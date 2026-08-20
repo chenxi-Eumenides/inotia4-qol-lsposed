@@ -2,6 +2,7 @@ package com.inotia4.export.service
 
 import com.inotia4.export.LogFile
 import com.inotia4.export.NativeBridge
+import com.inotia4.export.store.ModuleSaveStore
 import com.inotia4.export.util.ApiException
 import com.yanzhenjie.andserver.http.StatusCode
 import org.json.JSONObject
@@ -91,16 +92,20 @@ class ActionApiServiceImpl : ActionApiService {
         LogFile.op("POST /api/quest/quit_quest", "questId=$questId") { attachPlayer(NativeBridge.nativeOpQuestQuit(questId)) }
 
     override fun save(): String =
-        LogFile.op("POST /api/system/save", "") { attachPlayer(NativeBridge.nativeOpSave()) }
+        LogFile.op("POST /api/system/save", "") { attachPlayer(afterSave(NativeBridge.nativeOpSave())) }
 
     override fun mainMenu(): String =
         LogFile.op("POST /api/ui/go_main_menu", "") { attachPlayer(NativeBridge.nativeOpMainMenu()) }
 
     override fun enterSlot(slot: Int): String =
-        LogFile.op("POST /api/system/enter_slot", "slot=$slot") { attachPlayer(NativeBridge.nativeOpEnterSlot(slot)) }
+        LogFile.op("POST /api/system/enter_slot", "slot=$slot") {
+            attachPlayer(afterNativeSuccess(NativeBridge.nativeOpEnterSlot(slot)) { ModuleSaveStore.ensureSlot(slot) })
+        }
 
     override fun createSlot(slot: Int, classIdx: Int): String =
-        LogFile.op("POST /api/system/create_slot", "slot=$slot,classIdx=$classIdx") { attachPlayer(NativeBridge.nativeOpCreateSlot(slot, classIdx)) }
+        LogFile.op("POST /api/system/create_slot", "slot=$slot,classIdx=$classIdx") {
+            attachPlayer(afterNativeSuccess(NativeBridge.nativeOpCreateSlot(slot, classIdx)) { ModuleSaveStore.resetSlot(slot) })
+        }
 
     override fun panelClose(): String =
         LogFile.op("POST /api/ui/close_panel", "") { attachUi(NativeBridge.nativeOpPanelClose()) }
@@ -171,6 +176,25 @@ class ActionApiServiceImpl : ActionApiService {
 
     private fun attachUi(op: String): String =
         attach(op) { NativeBridge.nativeGetGamestateJson() }
+
+    private fun afterSave(op: String): String = afterNativeSuccess(op) {
+        val current = try {
+            JSONObject(NativeBridge.nativeCurrentSaveSlot()).optInt("current_save_slot", -1)
+        } catch (e: Exception) {
+            -1
+        }
+        if (current in 0..2) ModuleSaveStore.ensureSlot(current)
+    }
+
+    private fun afterNativeSuccess(op: String, action: () -> Unit): String {
+        val succeeded = try {
+            JSONObject(op).optBoolean("ok", false)
+        } catch (e: Exception) {
+            false
+        }
+        if (succeeded) action()
+        return op
+    }
 
     private fun findItemSlot(category: Int): Pair<Int, Int>? {
         val inv = try {

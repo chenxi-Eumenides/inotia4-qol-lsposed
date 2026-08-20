@@ -40,6 +40,7 @@
 │          ├─ service/OpApiService.kt  OP 唯一入口（含 opEnabled 门禁）│
 │          ├─ service/ConfigApiService.kt  配置下发 native 收口 │
 │          ├─ service/NameInjector.kt  名称注入（物品名/属性名） │
+│          ├─ store/ModuleSaveStore.kt  按槽 sidecar 容器       │
 │          ├─ util/JsonUtil / ControllerGuard / ApiException /  │
 │          │   GlobalExceptionResolver / CorsInterceptor        │
 │          ├─ controller/（23 个，见 §3）                        │
@@ -260,6 +261,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | `NativeBridge.kt` | JNI 声明（`System.loadLibrary("gamebridge")` + **87 个 external**，JNI 面冻结见 §9.5） |
 | `ApiServer.kt` | AndServer 启动（监听地址/端口读 ModuleConfig（外部 config.json）、模块 assets 注入、StaticData 挂接） |
 | `ModuleConfig.kt` | **配置组件（v0.5.17，v0.5.21 改外部源）**：外部存储 config.json 为唯一配置来源（缺失用默认值并立即写入），提供监听地址/端口/堆叠上限增加/拖拽合并/**opEnabled** 等配置的获取与修改（每次修改立即持久化） |
+| `store/ModuleSaveStore.kt` | **模块存档容器**：每个原版槽 `0..2` 对应一个外部 sidecar；以版本化、不透明 section 保存模块新增数据，`AtomicFile` 原子写与 last-good 恢复，绝不触碰 `save*.dat`。格式和生命周期见 `docs/module-save-store.md`。 |
 | `service/ApiServices.kt` | **服务注册中心（v0.4.0，P0-3 重构）**：controller/调用层从这里取 Service 实例；多调用通道预留（Binder/LocalSocket 复用同一 Service 层） |
 | `service/ApiService.kt` | **单文件双接口**：`InfoApiService`（信息查询服务接口，GET /api/info/* 契约）+ `ActionApiService`（合法操作服务接口，POST /api/action/* 契约），均不绑定 HTTP 语义 |
 | `service/InfoApiServiceImpl.kt` | **信息查询服务实现（v0.4.0，迁移自 InfoService）**：从 native 复合 JSON 提取简单端点字段，名称注入（物品名/属性名）统一在此 |
