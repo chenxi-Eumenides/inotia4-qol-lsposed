@@ -55,6 +55,88 @@
   }
   #settingsBtn:hover { color: var(--accent); border-color: var(--accent); }
   #settingsBtn svg { width: 16px; height: 16px; }
+  #viewToggle {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--dim);
+    font-size: 11px;
+    font-family: "Fira Code", monospace;
+    padding: 5px 10px;
+    cursor: pointer;
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+  #viewToggle:hover { color: var(--accent); border-color: var(--accent); }
+  #viewToggle.active { color: var(--accent); border-color: var(--accent); background: rgba(37, 99, 235, 0.08); }
+
+  /* ===== 专用视图 ===== */
+  .sp-stat { display: flex; flex-wrap: wrap; gap: 8px 20px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .sp-stat .st { display: flex; align-items: baseline; gap: 6px; }
+  .sp-stat .st .lbl { font-size: 11px; color: var(--dim); font-family: "Fira Code", monospace; }
+  .sp-stat .st .val { font-size: 13px; font-weight: 700; font-family: "Fira Code", monospace; }
+  .sp-cards { display: flex; flex-direction: column; gap: 8px; }
+  .sp-card {
+    background: var(--head);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .sp-card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sp-card .head .nm { font-weight: 700; font-size: 13px; }
+  .sp-card .head .sub { font-size: 11px; color: var(--dim); font-family: "Fira Code", monospace; }
+  .sp-card .head .tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--panel); border: 1px solid var(--border); color: var(--dim); }
+  .sp-card .head .tag.main { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .sp-card .head .tag.side { color: #7c3aed; }
+  .sp-bars { display: flex; flex-direction: column; gap: 4px; }
+  .sp-bar { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .sp-bar .bt { flex: 0 0 auto; font-family: "Fira Code", monospace; color: var(--dim); }
+  .sp-bar .track { flex: 1 1 auto; height: 10px; border-radius: 5px; background: var(--panel); border: 1px solid var(--border); overflow: hidden; position: relative; }
+  .sp-bar .fill { display: block; height: 100%; border-radius: 4px; }
+  .sp-bar .fill.hp { background: linear-gradient(90deg, #dc2626, #ef4444); }
+  .sp-bar .fill.mp { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+  .sp-bar .txt { flex: 0 0 auto; font-family: "Fira Code", monospace; }
+  .sp-bar .pct { flex: 0 0 40px; text-align: right; font-family: "Fira Code", monospace; color: var(--dim); }
+  .sp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+  .sp-cell {
+    background: var(--head);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 0;
+  }
+  .sp-cell .inm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sp-cell .imeta { font-size: 10px; color: var(--dim); font-family: "Fira Code", monospace; display: flex; justify-content: space-between; gap: 4px; }
+  .sp-cell.r0 { border-left: 3px solid #9ca3af; }
+  .sp-cell.r1 { border-left: 3px solid #4ade80; }
+  .sp-cell.r2 { border-left: 3px solid #60a5fa; }
+  .sp-cell.r3 { border-left: 3px solid #facc15; }
+  .sp-cell.r4 { border-left: 3px solid #c084fc; }
+  .sp-list { display: flex; flex-direction: column; gap: 4px; }
+  .sp-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 8px; border-radius: 6px;
+    background: var(--head); border: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .sp-row .ix { flex: 0 0 auto; font-family: "Fira Code", monospace; color: var(--dim); font-size: 11px; min-width: 24px; }
+  .sp-row .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sp-row .mt { margin-left: auto; flex: 0 0 auto; font-family: "Fira Code", monospace; color: var(--dim); font-size: 11px; }
+  .sp-empty { color: var(--dim); font-style: italic; font-size: 12px; padding: 4px 2px; }
+  .sp-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12px; }
+  .sp-kv .k { color: var(--dim); font-family: "Fira Code", monospace; white-space: nowrap; }
+  .sp-kv .v { font-family: "Fira Code", monospace; word-break: break-all; }
+  .sp-screen { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 6px; font-size: 13px; font-weight: 700; background: var(--head); border: 1px solid var(--border); font-family: "Fira Code", monospace; }
+  .sp-screen.ok { color: #16a34a; }
+  .sp-screen.ui { color: #b45309; }
+  .sp-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sp-tag { font-size: 11px; font-family: "Fira Code", monospace; padding: 3px 10px; border-radius: 5px; background: var(--head); border: 1px solid var(--border); color: var(--dim); }
+  .sp-section-title { font-size: 11px; color: var(--dim); opacity: 0.7; margin: 8px 0 4px; font-weight: 600; letter-spacing: 0.05em; }
+  .sp-slot-bar { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sp-slot { width: 26px; height: 26px; border-radius: 5px; border: 1px solid var(--border); background: var(--head); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--dim); font-family: "Fira Code", monospace; }
+  .sp-slot.has { border-color: var(--accent); color: var(--accent); background: rgba(37, 99, 235, 0.08); font-weight: 700; }
 
   .cols { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
   .col { flex: 1 1 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -161,6 +243,7 @@
   <div class="conn">
     <span class="dot off" id="connDot"></span>
     <span id="connText">连接中…</span>
+    <button id="viewToggle" title="切换显示模式">专用视图</button>
     <button id="settingsBtn" aria-label="设置" title="设置">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
@@ -206,6 +289,7 @@
 const DEFAULTS = { api: "http://localhost:8088", interval: 2000, timeout: 5000 };
 let apiBase = DEFAULTS.api;
 let mockMode = false;
+let viewMode = "special"; // special=专用视图, auto=自适应表格（localStorage 持久化）
 
 /* 端点清单：id=面板标题，url=路径，freq=轮询倍率，col=所在栏；dynamic 端点的 url 含 {map_id} 占位 */
 const ENDPOINTS = [
@@ -250,6 +334,7 @@ function resolveConfig() {
     if (saved) apiBase = saved.replace(/\/+$/, "");
   }
   mockMode = params.get("mock") === "1";
+  viewMode = localStorage.getItem("viewMode") || "special";
   const theme = params.get("theme") || localStorage.getItem("theme") || "light";
   document.body.dataset.theme = theme;
   const savedIv = parseFloat(localStorage.getItem("interval"));
@@ -411,6 +496,11 @@ function renderPanel(id, json) {
   const panel = panelEls[id];
   if (!panel) return;
   const body = panel.body;
+  /* 专用视图：按面板 id 分发到专门的渲染器 */
+  if (viewMode === "special" && SPECIAL_VIEWS[id]) {
+    SPECIAL_VIEWS[id](body, json);
+    return;
+  }
   if (id === "快照" && json && typeof json === "object") {
     renderSnapshotPanel(body, json);
     return;
@@ -427,6 +517,365 @@ function renderPanel(id, json) {
   openStates.forEach((open, i) => {
     if (newDetails[i]) newDetails[i].open = open;
   });
+}
+
+/* ================================================================
+ * 专用视图渲染器：每种 API 数据格式的定制显示
+ * ================================================================ */
+const SPECIAL_VIEWS = {
+  "快照": renderSnapshotSpecial,
+  "队伍": renderPartySpecial,
+  "佣兵": renderMercenarySpecial,
+  "任务": renderQuestSpecial,
+  "背包": renderInventorySpecial,
+  "商店": renderShopSpecial,
+  "游戏信息": renderInfoSpecial,
+  "事件": renderEventsSpecial,
+  "界面": renderUiSpecial,
+  "敌人": renderUnitsSpecial,
+  "交互对象": renderUnitsSpecial,
+  "单位": renderUnitsSpecial,
+  "出口": renderExitsSpecial,
+  "配置": renderConfigSpecial,
+  "静态表": renderTablesSpecial,
+};
+
+/* 通用小工具 */
+function spEl(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+function pct(cur, max) { return max > 0 ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0; }
+function rarityCls(item) {
+  if (!item) return "";
+  const r = item.rarity != null ? item.rarity : item.rarity_tier;
+  const map = { 0: "r0", 1: "r1", 2: "r2", 3: "r3", 4: "r4", "白": "r0", "绿": "r1", "蓝": "r2", "黄": "r3", "紫": "r4" };
+  return map[r] || "";
+}
+
+/* —— 快照：统计条 + 队伍摘要卡 + 瓦片 —— */
+function renderSnapshotSpecial(body, json) {
+  if (!json || typeof json !== "object") { body.textContent = String(json); return; }
+  let inner = body.querySelector(".snap-inner");
+  if (!inner) {
+    body.textContent = "";
+    inner = document.createElement("div");
+    inner.className = "snap-inner";
+    const left = document.createElement("div");
+    left.className = "snap-table";
+    inner.appendChild(left);
+    const patch = document.createElement("div");
+    patch.className = "tiles-patch";
+    patch.innerHTML = "<div class='sp-section-title'>地图瓦片</div><div class='tiles-patch-slot'></div>";
+    inner.appendChild(patch);
+    body.appendChild(inner);
+  }
+  const left = inner.querySelector(".snap-table");
+  left.textContent = "";
+  /* 统计条 */
+  const stat = spEl("div", "sp-stat");
+  const money = spEl("span", "st"); money.innerHTML = "<span class='lbl'>金币</span><span class='val'>" + esc(fmtN(json.money)) + "</span>";
+  const frame = spEl("span", "st"); frame.innerHTML = "<span class='lbl'>帧</span><span class='val'>" + esc(fmtN(json.frame)) + "</span>";
+  const scr = spEl("span", "st"); scr.innerHTML = "<span class='lbl'>界面</span><span class='val'>" + esc(json.screen) + "</span>";
+  const pos = spEl("span", "st"); pos.innerHTML = "<span class='lbl'>坐标</span><span class='val'>" + esc((json.x != null ? json.x : "—") + "," + (json.y != null ? json.y : "—")) + "</span>";
+  const mp = spEl("span", "st"); mp.innerHTML = "<span class='lbl'>地图</span><span class='val'>" + esc(fmtN(json.map_id)) + "</span>";
+  stat.append(money, frame, scr, pos, mp);
+  left.appendChild(stat);
+  /* 队伍摘要卡 */
+  const title = spEl("div", "sp-section-title", "队伍摘要");
+  left.appendChild(title);
+  const cards = spEl("div", "sp-cards");
+  (json.party || []).forEach((m, i) => {
+    const card = spEl("div", "sp-card");
+    if (!m) { card.textContent = "（空位）"; card.style.opacity = 0.5; cards.appendChild(card); return; }
+    const head = spEl("div", "head");
+    const nm = spEl("span", "nm", m.name || "角色" + (i + 1));
+    head.appendChild(nm);
+    if (m.class_name) head.appendChild(spEl("span", "sub", m.class_name));
+    if (i === json.leader_slot) head.appendChild(spEl("span", "tag", "主控"));
+    card.appendChild(head);
+    const bars = spEl("div", "sp-bars");
+    bars.appendChild(barEl("HP", m.hp, m.max_hp));
+    bars.appendChild(barEl("MP", m.mp, m.max_mp));
+    card.appendChild(bars);
+    cards.appendChild(card);
+  });
+  left.appendChild(cards);
+  /* 瓦片 */
+  const slot = body.querySelector(".tiles-patch-slot");
+  if (slot && tilesCache && slot.childElementCount === 0) renderTilesPanel(slot, tilesCache);
+}
+function fmtN(n) { return (n == null || isNaN(n)) ? "—" : Number(n).toLocaleString("en-US"); }
+function barEl(label, cur, max) {
+  const wrap = spEl("div", "sp-bar");
+  wrap.appendChild(spEl("span", "bt", label));
+  const track = spEl("span", "track");
+  const fill = spEl("i", "fill " + label.toLowerCase());
+  fill.style.width = pct(cur, max) + "%";
+  track.appendChild(fill);
+  wrap.appendChild(track);
+  wrap.appendChild(spEl("span", "txt", fmtN(cur) + " / " + fmtN(max)));
+  wrap.appendChild(spEl("span", "pct", Math.ceil(pct(cur, max)) + "%"));
+  return wrap;
+}
+
+/* —— 队伍：角色卡（血条/属性/装备/技能） —— */
+function renderPartySpecial(body, json) {
+  body.textContent = "";
+  if (!Array.isArray(json)) { body.innerHTML = renderTable(json); return; }
+  const cards = spEl("div", "sp-cards");
+  json.forEach((m, i) => {
+    if (!m) return;
+    const card = spEl("div", "sp-card");
+    const head = spEl("div", "head");
+    head.appendChild(spEl("span", "nm", m.name || "角色" + (i + 1)));
+    if (m.class_name) head.appendChild(spEl("span", "sub", m.class_name));
+    head.appendChild(spEl("span", "sub", "Lv " + m.level));
+    if (m.type_name) head.appendChild(spEl("span", "tag", m.type_name));
+    card.appendChild(head);
+    const s = m.status || m;
+    const bars = spEl("div", "sp-bars");
+    bars.appendChild(barEl("HP", s.hp, s.max_hp));
+    bars.appendChild(barEl("MP", s.mp, s.max_mp));
+    if (s.exp != null && s.exp_next != null) {
+      bars.appendChild(barEl("EXP", s.exp, s.exp_next));
+    }
+    card.appendChild(bars);
+    /* 装备 */
+    if (Array.isArray(m.equipment) && m.equipment.some(Boolean)) {
+      card.appendChild(spEl("div", "sp-section-title", "装备"));
+      const grid = spEl("div", "sp-grid");
+      m.equipment.forEach(eq => {
+        if (!eq) return;
+        const cell = spEl("div", "sp-cell " + rarityCls(eq));
+        cell.appendChild(spEl("div", "inm", eq.name || ("#" + eq.category)));
+        const meta = spEl("div", "imeta");
+        meta.appendChild(spEl("span", "", eq.position || ""));
+        meta.appendChild(spEl("span", "", "Lv" + (eq.need_level ?? "?")));
+        cell.appendChild(meta);
+        grid.appendChild(cell);
+      });
+      card.appendChild(grid);
+    }
+    cards.appendChild(card);
+  });
+  body.appendChild(cards);
+}
+
+/* —— 佣兵：佣兵卡 —— */
+function renderMercenarySpecial(body, json) {
+  body.textContent = "";
+  if (!Array.isArray(json)) { body.innerHTML = renderTable(json); return; }
+  if (!json.length) { body.appendChild(spEl("div", "sp-empty", "无佣兵")); return; }
+  const cards = spEl("div", "sp-cards");
+  json.forEach(m => {
+    const card = spEl("div", "sp-card");
+    const head = spEl("div", "head");
+    head.appendChild(spEl("span", "nm", m.name || ("佣兵 #" + m.slot)));
+    head.appendChild(spEl("span", "sub", "Lv " + m.level));
+    if (m.in_party) head.appendChild(spEl("span", "tag", "在队"));
+    head.appendChild(spEl("span", "sub", "slot " + m.slot));
+    card.appendChild(head);
+    if (m.x != null) {
+      const coord = spEl("div", "sp-bar");
+      coord.appendChild(spEl("span", "bt", "位置"));
+      coord.appendChild(spEl("span", "txt", m.x + "," + m.y));
+      card.appendChild(coord);
+    }
+    cards.appendChild(card);
+  });
+  body.appendChild(cards);
+}
+
+/* —— 任务：active/details/completed 三区块 —— */
+function renderQuestSpecial(body, json) {
+  body.textContent = "";
+  if (!json || typeof json !== "object") { body.innerHTML = renderTable(json); return; }
+  const renderList = (arr, title) => {
+    if (!arr || !arr.length) return null;
+    const wrap = spEl("div", "");
+    wrap.appendChild(spEl("div", "sp-section-title", title + "（" + arr.length + "）"));
+    const list = spEl("div", "sp-list");
+    arr.forEach(q => {
+      const row = spEl("div", "sp-row");
+      row.appendChild(spEl("span", "ix", String(q.quest_id ?? q.id ?? "")));
+      row.appendChild(spEl("span", "nm", q.name || q.id_name || ("任务 #" + q.quest_id)));
+      if (q.is_mainline) row.appendChild(spEl("span", "tag main", "主线"));
+      else if (q.is_side) row.appendChild(spEl("span", "tag side", "支线"));
+      if (q.deliverable) row.appendChild(spEl("span", "tag", "可交付"));
+      row.appendChild(spEl("span", "mt", q.group_name || ""));
+      list.appendChild(row);
+    });
+    wrap.appendChild(list);
+    return wrap;
+  };
+  const secs = [renderList(json.active, "进行中"), renderList(json.details, "全部"), renderList(json.completed, "已完成")].filter(Boolean);
+  if (!secs.length) { body.appendChild(spEl("div", "sp-empty", "无任务数据")); return; }
+  secs.forEach(s => body.appendChild(s));
+}
+
+/* —— 背包：格子网格（按稀有度色） —— */
+function renderInventorySpecial(body, json) {
+  body.textContent = "";
+  if (!json || !json.bags) { body.innerHTML = renderTable(json); return; }
+  json.bags.forEach((bag, bi) => {
+    const title = spEl("div", "sp-section-title", "背包 " + bag.bag + (bag.capacity ? "（" + bag.slot_count + "/" + bag.capacity + "）" : ""));
+    body.appendChild(title);
+    const grid = spEl("div", "sp-grid");
+    (bag.items || []).forEach(it => {
+      const cell = spEl("div", "sp-cell " + rarityCls(it));
+      cell.appendChild(spEl("div", "inm", it.name || ("#" + it.category)));
+      const meta = spEl("div", "imeta");
+      meta.appendChild(spEl("span", "", "slot " + it.slot));
+      meta.appendChild(spEl("span", "", "×" + (it.count ?? 1)));
+      cell.appendChild(meta);
+      grid.appendChild(cell);
+    });
+    body.appendChild(grid);
+    if (!bag.items || !bag.items.length) body.appendChild(spEl("div", "sp-empty", "空背包"));
+  });
+}
+
+/* —— 商店：商品列表 —— */
+function renderShopSpecial(body, json) {
+  body.textContent = "";
+  if (!json || !Array.isArray(json.items)) { body.innerHTML = renderTable(json); return; }
+  if (!json.items.length) { body.appendChild(spEl("div", "sp-empty", "商店无商品")); return; }
+  const list = spEl("div", "sp-list");
+  json.items.forEach((it, i) => {
+    const row = spEl("div", "sp-row");
+    row.appendChild(spEl("span", "ix", String(i + 1)));
+    row.appendChild(spEl("span", "nm", it.name || ("#" + it.category)));
+    if (it.price != null) row.appendChild(spEl("span", "mt", it.price.toLocaleString() + " 金"));
+    else row.appendChild(spEl("span", "mt", "×" + (it.count ?? 1)));
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
+/* —— 游戏信息：信息卡 + 存档槽 —— */
+function renderInfoSpecial(body, json) {
+  body.textContent = "";
+  if (!json || typeof json !== "object") { body.innerHTML = renderTable(json); return; }
+  const kv = spEl("div", "sp-kv");
+  const rows = [["版本", json.version], ["当前存档", json.current_save_slot != null ? "槽 " + json.current_save_slot : null], ["包名", json.package_name]];
+  rows.forEach(([k, v]) => {
+    if (v == null) return;
+    kv.appendChild(spEl("span", "k", k));
+    kv.appendChild(spEl("span", "v", String(v)));
+  });
+  body.appendChild(kv);
+  if (Array.isArray(json.save_slots)) {
+    body.appendChild(spEl("div", "sp-section-title", "存档槽"));
+    const slots = spEl("div", "sp-slot-bar");
+    json.save_slots.forEach(s => {
+      const sl = spEl("span", "sp-slot" + (s.exists ? " has" : ""), s.exists ? "✓" : "·");
+      sl.title = s.exists ? ("槽 " + s.slot + " · Lv" + s.hero_level) : ("槽 " + s.slot + " 空");
+      slots.appendChild(sl);
+    });
+    body.appendChild(slots);
+  }
+}
+
+/* —— 事件：事件流 —— */
+function renderEventsSpecial(body, json) {
+  body.textContent = "";
+  if (!json || !Array.isArray(json.events)) { body.innerHTML = renderTable(json); return; }
+  if (!json.events.length) { body.appendChild(spEl("div", "sp-empty", "无事件")); return; }
+  const list = spEl("div", "sp-list");
+  json.events.forEach((ev, i) => {
+    const row = spEl("div", "sp-row");
+    row.appendChild(spEl("span", "ix", String(i + 1)));
+    row.appendChild(spEl("span", "nm", ev.name || ev.type || JSON.stringify(ev)));
+    if (ev.time != null) row.appendChild(spEl("span", "mt", String(ev.time)));
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
+/* —— 界面：屏幕状态徽章 + 帧 —— */
+function renderUiSpecial(body, json) {
+  body.textContent = "";
+  if (!json || typeof json !== "object") { body.innerHTML = renderTable(json); return; }
+  const screen = json.screen || "?";
+  const scr = spEl("span", "sp-screen" + (screen === "world" || screen === "loading" ? " ok" : " ui"), screen);
+  body.appendChild(scr);
+  if (json.frame != null) {
+    const fr = spEl("span", "st"); fr.style.cssText = "margin-left:12px;";
+    fr.innerHTML = "<span class='lbl'>帧</span><span class='val'>" + esc(fmtN(json.frame)) + "</span>";
+    body.appendChild(fr);
+  }
+  if (json.dialog && json.dialog.type && json.dialog.type !== "none") {
+    body.appendChild(spEl("div", "sp-section-title", "对话"));
+    const kv = spEl("div", "sp-kv");
+    kv.appendChild(spEl("span", "k", "类型")); kv.appendChild(spEl("span", "v", json.dialog.type));
+    if (json.dialog.text) { kv.appendChild(spEl("span", "k", "内容")); kv.appendChild(spEl("span", "v", json.dialog.text)); }
+    if (Array.isArray(json.dialog.options)) {
+      kv.appendChild(spEl("span", "k", "选项")); kv.appendChild(spEl("span", "v", json.dialog.options.map(o => o.label ?? o.id).join(" / ")));
+    }
+    body.appendChild(kv);
+  }
+}
+
+/* —— 单位/敌人/交互对象：单位卡表 —— */
+function renderUnitsSpecial(body, json) {
+  body.textContent = "";
+  const units = json && Array.isArray(json.units) ? json.units : (Array.isArray(json) ? json : null);
+  if (!units) { body.innerHTML = renderTable(json); return; }
+  if (!units.length) { body.appendChild(spEl("div", "sp-empty", "无单位")); return; }
+  const list = spEl("div", "sp-list");
+  units.forEach(u => {
+    const row = spEl("div", "sp-row");
+    row.appendChild(spEl("span", "ix", "s" + u.slot));
+    row.appendChild(spEl("span", "nm", u.name || ("#" + u.type)));
+    if (u.level != null) row.appendChild(spEl("span", "sub", "Lv" + u.level));
+    if (u.interactable) row.appendChild(spEl("span", "tag", "可交互"));
+    if (u.distance != null) row.appendChild(spEl("span", "mt", u.distance + "m"));
+    else if (u.x != null) row.appendChild(spEl("span", "mt", u.x + "," + u.y));
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
+/* —— 出口：出口表 —— */
+function renderExitsSpecial(body, json) {
+  body.textContent = "";
+  if (!json || !Array.isArray(json.exits)) { body.innerHTML = renderTable(json); return; }
+  if (!json.exits.length) { body.appendChild(spEl("div", "sp-empty", "无出口")); return; }
+  const list = spEl("div", "sp-list");
+  json.exits.forEach((e, i) => {
+    const row = spEl("div", "sp-row");
+    row.appendChild(spEl("span", "ix", String(i + 1)));
+    row.appendChild(spEl("span", "nm", "(" + e.x + "," + e.y + ")"));
+    row.appendChild(spEl("span", "mt", "→ 地图 " + e.targetMapId + " (" + e.targetX + "," + e.targetY + ")"));
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
+/* —— 配置：键值卡 —— */
+function renderConfigSpecial(body, json) {
+  body.textContent = "";
+  if (!json || typeof json !== "object") { body.innerHTML = renderTable(json); return; }
+  const kv = spEl("div", "sp-kv");
+  const cfg = json.config || json;
+  Object.entries(cfg).forEach(([k, v]) => {
+    if (typeof v === "object") return;
+    kv.appendChild(spEl("span", "k", k));
+    kv.appendChild(spEl("span", "v", typeof v === "boolean" ? (v ? "✓ 开" : "✗ 关") : String(v)));
+  });
+  body.appendChild(kv);
+}
+
+/* —— 静态表：表名标签 —— */
+function renderTablesSpecial(body, json) {
+  body.textContent = "";
+  if (!json || !Array.isArray(json.tables)) { body.innerHTML = renderTable(json); return; }
+  const tags = spEl("div", "sp-tags");
+  json.tables.forEach(t => tags.appendChild(spEl("span", "sp-tag", t)));
+  body.appendChild(tags);
 }
 
 /* ========== 快照面板（复合端点：表格 + 地图瓦片特殊区块） ========== */
@@ -704,55 +1153,85 @@ document.getElementById("settingsCancel").addEventListener("click", () => { sett
 settingsModal.addEventListener("click", e => { if (e.target === settingsModal) settingsModal.hidden = true; });
 document.addEventListener("keydown", e => { if (e.key === "Escape") settingsModal.hidden = true; });
 
+/* ========== 视图切换：专用视图 ↔ 自适应表格 ========== */
+const viewToggleBtn = document.getElementById("viewToggle");
+
+function applyViewToggleUI() {
+  viewToggleBtn.textContent = viewMode === "special" ? "专用视图" : "自适应视图";
+  viewToggleBtn.classList.toggle("active", viewMode === "special");
+  viewToggleBtn.title = viewMode === "special" ? "当前：专用视图（点击切换为自适应）" : "当前：自适应表格（点击切换为专用视图）";
+}
+
+function switchView() {
+  viewMode = viewMode === "special" ? "auto" : "special";
+  localStorage.setItem("viewMode", viewMode);
+  applyViewToggleUI();
+  /* 重建所有面板并立即刷新（保持折叠状态：collapsed 存 localStorage，重建后仍生效） */
+  const collapsedBefore = collapsedSet();
+  buildPanels();
+  collapsedBefore.forEach(id => {
+    const p = panelEls[id];
+    if (p && !p.body.classList.contains("hidden")) {
+      p.body.classList.add("hidden");
+      p.h2.querySelector(".fold").textContent = "+";
+    }
+  });
+  if (mockMode) startMock();
+  else refreshAll();
+}
+
+viewToggleBtn.addEventListener("click", switchView);
+
 /* ========== Mock 数据 ========== */
 const MOCK = {
   "/api/system/snapshot": {
-    frame: 124578, screen: "world", money: 72503, map_id: 30, x: 304, y: 376,
-    main_mercenary_slot: 0, party_count: 3,
+    frame: 63071, screen: "world", money: 72503, map_id: 30, x: 304, y: 376,
+    leader_slot: 0,
     party: [
-      { type: 1, name: "凯恩", level: 27, hp: 10598, mp: 200, max_hp: 10664, max_mp: 250 },
-      { type: 2, name: "西雷斯", level: 26, hp: 8120, mp: 430, max_hp: 8600, max_mp: 460 },
-      { type: 3, name: "露西", level: 24, hp: 5600, mp: 890, max_hp: 5800, max_mp: 920 },
+      { type: 0, type_name: "主角", class_idx: 0, class_name: "黑暗骑士", name: "凯恩", level: 27, hp: 10598, mp: 200, max_hp: 10664, max_mp: 250 },
+      { type: 1, type_name: "佣兵", class_idx: 2, class_name: "黑魔导", name: "西雷斯", level: 26, hp: 8120, mp: 430, max_hp: 8600, max_mp: 460 },
+      { type: 1, type_name: "佣兵", class_idx: 3, class_name: "祭司", name: "露西", level: 24, hp: 5600, mp: 890, max_hp: 5800, max_mp: 920 },
     ],
-    mercenaries: [ { slot: 0, type: 0, in_party: true, name: "凯恩", level: 27 } ],
   },
-  "/api/system/info": { version: "0.5.13", game: "world", package_name: "com.com2us.inotia4.normal.freefull.google.global.android.common", save_slots: [ { slot: 0, exists: true, hero_level: 27 }, { slot: 1, exists: false } ], current_save_slot: 0 },
+  "/api/system/info": { version: "0.6.11", game: "world", package_name: "com.com2us.inotia4.normal.freefull.google.global.android.common", save_slots: [ { slot: 0, exists: true, hero_level: 27 }, { slot: 1, exists: false }, { slot: 2, exists: false } ], current_save_slot: 0 },
   "/api/system/game_frame": { frame: 124578 },
   "/api/world/map": {
     map_id: 30, x: 304, y: 376,
     tile: { tx: 19, ty: 23, blocking: false },
-    exits: [ { tx: 31, ty: 20, px: 520, py: 380 } ],
+    exits: [ { x: 31, y: 20, targetMapId: 0, targetX: 2, targetY: 10 } ],
     map_data: { text_id: 3513, name: "影子丛林1" },
     units: [ { slot: 0, name: "凯恩", status: 1 } ],
     enemies: [], interactives: [ { slot: 0, name: "凯恩", status: 1 } ], drops: [],
   },
-  "/api/world/map/units": { units: [ { slot: 0, type: 0, name: "凯恩", status: 1, level: 27, x: 304, y: 376 } ] },
-  "/api/world/map/enemies": { units: [ { slot: 1, type: 100, name: "暗影狼", status: 2, level: 25, x: 480, y: 200 } ] },
-  "/api/world/map/interactives": { units: [ { slot: 2, type: 3, name: "商人", status: 1, level: 1, x: 200, y: 300 } ] },
-  "/api/world/map/exits": { exits: [ { tx: 31, ty: 20, px: 520, py: 380 } ] },
+  "/api/world/map/units": { units: [ { slot: 0, x: 304, y: 376, type: 0, status: 1, level: 27, hp: 10598, mp: 200, name: "凯恩", distance: 3 }, { slot: 1, x: 120, y: 88, type: 2, status: 2, level: 1, hp: 792, mp: 200, name: "火把", interactable: false, distance: 20 } ] },
+  "/api/world/map/enemies": { units: [ { slot: 3, x: 480, y: 200, type: 1, status: 2, level: 25, hp: 3200, mp: 100, name: "暗影狼", distance: 8 } ] },
+  "/api/world/map/interactives": { units: [ { slot: 10, x: 200, y: 300, type: 2, status: 2, level: 1, hp: 792, mp: 200, name: "杂货商人", interactable: true, distance: 1 } ] },
+  "/api/world/map/exits": { exits: [ { x: 31, y: 20, targetMapId: 0, targetX: 2, targetY: 10 }, { x: 31, y: 21, targetMapId: 0, targetX: 2, targetY: 10 } ] },
   "/api/character/party": [
     {
-      id: 1, id_name: "忍者", name_id: 2210, name: "凯恩", level: 27,
+      id: 1, id_name: "黑暗骑士", name_id: 2210, name: "凯恩", level: 27,
+      class_name: "黑暗骑士", type_name: "主角",
+      hp: 10598, max_hp: 10664, mp: 200, max_mp: 250, exp: 12000, exp_next: 15000,
       status: { hp: 10598, max_hp: 10664, mp: 200, max_mp: 250, exp: 12000, exp_next: 15000, skill_points: 2, attribute_points: 78 },
       stats: { crit_rate: 30, crit_damage: 1000, attack: 300, magic_attack: 150, defense: 200, max_hp: 10664, max_mp: 212 },
-      main_stats: { "力量": 96, "敏捷": 139, "体力": 101, "智力": 54, "精力": 38 },
+      main_stats: [ { stat_name: "力量", base_stat: 96 }, { stat_name: "敏捷", base_stat: 139 }, { stat_name: "体力", base_stat: 101 }, { stat_name: "智力", base_stat: 54 }, { stat_name: "精力", base_stat: 38 } ],
       equipment: [
-        { slot: 0, position: "head", category: 333, rarity: 3, name: "光荣的火冠" },
-        { slot: 1, position: "glove", category: 334, rarity: 4, name: "暗影裂刃" },
+        { slot: 0, name: "光荣的火冠", category: 333, rarity: 3, position: "head", need_level: 25 },
+        { slot: 1, name: "暗影裂刃", category: 334, rarity: 4, position: "glove", need_level: 24 },
         null, null, null, null, null, null, null, null,
       ],
       skills: [ { action_id: 5, name: "致命一击", level: 3, max_level: 4 }, { action_id: 80, name: "影袭", level: 1, max_level: 4 } ],
       unlock_bitmap: 65535, active_skill_id: 5,
     },
-    { id: 2, id_name: "黑魔导", name: "西雷斯", level: 26, status: { hp: 8120, max_hp: 8600, mp: 430, max_mp: 460 }, equipment: [], skills: [] },
-    { id: 3, id_name: "祭司", name: "露西", level: 24, status: { hp: 5600, max_hp: 5800, mp: 890, max_mp: 920 }, equipment: [], skills: [] },
+    { id: 2, id_name: "黑魔导", name: "西雷斯", class_name: "黑魔导", type_name: "佣兵", level: 26, hp: 8120, max_hp: 8600, mp: 430, max_mp: 460, status: { hp: 8120, max_hp: 8600, mp: 430, max_mp: 460 }, equipment: [], skills: [] },
+    { id: 3, id_name: "祭司", name: "露西", class_name: "祭司", type_name: "佣兵", level: 24, hp: 5600, max_hp: 5800, mp: 890, max_mp: 920, status: { hp: 5600, max_hp: 5800, mp: 890, max_mp: 920 }, equipment: [], skills: [] },
   ],
   "/api/character/leader": {
-    id: 1, id_name: "忍者", name: "凯恩", level: 27,
+    id: 1, id_name: "黑暗骑士", name: "凯恩", level: 27,
     status: { hp: 10598, max_hp: 10664, mp: 200, max_mp: 250 },
     stats: { attack: 300, defense: 200, max_hp: 10664 },
     main_stats: { "力量": 96, "敏捷": 139, "体力": 101, "智力": 54, "精力": 38 },
-    equipment: [ { slot: 0, position: "head", category: 333, rarity: 3, name: "光荣的火冠" }, null ],
+    equipment: [ { slot: 0, name: "光荣的火冠", category: 333, rarity: 3 }, null ],
     skills: [ { action_id: 5, name: "致命一击", level: 3, max_level: 4 } ],
   },
   "/api/character/mercenary": [
@@ -770,14 +1249,14 @@ const MOCK = {
     ],
   },
   "/api/item/inventory/items": { items: [ { bag: 0, slot: 3, category: 1, count: 5, name: "治疗药水" }, { bag: 0, slot: 7, category: 512, count: 1, name: "守护者胸甲" } ] },
-  "/api/item/shop/items": { items: [ { slot: 0, category: 5, count: 3, price: 15, name: "恢复药水" } ] },
-  "/api/quest": { active: [ { id: 381, id_name: "拯救村子", is_mainline: true } ], list: [], completed: [] },
+  "/api/item/shop/items": { items: [ { slot: 0, category: 5, count: 3, price: 15, name: "恢复药水" }, { slot: 1, category: 333, count: 1, price: 1200, name: "铁盔", rarity: 1 } ] },
+  "/api/quest": { active: [ { quest_id: 381, id_name: "拯救村子", is_mainline: true, group_name: "主线", deliverable: false } ], details: [ { quest_id: 180, name: "第1章路障", is_mainline: true, group_name: "黑暗教团教主的任务", deliverable: false } ], completed: [] },
   "/api/quest/active": { quests: [ { id: 381, id_name: "拯救村子", is_mainline: true, progress: { state: 1, detail: "击败 5/10 只狼" } } ] },
-  "/api/ui": { screen: "world", dialog: { type: "none", active: false, options: [] } },
+  "/api/ui": { screen: "world", frame: 63071, dialog: { type: "none", options: [] } },
   "/api/ui/dialog": { type: "none", active: false, title: null, text: null, options: [] },
   "/api/system/tables": { tables: [ "ITEMDATABASE", "MONDATABASE", "QUESTINFOBASE", "MAPINFOBASE", "SKILLDESCBASE", "CHARCLASSBASE", "MERCENARYINFOBASE", "NPCINFOBASE", "TEXT", "STORY-EVENTS" ] },
-  "/api/config/list": { config: { listen_host: "0.0.0.0", port: 8088, stack_max: 99, gem_batch: 5 } },
-  "/api/system/events": { events: [] },
+  "/api/config/list": { listenAddress: "0.0.0.0", listenPort: 8088, stackLimitIncrease: true, moveMergeEnabled: true, opEnabled: true },
+  "/api/system/events": { events: [ { type: "map_change", map_id: 30, time: 12345 } ] },
 };
 
 function startMock() {
@@ -814,6 +1293,7 @@ function mockTilesObj() {
 
 /* ========== 启动 ========== */
 resolveConfig();
+applyViewToggleUI();
 buildPanels();
 if (mockMode) {
   startMock();
