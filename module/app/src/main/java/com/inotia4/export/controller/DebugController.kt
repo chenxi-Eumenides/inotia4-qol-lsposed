@@ -1,12 +1,15 @@
 package com.inotia4.export.controller
 
 import com.inotia4.export.service.ApiServices
+import com.inotia4.export.util.ApiException
+import com.inotia4.export.util.JsonUtil
 import com.inotia4.export.util.ControllerGuard
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RequestParam
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.StatusCode
 
 /**
  * 调试端点：/api/debug/ui、/api/debug/path、/api/debug/exp（architecture §9.1 登记）。
@@ -59,4 +62,31 @@ class DebugController {
 
     @PostMapping("/api/debug/settings-ui/open-panel")
     fun settingsUiOpenPanel(): String = ControllerGuard.guard { ApiServices.info.settingsUiOpenPanel() }
+
+    @GetMapping("/api/debug/extension_bag/status")
+    fun extensionBagStatus(): String = ControllerGuard.guard { ApiServices.info.extensionBagStatus() }
+
+    @PostMapping("/api/debug/extension_bag/equip")
+    fun extensionBagEquip(@RequestBody body: String): String {
+        val json = JsonUtil.parseBody(body)
+            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        return ControllerGuard.guard {
+            ApiServices.info.extensionBagTestEquip(json.optInt("index", -1), json.optInt("bagType", -1))
+        }
+    }
+
+    @PostMapping("/api/debug/extension_bag/item")
+    fun extensionBagItem(@RequestBody body: String): String {
+        val json = JsonUtil.parseBody(body)
+            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        return ControllerGuard.guard {
+            ApiServices.info.extensionBagTestItem(
+                json.optInt("index", -1),
+                json.optInt("slot", -1),
+                json.optInt("category", -1),
+                json.optInt("count", -1),
+            )
+        }
+    }
+
 }

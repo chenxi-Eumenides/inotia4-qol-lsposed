@@ -72,6 +72,9 @@ interface InfoApiService {
     fun settingsUiRestore(): String
     fun settingsUiOpenOption(): String
     fun settingsUiOpenPanel(): String
+    fun extensionBagStatus(): String
+    fun extensionBagTestEquip(index: Int, bagType: Int): String
+    fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
 }
 
 // API 服务层接口（v0.4.0 P0-3 重构）
