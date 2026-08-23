@@ -55,7 +55,7 @@ VALID_EVENTS = ("click", "down", "up", "wait")
 
 # getevent 单行: [ 1234.567890] EV_ABS       ABS_MT_POSITION_X   000001f4
 GEVENT_LINE = re.compile(
-    r"\[\s*(\d+)\.(\d+)\]\s+EV_(\w+)\s+(\S+)\s+(\S+)\s*$"
+    r"\[\s*(\d+)\.(\d+)\]\s+(?:/dev/input/event\d+:\s+)?EV_(\w+)\s+(\S+)\s+(\S+)\s*$"
 )
 
 
@@ -74,7 +74,10 @@ def require_device() -> None:
 def detect_touch_device() -> str:
     """从 /proc/bus/input/devices 探测触摸屏事件节点（立即返回，不挂起）。"""
     r = adb("shell", "cat /proc/bus/input/devices")
-    keywords = ("touchpanel", "touchscreen", "synaptics", "goodix", "ft5x", "fts", "msg")
+    keywords = (
+        "touchpanel", "touchscreen", "synaptics", "goodix", "ft5x", "fts", "msg",
+        "mtk-tpd", "axs_ts",
+    )
     fallback: str | None = None
     cur_name = ""
     for line in r.stdout.splitlines():
@@ -92,7 +95,32 @@ def detect_touch_device() -> str:
                 fallback = f"/dev/input/{m.group(1)}"
     if fallback:
         return fallback
-    return "/dev/input/event8"
+    r = adb("shell", "getevent", "-pl")
+    blocks = re.split(r"(?=add device \d+: /dev/input/event\d+)", r.stdout)
+    for block in blocks:
+        device = re.search(r"add device \d+: (/dev/input/event\d+)", block)
+        if device is None:
+            continue
+        has_multitouch_position = "ABS_MT_POSITION_X" in block and "ABS_MT_POSITION_Y" in block
+        if has_multitouch_position and "INPUT_PROP_DIRECT" in block:
+            return device.group(1)
+    sys.exit("错误: 未找到触摸屏事件节点；请使用 --device /dev/input/eventN 指定")
+
+
+def detect_touch_devices() -> list[str]:
+    """探测所有具备多点坐标轴的触摸节点，避免同机双触摸驱动漏事件。"""
+    r = adb("shell", "getevent", "-pl")
+    devices: list[str] = []
+    blocks = re.split(r"(?=add device \d+: /dev/input/event\d+)", r.stdout)
+    for block in blocks:
+        device = re.search(r"add device \d+: (/dev/input/event\d+)", block)
+        if device is None:
+            continue
+        if "ABS_MT_POSITION_X" in block and "ABS_MT_POSITION_Y" in block and "INPUT_PROP_DIRECT" in block:
+            devices.append(device.group(1))
+    if not devices:
+        sys.exit("错误: 未找到触摸屏事件节点；请使用 --device /dev/input/eventN 指定")
+    return devices
 
 
 def get_screen_size() -> tuple[int, int]:
@@ -306,13 +334,15 @@ def run_mode(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------ 检测模式
 def record_mode(args: argparse.Namespace) -> None:
     require_device()
-    dev = args.device or detect_touch_device()
+    devices = [args.device] if args.device else detect_touch_devices()
+    dev = devices[0] if args.device else "all-touch-devices"
     rotation, lw, lh = get_rotation_and_bounds()
-    calib = Calib(rotation, lw, lh, get_absinfo(dev))
+    calib = Calib(rotation, lw, lh, get_absinfo(devices[0]))
     print(f"检测模式：监听 {dev}（窗口 {lw}x{lh}，旋转 {rotation * 90}°），Ctrl+C 结束")
     signal.signal(signal.SIGTERM, lambda _s, _f: (_ for _ in ()).throw(KeyboardInterrupt()))
+    remote_getevent = "exec getevent -lt" + (f" {devices[0]}" if args.device else "")
     proc = subprocess.Popen(
-        [ADB, "shell", "getevent", "-lt", dev],
+        [ADB, "shell", "su", "-c", remote_getevent],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         bufsize=1,
     )
@@ -366,6 +396,8 @@ def record_mode(args: argparse.Namespace) -> None:
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             proc.kill()
+    if proc.returncode not in (0, -signal.SIGTERM):
+        sys.exit(f"监听异常退出（getevent 返回 {proc.returncode}）；请检查设备节点权限: {dev}")
     print(f"\n检测结束，共 {count} 个动作")
 
 
