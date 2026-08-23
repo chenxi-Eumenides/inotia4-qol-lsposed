@@ -420,6 +420,7 @@ constexpr uintptr_t F_UIEQUIP_IS_APPLY_STUFF_VMA = 0xb8d4c;
 constexpr uintptr_t F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA = 0xb7910;
 constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
 constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
+constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
