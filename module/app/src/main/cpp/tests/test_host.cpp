@@ -16,6 +16,7 @@
 #include "game_nav.h"
 #include "game_tiles.h"
 #include "stack_codec.h"
+#include "virtual_bag_state.h"
 #include "../game_tiles.cpp"
 
 static int g_pass = 0;
@@ -220,6 +221,66 @@ static void test_stack_codec() {
     CHECK_EQ(stack_codec::write_count(low, 999) & stack_codec::kCountMask, 999u << 22);
 }
 
+static void test_virtual_bag_state() {
+    virtual_bag::State state{};
+    state.capacities = {0, 0, 0, 0, 0};
+    state.types = {4, 4, 4, 4, 4};
+    virtual_bag::normalize(&state);
+    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK_EQ((int)state.capacities[1], 8);
+    CHECK_EQ((int)state.capacities[2], 4);
+    CHECK_EQ((int)state.capacities[3], 0);
+    CHECK_EQ((int)state.capacities[4], 0);
+    state.mode = virtual_bag::Mode::kModule;
+    state.selected = 3;
+    virtual_bag::normalize(&state);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kOriginal);
+    CHECK_EQ(state.selected, -1);
+    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK_EQ((int)state.capacities[1], 8);
+    CHECK_EQ((int)state.capacities[2], 4);
+    CHECK_EQ((int)state.capacities[3], 0);
+    CHECK_EQ((int)state.capacities[4], 0);
+    CHECK(virtual_bag::set_test_equipped(&state, 0, 1));
+    CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kSelected);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kModule);
+    CHECK_EQ(state.selected, 0);
+    CHECK_EQ(state.inspected, -1);
+    CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kInspected);
+    CHECK_EQ(state.inspected, 0);
+    state = {};
+    CHECK(virtual_bag::set_test_equipped(&state, 0, 1));
+    CHECK_EQ((int)state.types[0], 1);
+    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kSelected);
+    CHECK_EQ(state.selected, 0);
+    CHECK_EQ(state.inspected, -1);
+    CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kInspected);
+    CHECK_EQ(state.inspected, 0);
+    CHECK(virtual_bag::set_test_equipped(&state, 1, 4));
+    CHECK_EQ((int)state.capacities[1], 8);
+    CHECK_EQ(virtual_bag::click(&state, 1), virtual_bag::ClickResult::kSelected);
+    CHECK_EQ(state.selected, 1);
+    CHECK_EQ(state.inspected, -1);
+    CHECK(!virtual_bag::set_test_equipped(&state, 5, 1));
+    CHECK(!virtual_bag::set_test_equipped(&state, 2, 5));
+    CHECK_EQ(virtual_bag::click(&state, 3), virtual_bag::ClickResult::kIgnored);
+    CHECK_EQ(virtual_bag::click(&state, 2), virtual_bag::ClickResult::kSelected);
+    CHECK_EQ(state.selected, 2);
+    CHECK(virtual_bag::set_item(&state, 2, 3, 401, 7));
+    CHECK_EQ(state.items[2][3].category, 401);
+    CHECK_EQ(state.items[2][3].count, 7);
+    virtual_bag::begin_exit_module(&state);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kExitingModule);
+    CHECK_EQ(state.selected, 2);
+    CHECK_EQ(state.inspected, -1);
+    virtual_bag::enter_original(&state, 4);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kOriginal);
+    CHECK_EQ(state.original_selected, 4);
+    CHECK_EQ(state.selected, -1);
+    CHECK_EQ(state.inspected, -1);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -228,6 +289,7 @@ int main() {
     test_nav_bfs();
     test_nav_bfs_multi();
     test_stack_codec();
+    test_virtual_bag_state();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
