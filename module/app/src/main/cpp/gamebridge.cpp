@@ -19,6 +19,7 @@
 #include "game_patch.h"
 #include "game_ui_exp.h"
 #include "game_ui_settings.h"
+#include "game_ui_virtbag.h"
 #include <android/log.h>
 
 #define MOVE_TAG "Inotia4Move"
@@ -40,6 +41,11 @@ Java_com_inotia4_export_NativeBridge_nativeRegisterConfigBridge(JNIEnv* env, jcl
     settings_register_config_bridge(env, bridge_class);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_inotia4_export_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env, jclass, jclass bridge_class) {
+    virtual_bag_ui_register_bridge(env, bridge_class);
+}
+
 template <typename T>
 inline std::string str_of(T v) { return std::to_string(static_cast<long long>(v)); }
 inline std::string str_of(const std::string& v) { return v; }
@@ -58,6 +64,7 @@ Java_com_inotia4_export_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
         settings_ui_start_auto_inject();
+        virtual_bag_ui_start_auto_inject();
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -570,4 +577,21 @@ Java_com_inotia4_export_NativeBridge_nativeSettingsUiOpenOption(JNIEnv* env, jcl
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_export_NativeBridge_nativeSettingsUiOpenPanel(JNIEnv* env, jclass) {
     return env->NewStringUTF(data_settings_ui_open_panel().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_export_NativeBridge_nativeExtensionBagUiStatus(JNIEnv* env, jclass) {
+    return env->NewStringUTF(data_virtual_bag_ui_status_json().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_export_NativeBridge_nativeExtensionBagTestEquip(JNIEnv* env, jclass, jint index, jint capacity) {
+    return env->NewStringUTF(data_virtual_bag_test_equip(static_cast<int>(index), static_cast<int>(capacity)).c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_export_NativeBridge_nativeExtensionBagTestItem(JNIEnv* env, jclass, jint index, jint slot,
+                                                               jint category, jint count) {
+    return env->NewStringUTF(data_virtual_bag_test_item(static_cast<int>(index), static_cast<int>(slot),
+                                                        static_cast<int>(category), static_cast<int>(count)).c_str());
 }

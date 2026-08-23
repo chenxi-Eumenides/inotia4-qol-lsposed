@@ -27,6 +27,7 @@ add_library(gamebridge SHARED
     game_ui_kit.cpp
     game_ui_components.cpp
     game_ui_settings.cpp
+    game_ui_virtbag.cpp
 )
 
 find_library(log-lib log)
