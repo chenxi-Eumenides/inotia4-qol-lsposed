@@ -5,6 +5,7 @@
 // 游戏状态层：全局状态检测 + 跨域查询原语 + 跨域遍历原语（无构建/导航依赖）。
 
 bool game_in_world();
+int current_save_slot();
 const char* ui_blocked();
 int tutorial_state();
 void tutorial_cancel();

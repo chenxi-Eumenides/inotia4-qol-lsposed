@@ -24,6 +24,12 @@ bool game_in_world() {
     return g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 5;
 }
 
+int current_save_slot() {
+    if (g_base == 0) return -1;
+    uint8_t* slot = *reinterpret_cast<uint8_t**>(g_base + G_CURRENT_SLOT_GOT_VMA);
+    return slot != nullptr ? static_cast<int>(*slot) : -1;
+}
+
 // UI 占据检查（v0.5.43）：world 态下 screen 非 "world" 即 UI 占据（对话框 dialog_*/面板 panel_*/教学）。
 // 复用 data_ui_screen() 统一判定（与 /api/ui/screen 同源）；返回占据的 screen 名，nullptr=无占据。
 // 用于世界操作（移动/战斗/交互/技能/物品）前置阻塞——UI 占据时游戏输入被接管，直接调 CHAR_Move
@@ -131,4 +137,3 @@ bool pool_obj_valid(const uint8_t* obj) {
     if (x <= 0 || x >= 1500 || y <= 0 || y >= 1500) return false;
     return true;
 }
-
