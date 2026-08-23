@@ -20,6 +20,7 @@ object NativeBridge {
         if (ready) return true
         ready = try {
             nativeRegisterConfigBridge(ModuleConfigUiBridge::class.java)
+        nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
             nativeInit()
         } catch (t: Throwable) {
             android.util.Log.e(NATIVE_TAG, "nativeInit failed", t)
@@ -30,6 +31,7 @@ object NativeBridge {
 
     external fun nativeInit(): Boolean
     external fun nativeRegisterConfigBridge(bridge: Class<*>)
+    external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)
     external fun nativeGetInitReport(): String
     external fun nativeGetBaseAddr(): Long
     external fun nativeGetFrameCount(): Long
@@ -130,4 +132,7 @@ object NativeBridge {
     external fun nativeSettingsUiRestore(): String
     external fun nativeSettingsUiOpenOption(): String
     external fun nativeSettingsUiOpenPanel(): String
+    external fun nativeExtensionBagUiStatus(): String
+    external fun nativeExtensionBagTestEquip(index: Int, bagType: Int): String
+    external fun nativeExtensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
 }
