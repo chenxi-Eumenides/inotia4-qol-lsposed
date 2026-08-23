@@ -281,6 +281,37 @@ static void test_virtual_bag_state() {
     CHECK_EQ(state.inspected, -1);
 }
 
+static void test_extension_bag_exit_rendering_state() {
+    virtual_bag::State state{};
+    CHECK(virtual_bag::set_test_equipped(&state, 0, 1));
+    CHECK(virtual_bag::set_item(&state, 0, 0, 401, 7));
+    CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kSelected);
+
+    virtual_bag::begin_exit_module(&state);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kExitingModule);
+    CHECK(state.mode != virtual_bag::Mode::kModule);
+    CHECK(!(state.mode == virtual_bag::Mode::kModule &&
+            virtual_bag::valid_index(state.selected)));
+    CHECK_EQ(state.selected, 0);
+    CHECK_EQ(state.inspected, -1);
+    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK_EQ(state.items[0][0].category, 401);
+    CHECK_EQ(state.items[0][0].count, 7);
+
+    virtual_bag::normalize(&state);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kExitingModule);
+    CHECK_EQ(state.selected, 0);
+
+    virtual_bag::enter_original(&state, 3);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kOriginal);
+    CHECK_EQ(state.original_selected, 3);
+    CHECK_EQ(state.selected, -1);
+    CHECK_EQ(state.inspected, -1);
+
+    virtual_bag::enter_original(&state, 6);
+    CHECK_EQ(state.original_selected, 0);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -290,6 +321,7 @@ int main() {
     test_nav_bfs_multi();
     test_stack_codec();
     test_virtual_bag_state();
+    test_extension_bag_exit_rendering_state();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

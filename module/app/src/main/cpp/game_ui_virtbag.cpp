@@ -40,6 +40,7 @@ constexpr uint8_t kNoOriginalBagSelected = 6;
 using PopupEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using PopupNoArgFn = void (*)();
 using OriginalDrawInvenBagFn = void (*)();
+using OriginalDrawInvenItemFn = void (*)();
 
 std::mutex g_virtual_bag_mtx;
 std::atomic<bool> g_inject_thread_started{false};
@@ -50,8 +51,10 @@ PopupEventFn g_orig_event = nullptr;
 PopupNoArgFn g_orig_f3 = nullptr;
 uintptr_t g_draw_patch_addr = 0;
 uintptr_t g_bag_draw_patch_addr = 0;
+uintptr_t g_item_draw_patch_addr = 0;
 void* g_draw_thunk = nullptr;
 void* g_bag_draw_thunk = nullptr;
+void* g_item_draw_thunk = nullptr;
 virtual_bag::State g_virtual_bag_state{};
 int g_loaded_slot = -2;
 std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_objects{};
@@ -63,6 +66,7 @@ uint32_t* g_original_bag_size_word = nullptr;
 uint32_t g_original_bag_size = 0;
 bool g_module_view_installed = false;
 int g_module_view_index = -1;
+uint8_t g_exit_display_bag = kNoOriginalBagSelected;
 
 int font_id() {
     if (g_base == 0) return 1;
@@ -314,15 +318,18 @@ void draw_cells_in_frame_locked() {
 
 int original_bag_locked();
 
-uint32_t* original_bag_size_word_locked() {
+uint32_t* bag_size_word_locked(int bag) {
     if (g_base == 0) return nullptr;
     void*** table_slot = reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
     if (table_slot == nullptr || *table_slot == nullptr) return nullptr;
-    const int bag = original_bag_locked();
     if (bag < 0 || bag >= 6) return nullptr;
     void* bag_object = (*table_slot)[bag];
     if (bag_object == nullptr) return nullptr;
     return reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) + 0x10);
+}
+
+uint32_t* original_bag_size_word_locked() {
+    return bag_size_word_locked(original_bag_locked());
 }
 
 void refresh_module_item_area_locked(int index) {
@@ -362,6 +369,26 @@ void virtual_bag_draw_original_bag_wrapper() {
     }
     original();
     if (masked) **current_bag = saved_current;
+}
+
+void virtual_bag_draw_inven_item_wrapper() {
+    const OriginalDrawInvenItemFn original =
+        reinterpret_cast<OriginalDrawInvenItemFn>(g_base + fn_resolve("F_UIEQUIP_DRAW_INVEN_ITEM_VMA",
+                                                                       F_UIEQUIP_DRAW_INVEN_ITEM_VMA));
+    if (original == nullptr) return;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
+    uint8_t saved_current = 0;
+    bool restored_for_draw = false;
+    if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule &&
+        g_exit_display_bag < kNoOriginalBagSelected && current_bag != nullptr &&
+        *current_bag != nullptr && **current_bag == kNoOriginalBagSelected) {
+        saved_current = **current_bag;
+        **current_bag = g_exit_display_bag;
+        restored_for_draw = true;
+    }
+    original();
+    if (restored_for_draw) **current_bag = saved_current;
 }
 
 int original_bag_locked() {
@@ -407,15 +434,39 @@ void clear_original_desc_locked() {
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
 }
 
-bool original_bag_button_hit(int64_t x, int64_t y) {
+int original_bag_button_index(int64_t x, int64_t y) {
     // UIEquip original bag controls are children of nested parents. The final absolute
     // rect for bag 0 is (1116, 145, 57, 57); each subsequent original bag is 70px lower.
     constexpr int64_t kOriginalBagX = 0x45c;
     constexpr int64_t kOriginalBagWidth = 0x39;
     constexpr int64_t kOriginalBagY = 0x91;
+    constexpr int64_t kOriginalBagHeight = 0x39;
     constexpr int64_t kOriginalBagStepY = 0x46;
-    return x >= kOriginalBagX && x < kOriginalBagX + kOriginalBagWidth &&
-           y >= kOriginalBagY && y < kOriginalBagY + kOriginalBagStepY * 6;
+    if (x < kOriginalBagX || x >= kOriginalBagX + kOriginalBagWidth || y < kOriginalBagY) {
+        return -1;
+    }
+    const int64_t relative_y = y - kOriginalBagY;
+    const int index = static_cast<int>(relative_y / kOriginalBagStepY);
+    if (index < 0 || index >= 6 || relative_y % kOriginalBagStepY >= kOriginalBagHeight) return -1;
+    return index;
+}
+
+bool bind_original_exit_display_bag_locked(int bag) {
+    if (g_base == 0 || bag < 0 || bag >= 6 || fn_ui_equip_refresh_item_area == nullptr) return false;
+    uint8_t* direct_bag = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
+    if (current_bag == nullptr || *current_bag == nullptr) return false;
+    const uint8_t saved_direct = *direct_bag;
+    const uint8_t saved_got = **current_bag;
+    *direct_bag = static_cast<uint8_t>(bag);
+    **current_bag = static_cast<uint8_t>(bag);
+    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+    const uint32_t* size_word = bag_size_word_locked(bag);
+    const bool has_capacity = size_word != nullptr && (*size_word & kCapacityMask) != 0;
+    if (has_capacity) fn_ui_equip_refresh_item_area();
+    *direct_bag = saved_direct;
+    **current_bag = saved_got;
+    return has_capacity;
 }
 
 void* module_item_locked(int bag, int slot) {
@@ -461,6 +512,7 @@ bool complete_original_exit_locked() {
     if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
     virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
     persist_state_locked();
+    g_exit_display_bag = kNoOriginalBagSelected;
     log_exit_trace_locked("complete_success", 0, 0, 0);
     return true;
 }
@@ -472,6 +524,7 @@ void cancel_original_exit_locked() {
     if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
     virtual_bag::enter_original(&g_virtual_bag_state, original_bag);
     persist_state_locked();
+    g_exit_display_bag = kNoOriginalBagSelected;
     log_exit_trace_locked("complete_cancel", 0, 0, 0);
 }
 
@@ -487,6 +540,7 @@ void virtual_bag_f3_wrapper() {
         } else if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
             cancel_original_exit_locked();
         }
+        g_exit_display_bag = kNoOriginalBagSelected;
         log_exit_trace_locked("f3", 0, 0, 0);
         original = g_orig_f3;
     }
@@ -627,10 +681,16 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             log_exit_trace_locked("virtual_cell", event, param, param2, x, y);
             return 0;
         }
-        if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule && original_bag_button_hit(x, y)) {
+        const int target_original_bag = original_bag_button_index(x, y);
+        if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule && target_original_bag >= 0) {
             restore_module_view_locked();
             virtual_bag::begin_exit_module(&g_virtual_bag_state);
             clear_original_bag_selection_locked();
+            g_exit_display_bag = g_original_current_got < kNoOriginalBagSelected ?
+                                 g_original_current_got : g_original_current_direct;
+            if (bind_original_exit_display_bag_locked(target_original_bag)) {
+                g_exit_display_bag = static_cast<uint8_t>(target_original_bag);
+            }
             exiting_to_original = true;
             log_exit_trace_locked("original_press_pre_orig", event, param, param2, x, y);
         }
@@ -677,6 +737,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
             virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
             persist_state_locked();
+            g_exit_display_bag = kNoOriginalBagSelected;
         } else if (event == 0x17 || event == 0x18) {
             g_virtual_bag_state.original_selected = original_bag_locked();
         }
@@ -697,9 +758,47 @@ bool inject_locked() {
     g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + 0x38));
     g_orig_f3 = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x28));
 
-    const uintptr_t bag_draw_call = g_base + fn_resolve("F_UIEQUIP_DRAW_VMA", F_UIEQUIP_DRAW_VMA) + 0x98;
-    constexpr uint32_t kOriginalBagDrawCall = 0x97fffee8;
+    const uintptr_t equip_draw = g_base + fn_resolve("F_UIEQUIP_DRAW_VMA", F_UIEQUIP_DRAW_VMA);
+    const uintptr_t item_draw_call = equip_draw + 0x94;
+    constexpr uint32_t kOriginalItemDrawCall = 0x97fffe33;
     constexpr size_t kPageSize = 4096;
+    if (g_item_draw_patch_addr == 0) {
+        const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&virtual_bag_draw_inven_item_wrapper);
+        const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(item_draw_call);
+        uintptr_t branch_target = wrapper;
+        if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
+            g_item_draw_thunk = allocate_draw_thunk(item_draw_call, wrapper);
+            if (g_item_draw_thunk == nullptr) {
+                VIRTBAG_LOG("inventory item draw thunk allocation failed");
+                return false;
+            }
+            branch_target = reinterpret_cast<uintptr_t>(g_item_draw_thunk);
+        }
+        const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(item_draw_call);
+        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
+            VIRTBAG_LOG("inventory item draw target out of range");
+            return false;
+        }
+        const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+        const uintptr_t page = item_draw_call & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            VIRTBAG_LOG("inventory item draw patch mprotect failed errno=%d", errno);
+            return false;
+        }
+        const uint32_t current = *reinterpret_cast<uint32_t*>(item_draw_call);
+        if (current != kOriginalItemDrawCall && current != replacement) {
+            VIRTBAG_LOG("inventory item draw patch mismatch got=0x%08x", current);
+            return false;
+        }
+        *reinterpret_cast<uint32_t*>(item_draw_call) = replacement;
+        __builtin___clear_cache(reinterpret_cast<char*>(item_draw_call),
+                                 reinterpret_cast<char*>(item_draw_call + sizeof(uint32_t)));
+        g_item_draw_patch_addr = item_draw_call;
+        VIRTBAG_LOG("inventory item draw hook patched replacement=0x%08x", replacement);
+    }
+
+    const uintptr_t bag_draw_call = equip_draw + 0x98;
+    constexpr uint32_t kOriginalBagDrawCall = 0x97fffee8;
     if (g_bag_draw_patch_addr == 0) {
         const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&virtual_bag_draw_original_bag_wrapper);
         const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(bag_draw_call);
