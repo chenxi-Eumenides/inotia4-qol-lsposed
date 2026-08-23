@@ -193,6 +193,9 @@ constexpr uintptr_t G_MERC_NAME_TABLE_DATA_GOT_VMA = 0x2f6000 + 0x598; // 佣兵
 constexpr uintptr_t F_PANEL_CHARACTER_INFO_ENTER = 0x148950; // character_info 角色信息
 constexpr uintptr_t F_PANEL_CHOICE_ENTER = 0x14a664;          // choice 选择框（事件驱动）
 constexpr uintptr_t F_PANEL_INVENTORY_ENTER = 0x14a8b0;       // inventory 背包（可开）
+constexpr uintptr_t F_SCENE_PROCESS_EQUIP_VMA = 0x14ac2c;     // void () Scene_Process_POPUP_SC_EQUIP
+constexpr uintptr_t F_SCENE_DRAW_EQUIP_VMA = 0x14a9bc;        // void () Scene_Draw_POPUP_SC_EQUIP
+constexpr uintptr_t F_SCENE_EVENT_EQUIP_VMA = 0x14acd0;       // u64 (u64, u64, u64) Scene_Event_POPUP_SC_EQUIP
 constexpr uintptr_t F_PANEL_INPUT_COUNT_ENTER = 0x14ad98;     // input_count 数量输入（需物品上下文）
 constexpr uintptr_t F_PANEL_MERCENARY_ENTER = 0x14af14;       // mercenary 佣兵（可开）
 constexpr uintptr_t F_PANEL_CRAFT_ENTER = 0x14b330;           // craft 合成（需 NPC）
@@ -230,6 +233,8 @@ constexpr uintptr_t G_STATUSDICE_FLAG_GOT_VMA = 0x2f37b8;     // GOT 槽：*(此
 constexpr uintptr_t G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA = 0x2f5410;
 constexpr uintptr_t G_UIEQUIP_PANEL_VMA = 0x3049e0;
 constexpr uintptr_t G_UIEQUIP_CUR_BAG_VMA = G_UIEQUIP_PANEL_VMA + 0x61;
+constexpr uintptr_t G_UIEQUIP_CUR_BAG_GOT_VMA = 0x2f5000 + 0x6d8; // ptr to UIEquip current bag index, used by UIEquip_DrawInven*
+constexpr uintptr_t G_UIEQUIP_DESC_TYPE_VMA = G_UIEQUIP_PANEL_VMA + 0x63;
 constexpr uintptr_t G_UIEQUIP_PANEL_CTRL_VMA = G_UIEQUIP_PANEL_VMA + 0x8;
 
 // ---- UIMix 合成器控件系统（craft-batch-ui，v0.5.18）----
@@ -414,6 +419,9 @@ constexpr uintptr_t F_SAVE_LOAD_INVENTORY_VMA = 0x127ea4;     // SAVE_LoadInvent
 constexpr uintptr_t F_UIEQUIP_IS_APPLY_STUFF_VMA = 0xb8d4c;
 constexpr uintptr_t F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA = 0xb7910;
 constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
+constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
+constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
+constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
 // ---- 合成系统（MIXSYSTEM，craft-batch-ui v0.5.18，libgame-symbols.txt 核对）----
@@ -519,6 +527,7 @@ using ControlObjectGetDataFn = void* (*)(void*);
 using UiEquipIsApplyStuffFn = int (*)(void*, void*);
 using UiEquipGetItemSlotIndexFn = int (*)(void*);
 using UiEquipRefreshItemAreaFn = void (*)();
+using UiDescSetOffFn = void (*)();
 using TouchHandleSetCursorFn = void (*)(void*, void*);
 using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using SetExpFn = void (*)(void*, int32_t);

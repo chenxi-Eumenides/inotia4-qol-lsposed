@@ -157,6 +157,7 @@ extern ControlObjectGetDataFn fn_control_object_get_data;
 extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;
 extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
+extern UiDescSetOffFn fn_ui_desc_set_off;
 extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
 extern MakeMixFn fn_make_mix;
