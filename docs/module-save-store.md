@@ -50,4 +50,4 @@ section 名只能是 `[a-z0-9._-]{1,64}`，单个 payload 最大 1 MiB，整个�
 - `removeSection(slot, name)`：显式删除一个 section。
 - `resetSlot(slot)`：创建新原版存档时清除旧 sidecar 与 last-good。
 
-section payload 对容器不透明。虚拟背包等未来功能自行定义 payload 数据结构与版本，并通过这个 API 持久化；v1 不提供 HTTP、JNI 或原版 UI 回调入口。
+section payload 对容器不透明。扩展背包等未来功能自行定义 payload 数据结构与版本，并通过这个 API 持久化；v1 不提供 HTTP、JNI 或原版 UI 回调入口。
