@@ -135,7 +135,7 @@ const char* data_top_panel_name() {
 }
 
 // 统一 UI 状态判定（v0.5.42）：screen 唯一来源，替代 dialog_active 布尔判定。
-// 判定链：STATE 状态机（主菜单/世界中）→ 教学暂停 → UIPopupMsg 弹窗 → GAMESTATE 剧情
+// 判定链：UIPopupMsg 弹窗 → STATE 状态机（主菜单/世界中）→ 教学暂停 → GAMESTATE 剧情
 // → popup 栈顶分派（对话框 dialog_* / 面板 panel_*）→ world。
 // 与 data_dialog_content_json 判定链同序（popup 最优先，v0.4.39）。
 // 修复（v0.5.42）：不再用数据层计数（UICHOICE/NPCTASKLIST）直接判定——NPC 交互后数据残留
@@ -143,6 +143,9 @@ const char* data_top_panel_name() {
 // 现完全以 popup 栈顶为准：栈顶无面板/对话框 → world，残留计数不产生任何误报。
 const char* data_ui_screen() {
     uint16_t state = g_state != nullptr ? *reinterpret_cast<uint16_t*>(g_state) : 0xFFFF;
+    // UIPopupMsg 不一定进入 popup 栈（启动确认弹窗即是此类），必须先于主菜单分支识别。
+    if (g_base != 0 && g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on))
+        return "dialog_popup";
     if (state == 4) {
         // 主菜单：按 popup 栈顶细分（v0.4.18 修复：标题屏/存档选择/职业选择）
         switch (data_popup_top_vma()) {
@@ -157,8 +160,6 @@ const char* data_ui_screen() {
     if (state != 5) return "loading";
     // 药水教学残血：自动完成不暂停（阻断教学暂停，避免卡住 API 操控；tutorial_pause 枚举保留不再返回）
     if (tutorial_state() == 6) tutorial_cancel();
-    // 弹窗最优先（v0.4.39：剧情段结束弹任务简报时 gs=1 残留但 UIPopupMsg 激活，弹窗阻塞一切交互）
-    if (g_base != 0 && g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on)) return "dialog_popup";
     if (data_story_active()) return "dialog_story";
     // popup 栈顶分派：对话框类（dialog_*）优先于面板类（panel_*）
     uintptr_t top_vma = data_popup_top_vma();

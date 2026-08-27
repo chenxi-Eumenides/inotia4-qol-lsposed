@@ -36,7 +36,6 @@ std::string data_npc_dialog_options_json() {
 }
 
 std::string data_dialog_content_json() {
-    if (!game_in_world()) return "{\"error\":\"not in game\"}";
     // 弹窗最优先（v0.4.39 修复）：剧情段结束弹任务简报时 gs=1 残留但 UIPopupMsg 激活，
     // 若 story 优先会遮蔽弹窗 → select ok 无法确认任务简报。弹窗会阻塞一切下层交互。
     if (g_base != 0 && g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on)) {
@@ -56,6 +55,7 @@ std::string data_dialog_content_json() {
         out += "]}";
         return out;
     }
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
     if (data_story_active()) {
         // story 态：统一 type 字段 + 剧情推进/跳过作为选项暴露（v0.4.31 修复）
         std::string sj = data_story_json();
