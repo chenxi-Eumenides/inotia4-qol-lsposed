@@ -4,10 +4,8 @@ import com.inotia4.export.service.ApiServices
 import com.inotia4.export.util.ApiException
 import com.inotia4.export.util.ControllerGuard
 import com.inotia4.export.util.JsonUtil
-import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
-import com.yanzhenjie.andserver.annotation.RequestParam
 import com.yanzhenjie.andserver.annotation.RestController
 import com.yanzhenjie.andserver.http.StatusCode
 
@@ -35,7 +33,4 @@ class SaveController {
         return ControllerGuard.guard { ApiServices.action.createSlot(slot, classIdx) }
     }
 
-    @GetMapping("/api/system/export_save_file")
-    fun exportSaveFile(@RequestParam("slot") slot: Int): String =
-        ControllerGuard.guard { ApiServices.info.exportSaveFile(slot) }
 }

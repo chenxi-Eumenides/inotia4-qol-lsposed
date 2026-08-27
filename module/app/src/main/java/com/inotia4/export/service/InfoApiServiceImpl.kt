@@ -9,7 +9,6 @@ import com.inotia4.export.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /**
  * 信息查询服务实现（InfoApiService 接口的唯一实现，v0.4.0 迁移自 InfoService）。
@@ -458,33 +457,6 @@ class InfoApiServiceImpl : InfoApiService {
     }
 
     override fun health(): String = JsonUtil.wrap("ok" to true)
-
-    override fun exportSaveFile(slot: Int): String {
-        if (slot < 0 || slot > 2) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot must be 0-2")
-        val dataDir = StaticData.dataDir() ?: throw ApiException(StatusCode.SC_INTERNAL_SERVER_ERROR, "data dir unavailable")
-        // 存档路径 /data/data/<pkg>/<uid 哈希目录>/save{slot}.dat（目录名随 UID 变化，扫描定位）
-        val dirs = File(dataDir).listFiles() ?: throw ApiException(StatusCode.SC_NOT_FOUND, "save file not found")
-        for (d in dirs) {
-            if (!d.isDirectory) continue
-            val f = File(d, "save$slot.dat")
-            if (!f.isFile) continue
-            return try {
-                val bytes = f.readBytes()
-                val root = JSONObject()
-                root.put("ok", true)
-                root.put("slot", slot)
-                root.put("path", f.absolutePath)
-                root.put("size", bytes.size)
-                root.put("name", f.name)
-                root.put("content", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
-                root.toString()
-            } catch (e: Exception) {
-                LogFile.logError("exportSaveFile failed", e)
-                throw ApiException(StatusCode.SC_INTERNAL_SERVER_ERROR, "read failed")
-            }
-        }
-        throw ApiException(StatusCode.SC_NOT_FOUND, "save file not found")
-    }
 
     /**
      * native 数据函数在非 world 状态（主菜单等）下返回 {"error":"..."}（与写操作 game_in_world() 一致）。

@@ -55,7 +55,6 @@ interface InfoApiService {
 
     fun events(since: Long?): String
     fun health(): String
-    fun exportSaveFile(slot: Int): String
     fun npcDialogOptions(): String
     fun shopItems(): String
     fun debugUi(): String

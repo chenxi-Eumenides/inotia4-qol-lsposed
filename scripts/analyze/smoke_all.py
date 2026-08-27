@@ -175,11 +175,10 @@ ROUTES = [
     {"m": "GET", "p": "/api/quest/details"},
     {"m": "GET", "p": "/api/quest/{id}"},
     {"m": "GET", "p": "/api/quest/completed"},
-    # ---- SaveController (4) ----
+    # ---- SaveController (3) ----
     {"m": "POST", "p": "/api/system/save", "note": "写盘保存(有益)"},
     {"m": "POST", "p": "/api/system/enter_slot", "body": MISSING, "note": "危险:切存档槽,缺 slot"},
     {"m": "POST", "p": "/api/system/create_slot", "body": MISSING, "note": "危险:建存档,缺 slot/class_idx"},
-    {"m": "GET", "p": "/api/system/export_save_file", "query": {"slot": 0}},
     # ---- ShopController (2) ----
     {"m": "GET", "p": "/api/item/shop/items"},
     {"m": "POST", "p": "/api/item/shop/buy_item", "body": '{"slot":0}', "note": "危险:购买物品"},
