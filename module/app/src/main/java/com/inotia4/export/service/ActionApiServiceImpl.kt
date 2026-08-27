@@ -92,7 +92,9 @@ class ActionApiServiceImpl : ActionApiService {
         LogFile.op("POST /api/quest/quit_quest", "questId=$questId") { attachPlayer(NativeBridge.nativeOpQuestQuit(questId)) }
 
     override fun save(): String =
-        LogFile.op("POST /api/system/save", "") { attachPlayer(afterSave(NativeBridge.nativeOpSave())) }
+        LogFile.op("POST /api/system/save", "") {
+            attachPlayer(afterSave(NativeBridge.nativeOpSave()))
+        }
 
     override fun mainMenu(): String =
         LogFile.op("POST /api/ui/go_main_menu", "") { attachPlayer(NativeBridge.nativeOpMainMenu()) }
@@ -177,12 +179,14 @@ class ActionApiServiceImpl : ActionApiService {
     private fun attachUi(op: String): String =
         attach(op) { NativeBridge.nativeGetGamestateJson() }
 
+    private fun currentSaveSlot(): Int = try {
+        JSONObject(NativeBridge.nativeCurrentSaveSlot()).optInt("current_save_slot", -1)
+    } catch (e: Exception) {
+        -1
+    }
+
     private fun afterSave(op: String): String = afterNativeSuccess(op) {
-        val current = try {
-            JSONObject(NativeBridge.nativeCurrentSaveSlot()).optInt("current_save_slot", -1)
-        } catch (e: Exception) {
-            -1
-        }
+        val current = currentSaveSlot()
         if (current in 0..2) ModuleSaveStore.ensureSlot(current)
     }
 
