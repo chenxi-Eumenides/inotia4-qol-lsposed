@@ -112,7 +112,8 @@ data 层 → 仅 STL
 | `game_ui.*` | parse 域 | 界面：debug_ui / ui_screen / popup_top_vma / top_panel_name + main_menu / panel_open / panel_close | data + 引擎 |
 | `game_dialog.*` | parse 域 | 对话：npc_dialog_options / dialog_content + npc_interact / **dialog_select 分发器** / dialog_ok / dialog_cancel / npc_dialog_select / story_next / story_skip | data + 引擎 + 分发器特例（ui/save/world/json） |
 | `game_shop.*` | parse 域 | 商店：shop_items + shop_buy | data + 引擎 |
-| `game_save.*` | parse 域 | 存档：save_slots / current_save_slot + save / enter_slot / create_slot | data + 引擎 |
+| `game_save.*` | parse 域 | 存档：save_slots / current_save_slot + save / enter_slot（内部完整性门禁）/ create_slot | data + 引擎 |
+| `game_save_preflight.*` | parse 域（纯逻辑） | 存档预检判决：槽结构状态/失败码 → valid/corrupt/missing/incompatible/unknown + 阶段名 + 结构化 JSON；零游戏依赖，编入 host 单测 | 无（纯 STL） |
 | `game_system.*` | parse 域 | **系统聚合域（唯一允许 include 其他域头的聚合域）**：build_gamestate_json / build_snapshot_json + frame_count / init_report / events / emit / take_snapshot | data + 引擎 + 各域头 |
 | `game_patch.*` | patch | **注入/修改补丁域**：IAP 屏蔽 / 沉浸模式 / 堆叠上限（42 patch 点）/ craft 三函数 / recover_after_hive_block / migrate_stack（§2.5） | data + game_ptr_hook.h |
 
@@ -261,7 +262,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | `NativeBridge.kt` | JNI 声明（`System.loadLibrary("gamebridge")` + **87 个 external**，JNI 面冻结见 §9.5） |
 | `ApiServer.kt` | AndServer 启动（监听地址/端口读 ModuleConfig（外部 config.json）、模块 assets 注入、StaticData 挂接） |
 | `ModuleConfig.kt` | **配置组件（v0.5.17，v0.5.21 改外部源）**：外部存储 config.json 为唯一配置来源（缺失用默认值并立即写入），提供监听地址/端口/堆叠上限增加/拖拽合并/**opEnabled** 等配置的获取与修改（每次修改立即持久化） |
-| `store/ModuleSaveStore.kt` | **模块存档容器**：每个原版槽 `0..2` 对应一个外部 sidecar；以版本化、不透明 section 保存模块新增数据，`AtomicFile` 原子写与 last-good 恢复，绝不触碰 `save*.dat`。格式和生命周期见 `docs/module-save-store.md`。 |
+| `store/ModuleSaveStore.kt` | **模块 sidecar 存储**：保存扩展背包等模块数据；不覆盖原版 `save*.dat`。原版存档备份能力已移除，后续设计见 `docs/backlog.md` P1。 |
 | `service/ApiServices.kt` | **服务注册中心（v0.4.0，P0-3 重构）**：controller/调用层从这里取 Service 实例；多调用通道预留（Binder/LocalSocket 复用同一 Service 层） |
 | `service/ApiService.kt` | **单文件双接口**：`InfoApiService`（信息查询服务接口，GET /api/info/* 契约）+ `ActionApiService`（合法操作服务接口，POST /api/action/* 契约），均不绑定 HTTP 语义 |
 | `service/InfoApiServiceImpl.kt` | **信息查询服务实现（v0.4.0，迁移自 InfoService）**：从 native 复合 JSON 提取简单端点字段，名称注入（物品名/属性名）统一在此 |
@@ -293,7 +294,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | `controller/OpController.kt` | **OP 唯一入口（POST /api/op/*，v0.5.46 收口）**：10 个已实现端点（hp/mp/experience/level/set_attr/inventory-add/status-point/party-swap/money/teleport）+ 11 个占位（NOT_IMPL 501）；全部经 OpApiService |
 | `controller/ShopController.kt` | **商店（/api/item/shop/*，v0.5.0 归入 item 域）**：GET items + POST buy |
 | `controller/QuestActionController.kt` | **任务操作（POST /api/quest/quit，v0.5.0 归入 quest 域）** |
-| `controller/SaveController.kt`       | **存档操作（/api/system/save/*，v0.5.0 由 info/action 迁移归并）**：slots 读 + save/enter-slot/create 写；load 待实现 |
+| `controller/SaveController.kt`       | **存档操作（/api/system/save/*，v0.5.0 由 info/action 迁移归并）**：slots 读 + save/enter-slot/create 写；进入存档时由 native 内部门禁执行完整性检查 |
 | `controller/ConfigController.kt`     | **模块配置（GET /api/config/list + POST /api/config/set，v0.5.21）**：读当前配置 + 设置配置（每次修改立即持久化外部 config.json；监听地址/端口变化时延迟重启 ApiServer 生效；stackLimitIncrease 变化时通知 native 生效；纯 Kotlin 层，不走 ControllerGuard） |
 | `controller/DebugController.kt` | 调试端点（/api/debug/ui、/api/debug/path，开发期；v0.5.46 补 ControllerGuard.guard + InfoApiService 方法） |
 | `patch/IapBlocker.kt` | IAP 屏蔽（模块启动期经 ConfigApiService 下发 native） |

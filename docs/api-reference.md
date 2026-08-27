@@ -1448,7 +1448,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：非 world 才可调（world 中→`already in game`）；slot 越界→`bad slot`；空槽→`slot empty`；⚠️ 存档不存在时调用会崩溃——先查 `/api/system/info` 的 `save_slots` 确认。
+**注意**：非 world 才可调（world 中→`already in game`）；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
 #### 创建新存档
 
@@ -1461,21 +1461,6 @@
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
 **注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false。
-
-#### 导出存档文件
-
-`GET /api/system/export_save_file?slot=0`
-
-**用途**：导出指定存档槽的游戏存档文件（v0.5.12）。SAVE_GetSaveFileName(0x125d08) 依赖 HubSave 云存档系统（frida 实测崩溃），改为 Kotlin 层文件系统扫描：`applicationInfo.dataDir` 一级子目录找 `save{slot}.dat`（目录名随用户 UID 变，不可硬编码）。
-
-**请求格式**：query 参数 `slot`（0/1/2，必填）
-
-**返回格式**（base64 JSON）：
-```json
-{ "ok": true, "slot": 0, "path": "/data/user/0/<pkg>/fcea920f7412b5da7be0cf42b8c93759/save0.dat", "size": 3253, "name": "save0.dat", "content": "<base64, NO_WRAP>" }
-```
-
-**注意**：slot 越界→`{"error":"slot must be 0-2"}`；该槽无存档文件→`{"error":"save file not found"}`；调用方 base64 解码后即原始 .dat（magic 293a1962）。
 
 ### 7.4 静态数据表 tables
 

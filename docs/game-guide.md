@@ -65,7 +65,7 @@
 | 任务 | 主线/支线 NPC 任务 |
 | 地图/移动 | 瓦片/出口/寻路/切图 |
 | 对话/剧情 | NPC 对话树、剧情过场、弹窗 |
-| 存档 | 3 槽、保存/进出档/导出备份 |
+| 存档 | 3 槽、保存/进出档 |
 | 合成/炼金 | 配方合成（未开放） |
 | 内购/每日奖励 | 已屏蔽（不影响游玩） |
 | 附魔 | 大修版新增：镶满 4 宝石触发神秘附魔 |
@@ -274,12 +274,10 @@ curl http://<手机IP>:8088/api/item/inventory/
 curl -X POST http://<手机IP>:8088/api/item/inventory/use_item -d '{"bag":0,"slot":3}'
 ```
 
-### 步骤 7：存档 + 备份
+### 步骤 7：存档
 
 ```bash
 curl -X POST http://<手机IP>:8088/api/system/save
-curl "http://<手机IP>:8088/api/system/export_save_file?slot=1"
-# {"ok":true,"slot":1,"name":"save1.dat","content":"<base64>"}  → base64 解码即存档文件
 ```
 
 > ⚠️ **养成好习惯**：每个里程碑（升级/换装/交任务/捡到好装备）后都存档，否则死亡会丢进度。
@@ -549,11 +547,10 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | POST | `/api/system/save` | 手动存档 | 无 body | `{"ok":true,"state":<Player>}` |
 | POST | `/api/system/enter_slot` | 进入存档槽（读档） | `{"slot":0}` (0-2) | `{"ok":true,"state":<Player>}` |
 | POST | `/api/system/create_slot` | 创建新角色 | `{"slot":1,"class_idx":2}` | `{"ok":true,"state":<Player>}` |
-| GET | `/api/system/export_save_file?slot=1` | 导出存档文件 | query `slot` | `{"ok":true,"name":"save1.dat","content":"<base64>"}` |
 
 **⚠️ enter_slot 注意事项**：
 - 只能在非 world 状态调用（world 中 → `already in game`）
-- **存档不存在时调用会崩溃**——先查 `/api/system/info` 的 `save_slots` 确认 `exists=true`
+- 进入前会在 `enter_slot` 内执行只读完整性检查；缺失、损坏或不兼容存档返回结构化错误，不调用原版进档路径；当前没有独立预检 API。
 
 #### 事件流
 
@@ -964,14 +961,12 @@ curl -X POST http://<手机IP>:8088/api/character/party/withdraw -d '{"mercenary
 curl -X POST http://<手机IP>:8088/api/character/party/discharge -d '{"mercenary_slot":0}'   # 不可逆！
 ```
 
-### 7.9 存档与备份
+### 7.9 存档
 
 ```bash
 # 关键操作前存档！
 curl -X POST http://<手机IP>:8088/api/system/save
 
-# 导出存档备份（base64 编码，解码后为存档文件）
-curl "http://<手机IP>:8088/api/system/export_save_file?slot=0" -o save0.json
 ```
 
 ---
@@ -1262,7 +1257,7 @@ loop:
 | 返回 `{"error":"not ready"}` | 游戏未就绪（刚启动），等 1-2 秒重试 |
 | 返回 `{"error":"not in game"}` | 未进入存档，先 enter_slot / create_slot |
 | 写操作无反应 | 先 `GET /api/ui/dialog` 检查弹窗，处理后再操作 |
-| enter_slot 后崩溃 | 存档槽不存在时调用会崩——先查 `/api/system/info` 的 `save_slots` 确认 `exists=true` |
+| enter_slot 后崩溃 | 新版本会在原版进档前执行内部完整性检查；若仍异常，保留 tombstone 和存档字节快照 |
 | 移动不生效 | 确认 `screen=world`；剧情/切图中操作自动终止 |
 | 商店 items 为空 | 需先与商人交互进入商店界面 |
 | attack 返回 `target not found` | target_slot 用 `map/units` 返回的 `slot`（每帧会变，重新查询） |
