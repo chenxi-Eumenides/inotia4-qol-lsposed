@@ -2,8 +2,10 @@ package com.inotia4.export.service
 
 import com.inotia4.export.LogFile
 import com.inotia4.export.NativeBridge
+import com.inotia4.export.UiActivityTracker
 import com.inotia4.export.store.ModuleSaveStore
 import com.inotia4.export.util.ApiException
+import com.inotia4.export.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
 import org.json.JSONObject
 
@@ -101,7 +103,14 @@ class ActionApiServiceImpl : ActionApiService {
 
     override fun enterSlot(slot: Int): String =
         LogFile.op("POST /api/system/enter_slot", "slot=$slot") {
-            attachPlayer(afterNativeSuccess(NativeBridge.nativeOpEnterSlot(slot)) { ModuleSaveStore.ensureSlot(slot) })
+            val activityCheck = UiActivityTracker.check()
+            if (activityCheck.failed) {
+                JsonUtil.err("ui state unavailable")
+            } else if (activityCheck.blockingActivityName != null) {
+                JsonUtil.err("ui occupied: dialog_popup")
+            } else {
+                attachPlayer(afterNativeSuccess(NativeBridge.nativeOpEnterSlot(slot)) { ModuleSaveStore.ensureSlot(slot) })
+            }
         }
 
     override fun createSlot(slot: Int, classIdx: Int): String =

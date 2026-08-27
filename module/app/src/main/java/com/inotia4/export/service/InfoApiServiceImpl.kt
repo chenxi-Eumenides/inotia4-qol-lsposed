@@ -4,6 +4,7 @@ import com.inotia4.export.BuildConfig
 import com.inotia4.export.LogFile
 import com.inotia4.export.NativeBridge
 import com.inotia4.export.StaticData
+import com.inotia4.export.UiActivityTracker
 import com.inotia4.export.util.ApiException
 import com.inotia4.export.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
@@ -374,6 +375,15 @@ class InfoApiServiceImpl : InfoApiService {
         // dialog 同源（data_dialog_content_json）；active 改为基于 screen 判定（screen 以 dialog_
         // 开头即 true）——替代旧 type!=none（数据残留误报：关闭 NPC 对话框后 type 残留 npc 但
         // UI 栈已空，旧逻辑 active 仍为 true，与已删除的 dialog_active 同源问题）
+        val activityCheck = UiActivityTracker.check()
+        if (activityCheck.blockingActivityName != null) {
+            return JSONObject()
+                .put("type", "popup")
+                .put("active", true)
+                .put("activity", activityCheck.blockingActivityName)
+                .put("options", JSONArray())
+                .toString()
+        }
         val json = NativeBridge.nativeDialogContent()
         if (isNativeError(json)) return json
         return try {
@@ -482,7 +492,27 @@ class InfoApiServiceImpl : InfoApiService {
 
     private fun dropsJson(): String = NativeBridge.nativeGetDropsJson()
 
-    private fun gamestateJson(): String = NativeBridge.nativeGetGamestateJson()
+    private fun gamestateJson(): String {
+        val json = NativeBridge.nativeGetGamestateJson()
+        val activityCheck = UiActivityTracker.check()
+        val blockingActivity = activityCheck.blockingActivityName ?: return json
+        return try {
+            val root = JSONObject(json)
+            root.put("screen", "dialog_popup")
+            root.put(
+                "dialog",
+                JSONObject()
+                    .put("type", "popup")
+                    .put("active", true)
+                    .put("activity", blockingActivity)
+                    .put("options", JSONArray()),
+            )
+            root.toString()
+        } catch (e: Exception) {
+            LogFile.logError("attach foreground activity to gamestate failed", e)
+            json
+        }
+    }
 
     private fun snapshotJson(): String = NativeBridge.nativeGetSnapshotJson()
 

@@ -212,7 +212,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| `screen` | 当前界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 同值）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`） |
+| `screen` | 当前界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 同值）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）。Android 同意页 `AgreementUIActivity` 也映射为 `dialog_popup`。 |
 | `story` | 仅 screen=dialog_story：`active`/`speaker`/`text`/`index`/`count` |
 | `dialog` | 仅 UI 被占据时存在：`<DialogContent 模型>`（type/title/text/options）。注意：type 残留时 `displayed` 字段为 false（数据残留，非实际 UI），以 `screen` 为准 |
 
@@ -1448,7 +1448,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，需先处理弹窗；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
+**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 或 Android `AgreementUIActivity` 弹窗存在时返回 `ui occupied: dialog_popup`，需先处理弹窗；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
 #### 创建新存档
 
