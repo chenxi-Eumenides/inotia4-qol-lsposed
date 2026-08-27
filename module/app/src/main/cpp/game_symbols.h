@@ -317,6 +317,7 @@ constexpr uintptr_t F_SAVE_GET_SAVE_SLOT_VMA = 0x1289e4;    // void* (int32_t) �
 constexpr uintptr_t F_UI_SET_POPUP_PROCESS_INFO_VMA = 0xaecc8;  // int (int32_t id, int32_t data) 注册 popup 流程（Array_Add 到 popup 数组 [0x2f5000+0xc38]）
 constexpr uintptr_t F_GAME_START_RESUME_GAME_VMA = 0x1002e8;  // int (int32_t slot) 启动游戏读档（GAME_Initialize → [0x2f6000+0xd20]=slot → STATE_Set(5) → MAPCHANGE_Set → GAMESTATE_SetState(3) → 主循环读档进 world）
 constexpr uintptr_t F_SAVE_CREATE_SAVE_SLOT_VMA = 0x129b38;    // void (void) 初始化全部 3 槽（循环 SAVESLOT_Initialize + SAVE_LoadSaveSlot 加载存档到槽区）
+constexpr uintptr_t F_SAVE_LOAD_SAVE_SLOT_VMA = 0x1298dc;      // int (int32_t, void*) 按槽加载单个存档到 SAVESLOT 结构
 constexpr uintptr_t F_SAVESLOT_GET_HERO_VMA = 0x14cda4;       // void* (void*) 取主控角色指针（[slot+0x1c] 索引 → [slot+0x4+idx*8]）
 constexpr uintptr_t F_STATE_SET_VMA = 0xd46a8;                // void (int32_t) 写状态机 state（*[0x2f5000+0xf8] = state；STATE_NextStartProcess 驱动 enter 回调）
 constexpr uintptr_t F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA = 0x10013c;  // void (void) 点空槽进选角（GAME_Initialize + MAP_Load(6) + MAINMENU_CreateSelectCharList；SaveSlot_GoToNewGame 调用）
@@ -566,6 +567,7 @@ using QuestSystemRemoveSlotFn = int (*)(int32_t);
 using SaveFn = int (*)();
 using GamestateSetStateFn = void (*)(int32_t);
 using SaveGetSaveSlotFn = void* (*)(int32_t);
+using SaveLoadSaveSlotFn = int (*)(int32_t, void*);
 using UiSetPopupProcessInfoFn = int (*)(int32_t, int32_t);
 using GameStartResumeGameFn = int (*)(int32_t);
 using SaveCreateSaveSlotFn = void (*)();

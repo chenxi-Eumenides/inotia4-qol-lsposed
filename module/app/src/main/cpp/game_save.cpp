@@ -3,8 +3,13 @@
 
 #include "game_save.h"
 
+#include <cstdio>
+#include <atomic>
+#include <unistd.h>
+
 #include "game_access.h"
 #include "game_ops_common.h"
+#include "game_save_preflight.h"
 #include "game_state.h"
 #include "game_ui_virtbag.h"
 
@@ -41,6 +46,69 @@ std::string data_op_save() {
     if (fn_save == nullptr) return op_err("symbol not resolved");
     return virtual_bag_save_game() ? op_ok() : op_err("save failed");
 }
+
+// 预检（backlog P0②）：仅主菜单（STATE==4）刷新判决——非主菜单调 CreateSaveSlot 会让
+// SAVE_LoadInformation 覆盖世界态全局（版本/时长等，docs/system/save.md §3），故其余状态
+// 一律返回 unknown，不刷新、只读当前槽结构字节。
+static std::string save_preflight_for_enter(int32_t slot) {
+    if (g_state == nullptr) return op_err("libgame not ready");
+    if (fn_save_get_save_slot == nullptr || fn_save_load_save_slot == nullptr ||
+        fn_saveslot_get_hero == nullptr)
+        return op_err("symbol not resolved");
+    if (slot < 0 || slot > 2) return op_err("bad slot");
+    uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
+    if (st != 4) {
+        return save_preflight_error_json(slot, 0xff, 0);
+    }
+    void* ss = fn_save_get_save_slot(slot);
+    if (ss == nullptr) return op_err("bad slot");
+    fn_save_load_save_slot(slot, ss);
+    uint8_t* p = reinterpret_cast<uint8_t*>(ss);
+    uint8_t slot_state = p[2];
+    uint8_t slot_err = p[3];
+    int map_id = *reinterpret_cast<uint16_t*>(p);
+    int hero_level = 0;
+    int hero_index = -1;
+    std::string detail;
+    if (slot_state == 2) {
+        void* hero = fn_saveslot_get_hero(ss);
+        hero_index = *reinterpret_cast<int8_t*>(p + 0x1c);
+        if (hero == nullptr) {
+            void* raw_hero = nullptr;
+            if (hero_index >= 0 && hero_index < 3) {
+                raw_hero = *reinterpret_cast<void**>(p + 0x04 + hero_index * sizeof(void*));
+            }
+            if (raw_hero == nullptr) {
+                uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + 0x2f4000 + 0x120);
+                std::string detail = "slot state is loaded but raw hero pointer is null";
+                if (player_indices != nullptr && g_main_merc_slot != nullptr) {
+                    detail += "; player_indices=" + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[0])))
+                        + "," + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[1])))
+                        + "," + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[2])))
+                        + ", main_merc_slot=" + std::to_string(static_cast<int>(static_cast<int8_t>(*reinterpret_cast<uint8_t*>(g_main_merc_slot))));
+                }
+                return save_preflight_semantic_error_json(slot, "character", 7, detail.c_str());
+            }
+            return save_preflight_semantic_error_json(
+                slot, "character", 7,
+                "slot raw hero pointer is non-null but SAVESLOT_GetHero returned null");
+        }
+        hero_level = static_cast<int8_t>(*reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(hero) + C_LEVEL));
+        uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + 0x2f4000 + 0x120);
+        if (player_indices != nullptr && g_main_merc_slot != nullptr) {
+            detail = "player_indices=" + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[0])))
+                + "," + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[1])))
+                + "," + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[2])))
+                + ", main_merc_slot=" + std::to_string(static_cast<int>(static_cast<int8_t>(*reinterpret_cast<uint8_t*>(g_main_merc_slot))));
+        }
+    }
+    if (save_preflight_classify(slot_state, slot_err) != SavePreflightVerdict::kValid) {
+        return save_preflight_error_json(slot, slot_state, slot_err);
+    }
+    return save_preflight_json(slot, slot_state, slot_err, map_id, hero_level, hero_index,
+                               detail.empty() ? nullptr : detail.c_str());
+}
+
 std::string data_op_enter_slot(int32_t slot) {
     if (g_state == nullptr) return op_err("libgame not ready");
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
@@ -53,16 +121,15 @@ std::string data_op_enter_slot(int32_t slot) {
         return op_err(e.c_str());
     }
     if (fn_save_get_save_slot == nullptr || fn_ui_set_popup_process_info == nullptr ||
-        fn_game_start_resume_game == nullptr || fn_save_create_save_slot == nullptr)
+        fn_game_start_resume_game == nullptr || fn_save_create_save_slot == nullptr ||
+        fn_save_load_save_slot == nullptr || fn_saveslot_get_hero == nullptr)
         return op_err("symbol not resolved");
     if (slot < 0 || slot > 2) return op_err("bad slot");
-    // 先初始化槽区（SAVE_CreateSaveSlot 循环加载 3 槽存档到内存），否则 b0/b2 全 0 误判空槽
     fn_save_create_save_slot();
+    std::string preflight = save_preflight_for_enter(slot);
+    if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);
-    if (slot_struct == nullptr) return op_err("bad slot");
-    uint8_t b0 = *reinterpret_cast<uint8_t*>(slot_struct);
-    uint8_t b2 = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(slot_struct) + 2);
-    if (b0 == 0 && b2 == 0) return op_err("slot empty");
+    if (slot_struct == nullptr || fn_saveslot_get_hero(slot_struct) == nullptr) return op_err("slot corrupt");
     virtual_bag_prepare_save_slot_load();
     fn_ui_set_popup_process_info(4, 0);
     uint8_t** flag_ptr = reinterpret_cast<uint8_t**>(g_base + G_GAME_RESUME_FLAG_GOT_VMA);

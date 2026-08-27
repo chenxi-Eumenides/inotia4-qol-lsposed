@@ -59,6 +59,7 @@ QuestSystemFindFn fn_questsystem_find = nullptr;
 QuestSystemRemoveSlotFn fn_questsystem_remove_slot = nullptr;
 SaveFn fn_save = nullptr;
 SaveGetSaveSlotFn fn_save_get_save_slot = nullptr;
+SaveLoadSaveSlotFn fn_save_load_save_slot = nullptr;
 UiSetPopupProcessInfoFn fn_ui_set_popup_process_info = nullptr;
 GameStartResumeGameFn fn_game_start_resume_game = nullptr;
 SaveCreateSaveSlotFn fn_save_create_save_slot = nullptr;
@@ -336,6 +337,7 @@ bool bridge_init() {
     fn_questsystem_remove_slot = reinterpret_cast<QuestSystemRemoveSlotFn>(g_base + fn_resolve("F_QUESTSYSTEM_REMOVE_SLOT_VMA", F_QUESTSYSTEM_REMOVE_SLOT_VMA));
     fn_save = reinterpret_cast<SaveFn>(g_base + fn_resolve("F_SAVE_VMA", F_SAVE_VMA));
     fn_save_get_save_slot = reinterpret_cast<SaveGetSaveSlotFn>(g_base + fn_resolve("F_SAVE_GET_SAVE_SLOT_VMA", F_SAVE_GET_SAVE_SLOT_VMA));
+    fn_save_load_save_slot = reinterpret_cast<SaveLoadSaveSlotFn>(g_base + fn_resolve("F_SAVE_LOAD_SAVE_SLOT_VMA", F_SAVE_LOAD_SAVE_SLOT_VMA));
     fn_ui_set_popup_process_info = reinterpret_cast<UiSetPopupProcessInfoFn>(g_base + fn_resolve("F_UI_SET_POPUP_PROCESS_INFO_VMA", F_UI_SET_POPUP_PROCESS_INFO_VMA));
     fn_game_start_resume_game = reinterpret_cast<GameStartResumeGameFn>(g_base + fn_resolve("F_GAME_START_RESUME_GAME_VMA", F_GAME_START_RESUME_GAME_VMA));
     fn_save_create_save_slot = reinterpret_cast<SaveCreateSaveSlotFn>(g_base + fn_resolve("F_SAVE_CREATE_SAVE_SLOT_VMA", F_SAVE_CREATE_SAVE_SLOT_VMA));

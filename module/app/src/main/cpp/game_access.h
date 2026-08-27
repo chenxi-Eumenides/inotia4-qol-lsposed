@@ -63,6 +63,7 @@ extern QuestSystemFindFn fn_questsystem_find;
 extern QuestSystemRemoveSlotFn fn_questsystem_remove_slot;
 extern SaveFn fn_save;
 extern SaveGetSaveSlotFn fn_save_get_save_slot;
+extern SaveLoadSaveSlotFn fn_save_load_save_slot;
 extern UiSetPopupProcessInfoFn fn_ui_set_popup_process_info;
 extern GameStartResumeGameFn fn_game_start_resume_game;
 extern SaveCreateSaveSlotFn fn_save_create_save_slot;

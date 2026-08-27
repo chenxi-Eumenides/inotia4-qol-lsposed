@@ -16,6 +16,7 @@ add_library(gamebridge SHARED
     game_dialog.cpp
     game_shop.cpp
     game_save.cpp
+    game_save_preflight.cpp
     game_system.cpp
     game_motion.cpp
     game_tiles.cpp

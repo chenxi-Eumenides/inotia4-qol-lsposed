@@ -14,6 +14,7 @@
 
 #include "game_json.h"
 #include "game_nav.h"
+#include "game_save_preflight.h"
 #include "game_tiles.h"
 #include "stack_codec.h"
 #include "virtual_bag_state.h"
@@ -519,6 +520,92 @@ static void test_virtual_bag_recovery() {
     CHECK_EQ(virtual_bag::recovery_action(state, p2), virtual_bag::RecoveryAction::kRollback);
 }
 
+// 存档预检样本：槽状态字节/失败码 → 五态判决（docs/system/save.md §4 阶段码全覆盖）
+static void test_save_preflight_classify() {
+    using V = SavePreflightVerdict;
+    CHECK(save_preflight_classify(0, 0) == V::kMissing);   // 空槽/文件缺失
+    CHECK(save_preflight_classify(2, 0) == V::kValid);     // 加载成功
+    CHECK(save_preflight_classify(1, 3) == V::kIncompatible);  // 版本 >5 / 槽位号不匹配
+    for (uint8_t c : {0, 1, 2, 4, 5, 6, 7})
+        CHECK(save_preflight_classify(1, c) == V::kCorrupt);   // 其余阶段码均损坏
+    CHECK(save_preflight_classify(3, 0) == V::kUnknown);   // 非法状态字节
+    CHECK(save_preflight_classify(0xff, 0) == V::kUnknown);  // 非主菜单哨兵
+    // 失败字节 bits[5:3] 为槽位号，不应干扰判决
+    CHECK(save_preflight_classify(1, (2 << 3) | 3) == V::kIncompatible);
+    CHECK(save_preflight_classify(1, (2 << 3) | 5) == V::kCorrupt);
+}
+
+static void test_save_preflight_stage() {
+    CHECK_EQ(std::string(save_preflight_stage_name(0)), "load_data");
+    CHECK_EQ(std::string(save_preflight_stage_name(1)), "block_table");
+    CHECK_EQ(std::string(save_preflight_stage_name(2)), "information");
+    CHECK_EQ(std::string(save_preflight_stage_name(3)), "validation");
+    CHECK_EQ(std::string(save_preflight_stage_name(4)), "block_table");
+    CHECK_EQ(std::string(save_preflight_stage_name(5)), "player");
+    CHECK_EQ(std::string(save_preflight_stage_name(6)), "mercenary_slot");
+    CHECK_EQ(std::string(save_preflight_stage_name(7)), "character");
+    CHECK_EQ(std::string(save_preflight_stage_name(9)), "character");
+    CHECK_EQ(std::string(save_preflight_stage_name(10)), "unknown");
+    CHECK_EQ(std::string(save_preflight_stage_name(255)), "unknown");
+}
+
+static void test_save_preflight_json() {
+    const std::string::size_type npos = std::string::npos;
+    // 可进入样本：携带地图/角色诊断字段，无 stage
+    std::string valid = save_preflight_json(1, 2, 0, 30, 27, 0);
+    CHECK(valid.find("\"ok\":true") != npos);
+    CHECK(valid.find("\"verdict\":\"valid\"") != npos);
+    CHECK(valid.find("\"enter\":true") != npos);
+    CHECK(valid.find("\"slot_state\":2") != npos);
+    CHECK(valid.find("\"map_id\":30") != npos);
+    CHECK(valid.find("\"hero_level\":27") != npos);
+    CHECK(valid.find("\"hero_index\":0") != npos);
+    CHECK(valid.find("\"stage\"") == npos);
+
+    // 校验失败样本（load_data=解密/校验和层）：拒绝进入 + 阶段与错误码
+    std::string corrupt = save_preflight_json(0, 1, 0, 0, 0, -1);
+    CHECK(corrupt.find("\"verdict\":\"corrupt\"") != npos);
+    CHECK(corrupt.find("\"enter\":false") != npos);
+    CHECK(corrupt.find("\"stage\":\"load_data\"") != npos);
+    CHECK(corrupt.find("\"error_code\":0") != npos);
+    CHECK(corrupt.find("\"map_id\"") == npos);
+
+    // 版本不兼容样本
+    std::string incompat = save_preflight_json(2, 1, 3, 0, 0, -1);
+    CHECK(incompat.find("\"verdict\":\"incompatible\"") != npos);
+    CHECK(incompat.find("\"stage\":\"validation\"") != npos);
+    CHECK(incompat.find("\"enter\":false") != npos);
+
+    // 空槽样本
+    std::string missing = save_preflight_json(1, 0, 0, 0, 0, -1);
+    CHECK(missing.find("\"verdict\":\"missing\"") != npos);
+    CHECK(missing.find("\"enter\":false") != npos);
+
+    // 解析异常/未知样本：detail 透传（非主菜单拒刷新）
+    std::string unknown = save_preflight_json(0, 0xff, 0, 0, 0, -1, "not in main menu (state=5)");
+    CHECK(unknown.find("\"verdict\":\"unknown\"") != npos);
+    CHECK(unknown.find("\"detail\":\"not in main menu (state=5)\"") != npos);
+    std::string unknown_error = save_preflight_error_json(0, 0xff, 0);
+    CHECK(unknown_error.find("\"ok\":false") != npos);
+    CHECK(unknown_error.find("\"verdict\":\"unknown\"") != npos);
+    CHECK(unknown_error.find("\"enter\":false") != npos);
+    std::string escaped = save_preflight_json(0, 0xff, 0, 0, 0, -1, "state=5, \"world\"");
+    CHECK(escaped.find("\\\"world\\\"") != npos);
+
+    // enter_slot 拒绝体：错误信封 + 机器可读字段
+    std::string err = save_preflight_error_json(0, 1, 2);
+    CHECK(err.find("\"ok\":false") != npos);
+    CHECK(err.find("\"error\":\"slot corrupt\"") != npos);
+    CHECK(err.find("\"verdict\":\"corrupt\"") != npos);
+    CHECK(err.find("\"stage\":\"information\"") != npos);
+    CHECK(err.find("\"error_code\":2") != npos);
+    CHECK(err.find("\"enter\":false") != npos);
+    std::string semantic = save_preflight_semantic_error_json(0, "character", 7, "hero pointer is null");
+    CHECK(semantic.find("\"verdict\":\"corrupt\"") != npos);
+    CHECK(semantic.find("\"stage\":\"character\"") != npos);
+    CHECK(semantic.find("hero pointer is null") != npos);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -537,6 +624,9 @@ int main() {
     test_virtual_bag_legacy_json();
     test_virtual_bag_normalize_payload();
     test_virtual_bag_recovery();
+    test_save_preflight_classify();
+    test_save_preflight_stage();
+    test_save_preflight_json();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

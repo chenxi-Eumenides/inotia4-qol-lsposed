@@ -17,6 +17,7 @@ add_executable(host_tests
     test_stubs.cpp
     ${CPP_DIR}/game_json.cpp
     ${CPP_DIR}/game_nav.cpp
+    ${CPP_DIR}/game_save_preflight.cpp
 )
 
 target_include_directories(host_tests PRIVATE
