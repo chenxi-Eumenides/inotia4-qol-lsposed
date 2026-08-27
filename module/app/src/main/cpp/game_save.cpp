@@ -21,7 +21,10 @@ std::string data_current_save_slot_json() {
 std::string data_save_slots_json() {
     if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr || fn_save_create_save_slot == nullptr)
         return op_err("symbol not resolved");
-    fn_save_create_save_slot();
+    // SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局；只允许在主菜单刷新。
+    // world/启动过渡阶段查询 save_slots 必须只读现有槽结构，不能因 GET /system/info 破坏当前游戏。
+    if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 4)
+        fn_save_create_save_slot();
     std::string s = "{\"slots\":[";
     for (int i = 0; i < 3; ++i) {
         if (i > 0) s += ",";
@@ -58,8 +61,11 @@ static std::string save_preflight_for_enter(int32_t slot) {
     if (slot < 0 || slot > 2) return op_err("bad slot");
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
     if (st != 4) {
-        return save_preflight_error_json(slot, 0xff, 0);
+        std::string e = "not in main menu (state=" + std::to_string(st) + ")";
+        return op_err(e.c_str());
     }
+    if (g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on))
+        return op_err("ui occupied: dialog_popup");
     void* ss = fn_save_get_save_slot(slot);
     if (ss == nullptr) return op_err("bad slot");
     fn_save_load_save_slot(slot, ss);
