@@ -39,10 +39,10 @@ def lead_fields(party) -> dict:
     if isinstance(party, list) and party and party[0]:
         p = party[0]
         return {
-            "hp": p.get("hp"), "maxHp": p.get("maxHp"),
-            "mp": p.get("mp"), "maxMp": p.get("maxMp"),
+            "hp": p.get("hp"), "maxHp": p.get("max_hp"),
+            "mp": p.get("mp"), "maxMp": p.get("max_mp"),
             "lv": p.get("level"), "exp": p.get("exp"),
-            "nameId": p.get("nameId"), "equip": sum(1 for e in p.get("equipment", []) if e),
+            "nameId": p.get("name_id"), "equip": sum(1 for e in p.get("equipment", []) if e),
         }
     return {}
 
@@ -68,7 +68,7 @@ def main() -> None:
     t0 = time.time()
     while time.time() - t0 < API_WAIT_MIN * 60:
         try:
-            fetch(f"{base}/api/info/player")
+            fetch(f"{base}/api/health")
             log("API 就绪")
             break
         except Exception:  # noqa: BLE001
@@ -81,7 +81,7 @@ def main() -> None:
     t0 = time.time()
     while time.time() - t0 < API_WAIT_MIN * 60:
         try:
-            party = fetch(f"{base}/api/info/player/party")
+            party = fetch(f"{base}/api/character/party")
             if isinstance(party, list) and party and party[0] and party[0].get("hp") is not None:
                 log(f"游戏世界就绪：party={len(party)}，开始采样")
                 break
@@ -109,9 +109,9 @@ def main() -> None:
     log("采样中... 操作开始（打怪/捡钱/走动/切图/买卖装备）")
     while time.time() - t_start < max_run_min * 60:
         try:
-            p = fetch(f"{base}/api/info/player")
-            party = fetch(f"{base}/api/info/player/party")
-            inv = fetch(f"{base}/api/info/inventory")
+            p = fetch(f"{base}/api/system/game").get("snapshot", {})
+            party = fetch(f"{base}/api/character/party")
+            inv = fetch(f"{base}/api/item/inventory")
             consec_fail = 0
         except Exception as e:  # noqa: BLE001
             consec_fail += 1
@@ -125,9 +125,9 @@ def main() -> None:
 
         lf = lead_fields(party)
         row = {
-            "money": p.get("money"), "mapId": p.get("mapId"),
+            "money": p.get("money"), "mapId": p.get("map_id"),
             "x": p.get("x"), "y": p.get("y"),
-            "partyCount": p.get("partyCount"), "activeQuest": p.get("activeQuest"),
+            "partyCount": sum(1 for member in party if member), "activeQuest": p.get("activeQuest"),
             "hp": lf.get("hp"), "maxHp": lf.get("maxHp"),
             "mp": lf.get("mp"), "maxMp": lf.get("maxMp"),
             "lv": lf.get("lv"), "exp": lf.get("exp"),

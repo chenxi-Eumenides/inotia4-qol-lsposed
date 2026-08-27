@@ -12,7 +12,7 @@ import org.json.JSONObject
  */
 object ModuleConfigUiBridge {
 
-    private val BOOL_KEYS = setOf("stackLimitIncrease", "moveMergeEnabled", "opEnabled")
+    private val BOOL_KEYS = setOf("stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled")
 
     @JvmStatic
     fun getConfigJson(): String = ModuleConfig.toJson().toString()
@@ -22,16 +22,18 @@ object ModuleConfigUiBridge {
         if (key !in BOOL_KEYS) return "error:not_boolean"
         val oldStack = ModuleConfig.stackLimitIncrease
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
+        val oldExtensionBag = ModuleConfig.extensionBagEnabled
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
+            "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
             else -> ModuleConfig.opEnabled
         }
         val json = JSONObject()
         json.put(key, !current)
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
-        ApiServices.config.applyOnChange(oldStack, oldMoveMerge)
+        ApiServices.config.applyOnChange(oldStack, oldMoveMerge, oldExtensionBag)
         return "ok"
     }
 }

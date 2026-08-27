@@ -15,7 +15,7 @@ interface ConfigApiService {
     fun applyToNative()
 
     /** 配置变更增量应用：仅当对应值变化时通知 native（POST /api/config/set 用） */
-    fun applyOnChange(oldStack: Boolean, oldMoveMerge: Boolean)
+    fun applyOnChange(oldStack: Boolean, oldMoveMerge: Boolean, oldExtensionBag: Boolean)
 
     /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵 2026-08-12） */
     fun applyTiles()
@@ -32,16 +32,21 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.log("stackLimitIncrease=${ModuleConfig.stackLimitIncrease} applied=$applied")
         val moveMergeApplied = NativeBridge.nativeSetMoveMergeEnabled(ModuleConfig.moveMergeEnabled)
         LogFile.log("moveMergeEnabled=${ModuleConfig.moveMergeEnabled} applied=$moveMergeApplied")
+        val extensionApplied = NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
+        LogFile.log("extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
         applyTiles()
     }
 
-    override fun applyOnChange(oldStack: Boolean, oldMoveMerge: Boolean) {
+    override fun applyOnChange(oldStack: Boolean, oldMoveMerge: Boolean, oldExtensionBag: Boolean) {
         if (!NativeBridge.ready) return
         if (ModuleConfig.stackLimitIncrease != oldStack) {
             NativeBridge.nativeSetStackLimitEnabled(ModuleConfig.stackLimitIncrease)
         }
         if (ModuleConfig.moveMergeEnabled != oldMoveMerge) {
             NativeBridge.nativeSetMoveMergeEnabled(ModuleConfig.moveMergeEnabled)
+        }
+        if (ModuleConfig.extensionBagEnabled != oldExtensionBag) {
+            NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
         }
     }
 

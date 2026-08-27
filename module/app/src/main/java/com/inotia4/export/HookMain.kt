@@ -64,6 +64,7 @@ class HookMain : XposedModule() {
                     val ctx = currentApplication()
                     if (ctx != null) {
                         val moduleApk = getModuleApplicationInfo().sourceDir
+                        LogFile.logModuleIdentity(moduleApk)
                         ApiServer.start(ctx, moduleApk)
                         LogFile.log("ApiServer start requested, moduleApk=$moduleApk")
                     } else {

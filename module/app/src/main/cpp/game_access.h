@@ -105,6 +105,8 @@ extern ItemGetAbilityLevelFn fn_item_get_ability_level;
 extern ItemGetBuyPriceFn fn_item_get_buy_price;
 extern InvenFindSaveSlotFn fn_inven_find_save_slot;
 extern InvenSaveItemFn fn_inven_save_item;
+extern InvenSaveItemDirectFn fn_inven_save_item_direct;
+extern InvenSaveItemOnEmptyFn fn_inven_save_item_on_empty;
 extern DealSystemFindSaleByIdFn fn_dealsystem_find_sale_by_id;
 extern InvenMoveItemFn fn_inven_move_item;
 extern SetExpFn fn_set_exp;
@@ -160,8 +162,13 @@ extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
 extern UiDescSetOffFn fn_ui_desc_set_off;
 extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
+extern ItemDrawPortingFn fn_item_draw_porting;
 extern MakeMixFn fn_make_mix;
 extern GetCostFn fn_get_cost;
+// 物品序列化（lossless 扩展背包移动，v0.7.0）
+extern SaveSaveItemFn fn_save_save_item;
+extern SaveLoadItemFn fn_save_load_item;
+extern ItemPoolFreeFn fn_itempool_free;
 // ---- UI 实验函数指针（ui-exp v0.6.7）----
 extern ControlObjectCreateFn fn_ctrl_create;
 extern ControlObjectAddFn fn_ctrl_add;

@@ -76,8 +76,9 @@ GRADLE_USER_HOME=$PWD/../.gradle $GRADLE_BIN :app:assembleDebug --no-daemon
 # 命名格式固定：inotia4-export-module-vX.Y.Z.apk（如 v0.4.56）
 
 # ② 部署（覆盖安装，LSPosed 启用状态按包名保留）
-# 默认操作真机2（192.168.3.54）；若同时连着真机1 需加 -s <序列号> 区分
-adb -s 192.168.3.54:5555 install -r output/inotia4-export-module-v0.4.56.apk
+# 默认操作真机2（192.168.3.54）；若同时连着真机1 需加 -s <序列号> 区分。
+# 当前构建命令的实际产物是 app/build/outputs/apk/debug/app-debug.apk。
+adb -s 192.168.3.54:5555 install -r app/build/outputs/apk/debug/app-debug.apk
 
 # ③ 重启游戏（让 Xposed 重新注入，模块更新生效的必需步骤）
 # 按包名 force-stop 即可，**无需 pid**；monkey 启动与桌面点击等价
@@ -85,12 +86,16 @@ adb -s 192.168.3.54:5555 install -r output/inotia4-export-module-v0.4.56.apk
 adb -s 192.168.3.54:5555 shell am force-stop com.com2us.inotia4.normal.freefull.google.global.android.common
 adb -s 192.168.3.54:5555 shell monkey -p com.com2us.inotia4.normal.freefull.google.global.android.common -c android.intent.category.LAUNCHER 1
 
+# ③a 真机2启动弹窗前置（2026-08-27 实测必需；仅此一步使用触摸脚本）
+# 脚本通过 ANDROID_SERIAL 固定目标真机2，坐标不适用于其他设备。
+ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/touch_automation.py --inject input click 420,280 1.0
+
 # ④ 等待 API 就绪（8088 端口；curl 轮询比 /proc/net/tcp 可靠）
 # API 可达（能返回 JSON）即代表模块已注入、游戏启动完成；轮询到 "screen" 字段说明模块数据通路就绪
 until curl -s -m 2 http://192.168.3.54:8088/api/health | grep -q '"ok"'; do sleep 2; done
 
-# ⑤ 进入游戏世界（推荐：API enter-slot，v0.4.18 起；触摸方案已弃用）
-curl -s -X POST http://192.168.3.54:8088/api/system/save/enter-slot -H "Content-Type: application/json" -d '{"slot":0}'
+# ⑤ 进入游戏世界（推荐：API enter_slot；触摸方案已弃用）
+curl -s -X POST http://192.168.3.54:8088/api/system/enter_slot -H "Content-Type: application/json" -d '{"slot":0}'
 # 验证：screen=world 即进入世界
 curl -s http://192.168.3.54:8088/api/ui/screen
 ```
@@ -125,7 +130,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 3. **Tailscale**：`adb connect 100.110.139.83:5555`（仅真机1）
 
 > **重要**：两台设备分别 `adb connect` 后由 `adb -s <序列号> <命令>` 区分；`adb` 默认连最后连接的设备。日常默认以**真机2（192.168.3.54）**为开发机，命令速查中的 IP 均指真机2。
-> **UI 坐标限制**：`scripts/touch_automation.py` 中的坐标**仅适用于真机1**（3168x1440）；真机2 需**完全通过 HTTP API 操控**（enter-slot/move/dialog select 等），不得使用触摸方案。
+> **UI 坐标限制**：真机2仅允许在启动弹窗前置使用已验证坐标 `(420,280)`；其余进入存档、背包读取、移动、保存和验收全部使用 HTTP API。真机1坐标仍不在本项目当前验收范围内。
 
 ### 3.4 其他常用命令
 
@@ -133,8 +138,8 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 # 符号查询（workdir: 项目根，libgame.so 符号表）
 grep " INVEN_GetMoney" apk/decompiled/libgame-symbols.txt
 
-# 抓模块日志（tag: Inotia4Export；日志文件在手机 sdcard/Android/data/<包名>/files/）
-adb logcat -s Inotia4Export:V
+# 抓模块与扩展背包 native 日志（文件日志在手机 sdcard/Android/data/<游戏包>/files/）
+adb logcat -s Inotia4Export:V Inotia4VirtBag:V
 
 # 反汇编定位（改 game_symbols.h 时用）
 tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/decoded/lib/arm64-v8a/libgame.so
@@ -184,7 +189,8 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 10. **zsh 通配符不展开**（2026-08-12 实测）：`GRADLE_BIN=$PWD/../.gradle/wrapper/dists/gradle-8.11.1-bin/*/...` 中 `*/` 在 zsh 下**不展开**直接报 `没有那个文件或目录` → 写完整路径 `.../bpt9gzteqjrbo1mjrsomdt32c/gradle-8.11.1/bin/gradle`。
 11. **frida-server 重启后需 su 启动**（2026-08-12 实测）：设备重启后 `/data/local/tmp/frida-server` 需 `adb shell su -c 'nohup /data/local/tmp/frida-server >/dev/null 2>&1 &'`（root + nohup），普通 `adb shell "frida-server &"` 无权限启动失败。
 12. **通知栏遮挡启动**（2026-08-12 实测）：设备重启后首屏可能是 NotificationShade（`dumpsys window` mCurrentFocus 显示），monkey 启动游戏前先 `input keyevent 4` 关闭通知栏回到桌面，否则游戏未真正启动（8088 无监听）。
-13. **两台真机**（2026-08-12 确认）：真机1=`192.168.3.11`（局域网）+`100.110.139.83`（Tailscale，同一台）；真机2=`192.168.3.54`（另一台，当前主力）。**UI 点击坐标只适用于真机1**（3168x1440），真机2 完全用 API 操控。详见 §3.3。
+13. **两台真机**（2026-08-12 确认）：真机1=`192.168.3.11`（局域网）+`100.110.139.83`（Tailscale，同一台）；真机2=`192.168.3.54`（另一台，当前主力）。真机2仅启动弹窗前置例外使用 `(420,280)`，其余完全用 API 操控。详见 §3.3。
+14. **真机2启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/touch_automation.py --inject input click 420,280 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机2触摸坐标。
 
 ## 6. 关联文档
 

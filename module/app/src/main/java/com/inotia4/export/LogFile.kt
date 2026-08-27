@@ -6,9 +6,11 @@ import com.inotia4.export.util.JsonUtil
 import org.json.JSONObject
 import java.io.BufferedWriter
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileWriter
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -97,6 +99,28 @@ object LogFile {
 
     fun path(): String? = file?.absolutePath
 
+    fun logModuleIdentity(moduleApk: String) {
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            FileInputStream(moduleApk).use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            log(
+                "module identity: package=${BuildConfig.APPLICATION_ID} " +
+                    "versionCode=${BuildConfig.VERSION_CODE} " +
+                    "versionName=${BuildConfig.VERSION_NAME} " +
+                    "apk=$moduleApk sha256=${digest.digest().toHex()}"
+            )
+        } catch (t: Throwable) {
+            logError("module identity failed: apk=$moduleApk", t)
+        }
+    }
+
     private fun resultSummary(result: String): String = try {
         val obj = JSONObject(result)
         if (obj.optBoolean("ok", false)) {
@@ -125,4 +149,7 @@ object LogFile {
 
     private fun timestamp(): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+
+    private fun ByteArray.toHex(): String =
+        joinToString(separator = "") { byte -> "%02x".format(Locale.US, byte.toInt() and 0xff) }
 }

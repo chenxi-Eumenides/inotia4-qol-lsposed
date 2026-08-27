@@ -7,6 +7,17 @@
 void virtual_bag_ui_start_auto_inject();
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
 
+bool virtual_bag_module_view_installed();
+bool virtual_bag_original_item_input_blocked();
+bool set_virtual_bag_enabled(bool enabled);
+bool virtual_bag_enabled();
+void virtual_bag_prepare_main_menu();
+void virtual_bag_prepare_save_slot_load();
+bool virtual_bag_save_game();
+bool virtual_bag_sync_projected_slot(int display_bag, int slot);
+bool virtual_bag_sync_projected_bag();
+bool virtual_bag_sync_projected_item_control(void* control);
+
 std::string data_virtual_bag_ui_status_json();
 std::string data_virtual_bag_test_equip(int index, int bag_type);
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count);

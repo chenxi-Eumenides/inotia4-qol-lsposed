@@ -237,6 +237,16 @@ constexpr uintptr_t G_UIEQUIP_CUR_BAG_GOT_VMA = 0x2f5000 + 0x6d8; // ptr to UIEq
 constexpr uintptr_t G_UIEQUIP_DESC_TYPE_VMA = G_UIEQUIP_PANEL_VMA + 0x63;
 constexpr uintptr_t G_UIEQUIP_PANEL_CTRL_VMA = G_UIEQUIP_PANEL_VMA + 0x8;
 
+// ---- 物品序列化 + 触摸拖动状态（v0.7.0 扩展背包跨包移动，objdump 逐字节确认）----
+constexpr uintptr_t F_SAVE_SAVE_ITEM_VMA = 0x1274f0;    // int (uint8_t* out, void* item) SAVE_SaveItem：序列化物品到 out（u8 长度前缀 + 18B 头 + 4B×N 词缀；总长 ≤255，返回总字节）
+constexpr uintptr_t F_SAVE_LOAD_ITEM_VMA = 0x1278a0;    // int (const uint8_t* in, void** out, int* consumed) SAVE_LoadItem：ITEMPOOL_Allocate 重建物品；consumed=前缀+1=记录总长；失败返回 0 且 *out 不清空（调用方须先置空）
+constexpr uintptr_t F_ITEMPOOL_FREE_VMA = 0x108160;     // void (void*) ITEMPOOL_Free：释放物品对象回游戏对象池
+constexpr uintptr_t G_TOUCH_STATE_VMA = 0x301000 + 0xcf8; // TouchHandle 全局状态（匿名 .bss）：+0x30=拖动中控件 +0x50=释放参数(+0x50=释放控件 +0x58=拖动源控件 +0x60=释放坐标)
+constexpr size_t TOUCH_STATE_MOVING_CTRL = 0x30;        // TouchHandle_Event 0x17 按下/拖动中控件
+constexpr size_t TOUCH_STATE_DROP_SRC_CTRL = 0x58;      // TouchHandle_SetReleaseEvent 写入的拖动源控件
+constexpr size_t ITEM_CTRL_MOVING_FLAG = 0x0a;          // 物品控件数据块移动标志（ContorlItem_SetMoving 写）
+constexpr size_t ITEM_CTRL_ON_FLAG = 0x0b;              // 物品控件数据块选中标志（ContorlItem_SetOn 写）
+
 // ---- UIMix 合成器控件系统（craft-batch-ui，v0.5.18）----
 // 全局 0x305550（.bss 无名，直接 VMA 兜底）：UIMix 固定控件指针槽基址（UIMix_CreateMainControl 反汇编确认）。
 constexpr uintptr_t G_UIMIX_VMA = 0x305550;          // UIMix 固定控件槽基址（根控件/按钮/材料槽指针表）
@@ -402,6 +412,7 @@ constexpr uintptr_t F_CREATE_ITEM_VMA = 0x10be9c;    // void* (int32_t category,
 // ---- 堆叠上限 patch 点所在函数 VMA（stack-limit-999，v0.5.18；符号名见 libgame-symbols.txt）----
 constexpr uintptr_t F_ITEMSYSTEM_DIVIDE_VMA = 0x1083f8;       // ITEMSYSTEM_Divide 拆堆
 constexpr uintptr_t F_INVEN_SAVE_ITEM_DIRECT_VMA = 0x103bf0;  // INVEN_SaveItemDirect 存入堆叠
+constexpr uintptr_t F_INVEN_SAVE_ITEM_ON_EMPTY_VMA = 0x104be0;  // int (void* item, int bag) INVEN_SaveItemOnEmpty：目标袋内找空槽后 SaveItemDirect 精确入库，返回 1 成功 0 袋满
 constexpr uintptr_t F_INVEN_SAVE_ITEM_DATA_VMA = 0x104614;    // INVEN_SaveItemData 存数据
 constexpr uintptr_t F_INVEN_CHECK_SAVE_IN_NOT_EMPTY_SLOT_VMA = 0x103d78; // INVEN_CheckSaveInNotEmptySlot 槽检查
 constexpr uintptr_t F_INVEN_REMOVE_ITEM_DATA_VMA = 0x1040a8;  // INVEN_RemoveItemData 删除数据
@@ -422,6 +433,7 @@ constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
 constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
+constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
@@ -531,6 +543,7 @@ using UiEquipRefreshItemAreaFn = void (*)();
 using UiDescSetOffFn = void (*)();
 using TouchHandleSetCursorFn = void (*)(void*, void*);
 using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
+using ItemDrawPortingFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t);
 using SetExpFn = void (*)(void*, int32_t);
 using SetLevelFn = int (*)(void*, int32_t);   // CHAR_SetLevel(0xe05a0)：返回 1=成功（升级/同级）/ 0=降级拒绝
 using AddExpFn = int (*)(void*, int32_t, uint8_t);
@@ -566,6 +579,8 @@ using CsFsRemoveFn = int (*)(char*, int32_t);
 using ItemGetBuyPriceFn = int (*)(void*);
 using InvenFindSaveSlotFn = int (*)(void*, int32_t);
 using InvenSaveItemFn = int (*)(void*, void*);
+using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);  // INVEN_SaveItemDirect(item, bag, slot) 指定袋槽入库（空槽写入/同类堆叠合并）
+using InvenSaveItemOnEmptyFn = int (*)(void*, int32_t);  // INVEN_SaveItemOnEmpty(item, bag) 目标袋内找空槽入库
 using DealSystemFindSaleByIdFn = void* (*)(void*);
 using UinpcInitFn = uint8_t (*)();
 using NpcSystemCheckFunctionDisplayFn = int (*)(int32_t);
@@ -619,6 +634,9 @@ using CreateItemFn = void* (*)(int32_t, int32_t, int32_t, int32_t);
 using NetworkStoreSetStateFn = void (*)(int);
 using MakeMixFn = int (*)(int32_t, void**);       // MIXSYSTEM_MakeItem：0=成功（*outItem 已填），非 0=失败
 using GetCostFn = int64_t (*)(int32_t, void*);    // MIXSYSTEM_GetCost：合成费用（负数=非法配方）
+using SaveSaveItemFn = int (*)(uint8_t*, void*);  // SAVE_SaveItem(out, item)：序列化物品，返回总字节（uxtb 截断，须 ≤255）
+using SaveLoadItemFn = int (*)(const uint8_t*, void**, int*);  // SAVE_LoadItem(in, &out, &consumed)：重建物品，1=成功
+using ItemPoolFreeFn = void (*)(void*);           // ITEMPOOL_Free(item)：释放物品对象
 
 // ---- UI 实验函数签名（ui-exp v0.6.7）----
 using ControlObjectCreateFn = void* (*)(uint32_t type, void* x1, void* x2, void* x3);

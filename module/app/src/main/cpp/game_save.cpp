@@ -6,6 +6,7 @@
 #include "game_access.h"
 #include "game_ops_common.h"
 #include "game_state.h"
+#include "game_ui_virtbag.h"
 
 // v0.5.5：当前加载存档槽（S5）——G_CURRENT_SLOT 双层解引用（SaveSlot_GoToNewGame/STATE_EnterGame 写，v0.5.5 frida 实测 world=0）
 std::string data_current_save_slot_json() {
@@ -38,8 +39,7 @@ std::string data_save_slots_json() {
 std::string data_op_save() {
     if (!game_in_world()) return op_err("not in game");
     if (fn_save == nullptr) return op_err("symbol not resolved");
-    int r = fn_save();
-    return r ? op_ok() : op_err("save failed");
+    return virtual_bag_save_game() ? op_ok() : op_err("save failed");
 }
 std::string data_op_enter_slot(int32_t slot) {
     if (g_state == nullptr) return op_err("libgame not ready");
@@ -63,6 +63,7 @@ std::string data_op_enter_slot(int32_t slot) {
     uint8_t b0 = *reinterpret_cast<uint8_t*>(slot_struct);
     uint8_t b2 = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(slot_struct) + 2);
     if (b0 == 0 && b2 == 0) return op_err("slot empty");
+    virtual_bag_prepare_save_slot_load();
     fn_ui_set_popup_process_info(4, 0);
     uint8_t** flag_ptr = reinterpret_cast<uint8_t**>(g_base + G_GAME_RESUME_FLAG_GOT_VMA);
     if (*flag_ptr != nullptr) **flag_ptr = 0;
@@ -88,6 +89,7 @@ std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
     if (slot < 0 || slot > 2) return op_err("bad slot");
     if (class_idx < 0 || class_idx > 5) return op_err("bad class");
     if (g_base == 0) return op_err("libgame not ready");
+    virtual_bag_prepare_save_slot_load();
     if (fn_save_create_save_slot == nullptr || fn_game_exit_save_slot_select_char == nullptr ||
         fn_select_character_start_game == nullptr || fn_tutorial_start == nullptr ||
         fn_save_get_save_file_name == nullptr || fn_cs_fs_remove == nullptr)

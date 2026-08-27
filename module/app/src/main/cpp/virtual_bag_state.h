@@ -2,6 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
+#include <string>
+
+#include "stack_codec.h"
 
 namespace virtual_bag {
 
@@ -9,6 +13,12 @@ constexpr int kBagCount = 5;
 constexpr int kMaxCapacity = 16;
 constexpr int kSlotCount = 16;
 constexpr std::array<uint8_t, kBagCount> kFixedCapacities = {16, 8, 4, 0, 0};
+
+// SAVE_SaveItem 记录约束（objdump 确认）：u8 长度前缀 + 18B 头 + 4B×N 词缀，总长 ≤255。
+constexpr size_t kSerializedItemBuffer = 256;  // 固定字节数组容量（State 内禁止裸指针）
+constexpr size_t kMaxSerializedItem = 255;     // 可序列化最大总长（SAVE_SaveItem 返回值 uxtb 截断）
+constexpr size_t kPayloadHeaderSize = 19;      // 1 前缀 + 18 头（真实物品载荷最小长度）
+constexpr size_t kPayloadCountOffset = 11;     // 载荷内 u32 数量位域偏移（小端）
 
 enum class BagType : uint8_t {
     kNone = 0,
@@ -25,8 +35,31 @@ enum class Mode {
 };
 
 struct Item {
-    int category = 0;
-    int count = 0;
+    int category = 0;    // 缓存渲染字段（SAVE_LoadItem 头部的物品类别）
+    int count = 0;       // 缓存渲染字段（堆叠数量，合并时按 99/999 上限 clamp）
+    uint16_t payload_size = 0;  // 0 = 旧版描述符（无可序列化载荷，仅按类别渲染）
+    std::array<uint8_t, kSerializedItemBuffer> payload{};  // SAVE_SaveItem 序列化记录（无损数据源）
+};
+
+// 跨包移动方向常量。
+constexpr uint8_t kTransferOriginalToExtension = 0;
+constexpr uint8_t kTransferExtensionToOriginal = 1;
+
+// 可恢复事务记录：先写 pending → 提交状态 → 变更原版 → fn_save → 清 pending。
+// 载荷语义随方向变化：
+//   orig→ext：提交后目标扩展槽应持有的完整载荷（合并时数量位段已修补）；
+//   ext→orig：被移动物品的源载荷（恢复时重建入库用）。
+struct PendingTransfer {
+    bool valid = false;
+    uint8_t direction = kTransferOriginalToExtension;
+    uint8_t src_bag = 0;
+    uint8_t src_slot = 0;
+    uint8_t dst_bag = 0;
+    uint8_t dst_slot = 0;
+    uint16_t payload_size = 0;
+    std::array<uint8_t, kSerializedItemBuffer> payload{};
+    uint16_t source_payload_size = 0;
+    std::array<uint8_t, kSerializedItemBuffer> source_payload{};
 };
 
 struct State {
@@ -37,12 +70,19 @@ struct State {
     int original_selected = 0;
     int selected = -1;
     int inspected = -1;
+    PendingTransfer pending{};  // 未完成事务（随 JSON 往返持久化，恢复用）
 };
 
 enum class ClickResult {
     kIgnored,
     kSelected,
     kInspected,
+};
+
+enum class RecoveryAction {
+    kRollback,   // 事务未提交：保持现状，仅清除 pending
+    kComplete,   // 事务已提交：补做原版侧变更（移除源槽 / 重建入库）
+    kNone,       // 无 pending
 };
 
 inline bool valid_index(int index) {
@@ -58,6 +98,93 @@ inline bool valid_type(int type) {
            type <= static_cast<int>(BagType::kLargeBackpack);
 }
 
+inline bool valid_payload(const Item& item) {
+    return item.payload_size >= kPayloadHeaderSize && item.payload_size <= kMaxSerializedItem &&
+           item.payload[0] == static_cast<uint8_t>(item.payload_size - 1);
+}
+
+inline uint32_t payload_count(const Item& item) {
+    uint32_t v = 0;
+    for (size_t i = 0; i < 4; ++i) {
+        v |= uint32_t(item.payload[kPayloadCountOffset + i]) << (8 * i);
+    }
+    return v;
+}
+
+inline void patch_payload_count(Item* item, uint32_t count) {
+    if (item == nullptr || !valid_payload(*item)) return;
+    const uint32_t updated = stack_codec::write_count(payload_count(*item), count);
+    for (size_t i = 0; i < 4; ++i) {
+        item->payload[kPayloadCountOffset + i] = static_cast<uint8_t>((updated >> (8 * i)) & 0xFF);
+    }
+}
+
+inline uint32_t payload_hash(const Item& item) {
+    uint32_t h = 2166136261u;
+    h ^= static_cast<uint32_t>(item.category);
+    h *= 16777619u;
+    h ^= static_cast<uint32_t>(item.count);
+    h *= 16777619u;
+    h ^= static_cast<uint32_t>(item.payload_size);
+    h *= 16777619u;
+    for (size_t i = 0; i < item.payload_size; ++i) {
+        h ^= item.payload[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
+// 合并数量：按堆叠上限（stack_limit_enabled ? 999 : 99）clamp。
+inline uint32_t merge_count(int existing_count, int added_count, bool extended) {
+    const int64_t sum = static_cast<int64_t>(existing_count) + added_count;
+    if (sum <= 0) return 0;
+    return stack_codec::clamp_count(static_cast<uint32_t>(sum), extended);
+}
+
+inline bool mergeable_items(const Item& existing, const Item& source) {
+    if (existing.category <= 0 || existing.count <= 0 || source.category <= 0 ||
+        source.count <= 0 || existing.category != source.category) {
+        return false;
+    }
+    if (existing.payload_size == 0 && source.payload_size == 0) return true;
+    if (!valid_payload(existing) || !valid_payload(source) ||
+        existing.payload_size != source.payload_size) {
+        return false;
+    }
+    Item existing_identity = existing;
+    Item source_identity = source;
+    patch_payload_count(&existing_identity, 1);
+    patch_payload_count(&source_identity, 1);
+    return std::memcmp(existing_identity.payload.data(), source_identity.payload.data(),
+                       existing_identity.payload_size) == 0;
+}
+
+inline bool item_matches_payload(const Item& item, const PendingTransfer& pending) {
+    return pending.payload_size > 0 && item.payload_size == pending.payload_size &&
+           std::memcmp(item.payload.data(), pending.payload.data(), pending.payload_size) == 0;
+}
+
+// 纯判定逻辑（不涉及 native 调用，host 测试覆盖）：
+// 以「状态中对应槽的载荷是否等于 pending 载荷」区分事务已提交/未提交，产出确定性恢复动作。
+inline RecoveryAction recovery_action(const State& state, const PendingTransfer& pending) {
+    if (!pending.valid) return RecoveryAction::kNone;
+    const bool original_to_extension = pending.direction == kTransferOriginalToExtension;
+    const bool slot_invalid = pending.src_slot >= kSlotCount || pending.dst_slot >= kSlotCount ||
+                              (original_to_extension &&
+                               (pending.src_bag >= 6 || pending.dst_bag >= kBagCount)) ||
+                              (!original_to_extension &&
+                               (pending.src_bag >= kBagCount || pending.dst_bag >= 6));
+    if (slot_invalid) return RecoveryAction::kRollback;
+    if (pending.direction == kTransferOriginalToExtension) {
+        return item_matches_payload(state.items[pending.dst_bag][pending.dst_slot], pending)
+                   ? RecoveryAction::kComplete
+                   : RecoveryAction::kRollback;
+    }
+    return item_matches_payload(state.items[pending.src_bag][pending.src_slot], pending)
+               ? RecoveryAction::kRollback
+               : RecoveryAction::kComplete;
+}
+
 inline void normalize(State* state) {
     if (state == nullptr) return;
     for (int index = 0; index < kBagCount; ++index) {
@@ -67,6 +194,11 @@ inline void normalize(State* state) {
     for (auto& bag : state->items) {
         for (Item& item : bag) {
             if (item.category < 0 || item.count < 0) {
+                item = {};
+            }
+            if (item.payload_size > 0 && (!valid_payload(item) || item.category <= 0)) {
+                // 损坏载荷不能降级为 category/count 素体，否则随机类别可能被显示成
+                // “背包（小）”等完全不同的物品；宁可丢弃该扩展槽，也不创建不可信对象。
                 item = {};
             }
         }
@@ -132,6 +264,292 @@ inline bool set_item(State* state, int bag, int slot, int category, int count) {
         return false;
     }
     state->items[bag][slot] = Item{category, count};
+    return true;
+}
+
+// ---- JSON 桥接（Kotlin ExtensionBagUiBridge 往返，payload 以 base64 安全编码）----
+
+inline std::string base64_encode(const uint8_t* data, size_t size) {
+    static const char kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((size + 2) / 3 * 4);
+    size_t i = 0;
+    for (; i + 3 <= size; i += 3) {
+        const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8) | data[i + 2];
+        out += kTable[(v >> 18) & 0x3F];
+        out += kTable[(v >> 12) & 0x3F];
+        out += kTable[(v >> 6) & 0x3F];
+        out += kTable[v & 0x3F];
+    }
+    if (i + 1 == size) {
+        const uint32_t v = uint32_t(data[i]) << 16;
+        out += kTable[(v >> 18) & 0x3F];
+        out += kTable[(v >> 12) & 0x3F];
+        out += "==";
+    } else if (i + 2 == size) {
+        const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8);
+        out += kTable[(v >> 18) & 0x3F];
+        out += kTable[(v >> 12) & 0x3F];
+        out += kTable[(v >> 6) & 0x3F];
+        out += '=';
+    }
+    return out;
+}
+
+// 严格 RFC4648 解码：长度必须为 4 的倍数，'=' 仅允许结尾 0-2 个，非法字符拒绝。
+inline int base64_decode(const char* text, size_t len, uint8_t* out, size_t cap) {
+    if (text == nullptr || len == 0 || len % 4 != 0) return 0;
+    auto value = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    size_t written = 0;
+    for (size_t i = 0; i < len; i += 4) {
+        int v[4] = {0, 0, 0, 0};
+        for (int k = 0; k < 4; ++k) {
+            if (text[i + k] == '=') {
+                v[k] = -2;
+            } else {
+                v[k] = value(text[i + k]);
+                if (v[k] < 0) return 0;
+            }
+        }
+        if (v[0] < 0 || v[1] < 0) return 0;
+        const uint32_t a = uint32_t(v[0]) << 18 | uint32_t(v[1]) << 12;
+        if (v[2] == -2) {
+            if (v[3] != -2 || written >= cap) return 0;
+            out[written++] = static_cast<uint8_t>(a >> 16);
+            continue;
+        }
+        if (v[3] == -2) {
+            if (written + 1 >= cap) return 0;
+            const uint32_t b = a | uint32_t(v[2]) << 6;
+            out[written++] = static_cast<uint8_t>(b >> 16);
+            out[written++] = static_cast<uint8_t>((b >> 8) & 0xFF);
+            continue;
+        }
+        if (written + 2 >= cap) return 0;
+        const uint32_t b = a | uint32_t(v[2]) << 6 | uint32_t(v[3]);
+        out[written++] = static_cast<uint8_t>(b >> 16);
+        out[written++] = static_cast<uint8_t>((b >> 8) & 0xFF);
+        out[written++] = static_cast<uint8_t>(b & 0xFF);
+    }
+    return static_cast<int>(written);
+}
+
+inline std::string state_json(const State& state) {
+    std::string json = "{\"mode\":\"";
+    json += state.mode == Mode::kModule ? "module" : "original";
+    json += "\",\"originalSelected\":" + std::to_string(state.original_selected);
+    json += ",\"types\":[";
+    for (int index = 0; index < kBagCount; ++index) {
+        if (index > 0) json += ',';
+        json += std::to_string(state.types[index]);
+    }
+    json += "],\"capacities\":[";
+    for (int index = 0; index < kBagCount; ++index) {
+        if (index > 0) json += ',';
+        json += std::to_string(state.capacities[index]);
+    }
+    json += "],\"selected\":" + std::to_string(state.selected);
+    json += ",\"inspected\":" + std::to_string(state.inspected) + ",\"items\":[";
+    for (int bag = 0; bag < kBagCount; ++bag) {
+        if (bag > 0) json += ',';
+        json += '[';
+        for (int slot = 0; slot < kSlotCount; ++slot) {
+            if (slot > 0) json += ',';
+            const Item& item = state.items[bag][slot];
+            json += "{\"category\":" + std::to_string(item.category) +
+                    ",\"count\":" + std::to_string(item.count);
+            if (item.payload_size > 0) {
+                json += ",\"payload\":\"" +
+                        base64_encode(item.payload.data(), item.payload_size) + "\"";
+            }
+            json += '}';
+        }
+        json += ']';
+    }
+    json += "]";
+    if (state.pending.valid) {
+        json += ",\"pending\":{\"direction\":" + std::to_string(state.pending.direction);
+        json += ",\"srcBag\":" + std::to_string(state.pending.src_bag);
+        json += ",\"srcSlot\":" + std::to_string(state.pending.src_slot);
+        json += ",\"dstBag\":" + std::to_string(state.pending.dst_bag);
+        json += ",\"dstSlot\":" + std::to_string(state.pending.dst_slot);
+        json += ",\"payload\":\"" +
+                base64_encode(state.pending.payload.data(), state.pending.payload_size) + "\"}";
+        if (state.pending.source_payload_size > 0) {
+            json.pop_back();
+            json += ",\"sourcePayload\":\"" +
+                    base64_encode(state.pending.source_payload.data(),
+                                  state.pending.source_payload_size) + "\"}";
+        }
+    }
+    json += "}";
+    return json;
+}
+
+inline bool parse_pending_transfer(const char* json, PendingTransfer* out) {
+    if (json == nullptr || out == nullptr) return false;
+    const char* key = strstr(json, "\"pending\":{");
+    if (key == nullptr) return false;
+    PendingTransfer parsed{};
+    auto parse_field = [&](const char* name, uint8_t* dst) -> bool {
+        const std::string pattern = std::string("\"") + name + "\":";
+        const char* pos = strstr(key, pattern.c_str());
+        if (pos == nullptr) return false;
+        char* end = nullptr;
+        const long v = strtol(pos + pattern.size(), &end, 10);
+        if (end == pos + static_cast<std::ptrdiff_t>(pattern.size())) return false;
+        *dst = static_cast<uint8_t>(v);
+        return true;
+    };
+    if (!parse_field("direction", &parsed.direction) || parsed.direction > kTransferExtensionToOriginal) {
+        return false;
+    }
+    if (!parse_field("srcBag", &parsed.src_bag)) return false;
+    if (!parse_field("srcSlot", &parsed.src_slot) || parsed.src_slot >= kSlotCount) return false;
+    if (!parse_field("dstBag", &parsed.dst_bag)) return false;
+    if (!parse_field("dstSlot", &parsed.dst_slot) || parsed.dst_slot >= kSlotCount) return false;
+    if ((parsed.direction == kTransferOriginalToExtension &&
+         (parsed.src_bag >= 6 || parsed.dst_bag >= kBagCount)) ||
+        (parsed.direction == kTransferExtensionToOriginal &&
+         (parsed.src_bag >= kBagCount || parsed.dst_bag >= 6))) {
+        return false;
+    }
+    const char* payload_key = strstr(key, "\"payload\":\"");
+    if (payload_key == nullptr) return false;
+    const char* b64 = payload_key + strlen("\"payload\":\"");
+    const char* end_quote = strchr(b64, '"');
+    if (end_quote == nullptr) return false;
+    const size_t b64_len = static_cast<size_t>(end_quote - b64);
+    if (b64_len == 0 || b64_len > 512) return false;
+    const int decoded = base64_decode(b64, b64_len, parsed.payload.data(), parsed.payload.size());
+    if (decoded < static_cast<int>(kPayloadHeaderSize) ||
+        decoded > static_cast<int>(kMaxSerializedItem)) {
+        return false;
+    }
+    parsed.payload_size = static_cast<uint16_t>(decoded);
+    const char* source_key = strstr(key, "\"sourcePayload\":\"");
+    if (source_key != nullptr) {
+        const char* source_b64 = source_key + strlen("\"sourcePayload\":\"");
+        const char* source_end = strchr(source_b64, '\"');
+        if (source_end == nullptr) return false;
+        const size_t source_len = static_cast<size_t>(source_end - source_b64);
+        if (source_len == 0 || source_len > 512) return false;
+        const int source_decoded =
+            base64_decode(source_b64, source_len, parsed.source_payload.data(),
+                          parsed.source_payload.size());
+        if (source_decoded < static_cast<int>(kPayloadHeaderSize) ||
+            source_decoded > static_cast<int>(kMaxSerializedItem)) {
+            return false;
+        }
+        parsed.source_payload_size = static_cast<uint16_t>(source_decoded);
+    }
+    parsed.valid = true;
+    *out = parsed;
+    return true;
+}
+
+inline bool parse_state_json(const char* json, State* state) {
+    if (json == nullptr || state == nullptr) return false;
+    const char* types = strstr(json, "\"types\":[");
+    if (types == nullptr) return false;
+    const char* cursor = types + strlen("\"types\":[");
+    State parsed{};
+    for (int index = 0; index < kBagCount; ++index) {
+        char* end = nullptr;
+        long type = strtol(cursor, &end, 10);
+        if (end == cursor || type < 0 || type > static_cast<long>(BagType::kLargeBackpack)) {
+            return false;
+        }
+        parsed.types[index] = static_cast<uint8_t>(type);
+        cursor = end;
+        if (index + 1 < kBagCount) {
+            if (*cursor != ',') return false;
+            ++cursor;
+        }
+    }
+    if (*cursor != ']') return false;
+    const char* mode = strstr(json, "\"mode\":\"module\"");
+    parsed.mode = mode == nullptr ? Mode::kOriginal : Mode::kModule;
+    const char* original_selected = strstr(json, "\"originalSelected\":");
+    const char* selected = strstr(json, "\"selected\":");
+    const char* inspected = strstr(json, "\"inspected\":");
+    if (original_selected == nullptr || selected == nullptr || inspected == nullptr) return false;
+    cursor = original_selected + strlen("\"originalSelected\":");
+    char* end = nullptr;
+    long original = strtol(cursor, &end, 10);
+    if (end == cursor || original < 0 || original >= 6) return false;
+    parsed.original_selected = static_cast<int>(original);
+    cursor = selected + strlen("\"selected\":");
+    {
+        char* selected_end = nullptr;
+        long value = strtol(cursor, &selected_end, 10);
+        if (selected_end == cursor || value < -1 || value > kMaxCapacity) return false;
+        parsed.selected = static_cast<int>(value);
+    }
+    cursor = inspected + strlen("\"inspected\":");
+    {
+        char* inspected_end = nullptr;
+        long value = strtol(cursor, &inspected_end, 10);
+        if (inspected_end == cursor || value < -1 || value > kMaxCapacity) return false;
+        parsed.inspected = static_cast<int>(value);
+    }
+    const char* items = strstr(json, "\"items\":[");
+    if (items == nullptr) return false;
+    cursor = items + strlen("\"items\":[");
+    for (int bag = 0; bag < kBagCount; ++bag) {
+        for (int slot = 0; slot < kSlotCount; ++slot) {
+            const char* object_start = strchr(cursor, '{');
+            if (object_start == nullptr) return false;
+            const char* object_end = strchr(object_start, '}');
+            if (object_end == nullptr) return false;
+            const char* category = strstr(object_start, "\"category\":");
+            const char* count = strstr(object_start, "\"count\":");
+            if (category == nullptr || count == nullptr || category >= object_end || count >= object_end) {
+                return false;
+            }
+            char* category_end = nullptr;
+            long category_value = strtol(category + strlen("\"category\":"), &category_end, 10);
+            char* count_end = nullptr;
+            long count_value = strtol(count + strlen("\"count\":"), &count_end, 10);
+            if (category_end == category + static_cast<std::ptrdiff_t>(strlen("\"category\":")) ||
+                count_end == count + static_cast<std::ptrdiff_t>(strlen("\"count\":")) ||
+                category_value < 0 || count_value < 0) {
+                return false;
+            }
+            Item& item = parsed.items[bag][slot];
+            item.category = static_cast<int>(category_value);
+            item.count = static_cast<int>(count_value);
+            const char* payload_key = strstr(object_start, "\"payload\":\"");
+            if (payload_key != nullptr && payload_key < object_end) {
+                const char* b64 = payload_key + strlen("\"payload\":\"");
+                const char* end_quote = strchr(b64, '"');
+                if (end_quote == nullptr) return false;
+                const size_t b64_len = static_cast<size_t>(end_quote - b64);
+                if (b64_len == 0 || b64_len > 512) return false;
+                const int decoded =
+                    base64_decode(b64, b64_len, item.payload.data(), item.payload.size());
+                if (decoded < static_cast<int>(kPayloadHeaderSize) ||
+                    decoded > static_cast<int>(kMaxSerializedItem)) {
+                    return false;
+                }
+                item.payload_size = static_cast<uint16_t>(decoded);
+            }
+            cursor = object_end + 1;
+        }
+    }
+    if (strstr(json, "\"pending\":") != nullptr &&
+        !parse_pending_transfer(json, &parsed.pending)) {
+        return false;
+    }
+    normalize(&parsed);
+    *state = parsed;
     return true;
 }
 

@@ -6,6 +6,7 @@
 #include "game_symbols.h"
 #include "game_ops_common.h"
 #include "game_ptr_hook.h"
+#include "game_ui_virtbag.h"
 
 #include <android/log.h>
 #include <atomic>
@@ -217,41 +218,53 @@ std::string data_recover_after_hive_block() {
 }
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
+    if (virtual_bag_original_item_input_blocked()) {
+        MOVE_LOG("move_merge: original item input blocked in extension view control=%p event=%llu",
+                 control, static_cast<unsigned long long>(event));
+        return 0;
+    }
     if (event == 4 && param != nullptr && fn_control_object_get_data != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
         fn_get_cumulate_count != nullptr && fn_get_bit != nullptr && fn_inven_move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
-        if (ctrl_src != nullptr) {
-            void* src_data = fn_control_object_get_data(ctrl_src);
-            void* dst_data = fn_control_object_get_data(control);
-            if (src_data != nullptr && dst_data != nullptr) {
-                void* item_a = *reinterpret_cast<void**>(src_data);
-                void* item_b = *reinterpret_cast<void**>(dst_data);
-                if (item_a != nullptr && item_b != nullptr &&
-                    !fn_ui_equip_is_apply_stuff(item_b, item_a) && !item_is_equip(item_a)) {
-                    uint16_t fa = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_a) + I_TYPE);
-                    uint16_t fb = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_b) + I_TYPE);
-                    if (fn_get_bit(fa, 15, 6) == fn_get_bit(fb, 15, 6)) {
-                        int count = fn_get_cumulate_count(item_a);
-                        int bag = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
-                        int slot = fn_ui_equip_get_item_slot_index(control);
-                        int r = fn_inven_move_item(item_a, count, bag, slot);
-                        if (!r) return 0;
-                        if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
-                        void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
-                        if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
-                            fn_touch_handle_set_cursor(panel_ctrl, nullptr);
-                        }
-                        MOVE_LOG("move_merge: merged bag=%d slot=%d count=%d", bag, slot, count);
-                        if (fn_ui_equip_inven_item_control_event_proc == nullptr) return 0;
-                        return fn_ui_equip_inven_item_control_event_proc(control, event, x2, param);
-                    }
+        void* src_data = ctrl_src != nullptr ? fn_control_object_get_data(ctrl_src) : nullptr;
+        void* dst_data = fn_control_object_get_data(control);
+        void* item_a = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
+        void* item_b = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
+        if (item_a != nullptr && item_b != nullptr &&
+            !fn_ui_equip_is_apply_stuff(item_b, item_a) && !item_is_equip(item_a)) {
+            const uint16_t flags_a =
+                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_a) + I_TYPE);
+            const uint16_t flags_b =
+                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_b) + I_TYPE);
+            if (fn_get_bit(flags_a, 15, 6) == fn_get_bit(flags_b, 15, 6)) {
+                const int bag = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+                const int dst_slot = fn_ui_equip_get_item_slot_index(control);
+                const int src_slot = ctrl_src != nullptr ? fn_ui_equip_get_item_slot_index(ctrl_src) : -1;
+                const int count = fn_get_cumulate_count(item_a);
+                const int result = fn_inven_move_item(item_a, count, bag, dst_slot);
+                if (!result) return 0;
+                if (virtual_bag_module_view_installed()) {
+                    virtual_bag_sync_projected_slot(bag, src_slot);
+                    virtual_bag_sync_projected_slot(bag, dst_slot);
                 }
+                if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+                void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+                if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
+                    fn_touch_handle_set_cursor(panel_ctrl, nullptr);
+                }
+                MOVE_LOG("move_merge: merged bag=%d src=%d dst=%d count=%d", bag, src_slot,
+                         dst_slot, count);
+                return 0;
             }
         }
     }
     if (fn_ui_equip_inven_item_control_event_proc == nullptr) return 0;
-    return fn_ui_equip_inven_item_control_event_proc(control, event, x2, param);
+    const uint64_t result = fn_ui_equip_inven_item_control_event_proc(control, event, x2, param);
+    if (virtual_bag_module_view_installed()) {
+        virtual_bag_sync_projected_bag();
+    }
+    return result;
 }
 
 bool set_move_merge_enabled(bool enabled) {

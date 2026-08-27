@@ -24,6 +24,7 @@ import java.io.File
  *   默认 false；启动期和配置变更时均下发 native GOT hook。
  * - opEnabled：OP 能力全局开关（/api/op 门禁，architecture §9.1-2）。
  *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
+ * - extensionBagEnabled：是否启用扩展背包，默认 true。
  *
  * 线程安全：配置可能被 API 请求线程/启动线程并发读写，字段用 @Volatile 保护。
  */
@@ -36,6 +37,7 @@ object ModuleConfig {
     const val DEFAULT_STACK_LIMIT_INCREASE = false
     const val DEFAULT_MOVE_MERGE_ENABLED = false
     const val DEFAULT_OP_ENABLED = false
+    const val DEFAULT_EXTENSION_BAG_ENABLED = true
 
     @Volatile
     private var loaded = false
@@ -69,6 +71,10 @@ object ModuleConfig {
     var opEnabled: Boolean = DEFAULT_OP_ENABLED
         private set
 
+    @Volatile
+    var extensionBagEnabled: Boolean = DEFAULT_EXTENSION_BAG_ENABLED
+        private set
+
     /** 加载配置（幂等）：外部 config.json 为唯一来源；不存在/损坏时用默认值并立即写入 */
     @Synchronized
     fun load(context: Context) {
@@ -92,7 +98,8 @@ object ModuleConfig {
             stackLimitIncrease = json.optBoolean("stackLimitIncrease", DEFAULT_STACK_LIMIT_INCREASE)
             moveMergeEnabled = json.optBoolean("moveMergeEnabled", DEFAULT_MOVE_MERGE_ENABLED)
             opEnabled = json.optBoolean("opEnabled", DEFAULT_OP_ENABLED)
-            if (!json.has("moveMergeEnabled") || json.has("jewelBatchMix")) {
+            extensionBagEnabled = json.optBoolean("extensionBagEnabled", DEFAULT_EXTENSION_BAG_ENABLED)
+            if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") || json.has("jewelBatchMix")) {
                 LogFile.log("updating $CONFIG_FILE with current configuration fields")
                 persist(toJson())
             }
@@ -121,6 +128,7 @@ object ModuleConfig {
         var newStack = stackLimitIncrease
         var newMoveMerge = moveMergeEnabled
         var newOp = opEnabled
+        var newExtensionBag = extensionBagEnabled
         if (json.has("listenAddress")) {
             val a = json.optString("listenAddress")
             if (a.isBlank()) return "listenAddress required"
@@ -134,18 +142,21 @@ object ModuleConfig {
         if (json.has("stackLimitIncrease")) newStack = json.optBoolean("stackLimitIncrease", newStack)
         if (json.has("moveMergeEnabled")) newMoveMerge = json.optBoolean("moveMergeEnabled", newMoveMerge)
         if (json.has("opEnabled")) newOp = json.optBoolean("opEnabled", newOp)
+        if (json.has("extensionBagEnabled")) newExtensionBag = json.optBoolean("extensionBagEnabled", newExtensionBag)
         val merged = JSONObject()
             .put("listenAddress", newAddress)
             .put("listenPort", newPort)
             .put("stackLimitIncrease", newStack)
             .put("moveMergeEnabled", newMoveMerge)
             .put("opEnabled", newOp)
+            .put("extensionBagEnabled", newExtensionBag)
         if (!persist(merged)) return "config save failed"
         listenAddress = newAddress
         listenPort = newPort
         stackLimitIncrease = newStack
         moveMergeEnabled = newMoveMerge
         opEnabled = newOp
+        extensionBagEnabled = newExtensionBag
         return null
     }
 
@@ -156,6 +167,7 @@ object ModuleConfig {
         put("stackLimitIncrease", stackLimitIncrease)
         put("moveMergeEnabled", moveMergeEnabled)
         put("opEnabled", opEnabled)
+        put("extensionBagEnabled", extensionBagEnabled)
     }
 
     /**

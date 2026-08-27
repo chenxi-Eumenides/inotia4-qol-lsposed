@@ -7,6 +7,7 @@
 #include "game_state.h"
 #include "game_world.h"
 #include "game_ops_common.h"
+#include "game_ui_virtbag.h"
 
 #include <cstdio>
 
@@ -196,6 +197,7 @@ const char* data_ui_screen() {
 
 std::string data_op_main_menu() {
     if (fn_gamestate_set_state == nullptr) return op_err("symbol not resolved");
+    virtual_bag_prepare_main_menu();
     fn_gamestate_set_state(4);
     return op_ok();
 }

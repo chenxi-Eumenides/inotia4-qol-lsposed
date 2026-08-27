@@ -270,6 +270,13 @@ static void test_virtual_bag_state() {
     CHECK(virtual_bag::set_item(&state, 2, 3, 401, 7));
     CHECK_EQ(state.items[2][3].category, 401);
     CHECK_EQ(state.items[2][3].count, 7);
+    state.items[2][4].category = 2;
+    state.items[2][4].count = 1;
+    state.items[2][4].payload_size = virtual_bag::kPayloadHeaderSize;
+    state.items[2][4].payload[0] = 0;
+    virtual_bag::normalize(&state);
+    CHECK_EQ(state.items[2][4].category, 0);
+    CHECK_EQ(state.items[2][4].count, 0);
     virtual_bag::begin_exit_module(&state);
     CHECK_EQ(state.mode, virtual_bag::Mode::kExitingModule);
     CHECK_EQ(state.selected, 2);
@@ -312,6 +319,206 @@ static void test_extension_bag_exit_rendering_state() {
     CHECK_EQ(state.original_selected, 0);
 }
 
+static void make_small_payload(virtual_bag::Item* item, uint32_t count) {
+    item->payload_size = 19;
+    item->payload[0] = static_cast<uint8_t>(item->payload_size - 1);
+    const uint32_t count_u32 = stack_codec::write_count(0x00012345u, count);
+    for (size_t i = 0; i < 4; ++i) {
+        item->payload[virtual_bag::kPayloadCountOffset + i] =
+            static_cast<uint8_t>((count_u32 >> (8 * i)) & 0xFF);
+    }
+}
+
+static void test_virtual_bag_base64() {
+    uint8_t data[255];
+    for (size_t i = 0; i < sizeof(data); ++i) data[i] = static_cast<uint8_t>(i * 7 + 1);
+    for (size_t len : {1u, 2u, 3u, 4u, 5u, 19u, 255u}) {
+        const std::string enc = virtual_bag::base64_encode(data, len);
+        uint8_t dec[256] = {0};
+        const int n = virtual_bag::base64_decode(enc.c_str(), enc.size(), dec, sizeof(dec));
+        CHECK_EQ(n, static_cast<int>(len));
+        CHECK(std::memcmp(dec, data, len) == 0);
+    }
+    uint8_t out[256] = {0};
+    CHECK_EQ(virtual_bag::base64_decode("!!!!", 4, out, sizeof(out)), 0);
+    CHECK_EQ(virtual_bag::base64_decode("A", 1, out, sizeof(out)), 0);
+    CHECK_EQ(virtual_bag::base64_decode("AA=A", 4, out, sizeof(out)), 0);
+    uint8_t small[2] = {0};
+    CHECK_EQ(virtual_bag::base64_decode("AAAA", 4, small, 2), 0);
+    CHECK_EQ(virtual_bag::base64_decode("", 0, out, sizeof(out)), 0);
+}
+
+static void test_virtual_bag_payload_helpers() {
+    virtual_bag::Item item{};
+    item.category = 401;
+    item.count = 3;
+    make_small_payload(&item, 3);
+    CHECK(virtual_bag::valid_payload(item));
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(virtual_bag::payload_count(item))), 3);
+    virtual_bag::patch_payload_count(&item, 7);
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(virtual_bag::payload_count(item))), 7);
+    CHECK_EQ(virtual_bag::payload_count(item) & ~stack_codec::kCountMask, 0x00012345u);
+    virtual_bag::patch_payload_count(&item, 999);
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(virtual_bag::payload_count(item))), 999);
+    const uint32_t hash = virtual_bag::payload_hash(item);
+    item.count = 1;
+    CHECK(virtual_bag::payload_hash(item) != hash);
+}
+
+static void test_virtual_bag_merge_count() {
+    CHECK_EQ(virtual_bag::merge_count(3, 5, false), 8u);
+    CHECK_EQ(virtual_bag::merge_count(95, 10, false), 99u);
+    CHECK_EQ(virtual_bag::merge_count(95, 10, true), 105u);
+    CHECK_EQ(virtual_bag::merge_count(990, 20, true), 999u);
+    CHECK_EQ(virtual_bag::merge_count(0, 0, false), 0u);
+}
+
+static void test_virtual_bag_mergeable_items() {
+    virtual_bag::Item existing{};
+    virtual_bag::Item source{};
+    existing.category = 401;
+    source.category = 401;
+    existing.count = 3;
+    source.count = 5;
+    make_small_payload(&existing, existing.count);
+    make_small_payload(&source, source.count);
+    CHECK(virtual_bag::mergeable_items(existing, source));
+    source.category = 402;
+    CHECK(!virtual_bag::mergeable_items(existing, source));
+    source.category = existing.category;
+    source.payload[7] ^= 1;
+    CHECK(!virtual_bag::mergeable_items(existing, source));
+    source = virtual_bag::Item{existing.category, source.count};
+    virtual_bag::Item legacy_existing{existing.category, existing.count};
+    CHECK(virtual_bag::mergeable_items(legacy_existing, source));
+}
+
+static void test_virtual_bag_json_roundtrip() {
+    virtual_bag::State state{};
+    state.types = {4, 4, 4, 4, 4};
+    virtual_bag::normalize(&state);
+    virtual_bag::Item payload_item{};
+    payload_item.category = 401;
+    payload_item.count = 7;
+    make_small_payload(&payload_item, 7);
+    state.items[1][2] = payload_item;
+    virtual_bag::set_item(&state, 2, 3, 55, 9);
+    state.pending.valid = true;
+    state.pending.direction = virtual_bag::kTransferOriginalToExtension;
+    state.pending.src_bag = 0;
+    state.pending.src_slot = 4;
+    state.pending.dst_bag = 1;
+    state.pending.dst_slot = 2;
+    state.pending.payload_size = payload_item.payload_size;
+    state.pending.payload = payload_item.payload;
+    state.pending.source_payload_size = payload_item.payload_size;
+    state.pending.source_payload = payload_item.payload;
+
+    const std::string json = virtual_bag::state_json(state);
+    virtual_bag::State parsed{};
+    CHECK(virtual_bag::parse_state_json(json.c_str(), &parsed));
+    CHECK_EQ(parsed.items[1][2].category, 401);
+    CHECK_EQ(parsed.items[1][2].count, 7);
+    CHECK_EQ(static_cast<int>(parsed.items[1][2].payload_size), 19);
+    CHECK(std::memcmp(parsed.items[1][2].payload.data(), payload_item.payload.data(), 19) == 0);
+    CHECK_EQ(parsed.items[2][3].category, 55);
+    CHECK_EQ(parsed.items[2][3].count, 9);
+    CHECK_EQ(static_cast<int>(parsed.items[2][3].payload_size), 0);
+    CHECK(parsed.pending.valid);
+    CHECK_EQ(static_cast<int>(parsed.pending.direction),
+             static_cast<int>(virtual_bag::kTransferOriginalToExtension));
+    CHECK_EQ(static_cast<int>(parsed.pending.dst_slot), 2);
+    CHECK_EQ(static_cast<int>(parsed.pending.payload_size), 19);
+    CHECK(std::memcmp(parsed.pending.payload.data(), payload_item.payload.data(), 19) == 0);
+    CHECK_EQ(static_cast<int>(parsed.pending.source_payload_size), 19);
+    CHECK(std::memcmp(parsed.pending.source_payload.data(), payload_item.payload.data(), 19) == 0);
+
+    const std::string encoded = virtual_bag::base64_encode(
+        payload_item.payload.data(), payload_item.payload_size);
+    const std::string ordered = "\"category\":401,\"count\":7,\"payload\":\"" + encoded + "\"";
+    const std::string reordered = "\"payload\":\"" + encoded + "\",\"count\":7,\"category\":401";
+    std::string hash_order_json = json;
+    const size_t ordered_pos = hash_order_json.find(ordered);
+    CHECK(ordered_pos != std::string::npos);
+    hash_order_json.replace(ordered_pos, ordered.size(), reordered);
+    virtual_bag::State hash_order_parsed{};
+    CHECK(virtual_bag::parse_state_json(hash_order_json.c_str(), &hash_order_parsed));
+    CHECK_EQ(static_cast<int>(hash_order_parsed.items[1][2].payload_size), 19);
+    CHECK(std::memcmp(hash_order_parsed.items[1][2].payload.data(), payload_item.payload.data(), 19) == 0);
+}
+
+static void test_virtual_bag_legacy_json() {
+    virtual_bag::State state{};
+    state.types = {4, 4, 4, 4, 4};
+    virtual_bag::normalize(&state);
+    virtual_bag::set_item(&state, 0, 0, 401, 7);
+    virtual_bag::set_item(&state, 3, 1, 55, 2);
+    const std::string json = virtual_bag::state_json(state);
+    virtual_bag::State parsed{};
+    CHECK(virtual_bag::parse_state_json(json.c_str(), &parsed));
+    CHECK_EQ(parsed.items[0][0].category, 401);
+    CHECK_EQ(parsed.items[0][0].count, 7);
+    CHECK_EQ(static_cast<int>(parsed.items[0][0].payload_size), 0);
+    CHECK_EQ(parsed.items[3][1].category, 55);
+    CHECK(!parsed.pending.valid);
+}
+
+static void test_virtual_bag_normalize_payload() {
+    virtual_bag::State state{};
+    virtual_bag::normalize(&state);
+    state.items[0][0].category = 401;
+    state.items[0][0].count = 1;
+    state.items[0][0].payload_size = 5;
+    state.items[0][0].payload[0] = 4;
+    virtual_bag::normalize(&state);
+    CHECK_EQ(static_cast<int>(state.items[0][0].payload_size), 0);
+    CHECK_EQ(state.items[0][0].category, 0);
+    CHECK_EQ(state.items[0][0].count, 0);
+}
+
+static void test_virtual_bag_recovery() {
+    virtual_bag::State state{};
+    virtual_bag::normalize(&state);
+    CHECK_EQ(virtual_bag::recovery_action(state, state.pending),
+             virtual_bag::RecoveryAction::kNone);
+
+    virtual_bag::PendingTransfer p{};
+    p.valid = true;
+    p.direction = virtual_bag::kTransferOriginalToExtension;
+    p.src_bag = 0;
+    p.src_slot = 3;
+    p.dst_bag = 1;
+    p.dst_slot = 5;
+    virtual_bag::Item payload_item{};
+    payload_item.category = 401;
+    payload_item.count = 4;
+    make_small_payload(&payload_item, 4);
+    p.payload_size = payload_item.payload_size;
+    p.payload = payload_item.payload;
+
+    state.items[1][5] = payload_item;
+    CHECK_EQ(virtual_bag::recovery_action(state, p), virtual_bag::RecoveryAction::kComplete);
+    state.items[1][5] = {};
+    CHECK_EQ(virtual_bag::recovery_action(state, p), virtual_bag::RecoveryAction::kRollback);
+
+    virtual_bag::PendingTransfer p2{};
+    p2.valid = true;
+    p2.direction = virtual_bag::kTransferExtensionToOriginal;
+    p2.src_bag = 1;
+    p2.src_slot = 5;
+    p2.dst_bag = 0;
+    p2.dst_slot = 0;
+    p2.payload_size = payload_item.payload_size;
+    p2.payload = payload_item.payload;
+    state.items[1][5] = payload_item;
+    CHECK_EQ(virtual_bag::recovery_action(state, p2), virtual_bag::RecoveryAction::kRollback);
+    state.items[1][5] = {};
+    CHECK_EQ(virtual_bag::recovery_action(state, p2), virtual_bag::RecoveryAction::kComplete);
+
+    p2.dst_bag = 6;
+    CHECK_EQ(virtual_bag::recovery_action(state, p2), virtual_bag::RecoveryAction::kRollback);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -322,6 +529,14 @@ int main() {
     test_stack_codec();
     test_virtual_bag_state();
     test_extension_bag_exit_rendering_state();
+    test_virtual_bag_base64();
+    test_virtual_bag_payload_helpers();
+    test_virtual_bag_merge_count();
+    test_virtual_bag_mergeable_items();
+    test_virtual_bag_json_roundtrip();
+    test_virtual_bag_legacy_json();
+    test_virtual_bag_normalize_payload();
+    test_virtual_bag_recovery();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

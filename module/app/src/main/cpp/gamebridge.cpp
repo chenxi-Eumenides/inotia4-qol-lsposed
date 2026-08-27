@@ -64,7 +64,6 @@ Java_com_inotia4_export_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
         settings_ui_start_auto_inject();
-        virtual_bag_ui_start_auto_inject();
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -551,6 +550,11 @@ Java_com_inotia4_export_NativeBridge_nativeSetStackLimitEnabled(JNIEnv*, jclass,
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_export_NativeBridge_nativeSetMoveMergeEnabled(JNIEnv*, jclass, jboolean enabled) {
     return set_move_merge_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_export_NativeBridge_nativeSetExtensionBagEnabled(JNIEnv*, jclass, jboolean enabled) {
+    return set_virtual_bag_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 // ---- 模块设置 UI 端点（ui-settings v0.6.9）----

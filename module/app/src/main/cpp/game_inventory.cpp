@@ -7,6 +7,7 @@
 #include "game_state.h"
 #include "game_ops_common.h"
 #include "game_patch.h"
+#include "game_ui_virtbag.h"
 #include "stack_codec.h"
 
 #include <android/log.h>
@@ -94,18 +95,21 @@ std::string data_op_remove_item(int32_t category) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_remove_item == nullptr || fn_get_bit == nullptr) return op_err("symbol not resolved");
     // 按类别删第一个匹配物品（INVEN_RemoveItem 按 item 指针删，需先按类别定位）
-    struct Ctx { int32_t category; int r; bool found; } ctx{category, 0, false};
-    for_each_bag_slot([](void* item, int, int, void* c) -> bool {
+    struct Ctx { int32_t category; int r; int bag; int slot; bool found; } ctx{category, 0, -1, -1, false};
+    for_each_bag_slot([](void* item, int bag, int slot, void* c) -> bool {
         Ctx* p = static_cast<Ctx*>(c);
         uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
         if (fn_get_bit(flags, 15, 6) == p->category) {
             p->r = fn_remove_item(item);
+            p->bag = bag;
+            p->slot = slot;
             p->found = true;
             return true;
         }
         return false;
     }, &ctx);
     if (!ctx.found) return op_err("item not found");
+    if (ctx.r) virtual_bag_sync_projected_slot(ctx.bag, ctx.slot);
     return ctx.r ? op_ok() : op_err("item not found");
 }
 
@@ -125,6 +129,7 @@ std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     if (r != 0) return r == 2 ? op_err("no socket") : op_err("not jewel");
     // PutJewel 不消耗宝石物品本身，镶嵌成功后手动删除背包中的宝石（防刷宝石）
     fn_remove_item_direct(bag, slot);
+    virtual_bag_sync_projected_slot(bag, slot);
     return op_ok();
 }
 std::string data_op_enchant(int role, int bag, int slot, int equip_slot) {
@@ -146,6 +151,7 @@ std::string data_op_enchant(int role, int bag, int slot, int equip_slot) {
     int r = fn_enchant_item(equip, scroll_cat);
     if (r != 0) return r == 7 ? op_err("not enchantable") : op_err("enchant failed");
     fn_consume_item(scroll);
+    virtual_bag_sync_projected_slot(bag, slot);
     return op_ok();
 }
 std::string data_op_equip(int role, int bag, int slot) {
@@ -170,6 +176,7 @@ std::string data_op_equip(int role, int bag, int slot) {
         }
     }
     int r = fn_equip_item(ch, item);
+    if (r) virtual_bag_sync_projected_bag();
     return r ? op_ok() : op_err("equip failed");
 }
 std::string data_op_unequip(int role, int32_t equip_slot) {
@@ -179,6 +186,7 @@ std::string data_op_unequip(int role, int32_t equip_slot) {
     if (fn_unequip == nullptr) return op_err("symbol not resolved");
     if (equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) return op_err("bad slot");
     int r = fn_unequip(ch, equip_slot);
+    if (r) virtual_bag_sync_projected_bag();
     return r ? op_ok() : op_err("unequip failed");
 }
 std::string data_op_use_item(int bag, int slot) {
@@ -224,6 +232,7 @@ std::string data_op_use_item(int bag, int slot) {
         // 无 pending 时掷骰即消耗（原版 ButtonRollExe 语义），置 flag 待确认
         if (fn_consume_item != nullptr) fn_consume_item(item);
         if (flag != nullptr) *flag |= 1u;
+        virtual_bag_sync_projected_slot(bag, slot);
         std::string s = "{\"ok\":true,\"base\":[";
         for (int i = 0; i < 5; ++i) {
             if (i > 0) s += ",";
@@ -252,6 +261,7 @@ std::string data_op_use_item(int bag, int slot) {
         int ok = fn_release_sealed(category);
         if (ok) {
             if (fn_consume_item != nullptr) fn_consume_item(item);
+            virtual_bag_sync_projected_slot(bag, slot);
             return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
         }
         return op_err("release sealed failed");
@@ -266,6 +276,7 @@ std::string data_op_use_item(int bag, int slot) {
         int ok = fn_open_item_box(category);
         if (ok) {
             if (fn_consume_item != nullptr) fn_consume_item(item);
+            virtual_bag_sync_projected_slot(bag, slot);
             return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
         }
         return op_err("open box failed");
@@ -278,6 +289,7 @@ std::string data_op_use_item(int bag, int slot) {
     int ok = fn_char_use_item_ex(leader, item, 0);
     // 用药成功且药水教学激活（obj170==6）→ 复现官方 0xec340 教学完成链（CHAR_ProcessShortcut 用药后检查）
     if (ok && tutorial_state() == 6) tutorial_cancel();
+    if (ok) virtual_bag_sync_projected_slot(bag, slot);
     return ok ? op_ok() : op_err("on cooldown");
 }
 std::string data_op_dice_accept() {
@@ -326,6 +338,7 @@ std::string data_op_discard_item(int bag, int slot) {
     if (inventory_item_at(bag, slot) == nullptr) return op_err("slot empty");
     fn_remove_item_direct(bag, slot);
     if (inventory_item_at(bag, slot) != nullptr) return op_err("discard failed");
+    virtual_bag_sync_projected_slot(bag, slot);
     return op_ok();
 }
 std::string data_op_sell_item(int bag, int slot) {
@@ -340,6 +353,7 @@ std::string data_op_sell_item(int bag, int slot) {
     int64_t price = base_price / 5;
     fn_remove_item_direct(bag, slot);
     if (inventory_item_at(bag, slot) != nullptr) return op_err("sell failed");
+    virtual_bag_sync_projected_slot(bag, slot);
     fn_add_money(price);
     return "{\"ok\":true,\"price\":" + std::to_string(price) + "}";
 }
@@ -353,6 +367,10 @@ std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_s
     if (bag == to_bag && slot == to_slot) return op_err("same slot");
     int r = fn_inven_move_item(item, count, to_bag, to_slot);
     // 返回 1=成功（mov w1,#0x1），0/失败返回空——按目标槽是否有物品判定
+    if (r) {
+        virtual_bag_sync_projected_slot(bag, slot);
+        virtual_bag_sync_projected_slot(to_bag, to_slot);
+    }
     return r ? op_ok() : op_err("move failed");
 }
 

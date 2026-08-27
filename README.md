@@ -81,9 +81,10 @@ projects/android-game-api-export/
 | **docs/environment.md** | 开发环境与工具链（依赖清单/关键命令/踩坑记录） | 第二级 | 环境权威 |
 | docs/game-systems.md | 游戏系统总览（19 系统/静态表/动态数据清单） | 第二级 | 参考 |
 | **docs/backlog.md** | 开发待办总清单（唯一待办来源） | 第二级 | 待办权威 |
+| **docs/extension-bag-control-plane.md** | 扩展背包目标、阶段、验收、证据和决策 | 第二级 | **扩展背包控制面唯一权威** |
 | docs/refactor-plan.md | 代码重构实施方案（四层架构：P0-P4 分阶段） | 第二级 | 方案 |
 
-> 职责划分原则：**每个文档只有一个主题，互不重复**。结构/规范以 architecture.md 为唯一权威，API 以 api-reference.md 为准，其余均为补充细节。
+> 职责划分原则：**每个文档只有一个主题，互不重复**；扩展背包控制面是跨域整合例外，只维护该功能的范围、阶段、验收、证据和决策，不取代各领域权威文档。结构/规范以 architecture.md 为唯一权威，API 以 api-reference.md 为准，其余均为补充细节。
 
 ## 目录规范与环境隔离（强制）
 
