@@ -62,7 +62,7 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - `G_POPUP_STACK_VMA = 0x728fd8`：`g_arrPopupStack`（32B）。栈数据区：`+8` = 计数（≤27），`+0x18` = 栈数组指针，栈元素 `0x40B/条`，栈顶元素 `+0x10` = enter 函数指针
 - `G_POPUP_STATE_LIST_GOT_VMA = 0x2f3000+0x4f0`：`g_sPopupStateList`（27 条 × 64B：`id@+0, enter@+0x10, process@+0x18, f3@+0x28, f4@+0x30, event@+0x38`；`POPUPSTATE_Push` 以 `id×0x40` 索引）
 - 打开：`fn_ui_set_popup_process_info(1, state_id)`（`UI_SetPopupProcessInfo` @0xaecc8）；关闭：`(3, 0)`；另有 `(4, 0)`（recover 语义，见 game_patch.cpp）
-- 模块已实现：`data_popup_top_vma()`（栈顶 enter VMA → 面板识别）、`data_ui_screen()`（v0.5.42 统一 screen 枚举：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）
+- 模块已实现：`data_popup_top_vma()`（栈顶 enter VMA → 面板识别）、`data_ui_screen()`（v0.5.42 统一 screen 枚举；UIPopupMsg 独立于 popup 栈，主菜单弹窗也识别为 `dialog_popup`：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）
 
 ## 3. ControlObject 控件系统（元素的定义）
 

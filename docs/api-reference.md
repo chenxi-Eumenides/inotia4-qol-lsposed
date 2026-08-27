@@ -1448,7 +1448,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：非 world 才可调（world 中→`already in game`）；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
+**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，需先处理弹窗；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
 #### 创建新存档
 

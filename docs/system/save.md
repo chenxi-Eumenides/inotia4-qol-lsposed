@@ -174,12 +174,13 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
    `MAP_AddNPCItemLocation → MAP_LoadLayer → MAP_Load → SAVE_Load`。
 
 3. 随后确认真正的进档链会再次执行 `SAVE_Load → SAVE_LoadCharacterAll`，因此 patch 改为覆盖：
-   - `SAVE_LoadSaveSlot+0x1b4/+0x1b8/+0x1bc`：临时把第一个槽挂接为角色 0，并跳过空队友循环；
+   - `SAVE_LoadSaveSlot+0x1b8/+0x1bc/+0x1c0`：临时把第一个槽挂接为角色 0，并跳过空队友循环；
    - `SAVE_LoadCharacterAll+0x6c`：只将第一个角色索引视为 0；
    - `SAVE_LoadCharacterAll+0x84`：处理第一个角色后跳过两个已知为空的队友槽。
 - 该 patch 只改进程内指令，所有指令均先校验原始 opcode，并在实验结束后回退；没有把 patch 作为最终交付逻辑保留。
-- 正确 patch 版本在启动弹窗点击 `(420,280)` 后验证成功：
-  `screen=world`，主角“凯恩”可读取，等级 1、HP 1672/1672、MP 200/200，`party_count=1`（其余队伍槽为空），进程保持健康。
+ - 正确 patch 版本在启动弹窗点击 `(420,280)` 后验证成功：
+   `screen=world`，主角“凯恩”可读取，等级 1、HP 1672/1672、MP 200/200，`party_count=1`（其余队伍槽为空），进程保持健康。
+ - 可复用脚本已登记为 `scripts/frida/save0-repair-patch.js`；执行前必须按当前 `libgame.so` 反汇编核对五个 opcode，成功保存后重启进程移除 patch。
 
 ### 11.3 使用游戏自身保存完成文件修复
 
@@ -197,3 +198,11 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 重启游戏后按真机2既定前置点击启动弹窗 `(420,280)`，再调用 `enter_slot {"slot":0}`。
 - 无 patch 的最终验收仍为内部 `preflight=valid`，`screen_after=world`，`/api/health={"ok":true}`；主角数据可读。
 - 结论：save0 已通过“运行时恢复 → 游戏原生保存 → 回主菜单预检 → 移除 patch 后重启读档”闭环修复。原始备份必须保留，后续若继续做地图、装备或技能完整性研究，应以修复后的 save0 和原始备份对照，禁止覆盖原始备份。
+
+## 12. 2026-08-27 再次修复与查询副作用修复
+
+- save0 再次出现无主角状态后，按 §11.2 的五条加载 patch，并额外在目标槽加载完成后将 `player_indices[0]` 恢复为 `0`；否则内存中虽可进入，原生保存仍会把三个角色索引写回 `-1,-1,-1`。
+- patch 下进入 save0 后原生保存返回 `ok=true`、`map_id=30`、`leader_slot=0`、`party_count=1`。
+- 移除 patch 并重启，在同意页关闭后无 patch 进入 save0；最终 `/api/ui` 为 `screen=world`，`/api/system/info` 显示 save0 `hero_level=1`、`hero_index=0`，`/api/health` 为 `ok=true`。
+- 修复 `data_save_slots_json()`：仅主菜单 `state=4` 调用 `SAVE_CreateSaveSlot()` 刷新槽区；world/启动过渡阶段只读槽结构，避免查询 `/api/system/info` 覆盖角色运行时全局。
+- 启动确认弹窗的 native `UIPopupMsg` 现在优先于状态机参与 `screen` 判定；`enter_slot` 检测到活动弹窗返回 `ui occupied: dialog_popup`。Android `AgreementUIActivity` 属于 Java 同意页，不由 native `UIPopupMsg` 表示。

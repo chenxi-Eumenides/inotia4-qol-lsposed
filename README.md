@@ -95,7 +95,7 @@ projects/android-game-api-export/
 1. **工具输出（必须项目内）**：凡工具会产出文件——解码产物（apktool）、反编译输出（jadx）、构建产物（Gradle/Android 构建）、生成的 APK、解析出的 JSON、日志与截图——输出路径必须落在项目文件夹内（`apk/decoded/`、`output/`、`apk/static-data/`、`.tmp/` 等），禁止散落到系统目录或项目外 `/tmp`
 2. **Python**：项目依赖一律用项目内 `.venv/`（`uv run`），禁止向系统 Python 安装项目依赖；系统 pacman 的 python-frida 不用于本项目
 3. **构建与交付**：Gradle 中间产物在 `module/**/build/`，最终 APK 复制到 `output/` 后验收交付；如需更干净的构建隔离，可用 `GRADLE_USER_HOME=$PWD/.gradle`（可选强化，非强制）
-4. **临时文件**：统一放 `.tmp/`，可随时清空。**可复用的开发期探针脚本（frida/导航/逆向）及时入库 `scripts/analyze/`**；探索截图/反汇编等中间产物归档 `archive/`；一次性调试产物留在 `.tmp/` 随用随清
+4. **临时文件**：统一放 `.tmp/`，可随时清空。可复用的开发期探针脚本（frida/导航/逆向）入库 `scripts/analyze/`；专用于存档修复的可复用 Frida patch 入库 `scripts/frida/`；探索截图/反汇编等中间产物归档 `archive/`；一次性调试产物留在 `.tmp/` 随用随清
 5. **只读环境依赖**：Android SDK（`/opt/android-sdk`）属运行环境，仅引用，项目文件不写入其中
 6. **版本递增**: 只有在一个或多个功能完成后，才能更新版本号，每次只更新0.0.1。只有用户明确，才升小版本号0.1.0。
 7. **版本提交（强制）**：每次递增版本号并成功构建出一个新版本 APK 后，必须将代码变更提交到 git；提交信息注明版本号与变更摘要（如 `feat(v0.2.21): 新增 xxx`）。新版本只有代码已提交后才算完成
