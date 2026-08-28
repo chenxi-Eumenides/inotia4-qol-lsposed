@@ -1,5 +1,6 @@
 package com.inotia4.export.service
 
+import com.inotia4.export.AgreementPopup
 import com.inotia4.export.LogFile
 import com.inotia4.export.NativeBridge
 import com.inotia4.export.UiActivityTracker
@@ -107,7 +108,7 @@ class ActionApiServiceImpl : ActionApiService {
             if (activityCheck.failed) {
                 JsonUtil.err("ui state unavailable")
             } else if (activityCheck.blockingActivityName != null) {
-                JsonUtil.err("ui occupied: dialog_popup")
+                JsonUtil.err("ui occupied: agreement")
             } else {
                 attachPlayer(afterNativeSuccess(NativeBridge.nativeOpEnterSlot(slot)) { ModuleSaveStore.ensureSlot(slot) })
             }
@@ -115,7 +116,14 @@ class ActionApiServiceImpl : ActionApiService {
 
     override fun createSlot(slot: Int, classIdx: Int): String =
         LogFile.op("POST /api/system/create_slot", "slot=$slot,classIdx=$classIdx") {
-            attachPlayer(afterNativeSuccess(NativeBridge.nativeOpCreateSlot(slot, classIdx)) { ModuleSaveStore.resetSlot(slot) })
+            val activityCheck = UiActivityTracker.check()
+            if (activityCheck.failed) {
+                JsonUtil.err("ui state unavailable")
+            } else if (activityCheck.blockingActivityName != null) {
+                JsonUtil.err("ui occupied: agreement")
+            } else {
+                attachPlayer(afterNativeSuccess(NativeBridge.nativeOpCreateSlot(slot, classIdx)) { ModuleSaveStore.resetSlot(slot) })
+            }
         }
 
     override fun panelClose(): String =
@@ -128,7 +136,25 @@ class ActionApiServiceImpl : ActionApiService {
         LogFile.op("POST /api/ui/start_interact", "") { NativeBridge.nativeOpNpcInteract() }
 
     override fun dialogSelect(action: String, index: Int): String =
-        LogFile.op("POST /api/ui/dialog/select", "action=$action,index=$index") { NativeBridge.nativeOpDialogSelect(action, index) }
+        LogFile.op("POST /api/ui/dialog/select", "action=$action,index=$index") {
+            val activityCheck = UiActivityTracker.check()
+            if (activityCheck.blockingActivityName != null) {
+                // agreement 域（Java 同意页，仅主菜单）：select 不 fail-closed——检测失败时落回
+                // native（其自带 in_world 守卫），避免 Java 反射故障拖垮 world 内全部 select。
+                if (action == "ok") {
+                    val activity = UiActivityTracker.agreementActivity()
+                    if (activity == null || !AgreementPopup.dismiss(activity)) {
+                        JsonUtil.err("agreement window unavailable")
+                    } else {
+                        JSONObject().put("ok", true).put("result", "tap_dispatched").toString()
+                    }
+                } else {
+                    JsonUtil.err("no such option in agreement")
+                }
+            } else {
+                NativeBridge.nativeOpDialogSelect(action, index)
+            }
+        }
 
     override fun shopBuy(slot: Int): String =
         LogFile.op("POST /api/item/shop/buy_item", "slot=$slot") { attachInventory(NativeBridge.nativeOpShopBuy(slot)) }

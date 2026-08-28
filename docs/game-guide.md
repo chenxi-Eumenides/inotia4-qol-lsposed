@@ -291,6 +291,9 @@ curl http://<手机IP>:8088/api/ui/
 # 剧情对话（screen=dialog_story）→ 跳过
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"skip"}'
 
+# 启动同意页（screen=agreement）→ 同意关闭（异步生效，轮询 screen 直到 main_menu）
+curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"ok"}'
+
 # 有阻塞弹窗（screen=dialog_popup）→ 查看内容并选择
 curl http://<手机IP>:8088/api/ui/dialog
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"ok"}'
@@ -465,7 +468,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `main_menu_` | `main_menu_save_slot` / `main_menu_character_select` / `main_menu_daily_reward` / `main_menu_options` / `main_menu_settings` / `main_menu` | 主菜单面板 |
 | `dialog_` | `dialog_popup`（弹窗） / `dialog_story`（剧情） / `dialog_wipeout`（死亡） / `dialog_quest`（任务完成） / `dialog_npc`（NPC 对话） / `dialog_choice`（选择框） / `dialog_input_count`（数量输入） | **对话框类占据** |
 | `panel_` | `panel_character_info` / `panel_inventory` / `panel_mercenary` / `panel_craft` / `panel_npc_rest` / `panel_npc_revive` / `panel_options` / `panel_quests` / `panel_save_slot` / `panel_character_select` / `panel_shortcut` / `panel_skills` / `panel_shop` / `panel_settings` / `panel_world_map` / `panel_in_app` / `panel_daily_reward` / `panel_ui_panel` | **面板类占据** |
-| 其他 | `world`（自由操作） / `loading`（加载） / `tutorial_pause`（药水教学暂停） | 特殊状态 |
+| 其他 | `world`（自由操作） / `loading`（加载） / `tutorial_pause`（药水教学暂停） / `agreement`（Java 层同意页，仅主菜单前，`dialog/select {"action":"ok"}` 关闭） | 特殊状态 |
 
 **判定规则**（v0.5.42+）：
 - `dialog_` 前缀 = 对话框类占据（`/api/ui/dialog` 的 `active=true` 即由此判断）
@@ -550,6 +553,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 **⚠️ enter_slot 注意事项**：
 - 只能在非 world 状态调用（world 中 → `already in game`）
+- 启动同意页（screen=`agreement`）→ `ui occupied: agreement`；先 `POST /api/ui/dialog/select {"action":"ok"}` 关闭后再进档；原生弹窗（screen=`dialog_popup`）→ `ui occupied: dialog_popup`
 - 进入前会在 `enter_slot` 内执行只读完整性检查；缺失、损坏或不兼容存档返回结构化错误，不调用原版进档路径；当前没有独立预检 API。
 
 #### 事件流

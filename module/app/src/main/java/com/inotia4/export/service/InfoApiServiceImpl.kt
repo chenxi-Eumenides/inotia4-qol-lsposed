@@ -378,10 +378,13 @@ class InfoApiServiceImpl : InfoApiService {
         val activityCheck = UiActivityTracker.check()
         if (activityCheck.blockingActivityName != null) {
             return JSONObject()
-                .put("type", "popup")
+                .put("type", "agreement")
                 .put("active", true)
                 .put("activity", activityCheck.blockingActivityName)
-                .put("options", JSONArray())
+                .put(
+                    "options",
+                    JSONArray().put(JSONObject().put("id", "ok").put("label", "同意")),
+                )
                 .toString()
         }
         val json = NativeBridge.nativeDialogContent()
@@ -498,14 +501,17 @@ class InfoApiServiceImpl : InfoApiService {
         val blockingActivity = activityCheck.blockingActivityName ?: return json
         return try {
             val root = JSONObject(json)
-            root.put("screen", "dialog_popup")
+            root.put("screen", "agreement")
             root.put(
                 "dialog",
                 JSONObject()
-                    .put("type", "popup")
+                    .put("type", "agreement")
                     .put("active", true)
                     .put("activity", blockingActivity)
-                    .put("options", JSONArray()),
+                    .put(
+                        "options",
+                        JSONArray().put(JSONObject().put("id", "ok").put("label", "同意")),
+                    ),
             )
             root.toString()
         } catch (e: Exception) {

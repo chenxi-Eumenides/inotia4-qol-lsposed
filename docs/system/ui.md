@@ -63,6 +63,7 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - `G_POPUP_STATE_LIST_GOT_VMA = 0x2f3000+0x4f0`：`g_sPopupStateList`（27 条 × 64B：`id@+0, enter@+0x10, process@+0x18, f3@+0x28, f4@+0x30, event@+0x38`；`POPUPSTATE_Push` 以 `id×0x40` 索引）
 - 打开：`fn_ui_set_popup_process_info(1, state_id)`（`UI_SetPopupProcessInfo` @0xaecc8）；关闭：`(3, 0)`；另有 `(4, 0)`（recover 语义，见 game_patch.cpp）
 - 模块已实现：`data_popup_top_vma()`（栈顶 enter VMA → 面板识别）、`data_ui_screen()`（v0.5.42 统一 screen 枚举；UIPopupMsg 独立于 popup 栈，主菜单弹窗也识别为 `dialog_popup`：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）
+- Java 层例外：Android 同意页 `AgreementUIActivity` 不经 libgame.so，native 枚举不感知；由 Kotlin 层（`UiActivityTracker` + `InfoApiServiceImpl.gamestateJson()`）覆盖为独立 `screen=agreement`，与 native `dialog_popup` 是两个域（in_world 守卫分界：native 对话仅 world 内，同意页仅主菜单前）
 
 ## 3. ControlObject 控件系统（元素的定义）
 
@@ -125,6 +126,7 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 
 | 类型 | 判定 | 机制 |
 |---|---|---|
+| `agreement`（Java 层，优先于全部 native 检测） | 前台 Activity = `AgreementUIActivity`（`UiActivityTracker` 反射） | 同意页：options `[ok 同意]`；select ok 在窗口重放登记触摸 `(420,280)` 关闭（`AgreementPopup`） |
 | `dialog_popup` | `UIPopupMsg_bOn`（G_POPUP_ON @0x3070e8） | 弹窗：`UIPopupMsg_pText`（文本指针）+ `fpOK`/`fpCancel`（回调指针，非空=有按钮）；`UIPopupMsg_i32Type`/`i32DisplayType` |
 | `dialog_story` | `data_story_active()` | 剧情 AVG（EVTSYSTEM 驱动），`Event_ButtonOKExe`/`Event_ButtonSkipExe` 推进/跳过 |
 | `dialog_npc` | `UICHOICE_nItemCount`/`NPCTASKLIST_nCount` | NPC 对话：`UICHOICE_pItemText`（6×8B 选项文本指针）+ `NPCTASKLIST` 槽数组（32×16B：+0 type/+2 id/+8 文本指针）；`UINpc_InitNPC` 建 NPCBOX+任务列表 |

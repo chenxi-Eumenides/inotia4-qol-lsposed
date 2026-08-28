@@ -212,7 +212,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| `screen` | 当前界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 同值）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）。Android 同意页 `AgreementUIActivity` 也映射为 `dialog_popup`。 |
+| `screen` | 当前界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 同值）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）/ `"agreement"`（Android Java 层同意页 `AgreementUIActivity`，独立于 native dialog_*/panel_*；仅主菜单前触发，`POST /api/ui/dialog/select` `{"action":"ok"}` 关闭）。 |
 | `story` | 仅 screen=dialog_story：`active`/`speaker`/`text`/`index`/`count` |
 | `dialog` | 仅 UI 被占据时存在：`<DialogContent 模型>`（type/title/text/options）。注意：type 残留时 `displayed` 字段为 false（数据残留，非实际 UI），以 `screen` 为准 |
 
@@ -254,7 +254,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| `type` | 弹窗/对话种类：`save`/`sell`/`quest`/`npc`/`story`/`popup`/`wipeout`/`none`（随逆向扩展） |
+| `type` | 弹窗/对话种类：`save`/`sell`/`quest`/`npc`/`story`/`popup`/`wipeout`/`agreement`/`none`（随逆向扩展；`agreement` 为 Java 层同意页，非 native 对话） |
 | `active` | 是否有对话/弹窗 |
 | `title` | 标题（任务对话框/出售弹窗等有标题的类型；无标题为 null） |
 | `text` | 内容文本 |
@@ -1264,6 +1264,7 @@
 | type | 场景 | options 示例 |
 |---|---|---|
 | `popup` | 普通确认弹窗 | `[ok 确认, cancel 取消]` |
+| `agreement` | Android 同意页（主菜单前，Java 层） | `[ok 同意]` |
 | `story` | 剧情对话 | `[next 下一句, skip 跳过]` |
 | `npc` | 商人/村民对话 | 分支选项 `[0..n + close 关闭]`（选择框型，v0.6.6）或 `[next 下一句]`（线性型） |
 | `npc_quest` | NPC 任务完成面板 | `[complete 完成任务, close 关闭]` |
@@ -1288,6 +1289,7 @@
 **返回格式**：`{"ok":true}` 或 `{"ok":false,"error":<原因>}`
 
 **支持动作**（✅ v0.5.6 实机验证）：
+- agreement（Java 层同意页，主菜单前）：`ok`（同意——在同意页窗口重放登记触摸 `(420,280)`，返回 `{"ok":true,"result":"tap_dispatched"}`，关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`）；其他动作→`no such option in agreement`
 - popup：`ok`/`cancel`（UIPopupMsg 官方按钮）
 - story：`next`（下一句）/`skip`（跳过）
 - npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）
@@ -1295,7 +1297,7 @@
 - wipeout：`revive`/`special_revive`/`game_over`
 - 面板态：`close`（关闭面板，panel/close 官方流程3）；save_slot 面板另接受 `save`（存档落盘）
 
-**注意**：`action` 必须匹配当前对话态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`。
+**注意**：`action` 必须匹配当前对话态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`；Java 层同意页（screen=`agreement`）存在时走 agreement 分支，不进入 native 检测。
 
 #### 开始交互
 
@@ -1448,7 +1450,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 或 Android `AgreementUIActivity` 弹窗存在时返回 `ui occupied: dialog_popup`，需先处理弹窗；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
+**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，Android 同意页（screen=`agreement`）存在时返回 `ui occupied: agreement`，需先 `dialog/select {"action":"ok"}` 关闭同意页或处理弹窗；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
 #### 创建新存档
 
@@ -1460,7 +1462,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false。
+**注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false；与 enter_slot 相同的同意页/弹窗门禁（`ui occupied: agreement` / `ui occupied: dialog_popup` / `ui state unavailable`）。
 
 ### 7.4 静态数据表 tables
 
