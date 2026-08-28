@@ -202,6 +202,23 @@ class ActionApiServiceImpl : ActionApiService {
             attach(NativeBridge.nativeOpStopCombat(role)) { NativeBridge.nativeGetPlayerJson() }
         }
 
+    override fun extensionBagEnterView(bag: Int): String =
+        LogFile.op("POST /api/extension_bag/enter_view", "bag=$bag") { NativeBridge.nativeOpExtensionBagEnterView(bag) }
+
+    override fun extensionBagExitView(): String =
+        LogFile.op("POST /api/extension_bag/exit_view", "") { NativeBridge.nativeOpExtensionBagExitView() }
+
+    override fun extensionBagSelectBag(bag: Int): String =
+        LogFile.op("POST /api/extension_bag/select_bag", "bag=$bag") { NativeBridge.nativeOpExtensionBagSelectBag(bag) }
+
+    override fun extensionBagClickItem(bag: Int, slot: Int): String =
+        LogFile.op("POST /api/extension_bag/click_item", "bag=$bag,slot=$slot") { NativeBridge.nativeOpExtensionBagClickItem(bag, slot) }
+
+    override fun extensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String =
+        LogFile.op("POST /api/extension_bag/move_item", "fromBag=$fromBag,fromSlot=$fromSlot,toBag=$toBag,toSlot=$toSlot") {
+            NativeBridge.nativeOpExtensionBagMoveItem(fromBag, fromSlot, toBag, toSlot)
+        }
+
     private fun attachPlayer(op: String): String =
         attach(op) { NativeBridge.nativeGetPlayerJson() }
 

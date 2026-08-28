@@ -357,6 +357,7 @@ void recover_pending_transaction_locked();
 void prepare_main_menu_locked();
 void free_module_object_locked(int bag, int slot);
 bool move_original_to_extension_locked(int dst_bag, void* moving_control);
+bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_bag);
 bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag);
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
@@ -791,34 +792,28 @@ bool category_is_equip(int category) {
     return (class_data[category * stride + 6] & 1) == 0;
 }
 
-bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
-    if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
-        fn_ui_equip_get_item_slot_index == nullptr || fn_save_save_item == nullptr ||
-        fn_get_cumulate_count == nullptr || fn_remove_item_direct == nullptr) {
-        VIRTBAG_LOG("cross move reject original->extension dst=%d control=%p capacity=%d symbols=%d",
-                    dst_bag, moving_control,
-                    virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
-                    fn_ui_equip_get_item_slot_index != nullptr && fn_save_save_item != nullptr &&
-                    fn_get_cumulate_count != nullptr && fn_remove_item_direct != nullptr ? 1 : 0);
-        return false;
-    }
+bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_bag) {
     if (g_unsaved_cross_move_count >= g_unsaved_cross_moves.size()) {
         VIRTBAG_LOG("cross move journal full; rejecting original->extension move");
         return false;
     }
-    const int src_bag = original_bag_locked();
-    if (src_bag < 0 || src_bag >= 6) {
+    if (src_bag < 0 || src_bag >= 6 || src_bag == 5) {
         VIRTBAG_LOG("cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
     }
-    if (src_bag == 5) {
-        VIRTBAG_LOG("cross move: task bag index=5 is not movable");
+    if (src_slot < 0 || src_slot >= virtual_bag::kSlotCount) {
+        VIRTBAG_LOG("cross move reject original->extension invalid source slot=%d bag=%d",
+                    src_slot, src_bag);
         return false;
     }
-    const int src_slot = fn_ui_equip_get_item_slot_index(moving_control);
-    if (src_slot < 0 || src_slot >= virtual_bag::kSlotCount) {
-        VIRTBAG_LOG("cross move reject original->extension invalid source slot=%d bag=%d control=%p",
-                    src_slot, src_bag, moving_control);
+    if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
+        fn_save_save_item == nullptr || fn_get_cumulate_count == nullptr ||
+        fn_remove_item_direct == nullptr) {
+        VIRTBAG_LOG("cross move reject original->extension dst=%d capacity=%d symbols=%d",
+                    dst_bag,
+                    virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
+                    fn_save_save_item != nullptr && fn_get_cumulate_count != nullptr &&
+                    fn_remove_item_direct != nullptr ? 1 : 0);
         return false;
     }
     void* src_item = nullptr;
@@ -916,13 +911,14 @@ bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
         VIRTBAG_LOG("cross move: target extension item could not be materialized; source retained");
         return false;
     }
-    if (fn_remove_item_direct == nullptr || fn_remove_item_direct(src_bag, src_slot) == 0) {
+    if (fn_remove_item_direct == nullptr) {
         g_virtual_bag_state.items[dst_bag][dst_slot] = previous;
         g_virtual_bag_state.pending = {};
         persist_state_locked(true);
         VIRTBAG_LOG("cross move: original->extension source removal failed");
         return false;
     }
+    fn_remove_item_direct(src_bag, src_slot);
     void* remaining_source = nullptr;
     if (inventory_slot_locked(src_bag, src_slot, &remaining_source) && remaining_source != nullptr) {
         g_virtual_bag_state.items[dst_bag][dst_slot] = previous;
@@ -951,10 +947,25 @@ bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
     g_virtual_bag_state.inspected = -1;
     free_module_object_locked(dst_bag, dst_slot);
     if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
-    reset_drag_state_locked(moving_control);
     VIRTBAG_LOG("cross move: original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
                 dst_bag, dst_slot, src_category, committed.count, src_bag, src_slot);
     return true;
+}
+
+bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
+    if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
+        fn_ui_equip_get_item_slot_index == nullptr) {
+        VIRTBAG_LOG("cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
+                    dst_bag, moving_control,
+                    virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
+                    fn_ui_equip_get_item_slot_index != nullptr ? 1 : 0);
+        return false;
+    }
+    const int src_bag = original_bag_locked();
+    const int src_slot = fn_ui_equip_get_item_slot_index(moving_control);
+    const bool moved = move_original_to_extension_slot_locked(src_bag, src_slot, dst_bag);
+    if (moved) reset_drag_state_locked(moving_control);
+    return moved;
 }
 
 bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag) {
@@ -2322,4 +2333,158 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
     }
     g_item_state_dirty = true;
     return op_ok();
+}
+
+namespace {
+
+const char* extension_recovery_action_name_locked() {
+    const virtual_bag::RecoveryAction action =
+        virtual_bag::recovery_action(g_virtual_bag_state, g_virtual_bag_state.pending);
+    if (action == virtual_bag::RecoveryAction::kComplete) return "complete";
+    if (action == virtual_bag::RecoveryAction::kRollback) return "rollback";
+    return "none";
+}
+
+std::string extension_bag_status_json_locked() {
+    return "{\"enabled\":" + std::string(g_virtual_bag_enabled.load() ? "true" : "false") +
+           ",\"injected\":" + std::string(g_state_entry != nullptr ? "true" : "false") +
+           ",\"extension_tab_button\":" +
+           std::string(g_extension_tab_buttons[0] != nullptr ? "true" : "false") +
+           ",\"inventory_frame_active\":" +
+           std::string(g_inventory_frame_active ? "true" : "false") +
+           ",\"recovery_action\":\"" + extension_recovery_action_name_locked() + "\"" +
+           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state) + "}";
+}
+
+std::string extension_bag_not_ready_error_locked() {
+    if (!g_virtual_bag_enabled.load()) return op_err("extension bag disabled");
+    return op_err("not in game");
+}
+
+bool extension_bag_ready_locked() {
+    return g_virtual_bag_enabled.load() && game_in_world();
+}
+
+int extension_internal_bag(int logical_bag) {
+    if (logical_bag < 6 || logical_bag >= 6 + virtual_bag::kBagCount) return -1;
+    return logical_bag - 6;
+}
+
+std::string extension_bag_view_result_json(bool ok, const char* error) {
+    if (!ok) return op_err(error);
+    return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
+}
+
+}  // namespace
+
+std::string data_op_extension_bag_status_json() {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!game_in_world()) {
+        return "{\"enabled\":" + std::string(g_virtual_bag_enabled.load() ? "true" : "false") +
+               ",\"injected\":false,\"extension_tab_button\":false," +
+               "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
+    }
+    ensure_state_loaded_locked();
+    return extension_bag_status_json_locked();
+}
+
+std::string data_op_extension_bag_enter_view(int logical_bag) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    const int internal_bag = extension_internal_bag(logical_bag);
+    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule) {
+        return op_err("already in extension view");
+    }
+    if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
+        return op_err("exit in progress");
+    }
+    handle_extension_tab_click_locked(internal_bag);
+    const bool entered = g_virtual_bag_state.mode == virtual_bag::Mode::kModule;
+    return extension_bag_view_result_json(entered, "enter extension view failed");
+}
+
+std::string data_op_extension_bag_exit_view() {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
+        return op_err("exit in progress");
+    }
+    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule || g_virtual_bag_state.selected < 0) {
+        return op_err("not in extension view");
+    }
+    handle_extension_tab_click_locked(g_virtual_bag_state.selected);
+    const bool exited = g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal;
+    return extension_bag_view_result_json(exited, "exit extension view failed");
+}
+
+std::string data_op_extension_bag_select_bag(int logical_bag) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    const int internal_bag = extension_internal_bag(logical_bag);
+    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule) {
+        return op_err("not in extension view");
+    }
+    if (g_virtual_bag_state.selected == internal_bag) return op_err("bag already selected");
+    handle_extension_tab_click_locked(internal_bag);
+    const bool selected = g_virtual_bag_state.selected == internal_bag;
+    return extension_bag_view_result_json(selected, "select bag failed");
+}
+
+std::string data_op_extension_bag_click_item(int logical_bag, int slot) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
+    const int internal_bag = extension_internal_bag(logical_bag);
+    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule) {
+        return op_err("not in extension view");
+    }
+    if (g_virtual_bag_state.selected != internal_bag) return op_err("bag not selected");
+    const virtual_bag::Item& item = g_virtual_bag_state.items[internal_bag][slot];
+    if (item.category <= 0 || item.count <= 0) {
+        g_virtual_bag_state.inspected = -1;
+        persist_state_locked();
+        return "{\"ok\":true,\"item\":null}";
+    }
+    g_virtual_bag_state.inspected = slot;
+    persist_state_locked();
+    return "{\"ok\":true,\"item\":{\"bag\":" + std::to_string(logical_bag) +
+           ",\"slot\":" + std::to_string(slot) +
+           ",\"category\":" + std::to_string(item.category) +
+           ",\"count\":" + std::to_string(item.count) +
+           ",\"payload\":\"" +
+           virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
+}
+
+std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    if (from_bag == 5 || to_bag == 5) return op_err("task bag excluded");
+    if (from_slot < 0 || from_slot >= virtual_bag::kSlotCount) return op_err("bad slot");
+    const bool from_original = from_bag >= 0 && from_bag < 6;
+    const bool to_original = to_bag >= 0 && to_bag < 6;
+    const int from_internal = extension_internal_bag(from_bag);
+    const int to_internal = extension_internal_bag(to_bag);
+    const bool from_extension = from_internal >= 0;
+    const bool to_extension = to_internal >= 0;
+    if (!from_original && !from_extension) return op_err("bad from bag");
+    if (!to_original && !to_extension) return op_err("bad to bag");
+    if (from_original && to_original) return op_err("use /api/item/inventory/move_item");
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    bool moved = false;
+    if (from_original && to_extension) {
+        moved = move_original_to_extension_slot_locked(from_bag, from_slot, to_internal);
+    } else if (from_extension && to_original) {
+        moved = move_extension_to_original_locked(from_internal, from_slot, to_bag);
+    } else {
+        moved = move_extension_to_extension_locked(from_internal, from_slot, to_internal, to_slot);
+    }
+    if (!moved) return op_err("move failed");
+    return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
 }

@@ -136,4 +136,10 @@ object NativeBridge {
     external fun nativeExtensionBagUiStatus(): String
     external fun nativeExtensionBagTestEquip(index: Int, bagType: Int): String
     external fun nativeExtensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
+    external fun nativeExtensionBagStatusJson(): String
+    external fun nativeOpExtensionBagEnterView(bag: Int): String
+    external fun nativeOpExtensionBagExitView(): String
+    external fun nativeOpExtensionBagSelectBag(bag: Int): String
+    external fun nativeOpExtensionBagClickItem(bag: Int, slot: Int): String
+    external fun nativeOpExtensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
 }

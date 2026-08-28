@@ -21,3 +21,10 @@ bool virtual_bag_sync_projected_item_control(void* control);
 std::string data_virtual_bag_ui_status_json();
 std::string data_virtual_bag_test_equip(int index, int bag_type);
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count);
+
+std::string data_op_extension_bag_status_json();
+std::string data_op_extension_bag_enter_view(int logical_bag);
+std::string data_op_extension_bag_exit_view();
+std::string data_op_extension_bag_select_bag(int logical_bag);
+std::string data_op_extension_bag_click_item(int logical_bag, int slot);
+std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);

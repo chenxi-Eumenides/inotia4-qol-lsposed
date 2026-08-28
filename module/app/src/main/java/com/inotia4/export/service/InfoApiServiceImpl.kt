@@ -447,6 +447,7 @@ class InfoApiServiceImpl : InfoApiService {
     override fun settingsUiOpenOption(): String = NativeBridge.nativeSettingsUiOpenOption()
     override fun settingsUiOpenPanel(): String = NativeBridge.nativeSettingsUiOpenPanel()
     override fun extensionBagStatus(): String = NativeBridge.nativeExtensionBagUiStatus()
+    override fun extensionBagStatusJson(): String = NativeBridge.nativeExtensionBagStatusJson()
     override fun extensionBagTestEquip(index: Int, bagType: Int): String =
         NativeBridge.nativeExtensionBagTestEquip(index, bagType)
     override fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String =

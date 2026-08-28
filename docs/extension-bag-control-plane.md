@@ -3,36 +3,36 @@
 > 本文是扩展背包任务的长期控制面，唯一控制范围是本功能的目标架构、阶段状态、验收顺序、设计决策和证据登记。
 > `README.md` 负责项目总览，`architecture.md` 负责代码结构与规范，`docs/backlog.md` 负责全局待办，`docs/environment.md` 负责环境与设备，`docs/module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
 >
-> **文档版本**：v1.5 ｜ **状态**：CURRENT ｜ **最后修改**：2026-08-27 ｜ **最近审核**：2026-08-27
-> **当前阶段**：P0 身份与纯度已核对，唯一真机原版 smoke 待完成 ｜ **当前闸门**：P0 单机 API 原版背包 smoke
+> **文档版本**：v1.7 ｜ **状态**：CURRENT ｜ **最后修改**：2026-08-28 ｜ **最近审核**：2026-08-28
+> **当前阶段**：P0 已通过（E-2026-08-28-01）；扩展交互正式 API 已登记并真机验证（E-2026-08-28-02） ｜ **当前闸门**：P1 逻辑背包模型与 sidecar 原型（已可启动）
 
 ## 0. 控制面恢复块
 
 - **唯一入口**：会话压缩、换代理或重新打开任务时，先读本节，再读“当前状态”和“当前闸门”，不得以聊天记录或旧日志替代事实。
-- **当前结论**：`NOT_ACCEPTED`。host 测试结果不能替代唯一真机的完整验收；源码存在也不能视为功能完成。
-- **下一允许动作**：保持扩展背包关闭；启动弹窗由当前执行代理使用真机 2 专用脚本点击 `(420,280)` 消除，随后通过 API 进入已有存档并完成原版背包 smoke；未通过前不得进入功能验收。
-- **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false`；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
+- **当前结论**：`NOT_ACCEPTED`。host 测试结果不能替代唯一真机的完整验收；源码存在也不能视为功能完成。P0 原版背包 smoke 已于 2026-08-28 在唯一真机通过（E-2026-08-28-01）；整体仍未验收。
+- **下一允许动作**：启动 P1（逻辑背包模型与 sidecar 原型）：完成“装备背包物品→容量派生”逆向与模型设计、所有权状态机、prepare journal/generation 规则与 host 测试；扩展交互正式 API 已就绪（`/api/extension_bag/*`，见 `docs/api-reference.md` §十）。
+- **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
 - **冲突裁决**：代码结构以 `architecture.md` 为准，待办来源以 `docs/backlog.md` 为准，设备与工具链以 `docs/environment.md` 为准，API 端点以 `docs/api-reference.md` 为准，sidecar 契约以 `docs/module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
 
 ## 1. 当前状态与阶段指针
 
 - 扩展背包基线（`game_ui_virtbag.*` 工作树）的代码已在工作树中，但尚未完成扩展背包功能的真机验收。
-- 本轮 host 测试为 `1/1 passed`，debug APK 构建成功；二者仅证明本地构建与纯逻辑，不替代真机验收。
+- 本轮 debug APK 构建成功；既有 host 测试仅证明纯逻辑，不能替代真机验收。
 - 目前不依据旧日志继续修改事务逻辑；先按下方顺序逐项验证，失败时只记录该项证据。
-- 当前工作树存在大量未提交代码修改；不要把当前 `HEAD` 称为扩展背包完成版本。`E-2026-08-26-01` 已记录本轮源码差异摘要、APK、唯一真机安装包和启动日志关联。
+- 当前 `HEAD` 工作树干净；不要把当前 `HEAD` 称为扩展背包完成版本。`E-2026-08-26-01` 已记录历史身份链，`E-2026-08-27-02` 记录当前版本的 P0 失败证据。
 
 **结构化控制状态**
 
 | 字段 | 当前值 |
 |---|---|
 | Overall | `NOT_ACCEPTED` |
-| Current phase | `P0`：身份已核对，单机原版基线待确认 |
-| Current gate | P0 单机 API 原版背包 smoke（扩展功能必须关闭） |
-| Blocking issue | 冷启动弹窗已可由真机 2 专用脚本消除；需在弹窗消除后重新调用 `POST /api/system/enter_slot`，原版移动已成功但重启后的重读尚未完成 |
-| Next allowed action | 当前执行代理执行启动弹窗脚本后，通过 API 进入已有存档 0，再完成背包读取、保存和重启后重读判定 |
-| Owner | 当前执行代理；启动弹窗脚本由代理执行，其他 API 结论由代理记录 |
-| Evidence | `E-2026-08-26-01`（身份链） |
+| Current phase | `P0` 已通过（E-2026-08-28-01）；扩展交互正式 API 就绪（E-2026-08-28-02） |
+| Current gate | P1 逻辑背包模型与 sidecar 原型（验收路径已就绪：`/api/extension_bag/*` 六端点已登记并真机验证） |
+| Blocking issue | 无阶段级阻断；P1 完成要求（容量派生逆向、所有权状态机、prepare journal、host 测试）待实施 |
+| Next allowed action | 启动 P1：模型设计与 host 测试优先；真机验收使用 `/api/extension_bag/*` 正式端点，不使用 debug 注入端点 |
+| Owner | 当前执行代理；扩展 API 全链路（进档/视图/移动/保存/重启）已由代理经 API 驱动验证 |
+| Evidence | `E-2026-08-26-01`（历史身份链）；`E-2026-08-27-02`（历史阻断）；`E-2026-08-28-01`（P0 通过）；`E-2026-08-28-02`（正式 API 就绪） |
 
 ## 2. 不变的实施基线
 
@@ -166,6 +166,51 @@
 | Logs | 文件日志 `/sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/inotia4-export.log` 可读；本轮末尾锚点为 `2026-08-26 14:18:16.697`、`seq=2687` |
 | Result / User verdict | `阻断`：身份链完成；等待关闭扩展功能后，在唯一真机通过 API 完成原版背包 smoke |
 
+#### E-2026-08-27-02：P0 原版移动保存与重启重读失败
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P0 单机 API 原版背包 smoke；扩展关闭，仅验证原版物品移动、原版保存、重启后重读 |
+| Source | `fd7e0b6c255b4bd4e99e57554896b4de0a984c98`；工作树干净；当前 debug APK SHA-256 `babad530dcf52ade66472ef3b569a717e7c5ba33e954736ee668434db5b88d2f` |
+| Build identity | `module/app/build/outputs/apk/debug/app-debug.apk`；`com.inotia4.export` `versionCode=170` / `versionName=0.6.12`；V2 签名证书 SHA-256 `00ee2c43b0b66361f405fa4f97ec0876c6dcc113b3e0f004a29192e42cb5cbd6` |
+| Device | 唯一真机 `192.168.3.54:5555`；`Phh-Treble with GApps`；Android 12；重启前 API health 正常 |
+| Config | `extensionBagEnabled=false`、`moveMergeEnabled=true`、`stackLimitIncrease=true`、`opEnabled=true` |
+| Bag / Projection | 操作前 `bag0/slot4=16`、`bag1/slot6=1`；将 1 个大恢复药水合并至 `bag0/slot4` 后为 `17`，`bag1/slot6` 为空；重启后 API 重读仍为 `bag0/slot4=17`；扩展状态 `injected=false`、`extension_tab_button=false` |
+| Ownership / Persistence | 原版 API 移动和 `POST /api/system/save` 均返回 `ok=true`；sidecar 分项未取得；原版索引 5 未在本轮写入 |
+| Before / Action / After | 已完成原版移动→保存→强制停止/启动→执行登记触摸脚本；重启后进入 world 并成功读到 `17`，随后游戏 native 崩溃，无法完成稳定性复测 |
+| Logs | `adb logcat` 时间锚点 `2026-08-27 18:18:10.936`：`Fatal signal 11 (SIGSEGV)`；栈顶 `libgame.so!Scene_Draw_POPUP_SC_CHARACTER_INFO+608`；进程退出后 `192.168.3.54:8088` 不可达 |
+| Result / User verdict | `阻断`：移动保存持久化结果已验证，但重启后 native 崩溃，P0 不通过；不得进入 P1+ |
+
+#### E-2026-08-28-01：P0 原版背包 smoke 通过（v0.6.14）
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P0 单机 API 原版背包 smoke；扩展关闭，验证 原版移动→保存→重启→重读 完整闭环；全程 API 驱动，无用户物理触摸 |
+| Source | `ba516dd feat(v0.6.14): block agreement launch outside main menu`；工作树仅本文档改动 |
+| Build identity | `module/app/build/outputs/apk/debug/app-debug.apk`；SHA-256 `233b52c2bf34bbda74af22bec414f8c3771408f8079b876e11f16ed97773a859`；`com.inotia4.export` `versionCode=172` / `versionName=0.6.14`；V2 证书 SHA-256 `00ee2c43b0b66361f405fa4f97ec0876c6dcc113b3e0f004a29192e42cb5cbd6`；设备安装 APK SHA-256 与本地构建一致 |
+| Device | 唯一真机 `192.168.3.54:5555`；`Phh-Treble with GApps`；Android 12；TCP ADB；`GET /api/health` 全程正常 |
+| Config | `extensionBagEnabled=false`、`moveMergeEnabled=true`、`stackLimitIncrease=true`、`opEnabled=true`；文件日志确认 `extensionBagEnabled=false applied=true` |
+| Bag / Projection | 进入前 `bag0/slot4=17`（昨日保存结果仍持久）、`bag1/slot6` 空；索引 `5` sentinel 全程 `capacity=16, slot_count=0` 未变；移动 1 个大恢复药水 `bag0/4→bag1/6` 后 `16/1`；重启重读一致 `bag0/4=16`、`bag1/6=1`；扩展状态重启后复核 `injected=false`、`extension_tab_button=false` |
+| Ownership / Persistence | `POST /api/system/save` 返回 `ok=true`（money=133640、map=30）；原版移动 `move_item ok=true`；重启→重读闭环通过；本轮原版 smoke 不依赖 sidecar，sidecar generation/CRC 未单独读取 |
+| Before / Action / After | 冷启动→`GET /api/ui/screen` 检测 `agreement`→`POST /api/ui/dialog/select {action:ok}` 返回 `tap_dispatched`→轮询至 `main_menu`→`enter_slot(0)`→轮询世界就绪（money/leader/map 有效）→移动→保存→force-stop 重启→重复弹窗 API→`enter_slot(0)`→重读验证 `16/1` |
+| Logs | 文件日志锚点 `2026-08-28 13:48:27.476`：`module identity: versionCode=172 versionName=0.6.14 sha256=233b52c2...`；操作记录含 `POST /api/ui/dialog/select {action=ok}` 与 `POST /api/system/enter_slot {slot=0} result={ok:true}`；模块自动拦截 Hive 支付弹窗并恢复 |
+| Result / User verdict | `通过`：API 结论由执行代理记录；启动弹窗检测/关闭、进档、背包读取、移动、保存、重启重读全部经 API 完成；P0 闸门关闭，P1 待 ADR-008 API 登记 |
+
+#### E-2026-08-28-02：扩展交互正式 API 登记并真机验证（v0.6.15）
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | ADR-008 正式操作面就绪验证；`/api/extension_bag/*` 六端点全链路真机验证（状态/视图/切袋/点击/三方向移动/错误语义/sidecar 持久化）；非扩展功能验收 |
+| Source | `ba516dd` 基础上新增扩展背包 API 实现（未提交时验证，提交即 v0.6.15）；构建含 `move_original_to_extension_slot_locked` 重构与 `INVEN_RemoveItemDirect` 返回值修复 |
+| Build identity | `com.inotia4.export` `versionCode=173` / `versionName=0.6.15`；`GET /api/system/game` 报告 `0.6.15`；经 `adb install -r` 部署 |
+| Device | 唯一真机 `192.168.3.54:5555`；全程 API 驱动（协议页经 `dialog/select {action:ok}` 关闭，无用户触摸） |
+| Config | 验证期 `extensionBagEnabled=true`（API 测试必需）；验证结束恢复 `false`（运行时 `injected=true` 为既有已知行为，冷启动恢复严格基线） |
+| Bag / Projection | 原版→扩展：`bag0/4` 魔法衣料 cat41×1 → `bag6`（源槽清空、扩展 slot0 入位）；扩展→原版：返回至 `bag0/4` 原槽；ext→ext：`bag6/1` cat2×1 → `bag7/1`；重启后 sidecar 精确恢复 `bag7/{0,1}`；索引 5 双向拒绝（`task bag excluded`） |
+| Ownership / Persistence | `POST /api/system/save` ok=true（扩展开启态）；重启重读 sidecar 物品一致；无 pending 残留（`recovery_action: none`） |
+| Before / Action / After | 状态→enter_view(6)→幂等拒绝→click 空/实物→move 三方向→task bag 拒绝→orig→orig 重定向→select/exit 语义→save→force-stop 重启→enter_slot→sidecar 比对→物品归位→保存→关闭扩展 |
+| Logs | 文件日志 `[OP] extension_bag/*` 全记录；`cross move: original->extension source removal failed`（修复前）→ 修复后移动成功；`game_symbols.h` 已登记 `INVEN_RemoveItemDirect` 返回值不可信（删除成功仍返回 0） |
+| Result / User verdict | `通过`：六端点全部按规格工作；发现并修复返回值误判缺陷（真机验证其回滚曾致运行时源物品移除——磁盘存档未受影响，经重载恢复）；preflight 初始化未就绪误判已登记 backlog |
+
 ## 6. 关键代码索引
 
 | 文件 | 作用 |
@@ -275,8 +320,9 @@
 
 | 阶段 | 状态 | 闸门 |
 |---|---|---|
-| P0 | 🔄 进行中 | 身份、唯一真机 API 原版基线和证据 |
-| P1–P8 | 📋 待启动 | 依赖前一阶段通过 |
+| P0 | ✅ 通过（2026-08-28，E-2026-08-28-01） | 身份、唯一真机 API 原版基线和证据 |
+| P1 | 🔄 可启动（E-2026-08-28-02：正式 API 就绪） | 逻辑背包模型与 sidecar 原型：容量派生逆向、所有权状态机、prepare journal、host 测试 |
+| P2–P8 | 📋 待启动 | 依赖前一阶段通过 |
 
 ### 阶段 P0：冻结原版基线与可复现身份
 
@@ -575,6 +621,8 @@
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.7 | 2026-08-28 | 登记 E-2026-08-28-02：`/api/extension_bag/*` 六端点登记至 api-reference §十并真机验证（v0.6.15）；ADR-008 正式操作面就绪，P1 验收路径解除阻断；登记 `INVEN_RemoveItemDirect` 返回值不可信发现 | 当前执行代理 |
+| v1.6 | 2026-08-28 | 登记 E-2026-08-28-01：P0 原版背包 smoke 在唯一真机通过（v0.6.14，身份链完整，全程 API 无用户触摸）；P0 闸门关闭，P1–P8 按 ADR-008 保持“验收路径未就绪” | 当前执行代理 |
 | v1.5 | 2026-08-27 | 登记真机2启动弹窗前置：固定 `ANDROID_SERIAL=192.168.3.54:5555` 执行 `(420,280)` 脚本点击；除该触摸例外外，启动后续与验收继续由代理使用 API 完成 | 当前执行代理 |
 | v1.4 | 2026-08-27 | 登记 P0 冷启动纯度、原版移动保存和 API 进档阻断；保持 `NOT_ACCEPTED` | 当前执行代理 |
 | v1.3 | 2026-08-27 | 根据三份审查补充分层事实、overlay/投影边界、扩展编号换算、对象所有权、装备派生容量、prepare journal、API 验收前置、P0 纯度、索引 5 sentinel、故障注入、ADR-007 至 ADR-009 和新增风险 | 当前执行代理 |

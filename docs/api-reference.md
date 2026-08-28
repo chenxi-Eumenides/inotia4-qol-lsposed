@@ -7,7 +7,7 @@
 > 通用约定：
 > - 服务地址：`http://<设备IP>:8088`（局域网，模块监听 0.0.0.0）
 > - 请求/响应均为 JSON；写操作（POST）的 body 是 JSON 字符串
-> - `role` = 出战槽位 0..2；`bag` = 背包袋 0..5；`slot` = 袋内槽位 0..15
+> - `role` = 出战槽位 0..2；`bag` = 背包袋 0..5；`slot` = 袋内槽位 0..15；扩展逻辑袋 = `6..10`（§十）
 > - 写操作成功返回 `{"ok":true,...}`；失败返回 `{"ok":false,"error":"<原因>"}`（错误信封格式 A，v0.5.45 统一）
 > - **错误信封与 HTTP 状态码（v0.5.45 统一）**：所有错误响应统一 `{"ok":false,"error":"<原因>"}` + 语义状态码——**400** 参数错误（路由参数解析异常/body 解析失败/参数校验不过）、**403** 权限不足（OP 门禁未开启 `op disabled`）、**404** 未找到、**500** 内部错误、**501** 未实现（OP 占位端点）、**503** 未就绪（native 初始化中）。实现机制：controller 抛 `ApiException(code,msg)` → `GlobalExceptionResolver`（@Resolver）统一转响应
 > - 写操作返回会附带 `state` 字段 = 操作后的最新状态快照（类型见各端点说明）
@@ -31,10 +31,11 @@
 | **system**（系统与会话） | `/api/system/*` | 游戏整体 game、事件流 events、存档 save、静态数据表 tables（含 text/story-events）、帮助文档 help | 16 |
 | **config**（模块配置） | `/api/config/*` | 模块配置读取与修改（list/set） | 2 |
 | **op**（越权操作） | `/api/op/*` | 改数据/强行操作（全局开关门禁，默认关闭，见 §8） | 10 已实现 + 11 定稿 |
+| **extension_bag**（扩展背包） | `/api/extension_bag/*` | 扩展视图、逻辑袋切换、点击信息、三方向移动（§十，control-plane ADR-008） | 6 |
 | debug（调试） | `/api/debug/*` | 开发期调试 | 2 |
 | health（顶层） | `/api/health` | 服务健康检查 | 1 |
 
-> 全量端点 = 107（character 29 + world 15 + item 17 + quest 6 + ui 9 + system 16 + config 2 + op 10 + debug 2 + health 1；其中 GET 59 / POST 48）。
+> 全量端点 = 113（character 29 + world 15 + item 17 + quest 6 + ui 9 + system 16 + config 2 + op 10 + extension_bag 6 + debug 2 + health 1；其中 GET 60 / POST 53）。
 
 ---
 
@@ -1778,7 +1779,134 @@
 
 ---
 
-## 十、部署形态差异
+## 十、extension_bag（扩展背包）— GET/POST /api/extension_bag/*
+
+> 扩展背包正式操作面（v0.6.15）。依据 `docs/extension-bag-control-plane.md` §4.1 与 ADR-008：扩展背包 UI 操作的 API-first 验收以本章端点为准；`/api/debug/extension_bag/{status,equip,item}` 仅为开发期注入工具，不构成正式操作面。
+>
+> **编号约定**：
+> - 扩展逻辑袋（对外编号）`6..10`，内部索引 `0..4`（唯一换算 `internal = bag - 6`）；原版袋 `0..4`
+> - 原版第 6 袋（索引 `5`，任务物品专用袋）被全部端点拒绝（`task bag excluded`，ADR-006）
+> - `extensionBagEnabled=false` 或非 world 态时写操作分别返回 `extension bag disabled` / `not in game`
+> - **原型阶段声明**：扩展容量固定 `16/8/4/0/0`（ADR-004）；扩展物品不进入原版 `g_inven`，由模块自持（Scheme C）；视图状态属背包界面会话，重开背包或 F3 会重置为原版视图。最终架构见 `extension-bag-control-plane.md` §8
+
+### 10.1 状态
+
+#### 扩展背包状态
+
+`GET /api/extension_bag/status`
+
+**用途**：读取扩展背包完整状态：使能/注入/控件旗标、视图模式、全部物品、pending 事务与恢复动作预测。
+
+**返回格式**：
+
+```json
+{ "enabled": true,
+  "injected": false,
+  "extension_tab_button": false,
+  "inventory_frame_active": false,
+  "recovery_action": "none",
+  "state": { "mode": "original", "originalSelected": 0, "types": [4,0,0,0,0],
+             "capacities": [16,8,4,0,0], "selected": -1, "inspected": -1,
+             "items": [[{"category":7,"count":18,"payload":"<base64>"}]],
+             "pending": { } } }
+```
+
+- `recovery_action`：`virtual_bag::recovery_action` 纯逻辑预测，`none` / `complete` / `rollback`
+- `state.pending`：仅存在未完成跨域事务时出现（`valid/direction/srcBag/srcSlot/dstBag/dstSlot/payload[/sourcePayload]`）
+- 非 world 态返回 `{"enabled":<bool>,"injected":false,"extension_tab_button":false,"inventory_frame_active":false,"recovery_action":"none","state":{}}`
+
+**注意**：本端点同时承担 §4.1「故障注入结果读取」能力——注入动作保留在 debug 域（开发期），结果统一经 `pending` + `recovery_action` 读取。
+
+### 10.2 视图与选中
+
+#### 进入扩展视图
+
+`POST /api/extension_bag/enter_view`
+
+**用途**：从原版背包视图进入指定扩展逻辑袋视图（等价点击扩展 tab）。
+
+**请求格式**：`{ "bag": 6 }`
+
+**返回格式**：`{"ok":true,"state":<10.1 的 state>}`
+
+**错误**：`bad extension bag (6-10)` / `already in extension view` / `exit in progress` / `extension bag disabled` / `not in game`
+
+**注意**：幂等性——非 `kOriginal` 模式下调用被拒，不产生部分状态；`enter failed` 表示状态机未迁移（可安全重试）。
+
+#### 退出扩展视图
+
+`POST /api/extension_bag/exit_view`
+
+**用途**：回到原版背包视图（等价再次点击当前扩展 tab；触摸拖动状态一并清理）。
+
+**请求格式**：`{}`（可省略 body）
+
+**返回格式**：`{"ok":true,"state":<10.1 的 state>}`
+
+**错误**：`not in extension view` / `exit in progress` / `extension bag disabled` / `not in game`
+
+#### 切换扩展逻辑袋
+
+`POST /api/extension_bag/select_bag`
+
+**用途**：扩展视图内切换当前逻辑袋（等价点击另一个扩展 tab）。
+
+**请求格式**：`{ "bag": 7 }`
+
+**返回格式**：`{"ok":true,"state":<10.1 的 state>}`
+
+**错误**：`not in extension view` / `bag already selected` / 其余同 `enter_view`
+
+#### 点击扩展物品（选中/信息）
+
+`POST /api/extension_bag/click_item`
+
+**用途**：选中扩展物品并返回信息（等价点击扩展格子）；点击空槽关闭信息（`item:null`）。
+
+**请求格式**：`{ "bag": 6, "slot": 0 }`
+
+**返回格式**：`{"ok":true,"item":{"bag":6,"slot":0,"category":7,"count":18,"payload":"<base64>"}}`；空槽 → `{"ok":true,"item":null}`
+
+**错误**：`bad slot` / `bag not selected` / `not in extension view` / `extension bag disabled` / `not in game`
+
+**注意**：`payload` 为完整 `SAVE_SaveItem` 序列化记录（base64），与 sidecar 一致。
+
+### 10.3 移动
+
+#### 三方向移动
+
+`POST /api/extension_bag/move_item`
+
+**用途**：在原版袋（`0..4`）与扩展逻辑袋（`6..10`）之间移动物品，按源/目标域自动分派三条路径：原版→扩展（`SAVE_SaveItem` 序列化入扩展 + 原版源删除）、扩展→原版（payload 重建入库）、扩展→扩展（纯逻辑事务）。原版→原版请用 `/api/item/inventory/move_item`。
+
+**请求格式**：`{ "from_bag": 0, "from_slot": 4, "to_bag": 6 }`（`to_slot` 可选）
+
+**返回格式**：`{"ok":true,"state":<10.1 的 state>}`
+
+**注意**：
+- `to_slot` 仅对扩展→扩展生效（缺省 `-1` 自动放置）；原版↔扩展方向的放置槽由系统自动选择（优先可合并槽，其次空槽）
+- 移动为整堆语义（不支持部分数量拆分）；合并遵循 `moveMergeEnabled` / `stackLimitIncrease`
+- 每次跨域移动写入模块 unsaved journal，显式保存（`/api/system/save`）成功后清零；进程内中断由 `pending`/`recovery_action` 机制恢复
+- 错误：`task bag excluded` / `bad slot` / `bad from bag` / `bad to bag` / `use /api/item/inventory/move_item` / `move failed` / `extension bag disabled` / `not in game`
+- 幂等性：失败路径（落盘失败/入库失败/源残留）均回滚到操作前状态，可安全重试
+
+### 10.4 control-plane §4.1 能力对照
+
+| §4.1 能力 | 端点 | 状态 |
+|---|---|---|
+| 读取原版/扩展袋状态 | `GET /api/extension_bag/status` + 既有 `/api/item/inventory*` | 已实现 |
+| 进入/退出扩展视图 | `POST /api/extension_bag/enter_view` / `exit_view` | 已实现 |
+| 切换逻辑袋 | `POST /api/extension_bag/select_bag` | 已实现 |
+| 点击/选中/信息 | `POST /api/extension_bag/click_item` | 已实现 |
+| 拖动/放置/取消 | `move_item` 提供等效原子放置语义（失败自动回滚=取消）；真实拖动路径待 P3 控件接入后补充 | 等效实现 |
+| 三方向移动 | `POST /api/extension_bag/move_item` | 已实现 |
+| 配置切换 | 既有 `POST /api/config/set {"extensionBagEnabled":bool}` | 既有 |
+| 保存/切档/重启准备 | 既有 `/api/system/save`、`/api/system/enter_slot`（内部衔接 `virtual_bag_prepare_save_slot_load` / 主菜单清理） | 既有 |
+| 故障注入结果读取 | `status` 的 `state.pending` + `recovery_action`（注入动作在 debug 域） | 已实现 |
+
+---
+
+## 十一、部署形态差异
 
 | 项 | 手机版（LSPosed 模块） | 服务器版（LSPatch 集成） |
 |---|---|---|
