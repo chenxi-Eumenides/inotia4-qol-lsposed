@@ -359,6 +359,9 @@ std::string data_op_sell_item(int bag, int slot) {
 }
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
     if (!game_in_world()) return op_err("not in game");
+    if (virtual_bag_module_view_installed()) {
+        return op_err("extension view open; movement disabled (P2)");
+    }
     if (fn_inven_move_item == nullptr) return op_err("symbol not resolved");
     void* item = inventory_item_at(bag, slot);
     if (item == nullptr) return op_err("slot empty");

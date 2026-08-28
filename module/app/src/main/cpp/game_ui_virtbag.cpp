@@ -351,6 +351,7 @@ int grid_slot_index(int64_t x, int64_t y, int64_t origin_x, int64_t origin_y);
 int original_bag_locked();
 void set_original_bag_locked(int bag);
 int original_bag_button_index(int64_t x, int64_t y);
+bool install_module_view_locked(int bag);
 void restore_module_view_locked();
 void* module_item_locked(int bag, int slot);
 void recover_pending_transaction_locked();
@@ -373,6 +374,7 @@ void handle_extension_tab_click_locked(int extension_bag) {
             g_original_current_got = static_cast<uint8_t>(original_bag);
             if (virtual_bag::click(&g_virtual_bag_state, extension_bag) !=
                 virtual_bag::ClickResult::kIgnored) {
+                install_module_view_locked(extension_bag);
                 persist_state_locked();
                 VIRTBAG_LOG("extension tab selected bag=%d original_bag=%d", extension_bag,
                             original_bag);
@@ -384,12 +386,14 @@ void handle_extension_tab_click_locked(int extension_bag) {
         if (g_virtual_bag_state.selected != extension_bag) {
             if (virtual_bag::click(&g_virtual_bag_state, extension_bag) !=
                 virtual_bag::ClickResult::kIgnored) {
+                install_module_view_locked(extension_bag);
                 VIRTBAG_LOG("extension tab switched bag=%d", extension_bag);
             }
             return;
         }
         const int original_bag = original_bag_locked();
         if (original_bag >= 0 && original_bag < 6) {
+            restore_module_view_locked();
             set_original_bag_locked(original_bag);
             virtual_bag::enter_original(&g_virtual_bag_state, original_bag);
             g_extension_touch_capture = false;
@@ -1349,7 +1353,7 @@ void draw_cells_in_frame_locked() {
     }
 
     if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
-        !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
+        !virtual_bag::valid_index(g_virtual_bag_state.selected) || g_module_view_installed) {
         return;
     }
 
@@ -1451,6 +1455,10 @@ void virtual_bag_draw_original_bag_wrapper() {
         log_exit_trace_locked("draw_bag", 0, 0, 0);
         last_module_view = module_view ? 1 : 0;
     }
+    if (module_view && g_module_view_installed) {
+        original();
+        return;
+    }
     uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
     uint8_t saved_current = 0;
     bool masked = false;
@@ -1471,6 +1479,10 @@ void virtual_bag_draw_inven_item_wrapper() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected)) {
+        if (g_module_view_installed) {
+            original();
+            return;
+        }
         // Extension items occupy the original inventory rectangle without
         // entering g_inven. Mask the original bag only for this draw call so
         // the underlying ControlItem visuals do not show through the overlay.
@@ -1595,6 +1607,50 @@ void* module_item_locked(int bag, int slot) {
         g_module_object_hashes[bag][slot] = descriptor_hash;
     }
     return item;
+}
+
+// 正式窗口投影（P2，control-plane 阶段 P2）：借出对象写入原版装备窗口数据源，
+// 原版窗口原生绘制扩展物品；恢复由 restore_module_view_locked 反向写回快照。
+bool install_module_view_locked(int bag) {
+    if (g_inven == nullptr || g_base == 0 || !virtual_bag::valid_index(bag)) return false;
+    if (g_virtual_bag_state.capacities[bag] == 0) return false;
+    const int original_bag = original_bag_locked();
+    if (original_bag < 0 || original_bag >= 5) {
+        VIRTBAG_LOG("module view reject install: original window bag=%d (task bag reserved)",
+                    original_bag);
+        return false;
+    }
+    uint8_t* direct_bag = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
+    if (direct_bag == nullptr || current_bag == nullptr || *current_bag == nullptr) return false;
+    void** inventory = static_cast<void**>(g_inven);
+    const size_t bag_offset = static_cast<size_t>(original_bag) * kInventorySlotStride;
+    uint32_t* size_word = bag_size_word_locked(original_bag);
+    if (size_word == nullptr) return false;
+
+    if (g_module_view_installed) restore_module_view_locked();
+
+    for (size_t slot = 0; slot < g_original_inventory.size(); ++slot) {
+        g_original_inventory[slot] = inventory[bag_offset + slot];
+    }
+    g_original_current_direct = *direct_bag;
+    g_original_current_got = **current_bag;
+    g_original_bag_size_word = size_word;
+    g_original_bag_size = *size_word;
+
+    const int capacity = g_virtual_bag_state.capacities[bag];
+    for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+        inventory[bag_offset + slot] =
+            slot < capacity ? module_item_locked(bag, slot) : nullptr;
+    }
+    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+    *size_word = (*size_word & ~kCapacityMask) |
+                 (static_cast<uint32_t>(capacity) & kCapacityMask);
+    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    g_module_view_installed = true;
+    g_module_view_index = bag;
+    VIRTBAG_LOG("module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
+    return true;
 }
 
 void restore_module_view_locked() {
@@ -2468,6 +2524,7 @@ std::string data_op_extension_bag_click_item(int logical_bag, int slot) {
 
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    if (g_module_view_installed) return op_err("extension view open; movement disabled (P2)");
     if (from_bag == 5 || to_bag == 5) return op_err("task bag excluded");
     if (from_slot < 0 || from_slot >= virtual_bag::kSlotCount) return op_err("bad slot");
     const bool from_original = from_bag >= 0 && from_bag < 6;
