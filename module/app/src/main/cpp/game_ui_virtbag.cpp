@@ -1154,7 +1154,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         return true;
     };
     if (requested_dst_slot >= 0) {
-        if (requested_dst_slot >= capacity || requested_dst_slot == src_slot) {
+        if (requested_dst_slot >= capacity) {
             VIRTBAG_LOG("cross move reject extension->extension invalid destination=%d capacity=%d",
                         requested_dst_slot, capacity);
             return false;
@@ -2316,22 +2316,26 @@ std::string data_virtual_bag_ui_status_json() {
 }
 
 std::string data_virtual_bag_test_equip(int index, int bag_type) {
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    if (!virtual_bag::set_test_equipped(&g_virtual_bag_state, index, bag_type)) {
-        return op_err("bad virtual bag index or bag type");
+    bool updated = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        updated = virtual_bag::set_test_equipped(&g_virtual_bag_state, index, bag_type);
+        if (updated) g_item_state_dirty = true;
     }
-    g_item_state_dirty = true;
+    if (!updated) return op_err("bad virtual bag index or bag type");
     return op_ok();
 }
 
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count) {
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    if (!virtual_bag::set_item(&g_virtual_bag_state, index, slot, category, count)) {
-        return op_err("bad virtual bag item");
+    bool updated = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        updated = virtual_bag::set_item(&g_virtual_bag_state, index, slot, category, count);
+        if (updated) g_item_state_dirty = true;
     }
-    g_item_state_dirty = true;
+    if (!updated) return op_err("bad virtual bag item");
     return op_ok();
 }
 
