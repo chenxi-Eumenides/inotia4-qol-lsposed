@@ -1289,7 +1289,7 @@
 **返回格式**：`{"ok":true}` 或 `{"ok":false,"error":<原因>}`
 
 **支持动作**（✅ v0.5.6 实机验证）：
-- agreement（Java 层同意页，主菜单前）：`ok`（同意——在同意页窗口重放登记触摸 `(420,280)`，返回 `{"ok":true,"result":"tap_dispatched"}`，关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`）；其他动作→`no such option in agreement`
+- agreement（Java 层同意页，主菜单前）：`ok`（同意——在同意页窗口重放登记触摸 `(420,280)`，返回 `{"ok":true,"result":"tap_dispatched"}`，关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；若在页面刚出现瞬间点击可能因未就绪被吞掉，重试 `ok` 即可）；其他动作→`no such option in agreement`
 - popup：`ok`/`cancel`（UIPopupMsg 官方按钮）
 - story：`next`（下一句）/`skip`（跳过）
 - npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）
@@ -1450,7 +1450,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，Android 同意页（screen=`agreement`）存在时返回 `ui occupied: agreement`，需先 `dialog/select {"action":"ok"}` 关闭同意页或处理弹窗；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
+**注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，Android 同意页（screen=`agreement`）存在时返回 `ui occupied: agreement`，需先 `dialog/select {"action":"ok"}` 关闭同意页或处理弹窗；进档流程期间（调用后 15s 宽限）同意页启动会被模块拦截，不会打断读档；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
 #### 创建新存档
 
@@ -1462,7 +1462,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false；与 enter_slot 相同的同意页/弹窗门禁（`ui occupied: agreement` / `ui occupied: dialog_popup` / `ui state unavailable`）。
+**注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false；与 enter_slot 相同的同意页/弹窗门禁（`ui occupied: agreement` / `ui occupied: dialog_popup` / `ui state unavailable`）及 15s 进档宽限拦截；损坏槽可直接 create_slot 重建覆盖（2026-08-28 save1 实测）。
 
 ### 7.4 静态数据表 tables
 

@@ -554,6 +554,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 **⚠️ enter_slot 注意事项**：
 - 只能在非 world 状态调用（world 中 → `already in game`）
 - 启动同意页（screen=`agreement`）→ `ui occupied: agreement`；先 `POST /api/ui/dialog/select {"action":"ok"}` 关闭后再进档；原生弹窗（screen=`dialog_popup`）→ `ui occupied: dialog_popup`
+- 进档调用后 15s 内同意页启动会被模块自动拦截（不会打断读档，也无需处理）；同意页在同意动作完成后的消失动画期间进档是安全的
 - 进入前会在 `enter_slot` 内执行只读完整性检查；缺失、损坏或不兼容存档返回结构化错误，不调用原版进档路径；当前没有独立预检 API。
 
 #### 事件流

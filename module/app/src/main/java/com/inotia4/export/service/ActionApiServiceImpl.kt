@@ -4,6 +4,7 @@ import com.inotia4.export.AgreementPopup
 import com.inotia4.export.LogFile
 import com.inotia4.export.NativeBridge
 import com.inotia4.export.UiActivityTracker
+import com.inotia4.export.patch.AgreementGate
 import com.inotia4.export.store.ModuleSaveStore
 import com.inotia4.export.util.ApiException
 import com.inotia4.export.util.JsonUtil
@@ -110,6 +111,7 @@ class ActionApiServiceImpl : ActionApiService {
             } else if (activityCheck.blockingActivityName != null) {
                 JsonUtil.err("ui occupied: agreement")
             } else {
+                AgreementGate.beginWorldLoad()
                 attachPlayer(afterNativeSuccess(NativeBridge.nativeOpEnterSlot(slot)) { ModuleSaveStore.ensureSlot(slot) })
             }
         }
@@ -122,6 +124,7 @@ class ActionApiServiceImpl : ActionApiService {
             } else if (activityCheck.blockingActivityName != null) {
                 JsonUtil.err("ui occupied: agreement")
             } else {
+                AgreementGate.beginWorldLoad()
                 attachPlayer(afterNativeSuccess(NativeBridge.nativeOpCreateSlot(slot, classIdx)) { ModuleSaveStore.resetSlot(slot) })
             }
         }

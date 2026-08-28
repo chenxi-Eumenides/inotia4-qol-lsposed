@@ -2,10 +2,12 @@ package com.inotia4.export
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.HandlerThread
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
+import com.inotia4.export.patch.AgreementGate
 import com.inotia4.export.patch.IapBlocker
 import com.inotia4.export.patch.ImmersiveMode
 import io.github.libxposed.api.XposedModuleInterface
@@ -37,6 +39,20 @@ class HookMain : XposedModule() {
                     LogFile.log("blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
                     IapBlocker.recover()
                     null
+                }
+        }
+
+        AgreementGate.install(param) { method, intentIdx ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val intent = chain.getArg(intentIdx) as? Intent
+                    if (intent?.component?.className == AgreementGate.AGREEMENT_ACTIVITY && AgreementGate.shouldBlock()) {
+                        LogFile.log("blocked AgreementUIActivity launch (outside main menu or world load in progress)")
+                        null
+                    } else {
+                        chain.proceed()
+                    }
                 }
         }
 

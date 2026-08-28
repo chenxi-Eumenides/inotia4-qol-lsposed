@@ -206,3 +206,13 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 移除 patch 并重启，在同意页关闭后无 patch 进入 save0；最终 `/api/ui` 为 `screen=world`，`/api/system/info` 显示 save0 `hero_level=1`、`hero_index=0`，`/api/health` 为 `ok=true`。
 - 修复 `data_save_slots_json()`：仅主菜单 `state=4` 调用 `SAVE_CreateSaveSlot()` 刷新槽区；world/启动过渡阶段只读槽结构，避免查询 `/api/system/info` 覆盖角色运行时全局。
 - 启动确认弹窗的 native `UIPopupMsg` 现在优先于状态机参与 `screen` 判定；`enter_slot` 检测到活动弹窗返回 `ui occupied: dialog_popup`。Android `AgreementUIActivity` 属于 Java 同意页，不由 native `UIPopupMsg` 表示，独立为 `screen=agreement`（Kotlin 层覆盖，与 native 弹窗以 in_world 守卫分域）；`enter_slot`/`create_slot` 在同意页存在时返回 `ui occupied: agreement`，`dialog/select {"action":"ok"}` 重放登记触摸 `(420,280)` 关闭同意页。
+
+## 13. 2026-08-28 裸窗口损坏实测与同意页启动拦截
+
+- 时序实测（0.6.13）：冷启动 `13.35s main_menu → 14.01s agreement`，存在 ~0.66s「裸窗口」——native 已 `state=4` 且同意页未出现，`enter_slot` 双门禁全放行。
+- 损坏复现（save1，用户批准牺牲）：裸窗口内 `enter_slot(1)` 被接受（13.84s ok），同意页 14.35s 弹出打断读档；关闭同意页后 world 出现但角色丢失，退档后 slot1 `hero_level=0`，re-enter 返回 `slot corrupt / stage:character`——与 §12 save0 事故同源。
+- 消失窗口实测（良性）：`select ok` 后 tracker 在 pause 瞬间失明（~1.7s），此时抢进 `enter_slot` 成功进 world，主角在场、存档完好；同意动作已完成后进档链与正常流程等价。
+- 修复：`patch/AgreementGate.kt` hook `Instrumentation.execStartActivity`（启动点为 `CheckPermission$1/$2` 持 Activity 调 `Activity.startActivity`，必经此路径），`AgreementUIActivity` 启动仅在「native screen=main_menu 且不在进档宽限期」时放行，否则丢弃；`enter_slot`/`create_slot` 调用前设置 15s 宽限（`AgreementGate.beginWorldLoad()`）。探针失败放行（API 层门禁仍 fail-closed）。
+- 拦截后验证：裸窗口 `enter_slot(1)` → `14.30s` 直接 `world`（同意页未出现），主角凯恩在场，退档后 save1 `hero_level=1` 完好；正常启动同意页照常弹出（`main_menu` 时放行）。模块日志出现 `blocked AgreementUIActivity launch (outside main menu or world load in progress)`。
+- 未联网时同意页不弹出（用户确认），因此不能用「见过 agreement」做门禁；拦截方案不依赖该信号。
+- save1 损坏后未修复，直接 `create_slot {"slot":1,"class_idx":0}` 重建，回主菜单后 `hero_level=1` 恢复。
