@@ -613,6 +613,12 @@ Java_com_inotia4_export_NativeBridge_nativeOpExtensionBagEnterView(JNIEnv* env, 
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_export_NativeBridge_nativeOpExtensionBagUnequip(JNIEnv* env, jclass, jint bag) {
+    return op_result(env, "op_extension_bag_unequip", ("bag=" + str_of(bag)),
+                     data_op_extension_bag_unequip(static_cast<int>(bag)));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_export_NativeBridge_nativeOpExtensionBagExitView(JNIEnv* env, jclass) {
     return op_result(env, "op_extension_bag_exit_view", (std::string("")),
                      data_op_extension_bag_exit_view());

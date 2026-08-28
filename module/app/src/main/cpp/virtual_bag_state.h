@@ -104,8 +104,16 @@ struct State {
     Mode mode = Mode::kOriginal;
     int original_selected = 0;
     int selected = -1;
-    int inspected = -1;
+    int inspected = -1;   // 槽信息态（扩展物品详情高亮，槽位号）
+    int info_bag = -1;    // 袋信息态（二次点击打开，袋号；与槽 inspected 语义分离）
     PendingTransfer pending{};  // 未完成事务（随 JSON 往返持久化，恢复用）
+};
+
+// 袋解除结果（原版语义：有物品弹窗拒绝，空袋解除）。
+enum class UnequipResult {
+    kOk,        // 空袋解除：装备清零、容量归 0、标签禁用
+    kBlocked,   // 袋内有物品，拒绝解除
+    kInvalid,   // 非法袋号
 };
 
 enum class ClickResult {
@@ -313,6 +321,11 @@ inline void normalize(State* state) {
         state->mode = Mode::kOriginal;
         state->selected = -1;
     }
+    if (state->info_bag != -1 &&
+        (!valid_index(state->info_bag) || state->capacities[state->info_bag] == 0 ||
+         state->mode != Mode::kModule)) {
+        state->info_bag = -1;
+    }
     if (state->inspected != state->selected) state->inspected = -1;
 }
 
@@ -339,6 +352,21 @@ inline bool set_test_equipped(State* state, int index, int bag_type) {
     return true;
 }
 
+inline bool unequip_bag(State* state, int index) {
+    if (state == nullptr || !valid_index(index)) return false;
+    for (const Item& item : state->items[index]) {
+        if (item.category > 0 || item.count > 0) return false;
+    }
+    state->types[index] = 0;
+    if (state->info_bag == index) state->info_bag = -1;
+    if (state->selected == index) {
+        state->selected = -1;
+        state->mode = Mode::kOriginal;
+    }
+    normalize(state);
+    return true;
+}
+
 inline ClickResult click(State* state, int index) {
     if (state == nullptr || !valid_index(index)) {
         return ClickResult::kIgnored;
@@ -348,12 +376,14 @@ inline ClickResult click(State* state, int index) {
     }
     if (state->selected == index) {
         state->mode = Mode::kModule;
-        state->inspected = index;
+        state->info_bag = index;  // 二次点击 = 袋信息态（原版语义：desc_type=1 + MakeDesc）
+        state->inspected = -1;
         return ClickResult::kInspected;
     }
     state->mode = Mode::kModule;
     state->selected = index;
     state->inspected = -1;
+    state->info_bag = -1;
     return ClickResult::kSelected;
 }
 
@@ -569,7 +599,9 @@ inline std::string state_json(const State& state) {
         json += std::to_string(state.capacities[index]);
     }
     json += "],\"selected\":" + std::to_string(state.selected);
-    json += ",\"inspected\":" + std::to_string(state.inspected) + ",\"items\":[";
+    json += ",\"inspected\":" + std::to_string(state.inspected);
+    json += ",\"infoBag\":" + std::to_string(state.info_bag);
+    json += ",\"items\":[";
     for (int bag = 0; bag < kBagCount; ++bag) {
         if (bag > 0) json += ',';
         json += '[';
@@ -712,6 +744,14 @@ inline bool parse_state_json(const char* json, State* state) {
         long value = strtol(cursor, &inspected_end, 10);
         if (inspected_end == cursor || value < -1 || value > kMaxCapacity) return false;
         parsed.inspected = static_cast<int>(value);
+    }
+    const char* info_bag = strstr(json, "\"infoBag\":");
+    if (info_bag != nullptr) {
+        cursor = info_bag + strlen("\"infoBag\":");
+        char* info_end = nullptr;
+        long value = strtol(cursor, &info_end, 10);
+        if (info_end == cursor || value < -1 || value >= kBagCount) return false;
+        parsed.info_bag = static_cast<int>(value);
     }
     const char* items = strstr(json, "\"items\":[");
     if (items == nullptr) return false;

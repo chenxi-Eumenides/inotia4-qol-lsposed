@@ -213,6 +213,9 @@ class ActionApiServiceImpl : ActionApiService {
     override fun extensionBagExitView(): String =
         LogFile.op("POST /api/debug/extension_bag/exit_view", "") { NativeBridge.nativeOpExtensionBagExitView() }
 
+    override fun extensionBagUnequip(bag: Int): String =
+        LogFile.op("POST /api/debug/extension_bag/unequip", "bag=$bag") { NativeBridge.nativeOpExtensionBagUnequip(bag) }
+
     override fun extensionBagSelectBag(bag: Int): String =
         LogFile.op("POST /api/debug/extension_bag/select_bag", "bag=$bag") { NativeBridge.nativeOpExtensionBagSelectBag(bag) }
 

@@ -157,6 +157,8 @@ UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff = nullptr;
 UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index = nullptr;
 UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area = nullptr;
 UiDescSetOffFn fn_ui_desc_set_off = nullptr;
+SoundSystemPlayFn fn_sound_system_play = nullptr;
+uint8_t* g_snd_fx = nullptr;
 TouchHandleSetCursorFn fn_touch_handle_set_cursor = nullptr;
 UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc = nullptr;
 ItemDrawPortingFn fn_item_draw_porting = nullptr;
@@ -432,6 +434,8 @@ bool bridge_init() {
     fn_ui_equip_is_apply_stuff = reinterpret_cast<UiEquipIsApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_IS_APPLY_STUFF_VMA", F_UIEQUIP_IS_APPLY_STUFF_VMA));
     fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));
     fn_ui_equip_refresh_item_area = reinterpret_cast<UiEquipRefreshItemAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA));
+    fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
+    g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));
     fn_ui_desc_set_off = reinterpret_cast<UiDescSetOffFn>(g_base + fn_resolve("F_UIDESC_SET_OFF_VMA", F_UIDESC_SET_OFF_VMA));
     fn_touch_handle_set_cursor = reinterpret_cast<TouchHandleSetCursorFn>(g_base + fn_resolve("F_TOUCHHANDLE_SET_CURSOR_VMA", F_TOUCHHANDLE_SET_CURSOR_VMA));
     fn_ui_equip_inven_item_control_event_proc = reinterpret_cast<UiEquipInvenItemControlEventProcFn>(g_base + fn_resolve("F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA));

@@ -78,6 +78,15 @@ class DebugController {
     @PostMapping("/api/debug/extension_bag/exit_view")
     fun extensionBagExitView(): String = ControllerGuard.guard { ApiServices.action.extensionBagExitView() }
 
+    @PostMapping("/api/debug/extension_bag/unequip")
+    fun extensionBagUnequip(@RequestBody body: String): String {
+        val json = JsonUtil.parseBody(body)
+            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val bag = json.optInt("bag", -1)
+        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
+        return ControllerGuard.guard { ApiServices.action.extensionBagUnequip(bag) }
+    }
+
     @PostMapping("/api/debug/extension_bag/select_bag")
     fun extensionBagSelectBag(@RequestBody body: String): String {
         val json = JsonUtil.parseBody(body)

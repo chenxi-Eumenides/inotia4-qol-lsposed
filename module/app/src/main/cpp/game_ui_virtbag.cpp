@@ -6,6 +6,7 @@
 #include "game_patch.h"
 #include "game_state.h"
 #include "game_symbols.h"
+#include "ownership_ledger.h"
 #include "stack_codec.h"
 #include "virtual_bag_state.h"
 #include "game_ui_kit.h"
@@ -106,6 +107,8 @@ PopupNoArgFn g_orig_save_enter = nullptr;
 uint8_t* g_save_state_entry = nullptr;
 uintptr_t g_draw_patch_addr = 0;
 uintptr_t g_bag_draw_patch_addr = 0;
+uintptr_t g_save_inventory_patch_addr = 0;
+void* g_save_inventory_thunk = nullptr;
 uintptr_t g_item_draw_patch_addr = 0;
 void* g_draw_thunk = nullptr;
 void* g_bag_draw_thunk = nullptr;
@@ -364,6 +367,12 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
 bool handle_bag_drop_release_locked(int64_t x, int64_t y);
 
+// P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。
+void play_extension_switch_sound() {
+    if (fn_sound_system_play == nullptr || g_snd_fx == nullptr) return;
+    fn_sound_system_play(0x11);
+}
+
 void handle_extension_tab_click_locked(int extension_bag) {
     if (!virtual_bag::valid_index(extension_bag)) return;
     ensure_state_loaded_locked();
@@ -387,19 +396,17 @@ void handle_extension_tab_click_locked(int extension_bag) {
             if (virtual_bag::click(&g_virtual_bag_state, extension_bag) !=
                 virtual_bag::ClickResult::kIgnored) {
                 install_module_view_locked(extension_bag);
+                play_extension_switch_sound();
                 VIRTBAG_LOG("extension tab switched bag=%d", extension_bag);
             }
             return;
         }
-        const int original_bag = original_bag_locked();
-        if (original_bag >= 0 && original_bag < 6) {
-            restore_module_view_locked();
-            set_original_bag_locked(original_bag);
-            virtual_bag::enter_original(&g_virtual_bag_state, original_bag);
-            g_extension_touch_capture = false;
-            g_extension_drag = {};
-            persist_state_locked();
-            VIRTBAG_LOG("extension tab returned to original bag=%d", original_bag);
+        // 二次点击 = 袋信息态（原版语义：desc_type=1 + MakeDesc；解除按钮在信息页）。
+        // 退出模块视图仅经原版袋按钮或 exit_view 端点。
+        if (virtual_bag::click(&g_virtual_bag_state, extension_bag) ==
+            virtual_bag::ClickResult::kInspected) {
+            play_extension_switch_sound();
+            VIRTBAG_LOG("extension bag info opened bag=%d", extension_bag);
         }
     }
 }
@@ -694,6 +701,12 @@ void recover_pending_transaction_locked() {
     (void)restore_bag;
 }
 
+// P3 所有权账本（ownership_ledger.h）：借出对象四态跟踪。
+// materialize → kModuleOwned；install 投影 → kBorrowedForView；restore 收回 → kModuleOwned；
+// free → kReleased；原版接管（P4 事务桥接）→ kInventoryOwned。
+ownership::Ledger g_ownership_ledger{};
+uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount]{};
+
 void free_module_object_locked(int bag, int slot) {
     if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return;
@@ -701,10 +714,12 @@ void free_module_object_locked(int bag, int slot) {
     void* item = g_module_objects[bag][slot];
     if (item != nullptr && fn_itempool_free != nullptr) {
         fn_itempool_free(item);
+        ownership::release(&g_ownership_ledger, g_module_object_handles[bag][slot]);
     }
     g_module_objects[bag][slot] = nullptr;
     g_module_object_categories[bag][slot] = 0;
     g_module_object_hashes[bag][slot] = 0;
+    g_module_object_handles[bag][slot] = 0;
 }
 
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
@@ -973,7 +988,7 @@ bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
 }
 
 bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag) {
-    if (target_bag < 0 || target_bag >= 6 || !virtual_bag::valid_index(src_bag) ||
+    if (target_bag < 0 || target_bag >= 6 || target_bag == 5 || !virtual_bag::valid_index(src_bag) ||
         src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
         fn_inven_save_item_on_empty == nullptr) {
         VIRTBAG_LOG("cross move reject extension->original src=%d/%d target_bag=%d", src_bag,
@@ -1276,6 +1291,11 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
         }
         const int target_bag = original_bag_button_index(x, y);
         if (target_bag >= 0 && target_bag < 6) {
+            if (target_bag == 5) {
+                // 索引 5 = 原版任务袋（ADR-006）：不得成为扩展移动目标（触摸路径与 API 门禁对齐）。
+                VIRTBAG_LOG("drop reject extension->original target=task bag(5)");
+                return false;
+            }
             const bool handled = move_extension_to_original_locked(
                 g_extension_drag.bag, g_extension_drag.slot, target_bag);
             VIRTBAG_LOG("drop result direction=extension->original handled=%d src=%d/%d target_bag=%d",
@@ -1307,6 +1327,7 @@ bool persist_state_locked(bool force) {
 
 bool extension_tab_hit(int index, int64_t x, int64_t y) {
     if (!virtual_bag::valid_index(index)) return false;
+    if (g_virtual_bag_state.capacities[index] == 0) return false;  // 未装备袋不可命中（G-12）
     const int64_t tab_y = kCellY + index * kCellStepY;
     return x >= kCellX && x < kCellX + kExtensionTabWidth &&
            y >= tab_y && y < tab_y + kExtensionTabHeight;
@@ -1346,9 +1367,15 @@ void draw_cells_in_frame_locked() {
             const UiRect tab_size{0, 0, kExtensionTabWidth, kExtensionTabHeight};
             const bool selected = g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
                                   g_virtual_bag_state.selected == index;
-            ui_draw_button_background(button, tab_size, selected ? 0xff9a6a2f : 0xff6b3f1f);
-            ui_draw_button_border(button, tab_size, selected ? 0xffffd875 : 0xffffffff, 2);
-            ui_draw_text_centered(button, 8, 0xffffffff);
+            const bool disabled = g_virtual_bag_state.capacities[index] == 0;
+            ui_draw_button_background(button, tab_size,
+                                      disabled ? 0xff2b2b2b
+                                               : (selected ? 0xff9a6a2f : 0xff6b3f1f));
+            ui_draw_button_border(button, tab_size,
+                                  disabled ? 0xff555555
+                                           : (selected ? 0xffffd875 : 0xffffffff),
+                                  2);
+            ui_draw_text_centered(button, 8, disabled ? 0xff888888 : 0xffffffff);
         }
     }
 
@@ -1602,11 +1629,35 @@ void* module_item_locked(int bag, int slot) {
         free_module_object_locked(bag, slot);
         item = materialize_module_item_locked(descriptor);
         if (item == nullptr) return nullptr;
+        uint32_t handle = 0;
+        if (ownership::allocate(&g_ownership_ledger, &handle) == ownership::Outcome::kOk) {
+            g_module_object_handles[bag][slot] = handle;  // module-owned（G-13）
+        }
         g_module_objects[bag][slot] = item;
         g_module_object_categories[bag][slot] = descriptor.category;
         g_module_object_hashes[bag][slot] = descriptor_hash;
     }
     return item;
+}
+
+// 保存门禁（P3 事故修复）：SAVE_SaveInventory 被游戏内部直调（存档面板/自动存档），
+// 投影安装期间执行会把 INVEN 投影态写进存档（E-2026-08-29-02 污染事故根因）。
+// 通过替换 SAVE_Save 内唯一 bl 调用点，保存前强制把投影写回快照。
+typedef uint32_t (*SaveInventoryRawFn)(uint8_t* cursor);
+uint32_t save_inventory_wrapper(uint8_t* cursor) {
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (g_module_view_installed) {
+            VIRTBAG_LOG("save gate: restoring projected view before SAVE_SaveInventory");
+            restore_module_view_locked();
+        }
+    }
+    const uintptr_t raw = g_base != 0
+                              ? g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_VMA",
+                                                    F_SAVE_SAVE_INVENTORY_VMA)
+                              : 0;
+    if (raw == 0) return 0;
+    return reinterpret_cast<SaveInventoryRawFn>(raw)(cursor);
 }
 
 // 正式窗口投影（P2，control-plane 阶段 P2）：借出对象写入原版装备窗口数据源，
@@ -1642,6 +1693,10 @@ bool install_module_view_locked(int bag) {
     for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
         inventory[bag_offset + slot] =
             slot < capacity ? module_item_locked(bag, slot) : nullptr;
+        if (slot < capacity) {
+            ownership::borrow_for_view(&g_ownership_ledger,
+                                       g_module_object_handles[bag][slot]);  // G-13 borrowed-for-view
+        }
     }
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     *size_word = (*size_word & ~kCapacityMask) |
@@ -1659,6 +1714,12 @@ void restore_module_view_locked() {
     const size_t bag_offset = static_cast<size_t>(g_original_current_direct) * kInventorySlotStride;
     for (size_t slot = 0; slot < g_original_inventory.size(); ++slot) {
         inventory[bag_offset + slot] = g_original_inventory[slot];
+    }
+    if (g_module_view_index >= 0 && virtual_bag::valid_index(g_module_view_index)) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            ownership::return_from_view(&g_ownership_ledger,
+                                        g_module_object_handles[g_module_view_index][slot]);
+        }
     }
     if (g_original_bag_size_word != nullptr) *g_original_bag_size_word = g_original_bag_size;
     *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA) = g_original_current_direct;
@@ -1782,10 +1843,12 @@ void virtual_bag_draw_end_wrapper() {
     }
     ensure_state_loaded_locked();
     commit_pending_extension_tab_locked();
-    // Scheme C phase one never projects extension objects into g_inven. If a
-    // stale view came from an older in-process state, restore it once; normal
-    // module rendering is handled exclusively by the independent overlay.
-    if (g_module_view_installed) restore_module_view_locked();
+    // 投影常驻（P2/P3）：module 视图有效期间保持安装；仅在状态不再指向
+    // 模块视图（退出/切档/异常）时兜底恢复，防止遗留投影污染原版窗口。
+    const bool module_view_expected =
+        g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+        virtual_bag::valid_index(g_virtual_bag_state.selected);
+    if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
     static int last_mode = -1;
     static int last_selected = -2;
     static int last_overlay = -1;
@@ -2199,6 +2262,48 @@ bool inject_locked() {
         g_draw_patch_addr = call_addr;
         VIRTBAG_LOG("inventory draw restore hook patched call=%p replacement=0x%08x", reinterpret_cast<void*>(call_addr), replacement);
     }
+
+    if (g_save_inventory_patch_addr == 0) {
+        const uintptr_t call_addr =
+            g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_CALLSITE_VMA",
+                                F_SAVE_SAVE_INVENTORY_CALLSITE_VMA);
+        constexpr uint32_t kOriginalSaveCall = 0x97fff987;
+        const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&save_inventory_wrapper);
+        const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
+        uintptr_t branch_target = wrapper;
+        if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
+            g_save_inventory_thunk = allocate_draw_thunk(call_addr, wrapper);
+            if (g_save_inventory_thunk == nullptr) {
+                VIRTBAG_LOG("save gate thunk allocation failed call=%p wrapper=%p",
+                            reinterpret_cast<void*>(call_addr), wrapper);
+                return false;
+            }
+            branch_target = reinterpret_cast<uintptr_t>(g_save_inventory_thunk);
+        }
+        const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
+        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
+            VIRTBAG_LOG("save gate branch target out of range call=%p target=%p",
+                        reinterpret_cast<void*>(call_addr), branch_target);
+            return false;
+        }
+        const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+        const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            VIRTBAG_LOG("save gate patch mprotect failed errno=%d", errno);
+            return false;
+        }
+        const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
+        if (current != kOriginalSaveCall && current != replacement) {
+            VIRTBAG_LOG("save gate patch mismatch got=0x%08x", current);
+            return false;
+        }
+        *reinterpret_cast<uint32_t*>(call_addr) = replacement;
+        __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
+                                reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
+        g_save_inventory_patch_addr = call_addr;
+        VIRTBAG_LOG("save gate hook patched call=%p replacement=0x%08x",
+                    reinterpret_cast<void*>(call_addr), replacement);
+    }
     *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
     *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
     *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
@@ -2506,6 +2611,9 @@ std::string data_op_extension_bag_click_item(int logical_bag, int slot) {
         return op_err("not in extension view");
     }
     if (g_virtual_bag_state.selected != internal_bag) return op_err("bag not selected");
+    if (slot >= g_virtual_bag_state.capacities[internal_bag]) {
+        return op_err("slot beyond derived capacity");
+    }
     const virtual_bag::Item& item = g_virtual_bag_state.items[internal_bag][slot];
     if (item.category <= 0 || item.count <= 0) {
         g_virtual_bag_state.inspected = -1;
@@ -2520,6 +2628,26 @@ std::string data_op_extension_bag_click_item(int logical_bag, int slot) {
            ",\"count\":" + std::to_string(item.count) +
            ",\"payload\":\"" +
            virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
+}
+
+// P3 袋解除（原版语义）：有物品拒绝（弹窗拒绝对应此错误），空袋解除=装备清零+容量归 0。
+// 解除后的背包物品回流背包空位，等 P4 对象桥接（当前装备态为测试标记，无真实对象）。
+std::string data_op_extension_bag_unequip(int logical_bag) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    const int internal_bag = extension_internal_bag(logical_bag);
+    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (g_virtual_bag_state.capacities[internal_bag] == 0) return op_err("bag not equipped");
+    if (!virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag)) {
+        return op_err("bag not empty");
+    }
+    if (g_module_view_installed && g_module_view_index == internal_bag) {
+        restore_module_view_locked();
+    }
+    g_item_state_dirty = true;
+    if (persist_state_locked()) return op_ok();
+    return op_err("persist failed");
 }
 
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot) {

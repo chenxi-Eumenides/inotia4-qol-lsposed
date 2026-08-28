@@ -264,7 +264,8 @@ static void test_virtual_bag_state() {
     CHECK_EQ(state.selected, 0);
     CHECK_EQ(state.inspected, -1);
     CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kInspected);
-    CHECK_EQ(state.inspected, 0);
+    CHECK_EQ(state.info_bag, 0);
+    CHECK_EQ(state.inspected, -1);
     state = {};
     CHECK(virtual_bag::set_test_equipped(&state, 0, 1));
     CHECK_EQ((int)state.types[0], 1);
@@ -273,7 +274,8 @@ static void test_virtual_bag_state() {
     CHECK_EQ(state.selected, 0);
     CHECK_EQ(state.inspected, -1);
     CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kInspected);
-    CHECK_EQ(state.inspected, 0);
+    CHECK_EQ(state.info_bag, 0);
+    CHECK_EQ(state.inspected, -1);
     CHECK(virtual_bag::set_test_equipped(&state, 1, 4));
     CHECK_EQ((int)state.capacities[1], 16);
     CHECK_EQ(virtual_bag::click(&state, 1), virtual_bag::ClickResult::kSelected);
@@ -842,12 +844,38 @@ static void test_ownership_ledger() {
     CHECK(ownership::release(&ledger, 0x7FFFFFFF) == ownership::Outcome::kRejectUnknownHandle);
 }
 
+static void test_unequip_bag() {
+    virtual_bag::State state{};
+    CHECK(!virtual_bag::unequip_bag(&state, -1));
+    CHECK(!virtual_bag::unequip_bag(&state, 5));
+    CHECK(virtual_bag::set_test_equipped(&state, 0, 2));
+    CHECK_EQ(virtual_bag::unequip_bag(&state, 0), true);
+    CHECK_EQ((int)state.types[0], 0);
+    CHECK_EQ((int)state.capacities[0], 0);
+    CHECK_EQ(state.selected, -1);
+
+    CHECK(virtual_bag::set_test_equipped(&state, 1, 3));
+    CHECK_EQ(virtual_bag::click(&state, 1), virtual_bag::ClickResult::kSelected);
+    CHECK_EQ(virtual_bag::click(&state, 1), virtual_bag::ClickResult::kInspected);
+    CHECK_EQ(state.info_bag, 1);
+    CHECK(virtual_bag::set_item(&state, 1, 0, 7, 3));
+    CHECK_EQ(virtual_bag::unequip_bag(&state, 1), false);
+    CHECK_EQ((int)state.capacities[1], 12);
+    CHECK_EQ(state.info_bag, 1);
+    state.items[1][0] = {};
+    CHECK_EQ(virtual_bag::unequip_bag(&state, 1), true);
+    CHECK_EQ((int)state.capacities[1], 0);
+    CHECK_EQ(state.info_bag, -1);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kOriginal);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
     test_parse_int_field();
     test_tiles_parse();
     test_ownership_ledger();
+    test_unequip_bag();
     test_nav_bfs();
     test_nav_bfs_multi();
     test_stack_codec();

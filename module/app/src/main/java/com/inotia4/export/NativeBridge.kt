@@ -138,6 +138,7 @@ object NativeBridge {
     external fun nativeExtensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
     external fun nativeExtensionBagStatusJson(): String
     external fun nativeOpExtensionBagEnterView(bag: Int): String
+    external fun nativeOpExtensionBagUnequip(bag: Int): String
     external fun nativeOpExtensionBagExitView(): String
     external fun nativeOpExtensionBagSelectBag(bag: Int): String
     external fun nativeOpExtensionBagClickItem(bag: Int, slot: Int): String
