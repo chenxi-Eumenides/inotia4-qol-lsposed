@@ -311,6 +311,12 @@
 - 原版保存成功后，才允许提交扩展背包 sidecar；但保护原版与扩展一致性的 prepare journal 必须在调用原版保存之前独立落盘。
 - 持久化状态必须区分“已提交扩展状态”和“未提交 prepare journal”，不能仅按 payload 相等判断事务完成。journal 至少包含 `slotId`、`generation`、`transactionId`、源/目标身份、数量、payload 标识和提交阶段。
 - 正式顺序为：写入含 prepare journal 的 sidecar → 调用原版保存 → 原版成功后写入新扩展状态并提交 generation → sidecar 提交成功后清理 journal。任一步失败都保留 journal，重启时按 transactionId/generation 幂等重放或回滚，并记录最终选择。
+
+**prepare journal 格式 v1（2026-08-28 落地）**：
+- 落盘位置：sidecar 独立 section `extensionbags.journal`（v1），与 committed section `extensionbags.items` 物理分区；复用 ModuleSaveStore 的原子写/CRC/last-good/generation
+- 记录字段：`transactionId`（Kotlin `j-<millis>-<counter>` 生成）、`stage`（0=prepared / 1=original_saved / 2=sidecar_committed）、`generation`、方向、源/目标袋槽、payload（b64，与 PendingTransfer 同语义）、sourcePayload（ext→orig）
+- 恢复裁决 = `journal_recovery_action(state, journal, worldProbe)`（virtual_bag_state.h，host 测试覆盖）：**原版世界实态探针优先于 stage 标记**（stage 可能在"原版保存成功后、stage 落盘前"崩溃时落后于实态）——orig→ext 源槽已无源物品 ⇒ 重放扩展侧；仍有 ⇒ 回滚。ext→orig 反向对称。committed 已等于目标态或 stage=2 ⇒ 仅清理（幂等）。journal 非法 ⇒ kDiscard 隔离并告警，禁止按其重放
+- 执行顺序（P7 收口）：pending(内存) → journal(stage=0) → 原版变更+原版保存 → journal(stage=1) → sidecar 提交 committed → 清 journal
 - 原版保存失败时，扩展改动不得被标记为已保存；sidecar 写入失败或两者之间进程中断时，不得静默清除未完成事务。
 - 原版槽 `0..2` 与模块 sidecar 槽一一对应。
 - 扩展物品保存使用完整 `SAVE_SaveItem` payload，不保存 native 指针。
@@ -627,6 +633,7 @@
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.11 | 2026-08-28 | P1 prepare journal 格式 v1 落地：sidecar 独立 section `extensionbags.journal` + 三方对照恢复裁决（世界探针优先于 stage）；C++ JournalRecord/序列化/裁决纯函数 + Kotlin ExtensionBagJournal 存储辅助；host 测试 319 项通过 | 当前执行代理 |
 | v1.10 | 2026-08-28 | P1 容量派生契约 v1 落地：ITEMSTATICBASE 镜像 `derive_capacity(BagType)`（4/8/12/16）替换 kFixedCapacities 全部运行时读取；host 测试 284 项通过；ADR-004 标记已满足 | 当前执行代理 |
 | v1.9 | 2026-08-28 | P1 启动：容量派生逆向第一阶段完成（`docs/system/bag.md`）——袋对象=已装备背包物品对象、容量=物品+0x10 bit0..24、存档按容量循环编码袋内物品、真机实测 16/8/8/8/4；ADR-008 v2 已生效（原版背包 API 并入） | 当前执行代理 |
 | v1.8 | 2026-08-28 | 用户决策：取消独立扩展背包域，原版背包 API（bag 6..10 并入）为正式操作面，视图类端点迁入 `/api/debug/extension_bag/*`；ADR-008 修订为 v2；§4.1 操作面条款重写；v0.6.15 的 `/api/extension_bag/*` 移除 | 当前执行代理 |

@@ -48,6 +48,38 @@ struct Item {
 constexpr uint8_t kTransferOriginalToExtension = 0;
 constexpr uint8_t kTransferExtensionToOriginal = 1;
 
+// prepare journal 提交阶段（ADR-007）：跨进程恢复时与 committed state、原版世界实态三方对照裁决。
+constexpr uint8_t kJournalStagePrepared = 0;        // journal 已落盘，原版保存未执行
+constexpr uint8_t kJournalStageOriginalSaved = 1;   // 原版侧变更已持久化，sidecar 未提交
+constexpr uint8_t kJournalStageSidecarCommitted = 2; // 两侧均完成，仅待清 journal
+
+// sidecar journal 区段（Kotlin 侧常量镜像，见 ExtensionBagJournal）。
+constexpr const char* kJournalSectionName = "extensionbags.journal";
+constexpr int kJournalSectionVersion = 1;
+constexpr size_t kMaxTransactionIdChars = 64;
+
+// 落盘 journal：与内存 PendingTransfer 携带同样的变更语义，外加事务标识与提交阶段。
+struct JournalRecord {
+    bool valid = false;
+    uint8_t stage = kJournalStagePrepared;
+    uint64_t generation = 0;  // 写 journal 时的 sidecar 容器 generation
+    char transaction_id[kMaxTransactionIdChars + 1]{};  // NUL 结尾，Kotlin 生成
+    uint8_t direction = kTransferOriginalToExtension;
+    uint8_t src_bag = 0;
+    uint8_t src_slot = 0;
+    uint8_t dst_bag = 0;
+    uint8_t dst_slot = 0;
+    uint16_t payload_size = 0;
+    std::array<uint8_t, kSerializedItemBuffer> payload{};
+    uint16_t source_payload_size = 0;
+    std::array<uint8_t, kSerializedItemBuffer> source_payload{};
+};
+
+// 原版世界实态探针结果：恢复必须在游戏世界加载后对照真实槽位，不能只信 journal。
+struct WorldProbe {
+    bool original_slot_holds_payload = false;  // orig→ext：原版源槽仍有源物品；ext→orig：原版目标槽已有该物品
+};
+
 // 可恢复事务记录：先写 pending → 提交状态 → 变更原版 → fn_save → 清 pending。
 // 载荷语义随方向变化：
 //   orig→ext：提交后目标扩展槽应持有的完整载荷（合并时数量位段已修补）；
@@ -191,6 +223,65 @@ inline RecoveryAction recovery_action(const State& state, const PendingTransfer&
     return item_matches_payload(state.items[pending.src_bag][pending.src_slot], pending)
                ? RecoveryAction::kRollback
                : RecoveryAction::kComplete;
+}
+
+// ---- 跨进程 prepare journal（ADR-007 v1，section: extensionbags.journal）----
+
+enum class JournalRecovery {
+    kDiscard,          // journal 损坏/非法：隔离并告警，禁止按其重放（静默覆盖禁令）
+    kRollback,         // 原版侧未持久化：清 journal 与 pending，committed 不变
+    kReplayToSidecar,  // 原版侧已持久化：把变更应用到 committed 并提交（幂等）
+    kJustClear,        // 两侧均完成：仅清 journal
+};
+
+// JournalRecord 与 Item 的 payload 一致性（数量位段无关的全量比对，复用 Item 匹配语义）。
+inline bool journal_slot_holds_payload(const Item& item, const JournalRecord& journal) {
+    PendingTransfer pending{};
+    pending.valid = true;
+    pending.payload_size = journal.payload_size;
+    pending.payload = journal.payload;
+    return item_matches_payload(item, pending);
+}
+
+inline bool valid_journal_record(const JournalRecord& journal) {
+    if (!journal.valid) return false;
+    if (journal.stage > kJournalStageSidecarCommitted) return false;
+    const size_t id_len = std::strlen(journal.transaction_id);
+    if (id_len == 0 || id_len > kMaxTransactionIdChars) return false;
+    const bool original_to_extension = journal.direction == kTransferOriginalToExtension;
+    const bool slot_invalid = journal.src_slot >= kSlotCount || journal.dst_slot >= kSlotCount ||
+                              (original_to_extension &&
+                               (journal.src_bag >= 6 || journal.dst_bag >= kBagCount)) ||
+                              (!original_to_extension &&
+                               (journal.src_bag >= kBagCount || journal.dst_bag >= 6));
+    if (slot_invalid) return false;
+    if (journal.payload_size > 0 &&
+        (journal.payload_size < kPayloadHeaderSize || journal.payload_size > kMaxSerializedItem)) {
+        return false;
+    }
+    return true;
+}
+
+// 三方对照裁决（journal stage × committed state × 原版世界实态）。
+// stage 标记可能落后于实态（原版保存成功后、stage 落盘前崩溃），因此世界探针优先于 stage：
+//   orig→ext：原版源槽已无源物品 ⇒ 原版侧已持久化 ⇒ 重放扩展侧；仍有 ⇒ 回滚。
+//   ext→orig：原版目标槽已有该物品 ⇒ 原版侧已持久化 ⇒ 重放扩展侧（删源槽）；没有 ⇒ 回滚。
+// stage=2 或「committed 已等于目标态」时仅需清理（幂等）。
+inline JournalRecovery journal_recovery_action(const State& state,
+                                               const JournalRecord& journal,
+                                               const WorldProbe& probe) {
+    if (!valid_journal_record(journal)) return JournalRecovery::kDiscard;
+    if (journal.stage == kJournalStageSidecarCommitted) return JournalRecovery::kJustClear;
+    const bool original_to_extension = journal.direction == kTransferOriginalToExtension;
+    const bool original_side_persisted = original_to_extension
+                                             ? !probe.original_slot_holds_payload
+                                             : probe.original_slot_holds_payload;
+    if (!original_side_persisted) return JournalRecovery::kRollback;
+    const bool sidecar_committed =
+        original_to_extension
+            ? journal_slot_holds_payload(state.items[journal.dst_bag][journal.dst_slot], journal)
+            : state.items[journal.src_bag][journal.src_slot].category == 0;
+    return sidecar_committed ? JournalRecovery::kJustClear : JournalRecovery::kReplayToSidecar;
 }
 
 inline void normalize(State* state) {
@@ -347,6 +438,120 @@ inline int base64_decode(const char* text, size_t len, uint8_t* out, size_t cap)
         out[written++] = static_cast<uint8_t>(b & 0xFF);
     }
     return static_cast<int>(written);
+}
+
+inline JournalRecord journal_from_pending(const PendingTransfer& pending, uint64_t generation) {
+    JournalRecord journal{};
+    journal.valid = pending.valid;
+    journal.stage = kJournalStagePrepared;
+    journal.generation = generation;
+    journal.direction = pending.direction;
+    journal.src_bag = pending.src_bag;
+    journal.src_slot = pending.src_slot;
+    journal.dst_bag = pending.dst_bag;
+    journal.dst_slot = pending.dst_slot;
+    journal.payload_size = pending.payload_size;
+    journal.payload = pending.payload;
+    journal.source_payload_size = pending.source_payload_size;
+    journal.source_payload = pending.source_payload;
+    return journal;
+}
+
+inline std::string journal_json(const JournalRecord& journal) {
+    std::string json = "{\"transactionId\":\"";
+    json += journal.transaction_id;
+    json += "\",\"stage\":" + std::to_string(journal.stage);
+    json += ",\"generation\":" + std::to_string(journal.generation);
+    json += ",\"direction\":" + std::to_string(journal.direction);
+    json += ",\"srcBag\":" + std::to_string(journal.src_bag);
+    json += ",\"srcSlot\":" + std::to_string(journal.src_slot);
+    json += ",\"dstBag\":" + std::to_string(journal.dst_bag);
+    json += ",\"dstSlot\":" + std::to_string(journal.dst_slot);
+    if (journal.payload_size > 0) {
+        json += ",\"payload\":\"" +
+                base64_encode(journal.payload.data(), journal.payload_size) + "\"";
+    }
+    if (journal.source_payload_size > 0) {
+        json += ",\"sourcePayload\":\"" +
+                base64_encode(journal.source_payload.data(), journal.source_payload_size) + "\"";
+    }
+    json += "}";
+    return json;
+}
+
+inline bool parse_journal_json(const char* json, JournalRecord* out) {
+    if (json == nullptr || out == nullptr) return false;
+    JournalRecord parsed{};
+    const char* id_key = strstr(json, "\"transactionId\":\"");
+    if (id_key == nullptr) return false;
+    const char* id_begin = id_key + strlen("\"transactionId\":\"");
+    const char* id_end = strchr(id_begin, '"');
+    if (id_end == nullptr) return false;
+    const size_t id_len = static_cast<size_t>(id_end - id_begin);
+    if (id_len == 0 || id_len > kMaxTransactionIdChars) return false;
+    std::memcpy(parsed.transaction_id, id_begin, id_len);
+    parsed.transaction_id[id_len] = '\0';
+    auto parse_u64 = [&](const char* name, uint64_t* dst) -> bool {
+        const std::string pattern = std::string("\"") + name + "\":";
+        const char* pos = strstr(json, pattern.c_str());
+        if (pos == nullptr) return false;
+        char* end = nullptr;
+        const unsigned long long v = strtoull(pos + pattern.size(), &end, 10);
+        if (end == pos + static_cast<std::ptrdiff_t>(pattern.size())) return false;
+        *dst = static_cast<uint64_t>(v);
+        return true;
+    };
+    uint64_t stage = 0;
+    if (!parse_u64("stage", &stage) || stage > kJournalStageSidecarCommitted) return false;
+    parsed.stage = static_cast<uint8_t>(stage);
+    if (!parse_u64("generation", &parsed.generation)) return false;
+    auto parse_u8 = [&](const char* name, uint8_t* dst) -> bool {
+        uint64_t v = 0;
+        if (!parse_u64(name, &v) || v > 0xFF) return false;
+        *dst = static_cast<uint8_t>(v);
+        return true;
+    };
+    if (!parse_u8("direction", &parsed.direction) || parsed.direction > kTransferExtensionToOriginal) {
+        return false;
+    }
+    if (!parse_u8("srcBag", &parsed.src_bag) || !parse_u8("srcSlot", &parsed.src_slot) ||
+        !parse_u8("dstBag", &parsed.dst_bag) || !parse_u8("dstSlot", &parsed.dst_slot)) {
+        return false;
+    }
+    const char* payload_key = strstr(json, "\"payload\":\"");
+    if (payload_key != nullptr) {
+        const char* b64 = payload_key + strlen("\"payload\":\"");
+        const char* end_quote = strchr(b64, '"');
+        if (end_quote == nullptr) return false;
+        const size_t b64_len = static_cast<size_t>(end_quote - b64);
+        if (b64_len == 0 || b64_len > 512) return false;
+        const int decoded = base64_decode(b64, b64_len, parsed.payload.data(), parsed.payload.size());
+        if (decoded < static_cast<int>(kPayloadHeaderSize) ||
+            decoded > static_cast<int>(kMaxSerializedItem)) {
+            return false;
+        }
+        parsed.payload_size = static_cast<uint16_t>(decoded);
+    }
+    const char* source_key = strstr(json, "\"sourcePayload\":\"");
+    if (source_key != nullptr) {
+        const char* source_b64 = source_key + strlen("\"sourcePayload\":\"");
+        const char* source_end = strchr(source_b64, '\"');
+        if (source_end == nullptr) return false;
+        const size_t source_len = static_cast<size_t>(source_end - source_b64);
+        if (source_len == 0 || source_len > 512) return false;
+        const int source_decoded =
+            base64_decode(source_b64, source_len, parsed.source_payload.data(),
+                          parsed.source_payload.size());
+        if (source_decoded < static_cast<int>(kPayloadHeaderSize) ||
+            source_decoded > static_cast<int>(kMaxSerializedItem)) {
+            return false;
+        }
+        parsed.source_payload_size = static_cast<uint16_t>(source_decoded);
+    }
+    parsed.valid = true;
+    if (!valid_journal_record(parsed)) return false;
+    *out = parsed;
+    return true;
 }
 
 inline std::string state_json(const State& state) {

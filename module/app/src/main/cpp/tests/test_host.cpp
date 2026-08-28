@@ -624,6 +624,148 @@ static void test_save_preflight_json() {
     CHECK(semantic.find("hero pointer is null") != npos);
 }
 
+static void test_prepare_journal() {
+    using namespace virtual_bag;
+    auto base_record = []() {
+        JournalRecord journal{};
+        journal.valid = true;
+        journal.stage = kJournalStagePrepared;
+        journal.generation = 7;
+        std::memcpy(journal.transaction_id, "j-1724800000-1", sizeof("j-1724800000-1"));
+        journal.direction = kTransferOriginalToExtension;
+        journal.src_bag = 0;
+        journal.src_slot = 4;
+        journal.dst_bag = 6 - 6;
+        journal.dst_slot = 0;
+        return journal;
+    };
+
+    CHECK(!valid_journal_record(JournalRecord{}));
+    {
+        JournalRecord journal = base_record();
+        journal.valid = false;
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.transaction_id[0] = '\0';
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.stage = 3;
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.src_bag = 6;
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.direction = kTransferExtensionToOriginal;
+        journal.src_bag = kBagCount;
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.payload_size = kPayloadHeaderSize - 1;
+        CHECK(!valid_journal_record(journal));
+    }
+
+    State state{};
+    CHECK(set_test_equipped(&state, 0, 2));
+    Item source_item{};
+    source_item.category = 7;
+    source_item.count = 3;
+    source_item.payload_size = kPayloadHeaderSize;
+    source_item.payload[0] = static_cast<uint8_t>(kPayloadHeaderSize - 1);
+    for (size_t i = 1; i < kPayloadHeaderSize; ++i) source_item.payload[i] = static_cast<uint8_t>(i);
+
+    const WorldProbe source_held{true};
+    const WorldProbe source_gone{false};
+
+    {
+        JournalRecord journal = base_record();
+        journal.payload = source_item.payload;
+        journal.payload_size = source_item.payload_size;
+        CHECK(journal_recovery_action(state, journal, source_held) == JournalRecovery::kRollback);
+        CHECK(journal_recovery_action(state, journal, source_gone) == JournalRecovery::kReplayToSidecar);
+        journal.stage = kJournalStageOriginalSaved;
+        CHECK(journal_recovery_action(state, journal, source_held) == JournalRecovery::kRollback);
+        CHECK(journal_recovery_action(state, journal, source_gone) == JournalRecovery::kReplayToSidecar);
+        State committed = state;
+        committed.items[0][0] = source_item;
+        CHECK(journal_recovery_action(committed, journal, source_gone) == JournalRecovery::kJustClear);
+        journal.stage = kJournalStageSidecarCommitted;
+        CHECK(journal_recovery_action(state, journal, source_held) == JournalRecovery::kJustClear);
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.direction = kTransferExtensionToOriginal;
+        journal.src_bag = 0;
+        journal.src_slot = 0;
+        journal.dst_bag = 1;
+        journal.dst_slot = 5;
+        State with_source = state;
+        with_source.items[0][0] = source_item;
+        const WorldProbe original_empty{false};
+        const WorldProbe original_received{true};
+        CHECK(journal_recovery_action(with_source, journal, original_empty) == JournalRecovery::kRollback);
+        CHECK(journal_recovery_action(with_source, journal, original_received) ==
+              JournalRecovery::kReplayToSidecar);
+        State cleared = state;
+        CHECK(journal_recovery_action(cleared, journal, original_received) == JournalRecovery::kJustClear);
+    }
+
+    {
+        JournalRecord journal = base_record();
+        journal.payload = source_item.payload;
+        journal.payload_size = source_item.payload_size;
+        journal.source_payload = source_item.payload;
+        journal.source_payload_size = source_item.payload_size;
+        const std::string encoded = journal_json(journal);
+        JournalRecord parsed{};
+        CHECK(parse_journal_json(encoded.c_str(), &parsed));
+        CHECK_EQ(parsed.generation, journal.generation);
+        CHECK_EQ((int)parsed.stage, (int)journal.stage);
+        CHECK_EQ((int)parsed.direction, (int)journal.direction);
+        CHECK_EQ(parsed.src_bag, journal.src_bag);
+        CHECK_EQ(parsed.dst_slot, journal.dst_slot);
+        CHECK(std::strcmp(parsed.transaction_id, journal.transaction_id) == 0);
+        CHECK_EQ((int)parsed.payload_size, (int)journal.payload_size);
+        CHECK(std::memcmp(parsed.payload.data(), journal.payload.data(), journal.payload_size) == 0);
+        CHECK_EQ((int)parsed.source_payload_size, (int)journal.source_payload_size);
+        JournalRecord corrupted{};
+        CHECK(!parse_journal_json("{\"transactionId\":\"\"}", &corrupted));
+        CHECK(!parse_journal_json("not json", &corrupted));
+        CHECK(!parse_journal_json(
+            "{\"transactionId\":\"x\",\"stage\":9,\"generation\":1,\"direction\":0,"
+            "\"srcBag\":0,\"srcSlot\":0,\"dstBag\":0,\"dstSlot\":0}",
+            &corrupted));
+    }
+
+    {
+        PendingTransfer pending{};
+        pending.valid = true;
+        pending.direction = kTransferExtensionToOriginal;
+        pending.src_bag = 2;
+        pending.src_slot = 1;
+        pending.dst_bag = 1;
+        pending.dst_slot = 4;
+        pending.payload_size = kPayloadHeaderSize;
+        pending.payload[0] = static_cast<uint8_t>(kPayloadHeaderSize - 1);
+        const JournalRecord journal = journal_from_pending(pending, 42);
+        CHECK(!valid_journal_record(journal));
+        JournalRecord identified = journal;
+        std::memcpy(identified.transaction_id, "j-1724800000-9", sizeof("j-1724800000-9"));
+        CHECK(valid_journal_record(identified));
+        CHECK_EQ(journal.generation, 42u);
+        CHECK_EQ((int)journal.direction, (int)kTransferExtensionToOriginal);
+        CHECK_EQ(journal.src_bag, 2);
+    }
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -634,6 +776,7 @@ int main() {
     test_stack_codec();
     test_virtual_bag_state();
     test_extension_bag_exit_rendering_state();
+    test_prepare_journal();
     test_virtual_bag_base64();
     test_virtual_bag_payload_helpers();
     test_virtual_bag_merge_count();
