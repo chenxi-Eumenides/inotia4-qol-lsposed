@@ -1690,15 +1690,18 @@ bool install_module_view_locked(int bag) {
     *size_word = (*size_word & ~kCapacityMask) |
                  (static_cast<uint32_t>(capacity) & kCapacityMask);
 
-    void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA + 0x8);
+    void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
     g_projected_item_root = root;
     if (root != nullptr && fn_ui_equip_refresh_item_area != nullptr) {
         fn_ui_equip_refresh_item_area();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
         for (int slot = 0; slot < capacity; ++slot) {
             void* ctrl = fn_control_object_get_child(root, slot);
+            if (ctrl == nullptr) continue;
             void* item = module_item_locked(bag, slot);
-            if (ctrl != nullptr && item != nullptr) {
-                fn_control_item_set_item(ctrl, item);  // 控件投影覆盖（INVEN 不动）
+            // 空槽也必须 SetItem(nullptr)：RefreshItemArea 刚把 INVEN 原版物品刷进控件，
+            // 扩展袋空位不覆盖的话会残留原版物品显示。
+            fn_control_item_set_item(ctrl, item);
+            if (item != nullptr) {
                 ownership::borrow_for_view(&g_ownership_ledger,
                                            g_module_object_handles[bag][slot]);
             }
@@ -1720,14 +1723,18 @@ void refresh_projection_if_overwritten_locked() {
     }
     const int bag = g_module_view_index;
     const int capacity = g_virtual_bag_state.capacities[bag];
+    static int heal_count = 0;
     for (int slot = 0; slot < capacity; ++slot) {
-        void* item = g_module_objects[bag][slot];
+        void* item = g_module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
         void* ctrl = fn_control_object_get_child(g_projected_item_root, slot);
-        if (item == nullptr || ctrl == nullptr) continue;
+        if (ctrl == nullptr) continue;
         void* data = fn_control_object_get_data(ctrl);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != item) {
+            ++heal_count;
             fn_control_item_set_item(ctrl, item);
+            VIRTBAG_LOG("projection heal #%d slot=%d current=%p item=%p",
+                        heal_count, slot, current, item);
         }
     }
 }
