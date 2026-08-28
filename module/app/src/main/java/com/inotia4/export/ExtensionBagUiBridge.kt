@@ -1,8 +1,11 @@
 package com.inotia4.export
 
+import android.content.Context
+import android.content.pm.PackageManager
 import com.inotia4.export.store.ModuleSaveStore
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
 /**
  * Module-owned extension backpack data. It persists stable item descriptors plus lossless native
@@ -17,8 +20,40 @@ object ExtensionBagUiBridge {
     private const val BAG_COUNT = 5
     private const val SLOT_COUNT = 16
     private const val MAX_PAYLOAD_CHARS = 512
+    private const val IDENTITY_KEY = "gameIdentity"
 
     private val payloadPattern = Regex("^[A-Za-z0-9+/]*={0,2}$")
+
+    @Volatile
+    private var appContext: Context? = null
+
+    /** Idempotent; ApiServer restart may call it again. */
+    @JvmStatic
+    fun initialize(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    /**
+     * Host-game identity for sidecar deserialization gating (control-plane §9 P1): signature
+     * digest prefix changes only when the APK binary identity changes; same-signature game
+     * updates keep sidecar data readable.
+     */
+    private fun gameIdentity(): String? {
+        val context = appContext ?: return null
+        return try {
+            val info = context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES,
+            )
+            val signatures = info.signingInfo?.apkContentsSigners ?: return null
+            val signature = signatures.firstOrNull() ?: return null
+            val digest = MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
+            digest.take(8).joinToString("") { "%02x".format(it) }
+        } catch (t: Throwable) {
+            LogFile.logError("extension bag identity unavailable", t)
+            null
+        }
+    }
 
     @JvmStatic
     fun loadStateJson(slot: Int): String {
@@ -35,6 +70,10 @@ object ExtensionBagUiBridge {
             3 -> raw // v3 旧描述符：仅 category/count，无序列化载荷，解析后按 v4 重写
             SECTION_VERSION -> raw
             else -> return defaultStateJson()
+        }
+        if (!identityAcceptable(payload)) {
+            LogFile.log("extension bag slot=$slot rejected: incompatible game identity")
+            return defaultStateJson()
         }
         val parsed = payload?.let {
             parseState(it, rejectPayloadlessItems = section.version == SECTION_VERSION)
@@ -54,9 +93,23 @@ object ExtensionBagUiBridge {
         return parsed?.toString() ?: defaultStateJson()
     }
 
+    private fun identityAcceptable(payload: String?): Boolean {
+        if (payload == null) return true
+        val stored = try {
+            JSONObject(payload).optString(IDENTITY_KEY, "")
+        } catch (t: Throwable) {
+            LogFile.logError("extension bag state unreadable", t)
+            return false
+        }
+        if (stored.isEmpty()) return true // 旧格式或 unknown 身份：按可读处理
+        val current = gameIdentity() ?: return true // 身份不可得时不阻断（host/诊断期）
+        return stored == current
+    }
+
     @JvmStatic
     fun saveStateJson(slot: Int, stateJson: String): String {
         val normalized = parseState(stateJson) ?: return "error:invalid_state"
+        gameIdentity()?.let { normalized.put(IDENTITY_KEY, it) }
         return try {
             val saved = ModuleSaveStore.writeSection(
                 slot,

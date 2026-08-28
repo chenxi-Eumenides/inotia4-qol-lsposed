@@ -46,6 +46,7 @@ object ApiServer {
         // 模块配置组件：外部 config.json 为唯一来源（v0.5.21 起不再读 assets；缺失用默认值并写入外部存储）
         ModuleConfig.load(context)
         ModuleSaveStore.initialize(context)
+        ExtensionBagUiBridge.initialize(context)
         // 功能开关通知 native 生效 + 静态瓦片矩阵加载（v0.5.18/2026-08-12；v0.5.46 收口到 ConfigApiService）
         ApiServices.config.applyToNative()
         if (!startServer(context)) {

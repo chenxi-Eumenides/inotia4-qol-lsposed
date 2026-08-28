@@ -333,7 +333,7 @@
 | 阶段 | 状态 | 闸门 |
 |---|---|---|
 | P0 | ✅ 通过（2026-08-28，E-2026-08-28-01） | 身份、唯一真机 API 原版基线和证据 |
-| P1 | 🔄 可启动（E-2026-08-28-02：正式 API 就绪） | 逻辑背包模型与 sidecar 原型：容量派生逆向、所有权状态机、prepare journal、host 测试 |
+| P1 | ✅ 通过（2026-08-29，E-2026-08-28-03：v0.6.17/175 真机验证） | 逻辑背包模型与 sidecar 原型：容量派生逆向、所有权状态机、prepare journal、host 测试 |
 | P2–P8 | 📋 待启动 | 依赖前一阶段通过 |
 
 ### 阶段 P0：冻结原版基线与可复现身份
@@ -380,6 +380,15 @@
 - host 测试覆盖正常 payload、非法 payload、不同物品身份、99/999 上限、空槽/满槽和所有 pending 阶段。
 - 使用固定样本验证 v4 `SAVE_SaveItem` payload 在 normalize、JSON 往返、合并和恢复路径中不丢失。
 - 覆盖语义损坏 payload 的隔离、只读诊断和禁止静默覆盖；验证不兼容 APK/libgame 身份拒绝反序列化。
+
+**P1 完成登记（2026-08-29，证据链 `404f3c3`→`06b42b7`→`f3e25f1`→`2f6340c`→`362c220`）**
+
+- 容量派生：逆向全链闭环（`docs/system/bag.md` §5，ITEMSTATICBASE 4/8/12/16）+ `derive_capacity` 实现 + 真机端到端（equip 手包→4/中包→12、保存→重启→capacities 由 types 派生重建）
+- 所有权状态机：`ownership_ledger.h` 四态转移表 + generation 句柄 + 计数审计（host 33 用例）；运行时接线属 P3
+- prepare journal v1：独立 section `extensionbags.journal` + 三方对照恢复裁决（世界探针优先于 stage）+ Kotlin 存储辅助
+- 游戏身份绑定：`gameIdentity`（签名摘要前缀）写入 committed state section；不匹配身份拒绝反序列化并隔离为默认态
+- 完成要求对照：纯逻辑移动/合并/满包/取消/回滚/恢复可确定重放 ✓（host 356 用例）；扩展状态不含 native 指针 ✓（payload=字节序列化+category/count 缓存）；sidecar 写失败不丢可恢复事务 ✓（journal 独立 section 复用容器原子写/CRC/last-good）
+- 真机 v0.6.17 附带修复两缺陷并登记 backlog：跨袋同槽移动误拒、锁内 op_ok 自死锁（模式约束进 P7 审计）
 
 ### 阶段 P2：原版 UI 只读窗口原型
 
@@ -633,6 +642,7 @@
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.13 | 2026-08-29 | P1 收尾通过：游戏身份绑定（gameIdentity 签名摘要）+ C++ 前向兼容用例；host 测试 356 项；P1 阶段标记 ✅（E-2026-08-28-03） | 当前执行代理 |
 | v1.12 | 2026-08-28 | v0.6.17/175 真机验证通过（E-2026-08-28-03）：派生容量端到端（equip 手包→4/中包→12/未装备→0；保存→重启→capacities 由 types 派生重建）；修复两缺陷——跨袋同槽移动误拒（预存在 `requested_dst_slot == src_slot` 条件）、world 下 debug equip/item 自死锁（op_ok 锁内触发 frame 刷新抢同锁，模式登记 backlog） | 当前执行代理 |
 | v1.11 | 2026-08-28 | P1 prepare journal 格式 v1 落地：sidecar 独立 section `extensionbags.journal` + 三方对照恢复裁决（世界探针优先于 stage）；C++ JournalRecord/序列化/裁决纯函数 + Kotlin ExtensionBagJournal 存储辅助；host 测试 319 项通过 | 当前执行代理 |
 | v1.10 | 2026-08-28 | P1 容量派生契约 v1 落地：ITEMSTATICBASE 镜像 `derive_capacity(BagType)`（4/8/12/16）替换 kFixedCapacities 全部运行时读取；host 测试 284 项通过；ADR-004 标记已满足 | 当前执行代理 |

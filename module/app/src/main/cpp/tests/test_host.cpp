@@ -765,6 +765,29 @@ static void test_prepare_journal() {
         CHECK_EQ((int)journal.direction, (int)kTransferExtensionToOriginal);
         CHECK_EQ(journal.src_bag, 2);
     }
+
+    {
+        const char* with_unknown_fields =
+            "{\"gameIdentity\":\"aabbccdd00112233\",\"futureField\":{\"x\":1},"
+            "\"mode\":\"module\",\"originalSelected\":1,\"types\":[2,0,0,0,0],"
+            "\"selected\":0,\"inspected\":-1,\"items\":[" ;
+        std::string json = with_unknown_fields;
+        for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+            json += '[';
+            for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+                if (slot > 0) json += ',';
+                json += (bag == 0 && slot == 0) ? R"({"category":7,"count":5})" : "{\"category\":0,\"count\":0}";
+            }
+            json += ']';
+            if (bag + 1 < virtual_bag::kBagCount) json += ',';
+        }
+        json += "]}";
+        virtual_bag::State forward{};
+        CHECK(virtual_bag::parse_state_json(json.c_str(), &forward));
+        CHECK_EQ(forward.items[0][0].category, 7);
+        CHECK_EQ(forward.items[0][0].count, 5);
+        CHECK_EQ(forward.selected, 0);
+    }
 }
 
 static void test_ownership_ledger() {
