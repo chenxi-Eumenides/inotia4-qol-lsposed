@@ -2474,19 +2474,50 @@ bool virtual_bag_save_game() {
     return state_saved && result != 0;
 }
 
+// G-14（方案 C）：原版物品操作后 RefreshItemArea 会以 INVEN 重刷控件，窗口袋投影需重写。
+// 投影只占窗口袋；其他袋调用为 no-op。调用方（data_op_*）不持模块锁，此处安全获锁。
 bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
-    (void)display_bag;
-    (void)slot;
-    return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
+        g_projected_item_root == nullptr || fn_control_object_get_child == nullptr ||
+        fn_control_item_set_item == nullptr) {
+        return false;
+    }
+    if (display_bag < 0 || display_bag >= 5 || display_bag != original_bag_locked()) {
+        return false;
+    }
+    if (slot < 0 || slot >= g_virtual_bag_state.capacities[g_module_view_index]) {
+        return false;
+    }
+    void* ctrl = fn_control_object_get_child(g_projected_item_root, slot);
+    void* item = g_module_objects[g_module_view_index][slot];
+    if (ctrl == nullptr) return false;
+    fn_control_item_set_item(ctrl, item);
+    return true;
 }
 
 bool virtual_bag_sync_projected_item_control(void* control) {
-    (void)control;
+    if (control == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
+        g_projected_item_root == nullptr || fn_control_object_get_child == nullptr ||
+        fn_control_item_set_item == nullptr) {
+        return false;
+    }
+    const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
+    for (int slot = 0; slot < capacity; ++slot) {
+        if (fn_control_object_get_child(g_projected_item_root, slot) == control) {
+            fn_control_item_set_item(control, g_module_objects[g_module_view_index][slot]);
+            return true;
+        }
+    }
     return false;
 }
 
 bool virtual_bag_sync_projected_bag() {
-    return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    refresh_projection_if_overwritten_locked();
+    return g_module_view_installed;
 }
 
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
