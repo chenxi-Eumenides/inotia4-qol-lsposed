@@ -165,6 +165,11 @@ extern UiDescSetOffFn fn_ui_desc_set_off;
 typedef void (*SoundSystemPlayFn)(int16_t id);
 extern SoundSystemPlayFn fn_sound_system_play;
 extern uint8_t* g_snd_fx;
+// P3 控件级投影（SetItem/SetShow typedef 在 game_symbols.h:692-694 已有）
+extern ControlItemSetItemFn fn_control_item_set_item;
+extern ControlObjectSetActiveFn fn_control_object_set_active;
+extern ControlObjectSetShowFn fn_control_object_set_show;
+extern ControlObjectGetChildFn fn_control_object_get_child;
 extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
 extern ItemDrawPortingFn fn_item_draw_porting;

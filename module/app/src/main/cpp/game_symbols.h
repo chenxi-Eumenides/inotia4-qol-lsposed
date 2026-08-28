@@ -434,6 +434,9 @@ constexpr uintptr_t F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA = 0xb7910;
 constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
 constexpr uintptr_t F_SOUNDSYSTEM_PLAY_VMA = 0x1377f0;   // void(int16 id) 原版 UI 音效（袋切换=0x11，反汇编 b8c34）
 constexpr uintptr_t G_SND_FX_VMA = 0x307850;             // g_sndFx 音效句柄表（判空防崩）
+constexpr uintptr_t F_CONTROL_ITEM_SET_ITEM_VMA = 0xaad60;      // (ctrl, item) 控件物品指针（RefreshItemArea b7a64）
+constexpr uintptr_t F_CONTROL_OBJECT_SET_SHOW_VMA = 0x9dc28;    // (ctrl, int)（RefreshItemArea b7a44）
+// ControlObject_SetActive(0x9dbd8)/GetChild(0x9eacc) 已在上方登记（508/510 行附近）
 constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
@@ -689,4 +692,6 @@ using ControlObjectGetCountFn = uint32_t (*)(void* ctrl);
 using ControlObjectGetChildFn = void* (*)(void* ctrl, uint32_t index);
 using ControlObjectGetDataFn = void* (*)(void* ctrl);
 using ControlObjectSetActiveFn = void (*)(void* ctrl, uint32_t active);
+using ControlItemSetItemFn = void (*)(void* ctrl, void* item);
+using ControlObjectSetShowFn = void (*)(void* ctrl, uint32_t show);
 using ControlButtonDrawFn = void (*)(void* ctrl);
