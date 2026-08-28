@@ -44,7 +44,12 @@ class ActionApiServiceImpl : ActionApiService {
 
     override fun moveItem(bag: Int, slot: Int, count: Int, toBag: Int, toSlot: Int): String =
         LogFile.op("POST /api/item/inventory/move_item", "bag=$bag,slot=$slot,count=$count,toBag=$toBag,toSlot=$toSlot") {
-            attachInventory(NativeBridge.nativeOpMoveItem(bag, slot, count, toBag, toSlot))
+            val extensionInvolved = bag in 6..10 || toBag in 6..10
+            if (extensionInvolved) {
+                NativeBridge.nativeOpExtensionBagMoveItem(bag, slot, toBag, toSlot)
+            } else {
+                attachInventory(NativeBridge.nativeOpMoveItem(bag, slot, count, toBag, toSlot))
+            }
         }
 
     override fun equip(role: Int, bag: Int, slot: Int): String =
@@ -203,16 +208,16 @@ class ActionApiServiceImpl : ActionApiService {
         }
 
     override fun extensionBagEnterView(bag: Int): String =
-        LogFile.op("POST /api/extension_bag/enter_view", "bag=$bag") { NativeBridge.nativeOpExtensionBagEnterView(bag) }
+        LogFile.op("POST /api/debug/extension_bag/enter_view", "bag=$bag") { NativeBridge.nativeOpExtensionBagEnterView(bag) }
 
     override fun extensionBagExitView(): String =
-        LogFile.op("POST /api/extension_bag/exit_view", "") { NativeBridge.nativeOpExtensionBagExitView() }
+        LogFile.op("POST /api/debug/extension_bag/exit_view", "") { NativeBridge.nativeOpExtensionBagExitView() }
 
     override fun extensionBagSelectBag(bag: Int): String =
-        LogFile.op("POST /api/extension_bag/select_bag", "bag=$bag") { NativeBridge.nativeOpExtensionBagSelectBag(bag) }
+        LogFile.op("POST /api/debug/extension_bag/select_bag", "bag=$bag") { NativeBridge.nativeOpExtensionBagSelectBag(bag) }
 
     override fun extensionBagClickItem(bag: Int, slot: Int): String =
-        LogFile.op("POST /api/extension_bag/click_item", "bag=$bag,slot=$slot") { NativeBridge.nativeOpExtensionBagClickItem(bag, slot) }
+        LogFile.op("POST /api/debug/extension_bag/click_item", "bag=$bag,slot=$slot") { NativeBridge.nativeOpExtensionBagClickItem(bag, slot) }
 
     override fun extensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String =
         LogFile.op("POST /api/extension_bag/move_item", "fromBag=$fromBag,fromSlot=$fromSlot,toBag=$toBag,toSlot=$toSlot") {

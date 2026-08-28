@@ -28,3 +28,4 @@ std::string data_op_extension_bag_exit_view();
 std::string data_op_extension_bag_select_bag(int logical_bag);
 std::string data_op_extension_bag_click_item(int logical_bag, int slot);
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
+std::string virtual_bag_inventory_bags_json();

@@ -495,6 +495,8 @@ std::string build_inventory_json() {
         }
         s += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
     }
+    // 扩展逻辑袋 6..10（extensionBagEnabled 且 world 时并入；schema 与原版袋一致）
+    s += virtual_bag_inventory_bags_json();
     s += "]}";
     return s;
 }

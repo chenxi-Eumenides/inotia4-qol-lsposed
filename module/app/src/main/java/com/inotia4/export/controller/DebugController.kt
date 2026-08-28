@@ -64,7 +64,39 @@ class DebugController {
     fun settingsUiOpenPanel(): String = ControllerGuard.guard { ApiServices.info.settingsUiOpenPanel() }
 
     @GetMapping("/api/debug/extension_bag/status")
-    fun extensionBagStatus(): String = ControllerGuard.guard { ApiServices.info.extensionBagStatus() }
+    fun extensionBagStatus(): String = ControllerGuard.guard { ApiServices.info.extensionBagStatusJson() }
+
+    @PostMapping("/api/debug/extension_bag/enter_view")
+    fun extensionBagEnterView(@RequestBody body: String): String {
+        val json = JsonUtil.parseBody(body)
+            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val bag = json.optInt("bag", -1)
+        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
+        return ControllerGuard.guard { ApiServices.action.extensionBagEnterView(bag) }
+    }
+
+    @PostMapping("/api/debug/extension_bag/exit_view")
+    fun extensionBagExitView(): String = ControllerGuard.guard { ApiServices.action.extensionBagExitView() }
+
+    @PostMapping("/api/debug/extension_bag/select_bag")
+    fun extensionBagSelectBag(@RequestBody body: String): String {
+        val json = JsonUtil.parseBody(body)
+            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val bag = json.optInt("bag", -1)
+        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
+        return ControllerGuard.guard { ApiServices.action.extensionBagSelectBag(bag) }
+    }
+
+    @PostMapping("/api/debug/extension_bag/click_item")
+    fun extensionBagClickItem(@RequestBody body: String): String {
+        val json = JsonUtil.parseBody(body)
+            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val bag = json.optInt("bag", -1)
+        val slot = json.optInt("slot", -1)
+        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
+        if (slot < 0 || slot > 15) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot required (0-15)")
+        return ControllerGuard.guard { ApiServices.action.extensionBagClickItem(bag, slot) }
+    }
 
     @PostMapping("/api/debug/extension_bag/equip")
     fun extensionBagEquip(@RequestBody body: String): String {

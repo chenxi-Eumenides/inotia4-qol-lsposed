@@ -71,7 +71,6 @@ interface InfoApiService {
     fun settingsUiRestore(): String
     fun settingsUiOpenOption(): String
     fun settingsUiOpenPanel(): String
-    fun extensionBagStatus(): String
     fun extensionBagStatusJson(): String
     fun extensionBagTestEquip(index: Int, bagType: Int): String
     fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String

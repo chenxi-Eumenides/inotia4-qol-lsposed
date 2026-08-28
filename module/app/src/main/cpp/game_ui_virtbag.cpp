@@ -2488,3 +2488,29 @@ std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_
     if (!moved) return op_err("move failed");
     return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
 }
+
+std::string virtual_bag_inventory_bags_json() {
+    if (!g_virtual_bag_enabled.load() || !game_in_world()) return "";
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    std::string out;
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        const int capacity = g_virtual_bag_state.capacities[bag];
+        int filled = 0;
+        std::string items;
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
+            if (item.category <= 0 || item.count <= 0) continue;
+            if (filled > 0) items += ",";
+            items += "{\"slot\":" + std::to_string(slot) +
+                     ",\"category\":" + std::to_string(item.category) +
+                     ",\"count\":" + std::to_string(item.count) + "}";
+            ++filled;
+        }
+        out += ",{\"bag\":" + std::to_string(bag + 6) +
+               ",\"items\":[" + items + "]" +
+               ",\"capacity\":" + std::to_string(capacity) +
+               ",\"slot_count\":" + std::to_string(filled) + "}";
+    }
+    return out;
+}

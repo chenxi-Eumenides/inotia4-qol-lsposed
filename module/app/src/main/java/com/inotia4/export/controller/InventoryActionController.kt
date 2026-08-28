@@ -56,8 +56,8 @@ class InventoryActionController {
         val count = o.optInt("count", -1)
         val toBag = o.optInt("to_bag", -1)
         val toSlot = o.optInt("to_slot", -1)
-        if (bag < 0 || slot < 0 || count <= 0 || toBag < 0 || toSlot < 0)
-            throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot/count/to_bag/to_slot required")
+        if (bag < 0 || bag > 10 || slot < 0 || count <= 0 || toBag < 0 || toBag > 10 || toSlot < -1)
+            throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)")
         return ControllerGuard.guard { ApiServices.action.moveItem(bag, slot, count, toBag, toSlot) }
     }
 
