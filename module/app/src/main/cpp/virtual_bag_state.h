@@ -12,7 +12,10 @@ namespace virtual_bag {
 constexpr int kBagCount = 5;
 constexpr int kMaxCapacity = 16;
 constexpr int kSlotCount = 16;
-constexpr std::array<uint8_t, kBagCount> kFixedCapacities = {16, 8, 4, 0, 0};
+
+// ITEMSTATICBASE 静态表镜像（docs/system/bag.md §5，apk/static-data/json/tables/ITEMSTATICBASE.json）：
+// 下标 = BagType，容量 4/8/12/16；kNone=0 → 未装备 → 容量 0（ADR-004：固定绘制值不进入最终架构）。
+constexpr std::array<uint8_t, 5> kBagTypeCapacities = {0, 4, 8, 12, 16};
 
 // SAVE_SaveItem 记录约束（objdump 确认）：u8 长度前缀 + 18B 头 + 4B×N 词缀，总长 ≤255。
 constexpr size_t kSerializedItemBuffer = 256;  // 固定字节数组容量（State 内禁止裸指针）
@@ -63,8 +66,8 @@ struct PendingTransfer {
 };
 
 struct State {
-    std::array<uint8_t, kBagCount> types{};
-    std::array<uint8_t, kBagCount> capacities{};
+    std::array<uint8_t, kBagCount> types{};      // 各扩展袋已装备的背包物品 BagType（0=未装备）
+    std::array<uint8_t, kBagCount> capacities{}; // 派生容量 = derive_capacity(types[i])，禁止直写
     std::array<std::array<Item, kSlotCount>, kBagCount> items{};
     Mode mode = Mode::kOriginal;
     int original_selected = 0;
@@ -96,6 +99,11 @@ inline bool valid_capacity(int capacity) {
 inline bool valid_type(int type) {
     return type >= static_cast<int>(BagType::kNone) &&
            type <= static_cast<int>(BagType::kLargeBackpack);
+}
+
+// 容量派生唯一入口：扩展袋容量由其已装备的背包物品 BagType 决定（ITEMSTATICBASE 镜像）。
+inline uint8_t derive_capacity(int bag_type) {
+    return valid_type(bag_type) ? kBagTypeCapacities[bag_type] : 0;
 }
 
 inline bool valid_payload(const Item& item) {
@@ -189,7 +197,7 @@ inline void normalize(State* state) {
     if (state == nullptr) return;
     for (int index = 0; index < kBagCount; ++index) {
         if (!valid_type(state->types[index])) state->types[index] = 0;
-        state->capacities[index] = kFixedCapacities[index];
+        state->capacities[index] = derive_capacity(state->types[index]);
     }
     for (auto& bag : state->items) {
         for (Item& item : bag) {
@@ -244,7 +252,7 @@ inline ClickResult click(State* state, int index) {
     if (state == nullptr || !valid_index(index)) {
         return ClickResult::kIgnored;
     }
-    if (kFixedCapacities[index] == 0) {
+    if (state->capacities[index] == 0) {
         return ClickResult::kIgnored;
     }
     if (state->selected == index) {

@@ -223,26 +223,41 @@ static void test_stack_codec() {
 }
 
 static void test_virtual_bag_state() {
+    CHECK_EQ((int)virtual_bag::derive_capacity(0), 0);
+    CHECK_EQ((int)virtual_bag::derive_capacity(1), 4);
+    CHECK_EQ((int)virtual_bag::derive_capacity(2), 8);
+    CHECK_EQ((int)virtual_bag::derive_capacity(3), 12);
+    CHECK_EQ((int)virtual_bag::derive_capacity(4), 16);
+    CHECK_EQ((int)virtual_bag::derive_capacity(-1), 0);
+    CHECK_EQ((int)virtual_bag::derive_capacity(5), 0);
     virtual_bag::State state{};
-    state.capacities = {0, 0, 0, 0, 0};
+    virtual_bag::normalize(&state);
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        CHECK_EQ((int)state.capacities[index], 0);
+    }
     state.types = {4, 4, 4, 4, 4};
     virtual_bag::normalize(&state);
-    CHECK_EQ((int)state.capacities[0], 16);
-    CHECK_EQ((int)state.capacities[1], 8);
-    CHECK_EQ((int)state.capacities[2], 4);
-    CHECK_EQ((int)state.capacities[3], 0);
-    CHECK_EQ((int)state.capacities[4], 0);
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        CHECK_EQ((int)state.capacities[index], 16);
+    }
     state.mode = virtual_bag::Mode::kModule;
     state.selected = 3;
     virtual_bag::normalize(&state);
+    CHECK_EQ(state.mode, virtual_bag::Mode::kModule);
+    CHECK_EQ(state.selected, 3);
+    state.types[3] = 0;
+    virtual_bag::normalize(&state);
     CHECK_EQ(state.mode, virtual_bag::Mode::kOriginal);
     CHECK_EQ(state.selected, -1);
-    CHECK_EQ((int)state.capacities[0], 16);
-    CHECK_EQ((int)state.capacities[1], 8);
-    CHECK_EQ((int)state.capacities[2], 4);
     CHECK_EQ((int)state.capacities[3], 0);
-    CHECK_EQ((int)state.capacities[4], 0);
+    state.items[3][5] = {};
+    state.items[3][5].category = 7;
+    state.items[3][5].count = 3;
+    virtual_bag::normalize(&state);
+    CHECK_EQ(state.items[3][5].category, 7);
+    CHECK_EQ(state.items[3][5].count, 3);
     CHECK(virtual_bag::set_test_equipped(&state, 0, 1));
+    CHECK_EQ((int)state.capacities[0], 4);
     CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kSelected);
     CHECK_EQ(state.mode, virtual_bag::Mode::kModule);
     CHECK_EQ(state.selected, 0);
@@ -252,20 +267,23 @@ static void test_virtual_bag_state() {
     state = {};
     CHECK(virtual_bag::set_test_equipped(&state, 0, 1));
     CHECK_EQ((int)state.types[0], 1);
-    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK_EQ((int)state.capacities[0], 4);
     CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kSelected);
     CHECK_EQ(state.selected, 0);
     CHECK_EQ(state.inspected, -1);
     CHECK_EQ(virtual_bag::click(&state, 0), virtual_bag::ClickResult::kInspected);
     CHECK_EQ(state.inspected, 0);
     CHECK(virtual_bag::set_test_equipped(&state, 1, 4));
-    CHECK_EQ((int)state.capacities[1], 8);
+    CHECK_EQ((int)state.capacities[1], 16);
     CHECK_EQ(virtual_bag::click(&state, 1), virtual_bag::ClickResult::kSelected);
     CHECK_EQ(state.selected, 1);
     CHECK_EQ(state.inspected, -1);
     CHECK(!virtual_bag::set_test_equipped(&state, 5, 1));
     CHECK(!virtual_bag::set_test_equipped(&state, 2, 5));
     CHECK_EQ(virtual_bag::click(&state, 3), virtual_bag::ClickResult::kIgnored);
+    CHECK_EQ(virtual_bag::click(&state, 2), virtual_bag::ClickResult::kIgnored);
+    CHECK(virtual_bag::set_test_equipped(&state, 2, 3));
+    CHECK_EQ((int)state.capacities[2], 12);
     CHECK_EQ(virtual_bag::click(&state, 2), virtual_bag::ClickResult::kSelected);
     CHECK_EQ(state.selected, 2);
     CHECK(virtual_bag::set_item(&state, 2, 3, 401, 7));
@@ -302,7 +320,7 @@ static void test_extension_bag_exit_rendering_state() {
             virtual_bag::valid_index(state.selected)));
     CHECK_EQ(state.selected, 0);
     CHECK_EQ(state.inspected, -1);
-    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK_EQ((int)state.capacities[0], 4);
     CHECK_EQ(state.items[0][0].category, 401);
     CHECK_EQ(state.items[0][0].count, 7);
 

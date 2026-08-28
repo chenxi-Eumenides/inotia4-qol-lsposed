@@ -57,7 +57,37 @@ if (capacity > 0)
 
 **结论**：原版存档流按「先袋物品、后 capacity 个袋内物品」编码；袋容量持久化由原版存档天然承载（无需 sidecar 重复存储容量值）。`SAVE_SaveInventory`（0x127d8c）为对称写入方。
 
-## 5. 背包物品静态记录（ITEMDATABASE.json）
+## 5. 容量真源：ITEMSTATICBASE 静态表（2026-08-28 补，容量派生链闭环）
+
+`ITEMSYSTEM_CreateItem(category)`（0x10be9c，反汇编）：
+
+```c
+item = ITEMPOOL_Allocate();
+item->uid = APPINFO_AllocateItemUID();
+item->type_flags = SetBitValue(item->type_flags, 15, 6, category);   // bit6..15 = category
+value = ITEMSTATICBASE_FindValue(category);                          // 静态表查询
+if (value > 0)
+    item->count_word = SetBitValue(item->count_word, 24, 0, value);  // bit0..24 = 容量
+```
+
+- 物品 category（bit6..15）= ITEMDATABASE **记录下标**（`记录数组基址 + 记录大小×下标` 直接寻址）——统一 category 语义（此前"item_id−30"仅对前 48 条成立）
+- **ITEMSTATICBASE 全表 4 条记录，[下标→容量]：1→4（手提包）、2→8（背包小）、3→12（背包中）、4→16（背包大）**；其余物品 FindValue 返回 0（bit0..24 空）
+
+**完整派生链（三方互证）**：
+
+```
+ITEMSTATICBASE[category] = {4,8,12,16}      ← 静态真源（apk/static-data/json/tables/ITEMSTATICBASE.json）
+    ↓ CreateItem 查表写入
+背包物品对象 +0x10 bit0..24 = 容量           ← 运行时承载
+    ↓ 装备到袋槽（INVEN_pBagSlot[slot] = 物品指针）
+INVEN_GetBagSize(slot) = 读物品 +0x10        ← 运行时唯一读取口径
+    ↓ SAVE_SaveInventory 序列化袋物品（容量内嵌 payload）
+原版存档                                    ← 天然持久化
+```
+
+真机实测（§3 表）与此自洽：袋0=16（大）、袋1/2/3=8（小×3）、袋4=4（手提包）。
+
+## 6. 背包物品静态记录（ITEMDATABASE.json）
 
 | cat | item_id | 名称 | 价格(u16[6]) |
 |---|---|---|---|
@@ -68,15 +98,16 @@ if (capacity > 0)
 
 live category = ITEMDATABASE 记录下标 = item_id − 30。容量（4/8/12/16，见 `docs/stack-limit-fixed-split-plan.md:15`）**不在静态记录的可见字段中**——由装备逻辑写入物品 +0x10。
 
-## 6. 已确认与未决
+## 7. 已确认与未决
 
 **已确认**：
-- 容量派生源 = 装备物品对象 +0x10 bit0..24（运行时唯一真源）
+- 容量派生全链闭环：ITEMSTATICBASE[category]（4/8/12/16）→ CreateItem 写入物品 +0x10 bit0..24 → INVEN_GetBagSize 读取 → 原版存档内嵌持久化
 - 袋对象即背包物品对象；袋槽与物品一一对应
 - 存档按容量循环编码袋内物品；容量随原版存档持久化
-- 实测容量 16/8/8/8/4（+任务袋 16）；等级序列 4/8/12/16 见 stack-limit 文档
+- 实测容量 16/8/8/8/4（+任务袋 16）与静态表互证
+- 物品 category = ITEMDATABASE 记录下标（CreateItem 直接寻址写入 bit6..15）
 
 **未决（后续实验）**：
-- 装备时初值写入方：背包物品装备到袋槽的代码路径（UI 层，CHAR_EquipItem 0xe51c0 无背包分支）；动态实验：装备一个背包（中）观察 +0x10 变化，确认 4/8/12/16 与物品等级的映射
-- 袋对象 +0x08（4×u16）与 +0x1c（2×u16）字段语义
+- 袋对象（已装备背包物品）+0x08（4×u16）与 +0x1c（2×u16）字段语义
 - 解除/出售已装备背包、超容溢出的原版行为
+- 索引 5 任务袋（容量 16）的隔离证据仍待补（UN-7）

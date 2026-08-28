@@ -1354,7 +1354,7 @@ void draw_cells_in_frame_locked() {
     }
 
     const int bag = g_virtual_bag_state.selected;
-    const int capacity = virtual_bag::kFixedCapacities[bag];
+    const int capacity = g_virtual_bag_state.capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
         const int column = slot % 4;
         const int row = slot / 4;
@@ -1832,7 +1832,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             g_extension_drag.current_x = x;
             g_extension_drag.current_y = y;
             const int capacity = virtual_bag::valid_index(g_virtual_bag_state.selected)
-                                     ? virtual_bag::kFixedCapacities[g_virtual_bag_state.selected]
+                                     ? g_virtual_bag_state.capacities[g_virtual_bag_state.selected]
                                      : 0;
             if (slot >= 0 && slot < capacity) {
                 const virtual_bag::Item& item =
