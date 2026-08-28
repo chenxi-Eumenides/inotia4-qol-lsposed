@@ -16,6 +16,7 @@
 #include "game_nav.h"
 #include "game_save_preflight.h"
 #include "game_tiles.h"
+#include "ownership_ledger.h"
 #include "stack_codec.h"
 #include "virtual_bag_state.h"
 #include "../game_tiles.cpp"
@@ -766,11 +767,64 @@ static void test_prepare_journal() {
     }
 }
 
+static void test_ownership_ledger() {
+    ownership::Ledger ledger{};
+    uint32_t a = 0;
+    uint32_t b = 0;
+
+    CHECK(ownership::allocate(&ledger, &a) == ownership::Outcome::kOk);
+    CHECK(ownership::allocate(&ledger, &b) == ownership::Outcome::kOk);
+    CHECK(a != b);
+    CHECK(ownership::live_state(ledger, a, ownership::State::kModuleOwned));
+    CHECK_EQ(ledger.total_allocated, 2u);
+    {
+        const ownership::Audit report = ownership::audit(ledger);
+        CHECK(report.balanced);
+        CHECK_EQ(report.outstanding_objects, 2u);
+        CHECK_EQ(report.outstanding_borrows, 0u);
+    }
+
+    CHECK(ownership::borrow_for_view(&ledger, a) == ownership::Outcome::kOk);
+    CHECK(!ownership::live_state(ledger, a, ownership::State::kModuleOwned));
+    CHECK(ownership::live_state(ledger, a, ownership::State::kBorrowedForView));
+    CHECK(ownership::release(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::return_from_view(&ledger, a) == ownership::Outcome::kOk);
+    CHECK(ownership::live_state(ledger, a, ownership::State::kModuleOwned));
+
+    CHECK(ownership::handover_to_inventory(&ledger, a) == ownership::Outcome::kOk);
+    CHECK(!ownership::live_state(ledger, a, ownership::State::kModuleOwned));
+    CHECK(!ownership::live_state(ledger, a, ownership::State::kInventoryOwned));
+    CHECK(ownership::release(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::handover_to_inventory(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+
+    CHECK(ownership::release(&ledger, b) == ownership::Outcome::kOk);
+    {
+        const ownership::Audit report = ownership::audit(ledger);
+        CHECK(report.balanced);
+        CHECK_EQ(ledger.total_released, 1u);
+        CHECK_EQ(ledger.total_handed_over, 1u);
+        CHECK_EQ(report.outstanding_objects, 0u);
+        CHECK_EQ(report.outstanding_borrows, 0u);
+        CHECK_EQ(report.inventory_owned, 1u);
+        CHECK_EQ(report.live_handles, 1u);
+    }
+
+    uint32_t c = 0;
+    CHECK(ownership::allocate(&ledger, &c) == ownership::Outcome::kOk);
+    CHECK(c != b);
+    CHECK(ownership::live_state(ledger, c, ownership::State::kModuleOwned));
+
+    CHECK(ownership::allocate(nullptr, &c) == ownership::Outcome::kRejectInvalidState);
+    CHECK(ownership::allocate(&ledger, nullptr) == ownership::Outcome::kRejectInvalidState);
+    CHECK(ownership::release(&ledger, 0x7FFFFFFF) == ownership::Outcome::kRejectUnknownHandle);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
     test_parse_int_field();
     test_tiles_parse();
+    test_ownership_ledger();
     test_nav_bfs();
     test_nav_bfs_multi();
     test_stack_codec();
