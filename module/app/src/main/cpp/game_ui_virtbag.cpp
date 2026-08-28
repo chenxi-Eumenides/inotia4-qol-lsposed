@@ -109,6 +109,8 @@ uintptr_t g_draw_patch_addr = 0;
 uintptr_t g_bag_draw_patch_addr = 0;
 uintptr_t g_save_inventory_patch_addr = 0;
 void* g_save_inventory_thunk = nullptr;
+uintptr_t g_menu_gate_patch_addr = 0;
+void* g_menu_gate_thunk = nullptr;
 uintptr_t g_item_draw_patch_addr = 0;
 void* g_draw_thunk = nullptr;
 void* g_bag_draw_thunk = nullptr;
@@ -1663,6 +1665,25 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
     return reinterpret_cast<SaveInventoryRawFn>(raw)(cursor);
 }
 
+// G-6/G-7 菜单门禁：MakeDesc 尾跳 SetDescMenu 的 B 指令替换为 wrapper——
+// 投影期间详情（UIDesc_MakeItem 只读）正常显示，操作按钮（使用/装备/丢弃）
+// 不生成：借出对象不可被原版菜单操作，P4 对象桥接后按物品归属放行。
+void menu_gate_wrapper() {
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (g_module_view_installed) {
+            VIRTBAG_LOG("desc menu suppressed while projection installed");
+            return;
+        }
+    }
+    const uintptr_t raw = g_base != 0
+                              ? g_base + fn_resolve("F_UIEQUIP_SET_DESC_MENU_VMA",
+                                                    F_UIEQUIP_SET_DESC_MENU_VMA)
+                              : 0;
+    if (raw == 0) return;
+    reinterpret_cast<void (*)()>(raw)();
+}
+
 // 正式窗口投影（P3 方案 C，控件级）：只写控件不写 INVEN——
 //   容量字（袋对象 +0x10）临时写扩展容量驱动 RefreshItemArea/DrawInvenBag 的容量语义；
 //   RefreshItemArea 按容量字 SetActive/SetShow 容量外控件（隐藏）；
@@ -1874,6 +1895,16 @@ void virtual_bag_draw_end_wrapper() {
         g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected);
     if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
+    if (g_module_view_installed) {
+        // 拖动第二重抑制：TouchHandle 内部状态不经过 panel proc，installed 时每帧
+        // 清除 MOVING 标志，确保拖动无法积累触发 drop（event 0x04）。
+        if (g_base != 0) {
+            uint8_t* touch_state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+            *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL) = nullptr;
+            *reinterpret_cast<void**>(touch_state + TOUCH_STATE_DROP_SRC_CTRL) = nullptr;
+        }
+        refresh_projection_if_overwritten_locked();
+    }
     static int last_mode = -1;
     static int last_selected = -2;
     static int last_overlay = -1;
@@ -1967,6 +1998,20 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                     static_cast<unsigned long long>(g_inventory_generation));
         if (g_extension_touch_capture) return 1;
         if (extension_grid_hit(x, y)) {
+            // G-6/G-7：投影常驻时点击放行原版控件链——ControlItem SetOn 选中动画 +
+            // MakeDesc 只读详情（操作按钮由 menu_gate 拦截）。自研拖动停用，
+            // TouchHandle 拖动由 0x19 吞事件 + 每帧 MOVING 清除双重抑制。
+            if (g_module_view_installed) {
+                clear_original_desc_locked();
+                clear_original_item_selection_locked();
+                g_virtual_bag_state.inspected = -1;
+                g_extension_drag = {};
+                reset_drag_state_locked(nullptr);
+                VIRTBAG_LOG("projection click passthrough x=%lld y=%lld slot=%d",
+                            static_cast<long long>(x), static_cast<long long>(y),
+                            grid_slot_index(x, y, kGridX, kGridY));
+                // fall through to delegate（return 在函数尾部 result）
+            } else {
             clear_original_desc_locked();
             clear_original_item_selection_locked();
             reset_drag_state_locked(nullptr);
@@ -1994,6 +2039,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             // sequence here so they cannot open UIDesc or item actions.
             g_extension_touch_capture = true;
             return 1;
+            }
         }
         if (g_virtual_bag_state.mode != virtual_bag::Mode::kOriginal &&
             grid_slot_index(x, y, kOriginalGridX, kOriginalGridY) >= 0) {
@@ -2096,6 +2142,11 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 g_extension_drag.current_x = x;
                 g_extension_drag.current_y = y;
             }
+            return 1;
+        }
+        // G-6/G-7 拖动抑制：投影常驻时网格区域 move 全吞——TouchHandle 无拖动轨迹，
+        // release 不会升级为 drop（event 0x04 不会写借出对象进 INVEN）。
+        if (g_module_view_installed && extension_grid_hit(x, y)) {
             return 1;
         }
     }
@@ -2327,6 +2378,47 @@ bool inject_locked() {
                                 reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
         g_save_inventory_patch_addr = call_addr;
         VIRTBAG_LOG("save gate hook patched call=%p replacement=0x%08x",
+                    reinterpret_cast<void*>(call_addr), replacement);
+    }
+
+    if (g_menu_gate_patch_addr == 0) {
+        const uintptr_t call_addr =
+            g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_TAIL_VMA", F_UIEQUIP_MAKE_DESC_TAIL_VMA);
+        constexpr uint32_t kOriginalTailJump = 0x17fffed1;
+        const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&menu_gate_wrapper);
+        const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
+        uintptr_t branch_target = wrapper;
+        if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
+            g_menu_gate_thunk = allocate_draw_thunk(call_addr, wrapper);
+            if (g_menu_gate_thunk == nullptr) {
+                VIRTBAG_LOG("menu gate thunk allocation failed call=%p wrapper=%p",
+                            reinterpret_cast<void*>(call_addr), wrapper);
+                return false;
+            }
+            branch_target = reinterpret_cast<uintptr_t>(g_menu_gate_thunk);
+        }
+        const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
+        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
+            VIRTBAG_LOG("menu gate branch target out of range call=%p target=%p",
+                        reinterpret_cast<void*>(call_addr), branch_target);
+            return false;
+        }
+        const uint32_t replacement = 0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+        const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            VIRTBAG_LOG("menu gate patch mprotect failed errno=%d", errno);
+            return false;
+        }
+        const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
+        if (current != kOriginalTailJump && current != replacement) {
+            VIRTBAG_LOG("menu gate patch mismatch got=0x%08x", current);
+            return false;
+        }
+        *reinterpret_cast<uint32_t*>(call_addr) = replacement;
+        __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
+                                reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
+        g_menu_gate_patch_addr = call_addr;
+        VIRTBAG_LOG("menu gate hook patched call=%p replacement=0x%08x",
                     reinterpret_cast<void*>(call_addr), replacement);
     }
     *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);

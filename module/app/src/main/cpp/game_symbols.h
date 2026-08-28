@@ -505,6 +505,9 @@ constexpr uintptr_t G_UIOPTION_INSTANCE_VMA = 0x307000;       // UIOption 实例
 constexpr uintptr_t G_OPTION_SCENE_ROOT_CTRL_VMA = 0x307fd8;  // OPTION 场景 root 组控件槽（Scene_Init 创建全屏组，button1@+0x8 左上/button2@+0x10 右上/主 group@+0x18；Terminate 时 TouchHandle_DeleteControl 删除整树）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_COUNT_VMA = 0x9eab8; // u32 (void* ctrl) 子控件数（父控件遍历子节点用）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_CHILD_VMA = 0x9eacc; // void* (void* ctrl, u32 index) 取第 index 子控件
+constexpr uintptr_t F_UIEQUIP_MAKE_DESC_VMA = 0xb8980;          // (ctrl, 0) 详情面板（读控件物品）
+constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
+constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_DATA_VMA = 0x9df18;  // void* (void* ctrl) 取控件私有数据块
 constexpr uintptr_t F_CONTROL_OBJECT_SET_ACTIVE_VMA = 0x9dbd8; // void (void* ctrl, u32 active) 写 Active@+0x0c（0x20=激活，ControlObject_EventProc 校验 ==0x20）
 constexpr uintptr_t F_CONTROL_BUTTON_DRAW_VMA = 0xaac2c;      // void (void* ctrl) 按钮绘制（GetData 非空 + [data+0x60] DrawProc 非空 → blr DrawProc(x0=ctrl)）
