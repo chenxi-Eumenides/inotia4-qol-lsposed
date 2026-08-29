@@ -111,6 +111,8 @@ uintptr_t g_save_inventory_patch_addr = 0;
 void* g_save_inventory_thunk = nullptr;
 uintptr_t g_drop_gate_patch_addr = 0;
 void* g_drop_gate_thunk = nullptr;
+uintptr_t g_draw_gate_patch_addr = 0;
+void* g_draw_gate_thunk = nullptr;
 uintptr_t g_item_draw_patch_addr = 0;
 void* g_draw_thunk = nullptr;
 void* g_bag_draw_thunk = nullptr;
@@ -1483,6 +1485,26 @@ void* valid_child_locked(void* root, int slot) {
 // G-6：投影命中走控件 AbsoluteRect。GetAbsoluteRect 是 x8 sret 函数禁止 C++ 直调
 // （真机 SIGSEGV），用手工父链累加（ctrl_abs_point 同款，纯内存读）。
 // w/h 用贴图固定尺寸 kGridCell（GetAbsoluteRect 也只输出 x/y 两个 i64）。
+// 物品指针合法性：模块缓存、延迟释放隔离区、INVEN_pItem 三集合任一命中即合法。
+bool item_pointer_known_locked(void* item) {
+    if (item == nullptr) return true;  // 空指针由调用方各自处理
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_module_objects[bag][slot] == item) return true;
+        }
+    }
+    for (int i = 0; i < g_deferred_free_count; ++i) {
+        if (g_deferred_free_queue[i].item == item) return true;
+    }
+    if (g_inven != nullptr) {
+        void** inventory = static_cast<void**>(g_inven);
+        for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
+            if (inventory[idx] == item) return true;
+        }
+    }
+    return false;
+}
+
 bool extension_grid_hit(int64_t x, int64_t y) {
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
@@ -1845,6 +1867,25 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
                               : 0;
     if (raw == 0) return 0;
     return reinterpret_cast<SaveInventoryRawFn>(raw)(cursor);
+}
+
+// G-6 终极绘制门禁：ControlItem_Draw 的 bl ITEM_DrawPorting（0xaaf28）替换——
+// 投影期间任何控件 data[0] 悬空（desc 残留/重建窗口/释放时序）都不再崩游戏：
+// 物品指针必须命中已知集合（模块缓存/隔离区/INVEN_pItem）才放行绘制。
+bool item_pointer_known_locked(void* item);
+
+uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int32_t b, int32_t c) {
+    if (g_module_view_installed && !item_pointer_known_locked(item)) {
+        VIRTBAG_LOG("draw gate: suppressed unknown item=%p", item);
+        return 0;
+    }
+    const uintptr_t raw = g_base != 0
+                              ? g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA",
+                                                    F_ITEM_DRAW_PORTING_VMA)
+                              : 0;
+    if (raw == 0) return 0;
+    typedef uint32_t (*DrawPortingFn)(void*, int32_t, int32_t, int32_t, int32_t, int32_t);
+    return reinterpret_cast<DrawPortingFn>(raw)(item, x, y, a, b, c);
 }
 
 // G-6/G-7 drop 门禁 → G-8 路由：bag proc event 0x04 落袋写入（b8cc0 bl）——
@@ -2592,6 +2633,46 @@ bool inject_locked() {
                                 reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
         g_drop_gate_patch_addr = call_addr;
         VIRTBAG_LOG("drop gate hook patched call=%p replacement=0x%08x",
+                    reinterpret_cast<void*>(call_addr), replacement);
+    }
+
+    if (g_draw_gate_patch_addr == 0) {
+        const uintptr_t call_addr = g_base + 0xaaf28;
+        constexpr uint32_t kOriginalDrawCall = 0x94016d49;
+        const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&item_draw_porting_gate);
+        const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
+        uintptr_t branch_target = wrapper;
+        if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
+            g_draw_gate_thunk = allocate_draw_thunk(call_addr, wrapper);
+            if (g_draw_gate_thunk == nullptr) {
+                VIRTBAG_LOG("draw gate thunk allocation failed call=%p wrapper=%p",
+                            reinterpret_cast<void*>(call_addr), wrapper);
+                return false;
+            }
+            branch_target = reinterpret_cast<uintptr_t>(g_draw_gate_thunk);
+        }
+        const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
+        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
+            VIRTBAG_LOG("draw gate branch target out of range call=%p target=%p",
+                        reinterpret_cast<void*>(call_addr), branch_target);
+            return false;
+        }
+        const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+        const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            VIRTBAG_LOG("draw gate patch mprotect failed errno=%d", errno);
+            return false;
+        }
+        const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
+        if (current != kOriginalDrawCall && current != replacement) {
+            VIRTBAG_LOG("draw gate patch mismatch got=0x%08x", current);
+            return false;
+        }
+        *reinterpret_cast<uint32_t*>(call_addr) = replacement;
+        __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
+                                reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
+        g_draw_gate_patch_addr = call_addr;
+        VIRTBAG_LOG("draw gate hook patched call=%p replacement=0x%08x",
                     reinterpret_cast<void*>(call_addr), replacement);
     }
     *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
