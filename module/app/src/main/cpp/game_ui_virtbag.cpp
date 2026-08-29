@@ -1337,6 +1337,13 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
            y >= tab_y && y < tab_y + kExtensionTabHeight;
 }
 
+// GetChild 结果必须过 GetUserType==2（ControlItem）校验：面板开/关的重建窗口里
+// GetChild 可能返回垃圾指针（非 null），GetAbsoluteRect/解引用会 SEGV（tombstone_02）。
+bool control_item_valid_locked(void* ctrl) {
+    return ctrl != nullptr && fn_control_object_get_user_type != nullptr &&
+           fn_control_object_get_user_type(ctrl) == 2;
+}
+
 bool extension_grid_hit(int64_t x, int64_t y) {
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
@@ -1513,6 +1520,21 @@ void virtual_bag_draw_inven_item_wrapper() {
         virtual_bag::valid_index(g_virtual_bag_state.selected)) {
         if (g_module_view_installed) {
             original();
+            // 一次性 rect 转储（G-8 触摸命中定位）：投影控件的绝对屏幕位置。
+            static bool rect_dumped = false;
+            if (!rect_dumped && g_projected_item_root != nullptr &&
+                fn_control_object_get_child != nullptr &&
+                fn_control_object_get_absolute_rect != nullptr) {
+                rect_dumped = true;
+                const int cap = g_virtual_bag_state.capacities[g_virtual_bag_state.selected];
+                for (int slot = 0; slot < cap && slot < 4; ++slot) {
+                    void* ctrl = fn_control_object_get_child(g_projected_item_root, slot);
+                    if (!control_item_valid_locked(ctrl)) continue;
+                    const ControlAbsoluteRect r = fn_control_object_get_absolute_rect(ctrl);
+                    VIRTBAG_LOG("projection rect slot=%d (%d,%d,%d,%d)",
+                                slot, r.x, r.y, r.w, r.h);
+                }
+            }
             return;
         }
         // Extension items occupy the original inventory rectangle without
@@ -1717,7 +1739,7 @@ bool install_module_view_locked(int bag) {
         fn_ui_equip_refresh_item_area();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
         for (int slot = 0; slot < capacity; ++slot) {
             void* ctrl = fn_control_object_get_child(root, slot);
-            if (ctrl == nullptr) continue;
+            if (!control_item_valid_locked(ctrl)) continue;
             void* item = module_item_locked(bag, slot);
             // 空槽也必须 SetItem(nullptr)：RefreshItemArea 刚把 INVEN 原版物品刷进控件，
             // 扩展袋空位不覆盖的话会残留原版物品显示。
@@ -1748,7 +1770,7 @@ void refresh_projection_if_overwritten_locked() {
     for (int slot = 0; slot < capacity; ++slot) {
         void* item = g_module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
         void* ctrl = fn_control_object_get_child(g_projected_item_root, slot);
-        if (ctrl == nullptr) continue;
+        if (!control_item_valid_locked(ctrl)) continue;
         void* data = fn_control_object_get_data(ctrl);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != item) {
@@ -2529,7 +2551,7 @@ bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
     }
     void* ctrl = fn_control_object_get_child(g_projected_item_root, slot);
     void* item = g_module_objects[g_module_view_index][slot];
-    if (ctrl == nullptr) return false;
+    if (!control_item_valid_locked(ctrl)) return false;
     fn_control_item_set_item(ctrl, item);
     return true;
 }
