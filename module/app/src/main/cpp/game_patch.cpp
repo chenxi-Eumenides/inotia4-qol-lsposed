@@ -218,6 +218,14 @@ std::string data_recover_after_hive_block() {
 }
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
+    // G-8：投影拖动 drop 到扩展格（0x02）→ 路由 ext→ext 事务，抑制原版
+    // INVEN_MoveItem（借出对象不在 INVEN，原版移动不可靠）。
+    if (event == 0x2 && param != nullptr && param != nullptr) {
+        void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+        if (virtual_bag_projection_drop_to_slot(control, ctrl_src)) {
+            return 1;
+        }
+    }
     // G-7：扩展视图内只拦截 drop（0x04，借出对象不得拖入原版袋——SaveItemOnEmpty
     // 门禁为第二层）；详情(0x80)/选中(0x01,0x02)/其余事件放行原版控件链。
     if (virtual_bag_original_item_input_blocked() && event == 0x04) {

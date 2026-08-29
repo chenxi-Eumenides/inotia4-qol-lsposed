@@ -1355,6 +1355,13 @@ void* valid_child_locked(void* root, int slot) {
     return ctrl;
 }
 
+// ---- G-8 投影拖动状态机（模块侧，独立于 TouchHandle 内部拖动）----
+// press 只读记录命中扩展槽（不触碰 TouchHandle）；move 更新触点 + 吞 panel 层事件
+// （抑制 TouchHandle 拖动与场景溢出）；drop 在控件层路由到既有跨包事务：
+//   落到物品控件（0x02）→ ext→ext；落到袋控件（0x04）→ ext→orig（经 SaveItemOnEmpty 门禁）。
+// G-6：投影命中走控件 AbsoluteRect。GetAbsoluteRect 是 x8 sret 函数禁止 C++ 直调
+// （真机 SIGSEGV），用手工父链累加（ctrl_abs_point 同款，纯内存读）。
+// w/h 用贴图固定尺寸 kGridCell（GetAbsoluteRect 也只输出 x/y 两个 i64）。
 bool extension_grid_hit(int64_t x, int64_t y) {
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
@@ -1683,13 +1690,45 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
     return reinterpret_cast<SaveInventoryRawFn>(raw)(cursor);
 }
 
-// G-6/G-7 drop 门禁：bag proc event 0x04 落袋写入（b8cc0 bl）——投影期间拖动
-// 投影物品松手会走到这里，借出对象必须不入 INVEN。捡取路径的其他调用点不受影响。
+// G-6/G-7 drop 门禁 → G-8 路由：bag proc event 0x04 落袋写入（b8cc0 bl）——
+// 投影期间拖动投影物品松手到这里：路由到 ext→orig 事务（真实移动），借出对象
+// 不经原版 SaveItemOnEmpty 写 INVEN。非投影拖动（installed=false）直通原版。
+// G-8 源识别：drop 事件的物品指针与模块缓存比对，反查扩展袋/槽。
+// 事件参数自带物品指针（SaveItemOnEmpty 的 item / 0x02 的 src 控件 data），
+// 无需模块维护拖动状态机——TouchHandle 全权处理拖动建立与拖影。
+bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot) {
+    if (item == nullptr) return false;
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_module_objects[bag][slot] == item) {
+                *out_bag = bag;
+                *out_slot = slot;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 int32_t save_item_on_empty_gate(void* item, int32_t bag) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (g_module_view_installed) {
-            VIRTBAG_LOG("drop gate: SaveItemOnEmpty suppressed while projection installed");
+            int src_bag = -1, src_slot = -1;
+            if (!module_slot_of_item_locked(item, &src_bag, &src_slot)) {
+                return reinterpret_cast<InvenSaveItemOnEmptyFn>(
+                    g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA",
+                                        F_INVEN_SAVE_ITEM_ON_EMPTY_VMA))(item, bag);
+            }
+            const bool routed = bag >= 0 && bag < 5 &&
+                                move_extension_to_original_locked(src_bag, src_slot, bag);
+            if (routed) {
+                persist_state_locked();
+                refresh_projection_if_overwritten_locked();
+                VIRTBAG_LOG("drop routed ext->orig bag=%d", bag);
+                return 1;
+            }
+            VIRTBAG_LOG("drop gate: route failed bag=%d", bag);
             return 0;
         }
     }
@@ -1913,6 +1952,9 @@ void virtual_bag_draw_end_wrapper() {
         g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected);
     if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
+    if (g_module_view_installed) {
+        refresh_projection_if_overwritten_locked();
+    }
     static int last_mode = -1;
     static int last_selected = -2;
     static int last_overlay = -1;
@@ -2007,7 +2049,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         if (g_extension_touch_capture) return 1;
         if (extension_grid_hit(x, y)) {
             // G-6/G-7 零干预原则：投影常驻时网格触摸完全放行原版控件链
-            // （TouchHandle 自带命中/选中动画/详情；开发期操作按钮放开（用户决策）；
+            // （TouchHandle 自带命中/选中动画/详情；操作按钮由 menu_gate 拦截；
             // 拖动 drop 由 SaveItemOnEmpty 门禁拦截）。模块不做任何状态清理——
             // press 时 reset/clear 会破坏 TouchHandle 的按压记录导致点击失效。
         }
@@ -2442,6 +2484,34 @@ void prepare_main_menu_locked() {
 }
 
 }  // namespace
+
+// G-8：item proc 0x02（drop 到扩展格控件）路由——src=模块拖动状态（press 时
+// projection_slot_at 记录），dst=落点控件索引。成功返回 true（wrapper 吞原版事件）。
+bool virtual_bag_projection_drop_to_slot(void* dst_control, void* src_control) {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!g_module_view_installed || dst_control == nullptr ||
+        src_control == nullptr || fn_ui_equip_get_item_slot_index == nullptr ||
+        fn_control_object_get_data == nullptr) {
+        return false;
+    }
+    void* src_data = fn_control_object_get_data(src_control);
+    void* item = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
+    int src_bag = -1, src_slot = -1;
+    if (item == nullptr || !module_slot_of_item_locked(item, &src_bag, &src_slot)) {
+        return false;
+    }
+    const int dst_slot = fn_ui_equip_get_item_slot_index(dst_control);
+    if (dst_slot < 0 || dst_slot >= g_virtual_bag_state.capacities[src_bag]) {
+        return false;
+    }
+    const bool routed = move_extension_to_extension_locked(src_bag, src_slot, src_bag, dst_slot);
+    if (routed) {
+        persist_state_locked();
+        refresh_projection_if_overwritten_locked();
+        VIRTBAG_LOG("drop routed ext->ext dst_slot=%d", dst_slot);
+    }
+    return routed;
+}
 
 void virtual_bag_ui_start_auto_inject() {
     ensure_inject_thread();
