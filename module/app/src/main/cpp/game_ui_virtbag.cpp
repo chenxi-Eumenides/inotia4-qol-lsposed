@@ -792,6 +792,14 @@ void free_module_object_locked(int bag, int slot) {
     }
     void* item = g_module_objects[bag][slot];
     if (item != nullptr && fn_itempool_free != nullptr) {
+        // 投影期间先清控件引用：Scene_Draw 会画控件 data[0]，释放悬空对象前
+        // 必须置空（否则 ITEM_DrawPorting 解引用已释放内存崩溃，tombstone_06）。
+        if (g_module_view_installed && g_module_view_index == bag &&
+            g_projected_item_root != nullptr && fn_control_object_get_child != nullptr &&
+            fn_control_item_set_item != nullptr) {
+            void* ctrl = valid_child_locked(g_projected_item_root, slot);
+            if (ctrl != nullptr) fn_control_item_set_item(ctrl, nullptr);
+        }
         fn_itempool_free(item);
         ownership::release(&g_ownership_ledger, g_module_object_handles[bag][slot]);
     }
@@ -1470,9 +1478,11 @@ void draw_cells_in_frame_locked() {
         if (button != nullptr) {
             const bool selected = g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
                                   g_virtual_bag_state.selected == index;
-            const bool disabled = g_virtual_bag_state.capacities[index] == 0;
-            // G-1：底框用原版空袋贴图（loc 9，DrawInvenBag 同款 GRPX_DrawPart 调用），
-            // 坐标为 tab 控件绝对位置（手工父链累加，GetAbsoluteRect 禁 C++ 直调）。
+            const bool equipped = g_virtual_bag_state.capacities[index] != 0;
+            VIRTBAG_LOG("tab draw index=%d selected=%d equipped=%d", index,
+                        selected ? 1 : 0, equipped ? 1 : 0);
+            // G-1：贴图对齐 DrawInvenBag 原版语义——选中=loc 0x13（亮）、
+            // 装备未选中=loc 0xa（暗）、未装备=loc 9（空袋）；无边框，选中/未选中靠贴图区分。
             if (can_draw_original_button && group != nullptr) {
                 int64_t ax = 0, ay = 0;
                 uint8_t* c = reinterpret_cast<uint8_t*>(button);
@@ -1485,18 +1495,35 @@ void draw_cells_in_frame_locked() {
                     ay += *reinterpret_cast<int64_t*>(pc + CO_RECT_Y);
                     p = *reinterpret_cast<void**>(pc + CO_PARENT);
                 }
-                void* loc = fn_imgsys_get_loc(0xf, 9);
-                if (loc != nullptr) {
-                    fn_grpx_draw_part(group, static_cast<int32_t>(ax),
-                                      static_cast<int32_t>(ay), loc, 0, 1, 0x28);
+                // 贴图照抄 DrawInvenBag 原版分支（b73c0-b7444），含 w6 差异：
+                // 选中=先 loc 0x13（w6=0）再 loc 6（w6=0，"亮底框"）；
+                // 未选中装备=仅 loc 6（w6=0x28，"暗底框"）；未装备=仅 loc 9（w6=0x28）。
+                if (selected) {
+                    void* icon = fn_imgsys_get_loc(0xf, 0x13);
+                    if (icon != nullptr) {
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax - 10),
+                                          static_cast<int32_t>(ay - 3), icon, 0, 1, 0);
+                    }
+                    void* frame = fn_imgsys_get_loc(0xf, 6);
+                    if (frame != nullptr) {
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax),
+                                          static_cast<int32_t>(ay), frame, 0, 1, 0);
+                    }
+                } else if (equipped) {
+                    void* frame = fn_imgsys_get_loc(0xf, 6);
+                    if (frame != nullptr) {
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax),
+                                          static_cast<int32_t>(ay), frame, 0, 1, 0x28);
+                    }
+                } else {
+                    void* bag_icon = fn_imgsys_get_loc(0xf, 9);
+                    if (bag_icon != nullptr) {
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax),
+                                          static_cast<int32_t>(ay), bag_icon, 0, 1, 0x28);
+                    }
                 }
             }
-            const UiRect tab_size{0, 0, kExtensionTabWidth, kExtensionTabHeight};
-            if (selected) {
-                // 选中标记：原版袋无选中贴图，保留边框叠加作视觉区分。
-                ui_draw_button_border(button, tab_size, 0xffffd875, 2);
-            }
-            ui_draw_text_centered(button, 8, disabled ? 0xff888888 : 0xffffffff);
+            ui_draw_text_centered(button, 8, equipped ? 0xffffffffu : 0xff888888u);
         }
     }
 
