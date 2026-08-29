@@ -370,6 +370,7 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
 bool handle_bag_drop_release_locked(int64_t x, int64_t y);
+void* valid_child_locked(void* root, int slot);
 
 // P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。
 void play_extension_switch_sound() {
