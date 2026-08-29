@@ -200,6 +200,10 @@ void install_extension_tab_buttons_locked() {
             reinterpret_cast<void*>(&extension_tab_button_clicked);
         *reinterpret_cast<void**>(data + CB_DRAW_PROC) = nullptr;
         if (fn_ctrl_btn_set_text != nullptr) fn_ctrl_btn_set_text(button, texts[index]);
+        // TouchHandle 会把命中控件的 data[0] 当"物品指针"存进 TouchState 并由
+        // Scene_Draw 画它（tombstone_15：垃圾指针 SEGV）。ControlButton 的 data[0]
+        // 不是物品——清成 nullptr 让 TouchHandle 读到空、跳过物品存取。
+        *reinterpret_cast<void**>(data) = nullptr;
         buttons[index] = button;
     }
     g_extension_tab_buttons = buttons;
