@@ -173,7 +173,9 @@ extern ControlObjectGetChildFn fn_control_object_get_child;
 // GetAbsoluteRect 出参布局与 UiRect（game_ui_kit.h）一致；此处自包含避免头循环。
 struct ControlAbsoluteRect { int32_t x, y, w, h; };
 typedef ControlAbsoluteRect (*ControlObjectGetAbsoluteRectFn)(void* ctrl);
-extern ControlObjectGetAbsoluteRectFn fn_control_object_get_absolute_rect;extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
+extern ControlObjectGetAbsoluteRectFn fn_control_object_get_absolute_rect;
+typedef void (*TouchHandleDeleteControlFn)(void* ctrl);
+extern TouchHandleDeleteControlFn fn_touch_handle_delete_control;extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
 extern ItemDrawPortingFn fn_item_draw_porting;
 extern MakeMixFn fn_make_mix;

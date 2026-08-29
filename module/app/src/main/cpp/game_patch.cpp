@@ -218,9 +218,11 @@ std::string data_recover_after_hive_block() {
 }
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
-    if (virtual_bag_original_item_input_blocked()) {
-        MOVE_LOG("move_merge: original item input blocked in extension view control=%p event=%llu",
-                 control, static_cast<unsigned long long>(event));
+    // G-7：扩展视图内只拦截 drop（0x04，借出对象不得拖入原版袋——SaveItemOnEmpty
+    // 门禁为第二层）；详情(0x80)/选中(0x01,0x02)/其余事件放行原版控件链。
+    if (virtual_bag_original_item_input_blocked() && event == 0x04) {
+        MOVE_LOG("move_merge: drop suppressed in extension view control=%p",
+                 control);
         return 0;
     }
     if (event == 4 && param != nullptr && fn_control_object_get_data != nullptr &&

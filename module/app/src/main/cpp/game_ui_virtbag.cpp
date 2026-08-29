@@ -109,8 +109,6 @@ uintptr_t g_draw_patch_addr = 0;
 uintptr_t g_bag_draw_patch_addr = 0;
 uintptr_t g_save_inventory_patch_addr = 0;
 void* g_save_inventory_thunk = nullptr;
-uintptr_t g_menu_gate_patch_addr = 0;
-void* g_menu_gate_thunk = nullptr;
 uintptr_t g_drop_gate_patch_addr = 0;
 void* g_drop_gate_thunk = nullptr;
 uintptr_t g_item_draw_patch_addr = 0;
@@ -1667,77 +1665,6 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
     return reinterpret_cast<SaveInventoryRawFn>(raw)(cursor);
 }
 
-// G-6/G-7 菜单门禁：MakeDesc 尾跳 SetDescMenu 的 B 指令替换为**纯汇编 stub**——
-// 该尾跳是非标准调用（MakeDesc 先恢复调用者帧再 B 跳，SetDescMenu 依赖调用者
-// 寄存器残值 x19），C 函数 wrapper 会破坏现场致 SIGSEGV（tombstone_15）。
-// stub 只用临时寄存器 x17：未安装→直跳 SetDescMenu（原路径）；安装→br x30 返回。
-void menu_gate_wrapper() {
-    // 兼容占位：实际门禁逻辑在汇编 stub 中（见 allocate_menu_gate_stub）。
-}
-
-// stub 布局（thunk 页）：
-//   adrp x17, flag_page          ; g_module_view_installed 地址页
-//   ldrb w17, [x17, #flag_lo]
-//   cbnz w17, skip               ; installed → 跳过菜单
-//   b    SetDescMenu             ; 原路径直跳（寄存器零破坏）
-// skip: br x30                   ; 返回 MakeDesc 调用者（x30 已由 MakeDesc 恢复）
-void* allocate_menu_gate_stub(uintptr_t call_addr, uintptr_t set_desc_menu,
-                              uintptr_t flag_addr) {
-#ifndef MAP_FIXED_NOREPLACE
-    (void)call_addr;
-    (void)set_desc_menu;
-    (void)flag_addr;
-    return nullptr;
-#else
-    constexpr size_t kPageSize = 4096;
-    constexpr int64_t kStep = 0x00010000;
-    const uintptr_t base = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-    for (int64_t distance = kStep; distance < 0x08000000; distance += kStep) {
-        for (int sign : {1, -1}) {
-            const int64_t candidate_signed = static_cast<int64_t>(base) + sign * distance;
-            if (candidate_signed <= 0) continue;
-            const uintptr_t candidate = static_cast<uintptr_t>(candidate_signed);
-            void* region = mmap(reinterpret_cast<void*>(candidate), kPageSize,
-                                PROT_READ | PROT_WRITE | PROT_EXEC,
-                                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (region == MAP_FAILED) continue;
-            const uintptr_t stub = candidate;
-            const int64_t flag_page_delta =
-                static_cast<int64_t>((flag_addr & ~(kPageSize - 1))) -
-                static_cast<int64_t>(stub & ~(kPageSize - 1));
-            const int64_t flag_imm = flag_page_delta >> 12;
-            if (flag_imm < -2097152LL || flag_imm > 2097151LL) {  // adrp ±4GB
-                munmap(region, kPageSize);
-                continue;
-            }
-            const uint32_t immlo = static_cast<uint32_t>(flag_imm & 0x3);
-            const uint32_t immhi = static_cast<uint32_t>((flag_imm >> 2) & 0x7ffff);
-            const uint32_t flag_byte_offset = static_cast<uint32_t>(flag_addr & 0xfff);
-            const int64_t menu_delta = static_cast<int64_t>(set_desc_menu) -
-                                       static_cast<int64_t>(stub + 12);
-            if (menu_delta < -0x08000000LL || menu_delta >= 0x08000000LL ||
-                (menu_delta & 0x3) != 0) {
-                munmap(region, kPageSize);
-                continue;
-            }
-            // adrp: op immlo(2)@bit29-30 '10000' immhi(19)@bit5-23 Rd(5)@bit0-4
-            uint32_t code[] = {
-                0x90000000u | (immlo << 29) | (immhi << 5) | 17u,          // adrp x17, flag
-                0x39400000u | (flag_byte_offset << 10) | (17u << 5) | 17u, // ldrb w17,[x17,#off]
-                0x35000051u,                                               // cbnz w17, skip(+16)
-                0x14000000u | (static_cast<uint32_t>(menu_delta >> 2) & 0x03ffffffu), // b SetDescMenu
-                0xd61f0000u,                                               // skip: br x30
-            };
-            memcpy(region, code, sizeof(code));
-            __builtin___clear_cache(reinterpret_cast<char*>(region),
-                                    reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(region) + sizeof(code)));
-            return region;
-        }
-    }
-    return nullptr;
-#endif
-}
-
 // G-6/G-7 drop 门禁：bag proc event 0x04 落袋写入（b8cc0 bl）——投影期间拖动
 // 投影物品松手会走到这里，借出对象必须不入 INVEN。捡取路径的其他调用点不受影响。
 int32_t save_item_on_empty_gate(void* item, int32_t bag) {
@@ -2062,7 +1989,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         if (g_extension_touch_capture) return 1;
         if (extension_grid_hit(x, y)) {
             // G-6/G-7 零干预原则：投影常驻时网格触摸完全放行原版控件链
-            // （TouchHandle 自带命中/选中动画/详情；操作按钮由 menu_gate 拦截；
+            // （TouchHandle 自带命中/选中动画/详情；开发期操作按钮放开（用户决策）；
             // 拖动 drop 由 SaveItemOnEmpty 门禁拦截）。模块不做任何状态清理——
             // press 时 reset/clear 会破坏 TouchHandle 的按压记录导致点击失效。
         }
@@ -2439,46 +2366,6 @@ bool inject_locked() {
         g_drop_gate_patch_addr = call_addr;
         VIRTBAG_LOG("drop gate hook patched call=%p replacement=0x%08x",
                     reinterpret_cast<void*>(call_addr), replacement);
-    }
-
-    if (g_menu_gate_patch_addr == 0) {
-        const uintptr_t call_addr =
-            g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_TAIL_VMA", F_UIEQUIP_MAKE_DESC_TAIL_VMA);
-        constexpr uint32_t kOriginalTailJump = 0x17fffed1;
-        const uintptr_t set_desc_menu =
-            g_base + fn_resolve("F_UIEQUIP_SET_DESC_MENU_VMA", F_UIEQUIP_SET_DESC_MENU_VMA);
-        const uintptr_t flag_addr =
-            reinterpret_cast<uintptr_t>(&g_module_view_installed);
-        void* stub = allocate_menu_gate_stub(call_addr, set_desc_menu, flag_addr);
-        if (stub == nullptr) {
-            VIRTBAG_LOG("menu gate stub allocation failed call=%p", reinterpret_cast<void*>(call_addr));
-            return false;
-        }
-        g_menu_gate_thunk = stub;
-        const int64_t delta = static_cast<int64_t>(reinterpret_cast<uintptr_t>(stub)) -
-                              static_cast<int64_t>(call_addr);
-        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            VIRTBAG_LOG("menu gate branch target out of range call=%p target=%p",
-                        reinterpret_cast<void*>(call_addr), stub);
-            return false;
-        }
-        const uint32_t replacement = 0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
-        const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            VIRTBAG_LOG("menu gate patch mprotect failed errno=%d", errno);
-            return false;
-        }
-        const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
-        if (current != kOriginalTailJump && current != replacement) {
-            VIRTBAG_LOG("menu gate patch mismatch got=0x%08x", current);
-            return false;
-        }
-        *reinterpret_cast<uint32_t*>(call_addr) = replacement;
-        __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
-                                reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
-        g_menu_gate_patch_addr = call_addr;
-        VIRTBAG_LOG("menu gate hook patched call=%p stub=%p replacement=0x%08x",
-                    reinterpret_cast<void*>(call_addr), stub, replacement);
     }
     *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
     *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
