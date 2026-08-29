@@ -163,6 +163,36 @@ int extension_tab_index(void* ctrl) {
     return -1;
 }
 
+// 扩展标签的"已装备背包物品"对象（用户方案：与 RefreshBagArea 同款语义——
+// data[0] 放真实物品）。按袋 types 物化（CreateItem(30+type)），卸下/降级时
+// 经延迟释放退役（对象可能仍被 TouchState 引用，不真释放）。
+void* g_tab_bag_items[virtual_bag::kBagCount] = {};
+
+void defer_item_free_locked(void* item);
+void refresh_tab_bag_items_locked() {
+    for (int i = 0; i < virtual_bag::kBagCount; ++i) {
+        const uint8_t type = g_virtual_bag_state.types[i];
+        void*& slot = g_tab_bag_items[i];
+        if (type == 0) {
+            if (slot != nullptr) {
+                defer_item_free_locked(slot);  // 不真释放：TouchState 可能仍引用
+                slot = nullptr;
+            }
+            continue;
+        }
+        // 已有对象且等级未变则复用（简化：按 category 存活即复用）
+        if (slot != nullptr) continue;
+        if (fn_create_item == nullptr) continue;
+        slot = fn_create_item(static_cast<int32_t>(30 + type), 0, 0, 0);
+        if (slot != nullptr) {
+            uint32_t count_flags =
+                *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT);
+            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT) =
+                stack_codec::write_count(count_flags, 1);
+        }
+    }
+}
+
 void install_extension_tab_buttons_locked() {
     if (g_base == 0 || fn_ctrl_btn_create == nullptr) return;
     void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
@@ -200,10 +230,11 @@ void install_extension_tab_buttons_locked() {
             reinterpret_cast<void*>(&extension_tab_button_clicked);
         *reinterpret_cast<void**>(data + CB_DRAW_PROC) = nullptr;
         if (fn_ctrl_btn_set_text != nullptr) fn_ctrl_btn_set_text(button, texts[index]);
-        // TouchHandle 会把命中控件的 data[0] 当"物品指针"存进 TouchState 并由
-        // Scene_Draw 画它（tombstone_15：垃圾指针 SEGV）。ControlButton 的 data[0]
-        // 不是物品——清成 nullptr 让 TouchHandle 读到空、跳过物品存取。
-        *reinterpret_cast<void**>(data) = nullptr;
+        // TouchHandle 把命中控件的 data[0] 当"物品指针"存 TouchState 并由 Scene_Draw
+        // 画它（垃圾指针即崩）。扩展标签放真实背包物品对象（RefreshBagArea 同款语义，
+        // 用户决策）：对象由 refresh_tab_bag_items_locked 按袋装备类型物化。
+        refresh_tab_bag_items_locked();
+        *reinterpret_cast<void**>(data) = g_tab_bag_items[index];
         buttons[index] = button;
     }
     g_extension_tab_buttons = buttons;
@@ -376,6 +407,7 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
 bool handle_bag_drop_release_locked(int64_t x, int64_t y);
+void defer_item_free_locked(void* item);
 void* valid_child_locked(void* root, int slot);
 
 // P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。
