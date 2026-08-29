@@ -787,6 +787,43 @@ void recover_pending_transaction_locked() {
 ownership::Ledger g_ownership_ledger{};
 uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount]{};
 
+// 延迟释放队列：借出对象可能仍被控件 data[0] 引用（Scene_Draw 逐帧解引用），
+// 释放后立即 ItemPool_Free 会造成悬空。对象先进隔离区，隔离 N 帧（覆盖一次
+// 完整绘制循环）后确认框架不再持有再真释放。
+constexpr int kDeferredFreeCapacity = 16;
+constexpr int kDeferredFreeFrames = 8;
+struct DeferredFree {
+    void* item = nullptr;
+    int frames_left = 0;
+};
+DeferredFree g_deferred_free_queue[kDeferredFreeCapacity]{};
+int g_deferred_free_count = 0;
+
+// 每帧（draw_end，锁内）递减隔离计数，归零后真释放。
+void process_deferred_frees_locked() {
+    for (int i = g_deferred_free_count - 1; i >= 0; --i) {
+        DeferredFree& entry = g_deferred_free_queue[i];
+        if (--entry.frames_left > 0) continue;
+        if (entry.item != nullptr && fn_itempool_free != nullptr) {
+            fn_itempool_free(entry.item);
+        }
+        g_deferred_free_queue[i] = g_deferred_free_queue[g_deferred_free_count - 1];
+        g_deferred_free_count -= 1;
+    }
+}
+
+// 入隔离区；队列满时（极端）退化为立即释放。
+void defer_item_free_locked(void* item) {
+    if (item == nullptr || fn_itempool_free == nullptr) return;
+    if (g_deferred_free_count >= kDeferredFreeCapacity) {
+        fn_itempool_free(item);
+        return;
+    }
+    DeferredFree& entry = g_deferred_free_queue[g_deferred_free_count++];
+    entry.item = item;
+    entry.frames_left = kDeferredFreeFrames;
+}
+
 void free_module_object_locked(int bag, int slot) {
     if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return;
@@ -801,8 +838,8 @@ void free_module_object_locked(int bag, int slot) {
             void* ctrl = valid_child_locked(g_projected_item_root, slot);
             if (ctrl != nullptr) fn_control_item_set_item(ctrl, nullptr);
         }
-        fn_itempool_free(item);
         ownership::release(&g_ownership_ledger, g_module_object_handles[bag][slot]);
+        defer_item_free_locked(item);
     }
     g_module_objects[bag][slot] = nullptr;
     g_module_object_categories[bag][slot] = 0;
@@ -2073,6 +2110,7 @@ void virtual_bag_draw_end_wrapper() {
         g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected);
     if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
+    process_deferred_frees_locked();
     if (g_module_view_installed) {
         refresh_projection_if_overwritten_locked();
     }
