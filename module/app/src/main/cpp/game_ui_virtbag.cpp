@@ -193,55 +193,82 @@ void refresh_tab_bag_items_locked() {
     }
 }
 
+// 扩展标签控件事件处理：TouchHandle 转发的控件事件（0x02=click 松开确认）。
+// 挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定 click → 本 proc。
+void queue_extension_tab_click_locked(int extension_bag);
+uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
+    if (event == 0x02) {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        const int index = extension_tab_index(ctrl);
+        if (index >= 0) {
+            queue_extension_tab_click_locked(index);
+        }
+    }
+    return 1;
+}
+
+// 扩展标签 = ControlItem（与原版袋标签同类）：挂袋容器（0x3049e0+0x50），
+// SetUserType(2) + SetControlProc（自定义，0x02 松开确认切换/详情 toggle）。
+// data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
 void install_extension_tab_buttons_locked() {
-    if (g_base == 0 || fn_ctrl_btn_create == nullptr) return;
-    void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
-    if (root == nullptr) return;
-    if (g_extension_tab_generation == g_inventory_generation &&
-        g_extension_tab_root == root && g_extension_tab_buttons[0] != nullptr) {
+    if (g_base == 0 || fn_control_object_get_child == nullptr ||
+        fn_control_item_set_item == nullptr || fn_mem_malloc == nullptr ||
+        fn_control_object_set_control_proc == nullptr ||
+        fn_control_object_set_user_type == nullptr ||
+        fn_touch_handle_unuse_control_event_move == nullptr ||
+        fn_touch_handle_delete_control == nullptr ||
+        fn_ctrl_get_count == nullptr) {
         return;
     }
-
-    static char texts[virtual_bag::kBagCount][16] = {"扩展1", "扩展2", "扩展3", "扩展4", "扩展5"};
-    std::array<void*, virtual_bag::kBagCount> buttons{};
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        void* button = fn_ctrl_btn_create(root, texts[index]);
-        if (button == nullptr) {
-            VIRTBAG_LOG("extension tab create failed index=%d", index);
-            return;
-        }
-        uint8_t* data = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(button) + CO_DATA);
-        if (data == nullptr) {
-            VIRTBAG_LOG("extension tab data is null index=%d", index);
-            return;
-        }
-        *reinterpret_cast<int64_t*>(static_cast<uint8_t*>(button) + CO_RECT_X) = kExtensionTabX;
-        *reinterpret_cast<int64_t*>(static_cast<uint8_t*>(button) + CO_RECT_Y) =
-            kExtensionTabY + index * kCellStepY;
-        *reinterpret_cast<int64_t*>(static_cast<uint8_t*>(button) + CO_RECT_W) = kExtensionTabWidth;
-        *reinterpret_cast<int64_t*>(static_cast<uint8_t*>(button) + CO_RECT_H) = kExtensionTabHeight;
-        *reinterpret_cast<uintptr_t*>(static_cast<uint8_t*>(button) + CO_PROC) =
-            g_base + F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA;
-        *reinterpret_cast<uintptr_t*>(static_cast<uint8_t*>(button) + CO_CONTROL_PROC) =
-            g_base + F_CONTROL_BUTTON_CONTROL_EVENT_PROC_VMA;
-        if (fn_ctrl_set_event_call_type != nullptr) fn_ctrl_set_event_call_type(button, 0x200);
-        if (fn_ctrl_set_active != nullptr) fn_ctrl_set_active(button, 0x20);
-        *reinterpret_cast<void**>(data + CB_EXECUTE_PROC) =
-            reinterpret_cast<void*>(&extension_tab_button_clicked);
-        *reinterpret_cast<void**>(data + CB_DRAW_PROC) = nullptr;
-        if (fn_ctrl_btn_set_text != nullptr) fn_ctrl_btn_set_text(button, texts[index]);
-        // TouchHandle 把命中控件的 data[0] 当"物品指针"存 TouchState 并由 Scene_Draw
-        // 画它（垃圾指针即崩）。扩展标签放真实背包物品对象（RefreshBagArea 同款语义，
-        // 用户决策）：对象由 refresh_tab_bag_items_locked 按袋装备类型物化。
-        refresh_tab_bag_items_locked();
-        *reinterpret_cast<void**>(data) = g_tab_bag_items[index];
-        buttons[index] = button;
+    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA + 0x50);
+    if (bag_container == nullptr) return;
+    if (g_extension_tab_generation == g_inventory_generation &&
+        g_extension_tab_root == bag_container && g_extension_tab_buttons[0] != nullptr) {
+        return;
     }
-    g_extension_tab_buttons = buttons;
-    g_extension_tab_root = root;
+    // 重建：先删旧标签（挂在袋容器，容器重建后旧指针无效）
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        if (g_extension_tab_buttons[index] != nullptr) {
+            fn_touch_handle_delete_control(g_extension_tab_buttons[index]);
+            g_extension_tab_buttons[index] = nullptr;
+        }
+    }
+    refresh_tab_bag_items_locked();
+    static char texts[virtual_bag::kBagCount][16] = {"扩展1", "扩展2", "扩展3", "扩展4", "扩展5"};
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3) + SetControlProc + SetUserType(2)
+        const uintptr_t add_fn =
+            g_base + fn_resolve("F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA",
+                                F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA);
+        typedef void* (*AddFn)(void*, void*, void*, uint32_t, void*);
+        void* ctrl = reinterpret_cast<AddFn>(add_fn)(bag_container, nullptr, nullptr, 3, nullptr);
+        if (ctrl == nullptr) {
+            VIRTBAG_LOG("extension tab create failed index=%d", index);
+            continue;
+        }
+        fn_control_object_set_control_proc(ctrl,
+            reinterpret_cast<void*>(&extension_tab_item_proc));
+        fn_control_object_set_user_type(ctrl, 2);
+        fn_touch_handle_unuse_control_event_move(ctrl);
+        // rect：袋容器相对坐标（袋行右侧）
+        const int row_y = 130 + index * 70;
+        uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
+        *reinterpret_cast<int64_t*>(c + CO_RECT_X) = 470;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_Y) = row_y;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_W) = 200;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_H) = 64;
+        // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
+        void* data = fn_mem_malloc(0x10);
+        if (data == nullptr) continue;
+        std::memset(data, 0, 0x10);
+        *reinterpret_cast<void**>(data) = g_tab_bag_items[index];
+        fn_ctrl_set_data(ctrl, data);
+        g_extension_tab_buttons[index] = ctrl;
+    }
+    g_extension_tab_root = bag_container;
     g_extension_tab_generation = g_inventory_generation;
     VIRTBAG_LOG("extension tabs installed generation=%llu root=%p",
-                static_cast<unsigned long long>(g_inventory_generation), root);
+                static_cast<unsigned long long>(g_inventory_generation), bag_container);
 }
 
 void disable_extension_tab_buttons_locked() {
@@ -417,6 +444,7 @@ void play_extension_switch_sound() {
 }
 
 // ---- 袋信息页（二次点击袋标签）：容量/物品数/解除按钮，label+button 控件组 ----
+void queue_extension_tab_click_locked(int extension_bag);
 void bag_info_unequip_clicked(void* ctrl);
 // 解除按钮 = 原版语义：有物品拒绝（静默 v1）、空袋卸下（容量清零+标签禁用）。
 // 面板挂 panel root，随面板关闭销毁；切袋/退出/三次点击经显式 remove。

@@ -176,6 +176,12 @@ extern ControlObjectGetChildFn fn_control_object_get_child;
 // （ctrl_abs_point 模式，见 game_ui_custom.cpp）或 install 时缓存。
 typedef void (*TouchHandleDeleteControlFn)(void* ctrl);
 extern TouchHandleDeleteControlFn fn_touch_handle_delete_control;
+typedef void (*ControlObjectSetControlProcFn)(void* ctrl, void* proc);
+extern ControlObjectSetControlProcFn fn_control_object_set_control_proc;
+typedef void (*ControlObjectSetUserTypeFn)(void* ctrl, uint32_t type);
+extern ControlObjectSetUserTypeFn fn_control_object_set_user_type;
+typedef void (*TouchHandleUnuseControlEventMoveFn)(void* ctrl);
+extern TouchHandleUnuseControlEventMoveFn fn_touch_handle_unuse_control_event_move;
 typedef uint32_t (*ControlObjectGetUserTypeFn)(void* ctrl);
 extern ControlObjectGetUserTypeFn fn_control_object_get_user_type;extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
