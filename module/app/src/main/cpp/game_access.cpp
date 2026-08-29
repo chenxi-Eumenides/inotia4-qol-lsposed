@@ -163,7 +163,6 @@ ControlItemSetItemFn fn_control_item_set_item = nullptr;
 ControlObjectSetActiveFn fn_control_object_set_active = nullptr;
 ControlObjectSetShowFn fn_control_object_set_show = nullptr;
 ControlObjectGetChildFn fn_control_object_get_child = nullptr;
-ControlObjectGetAbsoluteRectFn fn_control_object_get_absolute_rect = nullptr;
 TouchHandleDeleteControlFn fn_touch_handle_delete_control = nullptr;
 ControlObjectGetUserTypeFn fn_control_object_get_user_type = nullptr;
 TouchHandleSetCursorFn fn_touch_handle_set_cursor = nullptr;
@@ -447,7 +446,6 @@ bool bridge_init() {
     fn_control_object_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
     fn_control_object_set_show = reinterpret_cast<ControlObjectSetShowFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_SHOW_VMA", F_CONTROL_OBJECT_SET_SHOW_VMA));
     fn_control_object_get_child = reinterpret_cast<ControlObjectGetChildFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_CHILD_VMA", F_CONTROL_OBJECT_GET_CHILD_VMA));
-    fn_control_object_get_absolute_rect = reinterpret_cast<ControlObjectGetAbsoluteRectFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA", F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA));
     fn_touch_handle_delete_control = reinterpret_cast<TouchHandleDeleteControlFn>(g_base + fn_resolve("F_TOUCH_HANDLE_DELETE_CONTROL_VMA", F_TOUCH_HANDLE_DELETE_CONTROL_VMA));
     fn_control_object_get_user_type = reinterpret_cast<ControlObjectGetUserTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_USER_TYPE_VMA", F_CONTROL_OBJECT_GET_USER_TYPE_VMA));
     fn_ui_desc_set_off = reinterpret_cast<UiDescSetOffFn>(g_base + fn_resolve("F_UIDESC_SET_OFF_VMA", F_UIDESC_SET_OFF_VMA));

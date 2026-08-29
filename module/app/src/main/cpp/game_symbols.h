@@ -508,7 +508,7 @@ constexpr uintptr_t F_CONTROL_OBJECT_GET_CHILD_VMA = 0x9eacc; // void* (void* ct
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_VMA = 0xb8980;          // (ctrl, 0) 详情面板（读控件物品）
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
-constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 出参，DrawInvenItem/命中统一坐标）
+constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 sret 出参）——禁止 C++ 直调（真机 SIGSEGV，见 game_access.h 注释）；取 rect 用手工父链读
 constexpr uintptr_t F_TOUCH_HANDLE_DELETE_CONTROL_VMA = 0xa3c04;     // void (ctrl) 删除控件（信息面板销毁）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_USER_TYPE_VMA = 0x9dbbc;    // u32 (ctrl) 控件类型（2=ControlItem，SetItem 内部门禁）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_DATA_VMA = 0x9df18;  // void* (void* ctrl) 取控件私有数据块

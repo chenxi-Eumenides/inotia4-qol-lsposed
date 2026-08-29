@@ -170,10 +170,10 @@ extern ControlItemSetItemFn fn_control_item_set_item;
 extern ControlObjectSetActiveFn fn_control_object_set_active;
 extern ControlObjectSetShowFn fn_control_object_set_show;
 extern ControlObjectGetChildFn fn_control_object_get_child;
-// GetAbsoluteRect 出参布局与 UiRect（game_ui_kit.h）一致；此处自包含避免头循环。
-struct ControlAbsoluteRect { int32_t x, y, w, h; };
-typedef ControlAbsoluteRect (*ControlObjectGetAbsoluteRectFn)(void* ctrl);
-extern ControlObjectGetAbsoluteRectFn fn_control_object_get_absolute_rect;
+// 注意：ControlObject_GetAbsoluteRect(0x9e748) 用 x8 sret 出参，禁止从 C++ 直接调用
+// （16B 结构体走 x0/x1 返回，clang 不设 x8 → GetRelativeRect stp [x8] 写垃圾地址 →
+// SEGV_ACCERR，真机实测 + docs/system/ui.md §6 第 3 坑）。取 rect 用手工父链读
+// （ctrl_abs_point 模式，见 game_ui_custom.cpp）或 install 时缓存。
 typedef void (*TouchHandleDeleteControlFn)(void* ctrl);
 extern TouchHandleDeleteControlFn fn_touch_handle_delete_control;
 typedef uint32_t (*ControlObjectGetUserTypeFn)(void* ctrl);

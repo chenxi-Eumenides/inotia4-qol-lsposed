@@ -1531,19 +1531,6 @@ void virtual_bag_draw_inven_item_wrapper() {
         virtual_bag::valid_index(g_virtual_bag_state.selected)) {
         if (g_module_view_installed) {
             original();
-            // 一次性 rect 转储（G-8 触摸命中定位）：投影控件的绝对屏幕位置。
-            static bool rect_dumped = false;
-            if (!rect_dumped && fn_control_object_get_absolute_rect != nullptr) {
-                void* live_root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
-                rect_dumped = true;
-                for (int slot = 0; slot < 4; ++slot) {
-                    void* ctrl = valid_child_locked(live_root, slot);
-                    if (ctrl == nullptr) continue;
-                    const ControlAbsoluteRect r = fn_control_object_get_absolute_rect(ctrl);
-                    VIRTBAG_LOG("projection rect slot=%d (%d,%d,%d,%d)",
-                                slot, r.x, r.y, r.w, r.h);
-                }
-            }
             return;
         }
         // Extension items occupy the original inventory rectangle without
