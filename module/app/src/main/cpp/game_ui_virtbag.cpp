@@ -792,38 +792,12 @@ uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount
 // 延迟释放队列：借出对象可能仍被控件 data[0] 引用（Scene_Draw 逐帧解引用），
 // 释放后立即 ItemPool_Free 会造成悬空。对象先进隔离区，隔离 N 帧（覆盖一次
 // 完整绘制循环）后确认框架不再持有再真释放。
-constexpr int kDeferredFreeCapacity = 16;
-constexpr int kDeferredFreeFrames = 8;
-struct DeferredFree {
-    void* item = nullptr;
-    int frames_left = 0;
-};
-DeferredFree g_deferred_free_queue[kDeferredFreeCapacity]{};
-int g_deferred_free_count = 0;
-
-// 每帧（draw_end，锁内）递减隔离计数，归零后真释放。
-void process_deferred_frees_locked() {
-    for (int i = g_deferred_free_count - 1; i >= 0; --i) {
-        DeferredFree& entry = g_deferred_free_queue[i];
-        if (--entry.frames_left > 0) continue;
-        if (entry.item != nullptr && fn_itempool_free != nullptr) {
-            fn_itempool_free(entry.item);
-        }
-        g_deferred_free_queue[i] = g_deferred_free_queue[g_deferred_free_count - 1];
-        g_deferred_free_count -= 1;
-    }
-}
-
-// 入隔离区；队列满时（极端）退化为立即释放。
+// 借出对象释放策略（根治悬空）：对象可能仍被 TouchState/控件 data 残留引用，
+// ItemPool_Free 后这些引用全部悬空（多轮修复未穷尽持有者）。改为**不真释放**：
+// 仅清除模块引用，对象内存保留至进程结束（单个 ~48B，开发期可接受；
+// P4 对象桥接后借出对象走真实所有权流动，此机制整体退役）。
 void defer_item_free_locked(void* item) {
-    if (item == nullptr || fn_itempool_free == nullptr) return;
-    if (g_deferred_free_count >= kDeferredFreeCapacity) {
-        fn_itempool_free(item);
-        return;
-    }
-    DeferredFree& entry = g_deferred_free_queue[g_deferred_free_count++];
-    entry.item = item;
-    entry.frames_left = kDeferredFreeFrames;
+    (void)item;  // 有意不释放：防 TouchState/控件残留引用悬空
 }
 
 void free_module_object_locked(int bag, int slot) {
@@ -1485,16 +1459,14 @@ void* valid_child_locked(void* root, int slot) {
 // G-6：投影命中走控件 AbsoluteRect。GetAbsoluteRect 是 x8 sret 函数禁止 C++ 直调
 // （真机 SIGSEGV），用手工父链累加（ctrl_abs_point 同款，纯内存读）。
 // w/h 用贴图固定尺寸 kGridCell（GetAbsoluteRect 也只输出 x/y 两个 i64）。
-// 物品指针合法性：模块缓存、延迟释放隔离区、INVEN_pItem 三集合任一命中即合法。
+// 物品指针合法性：模块缓存、INVEN_pItem 两集合任一命中即合法
+// （借出对象不再真释放，无需隔离区）。
 bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             if (g_module_objects[bag][slot] == item) return true;
         }
-    }
-    for (int i = 0; i < g_deferred_free_count; ++i) {
-        if (g_deferred_free_queue[i].item == item) return true;
     }
     if (g_inven != nullptr) {
         void** inventory = static_cast<void**>(g_inven);
@@ -2194,7 +2166,6 @@ void virtual_bag_draw_end_wrapper() {
         }
         refresh_projection_if_overwritten_locked();
     }
-    process_deferred_frees_locked();
     if (g_module_view_installed) {
         refresh_projection_if_overwritten_locked();
     }
