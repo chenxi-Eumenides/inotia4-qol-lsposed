@@ -250,10 +250,11 @@ void install_extension_tab_buttons_locked() {
             reinterpret_cast<void*>(&extension_tab_item_proc));
         fn_control_object_set_user_type(ctrl, 2);
         fn_touch_handle_unuse_control_event_move(ctrl);
-        // rect：袋容器相对坐标（袋行右侧）
-        const int row_y = 130 + index * 70;
+        // rect：袋容器相对坐标。实测容器绝对=(1116,145)＝原版袋 0 位置，
+        // 原版袋 i 相对=(0,70i,57,57)。扩展标签放袋列右侧：相对 x=65 → 绝对 1181。
+        const int row_y = index * 70;
         uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
-        *reinterpret_cast<int64_t*>(c + CO_RECT_X) = 470;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_X) = 65;
         *reinterpret_cast<int64_t*>(c + CO_RECT_Y) = row_y;
         *reinterpret_cast<int64_t*>(c + CO_RECT_W) = 200;
         *reinterpret_cast<int64_t*>(c + CO_RECT_H) = 64;
@@ -1566,9 +1567,12 @@ void draw_cells_in_frame_locked() {
     const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
                                            fn_imgsys_get_loc != nullptr;
     void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
-    void* current_root = g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA) : nullptr;
-    const bool tabs_are_current = current_root != nullptr && current_root == g_extension_tab_root &&
-                                  g_extension_tab_generation == g_inventory_generation;
+    // 标签挂袋容器（0x3049e0+0x50）：比对基准同步为袋容器句柄。
+    void* current_bag_container =
+        g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA + 0x50) : nullptr;
+    const bool tabs_are_current =
+        current_bag_container != nullptr && current_bag_container == g_extension_tab_root &&
+        g_extension_tab_generation == g_inventory_generation;
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* button = tabs_are_current ? g_extension_tab_buttons[index] : nullptr;
         if (button != nullptr) {
