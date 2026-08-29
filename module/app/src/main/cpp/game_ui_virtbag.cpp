@@ -210,6 +210,36 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // 扩展标签 = ControlItem（与原版袋标签同类）：挂袋容器（0x3049e0+0x50），
 // SetUserType(2) + SetControlProc（自定义，0x02 松开确认切换/详情 toggle）。
 // data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
+// 挂载父层获取（depth 试验中）：从袋容器沿 CO_PARENT 走 N 层。
+// 当前 depth1（容器父，rect (496,0)——试验用户指定）。
+void* scene_root_from_container_locked(void* container) {
+    void* cur = container;
+    for (int i = 0; i < 1 && cur != nullptr; ++i) {
+        cur = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cur) + CO_PARENT);
+    }
+    return cur;
+}
+
+// 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
+void ctrl_abs_pos_locked(void* ctrl, int64_t* out_x, int64_t* out_y) {
+    // 先收集父链（自下而上）
+    void* chain[8] = {};
+    int depth = 0;
+    void* cur = ctrl;
+    while (cur != nullptr && depth < 8) {
+        chain[depth++] = cur;
+        cur = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cur) + CO_PARENT);
+    }
+    int64_t ax = 0, ay = 0;
+    for (int i = depth - 1; i >= 0; --i) {
+        uint8_t* c = reinterpret_cast<uint8_t*>(chain[i]);
+        ax += *reinterpret_cast<int64_t*>(c + CO_RECT_X);
+        ay += *reinterpret_cast<int64_t*>(c + CO_RECT_Y);
+    }
+    *out_x = ax;
+    *out_y = ay;
+}
+
 void install_extension_tab_buttons_locked() {
     if (g_base == 0 || fn_control_object_get_child == nullptr ||
         fn_control_item_set_item == nullptr || fn_mem_malloc == nullptr ||
@@ -222,6 +252,16 @@ void install_extension_tab_buttons_locked() {
     }
     void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA + 0x50);
     if (bag_container == nullptr) return;
+    // 动态计算（用户方案）：打开面板后，原版袋 0 按钮的绝对位置 =
+    // 袋容器绝对（父链累加，袋 0 相对容器为 (0,0)）。缓存至面板重建。
+    int64_t bag0_abs_x = 0, bag0_abs_y = 0;
+    ctrl_abs_pos_locked(bag_container, &bag0_abs_x, &bag0_abs_y);
+    void* scene_root = scene_root_from_container_locked(bag_container);
+    int64_t mount_abs_x = 0, mount_abs_y = 0;
+    if (scene_root != nullptr) ctrl_abs_pos_locked(scene_root, &mount_abs_x, &mount_abs_y);
+    // 标签相对挂载层 = 原版袋列右侧（袋 0 绝对 + (65,0)，减挂载层绝对）
+    const int64_t tab_rel_x = bag0_abs_x + 65 - mount_abs_x;
+    const int64_t tab_rel_y = bag0_abs_y - mount_abs_y;
     if (g_extension_tab_generation == g_inventory_generation &&
         g_extension_tab_root == bag_container && g_extension_tab_buttons[0] != nullptr) {
         return;
@@ -250,11 +290,10 @@ void install_extension_tab_buttons_locked() {
             reinterpret_cast<void*>(&extension_tab_item_proc));
         fn_control_object_set_user_type(ctrl, 2);
         fn_touch_handle_unuse_control_event_move(ctrl);
-        // rect：袋容器相对坐标。实测容器绝对=(1116,145)＝原版袋 0 位置，
-        // 原版袋 i 相对=(0,70i,57,57)。扩展标签放袋列右侧：相对 x=65 → 绝对 1181。
-        const int row_y = index * 70;
+        // rect：相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
+        const int64_t row_y = tab_rel_y + index * 70;
         uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
-        *reinterpret_cast<int64_t*>(c + CO_RECT_X) = 65;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_X) = tab_rel_x;
         *reinterpret_cast<int64_t*>(c + CO_RECT_Y) = row_y;
         *reinterpret_cast<int64_t*>(c + CO_RECT_W) = 200;
         *reinterpret_cast<int64_t*>(c + CO_RECT_H) = 64;
@@ -266,7 +305,7 @@ void install_extension_tab_buttons_locked() {
         fn_ctrl_set_data(ctrl, data);
         g_extension_tab_buttons[index] = ctrl;
     }
-    g_extension_tab_root = bag_container;
+    g_extension_tab_root = scene_root;
     g_extension_tab_generation = g_inventory_generation;
     VIRTBAG_LOG("extension tabs installed generation=%llu root=%p",
                 static_cast<unsigned long long>(g_inventory_generation), bag_container);
