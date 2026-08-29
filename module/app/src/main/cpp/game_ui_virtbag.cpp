@@ -210,16 +210,6 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // 扩展标签 = ControlItem（与原版袋标签同类）：挂袋容器（0x3049e0+0x50），
 // SetUserType(2) + SetControlProc（自定义，0x02 松开确认切换/详情 toggle）。
 // data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
-// 挂载父层获取（depth 试验中）：从袋容器沿 CO_PARENT 走 N 层。
-// 当前 depth1（容器父，rect (496,0)——试验用户指定）。
-void* scene_root_from_container_locked(void* container) {
-    void* cur = container;
-    for (int i = 0; i < 1 && cur != nullptr; ++i) {
-        cur = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cur) + CO_PARENT);
-    }
-    return cur;
-}
-
 // 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
 void ctrl_abs_pos_locked(void* ctrl, int64_t* out_x, int64_t* out_y) {
     // 先收集父链（自下而上）
@@ -250,23 +240,29 @@ void install_extension_tab_buttons_locked() {
         fn_ctrl_get_count == nullptr) {
         return;
     }
-    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA + 0x50);
+    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50);
     if (bag_container == nullptr) return;
+    // 容器就位守卫：面板打开初期 0x50 槽位指向占位容器（无原版袋标签子控件，
+    // rect 未定位）。此时挂载会让标签落在占位容器上（绝对 x≈296 出位）。
+    // 等原版 6 袋标签就位（child count ≥ 6）后再挂载；未就位直接跳过，
+    // 由 draw 每帧检测容器就位后重试。
+    if (fn_ctrl_get_count != nullptr && fn_ctrl_get_count(bag_container) < 6) return;
     // 动态计算（用户方案）：打开面板后，原版袋 0 按钮的绝对位置 =
     // 袋容器绝对（父链累加，袋 0 相对容器为 (0,0)）。缓存至面板重建。
+    // 挂载层 = 袋容器（与原版 6 袋标签同父，跟随容器动画，天然不漂移）。
     int64_t bag0_abs_x = 0, bag0_abs_y = 0;
     ctrl_abs_pos_locked(bag_container, &bag0_abs_x, &bag0_abs_y);
-    void* scene_root = scene_root_from_container_locked(bag_container);
+    void* mount_parent = bag_container;
     int64_t mount_abs_x = 0, mount_abs_y = 0;
-    if (scene_root != nullptr) ctrl_abs_pos_locked(scene_root, &mount_abs_x, &mount_abs_y);
-    // 标签相对挂载层 = 原版袋列右侧（袋 0 绝对 + (65,0)，减挂载层绝对）
-    const int64_t tab_rel_x = bag0_abs_x + 65 - mount_abs_x;
-    const int64_t tab_rel_y = bag0_abs_y - mount_abs_y;
+    ctrl_abs_pos_locked(mount_parent, &mount_abs_x, &mount_abs_y);
+    // 标签相对挂载层 = 原版袋列右侧（袋 0 绝对 + (68,2)，减挂载层绝对）
+    const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
+    const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
     if (g_extension_tab_generation == g_inventory_generation &&
-        g_extension_tab_root == bag_container && g_extension_tab_buttons[0] != nullptr) {
+        g_extension_tab_root == mount_parent && g_extension_tab_buttons[0] != nullptr) {
         return;
     }
-    // 重建：先删旧标签（挂在袋容器，容器重建后旧指针无效）
+    // 重建：先删旧标签（挂载层控件重建后旧指针无效）
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         if (g_extension_tab_buttons[index] != nullptr) {
             fn_touch_handle_delete_control(g_extension_tab_buttons[index]);
@@ -274,14 +270,17 @@ void install_extension_tab_buttons_locked() {
         }
     }
     refresh_tab_bag_items_locked();
-    static char texts[virtual_bag::kBagCount][16] = {"扩展1", "扩展2", "扩展3", "扩展4", "扩展5"};
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3) + SetControlProc + SetUserType(2)
+        // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3, proc) + SetControlProc + SetUserType(2)。
+        // 第 5 参 = proc，经 CreateControlInfo 写入 +0x90（CO_PROC，TouchHandle 统一事件分发）。
+        // 传 nullptr 会让 +0x90 为空 → TouchHandle 命中后无法分发到 +0x98 control proc（点击失效）。
         const uintptr_t add_fn =
             g_base + fn_resolve("F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA",
                                 F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA);
         typedef void* (*AddFn)(void*, void*, void*, uint32_t, void*);
-        void* ctrl = reinterpret_cast<AddFn>(add_fn)(bag_container, nullptr, nullptr, 3, nullptr);
+        void* ctrl = reinterpret_cast<AddFn>(add_fn)(
+            mount_parent, nullptr, nullptr, 3,
+            reinterpret_cast<void*>(g_base + F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA));
         if (ctrl == nullptr) {
             VIRTBAG_LOG("extension tab create failed index=%d", index);
             continue;
@@ -290,13 +289,14 @@ void install_extension_tab_buttons_locked() {
             reinterpret_cast<void*>(&extension_tab_item_proc));
         fn_control_object_set_user_type(ctrl, 2);
         fn_touch_handle_unuse_control_event_move(ctrl);
-        // rect：相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
+        // rect：与原版袋标签同尺寸 57x57（loc6/loc9 底框 47x47 居中填充成背景框）。
+        // 相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
         const int64_t row_y = tab_rel_y + index * 70;
         uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
         *reinterpret_cast<int64_t*>(c + CO_RECT_X) = tab_rel_x;
         *reinterpret_cast<int64_t*>(c + CO_RECT_Y) = row_y;
-        *reinterpret_cast<int64_t*>(c + CO_RECT_W) = 200;
-        *reinterpret_cast<int64_t*>(c + CO_RECT_H) = 64;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_W) = 57;
+        *reinterpret_cast<int64_t*>(c + CO_RECT_H) = 57;
         // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
         void* data = fn_mem_malloc(0x10);
         if (data == nullptr) continue;
@@ -305,7 +305,7 @@ void install_extension_tab_buttons_locked() {
         fn_ctrl_set_data(ctrl, data);
         g_extension_tab_buttons[index] = ctrl;
     }
-    g_extension_tab_root = scene_root;
+    g_extension_tab_root = mount_parent;
     g_extension_tab_generation = g_inventory_generation;
     VIRTBAG_LOG("extension tabs installed generation=%llu root=%p",
                 static_cast<unsigned long long>(g_inventory_generation), bag_container);
@@ -1606,9 +1606,19 @@ void draw_cells_in_frame_locked() {
     const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
                                            fn_imgsys_get_loc != nullptr;
     void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
-    // 标签挂袋容器（0x3049e0+0x50）：比对基准同步为袋容器句柄。
+    // 标签挂袋容器（与原版 6 袋标签同父）：比对基准同步为袋容器句柄。
     void* current_bag_container =
-        g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA + 0x50) : nullptr;
+        g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50) : nullptr;
+    // 容器就位重试：enter 时 install 可能因占位容器（child count<6）被跳过；
+    // 每帧检测真容器就位且尚未挂载（root 变化）时重新 install。
+    if (current_bag_container != nullptr &&
+        fn_ctrl_get_count != nullptr && fn_ctrl_get_count(current_bag_container) >= 6 &&
+        current_bag_container != g_extension_tab_root) {
+        install_extension_tab_buttons_locked();
+        current_bag_container =
+            g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50)
+                        : nullptr;
+    }
     const bool tabs_are_current =
         current_bag_container != nullptr && current_bag_container == g_extension_tab_root &&
         g_extension_tab_generation == g_inventory_generation;
@@ -1620,8 +1630,7 @@ void draw_cells_in_frame_locked() {
             const bool equipped = g_virtual_bag_state.capacities[index] != 0;
             VIRTBAG_LOG("tab draw index=%d selected=%d equipped=%d", index,
                         selected ? 1 : 0, equipped ? 1 : 0);
-            // G-1：贴图对齐 DrawInvenBag 原版语义——选中=loc 0x13（亮）、
-            // 装备未选中=loc 0xa（暗）、未装备=loc 9（空袋）；无边框，选中/未选中靠贴图区分。
+            // 贴图对齐原版：底框 loc 20 + 袋图标 loc 6/loc 9 + 选中高亮 loc 19。
             if (can_draw_original_button && group != nullptr) {
                 int64_t ax = 0, ay = 0;
                 uint8_t* c = reinterpret_cast<uint8_t*>(button);
@@ -1634,35 +1643,41 @@ void draw_cells_in_frame_locked() {
                     ay += *reinterpret_cast<int64_t*>(pc + CO_RECT_Y);
                     p = *reinterpret_cast<void**>(pc + CO_PARENT);
                 }
-                // 贴图照抄 DrawInvenBag 原版分支（b73c0-b7444），含 w6 差异：
-                // 选中=先 loc 0x13（w6=0）再 loc 6（w6=0，"亮底框"）；
-                // 未选中装备=仅 loc 6（w6=0x28，"暗底框"）；未装备=仅 loc 9（w6=0x28）。
+                // 底框：照抄 UIEquip_DrawInvenBackground（0xb6ec8）——每个袋标签画
+                // loc 20（GetLoc(0xf,0x14)，72x84）于 (abs_x-5, abs_y-12)，w6=0（亮）。
+                // 选中/未选中靠 loc 6 袋图标（w6=0 亮 / w6=0x28 暗）+ loc 19 选中高亮区分。
+                // w6 = 亮度衰减（SGL_DrawTexturePartEx 内 100-w6 得亮度百分比）：
+                // w6=0 → 100% 亮（选中），w6=0x28 → 60% 暗（未选中/空袋）。
+                void* bg = fn_imgsys_get_loc(0xf, 0x14);
+                if (bg != nullptr) {
+                    fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
+                                      static_cast<int32_t>(ay - 12), bg, 0, 1, 0);
+                }
                 if (selected) {
                     void* icon = fn_imgsys_get_loc(0xf, 0x13);
                     if (icon != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax - 10),
-                                          static_cast<int32_t>(ay - 3), icon, 0, 1, 0);
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
+                                          static_cast<int32_t>(ay - 12), icon, 0, 1, 0);
                     }
                     void* frame = fn_imgsys_get_loc(0xf, 6);
                     if (frame != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax),
-                                          static_cast<int32_t>(ay), frame, 0, 1, 0);
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
+                                          static_cast<int32_t>(ay + 5), frame, 0, 1, 0);
                     }
                 } else if (equipped) {
                     void* frame = fn_imgsys_get_loc(0xf, 6);
                     if (frame != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax),
-                                          static_cast<int32_t>(ay), frame, 0, 1, 0x28);
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
+                                          static_cast<int32_t>(ay + 5), frame, 0, 1, 0x28);
                     }
                 } else {
                     void* bag_icon = fn_imgsys_get_loc(0xf, 9);
                     if (bag_icon != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax),
-                                          static_cast<int32_t>(ay), bag_icon, 0, 1, 0x28);
+                        fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
+                                          static_cast<int32_t>(ay + 5), bag_icon, 0, 1, 0x28);
                     }
                 }
             }
-            ui_draw_text_centered(button, 8, equipped ? 0xffffffffu : 0xff888888u);
         }
     }
 
@@ -1769,11 +1784,9 @@ void virtual_bag_draw_original_bag_wrapper() {
         log_exit_trace_locked("draw_bag", 0, 0, 0);
         last_module_view = module_view ? 1 : 0;
     }
-    if (module_view && g_module_view_installed) {
-        original();
-        refresh_projection_if_overwritten_locked();
-        return;
-    }
+    // 进入扩展选中态（kModule）时，原版袋标签全部取消高亮（互斥）：
+    // 画原版 DrawInvenBag 前把当前袋 GOT 临时设为 kNoOriginalBagSelected(6)，
+    // 画完恢复。此前只在 !installed 分支屏蔽，installed 分支漏掉了。
     uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
     uint8_t saved_current = 0;
     bool masked = false;
@@ -1782,10 +1795,15 @@ void virtual_bag_draw_original_bag_wrapper() {
         **current_bag = kNoOriginalBagSelected;
         masked = true;
     }
+    if (module_view && g_module_view_installed) {
+        original();
+        if (masked) **current_bag = saved_current;
+        refresh_projection_if_overwritten_locked();
+        return;
+    }
     original();
     if (masked) **current_bag = saved_current;
 }
-
 void virtual_bag_draw_inven_item_wrapper() {
     const OriginalDrawInvenItemFn original =
         reinterpret_cast<OriginalDrawInvenItemFn>(g_base + fn_resolve("F_UIEQUIP_DRAW_INVEN_ITEM_VMA",
