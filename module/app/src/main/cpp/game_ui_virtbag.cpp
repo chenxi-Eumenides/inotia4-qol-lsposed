@@ -2110,6 +2110,16 @@ void virtual_bag_draw_end_wrapper() {
         g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected);
     if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
+    if (g_module_view_installed) {
+        // 拖动中物品的悬空防护：用户按住投影物品时 TouchState 记录了借出对象，
+        // 延迟释放后 UIEquip_Draw 仍经 TouchState 画它（ITEM_DrawPorting 悬空崩溃）。
+        // 每帧仅清 MOVING_CTRL（+0x30）——不动 press/drop 字段（避免点击失效）。
+        if (g_base != 0) {
+            uint8_t* touch_state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+            *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL) = nullptr;
+        }
+        refresh_projection_if_overwritten_locked();
+    }
     process_deferred_frees_locked();
     if (g_module_view_installed) {
         refresh_projection_if_overwritten_locked();
