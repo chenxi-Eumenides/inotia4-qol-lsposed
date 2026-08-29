@@ -170,7 +170,10 @@ extern ControlItemSetItemFn fn_control_item_set_item;
 extern ControlObjectSetActiveFn fn_control_object_set_active;
 extern ControlObjectSetShowFn fn_control_object_set_show;
 extern ControlObjectGetChildFn fn_control_object_get_child;
-extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
+// GetAbsoluteRect 出参布局与 UiRect（game_ui_kit.h）一致；此处自包含避免头循环。
+struct ControlAbsoluteRect { int32_t x, y, w, h; };
+typedef ControlAbsoluteRect (*ControlObjectGetAbsoluteRectFn)(void* ctrl);
+extern ControlObjectGetAbsoluteRectFn fn_control_object_get_absolute_rect;extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
 extern ItemDrawPortingFn fn_item_draw_porting;
 extern MakeMixFn fn_make_mix;

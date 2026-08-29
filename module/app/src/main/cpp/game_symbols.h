@@ -508,6 +508,7 @@ constexpr uintptr_t F_CONTROL_OBJECT_GET_CHILD_VMA = 0x9eacc; // void* (void* ct
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_VMA = 0xb8980;          // (ctrl, 0) 详情面板（读控件物品）
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
+constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 出参，DrawInvenItem/命中统一坐标）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_DATA_VMA = 0x9df18;  // void* (void* ctrl) 取控件私有数据块
 constexpr uintptr_t F_CONTROL_OBJECT_SET_ACTIVE_VMA = 0x9dbd8; // void (void* ctrl, u32 active) 写 Active@+0x0c（0x20=激活，ControlObject_EventProc 校验 ==0x20）
 constexpr uintptr_t F_CONTROL_BUTTON_DRAW_VMA = 0xaac2c;      // void (void* ctrl) 按钮绘制（GetData 非空 + [data+0x60] DrawProc 非空 → blr DrawProc(x0=ctrl)）
