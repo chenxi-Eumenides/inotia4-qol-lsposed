@@ -377,6 +377,76 @@ void play_extension_switch_sound() {
     fn_sound_system_play(0x11);
 }
 
+// ---- 袋信息页（二次点击袋标签）：容量/物品数/解除按钮，label+button 控件组 ----
+void bag_info_unequip_clicked(void* ctrl);
+// 解除按钮 = 原版语义：有物品拒绝（静默 v1）、空袋卸下（容量清零+标签禁用）。
+// 面板挂 panel root，随面板关闭销毁；切袋/退出/三次点击经显式 remove。
+void* g_bag_info_labels[2] = {};
+void* g_bag_info_unequip_btn = nullptr;
+int g_bag_info_bag = -1;
+bool g_bag_info_visible = false;
+
+void remove_bag_info_panel_locked() {
+    for (void*& label : g_bag_info_labels) {
+        if (label != nullptr && fn_touch_handle_delete_control != nullptr) {
+            fn_touch_handle_delete_control(label);
+        }
+        label = nullptr;
+    }
+    if (g_bag_info_unequip_btn != nullptr && fn_touch_handle_delete_control != nullptr) {
+        fn_touch_handle_delete_control(g_bag_info_unequip_btn);
+    }
+    g_bag_info_unequip_btn = nullptr;
+    g_bag_info_visible = false;
+    g_bag_info_bag = -1;
+}
+
+void install_bag_info_panel_locked(int bag) {
+    remove_bag_info_panel_locked();
+    void* root = g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA)
+                             : nullptr;
+    if (root == nullptr || fn_touch_handle_delete_control == nullptr) return;
+    char line1[64];
+    char line2[64];
+    snprintf(line1, sizeof(line1), "扩展背包 %d", bag + 6);
+    snprintf(line2, sizeof(line2), "容量 %d", g_virtual_bag_state.capacities[bag]);
+    const int row_y = 130 + bag * 70;
+    const UiRect r1{470, row_y, 200, 28};
+    const UiRect r2{470, row_y + 32, 200, 28};
+    const UiRect rb{470, row_y + 64, 200, 36};
+    g_bag_info_labels[0] = ui_create_label(root, r1, line1, nullptr);
+    g_bag_info_labels[1] = ui_create_label(root, r2, line2, nullptr);
+    g_bag_info_unequip_btn =
+        ui_create_button(root, rb, "解除", &bag_info_unequip_clicked, nullptr);
+    g_bag_info_bag = bag;
+    g_bag_info_visible = g_bag_info_labels[0] != nullptr;
+}
+
+void bag_info_unequip_clicked(void* ctrl) {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!g_bag_info_visible || !virtual_bag::valid_index(g_bag_info_bag)) return;
+    const int bag = g_bag_info_bag;
+    bool has_items = false;
+    for (const auto& item : g_virtual_bag_state.items[bag]) {
+        if (item.category > 0 || item.count > 0) {
+            has_items = true;
+            break;
+        }
+    }
+    if (has_items) {
+        VIRTBAG_LOG("bag unequip blocked: bag=%d has items", bag);
+        return;
+    }
+    virtual_bag::unequip_bag(&g_virtual_bag_state, bag);
+    remove_bag_info_panel_locked();
+    if (g_module_view_installed && g_module_view_index == bag) {
+        restore_module_view_locked();
+    }
+    g_item_state_dirty = true;
+    persist_state_locked();
+    VIRTBAG_LOG("bag unequipped via info panel bag=%d", bag);
+}
+
 void handle_extension_tab_click_locked(int extension_bag) {
     if (!virtual_bag::valid_index(extension_bag)) return;
     ensure_state_loaded_locked();
@@ -405,11 +475,16 @@ void handle_extension_tab_click_locked(int extension_bag) {
             }
             return;
         }
-        // 二次点击 = 袋信息态（原版语义：desc_type=1 + MakeDesc；解除按钮在信息页）。
-        // 退出模块视图仅经原版袋按钮或 exit_view 端点。
+        // 二次点击 = 袋信息面板 toggle（原版语义：desc_type=1 + MakeDesc）。
+        // 面板含容量/物品数/解除按钮；退出模块视图仅经原版袋按钮或 exit_view 端点。
         if (virtual_bag::click(&g_virtual_bag_state, extension_bag) ==
             virtual_bag::ClickResult::kInspected) {
             play_extension_switch_sound();
+            if (g_bag_info_visible && g_bag_info_bag == extension_bag) {
+                remove_bag_info_panel_locked();
+            } else {
+                install_bag_info_panel_locked(extension_bag);
+            }
             VIRTBAG_LOG("extension bag info opened bag=%d", extension_bag);
         }
     }
@@ -1393,17 +1468,34 @@ void draw_cells_in_frame_locked() {
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* button = tabs_are_current ? g_extension_tab_buttons[index] : nullptr;
         if (button != nullptr) {
-            const UiRect tab_size{0, 0, kExtensionTabWidth, kExtensionTabHeight};
             const bool selected = g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
                                   g_virtual_bag_state.selected == index;
             const bool disabled = g_virtual_bag_state.capacities[index] == 0;
-            ui_draw_button_background(button, tab_size,
-                                      disabled ? 0xff2b2b2b
-                                               : (selected ? 0xff9a6a2f : 0xff6b3f1f));
-            ui_draw_button_border(button, tab_size,
-                                  disabled ? 0xff555555
-                                           : (selected ? 0xffffd875 : 0xffffffff),
-                                  2);
+            // G-1：底框用原版空袋贴图（loc 9，DrawInvenBag 同款 GRPX_DrawPart 调用），
+            // 坐标为 tab 控件绝对位置（手工父链累加，GetAbsoluteRect 禁 C++ 直调）。
+            if (can_draw_original_button && group != nullptr) {
+                int64_t ax = 0, ay = 0;
+                uint8_t* c = reinterpret_cast<uint8_t*>(button);
+                ax = *reinterpret_cast<int64_t*>(c + CO_RECT_X);
+                ay = *reinterpret_cast<int64_t*>(c + CO_RECT_Y);
+                void* p = *reinterpret_cast<void**>(c + CO_PARENT);
+                while (p != nullptr) {
+                    uint8_t* pc = reinterpret_cast<uint8_t*>(p);
+                    ax += *reinterpret_cast<int64_t*>(pc + CO_RECT_X);
+                    ay += *reinterpret_cast<int64_t*>(pc + CO_RECT_Y);
+                    p = *reinterpret_cast<void**>(pc + CO_PARENT);
+                }
+                void* loc = fn_imgsys_get_loc(0xf, 9);
+                if (loc != nullptr) {
+                    fn_grpx_draw_part(group, static_cast<int32_t>(ax),
+                                      static_cast<int32_t>(ay), loc, 0, 1, 0x28);
+                }
+            }
+            const UiRect tab_size{0, 0, kExtensionTabWidth, kExtensionTabHeight};
+            if (selected) {
+                // 选中标记：原版袋无选中贴图，保留边框叠加作视觉区分。
+                ui_draw_button_border(button, tab_size, 0xffffd875, 2);
+            }
             ui_draw_text_centered(button, 8, disabled ? 0xff888888 : 0xffffffff);
         }
     }
@@ -1819,6 +1911,7 @@ void refresh_projection_if_overwritten_locked() {
 
 void restore_module_view_locked() {
     if (!g_module_view_installed || g_base == 0) return;
+    remove_bag_info_panel_locked();
     if (g_original_bag_size_word != nullptr) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
         *g_original_bag_size_word =
@@ -2128,11 +2221,9 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             handle_bag_drop_release_locked(x, y)) {
             return 1;
         }
-        for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-            if (!extension_tab_hit(index, x, y)) continue;
-            queue_extension_tab_click_locked(index);
-            break;
-        }
+        // G-10：tab 点击的坐标兜底已删除——tab 点击由控件回调
+        // （extension_tab_button_clicked → queue_extension_tab_click）唯一处理，
+        // 消除坐标常量与控件树的双路径分歧。
         // Phase one is deliberately read-only. Do not route release events to
         // the legacy projection/move transaction handlers.
     }

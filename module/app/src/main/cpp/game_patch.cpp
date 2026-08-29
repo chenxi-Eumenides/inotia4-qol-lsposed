@@ -229,6 +229,13 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     // G-7：扩展视图内只拦截 drop（0x04，借出对象不得拖入原版袋——SaveItemOnEmpty
     // 门禁为第二层）；详情(0x80)/选中(0x01,0x02)/其余事件放行原版控件链。
     if (virtual_bag_original_item_input_blocked() && event == 0x04) {
+        // G-9 防护：扩展标签挂物品列表 root（索引 16+），GetItemSlotIndex 对其返回
+        // 越界值 16——drop 落到标签控件时直接拒绝，防越界写。
+        if (fn_ui_equip_get_item_slot_index != nullptr &&
+            fn_ui_equip_get_item_slot_index(control) >= 16) {
+            MOVE_LOG("drop suppressed: dst is extension tab control=%p", control);
+            return 0;
+        }
         MOVE_LOG("move_merge: drop suppressed in extension view control=%p",
                  control);
         return 0;
