@@ -367,6 +367,18 @@ inline bool unequip_bag(State* state, int index) {
     return true;
 }
 
+// 真实装备（P3 装备路径）：占用空闲扩展位；容量经 normalize 由 bag_type
+// 派生（与原版 ITEMSTATICBASE 1→4/2→8/3→12/4→16 同源）。已占用位拒绝。
+inline bool equip_bag(State* state, int index, int bag_type) {
+    if (state == nullptr || !valid_index(index) || !valid_type(bag_type) || bag_type == 0) {
+        return false;
+    }
+    if (state->types[index] != 0) return false;
+    state->types[index] = static_cast<uint8_t>(bag_type);
+    normalize(state);
+    return true;
+}
+
 inline ClickResult click(State* state, int index) {
     if (state == nullptr || !valid_index(index)) {
         return ClickResult::kIgnored;

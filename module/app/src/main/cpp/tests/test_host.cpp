@@ -869,6 +869,23 @@ static void test_unequip_bag() {
     CHECK_EQ(state.mode, virtual_bag::Mode::kOriginal);
 }
 
+static void test_equip_bag() {
+    virtual_bag::State state{};
+    CHECK(!virtual_bag::equip_bag(&state, -1, 2));
+    CHECK(!virtual_bag::equip_bag(&state, 0, 0));
+    CHECK(!virtual_bag::equip_bag(&state, 0, 5));
+    CHECK(virtual_bag::equip_bag(&state, 0, 4));
+    CHECK_EQ((int)state.types[0], 4);
+    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK(!virtual_bag::equip_bag(&state, 0, 1));  // 已占用位拒绝且不改类型
+    CHECK_EQ((int)state.types[0], 4);
+    CHECK_EQ((int)state.capacities[0], 16);
+    CHECK(virtual_bag::equip_bag(&state, 2, 1));
+    CHECK_EQ((int)state.types[2], 1);
+    CHECK_EQ((int)state.capacities[2], 4);
+    CHECK_EQ((int)state.capacities[1], 0);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -876,6 +893,7 @@ int main() {
     test_tiles_parse();
     test_ownership_ledger();
     test_unequip_bag();
+    test_equip_bag();
     test_nav_bfs();
     test_nav_bfs_multi();
     test_stack_codec();
