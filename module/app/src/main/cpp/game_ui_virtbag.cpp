@@ -384,6 +384,27 @@ struct UnsavedCrossMove {
     virtual_bag::Item extension_destination_previous{};
 };
 
+bool valid_unsaved_cross_move_domain(const UnsavedCrossMove& move) {
+    switch (move.direction) {
+        case UnsavedCrossMove::Direction::kOriginalToExtension:
+            return virtual_bag::valid_original_transaction_bag(move.src_bag) &&
+                   move.src_slot < virtual_bag::kSlotCount &&
+                   virtual_bag::valid_index(move.extension_bag) &&
+                   move.extension_slot < virtual_bag::kSlotCount;
+        case UnsavedCrossMove::Direction::kExtensionToOriginal:
+            return virtual_bag::valid_index(move.extension_bag) &&
+                   move.extension_slot < virtual_bag::kSlotCount &&
+                   virtual_bag::valid_original_transaction_bag(move.dst_bag) &&
+                   move.dst_slot < virtual_bag::kSlotCount;
+        case UnsavedCrossMove::Direction::kExtensionToExtension:
+            return virtual_bag::valid_index(move.extension_bag) &&
+                   move.extension_slot < virtual_bag::kSlotCount &&
+                   virtual_bag::valid_index(move.extension_dst_bag) &&
+                   move.extension_dst_slot < virtual_bag::kSlotCount;
+    }
+    return false;
+}
+
 std::array<UnsavedCrossMove, 128> g_unsaved_cross_moves{};
 size_t g_unsaved_cross_move_count = 0;
 
@@ -460,7 +481,25 @@ bool load_state_from_store(int slot) {
     }
     if (result == nullptr) return false;
     const char* utf = env->GetStringUTFChars(result, nullptr);
-    const bool parsed = utf != nullptr && virtual_bag::parse_state_json(utf, &g_virtual_bag_state);
+    bool parsed = false;
+    if (utf != nullptr) {
+        virtual_bag::PendingTransfer rejected_pending{};
+        const bool has_pending = std::strstr(utf, "\"pending\":") != nullptr;
+        const virtual_bag::PendingTransferParseResult pending_result =
+            has_pending ? virtual_bag::parse_pending_transfer_result(utf, &rejected_pending)
+                        : virtual_bag::PendingTransferParseResult::kOk;
+        if (pending_result == virtual_bag::PendingTransferParseResult::kInvalidTransactionDomain) {
+            VIRTBAG_LOG("pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
+                        static_cast<unsigned int>(rejected_pending.direction),
+                        static_cast<unsigned int>(rejected_pending.src_bag),
+                        static_cast<unsigned int>(rejected_pending.src_slot),
+                        static_cast<unsigned int>(rejected_pending.dst_bag),
+                        static_cast<unsigned int>(rejected_pending.dst_slot));
+        } else if (pending_result == virtual_bag::PendingTransferParseResult::kMalformed) {
+            VIRTBAG_LOG("pending isolated reason=malformed_pending_record");
+        }
+        parsed = virtual_bag::parse_state_json(utf, &g_virtual_bag_state);
+    }
     if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
     env->DeleteLocalRef(result);
     return parsed;
@@ -565,7 +604,7 @@ void handle_extension_tab_click_locked(int extension_bag) {
     ensure_state_loaded_locked();
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal) {
         const int original_bag = original_bag_locked();
-        if (original_bag >= 0 && original_bag < 6) {
+        if (virtual_bag::valid_original_transaction_bag(original_bag)) {
             g_original_current_direct = static_cast<uint8_t>(original_bag);
             g_original_current_got = static_cast<uint8_t>(original_bag);
             if (virtual_bag::click(&g_virtual_bag_state, extension_bag) !=
@@ -575,6 +614,9 @@ void handle_extension_tab_click_locked(int extension_bag) {
                 VIRTBAG_LOG("extension tab selected bag=%d original_bag=%d", extension_bag,
                             original_bag);
             }
+        } else {
+            VIRTBAG_LOG("extension tab reject original window reason=invalid_transaction_domain bag=%d",
+                        original_bag);
         }
         return;
     }
@@ -690,22 +732,24 @@ void clear_module_cache_locked() {
 bool serialize_item_payload_locked(void* item,
                                    std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out,
                                    int* out_size) {
-    if (item == nullptr || out == nullptr || out_size == nullptr || fn_save_save_item == nullptr) {
-        return false;
-    }
-    std::array<uint8_t, 1024> probe{};
-    const int size = fn_save_save_item(probe.data(), item);
-    if (size < static_cast<int>(virtual_bag::kPayloadHeaderSize) ||
-        size > static_cast<int>(virtual_bag::kMaxSerializedItem)) {
-        return false;
-    }
-    for (size_t index = static_cast<size_t>(size); index < probe.size(); ++index) {
-        if (probe[index] != 0) return false;
-    }
-    out->fill(0);
-    std::memcpy(out->data(), probe.data(), static_cast<size_t>(size));
-    *out_size = size;
-    return true;
+    return virtual_bag::save_item_payload(fn_save_save_item, item, out, out_size) ==
+           virtual_bag::PayloadValidation::kOk;
+}
+
+void release_temporary_item_locked(void* item) {
+    if (item != nullptr && fn_itempool_free != nullptr) fn_itempool_free(item);
+}
+
+void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context) {
+    const virtual_bag::ManagedLoadResult result = virtual_bag::load_item_payload_exact(
+        payload, payload_size, fn_save_save_item, fn_save_load_item, fn_itempool_free);
+    if (result.item != nullptr) return result.item;
+
+    VIRTBAG_LOG("payload bridge reject context=%s reason=%s validation=%s size=%d",
+                context,
+                virtual_bag::managed_load_failure_reason(result.failure),
+                virtual_bag::payload_validation_reason(result.validation), payload_size);
+    return nullptr;
 }
 
 void ensure_state_loaded_locked() {
@@ -717,6 +761,15 @@ void ensure_state_loaded_locked() {
     g_virtual_bag_state = {};
     if (!load_state_from_store(slot)) {
         VIRTBAG_LOG("virtual bag state slot=%d unavailable; using empty state", slot);
+    }
+    // mode/selected 是背包面板会话作用域字段：读档时世界界面必然从原版视图开始。
+    // 仅清除无 pending 的 kModule 残留（kExitingModule / pending 交给恢复流程）。
+    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+        !g_virtual_bag_state.pending.valid) {
+        g_virtual_bag_state.mode = virtual_bag::Mode::kOriginal;
+        g_virtual_bag_state.selected = -1;
+        g_virtual_bag_state.inspected = -1;
+        VIRTBAG_LOG("view state residue cleared on load slot=%d", slot);
     }
     g_loaded_slot = slot;
 }
@@ -737,7 +790,7 @@ bool inventory_slot_locked(int bag, int slot, void** out) {
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
     if (g_inven == nullptr || payload == nullptr || fn_save_save_item == nullptr ||
-        payload_size <= 0 || target_bag < 0 || target_bag >= 6) {
+        payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return false;
     }
     void** inventory = static_cast<void**>(g_inven);
@@ -755,7 +808,7 @@ bool original_inventory_contains_payload_locked(const uint8_t* payload, int payl
 int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
                                            int target_bag) {
     if (g_inven == nullptr || payload == nullptr || fn_save_save_item == nullptr ||
-        payload_size <= 0 || target_bag < 0 || target_bag >= 6) {
+        payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return -1;
     }
     void** inventory = static_cast<void**>(g_inven);
@@ -773,6 +826,15 @@ int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_s
 }
 
 void record_unsaved_cross_move_locked(const UnsavedCrossMove& move) {
+    if (!valid_unsaved_cross_move_domain(move)) {
+        VIRTBAG_LOG("unsaved cross move reject reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
+                    static_cast<unsigned int>(move.direction),
+                    static_cast<unsigned int>(move.src_bag),
+                    static_cast<unsigned int>(move.src_slot),
+                    static_cast<unsigned int>(move.dst_bag),
+                    static_cast<unsigned int>(move.dst_slot));
+        return;
+    }
     if (g_unsaved_cross_move_count >= g_unsaved_cross_moves.size()) {
         VIRTBAG_LOG("cross move journal full; refusing rollback record");
         return;
@@ -783,25 +845,30 @@ void record_unsaved_cross_move_locked(const UnsavedCrossMove& move) {
 void rollback_unsaved_cross_moves_locked() {
     while (g_unsaved_cross_move_count > 0) {
         const UnsavedCrossMove move = g_unsaved_cross_moves[--g_unsaved_cross_move_count];
+        if (!valid_unsaved_cross_move_domain(move)) {
+            VIRTBAG_LOG("unsaved cross move isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
+                        static_cast<unsigned int>(move.direction),
+                        static_cast<unsigned int>(move.src_bag),
+                        static_cast<unsigned int>(move.src_slot),
+                        static_cast<unsigned int>(move.dst_bag),
+                        static_cast<unsigned int>(move.dst_slot));
+            continue;
+        }
         bool original_source_restored = true;
         if (move.direction == UnsavedCrossMove::Direction::kOriginalToExtension) {
             void** inventory = static_cast<void**>(g_inven);
             const size_t offset = static_cast<size_t>(move.src_bag) * kInventorySlotStride +
-                                  move.src_slot;
+                                   move.src_slot;
             if (inventory == nullptr) {
                 original_source_restored = false;
-            } else if (inventory[offset] == nullptr && fn_save_load_item != nullptr) {
-                void* item = nullptr;
-                int consumed = 0;
-                if (fn_save_load_item(move.payload.data(), &item, &consumed) == 1 && item != nullptr &&
-                    consumed == move.payload_size) {
+            } else if (inventory[offset] == nullptr) {
+                void* item = load_item_payload_locked(
+                    move.payload.data(), move.payload_size, "rollback_original_to_extension");
+                if (item != nullptr) {
                     inventory[offset] = item;
-                } else if (item != nullptr && fn_itempool_free != nullptr) {
-                    fn_itempool_free(item);
+                } else {
                     original_source_restored = false;
                 }
-            } else if (inventory[offset] == nullptr) {
-                original_source_restored = false;
             }
         } else if (move.direction == UnsavedCrossMove::Direction::kExtensionToOriginal) {
             const int slot = original_inventory_payload_slot_locked(
@@ -851,6 +918,39 @@ void rollback_unsaved_cross_moves_locked() {
 void recover_pending_transaction_locked() {
     const virtual_bag::PendingTransfer pending = g_virtual_bag_state.pending;
     if (!pending.valid) return;
+    if (!virtual_bag::valid_pending_transfer_domain(pending)) {
+        VIRTBAG_LOG("pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
+                    static_cast<unsigned int>(pending.direction),
+                    static_cast<unsigned int>(pending.src_bag),
+                    static_cast<unsigned int>(pending.src_slot),
+                    static_cast<unsigned int>(pending.dst_bag),
+                    static_cast<unsigned int>(pending.dst_slot));
+        g_virtual_bag_state.pending = {};
+        persist_state_locked();
+        return;
+    }
+    if (!virtual_bag::valid_pending_transfer_payload(pending)) {
+        const virtual_bag::PayloadValidation payload_validation =
+            virtual_bag::validate_serialized_payload_buffer(pending.payload.data(),
+                                                            pending.payload.size(),
+                                                            pending.payload_size);
+        const virtual_bag::PayloadValidation source_validation =
+            pending.source_payload_size == 0
+                ? virtual_bag::PayloadValidation::kOk
+                : virtual_bag::validate_serialized_payload_buffer(
+                      pending.source_payload.data(), pending.source_payload.size(),
+                      pending.source_payload_size);
+        VIRTBAG_LOG("pending isolated reason=invalid_payload payload=%s source_payload=%s src=%u/%u dst=%u/%u",
+                    virtual_bag::payload_validation_reason(payload_validation),
+                    virtual_bag::payload_validation_reason(source_validation),
+                    static_cast<unsigned int>(pending.src_bag),
+                    static_cast<unsigned int>(pending.src_slot),
+                    static_cast<unsigned int>(pending.dst_bag),
+                    static_cast<unsigned int>(pending.dst_slot));
+        g_virtual_bag_state.pending = {};
+        persist_state_locked();
+        return;
+    }
     const bool restore_module = g_module_view_installed;
     const int restore_bag = g_module_view_index;
     if (restore_module) restore_module_view_locked();
@@ -889,19 +989,21 @@ void recover_pending_transaction_locked() {
             }
         } else {
             if (original_inventory_contains_payload_locked(pending.payload.data(),
-                                                            pending.payload_size,
-                                                            pending.dst_bag)) {
+                                                             pending.payload_size,
+                                                             pending.dst_bag)) {
                 clear_pending = true;
             } else {
                 set_original_bag_locked(pending.dst_bag);
-                void* item = nullptr;
-                int consumed = 0;
-                bool loaded = fn_save_load_item != nullptr &&
-                              fn_save_load_item(pending.payload.data(), &item, &consumed) == 1 &&
-                              item != nullptr && consumed == pending.payload_size;
-                if (loaded && fn_inven_save_item_on_empty != nullptr &&
-                    !fn_inven_save_item_on_empty(item, pending.dst_bag)) {
-                    if (fn_itempool_free != nullptr) fn_itempool_free(item);
+                void* item = load_item_payload_locked(
+                    pending.payload.data(), pending.payload_size, "recover_pending_extension_to_original");
+                bool loaded = item != nullptr;
+                if (loaded && fn_inven_save_item_on_empty != nullptr) {
+                    if (!fn_inven_save_item_on_empty(item, pending.dst_bag)) {
+                        release_temporary_item_locked(item);
+                        loaded = false;
+                    }
+                } else if (item != nullptr) {
+                    release_temporary_item_locked(item);
                     loaded = false;
                 }
                 if (loaded) {
@@ -937,12 +1039,85 @@ void defer_item_free_locked(void* item) {
     (void)item;  // 有意不释放：防 TouchState/控件残留引用悬空
 }
 
+// P4.3：所有权审计日志。只输出计数与句柄状态，禁止 native 指针进日志/持久层。
+void log_ownership_audit_locked(const char* context) {
+    const ownership::Audit report = ownership::audit(g_ownership_ledger);
+    VIRTBAG_LOG(
+        "ownership audit context=%s balanced=%d allocated=%u released=%u handed_over=%u "
+        "live=%u objects=%u borrows=%u inventory_owned=%u",
+        context, report.balanced ? 1 : 0, g_ownership_ledger.total_allocated,
+        g_ownership_ledger.total_released, g_ownership_ledger.total_handed_over,
+        report.live_handles, report.outstanding_objects, report.outstanding_borrows,
+        report.inventory_owned);
+}
+
+// 触摸窗口（按下/拖动未结算）内控件与 TouchState 可能仍持有物品指针；
+// 窗口外引用已撤销（投影控件已清、INVEN 未持有），允许真实释放。
+bool object_touch_window_active_locked() {
+    return g_extension_touch_capture || g_extension_drag.active;
+}
+
+// P4.3 退役第 1 步：模块保管终止（对象未移交原版库存）。
+// release 成功且非触摸窗口 → 真实 ITEMPOOL_Free；否则隔离区兜底（防悬空）。
+void retire_custody_item_locked(uint32_t handle, void* item, const char* context) {
+    const bool released =
+        ownership::release(&g_ownership_ledger, handle) == ownership::Outcome::kOk;
+    if (released && !object_touch_window_active_locked() && fn_itempool_free != nullptr) {
+        fn_itempool_free(item);
+    } else {
+        defer_item_free_locked(item);
+        VIRTBAG_LOG("ownership defer free context=%s released=%d touch_window=%d", context,
+                    released ? 1 : 0, object_touch_window_active_locked() ? 1 : 0);
+    }
+    log_ownership_audit_locked(context);
+}
+
+// P4.3：临时对象生命周期入口 = Load 成功即 allocate 入账本。
+// Load 成功但 ledger 分配失败 → 立即真释放并返回 nullptr（拒绝事务）。
+// 仅用于从未暴露给控件/TouchState 的临时对象。
+void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
+                                       const char* context, uint32_t* out_handle) {
+    *out_handle = 0;
+    void* item = load_item_payload_locked(payload, payload_size, context);
+    if (item == nullptr) return nullptr;
+    uint32_t handle = 0;
+    if (ownership::allocate(&g_ownership_ledger, &handle) != ownership::Outcome::kOk) {
+        release_temporary_item_locked(item);
+        VIRTBAG_LOG("ownership allocate reject; temp freed context=%s", context);
+        return nullptr;
+    }
+    *out_handle = handle;
+    return item;
+}
+
+// 入库成功 → handover（原版库存接管终态，模块此后不得触碰指针）。
+// handover 被拒 = 记账故障，对象归属不明：隔离区兜底（宁可泄漏不可 UAF）。
+void handover_tracked_item_locked(uint32_t handle, void* item, const char* context) {
+    if (ownership::handover_to_inventory(&g_ownership_ledger, handle) !=
+        ownership::Outcome::kOk) {
+        defer_item_free_locked(item);
+        VIRTBAG_LOG("ownership handover reject; deferred context=%s", context);
+    }
+    log_ownership_audit_locked(context);
+}
+
+// 失败路径：release + 真释放恰好一次；release 被拒 = 记账故障 → 隔离区兜底。
+void release_tracked_item_locked(uint32_t handle, void* item, const char* context) {
+    if (ownership::release(&g_ownership_ledger, handle) == ownership::Outcome::kOk) {
+        release_temporary_item_locked(item);
+    } else {
+        defer_item_free_locked(item);
+        VIRTBAG_LOG("ownership release reject; deferred context=%s", context);
+    }
+    log_ownership_audit_locked(context);
+}
+
 void free_module_object_locked(int bag, int slot) {
     if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return;
     }
     void* item = g_module_objects[bag][slot];
-    if (item != nullptr && fn_itempool_free != nullptr) {
+    if (item != nullptr) {
         // 投影期间先清控件引用：Scene_Draw 会画控件 data[0]，释放悬空对象前
         // 必须置空（否则 ITEM_DrawPorting 解引用已释放内存崩溃，tombstone_06）。
         if (g_module_view_installed && g_module_view_index == bag &&
@@ -951,8 +1126,13 @@ void free_module_object_locked(int bag, int slot) {
             void* ctrl = valid_child_locked(g_projected_item_root, slot);
             if (ctrl != nullptr) fn_control_item_set_item(ctrl, nullptr);
         }
-        ownership::release(&g_ownership_ledger, g_module_object_handles[bag][slot]);
-        defer_item_free_locked(item);
+        // 视图借用未归还时先归还（恢复路径之外的零散清除也保持借用成对）。
+        const uint32_t handle = g_module_object_handles[bag][slot];
+        if (ownership::live_state(g_ownership_ledger, handle,
+                                  ownership::State::kBorrowedForView)) {
+            ownership::return_from_view(&g_ownership_ledger, handle);
+        }
+        retire_custody_item_locked(handle, item, "free_module_object");
     }
     g_module_objects[bag][slot] = nullptr;
     g_module_object_categories[bag][slot] = 0;
@@ -961,24 +1141,8 @@ void free_module_object_locked(int bag, int slot) {
 }
 
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
-    if (virtual_bag::valid_payload(descriptor) &&
-        fn_save_load_item != nullptr) {
-        void* item = nullptr;
-        int consumed = 0;
-        const int loaded = fn_save_load_item(descriptor.payload.data(), &item, &consumed);
-        if (loaded == 1 && item != nullptr && consumed == descriptor.payload_size) return item;
-        if (item != nullptr && fn_itempool_free != nullptr) fn_itempool_free(item);
-        VIRTBAG_LOG("module item payload load failed category=%d loaded=%d consumed=%d expected=%u; fallback create",
-                    descriptor.category, loaded, consumed,
-                    static_cast<unsigned int>(descriptor.payload_size));
-    }
-    if (fn_create_item == nullptr) return nullptr;
-    void* item = fn_create_item(descriptor.category, 0, 0, 0);
-    if (item == nullptr) return nullptr;
-    uint32_t count_flags = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
-    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-        stack_codec::write_count(count_flags, static_cast<uint32_t>(descriptor.count));
-    return item;
+    return load_item_payload_locked(descriptor.payload.data(), descriptor.payload_size,
+                                    "materialize_module_item");
 }
 
 void* touch_moving_item_control_locked() {
@@ -1054,7 +1218,7 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
         VIRTBAG_LOG("cross move journal full; rejecting original->extension move");
         return false;
     }
-    if (src_bag < 0 || src_bag >= 6 || src_bag == 5) {
+    if (!virtual_bag::valid_original_transaction_bag(src_bag)) {
         VIRTBAG_LOG("cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
     }
@@ -1199,14 +1363,12 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     if (!persist_state_locked()) {
         VIRTBAG_LOG("cross move: pending clear persist failed; will recover on next load");
     }
-    g_virtual_bag_state.mode = virtual_bag::Mode::kModule;
-    g_virtual_bag_state.selected = dst_bag;
-    g_virtual_bag_state.inspected = -1;
     free_module_object_locked(dst_bag, dst_slot);
-    // 与点击标签进入扩展对齐：安装投影（重新物化物品 + 投影到原版窗口）。
-    // 此前缺失导致 mode=kModule 但投影未装，draw 走 overlay 分支画在原版格子上，
-    // 视觉上"容纳物品的格子跑到扩展背包背后"。
-    install_module_view_locked(dst_bag);
+    // 用户决策（2026-08-31）：orig→ext 后保持当前视图（对齐原版"移动后停留"）。
+    // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
+    // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
+    // 原版网格残影由 RefreshItemArea 清除（INVEN 全程真实，线程先例：install 路径）。
+    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
     VIRTBAG_LOG("cross move: original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
                 dst_bag, dst_slot, src_category, committed.count, src_bag, src_slot);
     return true;
@@ -1229,9 +1391,10 @@ bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
 }
 
 bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag) {
-    if (target_bag < 0 || target_bag >= 6 || target_bag == 5 || !virtual_bag::valid_index(src_bag) ||
+    if (!virtual_bag::valid_original_transaction_bag(target_bag) ||
+        !virtual_bag::valid_index(src_bag) ||
         src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
-        fn_inven_save_item_on_empty == nullptr) {
+        fn_inven_save_item_on_empty == nullptr || fn_remove_item_direct == nullptr) {
         VIRTBAG_LOG("cross move reject extension->original src=%d/%d target_bag=%d", src_bag,
                     src_slot, target_bag);
         return false;
@@ -1250,22 +1413,14 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                     src_slot);
         return false;
     }
-    if (source.payload_size == 0) {
-        void* source_object = module_item_locked(src_bag, src_slot);
-        if (source_object == nullptr || fn_save_save_item == nullptr) {
-            VIRTBAG_LOG("cross move reject extension->original source object unavailable=%d/%d",
-                        src_bag, src_slot);
-            return false;
-        }
-        std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-        int serialized_size = 0;
-        if (!serialize_item_payload_locked(source_object, &payload, &serialized_size)) {
-            VIRTBAG_LOG("cross move reject extension->original serialization failed=%d/%d",
-                        src_bag, src_slot);
-            return false;
-        }
-        source.payload_size = static_cast<uint16_t>(serialized_size);
-        source.payload = payload;
+    const virtual_bag::PayloadValidation source_validation =
+        virtual_bag::validate_serialized_payload_buffer(source.payload.data(), source.payload.size(),
+                                                        source.payload_size);
+    if (source_validation != virtual_bag::PayloadValidation::kOk) {
+        VIRTBAG_LOG("cross move reject extension->original reason=%s src=%d/%d size=%u",
+                    virtual_bag::payload_validation_reason(source_validation), src_bag, src_slot,
+                    static_cast<unsigned int>(source.payload_size));
+        return false;
     }
 
     virtual_bag::PendingTransfer pending{};
@@ -1286,39 +1441,15 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                     src_bag, src_slot, target_bag);
         return false;
     }
-    const virtual_bag::Item previous = g_virtual_bag_state.items[src_bag][src_slot];
-    g_virtual_bag_state.items[src_bag][src_slot] = {};
-    g_item_state_dirty = true;
-    if (!persist_state_locked(true)) {
-        g_virtual_bag_state.items[src_bag][src_slot] = previous;
-        g_virtual_bag_state.pending = {};
-        persist_state_locked();
-        VIRTBAG_LOG("cross move extension->original source clear persist failed src=%d/%d",
-                    src_bag, src_slot);
-        return false;
-    }
 
-    free_module_object_locked(src_bag, src_slot);
-    set_original_bag_locked(target_bag);
-
-    void* item = nullptr;
-    int consumed = 0;
-    if (source.payload_size >= virtual_bag::kPayloadHeaderSize && fn_save_load_item != nullptr &&
-        fn_save_load_item(source.payload.data(), &item, &consumed) == 1 && item != nullptr &&
-        consumed == source.payload_size) {
-        // 无损路径：SAVE_LoadItem 重建
-    } else if (source.payload_size == 0 && fn_create_item != nullptr) {
-        item = fn_create_item(source.category, 0, 0, 0);
-        if (item != nullptr) {
-            uint32_t count_flags =
-                *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
-            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-                stack_codec::write_count(count_flags, static_cast<uint32_t>(source.count));
-        }
-    }
+    // P4.2: Load/入库成功前不改扩展源；失败时源 payload 和投影保持原样。
+    // P4.3: Load 成功即入账本；入库失败 release+真释放恰好一次。
+    uint32_t item_handle = 0;
+    void* item = load_item_payload_tracked_locked(source.payload.data(), source.payload_size,
+                                                  "move_extension_to_original", &item_handle);
+    if (item != nullptr) set_original_bag_locked(target_bag);
     if (item == nullptr || !fn_inven_save_item_on_empty(item, target_bag)) {
-        if (item != nullptr && fn_itempool_free != nullptr) fn_itempool_free(item);
-        g_virtual_bag_state.items[src_bag][src_slot] = previous;
+        release_tracked_item_locked(item_handle, item, "ext2orig insert failed");
         g_virtual_bag_state.pending = {};
         persist_state_locked();
         reset_drag_state_locked(nullptr);
@@ -1353,12 +1484,19 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                 fn_ui_equip_refresh_item_area();
             }
         }
-        g_virtual_bag_state.items[src_bag][src_slot] = previous;
         g_virtual_bag_state.pending = {};
         persist_state_locked();
         reset_drag_state_locked(nullptr);
+        // P4.3：已移回的对象脱离 INVEN 后由账本终止保管（修复原泄漏路径）。
+        release_tracked_item_locked(item_handle, item, "ext2orig slot-not-found rollback");
         return false;
     }
+    // P4.3：入库已确认 → 原版库存接管终态（此后模块不得触碰 item 指针）。
+    handover_tracked_item_locked(item_handle, item, "ext2orig handover");
+    const virtual_bag::Item previous = g_virtual_bag_state.items[src_bag][src_slot];
+    g_virtual_bag_state.items[src_bag][src_slot] = {};
+    g_item_state_dirty = true;
+    free_module_object_locked(src_bag, src_slot);
     unsaved_move.extension_bag = static_cast<uint8_t>(src_bag);
     unsaved_move.extension_slot = static_cast<uint8_t>(src_slot);
     unsaved_move.payload_size = source.payload_size;
@@ -1366,9 +1504,13 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
     unsaved_move.extension_previous = previous;
     record_unsaved_cross_move_locked(unsaved_move);
     g_virtual_bag_state.pending = {};
-    g_virtual_bag_state.mode = virtual_bag::Mode::kModule;
-    g_virtual_bag_state.selected = src_bag;
-    g_virtual_bag_state.inspected = -1;
+    // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
+    // API 路径（原版视图）不改写视图字段（用户 2026-08-31 决策）。
+    if (g_module_view_installed) {
+        g_virtual_bag_state.mode = virtual_bag::Mode::kModule;
+        g_virtual_bag_state.selected = src_bag;
+        g_virtual_bag_state.inspected = -1;
+    }
     set_original_bag_locked(target_bag);
     persist_state_locked();
     reset_drag_state_locked(nullptr);
@@ -1390,6 +1532,15 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     if (source.category <= 0 || source.count <= 0) {
         VIRTBAG_LOG("cross move reject extension->extension source empty=%d/%d", src_bag,
                     src_slot);
+        return false;
+    }
+    const virtual_bag::PayloadValidation source_validation =
+        virtual_bag::validate_serialized_payload_buffer(source.payload.data(), source.payload.size(),
+                                                        source.payload_size);
+    if (source_validation != virtual_bag::PayloadValidation::kOk) {
+        VIRTBAG_LOG("cross move reject extension->extension reason=%s src=%d/%d size=%u",
+                    virtual_bag::payload_validation_reason(source_validation), src_bag, src_slot,
+                    static_cast<unsigned int>(source.payload_size));
         return false;
     }
 
@@ -1532,9 +1683,10 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
         }
         const int target_bag = original_bag_button_index(x, y);
         if (target_bag >= 0 && target_bag < 6) {
-            if (target_bag == 5) {
+            if (!virtual_bag::valid_original_transaction_bag(target_bag)) {
                 // 索引 5 = 原版任务袋（ADR-006）：不得成为扩展移动目标（触摸路径与 API 门禁对齐）。
-                VIRTBAG_LOG("drop reject extension->original target=task bag(5)");
+                VIRTBAG_LOG("drop reject extension->original reason=invalid_transaction_domain target_bag=%d",
+                            target_bag);
                 return false;
             }
             const bool handled = move_extension_to_original_locked(
@@ -1992,7 +2144,7 @@ bool bind_original_exit_display_bag_locked(int bag) {
 void* module_item_locked(int bag, int slot) {
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) return nullptr;
     const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
-    if (descriptor.category <= 0 || descriptor.count <= 0 || fn_create_item == nullptr) return nullptr;
+    if (descriptor.category <= 0 || descriptor.count <= 0) return nullptr;
     const uint32_t descriptor_hash = virtual_bag::payload_hash(descriptor);
     void* item = g_module_objects[bag][slot];
     if (item == nullptr || g_module_object_categories[bag][slot] != descriptor.category ||
@@ -2080,7 +2232,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
                     g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA",
                                         F_INVEN_SAVE_ITEM_ON_EMPTY_VMA))(item, bag);
             }
-            const bool routed = bag >= 0 && bag < 5 &&
+            const bool routed = virtual_bag::valid_original_transaction_bag(bag) &&
                                 move_extension_to_original_locked(src_bag, src_slot, bag);
             if (routed) {
                 persist_state_locked();
@@ -2110,7 +2262,7 @@ bool install_module_view_locked(int bag) {
     if (g_virtual_bag_state.capacities[bag] == 0) return false;
     if (fn_control_item_set_item == nullptr || fn_control_object_get_child == nullptr) return false;
     const int original_bag = original_bag_locked();
-    if (original_bag < 0 || original_bag >= 5) {
+    if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
         VIRTBAG_LOG("module view reject install: original window bag=%d (task bag reserved)",
                     original_bag);
         return false;
@@ -2179,6 +2331,17 @@ void refresh_projection_if_overwritten_locked() {
 
 void restore_module_view_locked() {
     if (!g_module_view_installed || g_base == 0) return;
+    // P4.3：视图借出逐槽归还（安装时借出的槽位必须成对归还，窗口外借用为零）。
+    if (virtual_bag::valid_index(g_module_view_index)) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            const uint32_t handle = g_module_object_handles[g_module_view_index][slot];
+            if (ownership::live_state(g_ownership_ledger, handle,
+                                      ownership::State::kBorrowedForView)) {
+                ownership::return_from_view(&g_ownership_ledger, handle);
+            }
+        }
+        log_ownership_audit_locked("restore_module_view");
+    }
     clear_original_desc_locked();  // 关闭原版详情面板（二次点击 MakeDesc 打开）
     if (g_original_bag_size_word != nullptr) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
@@ -3105,7 +3268,8 @@ bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
         fn_control_item_set_item == nullptr) {
         return false;
     }
-    if (display_bag < 0 || display_bag >= 5 || display_bag != original_bag_locked()) {
+    if (!virtual_bag::valid_original_transaction_bag(display_bag) ||
+        display_bag != original_bag_locked()) {
         return false;
     }
     if (slot < 0 || slot >= g_virtual_bag_state.capacities[g_module_view_index]) {
@@ -3218,8 +3382,7 @@ bool extension_bag_ready_locked() {
 }
 
 int extension_internal_bag(int logical_bag) {
-    if (logical_bag < 6 || logical_bag >= 6 + virtual_bag::kBagCount) return -1;
-    return logical_bag - 6;
+    return virtual_bag::extension_internal_bag(logical_bag);
 }
 
 std::string extension_bag_view_result_json(bool ok, const char* error) {
@@ -3263,6 +3426,13 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
         VIRTBAG_LOG("extension unequip create item failed bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
+    // P4.3：全新对象立即入账本；分配失败立即真释放（尚未暴露，安全）。
+    uint32_t item_handle = 0;
+    if (ownership::allocate(&g_ownership_ledger, &item_handle) != ownership::Outcome::kOk) {
+        release_temporary_item_locked(item);
+        VIRTBAG_LOG("extension unequip ledger exhausted bag=%d", internal_bag);
+        return ExtensionBagUnequipResult::kFailed;
+    }
     uint32_t count_flags =
         *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
     *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
@@ -3282,8 +3452,8 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
         if (fn_inven_save_item_on_empty(item, order[i])) receiving_bag = order[i];
     }
     if (receiving_bag < 0) {
-        // 全满：全新对象从未暴露给控件/TouchState，立即真释放（非延迟隔离）。
-        if (fn_itempool_free != nullptr) fn_itempool_free(item);
+        // 全满：全新对象从未暴露给控件/TouchState，账本终止保管并真释放。
+        release_tracked_item_locked(item_handle, item, "unequip no space");
         return ExtensionBagUnequipResult::kNoSpace;
     }
 
@@ -3295,6 +3465,8 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
     set_original_bag_locked(receiving_bag);
     g_item_state_dirty = true;
     if (persist_state_locked()) {
+        // P4.3：persist 成功 = 提交点，此刻才移交原版库存（终态）。
+        handover_tracked_item_locked(item_handle, item, "unequip handover");
         VIRTBAG_LOG("extension unequip ok bag=%d type=%d receiving=%d", internal_bag,
                     static_cast<int>(saved_type), receiving_bag);
         return ExtensionBagUnequipResult::kOk;
@@ -3311,18 +3483,21 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
             void* after = item;
             if (inventory_slot_locked(receiving_bag, slot, &after) && after == nullptr) {
                 rolled_back = true;
-                if (fn_itempool_free != nullptr) fn_itempool_free(item);
             }
             break;
         }
     }
     if (rolled_back) {
+        // P4.3：回滚已确认（脱离 INVEN）→ 账本终止保管 + 真释放。
+        release_tracked_item_locked(item_handle, item, "unequip rollback");
         g_virtual_bag_state.types[internal_bag] = saved_type;
         virtual_bag::normalize(&g_virtual_bag_state);
         persist_state_locked();
         VIRTBAG_LOG("extension unequip persist failed; rolled back bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kPersistFailed;
     }
+    // 回滚未确认：对象去向不明，按 handover 记账（inventory-owned 终态，审计可见）。
+    handover_tracked_item_locked(item_handle, item, "unequip rollback uncertain");
     VIRTBAG_LOG("extension unequip rollback failed bag=%d receiving=%d", internal_bag,
                 receiving_bag);
     return ExtensionBagUnequipResult::kFailed;
@@ -3350,10 +3525,9 @@ void show_extension_bag_no_space_popup() {
 // 装备按钮路径经 desc 按钮 hook 溢出）。事务顺序对齐解除侧的反向操作：
 // 校验 → INVEN 定位源槽 → payload 备份 → RemoveItemDirect+重读确认
 // （返回值不可信，control-plane v1.7）→ equip_bag 占位（容量由 normalize
-// 派生）→ persist；失败回滚（清位 + 按备份 payload 重建入库，降级
-// CreateItem count-1）。装备对象不 free：原版把指针移入 INVEN_pBagSlot，
-// 模块无处安放（sidecar 只记 category），无人引用即安全泄漏——与
-// defer_item_free 策略一致，P4 对象桥接后退役。
+// 派生）→ persist；失败回滚（清位 + 按备份 payload 重建入库）。
+// P4.3：源物品在移除确认后入账本保管，提交/回滚均经 retire 终止保管
+// （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
 enum class ExtensionBagEquipResult {
     kOk,
     kReject,         // 前置不满足：非背包物品 / 扩展位已装备 / 不在原版库存
@@ -3378,7 +3552,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
     }
     int src_bag = -1;
     int src_slot = -1;
-    for (int bag = 0; bag < 6 && src_bag < 0; ++bag) {
+    for (int bag = 0; bag < virtual_bag::kOriginalTransactionBagCount && src_bag < 0; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             void* current = nullptr;
             if (inventory_slot_locked(bag, slot, &current) && current == item) {
@@ -3389,16 +3563,33 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
         }
     }
     if (src_bag < 0) return ExtensionBagEquipResult::kReject;
-    if (fn_remove_item_direct == nullptr) return ExtensionBagEquipResult::kFailed;
+    if (fn_remove_item_direct == nullptr || fn_inven_save_item_on_empty == nullptr ||
+        fn_save_save_item == nullptr || fn_save_load_item == nullptr || fn_itempool_free == nullptr) {
+        return ExtensionBagEquipResult::kFailed;
+    }
 
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
-    const bool has_payload = serialize_item_payload_locked(item, &payload, &payload_size);
+    if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
+        VIRTBAG_LOG("extension equip reject reason=payload_serialize_failed src=%d/%d", src_bag,
+                    src_slot);
+        return ExtensionBagEquipResult::kFailed;
+    }
+
+    // P4.3：移除前先分配保管 handle（失败时物品仍在原版库存，无丢失风险）。
+    uint32_t custody_handle = 0;
+    if (ownership::allocate(&g_ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
+        VIRTBAG_LOG("extension equip ledger exhausted src=%d/%d", src_bag, src_slot);
+        return ExtensionBagEquipResult::kFailed;
+    }
 
     fn_remove_item_direct(src_bag, src_slot);
     void* after = item;
     if (inventory_slot_locked(src_bag, src_slot, &after) && after != nullptr) {
         VIRTBAG_LOG("extension equip remove verify failed bag=%d slot=%d", src_bag, src_slot);
+        // 物品仍被 INVEN 持有（remove 未生效）→ 不得释放，记 inventory 终态。
+        handover_tracked_item_locked(custody_handle, item,
+                                     "equip remove verify failed; retained in inventory");
         return ExtensionBagEquipResult::kFailed;
     }
     // 移除已确认：此后任何失败（state 拒绝 / persist 失败）都必须回插物品，
@@ -3408,6 +3599,9 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
     if (state_equipped) {
         g_item_state_dirty = true;
         if (persist_state_locked()) {
+            // P4.3：装备对象已被状态 payload 取代（原指针无人引用），终止保管；
+            // drop 路径处于触摸窗口内 → 隔离区，API 路径窗口外 → 真释放。
+            retire_custody_item_locked(custody_handle, item, "equip custody retired");
             VIRTBAG_LOG("extension equip ok bag=%d category=%d src=%d/%d", internal_bag,
                         category, src_bag, src_slot);
             return ExtensionBagEquipResult::kOk;
@@ -3418,30 +3612,18 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
         VIRTBAG_LOG("extension equip state reject bag=%d category=%d", internal_bag, category);
     }
     bool restored = false;
-    if (has_payload && fn_save_load_item != nullptr && fn_inven_save_item_on_empty != nullptr) {
-        void* rebuilt = nullptr;
-        int consumed = 0;
-        if (fn_save_load_item(payload.data(), &rebuilt, &consumed) == 1 && rebuilt != nullptr &&
-            consumed == payload_size && fn_inven_save_item_on_empty(rebuilt, src_bag)) {
+    uint32_t rebuilt_handle = 0;
+    void* rebuilt = load_item_payload_tracked_locked(payload.data(), payload_size,
+                                                     "equip_rollback", &rebuilt_handle);
+    if (rebuilt != nullptr) {
+        if (fn_inven_save_item_on_empty(rebuilt, src_bag)) {
+            handover_tracked_item_locked(rebuilt_handle, rebuilt, "equip rollback handover");
             restored = true;
-        } else if (rebuilt != nullptr && fn_itempool_free != nullptr) {
-            fn_itempool_free(rebuilt);
+        } else {
+            release_tracked_item_locked(rebuilt_handle, rebuilt, "equip rollback insert failed");
         }
     }
-    if (!restored && fn_create_item != nullptr && fn_inven_save_item_on_empty != nullptr) {
-        void* rebuilt = fn_create_item(category, 0, 0, 0);
-        if (rebuilt != nullptr) {
-            uint32_t count_flags =
-                *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(rebuilt) + I_COUNT);
-            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(rebuilt) + I_COUNT) =
-                stack_codec::write_count(count_flags, 1);
-            if (fn_inven_save_item_on_empty(rebuilt, src_bag)) {
-                restored = true;
-            } else if (fn_itempool_free != nullptr) {
-                fn_itempool_free(rebuilt);
-            }
-        }
-    }
+    retire_custody_item_locked(custody_handle, item, "equip rollback custody retired");
     persist_state_locked();
     VIRTBAG_LOG("extension equip persist failed bag=%d restored=%d", internal_bag,
                 restored ? 1 : 0);
@@ -3748,10 +3930,13 @@ std::string data_op_extension_bag_unequip(int logical_bag) {
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
     if (g_module_view_installed) return op_err("extension view open; movement disabled (P2)");
-    if (from_bag == 5 || to_bag == 5) return op_err("task bag excluded");
+    if (from_bag == virtual_bag::kOriginalTaskBag ||
+        to_bag == virtual_bag::kOriginalTaskBag) {
+        return op_err("task bag excluded");
+    }
     if (from_slot < 0 || from_slot >= virtual_bag::kSlotCount) return op_err("bad slot");
-    const bool from_original = from_bag >= 0 && from_bag < 6;
-    const bool to_original = to_bag >= 0 && to_bag < 6;
+    const bool from_original = virtual_bag::valid_original_transaction_bag(from_bag);
+    const bool to_original = virtual_bag::valid_original_transaction_bag(to_bag);
     const int from_internal = extension_internal_bag(from_bag);
     const int to_internal = extension_internal_bag(to_bag);
     const bool from_extension = from_internal >= 0;

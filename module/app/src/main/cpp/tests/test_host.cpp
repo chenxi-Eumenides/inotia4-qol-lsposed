@@ -7,6 +7,7 @@
 //                       并复用 set_static_tiles 注入瓦片矩阵
 // 被测代码依赖的 Android 头由 stubs/android/log.h 覆盖；游戏内存符号由 test_stubs.cpp 提供。
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -351,6 +352,192 @@ static void make_small_payload(virtual_bag::Item* item, uint32_t count) {
     }
 }
 
+struct PayloadBridgeFixture {
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    int save_result = static_cast<int>(virtual_bag::kPayloadHeaderSize);
+    bool save_nonzero_tail = false;
+    int load_result = 1;
+    bool load_returns_item = true;
+    int consumed = static_cast<int>(virtual_bag::kPayloadHeaderSize);
+    int free_count = 0;
+};
+
+static PayloadBridgeFixture g_payload_bridge_fixture{};
+
+static int payload_bridge_save(uint8_t* out, void* item) {
+    auto* fixture = static_cast<PayloadBridgeFixture*>(item);
+    std::memcpy(out, fixture->payload.data(), fixture->payload.size());
+    if (fixture->save_nonzero_tail && fixture->save_result >= 0 &&
+        fixture->save_result < static_cast<int>(virtual_bag::kSerializedItemProbeBuffer)) {
+        out[fixture->save_result] = 0xa5;
+    }
+    return fixture->save_result;
+}
+
+static int payload_bridge_load(const uint8_t*, void** out, int* consumed) {
+    *out = g_payload_bridge_fixture.load_returns_item ? &g_payload_bridge_fixture : nullptr;
+    *consumed = g_payload_bridge_fixture.consumed;
+    return g_payload_bridge_fixture.load_result;
+}
+
+static void payload_bridge_free(void* item) {
+    if (item == &g_payload_bridge_fixture) ++g_payload_bridge_fixture.free_count;
+}
+
+static std::array<uint8_t, virtual_bag::kSerializedItemBuffer> make_payload_bytes(
+    size_t payload_size, uint32_t count) {
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    for (size_t index = 1; index < payload_size; ++index) {
+        payload[index] = static_cast<uint8_t>(index * 13u + 5u);
+    }
+    if (payload_size > 0) payload[0] = static_cast<uint8_t>(payload_size - 1);
+    const uint32_t count_flags = stack_codec::write_count(0x00012345u, count);
+    for (size_t index = 0; index < 4; ++index) {
+        payload[virtual_bag::kPayloadCountOffset + index] =
+            static_cast<uint8_t>((count_flags >> (8 * index)) & 0xffu);
+    }
+    return payload;
+}
+
+static void configure_payload_bridge(
+    const std::array<uint8_t, virtual_bag::kSerializedItemBuffer>& payload, int payload_size) {
+    g_payload_bridge_fixture = {};
+    g_payload_bridge_fixture.payload = payload;
+    g_payload_bridge_fixture.save_result = payload_size;
+    g_payload_bridge_fixture.consumed = payload_size;
+}
+
+static void test_virtual_bag_payload_bridge() {
+    using namespace virtual_bag;
+
+    for (const uint32_t count : {1u, 99u, 999u}) {
+        const auto payload = make_payload_bytes(kPayloadHeaderSize, count);
+        configure_payload_bridge(payload, static_cast<int>(kPayloadHeaderSize));
+        const ManagedLoadResult result = load_item_payload_exact(
+            payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+            payload_bridge_load, payload_bridge_free);
+        CHECK(result.item == &g_payload_bridge_fixture);
+        CHECK_EQ(result.failure, ManagedLoadFailure::kNone);
+        CHECK_EQ(result.validation, PayloadValidation::kOk);
+        uint32_t encoded_count = 0;
+        for (size_t index = 0; index < 4; ++index) {
+            encoded_count |= static_cast<uint32_t>(
+                                 payload[kPayloadCountOffset + index]) << (8 * index);
+        }
+        CHECK_EQ(static_cast<int>(stack_codec::read_count(encoded_count)), static_cast<int>(count));
+        CHECK_EQ(g_payload_bridge_fixture.free_count, 0);
+    }
+
+    auto complex_payload = make_payload_bytes(kPayloadHeaderSize, 1);
+    complex_payload[1] = 0x92;
+    complex_payload[7] = 0x3e;
+    complex_payload[17] = 0xd4;
+    configure_payload_bridge(complex_payload, static_cast<int>(kPayloadHeaderSize));
+    ManagedLoadResult complex_result = load_item_payload_exact(
+        complex_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK(complex_result.item == &g_payload_bridge_fixture);
+    CHECK(std::memcmp(g_payload_bridge_fixture.payload.data(), complex_payload.data(),
+                      kPayloadHeaderSize) == 0);
+
+    const auto max_payload = make_payload_bytes(kMaxSerializedItem, 999);
+    configure_payload_bridge(max_payload, static_cast<int>(kMaxSerializedItem));
+    ManagedLoadResult max_result = load_item_payload_exact(
+        max_payload.data(), static_cast<int>(kMaxSerializedItem), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK(max_result.item == &g_payload_bridge_fixture);
+    CHECK_EQ(max_result.failure, ManagedLoadFailure::kNone);
+
+    auto invalid_payload = make_payload_bytes(kPayloadHeaderSize, 1);
+    const auto unchanged_payload = invalid_payload;
+    ManagedLoadResult empty_result = load_item_payload_exact(
+        invalid_payload.data(), 0, payload_bridge_save, payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(empty_result.failure, ManagedLoadFailure::kInvalidPayload);
+    CHECK_EQ(empty_result.validation, PayloadValidation::kMissing);
+    CHECK(std::memcmp(invalid_payload.data(), unchanged_payload.data(), invalid_payload.size()) == 0);
+
+    ManagedLoadResult truncated_result = load_item_payload_exact(
+        invalid_payload.data(), static_cast<int>(kPayloadHeaderSize - 1), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(truncated_result.failure, ManagedLoadFailure::kInvalidPayload);
+    CHECK_EQ(truncated_result.validation, PayloadValidation::kLengthOutOfRange);
+
+    invalid_payload[0] = 0;
+    ManagedLoadResult prefix_result = load_item_payload_exact(
+        invalid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(prefix_result.validation, PayloadValidation::kLengthPrefixMismatch);
+
+    invalid_payload = make_payload_bytes(kPayloadHeaderSize, 1);
+    invalid_payload[kPayloadHeaderSize] = 0x7f;
+    ManagedLoadResult tail_result = load_item_payload_exact(
+        invalid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(tail_result.validation, PayloadValidation::kNonZeroTail);
+
+    invalid_payload = make_payload_bytes(kMaxSerializedItem, 1);
+    invalid_payload[0] = 0xff;
+    ManagedLoadResult oversize_result = load_item_payload_exact(
+        invalid_payload.data(), static_cast<int>(kSerializedItemBuffer), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(oversize_result.validation, PayloadValidation::kLengthOutOfRange);
+
+    const auto valid_payload = make_payload_bytes(kPayloadHeaderSize, 1);
+    configure_payload_bridge(valid_payload, static_cast<int>(kPayloadHeaderSize));
+    g_payload_bridge_fixture.load_result = 0;
+    ManagedLoadResult load_failure = load_item_payload_exact(
+        valid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(load_failure.failure, ManagedLoadFailure::kLoadFailed);
+    CHECK_EQ(g_payload_bridge_fixture.free_count, 1);
+
+    configure_payload_bridge(valid_payload, static_cast<int>(kPayloadHeaderSize));
+    g_payload_bridge_fixture.load_returns_item = false;
+    ManagedLoadResult missing_output = load_item_payload_exact(
+        valid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(missing_output.failure, ManagedLoadFailure::kMissingOutput);
+    CHECK_EQ(g_payload_bridge_fixture.free_count, 0);
+
+    configure_payload_bridge(valid_payload, static_cast<int>(kPayloadHeaderSize));
+    g_payload_bridge_fixture.consumed = static_cast<int>(kPayloadHeaderSize - 1);
+    ManagedLoadResult consumed_mismatch = load_item_payload_exact(
+        valid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(consumed_mismatch.failure, ManagedLoadFailure::kConsumedMismatch);
+    CHECK_EQ(g_payload_bridge_fixture.free_count, 1);
+
+    configure_payload_bridge(valid_payload, static_cast<int>(kPayloadHeaderSize));
+    g_payload_bridge_fixture.payload[7] ^= 1;
+    ManagedLoadResult round_trip_mismatch = load_item_payload_exact(
+        valid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(round_trip_mismatch.failure, ManagedLoadFailure::kRoundTripMismatch);
+    CHECK_EQ(g_payload_bridge_fixture.free_count, 1);
+
+    configure_payload_bridge(valid_payload, static_cast<int>(kPayloadHeaderSize));
+    g_payload_bridge_fixture.save_nonzero_tail = true;
+    ManagedLoadResult reserialize_rejected = load_item_payload_exact(
+        valid_payload.data(), static_cast<int>(kPayloadHeaderSize), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(reserialize_rejected.failure, ManagedLoadFailure::kReserializeRejected);
+    CHECK_EQ(reserialize_rejected.validation, PayloadValidation::kNonZeroTail);
+    CHECK_EQ(g_payload_bridge_fixture.free_count, 1);
+
+    PendingTransfer pending{};
+    pending.valid = true;
+    pending.direction = kTransferOriginalToExtension;
+    pending.src_bag = 0;
+    pending.src_slot = 0;
+    pending.dst_bag = 0;
+    pending.dst_slot = 0;
+    pending.payload = valid_payload;
+    pending.payload_size = static_cast<uint16_t>(kPayloadHeaderSize);
+    CHECK(valid_pending_transfer_payload(pending));
+    pending.payload[kPayloadHeaderSize] = 0x01;
+    CHECK(!valid_pending_transfer_payload(pending));
+}
+
 static void test_virtual_bag_base64() {
     uint8_t data[255];
     for (size_t i = 0; i < sizeof(data); ++i) data[i] = static_cast<uint8_t>(i * 7 + 1);
@@ -412,7 +599,7 @@ static void test_virtual_bag_mergeable_items() {
     CHECK(!virtual_bag::mergeable_items(existing, source));
     source = virtual_bag::Item{existing.category, source.count};
     virtual_bag::Item legacy_existing{existing.category, existing.count};
-    CHECK(virtual_bag::mergeable_items(legacy_existing, source));
+    CHECK(!virtual_bag::mergeable_items(legacy_existing, source));
 }
 
 static void test_virtual_bag_json_roundtrip() {
@@ -539,6 +726,88 @@ static void test_virtual_bag_recovery() {
 
     p2.dst_bag = 6;
     CHECK_EQ(virtual_bag::recovery_action(state, p2), virtual_bag::RecoveryAction::kRollback);
+    p.src_bag = virtual_bag::kOriginalTaskBag;
+    CHECK_EQ(virtual_bag::recovery_action(state, p), virtual_bag::RecoveryAction::kRollback);
+    p2.dst_bag = virtual_bag::kOriginalTaskBag;
+    CHECK_EQ(virtual_bag::recovery_action(state, p2), virtual_bag::RecoveryAction::kRollback);
+}
+
+static void test_virtual_bag_transaction_domain() {
+    using namespace virtual_bag;
+
+    CHECK(valid_original_transaction_bag(0));
+    CHECK(valid_original_transaction_bag(4));
+    CHECK(!valid_original_transaction_bag(-1));
+    CHECK(!valid_original_transaction_bag(kOriginalTaskBag));
+    CHECK(!valid_original_transaction_bag(6));
+    CHECK(!valid_original_transaction_bag(255));
+
+    CHECK(valid_extension_logical_bag(kExtensionLogicalBagFirst));
+    CHECK(valid_extension_logical_bag(kExtensionLogicalBagLast));
+    CHECK(!valid_extension_logical_bag(kOriginalTaskBag));
+    CHECK(!valid_extension_logical_bag(11));
+    CHECK_EQ(extension_internal_bag(kExtensionLogicalBagFirst), 0);
+    CHECK_EQ(extension_internal_bag(kExtensionLogicalBagLast), kBagCount - 1);
+    CHECK_EQ(extension_internal_bag(11), -1);
+
+    CHECK(valid_transaction_domain(kTransferOriginalToExtension, 0, 0, 4, 15));
+    CHECK(valid_transaction_domain(kTransferExtensionToOriginal, 4, 15, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, -1, 0, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, kOriginalTaskBag, 0, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, 0, 0, kOriginalTaskBag, 0));
+    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, 0, kBagCount, 0));
+    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, kBagCount, 0, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, -1, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, 0, 0, 0, kSlotCount));
+
+    Item item{};
+    item.category = 401;
+    item.count = 4;
+    make_small_payload(&item, item.count);
+
+    State source{};
+    source.types = {4, 0, 0, 0, 0};
+    normalize(&source);
+    source.items[0][0] = item;
+    source.pending.valid = true;
+    source.pending.direction = kTransferOriginalToExtension;
+    source.pending.src_bag = 0;
+    source.pending.src_slot = 0;
+    source.pending.dst_bag = 0;
+    source.pending.dst_slot = 1;
+    source.pending.payload_size = item.payload_size;
+    source.pending.payload = item.payload;
+
+    std::string invalid_pending_json = state_json(source);
+    const std::string valid_source_bag = "\"srcBag\":0";
+    const size_t source_bag_pos = invalid_pending_json.find(valid_source_bag);
+    CHECK(source_bag_pos != std::string::npos);
+    invalid_pending_json.replace(source_bag_pos, valid_source_bag.size(),
+                                 "\"srcBag\":5");
+
+    PendingTransfer rejected{};
+    CHECK(parse_pending_transfer_result(invalid_pending_json.c_str(), &rejected) ==
+          PendingTransferParseResult::kInvalidTransactionDomain);
+    CHECK_EQ(static_cast<int>(rejected.src_bag), kOriginalTaskBag);
+
+    State parsed{};
+    CHECK(parse_state_json(invalid_pending_json.c_str(), &parsed));
+    CHECK_EQ(parsed.items[0][0].category, item.category);
+    CHECK_EQ(parsed.items[0][0].count, item.count);
+    CHECK(!parsed.pending.valid);
+
+    std::string negative_pending_json = state_json(source);
+    const size_t negative_source_bag_pos = negative_pending_json.find(valid_source_bag);
+    CHECK(negative_source_bag_pos != std::string::npos);
+    negative_pending_json.replace(negative_source_bag_pos, valid_source_bag.size(),
+                                  "\"srcBag\":-1");
+    CHECK(parse_pending_transfer_result(negative_pending_json.c_str(), &rejected) ==
+          PendingTransferParseResult::kMalformed);
+    State negative_parsed{};
+    CHECK(parse_state_json(negative_pending_json.c_str(), &negative_parsed));
+    CHECK_EQ(negative_parsed.items[0][0].category, item.category);
+    CHECK_EQ(negative_parsed.items[0][0].count, item.count);
+    CHECK(!negative_parsed.pending.valid);
 }
 
 // 存档预检样本：槽状态字节/失败码 → 五态判决（docs/system/save.md §4 阶段码全覆盖）
@@ -640,6 +909,8 @@ static void test_prepare_journal() {
         journal.src_slot = 4;
         journal.dst_bag = 6 - 6;
         journal.dst_slot = 0;
+        journal.payload_size = kPayloadHeaderSize;
+        journal.payload[0] = static_cast<uint8_t>(kPayloadHeaderSize - 1);
         return journal;
     };
 
@@ -666,8 +937,20 @@ static void test_prepare_journal() {
     }
     {
         JournalRecord journal = base_record();
+        journal.src_bag = kOriginalTaskBag;
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
         journal.direction = kTransferExtensionToOriginal;
         journal.src_bag = kBagCount;
+        CHECK(!valid_journal_record(journal));
+    }
+    {
+        JournalRecord journal = base_record();
+        journal.direction = kTransferExtensionToOriginal;
+        journal.src_bag = 0;
+        journal.dst_bag = kOriginalTaskBag;
         CHECK(!valid_journal_record(journal));
     }
     {
@@ -729,6 +1012,7 @@ static void test_prepare_journal() {
         journal.source_payload_size = source_item.payload_size;
         const std::string encoded = journal_json(journal);
         JournalRecord parsed{};
+        JournalRecord corrupted{};
         CHECK(parse_journal_json(encoded.c_str(), &parsed));
         CHECK_EQ(parsed.generation, journal.generation);
         CHECK_EQ((int)parsed.stage, (int)journal.stage);
@@ -739,7 +1023,12 @@ static void test_prepare_journal() {
         CHECK_EQ((int)parsed.payload_size, (int)journal.payload_size);
         CHECK(std::memcmp(parsed.payload.data(), journal.payload.data(), journal.payload_size) == 0);
         CHECK_EQ((int)parsed.source_payload_size, (int)journal.source_payload_size);
-        JournalRecord corrupted{};
+        std::string task_bag_journal = encoded;
+        const std::string valid_source_bag = "\"srcBag\":0";
+        const size_t source_bag_pos = task_bag_journal.find(valid_source_bag);
+        CHECK(source_bag_pos != std::string::npos);
+        task_bag_journal.replace(source_bag_pos, valid_source_bag.size(), "\"srcBag\":5");
+        CHECK(!parse_journal_json(task_bag_journal.c_str(), &corrupted));
         CHECK(!parse_journal_json("{\"transactionId\":\"\"}", &corrupted));
         CHECK(!parse_journal_json("not json", &corrupted));
         CHECK(!parse_journal_json(
@@ -844,6 +1133,69 @@ static void test_ownership_ledger() {
     CHECK(ownership::release(&ledger, 0x7FFFFFFF) == ownership::Outcome::kRejectUnknownHandle);
 }
 
+static void test_ownership_ledger_p43() {
+    // 过期 generation handle：释放后同槽再分配，旧句柄全部操作必须被拒。
+    ownership::Ledger ledger{};
+    uint32_t a = 0;
+    CHECK(ownership::allocate(&ledger, &a) == ownership::Outcome::kOk);
+    CHECK(ownership::release(&ledger, a) == ownership::Outcome::kOk);
+    uint32_t b = 0;
+    CHECK(ownership::allocate(&ledger, &b) == ownership::Outcome::kOk);
+    CHECK(b != a);
+    CHECK(ownership::handle_slot(b) == ownership::handle_slot(a));
+    CHECK(ownership::live_state(ledger, a, ownership::State::kModuleOwned) == false);
+    CHECK(ownership::release(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::handover_to_inventory(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::borrow_for_view(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::return_from_view(&ledger, a) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::live_state(ledger, b, ownership::State::kModuleOwned));
+
+    // 池耗尽与槽位复用：33 次分配被拒；释放后可复用且 generation 递增。
+    ownership::Ledger pool{};
+    uint32_t handles[ownership::kLedgerCapacity] = {};
+    for (int i = 0; i < ownership::kLedgerCapacity; ++i) {
+        CHECK(ownership::allocate(&pool, &handles[i]) == ownership::Outcome::kOk);
+    }
+    uint32_t extra = 0;
+    CHECK(ownership::allocate(&pool, &extra) == ownership::Outcome::kRejectPoolExhausted);
+    CHECK(ownership::release(&pool, handles[7]) == ownership::Outcome::kOk);
+    CHECK(ownership::allocate(&pool, &extra) == ownership::Outcome::kOk);
+    CHECK(ownership::handle_slot(extra) == ownership::handle_slot(handles[7]));
+    CHECK(extra != handles[7]);
+    for (int i = 0; i < ownership::kLedgerCapacity; ++i) {
+        if (i == 7) continue;
+        CHECK(ownership::release(&pool, handles[i]) == ownership::Outcome::kOk);
+    }
+    CHECK(ownership::release(&pool, extra) == ownership::Outcome::kOk);
+    CHECK_EQ(ownership::audit(pool).outstanding_objects, 0u);
+    CHECK(ownership::audit(pool).balanced);
+
+    // 混合生命周期审计：借出中禁止 handover；归还→handover→终态计数。
+    ownership::Ledger mixed{};
+    uint32_t h1 = 0;
+    uint32_t h2 = 0;
+    uint32_t h3 = 0;
+    CHECK(ownership::allocate(&mixed, &h1) == ownership::Outcome::kOk);
+    CHECK(ownership::allocate(&mixed, &h2) == ownership::Outcome::kOk);
+    CHECK(ownership::allocate(&mixed, &h3) == ownership::Outcome::kOk);
+    CHECK(ownership::borrow_for_view(&mixed, h2) == ownership::Outcome::kOk);
+    CHECK(ownership::handover_to_inventory(&mixed, h2) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::release(&mixed, h2) == ownership::Outcome::kRejectUnknownHandle);
+    CHECK(ownership::return_from_view(&mixed, h2) == ownership::Outcome::kOk);
+    CHECK(ownership::handover_to_inventory(&mixed, h2) == ownership::Outcome::kOk);
+    CHECK(ownership::release(&mixed, h1) == ownership::Outcome::kOk);
+    {
+        const ownership::Audit report = ownership::audit(mixed);
+        CHECK(report.balanced);
+        CHECK_EQ(report.outstanding_borrows, 0u);
+        CHECK_EQ(report.outstanding_objects, 1u);
+        CHECK_EQ(report.inventory_owned, 1u);
+        CHECK_EQ(mixed.total_allocated, mixed.total_released + mixed.total_handed_over + 1u);
+    }
+    CHECK(ownership::release(&mixed, h3) == ownership::Outcome::kOk);
+    CHECK_EQ(ownership::audit(mixed).live_handles, 1u);
+}
+
 static void test_unequip_bag() {
     virtual_bag::State state{};
     CHECK(!virtual_bag::unequip_bag(&state, -1));
@@ -892,6 +1244,7 @@ int main() {
     test_parse_int_field();
     test_tiles_parse();
     test_ownership_ledger();
+    test_ownership_ledger_p43();
     test_unequip_bag();
     test_equip_bag();
     test_nav_bfs();
@@ -902,12 +1255,14 @@ int main() {
     test_prepare_journal();
     test_virtual_bag_base64();
     test_virtual_bag_payload_helpers();
+    test_virtual_bag_payload_bridge();
     test_virtual_bag_merge_count();
     test_virtual_bag_mergeable_items();
     test_virtual_bag_json_roundtrip();
     test_virtual_bag_legacy_json();
     test_virtual_bag_normalize_payload();
     test_virtual_bag_recovery();
+    test_virtual_bag_transaction_domain();
     test_save_preflight_classify();
     test_save_preflight_stage();
     test_save_preflight_json();
