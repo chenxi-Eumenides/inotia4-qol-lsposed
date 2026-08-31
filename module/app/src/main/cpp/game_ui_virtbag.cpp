@@ -1877,39 +1877,6 @@ void virtual_bag_draw_inven_item_wrapper() {
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected)) {
         if (g_module_view_installed) {
-            // G-8 崩溃诊断（快照比对限频）：物品指针表变化时 dump 当前袋+每槽
-            // 控件 data[0]——崩溃前最后一条即肇事物品。
-            static void* last_items[virtual_bag::kSlotCount] = {};
-            static bool last_valid = false;
-            if (g_base != 0 && fn_control_object_get_child != nullptr &&
-                fn_control_object_get_data != nullptr) {
-                void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
-                void* cur_items[virtual_bag::kSlotCount] = {};
-                bool changed = !last_valid;
-                for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-                    void* ctrl = valid_child_locked(root, slot);
-                    void* data = ctrl != nullptr && fn_control_object_get_data != nullptr
-                                     ? fn_control_object_get_data(ctrl)
-                                     : nullptr;
-                    cur_items[slot] = data != nullptr
-                                          ? *reinterpret_cast<void**>(data)
-                                          : nullptr;
-                    if (cur_items[slot] != last_items[slot]) changed = true;
-                }
-                if (changed) {
-                    const int cur_bag = original_bag_locked();
-                    for (int slot = 0; slot < virtual_bag::kSlotCount; slot += 4) {
-                        VIRTBAG_LOG(
-                            "drawdiag bag=%d slot=%d..%d items=%p %p %p %p",
-                            cur_bag, slot, slot + 3, cur_items[slot],
-                            slot + 1 < virtual_bag::kSlotCount ? cur_items[slot + 1] : nullptr,
-                            slot + 2 < virtual_bag::kSlotCount ? cur_items[slot + 2] : nullptr,
-                            slot + 3 < virtual_bag::kSlotCount ? cur_items[slot + 3] : nullptr);
-                    }
-                    std::memcpy(last_items, cur_items, sizeof(last_items));
-                    last_valid = true;
-                }
-            }
             original();
             return;
         }
