@@ -122,6 +122,8 @@ void* g_bag_draw_thunk = nullptr;
 void* g_item_draw_thunk = nullptr;
 virtual_bag::State g_virtual_bag_state{};
 int g_loaded_slot = -2;
+
+uint64_t isolation_now_ms_locked();
 std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_objects{};
 std::array<std::array<int, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_categories{};
 std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_hashes{};
@@ -453,7 +455,38 @@ bool load_state_from_store(int slot) {
         } else if (pending_result == virtual_bag::PendingTransferParseResult::kMalformed) {
             VIRTBAG_LOG("pending isolated reason=malformed_pending_record");
         }
-        parsed = virtual_bag::parse_state_json(utf, &g_virtual_bag_state);
+        parsed = virtual_bag::parse_state_json_at(utf, &g_virtual_bag_state,
+                                                  isolation_now_ms_locked());
+        if (has_pending &&
+            pending_result != virtual_bag::PendingTransferParseResult::kOk) {
+            virtual_bag::IsolationRecord record{};
+            record.valid = true;
+            record.observed_at_ms = isolation_now_ms_locked();
+            if (pending_result ==
+                virtual_bag::PendingTransferParseResult::kInvalidTransactionDomain) {
+                record.reason = virtual_bag::isolation_reason::kInvalidTransactionDomain;
+                record.direction = rejected_pending.direction;
+                record.src_bag = rejected_pending.src_bag;
+                record.src_slot = rejected_pending.src_slot;
+                record.dst_bag = rejected_pending.dst_bag;
+                record.dst_slot = rejected_pending.dst_slot;
+                std::strncpy(record.transaction_id, rejected_pending.transaction_id,
+                             sizeof(record.transaction_id) - 1);
+                record.payload_size = std::min<uint16_t>(
+                    rejected_pending.payload_size,
+                    static_cast<uint16_t>(rejected_pending.payload.size()));
+                record.payload = rejected_pending.payload;
+                record.source_payload_size = std::min<uint16_t>(
+                    rejected_pending.source_payload_size,
+                    static_cast<uint16_t>(rejected_pending.source_payload.size()));
+                record.source_payload = rejected_pending.source_payload;
+                record.detail = "pending_rejected_at_load";
+            } else {
+                record.reason = virtual_bag::isolation_reason::kInvalidPayload;
+                record.detail = "malformed_pending_record";
+            }
+            virtual_bag::push_isolation(&g_virtual_bag_state, record);
+        }
     }
     if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
     env->DeleteLocalRef(result);
@@ -808,6 +841,58 @@ bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
 
 // 按失败阶段回滚：先还原逻辑槽与 pending，再由调用方释放仍归模块所有的临时对象；
 // 已移交原版库存的对象不参与（所有权账本终态）。
+uint64_t isolation_now_ms_locked() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+
+// P4.5：pending 恢复失败隔离——原始袋槽值原样保留（可能越界，不正则化），
+// payload 字节留作只读诊断。
+void isolate_pending_locked(const char* reason, const char* detail) {
+    const virtual_bag::PendingTransfer& pending = g_virtual_bag_state.pending;
+    virtual_bag::IsolationRecord record{};
+    record.valid = true;
+    record.reason = reason;
+    record.observed_at_ms = isolation_now_ms_locked();
+    std::strncpy(record.transaction_id, pending.transaction_id,
+                 virtual_bag::kMaxTransactionIdChars);
+    record.direction = pending.direction;
+    record.src_bag = pending.src_bag;
+    record.src_slot = pending.src_slot;
+    record.dst_bag = pending.dst_bag;
+    record.dst_slot = pending.dst_slot;
+    record.payload_size = pending.payload_size;
+    record.payload = pending.payload;
+    record.source_payload_size = pending.source_payload_size;
+    record.source_payload = pending.source_payload;
+    record.detail = detail;
+    push_isolation(&g_virtual_bag_state, record);
+}
+
+// P4.5：ext→orig 失败隔离——扩展源逻辑物品保留（payload 字节未丢），记录
+// 事务上下文与失败阶段供审计。
+void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
+                                     virtual_bag::TxnStage phase, const char* reason,
+                                     const char* detail) {
+    virtual_bag::IsolationRecord record{};
+    record.valid = true;
+    record.reason = reason;
+    record.observed_at_ms = isolation_now_ms_locked();
+    std::strncpy(record.transaction_id, txn.transaction_id,
+                 virtual_bag::kMaxTransactionIdChars);
+    record.direction = txn.direction;
+    record.phase = static_cast<int>(phase);
+    record.src_bag = txn.src_bag;
+    record.src_slot = txn.src_slot;
+    record.dst_bag = txn.dst_bag;
+    record.dst_slot = txn.dst_slot;
+    record.payload_size = txn.source.payload_size;
+    record.payload = txn.source.payload;
+    record.detail = detail;
+    push_isolation(&g_virtual_bag_state, record);
+}
+
 void txn_abort_locked(const virtual_bag::TransactionContext& txn,
                       virtual_bag::TxnStage failed_at, const char* reason) {
     virtual_bag::txn_rollback_logical(&g_virtual_bag_state, txn, failed_at);
@@ -825,6 +910,8 @@ void recover_pending_transaction_locked() {
     const virtual_bag::PendingTransfer pending = g_virtual_bag_state.pending;
     if (!pending.valid) return;
     if (!virtual_bag::valid_pending_transfer_domain(pending)) {
+        isolate_pending_locked(virtual_bag::isolation_reason::kInvalidTransactionDomain,
+                               "pending recovery");
         VIRTBAG_LOG("pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
                     static_cast<unsigned int>(pending.direction),
                     static_cast<unsigned int>(pending.src_bag),
@@ -846,6 +933,10 @@ void recover_pending_transaction_locked() {
                 : virtual_bag::validate_serialized_payload_buffer(
                       pending.source_payload.data(), pending.source_payload.size(),
                       pending.source_payload_size);
+        isolate_pending_locked(virtual_bag::isolation_reason::kInvalidPayload,
+                               payload_validation != virtual_bag::PayloadValidation::kOk
+                                   ? virtual_bag::payload_validation_reason(payload_validation)
+                                   : virtual_bag::payload_validation_reason(source_validation));
         VIRTBAG_LOG("pending isolated reason=invalid_payload payload=%s source_payload=%s src=%u/%u dst=%u/%u",
                     virtual_bag::payload_validation_reason(payload_validation),
                     virtual_bag::payload_validation_reason(source_validation),
@@ -1319,6 +1410,15 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                                                   "move_extension_to_original", &item_handle);
     if (item != nullptr) set_original_bag_locked(target_bag);
     if (item == nullptr || !fn_inven_save_item_on_empty(item, target_bag)) {
+        // P4.5：Load 失败或插入失败隔离。扩展源逻辑物品保留（payload 字节未丢），
+        // 事务上下文留作只读诊断；不构造可移动替代项。
+        isolate_ext2orig_failure_locked(txn,
+                                        item == nullptr ? virtual_bag::TxnStage::kLogicalUpdated
+                                                        : virtual_bag::TxnStage::kOriginalUpdated,
+                                        item == nullptr ? virtual_bag::isolation_reason::kLoadFailed
+                                                        : virtual_bag::isolation_reason::kInsertFailed,
+                                        item == nullptr ? "move_extension_to_original load"
+                                                        : "move_extension_to_original insert");
         txn_abort_locked(txn,
                          item != nullptr ? virtual_bag::TxnStage::kOriginalUpdated
                                          : virtual_bag::TxnStage::kLogicalUpdated,
@@ -1342,6 +1442,9 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
             source.payload.data(), source.payload_size, target_bag);
     }
     if (inserted_slot < 0) {
+        isolate_ext2orig_failure_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                                        virtual_bag::isolation_reason::kSlotNotFound,
+                                        "ext2orig insertion verify");
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                          "insertion slot not found; extension source retained");
         release_tracked_item_locked(item_handle, item, "ext2orig slot-not-found rollback");
@@ -3164,7 +3267,7 @@ std::string data_virtual_bag_ui_status_json() {
     return "{\"injected\":" + std::string(g_state_entry != nullptr ? "true" : "false") +
            ",\"extension_tab_button\":" +
            std::string(g_extension_tab_buttons[0] != nullptr ? "true" : "false") +
-           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state) + "}";
+           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state, true) + "}";
 }
 
 std::string data_virtual_bag_test_equip(int index, int bag_type) {
@@ -3209,7 +3312,7 @@ std::string extension_bag_status_json_locked() {
            ",\"inventory_frame_active\":" +
            std::string(g_inventory_frame_active ? "true" : "false") +
            ",\"recovery_action\":\"" + extension_recovery_action_name_locked() + "\"" +
-           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state) + "}";
+           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state, true) + "}";
 }
 
 std::string extension_bag_not_ready_error_locked() {
@@ -3331,6 +3434,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
         // P4.3：回滚已确认（脱离 INVEN）→ 账本终止保管 + 真释放。
         release_tracked_item_locked(item_handle, item, "unequip rollback");
         g_virtual_bag_state.types[internal_bag] = saved_type;
+        g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
         virtual_bag::normalize(&g_virtual_bag_state);
         persist_state_locked();
         VIRTBAG_LOG("extension unequip persist failed; rolled back bag=%d", internal_bag);
@@ -3447,6 +3551,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
             return ExtensionBagEquipResult::kOk;
         }
         g_virtual_bag_state.types[internal_bag] = 0;
+        g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
         virtual_bag::normalize(&g_virtual_bag_state);
     } else {
         VIRTBAG_LOG("extension equip state reject bag=%d category=%d", internal_bag, category);

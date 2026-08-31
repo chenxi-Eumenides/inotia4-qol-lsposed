@@ -789,6 +789,11 @@ static void test_virtual_bag_transaction_domain() {
     CHECK(parse_pending_transfer_result(invalid_pending_json.c_str(), &rejected) ==
           PendingTransferParseResult::kInvalidTransactionDomain);
     CHECK_EQ(static_cast<int>(rejected.src_bag), kOriginalTaskBag);
+    CHECK_EQ(static_cast<int>(rejected.payload_size),
+             static_cast<int>(source.pending.payload_size));
+    CHECK(rejected.payload == source.pending.payload);
+    CHECK_EQ(std::string(rejected.transaction_id),
+             std::string(source.pending.transaction_id));
 
     State parsed{};
     CHECK(parse_state_json(invalid_pending_json.c_str(), &parsed));
@@ -1419,6 +1424,179 @@ static void test_p44_transaction_stages() {
     CHECK_EQ(legacy_back.transaction_id[0], '\0');
 }
 
+static void test_p45_isolation() {
+    using virtual_bag::IsolationRecord;
+    namespace ir = virtual_bag::isolation_reason;
+
+    // reason 分类互异（host/native 单一来源）。
+    const char* reasons[] = {
+        ir::kPayloadInvalid,
+        ir::kInvalidTransactionDomain,
+        ir::kInvalidPayload,
+        ir::kLoadFailed,
+        ir::kInsertFailed,
+        ir::kSlotNotFound,
+        ir::kJournalInvalid,
+    };
+    for (size_t i = 0; i < sizeof(reasons) / sizeof(reasons[0]); ++i) {
+        CHECK(reasons[i][0] != '\0');
+        for (size_t j = i + 1; j < sizeof(reasons) / sizeof(reasons[0]); ++j) {
+            CHECK(std::strcmp(reasons[i], reasons[j]) != 0);
+        }
+    }
+
+    // payload_invalid：normalize 保留原始字节为隔离记录后清槽，detail 区分完整性诊断。
+    virtual_bag::State state{};
+    state.isolation_now_ms = 1234;
+    state.items[2][3].category = 401;
+    state.items[2][3].count = 1;
+    state.items[2][3].payload_size = 5;
+    state.items[2][3].payload[0] = 4;
+    state.items[2][3].payload[1] = 9;
+    virtual_bag::normalize(&state);
+    CHECK_EQ(static_cast<int>(state.items[2][3].payload_size), 0);
+    CHECK_EQ(state.items[2][3].category, 0);
+    CHECK_EQ(state.items[2][3].count, 0);
+    CHECK_EQ(state.isolation_count, 1);
+    CHECK_EQ(state.isolation_sequence, 1);
+    const IsolationRecord& normalized = state.isolations[0];
+    CHECK(normalized.valid);
+    CHECK_EQ(normalized.sequence, 0u);
+    CHECK_EQ(normalized.observed_at_ms, 1234u);
+    CHECK(std::strcmp(normalized.reason, ir::kPayloadInvalid) == 0);
+    CHECK_EQ(normalized.src_bag, 2);
+    CHECK_EQ(normalized.src_slot, 3);
+    CHECK_EQ(static_cast<int>(normalized.payload_size), 5);
+    CHECK_EQ(normalized.payload[1], 9);
+    CHECK(std::strcmp(normalized.detail, "payload_length_out_of_range") == 0);
+
+    // category_invalid detail 分支：payload 校验通过但类别非法。
+    virtual_bag::State bad_category{};
+    bad_category.items[0][0].category = 0;
+    bad_category.items[0][0].count = 1;
+    bad_category.items[0][0].payload_size = 20;
+    bad_category.items[0][0].payload[0] = 19;
+    virtual_bag::normalize(&bad_category);
+    CHECK_EQ(bad_category.isolation_count, 1);
+    CHECK(std::strcmp(bad_category.isolations[0].detail, "category_invalid") == 0);
+
+    // D3：payload_size 超出固定数组容量时隔离记录钳制，序列化不越界读。
+    virtual_bag::State oversized{};
+    oversized.items[1][1].category = 401;
+    oversized.items[1][1].count = 1;
+    oversized.items[1][1].payload_size = 300;
+    oversized.items[1][1].payload[0] = 7;
+    virtual_bag::normalize(&oversized);
+    CHECK_EQ(oversized.isolation_count, 1);
+    CHECK_EQ(static_cast<int>(oversized.isolations[0].payload_size), 256);
+    const std::string oversized_json = virtual_bag::state_json(oversized, true);
+    CHECK(oversized_json.find("\"isolations\"") != std::string::npos);
+    CHECK(oversized_json.find("payload_invalid") != std::string::npos);
+
+    // 环形覆盖：写满 8 条后覆盖最旧，sequence 全局单调。
+    virtual_bag::State ring{};
+    for (int round = 0; round < 10; ++round) {
+        IsolationRecord pushed{};
+        pushed.valid = true;
+        push_isolation(&ring, pushed);
+    }
+    CHECK_EQ(static_cast<int>(ring.isolation_count), 8);
+    CHECK_EQ(ring.isolation_sequence, 10u);
+    const size_t oldest =
+        (ring.isolation_next + virtual_bag::kMaxIsolationRecords - ring.isolation_count) %
+        virtual_bag::kMaxIsolationRecords;
+    CHECK_EQ(ring.isolations[oldest].sequence, 2u);
+    const size_t newest = (ring.isolation_next + virtual_bag::kMaxIsolationRecords - 1) %
+                          virtual_bag::kMaxIsolationRecords;
+    CHECK_EQ(ring.isolations[newest].sequence, 9u);
+
+    // journal kDiscard：非法 journal（域越界）被拒并隔离，原始值不正则化。
+    virtual_bag::JournalRecord bad{};
+    bad.valid = true;
+    bad.stage = virtual_bag::kJournalStageOriginalSaved;
+    bad.direction = 200;
+    bad.src_bag = 200;
+    bad.src_slot = 250;
+    bad.dst_bag = 255;
+    bad.dst_slot = 254;
+    bad.generation = 42;
+    std::strncpy(bad.transaction_id, "crash-txn", sizeof(bad.transaction_id) - 1);
+    bad.payload_size = 32;
+    for (int index = 0; index < 32; ++index) bad.payload[static_cast<size_t>(index)] = static_cast<uint8_t>(index);
+    bad.source_payload_size = 20;
+    bad.source_payload[0] = 19;
+    virtual_bag::WorldProbe probe{};
+    CHECK(virtual_bag::journal_recovery_action(state, bad, probe) ==
+          virtual_bag::JournalRecovery::kDiscard);
+    const IsolationRecord journal_record =
+        virtual_bag::isolation_from_journal_record(bad, 777);
+    CHECK(journal_record.valid);
+    CHECK(std::strcmp(journal_record.reason, ir::kJournalInvalid) == 0);
+    CHECK_EQ(journal_record.observed_at_ms, 777u);
+    CHECK_EQ(journal_record.generation, 42u);
+    CHECK_EQ(journal_record.direction, 200);
+    CHECK_EQ(journal_record.phase, static_cast<int>(virtual_bag::kJournalStageOriginalSaved));
+    CHECK_EQ(journal_record.src_bag, 200);
+    CHECK_EQ(journal_record.src_slot, 250);
+    CHECK_EQ(journal_record.dst_bag, 255);
+    CHECK_EQ(journal_record.dst_slot, 254);
+    CHECK(std::strcmp(journal_record.transaction_id, "crash-txn") == 0);
+    CHECK_EQ(static_cast<int>(journal_record.payload_size), 32);
+    CHECK_EQ(journal_record.payload[31], 31);
+    CHECK_EQ(static_cast<int>(journal_record.source_payload_size), 20);
+    CHECK(std::strcmp(journal_record.detail, "kDiscard") == 0);
+
+    // transaction_id 超长安全截断。
+    virtual_bag::JournalRecord long_id{};
+    std::memset(long_id.transaction_id, 'x', sizeof(long_id.transaction_id) - 1);
+    long_id.transaction_id[sizeof(long_id.transaction_id) - 1] = '\0';
+    const IsolationRecord truncated =
+        virtual_bag::isolation_from_journal_record(long_id, 0);
+    CHECK_EQ(std::strlen(truncated.transaction_id),
+             static_cast<size_t>(virtual_bag::kMaxTransactionIdChars));
+
+    // state_json：include_isolations=true 输出只读诊断；默认/写路径不含。
+    virtual_bag::State with_record{};
+    with_record.isolation_now_ms = 55;
+    with_record.items[1][2].category = 401;
+    with_record.items[1][2].count = 1;
+    with_record.items[1][2].payload_size = 5;
+    with_record.items[1][2].payload[0] = 4;
+    virtual_bag::normalize(&with_record);
+    IsolationRecord enriched{};
+    enriched.valid = true;
+    std::strncpy(enriched.transaction_id, "txn-9", sizeof(enriched.transaction_id) - 1);
+    enriched.direction = 0;
+    enriched.phase = 1;
+    enriched.src_bag = 1;
+    enriched.src_slot = 2;
+    enriched.dst_bag = 3;
+    enriched.dst_slot = 4;
+    enriched.payload_size = 3;
+    enriched.payload[0] = 'a';
+    enriched.payload[1] = 'b';
+    enriched.payload[2] = 'c';
+    push_isolation(&with_record, enriched);
+    const std::string with_isolations = state_json(with_record, true);
+    CHECK(with_isolations.find("\"isolations\":[") != std::string::npos);
+    CHECK(with_isolations.find("\"recordId\":1") != std::string::npos);
+    CHECK(with_isolations.find("\"reason\":\"payload_invalid\"") != std::string::npos);
+    CHECK(with_isolations.find("\"transactionId\":\"txn-9\"") != std::string::npos);
+    CHECK(with_isolations.find("\"srcBag\":1") != std::string::npos);
+    CHECK(with_isolations.find("\"payload\":\"YWJj\"") != std::string::npos);
+    CHECK(with_isolations.find("\"payloadLength\":3") != std::string::npos);
+    CHECK(with_isolations.find("\"detail\":\"payload_length_out_of_range\"") != std::string::npos);
+    const std::string without_isolations = state_json(with_record);
+    CHECK(without_isolations.find("\"isolations\"") == std::string::npos);
+    CHECK(state_json(with_record, false).find("\"isolations\"") == std::string::npos);
+
+    // 隔离记录不进 JSON 往返（sidecar section 无隔离字段，P7 决定落盘时机）。
+    const std::string roundtrip_json = state_json(with_record);
+    virtual_bag::State reparsed{};
+    CHECK(virtual_bag::parse_state_json(roundtrip_json.c_str(), &reparsed));
+    CHECK_EQ(static_cast<int>(reparsed.isolation_count), 0);
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -1427,6 +1605,7 @@ int main() {
     test_ownership_ledger();
     test_ownership_ledger_p43();
     test_p44_transaction_stages();
+    test_p45_isolation();
     test_unequip_bag();
     test_equip_bag();
     test_nav_bfs();

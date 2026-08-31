@@ -3,14 +3,14 @@
 > 本文是扩展背包任务的长期控制面，唯一控制范围是本功能的目标架构、阶段状态、验收顺序、设计决策和证据登记。
 > `README.md` 负责项目总览，`architecture.md` 负责代码结构与规范，`docs/backlog.md` 负责全局待办，`docs/environment.md` 负责环境与设备，`docs/module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
 >
-> **文档版本**：v1.22 ｜ **状态**：CURRENT ｜ **最后修改**：2026-08-31 ｜ **最近审核**：2026-08-31
-> **当前阶段**：P0/P1/P2/P3 已通过（对应证据见 §5.2、§9 与 §13）；当前闸门为 P4 原版物品对象与逻辑背包事务桥接（进行中：P4.1 事务域校验与 P4.2 payload 桥接已实现并登记真机最小闭环证据 `E-2026-08-31-04`/`E-2026-08-31-05`；P4.3–P4.5 待实施）｜ P5 范围已包含扩展拖动建立协议（0x81），按 P5 串行规则逐路径真机验收
+> **文档版本**：v1.25 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-01 ｜ **最近审核**：2026-09-01
+> **当前阶段**：P0/P1/P2/P3 已通过（对应证据见 §5.2、§9 与 §13）；当前闸门为 P4 原版物品对象与逻辑背包事务桥接（P4.1–P4.6 全部工作包已实现、登记真机证据 `E-2026-08-31-04`～`E-2026-08-31-08`、`E-2026-09-01-01` 并通过只读复核；P4.5/P4.6 Oracle 有条件 Approve，D1/D2/D3 已修复验证，host 705/705；P4 整体 `NOT_ACCEPTED` 待用户验收与提交确认）｜ P5 范围已包含扩展拖动建立协议（0x81），按 P5 串行规则逐路径真机验收
 
 ## 0. 控制面恢复块
 
 - **唯一入口**：会话压缩、换代理或重新打开任务时，先读本节，再读“当前状态”和“当前闸门”，不得以聊天记录或旧日志替代事实。
 - **当前结论**：`NOT_ACCEPTED`。P0/P1/P2/P3 的历史通过不替代 P4–P8 最终真机验收；源码存在、host 测试或单次 API 调用均不能视为后续阶段功能完成。
-- **下一允许动作**：P4.1/P4.2 已实现、构建、host 通过并经只读补丁审查（Oracle，批准）与真机最小闭环验证（`E-2026-08-31-04`/`E-2026-08-31-05`）；下一步为 P4.3 ownership ledger 真实接线，随后 P4.4 统一事务入口、P4.5 隔离 schema；故障注入类真机项（目标满/取消/插入失败）按「验收路径未就绪」转 P5 路径矩阵，不得标记已通过。
+- **下一允许动作**：P4.1–P4.6 全部工作包已实现、构建、host 通过并经只读复核（P4.1/P4.2/P4.3 Oracle；P4.4 Momus；P4.5/P4.6 Oracle 有条件 Approve——D1 损坏 pending 在 load 路径真实隔离（域检查后置保留字节）、D2 Kotlin 告警带受限原始编码、D3 normalize 隔离 payload_size 钳制，三项均已修复：host 705/705、真机 `fc97f97b…` 两事务回归零误报）。下一步为向用户提请提交确认（v0.6.19）；故障注入类真机项（目标满/取消/插入失败）按「验收路径未就绪」转 P5 路径矩阵，不得标记已通过。
 - **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
 - **冲突裁决**：代码结构以 `architecture.md` 为准，待办来源以 `docs/backlog.md` 为准，设备与工具链以 `docs/environment.md` 为准，API 端点以 `docs/api-reference.md` 为准，sidecar 契约以 `docs/module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
@@ -27,12 +27,12 @@
 | 字段 | 当前值 |
 |---|---|
 | Overall | `NOT_ACCEPTED` |
-| Current phase | `P4` 原版物品对象与逻辑背包事务桥接（进行中：P4.1/P4.2 完成，P4.3–P4.5 未实施） |
+| Current phase | `P4` 原版物品对象与逻辑背包事务桥接（P4.1–P4.6 全部实现并复核关闭；待用户验收与提交确认后转 P5） |
 | Current gate | 原版物品进入扩展袋调用 `SAVE_SaveItem`、扩展物品进入原版袋调用 `SAVE_LoadItem`，统一事务状态须与 §8.5 prepare journal 顺序一致；每个物品在任意时刻只有一个逻辑所有者 |
-| Blocking issue | P4.3 ownership ledger 真实接线、P4.4 统一事务入口、P4.5 隔离 schema 未实施；故障注入类真机项（目标满/取消/插入失败）无 API 表达路径，登记「验收路径未就绪」转 P5；P4 整体通过前不得进入 P5 三方向移动与扩展拖动建立协议 |
-| Next allowed action | 实施 P4.3 ownership ledger 接线（复用既有四态 generation handle）；随后 P4.4/P4.5；已登记证据 `E-2026-08-31-04`/`E-2026-08-31-05` 覆盖空槽往返保真、合并身份规则与任务袋拒绝 |
+| Blocking issue | 无（P4.5/P4.6 Oracle 复核已完成：有条件 Approve，D1/D2/D3 全部修复并验证，host 705/705，真机 `fc97f97b…` 两事务回归通过）；故障注入类真机项（目标满/取消/插入失败）无 API 表达路径，登记「验收路径未就绪」转 P5 |
+| Next allowed action | P4 全部工作包（P4.1–P4.6）实现、验证、复核关闭——向用户提请提交确认（v0.6.19）；P4 整体 `NOT_ACCEPTED` 至用户验收，之后闸门转 P5 |
 | Owner | 当前执行代理；同一验收项一次只允许一个代码、构建或设备变量 |
-| Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05` |
+| Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05`；P4.3 审计循环/视图借用 `E-2026-08-31-06`/`E-2026-08-31-07`；P4.4 五态事务回归 `E-2026-08-31-08`；P4.5/P4.6 隔离与移交回归 `E-2026-09-01-01` |
 
 ## 2. 不变的实施基线
 
@@ -52,7 +52,7 @@
 
 ### 持久化模型
 
-文件：`module/app/src/main/java/com/inotia4/export/ExtensionBagUiBridge.kt`
+文件：`module/app/src/main/java/com/inotia4/qol/ExtensionBagUiBridge.kt`
 
 - section：`extensionbags.items`，v4 是最终 sidecar 唯一允许的版本。
 - 物品通过序列化 payload 保存；`pending` 用于跨包移动中断后的恢复。
@@ -265,6 +265,32 @@
 | Logs | `.tmp/p43-view-borrow-evidence.log`（70 行：安装 ×35 + 审计 ×35）；限制：install 侧无审计行，视图打开期间的 `borrows>0` 中间态未直接观测，配对由 restore 侧归零 + 全程平衡推断 |
 | Result / User verdict | `通过`（API 结论，执行代理记录；切换操作为用户物理触摸）。P4.3 真机退出条件至此全部覆盖（失败移动/入库见 `E-2026-08-31-06`） |
 
+#### E-2026-08-31-08：P4.4 唯一事务入口真机回归（API 驱动）与 UnsavedCrossMove 退役
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P4.4 退出条件真机部分：三方向统一五态事务（`txn stage=pending-recorded durable=false` → `txn committed`）真机移动、任务袋 5 拒绝、保存→强杀→重启→读档边界一致性（UnsavedCrossMove 退役后读档边界不再主动撤销未保存移动，由 sidecar 非显式窗口不落盘 + 游戏读档重建 INVEN 承担） |
+| Source | 工作树未提交改动（HEAD=`aafabbe`）：`virtual_bag_state.h`（五态核心/PendingTransfer.transaction_id/ext→ext pending 域）、`game_ui_virtbag.cpp`（txn 协调器、UnsavedCrossMove 全套退役）、`tests/test_host.cpp`（`test_p44_transaction_stages`）；host ctest `621/621` |
+| Build identity | `app-debug.apk` SHA-256 `d5bd5a6782c303c1…`；`adb install -r` 成功后 force-stop 重启加载。复核缺陷修复后重建 `44b5bd7f…`（正常路径零变化，未重跑本回归，证据仍有效） |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；全程 API 驱动（协议弹窗 `(420,280)` 触摸注入为环境文档既定流程）；扩展开启态 |
+| Bag / Projection | 初始 `bag7/0`×18（`Ejj6yQ…`）、`bag8/0`×1（`EofqSQ0…`）；ext→ext `7/0→8/1`（源清空、payload 一致）；任务袋 5 双向 `task bag excluded`；ext→orig `8/0→原版 slot2`（SaveItemOnEmpty 首空落位，扩展源清空）；orig→ext `原版 slot2→6/0`（payload `EofqSQ0…` 字节一致，原版源清空） |
+| Ownership / Persistence | `/api/system/save` ok → 强杀 → 重启 → 读档：ext `0/0`（`EofqSQ0…`）+ `2/1`（`Ejj6yQ…`×18）字节级恢复；logcat 三笔事务 `p4-1`(dir=2)/`p4-2`(dir=1,落位 slot=2)/`p4-3`(dir=0) 全部 pending-recorded→committed，零 abort、零 bridge reject、零 pending isolated |
+| Before / Action / After | 全程无崩溃；`git diff --check` 干净；改动收敛于三个预期文件 |
+| Logs | logcat `Inotia4VirtBag` txn 行 ×6（stage/committed 各 3） |
+| Result / User verdict | `通过`（API 结论，执行代理记录）。行为登记：F3 关面板/回主菜单/读档边界不再撤销未保存移动——若 orig→ext 后未经 `/api/system/save` 而发生游戏自动存档，存档 INVEN 与 sidecar 将不一致（物品丢失窗口；退役前 rollback 仅覆盖"关面板后自动存档"，"不关面板直接自动存档"退役前后同样丢失）；P7 审计原版保存入口后消除，用户规则不变：在乎的移动后跑保存 |
+
+#### E-2026-09-01-01：P4.5 失败隔离只读诊断与 P4.6 最小闭环回归（API 驱动）
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P4.5 退出条件真机可表达部分：隔离 schema 经 status 只读暴露、正常流零误报隔离；P4.6 最小闭环：三方向移动、任务袋拒绝、payload 字节保真、所有权审计、保存→强杀→重启→读档一致性（失败注入真机项沿用「验收路径未就绪」转 P5 登记） |
+| Source | 工作树未提交改动（HEAD=`e0b06f7`）：`virtual_bag_state.h`（IsolationRecord/`isolation_reason`×7/normalize 先隔离后清槽/`isolation_from_journal_record`/`state_json(include_isolations)`/`parse_state_json_at`）、`game_ui_virtbag.cpp`（recover_pending×2 与 ext→orig 失败分支接入隔离、status 暴露、时间源注入）、`ExtensionBagUiBridge.kt`（parseState 无效 payload/payloadless 隔离告警）、`tests/test_host.cpp`（`test_p45_isolation`，698/698） |
+| Build identity | `app-debug.apk` SHA-256 `3c2aace8d41b8029f02015d6af12cab29126b900355e95c6443f221a7fbe8177`；`adb install -r` 成功后 force-stop 重启加载；协议弹窗 `(420,280)` 注入 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；全程 API 驱动；扩展开启态 |
+| Bag / Projection | 六笔事务：`p4-1` ext→ext `6/0→7/1`；`p4-2` ext→orig 背包→原版 bag2/slot3（首空落位）；`p4-3` orig→ext `2/0`（低级宝石）→`6/0`；`p4-4` ext→orig 宝石回 `2/0`；`p4-5` ext→orig 药水×18→`1/5`；`p4-6` orig→ext `1/5`→`6/0` 载荷 `Ejj6yQAAAAAAyAEAZIAEAAAAAA==` 字节级一致 |
+| Ownership / Persistence | logcat 六笔全 `txn stage=pending-recorded durable=false`→`txn committed`，零 abort、零 isolated；ownership audit 5 行全 `balanced=1 borrows=0`；任务袋 5 双向 `task bag excluded`；`/api/system/save` ok→强杀→重启→读档：ext `6/0` 药水 `Ejj6yQ…` 字节级一致、宝石 3 叠与背包类 5 叠数量守恒、`isolations` 无记录不输出（零误报）、`pending` 无残留 |
+| Result / User verdict | `通过`（API 结论，执行代理记录）。限制登记：真机强制 Load/入库失败的隔离记录生成路径无 API 表达，沿用「验收路径未就绪」转 P5；隔离 reason 全分类由 host `test_p45_isolation` 覆盖 |
+
 #### 已引用、证据块待补的历史记录
 
 - `E-2026-08-28-03`（P1）与 `E-2026-08-29-01`（P2）已在 §9 与 §13 引用，但完整字段尚未回填至本节；本次不从旧日志推断或补造缺失字段。
@@ -334,8 +360,8 @@
 | `module/app/src/main/cpp/game_symbols.h` | 原版 UI/库存符号与函数签名 |
 | `module/app/src/main/cpp/symbol_registry.h` | native 符号注册与解析入口 |
 | `module/app/src/main/cpp/gamebridge.cpp` | JNI 导出与 native 分发 |
-| `module/app/src/main/java/com/inotia4/export/ExtensionBagUiBridge.kt` | section v4 读写和 pending 持久化；当前 v2/v3 兼容代码是待删除的原型遗留 |
-| `module/app/src/main/java/com/inotia4/export/NativeBridge.kt` | Kotlin/native API 声明 |
+| `module/app/src/main/java/com/inotia4/qol/ExtensionBagUiBridge.kt` | section v4 读写和 pending 持久化；当前 v2/v3 兼容代码是待删除的原型遗留 |
+| `module/app/src/main/java/com/inotia4/qol/NativeBridge.kt` | Kotlin/native API 声明 |
 | `module/app/src/main/cpp/tests/test_host.cpp` | 状态、payload、JSON、合并和恢复测试 |
 
 ## 7. 继续工作的规则与代理协作
@@ -445,7 +471,7 @@
 | P1 | ✅ 通过（2026-08-29，E-2026-08-28-03：v0.6.17/175 真机验证） | 逻辑背包模型与 sidecar 原型：容量派生逆向、所有权状态机、prepare journal、host 测试 |
 | P2 | ✅ 通过（2026-08-29，E-2026-08-29-01：10 轮压测 + 回主菜单恢复） | 原版 UI 只读窗口原型：正式投影 install/restore、移动门禁、索引5 sentinel |
 | P3 | ✅ 通过（2026-08-31，标签稳定 `E-2026-08-30-01`、装备/解除 `E-2026-08-31-01`、选中反馈 `E-2026-08-31-02`、全满弹窗 6 `E-2026-08-31-03`；扩展拖动 0x81 并入 P5） | 原版控件与扩展窗口的正式接入 |
-| P4 | 🔄 进行中（P4.1/P4.2 已实现并登记 `E-2026-08-31-04`/`E-2026-08-31-05`；P4.3–P4.5 未实施） | 原版物品对象与逻辑背包事务桥接：唯一 Save/Load 桥、所有权唯一、失败隔离 |
+| P4 | 🔄 待用户验收（P4.1–P4.6 全部实现并复核关闭：P4.1–P4.4 登记 `E-2026-08-31-04`～`E-2026-08-31-08`，P4.5/P4.6 登记 `E-2026-09-01-01` + 修复回归；Oracle 有条件 Approve，D1/D2/D3 已修复，host 705/705） | 原版物品对象与逻辑背包事务桥接：唯一 Save/Load 桥、所有权唯一、失败隔离 |
 
 ### 阶段 P0：冻结原版基线与可复现身份
 
@@ -771,6 +797,10 @@
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.26 | 2026-09-01 | P4.5/P4.6 复核关闭：Oracle 有条件 Approve（3 缺陷无 High，观察项 kDiscard 生产接线/ext→ext 短路补隔离/P7 持久 id+gameIdentity 落盘字段均登记留 P7）。修复全部 3 项：D1（Med）损坏 pending 在 `load_state_from_store` 生产路径真实入隔离环——`parse_pending_transfer_result` 域检查后置到 payload/sourcePayload 解析之后使 rejected 携带原始字节与 transaction_id，load 侧两分支 parse 后 `push_isolation`（parse 重置环故顺序敏感），日志措辞与事实一致化；D2（Med）Kotlin 隔离告警补受限原始编码 `payloadPreview`（截断 64 字符、whitespace/引号消毒）；D3（Low）normalize 隔离记录 `payload_size` 钳制至数组容量（与 journal 路径对称，`state_json` base64 不再可能越界读），`<algorithm>` 显式包含。host `test_p44` 追加域拒绝字节/ID 保留断言、`test_p45` 追加 300>256 钳制+序列化安全，705/705；APK `fc97f97b…` 真机两事务 ext→orig→orig→ext 回归 committed 零误报、payload 字节一致 | 当前执行代理 |
+| v1.25 | 2026-09-01 | P4.5 失败隔离实现完成：`IsolationRecord` 只读诊断 schema（recordId/observedAt/reason×7/transactionId/generation/direction/phase/袋槽原始值不正则化/payload+sourcePayload 原始字节/detail）入 `virtual_bag_state.h`，State 环形 8 条不进 JSON 序列化（sidecar 落盘时机归 P7）；接入点：normalize 损坏槽先隔离后清槽、recover_pending 域/payload 两处隔离、ext→orig Load 失败/插入失败/slot-not-found 隔离（源逻辑物品保留）、`isolation_from_journal_record`（kDiscard 纯函数）、Kotlin parseState 无效 payload/payloadless 隔离告警（LogFile）；status 端点 `include_isolations` 只读暴露，写 section 路径不含。host `test_p45_isolation` 698/698；真机登记 `E-2026-09-01-01`（六事务三方向 + 任务袋拒绝 + 药水字节级往返 + 保存强杀重启读档一致 + 零误报隔离，APK `3c2aace8…`）；P4.6 最小闭环核对完成（真机失败注入沿用转 P5 登记）；P4.5/P4.6 只读复核 Oracle 运行中 | 当前执行代理 |
+| v1.24 | 2026-08-31 | P4.4 复核关闭：Momus 结论 Approve（3 项低严重度缺陷，均不阻断验收）。修复 2 项：①恢复流程 `recover_pending_transaction_locked` kComplete else 分支增加 ext→ext 短路（损坏 sidecar 才可达的误恢复路径，禁止按 ext→orig 重放 dst 提交态，§4.2 不重放不推断）；②ext→orig 两个失败分支交换 abort/release 顺序（先还原逻辑态与 pending 再释放临时对象，P4.4:183 字面合规）。第 3 项（orig→ext original 失败 abort 后物化对象悬挂至槽复用/读档/主菜单回收）与 HEAD 行为一致非回归，登记观察留 P7。修复后 host 621/621、APK 重建 `44b5bd7f…`（正常路径零变化，未重跑真机回归，E-2026-08-31-08 证据仍有效）；同日模块包名迁移 `com.inotia4.export`→`com.inotia4.qol`（ff2ce58/253dee4/e0b06f7）由并行代理完成，P4.4 改动随迁移提交入库 | 当前执行代理 |
+| v1.23 | 2026-08-31 | P4.4 唯一进程内事务入口完成：三条移动函数收敛为五态事务协调器（`TxnStage`/`TransactionContext`/`txn_apply_logical`/`txn_rollback_logical` 纯模型核心入 `virtual_bag_state.h`，host 注入测试 `test_p44_transaction_stages`，621/621）；`PendingTransfer` 增 `transaction_id` 与 JournalRecord v1 一一映射，事务日志标 `durable=false`；退役 `UnsavedCrossMove` 全套（结构/域校验/数组/record/rollback/7 处调用点零残留），读档边界一致性由 sidecar 非显式窗口不落盘 + 游戏读档重建 INVEN 承担，行为差异登记于 `E-2026-08-31-08`；ext→ext 新增写 pending（恢复流程按 dst 槽 payload 匹配裁决）；登记 `E-2026-08-31-08`（三方向五态事务 + 任务袋拒绝 + 强杀重启读档字节级一致，APK `d5bd5a67…`）；头部指针区同步 P4.3 关闭状态 | 当前执行代理 |
 | v1.22 | 2026-08-31 | 登记 `E-2026-08-31-07`（P4.3 视图借用配对真机轮：用户触摸 35 次安装/归还全配对，restore 审计 borrows=0、balanced=1、快速切换计数零增长）。P4.3 真机退出条件全部覆盖，P4.3 关闭；P4 剩余 P4.4 唯一事务入口、P4.5 失败隔离、P4.6 验证移交 | 当前执行代理 |
 | v1.21 | 2026-08-31 | mode/selected 生命周期约束（用户确认实施）：① orig→ext 移动补删第二处 mode 写点（1366 行区，首处已随保持视图决策移除）；② ext→orig 移动仅扩展视图安装（拖放上下文）时写 mode/selected，API 路径不改写；③ 读档边界归零无 pending 的 kModule 残留（`kExitingModule`/pending 交恢复流程）。真机回归：读档 original/-1、双方向移动后保持 original/-1、任务袋拒绝正常、payload 一致（APK `f2158ee5…`）；归零分支因 sidecar 已净未触发（防御性保留） | 当前执行代理 |
 | v1.20 | 2026-08-31 | 登记 `E-2026-08-31-06`（P4.3 审计循环：3 轮 API 驱动跨域/ext→ext/失败移动，审计 balanced 全 1、borrows=0、保存重启读档字节级一致；视图借用配对真机轮待补）；用户决策落地：orig→ext 后保持当前视图（不切 mode、不装投影，RefreshItemArea 清残影，P2 锁不再因 API 移动触发）；P4.3 实现完成并经 Oracle 复核修复 1 项 High（equip remove 验证失败分支不得释放 INVEN 持有对象）后 Fix approved；发现登记：sidecar `mode/selected` 残留可跨读档恢复（本次经完整保存周期清除；加载边界归零待处理）、未保存移动跨重启按防复制回退原位（P7 边界内预期行为） | 当前执行代理 |

@@ -171,6 +171,20 @@ object ExtensionBagUiBridge {
                     } else {
                         ""
                     }
+                    // P4.5：无效 payload 不得静默转 ItemData(0,0)——隔离告警保留审计痕迹
+                    //（受限原始编码入日志；section 写入保持净荷，落盘时机归 P7）。
+                    if (hasPayload && safePayload.isEmpty()) {
+                        val preview = payload.take(64).map {
+                            if (it.isWhitespace() || it == '"') '?' else it
+                        }.joinToString("")
+                        LogFile.log("extension bag isolated reason=invalid_payload " +
+                            "bag=${bag + 6} slot=$slot payloadLength=${payload.length} " +
+                            "payloadPreview=$preview")
+                    }
+                    if (rejectPayloadlessItems && category > 0 && count > 0 && !hasPayload) {
+                        LogFile.log("extension bag isolated reason=payloadless_rejected " +
+                            "bag=${bag + 6} slot=$slot category=$category count=$count")
+                    }
                     when {
                         hasPayload && safePayload.isEmpty() -> ItemData(0, 0)
                         rejectPayloadlessItems && category > 0 && count > 0 && !hasPayload -> ItemData(0, 0)

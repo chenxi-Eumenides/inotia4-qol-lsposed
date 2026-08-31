@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -259,6 +260,42 @@ struct PendingTransfer {
     char transaction_id[kMaxTransactionIdChars + 1]{};
 };
 
+// ---- P4.5 失败隔离（内存只读诊断；sidecar 写入时机由 P7 决定，本结构不序列化）----
+
+constexpr size_t kMaxIsolationRecords = 8;
+
+// 隔离 reason 分类（§P4.5 失败分类：空/截断/长度不符归 payload_invalid 的 detail，
+// Load 失败、插入失败、域非法为独立 reason）。host 与 native 共用单一来源。
+namespace isolation_reason {
+constexpr const char* kPayloadInvalid = "payload_invalid";
+constexpr const char* kInvalidTransactionDomain = "invalid_transaction_domain";
+constexpr const char* kInvalidPayload = "invalid_payload";
+constexpr const char* kLoadFailed = "load_failed";
+constexpr const char* kInsertFailed = "insert_failed";
+constexpr const char* kSlotNotFound = "slot_not_found";
+constexpr const char* kJournalInvalid = "journal_invalid";
+}  // namespace isolation_reason
+
+struct IsolationRecord {
+    bool valid = false;
+    uint64_t sequence = 0;        // recordId（进程内递增）
+    uint64_t observed_at_ms = 0;  // 调用方注入时间源；0 = host/未知
+    const char* reason = "";      // 固定失败分类（静态字符串）
+    char transaction_id[kMaxTransactionIdChars + 1]{};
+    uint64_t generation = 0;      // journal 场景的 sidecar 容器 generation
+    int direction = -1;           // -1 = 不可得；取得的原始值不正则化
+    int phase = -1;               // TxnStage/journal stage，-1 = 不可得
+    int src_bag = -1;             // 袋/槽原始数值；-1 = 未知；非法值原样保留
+    int src_slot = -1;
+    int dst_bag = -1;
+    int dst_slot = -1;
+    uint16_t payload_size = 0;
+    std::array<uint8_t, kSerializedItemBuffer> payload{};
+    uint16_t source_payload_size = 0;
+    std::array<uint8_t, kSerializedItemBuffer> source_payload{};
+    const char* detail = "";      // 完整性诊断补充（payload 校验 reason / 失败上下文）
+};
+
 struct State {
     std::array<uint8_t, kBagCount> types{};      // 各扩展袋已装备的背包物品 BagType（0=未装备）
     std::array<uint8_t, kBagCount> capacities{}; // 派生容量 = derive_capacity(types[i])，禁止直写
@@ -269,7 +306,24 @@ struct State {
     int inspected = -1;   // 槽信息态（扩展物品详情高亮，槽位号）
     int info_bag = -1;    // 袋信息态（二次点击打开，袋号；与槽 inspected 语义分离）
     PendingTransfer pending{};  // 未完成事务（随 JSON 往返持久化，恢复用）
+    // P4.5 隔离诊断（内存 only，不进 JSON 序列化，不写 sidecar）。
+    std::array<IsolationRecord, kMaxIsolationRecords> isolations{};
+    uint8_t isolation_count = 0;   // min(记录数, kMaxIsolationRecords)
+    uint8_t isolation_next = 0;    // 环形写入位置
+    uint64_t isolation_sequence = 0;
+    uint64_t isolation_now_ms = 0; // 调用方在 normalize/隔离前注入的时间源
 };
+
+inline void push_isolation(State* state, const IsolationRecord& record) {
+    if (state == nullptr || !record.valid) return;
+    IsolationRecord copy = record;
+    copy.sequence = state->isolation_sequence++;
+    copy.valid = true;
+    state->isolations[state->isolation_next] = copy;
+    state->isolation_next =
+        static_cast<uint8_t>((state->isolation_next + 1) % kMaxIsolationRecords);
+    if (state->isolation_count < kMaxIsolationRecords) ++state->isolation_count;
+}
 
 // 袋解除结果（原版语义：有物品弹窗拒绝，空袋解除）。
 enum class UnequipResult {
@@ -597,20 +651,66 @@ inline JournalRecovery journal_recovery_action(const State& state,
     return sidecar_committed ? JournalRecovery::kJustClear : JournalRecovery::kReplayToSidecar;
 }
 
+// P4.5：journal kDiscard（结构/payload 损坏）时保留原始字节为只读隔离记录，
+// 供告警与 P7 journal 对照；禁止按其重放。transaction_id 长度不可信，安全截断。
+inline IsolationRecord isolation_from_journal_record(const JournalRecord& journal,
+                                                     uint64_t observed_at_ms) {
+    IsolationRecord record{};
+    record.valid = true;
+    record.observed_at_ms = observed_at_ms;
+    record.reason = isolation_reason::kJournalInvalid;
+    std::strncpy(record.transaction_id, journal.transaction_id, kMaxTransactionIdChars);
+    record.transaction_id[kMaxTransactionIdChars] = '\0';
+    record.generation = journal.generation;
+    record.direction = journal.direction;
+    record.phase = journal.stage;
+    record.src_bag = journal.src_bag;
+    record.src_slot = journal.src_slot;
+    record.dst_bag = journal.dst_bag;
+    record.dst_slot = journal.dst_slot;
+    const size_t payload_copy =
+        std::min<size_t>(journal.payload_size, journal.payload.size());
+    record.payload_size = static_cast<uint16_t>(payload_copy);
+    std::memcpy(record.payload.data(), journal.payload.data(), payload_copy);
+    const size_t source_copy =
+        std::min<size_t>(journal.source_payload_size, journal.source_payload.size());
+    record.source_payload_size = static_cast<uint16_t>(source_copy);
+    std::memcpy(record.source_payload.data(), journal.source_payload.data(), source_copy);
+    record.detail = "kDiscard";
+    return record;
+}
+
 inline void normalize(State* state) {
     if (state == nullptr) return;
     for (int index = 0; index < kBagCount; ++index) {
         if (!valid_type(state->types[index])) state->types[index] = 0;
         state->capacities[index] = derive_capacity(state->types[index]);
     }
-    for (auto& bag : state->items) {
-        for (Item& item : bag) {
+    for (int bag = 0; bag < kBagCount; ++bag) {
+        for (int slot = 0; slot < kSlotCount; ++slot) {
+            Item& item = state->items[bag][slot];
             if (item.category < 0 || item.count < 0) {
                 item = {};
             }
             if (item.payload_size > 0 && (!valid_payload(item) || item.category <= 0)) {
-                // 损坏载荷不能降级为 category/count 素体，否则随机类别可能被显示成
-                // “背包（小）”等完全不同的物品；宁可丢弃该扩展槽，也不创建不可信对象。
+                // 损坏载荷不能降级为 category/count 素体（随机类别会被渲染成完全
+                // 不同的物品），也不得默默转空槽：先保留原始字节为只读隔离记录
+                // （P4.5），再清槽。
+                IsolationRecord record{};
+                record.valid = true;
+                record.observed_at_ms = state->isolation_now_ms;
+                record.reason = isolation_reason::kPayloadInvalid;
+                record.src_bag = bag;
+                record.src_slot = slot;
+                record.payload_size = static_cast<uint16_t>(
+                    std::min<size_t>(item.payload_size, item.payload.size()));
+                record.payload = item.payload;
+                record.detail = item.category <= 0
+                                    ? "category_invalid"
+                                    : payload_validation_reason(validate_serialized_payload_buffer(
+                                          item.payload.data(), item.payload.size(),
+                                          item.payload_size));
+                push_isolation(state, record);
                 item = {};
             }
         }
@@ -912,7 +1012,7 @@ inline bool parse_journal_json(const char* json, JournalRecord* out) {
     return true;
 }
 
-inline std::string state_json(const State& state) {
+inline std::string state_json(const State& state, bool include_isolations = false) {
     std::string json = "{\"mode\":\"";
     json += state.mode == Mode::kModule ? "module" : "original";
     json += "\",\"originalSelected\":" + std::to_string(state.original_selected);
@@ -967,6 +1067,42 @@ inline std::string state_json(const State& state) {
                                   state.pending.source_payload_size) + "\"}";
         }
     }
+    // P4.5 只读诊断：仅开发期状态读取（API status）开启；sidecar 写入路径保持
+    // false（隔离记录落盘时机由 P7 决定）。
+    if (include_isolations && state.isolation_count > 0) {
+        json += ",\"isolations\":[";
+        for (size_t index = 0; index < state.isolation_count; ++index) {
+            const size_t position =
+                (state.isolation_next + kMaxIsolationRecords - state.isolation_count + index) %
+                kMaxIsolationRecords;
+            const IsolationRecord& record = state.isolations[position];
+            if (index > 0) json += ',';
+            json += "{\"recordId\":" + std::to_string(record.sequence);
+            json += ",\"observedAt\":" + std::to_string(record.observed_at_ms);
+            json += ",\"reason\":\"" + std::string(record.reason) + "\"";
+            json += ",\"transactionId\":\"" + std::string(record.transaction_id) + "\"";
+            json += ",\"generation\":" + std::to_string(record.generation);
+            json += ",\"direction\":" + std::to_string(record.direction);
+            json += ",\"phase\":" + std::to_string(record.phase);
+            json += ",\"srcBag\":" + std::to_string(record.src_bag);
+            json += ",\"srcSlot\":" + std::to_string(record.src_slot);
+            json += ",\"dstBag\":" + std::to_string(record.dst_bag);
+            json += ",\"dstSlot\":" + std::to_string(record.dst_slot);
+            json += ",\"payloadLength\":" + std::to_string(record.payload_size);
+            if (record.payload_size > 0) {
+                json += ",\"payload\":\"" +
+                        base64_encode(record.payload.data(), record.payload_size) + "\"";
+            }
+            json += ",\"sourcePayloadLength\":" + std::to_string(record.source_payload_size);
+            if (record.source_payload_size > 0) {
+                json += ",\"sourcePayload\":\"" +
+                        base64_encode(record.source_payload.data(), record.source_payload_size) +
+                        "\"";
+            }
+            json += ",\"detail\":\"" + std::string(record.detail) + "\"}";
+        }
+        json += ']';
+    }
     json += "}";
     return json;
 }
@@ -1004,10 +1140,6 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
         !parse_field("dstBag", &parsed.dst_bag) ||
         !parse_field("dstSlot", &parsed.dst_slot)) {
         return PendingTransferParseResult::kMalformed;
-    }
-    if (!valid_pending_transfer_domain(parsed)) {
-        *out = parsed;
-        return PendingTransferParseResult::kInvalidTransactionDomain;
     }
     const char* id_key = strstr(key, "\"transactionId\":\"");
     if (id_key != nullptr) {
@@ -1055,6 +1187,12 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
         if (!valid_pending_transfer_payload(parsed)) {
             return PendingTransferParseResult::kMalformed;
         }
+    }
+    // P4.5/D1：域检查后置到载荷解析之后，使 kInvalidTransactionDomain 的
+    // out 携带 transaction_id 与 payload 原始字节，供 load 侧隔离记录保留。
+    if (!valid_pending_transfer_domain(parsed)) {
+        *out = parsed;
+        return PendingTransferParseResult::kInvalidTransactionDomain;
     }
     parsed.valid = true;
     *out = parsed;
@@ -1170,6 +1308,20 @@ inline bool parse_state_json(const char* json, State* state) {
         }
     }
     normalize(&parsed);
+    *state = parsed;
+    return true;
+}
+
+// 同 parse_state_json，但为隔离记录注入观察时间（P4.5）。
+inline bool parse_state_json_at(const char* json, State* state, uint64_t observed_at_ms) {
+    if (state == nullptr) return false;
+    State parsed;
+    if (!parse_state_json(json, &parsed)) return false;
+    for (size_t index = 0; index < kMaxIsolationRecords; ++index) {
+        if (parsed.isolations[index].valid && parsed.isolations[index].observed_at_ms == 0) {
+            parsed.isolations[index].observed_at_ms = observed_at_ms;
+        }
+    }
     *state = parsed;
     return true;
 }

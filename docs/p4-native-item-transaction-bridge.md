@@ -1,6 +1,6 @@
 # 扩展背包 P4：原版物品对象与逻辑背包事务桥接
 
-> **状态**：实施中（2026-08-31）。P4.1 事务域校验与 P4.2 payload 桥接已实现并通过只读补丁审查（Oracle 批准）与 host 测试；真机最小闭环证据 `E-2026-08-31-04`/`E-2026-08-31-05` 已登记（空槽双向字节保真、合并身份规则、任务袋拒绝）。目标满/数量上限/取消/插入失败的真机注入无 API 表达路径，登记「验收路径未就绪」转 P5；P4.3–P4.5 未实施，P4 整体 `NOT_ACCEPTED`。
+> **状态**：实施完成待用户验收（2026-09-01）。P4.1–P4.6 全部工作包已实现并通过只读复核：P4.1 事务域校验、P4.2 payload 桥接、P4.3 所有权账本接线、P4.4 唯一事务入口、P4.5 失败隔离（`IsolationRecord` 只读诊断、7 类 reason、normalize/kDiscard/load 侧损坏 pending/ext→orig 失败全接入、status 只读暴露）、P4.6 最小闭环证据核对。P4.5/P4.6 复核结论 Oracle 有条件 Approve，D1（load 路径 pending 隔离真实入环）/D2（Kotlin 告警带受限原始编码）/D3（normalize 隔离 payload_size 钳制）已修复验证。host 测试 705/705；真机证据 `E-2026-08-31-04`～`E-2026-08-31-08`、`E-2026-09-01-01` 与修复回归（APK `fc97f97b…`，两事务 committed 零误报、payload 字节一致）已登记。目标满/数量上限/取消/插入失败的真机注入无 API 表达路径，登记「验收路径未就绪」转 P5；P4 整体 `NOT_ACCEPTED` 至用户验收确认。
 > **命名空间**：本文的 P4 仅指 `docs/extension-bag-control-plane.md` 的“原版物品对象与逻辑背包事务桥接”，不指 `docs/refactor-plan.md` 或 `docs/backlog.md` 中同名的其他阶段。
 > **权威边界**：阶段状态、范围和验收顺序以控制面为准；代码结构以 `architecture.md` 为准；sidecar 容器以 `docs/module-save-store.md` 为准；API 以 `docs/api-reference.md` 为准。本文件只把这些既定要求拆成可实施、可审查的 P4 工作包，不改变 ADR-001 至 ADR-009。
 
