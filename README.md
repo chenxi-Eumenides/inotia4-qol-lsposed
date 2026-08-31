@@ -1,6 +1,6 @@
-# 安卓游戏信息 API 导出项目
+# 艾诺迪亚4 QOL 改动 LSPosed 模块
 
-对安卓游戏（艾诺迪亚4）内部的数据与操作进行导出，供用户或 AI 进行外部操控。目前导出方式为 HTTP API 一种。
+艾诺迪亚4（Inotia 4）的 LSPosed 模块，提供多项 QOL 改动，并将游戏运行时数据与操作通过 HTTP API 导出，供用户或 AI 进行外部操控。
 
 ## 项目目标
 
@@ -51,7 +51,7 @@
 ## 项目文件结构
 
 ```
-projects/android-game-api-export/
+projects/inotia4-qol-lsposed/
 ├── apk/                                    # 【输入物】原始 APK + 解码/反编译中间产物 + 解析出的静态库（apk/static-data/，可再生成）
 ├── tools/                                  # 【工具】第三方工具（LSPatch/NDK 等，项目内隔离）
 ├── scripts/                                # 【工作区】开发期脚本（analyze/parse/touch_automation）
@@ -89,7 +89,7 @@ projects/android-game-api-export/
 ## 目录规范与环境隔离（强制）
 
 > **原则**：本项目的所有文件、中间产物、临时文件、构建产物与最终交付物，一律存放于本目录
-> `projects/android-game-api-export/` 内。**工具的输出文件（解码产物、反编译输出、构建产物、生成的 APK、
+> `projects/inotia4-qol-lsposed/` 内。**工具的输出文件（解码产物、反编译输出、构建产物、生成的 APK、
 > 解析结果、日志、截图等）必须落在项目文件夹内**，禁止写到项目文件夹之外。
 
 1. **工具输出（必须项目内）**：凡工具会产出文件——解码产物（apktool）、反编译输出（jadx）、构建产物（Gradle/Android 构建）、生成的 APK、解析出的 JSON、日志与截图——输出路径必须落在项目文件夹内（`apk/decoded/`、`output/`、`apk/static-data/`、`.tmp/` 等），禁止散落到系统目录或项目外 `/tmp`

@@ -275,8 +275,8 @@ P4 的“任意失败可恢复”限于**单个进程存活期间的一笔事务
 | `module/app/src/main/cpp/ownership_ledger.h` | 使用既有四态完成真实借用归还、移交和释放审计。 | 以裸指针或布尔标志取代 generation handle。 |
 | `module/app/src/main/cpp/game_ui_virtbag.cpp` | 统一三方向协调入口、Save/Load 包装调用、投影引用撤销、临时对象生命周期、隔离接线。 | 近似创建、并存 `UnsavedCrossMove`、把 persist 成功当落盘、调用 ext→ext 的 `INVEN_MoveItem`。 |
 | `module/app/src/main/cpp/game_access.*` / `game_symbols.h` | 仅在现有 ABI 不足且经逆向证实时补充已验证符号包装。 | 在 UI/事务代码中新增裸 VMA 或复制偏移。 |
-| `module/app/src/main/java/com/inotia4/export/ExtensionBagUiBridge.kt` | 解析结果携带隔离信息，避免坏 payload 降级为空 Item。 | 旧格式自动迁移、把隔离项当正常可移动 Item。 |
-| `module/app/src/main/java/com/inotia4/export/ExtensionBagJournal.kt` | P4 可验证其 v1 读写辅助和字段兼容。 | 在 P4 把所有移动或保存入口直接接到正式落盘协调器。 |
+| `module/app/src/main/java/com/inotia4/qol/ExtensionBagUiBridge.kt` | 解析结果携带隔离信息，避免坏 payload 降级为空 Item。 | 旧格式自动迁移、把隔离项当正常可移动 Item。 |
+| `module/app/src/main/java/com/inotia4/qol/ExtensionBagJournal.kt` | P4 可验证其 v1 读写辅助和字段兼容。 | 在 P4 把所有移动或保存入口直接接到正式落盘协调器。 |
 | `module/app/src/main/cpp/tests/test_host.cpp` | 新增纯模型、生命周期、隔离、域验证和兼容映射测试。 | 以 host 断言替代真机 native/UI/库存结论。 |
 
 实现必须符合 `architecture.md`：符号和 ABI 留在 data 层，解析留在 `game_inventory.*` / `game_save.*` 域，patch 逻辑不得向 Java 抛 native 异常。若当前文件布局不足，先写出最小职责变更并审查，不以 P4 为理由做未经验证的大规模重组。

@@ -6,7 +6,7 @@
     python3 scripts/analyze/smoke_all.py                      # 默认 http://192.168.3.54:8088
     python3 scripts/analyze/smoke_all.py http://127.0.0.1:8088 smoke_local.json
 
-路由清单从 module/app/src/main/java/com/inotia4/export/controller/*.kt 的
+路由清单从 module/app/src/main/java/com/inotia4/qol/controller/*.kt 的
 @GetMapping/@PostMapping 注解提取（118 条），路径模板参数 {role} {id} {slot} 等
 按各 controller 参数语义写死合理默认值。
 
@@ -328,7 +328,7 @@ def main() -> int:
 
     report = {
         "meta": {
-            "project": "android-game-api-export",
+            "project": "inotia4-qol-lsposed",
             "phase": "P0-baseline",
             "version": "v0.5.43",
             "base_url": base,

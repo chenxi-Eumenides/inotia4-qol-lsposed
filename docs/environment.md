@@ -72,8 +72,8 @@
 # ⚠️ zsh 下 `*/` 通配符不展开会报错，必须写完整路径（目录名 bpt9gzteqjrbo1mjrsomdt32c 固定）
 GRADLE_BIN=$PWD/../.gradle/wrapper/dists/gradle-8.11.1-bin/bpt9gzteqjrbo1mjrsomdt32c/gradle-8.11.1/bin/gradle
 GRADLE_USER_HOME=$PWD/../.gradle $GRADLE_BIN :app:assembleDebug --no-daemon
-# 产物 → output/inotia4-export-module-<版本>.apk（复制 + 版本号递增，见 README 规则 6）
-# 命名格式固定：inotia4-export-module-vX.Y.Z.apk（如 v0.4.56）
+# 产物 → output/inotia4-qol-lsposed-<版本>.apk（复制 + 版本号递增，见 README 规则 6）
+# 命名格式固定：inotia4-qol-lsposed-vX.Y.Z.apk（如 v0.4.56）
 
 # ② 部署（覆盖安装，LSPosed 启用状态按包名保留）
 # 默认操作真机2（192.168.3.54）；若同时连着真机1 需加 -s <序列号> 区分。
