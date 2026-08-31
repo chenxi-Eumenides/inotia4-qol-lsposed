@@ -4,6 +4,7 @@
 #include "game_inventory.h"
 #include "game_ops_common.h"
 #include "game_patch.h"
+#include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"
 #include "ownership_ledger.h"
@@ -114,6 +115,8 @@ void* g_drop_gate_thunk = nullptr;
 uintptr_t g_draw_gate_patch_addr = 0;
 void* g_draw_gate_thunk = nullptr;
 uintptr_t g_item_draw_patch_addr = 0;
+uintptr_t g_desc_open_patch_addr = 0;
+void* g_desc_open_thunk = nullptr;
 void* g_draw_thunk = nullptr;
 void* g_bag_draw_thunk = nullptr;
 void* g_item_draw_thunk = nullptr;
@@ -141,6 +144,10 @@ uint64_t g_inventory_generation = 0;
 uint64_t g_extension_tab_generation = 0;
 int g_pending_extension_tab = -1;
 uint64_t g_pending_extension_tab_generation = 0;
+PtrHook g_extension_desc_unequip_hook;
+int g_extension_desc_unequip_bag = -1;
+PtrHook g_extension_desc_equip_hook;
+void* g_extension_desc_equip_item = nullptr;
 
 struct ExtensionDrag {
     bool active = false;
@@ -164,8 +171,9 @@ int extension_tab_index(void* ctrl) {
 }
 
 // 扩展标签的"已装备背包物品"对象（用户方案：与 RefreshBagArea 同款语义——
-// data[0] 放真实物品）。按袋 types 物化（CreateItem(30+type)），卸下/降级时
-// 经延迟释放退役（对象可能仍被 TouchState 引用，不真释放）。
+// data[0] 放真实物品）。按袋 types 物化（CreateItem(category)，types[i] 即
+// ITEMDATABASE 记录下标 = 背包 category，1/2/3/4 → 手提/小/中/大包），
+// 卸下/降级时经延迟释放退役（对象可能仍被 TouchState 引用，不真释放）。
 void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
 void defer_item_free_locked(void* item);
@@ -180,10 +188,20 @@ void refresh_tab_bag_items_locked() {
             }
             continue;
         }
-        // 已有对象且等级未变则复用（简化：按 category 存活即复用）
-        if (slot != nullptr) continue;
+        // 类型一致性校验后复用：解除→换类型重装备时旧对象残留（unequip 不
+        // 触发本刷新），无校验会复用旧类型对象——详情页显示旧背包的真因。
+        // 对象同会话内不释放（defer 策略），档位加载边界已清空本数组，此处
+        // 读 I_TYPE 无回收悬空风险。
+        if (slot != nullptr) {
+            if (fn_get_bit == nullptr) continue;
+            const uint16_t flags =
+                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(slot) + I_TYPE);
+            if (fn_get_bit(flags, 15, 6) == static_cast<int>(type)) continue;
+            defer_item_free_locked(slot);
+            slot = nullptr;
+        }
         if (fn_create_item == nullptr) continue;
-        slot = fn_create_item(static_cast<int32_t>(30 + type), 0, 0, 0);
+        slot = fn_create_item(static_cast<int32_t>(type), 0, 0, 0);
         if (slot != nullptr) {
             uint32_t count_flags =
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT);
@@ -193,18 +211,41 @@ void refresh_tab_bag_items_locked() {
     }
 }
 
-// 扩展标签控件事件处理：TouchHandle 转发的控件事件（0x02=click 松开确认）。
-// 挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定 click → 本 proc。
+// 扩展标签控件事件处理：TouchHandle 转发的控件事件（0x02=click 松开确认，
+// 0x04=drop 到袋）。挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定。
 void queue_extension_tab_click_locked(int extension_bag);
+void* touch_moving_item_control_locked();
+bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control);
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
     if (event == 0x02) {
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            const int index = extension_tab_index(ctrl);
+            if (index >= 0) {
+                queue_extension_tab_click_locked(index);
+            }
+        }
+        return 1;  // 松开确认已处理（原版袋标签点击切袋同样返回 1，b8c60）
+    }
+    // 0x04 = 拖动 drop 到袋控件：背包物品（category 1..4）落到扩展标签 =
+    // 装备到该扩展位——原版拖放装备（InvenBagControlEventProc b8b30 块，写
+    // INVEN_pBagSlot/清源槽）的扩展对应物。其余一律拒绝。无论成败都返回 0
+    // 让 TouchHandle 复位 moving 控件（原版袋标签 proc 装备成功后同样返回
+    // 0，b8c18；此前返回 1 会导致"格子被移动"悬停缺陷）。
+    if (event == 0x04) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         const int index = extension_tab_index(ctrl);
-        if (index >= 0) {
-            queue_extension_tab_click_locked(index);
+        void* moving = touch_moving_item_control_locked();
+        if (index >= 0 && moving != nullptr) {
+            try_equip_on_extension_tab_drop_locked(index, moving);
         }
+        return 0;
     }
-    return 1;
+    // 其余事件（含 0x10 拖动发起查询：TouchHandle_MoveOn @a2fec-a304c 派发，
+    // proc 返回 1 即登记 moving 控件）一律返回 0——兜底返回 1 会让标签成为
+    // 拖动源（标签可被拖出背包物品的真因，且拖出物可被 drop 入库造成复制）。
+    // 原版控件对未处理事件同样返回 0。
+    return 0;
 }
 
 // 扩展标签 = ControlItem（与原版袋标签同类）：挂袋容器（0x3049e0+0x50），
@@ -454,6 +495,7 @@ bool save_state_to_store(int slot) {
 void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
 void clear_original_desc_locked();
+void extension_desc_unequip_execute(void*);
 void clear_original_item_selection_locked();
 void rollback_unsaved_cross_moves_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
@@ -476,82 +518,46 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
 bool handle_bag_drop_release_locked(int64_t x, int64_t y);
 void defer_item_free_locked(void* item);
 void* valid_child_locked(void* root, int slot);
+void make_desc_equip_gate(void* ctrl, void* arg);
+
+void reset_extension_desc_unequip_hook_locked() {
+    // Desc menu buttons are game-owned and can already be gone on teardown.
+    // Do not write through PtrHook::slot while discarding our bookkeeping.
+    g_extension_desc_unequip_hook = {};
+    g_extension_desc_unequip_bag = -1;
+}
+
+void install_extension_desc_unequip_hook_locked(int extension_bag) {
+    reset_extension_desc_unequip_hook_locked();
+    if (!virtual_bag::valid_index(extension_bag) || g_base == 0) return;
+
+    // UIEquip_SetDescMenu's desc_type=1 branch stores its newly created
+    // ControlButton in UIEquip panel +0x68. Its callback lives in data+0x20.
+    void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x68);
+    if (button == nullptr) {
+        VIRTBAG_LOG("extension desc unequip hook skipped: button missing bag=%d", extension_bag);
+        return;
+    }
+    void* data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
+    if (data == nullptr) {
+        VIRTBAG_LOG("extension desc unequip hook skipped: button data missing bag=%d", extension_bag);
+        return;
+    }
+    void* execute_proc = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
+    if (!g_extension_desc_unequip_hook.install_typed(execute_proc,
+                                                      &extension_desc_unequip_execute)) {
+        VIRTBAG_LOG("extension desc unequip hook install failed bag=%d", extension_bag);
+        return;
+    }
+    g_extension_desc_unequip_bag = extension_bag;
+    VIRTBAG_LOG("extension desc unequip hook installed bag=%d button=%p", extension_bag,
+                button);
+}
 
 // P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。
 void play_extension_switch_sound() {
     if (fn_sound_system_play == nullptr || g_snd_fx == nullptr) return;
     fn_sound_system_play(0x11);
-}
-
-// ---- 袋信息页（二次点击袋标签）：容量/物品数/解除按钮，label+button 控件组 ----
-void queue_extension_tab_click_locked(int extension_bag);
-void bag_info_unequip_clicked(void* ctrl);
-// 解除按钮 = 原版语义：有物品拒绝（静默 v1）、空袋卸下（容量清零+标签禁用）。
-// 面板挂 panel root，随面板关闭销毁；切袋/退出/三次点击经显式 remove。
-void* g_bag_info_labels[2] = {};
-void* g_bag_info_unequip_btn = nullptr;
-int g_bag_info_bag = -1;
-bool g_bag_info_visible = false;
-
-void remove_bag_info_panel_locked() {
-    for (void*& label : g_bag_info_labels) {
-        if (label != nullptr && fn_touch_handle_delete_control != nullptr) {
-            fn_touch_handle_delete_control(label);
-        }
-        label = nullptr;
-    }
-    if (g_bag_info_unequip_btn != nullptr && fn_touch_handle_delete_control != nullptr) {
-        fn_touch_handle_delete_control(g_bag_info_unequip_btn);
-    }
-    g_bag_info_unequip_btn = nullptr;
-    g_bag_info_visible = false;
-    g_bag_info_bag = -1;
-}
-
-void install_bag_info_panel_locked(int bag) {
-    remove_bag_info_panel_locked();
-    void* root = g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA)
-                             : nullptr;
-    if (root == nullptr || fn_touch_handle_delete_control == nullptr) return;
-    char line1[64];
-    char line2[64];
-    snprintf(line1, sizeof(line1), "扩展背包 %d", bag + 6);
-    snprintf(line2, sizeof(line2), "容量 %d", g_virtual_bag_state.capacities[bag]);
-    const int row_y = 130 + bag * 70;
-    const UiRect r1{470, row_y, 200, 28};
-    const UiRect r2{470, row_y + 32, 200, 28};
-    const UiRect rb{470, row_y + 64, 200, 36};
-    g_bag_info_labels[0] = ui_create_label(root, r1, line1, nullptr);
-    g_bag_info_labels[1] = ui_create_label(root, r2, line2, nullptr);
-    g_bag_info_unequip_btn =
-        ui_create_button(root, rb, "解除", &bag_info_unequip_clicked, nullptr);
-    g_bag_info_bag = bag;
-    g_bag_info_visible = g_bag_info_labels[0] != nullptr;
-}
-
-void bag_info_unequip_clicked(void* ctrl) {
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (!g_bag_info_visible || !virtual_bag::valid_index(g_bag_info_bag)) return;
-    const int bag = g_bag_info_bag;
-    bool has_items = false;
-    for (const auto& item : g_virtual_bag_state.items[bag]) {
-        if (item.category > 0 || item.count > 0) {
-            has_items = true;
-            break;
-        }
-    }
-    if (has_items) {
-        VIRTBAG_LOG("bag unequip blocked: bag=%d has items", bag);
-        return;
-    }
-    virtual_bag::unequip_bag(&g_virtual_bag_state, bag);
-    remove_bag_info_panel_locked();
-    if (g_module_view_installed && g_module_view_index == bag) {
-        restore_module_view_locked();
-    }
-    g_item_state_dirty = true;
-    persist_state_locked();
-    VIRTBAG_LOG("bag unequipped via info panel bag=%d", bag);
 }
 
 void handle_extension_tab_click_locked(int extension_bag) {
@@ -582,17 +588,38 @@ void handle_extension_tab_click_locked(int extension_bag) {
             }
             return;
         }
-        // 二次点击 = 袋信息面板 toggle（原版语义：desc_type=1 + MakeDesc）。
-        // 面板含容量/物品数/解除按钮；退出模块视图仅经原版袋按钮或 exit_view 端点。
+        // 二次点击 = 原版袋信息面板（原版语义：desc_type=1 + UIEquip_MakeDesc）。
+        // MakeDesc 读控件物品（data[0]=袋物品对象）生成详情，SetDescMenu 按
+        // desc_type=1 加解除按钮；关闭详情经 UIDesc_SetOff。
         if (virtual_bag::click(&g_virtual_bag_state, extension_bag) ==
             virtual_bag::ClickResult::kInspected) {
             play_extension_switch_sound();
-            if (g_bag_info_visible && g_bag_info_bag == extension_bag) {
-                remove_bag_info_panel_locked();
-            } else {
-                install_bag_info_panel_locked(extension_bag);
+            void* ctrl = g_extension_tab_buttons[extension_bag];
+            if (ctrl != nullptr && fn_ui_equip_make_desc != nullptr && g_base != 0) {
+                // 门禁掩码（P3）：UIEquip_SetDescMenu desc_type=1 分支经 GOT 槽读
+                // 当前原版袋索引，0（初始袋）/5（任务袋）短路不生成解除按钮
+                // （b8570-b8578）。扩展袋与该全局无关——进入前所在原版袋决定
+                // 按钮有无。MakeDesc 同步尾跳 SetDescMenu（b89c0），临时把
+                // direct+GOT 双字节掩码为 1 使按钮恒生成，返回后立即恢复快照
+                // （成对写约定同 set_original_bag_locked；按钮在 panel+0x68，
+                // 不随恢复消失，点击回调已被模块 hook 接管）。此路径仅在游戏
+                // 线程的 commit_pending_extension_tab 内可达，无跨线程窗口。
+                uint8_t* direct_bag =
+                    reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+                uint8_t** current_bag =
+                    reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
+                const bool got_valid = current_bag != nullptr && *current_bag != nullptr;
+                const uint8_t saved_direct = *direct_bag;
+                const uint8_t saved_got = got_valid ? **current_bag : 0;
+                *direct_bag = 1;
+                if (got_valid) **current_bag = 1;
+                *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA) = 1;
+                fn_ui_equip_make_desc(ctrl, nullptr);
+                *direct_bag = saved_direct;
+                if (got_valid) **current_bag = saved_got;
+                install_extension_desc_unequip_hook_locked(extension_bag);
             }
-            VIRTBAG_LOG("extension bag info opened bag=%d", extension_bag);
+            VIRTBAG_LOG("extension bag desc opened bag=%d", extension_bag);
         }
     }
 }
@@ -642,6 +669,12 @@ void clear_module_cache_locked() {
         }
     }
     g_original_inventory.fill(nullptr);
+    // 标签袋物品对象是 ItemPool 里的裸指针，跨存档槽位加载必须失效：游戏
+    // SAVE_LoadItem 重置/回收池内存，旧指针会被新读入的存档物品复用（真机
+    // 实证：返回主菜单不保存重进存档后，扩展标签/信息页显示成药水、金币）。
+    // 此处只清引用不释放——对象可能已被池回收，再 ItemPool_Free 是 UAF；
+    // 下次 install_extension_tab_buttons 按 types 重建新对象。
+    for (void*& tab_item : g_tab_bag_items) tab_item = nullptr;
     g_original_bag_size_word = nullptr;
     g_original_bag_size = 0;
     g_original_current_direct = 0;
@@ -1170,7 +1203,10 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     g_virtual_bag_state.selected = dst_bag;
     g_virtual_bag_state.inspected = -1;
     free_module_object_locked(dst_bag, dst_slot);
-    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    // 与点击标签进入扩展对齐：安装投影（重新物化物品 + 投影到原版窗口）。
+    // 此前缺失导致 mode=kModule 但投影未装，draw 走 overlay 分支画在原版格子上，
+    // 视觉上"容纳物品的格子跑到扩展背包背后"。
+    install_module_view_locked(dst_bag);
     VIRTBAG_LOG("cross move: original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
                 dst_bag, dst_slot, src_category, committed.count, src_bag, src_slot);
     return true;
@@ -1533,9 +1569,16 @@ bool persist_state_locked(bool force) {
 bool extension_tab_hit(int index, int64_t x, int64_t y) {
     if (!virtual_bag::valid_index(index)) return false;
     if (g_virtual_bag_state.capacities[index] == 0) return false;  // 未装备袋不可命中（G-12）
-    const int64_t tab_y = kCellY + index * kCellStepY;
-    return x >= kCellX && x < kCellX + kExtensionTabWidth &&
-           y >= tab_y && y < tab_y + kExtensionTabHeight;
+    // 标签位置是动态换算的（tab_rel + 袋容器绝对），用控件真实绝对 rect 判断，
+    // 不用旧硬编码 kCellX/kCellY（标签左移后二者偏移 36px 致命中失效）。
+    void* ctrl = g_extension_tab_buttons[index];
+    if (ctrl == nullptr) return false;
+    int64_t ax = 0, ay = 0;
+    ctrl_abs_pos_locked(ctrl, &ax, &ay);
+    uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
+    const int64_t w = *reinterpret_cast<int64_t*>(c + CO_RECT_W);
+    const int64_t h = *reinterpret_cast<int64_t*>(c + CO_RECT_H);
+    return x >= ax && x < ax + w && y >= ay && y < ay + h;
 }
 
 // GetChild 结果必须过双重校验：面板重建窗口里 GetChild(slot≥count) 返回不可读的
@@ -1563,7 +1606,8 @@ void* valid_child_locked(void* root, int slot) {
 // G-6：投影命中走控件 AbsoluteRect。GetAbsoluteRect 是 x8 sret 函数禁止 C++ 直调
 // （真机 SIGSEGV），用手工父链累加（ctrl_abs_point 同款，纯内存读）。
 // w/h 用贴图固定尺寸 kGridCell（GetAbsoluteRect 也只输出 x/y 两个 i64）。
-// 物品指针合法性：模块缓存、INVEN_pItem 两集合任一命中即合法
+// 物品指针合法性：模块缓存、INVEN_pItem、实时角色装备槽三集合任一命中即合法。
+// 装备槽必须实时读取，不能缓存对象指针；卸下或重建后的旧指针仍由 G-6 门禁阻断。
 // （借出对象不再真释放，无需隔离区）。
 bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理
@@ -1576,6 +1620,14 @@ bool item_pointer_known_locked(void* item) {
         void** inventory = static_cast<void**>(g_inven);
         for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
             if (inventory[idx] == item) return true;
+        }
+    }
+    for (int role = 0; role < 3; ++role) {
+        uint8_t* character = static_cast<uint8_t*>(member_or_null(role));
+        if (character == nullptr) continue;
+        for (int slot = 0; slot < C_EQUIP_SLOTS; ++slot) {
+            void* equipped = *reinterpret_cast<void**>(character + C_EQUIP + slot * sizeof(void*));
+            if (equipped == item) return true;
         }
     }
     return false;
@@ -1602,7 +1654,23 @@ int grid_slot_index(int64_t x, int64_t y, int64_t origin_x, int64_t origin_y) {
     return row * 4 + column;
 }
 
-void draw_cells_in_frame_locked() {
+void extension_tab_abs_pos_locked(void* button, int64_t* ax, int64_t* ay) {
+    uint8_t* c = reinterpret_cast<uint8_t*>(button);
+    *ax = *reinterpret_cast<int64_t*>(c + CO_RECT_X);
+    *ay = *reinterpret_cast<int64_t*>(c + CO_RECT_Y);
+    void* p = *reinterpret_cast<void**>(c + CO_PARENT);
+    while (p != nullptr) {
+        uint8_t* pc = reinterpret_cast<uint8_t*>(p);
+        *ax += *reinterpret_cast<int64_t*>(pc + CO_RECT_X);
+        *ay += *reinterpret_cast<int64_t*>(pc + CO_RECT_Y);
+        p = *reinterpret_cast<void**>(pc + CO_PARENT);
+    }
+}
+
+// 扩展标签绘制。挂在 DrawInvenBag wrapper（原版袋标签之后、DrawMovingItem 之前）
+// 以避免遮挡拖动中的物品。绘制顺序对齐原版 UIEquip_Draw：
+//   DrawInvenBackground 底框倒序(5→0) → DrawInvenBag 图标+高亮正序(0→5)。
+void draw_tab_buttons_in_frame_locked() {
     const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
                                            fn_imgsys_get_loc != nullptr;
     void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
@@ -1622,65 +1690,59 @@ void draw_cells_in_frame_locked() {
     const bool tabs_are_current =
         current_bag_container != nullptr && current_bag_container == g_extension_tab_root &&
         g_extension_tab_generation == g_inventory_generation;
+    if (!tabs_are_current || !can_draw_original_button || group == nullptr) return;
+    // 第一遍：底框 loc20（72x84），倒序 index 4→0（对齐原版 DrawInvenBackground 的 5→0）。
+    for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
+        void* button = g_extension_tab_buttons[index];
+        if (button == nullptr) continue;
+        int64_t ax = 0, ay = 0;
+        extension_tab_abs_pos_locked(button, &ax, &ay);
+        void* bg = fn_imgsys_get_loc(0xf, 0x14);
+        if (bg != nullptr) {
+            fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
+                              static_cast<int32_t>(ay - 12), bg, 0, 1, 0);
+        }
+    }
+    // 第二遍：袋图标 loc6/loc9 + 选中高亮 loc19，正序 index 0→4（对齐原版 DrawInvenBag 的 0→5）。
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        void* button = tabs_are_current ? g_extension_tab_buttons[index] : nullptr;
-        if (button != nullptr) {
-            const bool selected = g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
-                                  g_virtual_bag_state.selected == index;
-            const bool equipped = g_virtual_bag_state.capacities[index] != 0;
-            VIRTBAG_LOG("tab draw index=%d selected=%d equipped=%d", index,
-                        selected ? 1 : 0, equipped ? 1 : 0);
-            // 贴图对齐原版：底框 loc 20 + 袋图标 loc 6/loc 9 + 选中高亮 loc 19。
-            if (can_draw_original_button && group != nullptr) {
-                int64_t ax = 0, ay = 0;
-                uint8_t* c = reinterpret_cast<uint8_t*>(button);
-                ax = *reinterpret_cast<int64_t*>(c + CO_RECT_X);
-                ay = *reinterpret_cast<int64_t*>(c + CO_RECT_Y);
-                void* p = *reinterpret_cast<void**>(c + CO_PARENT);
-                while (p != nullptr) {
-                    uint8_t* pc = reinterpret_cast<uint8_t*>(p);
-                    ax += *reinterpret_cast<int64_t*>(pc + CO_RECT_X);
-                    ay += *reinterpret_cast<int64_t*>(pc + CO_RECT_Y);
-                    p = *reinterpret_cast<void**>(pc + CO_PARENT);
-                }
-                // 底框：照抄 UIEquip_DrawInvenBackground（0xb6ec8）——每个袋标签画
-                // loc 20（GetLoc(0xf,0x14)，72x84）于 (abs_x-5, abs_y-12)，w6=0（亮）。
-                // 选中/未选中靠 loc 6 袋图标（w6=0 亮 / w6=0x28 暗）+ loc 19 选中高亮区分。
-                // w6 = 亮度衰减（SGL_DrawTexturePartEx 内 100-w6 得亮度百分比）：
-                // w6=0 → 100% 亮（选中），w6=0x28 → 60% 暗（未选中/空袋）。
-                void* bg = fn_imgsys_get_loc(0xf, 0x14);
-                if (bg != nullptr) {
-                    fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
-                                      static_cast<int32_t>(ay - 12), bg, 0, 1, 0);
-                }
-                if (selected) {
-                    void* icon = fn_imgsys_get_loc(0xf, 0x13);
-                    if (icon != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
-                                          static_cast<int32_t>(ay - 12), icon, 0, 1, 0);
-                    }
-                    void* frame = fn_imgsys_get_loc(0xf, 6);
-                    if (frame != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
-                                          static_cast<int32_t>(ay + 5), frame, 0, 1, 0);
-                    }
-                } else if (equipped) {
-                    void* frame = fn_imgsys_get_loc(0xf, 6);
-                    if (frame != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
-                                          static_cast<int32_t>(ay + 5), frame, 0, 1, 0x28);
-                    }
-                } else {
-                    void* bag_icon = fn_imgsys_get_loc(0xf, 9);
-                    if (bag_icon != nullptr) {
-                        fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
-                                          static_cast<int32_t>(ay + 5), bag_icon, 0, 1, 0x28);
-                    }
-                }
+        void* button = g_extension_tab_buttons[index];
+        if (button == nullptr) continue;
+        const bool selected = g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+                              g_virtual_bag_state.selected == index;
+        const bool equipped = g_virtual_bag_state.capacities[index] != 0;
+        int64_t ax = 0, ay = 0;
+        extension_tab_abs_pos_locked(button, &ax, &ay);
+        if (selected) {
+            void* icon = fn_imgsys_get_loc(0xf, 0x13);
+            if (icon != nullptr) {
+                fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
+                                  static_cast<int32_t>(ay - 12), icon, 0, 1, 0);
+            }
+            void* frame = fn_imgsys_get_loc(0xf, 6);
+            if (frame != nullptr) {
+                fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
+                                  static_cast<int32_t>(ay + 5), frame, 0, 1, 0);
+            }
+        } else if (equipped) {
+            void* frame = fn_imgsys_get_loc(0xf, 6);
+            if (frame != nullptr) {
+                fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
+                                  static_cast<int32_t>(ay + 5), frame, 0, 1, 0x28);
+            }
+        } else {
+            void* bag_icon = fn_imgsys_get_loc(0xf, 9);
+            if (bag_icon != nullptr) {
+                fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
+                                  static_cast<int32_t>(ay + 5), bag_icon, 0, 1, 0x28);
             }
         }
     }
+}
 
+void draw_cells_in_frame_locked() {
+    const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
+                                           fn_imgsys_get_loc != nullptr;
+    void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
     if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected) || g_module_view_installed) {
         return;
@@ -1798,11 +1860,13 @@ void virtual_bag_draw_original_bag_wrapper() {
     if (module_view && g_module_view_installed) {
         original();
         if (masked) **current_bag = saved_current;
+        draw_tab_buttons_in_frame_locked();
         refresh_projection_if_overwritten_locked();
         return;
     }
     original();
     if (masked) **current_bag = saved_current;
+    draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {
     const OriginalDrawInvenItemFn original =
@@ -1917,6 +1981,7 @@ void clear_original_bag_selection_locked() {
 }
 
 void clear_original_desc_locked() {
+    reset_extension_desc_unequip_hook_locked();
     if (g_base == 0) return;
     *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA) = 0;
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
@@ -2147,7 +2212,7 @@ void refresh_projection_if_overwritten_locked() {
 
 void restore_module_view_locked() {
     if (!g_module_view_installed || g_base == 0) return;
-    remove_bag_info_panel_locked();
+    clear_original_desc_locked();  // 关闭原版详情面板（二次点击 MakeDesc 打开）
     if (g_original_bag_size_word != nullptr) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
         *g_original_bag_size_word =
@@ -2312,6 +2377,13 @@ void virtual_bag_draw_end_wrapper() {
     if (fn_grpx_end != nullptr) fn_grpx_end();
 }
 
+// thunk 页登记：每页 4096B 承载 28B thunk，剩余空间可复用（页必在 libgame
+// 调用点 ±128MB 内，多挂钩共享免再扫地址空间；粗扫粒度下零星单页空洞会
+// 耗尽——真机实证：第 7 个挂钩因分配失败拖垮整个注入链）。
+std::array<void*, 8> g_thunk_pages{};
+size_t g_thunk_page_count = 0;
+size_t g_thunk_page_used = 0;  // 当前页已用槽位数（每槽 32B 对齐）
+
 void* allocate_draw_thunk(uintptr_t call_addr, uintptr_t wrapper) {
 #ifndef MAP_FIXED_NOREPLACE
     (void)call_addr;
@@ -2319,29 +2391,53 @@ void* allocate_draw_thunk(uintptr_t call_addr, uintptr_t wrapper) {
     return nullptr;
 #else
     constexpr size_t kPageSize = 4096;
-    constexpr int64_t kStep = 0x00010000;
-    const uintptr_t base = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-    for (int64_t distance = kStep; distance < 0x08000000; distance += kStep) {
-        for (int sign : {1, -1}) {
-            const int64_t candidate_signed = static_cast<int64_t>(base) + sign * distance;
-            if (candidate_signed <= 0) continue;
-            void* region = mmap(reinterpret_cast<void*>(static_cast<uintptr_t>(candidate_signed)), kPageSize,
-                                PROT_READ | PROT_WRITE | PROT_EXEC,
-                                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (region == MAP_FAILED) continue;
-
-            uint32_t code[] = {
-                0xa9bf7bf0, // stp x16, x30, [sp, #-16]!
-                0x58000090, // ldr x16, #16 (literal at thunk+20)
-                0xd63f0200, // blr x16
-                0xa8c17bf0, // ldp x16, x30, [sp], #16
-                0xd65f03c0, // ret
-            };
-            memcpy(region, code, sizeof(code));
-            *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(region) + 20) = wrapper;
-            __builtin___clear_cache(reinterpret_cast<char*>(region),
-                                     reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(region) + 28));
-            return region;
+    constexpr size_t kThunkSlot = 32;
+    const auto emit_thunk = [](void* slot, uintptr_t wrapper_addr) {
+        uint32_t code[] = {
+            0xa9bf7bf0, // stp x16, x30, [sp, #-16]!
+            0x58000090, // ldr x16, #16 (literal at thunk+20)
+            0xd63f0200, // blr x16
+            0xa8c17bf0, // ldp x16, x30, [sp], #16
+            0xd65f03c0, // ret
+        };
+        memcpy(slot, code, sizeof(code));
+        *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(slot) + 20) = wrapper_addr;
+        __builtin___clear_cache(reinterpret_cast<char*>(slot),
+                                reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + kThunkSlot));
+    };
+    // 1) 已有页 carving（校验对本调用点的 BL 可达性：页可能在别的调用点
+    // ±128MB 边缘，libgame 跨度 ~20MB 时存在不可达组合）。
+    if (g_thunk_page_count > 0) {
+        void* page = g_thunk_pages[g_thunk_page_count - 1];
+        void* slot = reinterpret_cast<uint8_t*>(page) + g_thunk_page_used * kThunkSlot;
+        const int64_t reach = static_cast<int64_t>(reinterpret_cast<uintptr_t>(slot)) -
+                              static_cast<int64_t>(call_addr);
+        if ((g_thunk_page_used + 1) * kThunkSlot <= kPageSize && reach > -0x08000000LL &&
+            reach < 0x08000000LL) {
+            ++g_thunk_page_used;
+            emit_thunk(slot, wrapper);
+            return slot;
+        }
+    }
+    // 2) 两级扫描新页：先 64KB 粗扫（快），失败后 4KB 细扫兜底。
+    for (const int64_t coarse : {1, 0}) {
+        const int64_t kStep = coarse ? 0x00010000 : 0x1000;
+        const uintptr_t base = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        for (int64_t distance = kStep; distance < 0x08000000; distance += kStep) {
+            for (int sign : {1, -1}) {
+                const int64_t candidate_signed = static_cast<int64_t>(base) + sign * distance;
+                if (candidate_signed <= 0) continue;
+                void* region = mmap(reinterpret_cast<void*>(static_cast<uintptr_t>(candidate_signed)), kPageSize,
+                                    PROT_READ | PROT_WRITE | PROT_EXEC,
+                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+                if (region == MAP_FAILED) continue;
+                emit_thunk(region, wrapper);
+                if (g_thunk_page_count < g_thunk_pages.size()) {
+                    g_thunk_pages[g_thunk_page_count++] = region;
+                    g_thunk_page_used = 1;
+                }
+                return region;
+            }
         }
     }
     return nullptr;
@@ -2804,6 +2900,50 @@ bool inject_locked() {
         VIRTBAG_LOG("draw gate hook patched call=%p replacement=0x%08x",
                     reinterpret_cast<void*>(call_addr), replacement);
     }
+
+    if (g_desc_open_patch_addr == 0) {
+        // InvenItemControlEventProc 事件 0x80（物品 desc 打开）调 MakeDesc 的
+        // 唯一 bl：包装后在 desc 菜单上装装备按钮 hook（Path A 装备溢出）。
+        const uintptr_t call_addr =
+            g_base + fn_resolve("F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA",
+                                F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA);
+        constexpr uint32_t kOriginalDescOpenCall = 0x97fffdfe;  // bl 0xb8980（imm26=-0x202，真机核对）
+        const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&make_desc_equip_gate);
+        const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
+        uintptr_t branch_target = wrapper;
+        if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
+            g_desc_open_thunk = allocate_draw_thunk(call_addr, wrapper);
+            if (g_desc_open_thunk == nullptr) {
+                VIRTBAG_LOG("desc open gate thunk allocation failed call=%p wrapper=%p",
+                            reinterpret_cast<void*>(call_addr), wrapper);
+                return false;
+            }
+            branch_target = reinterpret_cast<uintptr_t>(g_desc_open_thunk);
+        }
+        const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
+        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
+            VIRTBAG_LOG("desc open gate branch target out of range call=%p target=%p",
+                        reinterpret_cast<void*>(call_addr), branch_target);
+            return false;
+        }
+        const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+        const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            VIRTBAG_LOG("desc open gate patch mprotect failed errno=%d", errno);
+            return false;
+        }
+        const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
+        if (current != kOriginalDescOpenCall && current != replacement) {
+            VIRTBAG_LOG("desc open gate patch mismatch got=0x%08x", current);
+            return false;
+        }
+        *reinterpret_cast<uint32_t*>(call_addr) = replacement;
+        __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
+                                reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
+        g_desc_open_patch_addr = call_addr;
+        VIRTBAG_LOG("desc open gate hook patched call=%p replacement=0x%08x",
+                    reinterpret_cast<void*>(call_addr), replacement);
+    }
     *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
     *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
     *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
@@ -3108,6 +3248,412 @@ std::string extension_bag_view_result_json(bool ok, const char* error) {
     return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
 }
 
+enum class ExtensionBagUnequipResult {
+    kOk,
+    kNotEquipped,
+    kNotEmpty,
+    kNoSpace,
+    kPersistFailed,
+    kFailed,
+};
+
+// P3 袋解除（对齐原版 UIEquip_ButtonUnequipExe desc_type=1 语义）：
+// 非空 → kNotEmpty（弹窗 7，b8084）；原版袋 0..4 全满 → kNoSpace（弹窗 6，
+// b809c）；成功 = 按袋类型重建 count-1 背包物品入库（源袋优先、显式跳过
+// 任务袋 5/ADR-006）→ 清装备态 → 切到接收袋（原版 b804c-b805c 双字节写）。
+// 顺序铁律：先预检空袋再建对象（原版同序 b7f94→b7fa8），否则非空路径会把
+// 已入库物品滞留 g_inven 造成复制；转移成功后仅 persist 失败需回滚
+// （INVEN_RemoveItemDirect 返回值不可信 → 槽位重读确认后再真释放）。
+ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
+    ensure_state_loaded_locked();
+    if (g_virtual_bag_state.capacities[internal_bag] == 0) {
+        return ExtensionBagUnequipResult::kNotEquipped;
+    }
+    for (const virtual_bag::Item& item : g_virtual_bag_state.items[internal_bag]) {
+        if (item.category > 0 || item.count > 0) {
+            return ExtensionBagUnequipResult::kNotEmpty;
+        }
+    }
+    if (fn_create_item == nullptr || fn_inven_save_item_on_empty == nullptr) {
+        VIRTBAG_LOG("extension unequip symbols unavailable bag=%d", internal_bag);
+        return ExtensionBagUnequipResult::kFailed;
+    }
+    void* item = fn_create_item(
+        static_cast<int32_t>(g_virtual_bag_state.types[internal_bag]), 0, 0, 0);
+    if (item == nullptr) {
+        VIRTBAG_LOG("extension unequip create item failed bag=%d", internal_bag);
+        return ExtensionBagUnequipResult::kFailed;
+    }
+    uint32_t count_flags =
+        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
+        stack_codec::write_count(count_flags, 1);
+
+    int preferred = original_bag_locked();
+    if (preferred < 0 || preferred > 4) preferred = g_virtual_bag_state.original_selected;
+    if (preferred < 0 || preferred > 4) preferred = 0;
+    int order[5];
+    int order_count = 0;
+    order[order_count++] = preferred;
+    for (int bag = 0; bag < 5; ++bag) {
+        if (bag != preferred) order[order_count++] = bag;
+    }
+    int receiving_bag = -1;
+    for (int i = 0; i < order_count && receiving_bag < 0; ++i) {
+        if (fn_inven_save_item_on_empty(item, order[i])) receiving_bag = order[i];
+    }
+    if (receiving_bag < 0) {
+        // 全满：全新对象从未暴露给控件/TouchState，立即真释放（非延迟隔离）。
+        if (fn_itempool_free != nullptr) fn_itempool_free(item);
+        return ExtensionBagUnequipResult::kNoSpace;
+    }
+
+    // 入库成功后 g_inven 拥有对象，模块不得再释放；预检后 unequip_bag 不会
+    // 因非空失败。UI 恢复仍由 virtual_bag_draw_end_wrapper 下一帧完成。
+    const uint8_t saved_type = g_virtual_bag_state.types[internal_bag];
+    virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag);
+    virtual_bag::enter_original(&g_virtual_bag_state, receiving_bag);
+    set_original_bag_locked(receiving_bag);
+    g_item_state_dirty = true;
+    if (persist_state_locked()) {
+        VIRTBAG_LOG("extension unequip ok bag=%d type=%d receiving=%d", internal_bag,
+                    static_cast<int>(saved_type), receiving_bag);
+        return ExtensionBagUnequipResult::kOk;
+    }
+    bool rolled_back = false;
+    if (fn_remove_item_direct != nullptr) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            void* slot_item = nullptr;
+            if (!inventory_slot_locked(receiving_bag, slot, &slot_item) ||
+                slot_item != item) {
+                continue;
+            }
+            fn_remove_item_direct(receiving_bag, slot);
+            void* after = item;
+            if (inventory_slot_locked(receiving_bag, slot, &after) && after == nullptr) {
+                rolled_back = true;
+                if (fn_itempool_free != nullptr) fn_itempool_free(item);
+            }
+            break;
+        }
+    }
+    if (rolled_back) {
+        g_virtual_bag_state.types[internal_bag] = saved_type;
+        virtual_bag::normalize(&g_virtual_bag_state);
+        persist_state_locked();
+        VIRTBAG_LOG("extension unequip persist failed; rolled back bag=%d", internal_bag);
+        return ExtensionBagUnequipResult::kPersistFailed;
+    }
+    VIRTBAG_LOG("extension unequip rollback failed bag=%d receiving=%d", internal_bag,
+                receiving_bag);
+    return ExtensionBagUnequipResult::kFailed;
+}
+
+void show_extension_bag_not_empty_popup() {
+    if (g_base == 0) return;
+    const uintptr_t popup =
+        g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                            F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+    if (popup == 0) return;
+    reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(7, 0, 0, 0);
+}
+
+void show_extension_bag_no_space_popup() {
+    if (g_base == 0) return;
+    const uintptr_t popup =
+        g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                            F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+    if (popup == 0) return;
+    reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(6, 0, 0, 0);
+}
+
+// P3 真实装备（原版两装备入口的扩展对应物；拖放路径经扩展标签 drop，
+// 装备按钮路径经 desc 按钮 hook 溢出）。事务顺序对齐解除侧的反向操作：
+// 校验 → INVEN 定位源槽 → payload 备份 → RemoveItemDirect+重读确认
+// （返回值不可信，control-plane v1.7）→ equip_bag 占位（容量由 normalize
+// 派生）→ persist；失败回滚（清位 + 按备份 payload 重建入库，降级
+// CreateItem count-1）。装备对象不 free：原版把指针移入 INVEN_pBagSlot，
+// 模块无处安放（sidecar 只记 category），无人引用即安全泄漏——与
+// defer_item_free 策略一致，P4 对象桥接后退役。
+enum class ExtensionBagEquipResult {
+    kOk,
+    kReject,         // 前置不满足：非背包物品 / 扩展位已装备 / 不在原版库存
+    kFailed,         // 移除或回滚失败（状态可能不一致，强日志）
+    kPersistFailed,  // persist 失败且已完整回滚
+};
+
+ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* item) {
+    ensure_state_loaded_locked();
+    if (!virtual_bag::valid_index(internal_bag) || item == nullptr) {
+        return ExtensionBagEquipResult::kReject;
+    }
+    if (g_virtual_bag_state.types[internal_bag] != 0) {
+        return ExtensionBagEquipResult::kReject;
+    }
+    if (fn_get_bit == nullptr) return ExtensionBagEquipResult::kFailed;
+    const uint16_t flags =
+        *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+    const int category = fn_get_bit(flags, 15, 6);
+    if (!virtual_bag::valid_type(category) || category == 0) {
+        return ExtensionBagEquipResult::kReject;
+    }
+    int src_bag = -1;
+    int src_slot = -1;
+    for (int bag = 0; bag < 6 && src_bag < 0; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            void* current = nullptr;
+            if (inventory_slot_locked(bag, slot, &current) && current == item) {
+                src_bag = bag;
+                src_slot = slot;
+                break;
+            }
+        }
+    }
+    if (src_bag < 0) return ExtensionBagEquipResult::kReject;
+    if (fn_remove_item_direct == nullptr) return ExtensionBagEquipResult::kFailed;
+
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    int payload_size = 0;
+    const bool has_payload = serialize_item_payload_locked(item, &payload, &payload_size);
+
+    fn_remove_item_direct(src_bag, src_slot);
+    void* after = item;
+    if (inventory_slot_locked(src_bag, src_slot, &after) && after != nullptr) {
+        VIRTBAG_LOG("extension equip remove verify failed bag=%d slot=%d", src_bag, src_slot);
+        return ExtensionBagEquipResult::kFailed;
+    }
+    // 移除已确认：此后任何失败（state 拒绝 / persist 失败）都必须回插物品，
+    // 否则真实丢失。equip_bag 前置已查 types==0，此处拒绝仅剩理论可能。
+    const bool state_equipped =
+        virtual_bag::equip_bag(&g_virtual_bag_state, internal_bag, category);
+    if (state_equipped) {
+        g_item_state_dirty = true;
+        if (persist_state_locked()) {
+            VIRTBAG_LOG("extension equip ok bag=%d category=%d src=%d/%d", internal_bag,
+                        category, src_bag, src_slot);
+            return ExtensionBagEquipResult::kOk;
+        }
+        g_virtual_bag_state.types[internal_bag] = 0;
+        virtual_bag::normalize(&g_virtual_bag_state);
+    } else {
+        VIRTBAG_LOG("extension equip state reject bag=%d category=%d", internal_bag, category);
+    }
+    bool restored = false;
+    if (has_payload && fn_save_load_item != nullptr && fn_inven_save_item_on_empty != nullptr) {
+        void* rebuilt = nullptr;
+        int consumed = 0;
+        if (fn_save_load_item(payload.data(), &rebuilt, &consumed) == 1 && rebuilt != nullptr &&
+            consumed == payload_size && fn_inven_save_item_on_empty(rebuilt, src_bag)) {
+            restored = true;
+        } else if (rebuilt != nullptr && fn_itempool_free != nullptr) {
+            fn_itempool_free(rebuilt);
+        }
+    }
+    if (!restored && fn_create_item != nullptr && fn_inven_save_item_on_empty != nullptr) {
+        void* rebuilt = fn_create_item(category, 0, 0, 0);
+        if (rebuilt != nullptr) {
+            uint32_t count_flags =
+                *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(rebuilt) + I_COUNT);
+            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(rebuilt) + I_COUNT) =
+                stack_codec::write_count(count_flags, 1);
+            if (fn_inven_save_item_on_empty(rebuilt, src_bag)) {
+                restored = true;
+            } else if (fn_itempool_free != nullptr) {
+                fn_itempool_free(rebuilt);
+            }
+        }
+    }
+    persist_state_locked();
+    VIRTBAG_LOG("extension equip persist failed bag=%d restored=%d", internal_bag,
+                restored ? 1 : 0);
+    return restored ? ExtensionBagEquipResult::kPersistFailed : ExtensionBagEquipResult::kFailed;
+}
+
+// 装备成功后的 UI 收尾（游戏线程、持锁；先例：draw_end/enter 路径的锁内
+// UI 调用）：标签物品对象物化 + 控件 data[0] 更新（绘制每帧读 capacities，
+// 其余自愈）+ 物品区刷新（清消耗源槽）+ 复位拖动态。音效复用模块袋切换
+// 音 0x11——原版按装备位查未注册全局（0x2f3418/0x2f5b60）从简。
+void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
+    refresh_tab_bag_items_locked();
+    void* tab = g_extension_tab_buttons[internal_bag];
+    if (tab != nullptr && fn_control_object_get_data != nullptr) {
+        void* data = fn_control_object_get_data(tab);
+        if (data != nullptr) {
+            *reinterpret_cast<void**>(data) = g_tab_bag_items[internal_bag];
+        }
+    }
+    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    if (moving_control != nullptr) reset_drag_state_locked(moving_control);
+    play_extension_switch_sound();
+}
+
+bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control) {
+    if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
+    if (fn_control_object_get_data == nullptr) return false;
+    void* data = fn_control_object_get_data(moving_control);
+    void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+    if (item == nullptr) return false;
+    const ExtensionBagEquipResult result = equip_extension_bag_item_locked(index, item);
+    if (result != ExtensionBagEquipResult::kOk) {
+        VIRTBAG_LOG("extension tab drop equip result=%d index=%d", static_cast<int>(result),
+                    index);
+        return false;
+    }
+    finish_extension_equip_ui_locked(index, moving_control);
+    VIRTBAG_LOG("extension tab drop equipped index=%d", index);
+    return true;
+}
+
+// ---- Path A：装备按钮溢出（原版 ButtonEquipExe 背包分支的扩展对应物）----
+// 原版全满判定 = 扫 INVEN_pBagSlot 1..4（b7d58-b7d70）→ 弹窗 6（b7d74）。
+// 挂法：BL hook 0xb9188（物品 desc 打开调 MakeDesc）→ 调原函数后 PtrHook
+// 装备按钮（panel+0x78，SetDescMenu desc_type=2 装备分支 b8668 创建）的
+// execute proc；wrapper 仅在「背包物品 + 原版 1..4 全满 + 扩展有空位」时
+// 接管，其余一律透传原 proc（原版行为不变）。
+void extension_desc_equip_execute(void* button);
+
+void reset_extension_desc_equip_hook_locked() {
+    // 与解除 hook 同款：desc 菜单按钮为游戏所有，可能已销毁，只清模块记录。
+    g_extension_desc_equip_hook = {};
+    g_extension_desc_equip_item = nullptr;
+}
+
+void install_extension_desc_equip_hook_locked(void* item) {
+    reset_extension_desc_equip_hook_locked();
+    if (g_base == 0 || item == nullptr) return;
+    void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x78);
+    if (button == nullptr) return;
+    void* data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
+    if (data == nullptr) return;
+    void* execute_proc = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
+    if (!g_extension_desc_equip_hook.install_typed(execute_proc,
+                                                   &extension_desc_equip_execute)) {
+        VIRTBAG_LOG("extension desc equip hook install failed");
+        return;
+    }
+    g_extension_desc_equip_item = item;
+}
+
+void extension_desc_equip_execute(void* button) {
+    const uintptr_t raw = g_base != 0
+        ? g_base + fn_resolve("F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA)
+        : 0;
+    bool takeover = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        void* item = g_extension_desc_equip_item;
+        void* hooked_button =
+            g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x78)
+                        : nullptr;
+        reset_extension_desc_equip_hook_locked();
+        const bool current_button = button != nullptr && button == hooked_button;
+        if (raw != 0 && current_button && g_virtual_bag_enabled.load() && game_in_world() &&
+            item != nullptr && fn_get_bit != nullptr && fn_get_bag_size != nullptr) {
+            const uint16_t flags =
+                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+            const int category = fn_get_bit(flags, 15, 6);
+            if (category >= 1 && category <= 4) {
+                bool original_free = false;
+                for (int bag = 1; bag <= 4; ++bag) {
+                    if (fn_get_bag_size(bag) <= 0) {
+                        original_free = true;
+                        break;
+                    }
+                }
+                int equip_index = -1;
+                if (!original_free) {
+                    for (int i = 0; i < virtual_bag::kBagCount; ++i) {
+                        if (g_virtual_bag_state.types[i] == 0) {
+                            equip_index = i;
+                            break;
+                        }
+                    }
+                }
+                if (equip_index >= 0) {
+                    const ExtensionBagEquipResult result =
+                        equip_extension_bag_item_locked(equip_index, item);
+                    takeover = result == ExtensionBagEquipResult::kOk;
+                    if (takeover) {
+                        // 对齐原版 ButtonEquipExe 入口行为（b7c34 UIDesc_SetOff
+                        // 关详情）；clear_original_desc_locked 为锁内既有模式。
+                        clear_original_desc_locked();
+                        finish_extension_equip_ui_locked(equip_index, nullptr);
+                    } else {
+                        VIRTBAG_LOG("extension equip button overflow result=%d index=%d",
+                                    static_cast<int>(result), equip_index);
+                    }
+                }
+            }
+        }
+    }
+    if (!takeover && raw != 0) {
+        reinterpret_cast<void (*)(void*)>(raw)(button);
+    }
+}
+
+// BL 门禁（0xb9188）：物品 desc 打开 → 调原 MakeDesc（同步生成含装备按钮的
+// 菜单）→ 锁内重装装备按钮 hook。物品从触发控件 data[0] 取（MakeDesc 同源）。
+void make_desc_equip_gate(void* ctrl, void* arg) {
+    const uintptr_t raw = g_base != 0
+        ? g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA)
+        : 0;
+    if (raw == 0 || ctrl == nullptr) return;
+    void* item = nullptr;
+    if (fn_control_object_get_data != nullptr) {
+        void* data = fn_control_object_get_data(ctrl);
+        item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+    }
+    reinterpret_cast<UiEquipMakeDescFn>(raw)(ctrl, arg);
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (g_virtual_bag_enabled.load() && game_in_world()) {
+            install_extension_desc_equip_hook_locked(item);
+        } else {
+            reset_extension_desc_equip_hook_locked();
+        }
+    }
+}
+
+void extension_desc_unequip_execute(void*) {
+    ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
+    bool show_not_empty = false;
+    bool show_no_space = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        const int internal_bag = g_extension_desc_unequip_bag;
+        const bool owns_current_desc =
+            virtual_bag::valid_index(internal_bag) &&
+            g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+            g_virtual_bag_state.selected == internal_bag &&
+            g_virtual_bag_state.info_bag == internal_bag;
+        if (owns_current_desc) {
+            result = unequip_extension_bag_locked(internal_bag);
+            show_not_empty = result == ExtensionBagUnequipResult::kNotEmpty;
+            show_no_space = result == ExtensionBagUnequipResult::kNoSpace;
+            VIRTBAG_LOG("extension desc unequip bag=%d result=%d", internal_bag,
+                        static_cast<int>(result));
+        } else {
+            VIRTBAG_LOG("extension desc unequip rejected: stale desc bag=%d", internal_bag);
+        }
+        reset_extension_desc_unequip_hook_locked();
+    }
+
+    // 锁内仅置标志，弹窗统一在解锁后调用（锁内零 UI 不变量）；两条弹窗均为
+    // 原版 UIEquip_ButtonUnequipExe 对应分支的精确复刻（非空=7/b8084、
+    // 无空位=6/b809c），且不在按钮回调栈内做 UIDesc_SetOff。
+    if (show_not_empty) {
+        show_extension_bag_not_empty_popup();
+        return;
+    }
+    if (show_no_space) {
+        show_extension_bag_no_space_popup();
+        return;
+    }
+    // Successful removal is restored by virtual_bag_draw_end_wrapper on the
+    // next game frame. Do not invoke original UI refresh from this callback or
+    // from the HTTP/JNI operation path.
+}
+
 }  // namespace
 
 std::string data_op_extension_bag_status_json() {
@@ -3201,24 +3747,23 @@ std::string data_op_extension_bag_click_item(int logical_bag, int slot) {
            virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
 }
 
-// P3 袋解除（原版语义）：有物品拒绝（弹窗拒绝对应此错误），空袋解除=装备清零+容量归 0。
-// 解除后的背包物品回流背包空位，等 P4 对象桥接（当前装备态为测试标记，无真实对象）。
+// P3 袋解除（原版语义）：非空拒绝、无空位拒绝、成功 = 按类型重建袋物品
+// 入库 + 装备清零 + 切到接收袋。HTTP 路径不弹窗，仅返回错误码。
 std::string data_op_extension_bag_unequip(int logical_bag) {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    if (g_virtual_bag_state.capacities[internal_bag] == 0) return op_err("bag not equipped");
-    if (!virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag)) {
-        return op_err("bag not empty");
+    ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        result = unequip_extension_bag_locked(internal_bag);
     }
-    if (g_module_view_installed && g_module_view_index == internal_bag) {
-        restore_module_view_locked();
-    }
-    g_item_state_dirty = true;
-    if (persist_state_locked()) return op_ok();
-    return op_err("persist failed");
+    if (result == ExtensionBagUnequipResult::kOk) return op_ok();
+    if (result == ExtensionBagUnequipResult::kNotEmpty) return op_err("bag not empty");
+    if (result == ExtensionBagUnequipResult::kNoSpace) return op_err("no space");
+    if (result == ExtensionBagUnequipResult::kPersistFailed) return op_err("persist failed");
+    if (result == ExtensionBagUnequipResult::kFailed) return op_err("unequip failed");
+    return op_err("bag not equipped");
 }
 
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
