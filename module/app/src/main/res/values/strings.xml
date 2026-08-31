@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="module_description">Inotia4 runtime data export API</string>
+    <string name="module_description">艾诺迪亚4 QOL 改动 LSPosed 模块，附带运行时数据 API 导出</string>
 </resources>

@@ -205,6 +205,7 @@ struct Item {
 // 跨包移动方向常量。
 constexpr uint8_t kTransferOriginalToExtension = 0;
 constexpr uint8_t kTransferExtensionToOriginal = 1;
+constexpr uint8_t kTransferExtensionToExtension = 2;
 
 // prepare journal 提交阶段（ADR-007）：跨进程恢复时与 committed state、原版世界实态三方对照裁决。
 constexpr uint8_t kJournalStagePrepared = 0;        // journal 已落盘，原版保存未执行
@@ -253,6 +254,9 @@ struct PendingTransfer {
     std::array<uint8_t, kSerializedItemBuffer> payload{};
     uint16_t source_payload_size = 0;
     std::array<uint8_t, kSerializedItemBuffer> source_payload{};
+    // P4.4：事务标识。仅本进程 pending 记录（durable=false），journal_from_pending
+    // 原样继承到 JournalRecord v1，保证两侧字段一一映射。
+    char transaction_id[kMaxTransactionIdChars + 1]{};
 };
 
 struct State {
@@ -305,7 +309,7 @@ inline int extension_internal_bag(int logical_bag) {
 }
 
 inline bool valid_transaction_domain(uint8_t direction, int src_bag, int src_slot,
-                                     int dst_bag, int dst_slot) {
+                                      int dst_bag, int dst_slot) {
     if (src_slot < 0 || src_slot >= kSlotCount || dst_slot < 0 || dst_slot >= kSlotCount) {
         return false;
     }
@@ -318,9 +322,21 @@ inline bool valid_transaction_domain(uint8_t direction, int src_bag, int src_slo
     return false;
 }
 
+// pending 域校验（进程内事务）：额外接受 ext→ext；journal v1 域校验不复用它，
+// 因为 ext→ext 恒不创建 prepare journal（§4.1）。
+inline bool valid_pending_transaction_domain(uint8_t direction, int src_bag, int src_slot,
+                                             int dst_bag, int dst_slot) {
+    if (direction == kTransferExtensionToExtension) {
+        return src_slot >= 0 && src_slot < kSlotCount && dst_slot >= 0 &&
+               dst_slot < kSlotCount && valid_index(src_bag) && valid_index(dst_bag) &&
+               src_bag != dst_bag;
+    }
+    return valid_transaction_domain(direction, src_bag, src_slot, dst_bag, dst_slot);
+}
+
 inline bool valid_pending_transfer_domain(const PendingTransfer& pending) {
-    return valid_transaction_domain(pending.direction, pending.src_bag, pending.src_slot,
-                                    pending.dst_bag, pending.dst_slot);
+    return valid_pending_transaction_domain(pending.direction, pending.src_bag, pending.src_slot,
+                                            pending.dst_bag, pending.dst_slot);
 }
 
 inline bool valid_pending_transfer_payload(const PendingTransfer& pending) {
@@ -425,9 +441,101 @@ inline RecoveryAction recovery_action(const State& state, const PendingTransfer&
                    ? RecoveryAction::kComplete
                    : RecoveryAction::kRollback;
     }
+    if (pending.direction == kTransferExtensionToExtension) {
+        return item_matches_payload(state.items[pending.dst_bag][pending.dst_slot], pending)
+                   ? RecoveryAction::kComplete
+                   : RecoveryAction::kRollback;
+    }
     return item_matches_payload(state.items[pending.src_bag][pending.src_slot], pending)
                ? RecoveryAction::kRollback
                : RecoveryAction::kComplete;
+}
+
+// ---- P4.4 进程内五态事务（唯一协调入口的纯模型核心，host 注入测试覆盖）----
+// prepared → pending-recorded → logical-state-updated → original-state-updated → committed。
+// 状态严格单向推进；失败只允许按阶段回滚（还原逻辑槽与 pending），不做猜测性逆转。
+// ext→ext 恒无 original 阶段：不调用原版库存移动，不创建 prepare journal（§4.1）。
+
+enum class TxnStage : uint8_t {
+    kPrepared = 0,
+    kPendingRecorded,
+    kLogicalUpdated,
+    kOriginalUpdated,
+    kCommitted,
+};
+
+// prepared 阶段收集的不可变事务快照；三条移动路径只负责构造它，推进与回滚共享唯一实现。
+struct TransactionContext {
+    uint8_t direction = kTransferOriginalToExtension;
+    uint8_t src_bag = 0;
+    uint8_t src_slot = 0;
+    uint8_t dst_bag = 0;
+    uint8_t dst_slot = 0;
+    bool merged = false;
+    bool original_stage_applicable = true;
+    Item source{};        // 源逻辑项快照（ext→ext/ext→orig 清源还原依据）
+    Item committed{};     // 目标提交态（合并时数量位段已修补）
+    Item previous_dst{};  // 目标槽先前态（回滚还原依据）
+    char transaction_id[kMaxTransactionIdChars + 1]{};
+    PendingTransfer pending{};  // txn_build_pending 产出，pending-recorded 阶段写入 State
+};
+
+// 依据方向填充 pending（payload 语义与 JournalRecord v1 字段一一映射，durable=false）：
+//   orig→ext：payload=目标提交态载荷，source_payload=原版源载荷（恢复时重建原版源）；
+//   ext→orig：payload=被移动物品源载荷（恢复时重建入库）；
+//   ext→ext：payload=目标提交态载荷。
+inline void txn_build_pending(TransactionContext* txn) {
+    if (txn == nullptr || txn->transaction_id[0] == '\0') return;
+    PendingTransfer pending{};
+    pending.valid = true;
+    pending.direction = txn->direction;
+    pending.src_bag = txn->src_bag;
+    pending.src_slot = txn->src_slot;
+    pending.dst_bag = txn->dst_bag;
+    pending.dst_slot = txn->dst_slot;
+    std::strncpy(pending.transaction_id, txn->transaction_id, kMaxTransactionIdChars);
+    pending.transaction_id[kMaxTransactionIdChars] = '\0';
+    if (txn->direction == kTransferOriginalToExtension) {
+        pending.payload_size = txn->committed.payload_size;
+        pending.payload = txn->committed.payload;
+        pending.source_payload_size = txn->source.payload_size;
+        pending.source_payload = txn->source.payload;
+    } else if (txn->direction == kTransferExtensionToOriginal) {
+        pending.payload_size = txn->source.payload_size;
+        pending.payload = txn->source.payload;
+    } else {
+        pending.payload_size = txn->committed.payload_size;
+        pending.payload = txn->committed.payload;
+    }
+    txn->pending = pending;
+}
+
+// logical-state-updated：按方向仅更新扩展逻辑 source/target。
+// ext→orig 的扩展源清空发生在原版接管成功之后（§4.3），logical 阶段不改逻辑数组。
+inline void txn_apply_logical(State* state, const TransactionContext& txn) {
+    if (state == nullptr) return;
+    if (txn.direction == kTransferOriginalToExtension) {
+        state->items[txn.dst_bag][txn.dst_slot] = txn.committed;
+    } else if (txn.direction == kTransferExtensionToExtension) {
+        state->items[txn.src_bag][txn.src_slot] = {};
+        state->items[txn.dst_bag][txn.dst_slot] = txn.committed;
+    }
+}
+
+// 按失败阶段还原：先还原逻辑槽，再清 pending。
+// 已移交原版库存的对象不参与模块回滚（释放/移交由持有账本的调用层负责）。
+inline void txn_rollback_logical(State* state, const TransactionContext& txn, TxnStage failed_at) {
+    if (state == nullptr) return;
+    if (failed_at >= TxnStage::kCommitted) return;  // 提交后不做猜测性逆转
+    if (failed_at > TxnStage::kPendingRecorded) {
+        if (txn.direction == kTransferOriginalToExtension) {
+            state->items[txn.dst_bag][txn.dst_slot] = txn.previous_dst;
+        } else if (txn.direction == kTransferExtensionToExtension) {
+            state->items[txn.src_bag][txn.src_slot] = txn.source;
+            state->items[txn.dst_bag][txn.dst_slot] = txn.previous_dst;
+        }
+    }
+    state->pending = {};
 }
 
 // ---- 跨进程 prepare journal（ADR-007 v1，section: extensionbags.journal）----
@@ -684,6 +792,8 @@ inline JournalRecord journal_from_pending(const PendingTransfer& pending, uint64
     journal.valid = pending.valid;
     journal.stage = kJournalStagePrepared;
     journal.generation = generation;
+    std::strncpy(journal.transaction_id, pending.transaction_id, kMaxTransactionIdChars);
+    journal.transaction_id[kMaxTransactionIdChars] = '\0';
     journal.direction = pending.direction;
     journal.src_bag = pending.src_bag;
     journal.src_slot = pending.src_slot;
@@ -843,6 +953,11 @@ inline std::string state_json(const State& state) {
         json += ",\"srcSlot\":" + std::to_string(state.pending.src_slot);
         json += ",\"dstBag\":" + std::to_string(state.pending.dst_bag);
         json += ",\"dstSlot\":" + std::to_string(state.pending.dst_slot);
+        if (state.pending.transaction_id[0] != '\0') {
+            json += ",\"transactionId\":\"";
+            json += state.pending.transaction_id;
+            json += "\"";
+        }
         json += ",\"payload\":\"" +
                 base64_encode(state.pending.payload.data(), state.pending.payload_size) + "\"}";
         if (state.pending.source_payload_size > 0) {
@@ -880,7 +995,8 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
         *dst = static_cast<uint8_t>(v);
         return true;
     };
-    if (!parse_field("direction", &parsed.direction) || parsed.direction > kTransferExtensionToOriginal) {
+    if (!parse_field("direction", &parsed.direction) ||
+        parsed.direction > kTransferExtensionToExtension) {
         return PendingTransferParseResult::kMalformed;
     }
     if (!parse_field("srcBag", &parsed.src_bag) ||
@@ -892,6 +1008,18 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
     if (!valid_pending_transfer_domain(parsed)) {
         *out = parsed;
         return PendingTransferParseResult::kInvalidTransactionDomain;
+    }
+    const char* id_key = strstr(key, "\"transactionId\":\"");
+    if (id_key != nullptr) {
+        const char* id_begin = id_key + strlen("\"transactionId\":\"");
+        const char* id_end = strchr(id_begin, '"');
+        if (id_end == nullptr) return PendingTransferParseResult::kMalformed;
+        const size_t id_len = static_cast<size_t>(id_end - id_begin);
+        if (id_len == 0 || id_len > kMaxTransactionIdChars) {
+            return PendingTransferParseResult::kMalformed;
+        }
+        std::memcpy(parsed.transaction_id, id_begin, id_len);
+        parsed.transaction_id[id_len] = '\0';
     }
     const char* payload_key = strstr(key, "\"payload\":\"");
     if (payload_key == nullptr) return PendingTransferParseResult::kMalformed;

@@ -128,7 +128,7 @@ bool jni_get_config_json(char* out, size_t out_size) {
         if (jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
     }
     jclass cls = g_config_bridge_class;
-    if (cls == nullptr) cls = env->FindClass("com/inotia4/export/ModuleConfigUiBridge");
+    if (cls == nullptr) cls = env->FindClass("com/inotia4/qol/ModuleConfigUiBridge");
     if (cls == nullptr) { env->ExceptionClear(); return false; }
     jmethodID mid = env->GetStaticMethodID(cls, "getConfigJson", "()Ljava/lang/String;");
     if (mid == nullptr) {
@@ -156,7 +156,7 @@ bool jni_toggle_config(const char* key) {
         if (jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
     }
     jclass cls = g_config_bridge_class;
-    if (cls == nullptr) cls = env->FindClass("com/inotia4/export/ModuleConfigUiBridge");
+    if (cls == nullptr) cls = env->FindClass("com/inotia4/qol/ModuleConfigUiBridge");
     if (cls == nullptr) { env->ExceptionClear(); return false; }
     jmethodID mid = env->GetStaticMethodID(cls, "toggleConfig", "(Ljava/lang/String;)Ljava/lang/String;");
     if (mid == nullptr) {

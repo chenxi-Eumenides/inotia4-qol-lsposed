@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="Inotia4 Export"
+        android:label="艾诺迪亚4 QOL改动"
         android:description="@string/module_description"
         android:usesCleartextTraffic="true">
     </application>

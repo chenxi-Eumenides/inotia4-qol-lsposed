@@ -363,51 +363,6 @@ void disable_extension_tab_buttons_locked() {
     g_extension_tab_generation = 0;
 }
 
-struct UnsavedCrossMove {
-    enum class Direction : uint8_t {
-        kOriginalToExtension,
-        kExtensionToOriginal,
-        kExtensionToExtension,
-    };
-    Direction direction = Direction::kOriginalToExtension;
-    uint8_t src_bag = 0;
-    uint8_t src_slot = 0;
-    uint8_t dst_bag = 0;
-    uint8_t dst_slot = virtual_bag::kSlotCount;
-    uint8_t extension_bag = 0;
-    uint8_t extension_slot = 0;
-    uint16_t payload_size = 0;
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-    virtual_bag::Item extension_previous{};
-    uint8_t extension_dst_bag = 0;
-    uint8_t extension_dst_slot = 0;
-    virtual_bag::Item extension_destination_previous{};
-};
-
-bool valid_unsaved_cross_move_domain(const UnsavedCrossMove& move) {
-    switch (move.direction) {
-        case UnsavedCrossMove::Direction::kOriginalToExtension:
-            return virtual_bag::valid_original_transaction_bag(move.src_bag) &&
-                   move.src_slot < virtual_bag::kSlotCount &&
-                   virtual_bag::valid_index(move.extension_bag) &&
-                   move.extension_slot < virtual_bag::kSlotCount;
-        case UnsavedCrossMove::Direction::kExtensionToOriginal:
-            return virtual_bag::valid_index(move.extension_bag) &&
-                   move.extension_slot < virtual_bag::kSlotCount &&
-                   virtual_bag::valid_original_transaction_bag(move.dst_bag) &&
-                   move.dst_slot < virtual_bag::kSlotCount;
-        case UnsavedCrossMove::Direction::kExtensionToExtension:
-            return virtual_bag::valid_index(move.extension_bag) &&
-                   move.extension_slot < virtual_bag::kSlotCount &&
-                   virtual_bag::valid_index(move.extension_dst_bag) &&
-                   move.extension_dst_slot < virtual_bag::kSlotCount;
-    }
-    return false;
-}
-
-std::array<UnsavedCrossMove, 128> g_unsaved_cross_moves{};
-size_t g_unsaved_cross_move_count = 0;
-
 int raw_direct_bag_locked() {
     if (g_base == 0) return -1;
     return *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
@@ -536,7 +491,6 @@ bool persist_state_locked(bool force = false);
 void clear_original_desc_locked();
 void extension_desc_unequip_execute(void*);
 void clear_original_item_selection_locked();
-void rollback_unsaved_cross_moves_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
 int grid_slot_index(int64_t x, int64_t y, int64_t origin_x, int64_t origin_y);
 int original_bag_locked();
@@ -724,7 +678,6 @@ void clear_module_cache_locked() {
     g_module_view_installed = false;
     g_module_view_index = -1;
     g_item_state_dirty = false;
-    g_unsaved_cross_move_count = 0;
     g_extension_touch_capture = false;
     g_extension_drag = {};
 }
@@ -756,7 +709,6 @@ void ensure_state_loaded_locked() {
     const int slot = current_save_slot();
     if (slot < 0 || slot > 2 || slot == g_loaded_slot) return;
     if (g_module_view_installed) restore_module_view_locked();
-    rollback_unsaved_cross_moves_locked();
     clear_module_cache_locked();
     g_virtual_bag_state = {};
     if (!load_state_from_store(slot)) {
@@ -825,94 +777,48 @@ int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_s
     return -1;
 }
 
-void record_unsaved_cross_move_locked(const UnsavedCrossMove& move) {
-    if (!valid_unsaved_cross_move_domain(move)) {
-        VIRTBAG_LOG("unsaved cross move reject reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
-                    static_cast<unsigned int>(move.direction),
-                    static_cast<unsigned int>(move.src_bag),
-                    static_cast<unsigned int>(move.src_slot),
-                    static_cast<unsigned int>(move.dst_bag),
-                    static_cast<unsigned int>(move.dst_slot));
-        return;
-    }
-    if (g_unsaved_cross_move_count >= g_unsaved_cross_moves.size()) {
-        VIRTBAG_LOG("cross move journal full; refusing rollback record");
-        return;
-    }
-    g_unsaved_cross_moves[g_unsaved_cross_move_count++] = move;
+// ---- P4.4 五态事务协调：三条移动路径共享的唯一推进/回滚实现 ----
+
+uint64_t g_transaction_sequence = 0;
+
+void generate_transaction_id_locked(char* out) {
+    const uint64_t seq = ++g_transaction_sequence;
+    std::snprintf(out, virtual_bag::kMaxTransactionIdChars, "p4-%llu",
+                  static_cast<unsigned long long>(seq));
 }
 
-void rollback_unsaved_cross_moves_locked() {
-    while (g_unsaved_cross_move_count > 0) {
-        const UnsavedCrossMove move = g_unsaved_cross_moves[--g_unsaved_cross_move_count];
-        if (!valid_unsaved_cross_move_domain(move)) {
-            VIRTBAG_LOG("unsaved cross move isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
-                        static_cast<unsigned int>(move.direction),
-                        static_cast<unsigned int>(move.src_bag),
-                        static_cast<unsigned int>(move.src_slot),
-                        static_cast<unsigned int>(move.dst_bag),
-                        static_cast<unsigned int>(move.dst_slot));
-            continue;
-        }
-        bool original_source_restored = true;
-        if (move.direction == UnsavedCrossMove::Direction::kOriginalToExtension) {
-            void** inventory = static_cast<void**>(g_inven);
-            const size_t offset = static_cast<size_t>(move.src_bag) * kInventorySlotStride +
-                                   move.src_slot;
-            if (inventory == nullptr) {
-                original_source_restored = false;
-            } else if (inventory[offset] == nullptr) {
-                void* item = load_item_payload_locked(
-                    move.payload.data(), move.payload_size, "rollback_original_to_extension");
-                if (item != nullptr) {
-                    inventory[offset] = item;
-                } else {
-                    original_source_restored = false;
-                }
-            }
-        } else if (move.direction == UnsavedCrossMove::Direction::kExtensionToOriginal) {
-            const int slot = original_inventory_payload_slot_locked(
-                move.payload.data(), move.payload_size, move.dst_bag);
-            int exact_slot = -1;
-            if (move.dst_slot < virtual_bag::kSlotCount) {
-                void* item = nullptr;
-                if (inventory_slot_locked(move.dst_bag, move.dst_slot, &item) && item != nullptr) {
-                    exact_slot = move.dst_slot;
-                }
-            }
-            const int rollback_slot = exact_slot >= 0 ? exact_slot : slot;
-            if (rollback_slot >= 0 && fn_remove_item_direct != nullptr) {
-                fn_remove_item_direct(move.dst_bag, rollback_slot);
-                if (fn_ui_equip_refresh_item_area != nullptr) {
-                    fn_ui_equip_refresh_item_area();
-                }
-            }
-        } else {
-            if (move.extension_bag < virtual_bag::kBagCount &&
-                move.extension_slot < virtual_bag::kSlotCount) {
-                g_virtual_bag_state.items[move.extension_bag][move.extension_slot] =
-                    move.extension_previous;
-            }
-            if (move.extension_dst_bag < virtual_bag::kBagCount &&
-                move.extension_dst_slot < virtual_bag::kSlotCount) {
-                g_virtual_bag_state.items[move.extension_dst_bag][move.extension_dst_slot] =
-                    move.extension_destination_previous;
-            }
-        }
-        if (move.direction != UnsavedCrossMove::Direction::kExtensionToExtension &&
-            (move.direction != UnsavedCrossMove::Direction::kOriginalToExtension ||
-             original_source_restored) &&
-            move.extension_bag < virtual_bag::kBagCount &&
-            move.extension_slot < virtual_bag::kSlotCount) {
-            g_virtual_bag_state.items[move.extension_bag][move.extension_slot] =
-                move.extension_previous;
-        } else if (move.direction == UnsavedCrossMove::Direction::kOriginalToExtension &&
-                   !original_source_restored) {
-            VIRTBAG_LOG("pending rollback retained extension item: source restore failed src=%u/%u",
-                        static_cast<unsigned int>(move.src_bag),
-                        static_cast<unsigned int>(move.src_slot));
-        }
+// pending-recorded 阶段：事务 pending 写入 State。durable=false：仅本进程记录。
+bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
+    virtual_bag::txn_build_pending(txn);
+    if (!virtual_bag::valid_pending_transfer_domain(txn->pending) ||
+        !virtual_bag::valid_pending_transfer_payload(txn->pending)) {
+        VIRTBAG_LOG("txn pending reject id=%s reason=invalid_domain", txn->transaction_id);
+        return false;
     }
+    g_virtual_bag_state.pending = txn->pending;
+    g_item_state_dirty = true;
+    VIRTBAG_LOG("txn stage=pending-recorded durable=false id=%s direction=%u src=%u/%u dst=%u/%u",
+                txn->transaction_id, static_cast<unsigned int>(txn->direction),
+                static_cast<unsigned int>(txn->src_bag),
+                static_cast<unsigned int>(txn->src_slot),
+                static_cast<unsigned int>(txn->dst_bag),
+                static_cast<unsigned int>(txn->dst_slot));
+    return true;
+}
+
+// 按失败阶段回滚：先还原逻辑槽与 pending，再由调用方释放仍归模块所有的临时对象；
+// 已移交原版库存的对象不参与（所有权账本终态）。
+void txn_abort_locked(const virtual_bag::TransactionContext& txn,
+                      virtual_bag::TxnStage failed_at, const char* reason) {
+    virtual_bag::txn_rollback_logical(&g_virtual_bag_state, txn, failed_at);
+    g_item_state_dirty = true;
+    VIRTBAG_LOG("txn abort stage=%d id=%s reason=%s direction=%u src=%u/%u dst=%u/%u",
+                static_cast<int>(failed_at), txn.transaction_id, reason,
+                static_cast<unsigned int>(txn.direction),
+                static_cast<unsigned int>(txn.src_bag),
+                static_cast<unsigned int>(txn.src_slot),
+                static_cast<unsigned int>(txn.dst_bag),
+                static_cast<unsigned int>(txn.dst_slot));
 }
 
 void recover_pending_transaction_locked() {
@@ -987,10 +893,16 @@ void recover_pending_transaction_locked() {
                     }
                 }
             }
+        } else if (pending.direction == virtual_bag::kTransferExtensionToExtension) {
+            // ext→ext 恒纯逻辑（§4.1）：此分支 = dst 槽 payload 不匹配，仅损坏/手工
+            // 构造的 sidecar 可达。pending.payload 是 dst 提交态而非可入原版库存的
+            // 源载荷，禁止按 ext→orig 重放（§4.2 不尝试重放或推断目标）；
+            // 按 kRollback 语义仅清 pending。
+            clear_pending = true;
         } else {
             if (original_inventory_contains_payload_locked(pending.payload.data(),
-                                                             pending.payload_size,
-                                                             pending.dst_bag)) {
+                                                           pending.payload_size,
+                                                           pending.dst_bag)) {
                 clear_pending = true;
             } else {
                 set_original_bag_locked(pending.dst_bag);
@@ -1214,10 +1126,6 @@ bool category_is_equip(int category) {
 }
 
 bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_bag) {
-    if (g_unsaved_cross_move_count >= g_unsaved_cross_moves.size()) {
-        VIRTBAG_LOG("cross move journal full; rejecting original->extension move");
-        return false;
-    }
     if (!virtual_bag::valid_original_transaction_bag(src_bag)) {
         VIRTBAG_LOG("cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
@@ -1253,27 +1161,33 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     const int src_count = fn_get_cumulate_count(src_item);
     const int src_category = original_item_category_locked(src_item);
     const int capacity = g_virtual_bag_state.capacities[dst_bag];
-    virtual_bag::Item source_descriptor{};
-    source_descriptor.category = src_category;
-    source_descriptor.count = src_count;
-    source_descriptor.payload_size = static_cast<uint16_t>(serialized_size);
-    source_descriptor.payload = source_payload;
 
-    int dst_slot = -1;
+    // prepared：收集不可变事务快照。
+    virtual_bag::TransactionContext txn{};
+    txn.direction = virtual_bag::kTransferOriginalToExtension;
+    txn.src_bag = static_cast<uint8_t>(src_bag);
+    txn.src_slot = static_cast<uint8_t>(src_slot);
+    txn.dst_bag = static_cast<uint8_t>(dst_bag);
+    txn.source.category = src_category;
+    txn.source.count = src_count;
+    txn.source.payload_size = static_cast<uint16_t>(serialized_size);
+    txn.source.payload = source_payload;
+
     virtual_bag::Item committed{};
+    int dst_slot = -1;
     bool merged = false;
     if (move_merge_enabled()) {
         const uint32_t limit = stack_codec::max_count(stack_limit_enabled());
         for (int slot = 0; slot < capacity && dst_slot < 0; ++slot) {
             const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
             const uint64_t total = static_cast<uint64_t>(existing.count) +
-                                   static_cast<uint64_t>(source_descriptor.count);
-            if (!virtual_bag::mergeable_items(existing, source_descriptor) || total > limit) {
+                                   static_cast<uint64_t>(txn.source.count);
+            if (!virtual_bag::mergeable_items(existing, txn.source) || total > limit) {
                 continue;
             }
             committed = existing;
             committed.count = static_cast<int>(virtual_bag::merge_count(
-                existing.count, source_descriptor.count, stack_limit_enabled()));
+                existing.count, txn.source.count, stack_limit_enabled()));
             virtual_bag::patch_payload_count(&committed, static_cast<uint32_t>(committed.count));
             dst_slot = slot;
             merged = true;
@@ -1283,7 +1197,7 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
         for (int slot = 0; slot < capacity; ++slot) {
             const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
             if (existing.category != 0 || existing.count != 0) continue;
-            committed = source_descriptor;
+            committed = txn.source;
             dst_slot = slot;
             break;
         }
@@ -1293,84 +1207,49 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
                     dst_bag, capacity);
         return false;
     }
-    if (merged) {
-        VIRTBAG_LOG("cross move: original merge src=%d/%d -> extension=%d/%d count=%d+%d=%d",
-                    src_bag, src_slot, dst_bag, dst_slot, src_count,
-                    g_virtual_bag_state.items[dst_bag][dst_slot].count, committed.count);
+    txn.dst_slot = static_cast<uint8_t>(dst_slot);
+    txn.merged = merged;
+    txn.committed = committed;
+    txn.previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
+    generate_transaction_id_locked(txn.transaction_id);
+    if (txn.merged) {
+        VIRTBAG_LOG("txn prepared id=%s original merge src=%d/%d -> extension=%d/%d count=%d+%d=%d",
+                    txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, src_count,
+                    txn.previous_dst.count, txn.committed.count);
     }
 
-    const virtual_bag::Item previous = g_virtual_bag_state.items[dst_bag][dst_slot];
-    virtual_bag::PendingTransfer pending{};
-    pending.valid = true;
-    pending.direction = virtual_bag::kTransferOriginalToExtension;
-    pending.src_bag = static_cast<uint8_t>(src_bag);
-    pending.src_slot = static_cast<uint8_t>(src_slot);
-    pending.dst_bag = static_cast<uint8_t>(dst_bag);
-    pending.dst_slot = static_cast<uint8_t>(dst_slot);
-    pending.payload_size = committed.payload_size;
-    pending.payload = committed.payload;
-    pending.source_payload_size = static_cast<uint16_t>(serialized_size);
-    pending.source_payload = source_payload;
+    // pending-recorded
+    if (!txn_record_pending_locked(&txn)) return false;
 
-    g_virtual_bag_state.pending = pending;
+    // logical-state-updated：写扩展逻辑目标；物化失败即回滚（源保持原版实态）。
+    virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
     g_item_state_dirty = true;
-    if (!persist_state_locked(true)) {
-        g_virtual_bag_state.pending = {};
-        return false;
-    }
-    g_virtual_bag_state.items[dst_bag][dst_slot] = committed;
-    if (!persist_state_locked(true)) {
-        g_virtual_bag_state.items[dst_bag][dst_slot] = previous;
-        g_virtual_bag_state.pending = {};
-        persist_state_locked();
-        return false;
-    }
     if (module_item_locked(dst_bag, dst_slot) == nullptr) {
-        g_virtual_bag_state.items[dst_bag][dst_slot] = previous;
-        g_virtual_bag_state.pending = {};
-        free_module_object_locked(dst_bag, dst_slot);
-        VIRTBAG_LOG("cross move: target extension item could not be materialized; source retained");
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "target extension item could not be materialized; source retained");
         return false;
     }
-    if (fn_remove_item_direct == nullptr) {
-        g_virtual_bag_state.items[dst_bag][dst_slot] = previous;
-        g_virtual_bag_state.pending = {};
-        persist_state_locked(true);
-        VIRTBAG_LOG("cross move: original->extension source removal failed");
-        return false;
-    }
+
+    // original-state-updated：删除原版源并以原版实态复核（不只信删除函数返回值）。
     fn_remove_item_direct(src_bag, src_slot);
     void* remaining_source = nullptr;
     if (inventory_slot_locked(src_bag, src_slot, &remaining_source) && remaining_source != nullptr) {
-        g_virtual_bag_state.items[dst_bag][dst_slot] = previous;
-        g_virtual_bag_state.pending = {};
-        persist_state_locked(true);
-        VIRTBAG_LOG("cross move: original->extension source slot remained occupied");
+        txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                         "original source slot remained occupied");
         return false;
     }
-    UnsavedCrossMove unsaved_move{};
-    unsaved_move.direction = UnsavedCrossMove::Direction::kOriginalToExtension;
-    unsaved_move.src_bag = static_cast<uint8_t>(src_bag);
-    unsaved_move.src_slot = static_cast<uint8_t>(src_slot);
-    unsaved_move.extension_bag = static_cast<uint8_t>(dst_bag);
-    unsaved_move.extension_slot = static_cast<uint8_t>(dst_slot);
-    unsaved_move.payload_size = static_cast<uint16_t>(serialized_size);
-    unsaved_move.payload = source_payload;
-    unsaved_move.extension_previous = previous;
-    record_unsaved_cross_move_locked(unsaved_move);
-    g_item_state_dirty = true;
+
+    // committed：不做猜测性逆转。清 pending、回收模块投影对象、刷新原版网格。
     g_virtual_bag_state.pending = {};
-    if (!persist_state_locked()) {
-        VIRTBAG_LOG("cross move: pending clear persist failed; will recover on next load");
-    }
     free_module_object_locked(dst_bag, dst_slot);
     // 用户决策（2026-08-31）：orig→ext 后保持当前视图（对齐原版"移动后停留"）。
     // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
     // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
     // 原版网格残影由 RefreshItemArea 清除（INVEN 全程真实，线程先例：install 路径）。
     if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
-    VIRTBAG_LOG("cross move: original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
-                dst_bag, dst_slot, src_category, committed.count, src_bag, src_slot);
+    VIRTBAG_LOG("txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
+                txn.transaction_id, dst_bag, dst_slot, src_category, txn.committed.count,
+                src_bag, src_slot);
     return true;
 }
 
@@ -1399,15 +1278,11 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                     src_slot, target_bag);
         return false;
     }
-    if (g_unsaved_cross_move_count >= g_unsaved_cross_moves.size()) {
-        VIRTBAG_LOG("cross move journal full; rejecting extension->original move");
-        return false;
-    }
     if (fn_get_bag_size != nullptr && fn_get_bag_size(target_bag) <= 0) {
         VIRTBAG_LOG("cross move reject extension->original target bag unavailable=%d", target_bag);
         return false;
     }
-    virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
+    const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
     if (source.category <= 0 || source.count <= 0) {
         VIRTBAG_LOG("cross move reject extension->original source empty=%d/%d", src_bag,
                     src_slot);
@@ -1423,86 +1298,63 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
         return false;
     }
 
-    virtual_bag::PendingTransfer pending{};
-    pending.valid = true;
-    pending.direction = virtual_bag::kTransferExtensionToOriginal;
-    pending.src_bag = static_cast<uint8_t>(src_bag);
-    pending.src_slot = static_cast<uint8_t>(src_slot);
-    pending.dst_bag = static_cast<uint8_t>(target_bag);
-    pending.dst_slot = 0;
-    pending.payload_size = source.payload_size;
-    pending.payload = source.payload;
+    // prepared：源载荷已验证；dst_slot 语义为占位 0（实际落位由 SaveItemOnEmpty 决定，
+    // 恢复流程按 payload 扫描定位，不依赖该字段）。
+    virtual_bag::TransactionContext txn{};
+    txn.direction = virtual_bag::kTransferExtensionToOriginal;
+    txn.src_bag = static_cast<uint8_t>(src_bag);
+    txn.src_slot = static_cast<uint8_t>(src_slot);
+    txn.dst_bag = static_cast<uint8_t>(target_bag);
+    txn.source = source;
+    txn.committed = source;
+    generate_transaction_id_locked(txn.transaction_id);
 
-    g_virtual_bag_state.pending = pending;
-    g_item_state_dirty = true;
-    if (!persist_state_locked(true)) {
-        g_virtual_bag_state.pending = {};
-        VIRTBAG_LOG("cross move extension->original pending persist failed src=%d/%d target=%d",
-                    src_bag, src_slot, target_bag);
-        return false;
-    }
+    // pending-recorded
+    if (!txn_record_pending_locked(&txn)) return false;
 
-    // P4.2: Load/入库成功前不改扩展源；失败时源 payload 和投影保持原样。
-    // P4.3: Load 成功即入账本；入库失败 release+真释放恰好一次。
+    // logical-state-updated：Load 临时对象并入账（P4.3：Load 成功即 allocate；扩展逻辑源未变）。
+    // 失败先回滚逻辑态与 pending，再释放仍归模块所有的临时对象。
     uint32_t item_handle = 0;
     void* item = load_item_payload_tracked_locked(source.payload.data(), source.payload_size,
                                                   "move_extension_to_original", &item_handle);
     if (item != nullptr) set_original_bag_locked(target_bag);
     if (item == nullptr || !fn_inven_save_item_on_empty(item, target_bag)) {
+        txn_abort_locked(txn,
+                         item != nullptr ? virtual_bag::TxnStage::kOriginalUpdated
+                                         : virtual_bag::TxnStage::kLogicalUpdated,
+                         "target insertion failed; extension source retained");
         release_tracked_item_locked(item_handle, item, "ext2orig insert failed");
-        g_virtual_bag_state.pending = {};
-        persist_state_locked();
         reset_drag_state_locked(nullptr);
-        VIRTBAG_LOG("cross move: extension->original target insertion failed; rollback src=%d/%d target=%d",
-                    src_bag, src_slot, target_bag);
         return false;
     }
-    UnsavedCrossMove unsaved_move{};
-    unsaved_move.direction = UnsavedCrossMove::Direction::kExtensionToOriginal;
-    unsaved_move.src_bag = static_cast<uint8_t>(src_bag);
-    unsaved_move.src_slot = static_cast<uint8_t>(src_slot);
-    unsaved_move.dst_bag = static_cast<uint8_t>(target_bag);
+
+    // original-state-updated：确认入库落位并以原版实态复核（指针身份扫描优先）。
+    int inserted_slot = -1;
     void* inserted_item = nullptr;
     for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
         if (inventory_slot_locked(target_bag, slot, &inserted_item) && inserted_item == item) {
-            unsaved_move.dst_slot = static_cast<uint8_t>(slot);
+            inserted_slot = slot;
             break;
         }
     }
-    if (unsaved_move.dst_slot >= virtual_bag::kSlotCount) {
-        const int matched_slot = original_inventory_payload_slot_locked(
+    if (inserted_slot < 0) {
+        inserted_slot = original_inventory_payload_slot_locked(
             source.payload.data(), source.payload_size, target_bag);
-        if (matched_slot >= 0) unsaved_move.dst_slot = static_cast<uint8_t>(matched_slot);
     }
-    if (unsaved_move.dst_slot >= virtual_bag::kSlotCount) {
-        VIRTBAG_LOG("cross move: extension->original insertion slot not found; rolling back");
-        const int matched_slot = original_inventory_payload_slot_locked(
-            source.payload.data(), source.payload_size, target_bag);
-        if (matched_slot >= 0 && fn_remove_item_direct != nullptr) {
-            fn_remove_item_direct(target_bag, matched_slot);
-            if (fn_ui_equip_refresh_item_area != nullptr) {
-                fn_ui_equip_refresh_item_area();
-            }
-        }
-        g_virtual_bag_state.pending = {};
-        persist_state_locked();
-        reset_drag_state_locked(nullptr);
-        // P4.3：已移回的对象脱离 INVEN 后由账本终止保管（修复原泄漏路径）。
+    if (inserted_slot < 0) {
+        txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                         "insertion slot not found; extension source retained");
         release_tracked_item_locked(item_handle, item, "ext2orig slot-not-found rollback");
+        reset_drag_state_locked(nullptr);
         return false;
     }
     // P4.3：入库已确认 → 原版库存接管终态（此后模块不得触碰 item 指针）。
     handover_tracked_item_locked(item_handle, item, "ext2orig handover");
-    const virtual_bag::Item previous = g_virtual_bag_state.items[src_bag][src_slot];
+
+    // committed：清扩展源逻辑项、恢复投影、清 pending。已移交对象不参与模块回滚。
     g_virtual_bag_state.items[src_bag][src_slot] = {};
     g_item_state_dirty = true;
     free_module_object_locked(src_bag, src_slot);
-    unsaved_move.extension_bag = static_cast<uint8_t>(src_bag);
-    unsaved_move.extension_slot = static_cast<uint8_t>(src_slot);
-    unsaved_move.payload_size = source.payload_size;
-    unsaved_move.payload = source.payload;
-    unsaved_move.extension_previous = previous;
-    record_unsaved_cross_move_locked(unsaved_move);
     g_virtual_bag_state.pending = {};
     // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
     // API 路径（原版视图）不改写视图字段（用户 2026-08-31 决策）。
@@ -1512,10 +1364,10 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
         g_virtual_bag_state.inspected = -1;
     }
     set_original_bag_locked(target_bag);
-    persist_state_locked();
     reset_drag_state_locked(nullptr);
-    VIRTBAG_LOG("cross move: extension->original src=%d/%d cat=%d count=%d target_bag=%d",
-                src_bag, src_slot, source.category, source.count, target_bag);
+    VIRTBAG_LOG("txn committed id=%s extension->original src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
+                txn.transaction_id, src_bag, src_slot, txn.source.category, txn.source.count,
+                target_bag, inserted_slot);
     return true;
 }
 
@@ -1528,7 +1380,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                     src_bag, src_slot, dst_bag, requested_dst_slot);
         return false;
     }
-    const virtual_bag::Item& source = g_virtual_bag_state.items[src_bag][src_slot];
+    const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
     if (source.category <= 0 || source.count <= 0) {
         VIRTBAG_LOG("cross move reject extension->extension source empty=%d/%d", src_bag,
                     src_slot);
@@ -1545,9 +1397,8 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     }
 
     const int capacity = g_virtual_bag_state.capacities[dst_bag];
-
-    int dst_slot = -1;
     virtual_bag::Item committed{};
+    int dst_slot = -1;
     bool merged = false;
     auto try_merge = [&](int slot) {
         const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
@@ -1600,43 +1451,40 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         return false;
     }
 
-    if (merged) {
-        VIRTBAG_LOG("cross move: extension merge %d/%d -> %d/%d count=%d+%d=%d",
-                    src_bag, src_slot, dst_bag, dst_slot, source.count,
-                    g_virtual_bag_state.items[dst_bag][dst_slot].count, committed.count);
+    // prepared：纯逻辑事务快照。ext→ext 恒无 original 阶段。
+    virtual_bag::TransactionContext txn{};
+    txn.direction = virtual_bag::kTransferExtensionToExtension;
+    txn.original_stage_applicable = false;
+    txn.src_bag = static_cast<uint8_t>(src_bag);
+    txn.src_slot = static_cast<uint8_t>(src_slot);
+    txn.dst_bag = static_cast<uint8_t>(dst_bag);
+    txn.dst_slot = static_cast<uint8_t>(dst_slot);
+    txn.merged = merged;
+    txn.source = source;
+    txn.committed = committed;
+    txn.previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
+    generate_transaction_id_locked(txn.transaction_id);
+    if (txn.merged) {
+        VIRTBAG_LOG("txn prepared id=%s extension merge %d/%d -> %d/%d count=%d+%d=%d",
+                    txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, source.count,
+                    txn.previous_dst.count, txn.committed.count);
     }
 
-    if (g_unsaved_cross_move_count >= g_unsaved_cross_moves.size()) {
-        VIRTBAG_LOG("cross move journal full; rejecting extension->extension move");
-        return false;
-    }
-    const virtual_bag::Item previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
-    const virtual_bag::Item previous_src = g_virtual_bag_state.items[src_bag][src_slot];
-    g_virtual_bag_state.items[src_bag][src_slot] = {};
-    g_virtual_bag_state.items[dst_bag][dst_slot] = committed;
+    // pending-recorded
+    if (!txn_record_pending_locked(&txn)) return false;
+
+    // logical-state-updated：仅更新扩展逻辑 source/target（不调用原版库存移动，不建 journal）。
+    virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
     g_item_state_dirty = true;
-    if (!persist_state_locked()) {
-        g_virtual_bag_state.items[src_bag][src_slot] = previous_src;
-        g_virtual_bag_state.items[dst_bag][dst_slot] = previous_dst;
-        persist_state_locked();
-        VIRTBAG_LOG("cross move extension->extension persist failed src=%d/%d dst=%d/%d",
-                    src_bag, src_slot, dst_bag, dst_slot);
-        return false;
-    }
-    UnsavedCrossMove unsaved_move{};
-    unsaved_move.direction = UnsavedCrossMove::Direction::kExtensionToExtension;
-    unsaved_move.extension_bag = static_cast<uint8_t>(src_bag);
-    unsaved_move.extension_slot = static_cast<uint8_t>(src_slot);
-    unsaved_move.extension_previous = previous_src;
-    unsaved_move.extension_dst_bag = static_cast<uint8_t>(dst_bag);
-    unsaved_move.extension_dst_slot = static_cast<uint8_t>(dst_slot);
-    unsaved_move.extension_destination_previous = previous_dst;
-    record_unsaved_cross_move_locked(unsaved_move);
+
+    // committed
+    g_virtual_bag_state.pending = {};
     free_module_object_locked(src_bag, src_slot);
     free_module_object_locked(dst_bag, dst_slot);
     reset_drag_state_locked(nullptr);
-    VIRTBAG_LOG("cross move: extension->extension %d/%d -> %d/%d cat=%d count=%d",
-                src_bag, src_slot, dst_bag, dst_slot, source.category, committed.count);
+    VIRTBAG_LOG("txn committed id=%s extension->extension %d/%d -> %d/%d cat=%d count=%d",
+                txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, txn.source.category,
+                txn.committed.count);
     return true;
 }
 
@@ -2396,11 +2244,6 @@ void virtual_bag_f3_wrapper() {
         if (!was_exiting_module && g_virtual_bag_state.mode != virtual_bag::Mode::kOriginal) {
             virtual_bag::enter_original(&g_virtual_bag_state, original_bag_locked());
         }
-        if (g_unsaved_cross_move_count > 0) {
-            rollback_unsaved_cross_moves_locked();
-            g_virtual_bag_state.pending = {};
-            persist_state_locked();
-        }
         if (was_exiting_module) {
             cancel_original_exit_locked();
         }
@@ -3120,7 +2963,6 @@ void ensure_lifecycle_thread() {
 
 void prepare_main_menu_locked() {
     if (g_module_view_installed) restore_module_view_locked();
-    rollback_unsaved_cross_moves_locked();
     clear_module_cache_locked();
     g_virtual_bag_state = {};
     g_loaded_slot = -2;
@@ -3216,7 +3058,6 @@ bool virtual_bag_enabled() {
 void virtual_bag_prepare_save_slot_load() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_module_view_installed) restore_module_view_locked();
-    rollback_unsaved_cross_moves_locked();
     clear_module_cache_locked();
     g_virtual_bag_state = {};
     g_loaded_slot = -2;
@@ -3246,15 +3087,14 @@ bool virtual_bag_save_game() {
         if (result != 0) {
             state_saved = persist_state_locked(true);
             if (state_saved) {
-                g_unsaved_cross_move_count = 0;
                 g_virtual_bag_state.pending = {};
                 g_item_state_dirty = false;
             }
         }
     }
     g_explicit_save_in_progress = false;
-    VIRTBAG_LOG("virtual bag save result native=%d sidecar=%d unsaved_cross=%zu pending=%d",
-                result != 0 ? 1 : 0, state_saved ? 1 : 0, g_unsaved_cross_move_count,
+    VIRTBAG_LOG("virtual bag save result native=%d sidecar=%d pending=%d",
+                result != 0 ? 1 : 0, state_saved ? 1 : 0,
                 g_virtual_bag_state.pending.valid ? 1 : 0);
     return state_saved && result != 0;
 }

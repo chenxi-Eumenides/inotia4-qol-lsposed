@@ -7,13 +7,13 @@ plugins {
 apply(plugin = "com.yanzhenjie.andserver")
 
 android {
-    namespace = "com.inotia4.export"
+    namespace = "com.inotia4.qol"
     compileSdk = 34
     buildToolsVersion = "37.0.0"
     ndkVersion = "26.3.11579264"
 
     defaultConfig {
-        applicationId = "com.inotia4.export"
+        applicationId = "com.inotia4.qol"
         minSdk = 30
         targetSdk = 34
     versionCode = 176

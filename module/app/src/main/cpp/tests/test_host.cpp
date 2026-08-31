@@ -1238,6 +1238,187 @@ static void test_equip_bag() {
     CHECK_EQ((int)state.capacities[1], 0);
 }
 
+// P4.4 五态事务纯模型：域校验、pending 构造与 journal v1 映射、
+// 逐阶段失败注入（logical/original/committed 边界）的还原断言。
+static bool p44_item_identity(const virtual_bag::Item& a, const virtual_bag::Item& b) {
+    return a.category == b.category && a.count == b.count &&
+           a.payload_size == b.payload_size &&
+           std::memcmp(a.payload.data(), b.payload.data(), virtual_bag::kSerializedItemBuffer) == 0;
+}
+
+static void test_p44_transaction_stages() {
+    using namespace virtual_bag;
+
+    // pending 域接受 ext→ext（内部袋索引）；journal v1 域（不建 journal）仍拒绝。
+    CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
+    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 1));
+    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, kBagCount, 1));
+    CHECK(!valid_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
+
+    Item src{};
+    src.category = 401;
+    src.count = 5;
+    make_small_payload(&src, src.count);
+    Item committed = src;
+    committed.count = 9;
+    patch_payload_count(&committed, 9);
+
+    // orig→ext pending：payload=目标提交态，source_payload=源载荷；journal 一一映射。
+    TransactionContext o2e{};
+    o2e.direction = kTransferOriginalToExtension;
+    o2e.src_bag = 0;
+    o2e.src_slot = 2;
+    o2e.dst_bag = 1;
+    o2e.dst_slot = 3;
+    std::strncpy(o2e.transaction_id, "p4-test-1", kMaxTransactionIdChars);
+    o2e.source = src;
+    o2e.committed = committed;
+    o2e.previous_dst.category = 7;
+    o2e.previous_dst.count = 1;
+    txn_build_pending(&o2e);
+    CHECK(o2e.pending.valid);
+    CHECK_EQ((int)o2e.pending.direction, (int)kTransferOriginalToExtension);
+    CHECK_EQ((int)o2e.pending.src_bag, 0);
+    CHECK_EQ((int)o2e.pending.src_slot, 2);
+    CHECK_EQ((int)o2e.pending.dst_bag, 1);
+    CHECK_EQ((int)o2e.pending.dst_slot, 3);
+    CHECK(std::strcmp(o2e.pending.transaction_id, "p4-test-1") == 0);
+    CHECK_EQ(o2e.pending.payload_size, committed.payload_size);
+    CHECK(std::memcmp(o2e.pending.payload.data(), committed.payload.data(),
+                      committed.payload_size) == 0);
+    CHECK_EQ(o2e.pending.source_payload_size, src.payload_size);
+    CHECK(std::memcmp(o2e.pending.source_payload.data(), src.payload.data(),
+                      src.payload_size) == 0);
+
+    JournalRecord journal = journal_from_pending(o2e.pending, 7);
+    CHECK(journal.valid);
+    CHECK_EQ((int)journal.stage, (int)kJournalStagePrepared);
+    CHECK_EQ(journal.generation, (uint64_t)7);
+    CHECK(std::strcmp(journal.transaction_id, "p4-test-1") == 0);
+    CHECK(std::memcmp(journal.payload.data(), o2e.pending.payload.data(),
+                      kSerializedItemBuffer) == 0);
+    CHECK(std::memcmp(journal.source_payload.data(), o2e.pending.source_payload.data(),
+                      kSerializedItemBuffer) == 0);
+    CHECK(valid_journal_record(journal));
+
+    // 空事务 id 拒绝构造 pending。
+    TransactionContext no_id = o2e;
+    no_id.transaction_id[0] = '\0';
+    no_id.pending = {};
+    txn_build_pending(&no_id);
+    CHECK(!no_id.pending.valid);
+
+    // ext→orig pending：payload=源载荷，无 source_payload（src=内部扩展袋，dst=原版袋）。
+    TransactionContext e2o{};
+    e2o.direction = kTransferExtensionToOriginal;
+    e2o.src_bag = 1;
+    e2o.src_slot = 1;
+    e2o.dst_bag = 2;
+    std::strncpy(e2o.transaction_id, "p4-test-2", kMaxTransactionIdChars);
+    e2o.source = src;
+    e2o.committed = src;
+    txn_build_pending(&e2o);
+    CHECK(e2o.pending.valid);
+    CHECK_EQ(e2o.pending.payload_size, src.payload_size);
+    CHECK_EQ((int)e2o.pending.source_payload_size, 0);
+
+    // ext→ext pending：payload=committed。
+    TransactionContext e2e{};
+    e2e.direction = kTransferExtensionToExtension;
+    e2e.src_bag = 2;
+    e2e.src_slot = 0;
+    e2e.dst_bag = 3;
+    e2e.dst_slot = 4;
+    std::strncpy(e2e.transaction_id, "p4-test-3", kMaxTransactionIdChars);
+    e2e.source = src;
+    e2e.committed = committed;
+    txn_build_pending(&e2e);
+    CHECK(valid_pending_transfer_domain(e2e.pending));
+    CHECK_EQ(e2e.pending.payload_size, committed.payload_size);
+    CHECK_EQ((int)e2e.pending.source_payload_size, 0);
+
+    // ---- 状态边界失败注入 ----
+    State st{};
+    st.types = {4, 4, 4, 0, 0};
+    normalize(&st);
+
+    // orig→ext：logical 应用 → 目标=committed；kOriginalUpdated 失败 → 目标还原、pending 清。
+    st.items[1][3] = o2e.previous_dst;
+    st.items[0][2] = {};
+    st.pending = {};
+    txn_apply_logical(&st, o2e);
+    CHECK(item_matches_payload(st.items[1][3], o2e.pending));
+    st.pending = o2e.pending;
+    txn_rollback_logical(&st, o2e, TxnStage::kOriginalUpdated);
+    CHECK(p44_item_identity(st.items[1][3], o2e.previous_dst));
+    CHECK(!st.pending.valid);
+
+    // orig→ext：kPendingRecorded 失败 → 物品未提交还原（仍为 previous）、pending 清。
+    st.items[1][3] = o2e.committed;
+    st.pending = o2e.pending;
+    txn_rollback_logical(&st, o2e, TxnStage::kPendingRecorded);
+    CHECK(p44_item_identity(st.items[1][3], o2e.committed));
+    CHECK(!st.pending.valid);
+
+    // committed 后不做猜测性逆转。
+    st.pending = o2e.pending;
+    txn_rollback_logical(&st, o2e, TxnStage::kCommitted);
+    CHECK(st.pending.valid);
+    st.pending = {};
+
+    // ext→ext：双槽应用；kLogicalUpdated 失败 → source/previous_dst 双还原、pending 清。
+    e2e.previous_dst = src;
+    st.items[2][0] = e2e.source;
+    st.items[3][4] = src;
+    st.pending = e2e.pending;
+    txn_apply_logical(&st, e2e);
+    CHECK(st.items[2][0].category == 0 && st.items[2][0].count == 0);
+    CHECK(item_matches_payload(st.items[3][4], e2e.pending));
+    txn_rollback_logical(&st, e2e, TxnStage::kLogicalUpdated);
+    CHECK(p44_item_identity(st.items[2][0], e2e.source));
+    CHECK(p44_item_identity(st.items[3][4], e2e.previous_dst));
+    CHECK(!st.pending.valid);
+
+    // ext→orig：logical 阶段不改逻辑数组（清源发生在原版接管成功后）。
+    st.items[1][1] = e2o.source;
+    st.pending = e2o.pending;
+    txn_apply_logical(&st, e2o);
+    CHECK(p44_item_identity(st.items[1][1], e2o.source));
+    txn_rollback_logical(&st, e2o, TxnStage::kOriginalUpdated);
+    CHECK(p44_item_identity(st.items[1][1], e2o.source));
+    CHECK(!st.pending.valid);
+
+    // recovery_action：ext→ext 目标匹配 committed → kComplete；不匹配 → kRollback。
+    State rs{};
+    rs.pending = e2e.pending;
+    rs.items[3][4] = e2e.committed;
+    CHECK(recovery_action(rs, rs.pending) == RecoveryAction::kComplete);
+    rs.items[3][4] = e2e.previous_dst;
+    CHECK(recovery_action(rs, rs.pending) == RecoveryAction::kRollback);
+
+    // pending JSON 往返：transactionId 与 ext→ext 方向保留。
+    State ps{};
+    ps.pending = e2e.pending;
+    const std::string json = state_json(ps);
+    PendingTransfer back{};
+    CHECK(parse_pending_transfer_result(json.c_str(), &back) ==
+          PendingTransferParseResult::kOk);
+    CHECK(back.valid);
+    CHECK(std::strcmp(back.transaction_id, "p4-test-3") == 0);
+    CHECK_EQ((int)back.direction, (int)kTransferExtensionToExtension);
+
+    // 无 id 的历史 pending JSON（向后兼容）解析为空 id。
+    std::string legacy_json = json;
+    const std::string id_field = ",\"transactionId\":\"p4-test-3\"";
+    const size_t id_pos = legacy_json.find(id_field);
+    CHECK(id_pos != std::string::npos);
+    legacy_json.erase(id_pos, id_field.size());
+    PendingTransfer legacy_back{};
+    CHECK(parse_pending_transfer_result(legacy_json.c_str(), &legacy_back) ==
+          PendingTransferParseResult::kOk);
+    CHECK_EQ(legacy_back.transaction_id[0], '\0');
+}
+
 int main() {
     test_json_escape();
     test_base64_decode();
@@ -1245,6 +1426,7 @@ int main() {
     test_tiles_parse();
     test_ownership_ledger();
     test_ownership_ledger_p43();
+    test_p44_transaction_stages();
     test_unequip_bag();
     test_equip_bag();
     test_nav_bfs();
