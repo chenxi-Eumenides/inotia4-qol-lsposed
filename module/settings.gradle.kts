@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "inotia4-export-module"
+rootProject.name = "inotia4-qol-lsposed"
 include(":app")
