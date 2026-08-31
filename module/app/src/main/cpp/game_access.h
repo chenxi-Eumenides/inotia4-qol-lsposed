@@ -161,6 +161,7 @@ extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;
 extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
 extern UiDescSetOffFn fn_ui_desc_set_off;
+extern UiEquipMakeDescFn fn_ui_equip_make_desc;
 // P3 扩展袋切换音效（原版袋按钮同款：SOUNDSYSTEM_Play(0x11)）
 typedef void (*SoundSystemPlayFn)(int16_t id);
 extern SoundSystemPlayFn fn_sound_system_play;

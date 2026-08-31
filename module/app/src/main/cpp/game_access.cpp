@@ -157,6 +157,7 @@ UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff = nullptr;
 UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index = nullptr;
 UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area = nullptr;
 UiDescSetOffFn fn_ui_desc_set_off = nullptr;
+UiEquipMakeDescFn fn_ui_equip_make_desc = nullptr;
 SoundSystemPlayFn fn_sound_system_play = nullptr;
 uint8_t* g_snd_fx = nullptr;
 ControlItemSetItemFn fn_control_item_set_item = nullptr;
@@ -455,6 +456,7 @@ bool bridge_init() {
     fn_control_object_set_user_type = reinterpret_cast<ControlObjectSetUserTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_USER_TYPE_VMA", F_CONTROL_OBJECT_SET_USER_TYPE_VMA));
     fn_touch_handle_unuse_control_event_move = reinterpret_cast<TouchHandleUnuseControlEventMoveFn>(g_base + fn_resolve("F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA", F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA));
     fn_ui_desc_set_off = reinterpret_cast<UiDescSetOffFn>(g_base + fn_resolve("F_UIDESC_SET_OFF_VMA", F_UIDESC_SET_OFF_VMA));
+    fn_ui_equip_make_desc = reinterpret_cast<UiEquipMakeDescFn>(g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA));
     fn_touch_handle_set_cursor = reinterpret_cast<TouchHandleSetCursorFn>(g_base + fn_resolve("F_TOUCHHANDLE_SET_CURSOR_VMA", F_TOUCHHANDLE_SET_CURSOR_VMA));
     fn_ui_equip_inven_item_control_event_proc = reinterpret_cast<UiEquipInvenItemControlEventProcFn>(g_base + fn_resolve("F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA));
     fn_item_draw_porting = reinterpret_cast<ItemDrawPortingFn>(g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA", F_ITEM_DRAW_PORTING_VMA));
