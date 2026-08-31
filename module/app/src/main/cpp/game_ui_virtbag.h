@@ -3,6 +3,7 @@
 #include <jni.h>
 
 #include <string>
+#include <cstdint>
 
 void virtual_bag_ui_start_auto_inject();
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
@@ -11,6 +12,8 @@ bool virtual_bag_module_view_installed();
 bool virtual_bag_original_item_input_blocked();
 bool set_virtual_bag_enabled(bool enabled);
 bool virtual_bag_enabled();
+bool virtual_bag_is_inventory_enter(uintptr_t enter);
+int virtual_bag_inventory_state_id();
 void virtual_bag_prepare_main_menu();
 void virtual_bag_prepare_save_slot_load();
 bool virtual_bag_save_game();

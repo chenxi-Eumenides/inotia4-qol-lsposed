@@ -2969,6 +2969,18 @@ void prepare_main_menu_locked() {
 
 }  // namespace
 
+bool virtual_bag_is_inventory_enter(uintptr_t enter) {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    return g_state_entry != nullptr &&
+           enter == *reinterpret_cast<uintptr_t*>(g_state_entry + 0x10);
+}
+
+int virtual_bag_inventory_state_id() {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (g_state_entry == nullptr) return -1;
+    return *reinterpret_cast<int32_t*>(g_state_entry);
+}
+
 // G-8：item proc 0x02（drop 到扩展格控件）路由——src=模块拖动状态（press 时
 // projection_slot_at 记录），dst=落点控件索引。成功返回 true（wrapper 吞原版事件）。
 bool virtual_bag_projection_drop_to_slot(void* dst_control, void* src_control) {

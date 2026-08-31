@@ -10,6 +10,26 @@
 #include "game_ui_virtbag.h"
 
 #include <cstdio>
+#include <chrono>
+#include <thread>
+
+namespace {
+
+uint32_t popup_stack_count() {
+    if (g_popup_stack == nullptr) return 0;
+    return *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(g_popup_stack) + 8);
+}
+
+bool wait_for_popup_stack_empty() {
+    constexpr int kMaxWaitMs = 1000;
+    for (int waited = 0; waited < kMaxWaitMs; waited += 16) {
+        if (popup_stack_count() == 0) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    return popup_stack_count() == 0;
+}
+
+}  // namespace
 
 std::string data_debug_ui_json() {
     char buf[4096];
@@ -97,6 +117,7 @@ uintptr_t data_popup_top_vma() {
     if (data == 0) return 0;
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * 0x40;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + 0x10);
+    if (virtual_bag_is_inventory_enter(enter)) return F_PANEL_INVENTORY_ENTER;
     return enter > g_base ? enter - g_base : 0;
 }
 
@@ -215,6 +236,7 @@ std::string data_op_panel_close() {
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * 0x40;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + 0x10);
     uintptr_t vma = enter > g_base ? enter - g_base : 0;
+    if (virtual_bag_is_inventory_enter(enter)) vma = F_PANEL_INVENTORY_ENTER;
     bool is_panel = false;
     switch (vma) {
         case F_PANEL_CHARACTER_INFO_ENTER: case F_PANEL_CHOICE_ENTER: case F_PANEL_INVENTORY_ENTER: case F_PANEL_INPUT_COUNT_ENTER:
@@ -285,12 +307,40 @@ std::string data_op_panel_open(const std::string& panel) {
     // 扫描 state list 找 enter == g_base+target 的 state id
     uint8_t* list = *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
     if (list == nullptr) return op_err("state list not ready");
-    int state_id = -1;
-    for (int i = 0; i < 27; ++i) {
+    int state_id = p == "inventory" ? virtual_bag_inventory_state_id() : -1;
+    for (int i = 0; state_id < 0 && i < 27; ++i) {
         uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * 0x40 + 0x10);
         if (enter == g_base + target) { state_id = i; break; }
     }
     if (state_id < 0) return op_err("panel state not found");
+
+    // UI_SetPopupProcessInfo(1, id) 是 Push，不会替换已有栈顶。相同面板直接幂等返回；
+    // 切换面板先走官方 Pop，并等待主循环真正清空栈，避免 Pop/Open 同帧再次叠加。
+    uintptr_t top_vma = data_popup_top_vma();
+    if (top_vma != 0) {
+        if (top_vma == target) return op_ok();
+        bool top_is_panel = false;
+        switch (top_vma) {
+            case F_PANEL_CHARACTER_INFO_ENTER: case F_PANEL_INVENTORY_ENTER:
+            case F_PANEL_MERCENARY_ENTER: case F_PANEL_QUESTS_ENTER:
+            case F_PANEL_CRAFT_ENTER: case F_PANEL_NPC_REST_ENTER:
+            case F_PANEL_NPC_REVIVE_ENTER: case F_PANEL_OPTIONS_ENTER:
+            case F_PANEL_SAVE_SLOT_ENTER: case F_PANEL_CHAR_SELECT_ENTER:
+            case F_PANEL_SHORTCUT_ENTER: case F_PANEL_SKILLS_ENTER:
+            case F_PANEL_SHOP_ENTER: case F_PANEL_SETTINGS_ENTER:
+            case F_PANEL_WORLD_MAP_ENTER: case F_PANEL_IN_APP_ENTER:
+            case F_PANEL_DAILY_REWARD_ENTER:
+            case F_PANEL_UNK1_ENTER: case F_PANEL_UNK2_ENTER:
+            case F_PANEL_UNK3_ENTER: case F_PANEL_UNK4_ENTER:
+            case F_PANEL_UNK5_ENTER:
+                top_is_panel = true;
+                break;
+            default: break;
+        }
+        if (!top_is_panel) return op_err("top of stack is not a panel");
+        fn_ui_set_popup_process_info(3, 0);
+        if (!wait_for_popup_stack_empty()) return op_err("panel close pending");
+    }
     fn_ui_set_popup_process_info(1, state_id);
     return op_ok();
 }
