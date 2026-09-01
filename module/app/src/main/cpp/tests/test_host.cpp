@@ -1424,6 +1424,74 @@ static void test_p44_transaction_stages() {
     CHECK_EQ(legacy_back.transaction_id[0], '\0');
 }
 
+static void test_p52_drag_session() {
+    using namespace virtual_bag;
+
+    ExtensionDragSession session{};
+    CHECK_EQ(session_begin(&session, 17, 42, 2, 3), DragTransition::kAdvanced);
+    CHECK_EQ(session.phase, DragPhase::kPressed);
+    CHECK_EQ(session_on_native_moving(&session, 42), DragTransition::kAdvanced);
+    CHECK_EQ(session.phase, DragPhase::kNativeMoving);
+    CHECK_EQ(session_on_native_moving(&session, 42), DragTransition::kIdempotentNoop);
+    CHECK_EQ(session_resolve_target(&session, 42, DragTargetKind::kExtensionSlot),
+             DragTransition::kAdvanced);
+    CHECK_EQ(session.phase, DragPhase::kTargetResolved);
+    CHECK_EQ(session_begin_transaction(&session, 42), DragTransition::kAdvanced);
+    CHECK(session_may_create_transaction(session));
+    CHECK(session_claim_transaction(&session));
+    CHECK(!session_may_create_transaction(session));
+    CHECK(!session_claim_transaction(&session));
+    CHECK_EQ(session_on_release(&session, 42), DragTransition::kAdvanced);
+    CHECK_EQ(session.release_sequence, 1u);
+    CHECK_EQ(session_finish_transaction(&session, true), DragTransition::kAdvanced);
+    CHECK_EQ(session.phase, DragPhase::kCommitted);
+    CHECK_EQ(session_on_release(&session, 42), DragTransition::kIdempotentNoop);
+
+    // 非法跳转不能绕过原生 moving、目标解析或事务阶段。
+    ExtensionDragSession illegal{};
+    CHECK_EQ(session_begin_transaction(&illegal, 0), DragTransition::kIllegal);
+    CHECK_EQ(session_on_release(&illegal, 0), DragTransition::kIllegal);
+    CHECK_EQ(session_begin(&illegal, 18, 42, 1, 1), DragTransition::kAdvanced);
+    CHECK_EQ(session_begin(&illegal, 19, 42, 1, 1), DragTransition::kIllegal);
+    CHECK_EQ(session_resolve_target(&illegal, 42, DragTargetKind::kOriginalBag),
+             DragTransition::kIllegal);
+
+    // stale generation 和已取消 session 都只做幂等 no-op，不创建事务。
+    CHECK_EQ(session_on_native_moving(&illegal, 41), DragTransition::kIdempotentNoop);
+    CHECK_EQ(session_on_cancel(&illegal, 42), DragTransition::kAdvanced);
+    CHECK_EQ(session_on_cancel(&illegal, 42), DragTransition::kIdempotentNoop);
+    CHECK(!session_may_create_transaction(illegal));
+    CHECK_EQ(session_begin_transaction(&illegal, 42), DragTransition::kIllegal);
+
+    ExtensionDragSession cancel_from_target{};
+    CHECK_EQ(session_begin(&cancel_from_target, 20, 7, 0, 0), DragTransition::kAdvanced);
+    CHECK_EQ(session_on_native_moving(&cancel_from_target, 7), DragTransition::kAdvanced);
+    CHECK_EQ(session_resolve_target(&cancel_from_target, 7, DragTargetKind::kOriginalBag),
+             DragTransition::kAdvanced);
+    CHECK_EQ(session_on_cancel(&cancel_from_target, 7), DragTransition::kAdvanced);
+    CHECK_EQ(cancel_from_target.phase, DragPhase::kCancelled);
+
+    // 无效目标进入 terminal rejected；任务袋 sentinel 与扩展/原版编号空间隔离。
+    ExtensionDragSession rejected{};
+    CHECK_EQ(session_begin(&rejected, 21, 8, 0, 0), DragTransition::kAdvanced);
+    CHECK_EQ(session_on_native_moving(&rejected, 8), DragTransition::kAdvanced);
+    CHECK_EQ(session_resolve_target(&rejected, 8, DragTargetKind::kTaskBagRejected),
+             DragTransition::kAdvanced);
+    CHECK_EQ(rejected.phase, DragPhase::kRejected);
+    CHECK_EQ(session_on_cancel(&rejected, 8), DragTransition::kIllegal);
+    CHECK(!session_may_create_transaction(rejected));
+
+    CHECK_EQ(classify_drag_target(0, 0), DragTargetKind::kOriginalBag);
+    CHECK_EQ(classify_drag_target(kOriginalTaskBag, 0), DragTargetKind::kTaskBagRejected);
+    CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 4), DragTargetKind::kExtensionSlot);
+    CHECK_EQ(classify_drag_target(kExtensionLogicalBagLast, 15), DragTargetKind::kExtensionSlot);
+    CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 0, true),
+             DragTargetKind::kExtensionTab);
+    CHECK_EQ(classify_drag_target(kBagCount, 0), DragTargetKind::kTaskBagRejected);
+    CHECK_EQ(classify_drag_target(0, kSlotCount), DragTargetKind::kInvalid);
+    CHECK_EQ(classify_drag_target(0, 0, false, true), DragTargetKind::kCancel);
+}
+
 static void test_p45_isolation() {
     using virtual_bag::IsolationRecord;
     namespace ir = virtual_bag::isolation_reason;
@@ -1605,6 +1673,7 @@ int main() {
     test_ownership_ledger();
     test_ownership_ledger_p43();
     test_p44_transaction_stages();
+    test_p52_drag_session();
     test_p45_isolation();
     test_unequip_bag();
     test_equip_bag();
