@@ -244,6 +244,9 @@ constexpr uintptr_t F_ITEMPOOL_FREE_VMA = 0x108160;     // void (void*) ITEMPOOL
 constexpr uintptr_t G_TOUCH_STATE_VMA = 0x301000 + 0xcf8; // TouchHandle 全局状态（匿名 .bss）：+0x30=拖动中控件 +0x50=释放参数(+0x50=释放控件 +0x58=拖动源控件 +0x60=释放坐标)
 constexpr size_t TOUCH_STATE_MOVING_CTRL = 0x30;        // TouchHandle_Event 0x17 按下/拖动中控件
 constexpr size_t TOUCH_STATE_DROP_SRC_CTRL = 0x58;      // TouchHandle_SetReleaseEvent 写入的拖动源控件
+constexpr size_t TOUCH_STATE_RELEASE_X = 0x60;          // TouchHandle release 坐标 x
+constexpr size_t TOUCH_STATE_RELEASE_Y = 0x68;          // TouchHandle release 坐标 y
+constexpr size_t ITEM_CTRL_ITEM = 0x00;                 // ControlItem 私有数据 data[0] 的物品指针
 constexpr size_t ITEM_CTRL_MOVING_FLAG = 0x0a;          // 物品控件数据块移动标志（ContorlItem_SetMoving 写）
 constexpr size_t ITEM_CTRL_ON_FLAG = 0x0b;              // 物品控件数据块选中标志（ContorlItem_SetOn 写）
 

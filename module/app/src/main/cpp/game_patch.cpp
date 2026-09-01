@@ -218,12 +218,18 @@ std::string data_recover_after_hive_block() {
 }
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
+    const uint64_t observation_token = virtual_bag_observe_item_proc_pre(control, event, x2, param);
+    const auto finish = [observation_token, control, event, x2, param](uint64_t result) {
+        virtual_bag_observe_item_proc_post(observation_token, control, event, x2, param, result);
+        return result;
+    };
     // G-8：投影拖动 drop 到扩展格（0x02）→ 路由 ext→ext 事务，抑制原版
     // INVEN_MoveItem（借出对象不在 INVEN，原版移动不可靠）。
     if (event == 0x2 && param != nullptr && param != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+        virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
         if (virtual_bag_projection_drop_to_slot(control, ctrl_src)) {
-            return 1;
+            return finish(1);
         }
     }
     // G-7：扩展视图内只拦截 drop（0x04，借出对象不得拖入原版袋——SaveItemOnEmpty
@@ -234,16 +240,17 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         if (fn_ui_equip_get_item_slot_index != nullptr &&
             fn_ui_equip_get_item_slot_index(control) >= 16) {
             MOVE_LOG("drop suppressed: dst is extension tab control=%p", control);
-            return 0;
+            return finish(0);
         }
         MOVE_LOG("move_merge: drop suppressed in extension view control=%p",
                  control);
-        return 0;
+        return finish(0);
     }
     if (event == 4 && param != nullptr && fn_control_object_get_data != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
         fn_get_cumulate_count != nullptr && fn_get_bit != nullptr && fn_inven_move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+        virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
         void* src_data = ctrl_src != nullptr ? fn_control_object_get_data(ctrl_src) : nullptr;
         void* dst_data = fn_control_object_get_data(control);
         void* item_a = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
@@ -260,7 +267,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 const int src_slot = ctrl_src != nullptr ? fn_ui_equip_get_item_slot_index(ctrl_src) : -1;
                 const int count = fn_get_cumulate_count(item_a);
                 const int result = fn_inven_move_item(item_a, count, bag, dst_slot);
-                if (!result) return 0;
+                if (!result) return finish(0);
                 if (virtual_bag_module_view_installed()) {
                     virtual_bag_sync_projected_slot(bag, src_slot);
                     virtual_bag_sync_projected_slot(bag, dst_slot);
@@ -272,16 +279,16 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 }
                 MOVE_LOG("move_merge: merged bag=%d src=%d dst=%d count=%d", bag, src_slot,
                          dst_slot, count);
-                return 0;
+                return finish(0);
             }
         }
     }
-    if (fn_ui_equip_inven_item_control_event_proc == nullptr) return 0;
+    if (fn_ui_equip_inven_item_control_event_proc == nullptr) return finish(0);
     const uint64_t result = fn_ui_equip_inven_item_control_event_proc(control, event, x2, param);
     if (virtual_bag_module_view_installed()) {
         virtual_bag_sync_projected_bag();
     }
-    return result;
+    return finish(result);
 }
 
 bool set_move_merge_enabled(bool enabled) {

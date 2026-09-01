@@ -21,6 +21,14 @@ bool virtual_bag_sync_projected_slot(int display_bag, int slot);
 bool virtual_bag_sync_projected_bag();
 bool virtual_bag_sync_projected_item_control(void* control);
 
+// P5.1 read-only protocol observation. These functions never retain or log native pointers.
+// The opaque token only correlates one proc invocation's pre/source/post observations.
+uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* x2, void* param);
+void virtual_bag_observe_item_proc_source(uint64_t observation_token, void* control, uint64_t event,
+                                          void* x2, void* param, void* source_control);
+void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* control, uint64_t event,
+                                        void* x2, void* param, uint64_t result);
+
 std::string data_virtual_bag_ui_status_json();
 std::string data_virtual_bag_test_equip(int index, int bag_type);
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count);
