@@ -3386,9 +3386,12 @@ uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* 
     }
     g_p5_observation_active = true;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    // 0x10 is the native drag-start query delivered to the item proc. At this
+    // point the proc control itself is the source; no TouchState field is inferred.
+    void* source_control = event == 0x10 ? control : nullptr;
     const uint64_t observation_token =
         log_p5_observation_locked("item-pre", control, event, x2 != nullptr, param != nullptr,
-                                  nullptr, false, 0);
+                                  source_control, false, 0);
     if (observation_token == 0) g_p5_observation_active = false;
     return observation_token;
 }

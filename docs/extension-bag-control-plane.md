@@ -382,6 +382,16 @@
 | Logs | 观察到投影目标 `target_projection=0/1`、`target_projection=0/2`、`target_projection=0/6`、`target_projection=0/7`；出现至少 7 次 `phase=item-pre event=0x10`，对应 `item-post result=0x1`，并持续出现 `moving=1`。本轮 `projection-moving-clear` 为 0，未出现 `FATAL`/`SIGSEGV`；`source_known=1` 仍为 0。 |
 | Result / User verdict | `P5.1 通过（拖动建立）`：投影物品已进入原版 TouchHandle 的 native moving，`MOVING_CTRL` 跨帧保留，符合“图标跟随动画”的建立条件；此前无动画的根因得到验证为面板层捕获/清理。`source identity` 尚未建立，故 P5 完整验收、三方向事务和 Overall 仍为 `NOT_ACCEPTED`，不得接通提交路径。 |
 
+#### E-2026-09-01-11：P5.1 投影物品落到投影目标的完整 source/drop 样本
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | E-10 修复后的 APK；投影物品长按后释放到另一个已占用投影槽，验证 native source、drop source 和 release 关联；不提交事务。 |
+| Source / Build identity | `com.inotia4.qol`；APK 已重新安装；日志文件 `.tmp/p5-evidence-source-drop.log`。 |
+| Device / Config | `192.168.3.54:5555`，Android API 32；采集期间 `log.tag.Inotia4VirtBag=DEBUG`，采集后关闭。 |
+| Logs | 出现 `phase=item-source event=0x2`，且 `source_known=1`、`source_type=2`、`source_projection=0/1`、`drop_source=1`、`drop_source_match=1`、`moving_source=1`；同一行 `target_projection=0/1`、`moving=1`、`moving_target=1`。本轮 `item-source` 1 次、`source_known=1` 1 次、`drop_source=1` 10 次、`moving=1` 616 次，未出现 `FATAL`/`SIGSEGV`。 |
+| Result / User verdict | `P5.1 通过（source/drop 建立）`：完整落点释放时，投影 source 已进入 `param+8`/`TOUCH_STATE_DROP_SRC_CTRL` 观测链，source 与 target 身份一致；之前 E-10 的 `source_known=0` 仅因未完成到目标控件的 release，不是 ABI 缺失。P5 完整验收仍需取消、stale generation、ownership 归还和三方向事务矩阵，Overall 继续 `NOT_ACCEPTED`。 |
+
 #### 已引用、证据块待补的历史记录
 
 - `E-2026-08-28-03`（P1）与 `E-2026-08-29-01`（P2）已在 §9 与 §13 引用，但完整字段尚未回填至本节；本次不从旧日志推断或补造缺失字段。
