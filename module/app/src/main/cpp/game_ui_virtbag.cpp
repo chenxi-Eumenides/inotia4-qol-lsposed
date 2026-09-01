@@ -163,6 +163,231 @@ struct ExtensionDrag {
 
 ExtensionDrag g_extension_drag{};
 
+std::atomic<uint64_t> g_p5_observation_sequence{0};
+std::atomic<uint64_t> g_p5_last_item_query_sample_ms{0};
+std::atomic<uint64_t> g_p5_last_panel_move_sample_ms{0};
+thread_local bool g_p5_observation_active = false;
+void* g_tab_bag_items[virtual_bag::kBagCount] = {};
+
+int extension_tab_index(void* ctrl);
+bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
+
+constexpr uint64_t kP5SampleIntervalMs = 100;
+
+bool p5_observation_enabled() {
+    return __android_log_is_loggable(ANDROID_LOG_DEBUG, VIRTBAG_TAG, ANDROID_LOG_INFO) != 0;
+}
+
+bool p5_panel_observation_enabled() {
+    return !g_p5_observation_active && p5_observation_enabled();
+}
+
+uint64_t p5_steady_now_ms() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+bool p5_take_sample(std::atomic<uint64_t>* last_sample_ms) {
+    const uint64_t now = p5_steady_now_ms();
+    uint64_t previous = last_sample_ms->load(std::memory_order_relaxed);
+    for (;;) {
+        if (now >= previous && now - previous < kP5SampleIntervalMs) return false;
+        if (last_sample_ms->compare_exchange_weak(previous, now, std::memory_order_relaxed,
+                                                  std::memory_order_relaxed)) {
+            return true;
+        }
+    }
+}
+
+bool p5_should_begin_item_observation(uint64_t event) {
+    return event != 0x10 || p5_take_sample(&g_p5_last_item_query_sample_ms);
+}
+
+bool p5_should_emit_observation(const char* phase, uint64_t event) {
+    if (!p5_observation_enabled()) return false;
+    if (g_p5_observation_active && std::strncmp(phase, "panel-", 6) == 0) return false;
+    if (event != 0x19 || std::strncmp(phase, "panel-", 6) != 0) return true;
+    if (std::strcmp(phase, "panel-entry") == 0) return false;
+    return p5_take_sample(&g_p5_last_panel_move_sample_ms);
+}
+
+class P5ObservationScope {
+public:
+    P5ObservationScope() : was_active_(g_p5_observation_active) {
+        g_p5_observation_active = true;
+    }
+
+    ~P5ObservationScope() {
+        g_p5_observation_active = was_active_;
+    }
+
+private:
+    bool was_active_;
+};
+
+enum class P5DataDomain : int {
+    kUnavailable = -1,
+    kNoData = 0,
+    kEmpty = 1,
+    kProjectedModuleItem = 2,
+    kModuleTabItem = 3,
+    kOriginalItem = 4,
+    kUnknownItem = 5,
+};
+
+struct P5ControlObservation {
+    int user_type = -1;
+    int original_slot = -1;
+    int projection_bag = -1;
+    int projection_slot = -1;
+    int tab_index = -1;
+    P5DataDomain data_domain = P5DataDomain::kUnavailable;
+    int parent_depth = -1;
+    bool parent_reaches_projection_root = false;
+};
+
+struct P5TouchObservation {
+    bool available = false;
+    bool moving_present = false;
+    bool drop_source_present = false;
+    bool moving_matches_target = false;
+    bool drop_source_matches_target = false;
+    bool moving_matches_source = false;
+    bool drop_source_matches_source = false;
+    int64_t release_x = -1;
+    int64_t release_y = -1;
+};
+
+P5ControlObservation p5_control_observation_locked(void* control) {
+    P5ControlObservation observation;
+    if (control == nullptr) return observation;
+
+    if (fn_control_object_get_user_type != nullptr) {
+        observation.user_type = static_cast<int>(fn_control_object_get_user_type(control));
+    }
+    if (fn_ui_equip_get_item_slot_index != nullptr) {
+        observation.original_slot = fn_ui_equip_get_item_slot_index(control);
+    }
+    observation.tab_index = extension_tab_index(control);
+
+    if (fn_control_object_get_data != nullptr) {
+        void* data = fn_control_object_get_data(control);
+        if (data == nullptr) {
+            observation.data_domain = P5DataDomain::kNoData;
+        } else {
+            void* item = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ITEM);
+            if (item == nullptr) {
+                observation.data_domain = P5DataDomain::kEmpty;
+            } else {
+                int module_bag = -1;
+                int module_slot = -1;
+                if (module_slot_of_item_locked(item, &module_bag, &module_slot)) {
+                    observation.data_domain = P5DataDomain::kProjectedModuleItem;
+                } else if (observation.tab_index >= 0 &&
+                           g_tab_bag_items[observation.tab_index] == item) {
+                    observation.data_domain = P5DataDomain::kModuleTabItem;
+                } else if (observation.original_slot >= 0 &&
+                           observation.original_slot < virtual_bag::kSlotCount) {
+                    observation.data_domain = P5DataDomain::kOriginalItem;
+                } else {
+                    observation.data_domain = P5DataDomain::kUnknownItem;
+                }
+            }
+        }
+    }
+
+    constexpr int kP5ParentDepthLimit = 16;
+    void* current = control;
+    observation.parent_depth = 0;
+    while (current != nullptr && observation.parent_depth < kP5ParentDepthLimit) {
+        if (current == g_projected_item_root) {
+            observation.parent_reaches_projection_root = true;
+            break;
+        }
+        void* parent = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(current) + CO_PARENT);
+        if (parent == current) break;
+        current = parent;
+        ++observation.parent_depth;
+    }
+
+    if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
+        g_projected_item_root == nullptr || fn_ctrl_get_count == nullptr ||
+        fn_control_object_get_child == nullptr) {
+        return observation;
+    }
+    const int child_count = static_cast<int>(fn_ctrl_get_count(g_projected_item_root));
+    const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
+    const int limit = capacity < child_count ? capacity : child_count;
+    for (int slot = 0; slot < limit; ++slot) {
+        if (fn_control_object_get_child(g_projected_item_root, slot) == control) {
+            observation.projection_bag = g_module_view_index;
+            observation.projection_slot = slot;
+            break;
+        }
+    }
+    return observation;
+}
+
+P5TouchObservation p5_touch_observation_locked(void* target_control, void* source_control) {
+    P5TouchObservation observation;
+    if (g_base == 0) return observation;
+
+    const uint8_t* state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+    const void* moving = *reinterpret_cast<const void* const*>(state + TOUCH_STATE_MOVING_CTRL);
+    const void* drop_source =
+        *reinterpret_cast<const void* const*>(state + TOUCH_STATE_DROP_SRC_CTRL);
+    observation.available = true;
+    observation.moving_present = moving != nullptr;
+    observation.drop_source_present = drop_source != nullptr;
+    observation.moving_matches_target =
+        target_control != nullptr && moving != nullptr && moving == target_control;
+    observation.drop_source_matches_target =
+        target_control != nullptr && drop_source != nullptr && drop_source == target_control;
+    observation.moving_matches_source = source_control != nullptr && moving == source_control;
+    observation.drop_source_matches_source =
+        source_control != nullptr && drop_source == source_control;
+    observation.release_x = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_X);
+    observation.release_y = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_Y);
+    return observation;
+}
+
+uint64_t log_p5_observation_locked(const char* phase, void* target_control, uint64_t event,
+                                   bool x2_present, bool param_present, void* source_control,
+                                   bool result_known, uint64_t result, int64_t event_x = -1,
+                                   int64_t event_y = -1, uint64_t related_sequence = 0) {
+    if (!p5_should_emit_observation(phase, event)) return 0;
+    P5ObservationScope observation_scope;
+    const P5ControlObservation target = p5_control_observation_locked(target_control);
+    const P5ControlObservation source = p5_control_observation_locked(source_control);
+    const P5TouchObservation touch =
+        p5_touch_observation_locked(target_control, source_control);
+    const uint64_t sequence = g_p5_observation_sequence.fetch_add(1) + 1;
+    VIRTBAG_LOG(
+        "p5obs seq=%llu related_seq=%llu phase=%s event=0x%llx x2=%d param=%d result_known=%d result=0x%llx event_x=%lld event_y=%lld target_type=%d target_slot=%d target_projection=%d/%d target_tab=%d target_data=%d target_parent_depth=%d target_parent_projection_root=%d source_known=%d source_type=%d source_slot=%d source_projection=%d/%d source_tab=%d source_data=%d source_parent_depth=%d source_parent_projection_root=%d touch=%d moving=%d drop_source=%d moving_target=%d drop_target=%d moving_source=%d drop_source_match=%d release_x=%lld release_y=%lld mode=%d selected=%d overlay=%d overlay_index=%d inventory_generation=%llu tab_generation=%llu capture=%d legacy_drag=%d",
+        static_cast<unsigned long long>(sequence),
+        static_cast<unsigned long long>(related_sequence), phase,
+        static_cast<unsigned long long>(event), x2_present ? 1 : 0, param_present ? 1 : 0,
+        result_known ? 1 : 0, static_cast<unsigned long long>(result),
+         static_cast<long long>(event_x), static_cast<long long>(event_y), target.user_type,
+         target.original_slot, target.projection_bag, target.projection_slot, target.tab_index,
+         static_cast<int>(target.data_domain), target.parent_depth,
+         target.parent_reaches_projection_root ? 1 : 0, source_control != nullptr ? 1 : 0,
+         source.user_type, source.original_slot, source.projection_bag, source.projection_slot,
+         source.tab_index, static_cast<int>(source.data_domain), source.parent_depth,
+         source.parent_reaches_projection_root ? 1 : 0,
+        touch.available ? 1 : 0, touch.moving_present ? 1 : 0,
+        touch.drop_source_present ? 1 : 0, touch.moving_matches_target ? 1 : 0,
+        touch.drop_source_matches_target ? 1 : 0, touch.moving_matches_source ? 1 : 0,
+        touch.drop_source_matches_source ? 1 : 0,
+        static_cast<long long>(touch.release_x), static_cast<long long>(touch.release_y),
+        static_cast<int>(g_virtual_bag_state.mode), g_virtual_bag_state.selected,
+        g_module_view_installed ? 1 : 0, g_module_view_index,
+        static_cast<unsigned long long>(g_inventory_generation),
+        static_cast<unsigned long long>(g_extension_tab_generation),
+        g_extension_touch_capture ? 1 : 0, g_extension_drag.active ? 1 : 0);
+    return sequence;
+}
+
 void extension_tab_button_clicked(void* ctrl);
 
 int extension_tab_index(void* ctrl) {
@@ -176,8 +401,6 @@ int extension_tab_index(void* ctrl) {
 // data[0] 放真实物品）。按袋 types 物化（CreateItem(category)，types[i] 即
 // ITEMDATABASE 记录下标 = 背包 category，1/2/3/4 → 手提/小/中/大包），
 // 卸下/降级时经延迟释放退役（对象可能仍被 TouchState 引用，不真释放）。
-void* g_tab_bag_items[virtual_bag::kBagCount] = {};
-
 void defer_item_free_locked(void* item);
 void refresh_tab_bag_items_locked() {
     for (int i = 0; i < virtual_bag::kBagCount; ++i) {
@@ -219,6 +442,11 @@ void queue_extension_tab_click_locked(int extension_bag);
 void* touch_moving_item_control_locked();
 bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control);
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
+    const uint64_t observation_token = virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);
+    const auto finish = [observation_token, ctrl, event, x2, param](uint64_t result) {
+        virtual_bag_observe_item_proc_post(observation_token, ctrl, event, x2, param, result);
+        return result;
+    };
     if (event == 0x02) {
         {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -227,7 +455,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                 queue_extension_tab_click_locked(index);
             }
         }
-        return 1;  // 松开确认已处理（原版袋标签点击切袋同样返回 1，b8c60）
+        return finish(1);  // 松开确认已处理（原版袋标签点击切袋同样返回 1，b8c60）
     }
     // 0x04 = 拖动 drop 到袋控件：背包物品（category 1..4）落到扩展标签 =
     // 装备到该扩展位——原版拖放装备（InvenBagControlEventProc b8b30 块，写
@@ -241,13 +469,13 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         if (index >= 0 && moving != nullptr) {
             try_equip_on_extension_tab_drop_locked(index, moving);
         }
-        return 0;
+        return finish(0);
     }
     // 其余事件（含 0x10 拖动发起查询：TouchHandle_MoveOn @a2fec-a304c 派发，
     // proc 返回 1 即登记 moving 控件）一律返回 0——兜底返回 1 会让标签成为
     // 拖动源（标签可被拖出背包物品的真因，且拖出物可被 drop 入库造成复制）。
     // 原版控件对未处理事件同样返回 0。
-    return 0;
+    return finish(0);
 }
 
 // 扩展标签 = ControlItem（与原版袋标签同类）：挂袋容器（0x3049e0+0x50），
@@ -1057,7 +1285,19 @@ void log_ownership_audit_locked(const char* context) {
 // 触摸窗口（按下/拖动未结算）内控件与 TouchState 可能仍持有物品指针；
 // 窗口外引用已撤销（投影控件已清、INVEN 未持有），允许真实释放。
 bool object_touch_window_active_locked() {
-    return g_extension_touch_capture || g_extension_drag.active;
+    if (g_extension_touch_capture || g_extension_drag.active) return true;
+    if (g_base == 0 || !g_module_view_installed || g_projected_item_root == nullptr ||
+        !virtual_bag::valid_index(g_module_view_index)) {
+        return false;
+    }
+    const uint8_t* touch_state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+    const void* moving = *reinterpret_cast<const void* const*>(touch_state + TOUCH_STATE_MOVING_CTRL);
+    if (moving == nullptr) return false;
+    const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
+    for (int slot = 0; slot < capacity; ++slot) {
+        if (valid_child_locked(g_projected_item_root, slot) == moving) return true;
+    }
+    return false;
 }
 
 // P4.3 退役第 1 步：模块保管终止（对象未移交原版库存）。
@@ -2423,12 +2663,25 @@ void virtual_bag_draw_end_wrapper() {
         virtual_bag::valid_index(g_virtual_bag_state.selected);
     if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
     if (g_module_view_installed) {
-        // 拖动中物品的悬空防护：用户按住投影物品时 TouchState 记录了借出对象，
-        // 延迟释放后 UIEquip_Draw 仍经 TouchState 画它（ITEM_DrawPorting 悬空崩溃）。
-        // 每帧仅清 MOVING_CTRL（+0x30）——不动 press/drop 字段（避免点击失效）。
+        // TouchHandle owns the native drag shadow. Keep a verified projected control
+        // alive across frames; all other stale moving controls are still cleared.
         if (g_base != 0) {
             uint8_t* touch_state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL) = nullptr;
+            void* moving = *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL);
+            bool projected_moving = false;
+            if (moving != nullptr && virtual_bag::valid_index(g_module_view_index) &&
+                g_projected_item_root != nullptr) {
+                const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
+                for (int slot = 0; slot < capacity; ++slot) {
+                    if (valid_child_locked(g_projected_item_root, slot) == moving) {
+                        projected_moving = true;
+                        break;
+                    }
+                }
+            }
+            if (!projected_moving) {
+                *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL) = nullptr;
+            }
         }
         refresh_projection_if_overwritten_locked();
     }
@@ -2527,6 +2780,11 @@ uintptr_t arm64_bl_target(uintptr_t call_addr, uint32_t instruction) {
 }
 
 uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
+    if (p5_panel_observation_enabled()) {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        log_p5_observation_locked("panel-entry", nullptr, event, param2 != 0, param != 0,
+                                  nullptr, false, 0);
+    }
     const bool extension_enabled = g_virtual_bag_enabled.load();
     const uint32_t gamestate = g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
     if (!extension_enabled || gamestate != 0) {
@@ -2535,7 +2793,13 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                         static_cast<unsigned long long>(event), extension_enabled ? 1 : 0,
                         gamestate, static_cast<unsigned long long>(g_base), g_state_entry != nullptr ? 1 : 0);
         }
-        return g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
+        const uint64_t result = g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
+        if (p5_panel_observation_enabled()) {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            log_p5_observation_locked("panel-bypass-post", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, true, result);
+        }
+        return result;
     }
     int64_t x = 0;
     int64_t y = 0;
@@ -2557,20 +2821,35 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                     g_virtual_bag_state.selected, g_module_view_installed ? 1 : 0,
                     g_extension_tab_root, static_cast<unsigned long long>(g_extension_tab_generation),
                     static_cast<unsigned long long>(g_inventory_generation));
-        if (g_extension_touch_capture) return 1;
+        if (g_extension_touch_capture) {
+            log_p5_observation_locked("panel-capture-press", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, true, 1, x, y);
+            return 1;
+        }
         if (extension_grid_hit(x, y)) {
             // G-6/G-7 零干预原则：投影常驻时网格触摸完全放行原版控件链
             // （TouchHandle 自带命中/选中动画/详情；操作按钮由 menu_gate 拦截；
             // 拖动 drop 由 SaveItemOnEmpty 门禁拦截）。模块不做任何状态清理——
             // press 时 reset/clear 会破坏 TouchHandle 的按压记录导致点击失效。
         }
+        const int projected_slot = grid_slot_index(x, y, kOriginalGridX, kOriginalGridY);
+        bool projected_item_press = false;
+        if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+            g_module_view_installed && virtual_bag::valid_index(g_module_view_index) &&
+            projected_slot >= 0 &&
+            projected_slot < g_virtual_bag_state.capacities[g_module_view_index] &&
+            g_projected_item_root != nullptr) {
+            projected_item_press = valid_child_locked(g_projected_item_root, projected_slot) != nullptr;
+        }
         if (g_virtual_bag_state.mode != virtual_bag::Mode::kOriginal &&
-            grid_slot_index(x, y, kOriginalGridX, kOriginalGridY) >= 0) {
+            projected_slot >= 0 && !projected_item_press) {
             // The original grid is hidden underneath the module grid layout.
             // Consume it even when no extension drag is active.
             g_extension_drag = {};
             reset_drag_state_locked(nullptr);
             g_extension_touch_capture = true;
+            log_p5_observation_locked("panel-hidden-grid-press", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, true, 1, x, y);
             return 1;
         }
         const int target_original_bag = original_bag_button_index(x, y);
@@ -2586,6 +2865,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             }
             exiting_to_original = true;
             log_exit_trace_locked("original_press_pre_orig", event, param, param2, x, y);
+            log_p5_observation_locked("panel-original-pre", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, false, 0, x, y);
         }
     }
     if (event == 0x18) {
@@ -2594,8 +2875,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             y = *reinterpret_cast<const int64_t*>(param + 8);
         } else if (g_base != 0) {
             const uint8_t* touch_state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            x = *reinterpret_cast<const int64_t*>(touch_state + 0x60);
-            y = *reinterpret_cast<const int64_t*>(touch_state + 0x68);
+            x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
+            y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
         }
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
@@ -2609,6 +2890,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 g_extension_drag = {};
                 g_extension_touch_capture = false;
                 reset_drag_state_locked(nullptr);
+                log_p5_observation_locked("panel-capture-release-empty", nullptr, event,
+                                          param2 != 0, param != 0, nullptr, true, 1, x, y);
                 return 1;
             }
             constexpr int64_t kTouchSlop = 24;
@@ -2633,10 +2916,14 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             reset_drag_state_locked(nullptr);
             g_extension_drag = {};
             g_extension_touch_capture = false;
+            log_p5_observation_locked("panel-capture-release", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, true, 1, x, y);
             return 1;
         }
         if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal &&
             handle_bag_drop_release_locked(x, y)) {
+            log_p5_observation_locked("panel-original-release-handled", nullptr, event,
+                                      param2 != 0, param != 0, nullptr, true, 1, x, y);
             return 1;
         }
         // G-10：tab 点击的坐标兜底已删除——tab 点击由控件回调
@@ -2651,8 +2938,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             y = *reinterpret_cast<const int64_t*>(param + 8);
         } else if (g_base != 0) {
             const uint8_t* touch_state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            x = *reinterpret_cast<const int64_t*>(touch_state + 0x60);
-            y = *reinterpret_cast<const int64_t*>(touch_state + 0x68);
+            x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
+            y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
         }
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
@@ -2663,6 +2950,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 g_extension_drag.current_x = x;
                 g_extension_drag.current_y = y;
             }
+            log_p5_observation_locked("panel-capture-move", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, true, 1, x, y);
             return 1;
         }
     }
@@ -2672,10 +2961,17 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         g_extension_touch_capture = false;
         reset_drag_state_locked(nullptr);
         log_exit_trace_locked("event_cancel", event, param, param2, x, y);
+        log_p5_observation_locked("panel-capture-cancel", nullptr, event, param2 != 0,
+                                  param != 0, nullptr, true, 1, x, y);
         return 1;
     }
     if (g_extension_touch_capture) {
         // Consume every event in the captured sequence, not only release and cancel.
+        if (p5_panel_observation_enabled()) {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            log_p5_observation_locked("panel-capture-consume", nullptr, event, param2 != 0,
+                                      param != 0, nullptr, true, 1, x, y);
+        }
         return 1;
     }
     if (event != 0x17) {
@@ -2688,18 +2984,24 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         log_exit_trace_locked("original_press_post_orig", event, param, param2, x, y);
+        log_p5_observation_locked("panel-original-post", nullptr, event, param2 != 0,
+                                  param != 0, nullptr, true, original_result, x, y);
         return original_result;
     }
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_pre_orig", event, param, param2, x, y);
+        log_p5_observation_locked("panel-delegate-pre", nullptr, event, param2 != 0,
+                                  param != 0, nullptr, false, 0, x, y);
     }
     const uint64_t result = g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_post_orig", event, param, param2, x, y);
+        log_p5_observation_locked("panel-delegate-post", nullptr, event, param2 != 0,
+                                  param != 0, nullptr, true, result, x, y);
         if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
             if (event == 0x18 && !complete_original_exit_locked()) {
                 cancel_original_exit_locked();
@@ -3076,6 +3378,41 @@ void prepare_main_menu_locked() {
 }
 
 }  // namespace
+
+uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* x2, void* param) {
+    if (g_p5_observation_active || !p5_observation_enabled() ||
+        !p5_should_begin_item_observation(event)) {
+        return 0;
+    }
+    g_p5_observation_active = true;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    const uint64_t observation_token =
+        log_p5_observation_locked("item-pre", control, event, x2 != nullptr, param != nullptr,
+                                  nullptr, false, 0);
+    if (observation_token == 0) g_p5_observation_active = false;
+    return observation_token;
+}
+
+void virtual_bag_observe_item_proc_source(uint64_t observation_token, void* control, uint64_t event,
+                                          void* x2, void* param, void* source_control) {
+    if (observation_token == 0) return;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    log_p5_observation_locked("item-source", control, event, x2 != nullptr, param != nullptr,
+                              source_control, false, 0, -1, -1, observation_token);
+}
+
+void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* control, uint64_t event,
+                                        void* x2, void* param, uint64_t result) {
+    if (observation_token == 0) return;
+    (void)control;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        // The original proc may have rebuilt the control tree. Do not dereference its prior control.
+        log_p5_observation_locked("item-post", nullptr, event, x2 != nullptr, param != nullptr,
+                                  nullptr, true, result, -1, -1, observation_token);
+    }
+    g_p5_observation_active = false;
+}
 
 bool virtual_bag_is_inventory_enter(uintptr_t enter) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
