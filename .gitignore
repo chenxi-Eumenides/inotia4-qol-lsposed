@@ -41,3 +41,5 @@ log/
 
 # ---- 其他文件 ----
 .sisyphus
+docs/改版作者的一些探索文档
+**/build-local/
