@@ -162,6 +162,7 @@ struct ExtensionDrag {
 };
 
 ExtensionDrag g_extension_drag{};
+virtual_bag::ExtensionDragSession g_extension_drag_session{};
 
 std::atomic<uint64_t> g_p5_observation_sequence{0};
 std::atomic<uint64_t> g_p5_last_item_query_sample_ms{0};
@@ -441,6 +442,26 @@ void refresh_tab_bag_items_locked() {
 void queue_extension_tab_click_locked(int extension_bag);
 void* touch_moving_item_control_locked();
 bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control);
+
+void begin_projected_drag_session_locked(int source_slot) {
+    if (g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) return;
+    const uint64_t token = g_p5_observation_sequence.fetch_add(1) + 1;
+    if (virtual_bag::session_begin(&g_extension_drag_session, token,
+                                   g_extension_tab_generation, g_module_view_index,
+                                   source_slot) == virtual_bag::DragTransition::kAdvanced) {
+        VIRTBAG_LOG("p5 session begin token=%llu source=%d/%d generation=%llu",
+                    static_cast<unsigned long long>(token), g_module_view_index, source_slot,
+                    static_cast<unsigned long long>(g_extension_tab_generation));
+    }
+}
+
+void advance_projected_drag_session_locked() {
+    if (g_extension_drag_session.phase != virtual_bag::DragPhase::kPressed) return;
+    if (touch_moving_item_control_locked() == nullptr) return;
+    virtual_bag::session_on_native_moving(&g_extension_drag_session,
+                                          g_extension_tab_generation);
+}
+
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
     const uint64_t observation_token = virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);
     const auto finish = [observation_token, ctrl, event, x2, param](uint64_t result) {
@@ -1899,6 +1920,47 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
     return false;
 }
 
+bool route_projected_session_drop_locked(int64_t x, int64_t y) {
+    if (g_extension_drag_session.phase == virtual_bag::DragPhase::kIdle ||
+        g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
+        !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
+        return false;
+    }
+    const int target_slot = grid_slot_index(x, y, kGridX, kGridY);
+    if (target_slot < 0 || target_slot >= g_virtual_bag_state.capacities[g_virtual_bag_state.selected]) {
+        return false;
+    }
+    if (g_extension_drag_session.phase == virtual_bag::DragPhase::kPressed) {
+        advance_projected_drag_session_locked();
+    }
+    if (virtual_bag::session_resolve_target(&g_extension_drag_session,
+                                            g_extension_tab_generation,
+                                            virtual_bag::DragTargetKind::kExtensionSlot) ==
+            virtual_bag::DragTransition::kIllegal ||
+        virtual_bag::session_begin_transaction(&g_extension_drag_session,
+                                               g_extension_tab_generation) ==
+            virtual_bag::DragTransition::kIllegal ||
+        !virtual_bag::session_claim_transaction(&g_extension_drag_session)) {
+        return false;
+    }
+    const bool moved = move_extension_to_extension_locked(
+        g_extension_drag_session.source_bag, g_extension_drag_session.source_slot,
+        g_virtual_bag_state.selected, target_slot);
+    virtual_bag::session_finish_transaction(&g_extension_drag_session, moved);
+    if (moved) {
+        persist_state_locked();
+        refresh_projection_if_overwritten_locked();
+        VIRTBAG_LOG("p5 session drop committed source=%d/%d target=%d/%d",
+                    g_extension_drag_session.source_bag, g_extension_drag_session.source_slot,
+                    g_virtual_bag_state.selected, target_slot);
+    } else {
+        VIRTBAG_LOG("p5 session drop rejected source=%d/%d target=%d/%d",
+                    g_extension_drag_session.source_bag, g_extension_drag_session.source_slot,
+                    g_virtual_bag_state.selected, target_slot);
+    }
+    return moved;
+}
+
 bool persist_state_locked(bool force) {
     (void)force;
     if (!g_explicit_save_in_progress) return true;
@@ -2598,6 +2660,7 @@ void virtual_bag_f3_wrapper() {
         g_inventory_frame_active = false;
         g_extension_touch_capture = false;
         g_extension_drag = {};
+        g_extension_drag_session = {};
         disable_extension_tab_buttons_locked();
         log_exit_trace_locked("f3", 0, 0, 0);
         original = g_orig_f3;
@@ -2617,6 +2680,7 @@ void virtual_bag_inventory_enter_wrapper() {
         g_inventory_frame_active = true;
         g_extension_touch_capture = false;
         g_extension_drag = {};
+        g_extension_drag_session = {};
         disable_extension_tab_buttons_locked();
         persist_state_locked();
         original = g_orig_enter;
@@ -2856,6 +2920,9 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                                       param != 0, nullptr, true, 1, x, y);
             return 1;
         }
+        if (projected_item_press && g_extension_drag_session.phase == virtual_bag::DragPhase::kIdle) {
+            begin_projected_drag_session_locked(projected_slot);
+        }
         const int target_original_bag = original_bag_button_index(x, y);
         if (!g_extension_touch_capture && g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
             target_original_bag >= 0) {
@@ -3006,6 +3073,21 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         log_exit_trace_locked("delegate_post_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-delegate-post", nullptr, event, param2 != 0,
                                   param != 0, nullptr, true, result, x, y);
+        if (event == 0x17 || event == 0x19) advance_projected_drag_session_locked();
+        if (event == 0x18 && g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+            if (g_extension_drag_session.phase == virtual_bag::DragPhase::kPressed ||
+                g_extension_drag_session.phase == virtual_bag::DragPhase::kNativeMoving ||
+                g_extension_drag_session.phase == virtual_bag::DragPhase::kTargetResolved) {
+                route_projected_session_drop_locked(x, y);
+            }
+            if (g_extension_drag_session.phase != virtual_bag::DragPhase::kCommitted &&
+                g_extension_drag_session.phase != virtual_bag::DragPhase::kRejected &&
+                g_extension_drag_session.phase != virtual_bag::DragPhase::kCancelled) {
+                virtual_bag::session_on_cancel(&g_extension_drag_session,
+                                               g_extension_tab_generation);
+            }
+            g_extension_drag_session = {};
+        }
         if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
             if (event == 0x18 && !complete_original_exit_locked()) {
                 cancel_original_exit_locked();
@@ -3379,6 +3461,7 @@ void prepare_main_menu_locked() {
     g_inventory_frame_active = false;
     disable_extension_tab_buttons_locked();
     g_extension_tab_buttons.fill(nullptr);
+    g_extension_drag_session = {};
 }
 
 }  // namespace
@@ -3449,7 +3532,30 @@ bool virtual_bag_projection_drop_to_slot(void* dst_control, void* src_control) {
     if (dst_slot < 0 || dst_slot >= g_virtual_bag_state.capacities[src_bag]) {
         return false;
     }
+    if (g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+        if (g_extension_drag_session.source_bag != src_bag ||
+            g_extension_drag_session.source_slot != src_slot ||
+            g_extension_drag_session.view_generation != g_extension_tab_generation) {
+            return false;
+        }
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kPressed) {
+            advance_projected_drag_session_locked();
+        }
+        if (virtual_bag::session_resolve_target(&g_extension_drag_session,
+                                                g_extension_tab_generation,
+                                                virtual_bag::DragTargetKind::kExtensionSlot) ==
+                virtual_bag::DragTransition::kIllegal ||
+            virtual_bag::session_begin_transaction(&g_extension_drag_session,
+                                                   g_extension_tab_generation) ==
+                virtual_bag::DragTransition::kIllegal ||
+            !virtual_bag::session_claim_transaction(&g_extension_drag_session)) {
+            return false;
+        }
+    }
     const bool routed = move_extension_to_extension_locked(src_bag, src_slot, src_bag, dst_slot);
+    if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+        virtual_bag::session_finish_transaction(&g_extension_drag_session, routed);
+    }
     if (routed) {
         persist_state_locked();
         refresh_projection_if_overwritten_locked();
