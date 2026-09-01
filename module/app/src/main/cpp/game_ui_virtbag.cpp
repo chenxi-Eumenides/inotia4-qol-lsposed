@@ -1717,8 +1717,11 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot) {
     if (!virtual_bag::valid_index(src_bag) || !virtual_bag::valid_index(dst_bag) ||
-        g_virtual_bag_state.capacities[dst_bag] == 0 || src_bag == dst_bag ||
-        src_slot < 0 || src_slot >= virtual_bag::kSlotCount) {
+        g_virtual_bag_state.capacities[dst_bag] == 0 || src_slot < 0 ||
+        src_slot >= virtual_bag::kSlotCount ||
+        (requested_dst_slot >= 0 &&
+         !virtual_bag::valid_ext2ext_transfer_slots(src_bag, src_slot, dst_bag,
+                                                    requested_dst_slot))) {
         VIRTBAG_LOG("cross move reject extension->extension src=%d/%d dst_bag=%d requested_dst=%d",
                     src_bag, src_slot, dst_bag, requested_dst_slot);
         return false;
@@ -1744,6 +1747,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     int dst_slot = -1;
     bool merged = false;
     auto try_merge = [&](int slot) {
+        if (src_bag == dst_bag && slot == src_slot) return false;
         const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
         if (!move_merge_enabled() || !virtual_bag::mergeable_items(existing, source)) return false;
         const uint32_t limit = stack_codec::max_count(stack_limit_enabled());

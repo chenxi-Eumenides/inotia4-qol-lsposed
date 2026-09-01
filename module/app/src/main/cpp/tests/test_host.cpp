@@ -1256,7 +1256,8 @@ static void test_p44_transaction_stages() {
 
     // pending 域接受 ext→ext（内部袋索引）；journal v1 域（不建 journal）仍拒绝。
     CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
-    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 1));
+    CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 1));
+    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 0));
     CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, kBagCount, 1));
     CHECK(!valid_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
 

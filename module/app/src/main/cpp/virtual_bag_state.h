@@ -561,6 +561,13 @@ inline int extension_internal_bag(int logical_bag) {
                : -1;
 }
 
+inline bool valid_ext2ext_transfer_slots(int src_bag, int src_slot, int dst_bag,
+                                         int dst_slot) {
+    return valid_index(src_bag) && valid_index(dst_bag) && src_slot >= 0 &&
+           src_slot < kSlotCount && dst_slot >= 0 && dst_slot < kSlotCount &&
+           (src_bag != dst_bag || src_slot != dst_slot);
+}
+
 inline bool valid_transaction_domain(uint8_t direction, int src_bag, int src_slot,
                                       int dst_bag, int dst_slot) {
     if (src_slot < 0 || src_slot >= kSlotCount || dst_slot < 0 || dst_slot >= kSlotCount) {
@@ -580,9 +587,7 @@ inline bool valid_transaction_domain(uint8_t direction, int src_bag, int src_slo
 inline bool valid_pending_transaction_domain(uint8_t direction, int src_bag, int src_slot,
                                              int dst_bag, int dst_slot) {
     if (direction == kTransferExtensionToExtension) {
-        return src_slot >= 0 && src_slot < kSlotCount && dst_slot >= 0 &&
-               dst_slot < kSlotCount && valid_index(src_bag) && valid_index(dst_bag) &&
-               src_bag != dst_bag;
+        return valid_ext2ext_transfer_slots(src_bag, src_slot, dst_bag, dst_slot);
     }
     return valid_transaction_domain(direction, src_bag, src_slot, dst_bag, dst_slot);
 }
