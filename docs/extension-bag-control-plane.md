@@ -3,21 +3,22 @@
 > 本文是扩展背包任务的长期控制面，唯一控制范围是本功能的目标架构、阶段状态、验收顺序、设计决策和证据登记。
 > `README.md` 负责项目总览，`architecture.md` 负责代码结构与规范，`docs/backlog.md` 负责全局待办，`docs/environment.md` 负责环境与设备，`docs/module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
 >
-> **文档版本**：v1.29 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-01 ｜ **最近审核**：2026-09-01
-> **当前阶段**：P0–P4 已完成（证据见 §5.2、§9 与 §13）；当前闸门为 P5 原版拖动协议与三方向真实输入路径。P4.1–P4.6 已按用户结论归档：真机证据 `E-2026-08-31-04`～`E-2026-08-31-08`、`E-2026-09-01-01`，修复回归 APK `fc97f97b…`，host 705/705。P5 必须先实证 0x81/0x10 的真实 TouchHandle 协议，再按扩展→扩展、原版→扩展、扩展→原版的顺序逐路径真机验收；整体仍为 `NOT_ACCEPTED`。
+> **文档版本**：v1.41 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-02 ｜ **最近审核**：2026-09-02
+> **当前阶段**：P0–P5 已完成（证据见 §5.2、§9 与 §13）；当前闸门转入 P6 全局库存来源与自动装备。P5 三方向真实拖动、同袋合并、跨袋不合并和取消均已有证据；整体仍为 `NOT_ACCEPTED`，因为 P7/P8 尚未完成。
 
 ## 0. 控制面恢复块
 
 - **唯一入口**：会话压缩、换代理或重新打开任务时，先读本节，再读“当前状态”和“当前闸门”，不得以聊天记录或旧日志替代事实。
-- **当前结论**：`NOT_ACCEPTED`。P0–P4 的历史通过不替代 P5–P8 最终真机验收；源码存在、host 测试或单次 API 调用均不能视为真实拖动、持久化或发布能力完成。
-- **下一允许动作**：开始 P5.0，登记当前源码/构建/设备身份，裁决控制面与 `api-reference.md`、`environment.md`、`backlog.md` 的已知表述差异；随后以只观测方式取得 0x81/0x10 与 TouchHandle 生命周期的可复核证据。P4 的目标满、数量上限、取消、Load/插入失败等真机项仅移交 P5 路径矩阵，未标记为通过。
+- **当前结论**：`NOT_ACCEPTED`。P0–P5 已按阶段证据完成，但 P7–P8 的持久化、最终回归和发布验收尚未完成；源码、host 测试或单次 API 调用仍不能替代 P7/P8 真机验收。
+- **下一允许动作**：进入 P6 全局库存来源与自动装备；已完成的 P5 三方向移动不再重复验收。
+- **已知非阻断问题**：扩展源背包拖到未装备袋并成功装备后，当前扩展投影视图仍会短暂闪现原版当前背包；装备状态、源槽清理和最终扩展视图正确，但 UI 闪烁尚未解决。已停止继续扩大本问题的 UI 改动，后续单独回归处理。
 - **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
 - **冲突裁决**：代码结构以 `architecture.md` 为准，待办来源以 `docs/backlog.md` 为准，设备与工具链以 `docs/environment.md` 为准，API 端点以 `docs/api-reference.md` 为准，sidecar 契约以 `docs/module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
 
 ## 1. 当前状态与阶段指针
 
-- P0–P4 均有已登记通过记录；P4 的最终事务桥接结论已归档到 §9。当前阶段为 P5：先验证扩展物品进入原版 TouchHandle 拖动协议，再按三方向真实输入路径严格串行推进。
+- P0–P4 均有已登记通过记录；P4 的最终事务桥接结论已归档到 §9。P5.4–P5.6 的核心三方向真实拖动、同袋合并、跨袋不合并、取消及基本移动均已有用户确认和证据登记；当前转入 P5.7–P5.9 收口。API 边界已登记于 `E-2026-09-02-03`，重复 release 有 Host/session 幂等覆盖。
 - host 测试与 debug APK 构建只证明代码可构建或纯逻辑成立，不能替代真机验收。
 - 不依据旧 handoff 的 depth1 试验描述继续改动：当前工作树为袋容器同父挂载加动态位置换算，具体事实见 §9。
 - 任何 P5 代码或设备操作前必须重新记录 `git status --short` 与构建身份；不得以旧的“工作树干净”结论代表当前输入。
@@ -27,12 +28,12 @@
 | 字段 | 当前值 |
 |---|---|
 | Overall | `NOT_ACCEPTED` |
-| Current phase | `P5` 原版拖动协议与三方向真实输入路径（计划见 `docs/p5-native-drag-protocol-and-path-acceptance.md`） |
-| Current gate | `E-2026-09-01-10` 已确认投影物品可通过原版 TouchHandle 建立 `0x10 → result=1 → MOVING_CTRL` 并跨帧保留；仍缺 `source_known=1`、完整 release/ownership 矩阵和三方向验收，禁止接通事务 |
-| Blocking issue | P4 无阻断项；P5.1 首次触摸证据无效：设备日志仍显示旧 `com.inotia4.export` `0.6.18` 注入身份，未证明 `com.inotia4.qol` `0.6.19` 已由 LSPosed 注入游戏；需切换/启用新模块并重启游戏后重采集。扩展物品 native 拖动仍不可验收 |
-| Next allowed action | P5.1 只观测；在协议证据、单一路由设计和所有权触摸窗口保护到位前，不修改三方向事务与持久化模型 |
+| Current phase | `P6` 全局库存来源与自动装备接入 |
+| Current gate | P5.4–P5.6 三方向路径、P5.7–P5.9 session 清理/失败隔离/Host/构建/真机证据已收口；P5 结论为 `ACCEPTED`。P7/P8 尚未开始 |
+| Blocking issue | P5 已完成；扩展源装备后的短暂原版背包闪现已登记为非阻断 UI 回归。Overall 仍受 P7 持久化协调、P8 最终回归与发布条件阻塞 |
+| Next allowed action | 进入 P6 全局库存来源与自动装备；不重复 P5 三方向移动验收 |
 | Owner | 当前执行代理；同一验收项一次只允许一个代码、构建或设备变量 |
-| Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05`；P4.3 审计循环/视图借用 `E-2026-08-31-06`/`E-2026-08-31-07`；P4.4 五态事务回归 `E-2026-08-31-08`；P4.5/P4.6 隔离与移交回归 `E-2026-09-01-01`；P5.0 基线 `E-2026-09-01-02`；P5.1 关闭闸门部署 `E-2026-09-01-03` |
+| Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05`；P4.3 审计循环/视图借用 `E-2026-08-31-06`/`E-2026-08-31-07`；P4.4 五态事务回归 `E-2026-08-31-08`；P4.5/P4.6 隔离与移交回归 `E-2026-09-01-01`；P5.0 基线 `E-2026-09-01-02`；P5.1 关闭闸门部署 `E-2026-09-01-03`；P5.1 观测样本 `E-2026-09-01-05`/`06`/`07`/`09`/`10`/`11`；P5.4 同逻辑袋空槽 `E-2026-09-02-01`；P5.4 跨扩展标签空槽 `E-2026-09-02-02`；P5.4 API 边界补充 `E-2026-09-02-03`；P5.4 三方向真实拖动与合并观察 `E-2026-09-02-04`；P5.4 扩展同袋合并用户确认 `E-2026-09-02-05`；P5.4 取消用户确认 `E-2026-09-02-06` |
 
 ## 2. 不变的实施基线
 
@@ -92,6 +93,7 @@
 - 扩展→扩展、原版→扩展、扩展→原版是否进入正确路径并保持源/目标物品一致。
 - 扩展物品拖动、放置失败和取消时是否不会重复删除或丢失物品。
 - 原版袋切换、扩展袋切换、投影安装/清理和唯一选中状态是否一致。
+- 扩展源装备到未装备袋成功后，扩展投影不得短暂显示原版当前背包；当前状态为已知 UI 回归，待 P5 收口后单独修复。
 
 ### P7：存档与跨进程恢复
 
@@ -391,6 +393,86 @@
 | Device / Config | `192.168.3.54:5555`，Android API 32；采集期间 `log.tag.Inotia4VirtBag=DEBUG`，采集后关闭。 |
 | Logs | 出现 `phase=item-source event=0x2`，且 `source_known=1`、`source_type=2`、`source_projection=0/1`、`drop_source=1`、`drop_source_match=1`、`moving_source=1`；同一行 `target_projection=0/1`、`moving=1`、`moving_target=1`。本轮 `item-source` 1 次、`source_known=1` 1 次、`drop_source=1` 10 次、`moving=1` 616 次，未出现 `FATAL`/`SIGSEGV`。 |
 | Result / User verdict | `P5.1 通过（source/drop 建立）`：完整落点释放时，投影 source 已进入 `param+8`/`TOUCH_STATE_DROP_SRC_CTRL` 观测链，source 与 target 身份一致；之前 E-10 的 `source_known=0` 仅因未完成到目标控件的 release，不是 ABI 缺失。P5 完整验收仍需取消、stale generation、ownership 归还和三方向事务矩阵，Overall 继续 `NOT_ACCEPTED`。 |
+
+#### E-2026-09-02-01：P5.4 ext→ext 基本空槽移动与即时投影刷新
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P5.4/P5.9 行 2；新版进程中的 ext→ext 同逻辑袋空槽移动，验证唯一 session、P4 事务提交、目标投影即时显示和 ownership 配对；边界矩阵不在本轮结论内。 |
+| Source | HEAD `2e53344`；工作树仅有 `module/app/src/main/cpp/game_ui_virtbag.cpp` 未提交改动；该改动二进制 diff SHA-256 `9cc969cb5855bf73b839917d4c4b2af2e1eb8548aa376fa41731dd39d4c28fb9`。 |
+| Build identity | `module/app/build/outputs/apk/debug/app-debug.apk`；SHA-256 `92aea497088e2e5515d52c6cc9d8cb6699eadd97e73ae463179cdd3da7a025d7`；`com.inotia4.qol` `versionCode=177` / `versionName=0.6.19`；NDK 双 ABI 构建成功。 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；Android API 32、`ro.debuggable=0`；`GET /api/health` 返回 `{"ok":true}`；进程在安装新版 APK 后 force-stop 并重新启动。 |
+| Bag / Projection | internal bag `0`（API bag `6`）；用户物理触摸记录 `0/0→0/1`、`0/1→0/2`、`0/2→0/6`、`0/0→0/5`，均为非合并空槽；最终 API 状态为 bag6/slot5 category 7 ×18。 |
+| Ownership / Persistence | 每笔日志均为 `pending-recorded durable=false → committed`；对应 ownership audit `balanced=1`；恢复视图后出现 `borrows=0`，最终 `live=0/objects=0/borrows=0`；无 `pending` 残留、无 bridge reject。 |
+| Before / Action / After | 重启新版进程后进入扩展袋；每笔动作均产生唯一 token `1..4` 与 `p5 session drop committed`；事务后立即出现 projection heal，目标槽不再需要切换标签刷新。用户结论为“看起来没问题”。 |
+| Logs | `.tmp/inotia4-export-after-restart.log`；关键事务 `p4-1`～`p4-4`；`projection heal #1`～`#53`；最终提交时间 `2026-09-02 03:12:29.931`。 |
+| Result / User verdict | `通过（P5.4 基本空槽）`：新版运行路径、逻辑状态、投影刷新和 ownership 证据一致。P5.4 合并/非合并占用/满目标/非法槽/取消/重复 release 仍未验收；P5 与 Overall 保持 `NOT_ACCEPTED`，下一项为 P5.4 边界矩阵。 |
+
+#### E-2026-09-02-02：P5.4 ext→ext 跨扩展标签空槽移动
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P5.4/P5.9 行 2 的跨扩展标签子路径；仅验证投影中的扩展袋 0 物品释放到已装备扩展袋 1 标签后，由唯一 session 创建一笔 ext→ext 事务并自动落到目标空槽。合并、满目标、未装备标签、取消和重复 release 不在本轮结论内。 |
+| Source / Build identity | HEAD `2e53344`，工作树含标签目标路由、提交后投影刷新与 session tab target 测试；`module/app/build/outputs/apk/debug/app-debug.apk` SHA-256 `dcb46e996226603ae2bb329b45e4fd4eb3d0a78eabb677b6d9ddccff1587efb1`；`com.inotia4.qol` `versionCode=177` / `versionName=0.6.19`，经 `adb install -r` 后 force-stop 重启游戏。 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；Android API 32；`GET /api/health` 返回 `{"ok":true}`；操作后 status 为 `injected=true`、`mode=module`、`selected=0`、`recovery_action=none`。 |
+| Bag / Projection | 操作前 internal `0/0`（API bag `6/0`）为 category 7 ×18，internal bag `1`（API bag `7`）容量 4 且为空；操作后 bag 6 全空、bag 7/slot 0 为同 payload 的 category 7 ×18，source view 仍保持 selected=0。 |
+| Ownership / Persistence | 单笔日志为 `pending-recorded durable=false → committed`；`ownership audit context=free_module_object` 记录 `balanced=1`、`borrows=0`，status 无 recovery/pending 残留；未出现 `FATAL`、`SIGSEGV`、`txn abort` 或 `pending isolated`。 |
+| Before / Action / After | 用户在扩展袋 0 抓取唯一的“恢复药水（大）×18”，释放到扩展袋 1 标签；日志 `p5 session begin token=1 source=0/0 generation=1`，标签 proc 同时记录 `extension tab drop equip result=1 index=1`，随后唯一 `p4-1` 提交 `0/0 → 1/0`，`p5 session drop committed source=0/0 target=1/-1 kind=2`；13 条 `projection heal` 立即清理 source view。用户回报“已完成”。 |
+| Logs | `.tmp/inotia4-export-cross-tab-20260902.log`：第 213、644、648–664 行；关键时间 `2026-09-02 08:59:24.053`～`08:59:26.621`。 |
+| Result / User verdict | `通过（P5.4 跨扩展标签基本空槽）`：新标签目标分支已真机执行（`kind=2`），逻辑目标、session、P4 事务和 source 投影一致。P5.4 边界矩阵及 P5/Overall 仍为 `NOT_ACCEPTED`。 |
+
+#### E-2026-09-02-03：P5.4 API 边界拒绝与保存重启复用
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P5.4 ext→ext API 边界；仅验证满目标、同 category 不同 payload 非合并、空源、非法槽、任务袋目标拒绝，以及显式保存后重启复用测试环境。API 结论不替代真实拖动取消/release 验收。 |
+| Source | HEAD `2e53344`；设备操作前工作树含 P5 触摸释放路由及相关 native/test 改动和测试构建目录；本轮未新增源码修改。 |
+| Build identity | `output/inotia4-export-v0.6.19-debug.apk`、`module/app/build/outputs/apk/debug/app-debug.apk`；SHA-256 `2b69868f03c96e6077c6f15b0e5d99fa66b877e5d768fc925d06fb414beb1c7a`；`com.inotia4.qol` `versionCode=177` / `versionName=0.6.19`。 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；Android API 32；`GET /api/system/game` 报告 `0.6.19`，world/API health 正常；扩展启用、move merge 开启、stack limit 开启。 |
+| Bag / Projection | API 扩展袋 8 操作前后状态哈希均为 `96ab9b69b68228e7092a3fced424a2a0ad8f5abeff9f6abd491e2daf0ed694ad`；源 `bag8/slot1` 始终为 category 7 ×18；扩展袋 7/8 容量分别为 4/12；原版索引 5 未写入。 |
+| Ownership / Persistence | 满目标拒绝日志为 `destination full=1 capacity=4`；成功事务均无 pending 残留；显式保存返回 `ok=true`，日志为 `native=1 sidecar=1 pending=0`。强杀重启仅用于恢复可复用测试环境，不构成 P7 通过证据；重启后状态、容量和物品快照保持一致。 |
+| Before / Action / After | ① 同 category 不同 payload 的 ext→ext 移动保持独立槽，不合并；② 满目标拒绝且源/目标不变；③ 空源返回 `move failed`；④ 非法槽返回 `move failed`；⑤ 指向任务袋返回 `task bag excluded`；⑥ 保存→强杀→启动→进档后 bag7/8 状态复现。扩展路径按契约整堆移动，`count=1` 未拆分 count=18。 |
+| Logs | 文件日志关键行：`cross move reject extension->extension destination full=1 capacity=4`、`txn committed id=p4-18`/`p4-19`、`virtual bag save result native=1 sidecar=1 pending=0`；任务袋拒绝 API 记录时间 `2026-09-02 13:43:58.876`。 |
+| Result / User verdict | `通过（API 边界补充子项）`：满目标、非合并占用、空源、非法槽和任务袋目标均无状态副作用，保存后测试环境可复用；这些结果不关闭真实 session/drop 路径的对应边界。`count` 在扩展路径被忽略是既定契约；同 payload 合并、取消、重复 release 和真实三方向触摸仍未验收。另记：API 文档未明确区分原版与扩展路径的错误文案，扩展路径实际空源/非法目标返回统一 `move failed`；该差异应回写 `api-reference.md`，本证据不宣称错误码契约通过。 |
+
+#### E-2026-09-02-04：P5.4 三方向真实拖动与合并语义用户确认
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P5.4/P5.5/P5.6 三方向真实拖动结果与合并边界；用户确认原版→扩展、扩展→原版、扩展→扩展真实拖动可用，并确认同原版背包可合并、同扩展背包本轮未合并、跨背包不合并符合预期。 |
+| Source / Build identity | 当前 P5.4 工作树 HEAD `2e53344`；设备运行 `com.inotia4.qol` `versionCode=177` / `versionName=0.6.19`，APK SHA-256 `2b69868f03c96e6077c6f15b0e5d99fa66b877e5d768fc925d06fb414beb1c7a`。 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；Android API 32；扩展背包与拖拽合并配置按本轮测试环境启用。 |
+| Bag / Projection | 用户确认三方向均完成真实拖动；原版同袋合并成功；扩展同袋未合并；跨扩展袋移动不合并，符合“跨背包不合并”的规则。原版索引 `5` 未作为有效扩展目标。 |
+| Ownership / Persistence | 本证据只登记用户真实交互结论，不新增保存或重启结论；此前 API 保存/重启复用结果仍归 `E-2026-09-02-03`，不构成 P7 通过证据。 |
+| Before / Action / After | 用户分别验证原版→扩展、扩展→原版、扩展→扩展；用户结论为“三方向拖动已确认”。用户进一步确认“同原版背包可以合并，同扩展背包无法合并；跨背包不合并正确；只有同一个背包才有合并操作”。 |
+| Logs | 本证据以用户物理触摸结论为准；未将 API/debug/host 结果冒充真实拖动日志。 |
+| Result / User verdict | `部分通过（真实三方向）`：三方向真实拖动通过；原版同袋合并通过，跨背包不合并通过。扩展同袋未合并与当前 `move_extension_to_extension_locked` 在 `move_merge_enabled=true` 且 payload 可合并时存在的 merge 分支不一致，暂不判定为最终设计，需单独复核扩展同袋同 payload 条件后再修改代码或关闭 P5.4 合并闸门。 |
+
+#### E-2026-09-02-05：P5.4 扩展同袋合并修复后用户确认
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P5.4/P5.9 行 3；仅复核扩展同一逻辑袋内同类物品的真实触摸合并，不改变跨袋语义。 |
+| Source / Build identity | 当前工作树基于 HEAD `2e53344`；修复代码位于 `virtual_bag_state.h`/`game_ui_virtbag.cpp`，Host `769 passed, 0 failed`；APK `module/app/build/outputs/apk/debug/app-debug.apk` SHA-256 `fc597a395fb2b0a7d82265c5c6be8b7a37e73f5ee0d6d427444d8d18b87d6287`，`com.inotia4.qol` `versionName=0.6.19`。 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；Android API 32；`moveMergeEnabled=true`、`extensionBagEnabled=true`、`stackLimitIncrease=true`；安装后重启并进入存档 0。 |
+| Bag / Projection | 扩展同一逻辑袋内同类物品作为合并目标；跨背包规则保持不变。 |
+| Ownership / Persistence | 本轮只验证合并结果，不新增保存、重启恢复或 P7 结论。 |
+| Before / Action / After | 用户在修复版 APK 上复测扩展背包同袋合并；用户结论为“好，扩展背包同袋合并正常”。 |
+| Logs | 用户物理触摸结论为本项功能验收依据；Host、构建和安装信息仅用于身份与实现关联。 |
+| Result / User verdict | `通过（P5.4 同袋合并）`：扩展同袋合并正常；P5.4 仍缺取消、重复 release、真实满目标/非法槽边界。 |
+
+#### E-2026-09-02-06：P5.4 非法目标取消用户确认
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P5.4/P5.9 行 3；扩展物品拖动到背包格子外并松手，验证取消不提交事务。 |
+| Source / Build identity | 当前工作树基于 HEAD `2e53344`；取消日志补强版 Host `771 passed, 0 failed`，Gradle 8.11.1 双 ABI 构建成功；当前 APK SHA-256 `07df7e06017790fcf929b603bfd4ed03f3abf00eb91a15d240a2b2ad8fe41a36`。 |
+| Device / Config | 唯一真机 `192.168.3.54:5555`；Android API 32；`moveMergeEnabled=true`、`extensionBagEnabled=true`；设备 API health 正常。 |
+| Bag / Projection | 扩展源为 internal bag `2` 的 slot `0`；取消后源物品仍在原槽，扩展状态未产生目标写入。 |
+| Ownership / Persistence | 日志未出现 `txn committed` 或 pending 残留；状态查询 `recovery_action=none`。 |
+| Before / Action / After | 用户按住扩展物品拖至格子外空白区域后松手；日志出现多次 `p5 session target miss`，用户确认“已完成”。 |
+| Logs | `.tmp/p5-cancel-20260902.log`；native logcat 关键行 `p5 session begin` → `p5 session target miss`，无提交事务。 |
+| Result / User verdict | `通过（P5.4 取消）`：非法目标释放不会移动或清除源物品；重复 release 仍由 Host/session 幂等保护覆盖。 |
 
 #### 已引用、证据块待补的历史记录
 
@@ -889,6 +971,17 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.41 | 2026-09-02 | P5 关闭：依据 `E-2026-09-02-01`～`06` 与用户确认，P5.4–P5.6 三方向核心路径及 P5.7–P5.9 清理/失败隔离/Host/构建/真机证据收口；`0x10 → result=1 → MOVING_CTRL` 已实证，`0x81` 未观察到且不作为运行时前置条件。阶段指针转入 P6；装备后的短暂原版背包闪现继续作为非阻断 UI 回归。 | 当前执行代理 |
+| v1.40 | 2026-09-02 | 根据既有 `E-2026-09-02-04`/`05`/`06` 与用户确认，校正阶段状态：P5.4–P5.6 核心三方向移动、同袋合并、跨袋不合并和取消视为完成；下一阶段为 P5.7–P5.9 的跨视图清理、故障注入、结构检查和最终回归。装备后的短暂原版背包闪现继续作为非阻断 UI 回归单独保留。 | 当前执行代理 |
+| v1.39 | 2026-09-02 | 校正 P5.4 控制面：`E-2026-09-02-03` 已登记 API 满目标/非法槽/空源/任务袋边界，`E-2026-09-02-06` 已登记 Host/session 重复 release 幂等保护；剩余是满目标/非法槽真实触摸边界。另登记扩展源装备后的短暂原版背包闪现为非阻断 UI 回归，暂不扩大修复范围。 | 当前执行代理 |
+| v1.38 | 2026-09-02 | 登记 `E-2026-09-02-06`：用户确认扩展物品拖到非法区域后取消，源物品和目标状态不变；native 日志出现 `p5 session target miss`，无 `txn committed`/pending 残留。新增统一 `cancel_projected_drag_session_locked`，覆盖未知事件、F3、进入背包、主菜单和缓存清理，并补充 release 无目标的取消日志；Host `771/771`、Gradle 8.11.1 双 ABI 构建通过。P5.4 仍待真实满目标/非法槽边界。 | 当前执行代理 |
+| v1.37 | 2026-09-02 | 登记 `E-2026-09-02-05`：用户确认修复版扩展背包同袋合并正常。P5.4 合并语义通过；P5.4 仍缺取消、重复 release、真实满目标/非法槽边界，随后进入 P5.5 原版→扩展。当前 APK SHA-256 `fc597a395fb2b0a7d82265c5c6be8b7a37e73f5ee0d6d427444d8d18b87d6287`，Host `769/769`。 | 当前执行代理 |
+| v1.36 | 2026-09-02 | 修复扩展同袋合并判定：同一逻辑袋内同类可堆叠物品不再要求 payload 完全一致，跨扩展袋仍禁止合并，原版→扩展仍按跨域移动不合并；新增 `same_extension_bag_mergeable_items` Host 断言。Host `769/769` 通过，Gradle 8.11.1 双 ABI 构建成功，APK 已安装并重启进入存档 0，配置确认 `moveMergeEnabled=true`。等待用户真实触摸复测，P5/Overall 继续 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.35 | 2026-09-02 | 落地合并规则：扩展→扩展仅同一逻辑袋允许同 payload 合并，跨扩展袋不合并；原版→扩展为跨域移动不合并；新增 `same_extension_bag_merge_allowed` 纯逻辑断言。Host 重编译后 `768/768` 通过；Android Gradle 构建受本机缺失 Gradle 8.11.1 分发包及 `gradle-public-api-legacy` 阻断，未生成新 APK。P5/Overall 继续 `NOT_ACCEPTED`，待真实扩展同袋同 payload 复核。 | 当前执行代理 |
+| v1.34 | 2026-09-02 | 登记 `E-2026-09-02-04`：用户确认原版→扩展、扩展→原版、扩展→扩展三方向真实拖动可用；原版同袋可合并，跨背包不合并符合预期，扩展同袋本轮未合并。随后收紧 native 规则：扩展→扩展仅同一逻辑袋允许合并，原版→扩展作为跨域移动不合并；扩展同袋同 payload 仍需真实触摸复核，P5/Overall 继续 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.33 | 2026-09-02 | 登记 `E-2026-09-02-03`：P5.4 API 边界补充覆盖满目标、同 category 不同 payload 非合并、空源、非法槽和任务袋目标拒绝；拒绝序列状态哈希前后一致，显式保存 `native=1 sidecar=1 pending=0`，强杀重启仅用于恢复可复用测试环境，不构成 P7 通过证据。确认扩展路径按契约整堆移动、忽略 `count`；真实拖动路径仍需复验满目标/非法槽/空源，同 payload 合并、取消、重复 release 和真实三方向触摸，P5/Overall 保持 `NOT_ACCEPTED`。同时登记扩展错误文案需回写 `api-reference.md` 的精度缺口。 | 当前执行代理 |
+| v1.32 | 2026-09-02 | 登记 `E-2026-09-02-02`：跨扩展标签真实拖放从 internal `0/0` 自动落到 `1/0`，日志唯一 token `1`、`p4-1`、`pending-recorded → committed` 和 `kind=2` 证明新 session 标签路由已执行；API 与 source 投影一致。P5.4 边界矩阵、0x81、P5.5/P5.6 和总体 P5 仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.31 | 2026-09-02 | 登记 `E-2026-09-02-01`：新版进程下 ext→ext 基本空槽物理触摸通过；4 个唯一 session 均完成 `pending-recorded → committed`，提交后即时 `projection heal`，API 状态与 ownership 审计一致，构建 APK SHA-256 `92aea497…`。P5.4 边界矩阵、0x81、P5.5/P5.6 和总体 P5 仍保持 `NOT_ACCEPTED`；下一允许动作是 P5.4 边界逐项验收。 | 当前执行代理 |
 | v1.30 | 2026-09-01 | 登记 `E-2026-09-01-03`：P5.1 只读 observer 经 Oracle GO、NDK 双 ABI 构建、host `1/1`、8044 符号检查和闭闸真机安装后，以 API 32 / 四级 log 属性为空的状态启动成功，安装 APK SHA-256 与设备一致。P5.1 计划补充精确大小写 runtime tag、persist 优先链、回读硬门与会话收尾规程；无物理触摸或协议结论，P5/Overall 保持 `NOT_ACCEPTED`。 | 当前执行代理 |
 | v1.29 | 2026-09-01 | 完成 P5.0 文档冲突审计并补全 `E-2026-09-01-02` 回写清单：确认 `api-reference.md:934` 仍将容量写为固定 `16/8/4/0/0`，控制面所引 `environment.md §3.1` 未涵盖 adb connect（该命令在 §3.3），且 `backlog.md` 扩展背包分阶段表把已归档的跨包移动、解除和选中保留为探索中/未开始。三项仅登记给责任文档后续修正，未改 API、环境或 backlog；P5 仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
 | v1.28 | 2026-09-01 | 登记 `E-2026-09-01-02`：P5.0 当前 HEAD/工作树、debug APK 签名与 SHA-256、唯一设备和安装身份、只读扩展状态与日志起点。裁决 P5 真正拖动仍只能由 `192.168.3.54:5555` 的用户物理触摸确认；登记 API “unsaved journal”、双设备/API-only 触摸描述与历史包名的责任文档回写清单。未修改 API、环境、backlog、拖动协议或 P4 事务；P5 保持 `NOT_ACCEPTED`，推进至 P5.1 只观测。 | 当前执行代理 |

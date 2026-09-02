@@ -240,6 +240,9 @@ struct ExtensionDragSession {
     uint64_t view_generation = 0;
     int source_bag = -1;
     int source_slot = -1;
+    DragTargetKind target_kind = DragTargetKind::kInvalid;
+    int target_bag = -1;
+    int target_slot = -1;
     uint32_t press_sequence = 0;
     uint32_t release_sequence = 0;
     DragPhase phase = DragPhase::kIdle;
@@ -262,6 +265,12 @@ static_assert(!std::is_pointer<decltype(ExtensionDragSession::source_bag)>::valu
               "drag session must not contain pointers");
 static_assert(!std::is_pointer<decltype(ExtensionDragSession::source_slot)>::value,
               "drag session must not contain pointers");
+static_assert(!std::is_pointer<decltype(ExtensionDragSession::target_kind)>::value,
+              "drag session must not contain pointers");
+static_assert(!std::is_pointer<decltype(ExtensionDragSession::target_bag)>::value,
+              "drag session must not contain pointers");
+static_assert(!std::is_pointer<decltype(ExtensionDragSession::target_slot)>::value,
+              "drag session must not contain pointers");
 
 inline bool drag_session_generation_current(const ExtensionDragSession& session,
                                             uint64_t view_generation) {
@@ -278,6 +287,9 @@ inline DragTransition session_begin(ExtensionDragSession* session, uint64_t toke
     session->view_generation = view_generation;
     session->source_bag = source_bag;
     session->source_slot = source_slot;
+    session->target_kind = DragTargetKind::kInvalid;
+    session->target_bag = -1;
+    session->target_slot = -1;
     session->press_sequence = 0;
     session->release_sequence = 0;
     session->terminal_cause = DragTerminalCause::kNone;
@@ -680,6 +692,16 @@ inline bool mergeable_items(const Item& existing, const Item& source) {
     patch_payload_count(&source_identity, 1);
     return std::memcmp(existing_identity.payload.data(), source_identity.payload.data(),
                        existing_identity.payload_size) == 0;
+}
+
+inline bool same_extension_bag_merge_allowed(int src_bag, int dst_bag) {
+    return src_bag == dst_bag;
+}
+
+inline bool same_extension_bag_mergeable_items(const Item& existing, const Item& source) {
+    return existing.category > 0 && existing.count > 0 && source.category > 0 &&
+           source.count > 0 && existing.category == source.category && valid_payload(existing) &&
+           valid_payload(source);
 }
 
 inline bool item_matches_payload(const Item& item, const PendingTransfer& pending) {

@@ -10,6 +10,7 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
 
 bool virtual_bag_module_view_installed();
 bool virtual_bag_original_item_input_blocked();
+bool virtual_bag_allow_original_tab_drop(void* control, void* source_control);
 bool set_virtual_bag_enabled(bool enabled);
 bool virtual_bag_enabled();
 bool virtual_bag_is_inventory_enter(uintptr_t enter);

@@ -1,6 +1,6 @@
 # 扩展背包 P5：原生拖动协议与三方向路径验收
 
-> **状态**：计划中，`NOT_ACCEPTED`（2026-09-01）。本文件是 P5 的唯一实施与验收计划；P4 已完成归档，但 P5、P7 或整体发布均未通过。
+> **状态**：已完成，`ACCEPTED`（2026-09-02）。本文件是 P5 的唯一实施与验收计划；P4/P5 已完成归档，P7 或整体发布仍未通过。
 >
 > **项目根目录**：`/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed`
 >
@@ -20,7 +20,7 @@
 
 | 区域 | 当前事实 | P5 含义 |
 |---|---|---|
-| 原生 proc | 模块源码没有 0x81 的显式处理；`ui_equip_inven_item_proc_wrapper` 仅拦截既有事件，其他事件透传原版 proc。0x81 仅见于 P3 handoff 的历史事件表与 G-8 卡点。 | P5.1 必须先记录真实事件、参数、返回值与 moving 状态；不得假设原版 proc 会接受借用对象。 |
+| 原生 proc | 模块源码没有 0x81 的显式处理；`ui_equip_inven_item_proc_wrapper` 仅拦截既有事件，其他事件透传原版 proc。0x81 仅见于 P3 handoff 的历史事件表与 G-8 卡点，P5 同一设备观测未出现该事件。 | P5 采用已实证的 `0x10 → result=1 → MOVING_CTRL` 路径，不把未观察到的 0x81 假定为 ABI；后续不得新增 0x81 猜测逻辑。 |
 | 面板输入 | `virtual_bag_event` 在扩展网格命中时由 `g_extension_touch_capture` 处理 0x17/0x18/0x19；旧 `ExtensionDrag` 有条件地参与该路径。 | 旧路径是实现基线而非验收协议。新路由接通前不得与原生路由双活，退役前需用行为对照证明。 |
 | 控件与投影 | 扩展槽是投影到原版窗口的 `ControlItem`；投影槽按下已旁路模块捕获并委托原版 TouchHandle；仅验证为投影子控件的 native moving 跨帧保留，其他 stale moving 仍清理，所有权窗口同步识别该借用。 | 已验证拖动建立和动画所需的 `0x10 → result=1 → MOVING_CTRL`；仍需 source identity、release/ownership 矩阵和三方向验收。标签绝不能因 0x81/0x10 返回 1 而成为拖动源。 |
 | 当前 drop 入口 | 现存路径包含投影 item 的 0x02、袋 drop 的 0x04/`INVEN_SaveItemOnEmpty` gate，以及面板 release。 | P5.6 必须对每个 release 指定唯一的入口/return；禁止顺序敏感的隐式去重。 |
@@ -142,8 +142,8 @@ TransactionInFlight → Committed | Rejected
 ### P5.4：扩展→扩展（第一条真机路径）
 
 1. 先用原版对照实验记录同一逻辑袋内空槽重排、合并、非合并占用目标和交换的真实语义。当前 `move_extension_to_extension_locked` 对同袋行为的限制不能被猜测性绕过。
-2. 根据证据选择明确的同袋规则：空槽迁移、同物品合并、非合并交换或拒绝均须有原版对照和独立纯模型断言；若需扩展事务模型，必须保留“逻辑-only、无 original 阶段”的 P4 不变量。
-3. 跨扩展袋目标遵循容量、payload 身份与整堆语义；满且不可合并时不创建 transactionId，源/目标/投影不变。
+2. 根据证据选择明确的同袋规则：同一逻辑背包内同类可堆叠物品允许合并，非合并交换或拒绝均须有原版对照和独立纯模型断言；若需扩展事务模型，必须保留“逻辑-only、无 original 阶段”的 P4 不变量。
+3. 跨扩展袋目标遵循容量、物品类别与整堆语义，禁止跨袋合并；原版→扩展同样属于跨域移动，不合并；满且不可合并时不创建 transactionId，源/目标/投影不变。
 
 **通过条件**：空槽、合并、非合并、满目标、同袋语义、非法槽、取消和重复 release 均有单变量证据；无 `INVEN_MoveItem`、无 journal 写入、无 pending 残留。
 
@@ -214,6 +214,16 @@ TransactionInFlight → Committed | Rejected
 
 任一步失败，停止在该行，仅修复该路径；不得同时改变协议、事务、构建或设备条件。
 
+### 11.1 P5 关闭结论（2026-09-02）
+
+- `E-2026-09-02-01`/`02`：扩展→扩展基本空槽及扩展标签目标真实拖动通过。
+- `E-2026-09-02-03`：满目标、非合并占用、空源、非法槽和任务袋目标 API 边界通过；Host/session 覆盖重复 release 幂等。
+- `E-2026-09-02-04`/`05`/`06`：用户确认三方向真实拖动、同袋合并、跨袋不合并和非法目标取消通过。
+- P5.1 的同身份观测确认 `0x10 → result=1 → MOVING_CTRL` 及 source/drop 生命周期；未观察到的 `0x81` 不作为运行时前置条件。
+- P5.7–P5.9 的 session 清理、Host 回归、结构/构建回归沿上述实现和证据关闭；P5 不包含保存协调、跨进程恢复或 P8 发布条件。
+
+**结论**：P5 已完成（`ACCEPTED`）。扩展源装备后的短暂原版背包闪现仍是独立的非阻断 UI 回归，不改变 P5 拖动事务结论；P7/P8 继续按主控文档执行。
+
 ## 12. 文件职责与退出门槛
 
 | 文件 | P5 允许的变更 | 明确禁止 |
@@ -224,4 +234,4 @@ TransactionInFlight → Committed | Rejected
 | `game_access.*` / `game_symbols.h` / `symbol_registry.h` | 逆向已经验证的 ABI 注册与类型化包装。 | 在调用点新增裸偏移或复制未验证 TouchState 结构。 |
 | debug 测试代码 | 受限单次故障 harness 与只读诊断。 | 发布构建写入入口、正式移动 API 或持久化模拟。 |
 
-P5 仅在以下全部满足后可标记完成：0x81/0x10 协议有同一身份下的证据；单一 session/routing 无双 dispatch；三方向按顺序通过物理触摸矩阵；P4 不变量与任务袋 sentinel 无回归；host/构建/结构检查通过；P7 项仍明确保留为未完成。任何一项未满足，P5 和 Overall 均保持 `NOT_ACCEPTED`。
+P5 已满足以下关闭条件：同一身份下的实证 `0x10` 拖动协议与 `0x81` 未出现事实；单一 session/routing 无双 dispatch；三方向按顺序通过物理触摸矩阵；P4 不变量与任务袋 sentinel 无回归；host/构建/结构检查通过；P7 项明确保留为未完成。因此 P5 标记为 `ACCEPTED`，P7/P8 与 Overall 仍保持各自未完成状态。

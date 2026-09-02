@@ -1039,7 +1039,7 @@
 
 **注意**：
 - 源空槽→`slot empty`；count≤0→参数错；同槽→`same slot`；目标越界→`bad target`。
-- **扩展路径（bag 含 6..10）**：整堆移动（`count` 忽略）；放置槽自动选择（优先可合并槽/空槽，`to_slot` 仅扩展→扩展生效）；`bag`/`to_bag`=5（任务物品袋）→`task bag excluded`；扩展开关关闭→`extension bag disabled`；跨域移动写入模块 unsaved journal，显式保存（`/api/system/save`）成功后清零。
+- **扩展路径（bag 含 6..10）**：整堆移动（`count` 忽略）；同一扩展逻辑袋内同类可堆叠物品才尝试合并，跨扩展袋不合并；原版→扩展属于跨域移动，也不合并；放置槽自动选择（优先同袋可合并槽/空槽，`to_slot` 仅扩展→扩展生效）；`bag`/`to_bag`=5（任务物品袋）→`task bag excluded`；扩展开关关闭→`extension bag disabled`；跨域移动写入模块 unsaved journal，显式保存（`/api/system/save`）成功后清零。
 - 原版→原版不可经扩展路径分派；扩展内部事务失败自动回滚，可安全重试。
 
 #### 出售物品

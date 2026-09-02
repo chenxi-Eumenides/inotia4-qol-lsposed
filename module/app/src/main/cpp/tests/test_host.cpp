@@ -592,6 +592,7 @@ static void test_virtual_bag_mergeable_items() {
     make_small_payload(&existing, existing.count);
     make_small_payload(&source, source.count);
     CHECK(virtual_bag::mergeable_items(existing, source));
+    CHECK(virtual_bag::same_extension_bag_mergeable_items(existing, source));
     source.category = 402;
     CHECK(!virtual_bag::mergeable_items(existing, source));
     source.category = existing.category;
@@ -600,6 +601,8 @@ static void test_virtual_bag_mergeable_items() {
     source = virtual_bag::Item{existing.category, source.count};
     virtual_bag::Item legacy_existing{existing.category, existing.count};
     CHECK(!virtual_bag::mergeable_items(legacy_existing, source));
+    CHECK(virtual_bag::same_extension_bag_merge_allowed(0, 0));
+    CHECK(!virtual_bag::same_extension_bag_merge_allowed(0, 1));
 }
 
 static void test_virtual_bag_json_roundtrip() {
@@ -1447,6 +1450,29 @@ static void test_p52_drag_session() {
     CHECK_EQ(session_finish_transaction(&session, true), DragTransition::kAdvanced);
     CHECK_EQ(session.phase, DragPhase::kCommitted);
     CHECK_EQ(session_on_release(&session, 42), DragTransition::kIdempotentNoop);
+    CHECK_EQ(session.release_sequence, 1u);
+
+    ExtensionDragSession tab_session{};
+    CHECK_EQ(session_begin(&tab_session, 22, 9, 0, 1), DragTransition::kAdvanced);
+    CHECK_EQ(session_on_native_moving(&tab_session, 9), DragTransition::kAdvanced);
+    CHECK_EQ(session_resolve_target(&tab_session, 9, DragTargetKind::kExtensionTab),
+             DragTransition::kAdvanced);
+    CHECK_EQ(session_begin_transaction(&tab_session, 9), DragTransition::kAdvanced);
+    CHECK(session_claim_transaction(&tab_session));
+    CHECK_EQ(session_finish_transaction(&tab_session, true), DragTransition::kAdvanced);
+    CHECK_EQ(tab_session.phase, DragPhase::kCommitted);
+
+    tab_session.target_kind = DragTargetKind::kOriginalBag;
+    tab_session.target_bag = 2;
+    tab_session.target_slot = -1;
+    CHECK_EQ(tab_session.target_kind, DragTargetKind::kOriginalBag);
+    CHECK_EQ(tab_session.target_bag, 2);
+    CHECK_EQ(tab_session.target_slot, -1);
+
+    ExtensionDragSession tab_illegal{};
+    CHECK_EQ(session_begin(&tab_illegal, 23, 9, 0, 1), DragTransition::kAdvanced);
+    CHECK_EQ(session_resolve_target(&tab_illegal, 9, DragTargetKind::kExtensionTab),
+             DragTransition::kIllegal);
 
     // 非法跳转不能绕过原生 moving、目标解析或事务阶段。
     ExtensionDragSession illegal{};
@@ -1454,6 +1480,8 @@ static void test_p52_drag_session() {
     CHECK_EQ(session_on_release(&illegal, 0), DragTransition::kIllegal);
     CHECK_EQ(session_begin(&illegal, 18, 42, 1, 1), DragTransition::kAdvanced);
     CHECK_EQ(session_begin(&illegal, 19, 42, 1, 1), DragTransition::kIllegal);
+    CHECK_EQ(illegal.target_kind, DragTargetKind::kInvalid);
+    CHECK_EQ(illegal.target_bag, -1);
     CHECK_EQ(session_resolve_target(&illegal, 42, DragTargetKind::kOriginalBag),
              DragTransition::kIllegal);
 
@@ -1461,6 +1489,7 @@ static void test_p52_drag_session() {
     CHECK_EQ(session_on_native_moving(&illegal, 41), DragTransition::kIdempotentNoop);
     CHECK_EQ(session_on_cancel(&illegal, 42), DragTransition::kAdvanced);
     CHECK_EQ(session_on_cancel(&illegal, 42), DragTransition::kIdempotentNoop);
+    CHECK_EQ(session_on_release(&illegal, 42), DragTransition::kIdempotentNoop);
     CHECK(!session_may_create_transaction(illegal));
     CHECK_EQ(session_begin_transaction(&illegal, 42), DragTransition::kIllegal);
 

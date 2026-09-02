@@ -6,6 +6,7 @@
 #include "game_symbols.h"
 #include "game_ops_common.h"
 #include "game_ptr_hook.h"
+#include "stack_codec.h"
 #include "game_ui_virtbag.h"
 
 #include <android/log.h>
@@ -239,6 +240,11 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
             virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param,
                                                  ctrl_src);
+            if (virtual_bag_allow_original_tab_drop(control, ctrl_src)) {
+                const uint64_t result = fn_ui_equip_inven_item_control_event_proc(
+                    control, event, x2, param);
+                return finish(result);
+            }
         }
         // G-9 防护：扩展标签挂物品列表 root（索引 16+），GetItemSlotIndex 对其返回
         // 越界值 16——drop 落到标签控件时直接拒绝，防越界写。
@@ -253,7 +259,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     }
     if (event == 4 && param != nullptr && fn_control_object_get_data != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
-        fn_get_cumulate_count != nullptr && fn_get_bit != nullptr && fn_inven_move_item != nullptr) {
+                 fn_get_cumulate_count != nullptr && fn_get_bit != nullptr && fn_inven_move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
         void* src_data = ctrl_src != nullptr ? fn_control_object_get_data(ctrl_src) : nullptr;
@@ -261,7 +267,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         void* item_a = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
         void* item_b = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
         if (item_a != nullptr && item_b != nullptr &&
-            !fn_ui_equip_is_apply_stuff(item_b, item_a) && !item_is_equip(item_a)) {
+            !fn_ui_equip_is_apply_stuff(item_b, item_a) && !item_is_equip(item_a) &&
+            !item_is_equip(item_b)) {
             const uint16_t flags_a =
                 *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_a) + I_TYPE);
             const uint16_t flags_b =
@@ -271,20 +278,36 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 const int dst_slot = fn_ui_equip_get_item_slot_index(control);
                 const int src_slot = ctrl_src != nullptr ? fn_ui_equip_get_item_slot_index(ctrl_src) : -1;
                 const int count = fn_get_cumulate_count(item_a);
-                const int result = fn_inven_move_item(item_a, count, bag, dst_slot);
-                if (!result) return finish(0);
-                if (virtual_bag_module_view_installed()) {
-                    virtual_bag_sync_projected_slot(bag, src_slot);
-                    virtual_bag_sync_projected_slot(bag, dst_slot);
+                const int target_count = fn_get_cumulate_count(item_b);
+                const uint32_t stack_limit = stack_codec::max_count(stack_limit_enabled());
+                const bool valid_slots = bag >= 0 && bag < 6 && src_slot >= 0 && src_slot < 16 &&
+                                         dst_slot >= 0 && dst_slot < 16;
+                const bool has_merge_room = target_count > 0 && count > 0 &&
+                                            static_cast<uint64_t>(target_count) < stack_limit;
+                if (valid_slots && has_merge_room) {
+                    const int result = fn_inven_move_item(item_a, count, bag, dst_slot);
+                    if (result) {
+                        if (virtual_bag_module_view_installed()) {
+                            virtual_bag_sync_projected_slot(bag, src_slot);
+                            virtual_bag_sync_projected_slot(bag, dst_slot);
+                        }
+                        if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+                        void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+                        if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
+                            fn_touch_handle_set_cursor(panel_ctrl, nullptr);
+                        }
+                        MOVE_LOG("move_merge: merged bag=%d src=%d dst=%d count=%d", bag, src_slot,
+                                 dst_slot, count);
+                        return finish(0);
+                    }
+                    MOVE_LOG("move_merge: native merge rejected; falling through bag=%d src=%d dst=%d",
+                             bag, src_slot, dst_slot);
+                } else {
+                    MOVE_LOG("move_merge: invalid/full target; falling through bag=%d src=%d dst=%d "
+                             "source_count=%d target_count=%d limit=%u",
+                             bag, src_slot, dst_slot, count, target_count,
+                             static_cast<unsigned int>(stack_limit));
                 }
-                if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
-                void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
-                if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
-                    fn_touch_handle_set_cursor(panel_ctrl, nullptr);
-                }
-                MOVE_LOG("move_merge: merged bag=%d src=%d dst=%d count=%d", bag, src_slot,
-                         dst_slot, count);
-                return finish(0);
             }
         }
     }

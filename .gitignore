@@ -11,6 +11,8 @@ __pycache__/
 # ---- Gradle 缓存与构建产物（缓存已指向项目内 .gradle/）----
 .gradle/
 **/build/
+**/build-local/
+**/build-qol/
 **/.cxx/
 .kotlin/
 local.properties
@@ -38,8 +40,7 @@ log/
 # ---- 编辑器/系统杂项 ----
 .DS_Store
 *.swp
+.sisyphus
 
 # ---- 其他文件 ----
-.sisyphus
 docs/改版作者的一些探索文档
-**/build-local/
