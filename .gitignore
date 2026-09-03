@@ -26,7 +26,26 @@ module/app/src/main/assets/static-data/
 
 # ---- 工具（本机安装，不入库：NDK 2GB / lspatch 等）----
 tools/
-scripts/
+
+# 历史实验脚本默认不入库；正式入口脚本按下方规则精确放行。
+scripts/*
+!scripts/AGENTS.md
+!scripts/build-debug.sh
+!scripts/build-release.sh
+!scripts/analysis/
+!scripts/analysis/frida/
+!scripts/analysis/frida/save0-repair-patch.js
+!scripts/verification/
+!scripts/verification/smoke_all.py
+!scripts/verification/smoke_baseline_v0.5.43.json
+!scripts/verification/live_session.py
+!scripts/verification/api_poll.py
+!scripts/device/
+!scripts/device/touch_automation.py
+!scripts/maintenance/
+!scripts/maintenance/check_symbols.py
+!scripts/data/
+!scripts/data/**
 
 # ---- 构建产物 APK（可重新构建）----
 output/
@@ -43,4 +62,4 @@ log/
 .sisyphus
 
 # ---- 其他文件 ----
-docs/改版作者的一些探索文档
+docs/history/experiments/改版作者的一些探索文档

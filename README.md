@@ -16,7 +16,7 @@
 - **游戏**：艾诺迪亚4（Inotia 4，Com2uS）盗版大修 20260704，单机/离线，无源码只有 APK（48.4MB），无加固，已被重打包重签。包名：`com.com2us.inotia4.normal.freefull.google.global.android.common`（adb/LSPosed scope/frida 等开发命令均需此包名）
 - **引擎**：原生 Java（classes.dex + classes2.dex）+ 自研引擎 native 库 `libgame.so`（arm64-v8a + armeabi-v7a，**未 strip 符号**）
 - **部署目标**：实体 root 手机（LSPosed 模块版）为主路线；Waydroid 集成版受游戏 ARM-only 限制，降级为延伸目标
-- 开发环境与工具链见 `docs/environment.md`
+- 开发环境与工具链见 `docs/guides/build-and-deploy.md`
 
 ## 硬性要求
 
@@ -33,12 +33,12 @@
 - **静态数据**：Python 脚本解析 game_res 格式（M3 完成）→ JSON 数据库（可交付）
 - **Frida**：仅开发期原型验证用，不进交付物
 
-> **详细架构与规范见 `architecture.md`（唯一权威）**；
-> API 端点与数据模型见 `docs/api-reference.md`。
+> **详细架构与规范见 `docs/development/architecture.md`（唯一权威）**；
+> API 端点与数据模型见 `docs/reference/api-reference.md`。
 
 ## 当前状态
 
-- 开发待办与完成标准见 `docs/backlog.md`（唯一待办来源）
+- 开发待办与完成标准见 `docs/development/planning/backlog.md`（唯一待办来源）
 
 ## 交付物
 
@@ -54,18 +54,17 @@
 projects/inotia4-qol-lsposed/
 ├── apk/                                    # 【输入物】原始 APK + 解码/反编译中间产物 + 解析出的静态库（apk/static-data/，可再生成）
 ├── tools/                                  # 【工具】第三方工具（LSPatch/NDK 等，项目内隔离）
-├── scripts/                                # 【工作区】开发期脚本（analyze/parse/touch_automation）
+├── scripts/                                # 【工作区】开发、分析、数据和验证脚本（analysis/verification/device/data/maintenance）
 ├── module/                                 # 【交付·源码】Xposed 导出模块 Gradle 工程
 ├── output/                                 # 【交付·二进制】构建产物 APK（最新版本见「交付物」表）
-├── architecture.md                         # 【交付·文档·第一级】代码规范（唯一权威，与 README 同级）
-├── docs/                                   # 【交付·文档·第二/三级】见下方「文档地图」
+├── docs/                                   # 【交付·文档】按用途分为 guides/development/reference/history
 ├── log/                                    # 运行日志
 ├── archive/                                # 【归档】探索研究中间产物（frida 探查脚本/反汇编/截图等，不入库）
 ├── .gradle/                                # 可选构建缓存隔离
-└── .tmp/                                   # 临时文件（可随时清空）
+└── .tmp/                                   # 按任务隔离的临时文件（任务完成后清理）
 ```
 
-> 目录明细与构建产物见 `docs/environment.md`。
+> 目录明细与构建产物见 `docs/guides/build-and-deploy.md`。
 
 ## 文档地图（文档结构）
 
@@ -75,16 +74,15 @@ projects/inotia4-qol-lsposed/
 | 文档 | 主题 | 分级 | 权威性 |
 |---|---|---|---|
 | **本文件 README.md** | 项目总览、目标、交付物、目录规范 | **第一级** | 总览 |
-| **architecture.md** | 模块代码结构 + 规范（分层/常量管理/迁移/新增端点流程） | **第一级** | **代码唯一权威** |
-| **docs/api-reference.md** | REST API 规格（数据模型/端点/状态/事件流） | 第二级 | API 权威 |
-| **docs/game-guide.md** | 游戏指南 + API 操作手册（游戏介绍/端点/玩法流程/给 AI 的建议） | 第二级 | 使用指南 |
-| **docs/environment.md** | 开发环境与工具链（依赖清单/关键命令/踩坑记录） | 第二级 | 环境权威 |
-| docs/game-systems.md | 游戏系统总览（19 系统/静态表/动态数据清单） | 第二级 | 参考 |
-| **docs/backlog.md** | 开发待办总清单（唯一待办来源） | 第二级 | 待办权威 |
-| **docs/extension-bag-control-plane.md** | 扩展背包目标、阶段、验收、证据和决策 | 第二级 | **扩展背包控制面唯一权威** |
-| docs/refactor-plan.md | 代码重构实施方案（四层架构：P0-P4 分阶段） | 第二级 | 方案 |
+| **docs/development/architecture.md** | 模块代码结构和规范 | 第一级 | **代码唯一权威** |
+| **docs/reference/api-reference.md** | REST API 规格 | 第二级 | API 权威 |
+| **docs/guides/game-guide.md** | 游戏与模块使用手册 | 第二级 | 使用指南 |
+| **docs/guides/build-and-deploy.md** | 构建、设备和部署 | 第二级 | 操作指南 |
+| **docs/development/planning/backlog.md** | 当前开发待办 | 第二级 | 待办权威 |
+| **docs/development/features/extension-bag/control-plane.md** | 扩展背包开发与验收 | 第二级 | 功能权威 |
+| **docs/INDEX.md** | 文档分类和阅读入口 | 第一级 | 文档导航 |
 
-> 职责划分原则：**每个文档只有一个主题，互不重复**；扩展背包控制面是跨域整合例外，只维护该功能的范围、阶段、验收、证据和决策，不取代各领域权威文档。结构/规范以 architecture.md 为唯一权威，API 以 api-reference.md 为准，其余均为补充细节。
+> 职责划分原则：**每个文档只有一个主题，互不重复**；结构/规范以 `docs/development/architecture.md` 为准，API 以 `docs/reference/api-reference.md` 为准，当前待办以 `docs/development/planning/backlog.md` 为准。
 
 ## 目录规范与环境隔离（强制）
 
@@ -94,8 +92,8 @@ projects/inotia4-qol-lsposed/
 
 1. **工具输出（必须项目内）**：凡工具会产出文件——解码产物（apktool）、反编译输出（jadx）、构建产物（Gradle/Android 构建）、生成的 APK、解析出的 JSON、日志与截图——输出路径必须落在项目文件夹内（`apk/decoded/`、`output/`、`apk/static-data/`、`.tmp/` 等），禁止散落到系统目录或项目外 `/tmp`
 2. **Python**：项目依赖一律用项目内 `.venv/`（`uv run`），禁止向系统 Python 安装项目依赖；系统 pacman 的 python-frida 不用于本项目
-3. **构建与交付**：Gradle 中间产物在 `module/**/build/`，最终 APK 复制到 `output/` 后验收交付；如需更干净的构建隔离，可用 `GRADLE_USER_HOME=$PWD/.gradle`（可选强化，非强制）
-4. **临时文件**：统一放 `.tmp/`，可随时清空。可复用的开发期探针脚本（frida/导航/逆向）入库 `scripts/analyze/`；专用于存档修复的可复用 Frida patch 入库 `scripts/frida/`；探索截图/反汇编等中间产物归档 `archive/`；一次性调试产物留在 `.tmp/` 随用随清
+3. **构建与交付**：必须使用 `scripts/build-debug.sh` 或 `scripts/build-release.sh`；Gradle 中间产物在 `module/**/build/`，最终 APK 由脚本复制到 `output/` 后验收交付。
+4. **临时文件**：统一写入 `.tmp/<task-name>/`，只保存可重建的日志、截图、反汇编和一次性中间文件；任务结束后清理对应目录。当前仅保留可重复验收、数据处理、设备操作、符号检查脚本和已登记的 Frida patch，一次性逆向探针不进入正式脚本目录。
 5. **只读环境依赖**：Android SDK（`/opt/android-sdk`）属运行环境，仅引用，项目文件不写入其中
 6. **版本递增**: 只有在一个或多个功能完成后，才能更新版本号，每次只更新0.0.1。只有用户明确，才升小版本号0.1.0。
 7. **版本提交（强制）**：每次递增版本号并成功构建出一个新版本 APK 后，必须将代码变更提交到 git；提交信息注明版本号与变更摘要（如 `feat(v0.2.21): 新增 xxx`）。新版本只有代码已提交后才算完成
