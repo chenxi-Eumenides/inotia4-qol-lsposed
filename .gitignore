@@ -46,6 +46,8 @@ scripts/*
 !scripts/maintenance/check_symbols.py
 !scripts/data/
 !scripts/data/**
+scripts/data/**/__pycache__/
+scripts/data/**/*.py[cod]
 
 # ---- 构建产物 APK（可重新构建）----
 output/
