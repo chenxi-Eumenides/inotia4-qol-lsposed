@@ -15,14 +15,17 @@ set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
-    ${CPP_DIR}/game_json.cpp
-    ${CPP_DIR}/game_nav.cpp
-    ${CPP_DIR}/game_save_preflight.cpp
+    ${CPP_DIR}/core/native/game_json.cpp
+    ${CPP_DIR}/core/native/game_nav.cpp
+    ${CPP_DIR}/api/native/game_save_preflight.cpp
 )
 
 target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
+    ${CPP_DIR}/api/native
+    ${CPP_DIR}/core/native
+    ${CPP_DIR}/data/native
     ${JNI_INCLUDE_DIRS}
 )
 

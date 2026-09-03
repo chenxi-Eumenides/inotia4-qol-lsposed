@@ -17,10 +17,10 @@
 #include "game_nav.h"
 #include "game_save_preflight.h"
 #include "game_tiles.h"
-#include "ownership_ledger.h"
-#include "stack_codec.h"
-#include "virtual_bag_state.h"
-#include "../game_tiles.cpp"
+#include "feature/extension_bag/model/ownership_ledger.h"
+#include "core/native/stack_codec.h"
+#include "feature/extension_bag/model/virtual_bag_state.h"
+#include "../data/native/game_tiles.cpp"
 
 static int g_pass = 0;
 static int g_fail = 0;
