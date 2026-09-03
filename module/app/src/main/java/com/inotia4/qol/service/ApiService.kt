@@ -1,8 +1,12 @@
 package com.inotia4.qol.service
 
-// API 服务层接口（v0.4.0 P0-3 重构）
+typealias InfoApiService = com.inotia4.qol.service.contract.InfoApiService
+typealias ActionApiService = com.inotia4.qol.service.contract.ActionApiService
 
-// API 服务层接口（v0.4.0 P0-3 重构）
+/*
+ * Compatibility aliases. New code should import the contracts from service.contract.
+ */
+/*
 interface InfoApiService {
     fun ready(): Boolean
 
@@ -123,3 +127,4 @@ interface ActionApiService {
     fun extensionBagClickItem(bag: Int, slot: Int): String
     fun extensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
 }
+*/
