@@ -6,7 +6,7 @@
 #include "game_access.h"
 #include "game_state.h"
 #include "game_world.h"
-#include "game_ui.h"
+#include "api/native/game_ui.h"
 #include "game_dialog.h"
 #include "game_json.h"
 

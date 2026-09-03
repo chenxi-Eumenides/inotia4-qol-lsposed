@@ -1,0 +1,99 @@
+// ---- 辅助定义（背包共用）----
+std::string inventory_gained_json(void* const* before) {
+    if (fn_get_bit == nullptr || fn_get_cumulate_count == nullptr) {
+        __android_log_print(ANDROID_LOG_WARN, "Inotia4Export", "inventory_gained_json: fn_get_bit/fn_get_cumulate_count not resolved");
+        return std::string();
+    }
+    std::string s;
+    int n = 0;
+    struct Ctx { void* const* before; std::string* s; int* n; } ctx{before, &s, &n};
+    for_each_bag_slot([](void* item, int b, int j, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        // ITEM_GetCumulateCount 自动适配 patch：可堆叠返回数量、装备/不可堆叠返回 1（已归一化）
+        int count = fn_get_cumulate_count(item);
+        void* old = p->before[b * 16 + j];
+        if (old == item) {
+            count -= fn_get_cumulate_count(old);
+            if (count <= 0) return false;
+        } else if (old != nullptr) {
+            return false;  // 同槽不同指针：旧物品被消耗/替换，非新增
+        }
+        if (*p->n > 0) *p->s += ",";
+        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+        *p->s += "{\"bag\":" + std::to_string(b);
+        *p->s += ",\"slot\":" + std::to_string(j);
+        *p->s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
+        *p->s += ",\"count\":" + std::to_string(count) + "}";
+        ++*p->n;
+        return false;
+    }, &ctx);
+    return s;
+}
+
+std::string data_op_set_money(int64_t money) {
+    if (!game_in_world()) return op_err("not in game");
+    if (fn_set_money == nullptr) return op_err("symbol not resolved");
+    fn_set_money(money);
+    return op_ok();
+}
+
+std::string data_op_add_money(int64_t delta) {
+    if (!game_in_world()) return op_err("not in game");
+    if (fn_add_money == nullptr) return op_err("symbol not resolved");
+    int r = fn_add_money(delta);
+    return r ? op_ok() : op_err("add money failed");
+}
+
+std::string data_op_add_item(int32_t category, int32_t count) {
+    if (!game_in_world()) return op_err("not in game");
+    if (count <= 0) return op_err("bad count");
+    if (fn_create_item == nullptr || fn_inven_save_item == nullptr || fn_inven_find_save_slot == nullptr)
+        return op_err("symbol not resolved");
+    // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
+    void* item = fn_create_item(category, 0, 0, 0);
+    if (item == nullptr) return op_err("create item failed");
+    // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（item_is_equip 同源，与 ITEM_GetCumulateCount 一致，
+    // 与 patch 无关）。不可用 fn_get_cumulate_count 返回值区分——装备与数量 1 的可堆叠均返回 1。
+    if (count > 1 && item_is_equip(item))
+        return op_err("item not stackable");
+    if (count > 1) {
+        count = static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count), stack_limit_enabled()));
+        uint32_t cf = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
+        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
+            stack_codec::write_count(cf, static_cast<uint32_t>(count));
+    }
+    int save_slot = fn_inven_find_save_slot(item, 0);
+    if (save_slot <= 0) return op_err("inventory full");
+    if (!fn_inven_save_item(item, nullptr)) return op_err("save item failed");
+    return op_ok();
+}
+
+std::string data_op_minus_money(int64_t delta) {
+    if (!game_in_world()) return op_err("not in game");
+    if (fn_minus_money == nullptr) return op_err("symbol not resolved");
+    int r = fn_minus_money(delta);
+    return r ? op_ok() : op_err("insufficient money");
+}
+
+std::string data_op_remove_item(int32_t category) {
+    if (!game_in_world()) return op_err("not in game");
+    if (fn_remove_item == nullptr || fn_get_bit == nullptr) return op_err("symbol not resolved");
+    // 按类别删第一个匹配物品（INVEN_RemoveItem 按 item 指针删，需先按类别定位）
+    struct Ctx { int32_t category; int r; int bag; int slot; bool found; } ctx{category, 0, -1, -1, false};
+    for_each_bag_slot([](void* item, int bag, int slot, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+        if (fn_get_bit(flags, 15, 6) == p->category) {
+            p->r = fn_remove_item(item);
+            p->bag = bag;
+            p->slot = slot;
+            p->found = true;
+            return true;
+        }
+        return false;
+    }, &ctx);
+    if (!ctx.found) return op_err("item not found");
+    if (ctx.r) extension_bag_sync_projected_slot(ctx.bag, ctx.slot);
+    return ctx.r ? op_ok() : op_err("item not found");
+}
+
