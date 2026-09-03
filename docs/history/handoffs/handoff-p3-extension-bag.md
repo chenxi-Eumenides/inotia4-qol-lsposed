@@ -1,13 +1,13 @@
 # Handoff：扩展背包 P3 批次 2/3 实施与调试（2026-08-29）
 
-> 供后续会话快速接续。控制面（docs/extension-bag-control-plane.md）为权威状态源，本文补足
+> 供后续会话快速接续。控制面（docs/development/features/extension-bag/control-plane.md）为权威状态源，本文补足
 > 控制面未覆盖的调试细节、根因结论与试验中间态。
 
 ## 1. 本会话成果总览（提交链）
 
 | 提交 | 内容 |
 |---|---|
-| 404f3c3 | P1 启动：袋/物品机制逆向（docs/system/bag.md）、frida 探针 |
+| 404f3c3 | P1 启动：袋/物品机制逆向（docs/reference/game/bag.md）、frida 探针 |
 | 06b42b7 | P1 容量派生契约落地：derive_capacity 替换 kFixedCapacities |
 | f3b87de | P1 prepare journal 格式 v1（独立 section + 三方对照裁决） |
 | 2f6340c | P1 所有权账本（ownership_ledger.h） |
@@ -60,7 +60,7 @@ install_extension_tab_buttons_locked 内的换算逻辑（bag0_abs - mount_abs�
 - **x8 sret 出参**：真实 UiRect = 4×int64 = 32B；C typedef 16B 结构体走 x0/x1 返回
   （AAPCS64 ≤16B 非 HFA 不用 x8）→ x8 残留垃圾 → GetRelativeRect `stp [x8]` 写只读页
 - **代码库早有记录**：game_ui_custom.cpp:74（ctrl_abs_point 手工父链累加模式）、
-  docs/system/ui.md §6 第 3 坑——本次重蹈后陷阱 typedef 已移除（game_access.h）
+docs/reference/game/ui.md §6 第 3 坑——本次重蹈后陷阱 typedef 已移除（game_access.h）
 - **替代**：手工读 CO_RECT_X/Y + CO_PARENT 累加（纯内存读）
 
 ### 3.3 借出对象不真释放
@@ -138,10 +138,10 @@ install_extension_tab_buttons_locked 内的换算逻辑（bag0_abs - mount_abs�
 
 ## 8. 关键文件
 
-- module/app/src/main/cpp/game_ui_virtbag.cpp — 核心改动（标签/投影/门禁/路由）
+- module/app/src/main/cpp/feature/extension_bag/game_ui_virtbag.cpp — 核心改动（标签/投影/门禁/路由）
 - module/app/src/main/cpp/game_patch.cpp — item proc wrapper（drop 路由/事件日志）
-- module/app/src/main/cpp/virtual_bag_state.h — 状态模型（info_bag/unequip/journal）
+- module/app/src/main/cpp/feature/extension_bag/model/virtual_bag_state.h — 状态模型（info_bag/unequip/journal）
 - module/app/src/main/cpp/game_access.h/.cpp — 符号解析（陷阱已标注）
-- docs/system/bag.md — 背包/袋对象机制逆向记录
-- docs/extension-bag-control-plane.md — 控制面（权威状态）
+- docs/reference/game/bag.md — 背包/袋对象机制逆向记录
+- docs/development/features/extension-bag/control-plane.md — 控制面（权威状态）
 - apk/decoded/lib/arm64-v8a/libgame.so — 反汇编目标（.tmp/game_full.asm 全量转储）

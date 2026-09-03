@@ -1,7 +1,7 @@
 # 游戏 UI 系统（Inotia 4 盗版大修 20260704）
 
 > 日期：2026-08-17 ｜ 状态：探索沉淀（结论经反汇编实证，自定义方式待实验验证）
-> 来源：`archive/tmp-exploration/disasm_text.txt`（36 万行反汇编）+ `apk/decompiled/libgame-symbols.txt`（8297 符号）+ `module/app/src/main/cpp/`（既有 UI 域实现）+ `docs/api-reference.md`（/api/ui 章节）
+> 来源：`archive/tmp-exploration/disasm_text.txt`（36 万行反汇编）+ `apk/decompiled/libgame-symbols.txt`（8297 符号）+ `module/app/src/main/cpp/`（既有 UI 域实现）+ `../api-reference.md`（/api/ui 章节）
 > 用途：回答「游戏 UI 面板如何显示、元素如何定义、能否自定义 UI」
 
 ## 1. UI 渲染链路（一句话结论）
@@ -220,5 +220,5 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 反汇编全文：`archive/tmp-exploration/disasm_text.txt`
 - 符号表：`apk/decompiled/libgame-symbols.txt`（8297 符号）
 - 既有 UI 域：`module/app/src/main/cpp/game_ui.cpp` / `game_dialog.cpp` / `game_patch.cpp`（按钮注入）/ `game_symbols.h`（CO_/CB_/UIMIX_ 偏移）/ `symbol_registry.h`
-- API 规格：`docs/api-reference.md` 第六章 /api/ui
-- 实验记录：`docs/system/ui-experiments.md`（实验完成后更新）
+- API 规格：`../api-reference.md` 第六章 /api/ui
+- 实验记录：`../../history/experiments/ui-experiments.md`（实验完成后更新）

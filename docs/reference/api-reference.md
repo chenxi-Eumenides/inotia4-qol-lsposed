@@ -1,7 +1,7 @@
 # API 参考手册
 
 > **本文档 = API 规格（面向调用方）**：每个 API 的路径、用途、请求格式、返回格式与注意事项。
-> 技术实现细节（VMA/函数签名/调用链/游戏内机制）见 `architecture.md` 与 `docs/refactor-plan.md`（原 `docs/research/` 系列已于 2026-08-16 清理）。
+> 技术实现细节（VMA/函数签名/调用链/游戏内机制）见 `docs/development/architecture.md` 与 `docs/development/planning/refactor-plan.md`（原 `docs/research/` 系列已于 2026-08-16 清理）。
 > 状态：**v0.5.13**。全部域（character/world/item/quest/ui/system/op/debug/health）端点已与 controller 真实路由对齐：v0.5.13 完成端点重构（36 处路径按本文档修正、废弃端点删除、缺失端点补齐或占位），本文档为唯一权威路由来源。
 >
 > 通用约定：
@@ -695,7 +695,7 @@
 
 #### 运行时逆向缺口
 
-> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机2，证据见 `docs/backlog.md` 对应条目）。
+> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机2，证据见 `docs/development/planning/backlog.md` 对应条目）。
 
 | # | 缺口 | 状态与结论 |
 |---|---|---|

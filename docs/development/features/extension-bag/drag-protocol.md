@@ -4,7 +4,7 @@
 >
 > **项目根目录**：`/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed`
 >
-> **权威关系**：阶段状态、设备、证据格式和 ADR 以 `docs/extension-bag-control-plane.md` 为准；本文件将其中 P5 拆为可实施的工作包。代码结构以 `architecture.md` 为准，API 以 `api-reference.md` 为准。本文不替代 P7 的持久化协议。
+> **权威关系**：阶段状态、设备、证据格式和 ADR 以 `control-plane.md` 为准；本文件将其中 P5 拆为可实施的工作包。代码结构以 `../../architecture.md` 为准，API 以 `../../../reference/api-reference.md` 为准。本文不替代 P7 的持久化协议。
 
 ## 1. P5 要解决的主要任务
 
@@ -174,7 +174,7 @@ TransactionInFlight → Committed | Rejected
 
 ### 10.1 host 与静态检查
 
-在 `virtual_bag_state.h` 的纯状态层新增可测试的 session token、view generation、target classification、单次 dispatch、terminal 幂等与同袋语义决策函数；`tests/test_host.cpp` 覆盖：
+在 `feature/extension_bag/model/virtual_bag_state.h` 的纯状态层新增可测试的 session token、view generation、target classification、单次 dispatch、terminal 幂等与同袋语义决策函数；`tests/test_host.cpp` 覆盖：
 
 - 每个 session 状态转移、非法跳转、重复 release、stale generation 与取消；
 - 任务袋 5、外部/内部袋号混用、无效槽、容量外槽和目标解析拒绝；

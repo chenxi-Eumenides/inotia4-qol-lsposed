@@ -114,7 +114,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 ## 8. 模块侧 sidecar 容器级恢复（仅保模块数据，不覆盖原版 save*.dat）
 
 模块侧仅在 `store/ModuleSaveStore.kt` 保留 AtomicFile + last-good 容器级恢复，用于模块自有 section 数据的可靠写入。
-原版 `save*.dat` 字节的备份、恢复和导出能力已删除，新的备份设计记录在 `docs/backlog.md` 的 P1，待后续单独实现。
+原版 `save*.dat` 字节的备份、恢复和导出能力已删除，新的备份设计记录在 `../../development/planning/backlog.md` 的 P1，待后续单独实现。
 
 ## 9. 2026-08-27 存档 0 取证
 
@@ -131,7 +131,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 当前文件的 container checksum 与游戏预检均通过，因此当前可取得的证据结论是「当前存档有效；历史崩溃调用链已确认；历史损坏层待原始快照或更早日志」。
 - 后续真机复测发现：原版槽状态为 `slot_state=2`，但模块同时读取到槽结构原始 `slot+0x04` 指针为 null，`SAVESLOT_GetHero` 也返回 null；原版 UI 因此走 `UNKNOWN` 分支（`SAVESLOT_DrawSlotText` 0x14d0dc）。这确认不是 Getter 计算错位，但 `slot_state=2` 按 `SAVE_LoadSaveSlot` 的控制流又表示角色加载函数已返回成功；因此当前证据只能确定“最终槽结构没有主控对象指针”，还不能区分角色块缺失、角色解析后被清零、或预检刷新后的生命周期覆盖。
 - 结合 `SAVESLOT_Initialize`（0x128958）与 `SAVE_LoadSaveSlot`（0x1298dc）完整分支，当前 save0 已通过单槽加载实验确认：`main_merc_slot=0`，Player 块的三个角色索引为 `-1,-1,-1`。负值分支（0x129aa4→0x129b10）写入 null 并继续循环，不会把槽判为失败；而 `SAVESLOT_Initialize` 会把 `slot+0x1c` 默认置为 0。因此 save0 的直接根因是“主佣兵索引存在，但三个队伍角色引用均为空”，形成 `slot_state=2 + hero_index=0 + slot[+0x04]=null`；这不是文件中保存了错误的动态指针。
-- v0.6.12 修复后，`POST /api/system/enter_slot` 返回 `corrupt / character / error_code=7 / raw hero pointer is null`，进程保持存活、screen 保持 `main_menu`，不再调用 `GAME_StartResumeGame`。Frida 角色加载阶段探针已加入 `scripts/analyze/save_character_load_probe.js`，但当前真机 Frida server 不可连接，尚未取得 `SAVE_LoadCharacterInfoBlock/CHARSYSTEM_Allocate/SAVE_LoadCharacter` 的逐阶段返回值。
+- v0.6.12 修复后，`POST /api/system/enter_slot` 返回 `corrupt / character / error_code=7 / raw hero pointer is null`，进程保持存活、screen 保持 `main_menu`，不再调用 `GAME_StartResumeGame`。历史 Frida 角色加载阶段探针未作为当前项目脚本保留，尚未取得 `SAVE_LoadCharacterInfoBlock/CHARSYSTEM_Allocate/SAVE_LoadCharacter` 的逐阶段返回值。
 - 只读内存验证实验（未写 save0）：临时把 `SAVE_LoadPlayer` 的角色索引写入指令替换为 0，重新调用一次原版加载后，save0 变为 `verdict=valid`、`hero_level=1`、hero 指针非空；但该单条指令实际作用于 3 次循环，Player 索引读回 `0,0,0`、`hero_index=2`，产生三个重复角色槽，未作为修复保留。该结果仅证明角色记录 0 可以被原版解析、分配并挂接；正确修复仍需在 `SAVE_LoadPlayer` 返回后的循环前只修改第 0 项。
 
 ## 10. 真机2故障注入结果（v0.6.12）
@@ -180,7 +180,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 该 patch 只改进程内指令，所有指令均先校验原始 opcode，并在实验结束后回退；没有把 patch 作为最终交付逻辑保留。
  - 正确 patch 版本在启动弹窗点击 `(420,280)` 后验证成功：
    `screen=world`，主角“凯恩”可读取，等级 1、HP 1672/1672、MP 200/200，`party_count=1`（其余队伍槽为空），进程保持健康。
- - 可复用脚本已登记为 `scripts/frida/save0-repair-patch.js`；执行前必须按当前 `libgame.so` 反汇编核对五个 opcode，成功保存后重启进程移除 patch。
+- 可复用脚本已登记为 `scripts/analysis/frida/save0-repair-patch.js`；执行前必须按当前 `libgame.so` 反汇编核对五个 opcode，成功保存后重启进程移除 patch。
 
 ### 11.3 使用游戏自身保存完成文件修复
 

@@ -1,6 +1,6 @@
 # UI 实验记录（v0.6.8 自定义商店面板）
 
-> 配套 `docs/system/ui.md`。本文记录自定义面板（`game_ui_custom.cpp`，exp6）的
+> 配套 `../../reference/game/ui.md`。本文记录自定义面板（`game_ui_custom.cpp`，exp6）的
 > 逆向结论与真机调试经验，按时间顺序追加。
 
 ## 1. 背景：自定义商店面板

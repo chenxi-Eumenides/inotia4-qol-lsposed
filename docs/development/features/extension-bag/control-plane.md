@@ -1,7 +1,8 @@
 # 扩展背包主控文档
 
 > 本文是扩展背包任务的长期控制面，唯一控制范围是本功能的目标架构、阶段状态、验收顺序、设计决策和证据登记。
-> `README.md` 负责项目总览，`architecture.md` 负责代码结构与规范，`docs/backlog.md` 负责全局待办，`docs/environment.md` 负责环境与设备，`docs/module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
+> `README.md` 负责项目总览，`docs/development/architecture.md` 负责代码结构与规范，`docs/development/planning/backlog.md` 负责全局待办，`docs/guides/build-and-deploy.md` 负责环境与设备，`module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
+> 本文中的 `.tmp/...` 路径是既有验收证据的历史引用；新日志和中间文件必须写入 `.tmp/<task-name>/`，长期证据应归档到 `docs/history/` 或 `archive/`。
 >
 > **文档版本**：v1.41 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-02 ｜ **最近审核**：2026-09-02
 > **当前阶段**：P0–P5 已完成（证据见 §5.2、§9 与 §13）；当前闸门转入 P6 全局库存来源与自动装备。P5 三方向真实拖动、同袋合并、跨袋不合并和取消均已有证据；整体仍为 `NOT_ACCEPTED`，因为 P7/P8 尚未完成。
@@ -14,7 +15,7 @@
 - **已知非阻断问题**：扩展源背包拖到未装备袋并成功装备后，当前扩展投影视图仍会短暂闪现原版当前背包；装备状态、源槽清理和最终扩展视图正确，但 UI 闪烁尚未解决。已停止继续扩大本问题的 UI 改动，后续单独回归处理。
 - **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
-- **冲突裁决**：代码结构以 `architecture.md` 为准，待办来源以 `docs/backlog.md` 为准，设备与工具链以 `docs/environment.md` 为准，API 端点以 `docs/api-reference.md` 为准，sidecar 契约以 `docs/module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
+- **冲突裁决**：代码结构以 `docs/development/architecture.md` 为准，待办来源以 `docs/development/planning/backlog.md` 为准，设备与工具链以 `docs/guides/build-and-deploy.md` 为准，API 端点以 `docs/reference/api-reference.md` 为准，sidecar 契约以 `module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
 
 ## 1. 当前状态与阶段指针
 
@@ -41,7 +42,7 @@
 
 ### 状态模型
 
-文件：`module/app/src/main/cpp/virtual_bag_state.h`
+文件：`module/app/src/main/cpp/feature/extension_bag/model/virtual_bag_state.h`
 
 - `kBagCount = 5`，`kSlotCount = 16`。
 - **当前实现事实**：`kFixedCapacities` 已删除；运行时容量统一由 `derive_capacity(BagType)` 派生，见 §8.4 与 ADR-004。固定值 `16/8/4/0/0` 仅是历史原型记录，不得再描述为当前实现。
@@ -62,7 +63,7 @@
 
 ### 投影和移动模型
 
-文件：`module/app/src/main/cpp/game_ui_virtbag.cpp`
+文件：`module/app/src/main/cpp/feature/extension_bag/game_ui_virtbag.cpp`
 
 - **当前实现事实**：P2 已登记正式窗口投影 install/restore 与退出快照恢复；P3 在此基础上接入原版控件树和输入。任何 P3 控件行为仍须独立真机验收，不能把 P2 投影通过外推为 P3 通过。
 - **P3 当前边界**：扩展标签使用原版 `ControlItem` 控件并挂在原版袋容器；投影、快照和输入路径以实际控制流为准，未验收行为不得作为最终能力宣传。
@@ -72,9 +73,9 @@
 - 原版第 6 袋（索引 `5`）是任务物品专用袋。P4 已将其排除于事务参数、投影窗口、恢复、回滚、匹配扫描和自动投递之外；P5 仍须以真实投放证明其作为拖动源或目标均被拒绝，且 sentinel 前后不变。
 - 原版第 6 袋（索引 `5`）的“任务物品专用”语义属于 P0 必须登记的逆向/运行证据，不得只以源码注释或单个拦截作为依据。P5 的控件命中与拖动 session 也必须先做该前置拒绝，不能因已通过 API 路径而省略真实输入验证。
 - 三条移动路径：
-  - 原版→扩展：`move_original_to_extension_locked()`（实现见 `game_ui_virtbag.cpp`）
-  - 扩展→原版：`move_extension_to_original_locked()`（实现见 `game_ui_virtbag.cpp`）
-  - 扩展→扩展：`move_extension_to_extension_locked()`（实现见 `game_ui_virtbag.cpp`）
+- 原版→扩展：`move_original_to_extension_locked()`（实现见 `feature/extension_bag/game_ui_virtbag.cpp`）
+- 扩展→原版：`move_extension_to_original_locked()`（实现见 `feature/extension_bag/game_ui_virtbag.cpp`）
+- 扩展→扩展：`move_extension_to_extension_locked()`（实现见 `feature/extension_bag/game_ui_virtbag.cpp`）
 - P4 三方向移动以 `PendingTransfer` 记录唯一的**进程内**五态事务；`pending-recorded` 明确标记 `durable=false`，提交后仅清理内存记录。
 - **持久化边界**：`PendingTransfer` 与 `JournalRecord` v1 字段同构，但不是已落盘 journal；保存成功、stage 0/1/2、sidecar 提交、重启恢复均只能由 P7 的协调器声明。
 
@@ -118,23 +119,23 @@
 10. 保存、退出、切档、回主菜单、重启和 pending 恢复。
 11. UI 完整性与崩溃回归。
 
-每项只部署该项所需版本。API-first 只有在 `docs/api-reference.md` 已登记并可实际驱动该项操作时才成立；扩展背包的进入、切袋、点击、拖动、移动和保存验收不得把现有 debug 注入端点冒充正式操作 API。正式 API 操作面（能力、请求、响应、错误和幂等语义）必须先设计、实现并登记；在此之前，相关项只能标记为“验收路径未就绪”，不能判通过。API 无法覆盖的真实触摸才由用户执行并反馈，且必须明确操作目标和结论。通过前不得开始下一项。每项至少记录：操作前状态、操作、操作后状态、对应日志结果和用户结论。失败时不跨项修复，也不同时改变代码、构建和安装条件。详细字段使用 §5 的证据模板。
+每项只部署该项所需版本。API-first 只有在 `docs/reference/api-reference.md` 已登记并可实际驱动该项操作时才成立；扩展背包的进入、切袋、点击、拖动、移动和保存验收不得把现有 debug 注入端点冒充正式操作 API。正式 API 操作面（能力、请求、响应、错误和幂等语义）必须先设计、实现并登记；在此之前，相关项只能标记为“验收路径未就绪”，不能判通过。API 无法覆盖的真实触摸才由用户执行并反馈，且必须明确操作目标和结论。通过前不得开始下一项。每项至少记录：操作前状态、操作、操作后状态、对应日志结果和用户结论。失败时不跨项修复，也不同时改变代码、构建和安装条件。详细字段使用 §5 的证据模板。
 
 验收唯一使用真机 `192.168.3.54`（TCP ADB/API）；仅启动弹窗允许执行已登记脚本点击 `(420,280)`，其余验收不使用坐标触摸；不使用 `192.168.3.11` 或双机覆盖要求。
 
 ### 4.1 API 验收边界
 
-- `docs/api-reference.md` 是 API 端点的唯一权威；本文只规定扩展背包验收所需能力和闸门，不直接替代 API 规格。
+- `docs/reference/api-reference.md` 是 API 端点的唯一权威；本文只规定扩展背包验收所需能力和闸门，不直接替代 API 规格。
 - **操作面形态（用户 2026-08-28 决策，修订 ADR-008）**：扩展背包不设独立 API 域；数据与移动操作面 = 原版背包 API（`/api/item/inventory*`，bag 6..10 并入）。读取当前原版/扩展袋状态、三方向移动、配置切换（`/api/config/set`）、保存/切档/重启准备均由原版 API 承载。进入/退出扩展视图、切换逻辑袋、点击/选中/信息属于开发期视图控制能力，由 `/api/debug/extension_bag/*` 提供；该组端点在 P3（正式控件接入）前作为视图验收的操作手段，其结论须与控件树/绘制证据互相印证，不得单独作为 UI 正确性依据。拖动/放置/取消由 `move_item` 的原子事务语义（失败自动回滚）等效承载，真实拖动路径在 P3 控件接入后补充。
 - 现有 debug 状态注入端点（equip/item）只能用于开发测试；其写入能力必须在最终发布构建中删除或严格隔离并登记。
 - API 面未覆盖的能力（真实拖动/放置/取消）在 P3 前按“验收路径未就绪”处理，不得通过。只有 API 明确无法覆盖的真实触摸才由用户执行；该例外不改变唯一真机、串行验收和证据要求。
-- 设备连接恢复时，按 `docs/environment.md §3.1` 已登记的 adb connect、health 轮询和 enter_slot 顺序重跑 P0 smoke，不重新设计连接流程，也不把连接恢复前的超时记录改写为通过。
+- 设备连接恢复时，按 `docs/guides/build-and-deploy.md §3.1` 已登记的 adb connect、health 轮询和 enter_slot 顺序重跑 P0 smoke，不重新设计连接流程，也不把连接恢复前的超时记录改写为通过。
 
 ## 5. 日志与证据登记
 
 - **文件日志**：`/sdcard/Android/data/<游戏包>/files/inotia4-export.log`；Java 启动时会截断旧内容，因此每轮验收结束后立即拉取留档。
-- **实时日志**：`adb logcat -s Inotia4Export:V Inotia4VirtBag:V`；前者是 Java/模块身份日志，后者是 native 扩展背包日志。配合 `scripts/analyze/live_session.py` 使用。
-- **sidecar**：`getExternalFilesDir(null)/module-saves/`，格式和容量以 `docs/module-save-store.md` 为准。
+- **实时日志**：`adb logcat -s Inotia4Export:V Inotia4VirtBag:V`；前者是 Java/模块身份日志，后者是 native 扩展背包日志。配合 `scripts/verification/live_session.py` 使用。
+- **sidecar**：`getExternalFilesDir(null)/module-saves/`，格式和容量以 `module-save-store.md` 为准。
 
 ### 5.1 证据模板
 
@@ -617,10 +618,10 @@
 
 **容量派生契约**：唯一派生函数以“该扩展袋已装备的背包物品完整身份与 payload”为输入，输出有效槽数和入口状态。它必须明确 `BagType`、物品属性、未装备、替换、解除、出售和超容溢出的规则；所有 UI、移动和自动入库路径只能调用该契约，不得读取固定数组或各自复制容量判断。
 
-**容量派生契约 v1（2026-08-28 落地，证据链见 `docs/system/bag.md` §5）**：
+**容量派生契约 v1（2026-08-28 落地，证据链见 `docs/reference/game/bag.md` §5）**：
 - 派生函数 = `virtual_bag::derive_capacity(BagType)`（virtual_bag_state.h），静态真源 = ITEMSTATICBASE 表（category 1/2/3/4 → 容量 4/8/12/16；kNone/未装备 → 0）
 - 未装备：容量 0，`click()` 拒绝，视图/移动/自动入库均不可用
-- 超容溢出（P1 规则）：normalize 不丢弃袋内数据（禁止静默覆盖），容量裁剪仅在视图与交互层生效；替换/解除/出售的正式规则待逆向补齐（bag.md §7 未决）
+- 超容溢出（P1 规则）：normalize 不丢弃袋内数据（禁止静默覆盖），容量裁剪仅在视图与交互层生效；替换/解除/出售的正式规则待逆向补齐（`docs/reference/game/bag.md` §7 未决）
 - 已替换 `kFixedCapacities` 的全部运行时读取（rendering/drag/normalize/click）；host 测试 284 项通过
 
 ### 8.5 持久化边界
@@ -704,7 +705,7 @@
 
 **P1 完成登记（2026-08-29，证据链 `404f3c3`→`06b42b7`→`f3e25f1`→`2f6340c`→`362c220`）**
 
-- 容量派生：逆向全链闭环（`docs/system/bag.md` §5，ITEMSTATICBASE 4/8/12/16）+ `derive_capacity` 实现 + 真机端到端（equip 手包→4/中包→12、保存→重启→capacities 由 types 派生重建）
+- 容量派生：逆向全链闭环（`docs/reference/game/bag.md` §5，ITEMSTATICBASE 4/8/12/16）+ `derive_capacity` 实现 + 真机端到端（equip 手包→4/中包→12、保存→重启→capacities 由 types 派生重建）
 - 所有权状态机：`ownership_ledger.h` 四态转移表 + generation 句柄 + 计数审计（host 33 用例）；运行时接线属 P3
 - prepare journal v1：独立 section `extensionbags.journal` + 三方对照恢复裁决（世界探针优先于 stage）+ Kotlin 存储辅助
 - 游戏身份绑定：`gameIdentity`（签名摘要前缀）写入 committed state section；不匹配身份拒绝反序列化并隔离为默认态
@@ -794,7 +795,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 
 ### 阶段 P5：三方向移动与原版库存逻辑接入
 
-**详细开发计划**：`docs/p5-native-drag-protocol-and-path-acceptance.md`。该文档是 P5 的唯一工作包、状态机、文件职责、测试矩阵和真机证据模板；本节保留阶段闸门与 P4/P7 边界。
+**详细开发计划**：`docs/development/features/extension-bag/drag-protocol.md`。该文档是 P5 的唯一工作包、状态机、文件职责、测试矩阵和真机证据模板；本节保留阶段闸门与 P4/P7 边界。
 
 **主要任务与顺序**
 
@@ -1003,7 +1004,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 | v1.12 | 2026-08-28 | v0.6.17/175 真机验证通过（E-2026-08-28-03）：派生容量端到端（equip 手包→4/中包→12/未装备→0；保存→重启→capacities 由 types 派生重建）；修复两缺陷——跨袋同槽移动误拒（预存在 `requested_dst_slot == src_slot` 条件）、world 下 debug equip/item 自死锁（op_ok 锁内触发 frame 刷新抢同锁，模式登记 backlog） | 当前执行代理 |
 | v1.11 | 2026-08-28 | P1 prepare journal 格式 v1 落地：sidecar 独立 section `extensionbags.journal` + 三方对照恢复裁决（世界探针优先于 stage）；C++ JournalRecord/序列化/裁决纯函数 + Kotlin ExtensionBagJournal 存储辅助；host 测试 319 项通过 | 当前执行代理 |
 | v1.10 | 2026-08-28 | P1 容量派生契约 v1 落地：ITEMSTATICBASE 镜像 `derive_capacity(BagType)`（4/8/12/16）替换 kFixedCapacities 全部运行时读取；host 测试 284 项通过；ADR-004 标记已满足 | 当前执行代理 |
-| v1.9 | 2026-08-28 | P1 启动：容量派生逆向第一阶段完成（`docs/system/bag.md`）——袋对象=已装备背包物品对象、容量=物品+0x10 bit0..24、存档按容量循环编码袋内物品、真机实测 16/8/8/8/4；ADR-008 v2 已生效（原版背包 API 并入） | 当前执行代理 |
+| v1.9 | 2026-08-28 | P1 启动：容量派生逆向第一阶段完成（`docs/reference/game/bag.md`）——袋对象=已装备背包物品对象、容量=物品+0x10 bit0..24、存档按容量循环编码袋内物品、真机实测 16/8/8/8/4；ADR-008 v2 已生效（原版背包 API 并入） | 当前执行代理 |
 | v1.8 | 2026-08-28 | 用户决策：取消独立扩展背包域，原版背包 API（bag 6..10 并入）为正式操作面，视图类端点迁入 `/api/debug/extension_bag/*`；ADR-008 修订为 v2；§4.1 操作面条款重写；v0.6.15 的 `/api/extension_bag/*` 移除 | 当前执行代理 |
 | v1.7 | 2026-08-28 | 登记 E-2026-08-28-02：`/api/extension_bag/*` 六端点登记至 api-reference §十并真机验证（v0.6.15）；ADR-008 正式操作面就绪，P1 验收路径解除阻断；登记 `INVEN_RemoveItemDirect` 返回值不可信发现 | 当前执行代理 |
 | v1.6 | 2026-08-28 | 登记 E-2026-08-28-01：P0 原版背包 smoke 在唯一真机通过（v0.6.14，身份链完整，全程 API 无用户触摸）；P0 闸门关闭，P1–P8 按 ADR-008 保持“验收路径未就绪” | 当前执行代理 |

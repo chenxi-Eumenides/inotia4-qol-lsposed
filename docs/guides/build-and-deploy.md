@@ -27,7 +27,7 @@
 
 | 程序 | 用途 | 状态 |
 |---|---|---|
-| Gradle | 命令行构建模块 APK | ✅ **8.11.1（唯一版本，v0.4.30 固定）**：wrapper 发行版缓存于项目 `.gradle/`；zip 本地备份 `tools/gradle-8.11.1-bin.zip`（wrapper.properties distributionUrl 指向本地 file://，网络抖动不重下载）。⚠️ 系统 gradle 9.6.1 与 AGP 8.7.3+kapt 1.9.24 不兼容（kaptDebugKotlin 创建失败），不可用 |
+| Gradle | 命令行构建模块 APK | ✅ **8.11.1（唯一版本，v0.4.30 固定）**：完整发行版缓存于项目隐藏目录 `.gradle/wrapper/dists/`，统一通过 `scripts/build-debug.sh` 自动发现和调用；不要求 `tools/` 保存 zip。⚠️ 系统 Gradle 版本不作为本项目构建入口 |
 | Android SDK platform | 提供 android.jar（`/opt/android-sdk/platforms/android-34/`） | ✅ android-34 |
 | Android SDK build-tools | 编译/打包 Android 模块 | ✅ 37.0.0 |
 | **Android NDK** | 编译 native 数据访问层 | ✅ **r26d（26.3.11579264）**，**项目内 `tools/ndk/`**（瘦身至 2.0G，仅 ARM ABI） |
@@ -67,12 +67,16 @@
 > 本节仅列核心命令速查。
 
 ```bash
-# ① 构建模块（workdir: module/，缓存落项目 .gradle/）
-# wrapper zip 曾被清理，直接用缓存发行版（或先让 wrapper 补下载）
-# ⚠️ zsh 下 `*/` 通配符不展开会报错，必须写完整路径（目录名 bpt9gzteqjrbo1mjrsomdt32c 固定）
-GRADLE_BIN=$PWD/../.gradle/wrapper/dists/gradle-8.11.1-bin/bpt9gzteqjrbo1mjrsomdt32c/gradle-8.11.1/bin/gradle
-GRADLE_USER_HOME=$PWD/../.gradle $GRADLE_BIN :app:assembleDebug --no-daemon
-# 产物 → output/inotia4-qol-lsposed-<版本>.apk（复制 + 版本号递增，见 README 规则 6）
+# ① 构建模块（workdir：项目根目录；脚本自动发现隐藏目录 .gradle/ 中的 Gradle 8.11.1）
+# 禁止直接执行 ./gradlew、系统 gradle 或手写缓存路径。
+scripts/build-debug.sh
+# 默认使用项目缓存离线构建；如需传递额外 Gradle 参数，直接追加参数即可：
+scripts/build-debug.sh --offline
+# 正式版构建并复制为 output/inotia4-qol-lsposed-v<version>-release-unsigned.apk
+scripts/build-release.sh
+# Debug 产物 → output/inotia4-qol-lsposed-debug-<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
+# Release 产物 → output/inotia4-qol-lsposed-v<version>-release-unsigned.apk；版本号来自 build.gradle.kts，脚本只保留最新 2 份 Release APK
+# 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
 # 命名格式固定：inotia4-qol-lsposed-vX.Y.Z.apk（如 v0.4.56）
 
 # ② 部署（覆盖安装，LSPosed 启用状态按包名保留）
@@ -88,7 +92,7 @@ adb -s 192.168.3.54:5555 shell monkey -p com.com2us.inotia4.normal.freefull.goog
 
 # ③a 真机2启动弹窗前置（2026-08-27 实测必需；仅此一步使用触摸脚本）
 # 脚本通过 ANDROID_SERIAL 固定目标真机2，坐标不适用于其他设备。
-ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/touch_automation.py --inject input click 420,280 1.0
+ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/device/touch_automation.py --inject input click 420,280 1.0
 
 # ④ 等待 API 就绪（8088 端口；curl 轮询比 /proc/net/tcp 可靠）
 # API 可达（能返回 JSON）即代表模块已注入、游戏启动完成；轮询到 "screen" 字段说明模块数据通路就绪
@@ -108,11 +112,11 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 
 | 脚本 | 用途 | 用法 | 默认 |
 |---|---|---|---|
-| `scripts/analyze/check_symbols.py` | 符号一致性校验（**改 game_symbols.h 后必跑**） | `uv run python scripts/analyze/check_symbols.py [libgame.so路径]` | `apk/decoded/lib/arm64-v8a/libgame.so`，比对 120+ 符号；**新增符号须登记 `SYMBOL_TO_MACRO` 映射** |
-| `scripts/analyze/api_poll.py` | 连续轮询 player/party/inventory 检测字段变化 | `uv run python scripts/analyze/api_poll.py <IP> [间隔秒] [次数]` | `192.168.3.54`, 2.0s, 30 次 |
-| `scripts/analyze/live_session.py` | 联调全自动会话（局域网/Tailscale 通用采样） | `uv run python scripts/analyze/live_session.py [IP] [时长上限分钟]` | `192.168.3.54`, 上限 5min |
-| `scripts/parse/package_assets.py` | 静态数据重打包进模块 assets（M3 产物 → module/assets） | `uv run python scripts/parse/package_assets.py` | 28 表 + zh-Hans/en 语言 |
-| `scripts/touch_automation.py` | adb 触摸注入（执行模式）+ 实时检测（无参数=检测模式） | `uv run python scripts/touch_automation.py click 100,200 0.5 ...` | 3168x1440 逻辑坐标，自动旋转校准 |
+| `scripts/maintenance/check_symbols.py` | 符号一致性校验（**改 game_symbols.h 后必跑**） | `uv run python scripts/maintenance/check_symbols.py [libgame.so路径]` | `apk/decoded/lib/arm64-v8a/libgame.so`，比对 120+ 符号；**新增符号须登记 `SYMBOL_TO_MACRO` 映射** |
+| `scripts/verification/api_poll.py` | 连续轮询 player/party/inventory 检测字段变化 | `uv run python scripts/verification/api_poll.py <IP> [间隔秒] [次数]` | `192.168.3.54`, 2.0s, 30 次 |
+| `scripts/verification/live_session.py` | 联调全自动会话（局域网/Tailscale 通用采样） | `uv run python scripts/verification/live_session.py [IP] [时长上限分钟]` | `192.168.3.54`, 上限 5min |
+| `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（M3 产物 → module/assets） | `uv run python scripts/data/package_assets.py` | 28 表 + zh-Hans/en 语言 |
+| `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）+ 实时检测（无参数=检测模式） | `uv run python scripts/device/touch_automation.py click 100,200 0.5 ...` | 3168x1440 逻辑坐标，自动旋转校准 |
 
 ### 3.3 设备连接方式（两台真机）
 
@@ -148,6 +152,13 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 > 构建注意：Gradle 中间产物在 `module/**/build/`，最终 APK 复制到 `output/` 后验收交付；
 > `GRADLE_USER_HOME=$PWD/.gradle` 为可选构建缓存隔离（非强制）。
 
+### 3.5 临时文件规则
+
+- 每个任务开始前创建独立目录：`.tmp/<task-name>/`；任务名使用小写英文、数字和短横线，避免直接写入 `.tmp/` 根目录。
+- `.tmp/<task-name>/` 只保存本次任务可重建的日志、截图、反汇编、探针输出和临时输入；源码、可复用脚本、第三方工具、APK 交付物和长期证据不得写入。
+- 任务完成后立即清理对应任务目录；长期需要保留的证据移入 `docs/history/` 或 `archive/`，不得依赖 `.tmp/` 作为长期存储。
+- `.tmp/` 已加入 Git 忽略规则，不得使用 `git add -f` 将其提交；清理时只能删除 `.tmp/` 内容，不得以清理临时文件为由删除 `apk/`、`output/` 或 `archive/`。
+
 ## 4. 环境验证记录（2026-08-05）
 
 | 验证项 | 结果 |
@@ -166,7 +177,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 
 ## 5. 环境相关已知待办
 
-> 环境/部署相关待办已统一收录至 `docs/backlog.md`（部署/环境表），本节不再维护。
+> 环境/部署相关待办已统一收录至 `docs/development/planning/backlog.md`（部署/环境表），本节不再维护。
 
 已完结（历史记录）：
 - [x] **y7000 模拟器环境**（2026-08-05 实测完结：TCG ARM VM boot 25+ 分钟未完成；x86_64 转译路线 frida 不可用 + LSPatch native 高风险）→ 模拟器路线冻结，转向真机
@@ -184,16 +195,16 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 5. **SDK 无 CMake**：NDK 瘦身移除 cmake。系统 cmake 4.4 通过 `local.properties` 加 `cmake.dir=/usr` 使用（AGP 找 `<dir>/bin/cmake`）；`android.ndkVersion` 须显式声明（26.3.11579264 匹配 r26d）。
 6. **libxposed 101 写法**：`class XposedMain : XposedModule()` + `override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam)`（101 起无参构造 + attachFramework 自动调用；参考 LSPosed/CorePatch）。
 7. **y7000 跨平台工具链**（2026-08-05 实测）：Windows OpenSSH 结束会话会终止 Start-Process 后台进程（长任务用 schtasks Interactive 登录）；aria2 `--all-proxy` 不支持 socks5://（只认 http://，127.0.0.1:20170 多线程 GB 级/分钟）；wsl.exe 输出为 UTF-16（PowerShell 调用后 grep 判二进制 → 重定向文件再 Get-Content）。
-8. **Gradle wrapper zip 曾被清理**：wrapper 需重新下载（services.gradle.org 超时）→ 直接用缓存发行版 `../.gradle/wrapper/dists/gradle-8.11.1-bin/*/gradle-8.11.1/bin/gradle`。
+8. **Gradle wrapper zip 曾被清理**：不要手写缓存哈希目录；从项目根目录执行 `scripts/build-debug.sh`，脚本会自动发现 `.gradle/wrapper/dists/` 中的 Gradle 8.11.1。
 9. **AGP 依赖下载慢**（国外仓库）→ 阿里云镜像（settings.gradle.kts 已配）。
-10. **zsh 通配符不展开**（2026-08-12 实测）：`GRADLE_BIN=$PWD/../.gradle/wrapper/dists/gradle-8.11.1-bin/*/...` 中 `*/` 在 zsh 下**不展开**直接报 `没有那个文件或目录` → 写完整路径 `.../bpt9gzteqjrbo1mjrsomdt32c/gradle-8.11.1/bin/gradle`。
+10. **zsh 通配符不展开**（2026-08-12 实测）：缓存发行版目录含随机哈希，统一使用 `scripts/build-debug.sh`，不要在命令行手写 `*/` 或缓存哈希。
 11. **frida-server 重启后需 su 启动**（2026-08-12 实测）：设备重启后 `/data/local/tmp/frida-server` 需 `adb shell su -c 'nohup /data/local/tmp/frida-server >/dev/null 2>&1 &'`（root + nohup），普通 `adb shell "frida-server &"` 无权限启动失败。
 12. **通知栏遮挡启动**（2026-08-12 实测）：设备重启后首屏可能是 NotificationShade（`dumpsys window` mCurrentFocus 显示），monkey 启动游戏前先 `input keyevent 4` 关闭通知栏回到桌面，否则游戏未真正启动（8088 无监听）。
 13. **两台真机**（2026-08-12 确认）：真机1=`192.168.3.11`（局域网）+`100.110.139.83`（Tailscale，同一台）；真机2=`192.168.3.54`（另一台，当前主力）。真机2仅启动弹窗前置例外使用 `(420,280)`，其余完全用 API 操控。详见 §3.3。
-14. **真机2启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/touch_automation.py --inject input click 420,280 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机2触摸坐标。
+14. **真机2启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/device/touch_automation.py --inject input click 420,280 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机2触摸坐标。
 
 ## 6. 关联文档
 
 - 项目总览 / 目录规范：`README.md`
-- 代码结构（NDK/CMake/依赖配置说明）：`architecture.md`
-- 开发待办：`docs/backlog.md`
+- 代码结构（NDK/CMake/依赖配置说明）：`docs/development/architecture.md`
+- 开发待办：`docs/development/planning/backlog.md`
