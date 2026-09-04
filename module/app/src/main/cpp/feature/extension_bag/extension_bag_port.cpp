@@ -30,10 +30,10 @@ int extension_bag_inventory_state_id() {
     return virtual_bag_inventory_state_id();
 }
 
-bool extension_bag_save_game() {
-    return virtual_bag_save_game();
-}
-
 void extension_bag_prepare_save_slot_load() {
     virtual_bag_prepare_save_slot_load();
+}
+
+void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
+    virtual_bag_for_each_logical_item(fn, ctx);
 }

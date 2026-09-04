@@ -667,8 +667,10 @@ void virtual_bag_inventory_enter_wrapper() {
 }
 
 void virtual_bag_save_panel_enter_wrapper() {
+    VIRTBAG_LOG("save panel enter wrapper invoked world=%d hook=%d",
+                game_in_world() ? 1 : 0, g_save_panel_hook_installed ? 1 : 0);
     if (game_in_world()) {
-        virtual_bag_save_game();
+        module_save_game();
     }
     if (g_orig_save_enter != nullptr) g_orig_save_enter();
 }
@@ -814,4 +816,3 @@ void* allocate_draw_thunk(uintptr_t call_addr, uintptr_t wrapper) {
     return nullptr;
 #endif
 }
-

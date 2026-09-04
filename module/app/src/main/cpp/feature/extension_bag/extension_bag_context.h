@@ -24,3 +24,6 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot,
 
 bool extension_bag_load_state_from_store(int slot);
 bool extension_bag_save_state_to_store(int slot);
+bool extension_bag_prepare_save_to_store(int slot, const char* transaction_id);
+    bool extension_bag_commit_save_to_store(int slot, const char* transaction_id);
+bool extension_bag_abort_known_failed_save(int slot, const char* transaction_id);

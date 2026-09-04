@@ -14,8 +14,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SO = ROOT / "apk" / "decoded" / "lib" / "arm64-v8a" / "libgame.so"
-HEADER = ROOT / "module" / "app" / "src" / "main" / "cpp" / "game_symbols.h"
-REGISTRY = ROOT / "module" / "app" / "src" / "main" / "cpp" / "symbol_registry.h"
+HEADER = ROOT / "module" / "app" / "src" / "main" / "cpp" / "data" / "native" / "game_symbols.h"
+REGISTRY = ROOT / "module" / "app" / "src" / "main" / "cpp" / "data" / "native" / "symbol_registry.h"
 READELF = (
     ROOT / "tools" / "ndk" / "android-ndk-r26d" / "toolchains" / "llvm"
     / "prebuilt" / "linux-x86_64" / "bin" / "llvm-readelf"

@@ -4,14 +4,14 @@
 > `README.md` 负责项目总览，`docs/development/architecture.md` 负责代码结构与规范，`docs/development/planning/backlog.md` 负责全局待办，`docs/guides/build-and-deploy.md` 负责环境与设备，`module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
 > 本文中的 `.tmp/...` 路径是既有验收证据的历史引用；新日志和中间文件必须写入 `.tmp/<task-name>/`，长期证据应归档到 `docs/history/` 或 `archive/`。
 >
-> **文档版本**：v1.41 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-02 ｜ **最近审核**：2026-09-02
-> **当前阶段**：P0–P5 已完成（证据见 §5.2、§9 与 §13）；当前闸门转入 P6 全局库存来源与自动装备。P5 三方向真实拖动、同袋合并、跨袋不合并和取消均已有证据；整体仍为 `NOT_ACCEPTED`，因为 P7/P8 尚未完成。
+> **文档版本**：v1.51 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-04 ｜ **最近审核**：2026-09-04
+> **当前阶段**：P0–P6 已完成（证据见 §5.2、§9 与 §13）；当前闸门转入 P7 全局库存来源与操作接入。P5 三方向真实拖动、同袋合并、跨袋不合并和取消，以及 P6 保存协调均已有证据；整体仍为 `NOT_ACCEPTED`，因为 P7–P8 尚未完成。
 
 ## 0. 控制面恢复块
 
 - **唯一入口**：会话压缩、换代理或重新打开任务时，先读本节，再读“当前状态”和“当前闸门”，不得以聊天记录或旧日志替代事实。
-- **当前结论**：`NOT_ACCEPTED`。P0–P5 已按阶段证据完成，但 P7–P8 的持久化、最终回归和发布验收尚未完成；源码、host 测试或单次 API 调用仍不能替代 P7/P8 真机验收。
-- **下一允许动作**：进入 P6 全局库存来源与自动装备；已完成的 P5 三方向移动不再重复验收。
+- **当前结论**：`NOT_ACCEPTED`。P0–P6 已按阶段证据完成，但 P7–P8 的全局库存接入、最终回归和发布验收尚未完成；源码、host 测试或单次 API 调用仍不能替代对应真机验收。
+- **下一允许动作**：进入 P7 全局库存来源与操作接入；已完成的 P5 三方向移动和 P6 保存协调不重复实现。
 - **已知非阻断问题**：扩展源背包拖到未装备袋并成功装备后，当前扩展投影视图仍会短暂闪现原版当前背包；装备状态、源槽清理和最终扩展视图正确，但 UI 闪烁尚未解决。已停止继续扩大本问题的 UI 改动，后续单独回归处理。
 - **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
@@ -29,10 +29,10 @@
 | 字段 | 当前值 |
 |---|---|
 | Overall | `NOT_ACCEPTED` |
-| Current phase | `P6` 全局库存来源与自动装备接入 |
-| Current gate | P5.4–P5.6 三方向路径、P5.7–P5.9 session 清理/失败隔离/Host/构建/真机证据已收口；P5 结论为 `ACCEPTED`。P7/P8 尚未开始 |
-| Blocking issue | P5 已完成；扩展源装备后的短暂原版背包闪现已登记为非阻断 UI 回归。Overall 仍受 P7 持久化协调、P8 最终回归与发布条件阻塞 |
-| Next allowed action | 进入 P6 全局库存来源与自动装备；不重复 P5 三方向移动验收 |
+| Current phase | `P7` 全局库存来源与操作接入 |
+| Current gate | P5.4–P5.6 三方向路径、P5.7–P5.9 session 清理/失败隔离/Host/构建/真机证据已收口；P5 结论为 `ACCEPTED`。P6 保存协调已完成并通过真机验证；P7/P8 尚未完成 |
+| Blocking issue | P5/P6 已完成；扩展源装备后的短暂原版背包闪现已登记为非阻断 UI 回归。Overall 仍受 P7 全局库存接入、P8 最终回归与发布条件阻塞 |
+| Next allowed action | 盘点统一逻辑库存枚举、数量查询、使用/消耗/配方和入库路径；不重复 P5/P6 验收 |
 | Owner | 当前执行代理；同一验收项一次只允许一个代码、构建或设备变量 |
 | Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05`；P4.3 审计循环/视图借用 `E-2026-08-31-06`/`E-2026-08-31-07`；P4.4 五态事务回归 `E-2026-08-31-08`；P4.5/P4.6 隔离与移交回归 `E-2026-09-01-01`；P5.0 基线 `E-2026-09-01-02`；P5.1 关闭闸门部署 `E-2026-09-01-03`；P5.1 观测样本 `E-2026-09-01-05`/`06`/`07`/`09`/`10`/`11`；P5.4 同逻辑袋空槽 `E-2026-09-02-01`；P5.4 跨扩展标签空槽 `E-2026-09-02-02`；P5.4 API 边界补充 `E-2026-09-02-03`；P5.4 三方向真实拖动与合并观察 `E-2026-09-02-04`；P5.4 扩展同袋合并用户确认 `E-2026-09-02-05`；P5.4 取消用户确认 `E-2026-09-02-06` |
 
@@ -77,7 +77,7 @@
 - 扩展→原版：`move_extension_to_original_locked()`（实现见 `feature/extension_bag/game_ui_virtbag.cpp`）
 - 扩展→扩展：`move_extension_to_extension_locked()`（实现见 `feature/extension_bag/game_ui_virtbag.cpp`）
 - P4 三方向移动以 `PendingTransfer` 记录唯一的**进程内**五态事务；`pending-recorded` 明确标记 `durable=false`，提交后仅清理内存记录。
-- **持久化边界**：`PendingTransfer` 与 `JournalRecord` v1 字段同构，但不是已落盘 journal；保存成功、stage 0/1/2、sidecar 提交、重启恢复均只能由 P7 的协调器声明。
+- **持久化边界**：`PendingTransfer` 与 `JournalRecord` v1 字段同构，但不是已落盘 journal；保存成功、stage 0/1/2、sidecar 提交、重启恢复均只能由 P6 的模块存档协调器声明。
 
 ## 3. 未验收问题
 
@@ -96,7 +96,7 @@
 - 原版袋切换、扩展袋切换、投影安装/清理和唯一选中状态是否一致。
 - 扩展源装备到未装备袋成功后，扩展投影不得短暂显示原版当前背包；当前状态为已知 UI 回归，待 P5 收口后单独修复。
 
-### P7：存档与跨进程恢复
+### P6：存档与跨进程恢复
 
 - 原版保存成功后 sidecar 写入；未保存内存改动丢失。
 - 切换存档、退出页面、回主菜单、重启进程后的投影和 pending 清理。
@@ -635,7 +635,7 @@
 - 落盘位置：sidecar 独立 section `extensionbags.journal`（v1），与 committed section `extensionbags.items` 物理分区；复用 ModuleSaveStore 的原子写/CRC/last-good/generation
 - 记录字段：`transactionId`（Kotlin `j-<millis>-<counter>` 生成）、`stage`（0=prepared / 1=original_saved / 2=sidecar_committed）、`generation`、方向、源/目标袋槽、payload（b64，与 PendingTransfer 同语义）、sourcePayload（ext→orig）
 - 恢复裁决 = `journal_recovery_action(state, journal, worldProbe)`（virtual_bag_state.h，host 测试覆盖）：**原版世界实态探针优先于 stage 标记**（stage 可能在"原版保存成功后、stage 落盘前"崩溃时落后于实态）——orig→ext 源槽已无源物品 ⇒ 重放扩展侧；仍有 ⇒ 回滚。ext→orig 反向对称。committed 已等于目标态或 stage=2 ⇒ 仅清理（幂等）。journal 非法 ⇒ kDiscard 隔离并告警，禁止按其重放
-- 执行顺序（P7 收口）：pending(内存) → journal(stage=0) → 原版变更+原版保存 → journal(stage=1) → sidecar 提交 committed → 清 journal
+- 执行顺序（P6 收口）：pending(内存) → journal(stage=0) → 原版变更+原版保存 → journal(stage=1) → sidecar 提交 committed → 清 journal
 - 原版保存失败时，扩展改动不得被标记为已保存；sidecar 写入失败或两者之间进程中断时，不得静默清除未完成事务。
 - 原版槽 `0..2` 与模块 sidecar 槽一一对应。
 - 扩展物品保存使用完整 `SAVE_SaveItem` payload，不保存 native 指针。
@@ -656,7 +656,9 @@
 | P2 | ✅ 通过（2026-08-29，E-2026-08-29-01：10 轮压测 + 回主菜单恢复） | 原版 UI 只读窗口原型：正式投影 install/restore、移动门禁、索引5 sentinel |
 | P3 | ✅ 通过（2026-08-31，标签稳定 `E-2026-08-30-01`、装备/解除 `E-2026-08-31-01`、选中反馈 `E-2026-08-31-02`、全满弹窗 6 `E-2026-08-31-03`；扩展拖动 0x81 并入 P5） | 原版控件与扩展窗口的正式接入 |
 | P4 | ✅ 已完成并归档（用户 2026-09-01 确认；`E-2026-08-31-04`～`E-2026-08-31-08`、`E-2026-09-01-01`、`fc97f97b…` 修复回归，host 705/705） | 原版物品对象与逻辑背包事务桥接：唯一 Save/Load 桥、所有权唯一、进程内五态事务、失败隔离 |
-| P5 | 🟡 计划中 | 先实证原版拖动协议，再以单一 session/routing 实现并验收 ext→ext → orig→ext → ext→orig 真实输入路径；详细计划见独立 P5 文档 |
+| P5 | ✅ 已完成（2026-09-02） | 三方向真实拖动、同袋合并、跨袋不合并、取消、session 清理与失败隔离 |
+| P6 | ✅ 已完成（2026-09-04） | 模块存档通用协调、真实原版保存入口收口、sidecar 提交、journal 恢复与保存边界 |
+| P7 | 🟡 进行中（2026-09-04） | 全局逻辑库存来源、数量/操作识别、自动装备、满包提示和所有入库路径 |
 
 ### 阶段 P0：冻结原版基线与可复现身份
 
@@ -780,7 +782,7 @@
 | 所有权 | `module-owned → borrowed-for-view → module-owned → released`，或在 ext→orig 实际入库成功后同锁 `module-owned → inventory-owned`。视图恢复先撤销 ControlItem、TouchState、描述和快照引用；视图外借用数为零。 | 模块不得回收、访问或释放 `inventory-owned` 对象；不得在借用仍存在时 Free。 |
 | 五态事务 | `prepared → pending-recorded → logical-state-updated → original-state-updated → committed`。每笔只有一个事务 ID；ext→ext 没有 original 阶段，不调用 `INVEN_MoveItem`。 | 另建 pending、回滚或移动模型；失败时先释放仍为模块所有的对象而未恢复逻辑/UI。 |
 | 隔离 | `IsolationRecord` 是进程内只读诊断，原因仅为 `payload_invalid`、`invalid_transaction_domain`、`invalid_payload`、`load_failed`、`insert_failed`、`slot_not_found`、`journal_invalid`；保留 transactionId、generation、原始袋槽和 payload。 | `normalize()`/解析静默清空坏记录、用替代物覆盖，或将隔离项当成正常可移动物品。 |
-| P7 接口 | `PendingTransfer` 与 `JournalRecord` v1 字段同构，但 P4 pending 明确为 `durable=false`。P7 的固定顺序为 stage 0 → 原版变更与保存 → stage 1 → sidecar committed → 清 journal，且世界实态优先于 stage。 | 在 P5 声称 journal 已落盘、sidecar 已提交、可跨进程恢复或已完成 stage 0/1/2。 |
+| P6 接口 | `PendingTransfer` 与 `JournalRecord` v1 字段同构，但 P4 pending 明确为 `durable=false`。P6 的固定顺序为 stage 0 → 原版变更与保存 → stage 1 → sidecar committed → 清 journal，且世界实态优先于 stage。 | 在 P5 声称 journal 已落盘、sidecar 已提交、可跨进程恢复或已完成 stage 0/1/2。 |
 
 **P4 的未就绪验收项已逐条转交 P5**
 
@@ -812,35 +814,19 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 - 日志必须含协议版本、session token、触发事件、源/目标控件与袋槽、payload 摘要、hit-test、transactionId、阶段和 success/fail/cancel/rollback 结果。
 - 真实拖放只能由唯一真机 `192.168.3.54:5555` 的用户触摸确认；API、debug 注入和 host 测试只能准备、诊断或验证纯模型，不能伪造物理拖动结论。
 
-**P5/P7 边界裁决**：P5 只验收进程存活期间的 UI 输入、事务回滚、Load/插入失败隔离和不重复/不丢失。原版保存失败、sidecar 写失败、journal stage 0/1/2、杀进程、切档、重启重放、全部保存调用点及 ADR-009 一律为 P7；这些项在 P5 矩阵中标为“未就绪，转 P7”，不得再写作 P5 测试目标。
+**P5/P6 边界裁决**：P5 只验收进程存活期间的 UI 输入、事务回滚、Load/插入失败隔离和不重复/不丢失。原版保存失败、sidecar 写失败、journal stage 0/1/2、杀进程、切档、重启重放、全部保存调用点及 ADR-009 一律为 P6；这些项在 P5 矩阵中标为“未就绪，转 P6”，不得再写作 P5 测试目标。
 
-### 阶段 P6：全局库存来源与自动装备接入
+### 阶段 P6：保存、切档、重启与异常恢复
 
-**内容**
-
-- 审计所有生成物品进入背包的路径：掉落、奖励、开箱、合成、商店购买、脱装备和物品使用结果。
-- 统一空槽查找顺序：原版背包优先，原版满后进入扩展背包。
-- 全部背包满时复用原版“背包已满”提示。
-- 自动入库和自动装备只搜索原版索引 `0..4` 与已装备的扩展逻辑袋，绝不向原版索引 `5` 投递。
-- 明确扩展物品能否被使用、装备、出售、强化和镶嵌；不能支持的路径必须阻断并返回明确错误。
-
-**完成要求**
-
-- 任何新增物品都不会绕过逻辑背包映射而丢失。
-- 自动装备和普通入库遵循相同的容量、堆叠和所有权规则。
-
-**测试目标**
-
-- 原版有空槽、原版满/扩展有空槽、全部满三种场景。
-- 覆盖自动装备、掉落拾取、奖励入库和脱装备入库。
-
-### 阶段 P7：保存、切档、重启与异常恢复
+**归档状态（2026-09-04）**：P6 已完成。原版 `SAVE_Save` 的 8 个真实保存 callsite 已统一接入 core `module_save_game()`；`SAVE_LoadCharacterAll` 内部读档调用保留原版语义。模块存档 participant 在完整原版保存前 prepare、成功后 commit；批量宝石合成等非保存操作不再隐式写入 sidecar。真机新进程已验证 hook 安装及 `sidecar prepare → sidecar commit → extension bag participant commit → save complete` 链路，用户确认保存结果无问题。详细代码和日志变更见变更日志 v1.48–v1.49。
 
 **内容**
 
-- 固化保存顺序：写入 prepare journal → 恢复临时 UI 窗口 → 调用原版保存 → 原版成功后提交 sidecar 新状态 → sidecar 成功后清理 pending/journal；原版保存失败或中途崩溃均按 transactionId/generation 重放或回滚。
-- 覆盖手动保存、自动保存、进入存档、切换存档、回主菜单、退出背包和进程重启。
-- 审计并收口全部原版保存调用点和自动保存调用点，不得存在绕过协调器的直接保存路径；明确存档面板进入是否会写入当前进度。
+- 建立模块存档通用协调器：保存前生成 participant 快照并写入协调 journal，调用并确认原版完整保存成功后，再提交各模块 section。
+- `SAVE_SaveInventory` 等原版保存子调用只能执行投影恢复和保存前准备，不能单独触发 sidecar 提交；离开背包、切换袋和恢复投影均不是保存事件。
+- 扩展背包作为第一个 participant，继续负责 `extensionbags.items`、payload、功能 journal 和业务恢复裁决；协调层不解释背包槽位语义。
+- 覆盖手动保存、已确认的自动保存、进入存档、切换存档、回主菜单和进程重启；未确认的保存路径不得标记为已接入。
+- 审计并收口全部原版完整保存调用点，不得存在绕过协调器的直接保存路径；明确存档面板进入是否真的写入当前进度。
 - 注入原版保存失败、sidecar 写失败和两者之间进程中断。
 
 **完成要求**
@@ -856,6 +842,83 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 - 每次异常测试都保存原版 inventory、sidecar generation/CRC、pending 状态和日志。
 - 每次异常测试还必须保存 prepare journal、transactionId、原版索引 `5` sentinel、控件树/描述菜单快照和对象分配/释放计数。
 - 最终持久化实现只接受 `extensionbags.items` v4；旧 section、旧版本转换和自动迁移代码必须在 P8 前移除。
+
+### 阶段 P7：全局库存来源与自动装备接入
+
+**内容**
+
+- P7 的目标是**语义上的全局支持**，不是把原版物理数组伪装成 11 个物理袋，也不是把所有原版函数都替换成同一个 hook。原版 `0..4` 袋与已装备扩展逻辑袋 `6..10` 进入同一逻辑库存来源；任务袋 `5` 永不参与。
+- 扩展物品始终由 payload 持有；需要原版 native 对象的路径必须经过“受控物化 → 同步调用原版能力 → 序列化回写 payload → 释放或继续借用”的完整生命周期。不得把 sidecar 描述直接强转为原版指针，也不得让原版 `ITEMPOOL_Free` 释放模块仍持有的对象。
+- 先完成查询统一，再完成操作统一，最后审计所有生产者和 UI 旁路。任何只修改 `INVEN_FindItem`、`INVEN_ConsumeItem`、`INVEN_RemoveItem` 的方案都不能直接宣称 P7 完成。
+- 盘点并接入快捷键、配方查询、类别/数量检查、消耗、使用、丢弃、出售、装备、附魔、镶嵌和移动；优先修改共享逻辑入口，共享入口不足时按业务语义分别适配。
+- 盘点所有物品进入背包的路径：掉落、奖励、开箱、拆包、合成、商店购买、网络商店、脱装备和物品使用结果。
+- 统一入库顺序：原版背包 `0..4` 优先；原版满后进入扩展逻辑袋；全部满时复用原版“背包已满”语义。不得将扩展物品投递到原版索引 `5`。
+- 盘点商店、合成等拥有独立物品控件树的面板，增加扩展标签或逻辑物品显示；显示接入不得改变原版保存时机。
+- 明确每条扩展物品路径是否支持使用、装备、出售、强化、镶嵌、拆分、合成和开箱；不支持的路径必须在操作前阻断并返回明确错误，不得调用原版函数试错。
+
+#### P7.1 背包相关函数清单与适配边界
+
+以下清单来自当前 `libgame.so` 动态符号、`game_symbols.h` 和源码调用点。函数按语义分组；“统一适配”表示可以纳入逻辑库存服务，不表示可以用一个机器码 patch 覆盖。
+
+| 分组 | 原版函数/入口 | 当前行为 | P7 处理方式 |
+|---|---|---|---|
+| 查询 | `INVEN_FindItem`、`INVEN_HaveItem`、`INVEN_GetItemCount`、`INVEN_FindItemSlot` | 只扫描原版物理袋 `0..5`；返回 native 指针、布尔值、数量或物理槽编码 | 新增逻辑查询服务；扩展分支返回逻辑引用或受控借用对象。`FindItemSlot` 不得用扩展袋号伪造物理槽 |
+| 袋/空槽 | `INVEN_GetBagSize`、`INVEN_GetEmptyBagSlot`、`INVEN_IsEmptyBag`、`INVEN_IsHavingEmptySlot`、`INVEN_CalculateEmptySlotCountForSave`、`INVEN_GetEmptySaveSlotEx`、`INVEN_GetNeededSaveSlotEx` | 读取/计算原版容量和物理空槽 | 原版和扩展分别计算后由统一入库策略聚合；不改变原版袋 `5` |
+| 堆叠/移动 | `INVEN_GetCumulateSaveSlotEx`、`INVEN_MoveItem`、`ITEMSYSTEM_Divide` | 按 native 指针、物理袋和原版堆叠规则处理 | 原版物品保留原函数；扩展物品走逻辑堆叠/拆分；跨域移动复用 P4 事务 |
+| 删除/消耗 | `INVEN_RemoveItem`、`INVEN_RemoveItemDirect`、`INVEN_RemoveItemData`、`INVEN_ConsumeItem` | `RemoveItem` 依赖物理指针反查；`RemoveItemDirect` 会释放物理对象；`ConsumeItem` 数量递减后可能删除 | 统一 `consume/remove` dispatcher；扩展对象禁止进入原版释放路径；原版返回值必须用状态观察校验 |
+| 入库/创建 | `INVEN_FindSaveSlot`、`INVEN_SaveItem`、`INVEN_SaveItemDirect`、`INVEN_SaveItemOnEmpty`、`INVEN_SaveItemData`、`INVEN_CheckSaveInNotEmptySlot`、`ITEMSYSTEM_CreateItem`、`ITEMSYSTEM_MakeItem`、`ITEMSYSTEM_ProcessUnpack` | 以原版物理袋和 native 对象为前提 | “原版优先、扩展兜底”的生产者适配；不能返回虚假物理槽让调用方继续写数组 |
+| 物品语义 | `ITEM_GetCumulateCount`、`ITEM_GetPrice`、`ITEM_GetSellPrice`、`ITEM_GetBuyPrice`、`ITEM_GetAbilityLevel`、`ITEM_GetRarity`、`ITEM_GetDamage`、`ITEM_GetDefense`、`ITEM_GetMagicDamage`、`ITEM_GetName`、`ITEMDATABASE_IsUse`、`ITEMSYSTEM_Is*`、`ITEMSYSTEM_CanPutJewel` | 读取 native 对象或静态表 | 对受控物化对象可复用；纯类别判定优先改为 category/静态表逻辑，避免不必要物化 |
+| 使用/装备 | `CHAR_UseItemEx`、`CHAR_ProcessShortcut`、`ITEMSYSTEM_OpenItemBox`、`ITEMSYSTEM_ReleaseSealed`、`CHAR_CanEquipItem`、`CHAR_FindEquipSlot`、`CHAR_EquipItem`、`CHAR_EquipItemFromInven*`、`CHAR_UnequipItemToInven*`、`CHAR_UnequipItemToInvenSlot` | 部分路径内部查找、消耗、入库或释放 native 物品 | 以操作 dispatcher 为主；快捷键等直接调用点单独验证，不以 API 使用成功替代游戏内调用链 |
+| 合成/商店/掉落 | `MIXSYSTEM_CheckMixture`、`MIXSYSTEM_GetStuff*`、`MIXSYSTEM_UseStuff`、`MIXSYSTEM_MakeItem`、`UIStore_*`、`DEALSYSTEM_*`、`NetworkStore_AddItem`、`MAPITEMSYSTEM_*`、`CHAR_PickItemAll` | 各自持有材料槽、商品槽、掉落槽或入库逻辑 | 分别接入逻辑库存；合成材料和商店入库不能只依赖 `INVEN_GetItemCount` |
+| 存档/对象 | `SAVE_SaveInventory`、`SAVE_LoadInventory`、`SAVE_SaveItem`、`SAVE_LoadItem`、`ITEMPOOL_Allocate`、`ITEMPOOL_Free` | 原版物理背包序列化和 native 对象池生命周期 | 原版存档保持原语义；扩展状态由 P6 participant/sidecar 负责，物化对象严格按所有权账本释放 |
+| UI/控件 | `UIEquip_*`、`ControlItem_SetItem`、`ITEM_Draw*`、`UIStore_*` 的库存控件入口、`UIMix_*` | 通过控件树、回调表或直接调用访问物品 | 已有正式投影继续复用；商店/合成等独立控件树分别接入，不把 debug 端点当正式操作面 |
+
+#### P7.2 Hook 与调用机制选择
+
+`docs/development/architecture.md` §2.2.1 已确定机制优先级：**直接读写内存 → 调用游戏函数指针 → `PtrHook` → 指令 `patch` → LSPosed Native Hook API**。P7 按以下规则执行：
+
+| P7 场景 | 适用机制 | 结论与限制 |
+|---|---|---|
+| 查询原版/扩展数量、类别、逻辑槽 | 直接读写内存 + `game_state` 逻辑服务 | 首选；不改游戏执行流。`for_each_bag_slot` 与扩展逻辑遍历分别实现，再由查询服务聚合 |
+| 调用原版创建、使用、装备、保存、序列化 | `game_access` 已解析的 `fn_*` 函数指针 | 首选；必须判空、确认 ABI、确认调用线程和对象所有权 |
+| UI 控件 ExecuteProc、ControlProc、回调表 | `PtrHook` | 首选拦截方式；只适用于稳定的间接函数指针槽，wrapper 签名必须完全一致。当前拖拽/按钮路径可沿用此机制 |
+| 固定位域、常量、稳定条件分支 | 可逆指令 `patch` | 仅用于少量确定指令；必须保留原指令校验、页权限、指令缓存刷新和回滚。不得在 patch 中塞入复杂库存业务 |
+| `CHAR_ProcessShortcut` 等直接 `BL INVEN_FindItem` 调用 | 最小调用点指令 patch + 已验证 veneer/dispatcher | `PtrHook` 无效，因为这是直接 `BL`。仅在确认调用点 ABI、分支范围、寄存器/返回值和恢复路径后使用；优先 patch 单个高价值调用点，不改整个函数入口 |
+| `INVEN_FindItem`/`INVEN_ConsumeItem`/`INVEN_RemoveItem` 全局入口 | 暂不使用通用 inline hook | 这些函数涉及 native 指针、递归/尾调用、对象释放和同步，当前 inline hook 历史上出现 `SIGBUS/SIGILL`；全局替换会放大所有系统风险 |
+| LSPosed Native Hook API | 仅作独立 PoC，不进入当前 P7 正式实现 | 本质仍是 inline hook；当前 APK 未配置 `assets/native_init`，且不能消除 ABI、并发、递归、卸载和生命周期风险 |
+
+**P7 Hook 裁决：**
+
+1. 不为“统一”而 Hook 原版函数；查询和 API 操作先在模块逻辑层统一。
+2. `PtrHook` 只用于已有稳定的 UI 间接回调，不用于 `INVEN_*` 直接函数。
+3. 指令 patch 只允许做固定分支/调用点转发；复杂的物化、payload 回写、事务和所有权逻辑必须留在 C++ dispatcher。
+4. 如果某个直接 `BL` 调用点确实无法通过上层入口覆盖，先建立单点 PoC，验证目标地址、完整 ABI、返回值、线程、重复安装、回滚和崩溃日志；PoC 通过后才能接入正式功能。
+5. `INVEN_FindItem`、`INVEN_HaveItem`、`INVEN_GetItemCount`、`INVEN_FindItemSlot` 若进入正式 patch 范围，必须先将 VMA、符号名、函数签名登记到 `game_symbols.h`/`symbol_registry.h`，禁止在域文件写裸地址。
+
+#### P7.3 实施顺序
+
+1. **逻辑查询层**：统一 `iterate / find / have / quantity / item_at`；扩展返回逻辑引用，原版返回物理引用；补齐 `find_inventory_item`、`inventory_item_at` 和增量快照统计。
+2. **操作 dispatcher**：实现 `consume / remove / move / add / sell / equip / enchant / jewel`；扩展操作必须更新 payload、dirty 状态和对象所有权，原版操作保持现有函数调用。
+3. **直接调用点审计**：逐一核对 `CHAR_ProcessShortcut`、`CHAR_UseItemEx`、配方材料检查和其他类别查询；能改上层就不做 patch，必须 patch 时只做单点调用点方案。
+4. **生产者接入**：掉落、奖励、开箱、拆包、合成、商店、网络商店、脱装备和物品使用结果，统一采用原版优先、扩展兜底。
+5. **面板接入**：商店、合成等独立物品控件树增加扩展逻辑显示和标签；不改变保存协调器和 sidecar 提交时机。
+6. **故障与真机验收**：验证原版有空槽、原版满/扩展有空槽、全部满、不可用类别、物化失败、回写失败、对象释放和任务袋 `5` 隔离。
+
+**完成要求**
+
+- 任何新增物品都不会绕过逻辑背包映射而丢失。
+- 自动装备和普通入库遵循相同的容量、堆叠和所有权规则。
+- `INVEN_FindItem`、`INVEN_HaveItem`、`INVEN_GetItemCount`、`INVEN_FindItemSlot`、`INVEN_ConsumeItem`、`INVEN_RemoveItem` 及其旁路不会把扩展对象送入错误的原版物理释放/写入路径。
+- 扩展物品的使用、消耗、删除、装备、合成材料检查和入库结果均可追溯到逻辑袋槽、payload、transactionId 和所有权状态。
+- 任何采用 `PtrHook` 或指令 patch 的点都有目标地址来源、原指令/原函数校验、ABI、安装/恢复和失败回滚证据；没有通用 inline hook 作为未验证依赖。
+
+**测试目标**
+
+- 原版有空槽、原版满/扩展有空槽、全部满三种场景。
+- 覆盖自动装备、掉落拾取、奖励入库和脱装备入库。
+- 覆盖每类查询函数的原版/扩展混合结果：空、单件、可堆叠、多袋、任务袋排除和跨存档切换。
+- 覆盖使用成功/失败、数量递减至零、删除、物化失败、payload 回写失败、原版函数返回值不可信和对象释放计数。
+- 覆盖快捷键、配方、商店、合成和至少一个直接 `BL` 调用点的真实调用链；调用点 patch 未通过时不得扩展到全局入口。
 
 ### 阶段 P8：最终回归与发布验收
 
@@ -936,7 +999,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 - **日期**：2026-08-27
 - **决策**：所有显式保存和自动保存均先独立落盘 prepare journal，再调用原版保存；原版成功后提交 sidecar 新状态，最后清理 journal。已提交状态与未提交事务必须分开表达。
 - **理由**：单纯“原版保存成功后写 sidecar”会留下进程中断窗口，内存 pending 无法支持跨进程恢复；统一协调器还可阻止直接保存调用造成状态分叉。
-- **状态**：生效；P7 前必须收口全部保存调用点并完成故障注入。
+- **状态**：生效；P6 前必须收口全部保存调用点并完成故障注入。
 
 ### ADR-008：扩展交互操作面 = 原版背包 API 并入（v2，用户 2026-08-28 决策）
 
@@ -950,7 +1013,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 - **日期**：2026-08-27
 - **决策**：存档面板进入是否写入当前进度不得由 hook 隐式决定；必须明确选择“进入即保存”或保持原版“打开面板只读旧档”，并将选择、影响和验收证据登记在控制面。
 - **理由**：隐式改变原版存档面板语义会导致用户打开旧档面板时当前进度被意外写入。
-- **状态**：待产品/实现决策；决策前 P7 不得通过。
+- **状态**：待产品/实现决策；决策前 P6 不得通过。
 
 ## 12. 风险登记
 
@@ -958,10 +1021,10 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 |---|---|---|---|
 | 原版物品丢失/重复/悬空指针 | 映射退出、失败回滚或重建对象异常 | 立即停止当前及后续阶段，保留日志和证据 | 开放 |
 | 原版保存成功但 sidecar 未提交 | sidecar 写入失败或进程中断 | 保留 pending/journal，不得标记已保存 | 开放 |
-| 跨存档污染 | 切档、重启后读取错误槽位 | 记录槽位、generation、CRC，回退 P7 | 开放 |
+| 跨存档污染 | 切档、重启后读取错误槽位 | 记录槽位、generation、CRC，回退 P6 | 开放 |
 | 固定容量误作正式能力 | 固定数组未替换、装备状态未驱动容量 | 不得进入 P8；验证装备派生容量、未装备限制和全部 UI/移动路径 | 开放 |
 | 任务袋污染 | 扩展路径读取或写入原版索引 `5` | 立即停止相关验收，记录源/目标和日志，回退对应阶段 | 开放 |
-| 保存调用未收口 | 任一显式或自动保存绕过协调器 | 立即将 P7 回退，登记调用点、原版与 sidecar generation 差异并补齐统一入口 | 开放 |
+| 保存调用未收口 | 任一显式或自动保存绕过协调器 | 立即将 P6 回退，登记调用点、原版与 sidecar generation 差异并补齐统一入口 | 开放 |
 | WAL 崩溃窗口 | prepare 未落盘、提交间中断或 journal 被误清理 | 注入故障并验证幂等重放/回滚；失败时不得进入 P8 | 开放 |
 | 装备背包移除后超容 | 解除、替换或出售装备物品导致有效容量下降 | 按已登记规则阻断或处理溢出，保存前后不得丢物；规则未定前禁止容量验收 | 开放 |
 | 扩展 API 验收缺口 | API 未登记或只能调用 debug 注入端点 | 相关阶段标记“验收路径未就绪”，不得用伪 API 结论通过 | 开放 |
@@ -972,6 +1035,15 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.51 | 2026-09-04 | P7 增补全局背包函数清单与实现方案：按查询、袋/空槽、堆叠/移动、删除/消耗、入库/创建、物品语义、使用/装备、合成/商店/掉落、存档/对象和 UI 分组登记适配边界；依据 architecture §2.2.1 明确 P7 优先使用逻辑库存服务与 `fn_*`，UI 间接回调使用 `PtrHook`，直接 `BL` 仅允许经过 ABI/分支范围验证的最小调用点指令 patch，暂不采用通用 inline hook；补充 P7.1–P7.3 实施顺序、完成要求和测试矩阵。 | 当前执行代理 |
+| v1.49 | 2026-09-04 | 移除批量宝石合成中的隐式 `module_save_game()`；该模块功能现在只修改游戏内存，保存只能由游戏真实保存入口或模块 API 显式触发。审计确认 feature 中无剩余直接 `fn_save()`/`module_save_game()` 保存调用，原版 `SAVE_Save` 的 8 个真实 callsite 仍统一接入 core。 | 当前执行代理 |
+| v1.48 | 2026-09-04 | 完成当前游戏版本 `SAVE_Save` 直接调用点审计：静态发现 9 个 callsite，其中 8 个真实保存触发点（复活、任务、保存状态机、网络商店）统一改写为 `core module_save_game()`；`SAVE_LoadCharacterAll` 内部读档特殊调用保留原版，避免读档递归保存。新 APK 真机新进程验证 8 个 callsite hook 安装成功，API 保存日志出现 `sidecar prepare`→`sidecar commit`→`extension bag participant commit`→`save complete`。 | 当前执行代理 |
+| v1.47 | 2026-09-04 | 保存编排职责移入 `core/native/module_save.cpp`：统一生成 transaction、调用所有 participant 的 prepare、调用原版 `fn_save()`、成功后 commit、失败 abort；扩展背包删除 `virtual_bag_save_game()`，仅注册 `extension-bag` participant（状态快照/提交/失败清理）。API 保存和保存面板入口均改走 core 协调器；自动保存及其他原版保存入口仍需逐一审计接入。 | 当前执行代理 |
+| v1.46 | 2026-09-04 | 全链路核验分离结果：物理拖动确实更新 `g_virtual_bag_state.items`（internal `2/7→2/8`），`sidecar prepare/commit` 与当前状态一致，`slot-0.module-save` 更新时间和 CRC 正确，重启进档 `sidecar load parsed=1` 回读一致。确认 `save_panel_hook=true` 只代表 hook 已安装，不代表每种游戏内保存/自动保存都调用完整 coordinator；`SAVE_SaveInventory` 旁路现仅恢复原版投影、不直接写 sidecar。若游戏内操作未出现 `sidecar prepare→commit`，该保存入口仍未收口，P6 不得通过。 | 当前执行代理 |
+| v1.45 | 2026-09-04 | 完成一次端到端持久化核验：最新 APK 真机物理拖动使 native `g_virtual_bag_state.items` 从 internal `2/7` 变为 `2/8`；保存日志按同一状态完成 `sidecar prepare`→`sidecar commit`，`native=1 sidecar=1 pending=0`；真机 `slot-0.module-save` 时间更新、容器/section CRC 正确；强杀重启进档日志 `sidecar load parsed=1`，回读仍为 `2/8=7x18`。同时移除 `SAVE_SaveInventory` 内绕过 coordinator 的直接 sidecar 写入。 | 当前执行代理 |
+| v1.44 | 2026-09-04 | 定位并修复游戏内保存不生效：`inject_locked()` 原先在背包事件 hook 成功后提前返回，保存面板节点若尚未初始化便永不重试，导致游戏内保存绕过 `virtual_bag_save_game()`；现改为注入线程持续重试保存面板 hook，并在 debug status 暴露 `save_panel_hook`。最新 APK 真机状态确认 `injected=true, save_panel_hook=true`。 | 当前执行代理 |
+| v1.43 | 2026-09-04 | 修复 P6 持久化快照过期：原实现 commit 只提交 `fn_save()` 前 prepare journal 中的扩展状态，保存过程中的投影恢复/库存刷新可能导致移动后的最新逻辑状态未提交；现改为 commit 校验 prepare 的 transaction/section 元数据后，重新接收保存结束时的当前扩展状态并与 journal 一次原子提交。真机复测：逻辑袋 8 槽 4→槽 5，`native=1 sidecar=1 pending=0`，强杀重启进档后物品仍在槽 5。P6 的自动保存完整成功确认、故障注入与跨进程恢复仍未关闭。 | 当前执行代理 |
+| v1.42 | 2026-09-04 | 用户决策将持久化协调提前为 P6、全局库存与自动装备顺延为 P7；明确离开背包/恢复投影/`SAVE_SaveInventory` 子调用不等于原版存档成功。新增模块存档通用协调边界与 `ModuleSaveCoordinator` 第一版：完整 `fn_save()` 前写 prepare journal，成功后原子提交 participant section；P6 仍未完成，自动保存完整成功确认与跨进程恢复待继续验证。 | 当前执行代理 |
 | v1.41 | 2026-09-02 | P5 关闭：依据 `E-2026-09-02-01`～`06` 与用户确认，P5.4–P5.6 三方向核心路径及 P5.7–P5.9 清理/失败隔离/Host/构建/真机证据收口；`0x10 → result=1 → MOVING_CTRL` 已实证，`0x81` 未观察到且不作为运行时前置条件。阶段指针转入 P6；装备后的短暂原版背包闪现继续作为非阻断 UI 回归。 | 当前执行代理 |
 | v1.40 | 2026-09-02 | 根据既有 `E-2026-09-02-04`/`05`/`06` 与用户确认，校正阶段状态：P5.4–P5.6 核心三方向移动、同袋合并、跨袋不合并和取消视为完成；下一阶段为 P5.7–P5.9 的跨视图清理、故障注入、结构检查和最终回归。装备后的短暂原版背包闪现继续作为非阻断 UI 回归单独保留。 | 当前执行代理 |
 | v1.39 | 2026-09-02 | 校正 P5.4 控制面：`E-2026-09-02-03` 已登记 API 满目标/非法槽/空源/任务袋边界，`E-2026-09-02-06` 已登记 Host/session 重复 release 幂等保护；剩余是满目标/非法槽真实触摸边界。另登记扩展源装备后的短暂原版背包闪现为非阻断 UI 回归，暂不扩大修复范围。 | 当前执行代理 |

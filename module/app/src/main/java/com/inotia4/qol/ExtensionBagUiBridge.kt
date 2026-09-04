@@ -3,6 +3,7 @@ package com.inotia4.qol
 import android.content.Context
 import android.content.pm.PackageManager
 import com.inotia4.qol.store.ModuleSaveStore
+import com.inotia4.qol.store.ModuleSaveCoordinator
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -122,6 +123,48 @@ object ExtensionBagUiBridge {
             LogFile.logError("extension bag UI state save failed", t)
             "error:storage"
         }
+    }
+
+    /** Prepare the extension section; commit is allowed only after complete SAVE_Save success. */
+    @JvmStatic
+    fun prepareSave(slot: Int, transactionId: String, stateJson: String): String {
+        val normalized = parseState(stateJson) ?: return "error:invalid_state"
+        gameIdentity()?.let { normalized.put(IDENTITY_KEY, it) }
+        val prepared = ModuleSaveCoordinator.prepare(
+            slot,
+            transactionId,
+            listOf(
+                ModuleSaveCoordinator.PreparedSection(
+                    SECTION_NAME,
+                    SECTION_VERSION,
+                    normalized.toString().toByteArray(Charsets.UTF_8),
+                ),
+            ),
+        )
+        return if (prepared) "ok" else "error:storage"
+    }
+
+    @JvmStatic
+    fun commitSave(slot: Int, transactionId: String, stateJson: String): String {
+        val normalized = parseState(stateJson) ?: return "error:invalid_state"
+        gameIdentity()?.let { normalized.put(IDENTITY_KEY, it) }
+        val committed = ModuleSaveCoordinator.commitAfterOriginalSave(
+            slot,
+            transactionId,
+            listOf(
+                ModuleSaveCoordinator.PreparedSection(
+                    SECTION_NAME,
+                    SECTION_VERSION,
+                    normalized.toString().toByteArray(Charsets.UTF_8),
+                ),
+            ),
+        )
+        return if (committed) "ok" else "error:storage"
+    }
+
+    @JvmStatic
+    fun abortKnownFailedSave(slot: Int, transactionId: String): String {
+        return if (ModuleSaveCoordinator.abortKnownFailedSave(slot, transactionId)) "ok" else "error:storage"
     }
 
     private fun defaultStateJson(): String = stateJson(

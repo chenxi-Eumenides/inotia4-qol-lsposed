@@ -4,6 +4,70 @@ uintptr_t arm64_bl_target(uintptr_t call_addr, uint32_t instruction) {
     return static_cast<uintptr_t>(static_cast<int64_t>(call_addr) + (immediate << 2));
 }
 
+struct SaveCallsiteSpec {
+    uintptr_t offset;
+    uint32_t original_instruction;
+    const char* name;
+};
+
+bool patch_save_callsite(const SaveCallsiteSpec& spec, size_t index) {
+    if (g_save_callsite_patch_addrs[index] != 0) return true;
+    const uintptr_t call_addr = g_base + spec.offset;
+    constexpr size_t kPageSize = 4096;
+    const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&module_save_game);
+    const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
+    uintptr_t branch_target = wrapper;
+    if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
+        branch_target = reinterpret_cast<uintptr_t>(allocate_draw_thunk(call_addr, wrapper));
+        if (branch_target == 0) {
+            VIRTBAG_LOG("save callsite thunk allocation failed name=%s call=%p", spec.name,
+                        reinterpret_cast<void*>(call_addr));
+            return false;
+        }
+    }
+    const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
+    if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
+        VIRTBAG_LOG("save callsite branch out of range name=%s call=%p target=%p", spec.name,
+                    reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+        return false;
+    }
+    const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+    const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+    if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+        VIRTBAG_LOG("save callsite mprotect failed name=%s errno=%d", spec.name, errno);
+        return false;
+    }
+    const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
+    if (current != spec.original_instruction && current != replacement) {
+        VIRTBAG_LOG("save callsite mismatch name=%s got=0x%08x", spec.name, current);
+        return false;
+    }
+    *reinterpret_cast<uint32_t*>(call_addr) = replacement;
+    __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
+                             reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
+    g_save_callsite_patch_addrs[index] = call_addr;
+    VIRTBAG_LOG("save callsite hooked name=%s call=%p", spec.name,
+                reinterpret_cast<void*>(call_addr));
+    return true;
+}
+
+bool patch_all_save_callsites() {
+    constexpr SaveCallsiteSpec specs[] = {
+        {F_SAVE_CALLSITE_REVIVE_VMA, 0x9401945e, "revive"},
+        {F_SAVE_CALLSITE_QUEST_CLEAR_1_VMA, 0x940175d8, "quest-clear-1"},
+        {F_SAVE_CALLSITE_QUEST_CLEAR_2_VMA, 0x940175ad, "quest-clear-2"},
+        {F_SAVE_CALLSITE_QUEST_REVIEW_VMA, 0x94000e5e, "quest-review"},
+        {F_SAVE_CALLSITE_PROCESS_VMA, 0x97ffff6c, "process-save"},
+        {F_SAVE_CALLSITE_NETWORK_ADD_VMA, 0x97ff2fbe, "network-add"},
+        {F_SAVE_CALLSITE_NETWORK_PROCESS_1_VMA, 0x97ff2edf, "network-process-1"},
+        {F_SAVE_CALLSITE_NETWORK_PROCESS_2_VMA, 0x97ff2e44, "network-process-2"},
+    };
+    for (size_t index = 0; index < sizeof(specs) / sizeof(specs[0]); ++index) {
+        if (!patch_save_callsite(specs[index], index)) return false;
+    }
+    return true;
+}
+
 uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (p5_panel_observation_enabled()) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -291,17 +355,21 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 bool inject_locked() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_virtual_bag_enabled.load()) return false;
-    if (g_state_entry != nullptr) return true;
-    uint8_t* entry = find_inventory_state_entry();
-    if (entry == nullptr) return false;
-    const uintptr_t expected_event = g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
-    if (*reinterpret_cast<uintptr_t*>(entry + 0x38) != expected_event) {
-        VIRTBAG_LOG("inventory state callbacks differ from expected symbols");
-        return false;
+    const bool install_inventory_hook = g_state_entry == nullptr;
+    uint8_t* entry = g_state_entry;
+    if (install_inventory_hook) {
+        entry = find_inventory_state_entry();
+        if (entry == nullptr) return false;
+        const uintptr_t expected_event =
+            g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
+        if (*reinterpret_cast<uintptr_t*>(entry + 0x38) != expected_event) {
+            VIRTBAG_LOG("inventory state callbacks differ from expected symbols");
+            return false;
+        }
+        g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + 0x38));
+        g_orig_f3 = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x28));
+        g_orig_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x10));
     }
-    g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + 0x38));
-    g_orig_f3 = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x28));
-    g_orig_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x10));
 
     const uintptr_t equip_draw = g_base + fn_resolve("F_UIEQUIP_DRAW_VMA", F_UIEQUIP_DRAW_VMA);
     const uintptr_t item_draw_call = equip_draw + 0x94;
@@ -459,6 +527,8 @@ bool inject_locked() {
                     reinterpret_cast<void*>(call_addr), replacement);
     }
 
+    if (!patch_all_save_callsites()) return false;
+
     if (g_drop_gate_patch_addr == 0) {
         const uintptr_t call_addr = g_base + 0xb8cc0;
         constexpr uint32_t kOriginalDropCall = 0x94012fc8;
@@ -582,26 +652,34 @@ bool inject_locked() {
         VIRTBAG_LOG("desc open gate hook patched call=%p replacement=0x%08x",
                     reinterpret_cast<void*>(call_addr), replacement);
     }
-    *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
-    *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
-    *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
-    uint8_t* save_entry = find_popup_state_entry(
-        g_base + fn_resolve("F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER));
-    if (save_entry != nullptr && save_entry != entry) {
-        g_save_state_entry = save_entry;
-        g_orig_save_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(save_entry + 0x10));
-        *reinterpret_cast<uintptr_t*>(save_entry + 0x10) =
-            reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper);
+    if (install_inventory_hook) {
+        *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
+        *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
+        *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
+        g_state_entry = entry;
+        VIRTBAG_LOG("inventory event callback wrapped; original renderer is reused for module views");
     }
-    g_state_entry = entry;
-    VIRTBAG_LOG("inventory event callback wrapped; original renderer is reused for module views");
+    if (!g_save_panel_hook_installed) {
+        uint8_t* save_entry = find_popup_state_entry(
+            g_base + fn_resolve("F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER));
+        if (save_entry != nullptr && save_entry != entry) {
+            g_save_state_entry = save_entry;
+            g_orig_save_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(save_entry + 0x10));
+            *reinterpret_cast<uintptr_t*>(save_entry + 0x10) =
+                reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper);
+            g_save_panel_hook_installed = true;
+            VIRTBAG_LOG("save panel enter hook installed entry=%p", save_entry);
+        } else {
+            VIRTBAG_LOG("save panel entry not ready; injection will retry");
+        }
+    }
     return true;
 }
 
 void ensure_inject_thread() {
     if (g_inject_thread_started.exchange(true)) return;
     std::thread([]() {
-        while (g_state_entry == nullptr) {
+        while (g_state_entry == nullptr || !g_save_panel_hook_installed) {
             inject_locked();
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }
@@ -637,4 +715,3 @@ void prepare_main_menu_locked() {
     g_extension_tab_buttons.fill(nullptr);
     cancel_projected_drag_session_locked("main-menu");
 }
-

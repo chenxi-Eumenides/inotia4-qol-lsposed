@@ -12,6 +12,7 @@
 #include "core/native/stack_limit_port.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "core/native/extension_bag_port.h"
+#include "core/native/module_save_port.h"
 #include "feature/extension_bag/extension_bag_context.h"
 #include "feature/extension_bag/extension_bag_geometry.h"
 #include "feature/extension_bag/extension_bag_logging.h"
@@ -74,10 +75,12 @@ PopupNoArgFn g_orig_f3 = nullptr;
 PopupNoArgFn g_orig_enter = nullptr;
 PopupNoArgFn g_orig_save_enter = nullptr;
 uint8_t* g_save_state_entry = nullptr;
+bool g_save_panel_hook_installed = false;
 uintptr_t g_draw_patch_addr = 0;
 uintptr_t g_bag_draw_patch_addr = 0;
 uintptr_t g_save_inventory_patch_addr = 0;
 void* g_save_inventory_thunk = nullptr;
+std::array<uintptr_t, 8> g_save_callsite_patch_addrs{};
 uintptr_t g_drop_gate_patch_addr = 0;
 void* g_drop_gate_thunk = nullptr;
 uintptr_t g_draw_gate_patch_addr = 0;
@@ -107,7 +110,6 @@ int g_module_view_index = -1;
 uint8_t g_exit_display_bag = kNoOriginalBagSelected;
 bool g_inventory_frame_active = false;
 bool g_item_state_dirty = false;
-bool g_explicit_save_in_progress = false;
 bool g_extension_touch_capture = false;
 std::array<void*, virtual_bag::kBagCount> g_extension_tab_buttons{};
 void* g_extension_tab_root = nullptr;
@@ -180,6 +182,8 @@ const char* extension_recovery_action_name_locked() {
 std::string extension_bag_status_json_locked() {
     return "{\"enabled\":" + std::string(g_virtual_bag_enabled.load() ? "true" : "false") +
            ",\"injected\":" + std::string(g_state_entry != nullptr ? "true" : "false") +
+           ",\"save_panel_hook\":" +
+           std::string(g_save_panel_hook_installed ? "true" : "false") +
            ",\"extension_tab_button\":" +
            std::string(g_extension_tab_buttons[0] != nullptr ? "true" : "false") +
            ",\"inventory_frame_active\":" +

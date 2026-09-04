@@ -197,33 +197,32 @@ void virtual_bag_prepare_main_menu() {
     prepare_main_menu_locked();
 }
 
-bool virtual_bag_save_game() {
-    {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
-        if (g_module_view_installed) restore_module_view_locked();
-        recover_pending_transaction_locked();
+bool virtual_bag_module_save_prepare(int slot, const char* transaction_id) {
+    if (transaction_id == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (g_module_view_installed) restore_module_view_locked();
+    recover_pending_transaction_locked();
+    return extension_bag_prepare_save_to_store(slot, transaction_id);
+}
+
+bool virtual_bag_module_save_commit(int slot, const char* transaction_id) {
+    if (transaction_id == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    const bool saved = extension_bag_commit_save_to_store(slot, transaction_id);
+    if (saved) {
+        g_virtual_bag_state.pending = {};
+        g_item_state_dirty = false;
     }
-    // fn_save 必须在锁外：内部 SAVE_SaveInventory 门禁 wrapper 需重新获锁做投影恢复，
-    // 同线程重入 std::mutex 会自死锁（与 op_ok 锁内刷新同型）。
-    g_explicit_save_in_progress = true;
-    const int result = fn_save != nullptr ? fn_save() : 0;
-    bool state_saved = false;
-    {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (result != 0) {
-            state_saved = persist_state_locked(true);
-            if (state_saved) {
-                g_virtual_bag_state.pending = {};
-                g_item_state_dirty = false;
-            }
-        }
-    }
-    g_explicit_save_in_progress = false;
-    VIRTBAG_LOG("virtual bag save result native=%d sidecar=%d pending=%d",
-                result != 0 ? 1 : 0, state_saved ? 1 : 0,
-                g_virtual_bag_state.pending.valid ? 1 : 0);
-    return state_saved && result != 0;
+    VIRTBAG_LOG("extension bag participant commit slot=%d tx=%s ok=%d pending=%d", slot,
+                transaction_id, saved ? 1 : 0, g_virtual_bag_state.pending.valid ? 1 : 0);
+    return saved;
+}
+
+bool virtual_bag_module_save_abort(int slot, const char* transaction_id) {
+    if (transaction_id == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    return extension_bag_abort_known_failed_save(slot, transaction_id);
 }
 
 // G-14（方案 C）：原版物品操作后 RefreshItemArea 会以 INVEN 重刷控件，窗口袋投影需重写。
@@ -280,6 +279,32 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_virtual_bag_bridge_class != nullptr) env->DeleteGlobalRef(g_virtual_bag_bridge_class);
     g_virtual_bag_bridge_class = static_cast<jclass>(env->NewGlobalRef(bridge_class));
+    const ModuleSaveParticipant participant{
+        "extension-bag",
+        virtual_bag_module_save_prepare,
+        virtual_bag_module_save_commit,
+        virtual_bag_module_save_abort,
+    };
+    if (!module_save_register_participant(participant)) {
+        VIRTBAG_LOG("module save participant registration failed");
+    }
+}
+
+void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
+    if (fn == nullptr || !g_virtual_bag_enabled.load() || !game_in_world()) return;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        const int capacity = g_virtual_bag_state.capacities[bag];
+        for (int slot = 0; slot < capacity; ++slot) {
+            const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
+            if (item.category <= 0 || item.count <= 0) continue;
+            if (fn(virtual_bag::kExtensionLogicalBagFirst + bag, slot, item.category,
+                   item.count, ctx)) {
+                return;
+            }
+        }
+    }
 }
 
 std::string data_virtual_bag_ui_status_json() {
@@ -317,4 +342,3 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
     if (!updated) return op_err("bad virtual bag item");
     return op_ok();
 }
-

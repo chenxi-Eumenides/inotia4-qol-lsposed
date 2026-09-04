@@ -1,6 +1,6 @@
 # 扩展背包 P5：原生拖动协议与三方向路径验收
 
-> **状态**：已完成，`ACCEPTED`（2026-09-02）。本文件是 P5 的唯一实施与验收计划；P4/P5 已完成归档，P7 或整体发布仍未通过。
+> **状态**：已完成，`ACCEPTED`（2026-09-02）。本文件是 P5 的唯一实施与验收计划；P4/P5 已完成归档，P6/P7 或整体发布仍未通过。
 >
 > **项目根目录**：`/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed`
 >
@@ -28,7 +28,7 @@
 
 ### 2.2 非目标与明确边界
 
-- 不在 P5 实现或验收 `extensionbags.journal` 的 stage 0/1/2 正式落盘、原版/sidecar 保存协调、杀进程/重启/切档重放、全部保存调用点或 ADR-009；这些均归 P7。
+- 不在 P5 实现或验收 `extensionbags.journal` 的 stage 0/1/2 正式落盘、原版/sidecar 保存协调、杀进程/重启/切档重放、全部保存调用点或 ADR-009；这些均归 P6。
 - 不把 API 移动、debug 注入、坐标脚本或 host 测试记为真实拖放成功。除启动协议弹窗的既有 `(420,280)` 例外外，P5 真机拖动必须由用户在 `192.168.3.54:5555` 物理触摸。
 - 不在本次文档变更中修改 `api-reference.md`、`environment.md`、`backlog.md` 或源码。P5.0 必须登记其冲突并在对应责任工作中修正。
 - 不新增裸 VMA、未知 TouchState 写法、第二个移动状态机、第二个 pending/journal 格式，或发布构建可用的隐藏写入端点。
@@ -194,7 +194,7 @@ TransactionInFlight → Committed | Rejected
 | 满/不可合并/容量外/任务袋 | `prepared` 前拒绝；无 payload/所有权/事务变更。 |
 | 取消、过期或重复事件 | 不创建第二事务；只清该 session 的 transient 引用。 |
 
-以下项目明确**不属于 P5**：原版保存失败、sidecar 写失败、journal stage 0/1/2、杀进程、重启、切档、跨进程隔离落盘和恢复裁决；全部转 P7。
+以下项目明确**不属于 P5**：原版保存失败、sidecar 写失败、journal stage 0/1/2、杀进程、重启、切档、跨进程隔离落盘和恢复裁决；全部转 P6。
 
 ## 11. P5.9：唯一真机串行证据矩阵
 
@@ -222,7 +222,7 @@ TransactionInFlight → Committed | Rejected
 - P5.1 的同身份观测确认 `0x10 → result=1 → MOVING_CTRL` 及 source/drop 生命周期；未观察到的 `0x81` 不作为运行时前置条件。
 - P5.7–P5.9 的 session 清理、Host 回归、结构/构建回归沿上述实现和证据关闭；P5 不包含保存协调、跨进程恢复或 P8 发布条件。
 
-**结论**：P5 已完成（`ACCEPTED`）。扩展源装备后的短暂原版背包闪现仍是独立的非阻断 UI 回归，不改变 P5 拖动事务结论；P7/P8 继续按主控文档执行。
+**结论**：P5 已完成（`ACCEPTED`）。扩展源装备后的短暂原版背包闪现仍是独立的非阻断 UI 回归，不改变 P5 拖动事务结论；P6/P7/P8 继续按主控文档执行。
 
 ## 12. 文件职责与退出门槛
 
@@ -234,4 +234,4 @@ TransactionInFlight → Committed | Rejected
 | `game_access.*` / `game_symbols.h` / `symbol_registry.h` | 逆向已经验证的 ABI 注册与类型化包装。 | 在调用点新增裸偏移或复制未验证 TouchState 结构。 |
 | debug 测试代码 | 受限单次故障 harness 与只读诊断。 | 发布构建写入入口、正式移动 API 或持久化模拟。 |
 
-P5 已满足以下关闭条件：同一身份下的实证 `0x10` 拖动协议与 `0x81` 未出现事实；单一 session/routing 无双 dispatch；三方向按顺序通过物理触摸矩阵；P4 不变量与任务袋 sentinel 无回归；host/构建/结构检查通过；P7 项明确保留为未完成。因此 P5 标记为 `ACCEPTED`，P7/P8 与 Overall 仍保持各自未完成状态。
+P5 已满足以下关闭条件：同一身份下的实证 `0x10` 拖动协议与 `0x81` 未出现事实；单一 session/routing 无双 dispatch；三方向按顺序通过物理触摸矩阵；P4 不变量与任务袋 sentinel 无回归；host/构建/结构检查通过；P6 项明确保留为未完成。因此 P5 标记为 `ACCEPTED`，P6/P7/P8 与 Overall 仍保持各自未完成状态。

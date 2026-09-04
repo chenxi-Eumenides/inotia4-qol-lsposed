@@ -15,6 +15,7 @@ void* member_or_null(int role);
 void* lead_member();
 void* find_char_by_merc_slot(int slot);
 int inventory_count();
+int inventory_quantity(int category);
 void* find_inventory_item(int category);
 void* inventory_item_at(int bag, int slot);
 

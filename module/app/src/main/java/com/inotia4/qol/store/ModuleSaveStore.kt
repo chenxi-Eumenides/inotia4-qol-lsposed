@@ -90,6 +90,28 @@ object ModuleSaveStore {
         writeSlot(slot, SlotData(nextGeneration(loaded.data.generation), sections), preserveCurrent = true)
     }
 
+    /** 原子替换多个 section，并按需删除 section；用于一次保存协调提交。 */
+    internal fun replaceSections(
+        slot: Int,
+        replacements: Map<String, Section>,
+        removals: Set<String>,
+    ): Boolean = synchronized(lock) {
+        requireSlot(slot)
+        replacements.keys.forEach(::requireSectionName)
+        removals.forEach(::requireSectionName)
+        replacements.values.forEach { section ->
+            require(section.version > 0) { "section version must be positive" }
+            require(section.payload.size <= MAX_SECTION_PAYLOAD_BYTES) { "section payload too large" }
+        }
+        val loaded = loadSlot(slot) ?: return false
+        val sections = LinkedHashMap(loaded.data.sections)
+        removals.forEach(sections::remove)
+        replacements.forEach { (name, section) ->
+            sections[name] = Section(section.version, section.payload.copyOf())
+        }
+        writeSlot(slot, SlotData(nextGeneration(loaded.data.generation), sections), preserveCurrent = true)
+    }
+
     /** 新建原版存档槽时调用：永久清除该槽旧模块数据后建立空容器。 */
     fun resetSlot(slot: Int): Boolean = synchronized(lock) {
         requireSlot(slot)

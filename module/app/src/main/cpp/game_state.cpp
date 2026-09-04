@@ -4,6 +4,7 @@
 
 #include "game_access.h"
 #include "game_symbols.h"
+#include "core/native/extension_bag_port.h"
 
 #include <android/log.h>
 #include <atomic>
@@ -105,7 +106,29 @@ int inventory_count() {
         static_cast<Ctx*>(c)->n++;
         return false;
     }, &ctx);
+    extension_bag_for_each_logical_item([](int, int, int, int, void* c) -> bool {
+        static_cast<Ctx*>(c)->n++;
+        return false;
+    }, &ctx);
     return ctx.n;
+}
+
+int inventory_quantity(int category) {
+    if (category <= 0) return 0;
+    struct Ctx { int category; int quantity; } ctx{category, 0};
+    for_each_bag_slot([](void* item, int, int, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+        if (fn_get_bit == nullptr || fn_get_bit(flags, 15, 6) != p->category) return false;
+        p->quantity += fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 0;
+        return false;
+    }, &ctx);
+    extension_bag_for_each_logical_item([](int, int, int item_category, int count, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        if (item_category == p->category) p->quantity += count;
+        return false;
+    }, &ctx);
+    return ctx.quantity;
 }
 
 void* inventory_item_at(int bag, int slot) {

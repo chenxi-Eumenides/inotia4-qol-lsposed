@@ -5,6 +5,8 @@
 #include <string>
 #include <cstdint>
 
+#include "core/native/extension_bag_port.h"
+
 void virtual_bag_ui_start_auto_inject();
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
 
@@ -17,7 +19,6 @@ bool virtual_bag_is_inventory_enter(uintptr_t enter);
 int virtual_bag_inventory_state_id();
 void virtual_bag_prepare_main_menu();
 void virtual_bag_prepare_save_slot_load();
-bool virtual_bag_save_game();
 bool virtual_bag_sync_projected_slot(int display_bag, int slot);
 bool virtual_bag_sync_projected_bag();
 bool virtual_bag_sync_projected_item_control(void* control);
@@ -43,3 +44,4 @@ std::string data_op_extension_bag_select_bag(int logical_bag);
 std::string data_op_extension_bag_click_item(int logical_bag, int slot);
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 std::string virtual_bag_inventory_bags_json();
+void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);

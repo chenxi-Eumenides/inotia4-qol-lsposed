@@ -123,6 +123,7 @@ data 层 → 仅 STL
 | `core/native/game_cache.*` | core | **帧缓存层**：12 槽表驱动（惰性/预取双模式），对外 data_*_json 接口 | 域文件 build_* 函数指针 |
 | `core/native/game_motion.*` | core | **FrameTaskManager**（帧任务调度，§2.1） | game_state.h |
 | `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
+| `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |
 | `api/native/game_character.*` | API native 域 | 角色：member_json / build_player_json / build_skills_json + 战斗/成长写操作（cast/attack/stop_combat/set_experience/set_level/add_experience/set_status_point/add_stat/set_auto_attack/set_skill_usage/learn_action/set_hp/set_mp/set_attr/stat_reset/skill_reset） | data + 引擎 |
 | `api/native/game_party.*` | API native 域 | 队伍：build_party_json / build_mercenaries_json + include/exclude/discharge/withdraw/switch_player/party_swap | data + 引擎 |
 | `api/native/game_inventory.*` | API native 域 | 背包：build_inventory_json / append_item_attrs / item_is_equip + set_money/add_money/minus_money/add_item/remove_item/use_item/discard/sell/move/jewel/enchant/dice_accept/dice_reject/equip/unequip；通过 core port 组合扩展背包投影和堆叠上限 | data + core + 引擎 |
@@ -210,6 +211,29 @@ std::atomic<bool> g_task_stop{false};
 - trampoline 必须保存/恢复原始 lr（blr 污染 lr → 重放区 stp x29,x30 存错 lr → 原函数 ret 跳错）
 - AGP 对 .S 汇编不支持 -fPIC 符号重定位（ldr literal/adr 均报错）→ 需纯 C++ mmap 生成指令
 - LSPosed 环境下 .S 全局符号跨 TU 引用解析到 base.apk 错误地址
+
+### 2.2.1 C++ Hook 技术选型结论（2026-09-04）
+
+本项目将 native 侧的行为改造能力拆为五种机制。前四种已经属于游戏当前实现，LSPosed Native API 是新增的通用入口 Hook 能力。它们不是互相替代的库，而是针对不同控制点的工具。
+
+| 机制 | 作用 | 能力边界 | 推荐用处 | 当前决策 |
+|---|---|---|---|---|---|
+| **直接读写游戏内存** | 通过 `g_base +` 符号/偏移读取或修改全局变量、对象字段和状态位 | 只能改变已知数据；不会自动执行校验、刷新 UI、派发事件或触发存档逻辑；必须掌握对象生命周期和并发关系 | 数据导出、开关/状态位修改、简单数值操作，以及读写游戏函数无法覆盖的存量状态 | **首选，已在真机验证** |
+| **调用游戏函数指针** | 通过 `symbol_resolver` 得到游戏函数地址，以声明的函数签名直接调用原版逻辑 | 只能调用已定位且签名确认的函数；参数、返回值、结构体/浮点 ABI 错误会导致崩溃；调用线程和游戏状态必须满足原函数前置条件 | 移动、装备、使用物品、保存、UI 操作等需要让游戏自身执行完整逻辑的功能 | **优先于任何入口 Hook** |
+| **`PtrHook` 函数指针槽覆盖** | 修改游戏对象、GOT 槽或回调表中的函数指针，将调用目标替换为模块 wrapper；wrapper 可选择调用原函数 | 只对经过间接调用的函数指针有效；找不到稳定槽位时不能使用；wrapper 必须完全匹配调用约定；对象销毁或槽位重建后需要重新安装 | 控件 `ExecuteProc`、`ControlProc`、事件处理器和回调表拦截；适合需要 before/after 或条件抑制的 UI/输入逻辑 | **入口 Hook 前的首选拦截方式，已在真机验证** |
+| **指令 `patch`** | 在已确认的函数偏移处替换 ARM/ARM64 机器指令，改变分支、立即数或门禁条件 | 只能处理确定的少量指令点；必须同步处理页权限、指令缓存、版本漂移、并发执行和恢复；不适合复杂业务逻辑或大段函数改写 | 固定常量/上限、条件分支、IAP 屏蔽和沉浸模式等少量稳定 patch 点 | **现有机制继续使用，必须可校验、可回滚** |
+| **LSPosed 官方 Native Hook API** | 由 LSPosed 在 so 加载事件中提供函数替换入口；模块通过 `native_init` 注册，并在回调中对目标函数执行 Native Hook | 本质是 Inline Hook，不是 GOT/PLT Hook；只解决入口重定向，不解决函数签名、线程并发、递归、生命周期和卸载安全；当前 APK 尚未配置 `assets/native_init`，不能直接使用 | 仅用于前四种机制无法覆盖、且确实必须拦截普通函数入口的场景；优先作为单点 PoC | **最后使用，先验证后进入正式功能** |
+
+关键事实与约束：
+
+- 直接读写内存和调用游戏函数指针是本项目的数据访问与操作主路径；不要为了“统一”而把它们改造成入口 Hook。
+- `PtrHook` 只改数据段中的函数指针，不改函数机器码，因此不需要 inline trampoline、`mprotect` 或指令缓存刷新；但它依赖稳定的间接调用槽位，不能拦截直接 `bl` 调用。
+- 指令 `patch` 与 `PtrHook` 是互补关系：前者改执行指令，后者改间接调用目标。所有 patch 地址必须来自 `game_symbols.h`/`symbol_resolver`，并保留原指令校验和失败回滚。
+- LSPosed 官方 Native Hook API 的 `hookFunc` 由框架内部 HookFunction/LSPlant 路径提供，官方文档的目标是函数替换，不应描述为 GOT/PLT Hook；它仍然继承 Inline Hook 的 trampoline、ABI、并发和卸载风险。
+- 使用 LSPosed API 时，`handle + dlsym()` 只适合从实际已加载目标库解析动态符号。项目现有 `game_access` 明确禁止自行 `dlopen/dlsym` 来访问 `libgame.so`，因为 Android linker namespace 可能加载独立副本；对非导出函数仍应使用项目的 `symbol_resolver` 和 `game_symbols.h`。
+- 任一入口 Hook 都必须先验证：目标地址来源、完整函数签名、浮点/结构体返回约定、递归路径、主循环并发、重复安装、恢复时机，以及目标函数正在执行时的卸载行为。没有这些验证，不得进入正式功能。
+
+推荐顺序固定为：**直接读写内存 → 调用游戏函数指针 → `PtrHook` → 指令 `patch` → LSPosed Native Hook API**。这不是绝对的技术强弱排序，而是从低执行流风险到高执行流风险的决策顺序：先选择能满足需求且不改函数入口的机制，只有前四种都无法实现时，才引入 LSPosed Native Hook API。参考：[LSPosed Native Hook](https://github.com/LSPosed/LSPosed/wiki/Native-Hook)、[LSPosed native API 实现](https://github.com/LSPosed/LSPosed/blob/master/core/src/main/jni/src/native_api.cpp)。
 
 ### 2.3 帧同步采集缓存层（v0.4.57）
 

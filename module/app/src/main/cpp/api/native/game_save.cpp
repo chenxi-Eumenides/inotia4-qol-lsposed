@@ -11,6 +11,7 @@
 #include "game_ops_common.h"
 #include "game_save_preflight.h"
 #include "game_state.h"
+#include "core/native/module_save_port.h"
 #include "core/native/extension_bag_port.h"
 
 // v0.5.5：当前加载存档槽（S5）——G_CURRENT_SLOT 双层解引用（SaveSlot_GoToNewGame/STATE_EnterGame 写，v0.5.5 frida 实测 world=0）
@@ -47,7 +48,7 @@ std::string data_save_slots_json() {
 std::string data_op_save() {
     if (!game_in_world()) return op_err("not in game");
     if (fn_save == nullptr) return op_err("symbol not resolved");
-    return extension_bag_save_game() ? op_ok() : op_err("save failed");
+    return module_save_game() ? op_ok() : op_err("save failed");
 }
 
 // 预检（backlog P0②）：仅主菜单（STATE==4）刷新判决——非主菜单调 CreateSaveSlot 会让

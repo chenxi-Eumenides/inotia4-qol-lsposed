@@ -28,7 +28,7 @@ void data_craft_btn_set_enabled(bool enabled) {
 // 批量宝石合成（按钮 ExecuteProc 回调，x0=控件对象）。
 // 遍历第一袋 16 槽，按宝石类别 cat28-31（排除混沌 32）分组，每组 3 个一批走
 // MIXSYSTEM_MakeItem（词条定向继承由游戏自动处理，无需复刻）→ 产物入库 → 消耗 3 材料。
-// 失败（配方/背包满/金币不足）安全停止；完成后一次性扣费并静默存档。
+// 失败（配方/背包满/金币不足）安全停止；完成后一次性扣费并只更新游戏内存。
 void data_op_mix_gem_batch(void* ctrl) {
     (void)ctrl;
     if (g_base == 0 || g_inven == nullptr) {
@@ -41,7 +41,7 @@ void data_op_mix_gem_batch(void* ctrl) {
     }
     if (fn_make_mix == nullptr || fn_get_cost == nullptr || fn_is_jewel == nullptr ||
         fn_remove_item_direct == nullptr || fn_inven_save_item == nullptr ||
-        fn_minus_money == nullptr || fn_save == nullptr || fn_get_bit == nullptr ||
+        fn_minus_money == nullptr || fn_get_bit == nullptr ||
         fn_get_money == nullptr) {
         MOVE_LOG("mix_gem_batch: symbol not resolved");
         return;
@@ -87,7 +87,6 @@ void data_op_mix_gem_batch(void* ctrl) {
         }
     }
     if (total_cost > 0) fn_minus_money(total_cost);
-    if (made > 0) fn_save();
     MOVE_LOG("mix_gem_batch: made=%d cost=%lld%s%s", made, static_cast<long long>(total_cost),
              stop_reason != nullptr ? " stop=" : "", stop_reason != nullptr ? stop_reason : "");
 }

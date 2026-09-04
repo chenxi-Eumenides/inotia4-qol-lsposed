@@ -745,15 +745,10 @@ bool category_is_equip(int category) {
 #include "feature/extension_bag/extension_bag_transaction.inc"
 bool persist_state_locked(bool force) {
     (void)force;
-    if (!g_explicit_save_in_progress) return true;
-    const int slot = current_save_slot();
-    if (slot < 0 || slot > 2) return false;
-    if (!extension_bag_save_state_to_store(slot)) {
-        VIRTBAG_LOG("virtual bag state slot=%d save failed", slot);
-        return false;
-    }
-    g_loaded_slot = slot;
-    if (g_explicit_save_in_progress) g_item_state_dirty = false;
+    // Sidecar writes are owned exclusively by core module_save_game's
+    // prepare/original-save/commit coordinator. SAVE_SaveInventory can run
+    // inside the original save before its final result is known, so it must
+    // never persist the extension state directly.
     return true;
 }
 

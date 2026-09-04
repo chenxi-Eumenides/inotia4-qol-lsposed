@@ -11,6 +11,46 @@ namespace {
 
 constexpr char kLogTag[] = "Inotia4VirtBag";
 
+std::string occupied_item_summary(const virtual_bag::State& state) {
+    std::string summary;
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            const virtual_bag::Item& item = state.items[bag][slot];
+            if (item.category <= 0 || item.count <= 0) continue;
+            if (!summary.empty()) summary += ',';
+            summary += std::to_string(bag) + '/' + std::to_string(slot) + '=' +
+                       std::to_string(item.category) + 'x' + std::to_string(item.count);
+        }
+    }
+    return summary.empty() ? "empty" : summary;
+}
+
+bool call_save_callback(JNIEnv* env, jclass bridge_class, const char* method_name,
+                        int slot, const char* transaction_id) {
+    if (env == nullptr || bridge_class == nullptr || transaction_id == nullptr) return false;
+    jmethodID method = env->GetStaticMethodID(
+        bridge_class, method_name, "(ILjava/lang/String;)Ljava/lang/String;");
+    if (method == nullptr) {
+        env->ExceptionClear();
+        return false;
+    }
+    jstring tx = env->NewStringUTF(transaction_id);
+    if (tx == nullptr) return false;
+    jstring result = static_cast<jstring>(
+        env->CallStaticObjectMethod(bridge_class, method, slot, tx));
+    env->DeleteLocalRef(tx);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    if (result == nullptr) return false;
+    const char* utf = env->GetStringUTFChars(result, nullptr);
+    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
+    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
+    env->DeleteLocalRef(result);
+    return ok;
+}
+
 }
 
 bool extension_bag_load_state_from_store(int slot) {
@@ -81,6 +121,9 @@ bool extension_bag_load_state_from_store(int slot) {
     }
     if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
     env->DeleteLocalRef(result);
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "sidecar load slot=%d parsed=%d items=%s", slot, parsed ? 1 : 0,
+                        occupied_item_summary(*state).c_str());
     return parsed;
 }
 
@@ -96,6 +139,9 @@ bool extension_bag_save_state_to_store(int slot) {
         return false;
     }
     const std::string json = virtual_bag::state_json(*state);
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "legacy sidecar save slot=%d items=%s", slot,
+                        occupied_item_summary(*state).c_str());
     jstring payload = env->NewStringUTF(json.c_str());
     if (payload == nullptr) return false;
     jstring result = static_cast<jstring>(env->CallStaticObjectMethod(bridge_class, method, slot, payload));
@@ -110,4 +156,87 @@ bool extension_bag_save_state_to_store(int slot) {
     if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
     env->DeleteLocalRef(result);
     return ok;
+}
+
+bool extension_bag_prepare_save_to_store(int slot, const char* transaction_id) {
+    JNIEnv* env = extension_bag_current_env();
+    jclass bridge_class = extension_bag_bridge_class();
+    virtual_bag::State* state = extension_bag_state();
+    if (env == nullptr || bridge_class == nullptr || state == nullptr || transaction_id == nullptr) return false;
+    jmethodID method = env->GetStaticMethodID(
+        bridge_class, "prepareSave", "(ILjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+    if (method == nullptr) {
+        env->ExceptionClear();
+        return false;
+    }
+    const std::string json = virtual_bag::state_json(*state);
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "sidecar prepare slot=%d tx=%s items=%s", slot, transaction_id,
+                        occupied_item_summary(*state).c_str());
+    jstring tx = env->NewStringUTF(transaction_id);
+    jstring payload = env->NewStringUTF(json.c_str());
+    if (tx == nullptr || payload == nullptr) {
+        if (tx != nullptr) env->DeleteLocalRef(tx);
+        if (payload != nullptr) env->DeleteLocalRef(payload);
+        return false;
+    }
+    jstring result = static_cast<jstring>(
+        env->CallStaticObjectMethod(bridge_class, method, slot, tx, payload));
+    env->DeleteLocalRef(tx);
+    env->DeleteLocalRef(payload);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    if (result == nullptr) return false;
+    const char* utf = env->GetStringUTFChars(result, nullptr);
+    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
+    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
+    env->DeleteLocalRef(result);
+    return ok;
+}
+
+bool extension_bag_commit_save_to_store(int slot, const char* transaction_id) {
+    JNIEnv* env = extension_bag_current_env();
+    jclass bridge_class = extension_bag_bridge_class();
+    virtual_bag::State* state = extension_bag_state();
+    if (env == nullptr || bridge_class == nullptr || state == nullptr || transaction_id == nullptr) {
+        return false;
+    }
+    jmethodID method = env->GetStaticMethodID(
+        bridge_class, "commitSave", "(ILjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+    if (method == nullptr) {
+        env->ExceptionClear();
+        return false;
+    }
+    const std::string json = virtual_bag::state_json(*state);
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "sidecar commit slot=%d tx=%s items=%s", slot, transaction_id,
+                        occupied_item_summary(*state).c_str());
+    jstring tx = env->NewStringUTF(transaction_id);
+    jstring payload = env->NewStringUTF(json.c_str());
+    if (tx == nullptr || payload == nullptr) {
+        if (tx != nullptr) env->DeleteLocalRef(tx);
+        if (payload != nullptr) env->DeleteLocalRef(payload);
+        return false;
+    }
+    jstring result = static_cast<jstring>(
+        env->CallStaticObjectMethod(bridge_class, method, slot, tx, payload));
+    env->DeleteLocalRef(tx);
+    env->DeleteLocalRef(payload);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    if (result == nullptr) return false;
+    const char* utf = env->GetStringUTFChars(result, nullptr);
+    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
+    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
+    env->DeleteLocalRef(result);
+    return ok;
+}
+
+bool extension_bag_abort_known_failed_save(int slot, const char* transaction_id) {
+    return call_save_callback(extension_bag_current_env(), extension_bag_bridge_class(),
+                              "abortKnownFailedSave", slot, transaction_id);
 }
