@@ -45,7 +45,7 @@
 | 交付物 | 说明 | 部署目标 | 状态 |
 |---|---|---|---|
 | **导出模块 APK** | Xposed 模块，Hook 游戏 + 提供 REST API | 手机（LSPosed） | ✅ 最新版本见 `output/` |
-| **集成版 APK（modded.apk）** | LSPatch 集成模块+游戏，免 root 单文件 | 按需集成（免 root 部署时） | 🔄 已构建待验证 |
+| **集成版 APK（modded.apk）** | LSPatch 集成模块+游戏，免 root 单文件 | 按需集成（免 root 部署时） | 🔄 由 `scripts/patch-apk.sh` 生成 |
 | **静态数据 JSON 数据库** | 解析的数值表/配置/资源 | 两者共用 | ✅ 完成（`apk/static-data/json/`，22MB） |
 
 ## 项目文件结构

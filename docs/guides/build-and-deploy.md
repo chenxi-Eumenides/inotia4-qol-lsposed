@@ -33,7 +33,7 @@
 | **Android NDK** | 编译 native 数据访问层 | ✅ **r26d（26.3.11579264）**，**项目内 `tools/ndk/`**（瘦身至 2.0G，仅 ARM ABI） |
 | libxposed API（compileOnly） | LSPosed 现代 Xposed API（`io.github.libxposed:api:101.0.1`） | 📦 Gradle 依赖（项目内） |
 | AndServer 库 | 进程内 HTTP 服务 | 📦 Gradle 依赖（项目内） |
-| LSPatch (lspatch.jar) | 集成免 root 版 APK | ✅ `tools/lspatch/lspatch.jar`（v0.6，10.8MB） |
+| **NPatch（默认集成工具）** | 集成免 root 版 APK | ✅ `tools/lspatch/npatch-v1.0.7-741-release.jar`（v1.0.7）；LSPatch v0.6 / v1.2 保留备用，可 `--lspatch-jar` 指定 |
 
 ### D. 部署与验证链 ✅
 
@@ -74,10 +74,25 @@ scripts/build-debug.sh
 scripts/build-debug.sh --offline
 # 正式版构建并复制为 output/inotia4-qol-lsposed-v<version>-release-unsigned.apk
 scripts/build-release.sh
-# Debug 产物 → output/inotia4-qol-lsposed-debug-<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
+# Debug 产物 → output/inotia4-qol-lsposed-debug-<YYMMDDHHMM>-<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
 # Release 产物 → output/inotia4-qol-lsposed-v<version>-release-unsigned.apk；版本号来自 build.gradle.kts，脚本只保留最新 2 份 Release APK
 # 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
 # 命名格式固定：inotia4-qol-lsposed-vX.Y.Z.apk（如 v0.4.56）
+# 多目标包名：逗号分隔，同时写入 LSPosed scope.list 和模块运行时过滤。
+scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.inotia4.qol.patched
+
+# ⑥ 按需生成集成版（原始游戏 APK + 本模块 APK → 单独 APK）
+# 默认使用 NPatch（tools/lspatch/npatch-v1.0.7-741-release.jar，JAR 自带 BouncyCastle，脚本自动注册 BKS provider）。
+scripts/patch-apk.sh <原始游戏.apk> <模块.apk>
+# 默认输出：output/<原始文件名>-npatched.apk（LSPatch JAR 则为 -lspatched.apk）；已有文件需显式 --force 覆盖。
+# NPatch 生成前会自动删除 output/ 下旧 NPatch 产物（*npatch*.apk，不含本次输出），保持输出目录干净。
+# 使用 LSPatch（v0.6 / v1.2）：
+scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar \
+    <原始游戏.apk> <模块.apk>
+# NPatch 支持修改输出 applicationId；模块构建时需把新包名加入 targetPackages：
+scripts/patch-apk.sh --newpackage com.inotia4.qol.patched <原始游戏.apk> <模块.apk>
+# signature bypass 按需显式设置；不要未经验证启用 level 3。
+scripts/patch-apk.sh --sigbypasslv 2 <原始游戏.apk> <模块.apk>
 
 # ② 部署（覆盖安装，LSPosed 启用状态按包名保留）
 # 默认操作真机2（192.168.3.54）；若同时连着真机1 需加 -s <序列号> 区分。
@@ -103,6 +118,22 @@ curl -s -X POST http://192.168.3.54:8088/api/system/enter_slot -H "Content-Type:
 # 验证：screen=world 即进入世界
 curl -s http://192.168.3.54:8088/api/ui/screen
 ```
+
+> `targetPackages` 默认只有原版游戏包名。需要让同一个 LSPosed 模块覆盖多个包时，使用
+> `-PtargetPackages=pkg.one,pkg.two`；构建会生成多行 `META-INF/xposed/scope.list`，并让运行时只在这些包中初始化。
+> 包名必须是合法 Android applicationId。NPatch 的 `--newpackage` 只改输出 APK 的 manifest/applicationId，原游戏 dex 中的类名和资源 ID 不变；因此新包名必须同时加入此参数并重新构建模块，不能只修改 APK 文件名。该游戏的资源表仍保留原资源 namespace，模块已在改包名进程中兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
+
+> 当前默认 Release 配置已同时包含原包和 `com.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
+
+> 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用 NPatch 内置证书重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。`--newpackage` 流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
++
++ > 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。已验证不可行的瘦身路径：预处理权限 + `-l 0` 虽能保住重叠（52MB），但 NPatch 重写 zip 时会把 STORED 资源重压缩为 DEFLATED，游戏引擎 mmap 直读崩溃（`SGL_Texture::FromResource`，Scudo misaligned pointer）；`-l 1` 以上又必须读取未修改原包的原始签名，预处理输入会报 `get original signature failed`。除非 NPatch 上游提供「删除指定权限」或「保留 STORED」选项，92MB 是当前唯一稳定形态。
+>
+> LSPatch 集成模式会把模块嵌入目标 APK，生成的 APK 不需要 LSPosed 或 LSPatch Manager 常驻；更换模块必须重新 patch。脚本只接受 `output/` 下的输出路径，并在完成后打印 SHA-256。
+>
+> 上游 JingMatrix/LSPatch 当前最新稳定版为 **v1.2**（2026-08-23），发行页提供 `lspatch-v1.2-487-release.jar`。v1.0 起运行时基于 Vector 并使用 modern libxposed API 102；本项目模块按 API 101 编译，因此脚本支持通过 `--lspatch-jar` 试用新版本，但不自动覆盖项目内 v0.6。正式切换前必须验证模块加载、native 库加载和 API 服务启动。
+>
+> 下载地址：[LSPatch v1.2 Release](https://github.com/JingMatrix/LSPatch/releases/tag/v1.2)。项目当前目标游戏为 ARM-only，集成 APK 仍需在 ARM64 真机验证。
 
 > **游戏重启与进程定位**：`am force-stop <包名>` 按包名杀进程，**不需要 pid**（pid 每次重启都变，不必查询）。
 > frida attach 也用**进程显示名**（`adb shell ps | grep 包名` 的 NAME 列，如 "Inotia4"），不用 pid。
@@ -172,7 +203,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 | Java | ✅ OpenJDK 17.0.19（已切换默认，原 1.8 弃用） |
 | python-frida | ✅ 17.7.2（CLI 未装，可选） |
 | Android SDK | ✅ `/opt/android-sdk/`：platforms/android-34 + build-tools/37.0.0 + platform-tools |
-| LSPatch | ✅ `tools/lspatch/lspatch.jar`（v0.6，10.8MB，`java -jar` 可运行） |
+| LSPatch | ✅ 项目内 v0.6（`java -jar` 可运行）；上游最新稳定版 v1.2，尚未替换并入项目 |
 | APK 解码 | ✅ `apktool d` 成功，输出至 `apk/decoded/` |
 
 ## 5. 环境相关已知待办
