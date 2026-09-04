@@ -32,6 +32,7 @@ scripts/*
 !scripts/AGENTS.md
 !scripts/build-debug.sh
 !scripts/build-release.sh
+!scripts/patch-apk.sh
 !scripts/analysis/
 !scripts/analysis/frida/
 !scripts/analysis/frida/save0-repair-patch.js
