@@ -26,6 +26,41 @@ using SaveItemPayloadFn = int (*)(uint8_t*, void*);
 using LoadItemPayloadFn = int (*)(const uint8_t*, void**, int*);
 using FreeItemPayloadFn = void (*)(void*);
 
+inline bool payload_round_trip_semantically_matches(const uint8_t* source,
+                                                    const uint8_t* round_trip,
+                                                    int payload_size) {
+    if (source == nullptr || round_trip == nullptr ||
+        payload_size < static_cast<int>(kPayloadHeaderSize)) {
+        return false;
+    }
+    // SAVE_LoadItem 重建附加属性时会经过 ITEM_AddOptionEx，原版可能规范化
+    // 属性记录的保留位；属性链顺序由 AddTail 保持。核心头部包含 uid、type
+    // （含品质/类别）、数量及物品元数据，
+    // 必须保持字节一致，避免把品质或堆叠状态当作可忽略差异。
+    if (std::memcmp(source + 1, round_trip + 1, kPayloadHeaderSize - 1) != 0) return false;
+    const int option_bytes = payload_size - static_cast<int>(kPayloadHeaderSize);
+    if (option_bytes < 0 || option_bytes % 4 != 0) return false;
+    const int option_count = option_bytes / 4;
+    constexpr size_t kMaxOptionCount = (kMaxSerializedItem - kPayloadHeaderSize) / 4;
+    if (static_cast<size_t>(option_count) > kMaxOptionCount) return false;
+    constexpr uint16_t kSerializedOptionSemanticMask = 0xe07f;
+    for (int source_index = 0; source_index < option_count; ++source_index) {
+        const uint8_t* source_option =
+            source + kPayloadHeaderSize + static_cast<size_t>(source_index) * 4;
+        const uint8_t* round_option =
+            round_trip + kPayloadHeaderSize + static_cast<size_t>(source_index) * 4;
+        const uint16_t source_code = static_cast<uint16_t>(source_option[0]) |
+                                     (static_cast<uint16_t>(source_option[1]) << 8);
+        const uint16_t round_code = static_cast<uint16_t>(round_option[0]) |
+                                    (static_cast<uint16_t>(round_option[1]) << 8);
+        if (((source_code ^ round_code) & kSerializedOptionSemanticMask) != 0 ||
+            std::memcmp(source_option + 2, round_option + 2, 2) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 inline PayloadValidation validate_serialized_payload_buffer(const uint8_t* payload,
                                                              size_t buffer_size,
                                                              int payload_size) {
@@ -136,8 +171,13 @@ inline ManagedLoadResult load_item_payload_exact(const uint8_t* payload, int pay
         result.failure = ManagedLoadFailure::kReserializeRejected;
         return result;
     }
-    if (round_trip_size != payload_size ||
-        std::memcmp(round_trip.data(), payload, static_cast<size_t>(payload_size)) != 0) {
+    const bool exact_match = round_trip_size == payload_size &&
+                             std::memcmp(round_trip.data(), payload,
+                                         static_cast<size_t>(payload_size)) == 0;
+    const bool semantic_match = round_trip_size == payload_size &&
+                                payload_round_trip_semantically_matches(
+                                    payload, round_trip.data(), payload_size);
+    if (!exact_match && !semantic_match) {
         free_item(item);
         result.failure = ManagedLoadFailure::kRoundTripMismatch;
         return result;

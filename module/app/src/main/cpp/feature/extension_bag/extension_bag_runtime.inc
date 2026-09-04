@@ -28,6 +28,13 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
             return finish(handled ? 1 : 0);
         }
         void* moving = touch_moving_item_control_locked();
+        // 原版不可堆叠装备在 drop 事件到达时可能已经清掉
+        // ITEM_CTRL_MOVING_FLAG，但事件参数仍保留真实 source control。
+        // 优先使用 TouchHandle 状态，只有状态已清空时才回退到事件源，避免
+        // 放宽普通点击/无效控件的处理范围。
+        if (moving == nullptr && param != nullptr) {
+            moving = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+        }
         if (index >= 0 && moving != nullptr) {
             void* data = fn_control_object_get_data != nullptr
                 ? fn_control_object_get_data(moving) : nullptr;
@@ -41,8 +48,21 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                 : original_item_category_locked(item);
             const bool backpack_item = category >= 1 && category <= 4;
             if (g_virtual_bag_state.types[index] == 0 && backpack_item) {
+                // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
+                // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
                 try_equip_on_extension_tab_drop_locked(index, moving);
-            } else if (!extension_source) {
+            } else if (extension_source) {
+                // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
+                // 扩展袋间移动处理，不能把“背包槽装备”误当成人物装备。
+                const bool moved = move_extension_to_extension_locked(
+                    module_bag, module_slot, index, -1);
+                if (moved) {
+                    persist_state_locked(false);
+                    refresh_projected_module_view_after_move_locked();
+                }
+                VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
+                            moved ? 1 : 0, index, category);
+            } else {
                 const bool moved = move_original_to_extension_locked(index, moving);
                 VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
                             moved ? 1 : 0, index, category,
@@ -239,6 +259,12 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y);
 void defer_item_free_locked(void* item);
 void* valid_child_locked(void* root, int slot);
 void make_desc_equip_gate(void* ctrl, void* arg);
+void extension_desc_item_execute(void* button);
+void reset_extension_desc_item_hooks_locked();
+void install_extension_desc_item_hooks_locked(void* item);
+bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
+                                                int before_count, int observed_before,
+                                                const char* context);
 
 void reset_extension_desc_unequip_hook_locked() {
     // Desc menu buttons are game-owned and can already be gone on teardown.
@@ -384,6 +410,10 @@ void commit_pending_extension_tab_locked() {
 
 void clear_module_cache_locked() {
     cancel_projected_drag_session_locked("module-cache-clear");
+    reset_extension_desc_item_hooks_locked();
+    g_extension_desc_item = nullptr;
+    g_extension_desc_item_bag = -1;
+    g_extension_desc_item_slot = -1;
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             // Scheme C objects never enter g_inven, so the module owns them

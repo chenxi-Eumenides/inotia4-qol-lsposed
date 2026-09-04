@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,6 +16,31 @@
 namespace {
 
 std::mutex g_mutex;
+
+bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
+    if (address == 0 || size == 0 || address > std::numeric_limits<uintptr_t>::max() - size) {
+        return false;
+    }
+    const uintptr_t end_address = address + size;
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) return false;
+    char line[512];
+    bool accessible = false;
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        unsigned long long start = 0;
+        unsigned long long end = 0;
+        char permissions[5] = {};
+        if (sscanf(line, "%llx-%llx %4s", &start, &end, permissions) != 3) continue;
+        if (address >= static_cast<uintptr_t>(start) &&
+            end_address <= static_cast<uintptr_t>(end) &&
+            strchr(permissions, permission) != nullptr) {
+            accessible = true;
+            break;
+        }
+    }
+    fclose(f);
+    return accessible;
+}
 
 // 宏名 → 游戏符号名查找表（X-macro 注册表生成，backlog P1 VMA 治理）
 const char* symbol_name_for_macro(const char* macro) {
@@ -61,6 +87,10 @@ void resolve_global(void*& dst, uintptr_t vma, const char* macro_name) {
 }
 
 }  // namespace
+
+bool game_memory_accessible(const void* address, size_t size, char permission) {
+    return mapping_has_permission(reinterpret_cast<uintptr_t>(address), size, permission);
+}
 
 // 函数指针地址：同 resolve_global（返回相对偏移，调用方拼 g_base）
 uintptr_t fn_resolve(const char* macro_name, uintptr_t vma) {
@@ -185,7 +215,8 @@ bool bridge_init() {
     fn_add_exp = reinterpret_cast<AddExpFn>(g_base + fn_resolve("F_ADD_EXP_VMA", F_ADD_EXP_VMA));
     fn_set_status_point = reinterpret_cast<SetStatusPointFn>(g_base + fn_resolve("F_SET_STATUS_POINT_VMA", F_SET_STATUS_POINT_VMA));
     fn_set_auto_attack = reinterpret_cast<SetAutoAttackFn>(g_base + fn_resolve("F_SET_AUTO_ATTACK_VMA", F_SET_AUTO_ATTACK_VMA));
-    fn_equip_item = reinterpret_cast<EquipItemFn>(g_base + fn_resolve("F_EQUIP_ITEM_VMA", F_EQUIP_ITEM_VMA));
+  fn_equip_item = reinterpret_cast<EquipItemFn>(g_base + fn_resolve("F_EQUIP_ITEM_VMA", F_EQUIP_ITEM_VMA));
+  fn_equip_item_from_inven_to_slot = reinterpret_cast<EquipItemFromInvenToSlotFn>(g_base + fn_resolve("F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA", F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA));
     fn_unequip = reinterpret_cast<UnequipFn>(g_base + fn_resolve("F_UNEQUIP_VMA", F_UNEQUIP_VMA));
     fn_can_equip = reinterpret_cast<CanEquipFn>(g_base + fn_resolve("F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA));
     fn_find_equip_slot = reinterpret_cast<FindEquipSlotFn>(g_base + fn_resolve("F_FIND_EQUIP_SLOT_VMA", F_FIND_EQUIP_SLOT_VMA));
@@ -228,6 +259,7 @@ bool bridge_init() {
     fn_ui_equip_is_apply_stuff = reinterpret_cast<UiEquipIsApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_IS_APPLY_STUFF_VMA", F_UIEQUIP_IS_APPLY_STUFF_VMA));
     fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));
     fn_ui_equip_refresh_item_area = reinterpret_cast<UiEquipRefreshItemAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA));
+fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_base + fn_resolve("F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA", F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA));
     fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
     g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));
     fn_control_item_set_item = reinterpret_cast<ControlItemSetItemFn>(g_base + fn_resolve("F_CONTROL_ITEM_SET_ITEM_VMA", F_CONTROL_ITEM_SET_ITEM_VMA));

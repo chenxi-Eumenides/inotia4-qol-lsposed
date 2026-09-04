@@ -142,4 +142,3 @@ bool move_merge_enabled() {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
     return g_move_merge_hook.orig != nullptr;
 }
-

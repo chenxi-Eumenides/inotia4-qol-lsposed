@@ -1,15 +1,18 @@
 std::string data_op_use_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
+    if (item_ref.kind == InventoryItemKind::kExtension) {
+        return extension_bag_use_item(bag, slot);
+    }
     if (const char* ui = ui_blocked()) {
         std::string err = "ui occupied: ";
         err += ui;
         return op_err(err.c_str());
     }
     if (fn_get_bit == nullptr) return op_err("symbol not resolved");
-    void* item = inventory_item_at(bag, slot);
-    if (item == nullptr) return op_err("slot empty");
-    uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-    int category = fn_get_bit(flags, 15, 6);
+    void* item = item_ref.native_item;
+    const int category = item_ref.category;
     // 解封/开箱/骰子类物品 fn_is_use 返回 0（IsUseAfterConfirm 判定集不含这些类别），
     // 但它们有自己的独立使用路径，不受 fn_is_use 限制
     bool sealed_or_box = (fn_is_sealed != nullptr && fn_is_sealed(category)) ||
@@ -144,7 +147,11 @@ std::string data_op_dice_reject() {
 std::string data_op_discard_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_remove_item_direct == nullptr) return op_err("symbol not resolved");
-    if (inventory_item_at(bag, slot) == nullptr) return op_err("slot empty");
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
+    if (item_ref.kind == InventoryItemKind::kExtension) {
+        return op_err("extension item discard not supported");
+    }
     fn_remove_item_direct(bag, slot);
     if (inventory_item_at(bag, slot) != nullptr) return op_err("discard failed");
     extension_bag_sync_projected_slot(bag, slot);
@@ -154,8 +161,12 @@ std::string data_op_sell_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_remove_item_direct == nullptr || fn_add_money == nullptr || fn_item_get_price == nullptr)
         return op_err("symbol not resolved");
-    void* item = inventory_item_at(bag, slot);
-    if (item == nullptr) return op_err("slot empty");
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
+    if (item_ref.kind == InventoryItemKind::kExtension) {
+        return op_err("extension item sell not supported");
+    }
+    void* item = item_ref.native_item;
     // 合法出售（v0.4.20）：ITEM_GetPrice 返回原始价格，出售价 = 原价 / 5
     // （改版币制：5 铜 = 1 银，出售价 = 真实价格 ÷ 5）
     int64_t base_price = fn_item_get_price(item);
@@ -172,10 +183,14 @@ std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_s
         return op_err("extension view open; movement disabled (P2)");
     }
     if (fn_inven_move_item == nullptr) return op_err("symbol not resolved");
-    void* item = inventory_item_at(bag, slot);
-    if (item == nullptr) return op_err("slot empty");
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
+    if (item_ref.kind == InventoryItemKind::kExtension) {
+        return op_err("extension item move not supported by original API");
+    }
+    void* item = item_ref.native_item;
     if (count <= 0) return op_err("bad count");
-    if (to_bag < 0 || to_bag >= 6 || to_slot < 0 || to_slot >= 16) return op_err("bad target");
+    if (to_bag < 0 || to_bag >= 5 || to_slot < 0 || to_slot >= 16) return op_err("bad target");
     if (bag == to_bag && slot == to_slot) return op_err("same slot");
     int r = fn_inven_move_item(item, count, to_bag, to_slot);
     // 返回 1=成功（mov w1,#0x1），0/失败返回空——按目标槽是否有物品判定
@@ -185,4 +200,3 @@ std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_s
     }
     return r ? op_ok() : op_err("move failed");
 }
-

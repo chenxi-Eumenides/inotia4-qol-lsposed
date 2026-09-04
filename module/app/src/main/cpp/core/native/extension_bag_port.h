@@ -17,3 +17,5 @@ void extension_bag_prepare_main_menu();
 int extension_bag_inventory_state_id();
 void extension_bag_prepare_save_slot_load();
 void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
+std::string extension_bag_use_item(int bag, int slot);
+std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot);

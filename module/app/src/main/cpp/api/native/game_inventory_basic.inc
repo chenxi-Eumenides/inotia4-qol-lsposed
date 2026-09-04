@@ -78,22 +78,12 @@ std::string data_op_minus_money(int64_t delta) {
 std::string data_op_remove_item(int32_t category) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_remove_item == nullptr || fn_get_bit == nullptr) return op_err("symbol not resolved");
-    // 按类别删第一个匹配物品（INVEN_RemoveItem 按 item 指针删，需先按类别定位）
-    struct Ctx { int32_t category; int r; int bag; int slot; bool found; } ctx{category, 0, -1, -1, false};
-    for_each_bag_slot([](void* item, int bag, int slot, void* c) -> bool {
-        Ctx* p = static_cast<Ctx*>(c);
-        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        if (fn_get_bit(flags, 15, 6) == p->category) {
-            p->r = fn_remove_item(item);
-            p->bag = bag;
-            p->slot = slot;
-            p->found = true;
-            return true;
-        }
-        return false;
-    }, &ctx);
-    if (!ctx.found) return op_err("item not found");
-    if (ctx.r) extension_bag_sync_projected_slot(ctx.bag, ctx.slot);
-    return ctx.r ? op_ok() : op_err("item not found");
+    InventoryItemRef ref;
+    if (!find_inventory_item_ref(category, &ref)) return op_err("item not found");
+    if (ref.kind == InventoryItemKind::kExtension) {
+        return op_err("extension item removal not supported");
+    }
+    const int result = fn_remove_item(ref.native_item);
+    if (result) extension_bag_sync_projected_slot(ref.bag, ref.slot);
+    return result ? op_ok() : op_err("item not found");
 }
-

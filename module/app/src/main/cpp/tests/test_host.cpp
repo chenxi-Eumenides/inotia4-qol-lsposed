@@ -440,6 +440,43 @@ static void test_virtual_bag_payload_bridge() {
     CHECK(std::memcmp(g_payload_bridge_fixture.payload.data(), complex_payload.data(),
                       kPayloadHeaderSize) == 0);
 
+    auto reordered_options = make_payload_bytes(kPayloadHeaderSize + 8, 1);
+    const size_t first_option = kPayloadHeaderSize;
+    const size_t second_option = first_option + 4;
+    reordered_options[9] = 0x41;
+    reordered_options[10] = 0x02;
+    reordered_options[first_option] = 0x11;
+    reordered_options[first_option + 1] = 0xaf;
+    reordered_options[first_option + 2] = 0x33;
+    reordered_options[first_option + 3] = 0x44;
+    reordered_options[second_option] = 0x55;
+    reordered_options[second_option + 1] = 0x66;
+    reordered_options[second_option + 2] = 0x77;
+    reordered_options[second_option + 3] = 0x88;
+    configure_payload_bridge(reordered_options, static_cast<int>(reordered_options[0] + 1));
+    g_payload_bridge_fixture.payload[first_option + 1] = 0xa0;
+    ManagedLoadResult canonicalized_result = load_item_payload_exact(
+        reordered_options.data(), static_cast<int>(reordered_options[0] + 1), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK(canonicalized_result.item == &g_payload_bridge_fixture);
+    CHECK_EQ(canonicalized_result.failure, ManagedLoadFailure::kNone);
+
+    configure_payload_bridge(reordered_options, static_cast<int>(reordered_options[0] + 1));
+    std::swap_ranges(g_payload_bridge_fixture.payload.begin() + first_option,
+                     g_payload_bridge_fixture.payload.begin() + second_option,
+                     g_payload_bridge_fixture.payload.begin() + second_option);
+    ManagedLoadResult reordered_result = load_item_payload_exact(
+        reordered_options.data(), static_cast<int>(reordered_options[0] + 1), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(reordered_result.failure, ManagedLoadFailure::kRoundTripMismatch);
+
+    configure_payload_bridge(reordered_options, static_cast<int>(reordered_options[0] + 1));
+    g_payload_bridge_fixture.payload[second_option + 2] ^= 1;
+    ManagedLoadResult changed_option_result = load_item_payload_exact(
+        reordered_options.data(), static_cast<int>(reordered_options[0] + 1), payload_bridge_save,
+        payload_bridge_load, payload_bridge_free);
+    CHECK_EQ(changed_option_result.failure, ManagedLoadFailure::kRoundTripMismatch);
+
     const auto max_payload = make_payload_bytes(kMaxSerializedItem, 999);
     configure_payload_bridge(max_payload, static_cast<int>(kMaxSerializedItem));
     ManagedLoadResult max_result = load_item_payload_exact(

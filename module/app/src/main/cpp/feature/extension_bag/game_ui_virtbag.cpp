@@ -121,6 +121,12 @@ PtrHook g_extension_desc_unequip_hook;
 int g_extension_desc_unequip_bag = -1;
 PtrHook g_extension_desc_equip_hook;
 void* g_extension_desc_equip_item = nullptr;
+std::array<PtrHook, 11> g_extension_desc_item_hooks{};
+void* g_extension_desc_item = nullptr;
+int g_extension_desc_item_bag = -1;
+int g_extension_desc_item_slot = -1;
+using ExtensionDestroyOkFn = void (*)();
+ExtensionDestroyOkFn g_extension_destroy_original_ok = nullptr;
 
 struct ExtensionDrag {
     bool active = false;
@@ -157,6 +163,9 @@ void* touch_moving_item_control_locked();
 bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control);
 bool extension_source_should_equip_locked(int target_bag);
 bool equip_extension_source_on_tab_locked(int target_bag, int source_bag, int source_slot);
+bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag, int dst_slot);
+bool persist_state_locked(bool force);
+void refresh_projected_module_view_after_move_locked();
 void cancel_projected_drag_session_locked(const char* reason);
 bool route_projected_session_to_tab_locked(int target_bag);
 int original_item_category_locked(void* item);

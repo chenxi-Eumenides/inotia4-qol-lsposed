@@ -145,8 +145,11 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control) {
         fn_ui_equip_get_item_slot_index == nullptr) {
         return false;
     }
-    if (extension_tab_index(control) >= 0 ||
-        fn_ui_equip_get_item_slot_index(control) < virtual_bag::kSlotCount) {
+    if (extension_tab_index(control) >= 0) {
+        return false;
+    }
+    const int target_slot = fn_ui_equip_get_item_slot_index(control);
+    if (target_slot < 0) {
         return false;
     }
     void* source_data = fn_control_object_get_data != nullptr
@@ -155,10 +158,11 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control) {
     void* item = source_data != nullptr ? *reinterpret_cast<void**>(source_data) : nullptr;
     int source_bag = -1;
     int source_slot = -1;
-    const bool allowed = item != nullptr && module_slot_of_item_locked(item, &source_bag, &source_slot);
+    const bool allowed = item != nullptr &&
+                         module_slot_of_item_locked(item, &source_bag, &source_slot);
     if (allowed) {
-        VIRTBAG_LOG("original tab drop allowed control=%p source=%d/%d",
-                    control, source_bag, source_slot);
+        VIRTBAG_LOG("original drop allowed control=%p source=extension bag=%d slot=%d target_slot=%d",
+                    control, source_bag, source_slot, target_slot);
     }
     return allowed;
 }

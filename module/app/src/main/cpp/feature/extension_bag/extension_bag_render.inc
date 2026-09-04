@@ -277,6 +277,10 @@ void clear_original_bag_selection_locked() {
 
 void clear_original_desc_locked() {
     reset_extension_desc_unequip_hook_locked();
+    reset_extension_desc_item_hooks_locked();
+    g_extension_desc_item = nullptr;
+    g_extension_desc_item_bag = -1;
+    g_extension_desc_item_slot = -1;
     if (g_base == 0) return;
     *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA) = 0;
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();

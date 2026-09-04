@@ -139,6 +139,102 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
     return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
 }
 
+namespace {
+void refresh_extension_item_operation_locked(int bag) {
+    if (g_module_view_installed && g_module_view_index == bag) {
+        refresh_module_item_area_locked(bag);
+    }
+}
+
+}  // namespace
+
+std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    const int bag = extension_internal_bag(logical_bag);
+    if (bag < 0) return op_err("bad extension bag (6-10)");
+    if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
+
+    bool used = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        if (slot >= g_virtual_bag_state.capacities[bag]) return op_err("slot beyond derived capacity");
+        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
+        if (fn_is_use == nullptr || fn_char_use_item_ex == nullptr) {
+            return op_err("symbol not resolved");
+        }
+        if (!fn_is_use(descriptor.category)) return op_err("item not usable");
+
+        void* item = module_item_locked(bag, slot);
+        void* leader = member_or_null(0);
+        if (item == nullptr) return op_err("extension item unavailable");
+        if (leader == nullptr) return op_err("no leader");
+
+        const int before_count = descriptor.count;
+        const int observed_before = fn_get_cumulate_count != nullptr
+            ? fn_get_cumulate_count(item) : before_count;
+        const bool closes_description = g_extension_desc_item == item;
+        if (closes_description && fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+        used = fn_char_use_item_ex(leader, item, 0) != 0;
+        if (!used) return op_err("on cooldown");
+        if (!consume_extension_item_after_native_locked(bag, slot, item, before_count,
+                                                         observed_before, "api_use")) {
+            return op_err("extension item state update failed");
+        }
+        g_item_state_dirty = true;
+        refresh_extension_item_operation_locked(bag);
+        if (closes_description) {
+            reset_extension_desc_item_hooks_locked();
+            g_extension_desc_item = nullptr;
+            g_extension_desc_item_bag = -1;
+            g_extension_desc_item_slot = -1;
+        }
+    }
+    if (used && tutorial_state() == 6) tutorial_cancel();
+    return op_ok();
+}
+
+std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot,
+                                             int equip_slot) {
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    const int bag = extension_internal_bag(logical_bag);
+    if (bag < 0) return op_err("bad extension bag (6-10)");
+    if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
+    if (equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) return op_err("bad equip slot");
+
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        if (slot >= g_virtual_bag_state.capacities[bag]) return op_err("slot beyond derived capacity");
+        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
+        if (fn_put_jewel == nullptr || fn_is_jewel == nullptr) {
+            return op_err("symbol not resolved");
+        }
+        if (!fn_is_jewel(descriptor.category)) return op_err("not jewel");
+
+        void* ch = member_or_null(role);
+        if (ch == nullptr) return op_err("role not found");
+        void* jewel = module_item_locked(bag, slot);
+        void* equip = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(ch) +
+                                                C_EQUIP + equip_slot * sizeof(void*));
+        if (jewel == nullptr) return op_err("extension jewel unavailable");
+        if (equip == nullptr) return op_err("equip slot empty");
+
+        const int before_count = descriptor.count;
+        const int result = fn_put_jewel(equip, jewel);
+        if (result != 0) return result == 2 ? op_err("no socket") : op_err("not jewel");
+        if (!consume_extension_item_after_native_locked(bag, slot, jewel, before_count,
+                                                         before_count, "api_put_jewel")) {
+            return op_err("extension jewel state update failed");
+        }
+        g_item_state_dirty = true;
+        refresh_extension_item_operation_locked(bag);
+    }
+    return op_ok();
+}
+
 std::string virtual_bag_inventory_bags_json() {
     if (!g_virtual_bag_enabled.load() || !game_in_world()) return "";
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);

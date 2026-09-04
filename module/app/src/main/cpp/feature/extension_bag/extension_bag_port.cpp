@@ -1,5 +1,6 @@
 #include "core/native/extension_bag_port.h"
 
+#include "feature/extension_bag/extension_bag_context.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
 
@@ -41,4 +42,12 @@ void extension_bag_prepare_save_slot_load() {
 
 void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     virtual_bag_for_each_logical_item(fn, ctx);
+}
+
+std::string extension_bag_use_item(int bag, int slot) {
+    return extension_bag_api_use_item_impl(bag, slot);
+}
+
+std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot) {
+    return extension_bag_api_put_jewel_impl(role, bag, slot, equip_slot);
 }

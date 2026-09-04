@@ -12,6 +12,9 @@
 // 不用 dlopen/dlsym：Android linker namespace 隔离下 dlopen 会加载独立副本，读不到游戏数据。
 
 extern uintptr_t g_base;
+// 检查游戏地址区间是否落在当前进程具有指定权限的映射中。
+// 游戏 UI 控件会在跨帧重建，调用其 getter 前必须先避免解引用失效控件。
+extern bool game_memory_accessible(const void* address, size_t size, char permission);
 extern JavaVM* g_jvm();   // JNI_OnLoad 缓存（gamebridge.cpp），native 反调 Kotlin 用
 extern void* g_money;
 extern void* g_map_id;
@@ -116,6 +119,7 @@ extern AddExpFn fn_add_exp;
 extern SetStatusPointFn fn_set_status_point;
 extern SetAutoAttackFn fn_set_auto_attack;
 extern EquipItemFn fn_equip_item;
+extern EquipItemFromInvenToSlotFn fn_equip_item_from_inven_to_slot;
 extern UnequipFn fn_unequip;
 extern CanEquipFn fn_can_equip;
 extern FindEquipSlotFn fn_find_equip_slot;
@@ -160,6 +164,7 @@ extern ControlObjectGetDataFn fn_control_object_get_data;
 extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;
 extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
+extern UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip;
 extern UiDescSetOffFn fn_ui_desc_set_off;
 extern UiEquipMakeDescFn fn_ui_equip_make_desc;
 // P3 扩展袋切换音效（原版袋按钮同款：SOUNDSYSTEM_Play(0x11)）

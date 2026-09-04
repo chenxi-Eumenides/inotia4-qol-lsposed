@@ -1,5 +1,8 @@
 std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     if (!game_in_world()) return op_err("not in game");
+    if (extension_bag_is_logical_bag(bag)) {
+        return extension_bag_put_jewel(role, bag, slot, equip_slot);
+    }
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_err("role not found");
     if (fn_put_jewel == nullptr || fn_is_jewel == nullptr || fn_remove_item_direct == nullptr)

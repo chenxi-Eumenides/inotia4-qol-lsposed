@@ -475,10 +475,18 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
         }
         for (int index = 0; index < virtual_bag::kBagCount; ++index) {
             if (!extension_tab_hit(index, x, y)) continue;
-            const int category = drag_source_category_locked();
+            void* item = nullptr;
+            if (fn_control_object_get_data != nullptr) {
+                void* data = fn_control_object_get_data(moving_control);
+                item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+            }
+            const int category = original_item_category_locked(item);
             if (g_virtual_bag_state.types[index] == 0 && category >= 1 && category <= 4) {
+                // 原版背包来源的袋物品拖到空扩展标签也必须走“袋槽装备”，
+                // 不能直接落入普通扩展物品槽。
                 return try_equip_on_extension_tab_drop_locked(index, moving_control);
             }
+            // 目标非空，或来源为装备/其他物品：保持原版物品的普通移动语义。
             return move_original_to_extension_locked(index, moving_control);
         }
         VIRTBAG_LOG("drop reject original->extension no extension tab hit x=%lld y=%lld",
@@ -648,4 +656,3 @@ bool route_projected_session_to_tab_locked(int target_bag) {
                 should_equip ? 1 : 0);
     return handled;
 }
-
