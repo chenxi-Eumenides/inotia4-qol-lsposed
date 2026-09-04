@@ -10,6 +10,7 @@ import io.github.libxposed.api.XposedModule
 import com.inotia4.qol.patch.AgreementGate
 import com.inotia4.qol.patch.IapBlocker
 import com.inotia4.qol.patch.ImmersiveMode
+import com.inotia4.qol.patch.ResourceNamespaceBridge
 import io.github.libxposed.api.XposedModuleInterface
 
 class HookMain : XposedModule() {
@@ -17,7 +18,9 @@ class HookMain : XposedModule() {
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
         super.onModuleLoaded(param)
         if (param.isSystemServer) return
-        if (param.processName != TARGET_PROCESS) return
+        val processPackage = param.processName.substringBefore(':')
+        if (!TargetPackages.contains(processPackage)) return
+        TargetPackages.activate(processPackage)
 
         // 无 context 提前初始化日志（进程 uid 与游戏一致，可写游戏私有目录）
         LogFile.initEarly()
@@ -32,6 +35,21 @@ class HookMain : XposedModule() {
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
+        if (!TargetPackages.contains(param.packageName)) return
+        TargetPackages.activate(param.packageName)
+        ResourceNamespaceBridge.install(param) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    if (chain.getExecutable().declaringClass.name == "android.content.res.Resources") {
+                        val args = chain.getArgs().toMutableList()
+                        ResourceNamespaceBridge.rewriteIdentifierArgs(args)
+                        chain.proceed(args.toTypedArray())
+                    } else {
+                        ResourceNamespaceBridge.resolve(chain.getArg(0) as? String ?: "")
+                    }
+                }
+        }
         IapBlocker.install(param) { method ->
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -101,10 +119,5 @@ class HookMain : XposedModule() {
     } catch (t: Throwable) {
         LogFile.logError("currentApplication failed", t)
         null
-    }
-
-    companion object {
-        private const val TARGET_PROCESS =
-            "com.com2us.inotia4.normal.freefull.google.global.android.common"
     }
 }

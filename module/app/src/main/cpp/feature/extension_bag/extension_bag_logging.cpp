@@ -8,13 +8,30 @@
 #include <ctime>
 #include <fcntl.h>
 #include <mutex>
+#include <string>
 #include <unistd.h>
 
 namespace {
 
-constexpr char kVirtBagLogPath[] =
-    "/sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/inotia4-export.log";
 std::mutex g_virtbag_log_mtx;
+
+const std::string& virtbag_log_path() {
+    static std::string path;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        char package_name[256] = {};
+        const int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+        const ssize_t size = fd >= 0 ? read(fd, package_name, sizeof(package_name) - 1) : -1;
+        if (fd >= 0) close(fd);
+        if (size > 0) {
+            package_name[size] = '\0';
+            path = "/sdcard/Android/data/" + std::string(package_name) + "/files/inotia4-export.log";
+        } else {
+            path = "/sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/inotia4-export.log";
+        }
+    });
+    return path;
+}
 
 }
 
@@ -35,7 +52,7 @@ void extension_bag_log(const char* format, ...) {
     localtime_r(&seconds, &local_time);
     const int millisecond_part = static_cast<int>(milliseconds % 1000);
     std::lock_guard<std::mutex> lock(g_virtbag_log_mtx);
-    const int fd = open(kVirtBagLogPath, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    const int fd = open(virtbag_log_path().c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (fd < 0) return;
     dprintf(fd, "%04d-%02d-%02d %02d:%02d:%02d.%03d [N] %s\n",
             local_time.tm_year + 1900, local_time.tm_mon + 1, local_time.tm_mday,

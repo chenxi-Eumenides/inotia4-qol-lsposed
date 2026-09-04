@@ -4,6 +4,7 @@ import com.inotia4.qol.BuildConfig
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.StaticData
+import com.inotia4.qol.TargetPackages
 import com.inotia4.qol.UiActivityTracker
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
@@ -357,7 +358,7 @@ class InfoApiServiceCore : InfoApiService {
             "version" to BuildConfig.VERSION_NAME,
             "save_slots" to slots,
             "current_save_slot" to currentSlot,
-            "package_name" to PKG_NAME,
+            "package_name" to TargetPackages.current(),
             "base" to NativeBridge.nativeGetBaseAddr()
         )
     }
@@ -482,9 +483,6 @@ class InfoApiServiceCore : InfoApiService {
         JsonUtil.parseObj(gamestateJson())?.optString("screen", "loading") ?: "loading"
 
     companion object {
-        private const val PKG_NAME =
-            "com.com2us.inotia4.normal.freefull.google.global.android.common"
-
         // v0.5.42：screen 枚举体系（与 data_ui_screen 完全对齐）——面板类 panel_* 前缀、
         // 主菜单面板类 main_menu_* 前缀；对话框类（dialog_*）不属于面板
         private val PANELS = setOf(

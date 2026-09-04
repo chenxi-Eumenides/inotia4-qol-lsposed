@@ -7,10 +7,8 @@ import java.lang.reflect.Method
 
 object IapBlocker {
 
-    private const val TARGET_PROCESS = "com.com2us.inotia4.normal.freefull.google.global.android.common"
-
     fun install(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
-        if (skipHiveBlock()) {
+        if (skipHiveBlock(param.packageName)) {
             LogFile.log("hive payment block skipped (flag file present, observation mode)")
             return
         }
@@ -39,8 +37,8 @@ object IapBlocker {
         }
     }
 
-    private fun skipHiveBlock(): Boolean = try {
-        java.io.File("/sdcard/Android/data/$TARGET_PROCESS/files/skip_hive_block.flag").exists()
+    private fun skipHiveBlock(packageName: String): Boolean = try {
+        java.io.File("/sdcard/Android/data/$packageName/files/skip_hive_block.flag").exists()
     } catch (t: Throwable) {
         LogFile.logError("skipHiveBlock check failed", t)
         false

@@ -4,6 +4,44 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+val defaultTargetPackages =
+    "com.com2us.inotia4.normal.freefull.google.global.android.common,com.inotia4.qol.patched"
+val targetPackages = providers.gradleProperty("targetPackages").orElse(defaultTargetPackages)
+    .map { raw ->
+        raw.split(',')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+            .also { packages ->
+                require(packages.isNotEmpty()) { "targetPackages must contain at least one package" }
+                packages.forEach { packageName ->
+                    require(packageName.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"))) {
+                        "Invalid Android package name: $packageName"
+                    }
+                }
+            }
+            .joinToString(",")
+    }
+
+val generateXposedScope = tasks.register("generateXposedScope") {
+    val scopeFile = layout.buildDirectory.file("generated/xposed-scope/META-INF/xposed/scope.list")
+    inputs.property("targetPackages", targetPackages)
+    outputs.file(scopeFile)
+    doLast {
+        val packages = targetPackages.get().split(',')
+        scopeFile.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(packages.joinToString("\n") + "\n")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name.matches(Regex("process.*JavaRes"))) {
+        dependsOn(generateXposedScope)
+    }
+}
+
 apply(plugin = "com.yanzhenjie.andserver")
 
 android {
@@ -16,8 +54,8 @@ android {
         applicationId = "com.inotia4.qol"
         minSdk = 30
         targetSdk = 34
-    versionCode = 177
-    versionName = "0.6.19"
+    versionCode = 178
+    versionName = "0.6.20"
 
         externalNativeBuild {
             cmake {
@@ -27,6 +65,8 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+
+        buildConfigField("String", "TARGET_PACKAGES", "\"${targetPackages.get()}\"")
     }
 
     buildTypes {
@@ -35,7 +75,7 @@ android {
         }
     }
 
-    buildFeatures {
+        buildFeatures {
         buildConfig = true
     }
 
@@ -52,8 +92,11 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
         }
+
     }
 }
+
+android.sourceSets["main"].resources.srcDir(layout.buildDirectory.dir("generated/xposed-scope"))
 
 dependencies {
     // LSPosed 现代 Xposed API（compileOnly：由框架提供，不打进 APK）

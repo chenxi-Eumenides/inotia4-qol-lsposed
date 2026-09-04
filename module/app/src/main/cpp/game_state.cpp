@@ -88,25 +88,13 @@ void* find_char_by_merc_slot(int slot) {
 }
 
 void* find_inventory_item(int category) {
-    if (fn_get_bit == nullptr) return nullptr;
-    struct Ctx { int category; void* found; } ctx{category, nullptr};
-    for_each_bag_slot([](void* item, int, int, void* c) -> bool {
-        Ctx* p = static_cast<Ctx*>(c);
-        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        if (fn_get_bit(flags, 15, 6) == p->category) { p->found = item; return true; }
-        return false;
-    }, &ctx);
-    return ctx.found;
+    InventoryItemRef ref;
+    return find_inventory_item_ref(category, &ref) ? ref.native_item : nullptr;
 }
 
 int inventory_count() {
-    if (g_inven == nullptr) return -1;
     struct Ctx { int n; } ctx{0};
-    for_each_bag_slot([](void*, int, int, void* c) -> bool {
-        static_cast<Ctx*>(c)->n++;
-        return false;
-    }, &ctx);
-    extension_bag_for_each_logical_item([](int, int, int, int, void* c) -> bool {
+    for_each_inventory_item([](const InventoryItemRef&, void* c) -> bool {
         static_cast<Ctx*>(c)->n++;
         return false;
     }, &ctx);
@@ -116,31 +104,84 @@ int inventory_count() {
 int inventory_quantity(int category) {
     if (category <= 0) return 0;
     struct Ctx { int category; int quantity; } ctx{category, 0};
-    for_each_bag_slot([](void* item, int, int, void* c) -> bool {
+    for_each_inventory_item([](const InventoryItemRef& item, void* c) -> bool {
         Ctx* p = static_cast<Ctx*>(c);
-        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        if (fn_get_bit == nullptr || fn_get_bit(flags, 15, 6) != p->category) return false;
-        p->quantity += fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 0;
-        return false;
-    }, &ctx);
-    extension_bag_for_each_logical_item([](int, int, int item_category, int count, void* c) -> bool {
-        Ctx* p = static_cast<Ctx*>(c);
-        if (item_category == p->category) p->quantity += count;
+        if (item.category == p->category) p->quantity += item.count;
         return false;
     }, &ctx);
     return ctx.quantity;
 }
 
 void* inventory_item_at(int bag, int slot) {
-    if (g_inven == nullptr) return nullptr;
-    if (bag < 0 || bag >= 6 || slot < 0 || slot >= 16) return nullptr;
+    InventoryItemRef ref;
+    if (!inventory_item_ref_at(bag, slot, &ref)) return nullptr;
+    return ref.native_item;
+}
+
+bool find_inventory_item_ref(int category, InventoryItemRef* out) {
+    if (out == nullptr || category <= 0) return false;
+    struct Ctx { int category; InventoryItemRef* out; bool found; } ctx{category, out, false};
+    for_each_inventory_item([](const InventoryItemRef& item, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        if (item.category != p->category) return false;
+        *p->out = item;
+        p->found = true;
+        return true;
+    }, &ctx);
+    return ctx.found;
+}
+
+bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
+    if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
+    if (extension_bag_is_logical_bag(bag)) {
+        struct Ctx { int bag; int slot; InventoryItemRef* out; } ctx{bag, slot, out};
+        extension_bag_for_each_logical_item([](int item_bag, int item_slot, int category, int count,
+                                               void* c) -> bool {
+            Ctx* p = static_cast<Ctx*>(c);
+            if (item_bag != p->bag || item_slot != p->slot) return false;
+            *p->out = {InventoryItemKind::kExtension, item_bag, item_slot, category, count, nullptr};
+            return true;
+        }, &ctx);
+        return out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot;
+    }
+    if (bag >= 5 || g_inven == nullptr || fn_get_bit == nullptr) {
+        return false;
+    }
     uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + bag * 0x80;
-    return *reinterpret_cast<void**>(bag_slots + slot * 8);
+    void* item = *reinterpret_cast<void**>(bag_slots + slot * 8);
+    if (item == nullptr) return false;
+    const uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+    *out = {InventoryItemKind::kOriginal, bag, slot, fn_get_bit(flags, 15, 6),
+            fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1, item};
+    return true;
+}
+
+void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
+    if (fn == nullptr) return;
+    struct Ctx { InventoryItemFn fn; void* ctx; bool stopped; } state{fn, ctx, false};
+    if (fn_get_bit != nullptr) {
+        for_each_bag_slot([](void* item, int bag, int slot, void* c) -> bool {
+            Ctx* p = static_cast<Ctx*>(c);
+            InventoryItemRef ref;
+            const uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+            ref = {InventoryItemKind::kOriginal, bag, slot, fn_get_bit(flags, 15, 6),
+                   fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1, item};
+            p->stopped = p->fn(ref, p->ctx);
+            return p->stopped;
+        }, &state);
+    }
+    if (state.stopped) return;
+    extension_bag_for_each_logical_item([](int bag, int slot, int category, int count, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        const InventoryItemRef ref{InventoryItemKind::kExtension, bag, slot, category, count, nullptr};
+        p->stopped = p->fn(ref, p->ctx);
+        return p->stopped;
+    }, &state);
 }
 
 void for_each_bag_slot(BagSlotFn fn, void* ctx) {
     if (fn == nullptr || g_inven == nullptr) return;
-    for (int b = 0; b < 6; ++b) {
+    for (int b = 0; b < 5; ++b) {
         uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + b * 0x80;
         for (int j = 0; j < 16; ++j) {
             void* item = *reinterpret_cast<void**>(bag_slots + j * 8);

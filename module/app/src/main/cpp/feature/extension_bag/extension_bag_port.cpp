@@ -1,6 +1,7 @@
 #include "core/native/extension_bag_port.h"
 
 #include "feature/extension_bag/game_ui_virtbag.h"
+#include "feature/extension_bag/model/virtual_bag_state.h"
 
 void extension_bag_sync_projected_slot(int bag, int slot) {
     virtual_bag_sync_projected_slot(bag, slot);
@@ -20,6 +21,10 @@ std::string extension_bag_inventory_bags_json() {
 
 bool extension_bag_is_inventory_enter(uintptr_t enter) {
     return virtual_bag_is_inventory_enter(enter);
+}
+
+bool extension_bag_is_logical_bag(int bag) {
+    return virtual_bag::valid_extension_logical_bag(bag);
 }
 
 void extension_bag_prepare_main_menu() {

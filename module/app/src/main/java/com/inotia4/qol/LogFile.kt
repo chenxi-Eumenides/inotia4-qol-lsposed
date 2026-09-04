@@ -19,9 +19,6 @@ object LogFile {
 
     private const val TAG = "Inotia4Export"
     private const val FILE_NAME = "inotia4-export.log"
-    private const val GAME_PKG =
-        "com.com2us.inotia4.normal.freefull.google.global.android.common"
-
     private val lock = Any()
 
     @Volatile
@@ -34,7 +31,7 @@ object LogFile {
             if (file != null) return
             try {
                 val base = Environment.getExternalStorageDirectory()
-                val dir = File(base, "Android/data/$GAME_PKG/files")
+                val dir = File(base, "Android/data/${TargetPackages.current()}/files")
                 if (dir.exists() || dir.mkdirs()) {
                     val f = File(dir, FILE_NAME)
                     // 覆盖模式：每次进程启动清空旧日志再记录

@@ -12,6 +12,7 @@ void extension_bag_sync_projected_bag();
 bool extension_bag_module_view_installed();
 std::string extension_bag_inventory_bags_json();
 bool extension_bag_is_inventory_enter(uintptr_t enter);
+bool extension_bag_is_logical_bag(int bag);
 void extension_bag_prepare_main_menu();
 int extension_bag_inventory_state_id();
 void extension_bag_prepare_save_slot_load();
