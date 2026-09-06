@@ -147,17 +147,21 @@ uint32_t* original_bag_size_word_locked() {
     return bag_size_word_locked(original_bag_locked());
 }
 
+void refresh_projection_if_overwritten_locked();
+
 void refresh_module_item_area_locked(int index) {
     if (fn_ui_equip_refresh_item_area == nullptr) return;
     uint32_t* size_word = g_original_bag_size_word;
     if (size_word == nullptr) {
         fn_ui_equip_refresh_item_area();
+        refresh_projection_if_overwritten_locked();
         return;
     }
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     *size_word = (g_original_bag_size & ~kCapacityMask) |
                  (static_cast<uint32_t>(g_virtual_bag_state.capacities[index]) & kCapacityMask);
     fn_ui_equip_refresh_item_area();
+    refresh_projection_if_overwritten_locked();
 }
 
 void virtual_bag_draw_original_bag_wrapper() {

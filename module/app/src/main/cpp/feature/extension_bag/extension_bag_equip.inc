@@ -674,6 +674,18 @@ void install_extension_desc_item_hooks_locked(void* item) {
         void** execute_slot = reinterpret_cast<void**>(
             reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC);
         if (!game_memory_accessible(execute_slot, sizeof(void*), 'w')) continue;
+        bool already_hooked = false;
+        for (size_t previous = 0; previous < index; ++previous) {
+            if (g_extension_desc_item_hooks[previous].slot == execute_slot) {
+                already_hooked = true;
+                break;
+            }
+        }
+        if (already_hooked) {
+            VIRTBAG_LOG("extension desc hook skip duplicate slot index=%d offset=0x%zx slot=%p",
+                        static_cast<int>(index), kDescButtonOffsets[index], execute_slot);
+            continue;
+        }
         void* original = *execute_slot;
         if (original == nullptr || !game_memory_accessible(original, 1, 'x')) continue;
         if (!g_extension_desc_item_hooks[index].install_typed(
@@ -876,6 +888,10 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
         ? g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA)
         : 0;
     if (raw == 0 || ctrl == nullptr) return;
+    // UIEquip_RefreshItemArea may have restored the original inventory object
+    // immediately before the original event reaches MakeDesc. Rebind only
+    // projected controls so the original MakeDesc reads the extension item.
+    virtual_bag_sync_projected_item_control(ctrl);
     void* item = nullptr;
     if (fn_control_object_get_data != nullptr) {
         if (game_memory_accessible(ctrl, CO_DATA + sizeof(void*), 'r')) {
