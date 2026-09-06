@@ -53,4 +53,7 @@ void* virtual_bag_find_native_item(int category);
 bool virtual_bag_remove_native_item(void* item);
 bool virtual_bag_equip_projected_item(void* item, int source_bag, int source_slot, int equip_slot);
 bool virtual_bag_consume_native_item(void* item);
+using VirtualBagPutJewelBackup = int (*)(void* equip_item, void* jewel_item);
+int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
+                                 VirtualBagPutJewelBackup backup);
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag);

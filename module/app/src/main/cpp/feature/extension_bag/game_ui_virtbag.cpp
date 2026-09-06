@@ -107,6 +107,9 @@ int g_module_window_original_bag = -1;
 void* g_projected_item_root = nullptr;
 bool g_module_view_installed = false;
 int g_module_view_index = -1;
+void* g_pending_jewel_detail_item = nullptr;
+int g_pending_jewel_detail_bag = -1;
+int g_pending_jewel_detail_slot = -1;
 uint8_t g_exit_display_bag = kNoOriginalBagSelected;
 bool g_inventory_frame_active = false;
 bool g_item_state_dirty = false;
@@ -178,6 +181,9 @@ void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
                                        const char* context, uint32_t* out_handle);
 void handover_tracked_item_locked(uint32_t handle, void* item, const char* context);
 void release_tracked_item_locked(uint32_t handle, void* item, const char* context);
+bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
+                                                int before_count, int observed_before,
+                                                const char* context);
 
 #include "feature/extension_bag/extension_bag_drag_session.inc"
 
@@ -240,27 +246,100 @@ bool virtual_bag_remove_native_item(void* item) {
 
 bool virtual_bag_consume_native_item(void* item) {
     if (item == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    int bag = -1;
-    int slot = -1;
-    if (!module_slot_of_item_locked(item, &bag, &slot) || g_module_objects[bag][slot] != item) {
-        return false;
+    void* detail_control = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        int bag = -1;
+        int slot = -1;
+        if (!module_slot_of_item_locked(item, &bag, &slot) || g_module_objects[bag][slot] != item) {
+            return false;
+        }
+        const int before_count = g_virtual_bag_state.items[bag][slot].count;
+        const int observed_before = fn_get_cumulate_count != nullptr
+            ? fn_get_cumulate_count(item) : before_count;
+        if (!consume_extension_item_after_native_locked(bag, slot, item, before_count,
+                                                        observed_before, "native_consume")) {
+            return false;
+        }
+        g_item_state_dirty = true;
+        persist_state_locked();
+        if (g_module_view_installed && g_module_view_index == bag) {
+            refresh_module_item_area_locked(bag);
+        }
+        if (g_pending_jewel_detail_item != nullptr &&
+            g_pending_jewel_detail_bag == g_module_view_index &&
+            g_pending_jewel_detail_slot >= 0 &&
+            g_pending_jewel_detail_slot < virtual_bag::kSlotCount &&
+            g_module_view_installed && g_projected_item_root != nullptr &&
+            fn_control_item_set_item != nullptr) {
+            detail_control = valid_child_locked(g_projected_item_root,
+                                                g_pending_jewel_detail_slot);
+            if (detail_control != nullptr) {
+                fn_control_item_set_item(detail_control, g_pending_jewel_detail_item);
+            }
+        }
+        g_pending_jewel_detail_item = nullptr;
+        g_pending_jewel_detail_bag = -1;
+        g_pending_jewel_detail_slot = -1;
+        VIRTBAG_LOG("native consume extension bag=%d slot=%d before=%d", bag, slot, before_count);
     }
-    const int before_count = g_virtual_bag_state.items[bag][slot].count;
-    const int observed_before = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : before_count;
-    if (!consume_extension_item_after_native_locked(bag, slot, item, before_count,
-                                                    observed_before, "native_consume")) {
-        return false;
+    if (detail_control != nullptr && fn_ui_equip_make_desc != nullptr) {
+        make_desc_equip_gate(detail_control, nullptr);
     }
-    g_item_state_dirty = true;
-    persist_state_locked();
-    if (g_module_view_installed && g_module_view_index == bag) {
-        refresh_module_item_area_locked(bag);
-    }
-    VIRTBAG_LOG("native consume extension bag=%d slot=%d before=%d", bag, slot, before_count);
     return true;
+}
+
+int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
+                                 VirtualBagPutJewelBackup backup) {
+    if (equip_item == nullptr || jewel_item == nullptr || backup == nullptr) return 3;
+
+    int equip_bag = -1;
+    int equip_slot = -1;
+    int jewel_bag = -1;
+    int jewel_slot = -1;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        if (!module_slot_of_item_locked(equip_item, &equip_bag, &equip_slot) ||
+            !module_slot_of_item_locked(jewel_item, &jewel_bag, &jewel_slot) ||
+            g_module_objects[equip_bag][equip_slot] != equip_item ||
+            g_module_objects[jewel_bag][jewel_slot] != jewel_item) {
+            return 3;
+        }
+        if (g_virtual_bag_state.items[jewel_bag][jewel_slot].count <= 0) return 3;
+    }
+
+    const int result = backup(equip_item, jewel_item);
+    if (result != 0) return result;
+
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        if (g_module_objects[equip_bag][equip_slot] != equip_item ||
+            g_module_objects[jewel_bag][jewel_slot] != jewel_item) {
+            VIRTBAG_LOG("native put jewel payload sync skipped after native success");
+            return 0;
+        }
+        g_pending_jewel_detail_item = equip_item;
+        g_pending_jewel_detail_bag = equip_bag;
+        g_pending_jewel_detail_slot = equip_slot;
+        std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+        int payload_size = 0;
+        if (!serialize_item_payload_locked(equip_item, &payload, &payload_size)) {
+            VIRTBAG_LOG("native put jewel payload sync failed bag=%d slot=%d", equip_bag, equip_slot);
+            return 0;
+        }
+        virtual_bag::Item& equip_descriptor = g_virtual_bag_state.items[equip_bag][equip_slot];
+        equip_descriptor.payload = payload;
+        equip_descriptor.payload_size = payload_size;
+        equip_descriptor.count = fn_get_cumulate_count != nullptr
+            ? fn_get_cumulate_count(equip_item) : equip_descriptor.count;
+        g_module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
+        g_item_state_dirty = true;
+        persist_state_locked();
+    }
+    return 0;
 }
 
 #include "feature/extension_bag/extension_bag_public_runtime.inc"
