@@ -91,16 +91,19 @@ int stage4_equip_item(void* character, int32_t bag, int32_t slot, int32_t equip_
 }
 
 int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem identify,
-                     Stage4JewelBackup backup, Stage4RemoveExtension extension_remove) {
+                     Stage4JewelBackup backup, Stage4JewelExtension extension_put) {
     if (backup == nullptr) return 3;
     int32_t bag = -1;
     int32_t slot = -1;
     if (identify == nullptr || !identify(jewel_item, &bag, &slot)) {
         return backup(equip_item, jewel_item);
     }
-    const int result = backup(equip_item, jewel_item);
-    if (result == 0 && (extension_remove == nullptr || !extension_remove(jewel_item))) return 3;
-    return result;
+    int32_t equip_bag = -1;
+    int32_t equip_slot = -1;
+    if (extension_put != nullptr && identify(equip_item, &equip_bag, &equip_slot)) {
+        return extension_put(equip_item, jewel_item, backup);
+    }
+    return backup(equip_item, jewel_item);
 }
 
 bool stage4_install_transaction(const Stage4HookSpec* hooks, std::size_t count,

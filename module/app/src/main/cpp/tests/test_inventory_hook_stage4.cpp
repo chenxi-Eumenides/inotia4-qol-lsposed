@@ -62,6 +62,11 @@ static int backup_equip(void*, int32_t, int32_t, int32_t) { ++g_equip_backup_cal
 static int g_jewel_backup_result = 0;
 static int g_jewel_backup_calls = 0;
 static int jewel_backup(void*, void*) { ++g_jewel_backup_calls; return g_jewel_backup_result; }
+static int g_jewel_extension_calls = 0;
+static int jewel_extension(void* equip_item, void* jewel_item, Stage4JewelBackup backup) {
+    ++g_jewel_extension_calls;
+    return backup == nullptr ? 3 : backup(equip_item, jewel_item);
+}
 
 static int g_install_calls = 0;
 static int g_uninstall_calls = 0;
@@ -131,12 +136,18 @@ static void test_object_operations() {
 
     g_jewel_backup_result = 0; g_jewel_backup_calls = 0; g_extension_action_calls = 0;
     CHECK(stage4_put_jewel(nullptr, g_extension_item, identify_item, jewel_backup,
-                            remove_item_extension) == 0);
-    CHECK(g_jewel_backup_calls == 1 && g_extension_action_calls == 1);
+                            nullptr) == 0);
+    CHECK(g_jewel_backup_calls == 1 && g_extension_action_calls == 0);
     g_jewel_backup_result = 3;
     CHECK(stage4_put_jewel(nullptr, g_extension_item, identify_item, jewel_backup,
-                            remove_item_extension) == 3);
-    CHECK(g_extension_action_calls == 1);
+                            nullptr) == 3);
+    CHECK(g_extension_action_calls == 0);
+
+    g_jewel_backup_result = 0; g_jewel_backup_calls = 0; g_jewel_extension_calls = 0;
+    CHECK(stage4_put_jewel(g_extension_item, g_extension_item, identify_item, jewel_backup,
+                           jewel_extension) == 0);
+    CHECK(g_jewel_extension_calls == 1 && g_jewel_backup_calls == 1 &&
+          g_extension_action_calls == 0);
 }
 
 static void test_install_transaction() {

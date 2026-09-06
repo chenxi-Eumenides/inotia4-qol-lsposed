@@ -42,8 +42,10 @@ int stage4_equip_item(void* character, int32_t bag, int32_t slot, int32_t equip_
                       Stage4EquipBackup backup);
 
 using Stage4JewelBackup = int (*)(void* equip_item, void* jewel_item);
+using Stage4JewelExtension = int (*)(void* equip_item, void* jewel_item,
+                                     Stage4JewelBackup backup);
 int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem identify,
-                     Stage4JewelBackup backup, Stage4RemoveExtension extension_remove);
+                     Stage4JewelBackup backup, Stage4JewelExtension extension_put);
 
 using Stage4HookInstall = int (*)(void* target, void* replacement, void** backup);
 using Stage4HookUninstall = int (*)(void* target);

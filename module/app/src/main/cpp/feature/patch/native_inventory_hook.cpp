@@ -3,6 +3,7 @@
 #include "inventory_hook_stage4.h"
 
 #include "core/native/extension_bag_port.h"
+#include "feature/extension_bag/game_ui_virtbag.h"
 #include "game_access.h"
 #include "game_state.h"
 
@@ -168,7 +169,7 @@ int put_jewel_wrapper(void* equip_item, void* jewel_item) {
     return stage4_put_jewel(equip_item, jewel_item,
                             extension_bag_enabled() ? extension_bag_identify_native_item : nullptr,
                             g_backup_put_jewel,
-                            extension_bag_enabled() ? extension_bag_remove_native_item : nullptr);
+                            extension_bag_enabled() ? virtual_bag_put_jewel_native : nullptr);
 }
 
 bool target_is_executable(uintptr_t target, const char* name) {
