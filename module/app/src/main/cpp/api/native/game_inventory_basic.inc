@@ -47,24 +47,33 @@ std::string data_op_add_money(int64_t delta) {
 std::string data_op_add_item(int32_t category, int32_t count) {
     if (!game_in_world()) return op_err("not in game");
     if (count <= 0) return op_err("bad count");
-    if (fn_create_item == nullptr || fn_inven_save_item == nullptr || fn_inven_find_save_slot == nullptr)
+    if (fn_create_item == nullptr || fn_inven_save_item == nullptr || fn_inven_find_save_slot == nullptr ||
+        fn_itempool_free == nullptr)
         return op_err("symbol not resolved");
     // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
     void* item = fn_create_item(category, 0, 0, 0);
     if (item == nullptr) return op_err("create item failed");
     // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（item_is_equip 同源，与 ITEM_GetCumulateCount 一致，
     // 与 patch 无关）。不可用 fn_get_cumulate_count 返回值区分——装备与数量 1 的可堆叠均返回 1。
-    if (count > 1 && item_is_equip(item))
+    if (count > 1 && item_is_equip(item)) {
+        fn_itempool_free(item);
         return op_err("item not stackable");
+    }
     if (count > 1) {
         count = static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count), stack_limit_enabled()));
         uint32_t cf = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
         *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
             stack_codec::write_count(cf, static_cast<uint32_t>(count));
     }
-    int save_slot = fn_inven_find_save_slot(item, 0);
-    if (save_slot <= 0) return op_err("inventory full");
-    if (!fn_inven_save_item(item, nullptr)) return op_err("save item failed");
+    int8_t save_slot = -1;
+    if (!fn_inven_find_save_slot(item, &save_slot)) {
+        fn_itempool_free(item);
+        return op_err("inventory full");
+    }
+    if (!fn_inven_save_item(item, nullptr)) {
+        fn_itempool_free(item);
+        return op_err("save item failed");
+    }
     return op_ok();
 }
 
@@ -81,8 +90,13 @@ std::string data_op_remove_item(int32_t category) {
     InventoryItemRef ref;
     if (!find_inventory_item_ref(category, &ref)) return op_err("item not found");
     if (ref.kind == InventoryItemKind::kExtension) {
-        return op_err("extension item removal not supported");
+        if (!extension_bag_remove_native_item(ref.native_item)) {
+            return op_err("extension item removal failed");
+        }
+        extension_bag_sync_projected_slot(ref.bag, ref.slot);
+        return op_ok();
     }
+    if (ref.bag == 5) return op_err("task bag excluded");
     const int result = fn_remove_item(ref.native_item);
     if (result) extension_bag_sync_projected_slot(ref.bag, ref.slot);
     return result ? op_ok() : op_err("item not found");

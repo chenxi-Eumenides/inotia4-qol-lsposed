@@ -8,6 +8,10 @@
 - 环境、构建和设备：`docs/guides/build-and-deploy.md`
 - 当前待办：`docs/development/planning/backlog.md`
 - 扩展背包范围和验收：`docs/development/features/extension-bag/control-plane.md`
+- 扩展背包 P7 阶段 0：`docs/development/features/extension-bag/stage-0-static-inventory-audit.md`
+- 扩展背包 P7 阶段 1：`docs/development/features/extension-bag/stage-1-physical-inventory-contract.md`
+- 扩展背包 P7 阶段 2：`docs/development/features/extension-bag/stage-2-static-support-matrix.md`
+- 扩展背包 P7 阶段 3：`docs/development/features/extension-bag/stage-3-bypass-audit.md`
 - 当前重构计划：`docs/development/planning/refactor-plan.md`
 - 历史方案仅供追溯：`docs/history/`
 

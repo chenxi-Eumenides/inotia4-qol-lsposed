@@ -1,5 +1,6 @@
 std::string data_op_use_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
+    if (bag == 5) return op_err("task bag excluded");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
     if (item_ref.kind == InventoryItemKind::kExtension) {
@@ -146,11 +147,16 @@ std::string data_op_dice_reject() {
 }
 std::string data_op_discard_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
+    if (bag == 5) return op_err("task bag excluded");
     if (fn_remove_item_direct == nullptr) return op_err("symbol not resolved");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
     if (item_ref.kind == InventoryItemKind::kExtension) {
-        return op_err("extension item discard not supported");
+        if (!extension_bag_remove_native_item(item_ref.native_item)) {
+            return op_err("extension item discard failed");
+        }
+        extension_bag_sync_projected_slot(bag, slot);
+        return op_ok();
     }
     fn_remove_item_direct(bag, slot);
     if (inventory_item_at(bag, slot) != nullptr) return op_err("discard failed");
@@ -159,18 +165,49 @@ std::string data_op_discard_item(int bag, int slot) {
 }
 std::string data_op_sell_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
-    if (fn_remove_item_direct == nullptr || fn_add_money == nullptr || fn_item_get_price == nullptr)
+    if (bag == 5) return op_err("task bag excluded");
+    if (fn_remove_item_direct == nullptr || fn_add_money == nullptr ||
+        fn_item_get_sell_price == nullptr || fn_item_is_no_sell == nullptr ||
+        fn_get_bit == nullptr)
         return op_err("symbol not resolved");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
     if (item_ref.kind == InventoryItemKind::kExtension) {
-        return op_err("extension item sell not supported");
+        if (item_ref.native_item == nullptr) return op_err("extension item unavailable");
+        if (fn_item_get_sell_price == nullptr || fn_add_money == nullptr ||
+            fn_minus_money == nullptr || fn_item_is_no_sell == nullptr ||
+            fn_get_bit == nullptr) {
+            return op_err("symbol not resolved");
+        }
+        const int count = fn_get_cumulate_count != nullptr
+            ? fn_get_cumulate_count(item_ref.native_item) : 1;
+        const uint16_t flags = *reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(item_ref.native_item) + I_TYPE);
+        const int category = fn_get_bit(flags, 15, 6);
+        if (fn_item_is_no_sell(category) != 0) return op_err("item cannot be sold");
+        const int64_t price = extension_bag_sell_price(item_ref.native_item, count);
+        if (price < 0) {
+            return op_err("invalid extension sell price");
+        }
+        if (!fn_add_money(price)) return op_err("sell money update failed");
+        if (!extension_bag_remove_native_item(item_ref.native_item)) {
+            fn_minus_money(price);
+            return op_err("extension item sell failed");
+        }
+        extension_bag_sync_projected_slot(bag, slot);
+        return "{\"ok\":true,\"price\":" + std::to_string(price) + "}";
     }
     void* item = item_ref.native_item;
-    // 合法出售（v0.4.20）：ITEM_GetPrice 返回原始价格，出售价 = 原价 / 5
-    // （改版币制：5 铜 = 1 银，出售价 = 真实价格 ÷ 5）
-    int64_t base_price = fn_item_get_price(item);
-    int64_t price = base_price / 5;
+    const uint16_t flags = *reinterpret_cast<uint16_t*>(
+        reinterpret_cast<uint8_t*>(item) + I_TYPE);
+    const int category = fn_get_bit(flags, 15, 6);
+    if (fn_item_is_no_sell(category) != 0) return op_err("item cannot be sold");
+    const int count = fn_get_cumulate_count != nullptr
+        ? fn_get_cumulate_count(item) : 1;
+    const int64_t price = extension_bag_sell_price(item, count);
+    if (price < 0) {
+        return op_err("invalid sell price");
+    }
     fn_remove_item_direct(bag, slot);
     if (inventory_item_at(bag, slot) != nullptr) return op_err("sell failed");
     extension_bag_sync_projected_slot(bag, slot);
@@ -179,6 +216,12 @@ std::string data_op_sell_item(int bag, int slot) {
 }
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
     if (!game_in_world()) return op_err("not in game");
+    if (bag == 5 || to_bag == 5) return op_err("task bag excluded");
+    if (extension_bag_is_logical_bag(bag) || extension_bag_is_logical_bag(to_bag)) {
+        if (count <= 0) return op_err("bad count");
+        if (to_slot < 0 || to_slot >= 16) return op_err("bad target");
+        return extension_bag_move_item(bag, slot, to_bag, to_slot);
+    }
     if (extension_bag_module_view_installed()) {
         return op_err("extension view open; movement disabled (P2)");
     }

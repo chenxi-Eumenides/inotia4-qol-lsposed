@@ -113,7 +113,7 @@ int inventory_quantity(int category) {
 }
 
 void* inventory_item_at(int bag, int slot) {
-    InventoryItemRef ref;
+    InventoryItemRef ref{};
     if (!inventory_item_ref_at(bag, slot, &ref)) return nullptr;
     return ref.native_item;
 }
@@ -133,6 +133,7 @@ bool find_inventory_item_ref(int category, InventoryItemRef* out) {
 
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
+    *out = {};
     if (extension_bag_is_logical_bag(bag)) {
         struct Ctx { int bag; int slot; InventoryItemRef* out; } ctx{bag, slot, out};
         extension_bag_for_each_logical_item([](int item_bag, int item_slot, int category, int count,
@@ -142,6 +143,9 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
             *p->out = {InventoryItemKind::kExtension, item_bag, item_slot, category, count, nullptr};
             return true;
         }, &ctx);
+        if (out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot) {
+            out->native_item = extension_bag_item_at(bag, slot);
+        }
         return out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot;
     }
     if (bag >= 5 || g_inven == nullptr || fn_get_bit == nullptr) {
@@ -181,7 +185,10 @@ void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
 
 void for_each_bag_slot(BagSlotFn fn, void* ctx) {
     if (fn == nullptr || g_inven == nullptr) return;
-    for (int b = 0; b < 5; ++b) {
+    // This is a read-only physical snapshot primitive: include task bag 5 to
+    // match the original query functions. Transaction callers use explicit
+    // ordinary-bag validation and must not reuse this range as a target domain.
+    for (int b = 0; b < 6; ++b) {
         uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + b * 0x80;
         for (int j = 0; j < 16; ++j) {
             void* item = *reinterpret_cast<void**>(bag_slots + j * 8);

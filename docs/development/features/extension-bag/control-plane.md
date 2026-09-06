@@ -4,18 +4,26 @@
 > `README.md` 负责项目总览，`docs/development/architecture.md` 负责代码结构与规范，`docs/development/planning/backlog.md` 负责全局待办，`docs/guides/build-and-deploy.md` 负责环境与设备，`module-save-store.md` 负责 sidecar 契约；本文引用这些文档，不复制其职责。
 > 本文中的 `.tmp/...` 路径是既有验收证据的历史引用；新日志和中间文件必须写入 `.tmp/<task-name>/`，长期证据应归档到 `docs/history/` 或 `archive/`。
 >
-> **文档版本**：v1.51 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-04 ｜ **最近审核**：2026-09-04
-> **当前阶段**：P0–P6 已完成（证据见 §5.2、§9 与 §13）；当前闸门转入 P7 全局库存来源与操作接入。P5 三方向真实拖动、同袋合并、跨袋不合并和取消，以及 P6 保存协调均已有证据；整体仍为 `NOT_ACCEPTED`，因为 P7–P8 尚未完成。
+> **文档版本**：v1.65 ｜ **状态**：CURRENT ｜ **最后修改**：2026-09-06 ｜ **最近审核**：2026-09-06
+> **当前阶段**：P0–P6 已完成（证据见 §5.2、§9 与 §13）；P7 阶段 0–3已形成独立冻结文档，阶段 4函数组 dispatcher/installer seam 已完成 Host 验证，LSPosed 安装运行时和阶段 5生产者验证仍未完成。整体仍为 `NOT_ACCEPTED`，因为 P7–P8 尚未完成。
 
 ## 0. 控制面恢复块
 
 - **唯一入口**：会话压缩、换代理或重新打开任务时，先读本节，再读“当前状态”和“当前闸门”，不得以聊天记录或旧日志替代事实。
 - **当前结论**：`NOT_ACCEPTED`。P0–P6 已按阶段证据完成，但 P7–P8 的全局库存接入、最终回归和发布验收尚未完成；源码、host 测试或单次 API 调用仍不能替代对应真机验收。
-- **下一允许动作**：进入 P7 全局库存来源与操作接入；已完成的 P5 三方向移动和 P6 保存协调不重复实现。
+- **下一允许动作**：按单函数顺序继续 P7 阶段 4；首个 `INVEN_FindItem` PoC 已完成，不重复 P5/P6 和 P7 阶段 0–3验收。
 - **已知非阻断问题**：扩展源背包拖到未装备袋并成功装备后，当前扩展投影视图仍会短暂闪现原版当前背包；装备状态、源槽清理和最终扩展视图正确，但 UI 闪烁尚未解决。已停止继续扩大本问题的 UI 改动，后续单独回归处理。
 - **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
 - **冲突裁决**：代码结构以 `docs/development/architecture.md` 为准，待办来源以 `docs/development/planning/backlog.md` 为准，设备与工具链以 `docs/guides/build-and-deploy.md` 为准，API 端点以 `docs/reference/api-reference.md` 为准，sidecar 契约以 `module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
+
+### 阶段 0–3 快速查找
+
+- 阶段 0：`E-2026-09-06-02`，静态函数/调用者、ABI、所有权和副作用矩阵。
+- 阶段 1：`E-2026-09-06-03`，物理袋 `0..5`、任务袋 `5`、普通目标 `0..4`、扩展逻辑袋 `6..10`。
+- 阶段 2：`E-2026-09-06-04`，Hook、原版优先、上层分发和暂缓决策。
+- 阶段 3：`E-2026-09-06-05` 至 `E-2026-09-06-07`，旁路裁决、失败路径修复和静态收口。
+- 详细矩阵：`inventory-integration-decision-plan.md` §3–§5；阶段 4不得重复这些前置分析。
 
 ## 1. 当前状态与阶段指针
 
@@ -29,12 +37,12 @@
 | 字段 | 当前值 |
 |---|---|
 | Overall | `NOT_ACCEPTED` |
-| Current phase | `P7` 全局库存来源与操作接入 |
+| Current phase | `P7` 阶段 4：最小 PoC |
 | Current gate | P5.4–P5.6 三方向路径、P5.7–P5.9 session 清理/失败隔离/Host/构建/真机证据已收口；P5 结论为 `ACCEPTED`。P6 保存协调已完成并通过真机验证；P7/P8 尚未完成 |
 | Blocking issue | P5/P6 已完成；扩展源装备后的短暂原版背包闪现已登记为非阻断 UI 回归。Overall 仍受 P7 全局库存接入、P8 最终回归与发布条件阻塞 |
-| Next allowed action | 盘点统一逻辑库存枚举、数量查询、使用/消耗/配方和入库路径；不重复 P5/P6 验收 |
+| Next allowed action | `INVEN_FindItem` 单函数 PoC 已完成；继续下一个单函数/严格同源函数组 PoC，不重复 P5/P6 验收 |
 | Owner | 当前执行代理；同一验收项一次只允许一个代码、构建或设备变量 |
-| Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05`；P4.3 审计循环/视图借用 `E-2026-08-31-06`/`E-2026-08-31-07`；P4.4 五态事务回归 `E-2026-08-31-08`；P4.5/P4.6 隔离与移交回归 `E-2026-09-01-01`；P5.0 基线 `E-2026-09-01-02`；P5.1 关闭闸门部署 `E-2026-09-01-03`；P5.1 观测样本 `E-2026-09-01-05`/`06`/`07`/`09`/`10`/`11`；P5.4 同逻辑袋空槽 `E-2026-09-02-01`；P5.4 跨扩展标签空槽 `E-2026-09-02-02`；P5.4 API 边界补充 `E-2026-09-02-03`；P5.4 三方向真实拖动与合并观察 `E-2026-09-02-04`；P5.4 扩展同袋合并用户确认 `E-2026-09-02-05`；P5.4 取消用户确认 `E-2026-09-02-06` |
+| Evidence | P0 `E-2026-08-28-01`；P1 `E-2026-08-28-03`（引用块待补）；P2 `E-2026-08-29-01`（引用块待补）；P3 标签稳定性 `E-2026-08-30-01`；P3 装备/解除 `E-2026-08-31-01`；P3 选中反馈 `E-2026-08-31-02`；P3 弹窗 6 `E-2026-08-31-03`；P4.2 最小闭环 `E-2026-08-31-04`；P4 任务袋拒绝 `E-2026-08-31-05`；P4.3 审计循环/视图借用 `E-2026-08-31-06`/`E-2026-08-31-07`；P4.4 五态事务回归 `E-2026-08-31-08`；P4.5/P4.6 隔离与移交回归 `E-2026-09-01-01`；P5.0 基线 `E-2026-09-01-02`；P5.1 关闭闸门部署 `E-2026-09-01-03`；P5.1 观测样本 `E-2026-09-01-05`/`06`/`07`/`09`/`10`/`11`；P5.4 同逻辑袋空槽 `E-2026-09-02-01`；P5.4 跨扩展标签空槽 `E-2026-09-02-02`；P5.4 API 边界补充 `E-2026-09-02-03`；P5.4 三方向真实拖动与合并观察 `E-2026-09-02-04`；P5.4 扩展同袋合并用户确认 `E-2026-09-02-05`；P5.4 取消用户确认 `E-2026-09-02-06`；P7 阶段 0静态审计完成 `E-2026-09-06-02`；P7 阶段 1静态契约完成 `E-2026-09-06-03`；P7 阶段 2支持矩阵完成 `E-2026-09-06-04`；P7 阶段 3旁路冲突审计 `E-2026-09-06-05`；P7 阶段 3失败路径与恢复校验 `E-2026-09-06-07`；P7 阶段 4函数组 dispatcher/installer seam `E-2026-09-06-09` |
 
 ## 2. 不变的实施基线
 
@@ -155,6 +163,128 @@
 | Result / User verdict | `通过/失败/阻断`；API 结论由执行代理记录，只有物理触摸结论必须由用户确认 |
 
 ### 5.2 已登记证据
+
+#### E-2026-09-06-01：P7 阶段 0 静态审计输入完整性与源码调用者盘点
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 0；检查库存函数清单、符号/VMA、ABI、源码直接调用者、已有 BL 证据和输入完整性；不宣布阶段完成 |
+| Source | 当前工作树；`stage-0-static-inventory-audit.md`；`game_symbols.h`；`symbol_registry.h`；`game_access.h`；`apk/decompiled/libgame-symbols.txt`；相关 native/feature 源码 |
+| Build identity | 未执行；本阶段静态审计不适用 |
+| Device | 未使用；阶段 0–4 禁止真机验证 |
+| Config | 未读取或修改运行时配置；不适用 |
+| Bag / Projection | 未执行运行时操作；不适用 |
+| Ownership / Persistence | 未进行运行时对象、payload、journal、sidecar 或保存验证；仅登记源码中的所有权边界 |
+| Before / Action / After | 既有材料包含符号表、登记 ABI 和部分源码调用点；本轮使用实际 `apk/decoded/lib/arm64-v8a/libgame.so` 及项目内 NDK `llvm-objdump` 17.0.2 生成反汇编，并按目标 VMA 初筛 BL caller；同时扫描 BLR/BR/B，未发现可解析到 P7 目标的间接调用；仍需逐点核对参数、返回值、线程和副作用 |
+| Logs | `stage-0-static-inventory-audit.md`；`.tmp/p7-implementation/libgame-arm64.objdump.txt`（SHA-256 `21e664516804ad371ff5b9e60627d4c955cec855a33599df486f3965dee1a4f4`）；`.tmp/p7-implementation/stage-0-bl-callers.txt`（SHA-256 `10a28ae45ca7e4b9d05c0fdf38526010f1e8923015e563b0114fe76f42b823c6`）；`.tmp/p7-implementation/stage-0-bl-context.txt`（SHA-256 `70ae484c3d4894ed4061ee95ce9bc78a3aaf6b7a1e5a74665779b670dc9448dc`）；输入 ELF SHA-256 `5f1388ec63fe3a44acd4755cb53296b88d2918a9cfebbe21e4b2a0e0415dd08e`；未生成设备日志 |
+| Result / User verdict | `阻断`：源码调用者、符号/ABI 基线和 BL 初筛部分完成，语义审计未闭合；不能据此宣称 Stage 0 或 P7 完成 |
+
+#### E-2026-09-06-02：P7 阶段 0 静态审计闭合与阶段 1放行
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 0；完成生产者调用链、ABI、对象所有权/回滚、锁/UI/cache/持久化副作用和间接控制流静态矩阵；不进行真机验证 |
+| Source | 当前工作树；`stage-0-static-inventory-audit.md`；`inventory-integration-decision-plan.md`；`game_symbols.h`；相关源码和固定 ELF 反汇编 |
+| Build identity | 未作为阶段 0通过条件；本轮代码修正后的 Debug 构建已独立成功 |
+| Device | 未使用；阶段 0–4禁止真机验证 |
+| Before / Action / After | 将静态可证明项逐项冻结；把 14 项无法静态证明的运行时事实明确归入阶段 5，把保存崩溃/进程中断/sidecar 一致性归入 P6；统一“未知调用者不得宣称全局覆盖”与“已登记延期项不阻断阶段 1物理契约定义”的门禁规则 |
+| Logs | `.tmp/p7-implementation/stage-0-bl-callers.txt`；`.tmp/p7-implementation/stage-0-bl-context.txt`；`.tmp/p7-implementation/libgame-arm64.objdump.txt`；`stage-0-static-inventory-audit.md` §6–§7 |
+| Result / User verdict | `STATIC-COMPLETE`；阶段指针推进至 P7 阶段 1；P7 Overall 仍为 `NOT_ACCEPTED`，后续必须完成原版物理契约和阶段 5真机验收 |
+
+#### E-2026-09-06-03：P7 阶段 1原版物理库存契约静态闭合
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 1；冻结物理数组 `0..5`、普通目标 `0..4`、任务袋 `5`、扩展逻辑袋 `6..10`，登记核心原版库存函数 ABI/扫描域/所有权边界及七类生产者静态目标域；不进行真机验证，不批准 P7 Overall |
+| Source | 当前工作树；`stage-1-physical-inventory-contract.md`；`stage-0-static-inventory-audit.md`；`inventory-integration-decision-plan.md`；`game_symbols.h`；固定 ELF 反汇编 |
+| Build identity | 未改变版本号；Host `host_tests` 构建并通过；Debug APK `output/inotia4-qol-lsposed-debug-2609061351-333bce5f65f0.apk`，SHA-256 `333bce5f65f08ac3f39e1bc34d28f372ffa3174505c281c4d270de88df9a62c1` |
+| Device | 未使用；阶段 1禁止真机验证 |
+| Config | 未读取或修改运行时配置 |
+| Bag / Projection | 静态确认物理快照覆盖 `0..5`；普通交易原语保持 `0..4`；任务袋 `5` 不作为扩展目标；扩展逻辑袋为 `6..10` |
+| Ownership / Persistence | 原版空槽写入、堆叠合并释放、物理删除和类别/数量回滚边界已登记；`SaveItem` context、保存辅助失败输出、运行时回滚和持久化未知项明确延期至阶段 5/P6 |
+| Before / Action / After | 补齐物理查询原语对 `0..5` 的快照遍历；修复扩展逻辑查询未命中时输出结构未初始化问题；同步阶段 1契约、生产者矩阵和后续阶段边界；未扩大 Hook、未删除旁路 |
+| Logs | `.tmp/p7-implementation/libgame-arm64.objdump.txt`；`.tmp/p7-implementation/inventory-remove-save-functions.txt`；`.tmp/p7-implementation/inventory-consume-saveempty.txt`；`.tmp/p7-implementation/stage-0-bl-context.txt`；本轮 Host 构建/测试 `.tmp/p7-task-bag-audit/build`（`1/1` passed）；Debug 构建由 `scripts/build-debug.sh` 完成；符号检查 `uv run scripts/maintenance/check_symbols.py` 全部一致；校验命令 `git diff --check` |
+| Result / User verdict | `STATIC-COMPLETE`；阶段指针推进至 P7 阶段 2；P7 Overall 保持 `NOT_ACCEPTED`。阶段 5真机生产者矩阵、P6持久化异常和 P8最终回归仍未通过 |
+
+#### E-2026-09-06-04：P7 阶段 2原版/扩展静态支持矩阵闭合
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 2；为查询、容量、入库、删除/消费、移动/拆堆、使用/装备/镶嵌、生产者和保存入口冻结 `必须 Hook`、`优先原版调用`、`上层分发`、`暂缓` 决策；不进行真机验证，不批准 P7 Overall |
+| Source | `inventory-integration-decision-plan.md` 阶段 2及 §4.1–§4.6；`stage-1-physical-inventory-contract.md`；`stage-0-static-inventory-audit.md`；`native_inventory_hook.cpp`；固定 ELF 反汇编 |
+| Build identity | 未改变版本号；阶段 2为静态决策，不新增 APK交付物；阶段 1已登记的 Host/符号/Debug证据继续有效 |
+| Device | 未使用；阶段 2禁止真机验证，生产者运行时矩阵转阶段 5 |
+| Bag / Projection | 查询/快照可读取物理袋 `0..5`；普通扩展目标固定 `0..4`；任务袋 `5` 不参与扩展操作、投影、恢复、回滚或自动投递；扩展逻辑袋固定 `6..10` |
+| Ownership / Persistence | 扩展对象只走扩展事务和受控物化；`SaveItemDirect`、`RemoveItemDirect`、`ITEMPOOL_Free` 不作为扩展入口；P6保存协调和 sidecar 不改；保存 context、生产者失败回滚、宝石删除原子性和运行时线程留阶段 5/P6 |
+| Before / Action / After | 固化原版优先、扩展上层兜底；`GetEmptyBagSlot` 不新增 Hook；`SaveItem`/生产者不做全局入口 Hook；消费/删除保留现有 LSPosed Native Hook分流；不删除旁路、不扩大 Hook范围 |
+| Logs | `inventory-integration-decision-plan.md` 阶段 2与 §4矩阵；`stage-0-static-inventory-audit.md`；`stage-1-physical-inventory-contract.md`；`.tmp/p7-implementation/libgame-arm64.objdump.txt`；`.tmp/p7-implementation/stage-0-bl-callers.txt`；本阶段未进行设备或真机日志采集 |
+| Result / User verdict | `STATIC-COMPLETE`；阶段指针推进至 P7 阶段 3旁路冲突分析；P7 Overall保持 `NOT_ACCEPTED`。阶段 5生产者真机验证、阶段 6旁路退役和 P8最终回归仍未通过 |
+
+#### E-2026-09-06-05：P7 阶段 3旁路冲突审计与确定性边界修复
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 3；审计 Native Hook、上层 API 分发、扩展三方向事务、任务袋门禁、对象释放/保存边界；修复确定性的扩展投影宝石 Direct remove 与直接 equip 旁路；不进行真机验证，不批准 P7 Overall |
+| Source | `native_inventory_hook.cpp`；`game_inventory_equipment.inc`；`extension_bag_equip.inc`；`extension_bag_api_impl.inc`；`extension_bag_transaction.inc`；`module_save.cpp`；两个 explore 审计结果与 Oracle 阶段 2矩阵复核 |
+| Build identity | Host `host_tests` 构建并通过；Debug APK `output/inotia4-qol-lsposed-debug-2609061441-ade3fb74a0fe.apk`，SHA-256 `ade3fb74a0fe2b6b4856d0e1598d2e58100ddcfb5aba3a1c878423f4bd217b06`；不更新版本号 |
+| Device | 未使用；阶段 3静态冲突分析禁止真机验证 |
+| Bag / Projection | `data_op_jewel` 发现物理投影槽中的扩展对象时改走逻辑袋 `6..10` 适配，不再调用 `INVEN_RemoveItemDirect`；`data_op_equip` 发现扩展投影对象时改走 `extension_bag_equip_projected_item`，无法满足投影上下文则拒绝；任务袋 `5` 仍不进入扩展事务 |
+| Ownership / Persistence | 保留扩展事务、消费/删除 Hook、UI 投影和 P6 sidecar 协调；pending ext→orig 恢复已改为 tracked load → SaveItemOnEmpty → handover/release 对称链并通过构建验证；合成产物入库失败已补原版对象池释放，材料删除前后校验和扣款失败检测已补，但部分提交回滚仍未闭合；生产者/保存 caller 覆盖和宝石失败回滚转后续阶段 |
+| Before / Action / After | 修复两个确定性原版旁路；不新增宽泛 Hook，不删除现有旁路，不改变 P4/P6 事务与保存时机 |
+| Logs | `.tmp/p7-implementation/libgame-arm64.objdump.txt`；`inventory-integration-decision-plan.md` 阶段 3；两个 explore 审计任务输出；`git diff --check`；Host CTest `1/1`；`uv run scripts/maintenance/check_symbols.py`；`scripts/build-debug.sh` |
+| Result / User verdict | `BLOCKED`；确定性旁路、pending ownership 链和合成产物失败释放已完成构建验证，阶段 3仍受生产者/保存调用者覆盖及生产事务回滚阻断；P7 Overall保持 `NOT_ACCEPTED` |
+
+#### E-2026-09-06-06：P7 阶段 3确定性失败路径修复
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 3；修复 API 创建物品失败泄漏和商店购买扣款/入库顺序缺陷；不进行真机验证，不批准 P7 Overall |
+| Source | `game_inventory_basic.inc`；`game_shop.cpp`；Oracle 最小修复复核；商店/API 失败路径静态审计 |
+| Build identity | Host `host_tests`：775 passed；Debug APK `output/inotia4-qol-lsposed-debug-2609061516-ef03a0335b20.apk`，SHA-256 `ef03a0335b2042a6a70cdbe1c617f8de36d5b10b6297f6ee62282f44974f5f34`；不更新版本号 |
+| Device | 未使用；阶段 3静态冲突分析禁止真机验证 |
+| Bag / Projection | 商店仍只走原版物理袋；未增加扩展袋或任务袋路径，任务袋 `5` 和扩展逻辑袋 `6..10` 边界不变 |
+| Ownership / Persistence | `CreateItem` 在不可堆叠、满包和保存失败前由模块调用 `ITEMPOOL_Free`；商店货架对象视为 borrowed，不手动释放；商店先扣款再保存，保存失败仅调用 `AddMoney` 退款，退款失败显式报错；合成部分提交回滚和 P6 保存边界仍未闭合 |
+| Before / Action / After | 消除两个确定性失败路径；不新增 Hook、不删除旁路、不改变 P4/P6 保存协调 |
+| Logs | `git diff --check`；Host `ctest --test-dir build --output-on-failure`；`uv run scripts/maintenance/check_symbols.py`；`scripts/build-debug.sh`；Oracle 最小修复复核 |
+| Result / User verdict | `BLOCKED`；确定性泄漏/扣款路径已修复并通过 Host/符号/Debug 构建验证，阶段 3仍受生产者/保存 caller 全覆盖及合成部分提交回滚阻断；P7 Overall保持 `NOT_ACCEPTED` |
+
+#### E-2026-09-06-07：P7 阶段 3静态收口与恢复校验
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 3；完成生产者/保存 caller、旁路、所有权和 LSPosed Native Hook 静态矩阵；补齐 ext→orig 恢复目标 payload/源槽复核；不进行真机验证，不批准 P7 Overall |
+| Source | `extension_bag_runtime.inc`；`native_inventory_hook.h`；`native_inventory_hook.cpp`；`inventory-integration-decision-plan.md`；三路 explore、librarian 与 Oracle 审计结果 |
+| Build identity | Host `host_tests`：`1/1`、`775 passed`；Debug APK `output/inotia4-qol-lsposed-debug-2609061536-b5984acd6892.apk`，SHA-256 `b5984acd6892e1d0618d2c8c7109fceb6f8e089172e14e0cbe1bc5c6a6e924dd`；不更新版本号 |
+| Device | 未使用；阶段 3静态冲突分析禁止真机验证 |
+| Bag / Projection | 普通原版目标保持 `0..4`；任务袋 `5` 仅原版只读；扩展逻辑袋保持 `6..10`；恢复删除源槽后必须确认槽为空，物化目标后必须确认完整 payload 已落入指定原版袋 |
+| Ownership / Persistence | `native_init` 显式默认可见且保留；Hook 仍为 LSPosed Modern Native API、original-first、失败逆序 unhook；P6 sidecar/save 时序不改；合成部分提交无安全精确逆操作，转阶段 5/P6，不添加猜测性回滚 |
+| Before / Action / After | 静态闭合所有已知直接 caller、危险释放边界和旁路裁决；不新增宽泛 SaveItem Hook、不删除现有旁路、不改变 P4/P6 语义；阶段指针推进至 P7 阶段 4 |
+| Logs | `git diff --check`；Host CTest；`uv run scripts/maintenance/check_symbols.py`；`scripts/build-debug.sh`；LSPosed 官方 Native Hook 文档核对 |
+| Result / User verdict | `STATIC-COMPLETE`；阶段 3静态审计闭合，生产者运行时矩阵转阶段 5，保存/sidecar 异常转 P6；P7 Overall保持 `NOT_ACCEPTED` |
+
+#### E-2026-09-06-08：P7 阶段 4首个单函数 `INVEN_FindItem` PoC
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 4；仅验证 `INVEN_FindItem` 的 original-first、扩展 fallback 和递归保护；不验证其他 Hook，不进行真机验证 |
+| Source | `inventory_find_item_poc.h`；`inventory_find_item_poc.cpp`；`native_inventory_hook.cpp`；`tests/test_host.cpp`；LSPosed 官方 Native Hook API 文档 |
+| Build identity | Host CTest：`1/1`、`775 passed`；Debug APK `output/inotia4-qol-lsposed-debug-2609061552-db6a4eb7811b.apk`，SHA-256 `db6a4eb7811bbbe4f5691fcb154f4de4e3c49103cc23fd8fff1bc3f9d3141363`；不更新版本号 |
+| Device | 未使用；阶段 4前期 PoC 禁止真机验证 |
+| Hook / ABI | `InventoryFindItemCallback` 与生产 `FindItemFn` 均为 `void* (*)(int32_t)`；只通过 LSPosed backup 指针调用原版，原版返回空时才调用扩展 fallback；递归路径禁用 fallback，避免扩展查询重入 |
+| Ownership / Persistence | 本函数只返回查找结果，不创建、释放或保存对象；不改变 P6 sidecar/save 时序，不触碰任务袋 `5` 和扩展逻辑袋 `6..10` 的物理边界 |
+| Tests / Logs | Host 覆盖原版命中、扩展 fallback、双 miss、递归 backup、guard 清理和已有 `recursive_guard=true` 路径；`git diff --check`；`scripts/build-debug.sh` |
+| Result / User verdict | `POC-COMPLETE`；首个单函数 PoC 通过静态 ABI 核对、Host 回归和 Debug 构建；阶段 4整体仍未完成，下一步继续下一个函数，P7 Overall保持 `NOT_ACCEPTED` |
+
+#### E-2026-09-06-09：P7 阶段 4函数组 dispatcher 与安装事务 seam
+
+| 字段 | 内容 |
+|---|---|
+| Gate / Scope | P7 阶段 4；为查询、消费/删除、装备/宝石和安装事务提供共享可测试实现；不进行真机验证，不宣称生产者覆盖 |
+| Source | `inventory_hook_stage4.h/.cpp`；`native_inventory_hook.cpp`；`tests/test_inventory_hook_stage4.cpp`；阶段 0–3四篇冻结文档 |
+| Build identity | Host CTest：`2/2`；`host_tests`既有回归通过，`stage4_hook_tests`覆盖 29项；Debug APK `output/inotia4-qol-lsposed-debug-2609061623-f50fd1671428.apk`，SHA-256 `f50fd1671428e9730890cca831e0ae4a9154cbfce674e1a65a6fd9f50b1f97d4`；不更新版本号 |
+| Device | 未使用；阶段 4禁止真机 |
+| Coverage | 覆盖原版优先、扩展 fallback、任务袋参数、数量合计、对象识别/消费/删除、装备/宝石失败路径、递归 guard 和安装事务逆序回滚 |
+| Result / User verdict | `IMPLEMENTED-HOST-VERIFIED`；函数组共享实现和 Host 回归通过，生产环境 LSPosed 安装与阶段 5生产者运行时验证仍未完成，P7 Overall保持 `NOT_ACCEPTED` |
 
 #### E-2026-08-26-01：P0 本地构建与唯一真机身份链
 
@@ -847,11 +977,11 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 
 **内容**
 
-- P7 的目标是**语义上的全局支持**，不是把原版物理数组伪装成 11 个物理袋，也不是把所有原版函数都替换成同一个 hook。原版 `0..4` 袋与已装备扩展逻辑袋 `6..10` 进入同一逻辑库存来源；任务袋 `5` 永不参与。
+- P7 的目标是**语义上的全局支持**，不是把原版物理数组伪装成 11 个物理袋，也不是把所有原版函数都替换成同一个 hook。原版 `0..4` 袋与已装备扩展逻辑袋 `6..10` 进入同一逻辑库存来源；任务袋 `5` 永不参与扩展操作、入库、投影、恢复、回滚和自动投递，但原版只读查询/完整物理快照可按函数契约读取它。
 - 扩展物品始终由 payload 持有；需要原版 native 对象的路径必须经过“受控物化 → 同步调用原版能力 → 序列化回写 payload → 释放或继续借用”的完整生命周期。不得把 sidecar 描述直接强转为原版指针，也不得让原版 `ITEMPOOL_Free` 释放模块仍持有的对象。
 - 先完成查询统一，再完成操作统一，最后审计所有生产者和 UI 旁路。任何只修改 `INVEN_FindItem`、`INVEN_ConsumeItem`、`INVEN_RemoveItem` 的方案都不能直接宣称 P7 完成。
 - 盘点并接入快捷键、配方查询、类别/数量检查、消耗、使用、丢弃、出售、装备、附魔、镶嵌和移动；优先修改共享逻辑入口，共享入口不足时按业务语义分别适配。
-- 盘点所有物品进入背包的路径：掉落、奖励、开箱、拆包、合成、商店购买、网络商店、脱装备和物品使用结果。
+- 盘点所有纳入本轮扩展接入的物品进入背包路径：掉落、奖励、开箱、拆包、合成、商店购买、脱装备和物品使用结果；网络商店已移出 P7 当前范围，保留其原版运行与 P6 保存记录。
 - 统一入库顺序：原版背包 `0..4` 优先；原版满后进入扩展逻辑袋；全部满时复用原版“背包已满”语义。不得将扩展物品投递到原版索引 `5`。
 - 盘点商店、合成等拥有独立物品控件树的面板，增加扩展标签或逻辑物品显示；显示接入不得改变原版保存时机。
 - 明确每条扩展物品路径是否支持使用、装备、出售、强化、镶嵌、拆分、合成和开箱；不支持的路径必须在操作前阻断并返回明确错误，不得调用原版函数试错。
@@ -869,7 +999,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 | 入库/创建 | `INVEN_FindSaveSlot`、`INVEN_SaveItem`、`INVEN_SaveItemDirect`、`INVEN_SaveItemOnEmpty`、`INVEN_SaveItemData`、`INVEN_CheckSaveInNotEmptySlot`、`ITEMSYSTEM_CreateItem`、`ITEMSYSTEM_MakeItem`、`ITEMSYSTEM_ProcessUnpack` | 以原版物理袋和 native 对象为前提 | “原版优先、扩展兜底”的生产者适配；不能返回虚假物理槽让调用方继续写数组 |
 | 物品语义 | `ITEM_GetCumulateCount`、`ITEM_GetPrice`、`ITEM_GetSellPrice`、`ITEM_GetBuyPrice`、`ITEM_GetAbilityLevel`、`ITEM_GetRarity`、`ITEM_GetDamage`、`ITEM_GetDefense`、`ITEM_GetMagicDamage`、`ITEM_GetName`、`ITEMDATABASE_IsUse`、`ITEMSYSTEM_Is*`、`ITEMSYSTEM_CanPutJewel` | 读取 native 对象或静态表 | 对受控物化对象可复用；纯类别判定优先改为 category/静态表逻辑，避免不必要物化 |
 | 使用/装备 | `CHAR_UseItemEx`、`CHAR_ProcessShortcut`、`ITEMSYSTEM_OpenItemBox`、`ITEMSYSTEM_ReleaseSealed`、`CHAR_CanEquipItem`、`CHAR_FindEquipSlot`、`CHAR_EquipItem`、`CHAR_EquipItemFromInven*`、`CHAR_UnequipItemToInven*`、`CHAR_UnequipItemToInvenSlot` | 部分路径内部查找、消耗、入库或释放 native 物品 | 以操作 dispatcher 为主；快捷键等直接调用点单独验证，不以 API 使用成功替代游戏内调用链 |
-| 合成/商店/掉落 | `MIXSYSTEM_CheckMixture`、`MIXSYSTEM_GetStuff*`、`MIXSYSTEM_UseStuff`、`MIXSYSTEM_MakeItem`、`UIStore_*`、`DEALSYSTEM_*`、`NetworkStore_AddItem`、`MAPITEMSYSTEM_*`、`CHAR_PickItemAll` | 各自持有材料槽、商品槽、掉落槽或入库逻辑 | 分别接入逻辑库存；合成材料和商店入库不能只依赖 `INVEN_GetItemCount` |
+| 合成/商店/掉落 | `MIXSYSTEM_CheckMixture`、`MIXSYSTEM_GetStuff*`、`MIXSYSTEM_UseStuff`、`MIXSYSTEM_MakeItem`、`UIStore_*`、`DEALSYSTEM_*`、`MAPITEMSYSTEM_*`、`CHAR_PickItemAll` | 各自持有材料槽、商品槽、掉落槽或入库逻辑；网络商店不属于当前 P7 接入范围 | 分别接入逻辑库存；合成材料和商店入库不能只依赖 `INVEN_GetItemCount`；保留网络商店原版代码和 P6 保存记录 |
 | 存档/对象 | `SAVE_SaveInventory`、`SAVE_LoadInventory`、`SAVE_SaveItem`、`SAVE_LoadItem`、`ITEMPOOL_Allocate`、`ITEMPOOL_Free` | 原版物理背包序列化和 native 对象池生命周期 | 原版存档保持原语义；扩展状态由 P6 participant/sidecar 负责，物化对象严格按所有权账本释放 |
 | UI/控件 | `UIEquip_*`、`ControlItem_SetItem`、`ITEM_Draw*`、`UIStore_*` 的库存控件入口、`UIMix_*` | 通过控件树、回调表或直接调用访问物品 | 已有正式投影继续复用；商店/合成等独立控件树分别接入，不把 debug 端点当正式操作面 |
 
@@ -884,23 +1014,23 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 | UI 控件 ExecuteProc、ControlProc、回调表 | `PtrHook` | 首选拦截方式；只适用于稳定的间接函数指针槽，wrapper 签名必须完全一致。当前拖拽/按钮路径可沿用此机制 |
 | 固定位域、常量、稳定条件分支 | 可逆指令 `patch` | 仅用于少量确定指令；必须保留原指令校验、页权限、指令缓存刷新和回滚。不得在 patch 中塞入复杂库存业务 |
 | `CHAR_ProcessShortcut` 等直接 `BL INVEN_FindItem` 调用 | 最小调用点指令 patch + 已验证 veneer/dispatcher | `PtrHook` 无效，因为这是直接 `BL`。仅在确认调用点 ABI、分支范围、寄存器/返回值和恢复路径后使用；优先 patch 单个高价值调用点，不改整个函数入口 |
-| `INVEN_FindItem`/`INVEN_ConsumeItem`/`INVEN_RemoveItem` 全局入口 | 暂不使用通用 inline hook | 这些函数涉及 native 指针、递归/尾调用、对象释放和同步，当前 inline hook 历史上出现 `SIGBUS/SIGILL`；全局替换会放大所有系统风险 |
-| LSPosed Native Hook API | 仅作独立 PoC，不进入当前 P7 正式实现 | 本质仍是 inline hook；当前 APK 未配置 `assets/native_init`，且不能消除 ABI、并发、递归、卸载和生命周期风险 |
+| `INVEN_FindItem`/`INVEN_ConsumeItem`/`INVEN_RemoveItem` 全局入口 | 使用 LSPosed Native Hook API 接入 | 仅允许由 LSPosed `native_init` 提供的 hook/unhook 函数指针完成入口替换（官方字段 `hookFunc`/`unhookFunc`，项目适配字段 `hook_func`/`unhook_func`）；扩展对象分流到逻辑适配，原版对象调用 backup；不使用 Dobby、ShadowHook 或手写 trampoline |
+| LSPosed Native Hook API | P7 允许使用的唯一 Native Hook 机制 | 由 `native_init.list` 注册并在 `libgame.so` 加载后安装；仍必须验证 ABI、并发、递归、生命周期、安装事务和回滚，不能把 Hook 安装成功等同于业务验收 |
 
 **P7 Hook 裁决：**
 
-1. 不为“统一”而 Hook 原版函数；查询和 API 操作先在模块逻辑层统一。
+1. 不为“统一”而扩大 Hook 范围；能通过原版函数指针和逻辑服务完成的路径不新增入口 Hook。
 2. `PtrHook` 只用于已有稳定的 UI 间接回调，不用于 `INVEN_*` 直接函数。
 3. 指令 patch 只允许做固定分支/调用点转发；复杂的物化、payload 回写、事务和所有权逻辑必须留在 C++ dispatcher。
 4. 如果某个直接 `BL` 调用点确实无法通过上层入口覆盖，先建立单点 PoC，验证目标地址、完整 ABI、返回值、线程、重复安装、回滚和崩溃日志；PoC 通过后才能接入正式功能。
-5. `INVEN_FindItem`、`INVEN_HaveItem`、`INVEN_GetItemCount`、`INVEN_FindItemSlot` 若进入正式 patch 范围，必须先将 VMA、符号名、函数签名登记到 `game_symbols.h`/`symbol_registry.h`，禁止在域文件写裸地址。
+5. `INVEN_FindItem`、`INVEN_HaveItem`、`INVEN_GetItemCount`、`INVEN_FindItemSlot` 若进入正式 Hook/patch 范围，必须先将 VMA、符号名、函数签名登记到 `game_symbols.h`/`symbol_registry.h`，禁止在域文件写裸地址；Native Hook 只能通过 LSPosed API 安装。
 
 #### P7.3 实施顺序
 
 1. **逻辑查询层**：统一 `iterate / find / have / quantity / item_at`；扩展返回逻辑引用，原版返回物理引用；补齐 `find_inventory_item`、`inventory_item_at` 和增量快照统计。
 2. **操作 dispatcher**：实现 `consume / remove / move / add / sell / equip / enchant / jewel`；扩展操作必须更新 payload、dirty 状态和对象所有权，原版操作保持现有函数调用。
 3. **直接调用点审计**：逐一核对 `CHAR_ProcessShortcut`、`CHAR_UseItemEx`、配方材料检查和其他类别查询；能改上层就不做 patch，必须 patch 时只做单点调用点方案。
-4. **生产者接入**：掉落、奖励、开箱、拆包、合成、商店、网络商店、脱装备和物品使用结果，统一采用原版优先、扩展兜底。
+4. **生产者接入**：掉落、奖励、开箱、拆包、合成、商店、脱装备和物品使用结果，统一采用原版优先、扩展兜底；网络商店已移出当前 P7 接入与验收范围。
 5. **面板接入**：商店、合成等独立物品控件树增加扩展逻辑显示和标签；不改变保存协调器和 sidecar 提交时机。
 6. **故障与真机验收**：验证原版有空槽、原版满/扩展有空槽、全部满、不可用类别、物化失败、回写失败、对象释放和任务袋 `5` 隔离。
 
@@ -1013,7 +1143,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 - **日期**：2026-08-27
 - **决策**：存档面板进入是否写入当前进度不得由 hook 隐式决定；必须明确选择“进入即保存”或保持原版“打开面板只读旧档”，并将选择、影响和验收证据登记在控制面。
 - **理由**：隐式改变原版存档面板语义会导致用户打开旧档面板时当前进度被意外写入。
-- **状态**：待产品/实现决策；决策前 P6 不得通过。
+- **状态**：产品语义待单独决策；不改变 P6 已完成的保存协调范围，决策前不得新增存档面板 Hook。
 
 ## 12. 风险登记
 
@@ -1024,7 +1154,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 | 跨存档污染 | 切档、重启后读取错误槽位 | 记录槽位、generation、CRC，回退 P6 | 开放 |
 | 固定容量误作正式能力 | 固定数组未替换、装备状态未驱动容量 | 不得进入 P8；验证装备派生容量、未装备限制和全部 UI/移动路径 | 开放 |
 | 任务袋污染 | 扩展路径读取或写入原版索引 `5` | 立即停止相关验收，记录源/目标和日志，回退对应阶段 | 开放 |
-| 保存调用未收口 | 任一显式或自动保存绕过协调器 | 立即将 P6 回退，登记调用点、原版与 sidecar generation 差异并补齐统一入口 | 开放 |
+| 保存调用未收口 | 后续发现任一显式或自动保存绕过协调器 | 立即将 P6 回退，登记调用点、原版与 sidecar generation 差异并补齐统一入口 | 监控风险；当前已按 E-2026-09-04 保存审计收口 |
 | WAL 崩溃窗口 | prepare 未落盘、提交间中断或 journal 被误清理 | 注入故障并验证幂等重放/回滚；失败时不得进入 P8 | 开放 |
 | 装备背包移除后超容 | 解除、替换或出售装备物品导致有效容量下降 | 按已登记规则阻断或处理溢出，保存前后不得丢物；规则未定前禁止容量验收 | 开放 |
 | 扩展 API 验收缺口 | API 未登记或只能调用 debug 注入端点 | 相关阶段标记“验收路径未就绪”，不得用伪 API 结论通过 | 开放 |
@@ -1035,6 +1165,19 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 
 | 版本 | 日期 | 变更摘要 | 责任方 |
 |---|---|---|---|
+| v1.65 | 2026-09-06 | 建立 P7 阶段 2/3独立冻结文档；阶段 4抽取查询、消费/删除、装备/宝石和安装事务 seam，新增 `stage4_hook_tests`，Host `2/2`、Debug 构建和 `git diff --check` 通过；不进行真机、不宣称生产者覆盖，P7 Overall仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.64 | 2026-09-06 | P7 阶段 4完成首个 `INVEN_FindItem` 单函数 PoC：抽取 original-first/fallback/递归保护 dispatcher，纳入 Host 与 Android CMake；Host `1/1`、`775 passed`、Debug 构建和 `git diff --check` 通过；不进行真机、不宣称其他 Hook 完成，P7 Overall仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.63 | 2026-09-06 | P7 阶段 3静态收口：补齐 ext→orig 恢复后的源槽清空与目标 payload 复核；为 LSPosed `native_init` 增加显式 default visibility/used 导出属性；完成 producer/save caller、旁路、所有权矩阵，阶段指针推进至 P7 阶段 4。合成部分提交无安全精确逆操作，转阶段 5/P6；Host `1/1`、`775 passed`、符号检查、Debug 构建和 `git diff --check` 通过，P7 Overall仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.61 | 2026-09-06 | 阶段 3继续修复合成旁路：记录材料源对象，删除前后校验物理槽身份，检查最终扣款返回值；不伪造完整原子回滚，生产者 caller、保存覆盖和部分提交一致性继续阻断阶段 3/5。Host `1/1`、符号检查、Debug 构建和 `git diff --check` 通过，P7 Overall仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.60 | 2026-09-06 | 完成 P7 阶段 3旁路冲突审计的确定性修复：物理投影宝石改走扩展逻辑适配、物理投影装备改走受控扩展装备适配；pending ext→orig 恢复改用 tracked load 并补齐失败 release/成功 handover；合成产物入库失败补原版对象池释放；补充生产者调用矩阵与阶段 3阻断项。Host `1/1`、符号检查、Debug 构建和 `git diff --check` 通过，P7 Overall仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.59 | 2026-09-06 | 完成 P7 阶段 2静态支持矩阵：查询原版优先、`GetEmptyBagSlot` 不 Hook、保存入口暂缓、消费/删除分流保留、生产者上层分发；任务袋 `5` 仅允许原版只读契约，普通目标固定 `0..4`，扩展逻辑袋固定 `6..10`；阶段指针推进至阶段 3，P7 Overall仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.58 | 2026-09-06 | 完成 P7 阶段 1静态契约并推进至阶段 2：确认原版任务袋 `5` 的特殊语义（查询类可扫描 `0..5`，普通入库目标为 `0..4`，`GetEmptyBagSlot` 固定排除 `5`）；物理查询遍历覆盖 `0..5`，普通 use/discard/sell/move 入口显式拒绝任务袋，并修复扩展查询未命中时的输出初始化风险；Host、符号检查、Debug 构建和 diff 校验通过，P7 Overall 仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.57 | 2026-09-06 | 阶段 0静态审计闭合：冻结生产者、ABI、对象所有权/回滚、副作用和间接控制流矩阵；14 项运行时未知分别归入阶段 5或 P6；控制面推进至 P7 阶段 1原版物理库存契约，Overall 仍为 `NOT_ACCEPTED`。 | 当前执行代理 |
+| v1.56 | 2026-09-06 | 根据网络商店功能已解除阻断的决定，将 `NetworkStore_AddItem` 从当前 P7 扩展背包生产者接入和验收范围移除；保留其原版符号、共享堆叠布局 patch、P6 保存调用点及阶段 0 历史审计证据，不删除运行时代码。 | 当前执行代理 |
+| v1.55 | 2026-09-06 | 继续阶段 0 函数本体审计：补充 `INVEN_SaveItem` 的入库与副作用、`ITEMSYSTEM_Divide` 的新 UID 拆堆、`ITEMSYSTEM_ProcessUnpack` 的产物失败释放与部分成功边界、`MIXSYSTEM_MakeItem` 原版链与模块旁路差异，以及 `NetworkStore_AddItem` 的保存失败回滚；阶段 0 仍未通过，未进入后续阶段。 | 当前执行代理 |
+| v1.54 | 2026-09-06 | 补充 `E-2026-09-06-01` 的阶段 0 语义审计：确认未发现可解析到 P7 目标的 BLR/尾跳，修正 `SaveItemOnEmpty` 原版 caller、`NetworkStore_AddItem` target/callsite 和 17 个目标函数统计；新增返回值、所有权、线程、刷新与持久化未闭合矩阵，阶段 0 继续阻断。 | 当前执行代理 |
+| v1.53 | 2026-09-06 | 登记 `E-2026-09-06-01`：新增 P7 阶段 0 静态审计记录，冻结当前符号/ABI、源码调用者和目标 VMA 的 BL 初筛；确认调用点参数、返回值、线程、所有权和副作用语义尚未闭合，阶段 0 保持阻断，P7 仍为 `NOT_ACCEPTED`；同时校正 LSPosed 官方字段 `hookFunc`/`unhookFunc` 与项目适配字段命名。 | 当前执行代理 |
+| v1.52 | 2026-09-06 | 根据原版优先目标，明确 P7 Native Hook 只使用 LSPosed 官方 Native Hook API（`native_init`/`hook_func`/`unhook_func`）；禁止 Dobby、ShadowHook 和手写 ARM64 trampoline。普通使用、强化和宝石路径优先复用原版效果与消费时机，扩展 Hook 仅承接逻辑槽、payload、所有权和 UI 同步；开箱、解封和骰子保留待验证边界。 | 当前执行代理 |
 | v1.51 | 2026-09-04 | P7 增补全局背包函数清单与实现方案：按查询、袋/空槽、堆叠/移动、删除/消耗、入库/创建、物品语义、使用/装备、合成/商店/掉落、存档/对象和 UI 分组登记适配边界；依据 architecture §2.2.1 明确 P7 优先使用逻辑库存服务与 `fn_*`，UI 间接回调使用 `PtrHook`，直接 `BL` 仅允许经过 ABI/分支范围验证的最小调用点指令 patch，暂不采用通用 inline hook；补充 P7.1–P7.3 实施顺序、完成要求和测试矩阵。 | 当前执行代理 |
 | v1.49 | 2026-09-04 | 移除批量宝石合成中的隐式 `module_save_game()`；该模块功能现在只修改游戏内存，保存只能由游戏真实保存入口或模块 API 显式触发。审计确认 feature 中无剩余直接 `fn_save()`/`module_save_game()` 保存调用，原版 `SAVE_Save` 的 8 个真实 callsite 仍统一接入 core。 | 当前执行代理 |
 | v1.48 | 2026-09-04 | 完成当前游戏版本 `SAVE_Save` 直接调用点审计：静态发现 9 个 callsite，其中 8 个真实保存触发点（复活、任务、保存状态机、网络商店）统一改写为 `core module_save_game()`；`SAVE_LoadCharacterAll` 内部读档特殊调用保留原版，避免读档递归保存。新 APK 真机新进程验证 8 个 callsite hook 安装成功，API 保存日志出现 `sidecar prepare`→`sidecar commit`→`extension bag participant commit`→`save complete`。 | 当前执行代理 |

@@ -35,6 +35,7 @@ std::string data_shop_items_json() {
 std::string data_op_shop_buy(int32_t slot) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_item_get_buy_price == nullptr || fn_get_money == nullptr || fn_minus_money == nullptr ||
+        fn_add_money == nullptr ||
         fn_inven_find_save_slot == nullptr || fn_inven_save_item == nullptr)
         return op_err("symbol not resolved");
     if (slot < 0 || slot >= 48) return op_err("bad slot");
@@ -48,9 +49,12 @@ std::string data_op_shop_buy(int32_t slot) {
     int price = fn_item_get_buy_price(item);
     int64_t money = fn_get_money();
     if (money < price) return op_err("not enough money");
-    int save_slot = fn_inven_find_save_slot(item, 0);
-    if (save_slot <= 0) return op_err("inventory full");
-    if (!fn_inven_save_item(item, nullptr)) return op_err("buy failed");
-    fn_minus_money(price);
+    int8_t save_slot = -1;
+    if (!fn_inven_find_save_slot(item, &save_slot)) return op_err("inventory full");
+    if (!fn_minus_money(price)) return op_err("insufficient money");
+    if (!fn_inven_save_item(item, nullptr)) {
+        if (!fn_add_money(price)) return op_err("buy failed; refund failed");
+        return op_err("buy failed");
+    }
     return "{\"ok\":true,\"price\":" + std::to_string(price) + "}";
 }

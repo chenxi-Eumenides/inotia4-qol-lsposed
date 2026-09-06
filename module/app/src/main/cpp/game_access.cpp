@@ -3,6 +3,7 @@
 #include "symbol_resolver.h"
 
 #include <cstdio>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -16,6 +17,7 @@
 namespace {
 
 std::mutex g_mutex;
+std::atomic<bool> g_bridge_ready{false};
 
 bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
     if (address == 0 || size == 0 || address > std::numeric_limits<uintptr_t>::max() - size) {
@@ -92,6 +94,10 @@ bool game_memory_accessible(const void* address, size_t size, char permission) {
     return mapping_has_permission(reinterpret_cast<uintptr_t>(address), size, permission);
 }
 
+bool bridge_ready() {
+    return g_bridge_ready.load(std::memory_order_acquire);
+}
+
 // 函数指针地址：同 resolve_global（返回相对偏移，调用方拼 g_base）
 uintptr_t fn_resolve(const char* macro_name, uintptr_t vma) {
     const char* symbol = symbol_name_for_macro(macro_name);
@@ -106,9 +112,10 @@ uintptr_t fn_resolve(const char* macro_name, uintptr_t vma) {
 
 bool bridge_init() {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_base != 0) return true;
+    if (g_bridge_ready.load(std::memory_order_acquire)) return true;
     g_symbol_report.clear();
     if (!find_libgame_base()) {
+        g_bridge_ready.store(false, std::memory_order_release);
         g_symbol_report.emplace_back("libgame_not_loaded", false);
         g_dl_error = "libgame.so not loaded yet";
         return false;
@@ -139,6 +146,12 @@ bool bridge_init() {
     fn_get_next_exp = reinterpret_cast<GetExpFn>(g_base + fn_resolve("F_GET_NEXT_EXP_VMA", F_GET_NEXT_EXP_VMA));
     fn_get_rarity = reinterpret_cast<GetRarityFn>(g_base + fn_resolve("F_GET_RARITY_VMA", F_GET_RARITY_VMA));
     fn_get_bag_size = reinterpret_cast<GetBagSizeFn>(g_base + fn_resolve("F_GET_BAG_SIZE_VMA", F_GET_BAG_SIZE_VMA));
+    fn_get_empty_bag_slot = reinterpret_cast<GetEmptyBagSlotFn>(
+        g_base + fn_resolve("F_INVEN_GET_EMPTY_BAG_SLOT_VMA", F_INVEN_GET_EMPTY_BAG_SLOT_VMA));
+    fn_is_empty_bag = reinterpret_cast<IsEmptyBagFn>(
+        g_base + fn_resolve("F_INVEN_IS_EMPTY_BAG_VMA", F_INVEN_IS_EMPTY_BAG_VMA));
+    fn_is_having_empty_slot = reinterpret_cast<IsHavingEmptySlotFn>(
+        g_base + fn_resolve("F_INVEN_IS_HAVING_EMPTY_SLOT_VMA", F_INVEN_IS_HAVING_EMPTY_SLOT_VMA));
     fn_get_bit = reinterpret_cast<GetBitFn>(g_base + fn_resolve("F_GET_BIT_VMA", F_GET_BIT_VMA));
     fn_get_cumulate_count = reinterpret_cast<GetCumulateCountFn>(g_base + fn_resolve("F_GET_CUMULATE_COUNT_VMA", F_GET_CUMULATE_COUNT_VMA));
     fn_get_damage = reinterpret_cast<GetItemStatFn>(g_base + fn_resolve("F_GET_DAMAGE_VMA", F_GET_DAMAGE_VMA));
@@ -200,8 +213,24 @@ bool bridge_init() {
     fn_set_money = reinterpret_cast<SetMoneyFn>(g_base + fn_resolve("F_SET_MONEY_VMA", F_SET_MONEY_VMA));
     fn_add_money = reinterpret_cast<AddMoneyFn>(g_base + fn_resolve("F_ADD_MONEY_VMA", F_ADD_MONEY_VMA));
     fn_minus_money = reinterpret_cast<AddMoneyFn>(g_base + fn_resolve("F_MINUS_MONEY_VMA", F_MINUS_MONEY_VMA));
+    fn_find_item = reinterpret_cast<FindItemFn>(g_base + fn_resolve("F_FIND_ITEM_VMA", F_FIND_ITEM_VMA));
+    fn_have_item = reinterpret_cast<HaveItemFn>(g_base + fn_resolve("F_INVEN_HAVE_ITEM_VMA", F_INVEN_HAVE_ITEM_VMA));
+    fn_get_item_count = reinterpret_cast<GetItemCountFn>(
+        g_base + fn_resolve("F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA));
+     fn_inven_find_item_slot = reinterpret_cast<InvenFindItemSlotFn>(
+         g_base + fn_resolve("F_INVEN_FIND_ITEM_SLOT_VMA", F_INVEN_FIND_ITEM_SLOT_VMA));
+     fn_inven_calculate_empty_slot_count_for_save = reinterpret_cast<InvenCalculateEmptySlotCountForSaveFn>(
+         g_base + fn_resolve("F_INVEN_CALCULATE_EMPTY_SLOT_COUNT_FOR_SAVE_VMA", F_INVEN_CALCULATE_EMPTY_SLOT_COUNT_FOR_SAVE_VMA));
+     fn_inven_get_empty_save_slot_ex = reinterpret_cast<InvenGetEmptySaveSlotExFn>(
+         g_base + fn_resolve("F_INVEN_GET_EMPTY_SAVE_SLOT_EX_VMA", F_INVEN_GET_EMPTY_SAVE_SLOT_EX_VMA));
+     fn_inven_get_needed_save_slot_ex = reinterpret_cast<InvenGetNeededSaveSlotExFn>(
+         g_base + fn_resolve("F_INVEN_GET_NEEDED_SAVE_SLOT_EX_VMA", F_INVEN_GET_NEEDED_SAVE_SLOT_EX_VMA));
+     fn_inven_get_cumulate_save_slot_ex = reinterpret_cast<InvenGetCumulateSaveSlotExFn>(
+         g_base + fn_resolve("F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA", F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA));
     fn_remove_item = reinterpret_cast<RemoveItemFn>(g_base + fn_resolve("F_REMOVE_ITEM_VMA", F_REMOVE_ITEM_VMA));
-    fn_item_get_price = reinterpret_cast<ItemGetPriceFn>(g_base + fn_resolve("F_ITEM_GET_PRICE_VMA", F_ITEM_GET_PRICE_VMA));
+     fn_item_get_price = reinterpret_cast<ItemGetPriceFn>(g_base + fn_resolve("F_ITEM_GET_PRICE_VMA", F_ITEM_GET_PRICE_VMA));
+     fn_item_get_sell_price = reinterpret_cast<ItemGetSellPriceFn>(g_base + fn_resolve("F_ITEM_GET_SELL_PRICE_VMA", F_ITEM_GET_SELL_PRICE_VMA));
+     fn_item_is_no_sell = reinterpret_cast<IntIntFn>(g_base + fn_resolve("F_ITEMDATABASE_IS_NO_SELL_VMA", F_ITEMDATABASE_IS_NO_SELL_VMA));
     fn_item_get_ability_level = reinterpret_cast<ItemGetAbilityLevelFn>(g_base + fn_resolve("F_ITEM_GET_ABILITY_LEVEL_VMA", F_ITEM_GET_ABILITY_LEVEL_VMA));
     fn_item_get_buy_price = reinterpret_cast<ItemGetBuyPriceFn>(g_base + fn_resolve("F_ITEM_GET_BUY_PRICE_VMA", F_ITEM_GET_BUY_PRICE_VMA));
     fn_inven_find_save_slot = reinterpret_cast<InvenFindSaveSlotFn>(g_base + fn_resolve("F_INVEN_FIND_SAVE_SLOT_VMA", F_INVEN_FIND_SAVE_SLOT_VMA));
@@ -210,6 +239,8 @@ bool bridge_init() {
     fn_inven_save_item_on_empty = reinterpret_cast<InvenSaveItemOnEmptyFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA", F_INVEN_SAVE_ITEM_ON_EMPTY_VMA));
     fn_dealsystem_find_sale_by_id = reinterpret_cast<DealSystemFindSaleByIdFn>(g_base + fn_resolve("F_DEALSYSTEM_FIND_SALE_BY_ID_VMA", F_DEALSYSTEM_FIND_SALE_BY_ID_VMA));
     fn_inven_move_item = reinterpret_cast<InvenMoveItemFn>(g_base + fn_resolve("F_INVEN_MOVE_ITEM_VMA", F_INVEN_MOVE_ITEM_VMA));
+    fn_item_system_divide = reinterpret_cast<ItemSystemDivideFn>(
+        g_base + fn_resolve("F_ITEMSYSTEM_DIVIDE_VMA", F_ITEMSYSTEM_DIVIDE_VMA));
     fn_set_exp = reinterpret_cast<SetExpFn>(g_base + fn_resolve("F_SET_EXP_VMA", F_SET_EXP_VMA));
     fn_set_level = reinterpret_cast<SetLevelFn>(g_base + fn_resolve("F_SET_LEVEL_VMA", F_SET_LEVEL_VMA));
     fn_add_exp = reinterpret_cast<AddExpFn>(g_base + fn_resolve("F_ADD_EXP_VMA", F_ADD_EXP_VMA));
@@ -241,6 +272,8 @@ bool bridge_init() {
     fn_char_stop_combat = reinterpret_cast<CharStopCombatFn>(g_base + fn_resolve("F_CHAR_STOP_COMBAT_VMA", F_CHAR_STOP_COMBAT_VMA));
     fn_consume_item = reinterpret_cast<ConsumeItemFn>(g_base + fn_resolve("F_CONSUME_ITEM_VMA", F_CONSUME_ITEM_VMA));
     fn_char_use_item_ex = reinterpret_cast<CharUseItemExFn>(g_base + fn_resolve("F_CHAR_USE_ITEM_EX_VMA", F_CHAR_USE_ITEM_EX_VMA));
+    fn_char_process_shortcut = reinterpret_cast<CharProcessShortcutFn>(
+        g_base + fn_resolve("F_CHAR_PROCESS_SHORTCUT_VMA", F_CHAR_PROCESS_SHORTCUT_VMA));
     fn_remove_item_direct = reinterpret_cast<RemoveItemDirectFn>(g_base + fn_resolve("F_REMOVE_ITEM_DIRECT_VMA", F_REMOVE_ITEM_DIRECT_VMA));
     fn_include_party = reinterpret_cast<IncludePartyFn>(g_base + fn_resolve("F_INCLUDE_PARTY_VMA", F_INCLUDE_PARTY_VMA));
     fn_exclude_party = reinterpret_cast<ExcludePartyFn>(g_base + fn_resolve("F_EXCLUDE_PARTY_VMA", F_EXCLUDE_PARTY_VMA));
@@ -295,6 +328,9 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ui_create_group_base_control = reinterpret_cast<UiCreateGroupBaseControlFn>(g_base + fn_resolve("F_UI_CREATE_GROUP_BASE_CONTROL_VMA", F_UI_CREATE_GROUP_BASE_CONTROL_VMA));
     fn_popup_create = reinterpret_cast<UiPopupMsgCreateFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_VMA", F_UIPOPUPMSG_CREATE_VMA));
     fn_popup_create_yesno = reinterpret_cast<UiPopupMsgCreateYesNoFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_VMA", F_UIPOPUPMSG_CREATE_YESNO_VMA));
+    fn_popup_create_yesno_from_textdata = reinterpret_cast<UiPopupMsgCreateYesNoFromTextDataFn>(
+        g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA",
+                            F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA));
     fn_popup_create_from_textdata = reinterpret_cast<UiPopupMsgCreateFromTextDataFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA", F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA));
     fn_popup_free = reinterpret_cast<UiPopupMsgFreeFn>(g_base + fn_resolve("F_UIPOPUPMSG_FREE_VMA", F_UIPOPUPMSG_FREE_VMA));
     fn_popupstate_push = reinterpret_cast<PopupStatePushFn>(g_base + fn_resolve("F_POPUPSTATE_PUSH_VMA", F_POPUPSTATE_PUSH_VMA));
@@ -326,10 +362,12 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ctrl_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
     fn_ctrl_btn_draw = reinterpret_cast<ControlButtonDrawFn>(g_base + fn_resolve("F_CONTROL_BUTTON_DRAW_VMA", F_CONTROL_BUTTON_DRAW_VMA));
     if (!apply_fixed_stack_layout()) {
+        g_bridge_ready.store(false, std::memory_order_release);
         g_dl_error = "fixed stack layout patch failed";
         g_base = 0;
         return false;
     }
+    g_bridge_ready.store(true, std::memory_order_release);
     return true;
 }
 

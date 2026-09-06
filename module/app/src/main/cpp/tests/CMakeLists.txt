@@ -15,6 +15,7 @@ set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
+    ${CPP_DIR}/feature/patch/inventory_find_item_poc.cpp
     ${CPP_DIR}/core/native/game_json.cpp
     ${CPP_DIR}/core/native/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp
@@ -32,3 +33,13 @@ target_include_directories(host_tests PRIVATE
 target_compile_features(host_tests PRIVATE cxx_std_17)
 
 add_test(NAME host_tests COMMAND host_tests)
+
+add_executable(stage4_hook_tests
+    test_inventory_hook_stage4.cpp
+    ${CPP_DIR}/feature/patch/inventory_hook_stage4.cpp
+)
+target_include_directories(stage4_hook_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
+add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)

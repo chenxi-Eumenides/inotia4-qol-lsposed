@@ -167,8 +167,10 @@ bool equip_module_item_on_character_locked(void* item, int source_bag, int sourc
     // 这是原版 UI 的真实交换入口：它从 INVEN[bag][slot] 取新装备，
     // 目标槽已有装备时把旧装备写回同一库存槽，再把新装备放入角色槽。
     // 先不调用 CHAR_EquipItem/CHAR_Unequip，后者会跳过交换协议。
+    extension_bag_begin_internal_equip();
     const int equip_result =
         fn_equip_item_from_inven_to_slot(character, original_bag, source_slot, target);
+    extension_bag_end_internal_equip();
     if (equip_result == 0) {
         *inventory_slot = original_inventory_item;
         return false;
@@ -308,7 +310,24 @@ bool equip_extension_source_on_tab_locked(int target_bag, int source_bag, int so
 void extension_desc_equip_execute(void* button);
 
 void reset_extension_desc_equip_hook_locked() {
-    // 与解除 hook 同款：desc 菜单按钮为游戏所有，可能已销毁，只清模块记录。
+    // 详情按钮由游戏所有：若当前 panel 仍指向被 hook 的按钮，先恢复原回调；
+    // 若按钮已被游戏销毁，则不能再写入旧 slot，只丢弃模块记录。
+    if (g_extension_desc_equip_hook.installed() && g_base != 0) {
+        void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x78);
+        void* data = nullptr;
+        if (button != nullptr &&
+            game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
+            data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
+        }
+        void* execute_proc = nullptr;
+        if (data != nullptr &&
+            game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
+            execute_proc = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
+        }
+        if (execute_proc == g_extension_desc_equip_hook.slot) {
+            g_extension_desc_equip_hook.uninstall();
+        }
+    }
     g_extension_desc_equip_hook = {};
     g_extension_desc_equip_item = nullptr;
 }
@@ -334,6 +353,15 @@ void install_extension_desc_equip_hook_locked(void* item) {
         VIRTBAG_LOG("extension desc equip hook skip invalid execute button=%p", button);
         return;
     }
+    const uintptr_t equip_raw = g_base +
+        fn_resolve("F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA);
+    if (equip_raw == 0 || *reinterpret_cast<void**>(execute_proc) !=
+        reinterpret_cast<void*>(equip_raw)) {
+        VIRTBAG_LOG("extension desc equip hook skip non-equip proc button=%p proc=%p expected=%p",
+                    button, *reinterpret_cast<void**>(execute_proc),
+                    reinterpret_cast<void*>(equip_raw));
+        return;
+    }
     if (!g_extension_desc_equip_hook.install_typed(execute_proc,
                                                    &extension_desc_equip_execute)) {
         VIRTBAG_LOG("extension desc equip hook install failed");
@@ -356,35 +384,15 @@ void extension_desc_equip_execute(void* button) {
         VIRTBAG_LOG("extension equip execute button=%p hooked=%p item=%p", button,
                     hooked_button, g_extension_desc_equip_item);
         reset_extension_desc_equip_hook_locked();
-        const bool current_button = button != nullptr && button == hooked_button;
+            const bool current_button = button != nullptr && button == hooked_button;
         if (raw != 0 && current_button && g_virtual_bag_enabled.load() && game_in_world() &&
-            item != nullptr && fn_get_bit != nullptr) {
-            const uint16_t flags =
-                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            const int category = fn_get_bit(flags, 15, 6);
-            if (category >= 1 && category <= 4) {
-                int equip_index = -1;
-                for (int i = 0; i < virtual_bag::kBagCount; ++i) {
-                    if (g_virtual_bag_state.types[i] == 0) {
-                        equip_index = i;
-                        break;
-                    }
-                }
-                if (equip_index >= 0) {
-                    const ExtensionBagEquipResult result =
-                        equip_extension_bag_item_locked(equip_index, item);
-                    takeover = result == ExtensionBagEquipResult::kOk;
-                    if (takeover) {
-                        // 对齐原版 ButtonEquipExe 入口行为（b7c34 UIDesc_SetOff
-                        // 关详情）；clear_original_desc_locked 为锁内既有模式。
-                        clear_original_desc_locked();
-                        finish_extension_equip_ui_locked(equip_index, nullptr);
-                    } else {
-                        VIRTBAG_LOG("extension equip button result=%d index=%d",
-                                    static_cast<int>(result), equip_index);
-                    }
-                }
-            } else if (item_is_equip(item)) {
+            item != nullptr) {
+            const uint16_t flags = *reinterpret_cast<uint16_t*>(
+                reinterpret_cast<uint8_t*>(item) + I_TYPE);
+            const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
+            const bool jewel = category >= 0 && fn_is_jewel != nullptr &&
+                               fn_is_jewel(category) != 0;
+            if (!jewel && item_is_equip(item)) {
                 int source_bag = -1;
                 int source_slot = -1;
                 if (module_slot_of_item_locked(item, &source_bag, &source_slot)) {
@@ -410,16 +418,166 @@ void reset_extension_desc_item_hooks_locked() {
     for (PtrHook& hook : g_extension_desc_item_hooks) hook.uninstall();
 }
 
-void extension_destroy_ok() {
-    ExtensionDestroyOkFn original_ok = nullptr;
+void extension_destroy_ok(void*);
+void extension_sell_ok(void*);
+void extension_destroy_cancel(void*);
+void extension_sell_cancel(void*);
+bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
+                                                int before_count, int observed_before,
+                                                const char* context);
+
+void restore_extension_desc_popup_callbacks_locked() {
+    if (g_base != 0) {
+        auto* ok_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPOK_VMA);
+        auto* cancel_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPCANCEL_VMA);
+        if (*ok_slot == &extension_destroy_ok) *ok_slot = g_extension_destroy_original_ok;
+        if (*ok_slot == &extension_sell_ok) *ok_slot = g_extension_sell_original_ok;
+        if (*cancel_slot == &extension_destroy_cancel) *cancel_slot = g_extension_destroy_original_cancel;
+        if (*cancel_slot == &extension_sell_cancel) *cancel_slot = g_extension_sell_original_cancel;
+    }
+    g_extension_destroy_original_ok = nullptr;
+    g_extension_sell_original_ok = nullptr;
+    g_extension_destroy_original_cancel = nullptr;
+    g_extension_sell_original_cancel = nullptr;
+    g_extension_sell_apply_variant_discount = true;
+}
+
+void extension_sell_cancel(void*) {
+    ExtensionDestroyOkFn original_cancel = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (g_base != 0) {
-            auto* ok_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPOK_VMA);
-            if (*ok_slot == &extension_destroy_ok) *ok_slot = g_extension_destroy_original_ok;
+        original_cancel = g_extension_sell_original_cancel;
+        restore_extension_desc_popup_callbacks_locked();
+        reset_extension_desc_item_hooks_locked();
+        g_extension_desc_item = nullptr;
+        g_extension_desc_item_bag = -1;
+        g_extension_desc_item_slot = -1;
+    }
+    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    if (original_cancel != nullptr) original_cancel(nullptr);
+}
+
+void extension_destroy_cancel(void*) {
+    ExtensionDestroyOkFn original_cancel = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        original_cancel = g_extension_destroy_original_cancel;
+        restore_extension_desc_popup_callbacks_locked();
+        reset_extension_desc_item_hooks_locked();
+        g_extension_desc_item = nullptr;
+        g_extension_desc_item_bag = -1;
+        g_extension_desc_item_slot = -1;
+    }
+    if (original_cancel != nullptr) original_cancel(nullptr);
+}
+
+void extension_sell_ok(void*) {
+    VIRTBAG_LOG("extension sell confirmation entered");
+    void* item = nullptr;
+    int bag = -1;
+    int slot = -1;
+    int count = 0;
+    int64_t price = 0;
+    bool apply_variant_discount = true;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        restore_extension_desc_popup_callbacks_locked();
+        item = g_extension_desc_item;
+        bag = g_extension_desc_item_bag;
+        slot = g_extension_desc_item_slot;
+        apply_variant_discount = g_extension_sell_apply_variant_discount;
+        const bool current_item = item != nullptr && virtual_bag::valid_index(bag) &&
+                                  slot >= 0 && slot < virtual_bag::kSlotCount &&
+                                  g_module_objects[bag][slot] == item;
+        if (!current_item) {
+            VIRTBAG_LOG("extension sell rejected stale detail bag=%d slot=%d item=%p", bag,
+                        slot, item);
+            reset_extension_desc_item_hooks_locked();
+            g_extension_desc_item = nullptr;
+            g_extension_desc_item_bag = -1;
+            g_extension_desc_item_slot = -1;
+            clear_original_desc_locked();
+            return;
         }
-        original_ok = g_extension_destroy_original_ok;
-        g_extension_destroy_original_ok = nullptr;
+        if (fn_item_get_sell_price == nullptr || fn_add_money == nullptr ||
+            fn_minus_money == nullptr || fn_item_is_no_sell == nullptr) {
+            VIRTBAG_LOG("extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
+            clear_original_desc_locked();
+            return;
+        }
+        count = g_virtual_bag_state.items[bag][slot].count;
+        const uint16_t flags = *reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(item) + I_TYPE);
+        const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
+        if (category < 0 || fn_item_is_no_sell(category) != 0) {
+            VIRTBAG_LOG("extension sell rejected no-sell item bag=%d slot=%d category=%d",
+                        bag, slot, category);
+            clear_original_desc_locked();
+            return;
+        }
+        price = extension_bag_sell_price(item, count, apply_variant_discount);
+        if (price < 0) {
+            VIRTBAG_LOG("extension sell rejected invalid price/count bag=%d slot=%d price=%lld count=%d",
+                        bag, slot, static_cast<long long>(price), count);
+            clear_original_desc_locked();
+            return;
+        }
+    }
+
+    if (price < 0 || !fn_add_money(price)) {
+        VIRTBAG_LOG("extension sell money credit failed bag=%d slot=%d price=%lld", bag, slot,
+                    static_cast<long long>(price));
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        clear_original_desc_locked();
+        return;
+    }
+    bool removed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        const bool current_item = g_extension_desc_item == item &&
+                                  g_extension_desc_item_bag == bag &&
+                                  g_extension_desc_item_slot == slot &&
+                                  g_module_objects[bag][slot] == item &&
+                                  g_virtual_bag_state.items[bag][slot].count == count;
+        if (current_item) {
+            g_virtual_bag_state.items[bag][slot] = {};
+            g_item_state_dirty = true;
+            free_module_object_locked(bag, slot);
+            persist_state_locked();
+            if (g_module_view_installed && g_module_view_index == bag) {
+                refresh_module_item_area_locked(bag);
+            }
+            removed = true;
+        }
+    }
+    if (!removed) {
+        const bool refunded = fn_minus_money(price) != 0;
+        VIRTBAG_LOG("extension sell remove failed bag=%d slot=%d price=%lld refunded=%d", bag,
+                    slot, static_cast<long long>(price), refunded ? 1 : 0);
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        clear_original_desc_locked();
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        reset_extension_desc_item_hooks_locked();
+        g_extension_desc_item = nullptr;
+        g_extension_desc_item_bag = -1;
+        g_extension_desc_item_slot = -1;
+        clear_original_desc_locked();
+    }
+    VIRTBAG_LOG("extension sell committed bag=%d slot=%d price=%lld", bag, slot,
+                static_cast<long long>(price));
+}
+
+void extension_destroy_ok(void*) {
+    int committed_bag = -1;
+    int committed_slot = -1;
+    bool committed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        restore_extension_desc_popup_callbacks_locked();
 
         const int bag = g_extension_desc_item_bag;
         const int slot = g_extension_desc_item_slot;
@@ -430,13 +588,28 @@ void extension_destroy_ok() {
             g_item_state_dirty = true;
             free_module_object_locked(bag, slot);
             persist_state_locked();
-            if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+            reset_extension_desc_item_hooks_locked();
+            g_extension_desc_item = nullptr;
+            g_extension_desc_item_bag = -1;
+            g_extension_desc_item_slot = -1;
             clear_original_desc_locked();
-            VIRTBAG_LOG("extension destroy committed bag=%d slot=%d", bag, slot);
-            return;
+            committed_bag = bag;
+            committed_slot = slot;
+            committed = true;
+        } else {
+            reset_extension_desc_item_hooks_locked();
+            g_extension_desc_item = nullptr;
+            g_extension_desc_item_bag = -1;
+            g_extension_desc_item_slot = -1;
+            VIRTBAG_LOG("extension destroy rejected stale detail bag=%d slot=%d", bag, slot);
         }
     }
-    if (original_ok != nullptr) original_ok();
+    if (committed && fn_ui_equip_refresh_item_area != nullptr) {
+        fn_ui_equip_refresh_item_area();
+    }
+    if (committed) {
+        VIRTBAG_LOG("extension destroy committed bag=%d slot=%d", committed_bag, committed_slot);
+    }
 }
 
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
@@ -503,8 +676,14 @@ void install_extension_desc_item_hooks_locked(void* item) {
         if (!game_memory_accessible(execute_slot, sizeof(void*), 'w')) continue;
         void* original = *execute_slot;
         if (original == nullptr || !game_memory_accessible(original, 1, 'x')) continue;
-        g_extension_desc_item_hooks[index].install_typed(execute_slot,
-                                                          &extension_desc_item_execute);
+        if (!g_extension_desc_item_hooks[index].install_typed(
+                execute_slot, &extension_desc_item_execute)) {
+            VIRTBAG_LOG("extension desc hook install failed index=%d offset=0x%zx button=%p data=%p",
+                        static_cast<int>(index), kDescButtonOffsets[index], button, data);
+            continue;
+        }
+        VIRTBAG_LOG("extension desc hook installed index=%d offset=0x%zx button=%p data=%p orig=%p",
+                    static_cast<int>(index), kDescButtonOffsets[index], button, data, original);
     }
 }
 
@@ -535,78 +714,38 @@ void extension_desc_item_execute(void* button) {
         item_slot = g_extension_desc_item_slot;
     }
     if (hook_index < 0 || hook == nullptr) return;
+    VIRTBAG_LOG("extension desc execute index=%d offset=0x%zx orig=%p bag=%d slot=%d",
+                hook_index, kDescButtonOffsets[hook_index], hook->orig, item_bag, item_slot);
 
     const uintptr_t use_raw = g_base != 0
         ? g_base + fn_resolve("F_UIEQUIP_BUTTON_USE_EXE_VMA", F_UIEQUIP_BUTTON_USE_EXE_VMA)
         : 0;
     if (use_raw != 0 && reinterpret_cast<uintptr_t>(hook->orig) == use_raw) {
         bool used = false;
+        bool current_item = false;
+        void* leader = nullptr;
+        bool closes_description = false;
         {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-            const bool current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
-                                      item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
-                                      g_module_objects[item_bag][item_slot] == item;
-            if (current_item && fn_char_use_item_ex != nullptr) {
-                void* leader = member_or_null(0);
-                if (leader != nullptr) {
-                    // UIEquip_ButtonUseExe 的真实路径是：关闭详情 → CHAR_UseItemEx。
-                    // 不调用原版按钮，避免其通过 INVEN_RemoveItem 反查不到扩展对象。
-                    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-                    const virtual_bag::Item& before_descriptor =
-                        g_virtual_bag_state.items[item_bag][item_slot];
-                    const int before_count = before_descriptor.count;
-                    const int observed_before = fn_get_cumulate_count != nullptr
-                        ? fn_get_cumulate_count(item) : before_count;
-                    used = fn_char_use_item_ex(leader, item, 0) != 0;
-                    if (used) {
-                        int count = fn_get_cumulate_count != nullptr
-                            ? fn_get_cumulate_count(item) : before_count - 1;
-                        // CHAR_UseItemEx 内部最终调用 INVEN_ConsumeItem，扩展对象
-                        // 不在原版库存链上时该调用不会改数量。若观察到数量未变，
-                        // 在同一对象上补写 count-1，避免药水/卷轴无限使用。
-                        if (count == observed_before && before_count > 0) {
-                            count = before_count - 1;
-                            const uint32_t count_flags = *reinterpret_cast<uint32_t*>(
-                                reinterpret_cast<uint8_t*>(item) + I_COUNT);
-                            *reinterpret_cast<uint32_t*>(
-                                reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-                                stack_codec::write_count(count_flags,
-                                                         static_cast<uint32_t>(count));
-                        }
-                        if (count <= 0) {
-                            g_virtual_bag_state.items[item_bag][item_slot] = {};
-                            free_module_object_locked(item_bag, item_slot);
-                        } else {
-                            std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-                            int payload_size = 0;
-                            if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-                                VIRTBAG_LOG("extension use reserialize failed bag=%d slot=%d",
-                                            item_bag, item_slot);
-                                used = false;
-                            } else {
-                                virtual_bag::Item& descriptor =
-                                    g_virtual_bag_state.items[item_bag][item_slot];
-                                descriptor.payload = payload;
-                                descriptor.payload_size = payload_size;
-                                descriptor.count = count;
-                                g_module_object_hashes[item_bag][item_slot] =
-                                    virtual_bag::payload_hash(descriptor);
-                            }
-                        }
-                        if (used) {
-                            g_item_state_dirty = true;
-                            persist_state_locked();
-                            if (fn_ui_equip_refresh_item_area != nullptr) {
-                                fn_ui_equip_refresh_item_area();
-                            }
-                        }
-                    }
-                }
+            current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
+                           item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
+                           g_module_objects[item_bag][item_slot] == item;
+            leader = current_item ? member_or_null(0) : nullptr;
+            closes_description = current_item;
+        }
+        if (current_item && leader != nullptr && fn_char_use_item_ex != nullptr) {
+            // CHAR_UseItemEx 会同步进入 INVEN_ConsumeItem；不得持有背包锁调用。
+            if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+            used = fn_char_use_item_ex(leader, item, 0) != 0;
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            if (closes_description) {
+                reset_extension_desc_item_hooks_locked();
+                g_extension_desc_item = nullptr;
+                g_extension_desc_item_bag = -1;
+                g_extension_desc_item_slot = -1;
             }
-            reset_extension_desc_item_hooks_locked();
-            g_extension_desc_item = nullptr;
-            g_extension_desc_item_bag = -1;
-            g_extension_desc_item_slot = -1;
         }
         VIRTBAG_LOG("extension use execute bag=%d slot=%d used=%d", item_bag, item_slot,
                     used ? 1 : 0);
@@ -617,27 +756,79 @@ void extension_desc_item_execute(void* button) {
         ? g_base + fn_resolve("F_UIEQUIP_BUTTON_DESTROY_EXE_VMA",
                               F_UIEQUIP_BUTTON_DESTROY_EXE_VMA)
         : 0;
-    if (destroy_raw != 0 && reinterpret_cast<uintptr_t>(hook->orig) == destroy_raw) {
-        hook->call_orig<void>(button);
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        const uintptr_t ok_raw = g_base != 0
-            ? g_base + fn_resolve("F_UIEQUIP_OK_DESTROY_ITEM_VMA",
-                                  F_UIEQUIP_OK_DESTROY_ITEM_VMA)
-            : 0;
-        auto* ok_slot = g_base != 0
-            ? reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPOK_VMA)
-            : nullptr;
-        if (g_extension_desc_item != nullptr && ok_slot != nullptr && ok_raw != 0 &&
-            *ok_slot == reinterpret_cast<ExtensionDestroyOkFn>(ok_raw)) {
-            g_extension_destroy_original_ok = *ok_slot;
-            *ok_slot = &extension_destroy_ok;
-            VIRTBAG_LOG("extension destroy confirmation hook installed bag=%d slot=%d",
-                        g_extension_desc_item_bag, g_extension_desc_item_slot);
+    const uintptr_t sell_button_raw = g_base != 0
+        ? g_base + fn_resolve("F_UISTORE_BUTTON_SELL_EXE_VMA", F_UISTORE_BUTTON_SELL_EXE_VMA)
+        : 0;
+    const bool direct_sell = sell_button_raw != 0 &&
+                             reinterpret_cast<uintptr_t>(hook->orig) == sell_button_raw;
+    const bool modified_destroy_sell = destroy_raw != 0 &&
+                                       reinterpret_cast<uintptr_t>(hook->orig) == destroy_raw;
+    if (direct_sell || modified_destroy_sell) {
+        VIRTBAG_LOG("extension sell button matched source=%s bag=%d slot=%d item=%p",
+                    modified_destroy_sell ? "destroy" : "store",
+                    g_extension_desc_item_bag, g_extension_desc_item_slot,
+                    g_extension_desc_item);
+        int64_t price = 0;
+        bool valid = false;
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            const int bag = g_extension_desc_item_bag;
+            const int slot = g_extension_desc_item_slot;
+            void* item = g_extension_desc_item;
+            const bool current_item = item != nullptr && virtual_bag::valid_index(bag) &&
+                                      slot >= 0 && slot < virtual_bag::kSlotCount &&
+                                      g_module_objects[bag][slot] == item;
+        if (current_item && fn_item_get_sell_price != nullptr &&
+                fn_item_is_no_sell != nullptr && fn_get_bit != nullptr) {
+                const int count = g_virtual_bag_state.items[bag][slot].count;
+                const uint16_t flags = *reinterpret_cast<uint16_t*>(
+                    reinterpret_cast<uint8_t*>(item) + I_TYPE);
+                const int category = fn_get_bit(flags, 15, 6);
+                if (fn_item_is_no_sell(category) == 0 && count > 0) {
+                    g_extension_sell_apply_variant_discount = modified_destroy_sell;
+                    price = extension_bag_sell_price(item, count, modified_destroy_sell);
+                    if (price >= 0) valid = true;
+                }
+            }
+            g_extension_sell_original_ok = nullptr;
+            g_extension_sell_original_cancel = nullptr;
         }
-        reset_extension_desc_item_hooks_locked();
+        const uintptr_t original_ok_raw = g_base != 0
+            ? g_base + fn_resolve(
+                modified_destroy_sell ? "F_UIEQUIP_OK_DESTROY_ITEM_VMA"
+                                      : "F_UISTORE_SELL_ITEM_VMA",
+                modified_destroy_sell ? F_UIEQUIP_OK_DESTROY_ITEM_VMA
+                                      : F_UISTORE_SELL_ITEM_VMA)
+            : 0;
+        const bool popup_created = valid && price <= UINT32_MAX && original_ok_raw != 0 &&
+                                   fn_popup_create_yesno_from_textdata != nullptr;
+        if (popup_created) {
+            // 原版按钮先关闭详情再创建确认弹窗；保持同样的 UI 生命周期，且不持有背包锁调用游戏函数。
+            if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+            // 先沿用原版回调创建控件。CreateYesNoFromTextData 内部会把 x3
+            // 暂时带入原版文本构造链，不能直接传模块函数指针；x5 是弹窗 i32Param。
+            fn_popup_create_yesno_from_textdata(
+                9, 0, 2,
+                reinterpret_cast<void*>(original_ok_raw), nullptr,
+                reinterpret_cast<void*>(static_cast<uintptr_t>(price)));
+            auto* ok_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPOK_VMA);
+            auto* cancel_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPCANCEL_VMA);
+            g_extension_sell_original_ok = *ok_slot;
+            g_extension_sell_original_cancel = *cancel_slot;
+            *ok_slot = &extension_sell_ok;
+            *cancel_slot = &extension_sell_cancel;
+            VIRTBAG_LOG("extension sell confirmation created price=%lld", static_cast<long long>(price));
+        } else {
+            VIRTBAG_LOG("extension sell confirmation unavailable valid=%d", valid ? 1 : 0);
+        }
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (popup_created) {
+            reset_extension_desc_item_hooks_locked();
+        } else {
+            clear_original_desc_locked();
+        }
         return;
     }
-
     hook->call_orig<void>(button);
 
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -714,11 +905,11 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
             }
         }
         bool real_equip = false;
-        if (item != nullptr && fn_get_bit != nullptr) {
+        if (item != nullptr && fn_get_bit != nullptr && fn_is_jewel != nullptr) {
             const uint16_t flags = *reinterpret_cast<uint16_t*>(
                 reinterpret_cast<uint8_t*>(item) + I_TYPE);
             const int category = fn_get_bit(flags, 15, 6);
-            real_equip = (category >= 1 && category <= 4) || item_is_equip(item);
+            real_equip = fn_is_jewel(category) == 0 && item_is_equip(item);
         }
         if (g_virtual_bag_enabled.load() && game_in_world() && real_equip) {
             install_extension_desc_equip_hook_locked(item);

@@ -235,6 +235,7 @@ JNIEnv* current_env() {
 void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
 void clear_original_desc_locked();
+void reset_extension_desc_equip_hook_locked();
 void extension_desc_unequip_execute(void*);
 void clear_original_item_selection_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
@@ -262,6 +263,7 @@ void make_desc_equip_gate(void* ctrl, void* arg);
 void extension_desc_item_execute(void* button);
 void reset_extension_desc_item_hooks_locked();
 void install_extension_desc_item_hooks_locked(void* item);
+void restore_extension_desc_popup_callbacks_locked();
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
                                                 const char* context);
@@ -704,7 +706,14 @@ void recover_pending_transaction_locked() {
                         if (fn_ui_equip_refresh_item_area != nullptr) {
                             fn_ui_equip_refresh_item_area();
                         }
-                        clear_pending = true;
+                        void* remaining_source = nullptr;
+                        if (inventory_slot_locked(pending.src_bag, pending.src_slot,
+                                                  &remaining_source) && remaining_source == nullptr) {
+                            clear_pending = true;
+                        } else {
+                            VIRTBAG_LOG("pending recovery: source removal not confirmed; retain pending");
+                            clear_pending = false;
+                        }
                     } else {
                         VIRTBAG_LOG("pending recovery: source identity mismatch; retain pending");
                     }
@@ -723,19 +732,30 @@ void recover_pending_transaction_locked() {
                 clear_pending = true;
             } else {
                 set_original_bag_locked(pending.dst_bag);
-                void* item = load_item_payload_locked(
-                    pending.payload.data(), pending.payload_size, "recover_pending_extension_to_original");
+                uint32_t item_handle = 0;
+                void* item = load_item_payload_tracked_locked(
+                    pending.payload.data(), pending.payload_size,
+                    "recover_pending_extension_to_original", &item_handle);
                 bool loaded = item != nullptr;
                 if (loaded && fn_inven_save_item_on_empty != nullptr) {
                     if (!fn_inven_save_item_on_empty(item, pending.dst_bag)) {
-                        release_temporary_item_locked(item);
+                        release_tracked_item_locked(item_handle, item,
+                                                    "recover ext2orig insert failed");
                         loaded = false;
                     }
                 } else if (item != nullptr) {
-                    release_temporary_item_locked(item);
+                    release_tracked_item_locked(item_handle, item,
+                                                "recover ext2orig save unavailable");
+                    loaded = false;
+                }
+                if (loaded && !original_inventory_contains_payload_locked(
+                                   pending.payload.data(), pending.payload_size, pending.dst_bag)) {
+                    VIRTBAG_LOG("pending recovery: target payload not confirmed; retain pending");
                     loaded = false;
                 }
                 if (loaded) {
+                    handover_tracked_item_locked(item_handle, item,
+                                                 "recover ext2orig handover");
                     clear_pending = true;
                 } else {
                     VIRTBAG_LOG("pending recovery: extension->original retry retained");

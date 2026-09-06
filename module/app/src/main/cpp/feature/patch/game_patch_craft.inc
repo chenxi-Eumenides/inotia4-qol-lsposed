@@ -40,7 +40,7 @@ void data_op_mix_gem_batch(void* ctrl) {
         return;
     }
     if (fn_make_mix == nullptr || fn_get_cost == nullptr || fn_is_jewel == nullptr ||
-        fn_remove_item_direct == nullptr || fn_inven_save_item == nullptr ||
+         fn_remove_item_direct == nullptr || fn_inven_save_item == nullptr || fn_itempool_free == nullptr ||
         fn_minus_money == nullptr || fn_get_bit == nullptr ||
         fn_get_money == nullptr) {
         MOVE_LOG("mix_gem_batch: symbol not resolved");
@@ -48,6 +48,7 @@ void data_op_mix_gem_batch(void* ctrl) {
     }
     // 扫描第一袋，按类别分组记录槽位（cat28-31，排除混沌 32 及异常类别）
     int slot_by_cat[4][16];
+    void* item_by_cat[4][16] = {};
     int cnt[4] = {0, 0, 0, 0};
     for (int slot = 0; slot < 16; ++slot) {
         void* item = inventory_item_at(0, slot);
@@ -57,7 +58,11 @@ void data_op_mix_gem_batch(void* ctrl) {
         if (!fn_is_jewel(cat)) continue;
         if (cat < 28 || cat > 31) continue;
         int idx = cat - 28;
-        if (cnt[idx] < 16) slot_by_cat[idx][cnt[idx]++] = slot;
+        if (cnt[idx] < 16) {
+            slot_by_cat[idx][cnt[idx]] = slot;
+            item_by_cat[idx][cnt[idx]] = item;
+            ++cnt[idx];
+        }
     }
     int64_t total_cost = 0;
     int made = 0;
@@ -75,18 +80,46 @@ void data_op_mix_gem_batch(void* ctrl) {
                 break;
             }
             if (!fn_inven_save_item(out, nullptr)) {
-                // 产物入库失败（背包满）：out 未入库，仅单个对象泄漏（每次点击至多 1 个），停止
+                // 产物入库失败（背包满）：out 尚未移交给库存，由原版对象池回收。
+                fn_itempool_free(out);
                 stop_reason = "inventory full";
                 break;
             }
-            // 成功：消耗 3 材料（RemoveItemDirect 仅清空该槽，不移动其它槽，槽位索引保持有效）
-            for (int k = 0; k < 3; ++k) fn_remove_item_direct(0, slot_by_cat[idx][used + k]);
+            bool materials_removed = true;
+            for (int k = 0; k < 3; ++k) {
+                const int source_slot = slot_by_cat[idx][used + k];
+                void* before_remove = item_by_cat[idx][used + k];
+                if (inventory_item_at(0, source_slot) != before_remove) {
+                    materials_removed = false;
+                    MOVE_LOG("mix_gem_batch: material identity changed bag=0 slot=%d expected=%p actual=%p",
+                             source_slot, before_remove, inventory_item_at(0, source_slot));
+                    break;
+                }
+            }
+            // RemoveItemDirect 返回值不可依赖；每个删除前后都校验槽位身份和清空结果。
+            for (int k = 0; materials_removed && k < 3; ++k) {
+                const int source_slot = slot_by_cat[idx][used + k];
+                fn_remove_item_direct(0, source_slot);
+                if (inventory_item_at(0, source_slot) != nullptr) {
+                    materials_removed = false;
+                    MOVE_LOG("mix_gem_batch: material removal failed bag=0 slot=%d item=%p",
+                             source_slot, item_by_cat[idx][used + k]);
+                }
+            }
+            if (!materials_removed) {
+                stop_reason = "material removal failed";
+                break;
+            }
             used += 3;
             total_cost += cost;
             ++made;
         }
     }
-    if (total_cost > 0) fn_minus_money(total_cost);
+    if (total_cost > 0 && fn_minus_money(total_cost) == 0) {
+        stop_reason = "charge failed";
+        MOVE_LOG("mix_gem_batch: charge failed cost=%lld; committed batches are not rolled back",
+                 static_cast<long long>(total_cost));
+    }
     MOVE_LOG("mix_gem_batch: made=%d cost=%lld%s%s", made, static_cast<long long>(total_cost),
              stop_reason != nullptr ? " stop=" : "", stop_reason != nullptr ? stop_reason : "");
 }

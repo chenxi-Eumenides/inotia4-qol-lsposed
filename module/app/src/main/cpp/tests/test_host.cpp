@@ -20,6 +20,7 @@
 #include "feature/extension_bag/model/ownership_ledger.h"
 #include "core/native/stack_codec.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
+#include "feature/patch/inventory_find_item_poc.h"
 #include "../data/native/game_tiles.cpp"
 
 static int g_pass = 0;
@@ -46,6 +47,80 @@ static int g_fail = 0;
             std::printf("FAIL %s:%d: %s == %s\n", __FILE__, __LINE__, #a, #b); \
         }                                                                  \
     } while (0)
+
+static void* g_find_original_result = nullptr;
+static void* g_find_extension_result = nullptr;
+static int g_find_original_calls = 0;
+static int g_find_extension_calls = 0;
+static bool* g_find_recursive_guard = nullptr;
+
+static void* p7_find_original_stub(int32_t) {
+    ++g_find_original_calls;
+    return g_find_original_result;
+}
+
+static void* p7_find_extension_stub(int32_t) {
+    ++g_find_extension_calls;
+    return g_find_extension_result;
+}
+
+static void* p7_find_recursive_original_stub(int32_t category) {
+    ++g_find_original_calls;
+    if (g_find_original_calls == 1 && g_find_recursive_guard != nullptr) {
+        return inventory_find_item_original_first(category, p7_find_recursive_original_stub,
+                                                   p7_find_extension_stub, *g_find_recursive_guard);
+    }
+    return nullptr;
+}
+
+static void test_p7_stage4_find_item_poc() {
+    bool recursive_guard = false;
+    g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x101));
+    g_find_extension_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x202));
+    g_find_original_calls = 0;
+    g_find_extension_calls = 0;
+    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
+                                             recursive_guard) == g_find_original_result);
+    CHECK_EQ(g_find_original_calls, 1);
+    CHECK_EQ(g_find_extension_calls, 0);
+    CHECK(!recursive_guard);
+
+    g_find_original_result = nullptr;
+    g_find_original_calls = 0;
+    g_find_extension_calls = 0;
+    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
+                                             recursive_guard) == g_find_extension_result);
+    CHECK_EQ(g_find_original_calls, 1);
+    CHECK_EQ(g_find_extension_calls, 1);
+    CHECK(!recursive_guard);
+
+    g_find_extension_result = nullptr;
+    g_find_original_calls = 0;
+    g_find_extension_calls = 0;
+    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
+                                             recursive_guard) == nullptr);
+    CHECK_EQ(g_find_original_calls, 1);
+    CHECK_EQ(g_find_extension_calls, 1);
+    CHECK(!recursive_guard);
+
+    g_find_original_calls = 0;
+    g_find_extension_calls = 0;
+    g_find_recursive_guard = &recursive_guard;
+    CHECK(inventory_find_item_original_first(7, p7_find_recursive_original_stub,
+                                             p7_find_extension_stub, recursive_guard) == nullptr);
+    CHECK_EQ(g_find_original_calls, 2);
+    CHECK_EQ(g_find_extension_calls, 1);
+    CHECK(!recursive_guard);
+    g_find_recursive_guard = nullptr;
+
+    recursive_guard = true;
+    g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x303));
+    g_find_extension_calls = 0;
+    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
+                                             recursive_guard) == g_find_original_result);
+    CHECK_EQ(g_find_extension_calls, 0);
+    recursive_guard = false;
+}
 
 static std::string base64_encode(const uint8_t* data, size_t n) {
     // 标准 RFC4648 big-endian 编码（与 Python 生成 tiles.json 一致，可被被测 base64_decode 正确回解）。
@@ -1733,6 +1808,7 @@ static void test_p45_isolation() {
 }
 
 int main() {
+    test_p7_stage4_find_item_poc();
     test_json_escape();
     test_base64_decode();
     test_parse_int_field();

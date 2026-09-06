@@ -32,6 +32,13 @@
 - `planning/`：当前待办和重构计划。
 - `features/`：模块新增或修改功能的设计、实现和验收。
 
+扩展背包 P7 的阶段基线按以下四篇独立文档读取；后续实现不得回到聊天记录恢复状态：
+
+- `development/features/extension-bag/stage-0-static-inventory-audit.md`
+- `development/features/extension-bag/stage-1-physical-inventory-contract.md`
+- `development/features/extension-bag/stage-2-static-support-matrix.md`
+- `development/features/extension-bag/stage-3-bypass-audit.md`
+
 ### `reference/`：共享参考
 
 面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。

@@ -222,7 +222,7 @@ std::atomic<bool> g_task_stop{false};
 | **调用游戏函数指针** | 通过 `symbol_resolver` 得到游戏函数地址，以声明的函数签名直接调用原版逻辑 | 只能调用已定位且签名确认的函数；参数、返回值、结构体/浮点 ABI 错误会导致崩溃；调用线程和游戏状态必须满足原函数前置条件 | 移动、装备、使用物品、保存、UI 操作等需要让游戏自身执行完整逻辑的功能 | **优先于任何入口 Hook** |
 | **`PtrHook` 函数指针槽覆盖** | 修改游戏对象、GOT 槽或回调表中的函数指针，将调用目标替换为模块 wrapper；wrapper 可选择调用原函数 | 只对经过间接调用的函数指针有效；找不到稳定槽位时不能使用；wrapper 必须完全匹配调用约定；对象销毁或槽位重建后需要重新安装 | 控件 `ExecuteProc`、`ControlProc`、事件处理器和回调表拦截；适合需要 before/after 或条件抑制的 UI/输入逻辑 | **入口 Hook 前的首选拦截方式，已在真机验证** |
 | **指令 `patch`** | 在已确认的函数偏移处替换 ARM/ARM64 机器指令，改变分支、立即数或门禁条件 | 只能处理确定的少量指令点；必须同步处理页权限、指令缓存、版本漂移、并发执行和恢复；不适合复杂业务逻辑或大段函数改写 | 固定常量/上限、条件分支、IAP 屏蔽和沉浸模式等少量稳定 patch 点 | **现有机制继续使用，必须可校验、可回滚** |
-| **LSPosed 官方 Native Hook API** | 由 LSPosed 在 so 加载事件中提供函数替换入口；模块通过 `native_init` 注册，并在回调中对目标函数执行 Native Hook | 本质是 Inline Hook，不是 GOT/PLT Hook；只解决入口重定向，不解决函数签名、线程并发、递归、生命周期和卸载安全；当前 APK 尚未配置 `assets/native_init`，不能直接使用 | 仅用于前四种机制无法覆盖、且确实必须拦截普通函数入口的场景；优先作为单点 PoC | **最后使用，先验证后进入正式功能** |
+| **LSPosed 官方 Native Hook API** | 由 LSPosed 在 so 加载事件中提供函数替换入口；模块通过 `native_init` 注册，并在回调中对目标函数执行 Native Hook | 本质是 Inline Hook，不是 GOT/PLT Hook；只解决入口重定向，不解决函数签名、线程并发、递归、生命周期和卸载安全 | 仅用于前四种机制无法覆盖、且确实必须拦截普通函数入口的场景；这是本项目唯一允许的 Native Hook 机制 | **允许使用，仍须最后接入并完成验证** |
 
 关键事实与约束：
 
@@ -230,6 +230,8 @@ std::atomic<bool> g_task_stop{false};
 - `PtrHook` 只改数据段中的函数指针，不改函数机器码，因此不需要 inline trampoline、`mprotect` 或指令缓存刷新；但它依赖稳定的间接调用槽位，不能拦截直接 `bl` 调用。
 - 指令 `patch` 与 `PtrHook` 是互补关系：前者改执行指令，后者改间接调用目标。所有 patch 地址必须来自 `game_symbols.h`/`symbol_resolver`，并保留原指令校验和失败回滚。
 - LSPosed 官方 Native Hook API 的 `hookFunc` 由框架内部 HookFunction/LSPlant 路径提供，官方文档的目标是函数替换，不应描述为 GOT/PLT Hook；它仍然继承 Inline Hook 的 trampoline、ABI、并发和卸载风险。
+- 本项目禁止引入或使用 Dobby、ShadowHook 和手写 ARM64 trampoline；Native Hook 入口统一使用 LSPosed 官方 API 提供的 hook/unhook 函数指针。官方当前结构字段名为 `hookFunc`/`unhookFunc`，本项目 `NativeAPIEntries` 使用同 ABI 的本地适配字段 `hook_func`/`unhook_func`。
+- 当前模块已通过 `module/app/src/main/resources/META-INF/xposed/native_init.list` 注册 `libgamebridge.so`；注册只证明加载入口存在，不证明目标函数 Hook 或业务链路已经验收。
 - 使用 LSPosed API 时，`handle + dlsym()` 只适合从实际已加载目标库解析动态符号。项目现有 `game_access` 明确禁止自行 `dlopen/dlsym` 来访问 `libgame.so`，因为 Android linker namespace 可能加载独立副本；对非导出函数仍应使用项目的 `symbol_resolver` 和 `game_symbols.h`。
 - 任一入口 Hook 都必须先验证：目标地址来源、完整函数签名、浮点/结构体返回约定、递归路径、主循环并发、重复安装、恢复时机，以及目标函数正在执行时的卸载行为。没有这些验证，不得进入正式功能。
 

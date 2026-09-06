@@ -125,9 +125,12 @@ std::array<PtrHook, 11> g_extension_desc_item_hooks{};
 void* g_extension_desc_item = nullptr;
 int g_extension_desc_item_bag = -1;
 int g_extension_desc_item_slot = -1;
-using ExtensionDestroyOkFn = void (*)();
+using ExtensionDestroyOkFn = void (*)(void*);
 ExtensionDestroyOkFn g_extension_destroy_original_ok = nullptr;
-
+ExtensionDestroyOkFn g_extension_sell_original_ok = nullptr;
+ExtensionDestroyOkFn g_extension_destroy_original_cancel = nullptr;
+ExtensionDestroyOkFn g_extension_sell_original_cancel = nullptr;
+bool g_extension_sell_apply_variant_discount = true;
 struct ExtensionDrag {
     bool active = false;
     uint8_t bag = 0;
@@ -171,11 +174,94 @@ bool route_projected_session_to_tab_locked(int target_bag);
 int original_item_category_locked(void* item);
 int drag_source_category_locked();
 bool move_original_to_extension_locked(int dst_bag, void* moving_control);
+void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
+                                       const char* context, uint32_t* out_handle);
+void handover_tracked_item_locked(uint32_t handle, void* item, const char* context);
+void release_tracked_item_locked(uint32_t handle, void* item, const char* context);
 
 #include "feature/extension_bag/extension_bag_drag_session.inc"
 
 #include "feature/extension_bag/extension_bag_runtime.inc"
 }  // namespace
+
+bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {
+    if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    return module_slot_of_item_locked(item, out_bag, out_slot);
+}
+
+void* virtual_bag_item_at(int bag, int slot) {
+    if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
+        return nullptr;
+    }
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    return module_item_locked(bag, slot);
+}
+
+void* virtual_bag_find_native_item(int category) {
+    if (category <= 0) return nullptr;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < g_virtual_bag_state.capacities[bag]; ++slot) {
+            const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+            if (descriptor.category != category || descriptor.count <= 0) continue;
+            void* item = module_item_locked(bag, slot);
+            if (item != nullptr) return item;
+            VIRTBAG_LOG("native find extension materialize failed bag=%d slot=%d category=%d",
+                        bag, slot, category);
+        }
+    }
+    return nullptr;
+}
+
+bool virtual_bag_remove_native_item(void* item) {
+    if (item == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    int bag = -1;
+    int slot = -1;
+    if (!module_slot_of_item_locked(item, &bag, &slot) ||
+        g_module_objects[bag][slot] != item) {
+        return false;
+    }
+    g_virtual_bag_state.items[bag][slot] = {};
+    g_item_state_dirty = true;
+    free_module_object_locked(bag, slot);
+    const bool persisted = persist_state_locked();
+    if (g_module_view_installed && g_module_view_index == bag) {
+        refresh_module_item_area_locked(bag);
+    }
+    VIRTBAG_LOG("native remove extension bag=%d slot=%d persisted=%d", bag, slot,
+                persisted ? 1 : 0);
+    return true;
+}
+
+bool virtual_bag_consume_native_item(void* item) {
+    if (item == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    int bag = -1;
+    int slot = -1;
+    if (!module_slot_of_item_locked(item, &bag, &slot) || g_module_objects[bag][slot] != item) {
+        return false;
+    }
+    const int before_count = g_virtual_bag_state.items[bag][slot].count;
+    const int observed_before = fn_get_cumulate_count != nullptr
+        ? fn_get_cumulate_count(item) : before_count;
+    if (!consume_extension_item_after_native_locked(bag, slot, item, before_count,
+                                                    observed_before, "native_consume")) {
+        return false;
+    }
+    g_item_state_dirty = true;
+    persist_state_locked();
+    if (g_module_view_installed && g_module_view_index == bag) {
+        refresh_module_item_area_locked(bag);
+    }
+    VIRTBAG_LOG("native consume extension bag=%d slot=%d before=%d", bag, slot, before_count);
+    return true;
+}
 
 #include "feature/extension_bag/extension_bag_public_runtime.inc"
 namespace {
@@ -359,6 +445,39 @@ void show_extension_bag_no_space_popup() {
 // P4.3：源物品在移除确认后入账本保管，提交/回滚均经 retire 终止保管
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
 #include "feature/extension_bag/extension_bag_equip.inc"
+
 }  // namespace
+
+bool virtual_bag_equip_projected_item(void* item, int source_bag, int source_slot, int equip_slot) {
+    if (item == nullptr || equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    if (!g_module_view_installed || g_module_view_index != source_bag) return false;
+    void* character = member_or_null(0);
+    if (character == nullptr || fn_find_equip_slot == nullptr ||
+        fn_find_equip_slot(character, item) != equip_slot) {
+        return false;
+    }
+    return equip_module_item_on_character_locked(item, source_bag, source_slot);
+}
+
+bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
+    if (needed <= 0) return true;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    int empty = 0;
+    const int bag_count = include_task_bag != 0 ? virtual_bag::kBagCount : virtual_bag::kOriginalTransactionBagCount;
+    for (int bag = 0; bag < bag_count; ++bag) {
+        const int capacity = g_virtual_bag_state.capacities[bag];
+        for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
+            const auto& item = g_virtual_bag_state.items[bag][slot];
+            if (item.category <= 0 || item.count <= 0) {
+                ++empty;
+                if (empty >= needed) return true;
+            }
+        }
+    }
+    return false;
+}
 
 #include "feature/extension_bag/extension_bag_api_impl.inc"

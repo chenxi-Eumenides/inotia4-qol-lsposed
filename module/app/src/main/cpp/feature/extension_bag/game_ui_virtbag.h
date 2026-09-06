@@ -45,3 +45,12 @@ std::string data_op_extension_bag_click_item(int logical_bag, int slot);
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 std::string virtual_bag_inventory_bags_json();
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
+void* virtual_bag_item_at(int bag, int slot);
+
+// Thread-safe read-only native item lookup used by the stable extension-bag port.
+bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot);
+void* virtual_bag_find_native_item(int category);
+bool virtual_bag_remove_native_item(void* item);
+bool virtual_bag_equip_projected_item(void* item, int source_bag, int source_slot, int equip_slot);
+bool virtual_bag_consume_native_item(void* item);
+bool virtual_bag_has_empty_slots(int needed, int include_task_bag);
