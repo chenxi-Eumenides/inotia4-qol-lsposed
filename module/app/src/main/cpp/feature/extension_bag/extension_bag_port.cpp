@@ -61,6 +61,29 @@ void* extension_bag_item_at(int bag, int slot) {
     return virtual_bag_item_at(bag, slot);
 }
 
+void* extension_bag_view_item_at(int bag, int slot) {
+    return virtual_bag_view_item_at(bag, slot);
+}
+
+bool extension_bag_handle_backpack_button_equip() {
+    return virtual_bag_handle_backpack_button_equip();
+}
+
+bool extension_bag_handle_original_bag_unequip(bool* out_no_space) {
+    return virtual_bag_handle_original_bag_unequip(out_no_space);
+}
+
+void extension_bag_show_no_space_popup() {
+    // TextData 6 = "背包已满"（与扩展袋/原版卸袋同窗）。直接解析原版弹窗
+    // 函数，不依赖 extension_bag 内部（show popup 位于其匿名 namespace）。
+    if (g_base == 0) return;
+    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+    if (popup == 0) return;
+    typedef void (*UiPopupFn)(int, int, int, int);
+    reinterpret_cast<UiPopupFn>(popup)(6, 0, 0, 0);
+}
+
 bool extension_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {
     return virtual_bag_identify_native_item(item, out_bag, out_slot);
 }
@@ -106,6 +129,10 @@ bool extension_bag_consume_native_item(void* item) {
 
 bool extension_bag_has_empty_slots(int needed, int include_task_bag) {
     return virtual_bag_has_empty_slots(needed, include_task_bag);
+}
+
+bool extension_bag_adopt_unequipped_item(void* character, int equip_slot) {
+    return virtual_bag_adopt_unequipped_item(character, equip_slot);
 }
 
 std::string extension_bag_use_item(int bag, int slot) {

@@ -148,55 +148,23 @@ std::string data_op_dice_reject() {
 std::string data_op_discard_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
     if (bag == 5) return op_err("task bag excluded");
-    if (fn_remove_item_direct == nullptr) return op_err("symbol not resolved");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
-    if (item_ref.kind == InventoryItemKind::kExtension) {
-        if (!extension_bag_remove_native_item(item_ref.native_item)) {
-            return op_err("extension item discard failed");
-        }
-        extension_bag_sync_projected_slot(bag, slot);
-        return op_ok();
-    }
-    fn_remove_item_direct(bag, slot);
-    if (inventory_item_at(bag, slot) != nullptr) return op_err("discard failed");
+    if (fn_remove_item == nullptr) return op_err("symbol not resolved");
+    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
+    if (fn_remove_item(item_ref.native_item) == 0) return op_err("discard failed");
     extension_bag_sync_projected_slot(bag, slot);
     return op_ok();
 }
 std::string data_op_sell_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
     if (bag == 5) return op_err("task bag excluded");
-    if (fn_remove_item_direct == nullptr || fn_add_money == nullptr ||
-        fn_item_get_sell_price == nullptr || fn_item_is_no_sell == nullptr ||
-        fn_get_bit == nullptr)
+    if (fn_remove_item == nullptr || fn_add_money == nullptr ||
+        fn_minus_money == nullptr || fn_item_get_sell_price == nullptr ||
+        fn_item_is_no_sell == nullptr || fn_get_bit == nullptr)
         return op_err("symbol not resolved");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
-    if (item_ref.kind == InventoryItemKind::kExtension) {
-        if (item_ref.native_item == nullptr) return op_err("extension item unavailable");
-        if (fn_item_get_sell_price == nullptr || fn_add_money == nullptr ||
-            fn_minus_money == nullptr || fn_item_is_no_sell == nullptr ||
-            fn_get_bit == nullptr) {
-            return op_err("symbol not resolved");
-        }
-        const int count = fn_get_cumulate_count != nullptr
-            ? fn_get_cumulate_count(item_ref.native_item) : 1;
-        const uint16_t flags = *reinterpret_cast<uint16_t*>(
-            reinterpret_cast<uint8_t*>(item_ref.native_item) + I_TYPE);
-        const int category = fn_get_bit(flags, 15, 6);
-        if (fn_item_is_no_sell(category) != 0) return op_err("item cannot be sold");
-        const int64_t price = extension_bag_sell_price(item_ref.native_item, count);
-        if (price < 0) {
-            return op_err("invalid extension sell price");
-        }
-        if (!fn_add_money(price)) return op_err("sell money update failed");
-        if (!extension_bag_remove_native_item(item_ref.native_item)) {
-            fn_minus_money(price);
-            return op_err("extension item sell failed");
-        }
-        extension_bag_sync_projected_slot(bag, slot);
-        return "{\"ok\":true,\"price\":" + std::to_string(price) + "}";
-    }
     void* item = item_ref.native_item;
     const uint16_t flags = *reinterpret_cast<uint16_t*>(
         reinterpret_cast<uint8_t*>(item) + I_TYPE);
@@ -208,10 +176,14 @@ std::string data_op_sell_item(int bag, int slot) {
     if (price < 0) {
         return op_err("invalid sell price");
     }
-    fn_remove_item_direct(bag, slot);
-    if (inventory_item_at(bag, slot) != nullptr) return op_err("sell failed");
+    if (!fn_add_money(price)) return op_err("sell money update failed");
+    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
+    // 删除失败回退金币，保持扩展物品原有退款路径语义。
+    if (fn_remove_item(item) == 0) {
+        fn_minus_money(price);
+        return op_err("sell failed");
+    }
     extension_bag_sync_projected_slot(bag, slot);
-    fn_add_money(price);
     return "{\"ok\":true,\"price\":" + std::to_string(price) + "}";
 }
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {

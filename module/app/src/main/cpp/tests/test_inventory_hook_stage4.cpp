@@ -51,6 +51,12 @@ static void backup_consume(void*) { ++g_backup_action_calls; }
 static int backup_remove(void*) { ++g_backup_action_calls; return 7; }
 
 static void* item_at(int32_t, int32_t) { return g_extension_item; }
+static void* g_fallback_view_active = nullptr;
+static int g_fallback_calls = 0;
+static void* view_item_at(int32_t, int32_t) {
+    ++g_fallback_calls;
+    return g_fallback_view_active;
+}
 static int g_equip_extension_calls = 0;
 static int g_equip_backup_calls = 0;
 static bool extension_equip(void*, int32_t bag, int32_t slot, int32_t equip_slot) {
@@ -67,6 +73,13 @@ static int jewel_extension(void* equip_item, void* jewel_item, Stage4JewelBackup
     ++g_jewel_extension_calls;
     return backup == nullptr ? 3 : backup(equip_item, jewel_item);
 }
+
+static int g_unequip_backup_result = 0;
+static int g_unequip_backup_calls = 0;
+static int unequip_backup(void*, int32_t) { ++g_unequip_backup_calls; return g_unequip_backup_result; }
+static int g_unequip_adopt_calls = 0;
+static bool g_unequip_adopt_result = true;
+static bool unequip_adopt(void*, int32_t) { ++g_unequip_adopt_calls; return g_unequip_adopt_result; }
 
 static int g_install_calls = 0;
 static int g_uninstall_calls = 0;
@@ -134,6 +147,19 @@ static void test_object_operations() {
                             extension_equip, backup_equip) == 9);
     CHECK(g_equip_backup_calls == 1);
 
+    // 源槽读空（INVEN 全程真实，扩展物品只在控件投影）时由带视图门禁的
+    // extension_item_at 物化兜底：命中扩展物品走扩展装备，门禁返回空回落原版。
+    g_fallback_view_active = g_extension_item; g_fallback_calls = 0;
+    g_equip_extension_calls = 0; g_equip_backup_calls = 0;
+    CHECK(stage4_equip_item(nullptr, 0, 0, 3, nullptr, identify_item,
+                            extension_equip, backup_equip, view_item_at) == 1);
+    CHECK(g_fallback_calls == 1 && g_equip_extension_calls == 1 && g_equip_backup_calls == 0);
+    g_fallback_view_active = nullptr; g_fallback_calls = 0;
+    g_equip_extension_calls = 0; g_equip_backup_calls = 0;
+    CHECK(stage4_equip_item(nullptr, 0, 0, 3, nullptr, identify_item,
+                            extension_equip, backup_equip, view_item_at) == 9);
+    CHECK(g_fallback_calls == 1 && g_equip_extension_calls == 0 && g_equip_backup_calls == 1);
+
     g_jewel_backup_result = 0; g_jewel_backup_calls = 0; g_extension_action_calls = 0;
     CHECK(stage4_put_jewel(nullptr, g_extension_item, identify_item, jewel_backup,
                             nullptr) == 0);
@@ -148,6 +174,28 @@ static void test_object_operations() {
                            jewel_extension) == 0);
     CHECK(g_jewel_extension_calls == 1 && g_jewel_backup_calls == 1 &&
           g_extension_action_calls == 0);
+}
+
+static void test_unequip_to_inven() {
+    bool guard = false;
+
+    g_unequip_backup_result = 5; g_unequip_backup_calls = 0; g_unequip_adopt_calls = 0;
+    CHECK(stage4_unequip_item_to_inven(nullptr, 3, unequip_backup, unequip_adopt, guard) == 5);
+    CHECK(g_unequip_backup_calls == 1 && g_unequip_adopt_calls == 0 && !guard);
+
+    g_unequip_backup_result = 0; g_unequip_adopt_result = true;
+    g_unequip_backup_calls = 0; g_unequip_adopt_calls = 0;
+    CHECK(stage4_unequip_item_to_inven(nullptr, 3, unequip_backup, unequip_adopt, guard) == 1);
+    CHECK(g_unequip_backup_calls == 1 && g_unequip_adopt_calls == 1 && !guard);
+
+    g_unequip_backup_result = 0; g_unequip_adopt_result = false;
+    g_unequip_backup_calls = 0; g_unequip_adopt_calls = 0;
+    CHECK(stage4_unequip_item_to_inven(nullptr, 3, unequip_backup, unequip_adopt, guard) == 0);
+    CHECK(g_unequip_backup_calls == 1 && g_unequip_adopt_calls == 1 && !guard);
+
+    g_unequip_backup_result = 0; g_unequip_adopt_calls = 0;
+    CHECK(stage4_unequip_item_to_inven(nullptr, 3, unequip_backup, nullptr, guard) == 0);
+    CHECK(g_unequip_adopt_calls == 0 && !guard);
 }
 
 static void test_install_transaction() {
@@ -167,6 +215,7 @@ static void test_install_transaction() {
 int main() {
     test_queries();
     test_object_operations();
+    test_unequip_to_inven();
     test_install_transaction();
     std::printf("stage4_hook_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

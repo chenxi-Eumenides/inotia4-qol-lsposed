@@ -19,6 +19,8 @@ int extension_bag_inventory_state_id();
 void extension_bag_prepare_save_slot_load();
 void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
 void* extension_bag_item_at(int bag, int slot);
+// 视图门禁版 item_at：仅当 bag 处于扩展视图时物化，否则 nullptr。
+void* extension_bag_view_item_at(int bag, int slot);
 bool extension_bag_identify_native_item(void* item, int* out_bag, int* out_slot);
 void* extension_bag_find_native_item(int category);
 bool extension_bag_remove_native_item(void* item);
@@ -29,6 +31,13 @@ void extension_bag_end_internal_equip();
 bool extension_bag_internal_equip_active();
 bool extension_bag_consume_native_item(void* item);
 bool extension_bag_has_empty_slots(int needed, int include_task_bag);
+bool extension_bag_adopt_unequipped_item(void* character, int equip_slot);
+// 装备按钮函数级 hook 分流：扩展槽背包物品接管返回 true。
+bool extension_bag_handle_backpack_button_equip();
+// 原版袋卸下接管（Stage4 第 11 hook）：同 virtual_bag_handle_original_bag_unequip。
+bool extension_bag_handle_original_bag_unequip(bool* out_no_space);
+// 解锁后弹"背包已满"（TextData 6）。
+void extension_bag_show_no_space_popup();
 std::string extension_bag_use_item(int bag, int slot);
 std::string extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot);

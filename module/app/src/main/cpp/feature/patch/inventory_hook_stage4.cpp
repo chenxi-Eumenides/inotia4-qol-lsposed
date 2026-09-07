@@ -78,9 +78,17 @@ int stage4_remove_item(void* item, Stage4IdentifyItem identify,
 int stage4_equip_item(void* character, int32_t bag, int32_t slot, int32_t equip_slot,
                       Stage4ItemAt item_at, Stage4IdentifyItem identify,
                       Stage4EquipExtension extension_equip,
-                      Stage4EquipBackup backup) {
+                      Stage4EquipBackup backup,
+                      Stage4ItemAt extension_item_at) {
     if (backup == nullptr) return 0;
     void* item = item_at == nullptr ? nullptr : item_at(bag, slot);
+    // 扩展视图下原版把控件 index 当 INVEN 坐标读，而 INVEN 全程真实（扩展
+    // 物品只投影到控件不进 INVEN），源槽会读出 null。此时坐标与扩展袋槽
+    // 1:1 对应，由带视图门禁的 extension_item_at 从扩展逻辑物化兜底，让
+    // identify 命中后走扩展装备路径。
+    if (item == nullptr && extension_item_at != nullptr) {
+        item = extension_item_at(bag, slot);
+    }
     int32_t module_bag = -1;
     int32_t module_slot = -1;
     if (item != nullptr && identify != nullptr && identify(item, &module_bag, &module_slot) &&
@@ -104,6 +112,19 @@ int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem iden
         return extension_put(equip_item, jewel_item, backup);
     }
     return backup(equip_item, jewel_item);
+}
+
+int stage4_unequip_item_to_inven(void* character, int32_t equip_slot,
+                                 Stage4UnequipBackup backup,
+                                 Stage4UnequipExtension extension_adopt,
+                                 bool& recursive_guard) {
+    if (backup == nullptr) return 0;
+    if (recursive_guard) return backup(character, equip_slot);
+    recursive_guard = true;
+    const int original = backup(character, equip_slot);
+    recursive_guard = false;
+    if (original != 0) return original;
+    return extension_adopt != nullptr && extension_adopt(character, equip_slot) ? 1 : 0;
 }
 
 bool stage4_install_transaction(const Stage4HookSpec* hooks, std::size_t count,

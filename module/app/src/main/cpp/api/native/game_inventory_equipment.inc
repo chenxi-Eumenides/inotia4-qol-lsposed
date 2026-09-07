@@ -5,7 +5,7 @@ std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     }
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_err("role not found");
-    if (fn_put_jewel == nullptr || fn_is_jewel == nullptr || fn_remove_item_direct == nullptr)
+    if (fn_put_jewel == nullptr || fn_is_jewel == nullptr || fn_remove_item == nullptr)
         return op_err("symbol not resolved");
     if (bag < 0 || bag >= 5 || slot < 0 || slot >= 16) return op_err("bad slot");
     if (equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) return op_err("bad equip slot");
@@ -20,8 +20,9 @@ std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     if (equip == nullptr) return op_err("equip slot empty");
     int r = fn_put_jewel(equip, jewel);
     if (r != 0) return r == 2 ? op_err("no socket") : op_err("not jewel");
-    // PutJewel 不消耗宝石物品本身，镶嵌成功后手动删除背包中的宝石（防刷宝石）
-    fn_remove_item_direct(bag, slot);
+    // PutJewel 不消耗宝石物品本身，镶嵌成功后手动删除背包中的宝石（防刷宝石）。
+    // 统一走已 Hook 的 INVEN_RemoveItem。
+    fn_remove_item(jewel);
     extension_bag_sync_projected_slot(bag, slot);
     return op_ok();
 }
@@ -57,27 +58,16 @@ std::string data_op_equip(int role, int bag, int slot) {
     uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + bag * 0x80;
     void* item = *reinterpret_cast<void**>(bag_slots + slot * 8);
     if (item == nullptr) return op_err("slot empty");
-    int extension_bag = -1;
-    int extension_slot = -1;
-    if (extension_bag_identify_native_item(item, &extension_bag, &extension_slot)) {
-        if (fn_find_equip_slot == nullptr) return op_err("symbol not resolved");
-        const int target = fn_find_equip_slot(ch, item);
-        if (target < 0 || target >= C_EQUIP_SLOTS) return op_err("cannot equip");
-        return extension_bag_equip_projected_item(item, extension_bag, extension_slot, target)
-            ? op_ok() : op_err("extension equip failed");
-    }
     if (!fn_can_equip(ch, item)) return op_err("cannot equip");
-    // CHAR_EquipItem 在目标槽已被占用时返回 0；先查槽位，占用则自动脱下旧装备再穿。
-    if (fn_find_equip_slot != nullptr && fn_get_equip_item != nullptr && fn_unequip != nullptr) {
-        int target = fn_find_equip_slot(ch, item);
-        if (target >= 0 && target < C_EQUIP_SLOTS) {
-            void* occupied = fn_get_equip_item(ch, target);
-            if (occupied != nullptr) {
-                fn_unequip(ch, target);
-            }
-        }
-    }
-    int r = fn_equip_item(ch, item);
+    // 原版交换入口 CHAR_EquipItemFromInvenToSlot：目标槽被占用时自动把旧装备
+    // 放回背包（交换语义），失败返回 0。不做手动查槽+卸下的原版模拟。
+    // 该入口已被 Stage4 Hook，扩展投影物品会透明路由到扩展装备适配，
+    // 无需上层识别。
+    if (fn_find_equip_slot == nullptr || fn_equip_item_from_inven_to_slot == nullptr)
+        return op_err("symbol not resolved");
+    const int target = fn_find_equip_slot(ch, item);
+    if (target < 0 || target >= C_EQUIP_SLOTS) return op_err("cannot equip");
+    const int r = fn_equip_item_from_inven_to_slot(ch, bag, slot, target);
     if (r) extension_bag_sync_projected_bag();
     return r ? op_ok() : op_err("equip failed");
 }

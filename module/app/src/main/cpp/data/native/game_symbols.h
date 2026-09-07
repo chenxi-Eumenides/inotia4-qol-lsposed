@@ -377,6 +377,7 @@ constexpr uintptr_t F_SET_AUTO_ATTACK_VMA = 0xe4cf4;   // void (void*, int32) �
 constexpr uintptr_t F_EQUIP_ITEM_VMA = 0xe51c0;        // int (void*, void*) 穿装备（自动找槽，槽占用返回 0）
 constexpr uintptr_t F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA = 0xe5368; // int (void*,int,int,int) 原版装备交换入口
 constexpr uintptr_t F_UNEQUIP_VMA = 0xe2f68;           // int (void*, int32) 脱装备槽→背包
+constexpr uintptr_t F_SET_EQUIP_ITEM_VMA = 0xe2e8c;    // void (void*, int32, void*) 写装备槽指针（CHAR_EquipItemFromInvenToSlot e555c 调用；传 nullptr 清槽）
 constexpr uintptr_t F_CAN_EQUIP_VMA = 0xe4eb4;         // int (void*, void*) 可否装备
 constexpr uintptr_t F_FIND_EQUIP_SLOT_VMA = 0xe4fd0;   // int (void*, void*) 计算目标装备槽（-1=不可装备）
 constexpr uintptr_t F_GET_EQUIP_ITEM_VMA = 0xda20c;    // void* (void*, int32) 读指定装备槽物品指针
@@ -459,6 +460,7 @@ constexpr uintptr_t F_UIEQUIP_IS_APPLY_STUFF_VMA = 0xb8d4c;
 constexpr uintptr_t F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA = 0xb7910;
 constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
 constexpr uintptr_t F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA = 0xb7784; // void (void) ButtonEquipExe b7d40 装备后刷新角色装备槽显示
+constexpr uintptr_t F_UIEQUIP_REFRESH_BAG_AREA_VMA = 0xb78bc; // void (void) ButtonEquipExe b7e0c 装袋后刷新原版袋槽区域
 constexpr uintptr_t F_SOUNDSYSTEM_PLAY_VMA = 0x1377f0;   // void(int16 id) 原版 UI 音效（袋切换=0x11，反汇编 b8c34）
 constexpr uintptr_t G_SND_FX_VMA = 0x307850;             // g_sndFx 音效句柄表（判空防崩）
 constexpr uintptr_t F_CONTROL_ITEM_SET_ITEM_VMA = 0xaad60;      // (ctrl, item) 控件物品指针（RefreshItemArea b7a64）
@@ -469,6 +471,7 @@ constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
 constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
+constexpr uintptr_t F_UIDESC_GET_DATA_VMA = 0xb2bd0;  // void* UIDesc_GetData()：当前 desc 面板物品对象（ButtonEquipExe b7c2c 同源）
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
 // ---- 合成系统（MIXSYSTEM，craft-batch-ui v0.5.18，libgame-symbols.txt 核对）----
@@ -538,6 +541,7 @@ constexpr uintptr_t F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA = 0xb9188; // InvenIt
 constexpr uintptr_t F_UIEQUIP_BUTTON_EQUIP_EXE_VMA = 0xb7c18;   // void (void*) 装备按钮 execute：记录+2==0x1f 背包分支扫袋 1..4，全满弹 6
 constexpr uintptr_t F_UIEQUIP_BUTTON_USE_EXE_VMA = 0xb80b8;     // void (void*) 使用按钮 execute：调用 CHAR_UseItemEx
 constexpr uintptr_t F_UIEQUIP_BUTTON_DESTROY_EXE_VMA = 0xb6240; // void (void*) 销毁按钮 execute：创建确认弹窗
+constexpr uintptr_t F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA = 0xb7e14; // void (void*) 卸下按钮 execute：desc_type=0 卸装备、desc_type=1 卸袋（b7f74）
 constexpr uintptr_t F_UIEQUIP_OK_DESTROY_ITEM_VMA = 0xb83d0;    // void () 销毁确认回调
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
@@ -602,8 +606,10 @@ using ControlObjectGetDataFn = void* (*)(void*);
 using UiEquipIsApplyStuffFn = int (*)(void*, void*);
 using UiEquipGetItemSlotIndexFn = int (*)(void*);
 using UiEquipRefreshItemAreaFn = void (*)();
+using UiEquipRefreshBagAreaFn = void (*)();
 using UiEquipUpdateCharEquipFn = void (*)();
 using UiDescSetOffFn = void (*)();
+using UiDescGetDataFn = void* (*)();
 using UiEquipMakeDescFn = void (*)(void*, void*);  // UIEquip_MakeDesc(ctrl, 0)：读控件物品生成详情面板（袋标签二次点击原版语义）
 using UiPopupMsgCreateOkFromTextDataFn = void (*)(uint32_t, uint32_t, uint32_t, uint32_t);
 using TouchHandleSetCursorFn = void (*)(void*, void*);
@@ -660,9 +666,12 @@ using SetAutoAttackFn = void (*)(void*, int32_t);
 using EquipItemFn = int (*)(void*, void*);
 using EquipItemFromInvenToSlotFn = int (*)(void*, int32_t, int32_t, int32_t);
 using UnequipFn = int (*)(void*, int32_t);
+using ButtonEquipExeFn = void (*)(void*);  // UIEquip_ButtonEquipExe(button)：全路径返回 1，返回值无消费方
+using ButtonUnequipExeFn = void (*)(void*);  // UIEquip_ButtonUnequipExe(button)
 using CanEquipFn = int (*)(void*, void*);
 using FindEquipSlotFn = int (*)(void*, void*);
 using GetEquipItemFn = void* (*)(void*, int32_t);
+using SetEquipItemFn = void (*)(void*, int32_t, void*);
 using IsSpecialNpcFn = int (*)(void*);
 using LearnActionFn = void* (*)(void*, int32_t, int32_t);
 using SetActivePlayerFn = int (*)(int32_t);

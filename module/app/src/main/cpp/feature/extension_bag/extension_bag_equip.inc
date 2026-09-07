@@ -288,6 +288,13 @@ bool extension_source_should_equip_locked(int target_bag) {
     return g_virtual_bag_state.types[target_bag] == 0 && category >= 1 && category <= 4;
 }
 
+int first_empty_extension_bag_locked() {
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        if (g_virtual_bag_state.types[bag] == 0) return bag;
+    }
+    return -1;
+}
+
 bool equip_extension_source_on_tab_locked(int target_bag, int source_bag, int source_slot) {
     void* source_item = module_item_locked(source_bag, source_slot);
     if (source_item == nullptr) return false;
@@ -304,29 +311,45 @@ bool equip_extension_source_on_tab_locked(int target_bag, int source_bag, int so
 
 // ---- Path A：装备按钮（原版 ButtonEquipExe 背包分支的扩展对应物）----
 // 挂法：BL hook 0xb9188（物品 desc 打开调 MakeDesc）→ 调原函数后 PtrHook
-// 装备按钮（panel+0x78，SetDescMenu desc_type=2 装备分支 b8668 创建）的
-// execute proc；用户点击装备按钮即明确选择扩展背包，因此只要扩展袋有空位
-// 就接管，不再因原版背包有空位而闪回原版背包。
+// 装备按钮的 execute proc；用户点击装备按钮即明确选择扩展背包，因此只要
+// 扩展袋有空位就接管，不再因原版背包有空位而闪回原版背包。
+// 注意：装备按钮所在 panel 槽位随 SetDescMenu desc_type 分支变化（真机日志
+// 实测 desc_type=2 时装备 proc 出现在 panel+0x68，而非旧实现硬编码的
+// 0x78——0x78 槽在当前版本指向 libgame 之外的地址，导致接管 hook 从未
+// 安装、装备按钮走纯原版流程）。因此一律遍历全部详情按钮槽查找
+// execute proc == F_UIEQUIP_BUTTON_EQUIP_EXE 的槽，不做槽位假设。
 void extension_desc_equip_execute(void* button);
+
+void* desc_button_with_execute_slot_locked(void* expected_slot) {
+    constexpr std::array<size_t, 11> kDescButtonOffsets = {
+        0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
+        0x98, 0xa0, 0xa8, 0xb0, 0xb8,
+    };
+    if (g_base == 0 || expected_slot == nullptr) return nullptr;
+    for (const size_t offset : kDescButtonOffsets) {
+        void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + offset);
+        if (button == nullptr ||
+            !game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
+            continue;
+        }
+        void* data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
+        if (data == nullptr ||
+            !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
+            continue;
+        }
+        if (reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC == expected_slot) {
+            return button;
+        }
+    }
+    return nullptr;
+}
 
 void reset_extension_desc_equip_hook_locked() {
     // 详情按钮由游戏所有：若当前 panel 仍指向被 hook 的按钮，先恢复原回调；
     // 若按钮已被游戏销毁，则不能再写入旧 slot，只丢弃模块记录。
-    if (g_extension_desc_equip_hook.installed() && g_base != 0) {
-        void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x78);
-        void* data = nullptr;
-        if (button != nullptr &&
-            game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
-            data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
-        }
-        void* execute_proc = nullptr;
-        if (data != nullptr &&
-            game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
-            execute_proc = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
-        }
-        if (execute_proc == g_extension_desc_equip_hook.slot) {
-            g_extension_desc_equip_hook.uninstall();
-        }
+    if (g_extension_desc_equip_hook.installed() &&
+        desc_button_with_execute_slot_locked(g_extension_desc_equip_hook.slot) != nullptr) {
+        g_extension_desc_equip_hook.uninstall();
     }
     g_extension_desc_equip_hook = {};
     g_extension_desc_equip_item = nullptr;
@@ -335,39 +358,47 @@ void reset_extension_desc_equip_hook_locked() {
 void install_extension_desc_equip_hook_locked(void* item) {
     reset_extension_desc_equip_hook_locked();
     if (g_base == 0 || item == nullptr) return;
-    void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x78);
-    if (button == nullptr) return;
-    if (!game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
-        VIRTBAG_LOG("extension desc equip hook skip invalid button=%p", button);
-        return;
-    }
-    void* data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
-    if (data == nullptr || !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
-        VIRTBAG_LOG("extension desc equip hook skip invalid data button=%p data=%p", button, data);
-        return;
-    }
-    void* execute_proc = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
-    if (!game_memory_accessible(execute_proc, sizeof(void*), 'w') ||
-        *reinterpret_cast<void**>(execute_proc) == nullptr ||
-        !game_memory_accessible(*reinterpret_cast<void**>(execute_proc), 1, 'x')) {
-        VIRTBAG_LOG("extension desc equip hook skip invalid execute button=%p", button);
-        return;
-    }
     const uintptr_t equip_raw = g_base +
         fn_resolve("F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA);
-    if (equip_raw == 0 || *reinterpret_cast<void**>(execute_proc) !=
-        reinterpret_cast<void*>(equip_raw)) {
-        VIRTBAG_LOG("extension desc equip hook skip non-equip proc button=%p proc=%p expected=%p",
-                    button, *reinterpret_cast<void**>(execute_proc),
+    if (equip_raw == 0) return;
+    constexpr std::array<size_t, 11> kDescButtonOffsets = {
+        0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
+        0x98, 0xa0, 0xa8, 0xb0, 0xb8,
+    };
+    void* target_button = nullptr;
+    void* target_execute_slot = nullptr;
+    for (const size_t offset : kDescButtonOffsets) {
+        void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + offset);
+        if (button == nullptr ||
+            !game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
+            continue;
+        }
+        void* data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
+        if (data == nullptr ||
+            !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
+            continue;
+        }
+        void* execute_slot = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
+        if (!game_memory_accessible(execute_slot, sizeof(void*), 'w')) continue;
+        void* proc = *reinterpret_cast<void**>(execute_slot);
+        if (proc != reinterpret_cast<void*>(equip_raw)) continue;
+        if (!game_memory_accessible(proc, 1, 'x')) continue;
+        target_button = button;
+        target_execute_slot = execute_slot;
+        break;
+    }
+    if (target_execute_slot == nullptr) {
+        VIRTBAG_LOG("extension desc equip hook skip: equip proc button not found expected=%p",
                     reinterpret_cast<void*>(equip_raw));
         return;
     }
-    if (!g_extension_desc_equip_hook.install_typed(execute_proc,
+    if (!g_extension_desc_equip_hook.install_typed(target_execute_slot,
                                                    &extension_desc_equip_execute)) {
         VIRTBAG_LOG("extension desc equip hook install failed");
         return;
     }
     g_extension_desc_equip_item = item;
+    VIRTBAG_LOG("extension desc equip hook installed button=%p", target_button);
 }
 
 void extension_desc_equip_execute(void* button) {
@@ -378,9 +409,9 @@ void extension_desc_equip_execute(void* button) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         void* item = g_extension_desc_equip_item;
-        void* hooked_button =
-            g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x78)
-                        : nullptr;
+        void* hooked_button = g_extension_desc_equip_hook.installed()
+            ? desc_button_with_execute_slot_locked(g_extension_desc_equip_hook.slot)
+            : nullptr;
         VIRTBAG_LOG("extension equip execute button=%p hooked=%p item=%p", button,
                     hooked_button, g_extension_desc_equip_item);
         reset_extension_desc_equip_hook_locked();
@@ -392,7 +423,11 @@ void extension_desc_equip_execute(void* button) {
             const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
             const bool jewel = category >= 0 && fn_is_jewel != nullptr &&
                                fn_is_jewel(category) != 0;
-            if (!jewel && item_is_equip(item)) {
+            // 背包物品（category_is_extension_backpack）不再在此处理：扩展槽
+            // 袋对象的两种去向已上移到函数级 hook 的
+            // virtual_bag_handle_backpack_button_equip（native 第 10 hook），
+            // 在原函数内联删源（b7e04）之前分流，无投影竞态。
+            if (!takeover && !jewel && item_is_equip(item)) {
                 int source_bag = -1;
                 int source_slot = -1;
                 if (module_slot_of_item_locked(item, &source_bag, &source_slot)) {
@@ -674,6 +709,16 @@ void install_extension_desc_item_hooks_locked(void* item) {
         void** execute_slot = reinterpret_cast<void**>(
             reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC);
         if (!game_memory_accessible(execute_slot, sizeof(void*), 'w')) continue;
+        // 装备接管 hook 已占用的槽不得重复挂观察 hook：PtrHook 是函数指针
+        // 覆盖（game_ptr_hook.h），后装者会把先装者的 trampoline 当原函数
+        // 保存，卸载顺序错乱会留下错误回调（架构审计确认的高风险点）。
+        // 装备 hook 记录在 g_extension_desc_equip_hook.slot。
+        if (g_extension_desc_equip_hook.installed() &&
+            g_extension_desc_equip_hook.slot == execute_slot) {
+            VIRTBAG_LOG("extension desc hook skip equip-owned slot offset=0x%zx slot=%p",
+                        kDescButtonOffsets[index], execute_slot);
+            continue;
+        }
         bool already_hooked = false;
         for (size_t previous = 0; previous < index; ++previous) {
             if (g_extension_desc_item_hooks[previous].slot == execute_slot) {
@@ -915,21 +960,36 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
                 g_extension_desc_item = item;
                 g_extension_desc_item_bag = item_bag;
                 g_extension_desc_item_slot = item_slot;
+                bool real_equip = false;
+                if (fn_get_bit != nullptr && fn_is_jewel != nullptr) {
+                    const uint16_t flags = *reinterpret_cast<uint16_t*>(
+                        reinterpret_cast<uint8_t*>(item) + I_TYPE);
+                    const int category = fn_get_bit(flags, 15, 6);
+                    real_equip = fn_is_jewel(category) == 0 && item_is_equip(item);
+                }
+                // 装备接管 hook 必须先于观察 hook 安装：PtrHook 是函数指针
+                // 替换，先装的 hook 会把槽里的原始 proc 改写为 trampoline；
+                // 装备 hook 按 proc==原版装备函数匹配，若在观察 hook 之后
+                // 安装，槽里已是 trampoline，匹配永远失败（真机日志实证：
+                // "equip proc button not found expected=..."）。先装装备
+                // hook 占住原始 proc，观察 hook 链式挂在其 trampoline 上
+                // （点击 → 观察 wrapper → 装备 wrapper → 原版）。卸载顺序
+                // 必须逆序：本函数开头已先 reset 观察 hooks，装备 hook 的
+                // reset 在下方 install 内部（先 reset 再装）或 else 分支，
+                // 顺序正确。
+                if (g_virtual_bag_enabled.load() && game_in_world() && real_equip) {
+                    install_extension_desc_equip_hook_locked(item);
+                } else {
+                    reset_extension_desc_equip_hook_locked();
+                }
                 install_extension_desc_item_hooks_locked(item);
                 VIRTBAG_LOG("extension desc item captured bag=%d slot=%d item=%p", item_bag,
                             item_slot, item);
             }
         }
-        bool real_equip = false;
-        if (item != nullptr && fn_get_bit != nullptr && fn_is_jewel != nullptr) {
-            const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            const int category = fn_get_bit(flags, 15, 6);
-            real_equip = fn_is_jewel(category) == 0 && item_is_equip(item);
-        }
-        if (g_virtual_bag_enabled.load() && game_in_world() && real_equip) {
-            install_extension_desc_equip_hook_locked(item);
-        } else {
+        // 兜底：本轮详情不是扩展物品（或安装被跳过）时，确保上一轮的装备
+        // 接管 hook 不残留，原版物品的装备按钮必须走纯原版流程。
+        if (g_extension_desc_equip_hook.installed() && g_extension_desc_equip_item != item) {
             reset_extension_desc_equip_hook_locked();
         }
     }
@@ -974,3 +1034,8 @@ void extension_desc_unequip_execute(void*) {
     // next game frame. Do not invoke original UI refresh from this callback or
     // from the HTTP/JNI operation path.
 }
+
+// virtual_bag_handle_backpack_button_equip 定义在 game_ui_virtbag.cpp 的
+// 匿名 namespace 之外（本文件整体位于匿名 namespace 内，internal linkage
+// 无法被 extension_bag_port.cpp 跨 TU 调用），依赖的本 TU 函数在匿名
+// namespace 内仍可见。

@@ -46,6 +46,9 @@ std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_
 std::string virtual_bag_inventory_bags_json();
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
 void* virtual_bag_item_at(int bag, int slot);
+// 视图门禁版：仅当 bag 处于扩展视图（控件 index 与扩展槽 1:1 对应）时物化，
+// 否则返回 nullptr。供 Stage4 装备路径在原版源槽读空时兜底。
+void* virtual_bag_view_item_at(int bag, int slot);
 
 // Thread-safe read-only native item lookup used by the stable extension-bag port.
 bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot);
@@ -57,3 +60,10 @@ using VirtualBagPutJewelBackup = int (*)(void* equip_item, void* jewel_item);
 int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
                                  VirtualBagPutJewelBackup backup);
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag);
+bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot);
+// 装备按钮函数级 hook（UIEquip_ButtonEquipExe）的扩展侧分流：详情物品为
+// 扩展槽背包物品时返回 true（已处理，不进原函数）；否则 false 走原版。
+bool virtual_bag_handle_backpack_button_equip();
+// 原版袋卸下接管（ButtonUnequipExe desc_type=1）：返回 true 表示已接管（原版
+// 不再执行）；out_no_space 置位表示应弹"背包已满"（袋保持装备态）。
+bool virtual_bag_handle_original_bag_unequip(bool* out_no_space);

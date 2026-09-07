@@ -39,13 +39,21 @@ using Stage4EquipBackup = int (*)(void* character, int32_t bag, int32_t slot,
 int stage4_equip_item(void* character, int32_t bag, int32_t slot, int32_t equip_slot,
                       Stage4ItemAt item_at, Stage4IdentifyItem identify,
                       Stage4EquipExtension extension_equip,
-                      Stage4EquipBackup backup);
+                      Stage4EquipBackup backup,
+                      Stage4ItemAt extension_item_at = nullptr);
 
 using Stage4JewelBackup = int (*)(void* equip_item, void* jewel_item);
 using Stage4JewelExtension = int (*)(void* equip_item, void* jewel_item,
                                      Stage4JewelBackup backup);
 int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem identify,
                      Stage4JewelBackup backup, Stage4JewelExtension extension_put);
+
+using Stage4UnequipBackup = int (*)(void* character, int32_t equip_slot);
+using Stage4UnequipExtension = bool (*)(void* character, int32_t equip_slot);
+int stage4_unequip_item_to_inven(void* character, int32_t equip_slot,
+                                 Stage4UnequipBackup backup,
+                                 Stage4UnequipExtension extension_adopt,
+                                 bool& recursive_guard);
 
 using Stage4HookInstall = int (*)(void* target, void* replacement, void** backup);
 using Stage4HookUninstall = int (*)(void* target);

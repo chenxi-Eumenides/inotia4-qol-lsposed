@@ -138,6 +138,7 @@ extern UnequipFn fn_unequip;
 extern CanEquipFn fn_can_equip;
 extern FindEquipSlotFn fn_find_equip_slot;
 extern GetEquipItemFn fn_get_equip_item;
+extern SetEquipItemFn fn_set_equip_item;
 extern IsSpecialNpcFn fn_is_special_npc;
 extern LearnActionFn fn_learn_action;
 extern SetActivePlayerFn fn_set_active_player;
@@ -179,8 +180,10 @@ extern ControlObjectGetDataFn fn_control_object_get_data;
 extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;
 extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
+extern UiEquipRefreshBagAreaFn fn_ui_equip_refresh_bag_area;
 extern UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip;
 extern UiDescSetOffFn fn_ui_desc_set_off;
+extern UiDescGetDataFn fn_ui_desc_get_data;
 extern UiEquipMakeDescFn fn_ui_equip_make_desc;
 // P3 扩展袋切换音效（原版袋按钮同款：SOUNDSYSTEM_Play(0x11)）
 typedef void (*SoundSystemPlayFn)(int16_t id);

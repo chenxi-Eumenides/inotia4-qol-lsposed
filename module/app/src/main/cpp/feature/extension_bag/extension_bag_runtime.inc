@@ -792,6 +792,21 @@ bool category_is_equip(int category) {
     return (class_data[category * stride + 6] & 1) == 0;
 }
 
+// 原版 ButtonEquipExe 的背包身份判定（反汇编 b7c74）：ITEMCLASSBASE 记录
+// +2 == 0x1f 即背包类。category 只是 ITEMDATABASE 索引，不能承担装备语义；
+// +2 是记录字段偏移（非 VMA），表基址/步长仍来自 game_symbols.h 的
+// G_ITEMCLASS_DATA/SIZE GOT 槽。
+bool category_is_extension_backpack(int category) {
+    if (g_base == 0 || category <= 0) return false;
+    uint8_t* class_data = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    if (class_data == nullptr || size_ptr == nullptr) return false;
+    const uint8_t stride = *size_ptr;
+    if (stride == 0) return false;
+    return class_data[category * stride + 2] == 0x1f;
+}
+
 #include "feature/extension_bag/extension_bag_transaction.inc"
 bool persist_state_locked(bool force) {
     (void)force;

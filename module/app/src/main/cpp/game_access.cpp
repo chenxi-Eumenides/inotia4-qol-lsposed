@@ -252,6 +252,7 @@ bool bridge_init() {
     fn_can_equip = reinterpret_cast<CanEquipFn>(g_base + fn_resolve("F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA));
     fn_find_equip_slot = reinterpret_cast<FindEquipSlotFn>(g_base + fn_resolve("F_FIND_EQUIP_SLOT_VMA", F_FIND_EQUIP_SLOT_VMA));
     fn_get_equip_item = reinterpret_cast<GetEquipItemFn>(g_base + fn_resolve("F_GET_EQUIP_ITEM_VMA", F_GET_EQUIP_ITEM_VMA));
+    fn_set_equip_item = reinterpret_cast<SetEquipItemFn>(g_base + fn_resolve("F_SET_EQUIP_ITEM_VMA", F_SET_EQUIP_ITEM_VMA));
     fn_is_special_npc = reinterpret_cast<IsSpecialNpcFn>(g_base + fn_resolve("F_IS_SPECIAL_NPC_VMA", F_IS_SPECIAL_NPC_VMA));
     fn_learn_action = reinterpret_cast<LearnActionFn>(g_base + fn_resolve("F_LEARN_ACTION_VMA", F_LEARN_ACTION_VMA));
     fn_set_active_player = reinterpret_cast<SetActivePlayerFn>(g_base + fn_resolve("F_SET_ACTIVE_PLAYER_VMA", F_SET_ACTIVE_PLAYER_VMA));
@@ -292,6 +293,7 @@ bool bridge_init() {
     fn_ui_equip_is_apply_stuff = reinterpret_cast<UiEquipIsApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_IS_APPLY_STUFF_VMA", F_UIEQUIP_IS_APPLY_STUFF_VMA));
     fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));
     fn_ui_equip_refresh_item_area = reinterpret_cast<UiEquipRefreshItemAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA));
+    fn_ui_equip_refresh_bag_area = reinterpret_cast<UiEquipRefreshBagAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_BAG_AREA_VMA", F_UIEQUIP_REFRESH_BAG_AREA_VMA));
 fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_base + fn_resolve("F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA", F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA));
     fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
     g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));
@@ -305,6 +307,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_control_object_set_user_type = reinterpret_cast<ControlObjectSetUserTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_USER_TYPE_VMA", F_CONTROL_OBJECT_SET_USER_TYPE_VMA));
     fn_touch_handle_unuse_control_event_move = reinterpret_cast<TouchHandleUnuseControlEventMoveFn>(g_base + fn_resolve("F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA", F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA));
     fn_ui_desc_set_off = reinterpret_cast<UiDescSetOffFn>(g_base + fn_resolve("F_UIDESC_SET_OFF_VMA", F_UIDESC_SET_OFF_VMA));
+    fn_ui_desc_get_data = reinterpret_cast<UiDescGetDataFn>(g_base + fn_resolve("F_UIDESC_GET_DATA_VMA", F_UIDESC_GET_DATA_VMA));
     fn_ui_equip_make_desc = reinterpret_cast<UiEquipMakeDescFn>(g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA));
     fn_touch_handle_set_cursor = reinterpret_cast<TouchHandleSetCursorFn>(g_base + fn_resolve("F_TOUCHHANDLE_SET_CURSOR_VMA", F_TOUCHHANDLE_SET_CURSOR_VMA));
     fn_ui_equip_inven_item_control_event_proc = reinterpret_cast<UiEquipInvenItemControlEventProcFn>(g_base + fn_resolve("F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA));
