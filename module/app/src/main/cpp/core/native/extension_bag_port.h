@@ -34,6 +34,10 @@ bool extension_bag_has_empty_slots(int needed, int include_task_bag);
 bool extension_bag_adopt_unequipped_item(void* character, int equip_slot);
 // INVEN_SaveItem 无空位时的扩展袋接管：把原版新创建物品收进扩展槽。
 bool extension_bag_adopt_native_item(void* item);
+// 原版库存写入（INVEN_SaveItem backup）前调用：若商店扩展视图正在放大
+// 窗口原版袋容量字，先恢复商店投影，避免原版 FindSaveSlot 把物品写进
+// 超过真实容量的槽位（物品丢失/错乱）。
+void extension_bag_store_restore_for_original_write();
 // 装备按钮函数级 hook 分流：扩展槽背包物品接管返回 true。
 bool extension_bag_handle_backpack_button_equip();
 // 原版袋卸下接管（Stage4 第 11 hook）：同 virtual_bag_handle_original_bag_unequip。

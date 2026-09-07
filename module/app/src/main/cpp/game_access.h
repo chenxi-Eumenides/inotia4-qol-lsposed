@@ -181,6 +181,8 @@ extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;
 extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
 extern UiEquipRefreshBagAreaFn fn_ui_equip_refresh_bag_area;
+extern UiStoreRefreshInvenBagFn fn_ui_store_refresh_inven_bag;
+extern UiStoreRefreshInvenItemFn fn_ui_store_refresh_inven_item;
 extern UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip;
 extern UiDescSetOffFn fn_ui_desc_set_off;
 extern UiDescGetDataFn fn_ui_desc_get_data;

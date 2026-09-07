@@ -149,6 +149,10 @@ bool extension_bag_adopt_native_item(void* item) {
     return virtual_bag_adopt_native_item(item);
 }
 
+void extension_bag_store_restore_for_original_write() {
+    virtual_bag_store_restore_for_original_write();
+}
+
 std::string extension_bag_use_item(int bag, int slot) {
     return extension_bag_api_use_item_impl(bag, slot);
 }

@@ -152,6 +152,9 @@ void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
 int extension_tab_index(void* ctrl);
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
+void store_teardown_locked();
+bool install_store_hooks_locked();
+bool store_hooks_installed();
 
 #include "feature/extension_bag/extension_bag_observation.inc"
 
@@ -615,8 +618,22 @@ void show_extension_bag_no_space_popup() {
 // P4.3：源物品在移除确认后入账本保管，提交/回滚均经 retire 终止保管
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
 #include "feature/extension_bag/extension_bag_equip.inc"
+#include "feature/extension_bag/extension_bag_store.inc"
 
 }  // namespace
+
+// 商店扩展视图会把窗口原版袋容量字临时放大到扩展容量；若玩家在此视图下
+// 触发原版库存写入（买入→INVEN_SaveItem），FindSaveSlot 会按放大容量找
+// 空槽，可能把物品写进超过真实容量的槽位（恢复后物品丢失/错乱）。该函数
+// 由 SaveItem hook wrapper 在 backup 前调用：商店投影激活时先恢复投影
+// （容量字还原），让原版按真实容量入库。
+void virtual_bag_store_restore_for_original_write() {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (store_view_installed) {
+        VIRTBAG_LOG("store save gate: restore store module view before original write");
+        store_restore_module_view_locked();
+    }
+}
 
 bool virtual_bag_equip_projected_item(void* item, int source_bag, int source_slot, int equip_slot) {
     if (item == nullptr) return false;

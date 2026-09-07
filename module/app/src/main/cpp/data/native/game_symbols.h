@@ -237,6 +237,33 @@ constexpr uintptr_t G_UIEQUIP_CUR_BAG_GOT_VMA = 0x2f5000 + 0x6d8; // ptr to UIEq
 constexpr uintptr_t G_UIEQUIP_DESC_TYPE_VMA = G_UIEQUIP_PANEL_VMA + 0x63;
 constexpr uintptr_t G_UIEQUIP_PANEL_CTRL_VMA = G_UIEQUIP_PANEL_VMA + 0x8;
 
+// ---- UIStore 商店面板（P7 store host）----
+// UIStore 面板 .bss 基址；商店宿主与 UIEquip 宿主使用独立控件树。
+constexpr uintptr_t G_UISTORE_PANEL_VMA = 0x3073e0;
+constexpr uintptr_t G_UISTORE_ITEM_CTRL_VMA = G_UISTORE_PANEL_VMA + 0x10;
+constexpr uintptr_t G_UISTORE_BAG_CTRL_VMA = G_UISTORE_PANEL_VMA + 0x38;
+constexpr uintptr_t G_UISTORE_SELL_BTN_VMA = G_UISTORE_PANEL_VMA + 0x48;
+constexpr uintptr_t F_UISTORE_REFRESH_INVEN_BAG_VMA = 0xd2228;
+constexpr uintptr_t F_UISTORE_REFRESH_INVEN_ITEM_VMA = 0xd22d0;
+constexpr uintptr_t F_UISTORE_MAKE_DESC_VMA = 0xd27a0;
+constexpr uintptr_t F_UISTORE_DESC_MAKE_DESC_CALL_VMA = 0xd287c;
+constexpr uintptr_t F_UISTORE_INVEN_ITEM_PROC_VMA = 0xd2838;
+constexpr uintptr_t F_UISTORE_INVEN_BAG_PROC_VMA = 0xd2394;
+constexpr uintptr_t F_UISTORE_DRAW_VMA = 0xd2fc4;
+constexpr uintptr_t F_UISTORE_DRAW_INVEN_ITEM_GROUP_VMA = 0xd2bf8;
+constexpr uintptr_t F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA = 0xd2d5c;
+constexpr uintptr_t F_SCENE_DRAW_STORE_VMA = 0x14f5a0;
+constexpr uintptr_t F_SCENE_EVENT_STORE_VMA = 0x14f6f8;
+constexpr uintptr_t F_SCENE_TERMINATE_STORE_VMA = 0x14f558;
+constexpr uintptr_t F_SCENE_DRAW_STORE_GRPX_END_CALL_VMA = 0x14f63c;
+// 商店买入预检：UIStore_BuyItem(0xd242c) 在 INVEN_SaveItem 前自行调
+// INVEN_FindSaveSlot 找槽，原版袋满直接弹窗（TextData 0xb），到不了
+// SaveItem hook 的扩展 adopt。两处 bl 调用点改写为 store buy-gate：
+// 原版无空位但扩展袋有空位时放行，让后续 SaveItem hook 触发扩展 adopt。
+constexpr uintptr_t F_UISTORE_BUY_ITEM_VMA = 0xd242c;
+constexpr uintptr_t F_UISTORE_BUY_FIND_SLOT_CALL_1_VMA = 0xd24a0;  // 普通货物路径（原字 0x9400c530）
+constexpr uintptr_t F_UISTORE_BUY_FIND_SLOT_CALL_2_VMA = 0xd2540;  // CopyAsNewUID 复制路径（原字 0x9400c508）
+
 // ---- 物品序列化 + 触摸拖动状态（v0.7.0 扩展背包跨包移动，objdump 逐字节确认）----
 constexpr uintptr_t F_SAVE_SAVE_ITEM_VMA = 0x1274f0;    // int (uint8_t* out, void* item) SAVE_SaveItem：序列化物品到 out（u8 长度前缀 + 18B 头 + 4B×N 词缀；总长 ≤255，返回总字节）
 constexpr uintptr_t F_SAVE_LOAD_ITEM_VMA = 0x1278a0;    // int (const uint8_t* in, void** out, int* consumed) SAVE_LoadItem：ITEMPOOL_Allocate 重建物品；consumed=前缀+1=记录总长；失败返回 0 且 *out 不清空（调用方须先置空）
@@ -607,6 +634,9 @@ using UiEquipIsApplyStuffFn = int (*)(void*, void*);
 using UiEquipGetItemSlotIndexFn = int (*)(void*);
 using UiEquipRefreshItemAreaFn = void (*)();
 using UiEquipRefreshBagAreaFn = void (*)();
+using UiStoreRefreshInvenBagFn = void (*)();
+using UiStoreRefreshInvenItemFn = void (*)();
+using UiStoreMakeDescFn = void (*)(void*, void*);
 using UiEquipUpdateCharEquipFn = void (*)();
 using UiDescSetOffFn = void (*)();
 using UiDescGetDataFn = void* (*)();

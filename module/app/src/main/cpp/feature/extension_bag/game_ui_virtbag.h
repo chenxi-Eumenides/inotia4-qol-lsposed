@@ -70,3 +70,7 @@ bool virtual_bag_handle_backpack_button_equip();
 // 表示已接管（原版不再执行）；out_no_space/out_not_empty 置位表示应弹
 // "背包已满"/"袋非空"（袋保持装备态）。
 bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty);
+// 商店扩展视图安装期间若发生原版 INVEN 写入（买入 SaveItem 等），必须先
+// 恢复商店投影（还原被放大的窗口袋容量字），否则原版 FindSaveSlot 会把
+// 物品写进超过真实容量的槽位（恢复后物品丢失）。由 SaveItem hook 调用。
+void virtual_bag_store_restore_for_original_write();

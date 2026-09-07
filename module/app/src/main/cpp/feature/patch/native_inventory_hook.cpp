@@ -177,6 +177,11 @@ int save_item_wrapper(void* item) {
     // FindSaveSlot 失败返回 0 → 上层会掉地/静默消失。此处 backup 返回 0 时
     // 转扩展袋空位接管（adopt 进扩展槽），返回 1 让上层按成功处理，
     // 发奖代码零改动即支持扩展背包。
+    // 商店扩展视图会把窗口原版袋容量字临时放大；买入等原版写入若以放大
+    // 容量扫空槽会把物品写进超过真实容量的槽位。backup 前先恢复商店投影。
+    if (extension_bag_enabled()) {
+        extension_bag_store_restore_for_original_write();
+    }
     const int result = g_backup_save_item(item);
     if (result != 0) return result;
     if (extension_bag_adopt_native_item(item)) return 1;

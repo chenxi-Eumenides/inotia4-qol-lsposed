@@ -673,13 +673,15 @@ bool inject_locked() {
             VIRTBAG_LOG("save panel entry not ready; injection will retry");
         }
     }
+    if (!install_store_hooks_locked()) return false;
     return true;
 }
 
 void ensure_inject_thread() {
     if (g_inject_thread_started.exchange(true)) return;
     std::thread([]() {
-        while (g_state_entry == nullptr || !g_save_panel_hook_installed) {
+        while (g_state_entry == nullptr || !g_save_panel_hook_installed ||
+               !store_hooks_installed()) {
             inject_locked();
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }
@@ -705,6 +707,7 @@ void ensure_lifecycle_thread() {
 }
 
 void prepare_main_menu_locked() {
+    store_teardown_locked();
     if (g_module_view_installed) restore_module_view_locked();
     clear_module_cache_locked();
     g_virtual_bag_state = {};

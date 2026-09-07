@@ -294,6 +294,8 @@ bool bridge_init() {
     fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));
     fn_ui_equip_refresh_item_area = reinterpret_cast<UiEquipRefreshItemAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA));
     fn_ui_equip_refresh_bag_area = reinterpret_cast<UiEquipRefreshBagAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_BAG_AREA_VMA", F_UIEQUIP_REFRESH_BAG_AREA_VMA));
+     fn_ui_store_refresh_inven_bag = reinterpret_cast<UiStoreRefreshInvenBagFn>(g_base + fn_resolve("F_UISTORE_REFRESH_INVEN_BAG_VMA", F_UISTORE_REFRESH_INVEN_BAG_VMA));
+     fn_ui_store_refresh_inven_item = reinterpret_cast<UiStoreRefreshInvenItemFn>(g_base + fn_resolve("F_UISTORE_REFRESH_INVEN_ITEM_VMA", F_UISTORE_REFRESH_INVEN_ITEM_VMA));
 fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_base + fn_resolve("F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA", F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA));
     fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
     g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));
