@@ -120,10 +120,7 @@ uint64_t g_inventory_generation = 0;
 uint64_t g_extension_tab_generation = 0;
 int g_pending_extension_tab = -1;
 uint64_t g_pending_extension_tab_generation = 0;
-PtrHook g_extension_desc_unequip_hook;
 int g_extension_desc_unequip_bag = -1;
-PtrHook g_extension_desc_equip_hook;
-void* g_extension_desc_equip_item = nullptr;
 std::array<PtrHook, 11> g_extension_desc_item_hooks{};
 void* g_extension_desc_item = nullptr;
 int g_extension_desc_item_bag = -1;
@@ -748,7 +745,22 @@ bool virtual_bag_handle_backpack_button_equip() {
     const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
     const bool jewel =
         category >= 0 && fn_is_jewel != nullptr && fn_is_jewel(category) != 0;
-    if (jewel || !category_is_extension_backpack(category)) return false;
+    if (jewel) return false;
+    if (!category_is_extension_backpack(category)) {
+        // 扩展槽装备物品 → 装备到角色（原详情按钮 PtrHook 职责，函数 hook 化；
+        // 装备按钮 proc 恒为 ButtonEquipExe，见 native 第 10 hook）。
+        if (from_extension && item_is_equip(item)) {
+            if (equip_module_item_on_character_locked(item, src_bag, src_slot)) {
+                if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+                clear_original_desc_locked();
+                finish_extension_equip_ui_locked(src_bag, nullptr);
+                return true;
+            }
+            VIRTBAG_LOG("extension character equip button failed bag=%d slot=%d", src_bag,
+                        src_slot);
+        }
+        return false;  // 其余（原版源装备/其他）交还原函数
+    }
 
     int found = -1;
     for (int bag = 1; bag <= 4; ++bag) {
@@ -813,17 +825,21 @@ bool virtual_bag_handle_backpack_button_equip() {
 }
 
 // ---- Path A'2：卸袋按钮函数级接管（Stage4 第 11 hook 的扩展侧实现）----
-// UIEquip_ButtonUnequipExe desc_type=1（卸下已装备的原版袋）在纯原版下有个
-// 边角缺陷：先 INVEN_FindSaveSlot 找空槽、后清袋表[N]；FindSaveSlot 在清袋表
-// 前运行，会把"即将腾空的自身袋行 N"当成可用位选中，SaveItem 却在清袋表之
-// 后执行，袋对象落进容量已归零的行 N → 不可见=物品消失（原版背包满时必现，
-// 模块把原版袋塞满的操作模式暴露了它）。接管语义：
-//   袋内容非空 → 交还原版（IsEmptyBag 失败弹"非空"，袋保持，安全）；
-//   原版其他袋有空位 → 放回原版（排除自身行 N）+ 清袋表[N]；
-//   原版满 → 收编扩展袋空位（与扩展袋解除 adopt 同模式）；
-//   扩展也满 → 弹"背包已满"，袋保持装备态（物品绝不消失）。
-bool virtual_bag_handle_original_bag_unequip(bool* out_no_space) {
+// UIEquip_ButtonUnequipExe desc_type=1 覆盖两类袋解除：
+//   · 扩展袋（mode=kModule，desc 由扩展标签二次点击打开）：走扩展解除
+//     unequip_extension_bag_locked（原扩展袋卸下按钮 PtrHook 的职责，
+//     现已函数 hook 化；g_extension_desc_unequip_bag 记录袋位）。
+//   · 原版袋（原版视图）：纯原版下有个边角缺陷——先 INVEN_FindSaveSlot 找
+//     空槽、后清袋表[N]；FindSaveSlot 在清袋表前运行会把"即将腾空的自身
+//     袋行 N"当成可用位选中，SaveItem 却在清袋表之后执行，袋对象落进容量
+//     已归零的行 N → 不可见=物品消失（原版背包满时必现）。接管语义：
+//       袋内容非空 → 弹"袋非空"（袋保持）；
+//       原版其他袋有空位 → 放回原版（排除自身行 N）+ 清袋表[N]；
+//       原版满 → 收编扩展袋空位；
+//       扩展也满 → 弹"背包已满"，袋保持装备态（物品绝不消失）。
+bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
     if (out_no_space != nullptr) *out_no_space = false;
+    if (out_not_empty != nullptr) *out_not_empty = false;
     if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
@@ -832,11 +848,31 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space) {
     // 收编由 CHAR_UnequipItemToInven 第 9 hook 覆盖）。
     const uint8_t desc_type = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);
     if (desc_type != 1) return false;
-    // 扩展视图激活时一律不接管：扩展袋 desc（同样 desc_type=1）的卸下按钮
-    // 已被模块 PtrHook（extension_desc_unequip_execute，internal_bag 记录于
-    // g_extension_desc_unequip_bag）接管，不会执行到本函数；此处兜底防
-    // PtrHook 漏装时用 current bag 误卸原版袋。
-    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule) return false;
+    // 扩展视图激活：desc 必为扩展袋（原版袋 desc 只能在原版视图触发，二次
+    // 点击扩展标签打开）。识别 g_extension_desc_unequip_bag 走扩展解除。
+    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule) {
+        const int ext_bag = g_extension_desc_unequip_bag;
+        const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
+                               g_virtual_bag_state.selected == ext_bag &&
+                               g_virtual_bag_state.info_bag == ext_bag;
+        if (owns_desc) {
+            const ExtensionBagUnequipResult result = unequip_extension_bag_locked(ext_bag);
+            VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag,
+                        static_cast<int>(result));
+            if (result == ExtensionBagUnequipResult::kNotEmpty && out_not_empty != nullptr) {
+                *out_not_empty = true;
+                return true;
+            }
+            if (result == ExtensionBagUnequipResult::kNoSpace && out_no_space != nullptr) {
+                *out_no_space = true;
+                return true;
+            }
+            return result == ExtensionBagUnequipResult::kOk;
+        }
+        // 扩展态但 desc 袋记录失效：保守拦截（不交原版误卸原版袋）。
+        VIRTBAG_LOG("extension desc unequip stale rejected ext_bag=%d", ext_bag);
+        return true;
+    }
     // 被卸袋位=当前袋：desc_type=1 恒为二次点击当前袋标签产生（原版
     // InvenBagControlEventProc N==current）。不能用 UIDesc_GetData/扫袋表
     // 反查——原版卸袋按钮回调拿的是袋标签控件 GetItem（data[0]），desc 面板
@@ -858,7 +894,9 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space) {
     void* item = bag_table[bag_index];
     if (item == nullptr) return false;  // 该袋位无袋对象（空位详情等）→ 交原版
     if (fn_is_empty_bag != nullptr && !fn_is_empty_bag(bag_index)) {
-        return false;  // 袋非空：交原版 IsEmptyBag 失败弹"非空"，袋保持安全
+        // 袋非空：模块接管弹"袋非空"（袋保持安全），不交原版。
+        if (out_not_empty != nullptr) *out_not_empty = true;
+        return true;
     }
     // 放回原版背包（排除自身袋行，防再次落入容量归零行）。
     int receiving_bag = -1;

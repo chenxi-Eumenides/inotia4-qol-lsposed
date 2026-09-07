@@ -64,6 +64,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot);
 // 装备按钮函数级 hook（UIEquip_ButtonEquipExe）的扩展侧分流：详情物品为
 // 扩展槽背包物品时返回 true（已处理，不进原函数）；否则 false 走原版。
 bool virtual_bag_handle_backpack_button_equip();
-// 原版袋卸下接管（ButtonUnequipExe desc_type=1）：返回 true 表示已接管（原版
-// 不再执行）；out_no_space 置位表示应弹"背包已满"（袋保持装备态）。
-bool virtual_bag_handle_original_bag_unequip(bool* out_no_space);
+// 原版袋卸下接管（ButtonUnequipExe desc_type=1，含扩展袋解除）：返回 true
+// 表示已接管（原版不再执行）；out_no_space/out_not_empty 置位表示应弹
+// "背包已满"/"袋非空"（袋保持装备态）。
+bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty);

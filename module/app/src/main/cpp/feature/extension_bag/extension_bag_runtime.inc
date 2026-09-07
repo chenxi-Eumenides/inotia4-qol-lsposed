@@ -235,8 +235,6 @@ JNIEnv* current_env() {
 void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
 void clear_original_desc_locked();
-void reset_extension_desc_equip_hook_locked();
-void extension_desc_unequip_execute(void*);
 void clear_original_item_selection_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
 int original_bag_locked();
@@ -269,37 +267,18 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 const char* context);
 
 void reset_extension_desc_unequip_hook_locked() {
-    // Desc menu buttons are game-owned and can already be gone on teardown.
-    // Do not write through PtrHook::slot while discarding our bookkeeping.
-    g_extension_desc_unequip_hook = {};
+    // 卸下按钮不再有 execute-slot PtrHook（函数级 ButtonUnequipExe hook 承担），
+    // 仅清 desc 袋记录。
     g_extension_desc_unequip_bag = -1;
 }
 
 void install_extension_desc_unequip_hook_locked(int extension_bag) {
     reset_extension_desc_unequip_hook_locked();
-    if (!virtual_bag::valid_index(extension_bag) || g_base == 0) return;
-
-    // UIEquip_SetDescMenu's desc_type=1 branch stores its newly created
-    // ControlButton in UIEquip panel +0x68. Its callback lives in data+0x20.
-    void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x68);
-    if (button == nullptr) {
-        VIRTBAG_LOG("extension desc unequip hook skipped: button missing bag=%d", extension_bag);
-        return;
-    }
-    void* data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(button) + CO_DATA);
-    if (data == nullptr) {
-        VIRTBAG_LOG("extension desc unequip hook skipped: button data missing bag=%d", extension_bag);
-        return;
-    }
-    void* execute_proc = reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
-    if (!g_extension_desc_unequip_hook.install_typed(execute_proc,
-                                                      &extension_desc_unequip_execute)) {
-        VIRTBAG_LOG("extension desc unequip hook install failed bag=%d", extension_bag);
-        return;
-    }
+    if (!virtual_bag::valid_index(extension_bag)) return;
+    // 扩展袋 desc 打开时记录袋位，供函数级 ButtonUnequipExe hook
+    // （virtual_bag_handle_original_bag_unequip）识别扩展袋解除路径。
     g_extension_desc_unequip_bag = extension_bag;
-    VIRTBAG_LOG("extension desc unequip hook installed bag=%d button=%p", extension_bag,
-                button);
+    VIRTBAG_LOG("extension desc unequip armed bag=%d", extension_bag);
 }
 
 // P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。

@@ -69,8 +69,8 @@ bool extension_bag_handle_backpack_button_equip() {
     return virtual_bag_handle_backpack_button_equip();
 }
 
-bool extension_bag_handle_original_bag_unequip(bool* out_no_space) {
-    return virtual_bag_handle_original_bag_unequip(out_no_space);
+bool extension_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
+    return virtual_bag_handle_original_bag_unequip(out_no_space, out_not_empty);
 }
 
 void extension_bag_show_no_space_popup() {
@@ -82,6 +82,16 @@ void extension_bag_show_no_space_popup() {
     if (popup == 0) return;
     typedef void (*UiPopupFn)(int, int, int, int);
     reinterpret_cast<UiPopupFn>(popup)(6, 0, 0, 0);
+}
+
+void extension_bag_show_not_empty_popup() {
+    // TextData 7 = "袋非空"（原版 b8084 同窗）。
+    if (g_base == 0) return;
+    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+    if (popup == 0) return;
+    typedef void (*UiPopupFn)(int, int, int, int);
+    reinterpret_cast<UiPopupFn>(popup)(7, 0, 0, 0);
 }
 
 bool extension_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {

@@ -35,9 +35,10 @@ bool extension_bag_adopt_unequipped_item(void* character, int equip_slot);
 // 装备按钮函数级 hook 分流：扩展槽背包物品接管返回 true。
 bool extension_bag_handle_backpack_button_equip();
 // 原版袋卸下接管（Stage4 第 11 hook）：同 virtual_bag_handle_original_bag_unequip。
-bool extension_bag_handle_original_bag_unequip(bool* out_no_space);
-// 解锁后弹"背包已满"（TextData 6）。
+bool extension_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty);
+// 解锁后弹原版窗：6="背包已满"、7="袋非空"。
 void extension_bag_show_no_space_popup();
+void extension_bag_show_not_empty_popup();
 std::string extension_bag_use_item(int bag, int slot);
 std::string extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot);

@@ -280,7 +280,6 @@ void clear_original_bag_selection_locked() {
 }
 
 void clear_original_desc_locked() {
-    reset_extension_desc_equip_hook_locked();
     restore_extension_desc_popup_callbacks_locked();
     reset_extension_desc_unequip_hook_locked();
     reset_extension_desc_item_hooks_locked();

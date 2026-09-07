@@ -209,12 +209,17 @@ void button_equip_exe_wrapper(void* button) {
 }
 
 void button_unequip_exe_wrapper(void* button) {
-    // 卸下按钮函数级接管：仅 desc_type=1（卸原版袋）且原版背包满时，模块
-    // 把袋对象放回原版其他袋行或收编扩展空位；物品绝不消失。卸装备与其他
-    // 场景一律走原函数。
+    // 卸下按钮函数级接管：desc_type=1 卸袋（原版袋/扩展袋）时模块接管，
+    // 原版背包满时把袋对象放回其他袋行或收编扩展空位；物品绝不消失。
+    // 卸装备与其他场景一律走原函数。
     bool no_space = false;
-    if (extension_bag_handle_original_bag_unequip(&no_space)) {
-        if (no_space) extension_bag_show_no_space_popup();
+    bool not_empty = false;
+    if (extension_bag_handle_original_bag_unequip(&no_space, &not_empty)) {
+        if (not_empty) {
+            extension_bag_show_not_empty_popup();
+        } else if (no_space) {
+            extension_bag_show_no_space_popup();
+        }
         return;
     }
     g_backup_button_unequip_exe(button);
