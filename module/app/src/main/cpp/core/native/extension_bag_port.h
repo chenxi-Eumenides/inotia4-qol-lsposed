@@ -32,6 +32,8 @@ bool extension_bag_internal_equip_active();
 bool extension_bag_consume_native_item(void* item);
 bool extension_bag_has_empty_slots(int needed, int include_task_bag);
 bool extension_bag_adopt_unequipped_item(void* character, int equip_slot);
+// INVEN_SaveItem 无空位时的扩展袋接管：把原版新创建物品收进扩展槽。
+bool extension_bag_adopt_native_item(void* item);
 // 装备按钮函数级 hook 分流：扩展槽背包物品接管返回 true。
 bool extension_bag_handle_backpack_button_equip();
 // 原版袋卸下接管（Stage4 第 11 hook）：同 virtual_bag_handle_original_bag_unequip。

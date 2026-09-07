@@ -145,6 +145,10 @@ bool extension_bag_adopt_unequipped_item(void* character, int equip_slot) {
     return virtual_bag_adopt_unequipped_item(character, equip_slot);
 }
 
+bool extension_bag_adopt_native_item(void* item) {
+    return virtual_bag_adopt_native_item(item);
+}
+
 std::string extension_bag_use_item(int bag, int slot) {
     return extension_bag_api_use_item_impl(bag, slot);
 }

@@ -26,7 +26,10 @@ int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
                                 Stage4EmptyBackup backup,
                                 Stage4EmptyExtension extension_has_empty,
                                 bool& recursive_guard) {
-    if (needed <= 0) return 0;
+    // 原版语义（0x103460 反汇编 0x10347c b.le → 0x1035d8 mov w0,#1）：
+    // needed<=0（物品可全部叠进现有堆、无需新槽）返回 1 = 可放。必须放行，
+    // 否则任务奖励等"全可叠"场景被误报背包已满（真机实证）。
+    if (needed <= 0) return 1;
     if (recursive_guard) {
         return backup == nullptr ? 0 : backup(needed, include_task_bag);
     }

@@ -712,6 +712,65 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     return true;
 }
 
+bool virtual_bag_adopt_native_item(void* item) {
+    // INVEN_SaveItem（0x104528）无空位（FindSaveSlot 失败）时的扩展袋接管：
+    // 把原版"新创建但无处可放"的物品收进扩展袋空位。被 hook 的 wrapper 在
+    // backup 返回 0 后调用；返回 true 则 wrapper 上报成功，上层（任务奖励/
+    // 事件发奖/开箱/拾取等）不会把物品掉地或静默释放。
+    if (item == nullptr || !g_virtual_bag_enabled.load()) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    int existing_bag = -1;
+    int existing_slot = -1;
+    if (module_slot_of_item_locked(item, &existing_bag, &existing_slot)) return false;
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    int payload_size = 0;
+    if (!serialize_item_payload_locked(item, &payload, &payload_size)) return false;
+    int dst_bag = -1;
+    int dst_slot = -1;
+    for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
+        if (g_virtual_bag_state.types[bag] == 0) continue;
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_virtual_bag_state.items[bag][slot].category <= 0) {
+                dst_bag = bag;
+                dst_slot = slot;
+                break;
+            }
+        }
+    }
+    if (dst_bag < 0) return false;  // 扩展袋也满：如实上报失败（上层按原版语义处理）
+    virtual_bag::Item& descriptor = g_virtual_bag_state.items[dst_bag][dst_slot];
+    descriptor.payload = payload;
+    descriptor.payload_size = payload_size;
+    descriptor.category = fn_get_bit != nullptr
+        ? fn_get_bit(*reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE),
+                     15, 6)
+        : 0;
+    descriptor.count = fn_get_cumulate_count != nullptr
+        ? fn_get_cumulate_count(item) : 1;
+    if (descriptor.count <= 0) descriptor.count = 1;
+    // 原版对象直接收编为扩展槽物化对象（SaveItem 失败对象未进库、无其他
+    // 持有者；adopt 后生命周期归模块 g_module_objects 管理）。
+    g_module_objects[dst_bag][dst_slot] = item;
+    g_module_object_categories[dst_bag][dst_slot] = descriptor.category;
+    g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(descriptor);
+    uint32_t adopted_handle = 0;
+    if (ownership::allocate(&g_ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
+        g_module_object_handles[dst_bag][dst_slot] = adopted_handle;
+    } else {
+        g_module_object_handles[dst_bag][dst_slot] = 0;
+        VIRTBAG_LOG("native save adopt ledger exhausted bag=%d slot=%d", dst_bag, dst_slot);
+    }
+    g_item_state_dirty = true;
+    persist_state_locked();
+    if (g_module_view_installed && g_module_view_index == dst_bag) {
+        refresh_module_item_area_locked(dst_bag);
+    }
+    VIRTBAG_LOG("native save adopt bag=%d slot=%d item=%p category=%d count=%d", dst_bag,
+                dst_slot, item, descriptor.category, descriptor.count);
+    return true;
+}
+
 // ---- Path A'：装备按钮函数级接管（Stage4 第 10 hook 的扩展侧实现）----
 // UIEquip_ButtonEquipExe（0xb7c18）被函数级 hook 后，wrapper 先进这里判定。
 // 只接管"详情物品来自扩展槽的背包物品"：原版 BagEquipExe 的删源是内联

@@ -651,6 +651,7 @@ using CsFsRemoveFn = int (*)(char*, int32_t);
 using ItemGetBuyPriceFn = int (*)(void*);
 using InvenFindSaveSlotFn = int (*)(void*, int8_t*);
 using InvenSaveItemFn = int (*)(void*, void*);
+using SaveItemFn = int (*)(void*);  // INVEN_SaveItem(item)：唯一"已创建物品放入背包"漏斗（0x104528，只用 x0；FindSaveSlot 失败返回 0）
 using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);  // INVEN_SaveItemDirect(item, bag, slot) 指定袋槽入库（空槽写入/同类堆叠合并）
 using InvenSaveItemOnEmptyFn = int (*)(void*, int32_t);  // INVEN_SaveItemOnEmpty(item, bag) 目标袋内找空槽入库
 using DealSystemFindSaleByIdFn = void* (*)(void*);

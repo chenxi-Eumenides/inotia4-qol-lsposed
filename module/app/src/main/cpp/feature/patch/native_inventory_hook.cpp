@@ -32,6 +32,7 @@ HaveItemFn g_backup_have_item = nullptr;
 GetItemCountFn g_backup_get_item_count = nullptr;
 ConsumeItemFn g_backup_consume_item = nullptr;
 RemoveItemFn g_backup_remove_item = nullptr;
+SaveItemFn g_backup_save_item = nullptr;
 EquipItemFromInvenToSlotFn g_backup_equip_item_from_inven_to_slot = nullptr;
 PutJewelFn g_backup_put_jewel = nullptr;
 IsHavingEmptySlotFn g_backup_is_having_empty_slot = nullptr;
@@ -170,6 +171,18 @@ int remove_item_wrapper(void* item) {
                               g_in_remove_item);
 }
 
+int save_item_wrapper(void* item) {
+    // INVEN_SaveItem 是所有"已创建物品放入背包"的唯一漏斗（任务奖励/事件
+    // 发奖/开箱/拾取/商店/合成等 18 条调用点）。原版全袋无空位时
+    // FindSaveSlot 失败返回 0 → 上层会掉地/静默消失。此处 backup 返回 0 时
+    // 转扩展袋空位接管（adopt 进扩展槽），返回 1 让上层按成功处理，
+    // 发奖代码零改动即支持扩展背包。
+    const int result = g_backup_save_item(item);
+    if (result != 0) return result;
+    if (extension_bag_adopt_native_item(item)) return 1;
+    return 0;
+}
+
 int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t slot,
                                           int32_t equip_slot) {
     if (extension_bag_internal_equip_active()) {
@@ -296,6 +309,8 @@ bool install_locked() {
         "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA);
     const uintptr_t button_unequip_exe = g_base + fn_resolve(
         "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA", F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA);
+    const uintptr_t save_item = g_base + fn_resolve(
+        "F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA);
     if (!target_is_executable(find_item, "INVEN_FindItem") ||
         !target_is_executable(have_item, "INVEN_HaveItem") ||
         !target_is_executable(get_item_count, "INVEN_GetItemCount") ||
@@ -306,7 +321,8 @@ bool install_locked() {
         !target_is_executable(is_having_empty_slot, "INVEN_IsHavingEmptySlot") ||
         !target_is_executable(unequip_item_to_inven, "CHAR_UnequipItemToInven") ||
         !target_is_executable(button_equip_exe, "UIEquip_ButtonEquipExe") ||
-        !target_is_executable(button_unequip_exe, "UIEquip_ButtonUnequipExe")) {
+        !target_is_executable(button_unequip_exe, "UIEquip_ButtonUnequipExe") ||
+        !target_is_executable(save_item, "INVEN_SaveItem")) {
         return false;
     }
 
@@ -321,8 +337,9 @@ bool install_locked() {
     g_backup_unequip_item_to_inven = nullptr;
     g_backup_button_equip_exe = nullptr;
     g_backup_button_unequip_exe = nullptr;
+    g_backup_save_item = nullptr;
 
-    InstalledHook installed[11]{};
+    InstalledHook installed[12]{};
     std::size_t installed_count = 0;
     const auto install_hook = [&](void* target, void* replacement, void** backup,
                                   const char* name) -> bool {
@@ -378,7 +395,11 @@ bool install_locked() {
         !install_hook(reinterpret_cast<void*>(button_unequip_exe),
                       reinterpret_cast<void*>(button_unequip_exe_wrapper),
                       reinterpret_cast<void**>(&g_backup_button_unequip_exe),
-                      "ButtonUnequipExe")) {
+                      "ButtonUnequipExe") ||
+        !install_hook(reinterpret_cast<void*>(save_item),
+                      reinterpret_cast<void*>(save_item_wrapper),
+                      reinterpret_cast<void**>(&g_backup_save_item),
+                      "SaveItem")) {
         return false;
     }
 

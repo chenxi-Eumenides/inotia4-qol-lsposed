@@ -61,6 +61,8 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
                                  VirtualBagPutJewelBackup backup);
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag);
 bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot);
+// INVEN_SaveItem 无空位时把原版新物品收编进扩展袋空位。
+bool virtual_bag_adopt_native_item(void* item);
 // 装备按钮函数级 hook（UIEquip_ButtonEquipExe）的扩展侧分流：详情物品为
 // 扩展槽背包物品时返回 true（已处理，不进原函数）；否则 false 走原版。
 bool virtual_bag_handle_backpack_button_equip();

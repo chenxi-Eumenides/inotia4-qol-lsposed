@@ -113,7 +113,9 @@ static void test_queries() {
     g_empty_original = 0; g_empty_extension = true; g_empty_original_calls = 0; g_empty_extension_calls = 0;
     CHECK(stage4_is_having_empty_slot(2, 1, empty_original, empty_extension, guard) == 1);
     CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 1 && !guard);
-    CHECK(stage4_is_having_empty_slot(0, 1, empty_original, empty_extension, guard) == 0);
+    // needed<=0 = 无需新槽（物品全可叠进现有堆）：原版返回 1（可放），
+    // 不得误报满（0x103460 反汇编 0x10347c b.le → 0x1035d8 return 1）。
+    CHECK(stage4_is_having_empty_slot(0, 1, empty_original, empty_extension, guard) == 1);
     CHECK(g_empty_extension_calls == 1 && !guard);
 
     g_original_calls = 0; g_extension_calls = 0; g_recursive_guard = &guard;
