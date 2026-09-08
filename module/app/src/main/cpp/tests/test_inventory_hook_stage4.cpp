@@ -38,13 +38,17 @@ static void* g_extension_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0
 static int g_identify_calls = 0;
 static int g_extension_action_calls = 0;
 static int g_backup_action_calls = 0;
+static bool g_extension_consume_result = true;
 static bool identify_item(void* item, int32_t* bag, int32_t* slot) {
     ++g_identify_calls;
     if (bag != nullptr) *bag = 6;
     if (slot != nullptr) *slot = 2;
     return item == g_extension_item;
 }
-static bool extension_consume(void*) { ++g_extension_action_calls; return true; }
+static bool extension_consume(void*) {
+    ++g_extension_action_calls;
+    return g_extension_consume_result;
+}
 static bool extension_remove(bool) { return true; }
 static bool remove_item_extension(void*) { ++g_extension_action_calls; return true; }
 static void backup_consume(void*) { ++g_backup_action_calls; }
@@ -59,8 +63,10 @@ static void* view_item_at(int32_t, int32_t) {
 }
 static int g_equip_extension_calls = 0;
 static int g_equip_backup_calls = 0;
-static bool extension_equip(void*, int32_t bag, int32_t slot, int32_t equip_slot) {
+static void* g_equip_character_seen = nullptr;
+static bool extension_equip(void* character, void*, int32_t bag, int32_t slot, int32_t equip_slot) {
     ++g_equip_extension_calls;
+    g_equip_character_seen = character;
     return bag == 6 && slot == 2 && equip_slot == 3;
 }
 static int backup_equip(void*, int32_t, int32_t, int32_t) { ++g_equip_backup_calls; return 9; }
@@ -127,11 +133,19 @@ static void test_queries() {
 static void test_object_operations() {
     bool guard = false;
     g_identify_calls = 0; g_extension_action_calls = 0; g_backup_action_calls = 0;
-    stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume, guard);
+    g_extension_consume_result = true;
+    CHECK(stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
+                              guard));
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
-    stage4_consume_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)), identify_item,
-                        extension_consume, backup_consume, guard);
+    CHECK(stage4_consume_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
+                              identify_item, extension_consume, backup_consume, guard));
     CHECK(g_backup_action_calls == 1 && !guard);
+
+    g_extension_consume_result = false;
+    g_extension_action_calls = 0; g_backup_action_calls = 0;
+    CHECK(!stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
+                               guard));
+    CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
 
     g_extension_action_calls = 0; g_backup_action_calls = 0;
     CHECK(stage4_remove_item(g_extension_item, identify_item, remove_item_extension,
@@ -141,24 +155,27 @@ static void test_object_operations() {
                              identify_item, remove_item_extension, backup_remove, guard) == 7);
     CHECK(g_backup_action_calls == 1 && !guard);
 
-    g_equip_extension_calls = 0; g_equip_backup_calls = 0;
-    CHECK(stage4_equip_item(nullptr, 0, 0, 3, item_at, identify_item,
+    void* equip_character = reinterpret_cast<void*>(static_cast<uintptr_t>(0x5678));
+    g_equip_extension_calls = 0; g_equip_backup_calls = 0; g_equip_character_seen = nullptr;
+    CHECK(stage4_equip_item(equip_character, 0, 0, 3, item_at, identify_item,
                             extension_equip, backup_equip) == 1);
-    CHECK(g_equip_extension_calls == 1 && g_equip_backup_calls == 0);
-    CHECK(stage4_equip_item(nullptr, 0, 0, 4, nullptr, identify_item,
+    CHECK(g_equip_extension_calls == 1 && g_equip_backup_calls == 0 &&
+          g_equip_character_seen == equip_character);
+    CHECK(stage4_equip_item(equip_character, 0, 0, 4, nullptr, identify_item,
                             extension_equip, backup_equip) == 9);
     CHECK(g_equip_backup_calls == 1);
 
     // 源槽读空（INVEN 全程真实，扩展物品只在控件投影）时由带视图门禁的
     // extension_item_at 物化兜底：命中扩展物品走扩展装备，门禁返回空回落原版。
     g_fallback_view_active = g_extension_item; g_fallback_calls = 0;
-    g_equip_extension_calls = 0; g_equip_backup_calls = 0;
-    CHECK(stage4_equip_item(nullptr, 0, 0, 3, nullptr, identify_item,
+    g_equip_extension_calls = 0; g_equip_backup_calls = 0; g_equip_character_seen = nullptr;
+    CHECK(stage4_equip_item(equip_character, 0, 0, 3, nullptr, identify_item,
                             extension_equip, backup_equip, view_item_at) == 1);
-    CHECK(g_fallback_calls == 1 && g_equip_extension_calls == 1 && g_equip_backup_calls == 0);
+    CHECK(g_fallback_calls == 1 && g_equip_extension_calls == 1 && g_equip_backup_calls == 0 &&
+          g_equip_character_seen == equip_character);
     g_fallback_view_active = nullptr; g_fallback_calls = 0;
     g_equip_extension_calls = 0; g_equip_backup_calls = 0;
-    CHECK(stage4_equip_item(nullptr, 0, 0, 3, nullptr, identify_item,
+    CHECK(stage4_equip_item(equip_character, 0, 0, 3, nullptr, identify_item,
                             extension_equip, backup_equip, view_item_at) == 9);
     CHECK(g_fallback_calls == 1 && g_equip_extension_calls == 0 && g_equip_backup_calls == 1);
 

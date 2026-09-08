@@ -312,6 +312,7 @@ constexpr size_t CB_SIZE = 0x78;             // 按钮私有数据总大小
 // ---- 函数 VMA ----
 constexpr uintptr_t F_GET_MONEY_VMA = 0x10445c;      // int64 ()
 constexpr uintptr_t F_GET_MEMBER_VMA = 0x11f384;     // void* (int)
+constexpr uintptr_t F_GET_MENU_CHARACTER_VMA = 0x120338; // void* () PARTY_GetMenuCharacter：当前装备/物品菜单选中角色
 constexpr uintptr_t F_GET_PARTY_SIZE_VMA = 0x11f3a4; // int ()
 constexpr uintptr_t F_GET_ATTR_VMA = 0xdfd18;        // int32 (void*, int)
 constexpr uintptr_t F_GET_EQUIP_VMA = 0xda20c;       // void* (void*, int)
@@ -567,6 +568,9 @@ constexpr uintptr_t F_UIEQUIP_MAKE_DESC_VMA = 0xb8980;          // (ctrl, 0) 详
 constexpr uintptr_t F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA = 0xb9188; // InvenItemControlEventProc 事件 0x80 调 MakeDesc 的唯一 bl（BL→装备按钮 hook wrapper）
 constexpr uintptr_t F_UIEQUIP_BUTTON_EQUIP_EXE_VMA = 0xb7c18;   // void (void*) 装备按钮 execute：记录+2==0x1f 背包分支扫袋 1..4，全满弹 6
 constexpr uintptr_t F_UIEQUIP_BUTTON_USE_EXE_VMA = 0xb80b8;     // void (void*) 使用按钮 execute：调用 CHAR_UseItemEx
+constexpr uintptr_t F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA = 0xb95f8; // void (void*) 确认后使用按钮 execute（IsUseAfterConfirm 类物品）：关 desc → UIEquip_ConfirmUseItem 弹确认 → OK=UIEquip_OKConfrimUseItem（先 INVEN_FindItemSlot 找槽，扩展物品不在 INVEN 被拦）
+constexpr uintptr_t F_UIEQUIP_CONFIRM_USE_ITEM_VMA = 0xb943c;    // (party_char, item) 弹确认使用 YesNo；OK 回调=OKConfrimUseItem（0xb8478）
+constexpr uintptr_t F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA = 0xb8478; // 确认使用 OK 回调：INVEN_FindItemSlot 定位后调 CHAR_UseItemEx
 constexpr uintptr_t F_UIEQUIP_BUTTON_DESTROY_EXE_VMA = 0xb6240; // void (void*) 销毁按钮 execute：创建确认弹窗
 constexpr uintptr_t F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA = 0xb7e14; // void (void*) 卸下按钮 execute：desc_type=0 卸装备、desc_type=1 卸袋（b7f74）
 constexpr uintptr_t F_UIEQUIP_OK_DESTROY_ITEM_VMA = 0xb83d0;    // void () 销毁确认回调
@@ -589,6 +593,7 @@ constexpr uintptr_t F_WIPEOUT_BUTTON_GAMEOVER_VMA = 0x1502ac;       // int () �
 // ---- 函数签名 ----
 using GetMoneyFn = int64_t (*)();
 using GetMemberFn = void* (*)(int);
+using GetMenuCharacterFn = void* (*)();
 using GetPartySizeFn = int (*)();
 using GetAttrFn = int32_t (*)(void*, int);
 using GetEquipFn = void* (*)(void*, int);
@@ -725,6 +730,7 @@ using CharSetTargetFn = void (*)(void*, void*);
 using CharStopCombatFn = void (*)(void*);
 using ConsumeItemFn = void (*)(void*);
 using CharUseItemExFn = int (*)(void*, void*, int);  // 返回 1=成功(内部已消耗) 0=失败
+using UiEquipOkConfirmUseItemFn = void (*)(void*);  // UIEquip_OKConfrimUseItem(item)：确认使用回调
 using CharProcessShortcutFn = int (*)(void*, int); // 返回 1=处理成功，0=未处理或失败
 using RemoveItemDirectFn = int (*)(int32_t, int32_t);
 using IncludePartyFn = int (*)(void*);

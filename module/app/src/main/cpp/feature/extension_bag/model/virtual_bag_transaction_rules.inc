@@ -147,6 +147,42 @@ inline bool same_extension_bag_mergeable_items(const Item& existing, const Item&
            valid_payload(source);
 }
 
+inline bool extension_swap_tokens_available(bool source_active, bool source_pending_release,
+                                            bool destination_active,
+                                            bool destination_pending_release) {
+    return !source_active && !source_pending_release && !destination_active &&
+           !destination_pending_release;
+}
+
+inline bool projection_drop_context_matches(int view_bag, int source_bag, bool root_matches,
+                                            bool source_control_matches,
+                                            bool destination_control_matches) {
+    return view_bag == source_bag && root_matches && source_control_matches &&
+           destination_control_matches;
+}
+
+inline uint32_t handle_if_object_matches(const void* expected_object, const void* slot_object,
+                                          uint32_t current_handle) {
+    return expected_object == slot_object ? current_handle : 0;
+}
+
+inline bool extension_source_protection_required(bool extension_bag_enabled,
+                                                 bool move_merge_enabled) {
+    return extension_bag_enabled || move_merge_enabled;
+}
+
+inline bool projected_release_owns_event(uint64_t event, bool session_has_projected_item) {
+    return event == 0x18 && session_has_projected_item;
+}
+
+constexpr size_t kPhysicalInventorySnapshotSlots = 6u * kSlotCount;
+
+inline bool physical_inventory_snapshot_changed(
+    const std::array<void*, kPhysicalInventorySnapshotSlots>& before,
+    const std::array<void*, kPhysicalInventorySnapshotSlots>& after) {
+    return before != after;
+}
+
 inline bool item_matches_payload(const Item& item, const PendingTransfer& pending) {
     return pending.payload_size > 0 && item.payload_size == pending.payload_size &&
            std::memcmp(item.payload.data(), pending.payload.data(), pending.payload_size) == 0;
@@ -195,6 +231,7 @@ struct TransactionContext {
     uint8_t dst_bag = 0;
     uint8_t dst_slot = 0;
     bool merged = false;
+    bool swapped = false;
     bool original_stage_applicable = true;
     Item source{};        // 源逻辑项快照（ext→ext/ext→orig 清源还原依据）
     Item committed{};     // 目标提交态（合并时数量位段已修补）
@@ -240,8 +277,13 @@ inline void txn_apply_logical(State* state, const TransactionContext& txn) {
     if (txn.direction == kTransferOriginalToExtension) {
         state->items[txn.dst_bag][txn.dst_slot] = txn.committed;
     } else if (txn.direction == kTransferExtensionToExtension) {
-        state->items[txn.src_bag][txn.src_slot] = {};
-        state->items[txn.dst_bag][txn.dst_slot] = txn.committed;
+        if (txn.swapped) {
+            state->items[txn.src_bag][txn.src_slot] = txn.previous_dst;
+            state->items[txn.dst_bag][txn.dst_slot] = txn.source;
+        } else {
+            state->items[txn.src_bag][txn.src_slot] = {};
+            state->items[txn.dst_bag][txn.dst_slot] = txn.committed;
+        }
     }
 }
 
@@ -348,4 +390,3 @@ inline IsolationRecord isolation_from_journal_record(const JournalRecord& journa
     record.detail = "kDiscard";
     return record;
 }
-

@@ -40,6 +40,8 @@ std::atomic<bool> g_craft_want{false};           // 是否期望注入（配置�
 std::atomic<bool> g_craft_thread_started{false};
 PtrHook g_move_merge_hook;
 std::mutex g_move_merge_mtx;
+std::atomic<bool> g_move_merge_requested{false};
+std::atomic<bool> g_extension_source_protection_requested{false};
 
 uintptr_t patch_addr(const PatchEntry& e) {
     if (g_base == 0) return 0;

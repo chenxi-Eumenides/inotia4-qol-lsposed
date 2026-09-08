@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <sys/mman.h>
 #include <thread>
@@ -66,6 +67,7 @@ using OriginalDrawInvenItemFn = void (*)();
 std::mutex g_virtual_bag_mtx;
 std::atomic<bool> g_inject_thread_started{false};
 std::atomic<bool> g_lifecycle_thread_started{false};
+std::atomic<bool> g_main_menu_cleanup_dirty{false};
 std::atomic<bool> g_virtual_bag_enabled{false};
 std::atomic<uint64_t> g_exit_trace_sequence{0};
 jclass g_virtual_bag_bridge_class = nullptr;
@@ -96,6 +98,24 @@ int g_loaded_slot = -2;
 
 uint64_t isolation_now_ms_locked();
 std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_objects{};
+struct ModuleUseState {
+    bool active = false;
+    bool consumed = false;
+    bool pending_release = false;
+    void* item = nullptr;
+    uint64_t generation = 0;
+    std::thread::id owner{};
+};
+struct ModuleUseToken {
+    int bag = -1;
+    int slot = -1;
+    void* item = nullptr;
+    uint64_t generation = 0;
+    std::thread::id owner{};
+};
+std::array<std::array<ModuleUseState, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
+    g_module_object_use{};
+thread_local ModuleUseToken* g_active_module_use_token = nullptr;
 std::array<std::array<int, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_categories{};
 std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_hashes{};
 std::array<void*, virtual_bag::kSlotCount> g_original_inventory{};
@@ -152,6 +172,14 @@ void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
 int extension_tab_index(void* ctrl);
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
+bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
+bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed);
+bool module_use_abort_locked(const ModuleUseToken& token);
+bool module_slot_is_assignable_locked(int bag, int slot);
+bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
+bool module_object_generation_advance_locked(int bag, int slot, const char* context);
+bool module_object_release_allowed_locked(int bag, int slot, void* item, const char* context,
+                                          bool allow_owner, const ModuleUseToken* token);
 void store_teardown_locked();
 bool install_store_hooks_locked();
 bool store_hooks_installed();
@@ -183,7 +211,7 @@ void handover_tracked_item_locked(uint32_t handle, void* item, const char* conte
 void release_tracked_item_locked(uint32_t handle, void* item, const char* context);
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
-                                                const char* context);
+                                                const char* context, void* use_token);
 
 #include "feature/extension_bag/extension_bag_drag_session.inc"
 
@@ -234,7 +262,7 @@ void* virtual_bag_find_native_item(int category) {
     return nullptr;
 }
 
-bool virtual_bag_remove_native_item(void* item) {
+bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
     if (item == nullptr) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
@@ -244,9 +272,19 @@ bool virtual_bag_remove_native_item(void* item) {
         g_module_objects[bag][slot] != item) {
         return false;
     }
+    ModuleUseToken* use_token = static_cast<ModuleUseToken*>(raw_use_token);
+    if (!module_object_release_allowed_locked(
+            bag, slot, item, "native remove", true, use_token)) {
+        return false;
+    }
+    const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
     g_virtual_bag_state.items[bag][slot] = {};
     g_item_state_dirty = true;
-    free_module_object_locked(bag, slot);
+    if (!free_module_object_locked(bag, slot, use_token)) {
+        g_virtual_bag_state.items[bag][slot] = previous_item;
+        VIRTBAG_LOG("native remove rejected object release bag=%d slot=%d", bag, slot);
+        return false;
+    }
     const bool persisted = persist_state_locked();
     if (g_module_view_installed && g_module_view_index == bag) {
         refresh_module_item_area_locked(bag);
@@ -256,7 +294,7 @@ bool virtual_bag_remove_native_item(void* item) {
     return true;
 }
 
-bool virtual_bag_consume_native_item(void* item) {
+bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
     if (item == nullptr) return false;
     void* detail_control = nullptr;
     {
@@ -267,11 +305,17 @@ bool virtual_bag_consume_native_item(void* item) {
         if (!module_slot_of_item_locked(item, &bag, &slot) || g_module_objects[bag][slot] != item) {
             return false;
         }
+        ModuleUseToken* use_token = static_cast<ModuleUseToken*>(raw_use_token);
+        if (!module_object_release_allowed_locked(
+                bag, slot, item, "native consume", true,
+                use_token)) {
+            return false;
+        }
         const int before_count = g_virtual_bag_state.items[bag][slot].count;
         const int observed_before = fn_get_cumulate_count != nullptr
             ? fn_get_cumulate_count(item) : before_count;
-        if (!consume_extension_item_after_native_locked(bag, slot, item, before_count,
-                                                        observed_before, "native_consume")) {
+        if (!consume_extension_item_after_native_locked(
+                bag, slot, item, before_count, observed_before, "native_consume", use_token)) {
             return false;
         }
         g_item_state_dirty = true;
@@ -300,6 +344,10 @@ bool virtual_bag_consume_native_item(void* item) {
         make_desc_equip_gate(detail_control, nullptr);
     }
     return true;
+}
+
+void* virtual_bag_current_use_token() {
+    return g_active_module_use_token;
 }
 
 int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
@@ -484,7 +532,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
             if (bag == internal_bag) continue;  // 排除正在解除的袋（见上）
             if (g_virtual_bag_state.types[bag] == 0) continue;
             for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-                if (g_virtual_bag_state.items[bag][slot].category <= 0) {
+                if (module_slot_is_assignable_locked(bag, slot)) {
                     adopt_bag = bag;
                     adopt_slot = slot;
                     break;
@@ -514,6 +562,10 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
         // 读得 0 会让收编袋显示为空槽（下次收编仍会选中它）。
         descriptor.count = 1;
         // 对象移交目标扩展槽保管（item_handle 早前已 allocate，沿用）。
+        if (!module_object_generation_advance_locked(adopt_bag, adopt_slot, "unequip adopt")) {
+            release_tracked_item_locked(item_handle, item, "unequip adopt slot protected");
+            return ExtensionBagUnequipResult::kFailed;
+        }
         g_module_objects[adopt_bag][adopt_slot] = item;
         g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
         g_module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
@@ -530,6 +582,11 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
             return ExtensionBagUnequipResult::kOk;
         }
         // persist 失败：回滚收编与袋装备态，对象真释放。
+        if (!module_object_generation_advance_locked(adopt_bag, adopt_slot, "unequip rollback")) {
+            VIRTBAG_LOG("extension unequip rollback blocked by active object bag=%d slot=%d",
+                        adopt_bag, adopt_slot);
+            return ExtensionBagUnequipResult::kPersistFailed;
+        }
         g_module_objects[adopt_bag][adopt_slot] = nullptr;
         g_module_object_categories[adopt_bag][adopt_slot] = 0;
         g_module_object_hashes[adopt_bag][adopt_slot] = 0;
@@ -622,6 +679,10 @@ void show_extension_bag_no_space_popup() {
 
 }  // namespace
 
+bool virtual_bag_handle_confirm_use_item(void* item) {
+    return extension_confirm_use_item(item);
+}
+
 // 商店扩展视图会把窗口原版袋容量字临时放大到扩展容量；若玩家在此视图下
 // 触发原版库存写入（买入→INVEN_SaveItem），FindSaveSlot 会按放大容量找
 // 空槽，可能把物品写进超过真实容量的槽位（恢复后物品丢失/错乱）。该函数
@@ -635,19 +696,19 @@ void virtual_bag_store_restore_for_original_write() {
     }
 }
 
-bool virtual_bag_equip_projected_item(void* item, int source_bag, int source_slot, int equip_slot) {
-    if (item == nullptr) return false;
+bool virtual_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
+                                      int equip_slot) {
+    if (character == nullptr || item == nullptr) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     if (!g_module_view_installed || g_module_view_index != source_bag) return false;
-    void* character = member_or_null(0);
-    if (character == nullptr || fn_find_equip_slot == nullptr) return false;
+    if (fn_find_equip_slot == nullptr) return false;
     const int found = fn_find_equip_slot(character, item);
     if (found < 0 || found >= C_EQUIP_SLOTS) return false;
     // 原版在源槽读空时传 equip_slot=-1（FindEquipSlot(null) 的结果）；扩展
     // 物品不在 INVEN，不能把 -1 当校验失败，以真实物品计算的装备槽为准。
     if (equip_slot >= 0 && equip_slot < C_EQUIP_SLOTS && equip_slot != found) return false;
-    return equip_module_item_on_character_locked(item, source_bag, source_slot);
+    return equip_module_item_on_character_locked(character, item, source_bag, source_slot);
 }
 
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
@@ -659,8 +720,7 @@ bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
     for (int bag = 0; bag < bag_count; ++bag) {
         const int capacity = g_virtual_bag_state.capacities[bag];
         for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
-            const auto& item = g_virtual_bag_state.items[bag][slot];
-            if (item.category <= 0 || item.count <= 0) {
+            if (module_slot_is_assignable_locked(bag, slot)) {
                 ++empty;
                 if (empty >= needed) return true;
             }
@@ -687,7 +747,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
         if (g_virtual_bag_state.types[bag] == 0) continue;
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_virtual_bag_state.items[bag][slot].category <= 0) {
+            if (module_slot_is_assignable_locked(bag, slot)) {
                 dst_bag = bag;
                 dst_slot = slot;
                 break;
@@ -707,6 +767,11 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     // 装备槽对象仍被原版 UI（装备槽 desc/控件缓存）引用，不能释放给对象池；
     // 直接收编为扩展槽的物化对象（与 equip_module_item_on_character_locked
     // 对旧装备的收编同规则）。
+    if (!module_object_generation_advance_locked(dst_bag, dst_slot, "unequip replacement")) {
+        VIRTBAG_LOG("native unequip adopt blocked by active object bag=%d slot=%d",
+                    dst_bag, dst_slot);
+        return false;
+    }
     g_module_objects[dst_bag][dst_slot] = item;
     g_module_object_categories[dst_bag][dst_slot] = descriptor.category;
     g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(descriptor);
@@ -748,7 +813,7 @@ bool virtual_bag_adopt_native_item(void* item) {
     for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
         if (g_virtual_bag_state.types[bag] == 0) continue;
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_virtual_bag_state.items[bag][slot].category <= 0) {
+            if (module_slot_is_assignable_locked(bag, slot)) {
                 dst_bag = bag;
                 dst_slot = slot;
                 break;
@@ -768,6 +833,11 @@ bool virtual_bag_adopt_native_item(void* item) {
     if (descriptor.count <= 0) descriptor.count = 1;
     // 原版对象直接收编为扩展槽物化对象（SaveItem 失败对象未进库、无其他
     // 持有者；adopt 后生命周期归模块 g_module_objects 管理）。
+    if (!module_object_generation_advance_locked(dst_bag, dst_slot, "native save adopt")) {
+        VIRTBAG_LOG("native save adopt blocked by active object bag=%d slot=%d",
+                    dst_bag, dst_slot);
+        return false;
+    }
     g_module_objects[dst_bag][dst_slot] = item;
     g_module_object_categories[dst_bag][dst_slot] = descriptor.category;
     g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(descriptor);
@@ -801,8 +871,10 @@ bool virtual_bag_adopt_native_item(void* item) {
 // 其他物品（原版物品、装备、宝石）一律交还原函数，保持原版流程。
 // 定义在匿名 namespace 之外（port 跨 TU 调用）；依赖的本 TU 匿名 namespace
 // 函数（category_is_extension_backpack 等）在 TU 内可见。
-bool virtual_bag_handle_backpack_button_equip() {
-    if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
+VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
+    if (!g_virtual_bag_enabled.load() || !game_in_world()) {
+        return VirtualBagEquipButtonResult::kNotExtension;
+    }
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     void* item = g_extension_desc_item;
@@ -812,7 +884,7 @@ bool virtual_bag_handle_backpack_button_equip() {
     if (item == nullptr && fn_ui_desc_get_data != nullptr) {
         item = fn_ui_desc_get_data();
     }
-    if (item == nullptr) return false;
+    if (item == nullptr) return VirtualBagEquipButtonResult::kNotExtension;
     int src_bag = -1;
     int src_slot = -1;
     const bool from_extension = module_slot_of_item_locked(item, &src_bag, &src_slot);
@@ -821,21 +893,29 @@ bool virtual_bag_handle_backpack_button_equip() {
     const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
     const bool jewel =
         category >= 0 && fn_is_jewel != nullptr && fn_is_jewel(category) != 0;
-    if (jewel) return false;
+    if (jewel) return VirtualBagEquipButtonResult::kNotExtension;
     if (!category_is_extension_backpack(category)) {
         // 扩展槽装备物品 → 装备到角色（原详情按钮 PtrHook 职责，函数 hook 化；
         // 装备按钮 proc 恒为 ButtonEquipExe，见 native 第 10 hook）。
         if (from_extension && item_is_equip(item)) {
-            if (equip_module_item_on_character_locked(item, src_bag, src_slot)) {
+            if (!module_object_replacement_allowed_locked(src_bag, src_slot,
+                                                          "character equip button")) {
+                VIRTBAG_LOG("extension character equip button blocked bag=%d slot=%d",
+                            src_bag, src_slot);
+                return VirtualBagEquipButtonResult::kBlocked;
+            }
+            void* character = extension_menu_character();
+            if (character != nullptr &&
+                equip_module_item_on_character_locked(character, item, src_bag, src_slot)) {
                 if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
                 clear_original_desc_locked();
                 finish_extension_equip_ui_locked(src_bag, nullptr);
-                return true;
+                return VirtualBagEquipButtonResult::kHandled;
             }
             VIRTBAG_LOG("extension character equip button failed bag=%d slot=%d", src_bag,
                         src_slot);
         }
-        return false;  // 其余（原版源装备/其他）交还原函数
+        return VirtualBagEquipButtonResult::kNotExtension;  // 其余（原版源装备/其他）交还原函数
     }
 
     int found = -1;
@@ -848,12 +928,24 @@ bool virtual_bag_handle_backpack_button_equip() {
     if (found >= 0) {
         // 原版背包源物品 + 原版有空袋：源在原版 INVEN，直接交还原版流程装袋
         // （原版自己写袋表 + 删源 + 刷新），模块不介入。
-        if (!from_extension) return false;
-        if (g_base == 0) return false;
+        if (!from_extension) return VirtualBagEquipButtonResult::kNotExtension;
+        if (!module_object_replacement_allowed_locked(src_bag, src_slot,
+                                                      "backpack equip to original")) {
+            VIRTBAG_LOG("extension backpack equip to original blocked bag=%d slot=%d",
+                        src_bag, src_slot);
+            return VirtualBagEquipButtonResult::kBlocked;
+        }
+        if (g_base == 0) return VirtualBagEquipButtonResult::kNotExtension;
         void** bag_table = *reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
         if (bag_table == nullptr) {
             VIRTBAG_LOG("extension backpack fn-equip bag table missing");
-            return false;
+            return VirtualBagEquipButtonResult::kBlocked;
+        }
+        if (!module_object_generation_advance_locked(src_bag, src_slot,
+                                                     "unequip to original")) {
+            VIRTBAG_LOG("extension unequip to original blocked by active object bag=%d slot=%d",
+                        src_bag, src_slot);
+            return VirtualBagEquipButtonResult::kBlocked;
         }
         bag_table[found] = item;
         virtual_bag::Item& descriptor = g_virtual_bag_state.items[src_bag][src_slot];
@@ -883,21 +975,26 @@ bool virtual_bag_handle_backpack_button_equip() {
         }
         VIRTBAG_LOG("extension backpack fn-equip original bag=%d src=%d/%d item=%p",
                     found, src_bag, src_slot, item);
-        return true;
+        return VirtualBagEquipButtonResult::kHandled;
     }
 
     // 原版袋全满 → 扩展接管。equip_extension_bag_item_locked 同时支持扩展槽
     // 源与"原版 INVEN 源"（内部先扫原版库存定位物品再移除，源物品真实销毁）。
     const int target = first_empty_extension_bag_locked();
-    if (target < 0) return false;  // 扩展也满：交还原函数弹 6 号"背包已满"
+    if (target < 0) return VirtualBagEquipButtonResult::kNotExtension;
     const ExtensionBagEquipResult result = equip_extension_bag_item_locked(target, item);
-    if (result != ExtensionBagEquipResult::kOk) return false;
+    if (result != ExtensionBagEquipResult::kOk) return VirtualBagEquipButtonResult::kNotExtension;
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
     clear_original_desc_locked();
     finish_extension_equip_ui_locked(target, nullptr);
     VIRTBAG_LOG("extension backpack fn-equip extension target=%d src=%d/%d", target,
                 src_bag, src_slot);
-    return true;
+    return VirtualBagEquipButtonResult::kHandled;
+}
+
+bool virtual_bag_handle_backpack_button_equip() {
+    return virtual_bag_handle_backpack_button_equip_result() ==
+           VirtualBagEquipButtonResult::kHandled;
 }
 
 // ---- Path A'2：卸袋按钮函数级接管（Stage4 第 11 hook 的扩展侧实现）----
@@ -1001,7 +1098,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
         if (g_virtual_bag_state.types[bag] == 0) continue;
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_virtual_bag_state.items[bag][slot].category <= 0) {
+            if (module_slot_is_assignable_locked(bag, slot)) {
                 adopt_bag = bag;
                 adopt_slot = slot;
                 break;
@@ -1035,6 +1132,12 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     } else {
         g_module_object_handles[adopt_bag][adopt_slot] = 0;
         VIRTBAG_LOG("original bag unequip ledger exhausted bag=%d", bag_index);
+    }
+    if (!module_object_generation_advance_locked(
+            adopt_bag, adopt_slot, "original bag unequip adopt")) {
+        VIRTBAG_LOG("original bag unequip adopt blocked by active object bag=%d slot=%d",
+                    adopt_bag, adopt_slot);
+        return false;
     }
     g_module_objects[adopt_bag][adopt_slot] = item;
     g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;

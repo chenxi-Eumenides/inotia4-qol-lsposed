@@ -348,12 +348,20 @@ void* module_item_locked(int bag, int slot) {
     void* item = g_module_objects[bag][slot];
     if (item == nullptr || g_module_object_categories[bag][slot] != descriptor.category ||
         g_module_object_hashes[bag][slot] != descriptor_hash) {
-        free_module_object_locked(bag, slot);
+        if (!free_module_object_locked(bag, slot)) {
+            VIRTBAG_LOG("module materialize rejected stale object bag=%d slot=%d item=%p",
+                        bag, slot, item);
+            return nullptr;
+        }
         item = materialize_module_item_locked(descriptor);
         if (item == nullptr) return nullptr;
         uint32_t handle = 0;
         if (ownership::allocate(&g_ownership_ledger, &handle) == ownership::Outcome::kOk) {
             g_module_object_handles[bag][slot] = handle;  // module-owned（G-13）
+        }
+        if (!module_object_generation_advance_locked(bag, slot, "materialize replacement")) {
+            VIRTBAG_LOG("module materialize replacement rejected bag=%d slot=%d", bag, slot);
+            return nullptr;
         }
         g_module_objects[bag][slot] = item;
         g_module_object_categories[bag][slot] = descriptor.category;
@@ -687,7 +695,12 @@ void virtual_bag_save_panel_enter_wrapper() {
 void virtual_bag_draw_end_wrapper() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) != 5) {
-        prepare_main_menu_locked();
+        if (!prepare_main_menu_locked()) {
+            g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
+            VIRTBAG_LOG("draw-end main-menu cleanup failed; retry scheduled");
+        } else {
+            g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+        }
         if (fn_grpx_end != nullptr) fn_grpx_end();
         return;
     }

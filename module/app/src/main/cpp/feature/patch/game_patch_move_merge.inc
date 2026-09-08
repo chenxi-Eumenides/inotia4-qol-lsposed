@@ -6,11 +6,17 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     };
     // G-8：投影拖动 drop 到扩展格（0x02）→ 路由 ext→ext 事务，抑制原版
     // INVEN_MoveItem（借出对象不在 INVEN，原版移动不可靠）。
-    if (event == 0x2 && param != nullptr && param != nullptr) {
+    if (event == 0x2 && param != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
-        if (virtual_bag_projection_drop_to_slot(control, ctrl_src)) {
+        const VirtualBagProjectionDropResult drop_result =
+            virtual_bag_projection_drop_to_slot(control, ctrl_src);
+        if (drop_result == VirtualBagProjectionDropResult::kHandled) {
             return finish(1);
+        }
+        if (drop_result == VirtualBagProjectionDropResult::kRejected) {
+            MOVE_LOG("move_merge: extension drop rejected; original proc suppressed");
+            return finish(0);
         }
     }
     // G-7：扩展视图内只拦截 drop（0x04，借出对象不得拖入原版袋——SaveItemOnEmpty
@@ -99,8 +105,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     return finish(result);
 }
 
-bool set_move_merge_enabled(bool enabled) {
-    std::lock_guard<std::mutex> lock(g_move_merge_mtx);
+bool update_move_merge_hook_locked() {
     if (g_base == 0) return false;
     void** slot = reinterpret_cast<void**>(g_base + G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA);
     if (slot == nullptr || *slot == nullptr) {
@@ -108,7 +113,9 @@ bool set_move_merge_enabled(bool enabled) {
         return false;
     }
     const void* replacement = reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper);
-    if (enabled) {
+    const bool should_install = g_move_merge_requested.load() ||
+                                g_extension_source_protection_requested.load();
+    if (should_install) {
         if (g_move_merge_hook.orig != nullptr) return true;
         const void* expected = reinterpret_cast<void*>(fn_ui_equip_inven_item_control_event_proc);
         if (expected == nullptr || *slot != expected) {
@@ -124,11 +131,14 @@ bool set_move_merge_enabled(bool enabled) {
         MOVE_LOG("move_merge: mprotect failed errno=%d", errno);
         return false;
     }
-    if (enabled) {
+    if (should_install) {
         bool ok = g_move_merge_hook.install_typed(slot, &ui_equip_inven_item_proc_wrapper);
         if (ok) {
-            MOVE_LOG("move_merge: enabled proc_got=%p orig=%p replacement=%p", slot, g_move_merge_hook.orig,
-                     reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper));
+            MOVE_LOG("move_merge: wrapper installed proc_got=%p orig=%p replacement=%p merge=%d extension_protection=%d",
+                     slot, g_move_merge_hook.orig,
+                     reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
+                     g_move_merge_requested.load() ? 1 : 0,
+                     g_extension_source_protection_requested.load() ? 1 : 0);
         }
         return ok;
     }
@@ -138,7 +148,31 @@ bool set_move_merge_enabled(bool enabled) {
     return true;
 }
 
+bool set_move_merge_enabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(g_move_merge_mtx);
+    g_move_merge_requested.store(enabled);
+    const bool ok = update_move_merge_hook_locked();
+    if (ok) {
+        MOVE_LOG("move_merge: behavior=%d wrapper=%d extension_protection=%d",
+                 enabled ? 1 : 0, g_move_merge_hook.orig != nullptr ? 1 : 0,
+                 g_extension_source_protection_requested.load() ? 1 : 0);
+    }
+    return ok;
+}
+
+bool set_extension_source_protection_enabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(g_move_merge_mtx);
+    g_extension_source_protection_requested.store(enabled);
+    const bool ok = update_move_merge_hook_locked();
+    if (ok) {
+        MOVE_LOG("move_merge: extension_source_protection=%d wrapper=%d merge=%d",
+                 enabled ? 1 : 0, g_move_merge_hook.orig != nullptr ? 1 : 0,
+                 g_move_merge_requested.load() ? 1 : 0);
+    }
+    return ok;
+}
+
 bool move_merge_enabled() {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
-    return g_move_merge_hook.orig != nullptr;
+    return g_move_merge_requested.load();
 }

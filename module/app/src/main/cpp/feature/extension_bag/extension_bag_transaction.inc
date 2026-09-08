@@ -51,8 +51,7 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     bool merged = false;
     if (dst_slot < 0) {
         for (int slot = 0; slot < capacity; ++slot) {
-            const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
-            if (existing.category != 0 || existing.count != 0) continue;
+            if (!module_slot_is_assignable_locked(dst_bag, slot)) continue;
             committed = txn.source;
             dst_slot = slot;
             break;
@@ -85,6 +84,18 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
                          "target extension item could not be materialized; source retained");
         return false;
     }
+    if (!module_object_release_allowed_locked(
+            dst_bag, dst_slot, g_module_objects[dst_bag][dst_slot],
+            "original-to-extension commit", false, nullptr)) {
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "target extension object is in use; source retained");
+        return false;
+    }
+    if (!free_module_object_locked(dst_bag, dst_slot)) {
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "target extension object release rejected");
+        return false;
+    }
 
     // original-state-updated：删除原版源并以原版实态复核（不只信删除函数返回值）。
     fn_remove_item_direct(src_bag, src_slot);
@@ -97,7 +108,6 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
 
     // committed：不做猜测性逆转。清 pending、回收模块投影对象、刷新原版网格。
     g_virtual_bag_state.pending = {};
-    free_module_object_locked(dst_bag, dst_slot);
     // 用户决策（2026-08-31）：orig→ext 后保持当前视图（对齐原版"移动后停留"）。
     // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
     // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
@@ -251,13 +261,36 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
         reset_drag_state_locked(nullptr);
         return false;
     }
+    if (!module_object_release_allowed_locked(
+            src_bag, src_slot, g_module_objects[src_bag][src_slot],
+            "extension-to-original commit", false, nullptr)) {
+        isolate_ext2orig_failure_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                                        virtual_bag::isolation_reason::kInsertFailed,
+                                        "source extension object is in use");
+        txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                         "source extension object release rejected");
+        fn_remove_item_direct(target_bag, inserted_slot);
+        release_tracked_item_locked(item_handle, item, "ext2orig release rejected rollback");
+        reset_drag_state_locked(nullptr);
+        return false;
+    }
     // P4.3：入库已确认 → 原版库存接管终态（此后模块不得触碰 item 指针）。
+    if (!free_module_object_locked(src_bag, src_slot)) {
+        isolate_ext2orig_failure_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                                        virtual_bag::isolation_reason::kInsertFailed,
+                                        "source extension object release rejected");
+        txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
+                         "source extension object release rejected");
+        fn_remove_item_direct(target_bag, inserted_slot);
+        release_tracked_item_locked(item_handle, item, "ext2orig release rejected rollback");
+        reset_drag_state_locked(nullptr);
+        return false;
+    }
     handover_tracked_item_locked(item_handle, item, "ext2orig handover");
 
     // committed：清扩展源逻辑项、恢复投影、清 pending。已移交对象不参与模块回滚。
     g_virtual_bag_state.items[src_bag][src_slot] = {};
     g_item_state_dirty = true;
-    free_module_object_locked(src_bag, src_slot);
     g_virtual_bag_state.pending = {};
     // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
     // API 路径（原版视图）不改写视图字段（用户 2026-08-31 决策）。
@@ -314,6 +347,195 @@ bool route_deferred_extension_to_original_locked() {
                     static_cast<int>(session.target_kind));
     }
     return moved;
+}
+
+bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst_slot) {
+    const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
+    const virtual_bag::Item destination = g_virtual_bag_state.items[dst_bag][dst_slot];
+    if (source.category <= 0 || source.count <= 0 || destination.category <= 0 ||
+        destination.count <= 0 || !virtual_bag::valid_payload(destination)) {
+        return false;
+    }
+
+    const ModuleUseState& source_use = g_module_object_use[src_bag][src_slot];
+    const ModuleUseState& destination_use = g_module_object_use[dst_bag][dst_slot];
+    if (!virtual_bag::extension_swap_tokens_available(
+            source_use.active, source_use.pending_release, destination_use.active,
+            destination_use.pending_release)) {
+        VIRTBAG_LOG("txn reject extension swap token active src=%d/%d active=%d pending=%d "
+                    "dst=%d/%d active=%d pending=%d",
+                    src_bag, src_slot, source_use.active ? 1 : 0,
+                    source_use.pending_release ? 1 : 0, dst_bag, dst_slot,
+                    destination_use.active ? 1 : 0,
+                    destination_use.pending_release ? 1 : 0);
+        return false;
+    }
+
+    const auto previous_source_object = g_module_objects[src_bag][src_slot];
+    const auto previous_destination_object = g_module_objects[dst_bag][dst_slot];
+    const int previous_source_category = g_module_object_categories[src_bag][src_slot];
+    const int previous_destination_category = g_module_object_categories[dst_bag][dst_slot];
+    const uint32_t previous_source_hash = g_module_object_hashes[src_bag][src_slot];
+    const uint32_t previous_destination_hash = g_module_object_hashes[dst_bag][dst_slot];
+    const uint32_t previous_source_handle = g_module_object_handles[src_bag][src_slot];
+    const uint32_t previous_destination_handle = g_module_object_handles[dst_bag][dst_slot];
+    const ModuleUseState previous_source_use = source_use;
+    const ModuleUseState previous_destination_use = destination_use;
+    const ownership::Ledger previous_ledger = g_ownership_ledger;
+    const bool previous_dirty = g_item_state_dirty;
+    bool objects_swapped = false;
+
+    // 非空缓存若与 descriptor 不一致，不能让 materialize 先释放旧指针再尝试
+    // swap，否则中途失败无法恢复原对象。该事务只对一致缓存或空缓存（可新建）开放。
+    if ((previous_source_object != nullptr &&
+         (previous_source_category != source.category ||
+          previous_source_hash != virtual_bag::payload_hash(source))) ||
+        (previous_destination_object != nullptr &&
+         (previous_destination_category != destination.category ||
+          previous_destination_hash != virtual_bag::payload_hash(destination)))) {
+        VIRTBAG_LOG("txn reject extension swap stale endpoint src=%d/%d dst=%d/%d",
+                    src_bag, src_slot, dst_bag, dst_slot);
+        return false;
+    }
+    void* source_object = previous_source_object == nullptr
+        ? module_item_locked(src_bag, src_slot) : previous_source_object;
+    void* destination_object = previous_destination_object == nullptr
+        ? module_item_locked(dst_bag, dst_slot) : previous_destination_object;
+    const bool source_materialized = previous_source_object == nullptr && source_object != nullptr;
+    const bool destination_materialized =
+        previous_destination_object == nullptr && destination_object != nullptr;
+    // 物化可能创建新 handle；只有仍绑定原对象的快照 handle 才可复用，冷缓存
+    // 的新 handle 必须从当前槽读取，不能被旧的 0 覆盖。
+    const uint32_t source_handle_for_object =
+        virtual_bag::handle_if_object_matches(
+            source_object, g_module_objects[src_bag][src_slot],
+            g_module_object_handles[src_bag][src_slot]);
+    const uint32_t destination_handle_for_object =
+        virtual_bag::handle_if_object_matches(
+            destination_object, g_module_objects[dst_bag][dst_slot],
+            g_module_object_handles[dst_bag][dst_slot]);
+
+    auto restore = [&](const virtual_bag::TransactionContext* txn, const char* reason) {
+        if (txn != nullptr) {
+            txn_abort_locked(*txn, virtual_bag::TxnStage::kLogicalUpdated, reason);
+        }
+        if (source_materialized) {
+            const int bag = objects_swapped ? dst_bag : src_bag;
+            const int slot = objects_swapped ? dst_slot : src_slot;
+            // 提交后 source_object 已在目标槽，不能再用入参 source_slot 查找。
+            if (g_module_objects[bag][slot] == source_object) {
+                free_module_object_locked(bag, slot);
+            }
+        }
+        if (destination_materialized) {
+            const int bag = objects_swapped ? src_bag : dst_bag;
+            const int slot = objects_swapped ? src_slot : dst_slot;
+            // 提交后 destination_object 已在源槽；回滚必须按交换后的实际槽位清理。
+            if (g_module_objects[bag][slot] == destination_object) {
+                free_module_object_locked(bag, slot);
+            }
+        }
+        g_module_objects[src_bag][src_slot] = previous_source_object;
+        g_module_objects[dst_bag][dst_slot] = previous_destination_object;
+        g_module_object_categories[src_bag][src_slot] = previous_source_category;
+        g_module_object_categories[dst_bag][dst_slot] = previous_destination_category;
+        g_module_object_hashes[src_bag][src_slot] = previous_source_hash;
+        g_module_object_hashes[dst_bag][dst_slot] = previous_destination_hash;
+        g_module_object_handles[src_bag][src_slot] = previous_source_handle;
+        g_module_object_handles[dst_bag][dst_slot] = previous_destination_handle;
+        g_module_object_use[src_bag][src_slot] = previous_source_use;
+        g_module_object_use[dst_bag][dst_slot] = previous_destination_use;
+        g_ownership_ledger = previous_ledger;
+        g_item_state_dirty = previous_dirty;
+        if (g_module_view_installed && fn_control_item_set_item != nullptr) {
+            if (g_module_view_index == src_bag) {
+                void* control = valid_child_locked(g_projected_item_root, src_slot);
+                if (control != nullptr) fn_control_item_set_item(control, previous_source_object);
+            }
+            if (g_module_view_index == dst_bag) {
+                void* control = valid_child_locked(g_projected_item_root, dst_slot);
+                if (control != nullptr) fn_control_item_set_item(control, previous_destination_object);
+            }
+        }
+    };
+
+    if (source_object == nullptr || destination_object == nullptr) {
+        restore(nullptr, "swap endpoint materialization failed");
+        VIRTBAG_LOG("txn reject extension swap endpoint materialization failed src=%d/%d dst=%d/%d",
+                    src_bag, src_slot, dst_bag, dst_slot);
+        return false;
+    }
+
+    virtual_bag::TransactionContext txn{};
+    txn.direction = virtual_bag::kTransferExtensionToExtension;
+    txn.original_stage_applicable = false;
+    txn.swapped = true;
+    txn.src_bag = static_cast<uint8_t>(src_bag);
+    txn.src_slot = static_cast<uint8_t>(src_slot);
+    txn.dst_bag = static_cast<uint8_t>(dst_bag);
+    txn.dst_slot = static_cast<uint8_t>(dst_slot);
+    txn.source = source;
+    txn.committed = source;
+    txn.previous_dst = destination;
+    generate_transaction_id_locked(txn.transaction_id);
+    if (!txn_record_pending_locked(&txn)) {
+        restore(nullptr, "swap pending record failed");
+        return false;
+    }
+    virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
+
+    g_module_objects[src_bag][src_slot] = destination_object;
+    g_module_objects[dst_bag][dst_slot] = source_object;
+    g_module_object_categories[src_bag][src_slot] = destination.category;
+    g_module_object_categories[dst_bag][dst_slot] = source.category;
+    g_module_object_hashes[src_bag][src_slot] = virtual_bag::payload_hash(destination);
+    g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(source);
+    g_module_object_handles[src_bag][src_slot] = destination_handle_for_object;
+    g_module_object_handles[dst_bag][dst_slot] = source_handle_for_object;
+    objects_swapped = true;
+
+    if (!module_object_generation_advance_locked(src_bag, src_slot, "extension swap source") ||
+        !module_object_generation_advance_locked(dst_bag, dst_slot, "extension swap destination")) {
+        restore(&txn, "swap generation advance failed");
+        return false;
+    }
+
+    auto sync_view_ownership = [&](int bag, int slot, uint32_t handle) {
+        if (handle == 0) return true;
+        const bool visible = g_module_view_installed && g_module_view_index == bag;
+        if (visible && ownership::live_state(g_ownership_ledger, handle,
+                                             ownership::State::kModuleOwned)) {
+            return ownership::borrow_for_view(&g_ownership_ledger, handle) == ownership::Outcome::kOk;
+        }
+        if (!visible && ownership::live_state(g_ownership_ledger, handle,
+                                              ownership::State::kBorrowedForView)) {
+            return ownership::return_from_view(&g_ownership_ledger, handle) == ownership::Outcome::kOk;
+        }
+        return true;
+    };
+    if (!sync_view_ownership(src_bag, src_slot, destination_handle_for_object) ||
+        !sync_view_ownership(dst_bag, dst_slot, source_handle_for_object)) {
+        restore(&txn, "swap view ownership update failed");
+        return false;
+    }
+    if (g_module_view_installed && fn_control_item_set_item != nullptr) {
+        if (g_module_view_index == src_bag) {
+            void* control = valid_child_locked(g_projected_item_root, src_slot);
+            if (control != nullptr) fn_control_item_set_item(control, destination_object);
+        }
+        if (g_module_view_index == dst_bag) {
+            void* control = valid_child_locked(g_projected_item_root, dst_slot);
+            if (control != nullptr) fn_control_item_set_item(control, source_object);
+        }
+    }
+    g_virtual_bag_state.pending = {};
+    g_item_state_dirty = true;
+    reset_drag_state_locked(nullptr);
+    VIRTBAG_LOG("txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
+                txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
+                static_cast<unsigned long long>(g_module_object_use[src_bag][src_slot].generation),
+                static_cast<unsigned long long>(g_module_object_use[dst_bag][dst_slot].generation));
+    return true;
 }
 
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
@@ -376,10 +598,21 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                         requested_dst_slot, capacity);
             return false;
         }
-        const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][requested_dst_slot];
         if (!try_merge(requested_dst_slot)) {
-            if (existing.category != 0 || existing.count != 0) {
-                VIRTBAG_LOG("cross move reject extension->extension destination occupied=%d/%d",
+            if (!module_slot_is_assignable_locked(dst_bag, requested_dst_slot)) {
+                const virtual_bag::Item& destination =
+                    g_virtual_bag_state.items[dst_bag][requested_dst_slot];
+                if (destination.category > 0 && destination.count > 0 &&
+                    (src_bag != dst_bag || src_slot != requested_dst_slot)) {
+                    if (swap_extension_slots_locked(src_bag, src_slot, dst_bag,
+                                                    requested_dst_slot)) {
+                        return true;
+                    }
+                    VIRTBAG_LOG("cross move reject extension->extension swap failed=%d/%d -> %d/%d",
+                                src_bag, src_slot, dst_bag, requested_dst_slot);
+                    return false;
+                }
+                VIRTBAG_LOG("cross move reject extension->extension destination unavailable=%d/%d",
                             dst_bag, requested_dst_slot);
                 return false;
             }
@@ -393,8 +626,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     }
     if (dst_slot < 0) {
         for (int slot = 0; slot < capacity; ++slot) {
-            const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
-            if (existing.category != 0 || existing.count != 0) continue;
+            if (!module_slot_is_assignable_locked(dst_bag, slot)) continue;
             committed = source;
             dst_slot = slot;
             break;
@@ -424,6 +656,13 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                     txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, source.count,
                     txn.previous_dst.count, txn.committed.count);
     }
+    if (!module_object_release_allowed_locked(
+            src_bag, src_slot, g_module_objects[src_bag][src_slot],
+            "extension-merge source", false, nullptr)) {
+        VIRTBAG_LOG("txn reject id=%s extension merge source object in use",
+                    txn.transaction_id);
+        return false;
+    }
 
     // pending-recorded
     if (!txn_record_pending_locked(&txn)) return false;
@@ -441,6 +680,9 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     if (destination_item == nullptr) {
         VIRTBAG_LOG("txn committed but destination materialize failed id=%s dst=%d/%d",
                     txn.transaction_id, dst_bag, dst_slot);
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "destination materialize failed");
+        return false;
     } else if (g_module_view_installed && g_module_view_index == dst_bag) {
         const uint32_t handle = g_module_object_handles[dst_bag][dst_slot];
         if (ownership::live_state(g_ownership_ledger, handle,
@@ -452,7 +694,13 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
             }
         }
     }
-    free_module_object_locked(src_bag, src_slot);
+    if (!free_module_object_locked(src_bag, src_slot)) {
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "extension merge source release rejected");
+        VIRTBAG_LOG("txn abort id=%s extension merge source release rejected",
+                    txn.transaction_id);
+        return false;
+    }
     reset_drag_state_locked(nullptr);
     VIRTBAG_LOG("txn committed id=%s extension->extension %d/%d -> %d/%d cat=%d count=%d",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, txn.source.category,
@@ -614,6 +862,9 @@ bool route_projected_session_drop_locked(int64_t x, int64_t y) {
 }
 
 bool route_projected_session_to_tab_locked(int target_bag) {
+    // target_bag 是扩展逻辑袋内部索引；成功装备由 finish_extension_equip_ui_locked
+    // 复用 handle_extension_tab_click_locked/install_module_view_locked 同步当前视图，
+    // 不能只结束 session 后继续沿用源袋的 g_module_view_index。
     auto& session = g_extension_drag_session;
     if (session.phase == virtual_bag::DragPhase::kIdle ||
         g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||

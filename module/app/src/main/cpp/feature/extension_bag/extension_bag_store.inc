@@ -520,20 +520,28 @@ void store_sell_ok(void*) {
         const bool current = item != nullptr && virtual_bag::valid_index(bag) &&
                              slot >= 0 && slot < virtual_bag::kSlotCount &&
                              g_module_objects[bag][slot] == item &&
-                             g_virtual_bag_state.items[bag][slot].count == count;
+                             g_virtual_bag_state.items[bag][slot].count == count &&
+                             module_object_release_allowed_locked(
+                                 bag, slot, item, "store sell", false, nullptr);
         if (current) {
+            const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
             g_virtual_bag_state.items[bag][slot] = {};
             g_item_state_dirty = true;
-            free_module_object_locked(bag, slot);
-            persist_state_locked();
-            // 只用商店投影刷新：调用原版 UIStore_RefreshInvenItem 会把整列控件
-            // 刷回窗口原版袋的 INVEN 内容，破坏扩展投影（equip 宿主等价用
-            // refresh_module_item_area_locked）。store_refresh_projection_locked
-            // 会把已删除槽置 null、其余槽保持扩展物品。
-            if (store_view_installed && store_view_bag == bag) {
-                store_refresh_projection_locked();
+            if (!free_module_object_locked(bag, slot)) {
+                g_virtual_bag_state.items[bag][slot] = previous_item;
+                persist_state_locked();
+                VIRTBAG_LOG("store sell rejected object release bag=%d slot=%d", bag, slot);
+            } else {
+                persist_state_locked();
+                // 只用商店投影刷新：调用原版 UIStore_RefreshInvenItem 会把整列控件
+                // 刷回窗口原版袋的 INVEN 内容，破坏扩展投影（equip 宿主等价用
+                // refresh_module_item_area_locked）。store_refresh_projection_locked
+                // 会把已删除槽置 null、其余槽保持扩展物品。
+                if (store_view_installed && store_view_bag == bag) {
+                    store_refresh_projection_locked();
+                }
+                removed = true;
             }
-            removed = true;
         }
         store_reset_desc_hook_locked();
         if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();

@@ -137,7 +137,9 @@ std::string data_op_enter_slot(int32_t slot) {
     if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);
     if (slot_struct == nullptr || fn_saveslot_get_hero(slot_struct) == nullptr) return op_err("slot corrupt");
-    extension_bag_prepare_save_slot_load();
+    if (!extension_bag_prepare_save_slot_load()) {
+        return op_err("extension bag cleanup failed; enter slot blocked");
+    }
     fn_ui_set_popup_process_info(4, 0);
     uint8_t** flag_ptr = reinterpret_cast<uint8_t**>(g_base + G_GAME_RESUME_FLAG_GOT_VMA);
     if (*flag_ptr != nullptr) **flag_ptr = 0;
@@ -163,7 +165,9 @@ std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
     if (slot < 0 || slot > 2) return op_err("bad slot");
     if (class_idx < 0 || class_idx > 5) return op_err("bad class");
     if (g_base == 0) return op_err("libgame not ready");
-    extension_bag_prepare_save_slot_load();
+    if (!extension_bag_prepare_save_slot_load()) {
+        return op_err("extension bag cleanup failed; create slot blocked");
+    }
     if (fn_save_create_save_slot == nullptr || fn_game_exit_save_slot_select_char == nullptr ||
         fn_select_character_start_game == nullptr || fn_tutorial_start == nullptr ||
         fn_save_get_save_file_name == nullptr || fn_cs_fs_remove == nullptr)

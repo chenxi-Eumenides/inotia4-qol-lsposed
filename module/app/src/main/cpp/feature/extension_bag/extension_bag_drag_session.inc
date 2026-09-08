@@ -17,6 +17,15 @@ void advance_projected_drag_session_locked() {
                                           g_extension_tab_generation);
 }
 
+bool projected_drag_session_active_locked() {
+    const auto& session = g_extension_drag_session;
+    // session 本身只由当前投影槽 press 建立；即使投影 generation 随后失效，也必须
+    // 继续把 release 视为模块拥有，不能让 stale session 穿过原版 INVEN 链。
+    return session.phase != virtual_bag::DragPhase::kIdle &&
+           virtual_bag::valid_index(session.source_bag) &&
+           session.source_slot >= 0 && session.source_slot < virtual_bag::kSlotCount;
+}
+
 void cancel_projected_drag_session_locked(const char* reason) {
     auto& session = g_extension_drag_session;
     if (session.phase == virtual_bag::DragPhase::kIdle) return;

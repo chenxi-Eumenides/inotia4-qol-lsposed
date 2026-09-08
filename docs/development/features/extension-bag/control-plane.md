@@ -12,7 +12,7 @@
 - **唯一入口**：会话压缩、换代理或重新打开任务时，先读本节，再读“当前状态”和“当前闸门”，不得以聊天记录或旧日志替代事实。
 - **当前结论**：`NOT_ACCEPTED`。P0–P6 已按阶段证据完成，但 P7–P8 的全局库存接入、最终回归和发布验收尚未完成；源码、host 测试或单次 API 调用仍不能替代对应真机验收。
 - **下一允许动作**：按单函数顺序继续 P7 阶段 4；首个 `INVEN_FindItem` PoC 已完成，不重复 P5/P6 和 P7 阶段 0–3验收。
-- **已知非阻断问题**：扩展源背包拖到未装备袋并成功装备后，当前扩展投影视图仍会短暂闪现原版当前背包；装备状态、源槽清理和最终扩展视图正确，但 UI 闪烁尚未解决。已停止继续扩大本问题的 UI 改动，后续单独回归处理。
+- **已知非阻断问题**：扩展源背包拖到未装备袋并成功装备后的原版背包短暂闪现已在当前实现中改为“原版刷新后立即重投影”；仍需真机回归确认，不得以 Host/Debug 构建替代。
 - **P0 纯度约束**：冷启动配置 false 已验证扩展状态 `injected=false` 且 `extension_tab_button=false`（重启后复核）；当前构建满足本轮严格基线的扩展 hook 纯度要求。设置 UI/堆叠合并等其他模块能力不纳入扩展 hook 判定。
 - **状态更新规则**：状态只能前进或明确回退；每次状态变化必须同时更新本文顶部状态、对应阶段、证据 ID 和变更日志。
 - **冲突裁决**：代码结构以 `docs/development/architecture.md` 为准，待办来源以 `docs/development/planning/backlog.md` 为准，设备与工具链以 `docs/guides/build-and-deploy.md` 为准，API 端点以 `docs/reference/api-reference.md` 为准，sidecar 契约以 `module-save-store.md` 为准；本文只裁决扩展背包范围、阶段、顺序和验收状态。若 `backlog.md` 的交互验收方式与本文冲突，以本文的扩展背包验收闸门为准，并将差异回写 backlog。
@@ -911,6 +911,7 @@
 | payload 桥 | orig→ext 只能用 `SAVE_SaveItem` 保存完整 payload；ext→orig 只能用 `SAVE_LoadItem` 精确重建。长度须在 `19..255`，Load 前 out 置空，必须检查返回值、out、consumed 与重序列化后的完整字节一致性。 | payload 缺失、Load 失败或字段不符时不得按 category/count 或 `fn_create_item` 近似创建。 |
 | 所有权 | `module-owned → borrowed-for-view → module-owned → released`，或在 ext→orig 实际入库成功后同锁 `module-owned → inventory-owned`。视图恢复先撤销 ControlItem、TouchState、描述和快照引用；视图外借用数为零。 | 模块不得回收、访问或释放 `inventory-owned` 对象；不得在借用仍存在时 Free。 |
 | 五态事务 | `prepared → pending-recorded → logical-state-updated → original-state-updated → committed`。每笔只有一个事务 ID；ext→ext 没有 original 阶段，不调用 `INVEN_MoveItem`。 | 另建 pending、回滚或移动模型；失败时先释放仍为模块所有的对象而未恢复逻辑/UI。 |
+| ext→ext 占用目标 | 两个扩展槽均非空且不满足合并条件时执行原子双槽 swap：descriptor、native object、handle 和投影一起互换，两槽 generation 各自递增；任一槽 `active/pending_release` 时零副作用拒绝。跨原版/扩展空间的占用目标仍拒绝。 | 不放宽 `module_slot_is_assignable_locked()`；不得清源后覆盖占用目标，也不得把跨空间拒绝回退为原版移动。 |
 | 隔离 | `IsolationRecord` 是进程内只读诊断，原因仅为 `payload_invalid`、`invalid_transaction_domain`、`invalid_payload`、`load_failed`、`insert_failed`、`slot_not_found`、`journal_invalid`；保留 transactionId、generation、原始袋槽和 payload。 | `normalize()`/解析静默清空坏记录、用替代物覆盖，或将隔离项当成正常可移动物品。 |
 | P6 接口 | `PendingTransfer` 与 `JournalRecord` v1 字段同构，但 P4 pending 明确为 `durable=false`。P6 的固定顺序为 stage 0 → 原版变更与保存 → stage 1 → sidecar committed → 清 journal，且世界实态优先于 stage。 | 在 P5 声称 journal 已落盘、sidecar 已提交、可跨进程恢复或已完成 stage 0/1/2。 |
 
@@ -941,6 +942,8 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 
 - 三方向的真机验收严格为 ext→ext → orig→ext → ext→orig；0x81 建立协议是覆盖前两类扩展源路径的独立证据轨，不能以一次成功代替各方向验收。
 - 每个 session 最多创建一笔 P4 事务。重复、过期或已取消事件必须无副作用；任务袋 `5` 在命中后、任何 payload/所有权变更前拒绝。
+- 投影格 drop 门为三态：`kNotExtension` 放行原版 proc，`kHandled` 吞事件，`kRejected`（扩展源但事务拒绝）也吞事件并记录日志；扩展对象不得进入原版移动链。扩展↔扩展非空目标优先尝试合并，否则按原子 swap；跨空间占用目标拒绝且不回退原版。
+- 确认使用成功收尾固定为：`module_use_finish_locked()` → `refresh_module_item_area_locked(bag)` → reset/卸详情按钮 PtrHook → 清扩展详情状态；刷新在既有锁上下文中执行，使原版刷新后的控件立即恢复扩展投影。
 - 日志必须含协议版本、session token、触发事件、源/目标控件与袋槽、payload 摘要、hit-test、transactionId、阶段和 success/fail/cancel/rollback 结果。
 - 真实拖放只能由唯一真机 `192.168.3.54:5555` 的用户触摸确认；API、debug 注入和 host 测试只能准备、诊断或验证纯模型，不能伪造物理拖动结论。
 
@@ -1015,6 +1018,7 @@ P4 的代码职责也随之固定：`virtual_bag_state.h` 承载纯域/payload/�
 | 固定位域、常量、稳定条件分支 | 可逆指令 `patch` | 仅用于少量确定指令；必须保留原指令校验、页权限、指令缓存刷新和回滚。不得在 patch 中塞入复杂库存业务 |
 | `CHAR_ProcessShortcut` 等直接 `BL INVEN_FindItem` 调用 | 最小调用点指令 patch + 已验证 veneer/dispatcher | `PtrHook` 无效，因为这是直接 `BL`。仅在确认调用点 ABI、分支范围、寄存器/返回值和恢复路径后使用；优先 patch 单个高价值调用点，不改整个函数入口 |
 | `INVEN_FindItem`/`INVEN_ConsumeItem`/`INVEN_RemoveItem` 全局入口 | 使用 LSPosed Native Hook API 接入 | 仅允许由 LSPosed `native_init` 提供的 hook/unhook 函数指针完成入口替换（官方字段 `hookFunc`/`unhookFunc`，项目适配字段 `hook_func`/`unhook_func`）；扩展对象分流到逻辑适配，原版对象调用 backup；不使用 Dobby、ShadowHook 或手写 trampoline |
+| `UIEquip_OKConfrimUseItem` 确认使用回调 | 使用 LSPosed Native Hook API 接入 | 常驻入口 Hook 按 item 与扩展详情/逻辑袋槽身份分流；扩展对象 try-lock 成功后按当前菜单角色、在锁外调用 `CHAR_UseItemEx`，期间持有槽级 generation/owner token 阻止外部释放并允许同线程消费，返回后复核再刷新/清理；原版对象 original-first 调用 backup；不再劫持 `UIPopupMsg_fpOK` 槽，Cancel 保持原版；取消本身不挂槽，后续 `clear_original_desc_locked`/视图关闭路径清理缓存，OK 入口再做锁内身份反查 |
 | LSPosed Native Hook API | P7 允许使用的唯一 Native Hook 机制 | 由 `native_init.list` 注册并在 `libgame.so` 加载后安装；仍必须验证 ABI、并发、递归、生命周期、安装事务和回滚，不能把 Hook 安装成功等同于业务验收 |
 
 **P7 Hook 裁决：**

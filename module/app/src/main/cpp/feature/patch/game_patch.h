@@ -55,12 +55,11 @@ bool apply_fixed_stack_layout();
 bool set_stack_limit_enabled(bool enabled);
 bool stack_limit_enabled();
 
-// ---- move-merge（v0.6.8）：游戏内拖拽移动物品触发同类合并；由 moveMergeEnabled 配置控制 ----
-// 覆盖 UIEquip 背包格控件事件处理器（GOT 0x2f5410）：
-// 拖拽移动（event==4）时若源/目标同类且可堆叠，不清空目标槽直接调 INVEN_MoveItem 合并
-//（数量并入目标槽、超出留源槽），其余场景回退原交换/移动逻辑。
+// ---- UIEquip 背包格事件 wrapper（v0.6.8） ----
+// wrapper 始终保留扩展源保护；只有原版同类合并行为由 moveMergeEnabled 控制。
 bool set_move_merge_enabled(bool enabled);
 bool move_merge_enabled();
+bool set_extension_source_protection_enabled(bool enabled);
 
 // ---- IAP 恢复 + 批量宝石合成按钮 ----
 void data_op_mix_gem_batch(void* ctrl);

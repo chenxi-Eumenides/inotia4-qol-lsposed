@@ -247,8 +247,10 @@ void refresh_projected_module_view_after_move_locked();
 void refresh_module_item_area_locked(int index);
 void* module_item_locked(int bag, int slot);
 void recover_pending_transaction_locked();
-void prepare_main_menu_locked();
-void free_module_object_locked(int bag, int slot);
+bool prepare_main_menu_locked();
+bool free_module_object_locked(int bag, int slot, void* use_token = nullptr);
+bool module_slot_is_assignable_locked(int bag, int slot);
+bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
 bool move_original_to_extension_locked(int dst_bag, void* moving_control);
 bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_bag);
 bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag);
@@ -264,7 +266,7 @@ void install_extension_desc_item_hooks_locked(void* item);
 void restore_extension_desc_popup_callbacks_locked();
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
-                                                const char* context);
+                                                const char* context, void* use_token);
 
 void reset_extension_desc_unequip_hook_locked() {
     // 卸下按钮不再有 execute-slot PtrHook（函数级 ButtonUnequipExe hook 承担），
@@ -389,20 +391,40 @@ void commit_pending_extension_tab_locked() {
     handle_extension_tab_click_locked(extension_bag);
 }
 
-void clear_module_cache_locked() {
-    cancel_projected_drag_session_locked("module-cache-clear");
-    reset_extension_desc_item_hooks_locked();
-    g_extension_desc_item = nullptr;
-    g_extension_desc_item_bag = -1;
-    g_extension_desc_item_slot = -1;
+bool module_cache_clear_preflight_locked() {
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            const ModuleUseState& use = g_module_object_use[bag][slot];
+            if (use.active) {
+                VIRTBAG_LOG("module cache clear preflight rejected active object bag=%d slot=%d item=%p generation=%llu",
+                            bag, slot, use.item,
+                            static_cast<unsigned long long>(use.generation));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool clear_module_cache_locked() {
+    if (!module_cache_clear_preflight_locked()) return false;
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             // Scheme C objects never enter g_inven, so the module owns them
             // until an explicit transfer is implemented. Drop them on slot
             // exit instead of retaining stale pointers across saves.
-            free_module_object_locked(bag, slot);
+            if (!free_module_object_locked(bag, slot)) {
+                VIRTBAG_LOG("module cache clear aborted; retained object bag=%d slot=%d item=%p",
+                            bag, slot, g_module_objects[bag][slot]);
+                return false;
+            }
         }
     }
+    cancel_projected_drag_session_locked("module-cache-clear");
+    reset_extension_desc_item_hooks_locked();
+    g_extension_desc_item = nullptr;
+    g_extension_desc_item_bag = -1;
+    g_extension_desc_item_slot = -1;
     g_original_inventory.fill(nullptr);
     // 标签袋物品对象是 ItemPool 里的裸指针，跨存档槽位加载必须失效：游戏
     // SAVE_LoadItem 重置/回收池内存，旧指针会被新读入的存档物品复用（真机
@@ -420,6 +442,7 @@ void clear_module_cache_locked() {
     g_item_state_dirty = false;
     g_extension_touch_capture = false;
     g_extension_drag = {};
+    return true;
 }
 
 bool serialize_item_payload_locked(void* item,
@@ -448,8 +471,15 @@ void* load_item_payload_locked(const uint8_t* payload, int payload_size, const c
 void ensure_state_loaded_locked() {
     const int slot = current_save_slot();
     if (slot < 0 || slot > 2 || slot == g_loaded_slot) return;
+    if (!module_cache_clear_preflight_locked()) {
+        VIRTBAG_LOG("state load blocked by active module object slot=%d", slot);
+        return;
+    }
     if (g_module_view_installed) restore_module_view_locked();
-    clear_module_cache_locked();
+    if (!clear_module_cache_locked()) {
+        VIRTBAG_LOG("module cache clear incomplete; retaining loaded slot=%d", slot);
+        return;
+    }
     g_virtual_bag_state = {};
     if (!extension_bag_load_state_from_store(slot)) {
         VIRTBAG_LOG("virtual bag state slot=%d unavailable; using empty state", slot);

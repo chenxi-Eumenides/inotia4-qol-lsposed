@@ -235,8 +235,8 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
             g_module_objects[bag][slot] != jewel) {
             return op_err("extension jewel changed during native operation");
         }
-        if (!consume_extension_item_after_native_locked(bag, slot, jewel, before_count,
-                                                         before_count, "api_put_jewel")) {
+        if (!consume_extension_item_after_native_locked(
+                bag, slot, jewel, before_count, before_count, "api_put_jewel", nullptr)) {
             return op_err("extension jewel state update failed");
         }
         g_item_state_dirty = true;

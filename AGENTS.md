@@ -48,7 +48,8 @@
 1. `git diff --check`。
 2. 相关 host tests。
 3. Android debug 构建。
-4. API smoke 或对应真机验收。
+4. 每次 debug 构建后：安装最新 APK 到真机 2（`adb -s 192.168.3.54:5555 install -r`）并 force-stop + monkey 重启游戏，按 `docs/guides/build-and-deploy.md` 步骤②③③a轮询 `/api/health` 就绪（同意页用 API 关闭至 `main_menu`）。
+5. API smoke 或对应真机验收。
 
 每个阶段独立提交；不要将构建产物、日志、缓存和临时文件加入源码变更。
 

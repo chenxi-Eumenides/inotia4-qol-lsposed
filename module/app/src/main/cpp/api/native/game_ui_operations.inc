@@ -1,6 +1,8 @@
 std::string data_op_main_menu() {
     if (fn_gamestate_set_state == nullptr) return op_err("symbol not resolved");
-    extension_bag_prepare_main_menu();
+    if (!extension_bag_prepare_main_menu()) {
+        return op_err("extension bag cleanup failed; main menu transition blocked");
+    }
     fn_gamestate_set_state(4);
     return op_ok();
 }

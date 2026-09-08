@@ -39,6 +39,7 @@ IsHavingEmptySlotFn g_backup_is_having_empty_slot = nullptr;
 UnequipFn g_backup_unequip_item_to_inven = nullptr;
 ButtonEquipExeFn g_backup_button_equip_exe = nullptr;
 ButtonUnequipExeFn g_backup_button_unequip_exe = nullptr;
+UiEquipOkConfirmUseItemFn g_backup_ok_confirm_use_item = nullptr;
 
 std::atomic<uint64_t> g_find_item_calls{0};
 std::atomic<uint64_t> g_consume_item_calls{0};
@@ -149,11 +150,20 @@ void consume_item_wrapper(void* item) {
                         static_cast<unsigned long long>(call), item,
                         g_in_consume_item ? 1 : 0,
                         reinterpret_cast<void*>(g_backup_consume_item));
-    stage4_consume_item(item,
-                        extension_bag_enabled() ? extension_bag_identify_native_item : nullptr,
-                        extension_bag_enabled() ? extension_bag_consume_native_item : nullptr,
-                        g_backup_consume_item,
-                        g_in_consume_item);
+    int extension_bag = -1;
+    int extension_slot = -1;
+    const bool extension_item = extension_bag_enabled() &&
+                                extension_bag_identify_native_item(item, &extension_bag,
+                                                                   &extension_slot);
+    const bool dispatched = stage4_consume_item(
+        item, extension_bag_enabled() ? extension_bag_identify_native_item : nullptr,
+        extension_bag_enabled() ? extension_bag_consume_native_item : nullptr,
+        g_backup_consume_item, g_in_consume_item);
+    if (!dispatched && extension_item) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag,
+                            "ConsumeItem extension consume failed bag=%d slot=%d item=%p",
+                            extension_bag, extension_slot, item);
+    }
     return;
 }
 
@@ -222,7 +232,14 @@ void button_equip_exe_wrapper(void* button) {
     // 装备按钮函数级接管：详情物品为扩展槽背包物品时在原函数内联删源
     // （b7e04）之前分流，源物品销毁与袋表移交由扩展事务完成；其余一律
     // 走原函数，保持完全原版流程。
-    if (extension_bag_handle_backpack_button_equip()) return;
+    const VirtualBagEquipButtonResult result =
+        virtual_bag_handle_backpack_button_equip_result();
+    if (result == VirtualBagEquipButtonResult::kHandled) return;
+    if (result == VirtualBagEquipButtonResult::kBlocked) {
+        __android_log_print(ANDROID_LOG_WARN, kTag,
+                            "ButtonEquipExe extension item blocked; original backup skipped");
+        return;
+    }
     g_backup_button_equip_exe(button);
 }
 
@@ -241,6 +258,16 @@ void button_unequip_exe_wrapper(void* button) {
         return;
     }
     g_backup_button_unequip_exe(button);
+}
+
+void ok_confirm_use_item_wrapper(void* item) {
+    if (virtual_bag_handle_confirm_use_item(item)) return;
+    if (g_backup_ok_confirm_use_item == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag,
+                            "UIEquip_OKConfrimUseItem backup unavailable item=%p", item);
+        return;
+    }
+    g_backup_ok_confirm_use_item(item);
 }
 
 bool target_is_executable(uintptr_t target, const char* name) {
@@ -314,6 +341,8 @@ bool install_locked() {
         "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA);
     const uintptr_t button_unequip_exe = g_base + fn_resolve(
         "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA", F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA);
+    const uintptr_t ok_confirm_use_item = g_base + fn_resolve(
+        "F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA", F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA);
     const uintptr_t save_item = g_base + fn_resolve(
         "F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA);
     if (!target_is_executable(find_item, "INVEN_FindItem") ||
@@ -327,6 +356,7 @@ bool install_locked() {
         !target_is_executable(unequip_item_to_inven, "CHAR_UnequipItemToInven") ||
         !target_is_executable(button_equip_exe, "UIEquip_ButtonEquipExe") ||
         !target_is_executable(button_unequip_exe, "UIEquip_ButtonUnequipExe") ||
+        !target_is_executable(ok_confirm_use_item, "UIEquip_OKConfrimUseItem") ||
         !target_is_executable(save_item, "INVEN_SaveItem")) {
         return false;
     }
@@ -342,9 +372,10 @@ bool install_locked() {
     g_backup_unequip_item_to_inven = nullptr;
     g_backup_button_equip_exe = nullptr;
     g_backup_button_unequip_exe = nullptr;
+    g_backup_ok_confirm_use_item = nullptr;
     g_backup_save_item = nullptr;
 
-    InstalledHook installed[12]{};
+    InstalledHook installed[13]{};
     std::size_t installed_count = 0;
     const auto install_hook = [&](void* target, void* replacement, void** backup,
                                   const char* name) -> bool {
@@ -401,6 +432,10 @@ bool install_locked() {
                       reinterpret_cast<void*>(button_unequip_exe_wrapper),
                       reinterpret_cast<void**>(&g_backup_button_unequip_exe),
                       "ButtonUnequipExe") ||
+        !install_hook(reinterpret_cast<void*>(ok_confirm_use_item),
+                      reinterpret_cast<void*>(ok_confirm_use_item_wrapper),
+                      reinterpret_cast<void**>(&g_backup_ok_confirm_use_item),
+                      "UIEquip_OKConfrimUseItem") ||
         !install_hook(reinterpret_cast<void*>(save_item),
                       reinterpret_cast<void*>(save_item_wrapper),
                       reinterpret_cast<void**>(&g_backup_save_item),
@@ -410,11 +445,12 @@ bool install_locked() {
 
     g_installed.store(true, std::memory_order_release);
     __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "hook install OK api=%u FindItem=%p/%p ConsumeItem=%p/%p RemoveItem=%p/%p EquipItemFromInvenToSlot=%p/%p",
+                        "hook install OK api=%u FindItem=%p/%p ConsumeItem=%p/%p RemoveItem=%p/%p OKConfirmUseItem=%p/%p EquipItemFromInvenToSlot=%p/%p",
                         kNativeApiVersion,
                         reinterpret_cast<void*>(find_item), reinterpret_cast<void*>(g_backup_find_item),
                         reinterpret_cast<void*>(consume_item), reinterpret_cast<void*>(g_backup_consume_item),
                         reinterpret_cast<void*>(remove_item), reinterpret_cast<void*>(g_backup_remove_item),
+                        reinterpret_cast<void*>(ok_confirm_use_item), reinterpret_cast<void*>(g_backup_ok_confirm_use_item),
                         reinterpret_cast<void*>(equip_item_from_inven_to_slot),
                         reinterpret_cast<void*>(g_backup_equip_item_from_inven_to_slot));
     return true;

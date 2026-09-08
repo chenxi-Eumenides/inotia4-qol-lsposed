@@ -42,23 +42,23 @@ int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
     return result;
 }
 
-void stage4_consume_item(void* item, Stage4IdentifyItem identify,
+bool stage4_consume_item(void* item, Stage4IdentifyItem identify,
                          Stage4ConsumeExtension extension_consume,
                          Stage4ConsumeBackup backup, bool& recursive_guard) {
     int32_t bag = -1;
     int32_t slot = -1;
     if (!recursive_guard && identify != nullptr && identify(item, &bag, &slot)) {
-        if (extension_consume != nullptr) extension_consume(item);
-        return;
+        return extension_consume != nullptr && extension_consume(item);
     }
-    if (backup == nullptr) return;
+    if (backup == nullptr) return false;
     if (recursive_guard) {
         backup(item);
-        return;
+        return true;
     }
     recursive_guard = true;
     backup(item);
     recursive_guard = false;
+    return true;
 }
 
 int stage4_remove_item(void* item, Stage4IdentifyItem identify,
@@ -66,9 +66,11 @@ int stage4_remove_item(void* item, Stage4IdentifyItem identify,
                        Stage4RemoveBackup backup, bool& recursive_guard) {
     int32_t bag = -1;
     int32_t slot = -1;
-    if (!recursive_guard && identify != nullptr && identify(item, &bag, &slot) &&
-        extension_remove != nullptr && extension_remove(item)) {
-        return 1;
+    if (!recursive_guard && identify != nullptr && identify(item, &bag, &slot)) {
+        if (extension_remove == nullptr) return 0;
+        // 扩展对象的释放失败必须停在扩展分支，不能再落入原版 backup
+        // （确认使用期间 backup 不认识逻辑对象且可能破坏失败语义）。
+        return extension_remove(item) ? 1 : 0;
     }
     if (backup == nullptr) return 0;
     if (recursive_guard) return backup(item);
@@ -96,7 +98,7 @@ int stage4_equip_item(void* character, int32_t bag, int32_t slot, int32_t equip_
     int32_t module_slot = -1;
     if (item != nullptr && identify != nullptr && identify(item, &module_bag, &module_slot) &&
         extension_equip != nullptr) {
-        return extension_equip(item, module_bag, module_slot, equip_slot) ? 1 : 0;
+        return extension_equip(character, item, module_bag, module_slot, equip_slot) ? 1 : 0;
     }
     return backup(character, bag, slot, equip_slot);
 }

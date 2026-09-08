@@ -68,6 +68,129 @@ bool patch_all_save_callsites() {
     return true;
 }
 
+struct PhysicalInventorySnapshot {
+    std::array<void*, virtual_bag::kPhysicalInventorySnapshotSlots> slots{};
+    void* inventory = nullptr;
+    uint64_t digest = 0;
+    int nonnull = 0;
+    bool valid = false;
+};
+
+PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
+    PhysicalInventorySnapshot snapshot{};
+    snapshot.inventory = g_inven;
+    snapshot.digest = 1469598103934665603ULL;
+    if (g_inven == nullptr) return snapshot;
+    void** inventory = static_cast<void**>(g_inven);
+    for (size_t index = 0; index < snapshot.slots.size(); ++index) {
+        void* item = inventory[index];
+        snapshot.slots[index] = item;
+        if (item != nullptr) ++snapshot.nonnull;
+        snapshot.digest ^= static_cast<uint64_t>(reinterpret_cast<uintptr_t>(item));
+        snapshot.digest *= 1099511628211ULL;
+    }
+    snapshot.valid = true;
+    return snapshot;
+}
+
+bool restore_physical_inventory_snapshot_locked(const PhysicalInventorySnapshot& snapshot) {
+    if (!snapshot.valid || g_inven == nullptr || g_inven != snapshot.inventory) return false;
+    void** inventory = static_cast<void**>(g_inven);
+    for (size_t index = 0; index < snapshot.slots.size(); ++index) {
+        inventory[index] = snapshot.slots[index];
+    }
+    return true;
+}
+
+void log_original_event_inventory_snapshot(const char* phase, uint64_t event,
+                                           bool session_has_projected_item,
+                                           int source_bag, int source_slot,
+                                           const PhysicalInventorySnapshot& snapshot) {
+    VIRTBAG_LOG("orig_event %s event=0x%llx session_projected=%d source=%d/%d inven_valid=%d digest=0x%llx nonnull=%d",
+                phase, static_cast<unsigned long long>(event),
+                session_has_projected_item ? 1 : 0, source_bag, source_slot,
+                snapshot.valid ? 1 : 0,
+                static_cast<unsigned long long>(snapshot.digest), snapshot.nonnull);
+}
+
+uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param,
+                                                  uint64_t param2) {
+    if (g_orig_event == nullptr) return 0;
+
+    PhysicalInventorySnapshot before{};
+    bool session_has_projected_item = false;
+    int source_bag = -1;
+    int source_slot = -1;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        session_has_projected_item = projected_drag_session_active_locked();
+        if (session_has_projected_item) {
+            source_bag = g_extension_drag_session.source_bag;
+            source_slot = g_extension_drag_session.source_slot;
+        }
+        before = capture_physical_inventory_snapshot_locked();
+        log_original_event_inventory_snapshot("pre", event, session_has_projected_item,
+                                              source_bag, source_slot, before);
+    }
+
+    const uint64_t result = g_orig_event(event, param, param2);
+    bool restored = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        const PhysicalInventorySnapshot after = capture_physical_inventory_snapshot_locked();
+        log_original_event_inventory_snapshot("post", event, session_has_projected_item,
+                                              source_bag, source_slot, after);
+        if (session_has_projected_item && before.valid && after.valid &&
+            virtual_bag::physical_inventory_snapshot_changed(before.slots, after.slots)) {
+            VIRTBAG_LOG("ERROR original event changed physical inventory while projected session active "
+                        "event=0x%llx before_digest=0x%llx after_digest=0x%llx",
+                        static_cast<unsigned long long>(event),
+                        static_cast<unsigned long long>(before.digest),
+                        static_cast<unsigned long long>(after.digest));
+            for (size_t index = 0; index < before.slots.size(); ++index) {
+                if (before.slots[index] == after.slots[index]) continue;
+                const int bag = static_cast<int>(index / virtual_bag::kSlotCount);
+                const int slot = static_cast<int>(index % virtual_bag::kSlotCount);
+                VIRTBAG_LOG("ERROR physical inventory mutation bag=%d slot=%d old=%p new=%p",
+                            bag, slot, before.slots[index], after.slots[index]);
+            }
+            restored = restore_physical_inventory_snapshot_locked(before);
+            VIRTBAG_LOG("ERROR physical inventory rollback event=0x%llx restored=%d",
+                        static_cast<unsigned long long>(event), restored ? 1 : 0);
+        }
+    }
+    if (restored) {
+        const bool synced = virtual_bag_sync_projected_bag();
+        VIRTBAG_LOG("ERROR physical inventory rollback projection_sync=%d", synced ? 1 : 0);
+    }
+    return result;
+}
+
+bool consume_projected_release_locked(int64_t x, int64_t y) {
+    if (!projected_drag_session_active_locked()) return false;
+    auto& session = g_extension_drag_session;
+    const int original_target_bag = original_bag_button_index(x, y);
+    bool routed = false;
+    if (original_target_bag >= 0 &&
+        virtual_bag::valid_original_transaction_bag(original_target_bag)) {
+        session.target_kind = virtual_bag::DragTargetKind::kOriginalBag;
+        session.target_bag = original_target_bag;
+        session.target_slot = -1;
+        routed = route_deferred_extension_to_original_locked();
+    } else {
+        routed = route_projected_session_drop_locked(x, y);
+    }
+    if (session.phase != virtual_bag::DragPhase::kCommitted &&
+        session.phase != virtual_bag::DragPhase::kRejected &&
+        session.phase != virtual_bag::DragPhase::kCancelled) {
+        cancel_projected_drag_session_locked("release-intercepted-without-target");
+    }
+    VIRTBAG_LOG("projected release intercepted event=0x18 source=%d/%d target_original=%d routed=%d",
+                session.source_bag, session.source_slot, original_target_bag, routed ? 1 : 0);
+    session = {};
+    return true;
+}
+
 uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (p5_panel_observation_enabled()) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -77,12 +200,22 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     const bool extension_enabled = g_virtual_bag_enabled.load();
     const uint32_t gamestate = g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
     if (!extension_enabled || gamestate != 0) {
+        if (extension_enabled && event == 0x18) {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            if (projected_drag_session_active_locked()) {
+                cancel_projected_drag_session_locked("release-bypassed-gamestate");
+                g_extension_drag_session = {};
+                VIRTBAG_LOG("projected release intercepted event=0x18 reason=gamestate=%u",
+                            gamestate);
+                return 1;
+            }
+        }
         if (event == 0x17 || event == 0x18 || event == 0x19) {
             VIRTBAG_LOG("touch bypass event=0x%llx enabled=%d gamestate=%u base=0x%llx hooked=%d",
                         static_cast<unsigned long long>(event), extension_enabled ? 1 : 0,
                         gamestate, static_cast<unsigned long long>(g_base), g_state_entry != nullptr ? 1 : 0);
         }
-        const uint64_t result = g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
+        const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
         if (p5_panel_observation_enabled()) {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
             log_p5_observation_locked("panel-bypass-post", nullptr, event, param2 != 0,
@@ -173,6 +306,13 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         log_exit_trace_locked("event_release", event, param, param2, x, y);
+        if (virtual_bag::projected_release_owns_event(
+                event, projected_drag_session_active_locked())) {
+            // 0x18 是投影拖拽的唯一提交 owner。必须在原版 TouchHandle/INVEN_MoveItem
+            // 之前完成扩展事务；失败也吞掉原版，防止真实物理槽被二次改写。
+            consume_projected_release_locked(x, y);
+            return 1;
+        }
         if (g_extension_touch_capture) {
             if (param == 0 && x == 0 && y == 0 && g_extension_drag.active) {
                 x = g_extension_drag.current_x;
@@ -272,7 +412,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         log_exit_trace_locked("event_enter", event, param, param2);
     }
     if (exiting_to_original) {
-        const uint64_t original_result = g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
+        const uint64_t original_result = call_original_event_with_inventory_guard(event, param, param2);
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         log_exit_trace_locked("original_press_post_orig", event, param, param2, x, y);
@@ -287,45 +427,16 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         log_p5_observation_locked("panel-delegate-pre", nullptr, event, param2 != 0,
                                   param != 0, nullptr, false, 0, x, y);
     }
-    const uint64_t result = g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
+    const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_post_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-delegate-post", nullptr, event, param2 != 0,
                                   param != 0, nullptr, true, result, x, y);
+        // 0x17/0x19 只负责原版 TouchHandle 的 press/move 握手，不提交扩展事务。
+        // 投影 session 的 0x18 已在 delegate 前返回，不能在这里再出现第二个 owner。
         if (event == 0x17 || event == 0x19) advance_projected_drag_session_locked();
-        if (event == 0x18 && g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
-            // TouchHandle releases on the original bag tab without dispatching
-            // the item-proc callback used by SaveItemOnEmpty. Resolve that
-            // coordinate here, after the native callback has returned, so the
-            // deferred ext->orig transaction still follows the real drag path.
-            const int original_target_bag = original_bag_button_index(x, y);
-            if (original_target_bag >= 0 &&
-                virtual_bag::valid_original_transaction_bag(original_target_bag)) {
-                g_extension_drag_session.target_kind =
-                    virtual_bag::DragTargetKind::kOriginalBag;
-                g_extension_drag_session.target_bag = original_target_bag;
-                g_extension_drag_session.target_slot = -1;
-                VIRTBAG_LOG("p5 session original tab resolved x=%lld y=%lld target_bag=%d",
-                            static_cast<long long>(x), static_cast<long long>(y),
-                            original_target_bag);
-            }
-            if (g_extension_drag_session.target_kind ==
-                virtual_bag::DragTargetKind::kOriginalBag) {
-                route_deferred_extension_to_original_locked();
-            } else if (g_extension_drag_session.phase == virtual_bag::DragPhase::kPressed ||
-                g_extension_drag_session.phase == virtual_bag::DragPhase::kNativeMoving ||
-                g_extension_drag_session.phase == virtual_bag::DragPhase::kTargetResolved) {
-                route_projected_session_drop_locked(x, y);
-            }
-            if (g_extension_drag_session.phase != virtual_bag::DragPhase::kCommitted &&
-                g_extension_drag_session.phase != virtual_bag::DragPhase::kRejected &&
-                g_extension_drag_session.phase != virtual_bag::DragPhase::kCancelled) {
-                cancel_projected_drag_session_locked("release-without-target");
-            }
-            g_extension_drag_session = {};
-        }
         if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
             if (event == 0x18 && !complete_original_exit_locked()) {
                 cancel_original_exit_locked();
@@ -355,6 +466,11 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 bool inject_locked() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_virtual_bag_enabled.load()) return false;
+    if (!set_extension_source_protection_enabled(true)) {
+        VIRTBAG_LOG("extension source protection install pending base=0x%llx",
+                    static_cast<unsigned long long>(g_base));
+        return false;
+    }
     const bool install_inventory_hook = g_state_entry == nullptr;
     uint8_t* entry = g_state_entry;
     if (install_inventory_hook) {
@@ -697,7 +813,21 @@ void ensure_lifecycle_thread() {
                 const int state = static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
                 if (last_state == 5 && state != 5) {
                     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-                    prepare_main_menu_locked();
+                    if (!prepare_main_menu_locked()) {
+                        g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
+                        VIRTBAG_LOG("lifecycle main-menu cleanup failed; retry scheduled");
+                    } else {
+                        g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+                    }
+                } else if (state != 5 &&
+                           g_main_menu_cleanup_dirty.load(std::memory_order_acquire)) {
+                    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+                    if (prepare_main_menu_locked()) {
+                        g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+                        VIRTBAG_LOG("lifecycle main-menu cleanup retry succeeded");
+                    } else {
+                        VIRTBAG_LOG("lifecycle main-menu cleanup retry failed");
+                    }
                 }
                 last_state = state;
             }
@@ -706,10 +836,17 @@ void ensure_lifecycle_thread() {
     }).detach();
 }
 
-void prepare_main_menu_locked() {
+bool prepare_main_menu_locked() {
+    if (!module_cache_clear_preflight_locked()) {
+        VIRTBAG_LOG("prepare main-menu preflight failed");
+        return false;
+    }
     store_teardown_locked();
     if (g_module_view_installed) restore_module_view_locked();
-    clear_module_cache_locked();
+    if (!clear_module_cache_locked()) {
+        VIRTBAG_LOG("prepare main-menu blocked by active module object");
+        return false;
+    }
     g_virtual_bag_state = {};
     g_loaded_slot = -2;
     g_item_state_dirty = false;
@@ -717,4 +854,5 @@ void prepare_main_menu_locked() {
     disable_extension_tab_buttons_locked();
     g_extension_tab_buttons.fill(nullptr);
     cancel_projected_drag_session_locked("main-menu");
+    return true;
 }

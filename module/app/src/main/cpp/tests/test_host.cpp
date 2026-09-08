@@ -715,6 +715,30 @@ static void test_virtual_bag_mergeable_items() {
     CHECK(!virtual_bag::mergeable_items(legacy_existing, source));
     CHECK(virtual_bag::same_extension_bag_merge_allowed(0, 0));
     CHECK(!virtual_bag::same_extension_bag_merge_allowed(0, 1));
+    // 合并判定优先于交换；交换只在目标非空且不满足合并条件时进入。
+    CHECK(virtual_bag::same_extension_bag_mergeable_items(existing, existing));
+    CHECK(virtual_bag::extension_swap_tokens_available(false, false, false, false));
+    CHECK(!virtual_bag::extension_swap_tokens_available(true, false, false, false));
+    CHECK(!virtual_bag::extension_swap_tokens_available(false, false, false, true));
+    CHECK(!virtual_bag::projection_drop_context_matches(1, 0, true, true, true));
+    CHECK(!virtual_bag::projection_drop_context_matches(0, 0, false, true, true));
+    void* materialized_object = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));
+    CHECK_EQ(virtual_bag::handle_if_object_matches(materialized_object, materialized_object, 77), 77u);
+    CHECK_EQ(virtual_bag::handle_if_object_matches(materialized_object, nullptr, 77), 0u);
+    CHECK(virtual_bag::extension_source_protection_required(true, false));
+    CHECK(virtual_bag::extension_source_protection_required(true, true));
+    CHECK(virtual_bag::extension_source_protection_required(false, true));
+    CHECK(!virtual_bag::extension_source_protection_required(false, false));
+    CHECK(virtual_bag::projected_release_owns_event(0x18, true));
+    CHECK(!virtual_bag::projected_release_owns_event(0x17, true));
+    CHECK(!virtual_bag::projected_release_owns_event(0x18, false));
+    std::array<void*, virtual_bag::kPhysicalInventorySnapshotSlots> before{};
+    auto after = before;
+    CHECK(!virtual_bag::physical_inventory_snapshot_changed(before, after));
+    after[5 * virtual_bag::kSlotCount + 3] = materialized_object;
+    CHECK(virtual_bag::physical_inventory_snapshot_changed(before, after));
+    after = before;
+    CHECK(!virtual_bag::physical_inventory_snapshot_changed(before, after));
 }
 
 static void test_virtual_bag_json_roundtrip() {
@@ -1498,6 +1522,25 @@ static void test_p44_transaction_stages() {
     txn_rollback_logical(&st, e2e, TxnStage::kLogicalUpdated);
     CHECK(p44_item_identity(st.items[2][0], e2e.source));
     CHECK(p44_item_identity(st.items[3][4], e2e.previous_dst));
+    CHECK(!st.pending.valid);
+
+    // 双非空 ext→ext swap：两槽 descriptor 互换，失败回滚恢复原值。
+    TransactionContext swap = e2e;
+    swap.src_bag = 2;
+    swap.src_slot = 0;
+    swap.dst_bag = 3;
+    swap.dst_slot = 4;
+    swap.swapped = true;
+    swap.source = src;
+    swap.previous_dst = committed;
+    st.items[2][0] = swap.source;
+    st.items[3][4] = swap.previous_dst;
+    txn_apply_logical(&st, swap);
+    CHECK(p44_item_identity(st.items[2][0], swap.previous_dst));
+    CHECK(p44_item_identity(st.items[3][4], swap.source));
+    txn_rollback_logical(&st, swap, TxnStage::kLogicalUpdated);
+    CHECK(p44_item_identity(st.items[2][0], swap.source));
+    CHECK(p44_item_identity(st.items[3][4], swap.previous_dst));
     CHECK(!st.pending.valid);
 
     // ext→orig：logical 阶段不改逻辑数组（清源发生在原版接管成功后）。

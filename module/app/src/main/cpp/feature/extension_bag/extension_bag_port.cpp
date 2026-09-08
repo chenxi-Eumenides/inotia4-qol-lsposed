@@ -41,16 +41,16 @@ bool extension_bag_is_logical_bag(int bag) {
     return virtual_bag::valid_extension_logical_bag(bag);
 }
 
-void extension_bag_prepare_main_menu() {
-    virtual_bag_prepare_main_menu();
+bool extension_bag_prepare_main_menu() {
+    return virtual_bag_prepare_main_menu();
 }
 
 int extension_bag_inventory_state_id() {
     return virtual_bag_inventory_state_id();
 }
 
-void extension_bag_prepare_save_slot_load() {
-    virtual_bag_prepare_save_slot_load();
+bool extension_bag_prepare_save_slot_load() {
+    return virtual_bag_prepare_save_slot_load();
 }
 
 void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
@@ -103,7 +103,7 @@ void* extension_bag_find_native_item(int category) {
 }
 
 bool extension_bag_remove_native_item(void* item) {
-    return virtual_bag_remove_native_item(item);
+    return virtual_bag_remove_native_item(item, virtual_bag_current_use_token());
 }
 
 int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount) {
@@ -117,8 +117,9 @@ int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_disco
     return (unit_price * multiplier) / 10;
 }
 
-bool extension_bag_equip_projected_item(void* item, int source_bag, int source_slot, int equip_slot) {
-    return virtual_bag_equip_projected_item(item, source_bag, source_slot, equip_slot);
+bool extension_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
+                                        int equip_slot) {
+    return virtual_bag_equip_projected_item(character, item, source_bag, source_slot, equip_slot);
 }
 
 void extension_bag_begin_internal_equip() {
@@ -134,7 +135,7 @@ bool extension_bag_internal_equip_active() {
 }
 
 bool extension_bag_consume_native_item(void* item) {
-    return virtual_bag_consume_native_item(item);
+    return virtual_bag_consume_native_item(item, virtual_bag_current_use_token());
 }
 
 bool extension_bag_has_empty_slots(int needed, int include_task_bag) {

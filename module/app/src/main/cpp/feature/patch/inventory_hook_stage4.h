@@ -24,7 +24,7 @@ using Stage4ConsumeBackup = void (*)(void* item);
 using Stage4RemoveExtension = bool (*)(void* item);
 using Stage4RemoveBackup = int (*)(void* item);
 
-void stage4_consume_item(void* item, Stage4IdentifyItem identify,
+bool stage4_consume_item(void* item, Stage4IdentifyItem identify,
                          Stage4ConsumeExtension extension_consume,
                          Stage4ConsumeBackup backup, bool& recursive_guard);
 int stage4_remove_item(void* item, Stage4IdentifyItem identify,
@@ -32,7 +32,7 @@ int stage4_remove_item(void* item, Stage4IdentifyItem identify,
                        Stage4RemoveBackup backup, bool& recursive_guard);
 
 using Stage4ItemAt = void* (*)(int32_t bag, int32_t slot);
-using Stage4EquipExtension = bool (*)(void* item, int32_t bag, int32_t slot,
+using Stage4EquipExtension = bool (*)(void* character, void* item, int32_t bag, int32_t slot,
                                       int32_t equip_slot);
 using Stage4EquipBackup = int (*)(void* character, int32_t bag, int32_t slot,
                                   int32_t equip_slot);

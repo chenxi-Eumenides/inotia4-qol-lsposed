@@ -62,29 +62,57 @@ int virtual_bag_inventory_state_id() {
 }
 
 // G-8：item proc 0x02（drop 到扩展格控件）路由——src=模块拖动状态（press 时
-// projection_slot_at 记录），dst=落点控件索引。成功返回 true（wrapper 吞原版事件）。
-bool virtual_bag_projection_drop_to_slot(void* dst_control, void* src_control) {
+// projection_slot_at 记录），dst=落点控件索引。必须区分“非扩展源”“扩展事务成功”
+// 和“扩展源但事务拒绝”：最后一种也必须吞掉原版事件，避免 INVEN_MoveItem 改写
+// 真实物理槽。src/dst 必须属于当前 g_module_view_index 对应的 projected root；
+// stale 控件或错视图一律是 kRejected。
+VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_control,
+                                                                    void* src_control) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (!g_module_view_installed || dst_control == nullptr ||
-        src_control == nullptr || fn_ui_equip_get_item_slot_index == nullptr ||
-        fn_control_object_get_data == nullptr) {
-        return false;
+    if (src_control == nullptr || fn_control_object_get_data == nullptr) {
+        return VirtualBagProjectionDropResult::kNotExtension;
     }
     void* src_data = fn_control_object_get_data(src_control);
     void* item = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
     int src_bag = -1, src_slot = -1;
     if (item == nullptr || !module_slot_of_item_locked(item, &src_bag, &src_slot)) {
-        return false;
+        return VirtualBagProjectionDropResult::kNotExtension;
+    }
+    if (!g_module_view_installed || dst_control == nullptr ||
+        fn_ui_equip_get_item_slot_index == nullptr ||
+        g_module_view_index != src_bag || g_projected_item_root == nullptr) {
+        VIRTBAG_LOG("drop rejected: extension source view mismatch src=%d/%d view=%d root=%p",
+                    src_bag, src_slot, g_module_view_index, g_projected_item_root);
+        return VirtualBagProjectionDropResult::kRejected;
+    }
+    void* live_root = g_base != 0
+        ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA) : nullptr;
+    void* projected_source = valid_child_locked(g_projected_item_root, src_slot);
+    if (live_root == nullptr || live_root != g_projected_item_root ||
+        projected_source != src_control) {
+        VIRTBAG_LOG("drop rejected: extension source control is not current projection "
+                    "src=%d/%d source=%p expected=%p root=%p live_root=%p",
+                    src_bag, src_slot, src_control, projected_source,
+                    g_projected_item_root, live_root);
+        return VirtualBagProjectionDropResult::kRejected;
     }
     const int dst_slot = fn_ui_equip_get_item_slot_index(dst_control);
-    if (dst_slot < 0 || dst_slot >= g_virtual_bag_state.capacities[src_bag]) {
-        return false;
+    const bool destination_control_matches =
+        dst_slot >= 0 && dst_slot < g_virtual_bag_state.capacities[g_module_view_index] &&
+        valid_child_locked(g_projected_item_root, dst_slot) == dst_control;
+    if (!virtual_bag::projection_drop_context_matches(
+            g_module_view_index, src_bag, true, true, destination_control_matches)) {
+        VIRTBAG_LOG("drop rejected: extension source invalid projected target src=%d/%d dst=%d",
+                    src_bag, src_slot, dst_slot);
+        return VirtualBagProjectionDropResult::kRejected;
     }
     if (g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
         if (g_extension_drag_session.source_bag != src_bag ||
             g_extension_drag_session.source_slot != src_slot ||
             g_extension_drag_session.view_generation != g_extension_tab_generation) {
-            return false;
+            VIRTBAG_LOG("drop rejected: extension source session mismatch src=%d/%d phase=%d",
+                        src_bag, src_slot, static_cast<int>(g_extension_drag_session.phase));
+            return VirtualBagProjectionDropResult::kRejected;
         }
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kPressed) {
             advance_projected_drag_session_locked();
@@ -101,7 +129,9 @@ bool virtual_bag_projection_drop_to_slot(void* dst_control, void* src_control) {
                                              g_extension_tab_generation) !=
                  virtual_bag::DragTransition::kAdvanced ||
              !virtual_bag::session_claim_transaction(&g_extension_drag_session)) {
-            return false;
+            VIRTBAG_LOG("drop rejected: extension source session transition failed src=%d/%d",
+                        src_bag, src_slot);
+            return VirtualBagProjectionDropResult::kRejected;
         }
     }
     const bool routed = move_extension_to_extension_locked(src_bag, src_slot, src_bag, dst_slot);
@@ -112,8 +142,11 @@ bool virtual_bag_projection_drop_to_slot(void* dst_control, void* src_control) {
         persist_state_locked();
         refresh_projected_module_view_after_move_locked();
         VIRTBAG_LOG("drop routed ext->ext dst_slot=%d", dst_slot);
+        return VirtualBagProjectionDropResult::kHandled;
     }
-    return routed;
+    VIRTBAG_LOG("drop rejected: extension transaction refused src=%d/%d dst=%d",
+                src_bag, src_slot, dst_slot);
+    return VirtualBagProjectionDropResult::kRejected;
 }
 
 void virtual_bag_ui_start_auto_inject() {
@@ -178,6 +211,10 @@ bool set_virtual_bag_enabled(bool enabled) {
             g_virtual_bag_state.inspected = -1;
         }
     }
+    if (!set_extension_source_protection_enabled(enabled)) {
+        VIRTBAG_LOG("extension source protection update deferred enabled=%d",
+                    enabled ? 1 : 0);
+    }
     if (enabled) virtual_bag_ui_start_auto_inject();
     return true;
 }
@@ -186,19 +223,27 @@ bool virtual_bag_enabled() {
     return g_virtual_bag_enabled.load();
 }
 
-void virtual_bag_prepare_save_slot_load() {
+bool virtual_bag_prepare_save_slot_load() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!module_cache_clear_preflight_locked()) {
+        VIRTBAG_LOG("prepare save-slot load preflight failed");
+        return false;
+    }
     if (g_module_view_installed) restore_module_view_locked();
-    clear_module_cache_locked();
+    if (!clear_module_cache_locked()) {
+        VIRTBAG_LOG("prepare save-slot load blocked by active module object");
+        return false;
+    }
     g_virtual_bag_state = {};
     g_loaded_slot = -2;
     disable_extension_tab_buttons_locked();
     g_extension_tab_buttons.fill(nullptr);
+    return true;
 }
 
-void virtual_bag_prepare_main_menu() {
+bool virtual_bag_prepare_main_menu() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    prepare_main_menu_locked();
+    return prepare_main_menu_locked();
 }
 
 bool virtual_bag_module_save_prepare(int slot, const char* transaction_id) {

@@ -5,6 +5,18 @@ enum class ExtensionBagEquipResult {
     kPersistFailed,  // persist 失败且已完整回滚
 };
 
+void* extension_menu_character() {
+    if (g_base == 0) return nullptr;
+    const uintptr_t raw = g_base + fn_resolve(
+        "F_GET_MENU_CHARACTER_VMA", F_GET_MENU_CHARACTER_VMA);
+    if (raw == 0 || !game_memory_accessible(reinterpret_cast<void*>(raw), 4, 'x')) {
+        return nullptr;
+    }
+    const GetMenuCharacterFn get_menu_character =
+        reinterpret_cast<GetMenuCharacterFn>(raw);
+    return get_menu_character();
+}
+
 ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* item) {
     ensure_state_loaded_locked();
     if (!virtual_bag::valid_index(internal_bag) || item == nullptr) {
@@ -56,13 +68,23 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
 
     if (module_source) {
         const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
+        const uint8_t previous_type = g_virtual_bag_state.types[internal_bag];
         if (!virtual_bag::equip_bag(&g_virtual_bag_state, internal_bag, category)) {
             return ExtensionBagEquipResult::kReject;
         }
         g_virtual_bag_state.items[src_bag][src_slot] = {};
         g_item_state_dirty = true;
         if (persist_state_locked()) {
-            free_module_object_locked(src_bag, src_slot);
+            if (!free_module_object_locked(src_bag, src_slot)) {
+                g_virtual_bag_state.types[internal_bag] = previous_type;
+                g_virtual_bag_state.items[src_bag][src_slot] = source;
+                g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
+                virtual_bag::normalize(&g_virtual_bag_state);
+                persist_state_locked();
+                VIRTBAG_LOG("extension equip rejected source release bag=%d slot=%d",
+                            src_bag, src_slot);
+                return ExtensionBagEquipResult::kFailed;
+            }
             VIRTBAG_LOG("extension equip ok source=extension bag=%d category=%d src=%d/%d",
                         internal_bag, category, src_bag, src_slot);
             return ExtensionBagEquipResult::kOk;
@@ -130,8 +152,9 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
     return restored ? ExtensionBagEquipResult::kPersistFailed : ExtensionBagEquipResult::kFailed;
 }
 
-bool equip_module_item_on_character_locked(void* item, int source_bag, int source_slot) {
-    if (item == nullptr || !virtual_bag::valid_index(source_bag) ||
+bool equip_module_item_on_character_locked(void* character, void* item, int source_bag,
+                                           int source_slot) {
+    if (character == nullptr || item == nullptr || !virtual_bag::valid_index(source_bag) ||
         source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
         g_module_objects[source_bag][source_slot] != item || fn_can_equip == nullptr ||
         fn_find_equip_slot == nullptr || fn_equip_item_from_inven_to_slot == nullptr ||
@@ -139,8 +162,11 @@ bool equip_module_item_on_character_locked(void* item, int source_bag, int sourc
         g_module_window_original_bag < 0 || g_module_window_original_bag >= 5) {
         return false;
     }
-    void* character = member_or_null(0);
-    if (character == nullptr || !fn_can_equip(character, item)) return false;
+    if (!module_object_replacement_allowed_locked(source_bag, source_slot,
+                                                  "character equip")) {
+        return false;
+    }
+    if (!fn_can_equip(character, item)) return false;
 
     const int target = fn_find_equip_slot(character, item);
     if (target < 0 || target >= C_EQUIP_SLOTS) return false;
@@ -211,6 +237,10 @@ bool equip_module_item_on_character_locked(void* item, int source_bag, int sourc
             ? fn_get_cumulate_count(previous_equipped_item) : 1;
         // 旧装备对象被原版 UI（装备槽 desc/控件缓存）持续引用，绝不能释放：
         // 直接收编为扩展槽的物化对象，投影与详情都继续指向同一存活对象。
+        if (!module_object_generation_advance_locked(
+                source_bag, source_slot, "character equip replacement")) {
+            return false;
+        }
         g_module_objects[source_bag][source_slot] = previous_equipped_item;
         g_module_object_categories[source_bag][source_slot] = descriptor.category;
         g_module_object_hashes[source_bag][source_slot] = virtual_bag::payload_hash(descriptor);
@@ -224,6 +254,10 @@ bool equip_module_item_on_character_locked(void* item, int source_bag, int sourc
         }
     } else {
         descriptor = {};
+        if (!module_object_generation_advance_locked(
+                source_bag, source_slot, "character equip clear")) {
+            return false;
+        }
         g_module_objects[source_bag][source_slot] = nullptr;
         g_module_object_categories[source_bag][source_slot] = 0;
         g_module_object_hashes[source_bag][source_slot] = 0;
@@ -237,10 +271,11 @@ bool equip_module_item_on_character_locked(void* item, int source_bag, int sourc
 }
 
 // 装备成功后的 UI 收尾（游戏线程、持锁；先例：draw_end/enter 路径的锁内
-// UI 调用）：标签物品对象物化 + 控件 data[0] 更新（绘制每帧读 capacities，
-// 其余自愈）+ 物品区刷新（清消耗源槽）+ 复位拖动态。音效复用模块袋切换
-// 音 0x11——原版按装备位查未注册全局（0x2f3418/0x2f5b60）从简。
+// UI 调用）：internal_bag 始终是扩展逻辑袋 0..4。若当前已在另一个扩展视图，
+// 先复用 handle_extension_tab_click_locked 切到目标袋，使容量字和投影使用同一
+// g_module_view_index，再刷新物品区；随后更新标签对象、复位拖动态并播放音效。
 void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
+    bool switched_view = false;
     refresh_tab_bag_items_locked();
     void* tab = g_extension_tab_buttons[internal_bag];
     if (tab != nullptr && fn_control_object_get_data != nullptr) {
@@ -249,7 +284,12 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
             *reinterpret_cast<void**>(data) = g_tab_bag_items[internal_bag];
         }
     }
-    if (g_module_view_installed) {
+    if (g_module_view_installed && g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+        g_module_view_index != internal_bag) {
+        handle_extension_tab_click_locked(internal_bag);
+        switched_view = g_module_view_index == internal_bag;
+    }
+    if (g_module_view_installed && g_module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
         refresh_projection_if_overwritten_locked();
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
@@ -257,7 +297,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     }
     if (fn_ui_equip_update_char_equip != nullptr) fn_ui_equip_update_char_equip();
     if (moving_control != nullptr) reset_drag_state_locked(moving_control);
-    play_extension_switch_sound();
+    if (!switched_view) play_extension_switch_sound();
 }
 
 bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control) {
@@ -392,7 +432,9 @@ void extension_sell_ok(void*) {
         apply_variant_discount = g_extension_sell_apply_variant_discount;
         const bool current_item = item != nullptr && virtual_bag::valid_index(bag) &&
                                   slot >= 0 && slot < virtual_bag::kSlotCount &&
-                                  g_module_objects[bag][slot] == item;
+                                  g_module_objects[bag][slot] == item &&
+                                  module_object_release_allowed_locked(
+                                      bag, slot, item, "extension sell", false, nullptr);
         if (!current_item) {
             VIRTBAG_LOG("extension sell rejected stale detail bag=%d slot=%d item=%p", bag,
                         slot, item);
@@ -442,16 +484,24 @@ void extension_sell_ok(void*) {
                                   g_extension_desc_item_bag == bag &&
                                   g_extension_desc_item_slot == slot &&
                                   g_module_objects[bag][slot] == item &&
-                                  g_virtual_bag_state.items[bag][slot].count == count;
+                                  g_virtual_bag_state.items[bag][slot].count == count &&
+                                  module_object_release_allowed_locked(
+                                      bag, slot, item, "extension sell commit", false, nullptr);
         if (current_item) {
+            const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
             g_virtual_bag_state.items[bag][slot] = {};
             g_item_state_dirty = true;
-            free_module_object_locked(bag, slot);
-            persist_state_locked();
-            if (g_module_view_installed && g_module_view_index == bag) {
-                refresh_module_item_area_locked(bag);
+            if (!free_module_object_locked(bag, slot)) {
+                g_virtual_bag_state.items[bag][slot] = previous_item;
+                persist_state_locked();
+                VIRTBAG_LOG("extension sell rejected object release bag=%d slot=%d", bag, slot);
+            } else {
+                persist_state_locked();
+                if (g_module_view_installed && g_module_view_index == bag) {
+                    refresh_module_item_area_locked(bag);
+                }
+                removed = true;
             }
-            removed = true;
         }
     }
     if (!removed) {
@@ -487,19 +537,27 @@ void extension_destroy_ok(void*) {
         const int slot = g_extension_desc_item_slot;
         if (g_extension_desc_item != nullptr && virtual_bag::valid_index(bag) &&
             slot >= 0 && slot < virtual_bag::kSlotCount &&
-            g_module_objects[bag][slot] == g_extension_desc_item) {
+            g_module_objects[bag][slot] == g_extension_desc_item &&
+            module_object_release_allowed_locked(
+                bag, slot, g_extension_desc_item, "extension destroy", false, nullptr)) {
+            const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
             g_virtual_bag_state.items[bag][slot] = {};
             g_item_state_dirty = true;
-            free_module_object_locked(bag, slot);
-            persist_state_locked();
+            if (!free_module_object_locked(bag, slot)) {
+                g_virtual_bag_state.items[bag][slot] = previous_item;
+                persist_state_locked();
+                VIRTBAG_LOG("extension destroy rejected object release bag=%d slot=%d", bag, slot);
+            } else {
+                persist_state_locked();
+                committed_bag = bag;
+                committed_slot = slot;
+                committed = true;
+            }
             reset_extension_desc_item_hooks_locked();
             g_extension_desc_item = nullptr;
             g_extension_desc_item_bag = -1;
             g_extension_desc_item_slot = -1;
             clear_original_desc_locked();
-            committed_bag = bag;
-            committed_slot = slot;
-            committed = true;
         } else {
             reset_extension_desc_item_hooks_locked();
             g_extension_desc_item = nullptr;
@@ -518,7 +576,7 @@ void extension_destroy_ok(void*) {
 
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
-                                                const char* context) {
+                                                const char* context, void* raw_use_token) {
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount ||
         item == nullptr || before_count <= 0) {
         return false;
@@ -530,8 +588,14 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     const uint32_t old_count_flags = *reinterpret_cast<uint32_t*>(
         reinterpret_cast<uint8_t*>(item) + I_COUNT);
     if (count == 0) {
+        const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
         g_virtual_bag_state.items[bag][slot] = {};
-        free_module_object_locked(bag, slot);
+        if (!free_module_object_locked(bag, slot, raw_use_token)) {
+            g_virtual_bag_state.items[bag][slot] = previous_item;
+            VIRTBAG_LOG("extension consume rejected object release context=%s bag=%d slot=%d",
+                        context, bag, slot);
+            return false;
+        }
         return true;
     }
     *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
@@ -617,6 +681,94 @@ void install_extension_desc_item_hooks_locked(void* item) {
     }
 }
 
+// IsUseAfterConfirm 类扩展物品（如卓越灵药）的确认使用回调分流：
+// 原版回调会先 INVEN_FindItemSlot（扩展物品不在 INVEN 被拦），此处直接
+// CHAR_UseItemEx 后清理 hooks/描述。身份不一致时返回 false，由 Native Hook
+// wrapper 调用原版 backup。
+bool extension_confirm_use_item(void* item) {
+    bool used = false;
+    int bag = -1;
+    int slot = -1;
+    {
+        std::unique_lock<std::mutex> lock(g_virtual_bag_mtx, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            VIRTBAG_LOG("extension confirm-use lock busy item=%p", item);
+            return false;
+        }
+        if (!extension_bag_enabled() || item == nullptr || item != g_extension_desc_item) {
+            return false;
+        }
+        bag = g_extension_desc_item_bag;
+        slot = g_extension_desc_item_slot;
+        int module_bag = -1;
+        int module_slot = -1;
+        if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount ||
+            g_virtual_bag_state.items[bag][slot].category <= 0 ||
+            g_virtual_bag_state.items[bag][slot].count <= 0 ||
+            g_module_objects[bag][slot] != item ||
+            !module_slot_of_item_locked(item, &module_bag, &module_slot) ||
+            module_bag != bag || module_slot != slot) {
+            return false;
+        }
+        void* character = extension_menu_character();
+        if (character == nullptr || fn_char_use_item_ex == nullptr) {
+            VIRTBAG_LOG("extension confirm-use unavailable bag=%d slot=%d character=%p fn=%p",
+                        bag, slot, character, reinterpret_cast<void*>(fn_char_use_item_ex));
+            return false;
+        }
+        ModuleUseToken use_token{};
+        if (!module_use_begin_locked(bag, slot, item, &use_token)) {
+            VIRTBAG_LOG("extension confirm-use already active bag=%d slot=%d item=%p",
+                        bag, slot, item);
+            return false;
+        }
+        // CHAR_UseItemEx 会同步进入 INVEN_ConsumeItem；不得持有背包锁调用。
+        ModuleUseToken* previous_use_token = g_active_module_use_token;
+        g_active_module_use_token = &use_token;
+        lock.unlock();
+        used = fn_char_use_item_ex(character, item, 0) != 0;
+        lock.lock();
+        g_active_module_use_token = previous_use_token;
+        bool consumed = false;
+        const bool use_token_valid = module_use_finish_locked(use_token, &consumed);
+        const bool same_item = g_module_objects[bag][slot] == item;
+        if (!use_token_valid) {
+            const bool marker_cleared = module_use_abort_locked(use_token);
+            VIRTBAG_LOG("ERROR extension confirm-use token lost after use bag=%d slot=%d item=%p marker_cleared=%d; treated handled",
+                        bag, slot, item, marker_cleared ? 1 : 0);
+            if (marker_cleared) {
+                reset_extension_desc_item_hooks_locked();
+                g_extension_desc_item = nullptr;
+                g_extension_desc_item_bag = -1;
+                g_extension_desc_item_slot = -1;
+            } else {
+                VIRTBAG_LOG("ERROR extension confirm-use abort failed; slot may remain active "
+                            "bag=%d slot=%d item=%p",
+                            bag, slot, item);
+            }
+            return true;
+        }
+        if (!used) {
+            VIRTBAG_LOG("extension confirm-use executed failed bag=%d slot=%d", bag, slot);
+            return true;
+        }
+        if (!same_item && !consumed) {
+            VIRTBAG_LOG("extension confirm-use identity changed unexpectedly bag=%d slot=%d item=%p",
+                        bag, slot, item);
+            return true;
+        }
+        // module_use_finish_locked 已完成消费后的槽级收尾；必须在同一锁上下文
+        // 中走“原版刷新后立即重投影”，避免中间一帧显示原版背包。
+        refresh_module_item_area_locked(bag);
+        reset_extension_desc_item_hooks_locked();
+        g_extension_desc_item = nullptr;
+        g_extension_desc_item_bag = -1;
+        g_extension_desc_item_slot = -1;
+    }
+    VIRTBAG_LOG("extension confirm-use handled bag=%d slot=%d used=1", bag, slot);
+    return true;
+}
+
 void extension_desc_item_execute(void* button) {
     constexpr std::array<size_t, 11> kDescButtonOffsets = {
         0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
@@ -650,7 +802,15 @@ void extension_desc_item_execute(void* button) {
     const uintptr_t use_raw = g_base != 0
         ? g_base + fn_resolve("F_UIEQUIP_BUTTON_USE_EXE_VMA", F_UIEQUIP_BUTTON_USE_EXE_VMA)
         : 0;
-    if (use_raw != 0 && reinterpret_cast<uintptr_t>(hook->orig) == use_raw) {
+    const uintptr_t use_after_confirm_raw = g_base != 0
+        ? g_base + fn_resolve("F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA",
+                              F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA)
+        : 0;
+    const bool direct_use = use_raw != 0 &&
+                            reinterpret_cast<uintptr_t>(hook->orig) == use_raw;
+    const bool confirm_use = use_after_confirm_raw != 0 &&
+                             reinterpret_cast<uintptr_t>(hook->orig) == use_after_confirm_raw;
+    if (direct_use || confirm_use) {
         bool used = false;
         bool current_item = false;
         void* leader = nullptr;
@@ -660,25 +820,41 @@ void extension_desc_item_execute(void* button) {
             current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
                            item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
                            g_module_objects[item_bag][item_slot] == item;
-            leader = current_item ? member_or_null(0) : nullptr;
+            leader = current_item ? extension_menu_character() : nullptr;
             closes_description = current_item;
         }
+        if (leader == nullptr || fn_char_use_item_ex == nullptr || !current_item) {
+            // 扩展侧没有完整接管前置条件时，direct/confirm 都必须回退原版按钮，
+            // 不能清状态或吞掉原版确认弹窗及其 OK 回调。
+            hook->call_orig<void>(button);
+            return;
+        }
         if (current_item && leader != nullptr && fn_char_use_item_ex != nullptr) {
-            // CHAR_UseItemEx 会同步进入 INVEN_ConsumeItem；不得持有背包锁调用。
-            if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+            if (confirm_use) {
+                // IsUseAfterConfirm 类物品（如卓越灵药）：原版按钮会弹确认
+                // YesNo，其 OK 回调（UIEquip_OKConfrimUseItem）在调
+                // CHAR_UseItemEx 前先 INVEN_FindItemSlot 定位——扩展物品不在
+                // INVEN 会被拦截而无效果。确认使用函数入口由常驻 LSPosed
+                // Native Hook 接管，按回调传入的物品身份分流；此处只让原版
+                // 按钮创建确认弹窗。弹窗创建/关闭不持有背包锁。
+                if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+                hook->call_orig<void>(button);
+                return;
+            }
             used = fn_char_use_item_ex(leader, item, 0) != 0;
         }
         {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
             if (closes_description) {
+                if (used) refresh_module_item_area_locked(item_bag);
                 reset_extension_desc_item_hooks_locked();
                 g_extension_desc_item = nullptr;
                 g_extension_desc_item_bag = -1;
                 g_extension_desc_item_slot = -1;
             }
         }
-        VIRTBAG_LOG("extension use execute bag=%d slot=%d used=%d", item_bag, item_slot,
-                    used ? 1 : 0);
+        VIRTBAG_LOG("extension use execute bag=%d slot=%d confirm=%d used=%d", item_bag, item_slot,
+                    confirm_use ? 1 : 0, used ? 1 : 0);
         return;
     }
 
@@ -777,6 +953,7 @@ void extension_desc_item_execute(void* button) {
         return;
     }
     virtual_bag::Item& descriptor = g_virtual_bag_state.items[item_bag][item_slot];
+    const virtual_bag::Item previous_descriptor = descriptor;
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
     if (fn_get_bit != nullptr) {
@@ -788,7 +965,13 @@ void extension_desc_item_execute(void* button) {
         virtual_bag::payload_count(descriptor)));
     if (descriptor.category <= 0 || descriptor.count <= 0) {
         descriptor = {};
-        free_module_object_locked(item_bag, item_slot);
+        if (!free_module_object_locked(item_bag, item_slot)) {
+            descriptor = previous_descriptor;
+            VIRTBAG_LOG("extension desc sync rejected object release bag=%d slot=%d",
+                        item_bag, item_slot);
+            reset_extension_desc_item_hooks_locked();
+            return;
+        }
     } else {
         g_module_object_categories[item_bag][item_slot] = descriptor.category;
         g_module_object_hashes[item_bag][item_slot] = virtual_bag::payload_hash(descriptor);
