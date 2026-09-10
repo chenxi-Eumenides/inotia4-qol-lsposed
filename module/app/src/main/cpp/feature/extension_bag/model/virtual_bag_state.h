@@ -4,10 +4,12 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 #include <string>
 #include <type_traits>
 
 #include "core/native/stack_codec.h"
+#include "core/native/stack_limit_port.h"
 
 namespace virtual_bag {
 

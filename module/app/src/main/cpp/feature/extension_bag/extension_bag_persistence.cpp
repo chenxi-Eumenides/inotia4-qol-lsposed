@@ -89,7 +89,8 @@ bool extension_bag_load_state_from_store(int slot) {
             __android_log_print(ANDROID_LOG_WARN, kLogTag,
                                 "pending isolated reason=malformed_pending_record");
         }
-        parsed = virtual_bag::parse_state_json_at(utf, state, extension_bag_isolation_now_ms());
+        parsed = virtual_bag::parse_state_json_at(
+            utf, state, extension_bag_isolation_now_ms(), virtual_bag_category_uses_stack_count);
         if (has_pending && pending_result != virtual_bag::PendingTransferParseResult::kOk) {
             virtual_bag::IsolationRecord record{};
             record.valid = true;

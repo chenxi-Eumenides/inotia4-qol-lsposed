@@ -572,7 +572,8 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         }
         const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
         if (!move_merge_enabled() ||
-            !virtual_bag::same_extension_bag_mergeable_items(existing, source)) {
+            !virtual_bag::same_extension_bag_mergeable_items(
+                existing, source, virtual_bag_category_uses_stack_count)) {
             return false;
         }
         const uint32_t limit = stack_codec::max_count(stack_limit_enabled());
@@ -582,7 +583,13 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         committed = existing;
         committed.count = static_cast<int>(virtual_bag::merge_count(
             existing.count, source.count, stack_limit_enabled()));
-        virtual_bag::patch_payload_count(&committed, static_cast<uint32_t>(committed.count));
+        if (!virtual_bag::patch_payload_count(
+                &committed, static_cast<uint32_t>(committed.count),
+                virtual_bag_category_uses_stack_count)) {
+            VIRTBAG_LOG("cross move reject extension->extension merge count gate src=%d/%d dst=%d/%d",
+                        src_bag, src_slot, dst_bag, slot);
+            return false;
+        }
         dst_slot = slot;
         merged = true;
         return true;
@@ -866,7 +873,13 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
         (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
     const bool apply_candidate = source_bag == target_bag && target_slot >= 0 &&
         source_is_apply_material && material != nullptr && target_item != nullptr &&
-        item_is_equip(target_item);
+        item_count_encoding(target_item) == stack_codec::CountEncoding::kNotEncoded;
+    if (source_bag == target_bag && target_slot >= 0 && source_is_apply_material &&
+        target_item != nullptr && item_count_encoding(target_item) ==
+            stack_codec::CountEncoding::kUnknown) {
+        VIRTBAG_LOG("p5 drop rejected: apply target category unavailable item=%p", target_item);
+        return false;
+    }
     if (apply_candidate) {
         handled = apply_extension_material_to_slot_locked(
             lock, source_bag, source_slot, target_bag, target_slot, material, target_item);

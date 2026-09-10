@@ -1,4 +1,6 @@
 // 固定 canonical 布局 patch 点（反汇编逐字节确认）。
+// 数量 patch 表准入规则：必须先证明目标位段是数量语义；装备标记、容量等非数量
+// 位段不得纳入数量布局或上限 patch 表。
 #define P(macro, off, o, r) { #macro, macro, off, o, r }
 const PatchEntry g_stack_layout_patches[] = {
     // 位段扩展 mov w2,#0x19(bitStart=25) → mov w2,#0x16(bitStart=22)
@@ -26,6 +28,8 @@ const PatchEntry g_stack_layout_patches[] = {
     P(F_UISTORE_BUTTON_SELL_EXE_VMA, 0xc0, 0x52800322, 0x528002C2),
     P(F_UISTORE_BUTTON_SELL_EXE_VMA, 0xd8, 0x52800322, 0x528002C2),
     P(F_UISTORE_SELL_ITEM_VMA, 0xd0, 0x52800322, 0x528002C2),
+    // 商店复制购买路径写入数量起始位 bit25 → bit22，保持与 CreateItem/GetCumulateCount 同布局
+    P(F_UISTORE_BUY_ITEM_VMA, 0x1a8, 0x52800322, 0x528002C2),
     P(F_GAME_START_NEW_GAME_VMA, 0xac, 0x52800322, 0x528002C2),
     P(F_MAKE_ITEM_VMA, 0x370, 0x52800322, 0x528002C2),
     P(F_ITEMSYSTEM_PROCESS_UNPACK_VMA, 0x354, 0x52800322, 0x528002C2),
@@ -41,7 +45,7 @@ const size_t g_stack_layout_patch_count = sizeof(g_stack_layout_patches) / sizeo
 
 // 可逆上限 patch：固定布局不变，只切换新操作的 99/999 上限。
 const PatchEntry g_stack_limit_clamp_patches[] = {
-    // 99→999 clamp（cmp/mov #0x63→#0x3E7，#0x62→#0x3E6）
+    // 99→999 clamp（cmp/mov #0x63→#0x3E7，#0x62→#0x3E6）；仅限已证明的数量语义路径。
     P(F_INVEN_MOVE_ITEM_VMA, 0x150, 0x71018c1f, 0x710f9c1f),
     P(F_INVEN_MOVE_ITEM_VMA, 0x158, 0x52800c77, 0x52807cf7),
     P(F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc, 0x71018c7f, 0x710f9c7f),
@@ -49,6 +53,7 @@ const PatchEntry g_stack_limit_clamp_patches[] = {
     P(F_INVEN_SAVE_ITEM_DATA_VMA, 0x7c, 0x71018a9f, 0x710f9a9f),
     P(F_INVEN_SAVE_ITEM_DATA_VMA, 0x8c, 0x52800c63, 0x52807ce3),
     P(F_INVEN_FIND_SAVE_SLOT_VMA, 0x238, 0x71018c1f, 0x710f9c1f),
+    P(F_INVEN_CHECK_SAVE_IN_NOT_EMPTY_SLOT_VMA, 0xa4, 0x52800c7a, 0x52807cfa),
     P(F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA, 0x164, 0x7101881f, 0x710f981f),
     P(F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA, 0x17c, 0x52800c62, 0x52807ce2),
 };
@@ -146,4 +151,3 @@ std::string data_recover_after_hive_block() {
     fn_ui_set_popup_process_info(4, 0);
     return op_ok();
 }
-

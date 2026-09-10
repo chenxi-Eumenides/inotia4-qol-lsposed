@@ -1560,7 +1560,7 @@
 > - 外部文件存在 → 读取生效
 > - 外部文件不存在/损坏 → 使用默认值，并**立即写入外部 config.json**
 > - 每次 `POST /api/config/set` 修改立即持久化到该文件；删除外部文件即恢复出厂默认
-> - `stackLimitIncrease` 变化时通知 native 生效（只切换新操作的 99/999 clamp），无需重启；canonical 数量格式始终固定为 bit22-31，不迁移、不截断已有数量
+> - `stackLimitIncrease` 变化时通知 native 生效（只切换新建/合并/消费/派生操作的 99/999 clamp），无需重启；canonical 数量格式始终固定为 bit22-31，sidecar 读档按绝对 `0..999` 校验，不迁移、不因当前配置截断已有数量；可堆叠 payload 仅在与 descriptor 不一致时同步
 > - `moveMergeEnabled` 控制背包内拖拽同类可堆叠物品时的自动合并，默认 `false`；变化即时安装或还原 native GOT hook，无需重启
 
 #### 读取配置

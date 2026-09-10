@@ -239,6 +239,12 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 #include "feature/extension_bag/extension_bag_runtime.inc"
 }  // namespace
 
+// 与 item_count_encoding/ITEM_GetCumulateCount 使用同一 ITEMCLASSBASE +6 bit0 语义：
+// kUnknown 必须继续向载入/合并调用方传播，不能降级成可堆叠。
+stack_codec::CountEncoding virtual_bag_category_uses_stack_count(int category) {
+    return category_is_equip(category);
+}
+
 void virtual_bag_refresh_item_area_with_gate() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     inventory_native_hook_call_refresh_item_area_original();
@@ -283,7 +289,13 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         const bool source_is_apply_material = extension_source &&
             ((fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
              (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0));
-        const bool target_is_equip_slot = target_item != nullptr && item_is_equip(target_item) &&
+        const stack_codec::CountEncoding target_encoding = item_count_encoding(target_item);
+        if (source_is_apply_material && target_item != nullptr &&
+            target_encoding == stack_codec::CountEncoding::kUnknown) {
+            VIRTBAG_LOG("equip control blocked: target category unavailable item=%p", target_item);
+            return VirtualBagEquipControlEventResult::kBlocked;
+        }
+        const bool target_is_equip_slot = target_encoding == stack_codec::CountEncoding::kNotEncoded &&
             target_slot_index >= 16;
         if (!stage4_is_extension_equip_control_source(
                 event, extension_source, source_is_apply_material, target_is_equip_slot)) {
@@ -665,18 +677,15 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
         VIRTBAG_LOG("extension unequip ledger exhausted bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
-    // 袋对象 +0x10 低 25 位是袋容量，ITEMSYSTEM_CreateItem（0x10be9c）已按
-    // ITEMSTATICBASE[category]（1→4、2→8、3→12、4→16）自动写入。此后只可
-    // 动 count 区（bit25..31，原版 ITEM_GetCumulateCount 同源），绝不可用
-    // 模块 stack_codec::write_count（其 count 位从 bit22 起，与容量位段
-    // bit0..24 重叠，会把容量破坏成巨值 → INVEN_GetBagSize 越界崩溃，真机
-    // 实证）。这里把原版 count 区置 1（袋对象恒 1 份），容量区保持原值。
+    // 袋对象 +0x10 的 bit0..24 是容量，ITEMSYSTEM_CreateItem（0x10be9c）已按
+    // ITEMSTATICBASE[category]（1→4、2→8、3→12、4→16）自动写入。只改
+    // bit25..31，禁止用 stack_codec::write_count；统一经
+    // write_native_bag_object_marker 保留容量位段。
     {
-        uint32_t flags = *reinterpret_cast<uint32_t*>(
+        const uint32_t flags = *reinterpret_cast<uint32_t*>(
             reinterpret_cast<uint8_t*>(item) + I_COUNT);
-        constexpr uint32_t kOriginalCountBits = 0x7Fu << 25;  // bit25..31
-        flags = (flags & ~kOriginalCountBits) | (1u << 25);
-        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = flags;
+        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
+            stack_codec::write_native_bag_object_marker(flags);
     }
 
     int preferred = original_bag_locked();
@@ -1075,7 +1084,13 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     if (!category_is_extension_backpack(category)) {
         // 扩展槽装备物品 → 装备到角色（原详情按钮 PtrHook 职责，函数 hook 化；
         // 装备按钮 proc 恒为 ButtonEquipExe，见 native 第 10 hook）。
-        if (from_extension && item_is_equip(item)) {
+        const stack_codec::CountEncoding item_encoding = item_count_encoding(item);
+        if (from_extension && item_encoding == stack_codec::CountEncoding::kUnknown) {
+            VIRTBAG_LOG("extension equip button blocked: category unavailable bag=%d slot=%d",
+                        src_bag, src_slot);
+            return VirtualBagEquipButtonResult::kBlocked;
+        }
+        if (from_extension && item_encoding == stack_codec::CountEncoding::kNotEncoded) {
             if (!module_object_replacement_allowed_locked(src_bag, src_slot,
                                                           "character equip button")) {
                 VIRTBAG_LOG("extension character equip button blocked bag=%d slot=%d",

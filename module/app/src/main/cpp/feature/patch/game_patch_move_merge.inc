@@ -57,8 +57,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         void* item_a = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
         void* item_b = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
         if (item_a != nullptr && item_b != nullptr &&
-            !fn_ui_equip_is_apply_stuff(item_b, item_a) && !item_is_equip(item_a) &&
-            !item_is_equip(item_b)) {
+            !fn_ui_equip_is_apply_stuff(item_b, item_a) &&
+            item_count_encoding(item_a) == stack_codec::CountEncoding::kEncoded &&
+            item_count_encoding(item_b) == stack_codec::CountEncoding::kEncoded) {
             const uint16_t flags_a =
                 *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_a) + I_TYPE);
             const uint16_t flags_b =

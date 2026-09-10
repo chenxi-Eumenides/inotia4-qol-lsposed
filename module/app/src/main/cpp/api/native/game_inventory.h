@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include "core/native/stack_codec.h"
+
 // 背包域（parse 域）：背包/装备/金钱操作。
 
 std::string data_op_set_money(int64_t money);
@@ -24,5 +26,6 @@ std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_s
 
 // 数据读取（read 域拆分）：物品属性/装备判定/背包 JSON 构造。
 void append_item_attrs(std::string& s, void* item);
+stack_codec::CountEncoding item_count_encoding(void* item);
 bool item_is_equip(void* item);
 std::string build_inventory_json();

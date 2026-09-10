@@ -135,7 +135,7 @@ data 层 → 仅 STL
 | `api/native/game_save.*` | API 存档域 | 存档：save_slots / current_save_slot + save / enter_slot（内部完整性门禁）/ create_slot | data + 引擎 + core ports |
 | `api/native/game_save_preflight.*` | API native 域（纯逻辑） | 存档预检判决：槽结构状态/失败码 → valid/corrupt/missing/incompatible/unknown + 阶段名 + 结构化 JSON；零游戏依赖，编入 host 单测 | 无（纯 STL） |
 | `game_system.*` | parse 域 | **系统聚合域（唯一允许 include 其他域头的聚合域）**：build_gamestate_json / build_snapshot_json + frame_count / init_report / events / emit / take_snapshot | data + 引擎 + 各域头 |
-| `feature/patch/game_patch.*` | patch | **注入/修改补丁域**：IAP 屏蔽 / 沉浸模式 / 堆叠上限（42 patch 点）/ craft 三函数 / recover_after_hive_block / migrate_stack（§2.5） | data + game_ptr_hook.h |
+| `feature/patch/game_patch.*` | patch | **注入/修改补丁域**：IAP 屏蔽 / 沉浸模式 / 堆叠上限（47 patch 点）/ craft 三函数 / recover_after_hive_block / migrate_stack（§2.5） | data + game_ptr_hook.h |
 | `feature/extension_bag/game_ui_virtbag.*` | feature | 扩展背包运行时：状态、投影、拖拽、绘制、生命周期与扩展背包操作 | data + core + patch |
 | `feature/extension_bag/extension_bag_port.cpp` | feature adapter | 将扩展背包内部实现适配为 `core/native/extension_bag_port.h` 稳定端口 | extension_bag runtime |
 | `feature/extension_bag/extension_bag_context.h` | feature internal | 持久化拆分使用的内部上下文访问点，不对外形成 API/core 契约 | extension_bag runtime |
@@ -296,8 +296,8 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 |---|---|---|
 | IAP 屏蔽 | 指令 patch（`patch_apply`/`patch_revert`，可逆改写 libgame.so 指令） | 屏蔽内购弹窗 |
 | 沉浸模式 | 指令 patch | 全屏沉浸 |
-| 堆叠数量格式 | 固定指令 patch（**33 个布局点**：位段扩展 31 + 存档子物品检查 2） | 数量永久使用 bit22-31；不迁移、不回滚布局 |
-| 堆叠上限 999 | 可逆指令 patch（9 个 clamp 点） | `set_stack_limit_enabled` 只切换新操作的 99/999 上限，已有 canonical 数量不改写 |
+| 堆叠数量格式 | 固定指令 patch（**34 个布局点**：均已证明为数量语义） | 数量永久使用 bit22-31；不迁移、不回滚布局；装备/损坏 marker 判定不纳入数量 patch |
+| 堆叠上限 999 | 可逆指令 patch（**10 个 clamp 点**：保存/空槽检查） | `set_stack_limit_enabled` 只切换新操作的 99/999 上限，已有 canonical 数量不改写 |
 | 背包拖拽合并 | 可逆 GOT hook | `set_move_merge_enabled` 覆盖背包格事件处理器；配置独立控制同类可堆叠物品的拖拽合并 |
 | 蜂巢阻塞恢复 | `data_recover_after_hive_block()` | IAP 恢复语义（v0.5.18 hive 屏蔽恢复） |
 

@@ -460,13 +460,27 @@ void extension_sell_ok(void*) {
             clear_original_desc_locked();
             return;
         }
+        const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
         price = extension_bag_sell_price(item, count, apply_variant_discount);
         if (price < 0) {
-            VIRTBAG_LOG("extension sell rejected invalid price/count bag=%d slot=%d price=%lld count=%d",
-                        bag, slot, static_cast<long long>(price), count);
+            VIRTBAG_LOG(
+                "sell price reject reason=price_bounds source=equip category=%d count=%d unit=%lld variant=%d payload=%u gen=%llu",
+                category, count, static_cast<long long>(unit_price),
+                apply_variant_discount ? 70 : 100,
+                virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
+                static_cast<unsigned long long>(g_module_object_use[bag][slot].generation));
             clear_original_desc_locked();
             return;
         }
+        VIRTBAG_LOG(
+            "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
+            category,
+            static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
+                                                      stack_limit_enabled())),
+            static_cast<long long>(unit_price), apply_variant_discount ? 70 : 100,
+            static_cast<long long>(price),
+            virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
+            static_cast<unsigned long long>(g_module_object_use[bag][slot].generation));
     }
 
     if (price < 0 || !fn_add_money(price)) {
@@ -596,6 +610,12 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
             return false;
         }
         return true;
+    }
+    const stack_codec::CountEncoding count_encoding = item_count_encoding(item);
+    if (count_encoding != stack_codec::CountEncoding::kEncoded) {
+        VIRTBAG_LOG("extension consume rejected count encoding=%d context=%s bag=%d slot=%d",
+                    static_cast<int>(count_encoding), context, bag, slot);
+        return false;
     }
     *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
         stack_codec::write_count(old_count_flags, static_cast<uint32_t>(count));
@@ -909,18 +929,54 @@ void extension_desc_item_execute(void* button) {
             void* item = g_extension_desc_item;
             const bool current_item = item != nullptr && virtual_bag::valid_index(bag) &&
                                       slot >= 0 && slot < virtual_bag::kSlotCount &&
-                                      g_module_objects[bag][slot] == item;
-        if (current_item && fn_item_get_sell_price != nullptr &&
+                                      g_module_objects[bag][slot] == item &&
+                                      module_object_release_allowed_locked(
+                                          bag, slot, item, "extension sell popup", false, nullptr);
+            int category = -1;
+            int count = 0;
+            int64_t unit_price = -1;
+            uint32_t payload = 0;
+            uint64_t generation = 0;
+            if (current_item && fn_item_get_sell_price != nullptr &&
                 fn_item_is_no_sell != nullptr && fn_get_bit != nullptr) {
-                const int count = g_virtual_bag_state.items[bag][slot].count;
+                count = g_virtual_bag_state.items[bag][slot].count;
                 const uint16_t flags = *reinterpret_cast<uint16_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_TYPE);
-                const int category = fn_get_bit(flags, 15, 6);
+                category = fn_get_bit(flags, 15, 6);
                 if (fn_item_is_no_sell(category) == 0 && count > 0) {
                     g_extension_sell_apply_variant_discount = modified_destroy_sell;
+                    unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
                     price = extension_bag_sell_price(item, count, modified_destroy_sell);
-                    if (price >= 0) valid = true;
+                    if (price >= 0) {
+                        valid = true;
+                        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+                        payload = virtual_bag::payload_hash(descriptor);
+                        generation = g_module_object_use[bag][slot].generation;
+                        const int legal_count = static_cast<int>(stack_codec::clamp_count(
+                            static_cast<uint32_t>(count), stack_limit_enabled()));
+                        VIRTBAG_LOG(
+                            "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
+                            category, legal_count, static_cast<long long>(unit_price),
+                            modified_destroy_sell ? 70 : 100, static_cast<long long>(price), payload,
+                            static_cast<unsigned long long>(generation));
+                    } else {
+                        VIRTBAG_LOG(
+                            "sell price reject reason=price_bounds source=equip category=%d count=%d unit=%lld variant=%d payload=%u gen=%llu",
+                            category, count, static_cast<long long>(unit_price),
+                            modified_destroy_sell ? 70 : 100, payload,
+                            static_cast<unsigned long long>(g_module_object_use[bag][slot].generation));
+                    }
+                } else {
+                    VIRTBAG_LOG(
+                        "sell price reject reason=no_sell_or_count source=equip category=%d count=%d variant=%d",
+                        category, count, modified_destroy_sell ? 70 : 100);
                 }
+            } else if (!current_item) {
+                VIRTBAG_LOG("sell price reject reason=stale_or_release_guard source=equip bag=%d slot=%d",
+                            bag, slot);
+            } else {
+                VIRTBAG_LOG("sell price reject reason=symbols source=equip bag=%d slot=%d",
+                            bag, slot);
             }
             g_extension_sell_original_ok = nullptr;
             g_extension_sell_original_cancel = nullptr;
@@ -951,7 +1007,8 @@ void extension_desc_item_execute(void* button) {
             *cancel_slot = &extension_sell_cancel;
             VIRTBAG_LOG("extension sell confirmation created price=%lld", static_cast<long long>(price));
         } else {
-            VIRTBAG_LOG("extension sell confirmation unavailable valid=%d", valid ? 1 : 0);
+            VIRTBAG_LOG("sell price reject reason=popup_unavailable source=equip valid=%d",
+                        valid ? 1 : 0);
         }
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (popup_created) {
@@ -987,8 +1044,8 @@ void extension_desc_item_execute(void* button) {
             reinterpret_cast<uint8_t*>(item) + I_TYPE);
         descriptor.category = fn_get_bit(flags, 15, 6);
     }
-    descriptor.count = static_cast<int>(stack_codec::read_count(
-        virtual_bag::payload_count(descriptor)));
+    descriptor.count = fn_get_cumulate_count != nullptr
+        ? fn_get_cumulate_count(item) : descriptor.count;
     if (descriptor.category <= 0 || descriptor.count <= 0) {
         descriptor = {};
         if (!free_module_object_locked(item_bag, item_slot)) {

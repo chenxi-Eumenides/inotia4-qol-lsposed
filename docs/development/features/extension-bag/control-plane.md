@@ -5,8 +5,9 @@
 > 本 Hub 只裁决扩展背包的范围、目标、阶段状态、未解决问题、文档路由和重大决策索引。
 > 规则、结构、函数接入、交互、存档和验收分别由七册中的对应权威册维护；Hub 不复制实现正文。
 >
-> **事实基线**：commit `56a477b`。问题 B 仍为“未解决+已布防”；本会话确认使用
-> `UIEquip_OKConfrimUseItem@0xb8478` 函数级 Hook、问题 A 已修复、物理守卫已部署。
+> **事实基线**：commit `19dbc77`。问题 B 仍为“未解决+已布防”；当前确认使用
+> `UIEquip_OKConfrimUseItem@0xb8478` 函数级 Hook、apply 分支已实现并真机验证通过、
+> 问题 A 已修复、物理守卫已部署。
 
 ## §1 范围与目标
 
@@ -121,7 +122,7 @@
 | P4 | ✅ 已完成并归档 | 原版对象与逻辑状态的进程内事务桥接、唯一事务入口、失败隔离和 ownership seam 已收口。 | 物理拖动的所有风险、跨进程恢复或问题 B 已解决。 |
 | P5 | ✅ 核心路径已完成 | 三方向拖动、同袋合并、跨袋不合并、取消、session 清理和失败隔离已有阶段证据。 | 扩展↔扩展交换导致的问题 B；不得把逻辑提交等同于物理安全。 |
 | P6 | ✅ 主保存协调已完成 | 保存 callsite→core coordinator→participant 的正常成功/失败边界已形成；sidecar 双 journal 语义已分立。 | 进程中断、coordinator 自动恢复和异常组合仍未全部关闭；详见存档册缺口。 |
-| P7 | 🟡 进行中 | 阶段 0–3 静态审计完成，阶段 4 dispatcher/installer seam 已 Host 验证。 | LSPosed 生产安装、阶段 5 生产者真机矩阵、全局库存覆盖和 P7 Overall。 |
+| P7 | 🟡 进行中 | 阶段 0–3 静态审计完成，阶段 4 dispatcher/installer seam 已 Host 验证；线 A+B 与商店复制购买数量位段修复已完成；sidecar 读档已与运行时 clamp 分离，Host 已覆盖双向跨配置 canonical 数量保持。 | 待真机双态（99/999）、VM-19 购买数量及 VM-30 跨配置读档回归，以及 LSPosed 生产安装、阶段 5 生产者真机矩阵、全局库存覆盖和 P7 Overall。 |
 
 ### 3.2 当前总闸门
 
@@ -132,8 +133,8 @@
 
 ### 3.3 当前已确认状态
 
-1. 文档事实基线为 commit `56a477b`；`UIEquip_OKConfrimUseItem@0xb8478` 使用
-   LSPosed Native Hook 和 original-first 路径。
+1. 文档事实基线为 commit `19dbc77`；`UIEquip_OKConfrimUseItem@0xb8478` 使用
+   LSPosed Native Hook 和 original-first 路径，apply 分支已真机验证通过。
 2. 视图切换收尾刷新按当前投影袋身份处理，结构性说明见架构册，规则见规则册。
 3. 当前防御包括 `0x18` 单一 drop owner、`moveMergeEnabled` 与扩展源保护解耦、
    物理 `0..5 × 16` 快照 pre/post 与恢复日志；这些防御不构成问题 B 修复证明。
@@ -142,8 +143,11 @@
 5. H-16 承担刷新后投影，moving 六条件保留门和 stale moving flags 清理已落地；原版四象限
    VM-B01～B04 正常。
 6. 页签优先解析、触摸窗口延迟释放队列和 H-16/定点 sync 刷新职责已由真机确认；扩展源→空
-   页签装备、扩展源→其它页签移动和原版→页签对照正常，S-03（扩展宝石拖装备）仍未决，
-   Overall 保持 `NOT_ACCEPTED`。
+   页签装备、扩展源→其它页签移动、原版→页签对照和同袋 apply 分支均正常。apply 分支覆盖
+   宝石镶嵌与强化卷轴强化，失败为 `Blocked` 且不降级 swap；Overall 仍保持 `NOT_ACCEPTED`。
+7. 任务袋 `5` 作为当前原版来源时，页签切换到扩展袋使用合法原版投影宿主 `0..4`；任务袋
+   仍不是扩展物品操作源/目标或投影窗口。实现与验收归 `verification-matrix.md` 的 VM-31，
+   Overall 仍保持 `NOT_ACCEPTED`。
 
 ### 3.4 阶段证据索引
 
@@ -184,11 +188,16 @@
 
 ### 4.3 审计缺口
 
-- **a）缺口-未实现，非刻意边界**：强化（enchant）无任何扩展物品接管，UI 入口未分流。出处：审计报告。
-- **b）已接入、真机待验**：扩展物品拖到角色装备栏使用 `UIEquip_EquipControlEventProc@0xb8f7c`
-  第 15 个 Native Hook；仅扩展宝石源进入 token/session 校验，失败 Blocked，不降级原版。
-  对应验收 `VM-10`，源码以 `native_inventory_hook.cpp:equip_control_event_proc_wrapper` 为准。
-- **c）缺口-未实现，非刻意边界**：`data_op_equip` 拒绝逻辑袋 6..10，与 UI 详情装备路径口径不一致。出处：审计报告。
+- **a）已实现、真机验证通过**：同一扩展逻辑袋内的扩展宝石/强化卷轴→扩展装备走
+  `UIEquip_IsApplyStuff@0xb8d4c`、`SAVE_IsOK@0x128c14`、`UIEquip_ApplyStuff@0xb8df8`；
+  原版 `PutJewel`/`EnchantItem` 分支和既有 `ConsumeItem` Hook 承接材料消费，失败为
+  `Blocked` 且不降级 swap。对应 `S-03`/`VM-10`，提交 `19dbc77`。
+- **b）已接入、真机验证通过**：扩展 apply 材料拖到装备槽使用
+  `UIEquip_EquipControlEventProc@0xb8f7c` 第 15 个 Native Hook；宝石和强化卷轴均进入
+  token/session 校验，失败 Blocked，不降级原版。源码以
+  `native_inventory_hook.cpp:equip_control_event_proc_wrapper` 为准。
+- **c）当前缺口**：`data_op_equip` 拒绝逻辑袋 6..10，与 UI 详情装备路径口径不一致；该缺口
+  不影响已验证的同袋 apply 分支。出处：审计报告。
 
 ## §5 决策记录索引
 
@@ -212,10 +221,14 @@
 | 2026-09-08 | 正式库存操作面使用 `/api/item/inventory*`；`/api/debug/extension_bag/*` 仅作视图控制开发面。 | `verification-matrix.md` §1.1；`docs/reference/api-reference.md` |
 | 2026-09-08 | `INVEN_MoveItem` 函数层接管采用方案 A：常驻 Native Hook 仅拦扩展身份源；原版对象全量 original-first backup 并取证。方案 B 因四参不足以还原扩展意图，且与 `0x18` owner 存在双提交风险而不采用。 | `inventory-integration-decision-plan.md` §2.2；`drag-protocol.md` §2.5、§4；`verification-matrix.md` VM-27 |
 | 2026-09-08 | `INVEN_MoveItem` guard 的身份、view/session、caller 和物理槽摘要必须在锁内采集，调用 backup 前放锁；扩展命中记录 ERROR 并跳过 backup，问题 B 仍保持“未解决+已布防”。 | `rulebook.md` R-31；`native_inventory_hook.cpp:226-273`；`verification-matrix.md` VM-27 |
-| 2026-09-09 | 第 15 个 Native Hook 接入 `UIEquip_EquipControlEventProc@0xb8f7c`：扩展宝石源通过 descriptor/generation/session 与 token 校验后放锁调用原版 proc，`PutJewel`/`ConsumeItem` 链承接镶嵌和消费；非扩展源/非宝石 original-first，校验失败 Blocked。 | `rulebook.md` R-02、R-09、R-15、R-16、R-31；`inventory-integration-decision-plan.md` §2.3/§2.4；`verification-matrix.md` VM-10 |
+| 2026-09-09 | 第 15 个 Native Hook 接入 `UIEquip_EquipControlEventProc@0xb8f7c`：扩展 apply 材料源（宝石/强化卷轴）通过 descriptor/generation/session 与 token 校验后放锁调用原版 proc，`PutJewel`/`EnchantItem`/`ConsumeItem` 链承接镶嵌、强化和消费；非扩展源/非 apply 材料 original-first，校验失败 Blocked。 | `rulebook.md` R-02、R-09、R-15、R-16、R-31；`inventory-integration-decision-plan.md` §2.3/§2.4；`verification-matrix.md` VM-10 |
+| 2026-09-10 | apply 分支落地：同一扩展逻辑袋内宝石/强化卷轴→装备经 `UIEquip_IsApplyStuff`、`SAVE_IsOK` 和原版 `UIEquip_ApplyStuff` 路由，`PutJewel`/`EnchantItem` 与 `ConsumeItem` 承接成功消费；失败为 Blocked，不降级 swap；真机验证通过。 | 提交 `19dbc77`；`rulebook.md` R-02、R-09、R-15、R-16、R-31；`verification-matrix.md` S-03、VM-10 |
 | 当前 | 刷新使用 H-16 函数级关卡：原版一次刷新锁内 trampoline 后覆盖投影，模块内部走 raw-original dispatcher，restore 期间抑制投影；moving 门和定点 sync 负责无刷新事务。 | `rulebook.md` R-32；`drag-protocol.md` §2.5、§2.7；`verification-matrix.md` VM-B |
 | 当前 | draw-end 不写帧级 projection；H-16 保留 post-projection，无刷新事务使用定点 `sync_projected_slot`；moving 仅六条件全真时保留，失效 moving 清理 TouchState 与控件 flags。 | `rulebook.md` R-34；`drag-protocol.md` §2.7；`verification-matrix.md` VM-B01～VM-B04 |
-| 当前 | 页签优先解析、触摸窗口延迟释放队列和 H-16/定点 sync 刷新职责已由真机确认；扩展源→空页签装备、扩展源→其它页签移动和原版→页签对照正常，S-03 仍未决。 | `rulebook.md` R-15、R-34～R-36；`drag-protocol.md` §2.2.1、§2.9、§4、§5；`verification-matrix.md` S-05、VM-29、VM-B01～B04 |
+| 当前 | 页签优先解析、触摸窗口延迟释放队列、H-16/定点 sync 刷新职责和同袋 apply 分支已由真机确认；扩展源→空页签装备、扩展源→其它页签移动、原版→页签对照及宝石/强化卷轴→装备均正常。 | `rulebook.md` R-15、R-34～R-36；`drag-protocol.md` §2.2.1、§2.9、§4、§5；`verification-matrix.md` S-03、S-05、VM-10、VM-29、VM-B01～B04 |
+| 2026-09-10 | 任务袋 `5` 作为当前来源允许切换到扩展页签；投影前选择原版 `0..4` 宿主并保持任务袋不进入投影/事务目标，扩展→任务袋仍只允许视图切换。 | `rulebook.md` R-19、R-26、R-27、R-30；`drag-protocol.md` §2.2.1；`verification-matrix.md` VM-31、VM-B04 |
+| 当前 | 线 A+B 的数量路径已复核；`ITEM_IsRealEquip/ITEM_IsRealBroken` 四处非数量 patch 已撤销，`UIStore_BuyItem+0x1a8` 保持；当前待真机双态（99/999）及装备显示/详情回归。 | `runtime-architecture.md` §2.1.1；`rulebook.md` R-38、R-43；`verification-matrix.md` VM-30 |
+| 2026-09-10 | sidecar 读档的 canonical 数量固定为 `0..999` 语义；不按当前堆叠配置截断已有值，可堆叠 payload 仅在与 descriptor 不一致时同步，越界值收敛到 999 并记录日志。 | `rulebook.md` R-38、R-40、R-41；`module-save-store.md` §6.1；`verification-matrix.md` VM-30；Host `test_virtual_bag_json_count_clamp` |
 
 ### 5.1 决策索引使用规则
 

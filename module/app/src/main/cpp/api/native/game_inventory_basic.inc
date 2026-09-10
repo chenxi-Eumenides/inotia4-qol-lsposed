@@ -53,11 +53,14 @@ std::string data_op_add_item(int32_t category, int32_t count) {
     // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
     void* item = fn_create_item(category, 0, 0, 0);
     if (item == nullptr) return op_err("create item failed");
-    // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（item_is_equip 同源，与 ITEM_GetCumulateCount 一致，
-    // 与 patch 无关）。不可用 fn_get_cumulate_count 返回值区分——装备与数量 1 的可堆叠均返回 1。
-    if (count > 1 && item_is_equip(item)) {
+    // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（与 ITEM_GetCumulateCount 同源）。
+    // 类别表不可用时拒绝多数量写入，不能把未知类别当作可堆叠物品。
+    const stack_codec::CountEncoding count_encoding = item_count_encoding(item);
+    if (count > 1 && count_encoding != stack_codec::CountEncoding::kEncoded) {
         fn_itempool_free(item);
-        return op_err("item not stackable");
+        return op_err(count_encoding == stack_codec::CountEncoding::kUnknown
+                          ? "item category unavailable"
+                          : "item not stackable");
     }
     if (count > 1) {
         count = static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count), stack_limit_enabled()));

@@ -14,3 +14,13 @@ uint32_t current_map_id() { return 0; }
 void* lead_member() { return nullptr; }
 
 CharGetAreaRectFn fn_char_get_area_rect = nullptr;
+
+namespace {
+bool g_host_stack_limit_enabled = false;
+}
+
+bool stack_limit_enabled() { return g_host_stack_limit_enabled; }
+
+void set_host_stack_limit_enabled(bool enabled) {
+    g_host_stack_limit_enabled = enabled;
+}

@@ -19,9 +19,12 @@
 #include "game_tiles.h"
 #include "feature/extension_bag/model/ownership_ledger.h"
 #include "core/native/stack_codec.h"
+#include "core/native/sell_price.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "feature/patch/inventory_find_item_poc.h"
 #include "../data/native/game_tiles.cpp"
+
+extern void set_host_stack_limit_enabled(bool enabled);
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -297,6 +300,24 @@ static void test_stack_codec() {
     CHECK_EQ(stack_codec::clamp_count(99, false), 99u);
     CHECK_EQ(stack_codec::write_count(low, 1000), low | (1000u << 22));
     CHECK_EQ(stack_codec::write_count(low, 999) & stack_codec::kCountMask, 999u << 22);
+    const uint32_t bag_flags = 0x01A54321u | (0x55u << 25);
+    const uint32_t marked = stack_codec::write_native_bag_object_marker(bag_flags);
+    CHECK_EQ(marked & ((1u << 25) - 1u), bag_flags & ((1u << 25) - 1u));
+    CHECK_EQ((marked >> stack_codec::kNativeBagObjectMarkerShift) & 0x7Fu, 1u);
+}
+
+static void test_sell_price_bounds() {
+    int64_t price = 0;
+    CHECK(sell_price::calculate(100, 99, false, &price));
+    CHECK_EQ(price, 9900);
+    CHECK(sell_price::calculate(100, 999, true, &price));
+    CHECK_EQ(price, 69930);
+    CHECK(!sell_price::calculate(-1, 1, false, &price));
+    CHECK(!sell_price::calculate(sell_price::kMaxValue + 1, 1, false, &price));
+    CHECK(!sell_price::calculate(sell_price::kMaxValue, 2, false, &price));
+    CHECK(!sell_price::calculate(1, 0, false, &price));
+    CHECK_EQ(stack_codec::clamp_count(1000, false), 99u);
+    CHECK_EQ(stack_codec::clamp_count(1000, true), 999u);
 }
 
 static void test_virtual_bag_state() {
@@ -425,6 +446,15 @@ static void make_small_payload(virtual_bag::Item* item, uint32_t count) {
         item->payload[virtual_bag::kPayloadCountOffset + i] =
             static_cast<uint8_t>((count_u32 >> (8 * i)) & 0xFF);
     }
+}
+
+static stack_codec::CountEncoding host_category_uses_stack_count(int category) {
+    return category == 333 ? stack_codec::CountEncoding::kNotEncoded
+                           : stack_codec::CountEncoding::kEncoded;
+}
+
+static stack_codec::CountEncoding host_unknown_category(int) {
+    return stack_codec::CountEncoding::kUnknown;
 }
 
 struct PayloadBridgeFixture {
@@ -676,11 +706,17 @@ static void test_virtual_bag_payload_helpers() {
     make_small_payload(&item, 3);
     CHECK(virtual_bag::valid_payload(item));
     CHECK_EQ(static_cast<int>(stack_codec::read_count(virtual_bag::payload_count(item))), 3);
-    virtual_bag::patch_payload_count(&item, 7);
+    CHECK(virtual_bag::patch_payload_count(&item, 7, host_category_uses_stack_count));
     CHECK_EQ(static_cast<int>(stack_codec::read_count(virtual_bag::payload_count(item))), 7);
     CHECK_EQ(virtual_bag::payload_count(item) & ~stack_codec::kCountMask, 0x00012345u);
-    virtual_bag::patch_payload_count(&item, 999);
+    CHECK(virtual_bag::patch_payload_count(&item, 999, host_category_uses_stack_count));
     CHECK_EQ(static_cast<int>(stack_codec::read_count(virtual_bag::payload_count(item))), 999);
+    virtual_bag::Item equipment = item;
+    equipment.category = 333;
+    const auto equipment_payload = equipment.payload;
+    CHECK(!virtual_bag::patch_payload_count(&equipment, 7, host_category_uses_stack_count));
+    CHECK(std::memcmp(equipment.payload.data(), equipment_payload.data(), equipment_payload.size()) == 0);
+    CHECK(!virtual_bag::patch_payload_count(&item, 7, host_unknown_category));
     const uint32_t hash = virtual_bag::payload_hash(item);
     item.count = 1;
     CHECK(virtual_bag::payload_hash(item) != hash);
@@ -703,21 +739,34 @@ static void test_virtual_bag_mergeable_items() {
     source.count = 5;
     make_small_payload(&existing, existing.count);
     make_small_payload(&source, source.count);
-    CHECK(virtual_bag::mergeable_items(existing, source));
-    CHECK(virtual_bag::same_extension_bag_mergeable_items(existing, source));
+    CHECK(virtual_bag::mergeable_items(existing, source, host_category_uses_stack_count));
+    CHECK(virtual_bag::same_extension_bag_mergeable_items(existing, source,
+                                                           host_category_uses_stack_count));
     source.category = 402;
-    CHECK(!virtual_bag::mergeable_items(existing, source));
+    CHECK(!virtual_bag::mergeable_items(existing, source, host_category_uses_stack_count));
     source.category = existing.category;
     source.payload[7] ^= 1;
-    CHECK(!virtual_bag::mergeable_items(existing, source));
-    CHECK(!virtual_bag::same_extension_bag_mergeable_items(existing, source));
+    CHECK(!virtual_bag::mergeable_items(existing, source, host_category_uses_stack_count));
+    CHECK(!virtual_bag::same_extension_bag_mergeable_items(existing, source,
+                                                            host_category_uses_stack_count));
     source = virtual_bag::Item{existing.category, source.count};
     virtual_bag::Item legacy_existing{existing.category, existing.count};
-    CHECK(!virtual_bag::mergeable_items(legacy_existing, source));
+    CHECK(!virtual_bag::mergeable_items(legacy_existing, source, host_category_uses_stack_count));
+    virtual_bag::Item equipment_existing{};
+    virtual_bag::Item equipment_source{};
+    equipment_existing.category = 333;
+    equipment_source.category = 333;
+    equipment_existing.count = 1;
+    equipment_source.count = 1;
+    make_small_payload(&equipment_existing, 100);
+    make_small_payload(&equipment_source, 100);
+    CHECK(!virtual_bag::same_extension_bag_mergeable_items(
+        equipment_existing, equipment_source, host_category_uses_stack_count));
     CHECK(virtual_bag::same_extension_bag_merge_allowed(0, 0));
     CHECK(!virtual_bag::same_extension_bag_merge_allowed(0, 1));
     // 合并判定优先于交换；交换只在目标非空且不满足合并条件时进入。
-    CHECK(virtual_bag::same_extension_bag_mergeable_items(existing, existing));
+    CHECK(virtual_bag::same_extension_bag_mergeable_items(existing, existing,
+                                                          host_category_uses_stack_count));
     CHECK(virtual_bag::extension_swap_tokens_available(false, false, false, false));
     CHECK(!virtual_bag::extension_swap_tokens_available(true, false, false, false));
     CHECK(!virtual_bag::extension_swap_tokens_available(false, false, false, true));
@@ -794,6 +843,84 @@ static void test_virtual_bag_json_roundtrip() {
     CHECK(virtual_bag::parse_state_json(hash_order_json.c_str(), &hash_order_parsed));
     CHECK_EQ(static_cast<int>(hash_order_parsed.items[1][2].payload_size), 19);
     CHECK(std::memcmp(hash_order_parsed.items[1][2].payload.data(), payload_item.payload.data(), 19) == 0);
+}
+
+static void test_virtual_bag_json_count_clamp() {
+    virtual_bag::State oversized_state{};
+    oversized_state.items[0][0].category = 401;
+    oversized_state.items[0][0].count = 1000;
+    make_small_payload(&oversized_state.items[0][0], 1000);
+
+    virtual_bag::State oversized_parsed{};
+    CHECK(virtual_bag::parse_state_json(
+        virtual_bag::state_json(oversized_state).c_str(), &oversized_parsed,
+        host_category_uses_stack_count));
+    CHECK_EQ(oversized_parsed.items[0][0].count, 999);
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(
+                  virtual_bag::payload_count(oversized_parsed.items[0][0]))), 999);
+
+    virtual_bag::State cross_config_state{};
+    cross_config_state.items[0][0].category = 401;
+    cross_config_state.items[0][0].count = 199;
+    make_small_payload(&cross_config_state.items[0][0], 199);
+
+    set_host_stack_limit_enabled(true);
+    const std::string enabled_json = virtual_bag::state_json(cross_config_state);
+    set_host_stack_limit_enabled(false);
+    virtual_bag::State parsed_disabled{};
+    CHECK(virtual_bag::parse_state_json(
+        enabled_json.c_str(), &parsed_disabled, host_category_uses_stack_count));
+    CHECK_EQ(parsed_disabled.items[0][0].count, 199);
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(
+                  virtual_bag::payload_count(parsed_disabled.items[0][0]))), 199);
+
+    set_host_stack_limit_enabled(false);
+    const std::string disabled_json = virtual_bag::state_json(cross_config_state);
+    set_host_stack_limit_enabled(true);
+    virtual_bag::State parsed_enabled{};
+    CHECK(virtual_bag::parse_state_json(
+        disabled_json.c_str(), &parsed_enabled, host_category_uses_stack_count));
+    CHECK_EQ(parsed_enabled.items[0][0].count, 199);
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(
+                  virtual_bag::payload_count(parsed_enabled.items[0][0]))), 199);
+    set_host_stack_limit_enabled(false);
+
+    virtual_bag::State mismatched_state = cross_config_state;
+    make_small_payload(&mismatched_state.items[0][0], 17);
+    virtual_bag::State mismatched_parsed{};
+    CHECK(virtual_bag::parse_state_json(
+        virtual_bag::state_json(mismatched_state).c_str(), &mismatched_parsed,
+        host_category_uses_stack_count));
+    CHECK_EQ(mismatched_parsed.items[0][0].count, 199);
+    CHECK_EQ(static_cast<int>(stack_codec::read_count(
+                  virtual_bag::payload_count(mismatched_parsed.items[0][0]))), 199);
+
+    virtual_bag::Item equipment{};
+    equipment.category = 333;
+    equipment.count = 1;
+    make_small_payload(&equipment, 100);
+    virtual_bag::State equipment_state{};
+    equipment_state.items[0][0] = equipment;
+    const std::string equipment_json = virtual_bag::state_json(equipment_state);
+    virtual_bag::State equipment_parsed{};
+    CHECK(virtual_bag::parse_state_json(
+        equipment_json.c_str(), &equipment_parsed, host_category_uses_stack_count));
+    CHECK_EQ(equipment_parsed.items[0][0].count, 1);
+    CHECK_EQ(equipment_parsed.items[0][0].payload_size, equipment.payload_size);
+    CHECK(std::memcmp(equipment_parsed.items[0][0].payload.data(), equipment.payload.data(),
+                      equipment.payload.size()) == 0);
+
+    virtual_bag::State legal_state{};
+    legal_state.items[0][0].category = 401;
+    legal_state.items[0][0].count = 7;
+    make_small_payload(&legal_state.items[0][0], 7);
+    const std::string legal_json = virtual_bag::state_json(legal_state);
+    virtual_bag::State legal_parsed{};
+    CHECK(virtual_bag::parse_state_json(
+        legal_json.c_str(), &legal_parsed, host_category_uses_stack_count));
+    CHECK_EQ(legal_parsed.items[0][0].count, 7);
+    CHECK(std::memcmp(legal_parsed.items[0][0].payload.data(), legal_state.items[0][0].payload.data(),
+                      legal_state.items[0][0].payload.size()) == 0);
 }
 
 static void test_virtual_bag_legacy_json() {
@@ -1411,7 +1538,7 @@ static void test_p44_transaction_stages() {
     make_small_payload(&src, src.count);
     Item committed = src;
     committed.count = 9;
-    patch_payload_count(&committed, 9);
+    CHECK(patch_payload_count(&committed, 9, host_category_uses_stack_count));
 
     // orig→ext pending：payload=目标提交态，source_payload=源载荷；journal 一一映射。
     TransactionContext o2e{};
@@ -1871,6 +1998,7 @@ int main() {
     test_nav_bfs();
     test_nav_bfs_multi();
     test_stack_codec();
+    test_sell_price_bounds();
     test_virtual_bag_state();
     test_extension_bag_exit_rendering_state();
     test_prepare_journal();
@@ -1880,6 +2008,7 @@ int main() {
     test_virtual_bag_merge_count();
     test_virtual_bag_mergeable_items();
     test_virtual_bag_json_roundtrip();
+    test_virtual_bag_json_count_clamp();
     test_virtual_bag_legacy_json();
     test_virtual_bag_normalize_payload();
     test_virtual_bag_recovery();

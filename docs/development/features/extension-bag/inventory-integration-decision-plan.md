@@ -82,8 +82,12 @@
 | `CHAR_EquipItemFromInvenToSlot` | `0xe5368` | Native Hook；扩展视图对象受控临时借入物理槽 | 装备交换、被替换装备回包 | 原版交换入口继续决定装备规则；扩展物品只在调用期间暴露，被替换装备转扩展所有权 | `extension_bag_internal_equip_active` 防止递归；失败必须恢复物理槽和角色槽。现码：`native_inventory_hook.cpp:201-221`、`extension_bag_equip.inc:155-220`。 |
 | `CHAR_UnequipItemToInven` | `0xe2f68` | Native Hook；原版失败后扩展兜底 | UI 卸装备、卸袋和未知 caller | 原版能入物理袋则透传；原版失败时扩展收编；扩展袋卸下必须非空拒绝 | 只信原版返回值会丢扩展兜底；目标任务袋 `5` 排除。现码：`native_inventory_hook.cpp:133-143`。 |
 | `CHAR_PickItemAll` / 拾取族 | `0xec4d8`；回调注释 `0xdd15c` | 不 Hook；保留 `nav_pick_items` 就近旁路 | 官方按键拾取、后台导航拾取、掉落回调 | 模块复刻范围判断和 `NOTIFIER_Add`，主线程回调最终进入 `INVEN_SaveItem`；原版优先、满包再由 SaveItem wrapper adopt | 直接后台调用原版会触发空音频句柄崩溃；不能改变掉落对象、通知节点和失败释放。现码：`game_world_movement.inc:4-35`，VMA `game_symbols.h:422-425`。 |
-| `ITEMSYSTEM_PutJewel` | `0x10bcb4` | Native Hook，原版 backup + 扩展材料适配 | 装备页、API 镶嵌、装备槽拖放 | 原版返回 0 决定效果；扩展宝石源由 H-15 放行原版 proc，`stage4_put_jewel` 承接两端分流 | 扩展宝石禁止 `RemoveItemDirect`；扩展宝石+原版装备不得直调 `virtual_bag_put_jewel_native`，消费由 `ConsumeItem` Hook 完成。现码：`native_inventory_hook.cpp:297-301`、`inventory_hook_stage4.cpp:106-119`。 |
-| `UIEquip_EquipControlEventProc` | `0xb8f7c` | **Native Hook，原版 proc 继续执行** | 装备槽拖放（event `0x04`） | 仅源为扩展宝石且 object/descriptor/generation/session 校验通过时取 token、放锁调用原版 proc；非扩展源/非宝石直接 backup | 校验或事务失败 Blocked，吞事件且不降级 backup；`game_patch_move_merge.inc` 不参与本修复。 |
+| `ITEMSYSTEM_PutJewel` | `0x10bcb4` | Native Hook，原版 backup + 扩展材料适配 | 装备页、API 镶嵌、装备槽拖放和 apply 分支 | 原版返回 0 决定效果；扩展材料源由 H-15 或同袋 apply 路由承接，`stage4_put_jewel` 处理宝石两端分流 | 扩展宝石禁止 `RemoveItemDirect`；扩展宝石+原版装备不得直调 `virtual_bag_put_jewel_native`，消费由 `ConsumeItem` Hook 完成。现码：`native_inventory_hook.cpp:297-301`、`inventory_hook_stage4.cpp:106-119`。 |
+| `UIEquip_IsApplyStuff` | `0xb8d4c` | 直接调用原版判定；apply 路由前置校验 | 同袋扩展材料→扩展装备、装备槽拖放 | 对目标装备和扩展宝石/强化卷轴判定是否可镶嵌/强化；不改原版判定结果 | 仅同一扩展逻辑袋的 apply 候选进入该路径；判定失败返回 `Blocked`，不得降级为扩展 swap。现码：`extension_bag_public_runtime.inc:132-145`。 |
+| `UIEquip_ApplyStuff` | `0xb8df8` | **apply 路由经原版 `ApplyStuff`**；材料消费经既有 Hook | 同袋扩展材料→扩展装备 | `SAVE_IsOK` 通过后放锁调用原版 `ApplyStuff`；原版内部按材料类型进入 `PutJewel` 或 `EnchantItem`，目标 payload/hash 随后同步 | 只允许源为扩展宝石/强化卷轴、目标为装备且同袋；失败必须 `Blocked`，不降级为 swap。提交 `19dbc77`；现码：`extension_bag_public_runtime.inc:132-245`。 |
+| `SAVE_IsOK` | `0x128c14` | apply 路由前置调用；不接管保存流程 | `UIEquip_ApplyStuff` 成功前状态检查 | 返回失败时终止 apply、abort token/session，不消费材料、不改装备、不进入 swap | 不把该状态检查等同于完整保存提交；VMA/类型登记见 `game_symbols.h`。 |
+| `ITEMSYSTEM_EnchantItem` | `0x10b330` | 原版 `ApplyStuff` 分支直接调用；材料消费经既有 `ConsumeItem` Hook | 强化卷轴→装备 | 强化卷轴成功更新装备 payload/等级，`ConsumeItem` 恰好消费一张卷轴；扩展只同步逻辑 descriptor/object/hash/projection | 不新增独立强化业务或绕过 `ApplyStuff`；不可强化、非卷轴和失败路径保持材料与装备不变。 |
+| `UIEquip_EquipControlEventProc` | `0xb8f7c` | **Native Hook，原版 proc 继续执行** | 装备槽拖放（event `0x04`） | 源为扩展 apply 材料（宝石/强化卷轴）且 object/descriptor/generation/session 校验通过时取 token、放锁调用原版 proc；非扩展源/非 apply 材料直接 backup | 校验或事务失败 Blocked，吞事件且不降级 backup；`game_patch_move_merge.inc` 不参与 apply 路由。 |
 | `UIEquip_RefreshItemArea` | `0xb7a00` | **Native Hook，非重入锁内 trampoline 后覆盖投影** | 原版背包区域刷新、扩展投影安装/恢复及事务收尾 | 原版一次刷新由 H-16 在锁内同步当前投影；模块内部主动刷新统一走 raw-original dispatcher | `refresh_depth>0`、restore 抑制或投影未安装时只走 trampoline；draw-end 不执行帧级 heal，无刷新事务使用定点 slot sync。现码：`native_inventory_hook.cpp:211-218`、`game_ui_virtbag.cpp:237-245`。 |
 | `ITEMSYSTEM_ReleaseSealed` | `0x10af4c` | 上层分发；不接管 | 解封类使用 | API 先记录原版库存变化，成功后消费输入 | 产物可能多件；输入消费、扩展落点和失败原子性未闭合。 |
 | `ITEMSYSTEM_OpenItemBox` | `0x10e970` | 上层分发；不 Hook | 开箱按钮/API | 原版开箱决定随机产物并内部走 `SaveItem`；扩展源通过受控使用入口 | 不凭 SaveItem wrapper 宣称多产物原子回滚；输入消费和部分成功仍需逐 caller 验证。现码：`game_inventory_use.inc:82-95`。 |
@@ -107,6 +111,18 @@
 | UI 详情/商店/销毁全局 popup | `G_POPUP_FPOK_VMA=0x3070e0`、`G_POPUP_FPCANCEL_VMA=0x3070d8` | GOT 槽临时替换，完成后恢复原回调 | 卖出、销毁确认 | 回调只接受当次详情身份和价格/数量快照 | 槽是全局且可被覆盖；必须保存原 callback，取消、失败、成功和 stale identity 都清理。VMA：`game_symbols.h:96-97`。 |
 
 **矩阵结论**：本节函数的 VMA、现码处置和边界以当前 `game_symbols.h` 与 Hook/适配实现为准；“Native Hook”只表示机制已安装或有安装路径，不代表每个游戏内 caller 已真机验证。
+
+#### 2.4.1 出售取价函数处置
+
+`extension_bag_sell_price` 继续调用原版 `ITEM_GetSellPrice` 获取单位价，不复制原版
+category/ability/payload 分支。适配层先按 `stack_codec::max_count(stack_limit_enabled())`
+将数量收敛到 99 或 999，再要求单位价和最终价均不超过 `INT32_MAX`；装备页销毁/粉碎
+保留 70% variant，装备页卖出、商店页和 API 保留 100% variant。
+
+装备页和商店页在写入 `fn_popup_create_yesno_from_textdata` 前必须完成对象、generation、
+release guard、类别、数量和价格校验；校验失败不创建弹窗、不写弹窗金额。API 卖出复用同一
+适配器，非法价格直接返回业务失败并记录 `sell price reject reason=...`。成功取价记录
+`source/category/count/unit/variant/final/payload/gen`，用于与原版单位价和真机弹窗参数对照。
 
 ### 2.5 矩阵使用核对表
 
@@ -146,6 +162,19 @@
 6. 证据闭合后才评估旁路调整；未完成真机生产者证据时保持“暂缓/保留”。
 
 这套顺序特别适用于 `SaveItem`、`FindSaveSlot`、装备交换和 `ConsumeItem`：它们分别连接生产者漏斗、商店门禁、角色装备所有权和确认使用 token，任何一处先改机制再补边界都会扩大问题 B 的取证范围。
+
+### 2.8 类别判定与袋对象安全门
+
+* `item_count_encoding` 和扩展运行时 `category_is_equip` 共用三态结果：
+  `kEncoded` 表示可堆叠数量，`kNotEncoded` 表示装备/非堆叠，`kUnknown` 表示表基址、
+  静态表或 stride 不可用。`kUnknown` 在 `state_json`、扩展消费、`game_inventory_basic`、
+  `game_patch_move_merge` 和 apply/装备按钮路径必须拒绝，不能按可堆叠处理。
+* `patch_payload_count` 自带类别门控；非 `kEncoded` 直接 no-op 并记录日志。ext→ext 合并
+  比较必须传入 `virtual_bag_category_uses_stack_count`，装备 payload 不得被数量归一化。
+* 原生袋对象 `+0x10` 的容量 bit0..24 与普通物品数量位不同；页签、商店和卸下袋对象三处
+  统一使用 `stack_codec::write_native_bag_object_marker`，不得使用 `write_count`。
+* `is_backpack_category` 只判断扩展 `BagType 1..4`；`category_is_extension_backpack`
+  只判断原生 `ITEMCLASSBASE +2 == 0x1f`。两者不是同一语义，不能互换。
 
 ## 3. 全局裁定
 

@@ -28,10 +28,10 @@ void refresh_tab_bag_items_locked() {
         if (fn_create_item == nullptr) continue;
         slot = fn_create_item(static_cast<int32_t>(type), 0, 0, 0);
         if (slot != nullptr) {
-            uint32_t count_flags =
+            const uint32_t count_flags =
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT);
             *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT) =
-                stack_codec::write_count(count_flags, 1);
+                stack_codec::write_native_bag_object_marker(count_flags);
         }
     }
 }

@@ -15,7 +15,8 @@ struct PatchEntry {
     uint32_t replacement;     // 替换指令
 };
 
-// 固定布局 patch：位段扩展 31 + 存档子物品检查 2。
+// 固定布局 patch：仅包含已证明为数量语义的位段读写与检查；装备/损坏 marker
+// 判定等非数量位段不得加入此表。
 extern const PatchEntry g_stack_layout_patches[];
 extern const size_t g_stack_layout_patch_count;
 

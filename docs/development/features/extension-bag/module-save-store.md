@@ -180,6 +180,12 @@ section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不�
 
 这是“先扩展状态、后视图”：`ensure_state_loaded_locked` 在安装控件前加载逻辑状态；`install_module_view_locked` 再按 descriptor 物化对象并借给控件，代码 `extension_bag_render.inc:498-542`。原版袋窗口容量只在视图安装期间临时改变，恢复时先归还 view borrow，再写回真实容量并刷新原版区域，代码 `extension_bag_render.inc:579-608`。
 
+sidecar 读档的数量语义独立于运行时堆叠配置：descriptor 的 canonical `count` 只接受
+`0..999`，越过绝对上限时收敛到 `999` 并记录日志；不会按当前 `stackLimitIncrease`
+把已有值截到 `99`。对可堆叠类别，payload 数量位只有在与 descriptor 不一致时才改为同一
+canonical 值；非堆叠类别的 payload 数量位按原始字节保留。运行时 `99/999` clamp 仅用于
+新建、合并、消费和派生操作，因此切换配置后重新读档不会迁移或截断已有数量。
+
 ### 6.2 pending 恢复
 
 `extension_bag_load_state_from_store` 在 `extension_bag_persistence.cpp:56-127` 解析 state JSON 中的 pending。malformed 或非法 transaction domain 不进入事务执行，而是构造 isolation record，保留 direction、源/目标、payload 和 transaction id 后清 pending；payload 校验失败同样隔离。隔离记录当前是内存诊断字段，不因 `state_json` 默认参数写入 sidecar，依据 `virtual_bag_state_json.inc:56-57`。

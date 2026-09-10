@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/native/stack_codec.h"
+
 #include <jni.h>
 
 #include <string>
@@ -53,6 +55,8 @@ std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_
 std::string virtual_bag_inventory_bags_json();
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
 void* virtual_bag_item_at(int bag, int slot);
+// 按 ITEMCLASSBASE +6 bit0 统一判定 payload 数量字段是否为 stack_codec 语义。
+stack_codec::CountEncoding virtual_bag_category_uses_stack_count(int category);
 // 视图门禁版：仅当 bag 处于扩展视图（控件 index 与扩展槽 1:1 对应）时物化，
 // 否则返回 nullptr。供 Stage4 装备路径在原版源槽读空时兜底。
 void* virtual_bag_view_item_at(int bag, int slot);

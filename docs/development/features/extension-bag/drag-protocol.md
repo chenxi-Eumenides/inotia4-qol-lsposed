@@ -11,7 +11,7 @@
 >   libgame_ui_0xa3000-0xba200.txt`（本册缩写 **UI**）与
 >   `archive/extension-bag/touch-baseline-20260909/libgame_inven_0x103000-0x105000.txt`
 >   （本册缩写 **INVEN**），引用格式 `UI:行号` / `INVEN:行号`；VMA 只在基线文件内核对。
-> - 模块代码行号按本次成稿时工作树核实（commit `56a477b` 之后的工作树）；后续修改代码
+> - 模块代码行号按当前工作树核实（commit `19dbc77`）；后续修改代码
 >   后必须重新核对全部 `文件:行` 锚点。
 > - 规则交叉引用以规则册已冻结的 `R-01..R-36` 为准；本册不得另行定义编号。
 
@@ -171,7 +171,7 @@ release 时 `TouchHandle_SetReleaseEvent@0xa343c`（UI:295-380）按 drop 目标
 | 事件入口 | 库存场景 state entry `+0x38`（原 `F_SCENE_EVENT_EQUIP_VMA`） | 保存原值到 `g_orig_event` 后覆盖为 `virtual_bag_event`；`+0x28`→`virtual_bag_f3_wrapper`、`+0x10`→`virtual_bag_inventory_enter_wrapper` | `extension_bag_lifecycle.inc:518-532`（读取）、`815-820`（覆盖） |
 | GOT 替换 | `G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA`（item proc 槽） | `ui_equip_inven_item_proc_wrapper`；安装条件 `g_move_merge_requested || g_extension_source_protection_requested`，含卸载路径 | `game_patch_move_merge.inc:122-163`、`165-187` |
 | H-14 | `INVEN_MoveItem@0x104934` Native Hook | `move_item_wrapper`：扩展身份拒绝+取证，原版对象 original-first | `native_inventory_hook.cpp:238-285`（wrapper）、`553-556`（安装）；`rulebook.md` R-31 |
-| H-15 | `UIEquip_EquipControlEventProc@0xb8f7c` Native Hook | `equip_control_event_proc_wrapper`：扩展宝石源校验后放锁调原版 proc | `native_inventory_hook.cpp:359-369`（wrapper）、`557-560`（安装）；`game_ui_virtbag.cpp:248-388`（实现） |
+| H-15 | `UIEquip_EquipControlEventProc@0xb8f7c` Native Hook | `equip_control_event_proc_wrapper`：扩展 apply 材料源（宝石/强化卷轴）校验后放锁调原版 proc | `native_inventory_hook.cpp:359-369`（wrapper）、`557-560`（安装）；`game_ui_virtbag.cpp:248-388`（实现） |
 | H-16 | `UIEquip_RefreshItemArea` Native Hook | `refresh_item_area_wrapper`：depth 门 + trampoline + `virtual_bag_refresh_item_area_with_gate` | `native_inventory_hook.cpp:205-213`（wrapper）、`561-564`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`rulebook.md` R-32 |
 | 指令 patch | bag proc `0x04` 内 `bl INVEN_SaveItemOnEmpty`（`g_base+0xb8cc0`） | 替换为 `bl save_item_on_empty_gate`；原字 `0x94012fc8` | `extension_bag_lifecycle.inc:692-730`；gate 实现 `extension_bag_render.inc:431-481` |
 | 指令 patch | item proc `0x80` 内 `bl UIEquip_MakeDesc`（`F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA`） | 替换为 `bl make_desc_equip_gate`；原字 `0x97fffdfe` | `extension_bag_lifecycle.inc:772-814` |
@@ -230,6 +230,7 @@ owner 判定 `virtual_bag::projected_release_owns_event`（`event == 0x18 且 se
 - 扩展源 release 的目标解析顺序固定为先遍历 `extension_tab_hit(index,x,y)`，再解析
   扩展网格槽；现有标签矩形与网格行在 y 坐标带上有重叠，因此页签命中优先表达切袋意图，
   不得被有效格子命中抢先消费。
+- 页签点击只按目标判定：当前原版任务袋 `5` 允许切到扩展页签或原版页签，只有目标为任务袋 `5` 的物品操作继续拒绝。
 - 空扩展页签且源类别为背包类时，类别统一由 `is_backpack_category(category)` 判定；
   投影扩展源从 session 的 `source_bag/source_slot` 读取，不再依赖 release 前可能已清掉
   moving flag 的控件。装备事务复用 `equip_extension_source_on_tab_locked`。
@@ -280,7 +281,7 @@ host 测试覆盖为 `tests/test_host.cpp` 的 `test_p52_drag_session`（引用�
 passthrough 后调 backup（`263-284`）。
 
 **H-15 `virtual_bag_handle_equip_control_event`**（`game_ui_virtbag.cpp:248-388`）：
-仅 `0x04` 参与（`252-254`）；锁内校验扩展宝石源、descriptor、session 与 token
+仅 `0x04` 参与（`252-254`）；锁内校验扩展 apply 材料源（宝石/强化卷轴）、descriptor、session 与 token
 （`262-309`），失败 Blocked 并取消 session；放锁调原版 proc（`320`）；回锁 finish
 （`326-341`）；成功路径把 session 推进到 Committed（`356-381`）。wrapper 返回值分流
 在 `native_inventory_hook.cpp:359-369`。
@@ -394,19 +395,22 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 - 页签命中先于网格解析；重叠坐标按页签意图路由，R1/R2 页签装备与跨页签分支可达。
 - 触摸窗口内释放请求进入延迟队列，由 draw-end 在引用检查通过后排空。
 - 真机已确认扩展拖动、扩展交换、消耗品使用、确认后使用、装备空槽、装备替换、扩展源
-  →其它页签移动、背包类源→空页签装备均正常；原版四象限 VM-B01～VM-B04 正常。
-  证据卡见 `verification-matrix.md` 的 S-05、VM-29 和 VM-B01～VM-B04。
-- S-03（扩展宝石拖装备）仍为未决，下一项验证队列为 S-03；它与已确认正常的原版
-  VM-B03（原版宝石拖装备）不是同一操作身份。
+  →其它页签移动、背包类源→空页签装备和同袋 apply 分支均正常；原版四象限 VM-B01～VM-B04
+  正常。apply 分支覆盖宝石镶嵌与强化卷轴强化，失败为 `Blocked` 且不降级 swap。
+  证据卡见 `verification-matrix.md` 的 S-03、S-05、VM-10、VM-29 和 VM-B01～VM-B04。
+- S-03（扩展宝石/强化卷轴拖装备）已实现并真机验证通过；它与原版 VM-B03（原版宝石拖装备）
+  仍按不同对象身份维护，apply 仅限同一扩展逻辑袋。
 - B-05“同堆合并”属于模块扩展袋功能，不属于原版四象限；模块行为由
   `verification-matrix.md` 的 VM-B05/VM-13 记录。
 - H-16 `UIEquip_RefreshItemArea` hook、定点 projection sync 和 moving 六条件门构成当前
   刷新职责；draw-end 不承担帧级投影刷新（`extension_bag_render.inc:712-770`、
-  `extension_bag_input.inc:34-77`）。Overall 仍为 `NOT_ACCEPTED`，原因是 S-03 未决。
+  `extension_bag_input.inc:34-77`）。Overall 仍为 `NOT_ACCEPTED`，原因是 P7 全局生产者和
+  其他运行时边界尚未全部闭合；S-03 apply 分支不属于当前阻断项。
 
 **后续计划**（事实性条目）：
 
-1. S-03（扩展宝石拖装备）继续按 `control-plane.md` §4 登记并取证。
+1. S-03 apply 分支按同袋、原版 `ApplyStuff` 路由和 `Blocked` 失败语义维护，证据归验收册
+   S-03/VM-10。
 2. R1/R2 页签落点修复和延迟释放队列按本册 §2.2.1、§2.9 与验收册 S-05/VM-29 维护。
 
 ## 5. 设计决策与未决事项
@@ -434,10 +438,11 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 2. **证据门槛**：验收卡、日志锚和真机操作应在实现交付前进入执行序列，避免只凭静态
    结论关闭行为验证。
 
-### 5.2 未决事项
+### 5.2 当前维护事项及未决事项
 
-1. S-03（宝石拖装备触发交换）的落点根因仍未定位；当前 R1/R2 仅覆盖背包类空页签装备
-   与跨页签提交，不能替代 S-03 结论。
+1. S-03 的 apply 分支已按同袋宝石/强化卷轴→装备验证通过；其成功路径不得出现
+   `extension swap`，失败路径为 `Blocked` 且不降级 swap。后续若修改原版 ApplyStuff、材料
+   消费或同袋判定，仍须复跑 S-03/VM-10。
 2. 问题 B（ext↔ext swap 的原版同号槽丢失）独立于触摸机械，登记与取证 SOP 归
    `control-plane.md` §4.1；本册 §2.8 的 H3 守卫是其防御层之一。
 3. `control-plane.md` §4.1 的取证入口为本册当前 H3 物理快照事实和

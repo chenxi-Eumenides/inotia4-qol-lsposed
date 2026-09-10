@@ -21,6 +21,7 @@ PtrHook store_desc_sell_hook{};
 void* store_desc_item = nullptr;
 int store_desc_item_bag = -1;
 int store_desc_item_slot = -1;
+uint64_t store_desc_item_generation = 0;
 StorePopupCallbackFn store_sell_original_ok = nullptr;
 StorePopupCallbackFn store_sell_original_cancel = nullptr;
 
@@ -64,6 +65,7 @@ void store_reset_desc_hook_locked() {
     store_desc_item = nullptr;
     store_desc_item_bag = -1;
     store_desc_item_slot = -1;
+    store_desc_item_generation = 0;
 }
 
 void store_clear_desc_locked() {
@@ -101,7 +103,7 @@ void store_refresh_tab_bag_items_locked() {
                 const uint32_t flags = *reinterpret_cast<uint32_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_COUNT);
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-                    stack_codec::write_count(flags, 1);
+                    stack_codec::write_native_bag_object_marker(flags);
             }
         }
     }
@@ -454,6 +456,7 @@ void store_make_desc_gate(void* ctrl, void* arg) {
     store_desc_item = item;
     store_desc_item_bag = bag;
     store_desc_item_slot = slot;
+    store_desc_item_generation = g_module_object_use[bag][slot].generation;
 
     void* button = *reinterpret_cast<void**>(g_base + G_UISTORE_SELL_BTN_VMA);
     const uintptr_t sell_raw = g_base + fn_resolve(
@@ -468,6 +471,7 @@ void store_make_desc_gate(void* ctrl, void* arg) {
         store_desc_item = nullptr;
         store_desc_item_bag = -1;
         store_desc_item_slot = -1;
+        store_desc_item_generation = 0;
         VIRTBAG_LOG("store sell hook install failed button=%p", button);
     }
 }
@@ -489,17 +493,51 @@ void store_sell_ok(void*) {
     int slot = -1;
     int count = 0;
     int64_t price = -1;
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         store_restore_popup_callbacks_locked();
         item = store_desc_item;
         bag = store_desc_item_bag;
         slot = store_desc_item_slot;
+        generation = store_desc_item_generation;
         if (item != nullptr && virtual_bag::valid_index(bag) &&
             slot >= 0 && slot < virtual_bag::kSlotCount &&
-            g_module_objects[bag][slot] == item) {
+            g_module_objects[bag][slot] == item &&
+            g_module_object_use[bag][slot].generation == generation &&
+            module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
+            fn_get_bit != nullptr && fn_item_is_no_sell != nullptr &&
+            fn_item_get_sell_price != nullptr) {
             count = g_virtual_bag_state.items[bag][slot].count;
-            price = extension_bag_sell_price(item, count, false);
+            const uint16_t flags = *reinterpret_cast<uint16_t*>(
+                reinterpret_cast<uint8_t*>(item) + I_TYPE);
+            const int category = fn_get_bit(flags, 15, 6);
+            if (fn_item_is_no_sell(category) == 0 && count > 0) {
+                const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
+                price = extension_bag_sell_price(item, count, false);
+                if (price >= 0) {
+                    VIRTBAG_LOG(
+                        "sell price source=store category=%d count=%d unit=%lld variant=100 final=%lld payload=%u gen=%llu",
+                        category,
+                        static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
+                                                                  stack_limit_enabled())),
+                        static_cast<long long>(unit_price), static_cast<long long>(price),
+                        virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
+                        static_cast<unsigned long long>(generation));
+                } else {
+                    VIRTBAG_LOG(
+                        "sell price reject reason=price_bounds source=store category=%d count=%d unit=%lld variant=100 payload=%u gen=%llu",
+                        category, count, static_cast<long long>(unit_price),
+                        virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
+                        static_cast<unsigned long long>(generation));
+                }
+            } else {
+                VIRTBAG_LOG("sell price reject reason=no_sell_or_count source=store category=%d count=%d variant=100",
+                            category, count);
+            }
+        } else {
+            VIRTBAG_LOG("sell price reject reason=stale_or_release_guard source=store bag=%d slot=%d gen=%llu",
+                        bag, slot, static_cast<unsigned long long>(generation));
         }
     }
     if (price < 0 || fn_add_money == nullptr || fn_minus_money == nullptr ||
@@ -560,6 +598,7 @@ void store_desc_sell_execute(void* button) {
     void* item = nullptr;
     int64_t price = -1;
     bool valid = false;
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         const bool current = store_desc_item != nullptr &&
@@ -567,21 +606,55 @@ void store_desc_sell_execute(void* button) {
                              store_desc_item_slot >= 0 &&
                              store_desc_item_slot < virtual_bag::kSlotCount &&
                              g_module_objects[store_desc_item_bag][store_desc_item_slot] ==
-                                 store_desc_item;
+                                 store_desc_item &&
+                             g_module_object_use[store_desc_item_bag][store_desc_item_slot].generation ==
+                                 store_desc_item_generation &&
+                             module_object_release_allowed_locked(
+                                 store_desc_item_bag, store_desc_item_slot, store_desc_item,
+                                 "store sell popup", false, nullptr);
         if (current) {
             item = store_desc_item;
             bag = store_desc_item_bag;
             slot = store_desc_item_slot;
+            generation = store_desc_item_generation;
             const int count = g_virtual_bag_state.items[bag][slot].count;
-            if (fn_item_is_no_sell != nullptr && fn_get_bit != nullptr && count > 0) {
+            if (fn_item_is_no_sell != nullptr && fn_get_bit != nullptr &&
+                fn_item_get_sell_price != nullptr && count > 0) {
                 const uint16_t flags = *reinterpret_cast<uint16_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_TYPE);
                 const int category = fn_get_bit(flags, 15, 6);
                 if (fn_item_is_no_sell(category) == 0) {
+                    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
                     price = extension_bag_sell_price(item, count, false);
                     valid = price >= 0;
+                    if (valid) {
+                        VIRTBAG_LOG(
+                            "sell price source=store category=%d count=%d unit=%lld variant=100 final=%lld payload=%u gen=%llu",
+                            category,
+                            static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
+                                                                      stack_limit_enabled())),
+                            static_cast<long long>(unit_price), static_cast<long long>(price),
+                            virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
+                            static_cast<unsigned long long>(generation));
+                    } else {
+                        VIRTBAG_LOG(
+                            "sell price reject reason=price_bounds source=store category=%d count=%d unit=%lld variant=100 payload=%u gen=%llu",
+                            category, count, static_cast<long long>(unit_price),
+                            virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
+                            static_cast<unsigned long long>(generation));
+                    }
+                } else {
+                    VIRTBAG_LOG("sell price reject reason=no_sell_or_count source=store category=%d count=%d variant=100",
+                                category, count);
                 }
+            } else {
+                VIRTBAG_LOG("sell price reject reason=symbols_or_count source=store bag=%d slot=%d",
+                            bag, slot);
             }
+        } else {
+            VIRTBAG_LOG("sell price reject reason=stale_or_release_guard source=store bag=%d slot=%d gen=%llu",
+                        store_desc_item_bag, store_desc_item_slot,
+                        static_cast<unsigned long long>(store_desc_item_generation));
         }
     }
     const uintptr_t original_ok = g_base != 0
@@ -606,8 +679,8 @@ void store_desc_sell_execute(void* button) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         store_reset_desc_hook_locked();
         if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-        VIRTBAG_LOG("store sell confirmation unavailable bag=%d slot=%d valid=%d", bag, slot,
-                    valid ? 1 : 0);
+        VIRTBAG_LOG("sell price reject reason=popup_unavailable source=store bag=%d slot=%d valid=%d",
+                    bag, slot, valid ? 1 : 0);
     }
     (void)button;
 }

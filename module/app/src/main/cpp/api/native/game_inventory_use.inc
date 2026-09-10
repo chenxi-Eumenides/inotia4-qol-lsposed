@@ -171,13 +171,28 @@ std::string data_op_sell_item(int bag, int slot) {
     const uint16_t flags = *reinterpret_cast<uint16_t*>(
         reinterpret_cast<uint8_t*>(item) + I_TYPE);
     const int category = fn_get_bit(flags, 15, 6);
-    if (fn_item_is_no_sell(category) != 0) return op_err("item cannot be sold");
+    if (fn_item_is_no_sell(category) != 0) {
+        __android_log_print(ANDROID_LOG_WARN, "Inotia4VirtBag",
+                            "sell price reject reason=no_sell source=api category=%d count=%d variant=100 payload=0 gen=0",
+                            category, item_ref.count);
+        return op_err("item cannot be sold");
+    }
     const int count = fn_get_cumulate_count != nullptr
         ? fn_get_cumulate_count(item) : 1;
+    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     const int64_t price = extension_bag_sell_price(item, count);
     if (price < 0) {
+        __android_log_print(ANDROID_LOG_WARN, "Inotia4VirtBag",
+                            "sell price reject reason=price_bounds source=api category=%d count=%d unit=%lld variant=100 payload=0 gen=0",
+                            category, count, static_cast<long long>(unit_price));
         return op_err("invalid sell price");
     }
+    __android_log_print(ANDROID_LOG_INFO, "Inotia4VirtBag",
+                        "sell price source=api category=%d count=%d unit=%lld variant=100 final=%lld payload=0 gen=0",
+                        category,
+                        static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
+                                                                  stack_limit_enabled())),
+                        static_cast<long long>(unit_price), static_cast<long long>(price));
     if (!fn_add_money(price)) return op_err("sell money update failed");
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
     // 删除失败回退金币，保持扩展物品原有退款路径语义。

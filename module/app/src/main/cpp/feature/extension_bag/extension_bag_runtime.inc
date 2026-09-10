@@ -1,6 +1,7 @@
 bool is_backpack_category(int category) {
-    // Bag types 1..4 derive capacities 4/8/12/16; keep drag/equip routing
-    // aligned with virtual_bag::derive_capacity().
+    // 这是 State::types 使用的 BagType 判定：1..4 派生容量 4/8/12/16，
+    // 只适用于已归一化的扩展袋类型。它不是原生物品类别判定；原生物品
+    // 详情必须使用 category_is_extension_backpack 的 ITEMCLASSBASE +2 规则。
     return category >= 1 && category <= 4;
 }
 
@@ -252,6 +253,7 @@ void clear_original_item_selection_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
 int original_bag_locked();
 void set_original_bag_locked(int bag);
+uint32_t* bag_size_word_locked(int bag);
 int original_bag_button_index(int64_t x, int64_t y);
 bool install_module_view_locked(int bag);
 void restore_module_view_locked();
@@ -308,6 +310,69 @@ void handle_extension_tab_click_locked(int extension_bag) {
     ensure_state_loaded_locked();
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal) {
         const int original_bag = original_bag_locked();
+        if (original_bag == virtual_bag::kOriginalTaskBag) {
+            constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+            void* panel_root = g_base != 0
+                ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA)
+                : nullptr;
+            const int target_capacity = g_virtual_bag_state.capacities[extension_bag];
+            const bool target_ready = target_capacity > 0 &&
+                                       fn_control_item_set_item != nullptr &&
+                                       fn_control_object_get_child != nullptr &&
+                                       panel_root != nullptr;
+            int projection_host = -1;
+            if (target_ready) {
+                for (int candidate = 0;
+                     candidate < virtual_bag::kOriginalTransactionBagCount; ++candidate) {
+                    uint32_t* size_word = bag_size_word_locked(candidate);
+                    if (size_word == nullptr || (*size_word & kCapacityMask) == 0) continue;
+                    bool controls_ready = true;
+                    for (int slot = 0; slot < target_capacity; ++slot) {
+                        if (valid_child_locked(panel_root, slot) == nullptr) {
+                            controls_ready = false;
+                            break;
+                        }
+                    }
+                    if (controls_ready) {
+                        projection_host = candidate;
+                        break;
+                    }
+                }
+            }
+            if (projection_host < 0) {
+                VIRTBAG_LOG(
+                    "extension tab reject reason=projection_host_unavailable source_original_bag=%d target=%d",
+                    original_bag, extension_bag);
+                return;
+            }
+            set_original_bag_locked(projection_host);
+            g_original_current_direct = static_cast<uint8_t>(projection_host);
+            g_original_current_got = static_cast<uint8_t>(projection_host);
+            if (!install_module_view_locked(extension_bag)) {
+                set_original_bag_locked(original_bag);
+                g_original_current_direct = static_cast<uint8_t>(original_bag);
+                g_original_current_got = static_cast<uint8_t>(original_bag);
+                VIRTBAG_LOG(
+                    "extension tab reject reason=projection_host_unavailable source_original_bag=%d target=%d host=%d",
+                    original_bag, extension_bag, projection_host);
+                return;
+            }
+            if (virtual_bag::click(&g_virtual_bag_state, extension_bag) !=
+                virtual_bag::ClickResult::kSelected) {
+                restore_module_view_locked();
+                set_original_bag_locked(original_bag);
+                g_original_current_direct = static_cast<uint8_t>(original_bag);
+                g_original_current_got = static_cast<uint8_t>(original_bag);
+                VIRTBAG_LOG(
+                    "extension tab reject reason=projection_host_unavailable source_original_bag=%d target=%d host=%d",
+                    original_bag, extension_bag, projection_host);
+                return;
+            }
+            persist_state_locked();
+            VIRTBAG_LOG("extension tab selected bag=%d original_bag=%d projection_host=%d",
+                        extension_bag, original_bag, projection_host);
+            return;
+        }
         if (virtual_bag::valid_original_transaction_bag(original_bag)) {
             g_original_current_direct = static_cast<uint8_t>(original_bag);
             g_original_current_got = static_cast<uint8_t>(original_bag);
@@ -804,15 +869,19 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
 
 #include "feature/extension_bag/extension_bag_input.inc"
 
-bool category_is_equip(int category) {
-    if (g_base == 0 || category <= 0) return false;
+stack_codec::CountEncoding category_is_equip(int category) {
+    if (g_base == 0 || category <= 0) return stack_codec::CountEncoding::kUnknown;
     uint8_t* class_data = *reinterpret_cast<uint8_t**>(
         *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
     uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    if (class_data == nullptr || size_ptr == nullptr) return false;
+    if (class_data == nullptr || size_ptr == nullptr) {
+        return stack_codec::CountEncoding::kUnknown;
+    }
     const uint8_t stride = *size_ptr;
-    if (stride == 0) return false;
-    return (class_data[category * stride + 6] & 1) == 0;
+    if (stride == 0) return stack_codec::CountEncoding::kUnknown;
+    return (class_data[category * stride + 6] & 1) == 0
+        ? stack_codec::CountEncoding::kNotEncoded
+        : stack_codec::CountEncoding::kEncoded;
 }
 
 // 原版 ButtonEquipExe 的背包身份判定（反汇编 b7c74）：ITEMCLASSBASE 记录

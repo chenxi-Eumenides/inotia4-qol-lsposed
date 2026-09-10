@@ -216,6 +216,26 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 | `UIEquip_ButtonUnequipExe` | `0xb7e14` | `game_symbols.h:575` |
 | `UIEquip_MakeDesc` | `0xb8980` | `game_symbols.h:567` |
 
+#### 2.1.1 数量位段与上限 patch 点
+
+当前工作树 `game_patch_core.inc` 的原版数量位段/上限 patch 表：固定布局共 34 点，可逆
+上限共 10 点。当前登记点如下，地址均为函数 VMA 加函数内偏移：
+
+| 地址 | 函数+偏移 | 原指令 | 新指令 | 语义 | 门控 |
+|---:|---|---|---|---|---|
+| `0x103b98` | `INVEN_FindSaveSlot+0x238` | `0x71018C1F` | `0x710F9C1F` | 数量上限 99→999 | 受 `set_stack_limit_enabled()` 门控 |
+| `0x103e1c` | `INVEN_CheckSaveInNotEmptySlot+0xa4` | `0x52800C7A` | `0x52807CFA` | 数量上限检查 99→999 | 受 `set_stack_limit_enabled()` 门控 |
+| `0x0d25d4` | `UIStore_BuyItem+0x1a8` | `0x52800322` | `0x528002C2` | 复制购买数量写入起始位 bit25→bit22 | 常驻 |
+
+`0x105b58`、`0x105c18`、`0x105b60`、`0x105c20` 已复核为**非数量，已撤销**：两处
+`ITEM_IsRealEquip/ITEM_IsRealBroken` 均先读取物品 `+0x10`，再以
+`UTIL_GetBitValue(start=25,end=31)` 读取 `ITEMSYSTEM_CreateItem@0x10c030..0x10c038`
+（`0x10be9c+0x194..0x19c`）
+写入的装备 marker `100`，后续比较只是装备/损坏判定，不是堆叠数量读取或上限。
+`UIStore_BuyItem+0x1a8` 保持为正确的数量写入 patch。
+
+既有有效 patch `0x103ec4`（`INVEN_CheckSaveInNotEmptySlot+0x14c`）保持不变。
+
 ### 2.2 18 项逐条核实
 
 | # | 操作 | 原版实现路径 | 模块当前路径 | 核实结论 |
@@ -235,7 +255,7 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 | 13 | 卖出（商店页） | `UIStore_*` 详情/确认 → 商店卖出回调 | 商店单独保存 `store_desc_*`，`store_make_desc_gate` 后由 `store_desc_sell_execute` 建 popup，OK 在 `extension_bag_store.inc:439-615` 完成；刷新只走 `store_refresh_projection_locked` | 一致；不调用会覆盖整列的原版刷新 |
 | 14 | 商店购买收编 | `UIStore_BuyItem` → `FindSaveSlot` → `SaveItem`；原版满则购买失败 | 两个 BL 在 `extension_bag_store.inc:714-726` patch 到 `store_buy_find_slot_gate@635-644`；原版 `SaveItem` 失败由 `save_item_wrapper@native_inventory_hook.cpp:184-198` adopt | 当前实现存在；SaveItem 函数处置以库存册 §2.2、§3.2 为准，caller 覆盖仍待 P7 stage-5 |
 | 15 | 拾取/生产者兜底 | 拾取、奖励、开箱、生产等 caller 各自创建/保存物品，最终部分进入 `INVEN_SaveItem` | 当前 `save_item_wrapper` 在 backup 失败时尝试扩展 adopt；注释列出 18 个漏斗，见 `native_inventory_hook.cpp:184-198`。caller 级所有权/失败回滚仍待 P7 stage-5 | 部分实现；不能称所有生产者已覆盖 |
-| 16 | 视图切换/页签 | 原版 inventory event、袋控件、TouchHandle 回调和原版绘制 | 扩展标签在 `extension_bag_runtime.inc:81-160` 创建；点击 proc 在 `:1-15` 排队，生命周期 `commit_pending_extension_tab_locked@runtime.inc:380-392` 执行；H-16 `UIEquip_RefreshItemArea` 负责原版刷新后的 post-projection，模块主动刷新走 raw-original dispatcher，draw-end 不再承担帧级 heal | 当前代码对码成立；页签拖放、四象限和 S-03 分别按验收册状态判定 |
+| 16 | 视图切换/页签 | 原版 inventory event、袋控件、TouchHandle 回调和原版绘制 | 扩展标签在 `extension_bag_runtime.inc:81-160` 创建；点击 proc 在 `:1-15` 排队，生命周期 `commit_pending_extension_tab_locked@runtime.inc:380-392` 执行；H-16 `UIEquip_RefreshItemArea` 负责原版刷新后的 post-projection，模块主动刷新走 raw-original dispatcher，draw-end 不再承担帧级 heal | 当前代码对码成立；页签拖放、四象限和同袋 apply 分支已按验收册真机状态确认，S-03 另由 VM-10 维护 |
 | 17 | 详情弹窗 | `UIEquip_InvenItemControlEventProc` 事件 `0x80` → `UIEquip_MakeDesc@0xb8980` → `SetDescMenu` | `extension_bag_lifecycle.inc:728-770` patch 唯一 BL 到 `make_desc_equip_gate`；扩展详情按钮 PtrHook 在 `extension_bag_equip.inc:620-682`，确认使用/装备/卖出/销毁分流 | 一致；装备/卸下 proc 明确跳过双层包装 |
 | 18 | 存档/sidecar | 原版保存入口 → `SAVE_Save@0x129600` → `SAVE_SaveInventory` 等原版序列化 | 8 个保存 callsite 在 `extension_bag_lifecycle.inc:54-68` patch 到 `module_save_game`；core 先 participant prepare，再 `fn_save`，成功 commit，见 `module_save.cpp:62-111`；扩展 JNI sidecar 在 `extension_bag_persistence.cpp:161-241` | 一致；不是 Hook `SAVE_*` 函数本体 |
 

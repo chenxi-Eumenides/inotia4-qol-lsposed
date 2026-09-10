@@ -96,12 +96,23 @@ inline uint32_t payload_count(const Item& item) {
     return v;
 }
 
-inline void patch_payload_count(Item* item, uint32_t count) {
-    if (item == nullptr || !valid_payload(*item)) return;
+using CategoryStackCountPredicate = stack_codec::CountEncoding (*)(int category);
+
+inline bool patch_payload_count(Item* item, uint32_t count,
+                                CategoryStackCountPredicate is_count_encoded) {
+    if (item == nullptr || !valid_payload(*item)) return false;
+    if (is_count_encoded == nullptr ||
+        is_count_encoded(item->category) != stack_codec::CountEncoding::kEncoded) {
+        std::fprintf(stderr,
+                     "virtual_bag patch_payload_count ignored category=%d reason=not_count_encoded\n",
+                     item->category);
+        return false;
+    }
     const uint32_t updated = stack_codec::write_count(payload_count(*item), count);
     for (size_t i = 0; i < 4; ++i) {
         item->payload[kPayloadCountOffset + i] = static_cast<uint8_t>((updated >> (8 * i)) & 0xFF);
     }
+    return true;
 }
 
 inline uint32_t payload_hash(const Item& item) {
@@ -126,9 +137,15 @@ inline uint32_t merge_count(int existing_count, int added_count, bool extended) 
     return stack_codec::clamp_count(static_cast<uint32_t>(sum), extended);
 }
 
-inline bool mergeable_items(const Item& existing, const Item& source) {
+inline bool mergeable_items(const Item& existing, const Item& source,
+                            CategoryStackCountPredicate is_count_encoded) {
     if (existing.category <= 0 || existing.count <= 0 || source.category <= 0 ||
         source.count <= 0 || existing.category != source.category) {
+        return false;
+    }
+    if (is_count_encoded == nullptr ||
+        is_count_encoded(existing.category) != stack_codec::CountEncoding::kEncoded ||
+        is_count_encoded(source.category) != stack_codec::CountEncoding::kEncoded) {
         return false;
     }
     if (!valid_payload(existing) || !valid_payload(source) ||
@@ -137,8 +154,10 @@ inline bool mergeable_items(const Item& existing, const Item& source) {
     }
     Item existing_identity = existing;
     Item source_identity = source;
-    patch_payload_count(&existing_identity, 1);
-    patch_payload_count(&source_identity, 1);
+    if (!patch_payload_count(&existing_identity, 1, is_count_encoded) ||
+        !patch_payload_count(&source_identity, 1, is_count_encoded)) {
+        return false;
+    }
     return std::memcmp(existing_identity.payload.data(), source_identity.payload.data(),
                        existing_identity.payload_size) == 0;
 }
@@ -147,8 +166,9 @@ inline bool same_extension_bag_merge_allowed(int src_bag, int dst_bag) {
     return src_bag == dst_bag;
 }
 
-inline bool same_extension_bag_mergeable_items(const Item& existing, const Item& source) {
-    return mergeable_items(existing, source);
+inline bool same_extension_bag_mergeable_items(const Item& existing, const Item& source,
+                                               CategoryStackCountPredicate is_count_encoded) {
+    return mergeable_items(existing, source, is_count_encoded);
 }
 
 inline bool extension_swap_tokens_available(bool source_active, bool source_pending_release,

@@ -314,8 +314,16 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
     void* dst_data = fn_control_object_get_data(dst_control);
     void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
+    const stack_codec::CountEncoding target_encoding = item_count_encoding(target_item);
     if (src_bag == g_module_view_index && dst_bag == g_module_view_index &&
-        source_is_apply_material && target_item != nullptr && item_is_equip(target_item)) {
+        source_is_apply_material && target_item != nullptr &&
+        target_encoding == stack_codec::CountEncoding::kUnknown) {
+        VIRTBAG_LOG("drop rejected: apply target category unavailable item=%p", target_item);
+        return VirtualBagProjectionDropResult::kRejected;
+    }
+    if (src_bag == g_module_view_index && dst_bag == g_module_view_index &&
+        source_is_apply_material && target_item != nullptr &&
+        target_encoding == stack_codec::CountEncoding::kNotEncoded) {
         return apply_extension_material_to_slot_locked(
             lock, src_bag, src_slot, dst_bag, dst_slot, item, target_item)
             ? VirtualBagProjectionDropResult::kHandled

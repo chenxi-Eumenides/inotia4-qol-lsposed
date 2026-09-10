@@ -4,8 +4,9 @@
 #include "feature/extension_bag/extension_bag_context.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
-
-#include <limits>
+#include "core/native/sell_price.h"
+#include "core/native/stack_codec.h"
+#include "core/native/stack_limit_port.h"
 
 namespace {
 
@@ -113,12 +114,14 @@ bool extension_bag_remove_native_item(void* item) {
 int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount) {
     if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const int64_t multiplier = static_cast<int64_t>(count) *
-                               (apply_variant_discount ? 7 : 10);
-    const int64_t max_value = std::numeric_limits<int64_t>::max();
-    if (unit_price < 0 || multiplier <= 0 || unit_price > max_value / multiplier) return -1;
+    const uint32_t legal_count = stack_codec::clamp_count(
+        static_cast<uint32_t>(count), stack_limit_enabled());
+    int64_t final_price = 0;
+    if (!sell_price::calculate(unit_price, legal_count, apply_variant_discount, &final_price)) {
+        return -1;
+    }
     // 原版商店为单位售价×数量；详情页粉碎改出售路径再乘 70%。
-    return (unit_price * multiplier) / 10;
+    return final_price;
 }
 
 bool extension_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
