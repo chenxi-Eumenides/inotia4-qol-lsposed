@@ -139,7 +139,45 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 > frida attach 也用**进程显示名**（`adb shell ps | grep 包名` 的 NAME 列，如 "Inotia4"），不用 pid。
 > 仅当需要 pid 时：`adb shell pidof com.com2us.inotia4.normal.freefull.google.global.android.common`。
 
-### 3.2 常用脚本速查（均须 `uv run`）
+### 3.2 卡死取证（游戏无响应/疑似死锁）
+
+> 适用症状：画面冻结、输入无响应但进程仍存活（ANR 或原生死锁）；进程已崩溃改看
+> tombstone，不在本节范围。扩展背包自死锁（持 `g_virtual_bag_mtx` 期间原版回调重入
+> 取锁，见 `rulebook.md` R-44）是本节的典型案例。
+
+1. 确认进程存活并取 pid：
+
+   ```bash
+   adb -s 192.168.3.54:5555 shell pidof com.com2us.inotia4.normal.freefull.google.global.android.common
+   ```
+
+   无输出即进程已死，转 tombstone 采集，不走本节后续步骤。
+
+2. 抓全部线程原生栈（真机已 root；输出追加到任务临时目录）：
+
+   ```bash
+   mkdir -p .tmp/<task-name>
+   adb -s 192.168.3.54:5555 shell su -c 'debuggerd -b <pid>' > .tmp/<task-name>/backtrace.txt
+   ```
+
+3. 定位等待线程：在 `backtrace.txt` 中搜 `std::mutex::lock`、`__pthread_mutex_lock`、
+   `futex`；其上层 `libgamebridge.so` 帧即当前取锁点。
+   - **同线程自死锁特征**：同一线程栈内同时出现「持锁路径帧」（如
+     `remove_item_direct_unlocked`、扩展事务帧）与「重入取锁帧」
+     （`std::mutex::lock` ← 库存 Hook wrapper，如 `get_item_count_wrapper`）。
+   - **跨线程锁序问题特征**：两个线程各自停在 `futex` 等待，且各持有另一线程需要的锁。
+4. 配套 logcat 采集（同一时间窗，用于对齐模块日志锚）：
+
+   ```bash
+   adb -s 192.168.3.54:5555 logcat -d -v time > .tmp/<task-name>/logcat.txt
+   ```
+
+   结合 `VIRTBAG_LOG` 锚（`txn committed ...`、`release_cleanup ...` 等）判断停滞点；
+   取证后恢复：`adb shell am force-stop <包名>` 并按 §3.1 ③ 重启。
+5. 取证文件只写 `.tmp/<task-name>/`，任务结束后清理；结论回填对应验收卡的日志锚，
+   不得只写「已卡死」而无线程栈证据。
+
+### 3.3 常用脚本速查（均须 `uv run`）
 
 | 脚本 | 用途 | 用法 | 默认 |
 |---|---|---|---|
@@ -149,7 +187,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 | `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（M3 产物 → module/assets） | `uv run python scripts/data/package_assets.py` | 28 表 + zh-Hans/en 语言 |
 | `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）+ 实时检测（无参数=检测模式） | `uv run python scripts/device/touch_automation.py click 100,200 0.5 ...` | 3168x1440 逻辑坐标，自动旋转校准 |
 
-### 3.3 设备连接方式（两台真机）
+### 3.4 设备连接方式（两台真机）
 
 > **项目有两台真机，不是同一台手机**（2026-08-12 确认）：
 
@@ -231,7 +269,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 10. **zsh 通配符不展开**（2026-08-12 实测）：缓存发行版目录含随机哈希，统一使用 `scripts/build-debug.sh`，不要在命令行手写 `*/` 或缓存哈希。
 11. **frida-server 重启后需 su 启动**（2026-08-12 实测）：设备重启后 `/data/local/tmp/frida-server` 需 `adb shell su -c 'nohup /data/local/tmp/frida-server >/dev/null 2>&1 &'`（root + nohup），普通 `adb shell "frida-server &"` 无权限启动失败。
 12. **通知栏遮挡启动**（2026-08-12 实测）：设备重启后首屏可能是 NotificationShade（`dumpsys window` mCurrentFocus 显示），monkey 启动游戏前先 `input keyevent 4` 关闭通知栏回到桌面，否则游戏未真正启动（8088 无监听）。
-13. **两台真机**（2026-08-12 确认）：真机1=`192.168.3.11`（局域网）+`100.110.139.83`（Tailscale，同一台）；真机2=`192.168.3.54`（另一台，当前主力）。真机2仅启动弹窗前置例外使用 `(420,280)`，其余完全用 API 操控。详见 §3.3。
+13. **两台真机**（2026-08-12 确认）：真机1=`192.168.3.11`（局域网）+`100.110.139.83`（Tailscale，同一台）；真机2=`192.168.3.54`（另一台，当前主力）。真机2仅启动弹窗前置例外使用 `(420,280)`，其余完全用 API 操控。详见 §3.4。
 14. **真机2启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/device/touch_automation.py --inject input click 420,280 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机2触摸坐标。
 
 ## 6. 关联文档

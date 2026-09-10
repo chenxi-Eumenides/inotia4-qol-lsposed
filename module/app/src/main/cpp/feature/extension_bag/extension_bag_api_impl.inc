@@ -97,8 +97,8 @@ std::string extension_bag_api_unequip_impl(int logical_bag) {
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
     ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        result = unequip_extension_bag_locked(internal_bag);
+        std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+        result = unequip_extension_bag_locked(lock, internal_bag);
     }
     if (result == ExtensionBagUnequipResult::kOk) return op_ok();
     if (result == ExtensionBagUnequipResult::kNotEmpty) return op_err("bag not empty");
@@ -125,13 +125,13 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
     if (!from_original && !from_extension) return op_err("bad from bag");
     if (!to_original && !to_extension) return op_err("bad to bag");
     if (from_original && to_original) return op_err("use /api/item/inventory/move_item");
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     bool moved = false;
     if (from_original && to_extension) {
-        moved = move_original_to_extension_slot_locked(from_bag, from_slot, to_internal);
+        moved = move_original_to_extension_slot_locked(lock, from_bag, from_slot, to_internal);
     } else if (from_extension && to_original) {
-        moved = move_extension_to_original_locked(from_internal, from_slot, to_bag);
+        moved = move_extension_to_original_locked(lock, from_internal, from_slot, to_bag);
     } else {
         moved = move_extension_to_extension_locked(from_internal, from_slot, to_internal, to_slot);
     }

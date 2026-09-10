@@ -17,7 +17,8 @@ void* extension_menu_character() {
     return get_menu_character();
 }
 
-ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* item) {
+ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mutex>& lock,
+                                                        int internal_bag, void* item) {
     ensure_state_loaded_locked();
     if (!virtual_bag::valid_index(internal_bag) || item == nullptr) {
         return ExtensionBagEquipResult::kReject;
@@ -104,9 +105,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
         return ExtensionBagEquipResult::kFailed;
     }
 
-    fn_remove_item_direct(src_bag, src_slot);
-    void* after = item;
-    if (inventory_slot_locked(src_bag, src_slot, &after) && after != nullptr) {
+    if (!remove_item_direct_unlocked(lock, src_bag, src_slot, item, "extension equip")) {
         VIRTBAG_LOG("extension equip remove verify failed bag=%d slot=%d", src_bag, src_slot);
         // 物品仍被 INVEN 持有（remove 未生效）→ 不得释放，记 inventory 终态。
         handover_tracked_item_locked(custody_handle, item,
@@ -292,20 +291,21 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     if (g_module_view_installed && g_module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
     if (fn_ui_equip_update_char_equip != nullptr) fn_ui_equip_update_char_equip();
     if (moving_control != nullptr) reset_drag_state_locked(moving_control);
     if (!switched_view) play_extension_switch_sound();
 }
 
-bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control) {
+bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
+                                            int index, void* moving_control) {
     if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
     if (fn_control_object_get_data == nullptr) return false;
     void* data = fn_control_object_get_data(moving_control);
     void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
     if (item == nullptr) return false;
-    const ExtensionBagEquipResult result = equip_extension_bag_item_locked(index, item);
+    const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, index, item);
     if (result != ExtensionBagEquipResult::kOk) {
         VIRTBAG_LOG("extension tab drop equip result=%d index=%d", static_cast<int>(result),
                     index);
@@ -334,11 +334,12 @@ int first_empty_extension_bag_locked() {
     return -1;
 }
 
-bool equip_extension_source_on_tab_locked(int target_bag, int source_bag, int source_slot) {
+bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+                                          int source_bag, int source_slot) {
     void* source_item = module_item_locked(source_bag, source_slot);
     if (source_item == nullptr) return false;
     const ExtensionBagEquipResult result =
-        equip_extension_bag_item_locked(target_bag, source_item);
+        equip_extension_bag_item_locked(lock, target_bag, source_item);
     if (result != ExtensionBagEquipResult::kOk) {
         VIRTBAG_LOG("extension source tab equip result=%d target=%d source=%d/%d",
                     static_cast<int>(result), target_bag, source_bag, source_slot);
@@ -580,7 +581,7 @@ void extension_destroy_ok(void*) {
         }
     }
     if (committed && fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
     if (committed) {
         VIRTBAG_LOG("extension destroy committed bag=%d slot=%d", committed_bag, committed_slot);

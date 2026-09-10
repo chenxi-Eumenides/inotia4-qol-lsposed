@@ -65,6 +65,12 @@ thread_local int g_refresh_depth = 0;
 
 void log_extension_item_observation(const char* operation, void* item, bool recursive,
                                     int result_known, int result) {
+    if (virtual_bag_native_call_active()) {
+        __android_log_print(ANDROID_LOG_INFO, kTag,
+                            "%s original-only native_call=1 recursive=%d result_known=%d result=%d",
+                            operation, recursive ? 1 : 0, result_known, result);
+        return;
+    }
     if (!extension_bag_enabled()) {
         __android_log_print(ANDROID_LOG_INFO, kTag,
                             "%s extension disabled recursive=%d result_known=%d result=%d",
@@ -82,7 +88,7 @@ void log_extension_item_observation(const char* operation, void* item, bool recu
 
 void* find_item_wrapper(int32_t category) {
     const uint64_t call = g_find_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (g_in_find_item || g_backup_find_item == nullptr) {
+    if (virtual_bag_native_call_active() || g_in_find_item || g_backup_find_item == nullptr) {
         __android_log_print(ANDROID_LOG_INFO, kTag,
                             "FindItem call=%llu category=%d recursive=%d backup=%p",
                             static_cast<unsigned long long>(call), category,
@@ -106,6 +112,7 @@ void* find_item_wrapper(int32_t category) {
 }
 
 int extension_item_count(int32_t category) {
+    if (virtual_bag_native_call_active()) return 0;
     struct Context { int32_t category; int count; } context{category, 0};
     extension_bag_for_each_logical_item([](int, int, int item_category, int item_count, void* raw) -> bool {
         Context* context = static_cast<Context*>(raw);
@@ -116,18 +123,30 @@ int extension_item_count(int32_t category) {
 }
 
 int have_item_wrapper(int32_t category) {
+    if (virtual_bag_native_call_active()) {
+        return stage4_have_item_original_only(category, g_backup_have_item, g_in_have_item);
+    }
     return stage4_have_item(category, g_backup_have_item,
                             extension_bag_enabled() ? extension_item_count : nullptr,
                             g_in_have_item);
 }
 
 int get_item_count_wrapper(int32_t category) {
+    if (virtual_bag_native_call_active()) {
+        return stage4_get_item_count_original_only(category, g_backup_get_item_count,
+                                                   g_in_get_item_count);
+    }
     return stage4_get_item_count(category, g_backup_get_item_count,
                                  extension_bag_enabled() ? extension_item_count : nullptr,
                                  g_in_get_item_count);
 }
 
 int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
+    if (virtual_bag_native_call_active()) {
+        return stage4_is_having_empty_slot_original_only(
+            needed, include_task_bag, g_backup_is_having_empty_slot,
+            g_in_is_having_empty_slot);
+    }
     return stage4_is_having_empty_slot(needed, include_task_bag,
                                         g_backup_is_having_empty_slot,
                                         extension_bag_enabled() ? extension_bag_has_empty_slots : nullptr,

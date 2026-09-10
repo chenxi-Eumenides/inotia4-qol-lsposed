@@ -1,3 +1,9 @@
+// 原版删除函数无可靠返回值；跨域事务只能以重新读取源物理槽为空作为成功后置条件。
+inline bool original_to_extension_source_slot_postcondition(void* expected_item,
+                                                             void* actual_item) {
+    return expected_item != nullptr && actual_item == nullptr;
+}
+
 inline bool valid_index(int index) {
     return index >= 0 && index < kBagCount;
 }

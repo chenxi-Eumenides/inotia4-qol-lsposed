@@ -319,7 +319,7 @@
 ## §5 雷区规则
 
 > 素材 §三 的 25 条候选均已逐条复核。R-01..R-25 按素材顺序对应；其中 R-20
-> 对码确认 R-26..R-43 为当前实现的同类耦合规则。
+> 对码确认 R-26..R-44 为当前实现的同类耦合规则。
 
 ### R-01 确认使用必须刷新并重投影
 
@@ -448,10 +448,10 @@
 
 ### R-18 投影同步不得在错误锁序触发原版刷新
 
-- **规则一句话**：同步接口持扩展锁时只能执行已验证的投影控件修复，不能递归触发会反向取锁的原版刷新。
+- **规则一句话**：同步接口持扩展锁时只能执行已验证的投影控件修复；移动事务若必须刷新原版区域，只能经 R-44 的受控 raw-original dispatcher，不能直接递归进入被 Hook 地址。
 - **为什么（修正）**：素材说 `extension_bag_sync_projected_bag` 当前会触发原版刷新；对码显示它只锁内调用 `refresh_projection_if_overwritten_locked`（`extension_bag_public_runtime.inc:320-324`），该函数只比较并设置控件（`extension_bag_render.inc:547-568`）。真正的原版刷新路径是 `refresh_projected_module_view_after_move_locked` 的 `refresh_module_item_area_locked`（`extension_bag_render.inc:571-576`）。
 - **典型破坏方式**：未来把原版 RefreshItemArea 塞进同步接口，形成递归刷新、锁序反转或容量错位。
-- **验证锚**：无锚-待补；本条为“修正后收录”，不是对素材原句的照抄。
+- **验证锚**：Host `test_original_only_queries`；真机 VM-15；本条为“修正后收录”，不是对素材原句的照抄。
 
 ### R-19 页签清理必须递增 generation
 
@@ -695,6 +695,14 @@
   `ITEMSYSTEM_CreateItem@0x10c030..0x10c038`（函数内 `+0x194..0x19c`）；真机 `VM-30`
   断言启用上限后装备显示和详情正常。
 
+### R-44 持锁调用原版回调必须启用 TLS 原版直通
+
+- **规则一句话**：持有 `g_virtual_bag_mtx`（非递归锁）期间禁止调用可能回调库存 Hook 的原版函数；确需调用必须二选一：①置 TLS original-only 守卫（`NativeCallScope`），使查询类 Hook 直通原版 backup；②解锁调用原版、重新加锁后复核状态（删除类按物理槽后置条件确认）。
+- **为什么**：`g_virtual_bag_mtx` 是非递归 `std::mutex`，同线程重入取锁即自死锁。已证实的死锁链：`0x18` release 持锁 → orig→ext 事务 `move_original_to_extension_locked` 调 `fn_remove_item_direct` → 原版 `INVEN_RemoveItemDirect` 清槽后同步回调 `PLAYER_UpdateShortcut` → 触发 H-03 `GetItemCount` Hook → 同线程重入取锁 → 自死锁。原版删除/刷新同样可能回调 `FindItem`、`HaveItem` 或 `IsHavingEmptySlot`。
+- **典型破坏方式**：绕开受控入口持锁直接调用 `INVEN_RemoveItemDirect` 或 raw refresh，原版回调进入扩展查询后游戏冻结；删除失败时仅依据返回值提交逻辑事务，造成源槽与 sidecar 分裂。
+- **受控入口清单**：dispatcher 本体与全部受控调用点的当前文件:行，见架构册 §5.4。
+- **验证锚**：Host `test_original_only_queries`、`test_virtual_bag_transaction_domain`（含 `original_to_extension_source_slot_postcondition`）；真机 `VM-15` 的 `txn committed ... original->extension`、`release_cleanup ctl=... flags_cleared` 与 API health 连续可达证据；源码 `game_ui_virtbag.cpp:246-269`（删除 dispatcher）、`:283-286`（刷新 dispatcher）、`native_inventory_hook.cpp:89-154`（查询 Hook 直通）。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -758,7 +766,7 @@
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-43`，共 43 条。
+1. 本册规则总数：`R-01..R-44`，共 44 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -766,12 +774,12 @@
    `R-34`（moving 六条件保留门）、`R-35`（页签命中优先于格子解析）、
    `R-36`（触摸窗口释放必须延迟回收）、`R-37`（卖出价格边界）、`R-38`（载荷数量
    收敛适用性）、`R-39`（袋对象 marker 位段）、`R-40`（类别判定 fail-closed）、
-   `R-41`（payload count 门控）、`R-42`（BagType/原生类别判定边界）和 `R-43`（数量 patch
-   表准入判据）。
-3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-43` 以对应 Host 断言和
+   `R-41`（payload count 门控）、`R-42`（BagType/原生类别判定边界）、`R-43`（数量 patch
+   表准入判据）和 `R-44`（持锁原版回调 TLS 直通与删除后置条件）。
+3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准。
 4. 当前 sync 接口只做投影控件修复，原版 RefreshItemArea 位于移动收尾路径。
 5. 无锚规则：`R-01`、`R-03`、`R-05`、`R-06`、`R-11`、`R-12`、`R-13`、`R-14`、
-   `R-15`、`R-17`、`R-18`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`，共 16 条；
+   `R-15`、`R-17`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`，共 15 条；
    其中已给源码锚但尚无专门 host/真机锚的规则，验收册仍应补操作证据。
 6. 规则正文以当前源码和本册证据锚为准。

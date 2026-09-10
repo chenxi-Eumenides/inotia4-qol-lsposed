@@ -1,4 +1,5 @@
-bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_bag) {
+bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+                                            int src_slot, int dst_bag) {
     if (!virtual_bag::valid_original_transaction_bag(src_bag)) {
         VIRTBAG_LOG("cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
@@ -98,9 +99,8 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     }
 
     // original-state-updated：删除原版源并以原版实态复核（不只信删除函数返回值）。
-    fn_remove_item_direct(src_bag, src_slot);
-    void* remaining_source = nullptr;
-    if (inventory_slot_locked(src_bag, src_slot, &remaining_source) && remaining_source != nullptr) {
+    if (!remove_item_direct_unlocked(lock, src_bag, src_slot, src_item,
+                                     "original-to-extension")) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                          "original source slot remained occupied");
         return false;
@@ -115,7 +115,7 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     if (g_module_view_installed && g_module_view_index == dst_bag) {
         sync_projected_slot_locked(dst_bag, dst_slot);
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
     VIRTBAG_LOG("txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
                 txn.transaction_id, dst_bag, dst_slot, src_category, txn.committed.count,
@@ -123,7 +123,8 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     return true;
 }
 
-bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
+bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
+                                       void* moving_control) {
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
         fn_ui_equip_get_item_slot_index == nullptr) {
         VIRTBAG_LOG("cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
@@ -134,12 +135,13 @@ bool move_original_to_extension_locked(int dst_bag, void* moving_control) {
     }
     const int src_bag = original_bag_locked();
     const int src_slot = fn_ui_equip_get_item_slot_index(moving_control);
-    const bool moved = move_original_to_extension_slot_locked(src_bag, src_slot, dst_bag);
+    const bool moved = move_original_to_extension_slot_locked(lock, src_bag, src_slot, dst_bag);
     if (moved) reset_drag_state_locked(moving_control);
     return moved;
 }
 
-bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag) {
+bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+                                       int src_slot, int target_bag) {
     if (!virtual_bag::valid_original_transaction_bag(target_bag) ||
         !virtual_bag::valid_index(src_bag) ||
         src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
@@ -264,7 +266,13 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                                         "source extension object is in use");
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                          "source extension object release rejected");
-        fn_remove_item_direct(target_bag, inserted_slot);
+        if (!remove_item_direct_unlocked(lock, target_bag, inserted_slot, item,
+                                         "ext2orig release rejected rollback")) {
+            handover_tracked_item_locked(item_handle, item,
+                                         "ext2orig rollback removal unconfirmed");
+            reset_drag_state_locked(nullptr);
+            return false;
+        }
         release_tracked_item_locked(item_handle, item, "ext2orig release rejected rollback");
         reset_drag_state_locked(nullptr);
         return false;
@@ -276,7 +284,13 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
                                         "source extension object release rejected");
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                          "source extension object release rejected");
-        fn_remove_item_direct(target_bag, inserted_slot);
+        if (!remove_item_direct_unlocked(lock, target_bag, inserted_slot, item,
+                                         "ext2orig persist rollback")) {
+            handover_tracked_item_locked(item_handle, item,
+                                         "ext2orig rollback removal unconfirmed");
+            reset_drag_state_locked(nullptr);
+            return false;
+        }
         release_tracked_item_locked(item_handle, item, "ext2orig release rejected rollback");
         reset_drag_state_locked(nullptr);
         return false;
@@ -302,7 +316,7 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
     return true;
 }
 
-bool route_deferred_extension_to_original_locked() {
+bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& lock) {
     virtual_bag::ExtensionDragSession& session = g_extension_drag_session;
     if (session.target_kind != virtual_bag::DragTargetKind::kOriginalBag ||
         !virtual_bag::valid_original_transaction_bag(session.target_bag) ||
@@ -328,7 +342,7 @@ bool route_deferred_extension_to_original_locked() {
     const int src_bag = session.source_bag;
     const int src_slot = session.source_slot;
     const int target_bag = session.target_bag;
-    const bool moved = move_extension_to_original_locked(src_bag, src_slot, target_bag);
+    const bool moved = move_extension_to_original_locked(lock, src_bag, src_slot, target_bag);
     virtual_bag::session_finish_transaction(&session, moved);
     if (moved) {
         persist_state_locked();
@@ -710,9 +724,9 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     return true;
 }
 
-bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
+bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
     ensure_state_loaded_locked();
-    recover_pending_transaction_locked();
+    recover_pending_transaction_locked(lock);
     VIRTBAG_LOG("drop release mode=%d selected=%d x=%lld y=%lld moving=%p extension_drag=%d",
                 static_cast<int>(g_virtual_bag_state.mode), g_virtual_bag_state.selected,
                 static_cast<long long>(x), static_cast<long long>(y),
@@ -734,10 +748,10 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
             if (g_virtual_bag_state.types[index] == 0 && is_backpack_category(category)) {
                 // 原版背包来源的袋物品拖到空扩展标签也必须走“袋槽装备”，
                 // 不能直接落入普通扩展物品槽。
-                return try_equip_on_extension_tab_drop_locked(index, moving_control);
+                return try_equip_on_extension_tab_drop_locked(lock, index, moving_control);
             }
             // 目标非空，或来源为装备/其他物品：保持原版物品的普通移动语义。
-            return move_original_to_extension_locked(index, moving_control);
+            return move_original_to_extension_locked(lock, index, moving_control);
         }
         VIRTBAG_LOG("drop reject original->extension no extension tab hit x=%lld y=%lld",
                     static_cast<long long>(x), static_cast<long long>(y));
@@ -762,7 +776,8 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
             const bool should_equip = g_virtual_bag_state.types[index] == 0 &&
                                       is_backpack_category(category);
             const bool handled = should_equip
-                ? try_equip_on_extension_tab_drop_locked(index, touch_moving_item_control_locked())
+                ? try_equip_on_extension_tab_drop_locked(
+                      lock, index, touch_moving_item_control_locked())
                 : move_extension_to_extension_locked(
                     g_extension_drag.bag, g_extension_drag.slot, index, -1);
             if (handled) refresh_projected_module_view_after_move_locked();
@@ -780,7 +795,7 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
                 return false;
             }
             const bool handled = move_extension_to_original_locked(
-                g_extension_drag.bag, g_extension_drag.slot, target_bag);
+                lock, g_extension_drag.bag, g_extension_drag.slot, target_bag);
             if (handled) refresh_projected_module_view_after_move_locked();
             VIRTBAG_LOG("drop result direction=extension->original handled=%d src=%d/%d target_bag=%d",
                         handled ? 1 : 0, g_extension_drag.bag, g_extension_drag.slot, target_bag);
@@ -814,7 +829,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
             target_bag, target_slot, true);
         if (target_kind == virtual_bag::DragTargetKind::kExtensionTab) {
             return route_projected_session_to_tab_locked(
-                virtual_bag::extension_logical_bag(target_bag));
+                lock, virtual_bag::extension_logical_bag(target_bag));
         }
     }
     int target_bag = g_virtual_bag_state.selected;
@@ -885,7 +900,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
             lock, source_bag, source_slot, target_bag, target_slot, material, target_item);
     } else if (should_equip) {
         handled = equip_extension_source_on_tab_locked(
-            target_bag, source_bag, source_slot);
+            lock, target_bag, source_bag, source_slot);
     } else {
         handled = move_extension_to_extension_locked(
             source_bag, source_slot,
@@ -903,7 +918,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     return handled;
 }
 
-bool route_projected_session_to_tab_locked(int target_bag) {
+bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag) {
     // 入口 target_bag 使用扩展逻辑袋号 6..10；事务状态和 State 数组统一使用
     // 内部索引 0..4。成功装备由 finish_extension_equip_ui_locked
     // 复用 handle_extension_tab_click_locked/install_module_view_locked 同步当前视图，
@@ -973,7 +988,7 @@ bool route_projected_session_to_tab_locked(int target_bag) {
     bool handled = false;
     if (should_equip) {
         handled = equip_extension_source_on_tab_locked(
-            target_internal, session.source_bag, session.source_slot);
+            lock, target_internal, session.source_bag, session.source_slot);
     } else {
         handled = move_extension_to_extension_locked(
             session.source_bag, session.source_slot, target_internal, -1);

@@ -148,6 +148,11 @@
 7. 任务袋 `5` 作为当前原版来源时，页签切换到扩展袋使用合法原版投影宿主 `0..4`；任务袋
    仍不是扩展物品操作源/目标或投影窗口。实现与验收归 `verification-matrix.md` 的 VM-31，
    Overall 仍保持 `NOT_ACCEPTED`。
+8. 持锁原版回调已统一经 TLS original-only 查询分支；跨域原版删除先放锁调用、重新加锁后
+   复核源槽为空（规则 R-44；受控入口清单见架构册 §5.4）。自死锁修复已随 debug APK
+   `b4a66375c14f` 部署到真机 2；VM-15 的 API 跨域移动回归提交与回滚均保持 health 可达；
+   VM-15 拖拽路径（orig→ext 源槽后置条件 + 无卡死）真机复测待用户执行，Overall 仍保持
+   `NOT_ACCEPTED`。
 
 ### 3.4 阶段证据索引
 
@@ -229,6 +234,7 @@
 | 2026-09-10 | 任务袋 `5` 作为当前来源允许切换到扩展页签；投影前选择原版 `0..4` 宿主并保持任务袋不进入投影/事务目标，扩展→任务袋仍只允许视图切换。 | `rulebook.md` R-19、R-26、R-27、R-30；`drag-protocol.md` §2.2.1；`verification-matrix.md` VM-31、VM-B04 |
 | 当前 | 线 A+B 的数量路径已复核；`ITEM_IsRealEquip/ITEM_IsRealBroken` 四处非数量 patch 已撤销，`UIStore_BuyItem+0x1a8` 保持；当前待真机双态（99/999）及装备显示/详情回归。 | `runtime-architecture.md` §2.1.1；`rulebook.md` R-38、R-43；`verification-matrix.md` VM-30 |
 | 2026-09-10 | sidecar 读档的 canonical 数量固定为 `0..999` 语义；不按当前堆叠配置截断已有值，可堆叠 payload 仅在与 descriptor 不一致时同步，越界值收敛到 999 并记录日志。 | `rulebook.md` R-38、R-40、R-41；`module-save-store.md` §6.1；`verification-matrix.md` VM-30；Host `test_virtual_bag_json_count_clamp` |
+| 当前 | 持锁原版删除/刷新统一使用 raw-original dispatcher 与 TLS original-only 查询；删除后重新读取物理槽确认清空后才提交跨域事务。 | `rulebook.md` R-18、R-44；`verification-matrix.md` VM-15、VM-B01～B04；Host `test_original_only_queries` |
 
 ### 5.1 决策索引使用规则
 
@@ -241,6 +247,24 @@
 - 若出处册正在并行修改，Hub 只引用稳定的文件名和章节，不复制未冻结段落。
 - 发现跨册口径不一致时，先在 Hub 或交接记录登记，再由权威册所有者修订正文。
 - 任何“完成”字样都必须带范围，例如“P6 主保存协调已完成”，不能省略未关闭的异常边界。
+
+### 5.2 经验记录（思考，非事实）
+
+> 本节是经验与思考，不属于事实章；每条不构成新的权威裁定，落地时必须回对应分册按
+> §1.4 决策卡格式登记。背景：orig→ext 事务持锁调用原版删除导致同线程自死锁（R-44）。
+
+1. 设计前提「原版函数不会回调我们的 Hook」不成立：原版函数（如 `INVEN_RemoveItemDirect`
+   经 `PLAYER_UpdateShortcut` 触发 `GetItemCount`）可能同步回调已 Hook 地址；任何持锁
+   原版调用都必须默认 Hook 可重入。
+2. 约束只写在代码注释里不足以约束实现：注释会被绕过或随重构失效；需要机械校验兜底
+   （持锁区间 `fn_*` 原版调用按 R-44 受控入口白名单扫描 + Debug 断言），当前尚未建立，
+   属待办方向。
+3. Host 测试只能验证 original-only 直通 seam 的纯逻辑（`test_original_only_queries`），
+   无法复现原版内部回调链的重入；此类死锁风险必须真机复现并按
+   [`build-and-deploy.md` §3.2](../../../guides/build-and-deploy.md) 取线程栈，Host 通过
+   不构成无死锁证据。
+4. 涉及锁的行为面提交前，先把「卡死取证流程」固化到部署文档；下一次同类问题可直接按
+   步骤取线程栈，缩短定位时间。
 
 ## §6 阅读顺序与维护规则
 

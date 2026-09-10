@@ -13,7 +13,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     };
     if (event == 0x02) {
         {
-            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
             const int index = extension_tab_index(ctrl);
             if (index >= 0) {
                 queue_extension_tab_click_locked(index);
@@ -27,13 +27,13 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     if (event == 0x04) {
         uint64_t result = 0;
         {
-            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
             const int index = extension_tab_index(ctrl);
             if (index >= 0 &&
                 g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
                 const int logical_bag = virtual_bag::extension_logical_bag(index);
                 const bool handled = logical_bag >= 0 &&
-                                     route_projected_session_to_tab_locked(logical_bag);
+                                     route_projected_session_to_tab_locked(lock, logical_bag);
                 if (logical_bag < 0) {
                     VIRTBAG_LOG("cross tab reject reason=target_tab_index_invalid index=%d", index);
                 }
@@ -62,7 +62,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                     if (g_virtual_bag_state.types[index] == 0 && backpack_item) {
                         // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
                         // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
-                        try_equip_on_extension_tab_drop_locked(index, moving);
+                        try_equip_on_extension_tab_drop_locked(lock, index, moving);
                     } else if (extension_source) {
                         // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
                         // 扩展袋间移动处理，不能把“背包槽装备”误当成人物装备。
@@ -75,7 +75,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                         VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
                                     moved ? 1 : 0, index, category);
                     } else {
-                        const bool moved = move_original_to_extension_locked(index, moving);
+                        const bool moved = move_original_to_extension_locked(lock, index, moving);
                         VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
                                     moved ? 1 : 0, index, category,
                                     g_virtual_bag_state.types[index] != 0 ? 1 : 0);
@@ -261,17 +261,20 @@ void refresh_projection_if_overwritten_locked();
 void refresh_projected_module_view_after_move_locked();
 void refresh_module_item_area_locked(int index);
 void* module_item_locked(int bag, int slot);
-void recover_pending_transaction_locked();
+void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock);
 bool prepare_main_menu_locked();
 bool free_module_object_locked(int bag, int slot, void* use_token = nullptr);
 bool module_slot_is_assignable_locked(int bag, int slot);
 bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
-bool move_original_to_extension_locked(int dst_bag, void* moving_control);
-bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_bag);
-bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag);
+bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
+                                       void* moving_control);
+bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+                                            int src_slot, int dst_bag);
+bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+                                       int src_slot, int target_bag);
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
-bool handle_bag_drop_release_locked(int64_t x, int64_t y);
+bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y);
 bool defer_item_free_locked(void* item);
 bool item_pointer_known_locked(void* item);
 void* valid_child_locked(void* root, int slot);
@@ -722,7 +725,7 @@ void txn_abort_locked(const virtual_bag::TransactionContext& txn,
                 static_cast<unsigned int>(txn.dst_slot));
 }
 
-void recover_pending_transaction_locked() {
+void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
     const virtual_bag::PendingTransfer pending = g_virtual_bag_state.pending;
     if (!pending.valid) return;
     if (!virtual_bag::valid_pending_transfer_domain(pending)) {
@@ -790,13 +793,12 @@ void recover_pending_transaction_locked() {
                                                          pending.source_payload.data(),
                                                          pending.source_payload_size) == 0;
                     if (same_source) {
-                        fn_remove_item_direct(pending.src_bag, pending.src_slot);
+                        const bool source_removed = remove_item_direct_unlocked(
+                            lock, pending.src_bag, pending.src_slot, src, "pending recovery");
                         if (fn_ui_equip_refresh_item_area != nullptr) {
-                            inventory_native_hook_call_refresh_item_area_original();
+                            virtual_bag_call_original_refresh_item_area_with_guard();
                         }
-                        void* remaining_source = nullptr;
-                        if (inventory_slot_locked(pending.src_bag, pending.src_slot,
-                                                  &remaining_source) && remaining_source == nullptr) {
+                        if (source_removed) {
                             clear_pending = true;
                         } else {
                             VIRTBAG_LOG("pending recovery: source removal not confirmed; retain pending");

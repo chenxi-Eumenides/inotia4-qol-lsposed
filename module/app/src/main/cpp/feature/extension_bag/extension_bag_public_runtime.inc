@@ -455,10 +455,10 @@ bool virtual_bag_prepare_main_menu() {
 
 bool virtual_bag_module_save_prepare(int slot, const char* transaction_id) {
     if (transaction_id == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     if (g_module_view_installed) restore_module_view_locked();
-    recover_pending_transaction_locked();
+    recover_pending_transaction_locked(lock);
     return extension_bag_prepare_save_to_store(slot, transaction_id);
 }
 

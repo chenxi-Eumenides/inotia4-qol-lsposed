@@ -491,6 +491,42 @@ load 兼容 legacy 见 `:59-67`；v2/3/4 分支、回写处理见 `:69-94`；pay
 `model/ownership_ledger.h:3-35`；持 `g_virtual_bag_mtx` 时不得调用会刷新的 `op_ok()`，
 见 `AGENTS.md:34-42`。
 
+#### 5.4.1 持锁原版回调的受控入口（R-44 同类点清单）
+
+`g_virtual_bag_mtx` 是非递归 `std::mutex`；持锁期间调用可能回调库存 Hook 的原版函数，
+会形成同线程重入取锁的自死锁。当前实现只允许经下列受控入口：
+
+**TLS original-only 守卫本体**：
+
+- `g_in_native_call`（thread_local）+ RAII `NativeCallScope`：`game_ui_virtbag.cpp:187-194`。
+- 查询口 `virtual_bag_native_call_active()`：`game_ui_virtbag.cpp:279-281`。
+
+**dispatcher 本体**：
+
+- 删除：`remove_item_direct_unlocked` 解锁 → `NativeCallScope` 内调 `fn_remove_item_direct`
+  → 重锁 → `original_to_extension_source_slot_postcondition` 复核源槽
+  （`game_ui_virtbag.cpp:246-269`）。
+- 刷新：`virtual_bag_call_original_refresh_item_area_with_guard` 经 `NativeCallScope` 调
+  raw-original trampoline（`game_ui_virtbag.cpp:283-286`）；
+  `inventory_native_hook_call_refresh_item_area_original`（`native_inventory_hook.cpp:608`）。
+
+**查询 Hook 的 original-only 直通分支**（守卫置位时只走原版 backup）：
+
+- `FindItem`：`native_inventory_hook.cpp:91-101`；`HaveItem`：`:125-132`；
+  `GetItemCount`：`:134-142`；`IsHavingEmptySlot`：`:144-154`。
+- `stage4_*_original_only` 实现：`inventory_hook_stage4.cpp:25-63`。
+
+**受控调用点**（新增持锁原版调用必须改走上述 dispatcher，不得自开裸调用）：
+
+| 调用点 | 入口 | context |
+|---|---|---|
+| `extension_bag_transaction.inc:102` | orig→ext 删除源（`move_original_to_extension_locked`） | `original-to-extension` |
+| `extension_bag_transaction.inc:118` | orig→ext 提交后原版刷新 | `NativeCallScope` |
+| `extension_bag_transaction.inc:269`、`:287` | ext→orig 失败回滚删除 | `ext2orig release rejected rollback` / `ext2orig persist rollback` |
+| `extension_bag_equip.inc:108` | 装备路径删除源 | `extension equip` |
+| `game_ui_virtbag.cpp:861` | 卸下回滚删除 | `unequip rollback` |
+| `extension_bag_runtime.inc:796`、`:799` | pending recovery 删除与刷新 | `pending recovery` |
+
 ### 5.5 结论边界
 
 本文能证明 include/port 层级、18 项代码路径、VMA/选型证据和素材差异；不能证明

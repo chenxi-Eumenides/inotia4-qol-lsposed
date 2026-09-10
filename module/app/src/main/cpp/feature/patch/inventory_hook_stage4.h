@@ -13,10 +13,17 @@ int stage4_have_item(int32_t category, Stage4HaveBackup backup,
                      Stage4CountExtension extension_count, bool& recursive_guard);
 int stage4_get_item_count(int32_t category, Stage4CountBackup backup,
                           Stage4CountExtension extension_count, bool& recursive_guard);
+int stage4_have_item_original_only(int32_t category, Stage4HaveBackup backup,
+                                   bool& recursive_guard);
+int stage4_get_item_count_original_only(int32_t category, Stage4CountBackup backup,
+                                        bool& recursive_guard);
 int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
                                 Stage4EmptyBackup backup,
                                 Stage4EmptyExtension extension_has_empty,
                                 bool& recursive_guard);
+int stage4_is_having_empty_slot_original_only(int32_t needed, int32_t include_task_bag,
+                                              Stage4EmptyBackup backup,
+                                              bool& recursive_guard);
 
 using Stage4IdentifyItem = bool (*)(void* item, int32_t* bag, int32_t* slot);
 using Stage4ConsumeExtension = bool (*)(void* item);

@@ -128,3 +128,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 void virtual_bag_store_restore_for_original_write();
 // 原版刷新函数级关卡：调用方不持扩展锁，由该函数负责锁内原版刷新和投影覆盖。
 void virtual_bag_refresh_item_area_with_gate();
+// 原版函数可能回调进入库存 Hook；持扩展锁调用已审计的原版路径时使用该 TLS 标记，
+// 查询 Hook 将只走 original backup，避免回调再次获取 g_virtual_bag_mtx。
+bool virtual_bag_native_call_active();
+void virtual_bag_call_original_refresh_item_area_with_guard();

@@ -153,13 +153,13 @@ void refresh_module_item_area_locked(int index) {
     if (fn_ui_equip_refresh_item_area == nullptr) return;
     uint32_t* size_word = g_original_bag_size_word;
     if (size_word == nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
         return;
     }
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     *size_word = (g_original_bag_size & ~kCapacityMask) |
                  (static_cast<uint32_t>(g_virtual_bag_state.capacities[index]) & kCapacityMask);
-    inventory_native_hook_call_refresh_item_area_original();
+    virtual_bag_call_original_refresh_item_area_with_guard();
     refresh_projection_if_overwritten_locked();
 }
 
@@ -332,7 +332,7 @@ bool bind_original_exit_display_bag_locked(int bag) {
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     const uint32_t* size_word = bag_size_word_locked(bag);
     const bool has_capacity = size_word != nullptr && (*size_word & kCapacityMask) != 0;
-    if (has_capacity) inventory_native_hook_call_refresh_item_area_original();
+    if (has_capacity) virtual_bag_call_original_refresh_item_area_with_guard();
     *direct_bag = saved_direct;
     **current_bag = saved_got;
     return has_capacity;
@@ -510,7 +510,7 @@ bool install_module_view_locked(int bag) {
     void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
     g_projected_item_root = root;
     if (root != nullptr && fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
+        virtual_bag_call_original_refresh_item_area_with_guard();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
         for (int slot = 0; slot < capacity; ++slot) {
             void* ctrl = valid_child_locked(root, slot);
             if (ctrl == nullptr) continue;
@@ -608,7 +608,7 @@ void restore_module_view_locked() {
             (g_original_bag_size & kCapacityMask);
     }
     if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
+        virtual_bag_call_original_refresh_item_area_with_guard();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
     }
     g_original_bag_size_word = nullptr;
     g_original_bag_size = 0;
@@ -627,7 +627,7 @@ bool complete_original_exit_locked() {
     }
     set_original_bag_locked(selected_original_bag);
     if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
     persist_state_locked();
@@ -641,7 +641,7 @@ void cancel_original_exit_locked() {
                              g_original_current_got : g_original_current_direct;
     set_original_bag_locked(original_bag);
     if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&g_virtual_bag_state, original_bag);
     persist_state_locked();
@@ -696,7 +696,7 @@ void virtual_bag_inventory_enter_wrapper() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     install_extension_tab_buttons_locked();
     if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
 }
 

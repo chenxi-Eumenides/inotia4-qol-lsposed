@@ -22,6 +22,16 @@ int stage4_get_item_count(int32_t category, Stage4CountBackup backup,
     return original + extension;
 }
 
+int stage4_have_item_original_only(int32_t category, Stage4HaveBackup backup,
+                                   bool& recursive_guard) {
+    return stage4_have_item(category, backup, nullptr, recursive_guard);
+}
+
+int stage4_get_item_count_original_only(int32_t category, Stage4CountBackup backup,
+                                        bool& recursive_guard) {
+    return stage4_get_item_count(category, backup, nullptr, recursive_guard);
+}
+
 int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
                                 Stage4EmptyBackup backup,
                                 Stage4EmptyExtension extension_has_empty,
@@ -40,6 +50,13 @@ int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
         : (extension_has_empty == nullptr || !extension_has_empty(needed, include_task_bag) ? 0 : 1);
     recursive_guard = false;
     return result;
+}
+
+int stage4_is_having_empty_slot_original_only(int32_t needed, int32_t include_task_bag,
+                                              Stage4EmptyBackup backup,
+                                              bool& recursive_guard) {
+    return stage4_is_having_empty_slot(needed, include_task_bag, backup, nullptr,
+                                       recursive_guard);
 }
 
 bool stage4_consume_item(void* item, Stage4IdentifyItem identify,

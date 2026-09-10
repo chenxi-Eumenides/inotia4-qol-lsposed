@@ -277,11 +277,12 @@
 - **原版链(VMA)**：原版源由 `INVEN_FindItemSlot@0x103704`/物理槽读取；原版删除原语 `INVEN_RemoveItemDirect@0x103fd8` 只可在确认扩展逻辑提交后受控使用。
 - **扩展接管点(文件:函数)**：`extension_bag_transaction.inc:move_original_to_extension_locked`；标签 drop `extension_bag_runtime.inc:extension_tab_item_proc`。
 - **共享状态读写**：读物理 source、目标容量和 payload；写 PendingTransfer、扩展 descriptor/object/handle、确认物理源为空、projection 和 dirty。
-- **必须保持的不变式(引 R-xx)**：任务袋 5 为源时拒绝；物理源清除必须删后复核；逻辑 bag 不能传进物理函数（R-02、R-21、R-22、R-25）。
+- **必须保持的不变式(引 R-xx)**：任务袋 5 为源时拒绝；物理源清除必须删后复核；逻辑 bag 不能传进物理函数；持锁原版删除/刷新只能经 R-44 受控 dispatcher，且不得触发同线程重入死锁（R-02、R-18、R-21、R-22、R-25、R-44）。
 - **失败语义**：目标非法/满、物化或物理删除复核失败回滚逻辑目标并保留原版源；原版源仍占用时不提交。
-- **Host 测试名(现有或「缺口」)**：`test_p44_transaction_stages`、`test_virtual_bag_transaction_domain`；缺口：`test_original_to_extension_source_slot_postcondition`。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-15`：①记录原版 bag/slot payload；②POST `move_item` 到 bag 6..10；③重读原版和扩展；预期源真实空、扩展 payload 完整，bag 5 源操作返回 `task bag excluded`。
-- **证据锚类型**：Host + API 真机。
+- **Host 测试名(现有或「缺口」)**：`test_p44_transaction_stages`、`test_virtual_bag_transaction_domain`（含 `original_to_extension_source_slot_postcondition`）；`test_original_only_queries`。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-15`：①记录原版 bag/slot payload；②真实拖拽路径：把原版袋物品拖到已装备扩展袋页签后释放（`0x18` release 走 orig→ext 事务）；③重读原版源槽与扩展目标槽，预期源槽真实空（后置条件成立）、扩展 payload 完整；④卡死检查：拖拽释放后游戏画面与输入持续响应，`/api/health` 连续轮询可达，无主线程冻结；⑤API 对照：POST `move_item` 到 bag 6..10 同断言，bag 5 源返回 `task bag excluded`。
+- **日志锚**：`txn committed id=... original->extension bag=.. slot=.. src=../..`；`release_cleanup ctl=.. flags_cleared`；持锁原版调用期间出现 `original-only native_call=1`；预期不存在 `event_release` 记录后的处理停滞（release 后事务在同一事件循环内完成）。
+- **证据锚类型**：Host + 真机（拖拽触摸路径 + API 对照）+ 日志锚；无卡死以 health 连续可达与画面响应为证，不以 API 成功替代。
 
 ### VM-16 装备页详情销毁
 
@@ -558,7 +559,7 @@
 
 ## 3. 规则锚表
 
-下表是 R-01..R-43 的反查表；“卡”列列出覆盖该规则的主卡。
+下表是 R-01..R-44 的反查表；“卡”列列出覆盖该规则的主卡。
 
 | 规则 | 被哪些卡覆盖 | 当前锚结论 |
 |---|---|---|
@@ -579,7 +580,7 @@
 | R-15 | VM-03、VM-04、VM-06、VM-16、VM-24 | 释放守卫静态检查 active 与 pending_release；现有 ledger 无专用断言，Host 缺口。
 | R-16 | VM-06、VM-10、VM-12、VM-13 | `test_p44_transaction_stages` 只证明 descriptor 模型；VM-13 增加归一化 payload；问题 B 真机单独保留。
 | R-17 | VM-06、VM-12、VM-14 | stale endpoint 当前无专用 Host；失败/回滚需真机与缺口。
-| R-18 | VM-03、VM-25 | 锁序/刷新重入必须运行时观察，Host 只可做 seam。
+| R-18 | VM-03、VM-15、VM-25 | `test_original_only_queries` 覆盖 TLS original-only seam；锁序/刷新重入仍需运行时观察。
 | R-19 | VM-09、VM-11、VM-23、VM-31 | `test_p52_drag_session` 有 stale generation；tab root 需真机。
 | R-20 | VM-11、VM-12、VM-14、VM-25 | `test_virtual_bag_mergeable_items` 有快照纯函数；H3/H4 真机为主。
 | R-21 | VM-01、VM-02、VM-14、VM-15、VM-26 | `test_virtual_bag_transaction_domain` 现成；页签 0..4→6..10 转换和 native item 判空由 VM-26/VM-15 取证。
@@ -605,10 +606,11 @@
 | R-41 | VM-13、VM-30 | `test_virtual_bag_payload_helpers` 断言装备/未知类别 patch no-op，`test_virtual_bag_mergeable_items` 断言合并前门控；真机同袋合并与存档载荷对照。 |
 | R-42 | VM-05、VM-29 | `test_virtual_bag_state` 断言 BagType 容量派生；真机原版物品→空页签和扩展页签路由核对两套判据不串用。 |
 | R-43 | VM-30 | `llvm-objdump` 证明装备 marker 判定不属于数量 patch；真机需核对启用上限后的装备显示与详情。 |
+| R-44 | VM-15、VM-B01～VM-B04 | `test_original_only_queries` 与 `test_virtual_bag_transaction_domain` 覆盖 Host seam；真机 VM-15 核对跨域删除后源槽为空、事务提交且 health 持续可达。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 
-规则册登记的无锚集合为 R-01、03、05、06、11、12、13、14、15、17、18、23、24、26、27、30、31。下表明确“可 Host/可 VM/不可锚”，不写实现方案。
+规则册登记的无锚集合为 R-01、03、05、06、11、12、13、14、15、17、23、24、26、27、30、31。下表明确“可 Host/可 VM/不可锚”，不写实现方案。
 
 | 规则 | 定锚结果 | 测试名或 VM 用例；断言要点 |
 |---|---|---|
@@ -622,7 +624,6 @@
 | R-14 | 可 VM | VM-24；装备/卸下 proc 不经详情观察 PtrHook 重复处理，使用/卖出/销毁仍各执行一次。
 | R-15 | 可 Host | 缺口 `test_ownership_active_pending_release`；断言 active/pending_release 对象不能替换、释放或复用，匹配 token finish 后才可终态释放。
 | R-17 | 可 Host | 缺口 `test_stale_endpoint_rejection`；断言非空 cache category/hash 与 descriptor 不符时先拒绝，原对象仍可审计回滚。
-| R-18 | 可 VM | VM-25；保存/投影同步不递归死锁、不将错误锁序造成的刷新写入当成功。
 | R-23 | 可 Host | 缺口 `test_sell_price_variants`；断言装备页和商店页传入不同 variant，价格结果互不污染。
 | R-24 | 可 VM | VM-04、VM-06；角色 B 菜单操作不修改角色 A，确认使用和装备均按当前菜单角色。
 | R-26 | 可 VM | VM-23；切袋/装备收尾后容量来自当前 view，窗口原版 bag 只承担临时投影字段。
@@ -630,7 +631,7 @@
 | R-30 | 可 Host | 缺口 `test_projection_root_generation_gate`；断言 root 重建递增 generation、失效 root/source control 被拒、新 root 控件才可提交。
 | R-31 | 可 VM | VM-27；扩展对象命中 guard 必须记录完整参数/身份/物理摘要并跳过 backup，原版对象必须保持原版结果。
 
-**定锚分布：可 Host 7 条（R-03/05/06/15/17/23/30），可 VM 10 条（R-01/11/12/13/14/18/24/26/27/31），不可锚 0 条。** “可 Host”中的 7 个测试名均为缺口，不把缺口写成已通过。
+**定锚分布：可 Host 7 条（R-03/05/06/15/17/23/30），可 VM 9 条（R-01/11/12/13/14/24/26/27/31），不可锚 0 条。** “可 Host”中的 7 个测试名均为缺口，不把缺口写成已通过。R-18 已脱离无锚集合：现锚为 Host `test_original_only_queries` 与 VM-15、VM-25（见 §3 锚表）。
 
 ## 4. 问题 B 专项：H3/H4 复现和日志判读
 
@@ -740,5 +741,5 @@
 
 * SaveItem 的 H-13 函数处置、caller 未覆盖边界，见
   [`inventory-integration-decision-plan.md §2.2、§3.2`](inventory-integration-decision-plan.md)。
-* 规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-43` 为准；本册只保留操作卡覆盖关系。
+* 规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-44` 为准；本册只保留操作卡覆盖关系。
 * `IsHavingEmptySlot` 的 `needed<=0` 返回 `1` 事实及源码/Host 锚，见库存册 §2.1；VM-02 只负责验收。

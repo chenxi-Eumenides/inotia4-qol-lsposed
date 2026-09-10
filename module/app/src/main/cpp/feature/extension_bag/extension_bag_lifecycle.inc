@@ -185,7 +185,7 @@ bool consume_projected_release_locked(std::unique_lock<std::mutex>& lock, int64_
         session.target_kind = virtual_bag::DragTargetKind::kOriginalBag;
         session.target_bag = original_target_bag;
         session.target_slot = -1;
-        routed = route_deferred_extension_to_original_locked();
+        routed = route_deferred_extension_to_original_locked(lock);
     } else {
         routed = route_projected_session_drop_locked(lock, x, y);
     }
@@ -377,7 +377,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                     release_cleanup_handled = false;
                 } else {
                     const bool handled = g_extension_drag.active &&
-                                         handle_bag_drop_release_locked(x, y);
+                                         handle_bag_drop_release_locked(lock, x, y);
                     // Drop keeps the transaction result; failed/no-source drops use unhandled cleanup.
                     release_cleanup_handled = handled;
                 }
@@ -388,7 +388,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 release_cleanup_needed = true;
             }
         } else if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal &&
-            handle_bag_drop_release_locked(x, y)) {
+            handle_bag_drop_release_locked(lock, x, y)) {
             log_p5_observation_locked("panel-original-release-handled", nullptr, event,
                                       param2 != 0, param != 0, nullptr, true, 1, x, y);
             // Original-bag drop was consumed by the module route; skip selected-control clearing.
@@ -495,7 +495,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             restore_module_view_locked();
             set_original_bag_locked(selected_original_bag);
             if (fn_ui_equip_refresh_item_area != nullptr) {
-                inventory_native_hook_call_refresh_item_area_original();
+                virtual_bag_call_original_refresh_item_area_with_guard();
             }
             virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
             persist_state_locked();

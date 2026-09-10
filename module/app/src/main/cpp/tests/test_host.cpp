@@ -1002,6 +1002,11 @@ static void test_virtual_bag_recovery() {
 static void test_virtual_bag_transaction_domain() {
     using namespace virtual_bag;
 
+    void* expected_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));
+    CHECK(original_to_extension_source_slot_postcondition(expected_item, nullptr));
+    CHECK(!original_to_extension_source_slot_postcondition(expected_item, expected_item));
+    CHECK(!original_to_extension_source_slot_postcondition(nullptr, nullptr));
+
     CHECK(valid_original_transaction_bag(0));
     CHECK(valid_original_transaction_bag(4));
     CHECK(!valid_original_transaction_bag(-1));

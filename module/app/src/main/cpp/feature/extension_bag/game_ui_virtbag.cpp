@@ -184,7 +184,15 @@ std::atomic<uint64_t> g_p5_last_item_query_sample_ms{0};
 std::atomic<uint64_t> g_p5_last_panel_move_sample_ms{0};
 thread_local bool g_p5_observation_active = false;
 thread_local bool g_refresh_restore_suppress = false;
+thread_local bool g_in_native_call = false;
 void* g_tab_bag_items[virtual_bag::kBagCount] = {};
+
+struct NativeCallScope {
+    const bool previous = g_in_native_call;
+
+    NativeCallScope() { g_in_native_call = true; }
+    ~NativeCallScope() { g_in_native_call = previous; }
+};
 
 int extension_tab_index(void* ctrl);
 bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
@@ -213,23 +221,52 @@ void extension_tab_button_clicked(void* ctrl);
 // 0x04=drop 到袋）。挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定。
 void queue_extension_tab_click_locked(int extension_bag);
 void* touch_moving_item_control_locked();
-bool try_equip_on_extension_tab_drop_locked(int index, void* moving_control);
+bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
+                                            int index, void* moving_control);
 bool extension_source_should_equip_locked(int target_bag);
-bool equip_extension_source_on_tab_locked(int target_bag, int source_bag, int source_slot);
+bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+                                          int source_bag, int source_slot);
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag, int dst_slot);
 bool persist_state_locked(bool force);
 void refresh_projected_module_view_after_move_locked();
 void cancel_projected_drag_session_locked(const char* reason);
 void refresh_projection_if_overwritten_locked();
 bool sync_projected_slot_locked(int bag, int slot);
-bool route_projected_session_to_tab_locked(int target_bag);
+bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag);
 int original_item_category_locked(void* item);
 int drag_source_category_locked();
-bool move_original_to_extension_locked(int dst_bag, void* moving_control);
+bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
+                                       void* moving_control);
 void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
                                        const char* context, uint32_t* out_handle);
 void handover_tracked_item_locked(uint32_t handle, void* item, const char* context);
 void release_tracked_item_locked(uint32_t handle, void* item, const char* context);
+bool inventory_slot_locked(int bag, int slot, void** out);
+
+bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
+                                 void* expected_item, const char* context) {
+    if (!lock.owns_lock() || fn_remove_item_direct == nullptr || expected_item == nullptr) {
+        return false;
+    }
+    lock.unlock();
+    {
+        NativeCallScope native_call;
+        fn_remove_item_direct(bag, slot);
+    }
+    lock.lock();
+
+    void* actual_item = nullptr;
+    const bool readable = inventory_slot_locked(bag, slot, &actual_item);
+    const bool removed = readable &&
+                         virtual_bag::original_to_extension_source_slot_postcondition(
+                             expected_item, actual_item);
+    if (!removed) {
+        VIRTBAG_LOG("native remove postcondition failed context=%s bag=%d slot=%d expected=%p actual=%p readable=%d",
+                    context != nullptr ? context : "unknown", bag, slot, expected_item,
+                    actual_item, readable ? 1 : 0);
+    }
+    return removed;
+}
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
                                                 const char* context, void* use_token);
@@ -239,6 +276,15 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 #include "feature/extension_bag/extension_bag_runtime.inc"
 }  // namespace
 
+bool virtual_bag_native_call_active() {
+    return g_in_native_call;
+}
+
+void virtual_bag_call_original_refresh_item_area_with_guard() {
+    NativeCallScope native_call;
+    inventory_native_hook_call_refresh_item_area_original();
+}
+
 // 与 item_count_encoding/ITEM_GetCumulateCount 使用同一 ITEMCLASSBASE +6 bit0 语义：
 // kUnknown 必须继续向载入/合并调用方传播，不能降级成可堆叠。
 stack_codec::CountEncoding virtual_bag_category_uses_stack_count(int category) {
@@ -247,7 +293,7 @@ stack_codec::CountEncoding virtual_bag_category_uses_stack_count(int category) {
 
 void virtual_bag_refresh_item_area_with_gate() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    inventory_native_hook_call_refresh_item_area_original();
+    virtual_bag_call_original_refresh_item_area_with_guard();
     const bool projection_installed =
         g_module_view_installed && g_projected_item_root != nullptr &&
         virtual_bag::valid_index(g_module_view_index);
@@ -650,7 +696,8 @@ enum class ExtensionBagUnequipResult {
 // 顺序铁律：先预检空袋再建对象（原版同序 b7f94→b7fa8），否则非空路径会把
 // 已入库物品滞留 g_inven 造成复制；转移成功后仅 persist 失败需回滚
 // （INVEN_RemoveItemDirect 返回值不可信 → 槽位重读确认后再真释放）。
-ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
+ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mutex>& lock,
+                                                       int internal_bag) {
     ensure_state_loaded_locked();
     if (g_virtual_bag_state.capacities[internal_bag] == 0) {
         return ExtensionBagUnequipResult::kNotEquipped;
@@ -811,9 +858,8 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(int internal_bag) {
                 slot_item != item) {
                 continue;
             }
-            fn_remove_item_direct(receiving_bag, slot);
-            void* after = item;
-            if (inventory_slot_locked(receiving_bag, slot, &after) && after == nullptr) {
+            if (remove_item_direct_unlocked(lock, receiving_bag, slot, item,
+                                             "unequip rollback")) {
                 rolled_back = true;
             }
             break;
@@ -1062,7 +1108,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     if (!g_virtual_bag_enabled.load() || !game_in_world()) {
         return VirtualBagEquipButtonResult::kNotExtension;
     }
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     void* item = g_extension_desc_item;
     // g_extension_desc_item 只在扩展物品详情被捕获；原版背包物品详情点装备
@@ -1161,7 +1207,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
         persist_state_locked();
         if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
         if (fn_ui_equip_refresh_item_area != nullptr) {
-            inventory_native_hook_call_refresh_item_area_original();
+            virtual_bag_call_original_refresh_item_area_with_guard();
         }
         if (fn_ui_equip_refresh_bag_area != nullptr) fn_ui_equip_refresh_bag_area();
         clear_original_desc_locked();
@@ -1177,7 +1223,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     // 源与"原版 INVEN 源"（内部先扫原版库存定位物品再移除，源物品真实销毁）。
     const int target = first_empty_extension_bag_locked();
     if (target < 0) return VirtualBagEquipButtonResult::kNotExtension;
-    const ExtensionBagEquipResult result = equip_extension_bag_item_locked(target, item);
+    const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, target, item);
     if (result != ExtensionBagEquipResult::kOk) return VirtualBagEquipButtonResult::kNotExtension;
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
     clear_original_desc_locked();
@@ -1209,7 +1255,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     if (out_no_space != nullptr) *out_no_space = false;
     if (out_not_empty != nullptr) *out_not_empty = false;
     if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     if (g_base == 0) return false;
     // 仅 desc_type=1（袋详情）卸下走接管；卸装备（desc_type=0）交原版（其
@@ -1224,7 +1270,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
                                g_virtual_bag_state.selected == ext_bag &&
                                g_virtual_bag_state.info_bag == ext_bag;
         if (owns_desc) {
-            const ExtensionBagUnequipResult result = unequip_extension_bag_locked(ext_bag);
+            const ExtensionBagUnequipResult result = unequip_extension_bag_locked(lock, ext_bag);
             VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag,
                         static_cast<int>(result));
             if (result == ExtensionBagUnequipResult::kNotEmpty && out_not_empty != nullptr) {
@@ -1281,7 +1327,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         persist_state_locked();
         if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
         if (fn_ui_equip_refresh_item_area != nullptr) {
-            inventory_native_hook_call_refresh_item_area_original();
+            virtual_bag_call_original_refresh_item_area_with_guard();
         }
         if (fn_ui_equip_refresh_bag_area != nullptr) fn_ui_equip_refresh_bag_area();
         clear_original_desc_locked();
@@ -1347,7 +1393,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     if (g_module_view_installed && g_module_view_index == adopt_bag) {
         refresh_module_item_area_locked(adopt_bag);
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
-        inventory_native_hook_call_refresh_item_area_original();
+        virtual_bag_call_original_refresh_item_area_with_guard();
     }
     if (fn_ui_equip_refresh_bag_area != nullptr) fn_ui_equip_refresh_bag_area();
     VIRTBAG_LOG("original bag unequip->extension bag=%d dst=%d/%d item=%p", bag_index,

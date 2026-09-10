@@ -34,6 +34,26 @@ static int g_empty_extension_calls = 0;
 static int empty_original(int32_t, int32_t) { ++g_empty_original_calls; return g_empty_original; }
 static bool empty_extension(int32_t, int32_t) { ++g_empty_extension_calls; return g_empty_extension; }
 
+static void test_original_only_queries() {
+    bool guard = false;
+    g_original_value = 0;
+    g_original_calls = 0;
+    g_extension_calls = 0;
+    CHECK(stage4_have_item_original_only(1, original_count, guard) == 0);
+    CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
+
+    g_original_value = 4;
+    g_original_calls = 0;
+    CHECK(stage4_get_item_count_original_only(1, original_count, guard) == 4);
+    CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
+
+    g_empty_original = 1;
+    g_empty_original_calls = 0;
+    g_empty_extension_calls = 0;
+    CHECK(stage4_is_having_empty_slot_original_only(1, 1, empty_original, guard) == 1);
+    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 0 && !guard);
+}
+
 static void* g_extension_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));
 static int g_identify_calls = 0;
 static int g_extension_action_calls = 0;
@@ -244,6 +264,7 @@ static void test_install_transaction() {
 
 int main() {
     test_queries();
+    test_original_only_queries();
     test_object_operations();
     test_unequip_to_inven();
     test_install_transaction();
