@@ -4,7 +4,7 @@
 >
 > 本册把当前规则册、运行时架构册、库存接入决策册、拖动协议和存档册交叉压成可执行的操作契约。源码行号按当前工作树记录；代码变更后必须重新核对文件:行。Host 测试名只引用当前存在的测试，`缺口：`表示本册登记的待补测试，不表示已经实现。
 >
-> **问题 B 固定口径：未解决+已布防。** 扩展袋 0 双非空交换后，原版袋 0 同号槽物品仍可能消失并被保存固化。F1 三态门、G 轮对象/回滚修正、H 轮单一 `0x18` owner、merge 解耦和 H3/H4 物理快照守卫均不是修复证明。
+> **问题 B 固定口径：未解决+已布防。** 扩展袋 0 双非空交换后，原版袋 0 同号槽物品仍可能消失并被保存固化。当前三态门、对象/回滚校验、单一 `0x18` owner、merge 解耦和 H3/H4 物理快照守卫均不是修复证明。B-05 是模块扩展袋同堆合并能力，不属于原版基线能力。
 
 ## 1. 使用约定
 
@@ -71,7 +71,7 @@
 - **必须保持的不变式(引 R-xx)**：确认使用固定走 `0xb8478` Native Hook，不能复活全局确认槽；成功后刷新并重投影（R-01、R-15、R-24、R-25）。
 - **失败语义**：详情身份、token、角色或 generation 不匹配返回 false/handled 并清理 marker；抢锁失败按未接管回 backup，不等待、不写半成品。
 - **Host 测试名(现有或「缺口」)**：缺口：`test_confirm_use_token_and_projection_refresh`（断言匹配 token 才 finish，失败 abort，成功 count/descriptor/control 一致）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-04`：①打开扩展详情；②点需要确认的“使用”；③确认；④读取 inventory 和当前面板；预期扩展物品按原版效果消费，确认后无旧控件残留，原版袋无伪造槽。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-04`：①打开扩展详情；②点需要确认的“使用”；③确认；④读取 inventory 和当前面板；预期扩展物品按原版效果消费，确认后无失效控件残留，原版袋无伪造槽。
 - **证据锚类型**：真机必需 + 源码；不能由 Host 单独通过。
 
 ### VM-05 原版袋物品装备为扩展背包
@@ -83,37 +83,64 @@
 - **必须保持的不变式(引 R-xx)**：目标袋空且类别合法才收编；原版源确认清空后提交；源/目标不能误认角色装备（R-08、R-16、R-25、R-26）。
 - **失败语义**：目标已装备、类别非法、容量不足、物化或源清除失败均拒绝并保持源；不得把失败降级成原版二次移动。
 - **Host 测试名(现有或「缺口」)**：`test_equip_bag`、`test_virtual_bag_state`；缺口：`test_original_to_extension_bag_equip_commit`（断言源槽清空前不清逻辑源，失败可重试）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-05`：①记录原版 bag/slot 的背包物品；②拖到未装备扩展标签；③读两侧 state 并切出/切回；预期扩展类型/容量正确、原版源空、切换后不显示旧袋物品。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-05`：①记录原版 bag/slot 的背包物品；②拖到未装备扩展标签；③读两侧 state 并切出/切回；预期扩展类型/容量正确、原版源空、切换后不显示非当前袋物品。
 - **证据锚类型**：真机 + Host 部分模型 + 源码。
 
 ### S-05 页签 drop 装备与跨页签提交
 
-- **反例**：背包类物品拖到空页签无效果；拖到其它页签时源视觉消失但没有
-  `txn committed`，目标无物品，切回源仍在。
+- **状态**：已解决（2026-09-10 真机确认；提交 `3539918`）。
 - **步骤**：①记录扩展源的逻辑 `bag/slot/category/generation`；②将类别 1..4 的扩展
-  物品拖到空页签；③再用非背包类物品或已装备页签拖到其它页签；④切回源页签并读取
-  两个逻辑袋、projection 和 session 收尾日志。
+  物品拖到空页签；③用非背包类物品从扩展源拖到其它页签；④用已装备页签拖到其它
+  页签；⑤用原版物品拖到页签，作为原版→页签对照；⑥切回源页签并读取两个逻辑袋、
+  原版物理袋、projection 和 session 收尾日志。
 - **预期**：空页签仅对 `is_backpack_category(category)` 成立的源走装备事务；其它目标
-  走 ext→ext。target kind、session generation、tab/inventory generation 或 source
-  不匹配时明确拒绝，逻辑源保持不变；只有事务成功才提交源/目标、持久化并刷新目标
-  projection，`0x18` 只执行 cleanup-only 收尾。扩展源 drop 目标解析先判页签、后判
-  网格；标签矩形与网格行的 y 坐标带存在重叠时，页签命中必须按切袋意图优先。
-- **日志锚**：成功必须出现
-  `tab commit handled=1 bag=.. slot=..`；失败必须出现
-  `cross tab reject reason=...` 或 `tab reject reason=transaction_failed ...`，失败路径
-  不得出现扩展 `txn committed`。
-- **关联规则/真机卡**：R-02、R-16、R-19、R-25、R-30；本卡真机证据待补。
+  走 ext→ext；原版源保持原版 tab/drop 语义。target kind、session generation、
+  tab/inventory generation 或 source 不匹配时明确拒绝并保持逻辑源；只有事务成功才提交
+  源/目标、持久化并刷新目标 projection，`0x18` 只执行 cleanup-only 收尾。扩展源 drop
+  目标解析先判页签、后判网格；标签矩形与网格行 y 坐标带存在重叠时，页签命中按切袋意图
+  优先。
+- **日志锚**：成功出现 `tab commit handled=1 bag=.. slot=..`；失败出现
+  `cross tab reject reason=...` 或 `tab reject reason=transaction_failed ...`；释放相关
+  路径出现 `deferred free enqueue` 与 `deferred free drain`。失败路径不得出现扩展
+  `txn committed`。
+- **关联规则/真机卡**：R-02、R-16、R-19、R-25、R-30、R-35、R-36；主卡 VM-29。
+
+### S-03 扩展宝石拖装备
+
+- **状态**：未决；列为下一项验证队列。
+- **步骤**：①记录扩展宝石的逻辑 `bag/slot/count/handle/generation` 和目标装备 socket；
+  ②将扩展宝石拖到原版装备槽；③读取装备 payload、宝石数量、扩展逻辑槽和物理槽；④
+  对无孔、非宝石和空装备目标重复失败路径。
+- **预期**：成功路径应只执行一次原版镶嵌并消费一颗扩展宝石，不应把源/目标送入扩展
+  swap；失败路径保持宝石、装备和槽位不变。当前卡只保留未决状态，不以原版 VM-B03
+  通过替代本卡结论。
+- **日志锚**：H-15 `UIEquip_EquipControlEventProc`、`PutJewel`/`ConsumeItem`、
+  `MoveItem GUARD reject`、session finish/abort；需补同一操作的真机时序日志。
+- **关联规则/真机卡**：R-02、R-09、R-15、R-31；VM-10；原版对照 VM-B03。
+
+### VM-29 页签拖放与原版页签对照
+
+- **操作**：覆盖扩展源→空页签装备、扩展源→其它页签移动和原版源→页签对照。
+- **步骤**：①准备类别 1..4 的扩展背包源和空页签；②拖放并确认扩展袋装备；③准备非
+  背包类扩展源，拖到其它页签；④准备原版物品，按原版页签/drop 操作拖到页签；⑤切换
+  页签并读取扩展逻辑袋、原版物理袋和 session。
+- **预期**：①扩展背包源装备到空页签并清理原扩展源；②非背包类扩展源提交 ext→ext
+  移动；③原版源不进入扩展事务；三种操作均无 stale moving。触摸窗口内释放先入队，
+  draw-end 关闭窗口后再按控件/槽位引用排空。
+- **日志锚**：`tab commit handled=1`、`deferred free enqueue`、`deferred free drain`；
+  原版对照使用原版 `MoveItem pre/post` 或 tab proc 日志，不能只用 UI 结果判定。
+- **关联规则**：R-02、R-19、R-30、R-35、R-36；S-05 已解决。
 
 ### VM-06 扩展物品装备到角色
 
 - **操作**：从扩展投影详情将装备穿到当前菜单角色的目标装备槽。
 - **原版链(VMA)**：`CHAR_EquipItemFromInvenToSlot@0xe5368` 读取物理 `INVEN[bag][slot]` 并交换。
 - **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:equip_item_from_inven_to_slot_wrapper` → `inventory_hook_stage4.cpp:stage4_equip_item` → `extension_bag_equip.inc:extension_bag_equip_projected_item`。
-- **共享状态读写**：读当前菜单角色、view/window bag、descriptor/hash/handle；临时借入物理槽，写角色装备、旧装备扩展槽、ownership、generation 和 projection。
+- **共享状态读写**：读当前菜单角色、view/window bag、descriptor/hash/handle；临时借入物理槽，写角色装备、被替换装备的扩展槽、ownership、generation 和 projection。
 - **必须保持的不变式(引 R-xx)**：临时物化不改变最终所有权；失败恢复物理槽和角色槽；`module_item_locked` 使用逻辑 bag 与当前 view（R-04、R-08、R-16、R-24、R-26）。
 - **失败语义**：角色/等级/职业/装备槽或物化不合法返回原版失败；扩展源失败不得把投影对象交给物理释放链。
 - **Host 测试名(现有或「缺口」)**：`test_object_operations`（fallback 装备与角色指针断言）；缺口：`test_projected_equip_handover_and_rollback`。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-06`：①在角色 A 菜单打开扩展装备详情；②点击装备；③确认角色 A 装备和扩展源/旧装备位置；④切换角色 B 重复；预期角色身份不串、失败不丢物。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-06`：①在角色 A 菜单打开扩展装备详情；②点击装备；③确认角色 A 装备和扩展源/被替换装备位置；④切换角色 B 重复；预期角色身份不串、失败不丢物。
 - **证据锚类型**：Host + 真机 + 源码。
 
 ### VM-07 装备按钮三态
@@ -232,7 +259,7 @@
 - **共享状态读写**：读详情 bag/slot/object/hash/handle；确认写逻辑清槽、释放、projection、dirty；成功/失败/取消恢复 popup 原 callback 和详情身份。
 - **必须保持的不变式(引 R-xx)**：扩展对象不进原版 Direct remove；全局 popup 劫持只用于卖出/销毁，回调不可跨页串线（R-07、R-13、R-15、R-30）。
 - **失败语义**：取消无状态变化；stale identity/释放失败拒绝；确认成功才清逻辑源和物化对象。
-- **Host 测试名(现有或「缺口」)**：缺口：`test_extension_destroy_identity_and_popup_restore`（断言取消/成功/陈旧身份的槽、handle、callback 清理）。
+- **Host 测试名(现有或「缺口」)**：缺口：`test_extension_destroy_identity_and_popup_restore`（断言取消/成功/失效身份的槽、handle、callback 清理）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-16`：①打开扩展物品详情；②取消确认；③再次打开并确认销毁；④切换到商店页；预期取消不变，确认后物品消失且其他页面 popup 不串线。
 - **证据锚类型**：真机 + 源码；Host 为待补 seam。
 
@@ -314,10 +341,10 @@
 - **原版链(VMA)**：原版 inventory event、袋控件和 `TouchHandle`；投影安装不等同于原版背包写入。
 - **扩展接管点(文件:函数)**：`extension_bag_runtime.inc:extension_tab_item_proc`、`install_extension_tab_buttons_locked`、`disable_extension_tab_buttons_locked`；`extension_bag_render.inc:install_module_view_locked/restore_module_view_locked`。
 - **共享状态读写**：读写 `mode/selected/inspected`、`g_module_view_index`、`g_module_window_original_bag`、`g_projected_item_root`、tab pointers/generation 和 capacity snapshot。
-- **必须保持的不变式(引 R-xx)**：view index 与窗口原版袋号分离；direct/GOT 成对恢复；root 重建先使旧事件失效（R-19、R-26、R-27、R-30）。
+- **必须保持的不变式(引 R-xx)**：view index 与窗口原版袋号分离；direct/GOT 成对恢复；root 重建先使失效事件失效（R-19、R-26、R-27、R-30）。
 - **失败语义**：未就绪容器、无容量、退出中或 stale root 拒绝；原版袋 5 不可成为投影窗口；恢复失败不得释放借用对象。
 - **Host 测试名(现有或「缺口」)**：`test_virtual_bag_state`、`test_extension_bag_exit_rendering_state`、`test_p52_drag_session`；缺口：`test_view_window_bag_pair_restore`。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-23`：①进入 bag 6/7/8；②快速来回切换；③退出到原版袋；④重开；预期只显示当前逻辑袋，退出后原版容量/direct/GOT/root 恢复，旧控件事件无效。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-23`：①进入 bag 6/7/8；②快速来回切换；③退出到原版袋；④重开；预期只显示当前逻辑袋，退出后原版容量/direct/GOT/root 恢复，失效控件事件无效。
 - **证据锚类型**：Host + 真机 + 源码。
 
 ### VM-24 详情弹窗与身份失效
@@ -325,11 +352,11 @@
 - **操作**：打开原版/扩展物品详情，验证使用、装备、卖出、销毁按钮分流和 stale identity。
 - **原版链(VMA)**：`UIEquip_MakeDesc@0xb8980`（唯一调用点 `0xb9188`）→ `SetDescMenu`→详情按钮 proc；装备/卸下 proc 走函数级 Hook。
 - **扩展接管点(文件:函数)**：`extension_bag_lifecycle.inc:make_desc_equip_gate`；`extension_bag_equip.inc` 详情按钮 PtrHook 安装与 `extension_*_ok` 分流。
-- **共享状态读写**：读当前 control/root、item/bag/slot/cache；写 `g_extension_desc_item`、details generation、button hooks、popup callback；重建时清旧指针。
+- **共享状态读写**：读当前 control/root、item/bag/slot/cache；写 `g_extension_desc_item`、details generation、button hooks、popup callback；重建时清理失效指针。
 - **必须保持的不变式(引 R-xx)**：操作前再次校验 item+bag+slot+cache；详情 PtrHook 跳过装备/卸下 proc；root 重建清 stale（R-14、R-15、R-24、R-30）。
 - **失败语义**：详情生成失败/身份失效/按钮数组 stale 只清理本次身份，不执行原版删源或错误角色操作。
 - **Host 测试名(现有或「缺口」)**：缺口：`test_detail_identity_and_proc_exclusion`（断言 stale identity 被拒、装备/卸下不双层进入、hook 清理完整）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-24`：①打开扩展详情；②切袋/重建面板后继续点旧详情按钮；③分别操作原版与扩展详情；预期 stale 操作无副作用，扩展按钮只处理扩展对象。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-24`：①打开扩展详情；②切袋/重建面板后继续点失效详情按钮；③分别操作原版与扩展详情；预期 stale 操作无副作用，扩展按钮只处理扩展对象。
 - **证据锚类型**：真机 + 源码；PtrHook 双层行为需运行时证据。
 
 ### VM-25 保存、切档、重启和 sidecar
@@ -375,12 +402,11 @@
 
 ## 2.1 VM-B 原版基线行为包
 
-> VM-B 与规则册 B-01～B-05 一一对应。前置条件：扩展背包已启用；每张卡均使用非扩展
-> 物品，并记录设备、APK SHA-256、配置开关、操作前后原版 `0..5×16` 物理槽摘要和
-> 扩展逻辑状态。S-01～S-03 是本轮已知真机回归反例：VM-B 必须证明它们不再发生；
-> B-04/B-05 另须证明原版袋内移动/合并没有被扩展路由污染。
+> VM-B01～VM-B04 对应规则册 B-01～B-04 的原版基线。前置条件：扩展背包已启用；每张
+> 卡均使用非扩展物品，并记录设备、APK SHA-256、配置开关、操作前后原版 `0..5×16`
+> 物理槽摘要和扩展逻辑状态。B-05 是模块扩展袋合并功能，另由 VM-B05/VM-13 取证。
 >
-> 本轮新增判读：draw-end 不再逐帧写投影控件；若出现非活 session、generation/root/view
+> 当前判读：draw-end 不再逐帧写投影控件；若出现非活 session、generation/root/view
 > 不匹配或 source 控件失效的 stale moving，必须观察 `TouchState+0x30` 被清空及控件
 > `+0x0a/+0x0b` flag 被清除。该判读对应 R-34，不替代 VM-B 的原版行为断言。
 
@@ -390,11 +416,10 @@
 | B-02 | VM-B02 | 点击装备直装或替换，不进入拖拽态 |
 | B-03 | VM-B03 | 宝石拖到装备执行镶嵌，不执行交换 |
 | B-04 | VM-B04 | 原版袋内拖动保持原版移动语义 |
-| B-05 | VM-B05 | 原版袋内合并保持原版堆叠语义 |
 
 ### VM-B01 原版消耗品点击使用
 
-- **对应契约**：B-01；反例样本 S-01。
+- **对应契约**：B-01。
 - **步骤**：①准备原版袋内非扩展消耗品并记录 bag/slot/count；②点击物品的“使用”，
   对需要确认的物品继续点击原版确认；③立即读取数量、物理槽和拖动 session 状态。
 - **预期**：原版效果执行并按原版时机直接扣量/清槽；不产生 `0x17/0x19/0x18` 拖动
@@ -405,7 +430,7 @@
 
 ### VM-B02 原版装备点击直装/替换
 
-- **对应契约**：B-02；反例样本 S-02。
+- **对应契约**：B-02。
 - **步骤**：①准备原版袋内非扩展装备；②在角色装备槽为空时点击“装备”；③恢复原状后
   在同一槽已有装备时再次点击“装备”；④检查角色槽、原版袋和拖动 session。
 - **预期**：空槽直接装备；已有装备按原版交换/替换并正确回包；两次点击均不进入拖拽态，
@@ -415,13 +440,16 @@
 
 ### VM-B03 原版宝石拖到装备镶嵌
 
-- **对应契约**：B-03；反例样本 S-03。
+- **对应契约**：B-03。
 - **步骤**：①记录原版宝石 count 和原版装备 socket/payload；②将宝石拖到有孔装备；
   ③分别对无孔、非宝石和空装备目标重试；④读取装备 payload、宝石数量、两侧槽位。
 - **预期**：有孔时只执行一次原版镶嵌并消耗一颗宝石，装备不被交换；其余三类失败保持
   宝石、装备和槽位不变；松手后无 moving/on 残留标志和幽灵拖拽；不得创建扩展 swap/pending。
 - **日志锚**：`ITEMSYSTEM_PutJewel`/`PutJewel` 返回值与前后 socket/count；成功路径不得
   以 `INVEN_MoveItem` 作为提交者，不得命中扩展 `MoveItem GUARD reject`。
+
+> 本卡对应原版源→原版装备的 B-03；S-03 指扩展宝石拖装备，仍为未决项，不能用本卡
+> 的原版四象限结果替代。
 
 ### VM-B04 原版袋内拖动
 
@@ -434,16 +462,16 @@
   H4 不得输出 `extension_item=1`/`backup=skipped`；`orig_event pre/post` digest 只可
   反映本次预期原版移动。
 
-### VM-B05 原版袋内合并
+### VM-B05 模块扩展袋内合并（非原版基线）
 
 - **对应契约**：B-05。
-- **步骤**：①准备同一原版袋内同 payload 的两个非扩展堆叠物；②拖动合并；③分别测试
-  payload 不同、超过 stack limit 和跨袋目标；④读取 source/target count、物理摘要和
-  扩展 pending/journal。
-- **预期**：仅满足原版条件时按原版上限合并；其他情况按原版移动/交换或失败返回；不
-  创建扩展 pending/journal，不修改扩展 object/handle，不因扩展开关改写原版合并结果。
-- **日志锚**：`moveMergeEnabled` 配置、原版 `MoveItem pre/post`、`C1` 放行和 `C2`
-  二次 proc guard；原版对象不得出现 H4 `backup=skipped`，无 `txn committed` 扩展日志。
+- **步骤**：①准备同一扩展逻辑袋内同 payload 的两个扩展堆叠物；②拖动合并；③分别测试
+  payload 不同、超过 stack limit 和跨袋目标；④读取 source/target count、逻辑对象、
+  projection 和 pending。
+- **预期**：仅满足模块条件时按 stack limit 合并；其他情况按模块移动/交换或失败返回；
+  不改写原版物理袋，不把模块合并能力写成原版 `INVEN_MoveItem` 能力。
+- **日志锚**：模块 `txn prepared/committed` 或失败日志、source protection 和 projection
+  更新；原版四象限结论不由本卡替代。
 
 ### VM-28 吞掉 release 的原版清理变体
 
@@ -467,7 +495,7 @@
 
 ## 3. 规则锚表
 
-下表是 R-01..R-34 的反查表；“卡”列列出覆盖该规则的主卡。
+下表是 R-01..R-36 的反查表；“卡”列列出覆盖该规则的主卡。
 
 | 规则 | 被哪些卡覆盖 | 当前锚结论 |
 |---|---|---|
@@ -498,13 +526,15 @@
 | R-25 | VM-03、VM-04、VM-08、VM-10、VM-14、VM-15、VM-17、VM-19、VM-25 | `test_p44_transaction_stages`/journal Host + 保存真机。
 | R-26 | VM-02、VM-05、VM-06、VM-19、VM-23、VM-25 | `test_extension_bag_exit_rendering_state` 部分覆盖；view/window 真机。
 | R-27 | VM-23、VM-25 | direct/GOT 成对恢复必须真机日志确认。
-| R-28 | VM-12、VM-13 | `test_virtual_bag_mergeable_items` 现成，问题 B 仍未解决。
+| R-28 | VM-12、VM-13、VM-B05 | `test_virtual_bag_mergeable_items` 现成，问题 B 仍未解决；VM-B05 是模块合并卡。
 | R-29 | VM-13、VM-14、VM-25 | `test_p44_transaction_stages` 覆盖 pending/journal 域模型。
 | R-30 | VM-07、VM-11、VM-16、VM-23、VM-24 | `test_p52_drag_session` 覆盖 generation；root/control 仍需缺口和真机。
 | R-31 | VM-10、VM-11、VM-12、VM-13、VM-27 | `test_inventory_hook_stage4` 覆盖源判据；Native `MoveItem GUARD reject` 与装备槽 proc 日志仍需真机。
-| R-32 | VM-B01～VM-B05 | H-16 安装日志 `count=16` 与 raw-original grep 锚已补；原版刷新后的扩展投影保持不被顶掉仍需 VM-B01～B05 真机行为证据。
+| R-32 | VM-B01～VM-B04 | H-16 安装日志 `count=16` 与 raw-original grep 锚已补；原版刷新后的扩展投影保持不被顶掉，VM-B01～B04 真机已确认；VM-B05 不属于原版刷新基线。 |
 | R-33 | VM-28 | 五个吞掉 `0x18` 出口统一经 `complete_original_release_cleanup_locked`；handled/unhandled 变体和锁外原版清理需真机日志确认。
-| R-34 | VM-B01～VM-B05 | Host 可静态核对六条件表达式；真机需确认 draw-end 不逐帧写控件、非活 stale moving 被清理；当前待补。 |
+| R-34 | VM-B01～VM-B04 | Host 可静态核对六条件表达式；真机已确认 draw-end 不逐帧写控件、非活 stale moving 被清理。 |
+| R-35 | S-05、VM-29 | 页签先于网格解析；真机已确认页签装备、跨页签移动和原版对照。 |
+| R-36 | S-05、VM-29 | 触摸窗口释放使用延迟队列；以 `deferred free enqueue/drain` 和 `tab commit` 日志核对。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 
@@ -512,7 +542,7 @@
 
 | 规则 | 定锚结果 | 测试名或 VM 用例；断言要点 |
 |---|---|---|
-| R-01 | 可 VM | VM-04；确认成功后扩展控件不残留旧对象、详情身份清理、消费数量与最新 state 一致。
+| R-01 | 可 VM | VM-04；确认成功后扩展控件不残留失效对象、详情身份清理、消费数量与最新 state 一致。
 | R-03 | 可 Host | 缺口 `test_projection_descriptor_object_sync`；断言 descriptor、object、hash、handle 和 control `data[0]` 五者在消费/交换/清槽后相同。
 | R-05 | 可 Host | 缺口 `test_virtual_bag_empty_slot_predicate`；断言派生 capacity、descriptor、object/token 不可分配条件共同决定结果，bag 5 不被计为扩展目标。
 | R-06 | 可 Host | 缺口 `test_equip_button_three_state`；断言 Handled/Blocked/NotExtension 分别为不 backup/不 backup/一次 backup。
@@ -521,13 +551,13 @@
 | R-13 | 可 VM | VM-16→VM-18；装备页与商店页交替确认后，OK/Cancel callback 与详情身份各自恢复。
 | R-14 | 可 VM | VM-24；装备/卸下 proc 不经详情观察 PtrHook 重复处理，使用/卖出/销毁仍各执行一次。
 | R-15 | 可 Host | 缺口 `test_ownership_active_pending_release`；断言 active/pending_release 对象不能替换、释放或复用，匹配 token finish 后才可终态释放。
-| R-17 | 可 Host | 缺口 `test_stale_endpoint_rejection`；断言非空 cache category/hash 与 descriptor 不符时先拒绝，旧对象仍可审计回滚。
+| R-17 | 可 Host | 缺口 `test_stale_endpoint_rejection`；断言非空 cache category/hash 与 descriptor 不符时先拒绝，原对象仍可审计回滚。
 | R-18 | 可 VM | VM-25；保存/投影同步不递归死锁、不将错误锁序造成的刷新写入当成功。
 | R-23 | 可 Host | 缺口 `test_sell_price_variants`；断言装备页和商店页传入不同 variant，价格结果互不污染。
 | R-24 | 可 VM | VM-04、VM-06；角色 B 菜单操作不修改角色 A，确认使用和装备均按当前菜单角色。
 | R-26 | 可 VM | VM-23；切袋/装备收尾后容量来自当前 view，窗口原版 bag 只承担临时投影字段。
 | R-27 | 可 VM | VM-23、VM-25；进入/退出/保存前后 direct 与 GOT 袋号相等且恢复为原值。
-| R-30 | 可 Host | 缺口 `test_projection_root_generation_gate`；断言 root 重建递增 generation、旧 root/source control 被拒、新 root 控件才可提交。
+| R-30 | 可 Host | 缺口 `test_projection_root_generation_gate`；断言 root 重建递增 generation、失效 root/source control 被拒、新 root 控件才可提交。
 | R-31 | 可 VM | VM-27；扩展对象命中 guard 必须记录完整参数/身份/物理摘要并跳过 backup，原版对象必须保持原版结果。
 
 **定锚分布：可 Host 7 条（R-03/05/06/15/17/23/30），可 VM 10 条（R-01/11/12/13/14/18/24/26/27/31），不可锚 0 条。** “可 Host”中的 7 个测试名均为缺口，不把缺口写成已通过。
@@ -555,13 +585,13 @@
 | `orig_event pre/post` 日志完全缺失 | H3/H4 观测链未建立，不能判 digest 未变化 | 先修取证过滤/日志窗口；当前样例 `archive/extension-bag/swap-loss-log-excerpt-20260908.txt`（原日志 7951-7973 段）只有 delegate、pending、post-refresh、commit，不足以闭合 H3/H4。
 | 只有 `txn committed` 和 `projection post-refresh` | 只证明逻辑事务/控件收尾 | 不证明物理数组和对象安全；按 VM-12 重新抓 pre/post/mutation。
 | `moveMergeEnabled=false applied=true` 但 swap 仍提交 | merge 开关不是扩展事务总开关 | 检查 source protection 是否仍启用；该日志不能解释为扩展 swap 被关闭。
-| 出现 `ERROR MoveItem GUARD reject ... backup=skipped` | 扩展对象到达 `INVEN_MoveItem`，被第 14 个 Hook 在物理写入前阻断 | 回查此前 event/source/session 路由；该次不再改物理槽，但不代表问题 B 根因已修复。
+| 出现 `ERROR MoveItem GUARD reject ... backup=skipped` | 扩展对象到达 `INVEN_MoveItem`，被 Native guard 在物理写入前阻断 | 检查 event/source/session 路由；该次不再改物理槽，但不代表问题 B 根因已修复。
 | 出现 `MoveItem pre`/`post` 且对象为原版 | 原版对象按 original-first 调 backup；摘要可直接比较该函数前后 | digest 或源/目标指针变化时将 `INVEN_MoveItem` 作为确认写点；无变化则继续查其他候选。
 | 只有 `MoveItem passthrough`，或完全没有 MoveItem 日志 | 前者是不在扩展 view/session 的原版低频路径，后者表示写点绕过该 Hook 或日志窗口缺失 | 继续核对 raw `SaveItemOnEmpty`、未包裹 event 和 caller；不能按“无 guard 日志”判安全。
 
 ### 4.3 当前预期结果
 
-`VM-12` 的当前预期失败是**已知未解决**：允许观察到原版同号槽消失，但必须留下完整 H3/H4 取证。F1/G/H 是已布防而非已修复；Host 的 `test_p44_transaction_stages`、`test_p52_drag_session`、`test_virtual_bag_mergeable_items` 不能替代该真机结论。
+`VM-12` 的当前预期失败是**已知未解决**：允许观察到原版同号槽消失，但必须留下完整 H3/H4 取证。当前防御是已布防而非已修复；Host 的 `test_p44_transaction_stages`、`test_p52_drag_session`、`test_virtual_bag_mergeable_items` 不能替代该真机结论。
 
 ## 5. 回归清单
 
@@ -584,10 +614,10 @@
 | 拖动/移动/合并 | VM-11、VM-12、VM-13、VM-14、VM-15、VM-27 |
 | 商店/生产者 | VM-18、VM-19、VM-20、VM-21、VM-22 |
 | 投影/页签/保存 | VM-23、VM-25；涉及问题 B 时追加 VM-12 |
-| `event`/`proc`/Hook 安装层 | **VM-B01、VM-B02、VM-B03、VM-B04、VM-B05 全跑**；不得只跑受影响的修复卡 |
+| `event`/`proc`/Hook 安装层 | **VM-B01、VM-B02、VM-B03、VM-B04 全跑**；模块合并改动追加 VM-B05；不得只跑受影响的修复卡 |
 
-**硬规则**：diff 触及 event、proc 或 Hook 安装层任一层时，必须全跑 VM-B；只跑修复闭环
-或只依赖静态审查，不构成回归通过。
+**硬规则**：diff 触及 event、proc 或 Hook 安装层任一层时，必须全跑原版基线 VM-B01～B04；
+涉及模块同堆合并时追加 VM-B05。只跑修复闭环或只依赖静态审查，不构成回归通过。
 
 ### 5.3 通过条件
 
@@ -638,7 +668,7 @@
 
 本册不复制设计裁定：
 
-* SaveItem 的 H-13 函数处置、旧 stage 裁定迁移和 caller 未覆盖边界，见
+* SaveItem 的 H-13 函数处置、caller 未覆盖边界，见
   [`inventory-integration-decision-plan.md §2.2、§3.2`](inventory-integration-decision-plan.md)。
-* 拖动规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-34` 为准；本册只保留操作卡覆盖关系。
+* 拖动规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-36` 为准；本册只保留操作卡覆盖关系。
 * `IsHavingEmptySlot` 的 `needed<=0` 返回 `1` 事实及源码/Host 锚，见库存册 §2.1；VM-02 只负责验收。

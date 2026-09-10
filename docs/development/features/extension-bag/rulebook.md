@@ -8,7 +8,7 @@
 > 触摸状态机见拖动册；sidecar 时序见存档册。
 >
 > 本册按工作树源码逐条复核，基线为 `archive/extension-bag/writing-materials/doc-set-plan.md` 所指向的任务基线。
-> 源码行号是当前文件行号；提交变更后必须重新 grep 锚点，不能把旧行号当作永久 ID。
+> 源码行号是当前文件行号；提交变更后必须重新 grep 锚点，不能把行号当作永久 ID。
 
 ## §0 使用方式
 
@@ -41,12 +41,11 @@
 
 ### 0.4 原版基线行为契约（B 系列）
 
-> 适用范围：扩展背包已启用，但操作对象是**非扩展物品**。本节记录必须保留的
+> 适用范围：B-01～B-04 适用于扩展背包已启用、但操作对象是**非扩展物品**的原版行为；
+> B-05 另记录模块扩展袋合并能力，不归入原版行为基线。本节记录必须保留的
 > 原版行为快照；“扩展已启用”不能成为把原版点击改成拖拽、把原版镶嵌改成交换，或
-> 把原版袋内移动改送扩展事务的理由。下列三条已发生的真机回归是反例样本：
-> **S-01** 点击消耗品“使用”进入拖拽态、未直接消耗；**S-02** 点击装备进入拖拽态、
-> 未直装/替换；**S-03** 宝石拖到装备后发生交换、未镶嵌。S-01～S-03 只证明回归曾发生，
-> 不构成通过证据。
+> 把原版袋内移动改送扩展事务的理由。每条契约都必须独立记录当前输入、预期输出、失败
+> 语义和证据；一条操作的证据不能替代另一条操作。
 
 #### B-01 点击原版消耗品“使用”必须直接消耗
 
@@ -54,7 +53,6 @@
   继续点击原版确认按钮。
 - **预期输出**：沿原版使用链直接执行效果并按原版时机减少数量/清槽；点击不建立拖拽
   session，不出现拖拽态，不把物品提交给扩展移动事务。
-- **反例样本**：**S-01**，点击“使用”后进入拖拽态而非直接消耗。
 - **关联机制点**：H-04 `INVEN_ConsumeItem` 必须 original-first；确认使用只在
   H-12 `UIEquip_OKConfrimUseItem` 的扩展身份分支接管。C1 事件层只拒绝已识别的扩展
   source，原版消耗品不得被 C1 设为拖拽 owner；H4 `INVEN_MoveItem` 仅在确认扩展身份时
@@ -64,9 +62,8 @@
 
 - **输入**：扩展背包启用时，点击原版袋内的非扩展装备并执行原版“装备”；覆盖角色装备
   槽为空和已有装备两种情况。
-- **预期输出**：空槽时直接装备；已有装备时按原版交换/替换规则完成，旧装备按原版回包
+- **预期输出**：空槽时直接装备；已有装备时按原版交换/替换规则完成，被替换装备按原版回包
   语义处理；点击不建立拖拽 session，不把装备按钮降级成拖动操作。
-- **反例样本**：**S-02**，点击装备后进入拖拽态，未直装或替换。
 - **关联机制点**：H-06 `CHAR_EquipItemFromInvenToSlot` 保持原版交换规则；H-10
   `UIEquip_ButtonEquipExe` 只有明确识别扩展详情对象时才使用 `Handled/Blocked`，
   非扩展对象必须 backup。C1/H4 的例外条件均是“扩展 source/扩展身份命中”，不得把
@@ -78,7 +75,6 @@
   非宝石和空装备目标的失败输入。
 - **预期输出**：成功时沿原版镶嵌语义写入装备 socket/payload，并只消耗一颗宝石；失败
   时返回原版失败语义，宝石和装备保持不变；不得把源、目标当作两个背包槽交换。
-- **反例样本**：**S-03**，宝石拖到装备后触发交换而不是镶嵌。
 - **关联机制点**：H-07 `ITEMSYSTEM_PutJewel` 保持原版成功/失败返回和消费时机；扩展
   宝石源由 H-15 `UIEquip_EquipControlEventProc@0xb8f7c` 校验后放锁继续原版 proc，
   再由 `PutJewel`/`ConsumeItem` 链承接；扩展宝石+原版装备不得直调
@@ -91,24 +87,24 @@
 - **输入**：扩展背包启用时，在原版物理袋 `0..5` 内将非扩展物品拖到合法空槽或原版目标槽。
 - **预期输出**：原版 source/target 槽按原版移动规则更新，扩展逻辑槽、projection、
   pending 和扩展 ownership 不发生变化；不重复提交、不进入扩展三方向事务。
-- **反例样本**：S-01～S-03 暴露的共同错误是原版输入被改路由；它们不能替代本条的独立
-  原版袋内拖动取证。若出现扩展 swap、物理槽异常或拖拽 session 残留，本条失败。
+- **独立证据要求**：本条必须单独核对原版 source/target 槽、扩展状态和拖拽 session；若
+  出现扩展 swap、物理槽异常或拖拽 session 残留，本条失败。
 - **关联机制点**：H-14 `INVEN_MoveItem` 对原版对象必须 original-first backup；C1
   事件层只拒绝扩展 source，原版 source 必须放行。H4 仅在 `module_slot_of_item_locked`
   证明扩展身份时 `backup=skipped`，原版对象不得命中 guard。
 
-#### B-05 原版袋内合并必须保持原版堆叠语义
+#### B-05 模块扩展袋内合并必须保持模块堆叠语义
 
-- **输入**：扩展背包启用时，在同一原版袋内拖动两个同类非扩展堆叠物；覆盖 payload 不同、
-  超过 stack limit 和跨袋等原版失败/非合并边界。
-- **预期输出**：同类同 payload 按原版上限合并并正确减少 source；不满足原版合并条件时
-  按原版移动/交换或失败返回；不创建扩展 pending/journal，不改扩展 object/handle。
-- **反例样本**：当前三条真机回归均说明“扩展启用后原版行为面未被逐项锁定”；在本条中，
-  任一原版合并被判成扩展交换或出现物理槽丢失，均按反例记录，不能用 S-01～S-03 的
-  其他操作结果代替。
-- **关联机制点**：H-14 原版对象继续调用 backup；C1 仅对扩展 source 拒绝，C2 只在
-  guard 已拒绝扩展对象后吞掉二次 proc；H4 不得拦截原版合并。`moveMergeEnabled` 只影响
-  原版合并开关，不能改变 B-04/B-05 的 source 身份判定或扩展保护边界。
+- **输入**：扩展逻辑袋内拖动两个同袋、同类、同 payload 的扩展堆叠物；覆盖 payload 不同、
+  超过 stack limit 和跨袋等模块失败/非合并边界。
+- **预期输出**：满足模块合并条件时按 stack limit 合并并正确减少 source；不满足条件时
+  按模块移动/交换或失败返回；更新扩展 pending、object、handle 和 projection，不改写
+  原版物理袋。
+- **范围**：B-05 是模块功能契约，不是原版能力契约；原版袋行为由 B-04 及 VM-B01～B04
+  的原版基线卡覆盖。
+- **关联机制点**：`move_extension_to_extension_locked` 按 payload、同袋、开关和 stack
+  limit 判定；扩展对象的 source protection 与原版对象 original-first 分开，不能把模块
+  合并结果写成原版 `INVEN_MoveItem` 能力。
 
 ## §1 袋号空间契约
 
@@ -131,8 +127,7 @@
 1. `INVEN_FindItemSlot` 的 ABI 是 `int(void*, int8_t*)`，符号源登记在
    `data/native/game_symbols.h:391` 和 `data/native/game_symbols.h:626`。
 2. 原版编码为 `(bag << 5) | slot`；解码是 `bag = encoded >> 5`、`slot = encoded & 0x1f`。
-3. 该编码是原版物理槽编码，不是扩展逻辑引用；旧 stage-1 静态契约已由
-   `56a477b` 的现行实现取代，当前边界以本节和 `game_symbols.h` 为准。
+3. 该编码是原版物理槽编码，不是扩展逻辑引用；当前边界以本节和 `game_symbols.h` 为准。
 4. 输出参数是 `int8_t*`，原版路径按一字节写回；调用链存在 `uxtb`/字节截断语义，
    因此扩展逻辑袋号不能靠“编码后再塞进一个字节”表达。
 5. 任何 wrapper 遇到扩展对象，都返回扩展逻辑 bag/slot 或走扩展适配器，不能伪造
@@ -225,7 +220,7 @@
 3. 只有身份明确属于扩展且事务被拒绝时，才能返回 Handled/Blocked 语义阻止原版；不能
    把锁忙误判成扩展拒绝。
 4. 锁外原版调用完成后必须重新检查 item、bag、slot、generation 和对象指针；检查失败
-   时走失败语义，不得按旧快照提交。
+   时走失败语义，不得按失效快照提交。
 5. 所有 lock/unlock 路径都必须覆盖异常前的状态恢复；本项目禁止空异常处理。
 
 ## §3 Hook 铁律
@@ -251,7 +246,7 @@
 | H-13 | `INVEN_SaveItem` | `save_item_wrapper` | `native_inventory_hook.cpp:533-536` |
 | H-14 | `INVEN_MoveItem` | `move_item_wrapper` | `native_inventory_hook.cpp:537-540` |
 | H-15 | `UIEquip_EquipControlEventProc` | `equip_control_event_proc_wrapper` | `native_inventory_hook.cpp:541-544` |
-| H-16 | `UIEquip_RefreshItemArea` | `refresh_item_area_wrapper` | `native_inventory_hook.cpp:567-570` |
+| H-16 | `UIEquip_RefreshItemArea` | `refresh_item_area_wrapper`；原版一次刷新走 trampoline 后由 gate 做 post-projection，模块主动刷新走 raw-original dispatcher | `native_inventory_hook.cpp:205-213`（wrapper）、`:561-564`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`extension_bag_render.inc:533-568` |
 
 1. 安装目标必须来自 `game_symbols.h`/resolver；域文件不得新增裸 VMA。
 2. 每个 Hook 都必须保留 backup；Hook 不是默认机制，架构册规定优先读内存、调用函数、
@@ -290,7 +285,7 @@
    区分 `UIStore_Sell` 与 `UIEquip_Destroy`，证据为
    `extension_bag_equip.inc:861-907`。
 2. 确认使用必须使用 `UIEquip_OKConfrimUseItem@0xb8478` Native Hook，保持
-   original-first；不得复活旧的全局“确认使用”槽劫持。
+   original-first；不得引入全局“确认使用”槽劫持。
 3. 当前详情按钮安装明确跳过装备/卸下 proc；装备和卸下只由函数级 Hook 负责
    （`extension_bag_equip.inc:645-657`）。
 4. 装备按钮分流是三态：`Handled`、`Blocked`、`NotExtension`，声明见
@@ -298,7 +293,7 @@
 5. `Handled` 表示扩展已完成，不能调用 backup；`NotExtension` 才调用 backup；
    `Blocked` 表示已识别扩展但必须阻止原版，禁止降级 backup
    （`native_inventory_hook.cpp:305-318`）。
-6. 这是为了防止原版内联删源在模块事务之前执行；按钮 wrapper 的注释和分支是当前
+6. 这是为了防止原版内联删源在模块事务前执行；按钮 wrapper 的注释和分支是当前
    证据（`native_inventory_hook.cpp:232-241`）。
 
 ## §4 共享状态写-主表
@@ -324,13 +319,13 @@
 ## §5 雷区规则
 
 > 素材 §三 的 25 条候选均已逐条复核。R-01..R-25 按素材顺序对应；其中 R-20
-> 对素材措辞作了精确修正。R-26..R-34 是对码发现的同类耦合补充。
+> 对码确认 R-26..R-36 为当前实现的同类耦合规则。
 
 ### R-01 确认使用必须刷新并重投影
 
 - **规则一句话**：确认使用成功后必须在同一锁上下文走 `refresh_module_item_area_locked(bag)`，并清理详情身份。
-- **为什么**：确认使用函数在锁外调用原版，消费完成后若不刷新，控件会保留旧物；收尾代码见 `extension_bag_equip.inc:725-762`。
-- **典型破坏方式**：只更新 descriptor 或只清详情 Hook，导致界面闪回原版背包或旧对象仍显示。
+- **为什么**：确认使用函数在锁外调用原版，消费完成后若不刷新，控件会保留已消费物品；收尾代码见 `extension_bag_equip.inc:725-762`。
+- **典型破坏方式**：只更新 descriptor 或只清详情 Hook，导致界面闪回原版背包或已失效对象仍显示。
 - **验证锚**：无锚-待补；源码锚 `extension_bag_equip.inc:760-766`。
 
 ### R-02 投影拖拽不得放行原版 0x18
@@ -346,7 +341,7 @@
 
 - **规则一句话**：`virtual_bag_sync_projected_*` 不能只刷控件，必须让控件、descriptor 和 object cache 同步。
 - **为什么**：投影刷新按 `g_module_objects[bag][slot]` 绑定控件（`extension_bag_render.inc:547-568`），而物化路径按 descriptor hash 校验（`:343-369`）。
-- **典型破坏方式**：消费、卖出或销毁后只清 UI，后续使用/释放命中旧对象。
+- **典型破坏方式**：消费、卖出或销毁后只清 UI，后续使用/释放命中失效对象。
 - **验证锚**：无锚-待补；host 可参考 `test_ownership_ledger_p43`，`tests/test_host.cpp:1280-1341`。
 
 ### R-04 `module_item_locked` 不得换角色源或袋号
@@ -428,10 +423,11 @@
 
 ### R-15 active/pending_release 对象不可释放或复用
 
-- **规则一句话**：active 或 pending_release 对象必须拒绝替换、释放和槽复用；ownership ledger 耗尽时拒绝登记；触摸窗口内的释放必须进入定长延迟回收队列，排空前通过投影控件和对象缓存引用检查。
+- **规则一句话**：active 或 pending_release 对象必须拒绝替换、释放和槽复用；ownership ledger 耗尽时拒绝登记；触摸窗口内的释放请求必须进入定长延迟回收队列并以成功释放路径返回，排空前通过投影控件和对象缓存引用检查。
 - **为什么**：`module_slot_is_assignable_locked` 和 release guard 同时检查 token 状态；`retire_custody_item_locked` 在触摸窗口内只退 custody、不立即物理释放，队列排空由 draw-end 安全点执行（`extension_bag_ownership.inc`）。
 - **典型破坏方式**：确认使用尚未完成时释放对象，产生悬挂指针和 token mismatch；在无可用 handle 时继续登记对象。
-- **验证锚**：无锚-待补；源码 `extension_bag_ownership.inc` 的 `module_slot_is_assignable_locked`、`retire_custody_item_locked`、`drain_deferred_frees_locked`。
+- **验证锚**：`deferred free enqueue`/`deferred free drain`；S-05、VM-29；源码
+  `extension_bag_ownership.inc:35-53,71-119,147-171`。
 
 ### R-16 交换必须同步 descriptor/object/hash/handle
 
@@ -443,8 +439,8 @@
 ### R-17 物化失败前必须拒绝 stale endpoint
 
 - **规则一句话**：交换或替换物化前必须先校验非空缓存的 category/hash，stale 时拒绝而不是先释放再重建。
-- **为什么**：当前交换在物化前比较旧 endpoint 与 descriptor hash（`extension_bag_transaction.inc:388-399`）。
-- **典型破坏方式**：旧对象已经释放后新对象物化失败，原对象无法恢复。
+- **为什么**：当前交换在物化前比较已有 endpoint 与 descriptor hash（`extension_bag_transaction.inc:388-399`）。
+- **典型破坏方式**：对象已经释放后新对象物化失败，原对象无法恢复。
 - **验证锚**：无锚-待补；源码 `extension_bag_transaction.inc:388-416`。
 
 ### R-18 投影同步不得在错误锁序触发原版刷新
@@ -456,9 +452,9 @@
 
 ### R-19 页签清理必须递增 generation
 
-- **规则一句话**：页签/控件树清理必须递增 generation，并使旧事件、pending tab 和旧 root 失效。
+- **规则一句话**：页签/控件树清理必须递增 generation，并使失效事件、pending tab 和失效 root 不可提交。
 - **为什么**：`disable_extension_tab_buttons_locked` 先递增 `g_inventory_generation` 再清引用（`extension_bag_runtime.inc:166-175`）。
-- **典型破坏方式**：旧控件事件提交到新面板状态，装备页或商店页重复创建标签。
+- **典型破坏方式**：失效控件事件提交到新面板状态，装备页或商店页重复创建标签。
 - **验证锚**：`test_p52_drag_session` 的 stale generation 分支，`tests/test_host.cpp:1643-1649`。
 
 ### R-20 原版事件 guard 必须比较并恢复物理快照
@@ -503,42 +499,42 @@
 - **典型破坏方式**：先清源或先持久化，随后原版入库失败，造成物品丢失或 pending 与真实库存不一致。
 - **验证锚**：`test_p44_transaction_stages`，`tests/test_host.cpp:1393-1584`。
 
-### R-26 窗口原版袋号与扩展 view index 必须分离（新增）
+### R-26 窗口原版袋号与扩展 view index 必须分离
 
 - **规则一句话**：`g_module_view_index` 是扩展逻辑内部袋号，`g_module_window_original_bag` 是投影所借用的物理原版窗口袋号，二者禁止互换。
 - **为什么**：安装时分别写入 `g_module_window_original_bag=original_bag` 和 `g_module_view_index=bag`（`extension_bag_render.inc:502-541`）。
 - **典型破坏方式**：用目标扩展袋号刷原版容量，或把扩展源投影到错误物理袋；问题 A 的根因正是收尾容量袋号与投影 view 不一致。
 - **验证锚**：无锚-待补；真机事实见 `impact-matrix-source.md:81`。
 
-### R-27 direct/GOT 原版袋选择值必须成对保存恢复（新增）
+### R-27 direct/GOT 原版袋选择值必须成对保存恢复
 
 - **规则一句话**：临时切换或屏蔽原版袋时，direct 与 GOT 两份袋号必须成对写入、成对恢复。
 - **为什么**：`set_original_bag_locked` 同时写两处（`extension_bag_render.inc:256-261`），绘制屏蔽也保存并恢复两处（`:181-200`）。
 - **典型破坏方式**：只改一份导致绘制、FindSaveSlot、输入和退出路径看到不同的当前袋。
 - **验证锚**：无锚-待补；源码 `extension_bag_render.inc:325-340`。
 
-### R-28 extension source protection 必须与 merge 开关解耦（新增）
+### R-28 extension source protection 必须与 merge 开关解耦
 
 - **规则一句话**：扩展背包开启或堆叠合并开启任一成立，都必须保留扩展源保护。
 - **为什么**：纯模型判定明确返回 `extension_bag_enabled || move_merge_enabled`，见 `virtual_bag_transaction_rules.inc:169-172`。
 - **典型破坏方式**：只按扩展开关安装保护，merge 开启时原版事件仍可改写投影源。
 - **验证锚**：`test_virtual_bag_mergeable_items`，`tests/test_host.cpp:728-734`。
 
-### R-29 ext→ext pending 与 journal 域不能混用（新增）
+### R-29 ext→ext pending 与 journal 域不能混用
 
 - **规则一句话**：ext→ext 可以使用进程内 `PendingTransfer`，但不能伪装成会创建原版 prepare journal 的跨域事务。
 - **为什么**：模型明确区分 pending 域和 journal v1 域，ext→ext 不进入 original 阶段；常规 pending 记录当前是 `durable=false`，双 journal 的落盘边界由存档册 §4 裁定（`virtual_bag_transaction_rules.inc:40-48`、`:213-216`、`extension_bag_runtime.inc:560-576`）。
 - **典型破坏方式**：给 ext→ext 创建原版 journal，恢复器误删物理源或把逻辑袋当原版袋。
 - **验证锚**：`test_p44_transaction_stages`，`tests/test_host.cpp:1393-1402`。
 
-### R-30 控件树重建后必须先失效旧 root 再接收事件（新增）
+### R-30 控件树重建后必须先失效 root 再接收事件
 
-- **规则一句话**：root 或子控件重建时必须递增 generation、清旧指针，并要求 source/destination 控件属于当前 root。
+- **规则一句话**：root 或子控件重建时必须递增 generation、清理失效指针，并要求 source/destination 控件属于当前 root。
 - **为什么**：drop gate 同时核对 live root、projected root 和 source control（`extension_bag_public_runtime.inc:81-107`），tab 重建由 `extension_bag_runtime.inc:117-164` 执行。
-- **典型破坏方式**：旧控件事件提交到新状态，或 stale 控件把物品送进错误袋槽。
+- **典型破坏方式**：失效控件事件提交到新状态，或 stale 控件把物品送进错误袋槽。
 - **验证锚**：无锚-待补；源码 `extension_bag_public_runtime.inc:109-149`。
 
-### R-31 扩展对象禁止进入原版移动链（新增）
+### R-31 扩展对象禁止进入原版移动链
 
 - **规则一句话**：扩展对象禁止进入原版移动链（proc 层+函数层双拦）；事件层先拒绝进入原版 proc，`INVEN_MoveItem@0x104934` 收到扩展身份对象时还必须完成锁内取证后记录 `ERROR MoveItem GUARD reject` 并返回 `0`，不得调用 backup；仅受控装备交换是唯一窄例外，原版对象一律 original-first。
 - **为什么**：该函数只有 item/count/target bag/slot 四参，不能安全还原扩展拖动意图；让它分流扩展事务会与 `0x18` owner 产生双提交，且可能改写物理 `g_inven`。
@@ -546,38 +542,59 @@
 - **锁纪律**：身份、当前 view/session 和源/目标物理槽摘要在 `g_virtual_bag_mtx` 内采集；返回后放锁，再调用 backup。backup 可能进入 Remove/Save/Consume hook，持锁调用会死锁。
 - **验证锚**：`native_inventory_hook.cpp:226-273` 的 `MoveItem GUARD reject`/`MoveItem pre/post` 日志格式及 `native_inventory_hook.cpp:347-357` 的装备槽事件分流；VM-10、VM-27；问题 B 仍以“未解决+已布防”判定。
 
-### R-32 模块内原版刷新必须走 trampoline（新增）
+### R-32 模块内原版刷新必须走 trampoline
 
 - **规则一句话**：模块内部主动刷新不得经被 Hook 的 `UIEquip_RefreshItemArea` 地址自调原版刷新，必须走 `g_backup_refresh_item_area` trampoline；模块路径仍自行完成投影覆盖。
 - **为什么**：模块刷新点多数持有 `g_virtual_bag_mtx`，经被 Hook 地址回入 H-16 wrapper 会再次尝试加锁，形成死锁；raw-original dispatcher 同时保留 Hook 未就绪时的现有函数回退。
-- **验证锚**：源码 grep `inventory_native_hook_call_refresh_item_area_original` 覆盖模块主动刷新点；VM-B01～VM-B05 观察原版路径未被扩展刷新覆盖，真机证据仍需补齐。
+- **验证锚**：源码 grep `inventory_native_hook_call_refresh_item_area_original` 覆盖模块主动刷新点；VM-B01～VM-B04 观察原版路径未被扩展刷新覆盖，真机已确认；VM-B05 只属于模块合并卡。
 
-### R-33 吞掉原版 release 必须完成等价清理（新增）
+### R-33 吞掉原版 release 必须完成等价清理
 
 - **规则一句话**：任何吞掉 `0x18` 的出口必须经 `complete_original_release_cleanup_locked` 完成
   原版 release 五步等价清理；`TouchHandle_ResetMovingControl` 的 `0x08` 派发和
   `TouchHandle_ResetSelectedControl` 必须放锁后执行。
-- **为什么**：只清扩展 session 会遗留原版 TouchState、moving/on 标志或选中控件，下一次
+- **为什么**：只清扩展 session 会保持原版 TouchState、moving/on 标志或选中控件，下一次
   原版点击可能进入幽灵拖拽；原版 UI 回调可重入模块，持有 `g_virtual_bag_mtx` 派发会死锁。
 - **范围**：owner/terminal、非世界取消、capture 空坐标、capture click/drop、原版袋 drop
   五个吞出口；C1/C2/H-15 proc 内返回值回流路径不重复清理。
 - **验证锚**：grep `complete_original_release_cleanup_locked`、日志
   `release_cleanup ctl=... flags_cleared`、VM-28 变体选择回归；H-16 仍由 R-32/VM-B 覆盖。
 
-### R-34 moving 保留必须通过六条件门（新增）
+### R-34 moving 保留必须通过六条件门
 
 - **规则一句话**：draw-end 只有在 session phase 为 Pressed/NativeMoving/TargetResolved/
   TransactionInFlight、模块投影仍安装且 mode 为 Module、view index 等于 source bag、
   session/tab/inventory 三代相等、live root 等于 `g_projected_item_root`，并且
   TouchState moving 控件等于当前 root 的 `source_slot` 子控件时，才可保留 moving；
   任一条件失败必须清 `TouchState+0x30` 及控件 `+0x0a/+0x0b` flag。
-- **为什么**：仅按控件是否属于某个投影 root 保留 moving，会把旧 session、旧 generation、
+- **为什么**：仅按控件是否属于某个投影 root 保留 moving，会把失效 session、失效 generation、
   错误页签或重建后的控件继续交给原版 TouchHandle，形成 stale drag。
 - **边界**：该门只清 stale moving 状态，不改变 `0x18` owner、release 五出口、C1/C2、
-  H-15、H-4、T3 安装/恢复或 S-03/S-05 未解决口径；H-16 负责刷新后的投影覆盖，帧级
-  projection heal 不再由 draw-end 调用，无刷新事务只做受影响槽定点同步。
-- **验证锚**：`extension_bag_input.inc:34-77` 的六条件门与 stale 日志；VM-B01～VM-B05
-  判读要求包含“draw-end 不再逐帧写控件”和“非活 stale moving 被清”；真机证据待补。
+  H-15、H-4、T3 安装/恢复或 S-03 未解决口径；S-05 已由真机确认；H-16 负责刷新后的
+  投影覆盖，帧级 projection heal 不再由 draw-end 调用，无刷新事务只做受影响槽定点同步。
+- **验证锚**：`extension_bag_input.inc:34-77` 的六条件门与 stale 日志；VM-B01～VM-B04
+  的真机回归确认 draw-end 不再逐帧写控件，VM-B05 为模块合并卡。
+
+### R-35 页签命中优先于格子解析
+
+- **规则一句话**：扩展源 release 的目标解析必须先检查页签，再检查扩展网格；页签矩形与
+  网格行 y 区间重叠时，页签命中优先解释为切袋意图。
+- **为什么**：`route_projected_session_drop_locked` 在格子解析前遍历页签并直接路由
+  `route_projected_session_to_tab_locked`；格子优先会短路页签路由，使页签装备/跨页签提交
+  分支无法执行（`extension_bag_transaction.inc:791-812`）。
+- **验证锚**：`tab commit handled=1`、`cross tab reject reason=...`、
+  `tab reject reason=transaction_failed ...`；S-05、VM-29。
+
+### R-36 触摸窗口释放必须延迟回收
+
+- **规则一句话**：触摸窗口内的释放请求必须先进入延迟释放队列并返回成功，禁止直接调用
+  `ITEMPOOL_Free`，也不得因触摸窗口活动而拒绝事务提交；非触摸窗口的排空只在无投影控件
+  和逻辑槽引用时调用 `ITEMPOOL_Free`。
+- **为什么**：触摸窗口仍可能由 moving 控件、projection 或逻辑槽持有对象；直接释放或
+  拒绝 source release 会分别形成 UAF 风险或 `extension merge source release rejected`
+  事务失败。队列、引用检查和 draw-end 排空见 `extension_bag_ownership.inc:35-53,71-119,147-171`
+  与 `extension_bag_render.inc:712-770`。
+- **验证锚**：日志 `deferred free enqueue`/`deferred free drain`；S-05、VM-29。
 
 ## §6 禁止事项汇总
 
@@ -605,24 +622,25 @@
    重开和保存后仍消失”。
 2. 当前结论必须写作：**未解决+已布防**。
 3. 禁止写作“已修复”“已消除”或用 Host 事务模型通过替代真机复现结论。
-4. 控制面事实记录了 F1、G、H 三轮防御仍未消除复现，见 `impact-matrix-source.md:79-83`。
+4. 当前控制面结论仍为“未解决+已布防”；取证以 `verification-matrix.md` 的 VM-12 和 H3/H4
+   字段为准。
 
-### 7.2 已布防的防御史
+### 7.2 当前防御
 
-1. F1：drop 三态门，阻止扩展源在失败时降级到原版路径；对应按钮三态和 drop gate
+1. drop 三态门阻止扩展源在失败时降级到原版路径；对应按钮三态和 drop gate
    见 `native_inventory_hook.cpp:235-243`、`extension_bag_public_runtime.inc:64-149`。
-2. G：修正 rollback 索引、冷缓存 handle 和视图归属校验；当前 stale endpoint 和
+2. rollback 索引、冷缓存 handle 和视图归属校验保护当前事务；stale endpoint 和
    handle 匹配证据见 `extension_bag_transaction.inc:388-416`。
-3. H：解耦 `moveMergeEnabled` 与扩展保护、固定 `0x18` 单一 owner，并加物理袋
+3. `moveMergeEnabled` 与扩展保护解耦，`0x18` 保持单一 owner，并使用物理袋
    `0..5 × 16` 快照守卫与恢复；快照大小和比较见 `virtual_bag_transaction_rules.inc:174-184`。
-4. H 的事件 guard 在原版事件前后记录 digest，证据格式为 `orig_event pre/post`
+4. 事件 guard 在原版事件前后记录 digest，证据格式为 `orig_event pre/post`
    （`extension_bag_lifecycle.inc:105-114`、`:120-142`）。
-5. H 检测物理变化后输出 `ERROR physical inventory mutation` 并尝试恢复，逐槽日志
+5. 检测物理变化后输出 `ERROR physical inventory mutation` 并尝试恢复，逐槽日志
    位置为 `extension_bag_lifecycle.inc:143-164`。
-6. H4 在 `INVEN_MoveItem@0x104934` 增加第 14 个 Native guard：扩展身份记录
+6. `INVEN_MoveItem@0x104934` 的 Native guard：扩展身份记录
    `MoveItem GUARD reject` 并跳过 backup；原版身份 original-first，活动 view/session
    记录 `MoveItem pre/post`（`native_inventory_hook.cpp:226-273`）。
-7. P1 增加第 15 个 `UIEquip_EquipControlEventProc@0xb8f7c` Hook：仅扩展宝石源进入
+7. `UIEquip_EquipControlEventProc@0xb8f7c` Hook：仅扩展宝石源进入
    锁内 descriptor/generation/session 校验；通过后取 `ModuleUseToken`，放锁调用原版 proc，
    由 `PutJewel`/`ConsumeItem` 链完成镶嵌和消费，校验失败直接 Blocked，不降级 backup。
 
@@ -633,23 +651,22 @@
    触发，未知 `orig_event pre/post` digest 是否显示变化。
 3. 后续验收必须保留同一操作前后物理 96 槽快照、扩展 descriptor/object/hash/handle、
    `pending` 和 sidecar 状态。
-4. 发现 `ERROR physical inventory mutation` 时，应同时记录 `bag`、`slot`、old/new
+4. 发现 `ERROR physical inventory mutation` 时，应同时记录 `bag`、`slot`、before/after
    指针及 before/after digest；当前逐槽日志已提供这些字段。
 5. 拖动协议、单一 drop owner、session 生命周期和复测步骤详见
    [`drag-protocol.md`](drag-protocol.md)；本册只保留不可违反的规则和证据口径。
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-34`，共 34 条。
-2. 素材外新增：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
+1. 本册规则总数：`R-01..R-36`，共 36 条。
+2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
    `R-32`（模块内原版刷新必须走 trampoline）、`R-33`（吞掉原版 release 必须完成等价清理）、
-   `R-34`（moving 六条件保留门与帧级 heal 退役）。
-3. 素材修正：候选 20 改为“对素材原句的精确修正”：当前 sync 接口只做投影控件修复，
-   真正原版 RefreshItemArea 位于移动收尾路径，不把不存在的当前副作用写成事实。
+   `R-34`（moving 六条件保留门）、`R-35`（页签命中优先于格子解析）、
+   `R-36`（触摸窗口释放必须延迟回收）。
+3. 当前 sync 接口只做投影控件修复，原版 RefreshItemArea 位于移动收尾路径。
 4. 无锚规则：`R-01`、`R-03`、`R-05`、`R-06`、`R-11`、`R-12`、`R-13`、`R-14`、
    `R-15`、`R-17`、`R-18`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`，共 16 条；
    其中已给源码锚但尚无专门 host/真机锚的规则，验收册仍应补操作证据。
-5. 与素材冲突处：仅候选 20 的“sync 会触发原版刷新”不成立，已按当前源码修正；
-   其余 24 条候选均按当前实现成立并收录。
+5. 规则正文以当前源码和本册证据锚为准。

@@ -13,7 +13,7 @@
 >   （本册缩写 **INVEN**），引用格式 `UI:行号` / `INVEN:行号`；VMA 只在基线文件内核对。
 > - 模块代码行号按本次成稿时工作树核实（commit `56a477b` 之后的工作树）；后续修改代码
 >   后必须重新核对全部 `文件:行` 锚点。
-> - 规则交叉引用以规则册已冻结的 `R-01..R-34` 为准；本册不得另行定义编号。
+> - 规则交叉引用以规则册已冻结的 `R-01..R-36` 为准；本册不得另行定义编号。
 
 ## 1. 原版触摸输入事实基线
 
@@ -194,7 +194,7 @@ TouchState+0x60/+0x68）并取消 session，随后以 unhandled 变体执行
 **0x17 press**（`extension_bag_lifecycle.inc:257-324`）：
 
 1. 读 press 坐标（`257-259`）。
-2. 旧 capture 活动时吞掉 press（`274-278`）。
+2. 活动 capture 时吞掉 press（`274-278`）。
 3. 投影槽命中且控件有效时建立 projected session（`285-293`、`305-307`，调
    `begin_projected_drag_session_locked`，`extension_bag_drag_session.inc:1-11`）。
 4. 扩展网格命中但无投影物品时置 `g_extension_touch_capture` 并吞掉（`294-304`）。
@@ -204,7 +204,7 @@ TouchState+0x60/+0x68）并取消 session，随后以 unhandled 变体执行
    （`481`，调 `advance_projected_drag_session_locked`，`extension_bag_drag_session.inc:13-18`）。
 
 **0x19 move**（`extension_bag_lifecycle.inc:409-431`）：读坐标（参数为空回读
-TouchState，`410-417`）；capture 活动时只更新旧拖动态坐标并吞掉（`420-430`）；其余
+TouchState，`410-417`）；capture 活动时只更新拖动态坐标并吞掉（`420-430`）；其余
 放行原版，无事务动作。
 
 **0x18 release 五出口**（`extension_bag_lifecycle.inc:325-408`）：
@@ -340,6 +340,23 @@ phase ∈ {Pressed, NativeMoving, TargetResolved, TransactionInFlight}
 记录 `ERROR physical inventory mutation` 并按 before 数组恢复，随后
 `virtual_bag_sync_projected_bag()`（`143-165`）。规则锚 `rulebook.md` R-20。
 
+### 2.9 触摸窗口内的延迟释放
+
+所有权账本在 `extension_bag_ownership.inc:5-15` 定义 16 项定长延迟释放队列；入队时
+按对象去重，并保存 item、handle、generation 和入队时间
+（`extension_bag_ownership.inc:35-53`）。`retire_custody_item_locked` 在触摸窗口内把
+释放请求送入队列后完成 ownership release，不在该窗口直接调用 `ITEMPOOL_Free`
+（`extension_bag_ownership.inc:147-171`）；因此释放请求可以返回成功，事务继续提交。
+
+draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
+（`extension_bag_render.inc:712-723`、`:725-729`、`:737-741`、`:768-770`）。排空逐项
+检查逻辑槽和投影控件 `data[0]` 引用（`extension_bag_ownership.inc:71-90`、`:93-119`），
+无引用时才调用 `ITEMPOOL_Free`；仍有引用的项保留在队列中。日志锚为
+`deferred free enqueue` 与 `deferred free drain`。
+
+当前日志锚为 `deferred free enqueue` 与 `deferred free drain`；触摸窗口内释放请求进入队列，
+事务继续提交，排空阶段只释放无逻辑槽和投影控件引用的对象。
+
 ## 3. 侵入面清单
 
 本册记录触摸链相关的全部改动点；「与 vanilla 差异」栏描述模块启用时的行为。
@@ -351,7 +368,7 @@ phase ∈ {Pressed, NativeMoving, TargetResolved, TransactionInFlight}
 | H-01..H-16 Native Hook | LSPosed `hook_func` 安装（`native_inventory_hook.cpp:507-566`） | 库存函数层分流；触摸链相关为 H-14/H-15/H-16 | 每个被 Hook 函数多一层 wrapper；原版对象 original-first | 安装失败自动回滚（`384-406`）；无运行期单独卸载 API |
 | `0xb8cc0` drop gate patch | BL 指令替换（`extension_bag_lifecycle.inc:692-730`） | bag proc `0x04` 落袋写入改经 `save_item_on_empty_gate` | 投影 session 命中时返回 0，原版不清同号物理槽；真实移动延迟到 `0x18` 路由（`extension_bag_render.inc:442-462`） | 可写回原字 `0x94012fc8`；无运行时还原路径 |
 | MakeDesc desc gate patch | BL 指令替换（`extension_bag_lifecycle.inc:772-814`） | 详情打开时装详情操作 hook（Path A） | `0x80` 详情路径多一层 gate；触摸落点无事务行为 | 可写回原字 `0x97fffdfe`；无运行时还原路径 |
-| 事件吞并（capture） | `virtual_bag_event` 内返回 1（`extension_bag_lifecycle.inc:274-304`、`348-389`、`432-450`） | 旧 overlay/网格空位交互与点击-拖动分类 | 被 capture 的序列不达原版 TouchHandle | 逻辑开关：`g_extension_touch_capture` 清除即恢复放行 |
+| 事件吞并（capture） | `virtual_bag_event` 内返回 1（`extension_bag_lifecycle.inc:274-304`、`348-389`、`432-450`） | 网格空位交互与点击-拖动分类 | 被 capture 的序列不达原版 TouchHandle | 逻辑开关：`g_extension_touch_capture` 清除即恢复放行 |
 | 事件吞并（projected owner） | `0x18` owner 返回 1（`extension_bag_lifecycle.inc:340-347`） | 扩展事务唯一提交，原版不得二次移动 | 该次 `0x18` 原版五步清理由等价清理补齐（`extension_bag_input.inc:34-71`） | 逻辑开关：session 不活动即不触发 |
 
 模块另有 draw/save 类指令 patch 与 store/save panel hook（`extension_bag_lifecycle.inc:534-690`），
@@ -372,24 +389,25 @@ phase ∈ {Pressed, NativeMoving, TargetResolved, TransactionInFlight}
 
 扩展源 drop 的目标解析先判页签、后判网格；重叠坐标按页签优先处理。
 
-**验证状态**（截至本稿）：
+**当前验证状态**：
 
-- 触摸机械部分（按下/拖动/松手/残留清理）已由用户在真机确认正常。
-- 触摸触发的落点问题中，宝石拖装备仍是反例 S-03（`rulebook.md:47-48`、
-  `verification-matrix.md` VM-B03），本批不处理；背包类物品拖空标签与跨页签提交已按
-  §2.2.1 完成 R1/R2 代码修复，真机证据由 `verification-matrix.md` 的 S-05 卡补齐。
-- 触摸链实施按会话口径分四步：①H-16 refresh gate（已完成，R-32）、②release 等
-  价清理（已完成，R-33，`control-plane.md` §3.3 第 4 条）、③heal 退役（代码已完成，
-  真机待验，R-34）、④VM-B01..VM-B05 四象限真机回归（未做，
-  `verification-matrix.md:358-420`）。moving 六条件门随第③步落地。
-- VM-28（release 清理变体选择）与 VM-B 真机证据均未采集；Overall 仍为
-  `NOT_ACCEPTED`（`control-plane.md` §3.2）。
+- 页签命中先于网格解析；重叠坐标按页签意图路由，R1/R2 页签装备与跨页签分支可达。
+- 触摸窗口内释放请求进入延迟队列，由 draw-end 在引用检查通过后排空。
+- 真机已确认扩展拖动、扩展交换、消耗品使用、确认后使用、装备空槽、装备替换、扩展源
+  →其它页签移动、背包类源→空页签装备均正常；原版四象限 VM-B01～VM-B04 正常。
+  证据卡见 `verification-matrix.md` 的 S-05、VM-29 和 VM-B01～VM-B04。
+- S-03（扩展宝石拖装备）仍为未决，下一项验证队列为 S-03；它与已确认正常的原版
+  VM-B03（原版宝石拖装备）不是同一操作身份。
+- B-05“同堆合并”属于模块扩展袋功能，不属于原版四象限；模块行为由
+  `verification-matrix.md` 的 VM-B05/VM-13 记录。
+- H-16 `UIEquip_RefreshItemArea` hook、定点 projection sync 和 moving 六条件门构成当前
+  刷新职责；draw-end 不承担帧级投影刷新（`extension_bag_render.inc:712-770`、
+  `extension_bag_input.inc:34-77`）。Overall 仍为 `NOT_ACCEPTED`，原因是 S-03 未决。
 
 **后续计划**（事实性条目）：
 
-1. VM-B 四象限回归：按 `verification-matrix.md` §2.1 五卡采集真机证据。
-2. S-03 仍按 `control-plane.md` §4 登记；R1/R2 的页签落点修复按本册 §2.2.1 与验收册
-   S-05 取证。
+1. S-03（扩展宝石拖装备）继续按 `control-plane.md` §4 登记并取证。
+2. R1/R2 页签落点修复和延迟释放队列按本册 §2.2.1、§2.9 与验收册 S-05/VM-29 维护。
 
 ## 5. 设计决策与未决事项
 
@@ -399,32 +417,28 @@ phase ∈ {Pressed, NativeMoving, TargetResolved, TransactionInFlight}
 |---|---|---|
 | `INVEN_MoveItem` 纯函数层不做扩展分流（「函数层全放行/全接管均不成立」的落点）：采用方案 A，只按 item 扩展身份拒绝 | 该函数只有 item/count/target bag/slot 四参，不足以区分物理/显示目标、无法还原扩展意图；在此分流会与 `0x18` owner 形成双提交 | `inventory-integration-decision-plan.md:72`（方案 A/B 裁决）；`rulebook.md` R-31（`rulebook.md:538-545`） |
 | 保留 `0x18` 单一 drop owner，事务失败也吞掉原版 | 原版 release 会继续调 `INVEN_MoveItem`/`SaveItemOnEmpty`，投影对象不在 `g_inven`；先放行后补偿会把物理槽交给原版链改写。R-33 的等价清理只补 TouchHandle 状态，不重新派发 `0x18` | `rulebook.md` R-02（`rulebook.md:333-340`）；`control-plane.md` §5 决策索引 2026-09-06 行 |
-| Refresh 采用函数级关卡（H-16）而非 15+ 主动刷新点+帧 heal | 模块刷新点多持有 `g_virtual_bag_mtx`，经被 Hook 地址自调会重复加锁死锁；raw-original dispatcher 保留 Hook 未就绪回退；H-16 承担 post-projection，帧级 heal 退役 | `rulebook.md` R-32、R-34；`control-plane.md` §5 决策索引 2026-09-09 行 |
-| moving 只在六条件全真时保留 | draw-end 不再逐帧写投影控件；无刷新事务定点同步受影响槽，stale moving 清 TouchState 与控件 flags | `rulebook.md` R-34；`verification-matrix.md` VM-B01～VM-B05 |
-| 吞掉 `0x18` 必须做原版等价清理且放锁派发 | 只清扩展 session 会遗留 TouchState、moving/on 标志与选中控件，下一次点击进入幽灵拖拽；原版 UI 回调可重入模块，持锁派发会死锁 | `rulebook.md` R-33（`rulebook.md:552-562`）；实现 `extension_bag_input.inc:34-71` |
+| Refresh 采用函数级关卡（H-16）而非 15+ 主动刷新点+帧 heal | 模块刷新点多持有 `g_virtual_bag_mtx`，经被 Hook 地址自调会重复加锁死锁；raw-original dispatcher 保留 Hook 未就绪回退；H-16 承担 post-projection，draw-end 不执行帧级 heal | `rulebook.md` R-32、R-34；`control-plane.md` §5 决策索引 |
+| moving 只在六条件全真时保留 | draw-end 不再逐帧写投影控件；无刷新事务定点同步受影响槽，stale moving 清 TouchState 与控件 flags | `rulebook.md` R-34；`verification-matrix.md` VM-B01～VM-B04 |
+| 吞掉 `0x18` 必须做原版等价清理且放锁派发 | 只清扩展 session 会保持 TouchState、moving/on 标志与选中控件，下一次点击可能进入幽灵拖拽；原版 UI 回调可重入模块，持锁派发会死锁 | `rulebook.md` R-33（`rulebook.md:552-562`）；实现 `extension_bag_input.inc:34-71` |
+| 页签与网格命中重叠时页签优先 | 当前页签矩形与网格行 y 区间重叠；先解析页签才能保留切袋意图，避免格子命中短路页签事务 | `rulebook.md` R-35；实现 `extension_bag_transaction.inc:791-812`；S-05/VM-29 |
+| 触摸窗口释放采用延迟队列 | 触摸窗口内直接释放会让事务在 source release 阶段拒绝；入队并延后到 draw-end 检查引用，使事务提交与对象安全释放分离 | `rulebook.md` R-36；实现 `extension_bag_ownership.inc:35-53,71-119,147-171`；`.tmp/tab-drop-260909/logcat-tagged.txt:8546-8548`；commit `3539918` |
 | 物理快照守卫只做「比较+恢复」，不承诺覆盖全部写点 | 它包住 `g_orig_event` 调用，无法观察不经过该调用的写入；问题 B 仍按「未解决+已布防」判定 | `rulebook.md` R-20（`rulebook.md:461-467`）；`control-plane.md` §4.1 |
-| R-27/R-26 窗口袋号与 direct/GOT 成对恢复；R-30 root 重建门禁；R-19 generation 递增 | 视图切换与控件重建后旧事件不得提交到新视图；具体正文的编号引用归规则册 §5 | `rulebook.md:454-466`、`503-537`；本册 §2.2/§2.4 为实现锚 |
+| R-27/R-26 窗口袋号与 direct/GOT 成对恢复；R-30 root 重建门禁；R-19 generation 递增 | 视图切换与控件重建后失效事件不得提交到当前视图；具体正文的编号引用归规则册 §5 | `rulebook.md:454-466`、`503-537`；本册 §2.2/§2.4 为实现锚 |
 
-### 5.1 未决事项
+### 5.1 经验（思考，非事实）
 
-1. S-03（宝石拖装备触发交换）的落点根因仍未定位；本批 R1/R2 仅覆盖背包类空页签装备
+以下条目是对维护和验收的思考，不是 §1–§4 的实现事实。
+
+1. **故障定位**：代码门禁只能限定影响面；关键决策点应先具备可检索的日志锚，再依据
+   运行证据确定修复边界。
+2. **证据门槛**：验收卡、日志锚和真机操作应在实现交付前进入执行序列，避免只凭静态
+   结论关闭行为验证。
+
+### 5.2 未决事项
+
+1. S-03（宝石拖装备触发交换）的落点根因仍未定位；当前 R1/R2 仅覆盖背包类空页签装备
    与跨页签提交，不能替代 S-03 结论。
 2. 问题 B（ext↔ext swap 的原版同号槽丢失）独立于触摸机械，登记与取证 SOP 归
    `control-plane.md` §4.1；本册 §2.8 的 H3 守卫是其防御层之一。
-3. `control-plane.md` §4.1 取证字段仍指向旧稿 `drag-protocol.md §7.4`；旧 §7.4
-   SOP 随本次重构移出本册，该引用需由 Hub 维护者修订（见附录 A）。
-
-## 附录 A. 旧稿章节映射（2026-09-09 重构）
-
-本册由「拖拽协议全册」收窄为「触摸链事实册」。旧稿章节去向：
-
-| 旧稿章节 | 去向 |
-|---|---|
-| §1 当前裁决与术语、§2 状态机、§3 三态门、§4 三方向事务、§5 投影生命周期、§6 H3 | 事实部分收窄进本册 §2；事务/投影/H3 细节仍以旧稿内容为准的，改引 `rulebook.md`（R-01..R-34）与 `runtime-architecture.md`；H3 保留为 §2.8 |
-| §7 问题 B 登记章、§8 候选写点清单 | `control-plane.md` §4.1（登记）与 `rulebook.md` R-20/R-31（防御层）；候选写点清单随旧稿移除，取证时按 `control-plane.md` §4.1 的证据缺口重新对码 |
-| §7.4 复现取证 SOP | `control-plane.md` §4.1「取证」字段为其唯一引用点；SOP 正文随旧稿移除，需时从 git 历史恢复 |
-| §9 旧稿结论迁移清单、§10 维护和验收引用 | R 编号索引归 `rulebook.md` §5；旧稿已废结论不再重复登记 |
-
-引用本册的外部锚点漂移：`control-plane.md` §5 决策索引中 `drag-protocol.md §5.2`、
-`§1.1`、`§3.1–§3.2`、`§3.3`、`§7.5`、`§8` 均指向旧稿编号，需由 Hub 维护者按本册
-新结构（§2.5、§2.2、§4）修订。
+3. `control-plane.md` §4.1 的取证入口为本册当前 H3 物理快照事实和
+   `verification-matrix.md` §4.1；操作卡维护当前字段与日志锚。

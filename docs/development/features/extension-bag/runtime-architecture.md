@@ -11,7 +11,7 @@
 
 ## 0. 阅读规则与结论边界
 
-1. 文件中的 `文件:行` 是当前源码锚点，不是历史版本锚点。
+1. 文件中的 `文件:行` 是当前源码锚点，不是版本锚点。
 2. `game_symbols.h` 中的 VMA 是当前目标 `libgame.so` 的证据索引；代码通过
    `fn_resolve` 和 `game_access` 使用符号，域文件不应复制裸地址。
 3. “当前路径”描述源码已经形成的路径；“已验证”仅指文档中登记的 Host、静态或
@@ -235,7 +235,7 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 | 13 | 卖出（商店页） | `UIStore_*` 详情/确认 → 商店卖出回调 | 商店单独保存 `store_desc_*`，`store_make_desc_gate` 后由 `store_desc_sell_execute` 建 popup，OK 在 `extension_bag_store.inc:439-615` 完成；刷新只走 `store_refresh_projection_locked` | 一致；不调用会覆盖整列的原版刷新 |
 | 14 | 商店购买收编 | `UIStore_BuyItem` → `FindSaveSlot` → `SaveItem`；原版满则购买失败 | 两个 BL 在 `extension_bag_store.inc:714-726` patch 到 `store_buy_find_slot_gate@635-644`；原版 `SaveItem` 失败由 `save_item_wrapper@native_inventory_hook.cpp:184-198` adopt | 当前实现存在；SaveItem 函数处置以库存册 §2.2、§3.2 为准，caller 覆盖仍待 P7 stage-5 |
 | 15 | 拾取/生产者兜底 | 拾取、奖励、开箱、生产等 caller 各自创建/保存物品，最终部分进入 `INVEN_SaveItem` | 当前 `save_item_wrapper` 在 backup 失败时尝试扩展 adopt；注释列出 18 个漏斗，见 `native_inventory_hook.cpp:184-198`。caller 级所有权/失败回滚仍待 P7 stage-5 | 部分实现；不能称所有生产者已覆盖 |
-| 16 | 视图切换/页签 | 原版 inventory event、袋控件、TouchHandle 回调和原版绘制 | 扩展标签在 `extension_bag_runtime.inc:81-160` 创建；点击 proc 在 `:1-15` 排队，生命周期 `commit_pending_extension_tab_locked@runtime.inc:380-392` 执行；投影由 draw/lifecycle wrapper 收尾 | 当前代码对码成立；行为仍按阶段验收 |
+| 16 | 视图切换/页签 | 原版 inventory event、袋控件、TouchHandle 回调和原版绘制 | 扩展标签在 `extension_bag_runtime.inc:81-160` 创建；点击 proc 在 `:1-15` 排队，生命周期 `commit_pending_extension_tab_locked@runtime.inc:380-392` 执行；H-16 `UIEquip_RefreshItemArea` 负责原版刷新后的 post-projection，模块主动刷新走 raw-original dispatcher，draw-end 不再承担帧级 heal | 当前代码对码成立；页签拖放、四象限和 S-03 分别按验收册状态判定 |
 | 17 | 详情弹窗 | `UIEquip_InvenItemControlEventProc` 事件 `0x80` → `UIEquip_MakeDesc@0xb8980` → `SetDescMenu` | `extension_bag_lifecycle.inc:728-770` patch 唯一 BL 到 `make_desc_equip_gate`；扩展详情按钮 PtrHook 在 `extension_bag_equip.inc:620-682`，确认使用/装备/卖出/销毁分流 | 一致；装备/卸下 proc 明确跳过双层包装 |
 | 18 | 存档/sidecar | 原版保存入口 → `SAVE_Save@0x129600` → `SAVE_SaveInventory` 等原版序列化 | 8 个保存 callsite 在 `extension_bag_lifecycle.inc:54-68` patch 到 `module_save_game`；core 先 participant prepare，再 `fn_save`，成功 commit，见 `module_save.cpp:62-111`；扩展 JNI sidecar 在 `extension_bag_persistence.cpp:161-241` | 一致；不是 Hook `SAVE_*` 函数本体 |
 
@@ -252,10 +252,14 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 1. `0x17` 识别投影 child 并开始 session，`0x19` 只更新 session，见
    `extension_bag_lifecycle.inc:257-279,367-388`、`extension_bag_drag_session.inc:1-10`。
 2. `0x18` 由 `consume_projected_release_locked` 唯一提交，目标分流到原版或扩展网格，
-   三方向调用对应 `move_*` 事务，见 `extension_bag_lifecycle.inc:297-315`、
-   `extension_bag_transaction.inc:1-127,145-349,541-708,796-861`。
+   三方向调用对应 `move_*` 事务；扩展源目标解析先判页签后判网格，见
+   `extension_bag_lifecycle.inc:297-315`、`extension_bag_transaction.inc:791-872`。
 3. 失败时仍吞掉 release，避免原版 `INVEN_MoveItem` 二次改真实槽；guard 做物理数组
    pre/post digest，见 `extension_bag_lifecycle.inc:120-165`。
+4. 触摸窗口内的 custody release 进入 `extension_bag_ownership.inc:35-53` 的延迟队列，
+   draw-end 由 `extension_bag_render.inc:712-770` 调用排空；排空逐项检查
+   `g_module_objects` 和 projection 控件引用，无引用时才调用 `ITEMPOOL_Free`
+   （`extension_bag_ownership.inc:71-119`）。
 
 “唯一 owner”只是控制流设计，不是问题 B 的修复证据；H3/H4 的
 `ERROR physical inventory mutation` 复测日志仍缺。
@@ -323,9 +327,8 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 ### 3.1 确认使用：全局 OK 槽 → `0xb8478` 函数本体 Hook
 
 选择函数级 LSPosed Hook；普通对象走 backup，扩展详情对象走
-`extension_confirm_use_item`。全局 OK 槽曾被确认使用、卖出、销毁共享，回调和身份
-会互相覆盖；函数级 original-first 让原版物品逐指令走原版。证据：共享槽冲突
-`archive/extension-bag/writing-materials/impact-matrix-source.md:10-12,20-21`、`inventory-integration-decision-plan.md:323-329`；
+`extension_confirm_use_item`。全局 OK 槽由确认使用、卖出、销毁共享，回调和身份会互相
+覆盖；函数级 original-first 让原版物品逐指令走原版。证据：`inventory-integration-decision-plan.md:323-329`；
 wrapper `native_inventory_hook.cpp:263-271`；扩展 token `extension_bag_equip.inc:688-770`；
 原版 VMA `game_symbols.h:571-573`。当前 popup 槽只剩卖出/销毁，分别见
 `extension_bag_equip.inc:361-386,418-575` 和 `extension_bag_store.inc:589-606`。
@@ -335,7 +338,7 @@ wrapper `native_inventory_hook.cpp:263-271`；扩展 token `extension_bag_equip.
 选择保留 `FindItemSlot` 原版物理契约；扩展通过上层分发、逻辑映射和受控物化使用
 `CHAR_UseItemEx`。原因是 `FindItemSlot` 的 `int8_t*` 输出不能安全承载 bag `6..10`
 和逻辑 slot，折叠扫描还会误伤确认、装备、删除等 caller。证据：ABI/VMA
-`game_symbols.h:391`、历史选型 [`native-inventory-hook-development.md`](../../../history/native-inventory-hook-development.md):49-68,129-150；
+`game_symbols.h:391`；
 袋域裁定 `control-plane.md:20-26`、`inventory-integration-decision-plan.md:81-89,105-118,208-224`；
 当前 API 分流 `game_inventory_use.inc:1-8`、确认 token `extension_bag_equip.inc:698-733`；
 原版效果优先 `inventory-integration-decision-plan.md:267-289`。
@@ -343,9 +346,7 @@ wrapper `native_inventory_hook.cpp:263-271`；扩展 token `extension_bag_equip.
 ### 3.3 采用 LSPosed 官方 Native Hook，不采用 Dobby/ShadowHook/字节系
 
 `native_init` 接收官方 `hook_func`/`unhook_func`，框架提供 backup/trampoline，安装链
-见 `native_inventory_hook.cpp:310-456,461-499`。不新增依赖的理由是框架已内置；历史
-ShadowHook 曾因错误 linker namespace 跳野地址，手写 ARM64 trampoline 修复后仍有
-SIGBUS/SIGILL，证据 `architecture.md:200-238`。动态符号优先、VMA fallback、可执行
+见 `native_inventory_hook.cpp:310-456,461-499`。不新增依赖的理由是框架已内置；当前安装链使用动态符号优先、VMA fallback、可执行
 校验和逆序回滚分别见 `native_inventory_hook.cpp:328-360,286-307,378-395`；本地 ABI
 见 `native_inventory_hook.h:5-23`，注册清单见 `native_init.list:1`。
 
@@ -370,12 +371,11 @@ SIGBUS/SIGILL，证据 `architecture.md:200-238`。动态符号优先、VMA fall
 Java section `ExtensionBagUiBridge.kt:11-24,110-168`；8 处 callsite
 `extension_bag_lifecycle.inc:54-68`。这是 callsite patch，不是 `SAVE_*` 函数 Hook。
 
-### 3.6 SaveItem 现码裁定与历史迁移
+### 3.6 SaveItem 当前处置
 
-当前代码安装第 13 个 `SaveItem` Native Hook，安装链见
+当前代码安装 `SaveItem` Native Hook，安装链见
 `native_inventory_hook.cpp:186-201,472-546`，wrapper 在 backup 失败后按 item 身份
-尝试 adopt，见 `:184-198`。库存册 §2.2、§3.2 是函数处置的唯一裁定源；旧 stage-2/3
-“不做全局 SaveItem Hook”的静态决策已由 `56a477b` 的现行实现取代。
+尝试 adopt，见 `:184-198`。库存册 §2.2、§3.2 是函数处置的唯一裁定源。
 
 现行“禁止宽 Hook”只表示不得继续扩大到 `SaveItemDirect`、`SaveItemData` 或所有保存
 辅助；它不表示不存在 H-13。wrapper 的存在也不证明 18 条 caller 已完成身份、失败释放
@@ -399,10 +399,10 @@ VM-19/VM-20/VM-21/VM-22 取证。
 ### 4.2 升宽槽编码
 
 设想：把 `int8_t* out_slot` 改成能编码 `6..10` 的结构，让原版 caller 直接识别逻辑袋。
-成本是同步修改 ABI、所有 caller、保存辅助、装备、删除和 TouchHandle，并证明旧 caller
+成本是同步修改 ABI、所有 caller、保存辅助、装备、删除和 TouchHandle，并证明现有 caller
 不会截断。风险是游戏二进制栈/寄存器契约不可安全改写，任务袋 5 与扩展域也会折叠。
-旧 stage-2 静态契约已由 `56a477b` 的现行实现取代；当前 `FindItemSlot` 只返回物理编码，证据
-`inventory-integration-decision-plan.md:208-224`、`game_symbols.h:391`，故不采用。
+当前 `FindItemSlot` 只返回物理编码，证据 `inventory-integration-decision-plan.md:208-224`、
+`game_symbols.h:391`，故不采用。
 
 ### 4.3 全量自绘 UI
 
@@ -422,7 +422,7 @@ VM-19/VM-20/VM-21/VM-22 取证。
 ### 4.5 Hook `SAVE_*` 承载 payload
 
 设想：把 payload 编进原版保存记录，Hook `SAVE_SaveInventory`/`SAVE_SaveItem`/
-`SAVE_LoadItem` 并取消 sidecar。成本是重做记录格式、长度、迁移、自动保存和崩溃恢复；
+`SAVE_LoadItem` 并取消 sidecar。成本是重做记录格式、长度、自动保存和崩溃恢复；
 风险是原版记录和对象池是固定契约，格式变化破坏存档兼容，扩展对象也不能交给
 `ITEMPOOL_Free`。当前 section version=4，见 `ExtensionBagUiBridge.kt:18-24`；sidecar
 participant 风险更小，故不采用。
@@ -436,8 +436,8 @@ draw-end 在窗口关闭后逐项检查 `g_projected_item_root` 控件 `data[0]`
 
 ### 5.1 问题 B：未解决
 
-固定口径：扩展袋 0 的 a↔b 交换后，原版袋 0 同号 b 格物品消失并被保存固化；F1/G/H
-轮、0x18 单一 owner、物理 `0..5×16` 快照守卫和 pre/post 插桩后仍复现。代码防线为
+固定口径：扩展袋 0 的 a↔b 交换后，原版袋 0 同号 b 格物品消失并被保存固化；当前使用
+0x18 单一 owner、物理 `0..5×16` 快照守卫和 pre/post 插桩。代码防线为
 swap 状态同步 `extension_bag_transaction.inc:374-449,487-538`、物理快照
 `extension_bag_lifecycle.inc:71-165`、唯一 owner `:297-315`；H3/H4 复测日志缺口为
 `archive/extension-bag/writing-materials/impact-matrix-source.md:79-83`。因此不能由守卫代码或 API 成功返回推导
@@ -454,13 +454,13 @@ swap 状态同步 `extension_bag_transaction.inc:374-449,487-538`、物理快照
 ### 5.3 `ExtensionBagUiBridge` v2/v3/v4 现状
 
 当前仍是兼容分支，不是最终纯 v4：主 section/版本见 `ExtensionBagUiBridge.kt:18-24`；
-load 回退 legacy 见 `:59-67`；v2/3/4 分支、迁移和自动回写见 `:69-94`；payload-less
+load 兼容 legacy 见 `:59-67`；v2/3/4 分支、回写处理见 `:69-94`；payload-less
 隔离见 `:180-240`。Hub 的 v4-only 是最终目标而非当前实现状态，见
 `control-plane.md:118`。本文记录现状，不宣称兼容分支属于最终发布契约。
 
-**未定-需真机证据**：v2/v3/legacy 在进程中断、切档和跨进程并发下的迁移回写安全性，
-不能由 `ExtensionBagUiBridge` 的静态分支判定。取证应使用验收册 VM-25：分别准备旧 section、
-在迁移回写窗口 force-stop，随后核对 v4 section、last-good、原版存档和隔离日志。
+**未定-需真机证据**：v2/v3/legacy 在进程中断、切档和跨进程并发下的回写安全性，不能由
+`ExtensionBagUiBridge` 的静态分支判定。取证应使用验收册 VM-25：分别准备兼容 section、
+在回写窗口 force-stop，随后核对 v4 section、last-good、原版存档和隔离日志。
 
 ### 5.4 API、UI 与锁限制
 
@@ -477,24 +477,7 @@ load 回退 legacy 见 `:59-67`；v2/3/4 分支、迁移和自动回写见 `:69-
 P7 生产者全覆盖、问题 B 已修复、全部 Hook 已通过 LSPosed 真机验收，或仅凭静态链
 关闭消费时机、失败回滚和跨进程恢复。
 
-## 6. 素材与代码不符处清单
-
-1. **原版袋→扩展袋入口**：素材把 `ButtonEquipExe` 写成主要接入；当前实际是 tab/drop
-   的 `virtual_bag_event`、`extension_tab_item_proc`、`try_equip_on_extension_tab_drop_locked`，
-   而 ButtonEquipExe 处理扩展→角色三态，见 §2.2 #3、`native_inventory_hook.cpp:305-318`。
-2. **SaveItem 选型**：旧 stage-2/3 静态文字已由 `56a477b` 的现行实现取代；当前 C++
-   安装 H-13 wrapper，函数裁定见库存册 §3.2，caller 覆盖仍未验收。
-3. **v2/v3**：Hub 的 v4-only 是最终目标；当前 Java 仍读取 legacy、接受 v2/v3、迁移回写，
-   见 `ExtensionBagUiBridge.kt:59-94`、`control-plane.md:118`。
-4. **16 Hook 与阶段状态**：代码有 16 个安装项（`native_inventory_hook.cpp:494-570`），
-   包含 `INVEN_MoveItem` 与 `UIEquip_EquipControlEventProc`；但 P7 Overall 仍
-   `NOT_ACCEPTED`，见 `control-plane.md:8,40-45`。
-5. **8 个 save callsite**：当前确有 8 项（`extension_bag_lifecycle.inc:54-68`），但
-   是 callsite patch→core 协调器，不是 `SAVE_*` 函数 Hook。
-6. **token 异常**：确认使用 token 丢失会 abort marker 后返回 handled，见
-   `extension_bag_equip.inc:733-749`，不能概括为异常均回 backup。
-
-## 7. 无法从仓库直接取证、标为“推断”的点
+## 6. 无法从仓库直接取证、标为“推断”的点
 
 以下内容标为推断，未作为实现事实：
 

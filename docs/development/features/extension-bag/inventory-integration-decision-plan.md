@@ -2,7 +2,7 @@
 
 > 状态：CURRENT；本册是库存、物品函数逐函数接入方式的唯一权威。
 >
-> 基线：工作区当前代码与 `game_symbols.h`；旧阶段册只作为裁定来源，不覆盖现码。
+> 基线：工作区当前代码与 `game_symbols.h`。
 >
 > 问题 B：未解决 + 已布防。扩展袋 0 的 a↔b 交换仍可能令原版袋 0 同号槽物品消失并在保存后固化，禁止将其写成已修复。
 
@@ -22,10 +22,10 @@
 
 ### 1.1 当前物理域
 
-* 原版 `INVEN_pItem` 是 6 袋物理数组：袋 `0..5`，每袋最多 16 个指针，槽步长 `0x80`；容量由袋对象字段决定。旧 stage-1 静态契约已由 `56a477b` 的现行实现取代；当前证据：`game_symbols.h:79-80`、`rulebook.md:46-56`。
+* 原版 `INVEN_pItem` 是 6 袋物理数组：袋 `0..5`，每袋最多 16 个指针，槽步长 `0x80`；容量由袋对象字段决定。当前证据：`game_symbols.h:79-80`、`rulebook.md:46-56`。
 * 普通扩展入库目标只有原版袋 `0..4`。袋 `5` 是任务袋：原版查询可以读它，但扩展逻辑不得将普通物品写入或把它改作扩展目标。
 * 扩展逻辑袋是逻辑索引 `6..10`，不在 `INVEN_pItem` 内；任何物理槽编码、`SaveItemDirect`、`RemoveItemDirect`、原版保存链都不能接收它。
-* 物理槽编码由 `bag = encoded >> 5`、`slot = encoded & 0x1f` 解出；来源为 `game_symbols.h:391,626` 及 `rulebook.md:60-70`。旧 stage-1 对该编码的静态说明已由 `56a477b` 的现行实现取代。
+* 物理槽编码由 `bag = encoded >> 5`、`slot = encoded & 0x1f` 解出；来源为 `game_symbols.h:391,626` 及 `rulebook.md:60-70`。
 * 物品对象的 payload 是 `SAVE_SaveItem` 生成的原版序列化记录。扩展描述符、对象缓存、handle、generation 必须同步；sidecar 只存描述符和 payload，不存 native 指针。来源：`ExtensionBagUiBridge.kt:11-15`。
 
 ### 1.2 常驻入口事实
@@ -62,11 +62,11 @@
 |---|---:|---|---|---|---|
 | `INVEN_FindSaveSlot` | `0x103960` | 上层分发；商店两处 callsite patch | API 创建、拾取、奖励、商店和原版入库 | 只预检原版物理袋；商店 gate 在原版失败且扩展有空位时返回“有空间” | 不改 out 槽为扩展编码；任务物品仍按任务语义；商店 patch 见 `extension_bag_store.inc:630-644,714-726`。 |
 | `INVEN_SaveItem` | `0x104528` | Native Hook，backup first，失败后扩展 adopt | 当前代码注释登记的 18 条已创建物品漏斗：拾取、奖励、事件、开箱、商店、合成等 | 原版成功完全透传；backup 返回 0 时，若扩展有空位则 `adopt_native_item` 并返回 1 | wrapper 当前只取 item 参数；不能假设未知 caller 的 context 已被覆盖。商店投影写入前先恢复容量，见 `native_inventory_hook.cpp:184-199`。 |
-| `INVEN_SaveItemDirect` | `0x103bf0` | 不接管；保留原版原语 | `SaveItem`、`SaveItemOnEmpty` 和批量保存内部 | 物理槽写入或同身份堆叠；合并可能 `ITEMPOOL_Free(item)` | 扩展对象绝不传入；返回值不可作为槽位、旧对象或释放结果。 |
+| `INVEN_SaveItemDirect` | `0x103bf0` | 不接管；保留原版原语 | `SaveItem`、`SaveItemOnEmpty` 和批量保存内部 | 物理槽写入或同身份堆叠；合并可能 `ITEMPOOL_Free(item)` | 扩展对象绝不传入；返回值不可作为槽位、被替换对象或释放结果。 |
 | `INVEN_SaveItemOnEmpty` | `0x104be0` | 上层旁路；投影 drop 单点 patch gate | 跨袋拖动、原版卸下回包和恢复事务 | 原版目标袋 `0..4` 由原版写入；扩展→原版由事务先提交，不让借出对象进入原版写链 | 当前 drop callsite 为代码中 `g_base + 0xb8cc0`（`extension_bag_lifecycle.inc:648-686`，该调用点未在 `game_symbols.h` 建独立常量）；原版返回 0 才能避免同槽清理，见 `extension_bag_render.inc:441-490`。 |
 | `INVEN_SaveItemData` | `0x104614` | 上层分发；不接管 | 类别/数量批量生产和原版回滚 | 扩展生产者不得把类别回滚误认为 UID 精确回滚 | 原版失败会按类别/数量进入 `RemoveItemData`，可能部分完成；扩展对象不得进入该链。 |
 | `INVEN_RemoveItem` | `0x104044` | Native Hook | 原版消费、删除、装备和 UI 事件 | 识别扩展对象后逻辑删除；否则 backup | 扩展释放失败必须停在扩展分支，不得再 backup；现码：`inventory_hook_stage4.cpp:64-80`。 |
-| `INVEN_RemoveItemDirect` | `0x103fd8` | 禁止扩展接入；保留原版原语 | 物理槽删除、原版回滚和若干旧旁路 | 只处理真实物理 bag/slot，并负责 `ITEMPOOL_Free` | 返回值不可信，即使删成功也可能为 0；必须读删后槽位确认。扩展对象进入这里会产生释放、悬挂指针或错误物理槽。 |
+| `INVEN_RemoveItemDirect` | `0x103fd8` | 禁止扩展接入；保留原版原语 | 物理槽删除、原版回滚和物理旁路 | 只处理真实物理 bag/slot，并负责 `ITEMPOOL_Free` | 返回值不可信，即使删成功也可能为 0；必须读删后槽位确认。扩展对象进入这里会产生释放、悬挂指针或错误物理槽。 |
 | `INVEN_RemoveItemData` | `0x1040a8` | 上层分发；仅原版物理数据回滚 | `SaveItemData` 失败回滚、类别消耗 | 只扫描物理袋 `0..5`，可部分删除 | 不支持扩展身份和 payload；任务袋语义按原版保留，扩展对象不得伪装成类别数据。 |
 | `INVEN_ConsumeItem` | `0x1047bc` | Native Hook | `CHAR_UseItemEx`、快捷键、开箱/解封/骰子结果 | 原版消费时机由 backup 决定；扩展分支更新数量、payload、逻辑槽和投影 | 不可堆叠归零时逻辑删除，禁止进入物理释放链。现码：`native_inventory_hook.cpp:146-168`、`inventory_hook_stage4.cpp:45-61`。 |
 | `INVEN_MoveItem` | `0x104934` | **Native Hook（方案 A：guard 仅拦扩展身份源；原版对象全量 backup+取证）** | 原版拖动、拆堆、投影移动 | 原版对象保持原版；扩展源在函数层拒绝进入物理移动，扩展三方向事务仍由上层处理 | 函数四参不足以还原扩展意图，否决方案 B 分流接管；仅受控装备交换为唯一窄例外，身份与快照取证后必须放锁再调 backup；问题 B 仍未解决。 |
@@ -79,12 +79,12 @@
 | `CHAR_UseItemEx` | `0xeb670` | 优先原版调用；API/UI 入口做逻辑槽门禁和受控物化 | 药水、卷轴、技能书、配方书、增益、打包物和确认使用 | 扩展 item 物化后调用原版效果；成功消费由 `ConsumeItem` Hook 承接 | 不能重复模拟效果或扣数量；效果函数若直接依赖物理槽，必须在适配层隔离。API 现码：`game_inventory_use.inc:98-106`。 |
 | `CHAR_ProcessShortcut` | `0xec028` | 上层分发；不新增 Hook | 快捷栏直接使用路径 | 快捷栏仍由原版处理；扩展对象通过查询/物化/消费适配 | 不以 `GetItemCount` 代替快捷栏对象身份；快捷键全 caller 运行时覆盖待验。 |
 | `CHAR_EquipItem`（`EquipItemInInven` 语义） | `0xe51c0` | 优先原版规则；扩展装备由上层事务调用适配 | 自动找装备槽、API 装备和 UI | 扩展对象不直接进入不受控的原版自动装备；扩展侧先校验角色和目标槽 | 不能用固定角色替代当前菜单角色；装备对象所有权必须和角色槽同步。 |
-| `CHAR_EquipItemFromInvenToSlot` | `0xe5368` | Native Hook；扩展视图对象受控临时借入物理槽 | 装备交换、旧装备回包 | 原版交换入口继续决定装备规则；扩展物品只在调用期间暴露，旧装备转扩展所有权 | `extension_bag_internal_equip_active` 防止递归；失败必须恢复物理槽和角色槽。现码：`native_inventory_hook.cpp:201-221`、`extension_bag_equip.inc:155-220`。 |
+| `CHAR_EquipItemFromInvenToSlot` | `0xe5368` | Native Hook；扩展视图对象受控临时借入物理槽 | 装备交换、被替换装备回包 | 原版交换入口继续决定装备规则；扩展物品只在调用期间暴露，被替换装备转扩展所有权 | `extension_bag_internal_equip_active` 防止递归；失败必须恢复物理槽和角色槽。现码：`native_inventory_hook.cpp:201-221`、`extension_bag_equip.inc:155-220`。 |
 | `CHAR_UnequipItemToInven` | `0xe2f68` | Native Hook；原版失败后扩展兜底 | UI 卸装备、卸袋和未知 caller | 原版能入物理袋则透传；原版失败时扩展收编；扩展袋卸下必须非空拒绝 | 只信原版返回值会丢扩展兜底；目标任务袋 `5` 排除。现码：`native_inventory_hook.cpp:133-143`。 |
 | `CHAR_PickItemAll` / 拾取族 | `0xec4d8`；回调注释 `0xdd15c` | 不 Hook；保留 `nav_pick_items` 就近旁路 | 官方按键拾取、后台导航拾取、掉落回调 | 模块复刻范围判断和 `NOTIFIER_Add`，主线程回调最终进入 `INVEN_SaveItem`；原版优先、满包再由 SaveItem wrapper adopt | 直接后台调用原版会触发空音频句柄崩溃；不能改变掉落对象、通知节点和失败释放。现码：`game_world_movement.inc:4-35`，VMA `game_symbols.h:422-425`。 |
 | `ITEMSYSTEM_PutJewel` | `0x10bcb4` | Native Hook，原版 backup + 扩展材料适配 | 装备页、API 镶嵌、装备槽拖放 | 原版返回 0 决定效果；扩展宝石源由 H-15 放行原版 proc，`stage4_put_jewel` 承接两端分流 | 扩展宝石禁止 `RemoveItemDirect`；扩展宝石+原版装备不得直调 `virtual_bag_put_jewel_native`，消费由 `ConsumeItem` Hook 完成。现码：`native_inventory_hook.cpp:297-301`、`inventory_hook_stage4.cpp:106-119`。 |
 | `UIEquip_EquipControlEventProc` | `0xb8f7c` | **Native Hook，原版 proc 继续执行** | 装备槽拖放（event `0x04`） | 仅源为扩展宝石且 object/descriptor/generation/session 校验通过时取 token、放锁调用原版 proc；非扩展源/非宝石直接 backup | 校验或事务失败 Blocked，吞事件且不降级 backup；`game_patch_move_merge.inc` 不参与本修复。 |
-| `UIEquip_RefreshItemArea` | `0xb7a00` | **Native Hook，非重入锁内 trampoline 后覆盖投影** | 原版背包区域刷新、扩展投影安装/恢复及事务收尾 | 原版一次刷新由 H-16 在锁内同步当前投影；模块内部主动刷新统一走 raw-original dispatcher | `refresh_depth>0`、restore 抑制或投影未安装时只走 trampoline；帧级 heal 已退役，无刷新事务使用定点 slot sync。现码：`native_inventory_hook.cpp:211-218`、`game_ui_virtbag.cpp:237-245`。 |
+| `UIEquip_RefreshItemArea` | `0xb7a00` | **Native Hook，非重入锁内 trampoline 后覆盖投影** | 原版背包区域刷新、扩展投影安装/恢复及事务收尾 | 原版一次刷新由 H-16 在锁内同步当前投影；模块内部主动刷新统一走 raw-original dispatcher | `refresh_depth>0`、restore 抑制或投影未安装时只走 trampoline；draw-end 不执行帧级 heal，无刷新事务使用定点 slot sync。现码：`native_inventory_hook.cpp:211-218`、`game_ui_virtbag.cpp:237-245`。 |
 | `ITEMSYSTEM_ReleaseSealed` | `0x10af4c` | 上层分发；不接管 | 解封类使用 | API 先记录原版库存变化，成功后消费输入 | 产物可能多件；输入消费、扩展落点和失败原子性未闭合。 |
 | `ITEMSYSTEM_OpenItemBox` | `0x10e970` | 上层分发；不 Hook | 开箱按钮/API | 原版开箱决定随机产物并内部走 `SaveItem`；扩展源通过受控使用入口 | 不凭 SaveItem wrapper 宣称多产物原子回滚；输入消费和部分成功仍需逐 caller 验证。现码：`game_inventory_use.inc:82-95`。 |
 | `ITEMSYSTEM_ProcessUnpack` | `0x10ce50` | 上层分发；不 Hook | 拆包、打包物使用 | 逐产物原版优先，失败时才进入扩展兜底策略 | 输入消费时机、第三参数和前序产物回滚未闭合，保留现有旁路。 |
@@ -100,7 +100,7 @@
 | `UIEquip_ButtonEquipExe` | `0xb7c18` | Native Hook，函数级三态 | 详情装备、背包类装备和未知按钮 caller | `Handled` 扩展事务；`Blocked` 吞掉原版；`NotExtension` backup | `Blocked` 绝不能降级 backup，否则原版内联删源；现码：`native_inventory_hook.cpp:305-318`。 |
 | `UIEquip_ButtonUnequipExe` | `0xb7e14` | Native Hook | 卸装备、卸袋详情按钮 | 卸袋非空/无空间弹模块提示，其余 backup | 只处理模块确认的当前详情身份；popup 和 desc 清理必须成对恢复。 |
 | `UIEquip_OKConfrimUseItem` | `0xb8478` | Native Hook，original-first | `ConfirmUseItem` 的 OK 回调 | 扩展详情对象直接调 `CHAR_UseItemEx`，token 完成后刷新投影；非扩展 backup | token/generation/owner 不匹配时不得释放或替换对象；现码：`native_inventory_hook.cpp:263-271`、`extension_bag_equip.inc:684-769`。 |
-| `UIEquip_MakeDesc` / 物品详情 | `0xb8980`；唯一调用点 `0xb9188` | BL patch 到 `make_desc_equip_gate`，再做详情按钮 PtrHook | 物品控件打开详情 | 先让原版生成菜单，再捕获当前 item，跳过装备/卸下 proc，接管使用/卖出/销毁 | 控件树重建会使旧指针失效；操作前必须复核 item+bag+slot+cache。现码：`extension_bag_lifecycle.inc:728-770`、`extension_bag_equip.inc:620-681,985-1019`。 |
+| `UIEquip_MakeDesc` / 物品详情 | `0xb8980`；唯一调用点 `0xb9188` | BL patch 到 `make_desc_equip_gate`，再做详情按钮 PtrHook | 物品控件打开详情 | 先让原版生成菜单，再捕获当前 item，跳过装备/卸下 proc，接管使用/卖出/销毁 | 控件树重建会使失效指针不可用；操作前必须复核 item+bag+slot+cache。现码：`extension_bag_lifecycle.inc:728-770`、`extension_bag_equip.inc:620-681,985-1019`。 |
 | `UIEquip_ButtonDestroyExe` / `OKDestroyItem` | `0xb6240` / `0xb83d0` | 详情 PtrHook + popup OK/Cancel 槽劫持；不做 OK 全局 Native Hook | 装备页详情销毁 | 确认后逻辑清槽、释放扩展对象、持久化/刷新 | 当前剩余全局 popup 槽劫持仅卖出/销毁；装备页与商店 popup 状态不得互用。 |
 | `UIStore_BuyItem` / `FindSaveSlot` 两处 | `0xd242c`；callsite `0xd24a0`,`0xd2540` | callsite patch 到 `store_buy_find_slot_gate`，再由 SaveItem Hook 收编 | 商店购买普通货物和 CopyAsNewUID 路径 | 原版物理有槽原样购买；物理满而扩展有空位则放行到 SaveItem adopt | gate 返回值只表达“继续流程”，不表达扩展物理槽；扣款/入库失败退款仍是边界。现码：`extension_bag_store.inc:630-644,714-726`。 |
 | `UIStore_MakeDesc` / 商店详情卖出 | `0xd27a0`；callsite `0xd287c`；按钮 `0xd1818`；原版卖出 `0xd25f0` | 商店独立 BL patch + 商店详情 PtrHook + popup callback | 商店页扩展投影卖出 | 商店投影独立，先加钱、逻辑删除，失败减回；只刷新商店投影 | 禁止调用 `UIStore_RefreshInvenItem` 破坏整列扩展投影；不复用 UIEquip 详情状态。现码：`extension_bag_store.inc:439-557,559-613`。 |
@@ -115,10 +115,10 @@
 | 核对项 | 必须回答的问题 | 当前证据入口 |
 |---|---|---|
 | ABI | 参数宽度、返回值、out 参数是否与当前 hook/callsite 一致？ | `game_symbols.h` 的函数签名区；`inventory_hook_stage4.h:6-56` |
-| 物理域 | 是否扫描 `0..5`，是否由参数决定是否含任务袋 `5`？ | `rulebook.md:46-56,72-84`；旧 stage-1 静态契约已由 `56a477b` 的现行实现取代 |
+| 物理域 | 是否扫描 `0..5`，是否由参数决定是否含任务袋 `5`？ | `rulebook.md:46-56,72-84` |
 | 身份 | 当前指针能否同时由 descriptor、object、bag/slot 和 generation 证明？ | `extension_bag_ownership.inc:81-143` |
 | 所有权 | 成功、失败、合并、回滚各自由谁释放或 handover？ | `extension_bag_ownership.inc:34-78`；原版 `ITEMPOOL_Free` VMA `0x108160` |
-| 原版副作用 | 是否会改物理槽、更新快捷栏、刷新控件、触发任务或释放传入对象？ | 当前函数实现与 `game_symbols.h:268-270,458-463`；旧 stage-1 函数契约已由 `56a477b` 的现行实现取代 |
+| 原版副作用 | 是否会改物理槽、更新快捷栏、刷新控件、触发任务或释放传入对象？ | 当前函数实现与 `game_symbols.h:268-270,458-463` |
 | caller 覆盖 | 是函数全局入口，还是只有一个 UI/生产者 callsite？ | `native_inventory_hook.cpp:328-442`；商店 patch `extension_bag_store.inc:646-726` |
 | 锁 | 是否持有 `g_virtual_bag_mtx` 调用了刷新、原版函数或 `op_ok()`？ | `extension_bag_public_runtime.inc:277-324`；规则册锁纪律 |
 | 回滚 | 失败后是否验证槽位、对象内容、数量和 ledger，而不是只信返回值？ | `inventory_hook_stage4.cpp:64-80`；`extension_bag_equip.inc:100-152` |
@@ -129,7 +129,7 @@
 以下事实必须在调用方保留删后/写后验证：
 
 * `INVEN_RemoveItemDirect@0x103fd8` 的返回值不可信，成功删除仍可能返回 0；读取 `INVEN_pItem[bag][slot]` 是成功判定。
-* `INVEN_SaveItemDirect@0x103bf0` 的返回寄存器不代表槽号、旧对象或合并释放结果；caller 必须按原版已证明的分支语义处理。
+* `INVEN_SaveItemDirect@0x103bf0` 的返回寄存器不代表槽号、被替换对象或合并释放结果；caller 必须按原版已证明的分支语义处理。
 * `INVEN_RemoveItemData@0x1040a8` 的类别/数量回滚可能部分完成，不能按一次调用原子清空。
 * `CHAR_UseItemEx@0xeb670` 的 0/非 0 只代表当前效果路径是否成功；扩展消费是否发生还要通过 `ConsumeItem` Hook、descriptor 数量和 object 身份复核。
 * `UIEquip_OKConfrimUseItem@0xb8478` 是 void 回调，完成与否由 token finish、消费状态和详情清理证明，不以函数返回值判断。
@@ -143,7 +143,7 @@
 3. 先定义原版对象路径：参数、backup、原版返回值、物理槽副作用和对象释放点。
 4. 再定义扩展对象路径：身份分流、物化、逻辑状态提交、投影刷新、handle/generation 和失败回滚。
 5. 用 Host 测试覆盖原版优先、扩展 fallback、满包、堆叠、不可堆叠和 stale identity。
-6. 证据闭合后才评估旁路迁移；未完成真机生产者证据时保持“暂缓/保留”。
+6. 证据闭合后才评估旁路调整；未完成真机生产者证据时保持“暂缓/保留”。
 
 这套顺序特别适用于 `SaveItem`、`FindSaveSlot`、装备交换和 `ConsumeItem`：它们分别连接生产者漏斗、商店门禁、角色装备所有权和确认使用 token，任何一处先改机制再补边界都会扩大问题 B 的取证范围。
 
@@ -173,7 +173,7 @@
 ### 3.3 宽 Hook 禁令
 
 * 禁止因 `SaveItem` 目前登记 18 个 caller 就扩大到 `SaveItemDirect`、`SaveItemData` 或所有保存辅助；wrapper 只在 `SaveItem` 失败且 item 尚未进入物理库存时收编。
-* 禁止把 `FindItemSlot` 的 1 字节 output 改成扩展槽。裁定依据是 `game_symbols.h:391,626`、`rulebook.md:60-70`；旧 stage-1 静态契约已由 `56a477b` 的现行实现取代，该 output 的位布局只描述真实物理数组。
+* 禁止把 `FindItemSlot` 的 1 字节 output 改成扩展槽。裁定依据是 `game_symbols.h:391,626`、`rulebook.md:60-70`；该 output 的位布局只描述真实物理数组。
 * 禁止以一个 `FindSaveSlot` callsite、一个商店入口或一个 API endpoint 宣称所有生产者覆盖。
 * 禁止在持有 `g_virtual_bag_mtx` 时调用会触发缓存刷新的 `op_ok()`；跨层调用先释放锁并按 participant/transaction 规则处理。
 
@@ -195,15 +195,15 @@
 
 | 边界 | 裁定 | 现码/依据 |
 |---|---|---|
-| 任务袋 `5` | 任务物品按原版任务语义留在 `5`；普通扩展收编只允许目标 `0..4` 失败后转逻辑袋 | `rulebook.md:46-56`；旧 stage-1 静态契约已由 `56a477b` 的现行实现取代 |
-| 任务奖励分类 | 不把所有奖励统一改成扩展物品；先判任务物品、类别和 caller context | `runtime-architecture.md:294-305`；旧 stage-3 生产者裁定已由 `56a477b` 的现行实现取代 |
+| 任务袋 `5` | 任务物品按原版任务语义留在 `5`；普通扩展收编只允许目标 `0..4` 失败后转逻辑袋 | `rulebook.md:46-56` |
+| 任务奖励分类 | 不把所有奖励统一改成扩展物品；先判任务物品、类别和 caller context | `runtime-architecture.md:294-305` |
 | 开箱 | 不 Hook `ITEMSYSTEM_OpenItemBox`；由原版决定随机产物，SaveItem wrapper 只处理单件漏斗 | `game_inventory_use.inc:82-95`、`game_symbols.h:448` |
-| 拆包 | 不 Hook `ITEMSYSTEM_ProcessUnpack`；逐产物核对输入消费、部分失败和回滚 | `game_symbols.h:471`、`runtime-architecture.md:294-305`；旧 stage-3 旁路裁定已由 `56a477b` 的现行实现取代 |
-| 合成 | 不做全局 `MIXSYSTEM` Hook；保留模块旁路，5 个 caller 逐一核验，未证明完整逆操作不猜测回滚 | `game_patch_craft.inc`、`runtime-architecture.md:294-305`；旧 stage-3 旁路裁定已由 `56a477b` 的现行实现取代 |
+| 拆包 | 不 Hook `ITEMSYSTEM_ProcessUnpack`；逐产物核对输入消费、部分失败和回滚 | `game_symbols.h:471`、`runtime-architecture.md:294-305` |
+| 合成 | 不做全局 `MIXSYSTEM` Hook；保留模块旁路，5 个 caller 逐一核验，未证明完整逆操作不猜测回滚 | `game_patch_craft.inc`、`runtime-architecture.md:294-305` |
 
 `NetworkStore_AddItem` 的原版链仍保留，但不属于当前扩展背包生产者验收；其保存 callsite 仍属于完整保存协调清单。
 
-## 5. 旁路迁移和保留
+## 5. 当前路径与保留边界
 
 ### 保留
 
@@ -213,13 +213,13 @@
 
 * ownership ledger 耗尽拒绝登记；触摸窗口内的对象释放进入定长延迟回收队列，排空前检查投影控件和模块对象缓存引用。
 
-### 迁移
+### 当前待补
 
-* 查询 Hook 维持 original-first/fallback，但调用方逐步统一到 `inventory_item_ref_at` 等身份化引用。
-* 使用/强化/宝石中的重复原版效果模拟逐项删除；原版效果保留，扩展只承接物化、消费、payload、所有权和 UI 同步。
-* `SaveItem` 统一收编已存在，但生产者 caller 仍需补 context、任务域、失败释放和真机证据。
+* 查询 Hook 维持 original-first/fallback；调用方使用 `inventory_item_ref_at` 等身份化引用。
+* 使用/强化/宝石保留原版效果，扩展只承接物化、消费、payload、所有权和 UI 同步。
+* `SaveItem` 统一收编已存在；生产者 caller 仍需补 context、任务域、失败释放和真机证据。
 
-### 不批准退役
+### 保持条件
 
 没有同时满足全部 caller 覆盖、原版/扩展成功失败、物理槽和任务袋 sentinel、对象释放、堆叠/payload、保存边界、Host 与真机回归前，任何旁路不得删除。问题 B 也不能因为 0x18 单一 owner、物理快照 guard 或 pre/post 插桩存在就标记解决。
 
@@ -227,13 +227,13 @@
 
 * 空槽合法状态要求 descriptor 为空、object 为空、handle 为 0、`active=false`、`pending_release=false`；`extension_bag_ownership.inc:81-93`。
 * `module_use_begin_locked` 为同一对象递增 generation 并绑定 owner thread；finish/abort 必须匹配 bag、slot、item、generation、owner 和当前 object，见 `extension_bag_ownership.inc:146-244`。
-* active 时释放只能由匹配 token 标为 pending-release；finish 再完成释放。无 token、陈旧 object 或不同 owner 均拒绝，见 `extension_bag_ownership.inc:247-295`。
+* active 时释放只能由匹配 token 标为 pending-release；finish 再完成释放。无 token、失效 object 或不同 owner 均拒绝，见 `extension_bag_ownership.inc:247-295`。
 * 交换必须同时移动 descriptor、object、category/hash、handle 和 use state；缓存与 descriptor 不一致时先拒绝，不得先释放后尝试回滚，见 `extension_bag_transaction.inc:352-538`。
 * 触摸窗口内不得直接释放借出对象；视图恢复先归还 view borrow，再恢复原版容量和控件。完整规则只在 `rulebook.md` 维护。
 
 ## 7. 问题 B：未解决 + 已布防
 
-事实是扩展袋 0 的双非空交换成功后，原版袋 0 同号 b 槽物品可消失，视图重开仍消失，保存后固化。F1 drop 三态门、G 轮 rollback/handle/视图归属校验、H 轮 `moveMergeEnabled` 解耦、0x18 单一 owner、物理 `0..5×16` 快照和 `orig_event pre/post` 插桩都没有消除复现。取证缺口仍是 H3/H4 日志未采集，`ERROR physical inventory mutation` 与 digest 是否触发未知；素材：`archive/extension-bag/swap-loss-log-excerpt-20260908.txt`（关键段摘录）。
+事实是扩展袋 0 的双非空交换成功后，原版袋 0 同号 b 槽物品可消失，视图重开仍消失，保存后固化。当前 drop 三态门、rollback/handle/视图归属校验、`moveMergeEnabled` 解耦、0x18 单一 owner、物理 `0..5×16` 快照和 `orig_event pre/post` 插桩均未形成修复证明。取证缺口仍是 H3/H4 日志未采集，`ERROR physical inventory mutation` 与 digest 是否触发未知；素材：`archive/extension-bag/swap-loss-log-excerpt-20260908.txt`（关键段摘录）。
 
 当前布防包括：
 
@@ -242,23 +242,9 @@
 3. `SAVE_Save` 内唯一 `SAVE_SaveInventory` BL 在写盘前恢复投影，见 `extension_bag_render.inc:373-390` 与 `extension_bag_lifecycle.inc:609-646`。
 4. 但快照恢复的是指针数组，不是被原版释放/破坏的对象内存；若原版保存序列继续读取被毁内存，物理空槽或坏记录仍可能被固化。因此问题 B 仍是“未解决+已布防”，不得改写为修复完成。
 
-## 8. 旧结论推翻清单
+## 8. 维护与验收入口
 
-以下旧结论被当前代码或新静态证据推翻，历史册不再作为当前决策依据：
-
-1. 旧册“`SaveItem` 不做全局入口 Hook、扩展只在 caller 旁路兜底”——现码已安装 `SaveItem` Native Hook，且统一 wrapper 在 backup 失败后 adopt，见 `native_inventory_hook.cpp:35,184-199,346-360,439-442`。
-2. 旧册“商店购买可直接依赖原版 `FindSaveSlot` 失败语义”——现码新增 `0xd24a0/0xd2540` 两处 gate，使扩展空位购买能继续进入 SaveItem。
-3. 旧册“确认使用可依赖原版 `FindItemSlot`”——扩展对象不在物理数组，现码改由 `UIEquip_OKConfrimUseItem@0xb8478` 入口按身份接管。
-4. 旧册“扩展宝石/装备可以沿 `RemoveItemDirect` 或直接原版装备链处理”——现码明确改为逻辑删除、受控物化和装备交换适配；旧 stage-3 确定性修复裁定已由 `56a477b` 的现行实现取代。
-5. 旧册“只要 0x18 单一 owner 和物理快照 guard 存在即可消除交换丢失”——H 轮真机仍复现，问题 B 仍未解决。
-
-旧 stage-1/2/3 文档中仍可追溯的物理袋 `0..5`、普通目标 `0..4`、任务袋 `5`、扩展逻辑袋
-`6..10`、`FindItemSlot` 不伪造物理编码、合成/开箱/拆包不做宽 Hook 和旁路保留结论，均已由
-`56a477b` 的现行实现取代；当前若与旧册正文冲突，以本册现码引用和 `game_symbols.h` 为准。
-
-## 9. 维护与验收入口
-
-* 修改函数决策时，必须同步检查 `game_symbols.h` 的 VMA、当前 wrapper、caller 面和对象释放边界；不接受手填旧地址。
+* 修改函数决策时，必须同步检查 `game_symbols.h` 的 VMA、当前 wrapper、caller 面和对象释放边界；不接受手填地址。
 * Hook 变更需验证原版对象 backup、扩展对象识别、递归 guard、安装回滚和 token/generation；生产者变更需逐 caller 记录原版满/未满、扩展有空/全满、堆叠和失败释放。
-* 本册不批准删除 `extension_bag_transaction.inc`、`extension_bag_api_impl.inc`、`extension_bag_equip.inc` 或 P6 保存协调器；退役结论必须落到对应操作验收卡。
+* 本册不批准删除 `extension_bag_transaction.inc`、`extension_bag_api_impl.inc`、`extension_bag_equip.inc` 或 P6 保存协调器；移除结论必须落到对应操作验收卡。
 * 相关静态验收：`git diff --check`、相关 Host tests、`scripts/maintenance/check_symbols.py`。Android 构建与真机验收由主代理按阶段要求执行。

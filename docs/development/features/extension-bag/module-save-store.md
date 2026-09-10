@@ -37,7 +37,10 @@ pending 当前明确为 `durable=false`，其状态只会在后续 prepare snaps
 | 7 | `0x15da84` | `0x97ff2edf` | `NetworkStore_Process` | patch 到协调器；网络商店流程保存 |
 | 8 | `0x15dcf0` | `0x97ff2e44` | `NetworkStore_Process` | 同一流程的第二个完整保存点，独立校验 |
 
-这 8 处是“完整保存请求”的 patch 清单，不是 8 个不同业务。旧审计另登记 `SAVE_LoadCharacterAll` 内部特殊保存调用点 `0x129f24`，但它不是 `patch_all_save_callsites` 八项，当前 `game_symbols.h` 也没有为该调用点建立独立 `F_*_VMA` 常量；因此只作为未 patch 的历史定位，不能混入本表。完整保存函数 VMA 是 `F_SAVE_VMA=0x129600`（`game_symbols.h:348`），由 `module_save.cpp` 的 `fn_save` 调用。
+这 8 处是“完整保存请求”的 patch 清单，不是 8 个不同业务。`SAVE_LoadCharacterAll` 内部调用点
+`0x129f24` 不属于 `patch_all_save_callsites` 八项，当前 `game_symbols.h` 也没有为该调用点
+建立独立 `F_*_VMA` 常量，因此不纳入本表。完整保存函数 VMA 是 `F_SAVE_VMA=0x129600`
+（`game_symbols.h:348`），由 `module_save.cpp` 的 `fn_save` 调用。
 
 ### 2.2 `SAVE_SaveInventory` 内部 gate
 
@@ -94,7 +97,7 @@ wrapper 只负责恢复投影后调用原版子步骤，不能据此认为保存
 
 commit 读取并严格校验 journal：tx、slot、stage、section 数量、name 和 version 必须匹配当前 participant；随后 `ModuleSaveStore.replaceSections` 替换 section 并删除 `module.save.journal`，代码 `ModuleSaveCoordinator.kt:48-90`。已知原版失败时 `abortKnownFailedSave` 只删除同 tx 协调记录，代码 `:92-103`。
 
-它不理解 bag/slot、payload 方向或对象所有权，不保存 native 指针，也不决定事务重放/回滚。当前实现没有独立的启动 `recover()` 调用；因此进程在“原版成功但 commit 尚未完成”窗口中断时，残留协调 journal 的自动恢复语义仍是缺口，不能从旧设计文字推导已解决。
+它不理解 bag/slot、payload 方向或对象所有权，不保存 native 指针，也不决定事务重放/回滚。当前实现没有独立的启动 `recover()` 调用；因此进程在“原版成功但 commit 尚未完成”窗口中断时，残留协调 journal 的自动恢复语义仍是缺口。
 
 ### 4.2 `extensionbags.journal`：ExtensionBagJournal
 
@@ -129,7 +132,7 @@ repeat sectionCount:
   u32 payloadLength
   u8[payloadLength] payload
   u32 payloadCrc32
-u32 containerCrc32       // 覆盖此前全部字节
+u32 containerCrc32       // 覆盖前述全部字节
 ```
 
 section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不超过 4 MiB；未知 section 在替换时保留，只有显式 `removeSection` 才删除。读取时校验 magic、格式、slot、重复名、版本、长度、section CRC、container CRC 和尾部无多余字节，代码 `ModuleSaveStore.kt:194-227`。
@@ -141,7 +144,7 @@ section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不�
 | `extensionbags.items` | 4 | 5 个扩展逻辑袋的类型、容量、descriptor、数量、base64 原版 payload、必要的 pending 状态 | `ExtensionBagUiBridge`；常量 `ExtensionBagUiBridge.kt:18-24` |
 | `module.save.journal` | 1 | 本次完整保存的协调 envelope 和待提交 section 快照 | `ModuleSaveCoordinator` |
 | `extensionbags.journal` | 1 | 扩展功能事务 journal；当前 helper 存在，但常规 native pending 尚未由它持久化 | `ExtensionBagJournal.kt:17,69` |
-| `virtualbags.items` | 旧版本 | 兼容读取和迁移来源，不是新的写入目标 | `ExtensionBagUiBridge.kt:18-20,60-89` |
+| `virtualbags.items` | 兼容版本 | 兼容读取来源，不是新的写入目标 | `ExtensionBagUiBridge.kt:18-20,60-89` |
 
 `extensionbags.items` 只保存序列化 payload，不保存 `g_module_objects`、`g_module_object_handles`、控件指针或原版 `INVEN_pItem` 记录；加载时用 `SAVE_LoadItem` 重建对象，代码 `extension_bag_runtime.inc:459-468`。
 
@@ -183,7 +186,7 @@ section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不�
 
 进入世界后，`virtual_bag_module_save_prepare` 会先 `recover_pending_transaction_locked`，顺序为：域校验 → payload 校验 → 恢复原版视图 → 按方向决定 action。ext→orig 只有在目标 payload 已存在，或重建对象并经 `SaveItemOnEmpty` 写入、再序列化确认目标后才清 pending；失败保留 pending，代码 `extension_bag_runtime.inc:646-778`。ext→ext 不重放到原版，只按 rollback 语义清理非法/损坏 pending。
 
-恢复是隔离而非猜测：任务袋、越界 bag/slot、非法 payload、陈旧 identity、目标内容不匹配时不自动“修正”为普通袋，也不调用 `RemoveItemDirect` 删除未知对象。加载失败则使用空扩展状态并记录日志，原版 `save*.dat` 仍可继续读取。
+恢复是隔离而非猜测：任务袋、越界 bag/slot、非法 payload、失效 identity、目标内容不匹配时不自动“修正”为普通袋，也不调用 `RemoveItemDirect` 删除未知对象。加载失败则使用空扩展状态并记录日志，原版 `save*.dat` 仍可继续读取。
 
 ### 6.3 `module.save.journal` 恢复缺口
 
@@ -212,7 +215,7 @@ force-stop，保留 `module.save.journal`、`extensionbags.items`、last-good、
 | 主 sidecar 损坏 | quarantine primary，回退 last-good；都坏则空容器 | 不污染原版存档 |
 | payload 无法重建 | `load_item_payload_exact` 拒绝并记录原因；pending 按隔离处理 | 不把坏对象交给原版对象池或物理数组 |
 
-### 7.2 “物理空槽被固化”的机理
+### 7.2 “物理空槽被固化”的当前机理边界
 
 问题 B 的口径必须是“未解决+已布防”。当前可确认的根因假设是：
 
@@ -221,7 +224,7 @@ force-stop，保留 `module.save.journal`、`extensionbags.items`、last-good、
 3. 若原版事件已经清槽、释放或破坏了原指针所指对象，恢复指针并不能恢复对象内容。之后 `SAVE_SaveInventory@0x127d8c` 的序列化过程可能继续读取被毁内存，读出的“空/坏”状态便会被原版保存固化。
 4. `save_inventory_wrapper` 能在保存前恢复投影，但它无法重建已经被原版释放的对象，也没有证明快照数组恢复覆盖所有对象内容和所有并发写入。
 
-因此 H 轮的 0x18 单一 owner、物理快照恢复、`orig_event pre/post` 插桩只是防线，不是修复证明。H3/H4 复测日志仍缺少 `ERROR physical inventory mutation` 和 pre/post digest 触发证据；不得将保存册写成“保存已修复”。
+因此 0x18 单一 owner、物理快照恢复、`orig_event pre/post` 插桩只是防线，不是修复证明。H3/H4 复测日志仍缺少 `ERROR physical inventory mutation` 和 pre/post digest 触发证据；不得将保存册写成“保存已修复”。
 
 ## 8. 拾取、奖励、商店和保存交互边界
 
@@ -239,19 +242,11 @@ force-stop，保留 `module.save.journal`、`extensionbags.items`、last-good、
 
 ### 8.3 保存中的 in-flight 事务
 
-保存 prepare 前必须恢复扩展视图；`virtual_bag_module_save_prepare` 还会尝试恢复 pending。prepare snapshot 是逻辑状态的不可变序列化副本，保存期间不能继续用已改变的 UI 投影或陈旧对象覆盖它。当前实现通过 `g_virtual_bag_mtx` 串行化扩展 participant，但 Java sidecar 调用发生在该锁内，见 `extension_bag_public_runtime.inc:249-255`、`extension_bag_persistence.cpp:161-197`；这形成 native lock→JNI→ModuleSaveStore lock 的跨层耦合，后续必须由 rulebook 登记并验证重入/阻塞边界。
+保存 prepare 前必须恢复扩展视图；`virtual_bag_module_save_prepare` 还会尝试恢复 pending。prepare snapshot 是逻辑状态的不可变序列化副本，保存期间不能继续用已改变的 UI 投影或失效对象覆盖它。当前实现通过 `g_virtual_bag_mtx` 串行化扩展 participant，但 Java sidecar 调用发生在该锁内，见 `extension_bag_public_runtime.inc:249-255`、`extension_bag_persistence.cpp:161-197`；这形成 native lock→JNI→ModuleSaveStore lock 的跨层耦合，后续必须由 rulebook 登记并验证重入/阻塞边界。
 
 保存成功后 commit 重新序列化当前 state，而不是直接从 participant prepare 参数传入 payload；因此 commit 前若有未被禁止的并发状态变化，可能出现“原版存的是 prepare 前物理状态，sidecar 是 commit 时逻辑状态”的窗口。当前主线程锁和保存 participant 顺序是防线，但不构成并发模型证明。
 
-## 9. 旧结论推翻清单
-
-1. 旧册把 `module.save.journal` 与 `extensionbags.journal` 合并为“同一个协调/功能 journal”——现码存在两个 section、两个所有者和两套 payload；本册明确分离。
-2. 旧册宣称加载时统一读取协调 journal 并由 participant `recover` 自动重放——当前 `ModuleSaveCoordinator.kt` 没有 `recover`，native 只实现 `extensionbags.items` 的 pending 恢复；该自动恢复结论撤销并登记为缺口。
-3. 旧册把所有 pending 都描述成独立 `extensionbags.journal` 持久化——当前 `txn_record_pending_locked` 注明 `durable=false`，正常路径由 prepare snapshot 随 `extensionbags.items` 捕获；独立功能 journal helper 尚未被常规事务调用。
-4. 旧册把 8 个保存点表述为所有保存相关 patch——现码区分 8 个完整 `SAVE_Save` caller patch 与 `SAVE_SaveInventory` 内部 gate；两者不能混为 9 个完整保存入口。
-5. 旧册把问题 B 的快照恢复写成可消除丢失——指针数组恢复不能恢复已毁对象内容，物理空槽仍可能被保存序列固化；当前口径仍是未解决+已布防。
-
-## 10. 验收与维护
+## 9. 验收与维护
 
 * 每次修改保存入口，先按 `game_symbols.h:476-486` 和 `extension_bag_lifecycle.inc:54-68,609-646` 对码，确认原始指令、patch 数和 `fn_save` 返回语义。
 * 每次修改 sidecar，验证 MSAV/version/slot/generation、section CRC、last-good、未知 section 保留和 identity gate；不得写入 native 指针。
