@@ -788,7 +788,7 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
     return false;
 }
 
-bool route_projected_session_drop_locked(int64_t x, int64_t y) {
+bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
     if (g_extension_drag_session.phase == virtual_bag::DragPhase::kIdle ||
         g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
@@ -851,13 +851,31 @@ bool route_projected_session_drop_locked(int64_t x, int64_t y) {
     const bool should_equip = target_kind == virtual_bag::DragTargetKind::kExtensionTab &&
                               extension_source_should_equip_locked(target_bag);
     bool handled = false;
-    if (should_equip) {
+    const int source_bag = g_extension_drag_session.source_bag;
+    const int source_slot = g_extension_drag_session.source_slot;
+    void* material = virtual_bag::valid_index(source_bag) && source_slot >= 0 &&
+        source_slot < virtual_bag::kSlotCount
+        ? g_module_objects[source_bag][source_slot] : nullptr;
+    void* target_item = target_slot >= 0 && target_slot < g_virtual_bag_state.capacities[target_bag]
+        ? g_module_objects[target_bag][target_slot] : nullptr;
+    const int source_category = virtual_bag::valid_index(source_bag) && source_slot >= 0 &&
+        source_slot < virtual_bag::kSlotCount
+        ? g_virtual_bag_state.items[source_bag][source_slot].category : 0;
+    const bool source_is_apply_material =
+        (fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
+        (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
+    const bool apply_candidate = source_bag == target_bag && target_slot >= 0 &&
+        source_is_apply_material && material != nullptr && target_item != nullptr &&
+        item_is_equip(target_item);
+    if (apply_candidate) {
+        handled = apply_extension_material_to_slot_locked(
+            lock, source_bag, source_slot, target_bag, target_slot, material, target_item);
+    } else if (should_equip) {
         handled = equip_extension_source_on_tab_locked(
-            target_bag, g_extension_drag_session.source_bag,
-            g_extension_drag_session.source_slot);
+            target_bag, source_bag, source_slot);
     } else {
         handled = move_extension_to_extension_locked(
-            g_extension_drag_session.source_bag, g_extension_drag_session.source_slot,
+            source_bag, source_slot,
             target_bag, target_slot);
         if (handled) {
             persist_state_locked();

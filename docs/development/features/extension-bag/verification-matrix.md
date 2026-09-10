@@ -126,8 +126,8 @@
   页签并读取扩展逻辑袋、原版物理袋和 session。
 - **预期**：①扩展背包源装备到空页签并清理原扩展源；②非背包类扩展源提交 ext→ext
   移动；③原版源不进入扩展事务；三种操作均无 stale moving。触摸窗口内释放先入队，
-  draw-end 关闭窗口后再按控件/槽位引用排空。
-- **日志锚**：`tab commit handled=1`、`deferred free enqueue`、`deferred free drain`；
+  队列满时保留 custody 且事务继续成功，draw-end 关闭窗口后再按控件/槽位引用排空。
+- **日志锚**：`tab commit handled=1`、`deferred free enqueue`、`deferred free queue full; custody retained`、`deferred free drain`；
   原版对照使用原版 `MoveItem pre/post` 或 tab proc 日志，不能只用 UI 结果判定。
 - **关联规则**：R-02、R-19、R-30、R-35、R-36；S-05 已解决。
 
@@ -513,7 +513,7 @@
 | R-12 | VM-18 | 商店投影刷新无现成 Host，真机观察整列不覆盖。
 | R-13 | VM-16、VM-17、VM-18 | popup 隔离无现成 Host，真机覆盖两宿主切换。
 | R-14 | VM-24 | 详情 proc 排除只能由真实 PtrHook/按钮行为确认。
-| R-15 | VM-03、VM-04、VM-06、VM-16、VM-24 | 现有 ledger 无 active/pending token 专用断言，Host 缺口。
+| R-15 | VM-03、VM-04、VM-06、VM-16、VM-24 | 释放守卫静态检查 active 与 pending_release；现有 ledger 无专用断言，Host 缺口。
 | R-16 | VM-06、VM-10、VM-12、VM-13 | `test_p44_transaction_stages` 只证明 descriptor 模型；VM-13 增加归一化 payload；问题 B 真机单独保留。
 | R-17 | VM-06、VM-12、VM-14 | stale endpoint 当前无专用 Host；失败/回滚需真机与缺口。
 | R-18 | VM-03、VM-25 | 锁序/刷新重入必须运行时观察，Host 只可做 seam。
@@ -534,7 +534,7 @@
 | R-33 | VM-28 | 五个吞掉 `0x18` 出口统一经 `complete_original_release_cleanup_locked`；handled/unhandled 变体和锁外原版清理需真机日志确认。
 | R-34 | VM-B01～VM-B04 | Host 可静态核对六条件表达式；真机已确认 draw-end 不逐帧写控件、非活 stale moving 被清理。 |
 | R-35 | S-05、VM-29 | 页签先于网格解析；真机已确认页签装备、跨页签移动和原版对照。 |
-| R-36 | S-05、VM-29 | 触摸窗口释放使用延迟队列；以 `deferred free enqueue/drain` 和 `tab commit` 日志核对。 |
+| R-36 | S-05、VM-29 | 触摸窗口释放使用延迟队列；队列满转 custody 保管且事务继续；以 `deferred free enqueue/drain`、`queue full; custody retained` 和 `tab commit` 日志核对。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 

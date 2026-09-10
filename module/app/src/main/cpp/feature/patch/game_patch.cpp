@@ -8,6 +8,7 @@
 #include "game_ptr_hook.h"
 #include "stack_codec.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
+#include "feature/patch/native_inventory_hook.h"
 
 #include <android/log.h>
 #include <atomic>

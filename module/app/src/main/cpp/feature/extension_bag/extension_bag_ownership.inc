@@ -13,6 +13,10 @@ constexpr size_t kDeferredFreeQueueCapacity = 16;
 std::array<DeferredItemFree, kDeferredFreeQueueCapacity> g_deferred_free_queue{};
 size_t g_deferred_free_queue_head = 0;
 size_t g_deferred_free_queue_size = 0;
+// 账本最多同时追踪 ownership::kLedgerCapacity 个对象；队列满时使用该有界
+// 保管区承接剩余对象，保证 custody 不丢失且事务不会因回收排队失败而失败。
+std::array<DeferredItemFree, ownership::kLedgerCapacity> g_deferred_free_custody{};
+size_t g_deferred_free_custody_size = 0;
 
 bool object_touch_window_active_locked();
 
@@ -38,15 +42,27 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
         const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
         if (g_deferred_free_queue[index].item == item) return true;
     }
+    for (size_t index = 0; index < g_deferred_free_custody_size; ++index) {
+        if (g_deferred_free_custody[index].item == item) return true;
+    }
+    const DeferredItemFree entry = {
+        item, handle, generation, deferred_free_now_ms_locked()};
     if (g_deferred_free_queue_size >= kDeferredFreeQueueCapacity) {
-        VIRTBAG_LOG("ERROR deferred free queue full item=%p handle=%u generation=%llu", item,
-                    handle, static_cast<unsigned long long>(generation));
-        return false;
+        // 正常调用方均持有 ownership ledger handle；该保管区容量覆盖 ledger
+        // 上限，因此队列满不会把释放失败传播给事务或丢失对象指针。
+        if (g_deferred_free_custody_size >= g_deferred_free_custody.size()) {
+            VIRTBAG_LOG("ERROR deferred free custody overflow item=%p handle=%u generation=%llu",
+                        item, handle, static_cast<unsigned long long>(generation));
+            return false;
+        }
+        g_deferred_free_custody[g_deferred_free_custody_size++] = entry;
+        VIRTBAG_LOG("deferred free queue full; custody retained item=%p handle=%u generation=%llu",
+                    item, handle, static_cast<unsigned long long>(generation));
+        return true;
     }
     const size_t tail = (g_deferred_free_queue_head + g_deferred_free_queue_size) %
                         kDeferredFreeQueueCapacity;
-    g_deferred_free_queue[tail] = {
-        item, handle, generation, deferred_free_now_ms_locked()};
+    g_deferred_free_queue[tail] = entry;
     ++g_deferred_free_queue_size;
     VIRTBAG_LOG("deferred free enqueue item=%p handle=%u generation=%llu", item, handle,
                 static_cast<unsigned long long>(generation));
@@ -92,7 +108,7 @@ bool deferred_item_referenced_locked(void* item) {
 
 void drain_deferred_frees_locked() {
     if (object_touch_window_active_locked()) return;
-    const size_t count = g_deferred_free_queue_size;
+    const size_t count = g_deferred_free_queue_size + g_deferred_free_custody_size;
     if (count == 0) return;
 
     std::array<DeferredItemFree, kDeferredFreeQueueCapacity> kept{};
@@ -115,8 +131,25 @@ void drain_deferred_frees_locked() {
         g_deferred_free_queue[index] = kept[index];
     }
     g_deferred_free_queue_size = kept_count;
+
+    std::array<DeferredItemFree, ownership::kLedgerCapacity> kept_custody{};
+    size_t kept_custody_count = 0;
+    for (size_t index = 0; index < g_deferred_free_custody_size; ++index) {
+        const DeferredItemFree entry = g_deferred_free_custody[index];
+        if (deferred_item_referenced_locked(entry.item) || fn_itempool_free == nullptr) {
+            kept_custody[kept_custody_count++] = entry;
+            continue;
+        }
+        fn_itempool_free(entry.item);
+        ++freed_count;
+    }
+    g_deferred_free_custody = {};
+    g_deferred_free_custody_size = kept_custody_count;
+    for (size_t index = 0; index < kept_custody_count; ++index) {
+        g_deferred_free_custody[index] = kept_custody[index];
+    }
     VIRTBAG_LOG("deferred free drain count=%zu freed=%zu kept=%zu", count, freed_count,
-                kept_count);
+                kept_count + kept_custody_count);
 }
 
 void log_ownership_audit_locked(const char* context) {
@@ -241,6 +274,11 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
         return false;
     }
     const ModuleUseState& use = g_module_object_use[bag][slot];
+    if (use.pending_release) {
+        VIRTBAG_LOG("module object release rejected while pending release context=%s bag=%d slot=%d item=%p",
+                    context, bag, slot, item);
+        return false;
+    }
     if (!use.active) return true;
     const bool token_matches = token != nullptr && token->item == item &&
                                token->item == use.item &&

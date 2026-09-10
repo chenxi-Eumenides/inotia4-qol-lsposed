@@ -33,6 +33,10 @@
 #include <thread>
 #include <unistd.h>
 
+bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
+                                             int src_bag, int src_slot, int dst_bag,
+                                             int dst_slot, void* material, void* target_item);
+
 namespace {
 
 constexpr size_t kPopupStateSize = 0x40;
@@ -274,13 +278,15 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
             ? fn_ui_equip_get_item_slot_index(control) : -1;
         const bool extension_source =
             source_item != nullptr && module_slot_of_item_locked(source_item, &source_bag, &source_slot);
-        const bool source_is_jewel = extension_source &&
-            fn_is_jewel != nullptr &&
-            fn_is_jewel(g_virtual_bag_state.items[source_bag][source_slot].category) != 0;
+        const int source_category = extension_source
+            ? g_virtual_bag_state.items[source_bag][source_slot].category : 0;
+        const bool source_is_apply_material = extension_source &&
+            ((fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
+             (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0));
         const bool target_is_equip_slot = target_item != nullptr && item_is_equip(target_item) &&
             target_slot_index >= 16;
         if (!stage4_is_extension_equip_control_source(
-                event, extension_source, source_is_jewel, target_is_equip_slot)) {
+                event, extension_source, source_is_apply_material, target_is_equip_slot)) {
             return VirtualBagEquipControlEventResult::kNotExtension;
         }
 

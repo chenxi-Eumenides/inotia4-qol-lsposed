@@ -423,11 +423,14 @@
 
 ### R-15 active/pending_release 对象不可释放或复用
 
-- **规则一句话**：active 或 pending_release 对象必须拒绝替换、释放和槽复用；ownership ledger 耗尽时拒绝登记；触摸窗口内的释放请求必须进入定长延迟回收队列并以成功释放路径返回，排空前通过投影控件和对象缓存引用检查。
+- **规则一句话**：active 或 pending_release 对象必须拒绝替换、释放和槽复用；释放守卫即使
+  `active=false` 也必须拒绝 `pending_release=true` 的重复释放并记录日志；ownership ledger
+  耗尽时拒绝登记；触摸窗口内的释放请求必须进入定长延迟回收队列并以成功释放路径返回，
+  排空前通过投影控件和对象缓存引用检查。
 - **为什么**：`module_slot_is_assignable_locked` 和 release guard 同时检查 token 状态；`retire_custody_item_locked` 在触摸窗口内只退 custody、不立即物理释放，队列排空由 draw-end 安全点执行（`extension_bag_ownership.inc`）。
 - **典型破坏方式**：确认使用尚未完成时释放对象，产生悬挂指针和 token mismatch；在无可用 handle 时继续登记对象。
 - **验证锚**：`deferred free enqueue`/`deferred free drain`；S-05、VM-29；源码
-  `extension_bag_ownership.inc:35-53,71-119,147-171`。
+  `extension_bag_ownership.inc:35-53,71-119,147-171,237-254`。
 
 ### R-16 交换必须同步 descriptor/object/hash/handle
 
@@ -588,13 +591,15 @@
 ### R-36 触摸窗口释放必须延迟回收
 
 - **规则一句话**：触摸窗口内的释放请求必须先进入延迟释放队列并返回成功，禁止直接调用
-  `ITEMPOOL_Free`，也不得因触摸窗口活动而拒绝事务提交；非触摸窗口的排空只在无投影控件
-  和逻辑槽引用时调用 `ITEMPOOL_Free`。
+  `ITEMPOOL_Free`，也不得因触摸窗口活动或延迟队列已满而拒绝事务提交；队列满时将对象放入
+  有界 custody 保管区，保持对象 live，事务继续成功。非触摸窗口的排空只在无投影控件和
+  逻辑槽引用时调用 `ITEMPOOL_Free`。
 - **为什么**：触摸窗口仍可能由 moving 控件、projection 或逻辑槽持有对象；直接释放或
   拒绝 source release 会分别形成 UAF 风险或 `extension merge source release rejected`
-  事务失败。队列、引用检查和 draw-end 排空见 `extension_bag_ownership.inc:35-53,71-119,147-171`
-  与 `extension_bag_render.inc:712-770`。
-- **验证锚**：日志 `deferred free enqueue`/`deferred free drain`；S-05、VM-29。
+  事务失败。队列、队列满时的 custody 保管区、引用检查和 draw-end 排空见
+  `extension_bag_ownership.inc:35-53,71-119,147-171` 与 `extension_bag_render.inc:712-770`。
+- **验证锚**：日志 `deferred free enqueue`/`deferred free queue full; custody retained`/
+  `deferred free drain`；S-05、VM-29。
 
 ## §6 禁止事项汇总
 

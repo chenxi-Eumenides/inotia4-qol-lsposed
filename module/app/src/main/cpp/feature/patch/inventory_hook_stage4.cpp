@@ -120,9 +120,9 @@ int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem iden
 }
 
 bool stage4_is_extension_equip_control_source(uint64_t event, bool extension_source,
-                                               bool source_is_jewel,
+                                               bool source_is_apply_material,
                                                bool target_is_equip_slot) {
-    return event == 0x04 && extension_source && source_is_jewel && target_is_equip_slot;
+    return event == 0x04 && extension_source && source_is_apply_material && target_is_equip_slot;
 }
 
 bool stage4_finish_requires_abort(bool finished) {

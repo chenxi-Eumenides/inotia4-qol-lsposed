@@ -168,6 +168,7 @@ bool bridge_init() {
     fn_is_jewel = reinterpret_cast<IsJewelFn>(g_base + fn_resolve("F_IS_JEWEL_VMA", F_IS_JEWEL_VMA));
     fn_enchant_item = reinterpret_cast<EnchantItemFn>(g_base + fn_resolve("F_ENCHANT_ITEM_VMA", F_ENCHANT_ITEM_VMA));
     fn_is_enchant_scroll = reinterpret_cast<IsEnchantScrollFn>(g_base + fn_resolve("F_IS_ENCHANT_SCROLL_VMA", F_IS_ENCHANT_SCROLL_VMA));
+    fn_save_is_ok = reinterpret_cast<SaveIsOkFn>(g_base + fn_resolve("F_SAVE_IS_OK_VMA", F_SAVE_IS_OK_VMA));
     fn_char_initialize_status = reinterpret_cast<CharInitializeStatusFn>(g_base + fn_resolve("F_CHAR_INITIALIZE_STATUS_VMA", F_CHAR_INITIALIZE_STATUS_VMA));
     fn_char_initialize_skill = reinterpret_cast<CharInitializeSkillFn>(g_base + fn_resolve("F_CHAR_INITIALIZE_SKILL_VMA", F_CHAR_INITIALIZE_SKILL_VMA));
     fn_char_set_action_id = reinterpret_cast<CharSetActionIdFn>(g_base + fn_resolve("F_CHAR_SET_ACTION_ID_VMA", F_CHAR_SET_ACTION_ID_VMA));
@@ -291,6 +292,7 @@ bool bridge_init() {
     fn_create_item = reinterpret_cast<CreateItemFn>(g_base + fn_resolve("F_CREATE_ITEM_VMA", F_CREATE_ITEM_VMA));
     fn_control_object_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
     fn_ui_equip_is_apply_stuff = reinterpret_cast<UiEquipIsApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_IS_APPLY_STUFF_VMA", F_UIEQUIP_IS_APPLY_STUFF_VMA));
+    fn_ui_equip_apply_stuff = reinterpret_cast<UiEquipApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_APPLY_STUFF_VMA", F_UIEQUIP_APPLY_STUFF_VMA));
     fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));
     fn_ui_equip_refresh_item_area = reinterpret_cast<UiEquipRefreshItemAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA));
     fn_ui_equip_refresh_bag_area = reinterpret_cast<UiEquipRefreshBagAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_BAG_AREA_VMA", F_UIEQUIP_REFRESH_BAG_AREA_VMA));

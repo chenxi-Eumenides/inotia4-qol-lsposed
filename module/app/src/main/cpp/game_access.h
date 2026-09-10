@@ -61,6 +61,7 @@ extern PutJewelFn fn_put_jewel;
 extern IsJewelFn fn_is_jewel;
 extern EnchantItemFn fn_enchant_item;
 extern IsEnchantScrollFn fn_is_enchant_scroll;
+extern SaveIsOkFn fn_save_is_ok;
 extern CharInitializeStatusFn fn_char_initialize_status;
 extern CharInitializeSkillFn fn_char_initialize_skill;
 extern CharSetActionIdFn fn_char_set_action_id;
@@ -178,6 +179,7 @@ extern CreateItemFn fn_create_item;
 // UIEquip 背包面板控件（move-merge v0.6.8）
 extern ControlObjectGetDataFn fn_control_object_get_data;
 extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
+extern UiEquipApplyStuffFn fn_ui_equip_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;
 extern UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area;
 extern UiEquipRefreshBagAreaFn fn_ui_equip_refresh_bag_area;

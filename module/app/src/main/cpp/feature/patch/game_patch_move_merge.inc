@@ -81,7 +81,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             virtual_bag_sync_projected_slot(bag, src_slot);
                             virtual_bag_sync_projected_slot(bag, dst_slot);
                         }
-                        if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+                        if (fn_ui_equip_refresh_item_area != nullptr) {
+                            inventory_native_hook_call_refresh_item_area_original();
+                        }
                         void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
                         if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
                             fn_touch_handle_set_cursor(panel_ctrl, nullptr);

@@ -48,9 +48,9 @@ using Stage4JewelExtension = int (*)(void* equip_item, void* jewel_item,
 int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem identify,
                      Stage4JewelBackup backup, Stage4JewelExtension extension_put);
 
-// 只有拖放事件的扩展宝石源落到装备槽才进入装备槽事件适配；其余源必须 backup。
+// 只有拖放事件的扩展 apply 材料源落到装备槽才进入装备槽事件适配；其余源必须 backup。
 bool stage4_is_extension_equip_control_source(uint64_t event, bool extension_source,
-                                               bool source_is_jewel,
+                                               bool source_is_apply_material,
                                                bool target_is_equip_slot);
 
 // finish 失败后必须进入 abort/isolation 出口；finished=true 时 token 已由 finish 收尾。

@@ -613,6 +613,16 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     descriptor.count = count;
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
+    // ApplyStuff consumes a stacked material through H-04. Keep the token's
+    // consumed bit even when the native object remains live, otherwise the
+    // caller treats a successful jewel/scroll apply as an unconsumed failure.
+    if (raw_use_token != nullptr) {
+        ModuleUseToken* token = static_cast<ModuleUseToken*>(raw_use_token);
+        ModuleUseState& use = g_module_object_use[bag][slot];
+        if (use.active && use.item == item && use.generation == token->generation) {
+            use.consumed = true;
+        }
+    }
     return true;
 }
 

@@ -201,6 +201,7 @@ static void test_object_operations() {
     CHECK(!stage4_is_extension_equip_control_source(0x04, true, false, true));
     CHECK(!stage4_is_extension_equip_control_source(0x04, false, true, true));
     CHECK(!stage4_is_extension_equip_control_source(0x02, true, true, true));
+    CHECK(stage4_is_extension_equip_control_source(0x04, true, true, true));
     CHECK(stage4_finish_requires_abort(false));
     CHECK(!stage4_finish_requires_abort(true));
 }

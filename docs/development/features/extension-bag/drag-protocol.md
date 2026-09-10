@@ -247,7 +247,7 @@ owner 判定 `virtual_bag::projected_release_owns_event`（`event == 0x18 且 se
 
 ### 2.3 release 等价清理（两段式）
 
-`complete_original_release_cleanup_locked` 在 `extension_bag_input.inc:34-71`：
+`complete_original_release_cleanup_locked` 在 `extension_bag_input.inc:79-116`：
 
 1. 锁内写 release 输入坐标到 TouchState+0x18/+0x20/+0x28，空则补采 moving 控件
    （`37-49`）。
@@ -369,7 +369,7 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 | `0xb8cc0` drop gate patch | BL 指令替换（`extension_bag_lifecycle.inc:692-730`） | bag proc `0x04` 落袋写入改经 `save_item_on_empty_gate` | 投影 session 命中时返回 0，原版不清同号物理槽；真实移动延迟到 `0x18` 路由（`extension_bag_render.inc:442-462`） | 可写回原字 `0x94012fc8`；无运行时还原路径 |
 | MakeDesc desc gate patch | BL 指令替换（`extension_bag_lifecycle.inc:772-814`） | 详情打开时装详情操作 hook（Path A） | `0x80` 详情路径多一层 gate；触摸落点无事务行为 | 可写回原字 `0x97fffdfe`；无运行时还原路径 |
 | 事件吞并（capture） | `virtual_bag_event` 内返回 1（`extension_bag_lifecycle.inc:274-304`、`348-389`、`432-450`） | 网格空位交互与点击-拖动分类 | 被 capture 的序列不达原版 TouchHandle | 逻辑开关：`g_extension_touch_capture` 清除即恢复放行 |
-| 事件吞并（projected owner） | `0x18` owner 返回 1（`extension_bag_lifecycle.inc:340-347`） | 扩展事务唯一提交，原版不得二次移动 | 该次 `0x18` 原版五步清理由等价清理补齐（`extension_bag_input.inc:34-71`） | 逻辑开关：session 不活动即不触发 |
+| 事件吞并（projected owner） | `0x18` owner 返回 1（`extension_bag_lifecycle.inc:340-347`） | 扩展事务唯一提交，原版不得二次移动 | 该次 `0x18` 原版五步清理由等价清理补齐（`extension_bag_input.inc:79-116`） | 逻辑开关：session 不活动即不触发 |
 
 模块另有 draw/save 类指令 patch 与 store/save panel hook（`extension_bag_lifecycle.inc:534-690`），
 不属于触摸落点链，登记于架构册与本册 §2.6；此处不展开。
@@ -419,7 +419,7 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 | 保留 `0x18` 单一 drop owner，事务失败也吞掉原版 | 原版 release 会继续调 `INVEN_MoveItem`/`SaveItemOnEmpty`，投影对象不在 `g_inven`；先放行后补偿会把物理槽交给原版链改写。R-33 的等价清理只补 TouchHandle 状态，不重新派发 `0x18` | `rulebook.md` R-02（`rulebook.md:333-340`）；`control-plane.md` §5 决策索引 2026-09-06 行 |
 | Refresh 采用函数级关卡（H-16）而非 15+ 主动刷新点+帧 heal | 模块刷新点多持有 `g_virtual_bag_mtx`，经被 Hook 地址自调会重复加锁死锁；raw-original dispatcher 保留 Hook 未就绪回退；H-16 承担 post-projection，draw-end 不执行帧级 heal | `rulebook.md` R-32、R-34；`control-plane.md` §5 决策索引 |
 | moving 只在六条件全真时保留 | draw-end 不再逐帧写投影控件；无刷新事务定点同步受影响槽，stale moving 清 TouchState 与控件 flags | `rulebook.md` R-34；`verification-matrix.md` VM-B01～VM-B04 |
-| 吞掉 `0x18` 必须做原版等价清理且放锁派发 | 只清扩展 session 会保持 TouchState、moving/on 标志与选中控件，下一次点击可能进入幽灵拖拽；原版 UI 回调可重入模块，持锁派发会死锁 | `rulebook.md` R-33（`rulebook.md:552-562`）；实现 `extension_bag_input.inc:34-71` |
+| 吞掉 `0x18` 必须做原版等价清理且放锁派发 | 只清扩展 session 会保持 TouchState、moving/on 标志与选中控件，下一次点击可能进入幽灵拖拽；原版 UI 回调可重入模块，持锁派发会死锁 | `rulebook.md` R-33（`rulebook.md:552-562`）；实现 `extension_bag_input.inc:79-116` |
 | 页签与网格命中重叠时页签优先 | 当前页签矩形与网格行 y 区间重叠；先解析页签才能保留切袋意图，避免格子命中短路页签事务 | `rulebook.md` R-35；实现 `extension_bag_transaction.inc:791-812`；S-05/VM-29 |
 | 触摸窗口释放采用延迟队列 | 触摸窗口内直接释放会让事务在 source release 阶段拒绝；入队并延后到 draw-end 检查引用，使事务提交与对象安全释放分离 | `rulebook.md` R-36；实现 `extension_bag_ownership.inc:35-53,71-119,147-171`；`.tmp/tab-drop-260909/logcat-tagged.txt:8546-8548`；commit `3539918` |
 | 物理快照守卫只做「比较+恢复」，不承诺覆盖全部写点 | 它包住 `g_orig_event` 调用，无法观察不经过该调用的写入；问题 B 仍按「未解决+已布防」判定 | `rulebook.md` R-20（`rulebook.md:461-467`）；`control-plane.md` §4.1 |

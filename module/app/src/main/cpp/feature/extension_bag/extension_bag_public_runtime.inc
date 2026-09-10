@@ -120,14 +120,128 @@ int virtual_bag_inventory_state_id() {
     return *reinterpret_cast<int32_t*>(g_state_entry);
 }
 
+bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
+                                             int src_bag, int src_slot, int dst_bag,
+                                             int dst_slot, void* material, void* target_item) {
+    const int source_category = g_virtual_bag_state.items[src_bag][src_slot].category;
+    const bool source_is_jewel = fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0;
+    const char* kind = source_is_jewel ? "jewel" : "scroll";
+    if (fn_ui_equip_is_apply_stuff == nullptr ||
+        fn_ui_equip_is_apply_stuff(target_item, material) == 0) {
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=not_applicable kind=%s equip=%p material=%p",
+                    kind, target_item, material);
+        return false;
+    }
+    if (fn_save_is_ok == nullptr || fn_ui_equip_apply_stuff == nullptr) {
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=symbol_unresolved kind=%s equip=%p material=%p",
+                    kind, target_item, material);
+        return false;
+    }
+    ModuleUseToken use_token{};
+    if (!module_use_begin_locked(src_bag, src_slot, material, &use_token)) {
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=stale_token kind=%s equip=%p material=%p",
+                    kind, target_item, material);
+        return false;
+    }
+    VIRTBAG_LOG("apply branch kind=%s equip=%p material=%p", kind, target_item, material);
+    ModuleUseToken* previous_use_token = g_active_module_use_token;
+    g_active_module_use_token = &use_token;
+    lock.unlock();
+    const bool save_ok = fn_save_is_ok() != 0;
+    if (save_ok) fn_ui_equip_apply_stuff(target_item, material);
+    g_active_module_use_token = previous_use_token;
+    lock.lock();
+
+    if (!save_ok) {
+        module_use_abort_locked(use_token);
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=is_ok_failed kind=%s equip=%p material=%p",
+                    kind, target_item, material);
+        return false;
+    }
+    bool consumed = false;
+    ModuleUseReleasePlan release_plan{};
+    const bool finished = module_use_finish_locked(use_token, &consumed, &release_plan);
+    if (!finished || !consumed) {
+        if (finished) {
+            module_use_abort_isolate_locked(use_token);
+        } else if (!module_use_abort_locked(use_token)) {
+            module_use_abort_isolate_locked(use_token);
+        }
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=%s kind=%s equip=%p material=%p",
+                    finished ? "native_apply_failed" : "stale_token",
+                    kind, target_item, material);
+        return false;
+    }
+    if (release_plan.pending) {
+        lock.unlock();
+        const bool released = module_use_release_native(release_plan);
+        lock.lock();
+        if (!released || !module_use_finalize_release_locked(release_plan)) {
+            if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+                virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+            }
+            VIRTBAG_LOG("apply reject reason=material_release_failed kind=%s equip=%p material=%p",
+                        kind, target_item, material);
+            return false;
+        }
+    }
+    if (g_module_objects[dst_bag][dst_slot] != target_item) {
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=stale_target kind=%s equip=%p material=%p",
+                    kind, target_item, material);
+        return false;
+    }
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    int payload_size = 0;
+    if (!serialize_item_payload_locked(target_item, &payload, &payload_size)) {
+        if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
+        }
+        VIRTBAG_LOG("apply reject reason=target_payload_sync_failed kind=%s equip=%p material=%p",
+                    kind, target_item, material);
+        return false;
+    }
+    virtual_bag::Item& target_descriptor = g_virtual_bag_state.items[dst_bag][dst_slot];
+    target_descriptor.payload = payload;
+    target_descriptor.payload_size = payload_size;
+    target_descriptor.count = fn_get_cumulate_count != nullptr
+        ? fn_get_cumulate_count(target_item) : target_descriptor.count;
+    g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
+    g_item_state_dirty = true;
+    persist_state_locked();
+    refresh_projected_module_view_after_move_locked();
+    if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+        virtual_bag::session_finish_transaction(&g_extension_drag_session, true);
+    }
+    VIRTBAG_LOG("apply committed kind=%s equip=%p material=%p", kind, target_item, material);
+    return true;
+}
+
 // G-8：item proc 0x02（drop 到扩展格控件）路由——src=模块拖动状态（press 时
 // projection_slot_at 记录），dst=落点控件索引。必须区分“非扩展源”“扩展事务成功”
 // 和“扩展源但事务拒绝”：最后一种也必须吞掉原版事件，避免 INVEN_MoveItem 改写
 // 真实物理槽。src/dst 必须属于当前 g_module_view_index 对应的 projected root；
 // stale 控件或错视图一律是 kRejected。
 VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_control,
-                                                                    void* src_control) {
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+                                                                     void* src_control) {
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     if (src_control == nullptr || fn_control_object_get_data == nullptr) {
         return VirtualBagProjectionDropResult::kNotExtension;
     }
@@ -193,6 +307,21 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
             return VirtualBagProjectionDropResult::kRejected;
         }
     }
+    const int dst_bag = g_module_view_index;
+    const int source_category = g_virtual_bag_state.items[src_bag][src_slot].category;
+    const bool source_is_apply_material =
+        (fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
+        (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
+    void* dst_data = fn_control_object_get_data(dst_control);
+    void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
+    if (src_bag == g_module_view_index && dst_bag == g_module_view_index &&
+        source_is_apply_material && target_item != nullptr && item_is_equip(target_item)) {
+        return apply_extension_material_to_slot_locked(
+            lock, src_bag, src_slot, dst_bag, dst_slot, item, target_item)
+            ? VirtualBagProjectionDropResult::kHandled
+            : VirtualBagProjectionDropResult::kRejected;
+    }
+
     const bool routed = move_extension_to_extension_locked(src_bag, src_slot, src_bag, dst_slot);
     if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
         virtual_bag::session_finish_transaction(&g_extension_drag_session, routed);

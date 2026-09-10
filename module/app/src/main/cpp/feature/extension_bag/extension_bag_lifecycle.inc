@@ -166,7 +166,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     return result;
 }
 
-bool consume_projected_release_locked(int64_t x, int64_t y) {
+bool consume_projected_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
     if (!projected_drag_session_active_locked()) return false;
     auto& session = g_extension_drag_session;
     if (session.phase == virtual_bag::DragPhase::kCommitted ||
@@ -187,7 +187,7 @@ bool consume_projected_release_locked(int64_t x, int64_t y) {
         session.target_slot = -1;
         routed = route_deferred_extension_to_original_locked();
     } else {
-        routed = route_projected_session_drop_locked(x, y);
+        routed = route_projected_session_drop_locked(lock, x, y);
     }
     if (session.phase != virtual_bag::DragPhase::kCommitted &&
         session.phase != virtual_bag::DragPhase::kRejected &&
@@ -245,7 +245,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         }
         const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
         if (p5_panel_observation_enabled()) {
-            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
             log_p5_observation_locked("panel-bypass-post", nullptr, event, param2 != 0,
                                       param != 0, nullptr, true, result);
         }
@@ -334,14 +334,14 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         bool release_cleanup_needed = false;
         bool release_cleanup_handled = false;
         {
-            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
             ensure_state_loaded_locked();
             log_exit_trace_locked("event_release", event, param, param2, x, y);
         if (virtual_bag::projected_release_owns_event(
                 event, projected_drag_session_active_locked())) {
             // 0x18 是投影拖拽的唯一提交 owner。必须在原版 TouchHandle/INVEN_MoveItem
             // 之前完成扩展事务；失败也吞掉原版，防止真实物理槽被二次改写。
-            consume_projected_release_locked(x, y);
+            consume_projected_release_locked(lock, x, y);
                 // Owner/terminal release is handled by the module; preserve native selection.
                 release_cleanup_needed = true;
                 release_cleanup_handled = true;
