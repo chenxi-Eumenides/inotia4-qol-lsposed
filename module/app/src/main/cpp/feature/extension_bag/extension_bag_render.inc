@@ -153,14 +153,13 @@ void refresh_module_item_area_locked(int index) {
     if (fn_ui_equip_refresh_item_area == nullptr) return;
     uint32_t* size_word = g_original_bag_size_word;
     if (size_word == nullptr) {
-        fn_ui_equip_refresh_item_area();
-        refresh_projection_if_overwritten_locked();
+        inventory_native_hook_call_refresh_item_area_original();
         return;
     }
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     *size_word = (g_original_bag_size & ~kCapacityMask) |
                  (static_cast<uint32_t>(g_virtual_bag_state.capacities[index]) & kCapacityMask);
-    fn_ui_equip_refresh_item_area();
+    inventory_native_hook_call_refresh_item_area_original();
     refresh_projection_if_overwritten_locked();
 }
 
@@ -193,7 +192,6 @@ void virtual_bag_draw_original_bag_wrapper() {
         original();
         if (masked) **current_bag = saved_current;
         draw_tab_buttons_in_frame_locked();
-        refresh_projection_if_overwritten_locked();
         return;
     }
     original();
@@ -334,7 +332,7 @@ bool bind_original_exit_display_bag_locked(int bag) {
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     const uint32_t* size_word = bag_size_word_locked(bag);
     const bool has_capacity = size_word != nullptr && (*size_word & kCapacityMask) != 0;
-    if (has_capacity) fn_ui_equip_refresh_item_area();
+    if (has_capacity) inventory_native_hook_call_refresh_item_area_original();
     *direct_bag = saved_direct;
     **current_bag = saved_got;
     return has_capacity;
@@ -356,10 +354,17 @@ void* module_item_locked(int bag, int slot) {
         item = materialize_module_item_locked(descriptor);
         if (item == nullptr) return nullptr;
         uint32_t handle = 0;
-        if (ownership::allocate(&g_ownership_ledger, &handle) == ownership::Outcome::kOk) {
-            g_module_object_handles[bag][slot] = handle;  // module-owned（G-13）
+        if (ownership::allocate(&g_ownership_ledger, &handle) != ownership::Outcome::kOk) {
+            release_temporary_item_locked(item);
+            VIRTBAG_LOG("module materialize rejected ownership ledger exhausted bag=%d slot=%d",
+                        bag, slot);
+            return nullptr;
         }
+        g_module_object_handles[bag][slot] = handle;  // module-owned（G-13）
         if (!module_object_generation_advance_locked(bag, slot, "materialize replacement")) {
+            g_module_object_handles[bag][slot] = 0;
+            ownership::release(&g_ownership_ledger, handle);
+            release_temporary_item_locked(item);
             VIRTBAG_LOG("module materialize replacement rejected bag=%d slot=%d", bag, slot);
             return nullptr;
         }
@@ -421,23 +426,6 @@ uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int
 // G-6/G-7 drop 门禁 → G-8 路由：bag proc event 0x04 落袋写入（b8cc0 bl）——
 // 投影期间拖动投影物品松手到这里：路由到 ext→orig 事务（真实移动），借出对象
 // 不经原版 SaveItemOnEmpty 写 INVEN。非投影拖动（installed=false）直通原版。
-// G-8 源识别：drop 事件的物品指针与模块缓存比对，反查扩展袋/槽。
-// 事件参数自带物品指针（SaveItemOnEmpty 的 item / 0x02 的 src 控件 data），
-// 无需模块维护拖动状态机——TouchHandle 全权处理拖动建立与拖影。
-bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot) {
-    if (item == nullptr) return false;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_module_objects[bag][slot] == item) {
-                *out_bag = bag;
-                *out_slot = slot;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 int32_t save_item_on_empty_gate(void* item, int32_t bag) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -522,7 +510,7 @@ bool install_module_view_locked(int bag) {
     void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
     g_projected_item_root = root;
     if (root != nullptr && fn_ui_equip_refresh_item_area != nullptr) {
-        fn_ui_equip_refresh_item_area();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
+        inventory_native_hook_call_refresh_item_area_original();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
         for (int slot = 0; slot < capacity; ++slot) {
             void* ctrl = valid_child_locked(root, slot);
             if (ctrl == nullptr) continue;
@@ -542,8 +530,8 @@ bool install_module_view_locked(int bag) {
     return true;
 }
 
-// 帧级自愈：RefreshItemArea 被游戏逻辑触发时会把控件刷回 INVEN 原版物品，
-// installed 状态下每帧检测并重投影（draw wrapper 已持锁）。
+// H-16 post-projection：一次原版 RefreshItemArea 返回后，按当前逻辑槽重绑投影。
+// 该函数不再由 draw wrapper 每帧调用；无刷新事务的调用方必须使用定点同步。
 void refresh_projection_if_overwritten_locked() {
     if (!g_module_view_installed || g_projected_item_root == nullptr ||
         fn_control_object_get_data == nullptr || fn_control_item_set_item == nullptr ||
@@ -552,7 +540,6 @@ void refresh_projection_if_overwritten_locked() {
     }
     const int bag = g_module_view_index;
     const int capacity = g_virtual_bag_state.capacities[bag];
-    static int heal_count = 0;
     for (int slot = 0; slot < capacity; ++slot) {
         void* item = g_module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
         void* ctrl = valid_child_locked(g_projected_item_root, slot);
@@ -560,12 +547,24 @@ void refresh_projection_if_overwritten_locked() {
         void* data = fn_control_object_get_data(ctrl);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != item) {
-            ++heal_count;
             fn_control_item_set_item(ctrl, item);
-            VIRTBAG_LOG("projection heal #%d slot=%d current=%p item=%p",
-                        heal_count, slot, current, item);
+            VIRTBAG_LOG("projection post-refresh slot=%d current=%p item=%p",
+                        slot, current, item);
         }
     }
+}
+
+bool sync_projected_slot_locked(int bag, int slot) {
+    if (!g_module_view_installed || bag != g_module_view_index ||
+        !virtual_bag::valid_index(bag) || g_projected_item_root == nullptr ||
+        fn_control_item_set_item == nullptr || slot < 0 ||
+        slot >= g_virtual_bag_state.capacities[bag]) {
+        return false;
+    }
+    void* ctrl = valid_child_locked(g_projected_item_root, slot);
+    if (ctrl == nullptr) return false;
+    fn_control_item_set_item(ctrl, g_module_objects[bag][slot]);
+    return true;
 }
 
 void refresh_projected_module_view_after_move_locked() {
@@ -573,11 +572,23 @@ void refresh_projected_module_view_after_move_locked() {
     // 原版 UIEquip_InvenItemControlEventProc 在移动成功后先刷新区域：该调用除了
     // SetItem，还会按当前容量更新每个槽的 Active/Show 状态；随后再覆盖回扩展对象。
     refresh_module_item_area_locked(g_module_view_index);
-    refresh_projection_if_overwritten_locked();
 }
+
+struct RefreshRestoreSuppressScope {
+    bool previous;
+
+    RefreshRestoreSuppressScope() : previous(g_refresh_restore_suppress) {
+        g_refresh_restore_suppress = true;
+    }
+
+    ~RefreshRestoreSuppressScope() {
+        g_refresh_restore_suppress = previous;
+    }
+};
 
 void restore_module_view_locked() {
     if (!g_module_view_installed || g_base == 0) return;
+    RefreshRestoreSuppressScope suppress_refresh;
     // P4.3：视图借出逐槽归还（安装时借出的槽位必须成对归还，窗口外借用为零）。
     if (virtual_bag::valid_index(g_module_view_index)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
@@ -597,7 +608,7 @@ void restore_module_view_locked() {
             (g_original_bag_size & kCapacityMask);
     }
     if (fn_ui_equip_refresh_item_area != nullptr) {
-        fn_ui_equip_refresh_item_area();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
+        inventory_native_hook_call_refresh_item_area_original();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
     }
     g_original_bag_size_word = nullptr;
     g_original_bag_size = 0;
@@ -615,7 +626,9 @@ bool complete_original_exit_locked() {
         return false;
     }
     set_original_bag_locked(selected_original_bag);
-    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    if (fn_ui_equip_refresh_item_area != nullptr) {
+        inventory_native_hook_call_refresh_item_area_original();
+    }
     virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
     persist_state_locked();
     g_exit_display_bag = kNoOriginalBagSelected;
@@ -627,7 +640,9 @@ void cancel_original_exit_locked() {
     const int original_bag = g_original_current_got < kNoOriginalBagSelected ?
                              g_original_current_got : g_original_current_direct;
     set_original_bag_locked(original_bag);
-    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    if (fn_ui_equip_refresh_item_area != nullptr) {
+        inventory_native_hook_call_refresh_item_area_original();
+    }
     virtual_bag::enter_original(&g_virtual_bag_state, original_bag);
     persist_state_locked();
     g_exit_display_bag = kNoOriginalBagSelected;
@@ -680,7 +695,9 @@ void virtual_bag_inventory_enter_wrapper() {
     if (!g_virtual_bag_enabled.load()) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     install_extension_tab_buttons_locked();
-    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    if (fn_ui_equip_refresh_item_area != nullptr) {
+        inventory_native_hook_call_refresh_item_area_original();
+    }
 }
 
 void virtual_bag_save_panel_enter_wrapper() {
@@ -702,11 +719,13 @@ void virtual_bag_draw_end_wrapper() {
             g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }
         if (fn_grpx_end != nullptr) fn_grpx_end();
+        drain_deferred_frees_locked();
         return;
     }
     if (g_gamestate != nullptr && *reinterpret_cast<uint32_t*>(g_gamestate) != 0) {
         restore_module_view_locked();
         if (fn_grpx_end != nullptr) fn_grpx_end();
+        drain_deferred_frees_locked();
         return;
     }
     if (!g_inventory_frame_active) {
@@ -718,6 +737,7 @@ void virtual_bag_draw_end_wrapper() {
     if (!g_virtual_bag_enabled.load()) {
         restore_module_view_locked();
         if (fn_grpx_end != nullptr) fn_grpx_end();
+        drain_deferred_frees_locked();
         return;
     }
     ensure_state_loaded_locked();
@@ -729,30 +749,7 @@ void virtual_bag_draw_end_wrapper() {
         virtual_bag::valid_index(g_virtual_bag_state.selected);
     if (g_module_view_installed && !module_view_expected) restore_module_view_locked();
     if (g_module_view_installed) {
-        // TouchHandle owns the native drag shadow. Keep a verified projected control
-        // alive across frames; all other stale moving controls are still cleared.
-        if (g_base != 0) {
-            uint8_t* touch_state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            void* moving = *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL);
-            bool projected_moving = false;
-            if (moving != nullptr && virtual_bag::valid_index(g_module_view_index) &&
-                g_projected_item_root != nullptr) {
-                const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
-                for (int slot = 0; slot < capacity; ++slot) {
-                    if (valid_child_locked(g_projected_item_root, slot) == moving) {
-                        projected_moving = true;
-                        break;
-                    }
-                }
-            }
-            if (!projected_moving) {
-                *reinterpret_cast<void**>(touch_state + TOUCH_STATE_MOVING_CTRL) = nullptr;
-            }
-        }
-        refresh_projection_if_overwritten_locked();
-    }
-    if (g_module_view_installed) {
-        refresh_projection_if_overwritten_locked();
+        clear_stale_projected_moving_locked();
     }
     static int last_mode = -1;
     static int last_selected = -2;
@@ -770,6 +767,7 @@ void virtual_bag_draw_end_wrapper() {
     }
     draw_cells_in_frame_locked();
     if (fn_grpx_end != nullptr) fn_grpx_end();
+    drain_deferred_frees_locked();
 }
 
 // thunk 页登记：每页 4096B 承载 28B thunk，剩余空间可复用（页必在 libgame

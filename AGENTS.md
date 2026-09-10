@@ -7,11 +7,8 @@
 - API 契约：`docs/reference/api-reference.md`
 - 环境、构建和设备：`docs/guides/build-and-deploy.md`
 - 当前待办：`docs/development/planning/backlog.md`
-- 扩展背包范围和验收：`docs/development/features/extension-bag/control-plane.md`
-- 扩展背包 P7 阶段 0：`docs/development/features/extension-bag/stage-0-static-inventory-audit.md`
-- 扩展背包 P7 阶段 1：`docs/development/features/extension-bag/stage-1-physical-inventory-contract.md`
-- 扩展背包 P7 阶段 2：`docs/development/features/extension-bag/stage-2-static-support-matrix.md`
-- 扩展背包 P7 阶段 3：`docs/development/features/extension-bag/stage-3-bypass-audit.md`
+- 扩展背包 Hub 与权威地图：`docs/development/features/extension-bag/control-plane.md`
+- 扩展背包七册按 Hub §2 路由阅读：`docs/development/features/extension-bag/`
 - 当前重构计划：`docs/development/planning/refactor-plan.md`
 - 历史方案仅供追溯：`docs/history/`
 
@@ -40,8 +37,15 @@
 - native 依赖方向为 bridge → feature/core、feature → core、core 不依赖 feature；禁止循环依赖。
 - 扩展背包持有 `g_virtual_bag_mtx` 时，不得调用会触发缓存刷新的 `op_ok()`。
 - 重构阶段只移动职责，不顺手修改无关业务逻辑。
+- 改扩展背包代码前必须全量阅读 `rulebook.md` 与受影响操作契约卡（`verification-matrix.md`）。
+- 改动说明必须列出影响的 R-xx 编号与保持证据（Host 测试名或 VM 用例号）。
+- Fixer 交付报告必须逐项给出四元组：**触及文件 → 影响的 R-xx/B-xx 编号 → 对应 VM-B/受影响 VM 卡 → 已执行/无法执行原因**；缺少任一项即拒收。
 
 ## 验证要求
+
+交付定义：**静态审查通过 ≠ 可交付**。只要触及行为面，必须附 VM-B 或受影响 VM 卡的真机
+日志证据；缺少证据时只能报告 **`NOT_ACCEPTED`**，不得以 Host、静态审查、Debug 构建或
+API 成功替代真机回归证据。
 
 修改后按影响范围执行：
 

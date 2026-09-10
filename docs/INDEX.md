@@ -32,12 +32,15 @@
 - `planning/`：当前待办和重构计划。
 - `features/`：模块新增或修改功能的设计、实现和验收。
 
-扩展背包 P7 的阶段基线按以下四篇独立文档读取；后续实现不得回到聊天记录恢复状态：
+扩展背包按七册推荐顺序阅读：先读 Hub，再读规则册，最后按任务读取专题册；后续实现不得回到聊天记录恢复状态：
 
-- `development/features/extension-bag/stage-0-static-inventory-audit.md`
-- `development/features/extension-bag/stage-1-physical-inventory-contract.md`
-- `development/features/extension-bag/stage-2-static-support-matrix.md`
-- `development/features/extension-bag/stage-3-bypass-audit.md`
+1. `development/features/extension-bag/control-plane.md`（Hub）
+2. `development/features/extension-bag/rulebook.md`（规则册）
+3. `development/features/extension-bag/runtime-architecture.md`（架构册）
+4. `development/features/extension-bag/inventory-integration-decision-plan.md`（库存册）
+5. `development/features/extension-bag/drag-protocol.md`（拖动册）
+6. `development/features/extension-bag/module-save-store.md`（存档册）
+7. `development/features/extension-bag/verification-matrix.md`（验收册）
 
 ### `reference/`：共享参考
 
@@ -49,6 +52,12 @@
 ### `history/`：历史归档
 
 保存已结束的方案、交接、实验和旧版本记录。历史内容不得替代当前文档中的规则和状态。
+
+- `history/native-inventory-hook-development.md`
+- `history/stage-0-static-inventory-audit.md`
+- `history/stage-1-physical-inventory-contract.md`
+- `history/stage-2-static-support-matrix.md`
+- `history/stage-3-bypass-audit.md`
 
 ## 权威关系
 
@@ -63,6 +72,6 @@
 
 ## 临时文件约定
 
-当前任务的日志、截图和可重建中间文件统一写入 `.tmp/<task-name>/`，任务完成后清理；需要长期保留的证据必须迁移到 `docs/history/` 或 `archive/`。现有文档中出现的 `.tmp/...` 路径属于历史证据引用，不构成新的存储位置规范。
+当前任务的日志、截图和可重建中间文件统一写入 `.tmp/<task-name>/`，任务完成后清理；需要长期保留的证据必须迁移到 `docs/history/` 或 `archive/`。正式文档一律不得引用 `.tmp/...` 路径（扩展背包取证已迁至 `archive/extension-bag/`）。
 
 普通 Markdown 文档默认面向人类，同时保证 AI 可读取；`AGENTS.md` 只用于代理执行规则，不复制普通文档内容。

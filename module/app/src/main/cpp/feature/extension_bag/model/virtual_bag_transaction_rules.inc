@@ -16,6 +16,12 @@ inline int extension_internal_bag(int logical_bag) {
                : -1;
 }
 
+inline int extension_logical_bag(int internal_bag) {
+    return internal_bag >= 0 && internal_bag < kBagCount
+               ? kExtensionLogicalBagFirst + internal_bag
+               : -1;
+}
+
 inline bool valid_ext2ext_transfer_slots(int src_bag, int src_slot, int dst_bag,
                                          int dst_slot) {
     return valid_index(src_bag) && valid_index(dst_bag) && src_slot >= 0 &&
@@ -142,9 +148,7 @@ inline bool same_extension_bag_merge_allowed(int src_bag, int dst_bag) {
 }
 
 inline bool same_extension_bag_mergeable_items(const Item& existing, const Item& source) {
-    return existing.category > 0 && existing.count > 0 && source.category > 0 &&
-           source.count > 0 && existing.category == source.category && valid_payload(existing) &&
-           valid_payload(source);
+    return mergeable_items(existing, source);
 }
 
 inline bool extension_swap_tokens_available(bool source_active, bool source_pending_release,

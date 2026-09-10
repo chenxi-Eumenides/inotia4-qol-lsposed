@@ -269,7 +269,15 @@ constexpr uintptr_t F_SAVE_SAVE_ITEM_VMA = 0x1274f0;    // int (uint8_t* out, vo
 constexpr uintptr_t F_SAVE_LOAD_ITEM_VMA = 0x1278a0;    // int (const uint8_t* in, void** out, int* consumed) SAVE_LoadItem：ITEMPOOL_Allocate 重建物品；consumed=前缀+1=记录总长；失败返回 0 且 *out 不清空（调用方须先置空）
 constexpr uintptr_t F_ITEMPOOL_FREE_VMA = 0x108160;     // void (void*) ITEMPOOL_Free：释放物品对象回游戏对象池
 constexpr uintptr_t G_TOUCH_STATE_VMA = 0x301000 + 0xcf8; // TouchHandle 全局状态（匿名 .bss）：+0x30=拖动中控件 +0x50=释放参数(+0x50=释放控件 +0x58=拖动源控件 +0x60=释放坐标)
+constexpr size_t TOUCH_STATE_PREFIX_SIZE = 0x10;           // TouchHandle_ResetMovingControl 清零前缀
+constexpr size_t TOUCH_STATE_ACTIVE_CTRL = 0x10;           // TouchHandle 当前激活控件
 constexpr size_t TOUCH_STATE_MOVING_CTRL = 0x30;        // TouchHandle_Event 0x17 按下/拖动中控件
+constexpr size_t TOUCH_STATE_RELEASE_INPUT_X = 0x18;    // TouchHandle_Event 0x18 输入坐标 x
+constexpr size_t TOUCH_STATE_RELEASE_INPUT_Y = 0x20;    // TouchHandle_Event 0x18 输入坐标 y
+constexpr size_t TOUCH_STATE_RELEASE_INPUT_PARAM = 0x28; // TouchHandle_Event 0x18 输入第三字段
+constexpr size_t TOUCH_STATE_MOVE_ON_CTRL = 0x38;       // TouchHandle_Move 交接控件
+constexpr size_t TOUCH_STATE_DROP_EVENT = 0x48;         // TouchHandle release drop 结果
+constexpr size_t TOUCH_STATE_RELEASE_CTRL = 0x50;       // TouchHandle_SetReleaseEvent 释放控件
 constexpr size_t TOUCH_STATE_DROP_SRC_CTRL = 0x58;      // TouchHandle_SetReleaseEvent 写入的拖动源控件
 constexpr size_t TOUCH_STATE_RELEASE_X = 0x60;          // TouchHandle release 坐标 x
 constexpr size_t TOUCH_STATE_RELEASE_Y = 0x68;          // TouchHandle release 坐标 y
@@ -485,6 +493,7 @@ constexpr uintptr_t F_SAVE_CALLSITE_NETWORK_PROCESS_1_VMA = 0x15da84; // Network
 constexpr uintptr_t F_SAVE_CALLSITE_NETWORK_PROCESS_2_VMA = 0x15dcf0; // NetworkStore_Process → SAVE_Save
 constexpr uintptr_t F_SAVE_LOAD_INVENTORY_VMA = 0x127ea4;     // SAVE_LoadInventory 读档背包（子物品检查位段）
 constexpr uintptr_t F_UIEQUIP_IS_APPLY_STUFF_VMA = 0xb8d4c;
+constexpr uintptr_t F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA = 0xb8f7c; // uint64 (control,event,x2,param)
 constexpr uintptr_t F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA = 0xb7910;
 constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
 constexpr uintptr_t F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA = 0xb7784; // void (void) ButtonEquipExe b7d40 装备后刷新角色装备槽显示
@@ -508,6 +517,8 @@ constexpr uintptr_t F_USE_STUFF_VMA = 0x11b300;      // void (int32_t mixType, v
 constexpr uintptr_t F_GET_COST_VMA = 0x11ab64;       // int64 (int32_t mixType, void* item) MIXSYSTEM_GetCost：读配方表费用文本 → CAL_Calculate，负数=非法配方
 // ---- UIMix 控件回调函数（按钮注入复用，均为 .dynsym 具名符号）----
 constexpr uintptr_t F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA = 0xa3590;   // TouchHandle_ControlEventProc（ControlObject+0x90 Proc）
+constexpr uintptr_t F_TOUCH_HANDLE_RESET_SELECTED_CONTROL_VMA = 0xa3414; // TouchHandle_ResetSelectedControl
+constexpr uintptr_t F_TOUCH_HANDLE_RESET_MOVING_CONTROL_VMA = 0xa371c;  // TouchHandle_ResetMovingControl
 constexpr uintptr_t F_CONTROL_BUTTON_CONTROL_EVENT_PROC_VMA = 0xaa818; // ControlButton_ControlEventProc（ControlObject+0x98 ControlProc）
 constexpr uintptr_t F_UIMIX_BUTTON_DRAW_MIXING_GEM_VMA = 0xbf218;      // UIMix_ButtonDrawMixingGem（按钮 DrawProc，复用原宝石按钮贴图）
 // ---- UI 实验控件系统符号（ui-exp v0.6.7，disasm_text.txt 反汇编确认签名）----
@@ -636,6 +647,7 @@ using InvenMoveItemFn = int (*)(void*, int, int, int);  // INVEN_MoveItem(item, 
 using ItemSystemDivideFn = void* (*)(void*, int32_t); // ITEMSYSTEM_Divide(item, count) -> new item
 using ControlObjectGetDataFn = void* (*)(void*);
 using UiEquipIsApplyStuffFn = int (*)(void*, void*);
+using UiEquipEquipControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using UiEquipGetItemSlotIndexFn = int (*)(void*);
 using UiEquipRefreshItemAreaFn = void (*)();
 using UiEquipRefreshBagAreaFn = void (*)();
@@ -648,6 +660,8 @@ using UiDescGetDataFn = void* (*)();
 using UiEquipMakeDescFn = void (*)(void*, void*);  // UIEquip_MakeDesc(ctrl, 0)：读控件物品生成详情面板（袋标签二次点击原版语义）
 using UiPopupMsgCreateOkFromTextDataFn = void (*)(uint32_t, uint32_t, uint32_t, uint32_t);
 using TouchHandleSetCursorFn = void (*)(void*, void*);
+using TouchHandleResetMovingControlFn = void (*)();
+using TouchHandleResetSelectedControlFn = uint64_t (*)();
 using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using ItemDrawPortingFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t);
 using SetExpFn = void (*)(void*, int32_t);

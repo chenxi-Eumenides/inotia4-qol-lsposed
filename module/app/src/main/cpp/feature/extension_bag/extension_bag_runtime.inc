@@ -1,3 +1,9 @@
+bool is_backpack_category(int category) {
+    // Bag types 1..4 derive capacities 4/8/12/16; keep drag/equip routing
+    // aligned with virtual_bag::derive_capacity().
+    return category >= 1 && category <= 4;
+}
+
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
     const uint64_t observation_token = virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);
     const auto finish = [observation_token, ctrl, event, x2, param](uint64_t result) {
@@ -18,58 +24,65 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     // 源类别为背包物品（category 1..4）就走装备；其他情况走移动。装备路径
     // 返回 0，让 TouchHandle 按原版语义复位 moving。
     if (event == 0x04) {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        const int index = extension_tab_index(ctrl);
-        if (index >= 0 &&
-            g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle &&
-            virtual_bag::drag_session_generation_current(
-                g_extension_drag_session, g_extension_tab_generation)) {
-            const bool handled = route_projected_session_to_tab_locked(index);
-            return finish(handled ? 1 : 0);
-        }
-        void* moving = touch_moving_item_control_locked();
-        // 原版不可堆叠装备在 drop 事件到达时可能已经清掉
-        // ITEM_CTRL_MOVING_FLAG，但事件参数仍保留真实 source control。
-        // 优先使用 TouchHandle 状态，只有状态已清空时才回退到事件源，避免
-        // 放宽普通点击/无效控件的处理范围。
-        if (moving == nullptr && param != nullptr) {
-            moving = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
-        }
-        if (index >= 0 && moving != nullptr) {
-            void* data = fn_control_object_get_data != nullptr
-                ? fn_control_object_get_data(moving) : nullptr;
-            void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
-            int module_bag = -1;
-            int module_slot = -1;
-            const bool extension_source =
-                item != nullptr && module_slot_of_item_locked(item, &module_bag, &module_slot);
-            const int category = extension_source
-                ? g_virtual_bag_state.items[module_bag][module_slot].category
-                : original_item_category_locked(item);
-            const bool backpack_item = category >= 1 && category <= 4;
-            if (g_virtual_bag_state.types[index] == 0 && backpack_item) {
-                // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
-                // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
-                try_equip_on_extension_tab_drop_locked(index, moving);
-            } else if (extension_source) {
-                // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
-                // 扩展袋间移动处理，不能把“背包槽装备”误当成人物装备。
-                const bool moved = move_extension_to_extension_locked(
-                    module_bag, module_slot, index, -1);
-                if (moved) {
-                    persist_state_locked(false);
-                    refresh_projected_module_view_after_move_locked();
+        uint64_t result = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            const int index = extension_tab_index(ctrl);
+            if (index >= 0 &&
+                g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+                const int logical_bag = virtual_bag::extension_logical_bag(index);
+                const bool handled = logical_bag >= 0 &&
+                                     route_projected_session_to_tab_locked(logical_bag);
+                if (logical_bag < 0) {
+                    VIRTBAG_LOG("cross tab reject reason=target_tab_index_invalid index=%d", index);
                 }
-                VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
-                            moved ? 1 : 0, index, category);
+                result = handled ? 1 : 0;
             } else {
-                const bool moved = move_original_to_extension_locked(index, moving);
-                VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
-                            moved ? 1 : 0, index, category,
-                            g_virtual_bag_state.types[index] != 0 ? 1 : 0);
+                void* moving = touch_moving_item_control_locked();
+                // 原版不可堆叠装备在 drop 事件到达时可能已经清掉
+                // ITEM_CTRL_MOVING_FLAG，但事件参数仍保留真实 source control。
+                // 优先使用 TouchHandle 状态，只有状态已清空时才回退到事件源，避免
+                // 放宽普通点击/无效控件的处理范围。
+                if (moving == nullptr && param != nullptr) {
+                    moving = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+                }
+                if (index >= 0 && moving != nullptr) {
+                    void* data = fn_control_object_get_data != nullptr
+                        ? fn_control_object_get_data(moving) : nullptr;
+                    void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+                    int module_bag = -1;
+                    int module_slot = -1;
+                    const bool extension_source =
+                        item != nullptr && module_slot_of_item_locked(item, &module_bag, &module_slot);
+                    const int category = extension_source
+                        ? g_virtual_bag_state.items[module_bag][module_slot].category
+                        : original_item_category_locked(item);
+                    const bool backpack_item = is_backpack_category(category);
+                    if (g_virtual_bag_state.types[index] == 0 && backpack_item) {
+                        // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
+                        // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
+                        try_equip_on_extension_tab_drop_locked(index, moving);
+                    } else if (extension_source) {
+                        // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
+                        // 扩展袋间移动处理，不能把“背包槽装备”误当成人物装备。
+                        const bool moved = move_extension_to_extension_locked(
+                            module_bag, module_slot, index, -1);
+                        if (moved) {
+                            persist_state_locked(false);
+                            refresh_projected_module_view_after_move_locked();
+                        }
+                        VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
+                                    moved ? 1 : 0, index, category);
+                    } else {
+                        const bool moved = move_original_to_extension_locked(index, moving);
+                        VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
+                                    moved ? 1 : 0, index, category,
+                                    g_virtual_bag_state.types[index] != 0 ? 1 : 0);
+                    }
+                }
             }
         }
-        return finish(0);
+        return finish(result);
     }
     // 其余事件（含 0x10 拖动发起查询：TouchHandle_MoveOn @a2fec-a304c 派发，
     // proc 返回 1 即登记 moving 控件）一律返回 0——兜底返回 1 会让标签成为
@@ -257,7 +270,8 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
 bool handle_bag_drop_release_locked(int64_t x, int64_t y);
-void defer_item_free_locked(void* item);
+bool defer_item_free_locked(void* item);
+bool item_pointer_known_locked(void* item);
 void* valid_child_locked(void* root, int slot);
 void make_desc_equip_gate(void* ctrl, void* arg);
 void extension_desc_item_execute(void* button);
@@ -713,7 +727,7 @@ void recover_pending_transaction_locked() {
                     if (same_source) {
                         fn_remove_item_direct(pending.src_bag, pending.src_slot);
                         if (fn_ui_equip_refresh_item_area != nullptr) {
-                            fn_ui_equip_refresh_item_area();
+                            inventory_native_hook_call_refresh_item_area_original();
                         }
                         void* remaining_source = nullptr;
                         if (inventory_slot_locked(pending.src_bag, pending.src_slot,
@@ -832,7 +846,7 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
         // 未装备袋只有在当前拖动物品满足装备规则时可命中；否则仍保持
         // G-12 的不可命中门禁，避免普通物品误落到未装备标签。
         const int category = drag_source_category_locked();
-        if (category < 1 || category > 4) return false;
+        if (!is_backpack_category(category)) return false;
     }
     // 标签位置是动态换算的（tab_rel + 袋容器绝对），用控件真实绝对 rect 判断，
     // 不用旧硬编码 kCellX/kCellY（标签左移后二者偏移 36px 致命中失效）。

@@ -4,9 +4,11 @@
 #include "game_inventory.h"
 #include "game_ops_common.h"
 #include "feature/patch/game_patch.h"
+#include "feature/patch/native_inventory_hook.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"
+#include "feature/patch/inventory_hook_stage4.h"
 #include "feature/extension_bag/model/ownership_ledger.h"
 #include "core/native/stack_codec.h"
 #include "core/native/stack_limit_port.h"
@@ -113,6 +115,15 @@ struct ModuleUseToken {
     uint64_t generation = 0;
     std::thread::id owner{};
 };
+struct ModuleUseReleasePlan {
+    bool pending = false;
+    int bag = -1;
+    int slot = -1;
+    void* item = nullptr;
+    void* control = nullptr;
+    uint32_t handle = 0;
+    uint64_t generation = 0;
+};
 std::array<std::array<ModuleUseState, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
     g_module_object_use{};
 thread_local ModuleUseToken* g_active_module_use_token = nullptr;
@@ -168,13 +179,17 @@ std::atomic<uint64_t> g_p5_observation_sequence{0};
 std::atomic<uint64_t> g_p5_last_item_query_sample_ms{0};
 std::atomic<uint64_t> g_p5_last_panel_move_sample_ms{0};
 thread_local bool g_p5_observation_active = false;
+thread_local bool g_refresh_restore_suppress = false;
 void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
 int extension_tab_index(void* ctrl);
-bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
 bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
-bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed);
+bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
+                              ModuleUseReleasePlan* out_release);
 bool module_use_abort_locked(const ModuleUseToken& token);
+bool module_use_abort_isolate_locked(const ModuleUseToken& token);
+bool module_use_release_native(const ModuleUseReleasePlan& release);
+bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release);
 bool module_slot_is_assignable_locked(int bag, int slot);
 bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
 bool module_object_generation_advance_locked(int bag, int slot, const char* context);
@@ -201,6 +216,8 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag, 
 bool persist_state_locked(bool force);
 void refresh_projected_module_view_after_move_locked();
 void cancel_projected_drag_session_locked(const char* reason);
+void refresh_projection_if_overwritten_locked();
+bool sync_projected_slot_locked(int bag, int slot);
 bool route_projected_session_to_tab_locked(int target_bag);
 int original_item_category_locked(void* item);
 int drag_source_category_locked();
@@ -217,6 +234,159 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 
 #include "feature/extension_bag/extension_bag_runtime.inc"
 }  // namespace
+
+void virtual_bag_refresh_item_area_with_gate() {
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    inventory_native_hook_call_refresh_item_area_original();
+    const bool projection_installed =
+        g_module_view_installed && g_projected_item_root != nullptr &&
+        virtual_bag::valid_index(g_module_view_index);
+    if (!g_refresh_restore_suppress && projection_installed) {
+        refresh_projection_if_overwritten_locked();
+    }
+}
+
+VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
+    void* control, uint64_t event, void* x2, void* param,
+    VirtualBagEquipControlEventBackup backup, uint64_t* out_result) {
+    if (out_result != nullptr) *out_result = 0;
+    if (event != 0x04 || param == nullptr || fn_control_object_get_data == nullptr) {
+        return VirtualBagEquipControlEventResult::kNotExtension;
+    }
+    void* source_control = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+    void* source_item = nullptr;
+    void* target_item = nullptr;
+    int source_bag = -1;
+    int source_slot = -1;
+    int target_slot_index = -1;
+    ModuleUseToken use_token{};
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        // 控件指针只作为当前投影索引；data 和 item 必须在同一锁上下文重读，
+        // 防止控件在锁外被重绑后仍沿用旧身份。
+        void* source_data = source_control != nullptr
+            ? fn_control_object_get_data(source_control) : nullptr;
+        void* target_data = control != nullptr ? fn_control_object_get_data(control) : nullptr;
+        source_item = source_data != nullptr ? *reinterpret_cast<void**>(source_data) : nullptr;
+        target_item = target_data != nullptr ? *reinterpret_cast<void**>(target_data) : nullptr;
+        target_slot_index = control != nullptr && fn_ui_equip_get_item_slot_index != nullptr
+            ? fn_ui_equip_get_item_slot_index(control) : -1;
+        const bool extension_source =
+            source_item != nullptr && module_slot_of_item_locked(source_item, &source_bag, &source_slot);
+        const bool source_is_jewel = extension_source &&
+            fn_is_jewel != nullptr &&
+            fn_is_jewel(g_virtual_bag_state.items[source_bag][source_slot].category) != 0;
+        const bool target_is_equip_slot = target_item != nullptr && item_is_equip(target_item) &&
+            target_slot_index >= 16;
+        if (!stage4_is_extension_equip_control_source(
+                event, extension_source, source_is_jewel, target_is_equip_slot)) {
+            return VirtualBagEquipControlEventResult::kNotExtension;
+        }
+
+        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[source_bag][source_slot];
+        const ModuleUseState& use = g_module_object_use[source_bag][source_slot];
+        const bool descriptor_valid = descriptor.category > 0 && descriptor.count > 0 &&
+            descriptor.payload_size > 0 && descriptor.payload_size <= virtual_bag::kMaxSerializedItem &&
+            g_module_objects[source_bag][source_slot] == source_item &&
+            g_module_object_categories[source_bag][source_slot] == descriptor.category &&
+            g_module_object_hashes[source_bag][source_slot] == virtual_bag::payload_hash(descriptor) &&
+            g_module_object_handles[source_bag][source_slot] != 0 && use.generation != 0 &&
+            !use.active && !use.pending_release;
+        const auto& session = g_extension_drag_session;
+        const bool session_valid = g_module_view_installed &&
+            g_module_view_index == source_bag && g_projected_item_root != nullptr &&
+            valid_child_locked(g_projected_item_root, source_slot) == source_control &&
+            session.phase != virtual_bag::DragPhase::kIdle &&
+            session.source_bag == source_bag && session.source_slot == source_slot &&
+            virtual_bag::drag_session_generation_current(session, g_extension_tab_generation);
+        if (!descriptor_valid || !session_valid || backup == nullptr ||
+            !module_use_begin_locked(source_bag, source_slot, source_item, &use_token)) {
+            VIRTBAG_LOG("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p descriptor=%d session=%d",
+                        source_item, source_bag, source_slot, target_item,
+                        descriptor_valid ? 1 : 0, session_valid ? 1 : 0);
+            cancel_projected_drag_session_locked("equip-control-validation-failed");
+            return VirtualBagEquipControlEventResult::kBlocked;
+        }
+    }
+
+    struct ActiveUseTokenScope {
+        ModuleUseToken* previous = nullptr;
+        explicit ActiveUseTokenScope(ModuleUseToken* current)
+            : previous(g_active_module_use_token) {
+            g_active_module_use_token = current;
+        }
+        ~ActiveUseTokenScope() { g_active_module_use_token = previous; }
+    } active_use_token_scope(&use_token);
+    const uint64_t original_result = backup(control, event, x2, param);
+
+    bool consumed = false;
+    bool finished = false;
+    ModuleUseReleasePlan release_plan{};
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        finished = module_use_finish_locked(use_token, &consumed, &release_plan);
+        if (stage4_finish_requires_abort(finished)) {
+            const bool aborted = module_use_abort_locked(use_token);
+            const bool isolated = aborted || module_use_abort_isolate_locked(use_token);
+            VIRTBAG_LOG("ERROR equip control token finish failed source=%p/%d/%d aborted=%d isolated=%d",
+                        source_item, source_bag, source_slot, aborted ? 1 : 0,
+                        isolated ? 1 : 0);
+            cancel_projected_drag_session_locked("equip-control-finish-mismatch");
+        } else if (!consumed) {
+            VIRTBAG_LOG("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p finished=%d consumed=%d",
+                        source_item, source_bag, source_slot, target_item,
+                        finished ? 1 : 0, consumed ? 1 : 0);
+            cancel_projected_drag_session_locked("equip-control-not-consumed");
+        }
+    }
+    if (!finished || !consumed) return VirtualBagEquipControlEventResult::kBlocked;
+
+    bool released = true;
+    if (release_plan.pending) {
+        released = module_use_release_native(release_plan);
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (released) released = module_use_finalize_release_locked(release_plan);
+    }
+    if (!released) {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        cancel_projected_drag_session_locked("equip-control-native-release-failed");
+        return VirtualBagEquipControlEventResult::kBlocked;
+    }
+
+    bool session_committed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        auto& session = g_extension_drag_session;
+        if (session.phase == virtual_bag::DragPhase::kPressed) {
+            virtual_bag::session_on_native_moving(&session, g_extension_tab_generation);
+        }
+        if (session.source_bag == source_bag && session.source_slot == source_slot &&
+            virtual_bag::drag_session_generation_current(session, g_extension_tab_generation) &&
+            session.phase == virtual_bag::DragPhase::kNativeMoving &&
+            virtual_bag::session_resolve_target(
+                &session, g_extension_tab_generation,
+                virtual_bag::DragTargetKind::kEquipmentSlot) != virtual_bag::DragTransition::kIllegal &&
+            virtual_bag::session_begin_transaction(
+                &session, g_extension_tab_generation) != virtual_bag::DragTransition::kIllegal &&
+            virtual_bag::session_claim_transaction(&session) &&
+            virtual_bag::session_finish_transaction(&session, true) ==
+                virtual_bag::DragTransition::kAdvanced) {
+            session_committed = true;
+            VIRTBAG_LOG("equip control committed session token=%llu source=%d/%d target_slot=%d",
+                        static_cast<unsigned long long>(session.token), source_bag, source_slot,
+                        target_slot_index);
+        } else {
+            cancel_projected_drag_session_locked("equip-control-session-commit-failed");
+        }
+    }
+    if (!session_committed) return VirtualBagEquipControlEventResult::kBlocked;
+    VIRTBAG_LOG("equip control handled caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p result=%llu",
+                source_item, source_bag, source_slot, target_item,
+                static_cast<unsigned long long>(original_result));
+    if (out_result != nullptr) *out_result = original_result;
+    return VirtualBagEquipControlEventResult::kHandled;
+}
 
 bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {
     if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
@@ -297,6 +467,7 @@ bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
 bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
     if (item == nullptr) return false;
     void* detail_control = nullptr;
+    void* detail_item = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
@@ -331,14 +502,15 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
             fn_control_item_set_item != nullptr) {
             detail_control = valid_child_locked(g_projected_item_root,
                                                 g_pending_jewel_detail_slot);
-            if (detail_control != nullptr) {
-                fn_control_item_set_item(detail_control, g_pending_jewel_detail_item);
-            }
+            detail_item = g_pending_jewel_detail_item;
         }
         g_pending_jewel_detail_item = nullptr;
         g_pending_jewel_detail_bag = -1;
         g_pending_jewel_detail_slot = -1;
         VIRTBAG_LOG("native consume extension bag=%d slot=%d before=%d", bag, slot, before_count);
+    }
+    if (detail_control != nullptr && fn_control_item_set_item != nullptr) {
+        fn_control_item_set_item(detail_control, detail_item);
     }
     if (detail_control != nullptr && fn_ui_equip_make_desc != nullptr) {
         make_desc_equip_gate(detail_control, nullptr);
@@ -967,7 +1139,9 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
         g_item_state_dirty = true;
         persist_state_locked();
         if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-        if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+        if (fn_ui_equip_refresh_item_area != nullptr) {
+            inventory_native_hook_call_refresh_item_area_original();
+        }
         if (fn_ui_equip_refresh_bag_area != nullptr) fn_ui_equip_refresh_bag_area();
         clear_original_desc_locked();
         if (g_module_view_installed && g_module_view_index == src_bag) {
@@ -1085,7 +1259,9 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         g_item_state_dirty = true;
         persist_state_locked();
         if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-        if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+        if (fn_ui_equip_refresh_item_area != nullptr) {
+            inventory_native_hook_call_refresh_item_area_original();
+        }
         if (fn_ui_equip_refresh_bag_area != nullptr) fn_ui_equip_refresh_bag_area();
         clear_original_desc_locked();
         VIRTBAG_LOG("original bag unequip->original bag=%d dst=%d item=%p", bag_index,
@@ -1150,7 +1326,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     if (g_module_view_installed && g_module_view_index == adopt_bag) {
         refresh_module_item_area_locked(adopt_bag);
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
-        fn_ui_equip_refresh_item_area();
+        inventory_native_hook_call_refresh_item_area_original();
     }
     if (fn_ui_equip_refresh_bag_area != nullptr) fn_ui_equip_refresh_bag_area();
     VIRTBAG_LOG("original bag unequip->extension bag=%d dst=%d/%d item=%p", bag_index,

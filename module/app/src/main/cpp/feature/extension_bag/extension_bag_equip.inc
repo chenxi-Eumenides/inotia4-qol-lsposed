@@ -47,7 +47,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(int internal_bag, void* 
             *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
         category = fn_get_bit(flags, 15, 6);
     }
-    if (category < 1 || category > 4) return ExtensionBagEquipResult::kReject;
+    if (!is_backpack_category(category)) return ExtensionBagEquipResult::kReject;
     if (!module_source &&
         (fn_remove_item_direct == nullptr || fn_inven_save_item_on_empty == nullptr ||
          fn_save_save_item == nullptr || fn_save_load_item == nullptr || fn_itempool_free == nullptr)) {
@@ -291,9 +291,8 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     }
     if (g_module_view_installed && g_module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
-        refresh_projection_if_overwritten_locked();
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
-        fn_ui_equip_refresh_item_area();
+        inventory_native_hook_call_refresh_item_area_original();
     }
     if (fn_ui_equip_update_char_equip != nullptr) fn_ui_equip_update_char_equip();
     if (moving_control != nullptr) reset_drag_state_locked(moving_control);
@@ -325,7 +324,7 @@ bool extension_source_should_equip_locked(int target_bag) {
         return false;
     }
     const int category = g_virtual_bag_state.items[session.source_bag][session.source_slot].category;
-    return g_virtual_bag_state.types[target_bag] == 0 && category >= 1 && category <= 4;
+    return g_virtual_bag_state.types[target_bag] == 0 && is_backpack_category(category);
 }
 
 int first_empty_extension_bag_locked() {
@@ -567,7 +566,7 @@ void extension_destroy_ok(void*) {
         }
     }
     if (committed && fn_ui_equip_refresh_item_area != nullptr) {
-        fn_ui_equip_refresh_item_area();
+        inventory_native_hook_call_refresh_item_area_original();
     }
     if (committed) {
         VIRTBAG_LOG("extension destroy committed bag=%d slot=%d", committed_bag, committed_slot);
@@ -689,6 +688,7 @@ bool extension_confirm_use_item(void* item) {
     bool used = false;
     int bag = -1;
     int slot = -1;
+    ModuleUseReleasePlan release_plan{};
     {
         std::unique_lock<std::mutex> lock(g_virtual_bag_mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
@@ -730,13 +730,14 @@ bool extension_confirm_use_item(void* item) {
         lock.lock();
         g_active_module_use_token = previous_use_token;
         bool consumed = false;
-        const bool use_token_valid = module_use_finish_locked(use_token, &consumed);
+        const bool use_token_valid = module_use_finish_locked(use_token, &consumed, &release_plan);
         const bool same_item = g_module_objects[bag][slot] == item;
         if (!use_token_valid) {
             const bool marker_cleared = module_use_abort_locked(use_token);
+            const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
             VIRTBAG_LOG("ERROR extension confirm-use token lost after use bag=%d slot=%d item=%p marker_cleared=%d; treated handled",
-                        bag, slot, item, marker_cleared ? 1 : 0);
-            if (marker_cleared) {
+                        bag, slot, item, isolated ? 1 : 0);
+            if (isolated) {
                 reset_extension_desc_item_hooks_locked();
                 g_extension_desc_item = nullptr;
                 g_extension_desc_item_bag = -1;
@@ -757,8 +758,23 @@ bool extension_confirm_use_item(void* item) {
                         bag, slot, item);
             return true;
         }
-        // module_use_finish_locked 已完成消费后的槽级收尾；必须在同一锁上下文
-        // 中走“原版刷新后立即重投影”，避免中间一帧显示原版背包。
+    }
+    if (release_plan.pending) {
+        if (!module_use_release_native(release_plan)) {
+            VIRTBAG_LOG("ERROR extension confirm-use native release failed bag=%d slot=%d",
+                        bag, slot);
+            return true;
+        }
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!module_use_finalize_release_locked(release_plan)) {
+            VIRTBAG_LOG("ERROR extension confirm-use release finalize failed bag=%d slot=%d",
+                        bag, slot);
+            return true;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        // native 释放和对象摘除完成后再刷新并清理详情控件，避免悬挂绑定。
         refresh_module_item_area_locked(bag);
         reset_extension_desc_item_hooks_locked();
         g_extension_desc_item = nullptr;

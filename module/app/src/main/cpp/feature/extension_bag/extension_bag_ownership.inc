@@ -2,8 +2,121 @@
 ownership::Ledger g_ownership_ledger{};
 uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount]{};
 
-void defer_item_free_locked(void* item) {
-    (void)item;
+struct DeferredItemFree {
+    void* item = nullptr;
+    uint32_t handle = 0;
+    uint64_t generation = 0;
+    uint64_t enqueued_at_ms = 0;
+};
+
+constexpr size_t kDeferredFreeQueueCapacity = 16;
+std::array<DeferredItemFree, kDeferredFreeQueueCapacity> g_deferred_free_queue{};
+size_t g_deferred_free_queue_head = 0;
+size_t g_deferred_free_queue_size = 0;
+
+bool object_touch_window_active_locked();
+
+uint64_t deferred_free_now_ms_locked() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+uint64_t module_object_generation_locked(void* item, uint32_t handle) {
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_module_objects[bag][slot] == item) {
+                return g_module_object_use[bag][slot].generation;
+            }
+        }
+    }
+    return static_cast<uint64_t>(handle >> 8);
+}
+
+bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t generation) {
+    if (item == nullptr) return false;
+    for (size_t offset = 0; offset < g_deferred_free_queue_size; ++offset) {
+        const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
+        if (g_deferred_free_queue[index].item == item) return true;
+    }
+    if (g_deferred_free_queue_size >= kDeferredFreeQueueCapacity) {
+        VIRTBAG_LOG("ERROR deferred free queue full item=%p handle=%u generation=%llu", item,
+                    handle, static_cast<unsigned long long>(generation));
+        return false;
+    }
+    const size_t tail = (g_deferred_free_queue_head + g_deferred_free_queue_size) %
+                        kDeferredFreeQueueCapacity;
+    g_deferred_free_queue[tail] = {
+        item, handle, generation, deferred_free_now_ms_locked()};
+    ++g_deferred_free_queue_size;
+    VIRTBAG_LOG("deferred free enqueue item=%p handle=%u generation=%llu", item, handle,
+                static_cast<unsigned long long>(generation));
+    return true;
+}
+
+bool defer_item_free_locked(void* item) {
+    uint32_t handle = 0;
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_module_objects[bag][slot] == item) {
+                handle = g_module_object_handles[bag][slot];
+                break;
+            }
+        }
+        if (handle != 0) break;
+    }
+    return enqueue_deferred_item_free_locked(
+        item, handle, module_object_generation_locked(item, handle));
+}
+
+bool deferred_item_referenced_locked(void* item) {
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_module_objects[bag][slot] == item) return true;
+        }
+    }
+    if (g_projected_item_root == nullptr || fn_ctrl_get_count == nullptr ||
+        fn_control_object_get_child == nullptr || fn_control_object_get_data == nullptr) {
+        return item_pointer_known_locked(item);
+    }
+    const int child_count = static_cast<int>(fn_ctrl_get_count(g_projected_item_root));
+    for (int slot = 0; slot < child_count; ++slot) {
+        void* control = fn_control_object_get_child(g_projected_item_root, slot);
+        if (control == nullptr) continue;
+        void* data = fn_control_object_get_data(control);
+        if (data != nullptr && *reinterpret_cast<void**>(data) == item) return true;
+    }
+    // 兜底覆盖原版库存和角色装备等非 projection root 的已知引用；宁可
+    // 保留队列项，也不能让 handover 失败路径把仍由游戏持有的对象释放掉。
+    return item_pointer_known_locked(item);
+}
+
+void drain_deferred_frees_locked() {
+    if (object_touch_window_active_locked()) return;
+    const size_t count = g_deferred_free_queue_size;
+    if (count == 0) return;
+
+    std::array<DeferredItemFree, kDeferredFreeQueueCapacity> kept{};
+    size_t kept_count = 0;
+    size_t freed_count = 0;
+    for (size_t offset = 0; offset < count; ++offset) {
+        const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
+        const DeferredItemFree entry = g_deferred_free_queue[index];
+        if (deferred_item_referenced_locked(entry.item) || fn_itempool_free == nullptr) {
+            kept[kept_count++] = entry;
+            continue;
+        }
+        fn_itempool_free(entry.item);
+        ++freed_count;
+    }
+    g_deferred_free_queue = {};
+    g_deferred_free_queue_head = 0;
+    g_deferred_free_queue_size = 0;
+    for (size_t index = 0; index < kept_count; ++index) {
+        g_deferred_free_queue[index] = kept[index];
+    }
+    g_deferred_free_queue_size = kept_count;
+    VIRTBAG_LOG("deferred free drain count=%zu freed=%zu kept=%zu", count, freed_count,
+                kept_count);
 }
 
 void log_ownership_audit_locked(const char* context) {
@@ -31,17 +144,31 @@ bool object_touch_window_active_locked() {
     return false;
 }
 
-void retire_custody_item_locked(uint32_t handle, void* item, const char* context) {
-    const bool released =
-        ownership::release(&g_ownership_ledger, handle) == ownership::Outcome::kOk;
-    if (released && !object_touch_window_active_locked() && fn_itempool_free != nullptr) {
-        fn_itempool_free(item);
-    } else {
-        defer_item_free_locked(item);
-        VIRTBAG_LOG("ownership defer free context=%s released=%d touch_window=%d", context,
-                    released ? 1 : 0, object_touch_window_active_locked() ? 1 : 0);
+bool retire_custody_item_locked(uint32_t handle, void* item, const char* context) {
+    if (item == nullptr || !ownership::live_state(g_ownership_ledger, handle,
+                                                   ownership::State::kModuleOwned)) {
+        VIRTBAG_LOG("ownership release refused context=%s invalid_handle=%u item=%p", context,
+                    handle, item);
+        return false;
+    }
+
+    const bool touch_window = object_touch_window_active_locked();
+    if (touch_window || fn_itempool_free == nullptr) {
+        const uint64_t generation = module_object_generation_locked(item, handle);
+        if (!enqueue_deferred_item_free_locked(item, handle, generation)) return false;
+    }
+    if (ownership::release(&g_ownership_ledger, handle) != ownership::Outcome::kOk) {
+        VIRTBAG_LOG("ERROR ownership release changed during custody retirement context=%s handle=%u",
+                    context, handle);
+        return false;
+    }
+    if (!touch_window && fn_itempool_free != nullptr) fn_itempool_free(item);
+    if (touch_window || fn_itempool_free == nullptr) {
+        VIRTBAG_LOG("ownership release deferred context=%s touch_window=%d handle=%u", context,
+                    touch_window ? 1 : 0, handle);
     }
     log_ownership_audit_locked(context);
+    return true;
 }
 
 void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
@@ -161,7 +288,9 @@ bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_
     return true;
 }
 
-bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed) {
+bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
+                              ModuleUseReleasePlan* out_release) {
+    if (out_release != nullptr) *out_release = {};
     if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
         token.slot >= virtual_bag::kSlotCount) {
         VIRTBAG_LOG("ERROR module use finish token mismatch invalid slot active=-1 "
@@ -194,16 +323,36 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed) {
     const bool pending_release = use.pending_release;
     const int bag = token.bag;
     const int slot = token.slot;
+    if (pending_release) {
+        ModuleUseReleasePlan release{};
+        release.pending = true;
+        release.bag = bag;
+        release.slot = slot;
+        release.item = token.item;
+        release.handle = g_module_object_handles[bag][slot];
+        release.generation = use.generation;
+        if (g_module_view_installed && g_module_view_index == bag &&
+            g_projected_item_root != nullptr && fn_control_item_set_item != nullptr) {
+            release.control = valid_child_locked(g_projected_item_root, slot);
+        }
+        // 事务状态、对象索引和 handle 在锁内摘除；native 控件写入及 itempool
+        // 释放由调用方在解锁后完成，避免重入 Remove/Save/Consume hook。
+        g_module_objects[bag][slot] = nullptr;
+        g_module_object_categories[bag][slot] = 0;
+        g_module_object_hashes[bag][slot] = 0;
+        g_module_object_handles[bag][slot] = 0;
+        use.active = false;
+        use.consumed = false;
+        use.item = token.item;
+        use.owner = {};
+        if (out_release != nullptr) *out_release = release;
+        return true;
+    }
     use.active = false;
     use.consumed = false;
     use.pending_release = false;
     use.item = nullptr;
     use.owner = {};
-    if (pending_release && !free_module_object_locked(bag, slot, nullptr)) {
-        VIRTBAG_LOG("ERROR module use finish deferred release failed bag=%d slot=%d item=%p",
-                    bag, slot, token.item);
-        return false;
-    }
     return true;
 }
 
@@ -242,6 +391,71 @@ bool module_use_abort_locked(const ModuleUseToken& token) {
     use.item = nullptr;
     use.owner = {};
     return true;
+}
+
+bool module_use_abort_isolate_locked(const ModuleUseToken& token) {
+    if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
+        token.slot >= virtual_bag::kSlotCount) {
+        return false;
+    }
+    ModuleUseState& use = g_module_object_use[token.bag][token.slot];
+    if (!use.active) return true;
+    // mismatch 后不释放未知 native 对象，只清除 active 标记并保留 pending 对象的
+    // 隔离状态；generation 保留以拒绝旧 token 重入。
+    VIRTBAG_LOG("ERROR module use abort isolation bag=%d slot=%d item=%p pending_release=%d",
+                token.bag, token.slot, use.item, use.pending_release ? 1 : 0);
+    use.active = false;
+    use.consumed = false;
+    if (!use.pending_release) use.item = nullptr;
+    use.owner = {};
+    return true;
+}
+
+bool module_use_release_native(const ModuleUseReleasePlan& release) {
+    if (!release.pending || release.item == nullptr || release.handle == 0) return false;
+    bool deferred = false;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (release.control != nullptr && fn_control_item_set_item != nullptr) {
+            fn_control_item_set_item(release.control, nullptr);
+        }
+        if (object_touch_window_active_locked() || fn_itempool_free == nullptr) {
+            deferred = enqueue_deferred_item_free_locked(release.item, release.handle,
+                                                         release.generation);
+            if (!deferred) return false;
+        }
+    }
+    if (!deferred) fn_itempool_free(release.item);
+    return true;
+}
+
+bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release) {
+    if (!release.pending || release.bag < 0 || release.bag >= virtual_bag::kBagCount ||
+        release.slot < 0 || release.slot >= virtual_bag::kSlotCount) {
+        return false;
+    }
+    ModuleUseState& use = g_module_object_use[release.bag][release.slot];
+    if (!use.pending_release || use.item != release.item || use.generation != release.generation) {
+        VIRTBAG_LOG("ERROR module use release finalize mismatch bag=%d slot=%d item=%p",
+                    release.bag, release.slot, release.item);
+        return false;
+    }
+    if (ownership::live_state(g_ownership_ledger, release.handle,
+                              ownership::State::kBorrowedForView)) {
+        ownership::return_from_view(&g_ownership_ledger, release.handle);
+    }
+    if (ownership::release(&g_ownership_ledger, release.handle) != ownership::Outcome::kOk) {
+        VIRTBAG_LOG("ERROR module use release ledger mismatch bag=%d slot=%d handle=%u",
+                    release.bag, release.slot, release.handle);
+        return false;
+    }
+    use.active = false;
+    use.consumed = false;
+    use.pending_release = false;
+    use.item = nullptr;
+    use.owner = {};
+    return module_object_generation_advance_locked(release.bag, release.slot,
+                                                   "module-use-native-release");
 }
 
 bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
@@ -286,7 +500,7 @@ bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
                                   ownership::State::kBorrowedForView)) {
             ownership::return_from_view(&g_ownership_ledger, handle);
         }
-        retire_custody_item_locked(handle, item, "free_module_object");
+        if (!retire_custody_item_locked(handle, item, "free_module_object")) return false;
     }
     g_module_objects[bag][slot] = nullptr;
     g_module_object_categories[bag][slot] = 0;

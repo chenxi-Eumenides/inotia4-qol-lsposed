@@ -169,6 +169,15 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
 bool consume_projected_release_locked(int64_t x, int64_t y) {
     if (!projected_drag_session_active_locked()) return false;
     auto& session = g_extension_drag_session;
+    if (session.phase == virtual_bag::DragPhase::kCommitted ||
+        session.phase == virtual_bag::DragPhase::kRejected ||
+        session.phase == virtual_bag::DragPhase::kCancelled) {
+        VIRTBAG_LOG("projected release consumed terminal session event=0x18 token=%llu phase=%d",
+                    static_cast<unsigned long long>(session.token),
+                    static_cast<int>(session.phase));
+        session = {};
+        return true;
+    }
     const int original_target_bag = original_bag_button_index(x, y);
     bool routed = false;
     if (original_target_bag >= 0 &&
@@ -201,12 +210,31 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     const uint32_t gamestate = g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
     if (!extension_enabled || gamestate != 0) {
         if (extension_enabled && event == 0x18) {
-            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-            if (projected_drag_session_active_locked()) {
-                cancel_projected_drag_session_locked("release-bypassed-gamestate");
-                g_extension_drag_session = {};
-                VIRTBAG_LOG("projected release intercepted event=0x18 reason=gamestate=%u",
-                            gamestate);
+            bool release_cleanup_needed = false;
+            int64_t release_x = 0;
+            int64_t release_y = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+                if (projected_drag_session_active_locked()) {
+                    if (param != 0) {
+                        release_x = *reinterpret_cast<const int64_t*>(param);
+                        release_y = *reinterpret_cast<const int64_t*>(param + 8);
+                    } else if (g_base != 0) {
+                        const uint8_t* touch_state =
+                            reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+                        release_x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
+                        release_y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
+                    }
+                    cancel_projected_drag_session_locked("release-bypassed-gamestate");
+                    g_extension_drag_session = {};
+                    VIRTBAG_LOG("projected release intercepted event=0x18 reason=gamestate=%u",
+                                gamestate);
+                    // Non-world cancellation is unhandled: clear native selection as original does.
+                    release_cleanup_needed = true;
+                }
+            }
+            if (release_cleanup_needed) {
+                complete_original_release_cleanup_locked(nullptr, release_x, release_y, param2, false);
                 return 1;
             }
         }
@@ -303,17 +331,21 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
             y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
         }
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
-        log_exit_trace_locked("event_release", event, param, param2, x, y);
+        bool release_cleanup_needed = false;
+        bool release_cleanup_handled = false;
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            ensure_state_loaded_locked();
+            log_exit_trace_locked("event_release", event, param, param2, x, y);
         if (virtual_bag::projected_release_owns_event(
                 event, projected_drag_session_active_locked())) {
             // 0x18 是投影拖拽的唯一提交 owner。必须在原版 TouchHandle/INVEN_MoveItem
             // 之前完成扩展事务；失败也吞掉原版，防止真实物理槽被二次改写。
             consume_projected_release_locked(x, y);
-            return 1;
-        }
-        if (g_extension_touch_capture) {
+                // Owner/terminal release is handled by the module; preserve native selection.
+                release_cleanup_needed = true;
+                release_cleanup_handled = true;
+            } else if (g_extension_touch_capture) {
             if (param == 0 && x == 0 && y == 0 && g_extension_drag.active) {
                 x = g_extension_drag.current_x;
                 y = g_extension_drag.current_y;
@@ -321,41 +353,51 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             if (param == 0 && x == 0 && y == 0) {
                 g_extension_drag = {};
                 g_extension_touch_capture = false;
-                reset_drag_state_locked(nullptr);
                 log_p5_observation_locked("panel-capture-release-empty", nullptr, event,
                                           param2 != 0, param != 0, nullptr, true, 1, x, y);
-                return 1;
-            }
-            constexpr int64_t kTouchSlop = 24;
-            const int64_t dx = x - g_extension_drag.press_x;
-            const int64_t dy = y - g_extension_drag.press_y;
-            const bool is_click = g_extension_drag.active &&
-                                  dx >= -kTouchSlop && dx <= kTouchSlop &&
-                                  dy >= -kTouchSlop && dy <= kTouchSlop;
-            if (is_click) {
-                g_virtual_bag_state.inspected = static_cast<int>(g_extension_drag.slot);
-                const virtual_bag::Item& item =
-                    g_virtual_bag_state.items[g_extension_drag.bag][g_extension_drag.slot];
-                VIRTBAG_LOG("extension item click bag=%d slot=%d category=%d count=%d",
-                            g_extension_drag.bag, g_extension_drag.slot, item.category,
-                            item.count);
-                log_exit_trace_locked("extension_item_click", event, param, param2, x, y);
+                // Empty capture has no module transaction; use the unhandled cleanup variant.
+                release_cleanup_needed = true;
+                release_cleanup_handled = false;
             } else {
-                const bool handled = g_extension_drag.active &&
-                                     handle_bag_drop_release_locked(x, y);
-                (void)handled;
+                constexpr int64_t kTouchSlop = 24;
+                const int64_t dx = x - g_extension_drag.press_x;
+                const int64_t dy = y - g_extension_drag.press_y;
+                const bool is_click = g_extension_drag.active &&
+                                      dx >= -kTouchSlop && dx <= kTouchSlop &&
+                                      dy >= -kTouchSlop && dy <= kTouchSlop;
+                if (is_click) {
+                    g_virtual_bag_state.inspected = static_cast<int>(g_extension_drag.slot);
+                    const virtual_bag::Item& item =
+                        g_virtual_bag_state.items[g_extension_drag.bag][g_extension_drag.slot];
+                    VIRTBAG_LOG("extension item click bag=%d slot=%d category=%d count=%d",
+                                g_extension_drag.bag, g_extension_drag.slot, item.category,
+                                item.count);
+                    log_exit_trace_locked("extension_item_click", event, param, param2, x, y);
+                    // The module consumed the click; still clear native selection state.
+                    release_cleanup_handled = false;
+                } else {
+                    const bool handled = g_extension_drag.active &&
+                                         handle_bag_drop_release_locked(x, y);
+                    // Drop keeps the transaction result; failed/no-source drops use unhandled cleanup.
+                    release_cleanup_handled = handled;
+                }
+                g_extension_drag = {};
+                g_extension_touch_capture = false;
+                log_p5_observation_locked("panel-capture-release", nullptr, event, param2 != 0,
+                                          param != 0, nullptr, true, 1, x, y);
+                release_cleanup_needed = true;
             }
-            reset_drag_state_locked(nullptr);
-            g_extension_drag = {};
-            g_extension_touch_capture = false;
-            log_p5_observation_locked("panel-capture-release", nullptr, event, param2 != 0,
-                                      param != 0, nullptr, true, 1, x, y);
-            return 1;
-        }
-        if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal &&
+        } else if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal &&
             handle_bag_drop_release_locked(x, y)) {
             log_p5_observation_locked("panel-original-release-handled", nullptr, event,
                                       param2 != 0, param != 0, nullptr, true, 1, x, y);
+            // Original-bag drop was consumed by the module route; skip selected-control clearing.
+            release_cleanup_needed = true;
+            release_cleanup_handled = true;
+        }
+        }
+        if (release_cleanup_needed) {
+            complete_original_release_cleanup_locked(nullptr, x, y, param2, release_cleanup_handled);
             return 1;
         }
         // G-10：tab 点击的坐标兜底已删除——tab 点击由控件回调
@@ -452,7 +494,9 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             const int selected_original_bag = original_bag_locked();
             restore_module_view_locked();
             set_original_bag_locked(selected_original_bag);
-            if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+            if (fn_ui_equip_refresh_item_area != nullptr) {
+                inventory_native_hook_call_refresh_item_area_original();
+            }
             virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
             persist_state_locked();
             g_exit_display_bag = kNoOriginalBagSelected;

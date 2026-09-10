@@ -150,6 +150,7 @@ std::string data_op_discard_item(int bag, int slot) {
     if (bag == 5) return op_err("task bag excluded");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
+    if (item_ref.native_item == nullptr) return op_err("extension item unavailable");
     if (fn_remove_item == nullptr) return op_err("symbol not resolved");
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
     if (fn_remove_item(item_ref.native_item) == 0) return op_err("discard failed");
@@ -165,6 +166,7 @@ std::string data_op_sell_item(int bag, int slot) {
         return op_err("symbol not resolved");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
+    if (item_ref.native_item == nullptr) return op_err("extension item unavailable");
     void* item = item_ref.native_item;
     const uint16_t flags = *reinterpret_cast<uint16_t*>(
         reinterpret_cast<uint8_t*>(item) + I_TYPE);

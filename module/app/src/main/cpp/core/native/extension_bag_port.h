@@ -14,10 +14,13 @@ bool extension_bag_enabled();
 std::string extension_bag_inventory_bags_json();
 bool extension_bag_is_inventory_enter(uintptr_t enter);
 bool extension_bag_is_logical_bag(int bag);
+int extension_bag_internal_index(int logical_bag);
 bool extension_bag_prepare_main_menu();
 int extension_bag_inventory_state_id();
 bool extension_bag_prepare_save_slot_load();
 void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
+// item_at consumes the internal 0..4 index; callers receiving logical 6..10
+// must convert through extension_bag_internal_index first.
 void* extension_bag_item_at(int bag, int slot);
 // 视图门禁版 item_at：仅当 bag 处于扩展视图时物化，否则 nullptr。
 void* extension_bag_view_item_at(int bag, int slot);

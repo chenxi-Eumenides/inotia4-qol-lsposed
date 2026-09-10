@@ -193,6 +193,16 @@ static void test_object_operations() {
                            jewel_extension) == 0);
     CHECK(g_jewel_extension_calls == 1 && g_jewel_backup_calls == 1 &&
           g_extension_action_calls == 0);
+
+    // EquipControlEventProc 的 wrapper 判据：只有 event=0x04、扩展宝石源且目标为
+    // 装备槽才进入扩展分支；原版源、扩展非宝石、非装备目标和其它事件均必须 backup。
+    CHECK(stage4_is_extension_equip_control_source(0x04, true, true, true));
+    CHECK(!stage4_is_extension_equip_control_source(0x04, true, true, false));
+    CHECK(!stage4_is_extension_equip_control_source(0x04, true, false, true));
+    CHECK(!stage4_is_extension_equip_control_source(0x04, false, true, true));
+    CHECK(!stage4_is_extension_equip_control_source(0x02, true, true, true));
+    CHECK(stage4_finish_requires_abort(false));
+    CHECK(!stage4_finish_requires_abort(true));
 }
 
 static void test_unequip_to_inven() {

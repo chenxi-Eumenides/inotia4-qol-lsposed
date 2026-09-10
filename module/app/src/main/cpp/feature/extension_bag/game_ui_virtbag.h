@@ -12,7 +12,8 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
 
 bool virtual_bag_module_view_installed();
 bool virtual_bag_original_item_input_blocked();
-bool virtual_bag_allow_original_tab_drop(void* control, void* source_control);
+bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
+                                         uint64_t caller_offset);
 bool set_virtual_bag_enabled(bool enabled);
 bool virtual_bag_enabled();
 bool virtual_bag_is_inventory_enter(uintptr_t enter);
@@ -58,12 +59,42 @@ void* virtual_bag_view_item_at(int bag, int slot);
 
 // Thread-safe read-only native item lookup used by the stable extension-bag port.
 bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot);
+// 调用方必须已持有 g_virtual_bag_mtx；事件层与函数层共用此 g_module_objects 反查。
+bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
+struct VirtualBagMoveItemObservation {
+    bool extension_item = false;
+    int extension_bag = -1;
+    int extension_slot = -1;
+    uint32_t extension_handle = 0;
+    int ownership_state = 0;
+    int module_view_index = -1;
+    bool drag_session_active = false;
+    int source_bag = -1;
+    int source_slot = -1;
+    void* source_ptr = nullptr;
+    void* target_ptr = nullptr;
+    uint64_t physical_digest = 0;
+    int physical_nonnull = 0;
+    bool physical_valid = false;
+};
+// 身份与取证数据在锁内采集；调用方必须放锁后再调用原版 backup。
+bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int target_slot,
+                                               VirtualBagMoveItemObservation* out);
 void* virtual_bag_find_native_item(int category);
 bool virtual_bag_remove_native_item(void* item, void* use_token);
 bool virtual_bag_equip_projected_item(void* character, void* item, int source_bag,
                                       int source_slot, int equip_slot);
 bool virtual_bag_consume_native_item(void* item, void* use_token);
 void* virtual_bag_current_use_token();
+using VirtualBagEquipControlEventBackup = uint64_t (*)(void*, uint64_t, void*, void*);
+enum class VirtualBagEquipControlEventResult : uint8_t {
+    kNotExtension,
+    kHandled,
+    kBlocked,
+};
+VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
+    void* control, uint64_t event, void* x2, void* param,
+    VirtualBagEquipControlEventBackup backup, uint64_t* out_result);
 using VirtualBagPutJewelBackup = int (*)(void* equip_item, void* jewel_item);
 int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
                                  VirtualBagPutJewelBackup backup);
@@ -91,3 +122,5 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 // 恢复商店投影（还原被放大的窗口袋容量字），否则原版 FindSaveSlot 会把
 // 物品写进超过真实容量的槽位（恢复后物品丢失）。由 SaveItem hook 调用。
 void virtual_bag_store_restore_for_original_write();
+// 原版刷新函数级关卡：调用方不持扩展锁，由该函数负责锁内原版刷新和投影覆盖。
+void virtual_bag_refresh_item_area_with_gate();

@@ -29,6 +29,7 @@ enum class DragTargetKind : uint8_t {
     kOriginalBag,
     kExtensionSlot,
     kExtensionTab,
+    kEquipmentSlot,
     kTaskBagRejected,
     kInvalid,
     kCancel,
@@ -124,11 +125,12 @@ inline DragTransition session_resolve_target(ExtensionDragSession* session,
         return DragTransition::kIllegal;
     }
     if (target != DragTargetKind::kOriginalBag && target != DragTargetKind::kExtensionSlot &&
-        target != DragTargetKind::kExtensionTab) {
+        target != DragTargetKind::kExtensionTab && target != DragTargetKind::kEquipmentSlot) {
         session->phase = DragPhase::kRejected;
         session->terminal_cause = DragTerminalCause::kInvalidTarget;
         return DragTransition::kAdvanced;
     }
+    session->target_kind = target;
     session->phase = DragPhase::kTargetResolved;
     return DragTransition::kAdvanced;
 }
@@ -206,4 +208,3 @@ inline DragTargetKind classify_drag_target(int bag, int slot, bool extension_tab
     if (valid_extension_logical_bag(bag)) return DragTargetKind::kExtensionSlot;
     return DragTargetKind::kInvalid;
 }
-

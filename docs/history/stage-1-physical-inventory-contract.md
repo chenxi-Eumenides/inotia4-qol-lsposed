@@ -1,5 +1,7 @@
 # P7 阶段 1：原版物理库存契约
 
+历史归档（2026-09-08）：仅供追溯，不得作为当前实现依据；当前权威见 docs/development/features/extension-bag/
+
 > 状态：STATIC-COMPLETE（静态契约已闭合；运行时未知已归入阶段 5/P6）
 > 日期：2026-09-06
 > 前置：阶段 0 `STATIC-COMPLETE`，证据见 `stage-0-static-inventory-audit.md` §6–§7。

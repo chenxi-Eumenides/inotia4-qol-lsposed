@@ -89,6 +89,7 @@ std::string data_op_remove_item(int32_t category) {
     if (fn_remove_item == nullptr || fn_get_bit == nullptr) return op_err("symbol not resolved");
     InventoryItemRef ref;
     if (!find_inventory_item_ref(category, &ref)) return op_err("item not found");
+    if (ref.native_item == nullptr) return op_err("extension item unavailable");
     if (ref.kind == InventoryItemKind::kExtension) {
         if (!extension_bag_remove_native_item(ref.native_item)) {
             return op_err("extension item removal failed");

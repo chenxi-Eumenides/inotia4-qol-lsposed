@@ -1,237 +1,430 @@
-# 扩展背包 P5：原生拖动协议与三方向路径验收
+# 扩展背包拖拽、投影与交互协议（触摸链事实册）
 
-> **状态**：已完成，`ACCEPTED`（2026-09-02）。本文件是 P5 的唯一实施与验收计划；P4/P5 已完成归档，P6/P7 或整体发布仍未通过。
+> **文档职责**：本册是扩展背包触摸输入链的事实文档，覆盖四件事——原版如何实现
+> （§1）、模块如何实现（§2）、模块改动哪些位置与侵入面（§3）、实现目标与验证状态
+> （§4）。裁定结论与理由集中在 §5，不与 §1–§4 的事实混排。
+> 状态总览归 `control-plane.md`，不变量和锁纪律归 `rulebook.md`，事务持久化归
+> `module-save-store.md`。
 >
-> **项目根目录**：`/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed`
->
-> **权威关系**：阶段状态、设备、证据格式和 ADR 以 `control-plane.md` 为准；本文件将其中 P5 拆为可实施的工作包。代码结构以 `../../architecture.md` 为准，API 以 `../../../reference/api-reference.md` 为准。本文不替代 P7 的持久化协议。
+> **基线**：
+> - 反汇编事实出处为归档基线 `archive/extension-bag/touch-baseline-20260909/
+>   libgame_ui_0xa3000-0xba200.txt`（本册缩写 **UI**）与
+>   `archive/extension-bag/touch-baseline-20260909/libgame_inven_0x103000-0x105000.txt`
+>   （本册缩写 **INVEN**），引用格式 `UI:行号` / `INVEN:行号`；VMA 只在基线文件内核对。
+> - 模块代码行号按本次成稿时工作树核实（commit `56a477b` 之后的工作树）；后续修改代码
+>   后必须重新核对全部 `文件:行` 锚点。
+> - 规则交叉引用以规则册已冻结的 `R-01..R-34` 为准；本册不得另行定义编号。
 
-## 1. P5 要解决的主要任务
+## 1. 原版触摸输入事实基线
 
-1. **先证实、后接通原生拖动**：查明 `UIEquip_InvenItemControlEventProc` 的 0x81/0x10 事件与 TouchHandle 生命周期。历史 handoff 所称“0x81 返回 1 建 moving”只是待复验的证据，不能直接当 ABI。
-2. **只保留一个拖动所有者和一个提交入口**：以 generation 绑定的 `ExtensionDragSession` 收敛按下、移动、目标解析、取消和 release；每次 release 最多派发一次既有 P4 事务。
-3. **完成三方向真实输入**：按扩展→扩展、原版→扩展、扩展→原版严格串行实现并验收；扩展源的 0x81 建立路径覆盖前、后三者中的扩展→扩展和扩展→原版。
-4. **把失败和跨视图处理变成可验证协议**：覆盖满目标、合并/不合并、任务袋 5、非法目标、取消、stale 事件、F3、切换/退出视图和受限的进程内 Load/插入失败。
-5. **提供可审计证据**：补齐纯模型 host 测试、结构检查、结构化日志和唯一真机物理触摸矩阵；debug 能力只能辅助诊断或受限注入，不能伪造拖动验收。
+### 1.1 入口、出口与调用链
 
-## 2. 已知基线、范围与非目标
-
-### 2.1 已证实的代码基线
-
-| 区域 | 当前事实 | P5 含义 |
-|---|---|---|
-| 原生 proc | 模块源码没有 0x81 的显式处理；`ui_equip_inven_item_proc_wrapper` 仅拦截既有事件，其他事件透传原版 proc。0x81 仅见于 P3 handoff 的历史事件表与 G-8 卡点，P5 同一设备观测未出现该事件。 | P5 采用已实证的 `0x10 → result=1 → MOVING_CTRL` 路径，不把未观察到的 0x81 假定为 ABI；后续不得新增 0x81 猜测逻辑。 |
-| 面板输入 | `virtual_bag_event` 在扩展网格命中时由 `g_extension_touch_capture` 处理 0x17/0x18/0x19；旧 `ExtensionDrag` 有条件地参与该路径。 | 旧路径是实现基线而非验收协议。新路由接通前不得与原生路由双活，退役前需用行为对照证明。 |
-| 控件与投影 | 扩展槽是投影到原版窗口的 `ControlItem`；投影槽按下已旁路模块捕获并委托原版 TouchHandle；仅验证为投影子控件的 native moving 跨帧保留，其他 stale moving 仍清理，所有权窗口同步识别该借用。 | 已验证拖动建立和动画所需的 `0x10 → result=1 → MOVING_CTRL`；仍需 source identity、release/ownership 矩阵和三方向验收。标签绝不能因 0x81/0x10 返回 1 而成为拖动源。 |
-| 当前 drop 入口 | 现存路径包含投影 item 的 0x02、袋 drop 的 0x04/`INVEN_SaveItemOnEmpty` gate，以及面板 release。 | P5.6 必须对每个 release 指定唯一的入口/return；禁止顺序敏感的隐式去重。 |
-| P4 移动核心 | `move_original_to_extension_slot_locked`、`move_original_to_extension_locked`、`move_extension_to_original_locked`、`move_extension_to_extension_locked` 已接入 P4 的 payload、所有权、五态事务与隔离。 | P5 只能解析输入并调用这些既有事务入口，不能重写或旁路事务模型。 |
-
-### 2.2 非目标与明确边界
-
-- 不在 P5 实现或验收 `extensionbags.journal` 的 stage 0/1/2 正式落盘、原版/sidecar 保存协调、杀进程/重启/切档重放、全部保存调用点或 ADR-009；这些均归 P6。
-- 不把 API 移动、debug 注入、坐标脚本或 host 测试记为真实拖放成功。除启动协议弹窗的既有 `(420,280)` 例外外，P5 真机拖动必须由用户在 `192.168.3.54:5555` 物理触摸。
-- 不在本次文档变更中修改 `api-reference.md`、`environment.md`、`backlog.md` 或源码。P5.0 必须登记其冲突并在对应责任工作中修正。
-- 不新增裸 VMA、未知 TouchState 写法、第二个移动状态机、第二个 pending/journal 格式，或发布构建可用的隐藏写入端点。
-
-## 3. P4 继承契约
-
-以下约束由主控文档的 P4 归档节定义，P5 的每个实现和测试都必须消费它们：
-
-| 领域 | 不变量 |
-|---|---|
-| 袋与槽 | 原版事务袋只为 `0..4`；任务袋 `5` 从源、目标、投影、恢复、回滚、扫描和自动投递中排除；扩展 API/日志袋为 `6..10`，内部状态袋为 `0..4`，两者不得混用。 |
-| payload | orig→ext 唯一使用 `SAVE_SaveItem` 完整 payload；ext→orig 唯一使用 `SAVE_LoadItem`，其 out 先置空，返回/out/consumed/重序列化字节比较必须全部通过。payload 长度为 `19..255`，禁止近似重建。 |
-| 所有权 | `module-owned`、`borrowed-for-view`、`inventory-owned`、`released` 四态唯一所有者；视图恢复撤销全部引用后才归还；原版接管成功后同锁 handover，模块永久不再访问该对象。 |
-| 事务 | 唯一五态 `prepared → pending-recorded → logical-state-updated → original-state-updated → committed`；ext→ext 无 original 阶段、不调 `INVEN_MoveItem`；失败先还原逻辑/UI，再释放仍属模块的临时对象。 |
-| 隔离 | 仅使用七个既有 reason；非法/坏数据保留原始袋槽、transactionId、generation 与字节，作为只读诊断，绝不静默清除或变成替代 Item。 |
-| 持久化 | `PendingTransfer` 是内存 `durable=false` 记录，只与 `JournalRecord` v1 字段同构；P5 不承诺跨进程恢复。 |
-
-## 4. P5.0：前置证据与文档治理
-
-**目标**：把 P5 的输入事实固定下来，避免用过期文档、旧 APK 或错误设备解释新行为。
-
-**必须完成**：
-
-1. 在任何源码或真机动作前记录 `git status --short`、HEAD、APK 身份、包名、版本、唯一设备与日志起点；不得把历史“工作树干净”作为当前证据。
-2. 以主控文档为扩展背包验收裁决面：它与 `environment.md`/`backlog.md` 的设备或触摸描述冲突时，先按主控的唯一设备与用户真实拖放规则执行，并建立回写任务。
-3. 建立事实修复清单：`api-reference.md` 的“unsaved journal”措辞应改为内存 `durable=false`；固定容量表述、历史包名以及 `environment.md` 的章节引用均需由其责任文档后续校正。本工作包只登记，不在本次计划文档中越权修改。
-4. 确认 P4 归档中的五个未就绪项已进入本文件：目标满/数量上限、拖放合并、任务袋真实拒绝、0x81 取消、每路径 Load/插入失败矩阵。
-
-**退出条件**：当前身份、设备、文档差异和 P4 移交清单均有记录；尚未发送任何协议改动或把 API/debug 结论写成真实拖放通过。
-
-## 5. P5.1：0x81/0x10 与 TouchHandle 只观测取证
-
-**目标**：建立可复核的事件事实，而不是立即“修复”拖动。
-
-**观测内容**：
-
-| 维度 | 每次按下/移动/release/取消必须记录 |
-|---|---|
-| 事件 | event 值、发生顺序、proc 返回值、param 是否存在及仅已知字段的安全摘要。 |
-| 控件 | source/target 控件类型、`data[0]` 所属域、UserType、父链身份、slot 映射结果；不持久化裸指针。 |
-| TouchHandle | `MOVING_CTRL`、drop source、release 坐标的前后可观察状态，以及引用何时安装/撤销。 |
-| 行为 | 原版物品与投影扩展物品各自的按下、移动、release、取消结果；0x81 与 0x10 的角色差异必须由同一 APK/设备复验裁决。 |
-
-**禁止项**：不得复制未知 TouchState 字段、伪造原版 proc 参数、基于历史表硬编码“0x81 必须返回 1”，也不得让未验证的控件或事件进入原生拖动/事务路径。
-
-**退出条件**：形成带源码/构建/设备身份的协议证据；明确原版 proc 的可安全委托条件，或证明必须使用最小 adapter。若证据冲突或触发 UAF/重复提交，停止在 P5.1，不进入实现。
-
-### 5.1.1 P5.1 debug observer 闸门与取证规程
-
-P5.1 observer 仅在 `__android_log_is_loggable(ANDROID_LOG_DEBUG, "Inotia4VirtBag",
-ANDROID_LOG_INFO)` 为真时运行。必须先以闸门关闭状态安装并启动 APK；闸门开启只用于单个
-证据会话，不能作为默认运行配置。
-
-1. 每次会话开始前登记设备 API level（必须 `>= 30`）、`ro.debuggable`、`log.tag`、
-   `persist.log.tag`、`log.tag.Inotia4VirtBag` 与 `persist.log.tag.Inotia4VirtBag`。四个
-   log 属性必须为空，才能将安装前状态解释为 observer 默认关闭；`persist.log.tag.*`
-   优先于 runtime 链，不能遗漏。
-2. 开启时先执行
-   `adb -s 192.168.3.54:5555 shell setprop log.tag.Inotia4VirtBag DEBUG`，并逐字读取
-   同一属性确认值为 `DEBUG`。属性键严格区分大小写，必须使用代码中的
-   `Inotia4VirtBag`，不得尝试全大写变体。回读失败时中止取证；首次物理触摸未产生
-   `p5obs` 行时，当前证据行无效，不得把没有日志解释为事件不存在。
-3. 每个有效会话的第一项动作必须是一次物理触摸并出现 `p5obs` 行；随后才记录原版 source
-   与投影 source 的按下、移动、release、取消。0x10 与 panel 0x19 已按 100ms 采样，0x81
-   不限频，读取时不得将日志行数直接解释为事件总数。
-4. 会话开始至结束不得改动任一 `log.tag*` 属性。中途关闭会留下只有 pre、没有 post 的
-   token；该 token 的结果只能登记为 `unknown`，不能作返回值或生命周期结论。
-5. 会话结束立即拉取文件日志与 logcat，并以
-   `adb -s 192.168.3.54:5555 shell setprop log.tag.Inotia4VirtBag ""` 恢复闸门关闭，
-   回读 runtime 和 persist tag 属性均为空；每轮使用独立 `E-YYYY-MM-DD-NN`，关联源码、
-   APK SHA-256、设备、属性值、日志起点和用户物理触摸结论。
-
-## 6. P5.2：唯一 `ExtensionDragSession` 与协议 adapter
-
-**目标**：用可验证的状态机代替多条隐式输入路径。
-
-### 6.1 运行时状态机
+原版触摸链的唯一事件入口是 `TouchHandle_Event@0xa380c`（UI:557），参数
+`(x0=root, x1=event, x2=param, x3=param2)`。按事件分支：
 
 ```text
-Idle → Pressed → NativeMoving → TargetResolved → TransactionInFlight
-                                              ↘ Rejected
-NativeMoving / TargetResolved → Cancelled
-TransactionInFlight → Committed | Rejected
+触摸驱动 → TouchHandle_Event@0xa380c (UI:557)
+  ├─ event 0x17 press   → 复制坐标入 TouchState → ControlObject_EventProc@0x9e244 (UI:687)
+  ├─ event 0x19 move    → TouchHandle_Move@0xa2ec0 → 0x19 派发 ControlObject_EventProc (UI:643/652)
+  │                       → TouchHandle_MoveOut@0xa3060 (UI:658)
+  └─ event 0x18 release → ControlObject_EventProc@0x9e244 (UI:613)
+                          → 复制 param 三字段入 TouchState+0x18/0x20/0x28 (UI:616-620)
+                          → TouchHandle_ResetMovingControl@0xa371c (UI:621)
+                          → 清 TouchState+0x48 (UI:622)
+                          → 按 proc 返回值分支 TouchHandle_ResetSelectedControl@0xa3414 (UI:627)
 ```
 
-- session 至少记录 protocol version、单调 token、view generation/identity、逻辑 source bag/slot、press/release 序列与 terminal cause；不保存 native 指针。
-- 每个 terminal 状态只清理本 session 的 moving 标记、控件引用和 transient 诊断；只有 `TransactionInFlight` 可创建 P4 transactionId。
-- 同 token 的重复 release、stale generation、已取消 session 或未知事件均为幂等无操作；绝不重新定位源、补发事务或回收 `inventory-owned` 对象。
+`ControlObject_EventProc@0x9e244` 在基线区间 `0xa3000-0xba200` 之外，仅作为调用目标
+出现（UI:582、602、613、652、687）。它按控件树把事件派发到各控件 proc；背包页三个
+proc 的符号与 VMA：
 
-### 6.2 选型闸门
-
-1. **安全委托原版 proc**：只有 P5.1 证明参数、所有权与 TouchHandle 字段均满足原版前置条件，且 session 全周期可持有有效借用引用时才能采用。
-2. **最小 adapter**：若原版 proc 拒绝借用对象，adapter 只能构造已经实证的返回语义并交给 session；它不得仿写未知原版状态机或让扩展标签成为拖动源。
-3. 两种方案必须二选一。`g_extension_touch_capture`/旧 `ExtensionDrag`、投影 0x02、0x04、面板 release 与低层 gate 不得同时拥有同一 release 的提交权。
-
-**生命周期前置修复已完成第一步**：draw-end 不再无差别清 `MOVING_CTRL`；仅经当前投影控件身份验证的 native moving 跨帧保留，`object_touch_window_active_locked()` 同步将其视为活动借用，其他 stale moving 仍清理。完整 session token、source identity 和 release ownership 矩阵仍是 P5 完成前置条件。
-
-## 7. P5.3：实时目标解析与路由去重
-
-**目标**：以真实控件身份决定路径，消除硬编码坐标和多入口竞态。
-
-- source 与 target 必须经控件树、UserType、已证实的 slot 映射和运行时容量确认；仅以手工父链计算的已验证绝对位置辅助命中，不直调已知存在 ABI 风险的 `GetAbsoluteRect`。
-- `original_bag_button_index` 的固定坐标判断不得成为最终原版袋目标依据；目标解析要返回原版袋 `0..4`、扩展逻辑袋/槽、扩展标签、非法目标或取消。
-- 一旦目标是任务袋 `5`、无效槽、容量外槽或过期 view generation，session 在 payload、Load、ledger 或事务前拒绝。
-- 为 0x02、0x04、面板 release、`INVEN_SaveItemOnEmpty` gate 建立 dispatch ownership 表。每一个 release 只能有一个 owner 和一个 return；模块自身直接调用底层入库时必须保持不重入 gate 的既有约定。
-
-**退出条件**：host 可验证 target classification 与 event 去重；结构检查能说明所有真实 release 都经过唯一 dispatch；没有再依赖“某路径先 reset moving 因而恰好去重”。
-
-## 8. 三方向实施工作包
-
-### P5.4：扩展→扩展（第一条真机路径）
-
-1. 先用原版对照实验记录同一逻辑袋内空槽重排、合并、非合并占用目标和交换的真实语义。当前 `move_extension_to_extension_locked` 对同袋行为的限制不能被猜测性绕过。
-2. 根据证据选择明确的同袋规则：同一逻辑背包内同类可堆叠物品允许合并，非合并交换或拒绝均须有原版对照和独立纯模型断言；若需扩展事务模型，必须保留“逻辑-only、无 original 阶段”的 P4 不变量。
-3. 跨扩展袋目标遵循容量、物品类别与整堆语义，禁止跨袋合并；原版→扩展同样属于跨域移动，不合并；满且不可合并时不创建 transactionId，源/目标/投影不变。
-
-**通过条件**：空槽、合并、非合并、满目标、同袋语义、非法槽、取消和重复 release 均有单变量证据；无 `INVEN_MoveItem`、无 journal 写入、无 pending 残留。
-
-### P5.5：原版→扩展（第二条真机路径）
-
-1. 原版物品必须继续由原版 TouchHandle 建立拖动；P5 不为它另建扩展 source session。
-2. 扩展标签 target 必须区分两种语义：背包装备物品的既有装备 drop，与普通原版物品移入扩展逻辑袋的 P4 orig→ext 事务。分类依据须来自控件/物品实证，不能凭 event 码单独判断。
-3. 只通过既有 Save→逻辑更新→原版源实态复核的事务入口移入扩展袋；原版源删除不得只信返回值。
-
-**通过条件**：正常、空/满目标、合并/不合并、任务袋源拒绝、取消和标签装备语义不回归分别留证；不得因为处理移动而让标签成为可拖动 source 或重复执行面板 release。
-
-### P5.6：扩展→原版（第三条真机路径）
-
-1. 由 P5.2 的扩展 source session 经 P5.3 的原版目标解析进入唯一 dispatch；验证 0x04、投影 0x02、release 与 `save_item_on_empty_gate` 的职责，而非并行触发它们。
-2. 仅对原版袋 `0..4` 调用既有 `move_extension_to_original_locked`。`SAVE_LoadItem`、ledger 登记、`INVEN_SaveItemOnEmpty`、同锁 handover 和逻辑源清理必须保持 P4 顺序。
-3. 目标满、插入失败或 slot-not-found 时，扩展源 payload 与逻辑状态保持，临时 module-owned 对象只处理一次，必要时写既有隔离记录。
-
-**通过条件**：正常落空槽、合适的自动落位、目标满、任务袋目标拒绝、Load/插入失败、取消与 stale release 的每条证据均证明不重复、不丢失、不留下源槽残影或错误所有权。
-
-## 9. P5.7：取消、跨视图与旧路径退役
-
-- F3、切换原版/扩展袋、回主菜单、投影 restore、view generation 改变和不属于 0x17/0x18/0x19 的中断事件，均必须使 session 进入 `Cancelled`，撤销引用并且不创建新事务。
-- 已进入 `TransactionInFlight` 的失败必须交给 P4 `txn_abort_locked`/隔离流程，不能由 UI 层自行清源或猜测回滚。
-- 旧 capture/`ExtensionDrag` 路由只能在新路由对照通过、未出现双 dispatch 且其激活条件/行为已证实后退役；“有历史引用”或“当前难以复现”均不是删除依据。
-- 退出后审计应表明 `outstanding_borrows=0`，不存在模块持有的 moving 控件引用；`inventory-owned` 从不由 cleanup 触碰。
-
-## 10. P5.8：测试、静态检查与受限故障注入
-
-### 10.1 host 与静态检查
-
-在 `feature/extension_bag/model/virtual_bag_state.h` 的纯状态层新增可测试的 session token、view generation、target classification、单次 dispatch、terminal 幂等与同袋语义决策函数；`tests/test_host.cpp` 覆盖：
-
-- 每个 session 状态转移、非法跳转、重复 release、stale generation 与取消；
-- 任务袋 5、外部/内部袋号混用、无效槽、容量外槽和目标解析拒绝；
-- 三方向调度只能选一个既有 P4 事务入口，ext→ext 永不引用原版移动；
-- P4 payload、五态、所有权和隔离回归继续通过。
-
-结构检查还须确认：没有新增裸 VMA；`extension_tab_item_proc` 不因 0x81/0x10 返回 1；`MOVING_CTRL` 清理受 session 生命周期保护；每个 release 路径恰好有一个 dispatcher。
-
-### 10.2 故障注入边界
-
-若 P5 需要触发 Load/插入失败，它必须是单次、可撤销、debug 构建专用、文档化且发布构建排除的测试 harness；通过既有只读诊断报告触发/结果。它不得成为正式移动 API、隐藏发布写入入口或持久化故障替身。
-
-| 进程内 P5 故障 | P5 的预期 |
-|---|---|
-| 无效 payload/Load 失败 | 不近似重建；隔离原始字节；扩展源保持。 |
-| 原版插入失败/找不到目标槽 | 临时对象按所有权规则处理一次；源、投影和 pending 恢复。 |
-| 满/不可合并/容量外/任务袋 | `prepared` 前拒绝；无 payload/所有权/事务变更。 |
-| 取消、过期或重复事件 | 不创建第二事务；只清该 session 的 transient 引用。 |
-
-以下项目明确**不属于 P5**：原版保存失败、sidecar 写失败、journal stage 0/1/2、杀进程、重启、切档、跨进程隔离落盘和恢复裁决；全部转 P6。
-
-## 11. P5.9：唯一真机串行证据矩阵
-
-每一行都使用独立 `E-YYYY-MM-DD-NN`，包含主控 §5.1 的源码/APK/设备/配置、bag/projection、ownership/persistence、before/action/after、日志和用户结论。用户只确认物理触摸结果；执行代理记录 API/日志/host 结论。
-
-| 顺序 | 单一变量 | 最低通过证据 |
-|---:|---|---|
-| 1 | P5.1 协议观测 | 原版 source 与扩展投影 source 的按下/移动/release/取消事件序列、返回值、moving 生命周期；不改行为。 |
-| 2 | ext→ext 基本移动 | 扩展 source 到扩展空槽：token、hit target、P4 transaction 阶段、payload 和两端状态一致。 |
-| 3 | ext→ext 边界 | 合并、非合并、满、同袋语义、取消、非法槽；每次只变一个条件。 |
-| 4 | orig→ext 基本移动 | 原版真实 source 移入扩展目标；与“拖放背包装备到标签”分别对照。 |
-| 5 | orig→ext 边界 | 满/合并/非合并、任务袋源、取消、标签语义不回归。 |
-| 6 | ext→orig 基本移动 | 扩展 source 到原版 `0..4` 的真实落点，入库 handover 后模块不可访问。 |
-| 7 | ext→orig 边界 | 满、任务袋目标、Load/插入失败 harness、取消/stale release；源保留或按事务提交。 |
-| 8 | 跨视图/退出 | 拖动期 F3、切袋、投影 restore、回主菜单；terminal cleanup、零借用、无重复提交。 |
-| 9 | 回归 | P4 host、P5 host、native 构建、符号/结构检查和三路径已通过证据均保留。 |
-
-任一步失败，停止在该行，仅修复该路径；不得同时改变协议、事务、构建或设备条件。
-
-### 11.1 P5 关闭结论（2026-09-02）
-
-- `E-2026-09-02-01`/`02`：扩展→扩展基本空槽及扩展标签目标真实拖动通过。
-- `E-2026-09-02-03`：满目标、非合并占用、空源、非法槽和任务袋目标 API 边界通过；Host/session 覆盖重复 release 幂等。
-- `E-2026-09-02-04`/`05`/`06`：用户确认三方向真实拖动、同袋合并、跨袋不合并和非法目标取消通过。
-- P5.1 的同身份观测确认 `0x10 → result=1 → MOVING_CTRL` 及 source/drop 生命周期；未观察到的 `0x81` 不作为运行时前置条件。
-- P5.7–P5.9 的 session 清理、Host 回归、结构/构建回归沿上述实现和证据关闭；P5 不包含保存协调、跨进程恢复或 P8 发布条件。
-
-**结论**：P5 已完成（`ACCEPTED`）。扩展源装备后的短暂原版背包闪现仍是独立的非阻断 UI 回归，不改变 P5 拖动事务结论；P6/P7/P8 继续按主控文档执行。
-
-## 12. 文件职责与退出门槛
-
-| 文件 | P5 允许的变更 | 明确禁止 |
+| proc | VMA | 基线行 |
 |---|---|---|
-| `game_ui_virtbag.cpp` | session 生命周期、控件目标解析、单一拖动 dispatch、既有 P4 移动入口调用、日志与视图清理。 | 第二套事务/pending、猜测 ABI、裸 VMA、用坐标硬编码代替最终 target identity。 |
-| `game_patch.cpp` | 仅在 P5.1 证实后调整 proc wrapper/gate 的唯一 owner。 | 多 route 重复提交、把未知 event 当 0x81 契约。 |
-| `virtual_bag_state.h` / `tests/test_host.cpp` | 纯 session、分类、幂等、同袋语义与回归测试。 | native 指针、真实控件/库存断言、P7 持久化写入。 |
-| `game_access.*` / `game_symbols.h` / `symbol_registry.h` | 逆向已经验证的 ABI 注册与类型化包装。 | 在调用点新增裸偏移或复制未验证 TouchState 结构。 |
-| debug 测试代码 | 受限单次故障 harness 与只读诊断。 | 发布构建写入入口、正式移动 API 或持久化模拟。 |
+| `UIEquip_InvenItemControlEventProc`（物品格） | `0xb911c` | UI:23719 |
+| `UIEquip_EquipControlEventProc`（装备槽） | `0xb8f7c` | UI:23613 |
+| `UIEquip_InvenBagControlEventProc`（页签/袋） | `0xb89d0` | UI:23244 |
 
-P5 已满足以下关闭条件：同一身份下的实证 `0x10` 拖动协议与 `0x81` 未出现事实；单一 session/routing 无双 dispatch；三方向按顺序通过物理触摸矩阵；P4 不变量与任务袋 sentinel 无回归；host/构建/结构检查通过；P6 项明确保留为未完成。因此 P5 标记为 `ACCEPTED`，P6/P7/P8 与 Overall 仍保持各自未完成状态。
+### 1.2 TouchState 全局状态字段
+
+`TouchHandle` 全局状态位于 `0x301000+0xcf8`，字段常量唯一来源为
+`game_symbols.h:271-283`（`G_TOUCH_STATE_VMA`、`TOUCH_STATE_*`）。release 输入坐标是
+`+0x18`（x）、`+0x20`（y）、`+0x28`（第三字段）三处独立字段（UI:616-620 写入，
+UI:521-522 读取）；release 结果控件对在 `+0x50/+0x58/+0x60..+0x70`
+（UI:295-311 `TouchHandle_SetReleaseEvent`）。
+
+### 1.3 press（0x17）
+
+`TouchHandle_Event` 对 `0x17` 的处理（UI:631-636、682-706）：
+
+1. 把 `param` 指向的三个字复制到 TouchState+0x18 起的连续字段（UI:682-686，VMA
+   `a39fc-a3a0c`）。
+2. 调 `ControlObject_EventProc` 派发 0x17（UI:687，VMA `a3a10`）。
+3. 返回值分支：返回 1 → 把 TouchState+0x40 复制到 +0x30（激活控件，UI:697-699）；
+   返回 2 → 把 +0x40 复制到 +0x48（UI:692-696）；其余 → 以事件码 `0x81` 调
+   `TouchHandle_SetSelectedControl@0xa31a8`（UI:700-706）。
+
+### 1.4 move（0x19）
+
+`0x19` 分支（UI:571-572、593-597、637-672）：
+
+1. TouchState+0x30（moving 控件）为空 → 走通用分支向树派发 `0xf000006`（UI:573-592）。
+2. 非空 → 把 TouchState+0x40 复制到 +0x30（UI:642），调 `TouchHandle_Move@0xa2ec0`
+   （UI:643），随后以 `0x19` 派发 `ControlObject_EventProc`（UI:652），再调
+   `TouchHandle_MoveOut@0xa3060`（UI:658）。
+
+### 1.5 release（0x18）五步清理
+
+`0x18` 分支（UI:612-630）依次执行，本册称「原版 release 五步清理」：
+
+| 步 | 动作 | 基线 |
+|---|---|---|
+| 1 | 派发 `ControlObject_EventProc@0x9e244`（携带 release 参数） | UI:613 |
+| 2 | 把 param 三字段复制到 TouchState+0x18/+0x20/+0x28 | UI:616-620 |
+| 3 | `TouchHandle_ResetMovingControl@0xa371c`：对 moving 控件派发 `0x08`、恢复相对坐标、清 +0x00..+0x10/+0x30/+0x38 | UI:621；函数体 UI:493-545 |
+| 4 | 清 TouchState+0x48 | UI:622 |
+| 5 | proc 返回值 `−1 ≤ 1`（无符号比较）→ 返回 1；否则 `TouchHandle_ResetSelectedControl@0xa3414` 后按非零返回 | UI:623-630 |
+
+`TouchHandle_ResetMovingControl@0xa371c`（UI:493-545）内部：moving 控件的
+`ControlObject_GetControlEventType` 第 3 位（`0x08`）置位时，先把 TouchState+0x18/+0x20
+复制到 +0x60/+0x68、+0x30/+0x38/+0x28 复制到 +0x50/+0x58/+0x70（UI:515-527），再对
+moving 控件派发 `x1=0x08`（UI:532-534）；派发返回值非 1 时调
+`ControlObject_GetRelativePointFromXY@0x9e718`（UI:540）与
+`ControlObject_SetRelativePoint@0x9e928`（UI:544）。函数收尾无条件清
++0x00..+0x10、+0x30、+0x38（UI:506-511）。
+`TouchHandle_ResetSelectedControl@0xa3414`（UI:281-288）是到
+`TouchHandle_SetSelectedControl@0xa31a8` 的尾调用（参数 `(0, 全局选中槽, 0x80)`）。
+
+### 1.6 起拖判定与 moving 标志
+
+`UIEquip_Process@0xb7964`（UI:22165-22204）在每帧处理中起拖：
+
+1. `TouchHandle_GetMovingControl@0xa3704`（UI:22169，函数体 UI:483-486）非空，且
+   `TouchHandle_IsControlEventMove@0xa3cf0`（UI:22172，函数体 UI:888 起）为真。
+2. `ControlItem_GetMoving@0xaae88`（UI:22179，函数体 UI:8722-8728）为假（尚未拖动）。
+3. `TouchHandle_GetControlOffset@0xa3190`（UI:22182）返回偏移，`MATH_Abs@0xa8b0c` 后
+   x 或 y 位移 `> 5`（UI:22184-22191）。
+4. 保存 slot index（UI:22195-22198），调 `ContorlItem_SetMoving(ctrl, 1)@0xaae64`
+   （UI:22201），再 `UIDesc_SetOff@0xb2b48`（UI:22204）。
+
+`ContorlItem_SetMoving@0xaae64`（UI:8711-8720）实现为向控件 data 的 `+0xa` 字节写
+标志（UI:8717）；`ControlItem_GetMoving` 读同一位（UI:8726）。
+
+### 1.7 控件 proc 事件码语义
+
+**物品格 `UIEquip_InvenItemControlEventProc@0xb911c`**（UI:23719-23919）：
+
+| 事件 | 行为 | 基线 |
+|---|---|---|
+| `0x08`、`0x02` | `ContorlItem_SetMoving(ctrl, 0)` 清 moving 标志，返回 1 | UI:23731-23732、23755-23756、23769-23772 |
+| `0x04` | 取 param+8 源控件物品与本控件目标物品（UI:23780-23783）；`UIEquip_IsApplyStuff@0xb8d4c` 为真走镶嵌/附魔（UI:23787-23791、23900-23907），为真且 `SAVE_IsOK@0x128c14` 失败弹窗（UI:23913-23918）；为假清 drag 数组槽后调 `INVEN_MoveItem@0x104934`（UI:23792-23801、23815），成功后播声、恢复数组槽并 `UIEquip_RefreshItemArea@0xb7a00`（UI:23816-23861） | UI:23757-23919 |
+| `0x01` | `UIDesc_IsOn@0xb2b9c` 为真返回 1，否则 `UIEquip_MakeDesc@0xb8980` | UI:23759-23760、23862-23872、23895-23898 |
+| `0x10` | `ControlItem_GetOn@0xaaec4` 为假时 `ContorlItem_SetOn(ctrl,1)`，返回 1（拖动源登记） | UI:23873-23883 |
+| `0x80` | 写全局字节后 `UIEquip_MakeDesc`（详情打开） | UI:23740-23747 |
+| `0x40` / `0x20` | 返回 1 / `ContorlItem_SetOn(ctrl,0)` 返回 0 | UI:23737-23739、23884-23894 |
+
+**装备槽 `UIEquip_EquipControlEventProc@0xb8f7c`**（UI:23613-23717）：
+
+| 事件 | 行为 | 基线 |
+|---|---|---|
+| `0x08`、`0x02` | 返回 1 | UI:23623-23624、23634、23639-23640 |
+| `0x04` | 源/目标物品均非空且 `UIEquip_IsApplyStuff`（UI:23650-23660）→ `SAVE_IsOK`（UI:23661）→ `UIEquip_ApplyStuff@0xb8df8`（UI:23666）→ `UIEquip_UpdateCharEquip@0xb7784`（UI:23667）→ `UIEquip_RefreshItemArea`（UI:23668）→ `TouchHandle_SetCursor`（UI:23672），返回 0 | UI:23641-23674 |
+| `0x80` / `0x01` / `0x10` / `0x20` | MakeDesc / UIDesc 门 / SetOn / SetOn(0) | UI:23675-23710 |
+
+`UIEquip_ApplyStuff@0xb8df8`（UI:23514-23611）按物品类型分流到
+`ITEMSYSTEM_EnchantItem@0x10b330`（UI:23531）或 `ITEMSYSTEM_PutJewel@0x10bcb4`
+（UI:23549）；`UIEquip_IsApplyStuff@0xb8d4c`（UI:23469-23503）依次测
+`ITEMSYSTEM_IsEnchantScroll@0x10b2f0`、`ITEMSYSTEM_IsJewel@0x10b964`、
+`ITEMSYSTEM_IsRestoreChaos@0x10be44`，宝石再经 `ITEMSYSTEM_CanPutJewel@0x10d328`
+（UI:23501）。
+
+**页签/袋 `UIEquip_InvenBagControlEventProc@0xb89d0`**（UI:23244-23467）：
+
+| 事件 | 行为 | 基线 |
+|---|---|---|
+| `0x08`、`0x100`、`0x10`、`0x01` | 返回 1 | UI:23253、23259-23262、23275-23284 |
+| `0x02` | `UIEquip_GetBagSlotIndex@0xb7868` → 容量≤0 返回 1；写全局当前袋、`UIEquip_RefreshItemArea`（切袋），返回 1；同袋则 MakeDesc | UI:23271-23272、23393-23427 |
+| `0x04` | 目标袋 = 当前袋或袋 `5` → 返回 0（UI:23285-23293）；源物品为空返回 0（UI:23294-23300）；容量/占位判定后调 `INVEN_SaveItemOnEmpty@0x104be0`（UI:23433），成功则清源数组槽、`UIEquip_RefreshBagArea@0xb78bc` + `UIEquip_RefreshItemArea`（UI:23385-23391），返回 0 | UI:23273-23467 |
+| `0x80` | `UIDesc_SetOff@0xb2b48`，返回 1 | UI:23257-23258、23411-23419 |
+
+### 1.8 TouchHandle 层的 drop 派发与数据提交点
+
+release 时 `TouchHandle_SetReleaseEvent@0xa343c`（UI:295-380）按 drop 目标控件类型
+向目标控件 proc 派发事件：类型含 `0x30` 位 → `x1=0x04`（UI:347-351）；含第 1 位 →
+`x1=0x02`（UI:376-379）；派发后清 TouchState+0x30、+0x38（UI:333-336）。
+`TouchHandle_ControlEventProc@0xa3590`（UI:382-448）在 `0x18` 且点中控件时调
+`TouchHandle_SetReleaseEvent`（UI:444-448）。
+
+数据提交点汇总（全部在控件 proc 内）：
+
+| drop 目标 | 提交函数 | VMA | 基线 |
+|---|---|---|---|
+| 物品格 | `INVEN_MoveItem@0x104934`（由 item proc `0x04` 调用） | `0x104934` | UI:23815；INVEN:1667 |
+| 页签/袋 | `INVEN_SaveItemOnEmpty@0x104be0`（由 bag proc `0x04` 调用） | `0x104be0` | UI:23433；INVEN:1840 |
+| 装备槽 | `UIEquip_ApplyStuff@0xb8df8` → `ITEMSYSTEM_PutJewel@0x10bcb4` / `ITEMSYSTEM_EnchantItem@0x10b330` | `0xb8df8` 等 | UI:23666、23531、23549 |
+
+## 2. 模块实现
+
+### 2.1 触摸相关 hook 分层总表
+
+| 层 | 目标 | 模块实现 | 代码锚 |
+|---|---|---|---|
+| 事件入口 | 库存场景 state entry `+0x38`（原 `F_SCENE_EVENT_EQUIP_VMA`） | 保存原值到 `g_orig_event` 后覆盖为 `virtual_bag_event`；`+0x28`→`virtual_bag_f3_wrapper`、`+0x10`→`virtual_bag_inventory_enter_wrapper` | `extension_bag_lifecycle.inc:518-532`（读取）、`815-820`（覆盖） |
+| GOT 替换 | `G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA`（item proc 槽） | `ui_equip_inven_item_proc_wrapper`；安装条件 `g_move_merge_requested || g_extension_source_protection_requested`，含卸载路径 | `game_patch_move_merge.inc:122-163`、`165-187` |
+| H-14 | `INVEN_MoveItem@0x104934` Native Hook | `move_item_wrapper`：扩展身份拒绝+取证，原版对象 original-first | `native_inventory_hook.cpp:238-285`（wrapper）、`553-556`（安装）；`rulebook.md` R-31 |
+| H-15 | `UIEquip_EquipControlEventProc@0xb8f7c` Native Hook | `equip_control_event_proc_wrapper`：扩展宝石源校验后放锁调原版 proc | `native_inventory_hook.cpp:359-369`（wrapper）、`557-560`（安装）；`game_ui_virtbag.cpp:248-388`（实现） |
+| H-16 | `UIEquip_RefreshItemArea` Native Hook | `refresh_item_area_wrapper`：depth 门 + trampoline + `virtual_bag_refresh_item_area_with_gate` | `native_inventory_hook.cpp:205-213`（wrapper）、`561-564`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`rulebook.md` R-32 |
+| 指令 patch | bag proc `0x04` 内 `bl INVEN_SaveItemOnEmpty`（`g_base+0xb8cc0`） | 替换为 `bl save_item_on_empty_gate`；原字 `0x94012fc8` | `extension_bag_lifecycle.inc:692-730`；gate 实现 `extension_bag_render.inc:431-481` |
+| 指令 patch | item proc `0x80` 内 `bl UIEquip_MakeDesc`（`F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA`） | 替换为 `bl make_desc_equip_gate`；原字 `0x97fffdfe` | `extension_bag_lifecycle.inc:772-814` |
+
+Native Hook 常驻清单 H-01..H-16 共 16 个且不增不减，编号正文归 `rulebook.md`
+§3.1（`rulebook.md:233-253`）；其安装目标校验、失败回滚和安装日志在
+`native_inventory_hook.cpp:408-585`（目标校验 `452-469`，回滚 `384-406`）。
+
+### 2.2 `virtual_bag_event` 事件生命周期
+
+入口 `virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2)` 在
+`extension_bag_lifecycle.inc:203-508`。
+
+**bypass 段（非启用或非世界态）**（`extension_bag_lifecycle.inc:211-253`）：
+扩展未启用或 `gamestate != 0` 时，活动 session 的 `0x18` 先取坐标（参数为空则回读
+TouchState+0x60/+0x68）并取消 session，随后以 unhandled 变体执行
+`complete_original_release_cleanup_locked` 并返回 1（`212-240`）；其余事件原样经
+`call_original_event_with_inventory_guard` 放行（`246`）。
+
+**0x17 press**（`extension_bag_lifecycle.inc:257-324`）：
+
+1. 读 press 坐标（`257-259`）。
+2. 旧 capture 活动时吞掉 press（`274-278`）。
+3. 投影槽命中且控件有效时建立 projected session（`285-293`、`305-307`，调
+   `begin_projected_drag_session_locked`，`extension_bag_drag_session.inc:1-11`）。
+4. 扩展网格命中但无投影物品时置 `g_extension_touch_capture` 并吞掉（`294-304`）。
+5. 点中原版袋按钮时恢复投影、进入 `kExitingModule`，标记 `exiting_to_original`
+   （`308-323`）。
+6. 其余放行原版（`451-507`），原版返回后 `0x17/0x19` 只推进 session
+   （`481`，调 `advance_projected_drag_session_locked`，`extension_bag_drag_session.inc:13-18`）。
+
+**0x19 move**（`extension_bag_lifecycle.inc:409-431`）：读坐标（参数为空回读
+TouchState，`410-417`）；capture 活动时只更新旧拖动态坐标并吞掉（`420-430`）；其余
+放行原版，无事务动作。
+
+**0x18 release 五出口**（`extension_bag_lifecycle.inc:325-408`）：
+owner 判定 `virtual_bag::projected_release_owns_event`（`event == 0x18 且 session 有效`，
+`model/virtual_bag_transaction_rules.inc:178-180`）成立时，`consume_projected_release_locked`
+在原版调用前路由事务并返回 1（`340-347`；实现 `extension_bag_lifecycle.inc:169-201`；
+目标路由 `extension_bag_transaction.inc:310-350` 与 `796-862`）。五个吞掉出口与清理
+变体：
+
+| 出口 | 清理变体 | 代码锚 |
+|---|---|---|
+| owner/terminal consume | handled（跳过 selected 清理） | `extension_bag_lifecycle.inc:340-347`；terminal 消费 `169-180` |
+| 非世界态取消 | unhandled（执行 selected 清理） | `extension_bag_lifecycle.inc:212-240` |
+| capture 空坐标 | unhandled | `extension_bag_lifecycle.inc:353-360` |
+| capture click / capture drop | click=unhandled；drop 按 `handle_bag_drop_release_locked` 返回值 | `extension_bag_lifecycle.inc:361-389` |
+| 原版袋 drop（kOriginal 模式） | handled | `extension_bag_lifecycle.inc:390-397` |
+
+所有出口统一经 `complete_original_release_cleanup_locked` 收尾并返回 1
+（`399-402`）。
+
+#### 2.2.1 页签 drop 路由（R1/R2）
+
+- 扩展源 release 的目标解析顺序固定为先遍历 `extension_tab_hit(index,x,y)`，再解析
+  扩展网格槽；现有标签矩形与网格行在 y 坐标带上有重叠，因此页签命中优先表达切袋意图，
+  不得被有效格子命中抢先消费。
+- 空扩展页签且源类别为背包类时，类别统一由 `is_backpack_category(category)` 判定；
+  投影扩展源从 session 的 `source_bag/source_slot` 读取，不再依赖 release 前可能已清掉
+  moving flag 的控件。装备事务复用 `equip_extension_source_on_tab_locked`。
+- 其它页签目标走 `move_extension_to_extension_locked`。路由在 target kind、session
+  generation、tab/inventory generation 和 source session 门禁后才 claim transaction；
+  任一门禁或事务失败都保留逻辑源，不降级到原版移动链。
+- 事务成功的顺序固定为：事务内部提交逻辑源/目标 → 持久化 → 刷新目标 projection；
+  `0x18` 仍由 projected owner 吞掉，并以 cleanup-only 变体完成原版 release 清理。
+- 真机判读日志锚：成功为
+  `tab commit handled=1 bag=.. slot=.. target_bag=..`；门禁失败为
+  `cross tab reject reason=...`；事务失败为 `tab reject reason=transaction_failed ...`。
+
+**capture 吞并其余事件**（`extension_bag_lifecycle.inc:432-450`）：capture 活动期间
+非 `0x17/0x18/0x19` 事件清拖动态并吞掉（`432-441`），其余事件直接吞掉（`442-450`）。
+
+### 2.3 release 等价清理（两段式）
+
+`complete_original_release_cleanup_locked` 在 `extension_bag_input.inc:34-71`：
+
+1. 锁内写 release 输入坐标到 TouchState+0x18/+0x20/+0x28，空则补采 moving 控件
+   （`37-49`）。
+2. 放锁调 `fn_touch_handle_reset_moving_control`（对应
+   `TouchHandle_ResetMovingControl@0xa371c`，含 `0x08` 派发与相对坐标恢复），
+   `handled=false` 变体再调 `fn_touch_handle_reset_selected_control`（`51-61`）。
+3. 回锁清 TouchState+0x48（`TOUCH_STATE_DROP_EVENT`）并输出
+   `release_cleanup ctl=... flags_cleared`（`63-70`）。
+
+事件派发与 selected 清理不持 `g_virtual_bag_mtx` 的依据与范围见 `rulebook.md`
+R-33（`rulebook.md:552-562`）。
+
+### 2.4 session 纯模型
+
+`DragPhase`、`DragTargetKind` 与状态迁移 helper 定义在
+`model/virtual_bag_drag_model.inc`（`DragPhase` 第 1 行、`DragTargetKind` 第 28 行、
+`session_begin` 81、`session_on_native_moving` 103、`session_resolve_target` 115、
+`session_begin_transaction` 137、`session_finish_transaction` 151、
+`session_claim_transaction` 194、`session_on_cancel` 174）；五态事务核心
+`TxnStage`/`TransactionContext` 在 `model/virtual_bag_transaction_rules.inc:222-245`。
+host 测试覆盖为 `tests/test_host.cpp` 的 `test_p52_drag_session`（引用见
+`rulebook.md:339`）。
+
+### 2.5 H-14 / H-15 / H-16 wrapper 细节
+
+**H-14 `move_item_wrapper`**（`native_inventory_hook.cpp:238-285`）：锁内经
+`virtual_bag_capture_move_item_observation`（`extension_bag_public_runtime.inc:75`）
+采集身份与物理摘要，随即放锁；扩展对象且非装备交换例外时记录
+`MoveItem GUARD reject` 并返回 0、不调 backup（`247-261`）；原版对象记录 pre/post 或
+passthrough 后调 backup（`263-284`）。
+
+**H-15 `virtual_bag_handle_equip_control_event`**（`game_ui_virtbag.cpp:248-388`）：
+仅 `0x04` 参与（`252-254`）；锁内校验扩展宝石源、descriptor、session 与 token
+（`262-309`），失败 Blocked 并取消 session；放锁调原版 proc（`320`）；回锁 finish
+（`326-341`）；成功路径把 session 推进到 Committed（`356-381`）。wrapper 返回值分流
+在 `native_inventory_hook.cpp:359-369`。
+
+**H-16 `refresh_item_area_wrapper`**（`native_inventory_hook.cpp:205-213`）：
+`g_refresh_depth > 0` 时直达 `inventory_native_hook_call_refresh_item_area_original`
+（`589-593`）；否则 depth+1 后进 `virtual_bag_refresh_item_area_with_gate`
+（`game_ui_virtbag.cpp:237-246`）：锁内 trampoline 调原版刷新，投影安装且非
+restore 抑制时 `refresh_projection_if_overwritten_locked`。
+`restore_module_view_locked` 通过 `RefreshRestoreSuppressScope` 设置同线程抑制
+（`extension_bag_render.inc:569-579`、`581-612`）。模块内部主动刷新点统一走
+raw-original dispatcher `inventory_native_hook_call_refresh_item_area_original`
+（`native_inventory_hook.cpp:589-593`；规则 `rulebook.md` R-32）。
+
+### 2.6 指令 patch 的安装与恢复
+
+全部 BL 指令 patch 的安装集中在 `inject_locked`（`extension_bag_lifecycle.inc:510-820`）：
+item draw 调用点（`534-571`）、bag draw 调用点（`573-608`）、draw-end 调用点
+（`610-646`）、save callsites（`648-690`，含 `patch_all_save_callsites` `55-69`）、
+drop gate `0xb8cc0`（`692-730`）、draw gate `0xaaf28`（`732-770`）、desc gate
+（`772-814`）。每处均校验原指令字后才写替换 BL，地址记录在 `g_*_patch_addr`。
+当前代码没有运行时把替换字写回原指令的路径；还原以「写回对应 `kOriginal*Call`
+常量」为可逆操作，进程重启后内存 patch 自然消失。
+
+### 2.7 投影同步与 moving 保留门
+
+H-16 的 post-projection 在一次原版 `RefreshItemArea` 返回后逐槽比较控件 `data[0]` 与
+`g_module_objects[bag][slot]`，不同才 `SetItem`，空槽同样覆盖
+（`extension_bag_render.inc:533-555`；H-16 入口
+`game_ui_virtbag.cpp:237-245`）。draw-end 和 draw wrapper 不再逐帧调用该路径。
+无刷新事务的变化只调用 `sync_projected_slot_locked(bag, slot)` 定点同步
+（`extension_bag_render.inc:557-568`；原版→扩展缺口调用
+`extension_bag_transaction.inc:115-116`）；H3 回滚仍保留整袋同步入口，不作为帧级兜底。
+
+draw-end 的 moving 保留门由 `clear_stale_projected_moving_locked` 实施
+（`extension_bag_input.inc:34-77`）。只有以下表达式全真才保留当前投影 moving，保留时不清
+任何字段：
+
+```text
+phase ∈ {Pressed, NativeMoving, TargetResolved, TransactionInFlight}
+&& g_module_view_installed
+&& g_virtual_bag_state.mode == Module
+&& g_module_view_index == session.source_bag
+&& session.view_generation == g_extension_tab_generation
+&& g_extension_tab_generation == g_inventory_generation
+&& live_root == g_projected_item_root
+&& moving == valid_child(g_projected_item_root, session.source_slot)
+```
+
+任一条件不成立即清 `TouchState+0x30`，并清 moving 控件及 release source 控件的
+`+0x0a/+0x0b` flag；该门不改变 `0x18` owner 或 release 五出口。
+
+### 2.8 H3 物理快照守卫
+
+`call_original_event_with_inventory_guard`（`extension_bag_lifecycle.inc:116-167`）
+在 `g_orig_event` 调用前后捕获 96 槽物理快照（`79-94`），session 活动且槽数组变化时
+记录 `ERROR physical inventory mutation` 并按 before 数组恢复，随后
+`virtual_bag_sync_projected_bag()`（`143-165`）。规则锚 `rulebook.md` R-20。
+
+## 3. 侵入面清单
+
+本册记录触摸链相关的全部改动点；「与 vanilla 差异」栏描述模块启用时的行为。
+
+| 改动点 | 方式 | 目的 | 与 vanilla 差异 | 可逆性 |
+|---|---|---|---|---|
+| 库存 state entry `+0x10/+0x28/+0x38` | 内存函数指针覆盖（`extension_bag_lifecycle.inc:815-820`） | 事件流进入 `virtual_bag_event`；F3/进入库存走 wrapper | 启用后全部触摸/按键事件先入模块；未启用分支原样调 `g_orig_event` | 进程内可逆：写回保存的原值（读取于 `523-531`）；当前无运行时还原路径 |
+| item proc GOT 槽 | GOT 写替换（`game_patch_move_merge.inc:122-163`） | C1/C2 事件层路由与 `0x02` 三态门 | 扩展源 drop 被吞或转扩展事务；原版源放行原版 proc | 有卸载路径 `uninstall()`（`159-161`） |
+| H-01..H-16 Native Hook | LSPosed `hook_func` 安装（`native_inventory_hook.cpp:507-566`） | 库存函数层分流；触摸链相关为 H-14/H-15/H-16 | 每个被 Hook 函数多一层 wrapper；原版对象 original-first | 安装失败自动回滚（`384-406`）；无运行期单独卸载 API |
+| `0xb8cc0` drop gate patch | BL 指令替换（`extension_bag_lifecycle.inc:692-730`） | bag proc `0x04` 落袋写入改经 `save_item_on_empty_gate` | 投影 session 命中时返回 0，原版不清同号物理槽；真实移动延迟到 `0x18` 路由（`extension_bag_render.inc:442-462`） | 可写回原字 `0x94012fc8`；无运行时还原路径 |
+| MakeDesc desc gate patch | BL 指令替换（`extension_bag_lifecycle.inc:772-814`） | 详情打开时装详情操作 hook（Path A） | `0x80` 详情路径多一层 gate；触摸落点无事务行为 | 可写回原字 `0x97fffdfe`；无运行时还原路径 |
+| 事件吞并（capture） | `virtual_bag_event` 内返回 1（`extension_bag_lifecycle.inc:274-304`、`348-389`、`432-450`） | 旧 overlay/网格空位交互与点击-拖动分类 | 被 capture 的序列不达原版 TouchHandle | 逻辑开关：`g_extension_touch_capture` 清除即恢复放行 |
+| 事件吞并（projected owner） | `0x18` owner 返回 1（`extension_bag_lifecycle.inc:340-347`） | 扩展事务唯一提交，原版不得二次移动 | 该次 `0x18` 原版五步清理由等价清理补齐（`extension_bag_input.inc:34-71`） | 逻辑开关：session 不活动即不触发 |
+
+模块另有 draw/save 类指令 patch 与 store/save panel hook（`extension_bag_lifecycle.inc:534-690`），
+不属于触摸落点链，登记于架构册与本册 §2.6；此处不展开。
+
+## 4. 实现目标与验证状态
+
+**目标**（三项）：
+
+1. 扩展物品在 vanilla 触控链可达：投影物品借用原版 `TouchHandle` 建立 moving 状态，
+   经 §1.4 起拖判定与 §1.7/§1.8 的 proc 事件进入模块路由（实现见 §2.2）。
+2. 原版路径零变化：扩展未启用、非世界态、非扩展源的事件全部按 §1 基线行为放行
+   （bypass 段 `extension_bag_lifecycle.inc:211-253`；C1 放行原版源
+   `game_patch_move_merge.inc:24-48`）。
+3. release 状态机等价：模块吞掉 `0x18` 的每个出口都以
+   `complete_original_release_cleanup_locked` 完成 §1.5 五步清理的等价动作
+   （§2.3；规则 `rulebook.md` R-33）。
+
+扩展源 drop 的目标解析先判页签、后判网格；重叠坐标按页签优先处理。
+
+**验证状态**（截至本稿）：
+
+- 触摸机械部分（按下/拖动/松手/残留清理）已由用户在真机确认正常。
+- 触摸触发的落点问题中，宝石拖装备仍是反例 S-03（`rulebook.md:47-48`、
+  `verification-matrix.md` VM-B03），本批不处理；背包类物品拖空标签与跨页签提交已按
+  §2.2.1 完成 R1/R2 代码修复，真机证据由 `verification-matrix.md` 的 S-05 卡补齐。
+- 触摸链实施按会话口径分四步：①H-16 refresh gate（已完成，R-32）、②release 等
+  价清理（已完成，R-33，`control-plane.md` §3.3 第 4 条）、③heal 退役（代码已完成，
+  真机待验，R-34）、④VM-B01..VM-B05 四象限真机回归（未做，
+  `verification-matrix.md:358-420`）。moving 六条件门随第③步落地。
+- VM-28（release 清理变体选择）与 VM-B 真机证据均未采集；Overall 仍为
+  `NOT_ACCEPTED`（`control-plane.md` §3.2）。
+
+**后续计划**（事实性条目）：
+
+1. VM-B 四象限回归：按 `verification-matrix.md` §2.1 五卡采集真机证据。
+2. S-03 仍按 `control-plane.md` §4 登记；R1/R2 的页签落点修复按本册 §2.2.1 与验收册
+   S-05 取证。
+
+## 5. 设计决策与未决事项
+
+本章只放裁定结论、理由与出处；事实记录在 §1–§4。
+
+| 决策 | 理由 | 出处 |
+|---|---|---|
+| `INVEN_MoveItem` 纯函数层不做扩展分流（「函数层全放行/全接管均不成立」的落点）：采用方案 A，只按 item 扩展身份拒绝 | 该函数只有 item/count/target bag/slot 四参，不足以区分物理/显示目标、无法还原扩展意图；在此分流会与 `0x18` owner 形成双提交 | `inventory-integration-decision-plan.md:72`（方案 A/B 裁决）；`rulebook.md` R-31（`rulebook.md:538-545`） |
+| 保留 `0x18` 单一 drop owner，事务失败也吞掉原版 | 原版 release 会继续调 `INVEN_MoveItem`/`SaveItemOnEmpty`，投影对象不在 `g_inven`；先放行后补偿会把物理槽交给原版链改写。R-33 的等价清理只补 TouchHandle 状态，不重新派发 `0x18` | `rulebook.md` R-02（`rulebook.md:333-340`）；`control-plane.md` §5 决策索引 2026-09-06 行 |
+| Refresh 采用函数级关卡（H-16）而非 15+ 主动刷新点+帧 heal | 模块刷新点多持有 `g_virtual_bag_mtx`，经被 Hook 地址自调会重复加锁死锁；raw-original dispatcher 保留 Hook 未就绪回退；H-16 承担 post-projection，帧级 heal 退役 | `rulebook.md` R-32、R-34；`control-plane.md` §5 决策索引 2026-09-09 行 |
+| moving 只在六条件全真时保留 | draw-end 不再逐帧写投影控件；无刷新事务定点同步受影响槽，stale moving 清 TouchState 与控件 flags | `rulebook.md` R-34；`verification-matrix.md` VM-B01～VM-B05 |
+| 吞掉 `0x18` 必须做原版等价清理且放锁派发 | 只清扩展 session 会遗留 TouchState、moving/on 标志与选中控件，下一次点击进入幽灵拖拽；原版 UI 回调可重入模块，持锁派发会死锁 | `rulebook.md` R-33（`rulebook.md:552-562`）；实现 `extension_bag_input.inc:34-71` |
+| 物理快照守卫只做「比较+恢复」，不承诺覆盖全部写点 | 它包住 `g_orig_event` 调用，无法观察不经过该调用的写入；问题 B 仍按「未解决+已布防」判定 | `rulebook.md` R-20（`rulebook.md:461-467`）；`control-plane.md` §4.1 |
+| R-27/R-26 窗口袋号与 direct/GOT 成对恢复；R-30 root 重建门禁；R-19 generation 递增 | 视图切换与控件重建后旧事件不得提交到新视图；具体正文的编号引用归规则册 §5 | `rulebook.md:454-466`、`503-537`；本册 §2.2/§2.4 为实现锚 |
+
+### 5.1 未决事项
+
+1. S-03（宝石拖装备触发交换）的落点根因仍未定位；本批 R1/R2 仅覆盖背包类空页签装备
+   与跨页签提交，不能替代 S-03 结论。
+2. 问题 B（ext↔ext swap 的原版同号槽丢失）独立于触摸机械，登记与取证 SOP 归
+   `control-plane.md` §4.1；本册 §2.8 的 H3 守卫是其防御层之一。
+3. `control-plane.md` §4.1 取证字段仍指向旧稿 `drag-protocol.md §7.4`；旧 §7.4
+   SOP 随本次重构移出本册，该引用需由 Hub 维护者修订（见附录 A）。
+
+## 附录 A. 旧稿章节映射（2026-09-09 重构）
+
+本册由「拖拽协议全册」收窄为「触摸链事实册」。旧稿章节去向：
+
+| 旧稿章节 | 去向 |
+|---|---|
+| §1 当前裁决与术语、§2 状态机、§3 三态门、§4 三方向事务、§5 投影生命周期、§6 H3 | 事实部分收窄进本册 §2；事务/投影/H3 细节仍以旧稿内容为准的，改引 `rulebook.md`（R-01..R-34）与 `runtime-architecture.md`；H3 保留为 §2.8 |
+| §7 问题 B 登记章、§8 候选写点清单 | `control-plane.md` §4.1（登记）与 `rulebook.md` R-20/R-31（防御层）；候选写点清单随旧稿移除，取证时按 `control-plane.md` §4.1 的证据缺口重新对码 |
+| §7.4 复现取证 SOP | `control-plane.md` §4.1「取证」字段为其唯一引用点；SOP 正文随旧稿移除，需时从 git 历史恢复 |
+| §9 旧稿结论迁移清单、§10 维护和验收引用 | R 编号索引归 `rulebook.md` §5；旧稿已废结论不再重复登记 |
+
+引用本册的外部锚点漂移：`control-plane.md` §5 决策索引中 `drag-protocol.md §5.2`、
+`§1.1`、`§3.1–§3.2`、`§3.3`、`§7.5`、`§8` 均指向旧稿编号，需由 Hub 维护者按本册
+新结构（§2.5、§2.2、§4）修订。

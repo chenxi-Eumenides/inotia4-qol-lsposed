@@ -119,6 +119,16 @@ int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem iden
     return backup(equip_item, jewel_item);
 }
 
+bool stage4_is_extension_equip_control_source(uint64_t event, bool extension_source,
+                                               bool source_is_jewel,
+                                               bool target_is_equip_slot) {
+    return event == 0x04 && extension_source && source_is_jewel && target_is_equip_slot;
+}
+
+bool stage4_finish_requires_abort(bool finished) {
+    return !finished;
+}
+
 int stage4_unequip_item_to_inven(void* character, int32_t equip_slot,
                                  Stage4UnequipBackup backup,
                                  Stage4UnequipExtension extension_adopt,

@@ -111,14 +111,11 @@ bool move_original_to_extension_slot_locked(int src_bag, int src_slot, int dst_b
     // 用户决策（2026-08-31）：orig→ext 后保持当前视图（对齐原版"移动后停留"）。
     // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
     // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
-    // 原版网格残影由 RefreshItemArea 清除（INVEN 全程真实，线程先例：install 路径）。
-    if (g_module_view_installed) {
-        // 扩展视图中原版刷新会先把当前原版袋绘制一帧，随后投影覆盖，
-        // 从而出现装备后短暂闪回原版背包。当前视图容量未变化，只需修复
-        // 已清空的源控件和已更新的扩展标签对象。
-        refresh_projection_if_overwritten_locked();
+    // 当前视图只同步发生变化的扩展槽；非扩展视图仍走原版刷新。
+    if (g_module_view_installed && g_module_view_index == dst_bag) {
+        sync_projected_slot_locked(dst_bag, dst_slot);
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
-        fn_ui_equip_refresh_item_area();
+        inventory_native_hook_call_refresh_item_area_original();
     }
     VIRTBAG_LOG("txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
                 txn.transaction_id, dst_bag, dst_slot, src_category, txn.committed.count,
@@ -227,7 +224,6 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
         if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
             set_original_bag_locked(g_module_window_original_bag);
             refresh_module_item_area_locked(g_module_view_index);
-            refresh_projection_if_overwritten_locked();
         }
         reset_drag_state_locked(nullptr);
         return false;
@@ -256,7 +252,6 @@ bool move_extension_to_original_locked(int src_bag, int src_slot, int target_bag
         if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
             set_original_bag_locked(g_module_window_original_bag);
             refresh_module_item_area_locked(g_module_view_index);
-            refresh_projection_if_overwritten_locked();
         }
         reset_drag_state_locked(nullptr);
         return false;
@@ -729,7 +724,7 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
                 item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
             }
             const int category = original_item_category_locked(item);
-            if (g_virtual_bag_state.types[index] == 0 && category >= 1 && category <= 4) {
+            if (g_virtual_bag_state.types[index] == 0 && is_backpack_category(category)) {
                 // 原版背包来源的袋物品拖到空扩展标签也必须走“袋槽装备”，
                 // 不能直接落入普通扩展物品槽。
                 return try_equip_on_extension_tab_drop_locked(index, moving_control);
@@ -758,7 +753,7 @@ bool handle_bag_drop_release_locked(int64_t x, int64_t y) {
             if (!extension_tab_hit(index, x, y)) continue;
             const int category = g_virtual_bag_state.items[g_extension_drag.bag][g_extension_drag.slot].category;
             const bool should_equip = g_virtual_bag_state.types[index] == 0 &&
-                                      category >= 1 && category <= 4;
+                                      is_backpack_category(category);
             const bool handled = should_equip
                 ? try_equip_on_extension_tab_drop_locked(index, touch_moving_item_control_locked())
                 : move_extension_to_extension_locked(
@@ -798,6 +793,22 @@ bool route_projected_session_drop_locked(int64_t x, int64_t y) {
         g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
         return false;
+    }
+    // Tab rects and grid rows overlap in the current UI coordinate space; a tab hit is
+    // therefore the explicit switch-bag intent and must take precedence over a slot hit.
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        const int target_bag = index;
+        const int target_slot = -1;
+        if (target_bag == g_extension_drag_session.source_bag ||
+            !extension_tab_hit(target_bag, x, y)) {
+            continue;
+        }
+        const virtual_bag::DragTargetKind target_kind = virtual_bag::classify_drag_target(
+            target_bag, target_slot, true);
+        if (target_kind == virtual_bag::DragTargetKind::kExtensionTab) {
+            return route_projected_session_to_tab_locked(
+                virtual_bag::extension_logical_bag(target_bag));
+        }
     }
     int target_bag = g_virtual_bag_state.selected;
     int target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
@@ -862,48 +873,94 @@ bool route_projected_session_drop_locked(int64_t x, int64_t y) {
 }
 
 bool route_projected_session_to_tab_locked(int target_bag) {
-    // target_bag 是扩展逻辑袋内部索引；成功装备由 finish_extension_equip_ui_locked
+    // 入口 target_bag 使用扩展逻辑袋号 6..10；事务状态和 State 数组统一使用
+    // 内部索引 0..4。成功装备由 finish_extension_equip_ui_locked
     // 复用 handle_extension_tab_click_locked/install_module_view_locked 同步当前视图，
     // 不能只结束 session 后继续沿用源袋的 g_module_view_index。
     auto& session = g_extension_drag_session;
-    if (session.phase == virtual_bag::DragPhase::kIdle ||
-        g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
-        !virtual_bag::valid_extension_logical_bag(target_bag) ||
-        target_bag == session.source_bag ||
-        !virtual_bag::drag_session_generation_current(session, g_extension_tab_generation)) {
+    const int target_internal = virtual_bag::extension_internal_bag(target_bag);
+    const auto reject = [&](const char* reason) {
+        VIRTBAG_LOG("cross tab reject reason=%s bag=%d slot=%d target_bag=%d target_internal=%d "
+                    "phase=%d generation=%llu/%llu/%llu",
+                    reason, session.source_bag, session.source_slot, target_bag, target_internal,
+                    static_cast<int>(session.phase),
+                    static_cast<unsigned long long>(session.view_generation),
+                    static_cast<unsigned long long>(g_extension_tab_generation),
+                    static_cast<unsigned long long>(g_inventory_generation));
         return false;
+    };
+    if (session.phase == virtual_bag::DragPhase::kIdle) {
+        return reject("session_idle");
+    }
+    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule) {
+        return reject("mode_not_module");
+    }
+    if (target_internal < 0) {
+        return reject("target_bag_invalid");
+    }
+    if (target_internal == session.source_bag) {
+        return reject("same_source_target");
+    }
+    if (!virtual_bag::drag_session_generation_current(session, g_extension_tab_generation)) {
+        return reject("session_generation_mismatch");
+    }
+    if (g_extension_tab_generation != g_inventory_generation) {
+        return reject("tab_generation_mismatch");
+    }
+    if (!virtual_bag::valid_index(session.source_bag) || session.source_slot < 0 ||
+        session.source_slot >= virtual_bag::kSlotCount) {
+        return reject("source_session_invalid");
     }
     if (session.phase == virtual_bag::DragPhase::kPressed) {
         advance_projected_drag_session_locked();
     }
     const virtual_bag::DragTargetKind target_kind = virtual_bag::classify_drag_target(
         target_bag, -1, true);
+    if (target_kind != virtual_bag::DragTargetKind::kExtensionTab) {
+        return reject("target_kind_invalid");
+    }
     if (virtual_bag::session_resolve_target(
             &session, g_extension_tab_generation, target_kind) ==
-            virtual_bag::DragTransition::kIllegal ||
-        virtual_bag::session_begin_transaction(&session, g_extension_tab_generation) ==
-            virtual_bag::DragTransition::kIllegal ||
-        virtual_bag::session_on_release(&session, g_extension_tab_generation) !=
-            virtual_bag::DragTransition::kAdvanced ||
-        !virtual_bag::session_claim_transaction(&session)) {
-        return false;
+        virtual_bag::DragTransition::kIllegal) {
+        return reject("target_transition_illegal");
     }
-    const bool should_equip = extension_source_should_equip_locked(target_bag);
+    if (session.target_kind != target_kind) {
+        return reject("session_target_kind_mismatch");
+    }
+    if (virtual_bag::session_begin_transaction(&session, g_extension_tab_generation) ==
+        virtual_bag::DragTransition::kIllegal) {
+        return reject("transaction_begin_illegal");
+    }
+    if (virtual_bag::session_on_release(&session, g_extension_tab_generation) !=
+        virtual_bag::DragTransition::kAdvanced) {
+        return reject("release_transition_illegal");
+    }
+    if (!virtual_bag::session_claim_transaction(&session)) {
+        return reject("transaction_claim_failed");
+    }
+    const bool should_equip = extension_source_should_equip_locked(target_internal);
     bool handled = false;
     if (should_equip) {
-        handled = try_equip_on_extension_tab_drop_locked(
-            target_bag, touch_moving_item_control_locked());
+        handled = equip_extension_source_on_tab_locked(
+            target_internal, session.source_bag, session.source_slot);
     } else {
         handled = move_extension_to_extension_locked(
-            session.source_bag, session.source_slot, target_bag, -1);
+            session.source_bag, session.source_slot, target_internal, -1);
         if (handled) {
             persist_state_locked();
             refresh_projected_module_view_after_move_locked();
         }
     }
     virtual_bag::session_finish_transaction(&session, handled);
-    VIRTBAG_LOG("p5 session tab drop source=%d/%d target_bag=%d handled=%d equip=%d",
-                session.source_bag, session.source_slot, target_bag, handled ? 1 : 0,
-                should_equip ? 1 : 0);
+    if (handled) {
+        VIRTBAG_LOG("tab commit handled=1 bag=%d slot=%d target_bag=%d target_kind=%d equip=%d",
+                    session.source_bag, session.source_slot, target_bag,
+                    static_cast<int>(target_kind), should_equip ? 1 : 0);
+    } else {
+        VIRTBAG_LOG("tab reject reason=transaction_failed bag=%d slot=%d target_bag=%d "
+                    "target_kind=%d equip=%d",
+                    session.source_bag, session.source_slot, target_bag,
+                    static_cast<int>(target_kind), should_equip ? 1 : 0);
+    }
     return handled;
 }

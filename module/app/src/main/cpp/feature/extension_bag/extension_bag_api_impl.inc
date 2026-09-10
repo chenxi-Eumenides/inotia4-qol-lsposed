@@ -158,6 +158,9 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     void* item = nullptr;
     void* leader = nullptr;
     bool closes_description = false;
+    ModuleUseToken use_token{};
+    ModuleUseToken* previous_use_token = nullptr;
+    ModuleUseReleasePlan release_plan{};
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
@@ -174,9 +177,35 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (item == nullptr) return op_err("extension item unavailable");
         if (leader == nullptr) return op_err("no leader");
         closes_description = g_extension_desc_item == item;
+        if (!module_use_begin_locked(bag, slot, item, &use_token)) {
+            return op_err("extension item already in use");
+        }
     }
     if (closes_description && fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    previous_use_token = g_active_module_use_token;
+    g_active_module_use_token = &use_token;
     used = fn_char_use_item_ex(leader, item, 0) != 0;
+    g_active_module_use_token = previous_use_token;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        bool consumed = false;
+        if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
+            const bool marker_cleared = module_use_abort_locked(use_token);
+            const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
+            VIRTBAG_LOG("ERROR API use token mismatch bag=%d slot=%d item=%p marker_cleared=%d",
+                        bag, slot, item, isolated ? 1 : 0);
+            return op_err("extension item changed during native operation");
+        }
+    }
+    if (release_plan.pending) {
+        if (!module_use_release_native(release_plan)) {
+            return op_err("extension item release failed");
+        }
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!module_use_finalize_release_locked(release_plan)) {
+            return op_err("extension item release finalize failed");
+        }
+    }
     if (!used) return op_err("on cooldown");
     if (closes_description) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -200,6 +229,9 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
     void* jewel = nullptr;
     void* equip = nullptr;
     int before_count = 0;
+    ModuleUseToken use_token{};
+    ModuleUseToken* previous_use_token = nullptr;
+    ModuleUseReleasePlan release_plan{};
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
@@ -220,27 +252,52 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         if (equip == nullptr) return op_err("equip slot empty");
 
         before_count = descriptor.count;
+        if (!module_use_begin_locked(bag, slot, jewel, &use_token)) {
+            return op_err("extension jewel already in use");
+        }
     }
 
+    previous_use_token = g_active_module_use_token;
+    g_active_module_use_token = &use_token;
     const int result = fn_put_jewel(equip, jewel);
-    if (result != 0) return result == 2 ? op_err("no socket") : op_err("not jewel");
+    g_active_module_use_token = previous_use_token;
 
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
-        int current_bag = -1;
-        int current_slot = -1;
-        if (!module_slot_of_item_locked(jewel, &current_bag, &current_slot) ||
-            current_bag != bag || current_slot != slot ||
-            g_module_objects[bag][slot] != jewel) {
+        bool consumed = false;
+        if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
+            const bool marker_cleared = module_use_abort_locked(use_token);
+            const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
+            VIRTBAG_LOG("ERROR API put jewel token mismatch bag=%d slot=%d item=%p marker_cleared=%d",
+                        bag, slot, jewel, isolated ? 1 : 0);
             return op_err("extension jewel changed during native operation");
         }
-        if (!consume_extension_item_after_native_locked(
-                bag, slot, jewel, before_count, before_count, "api_put_jewel", nullptr)) {
-            return op_err("extension jewel state update failed");
+        if (result != 0) return result == 2 ? op_err("no socket") : op_err("not jewel");
+        ensure_state_loaded_locked();
+        if (!consumed) {
+            int current_bag = -1;
+            int current_slot = -1;
+            if (!module_slot_of_item_locked(jewel, &current_bag, &current_slot) ||
+                current_bag != bag || current_slot != slot ||
+                g_module_objects[bag][slot] != jewel) {
+                return op_err("extension jewel changed during native operation");
+            }
+            if (!consume_extension_item_after_native_locked(
+                    bag, slot, jewel, before_count, before_count, "api_put_jewel", nullptr)) {
+                return op_err("extension jewel state update failed");
+            }
         }
         g_item_state_dirty = true;
         refresh_extension_item_operation_locked(bag);
+    }
+    if (release_plan.pending) {
+        if (!module_use_release_native(release_plan)) {
+            return op_err("extension jewel release failed");
+        }
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!module_use_finalize_release_locked(release_plan)) {
+            return op_err("extension jewel release finalize failed");
+        }
     }
     return op_ok();
 }

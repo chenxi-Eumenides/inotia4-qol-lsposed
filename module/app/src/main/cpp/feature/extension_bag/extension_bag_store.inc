@@ -84,8 +84,7 @@ void store_refresh_tab_bag_items_locked() {
         void*& item = store_tab_bag_items[index];
         if (type == 0) {
             if (item != nullptr) {
-                defer_item_free_locked(item);
-                item = nullptr;
+                if (defer_item_free_locked(item)) item = nullptr;
             }
             continue;
         }
@@ -93,8 +92,7 @@ void store_refresh_tab_bag_items_locked() {
             const uint16_t flags = *reinterpret_cast<uint16_t*>(
                 reinterpret_cast<uint8_t*>(item) + I_TYPE);
             if (fn_get_bit(flags, 15, 6) != static_cast<int>(type)) {
-                defer_item_free_locked(item);
-                item = nullptr;
+                if (defer_item_free_locked(item)) item = nullptr;
             }
         }
         if (item == nullptr && fn_create_item != nullptr) {
@@ -620,8 +618,7 @@ void store_teardown_locked() {
     store_reset_desc_hook_locked();
     for (void*& item : store_tab_bag_items) {
         if (item != nullptr) {
-            defer_item_free_locked(item);
-            item = nullptr;
+            if (defer_item_free_locked(item)) item = nullptr;
         }
     }
     store_frame_active = false;

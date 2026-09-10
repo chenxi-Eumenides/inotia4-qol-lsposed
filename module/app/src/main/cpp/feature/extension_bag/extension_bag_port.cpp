@@ -41,6 +41,10 @@ bool extension_bag_is_logical_bag(int bag) {
     return virtual_bag::valid_extension_logical_bag(bag);
 }
 
+int extension_bag_internal_index(int logical_bag) {
+    return virtual_bag::extension_internal_bag(logical_bag);
+}
+
 bool extension_bag_prepare_main_menu() {
     return virtual_bag_prepare_main_menu();
 }

@@ -42,9 +42,16 @@
 | 状态 | 待办项 | 现状 / 卡点 | 需要的探索 / 实现 | 来源 |
 |---|---|---|---|---|
 | 未开始 | **存档备份 API（重做）** | 当前原版存档备份、恢复备份、导出存档能力已删除；`enter_slot` 仅保留内部完整性门禁，不提供独立预检 API | ① 新增按指定 slot 备份到模块存档备份目录的 API；统一存档数据中的槽位字段后计算 MD5/SHA-256（或截取校验值）作为备份标识，避免跨 slot 恢复导致标识变化；② 新增备份列表 API，返回备份时间、角色信息、校验值等基本信息；③ 新增按校验值恢复到指定 slot 的 API；研究各 slot 是否绑定位置、能否跨 slot 恢复，以及修改存档槽位字段是否足够安全 | 用户 2026-08-27 要求 |
-| 未开始 | **扩展物品全局裸指针反查 generation 化** | `extension_bag_render.inc:419-430` 仍使用全局裸指针匹配；确认使用 v2 暂以槽位身份反查作为授权遗留 | 为扩展物品反查补 generation/token，覆盖物化、投影、释放和确认回调，消除地址复用窗口 | Oracle 复审授权遗留 |
-| 未开始 | **确认弹窗 Cancel 后详情缓存状态残留窗口** | 确认弹窗 Cancel 不劫持原版 Cancel 槽；状态依赖下一次详情/视图清理，`control-plane.md:1018` 已声明残留窗口 | 增加可观察的安全清理点或等价生命周期 token；不得重新劫持 Cancel 槽 | Oracle 复审 |
-| 未开始 | **确认使用 token mismatch 后 active 槽滞留** | `module_use_finish_locked()` 发现 generation/item/owner 不一致时只能记录完整诊断；若 `module_use_abort_locked()` 也失败，槽可能继续保持 active，当前无安全恢复机制 | 先裁决可接受的恢复/隔离策略，再实现不释放未知对象的安全清理；覆盖 active、pending_release、generation、handle、owner 线程和 token 全字段 | F4 静态审计 |
+| 未开始 | **扩展物品全局裸指针反查 generation 化** | `extension_bag_render.inc:419-430` 仍使用全局裸指针匹配；确认使用 v2 暂以槽位身份反查作为授权遗留。权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §4.2 | 为扩展物品反查补 generation/token，覆盖物化、投影、释放和确认回调，消除地址复用窗口 | Oracle 复审授权遗留 |
+| 未开始 | **确认弹窗 Cancel 后详情缓存状态残留窗口** | 确认弹窗 Cancel 不劫持原版 Cancel 槽；状态依赖下一次详情/视图清理，权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §4.2 | 增加可观察的安全清理点或等价生命周期 token；不得重新劫持 Cancel 槽 | Oracle 复审 |
+| 未开始 | **确认使用 token mismatch 后 active 槽滞留** | `module_use_finish_locked()` 发现 generation/item/owner 不一致时只能记录完整诊断；若 `module_use_abort_locked()` 也失败，槽可能继续保持 active，当前无安全恢复机制。权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §4.2 | 先裁决可接受的恢复/隔离策略，再实现不释放未知对象的安全清理；覆盖 active、pending_release、generation、handle、owner 线程和 token 全字段 | F4 静态审计 |
+| 未开始 | **强化（enchant）扩展物品接管** | **缺口-未实现，非刻意边界**：无任何扩展物品接管，UI 入口未分流，文档此前无裁定 | 建议下一步：先裁定强化 UI 入口、扩展物品接管边界及原版效果/消费路径，再登记函数级分流方案并补真机证据 | 审计报告 |
+| 已实现，待真机验收 | **扩展物品拖到角色装备栏的函数级接管** | 第 15 个常驻 Native Hook 接管 `UIEquip_EquipControlEventProc@0xb8f7c`；仅 event=0x04、扩展宝石源且目标为装备槽时放行原版镶嵌链，失败 Blocked 不降级 | 执行 VM-10/VM-B03，确认只消费一次且不发生交换 | `verification-matrix.md` VM-10、VM-B03 |
+| 未开始 | **data_op_equip 与 UI 详情装备路径口径统一** | **缺口-未实现，非刻意边界**：`data_op_equip` 拒绝逻辑袋 6..10，与 UI 详情装备路径口径不一致 | 建议下一步：先裁定 API 口径，再决定实现和验收边界 | 审计报告 |
+| 已实施，待真机 VM-27 | **MoveItem guard 方案 A** | 用户已裁决 A；第 14 个常驻 Native Hook 仅拦扩展身份源，原版对象 original-first backup+取证。方案 B 因四参不足和 `0x18` 双提交风险否决 | 完成代码/文档同步；执行 VM-27，确认扩展源无 backup、原版合并无行为变化 | `control-plane.md` §5；`verification-matrix.md` VM-27 |
+| 待定 | **未定-需真机证据：SaveItem 全 caller 覆盖** | H-13 `SaveItem` wrapper 已存在，但不能由单一 wrapper 推导所有生产者覆盖；权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §2 | 逐 caller 核对拾取、奖励、开箱、解封、拆包、合成、商店、脱装备和快捷键的成功/失败/释放/任务袋边界，并补真机证据 | `inventory-integration-decision-plan.md` §2.2、§3.2；`runtime-architecture.md` §3.6；`verification-matrix.md` §2 VM-19–VM-22 |
+| 待定 | **未定-需真机证据：保存 commit 窗口中断恢复** | 原版 `SAVE_Save` 成功与 participant commit 之间中断后的最终组合状态尚不能由静态代码判定；权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §2 | 在 commit 窗口 force-stop，核对 coordinator journal、sidecar、last-good 和原版槽，明确安全恢复或回滚语义 | `module-save-store.md` §3、§6.3；`verification-matrix.md` §2 VM-25 |
+| 待定 | **未定-需真机证据：v2/v3/legacy 迁移安全性** | 兼容读取与迁移路径已存在，但中断、切档和重启组合下的安全性未闭合；权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §2 | 覆盖 v2/v3/legacy 输入在迁移中断、切换存档、重启和坏 sidecar 场景的保留、隔离与回滚结果 | `runtime-architecture.md` §5.3；`module-save-store.md` §5.2–§6.3；`verification-matrix.md` §2 VM-25 |
 
 > 规则：严格按下列顺序串行实施。每项完成后只部署该项，由用户在真机触摸验收；验收通过前不得开始下一项。
 
@@ -142,3 +149,4 @@
 | 待定 | 模块 arm64-v8a 打包后 guest 内 dlopen/dlsym | 转译层内 dlopen/dlsym 是否可用未实证（高风险；与 P1 VMA 治理的 dlsym 化关联） | PoC：模块仅 arm64-v8a → 游戏启动 → System.loadLibrary | emulator-research §5 |
 | 待定 | LSPatch bootstrap 稳定性 | liblspatch.so x86_64 与 guest 进程混合无公开先例 | PoC | emulator-research §5 |
 | 待定 | LSPatch 0.6 与 libxposed 101 兼容性 | 内置 runtime 较旧 | 必要时降级 API 93 构建 | README 已知待办 |
+| 未开始 | **文档锚点保鲜校验** | 需要周期检查文档中的测试名与 `文件:行` 锚点仍可 grep；脚本尚未实现 | 新增 `scripts/maintenance/check_docs.py`，校验测试名/文件:行可 grep 性并登记失效锚点 | P4 文档治理 |

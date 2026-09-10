@@ -710,6 +710,7 @@ static void test_virtual_bag_mergeable_items() {
     source.category = existing.category;
     source.payload[7] ^= 1;
     CHECK(!virtual_bag::mergeable_items(existing, source));
+    CHECK(!virtual_bag::same_extension_bag_mergeable_items(existing, source));
     source = virtual_bag::Item{existing.category, source.count};
     virtual_bag::Item legacy_existing{existing.category, existing.count};
     CHECK(!virtual_bag::mergeable_items(legacy_existing, source));
@@ -888,6 +889,9 @@ static void test_virtual_bag_transaction_domain() {
     CHECK_EQ(extension_internal_bag(kExtensionLogicalBagFirst), 0);
     CHECK_EQ(extension_internal_bag(kExtensionLogicalBagLast), kBagCount - 1);
     CHECK_EQ(extension_internal_bag(11), -1);
+    CHECK_EQ(extension_logical_bag(0), kExtensionLogicalBagFirst);
+    CHECK_EQ(extension_logical_bag(kBagCount - 1), kExtensionLogicalBagLast);
+    CHECK_EQ(extension_logical_bag(kBagCount), -1);
 
     CHECK(valid_transaction_domain(kTransferOriginalToExtension, 0, 0, 4, 15));
     CHECK(valid_transaction_domain(kTransferExtensionToOriginal, 4, 15, 0, 0));
@@ -1302,6 +1306,7 @@ static void test_ownership_ledger_p43() {
     }
     uint32_t extra = 0;
     CHECK(ownership::allocate(&pool, &extra) == ownership::Outcome::kRejectPoolExhausted);
+    CHECK_EQ(extra, 0u);
     CHECK(ownership::release(&pool, handles[7]) == ownership::Outcome::kOk);
     CHECK(ownership::allocate(&pool, &extra) == ownership::Outcome::kOk);
     CHECK(ownership::handle_slot(extra) == ownership::handle_slot(handles[7]));

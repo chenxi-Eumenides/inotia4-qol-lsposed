@@ -1,5 +1,7 @@
 # P7 阶段 2：原版/扩展静态支持矩阵
 
+历史归档（2026-09-08）：仅供追溯，不得作为当前实现依据；当前权威见 docs/development/features/extension-bag/
+
 > 状态：STATIC-COMPLETE（机制选择和边界已冻结；不包含真机验证）
 > 日期：2026-09-06
 > 前置：阶段 0 `stage-0-static-inventory-audit.md`、阶段 1 `stage-1-physical-inventory-contract.md`

@@ -26,7 +26,10 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
             virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param,
                                                  ctrl_src);
-            if (virtual_bag_allow_original_tab_drop(control, ctrl_src)) {
+            const uintptr_t caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+            const uint64_t caller_offset =
+                g_base != 0 && caller >= g_base ? static_cast<uint64_t>(caller - g_base) : 0;
+            if (virtual_bag_allow_original_tab_drop(control, ctrl_src, caller_offset)) {
                 const uint64_t result = fn_ui_equip_inven_item_control_event_proc(
                     control, event, x2, param);
                 return finish(result);
@@ -43,7 +46,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                  control);
         return finish(0);
     }
-    if (event == 4 && param != nullptr && fn_control_object_get_data != nullptr &&
+    if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
+        fn_control_object_get_data != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
                  fn_get_cumulate_count != nullptr && fn_get_bit != nullptr && fn_inven_move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
@@ -84,6 +88,16 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                         }
                         MOVE_LOG("move_merge: merged bag=%d src=%d dst=%d count=%d", bag, src_slot,
                                  dst_slot, count);
+                        return finish(0);
+                    }
+                    int extension_source_bag = -1;
+                    int extension_source_slot = -1;
+                    if (virtual_bag_identify_native_item(item_a, &extension_source_bag,
+                                                         &extension_source_slot)) {
+                        MOVE_LOG(
+                            "move_merge: extension guard rejected; original proc suppressed "
+                            "item=%p source=%d/%d target=%d/%d",
+                            item_a, extension_source_bag, extension_source_slot, bag, dst_slot);
                         return finish(0);
                     }
                     MOVE_LOG("move_merge: native merge rejected; falling through bag=%d src=%d dst=%d",

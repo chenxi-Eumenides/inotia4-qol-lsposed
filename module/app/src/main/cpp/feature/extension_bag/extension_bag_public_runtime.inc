@@ -14,6 +14,23 @@ uint64_t extension_bag_isolation_now_ms() {
     return isolation_now_ms_locked();
 }
 
+// G-8/H4 共享扩展身份判据：所有事件层与函数层守卫都反查同一份
+// g_module_objects，避免 source 判定在不同防线间漂移。调用方必须已持有
+// g_virtual_bag_mtx。
+bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot) {
+    if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (g_module_objects[bag][slot] == item) {
+                *out_bag = bag;
+                *out_slot = slot;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* x2, void* param) {
     if (g_p5_observation_active || !p5_observation_enabled() ||
         !p5_should_begin_item_observation(event)) {
@@ -53,6 +70,48 @@ bool virtual_bag_is_inventory_enter(uintptr_t enter) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     return g_state_entry != nullptr &&
            enter == *reinterpret_cast<uintptr_t*>(g_state_entry + 0x10);
+}
+
+bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int target_slot,
+                                               VirtualBagMoveItemObservation* out) {
+    if (out == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    *out = {};
+    out->module_view_index = g_module_view_index;
+    out->drag_session_active = projected_drag_session_active_locked();
+    out->extension_item = item != nullptr &&
+                          module_slot_of_item_locked(item, &out->extension_bag,
+                                                     &out->extension_slot);
+    if (out->extension_item) {
+        out->extension_handle =
+            g_module_object_handles[out->extension_bag][out->extension_slot];
+        for (const ownership::State state : {ownership::State::kModuleOwned,
+                                             ownership::State::kBorrowedForView,
+                                             ownership::State::kInventoryOwned,
+                                             ownership::State::kReleased}) {
+            if (ownership::live_state(g_ownership_ledger, out->extension_handle, state)) {
+                out->ownership_state = static_cast<int>(state);
+                break;
+            }
+        }
+    }
+    const PhysicalInventorySnapshot snapshot = capture_physical_inventory_snapshot_locked();
+    out->physical_valid = snapshot.valid;
+    out->physical_digest = snapshot.digest;
+    out->physical_nonnull = snapshot.nonnull;
+    for (size_t index = 0; index < snapshot.slots.size(); ++index) {
+        void* slot_item = snapshot.slots[index];
+        if (item != nullptr && slot_item == item && out->source_bag < 0) {
+            out->source_bag = static_cast<int>(index / virtual_bag::kSlotCount);
+            out->source_slot = static_cast<int>(index % virtual_bag::kSlotCount);
+            out->source_ptr = slot_item;
+        }
+    }
+    if (target_bag >= 0 && target_bag < 6 && target_slot >= 0 &&
+        target_slot < virtual_bag::kSlotCount) {
+        out->target_ptr = snapshot.slots[target_bag * virtual_bag::kSlotCount + target_slot];
+    }
+    return true;
 }
 
 int virtual_bag_inventory_state_id() {
@@ -171,7 +230,8 @@ bool virtual_bag_original_item_input_blocked() {
     return blocked;
 }
 
-bool virtual_bag_allow_original_tab_drop(void* control, void* source_control) {
+bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
+                                         uint64_t caller_offset) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_virtual_bag_enabled.load() || !g_module_view_installed ||
         control == nullptr || source_control == nullptr ||
@@ -191,11 +251,21 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control) {
     void* item = source_data != nullptr ? *reinterpret_cast<void**>(source_data) : nullptr;
     int source_bag = -1;
     int source_slot = -1;
-    const bool allowed = item != nullptr &&
-                         module_slot_of_item_locked(item, &source_bag, &source_slot);
+    const bool extension_source = item != nullptr &&
+                                   module_slot_of_item_locked(item, &source_bag, &source_slot);
+    if (extension_source) {
+        VIRTBAG_LOG(
+            "drop rejected: extension source entering original proc item=%p caller=libgame+0x%llx "
+            "view=%d session=%d source=%d/%d target_slot=%d",
+            item, static_cast<unsigned long long>(caller_offset), g_module_view_index,
+            g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle ? 1 : 0,
+            source_bag, source_slot, target_slot);
+        return false;
+    }
+    const bool allowed = item != nullptr;
     if (allowed) {
-        VIRTBAG_LOG("original drop allowed control=%p source=extension bag=%d slot=%d target_slot=%d",
-                    control, source_bag, source_slot, target_slot);
+        VIRTBAG_LOG("original drop allowed control=%p source=original item=%p target_slot=%d",
+                    control, item, target_slot);
     }
     return allowed;
 }
@@ -290,13 +360,7 @@ bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
     if (slot < 0 || slot >= g_virtual_bag_state.capacities[g_module_view_index]) {
         return false;
     }
-    void* live_root = g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA)
-                                  : nullptr;
-    void* ctrl = valid_child_locked(live_root, slot);
-    void* item = g_module_objects[g_module_view_index][slot];
-    if (ctrl == nullptr) return false;
-    fn_control_item_set_item(ctrl, item);
-    return true;
+    return sync_projected_slot_locked(g_module_view_index, slot);
 }
 
 bool virtual_bag_sync_projected_item_control(void* control) {

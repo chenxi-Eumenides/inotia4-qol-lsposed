@@ -144,7 +144,9 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
             return true;
         }, &ctx);
         if (out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot) {
-            out->native_item = extension_bag_item_at(bag, slot);
+            const int internal_bag = extension_bag_internal_index(bag);
+            if (internal_bag < 0) return false;
+            out->native_item = extension_bag_item_at(internal_bag, slot);
         }
         return out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot;
     }
