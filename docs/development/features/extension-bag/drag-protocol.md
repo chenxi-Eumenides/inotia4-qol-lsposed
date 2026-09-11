@@ -170,15 +170,15 @@ release 时 `TouchHandle_SetReleaseEvent@0xa343c`（UI:295-380）按 drop 目标
 |---|---|---|---|
 | 事件入口 | 库存场景 state entry `+0x38`（原 `F_SCENE_EVENT_EQUIP_VMA`） | 保存原值到 `g_orig_event` 后覆盖为 `virtual_bag_event`；`+0x28`→`virtual_bag_f3_wrapper`、`+0x10`→`virtual_bag_inventory_enter_wrapper` | `extension_bag_lifecycle.inc:518-532`（读取）、`815-820`（覆盖） |
 | GOT 替换 | `G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA`（item proc 槽） | `ui_equip_inven_item_proc_wrapper`；安装条件 `g_move_merge_requested || g_extension_source_protection_requested`，含卸载路径 | `game_patch_move_merge.inc:122-163`、`165-187` |
-| H-14 | `INVEN_MoveItem@0x104934` Native Hook | `move_item_wrapper`：扩展身份拒绝+取证，原版对象 original-first | `native_inventory_hook.cpp:238-285`（wrapper）、`553-556`（安装）；`rulebook.md` R-31 |
-| H-15 | `UIEquip_EquipControlEventProc@0xb8f7c` Native Hook | `equip_control_event_proc_wrapper`：扩展 apply 材料源（宝石/强化卷轴）校验后放锁调原版 proc | `native_inventory_hook.cpp:359-369`（wrapper）、`557-560`（安装）；`game_ui_virtbag.cpp:248-388`（实现） |
-| H-16 | `UIEquip_RefreshItemArea` Native Hook | `refresh_item_area_wrapper`：depth 门 + trampoline + `virtual_bag_refresh_item_area_with_gate` | `native_inventory_hook.cpp:205-213`（wrapper）、`561-564`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`rulebook.md` R-32 |
+| H-14 | `INVEN_MoveItem@0x104934` Native Hook | `move_item_wrapper`：扩展身份拒绝+取证，原版对象 original-first | `native_inventory_hook.cpp:702-757`（wrapper）、`1184-1187`（安装）；`rulebook.md` R-31 |
+| H-15 | `UIEquip_EquipControlEventProc@0xb8f7c` Native Hook | `equip_control_event_proc_wrapper`：扩展 apply 材料源（宝石/强化卷轴）校验后放锁调原版 proc | `native_inventory_hook.cpp:946-956`（wrapper）、`1188-1191`（安装）；`game_ui_virtbag.cpp:248-388`（实现） |
+| H-16 | `UIEquip_RefreshItemArea` Native Hook | `refresh_item_area_wrapper`：depth 门 + trampoline + `virtual_bag_refresh_item_area_with_gate` | `native_inventory_hook.cpp:669-677`（wrapper）、`1192-1195`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`rulebook.md` R-32 |
 | 指令 patch | bag proc `0x04` 内 `bl INVEN_SaveItemOnEmpty`（`g_base+0xb8cc0`） | 替换为 `bl save_item_on_empty_gate`；原字 `0x94012fc8` | `extension_bag_lifecycle.inc:692-730`；gate 实现 `extension_bag_render.inc:431-481` |
 | 指令 patch | item proc `0x80` 内 `bl UIEquip_MakeDesc`（`F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA`） | 替换为 `bl make_desc_equip_gate`；原字 `0x97fffdfe` | `extension_bag_lifecycle.inc:772-814` |
 
-Native Hook 常驻清单 H-01..H-16 共 16 个且不增不减，编号正文归 `rulebook.md`
-§3.1（`rulebook.md:233-253`）；其安装目标校验、失败回滚和安装日志在
-`native_inventory_hook.cpp:408-585`（目标校验 `452-469`，回滚 `384-406`）。
+Native Hook 常驻清单 H-01..H-23 共 23 个且不增不减，编号正文归 `rulebook.md`
+§3.1（`rulebook.md:228-258`）；其安装目标校验、失败回滚和安装日志在
+`native_inventory_hook.cpp:995-1245`（目标校验 `1057-1081`，回滚 `971-993`）。
 
 ### 2.2 `virtual_bag_event` 事件生命周期
 
@@ -366,7 +366,7 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 |---|---|---|---|---|
 | 库存 state entry `+0x10/+0x28/+0x38` | 内存函数指针覆盖（`extension_bag_lifecycle.inc:815-820`） | 事件流进入 `virtual_bag_event`；F3/进入库存走 wrapper | 启用后全部触摸/按键事件先入模块；未启用分支原样调 `g_orig_event` | 进程内可逆：写回保存的原值（读取于 `523-531`）；当前无运行时还原路径 |
 | item proc GOT 槽 | GOT 写替换（`game_patch_move_merge.inc:122-163`） | C1/C2 事件层路由与 `0x02` 三态门 | 扩展源 drop 被吞或转扩展事务；原版源放行原版 proc | 有卸载路径 `uninstall()`（`159-161`） |
-| H-01..H-16 Native Hook | LSPosed `hook_func` 安装（`native_inventory_hook.cpp:507-566`） | 库存函数层分流；触摸链相关为 H-14/H-15/H-16 | 每个被 Hook 函数多一层 wrapper；原版对象 original-first | 安装失败自动回滚（`384-406`）；无运行期单独卸载 API |
+| H-01..H-23 Native Hook | LSPosed `hook_func` 安装（`native_inventory_hook.cpp:1107-1244`） | 库存函数层分流；触摸链相关为 H-14/H-15/H-16 | 每个被 Hook 函数多一层 wrapper；原版对象 original-first | 安装失败自动回滚（`971-993`）；无运行期单独卸载 API |
 | `0xb8cc0` drop gate patch | BL 指令替换（`extension_bag_lifecycle.inc:692-730`） | bag proc `0x04` 落袋写入改经 `save_item_on_empty_gate` | 投影 session 命中时返回 0，原版不清同号物理槽；真实移动延迟到 `0x18` 路由（`extension_bag_render.inc:442-462`） | 可写回原字 `0x94012fc8`；无运行时还原路径 |
 | MakeDesc desc gate patch | BL 指令替换（`extension_bag_lifecycle.inc:772-814`） | 详情打开时装详情操作 hook（Path A） | `0x80` 详情路径多一层 gate；触摸落点无事务行为 | 可写回原字 `0x97fffdfe`；无运行时还原路径 |
 | 事件吞并（capture） | `virtual_bag_event` 内返回 1（`extension_bag_lifecycle.inc:274-304`、`348-389`、`432-450`） | 网格空位交互与点击-拖动分类 | 被 capture 的序列不达原版 TouchHandle | 逻辑开关：`g_extension_touch_capture` 清除即恢复放行 |
@@ -396,7 +396,9 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 - 触摸窗口内释放请求进入延迟队列，由 draw-end 在引用检查通过后排空。
 - 真机已确认扩展拖动、扩展交换、消耗品使用、确认后使用、装备空槽、装备替换、扩展源
   →其它页签移动、背包类源→空页签装备和同袋 apply 分支均正常；原版四象限 VM-B01～VM-B04
-  正常。apply 分支覆盖宝石镶嵌与强化卷轴强化，失败为 `Blocked` 且不降级 swap。
+  正常。apply 分支覆盖宝石镶嵌与强化卷轴强化，结果类型按目标类别分流：目标为装备类
+  （`item_is_equip` 为真）才进入 apply，已准入 apply 的执行失败为 `Blocked`；普通物品
+  目标不进入 apply，回退正常交换/移动。
   证据卡见 `verification-matrix.md` 的 S-03、S-05、VM-10、VM-29 和 VM-B01～VM-B04。
 - S-03（扩展宝石/强化卷轴拖装备）已实现并真机验证通过；它与原版 VM-B03（原版宝石拖装备）
   仍按不同对象身份维护，apply 仅限同一扩展逻辑袋。
@@ -409,8 +411,9 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 
 **后续计划**（事实性条目）：
 
-1. S-03 apply 分支按同袋、原版 `ApplyStuff` 路由和 `Blocked` 失败语义维护，证据归验收册
-   S-03/VM-10。
+1. S-03 apply 分支按同袋、仅装备目标（`item_is_equip` + `IsApplyStuff` 判真，R-50）、
+   原版 `ApplyStuff` 路由维护：已准入 apply 的执行失败为 `Blocked`，普通物品目标回退
+   交换/移动；证据归验收册 S-03/VM-10。
 2. R1/R2 页签落点修复和延迟释放队列按本册 §2.2.1、§2.9 与验收册 S-05/VM-29 维护。
 
 ## 5. 设计决策与未决事项
@@ -441,8 +444,9 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 ### 5.2 当前维护事项及未决事项
 
 1. S-03 的 apply 分支已按同袋宝石/强化卷轴→装备验证通过；其成功路径不得出现
-   `extension swap`，失败路径为 `Blocked` 且不降级 swap。后续若修改原版 ApplyStuff、材料
-   消费或同袋判定，仍须复跑 S-03/VM-10。
+   `extension swap`，已准入 apply 的失败路径为 `Blocked` 且不降级 swap；普通物品目标
+   不进入 apply，必须回退扩展交换/移动（R-50）。后续若修改原版 ApplyStuff、材料
+   消费、同袋判定或目标类别判据，仍须复跑 S-03/VM-10。
 2. 问题 B（ext↔ext swap 的原版同号槽丢失）独立于触摸机械，登记与取证 SOP 归
    `control-plane.md` §4.1；本册 §2.8 的 H3 守卫是其防御层之一。
 3. `control-plane.md` §4.1 的取证入口为本册当前 H3 物理快照事实和

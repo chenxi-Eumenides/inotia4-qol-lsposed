@@ -178,6 +178,7 @@ extern MakeItemFn fn_make_item;
 extern CreateItemFn fn_create_item;
 // UIEquip 背包面板控件（move-merge v0.6.8）
 extern ControlObjectGetDataFn fn_control_object_get_data;
+extern ControlObjectGetCursorIndexFn fn_control_object_get_cursor_index; // 控件光标索引（UIEquip_OKDestroyItem 背包分支取槽）
 extern UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff;
 extern UiEquipApplyStuffFn fn_ui_equip_apply_stuff;
 extern UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index;

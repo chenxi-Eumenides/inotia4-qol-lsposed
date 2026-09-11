@@ -234,11 +234,11 @@ bool ui_popup_state_inject(UiPopupStateHandle* handle, uintptr_t enter_vma,
     uint8_t* entry = find_popup_state(enter_vma);
     if (entry == nullptr) return false;
     std::memcpy(handle->backup, entry, kPopupStateSize);
-    *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(hooks.enter);
-    *reinterpret_cast<uintptr_t*>(entry + 0x18) = reinterpret_cast<uintptr_t>(hooks.process);
-    *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(hooks.f3);
-    *reinterpret_cast<uintptr_t*>(entry + 0x30) = reinterpret_cast<uintptr_t>(hooks.f4);
-    *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(hooks.event);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) = reinterpret_cast<uintptr_t>(hooks.enter);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_PROCESS) = reinterpret_cast<uintptr_t>(hooks.process);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) = reinterpret_cast<uintptr_t>(hooks.f3);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F4) = reinterpret_cast<uintptr_t>(hooks.f4);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) = reinterpret_cast<uintptr_t>(hooks.event);
     handle->entry = entry;
     handle->state_id = *reinterpret_cast<int32_t*>(entry);
     return true;

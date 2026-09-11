@@ -12,12 +12,12 @@ std::string data_op_panel_close() {
     // 前置：栈顶必须是面板（enter 匹配 PANELS），非空弹窗栈或弹窗（G_POPUP_ON）不处理
     if (g_base == 0 || g_popup_stack == nullptr) return op_err("libgame not ready");
     uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
-    uint32_t count = *reinterpret_cast<uint32_t*>(stk + 8);
+    uint32_t count = *reinterpret_cast<uint32_t*>(stk + POPUP_STACK_COUNT);
     if (count == 0 || count > 27) return op_err("no panel open");
-    uint64_t data = *reinterpret_cast<uint64_t*>(stk + 0x18);
+    uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
     if (data == 0) return op_err("no panel open");
-    uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * 0x40;
-    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + 0x10);
+    uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
+    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     uintptr_t vma = enter > g_base ? enter - g_base : 0;
     if (extension_bag_is_inventory_enter(enter)) vma = F_PANEL_INVENTORY_ENTER;
     bool is_panel = false;
@@ -92,7 +92,7 @@ std::string data_op_panel_open(const std::string& panel) {
     if (list == nullptr) return op_err("state list not ready");
     int state_id = p == "inventory" ? extension_bag_inventory_state_id() : -1;
     for (int i = 0; state_id < 0 && i < 27; ++i) {
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * 0x40 + 0x10);
+        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);
         if (enter == g_base + target) { state_id = i; break; }
     }
     if (state_id < 0) return op_err("panel state not found");

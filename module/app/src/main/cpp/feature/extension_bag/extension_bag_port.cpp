@@ -114,7 +114,8 @@ bool extension_bag_remove_native_item(void* item) {
 int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount) {
     if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const uint32_t legal_count = stack_codec::clamp_count(
+    // count 为调用方传入的模式视图数量（R-47 决策 b），按模式上限收敛。
+    const uint32_t legal_count = stack_codec::effective_clamp(
         static_cast<uint32_t>(count), stack_limit_enabled());
     int64_t final_price = 0;
     if (!sell_price::calculate(unit_price, legal_count, apply_variant_discount, &final_price)) {
@@ -155,6 +156,10 @@ bool extension_bag_adopt_unequipped_item(void* character, int equip_slot) {
 
 bool extension_bag_adopt_native_item(void* item) {
     return virtual_bag_adopt_native_item(item);
+}
+
+bool extension_bag_merge_native_item(void* item) {
+    return virtual_bag_merge_native_item(item);
 }
 
 void extension_bag_store_restore_for_original_write() {

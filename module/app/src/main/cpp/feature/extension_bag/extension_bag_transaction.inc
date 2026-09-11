@@ -32,7 +32,10 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
         VIRTBAG_LOG("cross move: item serialization rejected");
         return false;
     }
-    const int src_count = fn_get_cumulate_count(src_item);
+    // descriptor.count 恒为 canonical 128a+b（R-38/R-48）：orig→ext 收编保留物品
+    // 全部位段，堆叠上限关闭态（R-47 决策 b）下 getter 只返回 b 视图，这里必须
+    // 用 canonical 读取，否则 sidecar 读档会把 a 段对齐抹掉。
+    const int src_count = canonical_item_count(src_item);
     const int src_category = original_item_category_locked(src_item);
     const int capacity = g_virtual_bag_state.capacities[dst_bag];
 
@@ -150,6 +153,32 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
                     src_slot, target_bag);
         return false;
     }
+    // VM-40 宿主容量守卫：目标袋为投影宿主时（扩展视图宿主常是原版袋 0——
+    // 用户拖回宿主袋是最常见路径），事务期把被投影替换的容量字恢复真实值，
+    // 使下方 fn_get_bag_size 满包预检与 INVEN_SaveItemOnEmpty 空槽扫描按真实
+    // 容量判定（扩展容量 < 真实容量时宿主袋被误判已满、> 真实容量时越窗扫描）；
+    // RAII 保证任何出口写回投影值（成功后由调用方 refresh 重刷控件）。
+    const bool host_restore = virtual_bag::ext2orig_requires_host_capacity_restore(
+        g_module_view_installed, target_bag, g_module_window_original_bag);
+    constexpr uint32_t kTxnCapacityMask = (1u << 25) - 1u;
+    uint32_t* host_word = host_restore ? g_original_bag_size_word : nullptr;
+    uint32_t host_projected_word = 0;
+    if (host_word != nullptr) {
+        host_projected_word = *host_word;
+        *host_word = (*host_word & ~kTxnCapacityMask) |
+                     (g_original_bag_size & kTxnCapacityMask);
+        VIRTBAG_LOG("ext2orig host capacity restored target=%d window=%d projected=0x%x real=0x%x",
+                    target_bag, g_module_window_original_bag, host_projected_word,
+                    g_original_bag_size);
+    }
+    struct HostCapacityGuard {
+        uint32_t* word;
+        uint32_t projected;
+        ~HostCapacityGuard() {
+            if (word != nullptr) *word = projected;
+        }
+    } host_capacity_guard{host_word, host_projected_word};
+
     if (fn_get_bag_size != nullptr && fn_get_bag_size(target_bag) <= 0) {
         VIRTBAG_LOG("cross move reject extension->original target bag unavailable=%d", target_bag);
         return false;
@@ -207,7 +236,14 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     uint32_t item_handle = 0;
     void* item = load_item_payload_tracked_locked(source.payload.data(), source.payload_size,
                                                   "move_extension_to_original", &item_handle);
-    if (item != nullptr) set_original_bag_locked(target_bag);
+    // VM-40 宿主身份守卫：投影安装中 CUR_BAG 是宿主身份的一部分（R-27 成对写），
+    // 事务内切换会让宿主记录与 CUR_BAG 分叉（下一次 install 把用户目标袋误选为
+    // 宿主——原版袋容量字被写扩展容量、扩展内容投影上去）。投影中不切换；
+    // SaveItemOnEmpty 显式携带 target_bag，不依赖 CUR_BAG。
+    if (item != nullptr &&
+        virtual_bag::ext2orig_should_switch_display_bag(g_module_view_installed)) {
+        set_original_bag_locked(target_bag);
+    }
     if (item == nullptr || !fn_inven_save_item_on_empty(item, target_bag)) {
         // P4.5：Load 失败或插入失败隔离。扩展源逻辑物品保留（payload 字节未丢），
         // 事务上下文留作只读诊断；不构造可移动替代项。
@@ -308,7 +344,12 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         g_virtual_bag_state.selected = src_bag;
         g_virtual_bag_state.inspected = -1;
     }
-    set_original_bag_locked(target_bag);
+    // 提交后的显示袋切换同样受 VM-40 宿主身份守卫：投影安装中宿主不变，
+    // 拖放调用方的 refresh_projected_module_view_after_move_locked 负责刷新；
+    // API（非投影）路径保留切到目标袋的既有语义。
+    if (virtual_bag::ext2orig_should_switch_display_bag(g_module_view_installed)) {
+        set_original_bag_locked(target_bag);
+    }
     reset_drag_state_locked(nullptr);
     VIRTBAG_LOG("txn committed id=%s extension->original src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
                 txn.transaction_id, src_bag, src_slot, txn.source.category, txn.source.count,
@@ -590,20 +631,32 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                 existing, source, virtual_bag_category_uses_stack_count)) {
             return false;
         }
-        const uint32_t limit = stack_codec::max_count(stack_limit_enabled());
-        const uint64_t total = static_cast<uint64_t>(existing.count) +
-                               static_cast<uint64_t>(source.count);
+        // S2 合并判定在模式视图上进行（R-47 决策 b）：启用态用 descriptor
+        // canonical（128a+b）；关闭态只按 b 视图相加（a 不参与运算），上限
+        // 999/99。拆段写回经 patch_payload_count 的模式感知写：启用态全量进位
+        // 内建，关闭态只写 b、保留 a；descriptor.count 恒回写 canonical
+        // （重开后读回完整值）。
+        const bool limit_enabled = stack_limit_enabled();
+        const uint32_t existing_view = stack_codec::effective_view_count(
+            static_cast<uint32_t>(existing.count), limit_enabled);
+        const uint32_t source_view = stack_codec::effective_view_count(
+            static_cast<uint32_t>(source.count), limit_enabled);
+        const uint32_t limit = stack_codec::max_count(limit_enabled);
+        const uint64_t total = static_cast<uint64_t>(existing_view) +
+                               static_cast<uint64_t>(source_view);
         if (total > limit) return false;
         committed = existing;
-        committed.count = static_cast<int>(virtual_bag::merge_count(
-            existing.count, source.count, stack_limit_enabled()));
         if (!virtual_bag::patch_payload_count(
-                &committed, static_cast<uint32_t>(committed.count),
-                virtual_bag_category_uses_stack_count)) {
+                &committed,
+                virtual_bag::merge_count(static_cast<int>(existing_view),
+                                         static_cast<int>(source_view), limit_enabled),
+                virtual_bag_category_uses_stack_count, limit_enabled)) {
             VIRTBAG_LOG("cross move reject extension->extension merge count gate src=%d/%d dst=%d/%d",
                         src_bag, src_slot, dst_bag, slot);
             return false;
         }
+        committed.count = static_cast<int>(
+            stack_codec::s2_read_count(virtual_bag::payload_count(committed)));
         dst_slot = slot;
         merged = true;
         return true;
@@ -886,15 +939,16 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     const bool source_is_apply_material =
         (fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
         (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
-    const bool apply_candidate = source_bag == target_bag && target_slot >= 0 &&
-        source_is_apply_material && material != nullptr && target_item != nullptr &&
-        item_count_encoding(target_item) == stack_codec::CountEncoding::kNotEncoded;
-    if (source_bag == target_bag && target_slot >= 0 && source_is_apply_material &&
-        target_item != nullptr && item_count_encoding(target_item) ==
-            stack_codec::CountEncoding::kUnknown) {
-        VIRTBAG_LOG("p5 drop rejected: apply target category unavailable item=%p", target_item);
-        return false;
-    }
+    // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
+    // IsApplyStuff 判真。目标类别用 item_is_equip 判定（数据不可用按非装备
+    // fail-closed），普通物品目标不得进入 apply；不设提前 return，统一落到
+    // 下方事务分支（交换/移动）并保证 session_finish_transaction 必然执行。
+    const bool apply_stuff_allowed = fn_ui_equip_is_apply_stuff != nullptr &&
+                                     material != nullptr && target_item != nullptr &&
+                                     fn_ui_equip_is_apply_stuff(target_item, material) != 0;
+    const bool apply_candidate = stage4_is_extension_apply_candidate(
+        source_bag == target_bag && target_slot >= 0, source_is_apply_material,
+        target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
     if (apply_candidate) {
         handled = apply_extension_material_to_slot_locked(
             lock, source_bag, source_slot, target_bag, target_slot, material, target_item);

@@ -33,7 +33,7 @@ std::string data_op_use_item(int bag, int slot) {
         // 有未确认结果时拒绝再掷（flag bit0，ButtonRollExe 置位/Create+Apply 复位）
         uint8_t* flag = *reinterpret_cast<uint8_t**>(g_base + G_STATUSDICE_FLAG_GOT_VMA);
         if (flag != nullptr && (*flag & 1u)) return op_err("dice result pending, accept or reject first");
-        int8_t char_idx = *reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(leader) + 0xd);
+        int8_t char_idx = *reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(leader) + C_CLASS);
         int type = category - 0x34;
         if (char_idx < 0 || char_idx > 5) return op_err("bad char");
         if (type < 0 || type > 4) return op_err("bad dice type");
@@ -190,8 +190,8 @@ std::string data_op_sell_item(int bag, int slot) {
     __android_log_print(ANDROID_LOG_INFO, "Inotia4VirtBag",
                         "sell price source=api category=%d count=%d unit=%lld variant=100 final=%lld payload=0 gen=0",
                         category,
-                        static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
-                                                                  stack_limit_enabled())),
+                        static_cast<int>(stack_codec::effective_clamp(
+                            static_cast<uint32_t>(count), stack_limit_enabled())),
                         static_cast<long long>(unit_price), static_cast<long long>(price));
     if (!fn_add_money(price)) return op_err("sell money update failed");
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。

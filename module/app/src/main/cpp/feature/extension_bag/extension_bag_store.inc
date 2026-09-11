@@ -508,7 +508,10 @@ void store_sell_ok(void*) {
             module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
             fn_get_bit != nullptr && fn_item_is_no_sell != nullptr &&
             fn_item_get_sell_price != nullptr) {
-            count = g_virtual_bag_state.items[bag][slot].count;
+            // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
+            count = static_cast<int>(stack_codec::effective_view_count(
+                static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
+                stack_limit_enabled()));
             const uint16_t flags = *reinterpret_cast<uint16_t*>(
                 reinterpret_cast<uint8_t*>(item) + I_TYPE);
             const int category = fn_get_bit(flags, 15, 6);
@@ -519,8 +522,8 @@ void store_sell_ok(void*) {
                     VIRTBAG_LOG(
                         "sell price source=store category=%d count=%d unit=%lld variant=100 final=%lld payload=%u gen=%llu",
                         category,
-                        static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
-                                                                  stack_limit_enabled())),
+                        static_cast<int>(stack_codec::effective_clamp(
+                            static_cast<uint32_t>(count), stack_limit_enabled())),
                         static_cast<long long>(unit_price), static_cast<long long>(price),
                         virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
                         static_cast<unsigned long long>(generation));
@@ -556,7 +559,11 @@ void store_sell_ok(void*) {
         const bool current = item != nullptr && virtual_bag::valid_index(bag) &&
                              slot >= 0 && slot < virtual_bag::kSlotCount &&
                              g_module_objects[bag][slot] == item &&
-                             g_virtual_bag_state.items[bag][slot].count == count &&
+                             stack_codec::effective_view_count(
+                                 static_cast<uint32_t>(
+                                     g_virtual_bag_state.items[bag][slot].count),
+                                 stack_limit_enabled()) ==
+                                 static_cast<uint32_t>(count) &&
                              module_object_release_allowed_locked(
                                  bag, slot, item, "store sell", false, nullptr);
         if (current) {
@@ -617,7 +624,10 @@ void store_desc_sell_execute(void* button) {
             bag = store_desc_item_bag;
             slot = store_desc_item_slot;
             generation = store_desc_item_generation;
-            const int count = g_virtual_bag_state.items[bag][slot].count;
+            // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
+            const int count = static_cast<int>(stack_codec::effective_view_count(
+                static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
+                stack_limit_enabled()));
             if (fn_item_is_no_sell != nullptr && fn_get_bit != nullptr &&
                 fn_item_get_sell_price != nullptr && count > 0) {
                 const uint16_t flags = *reinterpret_cast<uint16_t*>(
@@ -631,8 +641,8 @@ void store_desc_sell_execute(void* button) {
                         VIRTBAG_LOG(
                             "sell price source=store category=%d count=%d unit=%lld variant=100 final=%lld payload=%u gen=%llu",
                             category,
-                            static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
-                                                                      stack_limit_enabled())),
+                            static_cast<int>(stack_codec::effective_clamp(
+                                static_cast<uint32_t>(count), stack_limit_enabled())),
                             static_cast<long long>(unit_price), static_cast<long long>(price),
                             virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
                             static_cast<unsigned long long>(generation));
@@ -751,22 +761,22 @@ bool install_store_hooks_locked() {
         if (store_state_entry == nullptr) return false;
         const uintptr_t expected_event = g_base + fn_resolve(
             "F_SCENE_EVENT_STORE_VMA", F_SCENE_EVENT_STORE_VMA);
-        if (*reinterpret_cast<uintptr_t*>(store_state_entry + 0x38) != expected_event) {
+        if (*reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT) != expected_event) {
             store_state_entry = nullptr;
             VIRTBAG_LOG("store state callbacks differ from expected symbols");
             return false;
         }
         store_original_enter = reinterpret_cast<StoreSceneNoArgFn>(
-            *reinterpret_cast<uintptr_t*>(store_state_entry + 0x10));
+            *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_ENTER));
         store_original_f3 = reinterpret_cast<StoreSceneNoArgFn>(
-            *reinterpret_cast<uintptr_t*>(store_state_entry + 0x28));
+            *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_F3));
         store_original_event = reinterpret_cast<StoreSceneEventFn>(
-            *reinterpret_cast<uintptr_t*>(store_state_entry + 0x38));
-        *reinterpret_cast<uintptr_t*>(store_state_entry + 0x10) =
+            *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT));
+        *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_ENTER) =
             reinterpret_cast<uintptr_t>(&store_enter_wrapper);
-        *reinterpret_cast<uintptr_t*>(store_state_entry + 0x28) =
+        *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_F3) =
             reinterpret_cast<uintptr_t>(&store_f3_wrapper);
-        *reinterpret_cast<uintptr_t*>(store_state_entry + 0x38) =
+        *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT) =
             reinterpret_cast<uintptr_t>(&store_event_wrapper);
     }
 

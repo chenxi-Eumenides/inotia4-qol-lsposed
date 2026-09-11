@@ -291,6 +291,7 @@ bool bridge_init() {
     fn_make_item = reinterpret_cast<MakeItemFn>(g_base + fn_resolve("F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA));
     fn_create_item = reinterpret_cast<CreateItemFn>(g_base + fn_resolve("F_CREATE_ITEM_VMA", F_CREATE_ITEM_VMA));
     fn_control_object_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
+    fn_control_object_get_cursor_index = reinterpret_cast<ControlObjectGetCursorIndexFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_CURSOR_INDEX_VMA", F_CONTROL_OBJECT_GET_CURSOR_INDEX_VMA));
     fn_ui_equip_is_apply_stuff = reinterpret_cast<UiEquipIsApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_IS_APPLY_STUFF_VMA", F_UIEQUIP_IS_APPLY_STUFF_VMA));
     fn_ui_equip_apply_stuff = reinterpret_cast<UiEquipApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_APPLY_STUFF_VMA", F_UIEQUIP_APPLY_STUFF_VMA));
     fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));

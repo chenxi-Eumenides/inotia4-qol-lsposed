@@ -16,20 +16,20 @@ static void nav_pick_items(void* ch, int radius) {
     int16_t py = *reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(ch) + C_POS_Y);
     int seq = 0;
     for (int i = 0; i < static_cast<int>(*cnt); ++i) {
-        uint8_t* e = arr + i * 0x20;
-        int16_t ex = *reinterpret_cast<int16_t*>(e + 0x8);
-        int16_t ey = *reinterpret_cast<int16_t*>(e + 0xa);
+        uint8_t* e = arr + i * GROUND_ITEM_SIZE;
+        int16_t ex = *reinterpret_cast<int16_t*>(e + GROUND_ITEM_X);
+        int16_t ey = *reinterpret_cast<int16_t*>(e + GROUND_ITEM_Y);
         if (ex < px - radius || ex > px + radius) continue;
         if (ey < py - radius || ey > py + radius) continue;
-        if (e[0x18] & 0x2) continue;  // bit1 拾取中
-        void* node = fn_mem_malloc(0x18);
+        if (e[GROUND_ITEM_FLAGS] & GROUND_ITEM_FLAG_PICKING) continue;  // bit1 拾取中
+        void* node = fn_mem_malloc(PICKUP_EVENT_SIZE);
         if (node == nullptr) continue;
         uint8_t* nd = reinterpret_cast<uint8_t*>(node);
-        *reinterpret_cast<void**>(nd + 0x0) = ch;                                            // 玩家 char
-        *reinterpret_cast<int32_t*>(nd + 0x8) = px;                                          // 玩家 x
-        *reinterpret_cast<int32_t*>(nd + 0xc) = py;                                          // 玩家 y
-        *reinterpret_cast<void**>(nd + 0x10) = *reinterpret_cast<void**>(e + 0x0);          // 掉落物对象
-        e[0x18] |= 0x2;                                                                      // 拾取中标志
+        *reinterpret_cast<void**>(nd + PICKUP_EVENT_CHAR) = ch;                              // 玩家 char
+        *reinterpret_cast<int32_t*>(nd + PICKUP_EVENT_X) = px;                               // 玩家 x
+        *reinterpret_cast<int32_t*>(nd + PICKUP_EVENT_Y) = py;                               // 玩家 y
+        *reinterpret_cast<void**>(nd + PICKUP_EVENT_OBJECT) = *reinterpret_cast<void**>(e + GROUND_ITEM_OBJECT); // 掉落物对象
+        e[GROUND_ITEM_FLAGS] |= GROUND_ITEM_FLAG_PICKING;                                    // 拾取中标志
         fn_notifier_add(1, seq, cb, node);
         seq += 2;
     }

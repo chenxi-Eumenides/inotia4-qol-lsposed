@@ -159,6 +159,7 @@ IsItemBoxFn fn_is_item_box = nullptr;
 MakeItemFn fn_make_item = nullptr;
 CreateItemFn fn_create_item = nullptr;
 ControlObjectGetDataFn fn_control_object_get_data = nullptr;
+ControlObjectGetCursorIndexFn fn_control_object_get_cursor_index = nullptr;
 UiEquipIsApplyStuffFn fn_ui_equip_is_apply_stuff = nullptr;
 UiEquipApplyStuffFn fn_ui_equip_apply_stuff = nullptr;
 UiEquipGetItemSlotIndexFn fn_ui_equip_get_item_slot_index = nullptr;

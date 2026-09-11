@@ -4,7 +4,7 @@ void draw_tab_buttons_in_frame_locked() {
     void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
     // 标签挂袋容器（与原版 6 袋标签同父）：比对基准同步为袋容器句柄。
     void* current_bag_container =
-        g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50) : nullptr;
+        g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA) : nullptr;
     // 容器就位重试：enter 时 install 可能因占位容器（child count<6）被跳过；
     // 每帧检测真容器就位且尚未挂载（root 变化）时重新 install。
     if (current_bag_container != nullptr &&
@@ -12,7 +12,7 @@ void draw_tab_buttons_in_frame_locked() {
         current_bag_container != g_extension_tab_root) {
         install_extension_tab_buttons_locked();
         current_bag_container =
-            g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50)
+            g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA)
                         : nullptr;
     }
     const bool tabs_are_current =
@@ -140,7 +140,7 @@ uint32_t* bag_size_word_locked(int bag) {
     if (bag < 0 || bag >= 6) return nullptr;
     void* bag_object = (*table_slot)[bag];
     if (bag_object == nullptr) return nullptr;
-    return reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) + 0x10);
+    return reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) + BAG_OBJECT_CAPACITY);
 }
 
 uint32_t* original_bag_size_word_locked() {
@@ -296,7 +296,7 @@ int original_bag_button_index(int64_t x, int64_t y) {
     if (g_base == 0 || fn_control_object_get_child == nullptr || fn_ctrl_get_count == nullptr) {
         return -1;
     }
-    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50);
+    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
     if (bag_container == nullptr) return -1;
     const int child_count = static_cast<int>(fn_ctrl_get_count(bag_container));
     // 原版标签包含扩展事务袋之外的任务袋（索引 5）；不能使用

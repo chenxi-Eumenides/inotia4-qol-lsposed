@@ -28,4 +28,9 @@ std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_s
 void append_item_attrs(std::string& s, void* item);
 stack_codec::CountEncoding item_count_encoding(void* item);
 bool item_is_equip(void* item);
+// canonical 数量读取（与 stack_limit_enabled() 无关）：可堆叠类别直接按 S2 解码
+// `+0x10` 数量位 128a+b（R-45），供 descriptor 物化/持久化等必须保存完整值的
+// 路径使用；运行时展示/查询视图应改走 H-17 getter（关闭态按 R-47 决策 b 只返回
+// b）。非可堆叠/类别不可用回退 getter 原版语义（装备返回 1）。
+int canonical_item_count(void* item);
 std::string build_inventory_json();

@@ -233,7 +233,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
                               previous_equipped_item) + I_TYPE), 15, 6)
             : 0;
         descriptor.count = fn_get_cumulate_count != nullptr
-            ? fn_get_cumulate_count(previous_equipped_item) : 1;
+            ? canonical_item_count(previous_equipped_item) : 1;
         // 旧装备对象被原版 UI（装备槽 desc/控件缓存）持续引用，绝不能释放：
         // 直接收编为扩展槽的物化对象，投影与详情都继续指向同一存活对象。
         if (!module_object_generation_advance_locked(
@@ -451,7 +451,10 @@ void extension_sell_ok(void*) {
             clear_original_desc_locked();
             return;
         }
-        count = g_virtual_bag_state.items[bag][slot].count;
+                // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
+                count = static_cast<int>(stack_codec::effective_view_count(
+                    static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
+                    stack_limit_enabled()));
         const uint16_t flags = *reinterpret_cast<uint16_t*>(
             reinterpret_cast<uint8_t*>(item) + I_TYPE);
         const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
@@ -476,8 +479,8 @@ void extension_sell_ok(void*) {
         VIRTBAG_LOG(
             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
             category,
-            static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count),
-                                                      stack_limit_enabled())),
+            static_cast<int>(stack_codec::effective_clamp(static_cast<uint32_t>(count),
+                                                          stack_limit_enabled())),
             static_cast<long long>(unit_price), apply_variant_discount ? 70 : 100,
             static_cast<long long>(price),
             virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
@@ -498,7 +501,11 @@ void extension_sell_ok(void*) {
                                   g_extension_desc_item_bag == bag &&
                                   g_extension_desc_item_slot == slot &&
                                   g_module_objects[bag][slot] == item &&
-                                  g_virtual_bag_state.items[bag][slot].count == count &&
+                                  stack_codec::effective_view_count(
+                                      static_cast<uint32_t>(
+                                          g_virtual_bag_state.items[bag][slot].count),
+                                      stack_limit_enabled()) ==
+                                      static_cast<uint32_t>(count) &&
                                   module_object_release_allowed_locked(
                                       bag, slot, item, "extension sell commit", false, nullptr);
         if (current_item) {
@@ -618,8 +625,15 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                     static_cast<int>(count_encoding), context, bag, slot);
         return false;
     }
+    // S2 写回（R-47 决策 b 模式感知）：count 为 getter 返回的模式视图数量
+    //（启用态 canonical 128a+b、关闭态 b），扣减后的写回经 effective_write_count：
+    // 启用态拆段写回借位自动完成（a 借位 → b+128）；关闭态只写 b、保留 a——
+    // descriptor 随后回写 canonical 解码值，重开后读回完整值。非可堆叠类别已在
+    // 上方按 CountEncoding 门控拒绝，不会触碰 bits22-24。
+    const uint32_t new_count_field = stack_codec::effective_write_count(
+        old_count_flags, static_cast<uint32_t>(count), stack_limit_enabled());
     *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-        stack_codec::write_count(old_count_flags, static_cast<uint32_t>(count));
+        new_count_field;
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
@@ -631,7 +645,8 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
-    descriptor.count = count;
+    // descriptor.count 恒为 canonical：关闭态 b 写保留 a，重开读回完整值。
+    descriptor.count = static_cast<int>(stack_codec::s2_read_count(new_count_field));
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     // ApplyStuff consumes a stacked material through H-04. Keep the token's
@@ -843,8 +858,10 @@ void extension_desc_item_execute(void* button) {
         item_slot = g_extension_desc_item_slot;
     }
     if (hook_index < 0 || hook == nullptr) return;
-    VIRTBAG_LOG("extension desc execute index=%d offset=0x%zx orig=%p bag=%d slot=%d",
-                hook_index, kDescButtonOffsets[hook_index], hook->orig, item_bag, item_slot);
+    // 低噪分流锚：每次详情按钮点击一行，用于核对真实 execute proc（0x 十六进制）。
+    VIRTBAG_LOG("extension desc execute index=%d offset=0x%zx orig=0x%zx bag=%d slot=%d",
+                hook_index, kDescButtonOffsets[hook_index],
+                reinterpret_cast<uintptr_t>(hook->orig), item_bag, item_slot);
 
     const uintptr_t use_raw = g_base != 0
         ? g_base + fn_resolve("F_UIEQUIP_BUTTON_USE_EXE_VMA", F_UIEQUIP_BUTTON_USE_EXE_VMA)
@@ -912,10 +929,19 @@ void extension_desc_item_execute(void* button) {
     const uintptr_t sell_button_raw = g_base != 0
         ? g_base + fn_resolve("F_UISTORE_BUTTON_SELL_EXE_VMA", F_UISTORE_BUTTON_SELL_EXE_VMA)
         : 0;
-    const bool direct_sell = sell_button_raw != 0 &&
-                             reinterpret_cast<uintptr_t>(hook->orig) == sell_button_raw;
-    const bool modified_destroy_sell = destroy_raw != 0 &&
-                                       reinterpret_cast<uintptr_t>(hook->orig) == destroy_raw;
+    // 装备页出售（0.7 倍率、只能全卖）走原版销毁链：真实 execute proc 可能是
+    // UIEquip_ButtonDestroyExe（创建确认弹窗），也可能是其结算入口
+    // UIEquip_OKDestroyItem（0xb83d0）。两者都属目标 proc，任一命中即由模块
+    // 接管并走 canonical（下方 effective_view_count）；其余 proc 行为不变（非目标
+    // proc 直通 call_orig）。
+    const uintptr_t destroy_ok_raw = g_base != 0
+        ? g_base + fn_resolve("F_UIEQUIP_OK_DESTROY_ITEM_VMA", F_UIEQUIP_OK_DESTROY_ITEM_VMA)
+        : 0;
+    const uintptr_t orig_raw = reinterpret_cast<uintptr_t>(hook->orig);
+    const bool direct_sell = sell_button_raw != 0 && orig_raw == sell_button_raw;
+    const bool modified_destroy_sell =
+        (destroy_raw != 0 && orig_raw == destroy_raw) ||
+        (destroy_ok_raw != 0 && orig_raw == destroy_ok_raw);
     if (direct_sell || modified_destroy_sell) {
         VIRTBAG_LOG("extension sell button matched source=%s bag=%d slot=%d item=%p",
                     modified_destroy_sell ? "destroy" : "store",
@@ -940,7 +966,10 @@ void extension_desc_item_execute(void* button) {
             uint64_t generation = 0;
             if (current_item && fn_item_get_sell_price != nullptr &&
                 fn_item_is_no_sell != nullptr && fn_get_bit != nullptr) {
-                count = g_virtual_bag_state.items[bag][slot].count;
+        // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
+        count = static_cast<int>(stack_codec::effective_view_count(
+            static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
+            stack_limit_enabled()));
                 const uint16_t flags = *reinterpret_cast<uint16_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_TYPE);
                 category = fn_get_bit(flags, 15, 6);
@@ -953,7 +982,7 @@ void extension_desc_item_execute(void* button) {
                         const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
                         payload = virtual_bag::payload_hash(descriptor);
                         generation = g_module_object_use[bag][slot].generation;
-                        const int legal_count = static_cast<int>(stack_codec::clamp_count(
+                        const int legal_count = static_cast<int>(stack_codec::effective_clamp(
                             static_cast<uint32_t>(count), stack_limit_enabled()));
                         VIRTBAG_LOG(
                             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
@@ -1019,6 +1048,14 @@ void extension_desc_item_execute(void* button) {
         }
         return;
     }
+    // 未命中任何目标 proc 时回退原版；此处打印真实 execute proc 与期望值（方案1
+    // 第一步确诊锚）：若扩展背包出售按钮落在这里，日志即可确认其实际 orig。
+    // item 为分流块锁内捕获的本地副本，此处不再读全局，遵守 R-44 锁纪律。
+    if (item != nullptr) {
+        VIRTBAG_LOG(
+            "extension desc execute unmatched index=%d orig=0x%zx destroy=0x%zx destroy_ok=0x%zx store=0x%zx bag=%d slot=%d",
+            hook_index, orig_raw, destroy_raw, destroy_ok_raw, sell_button_raw, item_bag, item_slot);
+    }
     hook->call_orig<void>(button);
 
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -1045,8 +1082,10 @@ void extension_desc_item_execute(void* button) {
             reinterpret_cast<uint8_t*>(item) + I_TYPE);
         descriptor.category = fn_get_bit(flags, 15, 6);
     }
+    // descriptor.count 恒为 canonical（R-38/R-48）：getter 在关闭态只返回 b 视图
+    //（R-47 决策 b），物化/重同步必须保存完整 128a+b。
     descriptor.count = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : descriptor.count;
+        ? canonical_item_count(item) : descriptor.count;
     if (descriptor.category <= 0 || descriptor.count <= 0) {
         descriptor = {};
         if (!free_module_object_locked(item_bag, item_slot)) {

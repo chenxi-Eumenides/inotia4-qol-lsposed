@@ -1560,7 +1560,8 @@
 > - 外部文件存在 → 读取生效
 > - 外部文件不存在/损坏 → 使用默认值，并**立即写入外部 config.json**
 > - 每次 `POST /api/config/set` 修改立即持久化到该文件；删除外部文件即恢复出厂默认
-> - `stackLimitIncrease` 变化时通知 native 生效（只切换新建/合并/消费/派生操作的 99/999 clamp），无需重启；canonical 数量格式始终固定为 bit22-31，sidecar 读档按绝对 `0..999` 校验，不迁移、不因当前配置截断已有数量；可堆叠 payload 仅在与 descriptor 不一致时同步
+> - `stackLimitIncrease` 变化时通知 native 生效（切换运行时操作视图与 99/999 clamp），无需重启；sidecar 数量位解码永远按 S2 布局、与该开关无关；sidecar 读档按绝对 `0..999` 校验，不改写、不因当前配置截断已有数量；可堆叠 payload 仅在与 descriptor 不一致时同步
+> - **数量编码 S2（当前实现，无版本标识）**：sidecar `extensionbags.items` 状态 JSON 不携带编码版本字段；数量位只有 S2 布局（高位段 `a`=bits22-24、低位段 `b`=bits25-31，`count=128a+b`，业务上限 999）一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`（R-47 决策 b）；历史 sidecar 若携带 `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）；无 S1→S2 迁移代码，原版袋 `+0x10` 无迁移扫描；非可堆叠类别（宝石选项/袋容量/装备 marker）不参与数量位段改写。`/api/item/*` 的 `count` 字段为当前模式的运行时视图：启用态 S2 全量 `0..999`、关闭态低 7 位 `b`（`count mod 128`，`a` 保留、重开恢复完整值）；API 结构不变。详见 `docs/development/features/extension-bag/module-save-store.md` §6.4 与规则册 R-45..R-49
 > - `moveMergeEnabled` 控制背包内拖拽同类可堆叠物品时的自动合并，默认 `false`；变化即时安装或还原 native GOT hook，无需重启
 
 #### 读取配置

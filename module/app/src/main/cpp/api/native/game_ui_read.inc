@@ -78,12 +78,12 @@ std::string data_debug_ui_json() {
 uintptr_t data_popup_top_vma() {
     if (g_popup_stack == nullptr || g_base == 0) return 0;
     uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
-    uint32_t count = *reinterpret_cast<uint32_t*>(stk + 8);
+    uint32_t count = *reinterpret_cast<uint32_t*>(stk + POPUP_STACK_COUNT);
     if (count == 0 || count > 27) return 0;
-    uint64_t data = *reinterpret_cast<uint64_t*>(stk + 0x18);
+    uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
     if (data == 0) return 0;
-    uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * 0x40;
-    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + 0x10);
+    uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
+    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     if (extension_bag_is_inventory_enter(enter)) return F_PANEL_INVENTORY_ENTER;
     return enter > g_base ? enter - g_base : 0;
 }

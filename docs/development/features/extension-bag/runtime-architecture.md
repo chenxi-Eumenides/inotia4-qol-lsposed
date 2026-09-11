@@ -218,23 +218,67 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 
 #### 2.1.1 数量位段与上限 patch 点
 
-当前工作树 `game_patch_core.inc` 的原版数量位段/上限 patch 表：固定布局共 34 点，可逆
-上限共 10 点。当前登记点如下，地址均为函数 VMA 加函数内偏移：
+当前工作树 `game_patch_core.inc` 的原版数量位段/上限 patch 表（S2 布局）：常驻位段表
+共 2 点，可逆上限 clamp 表共 6 点。当前登记点如下，地址均为函数 VMA 加函数内偏移：
+
+常驻位段表（`g_stack_layout_patches`）：
 
 | 地址 | 函数+偏移 | 原指令 | 新指令 | 语义 | 门控 |
 |---:|---|---|---|---|---|
-| `0x103b98` | `INVEN_FindSaveSlot+0x238` | `0x71018C1F` | `0x710F9C1F` | 数量上限 99→999 | 受 `set_stack_limit_enabled()` 门控 |
-| `0x103e1c` | `INVEN_CheckSaveInNotEmptySlot+0xa4` | `0x52800C7A` | `0x52807CFA` | 数量上限检查 99→999 | 受 `set_stack_limit_enabled()` 门控 |
-| `0x0d25d4` | `UIStore_BuyItem+0x1a8` | `0x52800322` | `0x528002C2` | 复制购买数量写入起始位 bit25→bit22 | 常驻 |
+| `0x127e04` | `SAVE_SaveInventory+0x78` | `0x52800301` | `0x528002A1` | 子物品检查位段缩窄 bitEnd 24→21（避开数量高位段 a） | 常驻 |
+| `0x127f4c` | `SAVE_LoadInventory+0xa8` | `0x52800301` | `0x528002A1` | 同上（读档侧） | 常驻 |
 
-`0x105b58`、`0x105c18`、`0x105b60`、`0x105c20` 已复核为**非数量，已撤销**：两处
+S2 布局（`a=bits22-24`、`b=bits25-31`、`count=128a+b`）下 bits25-31 就是原版 7 位
+字段 b：原版 `UTIL_Get/SetBitValue(start=25,end=31)` 天然读写 b 且不触碰 a，S1 时代
+「把 bitStart 25 改 22 的单一 10 位段布局 patch」（含 `ITEM_GetCumulateCount+0x78` 读
+位段与 fix-15 的 `UIStore_BuyItem+0x1a8` 写位段）与 S2 编码冲突，已全部移除；数量
+读取统一依赖 `ITEM_GetCumulateCount` getter hook（S2-P2），写侧进位由调用方完成
+（§3.7）。存档子物品检查以 `GetBitValue(+0x10, end=24, start=0)` 判断袋容量位非零，
+`count≥128` 的普通物品会让 bits22-24（a 段）误判出「子物品」，因此 end 24→21 的缩窄
+在 S2 下仍然必要。
+
+可逆 clamp 表（`g_stack_limit_clamp_patches`，受 `set_stack_limit_enabled()` 门控）：
+
+| 地址 | 函数+偏移 | 原指令 | 新指令 | 语义 |
+|---:|---|---|---|---|
+| `0x104a84` | `INVEN_MoveItem+0x150` | `0x71018C1F` | `0x710F9C1F` | 合并总量 ≤999（getter hook 完整数） |
+| `0x104a8c` | `INVEN_MoveItem+0x158` | `0x52800C77` | `0x52807CF7` | 可转移量填满 999−目标总量 |
+| `0x103ccc` | `INVEN_SaveItemDirect+0xdc` | `0x71018C7F` | `0x710F9C7F` | 合并总量 ≤999（getter hook 完整数） |
+| `0x103ce0` | `INVEN_SaveItemDirect+0xf0` | `0x71018E9F` | `0x710F9E9F` | 源堆叠总量 ==999 判定 |
+| `0x104690` | `INVEN_SaveItemData+0x7c` | `0x71018A9F` | `0x710F9A9F` | 入参创建总量 >998 走拆堆分支 |
+| `0x103b98` | `INVEN_FindSaveSlot+0x238` | `0x71018C1F` | `0x710F9C1F` | 两堆总量之和 ≤999（getter hook 完整数） |
+
+clamp 口径：999 只允许作用于「数量完整值」判定点（比较数来自 getter hook 解码总量
+或函数入参总量）。直接读取 b 段残量（mod 128）的判定点不进 clamp 表——
+`INVEN_CheckSaveInNotEmptySlot+0xa4` 与 `INVEN_GetCumulateSaveSlotEx+0x164/0x17c` 在
+S2 下保持原版 99 的 b 满判定（999 对 b 值无意义且高估剩余空间，不 fail-closed）；
+`INVEN_SaveItemData+0x8c` 的 fill 常量同理保持原版 99（fill 写的是 b 段值，拆堆配对
+指令 `sub #0x63` 不可独立改写）。
+
+`0x105b58`、`0x105c18`、`0x105b60`、`0x105c20` 已复核为**非数量，保持撤销**：两处
 `ITEM_IsRealEquip/ITEM_IsRealBroken` 均先读取物品 `+0x10`，再以
 `UTIL_GetBitValue(start=25,end=31)` 读取 `ITEMSYSTEM_CreateItem@0x10c030..0x10c038`
 （`0x10be9c+0x194..0x19c`）
 写入的装备 marker `100`，后续比较只是装备/损坏判定，不是堆叠数量读取或上限。
-`UIStore_BuyItem+0x1a8` 保持为正确的数量写入 patch。
 
-既有有效 patch `0x103ec4`（`INVEN_CheckSaveInNotEmptySlot+0x14c`）保持不变。
+已知边界（写侧收口前开放点）：启用态下原版写点 `SetBitValue(start=25,end=31)` 只能
+写 b，合并/创建总量 >127 时无法对 a 进位；总量 ≤127 全部正确，>127 的原版袋内进位
+由调用方级 hook（S2-P3 H-18..H-21）闭合（禁止 hook `UTIL_SetBitValue`，
+见规则册 R-46/R-49）。
+
+16 函数 / 24 写点收口状态（2026-09-11 反汇编冻结，基线 `.tmp/dualmode-full.asm`，逐函数
+证据见 `native_inventory_hook.cpp` 语义表）：已接管 5 个（MoveItem、SaveItemDirect、
+Divide、ConsumeItem、RemoveItemData——H-21 快照/重扫修正部分删堆）；数量回写已撤销
+1 个（`ITEMSYSTEM_MakeItem`——arg2 是静态表查找/品质参数非数量，产物量由原版
+`CAL_Calculate` 公式写点 `0x10ca3c` 生成且 ≤99，b 写即全量，R-52/VM-38）；无需
+接管 8 个（UIStore_BuyItem 购买量 max=99、ITEMSYSTEM_CreateItem 数量恒 1、
+UIMix_StartMix/ITEMSYSTEM_ProcessUnpack 产物量=只读静态表、DEALSYSTEM_MakeSale
+唯一 31/25 写点是 marker=126、GAME_StartNewGame 初始量 5、INVEN_SaveItemData 每笔
+≤99、MAPITEMSYSTEM_CreateItem count=任务/事件表只读数据）；待勘察 2 个
+（NetworkStore_InitializeMenuData、NetworkStore_AddItem——数量来自网络数据，离线
+不可达）。已知开放边界：丢弃/移仓若存在把 S2 全量（>127）作为 count 传入
+MAPITEMSYSTEM_CreateItem 的路径（当前全量反汇编未见），以及 UIMix/ProcessUnpack
+静态表若含 >99 产物量（原版数据域设计 ≤99），需数据审计复核。
 
 ### 2.2 18 项逐条核实
 
@@ -280,6 +324,12 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
    draw-end 由 `extension_bag_render.inc:712-770` 调用排空；排空逐项检查
    `g_module_objects` 和 projection 控件引用，无引用时才调用 `ITEMPOOL_Free`
    （`extension_bag_ownership.inc:71-119`）。
+5. ext→orig 事务的投影宿主守卫（R-54/VM-40）：目标袋 == 投影宿主袋时，事务期用
+   `HostCapacityGuard` 临时恢复被投影替换的宿主容量字（`INVEN_GetBagSize` /
+   `INVEN_SaveItemOnEmpty` 按真实容量判定），任何出口写回投影值；投影中不改写
+   CUR_BAG（宿主身份 R-26/R-27），显示袋切换仅非投影/API 路径，见
+   `extension_bag_transaction.inc:move_extension_to_original_locked`、
+   `model/virtual_bag_transaction_rules.inc:ext2orig_requires_host_capacity_restore`。
 
 “唯一 owner”只是控制流设计，不是问题 B 的修复证据；H3/H4 的
 `ERROR physical inventory mutation` 复测日志仍缺。
@@ -325,6 +375,11 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 - wrapper 只负责“原版已创建对象入袋失败后的 adopt”，不重建对象、不判断 caller 的
   任务袋语义、不完成多产物回滚；成功返回原值，失败且有扩展空位才返回 `1`，见
   `native_inventory_hook.cpp:192-198`。
+- adopt 收编顺序（R-53/VM-39）：先 `adopt_merge_into` 遍历扩展袋已有同类堆合并
+  （判据与移动合并同源，不受 `move_merge_enabled` 门控——原版 `SaveItem→FindSaveSlot`
+  自带自动合并语义），无可合并堆才新建扩展空槽；见
+  `game_ui_virtbag.cpp:virtual_bag_adopt_native_item`、
+  `model/virtual_bag_transaction_rules.inc:adopt_merge_into`。
 - 合成仍有 `game_patch_craft.inc` 旁路，部分回滚和五个 caller 属 stage-5/P6；任务物品
   仍只能进原版任务袋 `5`。
 
@@ -401,6 +456,139 @@ Java section `ExtensionBagUiBridge.kt:11-24,110-168`；8 处 callsite
 辅助；它不表示不存在 H-13。wrapper 的存在也不证明 18 条 caller 已完成身份、失败释放
 和真机覆盖，生产者验收仍属 P7 stage-5。问题无法仅靠静态安装链闭合时，按验收册
 VM-19/VM-20/VM-21/VM-22 取证。
+
+### 3.7 S2 数量编码的 hook 分层（S2-P2 读侧、S2-P3 写侧、S2-P5 关闭态语义已落地）
+
+> 本节记录 S2 数量编码选型与分层现状。规则正文见规则册 R-45..R-49，存档侧数量语义见
+> 存档册 §6.4；patch 点登记见 §2.1.1。
+> 数量位无版本标识、无迁移代码：sidecar 与原版袋 `+0x10` 统一 S2 布局。
+> 已落地：patch 表 S2 重构（§2.1.1）、模块写路径编码（本节「模块写侧」）、
+> 读侧 getter hook（S2-P2，H-17）、模式感知读写层与关闭态低 7 位语义
+> （S2-P5，R-47 决策 b，`stack_codec::effective_*`）。
+
+- **编码层**：可堆叠数量采用 S2 布局 `a=(v>>22)&0x7`（bits22–24 高位段）、
+  `b=(v>>25)&0x7F`（bits25–31 低位段，即原版字段），`count=128a+b`，范围 `0..1023`
+  （业务上限 999）；高位段读写只对 count-encoded 类别生效（R-45、R-46）。
+- **读侧 = 统一 getter hook（S2-P2，已落地）**：数量读取统一经
+  `ITEM_GetCumulateCount@0x106094` 的 H-17 wrapper（`native_inventory_hook.cpp`
+  `get_cumulate_count_wrapper`，分流纯函数 `inventory_hook_stage4.cpp`
+  `stage4_get_cumulate_count`）按模式视图解码，调用方无需各自拆位；这是读路径的
+  唯一统一入口。门控判据沿用 R-40/R-41 的 `item_count_encoding`（ITEMCLASSBASE +6 bit0）：
+  kEncoded 返回 `stack_codec::effective_read_count(*(uint32_t*)(item+I_COUNT),
+  stack_limit_enabled())`（启用态 S2 全量 `128a+b`、关闭态只读 b），非可堆叠与
+  kUnknown fail-closed 直通 backup；wrapper 不取 `g_virtual_bag_mtx`、不设 TLS 直通
+  （原版 getter 反汇编 `0x106094–0x106124` 为纯读：空指针 0、非可堆叠 1、可堆叠
+  `GetBitValue(31,25)`）。
+- **模式感知读写层（S2-P5，R-47 决策 b）**：`core/native/stack_codec.h` 提供
+  `effective_read_count(value, enabled)`（启用态 `s2_read_count` 全量、关闭态只读
+  b 段）、`effective_write_count(value, count, enabled)`（启用态 `s2_write_count`
+  全量拆段、关闭态只写 b 段且 a（bits22–24）与 bits0–21 原样保留）、
+  `effective_clamp(count, enabled)`（999/99）与 `effective_view_count(canonical,
+  enabled)`（descriptor int 域视图：关闭态 = `count mod 128`）。运行时操作面
+  （展示、查询、消耗、合并、卖出、创建、拆堆回写）统一走该层；布局层 `s2_*`
+  本身与模式无关。
+- **descriptor canonical 边界**：descriptor `Item.count` 与 sidecar 持久化恒为
+  canonical `128a+b`（R-38/R-48 不变）；关闭态只改变运行时视图与操作算术，
+  读档不 clamp、不按配置重编码。凡从原版对象物化/重同步 descriptor 的写点
+  （adopt、unequip 收编、apply 同步、desc 重同步、orig→ext 收编）使用
+  `canonical_item_count`（`game_inventory_read.inc`，绕过 getter 直接 S2 解码），
+  关闭态模块侧数量写回后 descriptor 回写 `s2_read_count` 解码的 canonical，
+  保证重开后读回完整值。
+- **非 getter 读点白名单（反汇编盘点 `0x103000–0x106000`；处置口径=R-47，保持 b 段
+  原生语义，不新增指令 patch）**：
+  `INVEN_CheckSaveInNotEmptySlot@0x103d78` 的 `0x103ec8`（`+0x14c` 起 bit25，堆叠剩余
+  空间按 b 段残量）、`INVEN_GetCumulateSaveSlotEx@0x1051b0` 的 `0x105310`（`+0x160`，
+  b≥99 满判定）与 `0x105328`（`+0x178`，候选槽余量 99−b）、`INVEN_ConsumeItem@0x1047bc`
+  的 `0x104818`（`+0x5c`，count>1 走递减判定）与 `0x104844`（`+0x88`，递减前读，
+  配套 `0x104858` 只写 b）。b 段判定对 `count≥128`（b 段残量小）会高估剩余空间，
+  由后续入库路径的 getter 域 clamp（`INVEN_FindSaveSlot+0x238`、
+  `INVEN_SaveItemDirect+0xdc/0xf0`，§2.1.1）兜底；其余 `INVEN_*` 的
+  `UTIL_GetBitValue` 调用读类别 bit6..15 或袋容量 bit0..24，不属数量读点。
+  全量反汇编（`.tmp/dualmode-full.asm`，扫描判据 `ldr w,[x,#0x10]` 后 30 行内出现
+  `UTIL_GetBitValue(_,31,≥22)`/`lsr/ubfx ≥22`）补充 `0x103000–0x106000` 区间外的
+  数量位读点。**出售/拆堆直接位读组（S2 缺陷修复，R-51，已重定向）**：
+  `UIStore_ButtonSellExe` 的 `0xd18d0/0xd18e8`（b≤1 整堆判定 + 数量输入框上限）、
+  `UIStore_SellItem` 的 `0xd26b8`（b≤1 分批卖出）、`ITEMSYSTEM_Divide` 的
+  `0x108458/0x10848c`（拆堆满量守卫与 remain 计算）经
+  `g_stack_getter_redirect_patches` 重定向为 `mov x0,xN; bl ITEM_GetCumulateCount`，
+  读模式感知全量（启用 128a+b / 关闭 b）；安装日志 5 条 `redirect ...`。**注意**：
+  不可用「GetBitValue start 25→22」单指令窗口伪造全量——十位窗口 `(v>>22)&0x3FF`
+  是 `a+8b`，与 `a*128+b` 不等价。仍登记为 b 段原生语义的读点：装备页详情出售结算
+  函数 `0x1261c4`（由 `UIEquip_OKDestroyItem@0xb8468` 调用；`0x1261fc` 取 `+0x10`、
+  `0x126208` `bl UTIL_GetBitValue(_,31,25)` 内联位读 b 段，clamp `b∈[1,99]?b:1`）——
+  该点当前不在 `g_stack_getter_redirect_patches`（表内 5 条仅 `UIStore_ButtonSellExe`×2、
+  `UIStore_SellItem`×1、`ITEMSYSTEM_Divide`×2）；启用态背包详情出售由 R-55 H-23
+  `UIEquip_OKDestroyItem` 接管，关闭态与原版装备详情仍走该 b 段语义。`EVTSYSTEM_Process`
+  的 `0xfd1a0`（b==126 魔数分支，语义未定，仅登记）。以上登记项在 `count≥128` 时作用于
+  b 段残量（低估数量/上限），属调用方级借位与显示收口的同一开放边界。
+  **装备 marker 判定组（P4 必须收口）**：`ITEM_IsRealEquip` 的 `0x105b5c`、
+  `ITEM_IsRealBroken` 的 `0x105c1c`、`ITEM_GetDamage` 的 `0x109c44`、
+  `ITEM_GetDefense` 的 `0x109f14`、`ITEMSYSTEM_IsEnchantable` 的 `0x10b270` 均以
+  `GetBitValue(+0x10,31,25) > 99` 判定装备 marker 或触发强化分支；S2 下可堆叠
+  `count mod 128 ∈ [100,127]`（含 `count=100..127`）会与 marker `100` 冲突而被误判，
+  需按类别门控或改经 getter 完整值判定（对应 VM-33 的 100 边界用例）。
+- **写侧 = 调用方级 patch/hook + 进位**：原版不存在单一「写数量」函数，各 caller 直接
+  改 `+0x10` 位段；因此写侧只能在知道物品身份的调用方（既有 patch/hook 点）完成类别
+  门控与 `128a+b` 进位/借位，没有也不设统一 setter。
+   模块写侧当前实现（S2-P3 + S2-P5 模式感知）：全部数量产生点（创建
+   `data_op_add_item`、合并 `patch_payload_count`/`merge_count`、消耗写回
+   `consume_extension_item_after_native_locked`）统一走
+   `stack_codec::effective_write_count/effective_clamp`——类别门控 fail-closed（非
+   count-encoded 类别拒绝写）；启用态总量算术在解码域完成后由 `s2_write_count`
+   拆段写回，b 溢出 127 自动进位（a+1、b 归零），a 借位自动落 b+128；关闭态
+   只写 b 段、保留 a（R-47 决策 b）；袋对象 marker 写入保持
+   `write_native_bag_object_marker`（仅 bit25，不触碰容量位）。登记点：
+   `model/virtual_bag_transaction_rules.inc`（`patch_payload_count`、`merge_count`）、
+   `extension_bag_equip.inc`（消耗写回）、`api/native/game_inventory_basic.inc`
+   （`data_op_add_item`）。
+   原版写点现状：S2 下原版指令保持 b 段原生读写且不破坏 a（S1 布局 patch 已移除，
+   §2.1.1）；启用态 clamp 作用于完整数量判定点。已知开放边界：原版写点对 >127 的
+   合并/创建无法对 a 进位（≤127 全部正确），由调用方级写点（S2-P3 H-18..H-21）闭合，
+   无迁移扫描路径（原版袋 `+0x10` 迁移方案已删除，不存在按版本触发的字段重写）。
+   H-21 `INVEN_RemoveItemData`（`remove_item_data_wrapper` + 纯函数
+   `stage4_remove_item_data_plan`，Host `test_remove_item_data_plan`）：原版
+   0x1040a8 顺序遍历 6 袋，整删累计后对最后一堆写 `b = cum(Getter 全量) + w22 -
+   count`；启用态 getter 算术正确但 b 写对 remain>127 或旧 a 残留丢进位，wrapper
+   在 backup 前快照全部匹配类别的 count-encoded 堆、backup 后重扫（消失堆只求和、
+   唯一缩减堆回写 a+b=remain），多缩减/越域/count≤0 一律 fail-closed 保持原版结果；
+   关闭态原版 b 写天然正确（getter 返回 b 域、只写 b、a 保留），wrapper 不启用修正
+   （R-47）。其余 10 个原版写函数的反汇编证据与「无需接管/待勘察」判定见
+   `native_inventory_hook.cpp` 语义表（2026-09-11 冻结）。
+- **不 hook `UTIL_SetBitValue` 的原因**：它是无物品指针的通用位工具，hook 点拿不到
+  所属物品，无法判定类别（可堆叠数量、宝石选项、袋容量、装备 marker 共用该工具），
+  也无法计算进位；hook 它会把数量语义强加到所有位写入上。
+- **关闭态（决策 b，R-47）**：堆叠上限关闭态下，模块与原版的数量读写、操作与展示
+  统一按低 7 位视图——有效数量 = `b`（`count mod 128`），上限 99；`a`（bits22–24）
+  不读、不写、不参与运算，只原样保留；重新开启后经 S2 解码读回完整 canonical 值。
+  该语义由三层共同保证：①读侧 getter 经 `effective_read_count` 只返回 b；②原版写点
+  只写 b（常驻 patch 表不含任何 a 段写点，clamp 表关闭态整体 revert 回原版 99/b
+  语义）；③模块写点经 `effective_write_count` 只写 b，且 H-04 消耗借位预置仅在
+  启用态生效（关闭态 b≤1 消耗到空按原版删除即关闭态语义，不为了保留 a 而让有效
+  数量 0 的堆无法消耗）。关闭期操作造成的总量变化是决策 b 的既定语义，不做反向
+  同步、不清零 `a`。S2 下 descriptor 与 sidecar 恒保持 canonical（见上文
+  「descriptor canonical 边界」），重开即恢复完整视图。
+
+- **S2 缺陷修复映射（2026-09-11，规则册 R-51..R-55 / 验证矩阵 VM-37..VM-41）**：
+  ①出售/拆堆直接位读重定向统一 getter（R-51，`g_stack_getter_redirect_patches`，
+  §3.7 上文）——修复整堆出售按 b 残量结算；②`ITEMSYSTEM_MakeItem` arg2 非数量、
+  数量回写撤销（R-52，`stage4_make_item_writeback_count` 恒 0）——修复拾取 1 个得
+  2/3/4 个；③`INVEN_SaveItem` 漏斗 backup 前 `virtual_bag_merge_native_item` 与
+  backup 失败后 `virtual_bag_adopt_native_item` 都先经 `adopt_merge_into` 并入扩展
+  同类堆（R-53）——修复拾取不并入扩展堆；④`move_extension_to_original_locked` 在
+  目标袋为投影宿主时事务期恢复宿主真实容量字（RAII 写回投影值）且投影中不切换
+  显示袋（R-54，`ext2orig_requires_host_capacity_restore`/
+  `ext2orig_should_switch_display_bag`）——修复扩展→原版袋 0 移动误判满/宿主分叉
+  错位视图；⑤`UIEquip_OKDestroyItem` 背包详情出售由 H-23 接管（R-55）——启用态取
+  canonical 全量、按 `unit×count×7/10` 加钱删堆刷新，按钮预演只回填金额，关闭态/
+  非背包详情 backup，修复原版 `0x1261c4` 内联 b 段读把 `199` 按 `71` 结算（真机
+  实得 546）。五者行为断言均待真机 VM-37..VM-41 取证。
+
+验证锚：真机锚归验证矩阵 VM-33/VM-34/VM-35/VM-36；读侧门控分流由
+Host `test_get_cumulate_count_s2` 覆盖（kEncoded 直达不调 backup、kNotEncoded/
+kUnknown/空指针 fail-closed 走 backup、启用/关闭两态视图与切换不丢值）；编码层与
+模块写侧的编码/模式感知语义由 Host `test_stack_codec_s2`、
+`test_stack_codec_effective_mode`、`test_virtual_bag_mode_aware_ops` 覆盖，patch 表
+指令匹配待 debug 构建与真机回归取证。
 
 ## 4. 可替代的更好方法与不采用原因
 

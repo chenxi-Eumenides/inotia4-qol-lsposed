@@ -20,7 +20,7 @@ uint8_t* find_popup_state(uintptr_t enter_vma) {
     uint8_t* list = static_cast<uint8_t*>(popup_state_list());
     if (list == nullptr) return nullptr;
     for (int i = 0; i < kPopupStateCount; ++i) {
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * kPopupStateSize + 0x10);
+        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * kPopupStateSize + POPUP_ENTRY_ENTER);
         if (enter == g_base + enter_vma) return list + i * kPopupStateSize;
     }
     return nullptr;

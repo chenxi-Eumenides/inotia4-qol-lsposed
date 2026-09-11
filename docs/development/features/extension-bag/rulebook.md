@@ -225,28 +225,37 @@
 
 ## §3 Hook 铁律
 
-### 3.1 16 个常驻 Native Hook
+### 3.1 23 个常驻 Native Hook
 
-安装链是唯一清单，当前必须保持以下 16 个且不增不减：
+安装链是唯一清单，当前必须保持以下 23 个且不增不减（H-17 为 S2 读侧统一 getter，
+H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` 数量回写已
+撤销、wrapper 纯透传，见 R-52；H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 | 编号 | 目标 | wrapper | 安装证据 |
 |---|---|---|---|
-| H-01 | `INVEN_FindItem` | `find_item_wrapper` | `native_inventory_hook.cpp:472-475` |
-| H-02 | `INVEN_HaveItem` | `have_item_wrapper` | `native_inventory_hook.cpp:475-478` |
-| H-03 | `INVEN_GetItemCount` | `get_item_count_wrapper` | `native_inventory_hook.cpp:478-481` |
-| H-04 | `INVEN_ConsumeItem` | `consume_item_wrapper` | `native_inventory_hook.cpp:481-484` |
-| H-05 | `INVEN_RemoveItem` | `remove_item_wrapper` | `native_inventory_hook.cpp:484-487` |
-| H-06 | `CHAR_EquipItemFromInvenToSlot` | `equip_item_from_inven_to_slot_wrapper` | `native_inventory_hook.cpp:487-491` |
-| H-07 | `ITEMSYSTEM_PutJewel` | `put_jewel_wrapper` | `native_inventory_hook.cpp:491-494` |
-| H-08 | `INVEN_IsHavingEmptySlot` | `is_having_empty_slot_wrapper` | `native_inventory_hook.cpp:494-498` |
-| H-09 | `CHAR_UnequipItemToInven` | `unequip_item_to_inven_wrapper` | `native_inventory_hook.cpp:498-502` |
-| H-10 | `UIEquip_ButtonEquipExe` | `button_equip_exe_wrapper` | `native_inventory_hook.cpp:502-506` |
-| H-11 | `UIEquip_ButtonUnequipExe` | `button_unequip_exe_wrapper` | `native_inventory_hook.cpp:506-510` |
-| H-12 | `UIEquip_OKConfrimUseItem` | `ok_confirm_use_item_wrapper` | `native_inventory_hook.cpp:510-514` |
-| H-13 | `INVEN_SaveItem` | `save_item_wrapper` | `native_inventory_hook.cpp:533-536` |
-| H-14 | `INVEN_MoveItem` | `move_item_wrapper` | `native_inventory_hook.cpp:537-540` |
-| H-15 | `UIEquip_EquipControlEventProc` | `equip_control_event_proc_wrapper` | `native_inventory_hook.cpp:541-544` |
-| H-16 | `UIEquip_RefreshItemArea` | `refresh_item_area_wrapper`；原版一次刷新走 trampoline 后由 gate 做 post-projection，模块主动刷新走 raw-original dispatcher | `native_inventory_hook.cpp:205-213`（wrapper）、`:561-564`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`extension_bag_render.inc:533-568` |
+| H-01 | `INVEN_FindItem` | `find_item_wrapper` | `native_inventory_hook.cpp:255-278`（wrapper）、`:1126-1128`（安装） |
+| H-02 | `INVEN_HaveItem` | `have_item_wrapper` | `native_inventory_hook.cpp:291-298`（wrapper）、`:1129-1131`（安装） |
+| H-03 | `INVEN_GetItemCount` | `get_item_count_wrapper` | `native_inventory_hook.cpp:300-308`（wrapper）、`:1132-1134`（安装） |
+| H-04 | `INVEN_ConsumeItem` | `consume_item_wrapper` | `native_inventory_hook.cpp:358-434`（wrapper）、`:1139-1141`（安装） |
+| H-05 | `INVEN_RemoveItem` | `remove_item_wrapper` | `native_inventory_hook.cpp:436-448`（wrapper）、`:1142-1144`（安装） |
+| H-06 | `CHAR_EquipItemFromInvenToSlot` | `equip_item_from_inven_to_slot_wrapper` | `native_inventory_hook.cpp:759-780`（wrapper）、`:1145-1148`（安装） |
+| H-07 | `ITEMSYSTEM_PutJewel` | `put_jewel_wrapper` | `native_inventory_hook.cpp:782-787`（wrapper）、`:1149-1151`（安装） |
+| H-08 | `INVEN_IsHavingEmptySlot` | `is_having_empty_slot_wrapper` | `native_inventory_hook.cpp:333-343`（wrapper）、`:1152-1155`（安装） |
+| H-09 | `CHAR_UnequipItemToInven` | `unequip_item_to_inven_wrapper` | `native_inventory_hook.cpp:345-356`（wrapper）、`:1156-1159`（安装） |
+| H-10 | `UIEquip_ButtonEquipExe` | `button_equip_exe_wrapper` | `native_inventory_hook.cpp:789-802`（wrapper）、`:1160-1163`（安装） |
+| H-11 | `UIEquip_ButtonUnequipExe` | `button_unequip_exe_wrapper` | `native_inventory_hook.cpp:814-829`（wrapper）、`:1164-1167`（安装） |
+| H-12 | `UIEquip_OKConfrimUseItem` | `ok_confirm_use_item_wrapper` | `native_inventory_hook.cpp:831-839`（wrapper）、`:1172-1175`（安装） |
+| H-13 | `INVEN_SaveItem` | `save_item_wrapper` | `native_inventory_hook.cpp:450-470`（wrapper）、`:1180-1183`（安装） |
+| H-14 | `INVEN_MoveItem` | `move_item_wrapper` | `native_inventory_hook.cpp:702-757`（wrapper）、`:1184-1187`（安装） |
+| H-15 | `UIEquip_EquipControlEventProc` | `equip_control_event_proc_wrapper` | `native_inventory_hook.cpp:946-956`（wrapper）、`:1188-1191`（安装） |
+| H-16 | `UIEquip_RefreshItemArea` | `refresh_item_area_wrapper`；原版一次刷新走 trampoline 后由 gate 做 post-projection，模块主动刷新走 raw-original dispatcher | `native_inventory_hook.cpp:669-677`（wrapper）、`:1192-1195`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`extension_bag_render.inc:533-568` |
+| H-17 | `ITEM_GetCumulateCount` | `get_cumulate_count_wrapper`；S2 读侧统一解码（R-49）：count-encoded 类别按模式视图解码 `+0x10`（启用态 `128a+b`、关闭态低 7 位 b，R-47 决策 b），非可堆叠/类别未知（kUnknown）original-first backup（R-46 fail-closed） | `native_inventory_hook.cpp`（wrapper，分流在 `inventory_hook_stage4.cpp:stage4_get_cumulate_count`）、安装链第 4 个 |
+| H-18 | `INVEN_SaveItemDirect` | `save_item_direct_wrapper`；同身份堆叠合并时采集目标槽旧全量、backup 后确认原版 b 写再回写 a+b（R-45/R-49） | `native_inventory_hook.cpp:save_item_direct_wrapper`、安装链第 20 个 |
+| H-19 | `ITEMSYSTEM_Divide` | `item_system_divide_wrapper`；拆堆源堆借位与新对象设值（R-45/R-49） | `native_inventory_hook.cpp:item_system_divide_wrapper`、安装链第 21 个 |
+| H-20 | `ITEMSYSTEM_MakeItem` | `make_item_wrapper`；**数量回写已撤销**（arg2 是静态表查找/品质参数非数量，R-52/VM-38），wrapper 纯透传、回写计划经纯函数 `stage4_make_item_writeback_count` 恒 0 | `native_inventory_hook.cpp:make_item_wrapper`、安装链第 22 个 |
+| H-21 | `INVEN_RemoveItemData` | `remove_item_data_wrapper`；快照/重扫 + `stage4_remove_item_data_plan` 修正部分删堆（R-45/R-49） | `native_inventory_hook.cpp:remove_item_data_wrapper`、安装链第 23 个 |
+| H-22 | `UIEquip_ButtonDestroyExe` | `button_destroy_exe_wrapper`；R-55 预演标记源：进入按钮执行时置 thread_local，供 H-23 区分「按钮预演」与「弹窗 OK 真实结算」 | `native_inventory_hook.cpp:button_destroy_exe_wrapper`、安装链第 13 个 |
+| H-23 | `UIEquip_OKDestroyItem` | `ok_destroy_item_wrapper`；R-55 原版背包详情出售接管：启用态弹窗 OK 完全接管结算（canonical 全量、`unit×count×7/10` 加钱、删整堆、刷新），按钮预演只回填展示金额；关闭态/非背包详情/校验失败 backup | `native_inventory_hook.cpp:ok_destroy_item_wrapper`、安装链第 15 个 |
 
 1. 安装目标必须来自 `game_symbols.h`/resolver；域文件不得新增裸 VMA。
 2. 每个 Hook 都必须保留 backup；Hook 不是默认机制，架构册规定优先读内存、调用函数、
@@ -255,16 +264,21 @@
 ### 3.2 original-first 与安装事务
 
 1. 查询 Hook 先调用原版，再仅在原版没有结果时查扩展；`FindItem` 的实现和递归保护见
-   `native_inventory_hook.cpp:79-101`，Have/Count 的统一分流见
+   `native_inventory_hook.cpp:92-115`，Have/Count 的统一分流见
    `inventory_hook_stage4.cpp:3-23`。
+   1.1. H-17 `ITEM_GetCumulateCount` 是唯一例外：count-encoded 类别不先调 backup——
+   backup 体内的数量位段仍按原版/S1 布局读取，会与 S2 解码冲突；因此对 kEncoded 直接
+   返回模式视图解码值（启用态 `stack_codec::effective_read_count` 全量、关闭态只读 b，
+   R-47 决策 b），其余类别保持 original-first backup
+   （`inventory_hook_stage4.cpp:35-48`）。
 2. `ConsumeItem`、`RemoveItem`、装备和镶嵌必须按对象身份分流；扩展对象不能先落入
    原版释放或消费函数。
 3. 对可回退的非扩展路径，original backup 是唯一回退；不得复制一份近似原版逻辑。
 4. 安装任一 Hook 失败时，已经成功安装的 Hook 必须按成功顺序逆序卸载，并清空 backup。
-   当前链的 rollback 实现在 `native_inventory_hook.cpp:286-307`，安装循环在
-   `native_inventory_hook.cpp:378-395`。
+   当前链的 rollback 实现在 `native_inventory_hook.cpp:428-450`，安装循环在
+   `native_inventory_hook.cpp:555-618`。
 5. rollback 不完整时必须阻断重试，当前语义是 `g_install_blocked=true`
-   （`native_inventory_hook.cpp:302-306`）。
+   （`native_inventory_hook.cpp:445`）。
 6. Host 锚点：`test_install_transaction`，`tests/test_inventory_hook_stage4.cpp:220-232`。
 
 ### 3.3 SaveItem 特别纪律
@@ -319,7 +333,8 @@
 ## §5 雷区规则
 
 > 素材 §三 的 25 条候选均已逐条复核。R-01..R-25 按素材顺序对应；其中 R-20
-> 对码确认 R-26..R-44 为当前实现的同类耦合规则。
+> 对码确认 R-26..R-44 为当前实现的同类耦合规则；R-45..R-49 为已批准的 S2 数量编码
+> 契约规则（读侧、写侧与关闭态语义均已落地；真机锚 VM-32..VM-36 待取证）。
 
 ### R-01 确认使用必须刷新并重投影
 
@@ -628,9 +643,9 @@
   的 payload 必须逐字节保留。99/999 clamp 只作用于新建、合并、消费和派生操作。
 - **为什么**：`game_symbols.h:58` 规定物品对象 `+0x10` 的 bit22..31 中 `100` 是装备
   语义，而 `1..999` 才是可堆叠数量；序列化头部将同一字段落在
-  `virtual_bag_state.h:31-35` 的 payload `+11`。`stack_codec::write_count` 会保留其余
-  位（`core/native/stack_codec.h:22-28`），但不能改变这些位在非堆叠物品中的业务语义。
-  `stack_limit_enabled()` 是运行时操作配置，不是 sidecar 迁移规则。
+  `virtual_bag_state.h` 的 payload `+11`。`stack_codec::s2_write_count` 会保留其余
+   位（`core/native/stack_codec.h`），但不能改变这些位在非堆叠物品中的业务语义。
+  `stack_limit_enabled()` 是运行时操作配置，不是 sidecar 数量语义的组成部分。
 - **判据单源**：`item_is_equip`、`category_is_equip` 与载入/扩展合并适配均使用
   `ITEMCLASSBASE +6 bit0` 语义；载入路径通过 `virtual_bag_category_uses_stack_count`
   注入同一类别判据，模型不自行猜测 category 范围。
@@ -641,7 +656,7 @@
   等于装备语义未被改写，仍需将 payload 的数量位与原始/最后正常 payload 对照。
 - **当前实现事实**：原版数量读取、存档查找和非空槽检查的数量路径已覆盖；装备/损坏判定
   保留原版 marker 语义，不纳入数量布局或上限 patch；数量位段固定为 bit22..31。sidecar
-  读档不迁移、不因配置截断已有 canonical 数量；超过绝对上限 999 的 descriptor 记录
+   读档不改写、不因配置截断已有 canonical 数量；超过绝对上限 999 的 descriptor 记录
   收敛到 999 并记录日志，payload 仅按 descriptor 不一致同步。
 - **验证锚**：`test_virtual_bag_json_count_clamp`（`tests/test_host.cpp`）断言装备 payload
   逐字节不变、绝对超限收敛、双向跨配置读档不变和 descriptor/payload 不一致同步；真机
@@ -655,7 +670,7 @@
 - **为什么**：`INVEN_GetBagSize` 读取 bit0..24；普通数量位从 bit22 起，与容量重叠，误写会
   造成容量越界和后续 UI/库存访问风险。
 - **验证锚**：`test_stack_codec` 的位段保留断言；真机 `VM-09`/`VM-31` 核对袋容量和切换后
-  原版窗口状态，安装日志须保留 `count=16`。
+  原版窗口状态，安装日志须保留 `count=23`。
 
 ### R-40 类别判定不可用时必须 fail-closed
 
@@ -702,6 +717,279 @@
 - **典型破坏方式**：绕开受控入口持锁直接调用 `INVEN_RemoveItemDirect` 或 raw refresh，原版回调进入扩展查询后游戏冻结；删除失败时仅依据返回值提交逻辑事务，造成源槽与 sidecar 分裂。
 - **受控入口清单**：dispatcher 本体与全部受控调用点的当前文件:行，见架构册 §5.4。
 - **验证锚**：Host `test_original_only_queries`、`test_virtual_bag_transaction_domain`（含 `original_to_extension_source_slot_postcondition`）；真机 `VM-15` 的 `txn committed ... original->extension`、`release_cleanup ctl=... flags_cleared` 与 API health 连续可达证据；源码 `game_ui_virtbag.cpp:246-269`（删除 dispatcher）、`:283-286`（刷新 dispatcher）、`native_inventory_hook.cpp:89-154`（查询 Hook 直通）。
+
+### R-45 S2 数量编码布局与总量范围
+
+- **规则一句话**：可堆叠（count-encoded）物品的数量位段按 S2 布局解释与写入：
+  `a=(v>>22)&0x7`（bits22–24 高位段）、`b=(v>>25)&0x7F`（bits25–31 低位段，即原版
+  字段），`count=128a+b`，编码总量范围 `0..1023`，业务上限 `999`；模块启用态的总量
+  读写统一走 S2 编码 API（或等价的模式感知 API 启用态分支），禁止绕过编码 API 直接
+  拆写单个位段。原版侧 clamp 只允许
+  作用于「数量完整值」判定点（比较数来自 getter hook 解码总量或函数入参总量）；
+  直接作用于 b 段残量（mod 128）的判定点与 fill 写点不得 999 化，保持原版 99 的
+  b 满判定（fail-closed），登记见架构册 §2.1.1 clamp 口径。
+- **为什么**：原版单字段 7 位只能表达 `0..127`；S2 在不移动原版 7 位字段位置的前提下，
+  用 bits22–24 作高位段扩展到 `0..999`，并保持原版低 7 位恒等于 `count mod 128`。
+  b 段残量点上写 999 无算术意义且会高估剩余空间（不 fail-closed）。
+- **验证锚**：Host `test_stack_codec_s2`（S2 拆段编解码往返与位保留）、
+  `test_stack_codec_effective_mode`（模式感知层）；读侧解码经
+  H-17 落地（`native_inventory_hook.cpp` `get_cumulate_count_wrapper`），真机展示/查询核对见 `VM-33`
+  （待取证）；写侧进位/门控见 `VM-34`（待取证）。
+
+### R-46 S2 高位段读写必须类别门控且 fail-closed
+
+- **规则一句话**：`a`（bits22–24）的读与写只对 count-encoded（可堆叠）类别生效；
+  非可堆叠类别一律不碰 bits22–24——宝石选项位 bits18–23、袋容量位 bits0–24 与高位段
+  重叠，装备 marker 位 bits25–31 与低位段重叠，数量路径均不得改写；类别判定不可用时
+  按 R-40 fail-closed 拒绝，不得按可堆叠处理。模块数量写点登记（S2-P3）：
+  `virtual_bag::patch_payload_count`（`model/virtual_bag_transaction_rules.inc`，唯一
+  payload 写入口）、`api/native/game_inventory_basic.inc` 的 `data_op_add_item`（创建
+  直写点）、`extension_bag_equip.inc` 的 `consume_extension_item_after_native_locked`
+  （消耗写回点）——三处均先经 `item_count_encoding`/注入谓词门控；袋对象 marker 写入
+  保持 `write_native_bag_object_marker`（仅 bit25）。
+- **为什么**：bits22–24 与袋容量（bits0–24）、宝石选项（bits18–23）位段重叠，
+  bits25–31 在装备上是 marker `100` 语义；无门控的高位/低位写入会破坏容量、宝石选项
+  和装备判定。
+- **判据单源**：类别判定沿用 R-40/R-41 的同一 count-encoded 谓词（`item_count_encoding`），
+  不得在 S2 读写点另写一套类别区间。
+- **验证锚**：读侧门控已落地——H-17 仅对 kEncoded 解释 bits22–31，kUnknown/非可堆叠
+  fail-closed 走 backup（`inventory_hook_stage4.cpp:35-44`），分流边界由 Host
+  `test_get_cumulate_count_s2`（kEncoded 直达不调 backup、kNotEncoded/kUnknown/空指针
+  走 backup、backup 缺失兜底）断言；Host 写侧门控
+  `test_virtual_bag_payload_helpers`（非 count-encoded/未知类别拒绝，`test_host.cpp`）；
+  真机读侧核对见 `VM-33`（待取证），装备/宝石/袋对象不变式另见 `VM-32`；写侧门控与
+  进位见 `VM-34`（待取证）。
+
+### R-47 关闭态所有数量读写与操作按低 7 位视图（决策 b）
+
+- **规则一句话**：堆叠上限关闭态下，模块与原版的数量读、写、操作与展示统一按低 7 位
+  视图——有效数量 = `b`（`count mod 128`），上限 99；`a`（bits22–24）不读、不写、
+  不参与运算，只原样保留；重新开启后经 S2 解码读回完整 canonical 值，关闭期操作
+  造成的 `128a+b` 变化是决策 b 的既定语义，不按数据损坏处理，也不得引入关闭期的
+  反向同步或 `a` 清零。
+- **实现锚（模式感知 helper，唯一模式入口）**：
+  `stack_codec::effective_read_count / effective_write_count / effective_clamp /
+  effective_view_count`（`core/native/stack_codec.h`）；读侧 getter 分流
+  `stage4_get_cumulate_count`（`inventory_hook_stage4.cpp`）；模块合并按视图相加且
+  descriptor 回写 canonical（`extension_bag_transaction.inc`）；H-04 消耗借位预置仅在
+  启用态生效（`native_inventory_hook.cpp` `consume_item_wrapper`——关闭态 b≤1 消耗到
+  空按原版删除，不为了保留 a 而让有效数量 0 的堆无法消耗）。
+- **descriptor canonical 边界（R-38/R-48 不变）**：descriptor `count` 与 sidecar
+  持久化恒为 canonical `128a+b`；关闭态只改变运行时视图与操作算术，读档不 clamp、
+  不按配置重编码。示例：canonical 199（a=1,b=71）→ 关闭态读 71；关闭态消耗 1 →
+  b=70（a 保留）→ 重开读 198；关闭态写 99 → 只改 b → 重开读 227（128a+99）。
+- **为什么（决策 b）**：读、写、操作、展示统一收敛到 b 视图，上限 99 与原版 clamp 表
+  关闭态 revert 后的原生语义一致；`a` 只保留、不读不写不参与运算，重开即可恢复完整
+  canonical 值，关闭期单次操作不会放大成数量跳变，也不需要关闭期的反向同步。
+- **验证锚**：Host `test_stack_codec_effective_mode`、`test_virtual_bag_mode_aware_ops`
+  （`tests/test_host.cpp`：199 off 读 71/重开 199、off 写 99 → 227、off 消耗 → 198、
+  127/128/99 off 视图、合并按视图且 a 保留）、`test_get_cumulate_count_s2`
+  （getter 分流两态视图）；真机 `VM-36`（199→71、重开 199/198/227、off 上限 99）。
+
+### R-48 sidecar 无版本标识，数量位统一 S2，模式仅影响运行时视图与 clamp
+
+- **规则一句话**：sidecar 状态 JSON 不携带 `encoding_version`（也不携带任何编码版本
+  字段）；数量位只有 S2 布局（`a` 落 bits22–24、`b` 落 bits25–31，`count=128a+b`）
+  一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`（canonical 域）；
+  运行时操作面（展示/查询/消耗/合并/卖出/创建）统一经模式感知层
+  `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`
+  （启用态等价 canonical 全量、关闭态低 7 位视图，R-47 决策 b）；历史 sidecar 若携带
+  `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）。S1→S2 迁移函数与原版袋
+  `+0x10` 扫描状态机已删除，当前存档视为已迁移。
+- **读档不改写 canonical（R-48 载入侧约束）**：读档路径与 `stack_limit_enabled()`
+   完全解耦——已持久化的 canonical 数量（sidecar descriptor）原样保留，读档不 clamp、
+   不按当前配置重编码；`stack_limit_enabled()` 只允许出现在新建/合并/消费/派生等操作
+   层，且仅经 `effective_clamp`（99/999 上限）与 `effective_view_count`（关闭态运行时
+   视图）影响运行时，绝不影响持久化解码或编码。sidecar payload 仅与
+   descriptor canonical 对齐（descriptor 是唯一 canonical），与运行时模式无关。
+- **为什么**：解码随配置模式变化（或残留 S1 读路径）会让同一存档在不同开关态读出
+  不同数量（真机实证：关闭态 S2 写入 99，开启态被 S1 解码读出 792 且随后固定）。
+  唯一布局 + 统一 S2 读写 + 宽容忽略旧字段消除了整类「读写代数不一致」缺陷，且开发期
+  之外的用户不接触旧格式，无需版本协商。
+- **验证锚**：Host `test_stack_codec_mode_invariance`（99/127/128/217/999 两态写入
+  产物逐位一致、解码一致、切换模式不改值）、`test_stack_codec_s2`（S2 编解码往返与
+  位保留）、`test_virtual_bag_cross_config_roundtrip`（99/127/128/217/999 跨配置三
+  往返 payload 逐字节不变 + 旧 `encodingVersion` 字段宽容忽略）；真机 `VM-32`、
+  `VM-35`（跨配置往返与模式不变性，见验证矩阵）。
+
+### R-49 S2 读侧统一 getter hook，写侧无统一 setter
+
+- **规则一句话**：S2 数量读取统一经 `ITEM_GetCumulateCount@0x106094` 的 getter hook
+  按模式视图解码（启用态 `128a+b` 全量、关闭态只读 b，R-47 决策 b）；写侧不存在统一
+  setter，每个知道物品身份的调用方必须各自完成类别门控与模式感知写
+  （启用态 `128a+b` 进位/借位、关闭态只写 b 保留 a）；禁止引入 `UTIL_SetBitValue`
+  Hook 充当统一写入点。
+- **为什么**：原版写路径没有单一「写数量」函数，各 caller 直接改 `+0x10` 位段；
+  `UTIL_SetBitValue` 是无物品指针的通用位工具，hook 点无法判定类别（可堆叠/宝石/
+  袋容量/装备 marker 共用），也无法计算进位。分层事实见架构册。
+- **16 函数写点收口状态（2026-09-11 反汇编冻结，基线 `.tmp/dualmode-full.asm`）**：
+  已接管 5 个——`INVEN_MoveItem`、`INVEN_SaveItemDirect`、`ITEMSYSTEM_Divide`、
+  `INVEN_ConsumeItem`、`INVEN_RemoveItemData`（H-21 快照/重扫 +
+  `stage4_remove_item_data_plan` 修正部分删堆，启用态专用）；数量回写已撤销 1 个
+  ——`ITEMSYSTEM_MakeItem`（R-52：arg2 是静态表查找/品质参数非数量，产物量由
+  原版 CAL 公式写点生成且 ≤99，b 写即全量）；无需接管 8 个——`UIStore_BuyItem`
+  （购买量 max=99 立即数 `0xd17cc`、marker 写非数量）、`ITEMSYSTEM_CreateItem`
+  （数量写点恒 b=1、ABI 单参 category）、`UIMix_StartMix`（产物量=配方表只读静态
+  数据）、`DEALSYSTEM_MakeSale`（唯一 31/25 写点 marker=126、数量产生经 MakeItem）、
+  `GAME_StartNewGame`（初始量常量 5）、`INVEN_SaveItemData`（每笔 ≤99：
+  `cmp #0x62` 分支证据）、`ITEMSYSTEM_ProcessUnpack`（产物量=拆包表只读静态数据）、
+  `MAPITEMSYSTEM_CreateItem`（count 域=任务/事件表只读数据）；待勘察 2 个——
+  `NetworkStore_InitializeMenuData`、`NetworkStore_AddItem`（数量来自网络数据，
+  离线不可达无法冻结值域）。**注意**：MakeItem 曾按 `game_symbols.h` 注释把 arg2
+  当 count 回写（`count>1` 恒真），导致掉落物数量污染为 2/3/4/5（R-52/VM-38）。
+- **验证锚**：读侧已落地——H-17 `get_cumulate_count_wrapper`
+  （`native_inventory_hook.cpp:294-318`，分流 `inventory_hook_stage4.cpp:35-48`，
+  安装 `native_inventory_hook.cpp:894-897`）；Host 分流断言
+  `test_get_cumulate_count_s2`（`stage4_hook_tests`：kEncoded 两态解码直达且不调
+  backup、kNotEncoded/kUnknown/空指针 fail-closed 走 backup、backup 缺失兜底、模式
+  切换不丢值）；真机 `VM-33`：
+  数量 99/100/127/128/199/999 显示与查询走 S2 解码（待取证）。写侧调用方级门控与进位
+  已落地（S2-P3）：数量产生点统一 `effective_write_count`/`effective_clamp` 写回，
+  登记点见 R-46 规则一句话；H-21 分流断言 `test_remove_item_data_plan`
+  （`stage4_hook_tests`：跨 127 借位、旧 a 残留、已正确不写、全删、count≤0、
+  多缩减/越域 fail-closed）；真机 `VM-34`：创建/合并/消耗跨 127 进位、非可堆叠不触碰
+  bits22–24（待取证）。关闭态读写语义已落地（S2-P5，R-47 决策 b），真机 `VM-36`
+  （待取证）。非 getter 读点白名单见架构册 §3.7。
+
+### R-50 apply 准入必须校验目标装备类，非装备目标回退扩展事务
+
+- **规则一句话**：宝石/强化卷轴拖放的 apply 分支准入为「同袋 + 扩展宝石/强化卷轴源 +
+  目标为装备类（`item_is_equip(target)` 为真）+ `UIEquip_IsApplyStuff(target, source)`
+  判真」四条同时成立；任一不成立必须 fallthrough 到既有扩展交换/移动，不得吞事件、
+  不得 Blocked。
+- **为什么**：`item_is_equip` 语义是「不可堆叠」（ITEMCLASSBASE+6 bit0==0），非堆叠普通
+  物品同样满足；若只按「不可堆叠」近似装备，普通物品目标会误入 apply，被
+  `IsApplyStuff` 拒绝后事件被吞、交换失效（`stage4_is_extension_apply_candidate`
+  判据集中在 `inventory_hook_stage4.cpp`，消费方为 G-8 路由
+  `extension_bag_public_runtime.inc` 与 p5 session drop `extension_bag_transaction.inc`；
+  H-15 `game_ui_virtbag.cpp` 的装备槽事件适配同一口径）。
+- **典型破坏方式**：用 `kNotEncoded` 代替 `item_is_equip` 判装备；类别数据不可用时返回
+  Blocked 而不是按非装备回退；apply 准入失败后提前 return 跳过
+  `session_finish_transaction`（p5 会把 session 泄漏在 kTransactionInFlight）。
+- **验证锚**：Host `stage4_hook_tests` 的 `stage4_is_extension_apply_candidate` 断言
+  （宝石/卷轴+装备目标→apply；+普通物品目标→非 apply 应 swap；普通物品源→非 apply；
+  IsApplyStuff 假→非 apply）；真机口径归 `verification-matrix.md` S-03/VM-10
+  （宝石/卷轴→装备=apply；→普通物品=swap）。
+
+### R-51 出售/拆堆直接位读必须重定向到统一 getter，禁止单指令窗口 patch
+
+- **规则一句话**：`UIStore_ButtonSellExe`（`0xd18d0`/`0xd18e8`）、`UIStore_SellItem`
+  （`0xd26b8`）、`ITEMSYSTEM_Divide`（`0x108458`/`0x10848c`）共 5 条以
+  `ldr w0,[xN,#0x10]; bl UTIL_GetBitValue(_,31,25)` 直接读 b 段的数量读点，必须
+  重定向为 `mov x0,xN; bl ITEM_GetCumulateCount(item)`（`g_stack_getter_redirect_patches`），
+  经统一 getter 的类别门控与模式感知解码读全量；**禁止**把 `GetBitValue` 的 start
+  常量 25→22 当全量读。
+- **为什么**：S2 布局中 a（bits22–24）在窗口低位、b（bits25–31）在高位，十位窗口
+  `(v>>22)&0x3FF` 在数值上是 `a + 8b`，与 `a*128+b` 不等价（`count=1023` 的巧合相等
+  不能推广）；直接读 b 会让整堆出售判定、出售数量输入框上限与拆堆守卫按 b 残量
+  （真机实证：200 个中药水按 b=72 结算，实得 546 而非 1540）。重定向到已 hook 的
+  `ITEM_GetCumulateCount` 复用 R-46/R-47/R-49 的门控与解码，且同属 libgame.so
+  （bl 无需 thunk）；getter 关闭态返回 b，与原版逐位一致，故重定向常驻、不随上限
+  开关 revert。
+- **典型破坏方式**：用单指令窗口 patch 伪造全量；在 `UTIL_GetBitValue` 通用位工具上
+  hook（无物品指针，无法判类别，R-46）；把 `SetBitValue` 写点 start 22 化（`v<<22`
+  会把 v 低 3 位写进 a、高 7 位写进 b，反序布局）。
+- **验证锚**：Host `test_sell_divide_s2_read_window`（getter 解码两态等价 + 窗口伪修复
+  反例 + 200=a1b72）；真机 `VM-37`：`logcat` 出现 5 条 `Inotia4Export: redirect ...`
+  且 `stack canonical layout applied`；商店整堆/部分出售金额与 UI 数量一致（待取证）。
+- **表范围**：`g_stack_getter_redirect_patches` 当前仅上述 5 条；装备页详情出售结算
+  函数 `0x1261c4` 的内联 b 段读点（`0x126208`，由 `UIEquip_OKDestroyItem@0xb8468`
+  调用）当前不在表内——启用态由 R-55 H-23 `UIEquip_OKDestroyItem` 在回调层整体接管，
+  关闭态与装备详情仍走原版 b 段语义。
+
+### R-52 数量产生点入参语义必须以反汇编数据来源证明，不得按签名注释臆断
+
+- **规则一句话**：任何原版函数的「数量入参」判定必须有反汇编证据证明该入参进入
+  数量写点；仅凭 `game_symbols.h` 注释或函数名推断的入参不得用于 S2 数量回写，
+  拿不到可信数量源时 fail-closed 不写（R-46/R-49）。
+- **为什么**：`ITEMSYSTEM_MakeItem`（`0x10c6c8`）的 arg2（w1）实为与静态表 +0x2 域
+  匹配的查找/品质参数（`CHARSYSTEM_DropItem` 传 2..5、`DEALSYSTEM_MakeSale` 传 5），
+  产物数量由函数内 `CAL_Calculate` 公式写点（`0x10ca3c`，域 ≤99，b 写即全量）生成；
+  曾按签名注释把 arg2 当 count 回写（`count>1` 恒真），把掉落物数量污染成 2/3/4/5
+  （真机实证：药水 2/卷轴 3/材料 4）。撤销回写后 `make_item_wrapper` 纯透传，
+  回写计划经纯函数 `stage4_make_item_writeback_count`（恒 0）。
+- **典型破坏方式**：用 `count > 1` 之类的「非零即回写」守卫；把品质/查找参数、
+  category、flag 当数量；在缺少数量来源时猜测写入。
+- **验证锚**：Host `stage4_hook_tests` 的 `test_make_item_writeback_count`（掉落
+  品质分支 2..5 与商店货架 arg2=5 全部返回 0，边界/负数/未知类别同样 0）；真机
+  `VM-38`：拾取/掉落可堆叠物品一次得 1 个（待取证）。
+
+### R-53 SaveItem 漏斗在入库前必须先尝试并入扩展袋同类堆，再新建空槽
+
+- **规则一句话**：`INVEN_SaveItem` 漏斗的两条收编路径都必须在新建槽之前先合并：
+  ① backup 前 `virtual_bag_merge_native_item`（原版有空槽时也不让物品去原版开新格）；
+  ② backup 失败后 `virtual_bag_adopt_native_item`（原版满时）。两条路径共用
+  `adopt_merge_into` 判据（`mergeable_items` 身份 + 模式视图总量 ≤ 上限），且
+  **不受** `move_merge_enabled` 拖动合并开关门控——原版 `SaveItem→FindSaveSlot`
+  对物理袋自带同类堆自动合并语义，收编替代的是同一入库动作。
+- **为什么**：只在 adopt 分支合并会让「原版有空槽时拾取」在扩展袋已有同类堆旁
+  仍进原版新格；只在 backup 前合并又会让「原版满时拾取」在扩展袋新开一格（真机
+  实证：拾取不并入扩展背包已有同类堆）。合并产物 canonical 与移动合并同口径
+  （保留 existing payload、按视图相加后经 `patch_payload_count` 写回、
+  `descriptor.count` 回填 `s2_read_count`），物化对象数量位同步写回、原版对象
+  释放回池（延迟回收 R-36）。
+- **payload 布局与身份判据（`SAVE_SaveItem@0x1274f0`）**：payload 为「u8 长度前缀 +
+  18B 头 + 4B×N 词缀链」——`[0]` 长度前缀、`[1..8]` u64 UID、`[9..10]` u16 I_TYPE
+  位域、`[11..14]` u32 数量位域（bits22–31）、`[15]` I_MAGIC_RATE、`[16]` I_SOCKET、
+  `[17..18]` u16 I_ENCHANT、`[19..]` 词缀链。原版「同类可堆叠」判据只比较
+  I_TYPE bit6–15（类别）与可堆叠位（`INVEN_FindSaveSlot@0x103b48-0x103b9c`、
+  `INVEN_SaveItemDirect@0x103c88-0x103cb0`、`INVEN_MoveItem@0x104a50-0x104a7c`），
+  不比较 UID/词缀/镶嵌；模块 `mergeable_identity_equal` 在类别之外把 I_TYPE 其余位、
+  镶嵌、附魔与词缀链一并纳入，**只排除 UID 与数量位两个每实例可变字段**，绝不整份
+  memcmp（整份 memcmp 因 UID 不同导致拾取永不合并）。
+- **典型破坏方式**：把合并挂到 `move_merge_enabled`（拾取行为随拖动开关变化）；
+  直接改 descriptor.count 不写 payload/物化对象；合并后不更新
+  `g_module_object_hashes`（`module_item_locked` 会判 stale 并重建）；backup 前
+  合并后不释放收编对象。
+- **验证锚**：Host `test_adopt_merge_plan`（同类合并/身份不同拒绝/启用态 999 上限/
+  关闭态视图相加且 a 保留/非可堆叠门控拒绝，backup 前后共用同一判据）；真机
+  `VM-39`：①原版有空槽时拾取同类物品并入扩展已有堆（不进原版新格）；②原版袋满时
+  拾取同样并入扩展已有堆（待取证）。
+
+### R-54 ext→orig 目标袋为投影宿主时必须事务期恢复真实容量且不得切换显示袋
+
+- **规则一句话**：`move_extension_to_original_locked` 中，当
+  `ext2orig_requires_host_capacity_restore(view_installed, target_bag,
+  g_module_window_original_bag)` 为真时，事务期（满包预检与 `INVEN_SaveItemOnEmpty`
+  之前）必须把被投影替换的宿主袋容量字恢复真实值，并由 RAII 在任何出口写回投影值；
+  显示袋切换（`set_original_bag_locked`）仅在
+  `ext2orig_should_switch_display_bag(view_installed)` 为真（非投影/API 路径）时执行。
+- **为什么**：`INVEN_GetBagSize` 与 `INVEN_SaveItemOnEmpty` 的空槽扫描都读袋对象
+  `+0x10` 容量位，而 `install_module_view_locked` 会把宿主袋容量字临时替换为扩展
+  容量；目标袋恰为宿主袋时（扩展视图宿主常是原版袋 0），预检/插入按被污染容量
+  判定——扩展容量小于真实容量时误判「已满」拒绝（真机实证：无法移入原版袋 0，
+  袋 1 正常）。投影安装中 CUR_BAG（direct/GOT 成对写，R-26/R-27）是宿主身份的一
+  部分，事务内切换会让宿主记录与 CUR_BAG 分叉，下一次 install 把用户目标袋误选
+  为宿主（原版袋容量字被写扩展容量、扩展内容投影上去、物品未真正移动）。
+- **典型破坏方式**：只加满包预检而不管容量字；用 `restore_module_view_locked`
+  （会卸载投影）代替局部容量字恢复；在投影中 `set_original_bag_locked(target_bag)`
+  改写宿主；忘记在失败/成功出口写回投影容量字（RAII）。
+- **验证锚**：Host `test_ext2orig_host_guards`（宿主判定/非宿主/非投影/无效宿主，
+  显示袋切换仅在非投影）；真机 `VM-40`：投影中扩展物品可移入原版袋 0（宿主袋），
+  失败路径不出现宿主分叉视图（待取证）。
+
+### R-55 原版背包详情出售必须由模块按 canonical 全量接管结算
+
+- **规则一句话**：`UIEquip_OKDestroyItem@0xb83d0` 的背包详情（`desc_type==2`）结算
+  在堆叠上限启用态下由 H-23 `ok_destroy_item_wrapper` 完全接管——取已 hook 的
+  `ITEM_GetCumulateCount` canonical 全量、按 `unit×count×7/10` 加钱、删整堆并刷新；
+  按钮预演（`UIEquip_ButtonDestroyExe` 内 `x23=0x666`）只回填展示金额、绝不结算；
+  关闭态、非背包详情、类别非 count-encoded、禁售/取价失败/金额越界或槽位复核失败
+  一律 backup 原版（fail-safe，不半执行）。
+- **为什么**：原版结算函数 `0x1261c4` 内联 `UTIL_GetBitValue(+0x10,31,25)` 只读 b 段
+  再 clamp（`b∈[1,99]?b:1`），S2 下 canonical `199`（b=71）被按 71 结算（真机实证：
+  实得 546 而非 1540）。只重定向该读点而不改后续 clamp 会把 getter 的 canonical `>99`
+  压成 1（证伪记录见 Hub §5.2 经验记录），因此改由回调层整体接管，复用统一 getter 的
+  类别门控与模式解码。
+- **典型破坏方式**：在按钮预演阶段就真实结算（按下按钮即提前售出、取消不可回滚）；
+  用返回地址区分预演/弹窗 OK（经 Dobby 桥后 LR 不可信）；接管后仍按原版 b 段计价；
+  加钱失败后继续删堆而不退款；把 `desc_type==1`（扩展/其它袋详情）也当背包结算。
+- **验证锚**：Host `stage4_hook_tests::test_vanilla_sell_takeover`
+  （`vanilla_sell_route` 两态四分支、`vanilla_sell_money` canonical
+  0/1/99/100/199/999 与越界拒绝、调用点常量 `0xb83d0`/`0xb6240`/`desc_type==2`）、
+  `test_native_equip_sell_count`（原版 b 段语义 199→71 缺陷基线）；真机 `VM-41`：
+  启用态背包详情整堆出售按 canonical 全量计价、取消预演不售出、关闭态回原版
+  （待取证）。
 
 ## §6 禁止事项汇总
 
@@ -766,7 +1054,7 @@
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-44`，共 44 条。
+1. 本册规则总数：`R-01..R-55`，共 55 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -775,11 +1063,39 @@
    `R-36`（触摸窗口释放必须延迟回收）、`R-37`（卖出价格边界）、`R-38`（载荷数量
    收敛适用性）、`R-39`（袋对象 marker 位段）、`R-40`（类别判定 fail-closed）、
    `R-41`（payload count 门控）、`R-42`（BagType/原生类别判定边界）、`R-43`（数量 patch
-   表准入判据）和 `R-44`（持锁原版回调 TLS 直通与删除后置条件）。
+   表准入判据）、`R-44`（持锁原版回调 TLS 直通与删除后置条件）、`R-45`（S2 编码布局
+   与总量范围）、`R-46`（S2 高位段类别门控 fail-closed）、`R-47`（关闭态低 7 位视图
+   与 `a` 保留，决策 b）、`R-48`（sidecar 无版本标识、统一 S2、模式仅影响运行时视图
+   与 clamp）、`R-49`（读侧统一 getter、写侧
+   调用方级处理）、`R-50`（apply 准入目标装备类校验）、`R-51`（出售/拆堆位读重定向
+   到统一 getter，禁止窗口伪修复）、`R-52`（数量入参必须反汇编证明，MakeItem arg2
+    非数量）、`R-53`（SaveItem 漏斗入库前先并入扩展同类堆）、`R-54`（ext→orig
+    投影宿主容量字与显示袋守卫）、`R-55`（原版背包详情出售 canonical 接管与
+    预演/结算两态）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
-   VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准。
+   VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
+   契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、
+   `R-46` 读侧门控已落地（H-17 fail-closed）、`R-47` 关闭态低 7 位视图与 `a` 保留
+   （决策 b）已落地（Host `test_stack_codec_effective_mode`、
+   `test_virtual_bag_mode_aware_ops`，真机锚 `VM-36` 待取证）、`R-48` 无版本标识统一
+   S2 已落地（Host `test_stack_codec_mode_invariance`、
+   `test_virtual_bag_cross_config_roundtrip`）、`R-49` 读侧 getter hook 与写侧调用方级
+   门控已落地（S2-P2/P3，H-17 与 H-18..H-21 + Host
+   `test_get_cumulate_count_s2`、`test_remove_item_data_plan`）；真机证据 `VM-32`..`VM-36` 均待取证。`R-50`（apply 准入目标
+   装备类校验）已落地（G-8/p5/H-15 路由 + Host `stage4_hook_tests` 断言），真机
+   证据归 S-03/VM-10。`R-51`（出售/拆堆位读重定向 getter）已落地
+   （`g_stack_getter_redirect_patches` + Host `test_sell_divide_s2_read_window`，
+   真机重定向日志已取证、行为归 `VM-37` 待取证）；`R-52`（MakeItem arg2 非数量、
+   回写撤销）已落地（Host `test_make_item_writeback_count`，行为归 `VM-38` 待取证）；
+   `R-53`（adopt 先合并同类堆）已落地（Host `test_adopt_merge_plan`，行为归
+   `VM-39` 待取证）；`R-54`（ext→orig 宿主容量字与显示袋守卫）已落地
+    （Host `test_ext2orig_host_guards`，行为归 `VM-40` 待取证）；`R-55`（原版背包
+    详情出售接管）已落地（Host `test_vanilla_sell_takeover`，行为归 `VM-41` 待取证）。
 4. 当前 sync 接口只做投影控件修复，原版 RefreshItemArea 位于移动收尾路径。
 5. 无锚规则：`R-01`、`R-03`、`R-05`、`R-06`、`R-11`、`R-12`、`R-13`、`R-14`、
-   `R-15`、`R-17`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`，共 15 条；
-   其中已给源码锚但尚无专门 host/真机锚的规则，验收册仍应补操作证据。
+   `R-15`、`R-17`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`、`R-46`、
+   `R-49`，共 17 条；
+   其中已给源码锚但尚无专门 host/真机锚的规则，验收册仍应补操作证据；
+   `R-46`/`R-49` 的真机写侧证据归 `VM-34`，`R-47` 的真机证据归 `VM-36`
+   （均待取证）。
 6. 规则正文以当前源码和本册证据锚为准。

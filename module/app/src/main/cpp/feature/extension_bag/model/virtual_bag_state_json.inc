@@ -1,4 +1,5 @@
 inline std::string state_json(const State& state, bool include_isolations = false) {
+    // 无版本标识：sidecar 数量位只有 S2 一种布局，读写统一 s2_*，与运行时配置无关。
     std::string json = "{\"mode\":\"";
     json += state.mode == Mode::kModule ? "module" : "original";
     json += "\",\"originalSelected\":" + std::to_string(state.original_selected);
@@ -189,9 +190,19 @@ inline bool parse_pending_transfer(const char* json, PendingTransfer* out) {
     return parse_pending_transfer_result(json, out) == PendingTransferParseResult::kOk;
 }
 
+// 把 32 位数量字段写回 payload 数量位（仅 count-encoded 类别调用）。
+inline void store_payload_count_field(Item* item, uint32_t field_value) {
+    for (size_t i = 0; i < 4; ++i) {
+        item->payload[kPayloadCountOffset + i] =
+            static_cast<uint8_t>((field_value >> (8 * i)) & 0xFF);
+    }
+}
+
 inline bool parse_state_json(const char* json, State* state,
                              CategoryStackCountPredicate is_count_encoded = nullptr) {
     if (json == nullptr || state == nullptr) return false;
+    // 宽容忽略旧字段：历史 sidecar 可能携带 \"encodingVersion\"，当前无版本标识、
+    // 数量位统一 S2 布局，读到该字段直接忽略，不报错、不迁移。
     const char* types = strstr(json, "\"types\":[");
     if (types == nullptr) return false;
     const char* cursor = types + strlen("\"types\":[");
@@ -310,11 +321,14 @@ inline bool parse_state_json(const char* json, State* state,
                 item.payload_size = static_cast<uint16_t>(decoded);
                 // payload 只需与 descriptor 的 canonical 数量同步。不能按当前配置
                 // 判断“是否超限”，否则跨配置读档会改写已有数量。
-                if (count_encoding == stack_codec::CountEncoding::kEncoded &&
-                    payload_count(item) != canonical_count) {
-                    if (!patch_payload_count(&item, canonical_count, is_count_encoded)) {
-                        return false;
+                // 可堆叠类别：payload 数量位按 S2 解码，与 canonical 不一致时以
+                // S2 重编码对齐；非可堆叠类别逐字节保留（R-46）。
+                if (count_encoding == stack_codec::CountEncoding::kEncoded) {
+                    uint32_t count_field = payload_count(item);
+                    if (stack_codec::s2_read_count(count_field) != canonical_count) {
+                        count_field = stack_codec::s2_write_count(count_field, canonical_count);
                     }
+                    store_payload_count_field(&item, count_field);
                 }
             }
             cursor = object_end + 1;

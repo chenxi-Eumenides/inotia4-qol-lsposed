@@ -1,5 +1,8 @@
 #include "inventory_hook_stage4.h"
 
+#include "core/native/sell_price.h"
+#include "data/native/game_symbols.h"
+
 int stage4_have_item(int32_t category, Stage4HaveBackup backup,
                      Stage4CountExtension extension_count, bool& recursive_guard) {
     if (recursive_guard) return backup == nullptr ? 0 : backup(category);
@@ -30,6 +33,62 @@ int stage4_have_item_original_only(int32_t category, Stage4HaveBackup backup,
 int stage4_get_item_count_original_only(int32_t category, Stage4CountBackup backup,
                                         bool& recursive_guard) {
     return stage4_get_item_count(category, backup, nullptr, recursive_guard);
+}
+
+int stage4_get_cumulate_count(void* item, uint32_t raw_count_field,
+                              stack_codec::CountEncoding encoding,
+                              Stage4CumulateBackup backup, bool limit_enabled) {
+    // 只有 count-encoded 类别解释数量位段；装备 marker、宝石选项、袋容量等位段
+    // 语义一律交还原版 backup（R-46 fail-closed：kUnknown 也走 backup）。
+    // 解码值按模式视图（R-47 决策 b）：启用态 S2 全量 128a+b，关闭态只读 b 段。
+    if (item != nullptr && encoding == stack_codec::CountEncoding::kEncoded) {
+        return static_cast<int>(
+            stack_codec::effective_read_count(raw_count_field, limit_enabled));
+    }
+    return backup == nullptr ? 0 : backup(item);
+}
+
+uint32_t native_equip_sell_count(uint32_t field) {
+    // 原版 0x1261c4 的 b 段直读 + clamp（证据见头注释）：只解释 bits25–31，
+    // 不读 a 段、不读 descriptor canonical。b==0 或 b>99 一律回退 1（装备 marker
+    // 100 与 b∈[100,127] 的误判区间由此兜底）。重定向安装后运行时不再走此语义，
+    // 仅在重定向未安装/回滚时作为原版回退参照。
+    const uint32_t b = (field >> stack_codec::kS2ShiftB) &
+                       ((1u << stack_codec::kS2BitsB) - 1u);
+    return (b >= 1u && b <= 99u) ? b : 1u;
+}
+
+bool stage4_equip_sell_redirect_matches(uint32_t arg_orig, uint32_t call_orig) {
+    // 重定向表（game_patch_core.inc 的 F_UIEQUIP_SELL_SETTLE_VMA 条目）必须与
+    // 反汇编原字节逐位一致；调用方用本谓词校验，Host 用同一常量断言。
+    return arg_orig == kEquipSellRedirectArgOriginal &&
+           call_orig == kEquipSellRedirectCallOriginal;
+}
+
+VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run) {
+    // 关闭态一律 backup：原版逐指令不变（R-55 决策 a）。
+    if (!limit_enabled) return VanillaSellRoute::kBackup;
+    // 启用态：按钮预演只回填展示金额，绝不结算（取消不可回滚）；弹窗 OK 真实接管。
+    return button_dry_run ? VanillaSellRoute::kPreview : VanillaSellRoute::kTakeover;
+}
+
+bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price) {
+    if (out_price == nullptr || canonical_count == 0) return false;
+    // 启用态上限 999；canonical 已是 128a+b 全量，越界按模式上限收敛（与扩展出售同口径）。
+    const uint32_t legal_count = stack_codec::effective_clamp(canonical_count, true);
+    if (legal_count == 0) return false;
+    return sell_price::calculate(unit_price, legal_count, /*apply_variant_discount=*/true,
+                                 out_price);
+}
+
+uint32_t stage4_make_item_writeback_count(int32_t category, int32_t arg2, int32_t flag) {
+    // MakeItem 的 arg2 是静态表查找/品质参数而非数量（证据见头注释）；产物数量
+    // 由原版 CAL 公式写点生成且 ≤99（b 写即全量）。任何入参都不构成回写依据，
+    // 恒 0 = wrapper 纯透传（fail-closed：拿不到可信数量源就不写，R-46/R-49）。
+    (void)category;
+    (void)arg2;
+    (void)flag;
+    return 0;
 }
 
 int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
@@ -142,6 +201,13 @@ bool stage4_is_extension_equip_control_source(uint64_t event, bool extension_sou
     return event == 0x04 && extension_source && source_is_apply_material && target_is_equip_slot;
 }
 
+bool stage4_is_extension_apply_candidate(bool same_bag,
+                                         bool source_is_apply_material,
+                                         bool target_is_equip,
+                                         bool apply_stuff_allowed) {
+    return same_bag && source_is_apply_material && target_is_equip && apply_stuff_allowed;
+}
+
 bool stage4_finish_requires_abort(bool finished) {
     return !finished;
 }
@@ -178,4 +244,45 @@ bool stage4_install_transaction(const Stage4HookSpec* hooks, std::size_t count,
         }
     }
     return true;
+}
+
+Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* pre,
+                                                  const Stage4RemoveDataPost* post,
+                                                  int entry_count, int32_t count) {
+    Stage4RemoveDataPlan plan;
+    if (pre == nullptr || post == nullptr || entry_count <= 0 || count <= 0) return plan;
+    // 顺序（与原版一致）：先整删后部分删，部分删堆唯一。先汇总整删（快照对象
+    // 已不在槽内/被替换）并定位唯一缩减堆；任何第二缩减堆或增长堆都是数据矛盾，
+    // fail-closed 放弃修正。
+    uint32_t sum_vanished = 0;
+    int shrunk_index = -1;
+    uint32_t sum_kept_post = 0;
+    for (int index = 0; index < entry_count; ++index) {
+        if (post[index].item != pre[index].item) {
+            sum_vanished += pre[index].pre_full;
+            continue;
+        }
+        if (post[index].post_view < pre[index].pre_full) {
+            if (shrunk_index >= 0) return Stage4RemoveDataPlan{};
+            shrunk_index = index;
+            continue;
+        }
+        if (post[index].post_view != pre[index].pre_full) return Stage4RemoveDataPlan{};
+        sum_kept_post += post[index].post_view;
+    }
+    if (shrunk_index < 0) return plan;
+    const uint32_t pre_full = pre[shrunk_index].pre_full;
+    if (sum_vanished > static_cast<uint32_t>(count)) return Stage4RemoveDataPlan{};
+    // 原版部分删堆剩余 = pre_full - (count - 之前整删总量)；入参异常（count 过大、
+    // 恰好等于本堆全量——那应走整删分支）时公式越域，一律 fail-closed。
+    const uint32_t deleted_here = static_cast<uint32_t>(count) - sum_vanished;
+    if (deleted_here >= pre_full) return Stage4RemoveDataPlan{};
+    const uint32_t remain = pre_full - deleted_here;
+    const uint32_t post_view = post[shrunk_index].post_view;
+    if (remain > stack_codec::kS2Max) return Stage4RemoveDataPlan{};
+    if (remain == post_view) return plan;  // 原版 b 写已完整表达 remain（含 a=0）
+    plan.correct = true;
+    plan.entry_index = shrunk_index;
+    plan.remain = remain;
+    return plan;
 }

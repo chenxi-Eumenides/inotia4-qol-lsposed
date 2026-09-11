@@ -30,8 +30,8 @@ std::string data_save_slots_json() {
     for (int i = 0; i < 3; ++i) {
         if (i > 0) s += ",";
         void* slot = fn_save_get_save_slot(i);
-        uint8_t b2 = slot ? *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(slot) + 2) : 0;
-        int8_t hero_idx = slot ? *reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(slot) + 0x1c) : -1;
+        uint8_t b2 = slot ? *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(slot) + SAVESLOT_EXISTS) : 0;
+        int8_t hero_idx = slot ? *reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(slot) + SAVESLOT_HERO_INDEX) : -1;
         bool exists = (b2 != 0);
         s += "{\"slot\":" + std::to_string(i) + ",\"exists\":" + (exists ? "true" : "false");
         if (exists) {
@@ -79,14 +79,14 @@ static std::string save_preflight_for_enter(int32_t slot) {
     std::string detail;
     if (slot_state == 2) {
         void* hero = fn_saveslot_get_hero(ss);
-        hero_index = *reinterpret_cast<int8_t*>(p + 0x1c);
+        hero_index = *reinterpret_cast<int8_t*>(p + SAVESLOT_HERO_INDEX);
         if (hero == nullptr) {
             void* raw_hero = nullptr;
             if (hero_index >= 0 && hero_index < 3) {
-                raw_hero = *reinterpret_cast<void**>(p + 0x04 + hero_index * sizeof(void*));
+                raw_hero = *reinterpret_cast<void**>(p + SAVESLOT_HERO_PTRS + hero_index * sizeof(void*));
             }
             if (raw_hero == nullptr) {
-                uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + 0x2f4000 + 0x120);
+                uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + G_PLAYER_INDICES_GOT_VMA);
                 std::string detail = "slot state is loaded but raw hero pointer is null";
                 if (player_indices != nullptr && g_main_merc_slot != nullptr) {
                     detail += "; player_indices=" + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[0])))
@@ -101,7 +101,7 @@ static std::string save_preflight_for_enter(int32_t slot) {
                 "slot raw hero pointer is non-null but SAVESLOT_GetHero returned null");
         }
         hero_level = static_cast<int8_t>(*reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(hero) + C_LEVEL));
-        uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + 0x2f4000 + 0x120);
+        uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + G_PLAYER_INDICES_GOT_VMA);
         if (player_indices != nullptr && g_main_merc_slot != nullptr) {
             detail = "player_indices=" + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[0])))
                 + "," + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[1])))

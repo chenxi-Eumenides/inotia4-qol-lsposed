@@ -106,7 +106,7 @@ void install_extension_tab_buttons_locked() {
         fn_ctrl_get_count == nullptr) {
         return;
     }
-    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA + 0x50);
+    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
     if (bag_container == nullptr) return;
     // 容器就位守卫：面板打开初期 0x50 槽位指向占位容器（无原版袋标签子控件，
     // rect 未定位）。此时挂载会让标签落在占位容器上（绝对 x≈296 出位）。
@@ -226,7 +226,7 @@ uint8_t* find_popup_state_entry(uintptr_t enter_target) {
     uint8_t* list = reinterpret_cast<uint8_t*>(*got);
     for (int index = 0; index < kPopupStateCount; ++index) {
         uint8_t* entry = list + index * kPopupStateSize;
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(entry + 0x10);
+        uintptr_t enter = *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER);
         if (enter == enter_target) {
             return entry;
         }
@@ -563,7 +563,8 @@ void ensure_state_loaded_locked() {
         return;
     }
     g_virtual_bag_state = {};
-    if (!extension_bag_load_state_from_store(slot)) {
+    const bool state_loaded = extension_bag_load_state_from_store(slot);
+    if (!state_loaded) {
         VIRTBAG_LOG("virtual bag state slot=%d unavailable; using empty state", slot);
     }
     // mode/selected 是背包面板会话作用域字段：读档时世界界面必然从原版视图开始。

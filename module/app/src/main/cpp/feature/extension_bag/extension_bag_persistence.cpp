@@ -123,7 +123,8 @@ bool extension_bag_load_state_from_store(int slot) {
     if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
     env->DeleteLocalRef(result);
     __android_log_print(ANDROID_LOG_INFO, kLogTag,
-                        "sidecar load slot=%d parsed=%d items=%s", slot, parsed ? 1 : 0,
+                        "sidecar load slot=%d parsed=%d items=%s", slot,
+                        parsed ? 1 : 0,
                         occupied_item_summary(*state).c_str());
     return parsed;
 }

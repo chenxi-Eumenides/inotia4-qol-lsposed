@@ -109,7 +109,7 @@ static std::string build_units_json_impl(int mode, bool include_charloc) {
                 if (mode == 1 && type != 1) continue;  // enemies：仅怪物/NPC
                 if (mode == 2) {                        // interactives：仅可交互装饰物
                     if (type != 2) continue;
-                    uint16_t fd = *reinterpret_cast<uint16_t*>(obj + 0x0a);
+                    uint16_t fd = *reinterpret_cast<uint16_t*>(obj + C_FUNC_DISPLAY);
                     if (fn_check_function_display == nullptr || fn_check_function_display(fd) == 2) continue;
                 }
                 if (emitted > 0) s += ",";
@@ -128,7 +128,7 @@ static std::string build_units_json_impl(int mode, bool include_charloc) {
                     s += ",\"name\":null";
                 }
                 if (type == 2) {
-                    uint16_t fd = *reinterpret_cast<uint16_t*>(obj + 0x0a);
+                    uint16_t fd = *reinterpret_cast<uint16_t*>(obj + C_FUNC_DISPLAY);
                     s += ",\"func_display\":" + std::to_string(fd);
                     if (fn_check_function_display != nullptr) {
                         s += ",\"interactable\":" +
@@ -203,9 +203,9 @@ std::string build_drops_json() {
         uint8_t* arr = *reinterpret_cast<uint8_t**>(*reinterpret_cast<void**>(g_base + G_DROP_ARRAY_GOT_VMA));
         int emitted = 0;
         for (int i = 0; arr != nullptr && i < n; ++i) {
-            uint8_t* e = arr + i * 0x20;
-            int16_t x = *reinterpret_cast<int16_t*>(e + 0x8);
-            int16_t y = *reinterpret_cast<int16_t*>(e + 0xa);
+            uint8_t* e = arr + i * GROUND_ITEM_SIZE;
+            int16_t x = *reinterpret_cast<int16_t*>(e + GROUND_ITEM_X);
+            int16_t y = *reinterpret_cast<int16_t*>(e + GROUND_ITEM_Y);
             if (emitted > 0) s += ",";
             s += "{\"x\":" + std::to_string(x);
             s += ",\"y\":" + std::to_string(y) + "}";

@@ -335,14 +335,11 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         const bool source_is_apply_material = extension_source &&
             ((fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
              (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0));
-        const stack_codec::CountEncoding target_encoding = item_count_encoding(target_item);
-        if (source_is_apply_material && target_item != nullptr &&
-            target_encoding == stack_codec::CountEncoding::kUnknown) {
-            VIRTBAG_LOG("equip control blocked: target category unavailable item=%p", target_item);
-            return VirtualBagEquipControlEventResult::kBlocked;
-        }
-        const bool target_is_equip_slot = target_encoding == stack_codec::CountEncoding::kNotEncoded &&
-            target_slot_index >= 16;
+        // H-15 装备槽事件适配（R-50）：目标必须是装备类（item_is_equip 判定；
+        // 类别数据不可用时 item_is_equip 为假，按非装备 fail-closed 直通原版
+        // backup，不得 Blocked），且落点是装备槽控件（slot index >= 16）。
+        const bool target_is_equip_slot = target_item != nullptr &&
+            item_is_equip(target_item) && target_slot_index >= 16;
         if (!stage4_is_extension_equip_control_source(
                 event, extension_source, source_is_apply_material, target_is_equip_slot)) {
             return VirtualBagEquipControlEventResult::kNotExtension;
@@ -546,7 +543,11 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
                 use_token)) {
             return false;
         }
-        const int before_count = g_virtual_bag_state.items[bag][slot].count;
+        // 消耗前数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b，
+        // 与 getter 的 observed_before 同域参与扣减判定。
+        const int before_count = static_cast<int>(stack_codec::effective_view_count(
+            static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
+            stack_limit_enabled()));
         const int observed_before = fn_get_cumulate_count != nullptr
             ? fn_get_cumulate_count(item) : before_count;
         if (!consume_extension_item_after_native_locked(
@@ -629,8 +630,9 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
         virtual_bag::Item& equip_descriptor = g_virtual_bag_state.items[equip_bag][equip_slot];
         equip_descriptor.payload = payload;
         equip_descriptor.payload_size = payload_size;
+        // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
         equip_descriptor.count = fn_get_cumulate_count != nullptr
-            ? fn_get_cumulate_count(equip_item) : equip_descriptor.count;
+            ? canonical_item_count(equip_item) : equip_descriptor.count;
         g_module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
         g_item_state_dirty = true;
         persist_state_locked();
@@ -726,7 +728,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     }
     // 袋对象 +0x10 的 bit0..24 是容量，ITEMSYSTEM_CreateItem（0x10be9c）已按
     // ITEMSTATICBASE[category]（1→4、2→8、3→12、4→16）自动写入。只改
-    // bit25..31，禁止用 stack_codec::write_count；统一经
+    // bit25..31，禁止用 s2_write_count；统一经
     // write_native_bag_object_marker 保留容量位段。
     {
         const uint32_t flags = *reinterpret_cast<uint32_t*>(
@@ -995,8 +997,10 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
         ? fn_get_bit(*reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE),
                      15, 6)
         : 0;
+    // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）：
+    // 卸下收编的物品数量位保留完整 128a+b。
     descriptor.count = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : 1;
+        ? canonical_item_count(item) : 1;
     // 装备槽对象仍被原版 UI（装备槽 desc/控件缓存）引用，不能释放给对象池；
     // 直接收编为扩展槽的物化对象（与 equip_module_item_on_character_locked
     // 对旧装备的收编同规则）。
@@ -1027,68 +1031,157 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     return true;
 }
 
-bool virtual_bag_adopt_native_item(void* item) {
-    // INVEN_SaveItem（0x104528）无空位（FindSaveSlot 失败）时的扩展袋接管：
-    // 把原版"新创建但无处可放"的物品收进扩展袋空位。被 hook 的 wrapper 在
-    // backup 返回 0 后调用；返回 true 则 wrapper 上报成功，上层（任务奖励/
-    // 事件发奖/开箱/拾取等）不会把物品掉地或静默释放。
-    if (item == nullptr || !g_virtual_bag_enabled.load()) return false;
+// ---- 入库落位单一 owner（R-53）----
+// SaveItem 漏斗的两条入口（backup 前合并 / backup 失败后收编）共用同一落位驱动：
+// 先并入扩展袋既有同类堆（adopt_merge_into 判据），否则（仅 allow_new_slot）新建
+// 扩展空槽。owner 内部取 g_virtual_bag_mtx，只做副作用（对象写回/descriptor/hash/
+// persist/refresh/free），不调用被 Hook 原版（仅 defer_item_free_locked/
+// fn_itempool_free），满足 R-44。original-first 由调用方 wrapper 保证：本 owner
+// 不触碰原版 backup。
+enum class VirtualBagPlaceOutcome : uint8_t {
+    kNotApplicable,  // null/禁用/门控不符/已在模块槽：调用方保持原版
+    kMerged,         // 并入既有扩展同类堆
+    kPlacedNewSlot,  // 新建扩展槽（仅 allow_new_slot）
+    kNoSpace,        // 无合并目标且无空槽
+    kRejected,       // serialize/generation 拒绝（失败路径已回滚）
+};
+
+struct VirtualBagPlaceRequest {
+    void* item = nullptr;
+    bool allow_new_slot = false;  // merge=false, adopt=true
+    bool require_world = false;   // merge=true, adopt=false
+};
+
+VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceRequest& req) {
+    if (req.item == nullptr || !g_virtual_bag_enabled.load()) {
+        return VirtualBagPlaceOutcome::kNotApplicable;
+    }
+    if (req.require_world && !game_in_world()) {
+        return VirtualBagPlaceOutcome::kNotApplicable;
+    }
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
-    int existing_bag = -1;
-    int existing_slot = -1;
-    if (module_slot_of_item_locked(item, &existing_bag, &existing_slot)) return false;
+    int holder_bag = -1;
+    int holder_slot = -1;
+    if (module_slot_of_item_locked(req.item, &holder_bag, &holder_slot)) {
+        return VirtualBagPlaceOutcome::kNotApplicable;
+    }
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
-    if (!serialize_item_payload_locked(item, &payload, &payload_size)) return false;
-    int dst_bag = -1;
-    int dst_slot = -1;
-    for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
-        if (g_virtual_bag_state.types[bag] == 0) continue;
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (module_slot_is_assignable_locked(bag, slot)) {
-                dst_bag = bag;
-                dst_slot = slot;
-                break;
-            }
-        }
+    if (!serialize_item_payload_locked(req.item, &payload, &payload_size)) {
+        return VirtualBagPlaceOutcome::kRejected;
     }
-    if (dst_bag < 0) return false;  // 扩展袋也满：如实上报失败（上层按原版语义处理）
-    virtual_bag::Item& descriptor = g_virtual_bag_state.items[dst_bag][dst_slot];
-    descriptor.payload = payload;
-    descriptor.payload_size = payload_size;
-    descriptor.category = fn_get_bit != nullptr
-        ? fn_get_bit(*reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE),
-                     15, 6)
+    const int category = fn_get_bit != nullptr
+        ? fn_get_bit(*reinterpret_cast<uint16_t*>(
+              reinterpret_cast<uint8_t*>(req.item) + I_TYPE), 15, 6)
         : 0;
-    descriptor.count = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : 1;
-    if (descriptor.count <= 0) descriptor.count = 1;
-    // 原版对象直接收编为扩展槽物化对象（SaveItem 失败对象未进库、无其他
-    // 持有者；adopt 后生命周期归模块 g_module_objects 管理）。
-    if (!module_object_generation_advance_locked(dst_bag, dst_slot, "native save adopt")) {
-        VIRTBAG_LOG("native save adopt blocked by active object bag=%d slot=%d",
-                    dst_bag, dst_slot);
-        return false;
+    // descriptor.count 恒为 canonical（R-38/R-48）：getter 关闭态只返回 b 视图，
+    // 必须按 S2 解码保存完整 128a+b，否则 sidecar 读档会把 a 段对齐抹掉。
+    int canonical_count = fn_get_cumulate_count != nullptr
+        ? canonical_item_count(req.item) : 1;
+    if (canonical_count <= 0) canonical_count = 1;
+    const bool limit_enabled = stack_limit_enabled();
+    virtual_bag::Item source{};
+    source.category = category;
+    source.count = canonical_count;
+    source.payload = payload;
+    source.payload_size = payload_size;
+
+    const virtual_bag::PlacePlan plan = virtual_bag::place_plan(
+        g_virtual_bag_state.items, g_virtual_bag_state.types,
+        g_virtual_bag_state.capacities, source, req.allow_new_slot, limit_enabled,
+        virtual_bag_category_uses_stack_count, &module_slot_is_assignable_locked);
+
+    if (plan.outcome == virtual_bag::PlaceOutcome::kMerged) {
+        const int bag = plan.bag;
+        const int slot = plan.slot;
+        const virtual_bag::Item& merged = plan.merged;
+        // 物化对象同步：已有堆对象（若已物化）数量位按模式视图写回，保持
+        // 对象 +0x10 与 descriptor canonical 一致（非 count-encoded 在
+        // adopt_merge_into 的 mergeable_items 门控内已拒绝，R-46）。
+        void* materialized = g_module_objects[bag][slot];
+        if (materialized != nullptr) {
+            const uint32_t written = stack_codec::effective_write_count(
+                *reinterpret_cast<const uint32_t*>(
+                    reinterpret_cast<const uint8_t*>(materialized) + I_COUNT),
+                static_cast<uint32_t>(stack_codec::effective_view_count(
+                    static_cast<uint32_t>(merged.count), limit_enabled)),
+                limit_enabled);
+            *reinterpret_cast<uint32_t*>(
+                reinterpret_cast<uint8_t*>(materialized) + I_COUNT) = written;
+        }
+        g_virtual_bag_state.items[bag][slot] = merged;
+        g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(merged);
+        g_item_state_dirty = true;
+        persist_state_locked();
+        if (g_module_view_installed && g_module_view_index == bag) {
+            refresh_module_item_area_locked(bag);
+        }
+        // 收编对象未进库、无其他持有者（调用方前置门控），并入后释放回池。
+        if (!defer_item_free_locked(req.item)) {
+            if (fn_itempool_free != nullptr) fn_itempool_free(req.item);
+        }
+        VIRTBAG_LOG("native save place merge bag=%d slot=%d category=%d count=%d->%d item=%p",
+                    bag, slot, category, canonical_count, merged.count, req.item);
+        return VirtualBagPlaceOutcome::kMerged;
     }
-    g_module_objects[dst_bag][dst_slot] = item;
-    g_module_object_categories[dst_bag][dst_slot] = descriptor.category;
-    g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(descriptor);
-    uint32_t adopted_handle = 0;
-    if (ownership::allocate(&g_ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-        g_module_object_handles[dst_bag][dst_slot] = adopted_handle;
-    } else {
-        g_module_object_handles[dst_bag][dst_slot] = 0;
-        VIRTBAG_LOG("native save adopt ledger exhausted bag=%d slot=%d", dst_bag, dst_slot);
+    if (plan.outcome == virtual_bag::PlaceOutcome::kPlacedNewSlot) {
+        const int bag = plan.bag;
+        const int slot = plan.slot;
+        virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        const virtual_bag::Item previous_descriptor = descriptor;
+        descriptor = virtual_bag::apply_new_slot_descriptor(previous_descriptor, source, true);
+        // 原版对象直接收编为扩展槽物化对象（SaveItem 失败对象未进库、无其他
+        // 持有者；落位后生命周期归模块 g_module_objects 管理）。generation 校验
+        // 失败必须回滚 descriptor，避免 descriptor 与 g_module_objects 分叉。
+        if (!module_object_generation_advance_locked(bag, slot, "native save place")) {
+            descriptor =
+                virtual_bag::apply_new_slot_descriptor(previous_descriptor, source, false);
+            VIRTBAG_LOG("native save place blocked by active object bag=%d slot=%d", bag, slot);
+            return VirtualBagPlaceOutcome::kRejected;
+        }
+        g_module_objects[bag][slot] = req.item;
+        g_module_object_categories[bag][slot] = descriptor.category;
+        g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
+        uint32_t adopted_handle = 0;
+        if (ownership::allocate(&g_ownership_ledger, &adopted_handle) ==
+            ownership::Outcome::kOk) {
+            g_module_object_handles[bag][slot] = adopted_handle;
+        } else {
+            g_module_object_handles[bag][slot] = 0;
+            VIRTBAG_LOG("native save place ledger exhausted bag=%d slot=%d", bag, slot);
+        }
+        g_item_state_dirty = true;
+        persist_state_locked();
+        if (g_module_view_installed && g_module_view_index == bag) {
+            refresh_module_item_area_locked(bag);
+        }
+        VIRTBAG_LOG("native save place new bag=%d slot=%d item=%p category=%d count=%d",
+                    bag, slot, req.item, descriptor.category, descriptor.count);
+        return VirtualBagPlaceOutcome::kPlacedNewSlot;
     }
-    g_item_state_dirty = true;
-    persist_state_locked();
-    if (g_module_view_installed && g_module_view_index == dst_bag) {
-        refresh_module_item_area_locked(dst_bag);
-    }
-    VIRTBAG_LOG("native save adopt bag=%d slot=%d item=%p category=%d count=%d", dst_bag,
-                dst_slot, item, descriptor.category, descriptor.count);
-    return true;
+    return plan.outcome == virtual_bag::PlaceOutcome::kRejected
+               ? VirtualBagPlaceOutcome::kRejected
+               : VirtualBagPlaceOutcome::kNoSpace;
+}
+
+bool virtual_bag_merge_native_item(void* item) {
+    // INVEN_SaveItem backup 前的扩展同类堆合并（VM-39 拾取并入扩展堆）：
+    // original-first——仅当扩展袋已有可合并堆（allow_new_slot=false）时并入并
+    // 返回 true；找不到则返回 false 让原版按真实容量入库。薄包装 owner。
+    const VirtualBagPlaceRequest req{item, /*allow_new_slot=*/false, /*require_world=*/true};
+    return virtual_bag_place_native_item(req) == VirtualBagPlaceOutcome::kMerged;
+}
+
+bool virtual_bag_adopt_native_item(void* item) {
+    // INVEN_SaveItem（0x104528）无空位（FindSaveSlot 失败）时的扩展袋接管：
+    // 先并入既有同类堆，否则新建扩展空槽（allow_new_slot=true）。返回 true 则
+    // wrapper 上报成功，上层（任务奖励/事件发奖/开箱/拾取等）不会把物品掉地或
+    // 静默释放。薄包装 owner。
+    const VirtualBagPlaceRequest req{item, /*allow_new_slot=*/true, /*require_world=*/false};
+    const VirtualBagPlaceOutcome outcome = virtual_bag_place_native_item(req);
+    return outcome == VirtualBagPlaceOutcome::kMerged ||
+           outcome == VirtualBagPlaceOutcome::kPlacedNewSlot;
 }
 
 // ---- Path A'：装备按钮函数级接管（Stage4 第 10 hook 的扩展侧实现）----

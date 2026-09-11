@@ -20,6 +20,11 @@
 当前工作重点是 P7 全局库存接入：按对象身份统一查询、数量、消费、删除、装备、镶嵌、移动
 和入库路径；同时逐 caller 审计生产者、失败释放、任务袋隔离和真机证据。P7 仍未整体验收。
 
+S2 数量编码契约已批准并进入开发：可堆叠数量固定为 `128a+b` 高低位布局（总量
+`0..999`，无版本标识、无迁移代码，模式经 `effective_clamp`/`effective_view_count`
+影响运行时上限与关闭态视图）与关闭态语义（决策 b：低 7 位视图、`a` 保留）；子阶段
+清单见 §3.5。S2 开发不改变 P7 与 Overall 的现有口径。
+
 ### 1.2 最终目标
 
 最终交付必须同时满足以下边界：
@@ -69,7 +74,7 @@
 | 册 | 文件 | 唯一职责 | 不负责的内容 |
 |---|---|---|---|
 | Hub | `control-plane.md` | 范围、最终目标、阶段状态、问题登记、路由、决策索引 | 实现细节和操作契约正文 |
-| 规则册 | `rulebook.md` | 袋号、锁纪律、Hook 铁律、共享状态写者、`R-01..R-36` | 阶段结论和逐操作验收 |
+| 规则册 | `rulebook.md` | 袋号、锁纪律、Hook 铁律、共享状态写者、`R-01..R-55` | 阶段结论和逐操作验收 |
 | 架构册 | `runtime-architecture.md` | 代码层级、依赖、原版链与模块链、选型、替代方案、未知限制 | 规则编号和状态总览 |
 | 库存册 | `inventory-integration-decision-plan.md` | 原版库存/物品函数逐函数 hook、旁路、保留和理由 | 拖动 session 与 sidecar 时序 |
 | 拖动册 | `drag-protocol.md` | press/move/release、session、投影、drop owner、三方向事务和问题 B 取证 | 全局 Hook 清单和保存容器 |
@@ -122,7 +127,7 @@
 | P4 | ✅ 已完成并归档 | 原版对象与逻辑状态的进程内事务桥接、唯一事务入口、失败隔离和 ownership seam 已收口。 | 物理拖动的所有风险、跨进程恢复或问题 B 已解决。 |
 | P5 | ✅ 核心路径已完成 | 三方向拖动、同袋合并、跨袋不合并、取消、session 清理和失败隔离已有阶段证据。 | 扩展↔扩展交换导致的问题 B；不得把逻辑提交等同于物理安全。 |
 | P6 | ✅ 主保存协调已完成 | 保存 callsite→core coordinator→participant 的正常成功/失败边界已形成；sidecar 双 journal 语义已分立。 | 进程中断、coordinator 自动恢复和异常组合仍未全部关闭；详见存档册缺口。 |
-| P7 | 🟡 进行中 | 阶段 0–3 静态审计完成，阶段 4 dispatcher/installer seam 已 Host 验证；线 A+B 与商店复制购买数量位段修复已完成；sidecar 读档已与运行时 clamp 分离，Host 已覆盖双向跨配置 canonical 数量保持。 | 待真机双态（99/999）、VM-19 购买数量及 VM-30 跨配置读档回归，以及 LSPosed 生产安装、阶段 5 生产者真机矩阵、全局库存覆盖和 P7 Overall。 |
+| P7 | 🟡 进行中 | 阶段 0–3 静态审计完成，阶段 4 dispatcher/installer seam 已 Host 验证；线 A+B 与商店复制购买数量位段修复已完成；sidecar 读档已与运行时 clamp 分离，Host 已覆盖双向跨配置 canonical 数量保持；本轮 S2 四项修复（R-52 MakeItem 回写撤销、R-53 SaveItem 漏斗合并前置、R-54 ext→orig 宿主容量/显示袋守卫、R-55 原版背包详情出售 canonical 接管）与 R-51 位读重定向已落地，随 debug APK `52c5471e` 构建。 | 待真机双态（99/999）、VM-19 购买数量、VM-30 跨配置读档及 VM-37..VM-41 缺陷回归，以及 LSPosed 生产安装、阶段 5 生产者真机矩阵、全局库存覆盖和 P7 Overall。 |
 
 ### 3.2 当前总闸门
 
@@ -153,6 +158,11 @@
    `b4a66375c14f` 部署到真机 2；VM-15 的 API 跨域移动回归提交与回滚均保持 health 可达；
    VM-15 拖拽路径（orig→ext 源槽后置条件 + 无卡死）真机复测待用户执行，Overall 仍保持
    `NOT_ACCEPTED`。
+9. 本轮 S2 缺陷修复已随 debug APK `52c5471e` 构建（构建产物身份，不代表真机通过）：
+   R-51 出售/拆堆直接位读重定向统一 getter（5 条；装备页详情结算点 `0x1261c4` 不在表内）；R-52 `ITEMSYSTEM_MakeItem` 数量回写撤销（arg2 非数量）；R-53 `INVEN_SaveItem`
+   漏斗入库前先并入扩展同类堆；R-54 ext→orig 目标袋为投影宿主时恢复真实容量且不切换
+   显示袋；R-55 原版背包详情出售由 H-23 按 canonical 全量接管。对应 Host 断言已落地，
+   行为断言待真机 VM-37..VM-41，Overall 仍保持 `NOT_ACCEPTED`。
 
 ### 3.4 阶段证据索引
 
@@ -168,6 +178,23 @@
 
 阶段证据发生冲突时，保留较严格的失败或未知结论；不能以较新的文档日期自动替换较弱证据。
 证据 ID、构建身份和真机用例的完整字段由验收册维护，Hub 只保存阶段指针和裁决结果。
+
+### 3.5 S2 数量编码子阶段（开发中）
+
+S2 子阶段编号独立于全局 P1–P7；各子阶段在真机证据落地前不得推进状态。
+
+| 子阶段 | 内容 | 当前状态 |
+|---|---|---|
+| S2-P0 | 契约冻结：规则 R-45..R-49、架构 hook 分层（§3.7）、存档数量语义（存档册 §6.4）、API 字段语义 | 🟡 文档已落地；S2 专属 VM 卡 VM-32..VM-41 已登记（缺陷修复 VM-37..VM-41 待取证） |
+| S2-P1 | ~~sidecar `encoding_version` 字段与 S1→S2 迁移~~ 已裁撤：无版本标识、统一 S2、旧字段宽容忽略（R-48） | 已裁撤 |
+| S2-P2 | 读侧统一 getter hook：`ITEM_GetCumulateCount@0x106094` | 🟡 代码已落地（Host `test_get_cumulate_count_s2`）；真机证据待取证 |
+| S2-P3 | 写侧调用方类别门控与 `128a+b` 进位/借位 | 🟡 代码已落地（H-18..H-21 + 模块写点，Host codec/门控断言）；真机证据待取证 |
+| S2-P4 | ~~原版袋内 `+0x10` 一次性迁移扫描~~ 已裁撤：无迁移代码，`+0x10` 由读侧 hook 与写侧调用方级写点按 S2 读写 | 已裁撤 |
+| S2-P5 | 关闭态（决策 b：低 7 位视图、`a` 保留）语义落地 | 🟡 代码已落地（`stack_codec::effective_*` 模式感知层，Host `test_stack_codec_effective_mode`/`test_virtual_bag_mode_aware_ops`）；真机证据 `VM-36` 待取证 |
+| S2-P6 | S2 真机回归：补齐 S2 专属 VM 卡并验收 | 未开始 |
+
+S2 完成（含 S2-P6 验收）不改变 Overall `NOT_ACCEPTED` 口径；S2 各子阶段的验收证据按
+验收册操作契约卡登记，Hub 不复制证据正文。
 
 ## §4 未解决问题登记
 
@@ -235,6 +262,8 @@
 | 当前 | 线 A+B 的数量路径已复核；`ITEM_IsRealEquip/ITEM_IsRealBroken` 四处非数量 patch 已撤销，`UIStore_BuyItem+0x1a8` 保持；当前待真机双态（99/999）及装备显示/详情回归。 | `runtime-architecture.md` §2.1.1；`rulebook.md` R-38、R-43；`verification-matrix.md` VM-30 |
 | 2026-09-10 | sidecar 读档的 canonical 数量固定为 `0..999` 语义；不按当前堆叠配置截断已有值，可堆叠 payload 仅在与 descriptor 不一致时同步，越界值收敛到 999 并记录日志。 | `rulebook.md` R-38、R-40、R-41；`module-save-store.md` §6.1；`verification-matrix.md` VM-30；Host `test_virtual_bag_json_count_clamp` |
 | 当前 | 持锁原版删除/刷新统一使用 raw-original dispatcher 与 TLS original-only 查询；删除后重新读取物理槽确认清空后才提交跨域事务。 | `rulebook.md` R-18、R-44；`verification-matrix.md` VM-15、VM-B01～B04；Host `test_original_only_queries` |
+| 当前 | S2 数量编码（统一布局，无版本标识）：可堆叠数量按 `a=bits22-24`+`b=bits25-31`（`count=128a+b`，业务上限 999）读写，布局层 `s2_read_count`/`s2_write_count` 与模式无关，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`；读侧统一 `ITEM_GetCumulateCount@0x106094` getter hook（模式视图解码），写侧调用方级门控+进位，不 hook `UTIL_SetBitValue`（无物品指针无法判类别）；关闭态（决策 b）所有读写与操作按低 7 位视图（上限 99）、`a` 保留不动、重开读回完整 canonical；sidecar 不携带版本字段，历史 `encodingVersion` 宽容忽略，无迁移代码。子阶段见 §3.5。 | `rulebook.md` R-45..R-49；`runtime-architecture.md` §3.7；`module-save-store.md` §6.4；`api-reference.md` §7.6；Hub §3.5 |
+| 当前 | S2 缺陷修复（debug APK `52c5471e`）：R-51 出售/拆堆直接位读重定向统一 getter（5 条）；R-52 `ITEMSYSTEM_MakeItem` 数量回写撤销（arg2 非数量）；R-53 `INVEN_SaveItem` 漏斗入库前先并入扩展同类堆；R-54 ext→orig 宿主容量字 RAII 恢复与显示袋守卫；R-55 原版背包详情出售由 H-23 按 canonical 全量接管（预演只回填金额）。装备页详情结算点 `0x1261c4` 重定向已回退不入表。 | `rulebook.md` R-51..R-55；`runtime-architecture.md` §3.7；`verification-matrix.md` VM-37..VM-41；Hub §3.3 |
 
 ### 5.1 决策索引使用规则
 
@@ -265,6 +294,14 @@
    不构成无死锁证据。
 4. 涉及锁的行为面提交前，先把「卡死取证流程」固化到部署文档；下一次同类问题可直接按
    步骤取线程栈，缩短定位时间。
+5. 被证伪并回退的旧方案（原版详情出售结算点重定向）：曾计划把 `0x1261c4` 的
+   `0x1261fc`/`0x126208` 内联读重定向到 `ITEM_GetCumulateCount`（getter）。该方案在
+   真机暴露缺陷——原版紧随其后的 clamp 是 `N=(b∈[1,99])?b:1`，重定向只改了读指令、
+   没有改后续 clamp，于是 getter 返回的 canonical `>99` 会被 clamp 成 `1` 并触发
+   异常/卡死；且该点与商店/拆堆读点的寄存器约定不同（物品指针在 `x21`）。结论：该点
+   重定向已回退、不入 `g_stack_getter_redirect_patches`，改由 H-23
+   `UIEquip_OKDestroyItem` 在回调层整体接管（R-55）。教训：重定向单个读点前必须
+   连同其后的 clamp/分支一并建模，不能只替换 `bl` 目标。
 
 ## §6 阅读顺序与维护规则
 

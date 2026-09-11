@@ -84,6 +84,17 @@ bool item_is_equip(void* item) {
     return item_count_encoding(item) == stack_codec::CountEncoding::kNotEncoded;
 }
 
+int canonical_item_count(void* item) {
+    if (item == nullptr) return 0;
+    // 可堆叠类别：绕过 H-17 getter 直接按 S2 解码——getter 在堆叠上限关闭态按
+    // R-47 决策 b 只返回 b 视图，而物化/持久化需要完整 canonical 128a+b。
+    if (item_count_encoding(item) == stack_codec::CountEncoding::kEncoded) {
+        return static_cast<int>(stack_codec::s2_read_count(
+            *reinterpret_cast<const uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT)));
+    }
+    return fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 0;
+}
+
 std::string build_inventory_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
     // INVEN_pItem(G_INVEN_VMA)：背包槽数组，6 袋 × 0x80 步长，每槽 8B 物品指针。
@@ -111,8 +122,10 @@ std::string build_inventory_json() {
                     s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
                 }
                 if (fn_get_cumulate_count != nullptr) {
-                    // count 语义：ITEM_GetCumulateCount 按类型区分——可堆叠类返回 bit22-31，
-                    // 不可堆叠类（装备）返回 1（旧实现裸读位域导致装备 count=100）
+                    // count 语义：ITEM_GetCumulateCount 按类型与模式区分——可堆叠
+                    // 类返回模式视图数量（启用态 S2 全量 count=128a+b、关闭态低 7
+                    // 位 b，getter hook 统一解码，见规则册 R-49/R-47），不可堆叠
+                    // 类（装备）返回 1（旧实现裸读位域导致装备 count=100）
                     s += ",\"count\":" + std::to_string(fn_get_cumulate_count(item));
                 }
                 s += std::string(",\"equip\":") + (item_is_equip(item) ? "true" : "false");

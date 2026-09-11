@@ -63,10 +63,16 @@ std::string data_op_add_item(int32_t category, int32_t count) {
                           : "item not stackable");
     }
     if (count > 1) {
-        count = static_cast<int>(stack_codec::clamp_count(static_cast<uint32_t>(count), stack_limit_enabled()));
+        // S2 创建写点：类别门控已在上方 fail-closed（非可堆叠拒绝多数量写入）；
+        // 总量按模式 clamp（启用 999 / 关闭 99）后经 effective_write_count 写入：
+        // 启用态全量拆段（b 溢出 127 的进位 →a+1、b 归零由编码内建），关闭态只写
+        // b、保留 a（R-47 决策 b），不得改用裸位段直写。
+        count = static_cast<int>(stack_codec::effective_clamp(static_cast<uint32_t>(count),
+                                                              stack_limit_enabled()));
         uint32_t cf = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
         *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-            stack_codec::write_count(cf, static_cast<uint32_t>(count));
+            stack_codec::effective_write_count(cf, static_cast<uint32_t>(count),
+                                               stack_limit_enabled());
     }
     int8_t save_slot = -1;
     if (!fn_inven_find_save_slot(item, &save_slot)) {

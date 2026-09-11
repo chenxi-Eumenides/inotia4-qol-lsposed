@@ -106,6 +106,10 @@ bool virtual_bag_has_empty_slots(int needed, int include_task_bag);
 bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot);
 // INVEN_SaveItem 无空位时把原版新物品收编进扩展袋空位。
 bool virtual_bag_adopt_native_item(void* item);
+// INVEN_SaveItem backup 前的扩展同类堆合并（VM-39）：仅当扩展袋已有可合并堆
+// 时返回 true（并入并释放收编对象）；不新建扩展槽，找不到则返回 false 让原版
+// original-first 入库。
+bool virtual_bag_merge_native_item(void* item);
 enum class VirtualBagEquipButtonResult : uint8_t {
     kNotExtension,
     kHandled,

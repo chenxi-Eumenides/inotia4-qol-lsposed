@@ -522,13 +522,13 @@ bool inject_locked() {
         if (entry == nullptr) return false;
         const uintptr_t expected_event =
             g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
-        if (*reinterpret_cast<uintptr_t*>(entry + 0x38) != expected_event) {
+        if (*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) != expected_event) {
             VIRTBAG_LOG("inventory state callbacks differ from expected symbols");
             return false;
         }
-        g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + 0x38));
-        g_orig_f3 = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x28));
-        g_orig_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + 0x10));
+        g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT));
+        g_orig_f3 = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3));
+        g_orig_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER));
     }
 
     const uintptr_t equip_draw = g_base + fn_resolve("F_UIEQUIP_DRAW_VMA", F_UIEQUIP_DRAW_VMA);
@@ -607,7 +607,7 @@ bool inject_locked() {
         VIRTBAG_LOG("inventory bag highlight hook patched replacement=0x%08x", replacement);
     }
 
-    const uintptr_t call_addr = g_base + fn_resolve("F_SCENE_DRAW_EQUIP_VMA", F_SCENE_DRAW_EQUIP_VMA) + 0x210;
+    const uintptr_t call_addr = g_base + fn_resolve("F_SCENE_DRAW_EQUIP_VMA", F_SCENE_DRAW_EQUIP_VMA) + F_SCENE_DRAW_EQUIP_END_CALL_OFF;
     constexpr uint32_t kOriginalEndCall = 0x97fd11d2;
     if (g_draw_patch_addr == 0) {
         const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&virtual_bag_draw_end_wrapper);
@@ -690,7 +690,7 @@ bool inject_locked() {
     if (!patch_all_save_callsites()) return false;
 
     if (g_drop_gate_patch_addr == 0) {
-        const uintptr_t call_addr = g_base + 0xb8cc0;
+        const uintptr_t call_addr = g_base + F_SAVE_ITEM_ON_EMPTY_CALL_VMA;
         constexpr uint32_t kOriginalDropCall = 0x94012fc8;
         const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&save_item_on_empty_gate);
         const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
@@ -730,7 +730,7 @@ bool inject_locked() {
     }
 
     if (g_draw_gate_patch_addr == 0) {
-        const uintptr_t call_addr = g_base + 0xaaf28;
+        const uintptr_t call_addr = g_base + F_ITEM_DRAW_PORTING_CALL_VMA;
         constexpr uint32_t kOriginalDrawCall = 0x94016d49;
         const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&item_draw_porting_gate);
         const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
@@ -813,9 +813,9 @@ bool inject_locked() {
                     reinterpret_cast<void*>(call_addr), replacement);
     }
     if (install_inventory_hook) {
-        *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
-        *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
-        *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
+        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
+        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
+        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
         g_state_entry = entry;
         VIRTBAG_LOG("inventory event callback wrapped; original renderer is reused for module views");
     }
@@ -824,8 +824,8 @@ bool inject_locked() {
             g_base + fn_resolve("F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER));
         if (save_entry != nullptr && save_entry != entry) {
             g_save_state_entry = save_entry;
-            g_orig_save_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(save_entry + 0x10));
-            *reinterpret_cast<uintptr_t*>(save_entry + 0x10) =
+            g_orig_save_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(save_entry + POPUP_ENTRY_ENTER));
+            *reinterpret_cast<uintptr_t*>(save_entry + POPUP_ENTRY_ENTER) =
                 reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper);
             g_save_panel_hook_installed = true;
             VIRTBAG_LOG("save panel enter hook installed entry=%p", save_entry);

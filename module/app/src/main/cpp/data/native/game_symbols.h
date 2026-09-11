@@ -70,6 +70,45 @@ constexpr size_t O_NEXT = 0x08;  // 下一节点指针
 constexpr int ATTR_MAX_HP = 0x1e;
 constexpr int ATTR_MAX_MP = 0x1f;
 
+// ---- popup state entry 布局（g_sPopupStateList，27 条 × 64B；见 G_POPUP_STATE_LIST_GOT_VMA）----
+constexpr size_t POPUP_ENTRY_SIZE = 0x40;     // 每条 64B
+constexpr size_t POPUP_ENTRY_ENTER = 0x10;    // enter 回调
+constexpr size_t POPUP_ENTRY_PROCESS = 0x18;  // process 回调
+constexpr size_t POPUP_ENTRY_F3 = 0x28;       // f3 回调
+constexpr size_t POPUP_ENTRY_F4 = 0x30;       // f4 回调
+constexpr size_t POPUP_ENTRY_EVENT = 0x38;    // event 回调
+
+// ---- popup 栈结构（g_arrPopupStack，G_POPUP_STACK_VMA）----
+constexpr size_t POPUP_STACK_COUNT = 0x08;    // u32 栈内面板数
+constexpr size_t POPUP_STACK_DATA = 0x18;     // u64 条目数组指针
+
+// ---- 存档槽结构（fn_save_get_save_slot 返回对象）----
+constexpr size_t SAVESLOT_EXISTS = 0x02;      // u8 槽位是否存在
+constexpr size_t SAVESLOT_HERO_PTRS = 0x04;   // void*[3] 槽内 hero 指针数组
+constexpr size_t SAVESLOT_HERO_INDEX = 0x1c;  // int8 当前 hero 索引
+
+// ---- 角色朝向 / 交互函数显示 ----
+constexpr size_t C_DIRECTION = 0x06;          // u8 角色朝向
+constexpr size_t C_FUNC_DISPLAY = 0x0a;       // u16 交互函数显示值（type==2 装饰物；与 C_NAME_ID 同偏移）
+
+// ---- 地面掉落物数组（G_DROP_ARRAY_GOT_VMA，元素步长 0x20）----
+constexpr size_t GROUND_ITEM_SIZE = 0x20;     // 元素步长
+constexpr size_t GROUND_ITEM_OBJECT = 0x00;   // 掉落物对象指针
+constexpr size_t GROUND_ITEM_X = 0x08;        // int16 网格 X
+constexpr size_t GROUND_ITEM_Y = 0x0a;        // int16 网格 Y
+constexpr size_t GROUND_ITEM_FLAGS = 0x18;    // u8 标志
+constexpr uint8_t GROUND_ITEM_FLAG_PICKING = 0x02; // 拾取中标志位
+
+// ---- 拾取事件回调节点（NOTIFIER_Add 数据，CHAR_ActivePickupEvent 读取；模块 mem_malloc(0x18) 构造）----
+constexpr size_t PICKUP_EVENT_SIZE = 0x18;
+constexpr size_t PICKUP_EVENT_CHAR = 0x00;    // 玩家 char 指针
+constexpr size_t PICKUP_EVENT_X = 0x08;       // int32 玩家 x
+constexpr size_t PICKUP_EVENT_Y = 0x0c;       // int32 玩家 y
+constexpr size_t PICKUP_EVENT_OBJECT = 0x10;  // 掉落物对象指针
+
+// ---- 函数内 callsite 相对偏移 ----
+constexpr size_t F_SCENE_DRAW_EQUIP_END_CALL_OFF = 0x210; // F_SCENE_DRAW_EQUIP_VMA 内 bl 调用点偏移
+
 // ---- 全局变量 VMA ----
 constexpr uintptr_t G_MONEY_VMA = 0x7134c0;        // int64 金币
 constexpr uintptr_t G_MAP_ID_VMA = 0x713878;       // ⚠️ 历史遗留：实为瓦片矩阵起点（64×64，每字节 1 tile），前两字节 0x0808=2056 是巧合误读，勿用作 mapId（v0.4.28 修正）
@@ -133,6 +172,8 @@ constexpr uintptr_t G_NPCSEL_TYPE_VMA = 0x728e90;       // nSelectedType (u8 选
 constexpr uintptr_t G_NPC_QUEST_IDX_GOT_VMA = 0x2f3000 + 0x240;  // GOT 双层解引用 (ldrsh) 当前 NPC 任务 questId（UINpcQuest_MakeText/ButtonOKExe 读取；路障任务=381）
 constexpr uintptr_t G_NPC_QUEST_STATE_GOT_VMA = 0x2f6000 + 0xb40; // GOT 双层解引用 quest 状态表（GOT 槽 → 二级指针(.bss) → 状态表数组(堆)；索引=questId=记录下标，值 0=未接 1=进行 2=可完成 3=已完成；2026-08-16 实测：**st_got 指向堆 0x7c05dc7e6c，state[2]=1 与 API 一致）
 constexpr uintptr_t G_QUEST_COUNT_GOT_VMA = 0x2f6000 + 0xe08;  // GOT 双层解引用 u16 quest 总数（QUESTSYSTEM_ChangeQuestState 0x123bb4 ldrh 边界校验；状态表遍历上限）
+constexpr uintptr_t G_PLAYER_INDICES_GOT_VMA = 0x2f4000 + 0x120; // GOT 双层解引用 uint8_t*：3 名队员槽位索引数组（存档校验读 [0..2]；game_save.cpp）
+constexpr uintptr_t G_FONT_OBJ_GOT_VMA = 0x2f3000 + 0xf88; // GOT 槽：*(此地址)=字体对象指针（自绘按钮 font 来源；game_ui_custom_panel.inc）
 
 // ---- EVTSYSTEM 剧情对话（v0.4.27 readelf 符号确认 + EVTSYSTEM_Draw/PressKey/Process 反汇编）----
 constexpr uintptr_t G_EVT_STATE_VMA = 0x713034;      // EVTSYSTEM_nState (u32) 剧情状态：0=无，对话中=3（frida 实测）
@@ -236,6 +277,8 @@ constexpr uintptr_t G_UIEQUIP_CUR_BAG_VMA = G_UIEQUIP_PANEL_VMA + 0x61;
 constexpr uintptr_t G_UIEQUIP_CUR_BAG_GOT_VMA = 0x2f5000 + 0x6d8; // ptr to UIEquip current bag index, used by UIEquip_DrawInven*
 constexpr uintptr_t G_UIEQUIP_DESC_TYPE_VMA = G_UIEQUIP_PANEL_VMA + 0x63;
 constexpr uintptr_t G_UIEQUIP_PANEL_CTRL_VMA = G_UIEQUIP_PANEL_VMA + 0x8;
+constexpr uintptr_t G_UIEQUIP_PANEL_BAG_CONTAINER_VMA = G_UIEQUIP_PANEL_VMA + 0x50; // 面板 +0x50 = 袋容器控件指针
+constexpr size_t BAG_OBJECT_CAPACITY = 0x10; // 袋对象 +0x10 容量位域（bit0..24）
 
 // ---- UIStore 商店面板（P7 store host）----
 // UIStore 面板 .bss 基址；商店宿主与 UIEquip 宿主使用独立控件树。
@@ -460,7 +503,7 @@ constexpr uintptr_t F_IS_DICE_VMA = 0x10be60;         // int (int32_t category) 
 constexpr uintptr_t F_STATUSDICE_ROLL_VMA = 0x138338; // int (int32_t charIdx, int32_t type) 掷骰：纯表驱动计算写 pending[0..4]（charIdx=[ch+0xd] 0-5 职业索引，type=category-0x34 0-4；不读 UI，同步调用安全）
 constexpr uintptr_t F_IS_SEALED_VMA = 0x10be50;       // int (int32_t category) 是否可解封（类别 ∈[0x3a6,0x3ab]，与 ReleaseSealed 内联判定一致）
 constexpr uintptr_t F_IS_ITEMBOX_VMA = 0x10cda0;     // int (int32_t category) 是否开箱类（类别 ∈[0x3ef,0x3f1]，UIEquip_SetDescMenu 开箱按钮判定）
-constexpr uintptr_t F_MAKE_ITEM_VMA = 0x10c6c8;      // void* (int32_t category, int32_t count, int32_t flag) ITEMSYSTEM_MakeItem 创建物品对象
+constexpr uintptr_t F_MAKE_ITEM_VMA = 0x10c6c8;      // void* (int32_t category, int32_t lookup_key, int32_t flag) ITEMSYSTEM_MakeItem 创建物品对象；arg2 是静态表查找/品质参数非数量（产物量=0x10ca3c CAL 公式，域 ≤99）
 constexpr uintptr_t F_CREATE_ITEM_VMA = 0x10be9c;    // void* (int32_t category, int32_t, int32_t, int32_t) ITEMSYSTEM_CreateItem 创建物品对象（无 search_tbl 校验，OP 直调可靠）
 // ---- 堆叠上限 patch 点所在函数 VMA（stack-limit-999，v0.5.18；符号名见 libgame-symbols.txt）----
 constexpr uintptr_t F_ITEMSYSTEM_DIVIDE_VMA = 0x1083f8;       // ITEMSYSTEM_Divide 拆堆
@@ -494,6 +537,8 @@ constexpr uintptr_t F_SAVE_CALLSITE_PROCESS_VMA = 0x129850; // SAVE_ProcessSave 
 constexpr uintptr_t F_SAVE_CALLSITE_NETWORK_ADD_VMA = 0x15d708; // NetworkStore_AddItem → SAVE_Save
 constexpr uintptr_t F_SAVE_CALLSITE_NETWORK_PROCESS_1_VMA = 0x15da84; // NetworkStore_Process → SAVE_Save
 constexpr uintptr_t F_SAVE_CALLSITE_NETWORK_PROCESS_2_VMA = 0x15dcf0; // NetworkStore_Process → SAVE_Save
+constexpr uintptr_t F_SAVE_ITEM_ON_EMPTY_CALL_VMA = 0xb8cc0; // bl INVEN_SaveItemOnEmpty(0x104be0) 的 callsite（drop gate 门禁 wrapper；原字 0x94012fc8）
+constexpr uintptr_t F_ITEM_DRAW_PORTING_CALL_VMA = 0xaaf28; // ControlItem_Draw 内 bl ITEM_DrawPorting 的 callsite（draw gate 门禁 wrapper；原字 0x94016d49）
 constexpr uintptr_t F_SAVE_LOAD_INVENTORY_VMA = 0x127ea4;     // SAVE_LoadInventory 读档背包（子物品检查位段）
 constexpr uintptr_t F_UIEQUIP_IS_APPLY_STUFF_VMA = 0xb8d4c;
 constexpr uintptr_t F_UIEQUIP_APPLY_STUFF_VMA = 0xb8df8; // void (void*, void*) 原版镶嵌/强化并消费材料
@@ -589,6 +634,24 @@ constexpr uintptr_t F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA = 0xb8478; // 确认使用
 constexpr uintptr_t F_UIEQUIP_BUTTON_DESTROY_EXE_VMA = 0xb6240; // void (void*) 销毁按钮 execute：创建确认弹窗
 constexpr uintptr_t F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA = 0xb7e14; // void (void*) 卸下按钮 execute：desc_type=0 卸装备、desc_type=1 卸袋（b7f74）
 constexpr uintptr_t F_UIEQUIP_OK_DESTROY_ITEM_VMA = 0xb83d0;    // void () 销毁确认回调
+// UIEquip_OKDestroyItem(0xb83d0) 全量反汇编核实：无参、无物品入参寄存器——背包
+// 结算分支从面板上下文读 desc_type/bag/ctrl 后调 0x1261c4。仅两处调用者：
+//  - 按钮预演：UIEquip_ButtonDestroyExe 0x126288 `bl 0xb83d0`（进入前 x23=0x666）；
+//    settle 0x126298 `cmp x23,#0x666` 命中后只计算展示金额、不加钱/不删堆，并经
+//    OKDestroyItem 尾声把金额放 x0 返回给弹窗第 6 参（确认框显示金额）。
+//  - 弹窗 OK：UIPopupMsg_ButtonOKExe 0xcaa14 `blr x1`（fpOK）；真实结算。
+// 两态由 hook 的 thread_local「正在 UIEquip_ButtonDestroyExe 内」标记区分（返回地址
+// 经 Dobby 桥后不可信，见 native_inventory_hook.cpp）。仅弹窗 OK 真实接管；按钮预演
+// 只回填展示金额，否则按下按钮即提前售出、取消无法回滚。
+// G_UIEQUIP_DESC_TYPE_VMA == 2 表示「背包物品详情」（0=装备详情、1=扩展/其它袋详情）。
+// 原版 OKDestroyItem 仅 2 走 0x1261c4 背包结算分支。
+constexpr uint8_t kUIEquipBagDescType = 2;
+// 装备页详情出售结算（无名局部函数；唯一调用点 UIEquip_OKDestroyItem@0xb8468 bl 0x1261c4，
+// .dynsym 无符号，fn_resolve 无符号名回退本 VMA）。0x1261fc `ldr w0,[x21,#0x10]` +
+// 0x126208 `bl UTIL_GetBitValue(_,31,25)` 只读 b 段（S2 下 199→71 结算缺陷根因）；
+// 物品指针在 x21（0x1261f0 `mov x21,x0`），由 R-51 重定向为
+// `mov x0,x21; bl ITEM_GetCumulateCount`。同一函数返回的弹窗 i32Param 即确认框金额。
+constexpr uintptr_t F_UIEQUIP_SELL_SETTLE_VMA = 0x1261c4;
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 sret 出参）——禁止 C++ 直调（真机 SIGSEGV，见 game_access.h 注释）；取 rect 用手工父链读
@@ -598,6 +661,7 @@ constexpr uintptr_t F_CONTROL_OBJECT_SET_USER_TYPE_VMA = 0x9dbc4;      // void (
 constexpr uintptr_t F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA = 0xa3e94; // void (ctrl) 控件不参与 TouchHandle 移动（ControlItem_Create 内部同款）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_USER_TYPE_VMA = 0x9dbbc;    // u32 (ctrl) 控件类型（2=ControlItem，SetItem 内部门禁）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_DATA_VMA = 0x9df18;  // void* (void* ctrl) 取控件私有数据块
+constexpr uintptr_t F_CONTROL_OBJECT_GET_CURSOR_INDEX_VMA = 0x9ea48; // int (void* ctrl) 控件光标索引（背包列表控件→槽下标；UIEquip_OKDestroyItem 0xb845c 调用）
 constexpr uintptr_t F_CONTROL_OBJECT_SET_ACTIVE_VMA = 0x9dbd8; // void (void* ctrl, u32 active) 写 Active@+0x0c（0x20=激活，ControlObject_EventProc 校验 ==0x20）
 constexpr uintptr_t F_CONTROL_BUTTON_DRAW_VMA = 0xaac2c;      // void (void* ctrl) 按钮绘制（GetData 非空 + [data+0x60] DrawProc 非空 → blr DrawProc(x0=ctrl)）
 // wipeout 死亡面板按钮（v0.4.35）：官方 UIWipeout 按钮执行函数，均 int() 无参
@@ -708,6 +772,7 @@ using InvenFindSaveSlotFn = int (*)(void*, int8_t*);
 using InvenSaveItemFn = int (*)(void*, void*);
 using SaveItemFn = int (*)(void*);  // INVEN_SaveItem(item)：唯一"已创建物品放入背包"漏斗（0x104528，只用 x0；FindSaveSlot 失败返回 0）
 using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);  // INVEN_SaveItemDirect(item, bag, slot) 指定袋槽入库（空槽写入/同类堆叠合并）
+using InvenRemoveItemDataFn = int (*)(int32_t, int32_t);  // INVEN_RemoveItemData(category, count)：按类别批量删除（count<0 语义未冻结，wrapper fail-closed 不修正）
 using InvenSaveItemOnEmptyFn = int (*)(void*, int32_t);  // INVEN_SaveItemOnEmpty(item, bag) 目标袋内找空槽入库
 using DealSystemFindSaleByIdFn = void* (*)(void*);
 using UinpcInitFn = uint8_t (*)();
@@ -723,6 +788,7 @@ using EquipItemFn = int (*)(void*, void*);
 using EquipItemFromInvenToSlotFn = int (*)(void*, int32_t, int32_t, int32_t);
 using UnequipFn = int (*)(void*, int32_t);
 using ButtonEquipExeFn = void (*)(void*);  // UIEquip_ButtonEquipExe(button)：全路径返回 1，返回值无消费方
+using ButtonDestroyExeFn = void (*)(void*);  // UIEquip_ButtonDestroyExe(button)：详情出售按钮，创建确认弹窗前先预演 OKDestroyItem 取展示金额
 using ButtonUnequipExeFn = void (*)(void*);  // UIEquip_ButtonUnequipExe(button)
 using CanEquipFn = int (*)(void*, void*);
 using FindEquipSlotFn = int (*)(void*, void*);
@@ -751,6 +817,9 @@ using CharStopCombatFn = void (*)(void*);
 using ConsumeItemFn = void (*)(void*);
 using CharUseItemExFn = int (*)(void*, void*, int);  // 返回 1=成功(内部已消耗) 0=失败
 using UiEquipOkConfirmUseItemFn = void (*)(void*);  // UIEquip_OKConfrimUseItem(item)：确认使用回调
+// UIEquip_OKDestroyItem()：无参销毁/出售确认回调（背包结算分支读面板上下文取袋/槽）。
+// 返回值仅按钮预演读取（弹窗展示金额）；真实弹窗 OK 调用忽略返回值，故用 uint64_t 捕获 x0。
+using UiEquipOkDestroyItemFn = uint64_t (*)();
 using CharProcessShortcutFn = int (*)(void*, int); // 返回 1=处理成功，0=未处理或失败
 using RemoveItemDirectFn = int (*)(int32_t, int32_t);
 using IncludePartyFn = int (*)(void*);
@@ -820,6 +889,7 @@ using GetGroupTitleImgTypeFn = int32_t (*)();
 using ControlObjectGetCountFn = uint32_t (*)(void* ctrl);
 using ControlObjectGetChildFn = void* (*)(void* ctrl, uint32_t index);
 using ControlObjectGetDataFn = void* (*)(void* ctrl);
+using ControlObjectGetCursorIndexFn = int (*)(void* ctrl);
 using ControlObjectSetActiveFn = void (*)(void* ctrl, uint32_t active);
 using ControlItemSetItemFn = void (*)(void* ctrl, void* item);
 using ControlObjectSetShowFn = void (*)(void* ctrl, uint32_t show);

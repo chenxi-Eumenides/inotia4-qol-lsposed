@@ -182,9 +182,10 @@ section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不�
 
 sidecar 读档的数量语义独立于运行时堆叠配置：descriptor 的 canonical `count` 只接受
 `0..999`，越过绝对上限时收敛到 `999` 并记录日志；不会按当前 `stackLimitIncrease`
-把已有值截到 `99`。对可堆叠类别，payload 数量位只有在与 descriptor 不一致时才改为同一
-canonical 值；非堆叠类别的 payload 数量位按原始字节保留。运行时 `99/999` clamp 仅用于
-新建、合并、消费和派生操作，因此切换配置后重新读档不会迁移或截断已有数量。
+把已有值截到 `99`。可堆叠类别的 payload 数量位按 S2 布局解释（无版本标识，唯一
+布局），并与 descriptor 的 canonical 值对齐；非堆叠类别的 payload 数量位按原始字节
+保留。运行时 `99/999` clamp 仅用于新建、合并、消费和派生操作，因此切换配置后重新
+读档不会改写或截断已有数量。
 
 ### 6.2 pending 恢复
 
@@ -207,6 +208,38 @@ canonical 值；非堆叠类别的 payload 数量位按原始字节保留。运�
 回滚。取证方法：在 `module_save.cpp:89-111` 的原版返回与 participant commit 之间注入可控
 force-stop，保留 `module.save.journal`、`extensionbags.items`、last-good、原版 `save*.dat`
 和重启日志，再按 tx/slot/stage 对比下一次加载结果。
+
+### 6.4 S2 数量编码（当前实现：无版本标识、统一 S2）
+
+sidecar 状态 JSON 不携带版本标识字段，数量位只有 S2 一种布局，由
+`virtual_bag_state_json.inc` 的 `state_json`/`parse_state_json` 统一读写：
+
+1. 布局：`a` 落 bits22–24、`b` 落 bits25–31，`count=128a+b`，编码总量范围
+   `0..1023`，业务上限 `999`。sidecar 与 descriptor（canonical 域）的读写统一经
+   `s2_read_count`/`s2_write_count`；运行时操作面（展示/查询/消耗/合并/卖出/创建）
+   统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/
+   `effective_view_count`（启用态等价 canonical 全量、关闭态低 7 位视图且只写 b，
+   R-47 决策 b）。模式绝不影响 sidecar 的解码、编码或 canonical 对齐。
+2. 数据面：①sidecar 状态 JSON 中可堆叠 descriptor 的 canonical count 与 payload
+   数量位（载入时 payload 与 canonical 不一致则以 S2 重编码对齐）；②原版物理袋与
+   扩展物化对象的 `+0x10` 数量字由操作层写点（S2-P3 门控/进位）与读侧 getter hook
+   （S2-P2）按 S2 读写。非可堆叠类别不参与任何数量位段改写：宝石选项位 bits18–23、
+   袋容量位 bits0–24、装备 marker 位 bits25–31 均逐字节保留。
+3. 无迁移代码：S1→S2 迁移函数、原版袋 `+0x10` 扫描状态机与 `encoding_version`
+   字段均已删除；历史 sidecar 若携带 `encodingVersion` 字段，解析时宽容忽略（不
+   报错、不迁移），存量数据一律按统一 S2 语义读取。当前存档视为已迁移。
+4. 存量损坏值：历史漂移写坏的 canonical（如 count=705）在 canonical 语义下读档
+   原样保留，不经读档自动修正；恢复需经操作层写点改写或手动修 sidecar 后保存。
+5. payload 身份布局（`SAVE_SaveItem@0x1274f0`）：`[0]` 长度前缀、`[1..8]` u64 UID、
+   `[9..10]` u16 I_TYPE 位域、`[11..14]` u32 数量位域（bits22–31）、`[15]` I_MAGIC_RATE、
+   `[16]` I_SOCKET、`[17..18]` u16 I_ENCHANT、`[19..]` 词缀链。合并/收编身份判据排除
+   UID 与数量位两个每实例可变字段（`mergeable_identity_equal`），原版判据只比较类别与
+   可堆叠位，详见规则册 R-53。
+
+**当前依赖与未决**：`+0x10` 的读侧解码依赖 S2-P2 的 `ITEM_GetCumulateCount@0x106094`
+getter hook（模式视图），写侧持久化依赖 S2-P3 的类别门控与进位。`pending.payload` 的
+数量位随恢复重放路径按统一 S2 处理。S2 专属真机卡为验证矩阵 `VM-32`、`VM-35`
+（读档跨配置往返与模式不变性）与 `VM-36`（关闭态低 7 位视图与 `a` 保留）。
 
 ## 7. 失败路径与问题 B
 

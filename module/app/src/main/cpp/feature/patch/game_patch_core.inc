@@ -1,61 +1,46 @@
-// 固定 canonical 布局 patch 点（反汇编逐字节确认）。
-// 数量 patch 表准入规则：必须先证明目标位段是数量语义；装备标记、容量等非数量
-// 位段不得纳入数量布局或上限 patch 表。
+// S2 数量布局（a=bits22-24、b=bits25-31、count=128a+b，见 core/native/stack_codec.h）下的
+// 常驻 patch 表（反汇编逐字节确认）。
+// S2 布局中 bits25-31 就是原版 7 位字段 b：原版 UTIL_Get/SetBitValue(start=25,end=31)
+// 的读写天然作用于 b 且不破坏 a（bits22-24），S1 时代「把 bitStart 25 改 22 的单一
+// 10 位段布局 patch」与 S2 编码冲突（count<<22 的错位模式会写坏 a/b 段），已全部移除。
+// 数量 patch 表准入规则不变：必须先证明目标位段是数量语义；装备 marker（bits25-31）、
+// 袋容量（bits0-24）、宝石选项（bits18-23）等非数量位段不得纳入本表。
 #define P(macro, off, o, r) { #macro, macro, off, o, r }
 const PatchEntry g_stack_layout_patches[] = {
-    // 位段扩展 mov w2,#0x19(bitStart=25) → mov w2,#0x16(bitStart=22)
-    P(F_GET_CUMULATE_COUNT_VMA, 0x78, 0x52800322, 0x528002C2),
-    P(F_INVEN_MOVE_ITEM_VMA, 0x178, 0x52800322, 0x528002C2),
-    P(F_INVEN_MOVE_ITEM_VMA, 0x194, 0x52800322, 0x528002C2),
-    P(F_INVEN_MOVE_ITEM_VMA, 0x224, 0x52800322, 0x528002C2),
-    P(F_INVEN_MOVE_ITEM_VMA, 0x23c, 0x52800322, 0x528002C2),
-    P(F_CONSUME_ITEM_VMA, 0x58, 0x52800322, 0x528002C2),
-    P(F_CONSUME_ITEM_VMA, 0x80, 0x52800322, 0x528002C2),
-    P(F_CONSUME_ITEM_VMA, 0x98, 0x52800322, 0x528002C2),
-    P(F_CREATE_ITEM_VMA, 0x26c, 0x52800322, 0x528002C2),
-    P(F_ITEMSYSTEM_DIVIDE_VMA, 0x68, 0x52800322, 0x528002C2),
-    P(F_ITEMSYSTEM_DIVIDE_VMA, 0x90, 0x52800322, 0x528002C2),
-    P(F_ITEMSYSTEM_DIVIDE_VMA, 0xa4, 0x52800322, 0x528002C2),
-    P(F_ITEMSYSTEM_DIVIDE_VMA, 0xc0, 0x52800322, 0x528002C2),
-    P(F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xe8, 0x52800322, 0x528002C2),
-    P(F_INVEN_SAVE_ITEM_DIRECT_VMA, 0x110, 0x52800322, 0x528002C2),
-    P(F_INVEN_SAVE_ITEM_DIRECT_VMA, 0x168, 0x52800322, 0x528002C2),
-    P(F_INVEN_SAVE_ITEM_DATA_VMA, 0x88, 0x52800322, 0x528002C2),
-    P(F_INVEN_CHECK_SAVE_IN_NOT_EMPTY_SLOT_VMA, 0x14c, 0x52800322, 0x528002C2),
-    P(F_INVEN_REMOVE_ITEM_DATA_VMA, 0x18c, 0x52800322, 0x528002C2),
-    P(F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA, 0x15c, 0x52800322, 0x528002C2),
-    P(F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA, 0x174, 0x52800322, 0x528002C2),
-    P(F_UISTORE_BUTTON_SELL_EXE_VMA, 0xc0, 0x52800322, 0x528002C2),
-    P(F_UISTORE_BUTTON_SELL_EXE_VMA, 0xd8, 0x52800322, 0x528002C2),
-    P(F_UISTORE_SELL_ITEM_VMA, 0xd0, 0x52800322, 0x528002C2),
-    // 商店复制购买路径写入数量起始位 bit25 → bit22，保持与 CreateItem/GetCumulateCount 同布局
-    P(F_UISTORE_BUY_ITEM_VMA, 0x1a8, 0x52800322, 0x528002C2),
-    P(F_GAME_START_NEW_GAME_VMA, 0xac, 0x52800322, 0x528002C2),
-    P(F_MAKE_ITEM_VMA, 0x370, 0x52800322, 0x528002C2),
-    P(F_ITEMSYSTEM_PROCESS_UNPACK_VMA, 0x354, 0x52800322, 0x528002C2),
-    P(F_MAPITEMSYSTEM_CREATE_ITEM_VMA, 0xb4, 0x52800322, 0x528002C2),
-    P(F_NETWORKSTORE_ADD_ITEM_VMA, 0x110, 0x52800322, 0x528002C2),
-    P(F_SAVE_REVISE_CHARACTER_LOCATION_VMA, 0x248, 0x52800322, 0x528002C2),
-    P(F_UIMIX_START_MIX_VMA, 0x180, 0x52800322, 0x528002C2),
-    // 存档子物品检查位段缩窄 mov w1,#0x18(bitEnd=24) → mov w1,#0x15(bitEnd=21)
+    // 存档子物品检查位段缩窄 mov w1,#0x18(bitEnd=24) → mov w1,#0x15(bitEnd=21)。
+    // SAVE_SaveInventory/SAVE_LoadInventory 以 GetBitValue(+0x10, end=24, start=0)
+    // 判断袋对象是否有子物品（容量位非零）。S2 下 bits22-24 装可堆叠数量的高位段 a，
+    // count≥128 的普通物品会让该检查误判出「子物品」，因此检查位段必须继续避开
+    // bits22-24——这条缩窄在 S2 下仍然必要且语义不变（bits0-21 为容量/非数量位）。
     P(F_SAVE_SAVE_INVENTORY_VMA, 0x78, 0x52800301, 0x528002A1),
     P(F_SAVE_LOAD_INVENTORY_VMA, 0xa8, 0x52800301, 0x528002A1),
 };
 const size_t g_stack_layout_patch_count = sizeof(g_stack_layout_patches) / sizeof(g_stack_layout_patches[0]);
 
-// 可逆上限 patch：固定布局不变，只切换新操作的 99/999 上限。
+// 可逆上限 clamp patch（启用态 apply / 关闭态 revert）。
+// S2 语义口径：clamp 值 999 只允许作用于「数量完整值」判定点——即比较数来自
+// ITEM_GetCumulateCount（S2 getter hook 后返回 128a+b 总量）或函数入参总量的指令；
+// 直接读取 b 段（mod 128 残量）的判定点不进本表：999 对 b 值无意义且会高估剩余
+// 空间（不 fail-closed），保持原版 99 的 b 满判定即可安全拒绝溢出合并。
+// 已知边界（S2-P4 前的开放点）：启用态合并/创建总量 >127 时，原版写点
+// SetBitValue(start=25,end=31) 只能写 b、无法对 a 进位；≤127 全部正确，>127 的
+// 进位由 S2-P4 原版袋 +0x10 迁移扫描或后续调用方级方案闭合（禁止 hook UTIL_SetBitValue，
+// 见规则册 R-46/R-49）。
+//
+// 出售/拆堆直接位读的重定向（VM-37，见 g_stack_getter_redirect_patches）：
+// 这些读点原为 `ldr w0,[xN,#0x10]; bl UTIL_GetBitValue(_,31,25)` 只见 b 段，
+// 改为 `mov x0,xN; bl ITEM_GetCumulateCount(item)`——getter 已按类别门控 + 模式
+// 感知解码（启用态 128a+b、关闭态 b），故重定向常驻（不随开关 revert）。
+// 注意：不能把 GetBitValue 的 start 常量 25→22 当作全量读——窗口 (v>>22)&0x3FF
+// 在数值上是 `a + 8b`（a 在窗口低位、b 在高位），与 `a*128+b` 不等价。
 const PatchEntry g_stack_limit_clamp_patches[] = {
-    // 99→999 clamp（cmp/mov #0x63→#0x3E7，#0x62→#0x3E6）；仅限已证明的数量语义路径。
+    // 总量 999 clamp（cmp/mov #0x63→#0x3E7，#0x62→#0x3E6）；判定数均为完整数量值。
     P(F_INVEN_MOVE_ITEM_VMA, 0x150, 0x71018c1f, 0x710f9c1f),
     P(F_INVEN_MOVE_ITEM_VMA, 0x158, 0x52800c77, 0x52807cf7),
     P(F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc, 0x71018c7f, 0x710f9c7f),
     P(F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xf0, 0x71018e9f, 0x710f9e9f),
     P(F_INVEN_SAVE_ITEM_DATA_VMA, 0x7c, 0x71018a9f, 0x710f9a9f),
-    P(F_INVEN_SAVE_ITEM_DATA_VMA, 0x8c, 0x52800c63, 0x52807ce3),
     P(F_INVEN_FIND_SAVE_SLOT_VMA, 0x238, 0x71018c1f, 0x710f9c1f),
-    P(F_INVEN_CHECK_SAVE_IN_NOT_EMPTY_SLOT_VMA, 0xa4, 0x52800c7a, 0x52807cfa),
-    P(F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA, 0x164, 0x7101881f, 0x710f981f),
-    P(F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA, 0x17c, 0x52800c62, 0x52807ce2),
 };
 #undef P
 const size_t g_stack_limit_clamp_patch_count = sizeof(g_stack_limit_clamp_patches) / sizeof(g_stack_limit_clamp_patches[0]);
@@ -111,11 +96,100 @@ bool patch_revert(const PatchEntry* entries, size_t n) {
     return true;
 }
 
+// ---- S2 直接位读重定向（VM-37，常驻）----
+// 调用点原序：`ldr w0,[xN,#0x10]`（或 `mov w0,wN`，N 持有物品指针）→
+// `bl UTIL_GetBitValue(_,31,25)`。重定向后 x0=物品指针、bl 到
+// ITEM_GetCumulateCount（已 hook：类别门控 + 模式感知 S2 解码）。
+// bl 目标同属 libgame.so，imm26 按 g_base 运行时计算（无需 thunk）。
+// 第 4 个参数 arg_repl 是 arg 点的替换指令：物品指针所在寄存器随调用点不同
+// （x19 用 0xaa1303e0，x21 用 0xaa1503e0），禁止默认套用同一寄存器。
+#define R(func, arg_off, arg_orig, arg_repl, call_off, call_orig, target) \
+    { #func, func, arg_off, arg_orig, arg_repl, call_off, call_orig, #target, target }
+const S2ReadRedirectEntry g_stack_getter_redirect_patches[] = {
+    // UIStore_ButtonSellExe：0xd18d0（b≤1 整堆判定）、0xd18e8（输入框上限）。
+    R(F_UISTORE_BUTTON_SELL_EXE_VMA, 0xb8, 0xb9401260, 0xaa1303e0, 0xc4, 0x9401bb13, F_GET_CUMULATE_COUNT_VMA),
+    R(F_UISTORE_BUTTON_SELL_EXE_VMA, 0xd0, 0xb9401260, 0xaa1303e0, 0xdc, 0x9401bb0d, F_GET_CUMULATE_COUNT_VMA),
+    // UIStore_SellItem：0xd26b8（b≤1 整堆判定）。
+    R(F_UISTORE_SELL_ITEM_VMA, 0xc8, 0xb9401260, 0xaa1303e0, 0xd4, 0x9401b799, F_GET_CUMULATE_COUNT_VMA),
+    // ITEMSYSTEM_Divide：0x108458（count≥满量守卫）、0x10848c/0x108490（remain 计算）。
+    R(F_ITEMSYSTEM_DIVIDE_VMA, 0x60, 0xb9401260, 0xaa1303e0, 0x6c, 0x9400e031, F_GET_CUMULATE_COUNT_VMA),
+    R(F_ITEMSYSTEM_DIVIDE_VMA, 0x94, 0x2a1603e0, 0xaa1303e0, 0x98, 0x9400e026, F_GET_CUMULATE_COUNT_VMA),
+};
+#undef R
+const size_t g_stack_getter_redirect_patch_count =
+    sizeof(g_stack_getter_redirect_patches) / sizeof(g_stack_getter_redirect_patches[0]);
+
+uintptr_t redirect_func_addr(const S2ReadRedirectEntry& e) {
+    return g_base == 0 ? 0 : g_base + fn_resolve(e.func_macro, e.func_vma);
+}
+
+uintptr_t redirect_target_addr(const S2ReadRedirectEntry& e) {
+    return g_base == 0 ? 0 : g_base + fn_resolve(e.target_macro, e.target_vma);
+}
+
+// 同 .so 内 bl 编码：imm26 = (target - bl_addr) >> 2；超出 ±128MB 或非 4 字节对齐拒绝。
+bool encode_bl(uintptr_t bl_addr, uintptr_t target, uint32_t* out) {
+    const int64_t delta = static_cast<int64_t>(target) - static_cast<int64_t>(bl_addr);
+    if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) return false;
+    *out = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03FFFFFFu);
+    return true;
+}
+
+bool apply_s2_getter_redirects() {
+    std::lock_guard<std::recursive_mutex> lock(g_patch_mtx);
+    if (g_base == 0) return false;
+    for (size_t i = 0; i < g_stack_getter_redirect_patch_count; ++i) {
+        const S2ReadRedirectEntry& e = g_stack_getter_redirect_patches[i];
+        const uintptr_t func = redirect_func_addr(e);
+        if (func == 0) return false;
+        const uintptr_t arg_addr = func + e.arg_offset;
+        const uintptr_t call_addr = func + e.call_offset;
+        uint32_t replacement = 0;
+        if (!encode_bl(call_addr, redirect_target_addr(e), &replacement)) {
+            __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG,
+                                "redirect encode failed %s+0x%x -> %s", e.func_macro,
+                                e.call_offset, e.target_macro);
+            return false;
+        }
+        const uint32_t cur_arg = *reinterpret_cast<uint32_t*>(arg_addr);
+        const uint32_t cur_call = *reinterpret_cast<uint32_t*>(call_addr);
+        if (cur_arg == e.arg_replacement && cur_call == replacement) continue;  // 幂等
+        if (cur_arg != e.arg_orig || cur_call != e.call_orig) {
+            __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG,
+                                "redirect mismatch %s arg=0x%08x call=0x%08x", e.func_macro,
+                                cur_arg, cur_call);
+            return false;
+        }
+        if (!write_insn(arg_addr, e.arg_replacement) || !write_insn(call_addr, replacement)) {
+            return false;
+        }
+        __android_log_print(ANDROID_LOG_INFO, PATCH_TAG,
+                            "redirect %s+0x%x 0x%08x->0x%08x; +0x%x 0x%08x->0x%08x (%s)",
+                            e.func_macro, e.arg_offset, e.arg_orig, e.arg_replacement,
+                            e.call_offset, e.call_orig, replacement, e.target_macro);
+    }
+    return true;
+}
+
+bool revert_s2_getter_redirects() {
+    std::lock_guard<std::recursive_mutex> lock(g_patch_mtx);
+    if (g_base == 0) return false;
+    for (size_t i = g_stack_getter_redirect_patch_count; i > 0; --i) {
+        const S2ReadRedirectEntry& e = g_stack_getter_redirect_patches[i - 1];
+        const uintptr_t func = redirect_func_addr(e);
+        if (func == 0) return false;
+        write_insn(func + e.arg_offset, e.arg_orig);
+        write_insn(func + e.call_offset, e.call_orig);
+    }
+    return true;
+}
+
 bool apply_fixed_stack_layout() {
     std::lock_guard<std::recursive_mutex> lock(g_patch_mtx);
     if (g_base == 0) return false;
     if (g_stack_layout_patch_set.applied()) return true;
     bool ok = g_stack_layout_patch_set.apply();
+    if (ok) ok = apply_s2_getter_redirects();
     __android_log_print(ok ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, PATCH_TAG,
                         "stack canonical layout %s", ok ? "applied" : "failed");
     return ok;

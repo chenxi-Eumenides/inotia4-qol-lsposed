@@ -33,7 +33,7 @@ void custom_btn_draw(void* ctrl) {
     static int dbg = 0;
     if (++dbg % 60 == 1) {
         // font 来源实证：GOT 槽 0x2f3000+0x628（font_id 路径）、字体对象槽 0x2f3000+0xf88
-        void** slot_f88 = reinterpret_cast<void**>(g_base + 0x2f3f88);
+        void** slot_f88 = reinterpret_cast<void**>(g_base + G_FONT_OBJ_GOT_VMA);
         void* font_obj = (slot_f88 != nullptr) ? *slot_f88 : nullptr;
         int f88_first = 0;
         if (font_obj != nullptr) f88_first = *reinterpret_cast<int*>(font_obj);

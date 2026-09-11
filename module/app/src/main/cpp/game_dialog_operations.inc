@@ -18,7 +18,7 @@ std::string data_op_npc_interact() {
         if (hero != nullptr) {
             int hx = *reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_X);
             int hy = *reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_Y);
-            int hdir = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(hero) + 0x6);
+            int hdir = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(hero) + C_DIRECTION);
             uint8_t* pool = *reinterpret_cast<uint8_t**>(g_base + G_CHAR_POOL_VMA);
             if (pool != nullptr) {
                 int best_dist = 60, best_slot = -1;
@@ -52,7 +52,7 @@ std::string data_op_npc_interact() {
     }
     // 官方交互链（GAMESTATE_PressKeyPlay 交互分支）：读 npc+0xa u16 funcDisplay，
     // NPCSYSTEM_CheckFunctionDisplay 返回 0=弹 UI / 1=直接执行任务 / 2=不可交互。
-    uint16_t func_display = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(near_npc) + 0xa);
+    uint16_t func_display = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(near_npc) + C_FUNC_DISPLAY);
     int fd = fn_check_function_display(static_cast<int32_t>(func_display));
     if (fd > 1) return op_err("not interactable");
     uint8_t r = fn_uinpc_init();
@@ -63,7 +63,7 @@ std::string data_op_npc_interact() {
         uint8_t* list = *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
         if (list != nullptr) {
             for (int i = 0; i < 27; ++i) {
-                uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * 0x40 + 0x10);
+                uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);
                 if (enter == g_base + F_PANEL_NPC_ENTER) { state_id = i; break; }
             }
         }

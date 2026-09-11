@@ -85,7 +85,7 @@ uint8_t* find_state_entry(uintptr_t enter_vma) {
     if (got == nullptr || *got == nullptr) return nullptr;
     uint8_t* list = reinterpret_cast<uint8_t*>(*got);
     for (int i = 0; i < 27; ++i) {
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_STATE_SIZE + 0x10);
+        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_STATE_SIZE + POPUP_ENTRY_ENTER);
         if (enter == g_base + enter_vma) return list + i * POPUP_STATE_SIZE;
     }
     return nullptr;
@@ -198,11 +198,11 @@ std::string data_exp5_new_panel() {
     uint8_t* entry = find_state_entry(F_PANEL_DAILY_REWARD_ENTER);
     if (entry == nullptr) return op_err("state entry not found");
     memcpy(g_exp5_backup, entry, POPUP_STATE_SIZE);
-    *reinterpret_cast<uintptr_t*>(entry + 0x10) = reinterpret_cast<uintptr_t>(&exp5_enter);
-    *reinterpret_cast<uintptr_t*>(entry + 0x18) = reinterpret_cast<uintptr_t>(&exp5_noop);
-    *reinterpret_cast<uintptr_t*>(entry + 0x28) = reinterpret_cast<uintptr_t>(&exp5_noop);
-    *reinterpret_cast<uintptr_t*>(entry + 0x30) = reinterpret_cast<uintptr_t>(&exp5_noop);
-    *reinterpret_cast<uintptr_t*>(entry + 0x38) = reinterpret_cast<uintptr_t>(&exp5_noop);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) = reinterpret_cast<uintptr_t>(&exp5_enter);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_PROCESS) = reinterpret_cast<uintptr_t>(&exp5_noop);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) = reinterpret_cast<uintptr_t>(&exp5_noop);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F4) = reinterpret_cast<uintptr_t>(&exp5_noop);
+    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) = reinterpret_cast<uintptr_t>(&exp5_noop);
     g_exp5_entry = entry;
     g_exp5_done = true;
     int state_id = *reinterpret_cast<int32_t*>(entry);

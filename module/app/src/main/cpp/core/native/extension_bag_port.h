@@ -38,6 +38,11 @@ bool extension_bag_has_empty_slots(int needed, int include_task_bag);
 bool extension_bag_adopt_unequipped_item(void* character, int equip_slot);
 // INVEN_SaveItem 无空位时的扩展袋接管：把原版新创建物品收进扩展槽。
 bool extension_bag_adopt_native_item(void* item);
+// INVEN_SaveItem backup 前的扩展同类堆合并（VM-39 拾取并入扩展堆）：物品可
+// 堆叠且扩展袋存在同 category/归一化 payload 的可合并堆且模式视图不超上限时
+// 并入并返回 true（调用方跳过原版入库）；找不到可合并堆返回 false，保持原版
+// original-first 入库。
+bool extension_bag_merge_native_item(void* item);
 // 原版库存写入（INVEN_SaveItem backup）前调用：若商店扩展视图正在放大
 // 窗口原版袋容量字，先恢复商店投影，避免原版 FindSaveSlot 把物品写进
 // 超过真实容量的槽位（物品丢失/错乱）。
