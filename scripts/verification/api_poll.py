@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""连续轮询手机 API，检测字段变化（Tailscale 联调用）。
+"""连续轮询手机 API，检测字段变化。
 
-用法：uv run python scripts/verification/api_poll.py <手机tailscale-IP> [间隔秒] [次数]
+用法：uv run python scripts/verification/api_poll.py <设备IP> [间隔秒] [次数]
 输出：每次采样的 /api/system/game 快照、party 与 inventory 字段 + 变化标记
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ def fetch_json(url: str) -> dict:
 
 
 def main() -> None:
-    ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.3.54"
+    ip = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     interval = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
     count = int(sys.argv[3]) if len(sys.argv) > 3 else 30
     base = f"http://{ip}:{BASE_PORT}"

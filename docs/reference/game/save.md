@@ -118,7 +118,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 
 ## 9. 2026-08-27 存档 0 取证
 
-- 真机 2（`192.168.3.54:5555`）当前原版文件为
+- 真机（`<设备序列号>`）当前原版文件为
   `/data/data/com.com2us.inotia4.normal.freefull.google.global.android.common/fcea920f7412b5da7be0cf42b8c93759/save0.dat`，
   文件大小 3711 字节，拉取副本保存在 `.tmp/save-forensics/save0.dat`。
 - 当前文件字节证据：`L=N-3=3708`；`sum(ciphertext[0..L)) & 0xff = 0x75`，文件 checksum 字节为 `0x75`，两者匹配；seed=`0xf9`，尾字节=`0x1a`。
@@ -134,7 +134,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - v0.6.12 修复后，`POST /api/system/enter_slot` 返回 `corrupt / character / error_code=7 / raw hero pointer is null`，进程保持存活、screen 保持 `main_menu`，不再调用 `GAME_StartResumeGame`。历史 Frida 角色加载阶段探针未作为当前项目脚本保留，尚未取得 `SAVE_LoadCharacterInfoBlock/CHARSYSTEM_Allocate/SAVE_LoadCharacter` 的逐阶段返回值。
 - 只读内存验证实验（未写 save0）：临时把 `SAVE_LoadPlayer` 的角色索引写入指令替换为 0，重新调用一次原版加载后，save0 变为 `verdict=valid`、`hero_level=1`、hero 指针非空；但该单条指令实际作用于 3 次循环，Player 索引读回 `0,0,0`、`hero_index=2`，产生三个重复角色槽，未作为修复保留。该结果仅证明角色记录 0 可以被原版解析、分配并挂接；正确修复仍需在 `SAVE_LoadPlayer` 返回后的循环前只修改第 0 项。
 
-## 10. 真机2故障注入结果（v0.6.12）
+## 10. 真机故障注入结果（v0.6.12）
 
 在确认 slot1 原先不存在后，使用与原版文件相同的应用 UID/权限写入测试文件：
 
@@ -144,13 +144,13 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 | 3711 字节随机密文（校验和不匹配） | `corrupt / load_data / error_code=0` | `ok=false, slot corrupt` | `/api/health` 仍为 `ok=true` |
 | 清理测试文件后 | `missing` | `slot empty` | `/api/health` 仍为 `ok=true` |
 
-两种损坏样本均未进入 `GAME_StartResumeGame`，没有产生新的崩溃；测试文件已删除，slot1 恢复为 missing。该结果覆盖了截断、校验失败、拒绝进档和清理恢复，但尚未覆盖版本不兼容、内部块/角色解析失败样本，也未替代真机1验证。
+两种损坏样本均未进入 `GAME_StartResumeGame`，没有产生新的崩溃；测试文件已删除，slot1 恢复为 missing。该结果覆盖了截断、校验失败、拒绝进档和清理恢复，但尚未覆盖版本不兼容、内部块/角色解析失败样本，也未替代真机验证。
 
 ## 11. save0 运行时恢复与原生保存修复（2026-08-27）
 
 ### 11.1 原始文件保护
 
-- 在任何原生保存操作前，从真机2拉取未修改的 save0：
+- 在任何原生保存操作前，从真机拉取未修改的 save0：
   `.tmp/save-forensics/save0-before-recovery-20260827.dat`。
 - 原始文件大小为 3711 字节，SHA-256 为
   `034be740d395db25aaea6e509c0745952956e99f34d26f5409e694b7f9f3c59d`。
@@ -178,7 +178,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
    - `SAVE_LoadCharacterAll+0x6c`：只将第一个角色索引视为 0；
    - `SAVE_LoadCharacterAll+0x84`：处理第一个角色后跳过两个已知为空的队友槽。
 - 该 patch 只改进程内指令，所有指令均先校验原始 opcode，并在实验结束后回退；没有把 patch 作为最终交付逻辑保留。
- - 正确 patch 版本在启动弹窗点击 `(420,280)` 后验证成功：
+ - 正确 patch 版本在启动弹窗点击 `(<启动弹窗坐标>)` 后验证成功：
    `screen=world`，主角“凯恩”可读取，等级 1、HP 1672/1672、MP 200/200，`party_count=1`（其余队伍槽为空），进程保持健康。
 - 可复用脚本已登记为 `scripts/analysis/frida/save0-repair-patch.js`；执行前必须按当前 `libgame.so` 反汇编核对五个 opcode，成功保存后重启进程移除 patch。
 
@@ -195,7 +195,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 ### 11.4 重启验收
 
 - 移除临时运行时 patch、重新构建并部署模块。
-- 重启游戏后按真机2既定前置点击启动弹窗 `(420,280)`，再调用 `enter_slot {"slot":0}`。
+- 重启游戏后按真机既定前置点击启动弹窗 `(<启动弹窗坐标>)`，再调用 `enter_slot {"slot":0}`。
 - 无 patch 的最终验收仍为内部 `preflight=valid`，`screen_after=world`，`/api/health={"ok":true}`；主角数据可读。
 - 结论：save0 已通过“运行时恢复 → 游戏原生保存 → 回主菜单预检 → 移除 patch 后重启读档”闭环修复。原始备份必须保留，后续若继续做地图、装备或技能完整性研究，应以修复后的 save0 和原始备份对照，禁止覆盖原始备份。
 
@@ -205,7 +205,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - patch 下进入 save0 后原生保存返回 `ok=true`、`map_id=30`、`leader_slot=0`、`party_count=1`。
 - 移除 patch 并重启，在同意页关闭后无 patch 进入 save0；最终 `/api/ui` 为 `screen=world`，`/api/system/info` 显示 save0 `hero_level=1`、`hero_index=0`，`/api/health` 为 `ok=true`。
 - 修复 `data_save_slots_json()`：仅主菜单 `state=4` 调用 `SAVE_CreateSaveSlot()` 刷新槽区；world/启动过渡阶段只读槽结构，避免查询 `/api/system/info` 覆盖角色运行时全局。
-- 启动确认弹窗的 native `UIPopupMsg` 现在优先于状态机参与 `screen` 判定；`enter_slot` 检测到活动弹窗返回 `ui occupied: dialog_popup`。Android `AgreementUIActivity` 属于 Java 同意页，不由 native `UIPopupMsg` 表示，独立为 `screen=agreement`（Kotlin 层覆盖，与 native 弹窗以 in_world 守卫分域）；`enter_slot`/`create_slot` 在同意页存在时返回 `ui occupied: agreement`，`dialog/select {"action":"ok"}` 重放登记触摸 `(420,280)` 关闭同意页。
+- 启动确认弹窗的 native `UIPopupMsg` 现在优先于状态机参与 `screen` 判定；`enter_slot` 检测到活动弹窗返回 `ui occupied: dialog_popup`。Android `AgreementUIActivity` 属于 Java 同意页，不由 native `UIPopupMsg` 表示，独立为 `screen=agreement`（Kotlin 层覆盖，与 native 弹窗以 in_world 守卫分域）；`enter_slot`/`create_slot` 在同意页存在时返回 `ui occupied: agreement`，`dialog/select {"action":"ok"}` 定位并点击同意页的「同意」元素关闭。
 
 ## 13. 2026-08-28 裸窗口损坏实测与同意页启动拦截
 

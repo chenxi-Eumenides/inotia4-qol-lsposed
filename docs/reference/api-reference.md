@@ -695,7 +695,7 @@
 
 #### 运行时逆向缺口
 
-> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机2，证据见 `docs/development/planning/backlog.md` 对应条目）。
+> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机，证据见 `docs/development/planning/backlog.md` 对应条目）。
 
 | # | 缺口 | 状态与结论 |
 |---|---|---|
@@ -1294,7 +1294,7 @@
 **返回格式**：`{"ok":true}` 或 `{"ok":false,"error":<原因>}`
 
 **支持动作**（✅ v0.5.6 实机验证）：
-- agreement（Java 层同意页，主菜单前）：`ok`（同意——在同意页窗口重放登记触摸 `(420,280)`，返回 `{"ok":true,"result":"tap_dispatched"}`，关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；若在页面刚出现瞬间点击可能因未就绪被吞掉，重试 `ok` 即可）；其他动作→`no such option in agreement`
+- agreement（Java 层同意页，主菜单前）：`ok`（同意——定位同意页内的「同意」元素并点击，返回 `{"ok":true,"result":"tap_dispatched"}`，关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；若在页面刚出现瞬间点击可能因未就绪被吞掉，重试 `ok` 即可）；其他动作→`no such option in agreement`
 - popup：`ok`/`cancel`（UIPopupMsg 官方按钮）
 - story：`next`（下一句）/`skip`（跳过）
 - npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）

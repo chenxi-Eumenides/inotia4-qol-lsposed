@@ -157,7 +157,7 @@ cbz x0 → ret；Show(!=0x31)；GetData(0x9df18) 非空；[data+0x60]=DrawProc �
 uv run --with capstone python3 -c "
 from capstone import *
 md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-f = open('/tmp/opencode/versions/lib_20260810/libgame.so','rb')
+f = open('<本地临时目录>/versions/lib_20260810/libgame.so','rb')
 f.seek(BASE); code = f.read(LEN)
 for i in md.disasm(code, BASE):
     print('0x%x: %s %s' % (i.address, i.mnemonic, i.op_str))

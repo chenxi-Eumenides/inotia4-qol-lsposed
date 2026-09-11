@@ -3,7 +3,7 @@
 
 用法：
 python3 scripts/verification/smoke_all.py [base_url] [output_json]
-python3 scripts/verification/smoke_all.py                      # 默认 http://192.168.3.54:8088
+python3 scripts/verification/smoke_all.py                      # 默认 http://127.0.0.1:8088
 python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 smoke_local.json
 
 路由清单从 module/app/src/main/java/com/inotia4/qol/controller/*.kt 的
@@ -32,7 +32,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_BASE = "http://192.168.3.54:8088"
+DEFAULT_BASE = "http://127.0.0.1:8088"
 DEFAULT_OUT = Path(__file__).parent / "smoke_baseline_v0.5.43.json"
 
 # 路径变量默认值（语义见各 controller @PathVariable）

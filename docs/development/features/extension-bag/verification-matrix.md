@@ -13,7 +13,7 @@
 * `VM-01` 起为真机用例号；每张卡只有一个主用例号，复合操作用同一用例中的编号步骤区分阶段。
 * 原版物理袋为 `0..5`，普通交易目标为 `0..4`，任务袋 `5` 只保留原版语义；扩展逻辑袋对外为 `6..10`、内部为 `0..4`。
 * VMA 只从 `data/native/game_symbols.h` 反查；域文件不新增裸地址。卡片中的 VMA 是验收定位，不改变调用 ABI。
-* `Host` 表示可运行的当前测试；`真机` 表示唯一设备 `192.168.3.54:5555` 的行为证据；源码锚不能替代真机结果。
+* `Host` 表示可运行的当前测试；`真机` 表示唯一设备 `<设备序列号>` 的行为证据；源码锚不能替代真机结果。
 * API 面遵循 `docs/reference/api-reference.md`：库存读写使用 `/api/item/inventory*`，扩展袋并入 `bag=6..10`；视图控制仍是 `/api/debug/extension_bag/*` 的开发期能力。
 
 ### 1.2 失败判定总则
@@ -461,7 +461,7 @@
 ### VM-27 `INVEN_MoveItem` guard 与原版合并回归
 
 - **操作**：分别让扩展身份对象和原版对象到达 `INVEN_MoveItem@0x104934`，并覆盖活动扩展 view/session 与普通原版路径。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled` 与 source protection 最终值；在操作前记录原版袋 `0..5×16` 物理快照 digest、nonnull 和目标槽摘要。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled` 与 source protection 最终值；在操作前记录原版袋 `0..5×16` 物理快照 digest、nonnull 和目标槽摘要。
 - **原版链(VMA)**：`INVEN_MoveItem@0x104934`；模块直调点为 `game_patch_move_merge.inc:74` 和 `game_inventory_use.inc:210`。
 - **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:move_item_wrapper`、`equip_control_event_proc_wrapper`；身份/物理摘要 helper 为 `virtual_bag_capture_move_item_observation`。
 - **共享状态读写**：锁内读取 `g_module_objects`/ownership、`g_module_view_index`、drag session 和物理 `6×16` 摘要；锁外调用 backup，记录 caller、参数及 pre/post。
@@ -478,7 +478,7 @@
 ### VM-32 S2 存档数量一致性（无版本标识、统一 S2、宽容忽略旧字段）
 
 - **操作**：验证 sidecar 与原版袋 `+0x10` 数量在保存/读档/跨重启下按统一 S2 语义保持不变；携带历史 `encodingVersion` 字段的 sidecar 被宽容忽略且数值不变；非可堆叠类别逐字节不变。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`；操作前记录原版袋 `0..5×16` 物理快照 digest、nonnull 与可堆叠槽数量字摘要，并导出 sidecar JSON 副本（可含旧 `encodingVersion` 字段）。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`；操作前记录原版袋 `0..5×16` 物理快照 digest、nonnull 与可堆叠槽数量字摘要，并导出 sidecar JSON 副本（可含旧 `encodingVersion` 字段）。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（读侧解码，S2-P2）、`SAVE_SaveInventory@0x127d8c`。
 - **扩展接管点(文件:函数)**：`virtual_bag_state_json.inc:state_json/parse_state_json`（无版本字段写出、旧字段宽容忽略）；`extension_bag_persistence.cpp:extension_bag_load_state_from_store`。
 - **共享状态读写**：load 只解析数量数据面（descriptor canonical 与 payload 数量位），无版本分支；payload 与 canonical 不一致时以 S2 重编码对齐。
@@ -491,7 +491,7 @@
 ### VM-35 读档跨配置往返（canonical 不改写、模式不变性）
 
 - **操作**：启用态保存含可堆叠数量（重点 217，另覆盖 99/127/128/199/999）的存档 → 关闭堆叠上限 → 读档 → 核对数量与 payload 不变；再启用 → 再读档核对；覆盖切换模式不改变值与 sidecar 缺失行为。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256；操作前导出 sidecar JSON 副本、记录目标物品 `+0x10` 原始值与 UI 显示数。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256；操作前导出 sidecar JSON 副本、记录目标物品 `+0x10` 原始值与 UI 显示数。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（读侧解码）、`SAVE_SaveInventory@0x127d8c`。
 - **扩展接管点(文件:函数)**：`extension_bag_runtime.inc:ensure_state_loaded_locked`（无迁移门控，直接载入）、`virtual_bag_state_json.inc:parse_state_json`（统一 S2 解码与 canonical 对齐）、`extension_bag_persistence.cpp:extension_bag_load_state_from_store/extension_bag_save_state_to_store`。
 - **共享状态读写**：读档仅载入 sidecar canonical；无版本状态机、无物理袋扫描。
@@ -503,7 +503,7 @@
 ### VM-36 关闭态低 7 位视图与 a 保留（199→71、重开 199、off 上限 99）
 
 - **操作**：启用态构造 canonical 数量（重点 199）的可堆叠物品 → 关闭堆叠上限 → 核对所有读写/操作按低 7 位视图（读 71、上限 99、`a` 位段不变）→ 关闭态执行消耗/合并 → 重新启用 → 核对重开读回完整 canonical 值。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`、`stackLimitEnabled`；操作前记录目标物品 `+0x10` 原始值与 sidecar JSON 副本。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`stackLimitEnabled`；操作前记录目标物品 `+0x10` 原始值与 sidecar JSON 副本。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（读侧模式视图解码）、`INVEN_ConsumeItem@0x1047bc+0x104818/0x104844/0x104858`（b 递减）、`INVEN_MoveItem@0x104934`（合并写 b）。
 - **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_get_cumulate_count`（`effective_read_count` 模式视图）、`core/native/stack_codec.h:effective_read_count/effective_write_count/effective_clamp/effective_view_count`、`native_inventory_hook.cpp:consume_item_wrapper`（借位预置仅启用态）、`extension_bag_transaction.inc:move_extension_to_extension_locked`（合并按视图、descriptor 回写 canonical）、`extension_bag_equip.inc:consume_extension_item_after_native_locked`。
 - **共享状态读写**：关闭态模块侧写点只改 payload b 位；descriptor `count` 与 sidecar 恒为 canonical；读档路径不参与本卡（见 VM-35）。
@@ -516,7 +516,7 @@
 ### VM-33 S2 读侧 getter 显示与查询（99/100/127/128/199/999）
 
 - **操作**：验证 `ITEM_GetCumulateCount@0x106094` 读侧 hook 对可堆叠类别按 `128a+b` 解码、对非可堆叠类别直通原版，覆盖 S2 边界数量在背包显示、API `count` 与原版 UI 三处一致。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`；**前置：S2-P3 写侧已落地**（数量写入经 `s2_write_count`），否则数量值非 S2 布局、本卡预期不成立。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`；**前置：S2-P3 写侧已落地**（数量写入经 `s2_write_count`），否则数量值非 S2 布局、本卡预期不成立。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（原版只见 bits25–31，即 b 段；可堆叠返回 `b`，装备返回 `1`，空指针返回 `0`）。
 - **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:get_cumulate_count_wrapper`（门控 `item_count_encoding` == kEncoded 时返回 `stack_codec::s2_read_count(*(+I_COUNT))`，否则直通 backup）；安装链 `install_locked` 第 17 个 hook（`GetCumulateCount`）。
 - **共享状态读写**：纯读物品 `+0x10` 与 ITEMCLASSBASE 类别表；不取 `g_virtual_bag_mtx`，不写任何状态。
@@ -529,7 +529,7 @@
 ### VM-34 S2 写侧门控与进位/借位（创建/合并/消耗）
 
 - **操作**：驱动模块写路径（创建、扩展袋内合并、消耗扣减）产生跨 127 边界的数量变化，核对 `+0x10` 位段的 S2 拆段写入、非可堆叠类别 bits22–24 不变与 fail-closed 拒绝。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled`；操作前记录原版袋 `0..5×16` 物理快照 digest、目标物品原始 `+0x10` 与宝石/装备/袋对象位段摘要。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled`；操作前记录原版袋 `0..5×16` 物理快照 digest、目标物品原始 `+0x10` 与宝石/装备/袋对象位段摘要。
 - **原版链(VMA)**：写侧 clamp 点 `INVEN_FindSaveSlot@0x103960+0x238`、`INVEN_SaveItemDirect@0x103bf0+0xdc/0xf0`、`INVEN_MoveItem@0x104934+0x150/0x158`（完整数量判定 999）；`INVEN_CheckSaveInNotEmptySlot+0xa4`、`INVEN_GetCumulateSaveSlotEx+0x164/0x17c` 保持原版 b 满判定（不进 clamp 表）。
 - **扩展接管点(文件:函数)**：`model/virtual_bag_transaction_rules.inc:patch_payload_count/merge_count`、`api/native/game_inventory_basic.inc:data_op_add_item`、`extension_bag_equip.inc:consume_extension_item_after_native_locked`；统一 `stack_codec::s2_write_count/s2_clamp`（进位/借位内建）。
 - **共享状态读写**：写点持 `g_virtual_bag_mtx` 修改 payload 数量位与 descriptor；类别判定走 `item_count_encoding`（不持锁读 ITEMCLASSBASE）。
@@ -542,7 +542,7 @@
 ### VM-37 出售/拆堆数量按 S2 全量（直接位读重定向）
 
 - **操作**：启用堆叠上限，商店卖出可堆叠物品（整堆与部分），核对出售数量输入框上限、整堆判定与结算金额按 `128a+b` 全量而非 b 残量。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`、堆叠上限开关；操作前记录目标物品原始 `+0x10`（含 a/b 拆段）与 `count=128a+b`。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、堆叠上限开关；操作前记录目标物品原始 `+0x10`（含 a/b 拆段）与 `count=128a+b`。
 - **原版链(VMA)**：`UIStore_ButtonSellExe@0xd1818+0xb8/0xd0`（b≤1 整堆判定 + `UIInputItemCount_Create` 上限）、`UIStore_SellItem@0xd25f0+0xc8`（b≤1 判定 + `ITEMSYSTEM_Divide@0x1083f8+0x60/0x94` 拆堆守卫/remain）、`UIStore_SellOKInputItemCount@0xd1948`（金额=单价×输入数量）。
 - **扩展接管点(文件:函数)**：`game_patch_core.inc:g_stack_getter_redirect_patches` + `apply_s2_getter_redirects`（5 条 `mov x0,xN; bl ITEM_GetCumulateCount`）；被调用 getter 为 H-17 `native_inventory_hook.cpp:get_cumulate_count_wrapper`。
 - **共享状态读写**：重定向为纯指令 patch（常驻、不随开关 revert）；getter 内部不取 `g_virtual_bag_mtx`（R-44）；拆堆源堆 a+b 回写由 `item_system_divide_wrapper` 确认后完成（R-49）。
@@ -594,7 +594,7 @@
 ### VM-41 原版背包详情出售按 canonical 全量接管（R-55）
 
 - **操作**：启用堆叠上限，在装备页背包详情对可堆叠物品执行出售（按钮弹确认框→OK），核对确认框展示金额、实得金币与删除数量按 `128a+b` 全量；取消预演不得售出。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`、堆叠上限开关；操作前记录目标物品原始 `+0x10`（含 a/b 拆段）与 `count=128a+b`、money 前后值。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、堆叠上限开关；操作前记录目标物品原始 `+0x10`（含 a/b 拆段）与 `count=128a+b`、money 前后值。
 - **原版链(VMA)**：`UIEquip_ButtonDestroyExe@0xb6240`（按钮预演 `bl 0xb83d0`，进入前 `x23=0x666`）→ `UIEquip_OKDestroyItem@0xb83d0`（`0xb8468` `bl 0x1261c4`）→ `0x1261c4` 内联 `ldr w0,[x21,#0x10]` + `bl UTIL_GetBitValue(_,31,25)` 只读 b 段、clamp `b∈[1,99]?b:1`、`unit×count×7/10`；弹窗 OK 经 `UIPopupMsg_ButtonOKExe@0xcaa14 blr x1`。
 - **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:ok_destroy_item_wrapper`（H-23）+ `button_destroy_exe_wrapper`（H-22 预演标记）；纯函数 `inventory_hook_stage4.cpp:vanilla_sell_route`/`vanilla_sell_money`；安装链第 13/15 个 hook。
 - **共享状态读写**：wrapper 不取 `g_virtual_bag_mtx`；读 `G_UIEQUIP_DESC_TYPE_VMA`/`G_UIEQUIP_CUR_BAG_VMA`/`G_UIEQUIP_PANEL_CTRL_VMA` 面板上下文与物理槽对象；接管路径调 `fn_add_money`/`fn_minus_money`/`fn_remove_item_direct`/`fn_ui_equip_refresh_item_area`（不持扩展锁）。
@@ -607,7 +607,7 @@
 ### VM-42 三个 UI 宿主页签随扩展背包开关挂载/卸载（R-58）
 
 - **操作**：启用扩展背包，分别打开背包页/商店页/合成器页，确认扩展页签挂载；运行期 `POST /api/config/set {"extensionBagEnabled":false}`，确认三处页签全部卸载；再启用确认恢复挂载。
-- **设备/APK/快照前置**：记录真机 `192.168.3.54:5555`、最新 debug APK SHA-256、`extensionBagEnabled`；操作前后读 `/api/debug/extension_bag/status` 的 `extension_tab_button` 与 `enabled`。
+- **设备/APK/快照前置**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`；操作前后读 `/api/debug/extension_bag/status` 的 `extension_tab_button` 与 `enabled`。
 - **原版链(VMA)**：`UIEquip_CreateInvenControl@0xb6688`（`ldr x3,[0x2f5410]` 取 item proc）；`UIStore`/`UIMix` 袋容器（见 `extension_bag_store.inc`/`extension_bag_mix.inc` 挂载点）。
 - **扩展接管点(文件:函数)**：`extension_bag_runtime.inc:install_extension_tab_buttons_locked`、`extension_bag_store.inc:store_install_tab_buttons_locked`、`extension_bag_mix.inc:mix_install_tab_buttons_locked`（三处入口 `g_virtual_bag_enabled` 门控）；`extension_bag_render.inc:draw_tab_buttons_in_frame_locked`、`extension_bag_store.inc:store_draw_end_wrapper`、`extension_bag_mix.inc:mix_draw_end_wrapper` 的 disabled 分支清除。
 - **共享状态读写**：`g_virtual_bag_enabled`（`std::atomic`）、`g_extension_tab_buttons`/`store_tab_buttons`/`mix_tab_buttons` 与各自 generation。
@@ -620,7 +620,7 @@
 ### VM-43 monster 版物品数量上界兼容（R-59）
 
 - **操作**：在 monster v23（**未改 APK**）上启用模块，`enter_slot 0` 载入含 S2 扩展数量的存档，确认进入世界不崩溃；对非 monster（大修）版确认无改动。
-- **设备/APK/快照前置**：真机 `192.168.3.54:5555`、最新 debug APK SHA-256；记录 `monster item-count compat` 日志。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256；记录 `monster item-count compat` 日志。
 - **原版链(VMA)**：monster 物品准入 helper `0x741764`（注入段 `LOAD @0x740000`），取记录 `+14`（= `I_COUNT` 最高字节）做 `((v-2)>>1) > 0x62`。
 - **扩展接管点(文件:函数)**：`game_patch_core.inc:apply_monster_item_count_compat()`；调用点 `game_access.cpp:bridge_init()` 末尾。
 - **必须保持的不变式(引 R-xx)**：按特征字节 `1F 89 01 71 68 00 00 54`（`cmp w8,#0x62; b.hi`）在 `libgame.so` 可执行映射内定位；非命中不改；禁止改 APK/重打包（R-59）。
@@ -632,7 +632,7 @@
 ### VM-44 save gate 按符号 hook SAVE_SaveInventory 函数入口（R-60）
 
 - **操作**：monster v23 + 模块启动，确认 `save gate hook installed` 且 `save gate patch mismatch` 为 0；注入链完整；扩展视图可用；保存成功。
-- **设备/APK/快照前置**：真机 `192.168.3.54:5555`、最新 debug APK SHA-256。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256。
 - **原版链(VMA)**：`SAVE_Save@0x129600+0x170`（大修 `bl 0x127d8c`；monster `bl 0x741168` 包装器，内部 `0x741204 bl 0x127d8c`）；原版 `SAVE_SaveInventory@0x127d8c`。
 - **扩展接管点(文件:函数)**：`extension_bag_lifecycle.inc:inject_locked`（`native_hook_func()(target, &save_inventory_wrapper, &backup)`）；`extension_bag_render.inc:save_inventory_wrapper`（经 `g_backup_save_inventory` 调原函数）。
 - **共享状态读写**：`g_backup_save_inventory`、`g_save_inventory_patch_addr`。

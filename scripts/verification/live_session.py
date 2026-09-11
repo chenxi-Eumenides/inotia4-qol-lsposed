@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""联调全自动会话脚本（局域网/Tailscale 通用）。
+"""联调全自动会话脚本。
 
 流程：等待 API 就绪 → 等待游戏世界就绪 → 连续采样（2s 间隔）→ 检测失败/超时 → 输出分析报告。
 用法：uv run python scripts/verification/live_session.py [手机IP] [时长上限分钟]
@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "log" / "live-test"
 PORT = 8088
-DEFAULT_IP = "192.168.3.54"
+DEFAULT_IP = "127.0.0.1"  # 默认本机；实际使用请用参数传入设备 IP
 API_WAIT_MIN = 5
 MAX_RUN_MIN = 40
 INTERVAL = 2.0

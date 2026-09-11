@@ -825,8 +825,8 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 ### 7.1 从主菜单进入游戏
 
 ```bash
-# 启动后若出现无 API 跳过的弹窗（真机2专用前置），先点击确认：
-ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/device/touch_automation.py --inject input click 420,280 1.0
+# 启动后若出现无 API 跳过的弹窗（真机专用前置），先点击确认：
+ANDROID_SERIAL=<设备序列号> uv run python scripts/device/touch_automation.py --inject input click <启动弹窗坐标> 1.0
 
 # 1. 查存档
 curl http://<手机IP>:8088/api/system/info

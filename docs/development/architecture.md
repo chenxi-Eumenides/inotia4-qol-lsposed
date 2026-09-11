@@ -274,7 +274,7 @@ CacheSlot g_cache_slots[] = {
 **JNI 接口不变**：gamebridge.cpp 仍调 `data_*_json()`，Kotlin 层仅 Service 组装（v0.4.58 currentMap 的 unitsJson 去重）。
 
 **性能实测**：
-- v0.4.59（真机2，2026-08-12）：预取槽锁外构造修复后 party 单端点 500 并发 **337.5 req/s**（与 v0.4.57 持平）；纯预取 5 端点 267.8 req/s（units BFS 重构造成本）、纯惰性 2 端点 365.4 req/s（轻量端点）；混合 7 端点 182.4 req/s（端点构成差异，非机制问题）。**吞吐差异主因是端点构造成本（units BFS）而非缓存机制**。
+- v0.4.59（真机，2026-08-12）：预取槽锁外构造修复后 party 单端点 500 并发 **337.5 req/s**（与 v0.4.57 持平）；纯预取 5 端点 267.8 req/s（units BFS 重构造成本）、纯惰性 2 端点 365.4 req/s（轻量端点）；混合 7 端点 182.4 req/s（端点构成差异，非机制问题）。**吞吐差异主因是端点构造成本（units BFS）而非缓存机制**。
 - **P2/P3 复测（重构后）**：v0.5.48（P2）party 端点 keep-alive **712 req/s**（≥300 基线达成）；v0.5.49（P3）复测 **260-391 req/s**（端点构成差异，非机制回归）。
 
 ### 2.4 跨域遍历原语规范（P2 新增）
@@ -431,11 +431,11 @@ uv run python scripts/verification/smoke_all.py
 
 ## 8. 文档地图（避免重复）
 
-> 完整文档地图（三级分级）见 `README.md`「文档地图」，本节仅列与代码结构直接相关的文档。
+> 完整文档地图与三级分级见 `docs/INDEX.md` 与根目录 `AGENTS.md`，本节仅列与代码结构直接相关的文档。
 
 | 文档 | 职责 | 与本文档关系 |
 |---|---|---|
-| `README.md` | 项目总览、文档地图（三级分级） | 结构概览指向本文档 |
+| `README.md` | 面向用户的项目总览（功能、安装、使用、下载） | 结构概览指向本文档 |
 | `docs/development/planning/refactor-plan.md` | 重构实施方案和阶段计划 | 结构迁移目标与分阶段计划 |
 | `docs/player-operations.md` | 操作分级（合法 vs OP） | 新增操作端点时引用 |
 

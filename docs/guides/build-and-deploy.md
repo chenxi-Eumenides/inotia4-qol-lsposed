@@ -95,28 +95,28 @@ scripts/patch-apk.sh --newpackage com.com2us.inotia4.qol.patched <原始游戏.a
 scripts/patch-apk.sh --sigbypasslv 2 <原始游戏.apk> <模块.apk>
 
 # ② 部署（覆盖安装，LSPosed 启用状态按包名保留）
-# 默认操作真机2（192.168.3.54）；若同时连着真机1 需加 -s <序列号> 区分。
+# 默认操作单台真机（<设备IP>）；多设备时用 -s <序列号> 区分。
 # 当前构建命令的实际产物是 app/build/outputs/apk/debug/app-debug.apk。
-adb -s 192.168.3.54:5555 install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s <设备序列号> install -r app/build/outputs/apk/debug/app-debug.apk
 
 # ③ 重启游戏（让 Xposed 重新注入，模块更新生效的必需步骤）
 # 按包名 force-stop 即可，**无需 pid**；monkey 启动与桌面点击等价
 # 游戏启动约 15-18 秒到主菜单（state=4）；重启后首屏若为通知栏（NotificationShade）先 input keyevent 4 关闭
-adb -s 192.168.3.54:5555 shell am force-stop com.com2us.inotia4.normal.freefull.google.global.android.common
-adb -s 192.168.3.54:5555 shell monkey -p com.com2us.inotia4.normal.freefull.google.global.android.common -c android.intent.category.LAUNCHER 1
+adb -s <设备序列号> shell am force-stop com.com2us.inotia4.normal.freefull.google.global.android.common
+adb -s <设备序列号> shell monkey -p com.com2us.inotia4.normal.freefull.google.global.android.common -c android.intent.category.LAUNCHER 1
 
-# ③a 真机2启动弹窗前置（2026-08-27 实测必需；仅此一步使用触摸脚本）
-# 脚本通过 ANDROID_SERIAL 固定目标真机2，坐标不适用于其他设备。
-ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/device/touch_automation.py --inject input click 420,280 1.0
+# ③a 真机启动弹窗前置（2026-08-27 实测必需；仅此一步使用触摸脚本）
+# 脚本通过 ANDROID_SERIAL 固定目标真机，坐标不适用于其他设备。
+ANDROID_SERIAL=<设备序列号> uv run python scripts/device/touch_automation.py --inject input click <启动弹窗坐标> 1.0
 
 # ④ 等待 API 就绪（8088 端口；curl 轮询比 /proc/net/tcp 可靠）
 # API 可达（能返回 JSON）即代表模块已注入、游戏启动完成；轮询到 "screen" 字段说明模块数据通路就绪
-until curl -s -m 2 http://192.168.3.54:8088/api/health | grep -q '"ok"'; do sleep 2; done
+until curl -s -m 2 http://<设备IP>:8088/api/health | grep -q '"ok"'; do sleep 2; done
 
 # ⑤ 进入游戏世界（推荐：API enter_slot；触摸方案已弃用）
-curl -s -X POST http://192.168.3.54:8088/api/system/enter_slot -H "Content-Type: application/json" -d '{"slot":0}'
+curl -s -X POST http://<设备IP>:8088/api/system/enter_slot -H "Content-Type: application/json" -d '{"slot":0}'
 # 验证：screen=world 即进入世界
-curl -s http://192.168.3.54:8088/api/ui/screen
+curl -s http://<设备IP>:8088/api/ui/screen
 ```
 
 > `targetPackages` 默认只有原版游戏包名。需要让同一个 LSPosed 模块覆盖多个包时，使用
@@ -148,7 +148,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 1. 确认进程存活并取 pid：
 
    ```bash
-   adb -s 192.168.3.54:5555 shell pidof com.com2us.inotia4.normal.freefull.google.global.android.common
+   adb -s <设备序列号> shell pidof com.com2us.inotia4.normal.freefull.google.global.android.common
    ```
 
    无输出即进程已死，转 tombstone 采集，不走本节后续步骤。
@@ -157,7 +157,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 
    ```bash
    mkdir -p .tmp/<task-name>
-   adb -s 192.168.3.54:5555 shell su -c 'debuggerd -b <pid>' > .tmp/<task-name>/backtrace.txt
+   adb -s <设备序列号> shell su -c 'debuggerd -b <pid>' > .tmp/<task-name>/backtrace.txt
    ```
 
 3. 定位等待线程：在 `backtrace.txt` 中搜 `std::mutex::lock`、`__pthread_mutex_lock`、
@@ -169,7 +169,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 4. 配套 logcat 采集（同一时间窗，用于对齐模块日志锚）：
 
    ```bash
-   adb -s 192.168.3.54:5555 logcat -d -v time > .tmp/<task-name>/logcat.txt
+   adb -s <设备序列号> logcat -d -v time > .tmp/<task-name>/logcat.txt
    ```
 
    结合 `VIRTBAG_LOG` 锚（`txn committed ...`、`release_cleanup ...` 等）判断停滞点；
@@ -182,28 +182,18 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 | 脚本 | 用途 | 用法 | 默认 |
 |---|---|---|---|
 | `scripts/maintenance/check_symbols.py` | 符号一致性校验（**改 game_symbols.h 后必跑**） | `uv run python scripts/maintenance/check_symbols.py [libgame.so路径]` | `apk/decoded/overhaul/lib/arm64-v8a/libgame.so`，比对 120+ 符号；**新增符号须登记 `SYMBOL_TO_MACRO` 映射** |
-| `scripts/verification/api_poll.py` | 连续轮询 player/party/inventory 检测字段变化 | `uv run python scripts/verification/api_poll.py <IP> [间隔秒] [次数]` | `192.168.3.54`, 2.0s, 30 次 |
-| `scripts/verification/live_session.py` | 联调全自动会话（局域网/Tailscale 通用采样） | `uv run python scripts/verification/live_session.py [IP] [时长上限分钟]` | `192.168.3.54`, 上限 5min |
+| `scripts/verification/api_poll.py` | 连续轮询 player/party/inventory 检测字段变化 | `uv run python scripts/verification/api_poll.py <IP> [间隔秒] [次数]` | `<设备IP>`, 2.0s, 30 次 |
+| `scripts/verification/live_session.py` | 联调全自动会话（连续采样） | `uv run python scripts/verification/live_session.py [IP] [时长上限分钟]` | `<设备IP>`, 上限 5min |
 | `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（M3 产物 → module/assets） | `uv run python scripts/data/package_assets.py` | 28 表 + zh-Hans/en 语言 |
-| `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）+ 实时检测（无参数=检测模式） | `uv run python scripts/device/touch_automation.py click 100,200 0.5 ...` | 3168x1440 逻辑坐标，自动旋转校准 |
+| `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）+ 实时检测（无参数=检测模式） | `uv run python scripts/device/touch_automation.py click 100,200 0.5 ...` | <逻辑分辨率> 逻辑坐标，自动旋转校准 |
 
-### 3.4 设备连接方式（两台真机）
+### 3.4 设备连接方式
 
-> **项目有两台真机，不是同一台手机**（2026-08-12 确认）：
+> 本地真机、网络与触摸坐标等环境信息保存在本地（不纳入仓库）；以下为通用说明。
 
-| 设备 | 局域网 IP | Tailscale IP | 说明 |
-|---|---|---|---|
-| **真机1** | `192.168.3.11:5555` | `100.110.139.83:5555` | 原主力机（OnePlus 13，root + Zygisk-LSPosed），**UI 点击坐标文档（ui-click-coordinates.md）所有坐标均针对此机**（3168x1440 窗口坐标系） |
-| **真机2** | `192.168.3.54:5555` | 无（未配置） | 第二台真机（当前主力，2026-08-12 起），**完全用 API 操控，不适用触摸坐标** |
-
-连接方式（按优先级依次尝试）：
-
-1. **USB**：`adb devices`
-2. **局域网**：`adb connect <设备IP>:5555`（真机1=`192.168.3.11`，真机2=`192.168.3.54`）
-3. **Tailscale**：`adb connect 100.110.139.83:5555`（仅真机1）
-
-> **重要**：两台设备分别 `adb connect` 后由 `adb -s <序列号> <命令>` 区分；`adb` 默认连最后连接的设备。日常默认以**真机2（192.168.3.54）**为开发机，命令速查中的 IP 均指真机2。
-> **UI 坐标限制**：真机2仅允许在启动弹窗前置使用已验证坐标 `(420,280)`；其余进入存档、背包读取、移动、保存和验收全部使用 HTTP API。真机1坐标仍不在本项目当前验收范围内。
+- 连接：`adb connect <设备IP>:5555`；多设备用 `adb -s <序列号> <命令>` 区分（`adb` 默认连最后连接的设备）。
+- 部署与验收在真机上进行；除**启动弹窗前置**外，进档、背包读取、移动、保存和验收全部使用 HTTP API。
+- 触摸脚本 `scripts/device/touch_automation.py` 仅用于启动弹窗前置，坐标按本地设备实测填写。
 
 ### 3.4 其他常用命令
 
@@ -250,7 +240,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 
 已完结（历史记录）：
 - [x] **y7000 模拟器环境**（2026-08-05 实测完结：TCG ARM VM boot 25+ 分钟未完成；x86_64 转译路线 frida 不可用 + LSPatch native 高风险）→ 模拟器路线冻结，转向真机
-- [x] **实体 root 手机就绪**（✅ oneplus-13 已配置 root + Zygisk-LSPosed 并真机联调）
+- [x] **实体 root 手机就绪**（✅ 安卓真机 已配置 root + Zygisk-LSPosed 并真机联调）
 - [x] **android.jar 引用方式**（已用 `local.properties` 的 `sdk.dir` 解决）
 
 ## 5a. 环境踩坑记录（历次会话沉淀）
@@ -269,11 +259,11 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 10. **zsh 通配符不展开**（2026-08-12 实测）：缓存发行版目录含随机哈希，统一使用 `scripts/build-debug.sh`，不要在命令行手写 `*/` 或缓存哈希。
 11. **frida-server 重启后需 su 启动**（2026-08-12 实测）：设备重启后 `/data/local/tmp/frida-server` 需 `adb shell su -c 'nohup /data/local/tmp/frida-server >/dev/null 2>&1 &'`（root + nohup），普通 `adb shell "frida-server &"` 无权限启动失败。
 12. **通知栏遮挡启动**（2026-08-12 实测）：设备重启后首屏可能是 NotificationShade（`dumpsys window` mCurrentFocus 显示），monkey 启动游戏前先 `input keyevent 4` 关闭通知栏回到桌面，否则游戏未真正启动（8088 无监听）。
-13. **两台真机**（2026-08-12 确认）：真机1=`192.168.3.11`（局域网）+`100.110.139.83`（Tailscale，同一台）；真机2=`192.168.3.54`（另一台，当前主力）。真机2仅启动弹窗前置例外使用 `(420,280)`，其余完全用 API 操控。详见 §3.4。
-14. **真机2启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=192.168.3.54:5555 uv run python scripts/device/touch_automation.py --inject input click 420,280 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机2触摸坐标。
+13. **真机部署**：部署与验收在真机上进行；除启动弹窗前置例外使用触摸脚本外，其余完全用 API 操控。详见 §3.4。
+14. **真机启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=<设备序列号> uv run python scripts/device/touch_automation.py --inject input click <启动弹窗坐标> 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机触摸坐标。
 
 ## 6. 关联文档
 
-- 项目总览 / 目录规范：`README.md`
+- 项目总览：`README.md`；目录规范与代理规则：根目录 `AGENTS.md`
 - 代码结构（NDK/CMake/依赖配置说明）：`docs/development/architecture.md`
 - 开发待办：`docs/development/planning/backlog.md`
