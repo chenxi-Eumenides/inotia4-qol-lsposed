@@ -79,7 +79,7 @@ scripts/build-release.sh
 # 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
 # 命名格式固定：inotia4-qol-lsposed-vX.Y.Z.apk（如 v0.4.56）
 # 多目标包名：逗号分隔，同时写入 LSPosed scope.list 和模块运行时过滤。
-scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.inotia4.qol.patched
+scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.com2us.inotia4.qol.patched
 
 # ⑥ 按需生成集成版（原始游戏 APK + 本模块 APK → 单独 APK）
 # 默认使用 NPatch（tools/lspatch/npatch-v1.0.7-741-release.jar，JAR 自带 BouncyCastle，脚本自动注册 BKS provider）。
@@ -90,7 +90,7 @@ scripts/patch-apk.sh <原始游戏.apk> <模块.apk>
 scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar \
     <原始游戏.apk> <模块.apk>
 # NPatch 支持修改输出 applicationId；模块构建时需把新包名加入 targetPackages：
-scripts/patch-apk.sh --newpackage com.inotia4.qol.patched <原始游戏.apk> <模块.apk>
+scripts/patch-apk.sh --newpackage com.com2us.inotia4.qol.patched <原始游戏.apk> <模块.apk>
 # signature bypass 按需显式设置；不要未经验证启用 level 3。
 scripts/patch-apk.sh --sigbypasslv 2 <原始游戏.apk> <模块.apk>
 
@@ -123,7 +123,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 > `-PtargetPackages=pkg.one,pkg.two`；构建会生成多行 `META-INF/xposed/scope.list`，并让运行时只在这些包中初始化。
 > 包名必须是合法 Android applicationId。NPatch 的 `--newpackage` 只改输出 APK 的 manifest/applicationId，原游戏 dex 中的类名和资源 ID 不变；因此新包名必须同时加入此参数并重新构建模块，不能只修改 APK 文件名。该游戏的资源表仍保留原资源 namespace，模块已在改包名进程中兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
 
-> 当前默认 Release 配置已同时包含原包和 `com.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
+> 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
 
 > 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用 NPatch 内置证书重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。`--newpackage` 流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
 +

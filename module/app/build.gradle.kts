@@ -5,7 +5,7 @@ plugins {
 }
 
 val defaultTargetPackages =
-    "com.com2us.inotia4.normal.freefull.google.global.android.common,com.inotia4.qol.patched"
+    "com.com2us.inotia4.normal.freefull.google.global.android.common,com.com2us.inotia4.qol.patched"
 val targetPackages = providers.gradleProperty("targetPackages").orElse(defaultTargetPackages)
     .map { raw ->
         raw.split(',')
