@@ -346,6 +346,13 @@ monster 版重写背包加载器（`SAVE_LoadFile+0xd0` 的 `bl` 改指注入段
    CUR_BAG（宿主身份 R-26/R-27），显示袋切换仅非投影/API 路径，见
    `extension_bag_transaction.inc:move_extension_to_original_locked`、
    `model/virtual_bag_transaction_rules.inc:ext2orig_requires_host_capacity_restore`。
+6. 每帧 `clear_stale_projected_moving_locked`（`extension_bag_input.inc:34-77`）仅在会话非 idle
+   或触摸捕获时清 `TouchState+0x30`；空闲态 `MOVING_CTRL/DROP_SRC_CTRL` 属于原版手势，绝不清
+   （R-61/VM-45）。原版释放的唯一落点派发在 `TouchHandle_ResetMovingControl@0xa371c`（读 `+0x30`，
+   非空则向该控件派发 event 8）；误清会打断原版触摸状态机、使 `0x18` 不再产生（拖动失效）。
+7. 对象所有权账本 `model/ownership_ledger.h`：容量 128（≥ 5 袋 ×16 物品 + 事务余量），
+   `handover_to_inventory` 交接后**立即回收槽位**（`kNone` + generation 递增使旧句柄失效），
+   终态仅以 `total_handed_over` 累计；`Audit.inventory_owned` 由该累计值派生（R-62/VM-46）。
 
 “唯一 owner”只是控制流设计，不是问题 B 的修复证据；H3/H4 的
 `ERROR physical inventory mutation` 复测日志仍缺。
@@ -733,8 +740,8 @@ load 兼容 legacy 见 `:59-67`；v2/3/4 分支、回写处理见 `:69-94`；pay
 `InventoryActions.kt:24-31`；任务袋 5 和扩展视图打开时的原版移动被拒绝，见
 `game_inventory_use.inc:189-216`。视图入口/选择/点击仍有 debug 路径，见
 `ExtensionBagActions.kt:16-29`，不能代替 UI 验收。对象四态账本见
-`model/ownership_ledger.h:3-35`；持 `g_virtual_bag_mtx` 时不得调用会刷新的 `op_ok()`，
-见 `AGENTS.md:34-42`。
+`model/ownership_ledger.h`（容量 128，交接即回收终态槽，R-62/VM-46）；持
+`g_virtual_bag_mtx` 时不得调用会刷新的 `op_ok()`，见 `AGENTS.md:34-42`。
 
 #### 5.4.1 持锁原版回调的受控入口（R-44 同类点清单）
 

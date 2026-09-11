@@ -1093,6 +1093,39 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   save panel/store host/mix host 全部安装；`enter_view {"bag":6}` → `state.mode="module"`；
   `/api/system/save` → `save complete slot=0 tx=… participants=1`。大修版同链仍成立。
 
+### R-61 扩展视图的 moving 控件清理必须避开空闲态，不得清原版活动手势
+
+- **规则一句话**：`clear_stale_projected_moving_locked()` 只能在**模块会话进行中**
+  （`g_extension_drag_session.phase != kIdle`）或**模块触摸捕获中**（`g_extension_touch_capture`）
+  时清除 `TouchState+0x30`（MOVING_CTRL）；`moving==nullptr && drop_source==nullptr` 时直接返回
+  （不记日志）；会话空闲时 `MOVING_CTRL/DROP_SRC_CTRL` 属于原版 TouchHandle 手势，**绝不清除**。
+- **为什么**：原版释放的唯一落点派发在 `TouchHandle_ResetMovingControl@0xa371c`——读
+  `MOVING_CTRL`，非空时向该控件派发 event 8（真正的移动/合并），随后清空 touch state。模块
+  每帧清 `MOVING_CTRL` 会打断原版触摸状态机：真机实证「最后一次成功拖动后 `0x17`×48、
+  `0x19`×700、`0x18`×0，持续 ~11 分钟」，即释放事件不再产生、拖动彻底失效；日志同时出现
+  `stale projected moving cleared moving=<非0> phase=0`（空闲态清掉了非空原版控件）。
+- **典型破坏方式**：空闲态也清（把原版手势当成 stale 投影）；把每帧清空当无害；用
+  `reset_drag_state_locked` 的 memset 清掉原版 ACTIVE_CTRL 等状态。
+- **验证锚**：真机：进入扩展视图后 `stale projected moving cleared` 计数为 0（每帧噪声消失）；
+  连续拖多个物品后仍能继续拖动、`0x18` 持续正常（`VM-45`）。Host 无（依赖游戏控件树/触摸状态机）。
+
+### R-62 所有权账本容量必须覆盖扩展物品上限，交接终态槽必须回收
+
+- **规则一句话**：`ownership::kLedgerCapacity` 必须 ≥ 扩展背包物品上限（5 袋 ×16 = 80）加事务
+  余量（当前 128）；`handover_to_inventory` 交接后必须**立即回收槽位**（`slot.state = kNone` +
+  generation 递增使旧句柄失效），终态信息仅由 `total_handed_over` 累计记录，`Audit.inventory_owned`
+  由该累计值派生。
+- **为什么**：账本对**每个已物化扩展物品**占一个 `module-owned` 句柄，且 `kInventoryOwned` 原为
+  **永不释放**的终态槽（`handover` 只递增 generation、不置空闲）。原容量 32 在 28 件物品 + 4 个
+  终态槽时即耗尽（真机 `module materialize rejected ownership ledger exhausted` →
+  `txn committed but destination materialize failed` → `txn abort`），表现为**拖动可解析落点但
+  不产生结果**；且 ext→orig 操作次数无上限，任何有限容量若不回收终态槽都终将耗尽。
+- **典型破坏方式**：只调大容量当修复（终态槽仍累积，治标）；让 `allocate` 复用 `kInventoryOwned`
+  而不回收（两次分配之间连续交接仍会累积）；交接后仍按句柄报告 `kInventoryOwned`。
+- **验证锚**：Host `test_ownership_ledger`（池耗尽/槽位复用、交接后 `live_handles` 归零、
+  `inventory_owned` 为累计值）；真机：连续「扩展→原版」移动/装备后仍可继续拖动、无
+  `ownership ledger exhausted`（`VM-46`）。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -1156,7 +1189,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-60`，共 60 条。
+1. 本册规则总数：`R-01..R-62`，共 62 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -1174,9 +1207,10 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
     非数量）、`R-53`（SaveItem 漏斗入库前先并入扩展同类堆）、`R-54`（ext→orig
     投影宿主容量字与显示袋守卫）、`R-55`（原版背包详情出售 canonical 接管与
     预演/结算两态）、`R-56`（INVEN_RemoveItemData 物理不足从扩展袋按类别补扣）、
-    `R-57`（进入扩展视图时原版袋列取消高亮）、`R-58`（三个 UI 宿主页签挂载由扩展背包
-    开关唯一门控）、`R-59`（monster 物品数量上界由模块按特征码动态放行）、`R-60`（save
-    gate 按符号 hook `SAVE_SaveInventory` 函数入口）。
+     `R-57`（进入扩展视图时原版袋列取消高亮）、`R-58`（三个 UI 宿主页签挂载由扩展背包
+     开关唯一门控）、`R-59`（monster 物品数量上界由模块按特征码动态放行）、`R-60`（save
+     gate 按符号 hook `SAVE_SaveInventory` 函数入口）、`R-61`（扩展视图 moving 控件清理
+     避开空闲态、不清原版活动手势）、`R-62`（所有权账本容量覆盖扩展物品上限且交接终态槽回收）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、

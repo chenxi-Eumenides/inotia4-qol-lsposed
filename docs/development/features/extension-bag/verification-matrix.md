@@ -642,6 +642,32 @@
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-44`：①monster 启动 log `save gate hook installed target=… backup=…`、`save gate patch mismatch` 计数 0；②8× `save callsite hooked` + drop/draw/desc/event/save panel/store host/mix host 全部安装；③`enter_view {"bag":6}` → `state.mode="module"`；④`POST /api/system/save` → `save complete slot=0 tx=… participants=1`，进程存活。
 - **证据锚类型**：真机日志 + 源码。
 
+### VM-45 扩展视图 moving 控件清理避开空闲态（R-61）
+
+- **操作**：进入扩展视图，连续拖动多个物品（交换/跨袋移动）并观察是否持续可用；检查 `stale projected moving cleared` 日志与 `0x18` 释放事件。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256。
+- **原版链(VMA)**：`TouchHandle_ResetMovingControl@0xa371c`（读 `TouchState+0x30`，非空则向该控件派发 event 8 并清空 touch state）。
+- **扩展接管点(文件:函数)**：`extension_bag_input.inc:clear_stale_projected_moving_locked()`；调用点 `extension_bag_render.inc:draw_end`（`g_module_view_installed` 时）。
+- **共享状态读写**：`TouchState+0x30`（MOVING_CTRL）、`TouchState+0x58`（DROP_SRC_CTRL）、`g_extension_drag_session.phase`、`g_extension_touch_capture`。
+- **必须保持的不变式(引 R-xx)**：仅在会话非 idle 或触摸捕获时清；空闲态不清原版 moving；无可清（`moving`/`drop_source` 均空）时直接返回不记日志（R-61）。
+- **失败语义**：空闲态误清原版 moving → 原版触摸状态机被打断 → `0x18` 不再产生、拖动失效（回归）。
+- **Host 测试名(现有或「缺口」)**：无（依赖游戏控件树/触摸状态机）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-45`：①进入扩展视图后 `stale projected moving cleared` 计数 = 0（无每帧噪声）；②连续拖动 ≥5 个物品，每步 `p5 session drop committed` 或 `rejected` 且 `0x18` 持续出现；③拖满一轮后仍能继续拖动、无「只按下/移动、无释放」现象。
+- **证据锚类型**：真机日志 + 源码。
+
+### VM-46 所有权账本容量与交接终态槽回收（R-62）
+
+- **操作**：在含约 28+ 件扩展物品的存档上反复拖动（交换/跨袋移动）并执行「扩展→原版」移动/装备，确认不再出现 `ownership ledger exhausted`。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256。
+- **原版链(VMA)**：无（纯模块侧账本）。
+- **扩展接管点(文件:函数)**：`model/ownership_ledger.h`（`kLedgerCapacity`、`handover_to_inventory`、`allocate`、`audit`）；`extension_bag_ownership.inc:handover_tracked_item_locked`。
+- **共享状态读写**：`g_ownership_ledger`（`slots[]`、`total_allocated/total_released/total_handed_over`）。
+- **必须保持的不变式(引 R-xx)**：容量 ≥ 80 + 事务余量；交接即回收槽位（`kNone` + generation 递增）；`balanced` 不变式成立；`Audit.inventory_owned` 为累计交接数（R-62）。
+- **失败语义**：池耗尽 → `module materialize rejected ownership ledger exhausted` → `txn committed but destination materialize failed` → `txn abort`（拖动可解析落点但不产生结果）。
+- **Host 测试名(现有或「缺口」)**：`test_ownership_ledger`（池耗尽/槽位复用、过期句柄、交接后 `live_handles` 归零、`inventory_owned` 累计）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-46`：①`ownership audit` 的 `live` 仅随活跃物品数变化、不随 ext→orig 交接累积；②连续 ext→orig 移动/装备 ≥ 数次后拖动仍提交成功；③`logcat` 无 `ownership ledger exhausted`。
+- **证据锚类型**：真机日志 + Host 断言 + 源码。
+
 ## 2.1 VM-B 原版基线行为包
 
 > VM-B01～VM-B04 对应规则册 B-01～B-04 的原版基线。前置条件：扩展背包已启用；每张
@@ -797,6 +823,8 @@
 | R-55 | VM-41 | `ok_destroy_item_wrapper`（H-23）+ `button_destroy_exe_wrapper`（H-22 预演标记）+ `vanilla_sell_route`/`vanilla_sell_money` 已落地；Host `test_vanilla_sell_takeover` 覆盖两态路由与金额边界，`test_native_equip_sell_count` 固化原版 b 段缺陷基线；真机背包详情出售归 VM-41。 |
 | R-59 | VM-43 | `apply_monster_item_count_compat` 按特征字节 `1F 89 01 71 68 00 00 54` 在可执行映射内把 `cmp w8,#0x62` 改写为 `#0x7F`；非 monster 版无操作（`no target`）。真机 monster v23 归 VM-43（`enter_slot 0` 不崩）。 |
 | R-60 | VM-44 | save gate 改为 `native_hook_func()` hook `SAVE_SaveInventory` 函数入口，wrapper 经 `g_backup_save_inventory` 调原函数；不依赖调用点原指令字。真机 monster v23 归 VM-44（`save gate hook installed`、`patch mismatch`=0、注入链完整、保存成功）。 |
+| R-61 | VM-45 | `clear_stale_projected_moving_locked` 空闲态早退（`moving`/`drop_source` 均空即返回；会话 idle 且非捕获时不清原版 `MOVING_CTRL`）。Host 无（依赖控件树/触摸状态机），真机归 VM-45（`stale projected moving cleared`=0、拖动可持续、`0x18` 正常）。 |
+| R-62 | VM-46 | `kLedgerCapacity` 32→128、`handover_to_inventory` 交接即回收槽位（`kNone` + generation 递增）、`Audit.inventory_owned` 改为累计 `total_handed_over`；Host `test_ownership_ledger` 覆盖。真机归 VM-46（无 `ownership ledger exhausted`、ext→orig 后仍可拖动）。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 

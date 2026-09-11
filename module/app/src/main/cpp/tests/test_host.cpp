@@ -1920,7 +1920,7 @@ static void test_ownership_ledger() {
         CHECK_EQ(report.outstanding_objects, 0u);
         CHECK_EQ(report.outstanding_borrows, 0u);
         CHECK_EQ(report.inventory_owned, 1u);
-        CHECK_EQ(report.live_handles, 1u);
+        CHECK_EQ(report.live_handles, 0u);  // 交接槽已回收
     }
 
     uint32_t c = 0;
@@ -1971,7 +1971,7 @@ static void test_ownership_ledger_p43() {
     CHECK_EQ(ownership::audit(pool).outstanding_objects, 0u);
     CHECK(ownership::audit(pool).balanced);
 
-    // 混合生命周期审计：借出中禁止 handover；归还→handover→终态计数。
+    // 混合生命周期审计：借出中禁止 handover；归还→handover→槽位回收（累计计数）。
     ownership::Ledger mixed{};
     uint32_t h1 = 0;
     uint32_t h2 = 0;
@@ -1994,7 +1994,7 @@ static void test_ownership_ledger_p43() {
         CHECK_EQ(mixed.total_allocated, mixed.total_released + mixed.total_handed_over + 1u);
     }
     CHECK(ownership::release(&mixed, h3) == ownership::Outcome::kOk);
-    CHECK_EQ(ownership::audit(mixed).live_handles, 1u);
+    CHECK_EQ(ownership::audit(mixed).live_handles, 0u);  // h2 交接槽已回收
 }
 
 static void test_unequip_bag() {

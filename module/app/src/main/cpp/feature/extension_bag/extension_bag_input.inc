@@ -36,7 +36,12 @@ void clear_stale_projected_moving_locked() {
     uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
     void* moving = *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL);
     void* drop_source = *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_SRC_CTRL);
+    if (moving == nullptr && drop_source == nullptr) return;
     const auto& session = g_extension_drag_session;
+    // 会话空闲且非模块触摸捕获时，MOVING_CTRL/DROP_SRC_CTRL 属于原版 TouchHandle
+    // 手势（释放时由 TouchHandle_ResetMovingControl 派发 event 8）。模块在此时清除会
+    // 打断原版触摸状态机、导致 0x18 释放事件不再产生——故空闲态绝不触碰。
+    if (session.phase == virtual_bag::DragPhase::kIdle && !g_extension_touch_capture) return;
     const bool phase_retains_moving =
         session.phase == virtual_bag::DragPhase::kPressed ||
         session.phase == virtual_bag::DragPhase::kNativeMoving ||

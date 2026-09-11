@@ -5,7 +5,7 @@
 // 状态语义与控制面一一对应：
 //   module-owned   = 对象仅由模块持有（payload 在扩展状态，模块负责释放）
 //   borrowed-view  = 仅在原版绘制/事件调用窗口内借用；窗口外必须归还
-//   inventory-owned = 原版库存接管（终态：模块不得再释放或使用原指针）
+//   inventory-owned = 原版库存接管（交接即回收槽位；模块不得再释放或使用原指针）
 //   released       = 已释放且不可再访问（终态）
 
 #include <cstdint>
@@ -13,7 +13,11 @@
 
 namespace ownership {
 
-constexpr int kLedgerCapacity = 32;
+// 容量口径：扩展背包最多 5 袋 × 16 槽 = 80 个可物化物品（每个占一个 module-owned
+// 句柄），另需容纳 kInventoryOwned 终态槽（每次 ext→orig 交接占用且不复用）与事务期
+// 临时物化，故须显著大于 80。原值 32 在物品数接近上限时直接池耗尽，使拖放事务的
+// 目标物化失败（真机实证：28 件物品 + 4 个终态槽 = 32 即耗尽）。
+constexpr int kLedgerCapacity = 128;
 
 enum class State : uint8_t {
     kNone = 0,
@@ -101,8 +105,11 @@ inline Outcome handover_to_inventory(Ledger* ledger, uint32_t handle) {
     if (ledger == nullptr) return Outcome::kRejectInvalidState;
     if (!live_state(*ledger, handle, State::kModuleOwned)) return Outcome::kRejectUnknownHandle;
     Slot& slot = ledger->slots[handle_slot(handle)];
-    slot.state = State::kInventoryOwned;
-    slot.generation += 1;  // 句柄立即失效：原指针所有权已转移，模块不得复用
+    // 所有权已交原版：交接后槽位**立即回收**（generation 递增使旧句柄失效），不再占用
+    // module-owned 池。终态信息仅由 total_handed_over 累计记录；否则终态槽永不释放，
+    // 连续 ext→orig 交接会耗尽池（真机实证：28 物品 + 4 终态 = 32 即池满）。
+    slot.state = State::kNone;
+    slot.generation += 1;
     ledger->total_handed_over += 1;
     return Outcome::kOk;
 }
@@ -132,7 +139,7 @@ inline Audit audit(const Ledger& ledger) {
                 report.live_handles += 1;
                 break;
             case State::kInventoryOwned:
-                report.inventory_owned += 1;
+                // 交接后槽位已回收；该状态正常不再出现（保留兼容）。
                 report.live_handles += 1;
                 break;
             case State::kReleased:
@@ -141,6 +148,8 @@ inline Audit audit(const Ledger& ledger) {
         }
     }
     report.released = ledger.total_released;
+    // inventory_owned 为累计交接数（终态槽已回收，不再按句柄驻留）。
+    report.inventory_owned = ledger.total_handed_over;
     report.balanced = ledger.total_allocated ==
                       ledger.total_released + ledger.total_handed_over +
                           report.outstanding_objects + report.outstanding_borrows;
