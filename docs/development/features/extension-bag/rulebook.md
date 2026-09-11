@@ -1030,6 +1030,29 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   原版 6 袋全部取消高亮、扩展页签高亮；切回原版袋后原版高亮恢复。Host 无（纯 UI 位
   绘制，依赖游戏内存）。
 
+### R-58 三个 UI 宿主页签挂载必须由扩展背包开关唯一门控
+
+- **规则一句话**：扩展背包的三个 UI 宿主页签挂载点——
+  `install_extension_tab_buttons_locked`（背包页）、`store_install_tab_buttons_locked`
+  （商店页）、`mix_install_tab_buttons_locked`（合成器页）——都必须以
+  `g_virtual_bag_enabled` 为唯一门控，在函数入口直接判 `!g_virtual_bag_enabled.load()`
+  即返回；运行期关闭扩展背包时，已挂载页签必须被清除：背包页在
+  `draw_tab_buttons_in_frame_locked` 入口删除控件并失效，商店页在
+  `store_draw_end_wrapper` 的 disabled 分支删除并 teardown，合成器页在
+  `mix_draw_end_wrapper` 的 disabled 分支删除并失效。调用方不得再各自重复判断。
+- **为什么**：此前背包页 `draw_tab_buttons_in_frame_locked` 每帧无条件重装页签
+  （`extension_bag_render.inc:10-17` 只判容器就位、不判开关），商店页
+  `store_enter_wrapper` 每次进店无条件 `store_install_tab_buttons_locked`
+  （`extension_bag_store.inc:365`），且 `set_virtual_bag_enabled(false)` 只
+  `restore_module_view_locked` 而不清理页签；于是配置关闭后扩展 UI 仍挂载（真机实证）。
+- **典型破坏方式**：只在其中一个宿主判断开关（另两个漏判）；把门控放在调用方而
+  install 函数本身不判；关闭时只清 `*_tab_buttons` 引用而不删除已挂载控件
+  （残留控件仍可能被绘制/命中）；关闭时只 restore 投影不处理页签。
+- **验证锚**：真机：启用态背包页签 `extension_tab_button=true`；
+  `POST /api/config/set {"extensionBagEnabled":false}` 后 `extension_tab_button=false`，
+  再启用恢复 `true`（本轮已取证）；商店/合成器页签走同一 install 门控与 disabled
+  分支（`VM-42`，待取证）。Host 无（UI 挂载依赖游戏控件树）。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -1093,7 +1116,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-55`，共 55 条。
+1. 本册规则总数：`R-01..R-58`，共 58 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -1111,7 +1134,8 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
     非数量）、`R-53`（SaveItem 漏斗入库前先并入扩展同类堆）、`R-54`（ext→orig
     投影宿主容量字与显示袋守卫）、`R-55`（原版背包详情出售 canonical 接管与
     预演/结算两态）、`R-56`（INVEN_RemoveItemData 物理不足从扩展袋按类别补扣）、
-    `R-57`（进入扩展视图时原版袋列取消高亮）。
+    `R-57`（进入扩展视图时原版袋列取消高亮）、`R-58`（三个 UI 宿主页签挂载由扩展背包
+    开关唯一门控）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、
@@ -1131,9 +1155,11 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
    `VM-39` 待取证）；`R-54`（ext→orig 宿主容量字与显示袋守卫）已落地
     （Host `test_ext2orig_host_guards`，行为归 `VM-40` 待取证）；`R-55`（原版背包
     详情出售接管）已落地（Host `test_vanilla_sell_takeover`，行为归 `VM-41` 待取证）；
-    `R-56`（H-21 扩展桥接）已落地（Host `test_remove_data_extension_shortfall`，行为归
-    `VM-22` 待取证）；`R-57`（原版袋列高亮遮蔽）已落地（扩展页既有 + 商店/合成器新增
-    袋列绘制遮蔽 wrapper，行为归 `VM-18`/`VM-22`/`VM-23` 待取证）。
+     `R-56`（H-21 扩展桥接）已落地（Host `test_remove_data_extension_shortfall`，行为归
+     `VM-22` 待取证）；`R-57`（原版袋列高亮遮蔽）已落地（扩展页既有 + 商店/合成器新增
+     袋列绘制遮蔽 wrapper，行为归 `VM-18`/`VM-22`/`VM-23` 待取证）；`R-58`（三个 UI 宿主
+     页签挂载由扩展背包开关门控）已落地（三 install 函数入口门控 + 背包/商店/合成器
+     disabled 分支清除，背包页真机已取证 enable/disable 往返，行为归 `VM-42`）。
 4. 当前 sync 接口只做投影控件修复，原版 RefreshItemArea 位于移动收尾路径。
 5. 无锚规则：`R-01`、`R-03`、`R-05`、`R-06`、`R-11`、`R-12`、`R-13`、`R-14`、
    `R-15`、`R-17`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`、`R-46`、

@@ -113,6 +113,8 @@ void mix_delete_tab_buttons_locked() {
 }
 
 void mix_install_tab_buttons_locked() {
+    // 配置门控：扩展背包关闭时合成器页签不得挂载（3 个宿主之一）。
+    if (!g_virtual_bag_enabled.load()) return;
     if (g_base == 0 || g_uimix == nullptr || fn_control_object_get_child == nullptr ||
         fn_control_item_set_item == nullptr || fn_mem_malloc == nullptr ||
         fn_control_object_set_control_proc == nullptr ||

@@ -387,6 +387,22 @@ MAPITEMSYSTEM_CreateItem 的路径（当前全量反汇编未见），以及 UIM
    `UIStore_Draw` 末尾尾调用 `b UIStore_DrawInvenBagGroup`（`0xd30e4`）B patch。
 4. 材料扣减（R-56）见 §2.6；产物入库由 H-13（R-53）。
 
+### 2.5.2 三个 UI 宿主页签的扩展背包开关门控（R-58）
+
+1. 三个宿主页签挂载点——背包页 `install_extension_tab_buttons_locked`
+   （`extension_bag_runtime.inc`）、商店页 `store_install_tab_buttons_locked`
+   （`extension_bag_store.inc`）、合成器页 `mix_install_tab_buttons_locked`
+   （`extension_bag_mix.inc`）——在函数入口以 `g_virtual_bag_enabled` 为唯一门控，
+   关闭即返回；调用方不再各自判断。
+2. 运行期关闭（`set_virtual_bag_enabled(false)`，经 `/api/config/set` 增量生效）时已
+   挂载页签被清除：背包页在 `draw_tab_buttons_in_frame_locked` 入口
+   `delete_extension_tab_buttons_locked` + `disable_extension_tab_buttons_locked`；
+   商店页在 `store_draw_end_wrapper` 的 disabled 分支 `store_delete_tab_buttons_locked`
+   + `store_teardown_locked`；合成器页在 `mix_draw_end_wrapper` 的 disabled 分支
+   `mix_delete_tab_buttons_locked` + `mix_disable_tab_buttons_locked`。
+3. 关闭扩展背包不卸载已安装的商店/合成器宿主 hook（`install_*_hooks_locked`），但
+   宿主 wrapper 在关闭态走 disabled 分支，投影恢复且页签不挂载。
+
 ### 2.6 复杂操作：生产者兜底
 
 拾取、任务奖励、开箱、拆包、合成、商店、脱装备和使用结果不是同一 caller；静态决策

@@ -96,7 +96,21 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // SetUserType(2) + SetControlProc（自定义，0x02 松开确认切换/详情 toggle）。
 // data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
 // 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
+void delete_extension_tab_buttons_locked() {
+    if (fn_touch_handle_delete_control != nullptr) {
+        for (void*& button : g_extension_tab_buttons) {
+            if (button != nullptr) fn_touch_handle_delete_control(button);
+            button = nullptr;
+        }
+    } else {
+        g_extension_tab_buttons.fill(nullptr);
+    }
+}
+
 void install_extension_tab_buttons_locked() {
+    // 配置门控：扩展背包关闭时不得挂载页签（3 个宿主之一）。启用/禁用均以
+    // g_virtual_bag_enabled 为准；调用方不再各自判断。
+    if (!g_virtual_bag_enabled.load()) return;
     if (g_base == 0 || fn_control_object_get_child == nullptr ||
         fn_control_item_set_item == nullptr || fn_mem_malloc == nullptr ||
         fn_control_object_set_control_proc == nullptr ||
@@ -129,12 +143,7 @@ void install_extension_tab_buttons_locked() {
         return;
     }
     // 重建：先删旧标签（挂载层控件重建后旧指针无效）
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        if (g_extension_tab_buttons[index] != nullptr) {
-            fn_touch_handle_delete_control(g_extension_tab_buttons[index]);
-            g_extension_tab_buttons[index] = nullptr;
-        }
-    }
+    delete_extension_tab_buttons_locked();
     refresh_tab_bag_items_locked();
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3, proc) + SetControlProc + SetUserType(2)。

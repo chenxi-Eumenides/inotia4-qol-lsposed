@@ -1,4 +1,12 @@
 void draw_tab_buttons_in_frame_locked() {
+    // 配置门控：扩展背包关闭时不得绘制/重装页签，并清除已挂载的页签控件。
+    if (!g_virtual_bag_enabled.load()) {
+        if (g_extension_tab_root != nullptr || g_extension_tab_buttons[0] != nullptr) {
+            delete_extension_tab_buttons_locked();
+            disable_extension_tab_buttons_locked();
+        }
+        return;
+    }
     const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
                                            fn_imgsys_get_loc != nullptr;
     void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
