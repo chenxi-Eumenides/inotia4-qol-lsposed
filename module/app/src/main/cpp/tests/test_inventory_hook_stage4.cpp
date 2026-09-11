@@ -434,6 +434,26 @@ static void test_remove_item_data_plan() {
     CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, 0, 5).correct);
 }
 
+// H-21 扩展桥接（R-56）补扣量纯函数：物理实扣 = 前后 H-03 总数差，扩展补扣 =
+// max(0, requested - physical_removed)。覆盖足额/不足/全扩展/退化入参。
+static void test_remove_data_extension_shortfall() {
+    // 物理足额（含恰好全扣）→ 不补扣。
+    CHECK(stage4_remove_data_extension_shortfall(10, 5, 3) == 0);
+    CHECK(stage4_remove_data_extension_shortfall(8, 3, 5) == 0);
+    CHECK(stage4_remove_data_extension_shortfall(10, 0, 10) == 0);
+    // 物理不足 → 补差额。
+    CHECK(stage4_remove_data_extension_shortfall(10, 8, 5) == 3);
+    CHECK(stage4_remove_data_extension_shortfall(2, 0, 5) == 3);
+    // 材料全在扩展袋（原版一个物理都没扣）→ 全额补扣。
+    CHECK(stage4_remove_data_extension_shortfall(5, 5, 5) == 5);
+    CHECK(stage4_remove_data_extension_shortfall(0, 0, 1) == 1);
+    // requested<=0 不补扣。
+    CHECK(stage4_remove_data_extension_shortfall(5, 5, 0) == 0);
+    CHECK(stage4_remove_data_extension_shortfall(5, 5, -1) == 0);
+    // 数据反向（after>before）按物理零扣处理，返回全额，绝不产生负补扣。
+    CHECK(stage4_remove_data_extension_shortfall(5, 6, 4) == 4);
+}
+
 // 原版装备页出售/销毁结算数量语义（0x1261c4 直读 b 段 + clamp）：把 canonical
 // 编码成原生 +0x10 字段后，函数必须复现实测表（199→71→546 的价格基数）。
 static void test_native_equip_sell_count() {
@@ -534,6 +554,7 @@ int main() {
     test_original_only_queries();
     test_get_cumulate_count_s2();
     test_remove_item_data_plan();
+    test_remove_data_extension_shortfall();
     test_native_equip_sell_count();
     test_equip_sell_redirect_mapping();
     test_make_item_writeback_count();

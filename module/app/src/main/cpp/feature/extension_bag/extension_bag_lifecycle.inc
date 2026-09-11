@@ -834,6 +834,7 @@ bool inject_locked() {
         }
     }
     if (!install_store_hooks_locked()) return false;
+    if (!install_mix_hooks_locked()) return false;
     return true;
 }
 
@@ -841,7 +842,7 @@ void ensure_inject_thread() {
     if (g_inject_thread_started.exchange(true)) return;
     std::thread([]() {
         while (g_state_entry == nullptr || !g_save_panel_hook_installed ||
-               !store_hooks_installed()) {
+               !store_hooks_installed() || !mix_hooks_installed()) {
             inject_locked();
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }

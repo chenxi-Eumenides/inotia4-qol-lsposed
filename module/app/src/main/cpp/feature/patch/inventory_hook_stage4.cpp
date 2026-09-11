@@ -286,3 +286,12 @@ Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* p
     plan.remain = remain;
     return plan;
 }
+
+int stage4_remove_data_extension_shortfall(int total_before, int total_after,
+                                           int requested) {
+    if (requested <= 0) return 0;
+    const int physical_removed = total_before - total_after;
+    if (physical_removed <= 0) return requested;  // 原版未扣到任何物理堆
+    if (physical_removed >= requested) return 0;  // 物理已足额
+    return requested - physical_removed;
+}

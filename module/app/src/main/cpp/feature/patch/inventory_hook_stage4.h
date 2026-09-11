@@ -165,6 +165,14 @@ Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* p
                                                   const Stage4RemoveDataPost* post,
                                                   int entry_count, int32_t count);
 
+// H-21 扩展桥接（R-56）物理实扣量 → 扩展补扣量（纯函数供 Host 断言）。
+// 原版 INVEN_RemoveItemData 只遍历物理袋 0..5；物理实扣 = 调用前后 H-03 总数差
+// （H-03 = 物理 + 扩展，原版不动扩展，故差值即物理实扣）。返回需从扩展袋补扣的
+// 数量 = max(0, requested - physical_removed)，requested<=0 或数据反向（after>before）
+// 时按 0 处理，避免负补扣。
+int stage4_remove_data_extension_shortfall(int total_before, int total_after,
+                                           int requested);
+
 using Stage4UnequipBackup = int (*)(void* character, int32_t equip_slot);
 using Stage4UnequipExtension = bool (*)(void* character, int32_t equip_slot);
 int stage4_unequip_item_to_inven(void* character, int32_t equip_slot,

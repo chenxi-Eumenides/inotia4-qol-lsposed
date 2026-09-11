@@ -295,6 +295,7 @@ constexpr uintptr_t F_UISTORE_INVEN_BAG_PROC_VMA = 0xd2394;
 constexpr uintptr_t F_UISTORE_DRAW_VMA = 0xd2fc4;
 constexpr uintptr_t F_UISTORE_DRAW_INVEN_ITEM_GROUP_VMA = 0xd2bf8;
 constexpr uintptr_t F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA = 0xd2d5c;
+constexpr uintptr_t F_UISTORE_DRAW_INVEN_BAG_GROUP_CALL_VMA = 0xd30e4; // UIStore_Draw 末尾尾调用 b UIStore_DrawInvenBagGroup（原字 0x17ffff1e，B patch 挂遮蔽 wrapper）
 constexpr uintptr_t F_SCENE_DRAW_STORE_VMA = 0x14f5a0;
 constexpr uintptr_t F_SCENE_EVENT_STORE_VMA = 0x14f6f8;
 constexpr uintptr_t F_SCENE_TERMINATE_STORE_VMA = 0x14f558;
@@ -332,6 +333,9 @@ constexpr size_t ITEM_CTRL_ON_FLAG = 0x0b;              // 物品控件数据块
 // 全局 0x305550（.bss 无名，直接 VMA 兜底）：UIMix 固定控件指针槽基址（UIMix_CreateMainControl 反汇编确认）。
 constexpr uintptr_t G_UIMIX_VMA = 0x305550;          // UIMix 固定控件槽基址（根控件/按钮/材料槽指针表）
 constexpr size_t UIMIX_SLOT_GEM_BTN = 0xa0;          // 宝石合成按钮槽偏移（0x3055f0，UIMix_Draw 硬编码枚举绘制）
+constexpr size_t UIMIX_SLOT_ITEM_GROUP = 0xd8;       // 物品网格组指针槽（16 个 ControlItem 子控件，UIMix_RefreshInvenItem 反汇编确认）
+constexpr size_t UIMIX_SLOT_BAG_GROUP = 0xe0;        // 袋选择组指针槽（6 个 ControlItem 子控件，UIMix_CreateMainControl/UIMix_RefreshInvenBag 反汇编确认）
+constexpr size_t UIMIX_SLOT_STATE = 0x20;            // u8 面板状态：0=配方菜单（仅背景/标题/5 配方按钮），1=背包/合成视图（UIMix_SetState/UIMix_GetState/UIMix_Draw 反汇编确认）
 
 // ControlObject 结构（0xf8 字节，ControlObject_Create @0x9e4ec / ControlButton_Create @0xaa710 反汇编）
 constexpr size_t CO_TYPE = 0x08;             // u32 Type（button=3）
@@ -527,6 +531,11 @@ constexpr uintptr_t F_MAPITEMSYSTEM_CREATE_ITEM_VMA = 0x116e10; // MAPITEMSYSTEM
 constexpr uintptr_t F_NETWORKSTORE_ADD_ITEM_VMA = 0x15d640;   // NetworkStore_AddItem 网络商店
 constexpr uintptr_t F_SAVE_REVISE_CHARACTER_LOCATION_VMA = 0x125fbc; // SAVE_ReviseCharacterLocation 读数量
 constexpr uintptr_t F_UIMIX_START_MIX_VMA = 0xc0870;          // UIMix_StartMix 合成产物数量
+constexpr uintptr_t F_UIMIX_REFRESH_INVEN_ITEM_VMA = 0xc04fc; // void () UIMix_RefreshInvenItem：按当前袋号刷新 16 格物品网格
+constexpr uintptr_t F_UIMIX_DRAW_INVEN_BAG_GROUP_VMA = 0xc13ec; // void () UIMix_DrawInvenBagGroup：画 6 袋按钮并按当前袋 GOT 高亮（R-57 遮蔽点）
+constexpr uintptr_t F_UIMIX_DRAW_INVEN_BAG_GROUP_CALL_VMA = 0xc1a74; // UIMix_Draw 内 bl UIMix_DrawInvenBagGroup 调用点（原字 0x97fffe5e，BL patch 挂遮蔽 wrapper）
+constexpr uintptr_t F_SCENE_EVENT_MIX_VMA = 0x14b52c;         // u64 (u64,u64,u64) Scene_Event_POPUP_SC_MIX（合成器 popup state event 回调）
+constexpr uintptr_t F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA = 0x14b474; // Scene_Draw_POPUP_SC_MIX 内 bl GRPX_End 调用点（原字 0x97fd0fa8，BL patch 挂 draw_end wrapper）
 constexpr uintptr_t F_SAVE_SAVE_INVENTORY_VMA = 0x127d8c;     // SAVE_SaveInventory 存档背包（子物品检查位段）
 constexpr uintptr_t F_SAVE_SAVE_INVENTORY_CALLSITE_VMA = 0x129770; // SAVE_Save 内唯一 bl 调用点（BL→门禁 wrapper）
 constexpr uintptr_t F_SAVE_CALLSITE_REVIVE_VMA = 0xc4488; // UINpcRevive_Revive_Confirm → SAVE_Save
@@ -722,6 +731,7 @@ using UiEquipRefreshItemAreaFn = void (*)();
 using UiEquipRefreshBagAreaFn = void (*)();
 using UiStoreRefreshInvenBagFn = void (*)();
 using UiStoreRefreshInvenItemFn = void (*)();
+using UiMixRefreshInvenItemFn = void (*)();
 using UiStoreMakeDescFn = void (*)(void*, void*);
 using UiEquipUpdateCharEquipFn = void (*)();
 using UiDescSetOffFn = void (*)();

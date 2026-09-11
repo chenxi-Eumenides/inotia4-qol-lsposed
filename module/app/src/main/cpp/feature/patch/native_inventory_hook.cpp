@@ -101,7 +101,7 @@ thread_local int g_refresh_depth = 0;
 // | UIMix_StartMix                | 1    | 设（产物量）   | 配方区 +0x8（静态表数据）      | MIXSYSTEM_MakeItem out 对象 | 无需接管：产物量 = 配方表只读静态数据（模块无任何写点），原版数量域 ≤99 ≤127，b 写即全量；`cmp #0x1; b.le`（0xc0964 区）数量 ≤1 时连写点都不进 |
 // | DEALSYSTEM_MakeSale           | 1    | 设（货架生成） | ITEMSYSTEM_MakeItem ×5         | 货架对象                  | 无需接管：唯一 31/25 写点 `w3=0x7e`（0xf6754 区）是上架装备 marker=126，非数量；数量产生全部经 ITEMSYSTEM_MakeItem（产物恒 b=1，无需回写）；语义修正：本函数是商店特卖货架生成，不是售出 |
 // | GAME_StartNewGame             | 1    | 设（初始量）   | 函数内常量 5                   | 新建对象                  | 无需接管：唯一数量写点 `mov w3,#0x5; SetBitValue(31,25,5)`（0x100200 区），初始量 5 ≤127 b 写即全量；前两个 CreateItem（类别 3/4）无数量写 |
-// | INVEN_RemoveItemData          | 1    | 减（批量删除） | category/count 入参            | 多堆遍历（bag0..5 顺序）  | 已实现 remove_item_data_wrapper：快照/重扫 + stage4_remove_item_data_plan 修正部分删堆（整删消失堆只求和）；遍历顺序已冻结（0x1040a8：外层 bag 0..5 × 内层槽，Getter 读 cum、`b.lt` 判部分删） |
+// | INVEN_RemoveItemData          | 1    | 减（批量删除） | category/count 入参            | 多堆遍历（bag0..5 顺序）  | 已实现 remove_item_data_wrapper：快照/重扫 + stage4_remove_item_data_plan 修正部分删堆（整删消失堆只求和）；遍历顺序已冻结（0x1040a8：外层 bag 0..5 × 内层槽，Getter 读 cum、`b.lt` 判部分删）；R-56 扩展桥接：物理实扣不足按 category 从扩展袋补扣 |
 // | INVEN_SaveItemData            | 1    | 加（批量创建） | category/count 入参            | 多堆/空槽                 | 无需接管：可堆叠分支 `cmp w20,#0x62; b.gt`（0x104694 区）>98 每堆写 99、≤98 写 count，每笔 ≤99 ≤127 b 写即全量；不可堆叠分支每件数量 1；category=0 分支是加钱（INVEN_AddMoney），无数量写 |
 // | INVEN_ConsumeItem             | 1    | 减（1）        | 恒 1 + 对象旧全量              | item 入参                 | 已实现 consume_item_wrapper（b≤1 借位预置 + 回写） |
 // | ITEMSYSTEM_MakeItem           | 1    | 设（装备强化 marker，非数量） | CAL_Calculate 结果 | CreatePerfectItem 返回装备 | 勘误（2026-09-11 反汇编 0x10c6c8）：原登记「设（创建量）count 入参 arg2」错误——真实 ABI 是 `void* (category, lookup_key, luck)`（0x10c6d8 `mov w23,w1` 用于静态表 uint16 匹配、0x10c6e4 存 w2 作品质门槛比较，均非数量）；唯一 31/25 写点 0x10ca3c 仅对可强化装备写强化 marker（可堆叠类别 bit0=0 不进该分支，产物数量恒由 CreateItem 写 b=1，S2 完整）。旧 make_item_wrapper 把 x1（lookup_key）当 count 回写，导致拾取 1 个得 lookup_key 个（药水 2/卷轴 3/材料 4，真机实证）；H-20 已整体移除，原 hook 名保留编号不复用 |
@@ -656,6 +656,16 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
     // （任务物品回收）、UIMix/ProcessUnpack/SaveItemData 回滚、NetworkStore。
     // count<=0 语义未冻结（-1 分支存在），不快照不修正；扩展袋对象不参与物理袋
     // 快照，原版只删原版堆。
+    //
+    // R-56 扩展桥接：原版 INVEN_RemoveItemData 只遍历物理袋 0..5，扩展袋对象不
+    // 参与；与 H-01..H-05 的 original-first + 扩展兜底语义对齐，物理实扣不足的
+    // 部分按 category 从扩展袋补扣（合成药水/宝石孔/混沌/传说等按类别批量扣料即
+    // 自动生效）。物理实扣 = 调用前后 H-03 总数差（H-03 = 物理 + 扩展，原版不动
+    // 扩展，故差值即物理实扣）。
+    const bool extension_fallback =
+        count > 0 && category > 0 && extension_bag_enabled();
+    const int total_before =
+        extension_fallback ? get_item_count_wrapper(category) : 0;
     S2RemoveDataCapture capture{};
     if (g_backup_remove_item_data != nullptr) {
         s2_capture_remove_data(category, count, &capture);
@@ -663,6 +673,20 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
     const int result = g_backup_remove_item_data == nullptr
         ? 0 : g_backup_remove_item_data(category, count);
     s2_remove_data_writeback(capture, category, count);
+    if (extension_fallback) {
+        const int total_after = get_item_count_wrapper(category);
+        const int shortfall =
+            stage4_remove_data_extension_shortfall(total_before, total_after, count);
+        if (shortfall > 0) {
+            const int consumed = extension_bag_consume_category(category, shortfall);
+            if (consumed < shortfall) {
+                __android_log_print(ANDROID_LOG_INFO, kTag,
+                                    "RemoveItemData extension fallback category=%d "
+                                    "need=%d consumed=%d",
+                                    category, shortfall, consumed);
+            }
+        }
+    }
     return result;
 }
 

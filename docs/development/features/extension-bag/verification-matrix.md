@@ -402,11 +402,11 @@
 
 - **操作**：执行普通合成和失败注入/失败条件，核对材料、产物和对象释放。
 - **原版链(VMA)**：`MIXSYSTEM_MakeItem@0x11af58`/`UseStuff@0x11b300`，不同 caller 可能原地改装备或生成后保存；产物常经 `INVEN_SaveItem`。
-- **扩展接管点(文件:函数)**：`feature/patch/game_patch_craft.inc` 的上层旁路；`native_inventory_hook.cpp:save_item_wrapper` 只覆盖已创建对象入库失败。
+- **扩展接管点(文件:函数)**：材料扣减 `native_inventory_hook.cpp:remove_item_data_wrapper`（R-56：物理实扣不足时按 category 经 `extension_bag_port.cpp:extension_bag_consume_category` 从扩展袋补扣）；产物入库 `native_inventory_hook.cpp:save_item_wrapper`（H-13 合并/adopt）；`feature/patch/game_patch_craft.inc` 的上层旁路仅覆盖自定义批量宝石入口（当前死代码）。
 - **共享状态读写**：读材料对象/category/count、产物临时对象和物理/扩展容量；写材料删除、产物 adopt、ledger 和 dirty；禁止把类别回滚当 UID 回滚。
-- **必须保持的不变式(引 R-xx)**：不做全局 MIX Hook；材料删除前后校验，产物失败释放；无安全逆操作不添加猜测性回滚（R-07、R-15、R-22、R-25）。
+- **必须保持的不变式(引 R-xx)**：不做全局 MIX Hook；材料删除前后校验，产物失败释放；扩展补扣量 = `max(0, count − 物理实扣)`、绝不重复扣（R-56）；无安全逆操作不添加猜测性回滚（R-07、R-15、R-22、R-25）。
 - **失败语义**：材料不足/产物保存失败/扣款失败返回明确错误；已成功前序产物是否回滚必须按 caller 记录，不自动推导。
-- **Host 测试名(现有或「缺口」)**：缺口：`test_craft_product_failure_ownership`（断言未入库产物释放、材料源校验、失败不伪造扩展提交）。
+- **Host 测试名(现有或「缺口」)**：`test_remove_data_extension_shortfall`（R-56 补扣量：足额/不足/全扩展/`requested<=0`/数据反向）；缺口：`test_craft_product_failure_ownership`（断言未入库产物释放、材料源校验、失败不伪造扩展提交）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-22`：①记录材料 payload/count；②执行成功合成；③执行满包/失败合成；④检查材料、产物和日志；预期成功/失败所有权均可追溯，不能以一次成功覆盖五个 caller。
 - **证据锚类型**：真机必需；阶段 5/P6 边界未闭合。
 
@@ -416,10 +416,10 @@
 - **原版链(VMA)**：原版 inventory event、袋控件和 `TouchHandle`；投影安装不等同于原版背包写入。
 - **扩展接管点(文件:函数)**：`extension_bag_runtime.inc:extension_tab_item_proc`、`install_extension_tab_buttons_locked`、`disable_extension_tab_buttons_locked`；`extension_bag_render.inc:install_module_view_locked/restore_module_view_locked`。
 - **共享状态读写**：读写 `mode/selected/inspected`、`g_module_view_index`、`g_module_window_original_bag`、`g_projected_item_root`、tab pointers/generation 和 capacity snapshot。
-- **必须保持的不变式(引 R-xx)**：view index 与窗口原版袋号分离；direct/GOT 成对恢复；root 重建先使失效事件失效（R-19、R-26、R-27、R-30）。
+- **必须保持的不变式(引 R-xx)**：view index 与窗口原版袋号分离；direct/GOT 成对恢复；root 重建先使失效事件失效（R-19、R-26、R-27、R-30）；扩展视图激活时原版袋列高亮被遮蔽（R-57）。
 - **失败语义**：未就绪容器、无容量、退出中或 stale root 拒绝；原版袋 5 不可成为投影窗口；恢复失败不得释放借用对象。
 - **Host 测试名(现有或「缺口」)**：`test_virtual_bag_state`、`test_extension_bag_exit_rendering_state`、`test_p52_drag_session`；缺口：`test_view_window_bag_pair_restore`。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-23`：①进入 bag 6/7/8；②快速来回切换；③退出到原版袋；④重开；预期只显示当前逻辑袋，退出后原版容量/direct/GOT/root 恢复，失效控件事件无效。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-23`：①进入 bag 6/7/8；②快速来回切换；③退出到原版袋；④重开；预期只显示当前逻辑袋，退出后原版容量/direct/GOT/root 恢复，失效控件事件无效；⑤扩展视图激活时原版 6 袋全部取消高亮、扩展页签高亮（R-57）。
 - **证据锚类型**：Host + 真机 + 源码。
 
 ### VM-24 详情弹窗与身份失效

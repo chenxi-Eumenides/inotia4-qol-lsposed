@@ -34,6 +34,10 @@ void extension_bag_begin_internal_equip();
 void extension_bag_end_internal_equip();
 bool extension_bag_internal_equip_active();
 bool extension_bag_consume_native_item(void* item);
+// H-21 INVEN_RemoveItemData 扩展桥接（R-56）：物理袋 0..5 实扣不足时，按 category
+// 从扩展袋补扣至多 count 个（逐堆按模式视图扣减，复用 find/consume 原语）。
+// 返回实际从扩展袋扣减的数量（0..count）；类别非法、未启用或无可扣对象返回 0。
+int extension_bag_consume_category(int category, int count);
 bool extension_bag_has_empty_slots(int needed, int include_task_bag);
 bool extension_bag_adopt_unequipped_item(void* character, int equip_slot);
 // INVEN_SaveItem 无空位时的扩展袋接管：把原版新创建物品收进扩展槽。

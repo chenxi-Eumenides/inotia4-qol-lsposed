@@ -146,6 +146,18 @@ bool extension_bag_consume_native_item(void* item) {
     return virtual_bag_consume_native_item(item, virtual_bag_current_use_token());
 }
 
+int extension_bag_consume_category(int category, int count) {
+    if (category <= 0 || count <= 0 || !extension_bag_enabled()) return 0;
+    int consumed = 0;
+    while (consumed < count) {
+        void* item = extension_bag_find_native_item(category);
+        if (item == nullptr) break;
+        if (!extension_bag_consume_native_item(item)) break;
+        ++consumed;
+    }
+    return consumed;
+}
+
 bool extension_bag_has_empty_slots(int needed, int include_task_bag) {
     return virtual_bag_has_empty_slots(needed, include_task_bag);
 }

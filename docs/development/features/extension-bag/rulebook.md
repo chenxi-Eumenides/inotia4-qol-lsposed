@@ -253,7 +253,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 | H-18 | `INVEN_SaveItemDirect` | `save_item_direct_wrapper`；同身份堆叠合并时采集目标槽旧全量、backup 后确认原版 b 写再回写 a+b（R-45/R-49） | `native_inventory_hook.cpp:save_item_direct_wrapper`、安装链第 20 个 |
 | H-19 | `ITEMSYSTEM_Divide` | `item_system_divide_wrapper`；拆堆源堆借位与新对象设值（R-45/R-49） | `native_inventory_hook.cpp:item_system_divide_wrapper`、安装链第 21 个 |
 | H-20 | `ITEMSYSTEM_MakeItem` | `make_item_wrapper`；**数量回写已撤销**（arg2 是静态表查找/品质参数非数量，R-52/VM-38），wrapper 纯透传、回写计划经纯函数 `stage4_make_item_writeback_count` 恒 0 | `native_inventory_hook.cpp:make_item_wrapper`、安装链第 22 个 |
-| H-21 | `INVEN_RemoveItemData` | `remove_item_data_wrapper`；快照/重扫 + `stage4_remove_item_data_plan` 修正部分删堆（R-45/R-49） | `native_inventory_hook.cpp:remove_item_data_wrapper`、安装链第 23 个 |
+| H-21 | `INVEN_RemoveItemData` | `remove_item_data_wrapper`；快照/重扫 + `stage4_remove_item_data_plan` 修正部分删堆（R-45/R-49），并做扩展桥接（R-56）：物理实扣不足时按 category 从扩展袋补扣 | `native_inventory_hook.cpp:remove_item_data_wrapper`、安装链第 23 个 |
 | H-22 | `UIEquip_ButtonDestroyExe` | `button_destroy_exe_wrapper`；R-55 预演标记源：进入按钮执行时置 thread_local，供 H-23 区分「按钮预演」与「弹窗 OK 真实结算」 | `native_inventory_hook.cpp:button_destroy_exe_wrapper`、安装链第 13 个 |
 | H-23 | `UIEquip_OKDestroyItem` | `ok_destroy_item_wrapper`；R-55 原版背包详情出售接管：启用态弹窗 OK 完全接管结算（canonical 全量、`unit×count×7/10` 加钱、删整堆、刷新），按钮预演只回填展示金额；关闭态/非背包详情/校验失败 backup | `native_inventory_hook.cpp:ok_destroy_item_wrapper`、安装链第 15 个 |
 
@@ -991,6 +991,45 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   启用态背包详情整堆出售按 canonical 全量计价、取消预演不售出、关闭态回原版
   （待取证）。
 
+### R-56 INVEN_RemoveItemData 物理不足必须从扩展袋按类别补扣
+
+- **规则一句话**：H-21 `remove_item_data_wrapper` 在扩展启用且 `count>0`、`category>0`
+  时，先经 H-03 记录该类别总数，调原版 `INVEN_RemoveItemData` 删物理袋 0..5，再用
+  `stage4_remove_data_extension_shortfall`（物理实扣 = 调用前后 H-03 总数差）算出缺口，
+  经 `extension_bag_consume_category` 从扩展袋按 category 逐堆补扣（按模式视图扣减、
+  复用 find/consume 原语）；补扣不足时记录日志、绝不静默。与 H-01..H-05 的
+  original-first + 扩展兜底语义一致。
+- **为什么**：原版 `INVEN_RemoveItemData@0x1040a8` 只顺序遍历物理袋 0..5，扩展袋对象
+  不参与；而 H-03 `INVEN_GetItemCount` 已把扩展计入。二者语义不一致导致「材料被识别为
+  充足却不被消耗」——合成药水/宝石孔/混沌/传说（type0/2/3/4）经
+  `UIMix_StartMix → MIXSYSTEM_UseStuff → INVEN_RemoveItemData` 全部命中；宝石强化
+  （type1）走 `INVEN_RemoveItem`（H-05 按身份已支持扩展）。补齐 H-21 后按类别批量扣料
+  自动生效，同时任务回收/回滚等调用方也保持与 H-03 一致。
+- **典型破坏方式**：让 H-03 与 H-21 对扩展的可见性不一致（识别而不扣）；在
+  `count<=0`/类别非法时补扣；持 `g_virtual_bag_mtx` 调原版（R-44）；在调原版之前就
+  补扣导致物理与扩展重复扣；把补扣量算成 `count` 而非「`count` − 物理实扣」。
+- **验证锚**：Host `stage4_hook_tests::test_remove_data_extension_shortfall`
+  （足额/不足/全扩展/`requested<=0`/数据反向 五类分支）；真机 `VM-22`：把药水材料放入
+  扩展袋后执行合成，预期材料按量从扩展袋扣减、产物照常入库（待取证）。
+
+### R-57 进入扩展视图时原版袋列必须取消高亮（互斥）
+
+- **规则一句话**：扩展页、商店页、合成器页在扩展视图激活时，画原版袋列函数
+  （`UIEquip_DrawInvenBag` / `UIStore_DrawInvenBagGroup` / `UIMix_DrawInvenBagGroup`）
+  之前，必须把当前袋 GOT（`G_UIEQUIP_CUR_BAG_GOT_VMA`）临时置为
+  `kNoOriginalBagSelected(6)`，画完恢复；扩展页签的选中高亮由扩展侧在袋列绘制之后
+  单独补画。三者共用同一 GOT，语义一致。
+- **为什么**：投影安装把宿主物理袋设为当前袋（供原版按容量刷新网格），原版袋列按
+  `i == *current_bag` 画选中高亮，于是扩展视图激活时原版袋仍显示为选中，与扩展页签
+  选中态冲突。扩展页早已用「画前遮蔽、画后恢复」解决（`virtual_bag_draw_original_bag_wrapper`），
+  商店/合成器宿主此前遗漏。
+- **典型破坏方式**：把 GOT 永久置 6 而不只在袋列绘制窗口内遮蔽（原版 `RefreshInvenItem`
+  会按 6 越界取袋）；遮蔽后忘记恢复导致后续原版刷新/绘制错袋；在扩展页签高亮之前
+  恢复（被原版覆盖）；只遮蔽合成器不遮蔽商店（或反之）。
+- **验证锚**：真机 `VM-23`（扩展页）、`VM-18`（商店）、`VM-22`（合成器）：选中扩展袋后
+  原版 6 袋全部取消高亮、扩展页签高亮；切回原版袋后原版高亮恢复。Host 无（纯 UI 位
+  绘制，依赖游戏内存）。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -1071,7 +1110,8 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
    到统一 getter，禁止窗口伪修复）、`R-52`（数量入参必须反汇编证明，MakeItem arg2
     非数量）、`R-53`（SaveItem 漏斗入库前先并入扩展同类堆）、`R-54`（ext→orig
     投影宿主容量字与显示袋守卫）、`R-55`（原版背包详情出售 canonical 接管与
-    预演/结算两态）。
+    预演/结算两态）、`R-56`（INVEN_RemoveItemData 物理不足从扩展袋按类别补扣）、
+    `R-57`（进入扩展视图时原版袋列取消高亮）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、
@@ -1090,7 +1130,10 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
    `R-53`（adopt 先合并同类堆）已落地（Host `test_adopt_merge_plan`，行为归
    `VM-39` 待取证）；`R-54`（ext→orig 宿主容量字与显示袋守卫）已落地
     （Host `test_ext2orig_host_guards`，行为归 `VM-40` 待取证）；`R-55`（原版背包
-    详情出售接管）已落地（Host `test_vanilla_sell_takeover`，行为归 `VM-41` 待取证）。
+    详情出售接管）已落地（Host `test_vanilla_sell_takeover`，行为归 `VM-41` 待取证）；
+    `R-56`（H-21 扩展桥接）已落地（Host `test_remove_data_extension_shortfall`，行为归
+    `VM-22` 待取证）；`R-57`（原版袋列高亮遮蔽）已落地（扩展页既有 + 商店/合成器新增
+    袋列绘制遮蔽 wrapper，行为归 `VM-18`/`VM-22`/`VM-23` 待取证）。
 4. 当前 sync 接口只做投影控件修复，原版 RefreshItemArea 位于移动收尾路径。
 5. 无锚规则：`R-01`、`R-03`、`R-05`、`R-06`、`R-11`、`R-12`、`R-13`、`R-14`、
    `R-15`、`R-17`、`R-23`、`R-24`、`R-26`、`R-27`、`R-30`、`R-46`、

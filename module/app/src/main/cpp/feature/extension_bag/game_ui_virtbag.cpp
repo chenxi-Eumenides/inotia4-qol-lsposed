@@ -210,6 +210,9 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
 void store_teardown_locked();
 bool install_store_hooks_locked();
 bool store_hooks_installed();
+void mix_teardown_locked();
+bool install_mix_hooks_locked();
+bool mix_hooks_installed();
 
 #include "feature/extension_bag/extension_bag_observation.inc"
 
@@ -911,6 +914,7 @@ void show_extension_bag_no_space_popup() {
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
 #include "feature/extension_bag/extension_bag_equip.inc"
 #include "feature/extension_bag/extension_bag_store.inc"
+#include "feature/extension_bag/extension_bag_mix.inc"
 
 }  // namespace
 

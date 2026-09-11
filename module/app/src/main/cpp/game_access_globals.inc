@@ -167,6 +167,7 @@ UiEquipRefreshItemAreaFn fn_ui_equip_refresh_item_area = nullptr;
 UiEquipRefreshBagAreaFn fn_ui_equip_refresh_bag_area = nullptr;
 UiStoreRefreshInvenBagFn fn_ui_store_refresh_inven_bag = nullptr;
 UiStoreRefreshInvenItemFn fn_ui_store_refresh_inven_item = nullptr;
+UiMixRefreshInvenItemFn fn_ui_mix_refresh_inven_item = nullptr;
 UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip = nullptr;
 UiDescSetOffFn fn_ui_desc_set_off = nullptr;
 UiDescGetDataFn fn_ui_desc_get_data = nullptr;

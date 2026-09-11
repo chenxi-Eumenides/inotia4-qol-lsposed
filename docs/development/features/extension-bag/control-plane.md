@@ -127,7 +127,7 @@ S2 数量编码契约已批准并进入开发：可堆叠数量固定为 `128a+b
 | P4 | ✅ 已完成并归档 | 原版对象与逻辑状态的进程内事务桥接、唯一事务入口、失败隔离和 ownership seam 已收口。 | 物理拖动的所有风险、跨进程恢复或问题 B 已解决。 |
 | P5 | ✅ 核心路径已完成 | 三方向拖动、同袋合并、跨袋不合并、取消、session 清理和失败隔离已有阶段证据。 | 扩展↔扩展交换导致的问题 B；不得把逻辑提交等同于物理安全。 |
 | P6 | ✅ 主保存协调已完成 | 保存 callsite→core coordinator→participant 的正常成功/失败边界已形成；sidecar 双 journal 语义已分立。 | 进程中断、coordinator 自动恢复和异常组合仍未全部关闭；详见存档册缺口。 |
-| P7 | 🟡 进行中 | 阶段 0–3 静态审计完成，阶段 4 dispatcher/installer seam 已 Host 验证；线 A+B 与商店复制购买数量位段修复已完成；sidecar 读档已与运行时 clamp 分离，Host 已覆盖双向跨配置 canonical 数量保持；本轮 S2 四项修复（R-52 MakeItem 回写撤销、R-53 SaveItem 漏斗合并前置、R-54 ext→orig 宿主容量/显示袋守卫、R-55 原版背包详情出售 canonical 接管）与 R-51 位读重定向已落地，随 debug APK `52c5471e` 构建。 | 待真机双态（99/999）、VM-19 购买数量、VM-30 跨配置读档及 VM-37..VM-41 缺陷回归，以及 LSPosed 生产安装、阶段 5 生产者真机矩阵、全局库存覆盖和 P7 Overall。 |
+| P7 | 🟡 进行中 | 阶段 0–3 静态审计完成，阶段 4 dispatcher/installer seam 已 Host 验证；线 A+B 与商店复制购买数量位段修复已完成；sidecar 读档已与运行时 clamp 分离，Host 已覆盖双向跨配置 canonical 数量保持；本轮 S2 四项修复（R-52 MakeItem 回写撤销、R-53 SaveItem 漏斗合并前置、R-54 ext→orig 宿主容量/显示袋守卫、R-55 原版背包详情出售 canonical 接管）与 R-51 位读重定向已落地，随 debug APK `52c5471e` 构建。本轮追加：R-56 `INVEN_RemoveItemData` 物理不足从扩展袋按类别补扣（H-21 扩展桥接，合成药水/宝石孔/混沌/传说扣料自动生效）、R-57 扩展视图原版袋列高亮遮蔽（商店/合成器袋列绘制 wrapper）、合成器（UIMix）扩展袋宿主（页签/投影/状态门控）。 | 待真机双态（99/999）、VM-19 购买数量、VM-30 跨配置读档及 VM-22/VM-23/VM-37..VM-41 缺陷回归，以及 LSPosed 生产安装、阶段 5 生产者真机矩阵、全局库存覆盖和 P7 Overall。 |
 
 ### 3.2 当前总闸门
 
@@ -264,6 +264,7 @@ S2 完成（含 S2-P6 验收）不改变 Overall `NOT_ACCEPTED` 口径；S2 各�
 | 当前 | 持锁原版删除/刷新统一使用 raw-original dispatcher 与 TLS original-only 查询；删除后重新读取物理槽确认清空后才提交跨域事务。 | `rulebook.md` R-18、R-44；`verification-matrix.md` VM-15、VM-B01～B04；Host `test_original_only_queries` |
 | 当前 | S2 数量编码（统一布局，无版本标识）：可堆叠数量按 `a=bits22-24`+`b=bits25-31`（`count=128a+b`，业务上限 999）读写，布局层 `s2_read_count`/`s2_write_count` 与模式无关，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`；读侧统一 `ITEM_GetCumulateCount@0x106094` getter hook（模式视图解码），写侧调用方级门控+进位，不 hook `UTIL_SetBitValue`（无物品指针无法判类别）；关闭态（决策 b）所有读写与操作按低 7 位视图（上限 99）、`a` 保留不动、重开读回完整 canonical；sidecar 不携带版本字段，历史 `encodingVersion` 宽容忽略，无迁移代码。子阶段见 §3.5。 | `rulebook.md` R-45..R-49；`runtime-architecture.md` §3.7；`module-save-store.md` §6.4；`api-reference.md` §7.6；Hub §3.5 |
 | 当前 | S2 缺陷修复（debug APK `52c5471e`）：R-51 出售/拆堆直接位读重定向统一 getter（5 条）；R-52 `ITEMSYSTEM_MakeItem` 数量回写撤销（arg2 非数量）；R-53 `INVEN_SaveItem` 漏斗入库前先并入扩展同类堆；R-54 ext→orig 宿主容量字 RAII 恢复与显示袋守卫；R-55 原版背包详情出售由 H-23 按 canonical 全量接管（预演只回填金额）。装备页详情结算点 `0x1261c4` 重定向已回退不入表。 | `rulebook.md` R-51..R-55；`runtime-architecture.md` §3.7；`verification-matrix.md` VM-37..VM-41；Hub §3.3 |
+| 2026-09-11 | 合成器（UIMix）扩展袋支持：新增 `extension_bag_mix.inc` 宿主（ENTER/F3 回调 + draw_end BL patch + 自建页签 + 网格投影，state!=0 才挂载）；R-56 H-21 `INVEN_RemoveItemData` 物理不足按 category 从扩展袋补扣（合成药水/宝石孔/混沌/传说扣料自动生效，宝石强化走 H-05）；R-57 扩展视图原版袋列高亮遮蔽（商店/合成器袋列绘制 wrapper，扩展页既有）。 | `rulebook.md` R-56、R-57；`runtime-architecture.md` §2.1、§2.5.1、§2.6；`verification-matrix.md` VM-22、VM-23；Host `test_remove_data_extension_shortfall` |
 
 ### 5.1 决策索引使用规则
 

@@ -215,6 +215,9 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 | `UIEquip_ButtonDestroyExe` / OK | `0xb6240` / `0xb83d0` | `game_symbols.h:574,576` |
 | `UIEquip_ButtonUnequipExe` | `0xb7e14` | `game_symbols.h:575` |
 | `UIEquip_MakeDesc` | `0xb8980` | `game_symbols.h:567` |
+| `UIMix_RefreshInvenItem` | `0xc04fc` | `game_symbols.h`（UIMix 段，合成器网格刷新） |
+| `UIMix_DrawInvenBagGroup` | `0xc13ec` | 同上（R-57 合成器袋列高亮遮蔽点） |
+| `Scene_Event_POPUP_SC_MIX` | `0x14b52c` | 同上（合成器 popup state event 校验） |
 
 #### 2.1.1 数量位段与上限 patch 点
 
@@ -268,7 +271,7 @@ S2 下保持原版 99 的 b 满判定（999 对 b 值无意义且高估剩余空
 
 16 函数 / 24 写点收口状态（2026-09-11 反汇编冻结，基线 `.tmp/dualmode-full.asm`，逐函数
 证据见 `native_inventory_hook.cpp` 语义表）：已接管 5 个（MoveItem、SaveItemDirect、
-Divide、ConsumeItem、RemoveItemData——H-21 快照/重扫修正部分删堆）；数量回写已撤销
+Divide、ConsumeItem、RemoveItemData——H-21 快照/重扫修正部分删堆 + R-56 扩展桥接）；数量回写已撤销
 1 个（`ITEMSYSTEM_MakeItem`——arg2 是静态表查找/品质参数非数量，产物量由原版
 `CAL_Calculate` 公式写点 `0x10ca3c` 生成且 ≤99，b 写即全量，R-52/VM-38）；无需
 接管 8 个（UIStore_BuyItem 购买量 max=99、ITEMSYSTEM_CreateItem 数量恒 1、
@@ -365,6 +368,25 @@ MAPITEMSYSTEM_CreateItem 的路径（当前全量反汇编未见），以及 UIM
 购买路径的静态 gate、SaveItem fallback 和完整 caller 运行时覆盖是三个不同命题；
 当前只可以说前两者有代码，不能说所有购买/生产 caller 均已完成 stage-5 验证。
 
+### 2.5.1 复杂操作：合成器宿主（UIMix 页签/投影/高亮遮蔽）
+
+1. 宿主结构 `extension_bag_mix.inc` 完全自管 UIMix：包装 `Scene_Init_POPUP_SC_MIX`
+   （`POPUP_ENTRY_ENTER`）与 F3 回调，BL patch `Scene_Draw_POPUP_SC_MIX` 内 `bl GRPX_End`
+   调用点（`0x14b474`，原字 `0x97fd0fa8`）挂 draw_end；自建 5 个扩展袋页签挂到 UIMix
+   袋组 `[g_uimix+0xe0]`（与原版 6 袋按钮同父），投影写物品网格组 `[g_uimix+0xd8]`
+   的 16 个子控件。宿主物理袋沿用 `original_bag_locked()`——UIMix 与 UIEquip 共用
+   当前袋 GOT `0x2f56d8`（`UIMix_RefreshInvenItem` 反汇编确认），任务袋 `5`/非法回退
+   原版袋 `0`。
+2. 状态门控：页签只在 `UIMix` state（实例 `+0x20`，`UIMIX_SLOT_STATE`）`!=0` 时挂载/
+   绘制。`Scene_Init` 后 state=0（配方菜单，原版不画背包列），选中配方类型
+   （`UIMix_ButtonMenuListExe`）才置 1；state 0 卸载页签与投影，避免早于原版背包出现。
+3. 高亮遮蔽（R-57）：BL patch `UIMix_Draw` 内 `bl UIMix_DrawInvenBagGroup`（`0xc1a74`，
+   原字 `0x97fffe5e`）到遮蔽 wrapper——进入扩展视图时画前把当前袋 GOT 临时置
+   `kNoOriginalBagSelected(6)`、画后恢复，原版 6 袋不再高亮；扩展页签高亮由 draw_end
+   在袋列绘制之后补画。商店同法，见 §2.5 与 `extension_bag_store.inc` 的
+   `UIStore_Draw` 末尾尾调用 `b UIStore_DrawInvenBagGroup`（`0xd30e4`）B patch。
+4. 材料扣减（R-56）见 §2.6；产物入库由 H-13（R-53）。
+
 ### 2.6 复杂操作：生产者兜底
 
 拾取、任务奖励、开箱、拆包、合成、商店、脱装备和使用结果不是同一 caller；静态决策
@@ -380,8 +402,12 @@ MAPITEMSYSTEM_CreateItem 的路径（当前全量反汇编未见），以及 UIM
   自带自动合并语义），无可合并堆才新建扩展空槽；见
   `game_ui_virtbag.cpp:virtual_bag_adopt_native_item`、
   `model/virtual_bag_transaction_rules.inc:adopt_merge_into`。
-- 合成仍有 `game_patch_craft.inc` 旁路，部分回滚和五个 caller 属 stage-5/P6；任务物品
-  仍只能进原版任务袋 `5`。
+- 合成材料扣减已由 H-21 扩展桥接（R-56）覆盖：`UIMix_StartMix → MIXSYSTEM_UseStuff →
+  INVEN_RemoveItemData` 在物理袋 0..5 实扣不足时按 category 从扩展袋补扣（药水/宝石孔/
+  混沌/传说 type0/2/3/4），宝石强化（type1）走 `INVEN_RemoveItem`（H-05 按身份）；
+  产物入库由 H-13（R-53 先并扩展同类堆、失败再 adopt）。`game_patch_craft.inc` 旁路仅
+  覆盖自定义批量宝石入口（当前死代码）；部分回滚和五个 caller 真机仍属 stage-5/P6；
+  任务物品仍只能进原版任务袋 `5`。
 
 ### 2.7 复杂操作：存档
 
@@ -552,7 +578,9 @@ VM-19/VM-20/VM-21/VM-22 取证。
    在 backup 前快照全部匹配类别的 count-encoded 堆、backup 后重扫（消失堆只求和、
    唯一缩减堆回写 a+b=remain），多缩减/越域/count≤0 一律 fail-closed 保持原版结果；
    关闭态原版 b 写天然正确（getter 返回 b 域、只写 b、a 保留），wrapper 不启用修正
-   （R-47）。其余 10 个原版写函数的反汇编证据与「无需接管/待勘察」判定见
+   （R-47）。R-56 扩展桥接：扩展启用且 `count>0`/`category>0` 时，wrapper 调原版后按
+   前后 H-03 总数差算物理实扣，缺口经 `extension_bag_consume_category` 从扩展袋按类别
+   补扣（Host `test_remove_data_extension_shortfall`）。其余 10 个原版写函数的反汇编证据与「无需接管/待勘察」判定见
    `native_inventory_hook.cpp` 语义表（2026-09-11 冻结）。
 - **不 hook `UTIL_SetBitValue` 的原因**：它是无物品指针的通用位工具，hook 点拿不到
   所属物品，无法判定类别（可堆叠数量、宝石选项、袋容量、装备 marker 共用该工具），

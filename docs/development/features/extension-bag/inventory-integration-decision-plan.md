@@ -97,7 +97,7 @@
 | `ITEMSYSTEM_OpenItemBox` | `0x10e970` | 上层分发；不 Hook | 开箱按钮/API | 原版开箱决定随机产物并内部走 `SaveItem`；扩展源通过受控使用入口 | 不凭 SaveItem wrapper 宣称多产物原子回滚；输入消费和部分成功仍需逐 caller 验证。现码：`game_inventory_use.inc:82-95`。 |
 | `ITEMSYSTEM_ProcessUnpack` | `0x10ce50` | 上层分发；不 Hook | 拆包、打包物使用 | 逐产物原版优先，失败时才进入扩展兜底策略 | 输入消费时机、第三参数和前序产物回滚未闭合，保留现有旁路。 |
 | `ITEMSYSTEM_CreateItem` / `MakeItem` | `0x10be9c` / `0x10c6c8` | 优先原版创建；caller 明确移交；`MakeItem` 另有 H-20 Native Hook（`make_item_wrapper`，纯透传、数量回写恒 0——arg2 是静态表查找/品质参数非数量，R-52） | 任务奖励、开箱、合成、API 创建 | 创建对象不是已入库对象；选择原版 `SaveItem` 或扩展事务之一 | 失败必须释放仍由 caller 持有的对象；不能创建后同时被 SaveItem 和扩展 ledger 接管；不得把 arg2/category/flag 当数量回写。 |
-| `MIXSYSTEM_MakeItem` / `UseStuff` | `0x11af58` / `0x11b300` | 上层分发；保留合成旁路 | 5 个合成 caller、模块合成入口 | 原版负责产物规则；模块负责已确认的材料/产物边界和失败检查 | 没有安全、静态可证明的完整逆操作，不猜测提交回滚；材料删除顺序和产物释放待验证。 |
+| `MIXSYSTEM_MakeItem` / `UseStuff` | `0x11af58` / `0x11b300` | 上层分发；合成器（UIMix）扩展袋宿主已落地 | 5 个合成 caller、模块合成入口 | 原版负责产物规则；模块负责已确认的材料/产物边界和失败检查 | 没有安全、静态可证明的完整逆操作，不猜测提交回滚；材料扣减已由 H-21 扩展桥接（R-56）覆盖——`UseStuff→INVEN_RemoveItemData` 物理不足时按 category 从扩展袋补扣；产物入库由 H-13（R-53）；完整逆操作/产物释放仍待验证。 |
 
 ### 2.4 UI、详情、商店和销毁入口
 
@@ -238,7 +238,7 @@ canonical 0、单价越界、结果越界一律拒绝并 backup。按钮预演�
 | 任务奖励分类 | 不把所有奖励统一改成扩展物品；先判任务物品、类别和 caller context | `runtime-architecture.md:294-305` |
 | 开箱 | 不 Hook `ITEMSYSTEM_OpenItemBox`；由原版决定随机产物，SaveItem wrapper 只处理单件漏斗 | `game_inventory_use.inc:82-95`、`game_symbols.h:448` |
 | 拆包 | 不 Hook `ITEMSYSTEM_ProcessUnpack`；逐产物核对输入消费、部分失败和回滚 | `game_symbols.h:471`、`runtime-architecture.md:294-305` |
-| 合成 | 不做全局 `MIXSYSTEM` Hook；保留模块旁路，5 个 caller 逐一核验，未证明完整逆操作不猜测回滚 | `game_patch_craft.inc`、`runtime-architecture.md:294-305` |
+| 合成 | 不做全局 `MIXSYSTEM` Hook；合成器（UIMix）扩展袋宿主（`extension_bag_mix.inc`：页签/投影/状态门控）与 H-21 扩展桥接（R-56：物理不足按类别从扩展袋补扣）已落地，材料扣减自动生效；5 个 caller 逐一核验与完整逆操作回滚仍待验证；`game_patch_craft.inc` 为死代码 | `extension_bag_mix.inc`、`rulebook.md` R-56/R-57、`runtime-architecture.md` §2.5.1/§2.6 |
 
 `NetworkStore_AddItem` 的原版链仍保留，但不属于当前扩展背包生产者验收；其保存 callsite 仍属于完整保存协调清单。
 
