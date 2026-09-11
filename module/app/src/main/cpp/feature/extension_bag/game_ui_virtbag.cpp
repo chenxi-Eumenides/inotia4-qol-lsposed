@@ -88,6 +88,7 @@ uintptr_t g_draw_patch_addr = 0;
 uintptr_t g_bag_draw_patch_addr = 0;
 uintptr_t g_save_inventory_patch_addr = 0;
 void* g_save_inventory_thunk = nullptr;
+void* g_backup_save_inventory = nullptr;
 std::array<uintptr_t, 8> g_save_callsite_patch_addrs{};
 uintptr_t g_drop_gate_patch_addr = 0;
 void* g_drop_gate_thunk = nullptr;

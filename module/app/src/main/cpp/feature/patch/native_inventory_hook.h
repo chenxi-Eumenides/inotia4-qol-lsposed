@@ -23,6 +23,10 @@ void inventory_native_hook_install_if_ready();
 // 模块主动刷新必须走 backup/trampoline，避免经被 Hook 地址回入 wrapper 后重复加锁。
 void inventory_native_hook_call_refresh_item_area_original();
 
+// 暴露框架原生 hook/unhook（native_init 时注入）；供扩展背包等功能按函数入口安装 hook。
+NativeHookFunType native_hook_func();
+NativeUnhookFunType native_unhook_func();
+
 extern "C" [[gnu::visibility("default")]] [[gnu::used]]
 NativeOnModuleLoaded native_init(const NativeAPIEntries* entries);
 

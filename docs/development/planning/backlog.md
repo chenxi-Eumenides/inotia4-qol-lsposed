@@ -57,6 +57,8 @@
 | 未开始 | **合并实现去重（移动合并 vs 入库合并）** | 移动合并（`move_extension_to_extension_locked`）与入库收编合并（`adopt_merge_into`）判据同源但副作用路径各自实现，存在重复维护风险；权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §2 | 抽出共享的合并计划/落位驱动，统一判据与 canonical 回填；不改变现有行为 | 两路径共用同一纯函数与 owner，Host 断言覆盖且行为不变 | 本轮 R-53 实现 |
 | 未开始 | **host guard 抽象** | `HostCapacityGuard`（ext→orig 宿主容量 RAII）为事务内局部结构，类似「临时替换原版状态并保证写回」的守卫可能在其他原版调用点复用；权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §2 | 评估抽成通用 RAII 守卫模板，覆盖容量字/投影/显示袋等临时替换场景；保持 R-44 锁纪律 | 守卫复用有明确契约，Host 覆盖写回与失败路径 | 本轮 R-54 实现 |
 
+| 已实现，真机验证通过（大修 + monster v23） | **多版本（大修/monster）兼容** | R-59 monster 物品数量上界兼容：monster mod 重写背包加载器后按记录 `+14`（`I_COUNT` 最高字节）做 `>0x62` 准入，S2 高位段 `a` 触发拒绝导致 `SAVE_Load` 提前返回、`pMainPlayer=null` 崩溃；模块 `apply_monster_item_count_compat()` 按特征字节 `1F 89 01 71 68 00 00 54` 动态把 `cmp w8,#0x62`→`#0x7F`（不改 APK）。R-60 save gate 改为按符号 hook 原版 `SAVE_SaveInventory` 函数入口（wrapper 走 backup），修复 monster 上 `save gate patch mismatch` 导致 `bridge_init` 失败、整链不装 | 后续 monster 版本更新时依赖特征码定位（非命中即 `no target` no-op）；原版 v1.4.0 已放弃（GNU hash 解析已实现但未纳入验收） | 用户 2026-09-11；`rulebook.md` R-59/R-60；`verification-matrix.md` VM-43/VM-44 |
+
 > 规则：严格按下列顺序串行实施。每项完成后只部署该项，由用户在真机触摸验收；验收通过前不得开始下一项。
 
 | 顺序 | 状态 | 待办项 | 验收标准 |

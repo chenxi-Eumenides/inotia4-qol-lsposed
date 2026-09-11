@@ -1053,6 +1053,46 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   再启用恢复 `true`（本轮已取证）；商店/合成器页签走同一 install 门控与 disabled
   分支（`VM-42`，待取证）。Host 无（UI 挂载依赖游戏控件树）。
 
+### R-59 多版本物品数量上界兼容必须由模块按特征码动态放行，不得改 APK
+
+- **规则一句话**：monster 版把物品准入校验的 `I_COUNT` 最高字节上界硬编码为 `#0x62`
+  （对应原版 `count<=99`），与 S2 扩展上限编码冲突；模块必须在 `bridge_init()` 末尾调用
+  `apply_monster_item_count_compat()`，在 `libgame.so` 可执行映射内按特征字节
+  `1F 89 01 71 68 00 00 54`（`cmp w8,#0x62; b.hi`）定位，把 `cmp w8,#0x62`(0x7101891F)
+  改写为 `cmp w8,#0x7F`(0x7101FD1F)；非 monster 版不命中即无操作（log `no target`）。
+- **为什么**：monster mod 重写背包加载器（`SAVE_LoadFile+0xd0` 的 `bl` 改指注入段
+  `0x7413b4`），其准入 helper 对每条物品记录取 `+14`（= `I_COUNT` 最高字节）做
+  `((v-2)>>1) > 0x62` 判定。S2 编码把高位段 `a` 放在 bits22-24，使该字节从 0 变为非 0，
+  于是 `SAVE_LoadFile` 返回 0 → `SAVE_Load` 提前返回（跳过 `SAVE_LoadCharacterAll`/
+  `MAP_Load`）→ `pMainPlayer` 保持 null → `GAMESTATE_EnterPlay` 对 null 调
+  `CHAR_GetSkillPoint` SIGSEGV。放宽到 `#0x7F` 使派生值 ≤127 全部放行。
+- **典型破坏方式**：把兼容做成改 APK/重打包（交付形态错误，必须在模块内运行时 patch）；
+  按硬编码 VMA 定位（版本漂移即失效）而非特征码；在数据区同字节误命中；patch 晚于
+  `bridge_init` 导致首帧仍崩；对非 monster 版误改。
+- **验证锚**：真机 monster v23：log `monster item-count compat: 0x…818 cmp w8,#0x62 ->
+  #0x7F`；`enter_slot 0` → `screen=world` 且进程存活无 FATAL。大修版：log `no target`，
+  零改动。Host 无（依赖真机内存布局）。
+
+### R-60 save gate 必须按符号 hook 原版 SAVE_SaveInventory 函数入口，不得依赖调用点原指令字
+
+- **规则一句话**：存档门禁（还原投影后交还原版写盘）必须用 `native_hook_func()` 在
+  `g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_VMA", …)`（原版 `SAVE_SaveInventory`
+  函数入口）安装 inline hook；`save_inventory_wrapper` 经框架 backup 调原函数，禁止再
+  改写 `SAVE_Save+0x170` 调用点并校验硬编码原指令字 `0x97fff987`。
+- **为什么**：大修版 `SAVE_SaveInventory@0x127d8c` 唯一调用者就是 `SAVE_Save+0x170`，
+  调用点改写与函数入口 hook 语义等价；但 monster 把该调用点改为 `bl 0x741168`（mod 存档
+  包装器，内部再调原版），硬编码原指令字校验失败 → `save gate patch mismatch got=0x94185e7e`
+  → `install_inventory_hooks` 返回 false → 整条 VirtBag 注入链中止（save callsites/drop/
+  draw/desc/event/save panel/store host/mix host 全不装）。函数入口 hook 与调用点无关、
+  跨版本稳定，且在 monster 上还能同时拦到 mod 包装器的调用。
+- **典型破坏方式**：保留调用点改写并对新版本原指令字 fail-closed（版本一变全链不装）；
+  `save_inventory_wrapper` 直调符号地址导致重入自身（必须走 backup）；hook 未幂等；
+  backup 为空仍继续。
+- **验证锚**：真机 monster v23：log `save gate hook installed target=… backup=…`，
+  `save gate patch mismatch` 计数 0；8× `save callsite hooked` 与 drop/draw/desc/event/
+  save panel/store host/mix host 全部安装；`enter_view {"bag":6}` → `state.mode="module"`；
+  `/api/system/save` → `save complete slot=0 tx=… participants=1`。大修版同链仍成立。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -1116,7 +1156,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-58`，共 58 条。
+1. 本册规则总数：`R-01..R-60`，共 60 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -1135,7 +1175,8 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
     投影宿主容量字与显示袋守卫）、`R-55`（原版背包详情出售 canonical 接管与
     预演/结算两态）、`R-56`（INVEN_RemoveItemData 物理不足从扩展袋按类别补扣）、
     `R-57`（进入扩展视图时原版袋列取消高亮）、`R-58`（三个 UI 宿主页签挂载由扩展背包
-    开关唯一门控）。
+    开关唯一门控）、`R-59`（monster 物品数量上界由模块按特征码动态放行）、`R-60`（save
+    gate 按符号 hook `SAVE_SaveInventory` 函数入口）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、

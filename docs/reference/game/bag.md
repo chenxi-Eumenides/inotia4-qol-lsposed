@@ -1,7 +1,7 @@
 # 背包与袋对象机制（逆向记录）
 
 > 本文记录原版背包/袋对象机制的逆向结论，是扩展背包容量派生契约（control-plane §8.4）的证据基础。
-> 证据来源：libgame.so arm64 反汇编（`apk/decoded/lib/arm64-v8a/libgame.so`，带符号）+ 2026-08-28 真机 Frida 实测记录。
+> 证据来源：libgame.so arm64 反汇编（`apk/decoded/overhaul/lib/arm64-v8a/libgame.so`，带符号）+ 2026-08-28 真机 Frida 实测记录。
 
 ## 1. 三个数据结构
 

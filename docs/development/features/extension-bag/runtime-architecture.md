@@ -283,6 +283,19 @@ UIMix_StartMix/ITEMSYSTEM_ProcessUnpack 产物量=只读静态表、DEALSYSTEM_M
 MAPITEMSYSTEM_CreateItem 的路径（当前全量反汇编未见），以及 UIMix/ProcessUnpack
 静态表若含 >99 产物量（原版数据域设计 ≤99），需数据审计复核。
 
+#### 2.1.2 monster 物品数量上界兼容（R-59）
+
+monster 版重写背包加载器（`SAVE_LoadFile+0xd0` 的 `bl` 改指注入段 `0x7413b4`）后，对每条
+物品记录以 `+14`（= `I_COUNT` 最高字节）做 `((v-2)>>1) > 0x62` 准入；S2 高位段 `a`
+（bits22-24）使该字节非 0，导致 `SAVE_LoadFile` 返回 0 → `SAVE_Load` 提前返回（跳过
+`SAVE_LoadCharacterAll`/`MAP_Load`）→ `pMainPlayer` 保持 null → `GAMESTATE_EnterPlay`
+对 null 调 `CHAR_GetSkillPoint` SIGSEGV。`bridge_init()` 末尾
+`apply_monster_item_count_compat()` 在 `libgame.so` 可执行映射内按特征字节
+`1F 89 01 71 68 00 00 54`（`cmp w8,#0x62; b.hi`）定位，把 `cmp w8,#0x62`(0x7101891F)
+改写为 `cmp w8,#0x7F`(0x7101FD1F)；非 monster 版无命中即无操作（log `no target`）。
+实现于 `game_patch_core.inc`，声明 `game_patch.h`，调用点 `game_access.cpp` 的
+`bridge_init()`。禁止以改 APK/重打包方式交付。
+
 ### 2.2 18 项逐条核实
 
 | # | 操作 | 原版实现路径 | 模块当前路径 | 核实结论 |
@@ -304,7 +317,7 @@ MAPITEMSYSTEM_CreateItem 的路径（当前全量反汇编未见），以及 UIM
 | 15 | 拾取/生产者兜底 | 拾取、奖励、开箱、生产等 caller 各自创建/保存物品，最终部分进入 `INVEN_SaveItem` | 当前 `save_item_wrapper` 在 backup 失败时尝试扩展 adopt；注释列出 18 个漏斗，见 `native_inventory_hook.cpp:184-198`。caller 级所有权/失败回滚仍待 P7 stage-5 | 部分实现；不能称所有生产者已覆盖 |
 | 16 | 视图切换/页签 | 原版 inventory event、袋控件、TouchHandle 回调和原版绘制 | 扩展标签在 `extension_bag_runtime.inc:81-160` 创建；点击 proc 在 `:1-15` 排队，生命周期 `commit_pending_extension_tab_locked@runtime.inc:380-392` 执行；H-16 `UIEquip_RefreshItemArea` 负责原版刷新后的 post-projection，模块主动刷新走 raw-original dispatcher，draw-end 不再承担帧级 heal | 当前代码对码成立；页签拖放、四象限和同袋 apply 分支已按验收册真机状态确认，S-03 另由 VM-10 维护 |
 | 17 | 详情弹窗 | `UIEquip_InvenItemControlEventProc` 事件 `0x80` → `UIEquip_MakeDesc@0xb8980` → `SetDescMenu` | `extension_bag_lifecycle.inc:728-770` patch 唯一 BL 到 `make_desc_equip_gate`；扩展详情按钮 PtrHook 在 `extension_bag_equip.inc:620-682`，确认使用/装备/卖出/销毁分流 | 一致；装备/卸下 proc 明确跳过双层包装 |
-| 18 | 存档/sidecar | 原版保存入口 → `SAVE_Save@0x129600` → `SAVE_SaveInventory` 等原版序列化 | 8 个保存 callsite 在 `extension_bag_lifecycle.inc:54-68` patch 到 `module_save_game`；core 先 participant prepare，再 `fn_save`，成功 commit，见 `module_save.cpp:62-111`；扩展 JNI sidecar 在 `extension_bag_persistence.cpp:161-241` | 一致；不是 Hook `SAVE_*` 函数本体 |
+| 18 | 存档/sidecar | 原版保存入口 → `SAVE_Save@0x129600` → `SAVE_SaveInventory` 等原版序列化 | 8 个保存 callsite 在 `extension_bag_lifecycle.inc:54-68` patch 到 `module_save_game`；core 先 participant prepare，再 `fn_save`，成功 commit，见 `module_save.cpp:62-111`；扩展 JNI sidecar 在 `extension_bag_persistence.cpp:161-241` | 一致；save gate 为**按符号 hook `SAVE_SaveInventory` 函数入口**（R-60），非调用点原指令字改写 |
 
 ### 2.3 复杂操作：拖拽
 

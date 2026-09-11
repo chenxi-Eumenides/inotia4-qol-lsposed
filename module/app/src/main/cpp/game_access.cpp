@@ -378,6 +378,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
         g_base = 0;
         return false;
     }
+    apply_monster_item_count_compat();  // monster 版物品数量上界兼容；非 monster 版无操作
     g_bridge_ready.store(true, std::memory_order_release);
     return true;
 }

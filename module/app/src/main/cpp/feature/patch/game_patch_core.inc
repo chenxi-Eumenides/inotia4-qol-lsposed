@@ -195,6 +195,53 @@ bool apply_fixed_stack_layout() {
     return ok;
 }
 
+// monster 版（大黄猫改版）物品数量上界兼容：
+// monster mod 在 SAVE_LoadFile 内用自写包装器（注入段）逐件校验物品记录，
+// 对 I_COUNT（item+0x10）最高字节要求 ((b-2)>>1) <= 0x62（原版 7 位编码 ≤99）。
+// 模块 S2 扩展上限编码（a=bits22-24）会改变该最高字节，使扩展数量物品被拒，
+// 进而 SAVE_LoadFile 返回 0 → SAVE_Load 提前返回 → 角色未加载 → EnterPlay 崩溃。
+// 运行时按特征字节定位该上界判定并放宽：cmp w8,#0x62 (0x7101891F) → cmp w8,#0x7F (0x7101FD1F)。
+// 仅在 libgame.so 可执行映射内匹配（数据区同字节不命中），非 monster 版无操作。
+bool apply_monster_item_count_compat() {
+    std::lock_guard<std::recursive_mutex> lock(g_patch_mtx);
+    if (g_base == 0) return false;
+    static const uint8_t kSig[8] = {0x1F, 0x89, 0x01, 0x71, 0x68, 0x00, 0x00, 0x54};
+    constexpr uint32_t kOrig = 0x7101891Fu;  // cmp w8, #0x62
+    constexpr uint32_t kRepl = 0x7101FD1Fu;  // cmp w8, #0x7F
+    int hits = 0;
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) return false;
+    char line[512];
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        unsigned long lo = 0, hi = 0;
+        char perms[8] = {0};
+        char path[256] = {0};
+        if (sscanf(line, "%lx-%lx %7s %*s %*s %*s %255s", &lo, &hi, perms, path) < 4) continue;
+        if (strstr(path, "libgame.so") == nullptr || perms[2] != 'x') continue;
+        for (uintptr_t p = lo; p + sizeof(kSig) <= hi; ++p) {
+            if (memcmp(reinterpret_cast<const void*>(p), kSig, sizeof(kSig)) != 0) continue;
+            uint32_t* ip = reinterpret_cast<uint32_t*>(p);
+            if (*ip == kRepl) {
+                ++hits;
+                continue;
+            }
+            if (*ip != kOrig) continue;
+            if (write_insn(p, kRepl)) {
+                ++hits;
+                __android_log_print(ANDROID_LOG_INFO, PATCH_TAG,
+                                    "monster item-count compat: 0x%lx cmp w8,#0x62 -> #0x7F",
+                                    static_cast<unsigned long>(p));
+            }
+        }
+    }
+    fclose(f);
+    if (hits == 0) {
+        __android_log_print(ANDROID_LOG_INFO, PATCH_TAG,
+                            "monster item-count compat: no target (non-monster build)");
+    }
+    return true;
+}
+
 bool set_stack_limit_enabled(bool enabled) {
     std::lock_guard<std::recursive_mutex> lock(g_patch_mtx);
     if (g_base == 0 || !g_stack_layout_patch_set.applied()) return false;

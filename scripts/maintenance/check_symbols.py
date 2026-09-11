@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SO = ROOT / "apk" / "decoded" / "lib" / "arm64-v8a" / "libgame.so"
+DEFAULT_SO = ROOT / "apk" / "decoded" / "overhaul" / "lib" / "arm64-v8a" / "libgame.so"
 HEADER = ROOT / "module" / "app" / "src" / "main" / "cpp" / "data" / "native" / "game_symbols.h"
 REGISTRY = ROOT / "module" / "app" / "src" / "main" / "cpp" / "data" / "native" / "symbol_registry.h"
 READELF = (

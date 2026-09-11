@@ -181,7 +181,7 @@ curl -s http://192.168.3.54:8088/api/ui/screen
 
 | 脚本 | 用途 | 用法 | 默认 |
 |---|---|---|---|
-| `scripts/maintenance/check_symbols.py` | 符号一致性校验（**改 game_symbols.h 后必跑**） | `uv run python scripts/maintenance/check_symbols.py [libgame.so路径]` | `apk/decoded/lib/arm64-v8a/libgame.so`，比对 120+ 符号；**新增符号须登记 `SYMBOL_TO_MACRO` 映射** |
+| `scripts/maintenance/check_symbols.py` | 符号一致性校验（**改 game_symbols.h 后必跑**） | `uv run python scripts/maintenance/check_symbols.py [libgame.so路径]` | `apk/decoded/overhaul/lib/arm64-v8a/libgame.so`，比对 120+ 符号；**新增符号须登记 `SYMBOL_TO_MACRO` 映射** |
 | `scripts/verification/api_poll.py` | 连续轮询 player/party/inventory 检测字段变化 | `uv run python scripts/verification/api_poll.py <IP> [间隔秒] [次数]` | `192.168.3.54`, 2.0s, 30 次 |
 | `scripts/verification/live_session.py` | 联调全自动会话（局域网/Tailscale 通用采样） | `uv run python scripts/verification/live_session.py [IP] [时长上限分钟]` | `192.168.3.54`, 上限 5min |
 | `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（M3 产物 → module/assets） | `uv run python scripts/data/package_assets.py` | 28 表 + zh-Hans/en 语言 |
@@ -215,7 +215,7 @@ grep " INVEN_GetMoney" apk/decompiled/libgame-symbols.txt
 adb logcat -s Inotia4Export:V Inotia4VirtBag:V
 
 # 反汇编定位（改 game_symbols.h 时用）
-tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/decoded/lib/arm64-v8a/libgame.so
+tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/decoded/overhaul/lib/arm64-v8a/libgame.so
 ```
 
 > 构建注意：Gradle 中间产物在 `module/**/build/`，最终 APK 复制到 `output/` 后验收交付；

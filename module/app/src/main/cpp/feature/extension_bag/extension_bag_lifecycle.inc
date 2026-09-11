@@ -645,46 +645,29 @@ bool inject_locked() {
         VIRTBAG_LOG("inventory draw restore hook patched call=%p replacement=0x%08x", reinterpret_cast<void*>(call_addr), replacement);
     }
 
-    if (g_save_inventory_patch_addr == 0) {
-        const uintptr_t call_addr =
-            g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_CALLSITE_VMA",
-                                F_SAVE_SAVE_INVENTORY_CALLSITE_VMA);
-        constexpr uint32_t kOriginalSaveCall = 0x97fff987;
-        const uintptr_t wrapper = reinterpret_cast<uintptr_t>(&save_inventory_wrapper);
-        const int64_t direct_delta = static_cast<int64_t>(wrapper) - static_cast<int64_t>(call_addr);
-        uintptr_t branch_target = wrapper;
-        if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
-            g_save_inventory_thunk = allocate_draw_thunk(call_addr, wrapper);
-            if (g_save_inventory_thunk == nullptr) {
-                VIRTBAG_LOG("save gate thunk allocation failed call=%p wrapper=%p",
-                            reinterpret_cast<void*>(call_addr), wrapper);
-                return false;
-            }
-            branch_target = reinterpret_cast<uintptr_t>(g_save_inventory_thunk);
-        }
-        const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
-        if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            VIRTBAG_LOG("save gate branch target out of range call=%p target=%p",
-                        reinterpret_cast<void*>(call_addr), branch_target);
+    if (g_backup_save_inventory == nullptr) {
+        // 按符号 hook SAVE_SaveInventory 函数入口（调用方无关）：
+        // monster mod 把 SAVE_Save 内对它的调用改指到自己的包装器（最终仍调用本函数），
+        // 旧的「改写调用点 + 原指令字校验」会因此 fail-closed 中止整条注入链。
+        const uintptr_t target =
+            g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_VMA", F_SAVE_SAVE_INVENTORY_VMA);
+        const NativeHookFunType hook_func = native_hook_func();
+        if (hook_func == nullptr) {
+            VIRTBAG_LOG("save gate: native hook func unavailable");
             return false;
         }
-        const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
-        const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-        if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            VIRTBAG_LOG("save gate patch mprotect failed errno=%d", errno);
+        void* backup = nullptr;
+        const int result = hook_func(reinterpret_cast<void*>(target),
+                                     reinterpret_cast<void*>(&save_inventory_wrapper), &backup);
+        if (result != 0 || backup == nullptr) {
+            VIRTBAG_LOG("save gate: hook failed target=%p result=%d backup=%p",
+                        reinterpret_cast<void*>(target), result, backup);
             return false;
         }
-        const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
-        if (current != kOriginalSaveCall && current != replacement) {
-            VIRTBAG_LOG("save gate patch mismatch got=0x%08x", current);
-            return false;
-        }
-        *reinterpret_cast<uint32_t*>(call_addr) = replacement;
-        __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
-                                reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
-        g_save_inventory_patch_addr = call_addr;
-        VIRTBAG_LOG("save gate hook patched call=%p replacement=0x%08x",
-                    reinterpret_cast<void*>(call_addr), replacement);
+        g_backup_save_inventory = backup;
+        g_save_inventory_patch_addr = target;
+        VIRTBAG_LOG("save gate hook installed target=%p backup=%p",
+                    reinterpret_cast<void*>(target), backup);
     }
 
     if (!patch_all_save_callsites()) return false;

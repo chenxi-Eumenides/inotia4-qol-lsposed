@@ -617,6 +617,31 @@
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-42`：①启用态开背包页，`status.extension_tab_button=true`；②`POST /api/config/set {"extensionBagEnabled":false}` 后 `extension_tab_button=false`；③再启用恢复 `true`；④商店页/合成器页分别重复，页签挂载随开关；⑤`logcat` 无 patch 报错。
 - **证据锚类型**：真机 + 源码；行为断言待人工商店/合成器页签确认。
 
+### VM-43 monster 版物品数量上界兼容（R-59）
+
+- **操作**：在 monster v23（**未改 APK**）上启用模块，`enter_slot 0` 载入含 S2 扩展数量的存档，确认进入世界不崩溃；对非 monster（大修）版确认无改动。
+- **设备/APK/快照前置**：真机 `192.168.3.54:5555`、最新 debug APK SHA-256；记录 `monster item-count compat` 日志。
+- **原版链(VMA)**：monster 物品准入 helper `0x741764`（注入段 `LOAD @0x740000`），取记录 `+14`（= `I_COUNT` 最高字节）做 `((v-2)>>1) > 0x62`。
+- **扩展接管点(文件:函数)**：`game_patch_core.inc:apply_monster_item_count_compat()`；调用点 `game_access.cpp:bridge_init()` 末尾。
+- **必须保持的不变式(引 R-xx)**：按特征字节 `1F 89 01 71 68 00 00 54`（`cmp w8,#0x62; b.hi`）在 `libgame.so` 可执行映射内定位；非命中不改；禁止改 APK/重打包（R-59）。
+- **失败语义**：无命中（大修版）记 `monster item-count compat: no target` 并继续。
+- **Host 测试名(现有或「缺口」)**：无（依赖真机内存布局）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-43`：①monster v23 + 模块，log `monster item-count compat: 0x… cmp w8,#0x62 -> #0x7F`；②`enter_slot 0` → `screen=world`，进程存活且无 FATAL/tombstone；③大修版 log `no target` 且内存零改动。
+- **证据锚类型**：真机日志 + 源码。
+
+### VM-44 save gate 按符号 hook SAVE_SaveInventory 函数入口（R-60）
+
+- **操作**：monster v23 + 模块启动，确认 `save gate hook installed` 且 `save gate patch mismatch` 为 0；注入链完整；扩展视图可用；保存成功。
+- **设备/APK/快照前置**：真机 `192.168.3.54:5555`、最新 debug APK SHA-256。
+- **原版链(VMA)**：`SAVE_Save@0x129600+0x170`（大修 `bl 0x127d8c`；monster `bl 0x741168` 包装器，内部 `0x741204 bl 0x127d8c`）；原版 `SAVE_SaveInventory@0x127d8c`。
+- **扩展接管点(文件:函数)**：`extension_bag_lifecycle.inc:inject_locked`（`native_hook_func()(target, &save_inventory_wrapper, &backup)`）；`extension_bag_render.inc:save_inventory_wrapper`（经 `g_backup_save_inventory` 调原函数）。
+- **共享状态读写**：`g_backup_save_inventory`、`g_save_inventory_patch_addr`。
+- **必须保持的不变式(引 R-xx)**：按 `fn_resolve("F_SAVE_SAVE_INVENTORY_VMA")` 定位函数入口，不依赖调用点原指令字；wrapper 必须走框架 backup（不得直调符号地址导致重入）；hook 幂等（`g_backup_save_inventory==nullptr` 判定）；backup 为空即失败。
+- **失败语义**：`hook_func` 为空 / result!=0 / backup 为空 → `inject_locked` 返回 false（整链不装）。
+- **Host 测试名(现有或「缺口」)**：无（依赖真机 inline hook）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-44`：①monster 启动 log `save gate hook installed target=… backup=…`、`save gate patch mismatch` 计数 0；②8× `save callsite hooked` + drop/draw/desc/event/save panel/store host/mix host 全部安装；③`enter_view {"bag":6}` → `state.mode="module"`；④`POST /api/system/save` → `save complete slot=0 tx=… participants=1`，进程存活。
+- **证据锚类型**：真机日志 + 源码。
+
 ## 2.1 VM-B 原版基线行为包
 
 > VM-B01～VM-B04 对应规则册 B-01～B-04 的原版基线。前置条件：扩展背包已启用；每张
@@ -770,6 +795,8 @@
 | R-53 | VM-39 | `adopt_merge_into`（model 纯函数）+ `virtual_bag_merge_native_item`（backup 前）+ `virtual_bag_adopt_native_item`（backup 失败后）合并前置查找已落地；Host `test_adopt_merge_plan` 覆盖同类合并/身份不同/上限/关闭态/非可堆叠；真机拾取（原版有空/满）归 VM-39。 |
 | R-54 | VM-40 | `HostCapacityGuard` RAII + `ext2orig_requires_host_capacity_restore`/`ext2orig_should_switch_display_bag` 已落地；Host `test_ext2orig_host_guards` 覆盖宿主/非宿主/非投影判定；真机投影拖入宿主袋归 VM-40。 |
 | R-55 | VM-41 | `ok_destroy_item_wrapper`（H-23）+ `button_destroy_exe_wrapper`（H-22 预演标记）+ `vanilla_sell_route`/`vanilla_sell_money` 已落地；Host `test_vanilla_sell_takeover` 覆盖两态路由与金额边界，`test_native_equip_sell_count` 固化原版 b 段缺陷基线；真机背包详情出售归 VM-41。 |
+| R-59 | VM-43 | `apply_monster_item_count_compat` 按特征字节 `1F 89 01 71 68 00 00 54` 在可执行映射内把 `cmp w8,#0x62` 改写为 `#0x7F`；非 monster 版无操作（`no target`）。真机 monster v23 归 VM-43（`enter_slot 0` 不崩）。 |
+| R-60 | VM-44 | save gate 改为 `native_hook_func()` hook `SAVE_SaveInventory` 函数入口，wrapper 经 `g_backup_save_inventory` 调原函数；不依赖调用点原指令字。真机 monster v23 归 VM-44（`save gate hook installed`、`patch mismatch`=0、注入链完整、保存成功）。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 

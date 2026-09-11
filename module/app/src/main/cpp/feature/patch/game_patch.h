@@ -82,6 +82,9 @@ private:
 
 bool apply_fixed_stack_layout();
 
+// monster 版物品数量上界兼容（按特征字节定位，非 monster 版 no-op）。
+bool apply_monster_item_count_compat();
+
 bool set_stack_limit_enabled(bool enabled);
 bool stack_limit_enabled();
 

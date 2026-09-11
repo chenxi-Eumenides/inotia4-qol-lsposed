@@ -385,7 +385,9 @@ void* module_item_locked(int bag, int slot) {
 
 // 保存门禁（P3 事故修复）：SAVE_SaveInventory 被游戏内部直调（存档面板/自动存档），
 // 投影安装期间执行会把 INVEN 投影态写进存档（E-2026-08-29-02 污染事故根因）。
-// 通过替换 SAVE_Save 内唯一 bl 调用点，保存前强制把投影写回快照。
+// v0.6.x：由「改写 SAVE_Save 内唯一 bl 调用点」改为「按符号 hook SAVE_SaveInventory
+// 函数入口」——调用方无关（原版 SAVE_Save 或 monster mod 的包装器都经过此函数），
+// 且不受 monster 改指调用目标影响。
 typedef uint32_t (*SaveInventoryRawFn)(uint8_t* cursor);
 uint32_t save_inventory_wrapper(uint8_t* cursor) {
     {
@@ -395,12 +397,9 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
             restore_module_view_locked();
         }
     }
-    const uintptr_t raw = g_base != 0
-                              ? g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_VMA",
-                                                    F_SAVE_SAVE_INVENTORY_VMA)
-                              : 0;
-    if (raw == 0) return 0;
-    return reinterpret_cast<SaveInventoryRawFn>(raw)(cursor);
+    // 函数入口 hook：必须走框架 backup（原函数 trampoline）；按符号地址直调会重入自身。
+    if (g_backup_save_inventory == nullptr) return 0;
+    return reinterpret_cast<SaveInventoryRawFn>(g_backup_save_inventory)(cursor);
 }
 
 // G-6 终极绘制门禁：ControlItem_Draw 的 bl ITEM_DrawPorting（0xaaf28）替换——

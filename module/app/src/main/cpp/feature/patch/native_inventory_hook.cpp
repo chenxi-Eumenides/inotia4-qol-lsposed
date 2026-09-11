@@ -1310,6 +1310,9 @@ void inventory_native_hook_install_if_ready() {
     g_installing.store(false, std::memory_order_release);
 }
 
+NativeHookFunType native_hook_func() { return g_hook_func; }
+NativeUnhookFunType native_unhook_func() { return g_unhook_func; }
+
 extern "C" [[gnu::visibility("default")]] [[gnu::used]]
 NativeOnModuleLoaded native_init(const NativeAPIEntries* entries) {
     inventory_native_hook_on_api(entries);
