@@ -124,8 +124,6 @@ curl -s http://<设备IP>:8088/api/ui/screen
 > 包名必须是合法 Android applicationId。NPatch 的 `--newpackage` 只改输出 APK 的 manifest/applicationId，原游戏 dex 中的类名和资源 ID 不变；因此新包名必须同时加入此参数并重新构建模块，不能只修改 APK 文件名。该游戏的资源表仍保留原资源 namespace，模块已在改包名进程中兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
 
 > 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
->
-> **Release 附件要求**：3 个 NPatch 集成版固定使用**游戏原包名**（`patch-apk.sh` 不传 `--newpackage`）；`.patched` 独立包名仅用于手动/特殊场景，不进入 Release 附件。
 
 > 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用 NPatch 内置证书重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。`--newpackage` 流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
 
@@ -139,7 +137,6 @@ curl -s http://<设备IP>:8088/api/ui/screen
 2. **构建模块 Release APK**：`scripts/build-release.sh`，产物
    `output/inotia4-qol-lsposed-v<version>-release-unsigned.apk`。
 3. **生成 3 个 NPatch 集成版**（`scripts/patch-apk.sh <游戏.apk> <模块.apk>`，输入在 `apk/game-apk/`）：
-   - **不指定新包名**：Release 的 NPatch 集成版保留游戏原包名（`com.com2us.inotia4.normal.freefull.google.global.android.common`），**不要**传 `--newpackage` / 独立包名（如 `.patched`）——避免 92MB 体积与额外重签名，也不要求模块把该包名加入 `targetPackages`。
    - 原版：`艾诺迪亚4_v1.3.2_原版.apk` → 发布名 `inotia4-qol-original-npatched.apk`
    - 大修版：`艾诺迪亚4_v1.3.2_盗版大修_<日期>.apk` → 发布名 `inotia4-qol-overhaul-<日期>-npatched.apk`
    - monster 版：`Inotia4_v<游戏版本>_monster_<版本>.apk` → 发布名 `Inotia4_v<游戏版本>_monster_<版本>-npatched.apk`
