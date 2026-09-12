@@ -163,6 +163,14 @@ S2 数量编码契约已批准并进入开发：可堆叠数量固定为 `128a+b
    漏斗入库前先并入扩展同类堆；R-54 ext→orig 目标袋为投影宿主时恢复真实容量且不切换
    显示袋；R-55 原版背包详情出售由 H-23 按 canonical 全量接管。对应 Host 断言已落地，
    行为断言待真机 VM-37..VM-41，Overall 仍保持 `NOT_ACCEPTED`。
+10. 佣兵徽章使用（R-63）：新增第 16 个常驻 Native Hook H-24
+   `UIEquip_ButtonUseMercenarySealExe@0xb8144`，扩展侧经 `extension_use_mercenary_seal`
+   按原版顺序 `UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MERCENARYSYSTEM_MakeMercenary@0x119658`
+   接管，消耗经 H-04 `INVEN_RemoveItem` 承接；API `data_op_use_item` /
+   `extension_bag_api_use_item_impl` 对 `ITEMSYSTEM_IsMercenarySeal`（category 42..50 / 928..933）
+   豁免 `fn_is_use` 并走 `MakeMercenary`。VM-47（扩展袋 UI）2026-09-12 真机确认通过
+   （日志 `extension mercenary-seal handled bag=0 slot=8 used=1`）；VM-48（API）待补。
+   Overall 仍保持 `NOT_ACCEPTED`。
 
 ### 3.4 阶段证据索引
 
@@ -209,12 +217,10 @@ S2 完成（含 S2-P6 验收）不改变 Overall `NOT_ACCEPTED` 口径；S2 各�
 | 证据缺口 | H3/H4 复测尚未采集完整 `orig_event pre/post` 与 `ERROR physical inventory mutation`；是否触发、首个 digest 改变点均未知。 |
 | 规则关联 | `R-20`（物理快照守卫）；复现和取证以 `verification-matrix.md` 的 VM-12/H3/H4 为准。 |
 
-### 4.2 三条当前 backlog 项
+### 4.2 两条当前 backlog 项
 
 - **扩展物品全局裸指针反查 generation 化**：`render` 仍有裸指针反查窗口，见
   [`backlog.md`](../../planning/backlog.md) 的扩展背包待办条目。
-- **确认弹窗 Cancel 后详情缓存状态残留窗口**：不复活 Cancel 槽劫持，增加安全清理点或
-  等价 token，见 [`backlog.md`](../../planning/backlog.md) 的扩展背包待办条目。
 - **确认使用 token mismatch 后 active 槽滞留观察**：先裁决不释放未知对象的隔离/清理策略，
   见 [`backlog.md`](../../planning/backlog.md) 的扩展背包待办条目。
 

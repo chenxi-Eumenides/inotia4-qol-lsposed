@@ -47,6 +47,8 @@ ButtonEquipExeFn g_backup_button_equip_exe = nullptr;
 ButtonDestroyExeFn g_backup_button_destroy_exe = nullptr;  // R-55 预演标记源
 ButtonUnequipExeFn g_backup_button_unequip_exe = nullptr;
 UiEquipOkConfirmUseItemFn g_backup_ok_confirm_use_item = nullptr;
+// R-63 佣兵徽章专用使用按钮函数级接管：UIEquip_ButtonUseMercenarySealExe(0xb8144)。
+UiEquipButtonUseMercenarySealExeFn g_backup_button_use_mercenary_seal_exe = nullptr;
 // R-55 原版背包详情出售接管：UIEquip_OKDestroyItem(0xb83d0)。返回值仅按钮预演读取
 // （弹窗展示金额），用 UiEquipOkDestroyItemFn（uint64_t()）捕获 x0。
 UiEquipOkDestroyItemFn g_backup_ok_destroy_item = nullptr;
@@ -862,6 +864,20 @@ void ok_confirm_use_item_wrapper(void* item) {
     g_backup_ok_confirm_use_item(item);
 }
 
+// R-63 佣兵徽章使用按钮函数级接管：详情物品为扩展袋佣兵徽章时由扩展侧接管
+// （用模块详情身份调原版 MakeMercenary，消耗交给已 Hook 的 INVEN_RemoveItem）；
+// 其余（原版袋物品/非佣兵徽章）一律透传原函数，保持完全原版流程。
+void button_use_mercenary_seal_exe_wrapper(void* button) {
+    if (virtual_bag_handle_use_mercenary_seal()) return;
+    if (g_backup_button_use_mercenary_seal_exe == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag,
+                            "UIEquip_ButtonUseMercenarySealExe backup unavailable button=%p",
+                            button);
+        return;
+    }
+    g_backup_button_use_mercenary_seal_exe(button);
+}
+
 // R-55 原版背包详情出售接管（VM-41）。UIEquip_OKDestroyItem(0xb83d0) 无参：背包
 // 结算分支从面板上下文读 desc_type(0x304a43)/bag(0x304a41)/ctrl(0x3049e8)，再经
 // ControlObject_GetCursorIndex 取槽，随后调 0x1261c4 只按 b 段结算。两态由
@@ -1060,6 +1076,10 @@ bool install_locked() {
     // R-55 原版背包详情出售接管（追加链尾）。
     const uintptr_t ok_destroy_item = g_base + fn_resolve(
         "F_UIEQUIP_OK_DESTROY_ITEM_VMA", F_UIEQUIP_OK_DESTROY_ITEM_VMA);
+    // R-63 佣兵徽章使用按钮（追加链尾）。
+    const uintptr_t button_use_mercenary_seal_exe = g_base + fn_resolve(
+        "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA",
+        F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA);
     const uintptr_t save_item = g_base + fn_resolve(
         "F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA);
     const uintptr_t move_item = g_base + fn_resolve(
@@ -1093,6 +1113,7 @@ bool install_locked() {
         !target_is_executable(button_destroy_exe, "UIEquip_ButtonDestroyExe") ||
         !target_is_executable(ok_confirm_use_item, "UIEquip_OKConfrimUseItem") ||
         !target_is_executable(ok_destroy_item, "UIEquip_OKDestroyItem") ||
+        !target_is_executable(button_use_mercenary_seal_exe, "UIEquip_ButtonUseMercenarySealExe") ||
         !target_is_executable(save_item, "INVEN_SaveItem") ||
         !target_is_executable(move_item, "INVEN_MoveItem") ||
         !target_is_executable(equip_control_event_proc, "UIEquip_EquipControlEventProc") ||
@@ -1119,6 +1140,7 @@ bool install_locked() {
     g_backup_button_destroy_exe = nullptr;
     g_backup_ok_confirm_use_item = nullptr;
     g_backup_ok_destroy_item = nullptr;
+    g_backup_button_use_mercenary_seal_exe = nullptr;
     g_backup_save_item = nullptr;
     g_backup_move_item = nullptr;
     g_backup_refresh_item_area = nullptr;
@@ -1128,7 +1150,7 @@ bool install_locked() {
     g_backup_make_item = nullptr;
     g_backup_remove_item_data = nullptr;
 
-    InstalledHook installed[23]{};
+    InstalledHook installed[24]{};
     std::size_t installed_count = 0;
     const auto install_hook = [&](void* target, void* replacement, void** backup,
                                   const char* name) -> bool {
@@ -1201,6 +1223,10 @@ bool install_locked() {
                       reinterpret_cast<void*>(ok_destroy_item_wrapper),
                       reinterpret_cast<void**>(&g_backup_ok_destroy_item),
                       "UIEquip_OKDestroyItem") ||
+        !install_hook(reinterpret_cast<void*>(button_use_mercenary_seal_exe),
+                      reinterpret_cast<void*>(button_use_mercenary_seal_exe_wrapper),
+                      reinterpret_cast<void**>(&g_backup_button_use_mercenary_seal_exe),
+                      "UIEquip_ButtonUseMercenarySealExe") ||
         !install_hook(reinterpret_cast<void*>(save_item),
                       reinterpret_cast<void*>(save_item_wrapper),
                       reinterpret_cast<void**>(&g_backup_save_item),
@@ -1238,7 +1264,7 @@ bool install_locked() {
 
     g_installed.store(true, std::memory_order_release);
     __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "hook install OK api=%u count=23 FindItem=%p/%p GetItemCount=%p/%p GetCumulateCount=%p/%p ConsumeItem=%p/%p RemoveItem=%p/%p OKConfirmUseItem=%p/%p OKDestroyItem=%p/%p EquipItemFromInvenToSlot=%p/%p MoveItem=%p/%p EquipControlEventProc=%p/%p RefreshItemArea=%p/%p SaveItemDirect=%p/%p ItemSystemDivide=%p/%p ItemSystemMakeItem=%p/%p RemoveItemData=%p/%p ButtonDestroyExe=%p/%p",
+                        "hook install OK api=%u count=24 FindItem=%p/%p GetItemCount=%p/%p GetCumulateCount=%p/%p ConsumeItem=%p/%p RemoveItem=%p/%p OKConfirmUseItem=%p/%p OKDestroyItem=%p/%p EquipItemFromInvenToSlot=%p/%p MoveItem=%p/%p EquipControlEventProc=%p/%p RefreshItemArea=%p/%p SaveItemDirect=%p/%p ItemSystemDivide=%p/%p ItemSystemMakeItem=%p/%p RemoveItemData=%p/%p ButtonDestroyExe=%p/%p ButtonUseMercenarySealExe=%p/%p",
                         kNativeApiVersion,
                         reinterpret_cast<void*>(find_item), reinterpret_cast<void*>(g_backup_find_item),
                         reinterpret_cast<void*>(get_item_count), reinterpret_cast<void*>(g_backup_get_item_count),
@@ -1264,7 +1290,9 @@ bool install_locked() {
                         reinterpret_cast<void*>(remove_item_data),
                         reinterpret_cast<void*>(g_backup_remove_item_data),
                         reinterpret_cast<void*>(button_destroy_exe),
-                        reinterpret_cast<void*>(g_backup_button_destroy_exe));
+                        reinterpret_cast<void*>(g_backup_button_destroy_exe),
+                        reinterpret_cast<void*>(button_use_mercenary_seal_exe),
+                        reinterpret_cast<void*>(g_backup_button_use_mercenary_seal_exe));
     return true;
 }
 

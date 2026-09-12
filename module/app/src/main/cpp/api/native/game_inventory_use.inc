@@ -19,7 +19,11 @@ std::string data_op_use_item(int bag, int slot) {
     bool sealed_or_box = (fn_is_sealed != nullptr && fn_is_sealed(category)) ||
                          (fn_is_item_box != nullptr && fn_is_item_box(category)) ||
                          (fn_is_dice != nullptr && fn_is_dice(category));
-    if (!sealed_or_box && fn_is_use != nullptr && !fn_is_use(category))
+    // 佣兵徽章（R-63）：ITEMDATA_IsUse 只认 +2∈{0x16,0x17}，徽章 +2=0x1d 返回 0，
+    // 但其效果在独立的原版佣兵徽章按钮链，不受 fn_is_use 限制。
+    const bool mercenary_seal =
+        fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(category);
+    if (!sealed_or_box && !mercenary_seal && fn_is_use != nullptr && !fn_is_use(category))
         return op_err("item not usable");
 
     void* leader = member_or_null(0);
@@ -93,6 +97,22 @@ std::string data_op_use_item(int bag, int slot) {
             return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
         }
         return op_err("open box failed");
+    }
+
+    // 佣兵徽章（R-63，category 42..50 / 928..933）：效果只在原版
+    // UIEquip_ButtonUseMercenarySealExe→MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx
+    // 不实现；按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗由
+    // MakeMercenary 内部 INVEN_RemoveItem（H-04，扩展物品走扩展删除）承接。
+    // API 无 UI 上下文：失败返回明确错误，成功不弹原版 UI 弹窗。
+    if (mercenary_seal) {
+        if (fn_save_is_ok == nullptr || fn_mercenary_is_empty_manager_slot == nullptr ||
+            fn_mercenary_make_mercenary == nullptr)
+            return op_err("symbol not resolved");
+        if (fn_save_is_ok() == 0) return op_err("save busy");
+        if (fn_mercenary_is_empty_manager_slot() == 0) return op_err("mercenary slots full");
+        if (fn_mercenary_make_mercenary(item) == nullptr) return op_err("make mercenary failed");
+        extension_bag_sync_projected_slot(bag, slot);
+        return op_ok();
     }
 
     // 其余类型：CHAR_UseItemEx — 药水/卷轴/技能书/配方书/佣兵卡/增益/超药水/打包物

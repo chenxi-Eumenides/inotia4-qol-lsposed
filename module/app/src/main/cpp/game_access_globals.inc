@@ -149,6 +149,10 @@ IncludePartyFn fn_include_party = nullptr;
 ExcludePartyFn fn_exclude_party = nullptr;
 MercenaryReleaseFn fn_mercenary_release = nullptr;
 ItemIsUseFn fn_is_use = nullptr;
+// ---- 佣兵徽章使用链（R-63）----
+ItemSystemIsMercenarySealFn fn_is_mercenary_seal = nullptr;
+MercenarySystemIsEmptyManagerSlotFn fn_mercenary_is_empty_manager_slot = nullptr;
+MercenarySystemMakeMercenaryFn fn_mercenary_make_mercenary = nullptr;
 PopupStateExistFn fn_popup_exist = nullptr;
 NetworkStoreSetStateFn fn_networkstore_set_state = nullptr;
 OpenItemBoxFn fn_open_item_box = nullptr;

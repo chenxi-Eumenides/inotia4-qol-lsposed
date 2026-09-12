@@ -167,6 +167,10 @@ extern IncludePartyFn fn_include_party;
 extern ExcludePartyFn fn_exclude_party;
 extern MercenaryReleaseFn fn_mercenary_release;
 extern ItemIsUseFn fn_is_use;
+// ---- 佣兵徽章使用链（R-63）----
+extern ItemSystemIsMercenarySealFn fn_is_mercenary_seal;
+extern MercenarySystemIsEmptyManagerSlotFn fn_mercenary_is_empty_manager_slot;
+extern MercenarySystemMakeMercenaryFn fn_mercenary_make_mercenary;
 extern PopupStateExistFn fn_popup_exist;
 extern NetworkStoreSetStateFn fn_networkstore_set_state;
 extern OpenItemBoxFn fn_open_item_box;

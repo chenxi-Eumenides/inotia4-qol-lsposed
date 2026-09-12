@@ -923,6 +923,10 @@ bool virtual_bag_handle_confirm_use_item(void* item) {
     return extension_confirm_use_item(item);
 }
 
+bool virtual_bag_handle_use_mercenary_seal() {
+    return extension_use_mercenary_seal();
+}
+
 // 商店扩展视图会把窗口原版袋容量字临时放大到扩展容量；若玩家在此视图下
 // 触发原版库存写入（买入→INVEN_SaveItem），FindSaveSlot 会按放大容量找
 // 空槽，可能把物品写进超过真实容量的槽位（恢复后物品丢失/错乱）。该函数

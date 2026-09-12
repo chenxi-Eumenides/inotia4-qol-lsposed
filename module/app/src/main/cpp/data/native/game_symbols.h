@@ -556,6 +556,11 @@ constexpr uintptr_t F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA = 0xb7910;
 constexpr uintptr_t F_UIEQUIP_REFRESH_ITEM_AREA_VMA = 0xb7a00;
 constexpr uintptr_t F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA = 0xb7784; // void (void) ButtonEquipExe b7d40 装备后刷新角色装备槽显示
 constexpr uintptr_t F_UIEQUIP_REFRESH_BAG_AREA_VMA = 0xb78bc; // void (void) ButtonEquipExe b7e0c 装袋后刷新原版袋槽区域
+// ---- 佣兵徽章（英雄徽章）使用链（R-63）----
+constexpr uintptr_t F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA = 0xb8144; // void (void* button) 佣兵徽章专用使用按钮（UIEquip_SetDescMenu 面板 offset 0x98 挂载；0xb8144→SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary）
+constexpr uintptr_t F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA = 0x10be70; // int (int32 category) category∈42..50 或 928..933 为佣兵徽章
+constexpr uintptr_t F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA = 0x118b30; // int (void) 佣兵管理器是否有空槽（0x118b30 反汇编：无参，读 G_MERC_MAX_GOT/G_MERC_SLOTLIST_GOT）
+constexpr uintptr_t F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA = 0x119658; // void* (void* item) 生成佣兵（唯一调用点 0xb818c；内部 INVEN_RemoveItem 消耗，返回 null=失败）
 constexpr uintptr_t F_SOUNDSYSTEM_PLAY_VMA = 0x1377f0;   // void(int16 id) 原版 UI 音效（袋切换=0x11，反汇编 b8c34）
 constexpr uintptr_t G_SND_FX_VMA = 0x307850;             // g_sndFx 音效句柄表（判空防崩）
 constexpr uintptr_t F_CONTROL_ITEM_SET_ITEM_VMA = 0xaad60;      // (ctrl, item) 控件物品指针（RefreshItemArea b7a64）
@@ -738,6 +743,11 @@ using UiDescSetOffFn = void (*)();
 using UiDescGetDataFn = void* (*)();
 using UiEquipMakeDescFn = void (*)(void*, void*);  // UIEquip_MakeDesc(ctrl, 0)：读控件物品生成详情面板（袋标签二次点击原版语义）
 using UiPopupMsgCreateOkFromTextDataFn = void (*)(uint32_t, uint32_t, uint32_t, uint32_t);
+// ---- 佣兵徽章使用链 typedef（R-63）----
+using UiEquipButtonUseMercenarySealExeFn = void (*)(void*);   // UIEquip_ButtonUseMercenarySealExe(button)
+using ItemSystemIsMercenarySealFn = int (*)(int32_t);         // ITEMSYSTEM_IsMercenarySeal(category)
+using MercenarySystemIsEmptyManagerSlotFn = int (*)();        // MERCENARYSYSTEM_IsEmptyManagerSlot()
+using MercenarySystemMakeMercenaryFn = void* (*)(void*);      // MERCENARYSYSTEM_MakeMercenary(item) → 佣兵指针/null
 using TouchHandleSetCursorFn = void (*)(void*, void*);
 using TouchHandleResetMovingControlFn = void (*)();
 using TouchHandleResetSelectedControlFn = uint64_t (*)();

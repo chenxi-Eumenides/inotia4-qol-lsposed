@@ -668,6 +668,34 @@
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-46`：①`ownership audit` 的 `live` 仅随活跃物品数变化、不随 ext→orig 交接累积；②连续 ext→orig 移动/装备 ≥ 数次后拖动仍提交成功；③`logcat` 无 `ownership ledger exhausted`。
 - **证据锚类型**：真机日志 + Host 断言 + 源码。
 
+### VM-47 扩展袋 UI 佣兵徽章使用（R-63）
+
+- **状态**：已解决（2026-09-12 真机确认；debug APK `504df7be418f`）。日志锚：`extension desc hook installed index=6 offset=0x98 ... orig=0x...c4144`（MercSeal 按钮 = base+0xb8144）→ `extension desc item captured bag=0 slot=8` → `extension mercenary-seal handled bag=0 slot=8 used=1`；随后 `ownership audit ... balanced=1 live=0`。
+- **操作**：把英雄徽章（ITEMDATABASE item id=79，category=49）放入扩展逻辑袋；打开其详情，点击「佣兵徽章使用」按钮；并复测佣兵槽满与存档不可用两个边界。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256；佣兵管理器至少一个空槽；存档可写。
+- **原版链(VMA)**：`UIEquip_SetDescMenu@0xb8504`（category 49 → `ITEMSYSTEM_IsMercenarySeal@0x10be70` → 面板 offset 0x98）→ `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `SAVE_IsOK@0x128c14` → `MERCENARYSYSTEM_IsEmptyManagerSlot@0x118b30` → `MERCENARYSYSTEM_MakeMercenary@0x119658`（内部 `INVEN_RemoveItem@0x104044`）。
+- **扩展接管点(文件:函数)**：H-24 `native_inventory_hook.cpp:button_use_mercenary_seal_exe_wrapper` → `game_ui_virtbag.cpp:virtual_bag_handle_use_mercenary_seal` → `extension_bag_equip.inc:extension_use_mercenary_seal`。
+- **共享状态读写**：读 `g_extension_desc_item/_bag/_slot`、`g_module_objects`、descriptor；写 `ModuleUseToken`、扩展槽删除（经 H-04 `extension_bag_remove_native_item`）、`refresh_module_item_area_locked`、desc 身份清理。
+- **必须保持的不变式(引 R-xx)**：接管分支不持 `g_virtual_bag_mtx` 调 `MakeMercenary`（内部 `INVEN_RemoveItem` 再取锁）；不手动删槽（无双消耗）；失败（save busy / 槽满 / make failed）不消耗并清理 token；原版袋物品透传原版按钮（R-63、R-44）。
+- **失败语义**：SAVE_IsOK 失败→弹窗 0x25、不消耗；无空槽→弹窗 0x17、不消耗；`MakeMercenary` 返回 null→弹窗 0xc、不消耗；token 丢失→abort/isolate 并记录，不释放未知对象。
+- **Host 测试名(现有或「缺口」)**：缺口：`test_mercenary_seal_takeover_token`（断言身份校验、失败 abort、成功 finish 与 desc 清理）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-47`：①扩展袋徽章详情点使用→佣兵加入、徽章从扩展袋消失、详情关闭，日志 `extension mercenary-seal handled bag=.. slot=.. used=1`；②佣兵槽满→弹窗、徽章保留；③原版袋徽章照常使用（透传对照）；④连续使用/切袋无 `token mismatch`、无挂死。
+- **证据锚类型**：真机必需 + 源码；不能由 Host 单独通过。
+
+### VM-48 API 佣兵徽章使用（R-63）
+
+- **状态**：API 路径已实现（`IsMercenarySeal` 豁免 + `MakeMercenary` 分派）；本次真机仅取证 UI 路径（VM-47），API 原版袋/扩展袋用例待补。
+- **操作**：对原版袋与扩展逻辑袋中的英雄徽章分别调用 `POST /api/item/inventory/use_item`，覆盖成功、槽满、存档不可写与堆叠数量边界。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256；记录 bag/slot/count 与佣兵列表。
+- **原版链(VMA)**：同 VM-47；API 无 UI 上下文，不创建原版弹窗。
+- **扩展接管点(文件:函数)**：`api/native/game_inventory_use.inc:data_op_use_item`（原版袋）与 `feature/extension_bag/extension_bag_api_impl.inc:extension_bag_api_use_item_impl`（扩展袋）的 `IsMercenarySeal` 豁免 + `MakeMercenary` 分派。
+- **共享状态读写**：读 descriptor/category、token；写 `ModuleUseToken`、扩展槽删除、projection 同步、dirty。
+- **必须保持的不变式(引 R-xx)**：`fn_is_use` 对 `IsMercenarySeal` 类别豁免；SAVE_IsOK/空槽检查在锁外且失败先 `module_use_abort_locked`；成功只消耗一份且经 H-04 路由（R-63、R-03、R-15、R-44）。
+- **失败语义**：返回统一错误 envelope（`save busy`/`mercenary slots full`/`make mercenary failed`/`item not usable` 不再出现于徽章）；失败不扣数量、不释放 stale 对象。
+- **Host 测试名(现有或「缺口」)**：缺口：`test_use_mercenary_seal_gate_and_abort`（断言豁免门控与失败 abort）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-48`：①原版袋 `use_item`→`{"ok":true}`、徽章消失、佣兵加入；②扩展袋（bag 6..10）同上；③槽满→`mercenary slots full` 且不消耗；④堆叠 ≥2 徽章→只消耗一份（记录原版删堆语义）；⑤存档不可写→`save busy`。
+- **证据锚类型**：API 真机 + 源码；堆叠边界需 stage-5 证据。
+
 ## 2.1 VM-B 原版基线行为包
 
 > VM-B01～VM-B04 对应规则册 B-01～B-04 的原版基线。前置条件：扩展背包已启用；每张
@@ -825,6 +853,8 @@
 | R-60 | VM-44 | save gate 改为 `native_hook_func()` hook `SAVE_SaveInventory` 函数入口，wrapper 经 `g_backup_save_inventory` 调原函数；不依赖调用点原指令字。真机 monster v23 归 VM-44（`save gate hook installed`、`patch mismatch`=0、注入链完整、保存成功）。 |
 | R-61 | VM-45 | `clear_stale_projected_moving_locked` 空闲态早退（`moving`/`drop_source` 均空即返回；会话 idle 且非捕获时不清原版 `MOVING_CTRL`）。Host 无（依赖控件树/触摸状态机），真机归 VM-45（`stale projected moving cleared`=0、拖动可持续、`0x18` 正常）。 |
 | R-62 | VM-46 | `kLedgerCapacity` 32→128、`handover_to_inventory` 交接即回收槽位（`kNone` + generation 递增）、`Audit.inventory_owned` 改为累计 `total_handed_over`；Host `test_ownership_ledger` 覆盖。真机归 VM-46（无 `ownership ledger exhausted`、ext→orig 后仍可拖动）。 |
+| R-63 | VM-47 / VM-48 | H-24 函数级 Hook `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `extension_use_mercenary_seal`（原版顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗经 H-04）；API `data_op_use_item`/`extension_bag_api_use_item_impl` 对 `IsMercenarySeal` 豁免 `fn_is_use` 并走 `MakeMercenary`。Host 缺口 `test_mercenary_seal_takeover_token`；真机归 VM-47（UI）/VM-48（API）。 |
+| R-64 | 取证任务（无 VM 卡） | 详情按钮观察 hook 的面板偏移/去重漂移取证（真机 dump 11 偏移 button/data/orig + 物品 category）；独立任务，不阻塞 R-63。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 

@@ -1126,6 +1126,47 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   `inventory_owned` 为累计值）；真机：连续「扩展→原版」移动/装备后仍可继续拖动、无
   `ownership ledger exhausted`（`VM-46`）。
 
+### R-63 佣兵徽章使用必须函数级接管并复用原版 MakeMercenary 链
+
+- **规则一句话**：佣兵徽章（category 42..50 或 928..933，`ITEMSYSTEM_IsMercenarySeal`）的效果
+  只在原版 `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `MERCENARYSYSTEM_MakeMercenary@0x119658`
+  链中，`CHAR_UseItemEx` 不实现；扩展侧必须用函数级 Native Hook（H-24）接管该按钮，按原版顺序
+  `UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MakeMercenary` 执行，消耗交给已 Hook 的
+  `INVEN_RemoveItem`（H-04），不得另写删槽；API 路径（`data_op_use_item` /
+  `extension_bag_api_use_item_impl`）必须对 `IsMercenarySeal` 类别豁免 `fn_is_use` 并同样走
+  `MakeMercenary`。
+- **为什么**：`ITEMDATA_IsUse@0x10583c` 只认记录 +2 ∈ {0x16,0x17}，徽章 +2=0x1d 返回 0，两条
+  API 路径都被 `fn_is_use` 拦截返回 `item not usable`；而原版按钮经 `ControlItem_GetItem` 从
+  g_inven 取物品，扩展物品不进物理袋会取到 null/错位而静默失败；`CHAR_UseItemEx` 对 category 49
+  只走通用路径，不生成佣兵。
+- **典型破坏方式**：在扩展详情分流里对 0xb8144 只 `call_orig`（原版取不到扩展物品）；把徽章当
+  普通消耗品调 `CHAR_UseItemEx`；在接管分支手动删槽造成双消耗；持 `g_virtual_bag_mtx` 调
+  `MakeMercenary`（其内部 `INVEN_RemoveItem` 会再取锁，死锁）。
+- **验证锚**：Host 无（依赖原版链）；真机 `VM-47`（扩展袋 UI）与 `VM-48`（API 原版袋/扩展袋），
+  日志锚 `extension mercenary-seal handled bag=.. slot=.. used=1` 与
+  `hook install OK ... ButtonUseMercenarySealExe=`。
+
+### R-64 扩展详情按钮观察 hook 不得依赖面板偏移与按钮一一对应
+
+- **规则一句话**：`install_extension_desc_item_hooks_locked` 按面板偏移枚举按钮时必须先校验
+  控件/数据可访问，并按 execute slot 去重；不得因陈旧面板字段解析出同一 slot 而跳过**真实**
+  目标按钮（0x98）的安装；依赖详情按钮观察 hook 的分流不得假设「偏移 ↔ 按钮」稳定一一对应。
+- **为什么（反汇编 + 真机证据）**：`UIEquip_SetDescMenu@0xb8504` 的 `+0x68..+0xb8` 是
+  **互斥分支槽**，按 `desc_type` 与物品类别每次只写 1–2 个（`+0x80`=`IsShortcutUse`→
+  `ButtonUseExe@0xb80b8`；`+0x98`=`ITEMSYSTEM_IsMercenarySeal`→`MercSealExe@0xb8144`；
+  `+0xa0`=`IsDice`→`RollDiceExe`）。`UIDesc_ResetMenuGroup@0xb5324` 只 `DeleteChild` 组子控件，
+  **不清面板槽指针**；`ControlButton_Create` 地址复用，使陈旧槽与新按钮解析出同一
+  `data+CB_EXECUTE_PROC(0x20)`。真机 `.tmp/d1-full.txt` 因此出现
+  `skip duplicate slot index=6 offset=0x98 slot=0x...730`（与 offset 0x80 同 slot），且 0x98 的
+  `orig` 在不同 desc 间漂移（`0x...be144`/`0x...be280`）；同日志**全程无 `extension desc execute`**，
+  证明该观察 hook 未能稳定触达点击。常量佐证 `CO_DATA=0x50`、`CB_EXECUTE_PROC=0x20`。
+- **典型破坏方式**：去重仅比较 `slot` 而不校验按钮身份/偏移来源；对陈旧按钮安装 hook；把
+  `orig` 漂移误判为目标 proc；把「详情按钮观察 hook 已装」当作「点击必达」。
+- **验证锚**：R-63 采用函数级 H-24（`0xb8144` 入口）**不依赖该枚举**，故本漂移不影响佣兵徽章
+  修复；其余仍依赖 desc 观察 hook 的分流按本规则取证。真机 dump 详情打开时 11 个偏移的
+  button/data/orig 与物品 category，日志 `extension desc hook installed/skip ...` 与点击时
+  `extension desc execute ...` 成对。此项为独立取证任务，不阻塞 R-63。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -1189,7 +1230,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-62`，共 62 条。
+1. 本册规则总数：`R-01..R-64`，共 64 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -1210,7 +1251,9 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
      `R-57`（进入扩展视图时原版袋列取消高亮）、`R-58`（三个 UI 宿主页签挂载由扩展背包
      开关唯一门控）、`R-59`（monster 物品数量上界由模块按特征码动态放行）、`R-60`（save
      gate 按符号 hook `SAVE_SaveInventory` 函数入口）、`R-61`（扩展视图 moving 控件清理
-     避开空闲态、不清原版活动手势）、`R-62`（所有权账本容量覆盖扩展物品上限且交接终态槽回收）。
+     避开空闲态、不清原版活动手势）、`R-62`（所有权账本容量覆盖扩展物品上限且交接终态槽回收）、
+     `R-63`（佣兵徽章使用函数级 H-24 接管并复用原版 MakeMercenary 链，API 豁免 `fn_is_use`）、
+     `R-64`（扩展详情按钮观察 hook 不得依赖面板偏移与按钮一一对应）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、

@@ -281,6 +281,15 @@ bool bridge_init() {
     fn_exclude_party = reinterpret_cast<ExcludePartyFn>(g_base + fn_resolve("F_EXCLUDE_PARTY_VMA", F_EXCLUDE_PARTY_VMA));
     fn_mercenary_release = reinterpret_cast<MercenaryReleaseFn>(g_base + fn_resolve("F_MERCENARY_RELEASE_VMA", F_MERCENARY_RELEASE_VMA));
     fn_is_use = reinterpret_cast<ItemIsUseFn>(g_base + fn_resolve("F_ITEMDATA_IS_USE_VMA", F_ITEMDATA_IS_USE_VMA));
+    // ---- 佣兵徽章使用链（R-63）----
+    fn_is_mercenary_seal = reinterpret_cast<ItemSystemIsMercenarySealFn>(
+        g_base + fn_resolve("F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA", F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA));
+    fn_mercenary_is_empty_manager_slot = reinterpret_cast<MercenarySystemIsEmptyManagerSlotFn>(
+        g_base + fn_resolve("F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA",
+                            F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA));
+    fn_mercenary_make_mercenary = reinterpret_cast<MercenarySystemMakeMercenaryFn>(
+        g_base + fn_resolve("F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA",
+                            F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA));
     fn_popup_exist = reinterpret_cast<PopupStateExistFn>(g_base + fn_resolve("F_POPUPSTATE_EXIST_VMA", F_POPUPSTATE_EXIST_VMA));
     fn_networkstore_set_state = reinterpret_cast<NetworkStoreSetStateFn>(g_base + fn_resolve("F_NETWORKSTORE_SET_STATE_VMA", F_NETWORKSTORE_SET_STATE_VMA));
     fn_open_item_box = reinterpret_cast<OpenItemBoxFn>(g_base + fn_resolve("F_OPEN_ITEM_BOX_VMA", F_OPEN_ITEM_BOX_VMA));

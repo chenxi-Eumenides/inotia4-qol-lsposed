@@ -122,6 +122,9 @@ bool virtual_bag_handle_backpack_button_equip();
 // 确认使用回调的扩展侧分流：item 与当前扩展详情物品及逻辑袋槽一致时返回 true
 // 并接管确认流程；否则返回 false，由原版回调继续处理。
 bool virtual_bag_handle_confirm_use_item(void* item);
+// 佣兵徽章使用按钮（UIEquip_ButtonUseMercenarySealExe）的扩展侧分流：当前详情
+// 物品为扩展袋佣兵徽章时返回 true 并接管；否则 false 走原版按钮。
+bool virtual_bag_handle_use_mercenary_seal();
 // 原版袋卸下接管（ButtonUnequipExe desc_type=1，含扩展袋解除）：返回 true
 // 表示已接管（原版不再执行）；out_no_space/out_not_empty 置位表示应弹
 // "背包已满"/"袋非空"（袋保持装备态）。

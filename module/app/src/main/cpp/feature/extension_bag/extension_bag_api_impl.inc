@@ -157,6 +157,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
 
     bool used = false;
+    bool is_seal = false;
     void* item = nullptr;
     void* leader = nullptr;
     bool closes_description = false;
@@ -169,25 +170,49 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (slot >= g_virtual_bag_state.capacities[bag]) return op_err("slot beyond derived capacity");
         const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
-        if (fn_is_use == nullptr || fn_char_use_item_ex == nullptr) {
+        // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
+        // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
+        // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
+        is_seal = fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(descriptor.category);
+        if (is_seal) {
+            if (fn_save_is_ok == nullptr || fn_mercenary_is_empty_manager_slot == nullptr ||
+                fn_mercenary_make_mercenary == nullptr) {
+                return op_err("symbol not resolved");
+            }
+        } else if (fn_is_use == nullptr || fn_char_use_item_ex == nullptr) {
             return op_err("symbol not resolved");
         }
-        if (!fn_is_use(descriptor.category)) return op_err("item not usable");
+        if (!is_seal && !fn_is_use(descriptor.category)) return op_err("item not usable");
 
         item = module_item_locked(bag, slot);
         leader = member_or_null(0);
         if (item == nullptr) return op_err("extension item unavailable");
-        if (leader == nullptr) return op_err("no leader");
+        if (!is_seal && leader == nullptr) return op_err("no leader");
         closes_description = g_extension_desc_item == item;
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {
             return op_err("extension item already in use");
         }
     }
     if (closes_description && fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-    previous_use_token = g_active_module_use_token;
-    g_active_module_use_token = &use_token;
-    used = fn_char_use_item_ex(leader, item, 0) != 0;
-    g_active_module_use_token = previous_use_token;
+    if (is_seal) {
+        // SAVE_IsOK/空槽检查不得持背包锁调用；失败先 abort token 再返回明确错误。
+        const bool save_ok = fn_save_is_ok() != 0;
+        const bool slot_ok = save_ok && fn_mercenary_is_empty_manager_slot() != 0;
+        if (!save_ok || !slot_ok) {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            module_use_abort_locked(use_token);
+            return op_err(!save_ok ? "save busy" : "mercenary slots full");
+        }
+        previous_use_token = g_active_module_use_token;
+        g_active_module_use_token = &use_token;
+        used = fn_mercenary_make_mercenary(item) != nullptr;
+        g_active_module_use_token = previous_use_token;
+    } else {
+        previous_use_token = g_active_module_use_token;
+        g_active_module_use_token = &use_token;
+        used = fn_char_use_item_ex(leader, item, 0) != 0;
+        g_active_module_use_token = previous_use_token;
+    }
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         bool consumed = false;

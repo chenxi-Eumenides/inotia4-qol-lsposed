@@ -831,6 +831,134 @@ bool extension_confirm_use_item(void* item) {
     return true;
 }
 
+// R-63 佣兵徽章（category 42..50 / 928..933）使用按钮函数级接管。
+// 原版 UIEquip_ButtonUseMercenarySealExe(0xb8144) 经 ControlItem_GetItem 从 g_inven
+// 取物品，扩展物品不进物理袋会取到 null/错位而静默失败。此处按原版流程用模块详情
+// 身份直接调原版 MERCENARYSYSTEM_MakeMercenary（0x119658），消耗交给已 Hook 的
+// INVEN_RemoveItem（H-04）承接扩展槽删除；SAVE_IsOK/空槽校验顺序与原版一致。
+// 返回 true=已接管（原版按钮不再执行）；false=非扩展详情佣兵徽章，交原版透传。
+bool extension_use_mercenary_seal() {
+    bool used = false;
+    int bag = -1;
+    int slot = -1;
+    void* item = nullptr;
+    ModuleUseReleasePlan release_plan{};
+    {
+        std::unique_lock<std::mutex> lock(g_virtual_bag_mtx, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            VIRTBAG_LOG("extension mercenary-seal lock busy");
+            return false;
+        }
+        if (!extension_bag_enabled() || g_extension_desc_item == nullptr ||
+            fn_is_mercenary_seal == nullptr || fn_save_is_ok == nullptr ||
+            fn_mercenary_is_empty_manager_slot == nullptr ||
+            fn_mercenary_make_mercenary == nullptr) {
+            return false;
+        }
+        item = g_extension_desc_item;
+        bag = g_extension_desc_item_bag;
+        slot = g_extension_desc_item_slot;
+        if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount ||
+            g_module_objects[bag][slot] != item) {
+            return false;
+        }
+        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        if (descriptor.category <= 0 || descriptor.count <= 0) return false;
+        // 用物品自身 flags 的类别（与原版 SetDescMenu 创建 0x98 按钮同源）判定，
+        // descriptor.category 仅作回退，避免序列化差异导致误判。
+        int category = descriptor.category;
+        if (fn_get_bit != nullptr) {
+            const uint16_t flags = *reinterpret_cast<uint16_t*>(
+                reinterpret_cast<uint8_t*>(item) + I_TYPE);
+            category = fn_get_bit(flags, 15, 6);
+        }
+        if (!fn_is_mercenary_seal(category)) return false;
+    }
+    // 原版按钮顺序：UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MakeMercenary。
+    // 游戏函数一律在 g_virtual_bag_mtx 外调用（MakeMercenary 内部会进入
+    // INVEN_RemoveItem → H-04 再次取锁，持锁调用必死锁）。
+    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    const auto show_popup = [](uint32_t text_id) {
+        const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                                                    F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+        if (popup != 0) reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(text_id, 0, 0, 0);
+    };
+    if (fn_save_is_ok() == 0) {
+        VIRTBAG_LOG("extension mercenary-seal reject reason=save_busy bag=%d slot=%d", bag, slot);
+        show_popup(0x25);
+        return true;
+    }
+    if (fn_mercenary_is_empty_manager_slot() == 0) {
+        VIRTBAG_LOG("extension mercenary-seal reject reason=slots_full bag=%d slot=%d", bag, slot);
+        show_popup(0x17);
+        return true;
+    }
+    ModuleUseToken use_token{};
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (g_module_objects[bag][slot] != item ||
+            !module_use_begin_locked(bag, slot, item, &use_token)) {
+            VIRTBAG_LOG("extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
+                        item);
+            show_popup(0xc);
+            return true;
+        }
+    }
+    ModuleUseToken* previous_use_token = g_active_module_use_token;
+    g_active_module_use_token = &use_token;
+    void* mercenary = fn_mercenary_make_mercenary(item);
+    g_active_module_use_token = previous_use_token;
+    used = mercenary != nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        bool consumed = false;
+        if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
+            const bool marker_cleared = module_use_abort_locked(use_token);
+            const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
+            VIRTBAG_LOG("ERROR extension mercenary-seal token lost bag=%d slot=%d item=%p "
+                        "marker_cleared=%d; treated handled",
+                        bag, slot, item, isolated ? 1 : 0);
+            if (isolated) {
+                reset_extension_desc_item_hooks_locked();
+                g_extension_desc_item = nullptr;
+                g_extension_desc_item_bag = -1;
+                g_extension_desc_item_slot = -1;
+            }
+            return true;
+        }
+        if (!used) {
+            VIRTBAG_LOG("extension mercenary-seal make failed bag=%d slot=%d", bag, slot);
+            show_popup(0xc);
+            return true;
+        }
+    }
+    if (release_plan.pending) {
+        if (!module_use_release_native(release_plan)) {
+            VIRTBAG_LOG("ERROR extension mercenary-seal native release failed bag=%d slot=%d", bag,
+                        slot);
+            return true;
+        }
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!module_use_finalize_release_locked(release_plan)) {
+            VIRTBAG_LOG("ERROR extension mercenary-seal release finalize failed bag=%d slot=%d", bag,
+                        slot);
+            return true;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        // native 释放和对象摘除完成后再刷新并清理详情控件，避免悬挂绑定。
+        refresh_module_item_area_locked(bag);
+        reset_extension_desc_item_hooks_locked();
+        g_extension_desc_item = nullptr;
+        g_extension_desc_item_bag = -1;
+        g_extension_desc_item_slot = -1;
+    }
+    show_popup(0x18);
+    VIRTBAG_LOG("extension mercenary-seal handled bag=%d slot=%d used=1", bag, slot);
+    return true;
+}
+
 void extension_desc_item_execute(void* button) {
     constexpr std::array<size_t, 11> kDescButtonOffsets = {
         0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
