@@ -142,8 +142,8 @@ data 层 → 仅 STL
 | `feature/extension_bag/extension_bag_persistence.cpp` | feature persistence | 通过内部上下文执行状态 JSON 的加载、保存和 pending 事务隔离恢复 | feature context + model |
 | `feature/extension_bag/extension_bag_geometry.*` | feature geometry | 扩展背包布局门禁及控件命中适配；纯网格计算委托 `core/native/grid_geometry.*` | core geometry + game control data |
 | `feature/extension_bag/extension_bag_api.cpp` | feature API facade | 对外扩展背包 JSON/操作入口的稳定包装，不承载锁内业务实现 | extension bag internal API |
-| `feature/save_backup/save_backup_bundle.*` | feature 纯逻辑 | 存档管理器备份纯逻辑：`.qsb` bundle 组装/解析（大端+CRC32）、SHA-256/MD5/CRC32/base64 原语、极简扁平 metaJson 提取、MSAV sidecar 容器最小校验/重定槽；纯 STL，编入 host 单测 | 无（纯 STL） |
-| `feature/save_backup/save_backup.*` | feature | **存档管理器备份**：`.qsb` 导出（checksum 去重）/导入（两段事务 + `.rollback/` 回滚，sidecar 直改第 6 字节 slot + 重算尾部 CRC32）/列表/删除；返回体即 HTTP 响应 JSON | game_access + core（op_err）+ save_backup_bundle |
+| `feature/save_backup/save_backup_bundle.*` | feature 纯逻辑 | 存档管理器备份纯逻辑：`.qol_save` bundle 组装/解析（大端+CRC32）、SHA-256/MD5/CRC32/base64 原语、极简扁平 metaJson 提取、MSAV sidecar 容器最小校验/重定槽；纯 STL，编入 host 单测 | 无（纯 STL） |
+| `feature/save_backup/save_backup.*` | feature | **存档管理器备份**：`.qol_save` 导出（checksum 去重）/导入（两段事务 + `.rollback/` 回滚，sidecar 直改第 6 字节 slot + 重算尾部 CRC32）/列表/删除；返回体即 HTTP 响应 JSON | game_access + core（op_err）+ save_backup_bundle |
 | `feature/ui/game_ui_savebackup.*` | feature UI | **存档管理器面板**：设置页入口按钮 + 三栏备份面板（左槽/中操作/右列表每页 4 行 + 翻页 + 提示区 + 返回）；复用 IAP 死条目 `F_PANEL_UNK2_ENTER`，仅主菜单注入、离开还原；导入/删除面板内两步确认 | game_ui_kit + game_ui_settings + feature/save_backup + data |
 
 **已解散文件**：`game_data.h`（已删除）、`game_read.cpp`（→ character/party/inventory/world/system + state）、`game_misc.cpp`（→ world/quest/ui/dialog/shop/save/system）、`game_ops_value.cpp`（→ character/inventory + patch）、`game_ops_action.cpp`（→ 九域 + patch）。

@@ -560,11 +560,11 @@ bool valid_checksum(const std::string& value) {
 }
 
 bool extract_checksum_from_name(const std::string& file_name, std::string& out) {
-    // `_([0-9a-f]{12}).qsb$`
-    constexpr size_t kPat = 12 + 5;  // '_' + 12 hex + ".qsb"
+    // `_([0-9a-f]{12}).qol_save$`
+    constexpr size_t kPat = 12 + 10;  // '_' + 12 hex + ".qol_save"
     if (file_name.size() < kPat) return false;
-    if (!ends_with(file_name, ".qsb", 4)) return false;
-    const size_t start = file_name.size() - 4 - 12;
+    if (!ends_with(file_name, ".qol_save", 9)) return false;
+    const size_t start = file_name.size() - 9 - 12;
     if (file_name[start - 1] != '_') return false;
     for (size_t i = 0; i < 12; ++i) {
         const char c = file_name[start + i];

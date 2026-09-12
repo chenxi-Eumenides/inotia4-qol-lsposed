@@ -3,7 +3,7 @@
 #include <string>
 
 // 存档管理器备份 feature（save-backup）：
-// .qsb bundle 的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
+// .qol_save bundle 的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
 // 返回值即 HTTP 响应 JSON（{"ok":true,...} / {"ok":false,"error":"..."}）。
 // 依赖方向：feature → core（op_err 信封）+ data（game_access fn 指针）；不依赖 api/native。
 

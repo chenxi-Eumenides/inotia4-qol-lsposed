@@ -1471,9 +1471,9 @@
 
 #### 存档备份（导出 / 列表 / 导入 / 删除）
 
-> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qsb` 备份，可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/save_backup/`。
+> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol_save` 备份，可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/save_backup/`。
 >
-> **备份标识 = `checksum`**：`sha256(origPlain ‖ module)` 的前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qsb` 的末段。同一游戏内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名。
+> **备份标识 = `checksum`**：`sha256(origPlain ‖ module)` 的前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol_save` 的末段。同一游戏内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名。
 >
 > 导入导出时机与责任由调用方负责，模块只保证原子写、CRC 校验与内容完整。
 
@@ -1481,7 +1481,7 @@
 
 `POST /api/system/backup/export`
 
-**用途**：把指定槽导出为 `.qsb` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。
+**用途**：把指定槽导出为 `.qol_save` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。
 
 **请求格式**：`{ "slot": 0 }`（0/1/2）
 
@@ -1497,7 +1497,7 @@
 { "ok": true, "backup": <BackupMeta>, "deduplicated": true }
 ```
 
-**注意**：先算出 `checksum`，再扫描 `save_backup/*.qsb`：已存在同 `checksum` 备份 → 不写入新文件直接返回；不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
+**注意**：先算出 `checksum`，再扫描 `save_backup/*.qol_save`：已存在同 `checksum` 备份 → 不写入新文件直接返回；不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
 
 ##### 备份列表
 

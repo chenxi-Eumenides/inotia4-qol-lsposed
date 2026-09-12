@@ -42,7 +42,7 @@
 6. `development/features/extension-bag/module-save-store.md`（存档册）
 7. `development/features/extension-bag/verification-matrix.md`（验收册）
 
-存档管理器（save-backup）：`development/features/save-backup.md`（`.qsb` 备份格式、导出/导入事务与跨槽/跨设备语义）。
+存档管理器（save-backup）：`development/features/save-backup.md`（`.qol_save` 备份格式、导出/导入事务与跨槽/跨设备语义）。
 
 ### `reference/`：共享参考
 

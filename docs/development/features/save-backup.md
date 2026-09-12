@@ -1,11 +1,11 @@
 # 存档管理器（save-backup）设计与实现
 
-> 状态：CURRENT。本册是 `.qsb` 备份格式、导出/导入事务、跨槽/跨设备语义与真机证据的唯一权威。
+> 状态：CURRENT。本册是 `.qol_save` 备份格式、导出/导入事务、跨槽/跨设备语义与真机证据的唯一权威。
 > 端点契约以 `../../reference/api-reference.md` §7.3 为准；原版存档格式见 `../../reference/game/save.md`。
 
 ## 1. 范围与职责
 
-- 把「原版 `save{slot}.dat` + 模块 sidecar」导出为自包含 `.qsb` 备份，并可还原到任意槽位（原版与模块一起）。
+- 把「原版 `save{slot}.dat` + 模块 sidecar」导出为自包含 `.qol_save` 备份，并可还原到任意槽位（原版与模块一起）。
 - **模块只保证**：原子写、CRC/校验和验证、内容完整、失败回滚。**导入导出时机与责任由调用方负责**，模块不因游戏状态拒绝（唯一例外是参数与文件合法性）。
 - 不覆盖、不修改原版保存链；不改动 `save{slot}.dat` 的既有格式。
 
@@ -19,7 +19,7 @@
   - 块0：`+0 u8 slot`、`+13 u64 save_time`、`+29 u32 version(≤5)`；块1：`+0 i16 map_id`。
 - `SAVE_IsValidInformation@0x125f88` 要求块0 slot == 请求槽 ⇒ **跨槽导入必须改写该字节并重新加密**。
 
-## 3. `.qsb` 备份格式（大端）
+## 3. `.qol_save` 备份格式（大端）
 
 ```text
 u32 magic = 0x51534231 ("QSB1")
@@ -36,7 +36,7 @@ u8[metaLen] metaJson           # UTF-8 元数据
 u32 crc32                      # 覆盖此前全部字节
 ```
 
-- 文件名：`<yyyyMMdd-HHmmss>_s<sourceSlot>_<sha256(origPlain‖module)前12位>.qsb`（全 ASCII，同秒冲突加 `_1`、`_2`）。
+- 文件名：`<yyyyMMdd-HHmmss>_s<sourceSlot>_<sha256(origPlain‖module)前12位>.qol_save`（全 ASCII，同秒冲突加 `_1`、`_2`）。
 - **备份标识 `checksum`** = `sha256(origPlain ‖ module)` 前 12 位小写 hex，与文件名末段一致；导入/删除/去重均以它定位备份，不使用文件名。
 - `metaJson`：`source_slot`、`export_time`、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`。
 - 目录：`getExternalFilesDir(null)/save_backup/`；回滚暂存目录 `save_backup/.rollback/`。
@@ -47,12 +47,12 @@ u32 crc32                      # 覆盖此前全部字节
 1. native `read_original_plain(slot)`（`feature/save_backup/save_backup.cpp`）：`SAVE_LoadData` 解密 → 拷贝明文并 `MEM_Free` → 块0 slot 写 `0xFF` → 读 map_id/save_time/version → 元数据。
    - `hero_level`/`hero_index` 取运行时槽结构；主菜单（STATE==4）下先调 `SAVE_CreateSaveSlot` 刷新三槽，否则为 -1。
 2. native 读 sidecar 原始字节（`<external>/module-saves/slot-{n}.module-save`，magic+整体 CRC32 轻校验；缺失/损坏时仅导出原版）。
-3. 算 `checksum = sha256(origPlain ‖ module)` 前 12 位 → 按 `_<checksum>.qsb` 后缀扫描 `save_backup/*.qsb` 去重：已存在同 `checksum` 备份则**不写新文件**，返回既有备份 meta（`deduplicated:true`）。
-4. 组装 `.qsb`（CRC32，metaJson 含 `checksum`）→ tmp+rename 原子写入。
+3. 算 `checksum = sha256(origPlain ‖ module)` 前 12 位 → 按 `_<checksum>.qol_save` 后缀扫描 `save_backup/*.qol_save` 去重：已存在同 `checksum` 备份则**不写新文件**，返回既有备份 meta（`deduplicated:true`）。
+4. 组装 `.qol_save`（CRC32，metaJson 含 `checksum`）→ tmp+rename 原子写入。
 
 ## 5. 导入流程
 
-0. native 按 `checksum` 定位 bundle（`_<checksum>.qsb` 后缀；未命中→`backup not found`）。
+0. native 按 `checksum` 定位 bundle（`_<checksum>.qol_save` 后缀；未命中→`backup not found`）。
 
 1. 读并校验 magic/version/CRC/分段边界（`save_backup_bundle.cpp`）。
 2. native `encrypt_plain_to_slot(targetSlot, origPlain)`：块0 slot 写目标槽 → `ENCRYPT_Process2(mode=0)` → 密文（len+3 字节）。
@@ -86,7 +86,7 @@ u32 crc32                      # 覆盖此前全部字节
 
 ### 8.1 底层 API（native `feature/save_backup/`，checksum 标识）
 
-- 导出 slot0 → `20260912-155026_s0_8f03df248aec.qsb`（10080 B），`map_id=37`、`map_name=帝国首都`、`hero_level=5`、`hero_index=0`、`save_version=5`。
+- 导出 slot0 → `20260912-155026_s0_8f03df248aec.qol_save`（10080 B），`map_id=37`、`map_name=帝国首都`、`hero_level=5`、`hero_index=0`、`save_version=5`。
 - 同内容再次导出 → `deduplicated:true`（返回既有备份，不写新文件）。
 - `POST /api/system/backup/import {checksum, slot:1}` → `ok:true`；`/api/system/info` 三槽 `exists=true`、`hero_level=5`；`enter_slot(1)` → world、party=1。
 - `POST /api/system/backup/delete {checksum}` → `ok:true`（list 清空）；错误分支 `backup not found` / `bad checksum`。

@@ -1811,8 +1811,8 @@ static void test_save_backup_meta_entry() {
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
     Entry e;
-    sb::entry_from_bundle("20260912-122823_s1_89abcdef0123.qsb", parsed, e);
-    CHECK_EQ(e.file_name, std::string("20260912-122823_s1_89abcdef0123.qsb"));
+    sb::entry_from_bundle("20260912-122823_s1_89abcdef0123.qol_save", parsed, e);
+    CHECK_EQ(e.file_name, std::string("20260912-122823_s1_89abcdef0123.qol_save"));
     CHECK_EQ(e.size_bytes, static_cast<long long>(bundle.size()));
     CHECK_EQ(e.source_slot, 1);
     CHECK_EQ(e.export_time_ms, 1700000000000LL);
@@ -1826,7 +1826,7 @@ static void test_save_backup_meta_entry() {
 
     // metaJson 权威：meta 内 checksum 与文件名后缀不同时取 meta。
     Entry e2;
-    sb::entry_from_bundle("20260912-122823_s1_ffffffffffff.qsb", parsed, e2);
+    sb::entry_from_bundle("20260912-122823_s1_ffffffffffff.qol_save", parsed, e2);
     CHECK_EQ(e2.checksum, std::string("89abcdef0123"));
 
     // checksum 缺失 → 文件名兜底；字段缺失 → 默认值（map_id=0、hero=-1、version=0）。
@@ -1836,7 +1836,7 @@ static void test_save_backup_meta_entry() {
     legacy.size_bytes = 100;
     legacy.meta_json = "{}";
     Entry e3;
-    sb::entry_from_bundle("20260912-000000_s2_deadbeefcafe.qsb", legacy, e3);
+    sb::entry_from_bundle("20260912-000000_s2_deadbeefcafe.qol_save", legacy, e3);
     CHECK_EQ(e3.checksum, std::string("deadbeefcafe"));
     CHECK_EQ(e3.map_id, 0);
     CHECK_EQ(e3.hero_level, -1);
@@ -1879,7 +1879,7 @@ static void test_save_backup_meta_entry() {
 static void test_save_backup_entry_map_name() {
     namespace sb = save_backup;
     sb::Entry e;
-    e.file_name = "20260912-130000_s0_89abcdef0123.qsb";
+    e.file_name = "20260912-130000_s0_89abcdef0123.qol_save";
     e.size_bytes = 12345;
     e.source_slot = 0;
     e.export_time_ms = 1700000000000LL;
@@ -1894,14 +1894,14 @@ static void test_save_backup_entry_map_name() {
 
     // 缺省空串：entry_json 仍输出 "map_name":"" 字段
     sb::Entry empty;
-    empty.file_name = "x.qsb";
+    empty.file_name = "x.qol_save";
     empty.size_bytes = 0;
     empty.checksum = "000000000000";
     const std::string j2 = sb::entry_json(empty);
     CHECK(j2.find("\"map_name\":\"\"") != std::string::npos);
 
     // entry_from_bundle 不填充 map_name（Kotlin 启动期设置由 native 层注入；
-    // bundle 字节布局未引入新字段，旧 .qsb 解析仍向前兼容）。
+    // bundle 字节布局未引入新字段，旧 .qol_save 解析仍向前兼容）。
     const std::vector<uint8_t> plain(4, 0xAB);
     const std::string meta = sb::build_meta_json(0, 1, 30, 5, 0, 5, 0,
                                                  std::string(64, 'a'), std::string(),
@@ -1911,7 +1911,7 @@ static void test_save_backup_entry_map_name() {
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
     sb::Entry from_bundle;
-    sb::entry_from_bundle("x_s0_89abcdef0123.qsb", parsed, from_bundle);
+    sb::entry_from_bundle("x_s0_89abcdef0123.qol_save", parsed, from_bundle);
     CHECK_EQ(from_bundle.map_id, 30);
     CHECK(from_bundle.map_name.empty());  // bundle 解析不携带 map_name（native 内存表查表）
 }
@@ -1926,11 +1926,11 @@ static void test_save_backup_checksum_name() {
     CHECK(!sb::valid_checksum("89abcdef01234")); // 14 位
     CHECK(!sb::valid_checksum("89abcdefg123"));  // 非 hex
     std::string out;
-    CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qsb", out));
+    CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qol_save", out));
     CHECK_EQ(out, std::string("89abcdef0123"));
     CHECK(!sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.txt", out));
-    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qsb", out));  // 缺 `_` 前缀
-    CHECK(!sb::extract_checksum_from_name("short.qsb", out));
+    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol_save", out));  // 缺 `_` 前缀
+    CHECK(!sb::extract_checksum_from_name("short.qol_save", out));
 }
 
 static void test_save_backup_module_container() {

@@ -1,6 +1,6 @@
 // save_backup.cpp —— 存档管理器备份 feature（save-export 底层迁移自 Kotlin SaveBackupStore）。
 //
-// 职责：.qsb bundle（原版存档明文 + 模块 sidecar + 元信息）的导出/导入/列表/删除；
+// 职责：.qol_save bundle（原版存档明文 + 模块 sidecar + 元信息）的导出/导入/列表/删除；
 // 导出按 checksum 去重；导入为「原版 .dat 重加密 + sidecar 重定槽」两段事务，
 // 任一步失败从 save_backup/.rollback/ 还原。错误信封沿用 op_err（格式 A），
 // 错误串与迁移前 HTTP 契约逐字一致。
@@ -40,7 +40,7 @@ constexpr const char* kLogTag = "Inotia4SaveBackup";
 
 constexpr const char* kBackupDirName = "save_backup";
 constexpr const char* kRollbackDirName = ".rollback";
-constexpr const char* kBundleSuffix = ".qsb";
+constexpr const char* kBundleSuffix = ".qol_save";
 constexpr const char* kModuleSaveDirName = "module-saves";
 constexpr const char* kModuleSaveSuffix = ".module-save";
 constexpr const char* kLastGoodSuffix = ".last-good";
@@ -257,7 +257,7 @@ bool dir_contains_save_dat(const std::string& dir) {
     return found;
 }
 
-// 按文件名后缀 `_<checksum>.qsb` 定位备份；未命中返回空串。
+// 按文件名后缀 `_<checksum>.qol_save` 定位备份；未命中返回空串。
 std::string find_by_checksum(const std::string& dir, const std::string& checksum) {
     const std::string suffix = std::string("_") + checksum + kBundleSuffix;
     DIR* d = ::opendir(dir.c_str());
@@ -278,8 +278,8 @@ std::string find_by_checksum(const std::string& dir, const std::string& checksum
     return hit;
 }
 
-// 列出目录下全部 .qsb 文件名；目录不可读返回 false。
-bool list_qsb_files(const std::string& dir, std::vector<std::string>& out) {
+// 列出目录下全部 .qol_save 文件名；目录不可读返回 false。
+bool list_bundle_files(const std::string& dir, std::vector<std::string>& out) {
     DIR* d = ::opendir(dir.c_str());
     if (d == nullptr) return false;
     while (dirent* ent = ::readdir(d)) {
@@ -480,7 +480,7 @@ std::string save_backup_list_json() {
     std::string dir;
     if (!backup_dir(dir)) return s + "]}";
     std::vector<std::string> names;
-    if (!list_qsb_files(dir, names)) return s + "]}";
+    if (!list_bundle_files(dir, names)) return s + "]}";
     // 按文件名倒序（新在前），与迁移前 Kotlin 一致。
     std::sort(names.begin(), names.end(), std::greater<std::string>());
     bool first = true;

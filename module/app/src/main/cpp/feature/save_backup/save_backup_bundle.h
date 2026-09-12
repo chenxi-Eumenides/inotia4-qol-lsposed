@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-// save-backup 纯逻辑层：.qsb bundle 编解码、摘要/校验原语、极简 metaJson 字段提取。
+// save-backup 纯逻辑层：.qol_save bundle 编解码、摘要/校验原语、极简 metaJson 字段提取。
 // 零游戏/Android 依赖（纯 STL，编入 host 单测）；文件 IO 与游戏函数调用在 save_backup.cpp。
 //
 // bundle 布局 v1（大端，与 docs/development/features/save-backup.md §3 一致）：
@@ -27,7 +27,7 @@ struct Entry {
     long long export_time_ms = 0;
     int map_id = 0;
     // 地图名称（Kotlin 启动期下发的 MAPINFOBASE 表 map_id→text_0；启动前/未命中为空串）。
-    // 仅 entry_json 输出；bundle 字节布局未引入新字段，向后兼容旧 .qsb。
+    // 仅 entry_json 输出；bundle 字节布局未引入新字段，向后兼容旧 .qol_save。
     std::string map_name;
     int hero_level = -1;
     int hero_index = -1;
@@ -81,7 +81,7 @@ std::string entry_json(const Entry& e);
 
 // 从解析结果取 meta：bundle 头提供 source_slot/export_time/size；
 // metaJson 提供其余字段（缺省值与 Kotlin 一致）；checksum 以 metaJson 为权威、
-// 文件名 `_([0-9a-f]{12}).qsb` 后缀兜底。
+// 文件名 `_([0-9a-f]{12}).qol_save` 后缀兜底。
 void entry_from_bundle(const std::string& file_name, const ParsedBundle& p, Entry& out);
 
 // ---- 极简扁平 JSON 字段提取器（值只有数字与带引号字符串）----
@@ -91,7 +91,7 @@ bool json_find_string(const std::string& json, const char* key, std::string& out
 
 // ^[0-9a-f]{12}$
 bool valid_checksum(const std::string& value);
-// 从文件名后缀 `_([0-9a-f]{12}).qsb` 提取 checksum。
+// 从文件名后缀 `_([0-9a-f]{12}).qol_save` 提取 checksum。
 bool extract_checksum_from_name(const std::string& file_name, std::string& out);
 
 // ---- 模块 sidecar 容器（MSAV）最小操作（不解析 section）----
