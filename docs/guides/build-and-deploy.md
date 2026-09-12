@@ -140,14 +140,18 @@ curl -s http://<设备IP>:8088/api/ui/screen
    `output/inotia4-qol-lsposed-v<version>-release-unsigned.apk`。
 3. **生成 3 个 NPatch 集成版**：把 3 个游戏 APK 放入 `apk/game-apk/`，执行
    `scripts/patch-apk.sh <release 模块.apk>`（不传新包名，保留游戏原包名）；脚本遍历 `apk/game-apk/*.apk`，
-   逐个生成 `output/<游戏apk文件名>-npatched.apk`，再按下列发布名重命名：
-   - 原版：`艾诺迪亚4_v1.3.2_原版.apk` → 发布名 `inotia4-qol-original-npatched.apk`
-   - 大修版：`艾诺迪亚4_v1.3.2_盗版大修_<日期>.apk` → 发布名 `inotia4-qol-overhaul-<日期>-npatched.apk`
-   - monster 版：`Inotia4_v<游戏版本>_monster_<版本>.apk` → 发布名 `Inotia4_v<游戏版本>_monster_<版本>-npatched.apk`
+   逐个生成 `output/<游戏apk文件名>-npatched.apk`，再按下列发布名重命名（`<模块版本>` 取
+   release 模块 APK 的 `versionName`，带 `v` 前缀，如 `v0.7.3`；3 个 NPatch 发布名都必须带模块版本）：
+   - 原版：`艾诺迪亚4_v1.3.2_原版.apk` → 发布名 `inotia4-qol-original-v<模块版本>-npatched.apk`
+   - 大修版：`艾诺迪亚4_v1.3.2_盗版大修_<日期>.apk` → 发布名 `inotia4-qol-overhaul-<日期>-v<模块版本>-npatched.apk`
+   - monster 版：`Inotia4_v<游戏版本>_monster_<版本>.apk` → 发布名 `Inotia4_v<游戏版本>_monster_<版本>-v<模块版本>-npatched.apk`
+   - 示例（模块 `v0.7.3`）：`inotia4-qol-original-v0.7.3-npatched.apk`、
+     `inotia4-qol-overhaul-20260830-v0.7.3-npatched.apk`、`Inotia4_v1.3.2_monster_v25-v0.7.3-npatched.apk`
 4. **推送 GitHub**：`git push github`。
 5. **发布 Release**：`gh release create v<version> <4 个 APK> --title v<version> --notes-file <说明>`；
    说明覆盖「上一个版本 → 当前版本」的全部改动（新增 / 优化 / 修复 / 发布文件 / 致谢）。
-6. **附件命名（强制）**：GitHub CLI 上传的附件名必须全 ASCII、不得含中文；先核对上一次发布
+6. **附件命名（强制）**：GitHub CLI 上传的附件名必须全 ASCII、不得含中文；3 个 NPatch 附件名必须
+   带模块版本（`...-v<模块版本>-npatched.apk`），与 release 模块 APK 的版本一致；先核对上一次发布
    （`gh release view <上一个 tag> --json assets`）的命名再上传。
 > 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。已验证不可行的瘦身路径：预处理权限 + `-l 0` 虽能保住重叠（52MB），但 NPatch 重写 zip 时会把 STORED 资源重压缩为 DEFLATED，游戏引擎 mmap 直读崩溃（`SGL_Texture::FromResource`，Scudo misaligned pointer）；`-l 1` 以上又必须读取未修改原包的原始签名，预处理输入会报 `get original signature failed`。除非 NPatch 上游提供「删除指定权限」或「保留 STORED」选项，92MB 是当前唯一稳定形态。
 >
