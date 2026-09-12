@@ -1,7 +1,7 @@
 # Android 工程规则
 
-- 构建优先使用项目根目录的 `scripts/build-debug.sh`，它会自动发现 `.gradle/wrapper/dists/` 中的 Gradle 8.11.1 缓存。
-- 正式版使用项目根目录的 `scripts/build-release.sh`；它执行 `assembleRelease`，读取 `versionName`，并将当前未配置签名的 Release APK 复制为 `output/inotia4-qol-lsposed-v<version>-release-unsigned.apk`。
+- 日常构建使用项目根目录的 `scripts/build-debug.sh`，它会自动发现 `.gradle/wrapper/dists/` 中的 Gradle 8.11.1 缓存；提交时不改版本号。
+- `scripts/build-release.sh` 仅在用户明确要求 release 时使用；它执行 `assembleRelease`，读取 `versionName`，并将当前未配置签名的 Release APK 复制为 `output/inotia4-qol-lsposed-v<version>-release-unsigned.apk`。
 - Debug 构建会将 APK 复制为 `output/inotia4-qol-lsposed-debug-<sha256前12位>.apk`，并只保留最新 3 份 Debug APK；Release 构建只保留最新 2 份 Release APK。
 - 禁止直接执行 `./gradlew`、系统 `gradle` 或手写 Gradle 二进制路径；需要传递 Gradle 参数时追加到对应构建脚本末尾。
 - 不要根据 `./gradlew` 查找 `tools/gradle-8.11.1-bin.zip` 的失败结果判断 Gradle 缺失；当前 Wrapper 的本地压缩包地址不是缓存目录。
