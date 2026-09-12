@@ -1167,6 +1167,24 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   button/data/orig 与物品 category，日志 `extension desc hook installed/skip ...` 与点击时
   `extension desc execute ...` 成对。此项为独立取证任务，不阻塞 R-63。
 
+### R-65 S2 写侧回写门控必须与读侧同源（堆叠上限驱动，扩展背包无关）
+
+- **规则一句话**：S2 写侧回写总门控 `s2_writeback_gate` 必须与读侧 getter 门控同源——
+  `stack_limit_enabled()` 一开即需写侧进位；扩展背包开关不得作为 S2 数量写侧的必要条件。
+  模式统一经纯函数 `stack_codec::writeback_needed(extension_bag_enabled, stack_limit_enabled)`
+  进入，禁止在写点单用 `extension_bag_enabled()` 判定。
+- **为什么**：读侧 H-17 `get_cumulate_count_wrapper` 按 `stack_limit_enabled()` 解码 S2
+  全量（`stage4_get_cumulate_count(..., stack_limit_enabled())`），写侧若以
+  `extension_bag_enabled()` 门控，则「堆叠上限开 + 扩展背包关」配置下读按 `128a+b`、
+  写只落低 7 位 b，跨 127 的数量增写被截断（真机复现：两组 99 拖拽合并，`198=128+70`
+  只写入 b=70，读回 70）。
+- **典型破坏方式**：以扩展背包开关代替堆叠上限开关作为 S2 写侧条件；只在「扩展开」配置
+  回归，漏测「扩展关 + 堆叠开」组合；影响同门控的全部写点（`move_item_wrapper`、
+  `save_item_direct_wrapper`、`consume_item_wrapper`、`remove_item_data_wrapper`）。
+- **验证锚**：Host `stage4_hook_tests::test_s2_writeback_gate` 断言
+  (ext,stack)∈{(false,false)=false,(false,true)=true,(true,false)=true,(true,true)=true}；
+  真机 `VM-49`（堆叠开+扩展关 99+99→198，切换配置读回一致）。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到

@@ -549,6 +549,15 @@ static void test_vanilla_sell_takeover() {
     CHECK(vanilla_sell_money(0, 10u, &price) && price == 0);
 }
 
+// S2 写侧回写门控必须与读侧 getter 门控（stack_limit_enabled）对齐：
+// 堆叠上限开启即需要写侧进位，与扩展背包开关无关；扩展背包开启保持既有行为。
+static void test_s2_writeback_gate() {
+    CHECK(!stack_codec::writeback_needed(false, false));
+    CHECK(stack_codec::writeback_needed(false, true));   // 堆叠开 + 扩展关：修复点
+    CHECK(stack_codec::writeback_needed(true, false));
+    CHECK(stack_codec::writeback_needed(true, true));
+}
+
 int main() {
     test_queries();
     test_original_only_queries();
@@ -562,6 +571,7 @@ int main() {
     test_object_operations();
     test_unequip_to_inven();
     test_install_transaction();
+    test_s2_writeback_gate();
     std::printf("stage4_hook_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

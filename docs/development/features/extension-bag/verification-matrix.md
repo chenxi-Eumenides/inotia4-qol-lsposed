@@ -696,6 +696,20 @@
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-48`：①原版袋 `use_item`→`{"ok":true}`、徽章消失、佣兵加入；②扩展袋（bag 6..10）同上；③槽满→`mercenary slots full` 且不消耗；④堆叠 ≥2 徽章→只消耗一份（记录原版删堆语义）；⑤存档不可写→`save busy`。
 - **证据锚类型**：API 真机 + 源码；堆叠边界需 stage-5 证据。
 
+### VM-49 S2 写侧回写门控与读侧对齐（R-65）
+
+- **状态**：已解决（2026-09-12 真机验证写侧门控；debug APK `44d9d78e4ad5`）。日志锚：扩展关+堆叠开，`move_item` 合并两组 99 秘银（bag0 slot1→slot2）→ 目标槽 `count=198`，原生日志 `S2 writeback MoveItem merge target=0x... 99+99->198 field=0x8c406400`；切堆叠关读 70（b 视图，R-47 决策 b），重开读 198。UI 拖拽路径与 API 路径共用 `move_item_wrapper`（`fn_inven_move_item` 同入口），拖拽直点用例可复测补记。
+- **操作**：堆叠上限开、拖拽合并开、扩展背包关；原版袋内准备两组同身份可堆叠物品（如 99+99），拖动一组到另一组；随后切堆叠关再切回，核对数量与 `+0x10` 位段。
+- **设备/APK/快照前置**：真机 `<设备序列号>`、debug APK SHA-256 `44d9d78e4ad5...`；配置 stack_limit=on、move_merge=on、extension_bag=off；记录两组物品 bag/slot/field。
+- **原版链(VMA)**：`UIEquip_InvenItemControlEventProc`（drop）→ `INVEN_MoveItem`（合并写 b）→ module `move_item_wrapper`（S2 采集/回写）。
+- **扩展接管点(文件:函数)**：`feature/patch/game_patch_move_merge.inc:ui_equip_inven_item_proc_wrapper` → `native_inventory_hook.cpp:move_item_wrapper` → `s2_writeback_gate`/`s2_capture_merge`/`s2_merge_writeback`。
+- **共享状态读写**：读 `ITEM_GetCumulateCount`（`stack_limit_enabled()` 视图）；写 `+0x10` bits22–31（`effective_write_count(..., stack_limit_enabled())`）。
+- **必须保持的不变式(引 R-xx)**：写侧门控 = `writeback_needed(ext, stack)`，与读侧同源；非 count-encoded 不触碰 bits22–24；扩展开+堆叠关行为逐位不变（R-45、R-46、R-47、R-49、R-65）。
+- **失败语义**：原版未按预测写 b（`post != pre` 且不等于预测）或目标槽对象被替换/释放 → fail-closed 跳过回写并记 `S2 writeback ... mismatch skip`，不猜测。
+- **Host 测试名(现有或「缺口」)**：`stage4_hook_tests::test_s2_writeback_gate`（已落地，真值表四组合）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-49`：①扩展关+堆叠开，两组 99 拖拽合并→显示/查询 198（日志 `S2 writeback MoveItem merge ... 99+99->198`）；②切堆叠关→读 70（b 视图，R-47 决策 b 既定语义），再切回→198；③扩展开+堆叠关同操作与原版逐位一致；④非可堆叠（装备/宝石）合并不触碰 bits22–24。
+- **证据锚类型**：真机必需 + 源码；不能由 Host 单独通过。
+
 ## 2.1 VM-B 原版基线行为包
 
 > VM-B01～VM-B04 对应规则册 B-01～B-04 的原版基线。前置条件：扩展背包已启用；每张
@@ -855,6 +869,7 @@
 | R-62 | VM-46 | `kLedgerCapacity` 32→128、`handover_to_inventory` 交接即回收槽位（`kNone` + generation 递增）、`Audit.inventory_owned` 改为累计 `total_handed_over`；Host `test_ownership_ledger` 覆盖。真机归 VM-46（无 `ownership ledger exhausted`、ext→orig 后仍可拖动）。 |
 | R-63 | VM-47 / VM-48 | H-24 函数级 Hook `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `extension_use_mercenary_seal`（原版顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗经 H-04）；API `data_op_use_item`/`extension_bag_api_use_item_impl` 对 `IsMercenarySeal` 豁免 `fn_is_use` 并走 `MakeMercenary`。Host 缺口 `test_mercenary_seal_takeover_token`；真机归 VM-47（UI）/VM-48（API）。 |
 | R-64 | 取证任务（无 VM 卡） | 详情按钮观察 hook 的面板偏移/去重漂移取证（真机 dump 11 偏移 button/data/orig + 物品 category）；独立任务，不阻塞 R-63。 |
+| R-65 | VM-49 | `s2_writeback_gate` 改经 `stack_codec::writeback_needed(ext, stack)`，写侧门控与读侧 `stack_limit_enabled()` 同源；Host `stage4_hook_tests::test_s2_writeback_gate` 断言四组合真值表；真机 VM-49（堆叠开+扩展关 99+99→198）。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 

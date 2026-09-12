@@ -157,12 +157,14 @@ bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
     return false;
 }
 
-// S2 写侧回写总门控（R-46 fail-closed）：模块启用 + 对象有效 + count-encoded。
-// kUnknown 与非可堆叠（装备 marker bits25–31、宝石选项 bits18–23、袋容量
-// bits0–24）一律返回 false，调用方保持原版行为；堆叠上限关闭态按 R-47 决策 b
-// 以模式视图（b 域）参与取证与回写，effective_write_count 只写 b、保留 a。
+// S2 写侧回写总门控（R-46 fail-closed + R-47 门控对齐）：堆叠上限开启即需要写侧
+// 进位（与读侧 getter 门控 stack_limit_enabled 对齐，见 stack_codec::writeback_needed）；
+// 对象有效且 count-encoded。kUnknown 与非可堆叠（装备 marker bits25–31、宝石选项
+// bits18–23、袋容量 bits0–24）一律返回 false，调用方保持原版行为；堆叠上限关闭态按
+// R-47 决策 b 以模式视图（b 域）参与取证与回写，effective_write_count 只写 b、保留 a。
 bool s2_writeback_gate(void* item) {
-    return item != nullptr && extension_bag_enabled() &&
+    return item != nullptr &&
+           stack_codec::writeback_needed(extension_bag_enabled(), stack_limit_enabled()) &&
            item_count_encoding(item) == stack_codec::CountEncoding::kEncoded;
 }
 

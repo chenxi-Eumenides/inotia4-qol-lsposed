@@ -120,4 +120,12 @@ constexpr uint32_t effective_view_count(uint32_t canonical_count, bool enabled) 
     return enabled ? canonical_count : (canonical_count & ((1u << kS2BitsB) - 1u));
 }
 
+// S2 写侧回写总门控：堆叠上限开启即需要 S2 全量写侧进位——必须与读侧 getter 门控
+// `effective_read_count(..., stack_limit_enabled())` 对齐，否则会出现「读按 S2 全量、
+// 写只落 b 段」的不对称（99+99 被截断为 70）。
+// 扩展背包开启时保持既有行为：关闭态下 effective_write_count 只写 b 段，回写幂等。
+constexpr bool writeback_needed(bool extension_bag_enabled, bool stack_limit_enabled) {
+    return extension_bag_enabled || stack_limit_enabled;
+}
+
 }  // namespace stack_codec
