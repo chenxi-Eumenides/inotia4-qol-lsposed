@@ -8,7 +8,8 @@ usage() {
 
 行为：
   对 apk/game-apk/ 下的每个游戏 APK 生成一个集成 APK，输出到
-  output/<游戏apk文件名>-npatched.apk（LSPatch JAR 则为 -lspatched.apk）。
+  output/<游戏apk文件名>-npatched[-v<模块版本>].apk（LSPatch JAR 则为 -lspatched[-v<模块版本>]）。
+  模块版本从 release 模块 APK 文件名 `...-vX.Y.Z-...` 提取；debug 包无版本则不追加。
   - 提供「新包名」时用 NPatch --newpackage 修改输出 applicationId；不提供则保留原包名。
   - 默认覆盖已有输出（-f）；生成前先清理 output/ 下旧的 NPatch 产物（*npatch*.apk）。
   - 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks）签名输出，使集成版与
@@ -92,6 +93,13 @@ if [[ ! -f "$module_apk" ]]; then
 fi
 module_apk=$(realpath "$module_apk")
 
+# 模块版本：从 release 模块 APK 文件名（...-vX.Y.Z-...）提取，追加在 -npatched 之后；
+# debug 包文件名无版本，则不追加，输出仍为 <stem>-npatched.apk。
+module_version=
+if [[ "$(basename "$module_apk")" =~ -v([0-9]+\.[0-9]+\.[0-9]+)- ]]; then
+    module_version="v${BASH_REMATCH[1]}"
+fi
+
 if [[ ! -f "$lspatch_jar" ]]; then
     printf 'LSPatch JAR 不存在：%s\n' "$lspatch_jar" >&2
     printf '可用 --lspatch-jar 指定下载的版本。\n' >&2
@@ -172,6 +180,7 @@ fi
 printf '模块 APK：%s\n' "$module_apk"
 printf 'LSPatch：%s\n' "$lspatch_jar"
 printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
+[[ -n "$module_version" ]] && printf '模块版本：%s\n' "$module_version"
 [[ -n "$newpackage" ]] && printf '新包名：%s\n' "$newpackage"
 
 failed=0
@@ -179,7 +188,7 @@ generated=()
 for target_apk in "${game_apks[@]}"; do
     target_name=$(basename "$target_apk")
     target_stem=${target_name%.apk}
-    output_apk="$repo_root/output/${target_stem}-${patch_suffix}.apk"
+    output_apk="$repo_root/output/${target_stem}-${patch_suffix}${module_version:+-$module_version}.apk"
     work_dir=$(mktemp -d "$repo_root/.tmp/lspatch-apk.XXXXXX")
 
     printf '\n===== 处理：%s\n' "$target_name"
