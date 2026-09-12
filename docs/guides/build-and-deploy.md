@@ -27,7 +27,7 @@
 
 | 程序 | 用途 | 状态 |
 |---|---|---|
-| Gradle | 命令行构建模块 APK | ✅ **8.11.1（唯一版本，v0.4.30 固定）**：完整发行版缓存于项目隐藏目录 `.gradle/wrapper/dists/`，统一通过 `scripts/build-debug.sh` 自动发现和调用；不要求 `tools/` 保存 zip。⚠️ 系统 Gradle 版本不作为本项目构建入口 |
+| Gradle | 命令行构建模块 APK | ✅ **8.11.1（唯一版本，v0.4.30 固定）**：完整发行版缓存于项目隐藏目录 `.gradle/wrapper/dists/`，统一通过 `scripts/build-debug.sh` / `scripts/build-release.sh` 自动发现和调用；不要求 `tools/` 保存 zip。⚠️ 系统 Gradle 版本不作为本项目构建入口 |
 | Android SDK platform | 提供 android.jar（`/opt/android-sdk/platforms/android-34/`） | ✅ android-34 |
 | Android SDK build-tools | 编译/打包 Android 模块 | ✅ 37.0.0 |
 | **Android NDK** | 编译 native 数据访问层 | ✅ **r26d（26.3.11579264）**，**项目内 `tools/ndk/`**（瘦身至 2.0G，仅 ARM ABI） |
@@ -70,34 +70,36 @@
 # ① 构建模块（workdir：项目根目录；脚本自动发现隐藏目录 .gradle/ 中的 Gradle 8.11.1）
 # 禁止直接执行 ./gradlew、系统 gradle 或手写缓存路径。
 scripts/build-debug.sh
-# 默认使用项目缓存离线构建；如需传递额外 Gradle 参数，直接追加参数即可：
+# 无参数时默认追加 --offline（仅用项目缓存）；传递额外 Gradle 参数时脚本不再自动追加 --offline：
 scripts/build-debug.sh --offline
 # 正式版构建并复制为 output/inotia4-qol-lsposed-v<version>-release-unsigned.apk
 scripts/build-release.sh
 # Debug 产物 → output/inotia4-qol-lsposed-debug-<YYMMDDHHMM>-<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
 # Release 产物 → output/inotia4-qol-lsposed-v<version>-release-unsigned.apk；版本号来自 build.gradle.kts，脚本只保留最新 2 份 Release APK
 # 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
-# 命名格式固定：inotia4-qol-lsposed-vX.Y.Z.apk（如 v0.4.56）
+# 命名格式固定：inotia4-qol-lsposed-vX.Y.Z-release-unsigned.apk（如 v0.7.0）
 # 多目标包名：逗号分隔，同时写入 LSPosed scope.list 和模块运行时过滤。
 scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.com2us.inotia4.qol.patched
 
-# ⑥ 按需生成集成版（原始游戏 APK + 本模块 APK → 单独 APK）
+# ⑥ 按需生成集成版（本模块 APK → apk/game-apk/ 下各游戏 APK 的集成包）
 # 默认使用 NPatch（tools/lspatch/npatch-v1.0.7-741-release.jar，JAR 自带 BouncyCastle，脚本自动注册 BKS provider）。
-scripts/patch-apk.sh <原始游戏.apk> <模块.apk>
-# 默认输出：output/<原始文件名>-npatched.apk（LSPatch JAR 则为 -lspatched.apk）；已有文件需显式 --force 覆盖。
-# NPatch 生成前会自动删除 output/ 下旧 NPatch 产物（*npatch*.apk，不含本次输出），保持输出目录干净。
+# 用法：scripts/patch-apk.sh [选项] <模块 APK> [新包名]
+# 脚本遍历 apk/game-apk/ 下的每个 .apk（不含 history/ 子目录），逐个生成
+# output/<游戏apk文件名>-npatched.apk（LSPatch JAR 则为 -lspatched.apk）。
+scripts/patch-apk.sh <模块.apk>
+# 默认覆盖已有输出；生成前先清理 output/ 下旧 NPatch 产物（*npatch*.apk），保持输出目录干净。
 # 使用 LSPatch（v0.6 / v1.2）：
-scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar \
-    <原始游戏.apk> <模块.apk>
-# NPatch 支持修改输出 applicationId；模块构建时需把新包名加入 targetPackages：
-scripts/patch-apk.sh --newpackage com.com2us.inotia4.qol.patched <原始游戏.apk> <模块.apk>
+scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar <模块.apk>
+# NPatch 支持修改输出 applicationId：第二个位置参数传新包名；模块构建时需把新包名加入 targetPackages：
+scripts/patch-apk.sh <模块.apk> com.com2us.inotia4.qol.patched
 # signature bypass 按需显式设置；不要未经验证启用 level 3。
-scripts/patch-apk.sh --sigbypasslv 2 <原始游戏.apk> <模块.apk>
+scripts/patch-apk.sh --sigbypasslv 2 <模块.apk>
 
 # ② 部署（覆盖安装，LSPosed 启用状态按包名保留）
 # 默认操作单台真机（<设备IP>）；多设备时用 -s <序列号> 区分。
-# 当前构建命令的实际产物是 app/build/outputs/apk/debug/app-debug.apk。
-adb -s <设备序列号> install -r app/build/outputs/apk/debug/app-debug.apk
+# 当前构建命令的实际产物是 module/app/build/outputs/apk/debug/app-debug.apk
+# （build-debug.sh 另复制一份到 output/inotia4-qol-lsposed-debug-<YYMMDDHHMM>-<sha256前12位>.apk）。
+adb -s <设备序列号> install -r module/app/build/outputs/apk/debug/app-debug.apk
 
 # ③ 重启游戏（让 Xposed 重新注入，模块更新生效的必需步骤）
 # 按包名 force-stop 即可，**无需 pid**；monkey 启动与桌面点击等价
@@ -121,11 +123,11 @@ curl -s http://<设备IP>:8088/api/ui/screen
 
 > `targetPackages` 默认只有原版游戏包名。需要让同一个 LSPosed 模块覆盖多个包时，使用
 > `-PtargetPackages=pkg.one,pkg.two`；构建会生成多行 `META-INF/xposed/scope.list`，并让运行时只在这些包中初始化。
-> 包名必须是合法 Android applicationId。NPatch 的 `--newpackage` 只改输出 APK 的 manifest/applicationId，原游戏 dex 中的类名和资源 ID 不变；因此新包名必须同时加入此参数并重新构建模块，不能只修改 APK 文件名。该游戏的资源表仍保留原资源 namespace，模块已在改包名进程中兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
+> 包名必须是合法 Android applicationId。NPatch 改 applicationId（`patch-apk.sh` 的第二个位置参数）只改输出 APK 的 manifest/applicationId，原游戏 dex 中的类名和资源 ID 不变；因此新包名必须同时通过 `-PtargetPackages` 加入模块构建并重新构建，不能只修改 APK 文件名。该游戏的资源表仍保留原资源 namespace，模块已在改包名进程中兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
 
 > 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
 
-> 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用 NPatch 内置证书重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。`--newpackage` 流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
+> 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用 NPatch 内置证书重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。指定新包名的流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
 
 ### 3.2 Release 流程（仅用户明确要求时执行）
 
@@ -136,7 +138,9 @@ curl -s http://<设备IP>:8088/api/ui/screen
    仅用户明确才升小版本 `0.1.0`。
 2. **构建模块 Release APK**：`scripts/build-release.sh`，产物
    `output/inotia4-qol-lsposed-v<version>-release-unsigned.apk`。
-3. **生成 3 个 NPatch 集成版**（`scripts/patch-apk.sh <游戏.apk> <模块.apk>`，输入在 `apk/game-apk/`）：
+3. **生成 3 个 NPatch 集成版**：把 3 个游戏 APK 放入 `apk/game-apk/`，执行
+   `scripts/patch-apk.sh <release 模块.apk>`（不传新包名，保留游戏原包名）；脚本遍历 `apk/game-apk/*.apk`，
+   逐个生成 `output/<游戏apk文件名>-npatched.apk`，再按下列发布名重命名：
    - 原版：`艾诺迪亚4_v1.3.2_原版.apk` → 发布名 `inotia4-qol-original-npatched.apk`
    - 大修版：`艾诺迪亚4_v1.3.2_盗版大修_<日期>.apk` → 发布名 `inotia4-qol-overhaul-<日期>-npatched.apk`
    - monster 版：`Inotia4_v<游戏版本>_monster_<版本>.apk` → 发布名 `Inotia4_v<游戏版本>_monster_<版本>-npatched.apk`
@@ -147,7 +151,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
    （`gh release view <上一个 tag> --json assets`）的命名再上传。
 > 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。已验证不可行的瘦身路径：预处理权限 + `-l 0` 虽能保住重叠（52MB），但 NPatch 重写 zip 时会把 STORED 资源重压缩为 DEFLATED，游戏引擎 mmap 直读崩溃（`SGL_Texture::FromResource`，Scudo misaligned pointer）；`-l 1` 以上又必须读取未修改原包的原始签名，预处理输入会报 `get original signature failed`。除非 NPatch 上游提供「删除指定权限」或「保留 STORED」选项，92MB 是当前唯一稳定形态。
 >
-> LSPatch 集成模式会把模块嵌入目标 APK，生成的 APK 不需要 LSPosed 或 LSPatch Manager 常驻；更换模块必须重新 patch。脚本只接受 `output/` 下的输出路径，并在完成后打印 SHA-256。
+> LSPatch 集成模式会把模块嵌入目标 APK，生成的 APK 不需要 LSPosed 或 LSPatch Manager 常驻；更换模块必须重新 patch。脚本输出固定写入 `output/`，并在完成后打印每个产物的 SHA-256 和成功/失败汇总。
 >
 > 上游 JingMatrix/LSPatch 当前最新稳定版为 **v1.2**（2026-08-23），发行页提供 `lspatch-v1.2-487-release.jar`。v1.0 起运行时基于 Vector 并使用 modern libxposed API 102；本项目模块按 API 101 编译，因此脚本支持通过 `--lspatch-jar` 试用新版本，但不自动覆盖项目内 v0.6。正式切换前必须验证模块加载、native 库加载和 API 服务启动。
 >
