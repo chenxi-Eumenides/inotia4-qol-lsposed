@@ -238,6 +238,8 @@ bool bridge_init() {
      fn_item_is_no_sell = reinterpret_cast<IntIntFn>(g_base + fn_resolve("F_ITEMDATABASE_IS_NO_SELL_VMA", F_ITEMDATABASE_IS_NO_SELL_VMA));
     fn_item_get_ability_level = reinterpret_cast<ItemGetAbilityLevelFn>(g_base + fn_resolve("F_ITEM_GET_ABILITY_LEVEL_VMA", F_ITEM_GET_ABILITY_LEVEL_VMA));
     fn_item_get_buy_price = reinterpret_cast<ItemGetBuyPriceFn>(g_base + fn_resolve("F_ITEM_GET_BUY_PRICE_VMA", F_ITEM_GET_BUY_PRICE_VMA));
+    fn_item_system_get_option_value = reinterpret_cast<ItemSystemGetOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_OPTION_VALUE_VMA));
+    fn_item_system_get_jewel_option_value = reinterpret_cast<ItemSystemGetJewelOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA));
     fn_inven_find_save_slot = reinterpret_cast<InvenFindSaveSlotFn>(g_base + fn_resolve("F_INVEN_FIND_SAVE_SLOT_VMA", F_INVEN_FIND_SAVE_SLOT_VMA));
     fn_inven_save_item = reinterpret_cast<InvenSaveItemFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA));
     fn_inven_save_item_direct = reinterpret_cast<InvenSaveItemDirectFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA));

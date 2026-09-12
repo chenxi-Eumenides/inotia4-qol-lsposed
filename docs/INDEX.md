@@ -44,6 +44,8 @@
 
 存档管理器（save-backup）：`development/features/save-backup.md`（`.qol_save` 备份格式、导出/导入事务与跨槽/跨设备语义）。
 
+属性显示范围（attribute-range-display）：`development/features/attribute-range-display.md`（宝石/装备详情按随机属性百分位着色的目标、结论与可行性测试记录；装备词缀范围与渲染注入已真机验证，未实现）。
+
 ### `reference/`：共享参考
 
 面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。

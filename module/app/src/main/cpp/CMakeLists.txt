@@ -48,6 +48,8 @@ add_library(gamebridge SHARED
     feature/extension_bag/extension_bag_geometry.cpp
     feature/extension_bag/extension_bag_api.cpp
     feature/extension_bag/extension_bag_logging.cpp
+    feature/attribute_range/attribute_range.cpp
+    feature/attribute_range/game_ui_attr_range.cpp
 )
 
 find_library(log-lib log)

@@ -44,3 +44,13 @@ target_include_directories(stage4_hook_tests PRIVATE
 )
 target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
 add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
+
+add_executable(attribute_range_tests
+    test_attribute_range.cpp
+    ${CPP_DIR}/feature/attribute_range/attribute_range.cpp
+)
+target_include_directories(attribute_range_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(attribute_range_tests PRIVATE cxx_std_17)
+add_test(NAME attribute_range_tests COMMAND attribute_range_tests)

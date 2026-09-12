@@ -1,5 +1,6 @@
 #include "gamebridge_internal.h"
 #include "feature/patch/native_inventory_hook.h"
+#include "feature/attribute_range/game_ui_attr_range.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -29,6 +30,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     bool ok = bridge_init();
     if (ok) {
         inventory_native_hook_install_if_ready();
+        attr_range_ui_install_if_ready();
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
         settings_ui_start_auto_inject();
     }

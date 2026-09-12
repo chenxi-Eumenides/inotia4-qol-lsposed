@@ -126,6 +126,8 @@ extern ItemGetSellPriceFn fn_item_get_sell_price;
 extern IntIntFn fn_item_is_no_sell;
 extern ItemGetAbilityLevelFn fn_item_get_ability_level;
 extern ItemGetBuyPriceFn fn_item_get_buy_price;
+extern ItemSystemGetOptionValueFn fn_item_system_get_option_value;
+extern ItemSystemGetJewelOptionValueFn fn_item_system_get_jewel_option_value;
 extern InvenFindSaveSlotFn fn_inven_find_save_slot;
 extern InvenSaveItemFn fn_inven_save_item;
 extern InvenSaveItemDirectFn fn_inven_save_item_direct;

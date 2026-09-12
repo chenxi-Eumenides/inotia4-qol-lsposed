@@ -456,6 +456,14 @@ constexpr uintptr_t F_REMOVE_ITEM_VMA = 0x104044;      // int (void*) INVEN_Remo
 constexpr uintptr_t F_ITEM_GET_PRICE_VMA = 0x109f50;   // int (void*) ITEM_GetPrice 读静态表价格（item+8 字段 + ITEM_GetAbilityLevel）
 constexpr uintptr_t F_ITEM_GET_SELL_PRICE_VMA = 0x10a500; // int (void*) ITEM_GetSellPrice 原版最终出售价格
 constexpr uintptr_t F_ITEM_GET_ABILITY_LEVEL_VMA = 0x1091f4; // int (void*) ITEM_GetAbilityLevel 能力等级（所需等级）：非损坏 → ITEMSYSTEM_GetAbilityLevel(category)（ITEMCLASSBASE 记录+3 int8）；损坏 → 直读同偏移（0x1091f4 反汇编）
+// ---- 属性显示范围（attribute-range-display）----
+constexpr uintptr_t F_ITEMSYSTEM_GET_OPTION_VALUE_VMA = 0x109020;      // int (int optionIndex, int level, int flag, void* item) 词缀值：CAL 公式 + 修正后在 [base/2, base] 掷一次随机（0x109020 反汇编）
+constexpr uintptr_t F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA = 0x108f90; // int (int type, void* item) 宝石值：按 (类别,类型) 算 X 后在 [X, 2X] 掷一次随机（0x108f90 反汇编）
+constexpr uintptr_t F_MATH_GET_RANDOM_VMA = 0xa8bcc;                   // int (int min, int max) 闭区间随机数（0xa8bcc 反汇编）
+constexpr uintptr_t F_UIDESC_ADD_OPTION_VMA = 0xb343c;                 // void (void* builder, int type, int optIdx, int value) 详情选项行：写 "$<码>…$B" 内联颜色串（0xb343c 反汇编）
+constexpr uintptr_t F_UIDESC_MAKE_ITEM_VMA = 0xb36a0;                  // 物品详情构造入口；x0=item（0xb36a0 反汇编）
+constexpr uintptr_t G_UIDESC_TEXT_BUF_VMA = 0x303dc0;                  // UIDesc 详情文本缓冲基址（0xb36a0 起始 memset 目标，容量 0x200）
+constexpr size_t G_UIDESC_TEXT_BUF_SIZE = 0x200;                       // 详情文本缓冲容量（0xb36a4 mov x2,#0x200）
 constexpr uintptr_t F_ITEM_GET_BUY_PRICE_VMA = 0x10a200;  // int (void*) 买入价（ITEM_GetPrice + MERCENARYGROUPSKILLSYSTEM 折扣系数）
   constexpr uintptr_t F_INVEN_FIND_SAVE_SLOT_VMA = 0x103960;  // int (void*, int8_t*) 查找空槽并写入物理槽编码
 constexpr uintptr_t F_INVEN_SAVE_ITEM_VMA = 0x104528;   // int (void*, void*) 物品存入背包槽
@@ -773,6 +781,12 @@ using PutJewelFn = int (*)(void*, void*);
 using IsJewelFn = int (*)(int32_t);
 using EnchantItemFn = int (*)(void*, int32_t);
 using IsEnchantScrollFn = int (*)(int32_t);
+// 属性显示范围（attribute-range-display）
+using ItemSystemGetOptionValueFn = int (*)(int option_index, int level, int flag, void* item); // ITEMSYSTEM_GetOptionValue
+using ItemSystemGetJewelOptionValueFn = int (*)(int type, void* item);                          // ITEMSYSTEM_GetJewelOptionValue
+using MathGetRandomFn = int (*)(int min, int max);                                              // MATH_GetRandom
+using UiDescAddOptionFn = void (*)(void* builder, int type, int option_index, int value);       // UIDesc_AddOption
+using UiDescMakeItemFn = uintptr_t (*)(void* item, void* character, void* arg2);                // UIDesc_MakeItem（x0 透传）
 using SaveIsOkFn = int (*)();
 using CharInitializeStatusFn = void (*)(void*);
 using CharInitializeSkillFn = void (*)(void*);
