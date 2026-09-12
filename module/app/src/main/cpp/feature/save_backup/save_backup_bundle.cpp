@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
 namespace save_backup {
 namespace {
@@ -412,13 +413,78 @@ bool base64_decode(const std::string& in, std::vector<uint8_t>& out) {
     return true;
 }
 
+// ---- 个人仓库段编解码 ----
+
+bool valid_warehouse_suffix(const std::string& s) {
+    if (s.size() < 5 || s.size() > kMaxWarehouseSuffixBytes) return false;
+    if (s.compare(0, 5, ".wh4-") != 0) return false;
+    if (s.find("..") != std::string::npos) return false;
+    // 字符白名单为 ASCII 字母数字 + '.' + '-'：既覆盖 `.wh4-`/`.bak` 等固定字面量
+    //（含 hex 之外的 w/h/k），又排除路径分隔符与其它控制字符；`..` 已在上面单独拒绝。
+    for (char c : s) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+                        (c >= 'A' && c <= 'Z') || c == '.' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+std::vector<uint8_t> encode_warehouse(const std::vector<WarehouseFile>& files) {
+    // 空列表编码为空 blob：无仓库时 bundle 与旧版 checksum 逐字节一致（硬约束）。
+    if (files.empty()) return std::vector<uint8_t>();
+    std::vector<uint8_t> out;
+    wb16(out, static_cast<uint16_t>(files.size()));
+    for (const WarehouseFile& f : files) {
+        wb16(out, static_cast<uint16_t>(f.suffix.size()));
+        out.insert(out.end(), f.suffix.begin(), f.suffix.end());
+        wb32(out, static_cast<uint32_t>(f.data.size()));
+        out.insert(out.end(), f.data.begin(), f.data.end());
+    }
+    return out;
+}
+
+bool decode_warehouse(const uint8_t* data, size_t size, std::vector<WarehouseFile>& out) {
+    out.clear();
+    if (size == 0) return true;  // 空 blob = 无仓库文件
+    if (data == nullptr || size < 2) return false;
+    const uint16_t count = be16(data);
+    if (count > kMaxWarehouseFiles) return false;
+    size_t off = 2;
+    std::vector<WarehouseFile> files;
+    files.reserve(count);
+    for (uint16_t i = 0; i < count; ++i) {
+        if (off + 2 > size) return false;
+        const uint16_t suffix_len = be16(data + off);
+        off += 2;
+        if (suffix_len == 0 || suffix_len > kMaxWarehouseSuffixBytes) return false;
+        if (off + suffix_len > size) return false;
+        std::string suffix(reinterpret_cast<const char*>(data + off), suffix_len);
+        off += suffix_len;
+        if (!valid_warehouse_suffix(suffix)) return false;
+        if (off + 4 > size) return false;
+        const uint32_t data_len = be32(data + off);
+        off += 4;
+        if (data_len > kMaxWarehouseDataBytes) return false;
+        if (off + data_len > size) return false;
+        WarehouseFile f;
+        f.suffix = std::move(suffix);
+        f.data.assign(data + off, data + off + data_len);
+        off += data_len;
+        files.push_back(std::move(f));
+    }
+    if (off != size) return false;
+    out = std::move(files);
+    return true;
+}
+
 // ---- bundle 组装与解析 ----
 
 std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,
                             int hero_index, int save_version, long long save_time,
                             const std::string& original_sha256, const std::string& module_sha256,
                             const std::string& checksum, int class_idx,
-                            const std::string& class_name) {
+                            const std::string& class_name, int warehouse_count,
+                            const std::string& warehouse_sha256) {
     std::string s = "{\"source_slot\":";
     s += std::to_string(source_slot);
     s += ",\"export_time\":" + std::to_string(export_time_ms);
@@ -433,12 +499,16 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
     // 职业（v0.7.x 追加）：class_idx 数字 + class_name 中文名（name 为纯中文/ASCII，无转义）。
     s += ",\"class_idx\":" + std::to_string(class_idx);
     s += ",\"class_name\":\"" + class_name + "\"";
+    // 个人仓库（v0.8.x 追加）：数量与 blob 的 SHA-256（空仓库时 count=0、sha 为空串）。
+    s += ",\"warehouse_count\":" + std::to_string(warehouse_count);
+    s += ",\"warehouse_sha256\":\"" + warehouse_sha256 + "\"";
     s += "}";
     return s;
 }
 
 void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
-                  const std::vector<uint8_t>& module, const std::string& meta_json,
+                  const std::vector<uint8_t>& module,
+                  const std::vector<uint8_t>& warehouse_blob, const std::string& meta_json,
                   std::vector<uint8_t>& out) {
     out.clear();
     wb32(out, kBundleMagic);
@@ -452,6 +522,9 @@ void build_bundle(int source_slot, long long export_time_ms, const std::vector<u
     out.insert(out.end(), plain.begin(), plain.end());
     wb32(out, static_cast<uint32_t>(module.size()));
     out.insert(out.end(), module.begin(), module.end());
+    // v2：个人仓库段（空 blob 时仅写入 u32 0）。
+    wb32(out, static_cast<uint32_t>(warehouse_blob.size()));
+    out.insert(out.end(), warehouse_blob.begin(), warehouse_blob.end());
     wb16(out, static_cast<uint16_t>(meta_json.size()));
     out.insert(out.end(), meta_json.begin(), meta_json.end());
     wb32(out, crc32_ieee(out.data(), out.size()));
@@ -462,21 +535,38 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     const size_t body_size = size - 4;
     if (crc32_ieee(bytes, body_size) != be32(bytes + body_size)) return false;
     if (be32(bytes) != kBundleMagic) return false;
-    if (be16(bytes + 4) != kBundleVersion) return false;
+    const uint16_t version = be16(bytes + 4);
+    // 接受 v1（无仓库段）与 v2（含仓库段）。
+    if (version != kBundleVersion && version != kBundleVersionV1) return false;
     const int source_slot = bytes[6];
     if (source_slot > 2) return false;
     const long long export_time_ms = static_cast<long long>(be64(bytes + 10));
     size_t off = 18;
+    if (off + 4 > body_size) return false;
     const uint32_t orig_len = be32(bytes + off);
     off += 4;
     if (orig_len > body_size || off + orig_len > body_size) return false;
     const uint8_t* orig_plain = bytes + off;
     off += orig_len;
+    if (off + 4 > body_size) return false;
     const uint32_t module_len = be32(bytes + off);
     off += 4;
     if (module_len > body_size || off + module_len > body_size) return false;
     const uint8_t* module = bytes + off;
     off += module_len;
+
+    std::vector<WarehouseFile> warehouse;
+    bool has_warehouse = false;
+    if (version == kBundleVersion) {
+        if (off + 4 > body_size) return false;
+        const uint32_t warehouse_len = be32(bytes + off);
+        off += 4;
+        if (warehouse_len > kMaxWarehouseBlobBytes || off + warehouse_len > body_size) return false;
+        if (!decode_warehouse(bytes + off, warehouse_len, warehouse)) return false;
+        off += warehouse_len;
+        has_warehouse = true;
+    }
+
     if (off + 2 > body_size) return false;
     const uint16_t meta_len = be16(bytes + off);
     off += 2;
@@ -486,6 +576,8 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     out.export_time_ms = export_time_ms;
     out.orig_plain.assign(orig_plain, orig_plain + orig_len);
     out.module.assign(module, module + module_len);
+    out.warehouse = std::move(warehouse);
+    out.has_warehouse = has_warehouse;
     out.meta_json.assign(reinterpret_cast<const char*>(bytes + off), meta_len);
     out.size_bytes = static_cast<long long>(size);
     return true;

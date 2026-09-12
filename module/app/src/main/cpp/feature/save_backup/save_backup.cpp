@@ -573,11 +573,69 @@ std::string save_backup_export_json(int slot) {
         }
     }
 
+    // 个人仓库伴生文件（monster 改版）：收集同存档目录下 `save{slot}.dat.wh4-*` 普通文件
+    //（含游戏自建 `.bak`），排除目录与写入中间态 `.tmp`/`.wh-tmp`；按文件名升序保证确定性。
+    // 单文件 >1MiB 视为异常跳过并记日志；目录不可得/无命中则为空列表（导出仅原版 + sidecar）。
+    std::vector<save_backup::WarehouseFile> warehouse;
+    {
+        constexpr size_t kMaxWarehouseExportBytes = 1 * 1024 * 1024;
+        std::string save_dir;
+        if (locate_save_directory(save_dir) == 0) {
+            const std::string dat_name = "save" + std::to_string(slot) + ".dat";
+            const std::string prefix = dat_name + ".wh4-";
+            DIR* d = ::opendir(save_dir.c_str());
+            if (d != nullptr) {
+                std::vector<std::string> names;
+                while (dirent* ent = ::readdir(d)) {
+                    const std::string name = ent->d_name;
+                    if (name.size() <= prefix.size()) continue;
+                    if (name.compare(0, prefix.size(), prefix) != 0) continue;
+                    if (ends_with(name, ".tmp") || ends_with(name, ".wh-tmp")) continue;
+                    const std::string full = save_dir + "/" + name;
+                    struct stat st{};
+                    if (::stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+                    names.push_back(name);
+                }
+                ::closedir(d);
+                std::sort(names.begin(), names.end());
+                for (const std::string& name : names) {
+                    const std::string suffix = name.substr(dat_name.size());
+                    if (!save_backup::valid_warehouse_suffix(suffix)) {
+                        SB_LOG("save backup export slot=%d: skip invalid warehouse name: %s", slot,
+                               name.c_str());
+                        continue;
+                    }
+                    std::vector<uint8_t> bytes;
+                    if (!read_file_bytes(save_dir + "/" + name, bytes)) {
+                        SB_LOG("save backup export slot=%d: warehouse read failed: %s", slot,
+                               name.c_str());
+                        continue;
+                    }
+                    if (bytes.size() > kMaxWarehouseExportBytes) {
+                        SB_LOG("save backup export slot=%d: warehouse too large (%zu), skip: %s",
+                               slot, bytes.size(), name.c_str());
+                        continue;
+                    }
+                    save_backup::WarehouseFile wf;
+                    wf.suffix = suffix;
+                    wf.data.swap(bytes);
+                    warehouse.push_back(std::move(wf));
+                }
+            }
+        }
+    }
+    const std::vector<uint8_t> warehouse_blob = save_backup::encode_warehouse(warehouse);
+
     const long long export_time_ms = now_ms();
     const std::string original_sha = save_backup::sha256_hex(plain, {});
     const std::string module_sha = module.empty() ? std::string() : save_backup::sha256_hex(module, {});
-    // checksum = sha256(origPlain ‖ module) 前 12 位小写 hex。
-    const std::string checksum = save_backup::sha256_hex(plain, module).substr(0, 12);
+    const std::string warehouse_sha =
+        warehouse.empty() ? std::string() : save_backup::sha256_hex(warehouse_blob, {});
+    // checksum = sha256(origPlain ‖ module ‖ warehouseBlob) 前 12 位小写 hex。
+    // 无仓库时 warehouseBlob 为空 → 与旧版逐字节一致（硬约束）。
+    std::vector<uint8_t> module_and_wh = module;
+    module_and_wh.insert(module_and_wh.end(), warehouse_blob.begin(), warehouse_blob.end());
+    const std::string checksum = save_backup::sha256_hex(plain, module_and_wh).substr(0, 12);
 
     std::string dir;
     if (!backup_dir(dir)) return op_err("backup dir unavailable");
@@ -606,9 +664,10 @@ std::string save_backup_export_json(int slot) {
     const std::string class_name = save_backup_class_name(class_idx);
     const std::string meta_json = save_backup::build_meta_json(
         slot, export_time_ms, map_id, hero_level, hero_index, version, save_time, original_sha,
-        module_sha, checksum, class_idx, class_name);
+        module_sha, checksum, class_idx, class_name, static_cast<int>(warehouse.size()),
+        warehouse_sha);
     std::vector<uint8_t> bundle;
-    save_backup::build_bundle(slot, export_time_ms, plain, module, meta_json, bundle);
+    save_backup::build_bundle(slot, export_time_ms, plain, module, warehouse_blob, meta_json, bundle);
 
     char stamp[16] = {0};
     if (!local_stamp(export_time_ms, stamp)) return op_err("bundle write failed");
@@ -723,7 +782,57 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
 
-    // 6) 成功：清理该槽回滚副本。
+    // 6) 个人仓库伴生文件写回：仅当 v2 备份 parsed.has_warehouse 为真时执行；
+    //    v1 旧备份（has_warehouse=false）完全跳过，绝不触碰现存 wh4 文件（保护旧备份导入用户）。
+    //    **语义为 additive**：只新增/覆盖 bundle 内后缀对应的目标文件，不删除目标槽其它
+    //    后缀的 wh4 文件——理由：模块不掌握游戏仓库文件的完整集合语义，批量删除可能误删
+    //    其它存档数据。suffix 已由 decode_warehouse 校验（`.wh4-` 开头、无路径分隔/`..`），
+    //    因此 target 由 save_dir + 槽号 + suffix 直接拼接是安全的，不再引入额外路径处理。
+    //    任一步失败：先还原本函数已处理的全部 wh 文件，再回滚 dat/sidecar。
+    struct WhRollback {
+        std::string target;
+        std::string rb;
+        bool existed = false;
+    };
+    std::vector<WhRollback> wh_rollback;
+    auto restore_warehouse = [&wh_rollback]() {
+        for (auto it = wh_rollback.rbegin(); it != wh_rollback.rend(); ++it) {
+            if (it->existed) {
+                if (file_exists(it->rb)) copy_file(it->rb, it->target);
+            } else {
+                remove_file(it->target);
+            }
+            remove_file(it->rb);
+        }
+    };
+    if (parsed.has_warehouse) {
+        for (const save_backup::WarehouseFile& wf : parsed.warehouse) {
+            const std::string target =
+                save_dir + "/save" + std::to_string(slot) + ".dat" + wf.suffix;
+            const bool existed = file_exists(target);
+            std::string rb;
+            if (existed) {
+                rb = rollback_dir + "/" + file_name_of(target);
+                if (!copy_file(target, rb)) {
+                    remove_file(rb);  // 清理可能写了一半的副本
+                    restore_warehouse();
+                    restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
+                                          sidecar_existed);
+                    return op_err("rollback backup failed");
+                }
+            }
+            wh_rollback.push_back(WhRollback{target, rb, existed});
+            if (!write_file_bytes_atomic(target, wf.data.data(), wf.data.size())) {
+                restore_warehouse();
+                restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
+                                      sidecar_existed);
+                return op_err("warehouse file write failed");
+            }
+        }
+    }
+
+    // 7) 成功：清理该槽回滚副本（dat/sidecar 与 wh 副本）。
+    for (const WhRollback& item : wh_rollback) remove_file(item.rb);
     remove_file(rb_dat);
     remove_file(rb_sidecar);
     save_backup::Entry entry;

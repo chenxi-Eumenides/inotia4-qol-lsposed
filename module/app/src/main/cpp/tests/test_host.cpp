@@ -1760,8 +1760,10 @@ static void test_save_backup_bundle_roundtrip() {
                              "\"save_time\":1699999999000,\"original_sha256\":\"ab12\","
                              "\"module_sha256\":\"cd34\",\"checksum\":\"89abcdef0123\"}";
     std::vector<uint8_t> bundle;
-    sb::build_bundle(1, 1700000000000LL, plain, module, meta, bundle);
-    CHECK_EQ(bundle.size(), sb::kMinBundleBytes + plain.size() + module.size() + meta.size());
+    sb::build_bundle(1, 1700000000000LL, plain, module, {}, meta, bundle);
+    // v2 比 v1 多 u32 warehouseLen（空 blob 时 blob 为 0 字节）。
+    CHECK_EQ(bundle.size(),
+             sb::kMinBundleBytes + 4 + plain.size() + module.size() + meta.size());
 
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
@@ -1774,7 +1776,7 @@ static void test_save_backup_bundle_roundtrip() {
 
     // 空 module（仅原版备份）往返
     std::vector<uint8_t> bundle2;
-    sb::build_bundle(2, 42, plain, {}, meta, bundle2);
+    sb::build_bundle(2, 42, plain, {}, {}, meta, bundle2);
     sb::ParsedBundle parsed2;
     CHECK(sb::parse_bundle(bundle2.data(), bundle2.size(), parsed2));
     CHECK(parsed2.module.empty());
@@ -1807,7 +1809,7 @@ static void test_save_backup_meta_entry() {
                                              "cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00",
                                              "89abcdef0123");
     std::vector<uint8_t> bundle;
-    sb::build_bundle(1, 1700000000000LL, plain, {}, meta, bundle);
+    sb::build_bundle(1, 1700000000000LL, plain, {}, {}, meta, bundle);
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
     Entry e;
@@ -1907,7 +1909,7 @@ static void test_save_backup_entry_map_name() {
                                                  std::string(64, 'a'), std::string(),
                                                  "89abcdef0123");
     std::vector<uint8_t> bundle;
-    sb::build_bundle(0, 1, plain, {}, meta, bundle);
+    sb::build_bundle(0, 1, plain, {}, {}, meta, bundle);
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
     sb::Entry from_bundle;
@@ -1972,6 +1974,151 @@ static void test_save_backup_module_container() {
     std::vector<uint8_t> bad_magic = container;
     bad_magic[0] = 'X';
     CHECK(!sb::module_container_valid(bad_magic));
+}
+
+// 个人仓库段（v2 bundle）：encode/decode 往返、build/parse 携带、v1 兼容、
+// 解码 fail-closed、以及「空仓库不改变旧 checksum」回归。
+static void test_save_backup_warehouse() {
+    namespace sb = save_backup;
+    using sb::WarehouseFile;
+
+    // 1) 空列表编码为空 blob；空 blob/空指针解码为空且成功。
+    CHECK(sb::encode_warehouse({}).empty());
+    std::vector<WarehouseFile> empty_decoded;
+    CHECK(sb::decode_warehouse(nullptr, 0, empty_decoded));
+    CHECK(empty_decoded.empty());
+
+    // 2) 两个 WarehouseFile（主文件 + .bak）encode/decode 往返一致。
+    WarehouseFile main_file;
+    main_file.suffix = ".wh4-000001a043a2bba1";
+    main_file.data = {0x51, 0x53, 0x42, 0x31, 0x00, 0x01, 0x02, 0x03};
+    WarehouseFile bak_file;
+    bak_file.suffix = ".wh4-000001a043a2bba1.bak";
+    bak_file.data = {0xDE, 0xAD, 0xBE, 0xEF};
+    const std::vector<WarehouseFile> files = {main_file, bak_file};
+    const std::vector<uint8_t> blob = sb::encode_warehouse(files);
+    CHECK(!blob.empty());
+    std::vector<WarehouseFile> decoded;
+    CHECK(sb::decode_warehouse(blob.data(), blob.size(), decoded));
+    CHECK_EQ(decoded.size(), static_cast<size_t>(2));
+    CHECK_EQ(decoded[0].suffix, main_file.suffix);
+    CHECK(decoded[0].data == main_file.data);
+    CHECK_EQ(decoded[1].suffix, bak_file.suffix);
+    CHECK(decoded[1].data == bak_file.data);
+
+    // 3) build_bundle 携带 blob → parse_bundle：has_warehouse 为真且内容一致。
+    const std::vector<uint8_t> plain = {1, 2, 3, 4};
+    const std::string meta = "{}";
+    std::vector<uint8_t> bundle;
+    sb::build_bundle(1, 123, plain, {}, blob, meta, bundle);
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+    CHECK(parsed.has_warehouse);
+    CHECK_EQ(parsed.warehouse.size(), static_cast<size_t>(2));
+    CHECK_EQ(parsed.warehouse[0].suffix, main_file.suffix);
+    CHECK(parsed.warehouse[0].data == main_file.data);
+    CHECK_EQ(parsed.warehouse[1].suffix, bak_file.suffix);
+    CHECK(parsed.warehouse[1].data == bak_file.data);
+
+    // 4) 手写 v1 bundle（无仓库段）：parse 成功且 has_warehouse=false。
+    auto wb16 = [](std::vector<uint8_t>& o, uint16_t v) {
+        o.push_back(static_cast<uint8_t>(v >> 8));
+        o.push_back(static_cast<uint8_t>(v));
+    };
+    auto wb32 = [](std::vector<uint8_t>& o, uint32_t v) {
+        o.push_back(static_cast<uint8_t>(v >> 24));
+        o.push_back(static_cast<uint8_t>(v >> 16));
+        o.push_back(static_cast<uint8_t>(v >> 8));
+        o.push_back(static_cast<uint8_t>(v));
+    };
+    auto wb64 = [](std::vector<uint8_t>& o, uint64_t v) {
+        for (int i = 7; i >= 0; --i) o.push_back(static_cast<uint8_t>(v >> (8 * i)));
+    };
+    const std::vector<uint8_t> v1_plain = {9, 8, 7};
+    const std::vector<uint8_t> v1_module = {0x4D};
+    const std::string v1_meta = "{\"checksum\":\"001122334455\"}";
+    std::vector<uint8_t> v1;
+    wb32(v1, sb::kBundleMagic);
+    wb16(v1, sb::kBundleVersionV1);
+    v1.push_back(1);
+    v1.push_back(0);
+    v1.push_back(0);
+    v1.push_back(0);
+    wb64(v1, 42);
+    wb32(v1, static_cast<uint32_t>(v1_plain.size()));
+    v1.insert(v1.end(), v1_plain.begin(), v1_plain.end());
+    wb32(v1, static_cast<uint32_t>(v1_module.size()));
+    v1.insert(v1.end(), v1_module.begin(), v1_module.end());
+    wb16(v1, static_cast<uint16_t>(v1_meta.size()));
+    v1.insert(v1.end(), v1_meta.begin(), v1_meta.end());
+    wb32(v1, sb::crc32_ieee(v1.data(), v1.size()));
+    sb::ParsedBundle parsed_v1;
+    CHECK(sb::parse_bundle(v1.data(), v1.size(), parsed_v1));
+    CHECK(!parsed_v1.has_warehouse);
+    CHECK(parsed_v1.warehouse.empty());
+    CHECK(parsed_v1.orig_plain == v1_plain);
+    CHECK(parsed_v1.module == v1_module);
+    CHECK_EQ(parsed_v1.meta_json, v1_meta);
+
+    // 5) decode fail-closed：截断、count 越界、后缀非法、dataLen 越界。
+    std::vector<WarehouseFile> bad;
+    CHECK(!sb::decode_warehouse(blob.data(), 1, bad));               // 长度 < 2
+    CHECK(!sb::decode_warehouse(blob.data(), blob.size() - 1, bad));  // 尾部截断
+    std::vector<uint8_t> count_bad = blob;
+    count_bad[0] = 0x00;
+    count_bad[1] = 0x41;  // count=65 > kMaxWarehouseFiles
+    CHECK(!sb::decode_warehouse(count_bad.data(), count_bad.size(), bad));
+
+    // 单项辅助：suffix 指定、data 指定；构造合法 count=1 头。
+    auto make_one = [](const std::string& suffix, uint32_t data_len,
+                       const std::vector<uint8_t>& body) {
+        std::vector<uint8_t> one;
+        one.push_back(0x00);
+        one.push_back(0x01);
+        one.push_back(static_cast<uint8_t>(suffix.size() >> 8));
+        one.push_back(static_cast<uint8_t>(suffix.size()));
+        one.insert(one.end(), suffix.begin(), suffix.end());
+        one.push_back(static_cast<uint8_t>(data_len >> 24));
+        one.push_back(static_cast<uint8_t>(data_len >> 16));
+        one.push_back(static_cast<uint8_t>(data_len >> 8));
+        one.push_back(static_cast<uint8_t>(data_len));
+        one.insert(one.end(), body.begin(), body.end());
+        return one;
+    };
+    // 后缀非 `.wh4-`。
+    {
+        const std::vector<uint8_t> one = make_one(".evil", 1, {0x00});
+        CHECK(!sb::decode_warehouse(one.data(), one.size(), bad));
+    }
+    // 后缀含 `..`。
+    {
+        const std::vector<uint8_t> one = make_one(".wh4-..", 1, {0x00});
+        CHECK(!sb::decode_warehouse(one.data(), one.size(), bad));
+    }
+    // dataLen 声明越界（0xFFFFFFFF > kMaxWarehouseDataBytes）。
+    {
+        const std::vector<uint8_t> one = make_one(main_file.suffix, 0xFFFFFFFFu, {});
+        CHECK(!sb::decode_warehouse(one.data(), one.size(), bad));
+    }
+    // 后缀合法但 dataLen 超过实际剩余字节。
+    {
+        const std::vector<uint8_t> one = make_one(main_file.suffix, 8, {0x01, 0x02});
+        CHECK(!sb::decode_warehouse(one.data(), one.size(), bad));
+    }
+    // valid_warehouse_suffix 直接断言。
+    CHECK(sb::valid_warehouse_suffix(".wh4-000001a043a2bba1"));
+    CHECK(sb::valid_warehouse_suffix(".wh4-000001a043a2bba1.bak"));
+    CHECK(!sb::valid_warehouse_suffix("wh4-000001a043a2bba1"));   // 缺前导点
+    CHECK(!sb::valid_warehouse_suffix(".wh4-000001a043a2bba1/"));  // 含分隔符
+    CHECK(!sb::valid_warehouse_suffix(".wh4-.."));                 // 含 ..
+    CHECK(!sb::valid_warehouse_suffix(".wh4"));                    // 过短
+
+    // 6) checksum 回归保护：空 blob 时「module 后接空 blob」与「module」摘要一致。
+    const std::vector<uint8_t> module = {0x4D, 0x53, 0x41, 0x56, 1, 2, 3};
+    const std::vector<uint8_t> empty_blob = sb::encode_warehouse({});
+    std::vector<uint8_t> module_and_empty = module;
+    module_and_empty.insert(module_and_empty.end(), empty_blob.begin(), empty_blob.end());
+    CHECK_EQ(sb::sha256_hex(plain, module), sb::sha256_hex(plain, module_and_empty));
 }
 
 static void test_prepare_journal() {
@@ -2835,6 +2982,7 @@ int main() {
     test_save_backup_entry_map_name();
     test_save_backup_checksum_name();
     test_save_backup_module_container();
+    test_save_backup_warehouse();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

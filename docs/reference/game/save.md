@@ -11,6 +11,12 @@
 `/data/data/<pkg>/<32hex>/save{slot}.dat`（目录名随设备/UID 变化，模块侧通过扫描定位）。
 - 存在性判定：`FILE_IsExist`（0xa47f8），`SAVE_CheckFile`（0x12a4c8）/ `SAVE_IsExist`（0x128a3c）循环 3 槽调用。
 
+### 1.1 monster 改版个人仓库伴生文件
+
+- monster 改版在同目录新增「个人仓库」（96 格）伴生文件：`save{slot}.dat.wh4-<16位小写hex>`（主文件，整体加密），以及游戏自建的 `save{slot}.dat.wh4-<16hex>.bak` 备份。
+- 它们与 `save{slot}.dat` 位于同一存档目录，随存档槽位；文件名后缀为相对 `save{slot}.dat` 的 `.wh4-<hex>`（可带 `.bak`）。
+- 模块不解析其内部格式，仅在 `.qol_save` v2（见 `../../development/features/save-backup.md` §3）中按字节整体备份/恢复。
+
 ## 2. 文件容器格式（加密 + 校验和）
 
 `SAVE_LoadDataAsNameAndKey`（0x1290f8）+ `ENCRYPT_Process2`（0xa413c）实证：
