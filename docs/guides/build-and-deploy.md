@@ -34,6 +34,7 @@
 | libxposed API（compileOnly） | LSPosed 现代 Xposed API（`io.github.libxposed:api:101.0.1`） | 📦 Gradle 依赖（项目内） |
 | AndServer 库 | 进程内 HTTP 服务 | 📦 Gradle 依赖（项目内） |
 | **NPatch（默认集成工具）** | 集成免 root 版 APK | ✅ `tools/lspatch/npatch-v1.0.7-741-release.jar`（v1.0.7）；LSPatch v0.6 / v1.2 保留备用，可 `--lspatch-jar` 指定 |
+| **AOSP testkey（默认签名密钥）** | `scripts/patch-apk.sh` 默认签名证书 | ✅ `scripts/keys/aosp-testkey.bks`（AOSP 公开 testkey，CN=Android / android@android.com，SHA-256 `a40da80a…`），已入库 |
 
 ### D. 部署与验证链 ✅
 
@@ -88,6 +89,9 @@ scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.goo
 # output/<游戏apk文件名>-npatched.apk（LSPatch JAR 则为 -lspatched.apk）。
 scripts/patch-apk.sh <模块.apk>
 # 默认覆盖已有输出；生成前先清理 output/ 下旧 NPatch 产物（*npatch*.apk），保持输出目录干净。
+# 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks，已入库）签名输出：
+#   - 改版（盗版大修 / monster）本就由该 testkey 签名，集成版与其证书身份一致，可覆盖安装；
+#   - 原版由 Com2us 私钥签名（私钥不可得），集成版签名身份仍与原版不同，需先卸载原版。
 # 使用 LSPatch（v0.6 / v1.2）：
 scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar <模块.apk>
 # NPatch 支持修改输出 applicationId：第二个位置参数传新包名；模块构建时需把新包名加入 targetPackages：
@@ -127,7 +131,26 @@ curl -s http://<设备IP>:8088/api/ui/screen
 
 > 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
 
-> 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用 NPatch 内置证书重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。指定新包名的流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
+> 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用默认的 AOSP testkey 重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。指定新包名的流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
+
+> **默认签名密钥**：`scripts/patch-apk.sh` 用 `scripts/keys/aosp-testkey.bks`（AOSP 公开 testkey）签名，
+> 证书 SHA-256 为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`。NPatch 对所有 keystore
+> 都用 `KeyStore.getInstance("BKS")`，因此该文件必须是 BKS 格式。该密钥为公开测试密钥、非机密，已入库。
+> 如需重建（例如更换上游 testkey）：
+> ```bash
+> # 1) 取得 AOSP testkey（公开）
+> curl -fsSL -o testkey.pk8   https://raw.githubusercontent.com/aosp-mirror/platform_build/main/target/product/security/testkey.pk8
+> curl -fsSL -o testkey.x509.pem https://raw.githubusercontent.com/aosp-mirror/platform_build/main/target/product/security/testkey.x509.pem
+> # 2) pk8 -> PKCS12 -> BKS（BKS 需要 JAR 内自带的 BouncyCastle）
+> openssl pkcs8 -inform DER -in testkey.pk8 -nocrypt -out testkey.pem
+> openssl pkcs12 -export -inkey testkey.pem -in testkey.x509.pem -name testkey -out testkey.p12 -passout pass:123456
+> keytool -importkeystore -noprompt -srckeystore testkey.p12 -srcstoretype PKCS12 -srcstorepass 123456 -srcalias testkey -srckeypass 123456 \
+>   -destkeystore scripts/keys/aosp-testkey.bks -deststoretype BKS -deststorepass 123456 -destalias testkey -destkeypass 123456 \
+>   -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath tools/lspatch/npatch-v1.0.7-741-release.jar
+> # 3) 校验指纹应为 A4:0D:A8:0A:...
+> keytool -list -v -keystore scripts/keys/aosp-testkey.bks -storetype BKS -storepass 123456 -alias testkey \
+>   -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath tools/lspatch/npatch-v1.0.7-741-release.jar
+> ```
 
 ### 3.2 Release 流程（仅用户明确要求时执行）
 

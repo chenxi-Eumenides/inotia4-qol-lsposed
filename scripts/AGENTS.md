@@ -5,6 +5,7 @@
 - `device/`：adb、设备启动、安装和触摸自动化。
 - `data/`：静态数据导出、校验和 assets 打包。
 - `maintenance/`：符号、依赖和工作区检查。
+- `keys/`：`patch-apk.sh` 默认签名密钥（AOSP 公开 testkey，BKS，非机密）；生成与校验步骤见 `docs/guides/build-and-deploy.md` §3.1。
 - 一次性实验脚本放入项目根目录 `archive/experiments/`，不得混入正式入口。
 - 脚本输出只能写入 `apk/`、`output/`、`archive/` 或 `.tmp/`。
 - `.tmp/` 输出必须放入任务专属子目录，任务结束后清理；脚本不得把日志、截图或中间文件写入脚本目录根部。

@@ -11,6 +11,8 @@ usage() {
   output/<游戏apk文件名>-npatched.apk（LSPatch JAR 则为 -lspatched.apk）。
   - 提供「新包名」时用 NPatch --newpackage 修改输出 applicationId；不提供则保留原包名。
   - 默认覆盖已有输出（-f）；生成前先清理 output/ 下旧的 NPatch 产物（*npatch*.apk）。
+  - 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks）签名输出，使集成版与
+    同样用该 testkey 签名的游戏改版证书身份一致；原版游戏签名身份仍会不同。
 
 默认值：
   LSPatch JAR：tools/lspatch/npatch-v1.0.7-741-release.jar（NPatch）
@@ -26,6 +28,15 @@ EOF
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 lspatch_jar=${LSPATCH_JAR:-"$repo_root/tools/lspatch/npatch-v1.0.7-741-release.jar"}
+
+# 默认签名证书：AOSP 公开 testkey（CN=Android, android@android.com），
+# 令集成版与同样使用该 testkey 签名的游戏改版证书身份一致，可覆盖安装。
+# 原版游戏由 Com2us 私钥签名，私钥不可得，输出签名身份仍会与原版不同。
+aosp_keystore="$repo_root/scripts/keys/aosp-testkey.bks"
+aosp_storepass=123456
+aosp_alias=testkey
+aosp_keypass=123456
+
 debuggable=false
 sigbypasslv=
 positional=()
@@ -86,6 +97,11 @@ if [[ ! -f "$lspatch_jar" ]]; then
     printf '可用 --lspatch-jar 指定下载的版本。\n' >&2
     exit 1
 fi
+if [[ ! -f "$aosp_keystore" ]]; then
+    printf 'AOSP testkey keystore 不存在：%s\n' "$aosp_keystore" >&2
+    printf '生成步骤见 docs/guides/build-and-deploy.md §1。\n' >&2
+    exit 1
+fi
 if [[ -n "$newpackage" && ! "$newpackage" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]]; then
     printf '新包名不是合法 Android applicationId：%s\n' "$newpackage" >&2
     exit 1
@@ -128,9 +144,9 @@ for old_apk in "${old_npatch_apks[@]}"; do
     printf '已删除旧 NPatch 输出：%s\n' "$(basename "$old_apk")"
 done
 
-# --newpackage 后处理：预置 NPatch 内置证书 + apksigner
+# --newpackage 后处理：把 AOSP BKS keystore 转为 apksigner 可读的 PKCS12
 apksigner=
-npatch_keystore=
+sign_keystore=
 prep_dir=
 if [[ -n "$newpackage" ]]; then
     apksigner=$(command -v apksigner || true)
@@ -143,15 +159,14 @@ if [[ -n "$newpackage" ]]; then
     fi
     prep_dir=$(mktemp -d "$repo_root/.tmp/lspatch-key.XXXXXX")
     trap '[[ -n "$prep_dir" ]] && rm -rf "$prep_dir"' EXIT
-    npatch_key="$prep_dir/npatch.key"
-    npatch_keystore="$prep_dir/npatch.p12"
-    unzip -p "$lspatch_jar" assets/npatch.key > "$npatch_key"
+    sign_keystore="$prep_dir/aosp-testkey.p12"
     keytool -importkeystore -noprompt \
-        -srckeystore "$npatch_key" -srcstoretype BKS -srcstorepass 123456 \
-        -srcalias key0 -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider \
+        -srckeystore "$aosp_keystore" -srcstoretype BKS \
+        -srcstorepass "$aosp_storepass" -srcalias "$aosp_alias" -srckeypass "$aosp_keypass" \
+        -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider \
         -providerpath "$lspatch_jar" \
-        -destkeystore "$npatch_keystore" -deststoretype PKCS12 -deststorepass 123456 \
-        -destalias key0 -destkeypass 123456 >/dev/null
+        -destkeystore "$sign_keystore" -deststoretype PKCS12 \
+        -deststorepass "$aosp_storepass" -destalias "$aosp_alias" -destkeypass "$aosp_keypass" >/dev/null
 fi
 
 printf '模块 APK：%s\n' "$module_apk"
@@ -173,14 +188,16 @@ for target_apk in "${game_apks[@]}"; do
         props="$work_dir/npatch-java-security.properties"
         printf '%s\n' 'security.provider.13=org.bouncycastle.jce.provider.BouncyCastleProvider' > "$props"
         args=(java "-Djava.security.properties=$props" -cp "$lspatch_jar"
-              top.nkbe.npatch.patch.NPatch -m "$module_apk" -o "$work_dir")
+              top.nkbe.npatch.patch.NPatch -m "$module_apk" -o "$work_dir"
+              -k "$aosp_keystore" "$aosp_storepass" "$aosp_alias" "$aosp_keypass")
         [[ -n "$sigbypasslv" ]] && args+=(-l "$sigbypasslv")
         [[ "$debuggable" == true ]] && args+=(-d)
         args+=(-f)
         [[ -n "$newpackage" ]] && args+=(--newpackage "$newpackage")
         args+=("$target_apk")
     else
-        args=(java -jar "$lspatch_jar" -m "$module_apk" -o "$work_dir")
+        args=(java -jar "$lspatch_jar" -m "$module_apk" -o "$work_dir"
+              -k "$aosp_keystore" "$aosp_storepass" "$aosp_alias" "$aosp_keypass")
         [[ -n "$sigbypasslv" ]] && args+=(--sigbypasslv "$sigbypasslv")
         [[ "$debuggable" == true ]] && args+=(--debuggable)
         args+=(--force "$target_apk")
@@ -206,14 +223,14 @@ for target_apk in "${game_apks[@]}"; do
     final_apk=${patched_apks[0]}
     if [[ -n "$newpackage" ]]; then
         # NPatch 输出保留与原包冲突的 C2D_MESSAGE 权限声明；输出端删除该权限并用
-        # NPatch 内置证书重签名（输入端 -l 1 需读未修改原包签名，无法预处理）。
+        # AOSP testkey 重签名（输入端 -l 1 需读未修改原包签名，无法预处理）。
         permission_fixed_apk="$work_dir/permission-fixed.apk"
         uv run python "$repo_root/scripts/maintenance/strip-conflicting-permission.py" \
             "${patched_apks[0]}" "$permission_fixed_apk" \
             "com.com2us.inotia4.normal.freefull.google.global.android.common.permission.C2D_MESSAGE"
         resigned_apk="$work_dir/resigned.apk"
-        "$apksigner" sign --ks "$npatch_keystore" --ks-type PKCS12 \
-            --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias key0 \
+        "$apksigner" sign --ks "$sign_keystore" --ks-type PKCS12 \
+            --ks-pass "pass:$aosp_storepass" --key-pass "pass:$aosp_keypass" --ks-key-alias "$aosp_alias" \
             --out "$resigned_apk" "$permission_fixed_apk" >/dev/null
         final_apk="$resigned_apk"
     fi

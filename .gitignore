@@ -47,6 +47,8 @@ scripts/*
 !scripts/device/touch_automation.py
 !scripts/maintenance/
 !scripts/maintenance/check_symbols.py
+# 集成版默认签名密钥（AOSP 公开 testkey，非机密，需入库保证可复现）
+!scripts/keys/
 !scripts/data/
 !scripts/data/**
 scripts/data/**/__pycache__/
