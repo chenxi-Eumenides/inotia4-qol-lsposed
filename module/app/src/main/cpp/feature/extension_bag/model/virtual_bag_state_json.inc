@@ -145,9 +145,10 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
     const char* b64 = payload_key + strlen("\"payload\":\"");
     const char* end_quote = strchr(b64, '"');
     if (end_quote == nullptr) return PendingTransferParseResult::kMalformed;
-    const size_t b64_len = static_cast<size_t>(end_quote - b64);
-    if (b64_len == 0 || b64_len > 512) return PendingTransferParseResult::kMalformed;
-    const int decoded = base64_decode(b64, b64_len, parsed.payload.data(), parsed.payload.size());
+    char b64_plain[512];
+    const size_t b64_len = json_unescape_into(b64, end_quote, b64_plain, sizeof(b64_plain));
+    if (b64_len == 0) return PendingTransferParseResult::kMalformed;
+    const int decoded = base64_decode(b64_plain, b64_len, parsed.payload.data(), parsed.payload.size());
     if (decoded < static_cast<int>(kPayloadHeaderSize) ||
         decoded > static_cast<int>(kMaxSerializedItem)) {
         return PendingTransferParseResult::kMalformed;
@@ -161,10 +162,12 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
         const char* source_b64 = source_key + strlen("\"sourcePayload\":\"");
         const char* source_end = strchr(source_b64, '\"');
         if (source_end == nullptr) return PendingTransferParseResult::kMalformed;
-        const size_t source_len = static_cast<size_t>(source_end - source_b64);
-        if (source_len == 0 || source_len > 512) return PendingTransferParseResult::kMalformed;
+        char source_plain[512];
+        const size_t source_len =
+            json_unescape_into(source_b64, source_end, source_plain, sizeof(source_plain));
+        if (source_len == 0) return PendingTransferParseResult::kMalformed;
         const int source_decoded =
-            base64_decode(source_b64, source_len, parsed.source_payload.data(),
+            base64_decode(source_plain, source_len, parsed.source_payload.data(),
                           parsed.source_payload.size());
         if (source_decoded < static_cast<int>(kPayloadHeaderSize) ||
             source_decoded > static_cast<int>(kMaxSerializedItem)) {
@@ -310,10 +313,12 @@ inline bool parse_state_json(const char* json, State* state,
                 const char* b64 = payload_key + strlen("\"payload\":\"");
                 const char* end_quote = strchr(b64, '"');
                 if (end_quote == nullptr) return false;
-                const size_t b64_len = static_cast<size_t>(end_quote - b64);
-                if (b64_len == 0 || b64_len > 512) return false;
+                char b64_plain[512];
+                const size_t b64_len =
+                    json_unescape_into(b64, end_quote, b64_plain, sizeof(b64_plain));
+                if (b64_len == 0) return false;
                 const int decoded =
-                    base64_decode(b64, b64_len, item.payload.data(), item.payload.size());
+                    base64_decode(b64_plain, b64_len, item.payload.data(), item.payload.size());
                 if (decoded < static_cast<int>(kPayloadHeaderSize) ||
                     decoded > static_cast<int>(kMaxSerializedItem)) {
                     return false;

@@ -121,7 +121,7 @@ S2 数量编码契约已批准并进入开发：可堆叠数量固定为 `128a+b
 
 | 阶段 | 当前状态 | 已保留的有效结论 | 仍不能据此推出 |
 |---|---|---|---|
-| P1 | ✅ 已完成 | 逻辑袋模型、容量派生、payload、所有权账本和 sidecar 原型已建立。 | 最终 v4-only 清理、所有替换/解除超容边界和全局运行时验收；当前桥接仍兼容读取 v2/v3/legacy，详见架构册 §5.3。 |
+| P1 | ✅ 已完成 | 逻辑袋模型、容量派生、payload、所有权账本和 sidecar 原型已建立。 | 所有替换/解除超容边界和全局运行时验收；桥接已 v4-only（无 v2/v3/legacy 兼容读取），详见架构册 §5.3。 |
 | P2 | ✅ 已完成 | 原版窗口投影 install/restore、容量快照和任务袋 sentinel 已形成阶段闭环。 | P3 控件行为、P5 拖动安全或问题 B 已通过。 |
 | P3 | ✅ 已完成 | 原版控件树、标签、装备/解除、选中和全满边界已有真机记录；拖动转入 P5。 | 所有库存 caller、拖动异常和全局生产者已覆盖。 |
 | P4 | ✅ 已完成并归档 | 原版对象与逻辑状态的进程内事务桥接、唯一事务入口、失败隔离和 ownership seam 已收口。 | 物理拖动的所有风险、跨进程恢复或问题 B 已解决。 |
@@ -271,6 +271,9 @@ S2 完成（含 S2-P6 验收）不改变 Overall `NOT_ACCEPTED` 口径；S2 各�
 | 当前 | S2 数量编码（统一布局，无版本标识）：可堆叠数量按 `a=bits22-24`+`b=bits25-31`（`count=128a+b`，业务上限 999）读写，布局层 `s2_read_count`/`s2_write_count` 与模式无关，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`；读侧统一 `ITEM_GetCumulateCount@0x106094` getter hook（模式视图解码），写侧调用方级门控+进位，不 hook `UTIL_SetBitValue`（无物品指针无法判类别）；关闭态（决策 b）所有读写与操作按低 7 位视图（上限 99）、`a` 保留不动、重开读回完整 canonical；sidecar 不携带版本字段，历史 `encodingVersion` 宽容忽略，无迁移代码。子阶段见 §3.5。 | `rulebook.md` R-45..R-49；`runtime-architecture.md` §3.7；`module-save-store.md` §6.4；`api-reference.md` §7.6；Hub §3.5 |
 | 当前 | S2 缺陷修复（debug APK `52c5471e`）：R-51 出售/拆堆直接位读重定向统一 getter（5 条）；R-52 `ITEMSYSTEM_MakeItem` 数量回写撤销（arg2 非数量）；R-53 `INVEN_SaveItem` 漏斗入库前先并入扩展同类堆；R-54 ext→orig 宿主容量字 RAII 恢复与显示袋守卫；R-55 原版背包详情出售由 H-23 按 canonical 全量接管（预演只回填金额）。装备页详情结算点 `0x1261c4` 重定向已回退不入表。 | `rulebook.md` R-51..R-55；`runtime-architecture.md` §3.7；`verification-matrix.md` VM-37..VM-41；Hub §3.3 |
 | 2026-09-11 | 合成器（UIMix）扩展袋支持：新增 `extension_bag_mix.inc` 宿主（ENTER/F3 回调 + draw_end BL patch + 自建页签 + 网格投影，state!=0 才挂载）；R-56 H-21 `INVEN_RemoveItemData` 物理不足按 category 从扩展袋补扣（合成药水/宝石孔/混沌/传说扣料自动生效，宝石强化走 H-05）；R-57 扩展视图原版袋列高亮遮蔽（商店/合成器袋列绘制 wrapper，扩展页既有）。 | `rulebook.md` R-56、R-57；`runtime-architecture.md` §2.1、§2.5.1、§2.6；`verification-matrix.md` VM-22、VM-23；Host `test_remove_data_extension_shortfall` |
+| 2026-09-13 | 移除扩展背包 sidecar 的「游戏签名身份门禁」：兼容性改由容器 `formatVersion` + section 版本判定，未知版本按当前布局尽力解析。理由：签名门禁按游戏 APK 签名摘要匹配，同一份 sidecar 在换签名/换集成方式（LSPosed 注入与 NPatch 集成签名不同）后被判为不可读、整袋回退为空，阻止了合法的旧存档恢复。 | `module-save-store.md` §5.2、§6.1；`ExtensionBagUiBridge.kt:loadStateJson` |
+| 2026-09-13 | 删除 `virtualbags.items` legacy 兼容读取：核实其从未被任何发布版本写入（v0.6.11 及以前无 sidecar 代码，v0.7.0 起只写 `extensionbags.items` v4），仅存在于开发期数据；`virtualbags.ui-test` 从未出现在任何提交或发布中。 | `module-save-store.md` §5.2；`ExtensionBagUiBridge.kt:loadStateJson` |
+| 2026-09-13 | 桥接改 v4-only：删除 v2 `capacities` 迁移、v3 迁移回写；依据首个发布 v0.7.0 即 v4，v2/v3 只在开发期存在。未知 section 版本仍按 v4 布局尽力解析，失败回退空状态。 | `module-save-store.md` §5.2；`runtime-architecture.md` §5.3；`ExtensionBagUiBridge.kt:loadStateJson` |
 
 ### 5.1 决策索引使用规则
 

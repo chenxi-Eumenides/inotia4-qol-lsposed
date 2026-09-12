@@ -25,6 +25,19 @@ inline std::string base64_encode(const uint8_t* data, size_t size) {
     return out;
 }
 
+// 从 JSON 字符串字面量 [begin,end) 反转义拷贝到 out（不写 NUL，最多 cap 字节）。
+// 本模块 Kotlin 侧经 org.json JSONObject.toString() 产出 JSON，会把 '/' 转义为 `\/`；
+// base64 字母表不含反斜杠，故按 `\X`→`X` 处理即可（`\/`→`/`、`\\`→`\`）。返回长度，溢出返回 0。
+inline size_t json_unescape_into(const char* begin, const char* end, char* out, size_t cap) {
+    size_t len = 0;
+    for (const char* p = begin; p < end; ++p) {
+        if (*p == '\\' && p + 1 < end) ++p;
+        if (len >= cap) return 0;
+        out[len++] = *p;
+    }
+    return len;
+}
+
 // 严格 RFC4648 解码：长度必须为 4 的倍数，'=' 仅允许结尾 0-2 个，非法字符拒绝。
 inline int base64_decode(const char* text, size_t len, uint8_t* out, size_t cap) {
     if (text == nullptr || len == 0 || len % 4 != 0) return 0;
@@ -155,9 +168,11 @@ inline bool parse_journal_json(const char* json, JournalRecord* out) {
         const char* b64 = payload_key + strlen("\"payload\":\"");
         const char* end_quote = strchr(b64, '"');
         if (end_quote == nullptr) return false;
-        const size_t b64_len = static_cast<size_t>(end_quote - b64);
-        if (b64_len == 0 || b64_len > 512) return false;
-        const int decoded = base64_decode(b64, b64_len, parsed.payload.data(), parsed.payload.size());
+        char b64_plain[512];
+        const size_t b64_len = json_unescape_into(b64, end_quote, b64_plain, sizeof(b64_plain));
+        if (b64_len == 0) return false;
+        const int decoded =
+            base64_decode(b64_plain, b64_len, parsed.payload.data(), parsed.payload.size());
     if (decoded < static_cast<int>(kPayloadHeaderSize) ||
         decoded > static_cast<int>(kMaxSerializedItem)) {
         return false;
@@ -173,10 +188,12 @@ inline bool parse_journal_json(const char* json, JournalRecord* out) {
         const char* source_b64 = source_key + strlen("\"sourcePayload\":\"");
         const char* source_end = strchr(source_b64, '\"');
         if (source_end == nullptr) return false;
-        const size_t source_len = static_cast<size_t>(source_end - source_b64);
-        if (source_len == 0 || source_len > 512) return false;
+        char source_plain[512];
+        const size_t source_len =
+            json_unescape_into(source_b64, source_end, source_plain, sizeof(source_plain));
+        if (source_len == 0) return false;
         const int source_decoded =
-            base64_decode(source_b64, source_len, parsed.source_payload.data(),
+            base64_decode(source_plain, source_len, parsed.source_payload.data(),
                           parsed.source_payload.size());
         if (source_decoded < static_cast<int>(kPayloadHeaderSize) ||
             source_decoded > static_cast<int>(kMaxSerializedItem)) {

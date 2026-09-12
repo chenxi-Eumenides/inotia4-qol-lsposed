@@ -141,12 +141,13 @@ section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不�
 
 | section | 版本 | 内容 | 所有者 |
 |---|---:|---|---|
-| `extensionbags.items` | 4 | 5 个扩展逻辑袋的类型、容量、descriptor、数量、base64 原版 payload、必要的 pending 状态 | `ExtensionBagUiBridge`；常量 `ExtensionBagUiBridge.kt:18-24` |
+| `extensionbags.items` | 4 | 5 个扩展逻辑袋的类型、容量、descriptor、数量、base64 原版 payload、必要的 pending 状态；唯一读写目标 | `ExtensionBagUiBridge`；常量 `ExtensionBagUiBridge.kt:16-21` |
 | `module.save.journal` | 1 | 本次完整保存的协调 envelope 和待提交 section 快照 | `ModuleSaveCoordinator` |
 | `extensionbags.journal` | 1 | 扩展功能事务 journal；当前 helper 存在，但常规 native pending 尚未由它持久化 | `ExtensionBagJournal.kt:17,69` |
-| `virtualbags.items` | 兼容版本 | 兼容读取来源，不是新的写入目标 | `ExtensionBagUiBridge.kt:18-20,60-89` |
 
 `extensionbags.items` 只保存序列化 payload，不保存 `g_module_objects`、`g_module_object_handles`、控件指针或原版 `INVEN_pItem` 记录；加载时用 `SAVE_LoadItem` 重建对象，代码 `extension_bag_runtime.inc:459-468`。
+
+**加载兼容性（当前实现）**：读取只认 section 名 `extensionbags.items`，数据一律按 v4 布局解析（未知版本同样尽力解析，解析失败才回退空状态），不做旧版本迁移或回写；容器 `formatVersion` 必须为 1；不使用游戏签名/安装身份门禁。payload 字段按 JSON 字符串反转义后再 base64 解码（兼容 Android `org.json` 把 `/` 序列化为 `\/`），否则带 `/` 的 payload 会被判长度不足、整状态回退空。代码 `ExtensionBagUiBridge.kt:loadStateJson`、`virtual_bag_serialization.inc:json_unescape_into`。
 
 ### 5.3 文件、原子性和损坏处理
 
@@ -171,8 +172,8 @@ section 名满足 `[a-z0-9._-]{1,64}`；单 section 不超过 1 MiB，容器不�
   → clear_module_cache_locked
   → g_virtual_bag_state = {}
   → extension_bag_load_state_from_store(slot)
-       → Java 读 extensionbags.items（必要时读 legacy）
-       → 校验版本、identity、JSON 和 payload
+       → Java 读 extensionbags.items
+       → 校验版本、JSON 和 payload
        → 恢复逻辑 descriptor/capacity/pending
   → 清理无 pending 的残留 module view state
   → 后续 enter/draw 才 materialize 并安装投影视图
@@ -193,7 +194,7 @@ sidecar 读档的数量语义独立于运行时堆叠配置：descriptor 的 can
 
 进入世界后，`virtual_bag_module_save_prepare` 会先 `recover_pending_transaction_locked`，顺序为：域校验 → payload 校验 → 恢复原版视图 → 按方向决定 action。ext→orig 只有在目标 payload 已存在，或重建对象并经 `SaveItemOnEmpty` 写入、再序列化确认目标后才清 pending；失败保留 pending，代码 `extension_bag_runtime.inc:646-778`。ext→ext 不重放到原版，只按 rollback 语义清理非法/损坏 pending。
 
-恢复是隔离而非猜测：任务袋、越界 bag/slot、非法 payload、失效 identity、目标内容不匹配时不自动“修正”为普通袋，也不调用 `RemoveItemDirect` 删除未知对象。加载失败则使用空扩展状态并记录日志，原版 `save*.dat` 仍可继续读取。
+恢复是隔离而非猜测：任务袋、越界 bag/slot、非法 payload、目标内容不匹配时不自动“修正”为普通袋，也不调用 `RemoveItemDirect` 删除未知对象。加载失败则使用空扩展状态并记录日志，原版 `save*.dat` 仍可继续读取。
 
 ### 6.3 `module.save.journal` 恢复缺口
 
@@ -288,7 +289,7 @@ getter hook（模式视图），写侧持久化依赖 S2-P3 的类别门控与�
 ## 9. 验收与维护
 
 * 每次修改保存入口，先按 `game_symbols.h:476-486` 和 `extension_bag_lifecycle.inc:54-68,609-646` 对码，确认原始指令、patch 数和 `fn_save` 返回语义。
-* 每次修改 sidecar，验证 MSAV/version/slot/generation、section CRC、last-good、未知 section 保留和 identity gate；不得写入 native 指针。
+* 每次修改 sidecar，验证 MSAV/version/slot/generation、section CRC、last-good、未知 section 保留；不得写入 native 指针。
 * 每次修改恢复，分别覆盖合法 pending、非法 domain、坏 payload、目标已存在、目标写入失败、原版保存失败和 commit 失败；记录是 rollback、replay 还是 isolation。
 * 问题 B 验收必须保留“未解决+已布防”字样，并补采 H3/H4 pre/post digest 与 physical mutation 日志后再评估。
 * 本册不要求本批 Android 构建；主代理按仓库阶段规则执行 `git diff --check`、相关 Host tests、Debug 构建和真机保存/重启验收。

@@ -2304,6 +2304,40 @@ static void test_prepare_journal() {
         CHECK_EQ(forward.items[0][0].count, 5);
         CHECK_EQ(forward.selected, 0);
     }
+
+    {
+        // Android org.json 把 base64 里的 '/' 序列化成 `\/`；native 解析必须反转义后再解码，
+        // 否则带 '/' 的 payload 会被判长度不足、整个 sidecar 回退为空。
+        const char* escaped_payload = "Erj\\/CQ8AAAAASA4AZIAkAAAAAA==";
+        std::string json =
+            "{\"mode\":\"original\",\"originalSelected\":1,\"types\":[0,0,0,0,0],"
+            "\"selected\":-1,\"inspected\":-1,\"items\":[";
+        for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+            json += '[';
+            for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+                if (slot > 0) json += ',';
+                if (bag == 0 && slot == 0) {
+                    json += "{\"category\":7,\"count\":5,\"payload\":\"";
+                    json += escaped_payload;
+                    json += "\"}";
+                } else {
+                    json += "{\"category\":0,\"count\":0}";
+                }
+            }
+            json += ']';
+            if (bag + 1 < virtual_bag::kBagCount) json += ',';
+        }
+        json += "]}";
+        virtual_bag::State escaped{};
+        CHECK(virtual_bag::parse_state_json(json.c_str(), &escaped));
+        CHECK_EQ(escaped.items[0][0].category, 7);
+        CHECK_EQ(static_cast<int>(escaped.items[0][0].payload_size), 19);
+        uint8_t expected[19];
+        const int expected_len = virtual_bag::base64_decode(
+            "Erj/CQ8AAAAASA4AZIAkAAAAAA==", 28, expected, sizeof(expected));
+        CHECK_EQ(expected_len, 19);
+        CHECK(std::memcmp(escaped.items[0][0].payload.data(), expected, 19) == 0);
+    }
 }
 
 static void test_ownership_ledger() {

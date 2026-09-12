@@ -723,16 +723,16 @@ swap 状态同步 `extension_bag_transaction.inc:374-449,487-538`、物理快照
 材料删除、扣款回滚和脱装备满包也未由本架构关闭。SaveItem H-13 是当前代码事实，
 但 caller/所有权/真机覆盖仍未闭合，不能据此宣称生产者全覆盖。
 
-### 5.3 `ExtensionBagUiBridge` v2/v3/v4 现状
+### 5.3 `ExtensionBagUiBridge` v4 现状
 
-当前仍是兼容分支，不是最终纯 v4：主 section/版本见 `ExtensionBagUiBridge.kt:18-24`；
-load 兼容 legacy 见 `:59-67`；v2/3/4 分支、回写处理见 `:69-94`；payload-less
-隔离见 `:180-240`。Hub 的 v4-only 是最终目标而非当前实现状态，见
-`control-plane.md:118`。本文记录现状，不宣称兼容分支属于最终发布契约。
+当前为 v4-only：主 section/版本见 `ExtensionBagUiBridge.kt:16-20`；读取只认
+`extensionbags.items`，按 v4 布局解析（未知版本尽力解析，失败回退空状态），不做旧版本
+迁移或回写，见 `loadStateJson`（`:32-43`）；payload-less 隔离见 `parseState`（`:113-175`）。
+兼容读取分支的清理依据见 `control-plane.md` 决策索引。
 
-**未定-需真机证据**：v2/v3/legacy 在进程中断、切档和跨进程并发下的回写安全性，不能由
-`ExtensionBagUiBridge` 的静态分支判定。取证应使用验收册 VM-25：分别准备兼容 section、
-在回写窗口 force-stop，随后核对 v4 section、last-good、原版存档和隔离日志。
+**未定-需真机证据**：未知 section 版本在进程中断、切档和跨进程并发下的解析安全性不能由
+静态分支判定。取证应使用验收册 VM-25：准备非 v4 section，在回写窗口 force-stop，随后
+核对 v4 section、last-good、原版存档和隔离日志。
 
 ### 5.4 API、UI 与锁限制
 

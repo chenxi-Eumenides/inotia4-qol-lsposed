@@ -1,12 +1,10 @@
 package com.inotia4.qol
 
 import android.content.Context
-import android.content.pm.PackageManager
 import com.inotia4.qol.store.ModuleSaveStore
 import com.inotia4.qol.store.ModuleSaveCoordinator
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 
 /**
  * Module-owned extension backpack data. It persists stable item descriptors plus lossless native
@@ -16,101 +14,38 @@ import java.security.MessageDigest
 object ExtensionBagUiBridge {
 
     private const val SECTION_NAME = "extensionbags.items"
-    private const val LEGACY_SECTION_NAME = "virtualbags.items"
     private const val SECTION_VERSION = 4
     private const val BAG_COUNT = 5
     private const val SLOT_COUNT = 16
     private const val MAX_PAYLOAD_CHARS = 512
-    private const val IDENTITY_KEY = "gameIdentity"
 
     private val payloadPattern = Regex("^[A-Za-z0-9+/]*={0,2}$")
 
-    @Volatile
-    private var appContext: Context? = null
-
-    /** Idempotent; ApiServer restart may call it again. */
+    /** Idempotent; ApiServer restart may call it again. 无自有状态，保留入口稳定调用方。 */
     @JvmStatic
+    @Suppress("UNUSED_PARAMETER")
     fun initialize(context: Context) {
-        appContext = context.applicationContext
-    }
-
-    /**
-     * Host-game identity for sidecar deserialization gating (control-plane §9 P1): signature
-     * digest prefix changes only when the APK binary identity changes; same-signature game
-     * updates keep sidecar data readable.
-     */
-    private fun gameIdentity(): String? {
-        val context = appContext ?: return null
-        return try {
-            val info = context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.GET_SIGNING_CERTIFICATES,
-            )
-            val signatures = info.signingInfo?.apkContentsSigners ?: return null
-            val signature = signatures.firstOrNull() ?: return null
-            val digest = MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
-            digest.take(8).joinToString("") { "%02x".format(it) }
-        } catch (t: Throwable) {
-            LogFile.logError("extension bag identity unavailable", t)
-            null
-        }
+        // sidecar IO 与格式校验统一经 ModuleSaveStore；本桥不再持有上下文或游戏签名身份。
     }
 
     @JvmStatic
     fun loadStateJson(slot: Int): String {
         val section = try {
             ModuleSaveStore.readSection(slot, SECTION_NAME)
-                ?: ModuleSaveStore.readSection(slot, LEGACY_SECTION_NAME)
         } catch (t: Throwable) {
             LogFile.logError("extension bag UI state load failed", t)
             return defaultStateJson()
         } ?: return defaultStateJson()
         val raw = section.payload.toString(Charsets.UTF_8)
-        val payload = when (section.version) {
-            2 -> migrateLegacyState(raw)
-            3 -> raw // v3 旧描述符：仅 category/count，无序列化载荷，解析后按 v4 重写
-            SECTION_VERSION -> raw
-            else -> return defaultStateJson()
-        }
-        if (!identityAcceptable(payload)) {
-            LogFile.log("extension bag slot=$slot rejected: incompatible game identity")
-            return defaultStateJson()
-        }
-        val parsed = payload?.let {
-            parseState(it, rejectPayloadlessItems = section.version == SECTION_VERSION)
-        }
-        if (section.version != SECTION_VERSION && parsed != null) {
-            try {
-                ModuleSaveStore.writeSection(
-                    slot,
-                    SECTION_NAME,
-                    SECTION_VERSION,
-                    parsed.toString().toByteArray(Charsets.UTF_8),
-                )
-            } catch (t: Throwable) {
-                LogFile.logError("extension bag UI state migration failed", t)
-            }
-        }
+        // v4-only：读取只认当前 section 名与 v4 布局；未知版本也按当前布局尽力解析，
+        // 解析失败（parseState 返回 null）才回退空状态；不做旧版本迁移/回写，不使用身份门禁。
+        val parsed = parseState(raw, rejectPayloadlessItems = true)
         return parsed?.toString() ?: defaultStateJson()
-    }
-
-    private fun identityAcceptable(payload: String?): Boolean {
-        if (payload == null) return true
-        val stored = try {
-            JSONObject(payload).optString(IDENTITY_KEY, "")
-        } catch (t: Throwable) {
-            LogFile.logError("extension bag state unreadable", t)
-            return false
-        }
-        if (stored.isEmpty()) return true // 旧格式或 unknown 身份：按可读处理
-        val current = gameIdentity() ?: return true // 身份不可得时不阻断（host/诊断期）
-        return stored == current
     }
 
     @JvmStatic
     fun saveStateJson(slot: Int, stateJson: String): String {
         val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        gameIdentity()?.let { normalized.put(IDENTITY_KEY, it) }
         return try {
             val saved = ModuleSaveStore.writeSection(
                 slot,
@@ -129,7 +64,6 @@ object ExtensionBagUiBridge {
     @JvmStatic
     fun prepareSave(slot: Int, transactionId: String, stateJson: String): String {
         val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        gameIdentity()?.let { normalized.put(IDENTITY_KEY, it) }
         val prepared = ModuleSaveCoordinator.prepare(
             slot,
             transactionId,
@@ -147,7 +81,6 @@ object ExtensionBagUiBridge {
     @JvmStatic
     fun commitSave(slot: Int, transactionId: String, stateJson: String): String {
         val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        gameIdentity()?.let { normalized.put(IDENTITY_KEY, it) }
         val committed = ModuleSaveCoordinator.commitAfterOriginalSave(
             slot,
             transactionId,
@@ -281,30 +214,4 @@ object ExtensionBagUiBridge {
         return result
     }
 
-    private fun migrateLegacyState(raw: String): String? {
-        return try {
-            val source = JSONObject(raw)
-            val capacities = source.getJSONArray("capacities")
-            if (capacities.length() != BAG_COUNT) return null
-            val types = JSONArray()
-            for (index in 0 until BAG_COUNT) {
-                val capacity = capacities.getInt(index)
-                if (capacity !in 0..16) return null
-                val type = when {
-                    capacity == 0 -> 0
-                    capacity <= 4 -> 1
-                    capacity <= 8 -> 2
-                    capacity <= 12 -> 3
-                    else -> 4
-                }
-                types.put(type)
-            }
-            source.put("types", types)
-            source.remove("capacities")
-            source.toString()
-        } catch (t: Throwable) {
-            LogFile.logError("extension bag UI legacy state migration parse failed", t)
-            null
-        }
-    }
 }
