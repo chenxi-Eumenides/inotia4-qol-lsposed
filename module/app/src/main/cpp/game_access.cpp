@@ -188,6 +188,10 @@ bool bridge_init() {
     fn_tutorial_start = reinterpret_cast<TutorialStartFn>(g_base + fn_resolve("F_TUTORIAL_START_VMA", F_TUTORIAL_START_VMA));
     fn_save_get_save_file_name = reinterpret_cast<SaveGetSaveFileNameFn>(g_base + fn_resolve("F_SAVE_GET_SAVE_FILE_NAME_VMA", F_SAVE_GET_SAVE_FILE_NAME_VMA));
     fn_cs_fs_remove = reinterpret_cast<CsFsRemoveFn>(g_base + fn_resolve("F_CS_FS_REMOVE_VMA", F_CS_FS_REMOVE_VMA));
+    fn_hub_save_get_key = reinterpret_cast<HubSaveGetKeyFn>(g_base + fn_resolve("F_HUBSAVE_GET_KEY_VMA", F_HUBSAVE_GET_KEY_VMA));
+    fn_save_load_data = reinterpret_cast<SaveLoadDataFn>(g_base + fn_resolve("F_SAVE_LOAD_DATA_VMA", F_SAVE_LOAD_DATA_VMA));
+    fn_mem_free = reinterpret_cast<MemFreeFn>(g_base + fn_resolve("F_MEM_FREE_VMA", F_MEM_FREE_VMA));
+    fn_encrypt_process2 = reinterpret_cast<EncryptProcess2Fn>(g_base + fn_resolve("F_ENCRYPT_PROCESS2_VMA", F_ENCRYPT_PROCESS2_VMA));
     fn_gamestate_set_state = reinterpret_cast<GamestateSetStateFn>(g_base + fn_resolve("F_GAMESTATE_SET_STATE_VMA", F_GAMESTATE_SET_STATE_VMA));
     fn_uinpc_init = reinterpret_cast<UinpcInitFn>(g_base + fn_resolve("F_UINPC_INIT_VMA", F_UINPC_INIT_VMA));
     fn_check_function_display = reinterpret_cast<NpcSystemCheckFunctionDisplayFn>(g_base + fn_resolve("F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA", F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA));

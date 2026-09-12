@@ -62,6 +62,11 @@ SelectCharacterStartGameFn fn_select_character_start_game = nullptr;
 TutorialStartFn fn_tutorial_start = nullptr;
 SaveGetSaveFileNameFn fn_save_get_save_file_name = nullptr;
 CsFsRemoveFn fn_cs_fs_remove = nullptr;
+// ---- 存档文件加解密链（save-export 存档管理器）----
+HubSaveGetKeyFn fn_hub_save_get_key = nullptr;
+SaveLoadDataFn fn_save_load_data = nullptr;
+MemFreeFn fn_mem_free = nullptr;
+EncryptProcess2Fn fn_encrypt_process2 = nullptr;
 GamestateSetStateFn fn_gamestate_set_state = nullptr;
 UinpcInitFn fn_uinpc_init = nullptr;
 NpcSystemCheckFunctionDisplayFn fn_check_function_display = nullptr;

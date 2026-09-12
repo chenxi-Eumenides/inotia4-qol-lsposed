@@ -53,11 +53,16 @@ void settings_panel_enter() {
     if (addr != nullptr) {
         g_addr_desc = addr;
     }
+    // 存档备份按钮（v0.7.x）—— push 打开备份面板
+    void* sb_btn = ui_create_button(root, settings_savebackup_rect(), "存档备份",
+                                    &settings_savebackup_clicked, &savebackup_btn_draw);
+    g_savebackup_btn = sb_btn;
     g_root = root;
     g_panel_active = true;
     g_close_delay_frames = 0;
     g_back_pressed = false;
-    SETTINGS_LOG("settings panel enter: root=%p %d settings cells + addr created", root, SETTINGS_ROW_COUNT);
+    SETTINGS_LOG("settings panel enter: root=%p %d settings cells + addr + savebackup created",
+                 root, SETTINGS_ROW_COUNT);
 }
 
 void settings_panel_process() {
@@ -101,6 +106,7 @@ void settings_panel_process() {
         if (g_rows[i].desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[i].desc);
     }
     if (g_addr_desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_addr_desc);
+    if (g_savebackup_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_savebackup_btn);
     ui_end_frame();
 }
 
@@ -155,6 +161,12 @@ uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
                 break;
             }
         }
+        if (g_savebackup_btn != nullptr &&
+            ui_hit_test(g_savebackup_btn, tx, ty, settings_savebackup_rect())) {
+            SETTINGS_LOG("settings event: savebackup btn hit");
+            settings_savebackup_clicked(g_savebackup_btn);
+            return 1;
+        }
         if (g_back_btn != nullptr &&
             ui_hit_test(g_back_btn, tx, ty, {0, 0, BACK_BTN_W, BACK_BTN_H})) {
             settings_back_clicked(g_back_btn);
@@ -172,6 +184,16 @@ uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
         }
     }
     return 1;
+}
+
+void settings_savebackup_clicked(void* ctrl) {
+    SETTINGS_LOG("settings savebackup button clicked");
+    // 嵌套 push：保持设置页在栈中第 N 位；备份面板成为新栈顶；
+    // 关闭备份面板后回到设置页（实测如 push 行为异常，退化为切换式：先关闭自身再开备份面板）。
+    const std::string r = data_savebackup_ui_open_panel();
+    if (r.find("\"ok\":true") == std::string::npos) {
+        SETTINGS_LOG("savebackup open failed: %s", r.c_str());
+    }
 }
 
 // ---- 主菜单「更多游戏」按钮钩子 ----

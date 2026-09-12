@@ -9,6 +9,7 @@
 #include "game_ui.h"
 #include "game_ui_kit.h"
 #include "game_ui_components.h"
+#include "game_ui_savebackup.h"
 
 #include <android/log.h>
 #include <atomic>
@@ -77,6 +78,7 @@ struct SettingsRow {
 SettingsRow g_rows[SETTINGS_ROW_COUNT];
 void* g_back_btn = nullptr;
 void* g_addr_desc = nullptr;
+void* g_savebackup_btn = nullptr;  // v0.7.x：底部「存档备份」入口按钮
 
 // 配置键名（与 Kotlin ModuleConfig 字段一致）
 static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled"};
@@ -89,6 +91,8 @@ static char g_addr_text[CB_TEXT_SIZE] = "";
 bool inject_state_entry_locked();
 void settings_row_clicked(void* ctrl);
 void settings_back_clicked(void* ctrl);
+void settings_savebackup_clicked(void* ctrl);  // v0.7.x：存档备份按钮
+void savebackup_btn_draw(void* ctrl);
 
 #include "game_ui_settings_geometry.inc"
 #include "game_ui_settings_config.inc"
@@ -97,3 +101,33 @@ void settings_back_clicked(void* ctrl);
 #include "game_ui_settings_injection.inc"
 }  // namespace
 #include "game_ui_settings_api.inc"
+
+// 全局命名空间代理：给 savebackup UI 使用的设置面板状态查询。
+// 匿名命名空间成员在同 TU 内全局可见（using-directive 等价），故直接读 + 加锁即可。
+bool settings_panel_active_for_savebackup() {
+    // g_settings_mtx / g_panel_active 是 settings TU 的匿名命名空间成员，
+    // 同 TU 内（settings.cpp）可见，无需 extern。
+    std::lock_guard<std::mutex> lock(g_settings_mtx);
+    return g_panel_active;
+}
+
+// 关闭设置面板（v0.7.x）：清 panel 状态 + 还原 state entry。
+// 在切换式兜底路径中被 data_savebackup_ui_open_panel 调用（嵌套 push 失败后退化）。
+// 仅清理 settings 模块自身状态；调用方需自行调 fn_ui_set_popup_process_info(3, 0)
+// 让游戏主循环真正关闭 UI 显示（push state 0 + clear draw flag）。
+void settings_ui_close_panel() {
+    std::lock_guard<std::mutex> lock(g_settings_mtx);
+    if (g_panel_active) {
+        // 复用 settings_panel_f3 清理 panel 状态（清 g_panel_active、释放 option_images 等）。
+        // f3 内不持锁，直接调用即可（g_settings_mtx 已持锁）。
+        settings_panel_f3();
+        SETTINGS_LOG("settings panel closed by external caller");
+    }
+    // 还原注入的 state entry（保持死条目可复用；离开主菜单的 ensure_inject_thread 也会还原，
+    // 这里主动还原避免 settings_panel_enter 残留在 entry 上影响后续 game 内 IAP 检测路径）。
+    if (g_state_entry != nullptr) {
+        memcpy(g_state_entry, g_state_backup, POPUP_STATE_SIZE);
+        g_state_entry = nullptr;
+        g_state_id = -1;
+    }
+}

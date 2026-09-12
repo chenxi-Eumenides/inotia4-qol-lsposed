@@ -1469,6 +1469,72 @@
 
 **注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false；与 enter_slot 相同的同意页/弹窗门禁（`ui occupied: agreement` / `ui occupied: dialog_popup` / `ui state unavailable`）及 15s 进档宽限拦截；损坏槽可直接 create_slot 重建覆盖（2026-08-28 save1 实测）。
 
+#### 存档备份（导出 / 列表 / 导入 / 删除）
+
+> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qsb` 备份，可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/save_backup/`。
+>
+> **备份标识 = `checksum`**：`sha256(origPlain ‖ module)` 的前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qsb` 的末段。同一游戏内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名。
+>
+> 导入导出时机与责任由调用方负责，模块只保证原子写、CRC 校验与内容完整。
+
+##### 导出备份
+
+`POST /api/system/backup/export`
+
+**用途**：把指定槽导出为 `.qsb` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。
+
+**请求格式**：`{ "slot": 0 }`（0/1/2）
+
+**返回格式**：
+
+```json
+{ "ok": true, "backup": <BackupMeta> }
+```
+
+去重命中（同 `checksum` 备份已存在）时不写新文件，返回既有备份的 meta 并附加 `"deduplicated":true`：
+
+```json
+{ "ok": true, "backup": <BackupMeta>, "deduplicated": true }
+```
+
+**注意**：先算出 `checksum`，再扫描 `save_backup/*.qsb`：已存在同 `checksum` 备份 → 不写入新文件直接返回；不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
+
+##### 备份列表
+
+`GET /api/system/backup/list`
+
+**用途**：列出 `save_backup/` 下全部备份，按导出时间倒序。
+
+**返回格式**：`{"ok":true,"backups":[<BackupMeta>,...]}`
+
+**注意**：只读文件头元数据，不解密正文；`checksum` 从 bundle 的 metaJson 读取（文件名解析兜底）；损坏文件跳过并记日志。
+
+##### 导入备份
+
+`POST /api/system/backup/import`
+
+**用途**：把备份还原到指定槽位：原版存档按目标槽改写槽位字段并重加密写回 `save{slot}.dat`，模块 sidecar 一并写入。
+
+**请求格式**：`{ "checksum": "8f03df248aec", "slot": 1 }`
+
+**返回格式**：`{"ok":true,"backup":<BackupMeta>}`
+
+**注意**：按 `checksum` 定位 bundle。校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。写入前把目标槽现存原版文件与 sidecar 复制到 `save_backup/.rollback/`，任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
+
+##### 删除备份
+
+`POST /api/system/backup/delete`
+
+**用途**：按 `checksum` 删除备份文件（bundle 自包含，删除单文件即同时移除原版 + 模块两部分）。
+
+**请求格式**：`{ "checksum": "8f03df248aec" }`
+
+**返回格式**：`{"ok":true}`
+
+**注意**：校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
+
+**BackupMeta 字段**：`file_name`（含导出时间与 `checksum` 前缀）、`size_bytes`、`source_slot`（导出源槽）、`export_time`（ms）、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（备份标识，12 位小写 hex）。
+
 ### 7.4 静态数据表 tables
 
 > 静态知识库：游戏静态表 + 多语言文本（text）+ 剧情事件（story-events）统一作为 table 查询。

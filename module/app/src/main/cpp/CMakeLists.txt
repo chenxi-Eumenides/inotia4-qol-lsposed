@@ -25,6 +25,8 @@ add_library(gamebridge SHARED
     api/native/game_shop.cpp
     api/native/game_save.cpp
     api/native/game_save_preflight.cpp
+    feature/save_backup/save_backup_bundle.cpp
+    feature/save_backup/save_backup.cpp
     game_system.cpp
     core/native/game_motion.cpp
     data/native/game_tiles.cpp
@@ -39,6 +41,7 @@ add_library(gamebridge SHARED
     feature/ui/game_ui_kit.cpp
     feature/ui/game_ui_components.cpp
     feature/ui/game_ui_settings.cpp
+    feature/ui/game_ui_savebackup.cpp
     feature/extension_bag/game_ui_virtbag.cpp
     feature/extension_bag/extension_bag_port.cpp
     feature/extension_bag/extension_bag_persistence.cpp

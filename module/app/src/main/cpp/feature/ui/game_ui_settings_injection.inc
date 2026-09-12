@@ -37,12 +37,21 @@ void ensure_inject_thread() {
             if (on_main_menu) {
                 inject_state_entry_locked();
                 inject_more_games_btn();
-            } else if (g_more_games_injected) {
-                // 离开主菜单后控件树被释放，仅重置标志，不 uninstall（避免写已释放内存）
+            } else {
                 std::lock_guard<std::mutex> lock(g_settings_mtx);
-                g_more_games_injected = false;
-                g_more_games_hook.slot = nullptr;
-                g_more_games_hook.orig = nullptr;
+                // 离开主菜单（v0.7.x）：还原 PopupState 回调与按钮 hook，
+                // 不永久占用 IAP 死条目 / 更多游戏按钮，与 savebackup UI 同策略。
+                if (g_state_entry != nullptr) {
+                    memcpy(g_state_entry, g_state_backup, POPUP_STATE_SIZE);
+                    g_state_entry = nullptr;
+                    g_state_id = -1;
+                }
+                if (g_more_games_injected) {
+                    g_more_games_injected = false;
+                    g_more_games_hook.slot = nullptr;
+                    g_more_games_hook.orig = nullptr;
+                }
+                g_panel_active = false;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }

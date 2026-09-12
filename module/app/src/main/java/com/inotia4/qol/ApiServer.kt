@@ -46,6 +46,27 @@ object ApiServer {
         // 模块配置组件：外部 config.json 为唯一来源（v0.5.21 起不再读 assets；缺失用默认值并写入外部存储）
         ModuleConfig.load(context)
         ModuleSaveStore.initialize(context)
+        // 存档管理器备份底层（bundle 导出/导入/列表/删除）收口 native feature/save_backup
+        NativeBridge.nativeSaveBackupInit(
+            context.applicationInfo.dataDir,
+            context.getExternalFilesDir(null)?.absolutePath ?: "",
+        )
+        // 启动期下发 map_id → 中文名表（MAPINFOBASE），native 自存内存表供 entry_json 输出
+        // （v0.7.x 给游戏内备份面板的列表项展示地图名）。
+        try {
+            NativeBridge.nativeSaveBackupSetMapNames(StaticData.buildMapNamesJson())
+        } catch (t: Throwable) {
+            LogFile.logError("savebackup set map names failed", t)
+        }
+        // 启动游戏内备份面板的懒注入线程（注入 INAP_GOODS 死条目 + 设置页存档备份按钮）
+        try {
+            val r = NativeBridge.nativeSaveBackupUiInject()
+            LogFile.log("savebackup ui inject: $r")
+            val sr = NativeBridge.nativeSaveBackupUiSelfCheck()
+            LogFile.log("savebackup self check: $sr")
+        } catch (t: Throwable) {
+            LogFile.logError("savebackup ui init failed", t)
+        }
         ExtensionBagUiBridge.initialize(context)
         // 功能开关通知 native 生效 + 静态瓦片矩阵加载（v0.5.18/2026-08-12；v0.5.46 收口到 ConfigApiService）
         ApiServices.config.applyToNative()

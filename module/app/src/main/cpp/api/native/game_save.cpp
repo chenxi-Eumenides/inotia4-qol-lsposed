@@ -7,6 +7,7 @@
 #include <atomic>
 #include <unistd.h>
 
+#include "feature/ui/game_ui_savebackup.h"
 #include "game_access.h"
 #include "game_ops_common.h"
 #include "game_save_preflight.h"
@@ -47,6 +48,7 @@ std::string data_save_slots_json() {
 
 std::string data_op_save() {
     if (!game_in_world()) return op_err("not in game");
+    if (const char* ui_block = savebackup_ui_block_reason()) return op_err(ui_block);
     if (fn_save == nullptr) return op_err("symbol not resolved");
     return module_save_game() ? op_ok() : op_err("save failed");
 }
@@ -67,6 +69,9 @@ static std::string save_preflight_for_enter(int32_t slot) {
     }
     if (g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on))
         return op_err("ui occupied: dialog_popup");
+    if (const char* ui_block = savebackup_ui_block_reason()) {
+        return op_err(ui_block);
+    }
     void* ss = fn_save_get_save_slot(slot);
     if (ss == nullptr) return op_err("bad slot");
     fn_save_load_save_slot(slot, ss);
@@ -118,6 +123,7 @@ static std::string save_preflight_for_enter(int32_t slot) {
 
 std::string data_op_enter_slot(int32_t slot) {
     if (g_state == nullptr) return op_err("libgame not ready");
+    if (const char* ui_block = savebackup_ui_block_reason()) return op_err(ui_block);
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
     if (st == 5) return op_err("already in game");
     // 前置检查（v0.5.7）：仅主菜单（STATE==4）可进档。loading/切换态（STATE=0xFFFF）下
@@ -156,6 +162,7 @@ std::string data_op_enter_slot(int32_t slot) {
 // frida 全流程监听实证，见 docs/systems/save.md §10）
 std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
     if (g_state == nullptr) return op_err("libgame not ready");
+    if (const char* ui_block = savebackup_ui_block_reason()) return op_err(ui_block);
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
     if (st == 5) return op_err("already in game");
     if (st != 4) {

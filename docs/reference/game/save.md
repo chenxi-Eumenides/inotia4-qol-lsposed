@@ -18,16 +18,16 @@
 ```text
 文件大小 N（必须 ≥ 3）
 ├─ ciphertext[0 .. N-3)      有效负载密文，长度 L = N-3
-├─ byte[N-3] = checksum      sum(ciphertext[0..L)) & 0xff
+├─ byte[N-3] = sum_cipher    sum(ciphertext[0..L)) & 0xff
 ├─ byte[N-2] = seed          保存时 MATH_GetRandom 写入的随机种子（0-255）
-└─ byte[N-1] = 未使用        解密/校验均不引用
+└─ byte[N-1] = sum_plain     sum(plaintext[0..L)) & 0xff（解密后校验）
 ```
 
 - 读取：`FILE_Open(name,1,1)` → `FILE_GetSizeFromHandle` → `MEM_Malloc(N)` → `FILE_Read` 必须读满 N 字节（短读=失败）。
 - 解密（`ENCRYPT_Process2(buf, L, mode=1, key)`，就地）：
   `i = seed + j`（j ∈ [0,L)）；`plain[j] = cipher[j] XOR (key[i % keylen] + ENCRYPT_GetKey(i & 0xff))`。
-- **校验层**：解密前计算 `sum(cipher[0..L)) & 0xff`，与 `cipher[L]`（checksum 字节）比对，不等 → 返回 0（加载失败）。
-  这是原版唯一的完整性校验——**无魔数、无 CRC32，只有 8 位加和校验 + 逐字节 XOR 流加密**。
+- **校验层**：解密前计算 `sum(cipher[0..L)) & 0xff` 与 `cipher[L]` 比对；解密后计算 `sum(plain[0..L)) & 0xff` 与 `cipher[N-1]` 比对。两者都相等才返回 1，任一不等 → 返回 0（加载失败）。
+  这是原版唯一的完整性校验——**无魔数、无 CRC32，只有双重 8 位加和校验 + 逐字节 XOR 流加密**。
 - 密钥：`HubSave_GetKey`（0x9001c）返回设备相关密钥（`HubSave_LoadKey` 0x8ff1c 在 `[0x2f6000+0x80]==2` 时加载）；
   `SAVE_LoadData`（0x129260）在 `[0x2f6000+0x80]==3` 时用 `CS_hlpGetAppProperty` 取旧版密钥重试（v119  legacy 路径，
   配套 `SAVE_v119FileToBeforeVersion` 0x12aa10 / `SAVE_GetMergeData_v119` / `SAVE_MergeDataDelete_v119`）。

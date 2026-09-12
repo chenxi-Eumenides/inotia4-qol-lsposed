@@ -40,6 +40,8 @@ object ModuleSaveStore {
     private const val DIRECTORY_NAME = "module-saves"
     private const val FILE_SUFFIX = ".module-save"
     private const val LAST_GOOD_SUFFIX = ".last-good"
+    // 容器头内存储槽号偏移：u32 magic + u16 formatVersion 之后。
+    private const val CONTAINER_SLOT_OFFSET = 6
     private val sectionNamePattern = Regex("[a-z0-9._-]{1,$MAX_SECTION_NAME_BYTES}")
     private val lock = Any()
 
@@ -120,6 +122,52 @@ object ModuleSaveStore {
         AtomicFile(primary).delete()
         AtomicFile(lastGood).delete()
         writeSlot(slot, SlotData(generation = 1, sections = LinkedHashMap()), preserveCurrent = false)
+    }
+
+    /** 返回槽的主容器原始字节（可按该槽解码时；否则 null）。备份导出用。 */
+    fun readContainer(slot: Int): ByteArray? = synchronized(lock) {
+        requireSlot(slot)
+        val bytes = readAtomically(primaryFile(slot) ?: return null)
+        if (bytes != null && decode(bytes, slot) != null) bytes else null
+    }
+
+    /**
+     * 从外部容器字节导入一个槽（备份导入用）：先按源容器头第 6 字节存储的槽号校验，
+     * 再重编码为目标槽，结果同时原子写入 primary 与 last-good。失败返回 false（目标容器保持原状）。
+     */
+    fun importContainer(slot: Int, sourceBytes: ByteArray): Boolean = synchronized(lock) {
+        requireSlot(slot)
+        val storedSlot = if (sourceBytes.size > CONTAINER_SLOT_OFFSET) {
+            sourceBytes[CONTAINER_SLOT_OFFSET].toInt() and 0xFF
+        } else {
+            -1
+        }
+        val data = if (storedSlot in 0 until SLOT_COUNT) decode(sourceBytes, storedSlot) else null
+        if (data == null) {
+            LogFile.log("module save import slot=$slot rejected: source container invalid (storedSlot=$storedSlot)")
+            return false
+        }
+        val encoded = try {
+            encode(slot, SlotData(nextGeneration(data.generation), data.sections))
+        } catch (t: Throwable) {
+            LogFile.logError("module save import slot=$slot encode failed", t)
+            return false
+        }
+        val primary = primaryFile(slot) ?: return false
+        val lastGood = lastGoodFile(slot) ?: return false
+        if (!writeAtomically(primary, encoded)) return false
+        if (!writeAtomically(lastGood, encoded)) {
+            // primary 已提交且有效；last-good 滞后不阻塞导入，但记录异常供排查。
+            LogFile.log("module save import slot=$slot: last-good write failed after primary commit")
+            return false
+        }
+        true
+    }
+
+    /** 备份回滚用：槽 primary sidecar 文件路径（仅同模块内部使用）。 */
+    internal fun primarySnapshotFile(slot: Int): File? = synchronized(lock) {
+        requireSlot(slot)
+        primaryFile(slot)
     }
 
     private fun loadSlot(slot: Int): LoadedSlot? {

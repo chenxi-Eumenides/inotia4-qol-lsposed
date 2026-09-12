@@ -22,6 +22,7 @@
 #include "core/native/sell_price.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "feature/patch/inventory_find_item_poc.h"
+#include "feature/save_backup/save_backup_bundle.h"
 #include "../data/native/game_tiles.cpp"
 
 extern void set_host_stack_limit_enabled(bool enabled);
@@ -1696,6 +1697,283 @@ static void test_save_preflight_json() {
     CHECK(semantic.find("hero pointer is null") != npos);
 }
 
+// save-backup 纯逻辑层（feature/save_backup/save_backup_bundle.cpp，编译真实被测源文件）：
+
+static void test_save_backup_digests() {
+    namespace sb = save_backup;
+    using sb::Entry; using sb::ParsedBundle;
+    // SHA-256（FIPS 180-4 标准向量）
+    CHECK_EQ(sb::sha256_hex({}, {}), std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+    {
+        std::vector<uint8_t> abc = {'a', 'b', 'c'};
+        CHECK_EQ(sb::sha256_hex(abc, {}),
+                 std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        // 两段拼接等价于连接后单段。
+        std::vector<uint8_t> second = {'d', 'e'};
+        CHECK_EQ(sb::sha256_hex(abc, second), sb::sha256_hex({'a', 'b', 'c', 'd', 'e'}, {}));
+    }
+    // MD5（RFC 1321 标准向量）
+    CHECK_EQ(sb::md5_hex(reinterpret_cast<const uint8_t*>(""), 0),
+             std::string("d41d8cd98f00b204e9800998ecf8427e"));
+    CHECK_EQ(sb::md5_hex(reinterpret_cast<const uint8_t*>("abc"), 3),
+             std::string("900150983cd24fb0d6963f7d28e17f72"));
+    CHECK_EQ(sb::md5_hex(reinterpret_cast<const uint8_t*>("message digest"), 14),
+             std::string("f96b697d7cb7938d525a2f31aaf161d0"));
+    // CRC32（IEEE，与 java.util.zip.CRC32 一致）
+    CHECK_EQ(sb::crc32_ieee(reinterpret_cast<const uint8_t*>(""), 0), 0x00000000u);
+    CHECK_EQ(sb::crc32_ieee(reinterpret_cast<const uint8_t*>("123456789"), 9), 0xCBF43926u);
+}
+
+static void test_save_backup_base64() {
+    namespace sb = save_backup;
+    using sb::Entry; using sb::ParsedBundle;
+    const uint8_t hello[5] = {'H', 'e', 'l', 'l', 'o'};
+    CHECK_EQ(sb::base64_encode(hello, 5), std::string("SGVsbG8="));
+    std::vector<uint8_t> dec;
+    CHECK(sb::base64_decode("SGVsbG8=", dec));
+    CHECK_EQ(dec, (std::vector<uint8_t>{'H', 'e', 'l', 'l', 'o'}));
+    // 任意长度往返（含 padding 边界）
+    std::vector<uint8_t> data;
+    for (int i = 1; i <= 255; ++i) data.push_back(static_cast<uint8_t>(i * 7 + 1));
+    for (size_t len : {size_t(1), size_t(2), size_t(3), size_t(19), size_t(255)}) {
+        const std::string enc = sb::base64_encode(data.data(), len);
+        CHECK(sb::base64_decode(enc, dec));
+        CHECK_EQ(dec.size(), len);
+        CHECK(std::memcmp(dec.data(), data.data(), len) == 0);
+    }
+    // 空输入
+    CHECK(sb::base64_decode("", dec));
+    CHECK(dec.empty());
+    // 非法输入拒绝
+    CHECK(!sb::base64_decode("A", dec));
+    CHECK(!sb::base64_decode("AA=A", dec));
+    CHECK(!sb::base64_decode("!!!!", dec));
+}
+
+static void test_save_backup_bundle_roundtrip() {
+    namespace sb = save_backup;
+    using sb::Entry; using sb::ParsedBundle;
+    const std::vector<uint8_t> plain = {1, 2, 3, 4, 5, 6, 7, 8};
+    const std::vector<uint8_t> module = {0x4D, 0x53, 0x41, 0x56, 0, 1, 0, 9};
+    const std::string meta = "{\"source_slot\":1,\"export_time\":1700000000000,\"map_id\":37,"
+                             "\"hero_level\":5,\"hero_index\":0,\"save_version\":5,"
+                             "\"save_time\":1699999999000,\"original_sha256\":\"ab12\","
+                             "\"module_sha256\":\"cd34\",\"checksum\":\"89abcdef0123\"}";
+    std::vector<uint8_t> bundle;
+    sb::build_bundle(1, 1700000000000LL, plain, module, meta, bundle);
+    CHECK_EQ(bundle.size(), sb::kMinBundleBytes + plain.size() + module.size() + meta.size());
+
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+    CHECK_EQ(parsed.source_slot, 1);
+    CHECK_EQ(parsed.export_time_ms, 1700000000000LL);
+    CHECK(parsed.orig_plain == plain);
+    CHECK(parsed.module == module);
+    CHECK_EQ(parsed.meta_json, meta);
+    CHECK_EQ(parsed.size_bytes, static_cast<long long>(bundle.size()));
+
+    // 空 module（仅原版备份）往返
+    std::vector<uint8_t> bundle2;
+    sb::build_bundle(2, 42, plain, {}, meta, bundle2);
+    sb::ParsedBundle parsed2;
+    CHECK(sb::parse_bundle(bundle2.data(), bundle2.size(), parsed2));
+    CHECK(parsed2.module.empty());
+
+    // 损坏拒绝：CRC 篡改、magic 篡改、版本不识别、分段越界、尺寸过小
+    auto corrupted = bundle;
+    corrupted[corrupted.size() - 1] ^= 1;
+    CHECK(!sb::parse_bundle(corrupted.data(), corrupted.size(), parsed));
+    corrupted = bundle;
+    corrupted[0] = 'X';
+    CHECK(!sb::parse_bundle(corrupted.data(), corrupted.size(), parsed));
+    corrupted = bundle;
+    corrupted[4] = 9;  // version 高字节
+    CHECK(!sb::parse_bundle(corrupted.data(), corrupted.size(), parsed));
+    corrupted = bundle;
+    corrupted[6] = 3;  // sourceSlot > 2
+    CHECK(!sb::parse_bundle(corrupted.data(), corrupted.size(), parsed));
+    corrupted = bundle;
+    corrupted[18] = 0xFF;  // origLen 高字节越界
+    CHECK(!sb::parse_bundle(corrupted.data(), corrupted.size(), parsed));
+    CHECK(!sb::parse_bundle(bundle.data(), sb::kMinBundleBytes - 1, parsed));
+}
+
+static void test_save_backup_meta_entry() {
+    namespace sb = save_backup;
+    using sb::Entry; using sb::ParsedBundle;
+    const std::vector<uint8_t> plain(4, 0xAB);
+    const std::string meta = sb::build_meta_json(1, 1700000000000LL, 37, 5, 0, 5, 1699999999000LL,
+                                             "aa00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00",
+                                             "cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00",
+                                             "89abcdef0123");
+    std::vector<uint8_t> bundle;
+    sb::build_bundle(1, 1700000000000LL, plain, {}, meta, bundle);
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+    Entry e;
+    sb::entry_from_bundle("20260912-122823_s1_89abcdef0123.qsb", parsed, e);
+    CHECK_EQ(e.file_name, std::string("20260912-122823_s1_89abcdef0123.qsb"));
+    CHECK_EQ(e.size_bytes, static_cast<long long>(bundle.size()));
+    CHECK_EQ(e.source_slot, 1);
+    CHECK_EQ(e.export_time_ms, 1700000000000LL);
+    CHECK_EQ(e.map_id, 37);
+    CHECK_EQ(e.hero_level, 5);
+    CHECK_EQ(e.hero_index, 0);
+    CHECK_EQ(e.save_version, 5);
+    CHECK_EQ(e.save_time, 1699999999000LL);
+    CHECK(e.original_sha256.length() == 64);
+    CHECK_EQ(e.checksum, std::string("89abcdef0123"));
+
+    // metaJson 权威：meta 内 checksum 与文件名后缀不同时取 meta。
+    Entry e2;
+    sb::entry_from_bundle("20260912-122823_s1_ffffffffffff.qsb", parsed, e2);
+    CHECK_EQ(e2.checksum, std::string("89abcdef0123"));
+
+    // checksum 缺失 → 文件名兜底；字段缺失 → 默认值（map_id=0、hero=-1、version=0）。
+    ParsedBundle legacy;
+    legacy.source_slot = 2;
+    legacy.export_time_ms = 7;
+    legacy.size_bytes = 100;
+    legacy.meta_json = "{}";
+    Entry e3;
+    sb::entry_from_bundle("20260912-000000_s2_deadbeefcafe.qsb", legacy, e3);
+    CHECK_EQ(e3.checksum, std::string("deadbeefcafe"));
+    CHECK_EQ(e3.map_id, 0);
+    CHECK_EQ(e3.hero_level, -1);
+    CHECK_EQ(e3.hero_index, -1);
+    CHECK_EQ(e3.save_version, 0);
+    CHECK_EQ(e3.save_time, 0);
+    CHECK(e3.original_sha256.empty());
+    CHECK(e3.module_sha256.empty());
+
+    // entry_json 字段名与顺序（HTTP BackupMeta 契约）。
+    const std::string j = sb::entry_json(e3);
+    CHECK(j.find("\"file_name\":") != std::string::npos);
+    CHECK(j.find("\"size_bytes\":100") != std::string::npos);
+    CHECK(j.find("\"source_slot\":2") != std::string::npos);
+    CHECK(j.find("\"export_time\":7") != std::string::npos);
+    CHECK(j.find("\"map_id\":0") != std::string::npos);
+    CHECK(j.find("\"hero_level\":-1") != std::string::npos);
+    CHECK(j.find("\"hero_index\":-1") != std::string::npos);
+    CHECK(j.find("\"save_version\":0") != std::string::npos);
+    CHECK(j.find("\"save_time\":0") != std::string::npos);
+    CHECK(j.find("\"original_sha256\":\"\"") != std::string::npos);
+    CHECK(j.find("\"module_sha256\":\"\"") != std::string::npos);
+    CHECK(j.find("\"checksum\":\"deadbeefcafe\"") != std::string::npos);
+
+    // 极简提取器：键完整匹配（save_time 不串到 export_time）、缺省返回 false。
+    long long v = 0;
+    std::string s;
+    CHECK(sb::json_find_int(meta, "save_time", v));
+    CHECK_EQ(v, 1699999999000LL);
+    CHECK(sb::json_find_int(meta, "map_id", v));
+    CHECK_EQ(v, 37);
+    CHECK(!sb::json_find_int(meta, "missing", v));
+    CHECK(sb::json_find_string(meta, "checksum", s));
+    CHECK_EQ(s, std::string("89abcdef0123"));
+    CHECK(!sb::json_find_string(meta, "missing", s));
+}
+
+// entry_json 携带 map_name 字段（v0.7.x 给游戏内备份面板显示地图名）。
+// Entry.map_name 缺省空串、entry_json 输出空 map_name 字段不丢失。
+static void test_save_backup_entry_map_name() {
+    namespace sb = save_backup;
+    sb::Entry e;
+    e.file_name = "20260912-130000_s0_89abcdef0123.qsb";
+    e.size_bytes = 12345;
+    e.source_slot = 0;
+    e.export_time_ms = 1700000000000LL;
+    e.map_id = 37;
+    e.map_name = "影子丛林1";  // Kotlin 启动期下发的中文地图名
+    e.hero_level = 5;
+    e.checksum = "89abcdef0123";
+    const std::string j = sb::entry_json(e);
+    // map_name 必须在 JSON 内出现且等于原值
+    CHECK(j.find("\"map_name\":\"影子丛林1\"") != std::string::npos);
+    CHECK(j.find("\"map_id\":37") != std::string::npos);
+
+    // 缺省空串：entry_json 仍输出 "map_name":"" 字段
+    sb::Entry empty;
+    empty.file_name = "x.qsb";
+    empty.size_bytes = 0;
+    empty.checksum = "000000000000";
+    const std::string j2 = sb::entry_json(empty);
+    CHECK(j2.find("\"map_name\":\"\"") != std::string::npos);
+
+    // entry_from_bundle 不填充 map_name（Kotlin 启动期设置由 native 层注入；
+    // bundle 字节布局未引入新字段，旧 .qsb 解析仍向前兼容）。
+    const std::vector<uint8_t> plain(4, 0xAB);
+    const std::string meta = sb::build_meta_json(0, 1, 30, 5, 0, 5, 0,
+                                                 std::string(64, 'a'), std::string(),
+                                                 "89abcdef0123");
+    std::vector<uint8_t> bundle;
+    sb::build_bundle(0, 1, plain, {}, meta, bundle);
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+    sb::Entry from_bundle;
+    sb::entry_from_bundle("x_s0_89abcdef0123.qsb", parsed, from_bundle);
+    CHECK_EQ(from_bundle.map_id, 30);
+    CHECK(from_bundle.map_name.empty());  // bundle 解析不携带 map_name（native 内存表查表）
+}
+
+static void test_save_backup_checksum_name() {
+    namespace sb = save_backup;
+    using sb::Entry; using sb::ParsedBundle;
+    CHECK(sb::valid_checksum("89abcdef0123"));
+    CHECK(sb::valid_checksum("000000000000"));
+    CHECK(!sb::valid_checksum("89ABCDEF0123"));  // 大写拒绝
+    CHECK(!sb::valid_checksum("89abcdef01"));    // 10 位
+    CHECK(!sb::valid_checksum("89abcdef01234")); // 14 位
+    CHECK(!sb::valid_checksum("89abcdefg123"));  // 非 hex
+    std::string out;
+    CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qsb", out));
+    CHECK_EQ(out, std::string("89abcdef0123"));
+    CHECK(!sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.txt", out));
+    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qsb", out));  // 缺 `_` 前缀
+    CHECK(!sb::extract_checksum_from_name("short.qsb", out));
+}
+
+static void test_save_backup_module_container() {
+    namespace sb = save_backup;
+    using sb::Entry; using sb::ParsedBundle;
+    // 构造 fake MSAV 容器：magic + ver + slot + generation + count + 6 字节负载 + crc。
+    std::vector<uint8_t> container;
+    container.push_back(0x4D); container.push_back(0x53); container.push_back(0x41); container.push_back(0x56);
+    container.push_back(0x00); container.push_back(0x01);
+    container.push_back(0x00);  // slot=0
+    for (int i = 0; i < 8; ++i) container.push_back(0);
+    container.push_back(0x00); container.push_back(0x01);
+    const uint8_t payload[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+    container.insert(container.end(), payload, payload + sizeof(payload));
+    const uint32_t crc = sb::crc32_ieee(container.data(), container.size());
+    container.push_back(static_cast<uint8_t>(crc >> 24));
+    container.push_back(static_cast<uint8_t>(crc >> 16));
+    container.push_back(static_cast<uint8_t>(crc >> 8));
+    container.push_back(static_cast<uint8_t>(crc));
+    CHECK(sb::module_container_valid(container));
+
+    // 重定槽：第 6 字节改目标槽 + CRC 重算后仍校验通过，其余字节不变。
+    std::vector<uint8_t> reslotted = container;
+    CHECK(sb::module_container_reslot(reslotted, 2));
+    CHECK_EQ(static_cast<int>(reslotted[6]), 2);
+    CHECK(sb::module_container_valid(reslotted));
+    CHECK(std::memcmp(reslotted.data(), container.data(), 6) == 0);
+    // 第 6 字节之后、尾部 CRC 之前的字节不变。
+    CHECK(std::memcmp(reslotted.data() + 7, container.data() + 7, container.size() - 11) == 0);
+
+    // 损坏拒绝：翻转 payload 一字节 → CRC 失配。
+    std::vector<uint8_t> broken = container;
+    broken[15] ^= 1;
+    CHECK(!sb::module_container_valid(broken));
+    CHECK(!sb::module_container_reslot(broken, 1));
+    // 过小/坏 magic 拒绝。
+    std::vector<uint8_t> tiny = {0x4D, 0x53, 0x41};
+    CHECK(!sb::module_container_valid(tiny));
+    std::vector<uint8_t> bad_magic = container;
+    bad_magic[0] = 'X';
+    CHECK(!sb::module_container_valid(bad_magic));
+}
+
 static void test_prepare_journal() {
     using namespace virtual_bag;
     auto base_record = []() {
@@ -2550,6 +2828,13 @@ int main() {
     test_save_preflight_classify();
     test_save_preflight_stage();
     test_save_preflight_json();
+    test_save_backup_digests();
+    test_save_backup_base64();
+    test_save_backup_bundle_roundtrip();
+    test_save_backup_meta_entry();
+    test_save_backup_entry_map_name();
+    test_save_backup_checksum_name();
+    test_save_backup_module_container();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

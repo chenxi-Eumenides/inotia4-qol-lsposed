@@ -31,5 +31,12 @@ void back_btn_draw(void* ctrl) {
                            UI_GOLD, 2, "返回", UI_OPTION_TEXT, 8, 0x18);
 }
 
+void savebackup_btn_draw(void* ctrl) {
+    if (ctrl == nullptr) return;
+    UiRect r = settings_savebackup_rect();
+    ui_custom::draw_button(ctrl, {0, 0, r.w, r.h}, 0xFF2A2018,
+                           UI_GOLD, 2, "存档备份 →", UI_OPTION_TEXT, 0x10, 0x0C);
+}
+
 // ---- 面板控件创建与回调 ----
 

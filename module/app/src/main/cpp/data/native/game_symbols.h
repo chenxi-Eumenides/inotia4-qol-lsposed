@@ -415,6 +415,12 @@ constexpr uintptr_t F_SELECT_CHARACTER_START_GAME_VMA = 0x14de98;      // void (
 constexpr uintptr_t F_TUTORIAL_START_VMA = 0x16ceb0;          // void (void) 新档教学初始化（重置 10 处教学标志 + 教学事件数组 [0x2f4000+0xce0]×5=0x63）
 constexpr uintptr_t F_SAVE_GET_SAVE_FILE_NAME_VMA = 0x125d08;  // void (int32_t slot, char* out) 取存档文件名到 out（SaveSlot_GoToNewGame 删档用）
 constexpr uintptr_t F_CS_FS_REMOVE_VMA = 0x1b27bc;            // int (char* path, int32_t) 删除文件（SaveSlot_GoToNewGame 删旧档）
+
+// ---- 存档文件加解密链 VMA（save-export 存档管理器，overhaul v1.3.2 逆向）----
+constexpr uintptr_t F_HUBSAVE_GET_KEY_VMA = 0x9001c;    // const char* () 存档加密密钥字符串指针（本机 "1234567"）
+constexpr uintptr_t F_SAVE_LOAD_DATA_VMA = 0x129260;    // int (int32_t slot, void** outBuf, int* outLen) 读槽明文：成功返回 1；outBuf 为 MEM_Malloc 明文缓冲（须 MEM_Free），outLen = 文件长度-3（明文长度）
+constexpr uintptr_t F_MEM_FREE_VMA = 0xa8f18;           // void (void*) 游戏堆释放（与 MEM_Malloc 同堆，跨堆 free 会崩）
+constexpr uintptr_t F_ENCRYPT_PROCESS2_VMA = 0xa413c;   // int (void* buf, int len, int mode, const char* key) 就地加解密：mode==0 加密（写入 len+3 字节，缓冲区需 len+3 容量）、mode!=0 解密；成功返回 1
 constexpr uintptr_t F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA = 0x11e760; // int (int32_t funcDisplay) 判断 NPC 功能显示类型（读 npc+0xa u16）：0=普通功能弹 UI、1=任务交付/接取直接执行、2=不可交互
 constexpr uintptr_t F_UINPC_INIT_VMA = 0xc2cfc;              // u8 (void) NPC 交互触发（UINpc_InitNPC：建 NPCBOX+任务列表+功能列表；前置 PLAYER_pNearNPC 已设）
 constexpr uintptr_t F_UINPC_EXE_CURRENT_TASK_VMA = 0xc3070;  // void (void) 执行当前选中任务（slot=GetSlot(nIndex)→SetSelectedTask→ExeNpcTask 跳转表）
@@ -787,6 +793,11 @@ using SelectCharacterStartGameFn = void (*)();
 using TutorialStartFn = void (*)();
 using SaveGetSaveFileNameFn = void (*)(int32_t, char*);
 using CsFsRemoveFn = int (*)(char*, int32_t);
+// ---- 存档文件加解密链签名（save-export 存档管理器）----
+using HubSaveGetKeyFn = const char* (*)();
+using SaveLoadDataFn = int (*)(int32_t, void**, int*);
+using MemFreeFn = void (*)(void*);
+using EncryptProcess2Fn = int (*)(void*, int, int, const char*);
 using ItemGetBuyPriceFn = int (*)(void*);
 using InvenFindSaveSlotFn = int (*)(void*, int8_t*);
 using InvenSaveItemFn = int (*)(void*, void*);

@@ -24,6 +24,10 @@ interface ActionApiService {
     fun mainMenu(): String
     fun enterSlot(slot: Int): String
     fun createSlot(slot: Int, classIdx: Int): String
+    fun backupExport(slot: Int): String
+    fun backupImport(checksum: String, slot: Int): String
+    fun backupList(): String
+    fun backupDelete(checksum: String): String
     fun panelClose(): String
     fun panelOpen(panel: String): String
     fun npcInteract(): String

@@ -8,7 +8,7 @@
 
 `api/` 是独立、完整的原版能力导出模块：负责导出原版游戏信息、提供原版游戏操作接口，并包含其 Controller、Service、JNI/native 适配和数据构造链。它不是 `feature/` 下增强功能的业务层，不能把扩展背包、设置增强或其他模块改动视为 API 的实现。
 
-`feature/` 只包含模块新增或修改游戏行为的功能，目前包括 `extension_bag`、`iap_blocker`、`stack_limit`、`settings` 和 `save`。这些功能可以被 API 触发或与 API 共享底层原语，但产品归属和验收边界独立于 API。
+`feature/` 只包含模块新增或修改游戏行为的功能，目前包括 `extension_bag`、`iap_blocker`、`stack_limit`、`settings`、`save` 和 `save_backup`。这些功能可以被 API 触发或与 API 共享底层原语，但产品归属和验收边界独立于 API。
 
 推荐顶层关系：
 
@@ -37,10 +37,10 @@ native 侧按同一产品边界理解：`api/native/` 承载原版信息和原�
 │                                                              │
 │  HookMain.kt       模块入口：onModuleLoaded → 轮询初始化      │
 │    │                                                         │
-│    ├─ NativeBridge.kt   JNI 桥（112 个 external + loadLibrary）│
+│    ├─ NativeBridge.kt   JNI 桥（114 个 external + loadLibrary）│
 │    │     │                                                    │
 │    │     ▼                                                    │
-│    │  libgamebridge.so（native 层，21 cpp）                    │
+│    │  libgamebridge.so（native 层，22 cpp）                    │
 │    │  ├─ bridge/native/gamebridge*.cpp  JNI 薄层（导出 Java_* 函数）│
 │    │  ├─ data 层：game_symbols.h / symbol_registry.h /        │
 │    │  │   symbol_resolver.* / game_access.* / game_state.* /  │
@@ -107,11 +107,11 @@ data 层 → 仅 STL
 
 `wait_frame_boundary`（请求驱动等帧）、`cache_prefetch_thread_fn`（后台预取）、`task_thread_fn`（FrameTask 帧调度）三套机制**保持独立**：分别服务惰性请求、预取线程、逐帧任务三个不同场景，语义与锁边界各异，合并=高风险重设计。op_ok 内 `frame_cache_force_refresh` 属「写后刷新」第四种模式，同样保留。
 
-## 2. native 层文件职责（21 cpp）
+## 2. native 层文件职责（22 cpp）
 
 | 文件 | 层 | 职责 | 依赖 |
 |---|---|---|---|
-| `bridge/native/gamebridge*.cpp` | bridge | **JNI 薄层**：112 个 `Java_*` 导出，按生命周期、数据读取、操作、UI 和 feature 分组，仅参数传递 + 字符串转换，无业务逻辑 | 各层头 |
+| `bridge/native/gamebridge*.cpp` | bridge | **JNI 薄层**：114 个 `Java_*` 导出，按生命周期、数据读取、操作、UI 和 feature 分组，仅参数传递 + 字符串转换，无业务逻辑 | 各层头 |
 | `game_symbols.h` | data | **常量单一来源**：结构体偏移、VMA、函数签名。含逆向来源注释 | 无 |
 | `symbol_registry.h` | data | 符号登记表（SYM 宏名 → VMA/解析来源），check_symbols.py 校验清单 | 无 |
 | `symbol_resolver.*` | data | ELF `.dynsym` 符号名动态解析 + `.rela.dyn` RELATIVE 反查（GOT 槽），VMA 仅兜底 | game_symbols.h |
@@ -142,6 +142,9 @@ data 层 → 仅 STL
 | `feature/extension_bag/extension_bag_persistence.cpp` | feature persistence | 通过内部上下文执行状态 JSON 的加载、保存和 pending 事务隔离恢复 | feature context + model |
 | `feature/extension_bag/extension_bag_geometry.*` | feature geometry | 扩展背包布局门禁及控件命中适配；纯网格计算委托 `core/native/grid_geometry.*` | core geometry + game control data |
 | `feature/extension_bag/extension_bag_api.cpp` | feature API facade | 对外扩展背包 JSON/操作入口的稳定包装，不承载锁内业务实现 | extension bag internal API |
+| `feature/save_backup/save_backup_bundle.*` | feature 纯逻辑 | 存档管理器备份纯逻辑：`.qsb` bundle 组装/解析（大端+CRC32）、SHA-256/MD5/CRC32/base64 原语、极简扁平 metaJson 提取、MSAV sidecar 容器最小校验/重定槽；纯 STL，编入 host 单测 | 无（纯 STL） |
+| `feature/save_backup/save_backup.*` | feature | **存档管理器备份**：`.qsb` 导出（checksum 去重）/导入（两段事务 + `.rollback/` 回滚，sidecar 直改第 6 字节 slot + 重算尾部 CRC32）/列表/删除；返回体即 HTTP 响应 JSON | game_access + core（op_err）+ save_backup_bundle |
+| `feature/ui/game_ui_savebackup.*` | feature UI | **存档管理器面板**：设置页入口按钮 + 三栏备份面板（左槽/中操作/右列表每页 4 行 + 翻页 + 提示区 + 返回）；复用 IAP 死条目 `F_PANEL_UNK2_ENTER`，仅主菜单注入、离开还原；导入/删除面板内两步确认 | game_ui_kit + game_ui_settings + feature/save_backup + data |
 
 **已解散文件**：`game_data.h`（已删除）、`game_read.cpp`（→ character/party/inventory/world/system + state）、`game_misc.cpp`（→ world/quest/ui/dialog/shop/save/system）、`game_ops_value.cpp`（→ character/inventory + patch）、`game_ops_action.cpp`（→ 九域 + patch）。
 
@@ -310,14 +313,14 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | 文件 | 职责 |
 |---|---|
 | `HookMain.kt` | 模块入口；核心原则=读内存+调游戏函数为主，hook 仅必要时使用：轮询 `bridge_init()` 直至成功 → 反射拿 context → 启动 ApiServer |
-| `NativeBridge.kt` | JNI 声明（`System.loadLibrary("gamebridge")` + **112 个 external**，JNI 面冻结见 §9.5） |
+| `NativeBridge.kt` | JNI 声明（`System.loadLibrary("gamebridge")` + **114 个 external**，JNI 面冻结见 §9.5） |
 | `ApiServer.kt` | AndServer 启动（监听地址/端口读 ModuleConfig（外部 config.json）、模块 assets 注入、StaticData 挂接） |
 | `ModuleConfig.kt` | **配置组件（v0.5.17，v0.5.21 改外部源）**：外部存储 config.json 为唯一配置来源（缺失用默认值并立即写入），提供监听地址/端口/堆叠上限增加/拖拽合并/**opEnabled** 等配置的获取与修改（每次修改立即持久化） |
 | `store/ModuleSaveStore.kt` | **模块 sidecar 存储**：保存扩展背包等模块数据；不覆盖原版 `save*.dat`。原版存档备份能力已移除，后续设计见 `docs/development/planning/backlog.md` P1。 |
 | `service/ApiServices.kt` | **服务注册中心（v0.4.0，P0-3 重构）**：controller/调用层从这里取 Service 实例；多调用通道预留（Binder/LocalSocket 复用同一 Service 层） |
 | `service/ApiService.kt` | **单文件双接口**：`InfoApiService`（信息查询服务接口，GET /api/info/* 契约）+ `ActionApiService`（合法操作服务接口，POST /api/action/* 契约），均不绑定 HTTP 语义 |
 | `service/info/*` | **信息查询服务**：入口保持接口契约；地图、佣兵、系统薄查询和商店查询按职责独立，party/inventory/quest/ui/game 仍由 `InfoApiServiceCore` 聚合协调 |
-| `service/action/*` | **合法操作服务**：入口保持接口契约；`ActionApiServiceCore` 负责接口适配，`Movement/Inventory/Character/Party/Quest/Save/Ui/ExtensionBagActions` 按操作域实现，`ActionSupport` 统一快照 attach、保存后处理和槽位查找 |
+| `service/action/*` | **合法操作服务**：入口保持接口契约；`ActionApiServiceCore` 负责接口适配，`Movement/Inventory/Character/Party/Quest/Save/SaveBackup/Ui/ExtensionBagActions` 按操作域实现，`ActionSupport` 统一快照 attach、保存后处理和槽位查找 |
 | `service/OpApiService.kt` | **OP 唯一入口（v0.5.46 新建，v0.5.47 门禁）**：接口+实现，opSetAttr 批量循环逻辑在 impl；**所有方法入口统一 OP 门禁**（ModuleConfig.opEnabled 未开启 → 403 `{"ok":false,"error":"op disabled"}`） |
 | `service/ConfigApiService.kt` | **配置下发收口（v0.5.46）**：nativeSetStackLimitEnabled/nativeSetMoveMergeEnabled/nativeSetTilesData 直调收口（applyToNative）；ConfigController 与 ApiServer 启动期统一调用 |
 | `service/enrichment/*` | **名称/结构注入**：入口保持稳定调用名，Core 负责 inject* 名称注入 + restructure* 字段重排（Role 呈现顺序/main_stats 结构化/物品 base-bonus-gem-chaos-enchant 结构）+ StaticData 查询；item/role/quest 富化器仍待拆分 |
@@ -484,7 +487,7 @@ uv run python scripts/verification/smoke_all.py
 
 ### 9.5 JNI 面冻结约定（重构期确立）
 
-**NativeBridge 112 个 external 冻结**。native bridge 已按职责拆为多个 `gamebridge_*.cpp`，JNI 导出名与分发逻辑不随域拆分变化。新增端点按 §6 五段式扩展，**禁止改名/改签名既有 external**。
+**NativeBridge 114 个 external 冻结**。native bridge 已按职责拆为多个 `gamebridge_*.cpp`，JNI 导出名与分发逻辑不随域拆分变化。新增端点按 §6 五段式扩展，**禁止改名/改签名既有 external**。
 
 ## 10. 滞后修正清单（P4 文档同步，全部实测确认）
 

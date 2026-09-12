@@ -40,7 +40,7 @@
 
 | 状态 | 待办项 | 现状 / 卡点 | 需要的探索 / 实现 | 来源 |
 |---|---|---|---|---|
-| 未开始 | **存档备份 API（重做）** | 当前原版存档备份、恢复备份、导出存档能力已删除；`enter_slot` 仅保留内部完整性门禁，不提供独立预检 API | ① 新增按指定 slot 备份到模块存档备份目录的 API；统一存档数据中的槽位字段后计算 MD5/SHA-256（或截取校验值）作为备份标识，避免跨 slot 恢复导致标识变化；② 新增备份列表 API，返回备份时间、角色信息、校验值等基本信息；③ 新增按校验值恢复到指定 slot 的 API；研究各 slot 是否绑定位置、能否跨 slot 恢复，以及修改存档槽位字段是否足够安全 | 用户 2026-08-27 要求 |
+| 待定 | **存档备份 API（重做）** | 已实现并真机验证：`.qsb` 备份（解密明文原版 + sidecar 原始字节 + 元数据 + CRC32）；跨槽导入真机实证（save0→slot1/2，角色完整加载，明文仅 slot 字节不同）；导入前备份现存文件、失败自动回滚。2026-09-12 改造：`checksum`（`sha256(origPlain‖module)` 前 12 位小写 hex）为备份标识，端点迁至 `/api/system/backup/export|list|import|delete`，导出按 checksum 去重（命中不写新文件，响应带 `deduplicated:true`），导入/删除按 checksum 定位；**新端点待真机回归**。 | 残余：① backup/* 四端点真机回归（去重、删除、按 checksum 导入）；② 备份重命名未实现；③ 跨设备导入未实测（明文可移植，导入端用本地密钥重加密）；④ `hero_level` 依赖运行时槽结构（主菜单自动刷新），未做离线解析；⑤ 备份容量/清理策略未定 | 用户 2026-08-27 要求 |
 | 未开始 | **扩展物品全局裸指针反查 generation 化** | `extension_bag_render.inc:419-430` 仍使用全局裸指针匹配；确认使用 v2 暂以槽位身份反查作为授权遗留。权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §4.2 | 为扩展物品反查补 generation/token，覆盖物化、投影、释放和确认回调，消除地址复用窗口 | Oracle 复审授权遗留 |
 | 未开始 | **确认使用 token mismatch 后 active 槽滞留** | `module_use_finish_locked()` 发现 generation/item/owner 不一致时只能记录完整诊断；若 `module_use_abort_locked()` 也失败，槽可能继续保持 active，当前无安全恢复机制。权威路由：[`control-plane.md`](../features/extension-bag/control-plane.md) §4.2 | 先裁决可接受的恢复/隔离策略，再实现不释放未知对象的安全清理；覆盖 active、pending_release、generation、handle、owner 线程和 token 全字段 | F4 静态审计 |
 | 未开始 | **data_op_equip 与 UI 详情装备路径口径统一** | **缺口-未实现，非刻意边界**：`data_op_equip` 拒绝逻辑袋 6..10，与 UI 详情装备路径口径不一致 | 建议下一步：先裁定 API 口径，再决定实现和验收边界 | 审计报告 |

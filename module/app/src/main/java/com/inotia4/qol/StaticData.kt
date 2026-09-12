@@ -334,6 +334,59 @@ object StaticData {
         return m[questId]
     }
 
+    @Volatile
+    private var mapNames: Map<Int, String>? = null
+
+    /** 地图中文名（v0.7.x 给存档备份面板用）：MAPINFOBASE 记录下标 = map_id，text_0 = 中文名 */
+    fun mapName(mapId: Int): String? {
+        val m = mapNames ?: synchronized(this) {
+            mapNames ?: buildMapNames().also { mapNames = it }
+        }
+        return m[mapId]
+    }
+
+    /**
+     * 把所有 mapId → 中文名打包成 JSON 字符串下发 native（v0.7.x）：
+     * 仅供启动期 nativeSaveBackupSetMapNames 使用，native 自存内存表后不再查 StaticData。
+     * 空字段过滤；非 ASCII / 不安全字符跳过（避免 native 解析误判引号）。
+     */
+    fun buildMapNamesJson(): String {
+        val m = mapNames ?: synchronized(this) {
+            mapNames ?: buildMapNames().also { mapNames = it }
+        }
+        if (m.isEmpty()) return "{}"
+        val sb = StringBuilder(8192)
+        sb.append('{')
+        var first = true
+        // 按 mapId 升序输出，调试可读；native 解析对顺序无要求。
+        val sorted = m.keys.sorted()
+        for (k in sorted) {
+            val v = m[k] ?: continue
+            // 过滤包含 " 与反斜杠的项，避免破坏 native 极简 JSON 解析（实际数据均为中文/ASCII）
+            if (v.contains('"') || v.contains('\\')) continue
+            if (!first) sb.append(',')
+            first = false
+            sb.append('"').append(k).append("\":\"").append(v).append('"')
+        }
+        sb.append('}')
+        return sb.toString()
+    }
+
+    private fun buildMapNames(): Map<Int, String> {
+        val json = read("tables/MAPINFOBASE.json") ?: return emptyMap()
+        return try {
+            val records = JSONObject(json).getJSONArray("records")
+            val map = HashMap<Int, String>(records.length())
+            for (i in 0 until records.length()) {
+                val name = records.getJSONObject(i).optString("text_0", "")
+                if (name.isNotEmpty()) map[i] = name
+            }
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
     /** 任务名称（v0.5.37 改从 QUESTS.json 解析产物取，文本已去色） */
     fun questName(questId: Int): String? =
         questData(questId)?.optString("name")?.takeIf { it.isNotEmpty() }

@@ -43,3 +43,29 @@ Java_com_inotia4_qol_NativeBridge_nativeExtensionBagTestItem(JNIEnv* env, jclass
                                                         static_cast<int>(category), static_cast<int>(count)).c_str());
 }
 
+// ---- 存档管理器游戏内面板（ui-savebackup v0.7.x）----
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiInject(JNIEnv* env, jclass) {
+    return env->NewStringUTF(data_savebackup_ui_inject().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiStatus(JNIEnv* env, jclass) {
+    return env->NewStringUTF(data_savebackup_ui_status_json().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiRestore(JNIEnv* env, jclass) {
+    return env->NewStringUTF(data_savebackup_ui_restore().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiOpenPanel(JNIEnv* env, jclass) {
+    return env->NewStringUTF(data_savebackup_ui_open_panel().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiSelfCheck(JNIEnv* env, jclass) {
+    return env->NewStringUTF(data_savebackup_ui_self_check().c_str());
+}
+

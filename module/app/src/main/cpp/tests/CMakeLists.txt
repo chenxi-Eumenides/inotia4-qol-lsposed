@@ -19,6 +19,7 @@ add_executable(host_tests
     ${CPP_DIR}/core/native/game_json.cpp
     ${CPP_DIR}/core/native/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp
+    ${CPP_DIR}/feature/save_backup/save_backup_bundle.cpp
 )
 
 target_include_directories(host_tests PRIVATE

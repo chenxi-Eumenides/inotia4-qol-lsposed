@@ -81,6 +81,11 @@ extern SelectCharacterStartGameFn fn_select_character_start_game;
 extern TutorialStartFn fn_tutorial_start;
 extern SaveGetSaveFileNameFn fn_save_get_save_file_name;
 extern CsFsRemoveFn fn_cs_fs_remove;
+// ---- 存档文件加解密链（save-export 存档管理器）----
+extern HubSaveGetKeyFn fn_hub_save_get_key;
+extern SaveLoadDataFn fn_save_load_data;
+extern MemFreeFn fn_mem_free;
+extern EncryptProcess2Fn fn_encrypt_process2;
 extern GamestateSetStateFn fn_gamestate_set_state;
 extern UinpcInitFn fn_uinpc_init;
 extern NpcSystemCheckFunctionDisplayFn fn_check_function_display;

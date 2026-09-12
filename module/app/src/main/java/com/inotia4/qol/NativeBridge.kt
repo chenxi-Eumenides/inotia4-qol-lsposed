@@ -76,6 +76,18 @@ object NativeBridge {
     external fun nativeOpCast(role: Int, actionId: Int): String
     external fun nativeOpQuestQuit(questId: Int): String
     external fun nativeOpSave(): String
+    // ---- 存档管理器备份（save-backup feature：bundle 导出/导入/列表/删除收口 native）----
+    external fun nativeSaveBackupInit(dataDir: String, externalFilesDir: String)
+    external fun nativeSaveBackupSetMapNames(json: String)
+    external fun nativeBackupList(): String
+    external fun nativeBackupExport(slot: Int): String
+    external fun nativeBackupImport(checksum: String, slot: Int): String
+    external fun nativeBackupDelete(checksum: String): String
+    external fun nativeSaveBackupUiInject(): String
+    external fun nativeSaveBackupUiStatus(): String
+    external fun nativeSaveBackupUiRestore(): String
+    external fun nativeSaveBackupUiOpenPanel(): String
+    external fun nativeSaveBackupUiSelfCheck(): String
     external fun nativeOpMainMenu(): String
     external fun nativeOpEnterSlot(slot: Int): String
     external fun nativeOpCreateSlot(slot: Int, classIdx: Int): String

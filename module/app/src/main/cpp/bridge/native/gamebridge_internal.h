@@ -12,6 +12,7 @@
 #include "game_party.h"
 #include "game_quest.h"
 #include "api/native/game_save.h"
+#include "feature/save_backup/save_backup.h"
 #include "game_shop.h"
 #include "game_state.h"
 #include "game_system.h"
@@ -21,6 +22,7 @@
 #include "feature/patch/game_patch.h"
 #include "feature/ui/game_ui_exp.h"
 #include "feature/ui/game_ui_settings.h"
+#include "feature/ui/game_ui_savebackup.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 
 #include <android/log.h>

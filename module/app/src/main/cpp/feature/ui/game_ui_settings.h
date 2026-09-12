@@ -12,6 +12,8 @@
 // 参考 docs/system/ui.md §6 + ui-experiments.md（exp6 文字解法：font=1 官方实证）。
 // 链路：懒注入线程轮询主菜单 screen → PtrHook 覆盖更多游戏 ExecuteProc →
 // 点击 → UI_SetPopupProcessInfo(1, injected_state_id) 打开自定义面板。
+//
+// v0.7.x：底部追加「存档备份」按钮（push 打开 savebackup 面板），命名取自 extension bag 同源。
 
 std::string data_settings_ui_inject();      // 启用注入（懒注入线程启动 + state 注入）
 std::string data_settings_ui_status_json(); // 状态 JSON（注入标志/面板状态/配置项/按钮矩形）
@@ -21,3 +23,13 @@ std::string data_settings_ui_open_option(); // 调试：打开主菜单环境设
 void settings_ui_start_auto_inject();       // 游戏进程初始化后自动启动懒注入线程
 
 void settings_register_config_bridge(JNIEnv* env, jclass bridge_class);
+
+// 给 savebackup UI 用的状态查询：设置面板是否激活（用于 API 守卫）。
+// 实现：直接在全局命名空间读 g_panel_active，加锁保证可见性（见 game_ui_settings.cpp）。
+bool settings_panel_active_for_savebackup();
+
+// 关闭设置面板（v0.7.x）：调 f3 清理 panel 状态 + 还原注入的 state entry。
+// 用于嵌套 push 不可用时的切换式兜底（被 data_savebackup_ui_open_panel 调用）。
+// 注意：调用方需自行调 fn_ui_set_popup_process_info(3, 0) 关闭 UI 显示
+// （本函数只清理 settings 模块自身状态，不操作游戏 popup 栈）。
+void settings_ui_close_panel();

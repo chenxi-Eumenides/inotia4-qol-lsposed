@@ -88,6 +88,14 @@ class ActionApiServiceCore : ActionApiService {
 
     override fun createSlot(slot: Int, classIdx: Int): String = SaveActions.createSlot(slot, classIdx)
 
+    override fun backupExport(slot: Int): String = SaveBackupActions.backupExport(slot)
+
+    override fun backupImport(checksum: String, slot: Int): String = SaveBackupActions.backupImport(checksum, slot)
+
+    override fun backupList(): String = SaveBackupActions.backupList()
+
+    override fun backupDelete(checksum: String): String = SaveBackupActions.backupDelete(checksum)
+
     override fun panelClose(): String = UiActions.panelClose()
 
     override fun panelOpen(panel: String): String = UiActions.panelOpen(panel)
