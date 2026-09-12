@@ -20,6 +20,8 @@ local.properties
 # ---- 二进制输入及中间产物 ----
 apk/
 archive/
+# frida-trace 在 CWD 自动生成的 hook 桩目录，属分析产物，不入库
+__handlers__/
 
 # ---- 静态库（apk/static-data/ 由原始 APK 解析生成，可再生成；APK 内嵌子集同）----
 module/app/src/main/assets/static-data/
