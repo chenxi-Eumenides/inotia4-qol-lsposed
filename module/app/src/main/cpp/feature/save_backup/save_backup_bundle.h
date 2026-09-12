@@ -31,6 +31,10 @@ struct Entry {
     std::string map_name;
     int hero_level = -1;
     int hero_index = -1;
+    // 主角职业：class_idx 0-5（-1=未知/旧备份）。class_name 为中文名（UI 展示用），
+    // 由 save_backup.cpp 的职业表填充；bundle 解析只取 metaJson，旧备份缺失时保持 -1/空。
+    int class_idx = -1;
+    std::string class_name;
     int save_version = 0;
     long long save_time = 0;
     std::string original_sha256;
@@ -63,11 +67,13 @@ bool base64_decode(const std::string& in, std::vector<uint8_t>& out);
 
 // ---- bundle 组装与解析 ----
 
-// metaJson（字段顺序与 Kotlin 历史实现一致，扁平数字/字符串）。
+// metaJson（字段顺序遵循 Kotlin 历史实现，扁平数字/字符串；class_idx/class_name 追加在末尾，
+// 旧备份缺失时 entry_from_bundle 走默认值，不影响既有解析）。
 std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,
                             int hero_index, int save_version, long long save_time,
                             const std::string& original_sha256, const std::string& module_sha256,
-                            const std::string& checksum);
+                            const std::string& checksum, int class_idx = -1,
+                            const std::string& class_name = std::string());
 
 void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
                   const std::vector<uint8_t>& module, const std::string& meta_json,

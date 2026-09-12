@@ -42,6 +42,13 @@
 #define ADDR_H 0x28
 #define ROW_BTN_W 0xa8
 #define ROW_BTN_H 0x28
+// 存档备份格：按钮复用原版物品详情「使用」贴图（UIDesc_DrawMenuButton + loc 0x0e）。
+// 该分片 149x75，现有绘制 API 只能按原始尺寸画；控制矩形高取开关同高 0x28，
+// 宽度按贴图宽高比 149:75 同比得 0x50≈80（比其它开关窄）。
+#define SAVEBACKUP_BTN_W 0x50
+// 原版「使用」按钮分片：ButtonImgGroup(DrawID=0) 图组内 loc 0x0e
+// （UIEquip_SetDescMenu 反汇编实证：使用/确认使用/佣兵徽章/骰子/开箱/解封共用）。
+#define USE_BUTTON_LOC 0x0e
 #define CELL_PADDING 0x20
 #define ADDR_Y 0x18
 #define BACK_BTN_W 0x4a
@@ -78,7 +85,8 @@ struct SettingsRow {
 SettingsRow g_rows[SETTINGS_ROW_COUNT];
 void* g_back_btn = nullptr;
 void* g_addr_desc = nullptr;
-void* g_savebackup_btn = nullptr;  // v0.7.x：底部「存档备份」入口按钮
+void* g_savebackup_btn = nullptr;   // v0.7.x：配置网格内的「存档备份」入口按钮（「使用」样式）
+void* g_savebackup_desc = nullptr;  // v0.7.x：与配置项同款左描述「存档备份」
 
 // 配置键名（与 Kotlin ModuleConfig 字段一致）
 static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled"};

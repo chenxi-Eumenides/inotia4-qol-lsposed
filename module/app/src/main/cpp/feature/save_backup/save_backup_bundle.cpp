@@ -417,7 +417,8 @@ bool base64_decode(const std::string& in, std::vector<uint8_t>& out) {
 std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,
                             int hero_index, int save_version, long long save_time,
                             const std::string& original_sha256, const std::string& module_sha256,
-                            const std::string& checksum) {
+                            const std::string& checksum, int class_idx,
+                            const std::string& class_name) {
     std::string s = "{\"source_slot\":";
     s += std::to_string(source_slot);
     s += ",\"export_time\":" + std::to_string(export_time_ms);
@@ -429,6 +430,9 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
     s += ",\"original_sha256\":\"" + original_sha256 + "\"";
     s += ",\"module_sha256\":\"" + module_sha256 + "\"";
     s += ",\"checksum\":\"" + checksum + "\"";
+    // 职业（v0.7.x 追加）：class_idx 数字 + class_name 中文名（name 为纯中文/ASCII，无转义）。
+    s += ",\"class_idx\":" + std::to_string(class_idx);
+    s += ",\"class_name\":\"" + class_name + "\"";
     s += "}";
     return s;
 }
@@ -497,6 +501,8 @@ std::string entry_json(const Entry& e) {
     s += ",\"map_name\":\"" + e.map_name + "\"";
     s += ",\"hero_level\":" + std::to_string(e.hero_level);
     s += ",\"hero_index\":" + std::to_string(e.hero_index);
+    s += ",\"class_idx\":" + std::to_string(e.class_idx);
+    s += ",\"class_name\":\"" + e.class_name + "\"";
     s += ",\"save_version\":" + std::to_string(e.save_version);
     s += ",\"save_time\":" + std::to_string(e.save_time);
     s += ",\"original_sha256\":\"" + e.original_sha256 + "\"";
@@ -517,6 +523,9 @@ void entry_from_bundle(const std::string& file_name, const ParsedBundle& p, Entr
     if (json_find_int(p.meta_json, "map_id", v)) out.map_id = static_cast<int>(v);
     if (json_find_int(p.meta_json, "hero_level", v)) out.hero_level = static_cast<int>(v);
     if (json_find_int(p.meta_json, "hero_index", v)) out.hero_index = static_cast<int>(v);
+    // 职业：旧备份无 class_idx/class_name → 保持默认 -1/空，UI 退化显示。
+    if (json_find_int(p.meta_json, "class_idx", v)) out.class_idx = static_cast<int>(v);
+    if (json_find_string(p.meta_json, "class_name", s)) out.class_name = s;
     if (json_find_int(p.meta_json, "save_version", v)) out.save_version = static_cast<int>(v);
     if (json_find_int(p.meta_json, "save_time", v)) out.save_time = v;
     if (json_find_string(p.meta_json, "original_sha256", s)) out.original_sha256 = s;

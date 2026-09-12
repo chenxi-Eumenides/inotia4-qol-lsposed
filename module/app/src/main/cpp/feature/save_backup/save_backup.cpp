@@ -327,10 +327,11 @@ uint64_t rd_u64(const uint8_t* p) {
     return uint64_t(rd_u32(p)) | uint64_t(rd_u32(p + 4)) << 32;
 }
 
-// 槽结构元数据（尽力而为：槽结构未加载时返回 -1/-1，不阻塞明文导出）。
-void read_hero_meta(int32_t slot, int& hero_level, int& hero_index) {
+// 槽结构元数据（尽力而为：槽结构未加载时返回 -1/-1/-1，不阻塞明文导出）。
+void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_idx) {
     hero_level = -1;
     hero_index = -1;
+    class_idx = -1;
     if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr) return;
     // 主菜单（STATE==4）下槽结构未随启动刷新；与 data_save_slots_json 一致，仅此状态重载三槽。
     if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 4 &&
@@ -344,15 +345,17 @@ void read_hero_meta(int32_t slot, int& hero_level, int& hero_index) {
     hero_index = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(p + SAVESLOT_HERO_INDEX));
     void* hero = fn_saveslot_get_hero(slot_struct);
     if (hero == nullptr) return;
-    hero_level = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(
-        reinterpret_cast<uint8_t*>(hero) + C_LEVEL));
+    uint8_t* hp = reinterpret_cast<uint8_t*>(hero);
+    hero_level = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_LEVEL));
+    // 职业索引（0-5）；type==2 装饰物该字段非职业，但本路径取的是主角 hero 结构。
+    class_idx = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_CLASS));
 }
 
 // 读槽明文并归一化：SAVE_LoadData 解密 → 拷出并 MEM_Free → 块0 slot 写 0xFF。
 // 失败时 err 填错误串（与迁移前 data_op_save_read_original 一致）。
 bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
                          long long& save_time, int& version, int& hero_level, int& hero_index,
-                         std::string& err) {
+                         int& class_idx, std::string& err) {
     if (fn_save_load_data == nullptr || fn_mem_free == nullptr) {
         err = "symbol not resolved";
         return false;
@@ -384,7 +387,7 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
     version = static_cast<int>(rd_u32(plain.data() + block0 + 29));
     save_time = static_cast<long long>(rd_u64(plain.data() + block0 + 13));
     map_id = static_cast<int>(rd_i16(plain.data() + block1));
-    read_hero_meta(slot, hero_level, hero_index);
+    read_hero_meta(slot, hero_level, hero_index, class_idx);
     return true;
 }
 
@@ -474,6 +477,24 @@ void save_backup_set_map_names(const char* json) {
     set_map_names_locked(json != nullptr ? std::string(json) : std::string());
 }
 
+std::string save_backup_map_name(int map_id) {
+    // g_map_names 由 g_sb_mtx 保护：启动期单次写入，此后只读；按值返回避免调用方
+    // 持有跨锁引用。未命中（表未下发/map_id 未知）返回空串，由调用方走「地图N」兜底。
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    auto it = g_map_names.find(map_id);
+    return it != g_map_names.end() ? it->second : std::string();
+}
+
+const char* save_backup_class_name(int class_idx) {
+    // 与游戏 CHARCLASSBASE 文本逐条核对（apk/static-data/tables/CHARCLASSBASE.json
+    // + text/zh-Hans.json，0..5）：不使用 Kotlin 下发通道，避免新增 JNI/HTTP 依赖；
+    // 6 个职业为游戏固定枚举，硬编码稳定。表为常量、无锁。
+    static const char* const kNames[6] = {"黑暗骑士", "忍者", "黑魔导", "祭司",
+                                          "暗影猎手", "狂战士"};
+    if (class_idx < 0 || class_idx > 5) return "";
+    return kNames[class_idx];
+}
+
 std::string save_backup_list_json() {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
     std::string s = "{\"ok\":true,\"backups\":[";
@@ -481,9 +502,11 @@ std::string save_backup_list_json() {
     if (!backup_dir(dir)) return s + "]}";
     std::vector<std::string> names;
     if (!list_bundle_files(dir, names)) return s + "]}";
-    // 按文件名倒序（新在前），与迁移前 Kotlin 一致。
-    std::sort(names.begin(), names.end(), std::greater<std::string>());
-    bool first = true;
+    // 先解析全部 bundle，再按 export_time 倒序（新→旧，UI 第 1 页顶部 = 最新备份）。
+    // 权威字段 = bundle 头/metaJson 的 export_time（entry_from_bundle 填充）；
+    // 同毫秒并列时按文件名倒序保持稳定口径（文件名前缀即本地时间戳）。
+    std::vector<save_backup::Entry> entries;
+    entries.reserve(names.size());
     for (const std::string& name : names) {
         std::vector<uint8_t> bytes;
         save_backup::ParsedBundle parsed;
@@ -497,6 +520,19 @@ std::string save_backup_list_json() {
         // 从内存 map_id→name 表查表（启动期 Kotlin 下发）；未命中保持空串。
         auto it = g_map_names.find(entry.map_id);
         if (it != g_map_names.end()) entry.map_name = it->second;
+        // 职业名由 native 常量表补齐；旧备份 class_idx=-1 → 空串（UI 退化显示）。
+        entry.class_name = save_backup_class_name(entry.class_idx);
+        entries.push_back(std::move(entry));
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const save_backup::Entry& a, const save_backup::Entry& b) {
+                  if (a.export_time_ms != b.export_time_ms) {
+                      return a.export_time_ms > b.export_time_ms;
+                  }
+                  return a.file_name > b.file_name;
+              });
+    bool first = true;
+    for (const save_backup::Entry& entry : entries) {
         if (!first) s += ",";
         s += save_backup::entry_json(entry);
         first = false;
@@ -514,8 +550,10 @@ std::string save_backup_export_json(int slot) {
     int version = 0;
     int hero_level = -1;
     int hero_index = -1;
+    int class_idx = -1;
     std::string err;
-    if (!read_original_plain(slot, plain, map_id, save_time, version, hero_level, hero_index, err)) {
+    if (!read_original_plain(slot, plain, map_id, save_time, version, hero_level, hero_index,
+                             class_idx, err)) {
         return op_err(err.c_str());
     }
 
@@ -556,6 +594,7 @@ std::string save_backup_export_json(int slot) {
             save_backup::entry_from_bundle(file_name_of(existing), parsed, entry);
             auto dit = g_map_names.find(entry.map_id);
             if (dit != g_map_names.end()) entry.map_name = dit->second;
+            entry.class_name = save_backup_class_name(entry.class_idx);
             SB_LOG("save backup deduplicated: %s (checksum=%s)", entry.file_name.c_str(),
                    checksum.c_str());
             return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) +
@@ -564,9 +603,10 @@ std::string save_backup_export_json(int slot) {
         SB_LOG("save backup dedup hit unreadable, writing new bundle: %s", existing.c_str());
     }
 
+    const std::string class_name = save_backup_class_name(class_idx);
     const std::string meta_json = save_backup::build_meta_json(
         slot, export_time_ms, map_id, hero_level, hero_index, version, save_time, original_sha,
-        module_sha, checksum);
+        module_sha, checksum, class_idx, class_name);
     std::vector<uint8_t> bundle;
     save_backup::build_bundle(slot, export_time_ms, plain, module, meta_json, bundle);
 
@@ -594,6 +634,8 @@ std::string save_backup_export_json(int slot) {
     if (mit != g_map_names.end()) entry.map_name = mit->second;
     entry.hero_level = hero_level;
     entry.hero_index = hero_index;
+    entry.class_idx = class_idx;
+    entry.class_name = class_name;
     entry.save_version = version;
     entry.save_time = save_time;
     entry.original_sha256 = original_sha;
@@ -688,6 +730,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     save_backup::entry_from_bundle(name, parsed, entry);
     auto iit = g_map_names.find(entry.map_id);
     if (iit != g_map_names.end()) entry.map_name = iit->second;
+    entry.class_name = save_backup_class_name(entry.class_idx);
     SB_LOG("save backup imported: %s -> slot%d", name.c_str(), slot);
     return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
 }
@@ -706,4 +749,46 @@ std::string save_backup_delete_json(const char* checksum) {
     }
     SB_LOG("save backup deleted: %s", path.c_str());
     return "{\"ok\":true}";
+}
+
+// 删除某个槽的游戏存档：原版 save{slot}.dat + 模块 sidecar（module-saves/slot-{slot}.module-save
+// 与 .last-good）。安全边界：路径由整型 slot 精确拼接（save0/1/2.dat、slot-0/1/2.*），
+// 不含通配/遍历，绝不删除其它槽；只删存在的目标，缺失的目标跳过。
+// 全部失败路径返回结构化 op_err，不吞异常；无任何目标文件时返回 not found。
+std::string save_backup_delete_slot_json(int slot) {
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    if (slot < 0 || slot > 2) return op_err("bad slot");
+    std::string save_dir;
+    switch (locate_save_directory(save_dir)) {
+        case 0:
+            break;
+        case 2:
+            return op_err("save directory mkdir failed");
+        default:
+            return op_err("save directory not found");
+    }
+    const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
+    std::string sidecar_path;
+    std::string sidecar_last_good;
+    module_sidecar_paths(slot, sidecar_path, sidecar_last_good);
+    const bool dat_existed = file_exists(dat_path);
+    const bool sidecar_existed = !sidecar_path.empty() && file_exists(sidecar_path);
+    const bool last_good_existed = !sidecar_last_good.empty() && file_exists(sidecar_last_good);
+    if (!dat_existed && !sidecar_existed && !last_good_existed) return op_err("save not found");
+    // 逐个删除并检查返回值：任一失败立即返回结构化错误（已删除的部分不回滚，与单文件删除语义一致）。
+    if (dat_existed && ::unlink(dat_path.c_str()) != 0) {
+        SB_LOG("save slot delete failed: %s", dat_path.c_str());
+        return op_err("delete save failed");
+    }
+    if (sidecar_existed && ::unlink(sidecar_path.c_str()) != 0) {
+        SB_LOG("save slot delete failed: %s", sidecar_path.c_str());
+        return op_err("delete sidecar failed");
+    }
+    if (last_good_existed && ::unlink(sidecar_last_good.c_str()) != 0) {
+        SB_LOG("save slot delete failed: %s", sidecar_last_good.c_str());
+        return op_err("delete sidecar failed");
+    }
+    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d last_good=%d)", slot, dat_existed,
+           sidecar_existed, last_good_existed);
+    return "{\"ok\":true,\"deleted_slot\":" + std::to_string(slot) + "}";
 }

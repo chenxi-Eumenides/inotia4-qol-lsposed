@@ -13,7 +13,8 @@
 // 链路：懒注入线程轮询主菜单 screen → PtrHook 覆盖更多游戏 ExecuteProc →
 // 点击 → UI_SetPopupProcessInfo(1, injected_state_id) 打开自定义面板。
 //
-// v0.7.x：底部追加「存档备份」按钮（push 打开 savebackup 面板），命名取自 extension bag 同源。
+// v0.7.x：配置网格内新增「存档备份」格（左描述 + 右侧「使用」样式按钮），
+// 点击 push 打开 savebackup 面板；旧的底部独立长条入口已移除。
 
 std::string data_settings_ui_inject();      // 启用注入（懒注入线程启动 + state 注入）
 std::string data_settings_ui_status_json(); // 状态 JSON（注入标志/面板状态/配置项/按钮矩形）

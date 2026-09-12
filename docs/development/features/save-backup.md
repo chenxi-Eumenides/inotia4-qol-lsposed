@@ -38,7 +38,7 @@ u32 crc32                      # 覆盖此前全部字节
 
 - 文件名：`<yyyyMMdd-HHmmss>_s<sourceSlot>_<sha256(origPlain‖module)前12位>.qol_save`（全 ASCII，同秒冲突加 `_1`、`_2`）。
 - **备份标识 `checksum`** = `sha256(origPlain ‖ module)` 前 12 位小写 hex，与文件名末段一致；导入/删除/去重均以它定位备份，不使用文件名。
-- `metaJson`：`source_slot`、`export_time`、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`。
+- `metaJson`：`source_slot`、`export_time`、`map_id`、`class_idx`、`class_name`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（`class_idx`/`class_name` 为 2026-09-12 新增，旧备份缺字段时 UI 退化显示）。
 - 目录：`getExternalFilesDir(null)/save_backup/`；回滚暂存目录 `save_backup/.rollback/`。
 - **只存明文**：备份跨设备可移植（导入端用自己的密钥重加密）；不存原版密文。
 
@@ -114,10 +114,14 @@ u32 crc32                      # 覆盖此前全部字节
 
 ## 10. 游戏内 UI（阶段 2）
 
-- **入口**：设置页底部新增可点击按钮「存档备份」（非开关），点击后 push 独立备份面板；面板「← 返回」回到设置页。
+- **入口**：设置页配置网格中的一格「存档备份」（左描述 + 右侧「使用」样式按钮，复用物品详情页 `UIDesc_DrawMenuButton@0xb24bc` 的贴图 loc `0x0e`；图组未就绪时退化自绘），点击进入备份面板；面板「← 返回」回到设置页。
 - **PopupState 占用**：复用 IAP 屏蔽后的死条目 `F_PANEL_UNK2_ENTER`(0x15e740, `Scene_Init_POPUP_SC_INAPP_GOODS`)；设置页占 `F_PANEL_UNK1_ENTER`(GEMSHOP)，二者互斥。**只在主菜单注入**，离开主菜单时还原原始 enter/process/f3/f4/event（设置页同策略）。
-- **布局**（逻辑 960×640，root 居中）：顶部标题 + 左栏 3 槽纵列 + 中栏 3 操作（`→ 导出` / `← 导入` / `删除`）+ 右栏备份列表（每页 4 行，两行显示 `Lv<等级> <地图名>` / `<MM-DD HH:mm> #<checksum前6>`）+ 底部「下一页 N」+ 提示区 + 「← 返回」。
-- **交互**：左槽单选、右备份单选；导出（选槽 + `→`）；导入/删除两步确认（首击武装并在提示区提示，再击同 checksum+槽执行，其它交互取消）；提示区独立显示、不消失、新消息覆盖旧消息。
-- **数据**：列表每次进入读目录（后台线程，IO 不阻塞游戏线程）；槽位等级在游戏线程刷新（主菜单先 `SAVE_CreateSaveSlot`）。
+- **布局**（逻辑 960×640，root 居中）：顶部居中区（标题/消息）+ 左栏 3 槽 + 中栏 3 操作（`导出` / `导入` / `删除`）+ 右栏备份列表（**每页 5 行**，两行显示 `Lv<等级> <地图名>` / `<MM-DD HH:mm> #<checksum前6>`）+ 底部 `上一页 [N/M] 下一页`（页码居中、无框）+ 左上「← 返回」。
+- **左右栏**：同宽（`COL_W=0x196`）、不同高（左 `SLOT_FRAME_H=0x108` 容纳 3 槽；右 `FRAME_H=0x13E` 容纳 5 行）；中栏在两者之间水平居中。
+- **配色**：左栏空槽灰、有档金；右栏首行（等级+地图）金、次行（时间+校验值）白；中栏按钮可用时金色字、不可用时灰色字；选中项为**半透明深琥珀**背景（无边框）。
+- **`ui_fill_rect_alpha` 颜色格式**：**RGB565 + alpha 百分比 0..100**（经 `GRPX_GetColorFromGRPWithAlpha@0x8fc88` 展开），与 `GRPX_FillRect`（ABGR8888）**不同**；选中色 `COLOR_SEL_BG=0x5182` ≈ RGB(0x50,0x30,0x10)、alpha 80。写裸 ABGR 会被当作 RGB565 → 颜色错乱（历史 bug）。
+- **文本绘制**：`fn_grpx_set_font_color_rgb`(ABGR 拆包) + `fn_grpx_draw_string_with_font(text, x, y, align, font)`，align **0=左 / 1=右 / 2=中**；**不可用** `fn_ui_draw_string_halign`、`ui_draw_text_centered`（自定义面板下不出字）。
+- **交互**：左槽单选、右备份单选；导出（选槽 + `导出`）；导入/删除两步确认（首击武装并在提示区提示，再击同 checksum+槽执行，其它交互取消）；提示区在顶部居中、独立显示、不消失、新消息覆盖旧消息；列表按 `export_time` 倒序（新的在最上），导出成功后回到第 1 页。
+- **数据**：列表每次进入读目录（后台线程，IO 不阻塞游戏线程）；槽位等级/地图在游戏线程刷新（主菜单先 `SAVE_CreateSaveSlot`）。
 - **API 拦截**：面板/设置页打开时 `data_op_save`/`enter_slot`/`create_slot` 返回 `ui occupied: backup panel` / `ui occupied: settings panel`。
-- **实现文件**：`feature/ui/game_ui_savebackup.{h,cpp}` + `_panel.inc`/`_render.inc`/`_injection.inc`；设置页改动 `game_ui_settings*`；JNI `bridge/native/gamebridge_settings.cpp`（5 个 UI 导出）+ `gamebridge_operations.cpp`（`nativeSaveBackupSetMapNames`）；Kotlin `NativeBridge.kt` / `ApiServer.kt` / `StaticData.kt`。
+- **实现文件**：`feature/ui/game_ui_savebackup.{h,cpp}` + `_panel.inc`/`_render.inc`/`_injection.inc`；设置页 `game_ui_settings*`（网格一格 + 「使用」按钮）；JNI `bridge/native/gamebridge_settings.cpp`（5 个 UI 导出）+ `gamebridge_operations.cpp`（`nativeSaveBackupSetMapNames`）；Kotlin `NativeBridge.kt` / `ApiServer.kt` / `StaticData.kt`。

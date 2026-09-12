@@ -7,6 +7,7 @@
 #include "game_state.h"
 #include "game_symbols.h"
 #include "game_ui.h"
+#include "game_ui_components.h"
 #include "game_ui_kit.h"
 #include "game_ui_settings.h"
 
@@ -30,46 +31,127 @@
 #define CB_TEXT_SIZE 0x40
 
 // 面板布局（与 game_ui_settings 同构：逻辑坐标 0-960×0-640 空间，root 相对全屏居中）
-// 留出顶部 title 区域 + 底部 hint/状态栏 + 三栏主体。
+// 视觉与设置页同一套：顶部居中消息/标题区（同设置页 addr 标签位）+ 左上角「返回」
+// 原版贴图按钮（屏幕 (8,8)，同设置页位置/尺寸）；主体左（存档框）/中（操作按钮，无组框，
+// 居中于左右栏之间）/右（备份列表框）三栏，左右两栏同宽、右缘=内容区右缘；
+// 三栏沿同一水平中线垂直居中（左框/中按钮组按各自高度上下居中，见 CONTENT_MID_Y）。
 #define ROOT_W 0x3c0
 #define ROOT_H 0x280
-#define TITLE_H 0x38
-#define HINT_H 0x38
 #define CONTENT_X 0x18
 #define CONTENT_W (ROOT_W - 0x30)
-#define CONTENT_Y TITLE_H
-#define CONTENT_H (ROOT_H - TITLE_H - HINT_H)
-// 三栏：左（槽位）、中（操作）、右（备份列表）；栏间分隔线 0x06。
-// 基址链：左栏固定 CONTENT_X 起 → 中栏 OPS_COL_X 在左栏后 → 右栏 LIST_COL_X 在中栏后；
-// LIST_COL_W = 右栏起点到内容区右缘（CONTENT_X + CONTENT_W），保证不溢出。
-#define SLOT_COL_W 0x90
+#define CONTENT_Y 0x60
+// 三栏：左、右两栏同宽 W，中栏居中于两栏之间（两侧等 GAP=0x0A，间隔加宽）。
+//   W 由内容区总宽分配：2W + OPS_COL_W + 2*GAP = CONTENT_W
+//     → W = (912 - 88 - 20) / 2 = 402 = 0x192（整除，无需再取整）。
+//   字宽（libgame 0xa72ec 字形循环 / 0xa48d4 测宽反汇编：font=1 ASCII=6、空格=4、CJK=9
+//   原生单位；原生 480 宽 UI 对应本面板 960 逻辑宽，故 ×2）。
+//   现正文改 font=3（见下），宽度按字号比 28/24 放大；最长「职业名 Lv<L> <地图名>」
+//   （4 CJK 职业 + 16 字节地图名）在本模型下 ≈ 128 原生 ×2 ×(28/24) ≈ 299 逻辑 px，
+//   按钮可用宽 = (W-0x08) - 0x08 左内距 - 0x04 右边距 = 382 px，仍富余；
+//   渲染前仍按估算宽度截断地图名（render.inc est/truncate 助手）以防极端名；来源先截 16 字节。
+// 链式验算（单位 px）：
+//   SLOT 右缘  = 0x18 + 0x192 = 0x1AA
+//   OPS_COL_X  = 0x1AA + 0x0A = 0x1B4；中栏 [0x1B4, 0x20C]，中心 0x1E0 = 内容区中心
+//              （CONTENT_X + CONTENT_W/2 = 0x18 + 0x1C8 = 0x1E0）✓
+//   LIST_COL_X = 0x1B4 + 0x58 + 0x0A = 0x216
+//   LIST_COL_X + W = 0x216 + 0x192 = 0x3A8 = CONTENT_X + CONTENT_W（右框右缘=内容区右缘）✓
+//   三栏间隙均为 GAP=0x0A，互不重叠、不越界 ✓
+#define GAP 0x0A
 #define OPS_COL_W 0x58
-#define GAP 0x06
-#define OPS_COL_X (CONTENT_X + SLOT_COL_W + GAP)
+#define COL_W 0x192
+#define SLOT_COL_W COL_W
+#define LIST_COL_W COL_W
+#define SLOT_COL_X CONTENT_X
+#define OPS_COL_X (SLOT_COL_X + SLOT_COL_W + GAP)
 #define LIST_COL_X (OPS_COL_X + OPS_COL_W + GAP)
-#define LIST_COL_W (CONTENT_X + CONTENT_W - LIST_COL_X)
-// 左栏 3 槽纵列；中栏 3 操作按钮纵列；右栏每列 4 项 + 翻页头尾。
-#define SLOT_ROW_H 0x52
-#define SLOT_Y (CONTENT_Y + 0x06)
-#define OPS_BTN_H 0x40
-#define OPS_BTN_W 0x50   // 与 OPS_COL_W(0x58) 留 4px 边距；保证两行 hint 文字不溢出中栏
-#define OPS_BTN_GAP 0x0a
-#define OPS_Y0 (CONTENT_Y + 0x10)
-#define LIST_ROW_H 0x3c
-#define LIST_COLS_PER_PAGE 4
+// 正文字号：fn_grpx_draw_string_with_font 第 5 参 font = 游戏字体表下标。GRPX_CreateFont
+// (0x8f5f4) 用同一字体族创建 5 个字号：size={20,24,38,28,14}（vaddr 0x243c00 的
+// GRPX_GetFontSize 表：0..3），行高表 [0x2f5968]={22,26,40,30,16}。左栏与右栏正文统一
+// font=3（28/行高30）：比 font=1(24) 大，且比上一版 font=2(38) 收敛以适配更矮的行；
+// 同一字体族 → CJK 字形覆盖相同。中栏/翻页/标题/返回保持 font=1。
+#define SB_TEXT_FONT 3
+#define SB_FONT_H 0x1E      // font=3 行高 30（GRPX_GetFontHeight 表），用于垂直居中预算（最坏）
+// 右栏两行文本的 y 间隔：两行块高 = 间隔 + 行高。
+#define LIST_LINE_GAP 0x1C  // 0x1C(28)+0x1E(30)=0x3A(58) ≤ 按钮高 0x42(66)，居中 offset=4
+// 三栏垂直：右框最高（FRAME_H），以其中心为公共水平中线；左框/中栏按各自高度居中。
+//   框线内边界（draw_frame_box）：ui_draw_panel_decor 上边 [frame.y, frame.y+3)、
+//   下边 [frame.y+h-3, frame.y+h)；ui_draw_vertical_line 左边 [x, x+3)、右边 [x+w-3, x+w)
+//   （3px，左闭右开）。故框内可用区 y ∈ [frame.y+3, frame.y+h-3)，高 h-6；左右各内缩 3px。
+//   首/末行紧贴框内边缘：行按钮高 = ROW_H - ROW_GAP（行间仅留 ROW_GAP=4 缝隙），
+//     首行顶 = frame.y + FRAME_BORDER；末行底 = frame.y+3 + n*ROW_H - ROW_GAP；
+//     令其 = frame.y + h - 3 → h = n*ROW_H + 2*FRAME_BORDER - ROW_GAP。
+//   故 FRAME_H = 5*0x46 + 6 - 4 = 0x160(352)；SLOT_FRAME_H = 3*0x48 + 6 - 4 = 0xDA(218)。
+//   右框 5 行：pitch 0x46、按钮高 0x42(66)；左框 3 槽：pitch 0x48、按钮高 0x44(68)。
+//   FRAME_Y 下移：0x60 → 0x68（CONTENT_Y+8）；标题/消息保持绝对 y=0x18 不动。
+#define FRAME_Y (CONTENT_Y + 0x08)
+#define FRAME_BORDER 0x03
+#define LIST_ROW_H 0x46               // 70
+#define LIST_ROW_GAP 0x04             // 行间缝隙；按钮高 = 0x46-4 = 0x42(66)
+#define FRAME_H (5 * LIST_ROW_H + 2 * FRAME_BORDER - LIST_ROW_GAP)  // = 0x160(352)
+#define SLOT_ROW_H 0x48               // 72
+#define SLOT_ROW_GAP 0x04             // 按钮高 = 0x48-4 = 0x44(68)
+#define SLOT_FRAME_H (3 * SLOT_ROW_H + 2 * FRAME_BORDER - SLOT_ROW_GAP)  // = 0xDA(218)
+#define LIST_COLS_PER_PAGE 5
 #define LIST_COLS_MAX 64
-// 翻页按钮高度 = 列高；按钮宽 0x60
-#define LIST_PAGE_BTN_H LIST_ROW_H
-#define LIST_PAGE_BTN_W 0x60
+// 公共水平中线 = 右框中心；左框顶 SLOT_FRAME_Y / 中栏顶 OPS_Y0 据此推出。
+//   CONTENT_MID_Y = FRAME_Y + FRAME_H/2 = 0x68 + 0xB0 = 0x118(280)
+//   SLOT_FRAME_Y  = CONTENT_MID_Y - SLOT_FRAME_H/2 = 0x118 - 0x6D = 0xAB(171)
+//   OPS_Y0        = CONTENT_MID_Y - (3*0x40 + 2*0x0A)/2 = 0x118 - 0x6A = 0xAE(174)
+//   三者中心：0xAB+0x6D = 0xAE+0x6A = 0x68+0xB0 = 0x118 ✓
+//   左框底 = 0xAB+0xDA = 0x185 < 右框底 0x68+0x160 = 0x1C8；左框与右框互不重叠（异 x）。
+#define CONTENT_MID_Y (FRAME_Y + FRAME_H / 2)
+#define SLOT_FRAME_Y (CONTENT_MID_Y - SLOT_FRAME_H / 2)
+// 中栏 3 操作按钮：无组框（每个按钮 ui_custom::draw_button 自带 2px 边框），
+// 按钮组按公共中线垂直居中。
+#define OPS_BTN_H 0x40
+#define OPS_BTN_W 0x50   // 与 OPS_COL_W(0x58) 留 4px 边距；单行标签不溢出中栏
+#define OPS_BTN_GAP 0x0a
+#define OPS_Y0 (CONTENT_MID_Y - (3 * OPS_BTN_H + 2 * OPS_BTN_GAP) / 2)
+// 翻页按钮：右栏框下方一行，prev 左对齐 / next 右对齐（互不重叠）；
+// 页码指示（如「1/2」）画在两按钮正中间（LIST_COL_X + LIST_COL_W/2），只画文字无框。
+//   翻页行底 = PAGE_ROW_Y+0x30 = (0x68+0x160+0x08)+0x30 = 0x200 = 512 (root.y=0) < ROOT_H 0x280 ✓
+//   prev x ∈ [LIST_COL_X+0x04, +0x7C]，next x ∈ [LIST_COL_X+0x116, +0x18E]（W=0x192）；
+//   两按钮内缘间隙 [X+0x7C, X+0x116]，正中 = X+0xC9 = LIST_COL_X+LIST_COL_W/2。
+#define LIST_PAGE_BTN_H 0x30
+#define LIST_PAGE_BTN_W 0x78
+#define PAGE_ROW_Y (FRAME_Y + FRAME_H + 0x08)
+// 顶部消息/标题区：与设置页 addr 标签同高（settings.cpp ADDR_Y=0x18，label rect 高 ADDR_H=0x28）。
+//   MSG_Y + root.y == 0x18（root.y=0 → MSG_Y=0x18）；文本绘制偏移同 settings address_draw 的 0x18。
+#define MSG_X (ROOT_W / 2 - MSG_W / 2)
+#define MSG_Y 0x18
+#define MSG_W 0x120
+#define MSG_H 0x28
+// 返回按钮：与 game_ui_settings 完全同尺寸（原版 option 贴图量级），屏幕左上 (8,8)。
+#define BACK_BTN_W 0x4a
+#define BACK_BTN_H 0x51
+// 背景贴图 unit/loc：与 game_ui_settings 同值（title background 左右两半）。
+#define TITLE_BACKGROUND_LEFT_UNIT 0x4f
+#define TITLE_BACKGROUND_RIGHT_UNIT 0x50
+#define TITLE_BACKGROUND_LOC 0x0
 
-// 颜色（ABGR：与扩展背包一致，0xFF00B4D7=暗金描边）
-#define COLOR_BG 0xFF181012
-#define COLOR_PANEL 0xFF241C18
-#define COLOR_BORDER 0xFFB49067
-#define COLOR_TEXT 0xFFE8D6B8
-#define COLOR_TEXT_DIM 0xFF98816A
-#define COLOR_HIGHLIGHT 0xFF655444
-#define COLOR_HIGHLIGHT_SEL 0xFFB49067
+// 颜色（ABGR 0xAABBGGRR，文字/框线/按钮用）：与 game_ui_settings 同一套视觉语言——
+// UI_GOLD 金色 = 分割线/框线/次要文本/左栏有档槽文本/右栏首行文本/中栏可用按钮文字；
+// UI_OPTION_TEXT = 正文文字；COLOR_TEXT_WHITE = 右栏次行（时间+校验）；
+// COLOR_TEXT_GRAY = 左栏空槽文本 / 中栏不可用按钮文字。
+//
+// 注意：选中底色走 ui_fill_rect_alpha → GRPX_FillRectAlpha，颜色格式与上面不同！
+// 反汇编 libgame.so 0x8fccc：color(w4)/alpha(w5) 经 GRPX_GetColorFromGRPWithAlpha(0x8fc88)
+// 转换后再 SGL_grpFillRect。该转换把 color 低 16 位当作 **RGB565**（R=bit15..11、
+// G=bit10..5、B=bit4..0），展开为 ABGR8888；alpha 是 **0..100 百分比**（w5>0x64 直接 return，
+// 内部按 alpha*255/100 写入高字节）。故此处颜色必须写 RGB565，不能写 ABGR8888——
+// 之前写 0xFF102E4A 被当作 RGB565(0x2E4A) 解码成亮绿（实测），即此故。
+// COLOR_SEL_BG 深琥珀 0x5182 = RGB565(R5=10,G6=12,B5=2) → 渲染 RGB(0x50,0x30,0x10)
+// 暖暗棕（明度低），反衬 UI_GOLD 金色文字（深底亮字高对比），仍可与冷色近黑的
+// COLOR_BTN_BG/遮罩区分。COLOR_SEL_BG_ALPHA=0x50 即 80% 不透明度（百分比口径）。
+#define UI_GOLD 0xFF00B4D7
+#define UI_OPTION_TEXT 0xFFCB9EE2
+#define COLOR_TEXT_WHITE 0xFFFFFFFF
+#define COLOR_TEXT_GRAY 0xFF808080
+// RGB565（GRPX_FillRectAlpha 口径）：0x5182 → RGB(0x50,0x30,0x10) 深琥珀/深棕暖暗色。
+#define COLOR_SEL_BG 0x5182
+#define COLOR_SEL_BG_ALPHA 0x50
+#define COLOR_BTN_BG 0xFF241C18
+#define COLOR_BTN_BG_DIM 0xFF181012
 #define COLOR_OK 0xFFB0E89C
 #define COLOR_ERR 0xFFE89C9C
 #define COLOR_INFO 0xFF9CC2E8
@@ -88,24 +170,36 @@ void* g_root = nullptr;
 int g_back_pressed = 0;
 int g_close_delay_frames = 0;
 const char* kTitle = "存档备份";
+// 视觉资源（与 game_ui_settings 同款）：面板背景贴图两半 + 原版返回按钮贴图（unit 0x59）。
+// 注意：option 贴图单元与设置页共用，本面板不做「已加载」标志——enter 无条件确保加载
+// （幂等）、f3 不卸载（所有者是设置页）；返回按钮绘制直接尝试贴图、失败退化自绘，
+// 避免标志与实际单元状态不一致（设置页 f3 卸载后本面板 resumed 时标志仍为 true 的窗口）。
+bool g_title_background_images_loaded = false;
+bool g_background_unavailable_logged = false;
+// 返回按钮几何：创建控件时按 root 修正为屏幕绝对 (8,8)（同设置页 ui_create_button
+// {8-root.x, 8-root.y} 口径）；命中测试与绘制只读 w/h，x/y 仅创建时使用。
+UiRect g_back_btn_rect = {8, 8, BACK_BTN_W, BACK_BTN_H};
 
 // 三栏控件容器（label 类型，参与命中但 DrawProc 自绘；DrawProc 走 fn_ctrl_btn_draw → 自定义 cb）。
 void* g_slot_btns[3] = {nullptr, nullptr, nullptr};
 void* g_ops_btns[3] = {nullptr, nullptr, nullptr};   // 0=导出 1=导入 2=删除
-void* g_list_btns[LIST_COLS_MAX] = {nullptr};       // 当前页 4 个
+void* g_list_btns[LIST_COLS_MAX] = {nullptr};       // 当前页 5 个
 void* g_prev_btn = nullptr;
 void* g_next_btn = nullptr;
 void* g_back_btn = nullptr;                          // 底部「← 返回」：关闭面板
 void* g_msg_label = nullptr;                         // 操作结果提示区
-int g_selected_slot = 0;                             // 左栏选中槽 0/1/2
+int g_selected_slot = -1;                            // 左栏选中槽 0/1/2；-1=未选（默认两侧都不选）
 int g_selected_backup = -1;                          // 右栏当前页选中项下标（0..page_size-1）；-1=未选
 int g_page_index = 0;                                // 翻页：0..N
-// 备份列表缓存（从 save_backup_list_json 解析）；每项 checksum + hero_level + map_name + export_time。
+// 备份列表缓存（从 save_backup_list_json 解析）；每项 checksum + hero_level + class + map_name + export_time。
 // map_name 由 entry_json 输出携带（Kotlin 启动期下发的 map_id→中文名表）；未命中为空串。
+// class_idx/class_name 由导出时写入 metaJson；旧备份缺失时 -1/空串（UI 退化显示）。
 struct BackupEntry {
     std::string checksum;
     std::string map_name;
     int hero_level = -1;
+    int class_idx = -1;
+    std::string class_name;
     int map_id = 0;
     long long export_time_ms = 0;
     long long save_time = 0;
@@ -114,7 +208,7 @@ std::vector<BackupEntry> g_backups;
 int g_total_pages = 0;
 // 结果提示文本（不弹窗，在面板内独立显示区；新消息覆盖旧消息，不自动消失）。
 std::string g_msg_text;
-uint32_t g_msg_color = COLOR_TEXT;
+uint32_t g_msg_color = UI_OPTION_TEXT;
 bool g_msg_is_error = false;
 // 面板内两步确认状态（导入/删除不依赖原版 YesNo 弹窗——自定义面板下该弹窗不渲染）。
 // 0=无待确认 1=待确认导入 2=待确认删除；与目标备份 checksum + 目标槽绑定：
@@ -124,12 +218,14 @@ bool g_msg_is_error = false;
 int g_pending_op = 0;
 std::string g_pending_checksum;
 int g_pending_slot = -1;
-// 左栏三槽缓存：enter 后由后台线程读 fn_save_get_save_slot / fn_saveslot_get_hero /
-// C_LEVEL 填充（见 read_slots_into），DrawProc 只读缓存，不再直接读游戏内存。
+// 左栏三槽缓存：enter 后由游戏线程读 fn_save_get_save_slot / fn_saveslot_get_hero /
+// C_LEVEL / C_CLASS / SAVESLOT_MAP_ID 填充（见 read_slots_into），DrawProc 只读缓存，不读游戏内存。
 struct SlotInfo {
     bool exists = false;
     int hero_level = -1;
     int hero_index = -1;
+    int class_idx = -1;   // 主角职业索引 0-5（hero+C_CLASS）；-1=未知，UI 退化显示
+    int map_id = -1;
 };
 SlotInfo g_slots[3];
 // 备份列表/槽位后台刷新状态：IO（save_backup_list_json + 主菜单重载三槽）全部在
@@ -146,6 +242,10 @@ struct ClickId {
 // 三栏控件共用同一 UiClickProc（点击后用 ctrl 指针反查 g_slot_btns/g_ops_btns/g_list_btns 识别）。
 void on_btn_clicked(void* ctrl);
 void on_back_clicked(void* ctrl);
+
+// 列表按钮 rect 依赖当前页条目数（垂直居中分布），定义在 panel.inc；
+// apply_backups_locked 在 inc 之前先用到，此处前置声明。
+void sync_list_btn_rects_locked();
 
 // 设置页互斥引用：通过 settings 模块函数询问其面板是否激活。
 // settings_panel_active_for_savebackup 已在 game_ui_settings.h（全局命名空间）声明，
@@ -189,8 +289,10 @@ void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entri
         };
         find_str("checksum", e.checksum);
         find_str("map_name", e.map_name);
+        find_str("class_name", e.class_name);
         long long v = 0;
         if (find_int("hero_level", v)) e.hero_level = static_cast<int>(v);
+        if (find_int("class_idx", v)) e.class_idx = static_cast<int>(v);
         if (find_int("map_id", v)) e.map_id = static_cast<int>(v);
         if (find_int("export_time", v)) e.export_time_ms = v;
         if (find_int("save_time", v)) e.save_time = v;
@@ -208,6 +310,7 @@ void clear_pending_locked() {
 
 // 应用刷新结果（调用方须持 g_sbui_mtx）。
 void apply_backups_locked(std::vector<BackupEntry>& entries) {
+    const size_t old_count = g_backups.size();
     g_backups.swap(entries);
     g_selected_backup = -1;
     // 列表已重建：旧 pending 绑定的 checksum 可能已失效（备份被删/改），一并清除。
@@ -216,9 +319,19 @@ void apply_backups_locked(std::vector<BackupEntry>& entries) {
     g_total_pages = (total + LIST_COLS_PER_PAGE - 1) / LIST_COLS_PER_PAGE;
     if (g_page_index >= g_total_pages && g_total_pages > 0) g_page_index = g_total_pages - 1;
     if (g_page_index < 0) g_page_index = 0;
+    // 条目数/页码变化 → 本页条目垂直居中分布。控件 rect 的写回必须在游戏线程：
+    // 本函数可能在后台刷新线程执行（apply 阶段），故这里不直接 ui_set_rect；
+    // 由 savebackup_panel_process（游戏线程、持锁）每帧 sync_list_btn_rects_locked()。
+    // 命中/绘制本身已不依赖控件 rect（panel_abs_origin + 实时计算 rect），见 panel.inc/render.inc。
+    // 条数变化日志：真机验收据此确认「导出 → 后台读目录 → apply」链路把新条目带到列表
+    // （导出成功路径额外把 page_index 归零，见 export_selected）。
+    if (old_count != g_backups.size()) {
+        SB_UI_LOG("apply_backups: %zu -> %zu backups, total_pages=%d, page_index=%d",
+                  old_count, g_backups.size(), g_total_pages, g_page_index);
+    }
 }
 
-// 读三槽元数据到 out（无共享状态，锁外调用；通常在后台线程执行）。
+// 读三槽元数据到 out（无共享状态，锁外调用；必须在游戏线程执行，见 refresh_slots_on_game_thread）。
 // 口径与 save_backup.cpp:read_hero_meta / api/native/game_save.cpp:data_save_slots_json 一致：
 // 主菜单（STATE==4）下 SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局，仅此状态调用；
 // 其余状态只读现有槽结构。feature 侧只经 game_access.h 的 fn_* 与 game_symbols.h 常量访问游戏。
@@ -237,10 +350,14 @@ void read_slots_into(SlotInfo out[3]) {
         out[i].exists = true;
         out[i].hero_index = static_cast<int8_t>(
             *reinterpret_cast<const int8_t*>(p + SAVESLOT_HERO_INDEX));
+        out[i].map_id = static_cast<int>(
+            *reinterpret_cast<const uint16_t*>(p + SAVESLOT_MAP_ID));
         void* hero = fn_saveslot_get_hero(slot);
         if (hero == nullptr) continue;
-        out[i].hero_level = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(
-            reinterpret_cast<uint8_t*>(hero) + C_LEVEL));
+        uint8_t* hp = reinterpret_cast<uint8_t*>(hero);
+        out[i].hero_level = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_LEVEL));
+        // 职业索引 0-5（hero 结构 C_CLASS）；越界/异常值由 UI 端 save_backup_class_name 兜底。
+        out[i].class_idx = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_CLASS));
     }
 }
 
@@ -298,6 +415,13 @@ void set_msg_locked(const char* text, uint32_t color, bool is_error) {
     g_msg_text = text != nullptr ? text : "";
     g_msg_color = color;
     g_msg_is_error = is_error;
+    // 提示文本写入控件自身（msg_label_draw 用 ui_draw_text_centered 绘制控件文本）；
+    // 无消息时控件文本回退为面板标题。
+    if (g_msg_label != nullptr && fn_ctrl_btn_set_text != nullptr) {
+        fn_ctrl_btn_set_text(g_msg_label,
+                             g_msg_text.empty() ? const_cast<char*>(kTitle)
+                                                : const_cast<char*>(g_msg_text.c_str()));
+    }
 }
 
 bool settings_panel_active() { return settings_panel_active_for_savebackup(); }
@@ -319,6 +443,7 @@ UiRect list_btn_rect(int i);
 UiRect page_btn_rect(bool next);
 UiRect msg_label_rect();
 UiRect back_btn_rect();
+int page_entry_count();
 
 // ============== PopupState 注入 ==============
 uint8_t* find_state_entry(uintptr_t enter_vma);

@@ -25,10 +25,12 @@ UiRect settings_toggle_rect(int index) {
             cell.y + (cell.h - ROW_BTN_H) / 2, ROW_BTN_W, ROW_BTN_H};
 }
 
-// 存档备份按钮（v0.7.x）：底部独立条，点击后 push 打开 savebackup 面板。
+// 存档备份单元格（v0.7.x 改造）：复用网格第 3 行左侧空位（索引 = SETTINGS_ROW_COUNT），
+// 按钮高度与其他开关一致、右缘与其他开关对齐、宽度取窄值（见 SAVEBACKUP_BTN_W）。
 UiRect settings_savebackup_rect() {
-    return {CONTENT_X, GRID_Y + VISIBLE_GRID_ROWS * CELL_H + 0x08,
-            CONTENT_W, ROW_BTN_H + 0x08};
+    UiRect toggle = settings_toggle_rect(SETTINGS_ROW_COUNT);
+    return {toggle.x + toggle.w - SAVEBACKUP_BTN_W, toggle.y,
+            SAVEBACKUP_BTN_W, toggle.h};
 }
 
 // ---- Kotlin 配置桥接（native 反调 ModuleConfigUiBridge）----

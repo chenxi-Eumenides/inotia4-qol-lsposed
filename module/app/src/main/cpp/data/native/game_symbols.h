@@ -83,6 +83,7 @@ constexpr size_t POPUP_STACK_COUNT = 0x08;    // u32 栈内面板数
 constexpr size_t POPUP_STACK_DATA = 0x18;     // u64 条目数组指针
 
 // ---- 存档槽结构（fn_save_get_save_slot 返回对象）----
+constexpr size_t SAVESLOT_MAP_ID = 0x00;      // u16 槽位当前地图 id
 constexpr size_t SAVESLOT_EXISTS = 0x02;      // u8 槽位是否存在
 constexpr size_t SAVESLOT_HERO_PTRS = 0x04;   // void*[3] 槽内 hero 指针数组
 constexpr size_t SAVESLOT_HERO_INDEX = 0x1c;  // int8 当前 hero 索引
@@ -619,7 +620,7 @@ constexpr uintptr_t G_FONT_OBJ_SLOT_VMA = 0x2f3000 + 0xf88;   // GOT 槽：*(此
 constexpr uintptr_t F_GRPX_START_VMA = 0x8f2fc;               // void () 绘制开始（GRPX 上下文）
 constexpr uintptr_t F_GRPX_END_VMA = 0x8f314;                 // void () 绘制结束
 constexpr uintptr_t F_GRPX_FILL_RECT_VMA = 0x8fb30;           // void (i32 x, i32 y, i32 w, i32 h, u32 abgr) 纯色矩形（alpha 嵌 ABGR 高字节；GRPX_FillRectAlpha 的 alpha>0x64 直接 return，勿用）
-constexpr uintptr_t F_GRPX_FILL_RECT_ALPHA_VMA = 0x8fccc;     // void (i32 x, i32 y, i32 w, i32 h, u32 abgr, u32 alpha) 半透明矩形（alpha>0x64 直接 return 不绘制，0x3c=60 已验证有效）
+constexpr uintptr_t F_GRPX_FILL_RECT_ALPHA_VMA = 0x8fccc;     // void (i32 x, i32 y, i32 w, i32 h, u32 rgb565, u32 alpha_pct) 半透明矩形；颜色是 RGB565（低 16 位 R5G6B5，经 GRPX_GetColorFromGRPWithAlpha 0x8fc88 展开），alpha 是 0..100 百分比（>0x64 直接 return 不绘制）。注意与 GRPX_FillRect（ABGR8888）格式不同
 constexpr uintptr_t F_GRPX_SET_FONT_COLOR_VMA = 0x8fe58;      // void (u32 abgr) 设置文字颜色（GRPX_SetFontColor，ABGR 白=0xFFFFFFFF）
 constexpr uintptr_t F_GRPX_DRAW_STRING_WITH_FONT_VMA = 0x8f9b0; // void (char*, i32 x, i32 y, i32 align, i32 font) 原版字体绘制
 constexpr uintptr_t F_GRPX_SET_FONT_COLOR_RGB_VMA = 0x8fdb4;  // void (i32 r, i32 g, i32 b) 原版 RGB 字体配色
@@ -900,7 +901,7 @@ using ButtonExecuteProcFn = void (*)(void* ctrl);
 using GrpxStartFn = void (*)();
 using GrpxEndFn = void (*)();
 using GrpxFillRectFn = void (*)(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t abgr);
-using GrpxFillRectAlphaFn = void (*)(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t abgr, uint32_t alpha);
+using GrpxFillRectAlphaFn = void (*)(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t rgb565, uint32_t alpha_pct);  // rgb565 + alpha 百分比（非 ABGR8888）
 using GrpxSetFontColorFn = void (*)(uint32_t abgr);
 using GrpxDrawStringWithFontFn = void (*)(char* text, int32_t x, int32_t y, int32_t align, int32_t font);
 using GrpxSetFontColorRgbFn = void (*)(int32_t r, int32_t g, int32_t b);

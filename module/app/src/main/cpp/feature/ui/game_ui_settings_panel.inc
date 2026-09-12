@@ -53,15 +53,19 @@ void settings_panel_enter() {
     if (addr != nullptr) {
         g_addr_desc = addr;
     }
-    // 存档备份按钮（v0.7.x）—— push 打开备份面板
-    void* sb_btn = ui_create_button(root, settings_savebackup_rect(), "存档备份",
+    // 存档备份单元格（v0.7.x 改造）：复用网格第 3 行左侧空位，
+    // 左描述与配置项同款，右侧「使用」样式按钮（右缘与其它开关对齐）—— push 打开备份面板
+    void* sb_desc = ui_create_label(root, settings_label_rect(SETTINGS_ROW_COUNT),
+                                    "存档备份", &row_desc_draw);
+    g_savebackup_desc = sb_desc;
+    void* sb_btn = ui_create_button(root, settings_savebackup_rect(), "使用",
                                     &settings_savebackup_clicked, &savebackup_btn_draw);
     g_savebackup_btn = sb_btn;
     g_root = root;
     g_panel_active = true;
     g_close_delay_frames = 0;
     g_back_pressed = false;
-    SETTINGS_LOG("settings panel enter: root=%p %d settings cells + addr + savebackup created",
+    SETTINGS_LOG("settings panel enter: root=%p %d settings cells + backup cell + addr created",
                  root, SETTINGS_ROW_COUNT);
 }
 
@@ -106,6 +110,7 @@ void settings_panel_process() {
         if (g_rows[i].desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[i].desc);
     }
     if (g_addr_desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_addr_desc);
+    if (g_savebackup_desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_savebackup_desc);
     if (g_savebackup_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_savebackup_btn);
     ui_end_frame();
 }

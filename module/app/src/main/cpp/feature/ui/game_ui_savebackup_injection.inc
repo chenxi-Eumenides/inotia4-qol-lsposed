@@ -91,7 +91,12 @@ static void export_selected() {
         // 导出属于「其它操作」：点击即取消待确认（并清提示，避免残留确认文案）。
         if (g_pending_op != 0) {
             clear_pending_locked();
-            set_msg_locked("", COLOR_TEXT, false);
+            set_msg_locked("", UI_OPTION_TEXT, false);
+        }
+        // 未选中槽（再次点击已选槽取消）→ 不可用态下的点击反馈。
+        if (g_selected_slot < 0) {
+            set_msg_locked("请先选中一个存档槽", COLOR_ERR, true);
+            return;
         }
         slot = g_selected_slot;
     }
@@ -102,6 +107,11 @@ static void export_selected() {
         {
             std::lock_guard<std::mutex> lock(g_sbui_mtx);
             set_msg_locked("导出成功", COLOR_OK, false);
+            // 新备份按导出时间倒序位于第 0 页（列表顶部）。apply_backups_locked 只对
+            // g_page_index 做上限钳制、不回第 1 页：备份多于 1 页（>LIST_COLS_PER_PAGE 个）
+            // 且用户停在第 2+ 页导出时，刷新后仍停在原页 → 看不到新条目
+            // （用户反馈「创建备份后看不到」的成因）。导出成功一律回第 1 页。
+            g_page_index = 0;
         }
         refresh_panel_data_async();
     } else {
@@ -135,6 +145,11 @@ static void import_selected() {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (g_selected_backup < 0) {
             set_msg_locked("请先选中一个备份", COLOR_ERR, true);
+            return;
+        }
+        // 导入需目标槽：未选中槽（再次点击已选槽取消）→ 不可用态下的点击反馈。
+        if (g_selected_slot < 0) {
+            set_msg_locked("请先选中一个存档槽", COLOR_ERR, true);
             return;
         }
         const BackupEntry* e = backup_at_page(g_selected_backup);
@@ -178,46 +193,74 @@ static void import_selected() {
 }
 
 static void delete_selected() {
+    // 删除目标二选一（恰好选中一侧）：备份 → checksum；存档槽 → slot。
     std::string checksum;
+    int slot = -1;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        if (g_selected_backup < 0) {
-            set_msg_locked("请先选中一个备份", COLOR_ERR, true);
+        const bool slot_sel = g_selected_slot >= 0;
+        const bool backup_sel =
+            g_selected_backup >= 0 && backup_at_page(g_selected_backup) != nullptr;
+        if (slot_sel == backup_sel) {
+            // 两侧都选/都不选：删除不可用（渲染层已置灰），点击给出反馈。
+            set_msg_locked("请只选中存档槽或备份之一", COLOR_ERR, true);
             return;
         }
-        const BackupEntry* e = backup_at_page(g_selected_backup);
-        if (e == nullptr) {
-            set_msg_locked("备份项无效", COLOR_ERR, true);
-            return;
+        if (backup_sel) {
+            const BackupEntry* e = backup_at_page(g_selected_backup);
+            if (e == nullptr) {
+                set_msg_locked("备份项无效", COLOR_ERR, true);
+                return;
+            }
+            // 两步确认：同 checksum 才执行（op=2）。
+            const bool armed = (g_pending_op == 2 && g_pending_checksum == e->checksum);
+            if (!armed) {
+                g_pending_op = 2;
+                g_pending_checksum = e->checksum;
+                g_pending_slot = -1;
+                set_msg_locked("再次点击「删除」确认删除该备份", COLOR_INFO, false);
+                SB_UI_LOG("delete backup armed: checksum=%.8s", e->checksum.c_str());
+                return;
+            }
+            clear_pending_locked();
+            checksum = e->checksum;
+        } else {
+            // 删该槽游戏存档；两步确认绑定 slot（op=3），与备份删除区分。
+            slot = g_selected_slot;
+            const bool armed = (g_pending_op == 3 && g_pending_slot == slot);
+            if (!armed) {
+                g_pending_op = 3;
+                g_pending_checksum.clear();
+                g_pending_slot = slot;
+                char buf[96];
+                snprintf(buf, sizeof(buf), "再次点击「删除」确认删除 槽%d 的存档（不可恢复）",
+                         slot);
+                set_msg_locked(buf, COLOR_INFO, false);
+                SB_UI_LOG("delete slot armed: slot=%d", slot);
+                return;
+            }
+            clear_pending_locked();
         }
-        // 与导入同构：checksum + 目标槽绑定，第二次点击才执行。
-        const bool armed = (g_pending_op == 2 &&
-                            g_pending_checksum == e->checksum &&
-                            g_pending_slot == g_selected_slot);
-        if (!armed) {
-            g_pending_op = 2;
-            g_pending_checksum = e->checksum;
-            g_pending_slot = g_selected_slot;
-            set_msg_locked("再次点击「删除」确认删除该备份", COLOR_INFO, false);
-            SB_UI_LOG("delete armed: checksum=%.8s", e->checksum.c_str());
-            return;
-        }
-        clear_pending_locked();
-        checksum = e->checksum;
     }
     // 删除（文件 IO）在锁外执行。
-    const std::string resp = save_backup_delete_json(checksum.c_str());
+    const std::string resp = !checksum.empty() ? save_backup_delete_json(checksum.c_str())
+                                               : save_backup_delete_slot_json(slot);
     const bool ok = resp.find("\"ok\":true") != std::string::npos;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (ok) {
-            set_msg_locked("已删除", COLOR_OK, false);
-            g_selected_backup = -1;
+            set_msg_locked(checksum.empty() ? "已删除存档" : "已删除", COLOR_OK, false);
+            if (checksum.empty()) g_selected_slot = -1;
+            else g_selected_backup = -1;
         } else {
             set_msg_locked("删除失败", COLOR_ERR, true);
         }
     }
-    if (ok) refresh_panel_data_async();  // 删除不改槽文件，无需 refresh_slots
+    if (ok) {
+        // 删槽改动了游戏存档文件 → 槽结构必须在游戏线程重载（本回调即游戏线程，锁外调用）。
+        if (checksum.empty()) refresh_slots_on_game_thread();
+        refresh_panel_data_async();  // 备份列表刷新（删槽不改 bundle，但代价低且保持缓存新鲜）
+    }
 }
 
 // 控件通用点击回调（kind 通过 ctrl 指针反查）。
@@ -250,17 +293,21 @@ void on_btn_clicked(void* ctrl) {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (g_pending_op != 0) {
             clear_pending_locked();
-            set_msg_locked("", COLOR_TEXT, false);
+            set_msg_locked("", UI_OPTION_TEXT, false);
         }
         if (is_prev && g_page_index > 0) {
             --g_page_index;
             g_selected_backup = -1;
-            set_msg_locked("", COLOR_TEXT, false);
+            set_msg_locked("", UI_OPTION_TEXT, false);
         } else if (is_next && g_page_index < g_total_pages - 1) {
             ++g_page_index;
             g_selected_backup = -1;
-            set_msg_locked("", COLOR_TEXT, false);
+            set_msg_locked("", UI_OPTION_TEXT, false);
+        } else {
+            return;
         }
+        // 页码变化 → 本页条目数可能变化：垂直居中分布的列表按钮 rect 重对齐。
+        sync_list_btn_rects_locked();
     }
     // 槽位 / 备份项不在 ExecuteProc 走：命中测试已在 event 中处理 selection；此处留空
     // 以防 ui_create_button 自动调 click（实测：ui_create_button 不会自动调 ExecuteProc）
@@ -280,7 +327,7 @@ void on_back_clicked(void* ctrl) {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (!g_panel_active || ctrl != g_back_btn) return;
         clear_pending_locked();
-        set_msg_locked("", COLOR_TEXT, false);
+        set_msg_locked("", UI_OPTION_TEXT, false);
         g_panel_active = false;
         g_close_delay_frames = 0;
         g_back_pressed = 0;

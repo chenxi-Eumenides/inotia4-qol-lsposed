@@ -15,6 +15,15 @@ void save_backup_init(const char* data_dir, const char* external_files_dir);
 // 空串视为清空（用于解绑/卸载场景）；非法 JSON 容错为空表。
 void save_backup_set_map_names(const char* json);
 
+// map_id → 中文名查询（上表内存）；未命中返回空串。
+// 供 UI 层显示存档槽/备份条目地图名，避免上层复制一份映射表。
+std::string save_backup_map_name(int map_id);
+
+// class_idx（0-5）→ 职业中文名；非法/未知返回空串。表为编译期常量（无锁、无共享状态），
+// 可在持有任意锁的 UI DrawProc/后台解析路径安全调用。名称口径与游戏 CHARCLASSBASE 文本一致
+// （0=黑暗骑士 1=忍者 2=黑魔导 3=祭司 4=暗影猎手 5=狂战士）。
+const char* save_backup_class_name(int class_idx);
+
 // GET /api/system/backup/list 响应体。
 std::string save_backup_list_json();
 
@@ -26,3 +35,8 @@ std::string save_backup_import_json(const char* checksum, int slot);
 
 // POST /api/system/backup/delete 响应体。
 std::string save_backup_delete_json(const char* checksum);
+
+// 删除指定槽的游戏存档（原版 save{slot}.dat + 模块 sidecar slot-{slot}.module-save/.last-good）。
+// 只作用于该 slot 的精确文件名，不触碰其它槽；未找到任何目标文件返回结构化错误。
+// 与 save_backup_delete_json 同风格（HTTP 风格 {"ok":true,...}/{"ok":false,"error":"..."}）。
+std::string save_backup_delete_slot_json(int slot);
