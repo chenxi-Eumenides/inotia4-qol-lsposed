@@ -116,7 +116,7 @@ data 层 → 仅 STL
 | `symbol_registry.h` | data | 符号登记表（SYM 宏名 → VMA/解析来源），check_symbols.py 校验清单 | 无 |
 | `symbol_resolver.*` | data | ELF `.dynsym` 符号名动态解析 + `.rela.dyn` RELATIVE 反查（GOT 槽），VMA 仅兜底 | game_symbols.h |
 | `game_access.*` | data | `/proc/self/maps` 基址定位 + `resolve_global()` 符号解析 + `fn_*` 函数指针 + `bridge_init()` | game_symbols.h |
-| `game_state.*` | data | **状态判定 + 跨域查询原语 + 遍历原语**：game_in_world / ui_blocked / tutorial_*、member_or_null / lead_member / find_char_by_merc_slot / find_inventory_item / inventory_count / inventory_item_at、**for_each_bag_slot / pool_obj_valid** | 仅 STL |
+| `game_state.*` | data | **状态判定 + 跨域查询原语 + 遍历原语 + 离线程只读原语**：game_in_world / ui_blocked / tutorial_*、member_or_null / lead_member / find_char_by_merc_slot / find_inventory_item / inventory_count / inventory_item_at、**for_each_bag_slot / pool_obj_valid**、**char_max_hp/char_max_mp（直读属性缓存）/ char_stat_total（直读 C_STAT_* 求和）/ char_next_exp_cached + char_next_exp_cache_start（kFramePointLogicPre 游戏线程帧缓存）** | 仅 STL |
 | `game_tiles.*` | data | 静态瓦片矩阵（64×64 通行矩阵，assets maps/tiles.json 经 JNI 传入） | 仅 STL |
 | `core/native/game_json.*` | core | 纯 JSON 工具：json_escape | 仅 STL |
 | `core/native/game_nav.*` | core | BFS 寻路（nav_bfs / nav_bfs_multi，基于瓦片矩阵） | game_state.h（lead_member） |
@@ -185,7 +185,7 @@ data 层 → 仅 STL
 
 **移动互斥槽**（`game_world_movement.inc`）：`g_motion_task` + `motion_task_start/stop`，nav/walk 共用，注册即替换；`stop_all_tasks()` 已删除，`walk_stop` 改调 `motion_task_stop()`，不再影响其它帧任务（自动出售）。
 
-**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）、进入存档回调（`save_enter_tick`，`core/native/save_enter.cpp`）；退出存档回调（`save_exit`）经 call_patch 触发，不走帧任务。
+**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）、进入存档回调（`save_enter_tick`，`core/native/save_enter.cpp`）、角色升级经验游戏线程缓存（`char_next_exp_tick`，`game_state.cpp`，`kFramePointLogicPre` 常驻）；退出存档回调（`save_exit`）经 call_patch 触发，不走帧任务。
 
 **真机验证（2026-09-13）**：锚点安装成功；world 态 move_to / walk_dir / stop_move 逐帧驱动生效；无崩溃。
 
@@ -478,6 +478,15 @@ uv run python scripts/verification/smoke_all.py
 
 **NativeBridge 114 个 external 冻结**。native bridge 已按职责拆为多个 `gamebridge_*.cpp`，JNI 导出名与分发逻辑不随域拆分变化。新增端点按 §6 五段式扩展，**禁止改名/改签名既有 external**。
 
+### 9.6 线程纪律（非游戏线程禁用有写副作用的游戏函数，2026-09 事故新增）
+> 来源：HP 莫名扣血/死亡事故定位（`docs/history/hp-clamp-offthread-incident.md`）。以下为后续所有 native 读写必须遵守的持续性规范。
+1. **禁止在 HTTP 工作线程、缓存预取线程（`cache_prefetch_thread_fn`）、`bridge-init`、hook 回调等非游戏线程调用有写副作用的游戏函数**。游戏函数名带 `Get*` 不等于纯读——`CHAR_GetAttr`/`CHAR_GetStat`/`CHAR_GetNextExperience` 等在被调分支内会写回角色对象或使用全局计算器栈，与游戏主线程并发会破坏属性重算窗口。
+2. **只读数据优先直读缓存字段**，不复用可能带写副作用的 getter：
+   - HP/MP 上限用 `char_max_hp`/`char_max_mp` 直读 `[ch+0x9c]`/`[ch+0xa0]`，不用 `CHAR_GetAttr(0x1e/0x1f)`（0x1e 分支 HP>上限时把 HP 写为上限）；
+   - 主属性总属性用 `char_stat_total` 直读 `C_STAT_BASE/MAIN/BONUS/SUB` 求和，不用 `CHAR_GetStat`（经 `CHAR_GetStatSub` 重算并写回 `[ch+0x266]`/状态位）。
+3. **需要游戏函数结果时，用 `frame_task` 在游戏主线程帧周期缓存为 atomic 快照，供离线程只读**。范例：`char_next_exp_cached` 由 `char_next_exp_tick` 在 `kFramePointLogicPre` 每帧对 3 名队员调用 `CHAR_GetNextExperience` 并缓存（`CAL_Calculate` 使用全局计算器栈，不能在离线程调用），JSON 只读快照、未命中回退直读 `[ch+0x320]`。
+4. 落地方式：新增离线程只读原语放 `game_state.*`（data 层），写副作用 getter 保留给游戏线程操作路径；`game_access.h` 对禁用函数以 `⚠️ 禁止在非游戏线程调用` 注释标注。
+5. 事故证据：`cache_prefetch_thread_fn` 每帧构造 `interval>0` 槽时调用 `CHAR_GetAttr(0x1e)`，与游戏线程 `CHAR_UpdateAttr` 竞争把 HP 钳成 0 → 残血/死亡（真机 frida 高频调用复现 `dialog_wipeout`）。取证脚本 `scripts/verification/hp_watch_session.py`。
 ## 10. 滞后修正清单（P4 文档同步，全部实测确认）
 
 重构期间文档与代码的滞后点，P4 统一修正（以代码为准）：

@@ -191,18 +191,19 @@ std::string build_snapshot_json() {
         s += ",\"level\":" + std::to_string(level);
         s += ",\"hp\":" + std::to_string(*reinterpret_cast<int32_t*>(b + C_HP));
         s += ",\"mp\":" + std::to_string(*reinterpret_cast<int32_t*>(b + C_MP));
-        if (fn_get_attr != nullptr) {
-            s += ",\"max_hp\":" + std::to_string(fn_get_attr(ch, ATTR_MAX_HP));
-            s += ",\"max_mp\":" + std::to_string(fn_get_attr(ch, ATTR_MAX_MP));
+        // 直接读属性缓存字段（attr 0x1e/0x1f），不调用 CHAR_GetAttr：该函数 attr=0x1e 分支
+        // 在 HP>maxHP 时会写回 HP，预取线程每帧调用会与主线程属性重算竞争钳低 HP。
+        s += ",\"max_hp\":" + std::to_string(char_max_hp(ch));
+        s += ",\"max_mp\":" + std::to_string(char_max_mp(ch));
+        // main_stats 直读 Base+Main+Bonus+Sub（见 char_stat_total），避免 CHAR_GetStat 经
+        // CHAR_GetStatSub 触发动态派生重算写回角色对象。
+        s += ",\"main_stats\":[";
+        for (int a = 0; a < 5; ++a) {
+            if (a > 0) s += ",";
+            s += std::to_string(char_stat_total(ch, a));
         }
-        if (fn_get_stat != nullptr) {
-            s += ",\"main_stats\":[";
-            for (int a = 0; a < 5; ++a) {
-                if (a > 0) s += ",";
-                s += std::to_string(fn_get_stat(ch, a));
-            }
-            s += "]";
-        }
+        s += "]";
+        // base_stats：CHAR_GetStatBase(0xdb9e4) 为纯读（add + ldrsb），保留函数调用。
         if (fn_get_stat_base != nullptr) {
             s += ",\"base_stats\":[";
             for (int a = 0; a < 5; ++a) {

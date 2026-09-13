@@ -49,6 +49,9 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         if (frame_host_install_if_ready()) {
             autosell_set_host_installed(true);
         }
+        // 角色升级所需经验游戏线程缓存：注册常驻逻辑帧任务（CHAR_GetNextExperience 非纯读，
+        // 不能在预取/HTTP 线程调用）。帧宿主未安装时任务注册成功但不派发（惰性无效）。
+        char_next_exp_cache_start();
         transition_dispatch_init();           // 状态转换：逻辑帧点消费（go_main_menu/enter_slot/create_slot）
         save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
         save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点 call_patch

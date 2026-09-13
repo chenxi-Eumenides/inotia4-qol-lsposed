@@ -25,6 +25,7 @@
 
 **已迁移消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`）。
 
+**`kFramePointLogicPre` 消费者（除状态转换派发外）**：角色升级所需经验游戏线程缓存 `char_next_exp_tick`（`game_state.cpp`，`nativeInit` 内 `char_next_exp_cache_start()` 注册常驻任务，`interval=1`、`count=0`）。`CHAR_GetNextExperience` 在 `[ch+0x320]==0` 时用 `CAL_Calculate`（全局计算器栈）现算并写回，属非纯读，故只在游戏逻辑帧对 3 名队员调用一次并写 atomic 快照；JSON（预取/HTTP 线程）只读 `char_next_exp_cached`，未命中回退直读 `[ch+0x320]`。帧宿主未安装时任务注册成功但不派发（惰性无效）。
 **已删除**：`game_motion.{h,cpp}`（旧 FrameTaskManager）、`frame_tick.{h,cpp}`、`feature/autosell/autosell_host.{h,cpp}`。
 
 **真机验证结论**：锚点安装成功；world 态 `move_to` / `walk_dir` / `stop_move` 逐帧驱动生效；无崩溃。

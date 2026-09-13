@@ -111,9 +111,9 @@
 | `class_idx` | 职业索引 0-5（`[ch+0x0D]` int8，CHARCLASSBASE 记录下标；`type==2` 装饰物该字段存 type 值非职业索引） |
 | `class_name` | 职业名（service 层注入，`class_idx` → CHARCLASSBASE 联查：黑暗骑士/忍者/黑魔导/祭司/暗影猎手/狂战士；仅 `class_idx∈[0,5]` 时注入） |
 | `level` | 等级 |
-| `hp`/`max_hp`/`mp`/`max_mp` | 当前/最大血量魔力 |
-| `exp`/`exp_next` | 当前经验/升级所需经验 |
-| `main_stats` | 主属性列表（0-4=力量/敏捷/体力/智力/精力），每项 `{stat_name, base_stat, additional_stat}`；`base_stat`=基础属性（[ch+0x250+i] s8），`additional_stat`=总属性-基础（含分配/加成/动态） |
+| `hp`/`max_hp`/`mp`/`max_mp` | 当前血量魔力 + 最大血量魔力。`max_hp`/`max_mp` **直读属性缓存字段 `[ch+0x9c]`/`[ch+0xa0]`**（`char_max_hp`/`char_max_mp`），不调用 `CHAR_GetAttr(0x1e/0x1f)`——其 0x1e 分支在 HP>上限时会写回 HP，离线程调用会与游戏主线程属性重算竞争钳低 HP（见 `docs/history/hp-clamp-offthread-incident.md`）；缓存值 ≤0 时回退当前 `hp`/`mp` |
+| `exp`/`exp_next` | 当前经验/升级所需经验。`exp` 直读 `[ch+0x318]`（等价 `CHAR_GetExperience` 纯读）；`exp_next` 取自**游戏线程帧缓存**（`char_next_exp_cached`，`kFramePointLogicPre` 每帧对 3 名队员缓存 `CHAR_GetNextExperience` 结果，见 `docs/development/features/frame-dispatch-host.md`），未命中缓存时回退直读游戏自身惰性缓存 `[ch+0x320]` |
+| `main_stats` | 主属性列表（0-4=力量/敏捷/体力/智力/精力），每项 `{stat_name, base_stat, additional_stat}`；`base_stat`=基础属性（[ch+0x250+i] s8），`additional_stat`=总属性-基础（含分配/加成/动态）。总属性由 `char_stat_total` **直读 `C_STAT_BASE/MAIN/BONUS/SUB` 求和**（= `CHAR_GetStat` 的 Base+Main+Bonus+Sub，无 clamp），不调用 `CHAR_GetStat`（经 `CHAR_GetStatSub` 在动态派生脏位置位时会重算写回角色对象） |
 | `status_point` | 剩余能力点 |
 | `equipment` | 10 装备槽数组（每件为物品统一结构：`slot`/`name`/`category`/`item_type`/`need_level`/`rarity`/`rarity_tier`/`base`/`bonus`/`gem`/`chaos`/`enchant`，见 Inventory 段物品字段表），空槽为 `null`；位置映射见第二章 |
 | `name_id` | 角色名字文本 ID |
@@ -404,8 +404,8 @@
 | `wdr` | 19 | 武器伤害减免率 ×10（默认 30） |
 | `sub_weapon_attack` | 20 | 副手武器攻击（slot6） |
 | `level_attr` | 28 | 等级驱动属性 =(960+36×等级)/10（黑魔导；职业各异） |
-| `max_hp` | 30 | HP 上限（CHAR_GetAttr ch,0x1e；=640+72×(等级+10) 黑魔导） |
-| `max_mp` | 31 | MP 上限（CHAR_GetAttr ch,0x1f；默认 200） |
+| `max_hp` | 30 | HP 上限（属性缓存字段 `[ch+0x9c]`，`char_max_hp`；不调用 `CHAR_GetAttr(0x1e)`——该分支有 HP 写回副作用；=640+72×(等级+10) 黑魔导） |
+| `max_mp` | 31 | MP 上限（属性缓存字段 `[ch+0xa0]`，`char_max_mp`；默认 200） |
 | `total_attack` | 113 | 总攻击 = max(物攻,魔攻)（扩展 id，不在 32 项数组） |
 
 **属性公式表**（CHAR_UpdateAttrFromStat 映射，frida 实测）：力量→攻击(a×700/600/500÷1000，职业条件 4/2/3/5/6/18/1)、敏捷→攻击(a×500÷1000)+命中(a×4)+敏捷(a×1)、体力→HP上限(a×80)+防御(a×1)、智力→魔攻(a×600/700/1000÷1000，条件 5/6/16)、精力→魔攻(a×600/600/1000÷1000)+命中(a×4)。

@@ -5,6 +5,7 @@
 #include "game_access.h"
 #include "game_symbols.h"
 #include "core/native/extension_bag_port.h"
+#include "core/native/frame_task.h"
 
 #include <android/log.h>
 #include <atomic>
@@ -23,6 +24,87 @@
 
 bool game_in_world() {
     return g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 5;
+}
+
+// HP/MP 上限缓存读取（数据层原语）：直接读 [ch+C_MAX_HP]/[ch+C_MAX_MP]（属性数组 attr 0x1e/0x1f
+// 的缓存槽），不调用 CHAR_GetAttr——其 attr=0x1e 分支在 HP>maxHP 时会写回 HP（str w0,[x20,#0x1f0]），
+// 在 HTTP/缓存预取线程调用会与游戏主线程属性重算竞争并永久钳低角色 HP。
+// 兜底：缓存值 <= 0（世界未就绪/属性失效）时回退当前 C_HP/C_MP，保证输出数值合理。
+int32_t char_max_hp(const void* ch) {
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const int32_t cached = *reinterpret_cast<const int32_t*>(b + C_MAX_HP);
+    return cached > 0 ? cached : *reinterpret_cast<const int32_t*>(b + C_HP);
+}
+
+int32_t char_max_mp(const void* ch) {
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const int32_t cached = *reinterpret_cast<const int32_t*>(b + C_MAX_MP);
+    return cached > 0 ? cached : *reinterpret_cast<const int32_t*>(b + C_MP);
+}
+
+// 主属性总属性（数据层原语）：CHAR_GetStat(0xdf8d0) 的直读等价实现。
+// 反汇编：bl CHAR_GetStatBase / CHAR_GetStatMain / CHAR_GetStatBonus / CHAR_GetStatSub 后
+// 依次 add w19 累加，末尾 add w0, w19, w0 返回；无 clamp、无条件分支。
+int32_t char_stat_total(const void* ch, int index) {
+    if (ch == nullptr || index < 0 || index > 4) return 0;
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const size_t i = static_cast<size_t>(index);
+    const int32_t base = static_cast<int8_t>(b[C_STAT_BASE + i]);   // ldrsb [ch+0x250+i]
+    const int32_t main = *reinterpret_cast<const int16_t*>(b + C_STAT_MAIN + i * 2);   // ldrsh [ch+0x256+i*2]
+    const int32_t bonus = static_cast<int8_t>(b[C_STAT_BONUS + i]); // ldrsb [ch+0x260+i]
+    const int32_t sub = *reinterpret_cast<const int16_t*>(b + C_STAT_SUB + i * 2);     // ldrsh [ch+0x266+i*2]
+    return base + main + bonus + sub;
+}
+
+// ---- next_exp 游戏线程帧缓存 ----
+// 生命周期：char_next_exp_cache_start() 在 nativeInit 注册一个常驻帧任务（kFramePointLogicPre，
+// 每帧触发），随进程存活；不进 world 时置无效。读者（JSON 预取/HTTP 线程）只读 atomic 快照，
+// 不调用任何游戏函数；未命中缓存时回退直读游戏自身的惰性缓存 [ch+0x320]。
+namespace {
+
+constexpr int kPartyRoles = 3;
+
+struct CharNextExpSlot {
+    std::atomic<void*> ch{nullptr};   // 缓存对应的角色对象（指针稳定；换角色即重新命中）
+    std::atomic<int64_t> next_exp{0};
+    std::atomic<bool> valid{false};   // false = 本槽无有效缓存（非 world / 未进队 / 符号缺失）
+};
+
+CharNextExpSlot g_char_next_exp[kPartyRoles];
+FrameTaskId g_char_next_exp_task = 0;  // 仅 nativeInit 线程写入
+
+// 游戏主线程回调：对 3 名队员各调用一次 CHAR_GetNextExperience（首次/升级失效后现算并写回），
+// 结果写入 atomic 快照。返回 true 保持常驻。
+bool char_next_exp_tick(int64_t /*frame*/, void* /*ctx*/) {
+    if (g_base == 0 || !game_in_world()) {
+        for (int i = 0; i < kPartyRoles; ++i) g_char_next_exp[i].valid.store(false);
+        return true;
+    }
+    for (int i = 0; i < kPartyRoles; ++i) {
+        void* ch = (fn_get_member != nullptr) ? fn_get_member(i) : nullptr;
+        const bool ok = ch != nullptr && fn_get_next_exp != nullptr;
+        g_char_next_exp[i].ch.store(ok ? ch : nullptr);
+        if (ok) g_char_next_exp[i].next_exp.store(fn_get_next_exp(ch));
+        g_char_next_exp[i].valid.store(ok);
+    }
+    return true;
+}
+
+}  // namespace
+
+void char_next_exp_cache_start() {
+    if (g_char_next_exp_task != 0) return;
+    g_char_next_exp_task = frame_task_add(kFramePointLogicPre, &char_next_exp_tick, nullptr, 1, 0);
+}
+
+int64_t char_next_exp_cached(const void* ch) {
+    if (ch == nullptr) return 0;
+    for (int i = 0; i < kPartyRoles; ++i) {
+        if (g_char_next_exp[i].valid.load() && g_char_next_exp[i].ch.load() == ch)
+            return g_char_next_exp[i].next_exp.load();
+    }
+    // 回退：直读游戏自身惰性缓存 [ch+0x320]（等同 CHAR_GetNextExperience 非 0 分支）。
+    return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(ch) + C_NEXT_EXP);
 }
 
 int current_save_slot() {

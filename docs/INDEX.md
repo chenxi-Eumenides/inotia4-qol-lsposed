@@ -70,6 +70,7 @@
 - `history/stage-1-physical-inventory-contract.md`
 - `history/stage-2-static-support-matrix.md`
 - `history/stage-3-bypass-audit.md`
+- `history/hp-clamp-offthread-incident.md`（HP 离线程钳制写回事故：经过、根因与同类排查；当前线程规则见 `development/architecture.md` §9.6）
 
 ## 权威关系
 

@@ -36,9 +36,15 @@ extern void* g_uimix;
 extern GetMoneyFn fn_get_money;
 extern GetMemberFn fn_get_member;
 extern GetPartySizeFn fn_get_party_size;
+// ⚠️ 禁止在非游戏线程调用：CHAR_GetAttr(0xdfd18) attr=0x1e 分支在 HP>maxHP 时会写回 HP
+// （HP 钳制写副作用），其它分支亦有写；JSON/预取线程请改读属性缓存字段（char_max_hp/mp）
+// 或走游戏线程缓存。
 extern GetAttrFn fn_get_attr;
 extern GetEquipFn fn_get_equip;
+// CHAR_GetExperience(0xd9b54)：`ldr w0,[x0,#0x318]` 纯读，跨线程安全。
 extern GetExpFn fn_get_exp;
+// ⚠️ 禁止在非游戏线程调用：CHAR_GetNextExperience(0xd9b68) 在 [ch+0x320]==0 时用 CAL_Calculate
+// 现算并写回该字段（写操作），且 CHAR_SetLevel 会清零失效；JSON 请用 char_next_exp_cached()。
 extern GetExpFn fn_get_next_exp;
 extern GetRarityFn fn_get_rarity;
 extern GetBagSizeFn fn_get_bag_size;
@@ -49,8 +55,13 @@ extern GetBitFn fn_get_bit;
 extern GetCumulateCountFn fn_get_cumulate_count;
 extern GetItemStatFn fn_get_damage;
 extern GetItemStatFn fn_get_defense;
+// ⚠️ CHAR_GetStat(0xdf8d0) 经 CHAR_GetStatSub(0xdf888) 在动态派生脏位（[ch+0x270] bit i）置位时
+// 会调 CHAR_CalculateStatus 重算并写回 [ch+0x266]/SV，属写操作，禁止非游戏线程调用；
+// JSON 请用 char_stat_total() 直读。
 extern GetAttrFn2 fn_get_stat;
+// CHAR_GetStatBase(0xdb9e4) 为纯读（add + ldrsb），可跨线程调用。
 extern GetAttrFn2 fn_get_stat_base;
+// CHAR_GetStatBonus(0xdb9fc) 为纯读（add + ldrsb），可跨线程调用。
 extern GetAttrFn2 fn_get_stat_bonus;
 extern GetStatusPointFn fn_get_status_point;
 extern GetStatMainFn fn_get_stat_main;

@@ -186,7 +186,7 @@ std::string data_op_set_hp(int role, int32_t hp) {
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_err("role not found");
     if (hp < 0) hp = 0;
-    int32_t max_hp = fn_get_attr != nullptr ? fn_get_attr(ch, 0x1e) : 32767;
+    const int32_t max_hp = char_max_hp(ch);   // 直接读属性缓存，避免 CHAR_GetAttr(0x1e) 写回副作用
     if (hp > max_hp) hp = max_hp;
     *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_HP) = hp;
     return op_ok();
@@ -197,7 +197,7 @@ std::string data_op_set_mp(int role, int32_t mp) {
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_err("role not found");
     if (mp < 0) mp = 0;
-    int32_t max_mp = fn_get_attr != nullptr ? fn_get_attr(ch, 0x1f) : 32767;
+    const int32_t max_mp = char_max_mp(ch);   // 直接读属性缓存，避免 CHAR_GetAttr(0x1f) 调用
     if (mp > max_mp) mp = max_mp;
     *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_MP) = mp;
     return op_ok();
@@ -226,16 +226,14 @@ std::string member_json(void* ch) {
     s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_LEVEL]));
     s += ",\"hp\":" + std::to_string(*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_HP));
     s += ",\"mp\":" + std::to_string(*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_MP));
-    if (fn_get_attr != nullptr) {
-        s += ",\"max_hp\":" + std::to_string(fn_get_attr(ch, ATTR_MAX_HP));
-        s += ",\"max_mp\":" + std::to_string(fn_get_attr(ch, ATTR_MAX_MP));
-    }
-    if (fn_get_exp != nullptr) {
-        s += ",\"exp\":" + std::to_string(fn_get_exp(ch));
-        if (fn_get_next_exp != nullptr) {
-            s += ",\"exp_next\":" + std::to_string(fn_get_next_exp(ch));
-        }
-    }
+    // 直接读属性缓存字段（attr 0x1e/0x1f），不调用 CHAR_GetAttr（attr=0x1e 有 HP 写回副作用）
+    s += ",\"max_hp\":" + std::to_string(char_max_hp(ch));
+    s += ",\"max_mp\":" + std::to_string(char_max_mp(ch));
+    // exp 直读 [ch+C_EXP]：CHAR_GetExperience(0xd9b54) 即 `ldr w0,[x0,#0x318]`，纯读且与函数等价。
+    // exp_next 只读游戏线程帧缓存：CHAR_GetNextExperience(0xd9b68) 在 [ch+0x320]==0 时用 CAL_Calculate
+    // 现算并写回（非纯读），不能在本构造线程（预取/HTTP 线程）调用；见 char_next_exp_cached。
+    s += ",\"exp\":" + std::to_string(*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(ch) + C_EXP));
+    s += ",\"exp_next\":" + std::to_string(char_next_exp_cached(ch));
     s += ",\"stats\":{";
     bool first = true;
     for (int a = 0; a < 32; ++a) {
@@ -245,14 +243,15 @@ std::string member_json(void* ch) {
         first = false;
     }
     s += "}";
-    if (fn_get_stat != nullptr) {
-        s += ",\"main_stats\":[";
-        for (int a = 0; a < 5; ++a) {
-            if (a > 0) s += ",";
-            s += std::to_string(fn_get_stat(ch, a));
-        }
-        s += "]";
+    // main_stats 直读 Base+Main+Bonus+Sub（见 char_stat_total），避免 CHAR_GetStat 经
+    // CHAR_GetStatSub 触发动态派生重算写回角色对象。
+    s += ",\"main_stats\":[";
+    for (int a = 0; a < 5; ++a) {
+        if (a > 0) s += ",";
+        s += std::to_string(char_stat_total(ch, a));
     }
+    s += "]";
+    // base_stats：CHAR_GetStatBase(0xdb9e4) 为纯读（add + ldrsb），保留函数调用。
     if (fn_get_stat_base != nullptr) {
         s += ",\"base_stats\":[";
         for (int a = 0; a < 5; ++a) {

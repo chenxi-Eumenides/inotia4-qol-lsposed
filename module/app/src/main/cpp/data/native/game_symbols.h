@@ -70,6 +70,20 @@ constexpr size_t O_NEXT = 0x08;  // 下一节点指针
 constexpr int ATTR_MAX_HP = 0x1e;
 constexpr int ATTR_MAX_MP = 0x1f;
 
+// ---- HP/MP 上限缓存字段偏移（由 C_ATTR 基址 + ATTR_MAX_HP/MP * 4 推得，与 CHAR_GetAttr 同偏移体系）----
+// 直接读缓存字段可避开 CHAR_GetAttr(attr=0x1e) 的写回副作用（HP>maxHP 时 str w0,[x20,#0x1f0] 钳 HP），
+// 该函数在 HTTP/缓存预取线程调用会与游戏主线程属性重算竞争。
+constexpr size_t C_MAX_HP = C_ATTR + ATTR_MAX_HP * 4;  // int32 最大 HP [ch+0x9c]
+constexpr size_t C_MAX_MP = C_ATTR + ATTR_MAX_MP * 4;  // int32 最大 MP [ch+0xa0]
+// ---- 主属性四项字段偏移（CHAR_GetStat 0xdf8d0 反汇编核实：总属性 = Base + Main + Bonus + Sub，无 clamp）----
+// 索引 i = 0..4（力量/敏捷/体力/智力/精力）；宽度/符号性由各 getter 的加载指令确定。
+constexpr size_t C_STAT_BASE = 0x250;   // s8  基础属性 [ch+0x250+i]（CHAR_GetStatBase 0xdb9e4：add + ldrsb）
+constexpr size_t C_STAT_MAIN = 0x256;   // s16 分配主属性 [ch+0x256+i*2]（CHAR_GetStatMain 0xdb9f0：add lsl#1 + ldrsh）
+constexpr size_t C_STAT_BONUS = 0x260;  // s8  存档加成 [ch+0x260+i]（CHAR_GetStatBonus 0xdb9fc：add + ldrsb）
+constexpr size_t C_STAT_SUB = 0x266;    // s16 动态派生缓存 [ch+0x266+i*2]（CHAR_GetStatSub 0xdf888：add lsl#1 + ldrsh）
+// 动态派生脏位（CHAR_IsCalculateStatusOn 0xdba08：ldrb [ch+0x270] + asr by i）。
+// bit i 置位 = 第 i 项 sub 尚未重算；CHAR_GetStatSub 此时会先 CHAR_CalculateStatus 重算（写操作）。
+constexpr size_t C_STAT_CALC_FLAG = 0x270; // u8 动态派生脏位
 // ---- popup state entry 布局（g_sPopupStateList，27 条 × 64B；见 G_POPUP_STATE_LIST_GOT_VMA）----
 constexpr size_t POPUP_ENTRY_SIZE = 0x40;     // 每条 64B
 constexpr size_t POPUP_ENTRY_ENTER = 0x10;    // enter 回调
@@ -396,6 +410,8 @@ constexpr uintptr_t F_GET_BIT_VMA = 0x140528;        // int (int,int,int)
 constexpr uintptr_t F_GET_DAMAGE_VMA = 0x1099f0;     // int (void*) 物品攻击
 constexpr uintptr_t F_GET_DEFENSE_VMA = 0x109cc0;    // int (void*) 物品防御
 constexpr uintptr_t F_GET_STAT_VMA = 0xdf8d0;        // int (void*, int) 主属性总属性=Base+Main+Bonus+Sub (0=力量 1=敏捷 2=体力 3=智力 4=精力)
+// ⚠️ F_GET_STAT 经 CHAR_GetStatSub(0xdf888) 在动态派生脏位置位时会重算并写回，非纯读；
+// 非游戏线程请用 game_state.h 的 char_stat_total() 直读 C_STAT_* 字段。
 constexpr uintptr_t F_GET_STAT_BASE_VMA = 0xdb9e4;   // int (void*, int) 基础属性 [ch+0x250+i] s8
 constexpr uintptr_t F_GET_STAT_BONUS_VMA = 0xdb9fc;  // int (void*, int) 加成属性 [ch+0x260+i] s8（存档独立保存）
 constexpr uintptr_t F_GET_STATUS_POINT_VMA = 0xd9c44; // int (void*) 剩余能力点
