@@ -23,6 +23,7 @@
 #include "feature/ui/game_ui_exp.h"
 #include "feature/ui/game_ui_settings.h"
 #include "feature/ui/game_ui_savebackup.h"
+#include "feature/ui/game_ui_gemcraft.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 
 #include <android/log.h>

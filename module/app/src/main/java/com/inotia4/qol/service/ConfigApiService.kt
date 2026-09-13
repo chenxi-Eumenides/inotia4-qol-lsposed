@@ -15,7 +15,12 @@ interface ConfigApiService {
     fun applyToNative()
 
     /** 配置变更增量应用：仅当对应值变化时通知 native（POST /api/config/set 用） */
-    fun applyOnChange(oldStack: Boolean, oldMoveMerge: Boolean, oldExtensionBag: Boolean)
+    fun applyOnChange(
+        oldStack: Boolean,
+        oldMoveMerge: Boolean,
+        oldExtensionBag: Boolean,
+        oldGemCraft: Boolean
+    )
 
     /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵 2026-08-12） */
     fun applyTiles()
@@ -34,10 +39,17 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.log("moveMergeEnabled=${ModuleConfig.moveMergeEnabled} applied=$moveMergeApplied")
         val extensionApplied = NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
         LogFile.log("extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
+        val gemCraftApplied = NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
+        LogFile.log("gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
         applyTiles()
     }
 
-    override fun applyOnChange(oldStack: Boolean, oldMoveMerge: Boolean, oldExtensionBag: Boolean) {
+    override fun applyOnChange(
+        oldStack: Boolean,
+        oldMoveMerge: Boolean,
+        oldExtensionBag: Boolean,
+        oldGemCraft: Boolean
+    ) {
         if (!NativeBridge.ready) return
         if (ModuleConfig.stackLimitIncrease != oldStack) {
             NativeBridge.nativeSetStackLimitEnabled(ModuleConfig.stackLimitIncrease)
@@ -47,6 +59,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.extensionBagEnabled != oldExtensionBag) {
             NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
+        }
+        if (ModuleConfig.gemCraftOptimize != oldGemCraft) {
+            NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
         }
     }
 

@@ -178,3 +178,8 @@ Java_com_inotia4_qol_NativeBridge_nativeSetExtensionBagEnabled(JNIEnv*, jclass, 
     return set_virtual_bag_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSetGemCraftOptimizeEnabled(JNIEnv*, jclass, jboolean enabled) {
+    return set_gemcraft_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+

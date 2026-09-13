@@ -142,6 +142,7 @@ object NativeBridge {
     external fun nativeSetStackLimitEnabled(enabled: Boolean): Boolean
     external fun nativeSetMoveMergeEnabled(enabled: Boolean): Boolean
     external fun nativeSetExtensionBagEnabled(enabled: Boolean): Boolean
+    external fun nativeSetGemCraftOptimizeEnabled(enabled: Boolean): Boolean
     external fun nativeSettingsUiInject(): String
     external fun nativeSettingsUiStatus(): String
     external fun nativeSettingsUiRestore(): String

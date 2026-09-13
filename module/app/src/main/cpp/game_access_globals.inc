@@ -179,6 +179,15 @@ UiEquipRefreshBagAreaFn fn_ui_equip_refresh_bag_area = nullptr;
 UiStoreRefreshInvenBagFn fn_ui_store_refresh_inven_bag = nullptr;
 UiStoreRefreshInvenItemFn fn_ui_store_refresh_inven_item = nullptr;
 UiMixRefreshInvenItemFn fn_ui_mix_refresh_inven_item = nullptr;
+// ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
+UIMixGetTypeFn fn_uimix_get_type = nullptr;
+UIMixButtonInvenItemSelectExeFn fn_uimix_button_inven_item_select_exe = nullptr;
+UIMixButtonMenuListExeFn fn_uimix_button_menu_list_exe = nullptr;
+UIMixButtonRecipeExeFn fn_uimix_button_recipe_exe = nullptr;
+UIMixInitMixingStateFn fn_uimix_init_mixing_state = nullptr;
+UIMixResetStuffItemControlFn fn_uimix_reset_stuff_item_control = nullptr;
+ControlObjectGetCursorFn fn_control_object_get_cursor = nullptr;
+UiPopupMsgCreateOkFromTextDataFn fn_popup_create_ok_from_textdata = nullptr;
 UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip = nullptr;
 UiDescSetOffFn fn_ui_desc_set_off = nullptr;
 UiDescGetDataFn fn_ui_desc_get_data = nullptr;

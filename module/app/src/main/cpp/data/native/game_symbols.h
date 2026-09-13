@@ -337,6 +337,18 @@ constexpr size_t UIMIX_SLOT_GEM_BTN = 0xa0;          // 宝石合成按钮槽偏
 constexpr size_t UIMIX_SLOT_ITEM_GROUP = 0xd8;       // 物品网格组指针槽（16 个 ControlItem 子控件，UIMix_RefreshInvenItem 反汇编确认）
 constexpr size_t UIMIX_SLOT_BAG_GROUP = 0xe0;        // 袋选择组指针槽（6 个 ControlItem 子控件，UIMix_CreateMainControl/UIMix_RefreshInvenBag 反汇编确认）
 constexpr size_t UIMIX_SLOT_STATE = 0x20;            // u8 面板状态：0=配方菜单（仅背景/标题/5 配方按钮），1=背包/合成视图（UIMix_SetState/UIMix_GetState/UIMix_Draw 反汇编确认）
+// ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
+constexpr size_t UIMIX_SLOT_STUFF_GROUP = 0xc8;      // 填入格材料组指针槽（前 3 子控件 = 3 个填入格；UIMix_ButtonInvenItemSelectExe 0xc2528 ldr [x1,#0xc8] 反汇编确认）
+constexpr size_t UIMIX_SLOT_DESC_MENU = 0x130;       // 详情菜单按钮槽（ExecuteProc=UIMix_ButtonInvenItemSelectExe 0xc2328；UIMix_RefreshInvenItem/UIMix_SetDescMenu 写入）
+constexpr size_t UIMIX_SLOT_STUFF_LIST = 0xe8;       // 材料 itemId 列表指针槽（type 1 时首个 32 位字段 = 当前配方材料档位 category；0xc23c8 ldr x23,[x21,#0xe8] + 0xc24c0 ldr w2,[x23]）
+constexpr size_t UIMIX_SLOT_TYPE = 0x38;             // u8 合成类型（0=混沌 1=宝石 2=打孔 3=其它 4=传说；UIMix_GetType 0xbf480 读 0x305588=G_UIMIX_VMA+0x38）
+constexpr size_t UIMIX_SLOT_SELECTED_STUFF = 0x128;  // i64 当前选中填入格下标（-1=未选中；0xc24e0 ldr x0,[x21,#0x128] 反汇编确认，UIMix_StuffItemControlEventProc 写入）
+constexpr size_t UIMIX_SLOT_RECIPE_GROUP = 0x18;     // 配方组控件槽（UIMix_CreateRecipeGroupControl 0xbfbb4 str x0,[x19,#0x18]；子按钮 ExecuteProc=UIMix_ButtonRecipeExe）
+constexpr size_t UIMIX_SLOT_MENU_BUTTON_BASE = 0x60; // 5 个类型/菜单按钮槽起始（UIMix_CreateMainControl 0xbf6f4 add x21,x19,#0x60 + 0xbf700 str x0,[x21,x20,lsl#3]，步长 8）
+constexpr int UIMIX_MENU_BUTTON_COUNT = 5;           // 类型/菜单按钮数量（槽 0x60..0x80）
+constexpr size_t UIMIX_SLOT_CRAFT_BUTTON = 0x98;     // 合成按钮槽（UIMix_CreateMainControl 0xbf7d8 str x0,[x19,#0x98]；ExecuteProc=UIMix_ButtonMixingExe）
+constexpr size_t UIMIX_SLOT_MIXTYPE = 0x48;          // u32 当前 mixType（所选配方；UIMix_ButtonMixingExe 0xc222c 读 [+0xf8] 前由配方写入；阶段2 前置改写）
+constexpr size_t UIMIX_SLOT_COST = 0xf8;             // i64 合成费用（UIMix_InitMixingState 依配方费用文本 CAL_Calculate 写入；UIMix_ButtonMixingExe 0xc2230 读）
 
 // ControlObject 结构（0xf8 字节，ControlObject_Create @0x9e4ec / ControlButton_Create @0xaa710 反汇编）
 constexpr size_t CO_TYPE = 0x08;             // u32 Type（button=3）
@@ -549,6 +561,23 @@ constexpr uintptr_t F_UIMIX_START_MIX_VMA = 0xc0870;          // UIMix_StartMix 
 constexpr uintptr_t F_UIMIX_REFRESH_INVEN_ITEM_VMA = 0xc04fc; // void () UIMix_RefreshInvenItem：按当前袋号刷新 16 格物品网格
 constexpr uintptr_t F_UIMIX_DRAW_INVEN_BAG_GROUP_VMA = 0xc13ec; // void () UIMix_DrawInvenBagGroup：画 6 袋按钮并按当前袋 GOT 高亮（R-57 遮蔽点）
 constexpr uintptr_t F_UIMIX_DRAW_INVEN_BAG_GROUP_CALL_VMA = 0xc1a74; // UIMix_Draw 内 bl UIMix_DrawInvenBagGroup 调用点（原字 0x97fffe5e，BL patch 挂遮蔽 wrapper）
+// ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
+// 调用链终点挂钩：进入视图（菜单/配方按钮 ExecuteProc 尾部写 [+0x128]=-1）、放料
+// （desc 按钮 ExecuteProc 尾部 SetItem）、合成清空（UIMix_StartMix 内 bl UIMix_ResetStuffItemControl）。
+constexpr uintptr_t F_UIMIX_GET_TYPE_VMA = 0xbf47c;   // int () UIMix_GetType：返回 [0x305588] u8 合成类型（readelf .dynsym 核对）
+constexpr uintptr_t F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA = 0xc2328; // void (void*) UIMix_ButtonInvenItemSelectExe：desc 放入按钮 ExecuteProc，type 1 放料校验/放入（readelf .dynsym 核对）
+constexpr uintptr_t F_UIMIX_BUTTON_MENU_LIST_EXE_VMA = 0xc05c0; // void (void*) UIMix_ButtonMenuListExe：类型/菜单按钮 ExecuteProc，尾部 0xc0700 str [+0x128]=-1（readelf .dynsym 核对）
+constexpr uintptr_t F_UIMIX_BUTTON_RECIPE_EXE_VMA = 0xc0390;   // void (void*) UIMix_ButtonRecipeExe：配方按钮 ExecuteProc，尾部 0xc03e8 str [+0x128]=-1（readelf .dynsym 核对）
+constexpr uintptr_t F_UIMIX_BUTTON_MIXING_EXE_VMA = 0xc21ec;   // void (void*) UIMix_ButtonMixingExe：合成按钮 ExecuteProc，type1 读 [+0xf8] 费用判金币后弹 YesNo 确认（readelf .dynsym 核对）
+constexpr uintptr_t F_UIMIX_INIT_MIXING_STATE_VMA = 0xc0038;   // void () UIMix_InitMixingState：依 mixType 重算 stuffList 与费用 [+0xf8]（不清填入格；readelf .dynsym 核对）
+constexpr uintptr_t F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA = 0xc0240; // void () UIMix_ResetStuffItemControl：清空填入格（readelf .dynsym 核对）
+constexpr uintptr_t F_CONTROL_OBJECT_GET_CURSOR_VMA = 0x9ea7c; // void* (void*) ControlObject_GetCursor：父控件返回选中子控件 [+0x70]，否则 0（readelf .dynsym 核对）
+constexpr size_t F_UIMIX_START_MIX_RESET_STUFF_CALL_OFF = 0x258; // UIMix_StartMix 内 bl UIMix_ResetStuffItemControl 调用点偏移（0xc0ac8，原字 0x97fffdde）
+// 三个按钮 ExecuteProc 初值 GOT 槽（新建按钮即从这些槽读取；R_AARCH64_RELATIVE 核对）。
+constexpr uintptr_t G_UIMIX_DESC_EXE_GOT_VMA = 0x2f4598;   // → UIMix_ButtonInvenItemSelectExe(0xc2328)
+constexpr uintptr_t G_UIMIX_MENU_EXE_GOT_VMA = 0x2f6658;   // → UIMix_ButtonMenuListExe(0xc05c0)
+constexpr uintptr_t G_UIMIX_RECIPE_EXE_GOT_VMA = 0x2f40d0; // → UIMix_ButtonRecipeExe(0xc0390)
+constexpr uintptr_t G_UIMIX_CRAFT_EXE_GOT_VMA = 0x2f6d60;  // → UIMix_ButtonMixingExe(0xc21ec)；0xbf7d0 ldr x1,[x1,#0xd60] → ControlButton_Create
 constexpr uintptr_t F_SCENE_EVENT_MIX_VMA = 0x14b52c;         // u64 (u64,u64,u64) Scene_Event_POPUP_SC_MIX（合成器 popup state event 回调）
 constexpr uintptr_t F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA = 0x14b474; // Scene_Draw_POPUP_SC_MIX 内 bl GRPX_End 调用点（原字 0x97fd0fa8，BL patch 挂 draw_end wrapper）
 constexpr uintptr_t F_SAVE_SAVE_INVENTORY_VMA = 0x127d8c;     // SAVE_SaveInventory 存档背包（子物品检查位段）
@@ -940,6 +969,16 @@ using ControlObjectSetActiveFn = void (*)(void* ctrl, uint32_t active);
 using ControlItemSetItemFn = void (*)(void* ctrl, void* item);
 using ControlObjectSetShowFn = void (*)(void* ctrl, uint32_t show);
 using ControlButtonDrawFn = void (*)(void* ctrl);
+
+// ---- UIMix 宝石合成操作优化函数签名（gem-craft-optimization 阶段1）----
+using ControlObjectGetCursorFn = void* (*)(void*);          // ControlObject_GetCursor(ctrl)
+using UIMixGetTypeFn = int (*)();                           // UIMix_GetType()
+using UIMixButtonInvenItemSelectExeFn = void (*)(void*);    // UIMix_ButtonInvenItemSelectExe(ctrl)
+using UIMixButtonMenuListExeFn = void (*)(void*);           // UIMix_ButtonMenuListExe(ctrl)
+using UIMixButtonRecipeExeFn = void (*)(void*);             // UIMix_ButtonRecipeExe(ctrl)
+using UIMixButtonMixingExeFn = void (*)(void*);             // UIMix_ButtonMixingExe(ctrl)：合成按钮 ExecuteProc
+using UIMixInitMixingStateFn = void (*)();                  // UIMix_InitMixingState()：依当前 mixType 重算 stuffList/费用
+using UIMixResetStuffItemControlFn = void (*)();            // UIMix_ResetStuffItemControl()
 
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主调用点（auto-sell）----
 // 符号存在性已用 NDK r26d llvm-objdump 核对：GAMESTATE_DrawPlay@0x9d6cc。

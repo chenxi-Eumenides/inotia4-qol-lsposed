@@ -25,6 +25,7 @@ import java.io.File
  * - opEnabled：OP 能力全局开关（/api/op 门禁，architecture §9.1-2）。
  *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
  * - extensionBagEnabled：是否启用扩展背包，默认 true。
+ * - gemCraftOptimize：是否启用合成器宝石合成操作优化，默认 false。
  *
  * 线程安全：配置可能被 API 请求线程/启动线程并发读写，字段用 @Volatile 保护。
  */
@@ -38,6 +39,7 @@ object ModuleConfig {
     const val DEFAULT_MOVE_MERGE_ENABLED = false
     const val DEFAULT_OP_ENABLED = false
     const val DEFAULT_EXTENSION_BAG_ENABLED = true
+    const val DEFAULT_GEM_CRAFT_OPTIMIZE = false
 
     @Volatile
     private var loaded = false
@@ -75,6 +77,11 @@ object ModuleConfig {
     var extensionBagEnabled: Boolean = DEFAULT_EXTENSION_BAG_ENABLED
         private set
 
+    /** 是否启用合成器宝石合成操作优化（默认 false） */
+    @Volatile
+    var gemCraftOptimize: Boolean = DEFAULT_GEM_CRAFT_OPTIMIZE
+        private set
+
     /** 加载配置（幂等）：外部 config.json 为唯一来源；不存在/损坏时用默认值并立即写入 */
     @Synchronized
     fun load(context: Context) {
@@ -99,13 +106,17 @@ object ModuleConfig {
             moveMergeEnabled = json.optBoolean("moveMergeEnabled", DEFAULT_MOVE_MERGE_ENABLED)
             opEnabled = json.optBoolean("opEnabled", DEFAULT_OP_ENABLED)
             extensionBagEnabled = json.optBoolean("extensionBagEnabled", DEFAULT_EXTENSION_BAG_ENABLED)
-            if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") || json.has("jewelBatchMix")) {
+            gemCraftOptimize = json.optBoolean("gemCraftOptimize", DEFAULT_GEM_CRAFT_OPTIMIZE)
+            if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") ||
+                !json.has("gemCraftOptimize") || json.has("jewelBatchMix")
+            ) {
                 LogFile.log("updating $CONFIG_FILE with current configuration fields")
                 persist(toJson())
             }
             LogFile.log(
                 "config loaded: listenAddress=$listenAddress listenPort=$listenPort " +
-                    "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled"
+                    "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled " +
+                    "gemCraftOptimize=$gemCraftOptimize"
             )
         } catch (t: Throwable) {
             LogFile.logError("config parse failed, using defaults and persisting", t)
@@ -129,6 +140,7 @@ object ModuleConfig {
         var newMoveMerge = moveMergeEnabled
         var newOp = opEnabled
         var newExtensionBag = extensionBagEnabled
+        var newGemCraft = gemCraftOptimize
         if (json.has("listenAddress")) {
             val a = json.optString("listenAddress")
             if (a.isBlank()) return "listenAddress required"
@@ -143,6 +155,7 @@ object ModuleConfig {
         if (json.has("moveMergeEnabled")) newMoveMerge = json.optBoolean("moveMergeEnabled", newMoveMerge)
         if (json.has("opEnabled")) newOp = json.optBoolean("opEnabled", newOp)
         if (json.has("extensionBagEnabled")) newExtensionBag = json.optBoolean("extensionBagEnabled", newExtensionBag)
+        if (json.has("gemCraftOptimize")) newGemCraft = json.optBoolean("gemCraftOptimize", newGemCraft)
         val merged = JSONObject()
             .put("listenAddress", newAddress)
             .put("listenPort", newPort)
@@ -150,6 +163,7 @@ object ModuleConfig {
             .put("moveMergeEnabled", newMoveMerge)
             .put("opEnabled", newOp)
             .put("extensionBagEnabled", newExtensionBag)
+            .put("gemCraftOptimize", newGemCraft)
         if (!persist(merged)) return "config save failed"
         listenAddress = newAddress
         listenPort = newPort
@@ -157,6 +171,7 @@ object ModuleConfig {
         moveMergeEnabled = newMoveMerge
         opEnabled = newOp
         extensionBagEnabled = newExtensionBag
+        gemCraftOptimize = newGemCraft
         return null
     }
 
@@ -168,6 +183,7 @@ object ModuleConfig {
         put("moveMergeEnabled", moveMergeEnabled)
         put("opEnabled", opEnabled)
         put("extensionBagEnabled", extensionBagEnabled)
+        put("gemCraftOptimize", gemCraftOptimize)
     }
 
     /**

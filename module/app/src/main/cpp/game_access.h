@@ -198,6 +198,15 @@ extern UiEquipRefreshBagAreaFn fn_ui_equip_refresh_bag_area;
 extern UiStoreRefreshInvenBagFn fn_ui_store_refresh_inven_bag;
 extern UiStoreRefreshInvenItemFn fn_ui_store_refresh_inven_item;
 extern UiMixRefreshInvenItemFn fn_ui_mix_refresh_inven_item;
+// ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
+extern UIMixGetTypeFn fn_uimix_get_type;
+extern UIMixButtonInvenItemSelectExeFn fn_uimix_button_inven_item_select_exe;
+extern UIMixButtonMenuListExeFn fn_uimix_button_menu_list_exe;
+extern UIMixButtonRecipeExeFn fn_uimix_button_recipe_exe;
+extern UIMixInitMixingStateFn fn_uimix_init_mixing_state;
+extern UIMixResetStuffItemControlFn fn_uimix_reset_stuff_item_control;
+extern ControlObjectGetCursorFn fn_control_object_get_cursor;
+extern UiPopupMsgCreateOkFromTextDataFn fn_popup_create_ok_from_textdata;
 extern UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip;
 extern UiDescSetOffFn fn_ui_desc_set_off;
 extern UiDescGetDataFn fn_ui_desc_get_data;

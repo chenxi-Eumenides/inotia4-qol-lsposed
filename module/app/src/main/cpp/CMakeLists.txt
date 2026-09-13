@@ -83,3 +83,9 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     feature/autosell/autosell_store.cpp
 )
+
+# 合成器宝石合成操作优化（gem-craft-optimization 阶段1，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/gemcraft/gemcraft_rules.cpp
+    feature/ui/game_ui_gemcraft.cpp
+)

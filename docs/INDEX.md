@@ -46,6 +46,12 @@
 
 属性显示范围（attribute-range-display）：`development/features/attribute-range-display.md`（宝石/装备详情按随机属性百分位着色的目标、结论与可行性测试记录；装备词缀范围与渲染注入已真机验证，未实现）。
 
+自动出售（auto-sell）：`development/features/auto-sell.md`（背包页入口、品质阈值配置面板、扫描/保护/处置语义与风险验证计划；设计稿）。
+
+合成器宝石合成操作优化（gem-craft-optimization）：`development/features/gem-craft-optimization.md`（宝石合成放料解绑配方、合成期同档校验与错误提示、自动选中格；设计已对齐，待实现）。
+
+帧派发宿主（frame-dispatch-host）：`development/features/frame-dispatch-host.md`（FrameTaskManager 是否可用 hook 重构、游戏帧周期 §2 逆向结论、锚点与相位模型、统一 `frame_tick` + `frame_host` 设计与分阶段实施、真机验证开放项；可行性调查与设计稿，未实现）。
+
 ### `reference/`：共享参考
 
 面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。

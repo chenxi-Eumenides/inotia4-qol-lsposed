@@ -315,6 +315,22 @@ bool bridge_init() {
      fn_ui_store_refresh_inven_bag = reinterpret_cast<UiStoreRefreshInvenBagFn>(g_base + fn_resolve("F_UISTORE_REFRESH_INVEN_BAG_VMA", F_UISTORE_REFRESH_INVEN_BAG_VMA));
      fn_ui_store_refresh_inven_item = reinterpret_cast<UiStoreRefreshInvenItemFn>(g_base + fn_resolve("F_UISTORE_REFRESH_INVEN_ITEM_VMA", F_UISTORE_REFRESH_INVEN_ITEM_VMA));
     fn_ui_mix_refresh_inven_item = reinterpret_cast<UiMixRefreshInvenItemFn>(g_base + fn_resolve("F_UIMIX_REFRESH_INVEN_ITEM_VMA", F_UIMIX_REFRESH_INVEN_ITEM_VMA));
+    // ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
+    fn_uimix_get_type = reinterpret_cast<UIMixGetTypeFn>(g_base + fn_resolve("F_UIMIX_GET_TYPE_VMA", F_UIMIX_GET_TYPE_VMA));
+    fn_uimix_button_inven_item_select_exe = reinterpret_cast<UIMixButtonInvenItemSelectExeFn>(
+        g_base + fn_resolve("F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA", F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA));
+    fn_uimix_button_menu_list_exe = reinterpret_cast<UIMixButtonMenuListExeFn>(
+        g_base + fn_resolve("F_UIMIX_BUTTON_MENU_LIST_EXE_VMA", F_UIMIX_BUTTON_MENU_LIST_EXE_VMA));
+    fn_uimix_button_recipe_exe = reinterpret_cast<UIMixButtonRecipeExeFn>(
+        g_base + fn_resolve("F_UIMIX_BUTTON_RECIPE_EXE_VMA", F_UIMIX_BUTTON_RECIPE_EXE_VMA));
+    fn_uimix_init_mixing_state = reinterpret_cast<UIMixInitMixingStateFn>(
+        g_base + fn_resolve("F_UIMIX_INIT_MIXING_STATE_VMA", F_UIMIX_INIT_MIXING_STATE_VMA));
+    fn_uimix_reset_stuff_item_control = reinterpret_cast<UIMixResetStuffItemControlFn>(
+        g_base + fn_resolve("F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA", F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA));
+    fn_control_object_get_cursor = reinterpret_cast<ControlObjectGetCursorFn>(
+        g_base + fn_resolve("F_CONTROL_OBJECT_GET_CURSOR_VMA", F_CONTROL_OBJECT_GET_CURSOR_VMA));
+    fn_popup_create_ok_from_textdata = reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(
+        g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA", F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA));
 fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_base + fn_resolve("F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA", F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA));
     fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
     g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));

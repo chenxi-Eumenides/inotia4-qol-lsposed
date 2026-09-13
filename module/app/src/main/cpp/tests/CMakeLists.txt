@@ -95,3 +95,14 @@ target_include_directories(autosell_store_tests PRIVATE
 )
 target_compile_features(autosell_store_tests PRIVATE cxx_std_17)
 add_test(NAME autosell_store_tests COMMAND autosell_store_tests)
+
+# 合成器宝石合成优化纯逻辑 host 测试（gem-craft-optimization 阶段1，末尾追加）
+add_executable(gemcraft_rules_tests
+    test_gemcraft_rules.cpp
+    ${CPP_DIR}/feature/gemcraft/gemcraft_rules.cpp
+)
+target_include_directories(gemcraft_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(gemcraft_rules_tests PRIVATE cxx_std_17)
+add_test(NAME gemcraft_rules_tests COMMAND gemcraft_rules_tests)

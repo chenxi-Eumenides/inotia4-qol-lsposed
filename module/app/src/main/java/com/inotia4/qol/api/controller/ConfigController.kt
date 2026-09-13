@@ -30,12 +30,13 @@ class ConfigController {
         val oldStack = ModuleConfig.stackLimitIncrease
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
+        val oldGemCraft = ModuleConfig.gemCraftOptimize
         val err = ModuleConfig.apply(json)
         if (err != null) throw ApiException(StatusCode.SC_BAD_REQUEST, err)
         val restartNeeded = ModuleConfig.listenAddress != oldAddress || ModuleConfig.listenPort != oldPort
         if (restartNeeded) ApiServer.restartDelayed()
         // v0.5.46 收边：native 直调收口到 ConfigApiService（内部判断 ready + 增量生效）
-        ApiServices.config.applyOnChange(oldStack, oldMoveMerge, oldExtensionBag)
+        ApiServices.config.applyOnChange(oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft)
         return ModuleConfig.toJson()
             .put("ok", true)
             .put("restart", restartNeeded)

@@ -12,7 +12,9 @@ import org.json.JSONObject
  */
 object ModuleConfigUiBridge {
 
-    private val BOOL_KEYS = setOf("stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled")
+    private val BOOL_KEYS = setOf(
+        "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize"
+    )
 
     @JvmStatic
     fun getConfigJson(): String = ModuleConfig.toJson().toString()
@@ -23,17 +25,19 @@ object ModuleConfigUiBridge {
         val oldStack = ModuleConfig.stackLimitIncrease
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
+        val oldGemCraft = ModuleConfig.gemCraftOptimize
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
             "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
+            "gemCraftOptimize" -> ModuleConfig.gemCraftOptimize
             else -> ModuleConfig.opEnabled
         }
         val json = JSONObject()
         json.put(key, !current)
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
-        ApiServices.config.applyOnChange(oldStack, oldMoveMerge, oldExtensionBag)
+        ApiServices.config.applyOnChange(oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft)
         return "ok"
     }
 }
