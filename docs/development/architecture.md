@@ -122,6 +122,7 @@ data 层 → 仅 STL
 | `core/native/game_nav.*` | core | BFS 寻路（nav_bfs / nav_bfs_multi，基于瓦片矩阵） | game_state.h（lead_member） |
 | `core/native/game_cache.*` | core | **帧缓存层**：12 槽表驱动（惰性/预取双模式），对外 data_*_json 接口 | 域文件 build_* 函数指针 |
 | `core/native/frame_task.* / core/native/frame_host.*` | core | **统一帧任务管理器**（多点位 + 句柄 API，§2.1）+ 锚点安装（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase） | game_state.h / game_system.h / call_patch |
+| `core/native/save_enter.*` | core | 进入存档回调：读档/新档发起点 call_patch 标记 + 帧检测 world 就绪触发一次（§2.1） | frame_task.h / call_patch / game_state.h |
 | `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
 | `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |
 | `api/native/game_character.*` | API native 域 | 角色：member_json / build_player_json / build_skills_json + 战斗/成长写操作（cast/attack/stop_combat/set_experience/set_level/add_experience/set_status_point/add_stat/set_auto_attack/set_skill_usage/learn_action/set_hp/set_mp/set_attr/stat_reset/skill_reset） | data + 引擎 |
@@ -183,7 +184,7 @@ data 层 → 仅 STL
 
 **移动互斥槽**（`game_world_movement.inc`）：`g_motion_task` + `motion_task_start/stop`，nav/walk 共用，注册即替换；`stop_all_tasks()` 已删除，`walk_stop` 改调 `motion_task_stop()`，不再影响其它帧任务（自动出售）。
 
-**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）。
+**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）、进入存档回调（`save_enter_tick`，`core/native/save_enter.cpp`）。
 
 **真机验证（2026-09-13）**：锚点安装成功；world 态 move_to / walk_dir / stop_move 逐帧驱动生效；无崩溃。
 

@@ -431,6 +431,14 @@ constexpr uintptr_t F_CS_FS_REMOVE_VMA = 0x1b27bc;            // int (char* path
 constexpr uintptr_t F_SAVESLOT_DELETE_VMA = 0x14c4e8;          // void (int32_t slot) 删档确认回调：SAVE_GetSaveFileName + CS_fsRemove 删 dat + SAVE_DestroySaveSlot/SAVE_CreateSaveSlot
 constexpr uintptr_t G_SAVESLOT_DELETE_GOT_VMA = 0x2f3fa8;      // .got 槽（RELRO 只读）：SaveSlot_SlotButtonDelExe 经此取删档 OK 回调，值 = SaveSlot_Delete
 
+// ---- 进入存档（读档/新档）发起点：按钮 ExecuteProc 内调用点（save-enter-callback）----
+// 读档：SaveSlot_SlotButtonExe@0x14cd08 内 +0x88 的 `bl GAME_StartResumeGame`（原字 0x97fecd56）。
+// 新档：SelectCharacter_ButtonStartExe@0x14dee0 内 +0x10 的 `bl SelectCharacter_StartGame`（原字 0x97ffffea）。
+constexpr uintptr_t F_SAVESLOT_SLOT_BUTTON_EXE_VMA = 0x14cd08;              // void SaveSlot_SlotButtonExe(...)（读档按钮）
+constexpr size_t F_SAVESLOT_SLOT_BUTTON_EXE_RESUME_CALL_OFF = 0x88;         // 内 bl GAME_StartResumeGame（字 0x97fecd56）
+constexpr uintptr_t F_SELECTCHAR_BUTTON_START_EXE_VMA = 0x14dee0;          // void SelectCharacter_ButtonStartExe()（新档确认）
+constexpr size_t F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF = 0x10;  // 内 bl SelectCharacter_StartGame（字 0x97ffffea）
+
 // ---- 存档文件加解密链 VMA（save-export 存档管理器，overhaul v1.3.2 逆向）----
 constexpr uintptr_t F_HUBSAVE_GET_KEY_VMA = 0x9001c;    // const char* () 存档加密密钥字符串指针（本机 "1234567"）
 constexpr uintptr_t F_SAVE_LOAD_DATA_VMA = 0x129260;    // int (int32_t slot, void** outBuf, int* outLen) 读槽明文：成功返回 1；outBuf 为 MEM_Malloc 明文缓冲（须 MEM_Free），outLen = 文件长度-3（明文长度）

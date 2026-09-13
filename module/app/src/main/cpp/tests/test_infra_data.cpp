@@ -1,10 +1,12 @@
-// host 单测（自动出售阶段 A 纯逻辑）：
+// host 单测（自动出售阶段 A / 统一帧任务纯逻辑）：
 //   1) frame_task 按帧去重/节流/到期辅助 frame_task_detail::should_dispatch /
 //      normalize_interval / is_due
-//   2) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
+//   2) save_enter 触发判定 save_enter_detail::should_fire
+//   3) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
 // 纯头文件逻辑，不依赖 Android/游戏内存。
 
 #include "core/native/frame_task.h"
+#include "core/native/save_enter.h"
 #include "core/native/stack_codec.h"
 #include "data/native/item_class.h"
 
@@ -69,6 +71,14 @@ static void test_frame_task_scheduling() {
     // is_due：frame < next_frame 不触发。
     CHECK(!frame_task_detail::is_due(9, 10, true));
     CHECK(!frame_task_detail::is_due(0, 10, true));
+}
+
+static void test_save_enter_should_fire() {
+    // 仅「已发起 且 已进入 world」为真；其余三组合为假。
+    CHECK(!save_enter_detail::should_fire(false, false));
+    CHECK(!save_enter_detail::should_fire(false, true));
+    CHECK(!save_enter_detail::should_fire(true, false));
+    CHECK(save_enter_detail::should_fire(true, true));
 }
 
 static void test_item_is_equip_encoding() {
@@ -146,6 +156,7 @@ static void test_item_is_backpack_encoding() {
 int main() {
     test_frame_task_dedup();
     test_frame_task_scheduling();
+    test_save_enter_should_fire();
     test_item_is_equip_encoding();
     test_item_is_backpack_encoding();
     std::printf("infra_data_tests: %d passed, %d failed\n", g_pass, g_fail);

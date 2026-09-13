@@ -1,5 +1,6 @@
 #include "gamebridge_internal.h"
 #include "core/native/frame_host.h"
+#include "core/native/save_enter.h"
 #include "feature/autosell/autosell_config.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
@@ -46,6 +47,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         if (frame_host_install_if_ready()) {
             autosell_set_host_installed(true);
         }
+        save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
+        save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点 call_patch
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
         settings_ui_start_auto_inject();
     }

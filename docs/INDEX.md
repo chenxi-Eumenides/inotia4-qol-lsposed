@@ -52,6 +52,8 @@
 
 帧派发宿主（frame-dispatch-host）：`development/features/frame-dispatch-host.md`（FrameTaskManager 是否可用 hook 重构、游戏帧周期 §2 逆向结论、锚点与相位模型、统一 `frame_tick` + `frame_host` 设计与分阶段实施、真机验证开放项；可行性调查与设计稿，未实现）。
 
+进入存档回调（save-enter-callback）：`development/features/save-enter-callback.md`（读档/新档加载完成进入 world 后触发一次；两个 call_patch 发起点 + frame_task world 就绪检测；切图返回不触发）。
+
 ### `reference/`：共享参考
 
 面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。

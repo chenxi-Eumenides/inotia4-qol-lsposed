@@ -14,6 +14,7 @@
 #include "game_state.h"
 #include "core/native/module_save_port.h"
 #include "core/native/extension_bag_port.h"
+#include "core/native/save_enter.h"
 
 // v0.5.5：当前加载存档槽（S5）——G_CURRENT_SLOT 双层解引用（SaveSlot_GoToNewGame/STATE_EnterGame 写，v0.5.5 frida 实测 world=0）
 std::string data_current_save_slot_json() {
@@ -149,8 +150,10 @@ std::string data_op_enter_slot(int32_t slot) {
     fn_ui_set_popup_process_info(4, 0);
     uint8_t** flag_ptr = reinterpret_cast<uint8_t**>(g_base + G_GAME_RESUME_FLAG_GOT_VMA);
     if (*flag_ptr != nullptr) **flag_ptr = 0;
+    save_enter_mark_pending();  // 进入存档回调：标记读档发起
     int r = fn_game_start_resume_game(slot);
     if (!r) return op_err("enter slot failed");
+
     // v0.4.49：进档后清理残留教学暂停——obj170=6（药水教学）是持久状态，
     // 回主菜单（GAMESTATE_SetState(4)）与 GAME_StartResumeGame 均不清理，
     // API 进档后若仍为 6 会残留 tutorial_pause 卡住移动。手动进档无此问题
@@ -198,6 +201,7 @@ std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
     // 进入选角环境（GAME_Initialize + MAP_Load(6) + MAINMENU_CreateSelectCharList）
     fn_game_exit_save_slot_select_char();
     // 选角确认开始（*[0x2f5000+0xa00] = class_idx + STATE_Set(5) + UI_SetPopupProcessInfo(4,0)）
+    save_enter_mark_pending();  // 进入存档回调：标记新档发起
     fn_select_character_start_game();
     // 新档教学初始化（SelectCharacter_ButtonStartExe：StartGame 后 TutorialStart）
     fn_tutorial_start();
