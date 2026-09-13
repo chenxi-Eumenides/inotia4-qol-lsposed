@@ -300,7 +300,7 @@ S2 完成（含 S2-P6 验收）不改变 Overall `NOT_ACCEPTED` 口径；S2 各�
    属待办方向。
 3. Host 测试只能验证 original-only 直通 seam 的纯逻辑（`test_original_only_queries`），
    无法复现原版内部回调链的重入；此类死锁风险必须真机复现并按
-   [`build-and-deploy.md` §3.2](../../../guides/build-and-deploy.md) 取线程栈，Host 通过
+   [`build-and-deploy.md` §3.3](../../../guides/build-and-deploy.md) 取线程栈，Host 通过
    不构成无死锁证据。
 4. 涉及锁的行为面提交前，先把「卡死取证流程」固化到部署文档；下一次同类问题可直接按
    步骤取线程栈，缩短定位时间。
