@@ -16,9 +16,8 @@ void autosell_set_runtime_config(const autosell::Config& config);
 // 当前配置快照（拷贝）。
 autosell::Config autosell_get_runtime_config();
 
-// 记录一次扫描结果：frame = 本次扫描帧号；sold/failed/would_sell 为本次增量计数
-// （would_sell 仅开发期 dry-run 非 0，成品应恒为 0）。
-void autosell_note_scan(int64_t frame, int sold, int failed, int would_sell);
+// 记录一次扫描结果：frame = 本次扫描帧号；sold/failed 为本次增量计数。
+void autosell_note_scan(int64_t frame, int sold, int failed);
 
 // 记录主线程逐帧宿主是否安装成功（M-10：宿主安装失败/未安装可经状态 JSON 查）。
 void autosell_set_host_installed(bool installed);

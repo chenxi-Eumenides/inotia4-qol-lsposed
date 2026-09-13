@@ -15,7 +15,6 @@ autosell::Config g_config;  // 仅持 g_config_mtx 访问
 
 std::atomic<int64_t> g_sold_total{0};
 std::atomic<int64_t> g_failed_total{0};
-std::atomic<int64_t> g_would_sell_total{0};  // 开发期 dry-run 计数；成品应恒为 0
 std::atomic<int64_t> g_last_scan_frame{-1};
 std::atomic<bool> g_host_installed{false};
 std::atomic<int> g_store_slot{-1};
@@ -36,10 +35,9 @@ autosell::Config autosell_get_runtime_config() {
     return g_config;
 }
 
-void autosell_note_scan(int64_t frame, int sold, int failed, int would_sell) {
+void autosell_note_scan(int64_t frame, int sold, int failed) {
     if (sold > 0) g_sold_total.fetch_add(sold, std::memory_order_relaxed);
     if (failed > 0) g_failed_total.fetch_add(failed, std::memory_order_relaxed);
-    if (would_sell > 0) g_would_sell_total.fetch_add(would_sell, std::memory_order_relaxed);
     g_last_scan_frame.store(frame, std::memory_order_relaxed);
 }
 
@@ -57,7 +55,6 @@ std::string autosell_status_json() {
     const autosell::Config cfg = autosell_get_runtime_config();
     const int64_t sold = g_sold_total.load(std::memory_order_relaxed);
     const int64_t failed = g_failed_total.load(std::memory_order_relaxed);
-    const int64_t would_sell = g_would_sell_total.load(std::memory_order_relaxed);
     const int64_t frame = g_last_scan_frame.load(std::memory_order_relaxed);
     const bool host_installed = g_host_installed.load(std::memory_order_acquire);
     const int store_slot = g_store_slot.load(std::memory_order_relaxed);
@@ -68,12 +65,12 @@ std::string autosell_status_json() {
     std::snprintf(buf, sizeof(buf),
                   "{\"enabled\":%s,\"rarity\":%d,\"enhance\":%d,\"socket\":%d,"
                   "\"gemTier\":%d,\"gemRange\":%d,\"specialMask\":%u,"
-                  "\"sold\":%lld,\"failed\":%lld,\"wouldSell\":%lld,\"lastScanFrame\":%lld,"
+                  "\"sold\":%lld,\"failed\":%lld,\"lastScanFrame\":%lld,"
                   "\"slot\":%d,\"loadedSlot\":%d,\"persisted\":%s,\"hostInstalled\":%s}",
                   json_bool(cfg.enabled), cfg.rarity, cfg.enhance, cfg.socket, cfg.gem_tier,
                   cfg.gem_range, static_cast<unsigned>(cfg.special_mask),
                   static_cast<long long>(sold), static_cast<long long>(failed),
-                  static_cast<long long>(would_sell), static_cast<long long>(frame), store_slot,
+                  static_cast<long long>(frame), store_slot,
                   store_loaded_slot, json_bool(store_persisted), json_bool(host_installed));
     return std::string(buf);
 }

@@ -26,14 +26,6 @@
 #include <cstdint>
 #include <mutex>
 
-// ============================================================================
-// 开发期 dry-run 开关（仅测试用，成品不得包含）。
-// TODO(发布前必须处理)：将 AUTOSELL_DEV_DRY_RUN 置 0（或删除本宏与下方 #if 分支）后再发布；
-//   成品绝不能带 dry-run 行为，也不做成运行时开关。置 1 时命中规则只打日志 + 计数，
-//   不扣物、不加钱。
-// ============================================================================
-#define AUTOSELL_DEV_DRY_RUN 1
-
 namespace {
 
 constexpr char kTag[] = "Inotia4AutoSell";
@@ -51,7 +43,6 @@ std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置�
 struct ScanStats {
     int sold = 0;
     int failed = 0;
-    int would_sell = 0;  // dry-run：命中规则但未实际出售的计数（成品应为 0）
 };
 
 struct PhysicalScanCtx {
@@ -74,18 +65,6 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
     if (!autosell_build_view(ref, &view)) return;
     if (!autosell::should_sell(view, cfg)) return;
 
-#if AUTOSELL_DEV_DRY_RUN
-    // 开发期 dry-run：只记录「本应出售」，不扣物、不加钱。
-    // type = 特殊类型位掩码（ItemView.special_types）。
-    ++stats->would_sell;
-    __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "WOULD SELL bag=%d slot=%d category=%d rarity=%d enhance=%d "
-                        "socket=%d jewelTier=%d jewelPct=%d type=0x%x",
-                        ref.bag, ref.slot, ref.category, view.rarity, view.enhance_count,
-                        view.socket_total, view.jewel_tier, view.jewel_percentile,
-                        static_cast<unsigned>(view.special_types));
-    return;
-#else
     // I-2 NoSell 预过滤：不可售物品直接跳过，不计失败、不打 WARN
     // （否则 inventory_trade::sell 会以 WARN 记 no_sell 并计入失败）。
     if (fn_item_is_no_sell != nullptr && fn_item_is_no_sell(ref.category) != 0) {
@@ -109,7 +88,6 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
     __android_log_print(ANDROID_LOG_WARN, kTag,
                         "sell failed bag=%d slot=%d category=%d status=%d",
                         ref.bag, ref.slot, ref.category, static_cast<int>(result.status));
-#endif
 }
 
 void scan_body(const autosell::Config& cfg, int64_t frame) {
@@ -148,12 +126,11 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
         }
     }
 
-    autosell_note_scan(frame, stats.sold, stats.failed, stats.would_sell);
-    if (stats.sold > 0 || stats.failed > 0 || stats.would_sell > 0) {
+    autosell_note_scan(frame, stats.sold, stats.failed);
+    if (stats.sold > 0 || stats.failed > 0) {
         __android_log_print(ANDROID_LOG_INFO, kTag,
-                            "scan frame=%lld sold=%d failed=%d wouldSell=%d",
-                            static_cast<long long>(frame), stats.sold, stats.failed,
-                            stats.would_sell);
+                            "scan frame=%lld sold=%d failed=%d",
+                            static_cast<long long>(frame), stats.sold, stats.failed);
     }
 }
 

@@ -155,7 +155,7 @@
 - 特殊类型 `special_mask`：`0` = 关闭；非 0 位掩码与物品位标志按位与命中即出售（对任意物品生效）。
 - 跨类独立：装备、宝石、特殊类型各自判定，命中任一即出售（全局等价 OR）。
 - 保留按存档总开关 `enabled`（与全局开关独立；`enabled=false` 恒不售）。
-- **开发期 dry-run（成品不得包含）**：命中规则时只打日志 + `wouldSell` 计数，**不扣物、不加钱**；由编译期开关控制（§4.5.2），不是运行时开关。
+- 开发期 dry-run 已在提交前移除（2026-09-14 用户裁决）；命中即真实出售（NoSell 预过滤 → `inventory_trade::sell`），见 §4.5.2。
 - 比较方向统一为 `≤`（用户 2026-09-12；值语义 2026-09-14）。
 
 ### 4.4 配置项与持久化
@@ -220,13 +220,10 @@ section `autosell` v1 payload：
 - **兜底**：`INVEN_RemoveItem`（销毁，不给收益）。
 - **扩展袋物品**：原版删除/出售函数作用于原版物理槽；扩展袋物品必须走扩展背包桥接（H-04 / R-56 / 扩展 API），不得让扩展对象进入原版物理释放路径。
 
-#### 4.5.2 开发期 dry-run（成品不得包含）
+#### 4.5.2 开发期 dry-run（已移除）
 
-- 位置：`feature/autosell/autosell_scan.cpp` 顶部编译期宏 `#define AUTOSELL_DEV_DRY_RUN 1`（带醒目 TODO「发布前必须置 0 或删除该宏与分支」）。
-- 行为：宏为 1 时，`process_ref` 在 `should_sell` 命中后只打日志并累加 `wouldSell`，**不扣物、不加钱、不调用出售链**；宏为 0 时走真实出售（NoSell 预过滤 → `inventory_trade::sell`）。
-- 日志：`Inotia4AutoSell WOULD SELL bag=%d slot=%d category=%d rarity=%d enhance=%d socket=%d type=0x%x`（`type` = `ItemView.special_types` 位掩码）。
-- 状态 JSON 增加累计 `wouldSell` 计数（成品应恒为 0；每次扫描重复计数属预期）。
-- **不是运行时开关**，不得随成品发布；发布前必须移除/置 0。
+- 测试期曾用 `autosell_scan.cpp` 顶部编译期宏 `AUTOSELL_DEV_DRY_RUN`：命中只打 `WOULD SELL ...` 日志并累加 `wouldSell`，不扣物、不加钱。
+- **2026-09-14 用户裁决：提交前移除**。现状 `process_ref` 命中即真实出售；状态 JSON 不再含 `wouldSell`。成品不含 dry-run 行为与相关计数。
 
 ### 4.6 保护规则
 
@@ -447,7 +444,7 @@ section `autosell` v1 payload：
 - 签名：`extern "C" JNIEXPORT jboolean JNICALL Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(JNIEnv*, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier, jint specialMask, jint gemRange)`。
 - 入参：`enabled` 总开关；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`specialMask` 非负（空=关）、`gemRange` 0..5（0=关）。native 侧按边界钳制（M-11），填 `autosell::Config` 后 `autosell_apply_config(cfg)`；当前存档槽合法时直写 sidecar `autosell` section。
 - Kotlin 侧 `external fun nativeSetAutoSellConfig(enabled: Boolean, rarity: Int, enhance: Int, socket: Int, gemTier: Int, specialMask: Int, gemRange: Int): Boolean`（`NativeBridge.kt`）；开发期 API `AutoSellFeatureController` 以 `json.optInt("gemRange", 0)` 传入。
-- `nativeAutoSellRunNow` / `nativeAutoSellStatusJson` 签名不变；状态 JSON 现含 `wouldSell`（开发期 dry-run 计数，成品应恒为 0）。
+- `nativeAutoSellRunNow` / `nativeAutoSellStatusJson` 签名不变；状态 JSON 含配置键、`sold`/`failed`、`lastScanFrame`、`slot`/`loadedSlot`/`persisted`/`hostInstalled`（dry-run 移除后不再含 `wouldSell`）。
 
 ### 13.6 未决与风险
 
