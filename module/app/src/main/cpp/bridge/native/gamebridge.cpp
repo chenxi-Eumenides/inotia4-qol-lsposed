@@ -2,6 +2,7 @@
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
 #include "feature/autosell/autosell_store.h"
+#include "feature/save_backup/save_backup.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -37,6 +38,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         inventory_native_hook_install_if_ready();
         attr_range_ui_install_if_ready();
+        save_backup_slot_delete_hook_install_if_ready();
         // 自动出售宿主（GAMESTATE_DrawPlay 每帧 BL patch）已按用户 2026-09-13 要求停用：
         // 当前不安装，保持游戏原生状态；待统一 frame 派发宿主完成后接入
         // autosell_host_install_if_ready()。

@@ -428,6 +428,8 @@ constexpr uintptr_t F_SELECT_CHARACTER_START_GAME_VMA = 0x14de98;      // void (
 constexpr uintptr_t F_TUTORIAL_START_VMA = 0x16ceb0;          // void (void) 新档教学初始化（重置 10 处教学标志 + 教学事件数组 [0x2f4000+0xce0]×5=0x63）
 constexpr uintptr_t F_SAVE_GET_SAVE_FILE_NAME_VMA = 0x125d08;  // void (int32_t slot, char* out) 取存档文件名到 out（SaveSlot_GoToNewGame 删档用）
 constexpr uintptr_t F_CS_FS_REMOVE_VMA = 0x1b27bc;            // int (char* path, int32_t) 删除文件（SaveSlot_GoToNewGame 删旧档）
+constexpr uintptr_t F_SAVESLOT_DELETE_VMA = 0x14c4e8;          // void (int32_t slot) 删档确认回调：SAVE_GetSaveFileName + CS_fsRemove 删 dat + SAVE_DestroySaveSlot/SAVE_CreateSaveSlot
+constexpr uintptr_t G_SAVESLOT_DELETE_GOT_VMA = 0x2f3fa8;      // .got 槽（RELRO 只读）：SaveSlot_SlotButtonDelExe 经此取删档 OK 回调，值 = SaveSlot_Delete
 
 // ---- 存档文件加解密链 VMA（save-export 存档管理器，overhaul v1.3.2 逆向）----
 constexpr uintptr_t F_HUBSAVE_GET_KEY_VMA = 0x9001c;    // const char* () 存档加密密钥字符串指针（本机 "1234567"）

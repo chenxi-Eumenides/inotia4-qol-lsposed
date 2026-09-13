@@ -40,3 +40,9 @@ std::string save_backup_delete_json(const char* checksum);
 // 只作用于该 slot 的精确文件名，不触碰其它槽；未找到任何目标文件返回结构化错误。
 // 与 save_backup_delete_json 同风格（HTTP 风格 {"ok":true,...}/{"ok":false,"error":"..."}）。
 std::string save_backup_delete_slot_json(int slot);
+
+// 安装对游戏删档回调 SaveSlot_Delete 的 GOT 槽 PtrHook（槽 VMA 0x2f3fa8，G_SAVESLOT_DELETE_GOT_VMA）：
+// 游戏内存档面板删档确认后，同步删除该槽模块 sidecar（slot-{n}.module-save + .last-good）。
+// 由 nativeInit 在 bridge_init 成功后调用；fail-closed（GOT 当前值 != SaveSlot_Delete 时不安装）。
+// 覆盖范围仅「存档面板删档按钮路径」；SaveSlot_GoToNewGame 与 SAVE_FileDelete 不在覆盖内。
+void save_backup_slot_delete_hook_install_if_ready();

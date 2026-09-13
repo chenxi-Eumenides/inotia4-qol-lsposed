@@ -94,7 +94,7 @@ u32 crc32                      # 覆盖此前全部字节
 |---|---|
 | native 符号 | `game_symbols.h` + `symbol_registry.h` + `game_access.{h,cpp}` + `game_access_globals.inc`：`F_HUBSAVE_GET_KEY_VMA=0x9001c`、`F_SAVE_LOAD_DATA_VMA=0x129260`、`F_MEM_FREE_VMA=0xa8f18`、`F_ENCRYPT_PROCESS2_VMA=0xa413c` |
 | native 纯逻辑 | `feature/save_backup/save_backup_bundle.{h,cpp}`：bundle 组装/解析（大端+CRC32）、SHA-256（FIPS 180-4）、MD5（RFC 1321，存档目录名 hex(MD5(key))）、CRC32（IEEE，与 `java.util.zip.CRC32` 一致）、RFC4648 base64、极简扁平 metaJson 字段提取、MSAV sidecar 容器最小校验/重定槽；纯 STL，编入 host 单测 |
-| native 功能 | `feature/save_backup/save_backup.{h,cpp}`：`save_backup_init` / `save_backup_list_json` / `save_backup_export_json` / `save_backup_import_json` / `save_backup_delete_json`（返回体即 HTTP 响应 JSON；导出去重、导入两段事务 + `.rollback/` 回滚、sidecar 由 native 直改第 6 字节 slot + 重算尾部 CRC32 后 primary/last-good 双写） |
+| native 功能 | `feature/save_backup/save_backup.{h,cpp}`：`save_backup_init` / `save_backup_list_json` / `save_backup_export_json` / `save_backup_import_json` / `save_backup_delete_json`（返回体即 HTTP 响应 JSON；导出去重、导入两段事务 + `.rollback/` 回滚、sidecar 由 native 直改第 6 字节 slot + 重算尾部 CRC32 后 primary/last-good 双写）；`save_backup_slot_delete_hook_install_if_ready`（游戏删档回调 GOT 槽 PtrHook，删档后同步清该槽 sidecar） |
 | JNI | `bridge/native/gamebridge_operations.cpp` + `NativeBridge.kt`：`nativeSaveBackupInit(dataDir, externalDir)` / `nativeBackupList()` / `nativeBackupExport(slot)` / `nativeBackupImport(checksum, slot)` / `nativeBackupDelete(checksum)` |
 | Kotlin | `service/action/SaveBackupActions.kt`：`LogFile.op` 端点日志包装 + 入参防御校验，直接返回 native 响应 JSON |
 | API | `SaveController.kt` + `ActionApiService(Core)`：`POST /api/system/backup/export`、`GET /api/system/backup/list`、`POST /api/system/backup/import`（按 `checksum`）、`POST /api/system/backup/delete`（按 `checksum`）；Service 方法 `backupExport`/`backupList`/`backupImport`/`backupDelete` 签名不变 |
@@ -132,6 +132,18 @@ u32 crc32                      # 覆盖此前全部字节
 - host tests 全绿（`host_tests: 2547 passed, 0 failed`）；`scripts/build-debug.sh` `BUILD SUCCESSFUL`，APK `output/inotia4-qol-lsposed-debug-2609122241-393ba19f603f.apk`。
 - **未真机触发**：导入仓库写失败的回滚路径（`.rollback/` 还原 wh）未做故障注入实测，仅有代码审查覆盖。
 
+### 8.4 游戏删档同步清理模块 sidecar（2026-09-13，原版包）
+
+真机：Phh-Treble（`192.168.3.54:5555`），模块 debug `0.7.5`（`output/inotia4-qol-lsposed-debug-2609131227-dcae13c32981.apk`）。流程：安装 → force-stop + monkey 重启 → 同意页 `POST /api/ui/dialog/select {"action":"ok"}` → 轮询 `/api/health` → 主菜单。
+
+- **Hook 安装**：logcat `Inotia4SaveBackup: slot delete hook installed slot=0x7080cf6fa8 orig=0x7080b4f4e8`；`orig-base=0x14c4e8`、`slot-base=0x2f3fa8`，fail-closed 校验通过（GOT 槽值 == `SaveSlot_Delete`）。
+- **测试前置**：`POST /api/system/backup/export {"slot":0}` → `20260913-122932_s0_a17dd08f71b3.qol_save`（11840 B，`module_sha256=de9cb8d1a454f45d5894d30512032032b2194b74689376e730a04bfa01a285e8`）；`POST /api/system/backup/import {"checksum":"a17dd08f71b3","slot":1}` → `ok:true`，`slot-1.module-save`(5640 B) + `.last-good`(5640 B) 出现；`/api/system/info` slot0/1 `exists=true`。
+- **游戏内删档（slot1）**：主菜单「开始游戏」→ 存档面板（slot0/1 有档、slot2 EMPTY）→ 点 slot1 删除按钮 → 确认弹窗「是」。
+- **结果**：logcat `slot delete hook: removed sidecar .../slot-1.module-save`、`removed last-good .../slot-1.module-save.last-good`；`ls module-saves/` 仅剩 `slot-0.*`（slot-1 两文件消失）；root `find` 存档目录仅剩 `save0.dat`（`save1.dat` 已删）；`/api/system/info` slot1 `exists=false`、slot0 `exists=true`。
+- **不误伤**：删档前后 `slot-0.module-save` SHA-256 恒为 `de9cb8d1…`（与备份 `module_sha256` 一致）；打开存档面板本身不触发删除。
+- **崩溃韧性**：删档后立即 force-stop + monkey 重启，`module-saves/` 仍只有 `slot-0.*`，slot-1 不重建。
+- **未覆盖（残余）**：`SaveSlot_GoToNewGame`（点空槽开始新游戏）与 `SAVE_FileDelete`（Hive 云上传前清空）未经该 GOT 槽；本轮未对「删档后在游戏内新建档并打开扩展背包」单独构造实测。
+
 ## 9. 约束与残余
 
 - **时机**：导出读已落盘文件，不触发保存；导入不刷新内存态。调用方负责时序。
@@ -141,6 +153,8 @@ u32 crc32                      # 覆盖此前全部字节
 - **已实现（2026-09-12 个人仓库随存档备份）**：bundle 升到 v2（v1 仍可读）；导出收集 `save{slot}.dat.wh4-*`（含 `.bak`），导入 additive 写回目标槽（仅 v2 且 `has_warehouse`）。决策见 §3/§5。
 - 残余：① 备份重命名未实现；② 跨设备导入未实测；③ `hero_level` 依赖运行时槽结构，无离线解析；④ 备份容量/清理策略未定；⑤ sidecar 校验从「section 全解码」放宽为「magic+整体 CRC32」（不解析 section），损坏 section 的容器在导出侧可能被带上（导入侧重定槽后写回）；⑥ 面板内两步确认与「← 返回」为当前 UI 交互，后续可评估改回原版弹窗或增加键盘返回。
 - 残余（个人仓库）：⑦ wh4 文件整体加密，模块**未解析其格式**，只做字节级整体备份/恢复；⑧ 导入为 additive（只新增/覆盖 bundle 内后缀，不删除目标槽其它后缀），因此导入不会清除目标槽中 bundle 未包含的陈旧 wh4 文件；⑨ `save_backup_delete_slot_json`（删除游戏存档）**未清理 wh4 伴生文件**，删除槽位后可能残留仓库文件。
+- **已实现（2026-09-13 游戏删档同步清理）**：`save_backup_slot_delete_hook_install_if_ready()` 由 `nativeInit` 在 `bridge_init` 成功后安装，覆盖游戏删档回调 `SaveSlot_Delete@0x14c4e8` 的 GOT 槽 `G_SAVESLOT_DELETE_GOT_VMA=0x2f3fa8`（PtrHook）。该槽位于 GNU_RELRO 覆盖的 `.got`，安装前将该页 mprotect 为 RW；fail-closed：GOT 当前值不等于预期函数地址时不安装。wrapper 在游戏主线程回调原函数（删 `save{n}.dat` + `SAVE_DestroySaveSlot`/`SAVE_CreateSaveSlot`）后，按 `module_sidecar_paths` 路径 `unlink` 该槽 `slot-{n}.module-save` 与 `.last-good`，短取 `g_sb_mtx` 与导入/导出串行；不取 `g_virtual_bag_mtx`、不走 JNI/Kotlin、不再调 `SAVE_CreateSaveSlot`。扩展背包内存态失效沿用主菜单既有清理（`prepare_main_menu_locked` 置 `g_loaded_slot=-2`），wrapper 不处理。
+- 残余（游戏删档同步清理）：① 仅覆盖「存档面板删档按钮确认」路径；`SaveSlot_GoToNewGame`（空槽开始新游戏）与 `SAVE_FileDelete`（Hive 云上传前清空）不经该 GOT 槽，不在覆盖内；② 本 Hook 为即时删除，删档瞬间已完成，进程随后被杀不会残留；但「删档后才发生的中断」不会补清理（不做磁盘对账）；③ `save_backup.cpp` 未编入 host 单测，行为验证依赖真机；④ 真机已验收（§8.4）；「删档后在该槽游戏内新建档、扩展背包为空」未单独构造新档实测，但 sidecar 已删除、无数据可继承。
 - 变更本功能前须核对 `game_symbols.h` 的 VMA 与 `scripts/maintenance/check_symbols.py`；改动触及行为面须补真机证据。
 
 ## 10. 游戏内 UI（阶段 2）

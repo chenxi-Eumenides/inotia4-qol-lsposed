@@ -15,6 +15,7 @@
 #include "feature/save_backup/save_backup.h"
 
 #include <dirent.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -22,6 +23,7 @@
 #include <android/log.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -31,6 +33,8 @@
 #include "core/native/game_ops_common.h"
 #include "feature/save_backup/save_backup_bundle.h"
 #include "game_access.h"
+#include "game_ptr_hook.h"
+#include "game_symbols.h"
 
 namespace {
 
@@ -48,6 +52,10 @@ constexpr const char* kLastGoodSuffix = ".last-good";
 std::mutex g_sb_mtx;
 std::string g_sb_data_dir;
 std::string g_sb_external_dir;
+
+// 游戏删档回调 GOT 槽覆盖（save-delete-sync）。见 save_backup.h 声明注释。
+constexpr size_t kSlotDeletePageSize = 0x1000;
+PtrHook g_slot_delete_hook;
 
 // ---- 地图名表（Kotlin 启动期从 MAPINFOBASE 下发：map_id → 中文名） ----
 // 解析失败/空 JSON 视为空表（entry_json 输出空 map_name，UI 显示「未知地图」）。
@@ -226,6 +234,31 @@ void module_sidecar_paths(int slot, std::string& primary, std::string& last_good
     }
     primary = dir + "/slot-" + std::to_string(slot) + kModuleSaveSuffix;
     last_good = primary + kLastGoodSuffix;
+}
+
+// SaveSlot_Delete 的 PtrHook wrapper。执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），
+// x0 = slot(int32_t)。约束：
+//  - 只回调原函数（删 save{n}.dat + 重载三槽）并 unlink 该槽模块 sidecar 两文件；
+//  - 不取 g_virtual_bag_mtx、不走 JNI/Kotlin（避免跨层锁序与主线程阻塞）；
+//  - 不在本函数内再调 SAVE_CreateSaveSlot（原函数已调）；
+//  - 短取 g_sb_mtx，与 save_backup 导入/导出串行。
+void slot_delete_hook_wrapper(int32_t slot) {
+    if (g_slot_delete_hook.installed()) {
+        g_slot_delete_hook.call_orig(slot);
+    }
+    if (slot < 0 || slot > 2) return;
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    std::string primary;
+    std::string last_good;
+    module_sidecar_paths(slot, primary, last_good);
+    if (file_exists(primary)) {
+        remove_file(primary);
+        SB_LOG("slot delete hook: removed sidecar %s", primary.c_str());
+    }
+    if (file_exists(last_good)) {
+        remove_file(last_good);
+        SB_LOG("slot delete hook: removed last-good %s", last_good.c_str());
+    }
 }
 
 // 文件名全匹配 `save\d*\.dat`（与迁移前 Kotlin Regex 一致）。
@@ -470,6 +503,37 @@ void save_backup_init(const char* data_dir, const char* external_files_dir) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
     g_sb_data_dir = data_dir != nullptr ? data_dir : "";
     g_sb_external_dir = external_files_dir != nullptr ? external_files_dir : "";
+}
+
+void save_backup_slot_delete_hook_install_if_ready() {
+    if (g_slot_delete_hook.installed()) return;
+    if (!bridge_ready() || g_base == 0) return;
+    const uintptr_t expected =
+        g_base + fn_resolve("F_SAVESLOT_DELETE_VMA", F_SAVESLOT_DELETE_VMA);
+    if (expected == g_base) {
+        SB_LOG("slot delete hook: F_SAVESLOT_DELETE_VMA unresolved");
+        return;
+    }
+    void** slot = reinterpret_cast<void**>(g_base + G_SAVESLOT_DELETE_GOT_VMA);
+    if (!game_memory_accessible(slot, sizeof(void*), 'r')) {
+        SB_LOG("slot delete hook: got not accessible slot=%p", slot);
+        return;
+    }
+    if (*slot != reinterpret_cast<void*>(expected)) {
+        SB_LOG("slot delete hook: unexpected got value=%p expected=%p", *slot,
+               reinterpret_cast<void*>(expected));
+        return;
+    }
+    const uintptr_t page = reinterpret_cast<uintptr_t>(slot) & ~(kSlotDeletePageSize - 1);
+    if (mprotect(reinterpret_cast<void*>(page), kSlotDeletePageSize, PROT_READ | PROT_WRITE) != 0) {
+        SB_LOG("slot delete hook: mprotect failed errno=%d", errno);
+        return;
+    }
+    if (!g_slot_delete_hook.install_typed(slot, &slot_delete_hook_wrapper)) {
+        SB_LOG("slot delete hook: install failed slot=%p", slot);
+        return;
+    }
+    SB_LOG("slot delete hook installed slot=%p orig=%p", slot, g_slot_delete_hook.orig);
 }
 
 void save_backup_set_map_names(const char* json) {
