@@ -1,5 +1,41 @@
+namespace {
+
+// 栈顶 enter VMA 是否为「模块可安全 Pop 的面板」（栏位与 data_op_panel_close 一致）。
+bool popup_vma_is_panel(uintptr_t vma) {
+    switch (vma) {
+        case F_PANEL_CHARACTER_INFO_ENTER: case F_PANEL_CHOICE_ENTER: case F_PANEL_INVENTORY_ENTER: case F_PANEL_INPUT_COUNT_ENTER:
+        case F_PANEL_MERCENARY_ENTER: case F_PANEL_CRAFT_ENTER: case F_PANEL_NPC_ENTER: case F_PANEL_NPC_QUEST_ENTER:
+        case F_PANEL_NPC_REST_ENTER: case F_PANEL_NPC_REVIVE_ENTER: case F_PANEL_OPTIONS_ENTER: case F_PANEL_QUESTS_ENTER:
+        case F_PANEL_SAVE_SLOT_ENTER: case F_PANEL_CHAR_SELECT_ENTER: case F_PANEL_SHORTCUT_ENTER: case F_PANEL_SKILLS_ENTER:
+        case F_PANEL_SHOP_ENTER: case F_PANEL_SETTINGS_ENTER: case F_PANEL_WIPEOUT_ENTER: case F_PANEL_WORLD_MAP_ENTER:
+        case F_PANEL_IN_APP_ENTER: case F_PANEL_DAILY_REWARD_ENTER:
+        case F_PANEL_UNK1_ENTER: case F_PANEL_UNK2_ENTER: case F_PANEL_UNK3_ENTER:
+        case F_PANEL_UNK4_ENTER: case F_PANEL_UNK5_ENTER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+}  // namespace
+
 std::string data_op_main_menu() {
-    if (fn_gamestate_set_state == nullptr) return op_err("symbol not resolved");
+    if (!game_in_world()) return op_err("not in game");
+    if (fn_gamestate_set_state == nullptr || fn_ui_set_popup_process_info == nullptr) {
+        return op_err("symbol not resolved");
+    }
+    if (g_base == 0 || g_popup_stack == nullptr) return op_err("libgame not ready");
+    // 面板守卫：带着面板切 GAME_Exit 会触发游戏「terminate 面板后又画一帧」的空指针崩溃
+    // （ControlItem_Draw(NULL) ← UIEquip_DrawEquip）。栈顶是面板则先走官方 Pop 并等栈清空；
+    // 非面板弹窗（对话/剧情/数量输入等脚本态）fail-closed，不由模块代关。
+    const uintptr_t top_vma = data_popup_top_vma();
+    if (top_vma != 0) {
+        if (!popup_vma_is_panel(top_vma)) return op_err("ui occupied: close current dialog first");
+        fn_ui_set_popup_process_info(3, 0);
+        uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+        if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+        if (!wait_for_popup_stack_empty()) return op_err("panel close pending");
+    }
     // 扩展背包清理保持原调用时机（切换前）；游戏状态机切换走逻辑帧点。
     if (!extension_bag_prepare_main_menu()) {
         return op_err("extension bag cleanup failed; main menu transition blocked");
@@ -29,21 +65,7 @@ std::string data_op_panel_close() {
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     uintptr_t vma = enter > g_base ? enter - g_base : 0;
     if (extension_bag_is_inventory_enter(enter)) vma = F_PANEL_INVENTORY_ENTER;
-    bool is_panel = false;
-    switch (vma) {
-        case F_PANEL_CHARACTER_INFO_ENTER: case F_PANEL_CHOICE_ENTER: case F_PANEL_INVENTORY_ENTER: case F_PANEL_INPUT_COUNT_ENTER:
-        case F_PANEL_MERCENARY_ENTER: case F_PANEL_CRAFT_ENTER: case F_PANEL_NPC_ENTER: case F_PANEL_NPC_QUEST_ENTER:
-        case F_PANEL_NPC_REST_ENTER: case F_PANEL_NPC_REVIVE_ENTER: case F_PANEL_OPTIONS_ENTER: case F_PANEL_QUESTS_ENTER:
-        case F_PANEL_SAVE_SLOT_ENTER: case F_PANEL_CHAR_SELECT_ENTER: case F_PANEL_SHORTCUT_ENTER: case F_PANEL_SKILLS_ENTER:
-        case F_PANEL_SHOP_ENTER: case F_PANEL_SETTINGS_ENTER: case F_PANEL_WIPEOUT_ENTER: case F_PANEL_WORLD_MAP_ENTER:
-        case F_PANEL_IN_APP_ENTER: case F_PANEL_DAILY_REWARD_ENTER:
-        case F_PANEL_UNK1_ENTER: case F_PANEL_UNK2_ENTER: case F_PANEL_UNK3_ENTER:
-        case F_PANEL_UNK4_ENTER: case F_PANEL_UNK5_ENTER:
-            is_panel = true;
-            break;
-        default: break;
-    }
-    if (!is_panel) return op_err("top of stack is not a panel");
+    if (!popup_vma_is_panel(vma)) return op_err("top of stack is not a panel");
     // 官方 ButtonBackExe 链：SOUNDSYSTEM_Play(0) + 流程3 + HUD 开关恢复
     fn_ui_set_popup_process_info(3, 0);
     uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);

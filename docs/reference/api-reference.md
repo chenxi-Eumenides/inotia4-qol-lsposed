@@ -1331,7 +1331,7 @@
 
 **返回格式**：`{"ok":true,"state":<Player 模型>}`
 
-**注意**：非 world→`not in game`。
+**注意**：非 world→`not in game`。**UI 守卫（2026-09-14）**：栈顶是面板时模块先走官方 Pop 关闭并等栈清空再切换；栈顶是非面板弹窗（对话/剧情/数量输入等脚本态）→ `ui occupied: close current dialog first`（fail-closed，不由模块代关）；面板关闭未完成→`panel close pending`。带面板直接切换会触发游戏 `ControlItem_Draw(NULL)` 崩溃，故必须走守卫。
 
 #### 打开面板
 
@@ -1629,6 +1629,7 @@
 > - `stackLimitIncrease` 变化时通知 native 生效（切换运行时操作视图与 99/999 clamp），无需重启；sidecar 数量位解码永远按 S2 布局、与该开关无关；sidecar 读档按绝对 `0..999` 校验，不改写、不因当前配置截断已有数量；可堆叠 payload 仅在与 descriptor 不一致时同步
 > - **数量编码 S2（当前实现，无版本标识）**：sidecar `extensionbags.items` 状态 JSON 不携带编码版本字段；数量位只有 S2 布局（高位段 `a`=bits22-24、低位段 `b`=bits25-31，`count=128a+b`，业务上限 999）一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`（R-47 决策 b）；历史 sidecar 若携带 `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）；无 S1→S2 迁移代码，原版袋 `+0x10` 无迁移扫描；非可堆叠类别（宝石选项/袋容量/装备 marker）不参与数量位段改写。`/api/item/*` 的 `count` 字段为当前模式的运行时视图：启用态 S2 全量 `0..999`、关闭态低 7 位 `b`（`count mod 128`，`a` 保留、重开恢复完整值）；API 结构不变。详见 `docs/development/features/extension-bag/module-save-store.md` §6.4 与规则册 R-45..R-49
 > - `moveMergeEnabled` 控制背包内拖拽同类可堆叠物品时的自动合并，默认 `false`；变化即时安装或还原 native GOT hook，无需重启
+> - `autoSellEnabled` 自动出售全局开关，默认 `false`；变化即通知 native（进档后由存档内总开关共同决定扫描任务）
 > - `apiEnabled` API 全局开关，默认 `true`；`false` 时不启动 HTTP 服务与 native 缓存预取线程（`nativeSetApiEnabled(false)` → `frame_cache_stop()`），`GET/POST /api/config/*` 随之不可达。**`apiEnabled=false` 不影响 feature 初始化**——`ApiServer.bootstrap` 已把 feature 初始化（设置页/扩展背包/存档/自动出售等）与 HTTP 启动拆开，关闭仅停 HTTP 与预取线程。关闭后唯一恢复通道为**游戏内设置页第一项「API服务」开关**（走 `ModuleConfigUiBridge` JNI，不依赖 HTTP；false→true 经 `ApiServer.startFromConfig` 重启 HTTP）；由 HTTP 置 `false` 时延迟约 500ms 停止以先送回本响应
 
 #### 读取配置
@@ -1646,6 +1647,7 @@
   "stackLimitIncrease": false,
   "moveMergeEnabled": false,
   "opEnabled": false,
+  "autoSellEnabled": false,
   "apiEnabled": true
 }
 ```
@@ -1674,13 +1676,14 @@
   "stackLimitIncrease": true,
   "moveMergeEnabled": false,
   "opEnabled": false,
+  "autoSellEnabled": false,
   "apiEnabled": true
 }
 ```
 
 **注意**：
 - `listenAddress` 非空必填；`listenPort` 合法范围 1-65535，越界返回 `{"ok":false,"error":"listenPort must be 1-65535"}`；body 非法返回 `{"error":"bad request"}`；持久化失败返回 `{"ok":false,"error":"config save failed"}`（内存不提交）
-- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`apiEnabled` 时 `restart=false`
+- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`autoSellEnabled`/`apiEnabled` 时 `restart=false`
 - `apiEnabled=false` 时延迟约 500ms 停止 HTTP 服务（先让本响应送达），此后 `GET/POST /api/config/*` 不可达；重新开启须经游戏内设置页（HTTP 已不可达）
 - 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
 - **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）
