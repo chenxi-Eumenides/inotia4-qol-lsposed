@@ -4,6 +4,7 @@
 #include "game_world.h"
 #include "game_ops_common.h"
 #include "core/native/extension_bag_port.h"
+#include "core/native/transition_dispatch.h"
 #include <cstdio>
 
 #include "game_ui_read.inc"

@@ -18,6 +18,7 @@
 using FramePointId = int;
 enum : FramePointId {
     kFramePointRenderPre = 0,  // 渲染开始前（GAMESTATE_Draw 内 bl GAMESTATE_DrawPlay 锚点）
+    kFramePointLogicPre = 1,   // 逻辑帧开始前（MainProcess 内 bl STATE_NextStartProcess 之前）
     kFramePointCount,          // 点位数量（API/数据结构按多点位设计，每点位独立按帧去重）
 };
 

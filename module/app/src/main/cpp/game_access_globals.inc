@@ -57,6 +57,7 @@ GameStartResumeGameFn fn_game_start_resume_game = nullptr;
 SaveCreateSaveSlotFn fn_save_create_save_slot = nullptr;
 SaveslotGetHeroFn fn_saveslot_get_hero = nullptr;
 StateSetFn fn_state_set = nullptr;
+StateNextStartProcessFn fn_state_next_start_process = nullptr;
 GameExitSaveSlotSelectCharFn fn_game_exit_save_slot_select_char = nullptr;
 SelectCharacterStartGameFn fn_select_character_start_game = nullptr;
 TutorialStartFn fn_tutorial_start = nullptr;

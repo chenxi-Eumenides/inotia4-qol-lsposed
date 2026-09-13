@@ -90,3 +90,8 @@ target_sources(gamebridge PRIVATE
     feature/gemcraft/gemcraft_rules.cpp
     feature/ui/game_ui_gemcraft.cpp
 )
+
+# 状态转换派发（go_main_menu/enter_slot/create_slot 跨线程收敛到逻辑帧点，末尾追加）
+target_sources(gamebridge PRIVATE
+    core/native/transition_dispatch.cpp
+)

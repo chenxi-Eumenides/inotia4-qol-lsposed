@@ -1,10 +1,19 @@
 std::string data_op_main_menu() {
     if (fn_gamestate_set_state == nullptr) return op_err("symbol not resolved");
+    // 扩展背包清理保持原调用时机（切换前）；游戏状态机切换走逻辑帧点。
     if (!extension_bag_prepare_main_menu()) {
         return op_err("extension bag cleanup failed; main menu transition blocked");
     }
-    fn_gamestate_set_state(4);
-    return op_ok();
+    // 游戏状态机切换（GAMESTATE_SetState -> GAME_Exit）必须在游戏主线程的逻辑帧点执行；
+    // HTTP worker 线程直调会与渲染线程并发破坏游戏内存分配器（见 transition_dispatch.h）。
+    std::string result;
+    if (!transition_run([](std::string* out) {
+            fn_gamestate_set_state(4);
+            *out = op_ok();
+        }, kTransitionTimeoutMs, &result)) {
+        return op_err(result.c_str());
+    }
+    return result;
 }
 std::string data_op_panel_close() {
     if (!game_in_world()) return op_err("not in game");

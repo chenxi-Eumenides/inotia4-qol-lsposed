@@ -2,6 +2,7 @@
 #include "core/native/frame_host.h"
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
+#include "core/native/transition_dispatch.h"
 #include "feature/autosell/autosell_config.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
@@ -48,6 +49,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         if (frame_host_install_if_ready()) {
             autosell_set_host_installed(true);
         }
+        transition_dispatch_init();           // 状态转换：逻辑帧点消费（go_main_menu/enter_slot/create_slot）
         save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
         save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点 call_patch
         save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点 call_patch

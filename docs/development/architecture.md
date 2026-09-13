@@ -166,7 +166,7 @@ data 层 → 仅 STL
 
 **位置**：`core/native/frame_task.{h,cpp}`（管理器）+ `core/native/frame_host.{h,cpp}`（锚点安装）。**动机**：逐帧操作（移动/寻路/自动出售扫描）需要「任意线程可注册、回调只在游戏主线程帧周期执行、可多任务、可查询」。旧 `FrameTaskManager`（`game_motion.{h,cpp}`，后台线程轮询 + 单任务 clear）与 `frame_tick`（单注册表、无句柄）已删除，由本管理器取代。
 
-**多触发点位**：`enum : FramePointId { kFramePointRenderPre = 0, kFramePointCount };` 每点位独立按帧去重；当前只安装 `kFramePointRenderPre`（渲染开始前）。
+**多触发点位**：`enum : FramePointId { kFramePointRenderPre = 0, kFramePointLogicPre, kFramePointCount };` 每点位独立按帧去重；当前安装 `kFramePointRenderPre`（渲染开始前）与 `kFramePointLogicPre`（逻辑帧开始前）。两锚点由 `frame_host` **全成或全退**安装，`frame_host_anchors_installed()` 供派发器 fail-fast。
 
 **锚点（指令 patch，非 Native Hook）**：`GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`（原字 `0x9401d18a`，常量 `F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF`）。wrapper 先 `frame_task_dispatch(kFramePointRenderPre)` 再 `fn_map_drawbase()`。选点依据（真机探针）：`GAMESTATE_Draw+0x3c` 的 `bl GAMESTATE_DrawPlay` 在 world 态不执行（DrawPlay 由函数指针调用），而 DrawPlay 内两条路径都汇聚到 `+0x20`，故每帧必执行。
 

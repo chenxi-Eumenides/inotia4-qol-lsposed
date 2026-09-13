@@ -394,3 +394,6 @@ SYM(F_MAP_DRAWBASE_VMA, MAP_DrawBase)
 
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主（auto-sell）----
 SYM(F_GAMESTATE_DRAWPLAY_VMA, GAMESTATE_DrawPlay)
+// ---- 逻辑相位帧锚点：MainProcess 内 STATE_NextStartProcess 调用点（frame-dispatch-host）----
+SYM(F_MAINPROCESS_VMA, MainProcess)
+SYM(F_STATE_NEXT_START_PROCESS_VMA, STATE_NextStartProcess)

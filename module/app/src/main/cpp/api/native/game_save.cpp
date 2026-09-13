@@ -15,6 +15,7 @@
 #include "core/native/module_save_port.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/save_enter.h"
+#include "core/native/transition_dispatch.h"
 
 // v0.5.5：当前加载存档槽（S5）——G_CURRENT_SLOT 双层解引用（SaveSlot_GoToNewGame/STATE_EnterGame 写，v0.5.5 frida 实测 world=0）
 std::string data_current_save_slot_json() {
@@ -122,7 +123,7 @@ static std::string save_preflight_for_enter(int32_t slot) {
                                detail.empty() ? nullptr : detail.c_str());
 }
 
-std::string data_op_enter_slot(int32_t slot) {
+static std::string enter_slot_locked(int32_t slot) {
     if (g_state == nullptr) return op_err("libgame not ready");
     if (const char* ui_block = savebackup_ui_block_reason()) return op_err(ui_block);
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
@@ -161,9 +162,19 @@ std::string data_op_enter_slot(int32_t slot) {
     if (tutorial_state() == 6) tutorial_cancel();
     return op_ok();
 }
+
+std::string data_op_enter_slot(int32_t slot) {
+    // 读档链（GAME_StartResumeGame/SAVE 系列）必须在游戏主线程的逻辑帧点执行。
+    std::string result;
+    if (!transition_run([slot](std::string* out) { *out = enter_slot_locked(slot); },
+                        kTransitionHeavyTimeoutMs, &result)) {
+        return op_err(result.c_str());
+    }
+    return result;
+}
 // v0.4.64：创建新角色存档（复刻官方 SaveSlot_GoToNewGame + SelectCharacter_ButtonStartExe 链，
 // frida 全流程监听实证，见 docs/systems/save.md §10）
-std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
+static std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     if (g_state == nullptr) return op_err("libgame not ready");
     if (const char* ui_block = savebackup_ui_block_reason()) return op_err(ui_block);
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
@@ -207,4 +218,15 @@ std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
     fn_tutorial_start();
     // 状态机驱动：STATE_NextStartProcess → STATE_EnterGame → GAME_StartNewGame → 剧情 → 初始营地
     return op_ok();
+}
+
+std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
+    // 新档链（GAME_Initialize/SelectCharacter/STATE_Set）必须在游戏主线程的逻辑帧点执行。
+    std::string result;
+    if (!transition_run(
+            [slot, class_idx](std::string* out) { *out = create_slot_locked(slot, class_idx); },
+            kTransitionHeavyTimeoutMs, &result)) {
+        return op_err(result.c_str());
+    }
+    return result;
 }

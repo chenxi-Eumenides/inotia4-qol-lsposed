@@ -76,6 +76,7 @@ extern GameStartResumeGameFn fn_game_start_resume_game;
 extern SaveCreateSaveSlotFn fn_save_create_save_slot;
 extern SaveslotGetHeroFn fn_saveslot_get_hero;
 extern StateSetFn fn_state_set;
+extern StateNextStartProcessFn fn_state_next_start_process;
 extern GameExitSaveSlotSelectCharFn fn_game_exit_save_slot_select_char;
 extern SelectCharacterStartGameFn fn_select_character_start_game;
 extern TutorialStartFn fn_tutorial_start;

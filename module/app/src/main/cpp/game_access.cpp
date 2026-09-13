@@ -183,6 +183,7 @@ bool bridge_init() {
     fn_save_create_save_slot = reinterpret_cast<SaveCreateSaveSlotFn>(g_base + fn_resolve("F_SAVE_CREATE_SAVE_SLOT_VMA", F_SAVE_CREATE_SAVE_SLOT_VMA));
     fn_saveslot_get_hero = reinterpret_cast<SaveslotGetHeroFn>(g_base + fn_resolve("F_SAVESLOT_GET_HERO_VMA", F_SAVESLOT_GET_HERO_VMA));
     fn_state_set = reinterpret_cast<StateSetFn>(g_base + fn_resolve("F_STATE_SET_VMA", F_STATE_SET_VMA));
+    fn_state_next_start_process = reinterpret_cast<StateNextStartProcessFn>(g_base + fn_resolve("F_STATE_NEXT_START_PROCESS_VMA", F_STATE_NEXT_START_PROCESS_VMA));
     fn_game_exit_save_slot_select_char = reinterpret_cast<GameExitSaveSlotSelectCharFn>(g_base + fn_resolve("F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA", F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA));
     fn_select_character_start_game = reinterpret_cast<SelectCharacterStartGameFn>(g_base + fn_resolve("F_SELECT_CHARACTER_START_GAME_VMA", F_SELECT_CHARACTER_START_GAME_VMA));
     fn_tutorial_start = reinterpret_cast<TutorialStartFn>(g_base + fn_resolve("F_TUTORIAL_START_VMA", F_TUTORIAL_START_VMA));

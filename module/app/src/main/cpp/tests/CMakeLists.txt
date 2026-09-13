@@ -96,3 +96,13 @@ target_include_directories(gemcraft_rules_tests PRIVATE
 )
 target_compile_features(gemcraft_rules_tests PRIVATE cxx_std_17)
 add_test(NAME gemcraft_rules_tests COMMAND gemcraft_rules_tests)
+
+# 状态转换派发纯逻辑 host 测试（末尾追加）
+add_executable(transition_dispatch_tests
+    test_transition_dispatch.cpp
+)
+target_include_directories(transition_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(transition_dispatch_tests PRIVATE cxx_std_17)
+add_test(NAME transition_dispatch_tests COMMAND transition_dispatch_tests)

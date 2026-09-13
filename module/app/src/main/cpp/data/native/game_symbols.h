@@ -429,6 +429,13 @@ constexpr uintptr_t F_SAVE_CREATE_SAVE_SLOT_VMA = 0x129b38;    // void (void) �
 constexpr uintptr_t F_SAVE_LOAD_SAVE_SLOT_VMA = 0x1298dc;      // int (int32_t, void*) 按槽加载单个存档到 SAVESLOT 结构
 constexpr uintptr_t F_SAVESLOT_GET_HERO_VMA = 0x14cda4;       // void* (void*) 取主控角色指针（[slot+0x1c] 索引 → [slot+0x4+idx*8]）
 constexpr uintptr_t F_STATE_SET_VMA = 0xd46a8;                // void (int32_t) 写状态机 state（*[0x2f5000+0xf8] = state；STATE_NextStartProcess 驱动 enter 回调）
+// ---- 逻辑相位帧锚点：MainProcess 内 bl STATE_NextStartProcess（frame-dispatch-host 阶段 2）----
+// MainProcess@0xd4984（.dynsym 导出）内 +0x40 的 `bl STATE_NextStartProcess`（原字 0x97ffff3d）。
+// wrapper 先派发 kFramePointLogicPre，再复刻原调用；消费点位于帧计数自增与 Draw 之前，
+// 状态切换会在旧态 Process/Draw 空指针门（GAMESTATE_SetState 清函数指针）保护下安全落地。
+constexpr uintptr_t F_MAINPROCESS_VMA = 0xd4984;                          // void MainProcess()（游戏逻辑帧根，GLThread）
+constexpr size_t F_MAINPROCESS_NEXT_STATE_CALL_OFF = 0x40;                // 内 bl STATE_NextStartProcess（字 0x97ffff3d）
+constexpr uintptr_t F_STATE_NEXT_START_PROCESS_VMA = 0xd46b8;             // void STATE_NextStartProcess()
 constexpr uintptr_t F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA = 0x10013c;  // void (void) 点空槽进选角（GAME_Initialize + MAP_Load(6) + MAINMENU_CreateSelectCharList；SaveSlot_GoToNewGame 调用）
 constexpr uintptr_t F_SELECT_CHARACTER_START_GAME_VMA = 0x14de98;      // void (void) 选角确认开始（[0x2f5000+0xa00]=选中职业 + STATE_Set(5) + UI_SetPopupProcessInfo(4,0) + Flurry 统计；SelectCharacter_ButtonStartExe 调用）
 constexpr uintptr_t F_TUTORIAL_START_VMA = 0x16ceb0;          // void (void) 新档教学初始化（重置 10 处教学标志 + 教学事件数组 [0x2f4000+0xce0]×5=0x63）
@@ -841,6 +848,7 @@ using QuestSystemFindFn = int (*)(int32_t);
 using QuestSystemRemoveSlotFn = int (*)(int32_t);
 using SaveFn = int (*)();
 using GamestateSetStateFn = void (*)(int32_t);
+using StateNextStartProcessFn = void (*)();  // MainProcess 内逻辑帧状态推进（无参）
 using SaveGetSaveSlotFn = void* (*)(int32_t);
 using SaveLoadSaveSlotFn = int (*)(int32_t, void*);
 using UiSetPopupProcessInfoFn = int (*)(int32_t, int32_t);
