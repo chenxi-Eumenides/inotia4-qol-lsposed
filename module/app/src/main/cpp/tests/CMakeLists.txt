@@ -75,16 +75,6 @@ target_include_directories(infra_data_tests PRIVATE
 target_compile_features(infra_data_tests PRIVATE cxx_std_17)
 add_test(NAME infra_data_tests COMMAND infra_data_tests)
 
-# 自动出售阶段 B 节流纯函数 host 测试（M-2：autosell_should_scan，末尾追加）
-add_executable(autosell_scan_tests
-    test_autosell_scan.cpp
-)
-target_include_directories(autosell_scan_tests PRIVATE
-    ${CPP_DIR}
-)
-target_compile_features(autosell_scan_tests PRIVATE cxx_std_17)
-add_test(NAME autosell_scan_tests COMMAND autosell_scan_tests)
-
 # 自动出售 sidecar 配置纯序列化 host 测试（末尾追加）
 add_executable(autosell_store_tests
     test_autosell_store.cpp

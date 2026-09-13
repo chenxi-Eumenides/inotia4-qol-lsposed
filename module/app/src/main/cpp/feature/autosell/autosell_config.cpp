@@ -13,7 +13,6 @@ namespace {
 std::mutex g_config_mtx;
 autosell::Config g_config;  // 仅持 g_config_mtx 访问
 
-std::atomic<bool> g_immediate_run{false};
 std::atomic<int64_t> g_sold_total{0};
 std::atomic<int64_t> g_failed_total{0};
 std::atomic<int64_t> g_last_scan_frame{-1};
@@ -27,29 +26,13 @@ const char* json_bool(bool value) { return value ? "true" : "false"; }
 }  // namespace
 
 void autosell_set_runtime_config(const autosell::Config& config) {
-    bool was_enabled = false;
-    {
-        std::lock_guard<std::mutex> lock(g_config_mtx);
-        was_enabled = g_config.enabled;
-        g_config = config;
-    }
-    // 总开关 false -> true：启用后立即清扫一次。
-    if (config.enabled && !was_enabled) {
-        autosell_request_immediate_run();
-    }
+    std::lock_guard<std::mutex> lock(g_config_mtx);
+    g_config = config;
 }
 
 autosell::Config autosell_get_runtime_config() {
     std::lock_guard<std::mutex> lock(g_config_mtx);
     return g_config;
-}
-
-void autosell_request_immediate_run() {
-    g_immediate_run.store(true, std::memory_order_release);
-}
-
-bool autosell_consume_immediate_run() {
-    return g_immediate_run.exchange(false, std::memory_order_acq_rel);
 }
 
 void autosell_note_scan(int64_t frame, int sold, int failed) {

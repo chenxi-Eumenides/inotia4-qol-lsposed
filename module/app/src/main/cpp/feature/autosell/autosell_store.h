@@ -106,7 +106,9 @@ inline bool autosell_config_from_json(const char* json, autosell::Config* out) {
 // 注册 Kotlin AutoSellConfigStore（jclass + load/save 静态方法 id）。
 void autosell_store_register_bridge(JNIEnv* env, jclass bridge_class);
 
-// slot 变化时经桥读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
+// 【预留·当前未接线】进档时经桥读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
+// 进档自动注册任务的时机待定（见 autosell_scan.h 说明）；接线时应改走 autosell_apply_config，
+// 以便按 enabled 注册 / 删除扫描任务。
 void autosell_store_ensure_loaded(int slot);
 
 // 序列化并写回 `autosell` section；slot 非法或桥失败返回 false。

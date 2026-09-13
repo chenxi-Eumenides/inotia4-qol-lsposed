@@ -30,7 +30,7 @@
 
 ### 1.3 执行目标
 
-- 总开关开启后立即清扫一次，其后每 60 游戏帧扫描并处置一次。
+- 开启总开关时注册 60 帧周期扫描任务、关闭时删除任务；扫描每 60 帧一次（节流由 `frame_task` 的 `interval=60` 负责，开启后最多等待 60 帧）。
 - 扫描范围：原版袋 `0..4` + 模块扩展 5 袋；排除原版任务袋 `5`。
 - 处置优先复用原版单件销毁/出售链的结算语义，由模块循环（即用户所述「批量销毁」）。
 
@@ -186,8 +186,10 @@ section `autosell` v1 payload：
 
 ### 4.5 扫描与执行
 
-- **线程约束（强制）**：扫描与处置必须在游戏主线程执行；常驻帧宿主复用 `UIEquip_Draw` draw-end patch 或等价主循环回调；不得在 detached 线程直接调游戏函数。
-- 节流：`data_frame_count()` 帧计数；启用时立即执行一次，之后每 60 帧一次。
+- **线程约束（强制）**：扫描与处置必须在游戏主线程执行；回调由统一帧任务管理器（`core/native/frame_task` + `frame_host`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`）派发；不得在 detached 线程直接调游戏函数。
+- 任务生命周期：**开启时注册、关闭时删除**——`nativeSetAutoSellConfig` → `autosell_apply_config` 按 `enabled` 调 `frame_task_add(..., interval=60)` / `frame_task_remove`；不常驻空转。
+- 回调**无跨帧状态**：每次调用现取 `autosell_get_runtime_config()`，按规则扫描；不缓存、不在 tick 内读盘。
+- 待定：进入存档时按 sidecar `enabled` 自动注册任务的时机尚未接线（需后续寻找合适时机，或由帧任务管理器提供更多触发点）。
 - 单次扫描（原版袋 `0..4` + 扩展 5 袋逐槽）：
   1. 取物品指针；空槽跳过。
   2. 分类：装备 / 宝石 / 特殊类型。
@@ -261,7 +263,7 @@ section `autosell` v1 payload：
 - VM-AS8：宝石属性范围规则只出售 `百分位 ≤ 阈值` 的宝石（依赖 R7 解锁）。
 - VM-AS9：特殊类型多选命中即出售，未勾选类型不因该规则出售。
 - VM-AS10：硬保护生效（已穿戴/任务/不可售/不可销毁）。
-- VM-AS11：开启后立即清扫一次、之后每 60 帧一次（日志帧号可核）。
+- VM-AS11：开启时注册任务、扫描每 60 帧一次（日志帧号可核）；关闭时任务被删除（无回调）。
 - VM-AS12：扩展袋物品处置物理槽与扩展账本一致。
 - VM-AS13：空背包/满包/拖动中/存档界面/战斗中等边界无崩溃、无物品丢失。
 - VM-AS14：同类内任一启用规则命中即出售（OR 语义）；跨类命中任一即出售。
@@ -273,7 +275,7 @@ section `autosell` v1 payload：
 3. 宝石属性范围 feature 的稳定 API 与重入隔离（R7）。
 4. 宝石 5 档命名与用户口述 3 档的差异确认。
 5. 普通袋内任务物品与「不可销毁」判定函数。
-6. 面板关闭后常驻扫描宿主回调；与扩展背包锁/投影/拖动事务隔离。
+6. 任务仅在开关开启期间存在；关闭后无扫描回调。与扩展背包锁/投影/拖动事务隔离。
 7. 扩展袋被处置物品的 generation/handle 失效路径。
 8. 自动出售 section 与扩展背包 journal/协调器的隔离（单 participant 限制 → 直写）。
 
@@ -317,8 +319,8 @@ section `autosell` v1 payload：
 ### 11.2 定时宿主（R4）
 
 - `FrameTaskManager` **不可用**：回调运行在后台线程（`game_motion.cpp:51,75-98`），且 `frame_task_register` 会 `g_tasks.clear()`（`:45`）顶掉移动/寻路任务。（现状：旧 FrameTaskManager 已删除，自动出售经统一帧任务管理器注册到 kFramePointRenderPre，与移动槽互不影响。）
-- 截至验证时**不存在世界态通用每帧宿主**；现有 draw-end wrapper 只在对应面板绘制时触发（背包/合成/商店）。
-- **结论**：需新增主线程 draw-end tick（复用 `allocate_draw_thunk` + BL patch 范式，`extension_bag_lifecycle.inc:610-644`），用 `data_frame_count()`（`G_FRAME_COUNT_VMA`）做 60 帧节流；若需面板外常驻，需在世界绘制路径另挂一个 tick。
+- 截至验证时**不存在世界态通用每帧宿主**；后由并行功能补齐统一帧任务管理器（`core/native/frame_task.{h,cpp}` + `frame_host.{h,cpp}`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`，真机已验证每帧派发）。
+- **结论（已实现）**：自动出售由开关驱动注册（`autosell_apply_config`，`interval=60`，`frame_task` 负责节流）；无手写节流、无单次立即执行（`nativeAutoSellRunNow` 保留签名但不再单独触发扫描）。进档时按 sidecar `enabled` 自动注册任务的时机待定。
 - 未决：背包面板打开时 `g_gamestate==0` 未真机证实（不影响「不用 FrameTaskManager」的结论）。
 
 ### 11.3 强化「次数」口径（R9）

@@ -1,7 +1,6 @@
 #include "gamebridge_internal.h"
 #include "core/native/frame_host.h"
 #include "feature/autosell/autosell_config.h"
-#include "feature/autosell/autosell_scan.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
 #include "feature/autosell/autosell_store.h"
@@ -42,9 +41,9 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         inventory_native_hook_install_if_ready();
         attr_range_ui_install_if_ready();
         save_backup_slot_delete_hook_install_if_ready();
-        // 统一帧派发宿主（渲染开始前锚点）：安装成功后接入自动出售逐帧扫描。
+        // 统一帧派发宿主（渲染开始前锚点）。自动出售任务改为开关驱动：由
+        // nativeSetAutoSellConfig -> autosell_apply_config 按 enabled 注册 / 删除。
         if (frame_host_install_if_ready()) {
-            autosell_init();
             autosell_set_host_installed(true);
         }
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）

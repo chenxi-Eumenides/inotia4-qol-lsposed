@@ -13,11 +13,9 @@
 #include "core/native/inventory_trade.h"
 #include "data/native/game_symbols.h"
 #include "feature/autosell/autosell_config.h"
-#include "feature/autosell/autosell_store.h"
 #include "feature/autosell/autosell_view.h"
 #include "game_access.h"
 #include "game_state.h"
-#include "game_system.h"
 
 #include <android/log.h>
 
@@ -33,7 +31,8 @@ constexpr int kLogicalBagScanCount = 5;  // = kBagCount
 constexpr int kSlotCount = 16;
 
 std::mutex g_scan_mtx;
-int64_t g_last_scan_frame = -1;  // 仅主线程访问；<0 表示从未扫描
+std::mutex g_task_mtx;
+FrameTaskId g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
 
 struct ScanStats {
     int sold = 0;
@@ -128,35 +127,32 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
     }
 }
 
-}  // namespace
-
-void autosell_init() {
-    frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr, 0, 0);
-}
-
+// frame_task 回调：每次调用现取运行时配置，无跨帧状态；60 帧节流由 frame_task 的
+// interval 负责。返回 false = 任务完成（自动注销）；本任务无限期运行，恒返回 true。
 bool autosell_tick(int64_t frame, void* /*ctx*/) {
-    // 世界态门控后、节流前：按当前存档槽加载 sidecar 配置（slot 未变时零 IO）。
-    if (!scan_gates_ok()) return true;
-    autosell_store_ensure_loaded(current_save_slot());
-
     const autosell::Config cfg = autosell_get_runtime_config();
-    if (!cfg.enabled) return true;
-
-    const bool immediate = autosell_consume_immediate_run();
-    if (!autosell_should_scan(frame, g_last_scan_frame, immediate)) {
-        return true;
-    }
-    g_last_scan_frame = frame;
+    if (!cfg.enabled) return true;   // 防御：关闭态不应有任务存在
+    if (!scan_gates_ok()) return true;
 
     std::lock_guard<std::mutex> lock(g_scan_mtx);
     scan_body(cfg, frame);
     return true;
 }
 
-void autosell_scan_once() {
-    const autosell::Config cfg = autosell_get_runtime_config();
-    if (!cfg.enabled) return;
-    if (!scan_gates_ok()) return;
-    std::lock_guard<std::mutex> lock(g_scan_mtx);
-    scan_body(cfg, data_frame_count());
+}  // namespace
+
+void autosell_apply_config(const autosell::Config& config) {
+    autosell_set_runtime_config(config);
+    std::lock_guard<std::mutex> lock(g_task_mtx);
+    if (config.enabled) {
+        if (g_task == 0) {
+            // 开启：注册 60 帧周期任务；首个派发周期即触发。
+            g_task = frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr,
+                                    kAutoSellScanIntervalFrames, 0);
+        }
+    } else if (g_task != 0) {
+        // 关闭：删除任务，恢复无扫描回调状态。
+        frame_task_remove(g_task);
+        g_task = 0;
+    }
 }

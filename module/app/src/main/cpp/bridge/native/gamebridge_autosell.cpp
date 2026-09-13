@@ -5,6 +5,7 @@
 #include "gamebridge_internal.h"
 
 #include "feature/autosell/autosell_config.h"
+#include "feature/autosell/autosell_scan.h"
 #include "feature/autosell/autosell_store.h"
 
 namespace {
@@ -39,7 +40,8 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     cfg.gem_tier_threshold = clamp_range(static_cast<int>(gemTierThreshold), 0, 4);
     cfg.special_mask = static_cast<uint32_t>(specialMask);
     cfg.special_enabled = cfg.special_mask != 0u;
-    autosell_set_runtime_config(cfg);
+    // 写入运行时配置并按 enabled 注册 / 删除 60 帧周期扫描任务。
+    autosell_apply_config(cfg);
     // 按存档持久化：仅当前存档槽合法时直写 sidecar `autosell` section（不进 journal）。
     const int slot = current_save_slot();
     if (valid_persist_slot(slot)) {
@@ -50,7 +52,8 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeAutoSellRunNow(JNIEnv*, jclass) {
-    autosell_request_immediate_run();
+    // 保留 JNI 入口以兼容既有 external 签名；扫描已由 frame_task 周期任务（每 60 帧）负责，
+    // 不再提供单次立即扫描（2026-09-13 裁决：60 帧等待可接受）。
     return JNI_TRUE;
 }
 
