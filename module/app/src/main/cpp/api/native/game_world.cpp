@@ -8,7 +8,7 @@
 #include "game_nav.h"
 #include "game_state.h"
 #include "game_ops_common.h"
-#include "game_motion.h"
+#include "core/native/frame_task.h"
 #include "game_tiles.h"
 
 #include <android/log.h>

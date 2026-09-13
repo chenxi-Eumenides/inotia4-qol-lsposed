@@ -18,12 +18,12 @@ std::string data_op_move(int32_t x, int32_t y) {
     if (!game_in_world()) return op_err("not in game");
     // v0.4.56：药水教学暂停自动取消（视为完成）后放行；早期 v0.4.41 在此拒绝
     if (const char* tb = tutorial_block_error()) {
-        stop_all_tasks();
+        motion_task_stop();
         return op_err(tb);
     }
     // v0.5.43：UI 占据（对话框/面板/教学）时世界操作阻塞——游戏输入被 UI 接管
     if (const char* ui = ui_blocked()) {
-        stop_all_tasks();
+        motion_task_stop();
         std::string err = "ui occupied: ";
         err += ui;
         return op_err(err.c_str());
@@ -62,19 +62,19 @@ std::string data_op_move(int32_t x, int32_t y) {
     nav_ctx.orig_progress = 0;
     for (int i = 0; i < np.dir_count; ++i) nav_ctx.orig_dirs[i] = static_cast<int8_t>(np.dirs[i]);
     for (int i = 0; i < np.dir_count; ++i) nav_ctx.dirs[i] = static_cast<int8_t>(np.dirs[i]);
-    if (frame_task_register(nav_task_tick, &nav_ctx) == 0) return op_err("move start failed");
+    if (!motion_task_start(nav_task_tick, &nav_ctx)) return op_err("move start failed");
     return op_ok();
 }
 std::string data_op_walk(int32_t direction) {
     if (!game_in_world()) return op_err("not in game");
     // v0.4.56：药水教学暂停自动取消（视为完成）后放行；早期 v0.4.41 在此拒绝
     if (const char* tb = tutorial_block_error()) {
-        stop_all_tasks();
+        motion_task_stop();
         return op_err(tb);
     }
     // v0.5.43：UI 占据阻塞
     if (const char* ui = ui_blocked()) {
-        stop_all_tasks();
+        motion_task_stop();
         std::string err = "ui occupied: ";
         err += ui;
         return op_err(err.c_str());
@@ -90,7 +90,7 @@ std::string data_op_walk(int32_t direction) {
     walk_ctx.dir = direction;
     walk_ctx.remaining = 60;
     walk_ctx.first_tick = true;   // v0.4.57：首帧缓冲
-    if (frame_task_register(walk_task_tick, &walk_ctx) == 0) return op_err("walk start failed");
+    if (!motion_task_start(walk_task_tick, &walk_ctx)) return op_err("walk start failed");
     return op_ok();
 }
 std::string data_op_walk_stop() {
@@ -102,7 +102,7 @@ std::string data_op_walk_stop() {
     }
     void* ch = member_or_null(0);
     if (ch == nullptr) return op_err("role not found");
-    stop_all_tasks();
+    motion_task_stop();
     if (fn_char_remove_path == nullptr) return op_err("symbol not resolved");
     fn_char_remove_path(ch);
     return op_ok();

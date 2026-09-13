@@ -91,7 +91,7 @@
 - 面板范式：`PtrHook` 覆盖按钮 ExecuteProc（`game_ui_settings_injection.inc:12-29`）→ `fn_ui_set_popup_process_info(1, state_id)`（`:6-10`）→ 改写 PopupState 死条目 5 回调（`:75-94`）→ PROCESS 渲染 + EVENT 触摸（`game_ui_settings_panel.inc:72-116,152-192`）→ 配置反调 `game_ui_settings_config.inc:1-62`。
 - 空闲 PopupState 死条目：设置占 `F_PANEL_UNK1_ENTER`（GEMSHOP）、存档占 `F_PANEL_UNK2_ENTER`（GOODS）（`save-backup.md:118`）。
 - 可复用控件/绘制：`game_ui_kit.h:16-63` + `game_ui_components.h`。
-- `FrameTaskManager` 单任务且 world-gated（`game_motion.cpp:41-45`），**不可用**；逐帧宿主参考扩展背包 `UIEquip_Draw` 的 draw-end BL patch（`extension_bag_lifecycle.inc:612-644`）。
+- 帧派发：统一帧任务管理器（core/native/frame_task.* + frame_host.*，architecture.md §2.1）在主线程渲染开始前（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase）派发；旧 FrameTaskManager（后台线程、单任务）已删除。
 - 扩展袋：原版袋 `0..5`（5=任务袋，`virtual_bag_state.h:20-26`）；扩展逻辑袋 5 个（`:16`）；页签动态定位 `extension_bag_runtime.inc:110-187,138-140,169-174`。
 
 ### 3.6 外部依赖：属性范围 feature（并行开发中）
@@ -283,7 +283,7 @@ section `autosell` v1 payload：
 - 品质读取用 `ITEMSYSTEM_GetRarity`；强化/孔位无 getter，直接读 `I_ENCHANT`/`I_SOCKET` 位域。
 - 宝石档位判据用 category（28..32）而非实例随机等级：category 是稳定静态语义，实例等级是掷值。
 - 属性范围规则不复制属性范围 feature 的内部实现：作为外部依赖等待稳定 API，避免双份维护与重入竞争。
-- 扫描放游戏主线程逐帧回调；不用 `FrameTaskManager`（单任务且 world-gated）。
+- 扫描放游戏主线程逐帧回调（统一帧任务管理器 kFramePointRenderPre 点位）。
 - 处置首选复用原版单件链结算语义，保留销毁兜底；「批量」= 模块循环单件链。
 - 入口按钮模仿扩展背包页签动态定位，锚定任务袋标签右侧，不写死像素。
 - 配置按存档持久化到模块存档 sidecar，不用 `config.json`/`ModuleConfig`，不加 `opEnabled` 门禁（用户 2026-09-13）；入口按钮默认挂载，总开关在面板内启用。
@@ -316,7 +316,7 @@ section `autosell` v1 payload：
 
 ### 11.2 定时宿主（R4）
 
-- `FrameTaskManager` **不可用**：回调运行在后台线程（`game_motion.cpp:51,75-98`），且 `frame_task_register` 会 `g_tasks.clear()`（`:45`）顶掉移动/寻路任务。
+- `FrameTaskManager` **不可用**：回调运行在后台线程（`game_motion.cpp:51,75-98`），且 `frame_task_register` 会 `g_tasks.clear()`（`:45`）顶掉移动/寻路任务。（现状：旧 FrameTaskManager 已删除，自动出售经统一帧任务管理器注册到 kFramePointRenderPre，与移动槽互不影响。）
 - 截至验证时**不存在世界态通用每帧宿主**；现有 draw-end wrapper 只在对应面板绘制时触发（背包/合成/商店）。
 - **结论**：需新增主线程 draw-end tick（复用 `allocate_draw_thunk` + BL patch 范式，`extension_bag_lifecycle.inc:610-644`），用 `data_frame_count()`（`G_FRAME_COUNT_VMA`）做 60 帧节流；若需面板外常驻，需在世界绘制路径另挂一个 tick。
 - 未决：背包面板打开时 `g_gamestate==0` 未真机证实（不影响「不用 FrameTaskManager」的结论）。

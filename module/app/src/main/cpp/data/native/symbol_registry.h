@@ -386,5 +386,8 @@ SYM(F_CONTROL_OBJECT_GET_DATA_VMA, ControlObject_GetData)
 SYM(F_CONTROL_OBJECT_SET_ACTIVE_VMA, ControlObject_SetActive)
 SYM(F_CONTROL_BUTTON_DRAW_VMA, ControlButton_Draw)
 
+// ---- 统一帧派发宿主锚点：GAMESTATE_DrawPlay 内 MAP_DrawBase 调用点 ----
+SYM(F_MAP_DRAWBASE_VMA, MAP_DrawBase)
+
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主（auto-sell）----
 SYM(F_GAMESTATE_DRAWPLAY_VMA, GAMESTATE_DrawPlay)

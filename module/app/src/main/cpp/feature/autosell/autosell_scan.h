@@ -4,8 +4,8 @@
 
 // 自动出售扫描与主线程逐帧 tick（阶段 B）。
 //
-// 线程纪律：仅在游戏主线程执行（由 autosell_host 的 draw-end wrapper 经
-// frame_tick_dispatch 派发）；内部不取 g_virtual_bag_mtx、不调用 op_ok()、不主动
+// 线程纪律：仅在游戏主线程执行（由 frame_host 的渲染开始前 wrapper 经
+// frame_task_dispatch 派发）；内部不取 g_virtual_bag_mtx、不调用 op_ok()、不主动
 // save。扩展袋逐槽读取自身取放锁；处置走 inventory_trade::sell（H-04 已 Hook）。
 
 // 60 帧扫描间隔（M-2 纯函数）。
@@ -24,11 +24,12 @@ constexpr bool autosell_should_scan(int64_t frame, int64_t last, bool immediate)
     return (frame - last) >= kAutoSellScanIntervalFrames;
 }
 
-// 注册逐帧回调（幂等）。由 autosell_host_install_if_ready 在 BL patch 成功后调用。
+// 注册逐帧回调（幂等）。由 nativeInit 在 frame_host 安装成功后调用。
 void autosell_init();
 
-// frame_tick 回调：门控 + 60 帧节流 + 扫描；立即执行请求跳过节流。
-void autosell_tick(void* ctx);
+// frame_task 回调：门控 + 60 帧节流 + 扫描；立即执行请求跳过节流。
+// 返回 false = 任务完成（自动注销）；本任务无限期运行，恒返回 true。
+bool autosell_tick(int64_t frame, void* ctx);
 
 // 立即执行一次扫描（含全部门控）；供 tick 与测试/诊断调用。
 void autosell_scan_once();

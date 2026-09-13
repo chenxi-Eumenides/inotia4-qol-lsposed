@@ -9,7 +9,7 @@
 #include "feature/autosell/autosell_scan.h"
 
 #include "core/native/extension_bag_port.h"
-#include "core/native/frame_tick.h"
+#include "core/native/frame_task.h"
 #include "core/native/inventory_trade.h"
 #include "data/native/game_symbols.h"
 #include "feature/autosell/autosell_config.h"
@@ -17,6 +17,7 @@
 #include "feature/autosell/autosell_view.h"
 #include "game_access.h"
 #include "game_state.h"
+#include "game_system.h"
 
 #include <android/log.h>
 
@@ -84,9 +85,8 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
                         ref.bag, ref.slot, ref.category, static_cast<int>(result.status));
 }
 
-void scan_body(const autosell::Config& cfg) {
+void scan_body(const autosell::Config& cfg, int64_t frame) {
     ScanStats stats;
-    const int64_t frame = frame_tick_current_frame();
 
     // 原版物理袋 0..4（for_each_bag_slot 含任务袋 5，回调内排除）。
     PhysicalScanCtx physical{&cfg, &stats};
@@ -131,26 +131,26 @@ void scan_body(const autosell::Config& cfg) {
 }  // namespace
 
 void autosell_init() {
-    frame_tick_register(&autosell_tick, nullptr);
+    frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr, 0, 0);
 }
 
-void autosell_tick(void* /*ctx*/) {
+bool autosell_tick(int64_t frame, void* /*ctx*/) {
     // 世界态门控后、节流前：按当前存档槽加载 sidecar 配置（slot 未变时零 IO）。
-    if (!scan_gates_ok()) return;
+    if (!scan_gates_ok()) return true;
     autosell_store_ensure_loaded(current_save_slot());
 
     const autosell::Config cfg = autosell_get_runtime_config();
-    if (!cfg.enabled) return;
+    if (!cfg.enabled) return true;
 
-    const int64_t frame = frame_tick_current_frame();
     const bool immediate = autosell_consume_immediate_run();
     if (!autosell_should_scan(frame, g_last_scan_frame, immediate)) {
-        return;
+        return true;
     }
     g_last_scan_frame = frame;
 
     std::lock_guard<std::mutex> lock(g_scan_mtx);
-    scan_body(cfg);
+    scan_body(cfg, frame);
+    return true;
 }
 
 void autosell_scan_once() {
@@ -158,5 +158,5 @@ void autosell_scan_once() {
     if (!cfg.enabled) return;
     if (!scan_gates_ok()) return;
     std::lock_guard<std::mutex> lock(g_scan_mtx);
-    scan_body(cfg);
+    scan_body(cfg, data_frame_count());
 }

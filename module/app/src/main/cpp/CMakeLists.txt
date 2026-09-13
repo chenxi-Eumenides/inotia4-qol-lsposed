@@ -28,7 +28,6 @@ add_library(gamebridge SHARED
     feature/save_backup/save_backup_bundle.cpp
     feature/save_backup/save_backup.cpp
     game_system.cpp
-    core/native/game_motion.cpp
     data/native/game_tiles.cpp
     api/native/game_character.cpp
     api/native/game_party.cpp
@@ -64,7 +63,8 @@ target_link_libraries(gamebridge ${log-lib} dl)
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     core/native/call_patch.cpp
-    core/native/frame_tick.cpp
+    core/native/frame_task.cpp
+    core/native/frame_host.cpp
     core/native/inventory_trade.cpp
     data/native/item_class.cpp
 )
@@ -75,7 +75,6 @@ target_sources(gamebridge PRIVATE
     feature/autosell/autosell_config.cpp
     feature/autosell/autosell_view.cpp
     feature/autosell/autosell_scan.cpp
-    feature/autosell/autosell_host.cpp
     bridge/native/gamebridge_autosell.cpp
 )
 

@@ -985,6 +985,10 @@ using UIMixResetStuffItemControlFn = void (*)();            // UIMix_ResetStuffI
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主调用点（auto-sell）----
 // 符号存在性已用 NDK r26d llvm-objdump 核对：GAMESTATE_DrawPlay@0x9d6cc。
 constexpr uintptr_t F_GAMESTATE_DRAWPLAY_VMA = 0x9d6cc;  // void GAMESTATE_DrawPlay()
-// GAMESTATE_DrawPlay 内 +0x74 的 `bl GRPX_Start`（原指令字 0x97ffc6ef），作为
-// 主线程逐帧 draw-end 宿主调用点（call_patch BL patch 目标）。
-constexpr size_t F_GAMESTATE_DRAWPLAY_GRPX_START_CALL_OFF = 0x74;
+
+// ---- 统一帧派发宿主锚点：GAMESTATE_DrawPlay 内 +0x20 的 `bl MAP_DrawBase`（首个渲染调用之前）----
+// 原指令字 0x9401d18a；DrawPlay 内 byte==1 分支经 GRP_AddColorTone 后 b 0x9d6ec 汇聚到此，
+// 故每次 DrawPlay 必执行。
+constexpr uintptr_t F_MAP_DRAWBASE_VMA = 0x111d14;              // void MAP_DrawBase()
+constexpr size_t F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF = 0x20; // GAMESTATE_DrawPlay 内 bl MAP_DrawBase
+using MapDrawBaseFn = void (*)();                               // void MAP_DrawBase()

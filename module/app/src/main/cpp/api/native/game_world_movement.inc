@@ -1,6 +1,20 @@
 static uint32_t gamestate_state() {
     return g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
 }
+
+// 移动任务互斥槽：nav/walk 共用，注册即替换并取消上一个；仅此槽可被 stop 清空。
+// 不塞进通用注册表，避免 stop 误注销自动出售等其它帧任务。
+static FrameTaskId g_motion_task = 0;
+static bool motion_task_start(FrameTaskFn fn, void* ctx) {
+    if (!game_in_world()) return false;
+    if (g_gamestate != nullptr && *reinterpret_cast<uint32_t*>(g_gamestate) != 0) return false;
+    if (g_motion_task != 0) frame_task_remove(g_motion_task);
+    g_motion_task = frame_task_add(kFramePointRenderPre, fn, ctx, 0, 0);
+    return g_motion_task != 0;
+}
+static void motion_task_stop() {
+    if (g_motion_task != 0) { frame_task_remove(g_motion_task); g_motion_task = 0; }
+}
 // 复刻 CHAR_PickItemAll 数据路径：遍历掉落物数组 + 范围判断 + NOTIFIER_Add 排入主线程回调，
 // 跳过其末尾的 SOUNDSYSTEM_Play 拾取音效（后台线程音频引擎句柄为空 → fault 0x0 崩溃）。
 // 主线程 NOTIFIER_Process → CHAR_ActivePickupEvent(0xdd15c) 完成 INVEN_SaveItem 入库 + 移除掉落。
@@ -79,7 +93,7 @@ static int on_orig_path(const NavCtx* n, int tx, int ty) {
     return -1;
 }
 
-bool walk_task_tick(void* ctx) {
+bool walk_task_tick(int64_t /*frame*/, void* ctx) {
     WalkCtx* w = static_cast<WalkCtx*>(ctx);
     if (fn_char_move == nullptr || w == nullptr) return false;
     // v0.4.37 起在剧情/切图态禁止后台线程继续 CHAR_Move（与状态机竞争会破坏控制态）。
@@ -109,7 +123,7 @@ bool walk_task_tick(void* ctx) {
     nav_pick_items(w->ch, 0x18);
     return --w->remaining > 0 && !map_link_check(w->ch);  // 走完 60 帧或切图终止
 }
-bool nav_task_tick(void* ctx) {
+bool nav_task_tick(int64_t /*frame*/, void* ctx) {
     NavCtx* n = static_cast<NavCtx*>(ctx);
     if (n == nullptr || n->ch == nullptr || fn_char_move == nullptr) return false;
     // v0.4.37 起在剧情/切图态禁止后台线程继续 CHAR_Move（与状态机竞争会破坏控制态）。

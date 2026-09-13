@@ -233,6 +233,7 @@ UiPopupMsgCreateFromTextDataFn fn_popup_create_from_textdata = nullptr;
 UiPopupMsgFreeFn fn_popup_free = nullptr;
 PopupStatePushFn fn_popupstate_push = nullptr;
 // ---- UI 绘制原语函数指针（ui-settings v0.6.9）----
+MapDrawBaseFn fn_map_drawbase = nullptr;
 GrpxStartFn fn_grpx_start = nullptr;
 GrpxEndFn fn_grpx_end = nullptr;
 GrpxFillRectFn fn_grpx_fill_rect = nullptr;

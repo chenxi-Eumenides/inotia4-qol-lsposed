@@ -264,6 +264,7 @@ extern UiPopupMsgCreateFromTextDataFn fn_popup_create_from_textdata;
 extern UiPopupMsgFreeFn fn_popup_free;
 extern PopupStatePushFn fn_popupstate_push;
 // ---- UI 绘制原语函数指针（ui-settings v0.6.9）----
+extern MapDrawBaseFn fn_map_drawbase;
 extern GrpxStartFn fn_grpx_start;
 extern GrpxEndFn fn_grpx_end;
 extern GrpxFillRectFn fn_grpx_fill_rect;

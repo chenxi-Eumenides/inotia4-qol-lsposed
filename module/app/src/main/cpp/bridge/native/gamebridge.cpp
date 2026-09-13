@@ -1,4 +1,7 @@
 #include "gamebridge_internal.h"
+#include "core/native/frame_host.h"
+#include "feature/autosell/autosell_config.h"
+#include "feature/autosell/autosell_scan.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
 #include "feature/autosell/autosell_store.h"
@@ -39,9 +42,11 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         inventory_native_hook_install_if_ready();
         attr_range_ui_install_if_ready();
         save_backup_slot_delete_hook_install_if_ready();
-        // 自动出售宿主（GAMESTATE_DrawPlay 每帧 BL patch）已按用户 2026-09-13 要求停用：
-        // 当前不安装，保持游戏原生状态；待统一 frame 派发宿主完成后接入
-        // autosell_host_install_if_ready()。
+        // 统一帧派发宿主（渲染开始前锚点）：安装成功后接入自动出售逐帧扫描。
+        if (frame_host_install_if_ready()) {
+            autosell_init();
+            autosell_set_host_installed(true);
+        }
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
         settings_ui_start_auto_inject();
     }

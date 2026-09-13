@@ -1,9 +1,10 @@
 // host 单测（自动出售阶段 A 纯逻辑）：
-//   1) frame_tick 按帧去重/节流辅助 frame_tick_detail::should_dispatch
+//   1) frame_task 按帧去重/节流/到期辅助 frame_task_detail::should_dispatch /
+//      normalize_interval / is_due
 //   2) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
 // 纯头文件逻辑，不依赖 Android/游戏内存。
 
-#include "core/native/frame_tick.h"
+#include "core/native/frame_task.h"
 #include "core/native/stack_codec.h"
 #include "data/native/item_class.h"
 
@@ -28,25 +29,46 @@ uint16_t type_flags_for(int category) {
 
 }  // namespace
 
-static void test_frame_tick_dedup() {
+static void test_frame_task_dedup() {
     // 帧号无效（<=0）不派发。
-    CHECK(!frame_tick_detail::should_dispatch(0, -1));
-    CHECK(!frame_tick_detail::should_dispatch(-5, -1));
-    CHECK(!frame_tick_detail::should_dispatch(0, 0));
+    CHECK(!frame_task_detail::should_dispatch(0, -1));
+    CHECK(!frame_task_detail::should_dispatch(-5, -1));
+    CHECK(!frame_task_detail::should_dispatch(0, 0));
 
     // 首帧派发。
-    CHECK(frame_tick_detail::should_dispatch(1, -1));
+    CHECK(frame_task_detail::should_dispatch(1, -1));
 
     // 同一帧号重复调用只派发一次。
-    CHECK(!frame_tick_detail::should_dispatch(1, 1));
-    CHECK(!frame_tick_detail::should_dispatch(42, 42));
+    CHECK(!frame_task_detail::should_dispatch(1, 1));
+    CHECK(!frame_task_detail::should_dispatch(42, 42));
 
     // 下一帧恢复派发。
-    CHECK(frame_tick_detail::should_dispatch(2, 1));
-    CHECK(frame_tick_detail::should_dispatch(43, 42));
+    CHECK(frame_task_detail::should_dispatch(2, 1));
+    CHECK(frame_task_detail::should_dispatch(43, 42));
 
     // 帧号回退（异常/重启）视为不同帧，不静默丢弃。
-    CHECK(frame_tick_detail::should_dispatch(2, 3));
+    CHECK(frame_task_detail::should_dispatch(2, 3));
+}
+
+static void test_frame_task_scheduling() {
+    // interval 归一：0/负值 → 1（每帧）。
+    CHECK(frame_task_detail::normalize_interval(0) == 1);
+    CHECK(frame_task_detail::normalize_interval(-3) == 1);
+    CHECK(frame_task_detail::normalize_interval(1) == 1);
+    CHECK(frame_task_detail::normalize_interval(60) == 60);
+
+    // is_due：未 armed（首个派发周期）必触发。
+    CHECK(frame_task_detail::is_due(1, 0, false));
+    CHECK(frame_task_detail::is_due(100, 500, false));
+    CHECK(frame_task_detail::is_due(0, 0, false));
+
+    // is_due：frame >= next_frame 触发。
+    CHECK(frame_task_detail::is_due(10, 10, true));
+    CHECK(frame_task_detail::is_due(11, 10, true));
+
+    // is_due：frame < next_frame 不触发。
+    CHECK(!frame_task_detail::is_due(9, 10, true));
+    CHECK(!frame_task_detail::is_due(0, 10, true));
 }
 
 static void test_item_is_equip_encoding() {
@@ -122,7 +144,8 @@ static void test_item_is_backpack_encoding() {
 }
 
 int main() {
-    test_frame_tick_dedup();
+    test_frame_task_dedup();
+    test_frame_task_scheduling();
     test_item_is_equip_encoding();
     test_item_is_backpack_encoding();
     std::printf("infra_data_tests: %d passed, %d failed\n", g_pass, g_fail);

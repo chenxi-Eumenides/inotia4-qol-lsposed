@@ -78,7 +78,7 @@ native 侧按同一产品边界理解：`api/native/` 承载原版信息和原�
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | data | `game_symbols.h` / `symbol_registry.h` / `symbol_resolver.*` / `game_access.*` / `game_state.*` / `game_tiles.*` | 符号解析（VMA/ELF .dynsym）、偏移常量、`resolve_global`、跨域实体查询原语（member_or_null / lead_member / find_inventory_item / inventory_count / inventory_item_at / find_char_by_merc_slot）、**跨域遍历原语（for_each_bag_slot / pool_obj_valid）**、瓦片静态缓存、状态判定（game_in_world / ui_blocked / tutorial_*） | 构造业务 JSON；依赖 parse 层任何头 |
-| core | `core/native/game_json.*` / `core/native/game_nav.*` / `core/native/game_cache.*` / `core/native/game_motion.*` / `core/native/game_ops_common.*` | json_escape、BFS 寻路、帧缓存（12 槽表驱动）、FrameTaskManager、op_ok/op_err 响应信封 | 注入游戏语义名称 |
+| core | `core/native/game_json.*` / `core/native/game_nav.*` / `core/native/game_cache.*` / `core/native/frame_task.* / core/native/frame_host.*` / `core/native/game_ops_common.*` | json_escape、BFS 寻路、帧缓存（12 槽表驱动）、统一帧任务管理器（§2.1）、op_ok/op_err 响应信封 | 注入游戏语义名称 |
 | parse 域 | `game_character/party/inventory/world/quest/ui/dialog/shop/save/system` | build_*/data_* 读构造、data_op_* 写操作 | 域间水平互调（仅 system 聚合方向向下 + 分发器特例，见 §1.2） |
 | patch | `feature/patch/game_patch.*` / `game_ptr_hook.h` + Kotlin `patch/` | 注入/修改补丁域：IAP 屏蔽、沉浸模式、堆叠上限、craft 注入、recover、migrate_stack（见 §2.5） | — |
 | service | Kotlin `service/` | inject* 名称注入、快照 attach、OP 编排（LogFile.op + **OP 门禁**）、配置下发 native | 解析 HTTP 参数；直接读内存 |
@@ -103,9 +103,9 @@ data 层 → 仅 STL
 - parse 层：`g_cache_slots` 输出缓存（按帧号失效，表不变）
 - 游戏状态任何层不缓存
 
-### 1.4 三套帧机制独立（不合并）
+### 1.4 帧机制独立（不合并）
 
-`wait_frame_boundary`（请求驱动等帧）、`cache_prefetch_thread_fn`（后台预取）、`task_thread_fn`（FrameTask 帧调度）三套机制**保持独立**：分别服务惰性请求、预取线程、逐帧任务三个不同场景，语义与锁边界各异，合并=高风险重设计。op_ok 内 `frame_cache_force_refresh` 属「写后刷新」第四种模式，同样保留。
+`wait_frame_boundary`（请求驱动等帧）、`cache_prefetch_thread_fn`（后台预取）与统一帧任务管理器（`frame_task` + `frame_host`，§2.1）**保持独立**：分别服务惰性请求、预取线程、逐帧任务三个不同场景，语义与锁边界各异。op_ok 内 `frame_cache_force_refresh` 属「写后刷新」第四种模式，同样保留。
 
 ## 2. native 层文件职责（22 cpp）
 
@@ -121,7 +121,7 @@ data 层 → 仅 STL
 | `core/native/game_json.*` | core | 纯 JSON 工具：json_escape | 仅 STL |
 | `core/native/game_nav.*` | core | BFS 寻路（nav_bfs / nav_bfs_multi，基于瓦片矩阵） | game_state.h（lead_member） |
 | `core/native/game_cache.*` | core | **帧缓存层**：12 槽表驱动（惰性/预取双模式），对外 data_*_json 接口 | 域文件 build_* 函数指针 |
-| `core/native/game_motion.*` | core | **FrameTaskManager**（帧任务调度，§2.1） | game_state.h |
+| `core/native/frame_task.* / core/native/frame_host.*` | core | **统一帧任务管理器**（多点位 + 句柄 API，§2.1）+ 锚点安装（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase） | game_state.h / game_system.h / call_patch |
 | `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
 | `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |
 | `api/native/game_character.*` | API native 域 | 角色：member_json / build_player_json / build_skills_json + 战斗/成长写操作（cast/attack/stop_combat/set_experience/set_level/add_experience/set_status_point/add_stat/set_auto_attack/set_skill_usage/learn_action/set_hp/set_mp/set_attr/stat_reset/skill_reset） | data + 引擎 |
@@ -160,51 +160,38 @@ data 层 → 仅 STL
 - native 层不抛异常给 Java：失败返回 `-1`/空值，由 Kotlin 层容错
 - **带参 JNI**：`nativeGetPathJson(tx, ty)` 等参数经 JNI `jint` 传递（v0.2.33 起）
 
-### 2.1 FrameTaskManager（通用帧任务管理器，v0.4.26）
+### 2.1 统一帧任务管理器（frame_task + frame_host，2026-09-13）
 
-**位置**：`game_motion.cpp:23-98`（匿名 namespace；重构前在 game_data.cpp，P3 随域拆分迁入 game_motion）。**动机**：需按游戏帧率逐帧驱动的操作（移动/自动战斗/跟随）；同步循环（单次 API 调用内走完全程）导致画面"闪现"。hook 方案（ShadowHook/手写 inline hook）在 LSPosed 环境不可行（见 §2.2）。
+**位置**：`core/native/frame_task.{h,cpp}`（管理器）+ `core/native/frame_host.{h,cpp}`（锚点安装）。**动机**：逐帧操作（移动/寻路/自动出售扫描）需要「任意线程可注册、回调只在游戏主线程帧周期执行、可多任务、可查询」。旧 `FrameTaskManager`（`game_motion.{h,cpp}`，后台线程轮询 + 单任务 clear）与 `frame_tick`（单注册表、无句柄）已删除，由本管理器取代。
 
-**设计**：
+**多触发点位**：`enum : FramePointId { kFramePointRenderPre = 0, kFramePointCount };` 每点位独立按帧去重；当前只安装 `kFramePointRenderPre`（渲染开始前）。
 
-```cpp
-struct FrameTask {
-    bool (*fn)(void*);  // 任务回调：返回 true 继续，false 完成（自动移除）
-    void* ctx;          // 任务上下文（角色指针/方向/剩余帧等，任务自定义）
-    int id;
-};
-std::mutex g_task_mtx;            // register/unregister（API 线程）vs 遍历（任务线程）
-std::vector<FrameTask> g_tasks;
-std::thread g_task_thread;        // 单后台线程
-std::atomic<bool> g_task_stop{false};
-```
+**锚点（指令 patch，非 Native Hook）**：`GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`（原字 `0x9401d18a`，常量 `F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF`）。wrapper 先 `frame_task_dispatch(kFramePointRenderPre)` 再 `fn_map_drawbase()`。选点依据（真机探针）：`GAMESTATE_Draw+0x3c` 的 `bl GAMESTATE_DrawPlay` 在 world 态不执行（DrawPlay 由函数指针调用），而 DrawPlay 内两条路径都汇聚到 `+0x20`，故每帧必执行。
 
-**核心函数**：
+**API**：
 
 | 函数 | 语义 |
 |---|---|
-| `frame_task_register(fn, ctx)` | **单任务语义**：注册即 clear 旧任务再插入（与游戏"当前操作"一致）；返回任务 id（0=失败：fn 空或非游戏内） |
-| `frame_task_unregister(id)` | id<=0 清全部；否则按 id 移除 |
-| `stop_all_tasks()` | 置 stop 标志 → join 线程 → 清列表（walk_stop 端点调用） |
-| `task_thread_fn()` | 帧计数驱动循环（帧号变化即执行回调，≈16.9fps 对齐游戏帧率）：快照任务列表 → 逐回调调用 → 返回 false 的 unregister |
+| `frame_task_add(point, fn, ctx, interval, count)` | 返回句柄 `FrameTaskId`（0=失败）；`interval` 0=每帧；`count` 0=一直、1=一次；首个派发周期必触发 |
+| `frame_task_remove(id)` | 注销（幂等）；未知 id 返回 false |
+| `frame_task_query(id, out)` | `FrameTaskStatus{active, remaining_runs（无限=-1）, frames_to_next}` |
+| `frame_task_dispatch(point)` | 锚点 wrapper 在游戏主线程调用；同一 (point, frame) 只派发一次；`thread_local` 重入门禁 |
 
-**现有任务**（game_world.cpp）：
+回调签名 `bool (*)(int64_t frame, void* ctx)`，返回 false 自动注销。
 
-| 任务 | 回调 | ctx | 终止条件 |
-|---|---|---|---|
-| move（寻路） | `nav_task_tick` | 角色指针 | PATHLIST 空 / MoveAsPath 失败 / map_link_check 命中出口切图 |
-| walk（方向键） | `walk_task_tick` | `WalkCtx{ch,dir,remaining}` | 60 帧走完 / CHAR_Move 返回非 0（撞墙）/ 切图 |
+**线程模型**：注册/删除/查询任意线程可调；与派发共用一把锁；**持锁快照、锁外回调**，调用前再次持锁确认 id 存在；回调只在游戏主线程执行。帧号来源 `data_frame_count()`。
 
-⚠️ CHAR_Move 返回值语义：**0=正常走一步（成功），非 0=撞墙/阻挡**（反汇编 e98dc `mov w20,#0x1`，v0.4.26 修复）。
+**移动互斥槽**（`game_world_movement.inc`）：`g_motion_task` + `motion_task_start/stop`，nav/walk 共用，注册即替换；`stop_all_tasks()` 已删除，`walk_stop` 改调 `motion_task_stop()`，不再影响其它帧任务（自动出售）。
 
-**扩展新逐帧操作**（如自动战斗）：写 `bool xxx_task_tick(void* ctx)` 回调（ctx 自定义结构）+ `frame_task_register(xxx_task_tick, &ctx)`——零线程样板。
+**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）。
 
-**线程安全**：任务线程每帧（帧计数变化）调回调（v0.4.57 起帧驱动，此前 59ms 定时），回调直接读写游戏内存（与游戏主循环并发）。玩家控制态下 CHAR_Process 不驱动玩家移动 → 无双驱动竞争（MoveAsPath 前临时清零 C_CTRL_STATE 0x2e2）。新增任务须评估竞争风险。
+**真机验证（2026-09-13）**：锚点安装成功；world 态 move_to / walk_dir / stop_move 逐帧驱动生效；无崩溃。
 
 ### 2.2 帧驱动方案演进（为什么不用 hook）
 
 | 方案 | 结果 | 原因 |
 |---|---|---|
-| **FrameTaskManager 帧计数驱动** | ✅ 采用（v0.4.57 起） | task_thread_fn 轮询 `data_frame_count()`，帧号变化即执行回调——与游戏主循环精确同步，不随实际帧率漂移；此前 59ms 定时（v0.4.26-0.4.56）误差可接受但非严格帧对齐 |
+| **统一帧任务管理器（frame_task + frame_host）** | ✅ 采用（2026-09-13） | 指令 patch 锚点到游戏主线程帧周期（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase），`frame_task_dispatch` 按帧去重；回调主线程执行、frame 参数直传；旧 FrameTaskManager 后台线程并发读写内存已废弃 |
 | ShadowHook 1.0.10 | ❌ | LSPosed 环境 stub→new_addr 映射表在错误 linker 命名空间查找，桥跳野地址（0x79299114e4 访问违例） |
 | 手写 arm64 inline hook | ❌ | 已修 5 bug（adrp 掩码 0x9F000000、imm21 重组 immhi<<2\|immlo、stp 编码 0xa9b0、blr 数据槽、.S 符号冲突）仍 SIGBUS/SIGILL 崩溃（trampoline lr 污染、Draw 后续指令寄存器依赖） |
 | 填 PATHLIST 游戏自驱动 | ❌ | 玩家控制态（0x2e2=7）下游戏每帧重置玩家动作，驱动条件复杂（0x2fa/0xc40/0x2e0 耦合） |
@@ -497,7 +484,7 @@ uv run python scripts/verification/smoke_all.py
 |---|---|---|---|
 | 1 | HealthController 路由 `/api/system/health` | `GET /api/health`（HealthController.kt:15） | 已改 §3 表 |
 | 2 | 接口文件 InfoApiService.kt / ActionApiService.kt 两文件 | `ApiService.kt` 单文件双接口（InfoApiService + ActionApiService） | 已改 §3 表 |
-| 3 | FrameTaskManager 位置 game_data.cpp | `game_motion.cpp:23-98`（game_data.cpp 已删除） | 已改 §2.1 |
+| 3 | FrameTaskManager 位置 game_data.cpp | 已整体删除（game_motion.{h,cpp} 随统一帧任务管理器移除） | 已改 §2.1 |
 | 4 | move 回调名 move_task_tick | `nav_task_tick`（game_world.cpp:312） | 已改 §2.1 |
 | 5 | 不存在的路由 `/api/ui/dialog/ok`、`/api/ui/dialog/cancel`、`GET /api/ui/dialog/content` | 实际能力由 `/api/ui/dialog/select`（action=ok/cancel/index）+ `GET /api/ui/dialog` 承担（D2 裁决：修文档不补实现） | 已改 §3 表（UiActionController/UiController） |
 | 6 | ModuleConfig 注释「实际生效逻辑未实现（预留）」 | 已实现且 ConfigController/ApiServer 在调 | 已改 §3 表（ModuleConfig） |
