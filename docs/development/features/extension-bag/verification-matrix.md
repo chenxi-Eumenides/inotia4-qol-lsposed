@@ -45,9 +45,9 @@
 - **原版链(VMA)**：`INVEN_GetBagSize@0x103250`、`INVEN_GetEmptyBagSlot@0x103280`、`INVEN_IsHavingEmptySlot@0x103460`；`include_task_bag` 决定原版是否扫描 5。
 - **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_is_having_empty_slot`；`extension_bag_runtime.inc:extension_bag_has_empty_slots`；`virtual_bag_transaction_rules.inc:derive_capacity`。
 - **共享状态读写**：读 `capacities`、`types`、descriptor、对象和 token；原版 `bag_table` 只在投影窗口临时读写并必须恢复。
-- **必须保持的不变式(引 R-xx)**：容量统一派生，任务袋不成为扩展目标，空槽不能只看 descriptor（R-05、R-21、R-22、R-26）。
-- **失败语义**：容量 0/无可分配槽返回满或拒绝；`needed<=0` 由当前 `stage4_is_having_empty_slot` 明确返回 `1`（可放行，不调用 backup 或扩展 fallback）；袋 5 扩展目标直接拒绝。
-- **Host 测试名(现有或「缺口」)**：`test_queries`（`test_inventory_hook_stage4.cpp:115-125` 已断言 `needed<=0` 返回 `1`）、`test_virtual_bag_state`；缺口：`test_virtual_bag_empty_slot_predicate`（断言派生容量、active/token 对空槽的影响及 bag 5 排除）。
+- **必须保持的不变式(引 R-xx)**：容量统一派生，任务袋不成为扩展目标，空槽不能只看 descriptor（R-05、R-21、R-22、R-26）；`include_task_bag!=0` 的任务袋域查询不得被扩展空位兜底改判为可放，扩展兜底只回答 `include_task_bag==0` 的普通袋域（R-05）。
+- **失败语义**：容量 0/无可分配槽返回满或拒绝；`needed<=0` 由当前 `stage4_is_having_empty_slot` 明确返回 `1`（可放行，不调用 backup 或扩展 fallback）；任务袋域（`include_task_bag!=0`）原版返回 0 时直接返回 0，不查扩展、不改判；袋 5 扩展目标直接拒绝。
+- **Host 测试名(现有或「缺口」)**：`test_queries`（`test_inventory_hook_stage4.cpp:137-157` 断言：普通域原版 0 → 扩展 1；任务袋域原版 0 → 0 且 `empty_extension` 未被调用；`needed<=0` 两域均返回 `1` 且不查扩展）、`test_virtual_bag_state`；缺口：`test_virtual_bag_empty_slot_predicate`（断言派生容量、active/token 对空槽的影响及 bag 5 排除）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-02`：①读取 `/api/item/inventory/bag/{bag}/info`；②分别检查未装备、4/8/12/16 容量袋；③向 bag 5 发起一次移动；预期容量与 `derive_capacity` 一致，bag 5 返回 `task bag excluded`。
 - **证据锚类型**：Host + API 真机 + 源码。
 

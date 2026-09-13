@@ -104,9 +104,16 @@ int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
     }
     recursive_guard = true;
     const int original = backup == nullptr ? 0 : backup(needed, include_task_bag);
+    // 原版 csel 语义（0x103460 反汇编 0x103488/0x103490）：include_task_bag!=0 只查
+    // 物理任务袋 5，==0 只查普通袋 0..4。扩展逻辑袋不属于任务袋域，任务袋查询的
+    // 原版 0 结果不得被扩展空位改判为 1——否则上层（QUESTSYSTEM_CheckPrepare/
+    // CheckReward 等）会误判任务袋有空间并继续，随后 SaveItem 按 class 路由到袋 5
+    // 失败被 H-13 收编进扩展袋（R-53 边界漂移）。扩展兜底只回答普通袋域。
+    const bool extension_applicable =
+        extension_has_empty != nullptr && include_task_bag == 0;
     const int result = original != 0
         ? original
-        : (extension_has_empty == nullptr || !extension_has_empty(needed, include_task_bag) ? 0 : 1);
+        : (extension_applicable && extension_has_empty(needed, include_task_bag) ? 1 : 0);
     recursive_guard = false;
     return result;
 }

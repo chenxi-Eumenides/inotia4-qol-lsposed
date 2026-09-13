@@ -366,12 +366,13 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 - **典型破坏方式**：用当前原版袋替代扩展源袋，造成错误角色、错误袋或错误投影对象。
 - **验证锚**：`test_object_operations` 的 fallback 装备断言，`tests/test_inventory_hook_stage4.cpp:158-180`。
 
-### R-05 空槽判定不能只看 descriptor
+### R-05 空槽判定不能只看 descriptor，且扩展兜底只能回答普通袋域
 
 - **规则一句话**：容量判断必须使用派生容量和 object/token 可分配条件，不能只数 descriptor 空槽。
-- **为什么**：`stage4_is_having_empty_slot` 同时服务生产者和商店 gate（`inventory_hook_stage4.cpp:25-43`），扩展真实空槽还由 `extension_bag_has_empty_slots` 提供。
-- **典型破坏方式**：收编、生产或购买误报有容量，最终写入不可用槽或错误提示满包。
-- **验证锚**：`test_queries`，`tests/test_inventory_hook_stage4.cpp:115-125`；源码 `extension_bag_runtime.inc:394-406`。
+- **任务袋域边界**：`INVEN_IsHavingEmptySlot@0x103460` 的 `include_task_bag!=0` 只查物理任务袋 5、`==0` 只查普通袋 0..4（反汇编 csel `0x103488/0x103490`）；扩展逻辑袋不属于任务袋域，`stage4_is_having_empty_slot` 的扩展兜底只允许回答 `include_task_bag==0`，任务袋域查询必须只信原版结果。
+- **为什么**：`stage4_is_having_empty_slot` 同时服务生产者和商店 gate（`inventory_hook_stage4.cpp:94-119`），扩展真实空槽还由 `extension_bag_has_empty_slots` 提供；若任务袋查询用扩展空位改判为 1，上层（`QUESTSYSTEM_CheckPrepare`/`CheckReward`）会误判任务袋有空间并继续，随后 `INVEN_SaveItem` 按 class 路由到袋 5 失败被 H-13 收编进扩展袋（R-53 边界漂移）。
+- **典型破坏方式**：收编、生产或购买误报有容量，最终写入不可用槽或错误提示满包；任务袋域查询被扩展空位改判为可放。
+- **验证锚**：`test_queries`，`tests/test_inventory_hook_stage4.cpp:137-157`（普通域原版 0 → 扩展 1；任务袋域原版 0 → 0 且 `empty_extension` 未被调用；`needed<=0` 两域均 1 且不查扩展）；源码 `inventory_hook_stage4.cpp:106-116`。
 
 ### R-06 装备按钮三态不能合并为 bool
 
