@@ -175,6 +175,8 @@ bool bridge_init() {
     fn_char_get_enemy_target = reinterpret_cast<CharGetEnemyTargetFn>(g_base + fn_resolve("F_CHAR_GET_ENEMY_TARGET_VMA", F_CHAR_GET_ENEMY_TARGET_VMA));
     fn_questsystem_find = reinterpret_cast<QuestSystemFindFn>(g_base + fn_resolve("F_QUESTSYSTEM_FIND_VMA", F_QUESTSYSTEM_FIND_VMA));
     fn_questsystem_remove_slot = reinterpret_cast<QuestSystemRemoveSlotFn>(g_base + fn_resolve("F_QUESTSYSTEM_REMOVE_SLOT_VMA", F_QUESTSYSTEM_REMOVE_SLOT_VMA));
+    fn_questsystem_is_complete = reinterpret_cast<QuestSystemIsCompleteFn>(g_base + fn_resolve("F_QUESTSYSTEM_IS_COMPLETE_VMA", F_QUESTSYSTEM_IS_COMPLETE_VMA));
+    fn_questsystem_change_quest_state = reinterpret_cast<QuestSystemChangeQuestStateFn>(g_base + fn_resolve("F_QUESTSYSTEM_CHANGE_QUEST_STATE_VMA", F_QUESTSYSTEM_CHANGE_QUEST_STATE_VMA));
     fn_save = reinterpret_cast<SaveFn>(g_base + fn_resolve("F_SAVE_VMA", F_SAVE_VMA));
     fn_save_get_save_slot = reinterpret_cast<SaveGetSaveSlotFn>(g_base + fn_resolve("F_SAVE_GET_SAVE_SLOT_VMA", F_SAVE_GET_SAVE_SLOT_VMA));
     fn_save_load_save_slot = reinterpret_cast<SaveLoadSaveSlotFn>(g_base + fn_resolve("F_SAVE_LOAD_SAVE_SLOT_VMA", F_SAVE_LOAD_SAVE_SLOT_VMA));

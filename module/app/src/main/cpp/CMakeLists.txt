@@ -100,3 +100,8 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     core/native/transition_dispatch.cpp
 )
+
+# 任务完成度进档重算（quest-resync，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/quest/quest_resync.cpp
+)

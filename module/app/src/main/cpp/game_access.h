@@ -79,6 +79,8 @@ extern CharSetActionIdFn fn_char_set_action_id;
 extern CharGetEnemyTargetFn fn_char_get_enemy_target;
 extern QuestSystemFindFn fn_questsystem_find;
 extern QuestSystemRemoveSlotFn fn_questsystem_remove_slot;
+extern QuestSystemIsCompleteFn fn_questsystem_is_complete;
+extern QuestSystemChangeQuestStateFn fn_questsystem_change_quest_state;
 extern SaveFn fn_save;
 extern SaveGetSaveSlotFn fn_save_get_save_slot;
 extern SaveLoadSaveSlotFn fn_save_load_save_slot;

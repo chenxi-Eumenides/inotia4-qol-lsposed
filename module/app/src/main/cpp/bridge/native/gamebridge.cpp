@@ -10,6 +10,7 @@
 #include "feature/autosell/autosell_store.h"
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
+#include "feature/quest/quest_resync.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -60,6 +61,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点 call_patch
         autosell_register_save_enter();       // 自动出售：进档加载 sidecar 配置并注册扫描任务
         autosell_register_save_exit();        // 自动出售：退档删除扫描任务
+        quest_resync_register_save_enter();   // 任务完成度进档重算：world 就绪后一次性补 state=2
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
