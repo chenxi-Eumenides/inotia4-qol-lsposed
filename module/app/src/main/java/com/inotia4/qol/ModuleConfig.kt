@@ -24,7 +24,7 @@ import java.io.File
  *   默认 false；启动期和配置变更时均下发 native GOT hook。
  * - opEnabled：OP 能力全局开关（/api/op 门禁，architecture §9.1-2）。
  *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
- * - extensionBagEnabled：是否启用扩展背包，默认 true。
+ * - extensionBagEnabled：是否启用扩展背包，默认 false。
  * - gemCraftOptimize：是否启用合成器宝石合成操作优化，默认 false。
  *
  * 线程安全：配置可能被 API 请求线程/启动线程并发读写，字段用 @Volatile 保护。
@@ -38,7 +38,7 @@ object ModuleConfig {
     const val DEFAULT_STACK_LIMIT_INCREASE = false
     const val DEFAULT_MOVE_MERGE_ENABLED = false
     const val DEFAULT_OP_ENABLED = false
-    const val DEFAULT_EXTENSION_BAG_ENABLED = true
+    const val DEFAULT_EXTENSION_BAG_ENABLED = false
     const val DEFAULT_GEM_CRAFT_OPTIMIZE = false
 
     @Volatile
