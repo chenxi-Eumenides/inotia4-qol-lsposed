@@ -49,4 +49,21 @@ Tier classify(int value, int min, int max) {
     return Tier::Grey;
 }
 
+int percentile(int value, int min, int max) {
+    // 退化区间（max <= min）无法计算百分位，统一视为满值。
+    if (max <= min) {
+        return 100;
+    }
+    // 达到或超出上界（含特殊/固定值）视为满值；低于下界为 0。
+    if (value >= max) {
+        return 100;
+    }
+    if (value < min) {
+        return 0;
+    }
+    // 用 64 位避免 (value - min) * 100 在 int 下溢出；整数除法向下取整。
+    // value 已在 [min, max) 内，结果落在 [0, 100)。
+    return static_cast<int>((static_cast<int64_t>(value) - min) * 100 / (max - min));
+}
+
 }  // namespace attr_range

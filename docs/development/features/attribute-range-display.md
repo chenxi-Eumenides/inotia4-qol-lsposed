@@ -293,6 +293,8 @@ type=0 oi=24 val=480 -> "$R冰霜: 48.0%$B"
 
 **颜色改写（只染数值）**：hook `UIDesc_MakeItem` 入口缓存当前物品；hook `UIDesc_AddOption`，调原函数后用缓存物品与 `(type, optIdx, value)` 求 `color_code`。该行格式为 `$<原色><标签>: <数值>$B`；游戏内联色约定是 `$<码>文本$B`（段内着色、`$B` 收束），直接插入 `$<码>` 会让标签段回落默认色（真机实测标签变白）。因此在数值前**插入 `$B$<目标色>`**（先关闭标签段、再开值段），标签保持原色、行尾 `$B` 收束。插入前用 `G_UIDESC_TEXT_BUF_VMA + 0x200` 做容量边界检查（+4 字节），不足则不改写。`type=1` 仅当当前物品自身是宝石（`ITEMSYSTEM_IsJewel(category)`）才处理，装备上已镶嵌宝石跳过（E7）。退化区间（如低等级基础属性 `[1,1]`）按有效范围处理，`classify` 判为满值金。
 
+**对外复用**：`game_ui_attr_range.h` 另暴露只读 API `attr_range_ready()` 与 `attr_range_probe_jewel_range(type, item, out_min, out_max)`（纯逻辑侧同步提供 `attr_range::percentile(value,min,max)`），供自动出售 feature 复用宝石属性范围探测；不改变本册既有 UI 行为。
+
 ### 10.2 真机证据（2026-09-12，大修版，设备 `192.168.3.54`）
 
 安装 `output/inotia4-qol-lsposed-debug-2609122247-d83a907444d9.apk`，进档后打开背包面板并选中「战神的斗篷」，触发详情构建：

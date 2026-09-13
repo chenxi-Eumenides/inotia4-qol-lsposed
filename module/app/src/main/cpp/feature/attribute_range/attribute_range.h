@@ -16,4 +16,11 @@ char color_code(Tier tier);
 //     pct >= 90 -> Purple；>= 75 -> Blue；>= 60 -> Green；>= 30 -> White；其余（含 value < min 的负 pct）-> Grey
 Tier classify(int value, int min, int max);
 
+// 按 [min, max] 闭区间计算百分位（整数运算，返回值恒在 0..100）：
+//  1) max <= min              -> 100（退化区间无法计算，统一视为满值）
+//  2) value >= max            -> 100（含超出范围的特殊/固定值，视为满值）
+//  3) value < min             -> 0
+//  4) pct = (value - min) * 100 / (max - min)   // 向下取整
+int percentile(int value, int min, int max);
+
 }  // namespace attr_range

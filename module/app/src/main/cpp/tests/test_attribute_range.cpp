@@ -12,6 +12,7 @@ static int g_fail = 0;
 
 using attr_range::classify;
 using attr_range::color_code;
+using attr_range::percentile;
 using attr_range::Tier;
 
 static void test_bounds() {
@@ -42,6 +43,56 @@ static void test_percentile_thresholds() {
     CHECK(classify(0, 0, 100) == Tier::Grey);
     CHECK(classify(-1, 0, 100) == Tier::Grey);
     CHECK(classify(-1000, 0, 100) == Tier::Grey);
+}
+
+static void test_percentile_bounds() {
+    // max <= min -> 100（退化区间视为满值）。
+    CHECK(percentile(0, 10, 10) == 100);
+    CHECK(percentile(5, 10, 5) == 100);
+    CHECK(percentile(5, 10, 0) == 100);
+    CHECK(percentile(0, 0, 0) == 100);
+
+    // value >= max -> 100（含超出范围的特殊/固定值）。
+    CHECK(percentile(100, 0, 100) == 100);
+    CHECK(percentile(101, 0, 100) == 100);
+    CHECK(percentile(1000, 0, 100) == 100);
+    CHECK(percentile(10, 5, 10) == 100);
+
+    // value < min -> 0（不得为负）。
+    CHECK(percentile(-1, 0, 100) == 0);
+    CHECK(percentile(-1000, 0, 100) == 0);
+    CHECK(percentile(4, 5, 10) == 0);
+    CHECK(percentile(0, 5, 10) == 0);
+}
+
+static void test_percentile_values() {
+    // 分档阈值 30/60/75/90 及 0/100 端点的百分位定义（min=0,max=100）。
+    CHECK(percentile(0, 0, 100) == 0);
+    CHECK(percentile(29, 0, 100) == 29);
+    CHECK(percentile(30, 0, 100) == 30);
+    CHECK(percentile(59, 0, 100) == 59);
+    CHECK(percentile(60, 0, 100) == 60);
+    CHECK(percentile(74, 0, 100) == 74);
+    CHECK(percentile(75, 0, 100) == 75);
+    CHECK(percentile(89, 0, 100) == 89);
+    CHECK(percentile(90, 0, 100) == 90);
+    CHECK(percentile(99, 0, 100) == 99);
+
+    // 向下取整：1/3 -> 33%，2/3 -> 66%。
+    CHECK(percentile(1, 0, 3) == 33);
+    CHECK(percentile(2, 0, 3) == 66);
+
+    // 非零 min：min=5,max=10 -> 8 => (8-5)*100/5 = 60。
+    CHECK(percentile(5, 5, 10) == 0);
+    CHECK(percentile(6, 5, 10) == 20);
+    CHECK(percentile(7, 5, 10) == 40);
+    CHECK(percentile(8, 5, 10) == 60);
+    CHECK(percentile(9, 5, 10) == 80);
+
+    // 大区间仍用 64 位避免溢出：接近上界 -> 99。
+    CHECK(percentile(99999999, 0, 100000000) == 99);
+    CHECK(percentile(50000000, 0, 100000000) == 50);
+    CHECK(percentile(80000000, 50000000, 100000000) == 60);
 }
 
 static void test_color_code() {
@@ -82,6 +133,8 @@ static void test_no_int_overflow() {
 int main() {
     test_bounds();
     test_percentile_thresholds();
+    test_percentile_bounds();
+    test_percentile_values();
     test_color_code();
     test_nonzero_min();
     test_no_int_overflow();

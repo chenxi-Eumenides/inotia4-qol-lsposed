@@ -201,3 +201,14 @@ void attr_range_ui_install_if_ready() {
     g_installed.store(true, std::memory_order_release);
     __android_log_print(ANDROID_LOG_INFO, kTag, "attribute range hooks installed");
 }
+
+bool attr_range_ready() {
+    return g_installed.load(std::memory_order_acquire);
+}
+
+bool attr_range_probe_jewel_range(int type, void* item, int* out_min, int* out_max) {
+    // 未安装 hook 时不得调用游戏函数：否则 MATH_GetRandom 会真实消耗 RNG。
+    if (!g_installed.load(std::memory_order_acquire)) return false;
+    if (out_min == nullptr || out_max == nullptr) return false;
+    return probe_jewel_range(type, item, out_min, out_max);
+}
