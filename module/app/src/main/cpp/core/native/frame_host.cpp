@@ -4,17 +4,15 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/frame_task.h"
+#include "core/native/qol_log.h"
 #include "data/native/game_symbols.h"
 #include "game_access.h"
-
-#include <android/log.h>
 
 #include <atomic>
 #include <cstdint>
 
 namespace {
 
-constexpr char kTag[] = "Inotia4FrameHost";
 // GAMESTATE_DrawPlay 内 +0x20 处原 `bl MAP_DrawBase` 指令字（llvm-objdump 核对）。
 constexpr uint32_t kDrawPlayMapDrawBaseBlWord = 0x9401d18a;
 // MainProcess 内 +0x40 处原 `bl STATE_NextStartProcess` 指令字（llvm-objdump 核对）。
@@ -57,9 +55,9 @@ bool frame_host_install_if_ready() {
         F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF;
     if (!call_patch_install_bl(call_addr, kDrawPlayMapDrawBaseBlWord,
                                reinterpret_cast<void*>(&render_pre_wrapper))) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "install render failed call=%p expected=0x%08x",
-                            reinterpret_cast<void*>(call_addr), kDrawPlayMapDrawBaseBlWord);
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "install render failed call=%p expected=0x%08x",
+                      reinterpret_cast<void*>(call_addr), kDrawPlayMapDrawBaseBlWord);
         g_frame_host_installing.store(false, std::memory_order_release);
         return false;  // fail-closed：call_patch 已保证未改写任何字节
     }
@@ -69,9 +67,9 @@ bool frame_host_install_if_ready() {
         F_MAINPROCESS_NEXT_STATE_CALL_OFF;
     if (!call_patch_install_bl(logic_addr, kMainProcessNextStateBlWord,
                                reinterpret_cast<void*>(&logic_pre_wrapper))) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "install logic failed call=%p expected=0x%08x; rolling back render",
-                            reinterpret_cast<void*>(logic_addr), kMainProcessNextStateBlWord);
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "install logic failed call=%p expected=0x%08x; rolling back render",
+                      reinterpret_cast<void*>(logic_addr), kMainProcessNextStateBlWord);
         call_patch_revert_bl(call_addr, kDrawPlayMapDrawBaseBlWord);  // 全成或全退
         g_frame_host_installing.store(false, std::memory_order_release);
         return false;
@@ -79,8 +77,8 @@ bool frame_host_install_if_ready() {
 
     g_frame_host_installed.store(true, std::memory_order_release);
     g_frame_host_installing.store(false, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "installed render=%p logic=%p",
-                        reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(logic_addr));
+    QOL_LOG_INFO(QolDomain::kCore, "installed render=%p logic=%p",
+                 reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(logic_addr));
     return true;
 }
 

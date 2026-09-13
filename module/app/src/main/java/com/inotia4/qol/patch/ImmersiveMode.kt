@@ -5,6 +5,7 @@ import android.os.Build
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Method
@@ -25,9 +26,9 @@ object ImmersiveMode {
             val activityCls = cl.loadClass(TARGET_ACTIVITY)
             val method = activityCls.getDeclaredMethod("onWindowFocusChanged", Boolean::class.javaPrimitiveType)
             hooker(method)
-            LogFile.log("ImmersiveMode hook installed on MainActivity.onWindowFocusChanged")
+            LogFile.info(LogDomain.PLATFORM, "ImmersiveMode hook installed on MainActivity.onWindowFocusChanged")
         } catch (t: Throwable) {
-            LogFile.logError("ImmersiveMode hook failed", t)
+            LogFile.error(LogDomain.PLATFORM, "ImmersiveMode hook failed", t)
         }
     }
 
@@ -49,7 +50,7 @@ object ImmersiveMode {
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
             }
         } catch (t: Throwable) {
-            LogFile.logError("ImmersiveMode apply failed", t)
+            LogFile.error(LogDomain.PLATFORM, "ImmersiveMode apply failed", t)
         }
     }
 }

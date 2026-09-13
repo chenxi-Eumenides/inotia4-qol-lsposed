@@ -9,14 +9,11 @@
 #include "game_state.h"
 #include "game_ops_common.h"
 #include "core/native/frame_task.h"
+#include "core/native/qol_log.h"
 #include "game_tiles.h"
 
-#include <android/log.h>
 #include <cstdint>
 #include <vector>
-
-#define MOVE_TAG "Inotia4Move"
-#define MOVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, MOVE_TAG, __VA_ARGS__)
 
 #include "game_world_story.inc"
 #include "game_world_navigation.inc"

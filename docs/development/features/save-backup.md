@@ -136,7 +136,7 @@ u32 crc32                      # 覆盖此前全部字节
 
 真机：Phh-Treble（`192.168.3.54:5555`），模块 debug `0.7.5`（`output/inotia4-qol-lsposed-debug-2609131227-dcae13c32981.apk`）。流程：安装 → force-stop + monkey 重启 → 同意页 `POST /api/ui/dialog/select {"action":"ok"}` → 轮询 `/api/health` → 主菜单。
 
-- **Hook 安装**：logcat `Inotia4SaveBackup: slot delete hook installed slot=0x7080cf6fa8 orig=0x7080b4f4e8`；`orig-base=0x14c4e8`、`slot-base=0x2f3fa8`，fail-closed 校验通过（GOT 槽值 == `SaveSlot_Delete`）。
+- **Hook 安装**：logcat `Inotia4Qol ... domain=save_backup ... slot delete hook installed slot=0x7080cf6fa8 orig=0x7080b4f4e8`；`orig-base=0x14c4e8`、`slot-base=0x2f3fa8`，fail-closed 校验通过（GOT 槽值 == `SaveSlot_Delete`）。
 - **测试前置**：`POST /api/system/backup/export {"slot":0}` → `20260913-122932_s0_a17dd08f71b3.qol_save`（11840 B，`module_sha256=de9cb8d1a454f45d5894d30512032032b2194b74689376e730a04bfa01a285e8`）；`POST /api/system/backup/import {"checksum":"a17dd08f71b3","slot":1}` → `ok:true`，`slot-1.module-save`(5640 B) + `.last-good`(5640 B) 出现；`/api/system/info` slot0/1 `exists=true`。
 - **游戏内删档（slot1）**：主菜单「开始游戏」→ 存档面板（slot0/1 有档、slot2 EMPTY）→ 点 slot1 删除按钮 → 确认弹窗「是」。
 - **结果**：logcat `slot delete hook: removed sidecar .../slot-1.module-save`、`removed last-good .../slot-1.module-save.last-good`；`ls module-saves/` 仅剩 `slot-0.*`（slot-1 两文件消失）；root `find` 存档目录仅剩 `save0.dat`（`save1.dat` 已删）；`/api/system/info` slot1 `exists=false`、slot0 `exists=true`。

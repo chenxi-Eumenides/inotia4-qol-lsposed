@@ -106,3 +106,15 @@ target_include_directories(transition_dispatch_tests PRIVATE
 )
 target_compile_features(transition_dispatch_tests PRIVATE cxx_std_17)
 add_test(NAME transition_dispatch_tests COMMAND transition_dispatch_tests)
+
+# 统一日志系统 P0 纯格式化/限流 host 测试（末尾追加）
+add_executable(qol_log_tests
+    test_qol_log.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(qol_log_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(qol_log_tests PRIVATE cxx_std_17)
+add_test(NAME qol_log_tests COMMAND qol_log_tests)

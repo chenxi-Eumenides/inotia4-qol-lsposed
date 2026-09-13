@@ -1,5 +1,6 @@
 package com.inotia4.qol.service.enrichment
 
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.StaticData
 import org.json.JSONArray
@@ -293,7 +294,7 @@ object NameInjectorCore {
                 root.toString()
             }
         } catch (e: Exception) {
-            LogFile.logError("withItemNames failed", e)
+            LogFile.error(LogDomain.API, "withItemNames failed", e)
             json
         }
     }

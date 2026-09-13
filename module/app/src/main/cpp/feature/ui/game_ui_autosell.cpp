@@ -15,11 +15,10 @@
 #include "game_ui_autosell.h"
 
 #include "core/native/call_patch.h"
+#include "core/native/qol_log.h"
 #include "data/native/game_symbols.h"
 #include "game_access.h"
 #include "game_ui_kit.h"
-
-#include <android/log.h>
 
 #include <atomic>
 #include <cstdint>
@@ -27,8 +26,7 @@
 #include <cstring>
 #include <mutex>
 
-#define AUTOSELLUI_TAG "Inotia4AutoSellUI"
-#define AUTOSELLUI_LOG(...) __android_log_print(ANDROID_LOG_INFO, AUTOSELLUI_TAG, __VA_ARGS__)
+#define AUTOSELLUI_LOG(...) QOL_LOG_INFO(QolDomain::kAutosell, __VA_ARGS__)
 
 namespace {
 

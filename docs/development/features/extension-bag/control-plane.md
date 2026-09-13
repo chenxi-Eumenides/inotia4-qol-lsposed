@@ -163,7 +163,7 @@ S2 数量编码契约已批准并进入开发：可堆叠数量固定为 `128a+b
    漏斗入库前先并入扩展同类堆；R-54 ext→orig 目标袋为投影宿主时恢复真实容量且不切换
    显示袋；R-55 原版背包详情出售由 H-23 按 canonical 全量接管。对应 Host 断言已落地，
    行为断言待真机 VM-37..VM-41，Overall 仍保持 `NOT_ACCEPTED`。
-10. 佣兵徽章使用（R-63）：新增第 16 个常驻 Native Hook H-24
+10. 佣兵徽章使用（R-63）：新增第 24 个常驻 Native Hook H-24
    `UIEquip_ButtonUseMercenarySealExe@0xb8144`，扩展侧经 `extension_use_mercenary_seal`
    按原版顺序 `UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MERCENARYSYSTEM_MakeMercenary@0x119658`
    接管，消耗经 H-04 `INVEN_RemoveItem` 承接；API `data_op_use_item` /

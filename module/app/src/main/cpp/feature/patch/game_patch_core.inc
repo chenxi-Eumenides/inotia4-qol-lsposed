@@ -59,13 +59,13 @@ bool patch_apply(const PatchEntry* entries, size_t n) {
         uint32_t cur = *reinterpret_cast<uint32_t*>(addr);
         if (cur == e.replacement) { ++done; continue; }
         if (cur != e.orig) {
-            __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG, "patch_apply mismatch %s+0x%x got 0x%08x want 0x%08x",
+            QOL_LOG_ERROR(QolDomain::kPlatform, "patch_apply mismatch %s+0x%x got 0x%08x want 0x%08x",
                                 e.func_macro, e.func_offset, cur, e.orig);
             write_back(entries, done);
             return false;
         }
         if (!write_insn(addr, e.replacement)) { write_back(entries, done); return false; }
-        __android_log_print(ANDROID_LOG_INFO, PATCH_TAG, "patch_apply %s+0x%x 0x%08x -> 0x%08x",
+        QOL_LOG_INFO(QolDomain::kPlatform, "patch_apply %s+0x%x 0x%08x -> 0x%08x",
                             e.func_macro, e.func_offset, e.orig, e.replacement);
         ++done;
     }
@@ -84,12 +84,12 @@ bool patch_revert(const PatchEntry* entries, size_t n) {
         uint32_t cur = *reinterpret_cast<uint32_t*>(addr);
         if (cur == e.orig) { ++done; continue; }
         if (cur != e.replacement) {
-            __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG, "patch_revert mismatch %s+0x%x got 0x%08x want 0x%08x",
+            QOL_LOG_ERROR(QolDomain::kPlatform, "patch_revert mismatch %s+0x%x got 0x%08x want 0x%08x",
                                 e.func_macro, e.func_offset, cur, e.replacement);
             return false;
         }
         if (!write_insn(addr, e.orig)) return false;
-        __android_log_print(ANDROID_LOG_INFO, PATCH_TAG, "patch_revert %s+0x%x 0x%08x -> 0x%08x",
+        QOL_LOG_INFO(QolDomain::kPlatform, "patch_revert %s+0x%x 0x%08x -> 0x%08x",
                             e.func_macro, e.func_offset, e.replacement, e.orig);
         ++done;
     }
@@ -146,7 +146,7 @@ bool apply_s2_getter_redirects() {
         const uintptr_t call_addr = func + e.call_offset;
         uint32_t replacement = 0;
         if (!encode_bl(call_addr, redirect_target_addr(e), &replacement)) {
-            __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG,
+            QOL_LOG_ERROR(QolDomain::kPlatform,
                                 "redirect encode failed %s+0x%x -> %s", e.func_macro,
                                 e.call_offset, e.target_macro);
             return false;
@@ -155,7 +155,7 @@ bool apply_s2_getter_redirects() {
         const uint32_t cur_call = *reinterpret_cast<uint32_t*>(call_addr);
         if (cur_arg == e.arg_replacement && cur_call == replacement) continue;  // 幂等
         if (cur_arg != e.arg_orig || cur_call != e.call_orig) {
-            __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG,
+            QOL_LOG_ERROR(QolDomain::kPlatform,
                                 "redirect mismatch %s arg=0x%08x call=0x%08x", e.func_macro,
                                 cur_arg, cur_call);
             return false;
@@ -163,7 +163,7 @@ bool apply_s2_getter_redirects() {
         if (!write_insn(arg_addr, e.arg_replacement) || !write_insn(call_addr, replacement)) {
             return false;
         }
-        __android_log_print(ANDROID_LOG_INFO, PATCH_TAG,
+        QOL_LOG_INFO(QolDomain::kPlatform,
                             "redirect %s+0x%x 0x%08x->0x%08x; +0x%x 0x%08x->0x%08x (%s)",
                             e.func_macro, e.arg_offset, e.arg_orig, e.arg_replacement,
                             e.call_offset, e.call_orig, replacement, e.target_macro);
@@ -190,8 +190,11 @@ bool apply_fixed_stack_layout() {
     if (g_stack_layout_patch_set.applied()) return true;
     bool ok = g_stack_layout_patch_set.apply();
     if (ok) ok = apply_s2_getter_redirects();
-    __android_log_print(ok ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, PATCH_TAG,
-                        "stack canonical layout %s", ok ? "applied" : "failed");
+    if (ok) {
+        QOL_LOG_INFO(QolDomain::kPlatform, "stack canonical layout %s", "applied");
+    } else {
+        QOL_LOG_ERROR(QolDomain::kPlatform, "stack canonical layout %s", "failed");
+    }
     return ok;
 }
 
@@ -228,7 +231,7 @@ bool apply_monster_item_count_compat() {
             if (*ip != kOrig) continue;
             if (write_insn(p, kRepl)) {
                 ++hits;
-                __android_log_print(ANDROID_LOG_INFO, PATCH_TAG,
+                QOL_LOG_INFO(QolDomain::kPlatform,
                                     "monster item-count compat: 0x%lx cmp w8,#0x62 -> #0x7F",
                                     static_cast<unsigned long>(p));
             }
@@ -236,7 +239,7 @@ bool apply_monster_item_count_compat() {
     }
     fclose(f);
     if (hits == 0) {
-        __android_log_print(ANDROID_LOG_INFO, PATCH_TAG,
+        QOL_LOG_INFO(QolDomain::kPlatform,
                             "monster item-count compat: no target (non-monster build)");
     }
     return true;

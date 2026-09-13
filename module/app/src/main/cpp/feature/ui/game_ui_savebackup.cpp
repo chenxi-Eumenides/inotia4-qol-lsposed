@@ -1,5 +1,6 @@
 #include "game_ui_savebackup.h"
 
+#include "core/native/qol_log.h"
 #include "feature/save_backup/save_backup.h"
 #include "game_access.h"
 #include "game_ops_common.h"
@@ -11,7 +12,6 @@
 #include "game_ui_kit.h"
 #include "game_ui_settings.h"
 
-#include <android/log.h>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -24,8 +24,7 @@
 #include <thread>
 #include <vector>
 
-#define SB_UI_TAG "Inotia4UISaveBackup"
-#define SB_UI_LOG(...) __android_log_print(ANDROID_LOG_INFO, SB_UI_TAG, __VA_ARGS__)
+#define SB_UI_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
 
 #define POPUP_STATE_SIZE 0x40
 #define CB_TEXT_SIZE 0x40

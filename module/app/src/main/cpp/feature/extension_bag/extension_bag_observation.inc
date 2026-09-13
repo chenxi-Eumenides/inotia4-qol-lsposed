@@ -1,7 +1,7 @@
 constexpr uint64_t kP5SampleIntervalMs = 100;
 
 bool p5_observation_enabled() {
-    return __android_log_is_loggable(ANDROID_LOG_DEBUG, VIRTBAG_TAG, ANDROID_LOG_INFO) != 0;
+    return qol_log_debug_enabled();
 }
 
 bool p5_panel_observation_enabled() {

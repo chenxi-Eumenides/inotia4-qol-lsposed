@@ -56,7 +56,7 @@ void root_decor_draw() {
                            static_cast<int32_t>(root_rect.x + ROOT_W / 2 + 0x12c),
                            static_cast<int32_t>(ROOT_H / 2), 2, 1);
     } else if (!g_background_unavailable_logged) {
-        SB_UI_LOG("background image unavailable; drawing mask + lines only");
+        QOL_LOG_DEBUG(QolDomain::kUi, "background image unavailable; drawing mask + lines only");
         g_background_unavailable_logged = true;
     }
     // ② 半透明遮罩（同设置页 alpha 0x50）：矩形与 settings_panel_process 完全同口径

@@ -32,7 +32,7 @@
 - 检测任务 `save_enter_tick` 由统一帧任务管理器注册在 `kFramePointRenderPre`（渲染开始前锚点，仅 world 态 DrawPlay 执行），因此天然只在 world 态运行。
 - 判定纯函数 `save_enter_detail::should_fire(pending, in_world) = pending && in_world`（供 host 测试）。
 - 消费：`pending` 以 `std::atomic<bool>` 保存，`should_fire` 为真时 `exchange(false)` 消费一次；回调列表持锁快照、**锁外**逐个调用（主线程）。
-- 触发时打印一条 INFO 日志（tag `Inotia4SaveEnter`，含回调数量），不每帧打印。
+- 触发时打印一条 INFO 日志（domain=save，单一 tag `Inotia4Qol`，含回调数量）；`g_pending.exchange` 保证每次 pending 只触发一次，非逐帧，故保持 INFO，不每帧打印。
 
 ## 5. API（`core/native/save_enter.h`）
 
@@ -50,7 +50,7 @@ bool save_enter_host_install_if_ready();               // 安装两个发起点�
 
 - **Host**：`tests/test_infra_data.cpp` 的 `save_enter_detail::should_fire` 四组合（仅「已发起 且 在 world」为真）；`save_exit.h` 主机端可包含（编译性 `static_assert`）。
 - **Android debug 构建**：`scripts/build-debug.sh`。
-- **真机（进入，已办）**：读档进 world 触发一次且日志出现 `Inotia4SaveEnter save enter fired callbacks=N`；新档同；切图返回不触发；无崩溃。
+- **真机（进入，已办）**：读档进 world 触发一次且日志出现 `Inotia4Qol ... domain=save ... save enter fired callbacks=N`；新档同；切图返回不触发；无崩溃。
 - **真机（退出，待办）**：见 §7。
 
 ## 7. 退出存档回调
@@ -81,10 +81,10 @@ void save_exit_unregister(SaveExitFn fn, void* ctx);   // 幂等
 bool save_exit_host_install_if_ready();                // 安装发起点（幂等，fail-closed）
 ```
 
-- 触发时打印一条 INFO 日志（tag `Inotia4SaveExit`，含回调数量），不重复打印。
+- 触发时打印一条 INFO 日志（domain=save，单一 tag `Inotia4Qol`，含回调数量），不重复打印。
 
 ### 7.4 验证状态
 
 - **Host**：`save_exit.h` 主机端可包含（编译性断言），无纯逻辑可测。
 - **Android debug 构建**：通过。
-- **真机（待办，NOT_ACCEPTED）**：回主菜单触发一次且日志 `Inotia4SaveExit save exit fired callbacks=N`；进入存档 / 切图不触发；无崩溃。设备空闲后补验。
+- **真机（待办，NOT_ACCEPTED）**：回主菜单触发一次且日志 `Inotia4Qol ... domain=save ... save exit fired callbacks=N`；进入存档 / 切图不触发；无崩溃。设备空闲后补验。

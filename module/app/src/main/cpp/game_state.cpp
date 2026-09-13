@@ -7,7 +7,6 @@
 #include "core/native/extension_bag_port.h"
 #include "core/native/frame_task.h"
 
-#include <android/log.h>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -18,8 +17,6 @@
 #include <thread>
 #include <vector>
 
-#define MOVE_TAG "Inotia4Move"
-#define MOVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, MOVE_TAG, __VA_ARGS__)
 #include "game_state.h"
 
 bool game_in_world() {

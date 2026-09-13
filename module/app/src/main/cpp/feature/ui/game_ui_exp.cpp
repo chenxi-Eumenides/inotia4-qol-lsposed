@@ -1,5 +1,6 @@
 #include "game_ui_exp.h"
 
+#include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_ops_common.h"
 #include "game_ptr_hook.h"
@@ -7,14 +8,12 @@
 #include "game_symbols.h"
 #include "game_ui.h"
 
-#include <android/log.h>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
 
-#define EXP_TAG "Inotia4UIExp"
-#define EXP_LOG(...) __android_log_print(ANDROID_LOG_INFO, EXP_TAG, __VA_ARGS__)
+#define EXP_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
 
 #define CB_TEXT_SIZE 0x20
 #define POPUP_STATE_SIZE 0x40

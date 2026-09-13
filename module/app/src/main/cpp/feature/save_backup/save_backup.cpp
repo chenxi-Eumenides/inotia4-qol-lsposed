@@ -20,7 +20,6 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <android/log.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -31,6 +30,7 @@
 #include <vector>
 
 #include "core/native/game_ops_common.h"
+#include "core/native/qol_log.h"
 #include "feature/save_backup/save_backup_bundle.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
@@ -38,9 +38,7 @@
 
 namespace {
 
-constexpr const char* kLogTag = "Inotia4SaveBackup";
-
-#define SB_LOG(...) __android_log_print(ANDROID_LOG_INFO, kLogTag, __VA_ARGS__)
+#define SB_LOG(...) QOL_LOG_INFO(QolDomain::kSaveBackup, __VA_ARGS__)
 
 constexpr const char* kBackupDirName = "save_backup";
 constexpr const char* kRollbackDirName = ".rollback";

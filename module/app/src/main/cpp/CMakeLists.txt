@@ -46,7 +46,6 @@ add_library(gamebridge SHARED
     feature/extension_bag/extension_bag_persistence.cpp
     feature/extension_bag/extension_bag_geometry.cpp
     feature/extension_bag/extension_bag_api.cpp
-    feature/extension_bag/extension_bag_logging.cpp
     feature/attribute_range/attribute_range.cpp
     feature/attribute_range/game_ui_attr_range.cpp
 )
@@ -104,4 +103,10 @@ target_sources(gamebridge PRIVATE
 # 任务完成度进档重算（quest-resync，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     feature/quest/quest_resync.cpp
+)
+
+# 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    core/native/qol_log.cpp
+    bridge/native/gamebridge_log.cpp
 )

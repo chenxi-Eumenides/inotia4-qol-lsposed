@@ -6,10 +6,9 @@
 
 #include "feature/autosell/autosell_store.h"
 
+#include "core/native/qol_log.h"
 #include "feature/autosell/autosell_config.h"
 #include "game_access.h"
-
-#include <android/log.h>
 
 #include <cstring>
 #include <mutex>
@@ -17,7 +16,6 @@
 
 namespace {
 
-constexpr char kTag[] = "Inotia4AutoSell";
 constexpr int kSlotCount = 3;  // ModuleSaveStore SLOT_COUNT
 
 std::mutex g_store_mtx;
@@ -106,7 +104,7 @@ void autosell_store_register_bridge(JNIEnv* env, jclass bridge_class) {
         bridge_class, "saveConfigJson", "(ILjava/lang/String;)Ljava/lang/String;");
     if (load_mid == nullptr || save_mid == nullptr) {
         env->ExceptionClear();
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "autosell store bridge method missing");
+        QOL_LOG_ERROR(QolDomain::kAutosell, "autosell store bridge method missing");
         return;
     }
     std::lock_guard<std::mutex> lock(g_store_mtx);
@@ -114,7 +112,7 @@ void autosell_store_register_bridge(JNIEnv* env, jclass bridge_class) {
     g_bridge_class = static_cast<jclass>(env->NewGlobalRef(bridge_class));
     g_load_method = load_mid;
     g_save_method = save_mid;
-    __android_log_print(ANDROID_LOG_INFO, kTag, "autosell store bridge registered");
+    QOL_LOG_INFO(QolDomain::kAutosell, "autosell store bridge registered");
 }
 
 void autosell_store_ensure_loaded(int slot) {
@@ -155,7 +153,7 @@ void autosell_store_ensure_loaded(int slot) {
         persisted = g_last_persist_ok;
     }
     autosell_set_store_status(slot, loaded, persisted);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "sidecar config load slot=%d parsed=%d",
+    QOL_LOG_INFO(QolDomain::kAutosell, "sidecar config load slot=%d parsed=%d",
                         slot, parsed ? 1 : 0);
 }
 
@@ -170,7 +168,7 @@ bool autosell_store_persist(int slot, const autosell::Config& config) {
         loaded = g_loaded_slot;
     }
     autosell_set_store_status(slot, loaded, ok);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "sidecar config persist slot=%d ok=%d",
+    QOL_LOG_INFO(QolDomain::kAutosell, "sidecar config persist slot=%d ok=%d",
                         slot, ok ? 1 : 0);
     return ok;
 }

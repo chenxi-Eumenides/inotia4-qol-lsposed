@@ -3,7 +3,6 @@
 #include "game_access.h"
 #include "game_symbols.h"
 
-#include <android/log.h>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -13,8 +12,6 @@
 #include <thread>
 #include <vector>
 
-#define MOVE_TAG "Inotia4Move"
-#define MOVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, MOVE_TAG, __VA_ARGS__)
 #include "game_json.h"
 
 std::string json_escape(const char* s) {

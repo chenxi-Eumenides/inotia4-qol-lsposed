@@ -1,5 +1,6 @@
 package com.inotia4.qol.api.controller
 
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.util.ApiException
@@ -20,10 +21,10 @@ class OpController {
     private fun notImpl(): Nothing = throw ApiException(StatusCode.SC_NOT_IMPLEMENTED, "not implemented")
 
     @PostMapping("/api/op/quest/accept")
-    fun questAccept(): String = LogFile.op("POST /api/op/quest/accept", "") { notImpl() }
+    fun questAccept(): String = LogFile.op(LogDomain.OP, "POST /api/op/quest/accept", emptyMap<String, String>()) { notImpl() }
 
     @PostMapping("/api/op/quest/complete")
-    fun questComplete(): String = LogFile.op("POST /api/op/quest/complete", "") { notImpl() }
+    fun questComplete(): String = LogFile.op(LogDomain.OP, "POST /api/op/quest/complete", emptyMap<String, String>()) { notImpl() }
 
     @PostMapping("/api/op/character/{role}/status-point")
     fun statusPoint(@PathVariable("role") role: Int, @RequestBody body: String): String {
@@ -35,11 +36,11 @@ class OpController {
 
     @PostMapping("/api/op/character/{role}/skill-point")
     fun skillPoint(@PathVariable("role") role: Int): String =
-        LogFile.op("POST /api/op/character/{role}/skill-point", "role=$role") { notImpl() }
+        LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/skill-point", mapOf("role" to "$role")) { notImpl() }
 
     @PostMapping("/api/op/character/{role}/skill-level")
     fun skillLevel(@PathVariable("role") role: Int): String =
-        LogFile.op("POST /api/op/character/{role}/skill-level", "role=$role") { notImpl() }
+        LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/skill-level", mapOf("role" to "$role")) { notImpl() }
 
     @PostMapping("/api/op/party/swap")
     fun partySwap(@RequestBody body: String): String {
@@ -52,10 +53,10 @@ class OpController {
     }
 
     @PostMapping("/api/op/inventory/set-slot")
-    fun setSlot(): String = LogFile.op("POST /api/op/inventory/set-slot", "") { notImpl() }
+    fun setSlot(): String = LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-slot", emptyMap<String, String>()) { notImpl() }
 
     @PostMapping("/api/op/inventory/set-equip")
-    fun setEquip(): String = LogFile.op("POST /api/op/inventory/set-equip", "") { notImpl() }
+    fun setEquip(): String = LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-equip", emptyMap<String, String>()) { notImpl() }
 
     @PostMapping("/api/op/inventory/money")
     fun money(@RequestBody body: String): String {
@@ -66,23 +67,23 @@ class OpController {
     }
 
     @PostMapping("/api/op/craft/mix-direct")
-    fun mixDirect(): String = LogFile.op("POST /api/op/craft/mix-direct", "") { notImpl() }
+    fun mixDirect(): String = LogFile.op(LogDomain.OP, "POST /api/op/craft/mix-direct", emptyMap<String, String>()) { notImpl() }
 
     @PostMapping("/api/op/combat/{role}/heal")
     fun heal(@PathVariable("role") role: Int): String =
-        LogFile.op("POST /api/op/combat/{role}/heal", "role=$role") { notImpl() }
+        LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/heal", mapOf("role" to "$role")) { notImpl() }
 
     @PostMapping("/api/op/combat/{role}/rest")
     fun rest(@PathVariable("role") role: Int): String =
-        LogFile.op("POST /api/op/combat/{role}/rest", "role=$role") { notImpl() }
+        LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/rest", mapOf("role" to "$role")) { notImpl() }
 
     @PostMapping("/api/op/combat/{role}/revive")
     fun revive(@PathVariable("role") role: Int): String =
-        LogFile.op("POST /api/op/combat/{role}/revive", "role=$role") { notImpl() }
+        LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/revive", mapOf("role" to "$role")) { notImpl() }
 
     @PostMapping("/api/op/combat/{role}/hate")
     fun hate(@PathVariable("role") role: Int): String =
-        LogFile.op("POST /api/op/combat/{role}/hate", "role=$role") { notImpl() }
+        LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/hate", mapOf("role" to "$role")) { notImpl() }
 
     @PostMapping("/api/op/movement/teleport")
     fun teleport(@RequestBody body: String): String {

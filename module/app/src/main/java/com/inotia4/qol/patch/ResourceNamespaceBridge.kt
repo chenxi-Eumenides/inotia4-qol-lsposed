@@ -2,6 +2,7 @@ package com.inotia4.qol.patch
 
 import android.app.Activity
 import android.content.Context
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Field
@@ -35,9 +36,9 @@ object ResourceNamespaceBridge {
                 String::class.java
             )
             hooker(identifierMethod)
-            LogFile.log("Resource namespace bridge installed for ${param.packageName}")
+            LogFile.info(LogDomain.PLATFORM, "Resource namespace bridge installed for ${param.packageName}")
         } catch (t: Throwable) {
-            LogFile.logError("Resource namespace bridge failed", t)
+            LogFile.error(LogDomain.PLATFORM, "Resource namespace bridge failed", t)
         }
     }
 
@@ -74,13 +75,13 @@ object ResourceNamespaceBridge {
             field.isAccessible = true
             (field.get(null) as? Activity)?.let { return it }
         } catch (t: Throwable) {
-            LogFile.logError("Resource namespace bridge activity lookup failed", t)
+            LogFile.error(LogDomain.PLATFORM, "Resource namespace bridge activity lookup failed", t)
         }
         return try {
             val activityThread = Class.forName("android.app.ActivityThread")
             activityThread.getMethod("currentApplication").invoke(null) as? Context
         } catch (t: Throwable) {
-            LogFile.logError("Resource namespace bridge application lookup failed", t)
+            LogFile.error(LogDomain.PLATFORM, "Resource namespace bridge application lookup failed", t)
             null
         }
     }

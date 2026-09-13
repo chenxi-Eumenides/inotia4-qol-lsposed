@@ -1,7 +1,5 @@
 package com.inotia4.qol
 
-private const val NATIVE_TAG = "Inotia4Export"
-
 object NativeBridge {
 
     @Volatile
@@ -12,7 +10,7 @@ object NativeBridge {
         try {
             System.loadLibrary("gamebridge")
         } catch (t: Throwable) {
-            android.util.Log.e(NATIVE_TAG, "loadLibrary(gamebridge) failed", t)
+            LogFile.error(LogDomain.PLATFORM, "loadLibrary(gamebridge) failed", t)
         }
     }
 
@@ -24,13 +22,19 @@ object NativeBridge {
             nativeRegisterAutoSellStoreBridge(AutoSellConfigStore::class.java)
             nativeInit()
         } catch (t: Throwable) {
-            android.util.Log.e(NATIVE_TAG, "nativeInit failed", t)
+            LogFile.error(LogDomain.PLATFORM, "nativeInit failed", t)
             false
         }
         return ready
     }
 
     external fun nativeInit(): Boolean
+
+    // ---- 统一日志（qol_log）----
+    external fun nativeQolLogInit()
+    external fun nativeQolLogWrite(level: Int, domain: String, src: String, msg: String)
+    external fun nativeQolLogSetDebugEnabled(enabled: Boolean)
+
     external fun nativeRegisterConfigBridge(bridge: Class<*>)
     external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)
     external fun nativeRegisterAutoSellStoreBridge(bridge: Class<*>)

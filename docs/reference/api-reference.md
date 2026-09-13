@@ -1631,6 +1631,7 @@
 > - `moveMergeEnabled` 控制背包内拖拽同类可堆叠物品时的自动合并，默认 `false`；变化即时安装或还原 native GOT hook，无需重启
 > - `autoSellEnabled` 自动出售全局开关，默认 `false`；变化即通知 native（进档后由存档内总开关共同决定扫描任务）
 > - `apiEnabled` API 全局开关，默认 `true`；`false` 时不启动 HTTP 服务与 native 缓存预取线程（`nativeSetApiEnabled(false)` → `frame_cache_stop()`），`GET/POST /api/config/*` 随之不可达。**`apiEnabled=false` 不影响 feature 初始化**——`ApiServer.bootstrap` 已把 feature 初始化（设置页/扩展背包/存档/自动出售等）与 HTTP 启动拆开，关闭仅停 HTTP 与预取线程。关闭后唯一恢复通道为**游戏内设置页第一项「API服务」开关**（走 `ModuleConfigUiBridge` JNI，不依赖 HTTP；false→true 经 `ApiServer.startFromConfig` 重启 HTTP）；由 HTTP 置 `false` 时延迟约 500ms 停止以先送回本响应
+> - `debugLogEnabled` 统一日志 debug 级别运行时开关，默认 `false`；变化即时经 `nativeQolLogSetDebugEnabled` 下发 native 门控，无需重启。info/warn/error 不受该开关影响（常开）。接入游戏内**设置页第 8 行「调试日志」**；日志格式与规则见 `docs/development/logging.md`
 
 #### 读取配置
 
@@ -1648,7 +1649,8 @@
   "moveMergeEnabled": false,
   "opEnabled": false,
   "autoSellEnabled": false,
-  "apiEnabled": true
+  "apiEnabled": true,
+  "debugLogEnabled": false
 }
 ```
 
@@ -1662,7 +1664,7 @@
 **请求格式**：
 
 ```json
-{ "listenAddress": "0.0.0.0", "listenPort": 9090, "stackLimitIncrease": true, "moveMergeEnabled": false }
+{ "listenAddress": "0.0.0.0", "listenPort": 9090, "stackLimitIncrease": true, "moveMergeEnabled": false, "debugLogEnabled": true }
 ```
 
 **返回格式**：
@@ -1677,13 +1679,14 @@
   "moveMergeEnabled": false,
   "opEnabled": false,
   "autoSellEnabled": false,
-  "apiEnabled": true
+  "apiEnabled": true,
+  "debugLogEnabled": true
 }
 ```
 
 **注意**：
 - `listenAddress` 非空必填；`listenPort` 合法范围 1-65535，越界返回 `{"ok":false,"error":"listenPort must be 1-65535"}`；body 非法返回 `{"error":"bad request"}`；持久化失败返回 `{"ok":false,"error":"config save failed"}`（内存不提交）
-- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`autoSellEnabled`/`apiEnabled` 时 `restart=false`
+- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`autoSellEnabled`/`apiEnabled`/`debugLogEnabled` 时 `restart=false`
 - `apiEnabled=false` 时延迟约 500ms 停止 HTTP 服务（先让本响应送达），此后 `GET/POST /api/config/*` 不可达；重新开启须经游戏内设置页（HTTP 已不可达）
 - 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
 - **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）

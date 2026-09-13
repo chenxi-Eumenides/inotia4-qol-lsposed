@@ -2,6 +2,7 @@ package com.inotia4.qol.patch
 
 import android.content.Intent
 import android.os.SystemClock
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.util.JsonUtil
@@ -39,7 +40,7 @@ object AgreementGate {
         val screen = try {
             JsonUtil.parseObj(NativeBridge.nativeGetGamestateJson())?.optString("screen", "")
         } catch (t: Throwable) {
-            LogFile.logError("agreement gate screen probe failed", t)
+            LogFile.error(LogDomain.PLATFORM, "agreement gate screen probe failed", t)
             null
         }
         return screen != null && screen != "main_menu"
@@ -57,7 +58,7 @@ object AgreementGate {
                 }
                 .forEach { (m, idx) -> hooker(m, idx) }
         } catch (t: Throwable) {
-            LogFile.logError("AgreementGate install failed", t)
+            LogFile.error(LogDomain.PLATFORM, "AgreementGate install failed", t)
         }
     }
 }

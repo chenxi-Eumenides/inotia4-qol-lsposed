@@ -103,7 +103,7 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
     if (fn_touch_handle_reset_moving_control != nullptr) {
         fn_touch_handle_reset_moving_control();
     } else {
-        VIRTBAG_LOG("ERROR release_cleanup missing ResetMovingControl ctl=%p",
+        VIRTBAG_LOG_ERROR("ERROR release_cleanup missing ResetMovingControl ctl=%p",
                     captured_moving_control);
     }
     if (!handled && fn_touch_handle_reset_selected_control != nullptr) {

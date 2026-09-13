@@ -134,3 +134,4 @@
 | 待定 | LSPatch bootstrap 稳定性 | liblspatch.so x86_64 与 guest 进程混合无公开先例 | PoC | emulator-research §5 |
 | 待定 | LSPatch 0.6 与 libxposed 101 兼容性 | 内置 runtime 较旧 | 必要时降级 API 93 构建 | README 已知待办 |
 | 未开始 | **文档锚点保鲜校验** | 需要周期检查文档中的测试名与 `文件:行` 锚点仍可 grep；脚本尚未实现 | 新增 `scripts/maintenance/check_docs.py`，校验测试名/文件:行可 grep 性并登记失效锚点 | P4 文档治理 |
+| 进行中 | **统一日志系统代码迁移收尾** | **硬性收敛已完成**：规范 `docs/development/logging.md` 与合规脚本 `scripts/verification/check_log_policy.py` 已落地；native 单写者 `core/native/qol_log.{h,cpp}` + JNI `bridge/native/gamebridge_log.cpp` + Kotlin `LogFile` 经 JNI 转发；单一 tag `Inotia4Qol`，脚本 R1/R2/R3 当前为 0。与 logging.md §11 状态一致 | 清理持续软告警：按 logging.md §7「扩展背包级别策略」把逐帧/高频路径（`*_tick`/`*_process`/`*_wrapper`/`*_draw`/`*_render`/`*_gate`/`*_drawing`，含别名宏）的高级日志降为 DEBUG；补齐 R5 定位变量与级别错配；保持 `--warn-only` 退出码语义 | `docs/development/logging.md`（P4） |

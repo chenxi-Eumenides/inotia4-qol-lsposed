@@ -11,7 +11,8 @@
 #include "game_ui_components.h"
 #include "game_ui_savebackup.h"
 
-#include <android/log.h>
+#include "core/native/qol_log.h"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -20,8 +21,7 @@
 #include <mutex>
 #include <thread>
 
-#define SETTINGS_TAG "Inotia4UISettings"
-#define SETTINGS_LOG(...) __android_log_print(ANDROID_LOG_INFO, SETTINGS_TAG, __VA_ARGS__)
+#define SETTINGS_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
 
 #define POPUP_STATE_SIZE 0x40
 #define CB_TEXT_SIZE 0x20
@@ -31,10 +31,10 @@
 #define ROOT_H 0x280
 #define CONTENT_W 0x430
 #define CONTENT_X ((ROOT_W - CONTENT_W) / 2)
-#define SETTINGS_ROW_COUNT 7
+#define SETTINGS_ROW_COUNT 8
 #define SETTINGS_COLUMN_COUNT 2
 #define SETTINGS_GRID_ROWS ((SETTINGS_ROW_COUNT + SETTINGS_COLUMN_COUNT - 1) / SETTINGS_COLUMN_COUNT)
-#define VISIBLE_GRID_ROWS 4
+#define VISIBLE_GRID_ROWS 5
 #define CELL_W (CONTENT_W / SETTINGS_COLUMN_COUNT)
 #define CELL_H 0x66
 #define GRID_Y 0x60
@@ -89,11 +89,11 @@ void* g_savebackup_btn = nullptr;   // v0.7.x：配置网格内的「存档备�
 void* g_savebackup_desc = nullptr;  // v0.7.x：与配置项同款左描述「存档备份」
 
 // 配置键名（与 Kotlin ModuleConfig 字段一致）
-static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"apiEnabled", "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize", "autoSellEnabled"};
-static const char* kRowLabels[SETTINGS_ROW_COUNT] = {"API服务", "堆叠上限", "拖拽合并", "OP能力", "扩展背包", "宝石优化", "自动出售"};
+static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"apiEnabled", "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize", "autoSellEnabled", "debugLogEnabled"};
+static const char* kRowLabels[SETTINGS_ROW_COUNT] = {"API服务", "堆叠上限", "拖拽合并", "OP能力", "扩展背包", "宝石优化", "自动出售", "调试日志"};
 
 // 当前配置值缓存（面板打开时从 Kotlin 拉取，切换时本地翻转+上抛）
-static char g_row_status[SETTINGS_ROW_COUNT][CB_TEXT_SIZE] = {"开", "关", "关", "关", "关", "关", "关"};
+static char g_row_status[SETTINGS_ROW_COUNT][CB_TEXT_SIZE] = {"开", "关", "关", "关", "关", "关", "关", "关"};
 static char g_addr_text[CB_TEXT_SIZE] = "";
 
 bool inject_state_entry_locked();

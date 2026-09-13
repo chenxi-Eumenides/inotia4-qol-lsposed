@@ -3,6 +3,7 @@
 #include "inventory_hook_stage4.h"
 
 #include "core/native/extension_bag_port.h"
+#include "core/native/qol_log.h"
 #include "core/native/stack_codec.h"
 #include "data/native/item_class.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
@@ -10,8 +11,6 @@
 #include "game_inventory.h"
 #include "game_patch.h"
 #include "game_state.h"
-
-#include <android/log.h>
 
 #include <atomic>
 #include <cstddef>
@@ -21,7 +20,6 @@
 
 namespace {
 
-constexpr char kTag[] = "Inotia4NativeHook";
 constexpr uint32_t kNativeApiVersion = 2;
 
 std::mutex g_hook_mutex;
@@ -212,14 +210,14 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
     const uint32_t post_field = s2_read_count_field(cap.target);
     if (post_field == cap.pre_field) {
         if ((cap.delta % 128) == 0) {
-            __android_log_print(ANDROID_LOG_INFO, kTag,
+            QOL_LOG_INFO(QolDomain::kInventory,
                                 "S2 writeback %s degenerate skip target=%p delta=%u (delta%%128==0)",
                                 op, cap.target, cap.delta);
         }
         return;
     }
     if (!s2_writeback::original_count_write_confirmed(cap.pre_field, post_field, cap.new_full)) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "S2 writeback %s mismatch skip target=%p pre=0x%x post=0x%x expect_full=%u",
                             op, cap.target, cap.pre_field, post_field, cap.new_full);
         return;
@@ -229,7 +227,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
     const uint32_t written = stack_codec::effective_write_count(
         post_field, cap.new_full, stack_limit_enabled());
     s2_write_count_field(cap.target, written);
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
                         "S2 writeback %s merge target=%p %u+%u->%u field=0x%x",
                         op, cap.target, cap.pre_full, cap.delta, cap.new_full, written);
 }
@@ -237,13 +235,13 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
 void log_extension_item_observation(const char* operation, void* item, bool recursive,
                                     int result_known, int result) {
     if (virtual_bag_native_call_active()) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
                             "%s original-only native_call=1 recursive=%d result_known=%d result=%d",
                             operation, recursive ? 1 : 0, result_known, result);
         return;
     }
     if (!extension_bag_enabled()) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "%s extension disabled recursive=%d result_known=%d result=%d",
                             operation, recursive ? 1 : 0, result_known, result);
         return;
@@ -251,7 +249,7 @@ void log_extension_item_observation(const char* operation, void* item, bool recu
     int bag = -1;
     int slot = -1;
     const bool extension_item = extension_bag_identify_native_item(item, &bag, &slot);
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "%s extension_item=%d bag=%d slot=%d recursive=%d result_known=%d result=%d",
                         operation, extension_item ? 1 : 0, bag, slot, recursive ? 1 : 0,
                         result_known, result);
@@ -260,7 +258,7 @@ void log_extension_item_observation(const char* operation, void* item, bool recu
 void* find_item_wrapper(int32_t category) {
     const uint64_t call = g_find_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
     if (virtual_bag_native_call_active() || g_in_find_item || g_backup_find_item == nullptr) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "FindItem call=%llu category=%d recursive=%d backup=%p",
                             static_cast<unsigned long long>(call), category,
                             g_in_find_item ? 1 : 0,
@@ -270,7 +268,7 @@ void* find_item_wrapper(int32_t category) {
         log_extension_item_observation("FindItem", result, g_in_find_item, 1, result != nullptr ? 1 : 0);
         return result;
     }
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "FindItem call=%llu category=%d backup=%p",
                         static_cast<unsigned long long>(call), category,
                         reinterpret_cast<void*>(g_backup_find_item));
@@ -354,7 +352,7 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
                                                         ? extension_bag_adopt_unequipped_item
                                                         : nullptr,
                                                     g_in_unequip_item_to_inven);
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "UnequipItemToInven equip_slot=%d result=%d recursive=%d",
                         equip_slot, result, g_in_unequip_item_to_inven ? 1 : 0);
     return result;
@@ -362,7 +360,7 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
 
 void consume_item_wrapper(void* item) {
     const uint64_t call = g_consume_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "ConsumeItem call=%llu item=%p recursive=%d backup=%p",
                         static_cast<unsigned long long>(call), item,
                         g_in_consume_item ? 1 : 0,
@@ -405,7 +403,7 @@ void consume_item_wrapper(void* item) {
         if (s2_physical_slot_item(borrow_bag, borrow_slot) != item) {
             // 原版仍删除了整堆（与 0x104818 的 b>1 递减分支反汇编结论矛盾）：
             // 对象已释放，禁止触磁字段，只记 ERROR 供取证。
-            __android_log_print(ANDROID_LOG_ERROR, kTag,
+            QOL_LOG_ERROR(QolDomain::kInventory,
                                 "S2 writeback ConsumeItem borrow item removed unexpectedly "
                                 "item=%p bag=%d slot=%d pre_full=%u",
                                 item, borrow_bag, borrow_slot, borrow_pre_full);
@@ -417,13 +415,13 @@ void consume_item_wrapper(void* item) {
             if (post_field == expected) {
                 const uint32_t new_full = s2_writeback::decremented_count(borrow_pre_full);
                 s2_write_count_field(item, stack_codec::s2_write_count(post_field, new_full));
-                __android_log_print(ANDROID_LOG_INFO, kTag,
+                QOL_LOG_INFO(QolDomain::kInventory,
                                     "S2 writeback ConsumeItem borrow item=%p %u->%u",
                                     item, borrow_pre_full, new_full);
             } else {
                 // 原版未按预期递减：还原预置字段，保持进 hook 前原样。
                 s2_write_count_field(item, borrow_pre_field);
-                __android_log_print(ANDROID_LOG_ERROR, kTag,
+                QOL_LOG_ERROR(QolDomain::kInventory,
                                     "S2 writeback ConsumeItem borrow mismatch item=%p "
                                     "pre=0x%x post=0x%x restored",
                                     item, borrow_pre_field, post_field);
@@ -431,7 +429,7 @@ void consume_item_wrapper(void* item) {
         }
     }
     if (!dispatched && extension_item) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "ConsumeItem extension consume failed bag=%d slot=%d item=%p",
                             extension_bag, extension_slot, item);
     }
@@ -440,7 +438,7 @@ void consume_item_wrapper(void* item) {
 
 int remove_item_wrapper(void* item) {
     const uint64_t call = g_remove_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "RemoveItem call=%llu item=%p recursive=%d backup=%p",
                         static_cast<unsigned long long>(call), item,
                         g_in_remove_item ? 1 : 0,
@@ -528,11 +526,11 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
             s2_write_count_field(item,
                                  stack_codec::effective_write_count(
                                      post_field, remain, stack_limit_enabled()));
-            __android_log_print(ANDROID_LOG_INFO, kTag,
+            QOL_LOG_INFO(QolDomain::kInventory,
                                 "S2 writeback Divide source item=%p %u-%u->%u",
                                 item, pre_full, count, remain);
         } else if (post_field != pre_field) {
-            __android_log_print(ANDROID_LOG_ERROR, kTag,
+            QOL_LOG_ERROR(QolDomain::kInventory,
                                 "S2 writeback Divide source mismatch skip item=%p "
                                 "pre=0x%x post=0x%x expect_full=%u",
                                 item, pre_field, post_field, remain);
@@ -547,7 +545,7 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
                              stack_codec::effective_write_count(
                                  s2_read_count_field(new_item), new_full,
                                  stack_limit_enabled()));
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
                             "S2 writeback Divide new item=%p count=%u", new_item, new_full);
     }
     return new_item;
@@ -572,7 +570,7 @@ void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
                              stack_codec::effective_write_count(
                                  s2_read_count_field(item), writeback,
                                  stack_limit_enabled()));
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
                             "S2 writeback MakeItem set item=%p count=%u", item, writeback);
     }
     return item;
@@ -646,7 +644,7 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
     const uint32_t written = stack_codec::effective_write_count(
         s2_read_count_field(item), plan.remain, true);
     s2_write_count_field(item, written);
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
                         "S2 writeback RemoveItemData category=%d count=%d item=%p "
                         "%u->%u field=0x%x",
                         category, count, item, cap.pre_full[index], plan.remain, written);
@@ -685,7 +683,7 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
         if (shortfall > 0) {
             const int consumed = extension_bag_consume_category(category, shortfall);
             if (consumed < shortfall) {
-                __android_log_print(ANDROID_LOG_INFO, kTag,
+                QOL_LOG_INFO(QolDomain::kInventory,
                                     "RemoveItemData extension fallback category=%d "
                                     "need=%d consumed=%d",
                                     category, shortfall, consumed);
@@ -713,8 +711,7 @@ uint64_t move_item_caller_offset() {
 void log_move_item_observation(const char* phase, void* item, int count, int target_bag,
                                int target_slot, uint64_t caller_offset,
                                const VirtualBagMoveItemObservation& observation) {
-    __android_log_print(
-        ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
         "MoveItem %s item=%p count=%d target=%d/%d caller=libgame+0x%llx "
         "extension=%d/%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_ptr=%p target_ptr=%p "
         "digest=0x%llx nonnull=%d physical_valid=%d",
@@ -738,8 +735,7 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     // 仅允许装备交换 wrapper 主动借入物理槽时通过；普通投影/拖动仍必须
     // 拒绝 backup，避免扩展对象进入原版移动链。该例外不放宽其它 caller。
     if (captured && before.extension_item && !extension_bag_internal_equip_active()) {
-        __android_log_print(
-            ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
             "MoveItem GUARD reject item=%p count=%d target=%d/%d caller=libgame+0x%llx "
             "extension=%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_ptr=%p target_ptr=%p "
             "digest=0x%llx nonnull=%d physical_valid=%d backup=skipped",
@@ -776,7 +772,7 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
                                       caller_offset, after);
         }
     } else {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "MoveItem passthrough item=%p count=%d target=%d/%d "
                             "caller=libgame+0x%llx result=%d",
                             item, count, target_bag, target_slot,
@@ -802,7 +798,7 @@ int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t 
                                          extension_bag_enabled()
                                              ? extension_bag_view_item_at
                                              : nullptr);
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
                         "EquipItemFromInvenToSlot bag=%d slot=%d equip_slot=%d result=%d",
                         bag, slot, equip_slot, result);
     return result;
@@ -823,7 +819,7 @@ void button_equip_exe_wrapper(void* button) {
         virtual_bag_handle_backpack_button_equip_result();
     if (result == VirtualBagEquipButtonResult::kHandled) return;
     if (result == VirtualBagEquipButtonResult::kBlocked) {
-        __android_log_print(ANDROID_LOG_WARN, kTag,
+        QOL_LOG_WARN(QolDomain::kInventory,
                             "ButtonEquipExe extension item blocked; original backup skipped");
         return;
     }
@@ -860,7 +856,7 @@ void button_unequip_exe_wrapper(void* button) {
 void ok_confirm_use_item_wrapper(void* item) {
     if (virtual_bag_handle_confirm_use_item(item)) return;
     if (g_backup_ok_confirm_use_item == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "UIEquip_OKConfrimUseItem backup unavailable item=%p", item);
         return;
     }
@@ -873,7 +869,7 @@ void ok_confirm_use_item_wrapper(void* item) {
 void button_use_mercenary_seal_exe_wrapper(void* button) {
     if (virtual_bag_handle_use_mercenary_seal()) return;
     if (g_backup_button_use_mercenary_seal_exe == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "UIEquip_ButtonUseMercenarySealExe backup unavailable button=%p",
                             button);
         return;
@@ -910,7 +906,7 @@ uint64_t ok_destroy_item_wrapper() {
     if (item == nullptr) return call_backup();
     // 类别门控（R-46 fail-closed）：非 count-encoded（装备/宝石/袋对象）不接管。
     if (item_count_encoding(item) != stack_codec::CountEncoding::kEncoded) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
                             "vanilla sell backup reason=not_count_encoded bag=%d slot=%d item=%p",
                             bag, slot, item);
         return call_backup();
@@ -923,7 +919,7 @@ uint64_t ok_destroy_item_wrapper() {
         *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
     const int category = fn_get_bit(flags, 15, 6);
     if (category <= 0 || fn_item_is_no_sell(category) != 0) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
                             "vanilla sell backup reason=no_sell bag=%d slot=%d category=%d", bag,
                             slot, category);
         return call_backup();
@@ -933,8 +929,7 @@ uint64_t ok_destroy_item_wrapper() {
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     int64_t price = 0;
     if (!vanilla_sell_money(unit_price, canonical, &price)) {
-        __android_log_print(
-            ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
             "vanilla sell backup reason=price_bounds bag=%d slot=%d category=%d canonical=%u unit=%lld",
             bag, slot, category, canonical, static_cast<long long>(unit_price));
         return call_backup();
@@ -942,8 +937,7 @@ uint64_t ok_destroy_item_wrapper() {
 
     if (route == VanillaSellRoute::kPreview) {
         // 按钮预演：只回填弹窗展示金额，不结算。
-        __android_log_print(
-            ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
             "vanilla sell preview bag=%d slot=%d category=%d canonical=%u unit=%lld price=%lld",
             bag, slot, category, canonical, static_cast<long long>(unit_price),
             static_cast<long long>(price));
@@ -957,7 +951,7 @@ uint64_t ok_destroy_item_wrapper() {
         return call_backup();
     }
     if (!fn_add_money(price)) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                             static_cast<long long>(price));
         return 0;
@@ -965,7 +959,7 @@ uint64_t ok_destroy_item_wrapper() {
     // 提交前复核槽内对象未变（防并发替换/释放）。
     if (s2_physical_slot_item(bag, slot) != item) {
         fn_minus_money(price);
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell stale before remove bag=%d slot=%d refunded=1", bag,
                             slot);
         return 0;
@@ -973,13 +967,12 @@ uint64_t ok_destroy_item_wrapper() {
     fn_remove_item_direct(bag, slot);
     if (s2_physical_slot_item(bag, slot) == item) {
         fn_minus_money(price);
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell remove failed bag=%d slot=%d refunded=1", bag, slot);
         return 0;
     }
     if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
-    __android_log_print(
-        ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
         "vanilla sell committed bag=%d slot=%d category=%d canonical=%u unit=%lld price=%lld",
         bag, slot, category, canonical, static_cast<long long>(unit_price),
         static_cast<long long>(price));
@@ -1000,12 +993,12 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
 
 bool target_is_executable(uintptr_t target, const char* name) {
     if (target == 0 || !game_memory_accessible(reinterpret_cast<void*>(target), 4, 'x')) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "%s target invalid: %p", name,
                             reinterpret_cast<void*>(target));
         return false;
     }
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
                         "%s target validated: %p", name,
                         reinterpret_cast<void*>(target));
     return true;
@@ -1019,17 +1012,17 @@ bool rollback_installed_hooks(const InstalledHook* hooks, std::size_t count) {
             ? -1 : g_unhook_func(hook.target);
         if (result == 0) {
             if (hook.backup != nullptr) *hook.backup = nullptr;
-            __android_log_print(ANDROID_LOG_INFO, kTag,
+            QOL_LOG_INFO(QolDomain::kInventory,
                                 "hook rollback OK name=%s", hook.name);
         } else {
             rolled_back = false;
-            __android_log_print(ANDROID_LOG_ERROR, kTag,
+            QOL_LOG_ERROR(QolDomain::kInventory,
                                 "hook rollback failed name=%s result=%d", hook.name, result);
         }
     }
     if (!rolled_back) {
         g_install_blocked.store(true, std::memory_order_release);
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "hook rollback incomplete; retry blocked");
     }
     return rolled_back;
@@ -1037,16 +1030,16 @@ bool rollback_installed_hooks(const InstalledHook* hooks, std::size_t count) {
 
 bool install_locked() {
     if (g_installed.load(std::memory_order_acquire)) {
-        __android_log_print(ANDROID_LOG_INFO, kTag, "hook install skipped: already installed");
+        QOL_LOG_INFO(QolDomain::kInventory, "hook install skipped: already installed");
         return true;
     }
     if (g_install_blocked.load(std::memory_order_acquire)) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "hook install blocked after rollback failure");
         return false;
     }
     if (g_hook_func == nullptr || !bridge_ready()) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
+        QOL_LOG_INFO(QolDomain::kInventory,
                             "hook install deferred: hook_func=%p base=%p",
                             reinterpret_cast<void*>(g_hook_func),
                             reinterpret_cast<void*>(g_base));
@@ -1162,7 +1155,7 @@ bool install_locked() {
             installed[installed_count++] = {target, backup, name};
         }
         if (result != 0 || backup == nullptr || *backup == nullptr) {
-            __android_log_print(ANDROID_LOG_ERROR, kTag,
+            QOL_LOG_ERROR(QolDomain::kInventory,
                                 "%s hook failed result=%d backup=%p; rolling back %zu hooks",
                                 name, result, backup == nullptr ? nullptr : *backup,
                                 installed_count);
@@ -1266,7 +1259,7 @@ bool install_locked() {
     }
 
     g_installed.store(true, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
                         "hook install OK api=%u count=24 FindItem=%p/%p GetItemCount=%p/%p GetCumulateCount=%p/%p ConsumeItem=%p/%p RemoveItem=%p/%p OKConfirmUseItem=%p/%p OKDestroyItem=%p/%p EquipItemFromInvenToSlot=%p/%p MoveItem=%p/%p EquipControlEventProc=%p/%p RefreshItemArea=%p/%p SaveItemDirect=%p/%p ItemSystemDivide=%p/%p ItemSystemMakeItem=%p/%p RemoveItemData=%p/%p ButtonDestroyExe=%p/%p ButtonUseMercenarySealExe=%p/%p",
                         kNativeApiVersion,
                         reinterpret_cast<void*>(find_item), reinterpret_cast<void*>(g_backup_find_item),
@@ -1309,18 +1302,18 @@ void inventory_native_hook_call_refresh_item_area_original() {
 
 void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
     if (entries == nullptr || entries->hook_func == nullptr || entries->unhook_func == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "native_init received invalid API entries");
+        QOL_LOG_ERROR(QolDomain::kInventory, "native_init received invalid API entries");
         return;
     }
     std::lock_guard<std::mutex> lock(g_hook_mutex);
     if (entries->version < kNativeApiVersion) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kInventory,
                             "native API version unsupported: %u", entries->version);
         return;
     }
     g_hook_func = entries->hook_func;
     g_unhook_func = entries->unhook_func;
-    __android_log_print(ANDROID_LOG_INFO, kTag,
+    QOL_LOG_INFO(QolDomain::kInventory,
                         "native_init called api_version=%u hook_func=%p",
                         entries->version, reinterpret_cast<void*>(g_hook_func));
     install_locked();
@@ -1328,7 +1321,7 @@ void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
 
 void inventory_native_hook_on_module_loaded(const char* name, void*) {
     if (name == nullptr || std::strstr(name, "libgame.so") == nullptr) return;
-    __android_log_print(ANDROID_LOG_INFO, kTag, "module loaded: %s", name);
+    QOL_LOG_INFO(QolDomain::kInventory, "module loaded: %s", name);
     inventory_native_hook_install_if_ready();
 }
 

@@ -29,6 +29,7 @@ import java.io.File
  * - autoSellEnabled：自动出售全局开关，默认 false；开启后背包页显示入口按钮并启用扫描。
  * - apiEnabled：API 全局开关，默认 true；关闭时不启动 HTTP 服务与 native 缓存预取线程，
  *   唯一恢复通道为游戏内设置页（ModuleConfigUiBridge JNI，不依赖 HTTP）。
+ * - debugLogEnabled：统一日志 debug 门控，默认 false；变更时下发 native 生效。
  *
  * 线程安全：配置可能被 API 请求线程/启动线程并发读写，字段用 @Volatile 保护。
  */
@@ -45,6 +46,7 @@ object ModuleConfig {
     const val DEFAULT_GEM_CRAFT_OPTIMIZE = false
     const val DEFAULT_AUTO_SELL_ENABLED = false
     const val DEFAULT_API_ENABLED = true
+    const val DEFAULT_DEBUG_LOG_ENABLED = false
 
     @Volatile
     private var loaded = false
@@ -97,6 +99,11 @@ object ModuleConfig {
     var apiEnabled: Boolean = DEFAULT_API_ENABLED
         private set
 
+    /** 统一日志 debug 门控（默认 false）：开启后 debug 级日志才发射 */
+    @Volatile
+    var debugLogEnabled: Boolean = DEFAULT_DEBUG_LOG_ENABLED
+        private set
+
     /** 加载配置（幂等）：外部 config.json 为唯一来源；不存在/损坏时用默认值并立即写入 */
     @Synchronized
     fun load(context: Context) {
@@ -104,7 +111,7 @@ object ModuleConfig {
         if (loaded) return
         val content = readPersisted(context)
         if (content == null) {
-            LogFile.log("$CONFIG_FILE missing, using defaults and persisting")
+            LogFile.info(LogDomain.CONFIG, "$CONFIG_FILE missing, using defaults and persisting")
             persist(toJson())
             loaded = true
             return
@@ -124,21 +131,24 @@ object ModuleConfig {
             gemCraftOptimize = json.optBoolean("gemCraftOptimize", DEFAULT_GEM_CRAFT_OPTIMIZE)
             autoSellEnabled = json.optBoolean("autoSellEnabled", DEFAULT_AUTO_SELL_ENABLED)
             apiEnabled = json.optBoolean("apiEnabled", DEFAULT_API_ENABLED)
+            debugLogEnabled = json.optBoolean("debugLogEnabled", DEFAULT_DEBUG_LOG_ENABLED)
             if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") ||
                 !json.has("gemCraftOptimize") || !json.has("autoSellEnabled") ||
-                !json.has("apiEnabled") ||
+                !json.has("apiEnabled") || !json.has("debugLogEnabled") ||
                 json.has("jewelBatchMix")
             ) {
-                LogFile.log("updating $CONFIG_FILE with current configuration fields")
+                LogFile.info(LogDomain.CONFIG, "updating $CONFIG_FILE with current configuration fields")
                 persist(toJson())
             }
-            LogFile.log(
+            LogFile.info(
+                LogDomain.CONFIG,
                 "config loaded: listenAddress=$listenAddress listenPort=$listenPort " +
                     "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled " +
-                    "gemCraftOptimize=$gemCraftOptimize autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled"
+                    "gemCraftOptimize=$gemCraftOptimize autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled " +
+                    "debugLogEnabled=$debugLogEnabled"
             )
         } catch (t: Throwable) {
-            LogFile.logError("config parse failed, using defaults and persisting", t)
+            LogFile.error(LogDomain.CONFIG, "config parse failed, using defaults and persisting", t)
             persist(toJson())
         }
         loaded = true
@@ -162,6 +172,7 @@ object ModuleConfig {
         var newGemCraft = gemCraftOptimize
         var newAutoSell = autoSellEnabled
         var newApiEnabled = apiEnabled
+        var newDebugLog = debugLogEnabled
         if (json.has("listenAddress")) {
             val a = json.optString("listenAddress")
             if (a.isBlank()) return "listenAddress required"
@@ -179,6 +190,7 @@ object ModuleConfig {
         if (json.has("gemCraftOptimize")) newGemCraft = json.optBoolean("gemCraftOptimize", newGemCraft)
         if (json.has("autoSellEnabled")) newAutoSell = json.optBoolean("autoSellEnabled", newAutoSell)
         if (json.has("apiEnabled")) newApiEnabled = json.optBoolean("apiEnabled", newApiEnabled)
+        if (json.has("debugLogEnabled")) newDebugLog = json.optBoolean("debugLogEnabled", newDebugLog)
         val merged = JSONObject()
             .put("listenAddress", newAddress)
             .put("listenPort", newPort)
@@ -189,6 +201,7 @@ object ModuleConfig {
             .put("gemCraftOptimize", newGemCraft)
             .put("autoSellEnabled", newAutoSell)
             .put("apiEnabled", newApiEnabled)
+            .put("debugLogEnabled", newDebugLog)
         if (!persist(merged)) return "config save failed"
         listenAddress = newAddress
         listenPort = newPort
@@ -199,6 +212,7 @@ object ModuleConfig {
         gemCraftOptimize = newGemCraft
         autoSellEnabled = newAutoSell
         apiEnabled = newApiEnabled
+        debugLogEnabled = newDebugLog
         return null
     }
 
@@ -213,6 +227,7 @@ object ModuleConfig {
         put("gemCraftOptimize", gemCraftOptimize)
         put("autoSellEnabled", autoSellEnabled)
         put("apiEnabled", apiEnabled)
+        put("debugLogEnabled", debugLogEnabled)
     }
 
     /**
@@ -225,7 +240,7 @@ object ModuleConfig {
         val merged = toJson().put("listenPort", DEFAULT_LISTEN_PORT)
         if (!persist(merged)) return false
         listenPort = DEFAULT_LISTEN_PORT
-        LogFile.log("listenPort fallback to default $DEFAULT_LISTEN_PORT")
+        LogFile.info(LogDomain.CONFIG, "listenPort fallback to default $DEFAULT_LISTEN_PORT")
         return true
     }
 
@@ -235,7 +250,7 @@ object ModuleConfig {
             val f = File(dir, CONFIG_FILE)
             if (f.exists()) f.readText() else null
         } catch (t: Throwable) {
-            LogFile.logError("read persisted config failed", t)
+            LogFile.error(LogDomain.CONFIG, "read persisted config failed", t)
             null
         }
     }
@@ -254,10 +269,10 @@ object ModuleConfig {
                 f.writeText(content.toString())
                 tmp.delete()
             }
-            LogFile.log("config persisted: ${f.absolutePath}")
+            LogFile.info(LogDomain.CONFIG, "config persisted: ${f.absolutePath}")
             true
         } catch (t: Throwable) {
-            LogFile.logError("config persist failed", t)
+            LogFile.error(LogDomain.CONFIG, "config persist failed", t)
             false
         }
     }

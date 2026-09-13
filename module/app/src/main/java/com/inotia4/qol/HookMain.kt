@@ -12,6 +12,7 @@ import com.inotia4.qol.patch.IapBlocker
 import com.inotia4.qol.patch.ImmersiveMode
 import com.inotia4.qol.patch.ResourceNamespaceBridge
 import io.github.libxposed.api.XposedModuleInterface
+import java.io.File
 
 class HookMain : XposedModule() {
 
@@ -24,11 +25,11 @@ class HookMain : XposedModule() {
 
         // 无 context 提前初始化日志（进程 uid 与游戏一致，可写游戏私有目录）
         LogFile.initEarly()
-        LogFile.log("module loaded in process: ${param.processName}")
+        LogFile.info(LogDomain.PLATFORM, "module loaded in process: ${param.processName}")
 
         // 捕获未处理异常写日志（防闪退信息丢失）
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            LogFile.logError("uncaught exception on ${thread.name}", throwable)
+            LogFile.error(LogDomain.PLATFORM, "uncaught exception on ${thread.name}", throwable)
         }
 
         startBridgeLoop()
@@ -54,7 +55,7 @@ class HookMain : XposedModule() {
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
-                    LogFile.log("blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
+                    LogFile.info(LogDomain.PLATFORM, "blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
                     IapBlocker.recover()
                     null
                 }
@@ -66,7 +67,7 @@ class HookMain : XposedModule() {
                 .intercept { chain ->
                     val intent = chain.getArg(intentIdx) as? Intent
                     if (intent?.component?.className == AgreementGate.AGREEMENT_ACTIVITY && AgreementGate.shouldBlock()) {
-                        LogFile.log("blocked AgreementUIActivity launch (outside main menu or world load in progress)")
+                        LogFile.info(LogDomain.PLATFORM, "blocked AgreementUIActivity launch (outside main menu or world load in progress)")
                         null
                     } else {
                         chain.proceed()
@@ -95,18 +96,19 @@ class HookMain : XposedModule() {
             override fun run() {
                 val ctx = currentApplication()
                 if (ctx == null) {
-                    LogFile.log("context not ready, retrying in 500ms")
+                    LogFile.info(LogDomain.PLATFORM, "context not ready, retrying in 500ms")
                     handler.postDelayed(this, 500)
                     return
                 }
                 if (!NativeBridge.init()) {
-                    LogFile.log("NativeBridge init failed: ${NativeBridge.nativeGetInitReport()}, retrying in 1s")
+                    LogFile.info(LogDomain.PLATFORM, "NativeBridge init failed: ${NativeBridge.nativeGetInitReport()}, retrying in 1s")
                     handler.postDelayed(this, 1000)
                     return
                 }
-                LogFile.log("NativeBridge init OK: ${NativeBridge.nativeGetInitReport()}")
+                LogFile.onNativeReady()
+                LogFile.info(LogDomain.PLATFORM, "NativeBridge init OK: ${NativeBridge.nativeGetInitReport()}")
                 val moduleApk = getModuleApplicationInfo().sourceDir
-                LogFile.logModuleIdentity(moduleApk)
+                LogFile.logModuleIdentity(File(moduleApk))
                 // feature 初始化无条件执行；HTTP 服务器按 apiEnabled 决定是否启动，
                 // native 预取线程由 feature 初始化内的 applyToNative（nativeSetApiEnabled）控制。
                 ApiServer.bootstrap(ctx, moduleApk)
@@ -118,7 +120,7 @@ class HookMain : XposedModule() {
         val cl = Class.forName("android.app.ActivityThread")
         cl.getMethod("currentApplication").invoke(null) as? Context
     } catch (t: Throwable) {
-        LogFile.logError("currentApplication failed", t)
+        LogFile.error(LogDomain.PLATFORM, "currentApplication failed", t)
         null
     }
 }

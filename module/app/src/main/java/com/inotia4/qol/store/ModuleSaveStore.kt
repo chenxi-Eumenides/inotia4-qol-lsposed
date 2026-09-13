@@ -2,6 +2,7 @@ package com.inotia4.qol.store
 
 import android.content.Context
 import android.util.AtomicFile
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -147,13 +148,13 @@ object ModuleSaveStore {
         }
         val data = if (storedSlot in 0 until SLOT_COUNT) decode(sourceBytes, storedSlot) else null
         if (data == null) {
-            LogFile.log("module save import slot=$slot rejected: source container invalid (storedSlot=$storedSlot)")
+            LogFile.info(LogDomain.SAVE, "module save import slot=$slot rejected: source container invalid (storedSlot=$storedSlot)")
             return false
         }
         val encoded = try {
             encode(slot, SlotData(nextGeneration(data.generation), data.sections))
         } catch (t: Throwable) {
-            LogFile.logError("module save import slot=$slot encode failed", t)
+            LogFile.error(LogDomain.SAVE, "module save import slot=$slot encode failed", t)
             return false
         }
         val primary = primaryFile(slot) ?: return false
@@ -161,7 +162,7 @@ object ModuleSaveStore {
         if (!writeAtomically(primary, encoded)) return false
         if (!writeAtomically(lastGood, encoded)) {
             // primary 已提交且有效；last-good 滞后不阻塞导入，但记录异常供排查。
-            LogFile.log("module save import slot=$slot: last-good write failed after primary commit")
+            LogFile.info(LogDomain.SAVE, "module save import slot=$slot: last-good write failed after primary commit")
             return false
         }
         true
@@ -180,7 +181,7 @@ object ModuleSaveStore {
 
         val lastGood = lastGoodFile(slot) ?: return null
         decode(readAtomically(lastGood), slot)?.let {
-            LogFile.log("module save slot=$slot recovered from last-good copy")
+            LogFile.info(LogDomain.SAVE, "module save slot=$slot recovered from last-good copy")
             return LoadedSlot(it, primaryValid = false)
         }
         if (lastGood.exists()) quarantine(lastGood, "last-good")
@@ -193,7 +194,7 @@ object ModuleSaveStore {
         val encoded = try {
             encode(slot, data)
         } catch (t: Throwable) {
-            LogFile.logError("module save slot=$slot encode failed", t)
+            LogFile.error(LogDomain.SAVE, "module save slot=$slot encode failed", t)
             return false
         }
 
@@ -289,7 +290,7 @@ object ModuleSaveStore {
         val output = try {
             atomicFile.startWrite()
         } catch (t: Throwable) {
-            LogFile.logError("module save open failed: ${file.name}", t)
+            LogFile.error(LogDomain.SAVE, "module save open failed: ${file.name}", t)
             return false
         }
         return try {
@@ -298,7 +299,7 @@ object ModuleSaveStore {
             true
         } catch (t: Throwable) {
             atomicFile.failWrite(output)
-            LogFile.logError("module save write failed: ${file.name}", t)
+            LogFile.error(LogDomain.SAVE, "module save write failed: ${file.name}", t)
             false
         }
     }
@@ -312,17 +313,17 @@ object ModuleSaveStore {
     private fun storageDirectory(): File? {
         val context = appContext
         if (context == null) {
-            LogFile.log("module save unavailable: store not initialized")
+            LogFile.info(LogDomain.SAVE, "module save unavailable: store not initialized")
             return null
         }
         val base = context.getExternalFilesDir(null)
         if (base == null) {
-            LogFile.log("module save unavailable: external files directory unavailable")
+            LogFile.info(LogDomain.SAVE, "module save unavailable: external files directory unavailable")
             return null
         }
         val directory = File(base, DIRECTORY_NAME)
         if (!directory.exists() && !directory.mkdirs()) {
-            LogFile.log("module save unavailable: mkdir failed: ${directory.absolutePath}")
+            LogFile.info(LogDomain.SAVE, "module save unavailable: mkdir failed: ${directory.absolutePath}")
             return null
         }
         return directory
@@ -331,9 +332,9 @@ object ModuleSaveStore {
     private fun quarantine(file: File, kind: String) {
         val quarantined = File(file.parentFile, "${file.name}.corrupt.${System.currentTimeMillis()}")
         if (file.renameTo(quarantined)) {
-            LogFile.log("module save $kind quarantined: ${quarantined.name}")
+            LogFile.info(LogDomain.SAVE, "module save $kind quarantined: ${quarantined.name}")
         } else {
-            LogFile.log("module save $kind invalid and could not be quarantined: ${file.name}")
+            LogFile.info(LogDomain.SAVE, "module save $kind invalid and could not be quarantined: ${file.name}")
         }
     }
 

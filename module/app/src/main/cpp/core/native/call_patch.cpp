@@ -6,7 +6,7 @@
 
 #include "call_patch.h"
 
-#include <android/log.h>
+#include "core/native/qol_log.h"
 
 #include <array>
 #include <cerrno>
@@ -17,7 +17,6 @@
 
 namespace {
 
-constexpr char kTag[] = "Inotia4CallPatch";
 constexpr size_t kPageSize = 4096;
 constexpr size_t kThunkSlot = 32;         // 每槽 32B 对齐（thunk 码 20B + 字面量 8B）
 constexpr int64_t kBlRange = 0x08000000LL;  // BL 可达范围 ±128MB
@@ -129,8 +128,8 @@ bool write_code_word(uintptr_t addr, uint32_t word) {
     const uintptr_t page = addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
     if (mprotect(reinterpret_cast<void*>(page), kPageSize,
                  PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "mprotect failed addr=%p errno=%d",
-                            reinterpret_cast<void*>(addr), errno);
+        QOL_LOG_ERROR(QolDomain::kPlatform, "mprotect failed addr=%p errno=%d",
+                      reinterpret_cast<void*>(addr), errno);
         return false;
     }
     *reinterpret_cast<uint32_t*>(addr) = word;
@@ -154,9 +153,9 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
     if ((direct_delta & 0x3) != 0 || direct_delta <= -kBlRange || direct_delta >= kBlRange) {
         void* thunk = allocate_thunk_locked(call_addr, wrapper_addr);
         if (thunk == nullptr) {
-            __android_log_print(ANDROID_LOG_ERROR, kTag,
-                                "thunk allocation failed call=%p wrapper=%p",
-                                reinterpret_cast<void*>(call_addr), wrapper);
+            QOL_LOG_ERROR(QolDomain::kPlatform,
+                          "thunk allocation failed call=%p wrapper=%p",
+                          reinterpret_cast<void*>(call_addr), wrapper);
             return false;
         }
         branch_target = reinterpret_cast<uintptr_t>(thunk);
@@ -164,9 +163,9 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
 
     const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
     if ((delta & 0x3) != 0 || delta <= -kBlRange || delta >= kBlRange) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "branch target out of BL range call=%p target=%p",
-                            reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "branch target out of BL range call=%p target=%p",
+                      reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
         return false;
     }
     const uint32_t replacement =
@@ -178,15 +177,15 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
         return true;
     }
     if (current != expected_word) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "original word mismatch call=%p got=0x%08x expected=0x%08x",
-                            reinterpret_cast<void*>(call_addr), current, expected_word);
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "original word mismatch call=%p got=0x%08x expected=0x%08x",
+                      reinterpret_cast<void*>(call_addr), current, expected_word);
         return false;  // fail-closed：不改写任何字节
     }
     if (!write_code_word(call_addr, replacement)) return false;
     remember_patched_locked(call_addr, wrapper, replacement);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "patched call=%p replacement=0x%08x",
-                        reinterpret_cast<void*>(call_addr), replacement);
+    QOL_LOG_INFO(QolDomain::kPlatform, "patched call=%p replacement=0x%08x",
+                 reinterpret_cast<void*>(call_addr), replacement);
     return true;
 }
 
@@ -200,14 +199,14 @@ bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word) {
         return true;
     }
     if ((current & 0xFC000000u) != 0x94000000u) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "revert target is not a BL call call=%p current=0x%08x",
-                            reinterpret_cast<void*>(call_addr), current);
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "revert target is not a BL call call=%p current=0x%08x",
+                      reinterpret_cast<void*>(call_addr), current);
         return false;  // fail-closed：不覆盖非 BL 指令
     }
     if (!write_code_word(call_addr, original_word)) return false;
     forget_patched_locked(call_addr);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "reverted call=%p original=0x%08x",
-                        reinterpret_cast<void*>(call_addr), original_word);
+    QOL_LOG_INFO(QolDomain::kPlatform, "reverted call=%p original=0x%08x",
+                 reinterpret_cast<void*>(call_addr), original_word);
     return true;
 }

@@ -1,5 +1,6 @@
 package com.inotia4.qol.service.action
 
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.util.JsonUtil
@@ -16,12 +17,12 @@ internal object SaveBackupActions {
     private val CHECKSUM = Regex("^[0-9a-f]{12}$")
 
     fun backupExport(slot: Int): String =
-        LogFile.op("POST /api/system/backup/export", "slot=$slot") {
+        LogFile.op(LogDomain.SAVE_BACKUP, "POST /api/system/backup/export", mapOf("slot" to "$slot")) {
             if (slot !in 0..2) JsonUtil.err("bad slot") else NativeBridge.nativeBackupExport(slot)
         }
 
     fun backupImport(checksum: String, slot: Int): String =
-        LogFile.op("POST /api/system/backup/import", "checksum=$checksum,slot=$slot") {
+        LogFile.op(LogDomain.SAVE_BACKUP, "POST /api/system/backup/import", mapOf("checksum" to "$checksum", "slot" to "$slot")) {
             when {
                 !CHECKSUM.matches(checksum) -> JsonUtil.err("bad checksum")
                 slot !in 0..2 -> JsonUtil.err("bad slot")
@@ -30,10 +31,10 @@ internal object SaveBackupActions {
         }
 
     fun backupList(): String =
-        LogFile.op("GET /api/system/backup/list", "") { NativeBridge.nativeBackupList() }
+        LogFile.op(LogDomain.SAVE_BACKUP, "GET /api/system/backup/list", emptyMap<String, String>()) { NativeBridge.nativeBackupList() }
 
     fun backupDelete(checksum: String): String =
-        LogFile.op("POST /api/system/backup/delete", "checksum=$checksum") {
+        LogFile.op(LogDomain.SAVE_BACKUP, "POST /api/system/backup/delete", mapOf("checksum" to "$checksum")) {
             if (CHECKSUM.matches(checksum)) NativeBridge.nativeBackupDelete(checksum)
             else JsonUtil.err("bad checksum")
         }

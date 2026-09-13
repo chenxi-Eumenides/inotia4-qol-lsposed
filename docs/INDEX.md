@@ -29,6 +29,7 @@
 面向代码维护者和 AI 代理，描述如何修改、扩展和验证项目。
 
 - `development/architecture.md`：当前代码结构、分层和工程约束。
+- `development/logging.md`：统一日志系统规范（级别、domain 词表、行格式、配置接线与合规检查的唯一权威）。
 - `planning/`：当前待办和重构计划。
 - `features/`：模块新增或修改功能的设计、实现和验收。
 

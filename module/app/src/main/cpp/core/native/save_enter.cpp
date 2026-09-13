@@ -8,11 +8,10 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/frame_task.h"
+#include "core/native/qol_log.h"
 #include "data/native/game_symbols.h"
 #include "game_access.h"
 #include "game_state.h"
-
-#include <android/log.h>
 
 #include <atomic>
 #include <mutex>
@@ -21,7 +20,6 @@
 
 namespace {
 
-constexpr char kTag[] = "Inotia4SaveEnter";
 // 发起点原指令字（llvm-objdump 核对）。
 constexpr uint32_t kResumeBlWord = 0x97fecd56;    // SaveSlot_SlotButtonExe+0x88 bl GAME_StartResumeGame
 constexpr uint32_t kStartGameBlWord = 0x97ffffea; // SelectCharacter_ButtonStartExe+0x10 bl SelectCharacter_StartGame
@@ -63,7 +61,8 @@ bool save_enter_tick(int64_t /*frame*/, void* /*ctx*/) {
     for (const auto& entry : snapshot) {
         entry.first(entry.second);
     }
-    __android_log_print(ANDROID_LOG_INFO, kTag, "save enter fired callbacks=%zu", snapshot.size());
+    // 由 g_pending.exchange 保证每次 pending 只触发一次（非逐帧），保持 INFO。
+    QOL_LOG_INFO(QolDomain::kSave, "save enter fired callbacks=%zu", snapshot.size());
     return true;
 }
 
@@ -122,9 +121,9 @@ bool save_enter_host_install_if_ready() {
         F_SAVESLOT_SLOT_BUTTON_EXE_RESUME_CALL_OFF;
     if (!call_patch_install_bl(load_addr, kResumeBlWord,
                                reinterpret_cast<void*>(&save_load_wrapper))) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "install load-site failed call=%p expected=0x%08x",
-                            reinterpret_cast<void*>(load_addr), kResumeBlWord);
+        QOL_LOG_ERROR(QolDomain::kSave,
+                      "install load-site failed call=%p expected=0x%08x",
+                      reinterpret_cast<void*>(load_addr), kResumeBlWord);
         g_host_installing.store(false, std::memory_order_release);
         return false;  // fail-closed：call_patch 已保证未改写任何字节
     }
@@ -134,9 +133,9 @@ bool save_enter_host_install_if_ready() {
         F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF;
     if (!call_patch_install_bl(new_addr, kStartGameBlWord,
                                reinterpret_cast<void*>(&save_new_wrapper))) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
-                            "install new-site failed call=%p; rolling back load-site",
-                            reinterpret_cast<void*>(new_addr));
+        QOL_LOG_ERROR(QolDomain::kSave,
+                      "install new-site failed call=%p; rolling back load-site",
+                      reinterpret_cast<void*>(new_addr));
         call_patch_revert_bl(load_addr, kResumeBlWord);  // 全成或全退
         g_host_installing.store(false, std::memory_order_release);
         return false;
@@ -144,7 +143,7 @@ bool save_enter_host_install_if_ready() {
 
     g_host_installed.store(true, std::memory_order_release);
     g_host_installing.store(false, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "installed load=%p new=%p",
-                        reinterpret_cast<void*>(load_addr), reinterpret_cast<void*>(new_addr));
+    QOL_LOG_INFO(QolDomain::kSave, "installed load=%p new=%p",
+                 reinterpret_cast<void*>(load_addr), reinterpret_cast<void*>(new_addr));
     return true;
 }

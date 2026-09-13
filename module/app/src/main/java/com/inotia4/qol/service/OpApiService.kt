@@ -1,5 +1,6 @@
 package com.inotia4.qol.service
 
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.ModuleConfig
 import com.inotia4.qol.NativeBridge
@@ -41,28 +42,28 @@ class OpApiServiceImpl : OpApiService {
 
     override fun setHp(role: Int, hp: Int): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/character/{role}/hp", "role=$role,hp=$hp") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/hp", mapOf("role" to "$role", "hp" to "$hp")) {
             NativeBridge.nativeOpSetHp(role, hp)
         }
     }
 
     override fun setMp(role: Int, mp: Int): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/character/{role}/mp", "role=$role,mp=$mp") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/mp", mapOf("role" to "$role", "mp" to "$mp")) {
             NativeBridge.nativeOpSetMp(role, mp)
         }
     }
 
     override fun setExperience(role: Int, exp: Long): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/character/{role}/experience", "role=$role,exp=$exp") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/experience", mapOf("role" to "$role", "exp" to "$exp")) {
             NativeBridge.nativeOpSetExperience(role, exp)
         }
     }
 
     override fun setLevel(role: Int, level: Int, force: Boolean): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/character/{role}/level", "role=$role,level=$level,force=$force") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/level", mapOf("role" to "$role", "level" to "$level", "force" to "$force")) {
             NativeBridge.nativeOpSetLevel(role, level, force)
         }
     }
@@ -71,7 +72,7 @@ class OpApiServiceImpl : OpApiService {
     // 任一点失败即中断返回错误（批量循环逻辑从 controller 移入 impl，v0.5.46）
     override fun setAttr(role: Int, stats: List<Pair<Int, Int>>): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/character/{role}/set_attr", "role=$role,stats=$stats") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/set_attr", mapOf("role" to "$role", "stats" to "$stats")) {
             val sb = StringBuilder("[")
             for ((idx, v) in stats) {
                 val r = NativeBridge.nativeOpSetAttr(role, idx, v)
@@ -86,7 +87,7 @@ class OpApiServiceImpl : OpApiService {
 
     override fun addItem(category: Int, count: Int): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/inventory/add", "category=$category,count=$count") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/inventory/add", mapOf("category" to "$category", "count" to "$count")) {
             NativeBridge.nativeOpAddItem(category, count)
         }
     }
@@ -95,28 +96,28 @@ class OpApiServiceImpl : OpApiService {
 
     override fun setMoney(money: Long): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/inventory/money", "money=$money") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/inventory/money", mapOf("money" to "$money")) {
             NativeBridge.nativeOpSetMoney(money)
         }
     }
 
     override fun setStatusPoint(role: Int, points: Int): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/character/{role}/status-point", "role=$role,points=$points") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/status-point", mapOf("role" to "$role", "points" to "$points")) {
             NativeBridge.nativeOpSetStatusPoint(role, points)
         }
     }
 
     override fun partySwap(a: Int, b: Int): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/party/swap", "a=$a,b=$b") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/party/swap", mapOf("a" to "$a", "b" to "$b")) {
             NativeBridge.nativeOpPartySwap(a, b)
         }
     }
 
     override fun teleport(mapId: Int, x: Int, y: Int): String {
         checkOpEnabled()
-        return LogFile.op("POST /api/op/movement/teleport", "mapId=$mapId,x=$x,y=$y") {
+        return LogFile.op(LogDomain.OP, "POST /api/op/movement/teleport", mapOf("mapId" to "$mapId", "x" to "$x", "y" to "$y")) {
             NativeBridge.nativeOpTeleport(mapId, x, y)
         }
     }

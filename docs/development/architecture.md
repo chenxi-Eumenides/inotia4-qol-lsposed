@@ -78,7 +78,7 @@ native 侧按同一产品边界理解：`api/native/` 承载原版信息和原�
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | data | `game_symbols.h` / `symbol_registry.h` / `symbol_resolver.*` / `game_access.*` / `game_state.*` / `game_tiles.*` | 符号解析（VMA/ELF .dynsym）、偏移常量、`resolve_global`、跨域实体查询原语（member_or_null / lead_member / find_inventory_item / inventory_count / inventory_item_at / find_char_by_merc_slot）、**跨域遍历原语（for_each_bag_slot / pool_obj_valid）**、瓦片静态缓存、状态判定（game_in_world / ui_blocked / tutorial_*） | 构造业务 JSON；依赖 parse 层任何头 |
-| core | `core/native/game_json.*` / `core/native/game_nav.*` / `core/native/game_cache.*` / `core/native/frame_task.* / core/native/frame_host.*` / `core/native/game_ops_common.*` | json_escape、BFS 寻路、帧缓存（12 槽表驱动）、统一帧任务管理器（§2.1）、op_ok/op_err 响应信封 | 注入游戏语义名称 |
+| core | `core/native/game_json.*` / `core/native/game_nav.*` / `core/native/game_cache.*` / `core/native/frame_task.* / core/native/frame_host.*` / `core/native/game_ops_common.*` / `core/native/qol_log.*` | json_escape、BFS 寻路、帧缓存（12 槽表驱动）、统一帧任务管理器（§2.1）、op_ok/op_err 响应信封、统一日志单写者（`docs/development/logging.md`） | 注入游戏语义名称 |
 | parse 域 | `game_character/party/inventory/world/quest/ui/dialog/shop/save/system` | build_*/data_* 读构造、data_op_* 写操作 | 域间水平互调（仅 system 聚合方向向下 + 分发器特例，见 §1.2） |
 | patch | `feature/patch/game_patch.*` / `game_ptr_hook.h` + Kotlin `patch/` | 注入/修改补丁域：IAP 屏蔽、沉浸模式、堆叠上限、craft 注入、recover、migrate_stack（见 §2.5） | — |
 | service | Kotlin `service/` | inject* 名称注入、快照 attach、OP 编排（LogFile.op + **OP 门禁**）、配置下发 native | 解析 HTTP 参数；直接读内存 |
@@ -112,6 +112,7 @@ data 层 → 仅 STL
 | 文件 | 层 | 职责 | 依赖 |
 |---|---|---|---|
 | `bridge/native/gamebridge*.cpp` | bridge | **JNI 薄层**：114 个 `Java_*` 导出，按生命周期、数据读取、操作、UI 和 feature 分组，仅参数传递 + 字符串转换，无业务逻辑 | 各层头 |
+| `bridge/native/gamebridge_log.cpp` | bridge | **日志 JNI 薄层**：`nativeQolLogInit` / `nativeQolLogWrite` / `nativeQolLogSetDebugEnabled` 参数转换，转发 `core/native/qol_log.*` | qol_log.h |
 | `game_symbols.h` | data | **常量单一来源**：结构体偏移、VMA、函数签名。含逆向来源注释 | 无 |
 | `symbol_registry.h` | data | 符号登记表（SYM 宏名 → VMA/解析来源），check_symbols.py 校验清单 | 无 |
 | `symbol_resolver.*` | data | ELF `.dynsym` 符号名动态解析 + `.rela.dyn` RELATIVE 反查（GOT 槽），VMA 仅兜底 | game_symbols.h |
@@ -125,6 +126,7 @@ data 层 → 仅 STL
 | `core/native/save_enter.*` | core | 进入存档回调：读档/新档发起点 call_patch 标记 + 帧检测 world 就绪触发一次（§2.1） | frame_task.h / call_patch / game_state.h |
 | `core/native/save_exit.*` | core | 退出存档回调：world→主菜单发起点 call_patch（GAMESTATE_SetState+0xb0 bl GAME_Exit）触发一次 | call_patch / game_access |
 | `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
+| `core/native/qol_log.*` | core | **统一日志单写者**：行格式化、logcat + 文件发射、debug 运行时门控、逐帧节流原语；格式与规则唯一权威见 `docs/development/logging.md` | 仅 STL（Android 时含 `<android/log.h>`） |
 | `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |
 | `api/native/game_character.*` | API native 域 | 角色：member_json / build_player_json / build_skills_json + 战斗/成长写操作（cast/attack/stop_combat/set_experience/set_level/add_experience/set_status_point/add_stat/set_auto_attack/set_skill_usage/learn_action/set_hp/set_mp/set_attr/stat_reset/skill_reset） | data + 引擎 |
 | `api/native/game_party.*` | API native 域 | 队伍：build_party_json / build_mercenaries_json + include/exclude/discharge/withdraw/switch_player/party_swap | data + 引擎 |
@@ -304,7 +306,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | `HookMain.kt` | 模块入口；核心原则=读内存+调游戏函数为主，hook 仅必要时使用：轮询 `bridge_init()` 直至成功 → 反射拿 context → 启动 ApiServer |
 | `NativeBridge.kt` | JNI 声明（`System.loadLibrary("gamebridge")` + **114 个 external**，JNI 面冻结见 §9.5） |
 | `ApiServer.kt` | AndServer 启动（监听地址/端口读 ModuleConfig（外部 config.json）、模块 assets 注入、StaticData 挂接） |
-| `ModuleConfig.kt` | **配置组件（v0.5.17，v0.5.21 改外部源）**：外部存储 config.json 为唯一配置来源（缺失用默认值并立即写入），提供监听地址/端口/堆叠上限增加/拖拽合并/**opEnabled** 等配置的获取与修改（每次修改立即持久化） |
+| `ModuleConfig.kt` | **配置组件（v0.5.17，v0.5.21 改外部源）**：外部存储 config.json 为唯一配置来源（缺失用默认值并立即写入），提供监听地址/端口/堆叠上限增加/拖拽合并/**opEnabled**/**debugLogEnabled**（统一日志调试开关，默认 false，接入设置页第 8 行「调试日志」）等配置的获取与修改（每次修改立即持久化） |
 | `store/ModuleSaveStore.kt` | **模块 sidecar 存储**：保存扩展背包等模块数据；不覆盖原版 `save*.dat`。原版存档备份能力已移除，后续设计见 `docs/development/planning/backlog.md` P1。 |
 | `service/ApiServices.kt` | **服务注册中心（v0.4.0，P0-3 重构）**：controller/调用层从这里取 Service 实例；多调用通道预留（Binder/LocalSocket 复用同一 Service 层） |
 | `service/ApiService.kt` | **单文件双接口**：`InfoApiService`（信息查询服务接口，GET /api/info/* 契约）+ `ActionApiService`（合法操作服务接口，POST /api/action/* 契约），均不绑定 HTTP 语义 |
@@ -343,7 +345,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | `patch/IapBlocker.kt` | IAP 屏蔽（模块启动期经 ConfigApiService 下发 native） |
 | `patch/ImmersiveMode.kt` | 沉浸模式（模块启动期经 ConfigApiService 下发 native） |
 | `StaticData.kt` | assets 静态数据读取（内存缓存） |
-| `LogFile.kt` | 文件日志（/sdcard/Android/data/<游戏包>/files/inotia4-export.log） |
+| `LogFile.kt` | **日志门面（P1 重写，P4 统一日志系统）**：不再自持文件句柄，native 就绪后 `debug/info/warn/error/op` 一律经 JNI `nativeQolLogWrite` 转发 native 单写者；native 补时间戳与帧号，行格式 `<ts> f=<frame> <L> <domain> <src> <msg>`（见 `docs/development/logging.md`）。`onNativeReady` 前有界 backlog（512，logcat 兜底），就绪后重放再直写；`debug()` 由 `ModuleConfig.debugLogEnabled` 门控；`error`/`op` 输出单行 `key=value` 文案。落盘路径由 native 统一为 /sdcard/Android/data/<游戏包>/files/inotia4-export.log |
 
 ### 约定
 - **controller 只做路由 + 参数解析 + 调用 Service**，业务逻辑在 Service 层（InfoApiServiceImpl/ActionApiServiceImpl/OpApiService/ConfigApiService）或 native 或 StaticData
@@ -479,7 +481,9 @@ uv run python scripts/verification/smoke_all.py
 **NativeBridge 114 个 external 冻结**。native bridge 已按职责拆为多个 `gamebridge_*.cpp`，JNI 导出名与分发逻辑不随域拆分变化。新增端点按 §6 五段式扩展，**禁止改名/改签名既有 external**。
 
 ### 9.6 线程纪律（非游戏线程禁用有写副作用的游戏函数，2026-09 事故新增）
+
 > 来源：HP 莫名扣血/死亡事故定位（`docs/history/hp-clamp-offthread-incident.md`）。以下为后续所有 native 读写必须遵守的持续性规范。
+
 1. **禁止在 HTTP 工作线程、缓存预取线程（`cache_prefetch_thread_fn`）、`bridge-init`、hook 回调等非游戏线程调用有写副作用的游戏函数**。游戏函数名带 `Get*` 不等于纯读——`CHAR_GetAttr`/`CHAR_GetStat`/`CHAR_GetNextExperience` 等在被调分支内会写回角色对象或使用全局计算器栈，与游戏主线程并发会破坏属性重算窗口。
 2. **只读数据优先直读缓存字段**，不复用可能带写副作用的 getter：
    - HP/MP 上限用 `char_max_hp`/`char_max_mp` 直读 `[ch+0x9c]`/`[ch+0xa0]`，不用 `CHAR_GetAttr(0x1e/0x1f)`（0x1e 分支 HP>上限时把 HP 写为上限）；
@@ -487,6 +491,7 @@ uv run python scripts/verification/smoke_all.py
 3. **需要游戏函数结果时，用 `frame_task` 在游戏主线程帧周期缓存为 atomic 快照，供离线程只读**。范例：`char_next_exp_cached` 由 `char_next_exp_tick` 在 `kFramePointLogicPre` 每帧对 3 名队员调用 `CHAR_GetNextExperience` 并缓存（`CAL_Calculate` 使用全局计算器栈，不能在离线程调用），JSON 只读快照、未命中回退直读 `[ch+0x320]`。
 4. 落地方式：新增离线程只读原语放 `game_state.*`（data 层），写副作用 getter 保留给游戏线程操作路径；`game_access.h` 对禁用函数以 `⚠️ 禁止在非游戏线程调用` 注释标注。
 5. 事故证据：`cache_prefetch_thread_fn` 每帧构造 `interval>0` 槽时调用 `CHAR_GetAttr(0x1e)`，与游戏线程 `CHAR_UpdateAttr` 竞争把 HP 钳成 0 → 残血/死亡（真机 frida 高频调用复现 `dialog_wipeout`）。取证脚本 `scripts/verification/hp_watch_session.py`。
+
 ## 10. 滞后修正清单（P4 文档同步，全部实测确认）
 
 重构期间文档与代码的滞后点，P4 统一修正（以代码为准）：

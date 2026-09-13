@@ -33,7 +33,7 @@ object ExtensionBagUiBridge {
         val section = try {
             ModuleSaveStore.readSection(slot, SECTION_NAME)
         } catch (t: Throwable) {
-            LogFile.logError("extension bag UI state load failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state load failed", t)
             return defaultStateJson()
         } ?: return defaultStateJson()
         val raw = section.payload.toString(Charsets.UTF_8)
@@ -55,7 +55,7 @@ object ExtensionBagUiBridge {
             )
             if (saved) "ok" else "error:storage"
         } catch (t: Throwable) {
-            LogFile.logError("extension bag UI state save failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state save failed", t)
             "error:storage"
         }
     }
@@ -153,12 +153,12 @@ object ExtensionBagUiBridge {
                         val preview = payload.take(64).map {
                             if (it.isWhitespace() || it == '"') '?' else it
                         }.joinToString("")
-                        LogFile.log("extension bag isolated reason=invalid_payload " +
+                        LogFile.info(LogDomain.EXTENSION_BAG, "extension bag isolated reason=invalid_payload " +
                             "bag=${bag + 6} slot=$slot payloadLength=${payload.length} " +
                             "payloadPreview=$preview")
                     }
                     if (rejectPayloadlessItems && category > 0 && count > 0 && !hasPayload) {
-                        LogFile.log("extension bag isolated reason=payloadless_rejected " +
+                        LogFile.info(LogDomain.EXTENSION_BAG, "extension bag isolated reason=payloadless_rejected " +
                             "bag=${bag + 6} slot=$slot category=$category count=$count")
                     }
                     when {
@@ -171,7 +171,7 @@ object ExtensionBagUiBridge {
             val pending = if (source.has("pending")) source.optJSONObject("pending") else null
             stateJson(normalizedMode, originalSelected, types, selected, inspected, items, pending)
         } catch (t: Throwable) {
-            LogFile.logError("extension bag UI state parse failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state parse failed", t)
             null
         }
     }

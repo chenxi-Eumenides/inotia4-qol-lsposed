@@ -355,7 +355,7 @@ void* module_item_locked(int bag, int slot) {
     if (item == nullptr || g_module_object_categories[bag][slot] != descriptor.category ||
         g_module_object_hashes[bag][slot] != descriptor_hash) {
         if (!free_module_object_locked(bag, slot)) {
-            VIRTBAG_LOG("module materialize rejected stale object bag=%d slot=%d item=%p",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize rejected stale object bag=%d slot=%d item=%p",
                         bag, slot, item);
             return nullptr;
         }
@@ -364,7 +364,7 @@ void* module_item_locked(int bag, int slot) {
         uint32_t handle = 0;
         if (ownership::allocate(&g_ownership_ledger, &handle) != ownership::Outcome::kOk) {
             release_temporary_item_locked(item);
-            VIRTBAG_LOG("module materialize rejected ownership ledger exhausted bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize rejected ownership ledger exhausted bag=%d slot=%d",
                         bag, slot);
             return nullptr;
         }
@@ -373,7 +373,7 @@ void* module_item_locked(int bag, int slot) {
             g_module_object_handles[bag][slot] = 0;
             ownership::release(&g_ownership_ledger, handle);
             release_temporary_item_locked(item);
-            VIRTBAG_LOG("module materialize replacement rejected bag=%d slot=%d", bag, slot);
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize replacement rejected bag=%d slot=%d", bag, slot);
             return nullptr;
         }
         g_module_objects[bag][slot] = item;
@@ -393,7 +393,7 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (g_module_view_installed) {
-            VIRTBAG_LOG("save gate: restoring projected view before SAVE_SaveInventory");
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save gate: restoring projected view before SAVE_SaveInventory");
             restore_module_view_locked();
         }
     }
@@ -418,7 +418,7 @@ uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int
         }
     }
     if (g_module_view_installed && !item_pointer_known_locked(item)) {
-        VIRTBAG_LOG("draw gate: suppressed unknown item=%p", item);
+        QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw gate: suppressed unknown item=%p", item);
         return 0;
     }
     const uintptr_t raw = g_base != 0
@@ -449,7 +449,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
                 (g_extension_drag_session.target_kind !=
                      virtual_bag::DragTargetKind::kOriginalBag ||
                  g_extension_drag_session.target_bag != bag)) {
-                VIRTBAG_LOG("drop gate: conflicting deferred target old=%d/%d new=%d",
+                QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop gate: conflicting deferred target old=%d/%d new=%d",
                             static_cast<int>(g_extension_drag_session.target_kind),
                             g_extension_drag_session.target_bag, bag);
                 return 0;
@@ -457,7 +457,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
             g_extension_drag_session.target_kind = virtual_bag::DragTargetKind::kOriginalBag;
             g_extension_drag_session.target_bag = bag;
             g_extension_drag_session.target_slot = -1;
-            VIRTBAG_LOG("drop deferred ext->orig source=%d/%d bag=%d",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop deferred ext->orig source=%d/%d bag=%d",
                         src_bag, src_slot, bag);
             // 返回 0（而非伪成功 1）：反汇编证实（b8cc8 cbz）原版仅在返回 0 时
             // 跳过「清 INVEN[当前袋][控件槽号] + 控件重绑」——返回 1 会让游戏
@@ -471,7 +471,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
                     g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA",
                                         F_INVEN_SAVE_ITEM_ON_EMPTY_VMA))(item, bag);
             }
-            VIRTBAG_LOG("drop gate: source/session mismatch src=%d/%d bag=%d phase=%d",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop gate: source/session mismatch src=%d/%d bag=%d phase=%d",
                         src_bag, src_slot, bag,
                         static_cast<int>(g_extension_drag_session.phase));
             return 0;
@@ -496,7 +496,7 @@ bool install_module_view_locked(int bag) {
     if (fn_control_item_set_item == nullptr || fn_control_object_get_child == nullptr) return false;
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
-        VIRTBAG_LOG("module view reject install: original window bag=%d (task bag reserved)",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "module view reject install: original window bag=%d (task bag reserved)",
                     original_bag);
         return false;
     }
@@ -533,7 +533,7 @@ bool install_module_view_locked(int bag) {
     }
     g_module_view_installed = true;
     g_module_view_index = bag;
-    VIRTBAG_LOG("module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
     return true;
 }
 
@@ -555,7 +555,7 @@ void refresh_projection_if_overwritten_locked() {
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != item) {
             fn_control_item_set_item(ctrl, item);
-            VIRTBAG_LOG("projection post-refresh slot=%d current=%p item=%p",
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "projection post-refresh slot=%d current=%p item=%p",
                         slot, current, item);
         }
     }
@@ -708,7 +708,7 @@ void virtual_bag_inventory_enter_wrapper() {
 }
 
 void virtual_bag_save_panel_enter_wrapper() {
-    VIRTBAG_LOG("save panel enter wrapper invoked world=%d hook=%d",
+    QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save panel enter wrapper invoked world=%d hook=%d",
                 game_in_world() ? 1 : 0, g_save_panel_hook_installed ? 1 : 0);
     if (game_in_world()) {
         module_save_game();
@@ -721,7 +721,7 @@ void virtual_bag_draw_end_wrapper() {
     if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) != 5) {
         if (!prepare_main_menu_locked()) {
             g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
-            VIRTBAG_LOG("draw-end main-menu cleanup failed; retry scheduled");
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw-end main-menu cleanup failed; retry scheduled");
         } else {
             g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }

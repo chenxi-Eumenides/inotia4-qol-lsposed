@@ -394,7 +394,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         if (stage4_finish_requires_abort(finished)) {
             const bool aborted = module_use_abort_locked(use_token);
             const bool isolated = aborted || module_use_abort_isolate_locked(use_token);
-            VIRTBAG_LOG("ERROR equip control token finish failed source=%p/%d/%d aborted=%d isolated=%d",
+            VIRTBAG_LOG_ERROR("ERROR equip control token finish failed source=%p/%d/%d aborted=%d isolated=%d",
                         source_item, source_bag, source_slot, aborted ? 1 : 0,
                         isolated ? 1 : 0);
             cancel_projected_drag_session_locked("equip-control-finish-mismatch");

@@ -1,12 +1,12 @@
 #include "feature/ui/game_ui_gemcraft.h"
 
 #include "core/native/call_patch.h"
+#include "core/native/qol_log.h"
 #include "feature/gemcraft/gemcraft_rules.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
 #include "game_symbols.h"
 
-#include <android/log.h>
 #include <sys/mman.h>
 
 #include <atomic>
@@ -16,7 +16,6 @@
 
 namespace {
 
-constexpr char kTag[] = "Inotia4GemCraft";
 constexpr int kStuffSlotCount = 3;
 // UIMix_StartMix + 0x258 处原 `bl UIMix_ResetStuffItemControl` 指令字（0xc0ac8，反汇编核对）。
 constexpr uint32_t kCraftResetStuffCallWord = 0x97fffdde;
@@ -193,7 +192,7 @@ void gemcraft_craft_reset_gate() {
 // 语义与「三格必须同档/混沌不可合成」一致；用户裁决 D3）。
 void gemcraft_show_level_error() {
     if (fn_popup_create_ok_from_textdata == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "popup symbol not resolved");
+        QOL_LOG_ERROR(QolDomain::kGemCraft, "popup symbol not resolved");
         return;
     }
     fn_popup_create_ok_from_textdata(0x62, 0, 0, 0);
@@ -281,30 +280,30 @@ void try_install_craft_wrapper(void* button) {
 // 参考 game_patch_move_merge.inc update_move_merge_hook_locked 的 mprotect + PtrHook 范式。
 bool install_got_hook(uintptr_t got_vma, const char* name, PtrHook& hook,
                       void (*wrapper)(void*), uintptr_t expected) {
-    (void)name;  // host 桩的 __android_log_print 丢弃参数，避免 -Wunused-parameter
+    (void)name;  // host 日志桩丢弃该参数，避免 -Wunused-parameter
     if (hook.installed()) return true;
     if (g_base == 0 || wrapper == nullptr || expected == 0) return false;
     void** slot = reinterpret_cast<void**>(g_base + got_vma);
     if (!game_memory_accessible(slot, sizeof(void*), 'r')) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "%s got not accessible slot=%p", name, slot);
+        QOL_LOG_ERROR(QolDomain::kGemCraft, "%s got not accessible slot=%p", name, slot);
         return false;
     }
     if (*slot != reinterpret_cast<void*>(expected)) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag,
+        QOL_LOG_ERROR(QolDomain::kGemCraft,
                             "%s got unexpected slot=%p value=%p expected=%p", name, slot, *slot,
                             reinterpret_cast<void*>(expected));
         return false;
     }
     const uintptr_t page = reinterpret_cast<uintptr_t>(slot) & ~(kPageSize - 1);
     if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "%s mprotect failed errno=%d", name, errno);
+        QOL_LOG_ERROR(QolDomain::kGemCraft, "%s mprotect failed errno=%d", name, errno);
         return false;
     }
     if (!hook.install_typed(slot, wrapper)) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "%s install failed slot=%p", name, slot);
+        QOL_LOG_ERROR(QolDomain::kGemCraft, "%s install failed slot=%p", name, slot);
         return false;
     }
-    __android_log_print(ANDROID_LOG_INFO, kTag, "%s hook installed slot=%p orig=%p", name, slot,
+    QOL_LOG_INFO(QolDomain::kGemCraft, "%s hook installed slot=%p orig=%p", name, slot,
                         hook.orig);
     return true;
 }
@@ -334,7 +333,7 @@ bool set_gemcraft_enabled(bool enabled) {
     g_gemcraft_enabled.store(enabled, std::memory_order_release);
     if (!enabled) return true;
     if (!gemcraft_install_if_ready()) {
-        __android_log_print(ANDROID_LOG_WARN, kTag,
+        QOL_LOG_WARN(QolDomain::kGemCraft,
                             "install deferred (bridge/base not ready)");
     }
     return true;
@@ -375,13 +374,13 @@ bool gemcraft_install_if_ready() {
             F_UIMIX_START_MIX_RESET_STUFF_CALL_OFF;
         if (!call_patch_install_bl(call_addr, kCraftResetStuffCallWord,
                                    reinterpret_cast<void*>(&gemcraft_craft_reset_gate))) {
-            __android_log_print(ANDROID_LOG_ERROR, kTag,
+            QOL_LOG_ERROR(QolDomain::kGemCraft,
                                 "craft anchor install failed call=%p expected=0x%08x",
                                 reinterpret_cast<void*>(call_addr), kCraftResetStuffCallWord);
             ok = false;
         } else {
             g_craft_anchor_installed.store(true, std::memory_order_release);
-            __android_log_print(ANDROID_LOG_INFO, kTag, "craft anchor installed call=%p",
+            QOL_LOG_INFO(QolDomain::kGemCraft, "craft anchor installed call=%p",
                                 reinterpret_cast<void*>(call_addr));
         }
     }

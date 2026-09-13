@@ -151,13 +151,15 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
             n->target_py = py;
             for (int i = 0; i < retry.dir_count; ++i)
                 n->dirs[i] = static_cast<int8_t>(retry.dirs[i]);
-            MOVE_LOG("replan: wait-retry ok dirs=%d", retry.dir_count);
+            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                                "replan: wait-retry ok dirs=%d", retry.dir_count);
             return !map_link_check(n->ch);
         }
         ++n->wait_frames;
         if (n->wait_frames > 60) {
             n->wait_frames = 0;
-            MOVE_LOG("replan: wait timeout at (%d,%d)", px >> 4, py >> 4);
+            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                                "replan: wait timeout at (%d,%d)", px >> 4, py >> 4);
             return false;
         }
         return true;   // 继续等待（保持帧任务存活）
@@ -176,7 +178,8 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
                 fn_char_move(n->ch, face_dir, 8, 0);
                 n->face_target = false;
                 n->wait_frames = 1;
-                MOVE_LOG("replan: reached nearest (%d,%d), waiting", px >> 4, py >> 4);
+                QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                                    "replan: reached nearest (%d,%d), waiting", px >> 4, py >> 4);
                 return true;
             }
             return false;
@@ -191,7 +194,9 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
     if (fn_char_move(n->ch, n->dirs[n->dir_idx], 8, 0)) {
         // 撞墙/被动态单位阻挡 → 从当前格 BFS 绕行（排除撞墙格，见下 wall_tx/wall_ty）。
         if (n->target_tx < 0 || n->replan_count >= 5) {
-            MOVE_LOG("replan: abort target=(%d,%d) replan=%d", n->target_tx, n->target_ty, n->replan_count);
+            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                                "replan: abort target=(%d,%d) replan=%d",
+                                n->target_tx, n->target_ty, n->replan_count);
             return false;
         }
         int cpx = px >> 4, cpy = py >> 4;
@@ -200,8 +205,9 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
         int wall_tx = -1, wall_ty = -1;
         int wall_dir = (n->dir_idx >= 0 && n->dir_idx < n->dir_count) ? n->dirs[n->dir_idx] : -1;
         if (wall_dir >= 0) { wall_tx = cpx + NAV_DX[wall_dir]; wall_ty = cpy + NAV_DY[wall_dir]; }
-        MOVE_LOG("replan: hit wall at (%d,%d) dir=%d replan=%d wall=(%d,%d)", cpx, cpy,
-                 wall_dir, n->replan_count, wall_tx, wall_ty);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                            "replan: hit wall at (%d,%d) dir=%d replan=%d wall=(%d,%d)", cpx, cpy,
+                            wall_dir, n->replan_count, wall_tx, wall_ty);
         // v0.5.27：撞墙后从当前格 BFS 绕行（排除撞墙格）——废除 v0.4.53 的 resume 探测：
         // resume 格在障碍后方（玩家到不了），其路径起点与玩家位置错位，found=true 也会反复撞墙。
         // found=false（目标被动态单位封死）时不再直接终止——改用 nearest 最近可达点接续
@@ -216,12 +222,14 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
             n->target_py = py;
             n->face_target = !np.found;
             for (int i = 0; i < np.dir_count; ++i) n->dirs[i] = static_cast<int8_t>(np.dirs[i]);
-            MOVE_LOG("replan: cur-path ok dirs=%d found=%d nearest=(%d,%d)",
-                     np.dir_count, np.found ? 1 : 0, np.nearest_x, np.nearest_y);
+            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                                "replan: cur-path ok dirs=%d found=%d nearest=(%d,%d)",
+                                np.dir_count, np.found ? 1 : 0, np.nearest_x, np.nearest_y);
             return !map_link_check(n->ch);
         }
         // 全量规划失败：终止任务（v0.4.51：不再多余尝试）
-        MOVE_LOG("replan: fail, terminate at (%d,%d)", cpx, cpy);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                            "replan: fail, terminate at (%d,%d)", cpx, cpy);
         return false;
     }
     // v0.5.36：成功走一步后仅当回到原始路径「未走过的后续格」才清零重试计数——

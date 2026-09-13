@@ -11,6 +11,7 @@
 #include "core/native/extension_bag_port.h"
 #include "core/native/frame_task.h"
 #include "core/native/inventory_trade.h"
+#include "core/native/qol_log.h"
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "data/native/game_symbols.h"
@@ -20,15 +21,12 @@
 #include "game_access.h"
 #include "game_state.h"
 
-#include <android/log.h>
-
 #include <atomic>
 #include <cstdint>
 #include <mutex>
 
 namespace {
 
-constexpr char kTag[] = "Inotia4AutoSell";
 constexpr int kLastPhysicalBag = 4;      // 原版任务袋 5 排除
 constexpr int kLogicalBagScanFirst = 6;  // = kExtensionLogicalBagFirst
 constexpr int kLogicalBagScanCount = 5;  // = kBagCount
@@ -85,8 +83,8 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
         return;
     }
     ++stats->failed;
-    __android_log_print(ANDROID_LOG_WARN, kTag,
-                        "sell failed bag=%d slot=%d category=%d status=%d",
+    QOL_LOG_WARN(QolDomain::kAutosell,
+                 "sell failed bag=%d slot=%d category=%d status=%d",
                         ref.bag, ref.slot, ref.category, static_cast<int>(result.status));
 }
 
@@ -128,8 +126,8 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
 
     autosell_note_scan(frame, stats.sold, stats.failed);
     if (stats.sold > 0 || stats.failed > 0) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
-                            "scan frame=%lld sold=%d failed=%d",
+        QOL_LOG_INFO(QolDomain::kAutosell,
+                     "scan frame=%lld sold=%d failed=%d",
                             static_cast<long long>(frame), stats.sold, stats.failed);
     }
 }
@@ -154,7 +152,7 @@ void remove_task_if_any() {
     if (g_task == 0) return;
     frame_task_remove(g_task);
     g_task = 0;
-    __android_log_print(ANDROID_LOG_INFO, kTag, "task removed");
+    QOL_LOG_INFO(QolDomain::kAutosell, "task removed");
 }
 
 // 按「全局开关已武装 && 已进入存档 && 存档配置总开关开启」同步 60 帧周期任务；幂等。
@@ -171,7 +169,7 @@ void sync_task() {
     if (g_task != 0) return;
     g_task = frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr,
                             kAutoSellScanIntervalFrames, 0);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "task registered id=%llu",
+    QOL_LOG_INFO(QolDomain::kAutosell, "task registered id=%llu",
                         static_cast<unsigned long long>(g_task));
 }
 
@@ -180,7 +178,7 @@ void autosell_on_save_enter(void* /*ctx*/) {
     const int slot = current_save_slot();
     autosell_store_ensure_loaded(slot);
     g_save_active.store(true, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "save enter slot=%d; sync task", slot);
+    QOL_LOG_INFO(QolDomain::kAutosell, "save enter slot=%d; sync task", slot);
     sync_task();
 }
 
@@ -188,7 +186,7 @@ void autosell_on_save_enter(void* /*ctx*/) {
 // （兜底：不依赖存档配置的开启状态）。
 void autosell_on_save_exit(void* /*ctx*/) {
     g_save_active.store(false, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "save exit; remove task");
+    QOL_LOG_INFO(QolDomain::kAutosell, "save exit; remove task");
     remove_task_if_any();
 }
 
@@ -200,7 +198,7 @@ void autosell_apply_config(const autosell::Config& config) {
     const bool old_enabled = autosell_get_runtime_config().enabled;
     autosell_set_runtime_config(config);
     if (old_enabled == config.enabled) return;
-    __android_log_print(ANDROID_LOG_INFO, kTag, "save master switch %d -> %d",
+    QOL_LOG_INFO(QolDomain::kAutosell, "save master switch %d -> %d",
                         old_enabled ? 1 : 0, config.enabled ? 1 : 0);
     if (config.enabled) {
         sync_task();                 // 开：按条件注册
@@ -211,7 +209,7 @@ void autosell_apply_config(const autosell::Config& config) {
 
 void autosell_set_global_enabled(bool enabled) {
     g_global_enabled.store(enabled, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "global enabled=%d save_active=%d",
+    QOL_LOG_INFO(QolDomain::kAutosell, "global enabled=%d save_active=%d",
                         enabled ? 1 : 0,
                         g_save_active.load(std::memory_order_acquire) ? 1 : 0);
     if (enabled) {

@@ -2,19 +2,16 @@
 
 #include "attribute_range.h"
 
+#include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "game_access.h"
 #include "game_symbols.h"
-
-#include <android/log.h>
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 
 namespace {
-
-constexpr char kTag[] = "Inotia4AttrRange";
 
 // LSPosed native hook 写入的原始函数指针。
 MathGetRandomFn g_backup_math_get_random = nullptr;
@@ -149,10 +146,10 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
     insert_at[3] = code;
     *reinterpret_cast<char**>(builder) = after + 4;
 
-    if (g_verify_log_budget.fetch_sub(1) > 0) {
-        __android_log_print(ANDROID_LOG_INFO, kTag,
-                            "color type=%d oi=%d value=%d range=[%d,%d] code=%c line=%.32s",
-                            type, option_index, value, lo, hi, code, before);
+    if (qol_log_debug_enabled() && g_verify_log_budget.fetch_sub(1) > 0) {
+        QOL_LOG_DEBUG(QolDomain::kAttrRange,
+                      "color type=%d oi=%d value=%d range=[%d,%d] code=%c line=%.32s",
+                      type, option_index, value, lo, hi, code, before);
     }
 }
 
@@ -168,7 +165,7 @@ uintptr_t uid_desc_make_item_wrapper(void* item, void* character, void* arg2) {
 bool install_one(NativeHookFunType hook, uintptr_t target, void* replacement, void** backup, const char* name) {
     const int rc = hook(reinterpret_cast<void*>(target), replacement, backup);
     if (rc != 0 || backup == nullptr || *backup == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "%s hook failed rc=%d", name, rc);
+        QOL_LOG_ERROR(QolDomain::kAttrRange, "%s hook failed rc=%d", name, rc);
         return false;
     }
     return true;
@@ -199,7 +196,7 @@ void attr_range_ui_install_if_ready() {
     }
 
     g_installed.store(true, std::memory_order_release);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "attribute range hooks installed");
+    QOL_LOG_INFO(QolDomain::kAttrRange, "attribute range hooks installed");
 }
 
 bool attr_range_ready() {

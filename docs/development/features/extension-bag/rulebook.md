@@ -225,11 +225,13 @@
 
 ## §3 Hook 铁律
 
-### 3.1 23 个常驻 Native Hook
+### 3.1 24 个常驻 Native Hook
 
-安装链是唯一清单，当前必须保持以下 23 个且不增不减（H-17 为 S2 读侧统一 getter，
-H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` 数量回写已
-撤销、wrapper 纯透传，见 R-52；H-22/H-23 为 R-55 原版背包详情出售接管追加）：
+安装链是唯一清单，当前必须保持以下 24 个且不增不减（下表为 H-01..H-23 既有 23 个；
+H-24 为 R-63 佣兵徽章使用函数级接管新增，安装证据见 R-63，23 个既有 + H-24 = 24，与
+源码安装日志 `count=24` 一致。H-17 为 S2 读侧统一 getter，H-18..H-21 为 S2 写侧进位框架
+追加，其中 H-20 `ITEMSYSTEM_MakeItem` 数量回写已撤销、wrapper 纯透传，见 R-52；
+H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 | 编号 | 目标 | wrapper | 安装证据 |
 |---|---|---|---|
@@ -671,7 +673,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 - **为什么**：`INVEN_GetBagSize` 读取 bit0..24；普通数量位从 bit22 起，与容量重叠，误写会
   造成容量越界和后续 UI/库存访问风险。
 - **验证锚**：`test_stack_codec` 的位段保留断言；真机 `VM-09`/`VM-31` 核对袋容量和切换后
-  原版窗口状态，安装日志须保留 `count=23`。
+  原版窗口状态，安装日志须保留 `count=24`。
 
 ### R-40 类别判定不可用时必须 fail-closed
 
@@ -891,7 +893,7 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   hook（无物品指针，无法判类别，R-46）；把 `SetBitValue` 写点 start 22 化（`v<<22`
   会把 v 低 3 位写进 a、高 7 位写进 b，反序布局）。
 - **验证锚**：Host `test_sell_divide_s2_read_window`（getter 解码两态等价 + 窗口伪修复
-  反例 + 200=a1b72）；真机 `VM-37`：`logcat` 出现 5 条 `Inotia4Export: redirect ...`
+  反例 + 200=a1b72）；真机 `VM-37`：`logcat` 出现 5 条 `Inotia4Qol ... domain=platform ... redirect ...`
   且 `stack canonical layout applied`；商店整堆/部分出售金额与 UI 数量一致（待取证）。
 - **表范围**：`g_stack_getter_redirect_patches` 当前仅上述 5 条；装备页详情出售结算
   函数 `0x1261c4` 的内联 b 段读点（`0x126208`，由 `UIEquip_OKDestroyItem@0xb8468`

@@ -1,7 +1,7 @@
 // ---- 辅助定义（背包共用）----
 std::string inventory_gained_json(void* const* before) {
     if (fn_get_bit == nullptr || fn_get_cumulate_count == nullptr) {
-        __android_log_print(ANDROID_LOG_WARN, "Inotia4Export", "inventory_gained_json: fn_get_bit/fn_get_cumulate_count not resolved");
+        QOL_LOG_WARN(QolDomain::kInventory, "inventory_gained_json: fn_get_bit/fn_get_cumulate_count not resolved");
         return std::string();
     }
     std::string s;

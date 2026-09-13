@@ -30,13 +30,14 @@
 
 ### 1.2 常驻入口事实
 
-当前 `native_inventory_hook.cpp` 安装 23 个常驻 Native Hook：既有 16 个库存/移动/装备页
+当前 `native_inventory_hook.cpp` 安装 24 个常驻 Native Hook（23 个既有 + R-63 新增
+H-24 `UIEquip_ButtonUseMercenarySealExe@0xb8144`）：既有 16 个库存/移动/装备页
 入口（含 `UIEquip_EquipControlEventProc@0xb8f7c`、`UIEquip_RefreshItemArea@0xb7a00`），
 加上 S2 读/写侧框架 `ITEM_GetCumulateCount@0x106094`、`INVEN_SaveItemDirect@0x103bf0`、
 `ITEMSYSTEM_Divide@0x1083f8`、`ITEMSYSTEM_MakeItem@0x10c6c8`、
 `INVEN_RemoveItemData@0x1040a8`，以及 R-55 出售接管 `UIEquip_ButtonDestroyExe@0xb6240`、
 `UIEquip_OKDestroyItem@0xb83d0`。安装失败按既有成功顺序逆序回滚，清空 backup；安装日志
-`hook install OK api=2 count=23`。
+`hook install OK api=2 count=24`。
 
 所有 VMA 均以下表和 `game_symbols.h` 为准；表内“现码”列只描述当前工作区，不表示已完成真机验收。
 

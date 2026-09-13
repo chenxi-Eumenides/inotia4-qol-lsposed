@@ -31,7 +31,7 @@ object AutoSellConfigStore {
             val raw = section.payload.toString(Charsets.UTF_8)
             if (raw.isBlank()) DEFAULT_JSON else raw
         } catch (t: Throwable) {
-            LogFile.logError("autosell config load failed slot=$slot", t)
+            LogFile.error(LogDomain.AUTOSELL, "autosell config load failed slot=$slot", t)
             "error:storage"
         }
     }
@@ -48,7 +48,7 @@ object AutoSellConfigStore {
             )
             if (saved) "ok" else "error:storage"
         } catch (t: Throwable) {
-            LogFile.logError("autosell config save failed slot=$slot", t)
+            LogFile.error(LogDomain.AUTOSELL, "autosell config save failed slot=$slot", t)
             "error:storage"
         }
     }

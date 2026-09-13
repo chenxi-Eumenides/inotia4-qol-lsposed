@@ -7,13 +7,12 @@
 #include "inventory_trade.h"
 
 #include "core/native/extension_bag_port.h"
+#include "core/native/qol_log.h"
 #include "core/native/stack_codec.h"
 #include "core/native/stack_limit_port.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_symbols.h"
-
-#include <android/log.h>
 
 #include <cstdint>
 #include <mutex>
@@ -61,10 +60,10 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     result.category = category;
     result.count = item_ref.count;
     if (fn_item_is_no_sell(category) != 0) {
-        __android_log_print(ANDROID_LOG_WARN, "Inotia4VirtBag",
-                            "sell price reject reason=no_sell source=%s category=%d count=%d "
-                            "variant=100 payload=0 gen=0",
-                            source, category, item_ref.count);
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "sell price reject reason=no_sell source=%s category=%d count=%d "
+                     "variant=100 payload=0 gen=0",
+                     source, category, item_ref.count);
         result.status = Status::kNoSell;
         return result;
     }
@@ -74,21 +73,21 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     const int64_t price = extension_bag_sell_price(item, count);  // 默认变体折扣 70%
     if (price < 0) {
-        __android_log_print(ANDROID_LOG_WARN, "Inotia4VirtBag",
-                            "sell price reject reason=price_bounds source=%s category=%d count=%d "
-                            "unit=%lld variant=100 payload=0 gen=0",
-                            source, category, count, static_cast<long long>(unit_price));
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "sell price reject reason=price_bounds source=%s category=%d count=%d "
+                     "unit=%lld variant=100 payload=0 gen=0",
+                     source, category, count, static_cast<long long>(unit_price));
         result.status = Status::kPriceInvalid;
         return result;
     }
-    __android_log_print(ANDROID_LOG_INFO, "Inotia4VirtBag",
-                        "sell price source=%s category=%d count=%d unit=%lld variant=100 "
-                        "final=%lld payload=0 gen=0",
-                        source,
-                        category,
-                        static_cast<int>(stack_codec::effective_clamp(
-                            static_cast<uint32_t>(count), stack_limit_enabled())),
-                        static_cast<long long>(unit_price), static_cast<long long>(price));
+    QOL_LOG_INFO(QolDomain::kInventory,
+                 "sell price source=%s category=%d count=%d unit=%lld variant=100 "
+                 "final=%lld payload=0 gen=0",
+                 source,
+                 category,
+                 static_cast<int>(stack_codec::effective_clamp(
+                     static_cast<uint32_t>(count), stack_limit_enabled())),
+                 static_cast<long long>(unit_price), static_cast<long long>(price));
     result.price = price;
     if (!fn_add_money(price)) {
         result.status = Status::kCreditFailed;

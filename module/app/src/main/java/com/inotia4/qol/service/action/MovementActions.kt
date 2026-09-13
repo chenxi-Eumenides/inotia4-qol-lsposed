@@ -1,6 +1,7 @@
 package com.inotia4.qol.service.action
 
 import com.inotia4.qol.AgreementPopup
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.UiActivityTracker
@@ -14,11 +15,11 @@ import com.inotia4.qol.service.contract.ActionApiService
 
 internal object MovementActions {
     fun move(x: Int, y: Int): String =
-        LogFile.op("POST /api/world/movement/move_to", "x=$x,y=$y") { ActionSupport.attachPlayer(NativeBridge.nativeOpMove(x, y)) }
+        LogFile.op(LogDomain.API, "POST /api/world/movement/move_to", mapOf("x" to "$x", "y" to "$y")) { ActionSupport.attachPlayer(NativeBridge.nativeOpMove(x, y)) }
     fun walk(direction: Int): String =
-        LogFile.op("POST /api/world/movement/walk_dir", "dir=$direction") { ActionSupport.attachPlayer(NativeBridge.nativeOpWalk(direction)) }
+        LogFile.op(LogDomain.API, "POST /api/world/movement/walk_dir", mapOf("dir" to "$direction")) { ActionSupport.attachPlayer(NativeBridge.nativeOpWalk(direction)) }
     fun walkStop(): String =
-        LogFile.op("POST /api/world/movement/stop_move", "") { NativeBridge.nativeOpWalkStop() }
+        LogFile.op(LogDomain.API, "POST /api/world/movement/stop_move", emptyMap<String, String>()) { NativeBridge.nativeOpWalkStop() }
     fun interact(): String =
-        LogFile.op("POST /api/world/movement/interact_with", "") { ActionSupport.attachPlayer(NativeBridge.nativeOpInteract()) }
+        LogFile.op(LogDomain.API, "POST /api/world/movement/interact_with", emptyMap<String, String>()) { ActionSupport.attachPlayer(NativeBridge.nativeOpInteract()) }
 }

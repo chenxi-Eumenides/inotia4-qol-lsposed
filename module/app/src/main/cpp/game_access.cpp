@@ -1,6 +1,8 @@
 #include "game_access.h"
 #include "feature/patch/game_patch.h"
 #include "symbol_resolver.h"
+#include "game_system.h"
+#include "core/native/qol_log.h"
 
 #include <cstdio>
 #include <atomic>
@@ -418,6 +420,9 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
         return false;
     }
     apply_monster_item_count_compat();  // monster 版物品数量上界兼容；非 monster 版无操作
+    // 统一日志：注入帧 provider（data_frame_count）并打开文件 sink（截断 + 横幅）。
+    qol_log_set_frame_provider(&data_frame_count);
+    qol_log_init();
     g_bridge_ready.store(true, std::memory_order_release);
     return true;
 }

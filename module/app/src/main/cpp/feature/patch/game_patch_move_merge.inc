@@ -15,7 +15,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             return finish(1);
         }
         if (drop_result == VirtualBagProjectionDropResult::kRejected) {
-            MOVE_LOG("move_merge: extension drop rejected; original proc suppressed");
+            QOL_LOG_DEBUG(QolDomain::kPlatform,
+                          "move_merge: extension drop rejected; original proc suppressed");
             return finish(0);
         }
     }
@@ -39,11 +40,13 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         // 越界值 16——drop 落到标签控件时直接拒绝，防越界写。
         if (fn_ui_equip_get_item_slot_index != nullptr &&
             fn_ui_equip_get_item_slot_index(control) >= 16) {
-            MOVE_LOG("drop suppressed: dst is extension tab control=%p", control);
+            QOL_LOG_DEBUG(QolDomain::kPlatform,
+                          "drop suppressed: dst is extension tab control=%p", control);
             return finish(0);
         }
-        MOVE_LOG("move_merge: drop suppressed in extension view control=%p",
-                 control);
+        QOL_LOG_DEBUG(QolDomain::kPlatform,
+                      "move_merge: drop suppressed in extension view control=%p",
+                      control);
         return finish(0);
     }
     if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
@@ -89,27 +92,31 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                         if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
                             fn_touch_handle_set_cursor(panel_ctrl, nullptr);
                         }
-                        MOVE_LOG("move_merge: merged bag=%d src=%d dst=%d count=%d", bag, src_slot,
-                                 dst_slot, count);
+                        QOL_LOG_DEBUG(QolDomain::kPlatform,
+                                      "move_merge: merged bag=%d src=%d dst=%d count=%d", bag,
+                                      src_slot, dst_slot, count);
                         return finish(0);
                     }
                     int extension_source_bag = -1;
                     int extension_source_slot = -1;
                     if (virtual_bag_identify_native_item(item_a, &extension_source_bag,
                                                          &extension_source_slot)) {
-                        MOVE_LOG(
-                            "move_merge: extension guard rejected; original proc suppressed "
-                            "item=%p source=%d/%d target=%d/%d",
-                            item_a, extension_source_bag, extension_source_slot, bag, dst_slot);
+                        QOL_LOG_DEBUG(QolDomain::kPlatform,
+                                      "move_merge: extension guard rejected; original proc suppressed "
+                                      "item=%p source=%d/%d target=%d/%d",
+                                      item_a, extension_source_bag, extension_source_slot, bag,
+                                      dst_slot);
                         return finish(0);
                     }
-                    MOVE_LOG("move_merge: native merge rejected; falling through bag=%d src=%d dst=%d",
-                             bag, src_slot, dst_slot);
+                    QOL_LOG_DEBUG(QolDomain::kPlatform,
+                                  "move_merge: native merge rejected; falling through bag=%d src=%d dst=%d",
+                                  bag, src_slot, dst_slot);
                 } else {
-                    MOVE_LOG("move_merge: invalid/full target; falling through bag=%d src=%d dst=%d "
-                             "source_count=%d target_count=%d limit=%u",
-                             bag, src_slot, dst_slot, count, target_count,
-                             static_cast<unsigned int>(stack_limit));
+                    QOL_LOG_DEBUG(QolDomain::kPlatform,
+                                  "move_merge: invalid/full target; falling through bag=%d src=%d dst=%d "
+                                  "source_count=%d target_count=%d limit=%u",
+                                  bag, src_slot, dst_slot, count, target_count,
+                                  static_cast<unsigned int>(stack_limit));
                 }
             }
         }

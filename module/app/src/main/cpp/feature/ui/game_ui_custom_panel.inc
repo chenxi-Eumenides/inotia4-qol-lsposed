@@ -37,7 +37,8 @@ void custom_btn_draw(void* ctrl) {
         void* font_obj = (slot_f88 != nullptr) ? *slot_f88 : nullptr;
         int f88_first = 0;
         if (font_obj != nullptr) f88_first = *reinterpret_cast<int*>(font_obj);
-        CUSTOM_LOG("btn_draw: data=%s rect=(%lld,%lld) font_id=%d f88_obj=%p f88[0]=%d",
+        QOL_LOG_DEBUG(QolDomain::kUi,
+                      "btn_draw: data=%s rect=(%lld,%lld) font_id=%d f88_obj=%p f88[0]=%d",
                    reinterpret_cast<char*>(data),
                    static_cast<long long>(rect[0]), static_cast<long long>(rect[1]),
                    font_id(), font_obj, f88_first);
@@ -131,12 +132,14 @@ void custom_panel_process() {
     if (!g_panel_active || g_root == nullptr || g_base == 0) return;
     if (fn_grpx_start == nullptr || fn_grpx_end == nullptr) return;
     static int dbg_frame = 0;
-    if (++dbg_frame % 60 == 1) {
+    ++dbg_frame;
+    if (qol_log_debug_enabled()) {
         int64_t pt[2];
         ctrl_abs_point(g_root, pt);
-        CUSTOM_LOG("process: frame=%d root_abs=(%lld,%lld) cells ok=%d/%d", dbg_frame,
-                   static_cast<long long>(pt[0]), static_cast<long long>(pt[1]),
-                   g_cells[0].btn != nullptr, g_cells[2].btn != nullptr);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kUi, 60,
+                            "process: frame=%d root_abs=(%lld,%lld) cells ok=%d/%d", dbg_frame,
+                            static_cast<long long>(pt[0]), static_cast<long long>(pt[1]),
+                            g_cells[0].btn != nullptr, g_cells[2].btn != nullptr);
     }
     // 模拟 Scene_Draw_POPUP_SC_STORE 的 LCD 结构（绘制才进入渲染）：
     // 完整路径(RefreshLCDFlag=1): SaveLCD + 清标志；快路径(=0): RestoreLCD 恢复背景缓冲

@@ -1,5 +1,6 @@
 #include "game_ui_custom.h"
 
+#include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_ops_common.h"
 #include "feature/patch/game_patch.h"
@@ -8,7 +9,6 @@
 #include "game_symbols.h"
 #include "game_ui.h"
 
-#include <android/log.h>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -17,8 +17,7 @@
 #include <mutex>
 #include <thread>
 
-#define CUSTOM_TAG "Inotia4UICustom"
-#define CUSTOM_LOG(...) __android_log_print(ANDROID_LOG_INFO, CUSTOM_TAG, __VA_ARGS__)
+#define CUSTOM_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
 
 #define POPUP_STATE_SIZE 0x40
 #define CB_TEXT_SIZE 0x20

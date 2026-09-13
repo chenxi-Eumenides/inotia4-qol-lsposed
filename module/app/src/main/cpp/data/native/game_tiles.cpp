@@ -1,14 +1,18 @@
 #include "game_tiles.h"
 
-#include <android/log.h>
-
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
 
-#define TILES_TAG "Inotia4Tiles"
-#define TILES_LOG(...) __android_log_print(ANDROID_LOG_INFO, TILES_TAG, __VA_ARGS__)
+// 统一日志：设备侧走 qol_log（kCatalog）；host 单测由 test_host.cpp 直接 #include 本文件，
+// 无 qol_log 链接目标，故 host 侧退化为空操作（与既有 android/log.h 桩行为一致）。
+#if defined(__ANDROID__)
+#include "core/native/qol_log.h"
+#define TILES_LOG(...) QOL_LOG_INFO(QolDomain::kCatalog, __VA_ARGS__)
+#else
+#define TILES_LOG(...) do {} while (0)
+#endif
 
 namespace {
 

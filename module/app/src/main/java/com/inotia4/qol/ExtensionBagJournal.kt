@@ -27,7 +27,7 @@ object ExtensionBagJournal {
         return try {
             ModuleSaveStore.readSection(slot, JOURNAL_SECTION_NAME)?.let { it.version to it.payload }
         } catch (t: Throwable) {
-            LogFile.logError("extension bag journal read failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag journal read failed", t)
             null
         }
     }
@@ -41,7 +41,7 @@ object ExtensionBagJournal {
                 journalJson.toByteArray(Charsets.UTF_8),
             )
         } catch (t: Throwable) {
-            LogFile.logError("extension bag journal write failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag journal write failed", t)
             false
         }
     }
@@ -50,7 +50,7 @@ object ExtensionBagJournal {
         return try {
             ModuleSaveStore.removeSection(slot, JOURNAL_SECTION_NAME)
         } catch (t: Throwable) {
-            LogFile.logError("extension bag journal clear failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag journal clear failed", t)
             false
         }
     }
@@ -61,7 +61,7 @@ object ExtensionBagJournal {
             val id = json.optString("transactionId", "")
             if (id.isEmpty() || id.length > 64) null else json
         } catch (t: Throwable) {
-            LogFile.logError("extension bag journal parse failed", t)
+            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag journal parse failed", t)
             null
         }
     }

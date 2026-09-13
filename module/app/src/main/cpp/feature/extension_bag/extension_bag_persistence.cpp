@@ -3,13 +3,10 @@
 #include <algorithm>
 #include <cstring>
 
-#include <android/log.h>
-
+#include "core/native/qol_log.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 
 namespace {
-
-constexpr char kLogTag[] = "Inotia4VirtBag";
 
 std::string occupied_item_summary(const virtual_bag::State& state) {
     std::string summary;
@@ -78,7 +75,7 @@ bool extension_bag_load_state_from_store(int slot) {
             has_pending ? virtual_bag::parse_pending_transfer_result(utf, &rejected_pending)
                         : virtual_bag::PendingTransferParseResult::kOk;
         if (pending_result == virtual_bag::PendingTransferParseResult::kInvalidTransactionDomain) {
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
                                 "pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
                                 static_cast<unsigned int>(rejected_pending.direction),
                                 static_cast<unsigned int>(rejected_pending.src_bag),
@@ -86,7 +83,7 @@ bool extension_bag_load_state_from_store(int slot) {
                                 static_cast<unsigned int>(rejected_pending.dst_bag),
                                 static_cast<unsigned int>(rejected_pending.dst_slot));
         } else if (pending_result == virtual_bag::PendingTransferParseResult::kMalformed) {
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
                                 "pending isolated reason=malformed_pending_record");
         }
         parsed = virtual_bag::parse_state_json_at(
@@ -122,7 +119,7 @@ bool extension_bag_load_state_from_store(int slot) {
     }
     if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
     env->DeleteLocalRef(result);
-    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
                         "sidecar load slot=%d parsed=%d items=%s", slot,
                         parsed ? 1 : 0,
                         occupied_item_summary(*state).c_str());
@@ -141,7 +138,7 @@ bool extension_bag_save_state_to_store(int slot) {
         return false;
     }
     const std::string json = virtual_bag::state_json(*state);
-    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
                         "legacy sidecar save slot=%d items=%s", slot,
                         occupied_item_summary(*state).c_str());
     jstring payload = env->NewStringUTF(json.c_str());
@@ -172,7 +169,7 @@ bool extension_bag_prepare_save_to_store(int slot, const char* transaction_id) {
         return false;
     }
     const std::string json = virtual_bag::state_json(*state);
-    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
                         "sidecar prepare slot=%d tx=%s items=%s", slot, transaction_id,
                         occupied_item_summary(*state).c_str());
     jstring tx = env->NewStringUTF(transaction_id);
@@ -212,7 +209,7 @@ bool extension_bag_commit_save_to_store(int slot, const char* transaction_id) {
         return false;
     }
     const std::string json = virtual_bag::state_json(*state);
-    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
                         "sidecar commit slot=%d tx=%s items=%s", slot, transaction_id,
                         occupied_item_summary(*state).c_str());
     jstring tx = env->NewStringUTF(transaction_id);

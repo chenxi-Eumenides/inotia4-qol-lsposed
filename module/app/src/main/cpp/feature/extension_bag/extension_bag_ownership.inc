@@ -51,7 +51,7 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
         // 正常调用方均持有 ownership ledger handle；该保管区容量覆盖 ledger
         // 上限，因此队列满不会把释放失败传播给事务或丢失对象指针。
         if (g_deferred_free_custody_size >= g_deferred_free_custody.size()) {
-            VIRTBAG_LOG("ERROR deferred free custody overflow item=%p handle=%u generation=%llu",
+            VIRTBAG_LOG_ERROR("ERROR deferred free custody overflow item=%p handle=%u generation=%llu",
                         item, handle, static_cast<unsigned long long>(generation));
             return false;
         }
@@ -191,7 +191,7 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
         if (!enqueue_deferred_item_free_locked(item, handle, generation)) return false;
     }
     if (ownership::release(&g_ownership_ledger, handle) != ownership::Outcome::kOk) {
-        VIRTBAG_LOG("ERROR ownership release changed during custody retirement context=%s handle=%u",
+        VIRTBAG_LOG_ERROR("ERROR ownership release changed during custody retirement context=%s handle=%u",
                     context, handle);
         return false;
     }
@@ -331,7 +331,7 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
     if (out_release != nullptr) *out_release = {};
     if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
         token.slot >= virtual_bag::kSlotCount) {
-        VIRTBAG_LOG("ERROR module use finish token mismatch invalid slot active=-1 "
+        VIRTBAG_LOG_ERROR("ERROR module use finish token mismatch invalid slot active=-1 "
                     "pending_release=-1 generation=0 item=%p handle=0 owner_thread=0 "
                     "token_bag=%d token_slot=%d token_generation=%llu token_item=%p",
                     token.item, token.bag, token.slot,
@@ -344,7 +344,7 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
         const auto thread_key = [](const std::thread::id& id) -> unsigned long long {
             return static_cast<unsigned long long>(std::hash<std::thread::id>{}(id));
         };
-        VIRTBAG_LOG("ERROR module use finish token mismatch bag=%d slot=%d active=%d "
+        VIRTBAG_LOG_ERROR("ERROR module use finish token mismatch bag=%d slot=%d active=%d "
                     "pending_release=%d generation=%llu item=%p handle=%u owner_thread=%llu "
                     "token_bag=%d token_slot=%d token_generation=%llu token_item=%p "
                     "token_owner_thread=%llu current_object=%p",
@@ -397,7 +397,7 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
 bool module_use_abort_locked(const ModuleUseToken& token) {
     if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
         token.slot >= virtual_bag::kSlotCount) {
-        VIRTBAG_LOG("ERROR module use abort token mismatch; slot may remain active invalid slot "
+        VIRTBAG_LOG_ERROR("ERROR module use abort token mismatch; slot may remain active invalid slot "
                     "active=-1 pending_release=-1 generation=0 item=%p handle=0 owner_thread=0 "
                     "token_bag=%d token_slot=%d token_generation=%llu token_item=%p",
                     token.item, token.bag, token.slot,
@@ -410,7 +410,7 @@ bool module_use_abort_locked(const ModuleUseToken& token) {
         const auto thread_key = [](const std::thread::id& id) -> unsigned long long {
             return static_cast<unsigned long long>(std::hash<std::thread::id>{}(id));
         };
-        VIRTBAG_LOG("ERROR module use abort token mismatch; slot may remain active "
+        VIRTBAG_LOG_ERROR("ERROR module use abort token mismatch; slot may remain active "
                     "bag=%d slot=%d active=%d pending_release=%d generation=%llu item=%p "
                     "handle=%u owner_thread=%llu token_bag=%d token_slot=%d "
                     "token_generation=%llu token_item=%p token_owner_thread=%llu current_object=%p",
@@ -440,7 +440,7 @@ bool module_use_abort_isolate_locked(const ModuleUseToken& token) {
     if (!use.active) return true;
     // mismatch 后不释放未知 native 对象，只清除 active 标记并保留 pending 对象的
     // 隔离状态；generation 保留以拒绝旧 token 重入。
-    VIRTBAG_LOG("ERROR module use abort isolation bag=%d slot=%d item=%p pending_release=%d",
+    VIRTBAG_LOG_ERROR("ERROR module use abort isolation bag=%d slot=%d item=%p pending_release=%d",
                 token.bag, token.slot, use.item, use.pending_release ? 1 : 0);
     use.active = false;
     use.consumed = false;
@@ -474,7 +474,7 @@ bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release) {
     }
     ModuleUseState& use = g_module_object_use[release.bag][release.slot];
     if (!use.pending_release || use.item != release.item || use.generation != release.generation) {
-        VIRTBAG_LOG("ERROR module use release finalize mismatch bag=%d slot=%d item=%p",
+        VIRTBAG_LOG_ERROR("ERROR module use release finalize mismatch bag=%d slot=%d item=%p",
                     release.bag, release.slot, release.item);
         return false;
     }
@@ -483,7 +483,7 @@ bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release) {
         ownership::return_from_view(&g_ownership_ledger, release.handle);
     }
     if (ownership::release(&g_ownership_ledger, release.handle) != ownership::Outcome::kOk) {
-        VIRTBAG_LOG("ERROR module use release ledger mismatch bag=%d slot=%d handle=%u",
+        VIRTBAG_LOG_ERROR("ERROR module use release ledger mismatch bag=%d slot=%d handle=%u",
                     release.bag, release.slot, release.handle);
         return false;
     }
@@ -503,7 +503,7 @@ bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
     void* item = g_module_objects[bag][slot];
     if (item == nullptr) {
         if (g_module_object_use[bag][slot].active) {
-            VIRTBAG_LOG("ERROR module free rejected active token with empty slot bag=%d slot=%d",
+            VIRTBAG_LOG_ERROR("ERROR module free rejected active token with empty slot bag=%d slot=%d",
                         bag, slot);
             return false;
         }

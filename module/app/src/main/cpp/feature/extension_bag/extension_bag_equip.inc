@@ -62,7 +62,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
         payload = source.payload;
         payload_size = source.payload_size;
     } else if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-        VIRTBAG_LOG("extension equip reject reason=payload_serialize_failed src=%d/%d", src_bag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip reject reason=payload_serialize_failed src=%d/%d", src_bag,
                     src_slot);
         return ExtensionBagEquipResult::kFailed;
     }
@@ -82,11 +82,11 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
                 g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
                 virtual_bag::normalize(&g_virtual_bag_state);
                 persist_state_locked();
-                VIRTBAG_LOG("extension equip rejected source release bag=%d slot=%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip rejected source release bag=%d slot=%d",
                             src_bag, src_slot);
                 return ExtensionBagEquipResult::kFailed;
             }
-            VIRTBAG_LOG("extension equip ok source=extension bag=%d category=%d src=%d/%d",
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "extension equip ok source=extension bag=%d category=%d src=%d/%d",
                         internal_bag, category, src_bag, src_slot);
             return ExtensionBagEquipResult::kOk;
         }
@@ -101,12 +101,12 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     // P4.3：移除前先分配保管 handle（失败时物品仍在原版库存，无丢失风险）。
     uint32_t custody_handle = 0;
     if (ownership::allocate(&g_ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
-        VIRTBAG_LOG("extension equip ledger exhausted src=%d/%d", src_bag, src_slot);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip ledger exhausted src=%d/%d", src_bag, src_slot);
         return ExtensionBagEquipResult::kFailed;
     }
 
     if (!remove_item_direct_unlocked(lock, src_bag, src_slot, item, "extension equip")) {
-        VIRTBAG_LOG("extension equip remove verify failed bag=%d slot=%d", src_bag, src_slot);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip remove verify failed bag=%d slot=%d", src_bag, src_slot);
         // 物品仍被 INVEN 持有（remove 未生效）→ 不得释放，记 inventory 终态。
         handover_tracked_item_locked(custody_handle, item,
                                      "equip remove verify failed; retained in inventory");
@@ -122,7 +122,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
             // P4.3：装备对象已被状态 payload 取代（原指针无人引用），终止保管；
             // drop 路径处于触摸窗口内 → 隔离区，API 路径窗口外 → 真释放。
             retire_custody_item_locked(custody_handle, item, "equip custody retired");
-            VIRTBAG_LOG("extension equip ok bag=%d category=%d src=%d/%d", internal_bag,
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "extension equip ok bag=%d category=%d src=%d/%d", internal_bag,
                         category, src_bag, src_slot);
             return ExtensionBagEquipResult::kOk;
         }
@@ -130,7 +130,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
         g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
         virtual_bag::normalize(&g_virtual_bag_state);
     } else {
-        VIRTBAG_LOG("extension equip state reject bag=%d category=%d", internal_bag, category);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip state reject bag=%d category=%d", internal_bag, category);
     }
     bool restored = false;
     uint32_t rebuilt_handle = 0;
@@ -146,7 +146,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     }
     retire_custody_item_locked(custody_handle, item, "equip rollback custody retired");
     persist_state_locked();
-    VIRTBAG_LOG("extension equip persist failed bag=%d restored=%d", internal_bag,
+    QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip persist failed bag=%d restored=%d", internal_bag,
                 restored ? 1 : 0);
     return restored ? ExtensionBagEquipResult::kPersistFailed : ExtensionBagEquipResult::kFailed;
 }
@@ -220,7 +220,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
                               ownership::State::kModuleOwned)) {
         if (ownership::handover_to_inventory(&g_ownership_ledger, handle) !=
             ownership::Outcome::kOk) {
-            VIRTBAG_LOG("extension character equip ownership handover failed bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip ownership handover failed bag=%d slot=%d",
                         source_bag, source_slot);
         }
     }
@@ -248,7 +248,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
             g_module_object_handles[source_bag][source_slot] = adopted_handle;
         } else {
             g_module_object_handles[source_bag][source_slot] = 0;
-            VIRTBAG_LOG("extension character equip adopt ledger exhausted bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip adopt ledger exhausted bag=%d slot=%d",
                         source_bag, source_slot);
         }
     } else {
@@ -264,7 +264,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     }
     g_item_state_dirty = true;
     persist_state_locked();
-    VIRTBAG_LOG("extension character equip ok bag=%d slot=%d target=%d", source_bag,
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "extension character equip ok bag=%d slot=%d target=%d", source_bag,
                 source_slot, target);
     return true;
 }
@@ -307,12 +307,12 @@ bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
     if (item == nullptr) return false;
     const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, index, item);
     if (result != ExtensionBagEquipResult::kOk) {
-        VIRTBAG_LOG("extension tab drop equip result=%d index=%d", static_cast<int>(result),
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension tab drop equip result=%d index=%d", static_cast<int>(result),
                     index);
         return false;
     }
     finish_extension_equip_ui_locked(index, moving_control);
-    VIRTBAG_LOG("extension tab drop equipped index=%d", index);
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "extension tab drop equipped index=%d", index);
     return true;
 }
 
@@ -341,7 +341,7 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
     const ExtensionBagEquipResult result =
         equip_extension_bag_item_locked(lock, target_bag, source_item);
     if (result != ExtensionBagEquipResult::kOk) {
-        VIRTBAG_LOG("extension source tab equip result=%d target=%d source=%d/%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension source tab equip result=%d target=%d source=%d/%d",
                     static_cast<int>(result), target_bag, source_bag, source_slot);
         return false;
     }
@@ -436,7 +436,7 @@ void extension_sell_ok(void*) {
                                   module_object_release_allowed_locked(
                                       bag, slot, item, "extension sell", false, nullptr);
         if (!current_item) {
-            VIRTBAG_LOG("extension sell rejected stale detail bag=%d slot=%d item=%p", bag,
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected stale detail bag=%d slot=%d item=%p", bag,
                         slot, item);
             reset_extension_desc_item_hooks_locked();
             g_extension_desc_item = nullptr;
@@ -447,7 +447,7 @@ void extension_sell_ok(void*) {
         }
         if (fn_item_get_sell_price == nullptr || fn_add_money == nullptr ||
             fn_minus_money == nullptr || fn_item_is_no_sell == nullptr) {
-            VIRTBAG_LOG("extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
             clear_original_desc_locked();
             return;
         }
@@ -459,7 +459,7 @@ void extension_sell_ok(void*) {
             reinterpret_cast<uint8_t*>(item) + I_TYPE);
         const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
         if (category < 0 || fn_item_is_no_sell(category) != 0) {
-            VIRTBAG_LOG("extension sell rejected no-sell item bag=%d slot=%d category=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected no-sell item bag=%d slot=%d category=%d",
                         bag, slot, category);
             clear_original_desc_locked();
             return;
@@ -467,7 +467,7 @@ void extension_sell_ok(void*) {
         const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
         price = extension_bag_sell_price(item, count, apply_variant_discount);
         if (price < 0) {
-            VIRTBAG_LOG(
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
                 "sell price reject reason=price_bounds source=equip category=%d count=%d unit=%lld variant=%d payload=%u gen=%llu",
                 category, count, static_cast<long long>(unit_price),
                 apply_variant_discount ? 70 : 100,
@@ -476,7 +476,7 @@ void extension_sell_ok(void*) {
             clear_original_desc_locked();
             return;
         }
-        VIRTBAG_LOG(
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
             category,
             static_cast<int>(stack_codec::effective_clamp(static_cast<uint32_t>(count),
@@ -515,7 +515,7 @@ void extension_sell_ok(void*) {
             if (!free_module_object_locked(bag, slot)) {
                 g_virtual_bag_state.items[bag][slot] = previous_item;
                 persist_state_locked();
-                VIRTBAG_LOG("extension sell rejected object release bag=%d slot=%d", bag, slot);
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected object release bag=%d slot=%d", bag, slot);
             } else {
                 persist_state_locked();
                 if (g_module_view_installed && g_module_view_index == bag) {
@@ -567,7 +567,7 @@ void extension_destroy_ok(void*) {
             if (!free_module_object_locked(bag, slot)) {
                 g_virtual_bag_state.items[bag][slot] = previous_item;
                 persist_state_locked();
-                VIRTBAG_LOG("extension destroy rejected object release bag=%d slot=%d", bag, slot);
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension destroy rejected object release bag=%d slot=%d", bag, slot);
             } else {
                 persist_state_locked();
                 committed_bag = bag;
@@ -584,7 +584,7 @@ void extension_destroy_ok(void*) {
             g_extension_desc_item = nullptr;
             g_extension_desc_item_bag = -1;
             g_extension_desc_item_slot = -1;
-            VIRTBAG_LOG("extension destroy rejected stale detail bag=%d slot=%d", bag, slot);
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension destroy rejected stale detail bag=%d slot=%d", bag, slot);
         }
     }
     if (committed && fn_ui_equip_refresh_item_area != nullptr) {
@@ -613,7 +613,7 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
         g_virtual_bag_state.items[bag][slot] = {};
         if (!free_module_object_locked(bag, slot, raw_use_token)) {
             g_virtual_bag_state.items[bag][slot] = previous_item;
-            VIRTBAG_LOG("extension consume rejected object release context=%s bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension consume rejected object release context=%s bag=%d slot=%d",
                         context, bag, slot);
             return false;
         }
@@ -621,7 +621,7 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     }
     const stack_codec::CountEncoding count_encoding = item_count_encoding(item);
     if (count_encoding != stack_codec::CountEncoding::kEncoded) {
-        VIRTBAG_LOG("extension consume rejected count encoding=%d context=%s bag=%d slot=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension consume rejected count encoding=%d context=%s bag=%d slot=%d",
                     static_cast<int>(count_encoding), context, bag, slot);
         return false;
     }
@@ -638,7 +638,7 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     int payload_size = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
         *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = old_count_flags;
-        VIRTBAG_LOG("extension consume reserialize failed context=%s bag=%d slot=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension consume reserialize failed context=%s bag=%d slot=%d",
                     context, bag, slot);
         return false;
     }
@@ -674,13 +674,13 @@ void install_extension_desc_item_hooks_locked(void* item) {
                                                   kDescButtonOffsets[index]);
         if (button == nullptr) continue;
         if (!game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
-            VIRTBAG_LOG("extension desc hook skip invalid button index=%d button=%p",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip invalid button index=%d button=%p",
                         static_cast<int>(index), button);
             continue;
         }
         void* data = fn_control_object_get_data(button);
         if (data == nullptr || !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
-            VIRTBAG_LOG("extension desc hook skip invalid data index=%d button=%p data=%p",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip invalid data index=%d button=%p data=%p",
                         static_cast<int>(index), button, data);
             continue;
         }
@@ -697,7 +697,7 @@ void install_extension_desc_item_hooks_locked(void* item) {
         void* proc_value = *reinterpret_cast<void**>(execute_slot);
         if (proc_value == reinterpret_cast<void*>(equip_proc) ||
             proc_value == reinterpret_cast<void*>(unequip_proc)) {
-            VIRTBAG_LOG("extension desc hook skip equip/unequip proc offset=0x%zx slot=%p",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip equip/unequip proc offset=0x%zx slot=%p",
                         kDescButtonOffsets[index], execute_slot);
             continue;
         }
@@ -709,7 +709,7 @@ void install_extension_desc_item_hooks_locked(void* item) {
             }
         }
         if (already_hooked) {
-            VIRTBAG_LOG("extension desc hook skip duplicate slot index=%d offset=0x%zx slot=%p",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip duplicate slot index=%d offset=0x%zx slot=%p",
                         static_cast<int>(index), kDescButtonOffsets[index], execute_slot);
             continue;
         }
@@ -717,11 +717,11 @@ void install_extension_desc_item_hooks_locked(void* item) {
         if (original == nullptr || !game_memory_accessible(original, 1, 'x')) continue;
         if (!g_extension_desc_item_hooks[index].install_typed(
                 execute_slot, &extension_desc_item_execute)) {
-            VIRTBAG_LOG("extension desc hook install failed index=%d offset=0x%zx button=%p data=%p",
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook install failed index=%d offset=0x%zx button=%p data=%p",
                         static_cast<int>(index), kDescButtonOffsets[index], button, data);
             continue;
         }
-        VIRTBAG_LOG("extension desc hook installed index=%d offset=0x%zx button=%p data=%p orig=%p",
+        QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook installed index=%d offset=0x%zx button=%p data=%p orig=%p",
                     static_cast<int>(index), kDescButtonOffsets[index], button, data, original);
     }
 }
@@ -738,7 +738,7 @@ bool extension_confirm_use_item(void* item) {
     {
         std::unique_lock<std::mutex> lock(g_virtual_bag_mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
-            VIRTBAG_LOG("extension confirm-use lock busy item=%p", item);
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "extension confirm-use lock busy item=%p", item);
             return false;
         }
         if (!extension_bag_enabled() || item == nullptr || item != g_extension_desc_item) {
@@ -758,13 +758,13 @@ bool extension_confirm_use_item(void* item) {
         }
         void* character = extension_menu_character();
         if (character == nullptr || fn_char_use_item_ex == nullptr) {
-            VIRTBAG_LOG("extension confirm-use unavailable bag=%d slot=%d character=%p fn=%p",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension confirm-use unavailable bag=%d slot=%d character=%p fn=%p",
                         bag, slot, character, reinterpret_cast<void*>(fn_char_use_item_ex));
             return false;
         }
         ModuleUseToken use_token{};
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {
-            VIRTBAG_LOG("extension confirm-use already active bag=%d slot=%d item=%p",
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "extension confirm-use already active bag=%d slot=%d item=%p",
                         bag, slot, item);
             return false;
         }
@@ -781,7 +781,7 @@ bool extension_confirm_use_item(void* item) {
         if (!use_token_valid) {
             const bool marker_cleared = module_use_abort_locked(use_token);
             const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
-            VIRTBAG_LOG("ERROR extension confirm-use token lost after use bag=%d slot=%d item=%p marker_cleared=%d; treated handled",
+            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use token lost after use bag=%d slot=%d item=%p marker_cleared=%d; treated handled",
                         bag, slot, item, isolated ? 1 : 0);
             if (isolated) {
                 reset_extension_desc_item_hooks_locked();
@@ -789,31 +789,31 @@ bool extension_confirm_use_item(void* item) {
                 g_extension_desc_item_bag = -1;
                 g_extension_desc_item_slot = -1;
             } else {
-                VIRTBAG_LOG("ERROR extension confirm-use abort failed; slot may remain active "
+                QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use abort failed; slot may remain active "
                             "bag=%d slot=%d item=%p",
                             bag, slot, item);
             }
             return true;
         }
         if (!used) {
-            VIRTBAG_LOG("extension confirm-use executed failed bag=%d slot=%d", bag, slot);
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension confirm-use executed failed bag=%d slot=%d", bag, slot);
             return true;
         }
         if (!same_item && !consumed) {
-            VIRTBAG_LOG("extension confirm-use identity changed unexpectedly bag=%d slot=%d item=%p",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension confirm-use identity changed unexpectedly bag=%d slot=%d item=%p",
                         bag, slot, item);
             return true;
         }
     }
     if (release_plan.pending) {
         if (!module_use_release_native(release_plan)) {
-            VIRTBAG_LOG("ERROR extension confirm-use native release failed bag=%d slot=%d",
+            VIRTBAG_LOG_ERROR("ERROR extension confirm-use native release failed bag=%d slot=%d",
                         bag, slot);
             return true;
         }
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (!module_use_finalize_release_locked(release_plan)) {
-            VIRTBAG_LOG("ERROR extension confirm-use release finalize failed bag=%d slot=%d",
+            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use release finalize failed bag=%d slot=%d",
                         bag, slot);
             return true;
         }
@@ -846,7 +846,7 @@ bool extension_use_mercenary_seal() {
     {
         std::unique_lock<std::mutex> lock(g_virtual_bag_mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
-            VIRTBAG_LOG("extension mercenary-seal lock busy");
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "extension mercenary-seal lock busy");
             return false;
         }
         if (!extension_bag_enabled() || g_extension_desc_item == nullptr ||
@@ -898,7 +898,7 @@ bool extension_use_mercenary_seal() {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (g_module_objects[bag][slot] != item ||
             !module_use_begin_locked(bag, slot, item, &use_token)) {
-            VIRTBAG_LOG("extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
                         item);
             show_popup(0xc);
             return true;
@@ -915,7 +915,7 @@ bool extension_use_mercenary_seal() {
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
             const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
-            VIRTBAG_LOG("ERROR extension mercenary-seal token lost bag=%d slot=%d item=%p "
+            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension mercenary-seal token lost bag=%d slot=%d item=%p "
                         "marker_cleared=%d; treated handled",
                         bag, slot, item, isolated ? 1 : 0);
             if (isolated) {
@@ -927,20 +927,20 @@ bool extension_use_mercenary_seal() {
             return true;
         }
         if (!used) {
-            VIRTBAG_LOG("extension mercenary-seal make failed bag=%d slot=%d", bag, slot);
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal make failed bag=%d slot=%d", bag, slot);
             show_popup(0xc);
             return true;
         }
     }
     if (release_plan.pending) {
         if (!module_use_release_native(release_plan)) {
-            VIRTBAG_LOG("ERROR extension mercenary-seal native release failed bag=%d slot=%d", bag,
+            VIRTBAG_LOG_ERROR("ERROR extension mercenary-seal native release failed bag=%d slot=%d", bag,
                         slot);
             return true;
         }
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (!module_use_finalize_release_locked(release_plan)) {
-            VIRTBAG_LOG("ERROR extension mercenary-seal release finalize failed bag=%d slot=%d", bag,
+            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension mercenary-seal release finalize failed bag=%d slot=%d", bag,
                         slot);
             return true;
         }
@@ -1112,28 +1112,28 @@ void extension_desc_item_execute(void* button) {
                         generation = g_module_object_use[bag][slot].generation;
                         const int legal_count = static_cast<int>(stack_codec::effective_clamp(
                             static_cast<uint32_t>(count), stack_limit_enabled()));
-                        VIRTBAG_LOG(
+                        QOL_LOG_INFO(QolDomain::kExtensionBag,
                             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
                             category, legal_count, static_cast<long long>(unit_price),
                             modified_destroy_sell ? 70 : 100, static_cast<long long>(price), payload,
                             static_cast<unsigned long long>(generation));
                     } else {
-                        VIRTBAG_LOG(
+                        QOL_LOG_WARN(QolDomain::kExtensionBag,
                             "sell price reject reason=price_bounds source=equip category=%d count=%d unit=%lld variant=%d payload=%u gen=%llu",
                             category, count, static_cast<long long>(unit_price),
                             modified_destroy_sell ? 70 : 100, payload,
                             static_cast<unsigned long long>(g_module_object_use[bag][slot].generation));
                     }
                 } else {
-                    VIRTBAG_LOG(
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
                         "sell price reject reason=no_sell_or_count source=equip category=%d count=%d variant=%d",
                         category, count, modified_destroy_sell ? 70 : 100);
                 }
             } else if (!current_item) {
-                VIRTBAG_LOG("sell price reject reason=stale_or_release_guard source=equip bag=%d slot=%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "sell price reject reason=stale_or_release_guard source=equip bag=%d slot=%d",
                             bag, slot);
             } else {
-                VIRTBAG_LOG("sell price reject reason=symbols source=equip bag=%d slot=%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "sell price reject reason=symbols source=equip bag=%d slot=%d",
                             bag, slot);
             }
             g_extension_sell_original_ok = nullptr;
@@ -1196,7 +1196,7 @@ void extension_desc_item_execute(void* button) {
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-        VIRTBAG_LOG("extension desc operation reserialize failed bag=%d slot=%d", item_bag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension desc operation reserialize failed bag=%d slot=%d", item_bag,
                     item_slot);
         reset_extension_desc_item_hooks_locked();
         return;
@@ -1218,7 +1218,7 @@ void extension_desc_item_execute(void* button) {
         descriptor = {};
         if (!free_module_object_locked(item_bag, item_slot)) {
             descriptor = previous_descriptor;
-            VIRTBAG_LOG("extension desc sync rejected object release bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension desc sync rejected object release bag=%d slot=%d",
                         item_bag, item_slot);
             reset_extension_desc_item_hooks_locked();
             return;
@@ -1229,7 +1229,7 @@ void extension_desc_item_execute(void* button) {
     }
     g_item_state_dirty = true;
     reset_extension_desc_item_hooks_locked();
-    VIRTBAG_LOG("extension desc operation synced bag=%d slot=%d category=%d count=%d",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "extension desc operation synced bag=%d slot=%d category=%d count=%d",
                 item_bag, item_slot, descriptor.category, descriptor.count);
 }
 
@@ -1270,7 +1270,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
                 // 装备/卸下按钮无 PtrHook：装备语义由函数级 hook
                 // （ButtonEquipExe 第 10）承担，观察 hook 只覆盖其他详情按钮。
                 install_extension_desc_item_hooks_locked(item);
-                VIRTBAG_LOG("extension desc item captured bag=%d slot=%d item=%p", item_bag,
+                QOL_LOG_INFO(QolDomain::kExtensionBag, "extension desc item captured bag=%d slot=%d item=%p", item_bag,
                             item_slot, item);
             }
         }

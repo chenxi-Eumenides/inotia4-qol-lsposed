@@ -1,6 +1,7 @@
 package com.inotia4.qol.service.info
 
 import com.inotia4.qol.BuildConfig
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.StaticData
@@ -438,7 +439,7 @@ class InfoApiServiceCore : InfoApiService {
             )
             root.toString()
         } catch (e: Exception) {
-            LogFile.logError("attach foreground activity to gamestate failed", e)
+            LogFile.error(LogDomain.API, "attach foreground activity to gamestate failed", e)
             json
         }
     }

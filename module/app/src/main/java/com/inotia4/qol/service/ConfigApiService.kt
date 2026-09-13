@@ -1,5 +1,6 @@
 package com.inotia4.qol.service
 
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.ModuleConfig
 import com.inotia4.qol.NativeBridge
@@ -21,7 +22,8 @@ interface ConfigApiService {
         oldExtensionBag: Boolean,
         oldGemCraft: Boolean,
         oldAutoSell: Boolean,
-        oldApiEnabled: Boolean
+        oldApiEnabled: Boolean,
+        oldDebugLog: Boolean
     )
 
     /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵 2026-08-12） */
@@ -36,17 +38,19 @@ class ConfigApiServiceImpl : ConfigApiService {
     override fun applyToNative() {
         if (!NativeBridge.ready) return
         val applied = NativeBridge.nativeSetStackLimitEnabled(ModuleConfig.stackLimitIncrease)
-        LogFile.log("stackLimitIncrease=${ModuleConfig.stackLimitIncrease} applied=$applied")
+        LogFile.info(LogDomain.CONFIG, "stackLimitIncrease=${ModuleConfig.stackLimitIncrease} applied=$applied")
         val moveMergeApplied = NativeBridge.nativeSetMoveMergeEnabled(ModuleConfig.moveMergeEnabled)
-        LogFile.log("moveMergeEnabled=${ModuleConfig.moveMergeEnabled} applied=$moveMergeApplied")
+        LogFile.info(LogDomain.CONFIG, "moveMergeEnabled=${ModuleConfig.moveMergeEnabled} applied=$moveMergeApplied")
         val extensionApplied = NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
-        LogFile.log("extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
+        LogFile.info(LogDomain.CONFIG, "extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
         val gemCraftApplied = NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
-        LogFile.log("gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
+        LogFile.info(LogDomain.CONFIG, "gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
         val autoSellApplied = NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
-        LogFile.log("autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
+        LogFile.info(LogDomain.CONFIG, "autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
         val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
-        LogFile.log("apiEnabled=${ModuleConfig.apiEnabled} applied=$apiApplied")
+        LogFile.info(LogDomain.CONFIG, "apiEnabled=${ModuleConfig.apiEnabled} applied=$apiApplied")
+        NativeBridge.nativeQolLogSetDebugEnabled(ModuleConfig.debugLogEnabled)
+        LogFile.info(LogDomain.CONFIG, "debugLogEnabled=${ModuleConfig.debugLogEnabled} applied ok")
         applyTiles()
     }
 
@@ -56,7 +60,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldExtensionBag: Boolean,
         oldGemCraft: Boolean,
         oldAutoSell: Boolean,
-        oldApiEnabled: Boolean
+        oldApiEnabled: Boolean,
+        oldDebugLog: Boolean
     ) {
         if (!NativeBridge.ready) return
         if (ModuleConfig.stackLimitIncrease != oldStack) {
@@ -77,6 +82,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         if (ModuleConfig.apiEnabled != oldApiEnabled) {
             NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
         }
+        if (ModuleConfig.debugLogEnabled != oldDebugLog) {
+            NativeBridge.nativeQolLogSetDebugEnabled(ModuleConfig.debugLogEnabled)
+        }
     }
 
     override fun applyTiles() {
@@ -84,12 +92,12 @@ class ConfigApiServiceImpl : ConfigApiService {
             val tilesJson = StaticData.read("maps/tiles.json")
             if (tilesJson != null && NativeBridge.ready) {
                 val ok = NativeBridge.nativeSetTilesData(tilesJson)
-                LogFile.log("static tiles loaded: $ok")
+                LogFile.info(LogDomain.CONFIG, "static tiles loaded: $ok")
             } else if (tilesJson == null) {
-                LogFile.log("static tiles read failed: maps/tiles.json missing")
+                LogFile.info(LogDomain.CONFIG, "static tiles read failed: maps/tiles.json missing")
             }
         } catch (t: Throwable) {
-            LogFile.logError("load static tiles failed", t)
+            LogFile.error(LogDomain.CONFIG, "load static tiles failed", t)
         }
     }
 }

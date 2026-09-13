@@ -14,7 +14,7 @@ object ModuleConfigUiBridge {
 
     private val BOOL_KEYS = setOf(
         "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize",
-        "autoSellEnabled", "apiEnabled"
+        "autoSellEnabled", "apiEnabled", "debugLogEnabled"
     )
 
     @JvmStatic
@@ -29,21 +29,29 @@ object ModuleConfigUiBridge {
         val oldGemCraft = ModuleConfig.gemCraftOptimize
         val oldAutoSell = ModuleConfig.autoSellEnabled
         val oldApiEnabled = ModuleConfig.apiEnabled
+        val oldDebugLog = ModuleConfig.debugLogEnabled
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
+            "opEnabled" -> ModuleConfig.opEnabled
             "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
             "gemCraftOptimize" -> ModuleConfig.gemCraftOptimize
             "autoSellEnabled" -> ModuleConfig.autoSellEnabled
             "apiEnabled" -> ModuleConfig.apiEnabled
-            else -> ModuleConfig.opEnabled
+            "debugLogEnabled" -> ModuleConfig.debugLogEnabled
+            else -> {
+                // BOOL_KEYS 与分支必须逐项同步：未来新增 key 未接线时显式失败，
+                // 杜绝静默落到某个既有开关（历史上 opEnabled 曾靠 else 兜底）。
+                LogFile.warn(LogDomain.CONFIG, "toggleConfig unsupported key=$key")
+                return "error:unsupported_key"
+            }
         }
         val json = JSONObject()
         json.put(key, !current)
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldAutoSell, oldApiEnabled
+            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldAutoSell, oldApiEnabled, oldDebugLog
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
         // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。

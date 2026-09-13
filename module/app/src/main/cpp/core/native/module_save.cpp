@@ -1,6 +1,6 @@
 #include "core/native/module_save_port.h"
 
-#include <android/log.h>
+#include "core/native/qol_log.h"
 
 #include <atomic>
 #include <mutex>
@@ -12,7 +12,6 @@
 
 namespace {
 
-constexpr char kLogTag[] = "Inotia4ModuleSave";
 std::mutex g_participant_mtx;
 std::vector<ModuleSaveParticipant> g_participants;
 std::atomic<uint64_t> g_transaction_counter{0};
@@ -32,10 +31,10 @@ void abort_participants(const std::vector<ModuleSaveParticipant>& participants, 
                         const std::string& transaction_id) {
     for (auto it = participants.rbegin(); it != participants.rend(); ++it) {
         if (it->abort != nullptr && !it->abort(slot, transaction_id.c_str())) {
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                                "participant abort failed name=%s slot=%d tx=%s",
-                                it->name != nullptr ? it->name : "unknown", slot,
-                                transaction_id.c_str());
+            QOL_LOG_WARN(QolDomain::kSave,
+                         "participant abort failed name=%s slot=%d tx=%s",
+                         it->name != nullptr ? it->name : "unknown", slot,
+                         transaction_id.c_str());
         }
     }
 }
@@ -74,9 +73,9 @@ bool module_save_game() {
     size_t prepared_count = 0;
     for (const ModuleSaveParticipant& participant : participants) {
         if (!participant.prepare(slot, transaction_id.c_str())) {
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                                "prepare failed name=%s slot=%d tx=%s",
-                                participant.name, slot, transaction_id.c_str());
+            QOL_LOG_WARN(QolDomain::kSave,
+                         "prepare failed name=%s slot=%d tx=%s",
+                         participant.name, slot, transaction_id.c_str());
             abort_participants(
                 std::vector<ModuleSaveParticipant>(participants.begin(),
                                                    participants.begin() + prepared_count),
@@ -92,21 +91,21 @@ bool module_save_game() {
             std::vector<ModuleSaveParticipant>(participants.begin(),
                                                participants.begin() + prepared_count),
             slot, transaction_id);
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "original save failed slot=%d tx=%s", slot, transaction_id.c_str());
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "original save failed slot=%d tx=%s", slot, transaction_id.c_str());
         return false;
     }
 
     for (const ModuleSaveParticipant& participant : participants) {
         if (!participant.commit(slot, transaction_id.c_str())) {
-            __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                                "commit failed name=%s slot=%d tx=%s",
-                                participant.name, slot, transaction_id.c_str());
+            QOL_LOG_ERROR(QolDomain::kSave,
+                          "commit failed name=%s slot=%d tx=%s",
+                          participant.name, slot, transaction_id.c_str());
             return false;
         }
     }
-    __android_log_print(ANDROID_LOG_INFO, kLogTag,
-                        "save complete slot=%d tx=%s participants=%zu", slot,
-                        transaction_id.c_str(), participants.size());
+    QOL_LOG_INFO(QolDomain::kSave,
+                 "save complete slot=%d tx=%s participants=%zu", slot,
+                 transaction_id.c_str(), participants.size());
     return true;
 }

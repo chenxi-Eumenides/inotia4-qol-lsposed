@@ -1,6 +1,7 @@
 package com.inotia4.qol.service.action
 
 import com.inotia4.qol.AgreementPopup
+import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.UiActivityTracker
@@ -14,13 +15,13 @@ import com.inotia4.qol.service.contract.ActionApiService
 
 internal object UiActions {
     fun panelClose(): String =
-        LogFile.op("POST /api/ui/close_panel", "") { ActionSupport.attachUi(NativeBridge.nativeOpPanelClose()) }
+        LogFile.op(LogDomain.API, "POST /api/ui/close_panel", emptyMap<String, String>()) { ActionSupport.attachUi(NativeBridge.nativeOpPanelClose()) }
     fun panelOpen(panel: String): String =
-        LogFile.op("POST /api/ui/open_panel", "panel=$panel") { ActionSupport.attachUi(NativeBridge.nativeOpPanelOpen(panel)) }
+        LogFile.op(LogDomain.API, "POST /api/ui/open_panel", mapOf("panel" to "$panel")) { ActionSupport.attachUi(NativeBridge.nativeOpPanelOpen(panel)) }
     fun npcInteract(): String =
-        LogFile.op("POST /api/ui/start_interact", "") { NativeBridge.nativeOpNpcInteract() }
+        LogFile.op(LogDomain.API, "POST /api/ui/start_interact", emptyMap<String, String>()) { NativeBridge.nativeOpNpcInteract() }
     fun dialogSelect(action: String, index: Int): String =
-        LogFile.op("POST /api/ui/dialog/select", "action=$action,index=$index") {
+        LogFile.op(LogDomain.API, "POST /api/ui/dialog/select", mapOf("action" to "$action", "index" to "$index")) {
             val activityCheck = UiActivityTracker.check()
             if (activityCheck.blockingActivityName != null) {
                 // agreement 域（Java 同意页，仅主菜单）：select 不 fail-closed——检测失败时落回

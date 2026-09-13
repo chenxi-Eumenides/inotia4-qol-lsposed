@@ -1,5 +1,6 @@
 #include "game_patch.h"
 
+#include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_inventory.h"
 #include "game_state.h"
@@ -11,7 +12,6 @@
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/patch/inventory_hook_stage4.h"
 
-#include <android/log.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -22,9 +22,7 @@
 #include <thread>
 #include <unistd.h>
 
-#define PATCH_TAG "Inotia4Export"
-#define MOVE_TAG "Inotia4Move"
-#define MOVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, MOVE_TAG, __VA_ARGS__)
+#define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kPlatform, __VA_ARGS__)
 
 namespace {
 
@@ -54,7 +52,7 @@ bool write_insn(uintptr_t addr, uint32_t value) {
     const uintptr_t page = addr & ~uintptr_t{0xFFF};
     const size_t plen = (addr + sizeof(uint32_t) - page + 0xFFF) & ~size_t{0xFFF};
     if (mprotect(reinterpret_cast<void*>(page), plen, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, PATCH_TAG, "patch: mprotect(0x%lx) failed errno=%d", static_cast<unsigned long>(page), errno);
+        QOL_LOG_ERROR(QolDomain::kPlatform, "patch: mprotect(0x%lx) failed errno=%d", static_cast<unsigned long>(page), errno);
         return false;
     }
     *reinterpret_cast<uint32_t*>(addr) = value;

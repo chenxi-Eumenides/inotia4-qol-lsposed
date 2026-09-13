@@ -2,7 +2,6 @@ package com.inotia4.qol
 
 import android.app.Activity
 import android.os.SystemClock
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -18,7 +17,6 @@ import java.util.ArrayDeque
  * 的元素；两条路径都与手动点击走相同的点击管线，不依赖固定坐标或按钮内部实现。
  */
 object AgreementPopup {
-    private const val TAG = "Inotia4VirtBag"
     private const val TAP_DURATION_MS = 80L
     private const val AGREE_TEXT = "同意"
 
@@ -58,10 +56,10 @@ object AgreementPopup {
         activity.runOnUiThread {
             try {
                 webView.evaluateJavascript(JS_CLICK_AGREE) { result ->
-                    Log.i(TAG, "agreement js click: $result")
+                    LogFile.info(LogDomain.PLATFORM, "agreement js click: $result")
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "agreement js click failed", t)
+                LogFile.error(LogDomain.PLATFORM, "agreement js click failed", t)
             }
         }
         return true

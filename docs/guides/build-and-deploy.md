@@ -225,7 +225,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
    adb -s <设备序列号> logcat -d -v time > .tmp/<task-name>/logcat.txt
    ```
 
-   结合 `VIRTBAG_LOG` 锚（`txn committed ...`、`release_cleanup ...` 等）判断停滞点；
+   结合 `extension_bag` domain 日志锚（`txn committed ...`、`release_cleanup ...` 等，格式见 `docs/development/logging.md`）判断停滞点；
    取证后恢复：`adb shell am force-stop <包名>` 并按 §3.1 ③ 重启。
 5. 取证文件只写 `.tmp/<task-name>/`，任务结束后清理；结论回填对应验收卡的日志锚，
    不得只写「已卡死」而无线程栈证据。
@@ -254,8 +254,8 @@ curl -s http://<设备IP>:8088/api/ui/screen
 # 符号查询（workdir: 项目根，libgame.so 符号表）
 grep " INVEN_GetMoney" apk/decompiled/libgame-symbols.txt
 
-# 抓模块与扩展背包 native 日志（文件日志在手机 sdcard/Android/data/<游戏包>/files/）
-adb logcat -s Inotia4Export:V Inotia4VirtBag:V
+# 抓模块日志（单一 tag；文件日志在手机 sdcard/Android/data/<游戏包>/files/，格式见 docs/development/logging.md）
+adb logcat -s Inotia4Qol:V
 
 # 反汇编定位（改 game_symbols.h 时用）
 tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/decoded/overhaul/lib/arm64-v8a/libgame.so

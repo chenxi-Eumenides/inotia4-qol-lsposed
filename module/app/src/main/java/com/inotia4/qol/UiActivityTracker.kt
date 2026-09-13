@@ -13,7 +13,7 @@ object UiActivityTracker {
         return try {
             CheckResult(agreementActivity()?.let { AGREEMENT_ACTIVITY }, false)
         } catch (t: Throwable) {
-            LogFile.logError("foreground activity lookup failed", t)
+            LogFile.error(LogDomain.UI, "foreground activity lookup failed", t)
             CheckResult(null, true)
         }
     }

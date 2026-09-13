@@ -1,18 +1,18 @@
 bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
                                             int src_slot, int dst_bag) {
     if (!virtual_bag::valid_original_transaction_bag(src_bag)) {
-        VIRTBAG_LOG("cross move reject original->extension invalid source bag=%d", src_bag);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
     }
     if (src_slot < 0 || src_slot >= virtual_bag::kSlotCount) {
-        VIRTBAG_LOG("cross move reject original->extension invalid source slot=%d bag=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension invalid source slot=%d bag=%d",
                     src_slot, src_bag);
         return false;
     }
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
         fn_save_save_item == nullptr || fn_get_cumulate_count == nullptr ||
         fn_remove_item_direct == nullptr) {
-        VIRTBAG_LOG("cross move reject original->extension dst=%d capacity=%d symbols=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d capacity=%d symbols=%d",
                     dst_bag,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
                     fn_save_save_item != nullptr && fn_get_cumulate_count != nullptr &&
@@ -21,7 +21,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     }
     void* src_item = nullptr;
     if (!inventory_slot_locked(src_bag, src_slot, &src_item) || src_item == nullptr) {
-        VIRTBAG_LOG("cross move reject original->extension source empty bag=%d slot=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension source empty bag=%d slot=%d",
                     src_bag, src_slot);
         return false;
     }
@@ -29,7 +29,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> source_payload{};
     int serialized_size = 0;
     if (!serialize_item_payload_locked(src_item, &source_payload, &serialized_size)) {
-        VIRTBAG_LOG("cross move: item serialization rejected");
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move: item serialization rejected");
         return false;
     }
     // descriptor.count 恒为 canonical 128a+b（R-38/R-48）：orig→ext 收编保留物品
@@ -62,7 +62,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
         }
     }
     if (dst_slot < 0) {
-        VIRTBAG_LOG("cross move reject original->extension destination full bag=%d capacity=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension destination full bag=%d capacity=%d",
                     dst_bag, capacity);
         return false;
     }
@@ -72,7 +72,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     txn.previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
     generate_transaction_id_locked(txn.transaction_id);
     if (txn.merged) {
-        VIRTBAG_LOG("txn prepared id=%s original merge src=%d/%d -> extension=%d/%d count=%d+%d=%d",
+        QOL_LOG_INFO(QolDomain::kExtensionBag, "txn prepared id=%s original merge src=%d/%d -> extension=%d/%d count=%d+%d=%d",
                     txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, src_count,
                     txn.previous_dst.count, txn.committed.count);
     }
@@ -120,7 +120,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
-    VIRTBAG_LOG("txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
                 txn.transaction_id, dst_bag, dst_slot, src_category, txn.committed.count,
                 src_bag, src_slot);
     return true;
@@ -130,7 +130,7 @@ bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int d
                                        void* moving_control) {
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
         fn_ui_equip_get_item_slot_index == nullptr) {
-        VIRTBAG_LOG("cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
                     dst_bag, moving_control,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
                     fn_ui_equip_get_item_slot_index != nullptr ? 1 : 0);
@@ -149,7 +149,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         !virtual_bag::valid_index(src_bag) ||
         src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
         fn_inven_save_item_on_empty == nullptr || fn_remove_item_direct == nullptr) {
-        VIRTBAG_LOG("cross move reject extension->original src=%d/%d target_bag=%d", src_bag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original src=%d/%d target_bag=%d", src_bag,
                     src_slot, target_bag);
         return false;
     }
@@ -167,7 +167,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         host_projected_word = *host_word;
         *host_word = (*host_word & ~kTxnCapacityMask) |
                      (g_original_bag_size & kTxnCapacityMask);
-        VIRTBAG_LOG("ext2orig host capacity restored target=%d window=%d projected=0x%x real=0x%x",
+        QOL_LOG_INFO(QolDomain::kExtensionBag, "ext2orig host capacity restored target=%d window=%d projected=0x%x real=0x%x",
                     target_bag, g_module_window_original_bag, host_projected_word,
                     g_original_bag_size);
     }
@@ -180,7 +180,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     } host_capacity_guard{host_word, host_projected_word};
 
     if (fn_get_bag_size != nullptr && fn_get_bag_size(target_bag) <= 0) {
-        VIRTBAG_LOG("cross move reject extension->original target bag unavailable=%d", target_bag);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original target bag unavailable=%d", target_bag);
         return false;
     }
     // 满包预检：INVEN_SaveItemOnEmpty 是纯首空槽扫描（0x104be0，满则返回 0 无副作用），
@@ -196,14 +196,14 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
             }
         }
         if (!has_empty) {
-            VIRTBAG_LOG("cross move reject extension->original target full=%d size=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original target full=%d size=%d",
                         target_bag, bag_size);
             return false;
         }
     }
     const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
     if (source.category <= 0 || source.count <= 0) {
-        VIRTBAG_LOG("cross move reject extension->original source empty=%d/%d", src_bag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original source empty=%d/%d", src_bag,
                     src_slot);
         return false;
     }
@@ -211,7 +211,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         virtual_bag::validate_serialized_payload_buffer(source.payload.data(), source.payload.size(),
                                                         source.payload_size);
     if (source_validation != virtual_bag::PayloadValidation::kOk) {
-        VIRTBAG_LOG("cross move reject extension->original reason=%s src=%d/%d size=%u",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original reason=%s src=%d/%d size=%u",
                     virtual_bag::payload_validation_reason(source_validation), src_bag, src_slot,
                     static_cast<unsigned int>(source.payload_size));
         return false;
@@ -351,7 +351,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         set_original_bag_locked(target_bag);
     }
     reset_drag_state_locked(nullptr);
-    VIRTBAG_LOG("txn committed id=%s extension->original src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension->original src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
                 txn.transaction_id, src_bag, src_slot, txn.source.category, txn.source.count,
                 target_bag, inserted_slot);
     return true;
@@ -375,7 +375,7 @@ bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& l
         virtual_bag::session_begin_transaction(&session, g_extension_tab_generation) ==
             virtual_bag::DragTransition::kIllegal ||
         !virtual_bag::session_claim_transaction(&session)) {
-        VIRTBAG_LOG("drop deferred ext->orig rejected source=%d/%d target_bag=%d phase=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop deferred ext->orig rejected source=%d/%d target_bag=%d phase=%d",
                     session.source_bag, session.source_slot, session.target_bag,
                     static_cast<int>(session.phase));
         return false;
@@ -388,11 +388,11 @@ bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& l
     if (moved) {
         persist_state_locked();
         refresh_projected_module_view_after_move_locked();
-        VIRTBAG_LOG("p5 session drop committed source=%d/%d target=%d/%d kind=%d deferred=1",
+        QOL_LOG_INFO(QolDomain::kExtensionBag, "p5 session drop committed source=%d/%d target=%d/%d kind=%d deferred=1",
                     src_bag, src_slot, target_bag, -1,
                     static_cast<int>(session.target_kind));
     } else {
-        VIRTBAG_LOG("p5 session drop rejected source=%d/%d target=%d/%d kind=%d deferred=1",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "p5 session drop rejected source=%d/%d target=%d/%d kind=%d deferred=1",
                     src_bag, src_slot, target_bag, -1,
                     static_cast<int>(session.target_kind));
     }
@@ -412,7 +412,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     if (!virtual_bag::extension_swap_tokens_available(
             source_use.active, source_use.pending_release, destination_use.active,
             destination_use.pending_release)) {
-        VIRTBAG_LOG("txn reject extension swap token active src=%d/%d active=%d pending=%d "
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "txn reject extension swap token active src=%d/%d active=%d pending=%d "
                     "dst=%d/%d active=%d pending=%d",
                     src_bag, src_slot, source_use.active ? 1 : 0,
                     source_use.pending_release ? 1 : 0, dst_bag, dst_slot,
@@ -443,7 +443,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         (previous_destination_object != nullptr &&
          (previous_destination_category != destination.category ||
           previous_destination_hash != virtual_bag::payload_hash(destination)))) {
-        VIRTBAG_LOG("txn reject extension swap stale endpoint src=%d/%d dst=%d/%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "txn reject extension swap stale endpoint src=%d/%d dst=%d/%d",
                     src_bag, src_slot, dst_bag, dst_slot);
         return false;
     }
@@ -511,7 +511,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
 
     if (source_object == nullptr || destination_object == nullptr) {
         restore(nullptr, "swap endpoint materialization failed");
-        VIRTBAG_LOG("txn reject extension swap endpoint materialization failed src=%d/%d dst=%d/%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "txn reject extension swap endpoint materialization failed src=%d/%d dst=%d/%d",
                     src_bag, src_slot, dst_bag, dst_slot);
         return false;
     }
@@ -581,7 +581,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     g_virtual_bag_state.pending = {};
     g_item_state_dirty = true;
     reset_drag_state_locked(nullptr);
-    VIRTBAG_LOG("txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
                 static_cast<unsigned long long>(g_module_object_use[src_bag][src_slot].generation),
                 static_cast<unsigned long long>(g_module_object_use[dst_bag][dst_slot].generation));
@@ -596,13 +596,13 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         (requested_dst_slot >= 0 &&
          !virtual_bag::valid_ext2ext_transfer_slots(src_bag, src_slot, dst_bag,
                                                     requested_dst_slot))) {
-        VIRTBAG_LOG("cross move reject extension->extension src=%d/%d dst_bag=%d requested_dst=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension src=%d/%d dst_bag=%d requested_dst=%d",
                     src_bag, src_slot, dst_bag, requested_dst_slot);
         return false;
     }
     const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
     if (source.category <= 0 || source.count <= 0) {
-        VIRTBAG_LOG("cross move reject extension->extension source empty=%d/%d", src_bag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension source empty=%d/%d", src_bag,
                     src_slot);
         return false;
     }
@@ -610,7 +610,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         virtual_bag::validate_serialized_payload_buffer(source.payload.data(), source.payload.size(),
                                                         source.payload_size);
     if (source_validation != virtual_bag::PayloadValidation::kOk) {
-        VIRTBAG_LOG("cross move reject extension->extension reason=%s src=%d/%d size=%u",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension reason=%s src=%d/%d size=%u",
                     virtual_bag::payload_validation_reason(source_validation), src_bag, src_slot,
                     static_cast<unsigned int>(source.payload_size));
         return false;
@@ -651,7 +651,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                 virtual_bag::merge_count(static_cast<int>(existing_view),
                                          static_cast<int>(source_view), limit_enabled),
                 virtual_bag_category_uses_stack_count, limit_enabled)) {
-            VIRTBAG_LOG("cross move reject extension->extension merge count gate src=%d/%d dst=%d/%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension merge count gate src=%d/%d dst=%d/%d",
                         src_bag, src_slot, dst_bag, slot);
             return false;
         }
@@ -663,7 +663,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     };
     if (requested_dst_slot >= 0) {
         if (requested_dst_slot >= capacity) {
-            VIRTBAG_LOG("cross move reject extension->extension invalid destination=%d capacity=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension invalid destination=%d capacity=%d",
                         requested_dst_slot, capacity);
             return false;
         }
@@ -677,11 +677,11 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                                     requested_dst_slot)) {
                         return true;
                     }
-                    VIRTBAG_LOG("cross move reject extension->extension swap failed=%d/%d -> %d/%d",
+                    QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension swap failed=%d/%d -> %d/%d",
                                 src_bag, src_slot, dst_bag, requested_dst_slot);
                     return false;
                 }
-                VIRTBAG_LOG("cross move reject extension->extension destination unavailable=%d/%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension destination unavailable=%d/%d",
                             dst_bag, requested_dst_slot);
                 return false;
             }
@@ -702,7 +702,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         }
     }
     if (dst_slot < 0) {
-        VIRTBAG_LOG("cross move reject extension->extension destination full=%d capacity=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension destination full=%d capacity=%d",
                     dst_bag, capacity);
         return false;
     }
@@ -721,14 +721,14 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     txn.previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
     generate_transaction_id_locked(txn.transaction_id);
     if (txn.merged) {
-        VIRTBAG_LOG("txn prepared id=%s extension merge %d/%d -> %d/%d count=%d+%d=%d",
+        QOL_LOG_INFO(QolDomain::kExtensionBag, "txn prepared id=%s extension merge %d/%d -> %d/%d count=%d+%d=%d",
                     txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, source.count,
                     txn.previous_dst.count, txn.committed.count);
     }
     if (!module_object_release_allowed_locked(
             src_bag, src_slot, g_module_objects[src_bag][src_slot],
             "extension-merge source", false, nullptr)) {
-        VIRTBAG_LOG("txn reject id=%s extension merge source object in use",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "txn reject id=%s extension merge source object in use",
                     txn.transaction_id);
         return false;
     }
@@ -747,7 +747,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     // 立即绑定到目标槽，而不是等切换标签重新 install 视图时才显示。
     void* destination_item = module_item_locked(dst_bag, dst_slot);
     if (destination_item == nullptr) {
-        VIRTBAG_LOG("txn committed but destination materialize failed id=%s dst=%d/%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "txn committed but destination materialize failed id=%s dst=%d/%d",
                     txn.transaction_id, dst_bag, dst_slot);
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "destination materialize failed");
@@ -758,7 +758,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                   ownership::State::kModuleOwned)) {
             if (ownership::borrow_for_view(&g_ownership_ledger, handle) !=
                 ownership::Outcome::kOk) {
-                VIRTBAG_LOG("txn destination view borrow failed id=%s dst=%d/%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "txn destination view borrow failed id=%s dst=%d/%d",
                             txn.transaction_id, dst_bag, dst_slot);
             }
         }
@@ -766,12 +766,12 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     if (!free_module_object_locked(src_bag, src_slot)) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "extension merge source release rejected");
-        VIRTBAG_LOG("txn abort id=%s extension merge source release rejected",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "txn abort id=%s extension merge source release rejected",
                     txn.transaction_id);
         return false;
     }
     reset_drag_state_locked(nullptr);
-    VIRTBAG_LOG("txn committed id=%s extension->extension %d/%d -> %d/%d cat=%d count=%d",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension->extension %d/%d -> %d/%d cat=%d count=%d",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, txn.source.category,
                 txn.committed.count);
     return true;
@@ -780,14 +780,14 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
 bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
     ensure_state_loaded_locked();
     recover_pending_transaction_locked(lock);
-    VIRTBAG_LOG("drop release mode=%d selected=%d x=%lld y=%lld moving=%p extension_drag=%d",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "drop release mode=%d selected=%d x=%lld y=%lld moving=%p extension_drag=%d",
                 static_cast<int>(g_virtual_bag_state.mode), g_virtual_bag_state.selected,
                 static_cast<long long>(x), static_cast<long long>(y),
                 touch_moving_item_control_locked(), g_extension_drag.active ? 1 : 0);
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal) {
         void* moving_control = touch_moving_item_control_locked();
         if (moving_control == nullptr) {
-            VIRTBAG_LOG("drop reject original->extension no moving original control");
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject original->extension no moving original control");
             return false;
         }
         for (int index = 0; index < virtual_bag::kBagCount; ++index) {
@@ -806,7 +806,7 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
             // 目标非空，或来源为装备/其他物品：保持原版物品的普通移动语义。
             return move_original_to_extension_locked(lock, index, moving_control);
         }
-        VIRTBAG_LOG("drop reject original->extension no extension tab hit x=%lld y=%lld",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject original->extension no extension tab hit x=%lld y=%lld",
                     static_cast<long long>(x), static_cast<long long>(y));
         return false;
     }
@@ -817,7 +817,7 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
                 g_extension_drag.bag, g_extension_drag.slot,
                 g_virtual_bag_state.selected, target_slot);
             if (handled) refresh_projected_module_view_after_move_locked();
-            VIRTBAG_LOG("drop result direction=extension->extension handled=%d src=%d/%d dst=%d/%d",
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->extension handled=%d src=%d/%d dst=%d/%d",
                         handled ? 1 : 0, g_extension_drag.bag, g_extension_drag.slot,
                         g_virtual_bag_state.selected, target_slot);
             return handled;
@@ -834,7 +834,7 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
                 : move_extension_to_extension_locked(
                     g_extension_drag.bag, g_extension_drag.slot, index, -1);
             if (handled) refresh_projected_module_view_after_move_locked();
-            VIRTBAG_LOG("drop result direction=extension->tab handled=%d equip=%d src=%d/%d dst_bag=%d",
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->tab handled=%d equip=%d src=%d/%d dst_bag=%d",
                         handled ? 1 : 0, should_equip ? 1 : 0, g_extension_drag.bag,
                         g_extension_drag.slot, index);
             return handled;
@@ -843,21 +843,21 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
         if (target_bag >= 0 && target_bag < 6) {
             if (!virtual_bag::valid_original_transaction_bag(target_bag)) {
                 // 索引 5 = 原版任务袋（ADR-006）：不得成为扩展移动目标（触摸路径与 API 门禁对齐）。
-                VIRTBAG_LOG("drop reject extension->original reason=invalid_transaction_domain target_bag=%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension->original reason=invalid_transaction_domain target_bag=%d",
                             target_bag);
                 return false;
             }
             const bool handled = move_extension_to_original_locked(
                 lock, g_extension_drag.bag, g_extension_drag.slot, target_bag);
             if (handled) refresh_projected_module_view_after_move_locked();
-            VIRTBAG_LOG("drop result direction=extension->original handled=%d src=%d/%d target_bag=%d",
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->original handled=%d src=%d/%d target_bag=%d",
                         handled ? 1 : 0, g_extension_drag.bag, g_extension_drag.slot, target_bag);
             return handled;
         }
-        VIRTBAG_LOG("drop reject extension destination not found x=%lld y=%lld",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension destination not found x=%lld y=%lld",
                     static_cast<long long>(x), static_cast<long long>(y));
     } else if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule) {
-        VIRTBAG_LOG("drop reject extension no active drag selected=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension no active drag selected=%d",
                     g_virtual_bag_state.selected);
     }
     return false;
@@ -898,7 +898,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
             break;
         }
         if (target_bag < 0) {
-            VIRTBAG_LOG("p5 session target miss x=%lld y=%lld source=%d/%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "p5 session target miss x=%lld y=%lld source=%d/%d",
                         static_cast<long long>(x), static_cast<long long>(y),
                         g_extension_drag_session.source_bag,
                         g_extension_drag_session.source_slot);
@@ -965,7 +965,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
         }
     }
     virtual_bag::session_finish_transaction(&g_extension_drag_session, handled);
-    VIRTBAG_LOG("p5 session drop %s source=%d/%d target=%d/%d kind=%d equip=%d",
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "p5 session drop %s source=%d/%d target=%d/%d kind=%d equip=%d",
                 handled ? "committed" : "rejected",
                 g_extension_drag_session.source_bag, g_extension_drag_session.source_slot,
                 target_bag, target_slot, static_cast<int>(target_kind), should_equip ? 1 : 0);
@@ -980,7 +980,7 @@ bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, i
     auto& session = g_extension_drag_session;
     const int target_internal = virtual_bag::extension_internal_bag(target_bag);
     const auto reject = [&](const char* reason) {
-        VIRTBAG_LOG("cross tab reject reason=%s bag=%d slot=%d target_bag=%d target_internal=%d "
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "cross tab reject reason=%s bag=%d slot=%d target_bag=%d target_internal=%d "
                     "phase=%d generation=%llu/%llu/%llu",
                     reason, session.source_bag, session.source_slot, target_bag, target_internal,
                     static_cast<int>(session.phase),
@@ -1053,11 +1053,11 @@ bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, i
     }
     virtual_bag::session_finish_transaction(&session, handled);
     if (handled) {
-        VIRTBAG_LOG("tab commit handled=1 bag=%d slot=%d target_bag=%d target_kind=%d equip=%d",
+        QOL_LOG_INFO(QolDomain::kExtensionBag, "tab commit handled=1 bag=%d slot=%d target_bag=%d target_kind=%d equip=%d",
                     session.source_bag, session.source_slot, target_bag,
                     static_cast<int>(target_kind), should_equip ? 1 : 0);
     } else {
-        VIRTBAG_LOG("tab reject reason=transaction_failed bag=%d slot=%d target_bag=%d "
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "tab reject reason=transaction_failed bag=%d slot=%d target_bag=%d "
                     "target_kind=%d equip=%d",
                     session.source_bag, session.source_slot, target_bag,
                     static_cast<int>(target_kind), should_equip ? 1 : 0);

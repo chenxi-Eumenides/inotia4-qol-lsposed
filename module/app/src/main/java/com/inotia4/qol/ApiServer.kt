@@ -1,7 +1,6 @@
 package com.inotia4.qol
 
 import android.content.Context
-import android.util.Log
 import com.inotia4.qol.StaticData
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.store.ModuleSaveStore
@@ -44,7 +43,7 @@ object ApiServer {
         startModuleApkPath = moduleApkPath
         initFeatures(context, moduleApkPath)
         if (!ModuleConfig.apiEnabled) {
-            LogFile.log("ApiServer HTTP disabled by config (apiEnabled=false); features initialized")
+            LogFile.info(LogDomain.HTTP, "ApiServer HTTP disabled by config (apiEnabled=false); features initialized")
             return
         }
         start(context, moduleApkPath)
@@ -73,16 +72,16 @@ object ApiServer {
         try {
             NativeBridge.nativeSaveBackupSetMapNames(StaticData.buildMapNamesJson())
         } catch (t: Throwable) {
-            LogFile.logError("savebackup set map names failed", t)
+            LogFile.error(LogDomain.HTTP, "savebackup set map names failed", t)
         }
         // 启动游戏内备份面板的懒注入线程（注入 INAP_GOODS 死条目 + 设置页存档备份按钮）
         try {
             val r = NativeBridge.nativeSaveBackupUiInject()
-            LogFile.log("savebackup ui inject: $r")
+            LogFile.info(LogDomain.HTTP, "savebackup ui inject: $r")
             val sr = NativeBridge.nativeSaveBackupUiSelfCheck()
-            LogFile.log("savebackup self check: $sr")
+            LogFile.info(LogDomain.HTTP, "savebackup self check: $sr")
         } catch (t: Throwable) {
-            LogFile.logError("savebackup ui init failed", t)
+            LogFile.error(LogDomain.HTTP, "savebackup ui init failed", t)
         }
         ExtensionBagUiBridge.initialize(context)
         // 功能开关通知 native 生效（含 nativeSetApiEnabled：控制缓存预取线程启停）+ 静态瓦片矩阵加载
@@ -105,9 +104,9 @@ object ApiServer {
                 .getMethod("addAssetPath", String::class.java)
             m.invoke(context.assets, moduleApkPath)
             assetsInjected = true
-            LogFile.log("module assets added: $moduleApkPath")
+            LogFile.info(LogDomain.HTTP, "module assets added: $moduleApkPath")
         } catch (t: Throwable) {
-            LogFile.logError("addAssetPath failed", t)
+            LogFile.error(LogDomain.HTTP, "addAssetPath failed", t)
         }
     }
 
@@ -128,7 +127,7 @@ object ApiServer {
     private fun startServerWithFallback(context: Context) {
         if (startServer(context)) return
         if (ModuleConfig.listenPort != ModuleConfig.DEFAULT_LISTEN_PORT) {
-            LogFile.log("listenPort=${ModuleConfig.listenPort} start failed, fallback to default ${ModuleConfig.DEFAULT_LISTEN_PORT}")
+            LogFile.info(LogDomain.HTTP, "listenPort=${ModuleConfig.listenPort} start failed, fallback to default ${ModuleConfig.DEFAULT_LISTEN_PORT}")
             ModuleConfig.fallbackListenPortToDefault()
             startServer(context)
         }
@@ -142,28 +141,28 @@ object ApiServer {
             .serverSocketFactory(GracefulCloseServerSocketFactory)
             .listener(object : Server.ServerListener {
                 override fun onStarted() {
-                    Log.i(TAG, "AndServer started on ${ModuleConfig.listenAddress}:${ModuleConfig.listenPort}")
+                    LogFile.info(LogDomain.HTTP, "AndServer started on ${ModuleConfig.listenAddress}:${ModuleConfig.listenPort}")
                 }
 
                 override fun onStopped() {
-                    Log.i(TAG, "AndServer stopped")
+                    LogFile.info(LogDomain.HTTP, "AndServer stopped")
                 }
 
                 override fun onException(e: Exception) {
-                    Log.e(TAG, "AndServer error", e)
+                    LogFile.error(LogDomain.HTTP, "AndServer error", e)
                 }
             })
         // 按配置绑定监听地址；非法地址回退默认绑定（0.0.0.0 通配）
         try {
             builder.inetAddress(InetAddress.getByName(ModuleConfig.listenAddress))
         } catch (e: Exception) {
-            LogFile.logError("invalid listenAddress=${ModuleConfig.listenAddress}, fallback to wildcard bind", e)
+            LogFile.error(LogDomain.HTTP, "invalid listenAddress=${ModuleConfig.listenAddress}, fallback to wildcard bind", e)
         }
         server = builder.build()
         server?.startup()
         true
     } catch (t: Throwable) {
-        Log.e(TAG, "ApiServer start failed", t)
+        LogFile.error(LogDomain.HTTP, "ApiServer start failed", t)
         server = null
         false
     }
@@ -178,14 +177,14 @@ object ApiServer {
     @Synchronized
     fun startFromConfig() {
         if (!bootstrapped) {
-            LogFile.log("ApiServer startFromConfig skipped: features not bootstrapped")
+            LogFile.info(LogDomain.HTTP, "ApiServer startFromConfig skipped: features not bootstrapped")
             return
         }
         if (!ModuleConfig.apiEnabled) return
         if (server?.isRunning == true) return
         val ctx = startContext
         if (ctx == null) {
-            LogFile.log("ApiServer startFromConfig skipped: start context unavailable")
+            LogFile.info(LogDomain.HTTP, "ApiServer startFromConfig skipped: start context unavailable")
             return
         }
         start(ctx, startModuleApkPath)
@@ -222,8 +221,6 @@ object ApiServer {
             stop()
         }.start()
     }
-
-    private const val TAG = "Inotia4Export"
 }
 
 /**

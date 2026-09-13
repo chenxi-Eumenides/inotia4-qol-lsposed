@@ -523,7 +523,7 @@
 - **必须保持的不变式(引 R-xx)**：类别判定 fail-closed（表不可用→backup）；非可堆叠（装备 marker bits25–31、宝石 bits18–23、袋容量 bits0–24）不解释 bits22–24（R-45、R-46、R-49、R-40）。
 - **失败语义**：`item=nullptr` 返回 `0`；非可堆叠/未知类别返回原版语义（装备 `1`）；hook 安装失败时回滚整链并阻塞重试，不得半安装。
 - **Host 测试名(现有或「缺口」)**：`test_stack_codec_s2`（`s2_read_count` 解码往返、`s2_clamp` 999/99 上限）；wrapper 门控依赖游戏内存类别表，Host 缺口，以本卡真机为准。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-33`：①经写侧构造可堆叠物品数量 `99/100/127/128/199/999` 各一（99 前后各取关闭态/开启态一次）；②每档读取 GET `/api/item/inventory/items` 的 `count` 与原始 `+0x10`，核对 `count == 128*((raw>>22)&7) + ((raw>>25)&0x7F)`；③在背包 UI 与详情弹窗目视数量；④对一件装备、一颗宝石、一个袋对象重复②③；预期：六档 `count` 与 UI 显示一致且等于 S2 解码值（重点 `100`、`127→128` 进位边界、`999` 上限不出现 `1000`）；装备 `count=1`、宝石/袋容量数值不受影响；`logcat` 出现 `hook install OK api=2 count=23 ... GetCumulateCount=`；关闭扩展后可堆叠物品显示回落为 `count mod 128`（`a` 保留，R-47），重新启用后恢复完整值。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-33`：①经写侧构造可堆叠物品数量 `99/100/127/128/199/999` 各一（99 前后各取关闭态/开启态一次）；②每档读取 GET `/api/item/inventory/items` 的 `count` 与原始 `+0x10`，核对 `count == 128*((raw>>22)&7) + ((raw>>25)&0x7F)`；③在背包 UI 与详情弹窗目视数量；④对一件装备、一颗宝石、一个袋对象重复②③；预期：六档 `count` 与 UI 显示一致且等于 S2 解码值（重点 `100`、`127→128` 进位边界、`999` 上限不出现 `1000`）；装备 `count=1`、宝石/袋容量数值不受影响；`logcat` 出现 `hook install OK api=2 count=24 ... GetCumulateCount=`；关闭扩展后可堆叠物品显示回落为 `count mod 128`（`a` 保留，R-47），重新启用后恢复完整值。
 - **证据锚类型**：真机 + Host codec + 源码；读侧单点通过不代表写侧（VM-34）整体通过。
 
 ### VM-34 S2 写侧门控与进位/借位（创建/合并/消耗）
@@ -549,7 +549,7 @@
 - **必须保持的不变式(引 R-xx)**：重定向读值等于 `effective_read_count(field, stack_limit_enabled())`（R-51）；关闭态与原版 `GetBitValue(31,25)` 逐位一致（R-47）；装备 marker/宝石选项等非数量位段不被解释为全量（R-43/R-46）。
 - **失败语义**：patch 原指令不匹配（版本差异）时 `redirect mismatch` 并拒绝安装，保持原版 b 读；getter 未安装时退回原版 getter（b 读）。
 - **Host 测试名(现有或「缺口」)**：`test_sell_divide_s2_read_window`（getter 两态解码等价、十位窗口伪修复反例、200=a1b72）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-37`：①启用态持有一堆 `200`（a=1,b=72）中药水，商店整堆卖出，预期输入框上限 200、结算按 200 计价（对照原版实得 546 缺陷）；②输入 `150` 部分出售，预期背包剩 50、所得按 150；③关闭堆叠上限重复①，预期输入框上限 72（b 视图，与原版一致）；④`logcat` 出现 5 条 `Inotia4Export: redirect ...` 与 `stack canonical layout applied`、`hook install OK api=2 count=23`。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-37`：①启用态持有一堆 `200`（a=1,b=72）中药水，商店整堆卖出，预期输入框上限 200、结算按 200 计价（对照原版实得 546 缺陷）；②输入 `150` 部分出售，预期背包剩 50、所得按 150；③关闭堆叠上限重复①，预期输入框上限 72（b 视图，与原版一致）；④`logcat` 出现 5 条 `Inotia4Qol ... domain=platform ... redirect ...` 与 `stack canonical layout applied`、`hook install OK api=2 count=24`。
 - **证据锚类型**：真机 + Host codec + 源码；重定向安装日志已在部署流程取证，行为断言待人工商店操作。
 
 ### VM-38 拾取/掉落可堆叠物品数量为 1（MakeItem 回写撤销）
@@ -601,7 +601,7 @@
 - **必须保持的不变式(引 R-xx)**：仅 `desc_type==2` 且 count-encoded 的背包详情接管（R-46/R-55）；金额 `unit×min(canonical,999)×7/10`，canonical 0/单价越界/结果越界拒绝（R-37/R-55）；关闭态、非背包详情、装备详情与校验失败逐指令 backup；按钮预演绝不结算。
 - **失败语义**：加钱失败直接返回 0 不删堆；提交前槽位复核失败/删除未生效则 `fn_minus_money` 退款；任一前置校验失败 backup 原版（fail-safe，不半执行）。
 - **Host 测试名(现有或「缺口」)**：`stage4_hook_tests::test_vanilla_sell_takeover`（两态路由、金额边界与越界拒绝、调用点常量）、`test_native_equip_sell_count`（原版 b 段语义 199→71 缺陷基线）、`test_equip_sell_redirect_mapping`（重定向映射常量证据，该点当前不入表）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-41`：①启用态持有一堆 `200`（a=1,b=72）中药水，背包详情点出售，确认框展示金额应为 `unit×200×7/10`（对照原版缺陷按 71 结算），点 OK 后 money 增加该金额、整堆删除、背包刷新；②点出售后在确认框取消，预期不售出、数量与 money 不变；③关闭堆叠上限重复①，预期走原版 b 段语义（与原版一致）；④对装备详情（desc_type=0）重复出售，预期走原版路径；⑤`logcat` 出现 `hook install OK api=2 count=23` 与 `vanilla sell preview/committed ...`；⑥制造越界单价或加钱失败，预期不删堆并记 ERROR。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-41`：①启用态持有一堆 `200`（a=1,b=72）中药水，背包详情点出售，确认框展示金额应为 `unit×200×7/10`（对照原版缺陷按 71 结算），点 OK 后 money 增加该金额、整堆删除、背包刷新；②点出售后在确认框取消，预期不售出、数量与 money 不变；③关闭堆叠上限重复①，预期走原版 b 段语义（与原版一致）；④对装备详情（desc_type=0）重复出售，预期走原版路径；⑤`logcat` 出现 `hook install OK api=2 count=24` 与 `vanilla sell preview/committed ...`；⑥制造越界单价或加钱失败，预期不删堆并记 ERROR。
 - **证据锚类型**：真机 + Host 纯函数 + 源码；行为断言待人工详情出售。
 
 ### VM-42 三个 UI 宿主页签随扩展背包开关挂载/卸载（R-58）
@@ -799,7 +799,7 @@
 
 - Hook 后原版一次 `RefreshItemArea` 应由 H-16 先走 trampoline、再在锁内覆盖当前扩展
   投影；模块内部刷新必须走 raw-original dispatcher，因此原版刷新不再把扩展物品顶掉。
-  日志锚：`hook install OK ... count=23`、原版刷新调用前后及投影控件 `data[0]` 保持当前
+  日志锚：`hook install OK ... count=24`、原版刷新调用前后及投影控件 `data[0]` 保持当前
   扩展对象；不应出现 draw-end 逐帧写控件，非活 stale moving 应出现清理日志并清除
   `TouchState+0x30` 与控件 flags。H-16 post-projection 是唯一刷新后覆盖职责。
 
@@ -840,14 +840,14 @@
 | R-29 | VM-13、VM-14、VM-25 | `test_p44_transaction_stages` 覆盖 pending/journal 域模型。
 | R-30 | VM-07、VM-11、VM-16、VM-23、VM-24、VM-31 | `test_p52_drag_session` 覆盖 generation；root/control 仍需缺口和真机。
 | R-31 | VM-10、VM-11、VM-12、VM-13、VM-27 | `test_inventory_hook_stage4` 覆盖源判据；Native `MoveItem GUARD reject` 与装备槽 proc 日志仍需真机。
-| R-32 | VM-B01～VM-B04 | H-16 安装日志 `count=23`（当前总链 23 个）与 raw-original grep 锚已补；原版刷新后的扩展投影保持不被顶掉，VM-B01～B04 真机已确认；VM-B05 不属于原版刷新基线。 |
+| R-32 | VM-B01～VM-B04 | H-16 安装日志 `count=24`（当前总链 24 个）与 raw-original grep 锚已补；原版刷新后的扩展投影保持不被顶掉，VM-B01～B04 真机已确认；VM-B05 不属于原版刷新基线。 |
 | R-33 | VM-28 | 五个吞掉 `0x18` 出口统一经 `complete_original_release_cleanup_locked`；handled/unhandled 变体和锁外原版清理需真机日志确认。
 | R-34 | VM-B01～VM-B04 | Host 可静态核对六条件表达式；真机已确认 draw-end 不逐帧写控件、非活 stale moving 被清理。 |
 | R-35 | S-05、VM-29 | 页签先于网格解析；真机已确认页签装备、跨页签移动和原版对照。 |
 | R-36 | S-05、VM-29 | 触摸窗口释放使用延迟队列；队列满转 custody 保管且事务继续；以 `deferred free enqueue/drain`、`queue full; custody retained` 和 `tab commit` 日志核对。 |
 | R-37 | VM-17、VM-18、VM-30 | Host 价格边界/clamp 断言 + 真机装备/商店弹窗与 API 对照；非法价格不得写弹窗或结算。 |
 | R-38 | VM-30 | `test_virtual_bag_json_count_clamp` 断言非堆叠装备 payload 逐字节不变、可堆叠超限才收敛、合法数量幂等；真机存档回归仍需核对 payload 语义。 |
-| R-39 | VM-09、VM-31 | `test_stack_codec` 断言 marker 只改 bit25..31 且保留 bit0..24；真机核对袋容量、切换和 `count=23` 安装日志。 |
+| R-39 | VM-09、VM-31 | `test_stack_codec` 断言 marker 只改 bit25..31 且保留 bit0..24；真机核对袋容量、切换和 `count=24` 安装日志。 |
 | R-40 | VM-01、VM-03、VM-05、VM-10、VM-13 | `test_virtual_bag_json_count_clamp`、`test_virtual_bag_mergeable_items`、`test_virtual_bag_payload_helpers` 覆盖已知/非适用/未知 fail-closed；真机拒绝路径不得降级为堆叠或 apply。 |
 | R-41 | VM-13、VM-30 | `test_virtual_bag_payload_helpers` 断言装备/未知类别 patch no-op，`test_virtual_bag_mergeable_items` 断言合并前门控；真机同袋合并与存档载荷对照。 |
 | R-42 | VM-05、VM-29 | `test_virtual_bag_state` 断言 BagType 容量派生；真机原版物品→空页签和扩展页签路由核对两套判据不串用。 |

@@ -26,10 +26,10 @@
 #include "feature/ui/game_ui_gemcraft.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 
-#include <android/log.h>
+#include "core/native/qol_log.h"
 
-#define MOVE_TAG "Inotia4Move"
-#define MOVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, MOVE_TAG, __VA_ARGS__)
+// 统一日志：op_result 与 bridge 层沿用 MOVE_LOG 名称，接入 kApi 域。
+#define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kApi, __VA_ARGS__)
 
 template <typename T>
 inline std::string str_of(T v) {
