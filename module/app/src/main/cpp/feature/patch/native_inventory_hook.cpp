@@ -4,6 +4,7 @@
 
 #include "core/native/extension_bag_port.h"
 #include "core/native/stack_codec.h"
+#include "data/native/item_class.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "game_access.h"
 #include "game_inventory.h"

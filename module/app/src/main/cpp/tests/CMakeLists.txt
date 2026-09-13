@@ -54,3 +54,44 @@ target_include_directories(attribute_range_tests PRIVATE
 )
 target_compile_features(attribute_range_tests PRIVATE cxx_std_17)
 add_test(NAME attribute_range_tests COMMAND attribute_range_tests)
+
+add_executable(autosell_rules_tests
+    test_autosell_rules.cpp
+    ${CPP_DIR}/feature/autosell/autosell_rules.cpp
+)
+target_include_directories(autosell_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(autosell_rules_tests PRIVATE cxx_std_17)
+add_test(NAME autosell_rules_tests COMMAND autosell_rules_tests)
+
+# 自动出售阶段 A 纯逻辑 host 测试（按帧去重 + 物品编码分支）
+add_executable(infra_data_tests
+    test_infra_data.cpp
+)
+target_include_directories(infra_data_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(infra_data_tests PRIVATE cxx_std_17)
+add_test(NAME infra_data_tests COMMAND infra_data_tests)
+
+# 自动出售阶段 B 节流纯函数 host 测试（M-2：autosell_should_scan，末尾追加）
+add_executable(autosell_scan_tests
+    test_autosell_scan.cpp
+)
+target_include_directories(autosell_scan_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(autosell_scan_tests PRIVATE cxx_std_17)
+add_test(NAME autosell_scan_tests COMMAND autosell_scan_tests)
+
+# 自动出售 sidecar 配置纯序列化 host 测试（末尾追加）
+add_executable(autosell_store_tests
+    test_autosell_store.cpp
+)
+target_include_directories(autosell_store_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(autosell_store_tests PRIVATE cxx_std_17)
+add_test(NAME autosell_store_tests COMMAND autosell_store_tests)

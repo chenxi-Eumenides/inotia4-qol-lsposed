@@ -940,3 +940,10 @@ using ControlObjectSetActiveFn = void (*)(void* ctrl, uint32_t active);
 using ControlItemSetItemFn = void (*)(void* ctrl, void* item);
 using ControlObjectSetShowFn = void (*)(void* ctrl, uint32_t show);
 using ControlButtonDrawFn = void (*)(void* ctrl);
+
+// ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主调用点（auto-sell）----
+// 符号存在性已用 NDK r26d llvm-objdump 核对：GAMESTATE_DrawPlay@0x9d6cc。
+constexpr uintptr_t F_GAMESTATE_DRAWPLAY_VMA = 0x9d6cc;  // void GAMESTATE_DrawPlay()
+// GAMESTATE_DrawPlay 内 +0x74 的 `bl GRPX_Start`（原指令字 0x97ffc6ef），作为
+// 主线程逐帧 draw-end 宿主调用点（call_patch BL patch 目标）。
+constexpr size_t F_GAMESTATE_DRAWPLAY_GRPX_START_CALL_OFF = 0x74;

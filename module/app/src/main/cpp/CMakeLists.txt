@@ -60,3 +60,26 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/data/native
 )
 target_link_libraries(gamebridge ${log-lib} dl)
+
+# 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    core/native/call_patch.cpp
+    core/native/frame_tick.cpp
+    core/native/inventory_trade.cpp
+    data/native/item_class.cpp
+)
+
+# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/autosell/autosell_rules.cpp
+    feature/autosell/autosell_config.cpp
+    feature/autosell/autosell_view.cpp
+    feature/autosell/autosell_scan.cpp
+    feature/autosell/autosell_host.cpp
+    bridge/native/gamebridge_autosell.cpp
+)
+
+# 自动出售按存档配置 sidecar（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/autosell/autosell_store.cpp
+)

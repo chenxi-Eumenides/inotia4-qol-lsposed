@@ -1,6 +1,8 @@
 #include "gamebridge_internal.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
+#include "feature/autosell/autosell_host.h"
+#include "feature/autosell/autosell_store.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -23,6 +25,11 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env
     virtual_bag_ui_register_bridge(env, bridge_class);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeRegisterAutoSellStoreBridge(JNIEnv* env, jclass, jclass bridge_class) {
+    autosell_store_register_bridge(env, bridge_class);
+}
+
 // JNI 导出层：仅做参数传递与字符串转换，逻辑在 game_access / game_data。
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -31,6 +38,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         inventory_native_hook_install_if_ready();
         attr_range_ui_install_if_ready();
+        autosell_host_install_if_ready();
         frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
         settings_ui_start_auto_inject();
     }

@@ -165,63 +165,67 @@ std::string data_op_dice_reject() {
     *flag &= ~1u;
     return op_ok();
 }
+// 处置原语已下沉至 core/native/inventory_trade.*（阶段 A）；此处仅做状态→JSON 映射，
+// 错误文案/顺序与下沉前一致，source 固定 "api"。
 std::string data_op_discard_item(int bag, int slot) {
-    if (!game_in_world()) return op_err("not in game");
-    if (bag == 5) return op_err("task bag excluded");
-    InventoryItemRef item_ref;
-    if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
-    if (item_ref.native_item == nullptr) return op_err("extension item unavailable");
-    if (fn_remove_item == nullptr) return op_err("symbol not resolved");
-    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
-    if (fn_remove_item(item_ref.native_item) == 0) return op_err("discard failed");
-    extension_bag_sync_projected_slot(bag, slot);
-    return op_ok();
+    // I-1：先解析期望物品，传入处置原语做身份复核（并发下槽位被改动则不结算）。
+    InventoryItemRef expected_ref;
+    const bool found = inventory_item_ref_at(bag, slot, &expected_ref);
+    switch (inventory_trade::discard(bag, slot, found ? expected_ref.native_item : nullptr)) {
+        case inventory_trade::Status::kOk:
+            return op_ok();
+        case inventory_trade::Status::kNotInWorld:
+            return op_err("not in game");
+        case inventory_trade::Status::kTaskBagExcluded:
+            return op_err("task bag excluded");
+        case inventory_trade::Status::kEmptySlot:
+            return op_err("slot empty");
+        case inventory_trade::Status::kNoNativeItem:
+            return op_err("extension item unavailable");
+        case inventory_trade::Status::kStale:
+            // 并发下槽位物品已变：对外沿用既有 not found 语义（不新增错误文案）。
+            return op_err("slot empty");
+        case inventory_trade::Status::kSymbolsUnresolved:
+            return op_err("symbol not resolved");
+        case inventory_trade::Status::kRemoveFailed:
+            return op_err("discard failed");
+        default:
+            return op_err("discard failed");
+    }
 }
 std::string data_op_sell_item(int bag, int slot) {
-    if (!game_in_world()) return op_err("not in game");
-    if (bag == 5) return op_err("task bag excluded");
-    if (fn_remove_item == nullptr || fn_add_money == nullptr ||
-        fn_minus_money == nullptr || fn_item_get_sell_price == nullptr ||
-        fn_item_is_no_sell == nullptr || fn_get_bit == nullptr)
-        return op_err("symbol not resolved");
-    InventoryItemRef item_ref;
-    if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
-    if (item_ref.native_item == nullptr) return op_err("extension item unavailable");
-    void* item = item_ref.native_item;
-    const uint16_t flags = *reinterpret_cast<uint16_t*>(
-        reinterpret_cast<uint8_t*>(item) + I_TYPE);
-    const int category = fn_get_bit(flags, 15, 6);
-    if (fn_item_is_no_sell(category) != 0) {
-        __android_log_print(ANDROID_LOG_WARN, "Inotia4VirtBag",
-                            "sell price reject reason=no_sell source=api category=%d count=%d variant=100 payload=0 gen=0",
-                            category, item_ref.count);
-        return op_err("item cannot be sold");
+    // I-1：先解析期望物品，传入处置原语做身份复核（并发下槽位被改动则不结算）。
+    InventoryItemRef expected_ref;
+    const bool found = inventory_item_ref_at(bag, slot, &expected_ref);
+    const inventory_trade::Result result =
+        inventory_trade::sell(bag, slot, found ? expected_ref.native_item : nullptr, "api");
+    switch (result.status) {
+        case inventory_trade::Status::kOk:
+            return "{\"ok\":true,\"price\":" + std::to_string(result.price) + "}";
+        case inventory_trade::Status::kNotInWorld:
+            return op_err("not in game");
+        case inventory_trade::Status::kTaskBagExcluded:
+            return op_err("task bag excluded");
+        case inventory_trade::Status::kEmptySlot:
+            return op_err("slot empty");
+        case inventory_trade::Status::kNoNativeItem:
+            return op_err("extension item unavailable");
+        case inventory_trade::Status::kStale:
+            // 并发下槽位物品已变：对外沿用既有 not found 语义（不新增错误文案）。
+            return op_err("slot empty");
+        case inventory_trade::Status::kSymbolsUnresolved:
+            return op_err("symbol not resolved");
+        case inventory_trade::Status::kNoSell:
+            return op_err("item cannot be sold");
+        case inventory_trade::Status::kPriceInvalid:
+            return op_err("invalid sell price");
+        case inventory_trade::Status::kCreditFailed:
+            return op_err("sell money update failed");
+        case inventory_trade::Status::kRemoveFailed:
+            return op_err("sell failed");
+        default:
+            return op_err("sell failed");
     }
-    const int count = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : 1;
-    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const int64_t price = extension_bag_sell_price(item, count);
-    if (price < 0) {
-        __android_log_print(ANDROID_LOG_WARN, "Inotia4VirtBag",
-                            "sell price reject reason=price_bounds source=api category=%d count=%d unit=%lld variant=100 payload=0 gen=0",
-                            category, count, static_cast<long long>(unit_price));
-        return op_err("invalid sell price");
-    }
-    __android_log_print(ANDROID_LOG_INFO, "Inotia4VirtBag",
-                        "sell price source=api category=%d count=%d unit=%lld variant=100 final=%lld payload=0 gen=0",
-                        category,
-                        static_cast<int>(stack_codec::effective_clamp(
-                            static_cast<uint32_t>(count), stack_limit_enabled())),
-                        static_cast<long long>(unit_price), static_cast<long long>(price));
-    if (!fn_add_money(price)) return op_err("sell money update failed");
-    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
-    // 删除失败回退金币，保持扩展物品原有退款路径语义。
-    if (fn_remove_item(item) == 0) {
-        fn_minus_money(price);
-        return op_err("sell failed");
-    }
-    extension_bag_sync_projected_slot(bag, slot);
-    return "{\"ok\":true,\"price\":" + std::to_string(price) + "}";
 }
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
     if (!game_in_world()) return op_err("not in game");

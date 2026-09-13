@@ -63,26 +63,8 @@ void append_item_attrs(std::string& s, void* item) {
     s += "]";
 }
 
-// v0.5.12 ⑤ 类别判定：ITEMCLASSBASE 记录 +6 bit0=1 可堆叠 / 0 不可堆叠（装备）。
-// 表基址或步长不可用时返回 kUnknown，调用方不得按可堆叠处理。
-stack_codec::CountEncoding item_count_encoding(void* item) {
-    if (g_base == 0 || item == nullptr) return stack_codec::CountEncoding::kUnknown;
-    uint8_t* it = reinterpret_cast<uint8_t*>(item);
-    uint16_t flags = *reinterpret_cast<uint16_t*>(it + I_TYPE);
-    int category = (flags >> 6) & 0x3FF;
-    uint8_t* class_data = *reinterpret_cast<uint8_t**>(*reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
-    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    if (class_data == nullptr || size_ptr == nullptr) return stack_codec::CountEncoding::kUnknown;
-    uint8_t stride = *size_ptr;
-    if (stride == 0) return stack_codec::CountEncoding::kUnknown;
-    return (class_data[category * stride + 6] & 1) == 0
-        ? stack_codec::CountEncoding::kNotEncoded
-        : stack_codec::CountEncoding::kEncoded;
-}
-
-bool item_is_equip(void* item) {
-    return item_count_encoding(item) == stack_codec::CountEncoding::kNotEncoded;
-}
+// item_count_encoding / item_is_equip 已下沉至 data/native/item_class.{h,cpp}
+// （声明经 game_inventory.h 引用）。
 
 int canonical_item_count(void* item) {
     if (item == nullptr) return 0;

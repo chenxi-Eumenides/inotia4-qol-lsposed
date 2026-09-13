@@ -21,6 +21,7 @@ object NativeBridge {
         ready = try {
             nativeRegisterConfigBridge(ModuleConfigUiBridge::class.java)
         nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
+            nativeRegisterAutoSellStoreBridge(AutoSellConfigStore::class.java)
             nativeInit()
         } catch (t: Throwable) {
             android.util.Log.e(NATIVE_TAG, "nativeInit failed", t)
@@ -32,6 +33,7 @@ object NativeBridge {
     external fun nativeInit(): Boolean
     external fun nativeRegisterConfigBridge(bridge: Class<*>)
     external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)
+    external fun nativeRegisterAutoSellStoreBridge(bridge: Class<*>)
     external fun nativeGetInitReport(): String
     external fun nativeGetBaseAddr(): Long
     external fun nativeGetFrameCount(): Long
@@ -155,4 +157,19 @@ object NativeBridge {
     external fun nativeOpExtensionBagSelectBag(bag: Int): String
     external fun nativeOpExtensionBagClickItem(bag: Int, slot: Int): String
     external fun nativeOpExtensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
+    // ---- 自动出售（auto-sell 阶段 B）----
+    external fun nativeSetAutoSellConfig(
+        enabled: Boolean,
+        rarityEnabled: Boolean,
+        rarityThreshold: Int,
+        enhanceEnabled: Boolean,
+        enhanceThreshold: Int,
+        socketEnabled: Boolean,
+        socketThreshold: Int,
+        gemTierEnabled: Boolean,
+        gemTierThreshold: Int,
+        specialMask: Int
+    ): Boolean
+    external fun nativeAutoSellRunNow(): Boolean
+    external fun nativeAutoSellStatusJson(): String
 }

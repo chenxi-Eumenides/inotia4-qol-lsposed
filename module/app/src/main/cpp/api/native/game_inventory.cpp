@@ -3,6 +3,7 @@
 #include "game_state.h"
 #include "game_ops_common.h"
 #include "core/native/extension_bag_port.h"
+#include "core/native/inventory_trade.h"
 #include "core/native/stack_codec.h"
 #include "core/native/stack_limit_port.h"
 #include <android/log.h>

@@ -375,3 +375,6 @@ SYM(F_CONTROL_OBJECT_GET_CHILD_VMA, ControlObject_GetChild)
 SYM(F_CONTROL_OBJECT_GET_DATA_VMA, ControlObject_GetData)
 SYM(F_CONTROL_OBJECT_SET_ACTIVE_VMA, ControlObject_SetActive)
 SYM(F_CONTROL_BUTTON_DRAW_VMA, ControlButton_Draw)
+
+// ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主（auto-sell）----
+SYM(F_GAMESTATE_DRAWPLAY_VMA, GAMESTATE_DrawPlay)

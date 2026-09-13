@@ -53,6 +53,9 @@ object ModuleSaveStore {
         appContext = context.applicationContext
     }
 
+    /** 是否已初始化（appContext 已设置）。桥在启动早期可据此判定存储尚不可用。 */
+    fun isInitialized(): Boolean = appContext != null
+
     /** 确保指定槽的 sidecar 存在且可读取。 */
     fun ensureSlot(slot: Int): Boolean = synchronized(lock) {
         requireSlot(slot)
