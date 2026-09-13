@@ -7,6 +7,7 @@
 
 #include "core/native/frame_task.h"
 #include "core/native/save_enter.h"
+#include "core/native/save_exit.h"
 #include "core/native/stack_codec.h"
 #include "data/native/item_class.h"
 
@@ -22,6 +23,9 @@ static int g_fail = 0;
 } while (0)
 
 using stack_codec::CountEncoding;
+
+// save_exit 无纯逻辑可测；此处仅以编译性断言保证主机端可包含该头。
+static_assert(sizeof(SaveExitFn) > 0, "SaveExitFn must be complete");
 
 namespace {
 

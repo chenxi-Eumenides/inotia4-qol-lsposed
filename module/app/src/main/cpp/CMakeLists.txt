@@ -66,6 +66,7 @@ target_sources(gamebridge PRIVATE
     core/native/frame_task.cpp
     core/native/frame_host.cpp
     core/native/save_enter.cpp
+    core/native/save_exit.cpp
     core/native/inventory_trade.cpp
     data/native/item_class.cpp
 )

@@ -68,6 +68,7 @@ SaveLoadDataFn fn_save_load_data = nullptr;
 MemFreeFn fn_mem_free = nullptr;
 EncryptProcess2Fn fn_encrypt_process2 = nullptr;
 GamestateSetStateFn fn_gamestate_set_state = nullptr;
+GameExitFn fn_game_exit = nullptr;
 UinpcInitFn fn_uinpc_init = nullptr;
 NpcSystemCheckFunctionDisplayFn fn_check_function_display = nullptr;
 UinpcExeTaskFn fn_uinpc_exe_current_task = nullptr;

@@ -193,6 +193,7 @@ bool bridge_init() {
     fn_mem_free = reinterpret_cast<MemFreeFn>(g_base + fn_resolve("F_MEM_FREE_VMA", F_MEM_FREE_VMA));
     fn_encrypt_process2 = reinterpret_cast<EncryptProcess2Fn>(g_base + fn_resolve("F_ENCRYPT_PROCESS2_VMA", F_ENCRYPT_PROCESS2_VMA));
     fn_gamestate_set_state = reinterpret_cast<GamestateSetStateFn>(g_base + fn_resolve("F_GAMESTATE_SET_STATE_VMA", F_GAMESTATE_SET_STATE_VMA));
+    fn_game_exit = reinterpret_cast<GameExitFn>(g_base + fn_resolve("F_GAME_EXIT_VMA", F_GAME_EXIT_VMA));
     fn_uinpc_init = reinterpret_cast<UinpcInitFn>(g_base + fn_resolve("F_UINPC_INIT_VMA", F_UINPC_INIT_VMA));
     fn_check_function_display = reinterpret_cast<NpcSystemCheckFunctionDisplayFn>(g_base + fn_resolve("F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA", F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA));
     fn_uinpc_exe_current_task = reinterpret_cast<UinpcExeTaskFn>(g_base + fn_resolve("F_UINPC_EXE_CURRENT_TASK_VMA", F_UINPC_EXE_CURRENT_TASK_VMA));

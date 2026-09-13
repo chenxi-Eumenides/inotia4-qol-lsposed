@@ -416,6 +416,12 @@ constexpr uintptr_t F_QUESTSYSTEM_FIND_VMA = 0x122914;       // int (int32_t) �
 constexpr uintptr_t F_QUESTSYSTEM_REMOVE_SLOT_VMA = 0x1229a4;  // int (int32_t) 删除任务槽（CopySlot 前移 + QUEST_Initialize 末槽清空 + 槽数-1；返回 1 成功）
 constexpr uintptr_t F_SAVE_VMA = 0x129600;                // int (void) 完整静默保存（内部校验 SV_GoldGet/StatPoint/SkillPoint → KEY_ResetActive → 细分 SaveInformation/Player/CharacterAll/Inventory/Quest/Event/ETC 序列化；校验失败返回 0）
 constexpr uintptr_t F_GAMESTATE_SET_STATE_VMA = 0x151590;  // void (int32_t) 游戏状态机切换（STATE_nState：4=主菜单 5=world；state==4 分支 GAME_Exit + STATE_Set(4) + Enter 回调）
+// ---- 退出存档回调发起点：GAMESTATE_SetState state==4 分支的 bl GAME_Exit（save-exit-callback）----
+// GAMESTATE_SetState 内 state==4 分支跳转表落点 +0xb0 的 `bl GAME_Exit`（原字 0x97febb3d）；
+// GAME_Exit 在 .text 内仅此一个调用点，故仅覆盖 world -> 主菜单（不含退档到选角/杀进程）。
+constexpr uintptr_t F_GAME_EXIT_VMA = 0x100334;                    // void GAME_Exit() 退出当前存档（卸载系统/回主菜单）
+constexpr size_t F_GAMESTATE_SET_STATE_GAME_EXIT_CALL_OFF = 0xb0;  // GAMESTATE_SetState 内 state==4 分支 bl GAME_Exit
+using GameExitFn = void (*)();                                     // void GAME_Exit()
 constexpr uintptr_t F_SAVE_GET_SAVE_SLOT_VMA = 0x1289e4;    // void* (int32_t) 存档槽结构指针（[0x2f5000+0xe40] + slot×0x1d；slot>2 返 0）。槽结构：b0=存在标志 b2=槽标志 +0x1c=角色类型
 constexpr uintptr_t F_UI_SET_POPUP_PROCESS_INFO_VMA = 0xaecc8;  // int (int32_t id, int32_t data) 注册 popup 流程（Array_Add 到 popup 数组 [0x2f5000+0xc38]）
 constexpr uintptr_t F_GAME_START_RESUME_GAME_VMA = 0x1002e8;  // int (int32_t slot) 启动游戏读档（GAME_Initialize → [0x2f6000+0xd20]=slot → STATE_Set(5) → MAPCHANGE_Set → GAMESTATE_SetState(3) → 主循环读档进 world）

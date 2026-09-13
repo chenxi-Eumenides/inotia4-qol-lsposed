@@ -1,11 +1,12 @@
-# 进入存档回调（save-enter-callback）
+# 存档生命周期回调（进入/退出）
 
-> 状态：**已实现（2026-09-13）** ｜ 日期：2026-09-13 ｜ 范围：进入存档（读档/新档）加载完成后触发一次回调；切图返回不触发。
-> 相关：`docs/development/architecture.md` §2 / §2.1；`core/native/save_enter.{h,cpp}`、`core/native/frame_task.{h,cpp}`、`core/native/frame_host.{h,cpp}`。
+> 状态：**进入回调已实现（2026-09-13）；退出回调已实现但未真机验证（NOT_ACCEPTED）** ｜ 日期：2026-09-13 ｜ 范围：进入存档（读档/新档）加载完成后触发一次；退出存档（world → 主菜单）触发一次。
+> 相关：`docs/development/architecture.md` §2 / §2.1；`core/native/save_enter.{h,cpp}`、`core/native/save_exit.{h,cpp}`、`core/native/frame_task.{h,cpp}`、`core/native/frame_host.{h,cpp}`。
 
 ## 1. 需求
 
-进入存档（读档 / 新档）加载完成、进入 world 后，触发一次回调。用于模块需要在「存档已就绪」时做一次性初始化/同步（例如按当前存档槽加载 sidecar、刷新状态）。
+- **进入存档**：读档 / 新档加载完成、进入 world 后，触发一次回调。用于模块需要在「存档已就绪」时做一次性初始化/同步（例如按当前存档槽加载 sidecar、刷新状态）。
+- **退出存档**：从 world 返回主菜单时触发一次回调（不含退档到选角、不含杀进程）。用于模块在存档关闭前做一次性收尾/同步。
 
 ## 2. 语义
 
@@ -47,6 +48,43 @@ bool save_enter_host_install_if_ready();               // 安装两个发起点�
 
 ## 6. 验证
 
-- **Host**：`tests/test_infra_data.cpp` 的 `save_enter_detail::should_fire` 四组合（仅「已发起 且 在 world」为真）。
+- **Host**：`tests/test_infra_data.cpp` 的 `save_enter_detail::should_fire` 四组合（仅「已发起 且 在 world」为真）；`save_exit.h` 主机端可包含（编译性 `static_assert`）。
 - **Android debug 构建**：`scripts/build-debug.sh`。
-- **真机（待办）**：读档进 world 触发一次且日志出现 `Inotia4SaveEnter save enter fired callbacks=N`；新档同；切图返回不触发；无崩溃。
+- **真机（进入，已办）**：读档进 world 触发一次且日志出现 `Inotia4SaveEnter save enter fired callbacks=N`；新档同；切图返回不触发；无崩溃。
+- **真机（退出，待办）**：见 §7。
+
+## 7. 退出存档回调
+
+### 7.1 语义
+
+- **触发时机**：从 world 返回主菜单时触发一次。
+- **覆盖范围**：游戏自身状态机统一路径，故模块 `go_main_menu`（`api/native/game_ui_operations.inc:6` 调 `fn_gamestate_set_state(4)`）与游戏原生回主菜单都覆盖。
+- **不含**：退档到选角（走 `GAME_ExitSaveSlotSelectCharacter`，不同调用点）、杀进程。
+
+### 7.2 发起点（call_patch 指令 patch，非 Native Hook）
+
+| 场景 | 函数 | 调用点 | 原指令字 |
+|---|---|---|---|
+| world → 主菜单 | `GAMESTATE_SetState@0x151590` | state==4 分支落点 +0xb0 `bl GAME_Exit` | `0x97febb3d` |
+
+- `GAME_Exit@0x100334` 在 `.text` 内仅此一个调用点（全量反汇编 grep 确认），故该锚点仅覆盖 world → 主菜单。
+- wrapper：`save_exit_fire(); if (fn_game_exit) fn_game_exit();`——**先派发回调、再复刻原 `GAME_Exit`**（回调时 world 数据仍有效且保证执行）。
+- 未就绪/失败 fail-closed，不改写字节；`std::atomic` exchange 幂等。
+
+### 7.3 API（`core/native/save_exit.h`）
+
+```cpp
+using SaveExitFn = void (*)(void* ctx);
+
+bool save_exit_register(SaveExitFn fn, void* ctx);     // 同一 fn+ctx 幂等；fn 空返回 false
+void save_exit_unregister(SaveExitFn fn, void* ctx);   // 幂等
+bool save_exit_host_install_if_ready();                // 安装发起点（幂等，fail-closed）
+```
+
+- 触发时打印一条 INFO 日志（tag `Inotia4SaveExit`，含回调数量），不重复打印。
+
+### 7.4 验证状态
+
+- **Host**：`save_exit.h` 主机端可包含（编译性断言），无纯逻辑可测。
+- **Android debug 构建**：通过。
+- **真机（待办，NOT_ACCEPTED）**：回主菜单触发一次且日志 `Inotia4SaveExit save exit fired callbacks=N`；进入存档 / 切图不触发；无崩溃。设备空闲后补验。

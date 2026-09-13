@@ -87,6 +87,7 @@ extern SaveLoadDataFn fn_save_load_data;
 extern MemFreeFn fn_mem_free;
 extern EncryptProcess2Fn fn_encrypt_process2;
 extern GamestateSetStateFn fn_gamestate_set_state;
+extern GameExitFn fn_game_exit;
 extern UinpcInitFn fn_uinpc_init;
 extern NpcSystemCheckFunctionDisplayFn fn_check_function_display;
 extern UinpcExeTaskFn fn_uinpc_exe_current_task;
