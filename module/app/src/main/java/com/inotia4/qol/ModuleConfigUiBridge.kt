@@ -14,7 +14,7 @@ object ModuleConfigUiBridge {
 
     private val BOOL_KEYS = setOf(
         "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize",
-        "apiEnabled"
+        "autoSellEnabled", "apiEnabled"
     )
 
     @JvmStatic
@@ -27,12 +27,14 @@ object ModuleConfigUiBridge {
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
         val oldGemCraft = ModuleConfig.gemCraftOptimize
+        val oldAutoSell = ModuleConfig.autoSellEnabled
         val oldApiEnabled = ModuleConfig.apiEnabled
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
             "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
             "gemCraftOptimize" -> ModuleConfig.gemCraftOptimize
+            "autoSellEnabled" -> ModuleConfig.autoSellEnabled
             "apiEnabled" -> ModuleConfig.apiEnabled
             else -> ModuleConfig.opEnabled
         }
@@ -41,7 +43,7 @@ object ModuleConfigUiBridge {
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldApiEnabled
+            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldAutoSell, oldApiEnabled
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
         // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。

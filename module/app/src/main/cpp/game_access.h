@@ -187,6 +187,7 @@ extern IncludePartyFn fn_include_party;
 extern ExcludePartyFn fn_exclude_party;
 extern MercenaryReleaseFn fn_mercenary_release;
 extern ItemIsUseFn fn_is_use;
+extern IsRealEquipFn fn_item_is_real_equip;
 // ---- 佣兵徽章使用链（R-63）----
 extern ItemSystemIsMercenarySealFn fn_is_mercenary_seal;
 extern MercenarySystemIsEmptyManagerSlotFn fn_mercenary_is_empty_manager_slot;
@@ -288,6 +289,7 @@ extern GrpxSetFontColorRgbFn fn_grpx_set_font_color_rgb;
 extern GrpxDrawPartFn fn_grpx_draw_part;
 extern UiDrawStringHAlignFn fn_ui_draw_string_halign;
 extern UiDrawStringInWidthWithFontFn fn_ui_draw_string_in_width_with_font;
+extern UiDescDrawFn fn_uidesc_draw;
 extern MwGraphicDrawStringFn fn_mw_graphic_draw_string;
 extern GrpSaveLcdFn fn_grp_save_lcd;
 extern GrpRestoreLcdFn fn_grp_restore_lcd;

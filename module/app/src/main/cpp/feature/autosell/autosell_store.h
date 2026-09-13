@@ -56,25 +56,20 @@ inline int clamp_int(int value, int lo, int hi) {
 
 }  // namespace autosell_store_detail
 
-// Config -> section v1 JSON（specialMask 为 uint32 位掩码，与 autosell_rules.h 位一致）。
+// Config -> section v1 JSON（值即开关：0=关，正整数为 1-based 档位；specialMask 为 uint32 位掩码）。
 inline std::string autosell_config_to_json(const autosell::Config& config) {
-    char buf[512];
+    char buf[256];
     std::snprintf(buf, sizeof(buf),
-                  "{\"v\":1,\"enabled\":%s,\"rarityEnabled\":%s,\"rarityThreshold\":%d,"
-                  "\"enhanceEnabled\":%s,\"enhanceThreshold\":%d,"
-                  "\"socketEnabled\":%s,\"socketThreshold\":%d,"
-                  "\"gemTierEnabled\":%s,\"gemTierThreshold\":%d,"
-                  "\"specialMask\":%u}",
-                  config.enabled ? "true" : "false",
-                  config.rarity_enabled ? "true" : "false", config.rarity_threshold,
-                  config.enhance_enabled ? "true" : "false", config.enhance_threshold,
-                  config.socket_enabled ? "true" : "false", config.socket_threshold,
-                  config.gem_tier_enabled ? "true" : "false", config.gem_tier_threshold,
+                  "{\"v\":1,\"enabled\":%s,\"rarity\":%d,\"enhance\":%d,"
+                  "\"socket\":%d,\"gemTier\":%d,\"gemRange\":%d,\"specialMask\":%u}",
+                  config.enabled ? "true" : "false", config.rarity, config.enhance,
+                  config.socket, config.gem_tier, config.gem_range,
                   static_cast<unsigned>(config.special_mask));
     return std::string(buf);
 }
 
-// section JSON -> Config。缺失字段取默认并在边界内钳制；未知键忽略。
+// section JSON -> Config。缺失字段取默认 0 并在边界内钳制；未知键忽略。
+// 钳制：rarity/gemTier/gemRange 0..5、socket 0..16、enhance 0..32、mask 非负。
 // v 缺失或 <=1 按 v1；v>1（未知未来版本）/坏 JSON 返回 false 且 out=默认值。
 inline bool autosell_config_from_json(const char* json, autosell::Config* out) {
     if (out == nullptr) return false;
@@ -86,18 +81,13 @@ inline bool autosell_config_from_json(const char* json, autosell::Config* out) {
 
     autosell::Config cfg;
     cfg.enabled = parse_bool(json, "enabled", false);
-    cfg.rarity_enabled = parse_bool(json, "rarityEnabled", false);
-    cfg.rarity_threshold = clamp_int(parse_int(json, "rarityThreshold", 0), 0, 4);
-    cfg.enhance_enabled = parse_bool(json, "enhanceEnabled", false);
-    const int enhance = parse_int(json, "enhanceThreshold", 0);
-    cfg.enhance_threshold = enhance < 0 ? 0 : enhance;
-    cfg.socket_enabled = parse_bool(json, "socketEnabled", false);
-    cfg.socket_threshold = clamp_int(parse_int(json, "socketThreshold", 0), 0, 15);
-    cfg.gem_tier_enabled = parse_bool(json, "gemTierEnabled", false);
-    cfg.gem_tier_threshold = clamp_int(parse_int(json, "gemTierThreshold", 0), 0, 4);
+    cfg.rarity = clamp_int(parse_int(json, "rarity", 0), 0, 5);
+    cfg.enhance = clamp_int(parse_int(json, "enhance", 0), 0, 32);
+    cfg.socket = clamp_int(parse_int(json, "socket", 0), 0, 16);
+    cfg.gem_tier = clamp_int(parse_int(json, "gemTier", 0), 0, 5);
+    cfg.gem_range = clamp_int(parse_int(json, "gemRange", 0), 0, 5);
     const int mask = parse_int(json, "specialMask", 0);
     cfg.special_mask = static_cast<uint32_t>(mask < 0 ? 0 : mask);
-    cfg.special_enabled = cfg.special_mask != 0u;
 
     *out = cfg;
     return true;
@@ -106,9 +96,9 @@ inline bool autosell_config_from_json(const char* json, autosell::Config* out) {
 // 注册 Kotlin AutoSellConfigStore（jclass + load/save 静态方法 id）。
 void autosell_store_register_bridge(JNIEnv* env, jclass bridge_class);
 
-// 【预留·当前未接线】进档时经桥读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
-// 进档自动注册任务的时机待定（见 autosell_scan.h 说明）；接线时应改走 autosell_apply_config，
-// 以便按 enabled 注册 / 删除扫描任务。
+// 进档时经桥读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
+// 由 `autosell_register_save_enter` 的 save-enter 回调（游戏主线程）调用一次；任务
+// 生命周期见 autosell_scan.h（全局开关 + 已进档）。
 void autosell_store_ensure_loaded(int slot);
 
 // 序列化并写回 `autosell` section；slot 非法或桥失败返回 false。

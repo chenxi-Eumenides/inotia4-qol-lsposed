@@ -158,6 +158,7 @@ IncludePartyFn fn_include_party = nullptr;
 ExcludePartyFn fn_exclude_party = nullptr;
 MercenaryReleaseFn fn_mercenary_release = nullptr;
 ItemIsUseFn fn_is_use = nullptr;
+IsRealEquipFn fn_item_is_real_equip = nullptr;
 // ---- 佣兵徽章使用链（R-63）----
 ItemSystemIsMercenarySealFn fn_is_mercenary_seal = nullptr;
 MercenarySystemIsEmptyManagerSlotFn fn_mercenary_is_empty_manager_slot = nullptr;
@@ -246,6 +247,7 @@ GrpxSetFontColorRgbFn fn_grpx_set_font_color_rgb = nullptr;
 GrpxDrawPartFn fn_grpx_draw_part = nullptr;
 UiDrawStringHAlignFn fn_ui_draw_string_halign = nullptr;
 UiDrawStringInWidthWithFontFn fn_ui_draw_string_in_width_with_font = nullptr;
+UiDescDrawFn fn_uidesc_draw = nullptr;
 MwGraphicDrawStringFn fn_mw_graphic_draw_string = nullptr;
 GrpSaveLcdFn fn_grp_save_lcd = nullptr;
 GrpRestoreLcdFn fn_grp_restore_lcd = nullptr;

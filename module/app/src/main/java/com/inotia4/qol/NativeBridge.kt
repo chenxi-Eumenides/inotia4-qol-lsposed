@@ -143,6 +143,7 @@ object NativeBridge {
     external fun nativeSetMoveMergeEnabled(enabled: Boolean): Boolean
     external fun nativeSetExtensionBagEnabled(enabled: Boolean): Boolean
     external fun nativeSetGemCraftOptimizeEnabled(enabled: Boolean): Boolean
+    external fun nativeSetAutoSellEnabled(enabled: Boolean): Boolean
     external fun nativeSetApiEnabled(enabled: Boolean): Boolean
     external fun nativeSettingsUiInject(): String
     external fun nativeSettingsUiStatus(): String
@@ -160,17 +161,16 @@ object NativeBridge {
     external fun nativeOpExtensionBagClickItem(bag: Int, slot: Int): String
     external fun nativeOpExtensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
     // ---- 自动出售（auto-sell 阶段 B）----
+    // 值即开关：0=关闭，正整数为 1-based 档位（rarity 1..5 / enhance 1..32 /
+    // socket 1..16 / gemTier 1..5 / gemRange 1..5 / specialMask 非 0 位掩码）。
     external fun nativeSetAutoSellConfig(
         enabled: Boolean,
-        rarityEnabled: Boolean,
-        rarityThreshold: Int,
-        enhanceEnabled: Boolean,
-        enhanceThreshold: Int,
-        socketEnabled: Boolean,
-        socketThreshold: Int,
-        gemTierEnabled: Boolean,
-        gemTierThreshold: Int,
-        specialMask: Int
+        rarity: Int,
+        enhance: Int,
+        socket: Int,
+        gemTier: Int,
+        specialMask: Int,
+        gemRange: Int
     ): Boolean
     external fun nativeAutoSellRunNow(): Boolean
     external fun nativeAutoSellStatusJson(): String

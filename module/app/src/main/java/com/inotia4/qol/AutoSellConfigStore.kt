@@ -16,12 +16,10 @@ object AutoSellConfigStore {
     private const val SECTION_NAME = "autosell"
     private const val SECTION_VERSION = 1
 
-    /** 与 native autosell_store.cpp 默认值一致的 v1 配置。 */
+    /** 与 native autosell_store.h 默认值一致的 v1 配置（值即开关：0=关闭）。 */
     private const val DEFAULT_JSON =
-        "{\"v\":1,\"enabled\":false,\"rarityEnabled\":false,\"rarityThreshold\":0," +
-            "\"enhanceEnabled\":false,\"enhanceThreshold\":0," +
-            "\"socketEnabled\":false,\"socketThreshold\":0," +
-            "\"gemTierEnabled\":false,\"gemTierThreshold\":0,\"specialMask\":0}"
+        "{\"v\":1,\"enabled\":false,\"rarity\":0,\"enhance\":0," +
+            "\"socket\":0,\"gemTier\":0,\"gemRange\":0,\"specialMask\":0}"
 
     /** 读取该存档槽的自动出售配置；缺省返回默认 JSON，存储未就绪/异常返回 "error:..."。 */
     @JvmStatic

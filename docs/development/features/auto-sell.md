@@ -1,10 +1,10 @@
 # 自动出售（auto-sell）设计与实现
 
-> 状态：无 UI 版本代码已实现，但**宿主（每帧 BL patch）已按用户 2026-09-13 要求停用，游戏恢复原生状态**；待统一 frame 派发宿主完成后接入。host 通过、debug 构建通过；整体 `NOT_ACCEPTED`（缺真机证据）。本册是「自动出售」功能的范围、设计、风险与验收计划权威。
+> 状态：规则/视图/扫描（阶段 B）与游戏内 UI（背包入口按钮 + 只读占位面板）native 侧已实现；扫描任务由全局开关 `autoSellEnabled`（模块设置第 6 项）驱动，宿主为统一 frame 派发点。面板配置读写与关闭即保存尚未接线。host 通过、debug 构建通过；整体 `NOT_ACCEPTED`（缺真机证据）。本册是「自动出售」功能的范围、设计、风险与验收计划权威。
 > 来源：`idea.md` 第 3 项 + 2026-09-12 多轮目标对齐。
 > **功能定位**：独立于扩展背包的功能，与扩展背包为「支持」关系（可扫描/处置扩展袋物品），不归属扩展背包七册。
 > 关联：扩展背包七册入口 `../extension-bag/control-plane.md`（仅「扩展袋支持」部分引用其契约）；游戏 UI 机制 `../../reference/game/ui.md`。
-> **外部依赖（并行开发中，勿修改）**：属性范围 feature（`../attribute-range-display.md`、`module/app/src/main/cpp/feature/attribute_range/`、`tests/test_attribute_range.cpp`）。见 §3.6。
+> **外部依赖（已实现，只读复用，勿修改其行为）**：属性范围 feature（`../attribute-range-display.md`、`module/app/src/main/cpp/feature/attribute_range/`、`tests/test_attribute_range.cpp`）。见 §3.6。
 
 ## 1. 范围与目标
 
@@ -18,19 +18,19 @@
 
 1. **总开关**：启用/关闭整个自动出售。
 2. **简要说明**：一行描述文本（总开关下方）。
-3. **装备规则（3 条，每条可「关闭」，均为 `≤ 所选档`）**：
-   - 品质：阈值单选（白/绿/蓝/黄/紫），出售 `rarity ≤ 阈值` 的装备。
-   - 强化次数：阈值选择，出售 `总强化次数 ≤ 阈值` 的装备（`I_ENCHANT` bits6-10；新装备为 0）。
-   - 镶嵌空位：阈值选择，出售 `总孔数 ≤ 阈值` 的装备。
-4. **宝石规则（2 条，每条可「关闭」，均为 `≤ 所选档`）**：
-   - 宝石等级：档位单选（低级/中级/高级/顶级/混沌），出售 `category ≤ 所选档`（28+档位）的宝石。
-   - 宝石属性范围：复用属性范围 feature，阈值单选（30/60/75/90/100%），出售属性百分位 `≤ 阈值` 的宝石。
+3. **装备规则（3 条，值即开关，均为 `≤ 值-1`）**：
+   - 品质：档位值（0=关；1..5 → 出售 `rarity ≤ 值-1`，1=白…5=紫）。
+   - 强化次数：档位值（0=关；1..32 → 出售 `I_ENCHANT` bits6-10 `≤ 值-1`；新装备为 0）。
+   - 镶嵌空位：档位值（0=关；1..16 → 出售总孔数 `≤ 值-1`）。
+4. **宝石规则（2 条，均为 `≤ 值-1`）**：
+   - 宝石等级：档位值（0=关；1..5 → 出售 `category ≤ 27+值`，即 28+档位）。
+   - 宝石属性范围：复用属性范围 feature，阈值单选（30/60/75/90/99%；最高档 99 保留满分宝石）。
 5. **特殊类型（多选）**：如背包类、英雄徽章类等；命中任一勾选类型即出售。
 6. **返回**：关闭面板。
 
 ### 1.3 执行目标
 
-- 开启总开关时注册 60 帧周期扫描任务、关闭时删除任务；扫描每 60 帧一次（节流由 `frame_task` 的 `interval=60` 负责，开启后最多等待 60 帧）。
+- 全局开关（模块设置第 6 项）为「武装」标志：进入存档（读档/新档）后由 save-enter 回调按当前槽加载 sidecar 配置，仅在「已武装 + 已进档 + 存档总开关 `config.enabled` 为真」时注册 60 帧周期扫描任务；任一不满足即不持有任务。扫描每 60 帧一次（节流由 `frame_task` 的 `interval=60` 负责，注册后最多等待 60 帧）。存档总开关 `config.enabled` 变化时经 `autosell_apply_config` 同步任务（关→删除）；退出存档（world → 主菜单）由 save-exit 回调删除任务。
 - 扫描范围：原版袋 `0..4` + 模块扩展 5 袋；排除原版任务袋 `5`。
 - 处置优先复用原版单件销毁/出售链的结算语义，由模块循环（即用户所述「批量销毁」）。
 
@@ -51,7 +51,7 @@
   - **规则口径（用户 2026-09-13 裁决）**：强化次数 = **当前总强化次数（`I_ENCHANT` bits6-10）**。新获得的装备一定为 0，已强化装备由既有保护规则排除，故总次数与剩余可强化次数一致；采用唯一可读的 bits6-10。**无每件「强化上限」字段**，上限是常量（vanilla 30 / 改版 12），不用于比较。
   - 注：`game_symbols.h:61` 现有注释（bit5-6/bit10-15）与实现/实测不一致，属过时注释。
 - 孔位：`I_SOCKET = 0x19`（u8，`game_symbols.h:60`）；**bits0-3 = 已镶数、bits4-7 = 总孔数**（`game_inventory_read.inc:16-17`），空位数 = 总孔数 − 已镶数，无专用字段。公开对象 `gem:{total_slots, slots[]}`（`api-reference.md:154`）。`game_symbols.h:60` 注释（bit0-2/bit4-6）过时。
-- 装备判定：`item_is_equip(item) == (item_count_encoding(item)==kNotEncoded)`（`game_inventory_read.inc:83-85`），基于 `ITEMDATABASE[category].+6 bit0`（不可堆叠=装备）。
+- 装备判定（自动出售，2026-09-14 真机修正）：用游戏自身的 `ITEM_IsRealEquip(item)`（`F_ITEM_IS_REAL_EQUIP_VMA=0x105ab8`，读 `item+8` 的 category → `ITEMDATABASE[category].+2` → 二级表 bit0）；`game_access` 增 `fn_item_is_real_equip`。比「不可堆叠」精确：`item_is_equip(item)==(item_count_encoding(item)==kNotEncoded)`（`item_class.cpp`）会把宝石/背包/徽章等非装备判为真，导致装备规则过匹配（真机 dry-run 实测每轮命中由 13 降为 2）。API 的 `equip` 字段仍用 `item_is_equip`，未改动。
 - 强化写入函数 `ITEMSYSTEM_EnchantItem 0x10b330`（`game_symbols.h:395`）；镶嵌函数 `ITEMSYSTEM_PutJewel 0x10bcb4`（`:393`，返回 2=无孔）；无「读等级/读空位」谓词函数。
 
 ### 3.2 宝石（等级与属性）
@@ -94,22 +94,24 @@
 - 帧派发：统一帧任务管理器（core/native/frame_task.* + frame_host.*，architecture.md §2.1）在主线程渲染开始前（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase）派发；旧 FrameTaskManager（后台线程、单任务）已删除。
 - 扩展袋：原版袋 `0..5`（5=任务袋，`virtual_bag_state.h:20-26`）；扩展逻辑袋 5 个（`:16`）；页签动态定位 `extension_bag_runtime.inc:110-187,138-140,169-174`。
 
-### 3.6 外部依赖：属性范围 feature（并行开发中）
+### 3.6 外部依赖：属性范围 feature（已实现，已接线）
 
 - 该 feature（`idea.md` 第 2 项）负责把属性值按其在随机范围内的百分位着色（金100/紫90/蓝75/绿60/白30/灰0）。
-- 工作树现状（未提交 WIP，**auto-sell 不得修改**）：`feature/attribute_range/`（纯逻辑 `attribute_range.h/.cpp:5-50` + UI/探测 `game_ui_attr_range.cpp`）、`tests/test_attribute_range.cpp`、设计册 `docs/development/features/attribute-range-display.md`；并已改动 `CMakeLists.txt`、`gamebridge.cpp`、`game_symbols.h`、`symbol_registry.h`、`game_access.*`、`docs/INDEX.md`。
-- 对自动出售的可用性：纯逻辑 `attr_range::classify(value,min,max)` / `color_code(Tier)` 可复用，但**无对外 range provider**——范围探测函数在匿名命名空间内（`game_ui_attr_range.cpp:14-145`），自动出售无法直接调用；且其 `MATH_GetRandom` wrapper 使用 thread_local 单发捕获（`:29-31,39-48`），与详情渲染存在同线程重入/竞争。
-- 结论：**宝石属性范围规则依赖该 feature 暴露稳定 range API（或复制探测逻辑）后才能真正落地**；在此之前该规则只能先做 UI 占位/禁用。
+- 当前实现位于 `feature/attribute_range/`：纯逻辑 `attribute_range.h/.cpp` 提供 `classify(value,min,max)`、`color_code(Tier)` 与 `percentile(value,min,max)`（0..100 向下取整）；UI/探测 `game_ui_attr_range.h/.cpp` 提供对外稳定 API：
+  - `attr_range_ready()`：MATH_GetRandom hook 是否已安装完成；
+  - `attr_range_probe_jewel_range(type, item, out_min, out_max)`：探测独立宝石属性值的随机区间 `[X,2X]`（`type` = 宝石位域 bits18-23；不依赖详情渲染缓存 `t_current_item`，主线程调用）。
+- 自动出售按 §4.3 复用上述 API 计算宝石属性百分位，**不复制其内部实现，不在域文件写裸 VMA**；hook 未安装或探测失败时 API 返回 false。
+- 该 feature 的 `attr_range_ui_install_if_ready()` 仍由 `nativeInit` 安装；自动出售只读调用。
 
 ## 4. 设计
 
 ### 4.1 入口按钮
 
 - 位置：背包（EQUIP）页「任务背包右侧、扩展背包下方」，**动态锚定原版任务袋（袋 5）标签所在行**。
-- **默认挂载（用户 2026-09-13）**：入口按钮始终随背包页安装，不依赖任何前置开关；总开关在面板内。
+- **开关门控（用户 2026-09-13）**：入口按钮由模块设置第 6 项全局开关 `autoSellEnabled` 门控，默认关闭；开启后随背包页安装，关闭时移除引用并关闭已打开面板（§13.2）。面板内另有按存档的规则总开关。
   - 模仿扩展背包页签的动态计算：以原版袋标签实际坐标为基准 + 行偏移（参考式 `x = 袋0绝对x + 68`、`y = 袋0绝对y + 2 + 5×70`，尺寸 `57×57`；`extension_bag_runtime.inc:138-140,169-174`）。实现时动态计算，不写死像素。
   - 最终偏移量需真机校准（风险 R2）。
-- 控件：挂在原版袋容器，新增 ControlItem（`type=3` + `SetControlProc` + `SetUserType(2)`），点击回调打开配置面板。
+- 控件：挂在原版袋容器，新增 `ControlButton`（`ui_create_button`：`type=3` + `ControlButton_ControlEventProc` + `ExecuteProc`），点击回调打开配置面板；生命周期强校验见 §13.1。
 - 绘制：复用扩展页签 DrawProc/图组风格或 `ui_custom::draw_button`。
 
 ### 4.2 配置面板
@@ -129,7 +131,7 @@
 ────────────────────────────
  宝石规则
    宝石等级  [关闭] [低][中][高][顶级][混沌]      (单选)
-   属性范围  [关闭] [30%][60%][75%][90%][100%]   (单选；依赖 §3.6)
+   属性范围  [关闭] [30%][60%][75%][90%][99%]   (单选；最高档保留满分宝石)
 ────────────────────────────
  特殊类型（多选）
    [ ] 背包类  [ ] 英雄徽章  [ ] 强化卷轴
@@ -142,11 +144,19 @@
 
 ### 4.3 规则语义
 
-- 装备（仅 `equip==true`）：**同类内 OR**——任一已启用装备规则命中即出售：品质 `rarity ≤ 阈值`、总强化次数 `enhance_count ≤ 阈值`、总孔数 `socket_total ≤ 阈值`。
-- 宝石（`IsJewel(category)`）：**同类内 OR**——任一已启用宝石规则命中即出售：档位 `category ≤ 所选档`（28+档位）、属性 `百分位 ≤ 阈值`。
-- 特殊类型：命中任一勾选类型即出售。
+- **值即开关（用户 2026-09-14 裁决）**：规则组取消各自的 `*_enabled` 布尔开关，**用「值」当开关**——`0` = 关闭，从 `1` 开始的整数为 1-based 档位，出售阈值 = 值 − 1，比较方向统一 `≤`。
+- 装备（仅 `equip==true`）：**同类内 OR**——任一值非 0 的装备规则命中即出售：
+  - 品质 `rarity`：0=关；`1..5` → 出售 `rarity ≤ 值-1`（1=白…5=紫）。
+  - 强化次数 `enhance`：0=关；`1..32` → 出售 `enhance_count(I_ENCHANT bits6-10) ≤ 值-1`。
+  - 镶嵌空位 `socket`：0=关；`1..16` → 出售 `socket_total(I_SOCKET bits4-7) ≤ 值-1`。
+- 宝石（`IsJewel(category)`）：**同类内 OR**——任一值非 0 的宝石规则命中即出售：
+  - 宝石等级 `gem_tier`：0=关；`1..5` → 出售 `jewel_tier(category-28) ≤ 值-1`。
+  - 属性范围 `gem_range`：0=关；`1..5` → 出售属性百分位 `percentile(value,min,max) ≤ 阈值`，阈值 1→30、2→60、3→75、4→90、5→100（即卖掉百分位 ≤ 阈值的低品质宝石）。百分位由 §3.6 的 `attr_range_probe_jewel_range` + `attr_range::percentile` 求得；探测不可用/失败时该物品 `jewel_percentile=-1`，规则不命中（fail-closed，不得默认 0 触发误售）。
+- 特殊类型 `special_mask`：`0` = 关闭；非 0 位掩码与物品位标志按位与命中即出售（对任意物品生效）。
 - 跨类独立：装备、宝石、特殊类型各自判定，命中任一即出售（全局等价 OR）。
-- 比较方向统一为 `≤ 所选档`（用户 2026-09-12）。
+- 保留按存档总开关 `enabled`（与全局开关独立；`enabled=false` 恒不售）。
+- **开发期 dry-run（成品不得包含）**：命中规则时只打日志 + `wouldSell` 计数，**不扣物、不加钱**；由编译期开关控制（§4.5.2），不是运行时开关。
+- 比较方向统一为 `≤`（用户 2026-09-12；值语义 2026-09-14）。
 
 ### 4.4 配置项与持久化
 
@@ -157,26 +167,28 @@ section `autosell` v1 payload：
 ```json
 {"v":1,
  "enabled":false,
- "rarity":{"enabled":false,"threshold":0},
- "enhance":{"enabled":false,"threshold":0},
- "socket":{"enabled":false,"threshold":0},
- "gemTier":{"enabled":false,"threshold":0},
- "gemRange":{"enabled":false,"threshold":30},
+ "rarity":0,
+ "enhance":0,
+ "socket":0,
+ "gemTier":0,
+ "gemRange":0,
  "specialMask":0}
 ```
 
 | 字段 | 类型 | 默认 | 语义 |
 |---|---|---|---|
 | `enabled` | bool | `false` | 总开关（按存档） |
-| `rarity.enabled` / `.threshold` | bool / int `0..4` | `false` / `0` | 出售 `rarity ≤ 阈值` |
-| `enhance.enabled` / `.threshold` | bool / int `≥0` | `false` / `0` | 出售 `总强化次数（I_ENCHANT bits6-10）≤ 阈值` |
-| `socket.enabled` / `.threshold` | bool / int `0..15` | `false` / `0` | 出售 `总孔数 ≤ 阈值` |
-| `gemTier.enabled` / `.threshold` | bool / int `0..4` | `false` / `0` | 出售 `宝石 category ≤ 28+阈值` |
-| `gemRange.enabled` / `.threshold` | bool / int enum | `false` / `30` | 依赖 §3.6；仅入 schema，不接线 |
-| `specialMask` | int 位掩码 | `0` | 特殊类型多选（位与 `autosell_rules.h::SpecialType` 一致） |
+| `rarity` | int `0..5` | `0` | 0=关；1..5 → 出售 `rarity ≤ 值-1` |
+| `enhance` | int `0..32` | `0` | 0=关；1..32 → 出售 `总强化次数（I_ENCHANT bits6-10）≤ 值-1` |
+| `socket` | int `0..16` | `0` | 0=关；1..16 → 出售 `总孔数 ≤ 值-1` |
+| `gemTier` | int `0..5` | `0` | 0=关；1..5 → 出售 `jewel_tier（category-28）≤ 值-1` |
+| `gemRange` | int `0..5` | `0` | 0=关；1..5 → 出售属性百分位 `≤ 阈值`（30/60/75/90/99；最高档不出售满分宝石） |
+| `specialMask` | int 位掩码 | `0` | 0=关；非 0 特殊类型多选（位与 `autosell_rules.h::SpecialType` 一致） |
 
+- 键与 native `autosell::Config` 字段一一对应；**不再有** `rarityEnabled`/`rarityThreshold` 等成对开关与阈值键。
 - 读写：`ModuleSaveStore.readSection/writeSection(slot, "autosell", 1, payload)`；`slot = current_save_slot()`。
 - 加载：`autosell_tick` 顶部按 `slot` 变化惰性加载（与扩展背包同构）；主菜单/无存档保持默认且不扫描。
+- 解析：缺失字段取默认 `0`；钳制 `rarity`/`gemTier`/`gemRange` 0..5、`socket` 0..16、`enhance` 0..32、`specialMask` 非负。
 - 兼容：`v` 缺失或 ≤1 按 v1 解析；`v>1` fail-closed 用默认且**不删 section**；越界值钳制。
 - 该组配置**不进入 `ModuleConfig` / 模块设置页 / `ConfigApiService` 全局下发**；由自动出售面板写入当前存档 sidecar，随存档加载/保存。
 - 无 UI 阶段：由 debug JNI 应用并写入当前存档 sidecar，待面板接入。
@@ -187,13 +199,13 @@ section `autosell` v1 payload：
 ### 4.5 扫描与执行
 
 - **线程约束（强制）**：扫描与处置必须在游戏主线程执行；回调由统一帧任务管理器（`core/native/frame_task` + `frame_host`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`）派发；不得在 detached 线程直接调游戏函数。
-- 任务生命周期：**开启时注册、关闭时删除**——`nativeSetAutoSellConfig` → `autosell_apply_config` 按 `enabled` 调 `frame_task_add(..., interval=60)` / `frame_task_remove`；不常驻空转。
+- 任务生命周期：**全局开关武装 + 进档注册 + 退档删除**——`nativeSetAutoSellEnabled` → `autosell_set_global_enabled` 置位/清位武装标志并同步任务；进入存档（读档/新档）回调 `autosell_register_save_enter` 按当前槽加载 sidecar 配置后同步任务，退出存档（world → 主菜单）回调 `autosell_register_save_exit` 清位后**无条件删除任务（兜底，不依赖存档配置）**。注册条件 = 已武装 && 已进档 && 存档配置 `config.enabled`（启动/主菜单不注册，存档开关关闭也不注册）；`autosell_apply_config` 写运行时配置，**仅存档总开关切换时**才同步任务。`autosell_tick` 顶部对全局开关与 `config.enabled` 双重防御；不常驻空转。
 - 回调**无跨帧状态**：每次调用现取 `autosell_get_runtime_config()`，按规则扫描；不缓存、不在 tick 内读盘。
-- 待定：进入存档时按 sidecar `enabled` 自动注册任务的时机尚未接线（需后续寻找合适时机，或由帧任务管理器提供更多触发点）。
+- 已接线（2026-09-13）：进入存档（读档/新档）由 `core/native/save_enter` 回调触发一次，按 `current_save_slot()` 读取 sidecar `autosell`（`autosell_store_ensure_loaded`）应用到运行时配置，再同步扫描任务。
 - 单次扫描（原版袋 `0..4` + 扩展 5 袋逐槽）：
   1. 取物品指针；空槽跳过。
   2. 分类：装备 / 宝石 / 特殊类型。
-  3. 按 §4.3 规则判定（装备 `equip`+rarity/强化上限/总孔数；宝石 `IsJewel`+category/属性百分位；特殊类型谓词）。
+  3. 按 §4.3 规则判定（装备 `equip`+rarity/强化次数/总孔数；宝石 `IsJewel`+category/属性百分位；特殊类型谓词）。
   4. 保护过滤（§4.6）。
   5. 处置（§4.5.1）。
   6. 每次处置后重读槽位，避免遍历失效（原版删除返回值不可信，`game_symbols.h:500`）。
@@ -207,6 +219,14 @@ section `autosell` v1 payload：
   - 与 H-23 / R-55 的 canonical 接管关系必须核对，不得绕过或冲突。
 - **兜底**：`INVEN_RemoveItem`（销毁，不给收益）。
 - **扩展袋物品**：原版删除/出售函数作用于原版物理槽；扩展袋物品必须走扩展背包桥接（H-04 / R-56 / 扩展 API），不得让扩展对象进入原版物理释放路径。
+
+#### 4.5.2 开发期 dry-run（成品不得包含）
+
+- 位置：`feature/autosell/autosell_scan.cpp` 顶部编译期宏 `#define AUTOSELL_DEV_DRY_RUN 1`（带醒目 TODO「发布前必须置 0 或删除该宏与分支」）。
+- 行为：宏为 1 时，`process_ref` 在 `should_sell` 命中后只打日志并累加 `wouldSell`，**不扣物、不加钱、不调用出售链**；宏为 0 时走真实出售（NoSell 预过滤 → `inventory_trade::sell`）。
+- 日志：`Inotia4AutoSell WOULD SELL bag=%d slot=%d category=%d rarity=%d enhance=%d socket=%d type=0x%x`（`type` = `ItemView.special_types` 位掩码）。
+- 状态 JSON 增加累计 `wouldSell` 计数（成品应恒为 0；每次扫描重复计数属预期）。
+- **不是运行时开关**，不得随成品发布；发布前必须移除/置 0。
 
 ### 4.6 保护规则
 
@@ -288,7 +308,7 @@ section `autosell` v1 payload：
 - 扫描放游戏主线程逐帧回调（统一帧任务管理器 kFramePointRenderPre 点位）。
 - 处置首选复用原版单件链结算语义，保留销毁兜底；「批量」= 模块循环单件链。
 - 入口按钮模仿扩展背包页签动态定位，锚定任务袋标签右侧，不写死像素。
-- 配置按存档持久化到模块存档 sidecar，不用 `config.json`/`ModuleConfig`，不加 `opEnabled` 门禁（用户 2026-09-13）；入口按钮默认挂载，总开关在面板内启用。
+- 配置按存档持久化到模块存档 sidecar，不用 `config.json`/`ModuleConfig`，不加 `opEnabled` 门禁（用户 2026-09-13）；入口按钮与扫描任务由模块设置第 6 项全局开关 `autoSellEnabled` 门控（默认关闭），面板内另有按存档的规则总开关。
 - 规则组合（用户 2026-09-12）：同类内多条启用规则取 OR（命中一条即出售）；跨类独立，命中任一即出售。
 - 比较方向统一 `≤ 所选档`；孔位用总孔数；强化次数用「当前总强化次数（bits6-10）」（用户 2026-09-13 裁决；已强化装备由保护规则排除，总次数与剩余次数一致）。
 
@@ -320,7 +340,7 @@ section `autosell` v1 payload：
 
 - `FrameTaskManager` **不可用**：回调运行在后台线程（`game_motion.cpp:51,75-98`），且 `frame_task_register` 会 `g_tasks.clear()`（`:45`）顶掉移动/寻路任务。（现状：旧 FrameTaskManager 已删除，自动出售经统一帧任务管理器注册到 kFramePointRenderPre，与移动槽互不影响。）
 - 截至验证时**不存在世界态通用每帧宿主**；后由并行功能补齐统一帧任务管理器（`core/native/frame_task.{h,cpp}` + `frame_host.{h,cpp}`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`，真机已验证每帧派发）。
-- **结论（已实现）**：自动出售由开关驱动注册（`autosell_apply_config`，`interval=60`，`frame_task` 负责节流）；无手写节流、无单次立即执行（`nativeAutoSellRunNow` 保留签名但不再单独触发扫描）。进档时按 sidecar `enabled` 自动注册任务的时机待定。
+- **结论（已实现）**：扫描任务在「全局开关已武装 && 已进档 && 存档配置 `config.enabled`」时注册（`interval=60`，`frame_task` 负责节流）；无手写节流、无单次立即执行（`nativeAutoSellRunNow` 保留签名但不再单独触发扫描）。进档时按 sidecar 配置由 `save_enter` 回调自动应用（`autosell_register_save_enter`），存档开关变化由 `autosell_apply_config` 同步任务。
 - 未决：背包面板打开时 `g_gamestate==0` 未真机证实（不影响「不用 FrameTaskManager」的结论）。
 
 ### 11.3 强化「次数」口径（R9）
@@ -343,3 +363,94 @@ section `autosell` v1 payload：
 3. **配置存储与门禁（2026-09-13）**：按存档持久化到模块存档 sidecar（不用 `config.json`）；不加 `opEnabled` 门禁；入口按钮默认挂载，开关在面板内。
 
 > 本册为设计稿；实现落地前先按 `control-plane.md` §2.2「增加操作」路由补读架构册/库存册，并在验收册新增操作契约卡。属性范围依赖变更时须与对应 owner 协调。
+
+## 12. UI 可行性结论与原型（2026-09-13）
+
+> 范围：本节只回答「入口按钮样式 / 类详情页弹窗 / 自绘内容 + 关闭即保存」三问，并记录已落地的**无功能原型**。原型不做真实配置读写、不做扫描接线、不做真机验证。
+
+### 12.1 三个问题的结论
+
+| # | 问题 | 结论 | 依据 |
+|---|---|---|---|
+| ① | 背包页入口按钮能否套用「设置」按钮样式 | **机制已确认可行；样式「完全复刻」未定稿** | 设置入口与背包入口同类：都是 `ControlButton` + `ExecuteProc`，点击回调里 `UI_SetPopupProcessInfo(1,id)` 打开面板（`game_ui_settings_injection.inc:6-28`）。但「设置按钮」本身是主菜单原生按钮，其贴图/DrawProc 只随主菜单控件树存在，**不是可搬到背包页的独立素材**；可复用的原版面板入口风格只有 Options 图组 `0x59`（返回箭头）与标题图组胶囊。原型采用自绘金色边框小按钮（不依赖图像单元加载），文字分两行「自动/出售」，待复核。 |
+| ② | 点击后用「类物品详情页弹窗、双倍宽、遮住整页」 | **机制已确认可行；宽度基准未定** | 面板 = PopupState 死条目 push；`POPUPSTATE_Process/Event` 只走栈顶，push 后 EQUIP 的 process/draw/event 全部不执行（栈顶独占），触摸天然只归面板；全屏半透明遮罩 + 居中面板是设置/存档面板同款（`game_ui_settings_panel.inc:72-116`、`game_ui_savebackup_panel.inc`）。「两倍宽」的基准（详情面板实际宽度）**尚未真机量测**；原型暂取 2 × 0x180 = 0x300 = 768 ≤ 逻辑屏宽 1408。 |
+| ③ | 内容自绘 + 关闭按钮即保存 | **自绘已确认；关闭即保存的接线点已存在，本轮未接** | 自绘用 `ui_begin_frame` + `GRPX_FillRect/FillRectAlpha` + `GRPX_SetFontColorFromRGB`+`GRPX_DrawStringWithFont`（settings/savebackup 真机先例）。保存接线点：`AutoSellConfigStore` / `autosell_store` / `ModuleSaveStore` section `autosell`（§4.4）。原型关闭只写日志。 |
+
+### 12.2 原型实现（无功能）
+
+- 入口按钮：独立 `ControlButton` 挂原版袋容器（与扩展背包页签同宿主，`G_UIEQUIP_PANEL_BAG_CONTAINER_VMA`），相对位置 `(68, 2+5×70)`、尺寸 `57×57`（袋列右侧、扩展页签之后）；点击回调 `UI_SetPopupProcessInfo(1, id)`。**不依赖扩展背包开关**；由全局开关门控（§13.2），默认关闭。生命周期强校验见 §13.1。
+- 入口绘制宿主（关键选择）：用 `Scene_Draw_POPUP_SC_EQUIP + 0x1cc` 处 `bl UIDesc_Draw` 调用点的独立 BL patch（`call_patch_install_bl`，期望字 `0x97fdaadb`），wrapper 内先复刻 `UIDesc_Draw` 再绘制入口按钮。扩展背包占用的是同函数 `+0x210` 的 `bl GRPX_End`（`F_SCENE_DRAW_EQUIP_END_CALL_OFF`），两处地址不同，互不覆盖；扩展背包关闭时该 patch 也不安装，入口按钮仍显示。选此调用点是因为它在 `UIEquip_Draw`/`UIDesc_Draw` 之后、`GRPX_End` 之前，处于有效 GRPX 帧内，且不与扩展背包争用。
+- 面板：改写 IAP 死条目 `F_PANEL_UNK3_ENTER`（`Scene_Init_POPUP_SC_INAPP_HOT`）的 enter/process/f3/f4/event 五回调；原型不做运行期还原。
+- 面板几何：全屏半透明遮罩（`alpha=0x60`）+ 居中面板 `768×576`（`kPanelW=0x300`、`kPanelH=0x240`）。
+- 面板内容：标题「自动出售」、副标题「原型占位：不读取、不保存配置」、7 行占位规则（总开关/装备×3/宝石×2/特殊类型，右侧灰框占位值）、金色边框「关闭」按钮。关闭按钮命中用本模块自算绝对矩形（`0x17` 按下、`0x18` 抬起且仍在按钮内 → 延迟 2 帧 `(3,0)` 关闭）。
+- 涉及文件：`feature/ui/game_ui_autosell.{h,cpp}`；`game_symbols.h` 新增 `F_UIDESC_DRAW_VMA=0xb56f4`、`F_SCENE_DRAW_EQUIP_DESC_CALL_OFF=0x1cc`；`symbol_registry.h` 登记 `UIDesc_Draw`；`game_access.{h,cpp}` + `game_access_globals.inc` 增加 `fn_uidesc_draw`；`gamebridge.cpp` 在 `nativeInit` 调 `autosell_ui_install_if_ready()`；`CMakeLists.txt` 登记新 cpp。
+
+### 12.3 未决与风险（原型不阻塞、定稿前必须处理）
+
+1. **两倍宽基准未量测**：768 是「假定详情面板 384×2」；需真机截图量测 `UIDesc` 面板实际宽度后定稿宽度与是否真正「遮住所有背包页内容」。
+2. **死条目选择**：`F_PANEL_UNK3_ENTER`（INAPP_HOT）现被原型长期占用且不还原；IAP 已被模块屏蔽，但仍需真机确认不影响其余 IAP 路径，或补「离开背包即还原」检测。
+3. **入口绘制宿主冲突**：`+0x1cc` 与扩展背包 `+0x210` 地址不同（静态已确认），但需真机确认双开（扩展背包 + 自动出售）时绘制时序、点击、无互相遮挡/崩溃。
+4. **触摸命中**：入口按钮命中依赖原生 `TouchHandle` 递归分发 `ExecuteProc`（扩展页签同宿主先例）；关闭按钮命中用自算绝对矩形。两者均需真机点按验证（含分辨率缩放下绘制与命中一致）。
+5. **入口控件重建**：容器指针变化即判定旧控件失效；绘制前经「子控件 + 类型 + `ExecuteProc` 身份」强校验（§13.1），不通过即重建，不对未校验控件调用绘制。残余风险：容器与控件同址复用的极端情况，需真机回归覆盖多次开关背包。
+6. **入口文案**：「自动出售」拆两行「自动/出售」，待主代理复核。
+7. **API 屏幕枚举**：面板栈顶 enter 为模块函数，`data_ui_screen()` 会落到 `panel_ui_panel`（非 `in_app`）；原型不影响，若需 API 识别需另行登记。
+8. **未做真机验证**：本轮仅静态审查 + host 测试 + Debug 构建通过；行为面（按钮显示/点击、面板开关、命中、扩展背包双开）一律待真机回归，当前整体 `NOT_ACCEPTED`。
+
+## 13. 入口生命周期、全局开关与 JNI 契约（2026-09-13）
+
+> 范围：native 侧入口按钮生命周期修复、全局开关门控、扫描任务生命周期、模块设置面板第 6 项、JNI 契约。真机验证由主代理执行。
+
+### 13.1 入口按钮生命周期（防悬垂崩溃）
+
+崩溃现象：控件树重建后对已失效控件调用 `ControlButton_Draw`，`pc=fault=容器地址`（把垃圾当函数指针跳转）。修复要点（`feature/ui/game_ui_autosell.cpp`）：
+
+- `g_entry_container` 记录挂载容器；每帧读当前容器，**容器指针变化即判定旧控件失效并移除引用**（不销毁原版控件）。
+- 绘制前强校验 `autosell_entry_valid(container)`：① `g_entry_ctrl` 必须是当前容器子控件；② `CO_TYPE == 3`；③ `CO_ACTIVE == 0x20`；④ `CO_DATA != null` 且 `CB_EXECUTE_PROC == &autosell_entry_clicked`。任一不符即置空并重建；**绝不**对未通过校验的控件调用 `fn_ctrl_btn_draw`。
+- 校验顺序保证安全：容器指针比对与子控件指针扫描都不解引用 `g_entry_ctrl`；只有确认它仍在容器子链表中后才读取字段（此时控件必然存活）。
+- 容器就绪守卫（child count ≥ 6）保持；`fn_ctrl_get_count`/`fn_ctrl_get_child` 为空或容器为空时安全跳过。
+- 入口控件引用由 `g_entry_mtx` 保护（主线程绘制、JVM 线程开关写入）。
+
+### 13.2 全局开关门控
+
+- `autosell_ui_set_enabled(bool)` / `autosell_ui_enabled()`（`game_ui_autosell.h`）。
+- 默认**关闭**（`g_enabled=false`）：关闭态不安装、不绘制入口按钮；开启后下一次 EQUIP 页绘制时安装。
+- 关闭时：移除入口引用（不销毁原版控件）；`g_entry_ctrl` 残留控件即使仍被触摸命中，`autosell_entry_clicked` 也会因开关为关而直接返回；面板正打开则 `UI_SetPopupProcessInfo(3,0)` 关闭。
+- 开启/关闭仅切换开关状态与任务/入口引用，不触碰游戏控件树销毁路径。
+
+### 13.3 扫描任务生命周期（全局开关武装 + 进档注册）
+
+- `autosell_set_global_enabled(bool)`（`autosell_scan.h/.cpp`）：置位/清位 `g_global_enabled` 武装标志后调 `sync_task()`；`sync_task` 在「已武装 && 已进档（`g_save_active`）&& 存档配置 `config.enabled`」时 `frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr, kAutoSellScanIntervalFrames=60, 0)`，否则 `frame_task_remove`；幂等、`g_task_mtx` 保护。
+- `autosell_apply_config(config)`：UI **关闭/销毁时提交一次**（面板内编辑不实时持久化）；写入运行时配置，**仅当存档总开关 `enabled` 切换时**才同步任务（开→按条件注册，关→`remove_task_if_any` 兜底删除），减少注册/删除时机、避免无关注册。
+- `remove_task_if_any()`：无条件删除已注册任务，不读取全局/存档配置状态；用于退档、全局开关关闭、存档总开关关闭三条兜底路径。
+- 进档注册：`autosell_register_save_enter()`（nativeInit 调用一次）注册 `save_enter` 回调；读档/新档进 world 后触发一次，`autosell_store_ensure_loaded(current_save_slot())` 应用 sidecar 配置、置位 `g_save_active`，再同步任务。
+- 退档注册：`autosell_register_save_exit()`（nativeInit 调用一次）注册 `save_exit` 回调；world → 主菜单时触发一次，清位 `g_save_active` 并调 `remove_task_if_any()` **无条件删除任务（兜底，不读取配置/开关状态）**。全局开关关闭、存档总开关关闭同样走该兜底删除。
+- `autosell_apply_config(config)` **只写运行时配置**，不再注册/删除任务（避免与全局开关两处争抢）。
+- `autosell_tick` 顶部防御：`!g_global_enabled` 立即返回；随后仍检查 `config.enabled`（按存档规则总开关）与 `scan_gates_ok()`。
+
+### 13.4 模块设置面板第 6 项
+
+- `SETTINGS_ROW_COUNT` 5→6；`kRowKeys`/`kRowLabels`/`g_row_status` 各增一项：key `autoSellEnabled`、label `自动出售`。
+- 布局：6 项填满网格前 3 行（2 列×3 行）；「存档备份」沿用 `settings_toggle_rect(SETTINGS_ROW_COUNT)`，现 index 6 → 第 4 行左侧，无重叠。
+- 翻转走既有 `jni_toggle_config("autoSellEnabled")` → Kotlin；Kotlin 侧（并行 fixer）负责把变更下发到 `nativeSetAutoSellEnabled`。
+
+### 13.5 JNI 契约（native 导出）
+
+- 符号：`Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled`（`bridge/native/gamebridge_autosell.cpp`）。
+- 签名：`extern "C" JNIEXPORT jboolean JNICALL Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboolean enabled)`。
+- 内部：`autosell_set_global_enabled(enabled == JNI_TRUE); autosell_ui_set_enabled(enabled == JNI_TRUE); return JNI_TRUE;`
+- Kotlin 侧 `external fun nativeSetAutoSellEnabled(enabled: Boolean): Boolean` 由并行 fixer 声明。
+- 已核验：debug 构建 arm64-v8a / armeabi-v7a 的 `libgamebridge.so` 均导出该符号。
+
+按存档配置下发（**值即开关**，2026-09-14 起为 7 参）：
+
+- 符号：`Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig`。
+- 签名：`extern "C" JNIEXPORT jboolean JNICALL Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(JNIEnv*, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier, jint specialMask, jint gemRange)`。
+- 入参：`enabled` 总开关；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`specialMask` 非负（空=关）、`gemRange` 0..5（0=关）。native 侧按边界钳制（M-11），填 `autosell::Config` 后 `autosell_apply_config(cfg)`；当前存档槽合法时直写 sidecar `autosell` section。
+- Kotlin 侧 `external fun nativeSetAutoSellConfig(enabled: Boolean, rarity: Int, enhance: Int, socket: Int, gemTier: Int, specialMask: Int, gemRange: Int): Boolean`（`NativeBridge.kt`）；开发期 API `AutoSellFeatureController` 以 `json.optInt("gemRange", 0)` 传入。
+- `nativeAutoSellRunNow` / `nativeAutoSellStatusJson` 签名不变；状态 JSON 现含 `wouldSell`（开发期 dry-run 计数，成品应恒为 0）。
+
+### 13.6 未决与风险
+
+1. **真机回归**：反复开关背包、扩展背包开/关、切档、界面开启/关闭切换，验证无悬垂崩溃；全部待真机证据，当前 `NOT_ACCEPTED`。
+2. **关闭态残留控件**：入口控件不销毁，触摸仍可能命中该位置（已由 `autosell_entry_clicked` 开关防御拦截功能影响）；是否需彻底禁用其触摸待真机评估。
+3. **两倍宽基准**、**死条目占用**、**入口文案** 同 §12.3。

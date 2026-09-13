@@ -6,8 +6,10 @@
 #include "feature/autosell/autosell_config.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
+#include "feature/autosell/autosell_scan.h"
 #include "feature/autosell/autosell_store.h"
 #include "feature/save_backup/save_backup.h"
+#include "feature/ui/game_ui_autosell.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -44,8 +46,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         inventory_native_hook_install_if_ready();
         attr_range_ui_install_if_ready();
         save_backup_slot_delete_hook_install_if_ready();
-        // 统一帧派发宿主（渲染开始前锚点）。自动出售任务改为开关驱动：由
-        // nativeSetAutoSellConfig -> autosell_apply_config 按 enabled 注册 / 删除。
+        // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
+        // 进入存档后由 autosell_register_save_enter 的回调注册（见 autosell_scan.cpp）。
         if (frame_host_install_if_ready()) {
             autosell_set_host_installed(true);
         }
@@ -56,8 +58,11 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
         save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点 call_patch
         save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点 call_patch
+        autosell_register_save_enter();       // 自动出售：进档加载 sidecar 配置并注册扫描任务
+        autosell_register_save_exit();        // 自动出售：退档删除扫描任务
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
+        autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }

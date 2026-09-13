@@ -11,16 +11,28 @@
 #include "core/native/extension_bag_port.h"
 #include "core/native/frame_task.h"
 #include "core/native/inventory_trade.h"
+#include "core/native/save_enter.h"
+#include "core/native/save_exit.h"
 #include "data/native/game_symbols.h"
 #include "feature/autosell/autosell_config.h"
+#include "feature/autosell/autosell_store.h"
 #include "feature/autosell/autosell_view.h"
 #include "game_access.h"
 #include "game_state.h"
 
 #include <android/log.h>
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
+
+// ============================================================================
+// 开发期 dry-run 开关（仅测试用，成品不得包含）。
+// TODO(发布前必须处理)：将 AUTOSELL_DEV_DRY_RUN 置 0（或删除本宏与下方 #if 分支）后再发布；
+//   成品绝不能带 dry-run 行为，也不做成运行时开关。置 1 时命中规则只打日志 + 计数，
+//   不扣物、不加钱。
+// ============================================================================
+#define AUTOSELL_DEV_DRY_RUN 1
 
 namespace {
 
@@ -33,10 +45,13 @@ constexpr int kSlotCount = 16;
 std::mutex g_scan_mtx;
 std::mutex g_task_mtx;
 FrameTaskId g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
+std::atomic<bool> g_global_enabled{false};  // 全局开关；JVM 线程写、主线程读
+std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置位）；主线程写
 
 struct ScanStats {
     int sold = 0;
     int failed = 0;
+    int would_sell = 0;  // dry-run：命中规则但未实际出售的计数（成品应为 0）
 };
 
 struct PhysicalScanCtx {
@@ -59,6 +74,18 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
     if (!autosell_build_view(ref, &view)) return;
     if (!autosell::should_sell(view, cfg)) return;
 
+#if AUTOSELL_DEV_DRY_RUN
+    // 开发期 dry-run：只记录「本应出售」，不扣物、不加钱。
+    // type = 特殊类型位掩码（ItemView.special_types）。
+    ++stats->would_sell;
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "WOULD SELL bag=%d slot=%d category=%d rarity=%d enhance=%d "
+                        "socket=%d jewelTier=%d jewelPct=%d type=0x%x",
+                        ref.bag, ref.slot, ref.category, view.rarity, view.enhance_count,
+                        view.socket_total, view.jewel_tier, view.jewel_percentile,
+                        static_cast<unsigned>(view.special_types));
+    return;
+#else
     // I-2 NoSell 预过滤：不可售物品直接跳过，不计失败、不打 WARN
     // （否则 inventory_trade::sell 会以 WARN 记 no_sell 并计入失败）。
     if (fn_item_is_no_sell != nullptr && fn_item_is_no_sell(ref.category) != 0) {
@@ -82,6 +109,7 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
     __android_log_print(ANDROID_LOG_WARN, kTag,
                         "sell failed bag=%d slot=%d category=%d status=%d",
                         ref.bag, ref.slot, ref.category, static_cast<int>(result.status));
+#endif
 }
 
 void scan_body(const autosell::Config& cfg, int64_t frame) {
@@ -120,16 +148,20 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
         }
     }
 
-    autosell_note_scan(frame, stats.sold, stats.failed);
-    if (stats.sold > 0 || stats.failed > 0) {
-        __android_log_print(ANDROID_LOG_INFO, kTag, "scan frame=%lld sold=%d failed=%d",
-                            static_cast<long long>(frame), stats.sold, stats.failed);
+    autosell_note_scan(frame, stats.sold, stats.failed, stats.would_sell);
+    if (stats.sold > 0 || stats.failed > 0 || stats.would_sell > 0) {
+        __android_log_print(ANDROID_LOG_INFO, kTag,
+                            "scan frame=%lld sold=%d failed=%d wouldSell=%d",
+                            static_cast<long long>(frame), stats.sold, stats.failed,
+                            stats.would_sell);
     }
 }
 
 // frame_task 回调：每次调用现取运行时配置，无跨帧状态；60 帧节流由 frame_task 的
 // interval 负责。返回 false = 任务完成（自动注销）；本任务无限期运行，恒返回 true。
 bool autosell_tick(int64_t frame, void* /*ctx*/) {
+    // 全局开关防御：关闭态不应有任务存在；即使任务删除存在竞态也直接跳过。
+    if (!g_global_enabled.load(std::memory_order_acquire)) return true;
     const autosell::Config cfg = autosell_get_runtime_config();
     if (!cfg.enabled) return true;   // 防御：关闭态不应有任务存在
     if (!scan_gates_ok()) return true;
@@ -139,20 +171,85 @@ bool autosell_tick(int64_t frame, void* /*ctx*/) {
     return true;
 }
 
+// 无条件删除已注册任务（兜底）：不读取全局/存档配置状态，已有任务即删除。
+void remove_task_if_any() {
+    std::lock_guard<std::mutex> lock(g_task_mtx);
+    if (g_task == 0) return;
+    frame_task_remove(g_task);
+    g_task = 0;
+    __android_log_print(ANDROID_LOG_INFO, kTag, "task removed");
+}
+
+// 按「全局开关已武装 && 已进入存档 && 存档配置总开关开启」同步 60 帧周期任务；幂等。
+// 满足则注册；不满足一律走 remove_task_if_any 兜底删除（不依赖配置状态）。
+void sync_task() {
+    const bool want = g_global_enabled.load(std::memory_order_acquire) &&
+                      g_save_active.load(std::memory_order_acquire) &&
+                      autosell_get_runtime_config().enabled;
+    if (!want) {
+        remove_task_if_any();
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_task_mtx);
+    if (g_task != 0) return;
+    g_task = frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr,
+                            kAutoSellScanIntervalFrames, 0);
+    __android_log_print(ANDROID_LOG_INFO, kTag, "task registered id=%llu",
+                        static_cast<unsigned long long>(g_task));
+}
+
+// save_enter 回调（游戏主线程）：按当前存档槽加载 sidecar 配置应用到运行时，再同步任务。
+void autosell_on_save_enter(void* /*ctx*/) {
+    const int slot = current_save_slot();
+    autosell_store_ensure_loaded(slot);
+    g_save_active.store(true, std::memory_order_release);
+    __android_log_print(ANDROID_LOG_INFO, kTag, "save enter slot=%d; sync task", slot);
+    sync_task();
+}
+
+// save_exit 回调（游戏主线程）：退出存档（world -> 主菜单）时置「未进档」并无条件删除任务
+// （兜底：不依赖存档配置的开启状态）。
+void autosell_on_save_exit(void* /*ctx*/) {
+    g_save_active.store(false, std::memory_order_release);
+    __android_log_print(ANDROID_LOG_INFO, kTag, "save exit; remove task");
+    remove_task_if_any();
+}
+
 }  // namespace
 
 void autosell_apply_config(const autosell::Config& config) {
+    // UI 关闭/销毁时提交一次（面板内编辑不实时持久化）：写入运行时配置后，**仅当存档总开关
+    // enabled 发生切换**才同步任务；规则/阈值等改动不触碰任务生命周期（减少注册/删除时机）。
+    const bool old_enabled = autosell_get_runtime_config().enabled;
     autosell_set_runtime_config(config);
-    std::lock_guard<std::mutex> lock(g_task_mtx);
+    if (old_enabled == config.enabled) return;
+    __android_log_print(ANDROID_LOG_INFO, kTag, "save master switch %d -> %d",
+                        old_enabled ? 1 : 0, config.enabled ? 1 : 0);
     if (config.enabled) {
-        if (g_task == 0) {
-            // 开启：注册 60 帧周期任务；首个派发周期即触发。
-            g_task = frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr,
-                                    kAutoSellScanIntervalFrames, 0);
-        }
-    } else if (g_task != 0) {
-        // 关闭：删除任务，恢复无扫描回调状态。
-        frame_task_remove(g_task);
-        g_task = 0;
+        sync_task();                 // 开：按条件注册
+    } else {
+        remove_task_if_any();        // 关：无条件删除（兜底，不依赖配置状态）
     }
+}
+
+void autosell_set_global_enabled(bool enabled) {
+    g_global_enabled.store(enabled, std::memory_order_release);
+    __android_log_print(ANDROID_LOG_INFO, kTag, "global enabled=%d save_active=%d",
+                        enabled ? 1 : 0,
+                        g_save_active.load(std::memory_order_acquire) ? 1 : 0);
+    if (enabled) {
+        sync_task();                 // 开：按条件注册
+    } else {
+        remove_task_if_any();        // 关：无条件删除（兜底，不依赖配置状态）
+    }
+}
+
+void autosell_register_save_enter() {
+    // 幂等：同一 fn+ctx 重复注册不会叠加。
+    save_enter_register(&autosell_on_save_enter, nullptr);
+}
+
+void autosell_register_save_exit() {
+    // 幂等：world -> 主菜单时若已有任务即删除。
+    save_exit_register(&autosell_on_save_exit, nullptr);
 }

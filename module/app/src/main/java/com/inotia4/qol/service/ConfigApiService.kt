@@ -20,6 +20,7 @@ interface ConfigApiService {
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
         oldGemCraft: Boolean,
+        oldAutoSell: Boolean,
         oldApiEnabled: Boolean
     )
 
@@ -42,6 +43,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.log("extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
         val gemCraftApplied = NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
         LogFile.log("gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
+        val autoSellApplied = NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
+        LogFile.log("autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
         val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
         LogFile.log("apiEnabled=${ModuleConfig.apiEnabled} applied=$apiApplied")
         applyTiles()
@@ -52,6 +55,7 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
         oldGemCraft: Boolean,
+        oldAutoSell: Boolean,
         oldApiEnabled: Boolean
     ) {
         if (!NativeBridge.ready) return
@@ -66,6 +70,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.gemCraftOptimize != oldGemCraft) {
             NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
+        }
+        if (ModuleConfig.autoSellEnabled != oldAutoSell) {
+            NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
         }
         if (ModuleConfig.apiEnabled != oldApiEnabled) {
             NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)

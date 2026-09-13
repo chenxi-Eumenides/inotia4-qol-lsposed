@@ -289,6 +289,8 @@ bool bridge_init() {
     fn_exclude_party = reinterpret_cast<ExcludePartyFn>(g_base + fn_resolve("F_EXCLUDE_PARTY_VMA", F_EXCLUDE_PARTY_VMA));
     fn_mercenary_release = reinterpret_cast<MercenaryReleaseFn>(g_base + fn_resolve("F_MERCENARY_RELEASE_VMA", F_MERCENARY_RELEASE_VMA));
     fn_is_use = reinterpret_cast<ItemIsUseFn>(g_base + fn_resolve("F_ITEMDATA_IS_USE_VMA", F_ITEMDATA_IS_USE_VMA));
+    fn_item_is_real_equip = reinterpret_cast<IsRealEquipFn>(
+        g_base + fn_resolve("F_ITEM_IS_REAL_EQUIP_VMA", F_ITEM_IS_REAL_EQUIP_VMA));
     // ---- 佣兵徽章使用链（R-63）----
     fn_is_mercenary_seal = reinterpret_cast<ItemSystemIsMercenarySealFn>(
         g_base + fn_resolve("F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA", F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA));
@@ -389,6 +391,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_grpx_draw_part = reinterpret_cast<GrpxDrawPartFn>(g_base + fn_resolve("F_GRPX_DRAW_PART_VMA", F_GRPX_DRAW_PART_VMA));
     fn_ui_draw_string_halign = reinterpret_cast<UiDrawStringHAlignFn>(g_base + fn_resolve("F_UI_DRAW_STRING_HALIGN_VMA", F_UI_DRAW_STRING_HALIGN_VMA));
     fn_ui_draw_string_in_width_with_font = reinterpret_cast<UiDrawStringInWidthWithFontFn>(g_base + fn_resolve("F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA", F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA));
+    fn_uidesc_draw = reinterpret_cast<UiDescDrawFn>(g_base + fn_resolve("F_UIDESC_DRAW_VMA", F_UIDESC_DRAW_VMA));
     fn_mw_graphic_draw_string = reinterpret_cast<MwGraphicDrawStringFn>(g_base + fn_resolve("F_MW_GRAPHIC_DRAW_STRING_VMA", F_MW_GRAPHIC_DRAW_STRING_VMA));
     fn_grp_save_lcd = reinterpret_cast<GrpSaveLcdFn>(g_base + fn_resolve("F_GRP_SAVE_LCD_VMA", F_GRP_SAVE_LCD_VMA));
     fn_grp_restore_lcd = reinterpret_cast<GrpRestoreLcdFn>(g_base + fn_resolve("F_GRP_RESTORE_LCD_VMA", F_GRP_RESTORE_LCD_VMA));

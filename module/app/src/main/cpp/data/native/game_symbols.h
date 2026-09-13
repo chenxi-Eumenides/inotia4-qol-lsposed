@@ -75,6 +75,7 @@ constexpr int ATTR_MAX_MP = 0x1f;
 // 该函数在 HTTP/缓存预取线程调用会与游戏主线程属性重算竞争。
 constexpr size_t C_MAX_HP = C_ATTR + ATTR_MAX_HP * 4;  // int32 最大 HP [ch+0x9c]
 constexpr size_t C_MAX_MP = C_ATTR + ATTR_MAX_MP * 4;  // int32 最大 MP [ch+0xa0]
+
 // ---- 主属性四项字段偏移（CHAR_GetStat 0xdf8d0 反汇编核实：总属性 = Base + Main + Bonus + Sub，无 clamp）----
 // 索引 i = 0..4（力量/敏捷/体力/智力/精力）；宽度/符号性由各 getter 的加载指令确定。
 constexpr size_t C_STAT_BASE = 0x250;   // s8  基础属性 [ch+0x250+i]（CHAR_GetStatBase 0xdb9e4：add + ldrsb）
@@ -84,6 +85,7 @@ constexpr size_t C_STAT_SUB = 0x266;    // s16 动态派生缓存 [ch+0x266+i*2]
 // 动态派生脏位（CHAR_IsCalculateStatusOn 0xdba08：ldrb [ch+0x270] + asr by i）。
 // bit i 置位 = 第 i 项 sub 尚未重算；CHAR_GetStatSub 此时会先 CHAR_CalculateStatus 重算（写操作）。
 constexpr size_t C_STAT_CALC_FLAG = 0x270; // u8 动态派生脏位
+
 // ---- popup state entry 布局（g_sPopupStateList，27 条 × 64B；见 G_POPUP_STATE_LIST_GOT_VMA）----
 constexpr size_t POPUP_ENTRY_SIZE = 0x40;     // 每条 64B
 constexpr size_t POPUP_ENTRY_ENTER = 0x10;    // enter 回调
@@ -122,7 +124,8 @@ constexpr size_t PICKUP_EVENT_Y = 0x0c;       // int32 玩家 y
 constexpr size_t PICKUP_EVENT_OBJECT = 0x10;  // 掉落物对象指针
 
 // ---- 函数内 callsite 相对偏移 ----
-constexpr size_t F_SCENE_DRAW_EQUIP_END_CALL_OFF = 0x210; // F_SCENE_DRAW_EQUIP_VMA 内 bl 调用点偏移
+constexpr size_t F_SCENE_DRAW_EQUIP_END_CALL_OFF = 0x210;  // F_SCENE_DRAW_EQUIP_VMA 内 bl GRPX_End 调用点偏移（扩展背包占用）
+constexpr size_t F_SCENE_DRAW_EQUIP_DESC_CALL_OFF = 0x1cc; // F_SCENE_DRAW_EQUIP_VMA 内 bl UIDesc_Draw 调用点偏移（自动出售入口按钮绘制宿主，独立于扩展背包）
 
 // ---- 全局变量 VMA ----
 constexpr uintptr_t G_MONEY_VMA = 0x7134c0;        // int64 金币
@@ -655,6 +658,7 @@ constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
 constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_UIDESC_GET_DATA_VMA = 0xb2bd0;  // void* UIDesc_GetData()：当前 desc 面板物品对象（ButtonEquipExe b7c2c 同源）
+constexpr uintptr_t F_UIDESC_DRAW_VMA = 0xb56f4;      // void () UIDesc_Draw：物品详情面板绘制（Scene_Draw_POPUP_SC_EQUIP +0x1cc bl）
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
 // ---- 合成系统（MIXSYSTEM，craft-batch-ui v0.5.18，libgame-symbols.txt 核对）----
@@ -775,6 +779,7 @@ using GetAttrFn = int32_t (*)(void*, int);
 using GetEquipFn = void* (*)(void*, int);
 using GetExpFn = int64_t (*)(void*);
 using GetRarityFn = int (*)(void*);
+using IsRealEquipFn = int (*)(void*);  // ITEM_IsRealEquip(item 指针) → 非 0 = 真实装备（比不可堆叠更精确）
 using GetBagSizeFn = int (*)(int);
 using GetEmptyBagSlotFn = int (*)();
 using IsEmptyBagFn = int (*)(int);
@@ -824,6 +829,7 @@ using UiStoreMakeDescFn = void (*)(void*, void*);
 using UiEquipUpdateCharEquipFn = void (*)();
 using UiDescSetOffFn = void (*)();
 using UiDescGetDataFn = void* (*)();
+using UiDescDrawFn = void (*)();  // UIDesc_Draw()
 using UiEquipMakeDescFn = void (*)(void*, void*);  // UIEquip_MakeDesc(ctrl, 0)：读控件物品生成详情面板（袋标签二次点击原版语义）
 using UiPopupMsgCreateOkFromTextDataFn = void (*)(uint32_t, uint32_t, uint32_t, uint32_t);
 // ---- 佣兵徽章使用链 typedef（R-63）----

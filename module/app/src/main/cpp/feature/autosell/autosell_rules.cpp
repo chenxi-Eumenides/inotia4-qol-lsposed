@@ -4,29 +4,57 @@ namespace autosell {
 
 namespace {
 
-// 装备类规则：任一已启用规则命中即真（同类内 OR）。
+// 装备类规则：任一已开启规则命中即真（同类内 OR）。值 0=关；值 v → 阈值 v-1。
 bool equip_rule_hit(const ItemView& item, const Config& cfg) {
-    if (cfg.rarity_enabled && item.rarity <= cfg.rarity_threshold) {
+    if (cfg.rarity > 0 && item.rarity <= cfg.rarity - 1) {
         return true;
     }
-    if (cfg.enhance_enabled && item.enhance_count <= cfg.enhance_threshold) {
+    if (cfg.enhance > 0 && item.enhance_count <= cfg.enhance - 1) {
         return true;
     }
-    if (cfg.socket_enabled && item.socket_total <= cfg.socket_threshold) {
+    if (cfg.socket > 0 && item.socket_total <= cfg.socket - 1) {
         return true;
     }
     return false;
 }
 
-// 宝石类规则：任一已启用规则命中即真（同类内 OR）。
-bool jewel_rule_hit(const ItemView& item, const Config& cfg) {
-    return cfg.gem_tier_enabled && item.jewel_tier <= cfg.gem_tier_threshold;
+// 宝石属性范围档位 -> 属性百分位阈值（1→30 / 2→60 / 3→75 / 4→90 / 5→99）。
+// 最高档取 99：即使调到最大也不出售满分（百分位 100）的宝石。
+// 越界/0 返回 -1 = 关闭（不命中），避免未知档位默认命中。
+int gem_range_threshold(int gem_range) {
+    switch (gem_range) {
+        case 1:
+            return 30;
+        case 2:
+            return 60;
+        case 3:
+            return 75;
+        case 4:
+            return 90;
+        case 5:
+            return 99;
+        default:
+            return -1;
+    }
 }
 
-// 特殊类型规则：勾选集合与物品位标志有交集即真（对任意物品生效）。
+// 宝石类规则：任一已开启规则命中即真（同类内 OR）。值 0=关；值 v → 阈值 v-1。
+bool jewel_rule_hit(const ItemView& item, const Config& cfg) {
+    if (cfg.gem_tier > 0 && item.jewel_tier <= cfg.gem_tier - 1) {
+        return true;
+    }
+    // 属性范围规则：出售百分位 <= 阈值 的低品质宝石。percentile < 0（探测不可用/失败）
+    // 时不命中（fail-closed，不得默认 0 触发误售）。
+    const int threshold = gem_range_threshold(cfg.gem_range);
+    if (threshold >= 0 && item.jewel_percentile >= 0 && item.jewel_percentile <= threshold) {
+        return true;
+    }
+    return false;
+}
+
+// 特殊类型规则：掩码非 0 且勾选集合与物品位标志有交集即真（对任意物品生效）。
 bool special_rule_hit(const ItemView& item, const Config& cfg) {
-    return cfg.special_enabled && cfg.special_mask != 0u &&
-           (item.special_types & cfg.special_mask) != 0u;
+    return cfg.special_mask != 0u && (item.special_types & cfg.special_mask) != 0u;
 }
 
 }  // namespace

@@ -356,6 +356,7 @@ SYM(F_UIEQUIP_DRAW_INVEN_ITEM_VMA, UIEquip_DrawInvenItem)
 SYM(F_ITEM_DRAW_PORTING_VMA, ITEM_DrawPorting)
 SYM(F_UIDESC_SET_OFF_VMA, UIDesc_SetOff)
 SYM(F_UIDESC_GET_DATA_VMA, UIDesc_GetData)
+SYM(F_UIDESC_DRAW_VMA, UIDesc_Draw)
 SYM(F_TOUCHHANDLE_SET_CURSOR_VMA, TouchHandle_SetCursor)
 SYM(F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA, UIEquip_InvenItemControlEventProc)
 
@@ -394,6 +395,7 @@ SYM(F_MAP_DRAWBASE_VMA, MAP_DrawBase)
 
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主（auto-sell）----
 SYM(F_GAMESTATE_DRAWPLAY_VMA, GAMESTATE_DrawPlay)
+
 // ---- 逻辑相位帧锚点：MainProcess 内 STATE_NextStartProcess 调用点（frame-dispatch-host）----
 SYM(F_MAINPROCESS_VMA, MainProcess)
 SYM(F_STATE_NEXT_START_PROCESS_VMA, STATE_NextStartProcess)
