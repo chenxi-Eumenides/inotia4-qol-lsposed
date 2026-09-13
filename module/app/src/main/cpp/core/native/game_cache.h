@@ -5,6 +5,7 @@
 // 缓存层：惰性/预取混合缓存（v0.4.59 表驱动）。对外 data_*_json 接口。
 
 void frame_cache_start();
+void frame_cache_stop();
 void frame_cache_force_refresh();
 bool frame_cache_ready();
 

@@ -31,7 +31,7 @@
 #define ROOT_H 0x280
 #define CONTENT_W 0x430
 #define CONTENT_X ((ROOT_W - CONTENT_W) / 2)
-#define SETTINGS_ROW_COUNT 5
+#define SETTINGS_ROW_COUNT 6
 #define SETTINGS_COLUMN_COUNT 2
 #define SETTINGS_GRID_ROWS ((SETTINGS_ROW_COUNT + SETTINGS_COLUMN_COUNT - 1) / SETTINGS_COLUMN_COUNT)
 #define VISIBLE_GRID_ROWS 4
@@ -89,11 +89,11 @@ void* g_savebackup_btn = nullptr;   // v0.7.x：配置网格内的「存档备�
 void* g_savebackup_desc = nullptr;  // v0.7.x：与配置项同款左描述「存档备份」
 
 // 配置键名（与 Kotlin ModuleConfig 字段一致）
-static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize"};
-static const char* kRowLabels[SETTINGS_ROW_COUNT] = {"堆叠上限", "拖拽合并", "OP能力", "扩展背包", "宝石优化"};
+static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"apiEnabled", "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize"};
+static const char* kRowLabels[SETTINGS_ROW_COUNT] = {"API服务", "堆叠上限", "拖拽合并", "OP能力", "扩展背包", "宝石优化"};
 
 // 当前配置值缓存（面板打开时从 Kotlin 拉取，切换时本地翻转+上抛）
-static char g_row_status[SETTINGS_ROW_COUNT][CB_TEXT_SIZE] = {"关", "关", "关", "关", "关"};
+static char g_row_status[SETTINGS_ROW_COUNT][CB_TEXT_SIZE] = {"开", "关", "关", "关", "关", "关"};
 static char g_addr_text[CB_TEXT_SIZE] = "";
 
 bool inject_state_entry_locked();

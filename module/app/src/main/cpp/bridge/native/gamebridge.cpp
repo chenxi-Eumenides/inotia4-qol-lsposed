@@ -53,10 +53,21 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
         save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点 call_patch
         save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点 call_patch
-        frame_cache_start();   // v0.4.59：存在 interval>0 槽时启动预取线程（自 game_access 移入）
+        // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
     }
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+// API 全局开关：启用时启动帧缓存预取线程，关闭时停止线程并 join（可再次启用）。
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSetApiEnabled(JNIEnv*, jclass, jboolean enabled) {
+    if (enabled == JNI_TRUE) {
+        frame_cache_start();
+    } else {
+        frame_cache_stop();
+    }
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlong JNICALL

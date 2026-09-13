@@ -13,7 +13,8 @@ import org.json.JSONObject
 object ModuleConfigUiBridge {
 
     private val BOOL_KEYS = setOf(
-        "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize"
+        "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize",
+        "apiEnabled"
     )
 
     @JvmStatic
@@ -26,18 +27,31 @@ object ModuleConfigUiBridge {
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
         val oldGemCraft = ModuleConfig.gemCraftOptimize
+        val oldApiEnabled = ModuleConfig.apiEnabled
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
             "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
             "gemCraftOptimize" -> ModuleConfig.gemCraftOptimize
+            "apiEnabled" -> ModuleConfig.apiEnabled
             else -> ModuleConfig.opEnabled
         }
         val json = JSONObject()
         json.put(key, !current)
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
-        ApiServices.config.applyOnChange(oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft)
+        ApiServices.config.applyOnChange(
+            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldApiEnabled
+        )
+        // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
+        // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。
+        if (ModuleConfig.apiEnabled != oldApiEnabled) {
+            if (ModuleConfig.apiEnabled) {
+                Thread { ApiServer.startFromConfig() }.start()
+            } else {
+                ApiServer.stopDelayed()
+            }
+        }
         return "ok"
     }
 }

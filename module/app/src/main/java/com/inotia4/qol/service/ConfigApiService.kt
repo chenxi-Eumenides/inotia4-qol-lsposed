@@ -19,7 +19,8 @@ interface ConfigApiService {
         oldStack: Boolean,
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
-        oldGemCraft: Boolean
+        oldGemCraft: Boolean,
+        oldApiEnabled: Boolean
     )
 
     /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵 2026-08-12） */
@@ -41,6 +42,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.log("extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
         val gemCraftApplied = NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
         LogFile.log("gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
+        val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
+        LogFile.log("apiEnabled=${ModuleConfig.apiEnabled} applied=$apiApplied")
         applyTiles()
     }
 
@@ -48,7 +51,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldStack: Boolean,
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
-        oldGemCraft: Boolean
+        oldGemCraft: Boolean,
+        oldApiEnabled: Boolean
     ) {
         if (!NativeBridge.ready) return
         if (ModuleConfig.stackLimitIncrease != oldStack) {
@@ -62,6 +66,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.gemCraftOptimize != oldGemCraft) {
             NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
+        }
+        if (ModuleConfig.apiEnabled != oldApiEnabled) {
+            NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
         }
     }
 

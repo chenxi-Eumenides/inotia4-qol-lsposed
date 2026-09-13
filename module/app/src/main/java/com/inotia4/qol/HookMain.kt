@@ -93,22 +93,23 @@ class HookMain : XposedModule() {
         val handler = Handler(thread.looper)
         handler.post(object : Runnable {
             override fun run() {
-                if (NativeBridge.init()) {
-                    LogFile.log("NativeBridge init OK: ${NativeBridge.nativeGetInitReport()}")
-                    val ctx = currentApplication()
-                    if (ctx != null) {
-                        val moduleApk = getModuleApplicationInfo().sourceDir
-                        LogFile.logModuleIdentity(moduleApk)
-                        ApiServer.start(ctx, moduleApk)
-                        LogFile.log("ApiServer start requested, moduleApk=$moduleApk")
-                    } else {
-                        LogFile.log("context not ready, retrying in 500ms")
-                        handler.postDelayed(this, 500)
-                    }
-                } else {
+                val ctx = currentApplication()
+                if (ctx == null) {
+                    LogFile.log("context not ready, retrying in 500ms")
+                    handler.postDelayed(this, 500)
+                    return
+                }
+                if (!NativeBridge.init()) {
                     LogFile.log("NativeBridge init failed: ${NativeBridge.nativeGetInitReport()}, retrying in 1s")
                     handler.postDelayed(this, 1000)
+                    return
                 }
+                LogFile.log("NativeBridge init OK: ${NativeBridge.nativeGetInitReport()}")
+                val moduleApk = getModuleApplicationInfo().sourceDir
+                LogFile.logModuleIdentity(moduleApk)
+                // feature 初始化无条件执行；HTTP 服务器按 apiEnabled 决定是否启动，
+                // native 预取线程由 feature 初始化内的 applyToNative（nativeSetApiEnabled）控制。
+                ApiServer.bootstrap(ctx, moduleApk)
             }
         })
     }

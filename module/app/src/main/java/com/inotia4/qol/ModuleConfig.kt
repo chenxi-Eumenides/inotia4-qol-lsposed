@@ -26,6 +26,8 @@ import java.io.File
  *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
  * - extensionBagEnabled：是否启用扩展背包，默认 false。
  * - gemCraftOptimize：是否启用合成器宝石合成操作优化，默认 false。
+ * - apiEnabled：API 全局开关，默认 true；关闭时不启动 HTTP 服务与 native 缓存预取线程，
+ *   唯一恢复通道为游戏内设置页（ModuleConfigUiBridge JNI，不依赖 HTTP）。
  *
  * 线程安全：配置可能被 API 请求线程/启动线程并发读写，字段用 @Volatile 保护。
  */
@@ -40,6 +42,7 @@ object ModuleConfig {
     const val DEFAULT_OP_ENABLED = false
     const val DEFAULT_EXTENSION_BAG_ENABLED = false
     const val DEFAULT_GEM_CRAFT_OPTIMIZE = false
+    const val DEFAULT_API_ENABLED = true
 
     @Volatile
     private var loaded = false
@@ -82,6 +85,11 @@ object ModuleConfig {
     var gemCraftOptimize: Boolean = DEFAULT_GEM_CRAFT_OPTIMIZE
         private set
 
+    /** API 全局开关（默认 true）：关闭时不启动 HTTP 服务与 native 缓存预取线程 */
+    @Volatile
+    var apiEnabled: Boolean = DEFAULT_API_ENABLED
+        private set
+
     /** 加载配置（幂等）：外部 config.json 为唯一来源；不存在/损坏时用默认值并立即写入 */
     @Synchronized
     fun load(context: Context) {
@@ -107,8 +115,11 @@ object ModuleConfig {
             opEnabled = json.optBoolean("opEnabled", DEFAULT_OP_ENABLED)
             extensionBagEnabled = json.optBoolean("extensionBagEnabled", DEFAULT_EXTENSION_BAG_ENABLED)
             gemCraftOptimize = json.optBoolean("gemCraftOptimize", DEFAULT_GEM_CRAFT_OPTIMIZE)
+            apiEnabled = json.optBoolean("apiEnabled", DEFAULT_API_ENABLED)
             if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") ||
-                !json.has("gemCraftOptimize") || json.has("jewelBatchMix")
+                !json.has("gemCraftOptimize") ||
+                !json.has("apiEnabled") ||
+                json.has("jewelBatchMix")
             ) {
                 LogFile.log("updating $CONFIG_FILE with current configuration fields")
                 persist(toJson())
@@ -116,7 +127,7 @@ object ModuleConfig {
             LogFile.log(
                 "config loaded: listenAddress=$listenAddress listenPort=$listenPort " +
                     "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled " +
-                    "gemCraftOptimize=$gemCraftOptimize"
+                    "gemCraftOptimize=$gemCraftOptimize apiEnabled=$apiEnabled"
             )
         } catch (t: Throwable) {
             LogFile.logError("config parse failed, using defaults and persisting", t)
@@ -141,6 +152,7 @@ object ModuleConfig {
         var newOp = opEnabled
         var newExtensionBag = extensionBagEnabled
         var newGemCraft = gemCraftOptimize
+        var newApiEnabled = apiEnabled
         if (json.has("listenAddress")) {
             val a = json.optString("listenAddress")
             if (a.isBlank()) return "listenAddress required"
@@ -156,6 +168,7 @@ object ModuleConfig {
         if (json.has("opEnabled")) newOp = json.optBoolean("opEnabled", newOp)
         if (json.has("extensionBagEnabled")) newExtensionBag = json.optBoolean("extensionBagEnabled", newExtensionBag)
         if (json.has("gemCraftOptimize")) newGemCraft = json.optBoolean("gemCraftOptimize", newGemCraft)
+        if (json.has("apiEnabled")) newApiEnabled = json.optBoolean("apiEnabled", newApiEnabled)
         val merged = JSONObject()
             .put("listenAddress", newAddress)
             .put("listenPort", newPort)
@@ -164,6 +177,7 @@ object ModuleConfig {
             .put("opEnabled", newOp)
             .put("extensionBagEnabled", newExtensionBag)
             .put("gemCraftOptimize", newGemCraft)
+            .put("apiEnabled", newApiEnabled)
         if (!persist(merged)) return "config save failed"
         listenAddress = newAddress
         listenPort = newPort
@@ -172,6 +186,7 @@ object ModuleConfig {
         opEnabled = newOp
         extensionBagEnabled = newExtensionBag
         gemCraftOptimize = newGemCraft
+        apiEnabled = newApiEnabled
         return null
     }
 
@@ -184,6 +199,7 @@ object ModuleConfig {
         put("opEnabled", opEnabled)
         put("extensionBagEnabled", extensionBagEnabled)
         put("gemCraftOptimize", gemCraftOptimize)
+        put("apiEnabled", apiEnabled)
     }
 
     /**

@@ -25,7 +25,7 @@ UiRect settings_toggle_rect(int index) {
             cell.y + (cell.h - ROW_BTN_H) / 2, ROW_BTN_W, ROW_BTN_H};
 }
 
-// 存档备份单元格（v0.7.x 改造）：复用网格第 3 行左侧空位（索引 = SETTINGS_ROW_COUNT），
+// 存档备份单元格（v0.7.x 改造）：复用网格末行空位（索引 = SETTINGS_ROW_COUNT），
 // 按钮高度与其他开关一致、右缘与其他开关对齐、宽度取窄值（见 SAVEBACKUP_BTN_W）。
 UiRect settings_savebackup_rect() {
     UiRect toggle = settings_toggle_rect(SETTINGS_ROW_COUNT);

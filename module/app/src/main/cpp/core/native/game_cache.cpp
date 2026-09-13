@@ -155,6 +155,14 @@ void frame_cache_start() {
     g_cache_thread = std::thread(cache_prefetch_thread_fn);
 }
 
+// 停止预取线程（API 全局开关关闭时调用）：置停止标志并 join，join 后可再次 frame_cache_start()。
+void frame_cache_stop() {
+    g_cache_stop.store(true);
+    if (g_cache_thread.joinable()) {
+        g_cache_thread.join();
+    }
+}
+
 void frame_cache_force_refresh() {
     if (!game_in_world()) return;
     std::lock_guard<std::mutex> lock(g_cache_mtx);

@@ -53,7 +53,7 @@ void settings_panel_enter() {
     if (addr != nullptr) {
         g_addr_desc = addr;
     }
-    // 存档备份单元格（v0.7.x 改造）：复用网格第 3 行左侧空位，
+    // 存档备份单元格（v0.7.x 改造）：复用网格末行空位，
     // 左描述与配置项同款，右侧「使用」样式按钮（右缘与其它开关对齐）—— push 打开备份面板
     void* sb_desc = ui_create_label(root, settings_label_rect(SETTINGS_ROW_COUNT),
                                     "存档备份", &row_desc_draw);
