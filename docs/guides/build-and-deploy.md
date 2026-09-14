@@ -233,15 +233,53 @@ curl -s http://<设备IP>:8088/api/ui/screen
 5. 取证文件只写 `.tmp/<task-name>/`，任务结束后清理；结论回填对应验收卡的日志锚，
    不得只写「已卡死」而无线程栈证据。
 
-### 3.4 常用脚本速查（均须 `uv run`）
+### 3.4 脚本速查（Python 脚本均须 `uv run`）
 
-| 脚本 | 用途 | 用法 | 默认 |
-|---|---|---|---|
-| `scripts/maintenance/check_symbols.py` | 符号一致性校验（**改 game_symbols.h 后必跑**） | `uv run python scripts/maintenance/check_symbols.py [libgame.so路径]` | `apk/decoded/overhaul/lib/arm64-v8a/libgame.so`，比对 120+ 符号；**新增符号须登记 `SYMBOL_TO_MACRO` 映射** |
-| `scripts/verification/api_poll.py` | 连续轮询 player/party/inventory 检测字段变化 | `uv run python scripts/verification/api_poll.py <IP> [间隔秒] [次数]` | `<设备IP>`, 2.0s, 30 次 |
-| `scripts/verification/live_session.py` | 联调全自动会话（连续采样） | `uv run python scripts/verification/live_session.py [IP] [时长上限分钟]` | `<设备IP>`, 上限 5min |
-| `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（M3 产物 → module/assets） | `uv run python scripts/data/package_assets.py` | 28 表 + zh-Hans/en 语言 |
-| `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）+ 实时检测（无参数=检测模式） | `uv run python scripts/device/touch_automation.py click 100,200 0.5 ...` | <逻辑分辨率> 逻辑坐标，自动旋转校准 |
+> 构建入口只有 `scripts/build-debug.sh` 与 `scripts/build-release.sh`；`scripts/data/vendor/` 为底层解析库，不是入口。
+> 非脚本类检查一并列在本节末尾。
+
+#### 3.4.1 构建与交付
+
+| 脚本 | 用途（含用法） | 运行时机 |
+|---|---|---|
+| `scripts/build-debug.sh` | Debug 构建并复制为 `output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha前12>.apk`，只保留最新 3 份；无参默认 `--offline` | 日常开发与验证；改 Kotlin/Native/构建配置后 |
+| `scripts/build-release.sh` | Release 构建并复制为 `output/inotia4_qol_lsposed_release_unsigned_v<版本>.apk`，只保留最新 2 份；版本号取自 `build.gradle.kts` | 仅用户明确要求 release 时（§3.2） |
+| `scripts/patch-apk.sh` | 遍历 `apk/game-apk/*.apk` 逐个生成 NPatch/LSPatch 集成包到 `output/`（发布前缀全 ASCII，版本号附在 `_npatched` 之后） | release 流程第 3 步；更换模块后重出集成包 |
+
+#### 3.4.2 检查与验证
+
+| 脚本 | 用途（含用法） | 运行时机 |
+|---|---|---|
+| `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射 |
+| `scripts/verification/check_log_policy.py` | 按 `docs/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only` |
+| `scripts/verification/smoke_all.py` | 从 controller 注解提取全部路由做全量 smoke 探测，产出与 `smoke_baseline_v0.5.43.json` 可对比的基线报告 | 重构或端点变更后、真机 API 可达时 |
+| `scripts/verification/api_poll.py` | 连续轮询 `/api/system/game`、party、inventory，标记字段变化 | 单点联调、确认某字段是否按预期变化时（默认 2.0s × 30 次） |
+| `scripts/verification/live_session.py` | 全自动联调会话：等待 API 就绪 → 等待世界就绪 → 连续采样 → 检测失败/超时 → 输出报告 | 需要长时间观察稳定性时（默认上限 5 分钟） |
+| `scripts/verification/hp_watch_session.py` | 三开关（扩展背包/堆叠上限/拖拽合并）开启态挂机，检测任意角色 HP 下降/死亡并留取证快照 | 三开关、堆叠、拖拽合并相关改动后的真机回归取证 |
+
+> **文档自检脚本当前不存在**：文档锚点保鲜校验（测试名与 `文件:行` 可 grep 性）登记在 `docs/development/planning/backlog.md`，脚本 `scripts/maintenance/check_docs.py` 尚未实现。
+> 非脚本检查同样必须执行：`git diff --check`，以及 host 单测（`cd module/app/src/main/cpp/tests && cmake -B build && cmake --build build && ctest --test-dir build`）。
+
+#### 3.4.3 静态数据（导出/生成/打包）
+
+| 脚本 | 用途（含用法） | 运行时机 |
+|---|---|---|
+| `scripts/data/extract_all.py` | 解包 `apk/decoded/assets/common/game_res` 原始资源到 `apk/static-data/raw/` | 重新解码游戏 APK 后；其余导出脚本的前置 |
+| `scripts/data/export_tables.py` | 解析静态表 → `apk/static-data/json/tables/*.json`（含 `_summary.json`） | 静态表原始数据更新后 |
+| `scripts/data/export_texts.py` | 解析语言文本 → `apk/static-data/json/text/*.json` | 文本原始数据更新后 |
+| `scripts/data/export_snasys.py` | 解码 `i_tile` / `i_mapfeature` / `i_worldmap` → `apk/static-data/json/snasys/*.json` | 地图与地形原始数据更新后 |
+| `scripts/data/export_map_tiles.py` | 解析 416 个 map 文件 → 通行矩阵与出口目标 JSON | 地图原始数据更新后 |
+| `scripts/data/game_variant_table.py` | 按 `apk/game-apk/`（含 `history/`）生成 libgame.so 校验值 → 游戏变体/能力对照表 `module/app/src/main/cpp/data/native/game_variant_table.inc` | 新增或更新游戏 APK 后，生成的 `.inc` 与模块代码一并提交 |
+| `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（28 表 + zh-Hans/en 语言） | 静态数据 JSON 更新后、构建模块前 |
+
+#### 3.4.4 设备与分析辅助
+
+| 脚本 | 用途（含用法） | 运行时机 |
+|---|---|---|
+| `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）与实时触摸检测（无参数） | 仅用于启动弹窗前置；其余流程一律走 HTTP API |
+| `scripts/maintenance/strip-conflicting-permission.py` | 从二进制 `AndroidManifest.xml` 移除指定自定义权限 | 由 `patch-apk.sh` 在指定新包名时自动调用，不单独运行 |
+| `scripts/web/build_map_arranger.py` | 由静态地图数据生成 `web/map-arranger.html` | 地图静态数据更新后、需重新生成地图排版页时 |
+| `scripts/analysis/frida/save0-repair-patch.js` | 一次性存档修复 patch（含 opcode 校验，保存成功后必须重启进程） | 仅在处理对应存档损坏时使用；执行前须按当前 `libgame.so` 反汇编核对 opcode |
 
 ### 3.5 设备连接方式
 
