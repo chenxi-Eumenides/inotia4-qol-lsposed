@@ -48,9 +48,10 @@ hook 点 = `UIPlay_CallMapName` 尾部 0xc66c8 处 4 字节指令，**指令内�
 
 ### 3.2 面板实现（首选 UICHOICE，阶段 0 静态结论）
 
-- 打开：写 `G_UICHOICE_ITEMTEXT[0..3]`（**持久静态缓冲**「<地图名>(id±N)」，引用语义）及 `[4]="关闭"`，设置 `G_UICHOICE_COUNT=5`、`G_UICHOICE_FOCUS=0` → push choice 面板（choice 的 state id 运行时扫描 g_sPopupStateList 中 enter==F_PANEL_CHOICE_ENTER 的条目获得，不硬编码）
-- 标题时序：push 前生成并保存「当前地图：<地图名>(id:N)」，置位 pending；`UIChoice_Init` wrapper 先调用原函数，再把 `G_UICHOICE_MAIN_TEXT` 指向持久标题缓冲并清除 pending。push 失败清除 pending；pending 未置位时完全透传，避免污染商店/NPC choice。
-- **选中接管：单点 PtrHook `UIChoice_ButtonListExe`(0xb1a98)**——它是全部 5 个按钮共用 ExecuteProc（UIChoice_CreateControl 0xb2110 循环内统一设置），hook 一次即接管全部按钮。索引 0..3 读取 `ControlObject_GetCursorIndex`(0x9ea48)，先关闭底层 choice，再由下一逻辑帧创建 YesNo；索引 4 走原 `UIChoice_ButtonListExe` 的完整 choice 清理链（`UI_SetPopupProcessInfo(3,0)` + `EVTSYSTEM_DoCheckAllEvent(8)`）
+- 本功能的 UICHOICE 交互**全部委托可复用组件** `feature/ui/native_choice`（模块不再自行写 `G_UICHOICE_*`，也不由本功能挂钩 ExecuteProc）：`native_choice_open({items, 5, title, close_index=4, on_select=teleport_on_select})`。
+- 组件职责：写 `G_UICHOICE_ITEMTEXT/COUNT/FOCUS`、在 `UIChoice_Init` 时套用主标题、运行时扫描 `g_sPopupStateList` 取 `enter==F_PANEL_CHOICE_ENTER` 的 state id 并 push（不硬编码 state id）；选项文本与标题由本功能构造后经 spec 传入，组件内部**拷贝**到自己的持久缓冲，调用方无需保证生命周期。
+- 选中：组件包装全按钮共用的 ExecuteProc `UIChoice_ButtonListExe`(0xb1a98)（`UIChoice_CreateControl` 0xb2110 循环统一设置）。索引 0..3 → 回调 `teleport_on_select(index)`：先关闭底层 choice、恢复 HUD gate，再由下一逻辑帧创建 YesNo；索引 4（`close_index`）→ 走原版完整 choice 清理链（`UI_SetPopupProcessInfo(3,0)` + `EVTSYSTEM_DoCheckAllEvent(8)`）。
+- **原版框零影响（关键约束）**：组件仅在「模块框激活 **且** `G_UICHOICE_ITEMTEXT[0]` 指针落在组件自身文本缓冲区间内」时接管；否则**无条件透传**原版 ExecuteProc。原版选择框（NPC/商店/「记忆之门」等）行为不受影响。组件契约见 `native-choice.md`。
 - 按钮由面板 enter 内部创建（UIChoice_Init 0xb1cd4 + UIChoice_CreateControl 0xb2110），无需事件系统参与；PopupState process/event 回调可沿用原版（静态无 EVTSYSTEM 依赖）
 - 确认回调：YesNo 取消由官方流程关闭后，下一逻辑帧重新打开 choice；确认关闭 YesNo 后，再由延迟任务执行 `INVEN_GetMoney` 比对 → `INVEN_MinusMoney` → 按运行时记录数计算目标 id 回绕 → `MAPCHANGE_Set(id,0,0,dir)`+`GAMESTATE_SetState(3)`；余额不足或目标无效时仅提示，不切图
 - 余额不足/无效目标提示：调用原版 `INSTANTMSGSYSTEM_Add`(0x13be64) 横幅，精确参数为 `Add(3, text, 0, 0, 5, 0x15, 0, 0)`；不创建 `UIPopupMsg`，避免弹窗栈与按钮链表生命周期风险

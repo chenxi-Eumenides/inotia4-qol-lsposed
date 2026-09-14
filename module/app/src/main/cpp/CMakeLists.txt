@@ -41,6 +41,7 @@ add_library(gamebridge SHARED
     feature/ui/game_ui_components.cpp
     feature/ui/game_ui_settings.cpp
     feature/ui/game_ui_savebackup.cpp
+    feature/ui/native_choice.cpp
     feature/extension_bag/game_ui_virtbag.cpp
     feature/extension_bag/extension_bag_port.cpp
     feature/extension_bag/extension_bag_persistence.cpp

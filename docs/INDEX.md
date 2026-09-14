@@ -55,6 +55,8 @@
 
 进入存档回调（save-enter-callback）：`development/features/save-enter-callback.md`（存档生命周期回调：读档/新档加载完成进入 world 后触发一次；world→主菜单退出触发一次；call_patch 发起点 + frame_task world 就绪检测；切图返回不触发。进入回调已真机验证，退出回调未真机验证）。
 
+原生选择框组件（native-choice）：`development/features/native-choice.md`（可复用 UICHOICE 选择框组件 `feature/ui/native_choice`：API、原版透传门禁、文本归属校验、单活动约束、世界传送集成与真机验证；并列后续可复用对话框组件候选 `native_popup` / `popup_state` / `native_dialog_router`）。
+
 ### `reference/`：共享参考
 
 面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。

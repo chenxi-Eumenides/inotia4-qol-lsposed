@@ -158,3 +158,13 @@ target_include_directories(save_warehouse_validate_tests PRIVATE
 )
 target_compile_features(save_warehouse_validate_tests PRIVATE cxx_std_17)
 add_test(NAME save_warehouse_validate_tests COMMAND save_warehouse_validate_tests)
+
+# 原生选择框组件纯逻辑测试：spec 校验、串行化、关闭项和文本归属地址区间。
+add_executable(native_choice_tests
+    test_native_choice.cpp
+)
+target_include_directories(native_choice_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(native_choice_tests PRIVATE cxx_std_17)
+add_test(NAME native_choice_tests COMMAND native_choice_tests)
