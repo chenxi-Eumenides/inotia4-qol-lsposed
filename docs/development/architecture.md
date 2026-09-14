@@ -191,20 +191,9 @@ data 层 → 仅 STL
 
 **真机验证（2026-09-13）**：锚点安装成功；world 态 move_to / walk_dir / stop_move 逐帧驱动生效；无崩溃。
 
-### 2.2 帧驱动方案演进（为什么不用 hook）
+### 2.2 帧驱动方案（frame_task + frame_host）
 
-| 方案 | 结果 | 原因 |
-|---|---|---|
-| **统一帧任务管理器（frame_task + frame_host）** | ✅ 采用（2026-09-13） | 指令 patch 锚点到游戏主线程帧周期（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase），`frame_task_dispatch` 按帧去重；回调主线程执行、frame 参数直传；旧 FrameTaskManager 后台线程并发读写内存已废弃 |
-| ShadowHook 1.0.10 | ❌ | LSPosed 环境 stub→new_addr 映射表在错误 linker 命名空间查找，桥跳野地址（0x79299114e4 访问违例） |
-| 手写 arm64 inline hook | ❌ | 已修 5 bug（adrp 掩码 0x9F000000、imm21 重组 immhi<<2\|immlo、stp 编码 0xa9b0、blr 数据槽、.S 符号冲突）仍 SIGBUS/SIGILL 崩溃（trampoline lr 污染、Draw 后续指令寄存器依赖） |
-| 填 PATHLIST 游戏自驱动 | ❌ | 玩家控制态（0x2e2=7）下游戏每帧重置玩家动作，驱动条件复杂（0x2fa/0xc40/0x2e0 耦合） |
-
-**arm64 inline hook 技术教训**（后续若再尝试）：
-- 所有函数入口第 1 条几乎都是 adrp（PC 相对）→ 重放必须重定位
-- trampoline 必须保存/恢复原始 lr（blr 污染 lr → 重放区 stp x29,x30 存错 lr → 原函数 ret 跳错）
-- AGP 对 .S 汇编不支持 -fPIC 符号重定位（ldr literal/adr 均报错）→ 需纯 C++ mmap 生成指令
-- LSPosed 环境下 .S 全局符号跨 TU 引用解析到 base.apk 错误地址
+帧驱动统一采用 `frame_task` + `frame_host`（2026-09-13）：指令 patch 锚点到游戏主线程帧周期（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase），`frame_task_dispatch` 按帧去重；回调主线程执行、frame 参数直传。线程模型与现有消费者见 §2.1。
 
 ### 2.2.1 C++ Hook 技术选型结论（2026-09-04）
 
@@ -221,10 +210,10 @@ data 层 → 仅 STL
 关键事实与约束：
 
 - 直接读写内存和调用游戏函数指针是本项目的数据访问与操作主路径；不要为了“统一”而把它们改造成入口 Hook。
-- `PtrHook` 只改数据段中的函数指针，不改函数机器码，因此不需要 inline trampoline、`mprotect` 或指令缓存刷新；但它依赖稳定的间接调用槽位，不能拦截直接 `bl` 调用。
+- `PtrHook` 只改数据段中的函数指针，不改函数机器码，因此不需要 `mprotect`、指令缓存刷新或入口重定向；但它依赖稳定的间接调用槽位，不能拦截直接 `bl` 调用。
 - 指令 `patch` 与 `PtrHook` 是互补关系：前者改执行指令，后者改间接调用目标。所有 patch 地址必须来自 `game_symbols.h`/`symbol_resolver`，并保留原指令校验和失败回滚。
-- LSPosed 官方 Native Hook API 的 `hookFunc` 由框架内部 HookFunction/LSPlant 路径提供，官方文档的目标是函数替换，不应描述为 GOT/PLT Hook；它仍然继承 Inline Hook 的 trampoline、ABI、并发和卸载风险。
-- 本项目禁止引入或使用 Dobby、ShadowHook 和手写 ARM64 trampoline；Native Hook 入口统一使用 LSPosed 官方 API 提供的 hook/unhook 函数指针。官方当前结构字段名为 `hookFunc`/`unhookFunc`，本项目 `NativeAPIEntries` 使用同 ABI 的本地适配字段 `hook_func`/`unhook_func`。
+- LSPosed 官方 Native Hook API 的 `hookFunc` 由框架内部 HookFunction/LSPlant 路径提供，官方文档的目标是函数替换，不应描述为 GOT/PLT Hook；它仍然继承入口重定向的 ABI、并发和卸载风险。
+- 本项目不引入任何第三方 Native Hook 库，也不自写指令重定向；Native Hook 入口统一使用 LSPosed 官方 API 提供的 hook/unhook 函数指针。官方当前结构字段名为 `hookFunc`/`unhookFunc`，本项目 `NativeAPIEntries` 使用同 ABI 的本地适配字段 `hook_func`/`unhook_func`。
 - 当前模块已通过 `module/app/src/main/resources/META-INF/xposed/native_init.list` 注册 `libgamebridge.so`；注册只证明加载入口存在，不证明目标函数 Hook 或业务链路已经验收。
 - 使用 LSPosed API 时，`handle + dlsym()` 只适合从实际已加载目标库解析动态符号。项目现有 `game_access` 明确禁止自行 `dlopen/dlsym` 来访问 `libgame.so`，因为 Android linker namespace 可能加载独立副本；对非导出函数仍应使用项目的 `symbol_resolver` 和 `game_symbols.h`。
 - 任一入口 Hook 都必须先验证：目标地址来源、完整函数签名、浮点/结构体返回约定、递归路径、主循环并发、重复安装、恢复时机，以及目标函数正在执行时的卸载行为。没有这些验证，不得进入正式功能。
@@ -295,7 +284,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | 背包拖拽合并 | 可逆 GOT hook | `set_move_merge_enabled` 覆盖背包格事件处理器；配置独立控制同类可堆叠物品的拖拽合并 |
 | 蜂巢阻塞恢复 | `data_recover_after_hive_block()` | IAP 恢复语义（v0.5.18 hive 屏蔽恢复） |
 
-**game_ptr_hook.h**（v0.5.18）：函数指针包装——覆盖游戏内存中的函数指针字段（按钮 ExecuteProc、控件 Proc/ControlProc、回调表），wrapper 内可回调原函数。与指令 patch 互补：只改数据段指针，无需 mprotect/指令缓存刷新，无 inline hook 的 trampoline lr 污染问题。**调用约定约束**：wrapper 签名必须与被覆盖函数完全一致（参数寄存器 x0-x7、返回值、被调用者保存寄存器 x19-x28、16 字节栈对齐）。
+**game_ptr_hook.h**（v0.5.18）：函数指针包装——覆盖游戏内存中的函数指针字段（按钮 ExecuteProc、控件 Proc/ControlProc、回调表），wrapper 内可回调原函数。与指令 patch 互补：只改数据段指针，无需 mprotect/指令缓存刷新，无入口重定向的 lr 污染问题。**调用约定约束**：wrapper 签名必须与被覆盖函数完全一致（参数寄存器 x0-x7、返回值、被调用者保存寄存器 x19-x28、16 字节栈对齐）。
 
 **Kotlin**：`patch/IapBlocker.kt` / `patch/ImmersiveMode.kt`（模块启动期经 ConfigApiService 下发 native 生效）。
 

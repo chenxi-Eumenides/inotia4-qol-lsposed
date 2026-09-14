@@ -14,6 +14,7 @@
 **最终锚点**：`GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`（原指令字 `0x9401d18a`；常量 `F_MAP_DRAWBASE_VMA=0x111d14` / `F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF=0x20`）。DrawPlay 开头 `byte==1` 分支经 `GRP_AddColorTone` 后 `b 0x9d6ec` 与主线汇聚于此，故每次 DrawPlay 必执行；`MAP_DrawBase` 自身重新加载指针、不吃入参（`void()`）。wrapper 先 `frame_task_dispatch(kFramePointRenderPre)`，再 `fn_map_drawbase()`。
 
 **逻辑锚点（2026-09-13 新增，用于状态转换派发）**：`MainProcess` 内 `+0x40` 的 `bl STATE_NextStartProcess`（原指令字 `0x97ffff3d`；常量 `F_MAINPROCESS_VMA=0xd4984` / `F_MAINPROCESS_NEXT_STATE_CALL_OFF=0x40` / `F_STATE_NEXT_START_PROCESS_VMA=0xd46b8`，均 `.dynsym` 导出）。wrapper 先 `frame_task_dispatch(kFramePointLogicPre)`，再 `fn_state_next_start_process()`。消费点位于帧计数自增与 Draw 之前。`core/native/frame_host` 两个锚点**全成或全退**，`frame_host_anchors_installed()` 供派发器 fail-fast。用途：把 `go_main_menu` / `enter_slot` / `create_slot` 的游戏状态机调用从 HTTP 线程收敛到游戏线程安全相位（见 `core/native/transition_dispatch.{h,cpp}` 与本文 §4）。
+
 **API**（与 `frame_task.h` 一致）：
 
 - `frame_task_add(FramePointId point, FrameTaskFn fn, void* ctx, int interval, int count)`：返回句柄 `FrameTaskId`（0=失败）；`interval` 0=每帧、>0=每 interval 帧；`count` 0=一直、>0=最多 count 次；首个派发周期必触发。
@@ -26,6 +27,7 @@
 **已迁移消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`）。
 
 **`kFramePointLogicPre` 消费者（除状态转换派发外）**：角色升级所需经验游戏线程缓存 `char_next_exp_tick`（`game_state.cpp`，`nativeInit` 内 `char_next_exp_cache_start()` 注册常驻任务，`interval=1`、`count=0`）。`CHAR_GetNextExperience` 在 `[ch+0x320]==0` 时用 `CAL_Calculate`（全局计算器栈）现算并写回，属非纯读，故只在游戏逻辑帧对 3 名队员调用一次并写 atomic 快照；JSON（预取/HTTP 线程）只读 `char_next_exp_cached`，未命中回退直读 `[ch+0x320]`。帧宿主未安装时任务注册成功但不派发（惰性无效）。
+
 **已删除**：`game_motion.{h,cpp}`（旧 FrameTaskManager）、`frame_tick.{h,cpp}`、`feature/autosell/autosell_host.{h,cpp}`。
 
 **真机验证结论**：锚点安装成功；world 态 `move_to` / `walk_dir` / `stop_move` 逐帧驱动生效；无崩溃。
@@ -147,7 +149,7 @@ GAMESTATE_Draw@0x1512b8
 
 4. 「主线程逐帧 + 传 frame + 多回调」由 `frame_tick` 提供；缺的只是锚点与跨线程注册保证。
 5. draw 锚点已由自动出售真机验证可用；world 态下 `frame_tick_dispatch()` 每帧都被调用，足以支撑现有消费者。
-6. 依 `architecture.md §2.2.1`：机制优先级为 读写内存 → 调函数指针 → `PtrHook` → 指令 patch → **LSPosed Native Hook（最后手段）**。用 Native Hook 换锚点只增加 inline trampoline / ABI / 并发风险，不增加派发能力。
+6. 依 `architecture.md §2.2.1`：机制优先级为 读写内存 → 调函数指针 → `PtrHook` → 指令 patch → **LSPosed Native Hook（最后手段）**。用 Native Hook 换锚点只增加入口重定向 / ABI / 并发风险，不增加派发能力。
 7. **锚点选择是独立决策**：仅当真机证明现有 draw 锚点覆盖不足（需 world 外/逻辑相位逐帧）时，才引入 Native Hook 挂 `GAMESTATE_Process` 入口，而非 `MainProcess`。
 
 **已实现（2026-09-13）：**

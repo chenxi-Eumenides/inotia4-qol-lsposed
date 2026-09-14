@@ -46,7 +46,7 @@
 - 不改变宝石合成的 3:1 比例、费用计算、词条继承规则（沿用游戏 `MIXSYSTEM_*`）。
 - 不改变其他 4 个合成类型（混沌/打孔/其它/传说）的行为。
 - 不接管扩展背包页签/投影（沿用 `extension_bag_mix.inc` 既有契约）。
-- 不引入新 Hook 机制：沿用现有 `PtrHook`（数据段函数指针覆盖）、PopupState 回调包装、单指令 BL patch、直接调用游戏函数四种手段（ShadowHook / inline trampoline 在本项目环境不可用）。
+- 不引入新 Hook 机制：沿用现有 `PtrHook`（数据段函数指针覆盖）、PopupState 回调包装、单指令 BL patch、直接调用游戏函数四种手段。
 
 ## 3. 事实基础（已核实）
 

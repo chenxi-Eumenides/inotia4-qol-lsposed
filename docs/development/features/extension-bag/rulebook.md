@@ -985,7 +985,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   压成 1（证伪记录见 Hub §5.2 经验记录），因此改由回调层整体接管，复用统一 getter 的
   类别门控与模式解码。
 - **典型破坏方式**：在按钮预演阶段就真实结算（按下按钮即提前售出、取消不可回滚）；
-  用返回地址区分预演/弹窗 OK（经 Dobby 桥后 LR 不可信）；接管后仍按原版 b 段计价；
+  用返回地址区分预演/弹窗 OK（经 Hook 桥后 LR 不可信）；接管后仍按原版 b 段计价；
   加钱失败后继续删堆而不退款；把 `desc_type==1`（扩展/其它袋详情）也当背包结算。
 - **验证锚**：Host `stage4_hook_tests::test_vanilla_sell_takeover`
   （`vanilla_sell_route` 两态四分支、`vanilla_sell_money` canonical

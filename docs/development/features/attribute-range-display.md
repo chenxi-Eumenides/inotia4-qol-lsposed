@@ -97,7 +97,7 @@
 
 ### 3.4 模块既有能力（已产品化，可作为实现基础）
 
-- PtrHook 覆盖游戏内存函数指针（`feature/patch/game_ptr_hook.h`），无 inline trampoline，已在设置页/合成器/UI 实验真机验证（见 `../../reference/game/ui.md` §2.2.1、§6）。
+- PtrHook 覆盖游戏内存函数指针（`feature/patch/game_ptr_hook.h`），无入口重定向，已在设置页/合成器/UI 实验真机验证（见 `../../reference/game/ui.md` §2.2.1、§6）。
 - 可复用原生 UI 组件层 `game_ui_kit` 与 `game_ui_components`（见 `../../reference/game/ui-kit.md`）。
 - 物品 JSON 读取已暴露 `base`/`bonus`/`gem`/`chaos`/`enchant` 结构（`api/native/game_inventory.*`；契约见 `../../reference/api-reference.md` Inventory 段）。
 

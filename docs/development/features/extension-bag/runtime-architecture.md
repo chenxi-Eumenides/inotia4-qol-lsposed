@@ -480,7 +480,7 @@ wrapper `native_inventory_hook.cpp:263-271`；扩展 token `extension_bag_equip.
 当前 API 分流 `game_inventory_use.inc:1-8`、确认 token `extension_bag_equip.inc:698-733`；
 原版效果优先 `inventory-integration-decision-plan.md:267-289`。
 
-### 3.3 采用 LSPosed 官方 Native Hook，不采用 Dobby/ShadowHook/字节系
+### 3.3 采用 LSPosed 官方 Native Hook
 
 `native_init` 接收官方 `hook_func`/`unhook_func`，框架提供 backup/trampoline，安装链
 见 `native_inventory_hook.cpp:310-456,461-499`。不新增依赖的理由是框架已内置；当前安装链使用动态符号优先、VMA fallback、可执行

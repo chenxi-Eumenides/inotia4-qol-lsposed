@@ -180,7 +180,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 7. **附件命名（强制）**：GitHub CLI 上传的附件名必须全 ASCII、不得含中文；3 个 NPatch 附件名必须
    带模块版本且**版本号位于 `npatched` 之后**（`...-npatched-<模块版本>.apk`），与 release 模块 APK
    的版本一致；先核对上一次发布（`gh release view <上一个 tag> --json assets`）的命名再上传。
-> 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。已验证不可行的瘦身路径：预处理权限 + `-l 0` 虽能保住重叠（52MB），但 NPatch 重写 zip 时会把 STORED 资源重压缩为 DEFLATED，游戏引擎 mmap 直读崩溃（`SGL_Texture::FromResource`，Scudo misaligned pointer）；`-l 1` 以上又必须读取未修改原包的原始签名，预处理输入会报 `get original signature failed`。除非 NPatch 上游提供「删除指定权限」或「保留 STORED」选项，92MB 是当前唯一稳定形态。
+> 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。92MB 是当前唯一稳定形态。
 >
 > LSPatch 集成模式会把模块嵌入目标 APK，生成的 APK 不需要 LSPosed 或 LSPatch Manager 常驻；更换模块必须重新 patch。脚本输出固定写入 `output/`，并在完成后打印每个产物的 SHA-256 和成功/失败汇总。
 >
