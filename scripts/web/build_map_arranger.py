@@ -1,6 +1,9 @@
 import base64
 import json
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -345,6 +348,7 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     .map-item.is-dragging { opacity: .42; }
+    .map-item.is-isolated { opacity: .55; }
     .map-item[hidden], .empty-list[hidden] { display: none; }
 
     .map-item-index {
@@ -478,22 +482,20 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     .connection-line {
-      fill: none;
-      stroke: var(--connection);
-      stroke-dasharray: 5 4;
-      stroke-linecap: round;
-      stroke-width: 1.7;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1px;
+      height: 1.7px;
+      border-radius: 999px;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--connection) 0 5px,
+        transparent 5px 9px
+      );
       opacity: .82;
-      vector-effect: non-scaling-stroke;
-    }
-
-    .connection-line-shadow {
-      fill: none;
-      stroke: var(--stage);
-      stroke-linecap: round;
-      stroke-width: 4.5;
-      opacity: .9;
-      vector-effect: non-scaling-stroke;
+      box-shadow: 0 0 0 1.4px color-mix(in srgb, var(--stage) 90%, transparent);
+      transform-origin: left center;
     }
 
     .cards { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
@@ -521,7 +523,12 @@ HTML_TEMPLATE = r'''<!doctype html>
       box-shadow: 0 0 0 4px var(--accent-soft), var(--card-shadow);
     }
     .map-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 52%, transparent); outline-offset: 3px; }
-    .map-card.is-dragging { z-index: 10; cursor: grabbing; opacity: .88; }
+    .map-card.is-dragging {
+      z-index: 10;
+      cursor: grabbing;
+      opacity: .88;
+      will-change: transform;
+    }
 
     .map-canvas {
       display: block;
@@ -831,7 +838,7 @@ HTML_TEMPLATE = r'''<!doctype html>
         </div>
         <div class="stage" id="stage" aria-label="可拖动地图画布">
           <div class="world" id="world">
-            <svg class="connections" id="connections" aria-hidden="true"></svg>
+            <div class="connections" id="connections" aria-hidden="true"></div>
             <div class="cards" id="cards"></div>
           </div>
           <div class="stage-empty" id="stage-empty">从左侧选一张地图开始<br><small>空白处拖动可平移整张地图</small></div>
@@ -866,6 +873,10 @@ HTML_TEMPLATE = r'''<!doctype html>
     const CELL = 5;
     const MIN_ZOOM = 0.25;
     const MAX_ZOOM = 3;
+    const CONNECTION_MID_SCREEN_PX = 80;
+    const CONNECTION_LONG_SCREEN_PX = 200;
+    // 80px 约等于 16 个基础网格，低于 100% 时过滤近距离出口线；
+    // 200px 约等于 40 个基础网格，低于 50% 时只保留跨区域长线。
     const MAP_DATA_ELEMENT = document.getElementById("map-data");
     let MAP_DATA;
 
@@ -877,24 +888,6 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     const mapById = new Map(MAP_DATA.map((map) => [map.id, map]));
-    const outgoingMapIds = new Map(MAP_DATA.map((map) => [map.id, new Set()]));
-    for (const sourceMap of MAP_DATA) {
-      for (const exit of sourceMap.exits) {
-        const sourceTargets = outgoingMapIds.get(sourceMap.id);
-        if (sourceTargets && mapById.has(exit.targetMapId)) sourceTargets.add(exit.targetMapId);
-      }
-    }
-    const linkedMapIds = new Map(MAP_DATA.map((map) => [map.id, new Set()]));
-    for (const [sourceMapId, targets] of outgoingMapIds) {
-      const sourceLinks = linkedMapIds.get(sourceMapId);
-      if (!sourceLinks) continue;
-      for (const targetMapId of targets) {
-        const reverseTargets = outgoingMapIds.get(targetMapId);
-        if (reverseTargets && reverseTargets.has(sourceMapId)) {
-          sourceLinks.add(targetMapId);
-        }
-      }
-    }
     const state = {
       theme: "light",
       offset: { x: 0, y: 0 },
@@ -932,6 +925,23 @@ HTML_TEMPLATE = r'''<!doctype html>
     let searchTimer = null;
     let queuedPointer = null;
     let pointerFrame = null;
+    let dragDropRects = null;
+
+    function cacheDragDropRects() {
+      dragDropRects = {
+        library: library.getBoundingClientRect(),
+        stage: stage.getBoundingClientRect()
+      };
+      return dragDropRects;
+    }
+
+    function getDragDropRects() {
+      return dragDropRects || cacheDragDropRects();
+    }
+
+    function invalidateDragDropRects() {
+      dragDropRects = null;
+    }
 
     function errorMessage(error) {
       return error instanceof Error ? error.message : String(error);
@@ -948,84 +958,6 @@ HTML_TEMPLATE = r'''<!doctype html>
       }, 3600);
     }
 
-    function decodeTiles(map) {
-      const cellCount = map.w * map.h;
-      const result = new Uint8Array(cellCount);
-      if (!map.tiles) return result;
-      try {
-        const binary = atob(map.tiles);
-        for (let index = 0; index < cellCount && index < binary.length; index += 1) {
-          result[index] = binary.charCodeAt(index);
-        }
-      } catch (error) {
-        console.error("地图 " + map.id + " 的瓦片数据解码失败，改用空白矩阵。", error);
-      }
-      return result;
-    }
-
-    const mapRasterCache = new Map();
-
-    function createRasterSurface(map) {
-      if (typeof OffscreenCanvas === "function") return new OffscreenCanvas(map.w, map.h);
-      const surface = document.createElement("canvas");
-      surface.width = map.w;
-      surface.height = map.h;
-      return surface;
-    }
-
-    function buildMapRaster(map) {
-      const cached = mapRasterCache.get(map.id);
-      if (cached) return cached;
-
-      const surface = createRasterSurface(map);
-      const context = surface.getContext("2d");
-      if (!context) throw new Error("浏览器不支持 Canvas 2D 绘图。");
-      const image = context.createImageData(map.w, map.h);
-      const pixels = image.data;
-      const tiles = decodeTiles(map);
-      for (let index = 0; index < tiles.length; index += 1) {
-        const value = tiles[index];
-        let red;
-        let green;
-        let blue;
-        if ((value & 0x80) !== 0) {
-          red = 22;
-          green = 163;
-          blue = 74;
-        } else if ((value & 0x40) !== 0 || (value & 0x08) !== 0) {
-          red = 30;
-          green = 41;
-          blue = 59;
-        } else if (value === 0) {
-          red = 217;
-          green = 220;
-          blue = 226;
-        } else {
-          const gray = Math.min(200, 56 + value * 8);
-          red = gray;
-          green = Math.max(40, gray - 8);
-          blue = gray;
-        }
-        const pixel = index * 4;
-        pixels[pixel] = red;
-        pixels[pixel + 1] = green;
-        pixels[pixel + 2] = blue;
-        pixels[pixel + 3] = 255;
-      }
-      context.putImageData(image, 0, 0);
-      mapRasterCache.set(map.id, surface);
-      return surface;
-    }
-
-    function drawMap(canvas, map) {
-      canvas.width = map.w;
-      canvas.height = map.h;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("浏览器不支持 Canvas 2D 绘图。");
-      context.imageSmoothingEnabled = false;
-      context.drawImage(buildMapRaster(map), 0, 0);
-    }
-
     function mapLabel(map) {
       return map.name + " · m" + map.id;
     }
@@ -1035,6 +967,21 @@ HTML_TEMPLATE = r'''<!doctype html>
       if (!position) return;
       card.style.left = position.x + "px";
       card.style.top = position.y + "px";
+    }
+
+    function positionCardForDrag(card, deltaX, deltaY) {
+      card.style.transform = "translate3d(" + deltaX + "px," + deltaY + "px,0)";
+    }
+
+    function commitCardDrag(drag) {
+      if (drag.kind !== "card") return;
+      for (const mapId of drag.mapIds) {
+        const card = drag.cardByMapId.get(mapId);
+        if (!card) continue;
+        positionCard(card, mapId);
+        card.style.transform = "";
+        card.style.willChange = "";
+      }
     }
 
     function updateCardSelection(card, mapId) {
@@ -1093,11 +1040,12 @@ HTML_TEMPLATE = r'''<!doctype html>
       card.style.width = Math.max(1, map.w * CELL) + "px";
       card.style.height = Math.max(1, map.h * CELL) + "px";
 
-      const canvas = document.createElement("canvas");
-      canvas.className = "map-canvas";
-      canvas.setAttribute("aria-label", mapLabel(map) + " 瓦片图");
-      drawMap(canvas, map);
-      card.appendChild(canvas);
+      const image = document.createElement("img");
+      image.className = "map-canvas";
+      image.src = map.image;
+      image.alt = mapLabel(map) + " 瓦片图";
+      image.draggable = false;
+      card.appendChild(image);
 
       const label = document.createElement("div");
       label.className = "map-label";
@@ -1161,7 +1109,8 @@ HTML_TEMPLATE = r'''<!doctype html>
 
     function updateLinkedHighlights() {
       const sourceId = state.drag && state.drag.kind === "card" ? state.drag.mapId : state.hoveredMapId;
-      const linkedIds = sourceId === null ? new Set() : (linkedMapIds.get(sourceId) || new Set());
+      const sourceMap = sourceId === null ? null : mapById.get(sourceId);
+      const linkedIds = sourceMap ? new Set(sourceMap.linkedIds) : new Set();
       for (const entry of libraryEntries.values()) {
         entry.element.classList.toggle("is-linked", linkedIds.has(entry.map.id));
       }
@@ -1201,9 +1150,15 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     function initializeLibrary() {
+      const isIsolated = (map) => map.exits.length === 0 && !map.referenced;
+      const ordered = MAP_DATA.filter((map) => !isIsolated(map)).concat(MAP_DATA.filter(isIsolated));
       const fragment = document.createDocumentFragment();
-      for (const map of MAP_DATA) {
+      for (const map of ordered) {
         const element = createLibraryItem(map);
+        if (isIsolated(map)) {
+          element.classList.add("is-isolated");
+          element.title = "未与其他地图相连";
+        }
         libraryEntries.set(map.id, {
           map,
           element,
@@ -1244,38 +1199,30 @@ HTML_TEMPLATE = r'''<!doctype html>
       panStatus.textContent = "偏移 " + Math.round(state.offset.x) + ", " + Math.round(state.offset.y) + " · " + Math.round(state.zoom * 100) + "%";
     }
 
-    function createSvgElement(name) {
-      return document.createElementNS("http://www.w3.org/2000/svg", name);
-    }
-
     function exitPoint(position, x, y) {
       return { x: position.x + (x + 0.5) * CELL, y: position.y + (y + 0.5) * CELL };
     }
 
-    function appendConnection(start, end) {
-      const shadow = createSvgElement("line");
-      shadow.classList.add("connection-line-shadow");
-      shadow.setAttribute("x1", String(start.x));
-      shadow.setAttribute("y1", String(start.y));
-      shadow.setAttribute("x2", String(end.x));
-      shadow.setAttribute("y2", String(end.y));
-      connections.appendChild(shadow);
-
-      const line = createSvgElement("line");
-      line.classList.add("connection-line");
-      line.setAttribute("x1", String(start.x));
-      line.setAttribute("y1", String(start.y));
-      line.setAttribute("x2", String(end.x));
-      line.setAttribute("y2", String(end.y));
-      connections.appendChild(line);
-      return { shadow, line };
+    function connectionLength(start, end) {
+      return Math.hypot(end.x - start.x, end.y - start.y);
     }
 
-    function setConnectionCoordinates(element, start, end) {
-      element.setAttribute("x1", String(start.x));
-      element.setAttribute("y1", String(start.y));
-      element.setAttribute("x2", String(end.x));
-      element.setAttribute("y2", String(end.y));
+    function setConnectionTransform(element, start, end, scale) {
+      const deltaX = end.x - start.x;
+      const deltaY = end.y - start.y;
+      const angle = Math.atan2(deltaY, deltaX);
+      element.style.transform = "translate3d(" + start.x + "px," + start.y + "px,0) rotate(" + angle + "rad) scaleX(" + scale + ")";
+    }
+
+    function appendConnection(start, end) {
+      const line = document.createElement("div");
+      line.classList.add("connection-line");
+      const length = connectionLength(start, end);
+      const baseLength = Math.max(length, 1);
+      line.style.width = baseLength + "px";
+      setConnectionTransform(line, start, end, 1);
+      connections.appendChild(line);
+      return { line, baseLength, connectionLength: length };
     }
 
     function renderConnections() {
@@ -1285,19 +1232,18 @@ HTML_TEMPLATE = r'''<!doctype html>
       const pairs = new Map();
 
       for (const sourceMap of MAP_DATA) {
-        for (const exit of sourceMap.exits) {
-          if (!mapById.has(exit.targetMapId) || sourceMap.id === exit.targetMapId) continue;
-          const lowId = Math.min(sourceMap.id, exit.targetMapId);
-          const highId = Math.max(sourceMap.id, exit.targetMapId);
+        for (const targetMapId of sourceMap.linkedIds) {
+          const lowId = Math.min(sourceMap.id, targetMapId);
+          const highId = Math.max(sourceMap.id, targetMapId);
           const pairKey = lowId + ":" + highId;
-          let pair = pairs.get(pairKey);
-          if (!pair) {
-            pair = { lowId, highId, lowToHigh: [], highToLow: [] };
-            pairs.set(pairKey, pair);
-          }
-          const record = { sourceMapId: sourceMap.id, targetMapId: exit.targetMapId, exit };
-          if (sourceMap.id === lowId) pair.lowToHigh.push(record);
-          else pair.highToLow.push(record);
+          if (pairs.has(pairKey)) continue;
+          const lowMap = mapById.get(lowId);
+          const highMap = mapById.get(highId);
+          if (!lowMap || !highMap) continue;
+          const lowExit = lowMap.exits.find((exit) => exit.targetMapId === highId);
+          const highExit = highMap.exits.find((exit) => exit.targetMapId === lowId);
+          if (!lowExit || !highExit) continue;
+          pairs.set(pairKey, { lowId, highId, lowExit, highExit });
         }
       }
 
@@ -1307,21 +1253,20 @@ HTML_TEMPLATE = r'''<!doctype html>
         if (!lowPosition || !highPosition) continue;
 
         // 只有互为出口的地图对才画线；按无序地图对保证双向只出现一条。
-        if (pair.lowToHigh.length === 0 || pair.highToLow.length === 0) continue;
-        const lowExit = pair.lowToHigh[0].exit;
-        const highExit = pair.highToLow[0].exit;
         const elements = appendConnection(
-          exitPoint(lowPosition, lowExit.x, lowExit.y),
-          exitPoint(highPosition, highExit.x, highExit.y)
+          exitPoint(lowPosition, pair.lowExit.x, pair.lowExit.y),
+          exitPoint(highPosition, pair.highExit.x, pair.highExit.y)
         );
-        rememberConnection(pair.lowId + ":" + pair.highId, {
+        const record = {
           lowId: pair.lowId,
           highId: pair.highId,
-          lowExit,
-          highExit,
+          lowExit: pair.lowExit,
+          highExit: pair.highExit,
           bidirectional: true,
           ...elements
-        });
+        };
+        rememberConnection(pair.lowId + ":" + pair.highId, record);
+        updateConnectionVisibility(record);
       }
     }
 
@@ -1344,18 +1289,48 @@ HTML_TEMPLATE = r'''<!doctype html>
 
       const start = exitPoint(sourcePosition, record.lowExit.x, record.lowExit.y);
       const end = exitPoint(targetPosition, record.highExit.x, record.highExit.y);
-      setConnectionCoordinates(record.shadow, start, end);
-      setConnectionCoordinates(record.line, start, end);
+      const length = connectionLength(start, end);
+      setConnectionTransform(record.line, start, end, length / record.baseLength);
+      record.connectionLength = length;
+      updateConnectionVisibility(record);
+    }
+
+    function updateConnectionVisibility(record) {
+      if (!record) return;
+      const screenLength = record.connectionLength * state.zoom;
+      const visible = state.zoom >= 0.999
+        || (state.zoom >= 0.5 && screenLength >= CONNECTION_MID_SCREEN_PX)
+        || (state.zoom < 0.5 && screenLength >= CONNECTION_LONG_SCREEN_PX);
+      record.line.hidden = !visible;
+      if (!visible) {
+        record.line.style.willChange = "";
+      } else if (state.drag && state.drag.kind === "card" && state.drag.connectionRecords.has(record)) {
+        record.line.style.willChange = "transform";
+      }
+    }
+
+    function updateAllConnectionVisibility() {
+      for (const record of connectionRecords.values()) updateConnectionVisibility(record);
+    }
+
+    function connectionRecordsForMaps(mapIds) {
+      const records = new Set();
+      for (const mapId of mapIds) {
+        const mapRecords = connectionRecordsByMap.get(mapId);
+        if (!mapRecords) continue;
+        for (const record of mapRecords) records.add(record);
+      }
+      return records;
     }
 
     function updateConnectionsForMaps(mapIds) {
-      const recordsToUpdate = new Set();
-      for (const mapId of mapIds) {
-        const records = connectionRecordsByMap.get(mapId);
-        if (!records) continue;
-        for (const record of records) recordsToUpdate.add(record);
+      for (const record of connectionRecordsForMaps(mapIds)) updateConnection(record);
+    }
+
+    function setConnectionWillChange(records, enabled) {
+      for (const record of records) {
+        record.line.style.willChange = enabled && !record.line.hidden ? "transform" : "";
       }
-      for (const record of recordsToUpdate) updateConnection(record);
     }
 
     function updateStatus() {
@@ -1425,8 +1400,9 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     function updateDropHint(clientX, clientY) {
-      const libraryRect = library.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
+      const rects = getDragDropRects();
+      const libraryRect = rects.library;
+      const stageRect = rects.stage;
       const inLibrary = inside(libraryRect, clientX, clientY);
       const inStage = inside(stageRect, clientX, clientY);
       library.classList.toggle("is-drop-target", state.drag && state.drag.kind === "card" && inLibrary);
@@ -1464,6 +1440,7 @@ HTML_TEMPLATE = r'''<!doctype html>
         item,
         ghost: makeDragGhost(map)
       };
+      cacheDragDropRects();
       item.classList.add("is-dragging");
       state.drag.ghost.style.left = event.clientX + "px";
       state.drag.ghost.style.top = event.clientY + "px";
@@ -1490,6 +1467,7 @@ HTML_TEMPLATE = r'''<!doctype html>
           dragCardByMapId.set(selectedMapId, selectedCard);
         }
       }
+      const dragConnectionRecords = connectionRecordsForMaps(Array.from(startPositions.keys()));
       event.preventDefault();
       event.stopPropagation();
       state.drag = {
@@ -1502,9 +1480,16 @@ HTML_TEMPLATE = r'''<!doctype html>
         moved: false,
         shiftKey: event.shiftKey,
         cards: dragCards,
-        cardByMapId: dragCardByMapId
+        cardByMapId: dragCardByMapId,
+        connectionRecords: dragConnectionRecords
       };
-      for (const dragCard of dragCards) dragCard.classList.add("is-dragging");
+      cacheDragDropRects();
+      setConnectionWillChange(dragConnectionRecords, true);
+      for (const dragCard of dragCards) {
+        dragCard.classList.add("is-dragging");
+        dragCard.style.transform = "translate3d(0,0,0)";
+        dragCard.style.willChange = "transform";
+      }
       updateLinkedHighlights();
     }
 
@@ -1517,14 +1502,16 @@ HTML_TEMPLATE = r'''<!doctype html>
       if (!drag.moved) return;
 
       if (drag.kind === "card") {
+        const worldDeltaX = deltaX / state.zoom;
+        const worldDeltaY = deltaY / state.zoom;
         for (const mapId of drag.mapIds) {
           const position = state.placed.get(mapId);
           const startPosition = drag.startPositions.get(mapId);
           if (!position || !startPosition) continue;
-          position.y = startPosition.y + deltaY / state.zoom;
-          position.x = startPosition.x + deltaX / state.zoom;
+          position.y = startPosition.y + worldDeltaY;
+          position.x = startPosition.x + worldDeltaX;
           const card = drag.cardByMapId.get(mapId);
-          if (card) positionCard(card, mapId);
+          if (card) positionCardForDrag(card, worldDeltaX, worldDeltaY);
         }
         updateConnectionsForMaps(drag.mapIds);
       } else {
@@ -1582,7 +1569,10 @@ HTML_TEMPLATE = r'''<!doctype html>
         else processPointerMove(finalPoint);
       }
       const drag = state.drag;
-      if (!drag) return;
+      if (!drag) {
+        invalidateDragDropRects();
+        return;
+      }
       if (drag.kind === "pan") {
         if (!drag.moved && !drag.shiftKey) clearSelection();
         cleanupDrag();
@@ -1590,8 +1580,10 @@ HTML_TEMPLATE = r'''<!doctype html>
       }
       const pointX = event.clientX;
       const pointY = event.clientY;
-      const stageRect = stage.getBoundingClientRect();
-      const libraryRect = library.getBoundingClientRect();
+      const rects = getDragDropRects();
+      const stageRect = rects.stage;
+      const libraryRect = rects.library;
+      commitCardDrag(drag);
 
       if (drag.kind === "candidate") {
         if (drag.moved && inside(stageRect, pointX, pointY)) {
@@ -1612,13 +1604,19 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     function cancelDrag() {
-      if (!state.drag) return;
+      if (!state.drag) {
+        invalidateDragDropRects();
+        return;
+      }
       if (pointerFrame !== null) {
         window.cancelAnimationFrame(pointerFrame);
         pointerFrame = null;
       }
       queuedPointer = null;
-      if (state.drag.kind === "card") updateConnectionsForMaps(state.drag.mapIds);
+      if (state.drag.kind === "card") {
+        commitCardDrag(state.drag);
+        updateConnectionsForMaps(state.drag.mapIds);
+      }
       cleanupDrag();
     }
 
@@ -1627,15 +1625,21 @@ HTML_TEMPLATE = r'''<!doctype html>
       if (!drag) return;
       if (drag.item) drag.item.classList.remove("is-dragging");
       if (drag.cards) {
-        for (const dragCard of drag.cards) dragCard.classList.remove("is-dragging");
+        for (const dragCard of drag.cards) {
+          dragCard.classList.remove("is-dragging");
+          dragCard.style.transform = "";
+          dragCard.style.willChange = "";
+        }
       }
       if (drag.ghost) drag.ghost.remove();
+      if (drag.connectionRecords) setConnectionWillChange(drag.connectionRecords, false);
       if (pointerFrame !== null) {
         window.cancelAnimationFrame(pointerFrame);
         pointerFrame = null;
       }
       queuedPointer = null;
       clearDropHints();
+      invalidateDragDropRects();
       state.drag = null;
       updateLinkedHighlights();
     }
@@ -1652,6 +1656,7 @@ HTML_TEMPLATE = r'''<!doctype html>
         shiftKey: event.shiftKey,
         moved: false
       };
+      cacheDragDropRects();
     }
 
     function clampZoom(value) {
@@ -1673,6 +1678,7 @@ HTML_TEMPLATE = r'''<!doctype html>
       state.offset.x = pointerX - worldX * state.zoom;
       state.offset.y = pointerY - worldY * state.zoom;
       updateWorldTransform();
+      updateAllConnectionVisibility();
     }
 
     function validateLayout(payload) {
@@ -1856,6 +1862,7 @@ HTML_TEMPLATE = r'''<!doctype html>
     }, { passive: false });
     window.addEventListener("pointerup", finishDrag);
     window.addEventListener("pointercancel", cancelDrag);
+    window.addEventListener("resize", invalidateDragDropRects);
     window.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || importDialog.open || state.selectedMapIds.size === 0) return;
       event.preventDefault();
@@ -1911,6 +1918,68 @@ def crop_tiles(encoded, width, height, map_id, warnings):
     return base64.b64encode(bytes(cropped)).decode("ascii")
 
 
+def trim_tiles(encoded, width, height, protected_cells):
+    raw = base64.b64decode(encoded)
+    left = 0
+    top = 0
+    right = width
+    bottom = height
+
+    def trimmable_row(row):
+        return all(
+            raw[row * width + column] != 0
+            and (raw[row * width + column] & 0x80) == 0
+            and (column, row) not in protected_cells
+            for column in range(left, right)
+        )
+
+    def trimmable_column(column):
+        return all(
+            raw[row * width + column] != 0
+            and (raw[row * width + column] & 0x80) == 0
+            and (column, row) not in protected_cells
+            for row in range(top, bottom)
+        )
+
+    while bottom - top > 1 and trimmable_row(top):
+        top += 1
+    while bottom - top > 1 and trimmable_row(bottom - 1):
+        bottom -= 1
+    while right - left > 1 and trimmable_column(left):
+        left += 1
+    while right - left > 1 and trimmable_column(right - 1):
+        right -= 1
+
+    trimmed = b"".join(raw[row * width + left:row * width + right] for row in range(top, bottom))
+    return (
+        base64.b64encode(trimmed).decode("ascii"),
+        right - left,
+        bottom - top,
+        left,
+        top,
+    )
+
+
+def tile_color(value):
+    if (value & 0x80) != 0:
+        return 22, 163, 74
+    if (value & 0x08) != 0:
+        return 30, 41, 59
+    if value == 0:
+        return 217, 220, 226
+    gray = min(200, 56 + value * 8)
+    return gray, gray - 8, gray
+
+
+def render_tiles_png(encoded, width, height):
+    raw = base64.b64decode(encoded)
+    image = Image.new("RGB", (width, height))
+    image.putdata([tile_color(value) for value in raw])
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True, compress_level=9)
+    return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+
+
 def merge_exits(exit_record, map_id):
     grouped = {}
     raw_exits = exit_record.get("exits", []) if isinstance(exit_record, dict) else []
@@ -1944,7 +2013,7 @@ def merge_exits(exit_record, map_id):
     return merged
 
 
-def build_maps(map_info, tiles_by_id, exits_by_id, warnings):
+def build_maps(map_info, tiles_by_id, exits_by_id, warnings, trim_stats=None, legacy_tiles=None):
     records = map_info.get("records") if isinstance(map_info, dict) else None
     if not isinstance(records, list):
         raise RuntimeError("MAPINFOBASE.json 缺少 records 数组")
@@ -1952,6 +2021,7 @@ def build_maps(map_info, tiles_by_id, exits_by_id, warnings):
     exit_index = exits_by_id if isinstance(exits_by_id, dict) else {}
 
     maps = []
+    trim_info_by_id = {}
     for map_id, record in enumerate(records):
         record = record if isinstance(record, dict) else {}
         key = "m" + str(map_id)
@@ -1969,15 +2039,141 @@ def build_maps(map_info, tiles_by_id, exits_by_id, warnings):
             name = "未命名地图"
             warnings.append(key + " 缺少 text_0，使用未命名地图")
 
+        merged_exits = merge_exits(exit_record, map_id)
+        cropped_tiles = crop_tiles(tile_record.get("tiles"), width, height, map_id, warnings)
+        protected_cells = set()
+        for exit_item in exit_record.get("exits", []) if isinstance(exit_record, dict) else []:
+            if isinstance(exit_item, dict) and valid_int(exit_item.get("x")) and valid_int(exit_item.get("y")):
+                protected_cells.add((exit_item["x"], exit_item["y"]))
+        trimmed_tiles, trimmed_width, trimmed_height, trim_x, trim_y = trim_tiles(cropped_tiles, width, height, protected_cells)
+        image = render_tiles_png(trimmed_tiles, trimmed_width, trimmed_height)
+        trim_info = {
+            "id": map_id,
+            "name": name,
+            "before_width": width,
+            "before_height": height,
+            "before_bytes": width * height,
+            "after_width": trimmed_width,
+            "after_height": trimmed_height,
+            "after_bytes": trimmed_width * trimmed_height,
+            "trim_x": trim_x,
+            "trim_y": trim_y,
+            "old_tiles_base64_bytes": len(trimmed_tiles),
+            "new_png_data_uri_bytes": len(image),
+        }
+        trim_info_by_id[map_id] = trim_info
+        if trim_stats is not None:
+            trim_stats.append(trim_info)
+        if legacy_tiles is not None:
+            legacy_tiles[map_id] = trimmed_tiles
+
         maps.append({
             "id": map_id,
             "name": name,
-            "w": width,
-            "h": height,
-            "tiles": crop_tiles(tile_record.get("tiles"), width, height, map_id, warnings),
-            "exits": merge_exits(exit_record, map_id),
+            "w": trimmed_width,
+            "h": trimmed_height,
+            "image": image,
+            "exits": merged_exits,
         })
+
+    for map_data in maps:
+        source_trim = trim_info_by_id[map_data["id"]]
+        for exit_item in map_data["exits"]:
+            exit_item["x"] = min(max(exit_item["x"] - source_trim["trim_x"], 0), map_data["w"] - 1)
+            exit_item["y"] = min(max(exit_item["y"] - source_trim["trim_y"], 0), map_data["h"] - 1)
+            target_trim = trim_info_by_id.get(exit_item["targetMapId"])
+            if target_trim:
+                target_width = target_trim["after_width"]
+                target_height = target_trim["after_height"]
+                exit_item["targetX"] = min(max(exit_item["targetX"] - target_trim["trim_x"], 0), target_width - 1)
+                exit_item["targetY"] = min(max(exit_item["targetY"] - target_trim["trim_y"], 0), target_height - 1)
+
+    outgoing_ids = {
+        map_data["id"]: {exit_item["targetMapId"] for exit_item in map_data["exits"]}
+        for map_data in maps
+    }
+    referenced_ids = {target_id for targets in outgoing_ids.values() for target_id in targets}
+    for map_data in maps:
+        targets = outgoing_ids[map_data["id"]]
+        map_data["linkedIds"] = sorted(
+            target_id
+            for target_id in targets
+            if target_id in outgoing_ids and map_data["id"] in outgoing_ids[target_id]
+        )
+        map_data["referenced"] = map_data["id"] in referenced_ids
     return maps
+
+
+def print_trim_stats(trim_stats):
+    before_bytes = sum(item["before_bytes"] for item in trim_stats)
+    after_bytes = sum(item["after_bytes"] for item in trim_stats)
+    before_width = sum(item["before_width"] for item in trim_stats)
+    before_height = sum(item["before_height"] for item in trim_stats)
+    after_width = sum(item["after_width"] for item in trim_stats)
+    after_height = sum(item["after_height"] for item in trim_stats)
+    count = len(trim_stats)
+    if count > 0:
+        before_average = (before_width / count, before_height / count)
+        after_average = (after_width / count, after_height / count)
+    else:
+        before_average = (0, 0)
+        after_average = (0, 0)
+
+    print("削边统计：总瓦片字节数 " + str(before_bytes) + " → " + str(after_bytes) + "（减少 " + str(before_bytes - after_bytes) + "）")
+    print(
+        "削边统计：平均尺寸 "
+        + "{:.2f}×{:.2f}".format(*before_average)
+        + " → "
+        + "{:.2f}×{:.2f}".format(*after_average)
+    )
+    print("削减最多的地图：")
+    top_trimmed = sorted(
+        trim_stats,
+        key=lambda item: (-(item["before_bytes"] - item["after_bytes"]), item["id"]),
+    )[:3]
+    if not top_trimmed:
+        print("  无地图数据")
+        return
+    for item in top_trimmed:
+        reduced = item["before_bytes"] - item["after_bytes"]
+        print(
+            "  m"
+            + str(item["id"])
+            + " "
+            + item["name"]
+            + "："
+            + str(item["before_width"])
+            + "×"
+            + str(item["before_height"])
+            + " → "
+            + str(item["after_width"])
+            + "×"
+            + str(item["after_height"])
+            + "，减少 "
+            + str(reduced)
+            + " 字节"
+        )
+
+
+def print_volume_stats(trim_stats, old_html_size, new_html_size, html_baseline):
+    old_tiles_bytes = sum(item["old_tiles_base64_bytes"] for item in trim_stats)
+    new_png_bytes = sum(item["new_png_data_uri_bytes"] for item in trim_stats)
+    print(
+        "体积统计：旧 tiles base64 总量 "
+        + str(old_tiles_bytes)
+        + " 字节 → 新 PNG data URI 总量 "
+        + str(new_png_bytes)
+        + " 字节"
+    )
+    print(
+        "体积统计：HTML 文件总大小 "
+        + str(old_html_size)
+        + " 字节 → "
+        + str(new_html_size)
+        + " 字节（旧值："
+        + html_baseline
+        + "）"
+    )
 
 
 def serialize_map_data(maps):
@@ -1991,8 +2187,33 @@ def main():
     tiles_by_id = load_json(TILES_PATH)
     exits_by_id = load_json(EXITS_PATH)
     warnings = []
-    maps = build_maps(map_info, tiles_by_id, exits_by_id, warnings)
+    trim_stats = []
+    legacy_tiles = {}
+    maps = build_maps(map_info, tiles_by_id, exits_by_id, warnings, trim_stats, legacy_tiles)
+    legacy_maps = [
+        {
+            "id": map_data["id"],
+            "name": map_data["name"],
+            "w": map_data["w"],
+            "h": map_data["h"],
+            "tiles": legacy_tiles[map_data["id"]],
+            "exits": map_data["exits"],
+        }
+        for map_data in maps
+    ]
+    legacy_html = HTML_TEMPLATE.replace("/*__MAP_DATA__*/", serialize_map_data(legacy_maps))
     html = HTML_TEMPLATE.replace("/*__MAP_DATA__*/", serialize_map_data(maps))
+    legacy_html_size = len(legacy_html.encode("utf-8"))
+    old_html_size = legacy_html_size
+    html_baseline = "旧 tiles 数据同当前模板估算"
+    try:
+        old_html_size = OUTPUT_PATH.stat().st_size
+        html_baseline = "覆盖前的已有文件"
+    except FileNotFoundError:
+        old_html_size = legacy_html_size
+    except OSError as error:
+        raise RuntimeError("无法读取旧 HTML 文件大小 " + str(OUTPUT_PATH) + "：" + str(error)) from error
+    new_html_size = len(html.encode("utf-8"))
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         OUTPUT_PATH.write_text(html, encoding="utf-8")
@@ -2000,6 +2221,8 @@ def main():
         raise RuntimeError("无法写入 " + str(OUTPUT_PATH) + "：" + str(error)) from error
 
     print("已生成 " + str(OUTPUT_PATH) + "（" + str(len(maps)) + " 张地图）")
+    print_trim_stats(trim_stats)
+    print_volume_stats(trim_stats, old_html_size, new_html_size, html_baseline)
     for warning in warnings:
         print("警告：" + warning)
 
