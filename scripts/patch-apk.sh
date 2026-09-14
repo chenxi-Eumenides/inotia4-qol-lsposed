@@ -8,8 +8,9 @@ usage() {
 
 行为：
   对 apk/game-apk/ 下的每个游戏 APK 生成一个集成 APK，输出到
-  output/<游戏apk文件名>-npatched[-v<模块版本>].apk（LSPatch JAR 则为 -lspatched[-v<模块版本>]）。
-  模块版本从 release 模块 APK 文件名 `...-vX.Y.Z-...` 提取；debug 包无版本则不追加。
+  output/<发布前缀>_npatched[_v<模块版本>].apk（LSPatch JAR 则为 _lspatched[_v<模块版本>]）。
+  发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<日期>]。
+  模块版本从 release 模块 APK 文件名 `..._vX.Y.Z.apk` 提取；debug 包无版本则不追加。
   - 提供「新包名」时用 NPatch --newpackage 修改输出 applicationId；不提供则保留原包名。
   - 默认覆盖已有输出（-f）；生成前先清理 output/ 下旧的 NPatch 产物（*npatch*.apk）。
   - 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks）签名输出，使集成版与
@@ -93,10 +94,10 @@ if [[ ! -f "$module_apk" ]]; then
 fi
 module_apk=$(realpath "$module_apk")
 
-# 模块版本：从 release 模块 APK 文件名（...-vX.Y.Z-...）提取，追加在 -npatched 之后；
-# debug 包文件名无版本，则不追加，输出仍为 <stem>-npatched.apk。
+# 模块版本：从 release 模块 APK 文件名（inotia4_qol_lsposed_release_unsigned_vX.Y.Z.apk）提取，
+# 追加在 _npatched 之后；debug 包文件名无版本，则不追加，输出仍为 <发布前缀>_npatched.apk。
 module_version=
-if [[ "$(basename "$module_apk")" =~ -v([0-9]+\.[0-9]+\.[0-9]+)- ]]; then
+if [[ "$(basename "$module_apk")" =~ _v([0-9]+\.[0-9]+\.[0-9]+)\.apk$ ]]; then
     module_version="v${BASH_REMATCH[1]}"
 fi
 
@@ -143,6 +144,27 @@ fi
 patch_suffix=npatched
 [[ "$is_npatch" != true ]] && patch_suffix=lspatched
 
+# 发布前缀：游戏 APK 文件名 -> 全 ASCII 前缀（发布附件名不得含中文）。
+#   艾诺迪亚4_v1.3.2_原版.apk              -> Inotia4_v1.3.2_original
+#   艾诺迪亚4_v1.3.2_盗版大修_20260810.apk -> Inotia4_v1.3.2_overhaul_20260810
+#   Inotia4_v1.3.2_monster_v25.apk        -> Inotia4_v1.3.2_monster_v25
+release_stem() {
+    local stem=$1 game_version= date=
+    if [[ "$stem" =~ (v[0-9]+(\.[0-9]+)+) ]]; then
+        game_version=${BASH_REMATCH[1]}
+    fi
+    case "$stem" in
+        *monster*) printf '%s' "$stem" ;;
+        *原版*) printf 'Inotia4_%s_original' "${game_version:-v1.3.2}" ;;
+        *盗版大修*)
+            if [[ "$stem" =~ (20[0-9]{6}) ]]; then
+                date=${BASH_REMATCH[1]}
+            fi
+            printf 'Inotia4_%s_overhaul%s' "${game_version:-v1.3.2}" "${date:+_$date}" ;;
+        *) printf '%s' "$stem" ;;
+    esac
+}
+
 # 清理旧 NPatch 产物（一次）
 shopt -s nullglob
 old_npatch_apks=("$repo_root/output/"*npatch*.apk)
@@ -188,7 +210,7 @@ generated=()
 for target_apk in "${game_apks[@]}"; do
     target_name=$(basename "$target_apk")
     target_stem=${target_name%.apk}
-    output_apk="$repo_root/output/${target_stem}-${patch_suffix}${module_version:+-$module_version}.apk"
+    output_apk="$repo_root/output/$(release_stem "$target_stem")_${patch_suffix}${module_version:+_$module_version}.apk"
     work_dir=$(mktemp -d "$repo_root/.tmp/lspatch-apk.XXXXXX")
 
     printf '\n===== 处理：%s\n' "$target_name"

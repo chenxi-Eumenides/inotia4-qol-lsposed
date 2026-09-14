@@ -17,14 +17,14 @@
 
 ### 方式一：LSPosed 模块（需 root）
 
-1. 从 Releases 下载模块 APK（`inotia4-qol-lsposed-vX.Y.Z-*.apk`）。
+1. 从 Releases 下载模块 APK（`inotia4_qol_lsposed_release_unsigned_vX.Y.Z.apk`）。
 2. 安装后在 LSPosed 中启用模块，作用域勾选游戏包名
    `com.com2us.inotia4.normal.freefull.google.global.android.common`。
 3. 重启游戏。
 
 ### 方式二：免 root 集成包（NPatch）
 
-1. 从 Releases 下载与你的游戏版本对应的 `*-npatched-v*.apk`。
+1. 从 Releases 下载与你的游戏版本对应的 `*_npatched_v*.apk`。
 2. 安装（与原版同签名可覆盖；不同签名需先卸载原版，请注意备份存档）。
 3. 启动游戏即可。
 

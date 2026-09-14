@@ -73,12 +73,12 @@
 scripts/build-debug.sh
 # 无参数时默认追加 --offline（仅用项目缓存）；传递额外 Gradle 参数时脚本不再自动追加 --offline：
 scripts/build-debug.sh --offline
-# 正式版构建并复制为 output/inotia4-qol-lsposed-v<version>-release-unsigned.apk
+# 正式版构建并复制为 output/inotia4_qol_lsposed_release_unsigned_v<version>.apk
 scripts/build-release.sh
-# Debug 产物 → output/inotia4-qol-lsposed-debug-<YYMMDDHHMM>-<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
-# Release 产物 → output/inotia4-qol-lsposed-v<version>-release-unsigned.apk；版本号来自 build.gradle.kts，脚本只保留最新 2 份 Release APK
+# Debug 产物 → output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
+# Release 产物 → output/inotia4_qol_lsposed_release_unsigned_v<version>.apk；版本号来自 build.gradle.kts，脚本只保留最新 2 份 Release APK
 # 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
-# 命名格式固定：inotia4-qol-lsposed-vX.Y.Z-release-unsigned.apk（如 v0.7.0）
+# 命名格式固定：inotia4_qol_lsposed_release_unsigned_vX.Y.Z.apk（如 v0.7.7）
 # 多目标包名：逗号分隔，同时写入 LSPosed scope.list 和模块运行时过滤。
 scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.com2us.inotia4.qol.patched
 
@@ -86,8 +86,9 @@ scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.goo
 # 默认使用 NPatch（tools/lspatch/npatch-v1.0.7-741-release.jar，JAR 自带 BouncyCastle，脚本自动注册 BKS provider）。
 # 用法：scripts/patch-apk.sh [选项] <模块 APK> [新包名]
 # 脚本遍历 apk/game-apk/ 下的每个 .apk（不含 history/ 子目录），逐个生成
-# output/<游戏apk文件名>-npatched-<模块版本>.apk（LSPatch JAR 则为 -lspatched-<模块版本>.apk）；
-# <模块版本> 从 release 模块 APK 文件名（...-vX.Y.Z-...）提取，debug 包不追加。
+# output/<发布前缀>_npatched[_v<模块版本>].apk（LSPatch JAR 则为 _lspatched[_v<模块版本>]）；
+# 发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<日期>]。
+# <模块版本> 从 release 模块 APK 文件名（..._vX.Y.Z.apk）提取，debug 包不追加。
 scripts/patch-apk.sh <模块.apk>
 # 默认覆盖已有输出；生成前先清理 output/ 下旧 NPatch 产物（*npatch*.apk），保持输出目录干净。
 # 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks，已入库）签名输出：
@@ -104,7 +105,7 @@ scripts/patch-apk.sh --sigbypasslv 2 <模块.apk>
 # 默认操作单台真机（<设备IP>）；多设备时用 -s <序列号> 区分。
 # 只安装 output/ 下由构建脚本产出的最新 Debug APK（build-debug.sh 已复制至此，并只保留最新 3 份）。
 # 不直接安装 Gradle 中间产物 module/app/build/outputs/apk/debug/app-debug.apk（该路径仅脚本内部使用）。
-apk=$(ls -t output/inotia4-qol-lsposed-debug-*.apk | head -n1)
+apk=$(ls -t output/inotia4_qol_lsposed_debug_*.apk | head -n1)
 adb -s <设备序列号> install -r "$apk"
 
 # ③ 重启游戏（让 Xposed 重新注入，模块更新生效的必需步骤）
@@ -162,24 +163,26 @@ curl -s http://<设备IP>:8088/api/ui/screen
 1. **变更版本号**：`module/app/build.gradle.kts` 的 `versionName` `+0.0.1`（`versionCode` 同步 +1）；
    仅用户明确才升小版本 `0.1.0`。
 2. **构建模块 Release APK**：`scripts/build-release.sh`，产物
-   `output/inotia4-qol-lsposed-v<version>-release-unsigned.apk`。
+   `output/inotia4_qol_lsposed_release_unsigned_v<version>.apk`。
 3. **生成 3 个 NPatch 集成版**：把 3 个游戏 APK 放入 `apk/game-apk/`，执行
    `scripts/patch-apk.sh <release 模块.apk>`（不传新包名，保留游戏原包名）；脚本遍历 `apk/game-apk/*.apk`，
-   逐个生成 `output/<游戏apk文件名>-npatched-<模块版本>.apk`（`<模块版本>` 由脚本从 release 模块 APK
-   文件名提取，带 `v` 前缀，如 `v0.7.4`），再按下列发布名重命名（**版本号位于 `npatched` 之后**）：
-   - 原版：`艾诺迪亚4_v1.3.2_原版-npatched-<模块版本>.apk` → `inotia4-qol-original-npatched-<模块版本>.apk`
-   - 大修版：`艾诺迪亚4_v1.3.2_盗版大修_<日期>-npatched-<模块版本>.apk` → `inotia4-qol-overhaul-<日期>-npatched-<模块版本>.apk`
-   - monster 版：`Inotia4_v<游戏版本>_monster_<版本>-npatched-<模块版本>.apk`（已是 ASCII，无需改名）
-   - 示例（模块 `v0.7.4`）：`inotia4-qol-original-npatched-v0.7.4.apk`、
-     `inotia4-qol-overhaul-20260830-npatched-v0.7.4.apk`、`Inotia4_v1.3.2_monster_v25-npatched-v0.7.4.apk`
+   直接按发布名输出到 `output/`（`<模块版本>` 由脚本从 release 模块 APK 文件名提取，带 `v` 前缀，如 `v0.7.7`；
+   **版本号位于 `npatched` 之后**，无需再手动改名）：
+   - 原版：`Inotia4_v<游戏版本>_original_npatched_<模块版本>.apk`
+   - 大修版：`Inotia4_v<游戏版本>_overhaul_<日期>_npatched_<模块版本>.apk`
+   - monster 版：`Inotia4_v<游戏版本>_monster_<子版本>_npatched_<模块版本>.apk`
+   - 示例（模块 `v0.7.7`）：`Inotia4_v1.3.2_original_npatched_v0.7.7.apk`、
+     `Inotia4_v1.3.2_overhaul_20260810_npatched_v0.7.7.apk`、`Inotia4_v1.3.2_monster_v25_npatched_v0.7.7.apk`
 4. **生成 release 说明文本并交用户确认**：整理覆盖「上一个版本 → 当前版本」的全部改动（新增 / 优化 /
    修复 / 发布文件 / 致谢）作为 release notes，先提交给用户确认；**确认后才执行后续推送与发布**，
    未确认不得 `git push` 或创建 Release。
 5. **推送 GitHub**：`git push github`。
 6. **发布 Release**：`gh release create v<version> <4 个 APK> --title v<version> --notes-file <说明>`。
-7. **附件命名（强制）**：GitHub CLI 上传的附件名必须全 ASCII、不得含中文；3 个 NPatch 附件名必须
-   带模块版本且**版本号位于 `npatched` 之后**（`...-npatched-<模块版本>.apk`），与 release 模块 APK
-   的版本一致；先核对上一次发布（`gh release view <上一个 tag> --json assets`）的命名再上传。
+7. **附件命名（强制）**：GitHub CLI 上传的附件名必须全 ASCII、不得含中文；4 个附件命名固定为：
+   - 模块：`inotia4_qol_lsposed_release_unsigned_v<模块版本>.apk`
+   - 集成：`Inotia4_v<游戏版本>_{original|overhaul|monster}[_<日期或子版本>]_npatched_v<模块版本>.apk`
+   版本号均位于 `npatched`/`release_unsigned` 之后，且与 release 模块 APK 的版本一致；先核对上一次
+   发布（`gh release view <上一个 tag> --json assets`）的命名再上传。
 > 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。92MB 是当前唯一稳定形态。
 >
 > LSPatch 集成模式会把模块嵌入目标 APK，生成的 APK 不需要 LSPosed 或 LSPatch Manager 常驻；更换模块必须重新 patch。脚本输出固定写入 `output/`，并在完成后打印每个产物的 SHA-256 和成功/失败汇总。

@@ -35,7 +35,7 @@ source_apk="$repo_root/module/app/build/outputs/apk/debug/app-debug.apk"
 output_dir="$repo_root/output"
 checksum=$(sha256sum "$source_apk" | cut -d ' ' -f 1)
 build_timestamp=$(date +%y%m%d%H%M)
-output_apk="$output_dir/inotia4-qol-lsposed-debug-${build_timestamp}-${checksum:0:12}.apk"
+output_apk="$output_dir/inotia4_qol_lsposed_debug_${build_timestamp}_${checksum:0:12}.apk"
 mkdir -p "$output_dir"
 cp "$source_apk" "$output_apk"
 

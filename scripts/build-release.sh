@@ -32,7 +32,7 @@ cd "$repo_root/module"
 
 source_apk="$repo_root/module/app/build/outputs/apk/release/app-release-unsigned.apk"
 output_dir="$repo_root/output"
-output_apk="$output_dir/inotia4-qol-lsposed-v${version_name}-release-unsigned.apk"
+output_apk="$output_dir/inotia4_qol_lsposed_release_unsigned_v${version_name}.apk"
 mkdir -p "$output_dir"
 cp "$source_apk" "$output_apk"
 
