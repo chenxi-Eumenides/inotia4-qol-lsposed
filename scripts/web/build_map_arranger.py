@@ -999,7 +999,20 @@ HTML_TEMPLATE = r'''<!doctype html>
       card.dataset.mapId = String(map.id);
       card.tabIndex = 0;
       card.setAttribute("aria-label", mapLabel(map) + "，可拖动");
-      card.title = "拖动摆放 · Delete 键收纳 · " + mapLabel(map);
+      const targets = new Map();
+      for (const exit of map.exits) {
+        if (!targets.has(exit.targetMapId)) {
+          const target = mapById.get(exit.targetMapId);
+          targets.set(exit.targetMapId, target ? mapLabel(target) : "未知 · m" + exit.targetMapId);
+        }
+      }
+      const titleLines = [];
+      if (targets.size > 0) {
+        for (const label of targets.values()) titleLines.push("传送 → " + label);
+        titleLines.push("");
+      }
+      titleLines.push("拖动摆放", "Delete 键收纳", mapLabel(map));
+      card.title = titleLines.join("\n");
       card.style.width = Math.max(1, map.w * CELL) + "px";
       card.style.height = Math.max(1, map.h * CELL) + "px";
 
