@@ -515,6 +515,11 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     .map-card:hover { outline-color: var(--accent); box-shadow: 0 12px 25px rgba(20, 31, 41, .28), 0 0 0 3px var(--accent-soft); }
+    .map-card.is-selected {
+      outline: 3px solid var(--accent);
+      outline-offset: 1px;
+      box-shadow: 0 0 0 4px var(--accent-soft), var(--card-shadow);
+    }
     .map-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 52%, transparent); outline-offset: 3px; }
     .map-card.is-dragging { z-index: 10; cursor: grabbing; opacity: .88; }
 
@@ -895,9 +900,11 @@ HTML_TEMPLATE = r'''<!doctype html>
       offset: { x: 0, y: 0 },
       zoom: 1,
       placed: new Map(),
+      selectedMapIds: new Set(),
       drag: null,
       hoveredMapId: null,
-      suppressNextClick: false
+      suppressNextClick: false,
+      suppressNextSelectionClick: false
     };
 
     const body = document.body;
@@ -1030,11 +1037,44 @@ HTML_TEMPLATE = r'''<!doctype html>
       card.style.top = position.y + "px";
     }
 
+    function updateCardSelection(card, mapId) {
+      const selected = state.selectedMapIds.has(mapId);
+      card.classList.toggle("is-selected", selected);
+      card.setAttribute("aria-pressed", String(selected));
+    }
+
+    function syncCardSelection() {
+      for (const card of cards.querySelectorAll(".map-card")) {
+        updateCardSelection(card, Number(card.dataset.mapId));
+      }
+    }
+
+    function cleanSelection() {
+      for (const mapId of state.selectedMapIds) {
+        if (!state.placed.has(mapId)) state.selectedMapIds.delete(mapId);
+      }
+    }
+
+    function clearSelection() {
+      if (state.selectedMapIds.size === 0) return;
+      state.selectedMapIds.clear();
+      syncCardSelection();
+    }
+
+    function toggleMapSelection(mapId) {
+      if (!state.placed.has(mapId)) return;
+      if (state.selectedMapIds.has(mapId)) state.selectedMapIds.delete(mapId);
+      else state.selectedMapIds.add(mapId);
+      const card = cards.querySelector('[data-map-id="' + mapId + '"]');
+      if (card) updateCardSelection(card, mapId);
+    }
+
     function createMapCard(map) {
       const card = document.createElement("article");
       card.className = "map-card";
       card.dataset.mapId = String(map.id);
       card.tabIndex = 0;
+      card.setAttribute("role", "button");
       card.setAttribute("aria-label", mapLabel(map) + "，可拖动");
       const targets = new Map();
       for (const exit of map.exits) {
@@ -1048,7 +1088,7 @@ HTML_TEMPLATE = r'''<!doctype html>
         for (const label of targets.values()) titleLines.push("传送 → " + label);
         titleLines.push("");
       }
-      titleLines.push("拖动摆放", "Delete 键收纳", mapLabel(map));
+      titleLines.push("拖动摆放", "Shift+点击 多选", "Delete 收纳整组", mapLabel(map));
       card.title = titleLines.join("\n");
       card.style.width = Math.max(1, map.w * CELL) + "px";
       card.style.height = Math.max(1, map.h * CELL) + "px";
@@ -1077,7 +1117,17 @@ HTML_TEMPLATE = r'''<!doctype html>
         card.appendChild(dot);
       }
 
-      card.addEventListener("pointerdown", (event) => beginCardDrag(event, map.id, card));
+      card.addEventListener("pointerdown", (event) => beginCardDrag(event, map.id));
+      card.addEventListener("click", (event) => {
+        if (state.suppressNextSelectionClick) {
+          state.suppressNextSelectionClick = false;
+          return;
+        }
+        if (!event.shiftKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        toggleMapSelection(map.id);
+      });
       card.addEventListener("pointerenter", () => {
         state.hoveredMapId = map.id;
         updateLinkedHighlights();
@@ -1091,19 +1141,22 @@ HTML_TEMPLATE = r'''<!doctype html>
       card.addEventListener("keydown", (event) => {
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
-          removeMap(map.id);
+          removeSelectedMapsOrMap(map.id);
         }
       });
+      updateCardSelection(card, map.id);
       positionCard(card, map.id);
       return card;
     }
 
     function renderCards() {
+      cleanSelection();
       cards.replaceChildren();
       for (const map of MAP_DATA) {
         if (state.placed.has(map.id)) cards.appendChild(createMapCard(map));
       }
       stageEmpty.classList.toggle("is-hidden", state.placed.size > 0);
+      syncCardSelection();
     }
 
     function updateLinkedHighlights() {
@@ -1295,10 +1348,14 @@ HTML_TEMPLATE = r'''<!doctype html>
       setConnectionCoordinates(record.line, start, end);
     }
 
-    function updateConnectionsForMap(mapId) {
-      const records = connectionRecordsByMap.get(mapId);
-      if (!records) return;
-      for (const record of records) updateConnection(record);
+    function updateConnectionsForMaps(mapIds) {
+      const recordsToUpdate = new Set();
+      for (const mapId of mapIds) {
+        const records = connectionRecordsByMap.get(mapId);
+        if (!records) continue;
+        for (const record of records) recordsToUpdate.add(record);
+      }
+      for (const record of recordsToUpdate) updateConnection(record);
     }
 
     function updateStatus() {
@@ -1340,10 +1397,27 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     function removeMap(mapId) {
-      if (!state.placed.delete(mapId)) return;
-      if (state.hoveredMapId === mapId) state.hoveredMapId = null;
+      removeMaps([mapId]);
+    }
+
+    function removeMaps(mapIds) {
+      const removedMapIds = [];
+      for (const mapId of mapIds) {
+        if (!state.placed.delete(mapId)) continue;
+        removedMapIds.push(mapId);
+        state.selectedMapIds.delete(mapId);
+        if (state.hoveredMapId === mapId) state.hoveredMapId = null;
+      }
+      if (removedMapIds.length === 0) return;
+      cleanSelection();
       renderAll();
-      showToast("已收纳 " + mapLabel(mapById.get(mapId)));
+      if (removedMapIds.length === 1) showToast("已收纳 " + mapLabel(mapById.get(removedMapIds[0])));
+      else showToast("已收纳 " + removedMapIds.length + " 张地图");
+    }
+
+    function removeSelectedMapsOrMap(mapId) {
+      cleanSelection();
+      removeMaps(state.selectedMapIds.size > 0 ? Array.from(state.selectedMapIds) : [mapId]);
     }
 
     function inside(rect, clientX, clientY) {
@@ -1395,22 +1469,42 @@ HTML_TEMPLATE = r'''<!doctype html>
       state.drag.ghost.style.top = event.clientY + "px";
     }
 
-    function beginCardDrag(event, mapId, card) {
+    function beginCardDrag(event, mapId) {
       if (event.button !== 0) return;
       const position = state.placed.get(mapId);
       if (!position) return;
+      cleanSelection();
+      const mapIds = state.selectedMapIds.has(mapId)
+        ? Array.from(state.selectedMapIds)
+        : [mapId];
+      const startPositions = new Map();
+      const dragCards = [];
+      const dragCardByMapId = new Map();
+      for (const selectedMapId of mapIds) {
+        const selectedPosition = state.placed.get(selectedMapId);
+        if (!selectedPosition) continue;
+        startPositions.set(selectedMapId, { x: selectedPosition.x, y: selectedPosition.y });
+        const selectedCard = cards.querySelector('[data-map-id="' + selectedMapId + '"]');
+        if (selectedCard) {
+          dragCards.push(selectedCard);
+          dragCardByMapId.set(selectedMapId, selectedCard);
+        }
+      }
       event.preventDefault();
       event.stopPropagation();
       state.drag = {
         kind: "card",
         mapId,
+        mapIds: Array.from(startPositions.keys()),
         startX: event.clientX,
         startY: event.clientY,
-        startPosition: { x: position.x, y: position.y },
+        startPositions,
         moved: false,
-        card
+        shiftKey: event.shiftKey,
+        cards: dragCards,
+        cardByMapId: dragCardByMapId
       };
-      card.classList.add("is-dragging");
+      for (const dragCard of dragCards) dragCard.classList.add("is-dragging");
       updateLinkedHighlights();
     }
 
@@ -1423,13 +1517,16 @@ HTML_TEMPLATE = r'''<!doctype html>
       if (!drag.moved) return;
 
       if (drag.kind === "card") {
-        const position = state.placed.get(drag.mapId);
-        if (position) {
-          position.y = drag.startPosition.y + deltaY / state.zoom;
-          position.x = drag.startPosition.x + deltaX / state.zoom;
-          positionCard(drag.card, drag.mapId);
-          updateConnectionsForMap(drag.mapId);
+        for (const mapId of drag.mapIds) {
+          const position = state.placed.get(mapId);
+          const startPosition = drag.startPositions.get(mapId);
+          if (!position || !startPosition) continue;
+          position.y = startPosition.y + deltaY / state.zoom;
+          position.x = startPosition.x + deltaX / state.zoom;
+          const card = drag.cardByMapId.get(mapId);
+          if (card) positionCard(card, mapId);
         }
+        updateConnectionsForMaps(drag.mapIds);
       } else {
         drag.ghost.style.left = event.clientX + "px";
         drag.ghost.style.top = event.clientY + "px";
@@ -1487,6 +1584,7 @@ HTML_TEMPLATE = r'''<!doctype html>
       const drag = state.drag;
       if (!drag) return;
       if (drag.kind === "pan") {
+        if (!drag.moved && !drag.shiftKey) clearSelection();
         cleanupDrag();
         return;
       }
@@ -1503,12 +1601,13 @@ HTML_TEMPLATE = r'''<!doctype html>
           placeAtCenter(drag.mapId);
         }
       } else if (drag.moved && inside(libraryRect, pointX, pointY)) {
-        removeMap(drag.mapId);
+        removeMaps(drag.mapIds);
       } else {
-        updateConnectionsForMap(drag.mapId);
+        updateConnectionsForMaps(drag.mapIds);
       }
 
       state.suppressNextClick = drag.kind === "candidate";
+      state.suppressNextSelectionClick = drag.kind === "card" && drag.moved && drag.shiftKey;
       cleanupDrag();
     }
 
@@ -1519,7 +1618,7 @@ HTML_TEMPLATE = r'''<!doctype html>
         pointerFrame = null;
       }
       queuedPointer = null;
-      if (state.drag.kind === "card") updateConnectionsForMap(state.drag.mapId);
+      if (state.drag.kind === "card") updateConnectionsForMaps(state.drag.mapIds);
       cleanupDrag();
     }
 
@@ -1527,7 +1626,9 @@ HTML_TEMPLATE = r'''<!doctype html>
       const drag = state.drag;
       if (!drag) return;
       if (drag.item) drag.item.classList.remove("is-dragging");
-      if (drag.card) drag.card.classList.remove("is-dragging");
+      if (drag.cards) {
+        for (const dragCard of drag.cards) dragCard.classList.remove("is-dragging");
+      }
       if (drag.ghost) drag.ghost.remove();
       if (pointerFrame !== null) {
         window.cancelAnimationFrame(pointerFrame);
@@ -1548,6 +1649,7 @@ HTML_TEMPLATE = r'''<!doctype html>
         startX: event.clientX,
         startY: event.clientY,
         startOffset: { x: state.offset.x, y: state.offset.y },
+        shiftKey: event.shiftKey,
         moved: false
       };
     }
@@ -1627,6 +1729,7 @@ HTML_TEMPLATE = r'''<!doctype html>
       state.offset = { x: layout.offset.x, y: layout.offset.y };
       state.zoom = layout.zoom;
       state.placed = new Map(layout.placed.map((entry) => [entry.id, { x: entry.x, y: entry.y }]));
+      cleanSelection();
       renderAll();
       showToast("布局已导入：" + layout.placed.length + " 张地图");
     }
@@ -1753,6 +1856,11 @@ HTML_TEMPLATE = r'''<!doctype html>
     }, { passive: false });
     window.addEventListener("pointerup", finishDrag);
     window.addEventListener("pointercancel", cancelDrag);
+    window.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || importDialog.open || state.selectedMapIds.size === 0) return;
+      event.preventDefault();
+      clearSelection();
+    });
 
     initializeLibrary();
     renderAll();
