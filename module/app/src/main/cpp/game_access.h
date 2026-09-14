@@ -31,6 +31,15 @@ extern void* g_popup_on;
 extern void* g_mainmenu_draw;
 extern void* g_popup_stack;
 extern void* g_player_active;
+extern void* g_player_active_got;
+extern void* g_mapinfo_pdata_got;
+extern void* g_mapinfo_record_size;
+extern void* g_mapinfo_record_count;
+extern void* g_uichoice_itemtext;
+extern void* g_uichoice_count;
+extern void* g_uichoice_focus;
+extern void* g_uichoice_button_list_exe_got;
+extern void* g_uichoice_control_got;
 extern void* g_uimix;
 
 extern GetMoneyFn fn_get_money;
@@ -168,6 +177,12 @@ extern SetActivePlayerFn fn_set_active_player;
 extern PartySwapFn fn_party_swap;
 extern SetPositionFn fn_set_position;
 extern ChangeMapFn fn_change_map;
+extern UiChoiceButtonListExeFn fn_uichoice_button_list_exe;
+extern UiChoiceCreateControlFn fn_uichoice_create_control;
+extern UiChoiceProcessFn fn_uichoice_process;
+extern SceneEventPopupScChoiceFn fn_scene_event_popup_sc_choice;
+extern MapchangeSetFn fn_mapchange_set;
+extern MemorytextGetTextFn fn_memorytext_get_text;
 
 extern MoveAsPathFn fn_move_as_path;
 extern CharMoveFn fn_char_move;

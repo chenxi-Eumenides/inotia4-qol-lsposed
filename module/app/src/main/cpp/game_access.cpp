@@ -90,6 +90,15 @@ void resolve_global(void*& dst, uintptr_t vma, const char* macro_name) {
     g_symbol_report.emplace_back(macro_name, r.source != SymbolSource::MISS);
 }
 
+// GOT 槽地址：不把槽内的目标符号地址误当作数据全局地址，统一走 RELATIVE 反查。
+void resolve_global_slot(void*& dst, uintptr_t vma, const char* macro_name) {
+    ResolvedSymbol r = g_resolver.resolve(nullptr, vma);
+    (void)r;
+    // resolveSlot() 返回槽内目标的相对偏移；这里需要的是 GOT 槽本身地址。
+    dst = reinterpret_cast<void*>(g_base + vma);
+    g_symbol_report.emplace_back(macro_name, r.source != SymbolSource::MISS);
+}
+
 }  // namespace
 
 bool game_memory_accessible(const void* address, size_t size, char permission) {
@@ -138,6 +147,20 @@ bool bridge_init() {
     resolve_global(g_mainmenu_draw, G_MAINMENU_DRAW_VMA, "G_MAINMENU_DRAW_VMA");
     resolve_global(g_popup_stack, G_POPUP_STACK_VMA, "G_POPUP_STACK_VMA");
     resolve_global(g_player_active, G_PLAYER_ACTIVE_VMA, "G_PLAYER_ACTIVE_VMA");
+    resolve_global_slot(g_player_active_got, G_PLAYER_ACTIVE_GOT_VMA, "G_PLAYER_ACTIVE_GOT_VMA");
+    resolve_global_slot(g_mapinfo_pdata_got, G_MAPINFOBASE_PDATA_GOT_VMA,
+                        "G_MAPINFOBASE_PDATA_GOT_VMA");
+    resolve_global(g_mapinfo_record_size, G_MAPINFOBASE_RECORD_SIZE_VMA,
+                   "G_MAPINFOBASE_RECORD_SIZE_VMA");
+    resolve_global(g_mapinfo_record_count, G_MAPINFOBASE_RECORD_COUNT_VMA,
+                   "G_MAPINFOBASE_RECORD_COUNT_VMA");
+    resolve_global(g_uichoice_itemtext, G_UICHOICE_ITEMTEXT_VMA, "G_UICHOICE_ITEMTEXT_VMA");
+    resolve_global(g_uichoice_count, G_UICHOICE_COUNT_VMA, "G_UICHOICE_COUNT_VMA");
+    resolve_global(g_uichoice_focus, G_UICHOICE_FOCUS_VMA, "G_UICHOICE_FOCUS_VMA");
+    resolve_global_slot(g_uichoice_button_list_exe_got, G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA,
+                        "G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA");
+    resolve_global_slot(g_uichoice_control_got, G_UICHOICE_CONTROL_GOT_VMA,
+                        "G_UICHOICE_CONTROL_GOT_VMA");
     resolve_global(g_uimix, G_UIMIX_VMA, "G_UIMIX_VMA");
     fn_get_money = reinterpret_cast<GetMoneyFn>(g_base + fn_resolve("F_GET_MONEY_VMA", F_GET_MONEY_VMA));
     fn_get_member = reinterpret_cast<GetMemberFn>(g_base + fn_resolve("F_GET_MEMBER_VMA", F_GET_MEMBER_VMA));
@@ -272,6 +295,19 @@ bool bridge_init() {
     fn_party_swap = reinterpret_cast<PartySwapFn>(g_base + fn_resolve("F_PARTY_SWAP_VMA", F_PARTY_SWAP_VMA));
     fn_set_position = reinterpret_cast<SetPositionFn>(g_base + fn_resolve("F_SET_POSITION_VMA", F_SET_POSITION_VMA));
     fn_change_map = reinterpret_cast<ChangeMapFn>(g_base + fn_resolve("F_CHANGE_MAP_VMA", F_CHANGE_MAP_VMA));
+    fn_uichoice_button_list_exe = reinterpret_cast<UiChoiceButtonListExeFn>(
+        g_base + fn_resolve("F_UICHOICE_BUTTON_LIST_EXE_VMA", F_UICHOICE_BUTTON_LIST_EXE_VMA));
+    fn_uichoice_create_control = reinterpret_cast<UiChoiceCreateControlFn>(
+        g_base + fn_resolve("F_UICHOICE_CREATE_CONTROL_VMA", F_UICHOICE_CREATE_CONTROL_VMA));
+    fn_uichoice_process = reinterpret_cast<UiChoiceProcessFn>(
+        g_base + fn_resolve("F_UICHOICE_PROCESS_VMA", F_UICHOICE_PROCESS_VMA));
+    fn_scene_event_popup_sc_choice = reinterpret_cast<SceneEventPopupScChoiceFn>(
+        g_base + fn_resolve("F_SCENE_EVENT_POPUP_SC_CHOICE_VMA",
+                            F_SCENE_EVENT_POPUP_SC_CHOICE_VMA));
+    fn_mapchange_set = reinterpret_cast<MapchangeSetFn>(
+        g_base + fn_resolve("F_MAPCHANGE_SET_VMA", F_MAPCHANGE_SET_VMA));
+    fn_memorytext_get_text = reinterpret_cast<MemorytextGetTextFn>(
+        g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA));
     fn_move_as_path = reinterpret_cast<MoveAsPathFn>(g_base + fn_resolve("F_MOVE_AS_PATH_VMA", F_MOVE_AS_PATH_VMA));
     fn_char_move = reinterpret_cast<CharMoveFn>(g_base + fn_resolve("F_CHAR_MOVE_VMA", F_CHAR_MOVE_VMA));
     fn_char_pick_item_all = reinterpret_cast<CharPickItemAllFn>(g_base + fn_resolve("F_CHAR_PICK_ITEM_ALL_VMA", F_CHAR_PICK_ITEM_ALL_VMA));

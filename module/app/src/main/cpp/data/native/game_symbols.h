@@ -87,12 +87,16 @@ constexpr size_t C_STAT_SUB = 0x266;    // s16 动态派生缓存 [ch+0x266+i*2]
 constexpr size_t C_STAT_CALC_FLAG = 0x270; // u8 动态派生脏位
 
 // ---- popup state entry 布局（g_sPopupStateList，27 条 × 64B；见 G_POPUP_STATE_LIST_GOT_VMA）----
+constexpr size_t POPUP_STATE_COUNT = 27;      // 当前游戏版本的 state 条目数
 constexpr size_t POPUP_ENTRY_SIZE = 0x40;     // 每条 64B
 constexpr size_t POPUP_ENTRY_ENTER = 0x10;    // enter 回调
 constexpr size_t POPUP_ENTRY_PROCESS = 0x18;  // process 回调
 constexpr size_t POPUP_ENTRY_F3 = 0x28;       // f3 回调
 constexpr size_t POPUP_ENTRY_F4 = 0x30;       // f4 回调
 constexpr size_t POPUP_ENTRY_EVENT = 0x38;    // event 回调
+
+// ---- MAPINFOBASE 地图记录布局 ----
+constexpr size_t MAPINFOBASE_RECORD_NAME_TEXT_ID = 0x00; // u16 地图名称 text_id
 
 // ---- popup 栈结构（g_arrPopupStack，G_POPUP_STACK_VMA）----
 constexpr size_t POPUP_STACK_COUNT = 0x08;    // u32 栈内面板数
@@ -160,6 +164,12 @@ constexpr uintptr_t G_MAINMENU_MOREGAMES_SLOT = 0x20; // 「更多游戏」按�
 constexpr uintptr_t G_POPUP_STACK_VMA = 0x728fd8;    // g_arrPopupStack (32B) UI 弹窗栈（readelf 符号表）
 constexpr uintptr_t G_POPUP_STATE_LIST_GOT_VMA = 0x2f3000 + 0x4f0;  // GOT 槽：*(此地址) = popup state list 基址（g_sPopupStateList，27 条 × 64B：id@+0, enter@+0x10, process@+0x18, f3@+0x28, f4@+0x30, event@+0x38；POPUPSTATE_Push 0x122464 以 id×0x40 索引）
 constexpr uintptr_t G_PLAYER_ACTIVE_VMA = 0x728fc0;  // PLAYER_pActivePlayer (8B 指针) 游戏主控角色对象（PLAYER_SetActivePlayer 0x121a7c 写入；GAMEPLAY_DrawFocus 0x9d3ec / CHAR_Process 0xf1c04 读取；CHAR_MoveAsPath 驱动移动的真实对象，区别于 PARTY_GetMember 队伍槽——v0.4.38 移动修复）
+constexpr uintptr_t G_MAPINFOBASE_PDATA_GOT_VMA = 0x2f4000 + 0xe58; // MAPINFOBASE_pData GOT 槽（双层解引用后为地图记录数组）
+constexpr uintptr_t G_MAPINFOBASE_RECORD_SIZE_VMA = 0x3017b8; // MAPINFOBASE_nRecordSize（u8，值=6）
+constexpr uintptr_t G_MAPINFOBASE_RECORD_COUNT_VMA = 0x3017ba; // MAPINFOBASE_nRecordCount（u16，值=416）
+constexpr uintptr_t G_PLAYER_ACTIVE_GOT_VMA = 0x3f6000 + 0xa50; // 主控玩家指针 GOT 槽（双层解引用后为角色对象）
+constexpr uintptr_t G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA = 0x2f44d8; // UIChoice_ButtonListExe 函数指针 GOT 槽
+constexpr uintptr_t G_UICHOICE_CONTROL_GOT_VMA = 0x302550; // UICHOICE 主控件指针槽（ButtonListExe 读取）
 constexpr uintptr_t G_QUEST_SLOT_COUNT_VMA = 0x2f6000 + 0x270;  // GOT 双层解引用 u8 任务槽数量（QUESTSYSTEM_Find 0x12291c ldrb）
 constexpr uintptr_t G_QUEST_SLOTS_GOT_VMA = 0x2f4000 + 0x3d0;  // GOT 双层解引用 任务槽数组基址（12B/槽：+0 questId u16；QUESTSYSTEM_Find 0x12292c / QUESTSYSTEM_CopySlot 0x122994）
 constexpr uintptr_t G_MERC_SLOTLIST_GOT_VMA = 0x2f6000 + 0x10; // 佣兵槽数组指针（双层解引用 *(*(base+0x2f6000+0x10))，20B/槽；MERCENARYSYSTEM_IsEmptyManagerSlot 0x118b54 反汇编确认）
@@ -663,6 +673,17 @@ constexpr uintptr_t F_UIDESC_GET_DATA_VMA = 0xb2bd0;  // void* UIDesc_GetData()�
 constexpr uintptr_t F_UIDESC_DRAW_VMA = 0xb56f4;      // void () UIDesc_Draw：物品详情面板绘制（Scene_Draw_POPUP_SC_EQUIP +0x1cc bl）
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
+// ---- 世界传送（world-teleport）----
+constexpr uintptr_t F_UICHOICE_BUTTON_LIST_EXE_VMA = 0x0b1a98; // void (void*) UICHOICE 选项按钮 ExecuteProc
+constexpr uintptr_t F_UICHOICE_CREATE_CONTROL_VMA = 0x0b2110; // void (void*) UICHOICE 创建选项控件
+constexpr uintptr_t F_UICHOICE_PROCESS_VMA = 0x0b2104; // void () UICHOICE 处理函数
+constexpr uintptr_t F_SCENE_EVENT_POPUP_SC_CHOICE_VMA = 0x14a79c; // 选择面板事件回调
+constexpr uintptr_t F_MAPCHANGE_SET_VMA = 0x09c740; // void (int,int,int,int) MAPCHANGE_Set
+constexpr uintptr_t F_MEMORYTEXT_GET_TEXT_VMA = 0x118674; // const char* (uint16_t) MEMORYTEXT_GetText
+constexpr uintptr_t F_UI_PLAY_CALL_MAP_NAME_VMA = 0x0c6664; // UIPlay_CallMapName 函数入口（dynsym）
+constexpr size_t F_UI_PLAY_CALL_MAP_NAME_PATCH_OFF = 0x64; // 尾部入口 patch：0xc66c8
+constexpr size_t F_UI_PLAY_CALL_MAP_NAME_EPILOGUE_OFF = 0x68; // patch 后跳回：0xc66cc
+constexpr uintptr_t F_UI_PLAY_CALL_MAP_NAME_LEGACY_TARGET_VMA = 0x0c50f4; // 改版原传送注入块目标
 // ---- 合成系统（MIXSYSTEM，craft-batch-ui v0.5.18，libgame-symbols.txt 核对）----
 constexpr uintptr_t F_MAKE_MIX_VMA = 0x11af58;       // int (int32_t mixType, void** outItem) MIXSYSTEM_MakeItem：产物生成（词条定向继承由游戏处理），0=成功非 0=失败
 constexpr uintptr_t F_USE_STUFF_VMA = 0x11b300;      // void (int32_t mixType, void* stuffList) MIXSYSTEM_UseStuff：遍历材料槽逐条删材料（模块改用 RemoveItemDirect，此处仅登记）
@@ -925,6 +946,12 @@ using SetActivePlayerFn = int (*)(int32_t);
 using PartySwapFn = void (*)(int32_t, int32_t);
 using SetPositionFn = void (*)(int32_t, int32_t);
 using ChangeMapFn = void (*)(int32_t, int32_t, int32_t, int32_t);
+using UiChoiceButtonListExeFn = void (*)(void*); // UIChoice_ButtonListExe(control)
+using UiChoiceCreateControlFn = void (*)(void*); // UIChoice_CreateControl(control)
+using UiChoiceProcessFn = void (*)(); // UIChoice_Process()
+using SceneEventPopupScChoiceFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
+using MapchangeSetFn = void (*)(int32_t, int32_t, int32_t, int32_t);
+using MemorytextGetTextFn = const char* (*)(uint16_t);
 
 // ---- 合法操作函数签名 ----
 using MoveAsPathFn = int (*)(void*);

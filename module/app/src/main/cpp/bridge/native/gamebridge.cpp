@@ -11,6 +11,7 @@
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/quest/quest_resync.h"
+#include "feature/world_teleport/world_teleport.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -65,6 +66,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
+        world_teleport_install_if_ready();  // 世界传送：地图名入口 patch + choice ExecuteProc hook
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }

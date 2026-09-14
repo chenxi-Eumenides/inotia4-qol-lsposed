@@ -23,6 +23,7 @@
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "feature/patch/inventory_find_item_poc.h"
 #include "feature/save_backup/save_backup_bundle.h"
+#include "feature/world_teleport/world_teleport_rules.h"
 #include "../data/native/game_tiles.cpp"
 
 extern void set_host_stack_limit_enabled(bool enabled);
@@ -124,6 +125,22 @@ static void test_p7_stage4_find_item_poc() {
                                              recursive_guard) == g_find_original_result);
     CHECK_EQ(g_find_extension_calls, 0);
     recursive_guard = false;
+}
+
+static void test_world_teleport_target_map_id() {
+    CHECK_EQ(world_teleport::target_map_id(87, 1), 88);
+    CHECK_EQ(world_teleport::target_map_id(87, 10), 97);
+    CHECK_EQ(world_teleport::target_map_id(87, -1), 86);
+    CHECK_EQ(world_teleport::target_map_id(87, -10), 77);
+    CHECK_EQ(world_teleport::target_map_id(414, 1), 0);
+    CHECK_EQ(world_teleport::target_map_id(414, 10), 0);
+    CHECK_EQ(world_teleport::target_map_id(405, 10), 0);
+    CHECK_EQ(world_teleport::target_map_id(406, 10), 0);
+    CHECK_EQ(world_teleport::target_map_id(0, -1), 414);
+    CHECK_EQ(world_teleport::target_map_id(0, -10), 414);
+    CHECK_EQ(world_teleport::target_map_id(5, -10), 414);
+    CHECK_EQ(world_teleport::target_map_id(414, 0), 414);
+    CHECK_EQ(world_teleport::target_map_id(0, 0), 0);
 }
 
 static std::string base64_encode(const uint8_t* data, size_t n) {
@@ -2968,6 +2985,7 @@ static void test_p45_isolation() {
 
 int main() {
     test_p7_stage4_find_item_poc();
+    test_world_teleport_target_map_id();
     test_json_escape();
     test_base64_decode();
     test_parse_int_field();
