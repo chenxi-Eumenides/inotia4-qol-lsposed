@@ -1,6 +1,6 @@
 # 自动出售（auto-sell）设计与实现
 
-> 状态：规则/视图/扫描（阶段 B）与游戏内 UI（背包入口按钮 + 只读占位面板）native 侧已实现；扫描任务由全局开关 `autoSellEnabled`（模块设置第 6 项）驱动，宿主为统一 frame 派发点。面板配置读写与关闭即保存尚未接线。host 通过、debug 构建通过；整体 `NOT_ACCEPTED`（缺真机证据）。本册是「自动出售」功能的范围、设计、风险与验收计划权威。
+> 状态：规则/视图/扫描（阶段 B）与游戏内 UI（背包齿轮入口按钮 + 半透明配置面板）native 侧已实现；扫描任务由全局开关 `autoSellEnabled`（模块设置第 6 项）驱动，宿主为统一 frame 派发点。面板草稿仅在「保存并关闭」时应用并写入当前存档 sidecar。host 通过、debug 构建通过；整体 `NOT_ACCEPTED`（缺真机证据）。本册是「自动出售」功能的范围、设计、风险与验收计划权威。
 > 来源：`idea.md` 第 3 项 + 2026-09-12 多轮目标对齐。
 > **功能定位**：独立于扩展背包的功能，与扩展背包为「支持」关系（可扫描/处置扩展袋物品），不归属扩展背包七册。
 > 关联：扩展背包七册入口 `../extension-bag/control-plane.md`（仅「扩展袋支持」部分引用其契约）；游戏 UI 机制 `../../reference/game/ui.md`。
@@ -357,41 +357,42 @@ section `autosell` v1 payload：
 
 1. **强化规则语义（2026-09-13）**：采用「当前总强化次数 ≤ 阈值」（`I_ENCHANT` bits6-10）。理由：新装备为 0、已强化装备由保护规则排除，总次数与剩余次数一致；无每件上限字段。
 2. **出售价格（2026-09-13）**：70%（与详情页/`data_op_sell_item` 默认一致）。
-3. **配置存储与门禁（2026-09-13）**：按存档持久化到模块存档 sidecar（不用 `config.json`）；不加 `opEnabled` 门禁；入口按钮默认挂载，开关在面板内。
+3. **配置存储与门禁（2026-09-13）**：按存档持久化到模块存档 sidecar（不用 `config.json`）；不加 `opEnabled` 门禁；入口按钮与扫描任务受模块设置第 6 项 `autoSellEnabled` 门控，面板内另有按存档规则总开关。
 
-> 本册为设计稿；实现落地前先按 `control-plane.md` §2.2「增加操作」路由补读架构册/库存册，并在验收册新增操作契约卡。属性范围依赖变更时须与对应 owner 协调。
+> 本册同时记录当前 native UI 实现；行为面仍须按 §7 由主代理完成真机验收。实现涉及扩展背包处置契约时，继续按 `control-plane.md` §2.2「增加操作」路由补读架构册/库存册，并在验收册新增操作契约卡。属性范围依赖变更时须与对应 owner 协调。
 
-## 12. UI 可行性结论与原型（2026-09-13）
+## 12. UI 可行性结论与现状（2026-09-13）
 
-> 范围：本节只回答「入口按钮样式 / 类详情页弹窗 / 自绘内容 + 关闭即保存」三问，并记录已落地的**无功能原型**。原型不做真实配置读写、不做扫描接线、不做真机验证。
+> 范围：本节回答「入口按钮样式 / 类详情页弹窗 / 自绘内容 + 关闭即保存」三问，并记录当前 native UI 实现。真机行为证据仍由主代理补齐。
 
 ### 12.1 三个问题的结论
 
 | # | 问题 | 结论 | 依据 |
 |---|---|---|---|
-| ① | 背包页入口按钮能否套用「设置」按钮样式 | **机制已确认可行；样式「完全复刻」未定稿** | 设置入口与背包入口同类：都是 `ControlButton` + `ExecuteProc`，点击回调里 `UI_SetPopupProcessInfo(1,id)` 打开面板（`game_ui_settings_injection.inc:6-28`）。但「设置按钮」本身是主菜单原生按钮，其贴图/DrawProc 只随主菜单控件树存在，**不是可搬到背包页的独立素材**；可复用的原版面板入口风格只有 Options 图组 `0x59`（返回箭头）与标题图组胶囊。原型采用自绘金色边框小按钮（不依赖图像单元加载），文字分两行「自动/出售」，待复核。 |
-| ② | 点击后用「类物品详情页弹窗、双倍宽、遮住整页」 | **机制已确认可行；宽度基准未定** | 面板 = PopupState 死条目 push；`POPUPSTATE_Process/Event` 只走栈顶，push 后 EQUIP 的 process/draw/event 全部不执行（栈顶独占），触摸天然只归面板；全屏半透明遮罩 + 居中面板是设置/存档面板同款（`game_ui_settings_panel.inc:72-116`、`game_ui_savebackup_panel.inc`）。「两倍宽」的基准（详情面板实际宽度）**尚未真机量测**；原型暂取 2 × 0x180 = 0x300 = 768 ≤ 逻辑屏宽 1408。 |
-| ③ | 内容自绘 + 关闭按钮即保存 | **自绘已确认；关闭即保存的接线点已存在，本轮未接** | 自绘用 `ui_begin_frame` + `GRPX_FillRect/FillRectAlpha` + `GRPX_SetFontColorFromRGB`+`GRPX_DrawStringWithFont`（settings/savebackup 真机先例）。保存接线点：`AutoSellConfigStore` / `autosell_store` / `ModuleSaveStore` section `autosell`（§4.4）。原型关闭只写日志。 |
+| ① | 背包页入口按钮能否套用「设置」按钮样式 | **已采用原版齿轮贴图** | 背包页原版顶栏最后一个齿轮来自图组 `unit=0x0f, loc=0x05`；入口仍是 `ControlButton` + `ExecuteProc`，点击回调里 `UI_SetPopupProcessInfo(1,id)` 打开面板。绘制失败时退化为金色描边 + 矩形齿牙，不向 `ui_create_button` 传文字，避免 `CO_DATA[0]` 被当物品指针。 |
+| ② | 点击后用「类物品详情页弹窗、双倍宽、遮住整页」 | **已实现 768×576 居中面板 + 透景遮罩** | 面板 = PopupState 死条目 push；`POPUPSTATE_Process/Event` 只走栈顶，push 后 EQUIP 的 process/draw/event 全部不执行（栈顶独占），触摸天然只归面板；遮罩 alpha=`0x40`、面板底色 alpha=`0x54`，均低于原型的近不透明值，建议主代理真机优先验收文字对比度。 |
+| ③ | 内容自绘 + 关闭按钮即保存 | **已实现** | 自绘用 `fn_grpx_set_font_color_rgb` + `fn_grpx_draw_string_with_font`；打开读取 `autosell_get_runtime_config()` 到 draft，编辑期间不 apply/落盘；「保存并关闭」按 `autosell_apply_config(draft)` → 合法槽 `autosell_store_persist(current_save_slot(), draft)` 提交。 |
 
-### 12.2 原型实现（无功能）
+### 12.2 当前实现
 
-- 入口按钮：独立 `ControlButton` 挂原版袋容器（与扩展背包页签同宿主，`G_UIEQUIP_PANEL_BAG_CONTAINER_VMA`），相对位置 `(68, 2+5×70)`、尺寸 `57×57`（袋列右侧、扩展页签之后）；点击回调 `UI_SetPopupProcessInfo(1, id)`。**不依赖扩展背包开关**；由全局开关门控（§13.2），默认关闭。生命周期强校验见 §13.1。
+- 入口按钮：独立 `ControlButton` 挂原版袋容器（与扩展背包页签同宿主，`G_UIEQUIP_PANEL_BAG_CONTAINER_VMA`），相对位置 `(68, 2+5×70)`、尺寸 `57×57`（袋列右侧、扩展页签之后）；点击回调 `UI_SetPopupProcessInfo(1, id)`。**不依赖扩展背包开关**；由全局开关门控（§13.2），默认关闭。绘制优先复用 `unit=0x0f, loc=0x05` 齿轮；贴图不可用时用齿轮感 fallback。生命周期强校验见 §13.1。
 - 入口绘制宿主（关键选择）：用 `Scene_Draw_POPUP_SC_EQUIP + 0x1cc` 处 `bl UIDesc_Draw` 调用点的独立 BL patch（`call_patch_install_bl`，期望字 `0x97fdaadb`），wrapper 内先复刻 `UIDesc_Draw` 再绘制入口按钮。扩展背包占用的是同函数 `+0x210` 的 `bl GRPX_End`（`F_SCENE_DRAW_EQUIP_END_CALL_OFF`），两处地址不同，互不覆盖；扩展背包关闭时该 patch 也不安装，入口按钮仍显示。选此调用点是因为它在 `UIEquip_Draw`/`UIDesc_Draw` 之后、`GRPX_End` 之前，处于有效 GRPX 帧内，且不与扩展背包争用。
-- 面板：改写 IAP 死条目 `F_PANEL_UNK3_ENTER`（`Scene_Init_POPUP_SC_INAPP_HOT`）的 enter/process/f3/f4/event 五回调；原型不做运行期还原。
-- 面板几何：全屏半透明遮罩（`alpha=0x60`）+ 居中面板 `768×576`（`kPanelW=0x300`、`kPanelH=0x240`）。
-- 面板内容：标题「自动出售」、副标题「原型占位：不读取、不保存配置」、7 行占位规则（总开关/装备×3/宝石×2/特殊类型，右侧灰框占位值）、金色边框「关闭」按钮。关闭按钮命中用本模块自算绝对矩形（`0x17` 按下、`0x18` 抬起且仍在按钮内 → 延迟 2 帧 `(3,0)` 关闭）。
+- 面板：改写 IAP 死条目 `F_PANEL_UNK3_ENTER`（`Scene_Init_POPUP_SC_INAPP_HOT`）的 enter/process/f3/f4/event 五回调；面板状态按 PopupState 栈顶独占。
+- 面板几何：全屏遮罩 alpha=`0x40` + 深棕面板底色 alpha=`0x54`，可透出游戏场景；居中面板 `768×576`（`kPanelW=0x300`、`kPanelH=0x240`）。
+- 面板内容：存档规则总开关；品质、强化次数、总孔数、宝石档位、宝石属性范围 5 行左右选择器；特殊类型 6 个多选 chip；「保存并关闭」按钮。打开复制 `autosell_get_runtime_config()`，编辑期间只改 draft；关闭释放时按既有契约 apply 并持久化，延迟 2 帧 `(3,0)` 关闭。
+- 触摸：`0x17` 按下记录目标，`0x18` 抬起且仍在同一 `ui_hit_test` 区域才提交操作；规则值边界钳制，特殊类型按位切换。
 - 涉及文件：`feature/ui/game_ui_autosell.{h,cpp}`；`game_symbols.h` 新增 `F_UIDESC_DRAW_VMA=0xb56f4`、`F_SCENE_DRAW_EQUIP_DESC_CALL_OFF=0x1cc`；`symbol_registry.h` 登记 `UIDesc_Draw`；`game_access.{h,cpp}` + `game_access_globals.inc` 增加 `fn_uidesc_draw`；`gamebridge.cpp` 在 `nativeInit` 调 `autosell_ui_install_if_ready()`；`CMakeLists.txt` 登记新 cpp。
 
-### 12.3 未决与风险（原型不阻塞、定稿前必须处理）
+### 12.3 未决与风险
 
 1. **两倍宽基准未量测**：768 是「假定详情面板 384×2」；需真机截图量测 `UIDesc` 面板实际宽度后定稿宽度与是否真正「遮住所有背包页内容」。
-2. **死条目选择**：`F_PANEL_UNK3_ENTER`（INAPP_HOT）现被原型长期占用且不还原；IAP 已被模块屏蔽，但仍需真机确认不影响其余 IAP 路径，或补「离开背包即还原」检测。
+2. **死条目选择**：`F_PANEL_UNK3_ENTER`（INAPP_HOT）由面板长期占用且不还原；IAP 已被模块屏蔽，但仍需真机确认不影响其余 IAP 路径，或补「离开背包即还原」检测。
 3. **入口绘制宿主冲突**：`+0x1cc` 与扩展背包 `+0x210` 地址不同（静态已确认），但需真机确认双开（扩展背包 + 自动出售）时绘制时序、点击、无互相遮挡/崩溃。
-4. **触摸命中**：入口按钮命中依赖原生 `TouchHandle` 递归分发 `ExecuteProc`（扩展页签同宿主先例）；关闭按钮命中用自算绝对矩形。两者均需真机点按验证（含分辨率缩放下绘制与命中一致）。
+4. **触摸命中**：入口按钮命中依赖原生 `TouchHandle` 递归分发 `ExecuteProc`（扩展页签同宿主先例）；面板控件命中使用 `event 0x17/0x18` + `ui_hit_test`。两者均需真机点按验证（含分辨率缩放下绘制与命中一致）。
 5. **入口控件重建**：容器指针变化即判定旧控件失效；绘制前经「子控件 + 类型 + `ExecuteProc` 身份」强校验（§13.1），不通过即重建，不对未校验控件调用绘制。残余风险：容器与控件同址复用的极端情况，需真机回归覆盖多次开关背包。
-6. **入口文案**：「自动出售」拆两行「自动/出售」，待主代理复核。
+6. **入口贴图**：静态资源确认齿轮位于 `ui_002.png` 对应的 `unit=0x0f, loc=0x05`；运行时图组/分片不可用时使用 fallback，需真机确认实际视觉尺寸与裁切。
 7. **API 屏幕枚举**：面板栈顶 enter 为模块函数，`data_ui_screen()` 会落到 `panel_ui_panel`（非 `in_app`）；原型不影响，若需 API 识别需另行登记。
-8. **未做真机验证**：本轮仅静态审查 + host 测试 + Debug 构建通过；行为面（按钮显示/点击、面板开关、命中、扩展背包双开）一律待真机回归，当前整体 `NOT_ACCEPTED`。
+8. **未做真机验证**：本轮仅静态审查 + host 测试 + Debug 构建通过；行为面（按钮显示/点击、齿轮贴图、半透明透景、面板操作、命中、扩展背包双开）一律待真机回归，当前整体 `NOT_ACCEPTED`。
 
 ## 13. 入口生命周期、全局开关与 JNI 契约（2026-09-13）
 
@@ -450,4 +451,11 @@ section `autosell` v1 payload：
 
 1. **真机回归**：反复开关背包、扩展背包开/关、切档、界面开启/关闭切换，验证无悬垂崩溃；全部待真机证据，当前 `NOT_ACCEPTED`。
 2. **关闭态残留控件**：入口控件不销毁，触摸仍可能命中该位置（已由 `autosell_entry_clicked` 开关防御拦截功能影响）；是否需彻底禁用其触摸待真机评估。
-3. **两倍宽基准**、**死条目占用**、**入口文案** 同 §12.3。
+3. **两倍宽基准**、**死条目占用**、**齿轮贴图尺寸与裁切** 同 §12.3。
+
+### 13.7 当前配置面板 UI
+
+- 入口绘制优先调用 `ui_draw_control_image_part_centered(ctrl, 0x0f, 0x05, 0, 1)`；该贴图对应静态资源 `ui_002.png` 第二行第三个圆形齿轮。取不到图组或分片时使用金色矩形齿牙 fallback，并记录一次日志。
+- 面板逻辑坐标为 `768×576`，自上而下为标题、副标题、存档规则总开关、5 条规则选择器、6 个特殊类型 chip、保存并关闭；所有交互区域位于面板内，规则值显示语义化档位名。
+- 背景透景建议值：全屏黑色遮罩 `alpha=0x40`（64%），面板深棕底 `RGB565=0x2104`、`alpha=0x54`（84%）。文字使用 `fn_grpx_set_font_color_rgb` + `fn_grpx_draw_string_with_font(..., align=2)` 居中绘制。
+- 关闭调用链：`event 0x17` 按下 → `event 0x18` 同区域释放 → `autosell_apply_config(draft)` → 合法 `current_save_slot()` 调 `autosell_store_persist(slot, draft)` → 延迟 2 帧 `fn_ui_set_popup_process_info(3, 0)`；非法槽只应用、不持久化。

@@ -1,4 +1,4 @@
-// game_ui_autosell.cpp —— 自动出售 UI 原型（入口按钮 + 只读占位面板）。
+// game_ui_autosell.cpp —— 自动出售 UI（背包入口 + 按存档配置面板）。
 //
 // 机制来源（已确认）：
 // - 入口按钮挂载/点击：与扩展背包页签同宿主（原版袋容器），ControlButton 的
@@ -10,14 +10,18 @@
 // 线程模型：入口安装、绘制、面板 enter/process/event 全部运行在游戏主线程，
 // 故状态无需加锁；安装仅由 nativeInit 在 bridge 就绪后调用一次。
 //
-// 本轮范围：不做任何配置读写、不做扫描接线；关闭按钮只写日志。
+// 配置面板只在关闭按钮释放时提交 draft：先写运行时，再按当前存档槽直写 sidecar。
 
 #include "game_ui_autosell.h"
 
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
 #include "data/native/game_symbols.h"
+#include "feature/autosell/autosell_config.h"
+#include "feature/autosell/autosell_scan.h"
+#include "feature/autosell/autosell_store.h"
 #include "game_access.h"
+#include "game_state.h"
 #include "game_ui_kit.h"
 
 #include <atomic>
@@ -41,6 +45,10 @@ constexpr int kPopupStateCount = 27;
 constexpr int64_t kEntryRelX = 68;
 constexpr int64_t kEntryRelY = 2 + 5 * 70;
 constexpr int64_t kEntrySize = 57;
+constexpr int64_t kGearInset = 5;  // 齿轮贴图左上基准的内缩量（同扩展页签 47x47 图标内缩 5）
+// 真机目视微调（逻辑像素；屏幕缩放约 0.606）：左移 ≈3 物理像素、上移 ≈1 物理像素。
+constexpr int64_t kEntryNudgeX = -5;
+constexpr int64_t kEntryNudgeY = -2;
 
 // 面板几何（逻辑坐标基准 960×640；实际逻辑宽由 CalcResolution 推出，真机 1408）。
 // 宽度基准：2 × 0x180（假定物品详情面板宽 384）= 0x300 = 768 ≤ 1408。
@@ -48,33 +56,50 @@ constexpr int64_t kBaseW = 0x3c0;
 constexpr int64_t kBaseH = 0x280;
 constexpr int64_t kPanelW = 0x300;
 constexpr int64_t kPanelH = 0x240;
-constexpr int64_t kRowStartY = 0x70;
-constexpr int64_t kRowH = 0x30;
 constexpr int64_t kCloseW = 0xc0;
 constexpr int64_t kCloseH = 0x30;
+
+// world 左侧 HUD 齿轮：主代理真机探测与反汇编确认使用 unit 0x16 的 loc 0x00。
+// 同图组 loc 0x01/0x02/0x03 分别为物品、商店和刷新图标；绘制必须 flip=1。
+constexpr int32_t kGearImageUnit = 0x16;
+constexpr int32_t kGearImageLoc = 0x00;
+
+// 面板/控件填充沿用 GRPX_FillRectAlpha 的 RGB565 口径；全屏遮罩沿用 UI Kit 的
+// ABGR 黑色口径，alpha 是 0..100 百分比。真机建议先验收：遮罩 0x40（64% 黑）、
+// 面板 0x54（84% 深棕）。
+constexpr uint32_t kMaskAlpha = 0x40;
+constexpr uint32_t kPanelAlpha = 0x54;
+constexpr uint32_t kPanelFill565 = 0x2104;
+constexpr uint32_t kControlFill565 = 0x2945;
+constexpr uint32_t kSelectedFill565 = 0x5182;
 
 // ABGR 配色，与 settings/savebackup 同值。
 constexpr uint32_t kGold = 0xFF00B4D7;
 constexpr uint32_t kText = 0xFFCB9EE2;
 constexpr uint32_t kBorderGray = 0xFF606060;
 
-struct PlaceholderRow {
-    const char* label;
-    const char* value;
+constexpr int kRuleCount = 5;
+constexpr int kSpecialCount = 6;
+
+constexpr const char* kRarityLabels[] = {"关", "≤白", "≤绿", "≤蓝", "≤黄", "≤紫"};
+constexpr const char* kGemTierLabels[] = {"关", "≤低级", "≤中级", "≤高级", "≤顶级", "≤混沌"};
+constexpr const char* kGemRangeLabels[] = {"关", "≤30%", "≤60%", "≤75%", "≤90%", "≤99%"};
+constexpr const char* kSpecialLabels[] = {
+    "背包", "英雄徽章", "强化卷轴", "骰子", "可解封", "开箱",
+};
+constexpr uint32_t kSpecialBits[] = {
+    autosell::kSpecialBackpack,
+    autosell::kSpecialMercenarySeal,
+    autosell::kSpecialEnchantScroll,
+    autosell::kSpecialDice,
+    autosell::kSpecialSealed,
+    autosell::kSpecialItemBox,
 };
 
-// 占位行（静态显示；不读、不写配置）。分两列，每列 4 行。
-constexpr PlaceholderRow kRows[] = {
-    {"总开关", "关"},
-    {"装备·品质", "关闭"},
-    {"装备·强化次数", "关闭"},
-    {"装备·镶嵌空位", "关闭"},
-    {"宝石·等级", "关闭"},
-    {"宝石·属性范围", "关闭"},
-    {"特殊类型", "未启用"},
+struct PressTarget {
+    int kind = 0;      // 1=关闭，2=总开关，3=规则前，4=规则后，5=特殊类型
+    int index = -1;
 };
-constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
-constexpr int kRowsPerColumn = 4;
 
 bool g_installed = false;
 // 开关：JVM 线程写、游戏主线程读；默认关闭。
@@ -86,7 +111,11 @@ std::mutex g_entry_mtx;
 void* g_entry_ctrl = nullptr;       // 当前已挂载的入口按钮控件
 void* g_entry_container = nullptr;  // 挂载入口按钮的容器句柄（变化即旧控件失效）
 int g_close_delay = 0;              // 仅游戏主线程访问
-bool g_close_pressed = false;       // 仅游戏主线程访问
+PressTarget g_pressed_target;       // 仅游戏主线程访问
+autosell::Config g_draft;           // 面板草稿；打开时读取，关闭时一次性提交
+void* g_hit_root = nullptr;         // 仅用于复用 ui_hit_test 的绝对区域
+bool g_gear_image_loaded = false;    // 首次成功加载后不重复调用 unit loader
+bool g_gear_failure_logged = false;  // 仅游戏主线程访问
 uint8_t* g_state_entry = nullptr;   // 被改写的 PopupState 条目（仅主线程访问）
 uint8_t g_state_backup[kPopupStateSize] = {};
 int g_state_id = -1;
@@ -143,14 +172,162 @@ UiRect autosell_mask_rect(const UiRect& panel) {
 }
 
 UiRect autosell_close_rect(const UiRect& panel) {
-    return {panel.x + panel.w / 2 - kCloseW / 2, panel.y + panel.h - 0x50, kCloseW, kCloseH};
+    return {panel.x + panel.w / 2 - kCloseW / 2, panel.y + panel.h - 0x48, kCloseW, kCloseH};
 }
 
-bool autosell_close_hit(const UiRect& close, uint64_t param) {
-    if (param == 0) return false;
-    const int64_t tx = *reinterpret_cast<const int64_t*>(param);
-    const int64_t ty = *reinterpret_cast<const int64_t*>(param + 8);
-    return tx >= close.x && tx < close.x + close.w && ty >= close.y && ty < close.y + close.h;
+UiRect autosell_total_rect(const UiRect& panel) {
+    return {panel.x + 0x20, panel.y + 0x50, panel.w - 0x40, 0x2a};
+}
+
+UiRect autosell_rule_row(const UiRect& panel, int index) {
+    return {panel.x + 0x20, panel.y + 0x9a + index * 0x2d, panel.w - 0x40, 0x26};
+}
+
+UiRect autosell_rule_selector(const UiRect& panel, int index) {
+    const UiRect row = autosell_rule_row(panel, index);
+    return {panel.x + 0x140, row.y, 0x1a0, row.h};
+}
+
+UiRect autosell_rule_prev(const UiRect& panel, int index) {
+    const UiRect selector = autosell_rule_selector(panel, index);
+    return {selector.x, selector.y, 0x2c, selector.h};
+}
+
+UiRect autosell_rule_next(const UiRect& panel, int index) {
+    const UiRect selector = autosell_rule_selector(panel, index);
+    return {selector.x + selector.w - 0x2c, selector.y, 0x2c, selector.h};
+}
+
+UiRect autosell_special_chip(const UiRect& panel, int index) {
+    const int column = index % 3;
+    const int row = index / 3;
+    return {panel.x + 0x20 + column * 0xf0, panel.y + 0x1a0 + row * 0x28, 0xd8, 0x26};
+}
+
+bool autosell_hit_test(UiRect area, int64_t x, int64_t y) {
+    if (g_hit_root != nullptr) {
+        // ui_hit_test 按控件绝对原点 + 传入宽高判定；复用一个无父控件表示不同区域，
+        // 不把这些临时区域挂入游戏控件树，也不会触发默认 DrawProc。
+        ui_set_rect(g_hit_root, area);
+        return ui_hit_test(g_hit_root, x, y, {0, 0, area.w, area.h});
+    }
+    return x >= area.x && x < area.x + area.w && y >= area.y && y < area.y + area.h;
+}
+
+bool autosell_touch_xy(uint64_t param, int64_t* x, int64_t* y) {
+    // param 仅在 event 0x17/0x18 中是 {x, y, id} 坐标指针；其它事件不得解引用。
+    if (param == 0 || x == nullptr || y == nullptr) return false;
+    *x = *reinterpret_cast<const int64_t*>(param);
+    *y = *reinterpret_cast<const int64_t*>(param + 8);
+    return true;
+}
+
+int autosell_rule_value(int index) {
+    switch (index) {
+        case 0: return g_draft.rarity;
+        case 1: return g_draft.enhance;
+        case 2: return g_draft.socket;
+        case 3: return g_draft.gem_tier;
+        case 4: return g_draft.gem_range;
+        default: return 0;
+    }
+}
+
+int autosell_rule_max(int index) {
+    switch (index) {
+        case 0: return 5;
+        case 1: return 32;
+        case 2: return 16;
+        case 3: return 5;
+        case 4: return 5;
+        default: return 0;
+    }
+}
+
+void autosell_set_rule_value(int index, int value) {
+    const int clamped = value < 0 ? 0 : (value > autosell_rule_max(index) ? autosell_rule_max(index) : value);
+    switch (index) {
+        case 0: g_draft.rarity = clamped; break;
+        case 1: g_draft.enhance = clamped; break;
+        case 2: g_draft.socket = clamped; break;
+        case 3: g_draft.gem_tier = clamped; break;
+        case 4: g_draft.gem_range = clamped; break;
+        default: break;
+    }
+}
+
+const char* autosell_rule_name(int index) {
+    switch (index) {
+        case 0: return "品质";
+        case 1: return "强化次数";
+        case 2: return "总孔数";
+        case 3: return "宝石档位";
+        case 4: return "宝石属性范围";
+        default: return "";
+    }
+}
+
+void autosell_rule_value_text(int index, char* out, size_t out_size) {
+    if (out == nullptr || out_size == 0) return;
+    const int raw_value = autosell_rule_value(index);
+    const int max_value = autosell_rule_max(index);
+    const int value = raw_value < 0 ? 0 : (raw_value > max_value ? max_value : raw_value);
+    if (value == 0) {
+        std::snprintf(out, out_size, "%s", "关");
+        return;
+    }
+    if (index == 0) {
+        std::snprintf(out, out_size, "%s", kRarityLabels[value]);
+    } else if (index == 1) {
+        std::snprintf(out, out_size, "≤%d", value - 1);
+    } else if (index == 2) {
+        std::snprintf(out, out_size, "≤%d", value - 1);
+    } else if (index == 3) {
+        std::snprintf(out, out_size, "%s", kGemTierLabels[value]);
+    } else {
+        std::snprintf(out, out_size, "%s", kGemRangeLabels[value]);
+    }
+}
+
+void autosell_draw_box(UiRect rect, uint32_t fill, uint32_t fill_alpha, uint32_t border,
+                       int border_thickness) {
+    ui_fill_rect_alpha(rect, fill, fill_alpha);
+    ui_draw_panel_decor(rect, nullptr, 0, border);
+    ui_draw_vertical_line(rect.x, rect.y, rect.h, border, border_thickness);
+    ui_draw_vertical_line(rect.x + rect.w - border_thickness, rect.y, rect.h, border,
+                          border_thickness);
+}
+
+void autosell_draw_centered(UiRect rect, const char* text, uint32_t color) {
+    autosell_draw_text_at(rect.x + rect.w / 2, rect.y + 6, text, color, 2);
+}
+
+void autosell_draw_toggle(UiRect rect, bool enabled) {
+    autosell_draw_box(rect, enabled ? kSelectedFill565 : kControlFill565, 0x50,
+                      enabled ? kGold : kBorderGray, 2);
+    autosell_draw_centered(rect, enabled ? "开" : "关", enabled ? kGold : kText);
+}
+
+void autosell_draw_selector(UiRect selector, const char* value, bool active) {
+    autosell_draw_box(selector, active ? kSelectedFill565 : kControlFill565, 0x50,
+                      active ? kGold : kBorderGray, 2);
+    const UiRect prev{selector.x + 2, selector.y + 2, 0x28, selector.h - 4};
+    const UiRect next{selector.x + selector.w - 0x2a, selector.y + 2, 0x28, selector.h - 4};
+    const UiRect value_rect{selector.x + 0x2e, selector.y + 2, selector.w - 0x5c, selector.h - 4};
+    autosell_draw_centered(prev, "<", active ? kGold : kText);
+    autosell_draw_centered(value_rect, value, active ? kGold : kText);
+    autosell_draw_centered(next, ">", active ? kGold : kText);
+}
+
+void autosell_commit_draft() {
+    autosell_apply_config(g_draft);
+    const int slot = current_save_slot();
+    if (slot < 0 || slot >= 3) {
+        AUTOSELLUI_LOG("panel close applied config; no valid save slot=%d, skip persist", slot);
+        return;
+    }
+    const bool persisted = autosell_store_persist(slot, g_draft);
+    AUTOSELLUI_LOG("panel close applied config; persist slot=%d ok=%d", slot, persisted ? 1 : 0);
 }
 
 // ---- 入口按钮 ----
@@ -169,14 +346,39 @@ void autosell_entry_clicked(void* ctrl) {
 
 void autosell_entry_draw(void* ctrl) {
     if (ctrl == nullptr) return;
+    // 首次绘制显式加载 unit；成功后保持加载，不调用 UnitUnload。
+    if (!g_gear_image_loaded) {
+        g_gear_image_loaded = ui_load_image_unit(kGearImageUnit);
+    }
+    void* gear_group = fn_imgsys_get_group != nullptr ? fn_imgsys_get_group(kGearImageUnit) : nullptr;
+    void* gear_loc = fn_imgsys_get_loc != nullptr ? fn_imgsys_get_loc(kGearImageUnit, kGearImageLoc) : nullptr;
+    // 贴图约定（同扩展背包页签 extension_bag_render.inc:59-72）：fn_grpx_draw_part 以控制
+    // 左上为基准，需自行内缩居中（47x47 图标内缩 5）。ui_draw_control_image_part_centered
+    // 会在绝对坐标上再加 w/2,h/2，导致绘制落在右下（约半个图标），故此处不用它。
+    if (gear_group != nullptr && gear_loc != nullptr) {
+        int64_t gx = 0;
+        int64_t gy = 0;
+        autosell_ctrl_abs(ctrl, &gx, &gy);
+        if (ui_draw_image_part(kGearImageUnit, kGearImageLoc,
+                               static_cast<int32_t>(gx + kGearInset),
+                               static_cast<int32_t>(gy + kGearInset), 0, 1)) {
+            return;
+        }
+    }
+    if (!g_gear_failure_logged) {
+        AUTOSELLUI_LOG("gear image draw failed unit=0x%x loc=0x%x load_ok=%d group=%p loc=%p loc_null=%d",
+                       kGearImageUnit, kGearImageLoc, g_gear_image_loaded ? 1 : 0,
+                       gear_group, gear_loc, gear_loc == nullptr ? 1 : 0);
+        g_gear_failure_logged = true;
+    }
+    // 未找到图组/分片或图像绘制不可用时，使用可见的深色底、金边和「售」字 fallback。
     const UiRect size{0, 0, kEntrySize, kEntrySize};
     ui_draw_button_background(ctrl, size, 0xCC1A1008);
     ui_draw_button_border(ctrl, size, kGold, 2);
     int64_t ax = 0;
     int64_t ay = 0;
     autosell_ctrl_abs(ctrl, &ax, &ay);
-    autosell_draw_text_at(ax + kEntrySize / 2, ay + 0x12, "自动", kText, 2);
-    autosell_draw_text_at(ax + kEntrySize / 2, ay + 0x2e, "出售", kText, 2);
+    autosell_draw_text_at(ax + kEntrySize / 2, ay + 0x13, "售", kGold, 2);
 }
 
 bool autosell_is_child(void* parent, void* child) {
@@ -206,12 +408,50 @@ bool autosell_entry_valid(void* container) {
            reinterpret_cast<void*>(&autosell_entry_clicked);
 }
 
+// 动态定位入口：与扩展背包页签同一套算法（extension_bag_mix.inc:134-148）——
+// 取袋容器 child 0（原版袋 0）的绝对位置，加上「袋列右侧 68 / 下移 2」，再减去挂载层
+// （袋容器）绝对位置得到相对 rect；行号 5（与任务背包同行，扩展页签只占 0..4）。
+// 不使用绝对坐标，也不依赖子控件顺序（袋 0 = child 0）。读取失败时退回常量兜底。
+UiRect autosell_entry_rect(void* container) {
+    UiRect out{kEntryRelX, kEntryRelY, kEntrySize, kEntrySize};
+    if (container == nullptr || fn_ctrl_get_child == nullptr) return out;
+    void* bag0 = fn_ctrl_get_child(container, 0);
+    if (bag0 == nullptr || bag0 == g_entry_ctrl) return out;
+    const UiRect bag0_rect = [&]() {
+        UiRect r{};
+        ui_get_rect(bag0, &r);
+        return r;
+    }();
+    if (bag0_rect.w <= 0) return out;
+
+    int64_t bag0_abs_x = 0;
+    int64_t bag0_abs_y = 0;
+    autosell_ctrl_abs(bag0, &bag0_abs_x, &bag0_abs_y);
+    int64_t mount_abs_x = 0;
+    int64_t mount_abs_y = 0;
+    autosell_ctrl_abs(container, &mount_abs_x, &mount_abs_y);
+
+    out.x = bag0_abs_x + 68 - mount_abs_x + kEntryNudgeX;
+    // y 取「任务背包」实际 rect（袋列第 6 个 = child 5）：实测原版袋标签 y 为
+    // 0/70/139/208/277/347，并非严格的 2+index*70（第 6 个差 5），故用实际值对齐。
+    void* task_bag = fn_ctrl_get_child(container, 5);
+    UiRect task{};
+    if (task_bag != nullptr && task_bag != g_entry_ctrl && ui_get_rect(task_bag, &task) &&
+        task.h > 0) {
+        out.y = task.y + kEntryNudgeY;
+    } else {
+        out.y = bag0_abs_y + 2 - mount_abs_y + 5 * 70 + kEntryNudgeY;
+    }
+    return out;
+}
+
 void autosell_install_entry(void* container) {
     // 文字必须传 nullptr：ControlButton_SetText 会把字符串写到 CO_DATA[0]，而游戏的
     // ControlItem_Draw 会把 GetData()[0] 当物品指针传给 ITEM_DrawPorting，导致野解引用崩溃。
     // 入口外观由 autosell_entry_draw 自绘，不使用控件内置文字。
-    void* btn = ui_create_button(container, {kEntryRelX, kEntryRelY, kEntrySize, kEntrySize},
-                                 nullptr, &autosell_entry_clicked, &autosell_entry_draw);
+    const UiRect rect = autosell_entry_rect(container);
+    void* btn = ui_create_button(container, rect, nullptr, &autosell_entry_clicked,
+                                 &autosell_entry_draw);
     if (btn == nullptr) {
         AUTOSELLUI_LOG("entry create failed container=%p", container);
         return;
@@ -220,7 +460,9 @@ void autosell_install_entry(void* container) {
         fn_touch_handle_unuse_control_event_move(btn);
     }
     g_entry_ctrl = btn;
-    AUTOSELLUI_LOG("entry installed container=%p ctrl=%p", container, btn);
+    AUTOSELLUI_LOG("entry installed container=%p ctrl=%p rect=(%lld,%lld)",
+                   container, btn, static_cast<long long>(rect.x),
+                   static_cast<long long>(rect.y));
 }
 
 // 每帧（EQUIP 页）确保入口按钮存在并绘制。关闭态直接移除引用。
@@ -293,9 +535,11 @@ bool autosell_ensure_state_injected() {
 void autosell_panel_enter() {
     AUTOSELLUI_LOG("panel enter");
     autosell_ensure_state_injected();
+    g_draft = autosell_get_runtime_config();
+    if (g_hit_root == nullptr) g_hit_root = ui_create_root({0, 0, 1, 1});
     g_panel_active.store(true, std::memory_order_release);
     g_close_delay = 0;
-    g_close_pressed = false;
+    g_pressed_target = {};
 }
 
 void autosell_panel_process() {
@@ -310,37 +554,45 @@ void autosell_panel_process() {
     ui_begin_frame();
     const UiRect panel = autosell_panel_rect();
     const UiRect mask = autosell_mask_rect(panel);
-    ui_fill_rect_alpha(mask, 0xFF000000, 0x60);
-    ui_fill_rect_alpha(panel, 0xFF14100C, 0x64);
+    ui_fill_rect_alpha(mask, 0xFF000000, kMaskAlpha);
+    ui_fill_rect_alpha(panel, kPanelFill565, kPanelAlpha);
     // 金色外框。
     ui_draw_panel_decor(panel, nullptr, 0, kGold);
     ui_draw_vertical_line(panel.x, panel.y, panel.h, kGold, 3);
     ui_draw_vertical_line(panel.x + panel.w - 3, panel.y, panel.h, kGold, 3);
-    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x14, "自动出售", kGold, 2);
-    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x3c, "原型占位：不读取、不保存配置",
-                          kText, 2);
-    // 占位行两列。
-    const int64_t col_w = (panel.w - 0x60) / 2;
-    for (int i = 0; i < kRowCount; ++i) {
-        const int col = i / kRowsPerColumn;
-        const int row = i % kRowsPerColumn;
-        const int64_t x = panel.x + 0x30 + col * (col_w + 0x20);
-        const int64_t y = panel.y + kRowStartY + row * kRowH;
-        autosell_draw_text_at(x, y + 6, kRows[i].label, kText, 0);
-        const UiRect value{ x + col_w - 0x80, y + 2, 0x78, 0x24 };
-        ui_fill_rect_alpha(value, 0xFF201810, 0x50);
-        ui_draw_panel_decor(value, nullptr, 0, kBorderGray);
-        ui_draw_vertical_line(value.x, value.y, value.h, kBorderGray, 1);
-        ui_draw_vertical_line(value.x + value.w - 1, value.y, value.h, kBorderGray, 1);
-        autosell_draw_text_at(value.x + value.w / 2, value.y + 5, kRows[i].value, kText, 2);
+    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x16, "自动出售", kGold, 2);
+    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x3c,
+                          "按下方规则出售低价值物品", kText, 2);
+
+    const UiRect total = autosell_total_rect(panel);
+    autosell_draw_text_at(total.x + 0x08, total.y + 6, "存档规则总开关", kText, 0);
+    const UiRect total_toggle{total.x + total.w - 0x88, total.y, 0x78, total.h};
+    autosell_draw_toggle(total_toggle, g_draft.enabled);
+
+    autosell_draw_text_at(panel.x + 0x20, panel.y + 0x7e, "出售规则", kGold, 0);
+    for (int i = 0; i < kRuleCount; ++i) {
+        const UiRect row = autosell_rule_row(panel, i);
+        const bool active = autosell_rule_value(i) != 0;
+        char value_text[32] = {};
+        autosell_rule_value_text(i, value_text, sizeof(value_text));
+        autosell_draw_text_at(row.x + 0x08, row.y + 6, autosell_rule_name(i),
+                              active ? kText : kBorderGray, 0);
+        autosell_draw_selector(autosell_rule_selector(panel, i), value_text, active);
     }
+
+    autosell_draw_text_at(panel.x + 0x20, panel.y + 0x17e, "特殊类型（可多选）", kGold, 0);
+    for (int i = 0; i < kSpecialCount; ++i) {
+        const UiRect chip = autosell_special_chip(panel, i);
+        const bool selected = (g_draft.special_mask & kSpecialBits[i]) != 0;
+        autosell_draw_box(chip, selected ? kSelectedFill565 : kControlFill565, 0x50,
+                          selected ? kGold : kBorderGray, 2);
+        autosell_draw_centered(chip, kSpecialLabels[i], selected ? kGold : kText);
+    }
+
     // 关闭按钮。
     const UiRect close = autosell_close_rect(panel);
-    ui_fill_rect_alpha(close, 0xFF402010, 0x60);
-    ui_draw_panel_decor(close, nullptr, 0, kGold);
-    ui_draw_vertical_line(close.x, close.y, close.h, kGold, 2);
-    ui_draw_vertical_line(close.x + close.w - 2, close.y, close.h, kGold, 2);
-    autosell_draw_text_at(close.x + close.w / 2, close.y + 7, "关闭", kGold, 2);
+    autosell_draw_box(close, kSelectedFill565, 0x50, kGold, 2);
+    autosell_draw_centered(close, "保存并关闭", kGold);
     ui_end_frame();
 }
 
@@ -348,7 +600,7 @@ void autosell_panel_f3() {
     AUTOSELLUI_LOG("panel f3 (terminate)");
     g_panel_active.store(false, std::memory_order_release);
     g_close_delay = 0;
-    g_close_pressed = false;
+    g_pressed_target = {};
 }
 
 void autosell_panel_f4() {}
@@ -357,16 +609,66 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
     (void)param2;
     if (!g_panel_active.load(std::memory_order_acquire) || param == 0) return 1;
     if (g_close_delay > 0) return 1;
-    const UiRect close = autosell_close_rect(autosell_panel_rect());
+    if (event != 0x17 && event != 0x18) return 1;
+    const UiRect panel = autosell_panel_rect();
+    int64_t tx = 0;
+    int64_t ty = 0;
+    if (!autosell_touch_xy(param, &tx, &ty)) return 1;
     if (event == 0x17) {
-        if (autosell_close_hit(close, param)) g_close_pressed = true;
-    } else if (event == 0x18) {
-        if (g_close_pressed && autosell_close_hit(close, param)) {
-            // 关闭即保存的接线点（本轮只记日志，不写配置）。
-            AUTOSELLUI_LOG("close released -> close panel (no save in prototype)");
-            g_close_delay = 2;
+        g_pressed_target = {};
+        if (autosell_hit_test(autosell_close_rect(panel), tx, ty)) {
+            g_pressed_target = {1, -1};
+        } else if (autosell_hit_test(autosell_total_rect(panel), tx, ty)) {
+            g_pressed_target = {2, -1};
+        } else {
+            for (int i = 0; i < kRuleCount; ++i) {
+                if (autosell_hit_test(autosell_rule_prev(panel, i), tx, ty)) {
+                    g_pressed_target = {3, i};
+                    break;
+                }
+                if (autosell_hit_test(autosell_rule_next(panel, i), tx, ty)) {
+                    g_pressed_target = {4, i};
+                    break;
+                }
+            }
+            if (g_pressed_target.kind == 0) {
+                for (int i = 0; i < kSpecialCount; ++i) {
+                    if (autosell_hit_test(autosell_special_chip(panel, i), tx, ty)) {
+                        g_pressed_target = {5, i};
+                        break;
+                    }
+                }
+            }
         }
-        g_close_pressed = false;
+    } else if (event == 0x18) {
+        const PressTarget pressed = g_pressed_target;
+        bool released_inside = false;
+        if (pressed.kind == 1) {
+            released_inside = autosell_hit_test(autosell_close_rect(panel), tx, ty);
+        } else if (pressed.kind == 2) {
+            released_inside = autosell_hit_test(autosell_total_rect(panel), tx, ty);
+        } else if (pressed.kind == 3) {
+            released_inside = autosell_hit_test(autosell_rule_prev(panel, pressed.index), tx, ty);
+        } else if (pressed.kind == 4) {
+            released_inside = autosell_hit_test(autosell_rule_next(panel, pressed.index), tx, ty);
+        } else if (pressed.kind == 5) {
+            released_inside = autosell_hit_test(autosell_special_chip(panel, pressed.index), tx, ty);
+        }
+        if (released_inside) {
+            if (pressed.kind == 1) {
+                autosell_commit_draft();
+                AUTOSELLUI_LOG("close released -> save and close panel");
+                g_close_delay = 2;
+            } else if (pressed.kind == 2) {
+                g_draft.enabled = !g_draft.enabled;
+            } else if (pressed.kind == 3 || pressed.kind == 4) {
+                const int delta = pressed.kind == 3 ? -1 : 1;
+                autosell_set_rule_value(pressed.index, autosell_rule_value(pressed.index) + delta);
+            } else if (pressed.kind == 5 && pressed.index >= 0 && pressed.index < kSpecialCount) {
+                g_draft.special_mask ^= kSpecialBits[pressed.index];
+            }
+        }
+        g_pressed_target = {};
     }
     return 1;
 }
