@@ -15,7 +15,24 @@
 
 - monster 改版在同目录新增「个人仓库」（96 格）伴生文件：`save{slot}.dat.wh4-<16位小写hex>`（主文件，整体加密），以及游戏自建的 `save{slot}.dat.wh4-<16hex>.bak` 备份。
 - 它们与 `save{slot}.dat` 位于同一存档目录，随存档槽位；文件名后缀为相对 `save{slot}.dat` 的 `.wh4-<hex>`（可带 `.bak`）。
-- 模块不解析其内部格式，仅在 `.qol_save` v2（见 `../../development/features/save-backup.md` §3）中按字节整体备份/恢复。
+- **容器与密钥与 `save{slot}.dat` 相同**：同为 `payload + sum_cipher + seed + sum_plain`（有效负载长 = 文件长 − 3），密钥同 `HubSave_GetKey`（设备相关）。文件名后缀的 16 位 hex = 仓库 id = 明文 `+0x08` 的 u64。
+- **wh4 明文布局**（用游戏自身 `ENCRYPT_Process2(mode=1)` + 本机密钥解密得到）：
+
+  | 偏移 | 类型 | 语义 |
+  |---|---|---|
+  | +0x00 | char[8] | `"WH4JRN01"` |
+  | +0x08 | u64 | 仓库 id（= 文件名后缀） |
+  | +0x10 | u32 | 常量 `1` |
+  | +0x14 | u32 | **槽位号**（slot0→0 / slot1→1 / slot2→2；受 `+0x38` 的 FNV-1a 64 校验保护，**改写后必须同步重算 `+0x38`** 才能被游戏接受） |
+  | +0x18 / +0x20 | u64 ×2 | 哈希（同值） |
+  | +0x28 / +0x2c | u32 ×2 | 段长度 |
+  | +0x30 | u64 | 0 |
+  | +0x38 | u64 | **完整性校验值**（FNV-1a 64，小端；见下） |
+  | +0x40 起 | — | 两段 `"WH96v002"` + u32 len + u32 chk + 仓库条目（同一份内容重复两遍） |
+
+- **`+0x38` 完整性校验值（FNV-1a 64，u64 小端）**：`basis=0xCBF29CE484222325`、`prime=0x100000001B3`；覆盖 `plain[0x00..0x38)` 与 `plain[0x40..len)`（`+0x38..+0x40` 自身不参与）：`h = basis; for b in 覆盖区: h = (h ^ b) * prime`；写入 `plain[0x38..0x40) = h`（小端）。反汇编证据：隐藏段 `0x40a4-0x410c`（basis/prime 立即数 + 两段循环 + `cmp x8,x9; b.ne FAIL`）。离线对拍：真机 slot2 样本 `stored == calc == 0x79eb9e70bc54b9bd`。真机 A/B：同槽导入（未改字节）通过；**只改 `+0x14` 未重算 `+0x38`** 被拒 → 进档 SIGSEGV；**补上重算后即可跨槽**（模块已据此支持跨槽迁移）。
+- **跨设备不可用**：wh4 用源设备密钥加密，导入端按字节写回后本机无法解密；游戏读档时会因此拒绝整份存档（见 §14）。因此模块导入时必须先按本机密钥校验容器，失败则**不写盘**（`development/features/save-backup.md` §5 第 7 步）。
+- 模块不解析其内部业务格式；在 `.qol_save`（v3，见 `../../development/features/save-backup.md` §3）中随存档整体备份/恢复，可解密时以明文入包，导入端**补目标槽 + 重算 `+0x38` 后整体重加密**（往返自检）。
 
 ## 2. 文件容器格式（加密 + 校验和）
 
@@ -62,6 +79,18 @@
 - 块 1 = Player（`SAVE_LoadPlayer` 0x1273e8）。
 - 角色：主佣兵槽索引 = `[0x2f6000+0x4f8]` 有符号字节（**必须 ≥ 0**）；3 个角色槽索引来自 `[0x2f4000+0x120]+i`
   有符号字节（<0 跳过），逐个 `SAVE_LoadCharacterDirectEx`（0x128abc）；与主索引相等者写入槽结构 +0x1c。
+
+### 3.1 块 3 = Inventory（monster 改版扩展为个人仓库）
+
+原版/大修 `SAVE_LoadFile` 的块映射：块 3 → `SAVE_LoadInventory`（0x127ea4：先读 u32 金币 `SV_GoldSet`，再循环 `SAVE_LoadItem`（0x1278a0）逐条读道具，按 `item+0x10` 的 bit0x18 数量追加）。即**块 3 是背包/道具块**。
+
+monster 改版把块 3 的加载器**整体替换**为自写实现（libgame 无 section 的隐藏可执行段，vaddr `0x740000`；入口 `0x74462c` → 实现 `0x7413b4`），在其中额外处理 96 格个人仓库：
+
+- 记录仍按"逐条道具"解析（`sub_1764`：首字节 b 需满足 `0x12 ≤ b ≤ 0xFA` 且 `b&3==2`，记录长度 = `b|1`，并用记录内 id 查运行时物品表）。
+- 仓库有两种存放方式：**内嵌**在块 3 中的 `WH96v002` 段（新写法），或仅在外部 `.wh4-<id>` 文件（旧写法）。块 3 内嵌该段时读档**不读**外部 wh4；反之必须读，wh4 不可用会让整个 `SAVE_LoadFile` 返回 0（→ 不挂接角色 → `GAMESTATE_EnterPlay` 空指针 SIGSEGV，见 §14）。
+- 实测样本：本机 monster v23 的三个槽均内嵌 `WH96v002`；某源设备导出的 Lv105 档（较旧构建）无内嵌段，必须读外部 wh4。
+- **跨版本读取兼容性（2026-09-15 实证）**：基础版 `SAVE_LoadItem`/`SAVE_LoadInventory` 在 monster / 原版 / 大修三变体里**逐字节相同**；用游戏自带的原版解析器解析 monster 的记录区（slot2 剥离内嵌段后的 block3）**逐条完全对齐**（`baseLen == monsterLen`，71 条记录精确推进到 0x2ED，尾部零字节两侧都按 1 字节前进）。其余块：`SAVE_LoadInformation` / `SAVE_LoadCharacterInfoBlock` / `SAVE_LoadEvent` / `SAVE_LoadETC` 三变体字节相同；`SAVE_LoadPlayer` / `SAVE_LoadQuest` / `SAVE_LoadCharacter` 字节不同，但 `MEM_Read*` 调用序列与宽度完全一致（差异只在附加校验）。
+- ⇒ **剥离内嵌仓库段后的存档，其读取布局与基础版一致**：原版/大修可直接读入（它们没有仓库机制，会忽略 `.wh4-*` 文件）。最终确认仍需基础版实机的端到端读档（未做）。
 
 ## 4. 槽结构（内存判决，preflight 的直接依据）
 
@@ -222,3 +251,12 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 拦截后验证：裸窗口 `enter_slot(1)` → `14.30s` 直接 `world`（同意页未出现），主角凯恩在场，退档后 save1 `hero_level=1` 完好；正常启动同意页照常弹出（`main_menu` 时放行）。模块日志出现 `blocked AgreementUIActivity launch (outside main menu or world load in progress)`。
 - 未联网时同意页不弹出（用户确认），因此不能用「见过 agreement」做门禁；拦截方案不依赖该信号。
 - save1 损坏后未修复，直接 `create_slot {"slot":1,"class_idx":0}` 重建，回主菜单后 `hero_level=1` 恢复。
+
+## 14. 跨设备导入崩溃与 wh4 设备密钥（2026-09-15）
+
+- 现象：跨设备导入的 `save1.dat`（Lv105）进档时 SIGSEGV：`CHAR_GetSkillPoint+0`，fault addr `0x328`，线程 `GLThread`。
+- 崩溃链：`GAME_Initialize → PLAYER_Initialize` 先把主控指针写 0；随后 `GAMESTATE_ProcessMapChange → SAVE_Load → SAVE_LoadFile` 因**块 3 校验返回 0** 提前返回，未调用 `SAVE_LoadCharacterAll` → 主控指针保持 0 → `GAMESTATE_SetState → GAMESTATE_EnterPlay` 读技能点时空指针崩溃。
+- 拦截点：隐藏段的 wh4 读取函数 `sub_3f14`（`0x743f14`）用本机密钥调 `ENCRYPT_Process2(mode=1)` 解密外部 wh4；**双 8 位校验和不匹配 → 返回 -1 → 块 3 校验器 `0x7413b4` 返回 0**。导入的 wh4 由源设备密钥加密，在本机必然失败。
+- 缺失容忍：wh4 不存在时 `sub_3f14` 走 ENOENT 分支放行（返回 0），游戏会在下次成功读档后**自行重建**本机可用的同名 wh4（实测：重建版 md5 与导入版不同，且可正常再次进档）。
+- 模块对策：导入时按本机密钥逐个校验 wh4 容器，失败者不写盘（`development/features/save-backup.md` §5 第 7 步）；已真机验证"导入同一 bundle → 跳过 2 个 wh4 → `enter_slot(1)` 正常进入世界、角色与三人队伍完整"。
+- 变体/能力识别：模块用 `libgame.so` 校验值查离线表（生成脚本 `scripts/data/game_variant_table.py` → `data/native/game_variant_table.inc`），并以 `qol::game_feature_state()` 暴露"该构建是否具备个人仓库 / 内嵌写法 / 伴生文件机制"，供存档处理分支使用。

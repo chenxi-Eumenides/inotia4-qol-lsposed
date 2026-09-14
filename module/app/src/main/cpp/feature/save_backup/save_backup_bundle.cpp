@@ -1,5 +1,7 @@
 #include "feature/save_backup/save_backup_bundle.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +34,31 @@ uint16_t be16(const uint8_t* p) {
 
 uint32_t be32(const uint8_t* p) {
     return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | uint32_t(p[3]);
+}
+
+// wh4 / 存档明文的字段为游戏原生小端（ARM64），与 bundle 自身的大端编码区分开。
+uint16_t le16(const uint8_t* p) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) | static_cast<uint16_t>(p[1]) << 8);
+}
+
+uint32_t le32(const uint8_t* p) {
+    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
+}
+
+void wle16(std::vector<uint8_t>& out, size_t offset, uint16_t v) {
+    out[offset] = static_cast<uint8_t>(v);
+    out[offset + 1] = static_cast<uint8_t>(v >> 8);
+}
+
+void wle32(std::vector<uint8_t>& out, size_t offset, uint32_t v) {
+    out[offset] = static_cast<uint8_t>(v);
+    out[offset + 1] = static_cast<uint8_t>(v >> 8);
+    out[offset + 2] = static_cast<uint8_t>(v >> 16);
+    out[offset + 3] = static_cast<uint8_t>(v >> 24);
+}
+
+uint64_t le64(const uint8_t* p) {
+    return uint64_t(le32(p)) | uint64_t(le32(p + 4)) << 32;
 }
 
 uint64_t be64(const uint8_t* p) {
@@ -429,7 +456,196 @@ bool valid_warehouse_suffix(const std::string& s) {
     return true;
 }
 
-std::vector<uint8_t> encode_warehouse(const std::vector<WarehouseFile>& files) {
+bool warehouse_blob_decryptable(const uint8_t* data, size_t len, const char* key,
+                                WarehouseDecryptFn decrypt) {
+    // 容器为 payload + sum_cipher + seed + sum_plain：解密长度 = len-3，须 >=1。
+    if (data == nullptr || len < 4) return false;
+    // 无密钥或无解密函数：无法判定，放行（宁可不拦，保持既有导入行为）。
+    if (key == nullptr || decrypt == nullptr) return true;
+    // 必须把**完整容器**（含尾部 3 字节）交给回调：游戏 ENCRYPT_Process2(mode=1) 会读取
+    // buf[len-3 .. len) 的 sum/seed/sum_plain 做双重校验，缓冲被截断则校验必然失败
+    // （真机实测：同一文件同一密钥，截断传 len-3 → 返回 0；传完整容器 + 解密长度 len-3 → 返回 1）。
+    std::vector<uint8_t> copy(data, data + len);
+    return decrypt(copy.data(), static_cast<int>(len - 3), key) == 1;
+}
+
+const char* warehouse_reencrypt_status_name(WarehouseReencryptStatus s) {
+    switch (s) {
+        case WarehouseReencryptStatus::kOk: return "ok";
+        case WarehouseReencryptStatus::kNoKey: return "no key";
+        case WarehouseReencryptStatus::kBadPlain: return "bad plain";
+        case WarehouseReencryptStatus::kRoundtripFailed: return "roundtrip failed";
+    }
+    return "unknown";
+}
+
+namespace {
+
+uint64_t integrity_hash_range(const uint8_t* data, size_t len) {
+    if (data == nullptr || len < kWh4HashBodyStart) return 0;
+    uint64_t h = kWh4FnvOffsetBasis;
+    for (size_t i = 0; i < kWh4HashOffset; ++i) {
+        h = (h ^ data[i]) * kWh4FnvPrime;
+    }
+    for (size_t i = kWh4HashBodyStart; i < len; ++i) {
+        h = (h ^ data[i]) * kWh4FnvPrime;
+    }
+    return h;
+}
+
+}  // namespace
+
+uint64_t warehouse_plain_integrity_hash(const std::vector<uint8_t>& plain) {
+    return integrity_hash_range(plain.data(), plain.size());
+}
+
+void warehouse_plain_write_integrity_hash(std::vector<uint8_t>& plain) {
+    if (plain.size() < kWh4HashBodyStart) return;
+    const uint64_t h = warehouse_plain_integrity_hash(plain);
+    for (int i = 0; i < 8; ++i) {
+        plain[kWh4HashOffset + static_cast<size_t>(i)] =
+            static_cast<uint8_t>((h >> (8 * i)) & 0xffu);
+    }
+}
+
+WarehouseReencryptStatus warehouse_reencrypt_for_slot(
+    const std::vector<uint8_t>& plain, int slot, const char* key,
+    WarehouseEncryptFn encrypt, WarehouseDecryptFn decrypt,
+    std::vector<uint8_t>& out_cipher) {
+    out_cipher.clear();
+    if (slot < 0 || slot > 255) return WarehouseReencryptStatus::kBadPlain;
+    // 至少覆盖到 +0x38 校验字段之后，才能改写槽位并重算校验。
+    if (plain.size() < kWh4PlainMinBytes) return WarehouseReencryptStatus::kBadPlain;
+    if (key == nullptr || encrypt == nullptr || decrypt == nullptr) {
+        return WarehouseReencryptStatus::kNoKey;
+    }
+
+    std::vector<uint8_t> buf = plain;
+    // +0x14 可改写：写目标槽后必须同步重算 +0x38 完整性校验，否则游戏拒绝。
+    wle32(buf, kWh4PlainSlotOffset, static_cast<uint32_t>(slot));
+    warehouse_plain_write_integrity_hash(buf);
+    // mode=0 加密就地写入 len+3 字节，需预留容量。
+    buf.resize(plain.size() + 3, 0);
+    if (encrypt(buf.data(), static_cast<int>(plain.size()), key) != 1) {
+        return WarehouseReencryptStatus::kRoundtripFailed;
+    }
+
+    // 往返自检：解密返回 1、magic 正确、slot 正确，且重算 hash == 存储值。
+    // 注意：hash 只覆盖**明文**部分（plain.size()），不含 mode=0 追加的 3 字节容器尾。
+    std::vector<uint8_t> check = buf;
+    if (decrypt(check.data(), static_cast<int>(check.size() - 3), key) != 1 ||
+        std::memcmp(check.data(), kWh4PlainMagic, 8) != 0 ||
+        le32(check.data() + kWh4PlainSlotOffset) != static_cast<uint32_t>(slot) ||
+        integrity_hash_range(check.data(), plain.size()) != le64(check.data() + kWh4HashOffset)) {
+        return WarehouseReencryptStatus::kRoundtripFailed;
+    }
+
+    out_cipher.swap(buf);
+    return WarehouseReencryptStatus::kOk;
+}
+
+const char* inline_warehouse_strip_name(InlineWarehouseStrip s) {
+    switch (s) {
+        case InlineWarehouseStrip::kStripped: return "stripped";
+        case InlineWarehouseStrip::kNoSegment: return "no segment";
+        case InlineWarehouseStrip::kNotAtEnd: return "not at block end";
+        case InlineWarehouseStrip::kMalformed: return "malformed block table";
+    }
+    return "unknown";
+}
+
+InlineWarehouseStrip warehouse_strip_inline_segment(std::vector<uint8_t>& plain) {
+    constexpr size_t kMagicLen = 8;      // "WH96v002"
+    constexpr size_t kBlockCountMin = 4; // 需要 block3
+    constexpr size_t kBlockCountMax = 64;
+    // 头 8 字节 + 块表（每项 u16 offset_rel + u16 len）。
+    if (plain.size() < 8 + kBlockCountMin * 4) return InlineWarehouseStrip::kMalformed;
+    const uint16_t off0 = le16(plain.data() + 8);
+    if (off0 == 0 || off0 % 4 != 0) return InlineWarehouseStrip::kMalformed;
+    const size_t block_count = off0 / 4;  // 块0 数据紧跟块表 → offset_rel0 == 表字节数
+    if (block_count < kBlockCountMin || block_count > kBlockCountMax) {
+        return InlineWarehouseStrip::kMalformed;
+    }
+    const size_t table_end = 8 + block_count * 4;
+    if (table_end > plain.size()) return InlineWarehouseStrip::kMalformed;
+
+    struct Span {
+        size_t start;
+        size_t len;
+    };
+    std::vector<Span> spans(block_count);
+    for (size_t i = 0; i < block_count; ++i) {
+        const uint16_t off = le16(plain.data() + 8 + i * 4);
+        const uint16_t len = le16(plain.data() + 8 + i * 4 + 2);
+        const size_t start = 8 + static_cast<size_t>(off);
+        if (start < table_end || start > plain.size() ||
+            static_cast<size_t>(len) > plain.size() - start) {
+            return InlineWarehouseStrip::kMalformed;
+        }
+        spans[i] = Span{start, static_cast<size_t>(len)};
+    }
+    // 块必须无重叠、无空隙地铺满 [table_end, plain.size())（允许索引顺序≠物理顺序，重排时纠正）。
+    {
+        std::vector<size_t> order(block_count);
+        for (size_t i = 0; i < block_count; ++i) order[i] = i;
+        std::sort(order.begin(), order.end(),
+                  [&spans](size_t a, size_t b) { return spans[a].start < spans[b].start; });
+        size_t cursor = table_end;
+        for (size_t idx : order) {
+            if (spans[idx].start != cursor) return InlineWarehouseStrip::kMalformed;
+            cursor += spans[idx].len;
+        }
+        if (cursor != plain.size()) return InlineWarehouseStrip::kMalformed;
+    }
+
+    // block3 内定位**最后一个** WH96v002 段。
+    const Span& b3 = spans[3];
+    const size_t b3_end = b3.start + b3.len;
+    size_t seg_pos = std::string::npos;
+    for (size_t p = b3.start; p + kMagicLen <= b3_end; ++p) {
+        if (std::memcmp(plain.data() + p, kInlineWarehouseMagic, kMagicLen) == 0) {
+            seg_pos = p;
+        }
+    }
+    if (seg_pos == std::string::npos) return InlineWarehouseStrip::kNoSegment;
+    if (seg_pos + kMagicLen + 4 > b3_end) return InlineWarehouseStrip::kNotAtEnd;
+    const uint32_t seg_len = le32(plain.data() + seg_pos + kMagicLen);
+    const size_t seg_total = kMagicLen + static_cast<size_t>(seg_len);
+    // 段必须落在 block3 内，且其后只允许**零填充**（0x00 对改版与基础两个解析器都等价于
+    // “空记录、前进 1 字节”，真机 probe24 实测）——否则保持原样不剥离。
+    // 剥离时**连同零填充一起截断**：真机实测「只去段、保留零填充」会让改版校验失败
+    // （slot0 复现崩溃），而截断到段起点是已验证可通过的形式（slot2 实测进档正常）。
+    const size_t trailer_begin = seg_pos + seg_total;
+    if (trailer_begin > b3_end) return InlineWarehouseStrip::kNotAtEnd;
+    for (size_t p = trailer_begin; p < b3_end; ++p) {
+        if (plain[p] != 0) return InlineWarehouseStrip::kNotAtEnd;
+    }
+
+    // 重排为连续布局：header + 块表(index 顺序) + 各块数据；block3 截断到段起点。
+    std::vector<size_t> new_len(block_count);
+    for (size_t i = 0; i < block_count; ++i) new_len[i] = spans[i].len;
+    new_len[3] = seg_pos - b3.start;
+
+    std::vector<uint8_t> out;
+    out.reserve(plain.size() - seg_total);
+    out.insert(out.end(), plain.begin(), plain.begin() + static_cast<std::ptrdiff_t>(table_end));
+    size_t offset = block_count * 4;  // offset_rel 相对 plain+8
+    for (size_t i = 0; i < block_count; ++i) {
+        if (offset > 0xFFFFu) return InlineWarehouseStrip::kMalformed;  // offset_rel 为 u16
+        wle16(out, 8 + i * 4, static_cast<uint16_t>(offset));
+        wle16(out, 8 + i * 4 + 2, static_cast<uint16_t>(new_len[i]));
+        out.insert(out.end(), plain.begin() + static_cast<std::ptrdiff_t>(spans[i].start),
+                   plain.begin() + static_cast<std::ptrdiff_t>(spans[i].start + new_len[i]));
+        offset += new_len[i];
+    }
+    plain.swap(out);
+    return InlineWarehouseStrip::kStripped;
+}
+
+namespace {
+
+std::vector<uint8_t> encode_warehouse_impl(const std::vector<WarehouseFile>& files,
+                                           bool with_flags) {
     // 空列表编码为空 blob：无仓库时 bundle 与旧版 checksum 逐字节一致（硬约束）。
     if (files.empty()) return std::vector<uint8_t>();
     std::vector<uint8_t> out;
@@ -438,12 +654,14 @@ std::vector<uint8_t> encode_warehouse(const std::vector<WarehouseFile>& files) {
         wb16(out, static_cast<uint16_t>(f.suffix.size()));
         out.insert(out.end(), f.suffix.begin(), f.suffix.end());
         wb32(out, static_cast<uint32_t>(f.data.size()));
+        if (with_flags) out.push_back(f.flags);
         out.insert(out.end(), f.data.begin(), f.data.end());
     }
     return out;
 }
 
-bool decode_warehouse(const uint8_t* data, size_t size, std::vector<WarehouseFile>& out) {
+bool decode_warehouse_impl(const uint8_t* data, size_t size, bool with_flags,
+                           std::vector<WarehouseFile>& out) {
     out.clear();
     if (size == 0) return true;  // 空 blob = 无仓库文件
     if (data == nullptr || size < 2) return false;
@@ -465,9 +683,18 @@ bool decode_warehouse(const uint8_t* data, size_t size, std::vector<WarehouseFil
         const uint32_t data_len = be32(data + off);
         off += 4;
         if (data_len > kMaxWarehouseDataBytes) return false;
+        uint8_t flags = 0;
+        if (with_flags) {
+            if (off + 1 > size) return false;
+            flags = data[off];
+            off += 1;
+            // 未知 flags 位 fail-closed（当前仅定义 bit0=明文）。
+            if ((flags & ~kWarehouseFlagPlain) != 0) return false;
+        }
         if (off + data_len > size) return false;
         WarehouseFile f;
         f.suffix = std::move(suffix);
+        f.flags = flags;
         f.data.assign(data + off, data + off + data_len);
         off += data_len;
         files.push_back(std::move(f));
@@ -475,6 +702,24 @@ bool decode_warehouse(const uint8_t* data, size_t size, std::vector<WarehouseFil
     if (off != size) return false;
     out = std::move(files);
     return true;
+}
+
+}  // namespace
+
+std::vector<uint8_t> encode_warehouse(const std::vector<WarehouseFile>& files) {
+    return encode_warehouse_impl(files, /*with_flags=*/true);
+}
+
+std::vector<uint8_t> encode_warehouse_v2(const std::vector<WarehouseFile>& files) {
+    return encode_warehouse_impl(files, /*with_flags=*/false);
+}
+
+bool decode_warehouse(const uint8_t* data, size_t size, std::vector<WarehouseFile>& out) {
+    return decode_warehouse_impl(data, size, /*with_flags=*/true, out);
+}
+
+bool decode_warehouse_v2(const uint8_t* data, size_t size, std::vector<WarehouseFile>& out) {
+    return decode_warehouse_impl(data, size, /*with_flags=*/false, out);
 }
 
 // ---- bundle 组装与解析 ----
@@ -522,7 +767,7 @@ void build_bundle(int source_slot, long long export_time_ms, const std::vector<u
     out.insert(out.end(), plain.begin(), plain.end());
     wb32(out, static_cast<uint32_t>(module.size()));
     out.insert(out.end(), module.begin(), module.end());
-    // v2：个人仓库段（空 blob 时仅写入 u32 0）。
+    // 个人仓库段（空 blob 时仅写入 u32 0）。
     wb32(out, static_cast<uint32_t>(warehouse_blob.size()));
     out.insert(out.end(), warehouse_blob.begin(), warehouse_blob.end());
     wb16(out, static_cast<uint16_t>(meta_json.size()));
@@ -536,8 +781,11 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     if (crc32_ieee(bytes, body_size) != be32(bytes + body_size)) return false;
     if (be32(bytes) != kBundleMagic) return false;
     const uint16_t version = be16(bytes + 4);
-    // 接受 v1（无仓库段）与 v2（含仓库段）。
-    if (version != kBundleVersion && version != kBundleVersionV1) return false;
+    // 接受 v1（无仓库段）、v2（仓库段无 flags）、v3（仓库段带 flags）。
+    if (version != kBundleVersion && version != kBundleVersionV2 &&
+        version != kBundleVersionV1) {
+        return false;
+    }
     const int source_slot = bytes[6];
     if (source_slot > 2) return false;
     const long long export_time_ms = static_cast<long long>(be64(bytes + 10));
@@ -557,12 +805,15 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
 
     std::vector<WarehouseFile> warehouse;
     bool has_warehouse = false;
-    if (version == kBundleVersion) {
+    if (version == kBundleVersionV2 || version == kBundleVersion) {
         if (off + 4 > body_size) return false;
         const uint32_t warehouse_len = be32(bytes + off);
         off += 4;
         if (warehouse_len > kMaxWarehouseBlobBytes || off + warehouse_len > body_size) return false;
-        if (!decode_warehouse(bytes + off, warehouse_len, warehouse)) return false;
+        const bool decoded = (version == kBundleVersionV2)
+                                 ? decode_warehouse_v2(bytes + off, warehouse_len, warehouse)
+                                 : decode_warehouse(bytes + off, warehouse_len, warehouse);
+        if (!decoded) return false;
         off += warehouse_len;
         has_warehouse = true;
     }

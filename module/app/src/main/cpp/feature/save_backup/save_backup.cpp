@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/native/game_feature.h"
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
 #include "feature/save_backup/save_backup_bundle.h"
@@ -39,6 +40,7 @@
 namespace {
 
 #define SB_LOG(...) QOL_LOG_INFO(QolDomain::kSaveBackup, __VA_ARGS__)
+#define SB_LOG_WARN(...) QOL_LOG_WARN(QolDomain::kSaveBackup, __VA_ARGS__)
 
 constexpr const char* kBackupDirName = "save_backup";
 constexpr const char* kRollbackDirName = ".rollback";
@@ -441,6 +443,39 @@ bool encrypt_plain_to_slot(int32_t slot, const std::vector<uint8_t>& plain,
     return true;
 }
 
+// wh4 容器与 saveN.dat 同方案；mode=1 为解密，返回 1 表示双校验和通过（本机密钥可解）。
+int warehouse_decrypt_mode1(void* buf, int len, const char* key) {
+    return fn_encrypt_process2(buf, len, 1, key);
+}
+
+// mode=0 为加密，就地写入 len+3 字节（需 len+3 容量），返回 1 成功。
+int warehouse_encrypt_mode0(void* buf, int len, const char* key) {
+    return fn_encrypt_process2(buf, len, 0, key);
+}
+
+// 判断 bundle 内的 wh4 容器在本机是否可用（可解密）。用于导入时拦截「换设备后解不开」的 wh4：
+// 这类文件落盘会导致进档时 block3 校验失败 → SAVE_Load 提前返回 → SIGSEGV。
+// fn_encrypt_process2 缺失时传 nullptr 回调解密，纯逻辑层放行（无法判定时不拦）。
+bool warehouse_blob_usable_on_this_device(const uint8_t* data, size_t len, const char* key) {
+    const save_backup::WarehouseDecryptFn decrypt =
+        (fn_encrypt_process2 != nullptr) ? &warehouse_decrypt_mode1 : nullptr;
+    return save_backup::warehouse_blob_decryptable(data, len, key, decrypt);
+}
+
+// v3 flags=1 明文项：补目标 slot + 用本机密钥重加密 + 往返自检。
+// fn 指针缺失时传 nullptr，纯逻辑层返回 kNoKey（宁缺勿错，不写盘）。
+save_backup::WarehouseReencryptStatus warehouse_reencrypt_on_device(
+    const save_backup::WarehouseFile& wf, int slot, const char* key,
+    std::vector<uint8_t>& out_cipher) {
+    const bool available = fn_encrypt_process2 != nullptr;
+    const save_backup::WarehouseEncryptFn encrypt =
+        available ? &warehouse_encrypt_mode0 : nullptr;
+    const save_backup::WarehouseDecryptFn decrypt =
+        available ? &warehouse_decrypt_mode1 : nullptr;
+    return save_backup::warehouse_reencrypt_for_slot(wf.data, slot, key, encrypt, decrypt,
+                                                     out_cipher);
+}
+
 // 定位原版存档目录：优先 dataDir 下含 save*.dat 的子目录；否则 dataDir/hex(MD5(key)) 并建目录。
 // 返回 0=成功、1=未找到（含 key 不可得）、2=建目录失败。
 int locate_save_directory(std::string& out) {
@@ -680,12 +715,58 @@ std::string save_backup_export_json(int slot) {
                     }
                     save_backup::WarehouseFile wf;
                     wf.suffix = suffix;
-                    wf.data.swap(bytes);
+                    // v3：优先用本机密钥解密为明文存储（导入端可用目标设备密钥重加密，跨设备可移植）；
+                    // 解密失败（长度不足/无 key/双校验和不通过）则原样存密文，flags=0 走旧校验路径。
+                    // 注意：mode=1 会读 buf[len-3 .. len) 的尾部 3 字节做校验，必须传**完整容器**，
+                    // 只传 payload 会越界读到垃圾导致必然返回 0（真机实测）。
+                    bool decrypted = false;
+                    if (bytes.size() >= 4 && fn_hub_save_get_key != nullptr &&
+                        fn_encrypt_process2 != nullptr) {
+                        const char* wh_key = fn_hub_save_get_key();
+                        if (wh_key != nullptr) {
+                            const size_t payload_len = bytes.size() - 3;
+                            std::vector<uint8_t> buf = bytes;
+                            if (fn_encrypt_process2(buf.data(), static_cast<int>(payload_len), 1,
+                                                    wh_key) == 1) {
+                                wf.data.assign(buf.begin(), buf.begin() + payload_len);
+                                wf.flags = save_backup::kWarehouseFlagPlain;
+                                decrypted = true;
+                                SB_LOG("save backup export slot=%d: warehouse decrypted for "
+                                       "cross-device: %s (%zu bytes)",
+                                       slot, name.c_str(), wf.data.size());
+                            }
+                        }
+                    }
+                    if (!decrypted) {
+                        wf.data.swap(bytes);
+                        wf.flags = 0;
+                        SB_LOG("save backup export slot=%d: warehouse kept as ciphertext "
+                               "(decrypt unavailable): %s (%zu bytes)",
+                               slot, name.c_str(), wf.data.size());
+                    }
                     warehouse.push_back(std::move(wf));
                 }
             }
         }
     }
+    // 导出统一分离：若本次确实收齐了外部 wh4，则把存档 block3 内嵌的 WH96v002 仓库段剥离，
+    // 使存档退回基础形态、仓库一律走外部 wh4（跨设备可重加密）。保守规则：段不在 block3 末尾
+    // 或块表异常时维持原状。无外部 wh4 时不得剥离（否则丢仓库）。
+    if (!warehouse.empty()) {
+        const save_backup::InlineWarehouseStrip strip =
+            save_backup::warehouse_strip_inline_segment(plain);
+        if (strip == save_backup::InlineWarehouseStrip::kStripped) {
+            SB_LOG("save backup export slot=%d: inline WH96v002 segment stripped (origLen=%zu)", slot,
+                   plain.size());
+        } else {
+            SB_LOG("save backup export slot=%d: inline warehouse kept (%s)", slot,
+                   save_backup::inline_warehouse_strip_name(strip));
+        }
+    } else {
+        SB_LOG("save backup export slot=%d: no external warehouse collected, keep inline warehouse",
+               slot);
+    }
+
     const std::vector<uint8_t> warehouse_blob = save_backup::encode_warehouse(warehouse);
 
     const long long export_time_ms = now_ms();
@@ -801,6 +882,47 @@ std::string save_backup_import_json(const char* checksum, int slot) {
             return op_err("save directory not found");
     }
 
+    // 2a) 仓库写回预校验/预加密（必须在写任何文件之前，保证 .rollback/ 与现存文件不被触碰）：
+    //     fail-closed —— 任一项失败整次导入失败。
+    //       flags=0（密文 wh4）：必须能用本机密钥解密（v2 旧备份仅支持同设备导入；
+    //                            导入后再导出 v3 才变为可跨设备）。
+    //       flags=1（明文 wh4）：补 slot + 重算 +0x38 完整性校验 + 重加密 + 往返自检。
+    //     变体能力门禁 unsupported → 整步跳过（保持既有行为，不校验也不写）。
+    std::vector<std::vector<uint8_t>> wh_payloads;
+    qol::FeatureState wh_state = qol::FeatureState::kUnsupported;
+    bool wh_write = false;
+    if (parsed.has_warehouse) {
+        wh_state = qol::game_feature_state(qol::GameFeature::kWarehouseCompanionFile);
+        if (wh_state == qol::FeatureState::kUnsupported) {
+            SB_LOG("save backup import: slot%d warehouse companion unsupported (%s), skip %zu file(s)",
+                   slot, qol::game_feature_state_name(wh_state), parsed.warehouse.size());
+        } else {
+            wh_write = true;
+            const char* wh_key =
+                (fn_hub_save_get_key != nullptr) ? fn_hub_save_get_key() : nullptr;
+            wh_payloads.resize(parsed.warehouse.size());
+            for (size_t i = 0; i < parsed.warehouse.size(); ++i) {
+                const save_backup::WarehouseFile& wf = parsed.warehouse[i];
+                if ((wf.flags & save_backup::kWarehouseFlagPlain) != 0) {
+                    const save_backup::WarehouseReencryptStatus status =
+                        warehouse_reencrypt_on_device(wf, slot, wh_key, wh_payloads[i]);
+                    if (status != save_backup::WarehouseReencryptStatus::kOk) {
+                        return op_err(("warehouse companion reencrypt failed (" +
+                                       std::string(save_backup::warehouse_reencrypt_status_name(status)) +
+                                       "): " + wf.suffix).c_str());
+                    }
+                } else {
+                    if (!warehouse_blob_usable_on_this_device(wf.data.data(), wf.data.size(),
+                                                              wh_key)) {
+                        return op_err(("warehouse companion not decryptable on this device: " +
+                                       wf.suffix).c_str());
+                    }
+                    wh_payloads[i] = wf.data;
+                }
+            }
+        }
+    }
+
     // 3) 安全备份现存文件到 .rollback/。
     const std::string rollback_dir = dir + "/" + kRollbackDirName;
     if (!ensure_dir(rollback_dir)) return op_err("rollback dir mkdir failed");
@@ -844,8 +966,9 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
 
-    // 6) 个人仓库伴生文件写回：仅当 v2 备份 parsed.has_warehouse 为真时执行；
+    // 6) 个人仓库伴生文件写回：仅当 v2/v3 备份 parsed.has_warehouse 为真时执行；
     //    v1 旧备份（has_warehouse=false）完全跳过，绝不触碰现存 wh4 文件（保护旧备份导入用户）。
+    //    预校验/预加密已完成（见 2a），此处只做落盘。
     //    **语义为 additive**：只新增/覆盖 bundle 内后缀对应的目标文件，不删除目标槽其它
     //    后缀的 wh4 文件——理由：模块不掌握游戏仓库文件的完整集合语义，批量删除可能误删
     //    其它存档数据。suffix 已由 decode_warehouse 校验（`.wh4-` 开头、无路径分隔/`..`），
@@ -867,10 +990,14 @@ std::string save_backup_import_json(const char* checksum, int slot) {
             remove_file(it->rb);
         }
     };
-    if (parsed.has_warehouse) {
-        for (const save_backup::WarehouseFile& wf : parsed.warehouse) {
+    if (wh_write) {
+        size_t wh_written = 0;
+        size_t wh_reencrypted = 0;
+        for (size_t i = 0; i < parsed.warehouse.size(); ++i) {
+            const save_backup::WarehouseFile& wf = parsed.warehouse[i];
             const std::string target =
                 save_dir + "/save" + std::to_string(slot) + ".dat" + wf.suffix;
+            const std::vector<uint8_t>& payload = wh_payloads[i];
             const bool existed = file_exists(target);
             std::string rb;
             if (existed) {
@@ -884,12 +1011,19 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                 }
             }
             wh_rollback.push_back(WhRollback{target, rb, existed});
-            if (!write_file_bytes_atomic(target, wf.data.data(), wf.data.size())) {
+            if (!write_file_bytes_atomic(target, payload.data(), payload.size())) {
                 restore_warehouse();
                 restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
                                       sidecar_existed);
                 return op_err("warehouse file write failed");
             }
+            ++wh_written;
+            if ((wf.flags & save_backup::kWarehouseFlagPlain) != 0) ++wh_reencrypted;
+        }
+        if (wh_written > 0) {
+            SB_LOG("save backup import: slot%d warehouse companion files wrote=%zu skipped=0 "
+                   "reencrypted=%zu (state=%s)",
+                   slot, wh_written, wh_reencrypted, qol::game_feature_state_name(wh_state));
         }
     }
 

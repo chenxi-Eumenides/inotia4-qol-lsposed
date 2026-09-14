@@ -147,3 +147,14 @@ target_include_directories(game_feature_tests PRIVATE
 )
 target_compile_features(game_feature_tests PRIVATE cxx_std_17)
 add_test(NAME game_feature_tests COMMAND game_feature_tests)
+
+# wh4 容器可用性判定纯逻辑测试（末尾追加）
+add_executable(save_warehouse_validate_tests
+    test_save_warehouse_validate.cpp
+    ${CPP_DIR}/feature/save_backup/save_backup_bundle.cpp
+)
+target_include_directories(save_warehouse_validate_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(save_warehouse_validate_tests PRIVATE cxx_std_17)
+add_test(NAME save_warehouse_validate_tests COMMAND save_warehouse_validate_tests)

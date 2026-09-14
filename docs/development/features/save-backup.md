@@ -21,12 +21,12 @@
 
 ## 3. `.qol_save` 备份格式（大端）
 
-当前为 v2；v1 旧备份仍可读（`parse_bundle` 接受 version 1 与 2）。
+当前为 v3；v1/v2 旧备份仍可读（`parse_bundle` 接受 version 1、2 与 3）。
 
 ```text
-# v2（当前）
+# v3（当前）
 u32 magic = 0x51534231 ("QSB1")
-u16 formatVersion = 2
+u16 formatVersion = 3
 u8  sourceSlot                 # 导出源槽（元数据；payload 内 slot 已归一化）
 u8[3] reserved = 0
 u64 exportTimeMs
@@ -42,18 +42,21 @@ u32 crc32                      # 覆盖此前全部字节
 ```
 
 ```text
-# v1（旧备份，无仓库段）
+# v2（旧备份，仓库段无 flags）
+... | u32 warehouseLen | warehouseBlob | u16 metaLen | metaJson | u32 crc32
+# v1（更旧备份，无仓库段）
 ... | u32 moduleLen | module | u16 metaLen | metaJson | u32 crc32
 ```
 
-- **v1 兼容**：`formatVersion==1` 时无 `warehouseLen/warehouseBlob` 段，解析结果 `has_warehouse=false`、仓库列表为空；导入时完全跳过仓库写回（见 §5），不触碰现存 wh4 文件。
-- `warehouseBlob` 编码：空列表编码为**空 blob（0 字节）**——保证无仓库时 bundle 摘要与旧版逐字节一致；非空时为 `u16 count` + 每项 `u16 suffixLen | suffix | u32 dataLen | data`。`suffix` 为相对 `save{slot}.dat` 的后缀（如 `.wh4-000001a043a2bba1`、`.wh4-000001a043a2bba1.bak`）。
+- **v1/v2 兼容**：`formatVersion==1` 时无 `warehouseLen/warehouseBlob` 段，解析结果 `has_warehouse=false`、仓库列表为空；`formatVersion==2` 时仓库段按旧编码（无 flags）解析，每项 `flags` 恒为 0。导入时完全跳过仓库写回（v1），或按旧「可解密才写」路径处理（v2），见 §5。
+- `warehouseBlob` 编码（v3）：空列表编码为**空 blob（0 字节）**——保证无仓库时 bundle 摘要与旧版逐字节一致；非空时为 `u16 count` + 每项 `u16 suffixLen | suffix | u32 dataLen | u8 flags | data`。`flags` bit0=1 表示 `data` 为**明文**（导出时已用源设备密钥解密；导入时补目标槽、重算 `+0x38` 完整性校验后重加密），bit0=0 表示 `data` 为原始容器密文（源端解密失败时的兜底，也是 v1/v2 旧备份的形态）。未定义的 flags 位在解析时 fail-closed。v2 的每项为 `suffixLen | suffix | dataLen | data`（无 flags）。**wh4 明文 `+0x14` 槽位号可改写，但必须同步重算 `+0x38` 的 FNV-1a 64 校验**（`docs/reference/game/save.md` §1.1）；只改槽不重算会被游戏拒绝（真机 A/B 进档 SIGSEGV）。
+- `suffix` 为相对 `save{slot}.dat` 的后缀（如 `.wh4-000001a043a2bba1`、`.wh4-000001a043a2bba1.bak`）；主文件与 `.bak` 各自独立为一项。
 - 上限（解析 fail-closed）：文件数 ≤64、suffix ≤64B、单文件 ≤4MiB、blob ≤8MiB；suffix 必须 `.wh4-` 开头、字符为 ASCII 字母数字与 `.`/`-`、不含 `..`。
 - 文件名：`<yyyyMMdd-HHmmss>_s<sourceSlot>_<checksum>.qol_save`（全 ASCII，同秒冲突加 `_1`、`_2`）。
 - **备份标识 `checksum`** = `sha256(origPlain ‖ module ‖ warehouseBlob)` 前 12 位小写 hex，与文件名末段一致；导入/删除/去重均以它定位备份，不使用文件名。无仓库时 `warehouseBlob` 为空 ⇒ checksum 与旧版一致。
-- `metaJson`：`source_slot`、`export_time`、`map_id`、`class_idx`、`class_name`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`、`warehouse_count`、`warehouse_sha256`（`warehouse_sha256` 为 blob 的 SHA-256，空仓库时为空串；旧备份缺字段时 UI 退化显示）。
+- `metaJson`：`source_slot`、`export_time`、`map_id`、`class_idx`、`class_name`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`、`warehouse_count`、`warehouse_sha256`（`warehouse_sha256` 为 blob 的 SHA-256，空仓库时为空串；旧备份缺字段时 UI 退化显示）。字段集合不随 v3 变化。
 - 目录：`getExternalFilesDir(null)/save_backup/`；回滚暂存目录 `save_backup/.rollback/`。
-- **只存明文**：备份跨设备可移植（导入端用自己的密钥重加密）；不存原版密文。
+- **只存明文**：原版 `save{slot}.dat` 与可解密的 wh4 都以明文入包，备份跨设备可移植（导入端用自己的密钥重加密）；无法解密的 wh4 才原样存密文并标记 `flags=0`。
 
 ## 4. 导出流程
 
@@ -61,20 +64,29 @@ u32 crc32                      # 覆盖此前全部字节
    - `hero_level`/`hero_index` 取运行时槽结构；主菜单（STATE==4）下先调 `SAVE_CreateSaveSlot` 刷新三槽，否则为 -1。
 2. native 读 sidecar 原始字节（`<external>/module-saves/slot-{n}.module-save`，magic+整体 CRC32 轻校验；缺失/损坏时仅导出原版）。
 3. native 收集个人仓库伴生文件（monster 改版）：`locate_save_directory` 定位存档目录后，取该目录下文件名以 `save{slot}.dat.wh4-` 开头的**普通文件**（含游戏自建 `.bak`；排除目录与 `.tmp`/`.wh-tmp` 写入中间态），按文件名升序（确定性）逐个读入；单文件 >1MiB 视为异常跳过并记日志；目录不可得/无命中则为空列表。
+   - **导出解密（v3）**：对每个 wh4 取容器负载（`len-3`）用本机密钥 `ENCRYPT_Process2(mode=1)` 解密；成功 → 以明文 + `flags=1` 入包（导入端用目标设备密钥重加密，跨设备可移植）；失败（长度不足/无 key/双校验和不通过）→ 原样存密文 + `flags=0` 兜底，并记 `warehouse kept as ciphertext (decrypt unavailable)`。主文件与 `.bak` 各自独立处理，后缀原样保留。
+   - **导出统一分离（内嵌段剥离为外部 wh4）**：**仅当本次确实收齐了外部 wh4** 时，在存档明文 block3 内定位 ASCII `WH96v002` 段（读 u32 段长，段总长 = 8 + 段长），**仅当该段之后只剩零填充（或恰好结束于 block3 末尾）**才剥离，使存档退回基础形态、仓库一律走外部 wh4。剥离时**连同段后零填充一起截断**（真机实测：只去段、保留零填充会让改版校验失败并崩溃；截断是已验证形式）。剥离后把各块按索引顺序重排为连续布局、重写块表项（`offset_rel`/`len`），`origLen` 缩短；随后的 `original_sha256`/`checksum`/尾部 CRC32 自然重算（见第 4/5 步）。保守规则：段后存在非零字节或块表异常 → 维持原状并记日志；无外部 wh4 → 不剥离（否则丢仓库）并记日志。
 4. 算 `checksum = sha256(origPlain ‖ module ‖ warehouseBlob)` 前 12 位 → 按 `_<checksum>.qol_save` 后缀扫描 `save_backup/*.qol_save` 去重：已存在同 `checksum` 备份则**不写新文件**，返回既有备份 meta（`deduplicated:true`）。
-5. 组装 `.qol_save`（v2，CRC32，metaJson 含 `checksum`/`warehouse_count`/`warehouse_sha256`）→ tmp+rename 原子写入。
+5. 组装 `.qol_save`（v3，CRC32，metaJson 含 `checksum`/`warehouse_count`/`warehouse_sha256`）→ tmp+rename 原子写入。
 
 ## 5. 导入流程
 
 0. native 按 `checksum` 定位 bundle（`_<checksum>.qol_save` 后缀；未命中→`backup not found`）。
 
-1. 读并校验 magic/version/CRC/分段边界（`save_backup_bundle.cpp`）；v2 额外解码 `warehouseBlob`，`has_warehouse=true`；v1 无仓库段，`has_warehouse=false`。
+1. 读并校验 magic/version/CRC/分段边界（`save_backup_bundle.cpp`）；v2/v3 额外解码 `warehouseBlob`（v2 = 无 flags 旧编码，v3 = 带 flags），`has_warehouse=true`；v1 无仓库段，`has_warehouse=false`。
 2. native `encrypt_plain_to_slot(targetSlot, origPlain)`：块0 slot 写目标槽 → `ENCRYPT_Process2(mode=0)` → 密文（len+3 字节）。
 3. 定位存档目录：优先 `dataDir` 下含 `save*.dat` 的子目录；否则 `dataDir/hex(MD5(key))` 并建目录。
 4. 安全备份：把目标槽现存 `save{slot}.dat` 与 sidecar 主文件复制到 `.rollback/`。
 5. 原子写原版：`save{slot}.dat.tmp` → rename。
 6. sidecar：**native 直改字节**——只改容器第 6 字节 slot + 重算尾部 u32 CRC32（不解析 section），primary 与 last-good 双写；空 module 跳过。
-7. 仓库写回（**仅 `has_warehouse==true`**）：对每个 `WarehouseFile` 构造 `save{slot}.dat + suffix` 目标，已存在则先复制到 `.rollback/`，再原子写入。**语义为 additive：只新增/覆盖 bundle 内后缀对应的目标文件，不删除目标槽其它后缀的 wh4 文件**（模块不掌握游戏仓库文件完整集合语义，批量删除可能误删其它存档数据）。`suffix` 已由解码校验（`.wh4-` 开头、无路径分隔/`..`），target 由目录 + 槽号 + suffix 直接拼接安全。
+7. 仓库写回（**仅 `has_warehouse==true`**）：
+   - **能力门禁**：`qol::game_feature_state(kWarehouseCompanionFile)` 为 `unsupported`（该版本没有伴生文件仓库机制，如原版/大修）→ 整个仓库步骤跳过（等价 v1 处理），不触碰现存文件。
+   - **写盘前预校验/预加密（fail-closed，位于第 4 步之前，保证 `.rollback/` 与现存文件不被触碰）**：
+     - `flags=1`（v3 明文）：改写明文 `+0x14` 为目标 `slot`（小端 u32）→ **重算并写 `+0x38` 的 FNV-1a 64 校验** → `ENCRYPT_Process2(mode=0)` 整体重加密（`len+3` 字节）→ **往返自检**：再 `mode=1` 解密，要求返回 1、`+0x00` 前 8 字节 = `"WH4JRN01"`、`+0x14` = 目标槽、重算 hash == `+0x38` 存储值。任一项失败（无 key/长度不足/自检失败）→ **整次导入失败** `op_err("warehouse companion reencrypt failed (<reason>): <suffix>")`。
+     - `flags=0`（v1/v2/兜底密文）：用本机密钥试解容器（`len-3`，双校验和）。**任一项解不开 → 整次导入失败** `op_err("warehouse companion not decryptable on this device: <suffix>")`，不得静默跳过、不得写任何文件。语义：**v2 旧备份（密文 wh4）只支持同设备导入**；导入后再导出（v3）即变为可跨设备。
+   - **落盘**：预校验通过后，逐项按既有 additive 语义写入——已存在则先复制到 `.rollback/`，再原子写；**只新增/覆盖 bundle 内后缀对应的目标文件，不删除目标槽其它后缀的 wh4 文件**（模块不掌握游戏仓库文件完整集合语义，批量删除可能误删其它存档数据）。`suffix` 已由解码校验（`.wh4-` 开头、无路径分隔/`..`），target 由目录 + 槽号 + suffix 直接拼接安全。`.bak` 与主文件同样各自独立处理。
+   - 日志：汇总 `warehouse companion files wrote=N skipped=0 reencrypted=K (state=...)`；失败为错误响应而非跳过明细。
+   - 背景：wh4 与 `save{slot}.dat` 同容器方案、同一设备相关密钥。写入本机不可解的 wh4 会让游戏读档时 block3 校验失败（`SAVE_LoadFile` 返回 0 → 不挂接角色 → `GAMESTATE_EnterPlay` 空指针 SIGSEGV）。
 8. 任一步失败：先还原本函数已处理的全部 wh 文件（existed 从 `.rollback/` 取回、新增的删除、清理副本），再从 `.rollback/` 还原 `save{slot}.dat` 与 sidecar（existed 还原 / not-existed 删除）。
 9. 成功：清理 `.rollback/` 中 dat/sidecar 与 wh 全部副本。
 10. v1 旧备份（`has_warehouse==false`）：仓库步骤**完全跳过**，绝不触碰现存 wh4 文件。
@@ -83,8 +95,8 @@ u32 crc32                      # 覆盖此前全部字节
 ## 6. 跨槽与跨设备
 
 - **跨槽**：真机实证。save0 明文块0 slot 改 1 后重加密为 save1.dat，游戏识别、`enter_slot` 进世界、角色完整加载；导入后明文与源仅差 slot 字节。
-- **跨设备**：明文不含设备信息，理论上可移植（导入端用本地 `HubSave_GetKey` 重加密）。**尚未真机实测**。
-- 反篡改（`Protection` 类、`thpcheckslotN.dat`、`Com2usProtection.sav`）**未阻止**注入的槽改写存档。monster 改版的「个人仓库」（96 格）以伴生文件 `save{slot}.dat.wh4-<16hex>`（+ `.bak`）落在与原版存档同目录，随存档槽位；v2 bundle 会把它随存档一起备份/恢复。
+- **跨设备**：v3 导出时把可解密的 wh4 解密为明文入包（`flags=1`），导入端用本地 `HubSave_GetKey` **补目标槽 + 重算 `+0x38` 完整性校验后重加密**并做往返自检，故仓库可随存档跨设备/跨槽迁移。真机 A/B 实测：同槽重加密正常（`screen=world`、`party=3`）；只改 `+0x14` 未重算 `+0x38` 被游戏拒绝（进档 SIGSEGV）；补上重算后接受。`flags=0`（v2 旧备份密文）只支持同设备导入，导入后再导出 v3 才可跨设备。
+- 反篡改（`Protection` 类、`thpcheckslotN.dat`、`Com2usProtection.sav`）**未阻止**注入的槽改写存档。monster 改版的「个人仓库」（96 格）以伴生文件 `save{slot}.dat.wh4-<16hex>`（+ `.bak`）落在与原版存档同目录，随存档槽位；v3 bundle 会把它随存档一起备份/恢复。
 
 ## 7. 模块分层
 
