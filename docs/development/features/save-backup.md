@@ -129,12 +129,12 @@ u32 crc32                      # 覆盖此前全部字节
 - **v1 兼容（旧备份不触碰 wh4）**：导入改动前的 v1 备份 `20260912-194431_s1_9cceaef965b5` → slot2 → `ok:true`；`save2.dat` 生成，而 `save2.dat.wh4-*` 四个文件 md5 全部与导入前相同（`has_warehouse=false` 跳过）。
 - **additive 语义**：再把 v2 `a71e04a8dcb5` 导入 slot2 → `save2.dat.wh4-000001a043a2bba1`(+`.bak`) 覆盖为 `5e26d815…`/`23b9930c…`，而 bundle 未包含的旧后缀 `save2.dat.wh4-000001a090b9cd93`(+`.bak`) md5 保持 `c3bd83c4…`/`69e7bb14…` 不变（不误删）。
 - **去重稳定性**：同一状态连续导出 → 稳定 `checksum=03d8d3d710f9`，第二/三次返回 `deduplicated:true`。
-- host tests 全绿（`host_tests: 2547 passed, 0 failed`）；`scripts/build-debug.sh` `BUILD SUCCESSFUL`，APK `output/inotia4-qol-lsposed-debug-2609122241-393ba19f603f.apk`。
+- host tests 全绿（`host_tests: 2547 passed, 0 failed`）；`scripts/build-debug.sh` `BUILD SUCCESSFUL`，APK `output/inotia4-qol-lsposed-debug-2609122241-393ba19f603f.apk`（旧命名；新命名规则见 [`build-and-deploy.md` §3.2](../../guides/build-and-deploy.md)）。
 - **未真机触发**：导入仓库写失败的回滚路径（`.rollback/` 还原 wh）未做故障注入实测，仅有代码审查覆盖。
 
 ### 8.4 游戏删档同步清理模块 sidecar（2026-09-13，原版包）
 
-真机：Phh-Treble（`192.168.3.54:5555`），模块 debug `0.7.5`（`output/inotia4-qol-lsposed-debug-2609131227-dcae13c32981.apk`）。流程：安装 → force-stop + monkey 重启 → 同意页 `POST /api/ui/dialog/select {"action":"ok"}` → 轮询 `/api/health` → 主菜单。
+真机：Phh-Treble（`192.168.3.54:5555`），模块 debug `0.7.5`（`output/inotia4-qol-lsposed-debug-2609131227-dcae13c32981.apk`，旧命名；新命名规则见 [`build-and-deploy.md` §3.2](../../guides/build-and-deploy.md)）。流程：安装 → force-stop + monkey 重启 → 同意页 `POST /api/ui/dialog/select {"action":"ok"}` → 轮询 `/api/health` → 主菜单。
 
 - **Hook 安装**：logcat `Inotia4Qol ... domain=save_backup ... slot delete hook installed slot=0x7080cf6fa8 orig=0x7080b4f4e8`；`orig-base=0x14c4e8`、`slot-base=0x2f3fa8`，fail-closed 校验通过（GOT 槽值 == `SaveSlot_Delete`）。
 - **测试前置**：`POST /api/system/backup/export {"slot":0}` → `20260913-122932_s0_a17dd08f71b3.qol_save`（11840 B，`module_sha256=de9cb8d1a454f45d5894d30512032032b2194b74689376e730a04bfa01a285e8`）；`POST /api/system/backup/import {"checksum":"a17dd08f71b3","slot":1}` → `ok:true`，`slot-1.module-save`(5640 B) + `.last-good`(5640 B) 出现；`/api/system/info` slot0/1 `exists=true`。

@@ -297,7 +297,7 @@ type=0 oi=24 val=480 -> "$R冰霜: 48.0%$B"
 
 ### 10.2 真机证据（2026-09-12，大修版，设备 `192.168.3.54`）
 
-安装 `output/inotia4-qol-lsposed-debug-2609122247-d83a907444d9.apk`，进档后打开背包面板并选中「战神的斗篷」，触发详情构建：
+安装 `output/inotia4-qol-lsposed-debug-2609122247-d83a907444d9.apk`（旧命名；新命名规则见 [`build-and-deploy.md` §3.2](../../guides/build-and-deploy.md)），进档后打开背包面板并选中「战神的斗篷」，触发详情构建：
 
 ```
 attribute range hooks installed
