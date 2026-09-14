@@ -2,6 +2,7 @@
 
 #include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
+#include "feature/patch/native_inventory_hook.h"
 #include "feature/world_teleport/world_teleport_rules.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
@@ -22,9 +23,11 @@ namespace {
 constexpr size_t kPageSize = 0x1000;
 constexpr int64_t kBranchRange = 0x08000000LL;
 constexpr size_t kMapNameBufferSize = 256;
-constexpr size_t kChoiceCount = 4;
-constexpr int kChoiceDeltas[kChoiceCount] = {1, 10, -1, -10};
-constexpr int kChoiceCosts[kChoiceCount] = {300, 3000, 300, 3000};
+constexpr size_t kTeleportChoiceCount = 4;
+constexpr size_t kChoiceCount = 5;
+constexpr size_t kCloseChoiceIndex = kChoiceCount - 1;
+constexpr int kChoiceDeltas[kTeleportChoiceCount] = {1, 10, -1, -10};
+constexpr int kChoiceCosts[kTeleportChoiceCount] = {300, 3000, 300, 3000};
 
 // 阶段 2 真机对照开关：0=CallMapName 执行流内直接 push，1=下一逻辑帧 push。
 #ifndef WORLD_TELEPORT_OPEN_NEXT_FRAME
@@ -39,11 +42,15 @@ struct ChoiceTarget {
 std::mutex g_world_teleport_mtx;
 PtrHook g_choice_button_hook;
 bool g_installed = false;
+bool g_choice_init_hook_installed = false;
+bool g_pending_title = false;
+UiChoiceInitFn g_choice_init_original = nullptr;
 void* g_trampoline = nullptr;
 
-std::array<ChoiceTarget, kChoiceCount> g_targets{};
+std::array<ChoiceTarget, kTeleportChoiceCount> g_targets{};
 std::array<std::array<char, kMapNameBufferSize>, kChoiceCount> g_choice_text{};
 std::array<char, kMapNameBufferSize> g_confirm_text{};
+std::array<char, kMapNameBufferSize> g_main_title{};
 constexpr char kUnknownMapName[] = "未知地图";
 
 bool encode_b(uintptr_t from, uintptr_t to, uint32_t* out) {
@@ -137,13 +144,14 @@ int choice_state_id() {
 
 void open_choice_panel() {
     if (g_base == 0 || fn_popupstate_push == nullptr || g_uichoice_itemtext == nullptr ||
-        g_uichoice_count == nullptr || g_uichoice_focus == nullptr) {
+        g_uichoice_count == nullptr || g_uichoice_focus == nullptr ||
+        !g_choice_init_hook_installed) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice symbols not resolved");
         return;
     }
     const int current_id = static_cast<int>(current_map_id());
     auto** item_text = reinterpret_cast<char**>(g_uichoice_itemtext);
-    for (size_t index = 0; index < kChoiceCount; ++index) {
+    for (size_t index = 0; index < kTeleportChoiceCount; ++index) {
         const int delta = kChoiceDeltas[index];
         const int target_id = world_teleport::target_map_id(current_id, delta);
         g_targets[index] = {target_id, kChoiceCosts[index]};
@@ -153,6 +161,9 @@ void open_choice_panel() {
                       "%s(id%s%d)", name, sign, delta > 0 ? delta : -delta);
         item_text[index] = g_choice_text[index].data();
     }
+    std::snprintf(g_choice_text[kCloseChoiceIndex].data(),
+                  g_choice_text[kCloseChoiceIndex].size(), "关闭");
+    item_text[kCloseChoiceIndex] = g_choice_text[kCloseChoiceIndex].data();
     *reinterpret_cast<uint8_t*>(g_uichoice_count) = static_cast<uint8_t>(kChoiceCount);
     *reinterpret_cast<uint8_t*>(g_uichoice_focus) = 0;
     const int state_id = choice_state_id();
@@ -160,7 +171,11 @@ void open_choice_panel() {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice state not found");
         return;
     }
+    std::snprintf(g_main_title.data(), g_main_title.size(), "当前地图：%s(id:%d)",
+                  map_name(current_id), current_id);
+    g_pending_title = true;
     if (fn_popupstate_push(static_cast<uint32_t>(state_id)) == 0) {
+        g_pending_title = false;
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice push failed state=%d", state_id);
         return;
     }
@@ -184,7 +199,13 @@ void request_open_choice() {
 }
 
 void world_teleport_call_map_name() {
-    if (!game_in_world()) return;
+    const int state = g_state == nullptr ? -1 :
+        static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
+    QOL_LOG_INFO(QolDomain::kUi, "world teleport: CallMapName intercepted state=%d", state);
+    if (state != 5) {
+        QOL_LOG_WARN(QolDomain::kUi, "world teleport: ignored CallMapName outside world state=%d", state);
+        return;
+    }
     request_open_choice();
 }
 
@@ -239,6 +260,23 @@ bool delayed_transfer(int64_t, void* param) {
     return false;
 }
 
+bool delayed_close_choice(int64_t, void* param) {
+    if (fn_ui_set_popup_process_info == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice close symbols not resolved");
+        return false;
+    }
+    // 确认回调运行在 YesNo 仍是栈顶时；确认回调中的第一条 close 只会关闭
+    // YesNo。下一逻辑帧再排一条 close，才能关闭底层 UICHOICE，避免其
+    // Scene_Process 在控件销毁后继续进入 ControlScroll_Process。
+    fn_ui_set_popup_process_info(3, 0);
+    uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+    if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+    if (frame_task_add(kFramePointLogicPre, delayed_transfer, param, 1, 1) == 0) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: transfer registration failed");
+    }
+    return false;
+}
+
 void teleport_confirmed(void* param) {
     const auto* target = static_cast<const ChoiceTarget*>(param);
     if (target == nullptr || fn_get_money == nullptr || fn_minus_money == nullptr ||
@@ -248,7 +286,7 @@ void teleport_confirmed(void* param) {
     }
     // 先排队切图，再关闭 choice；切图必须等官方 Pop 在当前帧清理控件，
     // 否则下一帧的 ControlScroll_Process 会访问已失效的 choice 控件。
-    if (frame_task_add(kFramePointLogicPre, delayed_transfer,
+    if (frame_task_add(kFramePointLogicPre, delayed_close_choice,
                        const_cast<ChoiceTarget*>(target), 1, 1) == 0) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: transfer registration failed");
         return;
@@ -259,14 +297,22 @@ void teleport_confirmed(void* param) {
     if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
 }
 
+void close_choice_panel() {
+    g_pending_title = false;
+    if (fn_ui_set_popup_process_info != nullptr) fn_ui_set_popup_process_info(3, 0);
+    uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+    if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+}
+
 void teleport_cancelled(void*) {
-    open_choice_panel();
+    // 确认框覆盖在原 UICHOICE 上方；取消时官方流程会关闭确认框，原选择框
+    // 仍然有效。此处重新 Push 会叠加第二个 UICHOICE，导致关闭后访问失效控件。
+    QOL_LOG_INFO(QolDomain::kUi, "world teleport: confirmation cancelled");
 }
 
 void choice_button_execute(void* control) {
     if (control == nullptr || fn_control_object_get_cursor_index == nullptr ||
-        fn_popup_create_yesno == nullptr || g_uichoice_focus == nullptr ||
-        g_uichoice_control_got == nullptr) {
+        g_uichoice_focus == nullptr || g_uichoice_control_got == nullptr) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice selection symbols not resolved");
         return;
     }
@@ -281,6 +327,22 @@ void choice_button_execute(void* control) {
         return;
     }
     *reinterpret_cast<uint8_t*>(g_uichoice_focus) = static_cast<uint8_t>(index);
+    if (index == static_cast<int>(kCloseChoiceIndex)) {
+        // 关闭项走原版 ButtonListExe 的完整清理链：除关闭 popup 外，还要让
+        // EVTSYSTEM/UIChoice 自己完成 choice 状态清理，否则下一帧的
+        // Scene_Process_POPUP_SC_CHOICE 会访问已失效控件。
+        if (fn_uichoice_button_list_exe != nullptr) {
+            fn_uichoice_button_list_exe(control);
+        } else {
+            close_choice_panel();
+        }
+        QOL_LOG_INFO(QolDomain::kUi, "world teleport: choice closed");
+        return;
+    }
+    if (fn_popup_create_yesno == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: confirm symbols not resolved");
+        return;
+    }
     const ChoiceTarget& target = g_targets[static_cast<size_t>(index)];
     std::snprintf(g_confirm_text.data(), g_confirm_text.size(), "是否传送至%s？",
                   map_name(target.map_id));
@@ -290,6 +352,37 @@ void choice_button_execute(void* control) {
                           const_cast<ChoiceTarget*>(&target));
     QOL_LOG_INFO(QolDomain::kUi, "world teleport: selected index=%d target=%d cost=%d",
                  index, target.map_id, target.cost);
+}
+
+void choice_init_wrapper(void* control) {
+    if (g_choice_init_original != nullptr) g_choice_init_original(control);
+    if (!g_pending_title) return;
+    g_pending_title = false;
+    if (g_uichoice_main_text == nullptr ||
+        !game_memory_accessible(g_uichoice_main_text, sizeof(char*), 'w')) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice main title symbol unavailable");
+        return;
+    }
+    *reinterpret_cast<char**>(g_uichoice_main_text) = g_main_title.data();
+    QOL_LOG_INFO(QolDomain::kUi, "world teleport: choice title set");
+}
+
+bool install_choice_init_hook() {
+    if (g_choice_init_hook_installed) return true;
+    if (fn_uichoice_init == nullptr || g_uichoice_main_text == nullptr) return false;
+    const NativeHookFunType hook_func = native_hook_func();
+    if (hook_func == nullptr) return false;
+    void* backup = nullptr;
+    const int rc = hook_func(reinterpret_cast<void*>(fn_uichoice_init),
+                             reinterpret_cast<void*>(&choice_init_wrapper), &backup);
+    if (rc != 0 || backup == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: UIChoice_Init hook failed rc=%d", rc);
+        return false;
+    }
+    g_choice_init_original = reinterpret_cast<UiChoiceInitFn>(backup);
+    g_choice_init_hook_installed = true;
+    QOL_LOG_INFO(QolDomain::kUi, "world teleport: UIChoice_Init hooked");
+    return true;
 }
 
 bool install_choice_hook() {
@@ -393,6 +486,10 @@ bool world_teleport_install_if_ready() {
     bool supported = false;
     if (!install_entry_patch(&supported)) return false;
     if (!supported) return true;
+    if (!install_choice_init_hook()) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice init hook install failed");
+        return false;
+    }
     if (!install_choice_hook()) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice hook install failed");
         return false;

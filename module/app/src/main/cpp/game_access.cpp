@@ -157,6 +157,7 @@ bool bridge_init() {
     resolve_global(g_uichoice_itemtext, G_UICHOICE_ITEMTEXT_VMA, "G_UICHOICE_ITEMTEXT_VMA");
     resolve_global(g_uichoice_count, G_UICHOICE_COUNT_VMA, "G_UICHOICE_COUNT_VMA");
     resolve_global(g_uichoice_focus, G_UICHOICE_FOCUS_VMA, "G_UICHOICE_FOCUS_VMA");
+    resolve_global(g_uichoice_main_text, G_UICHOICE_MAIN_TEXT_VMA, "G_UICHOICE_MAIN_TEXT_VMA");
     resolve_global_slot(g_uichoice_button_list_exe_got, G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA,
                         "G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA");
     resolve_global_slot(g_uichoice_control_got, G_UICHOICE_CONTROL_GOT_VMA,
@@ -301,6 +302,8 @@ bool bridge_init() {
         g_base + fn_resolve("F_UICHOICE_CREATE_CONTROL_VMA", F_UICHOICE_CREATE_CONTROL_VMA));
     fn_uichoice_process = reinterpret_cast<UiChoiceProcessFn>(
         g_base + fn_resolve("F_UICHOICE_PROCESS_VMA", F_UICHOICE_PROCESS_VMA));
+    fn_uichoice_init = reinterpret_cast<UiChoiceInitFn>(
+        g_base + fn_resolve("F_UI_CHOICE_INIT_VMA", F_UI_CHOICE_INIT_VMA));
     fn_scene_event_popup_sc_choice = reinterpret_cast<SceneEventPopupScChoiceFn>(
         g_base + fn_resolve("F_SCENE_EVENT_POPUP_SC_CHOICE_VMA",
                             F_SCENE_EVENT_POPUP_SC_CHOICE_VMA));
