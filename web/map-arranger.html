@@ -19,6 +19,8 @@
       --border-strong: #bbc4ca;
       --accent: #e4572e;
       --accent-soft: rgba(228, 87, 46, .12);
+      --link: #0f766e;
+      --link-soft: rgba(13, 148, 136, .13);
       --connection: #b53d25;
       --connection-soft: rgba(181, 61, 37, .12);
       --success: #16a34a;
@@ -42,6 +44,8 @@
       --border-strong: #45515b;
       --accent: #ff7652;
       --accent-soft: rgba(255, 118, 82, .14);
+      --link: #5eead4;
+      --link-soft: rgba(45, 212, 191, .16);
       --connection: #ff896f;
       --connection-soft: rgba(255, 137, 111, .16);
       --shadow: 0 16px 45px rgba(0, 0, 0, .35);
@@ -315,6 +319,17 @@
     .map-item:hover {
       border-color: var(--border);
       background: var(--stage);
+    }
+
+    .map-item.is-linked {
+      border-color: var(--link);
+      background: var(--link-soft);
+      box-shadow: inset 3px 0 0 var(--link);
+    }
+
+    .map-item.is-linked .map-item-index {
+      color: var(--link);
+      background: color-mix(in srgb, var(--link) 17%, transparent);
     }
 
     .map-item.is-dragging { opacity: .42; }
@@ -801,6 +816,8 @@
     "use strict";
 
     const CELL = 5;
+    const MIN_ZOOM = 0.25;
+    const MAX_ZOOM = 3;
     const MAP_DATA_ELEMENT = document.getElementById("map-data");
     let MAP_DATA;
 
@@ -812,11 +829,24 @@
     }
 
     const mapById = new Map(MAP_DATA.map((map) => [map.id, map]));
+    const linkedMapIds = new Map(MAP_DATA.map((map) => [map.id, new Set()]));
+    for (const sourceMap of MAP_DATA) {
+      for (const exit of sourceMap.exits) {
+        const targetLinks = linkedMapIds.get(exit.targetMapId);
+        const sourceLinks = linkedMapIds.get(sourceMap.id);
+        if (targetLinks && sourceLinks) {
+          sourceLinks.add(exit.targetMapId);
+          targetLinks.add(sourceMap.id);
+        }
+      }
+    }
     const state = {
       theme: "light",
       offset: { x: 0, y: 0 },
+      zoom: 1,
       placed: new Map(),
       drag: null,
+      hoveredMapId: null,
       suppressNextClick: false
     };
 
@@ -939,6 +969,16 @@
       }
 
       card.addEventListener("pointerdown", (event) => beginCardDrag(event, map.id, card));
+      card.addEventListener("pointerenter", () => {
+        state.hoveredMapId = map.id;
+        updateLinkedHighlights();
+      });
+      card.addEventListener("pointerleave", () => {
+        if (!state.drag || state.drag.kind !== "card" || state.drag.mapId !== map.id) {
+          if (state.hoveredMapId === map.id) state.hoveredMapId = null;
+          updateLinkedHighlights();
+        }
+      });
       card.addEventListener("keydown", (event) => {
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
@@ -955,6 +995,14 @@
         if (state.placed.has(map.id)) cards.appendChild(createMapCard(map));
       }
       stageEmpty.classList.toggle("is-hidden", state.placed.size > 0);
+    }
+
+    function updateLinkedHighlights() {
+      const sourceId = state.drag && state.drag.kind === "card" ? state.drag.mapId : state.hoveredMapId;
+      const linkedIds = sourceId === null ? new Set() : (linkedMapIds.get(sourceId) || new Set());
+      for (const item of mapList.querySelectorAll(".map-item")) {
+        item.classList.toggle("is-linked", linkedIds.has(Number(item.dataset.mapId)));
+      }
     }
 
     function renderLibrary() {
@@ -1008,47 +1056,86 @@
       }
       mapList.replaceChildren(fragment);
       libraryCount.textContent = String(visibleCount);
+      updateLinkedHighlights();
     }
 
     function updateWorldTransform() {
-      world.style.transform = "translate3d(" + state.offset.x + "px," + state.offset.y + "px,0)";
-      panStatus.textContent = "偏移 " + Math.round(state.offset.x) + ", " + Math.round(state.offset.y);
+      world.style.transform = "translate3d(" + state.offset.x + "px," + state.offset.y + "px,0) scale(" + state.zoom + ")";
+      panStatus.textContent = "偏移 " + Math.round(state.offset.x) + ", " + Math.round(state.offset.y) + " · " + Math.round(state.zoom * 100) + "%";
     }
 
     function createSvgElement(name) {
       return document.createElementNS("http://www.w3.org/2000/svg", name);
     }
 
+    function exitPoint(position, x, y) {
+      return { x: position.x + (x + 0.5) * CELL, y: position.y + (y + 0.5) * CELL };
+    }
+
+    function appendConnection(start, end) {
+      const shadow = createSvgElement("line");
+      shadow.classList.add("connection-line-shadow");
+      shadow.setAttribute("x1", String(start.x));
+      shadow.setAttribute("y1", String(start.y));
+      shadow.setAttribute("x2", String(end.x));
+      shadow.setAttribute("y2", String(end.y));
+      connections.appendChild(shadow);
+
+      const line = createSvgElement("line");
+      line.classList.add("connection-line");
+      line.setAttribute("x1", String(start.x));
+      line.setAttribute("y1", String(start.y));
+      line.setAttribute("x2", String(end.x));
+      line.setAttribute("y2", String(end.y));
+      connections.appendChild(line);
+    }
+
     function renderConnections() {
       connections.replaceChildren();
+      const pairs = new Map();
+
       for (const sourceMap of MAP_DATA) {
-        const sourcePosition = state.placed.get(sourceMap.id);
-        if (!sourcePosition) continue;
         for (const exit of sourceMap.exits) {
-          const targetPosition = state.placed.get(exit.targetMapId);
-          if (!targetPosition) continue;
-
-          const x1 = sourcePosition.x + (exit.x + 0.5) * CELL;
-          const y1 = sourcePosition.y + (exit.y + 0.5) * CELL;
-          const x2 = targetPosition.x + (exit.targetX + 0.5) * CELL;
-          const y2 = targetPosition.y + (exit.targetY + 0.5) * CELL;
-
-          const shadow = createSvgElement("line");
-          shadow.classList.add("connection-line-shadow");
-          shadow.setAttribute("x1", String(x1));
-          shadow.setAttribute("y1", String(y1));
-          shadow.setAttribute("x2", String(x2));
-          shadow.setAttribute("y2", String(y2));
-          connections.appendChild(shadow);
-
-          const line = createSvgElement("line");
-          line.classList.add("connection-line");
-          line.setAttribute("x1", String(x1));
-          line.setAttribute("y1", String(y1));
-          line.setAttribute("x2", String(x2));
-          line.setAttribute("y2", String(y2));
-          connections.appendChild(line);
+          if (!mapById.has(exit.targetMapId) || sourceMap.id === exit.targetMapId) continue;
+          const lowId = Math.min(sourceMap.id, exit.targetMapId);
+          const highId = Math.max(sourceMap.id, exit.targetMapId);
+          const pairKey = lowId + ":" + highId;
+          let pair = pairs.get(pairKey);
+          if (!pair) {
+            pair = { lowId, highId, lowToHigh: [], highToLow: [] };
+            pairs.set(pairKey, pair);
+          }
+          const record = { sourceMapId: sourceMap.id, targetMapId: exit.targetMapId, exit };
+          if (sourceMap.id === lowId) pair.lowToHigh.push(record);
+          else pair.highToLow.push(record);
         }
+      }
+
+      for (const pair of pairs.values()) {
+        const lowPosition = state.placed.get(pair.lowId);
+        const highPosition = state.placed.get(pair.highId);
+        if (!lowPosition || !highPosition) continue;
+
+        if (pair.lowToHigh.length > 0 && pair.highToLow.length > 0) {
+          // 双向出口只保留一条线，并连接两侧各自的出口代表点。
+          const lowExit = pair.lowToHigh[0].exit;
+          const highExit = pair.highToLow[0].exit;
+          appendConnection(
+            exitPoint(lowPosition, lowExit.x, lowExit.y),
+            exitPoint(highPosition, highExit.x, highExit.y)
+          );
+          continue;
+        }
+
+        // 单向出口保持原语义：出口代表点连接到对方地图的落点。
+        const directed = pair.lowToHigh.length > 0 ? pair.lowToHigh[0] : pair.highToLow[0];
+        const sourcePosition = state.placed.get(directed.sourceMapId);
+        const targetPosition = state.placed.get(directed.targetMapId);
+        if (!sourcePosition || !targetPosition) continue;
+        appendConnection(
+          exitPoint(sourcePosition, directed.exit.x, directed.exit.y),
+          exitPoint(targetPosition, directed.exit.targetX, directed.exit.targetY)
+        );
       }
     }
 
@@ -1069,8 +1156,8 @@
     function stagePositionFromClient(clientX, clientY, map) {
       const rect = stage.getBoundingClientRect();
       return {
-        x: clientX - rect.left - state.offset.x - (map.w * CELL) / 2,
-        y: clientY - rect.top - state.offset.y - (map.h * CELL) / 2
+        x: (clientX - rect.left - state.offset.x) / state.zoom - (map.w * CELL) / 2,
+        y: (clientY - rect.top - state.offset.y) / state.zoom - (map.h * CELL) / 2
       };
     }
 
@@ -1079,8 +1166,8 @@
       if (!map) return;
       const rect = stage.getBoundingClientRect();
       placeMap(mapId, {
-        x: rect.width / 2 - state.offset.x - (map.w * CELL) / 2,
-        y: rect.height / 2 - state.offset.y - (map.h * CELL) / 2
+        x: (rect.width / 2 - state.offset.x) / state.zoom - (map.w * CELL) / 2,
+        y: (rect.height / 2 - state.offset.y) / state.zoom - (map.h * CELL) / 2
       });
     }
 
@@ -1092,6 +1179,7 @@
 
     function removeMap(mapId) {
       if (!state.placed.delete(mapId)) return;
+      if (state.hoveredMapId === mapId) state.hoveredMapId = null;
       renderAll();
       showToast("已收纳 " + mapLabel(mapById.get(mapId)));
     }
@@ -1161,6 +1249,7 @@
         card
       };
       card.classList.add("is-dragging");
+      updateLinkedHighlights();
     }
 
     function handlePointerMove(event) {
@@ -1175,8 +1264,8 @@
       if (drag.kind === "card") {
         const position = state.placed.get(drag.mapId);
         if (position) {
-          position.x = drag.startPosition.x + deltaX;
-          position.y = drag.startPosition.y + deltaY;
+          position.y = drag.startPosition.y + deltaY / state.zoom;
+          position.x = drag.startPosition.x + deltaX / state.zoom;
           positionCard(drag.card, drag.mapId);
           renderConnections();
         }
@@ -1230,6 +1319,7 @@
       if (drag.ghost) drag.ghost.remove();
       clearDropHints();
       state.drag = null;
+      updateLinkedHighlights();
     }
 
     function beginPan(event) {
@@ -1259,6 +1349,28 @@
       renderConnections();
     }
 
+    function clampZoom(value) {
+      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+    }
+
+    function handleWheel(event) {
+      event.preventDefault();
+      const rect = stage.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      const worldX = (pointerX - state.offset.x) / state.zoom;
+      const worldY = (pointerY - state.offset.y) / state.zoom;
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const nextZoom = clampZoom(state.zoom * Math.exp(-delta * 0.001));
+      if (nextZoom === state.zoom) return;
+
+      state.zoom = nextZoom;
+      state.offset.x = pointerX - worldX * state.zoom;
+      state.offset.y = pointerY - worldY * state.zoom;
+      updateWorldTransform();
+      renderConnections();
+    }
+
     function validateLayout(payload) {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON 顶层必须是对象。");
       if (payload.version !== 1) throw new Error("不支持的布局版本：" + String(payload.version));
@@ -1270,6 +1382,8 @@
         x: Number.isFinite(offsetSource.x) ? offsetSource.x : 0,
         y: Number.isFinite(offsetSource.y) ? offsetSource.y : 0
       };
+      if (payload.zoom !== undefined && !Number.isFinite(payload.zoom)) throw new Error("zoom 必须是有限数字。");
+      const zoom = payload.zoom === undefined ? 1 : clampZoom(payload.zoom);
       const placed = [];
       const seen = new Set();
       let unknownCount = 0;
@@ -1292,13 +1406,14 @@
         seen.add(entry.id);
         placed.push({ id: entry.id, x: entry.x, y: entry.y });
       }
-      return { offset, placed, unknownCount, duplicateCount, invalidCount };
+      return { offset, zoom, placed, unknownCount, duplicateCount, invalidCount };
     }
 
     function summarizeImport(layout) {
       const lines = [
         "将摆放 " + layout.placed.length + " 张地图",
         "画布偏移：" + Math.round(layout.offset.x) + ", " + Math.round(layout.offset.y),
+        "画布缩放：" + Math.round(layout.zoom * 100) + "%",
         "JSON 中未列出的地图将回到候选栏。"
       ];
       const skipped = layout.unknownCount + layout.duplicateCount + layout.invalidCount;
@@ -1308,6 +1423,7 @@
 
     function applyLayout(layout) {
       state.offset = { x: layout.offset.x, y: layout.offset.y };
+      state.zoom = layout.zoom;
       state.placed = new Map(layout.placed.map((entry) => [entry.id, { x: entry.x, y: entry.y }]));
       renderAll();
       showToast("布局已导入：" + layout.placed.length + " 张地图");
@@ -1317,6 +1433,7 @@
       const payload = {
         version: 1,
         canvasOffset: { x: Math.round(state.offset.x), y: Math.round(state.offset.y) },
+        zoom: Number(state.zoom.toFixed(3)),
         placed: Array.from(state.placed, ([id, position]) => ({
           id,
           x: Math.round(position.x),
@@ -1352,6 +1469,7 @@
     document.getElementById("import-button").addEventListener("click", () => importFile.click());
     mapSearch.addEventListener("input", renderLibrary);
     stage.addEventListener("pointerdown", beginPan);
+    stage.addEventListener("wheel", handleWheel, { passive: false });
 
     importFile.addEventListener("change", async () => {
       const file = importFile.files && importFile.files[0];
