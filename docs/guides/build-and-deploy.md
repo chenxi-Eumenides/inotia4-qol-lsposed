@@ -269,7 +269,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 | `scripts/data/export_texts.py` | 解析语言文本 → `apk/static-data/json/text/*.json` | 文本原始数据更新后 |
 | `scripts/data/export_snasys.py` | 解码 `i_tile` / `i_mapfeature` / `i_worldmap` → `apk/static-data/json/snasys/*.json` | 地图与地形原始数据更新后 |
 | `scripts/data/export_map_tiles.py` | 解析 416 个 map 文件 → 通行矩阵与出口目标 JSON | 地图原始数据更新后 |
-| `scripts/data/game_variant_table.py` | 按 `apk/game-apk/`（含 `history/`）生成 libgame.so 校验值 → 游戏变体/能力对照表 `module/app/src/main/cpp/data/native/game_variant_table.inc` | 新增或更新游戏 APK 后，生成的 `.inc` 与模块代码一并提交 |
+| `scripts/data/game_variant_table.py` | 读取 `apk/game-apk/*.apk`、`history/*.apk`、`history/*.xapk` 的 arm64 `libgame.so`，按 md5 生成游戏变体/能力对照表 `module/app/src/main/cpp/data/native/game_variant_table.inc`；无 arm64 库的 APK 告警跳过，md5 重复则拒绝生成，输出确定性（无时间戳，可重复运行） | 新增或更新游戏 APK 后；生成的 `.inc` 与模块代码一并提交 |
 | `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（28 表 + zh-Hans/en 语言） | 静态数据 JSON 更新后、构建模块前 |
 
 #### 3.4.4 设备与分析辅助

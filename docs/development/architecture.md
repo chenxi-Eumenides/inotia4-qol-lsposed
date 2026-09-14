@@ -127,6 +127,8 @@ data 层 → 仅 STL
 | `core/native/save_exit.*` | core | 退出存档回调：world→主菜单发起点 call_patch（GAMESTATE_SetState+0xb0 bl GAME_Exit）触发一次 | call_patch / game_access |
 | `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
 | `core/native/qol_log.*` | core | **统一日志单写者**：行格式化、logcat + 文件发射、debug 运行时门控、逐帧节流原语；格式与规则唯一权威见 `docs/development/logging.md` | 仅 STL（Android 时含 `<android/log.h>`） |
+| `core/native/game_variant.*` | core | **游戏变体识别**：按挂载 `libgame.so` 的 md5 查离线表（`scripts/data/game_variant_table.py` → `data/native/game_variant_table.inc`）得系列/版本/能力位；未命中回退扫 `WH4JRN01`（§4.1） | 仅 STL + 生成的表 |
+| `core/native/game_feature.*` | core | **功能抽象层**：`game_feature_state()` 把版本能力翻译为 有无/当前是否可用（可用性由上层注入回调）（§4.1） | game_variant.h + 仅 STL |
 | `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |
 | `api/native/game_character.*` | API native 域 | 角色：member_json / build_player_json / build_skills_json + 战斗/成长写操作（cast/attack/stop_combat/set_experience/set_level/add_experience/set_status_point/add_stat/set_auto_attack/set_skill_usage/learn_action/set_hp/set_mp/set_attr/stat_reset/skill_reset） | data + 引擎 |
 | `api/native/game_party.*` | API native 域 | 队伍：build_party_json / build_mercenaries_json + include/exclude/discharge/withdraw/switch_player/party_swap | data + 引擎 |
@@ -363,7 +365,16 @@ uv run python scripts/maintenance/check_symbols.py [libgame.so 路径]
 2. `uv run python scripts/maintenance/check_symbols.py <新so>` → 列出变化的 VMA
 3. 更新 `game_symbols.h` 的 VMA；结构体偏移（`C_*`/`I_*`）按 check 输出人工判断是否变化
 4. 重新提取静态数据（M3 流程，`scripts/data/` 脚本）
-5. 构建 v0.3.x 并真机验证
+5. **更新游戏变体对照表**：把新 APK 放进 `apk/game-apk/`（旧的下沉到 `apk/game-apk/history/`）→ `uv run python scripts/data/game_variant_table.py`（重新生成 `module/app/src/main/cpp/data/native/game_variant_table.inc`，确定性输出）→ 若有新的能力语义，补 `CURATION` 并提交生成文件
+6. 构建 v0.3.x 并真机验证
+
+### 4.1 游戏变体与功能识别（2026-09-15）
+
+- `core/native/game_variant.*`：用挂载的 `libgame.so` **文件校验值（md5）** 查离线表，得到 `{series(原版/大修/monster), version_label, capabilities, md5, known}`；未命中时回退为"可执行映射中扫 `WH4JRN01` → monster"，并记日志。
+- 对照表由 `scripts/data/game_variant_table.py` 从 `apk/game-apk/` + `apk/game-apk/history/` 的 APK/xapk 生成（提取 arm64 库 → md5/sha256/体积 + ELF 事实（隐藏可执行段、`WH4JRN01`）→ 文件名解析系列与版本 → 合并脚本内 `CURATION` 的语义能力位）。当前 19 条，md5 全唯一。
+- `core/native/game_feature.*`：把版本号翻译成"有无某功能 / 该功能当前是否可用"——`game_feature_state()` 返回 `unknown/unsupported/available/unavailable`（构建能力 × 运行时可用性，可用性由上层用 `game_feature_set_usability_fn()` 注入）。
+- 当前用途：存档导入时判断目标变体是否具备个人仓库/伴生文件机制，并对 wh4 逐个做"本机可解密"校验（见 `features/save-backup.md` §5 第 7 步）。
+- 启动日志一行：`game_variant: series=%s version=%s caps=0x%x md5=%s known=%d`（必须在 `qol_log_init()` 之后调用，否则只进 logcat、不落文件）。
 
 ## 5. 命名约定
 

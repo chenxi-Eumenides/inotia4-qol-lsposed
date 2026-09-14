@@ -3,6 +3,8 @@
 #include "symbol_resolver.h"
 #include "game_system.h"
 #include "core/native/qol_log.h"
+#include "core/native/game_variant.h"
+#include "core/native/game_feature.h"
 
 #include <cstdio>
 #include <atomic>
@@ -463,6 +465,22 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     // 统一日志：注入帧 provider（data_frame_count）并打开文件 sink（截断 + 横幅）。
     qol_log_set_frame_provider(&data_frame_count);
     qol_log_init();
+    // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
+    // 日志 sink 未初始化时发出的日志会被丢弃（同 apply_monster_item_count_compat 的日志）。
+    // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。
+    qol::game_variant_init();
+    // 功能可用性注入：仓库相关功能依赖存档加解密链是否已解析；其余功能不依赖运行时条件。
+    qol::game_feature_set_usability_fn([](qol::GameFeature feature) -> bool {
+        switch (feature) {
+            case qol::GameFeature::kPersonalWarehouse:
+            case qol::GameFeature::kWarehouseInlineInSave:
+            case qol::GameFeature::kWarehouseCompanionFile:
+                return fn_hub_save_get_key != nullptr && fn_encrypt_process2 != nullptr;
+            case qol::GameFeature::kItemCountUpperBound:
+                return true;
+        }
+        return true;
+    });
     g_bridge_ready.store(true, std::memory_order_release);
     return true;
 }

@@ -112,3 +112,13 @@ target_sources(gamebridge PRIVATE
     core/native/qol_log.cpp
     bridge/native/gamebridge_log.cpp
 )
+
+# libgame.so 变体对照表运行时查表（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    core/native/game_variant.cpp
+)
+
+# 功能抽象层：构建能力 → 功能可用性（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    core/native/game_feature.cpp
+)

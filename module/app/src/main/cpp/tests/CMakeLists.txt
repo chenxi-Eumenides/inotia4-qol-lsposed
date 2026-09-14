@@ -119,3 +119,31 @@ target_include_directories(qol_log_tests PRIVATE
 )
 target_compile_features(qol_log_tests PRIVATE cxx_std_17)
 add_test(NAME qol_log_tests COMMAND qol_log_tests)
+
+# libgame.so 变体对照表运行时查表测试（末尾追加）
+# test_game_variant.cpp 直接 #include game_variant.cpp 以访问匿名命名空间 MD5 内部函数，
+# 故不再单独编译该 .cpp；qol_log.cpp 提供日志符号，Android 头由 stubs/ 覆盖。
+add_executable(game_variant_tests
+    test_game_variant.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(game_variant_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(game_variant_tests PRIVATE cxx_std_17)
+add_test(NAME game_variant_tests COMMAND game_variant_tests)
+
+# 功能抽象层纯逻辑测试（末尾追加）
+add_executable(game_feature_tests
+    test_game_feature.cpp
+    ${CPP_DIR}/core/native/game_feature.cpp
+    ${CPP_DIR}/core/native/game_variant.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(game_feature_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(game_feature_tests PRIVATE cxx_std_17)
+add_test(NAME game_feature_tests COMMAND game_feature_tests)
