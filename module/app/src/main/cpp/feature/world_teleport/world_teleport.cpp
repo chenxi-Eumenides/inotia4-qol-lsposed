@@ -255,9 +255,15 @@ void world_teleport_call_map_name() {
 }
 
 void show_message(const char* message) {
-    if (fn_popup_create == nullptr) return;
+    if (fn_instantmsg_add == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: instant message symbol not resolved");
+        return;
+    }
     auto* text = const_cast<char*>(message);
-    fn_popup_create(text, static_cast<uint32_t>(std::strlen(message)), 0, 0);
+    // 原版 UIPlay_CallMapName 的精确调用：Add(3, text, 0, 0, 5, 0x15, 0, 0)。
+    // 这是非阻塞横幅，不创建 UIPopupMsg，避免余额不足时的失效按钮链表。
+    fn_instantmsg_add(3, text, 0, 0, 5, 0x15, 0, 0);
+    QOL_LOG_INFO(QolDomain::kUi, "world teleport: instant message shown text=%s", message);
 }
 
 void* active_player() {

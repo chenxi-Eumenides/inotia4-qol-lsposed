@@ -249,6 +249,7 @@ ControlButtonSetDrawSubIDFn fn_ctrl_btn_set_draw_sub_id = nullptr;
 ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc = nullptr;
 UiCreateGroupBaseControlFn fn_ui_create_group_base_control = nullptr;
 UiPopupMsgCreateFn fn_popup_create = nullptr;
+InstantMsgSystemAddFn fn_instantmsg_add = nullptr;
 UiPopupMsgCreateYesNoFn fn_popup_create_yesno = nullptr;
 UiPopupMsgCreateYesNoFromTextDataFn fn_popup_create_yesno_from_textdata = nullptr;
 UiPopupMsgCreateFromTextDataFn fn_popup_create_from_textdata = nullptr;

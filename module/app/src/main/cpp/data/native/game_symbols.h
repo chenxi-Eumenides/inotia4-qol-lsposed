@@ -683,6 +683,7 @@ constexpr uintptr_t F_UI_CHOICE_INIT_VMA = 0x0b1cd4; // void (void*) UIChoice_In
 constexpr uintptr_t F_SCENE_EVENT_POPUP_SC_CHOICE_VMA = 0x14a79c; // 选择面板事件回调
 constexpr uintptr_t F_MAPCHANGE_SET_VMA = 0x09c740; // void (int,int,int,int) MAPCHANGE_Set
 constexpr uintptr_t F_MEMORYTEXT_GET_TEXT_VMA = 0x118674; // const char* (uint16_t) MEMORYTEXT_GetText
+constexpr uintptr_t F_INSTANTMSGSYSTEM_ADD_VMA = 0x13be64; // void (u32 type, char* text, u32, u32, u32, u32, u32, u32) 原版地图名横幅调用约定
 constexpr uintptr_t F_UI_PLAY_CALL_MAP_NAME_VMA = 0x0c6664; // UIPlay_CallMapName 函数入口（dynsym）
 constexpr size_t F_UI_PLAY_CALL_MAP_NAME_PATCH_OFF = 0x64; // 尾部入口 patch：0xc66c8
 constexpr size_t F_UI_PLAY_CALL_MAP_NAME_EPILOGUE_OFF = 0x68; // patch 后跳回：0xc66cc
@@ -1011,6 +1012,8 @@ using ControlButtonSetDrawSubIDFn = void (*)(void* ctrl, int64_t subId);
 using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
 using UiCreateGroupBaseControlFn = void* (*)(void* parent, int64_t x, int64_t y, int64_t w, int64_t h);
 using UiPopupMsgCreateFn = void (*)(char* text, uint32_t len, uint32_t dispType, uint32_t type);
+using InstantMsgSystemAddFn = void (*)(uint32_t type, char* text, uint32_t arg2, uint32_t arg3,
+                                      uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7);
 using UiPopupMsgCreateYesNoFn = void (*)(char* text, uint32_t len, uint32_t dispType, uint32_t type,
                                           void* okFn, void* cancelFn, void* param);
 using UiPopupMsgCreateYesNoFromTextDataFn = void (*)(uint32_t textId, uint32_t dispType,

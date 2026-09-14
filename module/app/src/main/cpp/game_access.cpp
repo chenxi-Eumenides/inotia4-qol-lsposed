@@ -416,6 +416,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ctrl_btn_set_draw_proc = reinterpret_cast<ControlButtonSetDrawProcFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_PROC_VMA", F_CONTROL_BUTTON_SET_DRAW_PROC_VMA));
     fn_ui_create_group_base_control = reinterpret_cast<UiCreateGroupBaseControlFn>(g_base + fn_resolve("F_UI_CREATE_GROUP_BASE_CONTROL_VMA", F_UI_CREATE_GROUP_BASE_CONTROL_VMA));
     fn_popup_create = reinterpret_cast<UiPopupMsgCreateFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_VMA", F_UIPOPUPMSG_CREATE_VMA));
+    fn_instantmsg_add = reinterpret_cast<InstantMsgSystemAddFn>(g_base + fn_resolve("F_INSTANTMSGSYSTEM_ADD_VMA", F_INSTANTMSGSYSTEM_ADD_VMA));
     fn_popup_create_yesno = reinterpret_cast<UiPopupMsgCreateYesNoFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_VMA", F_UIPOPUPMSG_CREATE_YESNO_VMA));
     fn_popup_create_yesno_from_textdata = reinterpret_cast<UiPopupMsgCreateYesNoFromTextDataFn>(
         g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA",
