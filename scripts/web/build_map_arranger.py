@@ -345,6 +345,7 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     .map-item.is-dragging { opacity: .42; }
+    .map-item[hidden], .empty-list[hidden] { display: none; }
 
     .map-item-index {
       display: grid;
@@ -870,6 +871,8 @@ HTML_TEMPLATE = r'''<!doctype html>
     const world = document.getElementById("world");
     const cards = document.getElementById("cards");
     const connections = document.getElementById("connections");
+    const connectionRecords = new Map();
+    const connectionRecordsByMap = new Map();
     const stageEmpty = document.getElementById("stage-empty");
     const libraryCount = document.getElementById("library-count");
     const layoutStatus = document.getElementById("layout-status");
@@ -878,8 +881,13 @@ HTML_TEMPLATE = r'''<!doctype html>
     const importFile = document.getElementById("import-file");
     const importDialog = document.getElementById("import-dialog");
     const importSummary = document.getElementById("import-summary");
+    const libraryEntries = new Map();
     let pendingImport = null;
     let toastTimer = null;
+    let libraryEmpty = null;
+    let searchTimer = null;
+    let queuedPointer = null;
+    let pointerFrame = null;
 
     function errorMessage(error) {
       return error instanceof Error ? error.message : String(error);
@@ -894,15 +902,6 @@ HTML_TEMPLATE = r'''<!doctype html>
         toast.classList.remove("is-visible");
         toastTimer = null;
       }, 3600);
-    }
-
-    function tileColor(value) {
-      if ((value & 0x80) !== 0) return "#16a34a";
-      // 静态矩阵的阻挡语义是 bit6；同时保留 dashboard 使用的 bit3 深色兼容色。
-      if ((value & 0x40) !== 0 || (value & 0x08) !== 0) return "#1e293b";
-      if (value === 0) return "#d9dce2";
-      const gray = Math.min(200, 56 + value * 8);
-      return "rgb(" + gray + "," + Math.max(40, gray - 8) + "," + gray + ")";
     }
 
     function decodeTiles(map) {
@@ -920,19 +919,67 @@ HTML_TEMPLATE = r'''<!doctype html>
       return result;
     }
 
+    const mapRasterCache = new Map();
+
+    function createRasterSurface(map) {
+      if (typeof OffscreenCanvas === "function") return new OffscreenCanvas(map.w, map.h);
+      const surface = document.createElement("canvas");
+      surface.width = map.w;
+      surface.height = map.h;
+      return surface;
+    }
+
+    function buildMapRaster(map) {
+      const cached = mapRasterCache.get(map.id);
+      if (cached) return cached;
+
+      const surface = createRasterSurface(map);
+      const context = surface.getContext("2d");
+      if (!context) throw new Error("浏览器不支持 Canvas 2D 绘图。");
+      const image = context.createImageData(map.w, map.h);
+      const pixels = image.data;
+      const tiles = decodeTiles(map);
+      for (let index = 0; index < tiles.length; index += 1) {
+        const value = tiles[index];
+        let red;
+        let green;
+        let blue;
+        if ((value & 0x80) !== 0) {
+          red = 22;
+          green = 163;
+          blue = 74;
+        } else if ((value & 0x40) !== 0 || (value & 0x08) !== 0) {
+          red = 30;
+          green = 41;
+          blue = 59;
+        } else if (value === 0) {
+          red = 217;
+          green = 220;
+          blue = 226;
+        } else {
+          const gray = Math.min(200, 56 + value * 8);
+          red = gray;
+          green = Math.max(40, gray - 8);
+          blue = gray;
+        }
+        const pixel = index * 4;
+        pixels[pixel] = red;
+        pixels[pixel + 1] = green;
+        pixels[pixel + 2] = blue;
+        pixels[pixel + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+      mapRasterCache.set(map.id, surface);
+      return surface;
+    }
+
     function drawMap(canvas, map) {
       canvas.width = map.w;
       canvas.height = map.h;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("浏览器不支持 Canvas 2D 绘图。");
       context.imageSmoothingEnabled = false;
-      const tiles = decodeTiles(map);
-      for (let y = 0; y < map.h; y += 1) {
-        for (let x = 0; x < map.w; x += 1) {
-          context.fillStyle = tileColor(tiles[y * map.w + x]);
-          context.fillRect(x, y, 1, 1);
-        }
-      }
+      context.drawImage(buildMapRaster(map), 0, 0);
     }
 
     function mapLabel(map) {
@@ -1012,63 +1059,81 @@ HTML_TEMPLATE = r'''<!doctype html>
     function updateLinkedHighlights() {
       const sourceId = state.drag && state.drag.kind === "card" ? state.drag.mapId : state.hoveredMapId;
       const linkedIds = sourceId === null ? new Set() : (linkedMapIds.get(sourceId) || new Set());
-      for (const item of mapList.querySelectorAll(".map-item")) {
-        item.classList.toggle("is-linked", linkedIds.has(Number(item.dataset.mapId)));
+      for (const entry of libraryEntries.values()) {
+        entry.element.classList.toggle("is-linked", linkedIds.has(entry.map.id));
       }
+    }
+
+    function createLibraryItem(map) {
+      const item = document.createElement("button");
+      item.className = "map-item";
+      item.type = "button";
+      item.dataset.mapId = String(map.id);
+      item.setAttribute("aria-label", "摆放 " + mapLabel(map));
+      item.addEventListener("pointerdown", (event) => beginCandidateDrag(event, map.id, item));
+      item.addEventListener("click", () => {
+        if (state.suppressNextClick) {
+          state.suppressNextClick = false;
+          return;
+        }
+        placeAtCenter(map.id);
+      });
+
+      const index = document.createElement("span");
+      index.className = "map-item-index";
+      index.textContent = String(map.id).padStart(3, "0");
+      item.appendChild(index);
+
+      const copy = document.createElement("span");
+      copy.className = "map-item-copy";
+      const name = document.createElement("span");
+      name.className = "map-item-name";
+      name.textContent = map.name;
+      const id = document.createElement("span");
+      id.className = "map-item-id";
+      id.textContent = "m" + map.id + " · " + map.w + "×" + map.h;
+      copy.append(name, id);
+      item.appendChild(copy);
+      return item;
+    }
+
+    function initializeLibrary() {
+      const fragment = document.createDocumentFragment();
+      for (const map of MAP_DATA) {
+        const element = createLibraryItem(map);
+        libraryEntries.set(map.id, {
+          map,
+          element,
+          searchable: (map.name + " m" + map.id + " " + map.id).toLocaleLowerCase()
+        });
+        fragment.appendChild(element);
+      }
+      libraryEmpty = document.createElement("div");
+      libraryEmpty.className = "empty-list";
+      mapList.append(fragment, libraryEmpty);
     }
 
     function renderLibrary() {
       const query = mapSearch.value.trim().toLocaleLowerCase();
-      const fragment = document.createDocumentFragment();
       let visibleCount = 0;
 
-      for (const map of MAP_DATA) {
-        if (state.placed.has(map.id)) continue;
-        const searchable = (map.name + " m" + map.id + " " + map.id).toLocaleLowerCase();
-        if (query && !searchable.includes(query)) continue;
-        visibleCount += 1;
-
-        const item = document.createElement("button");
-        item.className = "map-item";
-        item.type = "button";
-        item.dataset.mapId = String(map.id);
-        item.setAttribute("aria-label", "摆放 " + mapLabel(map));
-        item.addEventListener("pointerdown", (event) => beginCandidateDrag(event, map.id, item));
-        item.addEventListener("click", () => {
-          if (state.suppressNextClick) {
-            state.suppressNextClick = false;
-            return;
-          }
-          placeAtCenter(map.id);
-        });
-
-        const index = document.createElement("span");
-        index.className = "map-item-index";
-        index.textContent = String(map.id).padStart(3, "0");
-        item.appendChild(index);
-
-        const copy = document.createElement("span");
-        copy.className = "map-item-copy";
-        const name = document.createElement("span");
-        name.className = "map-item-name";
-        name.textContent = map.name;
-        const id = document.createElement("span");
-        id.className = "map-item-id";
-        id.textContent = "m" + map.id + " · " + map.w + "×" + map.h;
-        copy.append(name, id);
-        item.appendChild(copy);
-        fragment.appendChild(item);
+      for (const entry of libraryEntries.values()) {
+        const visible = !state.placed.has(entry.map.id) && (!query || entry.searchable.includes(query));
+        entry.element.hidden = !visible;
+        if (visible) visibleCount += 1;
       }
-
-      if (visibleCount === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty-list";
-        empty.textContent = query ? "没有匹配的未摆放地图。" : "所有地图都已摆放。";
-        fragment.appendChild(empty);
-      }
-      mapList.replaceChildren(fragment);
+      libraryEmpty.hidden = visibleCount !== 0;
+      libraryEmpty.textContent = query ? "没有匹配的未摆放地图。" : "所有地图都已摆放。";
       libraryCount.textContent = String(visibleCount);
       updateLinkedHighlights();
+    }
+
+    function scheduleLibraryFilter() {
+      if (searchTimer !== null) window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => {
+        searchTimer = null;
+        renderLibrary();
+      }, 100);
     }
 
     function updateWorldTransform() {
@@ -1100,10 +1165,20 @@ HTML_TEMPLATE = r'''<!doctype html>
       line.setAttribute("x2", String(end.x));
       line.setAttribute("y2", String(end.y));
       connections.appendChild(line);
+      return { shadow, line };
+    }
+
+    function setConnectionCoordinates(element, start, end) {
+      element.setAttribute("x1", String(start.x));
+      element.setAttribute("y1", String(start.y));
+      element.setAttribute("x2", String(end.x));
+      element.setAttribute("y2", String(end.y));
     }
 
     function renderConnections() {
       connections.replaceChildren();
+      connectionRecords.clear();
+      connectionRecordsByMap.clear();
       const pairs = new Map();
 
       for (const sourceMap of MAP_DATA) {
@@ -1132,10 +1207,18 @@ HTML_TEMPLATE = r'''<!doctype html>
           // 双向出口只保留一条线，并连接两侧各自的出口代表点。
           const lowExit = pair.lowToHigh[0].exit;
           const highExit = pair.highToLow[0].exit;
-          appendConnection(
+          const elements = appendConnection(
             exitPoint(lowPosition, lowExit.x, lowExit.y),
             exitPoint(highPosition, highExit.x, highExit.y)
           );
+          rememberConnection(pair.lowId + ":" + pair.highId, {
+            lowId: pair.lowId,
+            highId: pair.highId,
+            lowExit,
+            highExit,
+            bidirectional: true,
+            ...elements
+          });
           continue;
         }
 
@@ -1144,11 +1227,54 @@ HTML_TEMPLATE = r'''<!doctype html>
         const sourcePosition = state.placed.get(directed.sourceMapId);
         const targetPosition = state.placed.get(directed.targetMapId);
         if (!sourcePosition || !targetPosition) continue;
-        appendConnection(
+        const elements = appendConnection(
           exitPoint(sourcePosition, directed.exit.x, directed.exit.y),
           exitPoint(targetPosition, directed.exit.targetX, directed.exit.targetY)
         );
+        rememberConnection(pair.lowId + ":" + pair.highId, {
+          lowId: pair.lowId,
+          highId: pair.highId,
+          directed,
+          bidirectional: false,
+          ...elements
+        });
       }
+    }
+
+    function rememberConnection(key, record) {
+      connectionRecords.set(key, record);
+      for (const mapId of [record.lowId, record.highId]) {
+        let records = connectionRecordsByMap.get(mapId);
+        if (!records) {
+          records = new Set();
+          connectionRecordsByMap.set(mapId, records);
+        }
+        records.add(record);
+      }
+    }
+
+    function updateConnection(record) {
+      const sourcePosition = state.placed.get(record.bidirectional ? record.lowId : record.directed.sourceMapId);
+      const targetPosition = state.placed.get(record.bidirectional ? record.highId : record.directed.targetMapId);
+      if (!sourcePosition || !targetPosition) return;
+
+      let start;
+      let end;
+      if (record.bidirectional) {
+        start = exitPoint(sourcePosition, record.lowExit.x, record.lowExit.y);
+        end = exitPoint(targetPosition, record.highExit.x, record.highExit.y);
+      } else {
+        start = exitPoint(sourcePosition, record.directed.exit.x, record.directed.exit.y);
+        end = exitPoint(targetPosition, record.directed.exit.targetX, record.directed.exit.targetY);
+      }
+      setConnectionCoordinates(record.shadow, start, end);
+      setConnectionCoordinates(record.line, start, end);
+    }
+
+    function updateConnectionsForMap(mapId) {
+      const records = connectionRecordsByMap.get(mapId);
+      if (!records) return;
+      for (const record of records) updateConnection(record);
     }
 
     function updateStatus() {
@@ -1264,14 +1390,13 @@ HTML_TEMPLATE = r'''<!doctype html>
       updateLinkedHighlights();
     }
 
-    function handlePointerMove(event) {
+    function processPointerMove(event) {
       const drag = state.drag;
       if (!drag) return;
       const deltaX = event.clientX - drag.startX;
       const deltaY = event.clientY - drag.startY;
       if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) drag.moved = true;
       if (!drag.moved) return;
-      event.preventDefault();
 
       if (drag.kind === "card") {
         const position = state.placed.get(drag.mapId);
@@ -1279,7 +1404,7 @@ HTML_TEMPLATE = r'''<!doctype html>
           position.y = drag.startPosition.y + deltaY / state.zoom;
           position.x = drag.startPosition.x + deltaX / state.zoom;
           positionCard(drag.card, drag.mapId);
-          renderConnections();
+          updateConnectionsForMap(drag.mapId);
         }
       } else {
         drag.ghost.style.left = event.clientX + "px";
@@ -1288,7 +1413,53 @@ HTML_TEMPLATE = r'''<!doctype html>
       updateDropHint(event.clientX, event.clientY);
     }
 
+    function processPanMove(event) {
+      const drag = state.drag;
+      if (!drag || drag.kind !== "pan") return;
+      const deltaX = event.clientX - drag.startX;
+      const deltaY = event.clientY - drag.startY;
+      if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) drag.moved = true;
+      if (!drag.moved) return;
+      state.offset.x = drag.startOffset.x + deltaX;
+      state.offset.y = drag.startOffset.y + deltaY;
+      updateWorldTransform();
+    }
+
+    function applyQueuedPointer() {
+      const point = queuedPointer;
+      queuedPointer = null;
+      if (!point || !state.drag) return;
+      if (state.drag.kind === "pan") processPanMove(point);
+      else processPointerMove(point);
+    }
+
+    function queuePointerMove(event) {
+      if (!state.drag) return;
+      if (event.cancelable) event.preventDefault();
+      queuedPointer = { clientX: event.clientX, clientY: event.clientY };
+      if (pointerFrame === null) {
+        pointerFrame = window.requestAnimationFrame(() => {
+          pointerFrame = null;
+          applyQueuedPointer();
+        });
+      }
+    }
+
+    function flushQueuedPointer() {
+      if (pointerFrame !== null) {
+        window.cancelAnimationFrame(pointerFrame);
+        pointerFrame = null;
+      }
+      applyQueuedPointer();
+    }
+
     function finishDrag(event) {
+      flushQueuedPointer();
+      if (state.drag) {
+        const finalPoint = { clientX: event.clientX, clientY: event.clientY };
+        if (state.drag.kind === "pan") processPanMove(finalPoint);
+        else processPointerMove(finalPoint);
+      }
       const drag = state.drag;
       if (!drag) return;
       if (drag.kind === "pan") {
@@ -1310,7 +1481,7 @@ HTML_TEMPLATE = r'''<!doctype html>
       } else if (drag.moved && inside(libraryRect, pointX, pointY)) {
         removeMap(drag.mapId);
       } else {
-        renderConnections();
+        updateConnectionsForMap(drag.mapId);
       }
 
       state.suppressNextClick = drag.kind === "candidate";
@@ -1319,7 +1490,12 @@ HTML_TEMPLATE = r'''<!doctype html>
 
     function cancelDrag() {
       if (!state.drag) return;
-      if (state.drag.kind === "card") renderConnections();
+      if (pointerFrame !== null) {
+        window.cancelAnimationFrame(pointerFrame);
+        pointerFrame = null;
+      }
+      queuedPointer = null;
+      if (state.drag.kind === "card") updateConnectionsForMap(state.drag.mapId);
       cleanupDrag();
     }
 
@@ -1329,6 +1505,11 @@ HTML_TEMPLATE = r'''<!doctype html>
       if (drag.item) drag.item.classList.remove("is-dragging");
       if (drag.card) drag.card.classList.remove("is-dragging");
       if (drag.ghost) drag.ghost.remove();
+      if (pointerFrame !== null) {
+        window.cancelAnimationFrame(pointerFrame);
+        pointerFrame = null;
+      }
+      queuedPointer = null;
       clearDropHints();
       state.drag = null;
       updateLinkedHighlights();
@@ -1345,20 +1526,6 @@ HTML_TEMPLATE = r'''<!doctype html>
         startOffset: { x: state.offset.x, y: state.offset.y },
         moved: false
       };
-    }
-
-    function handlePanMove(event) {
-      const drag = state.drag;
-      if (!drag || drag.kind !== "pan") return;
-      const deltaX = event.clientX - drag.startX;
-      const deltaY = event.clientY - drag.startY;
-      if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) drag.moved = true;
-      if (!drag.moved) return;
-      event.preventDefault();
-      state.offset.x = drag.startOffset.x + deltaX;
-      state.offset.y = drag.startOffset.y + deltaY;
-      updateWorldTransform();
-      renderConnections();
     }
 
     function clampZoom(value) {
@@ -1380,7 +1547,6 @@ HTML_TEMPLATE = r'''<!doctype html>
       state.offset.x = pointerX - worldX * state.zoom;
       state.offset.y = pointerY - worldY * state.zoom;
       updateWorldTransform();
-      renderConnections();
     }
 
     function validateLayout(payload) {
@@ -1479,7 +1645,7 @@ HTML_TEMPLATE = r'''<!doctype html>
     document.getElementById("export-button").addEventListener("click", exportLayout);
     document.getElementById("theme-button").addEventListener("click", toggleTheme);
     document.getElementById("import-button").addEventListener("click", () => importFile.click());
-    mapSearch.addEventListener("input", renderLibrary);
+    mapSearch.addEventListener("input", scheduleLibraryFilter);
     stage.addEventListener("pointerdown", beginPan);
     stage.addEventListener("wheel", handleWheel, { passive: false });
 
@@ -1514,12 +1680,12 @@ HTML_TEMPLATE = r'''<!doctype html>
     });
 
     window.addEventListener("pointermove", (event) => {
-      if (state.drag && state.drag.kind === "pan") handlePanMove(event);
-      else handlePointerMove(event);
+      queuePointerMove(event);
     }, { passive: false });
     window.addEventListener("pointerup", finishDrag);
     window.addEventListener("pointercancel", cancelDrag);
 
+    initializeLibrary();
     renderAll();
   </script>
 </body>
