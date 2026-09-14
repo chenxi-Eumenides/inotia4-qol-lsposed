@@ -29,16 +29,22 @@
 // 面板布局（逻辑坐标 0-960×0-640 空间，root 相对全屏居中；触摸坐标同空间）
 #define ROOT_W 0x3c0
 #define ROOT_H 0x280
+#define SETTINGS_COLUMN_COUNT 2
+#define VISIBLE_GRID_ROWS 4
+#define SETTINGS_PAGE_CAPACITY (SETTINGS_COLUMN_COUNT * VISIBLE_GRID_ROWS)
+#define PAGE_BUTTON_W 0x48
+#define PAGE_BUTTON_H 0x48
+#define PAGE_NAV_TEXT_GAP 0x28
+// 保持分页前的原始网格宽度；2×4 后将翻页按钮移到网格下方，避免与网格重叠。
 #define CONTENT_W 0x430
 #define CONTENT_X ((ROOT_W - CONTENT_W) / 2)
-#define SETTINGS_ROW_COUNT 8
-#define SETTINGS_COLUMN_COUNT 2
-#define SETTINGS_GRID_ROWS ((SETTINGS_ROW_COUNT + SETTINGS_COLUMN_COUNT - 1) / SETTINGS_COLUMN_COUNT)
-#define VISIBLE_GRID_ROWS 5
 #define CELL_W (CONTENT_W / SETTINGS_COLUMN_COUNT)
 #define CELL_H 0x66
 #define GRID_Y 0x60
 #define GRID_H (VISIBLE_GRID_ROWS * CELL_H)
+#define PAGE_INDICATOR_H 0x20
+#define PAGE_NAV_Y (GRID_Y + GRID_H + 0x08)
+#define PAGE_INDICATOR_Y (PAGE_NAV_Y + (PAGE_BUTTON_H - PAGE_INDICATOR_H) / 2)
 #define ADDR_H 0x28
 #define ROW_BTN_W 0xa8
 #define ROW_BTN_H 0x28
@@ -58,6 +64,12 @@
 #define TITLE_BACKGROUND_LEFT_UNIT 0x4f
 #define TITLE_BACKGROUND_RIGHT_UNIT 0x50
 #define TITLE_BACKGROUND_LOC 0x0
+// UIOption 的语言切换箭头：与原版 options 共用图像单元及箭头分片。
+#define OPTION_IMAGE_UNIT 0x59
+#define PAGE_PREV_ARROW_NORMAL_LOC 0x09
+#define PAGE_PREV_ARROW_PRESSED_LOC 0x0a
+#define PAGE_NEXT_ARROW_NORMAL_LOC 0x0b
+#define PAGE_NEXT_ARROW_PRESSED_LOC 0x0c
 
 namespace {
 
@@ -75,6 +87,7 @@ void* g_root = nullptr;
 bool g_option_images_loaded = false;
 bool g_title_background_images_loaded = false;
 bool g_background_unavailable_logged = false;
+bool g_page_arrow_unavailable_logged = false;
 int g_close_delay_frames = 0;
 bool g_back_pressed = false;
 
@@ -82,25 +95,51 @@ struct SettingsRow {
     void* btn;
     void* desc;
 };
-SettingsRow g_rows[SETTINGS_ROW_COUNT];
+
+// 配置项唯一登记表：key、label、page。
+// page 是逻辑页码；空出的逻辑页会在运行时按升序压缩，新增项只需在此表增加一行。
+// 空 key 的项是非开关入口，当前用于存档备份。
+struct SettingsItem {
+    const char* key;
+    const char* label;
+    int page;
+};
+
+static const SettingsItem kSettingsItems[] = {
+    {"", "存档备份", 1},
+    {"extensionBagEnabled", "扩展背包", 1},
+    {"stackLimitIncrease", "堆叠上限", 1},
+    {"apiEnabled", "API服务", 1},
+    {"autoSellEnabled", "自动出售", 1},
+    {"moveMergeEnabled", "拖拽合并", 2},
+    {"gemCraftOptimize", "宝石优化", 2},
+    {"debugLogEnabled", "调试日志", 2},
+    {"opEnabled", "OP能力", 3},
+};
+static constexpr int kSettingsItemCount =
+    static_cast<int>(sizeof(kSettingsItems) / sizeof(kSettingsItems[0]));
+
+SettingsRow g_rows[kSettingsItemCount];
+void* g_prev_page_btn = nullptr;
+void* g_next_page_btn = nullptr;
 void* g_back_btn = nullptr;
 void* g_addr_desc = nullptr;
-void* g_savebackup_btn = nullptr;   // v0.7.x：配置网格内的「存档备份」入口按钮（「使用」样式）
-void* g_savebackup_desc = nullptr;  // v0.7.x：与配置项同款左描述「存档备份」
-
-// 配置键名（与 Kotlin ModuleConfig 字段一致）
-static const char* kRowKeys[SETTINGS_ROW_COUNT] = {"apiEnabled", "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize", "autoSellEnabled", "debugLogEnabled"};
-static const char* kRowLabels[SETTINGS_ROW_COUNT] = {"API服务", "堆叠上限", "拖拽合并", "OP能力", "扩展背包", "宝石优化", "自动出售", "调试日志"};
+int g_page_index = 0;
+int g_total_pages = 1;
 
 // 当前配置值缓存（面板打开时从 Kotlin 拉取，切换时本地翻转+上抛）
-static char g_row_status[SETTINGS_ROW_COUNT][CB_TEXT_SIZE] = {"开", "关", "关", "关", "关", "关", "关", "关"};
+static char g_row_status[kSettingsItemCount][CB_TEXT_SIZE] = {
+    "", "关", "关", "开", "关", "关", "关", "关", "关"
+};
 static char g_addr_text[CB_TEXT_SIZE] = "";
 
 bool inject_state_entry_locked();
 void settings_row_clicked(void* ctrl);
+void settings_page_clicked(void* ctrl);
 void settings_back_clicked(void* ctrl);
 void settings_savebackup_clicked(void* ctrl);  // v0.7.x：存档备份按钮
 void savebackup_btn_draw(void* ctrl);
+void page_btn_draw(void* ctrl);
 
 #include "game_ui_settings_geometry.inc"
 #include "game_ui_settings_config.inc"

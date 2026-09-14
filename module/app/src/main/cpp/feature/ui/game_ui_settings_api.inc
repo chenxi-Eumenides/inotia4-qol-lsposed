@@ -57,6 +57,8 @@ std::string data_settings_ui_restore() {
     g_more_games_hook.uninstall();
     g_more_games_injected = false;
     g_panel_active = false;
+    g_page_index = 0;
+    settings_sync_page_state();
     if (g_option_images_loaded) {
         ui_original::unload_option_images();
         g_option_images_loaded = false;

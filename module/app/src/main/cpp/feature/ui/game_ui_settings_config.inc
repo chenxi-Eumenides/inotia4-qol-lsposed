@@ -62,8 +62,11 @@ bool jni_toggle_config(const char* key) {
 }
 
 void parse_config_into_rows(const char* json) {
-    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
-        const char* p = strstr(json, kRowKeys[i]);
+    if (json == nullptr) return;
+    for (int i = 0; i < kSettingsItemCount; ++i) {
+        const char* key = kSettingsItems[i].key;
+        if (key == nullptr || key[0] == 0) continue;
+        const char* p = strstr(json, key);
         if (p == nullptr) continue;
         p = strchr(p, ':');
         if (p == nullptr) continue;
@@ -102,4 +105,3 @@ void parse_config_into_rows(const char* json) {
 }
 
 // ---- 面板绘制（DrawProc：色块 + 文字）----
-

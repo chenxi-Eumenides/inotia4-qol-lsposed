@@ -1,7 +1,7 @@
 void row_btn_draw(void* ctrl) {
     if (g_base == 0) return;
     bool enabled = false;
-    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
+    for (int i = 0; i < kSettingsItemCount; ++i) {
         if (ctrl != g_rows[i].btn) continue;
         enabled = strcmp(g_row_status[i], "开") == 0;
         break;
@@ -62,5 +62,42 @@ void savebackup_btn_draw(void* ctrl) {
     ui_draw_text_centered(ctrl, 0x8, UI_OPTION_TEXT);
 }
 
-// ---- 面板控件创建与回调 ----
+void page_btn_draw(void* ctrl) {
+    if (ctrl == nullptr) return;
+    const bool is_next = ctrl == g_next_page_btn;
+    const bool is_prev = ctrl == g_prev_page_btn;
+    if (!is_next && !is_prev) return;
+    uint8_t* button_data = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(ctrl) + CO_DATA);
+    const bool pressed = button_data != nullptr &&
+                         *reinterpret_cast<uint8_t*>(button_data + CB_STATE) == 1;
+    const int32_t loc = is_next
+        ? (pressed ? PAGE_NEXT_ARROW_PRESSED_LOC : PAGE_NEXT_ARROW_NORMAL_LOC)
+        : (pressed ? PAGE_PREV_ARROW_PRESSED_LOC : PAGE_PREV_ARROW_NORMAL_LOC);
+    // UIOption 的语言切换箭头来自同一 0x59 图像单元；按按钮状态选择原版正常/按下分片，
+    // 保留原始分片尺寸与透明边缘，不再叠加自绘矩形或文字。分页边界仍由事件处理钳制，
+    // 原版资源没有单独禁用态。
+    if (g_option_images_loaded &&
+        ui_draw_control_image_part_centered(ctrl, OPTION_IMAGE_UNIT, loc, 2, 1)) {
+        return;
+    }
+    if (!g_page_arrow_unavailable_logged) {
+        QOL_LOG_DEBUG(QolDomain::kUi, "settings page arrow image unavailable: unit=0x%x", OPTION_IMAGE_UNIT);
+        g_page_arrow_unavailable_logged = true;
+    }
+}
 
+void settings_page_indicator_draw(const UiRect& root_rect) {
+    if (fn_grpx_set_font_color_rgb == nullptr || fn_grpx_draw_string_with_font == nullptr) return;
+    char page_text[16];
+    snprintf(page_text, sizeof(page_text), "%d/%d", g_page_index + 1,
+             g_total_pages > 0 ? g_total_pages : 1);
+    fn_grpx_set_font_color_rgb(static_cast<int32_t>(UI_OPTION_TEXT & 0xff),
+                               static_cast<int32_t>((UI_OPTION_TEXT >> 8) & 0xff),
+                               static_cast<int32_t>((UI_OPTION_TEXT >> 16) & 0xff));
+    const UiRect indicator = settings_page_indicator_rect();
+    fn_grpx_draw_string_with_font(
+        page_text, static_cast<int>(root_rect.x + ROOT_W / 2),
+        static_cast<int>(root_rect.y + indicator.y + 0x04), 2, 1);
+}
+
+// ---- 面板控件创建与回调 ----

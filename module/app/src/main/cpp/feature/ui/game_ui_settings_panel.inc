@@ -1,6 +1,7 @@
 void settings_panel_enter() {
     SETTINGS_LOG("settings panel enter");
     if (g_root != nullptr) {
+        settings_sync_page_state();
         char json[512] = {0};
         if (jni_get_config_json(json, sizeof(json))) {
             parse_config_into_rows(json);
@@ -12,6 +13,7 @@ void settings_panel_enter() {
             g_title_background_images_loaded = ui_load_image_unit(TITLE_BACKGROUND_LEFT_UNIT) &&
                 ui_load_image_unit(TITLE_BACKGROUND_RIGHT_UNIT);
         }
+        settings_sync_row_rects();
         g_panel_active = true;
         g_close_delay_frames = 0;
         g_back_pressed = false;
@@ -38,11 +40,12 @@ void settings_panel_enter() {
     ui_get_rect(root, &root_rect);
     g_back_btn = ui_create_button(root, {8 - root_rect.x, 8 - root_rect.y, BACK_BTN_W, BACK_BTN_H}, "返回",
                                   &settings_back_clicked, &back_btn_draw);
-    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
-        UiRect label = settings_label_rect(i);
-        void* btn = ui_create_button(root, settings_toggle_rect(i), "切换",
-                                     &settings_row_clicked, &row_btn_draw);
-        void* desc = ui_create_label(root, label, kRowLabels[i], &row_desc_draw);
+    for (int i = 0; i < kSettingsItemCount; ++i) {
+        const bool is_savebackup = settings_item_is_savebackup(i);
+        void* btn = ui_create_button(root, {0, 0, 0, 0}, is_savebackup ? "使用" : "切换",
+                                     is_savebackup ? &settings_savebackup_clicked : &settings_row_clicked,
+                                     is_savebackup ? &savebackup_btn_draw : &row_btn_draw);
+        void* desc = ui_create_label(root, {0, 0, 0, 0}, kSettingsItems[i].label, &row_desc_draw);
         if (btn == nullptr || desc == nullptr) continue;
         g_rows[i].btn = btn;
         g_rows[i].desc = desc;
@@ -53,20 +56,17 @@ void settings_panel_enter() {
     if (addr != nullptr) {
         g_addr_desc = addr;
     }
-    // 存档备份单元格（v0.7.x 改造）：复用网格末行空位，
-    // 左描述与配置项同款，右侧「使用」样式按钮（右缘与其它开关对齐）—— push 打开备份面板
-    void* sb_desc = ui_create_label(root, settings_label_rect(SETTINGS_ROW_COUNT),
-                                    "存档备份", &row_desc_draw);
-    g_savebackup_desc = sb_desc;
-    void* sb_btn = ui_create_button(root, settings_savebackup_rect(), "使用",
-                                    &settings_savebackup_clicked, &savebackup_btn_draw);
-    g_savebackup_btn = sb_btn;
+    g_prev_page_btn = ui_create_button(root, settings_page_button_rect(false), "",
+                                       &settings_page_clicked, &page_btn_draw);
+    g_next_page_btn = ui_create_button(root, settings_page_button_rect(true), "",
+                                       &settings_page_clicked, &page_btn_draw);
+    settings_sync_row_rects();
     g_root = root;
     g_panel_active = true;
     g_close_delay_frames = 0;
     g_back_pressed = false;
-    SETTINGS_LOG("settings panel enter: root=%p %d settings cells + backup cell + addr created",
-                 root, SETTINGS_ROW_COUNT);
+    SETTINGS_LOG("settings panel enter: root=%p items=%d pages=%d addr created",
+                 root, kSettingsItemCount, g_total_pages);
 }
 
 void settings_panel_process() {
@@ -106,13 +106,16 @@ void settings_panel_process() {
                               GRID_H, UI_GOLD, 3);
     }
     if (g_back_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_back_btn);
-    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
-        if (g_rows[i].btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[i].btn);
-        if (g_rows[i].desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[i].desc);
+    for (int cell = 0; cell < SETTINGS_PAGE_CAPACITY; ++cell) {
+        const int item = settings_item_index_at_cell(cell);
+        if (item < 0) continue;
+        if (g_rows[item].btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[item].btn);
+        if (g_rows[item].desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[item].desc);
     }
     if (g_addr_desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_addr_desc);
-    if (g_savebackup_desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_savebackup_desc);
-    if (g_savebackup_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_savebackup_btn);
+    if (g_prev_page_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_prev_page_btn);
+    if (g_next_page_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_next_page_btn);
+    settings_page_indicator_draw(root_rect);
     ui_end_frame();
 }
 
@@ -121,6 +124,9 @@ void settings_panel_f3() {
     g_panel_active = false;
     g_close_delay_frames = 0;
     g_back_pressed = false;
+    g_page_index = 0;
+    settings_sync_page_state();
+    g_page_arrow_unavailable_logged = false;
     if (g_option_images_loaded) {
         ui_original::unload_option_images();
         g_option_images_loaded = false;
@@ -130,9 +136,13 @@ void settings_panel_f3() {
 void settings_panel_f4() {}
 
 void settings_row_clicked(void* ctrl) {
-    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
+    for (int i = 0; i < kSettingsItemCount; ++i) {
         if (ctrl != g_rows[i].btn) continue;
-        if (!jni_toggle_config(kRowKeys[i])) return;
+        if (settings_item_is_savebackup(i)) {
+            settings_savebackup_clicked(ctrl);
+            return;
+        }
+        if (!jni_toggle_config(kSettingsItems[i].key)) return;
         char json[512] = {0};
         if (jni_get_config_json(json, sizeof(json))) {
             parse_config_into_rows(json);
@@ -143,6 +153,26 @@ void settings_row_clicked(void* ctrl) {
         SETTINGS_LOG("settings row%d toggled: %s", i, g_row_status[i]);
         return;
     }
+}
+
+void settings_page_clicked(void* ctrl) {
+    const bool is_next = ctrl == g_next_page_btn;
+    const bool is_prev = ctrl == g_prev_page_btn;
+    if (!is_next && !is_prev) return;
+    settings_sync_page_state();
+    const int old_page = g_page_index;
+    if (is_next && g_page_index < g_total_pages - 1) {
+        ++g_page_index;
+    } else if (is_prev && g_page_index > 0) {
+        --g_page_index;
+    }
+    if (old_page == g_page_index) {
+        SETTINGS_LOG("settings page unchanged: page=%d/%d", g_page_index + 1, g_total_pages);
+        return;
+    }
+    settings_sync_row_rects();
+    SETTINGS_LOG("settings page changed: %d/%d -> %d/%d", old_page + 1, g_total_pages,
+                 g_page_index + 1, g_total_pages);
 }
 
 void settings_back_clicked(void* ctrl) {
@@ -156,21 +186,27 @@ uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (event == 0x17) {
         int64_t tx = *reinterpret_cast<const int64_t*>(param);
         int64_t ty = *reinterpret_cast<const int64_t*>(param + 8);
-        for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
-            UiRect toggle = settings_toggle_rect(i);
-            if (g_rows[i].btn != nullptr &&
-                ui_hit_test(g_rows[i].btn, tx, ty, {0, 0, toggle.w, toggle.h})) {
-                SETTINGS_LOG("settings event: row%d toggle hit tx=%lld ty=%lld rect=(%lld,%lld)",
-                               i, static_cast<long long>(tx), static_cast<long long>(ty),
-                               static_cast<long long>(toggle.x), static_cast<long long>(toggle.y));
-                settings_row_clicked(g_rows[i].btn);
+        for (int cell = 0; cell < SETTINGS_PAGE_CAPACITY; ++cell) {
+            const int item = settings_item_index_at_cell(cell);
+            if (item < 0 || g_rows[item].btn == nullptr) continue;
+            UiRect toggle = settings_item_is_savebackup(item) ? settings_savebackup_rect(cell)
+                                                               : settings_toggle_rect(cell);
+            if (ui_hit_test(g_rows[item].btn, tx, ty, {0, 0, toggle.w, toggle.h})) {
+                SETTINGS_LOG("settings event: item%d cell%d hit tx=%lld ty=%lld rect=(%lld,%lld)",
+                             item, cell, static_cast<long long>(tx), static_cast<long long>(ty),
+                             static_cast<long long>(toggle.x), static_cast<long long>(toggle.y));
+                settings_row_clicked(g_rows[item].btn);
                 break;
             }
         }
-        if (g_savebackup_btn != nullptr &&
-            ui_hit_test(g_savebackup_btn, tx, ty, settings_savebackup_rect())) {
-            SETTINGS_LOG("settings event: savebackup btn hit");
-            settings_savebackup_clicked(g_savebackup_btn);
+        if (g_prev_page_btn != nullptr &&
+            ui_hit_test(g_prev_page_btn, tx, ty, {0, 0, PAGE_BUTTON_W, PAGE_BUTTON_H})) {
+            settings_page_clicked(g_prev_page_btn);
+            return 1;
+        }
+        if (g_next_page_btn != nullptr &&
+            ui_hit_test(g_next_page_btn, tx, ty, {0, 0, PAGE_BUTTON_W, PAGE_BUTTON_H})) {
+            settings_page_clicked(g_next_page_btn);
             return 1;
         }
         if (g_back_btn != nullptr &&
@@ -203,4 +239,3 @@ void settings_savebackup_clicked(void* ctrl) {
 }
 
 // ---- 主菜单「更多游戏」按钮钩子 ----
-
