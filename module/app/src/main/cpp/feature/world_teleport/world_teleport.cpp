@@ -53,6 +53,10 @@ std::array<std::array<char, kMapNameBufferSize>, kChoiceCount> g_choice_text{};
 std::array<char, kMapNameBufferSize> g_confirm_text{};
 std::array<char, kMapNameBufferSize> g_main_title{};
 constexpr char kUnknownMapName[] = "未知地图";
+// YesNo 第 7 参 param 语义=费用（UIPopupMsg 存全局槽，UINpcQuest_DrawEndPopup
+// 在值 >0 时用 MONEY_DrawWithUnit 渲染价格栏），不能携带指针；待传送目标改由
+// 此静态全局在确认/取消回调间传递。
+ChoiceTarget g_pending_target{};
 
 void teleport_confirmed(void* param);
 void teleport_cancelled(void* param);
@@ -222,9 +226,10 @@ bool delayed_open_confirmation(int64_t, void* param) {
                           static_cast<uint32_t>(std::strlen(g_confirm_text.data())),
                           0, 2, reinterpret_cast<void*>(&teleport_confirmed),
                           reinterpret_cast<void*>(&teleport_cancelled),
-                          const_cast<ChoiceTarget*>(target));
-    QOL_LOG_INFO(QolDomain::kUi, "world teleport: confirmation opened target=%d",
-                 target->map_id);
+                          reinterpret_cast<void*>(static_cast<intptr_t>(target->cost)));
+    QOL_LOG_INFO(QolDomain::kUi,
+                 "world teleport: confirmation opened target=%d cost=%d",
+                 target->map_id, target->cost);
     return false;
 }
 
@@ -317,9 +322,10 @@ bool delayed_close_choice(int64_t, void* param) {
     return false;
 }
 
-void teleport_confirmed(void* param) {
-    const auto* target = static_cast<const ChoiceTarget*>(param);
-    if (target == nullptr || fn_get_money == nullptr || fn_minus_money == nullptr ||
+void teleport_confirmed(void*) {
+    // YesNo 的 param 现在携带费用值（供价格栏渲染），目标统一读 g_pending_target。
+    const ChoiceTarget* target = &g_pending_target;
+    if (!target->valid || fn_get_money == nullptr || fn_minus_money == nullptr ||
         fn_mapchange_set == nullptr || fn_gamestate_set_state == nullptr) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: confirm symbols not resolved");
         return;
@@ -406,8 +412,9 @@ void choice_button_execute(void* control) {
     fn_ui_set_popup_process_info(3, 0);
     uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
     if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+    g_pending_target = target;
     if (frame_task_add(kFramePointLogicPre, delayed_open_confirmation,
-                       const_cast<ChoiceTarget*>(&target), 1, 1) == 0) {
+                       &g_pending_target, 1, 1) == 0) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: confirmation registration failed");
         return;
     }

@@ -716,7 +716,7 @@ constexpr uintptr_t F_CONTROL_BUTTON_SET_DRAW_PROC_VMA = 0xaac04;   // void (voi
 constexpr uintptr_t F_UI_CREATE_GROUP_BASE_CONTROL_VMA = 0xaea78;  // void* (void* parent, i64 x, i64 y, i64 w, i64 h) 建组容器（type=0 禁全部触摸）
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_VMA = 0xca54c;        // void (char* text, u32 len, u32 dispType, u32 type) 建弹窗：清旧 + 拷贝文本 + 建文本控件 + SetLayout + 置 bOn（type 0/1/2/3）
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_NONE_VMA = 0xca950;   // void (char* text, u32 len, u32 dispType, u32 type) 无按钮弹窗（内部 type=2）
-constexpr uintptr_t F_UIPOPUPMSG_CREATE_YESNO_VMA = 0xca8dc;  // void (char*, u32, u32, u32, fn ok, fn cancel, void* param) YesNo 弹窗（内部 type=1 + CreateButtonControl×2 + 存 fpOK/fpCancel/param）
+constexpr uintptr_t F_UIPOPUPMSG_CREATE_YESNO_VMA = 0xca8dc;  // void (char*, u32, u32, u32, fn ok, fn cancel, void* param) YesNo 弹窗（内部 type=1 + CreateButtonControl×2 + 存 fpOK/fpCancel/param）。param 语义=费用 int 值：CreateYesNo/CreateYesNoFromTextData 把 x6 存入 *(GOT 0x2f4698) 全局槽，UINpcQuest_DrawEndPopup 0xc32ec 读该槽、>0 时 MONEY_DrawWithUnit(0x11c6ec) 渲染价格栏——禁止传指针（会被当钱数显示乱值）；回调内取上下文须用模块自有全局
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA = 0xca7d4; // void (u32 textId, u32 dispType, u32 formatArg, fn ok, fn cancel, void* param) 原版格式化 YesNo 弹窗
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA = 0xca6f4; // void (u32 textId, u32 x1, u32 x2) 按 TEXTDATABASE 文本 id 弹窗（MEMORYTEXT_GetText + CS_knlSprintk 格式化）
 constexpr uintptr_t F_UIPOPUPMSG_FREE_VMA = 0xca4e8;          // void () 销毁弹窗（删主控件 + UTIL_ReleaseText + 销毁文本控件）
