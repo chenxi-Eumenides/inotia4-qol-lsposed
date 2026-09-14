@@ -141,6 +141,15 @@ static void test_world_teleport_target_map_id() {
     CHECK_EQ(world_teleport::target_map_id(5, -10), 414);
     CHECK_EQ(world_teleport::target_map_id(414, 0), 414);
     CHECK_EQ(world_teleport::target_map_id(0, 0), 0);
+    CHECK_EQ(world_teleport::max_map_id_from_record_count(416), 414);
+    CHECK_EQ(world_teleport::max_map_id_from_record_count(415), 414);
+    CHECK_EQ(world_teleport::max_map_id_from_record_count(414), 413);
+    CHECK_EQ(world_teleport::max_map_id_from_record_count(278), 277);
+    CHECK_EQ(world_teleport::max_map_id_from_record_count(0), 414);
+    CHECK_EQ(world_teleport::target_map_id(277, 1, 277), 0);
+    CHECK_EQ(world_teleport::target_map_id(0, -1, 277), 277);
+    CHECK_EQ(world_teleport::target_map_id(277, 10, 277), 0);
+    CHECK_EQ(world_teleport::target_map_id(5, -10, 277), 277);
 }
 
 static std::string base64_encode(const uint8_t* data, size_t n) {

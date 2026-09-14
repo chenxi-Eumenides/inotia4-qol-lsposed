@@ -1,6 +1,6 @@
 # 世界传送 5 选项（world-teleport）
 
-状态：实现中。本轮已加入第 5 项关闭、UICHOICE 当前地图标题 Hook；Host 测试 9/9，真机回归待本轮 APK 验收。
+状态：实现。已加入第 5 项关闭、UICHOICE 当前地图标题 Hook 和运行时地图数量门控；monster v25 的传送点与小地图区域路径均已完成本轮真机主链路验收，原版 v1.3.2 尚未验证，Host 测试 9/9。
 
 ## 1. 目标
 
@@ -16,8 +16,8 @@
 
 - **两级交互**：点选项 → 弹出改版同款 YesNo 确认框（「是否传送至<目标地图名>？」）→ 确认=查钱+扣钱+传送；取消=返回选项面板可改选
 - 费用沿用改版语义（按距离档：±10=3000、±1=300）；余额不足弹提示、不传送（改版此处 textId 0xa 误显示「狂战士」的 bug 顺带修复，模块自建提示文案）
-- 边界回绕保留（>414→0、<0→414，反汇编实证 `cmp w0,#0x19e`）
-- **三版本行为一致**：大修 20260830 / monster v23 / 原版 v1.3.2
+- 边界回绕保留；运行时上限为 `min(MAPINFOBASE_nRecordCount - 1, 414)`，避免不同版本地图记录数导致目标越界（静态上限反汇编实证 `cmp w0,#0x19e`）
+- **版本状态**：monster v25 已真机验证；大修 20260830、monster v23、原版 v1.3.2 当前未取得本轮同等证据
 - 地图名经 MAPINFOBASE→MEMORYTEXT 查询，查不到回退「未知地图」（与 monster 版现有兜底一致）
 - 选择面板标题由 `UIChoice_Init` 原函数完成后写入「当前地图：<地图名>(id:N)」；仅模块打开 choice 前置位，普通商店/NPC choice 不改标题
 
@@ -44,22 +44,22 @@ hook 点 = `UIPlay_CallMapName` 尾部 0xc66c8 处 4 字节指令，**指令内�
 - 原版：`mov x0,#1` → patch 为 `b 模块trampoline`，trampoline 末尾执行 `mov x0,#1` 并跳回 epilogue 0xc66cc（保留横幅与返回语义）
 - 大修/monster：`b 0xc50f4` → patch 为 `b 模块trampoline`，改版注入块（查钱/YesNo/文本 trampoline/寄生 OK 回调）**整条变死代码**，费用查扣由模块自理（解决「上游按朝向查费挡住低余额玩家选 +1（300G）」的语义冲突）
 - 两种内容都不匹配 → 不启用，记日志（未支持版本安全 no-op，先例 apply_monster_item_count_compat）
-- 打开时机：CallMapName 执行流内直接 push（改版同位置弹 YesNo 无崩溃先例）vs 下一帧延迟开——阶段 2 真机验证择一
+- 打开时机：UICHOICE 由 CallMapName 执行流直接 push；选择项确认框在下一逻辑帧创建，避免与 choice 当前帧的绘制/事件上下文冲突
 
 ### 3.2 面板实现（首选 UICHOICE，阶段 0 静态结论）
 
 - 打开：写 `G_UICHOICE_ITEMTEXT[0..3]`（**持久静态缓冲**「<地图名>(id±N)」，引用语义）及 `[4]="关闭"`，设置 `G_UICHOICE_COUNT=5`、`G_UICHOICE_FOCUS=0` → push choice 面板（choice 的 state id 运行时扫描 g_sPopupStateList 中 enter==F_PANEL_CHOICE_ENTER 的条目获得，不硬编码）
 - 标题时序：push 前生成并保存「当前地图：<地图名>(id:N)」，置位 pending；`UIChoice_Init` wrapper 先调用原函数，再把 `G_UICHOICE_MAIN_TEXT` 指向持久标题缓冲并清除 pending。push 失败清除 pending；pending 未置位时完全透传，避免污染商店/NPC choice。
-- **选中接管：单点 PtrHook `UIChoice_ButtonListExe`(0xb1a98)**——它是全部 5 个按钮共用 ExecuteProc（UIChoice_CreateControl 0xb2110 循环内统一设置），hook 一次即接管全部按钮。索引 0..3 不调用原函数，读取 `ControlObject_GetCursorIndex`(0x9ea48) 后弹 YesNo 二次确认；索引 4 例外走原 `UIChoice_ButtonListExe` 的完整 choice 清理链（`UI_SetPopupProcessInfo(3,0)` + `EVTSYSTEM_DoCheckAllEvent(8)`），确保关闭后下一帧不再处理失效控件
+- **选中接管：单点 PtrHook `UIChoice_ButtonListExe`(0xb1a98)**——它是全部 5 个按钮共用 ExecuteProc（UIChoice_CreateControl 0xb2110 循环内统一设置），hook 一次即接管全部按钮。索引 0..3 读取 `ControlObject_GetCursorIndex`(0x9ea48)，先关闭底层 choice，再由下一逻辑帧创建 YesNo；索引 4 走原 `UIChoice_ButtonListExe` 的完整 choice 清理链（`UI_SetPopupProcessInfo(3,0)` + `EVTSYSTEM_DoCheckAllEvent(8)`）
 - 按钮由面板 enter 内部创建（UIChoice_Init 0xb1cd4 + UIChoice_CreateControl 0xb2110），无需事件系统参与；PopupState process/event 回调可沿用原版（静态无 EVTSYSTEM 依赖）
-- 确认回调：先关闭 choice 面板并恢复 HUD gate，再由下一逻辑帧执行 `INVEN_GetMoney` 比对 → `INVEN_MinusMoney` → 目标 id 回绕（max=414，与改版 `cmp #0x19e` 一致）→ `MAPCHANGE_Set(id,0,0,dir)`+`GAMESTATE_SetState(3)`，避免切图过渡帧继续处理已清理的 choice 控件；取消：重新 push choice 可改选
-- 地图名：`MAPINFOBASE`（记录 6B，`+0`=名称 text_id，416 条， pData GOT=0x2f4000+0xe58）→ `MEMORYTEXT_GetText`(0x118674，自带越界保护返回 NULL) → 空/失败回退「未知地图」
+- 确认回调：YesNo 取消由官方流程关闭后，下一逻辑帧重新打开 choice；确认关闭 YesNo 后，再由延迟任务执行 `INVEN_GetMoney` 比对 → `INVEN_MinusMoney` → 按运行时记录数计算目标 id 回绕 → `MAPCHANGE_Set(id,0,0,dir)`+`GAMESTATE_SetState(3)`；余额不足或目标无效时仅提示，不切图
+- 地图名：`MAPINFOBASE`（记录 6B，`+0`=名称 text_id，pData GOT=0x2f4000+0xe58）→ `MEMORYTEXT_GetText`(0x118674，自带越界保护返回 NULL) → 空/失败回退「未知地图」；monster v25 本轮真机读取 `nRecordCount=421`，因此实际 `max_map_id=414`；原版 v1.3.2 的运行时数量尚未取得
 
-### 3.3 卡死回归根因与修复
+### 3.3 确认框不可见根因与修复
 
-- 根因：确认回调执行时 YesNo 仍在 popup 栈顶。`UI_SetPopupProcessInfo(3,0)` 只排队关闭当前栈顶的 YesNo，底层 UICHOICE 尚未关闭；下一帧 `Scene_Process_POPUP_SC_CHOICE → ControlScroll_Process` 继续使用已销毁控件，表现为卡死/无响应，旧证据为 `.tmp/world-teleport-impl/logcat-final-plus10-transfer.txt` 的 `transferred target=` 后 `ControlScroll_Process+20` SIGSEGV。
-- 修复时序：确认回调先注册 `delayed_close_choice` 并关闭当前 YesNo；下一逻辑帧再排队关闭底层 UICHOICE，同时恢复 HUD gate；再下一逻辑帧执行 `delayed_transfer`。`frame_task_add(..., interval=1, count=1)` 的首个派发为注册后的下一次派发，任务返回 `false` 后注销。
-- 诊断结论：旧链路未出现 `transfer registration failed`，且存在 `selected index=` 与 `transferred target=`；因此不是按钮未触发或 frame task 注册失败，而是传送已执行后残留 UICHOICE 的处理链崩溃。
+- 根因：在 UICHOICE 的按钮 ExecuteProc 内直接创建 YesNo 时，`UIPopupMsg` 的逻辑状态已经是 active，但底层 choice 仍占据当前绘制/事件上下文；真机表现为 API 返回 `dialog_popup`，画面仍显示 choice，用户无法看到确认框。
+- 修复时序：选择 0..3 时先关闭底层 UICHOICE、恢复 HUD gate，再由下一逻辑帧创建 YesNo；取消后下一逻辑帧重新 Push choice；确认仍通过延迟关闭/传送任务执行，避免切图过渡帧访问已清理控件。`frame_task_add(..., interval=1, count=1)` 的首个派发为注册后的下一次派发，任务返回 `false` 后注销。
+- monster v25 真机证据：修复前 `screen=dialog_popup` 但截图仍为 choice；修复后截图显示「是否传送至凯恩的房间？」确认框，取消返回 choice，确认后 `20→21` 且扣 `300G`。证据目录：`.tmp/world-teleport-monster-v25-path-compare/`。
 
 Plan B（真机验证失败时）：自定义 PopupState（实验⑤路径）+ `ControlButton_Create` 原生按钮 ×5，回调全自控。
 
@@ -98,7 +98,7 @@ Plan B（真机验证失败时）：自定义 PopupState（实验⑤路径）+ `
 |---|---|
 | choice 面板非事件上下文崩溃（craft/shop/input_count 前科） | 阶段 0 逆向依赖点 + 真机验证；Plan B 兜底（已验证路径） |
 | 面板期间游戏世界不暂停（非事件上下文继续跑怪） | 阶段 2 观察实际表现，必要时补暂停处理 |
-| UIPopupMsg 叠加 choice 面板的渲染/输入优先级未验证 | 阶段 2 真机验证；备选：取消时重建 choice |
+| UIPopupMsg 叠加 choice 面板的渲染/输入优先级 | 已修复并验证：创建 YesNo 前关闭底层 choice；取消下一逻辑帧重开 choice；确认按关闭→切图顺序执行 |
 | 改版注入块旁路依赖指令 patch | 有 42 点指令 patch 先例（game_patch_core.inc），风险可控 |
 
 ## 6. 验证矩阵 VM-WT
@@ -107,10 +107,10 @@ Plan B（真机验证失败时）：自定义 PopupState（实验⑤路径）+ `
 
 | 用例 | 大修 | monster | 原版 |
 |---|---|---|---|
-| WT-1 踩传送点弹出 4 选项面板（选项=地图名(id±N)） | ☐ | ☐ | ☐ |
-| WT-2 点选后弹出「是否传送至X？」确认框 | ☐ | ☐ | ☐ |
-| WT-3 确认→扣对应费用（300/3000）→切图成功 | ☐ | ☐ | ☐ |
-| WT-4 取消→返回选项面板可改选 | ☐ | ☐ | ☐ |
+| WT-1 踩传送点弹出 4 选项面板（选项=地图名(id±N)） | ☐ | ✅ | ☐ |
+| WT-2 点选后弹出「是否传送至X？」确认框 | ☐ | ✅ | ☐ |
+| WT-3 确认→扣对应费用（300/3000）→切图成功 | ☐ | ✅ | ☐ |
+| WT-4 取消→返回选项面板可改选 | ☐ | ✅ | ☐ |
 | WT-5 余额不足→提示且不扣钱不传送（文案正确，非「狂战士」） | ☐ | ☐ | ☐ |
 | WT-6 边界回绕：id>414→0、id<0→414 | ☐ | ☐ | ☐ |
 | WT-7 关闭面板不扣钱不传送 | ☐ | ☐ | ☐ |
@@ -120,6 +120,8 @@ Plan B（真机验证失败时）：自定义 PopupState（实验⑤路径）+ `
 | WT-11 选择第 5 项「关闭」→ 面板关闭且不扣钱不传送 | ☐ | ☐ | ☐ |
 
 Host 测试：目标 id 计算（+1/+10/-1/-10、回绕）纯函数对照用例（tests/test_host.cpp）。
+
+monster v25 本轮证据：路径 B（点击小地图非标记区域）打开选择框、选择第一项、确认框可见、取消重开选择框、确认后 `20→21`；日志与截图位于 `.tmp/world-teleport-monster-v25-path-compare/`。
 
 ## 7. 决策记录
 

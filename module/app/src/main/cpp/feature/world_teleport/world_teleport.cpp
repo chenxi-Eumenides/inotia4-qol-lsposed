@@ -37,6 +37,7 @@ constexpr int kChoiceCosts[kTeleportChoiceCount] = {300, 3000, 300, 3000};
 struct ChoiceTarget {
     int map_id = 0;
     int cost = 0;
+    bool valid = false;
 };
 
 std::mutex g_world_teleport_mtx;
@@ -52,6 +53,9 @@ std::array<std::array<char, kMapNameBufferSize>, kChoiceCount> g_choice_text{};
 std::array<char, kMapNameBufferSize> g_confirm_text{};
 std::array<char, kMapNameBufferSize> g_main_title{};
 constexpr char kUnknownMapName[] = "未知地图";
+
+void teleport_confirmed(void* param);
+void teleport_cancelled(void* param);
 
 bool encode_b(uintptr_t from, uintptr_t to, uint32_t* out) {
     if (from == 0 || to == 0 || out == nullptr) return false;
@@ -125,6 +129,14 @@ const char* map_name(int map_id) {
     return text;
 }
 
+int runtime_map_record_count() {
+    if (g_mapinfo_record_count == nullptr ||
+        !game_memory_accessible(g_mapinfo_record_count, sizeof(uint16_t), 'r')) {
+        return 0;
+    }
+    return static_cast<int>(*reinterpret_cast<uint16_t*>(g_mapinfo_record_count));
+}
+
 int choice_state_id() {
     if (g_base == 0) return -1;
     auto* list_slot = reinterpret_cast<void**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
@@ -150,15 +162,27 @@ void open_choice_panel() {
         return;
     }
     const int current_id = static_cast<int>(current_map_id());
+    const int record_count = runtime_map_record_count();
+    const int max_map_id = world_teleport::max_map_id_from_record_count(record_count);
+    QOL_LOG_INFO(QolDomain::kUi,
+                 "world teleport: map records count=%d max_map_id=%d current=%d",
+                 record_count, max_map_id, current_id);
     auto** item_text = reinterpret_cast<char**>(g_uichoice_itemtext);
     for (size_t index = 0; index < kTeleportChoiceCount; ++index) {
         const int delta = kChoiceDeltas[index];
-        const int target_id = world_teleport::target_map_id(current_id, delta);
-        g_targets[index] = {target_id, kChoiceCosts[index]};
-        const char* name = map_name(target_id);
+        const int target_id = world_teleport::target_map_id(current_id, delta, max_map_id);
+        const bool valid = target_id >= 0 &&
+            (record_count <= 0 || target_id < record_count);
+        g_targets[index] = {target_id, kChoiceCosts[index], valid};
+        const char* name = valid ? map_name(target_id) : "不可用";
         const char* sign = delta > 0 ? "+" : "-";
-        std::snprintf(g_choice_text[index].data(), g_choice_text[index].size(),
-                      "%s(id%s%d)", name, sign, delta > 0 ? delta : -delta);
+        if (valid) {
+            std::snprintf(g_choice_text[index].data(), g_choice_text[index].size(),
+                          "%s(id%s%d)", name, sign, delta > 0 ? delta : -delta);
+        } else {
+            std::snprintf(g_choice_text[index].data(), g_choice_text[index].size(),
+                          "%s（地图数据不足）", name);
+        }
         item_text[index] = g_choice_text[index].data();
     }
     std::snprintf(g_choice_text[kCloseChoiceIndex].data(),
@@ -185,6 +209,22 @@ void open_choice_panel() {
 
 bool delayed_open_choice(int64_t, void*) {
     open_choice_panel();
+    return false;
+}
+
+bool delayed_open_confirmation(int64_t, void* param) {
+    const auto* target = static_cast<const ChoiceTarget*>(param);
+    if (target == nullptr || fn_popup_create_yesno == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: confirmation symbols not resolved");
+        return false;
+    }
+    fn_popup_create_yesno(g_confirm_text.data(),
+                          static_cast<uint32_t>(std::strlen(g_confirm_text.data())),
+                          0, 2, reinterpret_cast<void*>(&teleport_confirmed),
+                          reinterpret_cast<void*>(&teleport_cancelled),
+                          const_cast<ChoiceTarget*>(target));
+    QOL_LOG_INFO(QolDomain::kUi, "world teleport: confirmation opened target=%d",
+                 target->map_id);
     return false;
 }
 
@@ -305,8 +345,11 @@ void close_choice_panel() {
 }
 
 void teleport_cancelled(void*) {
-    // 确认框覆盖在原 UICHOICE 上方；取消时官方流程会关闭确认框，原选择框
-    // 仍然有效。此处重新 Push 会叠加第二个 UICHOICE，导致关闭后访问失效控件。
+    // 官方流程会先关闭确认框；选择框已在打开确认框前关闭，因此下一逻辑帧
+    // 重新 Push，而不是在 YesNo 仍位于栈顶时叠加 UICHOICE。
+    if (frame_task_add(kFramePointLogicPre, delayed_open_choice, nullptr, 1, 1) == 0) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice reopen registration failed");
+    }
     QOL_LOG_INFO(QolDomain::kUi, "world teleport: confirmation cancelled");
 }
 
@@ -344,12 +387,30 @@ void choice_button_execute(void* control) {
         return;
     }
     const ChoiceTarget& target = g_targets[static_cast<size_t>(index)];
+    if (!target.valid) {
+        show_message("目标地图无效，无法传送");
+        QOL_LOG_WARN(QolDomain::kUi,
+                     "world teleport: invalid target index=%d map_id=%d",
+                     index, target.map_id);
+        return;
+    }
     std::snprintf(g_confirm_text.data(), g_confirm_text.size(), "是否传送至%s？",
                   map_name(target.map_id));
-    fn_popup_create_yesno(g_confirm_text.data(), static_cast<uint32_t>(std::strlen(g_confirm_text.data())),
-                          0, 2, reinterpret_cast<void*>(&teleport_confirmed),
-                          reinterpret_cast<void*>(&teleport_cancelled),
-                          const_cast<ChoiceTarget*>(&target));
+    // UIPopupMsg 是全局绘制层；若底层 UICHOICE 仍在栈顶，弹窗状态虽已创建，
+    // 实际画面仍会继续绘制 choice，导致用户看不到确认框。先按官方关闭流程
+    // 清掉 choice，再在下一逻辑帧创建 YesNo；取消回调会重新打开 choice。
+    if (fn_ui_set_popup_process_info == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice close symbols not resolved");
+        return;
+    }
+    fn_ui_set_popup_process_info(3, 0);
+    uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+    if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+    if (frame_task_add(kFramePointLogicPre, delayed_open_confirmation,
+                       const_cast<ChoiceTarget*>(&target), 1, 1) == 0) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: confirmation registration failed");
+        return;
+    }
     QOL_LOG_INFO(QolDomain::kUi, "world teleport: selected index=%d target=%d cost=%d",
                  index, target.map_id, target.cost);
 }

@@ -167,6 +167,7 @@ constexpr uintptr_t G_PLAYER_ACTIVE_VMA = 0x728fc0;  // PLAYER_pActivePlayer (8B
 constexpr uintptr_t G_MAPINFOBASE_PDATA_GOT_VMA = 0x2f4000 + 0xe58; // MAPINFOBASE_pData GOT 槽（双层解引用后为地图记录数组）
 constexpr uintptr_t G_MAPINFOBASE_RECORD_SIZE_VMA = 0x3017b8; // MAPINFOBASE_nRecordSize（u8，值=6）
 constexpr uintptr_t G_MAPINFOBASE_RECORD_COUNT_VMA = 0x3017ba; // MAPINFOBASE_nRecordCount（u16，值=416）
+constexpr int MAPINFOBASE_STATIC_MAX_MAP_ID = 414; // 原版/改版共同的静态地图 ID 上限；运行时仍须受 record_count 限制
 constexpr uintptr_t G_PLAYER_ACTIVE_GOT_VMA = 0x3f6000 + 0xa50; // 主控玩家指针 GOT 槽（双层解引用后为角色对象）
 constexpr uintptr_t G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA = 0x2f44d8; // UIChoice_ButtonListExe 函数指针 GOT 槽
 constexpr uintptr_t G_UICHOICE_CONTROL_GOT_VMA = 0x302550; // UICHOICE 主控件指针槽（ButtonListExe 读取）
