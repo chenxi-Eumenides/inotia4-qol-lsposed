@@ -658,6 +658,35 @@ HTML_TEMPLATE = r'''<!doctype html>
     .toast.is-visible { opacity: 1; transform: translateY(0); }
     .toast.is-error { border-left-color: #dc2626; }
 
+    .file-drop-hint {
+      position: fixed;
+      inset: 16px;
+      z-index: 70;
+      display: grid;
+      place-items: center;
+      border: 2px dashed var(--accent);
+      border-radius: 16px 5px 16px 5px;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+      font-family: "STKaiti", "KaiTi", "Noto Serif CJK SC", serif;
+      font-size: clamp(22px, 3vw, 34px);
+      font-weight: 700;
+      letter-spacing: .04em;
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(.985);
+      transition: opacity .16s ease, transform .16s ease;
+    }
+
+    body.is-file-drop-target .file-drop-hint {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    body.is-file-drop-target .stage {
+      box-shadow: inset 0 0 0 3px var(--accent);
+    }
+
     dialog {
       width: min(460px, calc(100vw - 32px));
       padding: 0;
@@ -823,6 +852,7 @@ HTML_TEMPLATE = r'''<!doctype html>
     </div>
   </dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="file-drop-hint" id="file-drop-hint" aria-hidden="true">松开导入布局 JSON</div>
 
   <script id="map-data" type="application/json">/*__MAP_DATA__*/</script>
   <script>
@@ -842,14 +872,21 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     const mapById = new Map(MAP_DATA.map((map) => [map.id, map]));
-    const linkedMapIds = new Map(MAP_DATA.map((map) => [map.id, new Set()]));
+    const outgoingMapIds = new Map(MAP_DATA.map((map) => [map.id, new Set()]));
     for (const sourceMap of MAP_DATA) {
       for (const exit of sourceMap.exits) {
-        const targetLinks = linkedMapIds.get(exit.targetMapId);
-        const sourceLinks = linkedMapIds.get(sourceMap.id);
-        if (targetLinks && sourceLinks) {
-          sourceLinks.add(exit.targetMapId);
-          targetLinks.add(sourceMap.id);
+        const sourceTargets = outgoingMapIds.get(sourceMap.id);
+        if (sourceTargets && mapById.has(exit.targetMapId)) sourceTargets.add(exit.targetMapId);
+      }
+    }
+    const linkedMapIds = new Map(MAP_DATA.map((map) => [map.id, new Set()]));
+    for (const [sourceMapId, targets] of outgoingMapIds) {
+      const sourceLinks = linkedMapIds.get(sourceMapId);
+      if (!sourceLinks) continue;
+      for (const targetMapId of targets) {
+        const reverseTargets = outgoingMapIds.get(targetMapId);
+        if (reverseTargets && reverseTargets.has(sourceMapId)) {
+          sourceLinks.add(targetMapId);
         }
       }
     }
@@ -1216,39 +1253,20 @@ HTML_TEMPLATE = r'''<!doctype html>
         const highPosition = state.placed.get(pair.highId);
         if (!lowPosition || !highPosition) continue;
 
-        if (pair.lowToHigh.length > 0 && pair.highToLow.length > 0) {
-          // 双向出口只保留一条线，并连接两侧各自的出口代表点。
-          const lowExit = pair.lowToHigh[0].exit;
-          const highExit = pair.highToLow[0].exit;
-          const elements = appendConnection(
-            exitPoint(lowPosition, lowExit.x, lowExit.y),
-            exitPoint(highPosition, highExit.x, highExit.y)
-          );
-          rememberConnection(pair.lowId + ":" + pair.highId, {
-            lowId: pair.lowId,
-            highId: pair.highId,
-            lowExit,
-            highExit,
-            bidirectional: true,
-            ...elements
-          });
-          continue;
-        }
-
-        // 单向出口保持原语义：出口代表点连接到对方地图的落点。
-        const directed = pair.lowToHigh.length > 0 ? pair.lowToHigh[0] : pair.highToLow[0];
-        const sourcePosition = state.placed.get(directed.sourceMapId);
-        const targetPosition = state.placed.get(directed.targetMapId);
-        if (!sourcePosition || !targetPosition) continue;
+        // 只有互为出口的地图对才画线；按无序地图对保证双向只出现一条。
+        if (pair.lowToHigh.length === 0 || pair.highToLow.length === 0) continue;
+        const lowExit = pair.lowToHigh[0].exit;
+        const highExit = pair.highToLow[0].exit;
         const elements = appendConnection(
-          exitPoint(sourcePosition, directed.exit.x, directed.exit.y),
-          exitPoint(targetPosition, directed.exit.targetX, directed.exit.targetY)
+          exitPoint(lowPosition, lowExit.x, lowExit.y),
+          exitPoint(highPosition, highExit.x, highExit.y)
         );
         rememberConnection(pair.lowId + ":" + pair.highId, {
           lowId: pair.lowId,
           highId: pair.highId,
-          directed,
-          bidirectional: false,
+          lowExit,
+          highExit,
+          bidirectional: true,
           ...elements
         });
       }
@@ -1267,19 +1285,12 @@ HTML_TEMPLATE = r'''<!doctype html>
     }
 
     function updateConnection(record) {
-      const sourcePosition = state.placed.get(record.bidirectional ? record.lowId : record.directed.sourceMapId);
-      const targetPosition = state.placed.get(record.bidirectional ? record.highId : record.directed.targetMapId);
+      const sourcePosition = state.placed.get(record.lowId);
+      const targetPosition = state.placed.get(record.highId);
       if (!sourcePosition || !targetPosition) return;
 
-      let start;
-      let end;
-      if (record.bidirectional) {
-        start = exitPoint(sourcePosition, record.lowExit.x, record.lowExit.y);
-        end = exitPoint(targetPosition, record.highExit.x, record.highExit.y);
-      } else {
-        start = exitPoint(sourcePosition, record.directed.exit.x, record.directed.exit.y);
-        end = exitPoint(targetPosition, record.directed.exit.targetX, record.directed.exit.targetY);
-      }
+      const start = exitPoint(sourcePosition, record.lowExit.x, record.lowExit.y);
+      const end = exitPoint(targetPosition, record.highExit.x, record.highExit.y);
       setConnectionCoordinates(record.shadow, start, end);
       setConnectionCoordinates(record.line, start, end);
     }
@@ -1620,6 +1631,50 @@ HTML_TEMPLATE = r'''<!doctype html>
       showToast("布局已导入：" + layout.placed.length + " 张地图");
     }
 
+    function isJsonFile(file) {
+      const name = typeof file.name === "string" ? file.name.toLowerCase() : "";
+      return name.endsWith(".json") || file.type === "application/json";
+    }
+
+    async function handleImportFile(file) {
+      try {
+        if (!isJsonFile(file)) throw new Error("仅支持 .json 布局文件。");
+        const layout = validateLayout(JSON.parse(await file.text()));
+        pendingImport = layout;
+        importSummary.textContent = summarizeImport(layout);
+        importDialog.showModal();
+      } catch (error) {
+        showToast("导入失败：" + errorMessage(error), "error");
+      }
+    }
+
+    function hasFiles(event) {
+      const transfer = event.dataTransfer;
+      if (!transfer) return false;
+      if (transfer.files && transfer.files.length > 0) return true;
+      return transfer.types ? Array.from(transfer.types).includes("Files") : false;
+    }
+
+    function clearFileDropFeedback() {
+      body.classList.remove("is-file-drop-target");
+    }
+
+    function handleWindowDragOver(event) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      body.classList.add("is-file-drop-target");
+    }
+
+    function handleWindowDrop(event) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      clearFileDropFeedback();
+      const file = event.dataTransfer && event.dataTransfer.files[0];
+      if (file) handleImportFile(file);
+      else showToast("导入失败：没有检测到文件。", "error");
+    }
+
     function exportLayout() {
       const payload = {
         version: 1,
@@ -1662,18 +1717,19 @@ HTML_TEMPLATE = r'''<!doctype html>
     stage.addEventListener("pointerdown", beginPan);
     stage.addEventListener("wheel", handleWheel, { passive: false });
 
-    importFile.addEventListener("change", async () => {
+    importFile.addEventListener("change", () => {
       const file = importFile.files && importFile.files[0];
       importFile.value = "";
       if (!file) return;
-      try {
-        const text = await file.text();
-        const layout = validateLayout(JSON.parse(text));
-        pendingImport = layout;
-        importSummary.textContent = summarizeImport(layout);
-        importDialog.showModal();
-      } catch (error) {
-        showToast("导入失败：" + errorMessage(error), "error");
+      handleImportFile(file);
+    });
+
+    window.addEventListener("dragover", handleWindowDragOver, { passive: false });
+    window.addEventListener("drop", handleWindowDrop, { passive: false });
+    window.addEventListener("dragend", clearFileDropFeedback);
+    window.addEventListener("dragleave", (event) => {
+      if (event.clientX <= 0 || event.clientY <= 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight) {
+        clearFileDropFeedback();
       }
     });
 
@@ -1766,17 +1822,16 @@ def merge_exits(exit_record, map_id):
             continue
         if target_map_id == map_id:
             continue
-        key = (target_map_id, target_x, target_y)
-        grouped.setdefault(key, []).append((x, y))
+        grouped.setdefault(target_map_id, []).append((x, y, target_x, target_y))
 
     merged = []
-    for (target_map_id, target_x, target_y), cells in sorted(grouped.items()):
+    for target_map_id, cells in sorted(grouped.items()):
         merged.append({
             "x": int(sum(cell[0] for cell in cells) / len(cells)),
             "y": int(sum(cell[1] for cell in cells) / len(cells)),
             "targetMapId": target_map_id,
-            "targetX": target_x,
-            "targetY": target_y,
+            "targetX": int(sum(cell[2] for cell in cells) / len(cells)),
+            "targetY": int(sum(cell[3] for cell in cells) / len(cells)),
         })
     return merged
 
