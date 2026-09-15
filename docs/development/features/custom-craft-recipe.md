@@ -708,7 +708,11 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 32. **书名册索引不变式（缺陷 + 修复）**：注入 N 条 RECIPEBASE 记录把总记录数由 69 改成 69+N，而 `GetRecipeCount(0)` 返回的正是总记录数 → `AddRecipeBook`/`MakeRecipeList` 的 `base` 由 17 变成 17+N，产生三个可观察症状：① 既有解锁在传说装备页**整体错位 N 条**（已解锁的 bit0 原本显示记录 17「安格巴德的剑」，变成记录 19「龙之心脏」）；② `idx < 17+N` 的记录（D级武器合成套装的 17/18）解算出**负位索引**，而 `AddRecipeBook` 只查上界 → 对书名册缓冲前方越界读改写；③ 横幅取自 `RECIPEBASE[idx].b0-1`、与位图无关，且 `AddRecipeBook` 返回值被丢弃、`CHAR_ProcessRecipe` 恒返回 1 → 用户看到「提示解锁了 A，页面上却是 B / 没有 A」。
      **修复（2026-09-16）**：`build_record_bytes` 让每条注入记录的 `b11` 同时带 `kRbRecipeBookBit`(bit5) → `base = (69+N) − (52+N) = 17` 对任意 N 恒成立；并在 `custom_recipe_table_ensure()` 里用 `count_recipe_book_records` + `recipe_book_bytes` 做「注入前后书名册字节数必须相等」的 **fail-closed 校验**（不相等即拒绝注入并记 `QOL_LOG_ERROR`），日志追加 `book_bytes=` 便于核对。
      **证据状态**：机制与修复依据为反汇编（§3.13）+ host 单测（`tests/test_custom_recipe.cpp` 第 6 项）。**尚未真机验证**：修复后「传说装备页解锁项与横幅一致、且不再出现负位记录」需在设备上回归；bit5 置位对其它读点的影响也需真机确认（设计上 group 5 的列表只扫书名册位图，注入记录对应的位 52/53 永不被解锁，故不应出现新条目）。
-33. **「合成套装在扩展背包可用、原版背包无效果」尚未定位**：两处最终都调 `CHAR_UseItemEx(ch, item, 0)`、都用物品类别取值，**代码路径完全相同**（模块对原版物品会 `return false` 交回 backup），故差异不在这条链上。待查：① 原版背包是否为这些物品提供「使用」动作（UIEquip 按钮表 / 物品 desc 的 disp 位），而扩展背包用的是模块自己的 `ITEMDATA_IsUse(类别)` 判定；② 原版链要求 `INVEN_FindItemSlot@0x103704` 命中（这正是模块给扩展袋单独分流的原因）；③ 两侧是否确为同一条物品记录 / 同一存档。
+33. **「合成套装在扩展背包可用、原版背包无效果」——游戏侧路径已排除，只剩两个候选（其一是本轮的索引偏移）**。
+    **原版背包确实会为合成套装挂载「使用」按钮**（已逐段反汇编核实）：`UIEquip_SetDescMenu@0xb8504` 的分支链先读物品记录 `byte[+2]` 与 `0x1f` 比较（装备分支，挂面板偏移 0x78），不等则依次退到 `ITEMSYSTEM_IsShortcutUse`(0x80) / `IsMercenarySeal`(0x98) / `IsDice`(0xa0) / `IsUseAfterConfirm`(0xa8)，最后在 `b888c` 读 `byte[+7]` 的 **bit1**；合成套装（类别 706..717）该字节 = `0x6a` → bit1 置位 → 挂载到面板偏移 **0x80**，其 handler 取自 GOT 槽 `0x2f6330` = **`UIEquip_ButtonUseExe@0xb80b8`**。
+    **该 handler 无类别门禁**：仅当 `类别==0x3e` 时先查 `SAVE_IsOK`（否则弹 `0x25`），随后无条件 `PARTY_GetMenuCharacter()` + `CHAR_UseItemEx(ch, item, 0)` —— 与扩展背包 `extension_confirm_use_item` 的目标调用**完全一致**。注：`ITEMDATA_IsUse`（判据 `itemId∈{26,27}` 或 `byte[+2]∈{0x16,0x17}`）对合成套装（`byte[+2]=0x21`）判否，但原版 desc 菜单的「使用」按钮**不经过这个判定**，故原版背包并非因它而缺少「使用」动作。
+    **剩余候选**：① **本轮已修复的书名册索引偏移 +2**（§7.32）——解锁落到错误记录上，用户核对的配方仍处锁定态，表现就是「使用无效果」，这与「横幅说 A、页面是 B」是同一症状；② 模块 desc 按钮 wrapper `extension_desc_item_execute` 开头 `if (hook_index < 0 || hook == nullptr) return;` 这条**不回退原版、直接吞掉点击**的路径（当面板槽位指针与安装时不一致时命中；该函数其余分支都是 `hook->call_orig(button)` 正常回退原版）。
+    **下一步**：真机回归（装最新 debug APK）先验证 ① —— 若传说装备页解锁项与横幅已一致，则「原版无效果」即为同一缺陷的表现；若仍复现，再按 `extension desc execute index=… orig=0x…` 日志定位 ②。
 
 ## 8. 关联
 
