@@ -64,6 +64,7 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 打开：`fn_ui_set_popup_process_info(1, state_id)`（`UI_SetPopupProcessInfo` @0xaecc8）；关闭：`(3, 0)`；另有 `(4, 0)`（recover 语义，见 game_patch.cpp）
 - 模块已实现：`data_popup_top_vma()`（栈顶 enter VMA → 面板识别）、`data_ui_screen()`（v0.5.42 统一 screen 枚举；UIPopupMsg 独立于 popup 栈，主菜单弹窗也识别为 `dialog_popup`：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）
 - Java 层例外：Android 同意页 `AgreementUIActivity` 不经 libgame.so，native 枚举不感知；由 Kotlin 层（`UiActivityTracker` + `InfoApiServiceImpl.gamestateJson()`）覆盖为独立 `screen=agreement`，与 native `dialog_popup` 是两个域（in_world 守卫分界：native 对话仅 world 内，同意页仅主菜单前）
+- Java 层启动指示框：`com.com2us.wrapper.WrapperUserDefined.ActivityIndicatorOpen/Close()` 显示/关闭一个 `setCancelable(false)` 的 `ProgressDialog("Connecting..")`（`WrapperUserDefined.java:166-198`）。调用方是**游戏主循环**——native `CWrapperKernel.nativeProcess` 经 JNI 反射调用（Java 栈：`CWrapperKernel.onProcess(CWrapperKernel.java:194)` ← `CWrapperTimer$1$1.run(:70)` ← GLThread），native 只把「等待中」状态画出来，不读返回值、Java 侧也无状态写入。关闭完全依赖 native 再次调用 Close（Java 侧无超时/无生命周期兜底），在它显示期间切场景或进存档会让 Close 不再到达、弹窗永久抢占输入；因此模块在 `patch/ActivityIndicatorBlocker.kt` 让 Open 空实现（纯 UI，无副作用）
 
 ## 3. ControlObject 控件系统（元素的定义）
 

@@ -8,6 +8,7 @@ import android.os.HandlerThread
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import com.inotia4.qol.patch.AgreementGate
+import com.inotia4.qol.patch.ActivityIndicatorBlocker
 import com.inotia4.qol.patch.IapBlocker
 import com.inotia4.qol.patch.ImmersiveMode
 import com.inotia4.qol.patch.ResourceNamespaceBridge
@@ -72,6 +73,17 @@ class HookMain : XposedModule() {
                     } else {
                         chain.proceed()
                     }
+                }
+        }
+
+        // "Connecting.." 模态进度框：native 只在联网等待点调用 Open，且关闭完全依赖 native 再调
+        // Close；显示期间切场景会让 Close 不再到达，弹窗永久抢占输入。直接空实现 Open（纯 UI，无副作用）。
+        ActivityIndicatorBlocker.install(param) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    LogFile.info(LogDomain.PLATFORM, "blocked ActivityIndicatorOpen (Connecting.. progress dialog)")
+                    null
                 }
         }
 
