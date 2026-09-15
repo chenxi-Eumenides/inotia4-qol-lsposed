@@ -24,8 +24,8 @@ static void test_damage_matrix() {
     CHECK(damage_percent(Side::kMonster, Side::kPlayer) == 50);   // 敌人打玩家
     CHECK(damage_percent(Side::kPlayer, Side::kPlayer) == 50);    // 玩家侧互击（不应发生）
     CHECK(damage_percent(Side::kNeutral, Side::kPlayer) == 50);   // 中立打玩家
-    // 玩家侧打怪物 → 200。
-    CHECK(damage_percent(Side::kPlayer, Side::kMonster) == 200);
+    // 玩家侧打怪物 → 150（+50%，×1.5）。
+    CHECK(damage_percent(Side::kPlayer, Side::kMonster) == 150);
     // 怪物互殴 / 怪物打 NPC → 100。
     CHECK(damage_percent(Side::kMonster, Side::kMonster) == 100);
     CHECK(damage_percent(Side::kMonster, Side::kNeutral) == 100);
@@ -43,10 +43,14 @@ static void test_max_hp_matrix() {
 }
 
 static void test_scale_by_percent() {
-    CHECK(scale_by_percent(100, 200) == 200);
+    CHECK(scale_by_percent(100, 150) == 150);
     CHECK(scale_by_percent(100, 50) == 50);
     CHECK(scale_by_percent(100, 100) == 100);
-    CHECK(scale_by_percent(7, 200) == 14);
+    CHECK(scale_by_percent(7, 150) == 10);   // 7×1.5 = 10.5 → 向下取整 10
+    // ×1.5 是分数倍率：1 点伤害取整后仍是 1（不增益），2 → 3 才是精确 +50%，3 → 4（4.5 取整）。
+    CHECK(scale_by_percent(1, 150) == 1);
+    CHECK(scale_by_percent(2, 150) == 3);
+    CHECK(scale_by_percent(3, 150) == 4);
     // 取整方向：向下（整数除法）。
     CHECK(scale_by_percent(7, 50) == 3);
     CHECK(scale_by_percent(3, 50) == 1);
@@ -54,12 +58,12 @@ static void test_scale_by_percent() {
     CHECK(scale_by_percent(1, 50) == 1);
     CHECK(scale_by_percent(2, 50) == 1);
     // 非法/零值原样返回，不被放大。
-    CHECK(scale_by_percent(0, 200) == 0);
-    CHECK(scale_by_percent(-5, 200) == -5);
+    CHECK(scale_by_percent(0, 150) == 0);
+    CHECK(scale_by_percent(-5, 150) == -5);
     // 溢出保护。
     const std::int32_t big = std::numeric_limits<std::int32_t>::max();
-    CHECK(scale_by_percent(big, 200) == big);
-    CHECK(scale_by_percent(big / 2, 200) == big - 1);  // (big/2)*2 = big-1，不溢出
+    CHECK(scale_by_percent(big, 150) == big);          // ×1.5 后超界 → 钳 INT32_MAX
+    CHECK(scale_by_percent(1000000, 150) == 1500000);  // 未超界时按 ×1.5 缩放
 }
 
 static void test_halved_max_hp() {

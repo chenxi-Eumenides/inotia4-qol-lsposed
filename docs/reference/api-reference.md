@@ -1632,7 +1632,7 @@
 > - `autoSellEnabled` 自动出售全局开关，默认 `false`；变化即通知 native（进档后由存档内总开关共同决定扫描任务）
 > - `apiEnabled` API 全局开关，默认 `true`；`false` 时不启动 HTTP 服务与 native 缓存预取线程（`nativeSetApiEnabled(false)` → `frame_cache_stop()`），`GET/POST /api/config/*` 随之不可达。**`apiEnabled=false` 不影响 feature 初始化**——`ApiServer.bootstrap` 已把 feature 初始化（设置页/扩展背包/存档/自动出售等）与 HTTP 启动拆开，关闭仅停 HTTP 与预取线程。关闭后唯一恢复通道为**游戏内设置页第一项「API服务」开关**（走 `ModuleConfigUiBridge` JNI，不依赖 HTTP；false→true 经 `ApiServer.startFromConfig` 重启 HTTP）；由 HTTP 置 `false` 时延迟约 500ms 停止以先送回本响应
 > - `debugLogEnabled` 统一日志 debug 级别运行时开关，默认 `false`；变化即时经 `nativeQolLogSetDebugEnabled` 下发 native 门控，无需重启。info/warn/error 不受该开关影响（常开）。接入游戏内**设置页第 8 行「调试日志」**；日志格式与规则见 `docs/development/logging.md`
-> - `simpleModeEnabled` 简单模式，默认 `false`；开启后怪物最大生命减半、玩家侧打敌人的伤害 ×2、玩家侧受到的伤害 ×0.5。变化即时经 `nativeSetSimpleModeEnabled` 下发 native（热路径只读一个 C++ 原子量），无需重启。接入游戏内**设置页「简单模式」**；落点、阵营判定与真机验收数据见 `docs/development/features/simple-mode.md`
+> - `simpleModeEnabled` 简单模式，默认 `false`；开启后怪物最大生命减半、玩家侧打敌人的伤害 ×1.5、玩家侧受到的伤害 ×0.5。变化即时经 `nativeSetSimpleModeEnabled` 下发 native（热路径只读一个 C++ 原子量），无需重启。接入游戏内**设置页「简单模式」**；落点、阵营判定与真机验收数据见 `docs/development/features/simple-mode.md`
 
 #### 读取配置
 

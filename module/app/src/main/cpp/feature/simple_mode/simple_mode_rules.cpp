@@ -10,8 +10,9 @@ int damage_percent(Side attacker, Side victim) {
         return 50;
     }
     // 再判攻击者：只有「玩家侧打怪物」才加伤；打 NPC/装饰物不加（它们不是敌人）。
+    // 150 = ×1.5（+50%）。
     if (attacker == Side::kPlayer && victim == Side::kMonster) {
-        return 200;
+        return 150;
     }
     return 100;
 }

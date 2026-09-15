@@ -27,7 +27,7 @@ import java.io.File
  * - extensionBagEnabled：是否启用扩展背包，默认 true。
  * - gemCraftOptimize：是否启用合成器宝石合成操作优化，默认 false。
  * - customRecipeEnabled：是否启用合成器自定义配方，默认 false；禁用不回滚已注入的表（custom-craft-recipe §4.8）。
- * - simpleModeEnabled：简单模式，默认 false。开启后怪物最大生命减半、玩家侧打敌人伤害 ×2、
+ * - simpleModeEnabled：简单模式，默认 false。开启后怪物最大生命减半、玩家侧打敌人伤害 ×1.5、
  *   玩家侧受到伤害 ×0.5；关闭即时生效（怪物在下一次属性重算写回满值）。变更时下发 native。
  * - autoSellEnabled：自动出售全局开关，默认 false；开启后背包页显示入口按钮并启用扫描。
  * - apiEnabled：API 全局开关，默认 true；关闭时不启动 HTTP 服务与 native 缓存预取线程，
@@ -99,7 +99,7 @@ object ModuleConfig {
     var customRecipeEnabled: Boolean = DEFAULT_CUSTOM_RECIPE_ENABLED
         private set
 
-    /** 简单模式（默认 false）：怪物最大生命减半 + 玩家侧打敌人伤害 ×2 + 玩家侧受到伤害 ×0.5 */
+    /** 简单模式（默认 false）：怪物最大生命减半 + 玩家侧打敌人伤害 ×1.5 + 玩家侧受到伤害 ×0.5 */
     @Volatile
     var simpleModeEnabled: Boolean = DEFAULT_SIMPLE_MODE_ENABLED
         private set

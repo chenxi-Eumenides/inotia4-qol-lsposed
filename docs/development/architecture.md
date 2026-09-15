@@ -142,7 +142,7 @@ data 层 → 仅 STL
 | `api/native/game_save_preflight.*` | API native 域（纯逻辑） | 存档预检判决：槽结构状态/失败码 → valid/corrupt/missing/incompatible/unknown + 阶段名 + 结构化 JSON；零游戏依赖，编入 host 单测 | 无（纯 STL） |
 | `game_system.*` | parse 域 | **系统聚合域（唯一允许 include 其他域头的聚合域）**：build_gamestate_json / build_snapshot_json + frame_count / init_report / events / emit / take_snapshot | data + 引擎 + 各域头 |
 | `feature/patch/game_patch.*` | patch | **注入/修改补丁域**：IAP 屏蔽 / 沉浸模式 / 堆叠上限（47 patch 点）/ craft 三函数 / recover_after_hive_block / migrate_stack（§2.5） | data + game_ptr_hook.h |
-| `feature/simple_mode/*` | feature | **简单模式**：包裹 `CHAR_AddDamage`（打敌人 ×2、受到伤害 ×0.5）与 `CHAR_UpdateAttrFromMonster`（怪物最大生命减半）；含阵营判定原语、mod 跳板跟随与半血幂等账本（§2.6） | data + core + `native_hook_func()` |
+| `feature/simple_mode/*` | feature | **简单模式**：包裹 `CHAR_AddDamage`（打敌人 ×1.5、受到伤害 ×0.5）与 `CHAR_UpdateAttrFromMonster`（怪物最大生命减半）；含阵营判定原语、mod 跳板跟随与半血幂等账本（§2.6） | data + core + `native_hook_func()` |
 | `feature/ui/module_text.*` | feature | **模块自定义文本层**：独占 `MEMORYTEXT_GetText` 单一 hook，按「text id + 窗口作用域」返回模块自有文本；charinfo 标签与合成器配方按钮文案的公共设施（§2.7） | data + core + `native_hook_func()` |
 | `feature/extension_bag/game_ui_virtbag.*` | feature | 扩展背包运行时：状态、投影、拖拽、绘制、生命周期与扩展背包操作 | data + core + patch |
 | `feature/extension_bag/extension_bag_port.cpp` | feature adapter | 将扩展背包内部实现适配为 `core/native/extension_bag_port.h` 稳定端口 | extension_bag runtime |
