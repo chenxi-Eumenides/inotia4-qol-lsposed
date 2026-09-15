@@ -94,10 +94,10 @@ const ThreeSlotRecipe kThreeSlotRecipes[] = {
      ProductMode::kFixedCategory, 0},
     {{kCategoryTopJewel, kCategoryTopJewel, kCategoryTopJewel}, false, kCategoryChaosJewel,
      ProductMode::kFixedCategory, 0},
-    // 宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25) → **该宝石自身**，数值 ×1.1（槽位严格顺序）。
+    // 宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25) → **该宝石自身**，数值 ×1.2 向上取整（槽位严格顺序）。
     // 第 1 格接受任意宝石（28..32），产物沿用源宝石的类别、随机等级与属性类型，只缩放数值位。
     {{kAnyJewelSlot, kCategoryChaosWeaponScroll, kCategoryChaosArmorScroll}, true, 0,
-     ProductMode::kScaleFirstItem, 1100},
+     ProductMode::kScaleFirstItem, 1200},
 };
 
 constexpr size_t kThreeSlotRecipeLen = sizeof(kThreeSlotRecipes) / sizeof(kThreeSlotRecipes[0]);

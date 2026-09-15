@@ -414,7 +414,7 @@ static void test_three_slot_stack_rules() {
 
 // ---------------------------------------------------------------------------
 // §2.8 混沌卷轴配方：宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25)
-//                     → 该宝石自身（同类别），数值 ×1.1
+//                     → 该宝石自身（同类别），数值 ×1.2 向上取整
 // 第 1 格为通配宝石槽（任意 28..32），且**槽位严格顺序**。
 // ---------------------------------------------------------------------------
 static void test_chaos_scroll_recipe() {
@@ -431,7 +431,7 @@ static void test_chaos_scroll_recipe() {
         if (hit == &recipes[6]) {
             CHECK(hit->ordered);
             CHECK(hit->product_mode == cr::ProductMode::kScaleFirstItem);
-            CHECK(hit->scale_permille == 1100);
+            CHECK(hit->scale_permille == 1200);
         }
     }
     // 顺序严格：换位 / 缺格 / 两格同料 一律不命中（也不得落到其它配方）。
@@ -459,22 +459,25 @@ static void test_chaos_scroll_recipe() {
     CHECK(gem_hit != nullptr && gem_hit->product == 29);
 }
 
-// 宝石数值缩放：floor(value × permille / 1000)，钳到 [0, 2047]。
+// 宝石数值缩放：**ceil**(value × permille / 1000)，钳到 [0, 2047]。
 static void test_scaled_jewel_value() {
-    CHECK(cr::scaled_jewel_value(100, 1100) == 110);
-    CHECK(cr::scaled_jewel_value(10, 1100) == 11);
-    CHECK(cr::scaled_jewel_value(101, 1100) == 111);  // floor(111.1)
-    CHECK(cr::scaled_jewel_value(1, 1100) == 1);      // floor(1.1) = 1，不会变成 0
+    // ×1.2 向上取整。
+    CHECK(cr::scaled_jewel_value(100, 1200) == 120);
+    CHECK(cr::scaled_jewel_value(10, 1200) == 12);
+    CHECK(cr::scaled_jewel_value(5, 1200) == 6);    // 恰好 6.0
+    CHECK(cr::scaled_jewel_value(3, 1200) == 4);    // ceil(3.6)=4（向下取整会得 3）
+    CHECK(cr::scaled_jewel_value(101, 1200) == 122);  // ceil(121.2)
+    CHECK(cr::scaled_jewel_value(1, 1200) == 2);      // ceil(1.2)，不会变成 0
     // 1000 千分比 = 原值；0 = 未配置 → fail-closed 返回原值（绝不清零）。
     CHECK(cr::scaled_jewel_value(500, 1000) == 500);
     CHECK(cr::scaled_jewel_value(500, 0) == 500);
     // 上限钳制（bits0-10 = 2047）。
-    CHECK(cr::scaled_jewel_value(2047, 1100) == 2047);
-    CHECK(cr::scaled_jewel_value(2000, 1100) == 2047);
+    CHECK(cr::scaled_jewel_value(2047, 1200) == 2047);
+    CHECK(cr::scaled_jewel_value(2000, 1200) == 2047);
     CHECK(cr::scaled_jewel_value(2047, 1000) == 2047);
     // 非正输入。
-    CHECK(cr::scaled_jewel_value(0, 1100) == 0);
-    CHECK(cr::scaled_jewel_value(-5, 1100) == 0);
+    CHECK(cr::scaled_jewel_value(0, 1200) == 0);
+    CHECK(cr::scaled_jewel_value(-5, 1200) == 0);
 }
 
 int main() {

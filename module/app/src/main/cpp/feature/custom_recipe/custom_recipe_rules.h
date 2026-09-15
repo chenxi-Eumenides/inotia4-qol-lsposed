@@ -83,8 +83,8 @@ bool stack_units_available(int units, int held_count);
 // 本常量在纯逻辑层独立声明（规则层不引入游戏符号头），两者由 §2.8 文档与真机验收保持同步。
 constexpr int kJewelValueMax = 2047;
 
-// 新数值 = floor(value × scale_permille / 1000)，再钳到 [0, kJewelValueMax]。
-//   scale_permille == 1000 → 原值；1100 → ×1.1（向下取整）；0 → 原值（视为未配置，fail-closed，
+// 新数值 = **ceil**(value × scale_permille / 1000)（向上取整），再钳到 [0, kJewelValueMax]。
+//   scale_permille == 1000 → 原值；1200 → ×1.2（向上取整）；0 → 原值（视为未配置，fail-closed，
 //   避免把数值清零）；value <= 0 → 0。
 // 纯整数运算，无浮点。
 int scaled_jewel_value(int value, uint16_t scale_permille);

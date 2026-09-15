@@ -86,7 +86,7 @@ struct ThreeSlotRecipe {
     bool ordered;      // true=按槽位严格匹配；false=按多重集（顺序无关）
     uint16_t product;  // kFixedCategory 的产物类别（kScaleFirstItem 时不使用，填 0）
     ProductMode product_mode;   // 产物生成方式
-    uint16_t scale_permille;    // kScaleFirstItem 的数值缩放（千分比：1100 = ×1.1；其它模式填 0）
+    uint16_t scale_permille;    // kScaleFirstItem 的数值缩放（千分比：1200 = ×1.2 向上取整；其它模式填 0）
 };
 
 // 3 格配方表（唯一真源）；out_count 回传条目数。表序即匹配优先级（首个命中者胜出）。
