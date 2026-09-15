@@ -708,6 +708,15 @@ constexpr uintptr_t F_UIMIX_BUTTON_RECIPE_EXE_VMA = 0xc0390;   // void (void*) U
 // 改成自有字面量的唯一落点（文本表里没有对应串）。**7 个已核对构建 VMA 完全一致（0xbef40）**：
 // 原版 v1.3.2 / monster v20·v23·v25·v26·v27 / 大修 0830。
 constexpr uintptr_t F_UIMIX_BUTTON_RECIPE_DRAW_VMA = 0xbef40;  // void (void* ctrl)
+// UIMix_Draw：面板绘制主函数。其内**第一处**取文本 = 「当前配方名」（选中配方后标题框里的名字）：
+//   c1898 ldr x0,[x0,#0x48]（UIMIX_SLOT_MIXTYPE）→ c18a4 madd p = RECIPEBASE + mixType*recsize
+//   → c18a8 MEM_ReadUint16 读记录 b0-1 → c18b0 bl MEMORYTEXT_GetText。
+// 它与配方按钮同 id、但走**不同函数**，故模块改名时必须单独标记本函数的绘制窗口。
+constexpr uintptr_t F_UIMIX_DRAW_VMA = 0xc1654;  // void () 面板绘制主函数
+// UIMix_ButtonMenuListDraw：5 个页签按钮的 DrawProc（文本取 SYMBOLBASE[146+idx]，索引 1 = 35291，
+// 与配方按钮/标题**同 id**）。它在 UIMix_Draw 内被嵌套调用，故需用它把「页签那一段」显式标成
+// 不替换，避免页签被一起改名。
+constexpr uintptr_t F_UIMIX_BUTTON_MENU_LIST_DRAW_VMA = 0xbeb9c;  // void (void* ctrl) 页签按钮 DrawProc
 constexpr uintptr_t F_UIMIX_BUTTON_MIXING_EXE_VMA = 0xc21ec;   // void (void*) UIMix_ButtonMixingExe：合成按钮 ExecuteProc，type1 读 [+0xf8] 费用判金币后弹 YesNo 确认（readelf .dynsym 核对）
 constexpr uintptr_t F_UIMIX_INIT_MIXING_STATE_VMA = 0xc0038;   // void () UIMix_InitMixingState：依 mixType 重算 stuffList 与费用 [+0xf8]（不清填入格；readelf .dynsym 核对）
 constexpr uintptr_t F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA = 0xc0240; // void () UIMix_ResetStuffItemControl：清空填入格（readelf .dynsym 核对）
@@ -1166,6 +1175,8 @@ using UIMixButtonInvenItemSelectExeFn = void (*)(void*);    // UIMix_ButtonInven
 using UIMixButtonMenuListExeFn = void (*)(void*);           // UIMix_ButtonMenuListExe(ctrl)
 using UIMixButtonRecipeExeFn = void (*)(void*);             // UIMix_ButtonRecipeExe(ctrl)
 using UIMixButtonRecipeDrawFn = void (*)(void*);            // UIMix_ButtonRecipeDraw(ctrl)
+using UIMixDrawFn = void (*)();                              // UIMix_Draw()
+using UIMixButtonMenuListDrawFn = void (*)(void*);           // UIMix_ButtonMenuListDraw(ctrl)
 using UIMixButtonMixingExeFn = void (*)(void*);             // UIMix_ButtonMixingExe(ctrl)：合成按钮 ExecuteProc
 using UIMixInitMixingStateFn = void (*)();                  // UIMix_InitMixingState()：依当前 mixType 重算 stuffList/费用
 using UIMixResetStuffItemControlFn = void (*)();            // UIMix_ResetStuffItemControl()

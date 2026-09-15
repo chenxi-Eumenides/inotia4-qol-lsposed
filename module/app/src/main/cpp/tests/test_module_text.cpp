@@ -25,7 +25,7 @@ static void test_table_integrity() {
     size_t n = 0;
     const Entry* e = module_text::entries(&n);
     CHECK(e != nullptr);
-    CHECK(n == 13);
+    CHECK(n == 14);
     for (size_t i = 0; i < n; ++i) {
         CHECK(e[i].key != nullptr && e[i].key[0] != '\0');
         for (size_t j = i + 1; j < n; ++j) CHECK(std::strcmp(e[i].key, e[j].key) != 0);
@@ -80,11 +80,14 @@ static void test_lookup_scope_gating() {
     CHECK(module_text::lookup(35185, Scope::kUimixRecipeButton) == nullptr);
     CHECK(module_text::lookup(35185, Scope::kNone) == nullptr);
 
-    // 配方按钮文案：只在 kUimixRecipeButton 下命中。
+    // 配方文案：按钮与面板标题都要显示「宝石升阶」；**页签必须保持原文**（三处同 id）。
     CHECK(std::strcmp(module_text::lookup(35291, Scope::kUimixRecipeButton), "宝石升阶") == 0);
+    CHECK(std::strcmp(module_text::lookup(35291, Scope::kUimixPanelTitle), "宝石升阶") == 0);
+    CHECK(module_text::lookup(35291, Scope::kUimixPageTab) == nullptr);  // 页签名不得被改名
     CHECK(module_text::lookup(35291, Scope::kCharacterPanel) == nullptr);
     CHECK(module_text::lookup(35291, Scope::kNone) == nullptr);
     CHECK(module_text::lookup(0, Scope::kUimixRecipeButton) == nullptr);
+    CHECK(module_text::lookup(0, Scope::kUimixPanelTitle) == nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +101,18 @@ static void test_key_lookup_and_id_sync() {
         CHECK(std::strcmp(e->text, "宝石升阶") == 0);
         CHECK(e->text_id == custom_recipe::kJewelTierUpLabelWordId);
     }
+    // 标题条目：同 id、不同作用域（面板标题框）。
+    const Entry* t = module_text::entry_by_key("recipe.jewel_tier_up.title");
+    CHECK(t != nullptr);
+    if (t != nullptr) {
+        CHECK(t->scope == Scope::kUimixPanelTitle);
+        CHECK(std::strcmp(t->text, "宝石升阶") == 0);
+        CHECK(t->text_id == custom_recipe::kJewelTierUpLabelWordId);
+    }
+    // 页签作用域只用于「显式不替换」，表中不得有任何该作用域条目。
+    size_t n = 0;
+    const Entry* all = module_text::entries(&n);
+    for (size_t i = 0; i < n; ++i) CHECK(all[i].scope != Scope::kUimixPageTab);
     CHECK(module_text::entry_by_key("nope") == nullptr);
     CHECK(module_text::entry_by_key(nullptr) == nullptr);
     CHECK(std::strcmp(module_text::scope_token(Scope::kCharacterPanel), "character_panel") == 0);

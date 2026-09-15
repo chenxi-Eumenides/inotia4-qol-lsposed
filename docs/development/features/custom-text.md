@@ -32,8 +32,20 @@
 | `kNone` | 不在任何登记窗口内（默认） | — |
 | `kCharacterPanel` | 角色属性面板绘制 | `feature/ui/game_ui_charinfo_zh.cpp`（hook `Scene_Draw_POPUP_SC_CHARACTER_INFO`） |
 | `kUimixRecipeButton` | UIMix 配方按钮绘制 | `feature/custom_recipe/game_ui_custom_recipe.cpp`（hook `UIMix_ButtonRecipeDraw`） |
+| `kUimixPanelTitle` | UIMix 面板标题绘制（选中配方后标题框里的「当前配方名」） | 同上（hook `UIMix_Draw`） |
+| `kUimixPageTab` | UIMix 页签按钮绘制 | 同上（hook `UIMix_ButtonMenuListDraw`）；**该作用域表中无任何条目，用途是「显式不替换」** |
 
-页签名「宝石强化」由 `UIMix_ButtonMenuListDraw` 绘制，**不在** `kUimixRecipeButton` 内，因此只有配方按钮会显示「宝石升阶」。这条语义由 host test 的 lookup 矩阵用例（同一个 id 35291 在两种作用域下结果不同）钉死。
+### 4.1 「一个 id、三个窗口」的典型案例（35291）
+
+UIMix 面板里同一个 wordId（35291）被三处复用，要求各不相同：
+
+| 窗口 | 绘制点 | 要求 |
+|---|---|---|
+| 配方按钮 | `UIMix_ButtonRecipeDraw` | 显示「宝石升阶」 |
+| 面板标题 | `UIMix_Draw` 内的「当前配方名」（读配方记录 b0-1） | 显示「宝石升阶」 |
+| 宝石强化页页签 | `UIMix_ButtonMenuListDraw`（取 `SYMBOLBASE[146+type]`） | **保持原文「宝石强化」** |
+
+第三处在第二处内部被**嵌套调用**，因此靠 `TextScopeGuard` 的保存/恢复语义把作用域在页签绘制期间压成 `kUimixPageTab`：只有页签那一段不替换，另外两处照常。这条语义由 host test 的 lookup 矩阵用例（同一 id 在三个作用域下结果不同）钉死。
 
 ## 5. 内置文案
 
@@ -54,7 +66,14 @@
 | `charinfo.weapon_block` | 35195 | W.D.R | 武器格挡 |
 | `charinfo.shield_block` | 35196 | S.D.R | 盾牌格挡 |
 
-**配方按钮（`kUimixRecipeButton`）**：`recipe.jewel_tier_up` = 35291 → 「宝石升阶」（模块「宝石强化」条目）。
+**配方文案（`kUimixRecipeButton` + `kUimixPanelTitle`）**：
+
+| 键 | id | 作用域 | 文本 |
+|---|---|---|---|
+| `recipe.jewel_tier_up` | 35291 | `kUimixRecipeButton` | 宝石升阶 |
+| `recipe.jewel_tier_up.title` | 35291 | `kUimixPanelTitle` | 宝石升阶 |
+
+页签（`kUimixPageTab`）不登记条目 —— 它与配方名同 id，必须保持游戏原文「宝石强化」。
 
 ## 6. 新增一条文案的步骤
 
@@ -67,12 +86,13 @@
 - **host tests**：`module_text_tests` —— 表完整性（键唯一；文案为纯中文 UTF-8、二至四字即 6/9/12 字节）、角色面板段连续升序、**lookup 作用域矩阵**（含「35291 只在配方按钮窗口内被替换」这条护栏）、语义键查询与跨功能 id 同步。全部 16 个 host test 目标通过。
 - **真机（monster v23）**：hook 安装日志
   ```
-  module text module_text.cpp:58 module text hook installed entries=13
+  module text module_text.cpp:58 module text hook installed entries=14
   ui game_ui_charinfo_zh.cpp:49 charinfo zh panel scope hook installed (texts in module_text)
-  custom_recipe game_ui_custom_recipe.cpp:924 custom recipe hooks installed core=5 desc=1 slotcount=1 label=1
+  custom_recipe game_ui_custom_recipe.cpp:953 custom recipe hooks installed core=5 desc=1 slotcount=1 label=1 title=1 tab=1
   ```
   迁移后角色面板截图复验：11 项标签全部正常（物攻 74 / 法攻 59 / 暴击率 11.3% / 命中率 107.5% / 爆伤 122.7% / 防御力 111 / 物抗 40.9% / 法抗 4.7% / 闪避率 21.6% / 武器格挡 4.5% / 盾牌格挡 0.0%），**四字标签渲染无溢出**。
-- **未验收**：配方按钮显示「宝石升阶」需打开合成器面板（该面板需要 NPC 交互上下文，API 不可开启），由用户手动确认。
+  合成器面板：用户实机确认配方按钮已显示「宝石升阶」；面板标题（同 id、另一绘制点）原本仍显示「宝石强化」，已按 §4.1 补上 `kUimixPanelTitle` 窗口并复测。
+- **未验收**：合成产物数值（宝石 ×1.1）需用户实机合成确认（合成器面板需要 NPC 交互上下文，API 不可开启）。
 
 ## 8. 失败与降级
 

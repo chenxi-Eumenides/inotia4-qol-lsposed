@@ -29,6 +29,9 @@ enum class Scope : uint8_t {
     kNone = 0,
     kCharacterPanel,     // 角色属性面板绘制（Scene_Draw_POPUP_SC_CHARACTER_INFO）
     kUimixRecipeButton,  // UIMix 配方按钮绘制（UIMix_ButtonRecipeDraw）
+    kUimixPanelTitle,    // UIMix 面板标题绘制（UIMix_Draw 内的「当前配方名」，读配方记录 b0-1）
+    kUimixPageTab,       // UIMix 页签按钮绘制（UIMix_ButtonMenuListDraw）：**显式不替换** ——
+                         // 页签名与配方名同 id（35291），必须保持游戏原文
 };
 
 constexpr const char* scope_token(Scope scope) {
@@ -39,6 +42,10 @@ constexpr const char* scope_token(Scope scope) {
             return "character_panel";
         case Scope::kUimixRecipeButton:
             return "uimix_recipe_button";
+        case Scope::kUimixPanelTitle:
+            return "uimix_panel_title";
+        case Scope::kUimixPageTab:
+            return "uimix_page_tab";
     }
     return "unknown";
 }
@@ -76,6 +83,8 @@ inline constexpr Entry kEntries[] = {
     {"charinfo.weapon_block", 35195, Scope::kCharacterPanel, "武器格挡"},  // W.D.R 武器格挡率
     {"charinfo.shield_block", 35196, Scope::kCharacterPanel, "盾牌格挡"},  // S.D.R 盾牌格挡率
     {"recipe.jewel_tier_up", 35291, Scope::kUimixRecipeButton, "宝石升阶"},
+    // 面板标题（选中配方后标题框里的「当前配方名」）：与配方按钮同 id，但由 UIMix_Draw 绘制。
+    {"recipe.jewel_tier_up.title", 35291, Scope::kUimixPanelTitle, "宝石升阶"},
 };
 
 inline constexpr size_t kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);

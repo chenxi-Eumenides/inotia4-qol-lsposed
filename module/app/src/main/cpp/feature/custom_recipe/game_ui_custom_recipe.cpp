@@ -792,16 +792,31 @@ void custom_set_desc_text_wrapper(void* ctrl, const char* text, uint32_t width, 
     g_backup_set_desc_text(ctrl, text, width, f1, f2, f3);
 }
 
-// ---- 配方按钮文案（「宝石升阶」）的窗口标记 ----
-// 文案与 id 表统一在 module_text 的内置表（键 `recipe.jewel_tier_up`，作用域
-// Scope::kUimixRecipeButton）；本 wrapper 只负责把**配方按钮的绘制窗口**标记为该作用域。
-// 为什么必须限定窗口：该条目的 label wordId（35291）同时是宝石强化页的**页签名**，而页签由
-// 另一个 DrawProc（UIMix_ButtonMenuListDraw）绘制 —— 不加窗口就会把页签一起改名。
+// ---- 模块配方文案（「宝石升阶」）的窗口标记 ----
+// 文案与 id 表统一在 module_text 的内置表；本处只负责把**三个不同的绘制窗口**分别标记好。
+// 为什么必须分窗口：同一个 wordId（35291）在 UIMix 面板里被三处复用 ——
+//   ① 配方按钮      UIMix_ButtonRecipeDraw    → 要显示「宝石升阶」（Scope::kUimixRecipeButton）
+//   ② 面板标题      UIMix_Draw 内的「当前配方名」（读配方记录 b0-1）→ 也要显示「宝石升阶」
+//   ③ 宝石强化页页签 UIMix_ButtonMenuListDraw  → **必须保持原文「宝石强化」**
+// ③ 在 ② 内部被嵌套调用，靠 TextScopeGuard 的保存/恢复语义把作用域压成 kUimixPageTab，
+// 因此只有页签那一段不替换，其它两处照常。
 UIMixButtonRecipeDrawFn g_backup_button_recipe_draw = nullptr;
+UIMixDrawFn g_backup_uimix_draw = nullptr;
+UIMixButtonMenuListDrawFn g_backup_menu_list_draw = nullptr;
 
 void uimix_button_recipe_draw_wrapper(void* ctrl) {
     module_text::TextScopeGuard scope(module_text::Scope::kUimixRecipeButton);
     if (g_backup_button_recipe_draw != nullptr) g_backup_button_recipe_draw(ctrl);
+}
+
+void uimix_draw_wrapper() {
+    module_text::TextScopeGuard scope(module_text::Scope::kUimixPanelTitle);
+    if (g_backup_uimix_draw != nullptr) g_backup_uimix_draw();
+}
+
+void uimix_menu_list_draw_wrapper(void* ctrl) {
+    module_text::TextScopeGuard scope(module_text::Scope::kUimixPageTab);
+    if (g_backup_menu_list_draw != nullptr) g_backup_menu_list_draw(ctrl);
 }
 
 bool install_one(NativeHookFunType hook, uintptr_t target, void* replacement, void** backup,
@@ -906,21 +921,35 @@ bool custom_recipe_ui_install_if_ready() {
                      "slot count hide hook skipped reason=install_failed");
     }
 
-    // 配方按钮文案（模块字面量「宝石升阶」）同样是**装饰性**能力：单独挂载、失败只告警。
+    // 模块配方文案（「宝石升阶」）同样是**装饰性**能力：三个窗口各自单独挂载、失败只告警。
     const uintptr_t button_recipe_draw =
         g_base + fn_resolve("F_UIMIX_BUTTON_RECIPE_DRAW_VMA", F_UIMIX_BUTTON_RECIPE_DRAW_VMA);
+    const uintptr_t uimix_draw = g_base + fn_resolve("F_UIMIX_DRAW_VMA", F_UIMIX_DRAW_VMA);
+    const uintptr_t menu_list_draw =
+        g_base + fn_resolve("F_UIMIX_BUTTON_MENU_LIST_DRAW_VMA", F_UIMIX_BUTTON_MENU_LIST_DRAW_VMA);
     if (!install_one(hook, button_recipe_draw,
                      reinterpret_cast<void*>(&uimix_button_recipe_draw_wrapper),
                      reinterpret_cast<void**>(&g_backup_button_recipe_draw),
                      "UIMix_ButtonRecipeDraw")) {
         QOL_LOG_WARN(QolDomain::kCustomRecipe, "recipe label hook skipped reason=install_failed");
     }
+    if (!install_one(hook, uimix_draw, reinterpret_cast<void*>(&uimix_draw_wrapper),
+                     reinterpret_cast<void**>(&g_backup_uimix_draw), "UIMix_Draw")) {
+        QOL_LOG_WARN(QolDomain::kCustomRecipe, "recipe title hook skipped reason=install_failed");
+    }
+    if (!install_one(hook, menu_list_draw, reinterpret_cast<void*>(&uimix_menu_list_draw_wrapper),
+                     reinterpret_cast<void**>(&g_backup_menu_list_draw),
+                     "UIMix_ButtonMenuListDraw")) {
+        QOL_LOG_WARN(QolDomain::kCustomRecipe, "page tab hook skipped reason=install_failed");
+    }
 
     g_installed.store(true, std::memory_order_release);
     QOL_LOG_INFO(QolDomain::kCustomRecipe,
-                 "custom recipe hooks installed core=5 desc=%d slotcount=%d label=%d",
+                 "custom recipe hooks installed core=5 desc=%d slotcount=%d label=%d title=%d tab=%d",
                  g_backup_set_desc_text != nullptr ? 1 : 0,
                  g_backup_item_draw_porting != nullptr ? 1 : 0,
-                 g_backup_button_recipe_draw != nullptr ? 1 : 0);
+                 g_backup_button_recipe_draw != nullptr ? 1 : 0,
+                 g_backup_uimix_draw != nullptr ? 1 : 0,
+                 g_backup_menu_list_draw != nullptr ? 1 : 0);
     return true;
 }
