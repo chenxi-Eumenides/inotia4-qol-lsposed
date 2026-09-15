@@ -245,7 +245,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 | 脚本 | 用途（含用法） | 运行时机 |
 |---|---|---|
 | `scripts/build-debug.sh` | Debug 构建并复制为 `output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha前12>.apk`，只保留最新 3 份；无参默认 `--offline` | 日常开发与验证；改 Kotlin/Native/构建配置后 |
-| `scripts/build-release.sh` | Release 构建：zipalign 后用默认 debug 签名（`~/.android/debug.keystore`，`CN=Android Debug`，与 debug 包同证书）签名，产物 `output/inotia4_qol_lsposed_release_v<版本>.apk`，只保留最新 2 份；版本号取自 `build.gradle.kts` | 仅用户明确要求 release 时（§3.2） |
+| `scripts/build-release.sh` | Release 构建：zipalign 后用默认 debug 签名（`~/.android/debug.keystore`，`CN=Android Debug`，与 debug 包同证书）签名，产物 `output/inotia4_qol_lsposed_release_v<版本>.apk`，只保留最新 2 份；签名关闭 v4（`--v4-signing-enabled false`，不产出 `.idsig`）；版本号取自 `build.gradle.kts` | 仅用户明确要求 release 时（§3.2） |
 | `scripts/patch-apk.sh` | 遍历 `apk/game-apk/*.apk` 逐个生成 NPatch/LSPatch 集成包到 `output/`（发布前缀全 ASCII，版本号附在 `_npatched` 之后） | release 流程第 3 步；更换模块后重出集成包 |
 
 #### 3.4.2 检查与验证

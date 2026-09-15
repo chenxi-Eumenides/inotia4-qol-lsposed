@@ -69,6 +69,7 @@ aligned_apk="$prep_dir/aligned.apk"
 
 "$apksigner" sign --ks "$debug_keystore" \
     --ks-pass "pass:$debug_storepass" --key-pass "pass:$debug_keypass" --ks-key-alias "$debug_keyalias" \
+    --v4-signing-enabled false \
     --out "$output_apk" "$aligned_apk"
 
 "$apksigner" verify --print-certs "$output_apk" >/dev/null
@@ -84,6 +85,9 @@ release_apks = sorted(
     reverse=True,
 )
 for path in release_apks[2:]:
+    path.unlink()
+# apksigner 旧版本可能遗留 .idsig（v4 签名）文件，一并清理
+for path in output_dir.glob("*.idsig"):
     path.unlink()
 PY
 
