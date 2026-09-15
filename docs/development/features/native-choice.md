@@ -59,7 +59,7 @@ void native_choice_close();
 
 | 优先级 | 组件 | 现状重复点 | 建议 API |
 |---|---|---|---|
-| P0 | `native_popup`（UIPopupMsg 生命周期 + 回调） | `feature/world_teleport/world_teleport.cpp:221`、`feature/extension_bag/extension_bag_equip.inc:1149`、`extension_bag_store.inc:675`、`feature/ui/game_ui_gemcraft.cpp:191`、`feature/ui/game_ui_exp.cpp:153` | `native_popup_text/yes_no/close` |
+| P0 | `native_popup`（UIPopupMsg 生命周期 + 回调） | `feature/world_teleport/world_teleport.cpp:221`、`feature/extension_bag/extension_bag_equip.inc:1149`、`extension_bag_store.inc:675`、`feature/craft_ui/craft_ui_hooks.cpp:228`、`feature/ui/game_ui_exp.cpp:153` | `native_popup_text/yes_no/close` |
 | P0 | `popup_state`（状态表注入/备份/恢复/栈顶校验） | `feature/ui/game_ui_settings_injection.inc:63`、`game_ui_savebackup_injection.inc:3`、`game_ui_autosell.cpp:524`、`game_ui_exp.cpp:190`、`game_ui_custom_injection.inc:3`；已有雏形 `feature/ui/game_ui_kit.h:46-63` | `native_panel_install/open/restore/is_top` |
 | P1 | `native_dialog_router`（按栈顶类型路由动作） | `game_dialog_content.inc:22-140` 与 `game_dialog_operations.inc:88-164` 各写一遍同一优先级链 | `native_dialog_snapshot/options/action` |
 

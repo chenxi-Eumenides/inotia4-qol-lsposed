@@ -31,7 +31,7 @@
 |---|---|---|
 | `kNone` | 不在任何登记窗口内（默认） | — |
 | `kCharacterPanel` | 角色属性面板绘制 | `feature/ui/game_ui_charinfo_zh.cpp`（hook `Scene_Draw_POPUP_SC_CHARACTER_INFO`） |
-| `kUimixRecipeButton` | UIMix 配方按钮绘制 | `feature/custom_recipe/game_ui_custom_recipe.cpp`（hook `UIMix_ButtonRecipeDraw`） |
+| `kUimixRecipeButton` | UIMix 配方按钮绘制 | `feature/craft_ui/craft_ui_hooks.cpp`（hook `UIMix_ButtonRecipeDraw`） |
 | `kUimixPanelTitle` | UIMix 面板标题绘制（选中配方后标题框里的「当前配方名」） | 同上（hook `UIMix_Draw`） |
 | `kUimixPageTab` | UIMix 页签按钮绘制 | 同上（hook `UIMix_ButtonMenuListDraw`）；**该作用域表中无任何条目，用途是「显式不替换」** |
 
@@ -88,7 +88,7 @@ UIMix 面板里同一个 wordId（35291）被三处复用，要求各不相同�
   ```
   module text module_text.cpp:58 module text hook installed entries=14
   ui game_ui_charinfo_zh.cpp:49 charinfo zh panel scope hook installed (texts in module_text)
-  custom_recipe game_ui_custom_recipe.cpp:953 custom recipe hooks installed core=5 desc=1 slotcount=1 label=1 title=1 tab=1
+  custom_recipe craft_ui_hooks.cpp:511 craft ui hooks installed core=5 desc=1 slotcount=1 label=1 title=1 tab=1 reset=1
   ```
   迁移后角色面板截图复验：11 项标签全部正常（物攻 74 / 法攻 59 / 暴击率 11.3% / 命中率 107.5% / 爆伤 122.7% / 防御力 111 / 物抗 40.9% / 法抗 4.7% / 闪避率 21.6% / 武器格挡 4.5% / 盾牌格挡 0.0%），**四字标签渲染无溢出**。
   合成器面板：用户实机确认配方按钮已显示「宝石升阶」；面板标题（同 id、另一绘制点）原本仍显示「宝石强化」，已按 §4.1 补上 `kUimixPanelTitle` 窗口并复测。
@@ -106,6 +106,6 @@ UIMix 面板里同一个 wordId（35291）被三处复用，要求各不相同�
 |---|---|
 | `feature/ui/module_text.{h,cpp}` | 唯一 hook owner、作用域栈与守卫、内置文本表与查表 |
 | `feature/ui/game_ui_charinfo_zh.{h,cpp}` | 角色面板绘制窗口 → `kCharacterPanel` 作用域（不再持有文案与 GetText hook） |
-| `feature/custom_recipe/game_ui_custom_recipe.cpp` | 配方按钮绘制窗口 → `kUimixRecipeButton` 作用域 |
+| `feature/craft_ui/craft_ui_hooks.cpp` | 配方按钮绘制窗口 → `kUimixRecipeButton` 作用域 |
 | `tests/test_module_text.cpp` | 表完整性 / 作用域矩阵 / 跨功能 id 同步 |
 | `data/native/game_symbols.h` | `F_UIMIX_BUTTON_RECIPE_DRAW_VMA = 0xbef40`（7 个构建 VMA 一致）+ typedef |

@@ -94,8 +94,8 @@
 
 - **形式是配方的属性，不是页面的属性**：`Def::form` ∈ {`kConsumeToCreate`（借 type 4：直接消耗材料生成物品）、`kTargetAndCreate`（借 type 3：填入一个物品 + 消耗材料 → 生成/原地修改）、`kMultiInputCreate`（借 type 1：填入多个物品 → 生成）}。选中配方后把 `[g_uimix+0x38]` 置为该形式的原版 type，后续放料/合成/产物全部由原版该 type 的路径处理（「走原版路径」）。
 - **页签归属**取 `Def::group`（页签组位索引）→ 注入记录 `b11 = 1 << group`。本轮两条都是 **group 3**。
-- **该页两条配方**（顺序 = 记录下标升序 = 按钮顺序）：`#69`「合成」（`Kind::kNativePassThrough` + `Form::kMultiInputCreate`，材料显示沿用原版 record 12 的 `{itemId=28, count=3}` 与费用文本 `188`，承担原「3 颗同档 → 高一颗」职能；实际合成由 gemcraft 改写 `[+0x48] = 12+(category−28)` 完成，故 1 个入口足够）；`#70`「宝石强化」（`Kind::kJewelTierUp` + `Form::kTargetAndCreate`，即本轮的自定义升阶配方）。
-- **原版 record 12..15 从该页移除**：注入时对**模块自有缓冲**清掉它们的 group3 位，其它字段原样保留（gemcraft 仍按下标 12..15 走原版合成，与组位无关）。
+- **该页两条配方**（顺序 = 记录下标升序 = 按钮顺序）：`#69`「合成」（`Kind::kNativePassThrough` + `Form::kMultiInputCreate`，材料显示沿用原版 record 12 的 `{itemId=28, count=3}` 与费用文本 `188`，承担原「3 颗同档 → 高一颗」职能；实际合成**统一走隐式配方表**（`kThreeSlotRecipes` 的 `{28,28,28}→29` 等 4 条），不再需要改写 `[+0x48]`）；`#70`「宝石强化」（`Kind::kJewelTierUp` + `Form::kTargetAndCreate`，即本轮的自定义升阶配方）。
+- **原版 record 12..15 从该页移除**：注入时对**模块自有缓冲**清掉它们的 group3 位，其它字段原样保留（原版仍按下标 12..15 走通用合成路径，与组位无关）。
 - **不做**：新增/重排原版 5 个页签（§7.19）；自绘合成面板与自绘文案（§7.24）。
 
 ### 2.8 3 格隐式配方（冻结）
@@ -223,7 +223,7 @@
 
 ### 3.9 可复用既有能力
 
-- `feature/ui/game_ui_gemcraft.cpp`：`install_got_hook`（:281-309）、`try_install_execute_wrapper`（:233-247）、`uimix_slot`（:32）、`read_filled_slots`（:48）、`selected_inven_item`（:119）。
+- `feature/craft_ui/craft_ui.cpp`：`install_got_hook`（:281-309）、`try_install_execute_wrapper`（:233-247）、`uimix_slot`（:32）、`read_filled_slots`（:48）、`selected_inven_item`（:119）。
 - `feature/attribute_range/`：`attr_range_probe_jewel_range(type, item, out_min, out_max)`（`game_ui_attr_range.h:16-20`）、`attr_range::classify` / `percentile`（`attribute_range.h:17/24`）。
 - `native_hook_func()`：函数级 hook（`feature/attribute_range/game_ui_attr_range.cpp` 已用）。
 - `feature/patch/game_ptr_hook.h`（PtrHook）、`core/native/call_patch.h`（BL patch）。
@@ -331,7 +331,7 @@ MakeRecipeList(5)：  记录 = GetRecipeCount(0) − GetRecipeCount(5) + 位
 feature/custom_recipe/custom_recipe_catalog.{h,cpp}  配方目录（唯一真源）：配方声明 + mixType/材料下标映射（纯逻辑）
 feature/custom_recipe/custom_recipe_rules.{h,cpp}    行为实现：档位 → 上一档区间 → 随机取值（可 host 单测）
 feature/custom_recipe/custom_recipe_table.{h,cpp}    表注入：RECIPEBASE / MIXTUREBASE 扩展与指针改写（幂等）
-feature/custom_recipe/game_ui_custom_recipe.{h,cpp}  UI 注入：菜单页签（确保注入）/ 放料 / 合成按钮 / 产物四处 hook 的安装与门控
+feature/custom_recipe/custom_recipe_api.{h,cpp}（结果层）+ feature/craft_ui/craft_ui_hooks.{h,cpp}（界面层）  UI 注入：菜单页签（确保注入）/ 放料 / 合成按钮 / 产物四处 hook 的安装与门控
 ```
 
 符号一律登记进 `game_symbols.h` + `symbol_registry.h`；依赖方向 `feature → core/data`，不得反向。
@@ -444,12 +444,18 @@ const Def* def_for_mix_type(uint32_t mix_type); // mixType → 配方（非自�
 
 返回 0 后，原版 `UIMix_StartMix` 照常扣料 / 扣钱 / 清槽 / 刷新 / 提示。
 
-### 4.7 与 gemcraft 的共存
+### 4.7 与界面层（craft_ui）的关系
 
-- gemcraft 以 GOT 槽覆盖 4 个按钮的 ExecuteProc（desc `0x2f4598`、menu `0x2f6658`、recipe `0x2f40d0`、craft `0x2f6d60`），门控 `type == 1`，并在其 wrapper 内**调用原函数地址**。
-- 本功能**不改动这 4 个 GOT 槽**，改为在**原函数入口**装函数级 hook，按 `type` / `mixType` 门控；gemcraft 转调原函数时会进入本 hook，`type == 1` 分支原样放行。
-- 结论：两者无安装顺序依赖、无槽位争用，不需要修改 gemcraft 现有代码。
+原 `feature/ui/game_ui_gemcraft.{h,cpp}` 与 `feature/gemcraft/gemcraft_rules.{h,cpp}` **已于 2026-09-16 删除**，其界面部分并入 `feature/craft_ui`，配方部分本就已在配方表中。原先「gemcraft 用 4 个 GOT 槽 PtrHook、本功能用函数入口 hook，靠 gemcraft 转调原函数地址时恰好命中本 hook」的隐式串联已消除：现在**同一 UIMix 函数只挂一次**，全部集中在 `feature/craft_ui/craft_ui_hooks.cpp`。
 
+分工边界（用户裁决「界面归界面，结果归结果」）：
+
+| 层 | 归属 | 内容 |
+|---|---|---|
+| 界面 | `feature/craft_ui` | UIMix 控件读写、11 处 hook 挂载与分派、自动选中格、弹窗与文案决策 |
+| 结果 | 本域（`feature/custom_recipe`） | 配方表 / 规则 / 结果枚举 / 产物与扣料 |
+
+依赖方向**单向**：`craft_ui → custom_recipe`。本域回传 `PlaceOutcome` / `PrepareOutcome` / `CraftOutcome` / `CraftGate` 四个枚举（定义见 `custom_recipe_api.h`），**不弹窗、不改选中格、不碰控件**。界面层文档见 `craft-ui.md`。
 ### 4.8 依赖与约束
 
 - 禁止 `as any` / 空异常处理；类型与错误语义必须清晰。
@@ -467,7 +473,8 @@ const Def* def_for_mix_type(uint32_t mix_type); // mixType → 配方（非自�
 | `feature/custom_recipe/custom_recipe_catalog.{h,cpp}` | 目录唯一真源；`mix_type_at` / `material_start_at` / `material_total` 纯映射 |
 | `feature/custom_recipe/custom_recipe_rules.{h,cpp}` | 档位纯逻辑：`tier_ordinal` / `tier_from_ordinal` / `tier_lower_bound`（二分，与 `attr_range::classify` 严格互逆）/ `next_tier_interval` / `compute_tier_up_value` |
 | `feature/custom_recipe/custom_recipe_table.{h,cpp}` | 记录字节构造 `build_record_bytes`、`derive_material_count`、纯注入 `inject_into_buffers`（host 可测）；`#ifdef __ANDROID__` 段为 `custom_recipe_table_ensure()` 实际写回 |
-| `feature/custom_recipe/game_ui_custom_recipe.{h,cpp}` | **四处**函数级 hook + 总开关 + 安装入口（`install_one` / `g_attempted` CAS / `g_verify_log_budget{16}`） |
+| `feature/custom_recipe/custom_recipe_api.{h,cpp}` | **结果层**：配方表 / 规则 / 结果枚举 / 产物与扣料 + 总开关 + 进档动态配方注册 |
+| `feature/craft_ui/craft_ui_hooks.{h,cpp}` | **界面层**：11 处 UIMix hook 的单一挂载与分派 + 文案常量 + 绘制状态 |
 | `tests/test_custom_recipe.cpp` | host 单测（4 组，见 §5.1） |
 
 | `custom_recipe_menu` | `UIMix_ButtonMenuListExe @ 0xc05c0` | 点页签时先确保注入完成（早于 `CreateRecipeList` 建配方按钮），再转调原函数 |
@@ -475,7 +482,7 @@ const Def* def_for_mix_type(uint32_t mix_type); // mixType → 配方（非自�
 | `custom_mixing` | `UIMix_ButtonMixingExe @ 0xc21ec` | §4.5 合成按钮前置校验 |
 | `custom_make_item` | `MIXSYSTEM_MakeItem @ 0x11af58` | §4.6 产物改写 |
 
-四处均装在**原函数入口**（`native_hook_func`），与 gemcraft 的 GOT 槽覆盖分层共存（§4.7）。
+全部装在**原函数入口**（`native_hook_func`），集中在 `feature/craft_ui/craft_ui_hooks.cpp` 一处；其中核心链 5 处任一失败即安装失败且可重试，装饰性 6 处失败只告警（§4.7）。
 
 对外契约（C++ 与 Kotlin 两侧同时实现）：配置 key `customRecipeEnabled`（默认 `false`）；JNI `nativeSetCustomRecipeEnabled(Boolean): Boolean`；native `set_custom_recipe_enabled(bool)` / `custom_recipe_enabled()` / `custom_recipe_ui_install_if_ready()`；日志 domain `custom_recipe`。设置项 `{"customRecipeEnabled", "自定义配方", 2}`（`feature/ui/game_ui_settings.cpp`），安装入口已接入 `nativeInit` 序列（`bridge/native/gamebridge.cpp`）。
 
@@ -500,7 +507,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 
 `material_count_for` 把 `level` 钳到 `[0,105]`、`grade<1` 或 `base<1` 返回 0；分子用 `long long` 防溢出；全程整数，避免浮点端点漂移。
 
-**调用点**（`game_ui_custom_recipe.cpp` 的 `apply_material_count(def, jewel)`，三处同源同式）：
+**调用点**（`custom_recipe_api.cpp` 的 `apply_material_count(def, jewel)`，三处同源同式）：
 
 1. **放料 hook**：宝石通过校验后立刻写入 → 用户放料后下一帧就看到正确需求数。
 2. **合成按钮 hook**：确认框弹出前再写一次（覆盖「放料后切换配方导致 `InitMixingState` 重置为源表值」的情形）。
@@ -601,7 +608,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 
 **已取得的真机证据（2026-09-15，大修版，`Inotia4` 进程内，非 VM 卡）**：
 
-- `custom_recipe game_ui_custom_recipe.cpp:264 custom recipe hooks installed` —— 四处 hook 全部安装成功，与 gemcraft 的四个 GOT 槽 hook 并存无冲突。
+- `custom_recipe craft_ui_hooks.cpp:511 craft ui hooks installed core=5 desc=1 slotcount=1 label=1 title=1 tab=1 reset=1` —— 核心链 5 处 + 装饰性 6 处全部安装成功。
 - 启动期配置下发（静态表未装载）：`table globals invalid recipe_size=0 mixture_size=0 count=0` + `table inject deferred reason=table_not_loaded`，**进程未崩溃**（fail-closed 生效）。
 - boot 后经 `POST /api/config/set` 启用：`recipe table injected base=69 records=70 materials=190` —— 与 §4.2 的运行时推导预测一致（`base_record_count = 69`、`base_material_count = 189`），5 个 `.bss` 全局地址正确、注入与写回成功。
 - 再次启用：**无第二次注入日志**（指针自校验生效，未重复追加记录）。
@@ -721,3 +728,59 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 - 游戏机制：`../../reference/game/game-systems.md` §6.3 / §6.4 / §6.8。
 - 符号与常量：`module/app/src/main/cpp/data/native/game_symbols.h`、`symbol_registry.h`。
 - 待办：`../planning/backlog.md`。
+
+## 5. 隐式配方扩展（2026-09-16）
+
+### 5.1 产品模式（`ProductMode`）
+
+| 模式 | 产物 |
+|---|---|
+| `kFixedCategory` | 按 `product` 类别新建（原版掷值） |
+| `kScaleFirstItem` | 第 1 格物品自身（同类别），宝石数值 × `scale_permille/1000` 向上取整，保留随机等级与属性类型 |
+| `kMaxSocketEnchantFirstItem` | 第 1 格物品自身（同类别）新建，并把两段位域写到最大值：`I_SOCKET` bits4-7 = `0xF`（宝石孔总数，4 位）、`I_ENCHANT` bits2-5 = `0xF`（剩余强化次数，4 位）。只动这两段 —— 已镶嵌数 / 已强化次数 / 强化 ID 保持产物原值不写（人工写入会造成游戏内不可能状态，实测已强化=2 且强化 ID=0 时游戏弹「与一般的强化卷轴不同」） |
+
+### 5.2 配方「两件相同特殊装备 + 元气恢复药水」
+
+```
+槽位：{ kAnySpecialEquipSlot, 14(元气恢复药水), kAnySpecialEquipSlot }，ordered，same_first_last
+产物：同类别特殊装备，ProductMode::kMaxSocketEnchantFirstItem（孔位与强化耐久拉满）
+```
+
+- 通配符 `kAnySpecialEquipSlot = 0xFFFE`：该格接受任意「特殊装备」类别，判定由调用方经
+  `match_three_slot(slots, is_special_equip)` 注入谓词（谓词为 `nullptr` 时该配方不命中，fail-closed）。
+  谓词实现走 `data/native/item_class.h` 的 `category_is_no_equip()`（记录 `+7` bit4），与
+  `feature/special_equip` 放行的是同一组 26 条，不产生跨 feature 的呈现依赖。
+- `same_first_last = true`：槽 0 与槽 2 必须是**同一**类别（「两件相同」）。
+
+### 5.3 动态特殊装备配方（进档随机生成）
+
+**语义**：每件特殊装备各有一条隐式配方 —— 3 个**互不相同**的材料、**顺序严格**，产物为该装备本身
+（`kFixedCategory`）。材料与装备的对应关系**每次进入存档时重新随机**，游戏内**刻意不提示**
+（用户裁决「无信息」），玩家只能试。
+
+- 生成：`build_dynamic_recipes()`（纯逻辑，host 可测）+ `refresh_dynamic_recipes()` 注册到
+  `save_enter`（`register_dynamic_recipes()`）；随机源用游戏自身的 `MATH_GetRandom`，
+  符号未就绪时生成 0 条并清空动态表（fail-closed，不留上一档的过期表）。
+- 装备集合：`kSpecialEquipCategories`（`+7` bit4 置位的全部 26 条）。
+- 材料池：`kMaterialPool` —— ITEMDATABASE 中用途类型 `+2 == 27` 的全部 14 条材料
+  （秘银/混沌之鳞/皮革/染血的毛/死亡之粉/魔力结晶/脉动结晶/锋利脚爪/魔法衣料/生命之叶/
+  根源之果/灵魂之根/魔法树枝/卓越之花）。
+- **允许随机到空**（用户裁决：「空不用单独的概率，就把它加入池子，然后随机就行」）：
+  「空」作为**普通候选并入池子**一起随机（池 = 14 材料 + 1 个空项，空项映射类别 0）。
+  「3 个不同」按池下标去重 ⇒ 空项最多出现一次，因此不会出现「三格全空」。
+  空槽在匹配语义上 = **该格必须为空**（与静态配方里的 `0` 槽同义）。
+- 匹配优先级：**静态表优先，其后动态表**，首个命中者胜出（`match_three_slot`）。
+- 容量上限 `kMaxDynamicRecipes = 64`。
+
+### 5.4 合成失败的统一收尾
+
+`CraftOutcome` 的全部失败路径都由界面层清空填入格并补选中第一个空格，让玩家立刻重试：
+
+| 结果 | 处理 |
+|---|---|
+| `kStaleSlots`（确认框停留期间第 1 格被改动） | 弹 94 + 清空 + 补选中 |
+| `kNotEnoughHeld`（扣料前库存复核失败，未消耗） | 弹 94，**不清空**（保留已填格便于补料重试） |
+| `kNoBagSpace`（产物创建/入包失败，材料已扣） | 弹 5 + 清空 + 补选中 |
+
+「清空后补选中」由界面层挂在 `UIMix_ResetStuffItemControl` 的**函数入口 hook** 上，因此覆盖其
+**所有**调用者（原版成功链、本域失败清空、换型重建），且**不随开关门控**。

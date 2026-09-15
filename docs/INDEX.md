@@ -50,7 +50,7 @@
 
 自动出售（auto-sell）：`development/features/auto-sell.md`（背包页入口、品质阈值配置面板、扫描/保护/处置语义与风险验证计划；设计稿）。
 
-合成器宝石合成操作优化（gem-craft-optimization）：`development/features/gem-craft-optimization.md`（宝石合成放料解绑配方、合成期同档校验与错误提示、自动选中格；设计已对齐，待实现）。
+新合成系统（craft-ui + custom-craft-recipe）：`development/features/craft-ui.md`（合成器界面层：UIMix 控件原语、11 处 hook 单一挂载、自动选中格）、`development/features/custom-craft-recipe.md`（配方层：配方表 / 规则 / 结果枚举 / 产物与扣料）。原 gem-craft-optimization 已并入这两层，设计书归档至 `history/features/gem-craft-optimization.md`。
 
 合成器自定义配方（custom-craft-recipe）：`development/features/custom-craft-recipe.md`（向混沌合成面板注入模块配方、选中时改写放料与合成按钮；配方 1 = 1 宝石 + 1 卓越灵药 → 宝石数值提升一档；表注入落位、档位定义、共存方案与 VM 验收卡；设计稿，未实现）。
 
