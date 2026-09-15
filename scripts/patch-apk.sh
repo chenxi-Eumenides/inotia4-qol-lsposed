@@ -94,7 +94,7 @@ if [[ ! -f "$module_apk" ]]; then
 fi
 module_apk=$(realpath "$module_apk")
 
-# 模块版本：从 release 模块 APK 文件名（inotia4_qol_lsposed_release_unsigned_vX.Y.Z.apk）提取，
+# 模块版本：从 release 模块 APK 文件名（inotia4_qol_lsposed_release_vX.Y.Z.apk）提取，
 # 追加在 _npatched 之后；debug 包文件名无版本，则不追加，输出仍为 <发布前缀>_npatched.apk。
 module_version=
 if [[ "$(basename "$module_apk")" =~ _v([0-9]+\.[0-9]+\.[0-9]+)\.apk$ ]]; then
