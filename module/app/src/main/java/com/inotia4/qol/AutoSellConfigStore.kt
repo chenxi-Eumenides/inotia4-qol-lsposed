@@ -3,7 +3,7 @@ package com.inotia4.qol
 import com.inotia4.qol.store.ModuleSaveStore
 
 /**
- * 自动出售按存档配置的 sidecar 桥（section `autosell` v1，UTF-8 JSON，直写）。
+ * 自动出售按存档配置的 sidecar 桥（section `autosell` v2，UTF-8 JSON，直写）。
  *
  * 与扩展背包 section/journal 完全隔离：只经 [ModuleSaveStore.readSection]/[writeSection]
  * 读写本功能 section，不注册 ModuleSaveCoordinator participant，不触碰
@@ -14,12 +14,12 @@ import com.inotia4.qol.store.ModuleSaveStore
 object AutoSellConfigStore {
 
     private const val SECTION_NAME = "autosell"
-    private const val SECTION_VERSION = 1
+    private const val SECTION_VERSION = 2
 
-    /** 与 native autosell_store.h 默认值一致的 v1 配置（值即开关：0=关闭）。 */
+    /** 与 native autosell_store.h 默认值一致的 v2 配置（值即开关：0=关闭；special 为类型名数组）。 */
     private const val DEFAULT_JSON =
-        "{\"v\":1,\"enabled\":false,\"rarity\":0,\"enhance\":0," +
-            "\"socket\":0,\"gemTier\":0,\"gemRange\":0,\"specialMask\":0}"
+        "{\"v\":2,\"enabled\":false,\"rarity\":0,\"enhance\":0," +
+            "\"socket\":0,\"gemTier\":0,\"gemRange\":0,\"special\":[]}"
 
     /** 读取该存档槽的自动出售配置；缺省返回默认 JSON，存储未就绪/异常返回 "error:..."。 */
     @JvmStatic

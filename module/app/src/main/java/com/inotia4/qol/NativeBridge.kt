@@ -167,14 +167,15 @@ object NativeBridge {
     external fun nativeOpExtensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
     // ---- 自动出售（auto-sell 阶段 B）----
     // 值即开关：0=关闭，正整数为 1-based 档位（rarity 1..5 / enhance 1..32 /
-    // socket 1..16 / gemTier 1..5 / gemRange 1..5 / specialMask 非 0 位掩码）。
+    // socket 1..16 / gemTier 1..5 / gemRange 1..5）。
+    // special 为特殊类型名 JSON 数组文本（合法名 backpack / normalSeal / dice；空数组 = 关）。
     external fun nativeSetAutoSellConfig(
         enabled: Boolean,
         rarity: Int,
         enhance: Int,
         socket: Int,
         gemTier: Int,
-        specialMask: Int,
+        special: String,
         gemRange: Int
     ): Boolean
     external fun nativeAutoSellRunNow(): Boolean

@@ -25,8 +25,8 @@ bool valid_persist_slot(int slot) { return slot >= 0 && slot < 3; }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
-    JNIEnv*, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier,
-    jint specialMask, jint gemRange) {
+    JNIEnv* env, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier,
+    jstring specialJson, jint gemRange) {
     autosell::Config cfg;
     // 值即开关：0=关闭，正整数为 1-based 档位；按边界钳制不可信输入。
     cfg.enabled = enabled == JNI_TRUE;
@@ -35,8 +35,13 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     cfg.socket = clamp_range(static_cast<int>(socket), 0, 16);
     cfg.gem_tier = clamp_range(static_cast<int>(gemTier), 0, 5);
     cfg.gem_range = clamp_range(static_cast<int>(gemRange), 0, 5);
-    const int mask = static_cast<int>(specialMask);
-    cfg.special_mask = static_cast<uint32_t>(mask < 0 ? 0 : mask);
+    // 特殊类型入参为 JSON 数组文本（如 ["dice"]）；null/坏串 -> 空集（名字->位表在 autosell_store.h）。
+    const char* special_chars =
+        specialJson != nullptr ? env->GetStringUTFChars(specialJson, nullptr) : nullptr;
+    cfg.special_mask = autosell_special_parse_array(special_chars);
+    if (special_chars != nullptr) {
+        env->ReleaseStringUTFChars(specialJson, special_chars);
+    }
     // 写入运行时配置并按 enabled 注册 / 删除 60 帧周期扫描任务。
     autosell_apply_config(cfg);
     // 按存档持久化：仅当前存档槽合法时直写 sidecar `autosell` section（不进 journal）。

@@ -8,6 +8,9 @@
 #include <mutex>
 #include <string>
 
+// 名字 <-> 位映射复用 store 头唯一表（autosell_special_to_array）。
+#include "feature/autosell/autosell_store.h"
+
 namespace {
 
 std::mutex g_config_mtx;
@@ -61,14 +64,16 @@ std::string autosell_status_json() {
     const int store_loaded_slot = g_store_loaded_slot.load(std::memory_order_relaxed);
     const bool store_persisted = g_store_persisted.load(std::memory_order_relaxed);
 
+    // special 为类型名数组（v2 对外契约；位掩码仅内部实现，见 autosell_store.h 名字表）。
+    const std::string special = autosell_special_to_array(cfg.special_mask);
     char buf[768];
     std::snprintf(buf, sizeof(buf),
                   "{\"enabled\":%s,\"rarity\":%d,\"enhance\":%d,\"socket\":%d,"
-                  "\"gemTier\":%d,\"gemRange\":%d,\"specialMask\":%u,"
+                  "\"gemTier\":%d,\"gemRange\":%d,\"special\":%s,"
                   "\"sold\":%lld,\"failed\":%lld,\"lastScanFrame\":%lld,"
                   "\"slot\":%d,\"loadedSlot\":%d,\"persisted\":%s,\"hostInstalled\":%s}",
                   json_bool(cfg.enabled), cfg.rarity, cfg.enhance, cfg.socket, cfg.gem_tier,
-                  cfg.gem_range, static_cast<unsigned>(cfg.special_mask),
+                  cfg.gem_range, special.c_str(),
                   static_cast<long long>(sold), static_cast<long long>(failed),
                   static_cast<long long>(frame), store_slot,
                   store_loaded_slot, json_bool(store_persisted), json_bool(host_installed));

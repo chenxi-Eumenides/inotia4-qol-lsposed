@@ -55,7 +55,9 @@ constexpr int64_t kEntryNudgeY = -2;
 constexpr int64_t kBaseW = 0x3c0;
 constexpr int64_t kBaseH = 0x280;
 constexpr int64_t kPanelW = 0x300;
-constexpr int64_t kPanelH = 0x240;
+// 规则行提高到 0x32（原 0x26 的 1.3 倍取整），并同步放大纵向布局；
+// 三个特殊类型 chip 改为一行后，面板高度 0x270（768×624）可容纳全部命中区。
+constexpr int64_t kPanelH = 0x270;
 constexpr int64_t kCloseW = 0xc0;
 constexpr int64_t kCloseH = 0x30;
 
@@ -79,21 +81,21 @@ constexpr uint32_t kText = 0xFFCB9EE2;
 constexpr uint32_t kBorderGray = 0xFF606060;
 
 constexpr int kRuleCount = 5;
-constexpr int kSpecialCount = 6;
+constexpr int kSpecialCount = 3;
+constexpr int64_t kRuleTop = 0x9a;
+constexpr int64_t kRuleRowH = 0x32;
+constexpr int64_t kRuleRowPitch = 0x3a;
 
 constexpr const char* kRarityLabels[] = {"关", "≤白", "≤绿", "≤蓝", "≤黄", "≤紫"};
 constexpr const char* kGemTierLabels[] = {"关", "≤低级", "≤中级", "≤高级", "≤顶级", "≤混沌"};
 constexpr const char* kGemRangeLabels[] = {"关", "≤30%", "≤60%", "≤75%", "≤90%", "≤99%"};
 constexpr const char* kSpecialLabels[] = {
-    "背包", "英雄徽章", "强化卷轴", "骰子", "可解封", "开箱",
+    "背包", "普通徽章", "骰子",
 };
 constexpr uint32_t kSpecialBits[] = {
     autosell::kSpecialBackpack,
-    autosell::kSpecialMercenarySeal,
-    autosell::kSpecialEnchantScroll,
+    autosell::kSpecialNormalSeal,
     autosell::kSpecialDice,
-    autosell::kSpecialSealed,
-    autosell::kSpecialItemBox,
 };
 
 struct PressTarget {
@@ -180,7 +182,8 @@ UiRect autosell_total_rect(const UiRect& panel) {
 }
 
 UiRect autosell_rule_row(const UiRect& panel, int index) {
-    return {panel.x + 0x20, panel.y + 0x9a + index * 0x2d, panel.w - 0x40, 0x26};
+    return {panel.x + 0x20, panel.y + kRuleTop + index * kRuleRowPitch, panel.w - 0x40,
+            kRuleRowH};
 }
 
 UiRect autosell_rule_selector(const UiRect& panel, int index) {
@@ -201,7 +204,15 @@ UiRect autosell_rule_next(const UiRect& panel, int index) {
 UiRect autosell_special_chip(const UiRect& panel, int index) {
     const int column = index % 3;
     const int row = index / 3;
-    return {panel.x + 0x20 + column * 0xf0, panel.y + 0x1a0 + row * 0x28, 0xd8, 0x26};
+    const UiRect last_rule = autosell_rule_row(panel, kRuleCount - 1);
+    const int64_t special_header_y = last_rule.y + last_rule.h + 0x0e;
+    return {panel.x + 0x20 + column * 0xf0, special_header_y + 0x22 + row * 0x38, 0xd8,
+            kRuleRowH};
+}
+
+int64_t autosell_special_header_y(const UiRect& panel) {
+    const UiRect last_rule = autosell_rule_row(panel, kRuleCount - 1);
+    return last_rule.y + last_rule.h + 0x0e;
 }
 
 bool autosell_hit_test(UiRect area, int64_t x, int64_t y) {
@@ -580,7 +591,8 @@ void autosell_panel_process() {
         autosell_draw_selector(autosell_rule_selector(panel, i), value_text, active);
     }
 
-    autosell_draw_text_at(panel.x + 0x20, panel.y + 0x17e, "特殊类型（可多选）", kGold, 0);
+    autosell_draw_text_at(panel.x + 0x20, autosell_special_header_y(panel), "特殊类型（可多选）", kGold,
+                          0);
     for (int i = 0; i < kSpecialCount; ++i) {
         const UiRect chip = autosell_special_chip(panel, i);
         const bool selected = (g_draft.special_mask & kSpecialBits[i]) != 0;

@@ -14,6 +14,10 @@ namespace {
 
 // 宝石 category 起档（IsJewel 闭区间 28..32；档位 = category - 28）。
 constexpr int kJewelCategoryFirst = 28;
+// ITEMDATABASE.json 名称核对：category 42..47 为各职业勇士徽章；48 及以上徽章为
+// 被祝福/英雄/教团等其他类型，不属于自动出售的普通徽章。
+constexpr int kNormalSealFirst = 42;
+constexpr int kNormalSealLast = 47;
 
 }  // namespace
 
@@ -68,20 +72,11 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
 
     uint32_t specials = 0;
     if (item_is_backpack(category)) specials |= autosell::kSpecialBackpack;
-    if (fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(category) != 0) {
-        specials |= autosell::kSpecialMercenarySeal;
-    }
-    if (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(category) != 0) {
-        specials |= autosell::kSpecialEnchantScroll;
+    if (category >= kNormalSealFirst && category <= kNormalSealLast) {
+        specials |= autosell::kSpecialNormalSeal;
     }
     if (fn_is_dice != nullptr && fn_is_dice(category) != 0) {
         specials |= autosell::kSpecialDice;
-    }
-    if (fn_is_sealed != nullptr && fn_is_sealed(category) != 0) {
-        specials |= autosell::kSpecialSealed;
-    }
-    if (fn_is_item_box != nullptr && fn_is_item_box(category) != 0) {
-        specials |= autosell::kSpecialItemBox;
     }
     out->special_types = specials;
     return true;

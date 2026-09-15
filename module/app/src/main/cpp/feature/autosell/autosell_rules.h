@@ -11,18 +11,16 @@
 //     出售阈值 = 值 - 1，比较方向统一 `<=`。
 //   - 同类内 OR：装备满足任一已开启装备规则即命中；宝石满足任一已开启宝石规则即命中。
 //   - 跨类独立：装备规则只对 is_equip 生效；宝石规则只对 is_jewel 生效；特殊类型对任意物品生效。
+//   - 特殊类型仅三项：背包、普通徽章（勇士徽章 category 42..47）、骰子。
 //   - 任一维度命中即出售（全局 OR）；未开启任何规则时不得出售。
 
 namespace autosell {
 
 // 特殊类型位标志（多选；ItemView.special_types 与 Config.special_mask 按位匹配）。
 enum SpecialType : uint32_t {
-    kSpecialBackpack      = 1u << 0,  // 背包类
-    kSpecialMercenarySeal = 1u << 1,  // 英雄徽章
-    kSpecialEnchantScroll = 1u << 2,  // 强化卷轴
-    kSpecialDice          = 1u << 3,  // 骰子
-    kSpecialSealed        = 1u << 4,  // 可解封
-    kSpecialItemBox       = 1u << 5,  // 开箱
+    kSpecialBackpack  = 1u << 0,  // 背包类
+    kSpecialNormalSeal = 1u << 1,  // 普通徽章：勇士徽章 category 42..47
+    kSpecialDice      = 1u << 2,  // 骰子
 };
 
 // 面板配置快照（与 sidecar `autosell` section 键一一对应；0 = 关闭，正整数为 1-based 档位）。

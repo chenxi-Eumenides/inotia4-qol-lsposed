@@ -25,7 +25,7 @@
 4. **宝石规则（2 条，均为 `≤ 值-1`）**：
    - 宝石等级：档位值（0=关；1..5 → 出售 `category ≤ 27+值`，即 28+档位）。
    - 宝石属性范围：复用属性范围 feature，阈值单选（30/60/75/90/99%；最高档 99 保留满分宝石）。
-5. **特殊类型（多选）**：如背包类、英雄徽章类等；命中任一勾选类型即出售。
+5. **特殊类型（多选）**：背包、普通徽章、骰子；命中任一勾选类型即出售。
 6. **返回**：关闭面板。
 
 ### 1.3 执行目标
@@ -67,12 +67,9 @@
 | 类型 | 判定符号 | VMA / 范围 | 证据 |
 |---|---|---|---|
 | 背包类 | `ITEMDATABASE[category].+2 == 0x1f`（原生判定，`category_is_extension_backpack`） | category 1..4（手提包/背包小中大） | `extension_bag_runtime.inc:903-916`；`bag.md:88-99` |
-| 英雄徽章 | `ITEMSYSTEM_IsMercenarySeal(category)` | `0x10be70`；category 42..50 / 928..933 | `game_symbols.h:574,761`；`control-plane.md:170` |
-| 强化卷轴 | `ITEMSYSTEM_IsEnchantScroll` | `0x10b2f0`；16-20/946、21-25/947 | `game_symbols.h:396` |
+| 普通徽章 | category 闭区间判定 | category 42..47（各职业勇士徽章） | `ITEMDATABASE.json` 名称核对；48 及以上不匹配 |
 | 宝石 | `ITEMSYSTEM_IsJewel` | `0x10b964`；28..32 | `game_symbols.h:394` |
 | 骰子 | `ITEMSYSTEM_IsDice` | `0x10be60`；0x34-0x38 | `game_symbols.h:519` |
-| 可解封 | `ITEMSYSTEM_IsSealed` | `0x10be50`；0x3a6-0x3ab | `game_symbols.h:521,518` |
-| 开箱 | `ITEMSYSTEM_IsItemBox` | `0x10cda0`；0x3ef-0x3f1 | `game_symbols.h:522` |
 | 不可售 | `ITEMDATABASE_IsNoSell(category)` | `0x105864` | `game_symbols.h:511`；`game_inventory_use.inc:194` |
 
 - 注意：徽章用途类型 `+2=0x1d` 在 `StaticData.itemType` 落 `consumable`，**不能靠 itemType 识别**。
@@ -134,8 +131,7 @@
    属性范围  [关闭] [30%][60%][75%][90%][99%]   (单选；最高档保留满分宝石)
 ────────────────────────────
  特殊类型（多选）
-   [ ] 背包类  [ ] 英雄徽章  [ ] 强化卷轴
-   [ ] 骰子    [ ] 解封类    [ ] 开箱类
+   [ ] 背包类  [ ] 普通徽章  [ ] 骰子
 [← 返回]
 ```
 
@@ -152,7 +148,7 @@
 - 宝石（`IsJewel(category)`）：**同类内 OR**——任一值非 0 的宝石规则命中即出售：
   - 宝石等级 `gem_tier`：0=关；`1..5` → 出售 `jewel_tier(category-28) ≤ 值-1`。
   - 属性范围 `gem_range`：0=关；`1..5` → 出售属性百分位 `percentile(value,min,max) ≤ 阈值`，阈值 1→30、2→60、3→75、4→90、5→100（即卖掉百分位 ≤ 阈值的低品质宝石）。百分位由 §3.6 的 `attr_range_probe_jewel_range` + `attr_range::percentile` 求得；探测不可用/失败时该物品 `jewel_percentile=-1`，规则不命中（fail-closed，不得默认 0 触发误售）。
-- 特殊类型 `special_mask`：`0` = 关闭；非 0 位掩码与物品位标志按位与命中即出售（对任意物品生效）。
+- 特殊类型 `special_mask`（内部位掩码；对外配置为 §4.4 的类型名集合 `special`）：`0` = 关闭；非 0 位掩码与物品位标志按位与命中即出售（对任意物品生效）。位定义为 `1=背包`、`2=普通徽章（勇士徽章 category 42..47）`、`4=骰子`，仅实现细节、不对外承诺。
 - 跨类独立：装备、宝石、特殊类型各自判定，命中任一即出售（全局等价 OR）。
 - 保留按存档总开关 `enabled`（与全局开关独立；`enabled=false` 恒不售）。
 - 开发期 dry-run 已在提交前移除（2026-09-14 用户裁决）；命中即真实出售（NoSell 预过滤 → `inventory_trade::sell`），见 §4.5.2。
@@ -160,19 +156,19 @@
 
 ### 4.4 配置项与持久化
 
-配置**按存档独立**，持久化到**模块存档 sidecar** 的独立 section `autosell`（version=1，UTF-8 JSON，**直写**，不进 participant/journal），**不写入 `config.json`**（用户 2026-09-13 裁决；sidecar 机制见 `../extension-bag/module-save-store.md`）。
+配置**按存档独立**，持久化到**模块存档 sidecar** 的独立 section `autosell`（version=2，UTF-8 JSON，**直写**，不进 participant/journal），**不写入 `config.json`**（用户 2026-09-13 裁决；sidecar 机制见 `../extension-bag/module-save-store.md`）。
 
-section `autosell` v1 payload：
+section `autosell` v2 payload（特殊类型由位掩码改为**类型名集合**，用户 2026-09-14 裁决）：
 
 ```json
-{"v":1,
+{"v":2,
  "enabled":false,
  "rarity":0,
  "enhance":0,
  "socket":0,
  "gemTier":0,
  "gemRange":0,
- "specialMask":0}
+ "special":[]}
 ```
 
 | 字段 | 类型 | 默认 | 语义 |
@@ -183,13 +179,15 @@ section `autosell` v1 payload：
 | `socket` | int `0..16` | `0` | 0=关；1..16 → 出售 `总孔数 ≤ 值-1` |
 | `gemTier` | int `0..5` | `0` | 0=关；1..5 → 出售 `jewel_tier（category-28）≤ 值-1` |
 | `gemRange` | int `0..5` | `0` | 0=关；1..5 → 出售属性百分位 `≤ 阈值`（30/60/75/90/99；最高档不出售满分宝石） |
-| `specialMask` | int 位掩码 | `0` | 0=关；非 0 特殊类型多选（位与 `autosell_rules.h::SpecialType` 一致） |
+| `special` | string 数组 | `[]` | 特殊类型多选（空数组=关）。合法名字仅三个：`"backpack"`（背包类）、`"normalSeal"`（普通徽章＝勇士徽章 category 42..47）、`"dice"`（骰子）；未知名字忽略；命中任一已选类型即出售 |
 
 - 键与 native `autosell::Config` 字段一一对应；**不再有** `rarityEnabled`/`rarityThreshold` 等成对开关与阈值键。
-- 读写：`ModuleSaveStore.readSection/writeSection(slot, "autosell", 1, payload)`；`slot = current_save_slot()`。
+- 名字 <-> 位映射唯一来源：`feature/autosell/autosell_store.h` 的名字表（`autosell_special_name/bit/parse_array/to_array`）；内部仍用 `autosell::SpecialType` 位掩码驱动规则，**位只作实现细节，不再对外承诺**。序列化输出顺序固定 `backpack → normalSeal → dice`。
+- 读写：`ModuleSaveStore.readSection/writeSection(slot, "autosell", 2, payload)`；`slot = current_save_slot()`。
 - 加载：`autosell_tick` 顶部按 `slot` 变化惰性加载（与扩展背包同构）；主菜单/无存档保持默认且不扫描。
-- 解析：缺失字段取默认 `0`；钳制 `rarity`/`gemTier`/`gemRange` 0..5、`socket` 0..16、`enhance` 0..32、`specialMask` 非负。
-- 兼容：`v` 缺失或 ≤1 按 v1 解析；`v>1` fail-closed 用默认且**不删 section**；越界值钳制。
+- 解析：缺失字段取默认 `0`/空集；钳制 `rarity`/`gemTier`/`gemRange` 0..5、`socket` 0..16、`enhance` 0..32；`special` 缺失或非数组 → 空集。
+- 兼容：`v` 缺失视为 2；`v > 2`（未知未来版本）fail-closed 用默认且**不删 section**；越界值钳制。
+- **不做 v1→v2 迁移**（用户 2026-09-14 裁决）：读取时**不再解析旧键 `specialMask`**（v1 存档的掩码直接忽略，其余同名键照常读取），特殊类型需按存档在面板重设；写入一律 v2。
 - 该组配置**不进入 `ModuleConfig` / 模块设置页 / `ConfigApiService` 全局下发**；由自动出售面板写入当前存档 sidecar，随存档加载/保存。
 - 无 UI 阶段：由 debug JNI 应用并写入当前存档 sidecar，待面板接入。
 - 默认值取安全侧：总开关默认关；各规则默认关。
@@ -240,7 +238,7 @@ section `autosell` v1 payload：
 
 | 层 | 规划内容 |
 |---|---|
-| data/symbols | 复用 `F_GET_RARITY_VMA`、`I_ENCHANT`/`I_SOCKET`、`IsJewel`/`IsMercenarySeal` 等；宝石属性读取需新增字段输出；如需新 VMA 登记 `game_symbols.h`+`symbol_registry.h` 并跑 `check_symbols.py` |
+| data/symbols | 复用 `F_GET_RARITY_VMA`、`I_ENCHANT`/`I_SOCKET`、`IsJewel`/`IsDice` 等；普通徽章使用 category 42..47 区间；宝石属性读取需新增字段输出；如需新 VMA 登记 `game_symbols.h`+`symbol_registry.h` 并跑 `check_symbols.py` |
 | native feature | 新增独立 `feature/autosell/`（纯逻辑：规则判定/组合/档位映射，可编 host 单测）+ `feature/ui/game_ui_autosell*`（入口/面板） |
 | bridge/JNI | 面板配置桥接与扫描状态导出（同 `gamebridge_settings.cpp` 模式） |
 | Kotlin | `AutoSellConfigStore`（`ModuleSaveStore` section `autosell` 读写 + debug JNI 桥）；**不**改 `ModuleConfig` / `ConfigApiService` |
@@ -351,7 +349,7 @@ section `autosell` v1 payload：
 
 - 宝石自身属性 `item+0x10`：bits0-10 值 / bits11-17 随机等级 / bits18-23 类型；现有 JSON **未读取**（`game_inventory_read.inc` 对 `+0x10` 按装备混沌解读，对宝石错误），需新增读取。档位用 category 28..32（`IsJewel`，5 档）正确。
 - 宝石属性范围依赖属性范围 feature（WIP，无对外 range API）——本阶段不实现该规则。
-- 6 个特殊谓词（`IsMercenarySeal`/`IsEnchantScroll`/`IsJewel`/`IsDice`/`IsSealed`/`IsItemBox`）均已解析可用；`ITEM_IsRealEquip` 未解析。
+- 自动出售特殊类型仅使用三项：背包判定、category 42..47 普通徽章区间、`IsDice`；不再使用 `IsMercenarySeal`/`IsEnchantScroll`/`IsSealed`/`IsItemBox` 作为自动出售判据。
 
 ### 11.5 裁决记录
 
@@ -370,7 +368,7 @@ section `autosell` v1 payload：
 | # | 问题 | 结论 | 依据 |
 |---|---|---|---|
 | ① | 背包页入口按钮能否套用「设置」按钮样式 | **已采用原版齿轮贴图** | 背包页原版顶栏最后一个齿轮来自图组 `unit=0x0f, loc=0x05`；入口仍是 `ControlButton` + `ExecuteProc`，点击回调里 `UI_SetPopupProcessInfo(1,id)` 打开面板。绘制失败时退化为金色描边 + 矩形齿牙，不向 `ui_create_button` 传文字，避免 `CO_DATA[0]` 被当物品指针。 |
-| ② | 点击后用「类物品详情页弹窗、双倍宽、遮住整页」 | **已实现 768×576 居中面板 + 透景遮罩** | 面板 = PopupState 死条目 push；`POPUPSTATE_Process/Event` 只走栈顶，push 后 EQUIP 的 process/draw/event 全部不执行（栈顶独占），触摸天然只归面板；遮罩 alpha=`0x40`、面板底色 alpha=`0x54`，均低于原型的近不透明值，建议主代理真机优先验收文字对比度。 |
+| ② | 点击后用「类物品详情页弹窗、双倍宽、遮住整页」 | **已实现 768×624 居中面板 + 透景遮罩** | 面板 = PopupState 死条目 push；`POPUPSTATE_Process/Event` 只走栈顶，push 后 EQUIP 的 process/draw/event 全部不执行（栈顶独占），触摸天然只归面板；遮罩 alpha=`0x40`、面板底色 alpha=`0x54`，均低于原型的近不透明值，建议主代理真机优先验收文字对比度。 |
 | ③ | 内容自绘 + 关闭按钮即保存 | **已实现** | 自绘用 `fn_grpx_set_font_color_rgb` + `fn_grpx_draw_string_with_font`；打开读取 `autosell_get_runtime_config()` 到 draft，编辑期间不 apply/落盘；「保存并关闭」按 `autosell_apply_config(draft)` → 合法槽 `autosell_store_persist(current_save_slot(), draft)` 提交。 |
 
 ### 12.2 当前实现
@@ -378,8 +376,8 @@ section `autosell` v1 payload：
 - 入口按钮：独立 `ControlButton` 挂原版袋容器（与扩展背包页签同宿主，`G_UIEQUIP_PANEL_BAG_CONTAINER_VMA`），相对位置 `(68, 2+5×70)`、尺寸 `57×57`（袋列右侧、扩展页签之后）；点击回调 `UI_SetPopupProcessInfo(1, id)`。**不依赖扩展背包开关**；由全局开关门控（§13.2），默认关闭。绘制优先复用 `unit=0x0f, loc=0x05` 齿轮；贴图不可用时用齿轮感 fallback。生命周期强校验见 §13.1。
 - 入口绘制宿主（关键选择）：用 `Scene_Draw_POPUP_SC_EQUIP + 0x1cc` 处 `bl UIDesc_Draw` 调用点的独立 BL patch（`call_patch_install_bl`，期望字 `0x97fdaadb`），wrapper 内先复刻 `UIDesc_Draw` 再绘制入口按钮。扩展背包占用的是同函数 `+0x210` 的 `bl GRPX_End`（`F_SCENE_DRAW_EQUIP_END_CALL_OFF`），两处地址不同，互不覆盖；扩展背包关闭时该 patch 也不安装，入口按钮仍显示。选此调用点是因为它在 `UIEquip_Draw`/`UIDesc_Draw` 之后、`GRPX_End` 之前，处于有效 GRPX 帧内，且不与扩展背包争用。
 - 面板：改写 IAP 死条目 `F_PANEL_UNK3_ENTER`（`Scene_Init_POPUP_SC_INAPP_HOT`）的 enter/process/f3/f4/event 五回调；面板状态按 PopupState 栈顶独占。
-- 面板几何：全屏遮罩 alpha=`0x40` + 深棕面板底色 alpha=`0x54`，可透出游戏场景；居中面板 `768×576`（`kPanelW=0x300`、`kPanelH=0x240`）。
-- 面板内容：存档规则总开关；品质、强化次数、总孔数、宝石档位、宝石属性范围 5 行左右选择器；特殊类型 6 个多选 chip；「保存并关闭」按钮。打开复制 `autosell_get_runtime_config()`，编辑期间只改 draft；关闭释放时按既有契约 apply 并持久化，延迟 2 帧 `(3,0)` 关闭。
+- 面板几何：全屏遮罩 alpha=`0x40` + 深棕面板底色 alpha=`0x54`，可透出游戏场景；居中面板 `768×624`（`kPanelW=0x300`、`kPanelH=0x270`）。
+- 面板内容：存档规则总开关；品质、强化次数、总孔数、宝石档位、宝石属性范围 5 行左右选择器；特殊类型 3 个多选 chip；「保存并关闭」按钮。规则行高为 `0x32`（原 `0x26` 的 1.3 倍取整），左右箭头命中区随行高扩大；打开复制 `autosell_get_runtime_config()`，编辑期间只改 draft；关闭释放时按既有契约 apply 并持久化，延迟 2 帧 `(3,0)` 关闭。
 - 触摸：`0x17` 按下记录目标，`0x18` 抬起且仍在同一 `ui_hit_test` 区域才提交操作；规则值边界钳制，特殊类型按位切换。
 - 涉及文件：`feature/ui/game_ui_autosell.{h,cpp}`；`game_symbols.h` 新增 `F_UIDESC_DRAW_VMA=0xb56f4`、`F_SCENE_DRAW_EQUIP_DESC_CALL_OFF=0x1cc`；`symbol_registry.h` 登记 `UIDesc_Draw`；`game_access.{h,cpp}` + `game_access_globals.inc` 增加 `fn_uidesc_draw`；`gamebridge.cpp` 在 `nativeInit` 调 `autosell_ui_install_if_ready()`；`CMakeLists.txt` 登记新 cpp。
 
@@ -439,13 +437,13 @@ section `autosell` v1 payload：
 - Kotlin 侧 `external fun nativeSetAutoSellEnabled(enabled: Boolean): Boolean` 由并行 fixer 声明。
 - 已核验：debug 构建 arm64-v8a / armeabi-v7a 的 `libgamebridge.so` 均导出该符号。
 
-按存档配置下发（**值即开关**，2026-09-14 起为 7 参）：
+按存档配置下发（**值即开关**，2026-09-14 起为 7 参；特殊类型为 JSON 数组字符串参）：
 
 - 符号：`Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig`。
-- 签名：`extern "C" JNIEXPORT jboolean JNICALL Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(JNIEnv*, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier, jint specialMask, jint gemRange)`。
-- 入参：`enabled` 总开关；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`specialMask` 非负（空=关）、`gemRange` 0..5（0=关）。native 侧按边界钳制（M-11），填 `autosell::Config` 后 `autosell_apply_config(cfg)`；当前存档槽合法时直写 sidecar `autosell` section。
-- Kotlin 侧 `external fun nativeSetAutoSellConfig(enabled: Boolean, rarity: Int, enhance: Int, socket: Int, gemTier: Int, specialMask: Int, gemRange: Int): Boolean`（`NativeBridge.kt`）；开发期 API `AutoSellFeatureController` 以 `json.optInt("gemRange", 0)` 传入。
-- `nativeAutoSellRunNow` / `nativeAutoSellStatusJson` 签名不变；状态 JSON 含配置键、`sold`/`failed`、`lastScanFrame`、`slot`/`loadedSlot`/`persisted`/`hostInstalled`（dry-run 移除后不再含 `wouldSell`）。
+- 签名：`extern "C" JNIEXPORT jboolean JNICALL Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(JNIEnv*, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier, jstring specialJson, jint gemRange)`。
+- 入参：`enabled` 总开关；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`gemRange` 0..5（0=关）；`specialJson` 为特殊类型名 JSON 数组文本（如 `["backpack","dice"]`；合法名 `backpack`/`normalSeal`/`dice`，未知名忽略；null/坏串 → 空集）。native 侧数值按边界钳制（M-11），`specialJson` 经 `autosell_special_parse_array` 换算为位掩码（名字表唯一来源 `autosell_store.h`），填 `autosell::Config` 后 `autosell_apply_config(cfg)`；当前存档槽合法时直写 sidecar `autosell` section（v2）。
+- Kotlin 侧 `external fun nativeSetAutoSellConfig(enabled: Boolean, rarity: Int, enhance: Int, socket: Int, gemTier: Int, special: String, gemRange: Int): Boolean`（`NativeBridge.kt`）；开发期 API `AutoSellFeatureController` 以 `json.optJSONArray("special")?.toString() ?: "[]"` 传入数组文本。
+- `nativeAutoSellRunNow` / `nativeAutoSellStatusJson` 签名不变；状态 JSON 含配置键（特殊类型为 `"special"` 名字数组，不再有 `specialMask`）、`sold`/`failed`、`lastScanFrame`、`slot`/`loadedSlot`/`persisted`/`hostInstalled`（dry-run 移除后不再含 `wouldSell`）。
 
 ### 13.6 未决与风险
 
@@ -456,6 +454,6 @@ section `autosell` v1 payload：
 ### 13.7 当前配置面板 UI
 
 - 入口绘制优先调用 `ui_draw_control_image_part_centered(ctrl, 0x0f, 0x05, 0, 1)`；该贴图对应静态资源 `ui_002.png` 第二行第三个圆形齿轮。取不到图组或分片时使用金色矩形齿牙 fallback，并记录一次日志。
-- 面板逻辑坐标为 `768×576`，自上而下为标题、副标题、存档规则总开关、5 条规则选择器、6 个特殊类型 chip、保存并关闭；所有交互区域位于面板内，规则值显示语义化档位名。
+- 面板逻辑坐标为 `768×624`，自上而下为标题、副标题、存档规则总开关、5 条规则选择器、3 个特殊类型 chip、保存并关闭；所有交互区域位于面板内，规则值显示语义化档位名。
 - 背景透景建议值：全屏黑色遮罩 `alpha=0x40`（64%），面板深棕底 `RGB565=0x2104`、`alpha=0x54`（84%）。文字使用 `fn_grpx_set_font_color_rgb` + `fn_grpx_draw_string_with_font(..., align=2)` 居中绘制。
 - 关闭调用链：`event 0x17` 按下 → `event 0x18` 同区域释放 → `autosell_apply_config(draft)` → 合法 `current_save_slot()` 调 `autosell_store_persist(slot, draft)` → 延迟 2 帧 `fn_ui_set_popup_process_info(3, 0)`；非法槽只应用、不持久化。

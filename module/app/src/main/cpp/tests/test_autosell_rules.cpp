@@ -30,9 +30,8 @@ Config all_rules_on() {
     cfg.socket = 16;      // 阈值 15，socket_total 0..15 命中
     cfg.gem_tier = 5;     // 阈值 4（混沌），tier 0..4 全命中
     cfg.gem_range = 5;    // 阈值 99：百分位 0..99 命中，100（满分）不命中
-    cfg.special_mask = autosell::kSpecialBackpack | autosell::kSpecialMercenarySeal |
-                       autosell::kSpecialEnchantScroll | autosell::kSpecialDice |
-                       autosell::kSpecialSealed | autosell::kSpecialItemBox;
+    cfg.special_mask = autosell::kSpecialBackpack | autosell::kSpecialNormalSeal |
+                       autosell::kSpecialDice;
     return cfg;
 }
 
@@ -434,6 +433,10 @@ static void test_cross_category_independence() {
 }
 
 static void test_special_mask() {
+    CHECK(autosell::kSpecialBackpack == 1u);
+    CHECK(autosell::kSpecialNormalSeal == 2u);
+    CHECK(autosell::kSpecialDice == 4u);
+
     Config cfg;
     cfg.enabled = true;
     cfg.special_mask = autosell::kSpecialBackpack | autosell::kSpecialDice;
@@ -444,14 +447,13 @@ static void test_special_mask() {
     CHECK(should_sell(item, cfg));
     item.special_types = autosell::kSpecialBackpack;
     CHECK(should_sell(item, cfg));
-    item.special_types = autosell::kSpecialBackpack | autosell::kSpecialSealed;
+    item.special_types = autosell::kSpecialBackpack | autosell::kSpecialNormalSeal;
     CHECK(should_sell(item, cfg));
 
     // 未勾选位不命中。
-    item.special_types = autosell::kSpecialMercenarySeal;
+    item.special_types = 1u << 3;
     CHECK(!should_sell(item, cfg));
-    item.special_types = autosell::kSpecialEnchantScroll | autosell::kSpecialSealed |
-                         autosell::kSpecialItemBox;
+    item.special_types = 1u << 4;
     CHECK(!should_sell(item, cfg));
     item.special_types = 0;
     CHECK(!should_sell(item, cfg));
@@ -499,11 +501,11 @@ static void test_global_or_across_categories() {
     Config cfg;
     cfg.enabled = true;
     cfg.rarity = 1;  // 阈值 0
-    cfg.special_mask = autosell::kSpecialItemBox;
+    cfg.special_mask = autosell::kSpecialNormalSeal;
 
     ItemView equip = equip_item();
     equip.rarity = 4;  // 装备规则不命中（4 > 0）
-    equip.special_types = autosell::kSpecialItemBox;
+    equip.special_types = autosell::kSpecialNormalSeal;
     CHECK(should_sell(equip, cfg));
 
     // 两者均不命中 -> 不出售。
