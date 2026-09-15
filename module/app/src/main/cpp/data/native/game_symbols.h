@@ -501,6 +501,7 @@ constexpr uintptr_t F_GAME_START_RESUME_GAME_VMA = 0x1002e8;  // int (int32_t sl
 constexpr uintptr_t F_SAVE_CREATE_SAVE_SLOT_VMA = 0x129b38;    // void (void) 初始化全部 3 槽（循环 SAVESLOT_Initialize + SAVE_LoadSaveSlot 加载存档到槽区）
 constexpr uintptr_t F_SAVE_LOAD_SAVE_SLOT_VMA = 0x1298dc;      // int (int32_t, void*) 按槽加载单个存档到 SAVESLOT 结构
 constexpr uintptr_t F_SAVESLOT_GET_HERO_VMA = 0x14cda4;       // void* (void*) 取主控角色指针（[slot+0x1c] 索引 → [slot+0x4+idx*8]）
+constexpr uintptr_t F_STATE_HIDE_MODULE_MAIN_MENU_VMA = 0x152ff4;  // void () 主菜单模块隐藏桩（空实现）；同段 +0x30 = 主菜单「开始游戏」按钮 ExecuteProc（未导出局部函数，STATE_EnterMainMenu 0x151fac 经 ControlButton_Create 传入），+0x48 = 其 isAuthUser() 判定分支（cbz w0 → Hive 登录询问弹窗）
 constexpr uintptr_t F_STATE_SET_VMA = 0xd46a8;                // void (int32_t) 写状态机 state（*[0x2f5000+0xf8] = state；STATE_NextStartProcess 驱动 enter 回调）
 // ---- 逻辑相位帧锚点：MainProcess 内 bl STATE_NextStartProcess（frame-dispatch-host 阶段 2）----
 // MainProcess@0xd4984（.dynsym 导出）内 +0x40 的 `bl STATE_NextStartProcess`（原字 0x97ffff3d）。

@@ -485,6 +485,9 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     // 日志 sink 未初始化时发出的日志会被丢弃（同 apply_monster_item_count_compat 的日志）。
     // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。
     qol::game_variant_init();
+    // 主菜单「开始游戏」不再弹 Com2uS Hive 注册/登录询问，直接进存档选择。
+    // 非致命：指令特征匹配失败只记日志，不阻断 bridge。
+    apply_hub_login_popup_skip();
     // 功能可用性注入：仓库相关功能依赖存档加解密链是否已解析；其余功能不依赖运行时条件。
     qol::game_feature_set_usability_fn([](qol::GameFeature feature) -> bool {
         switch (feature) {

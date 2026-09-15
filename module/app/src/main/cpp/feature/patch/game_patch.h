@@ -85,6 +85,9 @@ bool apply_fixed_stack_layout();
 // monster 版物品数量上界兼容（按特征字节定位，非 monster 版 no-op）。
 bool apply_monster_item_count_compat();
 
+// ---- 主菜单「开始游戏」：跳过 Com2uS Hive 注册/登录询问弹窗（常驻，启动期应用）----
+bool apply_hub_login_popup_skip();
+
 bool set_stack_limit_enabled(bool enabled);
 bool stack_limit_enabled();
 

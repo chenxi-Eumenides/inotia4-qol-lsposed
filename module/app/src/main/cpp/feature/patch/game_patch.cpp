@@ -74,3 +74,4 @@ void write_back(const PatchEntry* entries, size_t upto) {
 #include "game_patch_core.inc"
 #include "game_patch_move_merge.inc"
 #include "game_patch_craft.inc"
+#include "game_patch_hub_login.inc"
