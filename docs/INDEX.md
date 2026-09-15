@@ -12,6 +12,7 @@
 | 修改 Kotlin/Native 代码 | 根目录 `AGENTS.md` | `development/architecture.md`、相关功能文档 |
 | 理解 API 契约 | `reference/api-reference.md` | `guides/game-guide.md` |
 | 理解原版游戏机制 | `reference/game/` | 相关 `development/features/` |
+| 查静态分析产物（解码 / 反编译 / 静态表） | `apk/decoded/`、`apk/decompiled/`、`apk/static-data/` | `guides/build-and-deploy.md` §1 |
 | 继续重构工作 | `development/planning/refactor-plan.md` | `development/planning/backlog.md` |
 | 查看历史过程 | `history/` | 仅用于追溯，不作为当前实现依据 |
 
