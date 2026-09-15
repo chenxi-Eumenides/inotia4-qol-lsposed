@@ -143,6 +143,7 @@ data 层 → 仅 STL
 | `game_system.*` | parse 域 | **系统聚合域（唯一允许 include 其他域头的聚合域）**：build_gamestate_json / build_snapshot_json + frame_count / init_report / events / emit / take_snapshot | data + 引擎 + 各域头 |
 | `feature/patch/game_patch.*` | patch | **注入/修改补丁域**：IAP 屏蔽 / 沉浸模式 / 堆叠上限（47 patch 点）/ craft 三函数 / recover_after_hive_block / migrate_stack（§2.5） | data + game_ptr_hook.h |
 | `feature/simple_mode/*` | feature | **简单模式**：包裹 `CHAR_AddDamage`（打敌人 ×2、受到伤害 ×0.5）与 `CHAR_UpdateAttrFromMonster`（怪物最大生命减半）；含阵营判定原语、mod 跳板跟随与半血幂等账本（§2.6） | data + core + `native_hook_func()` |
+| `feature/ui/module_text.*` | feature | **模块自定义文本层**：独占 `MEMORYTEXT_GetText` 单一 hook，按「text id + 窗口作用域」返回模块自有文本；charinfo 标签与合成器配方按钮文案的公共设施（§2.7） | data + core + `native_hook_func()` |
 | `feature/extension_bag/game_ui_virtbag.*` | feature | 扩展背包运行时：状态、投影、拖拽、绘制、生命周期与扩展背包操作 | data + core + patch |
 | `feature/extension_bag/extension_bag_port.cpp` | feature adapter | 将扩展背包内部实现适配为 `core/native/extension_bag_port.h` 稳定端口 | extension_bag runtime |
 | `feature/extension_bag/extension_bag_context.h` | feature internal | 持久化拆分使用的内部上下文访问点，不对外形成 API/core 契约 | extension_bag runtime |
@@ -304,6 +305,16 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 - **半血必须幂等**：`CHAR_UpdateAttrFromMonster` 是「读旧槽值 → 变换 → 写回」的幂等调整层（唯一写点 `e011c`，`w20` 初值读自同一槽 `e008c`），对它再做非幂等变换会随每次重算累积。域内按角色池槽维护幂等账本；定位不到池槽时不改写（fail-safe）。
 - **阵营判定原语**（本次一并修正了 `C_TYPE` 的错误注释）：`C_TYPE(ch+0x09)` 取值即 `CHARSYSTEM_Produce` 的 type 参数 —— **0 = 玩家侧角色、1 = 怪物、2 = NPC/装饰物**。原语组合见 features/simple-mode.md §3；`CHAR_GetPartyIndex`（主角+队友）与 `CHAR_IsActivePlayerGroup`（主控+主控召唤物）都不覆盖「队友的召唤物」，须用 `CHAR_GetSummoner` 递归补齐。
 - **热路径开关**：开关是 `std::atomic<bool>`，JVM 线程写、游戏线程读；wrapper 内不得读文件或反调 Kotlin。
+
+### 2.7 模块自定义文本层（module-text）
+
+**native**：`feature/ui/module_text.{h,cpp}`。文案内容、作用域语义与验收见 `docs/development/features/custom-text.md`（唯一权威）。结构性事实：
+
+- **它是全库唯一使用 `MEMORYTEXT_GetText` 的功能**。该热点有 232 个调用点，而 LSPosed NativeHook 对同一地址二次挂载会返回 rc=-1 —— 因此需要替换文本的功能**不得**再挂该地址，只能把 `{语义键, text_id, Scope, 文本}` 登记进 `module_text::kEntries`。
+- **替换受窗口作用域约束**（`Scope` 枚举 + `thread_local` 栈 + `TextScopeGuard` RAII）。游戏里同一 text id 常被多界面复用（例：35291 既是宝石强化页页签名，也是模块配方按钮名），无门控替换会误改其它界面。
+- **只做读取侧替换**：先无条件调原函数，再按 (text_id, 当前作用域) 查表；不写游戏文本数据（`MEMORYTEXT` / `*BASE` 表全不动）、不改控件文本缓冲。
+- 表与 `lookup` 是**纯逻辑**（header-inline），编入 host 单测；hook 与作用域状态在 `.cpp`。
+- 安装顺序要求：`module_text_install_if_ready()` 必须早于任何「标记窗口」的功能（见 `gamebridge.cpp` 的 nativeInit）。
 
 ## 3. Kotlin 层文件职责
 

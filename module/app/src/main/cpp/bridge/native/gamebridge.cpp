@@ -11,6 +11,7 @@
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
+#include "feature/ui/module_text.h"
 #include "feature/quest/quest_resync.h"
 #include "feature/simple_mode/simple_mode.h"
 #include "feature/world_teleport/world_teleport.h"
@@ -49,7 +50,10 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         inventory_native_hook_install_if_ready();
         attr_range_ui_install_if_ready();
-        charinfo_zh_install_if_ready();  // 角色面板：绘制窗口内替换 11 个漏翻属性标签为中文
+        // 模块自定义文本层：独占 MEMORYTEXT_GetText 热点 hook（全库唯一 owner），必须在
+        // 任何「标记文本作用域」的功能之前安装 —— 否则消费者标了窗口也没有替换者。
+        module_text::module_text_install_if_ready();
+        charinfo_zh_install_if_ready();  // 角色面板：把绘制窗口标记为 kCharacterPanel 作用域
         save_backup_slot_delete_hook_install_if_ready();
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
         // 进入存档后由 autosell_register_save_enter 的回调注册（见 autosell_scan.cpp）。

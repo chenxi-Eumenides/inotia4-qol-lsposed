@@ -13,9 +13,10 @@ constexpr uint16_t kElixirOfExcellenceItemId = 15;
 // 按 3 格内容查表决定（§2.8/§4.12），不走原版 3:1 路径。
 constexpr uint16_t kLowJewelItemId = 28;
 constexpr uint8_t kGemCraftStuffCount = 3;
-// 配方按钮文本 wordId（复用既有本地化串，见 §7.2）：35216「合成」/ 35291「宝石强化」。
+// 配方按钮文本 wordId（复用既有本地化串，见 §7.2）：35216「合成」。
+// 「宝石强化」条目复用 35291，但按钮显示由 MEMORYTEXT_GetText 替换为模块字面量
+// 「宝石升阶」（custom_recipe_catalog.h 的 kJewelTierUpLabel）。
 constexpr uint16_t kNativeLabelWordId = 35216;
-constexpr uint16_t kJewelTierUpLabelWordId = 35291;
 // 「合成」入口费用公式 wordId：镜像原版 record 12（费用显示走原版公式，不由模块强制 0）。
 constexpr uint16_t kNativeCostWordId = 188;
 // 「宝石强化」条目的费用公式 wordId：**必须填合法公式**，不能填 0（免费配方的取值）。

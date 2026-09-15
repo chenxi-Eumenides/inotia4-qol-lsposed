@@ -184,14 +184,14 @@ target_compile_features(native_choice_tests PRIVATE cxx_std_17)
 add_test(NAME native_choice_tests COMMAND native_choice_tests)
 
 # 角色属性面板标签中文化白名单 host 测试（纯表逻辑，header-inline，末尾追加）
-add_executable(charinfo_zh_tests
-    test_charinfo_zh.cpp
+add_executable(module_text_tests
+    test_module_text.cpp
 )
-target_include_directories(charinfo_zh_tests PRIVATE
+target_include_directories(module_text_tests PRIVATE
     ${CPP_DIR}
 )
-target_compile_features(charinfo_zh_tests PRIVATE cxx_std_17)
-add_test(NAME charinfo_zh_tests COMMAND charinfo_zh_tests)
+target_compile_features(module_text_tests PRIVATE cxx_std_17)
+add_test(NAME module_text_tests COMMAND module_text_tests)
 
 # 简单模式纯逻辑 host 测试（阵营矩阵 / 倍率 / 边界钳制，末尾追加）
 add_executable(simple_mode_rules_tests

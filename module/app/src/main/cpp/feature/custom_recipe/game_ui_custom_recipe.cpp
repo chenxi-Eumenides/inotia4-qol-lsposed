@@ -8,6 +8,7 @@
 #include "feature/attribute_range/attribute_range.h"
 #include "feature/attribute_range/game_ui_attr_range.h"
 #include "feature/patch/native_inventory_hook.h"
+#include "feature/ui/module_text.h"
 #include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_symbols.h"
@@ -791,6 +792,18 @@ void custom_set_desc_text_wrapper(void* ctrl, const char* text, uint32_t width, 
     g_backup_set_desc_text(ctrl, text, width, f1, f2, f3);
 }
 
+// ---- 配方按钮文案（「宝石升阶」）的窗口标记 ----
+// 文案与 id 表统一在 module_text 的内置表（键 `recipe.jewel_tier_up`，作用域
+// Scope::kUimixRecipeButton）；本 wrapper 只负责把**配方按钮的绘制窗口**标记为该作用域。
+// 为什么必须限定窗口：该条目的 label wordId（35291）同时是宝石强化页的**页签名**，而页签由
+// 另一个 DrawProc（UIMix_ButtonMenuListDraw）绘制 —— 不加窗口就会把页签一起改名。
+UIMixButtonRecipeDrawFn g_backup_button_recipe_draw = nullptr;
+
+void uimix_button_recipe_draw_wrapper(void* ctrl) {
+    module_text::TextScopeGuard scope(module_text::Scope::kUimixRecipeButton);
+    if (g_backup_button_recipe_draw != nullptr) g_backup_button_recipe_draw(ctrl);
+}
+
 bool install_one(NativeHookFunType hook, uintptr_t target, void* replacement, void** backup,
                  const char* name) {
     const int rc = hook(reinterpret_cast<void*>(target), replacement, backup);
@@ -893,10 +906,21 @@ bool custom_recipe_ui_install_if_ready() {
                      "slot count hide hook skipped reason=install_failed");
     }
 
+    // 配方按钮文案（模块字面量「宝石升阶」）同样是**装饰性**能力：单独挂载、失败只告警。
+    const uintptr_t button_recipe_draw =
+        g_base + fn_resolve("F_UIMIX_BUTTON_RECIPE_DRAW_VMA", F_UIMIX_BUTTON_RECIPE_DRAW_VMA);
+    if (!install_one(hook, button_recipe_draw,
+                     reinterpret_cast<void*>(&uimix_button_recipe_draw_wrapper),
+                     reinterpret_cast<void**>(&g_backup_button_recipe_draw),
+                     "UIMix_ButtonRecipeDraw")) {
+        QOL_LOG_WARN(QolDomain::kCustomRecipe, "recipe label hook skipped reason=install_failed");
+    }
+
     g_installed.store(true, std::memory_order_release);
     QOL_LOG_INFO(QolDomain::kCustomRecipe,
-                 "custom recipe hooks installed core=5 desc=%d slotcount=%d",
+                 "custom recipe hooks installed core=5 desc=%d slotcount=%d label=%d",
                  g_backup_set_desc_text != nullptr ? 1 : 0,
-                 g_backup_item_draw_porting != nullptr ? 1 : 0);
+                 g_backup_item_draw_porting != nullptr ? 1 : 0,
+                 g_backup_button_recipe_draw != nullptr ? 1 : 0);
     return true;
 }

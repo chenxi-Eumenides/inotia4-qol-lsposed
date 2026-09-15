@@ -51,6 +51,15 @@ struct Def {
 // 仅在 UIDesc_MakeItemByID 汇聚点写入游戏共享描述缓冲，**不写任何游戏文本数据**。
 constexpr char kModuleRecipeDesc[] = "用3个材料合成";
 
+// 「宝石强化」页签下 `Kind::kJewelTierUp` 条目的按钮文案 wordId。
+// 该条目复用原版 35291 —— 它同时是**页签名**「宝石强化」（由 `UIMix_ButtonMenuListDraw` 绘制），
+// 且文本表里不存在「宝石升阶」这一串。因此按钮实际显示由 `feature/ui/module_text` 的
+// `recipe.jewel_tier_up` 条目在 `Scope::kUimixRecipeButton` 窗口内替换（页签不受影响）；
+// 未挂上 hook 时退化为显示原版「宝石强化」，不崩、不影响功能。
+// 本常量是**配方数据**（`Def::label_word_id` 取值）；module_text 侧的同名 id 由 host test
+// （`test_module_text.cpp` 的 test_recipe_label_id_sync）断言与本常量一致，避免两处漂移。
+inline constexpr uint16_t kJewelTierUpLabelWordId = 35291;
+
 // 注入记录的 RECIPEBASE 结果物品 id（b2-3，u16）恒为 0（custom_recipe_table.h kRbResultId
 // 「注入记录填 0」）。描述文案替换的门控依赖「当前 mixType 命中模块记录」这一条（另一条是
 // 「被写的文本就是原版配方模板」），见 game_ui_custom_recipe.cpp 的 custom_set_desc_text_wrapper。

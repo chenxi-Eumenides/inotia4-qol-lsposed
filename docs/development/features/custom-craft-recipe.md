@@ -162,7 +162,8 @@
 - `UIMix_CreateRecipeGroupControl@0xbfb24`：按计数创建等量配方按钮（ExecuteProc 取 GOT `0x2f40d0`；draw proc 取 GOT `0x2f52a8`）。
 - ⇒ **配方按钮数量完全由 `RECIPEBASE` 的 `b11` 位图决定，无硬编码**。
 - 选中配方：`UIMix_ButtonRecipeExe@0xc0390` → `mixType = recipeList[idx]` 写 `[+0x48]` → `UIMix_InitMixingState@0xc0038`。该函数**无数组长度边界检查**（槽号天然小于按钮数）、**无 mixType 合法性校验**（不比较 {0..4}）→ 注入的任意 mixType 均可被选中。
-- 配方按钮 draw proc = `UIMix_ButtonRecipeDraw@0xbef40`：槽号取 `UI_GetChildIndex`，`idx = (*(0x2f4fd8))[slot]`，`p = *(0x2f3158) + idx * recsize`，`MEMORYTEXT_GetText(*(u16*)p)` 居中绘制；**不读 `[+0x100+type*8]`、不绘制物品图标**。
+- 配方按钮 draw proc = `UIMix_ButtonRecipeDraw@0xbef40`：槽号取 `UI_GetChildIndex`，`idx = (*(0x2f4fd8))[slot]`，`p = *(0x2f3158) + idx * recsize`，`MEMORYTEXT_GetText(*(u16*)p)` 居中绘制；**不读 `[+0x100+type*8]`、不绘制物品图标**。该地址在 7 个已核对构建中 VMA 一致（0xbef40），模块以其为「配方按钮文案窗口」标记 `Scope::kUimixRecipeButton`。
+- **配方按钮文案改写**：模块「宝石强化」条目（`Kind::kJewelTierUp`）的 label wordId 复用原版 35291，而**文本表里没有「宝石升阶」**、且 35291 同时是宝石强化页的**页签名**。因此按钮文案由 `feature/ui/module_text` 的内置条目 `recipe.jewel_tier_up` 在 `Scope::kUimixRecipeButton` 窗口内替换为「宝石升阶」；页签由 `UIMix_ButtonMenuListDraw` 绘制、不在该作用域内，故保持「宝石强化」不变。详见 `docs/development/features/custom-text.md`。
 - `UIMix_CreateRecipeGroupControl@0xbfb24` 对配方数 ≤6 与 >6 两种分支生成的几何完全相同（仅 ≤6 多一个 `count>0` 守卫），**无 6 条上限**；超出可视区由滚动控件处理。按钮数量 = `*(0x2f4160)`。
 
 ### 3.4 选中配方后的界面构建
