@@ -5,6 +5,7 @@ import com.inotia4.qol.LogFile
 import com.inotia4.qol.ModuleConfig
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.StaticData
+import com.inotia4.qol.patch.WatermarkOverlay
 
 /**
  * 模块配置→native 生效服务层接口（v0.5.46 P1 收边）。
@@ -71,6 +72,11 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldDebugLog: Boolean,
         oldSimpleMode: Boolean
     ) {
+        // 水印颜色跟随简单模式开关，属纯 Kotlin 视图层装饰，与 native 就绪无关，
+        // 故放在 ready 检查之前（native 未就绪时也要让水印颜色正确）。
+        if (ModuleConfig.simpleModeEnabled != oldSimpleMode) {
+            WatermarkOverlay.refreshColor()
+        }
         if (!NativeBridge.ready) return
         if (ModuleConfig.stackLimitIncrease != oldStack) {
             NativeBridge.nativeSetStackLimitEnabled(ModuleConfig.stackLimitIncrease)
