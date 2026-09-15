@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-// 静态瓦片矩阵层（P0#瓦片矩阵，2026-08-12）：
+// 静态瓦片矩阵层（P0#瓦片矩阵）：
 // 从模块 assets 的 maps/tiles.json（Kotlin 读取后经 JNI 传入）加载 64×64 通行矩阵，
 // 替代运行时读游戏内存 *(*(base+G_TILE_GOT_VMA))。
 // bit3=阻挡(不可通行) bit6=显式阻挡 bit7=出口（data-sources.md §3.2 逆向）。

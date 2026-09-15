@@ -54,7 +54,7 @@ std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_tot
     // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
     void* item = fn_create_item(category, 0, 0, 0);
     if (item == nullptr) return op_err("create item failed");
-    // 孔位/强化构造（仅测试用，验证自动出售筛选 + 位级 A/B 实测；用户裁决 2026-09-15：
+    // 孔位/强化构造（仅测试用，验证自动出售筛选 + 位级 A/B 实测；
     // 只设「总孔位」与「剩余强化次数」两段）。CreateItem 产物 I_SOCKET/I_ENCHANT 恒为 0，
     // 缺省 0 时写入等价于不写。读改写、保留其余位：
     // I_SOCKET bits4-7=总孔数 socket_total（钳 0..15），bits0-3=已镶嵌数保持 0 不写；

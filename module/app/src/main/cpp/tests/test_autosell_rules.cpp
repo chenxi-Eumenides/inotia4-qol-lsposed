@@ -6,7 +6,7 @@
 // host 单测：autosell 纯规则引擎 should_sell 的命中/不命中、边界、
 // 装备三规则同类 AND（0=关不参与）、宝石同类 OR、跨类 OR、
 // 值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
-// 特殊多选与「无规则不出售」；硬保护（已强化/已镶嵌永不出售，用户 2026-09-15）。
+// 特殊多选与「无规则不出售」；硬保护（已强化/已镶嵌永不出售）。
 // 强化口径 = 剩余强化次数 enhance_remaining（I_ENCHANT bits2-5，UI 名称「强化耐久度」）。
 // 风格与 tests/test_attribute_range.cpp 一致（自带断言计数）。
 
@@ -175,7 +175,7 @@ static void test_socket_value_switch() {
 }
 
 static void test_hard_protection_enhanced_or_filled() {
-    // 硬保护（用户 2026-09-15 裁决）：已强化（I_ENCHANT bits6-10>0）或已镶嵌
+    // 硬保护：已强化（I_ENCHANT bits6-10>0）或已镶嵌
     // （I_SOCKET bits0-3>0）永不出售——即便全部规则开启且其他维度命中。
     Config cfg = all_rules_on();
 
@@ -350,7 +350,7 @@ static void test_gem_range_only_jewels_and_or() {
 }
 
 static void test_equip_rules_and() {
-    // 装备三规则同类 AND（用户 2026-09-16）：0=关不参与；已开启项须同时命中才出售。
+    // 装备三规则同类 AND：0=关不参与；已开启项须同时命中才出售。
     // 物品：rarity 2 / enhance_remaining 3 / socket_total 2。
     // 命中档位：rarity 值 3→阈值 2、enhance 值 4→阈值 3、socket 值 3→阈值 2。
     ItemView item = equip_item();

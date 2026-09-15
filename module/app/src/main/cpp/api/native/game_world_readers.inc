@@ -15,7 +15,7 @@ std::string build_map_json() {
     s += "\"map_id\":" + std::to_string(current_map_id());
     append_position(s, lead_member());
         // 瓦片通行查询（P0#3：MAP_IsBlocking 反汇编确认，GOT G_TILE_GOT_VMA 双层解引用，y*64+x 索引，bit3=阻挡）
-        // P0#瓦片矩阵（2026-08-12）：统一走 nav_tiles() —— 静态数据优先，缺失回退内存
+        // P0#瓦片矩阵：统一走 nav_tiles() —— 静态数据优先，缺失回退内存
         {
             const uint8_t* tiles = nav_tiles();
             if (tiles != nullptr) {
@@ -53,7 +53,7 @@ std::string build_map_json() {
 
 // v0.4.62 P0：完整瓦片矩阵导出（64×64=4096B，base64 编码）
 // 用途：P0 瓦片入静态数据采集——客户端一次性拿整图，无需 4096 次单 tile 查询
-// P0#瓦片矩阵（2026-08-12）：静态数据就绪时返回静态矩阵（与运行时一致），否则回退内存
+// P0#瓦片矩阵：静态数据就绪时返回静态矩阵（与运行时一致），否则回退内存
 std::string build_tiles_json() {
     const uint8_t* tiles = nav_tiles();
     if (tiles == nullptr) return "{\"error\":\"no tiles\"}";
@@ -79,7 +79,7 @@ std::string build_tiles_json() {
 // mode 0=全量（units，含 char_loc）1=敌人（enemies，type==1）2=可交互（interactives，type==2 且 interactable==true）
 static std::string build_units_json_impl(int mode, bool include_charloc) {
     // CHARSYSTEM 角色对象池：*(G_CHAR_POOL_VMA) 指向英雄对象，对象按 C_OBJ_SIZE 步长连续排列
-    // （frida 实测 2026-08-05：31 有效单位 = 3 队伍 + 怪物 + NPC，坐标与玩家同像素坐标系）。
+    // （frida 实测：31 有效单位 = 3 队伍 + 怪物 + NPC，坐标与玩家同像素坐标系）。
     // 有效性：type 0-2、status<=2、坐标 0-1500（未激活槽哨兵值 2048/16992/status>2，frida 实测排除）。
     // status: 0=队伍 1=城镇NPC/佣兵 2=怪物/召唤物。
     // type==2 为装饰/场景单位（路障/宝箱/火把/火堆等）。v0.4.25 曾过滤 type>1，本版取消过滤：

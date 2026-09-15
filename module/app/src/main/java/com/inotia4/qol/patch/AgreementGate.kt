@@ -12,7 +12,7 @@ import java.lang.reflect.Method
 /**
  * 仅允许同意页（AgreementUIActivity）在主菜单弹出。hook Instrumentation.execStartActivity
  * 丢弃其余场景的启动：进档宽限期内（enter_slot/create_slot 后 15s）或 native screen 非
- * main_menu。否则同意页 Activity 启动会打断读档流程导致角色数据丢失（2026-08-28 save1 实测复现）。
+ * main_menu。否则同意页 Activity 启动会打断读档流程导致角色数据丢失（save1 实测复现）。
  * 首次启动时放行同意页，避免启动阶段的 loading/connecting 被误判为读档；
  * 探针失败时放行（API 层门禁仍 fail-closed 兜底）。
  */

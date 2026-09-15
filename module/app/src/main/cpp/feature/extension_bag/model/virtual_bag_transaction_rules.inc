@@ -170,7 +170,7 @@ inline uint32_t merge_count(int existing_count, int added_count, bool extended) 
 //   payload[17..18] u16 I_ENCHANT
 //   payload[19..]   词缀链（每节点 u16 编码 + s16 值，步长 4）
 //
-// 原版「同类可堆叠」身份判据（反汇编基线，2026-09-11 冻结）：
+// 原版「同类可堆叠」身份判据（反汇编基线）：
 //   INVEN_FindSaveSlot@0x103b48-0x103b9c：先读 ITEMCLASSBASE[category]+6 bit0
 //     （可堆叠位，判据同 ITEM_GetCumulateCount@0x1060e0-0x1060f8），再比较
 //     I_TYPE bit6-15（类别，0x103b48-0x103b74），两堆 ITEM_GetCumulateCount 之和

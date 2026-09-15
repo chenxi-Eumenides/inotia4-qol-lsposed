@@ -384,7 +384,7 @@ void* module_item_locked(int bag, int slot) {
 }
 
 // 保存门禁（P3 事故修复）：SAVE_SaveInventory 被游戏内部直调（存档面板/自动存档），
-// 投影安装期间执行会把 INVEN 投影态写进存档（E-2026-08-29-02 污染事故根因）。
+// 投影安装期间执行会把 INVEN 投影态写进存档（污染事故根因）。
 // v0.6.x：由「改写 SAVE_Save 内唯一 bl 调用点」改为「按符号 hook SAVE_SaveInventory
 // 函数入口」——调用方无关（原版 SAVE_Save 或 monster mod 的包装器都经过此函数），
 // 且不受 monster 改指调用目标影响。

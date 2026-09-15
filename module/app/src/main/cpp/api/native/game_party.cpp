@@ -73,7 +73,7 @@ std::string data_op_switch_player(int32_t slot) {
     int r = fn_set_active_player(slot);
     if (!r) return op_err("switch failed");
     // v0.5.9：PARTY_SetActivePlayer 只写 PLAYER_pActivePlayer，不同步 SAVE_nMainMercenarySlot，
-    // 导致 main_mercenary_slot/leader 端点不更新（2026-08-13 实测修复）
+    // 导致 main_mercenary_slot/leader 端点不更新（实测修复）
     if (g_main_merc_slot != nullptr)
         *reinterpret_cast<uint8_t*>(g_main_merc_slot) = static_cast<uint8_t>(slot);
     return op_ok();

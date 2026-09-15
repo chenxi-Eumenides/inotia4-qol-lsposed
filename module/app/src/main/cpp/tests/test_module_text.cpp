@@ -34,7 +34,7 @@ static void test_table_integrity() {
         if (e[i].text == nullptr) continue;
         const size_t len = std::strlen(e[i].text);
         CHECK(len % 3 == 0);           // 纯中文 UTF-8：每字 3 字节
-        CHECK(len >= 6 && len <= 12);  // 二至四字（用户裁决上限四字）
+        CHECK(len >= 6 && len <= 12);  // 二至四字（上限四字）
         for (size_t k = 0; k < len; ++k) {
             CHECK(static_cast<unsigned char>(e[i].text[k]) >= 0x80);  // 无 ASCII 混入
         }
@@ -72,7 +72,7 @@ static void test_lookup_scope_gating() {
     CHECK(std::strcmp(module_text::lookup(35194, Scope::kCharacterPanel), "闪避率") == 0);
     CHECK(std::strcmp(module_text::lookup(35195, Scope::kCharacterPanel), "武器格挡") == 0);
     CHECK(std::strcmp(module_text::lookup(35196, Scope::kCharacterPanel), "盾牌格挡") == 0);
-    // 35188 显式登记为保持原文；35181..35184（LV/EXP/HP/MP）按用户裁决保持原文且不在表内。
+    // 35188 显式登记为保持原文；35181..35184（LV/EXP/HP/MP）保持原文且不在表内。
     CHECK(module_text::lookup(35188, Scope::kCharacterPanel) == nullptr);
     CHECK(module_text::lookup(35184, Scope::kCharacterPanel) == nullptr);
     CHECK(module_text::lookup(35197, Scope::kCharacterPanel) == nullptr);

@@ -1,4 +1,4 @@
-// host 纯函数单测（G4 裁决）：
+// host 纯函数单测：
 // 覆盖 json_escape / base64_decode / parse_int_field / nav_bfs / nav_bfs_multi / tiles 解析。
 // 全部编译真实被测源文件（非复制实现）：
 //   - game_json.cpp   → json_escape（纯 STL）

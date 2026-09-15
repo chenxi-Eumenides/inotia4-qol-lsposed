@@ -28,7 +28,7 @@ interface ConfigApiService {
         oldSimpleMode: Boolean
     )
 
-    /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵 2026-08-12） */
+    /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵） */
     fun applyTiles()
 }
 

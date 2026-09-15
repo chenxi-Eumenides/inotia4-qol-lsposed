@@ -111,7 +111,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
 
     // committed：不做猜测性逆转。清 pending、回收模块投影对象、刷新原版网格。
     g_virtual_bag_state.pending = {};
-    // 用户决策（2026-08-31）：orig→ext 后保持当前视图（对齐原版"移动后停留"）。
+    // orig→ext 后保持当前视图（对齐原版"移动后停留"）。
     // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
     // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
     // 当前视图只同步发生变化的扩展槽；非扩展视图仍走原版刷新。
@@ -338,7 +338,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     g_item_state_dirty = true;
     g_virtual_bag_state.pending = {};
     // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
-    // API 路径（原版视图）不改写视图字段（用户 2026-08-31 决策）。
+    // API 路径（原版视图）不改写视图字段。
     if (g_module_view_installed) {
         g_virtual_bag_state.mode = virtual_bag::Mode::kModule;
         g_virtual_bag_state.selected = src_bag;

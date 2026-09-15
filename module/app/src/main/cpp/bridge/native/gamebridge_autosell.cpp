@@ -63,7 +63,7 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboo
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeAutoSellRunNow(JNIEnv*, jclass) {
     // 保留 JNI 入口以兼容既有 external 签名；扫描已由 frame_task 周期任务（每 60 帧）负责，
-    // 不再提供单次立即扫描（2026-09-13 裁决：60 帧等待可接受）。
+    // 不再提供单次立即扫描：60 帧等待可接受。
     return JNI_TRUE;
 }
 

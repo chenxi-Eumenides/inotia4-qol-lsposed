@@ -17,7 +17,7 @@
 #include "game_tiles.h"
 
 const uint8_t* nav_tiles() {
-    // P0#瓦片矩阵（2026-08-12）：优先静态数据（assets maps/tiles.json，Kotlin 经 JNI 传入），
+    // P0#瓦片矩阵：优先静态数据（assets maps/tiles.json，Kotlin 经 JNI 传入），
     // 缺失时回退运行时读内存 *(*(base+G_TILE_GOT_VMA))。
     const uint8_t* st = static_tiles_for(static_cast<int>(current_map_id()));
     if (st != nullptr) return st;

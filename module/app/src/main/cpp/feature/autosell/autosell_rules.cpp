@@ -4,7 +4,7 @@ namespace autosell {
 
 namespace {
 
-// 装备类规则：三条规则之间为 AND（用户 2026-09-16 裁决）——值 0=关、不参与判定；
+// 装备类规则：三条规则之间为 AND——值 0=关、不参与判定；
 // 所有已开启（值 v>0）的规则必须同时命中才为真；三条全关时不参与（返回 false）。
 // 比较方向统一 `<=`：值 v → 阈值 v-1。
 bool equip_rule_hit(const ItemView& item, const Config& cfg) {
@@ -16,7 +16,7 @@ bool equip_rule_hit(const ItemView& item, const Config& cfg) {
             return false;
         }
     }
-    // 强化口径（用户 2026-09-15 裁决）：比较「剩余强化次数」enhance_remaining（bits2-5），
+    // 强化口径：比较「剩余强化次数」enhance_remaining（bits2-5），
     // 界面名称「强化耐久度」；不再读已强化次数 bits6-10（该字段改由硬保护使用）。
     if (cfg.enhance > 0) {
         any_enabled = true;
@@ -80,7 +80,7 @@ bool should_sell(const ItemView& item, const Config& cfg) {
         return false;
     }
 
-    // 硬保护：已强化或已镶嵌的装备永不出售（用户 2026-09-15）。
+    // 硬保护：已强化或已镶嵌的装备永不出售。
     // 已强化 = I_ENCHANT bits6-10 > 0；已镶嵌 = I_SOCKET bits0-3 > 0。
     // 无条件、不受配置影响，在一切规则判定（含宝石/特殊类型）之前先行排除。
     if (item.enhance_level > 0 || item.socket_filled > 0) {

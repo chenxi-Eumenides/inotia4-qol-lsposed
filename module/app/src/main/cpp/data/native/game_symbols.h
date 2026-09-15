@@ -43,7 +43,7 @@ constexpr size_t LOC_TYPE = 0x00;     // u8 单位类型
 constexpr size_t LOC_POS_X = 0x02;    // u16 实时 X
 constexpr size_t LOC_POS_Y = 0x04;    // u16 实时 Y
 
-// ---- 技能节点结构偏移（角色 C_SKILL_LIST 链表，frida 实测 2026-08-05）----
+// ---- 技能节点结构偏移（角色 C_SKILL_LIST 链表，frida 实测）----
 constexpr size_t S_ACTION_ID = 0x00; // u16 技能 action_id
 constexpr size_t S_LEVEL = 0x02;     // u8 技能等级
 constexpr size_t S_NEXT = 0x18;      // 下一节点指针
@@ -200,7 +200,7 @@ constexpr uintptr_t G_UI_PARTY_MENU_INDEX_VMA = 0x728ed8;      // PARTY_nMenuInd
 constexpr uintptr_t G_NPCSEL_ID_VMA = 0x728e8e;         // nSelectedID (u16 选中任务 ID)
 constexpr uintptr_t G_NPCSEL_TYPE_VMA = 0x728e90;       // nSelectedType (u8 选中任务类型)
 constexpr uintptr_t G_NPC_QUEST_IDX_GOT_VMA = 0x2f3000 + 0x240;  // GOT 双层解引用 (ldrsh) 当前 NPC 任务 questId（UINpcQuest_MakeText/ButtonOKExe 读取；路障任务=381）
-constexpr uintptr_t G_NPC_QUEST_STATE_GOT_VMA = 0x2f6000 + 0xb40; // GOT 双层解引用 quest 状态表（GOT 槽 → 二级指针(.bss) → 状态表数组(堆)；索引=questId=记录下标，值 0=未接 1=进行 2=可完成 3=已完成；2026-08-16 实测：**st_got 指向堆 0x7c05dc7e6c，state[2]=1 与 API 一致）
+constexpr uintptr_t G_NPC_QUEST_STATE_GOT_VMA = 0x2f6000 + 0xb40; // GOT 双层解引用 quest 状态表（GOT 槽 → 二级指针(.bss) → 状态表数组(堆)；索引=questId=记录下标，值 0=未接 1=进行 2=可完成 3=已完成；实测：**st_got 指向堆 0x7c05dc7e6c，state[2]=1 与 API 一致）
 constexpr uintptr_t G_QUEST_COUNT_GOT_VMA = 0x2f6000 + 0xe08;  // GOT 双层解引用 u16 quest 总数（QUESTSYSTEM_ChangeQuestState 0x123bb4 ldrh 边界校验；状态表遍历上限）
 constexpr uintptr_t G_PLAYER_INDICES_GOT_VMA = 0x2f4000 + 0x120; // GOT 双层解引用 uint8_t*：3 名队员槽位索引数组（存档校验读 [0..2]；game_save.cpp）
 constexpr uintptr_t G_FONT_OBJ_GOT_VMA = 0x2f3000 + 0xf88; // GOT 槽：*(此地址)=字体对象指针（自绘按钮 font 来源；game_ui_custom_panel.inc）
@@ -553,7 +553,7 @@ constexpr uintptr_t F_SEARCH_PATH_VMA = 0xdb094;      // int (void*, int, int, i
 constexpr uintptr_t F_CHAR_GET_BLOCK_VMA = 0xddaac;    // int (void*) 单位是否阻挡（CHARSYSTEM_GetCharacterBlock，ret=2 阻挡；BFS 阻挡判定参考，nav 单位占用过滤）
 constexpr uintptr_t F_CHAR_GET_AREA_RECT_VMA = 0xdd584; // void (void*, int, int, int16_t[4]) 单位碰撞矩形（CHAR_GetAreaRect：(obj, x, y, rect) 输出绝对像素 rect=[min_x,min_y,max_x,max_y]，偏移来自矩形表A/B，索引 obj+0x3ce）
 
-// ---- 写操作函数 VMA（2026-08-05 objdump 逆向确认，见 docs/notes/control-capability.md §5）----
+// ---- 写操作函数 VMA（objdump 逆向确认，见 docs/notes/control-capability.md §5）----
 constexpr uintptr_t F_SET_MONEY_VMA = 0x10449c;        // void (int64) 设金币
 constexpr uintptr_t F_ADD_MONEY_VMA = 0x1044e4;        // int (int64) 加金币（溢出返回 0）
 constexpr uintptr_t F_MINUS_MONEY_VMA = 0x104780;      // int (int64) 减金币（不足返回 0）
@@ -627,7 +627,7 @@ constexpr uintptr_t F_CHAR_SET_TARGET_VMA = 0xdc754;    // void (void*, void*) �
 constexpr uintptr_t F_CHAR_STOP_COMBAT_VMA = 0xe7c24;   // void (void*) 停止战斗（清战斗标志+移除仇恨+动作复位）
 
 // ---- 简单模式落点（伤害汇合点 / 怪物属性重算 / 阵营判定原语）----
-// 逐版核对结论（llvm-objdump -T/-d，2026-09-15）：下表 5 个符号在 原版 v1.3.2、monster v20/v23/v25/v26/v27、
+// 逐版核对结论（llvm-objdump -T/-d）：下表 5 个符号在 原版 v1.3.2、monster v20/v23/v25/v26/v27、
 // 大修 20260704/20260830 共 8 个构建中 VMA 与 size 全部逐字节一致；运行期仍优先按 .dynsym 符号名解析。
 //
 // CHAR_AddDamage：伤害结算唯一汇合点。函数体第 3 条语句即 `neg w1,w2; mov x0,受害者; bl CHAR_AddLife`

@@ -214,7 +214,7 @@ size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_coun
     }
     size_t written = 0;
     for (size_t e = 0; e < equip_count && written < out_capacity; ++e) {
-        // 「空」作为一个普通候选放进池子（用户裁决 2026-09-16：「空不用单独的概率，就把它加入
+        // 「空」作为一个普通候选放进池子（「空不用单独的概率，就把它加入
         // 池子，然后随机就行」）。池 = material_pool 的 pool_size 项 + 1 个「空」项；
         // 空项映射为类别 0，与三格匹配语义一致：`slots[i] == 0` 表示**该格必须为空**。
         // 「3 个不同」的约束按池下标去重，因此空项最多出现一次（不会出现「三格全空」）。

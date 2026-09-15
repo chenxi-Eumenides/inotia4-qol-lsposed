@@ -111,7 +111,7 @@ object StaticData {
     }
 
     /**
-     * 附魔/强化名称（2026-08-12）：enchantId → ITEMENCHANTBASE 记录(enchantId-1) +0x00 卷轴类别 →
+     * 附魔/强化名称：enchantId → ITEMENCHANTBASE 记录(enchantId-1) +0x00 卷轴类别 →
      * ITEMDATABASE 物品名。enchantId=0（无附魔）或无记录时返回 null。
      */
     fun enchantName(enchantId: Int): String? {
@@ -188,7 +188,7 @@ object StaticData {
     @Volatile
     private var itemUseTypes: Map<Int, Int>? = null
 
-    /** 物品类型五类（ITEMDATABASE 记录 +2 字节 = 用途类型，2026-08-17 逆向全量核实）：
+    /** 物品类型五类（ITEMDATABASE 记录 +2 字节 = 用途类型，逆向全量核实）：
      *  equipment(0-21 装备) / potion(22-23 药水) / scroll(24 卷轴) / gem(25 宝石) / consumable(其余消耗/材料/任务/货币)。 */
     fun itemType(category: Int): String = when (itemUseType(category)) {
         in 0..0x15 -> "equipment"
@@ -220,7 +220,7 @@ object StaticData {
         }
     }
 
-    /** ITEMDATABASE u16[0]（物品 id，= 记录下标+30，2026-08-16 全 1018 条核实恒等）→ 记录下标（category）映射 */
+    /** ITEMDATABASE u16[0]（物品 id，= 记录下标+30，全 1018 条核实恒等）→ 记录下标（category）映射 */
     private fun buildItemIdToIndex(): Map<Int, Int> {
         val json = read("tables/ITEMDATABASE.json") ?: return emptyMap()
         return try {

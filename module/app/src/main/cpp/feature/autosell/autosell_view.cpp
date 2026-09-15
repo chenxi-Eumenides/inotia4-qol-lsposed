@@ -41,7 +41,7 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
     out->is_equip = fn_item_is_real_equip(ref.native_item) != 0;
     out->rarity = fn_get_rarity(ref.native_item);
 
-    // 强化/孔位位段拆解（auto-sell.md §3.1）：bits2-5=剩余强化次数（筛选口径，2026-09-15 裁决）、
+    // 强化/孔位位段拆解（auto-sell.md §3.1）：bits2-5=剩余强化次数（筛选口径）、
     // bits6-10=已强化次数、I_SOCKET bits0-3=已镶嵌数（后两者 >0 触发硬保护）、bits4-7=总孔数。
     const uint16_t enchant = *reinterpret_cast<uint16_t*>(item + I_ENCHANT);
     out->enhance_remaining = static_cast<int>((enchant >> 2) & 0x0F);

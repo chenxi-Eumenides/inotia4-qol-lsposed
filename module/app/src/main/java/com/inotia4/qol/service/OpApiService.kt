@@ -87,7 +87,7 @@ class OpApiServiceImpl : OpApiService {
 
     // socket：总孔数（I_SOCKET bits4-7）；enhanceRemaining：剩余强化次数（I_ENCHANT bits2-5）；
     // 缺省 0（CreateItem 产物恒 0，写 0 等价不写），钳制在 native 侧；
-    // 已镶嵌数/已强化次数/强化 ID 由游戏维护，不经本接口设置（用户裁决 2026-09-15）；
+    // 已镶嵌数/已强化次数/强化 ID 由游戏维护，不经本接口设置；
     // rarity：品质档位 0..4 白绿蓝黄紫（缺省 -1 保留随机），同样钳制在 native 侧
     override fun addItem(category: Int, count: Int, socket: Int, enhanceRemaining: Int, rarity: Int): String {
         checkOpEnabled()
@@ -96,7 +96,7 @@ class OpApiServiceImpl : OpApiService {
         }
     }
 
-    // ---- v0.5.47 接线 4 端点（D4 用户裁决，native 已备） ----
+    // ---- v0.5.47 接线 4 端点（native 已备） ----
 
     override fun setMoney(money: Long): String {
         checkOpEnabled()

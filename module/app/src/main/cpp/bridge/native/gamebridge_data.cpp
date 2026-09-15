@@ -60,7 +60,7 @@ Java_com_inotia4_qol_NativeBridge_nativeGetTilesJson(JNIEnv* env, jclass) {
     return env->NewStringUTF(build_tiles_json().c_str());
 }
 
-// P0#瓦片矩阵（2026-08-12）：Kotlin 读取 assets maps/tiles.json 后传入，native 解析缓存
+// P0#瓦片矩阵：Kotlin 读取 assets maps/tiles.json 后传入，native 解析缓存
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetTilesData(JNIEnv* env, jclass, jstring json) {
     const char* j = json != nullptr ? env->GetStringUTFChars(json, nullptr) : nullptr;

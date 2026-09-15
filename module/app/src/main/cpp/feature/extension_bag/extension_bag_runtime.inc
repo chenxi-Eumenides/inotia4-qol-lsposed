@@ -127,7 +127,7 @@ void install_extension_tab_buttons_locked() {
     // 等原版 6 袋标签就位（child count ≥ 6）后再挂载；未就位直接跳过，
     // 由 draw 每帧检测容器就位后重试。
     if (fn_ctrl_get_count != nullptr && fn_ctrl_get_count(bag_container) < 6) return;
-    // 动态计算（用户方案）：打开面板后，原版袋 0 按钮的绝对位置 =
+    // 动态计算：打开面板后，原版袋 0 按钮的绝对位置 =
     // 袋容器绝对（父链累加，袋 0 相对容器为 (0,0)）。缓存至面板重建。
     // 挂载层 = 袋容器（与原版 6 袋标签同父，跟随容器动画，天然不漂移）。
     int64_t bag0_abs_x = 0, bag0_abs_y = 0;

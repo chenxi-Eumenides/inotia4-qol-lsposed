@@ -247,7 +247,7 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
     QOL_LOG_INFO(QolDomain::kCustomRecipe,
                  "dynamic special recipes rebuilt count=%zu equip=%zu materialPool=%zu",
                  n, custom_recipe::kSpecialEquipCategoryCount, custom_recipe::kMaterialPoolSize);
-    // 逐条映射刻意不打印（用户裁决「无信息」；临时排障日志已于开发收尾时删除）。
+    // 逐条映射刻意不打印（「无信息」；临时排障日志已于开发收尾时删除）。
 }
 
 }  // namespace
@@ -261,7 +261,7 @@ void register_dynamic_recipes() {
 // 结果层对外接口（界面层 feature/craft_ui 单向调用）
 // ===========================================================================
 //
-// 约定（用户裁定 2026-09-16：界面归界面，结果归结果）：本层**不认识界面** ——
+// 约定（界面归界面，结果归结果）：本层**不认识界面** ——
 // 不弹窗、不改选中格、不碰控件、不播声音；只回传结果枚举与产物/扣料决策。
 // 弹什么文案、清不清空填入格、选哪个格，全部由 craft_ui 按枚举决定。
 //

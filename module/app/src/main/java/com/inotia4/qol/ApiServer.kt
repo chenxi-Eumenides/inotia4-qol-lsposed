@@ -224,7 +224,7 @@ object ApiServer {
 }
 
 /**
- * 大响应间歇性 "Connection reset by peer" 的根因修复（2026-08-14）。
+ * 大响应间歇性 "Connection reset by peer" 的根因修复。
  *
  * 根因（基于 AndServer 2.1.12 + com.yanzhenjie.apache:httpcore:4.4.16 反编译证据）：
  * 1. AndServer 的 `BasicServer$1.run()` 对每个 accept 的连接硬编码了
