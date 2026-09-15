@@ -9,7 +9,9 @@ bool equip_rule_hit(const ItemView& item, const Config& cfg) {
     if (cfg.rarity > 0 && item.rarity <= cfg.rarity - 1) {
         return true;
     }
-    if (cfg.enhance > 0 && item.enhance_count <= cfg.enhance - 1) {
+    // 强化口径（用户 2026-09-15 裁决）：比较「剩余强化次数」enhance_remaining（bits2-5），
+    // 界面名称「强化耐久度」；不再读已强化次数 bits6-10（该字段改由硬保护使用）。
+    if (cfg.enhance > 0 && item.enhance_remaining <= cfg.enhance - 1) {
         return true;
     }
     if (cfg.socket > 0 && item.socket_total <= cfg.socket - 1) {
@@ -62,6 +64,13 @@ bool special_rule_hit(const ItemView& item, const Config& cfg) {
 bool should_sell(const ItemView& item, const Config& cfg) {
     // 总开关关闭：任何规则均不生效。
     if (!cfg.enabled) {
+        return false;
+    }
+
+    // 硬保护：已强化或已镶嵌的装备永不出售（用户 2026-09-15）。
+    // 已强化 = I_ENCHANT bits6-10 > 0；已镶嵌 = I_SOCKET bits0-3 > 0。
+    // 无条件、不受配置影响，在一切规则判定（含宝石/特殊类型）之前先行排除。
+    if (item.enhance_level > 0 || item.socket_filled > 0) {
         return false;
     }
 

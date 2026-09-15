@@ -13,6 +13,8 @@
 //   - 跨类独立：装备规则只对 is_equip 生效；宝石规则只对 is_jewel 生效；特殊类型对任意物品生效。
 //   - 特殊类型仅三项：背包、普通徽章（勇士徽章 category 42..47）、骰子。
 //   - 任一维度命中即出售（全局 OR）；未开启任何规则时不得出售。
+//   - 硬保护（用户 2026-09-15 裁决，无条件、不受配置影响）：已强化（I_ENCHANT bits6-10>0）
+//     或已镶嵌（I_SOCKET bits0-3>0）的装备永不出售，在规则判定之前先行排除。
 
 namespace autosell {
 
@@ -29,7 +31,7 @@ struct Config {
 
     // 装备规则（仅 is_equip 生效，同类内 OR）。值 v：0=关；1..N → 出售对应量 <= v-1。
     int rarity = 0;   // 0=关；1..5 → 出售 rarity <= 值-1（1=白…5=紫，4 为最高品质）
-    int enhance = 0;  // 0=关；1..32 → 出售 enhance_count(I_ENCHANT bits6-10) <= 值-1
+    int enhance = 0;  // 0=关；1..32 → 出售 enhance_remaining(I_ENCHANT bits2-5) <= 值-1；UI 名称「强化耐久度」
     int socket = 0;   // 0=关；1..16 → 出售 socket_total(I_SOCKET bits4-7) <= 值-1
 
     // 宝石规则（仅 is_jewel 生效，同类内 OR）。
@@ -47,8 +49,12 @@ struct Config {
 struct ItemView {
     bool is_equip = false;
     int rarity = 0;         // 0..4
-    int enhance_count = 0;  // 总强化次数 = (I_ENCHANT >> 6) & 0x1F
-    int socket_total = 0;   // 总孔数 = (I_SOCKET >> 4) & 0x0F
+    // 强化筛选口径 = 剩余强化次数（用户 2026-09-15 裁决，UI 名称「强化耐久度」）；
+    // 已强化次数与已镶嵌数仅供硬保护判定（>0 永不出售），不参与规则比较。
+    int enhance_remaining = 0;  // 剩余强化次数 = (I_ENCHANT >> 2) & 0x0F
+    int enhance_level = 0;      // 已强化次数 = (I_ENCHANT >> 6) & 0x1F（硬保护：>0 不售）
+    int socket_total = 0;       // 总孔数 = (I_SOCKET >> 4) & 0x0F
+    int socket_filled = 0;      // 已镶嵌数 = I_SOCKET & 0x0F（硬保护：>0 不售）
     bool is_jewel = false;
     int jewel_tier = 0;  // 0..4（category 28..32）
     // 宝石属性值在其随机范围内的百分位（0..100）；-1 = 未知/不适用

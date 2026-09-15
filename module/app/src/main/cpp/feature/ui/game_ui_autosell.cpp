@@ -57,7 +57,9 @@ constexpr int64_t kBaseH = 0x280;
 constexpr int64_t kPanelW = 0x300;
 // 规则行提高到 0x32（原 0x26 的 1.3 倍取整），并同步放大纵向布局；
 // 三个特殊类型 chip 改为一行后，面板高度 0x270（768×624）可容纳全部命中区。
-constexpr int64_t kPanelH = 0x270;
+// 最终布局（删除顶部居中标题与「出售规则」节标题后）：规则区起点 0x86，
+// 关闭按钮相对面板底上移 0x3c，面板高度 0x250（768×592）。
+constexpr int64_t kPanelH = 0x250;
 constexpr int64_t kCloseW = 0xc0;
 constexpr int64_t kCloseH = 0x30;
 
@@ -82,7 +84,8 @@ constexpr uint32_t kBorderGray = 0xFF606060;
 
 constexpr int kRuleCount = 5;
 constexpr int kSpecialCount = 3;
-constexpr int64_t kRuleTop = 0x9a;
+// 最终布局：总开关 panel.y+0x14、说明行 panel.y+0x46；规则区起点 0x86。
+constexpr int64_t kRuleTop = 0x86;
 constexpr int64_t kRuleRowH = 0x32;
 constexpr int64_t kRuleRowPitch = 0x3a;
 
@@ -174,11 +177,13 @@ UiRect autosell_mask_rect(const UiRect& panel) {
 }
 
 UiRect autosell_close_rect(const UiRect& panel) {
-    return {panel.x + panel.w / 2 - kCloseW / 2, panel.y + panel.h - 0x48, kCloseW, kCloseH};
+    // 关闭按钮相对面板底上移 0x3c（原 0x48），与底部「特殊类型」chip 拉开约 0x05 逻辑像素。
+    return {panel.x + panel.w / 2 - kCloseW / 2, panel.y + panel.h - 0x3c, kCloseW, kCloseH};
 }
 
 UiRect autosell_total_rect(const UiRect& panel) {
-    return {panel.x + 0x20, panel.y + 0x50, panel.w - 0x40, 0x2a};
+    // 「自动出售」总开关行：作为面板第一行（标题行），起点 panel.y + 0x14。
+    return {panel.x + 0x20, panel.y + 0x14, panel.w - 0x40, 0x2a};
 }
 
 UiRect autosell_rule_row(const UiRect& panel, int index) {
@@ -269,9 +274,9 @@ void autosell_set_rule_value(int index, int value) {
 
 const char* autosell_rule_name(int index) {
     switch (index) {
-        case 0: return "品质";
-        case 1: return "强化次数";
-        case 2: return "总孔数";
+        case 0: return "装备品质";
+        case 1: return "装备强化耐久度";
+        case 2: return "装备总孔数";
         case 3: return "宝石档位";
         case 4: return "宝石属性范围";
         default: return "";
@@ -309,8 +314,12 @@ void autosell_draw_box(UiRect rect, uint32_t fill, uint32_t fill_alpha, uint32_t
                           border_thickness);
 }
 
+// 居中：x 用 rect 中点；y 按字符近似高度 (kTextGlyphH=20) 反推，使基线落在
+// rect 几何中点。Rect 高 < 字高时退化为沿用原 +6 偏移，避免飞出框外。
 void autosell_draw_centered(UiRect rect, const char* text, uint32_t color) {
-    autosell_draw_text_at(rect.x + rect.w / 2, rect.y + 6, text, color, 2);
+    constexpr int64_t kTextGlyphH = 20;
+    const int64_t y_offset = rect.h >= kTextGlyphH ? (rect.h - kTextGlyphH) / 2 : 6;
+    autosell_draw_text_at(rect.x + rect.w / 2, rect.y + y_offset, text, color, 2);
 }
 
 void autosell_draw_toggle(UiRect rect, bool enabled) {
@@ -571,23 +580,24 @@ void autosell_panel_process() {
     ui_draw_panel_decor(panel, nullptr, 0, kGold);
     ui_draw_vertical_line(panel.x, panel.y, panel.h, kGold, 3);
     ui_draw_vertical_line(panel.x + panel.w - 3, panel.y, panel.h, kGold, 3);
-    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x16, "自动出售", kGold, 2);
-    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x3c,
-                          "按下方规则出售低价值物品", kText, 2);
-
+    // 第一行：总开关 + 标题文字「自动出售」。
     const UiRect total = autosell_total_rect(panel);
-    autosell_draw_text_at(total.x + 0x08, total.y + 6, "存档规则总开关", kText, 0);
+    autosell_draw_text_at(total.x + 0x08, total.y + 6, "自动出售", kText, 0);
     const UiRect total_toggle{total.x + total.w - 0x88, total.y, 0x78, total.h};
     autosell_draw_toggle(total_toggle, g_draft.enabled);
+    // 第二行：合并说明。占满整面板宽 (panel.x+0x10 .. panel.x+panel.w-0x10)
+    // 避免单行截断；y 已按真机反馈下移 3 逻辑像素（≈2 物理像素）。
+    autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x49,
+                          "按照规则定时出售物品。已强化/镶嵌/装备物品不会被出售。", kText, 2);
 
-    autosell_draw_text_at(panel.x + 0x20, panel.y + 0x7e, "出售规则", kGold, 0);
     for (int i = 0; i < kRuleCount; ++i) {
         const UiRect row = autosell_rule_row(panel, i);
         const bool active = autosell_rule_value(i) != 0;
         char value_text[32] = {};
         autosell_rule_value_text(i, value_text, sizeof(value_text));
-        autosell_draw_text_at(row.x + 0x08, row.y + 6, autosell_rule_name(i),
-                              active ? kText : kBorderGray, 0);
+        autosell_draw_text_at(row.x + 0x08,
+                              row.y + (row.h >= 0x14 ? (row.h - 0x14) / 2 : 6),
+                              autosell_rule_name(i), active ? kText : kBorderGray, 0);
         autosell_draw_selector(autosell_rule_selector(panel, i), value_text, active);
     }
 

@@ -5,7 +5,9 @@
 
 // host 单测：autosell 纯规则引擎 should_sell 的命中/不命中、边界、同类 OR、
 // 跨类独立、值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
-// 特殊多选与「无规则不出售」。风格与 tests/test_attribute_range.cpp 一致（自带断言计数）。
+// 特殊多选与「无规则不出售」；硬保护（已强化/已镶嵌永不出售，用户 2026-09-15）。
+// 强化口径 = 剩余强化次数 enhance_remaining（I_ENCHANT bits2-5，UI 名称「强化耐久度」）。
+// 风格与 tests/test_attribute_range.cpp 一致（自带断言计数）。
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -26,7 +28,7 @@ Config all_rules_on() {
     Config cfg;
     cfg.enabled = true;
     cfg.rarity = 5;       // 阈值 4（紫），rarity 0..4 全命中
-    cfg.enhance = 32;     // 阈值 31，enhance_count 0..31 命中
+    cfg.enhance = 32;     // 阈值 31 >= 字段上限 15，enhance_remaining 0..15 全命中
     cfg.socket = 16;      // 阈值 15，socket_total 0..15 命中
     cfg.gem_tier = 5;     // 阈值 4（混沌），tier 0..4 全命中
     cfg.gem_range = 5;    // 阈值 99：百分位 0..99 命中，100（满分）不命中
@@ -56,7 +58,7 @@ static void test_master_switch_off() {
 
     ItemView equip = equip_item();
     equip.rarity = 0;
-    equip.enhance_count = 0;
+    equip.enhance_remaining = 0;
     equip.socket_total = 0;
     equip.special_types = autosell::kSpecialDice;
     CHECK(!should_sell(equip, off));
@@ -109,29 +111,34 @@ static void test_enhance_value_switch() {
 
     // 值 0 = 关闭。
     cfg.enhance = 0;
-    item.enhance_count = 0;
+    item.enhance_remaining = 0;
     CHECK(!should_sell(item, cfg));
 
-    // 值 1 = 含最低档（卖 <= 0 次）；1 次不命中。
+    // 值 1 = 含最低档（卖剩余 0 次）；剩余 1 不命中。
     cfg.enhance = 1;
-    item.enhance_count = 0;
+    item.enhance_remaining = 0;
     CHECK(should_sell(item, cfg));
-    item.enhance_count = 1;
+    item.enhance_remaining = 1;
     CHECK(!should_sell(item, cfg));
 
     // 中间档：值 8 → 阈值 7。
     cfg.enhance = 8;
-    item.enhance_count = 7;
+    item.enhance_remaining = 7;
     CHECK(should_sell(item, cfg));
-    item.enhance_count = 8;
+    item.enhance_remaining = 8;
     CHECK(!should_sell(item, cfg));
 
-    // 值 32 = 含上限（卖 <= 31）：31 命中、越界 32 不命中。
-    cfg.enhance = 32;
-    item.enhance_count = 31;
+    // 值 16 = 含字段上限（bits2-5 最大 15，卖 <= 15）：剩余 15 命中。
+    cfg.enhance = 16;
+    item.enhance_remaining = 15;
     CHECK(should_sell(item, cfg));
-    item.enhance_count = 32;
-    CHECK(!should_sell(item, cfg));
+
+    // 配置上限 32（阈值 31 > 字段上限）：字段全域 0..15 均命中。
+    cfg.enhance = 32;
+    for (int r = 0; r <= 15; ++r) {
+        item.enhance_remaining = r;
+        CHECK(should_sell(item, cfg));
+    }
 }
 
 static void test_socket_value_switch() {
@@ -164,6 +171,42 @@ static void test_socket_value_switch() {
     CHECK(should_sell(item, cfg));
     item.socket_total = 16;
     CHECK(!should_sell(item, cfg));
+}
+
+static void test_hard_protection_enhanced_or_filled() {
+    // 硬保护（用户 2026-09-15 裁决）：已强化（I_ENCHANT bits6-10>0）或已镶嵌
+    // （I_SOCKET bits0-3>0）永不出售——即便全部规则开启且其他维度命中。
+    Config cfg = all_rules_on();
+
+    // 已强化 1 次：各维度均命中也不卖。
+    ItemView enhanced = equip_item();
+    enhanced.rarity = 0;
+    enhanced.enhance_remaining = 0;
+    enhanced.socket_total = 0;
+    enhanced.enhance_level = 1;
+    CHECK(!should_sell(enhanced, cfg));
+
+    // 已镶嵌 1 孔：不卖。
+    ItemView filled = equip_item();
+    filled.socket_filled = 1;
+    CHECK(!should_sell(filled, cfg));
+
+    // 两者兼有：不卖。
+    enhanced.socket_filled = 2;
+    CHECK(!should_sell(enhanced, cfg));
+
+    // 硬保护无条件生效：特殊类型命中（骰子）也被拦下。
+    ItemView special;
+    special.special_types = autosell::kSpecialDice;
+    special.enhance_level = 2;
+    CHECK(!should_sell(special, cfg));
+    special.enhance_level = 0;
+    special.socket_filled = 3;
+    CHECK(!should_sell(special, cfg));
+
+    // 对照组：两字段为 0 时不触发硬保护，规则照常命中出售。
+    ItemView plain = equip_item();
+    CHECK(should_sell(plain, cfg));
 }
 
 static void test_gem_tier_value_switch() {
@@ -309,7 +352,7 @@ static void test_equip_rules_or() {
     // 同类内 OR：三条装备规则中只开启命中的一条也出售。
     ItemView item = equip_item();
     item.rarity = 2;
-    item.enhance_count = 3;
+    item.enhance_remaining = 3;
     item.socket_total = 2;
 
     // 仅品质开启且不命中（值 2 → 阈值 1，rarity 2 不命中），其余关闭 -> 不出售。
@@ -357,7 +400,7 @@ static void test_disable_dimension() {
     // 值 0 = 关闭某条规则后，该维度即使原本命中也不得出售。
     ItemView item = equip_item();
     item.rarity = 0;       // 品质维度会命中
-    item.enhance_count = 5;
+    item.enhance_remaining = 5;
     item.socket_total = 3;
 
     Config cfg;
@@ -404,14 +447,14 @@ static void test_cross_category_independence() {
     plain.is_equip = false;
     plain.is_jewel = false;
     plain.rarity = 0;
-    plain.enhance_count = 0;
+    plain.enhance_remaining = 0;
     plain.socket_total = 0;
     CHECK(!should_sell(plain, cfg));
 
     // 宝石物品不被装备规则命中（is_equip=false）。
     ItemView jewel = jewel_item();
     jewel.rarity = 0;
-    jewel.enhance_count = 0;
+    jewel.enhance_remaining = 0;
     jewel.socket_total = 0;
     Config equip_only;
     equip_only.enabled = true;
@@ -481,7 +524,7 @@ static void test_no_rules_enabled() {
 
     ItemView equip = equip_item();
     equip.rarity = 0;
-    equip.enhance_count = 0;
+    equip.enhance_remaining = 0;
     equip.socket_total = 0;
     equip.special_types = 0xFFFFFFFFu;
     CHECK(!should_sell(equip, cfg));
@@ -518,6 +561,7 @@ int main() {
     test_rarity_value_switch();
     test_enhance_value_switch();
     test_socket_value_switch();
+    test_hard_protection_enhanced_or_filled();
     test_gem_tier_value_switch();
     test_gem_range_value_switch();
     test_gem_range_only_jewels_and_or();
