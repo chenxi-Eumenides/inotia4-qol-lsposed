@@ -123,3 +123,11 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     core/native/game_feature.cpp
 )
+
+# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/UI hook，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/custom_recipe/custom_recipe_catalog.cpp
+    feature/custom_recipe/custom_recipe_rules.cpp
+    feature/custom_recipe/custom_recipe_table.cpp
+    feature/custom_recipe/game_ui_custom_recipe.cpp
+)

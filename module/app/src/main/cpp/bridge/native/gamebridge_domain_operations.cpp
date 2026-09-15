@@ -184,3 +184,8 @@ Java_com_inotia4_qol_NativeBridge_nativeSetGemCraftOptimizeEnabled(JNIEnv*, jcla
     return set_gemcraft_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSetCustomRecipeEnabled(JNIEnv*, jclass, jboolean enabled) {
+    return set_custom_recipe_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+

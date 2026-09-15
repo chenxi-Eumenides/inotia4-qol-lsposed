@@ -153,6 +153,7 @@ extern ItemGetAbilityLevelFn fn_item_get_ability_level;
 extern ItemGetBuyPriceFn fn_item_get_buy_price;
 extern ItemSystemGetOptionValueFn fn_item_system_get_option_value;
 extern ItemSystemGetJewelOptionValueFn fn_item_system_get_jewel_option_value;
+extern MathGetRandomFn fn_math_get_random;  // MATH_GetRandom(min,max) 闭区间随机（custom-craft-recipe 产物取值）
 extern InvenFindSaveSlotFn fn_inven_find_save_slot;
 extern InvenSaveItemFn fn_inven_save_item;
 extern InvenSaveItemDirectFn fn_inven_save_item_direct;
@@ -250,6 +251,7 @@ extern SoundSystemPlayFn fn_sound_system_play;
 extern uint8_t* g_snd_fx;
 // P3 控件级投影（SetItem/SetShow typedef 在 game_symbols.h:692-694 已有）
 extern ControlItemSetItemFn fn_control_item_set_item;
+extern ControlItemGetItemFn fn_control_item_get_item;
 extern ControlObjectSetActiveFn fn_control_object_set_active;
 extern ControlObjectSetShowFn fn_control_object_set_show;
 extern ControlObjectGetChildFn fn_control_object_get_child;

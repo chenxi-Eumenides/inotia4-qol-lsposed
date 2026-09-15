@@ -24,6 +24,7 @@
 #include "feature/ui/game_ui_settings.h"
 #include "feature/ui/game_ui_savebackup.h"
 #include "feature/ui/game_ui_gemcraft.h"
+#include "feature/custom_recipe/game_ui_custom_recipe.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 
 #include "core/native/qol_log.h"

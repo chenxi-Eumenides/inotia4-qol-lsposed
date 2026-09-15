@@ -54,7 +54,8 @@
 
 ### 3.1 宝石合成界面结构（UIMix type 1）
 
-- 合成类型存于 UIMix 实例 `+0x38`（`game_symbols.h` 记 `[0x305000+0x588]`）：`0=混沌`、`1=宝石合成(3:1)`、`2=打孔`、`3=其它配方`、`4=传说/Unique`。
+- 合成类型存于 UIMix 实例 `+0x38`（`game_symbols.h` 记 `[0x305000+0x588]`）：`0=药水合成`、`1=宝石合成(3:1)`、`2=打孔`、`3=混沌合成(混沌/深渊)`、`4=传说/Unique`。
+  - 依据：`UIMix_ButtonMenuListExe@0xc05c0` 跳转表（偏移字节表 @`0x24a6ec` = `32 1d 16 00 45` → `SetType 0/1/2/3/4`，配方组 2/3/(硬编码 mixType 16)/1/5），与文本表 `35290-35294` 连续五项「药水合成/宝石强化/宝石孔生成/混沌合成/传说装备」一致。（2026-09-15 修正：此前误记 `0=混沌`、`3=其它`。）
 - 宝石合成视图有 **3 个填入格**：`UIMix_InitMixingState@0xc0038` 的 type==1 分支（`0xc017c`）执行 `[g_uimix+0xf0] = 3`，并按 `3×16` 字节分配 stuffList（`[g_uimix+0xe8]`）。填入格是材料组 `[g_uimix+0xc8]` 的前 3 个子控件（`UIMix_ResetStuffItemControl@0xc0240` 依 `[+0xf0]` 显示 1..4 格）。
 - **当前选中填入格下标：`[g_uimix+0x128]`（i64，`-1` = 未选中）**。写入点：
   - 点击填入格：`UIMix_StuffItemControlEventProc@0xc0ec8`（`UI_GetChildIndex` → 写入 `+0x128`）。

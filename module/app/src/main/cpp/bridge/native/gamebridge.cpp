@@ -67,6 +67,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
         world_teleport_install_if_ready();  // 世界传送：地图名入口 patch + choice ExecuteProc hook
+        custom_recipe_ui_install_if_ready();  // 自定义合成配方：UIMix 放料/合成/产物三处函数级 hook
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }

@@ -26,6 +26,7 @@ import java.io.File
  *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
  * - extensionBagEnabled：是否启用扩展背包，默认 true。
  * - gemCraftOptimize：是否启用合成器宝石合成操作优化，默认 false。
+ * - customRecipeEnabled：是否启用合成器自定义配方，默认 false；禁用不回滚已注入的表（custom-craft-recipe §4.8）。
  * - autoSellEnabled：自动出售全局开关，默认 false；开启后背包页显示入口按钮并启用扫描。
  * - apiEnabled：API 全局开关，默认 true；关闭时不启动 HTTP 服务与 native 缓存预取线程，
  *   唯一恢复通道为游戏内设置页（ModuleConfigUiBridge JNI，不依赖 HTTP）。
@@ -44,6 +45,7 @@ object ModuleConfig {
     const val DEFAULT_OP_ENABLED = false
     const val DEFAULT_EXTENSION_BAG_ENABLED = true
     const val DEFAULT_GEM_CRAFT_OPTIMIZE = false
+    const val DEFAULT_CUSTOM_RECIPE_ENABLED = false
     const val DEFAULT_AUTO_SELL_ENABLED = false
     const val DEFAULT_API_ENABLED = true
     const val DEFAULT_DEBUG_LOG_ENABLED = false
@@ -89,6 +91,11 @@ object ModuleConfig {
     var gemCraftOptimize: Boolean = DEFAULT_GEM_CRAFT_OPTIMIZE
         private set
 
+    /** 是否启用合成器自定义配方（默认 false）：禁用不回滚已注入的配方表 */
+    @Volatile
+    var customRecipeEnabled: Boolean = DEFAULT_CUSTOM_RECIPE_ENABLED
+        private set
+
     /** 自动出售全局开关（默认 false）：开启后背包页显示入口按钮并启用扫描 */
     @Volatile
     var autoSellEnabled: Boolean = DEFAULT_AUTO_SELL_ENABLED
@@ -129,11 +136,13 @@ object ModuleConfig {
             opEnabled = json.optBoolean("opEnabled", DEFAULT_OP_ENABLED)
             extensionBagEnabled = json.optBoolean("extensionBagEnabled", DEFAULT_EXTENSION_BAG_ENABLED)
             gemCraftOptimize = json.optBoolean("gemCraftOptimize", DEFAULT_GEM_CRAFT_OPTIMIZE)
+            customRecipeEnabled = json.optBoolean("customRecipeEnabled", DEFAULT_CUSTOM_RECIPE_ENABLED)
             autoSellEnabled = json.optBoolean("autoSellEnabled", DEFAULT_AUTO_SELL_ENABLED)
             apiEnabled = json.optBoolean("apiEnabled", DEFAULT_API_ENABLED)
             debugLogEnabled = json.optBoolean("debugLogEnabled", DEFAULT_DEBUG_LOG_ENABLED)
             if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") ||
-                !json.has("gemCraftOptimize") || !json.has("autoSellEnabled") ||
+                !json.has("gemCraftOptimize") || !json.has("customRecipeEnabled") ||
+                !json.has("autoSellEnabled") ||
                 !json.has("apiEnabled") || !json.has("debugLogEnabled") ||
                 json.has("jewelBatchMix")
             ) {
@@ -144,7 +153,8 @@ object ModuleConfig {
                 LogDomain.CONFIG,
                 "config loaded: listenAddress=$listenAddress listenPort=$listenPort " +
                     "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled " +
-                    "gemCraftOptimize=$gemCraftOptimize autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled " +
+                    "gemCraftOptimize=$gemCraftOptimize customRecipeEnabled=$customRecipeEnabled " +
+                    "autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled " +
                     "debugLogEnabled=$debugLogEnabled"
             )
         } catch (t: Throwable) {
@@ -170,6 +180,7 @@ object ModuleConfig {
         var newOp = opEnabled
         var newExtensionBag = extensionBagEnabled
         var newGemCraft = gemCraftOptimize
+        var newCustomRecipe = customRecipeEnabled
         var newAutoSell = autoSellEnabled
         var newApiEnabled = apiEnabled
         var newDebugLog = debugLogEnabled
@@ -188,6 +199,7 @@ object ModuleConfig {
         if (json.has("opEnabled")) newOp = json.optBoolean("opEnabled", newOp)
         if (json.has("extensionBagEnabled")) newExtensionBag = json.optBoolean("extensionBagEnabled", newExtensionBag)
         if (json.has("gemCraftOptimize")) newGemCraft = json.optBoolean("gemCraftOptimize", newGemCraft)
+        if (json.has("customRecipeEnabled")) newCustomRecipe = json.optBoolean("customRecipeEnabled", newCustomRecipe)
         if (json.has("autoSellEnabled")) newAutoSell = json.optBoolean("autoSellEnabled", newAutoSell)
         if (json.has("apiEnabled")) newApiEnabled = json.optBoolean("apiEnabled", newApiEnabled)
         if (json.has("debugLogEnabled")) newDebugLog = json.optBoolean("debugLogEnabled", newDebugLog)
@@ -199,6 +211,7 @@ object ModuleConfig {
             .put("opEnabled", newOp)
             .put("extensionBagEnabled", newExtensionBag)
             .put("gemCraftOptimize", newGemCraft)
+            .put("customRecipeEnabled", newCustomRecipe)
             .put("autoSellEnabled", newAutoSell)
             .put("apiEnabled", newApiEnabled)
             .put("debugLogEnabled", newDebugLog)
@@ -210,6 +223,7 @@ object ModuleConfig {
         opEnabled = newOp
         extensionBagEnabled = newExtensionBag
         gemCraftOptimize = newGemCraft
+        customRecipeEnabled = newCustomRecipe
         autoSellEnabled = newAutoSell
         apiEnabled = newApiEnabled
         debugLogEnabled = newDebugLog
@@ -225,6 +239,7 @@ object ModuleConfig {
         put("opEnabled", opEnabled)
         put("extensionBagEnabled", extensionBagEnabled)
         put("gemCraftOptimize", gemCraftOptimize)
+        put("customRecipeEnabled", customRecipeEnabled)
         put("autoSellEnabled", autoSellEnabled)
         put("apiEnabled", apiEnabled)
         put("debugLogEnabled", debugLogEnabled)

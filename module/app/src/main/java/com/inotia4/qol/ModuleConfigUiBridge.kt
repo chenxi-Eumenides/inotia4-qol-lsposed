@@ -14,6 +14,7 @@ object ModuleConfigUiBridge {
 
     private val BOOL_KEYS = setOf(
         "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize",
+        "customRecipeEnabled",
         "autoSellEnabled", "apiEnabled", "debugLogEnabled"
     )
 
@@ -27,6 +28,7 @@ object ModuleConfigUiBridge {
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
         val oldGemCraft = ModuleConfig.gemCraftOptimize
+        val oldCustomRecipe = ModuleConfig.customRecipeEnabled
         val oldAutoSell = ModuleConfig.autoSellEnabled
         val oldApiEnabled = ModuleConfig.apiEnabled
         val oldDebugLog = ModuleConfig.debugLogEnabled
@@ -36,6 +38,7 @@ object ModuleConfigUiBridge {
             "opEnabled" -> ModuleConfig.opEnabled
             "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
             "gemCraftOptimize" -> ModuleConfig.gemCraftOptimize
+            "customRecipeEnabled" -> ModuleConfig.customRecipeEnabled
             "autoSellEnabled" -> ModuleConfig.autoSellEnabled
             "apiEnabled" -> ModuleConfig.apiEnabled
             "debugLogEnabled" -> ModuleConfig.debugLogEnabled
@@ -51,7 +54,7 @@ object ModuleConfigUiBridge {
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldAutoSell, oldApiEnabled, oldDebugLog
+            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldCustomRecipe, oldAutoSell, oldApiEnabled, oldDebugLog
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
         // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。

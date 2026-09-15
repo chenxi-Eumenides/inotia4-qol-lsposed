@@ -272,6 +272,7 @@ bool bridge_init() {
     fn_item_get_buy_price = reinterpret_cast<ItemGetBuyPriceFn>(g_base + fn_resolve("F_ITEM_GET_BUY_PRICE_VMA", F_ITEM_GET_BUY_PRICE_VMA));
     fn_item_system_get_option_value = reinterpret_cast<ItemSystemGetOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_OPTION_VALUE_VMA));
     fn_item_system_get_jewel_option_value = reinterpret_cast<ItemSystemGetJewelOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA));
+    fn_math_get_random = reinterpret_cast<MathGetRandomFn>(g_base + fn_resolve("F_MATH_GET_RANDOM_VMA", F_MATH_GET_RANDOM_VMA));
     fn_inven_find_save_slot = reinterpret_cast<InvenFindSaveSlotFn>(g_base + fn_resolve("F_INVEN_FIND_SAVE_SLOT_VMA", F_INVEN_FIND_SAVE_SLOT_VMA));
     fn_inven_save_item = reinterpret_cast<InvenSaveItemFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA));
     fn_inven_save_item_direct = reinterpret_cast<InvenSaveItemDirectFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA));
@@ -384,6 +385,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
     g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));
     fn_control_item_set_item = reinterpret_cast<ControlItemSetItemFn>(g_base + fn_resolve("F_CONTROL_ITEM_SET_ITEM_VMA", F_CONTROL_ITEM_SET_ITEM_VMA));
+    fn_control_item_get_item = reinterpret_cast<ControlItemGetItemFn>(g_base + fn_resolve("F_CONTROL_ITEM_GET_ITEM_VMA", F_CONTROL_ITEM_GET_ITEM_VMA));
     fn_control_object_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
     fn_control_object_set_show = reinterpret_cast<ControlObjectSetShowFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_SHOW_VMA", F_CONTROL_OBJECT_SET_SHOW_VMA));
     fn_control_object_get_child = reinterpret_cast<ControlObjectGetChildFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_CHILD_VMA", F_CONTROL_OBJECT_GET_CHILD_VMA));

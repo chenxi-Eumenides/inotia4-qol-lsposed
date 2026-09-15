@@ -21,5 +21,6 @@ enum class LogDomain(val token: String) {
     ATTR_RANGE("attr_range"),
     UI("ui"),
     CONFIG("config"),
-    CATALOG("catalog");
+    CATALOG("catalog"),
+    CUSTOM_RECIPE("custom_recipe");
 }

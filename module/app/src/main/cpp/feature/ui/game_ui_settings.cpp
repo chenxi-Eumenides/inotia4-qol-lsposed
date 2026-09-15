@@ -113,6 +113,7 @@ static const SettingsItem kSettingsItems[] = {
     {"autoSellEnabled", "自动出售", 1},
     {"moveMergeEnabled", "拖拽合并", 2},
     {"gemCraftOptimize", "宝石优化", 2},
+    {"customRecipeEnabled", "自定义配方", 2},
     {"debugLogEnabled", "调试日志", 2},
     {"opEnabled", "OP能力", 3},
 };
@@ -129,7 +130,7 @@ int g_total_pages = 1;
 
 // 当前配置值缓存（面板打开时从 Kotlin 拉取，切换时本地翻转+上抛）
 static char g_row_status[kSettingsItemCount][CB_TEXT_SIZE] = {
-    "", "关", "关", "开", "关", "关", "关", "关", "关"
+    "", "关", "关", "开", "关", "关", "关", "关", "关", "关"
 };
 static char g_addr_text[CB_TEXT_SIZE] = "";
 

@@ -14,6 +14,7 @@ enum class QolLogLevel : uint8_t { kDebug = 0, kInfo = 1, kWarn = 2, kError = 3 
 enum class QolDomain : uint8_t {
     kPlatform = 0, kCore, kHttp, kApi, kOp, kInventory, kExtensionBag,
     kSave, kSaveBackup, kAutosell, kGemCraft, kAttrRange, kUi, kConfig, kCatalog,
+    kCustomRecipe,
 };
 
 const char* qol_domain_token(QolDomain domain);          // 小写 token，见实现表

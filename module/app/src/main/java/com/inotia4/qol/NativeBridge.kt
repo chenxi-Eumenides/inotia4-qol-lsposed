@@ -148,6 +148,7 @@ object NativeBridge {
     external fun nativeSetMoveMergeEnabled(enabled: Boolean): Boolean
     external fun nativeSetExtensionBagEnabled(enabled: Boolean): Boolean
     external fun nativeSetGemCraftOptimizeEnabled(enabled: Boolean): Boolean
+    external fun nativeSetCustomRecipeEnabled(enabled: Boolean): Boolean
     external fun nativeSetAutoSellEnabled(enabled: Boolean): Boolean
     external fun nativeSetApiEnabled(enabled: Boolean): Boolean
     external fun nativeSettingsUiInject(): String

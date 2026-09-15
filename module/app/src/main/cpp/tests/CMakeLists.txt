@@ -56,6 +56,20 @@ target_include_directories(attribute_range_tests PRIVATE
 target_compile_features(attribute_range_tests PRIVATE cxx_std_17)
 add_test(NAME attribute_range_tests COMMAND attribute_range_tests)
 
+# 自定义合成配方纯逻辑 host 测试（档位互逆 / 目录映射 / 表注入字节；末尾追加）
+add_executable(custom_recipe_tests
+    test_custom_recipe.cpp
+    ${CPP_DIR}/feature/attribute_range/attribute_range.cpp
+    ${CPP_DIR}/feature/custom_recipe/custom_recipe_rules.cpp
+    ${CPP_DIR}/feature/custom_recipe/custom_recipe_catalog.cpp
+    ${CPP_DIR}/feature/custom_recipe/custom_recipe_table.cpp
+)
+target_include_directories(custom_recipe_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(custom_recipe_tests PRIVATE cxx_std_17)
+add_test(NAME custom_recipe_tests COMMAND custom_recipe_tests)
+
 add_executable(autosell_rules_tests
     test_autosell_rules.cpp
     ${CPP_DIR}/feature/autosell/autosell_rules.cpp

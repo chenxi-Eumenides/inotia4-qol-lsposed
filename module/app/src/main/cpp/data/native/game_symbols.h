@@ -369,8 +369,20 @@ constexpr size_t UIMIX_SLOT_STATE = 0x20;            // u8 面板状态：0=配�
 // ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
 constexpr size_t UIMIX_SLOT_STUFF_GROUP = 0xc8;      // 填入格材料组指针槽（前 3 子控件 = 3 个填入格；UIMix_ButtonInvenItemSelectExe 0xc2528 ldr [x1,#0xc8] 反汇编确认）
 constexpr size_t UIMIX_SLOT_DESC_MENU = 0x130;       // 详情菜单按钮槽（ExecuteProc=UIMix_ButtonInvenItemSelectExe 0xc2328；UIMix_RefreshInvenItem/UIMix_SetDescMenu 写入）
-constexpr size_t UIMIX_SLOT_STUFF_LIST = 0xe8;       // 材料 itemId 列表指针槽（type 1 时首个 32 位字段 = 当前配方材料档位 category；0xc23c8 ldr x23,[x21,#0xe8] + 0xc24c0 ldr w2,[x23]）
-constexpr size_t UIMIX_SLOT_TYPE = 0x38;             // u8 合成类型（0=混沌 1=宝石 2=打孔 3=其它 4=传说；UIMix_GetType 0xbf480 读 0x305588=G_UIMIX_VMA+0x38）
+constexpr size_t UIMIX_SLOT_STUFF_LIST = 0xe8;       // 材料需求列表指针槽（type 1 时首个 32 位字段 = 当前配方材料档位 category；0xc23c8 ldr x23,[x21,#0xe8] + 0xc24c0 ldr w2,[x23]）
+constexpr size_t UIMIX_SLOT_STUFF_NUM = 0xf0;        // u32 材料需求条目数（UIMix_InitMixingState 0xc00b4 str x1,[x19,#0xf0]；与 RECIPEBASE[mixType] b6 相等）
+// stuffList 条目布局（MIXSYSTEM_MakeStuffSlot 0x11b20c 写入 / MIXSYSTEM_UseStuff 0x11b300 扣料 /
+// UIMix_Draw 0xc1120 绘制，三处一致）：步长 16B，+0 itemId(u32)、+4 持有数(u16)、+6 需求数(u16)。
+// 需求数是扣料与显示的唯一真源：UseStuff 读 +6 决定扣多少（0 直接跳过，见 0x11b370 cbz），
+// 绘制每帧读 +6 显示「持有/需求」，故改 +6 即时生效、无需刷新调用。
+constexpr size_t UIMIX_STUFF_ENTRY_SIZE = 16;        // 条目步长（UseStuff 0x11b360 add x19,x19,#0x10）
+constexpr size_t UIMIX_STUFF_ENTRY_ITEM_ID = 0;      // u32 材料 itemId
+constexpr size_t UIMIX_STUFF_ENTRY_HELD = 4;         // u16 持有数（MakeStuffSlot 0x11b2d8 strh w0,[x20,#4]）
+constexpr size_t UIMIX_STUFF_ENTRY_NEED = 6;         // u16 需求数（UseStuff 0x11b36c ldrh w1,[x19]；MakeStuffSlot 0x11b2cc strh w0,[x20,#6]）
+// u8 合成类型（0=药水合成 1=宝石合成(3:1) 2=打孔 3=混沌合成(混沌/深渊) 4=传说/Unique；
+// UIMix_GetType 0xbf480 读 0x305588=G_UIMIX_VMA+0x38。映射由 UIMix_ButtonMenuListExe 0xc05c0 跳转表
+//（0x24a6ec 字节表 32 1d 16 00 45 → SetType 0/1/2/3/4）与文本表 35290-35294 连续五项核对）
+constexpr size_t UIMIX_SLOT_TYPE = 0x38;
 constexpr size_t UIMIX_SLOT_SELECTED_STUFF = 0x128;  // i64 当前选中填入格下标（-1=未选中；0xc24e0 ldr x0,[x21,#0x128] 反汇编确认，UIMix_StuffItemControlEventProc 写入）
 constexpr size_t UIMIX_SLOT_RECIPE_GROUP = 0x18;     // 配方组控件槽（UIMix_CreateRecipeGroupControl 0xbfbb4 str x0,[x19,#0x18]；子按钮 ExecuteProc=UIMix_ButtonRecipeExe）
 constexpr size_t UIMIX_SLOT_MENU_BUTTON_BASE = 0x60; // 5 个类型/菜单按钮槽起始（UIMix_CreateMainControl 0xbf6f4 add x21,x19,#0x60 + 0xbf700 str x0,[x21,x20,lsl#3]，步长 8）
@@ -378,6 +390,28 @@ constexpr int UIMIX_MENU_BUTTON_COUNT = 5;           // 类型/菜单按钮数�
 constexpr size_t UIMIX_SLOT_CRAFT_BUTTON = 0x98;     // 合成按钮槽（UIMix_CreateMainControl 0xbf7d8 str x0,[x19,#0x98]；ExecuteProc=UIMix_ButtonMixingExe）
 constexpr size_t UIMIX_SLOT_MIXTYPE = 0x48;          // u32 当前 mixType（所选配方；UIMix_ButtonMixingExe 0xc222c 读 [+0xf8] 前由配方写入；阶段2 前置改写）
 constexpr size_t UIMIX_SLOT_COST = 0xf8;             // i64 合成费用（UIMix_InitMixingState 依配方费用文本 CAL_Calculate 写入；UIMix_ButtonMixingExe 0xc2230 读）
+constexpr size_t UIMIX_SLOT_TARGET_ITEM = 0x40;      // 目标槽 ControlItem 指针（UIMix_ButtonInvenItemSelectExe 0xc242c ControlItem_SetItem([+0x40],item)；ButtonMixingExe 0xc22e0 ControlItem_GetItem([+0x40])）
+
+// ---- 合成系统配方数据表基址/字段全局（custom-craft-recipe §3.2/§3.8）----
+// GOT 槽 → addend（.bss 全局）二级访问；本节直接登记 addend 落点的 .bss VMA（可写，无需 mprotect）。
+// ⚠️ 这 5 个是 .bss 内的无名（static）变量，readelf 符号表无对应名 → 无法经 symbol_registry.h
+//    名称解析，只能走 VMA 兜底（与 G_UIMIX_VMA 同例）。若三版本 .bss 布局差异，需逐变体复核。
+constexpr uintptr_t G_RECIPEBASE_DATA_VMA = 0x3019b0;   // RECIPEBASE 基址指针全局（void*，原 GOT 0x2f3158）
+constexpr uintptr_t G_RECIPEBASE_SIZE_VMA = 0x3019b8;   // RECIPEBASE 记录大小全局（u8，原 GOT 0x2f55e8）
+constexpr uintptr_t G_RECIPEBASE_COUNT_VMA = 0x3019ba;  // RECIPEBASE 记录数全局（u16，原 GOT 0x2f6960）
+constexpr uintptr_t G_MIXTUREBASE_DATA_VMA = 0x3019a0;  // MIXTUREBASE 基址指针全局（void*，原 GOT 0x2f6a98）
+constexpr uintptr_t G_MIXTUREBASE_SIZE_VMA = 0x3019a8;  // MIXTUREBASE 记录大小全局（u8，原 GOT 0x2f4898）
+
+// ---- 独立宝石数值位域（custom-craft-recipe §4.6）----
+constexpr size_t I_JEWEL_VALUE_WORD = 0x10;      // u32：bits0-10 数值、bits11-17 随机等级、bits18-23 属性类型
+constexpr uint32_t JEWEL_VALUE_MASK = 0x7FF;     // bits0-10 数值
+constexpr uint32_t JEWEL_TYPE_SHIFT = 18;        // bits18-23 属性类型起始位
+constexpr uint32_t JEWEL_TYPE_MASK = 0x3F;       // bits18-23 属性类型宽度 6 位
+// ITEMSYSTEM_IsJewel 入参为类别（item+I_TYPE u16 的 bits6-15；实证见 place.txt 0xc23bc-0xc23d0
+// 先 UTIL_GetBitValue(type,15,6) 取类别再 IsJewel，且 0x10b964 判 category-28<=4）。
+constexpr uint32_t I_TYPE_CATEGORY_SHIFT = 6;    // 类别位域起始位（bits6-15）
+constexpr uint32_t I_TYPE_CATEGORY_MASK = 0x3FF; // 类别位域宽度 10 位
+
 
 // ControlObject 结构（0xf8 字节，ControlObject_Create @0x9e4ec / ControlButton_Create @0xaa710 反汇编）
 constexpr size_t CO_TYPE = 0x08;             // u32 Type（button=3）
@@ -664,6 +698,7 @@ constexpr uintptr_t F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA = 0x119658; // void* (v
 constexpr uintptr_t F_SOUNDSYSTEM_PLAY_VMA = 0x1377f0;   // void(int16 id) 原版 UI 音效（袋切换=0x11，反汇编 b8c34）
 constexpr uintptr_t G_SND_FX_VMA = 0x307850;             // g_sndFx 音效句柄表（判空防崩）
 constexpr uintptr_t F_CONTROL_ITEM_SET_ITEM_VMA = 0xaad60;      // (ctrl, item) 控件物品指针（RefreshItemArea b7a64）
+constexpr uintptr_t F_CONTROL_ITEM_GET_ITEM_VMA = 0xaada8;      // void* (void* ctrl) ControlItem_GetItem：读控件当前物品（UIMix_ButtonMixingExe 0xc22e4 取目标槽 item）
 constexpr uintptr_t F_CONTROL_OBJECT_SET_SHOW_VMA = 0x9dc28;    // (ctrl, int)（RefreshItemArea b7a44）
 // ControlObject_SetActive(0x9dbd8)/GetChild(0x9eacc) 已在上方登记（508/510 行附近）
 constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
@@ -1051,6 +1086,7 @@ using ControlObjectGetDataFn = void* (*)(void* ctrl);
 using ControlObjectGetCursorIndexFn = int (*)(void* ctrl);
 using ControlObjectSetActiveFn = void (*)(void* ctrl, uint32_t active);
 using ControlItemSetItemFn = void (*)(void* ctrl, void* item);
+using ControlItemGetItemFn = void* (*)(void* ctrl);  // ControlItem_GetItem(ctrl) → 当前物品指针（0xaada8）
 using ControlObjectSetShowFn = void (*)(void* ctrl, uint32_t show);
 using ControlButtonDrawFn = void (*)(void* ctrl);
 

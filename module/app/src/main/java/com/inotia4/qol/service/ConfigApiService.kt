@@ -21,6 +21,7 @@ interface ConfigApiService {
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
         oldGemCraft: Boolean,
+        oldCustomRecipe: Boolean,
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
         oldDebugLog: Boolean
@@ -45,6 +46,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.info(LogDomain.CONFIG, "extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
         val gemCraftApplied = NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
         LogFile.info(LogDomain.CONFIG, "gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
+        val customRecipeApplied = NativeBridge.nativeSetCustomRecipeEnabled(ModuleConfig.customRecipeEnabled)
+        LogFile.info(LogDomain.CONFIG, "customRecipeEnabled=${ModuleConfig.customRecipeEnabled} applied=$customRecipeApplied")
         val autoSellApplied = NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
         LogFile.info(LogDomain.CONFIG, "autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
         val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
@@ -59,6 +62,7 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
         oldGemCraft: Boolean,
+        oldCustomRecipe: Boolean,
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
         oldDebugLog: Boolean
@@ -75,6 +79,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.gemCraftOptimize != oldGemCraft) {
             NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
+        }
+        if (ModuleConfig.customRecipeEnabled != oldCustomRecipe) {
+            NativeBridge.nativeSetCustomRecipeEnabled(ModuleConfig.customRecipeEnabled)
         }
         if (ModuleConfig.autoSellEnabled != oldAutoSell) {
             NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
