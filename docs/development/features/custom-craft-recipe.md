@@ -266,6 +266,21 @@
 - **`ControlButton_Create@0xaa710` 第二参是 ExecuteProc**（存 `priv+0x20`；原版传 `GOT 0x2f6658 = UIMix_ButtonMenuListExe`），文本另经 `ControlButton_SetText@0xaa7dc` 写 `priv+0x00`（32B）。**注意 `game_symbols.h` 原先把它标注为 `char* text` 是错的，已更正**。
 - **`ControlObject_SetRect@0x9de74` 禁止 C++ 直调**（第 5 参走 x8 sret，真机 SIGSEGV）→ 直写 `ctrl+0x18/0x20/0x28/0x30`。
 
+### 3.12 属性/数值生成的调用链（大修版 VMA）
+
+用户问「宝石、装备的属性随机值分别是哪个函数？有没有统一入口」。以下按 `.dynsym` 的 FUNC 边界逐个区间扫 `bl` 调用点得到（**扫描陷阱：capstone 从任意非指令边界开始会在第一条非法指令处停止，必须按函数逐个扫，否则会漏掉整片函数**）。
+
+| 层 | 函数 | 结论 |
+|---|---|---|
+| 底层随机源 | `MATH_GetRandom@0xa8bcc` | **全库统一**（168 个调用点） |
+| 宝石数值 | `ITEMSYSTEM_GetJewelOptionValue@0x108f90` | 全库**唯一调用者** = `ITEMSYSTEM_MakeJewel@0x10b974`（调用点 `0x10bc04`） |
+| 装备词缀值 | `ITEMSYSTEM_GetOptionValue@0x109020` | 全库**唯一调用者** = `ITEMSYSTEM_MakeOptionEx`（调用点 `0x109554`） |
+| **统一分派层** | `ITEMSYSTEM_CreatePerfectItem@0x10c600` | 8 个调用者（含 `MIXSYSTEM_MakeItem`、`ITEMSYSTEM_MakeItem`、`ITEMSYSTEM_ProcessUnpack`） |
+
+`ITEMSYSTEM_CreatePerfectItem(category)` 内部：`CreateItem(category)` → `ITEMSYSTEM_IsJewel@0x10b964` 为真 ? `ITEMSYSTEM_MakeJewel(item)`（失败则 `ITEMPOOL_Free` 并返回 null）: (`0x10be70(category)` 为真 ? `MATH_GetRandom(0, *(GOT 0x2f3638) 指向的 u16 − 1)` → `SetBitValue(word, 7, 0, 值)` 掷品质 : 原样返回)。
+
+**结论（回答该问题）**：属性值**没有单一生成函数** —— 宝石与装备各走各自的掷值函数；但**有单一的分派入口** `ITEMSYSTEM_CreatePerfectItem`，它按类别把两类掷值串起来。因此**凡是「按类别造一件成品」的路径都应调它，而不是只调 `ITEMSYSTEM_CreateItem`** —— 后者只给默认值（本功能实测：宝石数值恒为 `1024`、属性恒 0，真机报告见 §7.27 之后的本轮修复）。
+
 ## 4. 方案设计
 
 ### 4.1 分层落位
@@ -636,6 +651,10 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
       - **审计结论（2026-09-15 真机一轮日志）**：模板前缀调用 8 条**全部** `mixType=69`；其余 `SetTextControl` 调用（「点击」`head=e782b9e587bb`、「注意」`e6b3a8e5868c`、「道具」`e98193e585b7`、「这里」`e8bf99e6898d`，均 `mixType=0`）**一次都没被触碰** ⇒「模板前缀且非模块 mixType」计数 = 0，**替换无副作用**。
       - **为什么前几轮全部无效（失败教训）**：第一次误判写入者为 `UIDesc_MakeItemByID@0xb2eec`（实际零调用），第二次误判为 `UIDesc_MakeItem@0xb36a0`（实际零调用），两次都白做；第三次虽挂对了函数（`0xb181c`），门控却写成「`ctrl == 0x302d98` 且 `text == 0x303dc0`」—— 而真实调用用的是面板自己的堆对象，**指针比对永远不成立**。**教训：定位「某段 UI 文本由谁写」时，先用有界诊断日志打印「调用者返回地址 + 目标控件 + 文本首字节」把写入者钉死，再写门控；门控要按内容，不要按指针（对象可能是每面板/每帧新建的堆对象）。**
       - **装饰性 hook 不得串进主安装链**：`UIDesc_MakeItem@0xb36a0` 已被 attribute_range 功能 hook → 对同一地址二次挂载 `native_hook_func` 返回 -1；早期把它串进 `&&` 链，导致 **5 个核心 hook 全部未安装**（真机 `install deferred reason=bridge_or_hook_not_ready` 实证，功能整体失效）。现在描述 hook **单独安装、失败只记 `QOL_LOG_WARN`**，安装日志为 `custom recipe hooks installed core=5 desc=%d`。
+
+29. **「构建失败但脚本仍把旧包装上」必须双重确认**：`scripts/build-debug.sh` 在 C++ 编译失败时本任务曾出现「已报 BUILD FAILED、但 `output/` 里仍有可安装的旧包、脚本照样安装成功」，导致一次「修复」实际没生效（已向用户更正）。**判定新包是否生效，必须同时确认 `BUILD SUCCESSFUL` 与输出的 APK 文件名/hash 是本轮新产物**，不能只看「install Success」。
+30. **静态数据 dump 不完整，不能当否定证据**：`apk/static-data/json/tables/ITEMCLASSBASE.json` 仅 36 条（缺尾部），据此曾误判「类别 ≠ itemId」，随后被真机 `GET /api/item/inventory` 读出的真实类别推翻 —— **类别 == itemId 成立**（实测：恢复药水（小）=5、低级武器强化卷轴=16、皮革=35、魔法衣料=41、低级宝石=28、卓越灵药=15、秘银=33、再生药水（小）=10、元气恢复药水=14、生命之叶=57）。凡「表里查不到 / 越界」的结论，都要先确认真机内存实际值再下判断。
+31. **产物掷值的正确入口**：3 格配方的产物必须经 `fn_item_create_perfect_item`（`ITEMSYSTEM_CreatePerfectItem@0x10c600`）创建，否则宝石数值恒为默认值 `1024`、属性恒 0（详见 §3.12）。
 
 ## 8. 关联
 
