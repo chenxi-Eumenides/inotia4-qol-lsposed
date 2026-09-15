@@ -12,6 +12,7 @@ import com.inotia4.qol.patch.ActivityIndicatorBlocker
 import com.inotia4.qol.patch.IapBlocker
 import com.inotia4.qol.patch.ImmersiveMode
 import com.inotia4.qol.patch.ResourceNamespaceBridge
+import com.inotia4.qol.patch.WatermarkOverlay
 import io.github.libxposed.api.XposedModuleInterface
 import java.io.File
 
@@ -94,6 +95,17 @@ class HookMain : XposedModule() {
                 .intercept { chain ->
                     val result = chain.proceed()
                     (chain.thisObject as? Activity)?.let { ImmersiveMode.applyImmersive(it) }
+                    result
+                }
+        }
+
+        // 常驻水印：获焦回调后向 content 末尾注入半透明白 "qol" 视图（纯装饰，fail-safe）。
+        WatermarkOverlay.install(param) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.thisObject as? Activity)?.let { WatermarkOverlay.attachWatermark(it) }
                     result
                 }
         }

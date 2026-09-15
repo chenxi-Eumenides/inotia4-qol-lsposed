@@ -335,6 +335,7 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 | `api/controller/DebugController.kt` | 调试端点（/api/debug/ui、/api/debug/path，开发期；v0.5.46 补 ControllerGuard.guard + InfoApiService 方法） |
 | `patch/IapBlocker.kt` | IAP 屏蔽（模块启动期经 ConfigApiService 下发 native） |
 | `patch/ImmersiveMode.kt` | 沉浸模式（模块启动期经 ConfigApiService 下发 native） |
+| `patch/WatermarkOverlay.kt` | **常驻水印**：hook `MainActivity.onWindowFocusChanged` 后向 `android.R.id.content` 末尾幂等注入一个半透明白（`0x26FFFFFF`，15% alpha）、12sp、右下角 12dp 边距、非交互、无装饰的 `qol` TextView；纯 Android 视图层实现（窗口层恒在默认 z 序 SurfaceView 之上，所有游戏场景可见），无 native 参与、无配置开关、失败只记日志 |
 | `StaticData.kt` | assets 静态数据读取（内存缓存） |
 | `LogFile.kt` | **日志门面（P1 重写，P4 统一日志系统）**：不再自持文件句柄，native 就绪后 `debug/info/warn/error/op` 一律经 JNI `nativeQolLogWrite` 转发 native 单写者；native 补时间戳与帧号，行格式 `<ts> f=<frame> <L> <domain> <src> <msg>`（见 `docs/development/logging.md`）。`onNativeReady` 前有界 backlog（512，logcat 兜底），就绪后重放再直写；`debug()` 由 `ModuleConfig.debugLogEnabled` 门控；`error`/`op` 输出单行 `key=value` 文案。落盘路径由 native 统一为 /sdcard/Android/data/<游戏包>/files/inotia4-export.log |
 
