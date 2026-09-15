@@ -55,9 +55,9 @@ std::string data_dialog_content_json() {
     // wipeout 死亡面板（v0.4.35）：栈顶 enter == F_PANEL_WIPEOUT_ENTER 时优先于 NPC 对话报告
     uintptr_t top_vma = data_popup_top_vma();
     if (top_vma == F_PANEL_WIPEOUT_ENTER) {
+        // 仅暴露「游戏结束」（game_over）一项：revive/special_revive 走网络链
+        // （CS_netGetActiveNetwork），离线/无网络时无作用，故不再作为可选项提供。
         std::string out = "{\"type\":\"wipeout\",\"options\":["
-                          "{\"id\":\"revive\",\"label\":\"复活\"},"
-                          "{\"id\":\"special_revive\",\"label\":\"特殊复活\"},"
                           "{\"id\":\"game_over\",\"label\":\"游戏结束\"}]}";
         return out;
     }

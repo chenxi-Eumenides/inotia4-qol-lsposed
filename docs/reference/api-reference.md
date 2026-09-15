@@ -1273,7 +1273,7 @@
 | `story` | 剧情对话 | `[next 下一句, skip 跳过]` |
 | `npc` | 商人/村民对话 | 分支选项 `[0..n + close 关闭]`（选择框型，v0.6.6）或 `[next 下一句]`（线性型） |
 | `npc_quest` | NPC 任务完成面板 | `[complete 完成任务, close 关闭]` |
-| `wipeout` | 死亡面板 | `[revive 复活, special_revive 特殊复活, game_over 游戏结束]` |
+| `wipeout` | 死亡面板 | `[game_over 游戏结束]`（`revive`/`special_revive` 走网络链，离线无作用，不再提供） |
 | `save_slot` | 存档槽面板 | `[save 存档, close 关闭]` |
 | `character_info`/`inventory`/`skills`/`mercenary`/`quests`/`settings`/`shop`/`craft`/`npc_rest`/`npc_revive`/`options`/`shortcut`/`world_map`/`input_count`/`choice`/`daily_reward`/`in_app` | 各可交互面板 | `[close 关闭]` |
 | `save` | 保存弹窗 | `[confirm 确认]` |
@@ -1299,7 +1299,7 @@
 - story：`next`（下一句）/`skip`（跳过）
 - npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）
 - npc_quest：`complete`（完成任务）/`close`（关闭）
-- wipeout：`revive`/`special_revive`/`game_over`
+- wipeout：`game_over`（仅此一项；`revive`/`special_revive` 走网络链，离线无作用，已移除）
 - 面板态：`close`（关闭面板，panel/close 官方流程3）；save_slot 面板另接受 `save`（存档落盘）
 
 **注意**：`action` 必须匹配当前对话态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`；Java 层同意页（screen=`agreement`）存在时走 agreement 分支，不进入 native 检测。

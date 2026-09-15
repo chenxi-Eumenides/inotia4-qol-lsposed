@@ -93,8 +93,8 @@ std::string data_op_dialog_select(const std::string& action, int index) {
     } else if (data_story_active()) {
         if (action != "next" && action != "skip") return op_err("no such option in story");
     } else if (data_popup_top_vma() == F_PANEL_WIPEOUT_ENTER) {
-        if (action != "revive" && action != "special_revive" && action != "game_over")
-            return op_err("no such option in wipeout");
+        // 仅提供 game_over：revive/special_revive 走网络链，离线无作用，不再暴露。
+        if (action != "game_over") return op_err("no such option in wipeout");
     } else if (data_popup_top_vma() == F_PANEL_NPC_QUEST_ENTER) {
         // npc_quest 面板：仅接受 complete（完成任务）/ close（关闭面板）
         if (action != "complete" && action != "close") return op_err("no such option in npc_quest");
@@ -139,19 +139,11 @@ std::string data_op_dialog_select(const std::string& action, int index) {
         }
         if (action == "close") return data_op_panel_close();
     }
-    // wipeout 死亡面板动作（v0.4.35）：栈顶是 wipeout 面板时接受 revive/special_revive/game_over
-    if (action == "revive" || action == "special_revive" || action == "game_over") {
+    // wipeout 死亡面板动作：仅接受 game_over（revive/special_revive 走网络链，离线无作用，已移除）。
+    if (action == "game_over") {
         if (data_popup_top_vma() != F_PANEL_WIPEOUT_ENTER) return op_err("not in wipeout");
-        if (action == "revive") {
-            if (fn_wipeout_button_revive == nullptr) return op_err("symbol not resolved");
-            fn_wipeout_button_revive();
-        } else if (action == "special_revive") {
-            if (fn_wipeout_button_special_revive == nullptr) return op_err("symbol not resolved");
-            fn_wipeout_button_special_revive();
-        } else {
-            if (fn_wipeout_button_gameover == nullptr) return op_err("symbol not resolved");
-            fn_wipeout_button_gameover();
-        }
+        if (fn_wipeout_button_gameover == nullptr) return op_err("symbol not resolved");
+        fn_wipeout_button_gameover();
         return op_ok();
     }
     if (action == "close") return data_op_panel_close();

@@ -519,7 +519,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `npc` | NPC 对话 | `next` 下一句 / `index` 选项选择（`{"index":n}`） |
 | `popup` | 确认弹窗 | `ok` / `cancel` |
 | `npc_quest` | 任务完成面板 | `complete` / `close` |
-| `wipeout` | 死亡面板 | `revive` / `special_revive` / `game_over` |
+| `wipeout` | 死亡面板 | `game_over`（仅此一项） |
 | `save_slot` | 存档槽面板 | `save` / `close` |
 | 面板态 | 其他面板（背包/技能/设置等） | `close` 关闭面板 |
 | `save`/`sell`/`quest` | 各类弹窗 | `confirm` / `quit` / `cancel` |
@@ -773,7 +773,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 - story：`next` / `skip`
 - npc：`next` 或 `index`
 - npc_quest：`complete` / `close`
-- wipeout：`revive` / `special_revive` / `game_over`
+- wipeout：`game_over`（仅此一项；`revive`/`special_revive` 走网络链，离线无作用，已移除）
 - popup：`ok` / `cancel`
 - 面板态：`close`；save_slot 面板另接受 `save`
 
@@ -1274,7 +1274,7 @@ loop:
 - **无鉴权**：合法端点局域网内可访问，勿暴露公网
 - **OP 门禁**：OP 端点默认关闭（`opEnabled=false` → 403）；开启后无额外鉴权，且破坏性大，用前先存档
 - **OP 破坏性**：直改等级/属性/物品可能损坏存档，用前先存档
-- **死亡处理**：全灭 → `screen=dialog_wipeout`；`revive` 在盗版版走网络链会失败，`game_over` 回主菜单可重进档
+- **死亡处理**：全灭 → `screen=dialog_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
 - **教学状态**：新档可能触发 `tutorial_pause`（药水教学），游戏暂停移动，需使用药水后恢复
 
 ---
