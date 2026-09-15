@@ -17,7 +17,7 @@ enum class LogDomain(val token: String) {
     SAVE("save"),
     SAVE_BACKUP("save_backup"),
     AUTOSELL("autosell"),
-    GEM_CRAFT("gem_craft"),
+    CRAFT("craft"),
     ATTR_RANGE("attr_range"),
     UI("ui"),
     CONFIG("config"),

@@ -46,7 +46,7 @@ const DomainEntry kDomainTable[] = {
     {QolDomain::kSave, "save"},
     {QolDomain::kSaveBackup, "save_backup"},
     {QolDomain::kAutosell, "autosell"},
-    {QolDomain::kGemCraft, "gem_craft"},
+    {QolDomain::kCraft, "craft"},
     {QolDomain::kAttrRange, "attr_range"},
     {QolDomain::kUi, "ui"},
     {QolDomain::kConfig, "config"},

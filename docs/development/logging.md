@@ -58,7 +58,7 @@ domain 是**受控词表**（closed vocabulary），共 15 项。`<domain>` 字�
 | 8 | `save` | 存档生命周期：进入/退出/保存/槽位 |
 | 9 | `save_backup` | `.qol_save` 导出/导入/列表/删除 |
 | 10 | `autosell` | 自动出售扫描与配置 |
-| 11 | `gem_craft` | 合成器宝石合成优化 |
+| 11 | `craft` | 新合成系统（合成器界面层 craft_ui + 配方层 custom_recipe） |
 | 12 | `attr_range` | 属性显示范围着色 |
 | 13 | `ui` | 模块 UI：设置页、存档管理面板、经验/自定义 UI |
 | 14 | `config` | 模块配置读写与下发 |
@@ -268,7 +268,7 @@ uv run python scripts/verification/check_log_policy.py [--warn-only]
 | `Inotia4ModuleSave` / `Inotia4SaveEnter` / `Inotia4SaveExit` | `save` |
 | `Inotia4SaveBackup` | `save_backup` |
 | `Inotia4AutoSell` / `Inotia4AutoSellUI` | `autosell` |
-| `Inotia4GemCraft` | `gem_craft` |
+| `Inotia4Craft` | `craft` |
 | `Inotia4AttrRange` | `attr_range` |
 | `Inotia4UISettings` / `Inotia4UISaveBackup` / `Inotia4UIExp` / `Inotia4UICustom` | `ui` |
 | `Inotia4ModuleConfig` / 配置下发 | `config` |

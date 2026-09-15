@@ -88,14 +88,14 @@ static void test_domain_tokens() {
         QolDomain::kPlatform,   QolDomain::kCore,        QolDomain::kHttp,
         QolDomain::kApi,        QolDomain::kOp,          QolDomain::kInventory,
         QolDomain::kExtensionBag, QolDomain::kSave,      QolDomain::kSaveBackup,
-        QolDomain::kAutosell,   QolDomain::kGemCraft,    QolDomain::kAttrRange,
+        QolDomain::kAutosell,   QolDomain::kCraft,    QolDomain::kAttrRange,
         QolDomain::kUi,         QolDomain::kConfig,      QolDomain::kCatalog,
         QolDomain::kSimpleMode,
     };
     const char* tokens[] = {
         "platform", "core",  "http",   "api",        "op",
         "inventory", "extension_bag", "save", "save_backup", "autosell",
-        "gem_craft", "attr_range", "ui", "config", "catalog",
+        "craft", "attr_range", "ui", "config", "catalog",
         "simple_mode",
     };
     const size_t count = sizeof(domains) / sizeof(domains[0]);
