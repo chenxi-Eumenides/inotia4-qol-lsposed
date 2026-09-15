@@ -26,7 +26,8 @@ void build_record_bytes(const Def& def, uint16_t material_start, uint8_t out[kRe
     out[kRbFlag7] = kRbFlag7Value;
     put_u16(out + kRbCostWord, def.cost_word_id);
     out[kRbUnlockGate] = kRbUnlockGateValue;
-    out[kRbGroup] = recipe_group_bit(def.group);
+    // 组位 + 配方书位（bit5）：后者是计数不变式所必需，见 custom_recipe_table.h 的 kRbRecipeBookBit 注释。
+    out[kRbGroup] = static_cast<uint8_t>(recipe_group_bit(def.group) | kRbRecipeBookBit);
 }
 
 uint32_t derive_material_count(const uint8_t* recipe, uint16_t record_count, uint8_t record_size) {
@@ -42,6 +43,17 @@ uint32_t derive_material_count(const uint8_t* recipe, uint16_t record_count, uin
         if (end > max_end) max_end = end;
     }
     return max_end;
+}
+
+uint32_t count_recipe_book_records(const uint8_t* recipe, uint16_t record_count,
+                                   uint8_t record_size) {
+    if (recipe == nullptr || record_size <= kRbGroup) return 0;
+    uint32_t n = 0;
+    for (uint16_t i = 0; i < record_count; ++i) {
+        const uint8_t flags = recipe[static_cast<size_t>(i) * record_size + kRbGroup];
+        if ((flags & kRbRecipeBookBit) != 0) ++n;
+    }
+    return n;
 }
 
 uint32_t inject_into_buffers(const uint8_t* orig_recipe, uint16_t base_record_count,
@@ -185,6 +197,19 @@ bool ensure_impl() {
     if (cat == nullptr || n == 0) return false;
 
     const uint16_t base_record_count = cur_count;
+    // 书名册大小不变式：注入 N 条后 GetRecipeCount(5) 增加 N（每条注入记录都带 kRbRecipeBookBit），
+    // 而书名册缓冲是游戏按**注入前**的 (count5+7)/8 分配的、存档位图长度也按它决定 → 必须相等。
+    // 不相等时 fail-closed 拒绝注入：宁可模块配方不出现，也不要越界读写书名册或改存档格式长度。
+    const uint32_t book_count = count_recipe_book_records(recipe_data, base_record_count, recipe_size);
+    const uint32_t book_bytes_before = recipe_book_bytes(book_count);
+    const uint32_t book_bytes_after = recipe_book_bytes(book_count + static_cast<uint32_t>(n));
+    if (book_bytes_before != book_bytes_after) {
+        QOL_LOG_ERROR(QolDomain::kCustomRecipe,
+                      "recipe book byte size would change (%u -> %u, bit5=%u n=%u); injection "
+                      "refused to avoid out-of-bounds book access and save-format length change",
+                      book_bytes_before, book_bytes_after, book_count, static_cast<unsigned>(n));
+        return false;
+    }
     const uint32_t base_material_count =
         derive_material_count(recipe_data, base_record_count, recipe_size);
     const uint32_t material_total_count = material_total(cat, n);
@@ -217,9 +242,10 @@ bool ensure_impl() {
     g_base_record_count_cache = base_record_count;
     bind_base_record_count(base_record_count);
     QOL_LOG_INFO(QolDomain::kCustomRecipe,
-                 "recipe table injected base=%u records=%u materials=%u", base_record_count,
+                 "recipe table injected base=%u records=%u materials=%u book_bytes=%u", base_record_count,
                  static_cast<unsigned>(base_record_count + n),
-                 static_cast<unsigned>(base_material_count + material_total_count));
+                 static_cast<unsigned>(base_material_count + material_total_count),
+                 book_bytes_after);
     return true;
 }
 

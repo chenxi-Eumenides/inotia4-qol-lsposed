@@ -43,7 +43,7 @@ struct Def {
     uint16_t cost_word_id;         // 费用公式 wordId（0 = 免费；实际费用由 hook 强制 0）
     CountRule count_rule;          // 材料需求数量的计算规则（见 custom_recipe_rules.h）
     Form form;                     // 配方形式（借用的原版 type；见上）
-    uint8_t group;                 // 页签组位索引（注入记录 b11 = 1 << group；须 < 8）
+    uint8_t group;                 // 页签组位索引（注入记录 b11 = (1 << group) | kRbRecipeBookBit；须 < 8）
 };
 
 // 模块配方注入的描述文案（模块自有 UTF-8 字面量：36 字节 + NUL = 37，host 测试断言）。

@@ -150,7 +150,7 @@
 | b7 | 1（与原版一致，语义未定） |
 | b8-9 | 费用公式 wordId（`MEMORYTEXT_GetText_E` → `CAL_Calculate`，参数 = 目标物 `ITEM_GetAbilityLevel`） |
 | b10 | 解锁门槛：**`CalcRecipeListCount` 只按 b11 掩码计数、不检查 b10**，而 `MakeRecipeList` 用 `flag >= b10` 过滤 → 两者不一致会造成配方数组尾部为 `MEM_Malloc` 垃圾（幻影按钮 + 越界读）。运行时 flag = `u8[*(0x2f6a68)+0xe]` |
-| b11 | 面板组位图（bit g = group g）\| bit0 = 需装备（`MIXSYSTEM_IsNeedEuip`）\| bit5 = 配方书条目 |
+| b11 | 面板组位图（bit g = group g）\| bit0 = 需装备（`MIXSYSTEM_IsNeedEuip`）\| **bit5 = 配方书条目**（同时是 `GetRecipeCount(5)` 的计入条件，而该计数参与书名册索引 → 见 §3.13，注入记录必须置它） |
 
 - group 1 现有记录：0（按钮文本 1151「混沌」）/ 1（1152「深渊混沌」），均 `b2-3=64`、`b11=0x03`、`b6=4`、`b10=1`。
 - **`MIXTUREBASE` 189 条全部被 `RECIPEBASE` 引用（下标 0..188），无空闲条目；无 `itemId==15` 条目** → 注入配方必须同时扩展两张表。
@@ -285,6 +285,44 @@
 
 **结论（回答该问题）**：属性值**没有单一生成函数** —— 宝石与装备各走各自的掷值函数；但**有单一的分派入口** `ITEMSYSTEM_CreatePerfectItem`，它按类别把两类掷值串起来。因此**凡是「按类别造一件成品」的路径都应调它，而不是只调 `ITEMSYSTEM_CreateItem`** —— 后者只给默认值（本功能实测：宝石数值恒为 `1024`、属性恒 0，真机报告见 §7.27 之后的本轮修复）。
 
+### 3.13 合成套装（解锁配方的道具）与书名册位图
+
+「合成套装」= `ITEMDATABASE` 类别 **706..717**（名称 text_id 736..747：D/C/B/A/S 级武器/防具合成套装，共 12 件）。
+
+**使用链**（怪物 v23 与大修版 VMA 一致）：
+
+```
+[原版背包] UIEquip_ButtonUseExe@0xb80b8（类别 == 0x3e 时先 SAVE_IsOK）→ CHAR_UseItemEx@0xeb670
+[原版背包·确认框] UIEquip_OKConfrimUseItem@0xb8478 → PARTY_GetMenuCharacter → INVEN_FindItemSlot@0x103704
+     命中后才调 CHAR_UseItemEx；扩展背包由模块 extension_confirm_use_item 直接调 CHAR_UseItemEx（绕过 FindItemSlot）
+CHAR_UseItemEx：w27 = UTIL_GetBitValue(u16[item+8], 15, 6) = **物品类别**；
+     读物品表记录 byte[+7] 的 bit1（类别 706 的记录 = 0x6a，已置位）→ CHAR_ProcessRecipe(w27)@0xdcde4
+CHAR_ProcessRecipe：
+     idx = ITEMSYSTEM_DecideRecipeID(类别)@0x1081e4
+         → 在 ITEMMIXLINKBASE（52 条 × 4B {u16 类别, u16 配方索引}；基址全局 0x301a60、记录大小 0x301a68、
+           记录数 0x301a6a）中收集全部匹配项，再 MATH_GetRandom(0, n−1) **随机挑一条**；无匹配返回 −1
+     idx < 0 → 返回 0（无横幅、无解锁）
+     MIXSYSTEM_AddRecipeBook(idx)@0x11b938（**返回值被丢弃**）
+     UIPopupMsg_CreateOK(Sprintk(模板, MEMORYTEXT_GetText(RECIPEBASE[idx].b0-1)))@0xdce8c
+     → 返回 1（**无条件报成功**）
+```
+
+链接表实测：706→{17,18,19,20,21}、707→{22..25}、708→{26..30}、709→{31..34}、710→{35..39}、711→{40..43}、712→{44..47}、713→{48..52}、714→{53..59}、715→{60..62}、716→{63..65}、717→{66..68}；**全部目标记录 `b11 = 0x20`（bit5）**。
+
+**书名册索引（两侧互为逆运算）**：
+
+```
+AddRecipeBook(idx)：要求 RECIPEBASE[idx].b11 的 bit5；位 = idx + GetRecipeCount(5) − GetRecipeCount(0)
+                     越界检查**只有上界**（`asr w1,w19,#3; cmp w1,w0; b.ge`），**没有下界**
+MakeRecipeList(5)：  记录 = GetRecipeCount(0) − GetRecipeCount(5) + 位
+书名册大小 GetRecipeBookSize@0x11b450 = (GetRecipeCount(5) + 7) / 8 字节
+```
+
+⚠️ **`GetRecipeCount(0)` 不是统计 bit0**：`GetRecipeCount@0x11b3a8` 对 `group == 0` 走特殊分支（`0x11b42c`），直接返回 `*(u16*)0x3019ba` = **RECIPEBASE 总记录数**。原版 `69 − 52 = 17` = 第一条 bit5 记录的索引，两侧恰好自洽。
+
+**⇒ 记录数不变式（本模块的硬约束）**：注入 N 条 RECIPEBASE 后 `base = (69 + N) − GetRecipeCount(5)`。因此注入记录**必须同时置 bit5**，让 `GetRecipeCount(5)` 一起 +N，`base` 恒为 17。否则 `base = 17+N`：既有解锁在传说装备页整体错位 N 条；`idx < 17+N` 的记录解算出**负位索引**，而 `AddRecipeBook` 无下界检查 → 对书名册缓冲**前方越界读改写**。
+另一条约束：`GetRecipeBookSize()` 在注入前后必须相等（书缓冲按注入前分配、存档位图长度也按它动态）→ 以原版 52 计，注入条数 ≤ 4 才保持 7 字节。两条约束的落地与缺陷经过见 §7.32。
+
 ## 4. 方案设计
 
 ### 4.1 分层落位
@@ -364,7 +402,7 @@ const Def* def_for_mix_type(uint32_t mix_type); // mixType → 配方（非自�
 | b7 | 1（与原版一致） |
 | b8-9 | `Def.cost_word_id`；**实际费用由 hook 强制 `[+0xf8] = 0`**（`formula-e.json` 无求值为 0 的公式，见 §7.9） |
 | b10 | **0**（必须；见 §3.2 与 §7.8） |
-| b11 | `0x02`（bit1 = group 1；bit0 清 0 → `CheckMixture` 直接返回 0、`MakeItem` 走通用路径由 hook 拦截；bit5 必须为 0） |
+| b11 | `(1 << Def::group) \| kRbRecipeBookBit(0x20)`：bit0 必须清 0（`CheckMixture` 直接返回 0、`MakeItem` 走通用路径由 hook 拦截）；**bit5 必须置 1** —— 它是书名册计数不变式的一部分（§3.13 / §7.32），由 `build_record_bytes` 统一写入，理由见 `custom_recipe_table.h` 的 `kRbRecipeBookBit` 注释 |
 
 **幂等与重入（`custom_recipe_table_ensure()`）**：以「游戏侧指针是否仍指向模块缓冲」自校验，而非缓存计数——① 已注入且 `*(RECIPEBASE 基址全局) == 模块缓冲` → 直接返回，不重复追加；② 指针已被改写（**游戏重新装载静态表**，如进入存档时）→ 用新原表重新注入，旧缓冲**刻意不释放**（游戏可能仍持有指向其内部的局部指针，泄漏一份远优于悬空访问）；③ 表尚未装载或 5 个全局非法 → 返回 false（fail-closed）并允许后续重试。
 调用点：开关启用时（`set_custom_recipe_enabled(true)`）、每次放料/合成 hook 命中时、以及**点任何类型/菜单按钮时（`UIMix_ButtonMenuListExe`，早于 `CreateRecipeList` 建按钮）**。健康路径仅一次指针比较。实测：启动期配置下发时表未装载 → 记 `QOL_LOG_ERROR` 后跳过，进程不崩溃；boot 后再次启用 → 注入成功；再次启用 → 无第二次注入（自校验生效，未重复追加）。
@@ -533,8 +571,9 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 3. **目录映射**：对 N = 1 与合成的 N = 3 目录，断言 mixType = `base + i`、材料起始下标 = `base_material + Σ前缀`、材料条目数预算正确。
 4. **表注入字节断言**（不依赖游戏内存）：给定伪造原表，断言复制后前段一致、后段记录字段逐个正确、记录数 = `base + N`、幂等重复调用不改变结果。
 5. **材料需求数量**（§2.6）：类别 → 档位映射与越界返回 0；105 级为 0、超上限不为负；1 级为原量 1..5；向上取整边界（`ceil(5×53/105)=3`、`ceil(1×1/105)` 类非零值不得被取整成 0）；`base_count` 倍率；负等级钳制；非法输入返回 0；对等级**单调不增**且终值为 0。
+6. **配方书位不变式**（§3.13）：`count_recipe_book_records` 的 bit5 计数（含空指针、`record_size <= kRbGroup` 两个退化输入）；`recipe_book_bytes` 的字节边界（52/54 → 7 字节；52+4 → 7、52+5 → 8）；目录**每条**注入记录的 `b11 == (1 << group) | kRbRecipeBookBit`。
 
-**已执行（2026-09-15）**：`ctest --test-dir module/app/src/main/cpp/tests/build` 全量 14/14 通过（含 `custom_recipe_tests`）；`git diff --check` 通过；`scripts/verification/check_log_policy.py` 结果 PASS（`R3 = 0`、error = 0、本功能文件无 warn）；`scripts/build-debug.sh` BUILD SUCCESSFUL。
+**已执行（2026-09-16）**：`ctest` 全量 **16/16** 通过（含 `custom_recipe_tests`，新增第 6 项断言）；`git diff --check` 通过；`scripts/build-debug.sh` BUILD SUCCESSFUL。
 
 ### 5.2 真机验收（VM 卡，草案；实现阶段补齐正式卡号与日志）
 
@@ -622,7 +661,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 7. ~~多条配方时 `UIMix_CreateRecipeGroupControl` 的滚动/布局容量上限未验证~~ **已澄清（§3.3）：≤6 与 >6 两种分支几何完全相同、无 6 条上限**，超出可视区由滚动控件处理；多条配方仍需走一遍 VM-C1。
 8. **注入记录 `b10` 必须为 0**：`CalcRecipeListCount` 只按 `b11` 掩码计数、**不检查 `b10`**，而 `MakeRecipeList` 用运行时 flag 过滤 `b10` → 两者不一致会让配方数组尾部成为 `MEM_Malloc` 垃圾（幻影按钮 + 越界读）。原版记录 `b10=1` 仅因运行时 flag ≥ 1 才安全。
 9. **`formula-e.json` 中不存在求值为 0 的公式**（全表已枚举）→ 费用 0 只能由 hook 强制写 `[+0xf8] = 0`（§4.4），不能靠 `b8-9` 选一个「零公式」表项实现。
-10. **`RECIPEBASE` 记录数从 69 变大无副作用**：全库无硬编码 69；3 处全量遍历（`GetRecipeCount`/`CalcRecipeListCount`/`MakeRecipeList`）均以运行时 u16 计数为界；存档只读写配方书位图（长度按 `GetRecipeCount(5)` 动态）。
+10. ~~**`RECIPEBASE` 记录数从 69 变大无副作用**~~ **已修正 —— 见第 32 条**。对「配方列表构建」确实无副作用（全库无硬编码 69；3 处全量遍历 `GetRecipeCount`/`CalcRecipeListCount`/`MakeRecipeList` 均以运行时 u16 计数为界）；**但对书名册（配方书）索引有副作用** —— 原判断只看了遍历边界，漏掉 `GetRecipeCount(0)` 返回的是总记录数这一点。当前实现以「注入记录同时置 bit5」把索引恢复为原版值。
 11. **`MIXTUREBASE` 在 189 之后追加条目安全**：运行时读者 `GetStuffItem@0x11b05c`、`GetStuffCount`、`UIMix_Draw@0xc1fac` 只按下标取、不校验长度；计数全局 `*(0x2f6e60)` 无运行时读者。
 12. **跨版本 VMA**：新增的 5 个表指针全局（`0x3019b0`/`0x3019b8`/`0x3019ba`/`0x3019a0`/`0x3019a8`）是无名 `.bss` 变量，只能走 VMA 兜底（与既有 `G_UIMIX_VMA = 0x305550` 同例）；函数类符号经 `symbol_registry.h` 名称解析。若三版本 `.bss` 布局不同，需对 3 个变体各验一次。
     **真机实证（2026-09-15）**：`MIXTUREBASE` 的基址与大小两个全局互换了位置会使 `mixture_data`/`mixture_size` 读到垃圾（实测 `memcpy` 源 `0xbd0003`、长度 19278）并直接崩掉游戏进程。`custom_recipe_table_inject()` 已加窄域 fail-closed 校验（`recipe_size ≤ 64`、`mixture_size ≤ 16`、`1 ≤ count ≤ 4096`），错位时只记 `QOL_LOG_ERROR` 并跳过注入，不再崩溃。**任何新增的表指针全局都必须先由真实读取点的反汇编确认「基址/大小/记录数」三者的对应关系，不能仅凭 `readelf` 的 addend 推断语义。**
@@ -666,6 +705,10 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 29. **「构建失败但脚本仍把旧包装上」必须双重确认**：`scripts/build-debug.sh` 在 C++ 编译失败时本任务曾出现「已报 BUILD FAILED、但 `output/` 里仍有可安装的旧包、脚本照样安装成功」，导致一次「修复」实际没生效（已向用户更正）。**判定新包是否生效，必须同时确认 `BUILD SUCCESSFUL` 与输出的 APK 文件名/hash 是本轮新产物**，不能只看「install Success」。
 30. **静态数据 dump 不完整，不能当否定证据**：`apk/static-data/json/tables/ITEMCLASSBASE.json` 仅 36 条（缺尾部），据此曾误判「类别 ≠ itemId」，随后被真机 `GET /api/item/inventory` 读出的真实类别推翻 —— **类别 == itemId 成立**（实测：恢复药水（小）=5、低级武器强化卷轴=16、皮革=35、魔法衣料=41、低级宝石=28、卓越灵药=15、秘银=33、再生药水（小）=10、元气恢复药水=14、生命之叶=57）。凡「表里查不到 / 越界」的结论，都要先确认真机内存实际值再下判断。
 31. **产物掷值的正确入口**：3 格配方的产物必须经 `fn_item_create_perfect_item`（`ITEMSYSTEM_CreatePerfectItem@0x10c600`）创建，否则宝石数值恒为默认值 `1024`、属性恒 0（详见 §3.12）。
+32. **书名册索引不变式（缺陷 + 修复）**：注入 N 条 RECIPEBASE 记录把总记录数由 69 改成 69+N，而 `GetRecipeCount(0)` 返回的正是总记录数 → `AddRecipeBook`/`MakeRecipeList` 的 `base` 由 17 变成 17+N，产生三个可观察症状：① 既有解锁在传说装备页**整体错位 N 条**（已解锁的 bit0 原本显示记录 17「安格巴德的剑」，变成记录 19「龙之心脏」）；② `idx < 17+N` 的记录（D级武器合成套装的 17/18）解算出**负位索引**，而 `AddRecipeBook` 只查上界 → 对书名册缓冲前方越界读改写；③ 横幅取自 `RECIPEBASE[idx].b0-1`、与位图无关，且 `AddRecipeBook` 返回值被丢弃、`CHAR_ProcessRecipe` 恒返回 1 → 用户看到「提示解锁了 A，页面上却是 B / 没有 A」。
+     **修复（2026-09-16）**：`build_record_bytes` 让每条注入记录的 `b11` 同时带 `kRbRecipeBookBit`(bit5) → `base = (69+N) − (52+N) = 17` 对任意 N 恒成立；并在 `custom_recipe_table_ensure()` 里用 `count_recipe_book_records` + `recipe_book_bytes` 做「注入前后书名册字节数必须相等」的 **fail-closed 校验**（不相等即拒绝注入并记 `QOL_LOG_ERROR`），日志追加 `book_bytes=` 便于核对。
+     **证据状态**：机制与修复依据为反汇编（§3.13）+ host 单测（`tests/test_custom_recipe.cpp` 第 6 项）。**尚未真机验证**：修复后「传说装备页解锁项与横幅一致、且不再出现负位记录」需在设备上回归；bit5 置位对其它读点的影响也需真机确认（设计上 group 5 的列表只扫书名册位图，注入记录对应的位 52/53 永不被解锁，故不应出现新条目）。
+33. **「合成套装在扩展背包可用、原版背包无效果」尚未定位**：两处最终都调 `CHAR_UseItemEx(ch, item, 0)`、都用物品类别取值，**代码路径完全相同**（模块对原版物品会 `return false` 交回 backup），故差异不在这条链上。待查：① 原版背包是否为这些物品提供「使用」动作（UIEquip 按钮表 / 物品 desc 的 disp 位），而扩展背包用的是模块自己的 `ITEMDATA_IsUse(类别)` 判定；② 原版链要求 `INVEN_FindItemSlot@0x103704` 命中（这正是模块给扩展袋单独分流的原因）；③ 两侧是否确为同一条物品记录 / 同一存档。
 
 ## 8. 关联
 

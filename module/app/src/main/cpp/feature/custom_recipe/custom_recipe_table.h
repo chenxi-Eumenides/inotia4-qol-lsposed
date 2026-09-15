@@ -29,10 +29,37 @@ constexpr uint8_t kRbFlag7Value = 1;
 constexpr uint8_t kRbUnlockGateValue = 0;
 constexpr uint8_t kRbGroupBitCount = 8;  // b11 位宽（Def::group 须 < 8；越界视为非法，注入记录不占任何组）
 
+// b11 bit5 = 「配方书条目」（传说装备页成员）。**注入记录必须同时置这一位**，原因：
+//   `MIXSYSTEM_AddRecipeBook(idx)` 的位索引 = `idx + GetRecipeCount(5) - GetRecipeCount(0)`；
+//   `MIXSYSTEM_MakeRecipeList(5)` 的逆映射 = `GetRecipeCount(0) - GetRecipeCount(5) + 位`。
+//   其中 **`GetRecipeCount(0)` 不是统计 bit0，而是直接返回 RECIPEBASE 总记录数**（group==0 是特殊
+//   分支：`GetRecipeCount@0x11b3a8` 命中 → `0x11b42c` 读 `0x3019ba` 的记录数全局）。原版
+//   69 - 52 = 17 = 第一条 bit5 记录的索引，两侧互为逆运算，自洽。
+//   本模块把总记录数改成 69+N；若 N 条注入记录不计入 bit5，则 base 变成 17+N —— 既有解锁在传说
+//   装备页整体错位 N 条，且 `idx < 17+N` 的记录会解算出**负位索引**；`AddRecipeBook` 只校验上界
+//   （`asr w1,w19,#3; cmp w1,w0; b.ge`）不校验下界 → 对书名册缓冲**前方越界读改写**。
+//   置位后 base = (69+N) - (52+N) = 17 对任意 N 恒成立。
+constexpr uint8_t kRbRecipeBookBit = 0x20;
+
 // 注入记录 b11 的组位：`1 << Def::group`（bit0=0 免装备校验：CheckMixture 直接返回 0、
-// MakeItem 走通用路径由 hook 拦截；bit5=0 非配方书）。group >= 8 返回 0（该记录不出现在任何页）。
+// MakeItem 走通用路径由 hook 拦截）。group >= 8 返回 0（该记录不出现在任何页；仍须由
+// build_record_bytes 补上 kRbRecipeBookBit，否则上面的计数不变式被破坏）。
 constexpr uint8_t recipe_group_bit(uint8_t group) {
     return group < kRbGroupBitCount ? static_cast<uint8_t>(1u << group) : 0u;
+}
+
+// 统计一条 RECIPEBASE 中 bit5（配方书条目）的记录数。recipe==nullptr / record_size <= kRbGroup → 0。
+uint32_t count_recipe_book_records(const uint8_t* recipe, uint16_t record_count,
+                                   uint8_t record_size);
+
+// 书名册（MIXSYSTEM_pRecipeBook@0x307760）的字节数，游戏侧等价于 `MIXSYSTEM_GetRecipeBookSize()`
+// = `(GetRecipeCount(5) + 7) / 8`（0x11b450）。
+// ⚠️ 注入 N 条后 count5 变为 count5+N，该值**必须与注入前相等**：
+//   - 书名册缓冲由游戏在启动时按注入前的大小分配，变大即越界读写；
+//   - 存档只读写配方书位图、长度按 `GetRecipeCount(5)` 动态（§7.10），变大同时改变存档格式长度。
+// 以原版 52 为例：52..56 都是 7 字节，57 起变 8 字节 → 注入条数上限受此约束（当前 N=2 安全）。
+constexpr uint32_t recipe_book_bytes(uint32_t recipe_book_count) {
+    return (recipe_book_count + 7u) / 8u;
 }
 
 // 按目录派生一条注入用 RECIPEBASE 记录（12 字节，小端）。

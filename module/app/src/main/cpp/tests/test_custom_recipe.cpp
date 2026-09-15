@@ -208,7 +208,7 @@ static void test_catalog_mapping() {
 
 // ---------------------------------------------------------------------------
 // §5.1(4) 表注入字节断言（伪造原表，不依赖游戏内存）：
-// - 注入后记录数 = base + 2（目录两条），注入记录 b11 = 0x08（group 3）；
+// - 注入后记录数 = base + 2（目录两条），注入记录 b11 = 0x28（group 3 | 配方书位 bit5）；
 // - 原版 group-3 记录（模拟 12..15）的 b11 组位被清且**其它字节逐字节不变**；
 // - 材料条目按目录顺序追加（「合成」在前、「宝石强化」在后）。
 // ---------------------------------------------------------------------------
@@ -277,7 +277,7 @@ static void test_inject_bytes() {
     // MIXTUREBASE 前段原样复制（14 条 = 42B）。
     CHECK(std::memcmp(out_mixture, orig_mixture, sizeof(orig_mixture)) == 0);
 
-    // 注入记录 1（下标 base → 「合成」）：镜像 record 12 的材料/费用，b11=0x08。
+    // 注入记录 1（下标 base → 「合成」）：镜像 record 12 的材料/费用，b11=0x28。
     const uint8_t* inj0 = out_recipe + 3 * cr::kRecipeRecordSize;
     CHECK(rd_u16(inj0 + cr::kRbLabel) == 35216);
     CHECK(rd_u16(inj0 + cr::kRbResultId) == 0);
@@ -286,16 +286,16 @@ static void test_inject_bytes() {
     CHECK(inj0[cr::kRbFlag7] == 1);
     CHECK(rd_u16(inj0 + cr::kRbCostWord) == 188);
     CHECK(inj0[cr::kRbUnlockGate] == 0);                // 必须 0（§7.8）
-    CHECK(inj0[cr::kRbGroup] == 0x08);                 // bit3=group3（宝石强化页）；bit0/bit5 清
+    CHECK(inj0[cr::kRbGroup] == 0x28);                 // bit3=group3（宝石强化页）+ bit5=配方书位
 
-    // 注入记录 2（下标 base+1 → 「宝石强化」）：费用公式必须合法（188，同 record 12），b11=0x08。
+    // 注入记录 2（下标 base+1 → 「宝石强化」）：费用公式必须合法（188，同 record 12），b11=0x28。
     const uint8_t* inj1 = out_recipe + 4 * cr::kRecipeRecordSize;
     CHECK(rd_u16(inj1 + cr::kRbLabel) == 35291);
     CHECK(rd_u16(inj1 + cr::kRbMaterialStart) == 15);  // 14 + 1
     CHECK(inj1[cr::kRbMaterialCount] == 1);
     CHECK(rd_u16(inj1 + cr::kRbCostWord) == 188);
     CHECK(inj1[cr::kRbUnlockGate] == 0);
-    CHECK(inj1[cr::kRbGroup] == 0x08);
+    CHECK(inj1[cr::kRbGroup] == 0x28);
 
     // 追加材料条目：MIXTUREBASE[14] = {28,3}（合成），[15] = {15,1}（宝石强化）。
     const uint8_t* mat0 = out_mixture + 14 * cr::kMixtureRecordSize;
@@ -480,6 +480,45 @@ static void test_scaled_jewel_value() {
     CHECK(cr::scaled_jewel_value(-5, 1200) == 0);
 }
 
+// ---------------------------------------------------------------------------
+// §5.1(6) 配方书位（b11 bit5）不变式：
+// - 每条注入记录都必须带 bit5。注入 N 条 → GetRecipeCount(5) 增加 N →
+//   `base = 总记录数 − GetRecipeCount(5)` 保持不变（原版 69−52=17）。
+//   否则传说装备页的「位 ↔ 记录」映射整体偏移 N 条，且 idx < base 的记录解算出**负位索引**，
+//   而 AddRecipeBook 只校验上界 → 对书名册缓冲前方越界读改写。
+// - 书名册字节数 (count5+7)/8 在注入前后必须相等（缓冲按注入前分配、存档位图长度按它动态）。
+// ---------------------------------------------------------------------------
+static void test_recipe_book_bit_invariant() {
+    uint8_t recs[3 * cr::kRecipeRecordSize];
+    std::memset(recs, 0, sizeof(recs));
+    recs[0 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x20;  // 仅配方书位
+    recs[1 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x28;  // 配方书 + group3
+    recs[2 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x08;  // 仅 group3（不计入）
+    CHECK(cr::count_recipe_book_records(recs, 3, cr::kRecipeRecordSize) == 2);
+    CHECK(cr::count_recipe_book_records(recs, 0, cr::kRecipeRecordSize) == 0);
+    CHECK(cr::count_recipe_book_records(nullptr, 3, cr::kRecipeRecordSize) == 0);
+    CHECK(cr::count_recipe_book_records(recs, 3, cr::kRbGroup) == 0);  // record_size 过小 → 0
+
+    // 原版实测：69 条记录、其中 52 条 bit5 → 书名册 7 字节；注入 2 条后 54 → 仍 7 字节（不变式成立）。
+    CHECK(cr::recipe_book_bytes(52) == 7);
+    CHECK(cr::recipe_book_bytes(54) == 7);
+    // 边界：+4 仍 7 字节，+5（=57）变 8 字节 → 该情形必须被 ensure() 拒绝注入。
+    CHECK(cr::recipe_book_bytes(52 + 4) == 7);
+    CHECK(cr::recipe_book_bytes(52 + 5) == 8);
+
+    // 目录里每条注入记录的 b11 都必须同时带组位与配方书位。
+    size_t n = 0;
+    const cr::Def* cat = cr::catalog(&n);
+    CHECK(n > 0);
+    for (size_t i = 0; i < n; ++i) {
+        uint8_t out[cr::kRecipeRecordSize];
+        cr::build_record_bytes(cat[i], 0, out);
+        CHECK(out[cr::kRbGroup] ==
+              static_cast<uint8_t>(cr::recipe_group_bit(cat[i].group) | cr::kRbRecipeBookBit));
+        CHECK((out[cr::kRbGroup] & cr::kRbRecipeBookBit) != 0);
+    }
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
@@ -490,6 +529,7 @@ int main() {
     test_three_slot_stack_rules();
     test_chaos_scroll_recipe();
     test_scaled_jewel_value();
+    test_recipe_book_bit_invariant();
     std::printf("custom_recipe_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
