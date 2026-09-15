@@ -123,6 +123,11 @@ inotia4-qol-lsposed/
 │   └── maintenance/                  # 维护与一致性检查
 ├── tools/                            # 第三方工具本体，不放运行输出
 ├── apk/                              # 输入物与静态数据
+│   ├── game-apk/                     # 输入游戏 APK（history/ 为历史版本）
+│   ├── decoded/                      # apktool 解码产物：smali、res、assets、lib（大修 / monster）
+│   ├── decompiled/                   # jadx 反编译产物：sources、resources（大修 / monster）
+│   ├── static-data/                  # 解析后的静态数据：json/tables、text、maps、snasys、raw
+│   └── game-update-log/              # 改版作者更新说明存档
 ├── output/                           # 最终 APK 交付物
 ├── archive/                          # 非当前实现依据的归档材料
 └── .tmp/                             # 按任务隔离的一次性临时文件，完成后清理

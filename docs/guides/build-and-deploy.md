@@ -23,6 +23,10 @@
 | apksigner / zipalign / aapt2 / d8 | 签名/对齐/资源编译/dex 转换 | build-tools 37.0.0 |
 | uber-apk-signer | 一键签名+对齐+验证 | 1.3.0 |
 
+> 静态分析工具与已就绪产物配套使用：`apktool`（`/usr/bin/apktool`）、`jadx`（`/usr/bin/jadx`）、NDK `llvm-objdump`（`tools/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/`）。
+> `apk/` 下已有可直接读取的分析结果：`decoded/`（apktool 解码：smali/res/assets/lib）、`decompiled/`（jadx：sources/resources）、`static-data/`（解析后的 JSON）。
+> 符号与 VMA 以 `module/app/src/main/cpp/data/native/game_symbols.h` + `symbol_registry.h` 为准。
+
 ### C. 模块开发链 ✅（全部就绪）
 
 | 程序 | 用途 | 状态 |
