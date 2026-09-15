@@ -24,17 +24,17 @@ struct Expected {
 };
 
 static constexpr Expected kExpected[] = {
-    {35185, "伤害"},
-    {35186, "魔攻"},
-    {35187, "防御"},
-    {35189, "暴击"},
-    {35190, "命中"},
-    {35191, "爆伤"},
-    {35192, "毒抗"},
-    {35193, "魔抗"},
-    {35194, "回避"},
-    {35195, "武防"},
-    {35196, "盾防"},
+    {35185, "物攻"},    // DMG   物理攻击力
+    {35186, "法攻"},    // M. DMG 魔法攻击力
+    {35187, "防御力"},  // DEF   防御力
+    {35189, "暴击率"},  // CRT   暴击率
+    {35190, "命中率"},  // H.RATE 命中率
+    {35191, "爆伤"},    // C.DMG 暴击伤害（两字：用户裁决优于「暴击伤」）
+    {35192, "物抗"},    // P.RES 物理抗性（修正早前的错误标签「毒抗」）
+    {35193, "法抗"},    // M. RES 魔法抗性
+    {35194, "闪避率"},  // EVD   闪避率
+    {35195, "武器格挡"},  // W.D.R 武器格挡率
+    {35196, "盾牌格挡"},  // S.D.R 盾牌格挡率
 };
 static constexpr size_t kExpectedCount = sizeof(kExpected) / sizeof(kExpected[0]);
 
@@ -67,14 +67,14 @@ static void test_table_shape() {
     CHECK(kEntries[0].text_id == charinfo_zh::kTextIdMin);
     CHECK(kEntries[kEntryCount - 1].text_id == charinfo_zh::kTextIdMax);
 
-    // 每个非空文案必须是纯中文 UTF-8：整串由 3 字节序列组成（CJK 区 U+4E00..U+9FFF
-    // 的首字节落在 0xE4..0xE9），长度 >= 6B（2 汉字）。
+    // 每个非空文案必须是**二至四个汉字**的纯中文 UTF-8（即长度上限四字）：整串恰 6 / 9 / 12 字节，
+    // 由 3 字节序列组成（CJK 区 U+4E00..U+9FFF 的首字节落在 0xE4..0xE9）。上限来自面板布局（用户裁决）。
     bool texts_ok = true;
     for (size_t i = 0; i < kEntryCount; ++i) {
         const char* zh = kEntries[i].zh;
         if (zh == nullptr) continue;
         const size_t len = std::strlen(zh);
-        if (len < 6 || len % 3 != 0) texts_ok = false;
+        if (len != 6 && len != 9 && len != 12) texts_ok = false;
         for (size_t b = 0; b + 2 < len; b += 3) {
             const unsigned char c0 = static_cast<unsigned char>(zh[b]);
             const unsigned char c1 = static_cast<unsigned char>(zh[b + 1]);
