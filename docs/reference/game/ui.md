@@ -126,7 +126,7 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 
 | 类型 | 判定 | 机制 |
 |---|---|---|
-| `agreement`（Java 层，优先于全部 native 检测） | 前台 Activity = `AgreementUIActivity`（`UiActivityTracker` 反射） | 同意页：options `[ok 同意]`；select ok 定位并点击「同意」元素关闭（`AgreementPopup`，WebView 注入 JS）；启动经 `AgreementGate` hook 拦截，仅 main_menu 且非进档宽限期放行（离线时不弹出） |
+| `agreement`（Java 层，优先于全部 native 检测） | 前台 Activity = `AgreementUIActivity`（`UiActivityTracker` 反射） | 同意页：options `[ok 同意]`；select ok 走 `AgreementPopup` 反射放行（置 `destroyParentActivity=false` + `closeAgreementUI(1000)`），只关页不结束游戏（系统返回键会连带 `finish()` 游戏主 Activity，不可用作关闭手段，见 `save.md` §15）；启动经 `AgreementGate` hook 拦截，仅 main_menu 且非进档宽限期放行（离线时不弹出） |
 | `dialog_popup` | `UIPopupMsg_bOn`（G_POPUP_ON @0x3070e8） | 弹窗：`UIPopupMsg_pText`（文本指针）+ `fpOK`/`fpCancel`（回调指针，非空=有按钮）；`UIPopupMsg_i32Type`/`i32DisplayType` |
 | `dialog_story` | `data_story_active()` | 剧情 AVG（EVTSYSTEM 驱动），`Event_ButtonOKExe`/`Event_ButtonSkipExe` 推进/跳过 |
 | `dialog_npc` | `UICHOICE_nItemCount`/`NPCTASKLIST_nCount` | NPC 对话：`UICHOICE_pItemText`（6×8B 选项文本指针）+ `NPCTASKLIST` 槽数组（32×16B：+0 type/+2 id/+8 文本指针）；`UINpc_InitNPC` 建 NPCBOX+任务列表 |

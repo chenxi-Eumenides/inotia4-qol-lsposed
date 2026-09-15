@@ -1294,7 +1294,7 @@
 **返回格式**：`{"ok":true}` 或 `{"ok":false,"error":<原因>}`
 
 **支持动作**（✅ v0.5.6 实机验证）：
-- agreement（Java 层同意页，主菜单前）：`ok`（同意——定位同意页内的「同意」元素并点击，返回 `{"ok":true,"result":"tap_dispatched"}`，关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；若在页面刚出现瞬间点击可能因未就绪被吞掉，重试 `ok` 即可）；其他动作→`no such option in agreement`
+- agreement（Java 层同意页，主菜单前）：`ok`（同意——反射走 SDK 自身的放行分支关闭同意页且**不结束游戏**，返回 `{"ok":true,"result":"close_dispatched"}`；关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；同意页开场动画期间模块在主线程等待就绪后自动关闭（最多约 3s），调用方在页面刚可见时立刻调用也能一次成功；仅当同意页结构不可用时返回 `{"ok":false,"error":"agreement window unavailable"}`）；其他动作→`no such option in agreement`
 - popup：`ok`/`cancel`（UIPopupMsg 官方按钮）
 - story：`next`（下一句）/`skip`（跳过）
 - npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）

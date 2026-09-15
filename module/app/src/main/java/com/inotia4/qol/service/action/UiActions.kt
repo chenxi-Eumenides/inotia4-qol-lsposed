@@ -31,7 +31,7 @@ internal object UiActions {
                     if (activity == null || !AgreementPopup.dismiss(activity)) {
                         JsonUtil.err("agreement window unavailable")
                     } else {
-                        JSONObject().put("ok", true).put("result", "tap_dispatched").toString()
+                        JSONObject().put("ok", true).put("result", "close_dispatched").toString()
                     }
                 } else {
                     JsonUtil.err("no such option in agreement")

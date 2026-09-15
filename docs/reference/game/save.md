@@ -240,7 +240,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - patch 下进入 save0 后原生保存返回 `ok=true`、`map_id=30`、`leader_slot=0`、`party_count=1`。
 - 移除 patch 并重启，在同意页关闭后无 patch 进入 save0；最终 `/api/ui` 为 `screen=world`，`/api/system/info` 显示 save0 `hero_level=1`、`hero_index=0`，`/api/health` 为 `ok=true`。
 - 修复 `data_save_slots_json()`：仅主菜单 `state=4` 调用 `SAVE_CreateSaveSlot()` 刷新槽区；world/启动过渡阶段只读槽结构，避免查询 `/api/system/info` 覆盖角色运行时全局。
-- 启动确认弹窗的 native `UIPopupMsg` 现在优先于状态机参与 `screen` 判定；`enter_slot` 检测到活动弹窗返回 `ui occupied: dialog_popup`。Android `AgreementUIActivity` 属于 Java 同意页，不由 native `UIPopupMsg` 表示，独立为 `screen=agreement`（Kotlin 层覆盖，与 native 弹窗以 in_world 守卫分域）；`enter_slot`/`create_slot` 在同意页存在时返回 `ui occupied: agreement`，`dialog/select {"action":"ok"}` 定位并点击同意页的「同意」元素关闭。
+- 启动确认弹窗的 native `UIPopupMsg` 现在优先于状态机参与 `screen` 判定；`enter_slot` 检测到活动弹窗返回 `ui occupied: dialog_popup`。Android `AgreementUIActivity` 属于 Java 同意页，不由 native `UIPopupMsg` 表示，独立为 `screen=agreement`（Kotlin 层覆盖，与 native 弹窗以 in_world 守卫分域）；`enter_slot`/`create_slot` 在同意页存在时返回 `ui occupied: agreement`，`dialog/select {"action":"ok"}` 走 `AgreementPopup` 反射放行关闭同意页（见 §15）。
 
 ## 13. 2026-08-28 裸窗口损坏实测与同意页启动拦截
 
@@ -260,3 +260,16 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 缺失容忍：wh4 不存在时 `sub_3f14` 走 ENOENT 分支放行（返回 0），游戏会在下次成功读档后**自行重建**本机可用的同名 wh4（实测：重建版 md5 与导入版不同，且可正常再次进档）。
 - 模块对策：导入时按本机密钥逐个校验 wh4 容器，失败者不写盘（`development/features/save-backup.md` §5 第 7 步）；已真机验证"导入同一 bundle → 跳过 2 个 wh4 → `enter_slot(1)` 正常进入世界、角色与三人队伍完整"。
 - 变体/能力识别：模块用 `libgame.so` 校验值查离线表（生成脚本 `scripts/data/game_variant_table.py` → `data/native/game_variant_table.inc`），并以 `qol::game_feature_state()` 暴露"该构建是否具备个人仓库 / 内嵌写法 / 伴生文件机制"，供存档处理分支使用。
+
+## 15. 2026-09-15 同意页返回键语义与退出收尾崩溃
+
+结论来源：`apk/decompiled/monster/sources/com/com2us/module/activeuser/useragree/`（jadx），真机 `192.168.3.54:5555`。
+
+- **返回键不是「关闭弹窗」，是「不同意并退出游戏」**：`AgreementUIActivity.onKeyDown` 对 `KEYCODE_BACK` 先 `webView.loadUrl("javascript:backKeyPressed();")`，第一次按下只 `Toast(tm.getBackKeyText())` + 置 `backKeyFlag` + 2s 后复位；第二次才 `closeAgreementUI(destroyParentActivity ? -1 : 0)`，且两种情况都 `return false`（不消费事件）。
+- **关页与退游由一个布尔字段解耦**：`AgreementUIActivity.destroyParentActivity` 默认 `true`（`:94`），`onDestroy` 里 `if (destroyParentActivity) UserAgreeManager.getInstance().getActivity().finish();`（`:746-748`）会 finish 掉游戏主 Activity。返回键路径从不把它置 false，故按返回必然带走游戏本体。
+- **游戏主 Activity 不处理返回键**：`wrapper/kernel/CWrapperActivity.onKeyDown` 对 `KEYCODE_BACK` 直接 `return false`，无 `onBackPressed` 覆写、无双击退出。因此退出与「返回键落到游戏本体」无关；直接反射调 `AgreementUIActivity.onBackPressed()`（不经任何按键事件）同样导致退出，即为反证。
+- **`closeAgreementUI(int)` 参数语义**（`UserAgreeAnimation.closeAgreementUI`，自带 `!isOpened || isAnimation` 守卫）：`-1` = 拒绝/退出；`0` = 跳过放行；`1000` = SDK 自身的「已放行」值（写 `AGREEMENT_PRIVACY_PROPERTY` 并 `setAgreementCountryAndVersionInfo`），`>=0` 才会回调 `onUserAgreeResult` → `ActiveUser.executeModules()`。
+- **退出收尾崩溃是游戏自身内存 bug，与模块无关**：同意页 finish 带走主 Activity 后，`CWrapperActivity.onDestroy` → `CWrapperKernel.onDestroy` 并在 500ms 后 `System.exit(0)`；收尾中 `CWrapperData.nativeFinalize` 释放非法指针触发 `Scudo ERROR: invalid chunk state when deallocating` → SIGABRT。用纯 `adb shell input keyevent 4` 连按两次（零模块接口）复现同栈同 abort。
+- **模块对策**：`AgreementPopup` 复刻 SDK 自身的「pass Agreement UI」分支（`:344-345` 本地协议数据缺失 + 版本属性存在时的自动放行）——反射置 `destroyParentActivity = false` 后调 `closeAgreementUI(1000)`，同意页正常播完关闭动画并通知 `ActiveUser`，游戏继续停在主菜单；不注入触摸、不依赖 DOM 与 payload。未写 `AGREEMENT_VERSION_PROPERTY`（该属性只在 H5 回调 `c2s://activeuser?agreement=…` 分支写），故下次冷启动同意页仍会弹出，由同一接口再关一次。
+- 未开场完成（`isOpened == false` 或 `isAnimation == true`）时 `closeAgreementUI` 会被静默吞掉；`AgreementPopup.dismiss` 因此在主线程按 150ms 间隔轮询就绪（上限 20 次 ≈ 3s）后自行关闭——调用方在同意页刚可见时立刻发 `select ok` 也能一次成功，时序由模块内部消化。
+- **同意页弹出条件（本改版）**：原 SDK 的版本/隐私属性比对在 smali 里被两处无条件 `goto` 旁路（`ActiveUser.smali:1986-1991`）成为死代码，只剩一条——`get_agreement` 网关请求（`https://activeuser.qpyou.cn/gateway.php`，`ActiveUser.java:398`）返回非 null 响应对象就每次冷启动必弹；请求失败/离线走 `withoutLocalAgreeShow()`（`:401-412, 506-524`）静默放行，不弹。弹的内容被硬编码为本地 asset `common/ActiveUserAgreement/1417772988_M11_5.html`（CN/460 → version 5）。模块侧另有 `AgreementGate` 在非 `main_menu` 或进档宽限期内丢弃启动。

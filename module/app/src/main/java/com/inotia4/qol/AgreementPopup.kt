@@ -1,124 +1,118 @@
 package com.inotia4.qol
 
 import android.app.Activity
-import android.os.SystemClock
-import android.view.MotionEvent
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.WebView
-import android.widget.TextView
-import java.util.ArrayDeque
+import android.os.Handler
+import android.os.Looper
+import java.lang.reflect.Field
+import java.lang.reflect.Method
 
 /**
- * 关闭 Java 层同意页（AgreementUIActivity）。
+ * 关闭 Java 层同意页（AgreementUIActivity），且不结束游戏。
  *
- * 该页内容为 WebView（HTML），View 树中通常没有原生按钮，因此优先在 View 树中找原生
- * 「同意」文本按钮（其他布局兜底），否则找到 WebView 并注入 JS 定位/点击文本为「同意」
- * 的元素；两条路径都与手动点击走相同的点击管线，不依赖固定坐标或按钮内部实现。
+ * SDK 把「关页」与「退出游戏」解耦在 `AgreementUIActivity.destroyParentActivity`（默认 true）上：
+ * 该字段为 true 时同意页 `onDestroy` 会 `finish()` 掉游戏主 Activity。系统返回键路径从不把它置
+ * false，所以按返回必然带走游戏本体（真机实测：连按两次返回 → 同意页正常关闭 → 游戏退回桌面，
+ * 并在退出收尾时触发游戏侧 `CWrapperData_nativeFinalize` 的 Scudo abort）。
+ *
+ * 这里复刻 SDK 自身的「pass Agreement UI」分支（本地协议数据缺失且版本属性已存在时的自动放行，
+ * 见 AgreementUIActivity.java:344-345）：反射置 `destroyParentActivity = false`，再调
+ * `UserAgreeAnimation.closeAgreementUI(1000)` → 播关闭动画 → `UserAgreeManager.onUserAgreeResult(1000)`
+ * → `ActiveUser.executeModules()` → 同意页 finish，游戏继续停在主菜单。不注入触摸、不依赖 DOM 与 payload。
+ *
+ * `closeAgreementUI` 自带 `!isOpened || isAnimation` 守卫，同意页开场动画期间调用会被静默吞掉，
+ * 而调用方是在页面刚可见时立刻发请求，因此这里在主线程上自己等就绪（最多约 3s）后再关，
+ * 不把时序问题丢给调用方。
+ *
+ * 已知代价：该分支不写 `AGREEMENT_VERSION_PROPERTY`（那是 H5 回调
+ * `c2s://activeuser?agreement=…` 分支写的），所以下次冷启动同意页仍会照常弹出，由本接口再关一次。
  */
 object AgreementPopup {
-    private const val TAP_DURATION_MS = 80L
-    private const val AGREE_TEXT = "同意"
+    private const val FIELD_DESTROY_PARENT = "destroyParentActivity"
+    private const val FIELD_ANIMATION = "userAgreeAnimation"
+    private const val FIELD_OPENED = "isOpened"
+    private const val FIELD_ANIMATING = "isAnimation"
+    private const val METHOD_CLOSE = "closeAgreementUI"
 
-    private const val JS_CLICK_AGREE = """
-(function(){
-  var els = document.querySelectorAll('*');
-  var best = null;
-  for (var i = 0; i < els.length; i++) {
-    var e = els[i];
-    if (e.offsetParent === null) continue;
-    if ((e.textContent || '').trim() !== '同意') continue;
-    if (!best || best.contains(e)) best = e;
-  }
-  if (!best) return 'notfound';
-  var c = best;
-  for (var j = 0; j < 6 && c; j++) {
-    if (c.onclick || c.tagName === 'A' || c.tagName === 'BUTTON' ||
-        c.getAttribute('role') === 'button') {
-      c.click();
-      return 'clicked:' + c.tagName;
-    }
-    c = c.parentElement;
-  }
-  best.click();
-  return 'clicked-self:' + best.tagName;
-})()
-"""
+    /** `closeAgreementUI` 参数：-1 = 拒绝并退出、0 = 跳过放行、1000 = SDK 自身的「已放行」值。 */
+    private const val RESULT_PASSED = 1000
 
-    /** 关闭同意页；未找到可点击目标或窗口已销毁时返回 false。点击异步生效，调用方随后
-     *  轮询 /api/ui/screen 直到 main_menu。 */
+    private const val READY_RETRY_INTERVAL_MS = 150L
+    private const val READY_RETRY_MAX = 20
+
+    /** 关闭同意页且保留游戏主 Activity；同意页结构不可用时返回 false。关闭异步生效，
+     *  调用方随后轮询 `/api/ui/screen` 直到 `main_menu`。 */
     fun dismiss(activity: Activity): Boolean {
-        val decor = activity.window?.decorView ?: return false
+        if (activity.isFinishing || activity.isDestroyed) return false
+        val animation = userAgreeAnimation(activity) ?: return false
+        val closeMethod = closeMethod(animation) ?: return false
+        val keepParent = parentField(activity) ?: return false
 
-        findAgreeTextView(decor)?.let { return dispatchTap(activity, decor, it) }
+        val handler = Handler(Looper.getMainLooper())
+        handler.post(object : Runnable {
+            private var attempts = 0
 
-        val webView = findWebView(decor) ?: return false
-        activity.runOnUiThread {
-            try {
-                webView.evaluateJavascript(JS_CLICK_AGREE) { result ->
-                    LogFile.info(LogDomain.PLATFORM, "agreement js click: $result")
-                }
-            } catch (t: Throwable) {
-                LogFile.error(LogDomain.PLATFORM, "agreement js click failed", t)
-            }
-        }
-        return true
-    }
-
-    private fun dispatchTap(activity: Activity, decor: View, target: View): Boolean {
-        val btnLoc = IntArray(2).also { target.getLocationInWindow(it) }
-        val rootLoc = IntArray(2).also { decor.getLocationInWindow(it) }
-        val x = (btnLoc[0] - rootLoc[0]) + target.width / 2f
-        val y = (btnLoc[1] - rootLoc[1]) + target.height / 2f
-
-        val downTime = SystemClock.uptimeMillis()
-        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
-        val up = MotionEvent.obtain(downTime, downTime + TAP_DURATION_MS, MotionEvent.ACTION_UP, x, y, 0)
-        activity.runOnUiThread {
-            try {
-                decor.dispatchTouchEvent(down)
-                decor.postDelayed({
-                    try {
-                        decor.dispatchTouchEvent(up)
-                    } finally {
-                        up.recycle()
+            override fun run() {
+                if (activity.isFinishing || activity.isDestroyed) return
+                if (!animationReady(animation)) {
+                    if (attempts < READY_RETRY_MAX) {
+                        attempts++
+                        handler.postDelayed(this, READY_RETRY_INTERVAL_MS)
+                    } else {
+                        LogFile.warn(LogDomain.PLATFORM, "agreement never finished opening, close skipped")
                     }
-                }, TAP_DURATION_MS)
-            } finally {
-                down.recycle()
+                    return
+                }
+                try {
+                    keepParent.setBoolean(activity, false)
+                    closeMethod.invoke(animation, RESULT_PASSED)
+                    LogFile.info(LogDomain.PLATFORM, "agreement close dispatched, parent kept")
+                } catch (t: Throwable) {
+                    LogFile.error(LogDomain.PLATFORM, "agreement close dispatch failed", t)
+                }
             }
-        }
+        })
         return true
     }
 
-    private fun findAgreeTextView(root: View): TextView? {
-        var found: TextView? = null
-        walk(root) { v ->
-            if (found == null && v is TextView && v.isShown && v.text?.contains(AGREE_TEXT) == true) {
-                found = v
-            }
+    private fun userAgreeAnimation(activity: Activity): Any? {
+        return try {
+            val field = activity.javaClass.getDeclaredField(FIELD_ANIMATION)
+            field.isAccessible = true
+            field.get(activity)
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.PLATFORM, "agreement animation lookup failed", t)
+            null
         }
-        return found
     }
 
-    private fun findWebView(root: View): WebView? {
-        var found: WebView? = null
-        walk(root) { v ->
-            if (found == null && v is WebView && v.isShown) found = v
+    private fun closeMethod(animation: Any): Method? {
+        return try {
+            animation.javaClass.getMethod(METHOD_CLOSE, Int::class.javaPrimitiveType)
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.PLATFORM, "agreement close method lookup failed", t)
+            null
         }
-        return found
     }
 
-    private inline fun walk(root: View, visit: (View) -> Unit) {
-        val queue = ArrayDeque<View>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val v = queue.removeFirst()
-            if (v.visibility != View.VISIBLE) continue
-            visit(v)
-            if (v is ViewGroup) {
-                for (i in 0 until v.childCount) queue.add(v.getChildAt(i))
-            }
+    private fun parentField(activity: Activity): Field? {
+        return try {
+            activity.javaClass.getDeclaredField(FIELD_DESTROY_PARENT).apply { isAccessible = true }
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.PLATFORM, "agreement parent-flag field lookup failed", t)
+            null
+        }
+    }
+
+    /** `closeAgreementUI` 的守卫条件：未开场完成或动画进行中调它都是空操作。 */
+    private fun animationReady(animation: Any): Boolean {
+        return try {
+            val cls = animation.javaClass
+            val opened = cls.getDeclaredField(FIELD_OPENED).apply { isAccessible = true }.getBoolean(animation)
+            val animating = cls.getDeclaredField(FIELD_ANIMATING).apply { isAccessible = true }.getBoolean(animation)
+            opened && !animating
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.PLATFORM, "agreement animation state read failed", t)
+            false
         }
     }
 }
