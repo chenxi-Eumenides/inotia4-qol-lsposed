@@ -159,8 +159,9 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSetAttr(JNIEnv* env, jclass, jint role
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeOpAddItem(JNIEnv* env, jclass, jint category, jint count) {
-    return op_result(env, "op_add_item", ("category=" + str_of(category) + " " + "count=" + str_of(count)), data_op_add_item(static_cast<int32_t>(category), static_cast<int32_t>(count)));
+Java_com_inotia4_qol_NativeBridge_nativeOpAddItem(JNIEnv* env, jclass, jint category, jint count, jint socket,
+                                                   jint socket_filled, jint enhance, jint enhance_low4, jint rarity) {
+    return op_result(env, "op_add_item", ("category=" + str_of(category) + " " + "count=" + str_of(count) + " " + "socket=" + str_of(socket) + " " + "socketFilled=" + str_of(socket_filled) + " " + "enhance=" + str_of(enhance) + " " + "enhanceLow4=" + str_of(enhance_low4) + " " + "rarity=" + str_of(rarity)), data_op_add_item(static_cast<int32_t>(category), static_cast<int32_t>(count), static_cast<int32_t>(socket), static_cast<int32_t>(socket_filled), static_cast<int32_t>(enhance), static_cast<int32_t>(enhance_low4), static_cast<int32_t>(rarity)));
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

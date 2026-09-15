@@ -130,3 +130,8 @@ Java_com_inotia4_qol_NativeBridge_nativeDebugPathJson(JNIEnv* env, jclass, jint 
     return env->NewStringUTF(data_debug_path_json(static_cast<int32_t>(tx), static_cast<int32_t>(ty)).c_str());
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeDebugItemRawJson(JNIEnv* env, jclass, jint bag, jint slot) {
+    return env->NewStringUTF(data_debug_item_raw_json(static_cast<int32_t>(bag), static_cast<int32_t>(slot)).c_str());
+}
+

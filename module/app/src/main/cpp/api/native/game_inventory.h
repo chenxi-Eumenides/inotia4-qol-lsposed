@@ -11,7 +11,12 @@
 std::string data_op_set_money(int64_t money);
 std::string data_op_add_money(int64_t delta);
 std::string data_op_minus_money(int64_t delta);
-std::string data_op_add_item(int32_t category, int32_t count);
+// socket_total/socket_filled：I_SOCKET bits4-7 总孔数 / bits0-3 已镶嵌数（各 0..15）；
+// enhance_count/enhance_low4：I_ENCHANT bits6-10 已强化次数（0..31）/ bits2-5 未知段位
+// （0..15，语义待实测）。均仅供测试构造；缺省由调用方传 0（CreateItem 产物该两处恒 0，写 0 等价不写）。
+// rarity_group：I_TYPE bits2-5 品质档位（0..4 白绿蓝黄紫），-1 保留 CreateItem 随机掷级；缺省由调用方传 -1。
+std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t socket_filled,
+                             int32_t enhance_count, int32_t enhance_low4, int32_t rarity_group);
 std::string data_op_remove_item(int32_t category);
 
 std::string data_op_jewel(int role, int bag, int slot, int equip_slot);
@@ -34,3 +39,5 @@ void append_item_attrs(std::string& s, void* item);
 // b）。非可堆叠/类别不可用回退 getter 原版语义（装备返回 1）。
 int canonical_item_count(void* item);
 std::string build_inventory_json();
+// 仅测试/调试（GET /api/debug/item/raw）：读槽位物品原始字节并位分解输出，纯读取不写内存。
+std::string data_debug_item_raw_json(int32_t bag, int32_t slot);

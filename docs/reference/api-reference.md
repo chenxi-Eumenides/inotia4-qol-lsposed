@@ -1754,11 +1754,13 @@
 
 `POST /api/op/inventory/add`
 
-**请求格式**：`{ "category": 1, "count": 5 }`
+**请求格式**：`{ "category": 1, "count": 5 }` 或 `{ "category": 1, "count": 1, "socket": 3, "socketFilled": 1, "enhance": 5, "enhanceLow4": 0, "rarity": 4 }`
 
 **返回格式**：`{"ok":true,"state":<Inventory 模型>}`
 
 **注意**：ITEMSYSTEM_CreateItem + INVEN_SaveItem；`stackLimitIncrease=false` 时可堆叠上限 99，开启时上限 999；两种状态都使用固定 bit22-31 格式；背包满→`inventory full`。
+- `socket`/`socketFilled`/`enhance`/`enhanceLow4` 可选（缺省 0；CreateItem 产物这两字段恒 0，缺省写 0 等价不写）：分段直写 `I_SOCKET` bits4-7=总孔数（0..15）/ bits0-3=已镶嵌数（0..15）、`I_ENCHANT` bits6-10=已强化次数（0..31）/ bits2-5=未知低位段（0..15，语义待实测，疑为剩余次数；可用 `/api/debug/item/raw` A/B 观测），用于构造带孔位/强化的测试装备以验证自动出售筛选；越界钳制到区间（负值按 0）。混沌位（bit0）与强化 ID（bits11-15）不动，无副作用；只传 `{category,count}` 时行为不变。
+- `rarity` 可选（缺省 -1）：指定品质档位写入 `I_TYPE` bits2-5（raw grade，读改写保留 bits0-1 与 bits6-15 类别位），0..4 = 白/绿/蓝/黄/紫，用于验证自动出售「品质」筛选；-1 = 保留 CreateItem 的随机掷级。档位→raw 映射取 `{0,4,7,10,11}`，**待真机核实**，档位不符时调整 `game_inventory_basic.inc` 的 `kRarityRawForGroup` 表即可；越界钳制到 [-1,4]（负值视同 -1）。
 
 #### 修改金币
 
@@ -1857,6 +1859,31 @@
 - `static_block_count`：静态瓦片阻挡总数（全量 4096 tile 不逐一输出）
 
 **注意**：DebugController，不走 ControllerGuard。
+
+---
+
+`GET /api/debug/item/raw?bag=&slot=`
+
+**用途**（仅测试/调试）：读取槽位物品的**原始字节 + 位分解**，用于位级 A/B 实测（如一件强化、另一件镶宝石后观察哪一位段变化）。纯读取，不写任何游戏内存。
+
+**参数**：`bag` 0..10（6..10 为扩展袋，经稳定端口 `inventory_item_ref_at` 取物）、`slot` 0..15。
+
+**返回格式**：
+
+```json
+{"ok":true,"bag":0,"slot":14,"kind":"original","category":4,"count":1,
+ "type_raw":"0x0f01","raw_grade":0,
+ "count_raw":"0x00000001",
+ "socket_raw":"0x24","socket_total":2,"socket_filled":4,
+ "enchant_raw":"0x00c0","enchant_count":3,"enhance_low4":0,"enchant_id":0,"chaos":0,
+ "note":"raw fields for bit-level verification"}
+```
+
+- `type_raw`/`count_raw`/`socket_raw`/`enchant_raw`：`I_TYPE`(0x08,u16)/`I_COUNT`(0x10,u32)/`I_SOCKET`(0x19,u8)/`I_ENCHANT`(0x1A,u16) 原始值（hex）
+- 位分解：`raw_grade`=`I_TYPE` bits2-5（品质原始档）；`socket_total`/`socket_filled`=`I_SOCKET` bits4-7/bits0-3；`enchant_count`（bits6-10）/`enhance_low4`（bits2-5，**语义待实测**）/`enchant_id`（bits11-15）/`chaos`（bit0）
+- `count` 为归一化数量（getter 语义），堆叠类完整值以 `count_raw` 解码为准；取不到物品→`{"ok":false,"error":"item not found"}`
+
+**注意**：DebugController，走 ControllerGuard；bag/slot 越界→400。
 
 ---
 

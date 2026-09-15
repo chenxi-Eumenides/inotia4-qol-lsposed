@@ -27,6 +27,14 @@ class DebugController {
     fun path(@RequestParam("tx") tx: Int, @RequestParam("ty") ty: Int): String =
         ControllerGuard.guard { ApiServices.info.debugPath(tx, ty) }
 
+    /** 仅测试/调试：读槽位物品原始字节 + 位分解（纯读取，bag 0..10 含扩展袋） */
+    @GetMapping("/api/debug/item/raw")
+    fun itemRaw(@RequestParam("bag") bag: Int, @RequestParam("slot") slot: Int): String {
+        if (bag < 0 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (0-10)")
+        if (slot < 0 || slot > 15) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot required (0-15)")
+        return ControllerGuard.guard { ApiServices.info.debugItemRaw(bag, slot) }
+    }
+
     @GetMapping("/api/debug/exp/status")
     fun expStatus(): String = ControllerGuard.guard { ApiServices.info.expStatus() }
 

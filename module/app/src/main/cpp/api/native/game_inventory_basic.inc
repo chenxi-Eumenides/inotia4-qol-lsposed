@@ -44,7 +44,8 @@ std::string data_op_add_money(int64_t delta) {
     return r ? op_ok() : op_err("add money failed");
 }
 
-std::string data_op_add_item(int32_t category, int32_t count) {
+std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t socket_filled,
+                             int32_t enhance_count, int32_t enhance_low4, int32_t rarity_group) {
     if (!game_in_world()) return op_err("not in game");
     if (count <= 0) return op_err("bad count");
     if (fn_create_item == nullptr || fn_inven_save_item == nullptr || fn_inven_find_save_slot == nullptr ||
@@ -53,6 +54,39 @@ std::string data_op_add_item(int32_t category, int32_t count) {
     // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
     void* item = fn_create_item(category, 0, 0, 0);
     if (item == nullptr) return op_err("create item failed");
+    // 孔位/强化构造（仅测试用，验证自动出售筛选 + 位级 A/B 实测）：CreateItem 产物
+    // I_SOCKET/I_ENCHANT 恒为 0，各段缺省 0 时写入等价于不写。分段读改写、保留其余位：
+    // I_SOCKET bits4-7=总孔数（0..15）、bits0-3=已镶嵌数（0..15）；
+    // I_ENCHANT bits6-10=已强化次数（0..31）、bits2-5=enhance_low4（0..15，语义待实测，
+    // 疑为剩余次数）、bits11-15=强化 ID 不动（保持 0 → 零副作用）、bit0-1（混沌等）不动。
+    // 消费方（自动出售筛选、图标、战斗）均为即时位域直读，无派生缓存需同步。
+    // 负值按 0，超上限钳到上限（socket_total/socket_filled/enhance_low4 15，enhance_count 31）。
+    if (socket_total < 0) socket_total = 0;
+    if (socket_total > 15) socket_total = 15;
+    if (socket_filled < 0) socket_filled = 0;
+    if (socket_filled > 15) socket_filled = 15;
+    if (enhance_count < 0) enhance_count = 0;
+    if (enhance_count > 31) enhance_count = 31;
+    if (enhance_low4 < 0) enhance_low4 = 0;
+    if (enhance_low4 > 15) enhance_low4 = 15;
+    uint8_t* p_socket = reinterpret_cast<uint8_t*>(item) + I_SOCKET;
+    *p_socket = static_cast<uint8_t>((*p_socket & 0x0F) | ((socket_total & 0x0F) << 4));
+    *p_socket = static_cast<uint8_t>((*p_socket & 0xF0) | (socket_filled & 0x0F));
+    uint16_t* p_enchant = reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_ENCHANT);
+    *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x1F << 6)) | ((enhance_count & 0x1F) << 6));
+    *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x0F << 2)) | ((enhance_low4 & 0x0F) << 2));
+    // 品质构造（仅测试用，验证自动出售品质筛选）：CreateItem 的 ApplyGrade 会随机掷
+    // I_TYPE bits2-5 raw grade；rarity_group=-1（缺省）保留随机，0..4 指定档位
+    // （白/绿/蓝/黄/紫）。其余值钳到 [-1,4]：所有负值视同 -1，>4 视同 4。
+    // 读改写只动 bits2-5，保留 bits0-1 与 bits6-15（后者是 category，写坏会变成别的物品）。
+    static constexpr uint8_t kRarityRawForGroup[5] = {0, 4, 7, 10, 11};  // 档位→raw_grade，映射待真机核实（ITEMGRADEBASE[raw].+4 rarity_group）
+    if (rarity_group < -1) rarity_group = -1;
+    if (rarity_group > 4) rarity_group = 4;
+    if (rarity_group >= 0) {
+        const uint8_t raw = kRarityRawForGroup[rarity_group];
+        uint16_t* p_type = reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+        *p_type = static_cast<uint16_t>((*p_type & ~(0x0F << 2)) | ((raw & 0x0F) << 2));
+    }
     // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（与 ITEM_GetCumulateCount 同源）。
     // 类别表不可用时拒绝多数量写入，不能把未知类别当作可堆叠物品。
     const stack_codec::CountEncoding count_encoding = item_count_encoding(item);

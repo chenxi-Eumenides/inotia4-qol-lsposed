@@ -7,6 +7,7 @@ import com.inotia4.qol.util.JsonUtil
 internal object InfoSystemQueries {
     fun debugUi(): String = NativeBridge.nativeGetDebugUiJson()
     fun debugPath(tx: Int, ty: Int): String = NativeBridge.nativeDebugPathJson(tx, ty)
+    fun debugItemRaw(bag: Int, slot: Int): String = NativeBridge.nativeDebugItemRawJson(bag, slot)
     fun exp1BtnBehavior(): String = NativeBridge.nativeExp1BtnBehavior()
     fun exp2AddControl(): String = NativeBridge.nativeExp2AddControl()
     fun exp3CustomDialog(text: String): String = NativeBridge.nativeExp3CustomDialog(text)

@@ -64,6 +64,7 @@ object NativeBridge {
     external fun nativeGetPathJson(tx: Int, ty: Int): String
     external fun nativeDistanceJson(tx: Int, ty: Int): String
     external fun nativeDebugPathJson(tx: Int, ty: Int): String
+    external fun nativeDebugItemRawJson(bag: Int, slot: Int): String
 
     external fun nativeOpSetMoney(money: Long): String
     external fun nativeOpAddMoney(delta: Long): String
@@ -75,7 +76,7 @@ object NativeBridge {
     external fun nativeOpSetHp(role: Int, hp: Int): String
     external fun nativeOpSetMp(role: Int, mp: Int): String
     external fun nativeOpSetAttr(role: Int, attrIndex: Int, value: Int): String
-    external fun nativeOpAddItem(category: Int, count: Int): String
+    external fun nativeOpAddItem(category: Int, count: Int, socket: Int, socketFilled: Int, enhance: Int, enhanceLow4: Int, rarity: Int): String
     external fun nativeOpAddStat(role: Int, attr: Int): String
     external fun nativeOpStatReset(role: Int): String
     external fun nativeOpSkillReset(role: Int): String

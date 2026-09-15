@@ -374,6 +374,7 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun debugUi(): String = InfoSystemQueries.debugUi()
     override fun debugPath(tx: Int, ty: Int): String = InfoSystemQueries.debugPath(tx, ty)
+    override fun debugItemRaw(bag: Int, slot: Int): String = InfoSystemQueries.debugItemRaw(bag, slot)
     override fun exp1BtnBehavior(): String = InfoSystemQueries.exp1BtnBehavior()
     override fun exp2AddControl(): String = InfoSystemQueries.exp2AddControl()
     override fun exp3CustomDialog(text: String): String = InfoSystemQueries.exp3CustomDialog(text)

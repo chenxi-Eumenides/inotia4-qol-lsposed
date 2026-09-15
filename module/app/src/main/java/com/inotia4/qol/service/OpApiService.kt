@@ -20,7 +20,7 @@ interface OpApiService {
     fun setExperience(role: Int, exp: Long): String
     fun setLevel(role: Int, level: Int, force: Boolean): String
     fun setAttr(role: Int, stats: List<Pair<Int, Int>>): String
-    fun addItem(category: Int, count: Int): String
+    fun addItem(category: Int, count: Int, socket: Int, socketFilled: Int, enhance: Int, enhanceLow4: Int, rarity: Int): String
     fun setMoney(money: Long): String
     fun setStatusPoint(role: Int, points: Int): String
     fun partySwap(a: Int, b: Int): String
@@ -85,10 +85,13 @@ class OpApiServiceImpl : OpApiService {
         }
     }
 
-    override fun addItem(category: Int, count: Int): String {
+    // socket/socketFilled：总孔数/已镶嵌数；enhance/enhanceLow4：已强化次数/未知低位段（待实测）；
+    // 缺省 0（CreateItem 产物恒 0，写 0 等价不写），钳制在 native 侧；
+    // rarity：品质档位 0..4 白绿蓝黄紫（缺省 -1 保留随机），同样钳制在 native 侧
+    override fun addItem(category: Int, count: Int, socket: Int, socketFilled: Int, enhance: Int, enhanceLow4: Int, rarity: Int): String {
         checkOpEnabled()
-        return LogFile.op(LogDomain.OP, "POST /api/op/inventory/add", mapOf("category" to "$category", "count" to "$count")) {
-            NativeBridge.nativeOpAddItem(category, count)
+        return LogFile.op(LogDomain.OP, "POST /api/op/inventory/add", mapOf("category" to "$category", "count" to "$count", "socket" to "$socket", "socketFilled" to "$socketFilled", "enhance" to "$enhance", "enhanceLow4" to "$enhanceLow4", "rarity" to "$rarity")) {
+            NativeBridge.nativeOpAddItem(category, count, socket, socketFilled, enhance, enhanceLow4, rarity)
         }
     }
 
