@@ -114,6 +114,9 @@
 | 1 | 皮革(35) + 空 + 魔法衣料(41) | 是 | 背包（大）(4) |
 | 2 | 恢复药水（小）(5) ×2 + 低级武器强化卷轴(16) | 否 | 顶级宝石(31) |
 | 3–6 | 3 个同级宝石 28/29/30/31 → 29/30/31/32 | 否 | 高一级宝石（含 顶级→混沌） |
+| 7 | **任意宝石(28..32) + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25)** | **是** | **该宝石自身（同类别），数值 ×1.1** |
+
+第 7 条的槽位是**通配宝石槽**（`kAnyJewelSlot`：任意 28..32）+ 两个固定卷轴类别，**顺序严格**（卷轴换位、缺格、第 1 格非宝石均不命中）。产物沿用源宝石的类别、随机等级（bits11-17）与属性类型（bits18-23），**只把数值位（bits0-10）按 ×1.1 向下取整**并钳到上限 2047。类别依据：`ITEMDATABASE.json` 实证类别 20 → text_id 50「混沌武器强化卷轴」、类别 25 → 55「混沌防具强化卷轴」（全表满足「类别 = 名称 text_id − 30」）。
 
 - **扣料**：不可堆叠槽按对象整堆删；**可堆叠槽只扣 1 个单位**（不是整堆）；多格引用同一堆时逐格各扣 1。
 - **拒绝**：未命中配方 → 弹「材料不足。无法进行合成。」且**不消耗任何材料**；扣料前复核库存，不足则中止（**不消耗、不产出**，fail-closed）。
@@ -493,7 +496,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 | 配方表 | `custom_recipe_catalog.{h,cpp}` 的 `ThreeSlotRecipe` / `three_slot_recipes()` / `match_three_slot()`（唯一真源；纯逻辑，host 可直接断言） |
 | 放料 | `custom_place_wrapper` → `place_three_slot_item()`：type==1 且命中 `kThreeSlotCraft` 时**不转调原函数** —— 取选中背包物（`[+0xd8]` → `ControlObject_GetCursor` → `GetData` → `*`）→ 读 `[+0x128]` → 查重/上限判定 → `UIDesc_SetOff`（与原版放料前一致）→ `ControlItem_SetItem(ControlObject_GetChild([+0xc8], idx), item)` |
 | 合成 | `custom_mixing_wrapper` → `mix_three_slot_craft()`：读 3 格类别 → `match_three_slot`；未命中弹 94 并返回；命中则记入模块全局 `g_pending_three_slot` 并弹**原生 YesNo**（文本 18；回调 = 模块的 `three_slot_craft_callback`；第 6 参 `param` **必须传 nullptr** —— 该位会被当钱数渲染，上下文只能走模块自有全局） |
-| 产物与扣料 | 回调内**重读 3 格**（确认框停留期间可能被改动）→ **库存复核**（可堆叠堆的「需扣单位数 ≤ 当前数量」，不足弹 94 并**中止**）→ 逐格扣料（不可堆叠 `INVEN_RemoveItem`；可堆叠 `INVEN_RemoveItemData(category, 1)`）→ `ITEMSYSTEM_CreateItem(product,0,0,0)` → `INVEN_SaveItem(item, nullptr)`（唯一入包漏斗，**扩展袋 R-56/R-52 自动生效**）；入库失败按原版判据 `ITEMPOOL_Free` + 弹 5 |
+| 产物与扣料 | 回调内**重读 3 格**（确认框停留期间可能被改动）→ **库存复核**（可堆叠堆的「需扣单位数 ≤ 当前数量」，不足弹 94 并**中止**）→ 逐格扣料（不可堆叠 `INVEN_RemoveItem`；可堆叠 `INVEN_RemoveItemData(category, 1)`）→ `ITEMSYSTEM_CreateItem(product,0,0,0)` → `INVEN_SaveItem(item, nullptr)`（唯一入包漏斗，**扩展袋 R-56/R-52 自动生效**）；入库失败按原版判据 `ITEMPOOL_Free` + 弹 5。**`ProductMode::kScaleFirstItem`（第 7 条配方）额外要求**：在**扣料前**抓取第 1 格物品的类别与宝石字（`item+0x10`）——扣料会销毁该对象、指针随即失效；第 1 格已非宝石（确认框停留期间被换）→ 弹 94 并**中止，不消耗不产出**；产物类别取第 1 格类别，创建后只把数值位（bits0-10）改写为 `scaled_jewel_value(value, 1100)`，等级/属性类型位原样搬用 |
 | 收尾 | 照原版 `UIMix_StartMix` 成功序列：`UIMix_InitMixingState` → `UIMix_ResetStuffItemControl` → `UIMix_RefreshInvenItem` → `SOUNDSYSTEM_Play(9)` → 弹 106 |
 | 与 gemcraft 共存 | gemcraft 的合成 gate 是「3 格填满且同档 28..31 → 改写 `[+0x48]=12+(cat−28)`；填满但混档/超界 → 弹 98 拦截」⇒ **会先拦掉本模式**。故在其 gate **最前面**加一条：`custom_recipe_three_slot_mode_active()` 为真 → 直接 `call_orig` 返回；gemcraft 其余逻辑一律不动 |
 | 数量判定 | 上限与复核都用**游戏自带的类别持有总数** `INVEN_GetItemCount(category)@0x104260`（`fn_inven_get_item_count`）；判定式抽为 `custom_recipe_rules.{h,cpp}` 的 `slot_add_allowed(placed_slots, held_count)` 与 `stack_units_available(units, held_count)`（纯逻辑 + host 断言） |

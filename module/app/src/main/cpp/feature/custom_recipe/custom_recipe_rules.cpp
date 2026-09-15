@@ -116,4 +116,14 @@ bool stack_units_available(int units, int stack_count) {
     return stack_count >= units;
 }
 
+int scaled_jewel_value(int value, uint16_t scale_permille) {
+    if (value <= 0) return 0;
+    // 0 视为未配置：fail-closed 返回原值，绝不把数值清零。
+    if (scale_permille == 0 || scale_permille == 1000) return value > kJewelValueMax ? kJewelValueMax : value;
+    const long long scaled =
+        static_cast<long long>(value) * static_cast<long long>(scale_permille) / 1000;
+    if (scaled <= 0) return 0;
+    return scaled > kJewelValueMax ? kJewelValueMax : static_cast<int>(scaled);
+}
+
 }  // namespace custom_recipe

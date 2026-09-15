@@ -60,10 +60,24 @@ constexpr uint32_t kModuleRecipeResultItemId = 0;
 // **匹配键 = 物品类别**（`item + I_TYPE` u16 的 bits6-15；取法同 `item_is_jewel`），
 // 且对本项目用到的物品类别而言 **类别 == itemId**（文档类别表与 itemId 区间一致：
 // 5-8/15 药水、16-25 卷轴、28-32 宝石；`ITEMDATABASE` 记录内无独立类别字段）。
+//
+// 槽位通配符：`kAnyJewelSlot` 表示「该格接受任意宝石类别（28..32）」，**只在 ordered
+// （按槽位严格匹配）行里生效**；unordered 行参与排序比较，不得使用。
+constexpr uint16_t kAnyJewelSlot = 0xFFFF;
+
+// 产物生成方式。
+enum class ProductMode : uint8_t {
+    kFixedCategory,   // 产物 = `product` 类别新建（原版掷值），放料/合成语义不变
+    kScaleFirstItem,  // 产物 = **第 1 格物品自身**（同类别），宝石数值 × `scale_permille/1000`，
+                      // 并保留源物品的随机等级与属性类型（bits11-23 原样搬用）
+};
+
 struct ThreeSlotRecipe {
     uint16_t slots[3];
     bool ordered;      // true=按槽位严格匹配；false=按多重集（顺序无关）
-    uint16_t product;  // 产物类别，交给 ITEMSYSTEM_CreateItem
+    uint16_t product;  // kFixedCategory 的产物类别（kScaleFirstItem 时不使用，填 0）
+    ProductMode product_mode;   // 产物生成方式
+    uint16_t scale_permille;    // kScaleFirstItem 的数值缩放（千分比：1100 = ×1.1；其它模式填 0）
 };
 
 // 3 格配方表（唯一真源）；out_count 回传条目数。表序即匹配优先级（首个命中者胜出）。

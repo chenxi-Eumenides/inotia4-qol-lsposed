@@ -412,6 +412,71 @@ static void test_three_slot_stack_rules() {
     CHECK(cr::stack_units_available(-1, 0));
 }
 
+// ---------------------------------------------------------------------------
+// §2.8 混沌卷轴配方：宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25)
+//                     → 该宝石自身（同类别），数值 ×1.1
+// 第 1 格为通配宝石槽（任意 28..32），且**槽位严格顺序**。
+// ---------------------------------------------------------------------------
+static void test_chaos_scroll_recipe() {
+    size_t n = 0;
+    const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
+    CHECK(recipes != nullptr);
+    CHECK(n == 7);  // 6 条既有配方 + 本条
+
+    // 任意宝石类别都能填第 1 格（通配槽 28..32）。
+    for (uint16_t gem = 28; gem <= 32; ++gem) {
+        const uint16_t slots[3] = {gem, 20, 25};
+        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(slots);
+        CHECK(hit == &recipes[6]);
+        if (hit == &recipes[6]) {
+            CHECK(hit->ordered);
+            CHECK(hit->product_mode == cr::ProductMode::kScaleFirstItem);
+            CHECK(hit->scale_permille == 1100);
+        }
+    }
+    // 顺序严格：换位 / 缺格 / 两格同料 一律不命中（也不得落到其它配方）。
+    const uint16_t wrong_order[3] = {20, 28, 25};
+    CHECK(cr::match_three_slot(wrong_order) == nullptr);
+    const uint16_t wrong_order2[3] = {28, 25, 20};
+    CHECK(cr::match_three_slot(wrong_order2) == nullptr);
+    const uint16_t missing_armor[3] = {28, 20, 0};
+    CHECK(cr::match_three_slot(missing_armor) == nullptr);
+    const uint16_t two_scrolls[3] = {20, 20, 25};
+    CHECK(cr::match_three_slot(two_scrolls) == nullptr);
+    // 第 1 格必须是宝石：塞卷轴不命中。
+    const uint16_t non_jewel[3] = {16, 20, 25};
+    CHECK(cr::match_three_slot(non_jewel) == nullptr);
+
+    // 既有 6 条配方保持「固定类别产物」语义（本次扩展不得改动它们）。
+    for (size_t i = 0; i < 6; ++i) {
+        CHECK(recipes[i].product_mode == cr::ProductMode::kFixedCategory);
+    }
+    const uint16_t leather[3] = {35, 0, 41};
+    const cr::ThreeSlotRecipe* leather_hit = cr::match_three_slot(leather);
+    CHECK(leather_hit != nullptr && leather_hit->product == 4);
+    const uint16_t three_gems[3] = {28, 28, 28};
+    const cr::ThreeSlotRecipe* gem_hit = cr::match_three_slot(three_gems);
+    CHECK(gem_hit != nullptr && gem_hit->product == 29);
+}
+
+// 宝石数值缩放：floor(value × permille / 1000)，钳到 [0, 2047]。
+static void test_scaled_jewel_value() {
+    CHECK(cr::scaled_jewel_value(100, 1100) == 110);
+    CHECK(cr::scaled_jewel_value(10, 1100) == 11);
+    CHECK(cr::scaled_jewel_value(101, 1100) == 111);  // floor(111.1)
+    CHECK(cr::scaled_jewel_value(1, 1100) == 1);      // floor(1.1) = 1，不会变成 0
+    // 1000 千分比 = 原值；0 = 未配置 → fail-closed 返回原值（绝不清零）。
+    CHECK(cr::scaled_jewel_value(500, 1000) == 500);
+    CHECK(cr::scaled_jewel_value(500, 0) == 500);
+    // 上限钳制（bits0-10 = 2047）。
+    CHECK(cr::scaled_jewel_value(2047, 1100) == 2047);
+    CHECK(cr::scaled_jewel_value(2000, 1100) == 2047);
+    CHECK(cr::scaled_jewel_value(2047, 1000) == 2047);
+    // 非正输入。
+    CHECK(cr::scaled_jewel_value(0, 1100) == 0);
+    CHECK(cr::scaled_jewel_value(-5, 1100) == 0);
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
@@ -420,6 +485,8 @@ int main() {
     test_material_count();
     test_module_recipe_desc_constants();
     test_three_slot_stack_rules();
+    test_chaos_scroll_recipe();
+    test_scaled_jewel_value();
     std::printf("custom_recipe_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

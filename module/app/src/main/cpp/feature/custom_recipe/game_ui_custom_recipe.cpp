@@ -333,6 +333,22 @@ void three_slot_craft_callback() {
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
         items[i] = stuff_slot_item(i);
     }
+    // 产物 = 第 1 格物品自身（ProductMode::kScaleFirstItem）时，必须在**扣料前**抓取源物品的
+    // 宝石字与类别：扣料会销毁该对象（不可堆叠 → INVEN_RemoveItem 整堆删），此后指针失效。
+    uint16_t product_category = recipe->product;
+    uint32_t source_jewel_word = 0;
+    bool has_source_jewel = false;
+    if (recipe->product_mode == custom_recipe::ProductMode::kScaleFirstItem) {
+        if (items[0] == nullptr || !item_is_jewel(items[0])) {
+            // 确认框停留期间第 1 格被换成了非宝石 → fail-closed：不消耗、不产出。
+            show_text_data(kTextInsufficientMaterial);
+            return;
+        }
+        product_category = item_category(items[0]);
+        source_jewel_word = *reinterpret_cast<const uint32_t*>(
+            static_cast<const uint8_t*>(items[0]) + I_JEWEL_VALUE_WORD);
+        has_source_jewel = true;
+    }
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
         void* it = items[i];
         if (it == nullptr || !item_is_stackable(it)) continue;
@@ -362,14 +378,31 @@ void three_slot_craft_callback() {
     // 该符号未就绪时退回 CreateItem（fail-safe，仅数值为默认）。
     void* product = nullptr;
     if (fn_item_create_perfect_item != nullptr) {
-        product = fn_item_create_perfect_item(static_cast<int32_t>(recipe->product));
+        product = fn_item_create_perfect_item(static_cast<int32_t>(product_category));
     } else if (fn_create_item != nullptr) {
         QOL_LOG_WARN(QolDomain::kCustomRecipe, "three slot craft fallback reason=no_perfect_item");
-        product = fn_create_item(static_cast<int32_t>(recipe->product), 0, 0, 0);
+        product = fn_create_item(static_cast<int32_t>(product_category), 0, 0, 0);
     }
     if (product == nullptr) {
         show_text_data(kTextNoBagSpace);
         return;
+    }
+    // 数值缩放写回（§2.8 混沌卷轴配方）：只改数值位（bits0-10），保留源宝石的随机等级与
+    // 属性类型（bits11-23 原样搬用）；上限由 scaled_jewel_value 钳到 JEWEL_VALUE_MASK。
+    if (has_source_jewel) {
+        const int new_value = custom_recipe::scaled_jewel_value(
+            static_cast<int>(source_jewel_word & JEWEL_VALUE_MASK), recipe->scale_permille);
+        uint32_t* word_ptr =
+            reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(product) + I_JEWEL_VALUE_WORD);
+        *word_ptr = (source_jewel_word & ~JEWEL_VALUE_MASK) |
+                    (static_cast<uint32_t>(new_value) & JEWEL_VALUE_MASK);
+        if (qol_log_debug_enabled() && g_verify_log_budget.fetch_sub(1) > 0) {
+            QOL_LOG_DEBUG(QolDomain::kCustomRecipe,
+                          "three slot scale category=%u value=%u->%d permille=%u",
+                          static_cast<uint32_t>(product_category),
+                          static_cast<uint32_t>(source_jewel_word & JEWEL_VALUE_MASK), new_value,
+                          static_cast<uint32_t>(recipe->scale_permille));
+        }
     }
     if (fn_inven_save_item == nullptr) {
         QOL_LOG_WARN(QolDomain::kCustomRecipe, "three slot craft abort reason=no_save_item");
@@ -384,7 +417,7 @@ void three_slot_craft_callback() {
     }
     if (qol_log_debug_enabled() && g_verify_log_budget.fetch_sub(1) > 0) {
         QOL_LOG_DEBUG(QolDomain::kCustomRecipe, "three slot crafted product=%u consumed=%d",
-                      static_cast<uint32_t>(recipe->product),
+                      static_cast<uint32_t>(product_category),
                       (items[0] != nullptr) + (items[1] != nullptr) + (items[2] != nullptr));
     }
     finish_three_slot_craft();

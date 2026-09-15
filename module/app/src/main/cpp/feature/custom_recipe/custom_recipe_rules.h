@@ -77,4 +77,16 @@ bool slot_add_allowed(int placed_slots, int held_count);
 // units <= 0 → true（该类别无需扣减）；held_count 不足或为负 → false（调用方须中止且不消耗）。
 bool stack_units_available(int units, int held_count);
 
+// ---- 宝石数值缩放（§2.8「宝石 + 混沌武器卷轴 + 混沌防具卷轴」配方）----
+
+// 宝石数值位的上限（= game_symbols.h 的 JEWEL_VALUE_MASK，item+0x10 的 bits0-10）。
+// 本常量在纯逻辑层独立声明（规则层不引入游戏符号头），两者由 §2.8 文档与真机验收保持同步。
+constexpr int kJewelValueMax = 2047;
+
+// 新数值 = floor(value × scale_permille / 1000)，再钳到 [0, kJewelValueMax]。
+//   scale_permille == 1000 → 原值；1100 → ×1.1（向下取整）；0 → 原值（视为未配置，fail-closed，
+//   避免把数值清零）；value <= 0 → 0。
+// 纯整数运算，无浮点。
+int scaled_jewel_value(int value, uint16_t scale_permille);
+
 }  // namespace custom_recipe

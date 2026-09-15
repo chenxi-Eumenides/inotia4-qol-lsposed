@@ -1,5 +1,7 @@
 #include "custom_recipe_catalog.h"
 
+#include "custom_recipe_rules.h"
+
 namespace custom_recipe {
 
 namespace {
@@ -63,6 +65,10 @@ constexpr size_t kCatalogLen = sizeof(kCatalog) / sizeof(kCatalog[0]);
 constexpr uint16_t kCategoryBackpackLarge = 4;
 constexpr uint16_t kCategoryMinorHealingPotion = 5;
 constexpr uint16_t kCategoryLowWeaponScroll = 16;
+// 混沌卷轴（ITEMDATABASE 实证：类别 20 → text_id 50「混沌武器强化卷轴」；类别 25 → 55「混沌防具强化卷轴」；
+// 全表满足「类别 = 名称 text_id − 30」，与 16→46「低级武器强化卷轴」、28→58「低级宝石」一致）。
+constexpr uint16_t kCategoryChaosWeaponScroll = 20;
+constexpr uint16_t kCategoryChaosArmorScroll = 25;
 constexpr uint16_t kCategoryLowJewel = 28;
 constexpr uint16_t kCategoryMidJewel = 29;
 constexpr uint16_t kCategoryHighJewel = 30;
@@ -73,15 +79,24 @@ constexpr uint16_t kCategoryMagicCloth = 41;
 
 const ThreeSlotRecipe kThreeSlotRecipes[] = {
     // 皮革 + 空槽 + 魔法衣料 → 背包（大）：槽位严格匹配（第 2 格必须空）。
-    {{kCategoryLeather, 0, kCategoryMagicCloth}, true, kCategoryBackpackLarge},
+    {{kCategoryLeather, 0, kCategoryMagicCloth}, true, kCategoryBackpackLarge,
+     ProductMode::kFixedCategory, 0},
     // 恢复药水（小）×2 + 低级武器强化卷轴 → 顶级宝石：顺序无关。
     {{kCategoryMinorHealingPotion, kCategoryMinorHealingPotion, kCategoryLowWeaponScroll}, false,
-     kCategoryTopJewel},
+     kCategoryTopJewel, ProductMode::kFixedCategory, 0},
     // 3 颗同级宝石 → 高一级（含顶级 → 混沌）。
-    {{kCategoryLowJewel, kCategoryLowJewel, kCategoryLowJewel}, false, kCategoryMidJewel},
-    {{kCategoryMidJewel, kCategoryMidJewel, kCategoryMidJewel}, false, kCategoryHighJewel},
-    {{kCategoryHighJewel, kCategoryHighJewel, kCategoryHighJewel}, false, kCategoryTopJewel},
-    {{kCategoryTopJewel, kCategoryTopJewel, kCategoryTopJewel}, false, kCategoryChaosJewel},
+    {{kCategoryLowJewel, kCategoryLowJewel, kCategoryLowJewel}, false, kCategoryMidJewel,
+     ProductMode::kFixedCategory, 0},
+    {{kCategoryMidJewel, kCategoryMidJewel, kCategoryMidJewel}, false, kCategoryHighJewel,
+     ProductMode::kFixedCategory, 0},
+    {{kCategoryHighJewel, kCategoryHighJewel, kCategoryHighJewel}, false, kCategoryTopJewel,
+     ProductMode::kFixedCategory, 0},
+    {{kCategoryTopJewel, kCategoryTopJewel, kCategoryTopJewel}, false, kCategoryChaosJewel,
+     ProductMode::kFixedCategory, 0},
+    // 宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25) → **该宝石自身**，数值 ×1.1（槽位严格顺序）。
+    // 第 1 格接受任意宝石（28..32），产物沿用源宝石的类别、随机等级与属性类型，只缩放数值位。
+    {{kAnyJewelSlot, kCategoryChaosWeaponScroll, kCategoryChaosArmorScroll}, true, 0,
+     ProductMode::kScaleFirstItem, 1100},
 };
 
 constexpr size_t kThreeSlotRecipeLen = sizeof(kThreeSlotRecipes) / sizeof(kThreeSlotRecipes[0]);
@@ -99,6 +114,11 @@ void sort_three(uint16_t* v) {
         }
         v[j] = key;
     }
+}
+
+// 通配槽判定：类别是否落在宝石区间（28..32）。复用规则层的档位函数（非宝石返回 0）。
+bool is_jewel_category(uint16_t category) {
+    return jewel_grade_from_category(static_cast<int>(category)) > 0;
 }
 
 uint16_t g_base_record_count = 0;
@@ -125,7 +145,16 @@ const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3]) {
         if (recipe.ordered) {
             bool hit = true;
             for (size_t s = 0; s < kThreeSlotCount; ++s) {
-                if (slots[s] != recipe.slots[s]) {
+                const uint16_t want = recipe.slots[s];
+                if (want == kAnyJewelSlot) {
+                    // 通配：该格接受任意宝石类别（28..32）。
+                    if (!is_jewel_category(slots[s])) {
+                        hit = false;
+                        break;
+                    }
+                    continue;
+                }
+                if (slots[s] != want) {
                     hit = false;
                     break;
                 }
