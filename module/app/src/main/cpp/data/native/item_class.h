@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "core/native/stack_codec.h"
@@ -18,6 +19,14 @@ bool item_is_equip(void* item);
 // 与扩展背包 category_is_extension_backpack 同口径；category 为 I_TYPE bit6-15。
 bool item_is_backpack(int category);
 
+// ITEMDATABASE/ITEMCLASSBASE 记录 +7 的「NPC 专属保护」位（bit4）：置位 = 不可装备 + 不可脱下
+// （`CHAR_CanEquipItem @0xe4f3c` / `CHAR_CanUnequipItem @0xe4e80` 读的是同一位）。
+constexpr uint8_t kNoEquipBit = 0x10;
+constexpr size_t kNoEquipByteOffset = 7;
+
+// 类别是否带该保护位。全表共 26 条置位（cat 485-506、785-787、948）。
+bool category_is_no_equip(int category);
+
 // 纯编码判定（可注入类别表，供 host 单测）：
 //   category = I_TYPE bit6-15 解出的类别
 //   class_data / stride 同 item_count_encoding_from_flags
@@ -26,6 +35,16 @@ inline bool item_is_backpack_from_class_data(int category, const uint8_t* class_
                                              uint8_t stride) {
     if (class_data == nullptr || stride == 0 || category < 0) return false;
     return class_data[category * stride + 2] == 0x1f;
+}
+
+// 纯编码判定（可注入类别表，供 host 单测）：
+//   class_data = ITEMCLASSBASE 表基址，stride = 每条记录步长
+// class_data 为空、stride==0 或 category<0 时 fail-closed 返回 false。
+inline bool category_is_no_equip_from_class_data(int category, const uint8_t* class_data,
+                                                 uint8_t stride) {
+    if (class_data == nullptr || stride == 0 || category < 0) return false;
+    return (class_data[static_cast<size_t>(category) * stride + kNoEquipByteOffset] &
+            kNoEquipBit) != 0;
 }
 
 // 纯编码判定（可注入类别表，供 host 单测）：

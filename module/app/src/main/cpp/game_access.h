@@ -171,6 +171,8 @@ extern EquipItemFn fn_equip_item;
 extern EquipItemFromInvenToSlotFn fn_equip_item_from_inven_to_slot;
 extern UnequipFn fn_unequip;
 extern CanEquipFn fn_can_equip;
+extern CanUnequipFn fn_can_unequip;
+extern CanChangeEquipFn fn_char_can_change_equip;
 extern FindEquipSlotFn fn_find_equip_slot;
 extern GetEquipItemFn fn_get_equip_item;
 extern SetEquipItemFn fn_set_equip_item;
@@ -218,6 +220,7 @@ extern ExcludePartyFn fn_exclude_party;
 extern MercenaryReleaseFn fn_mercenary_release;
 extern ItemIsUseFn fn_is_use;
 extern IsRealEquipFn fn_item_is_real_equip;
+extern ItemGetEquipLevelFn fn_item_get_equip_level;
 // ---- 佣兵徽章使用链（R-63）----
 extern ItemSystemIsMercenarySealFn fn_is_mercenary_seal;
 extern MercenarySystemIsEmptyManagerSlotFn fn_mercenary_is_empty_manager_slot;

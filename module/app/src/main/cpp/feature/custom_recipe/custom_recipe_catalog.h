@@ -74,11 +74,21 @@ constexpr uint32_t kModuleRecipeResultItemId = 0;
 // （按槽位严格匹配）行里生效**；unordered 行参与排序比较，不得使用。
 constexpr uint16_t kAnyJewelSlot = 0xFFFF;
 
+// 通配符：该格接受任意「特殊装备」类别（`ITEMCLASSBASE` 记录 +7 bit4 置位，全表 26 条：
+// cat 485-506 敌方/剧情组、785-787 誓约之剑/神速长靴/真实的板甲、948 伪装用面具）。
+// 判定由调用方经 `match_three_slot` 的 `is_special_equip` 谓词注入（本目录保持纯逻辑，
+// 不引入游戏内存访问）；谓词为 nullptr 时该通配符永不命中（fail-closed）。
+constexpr uint16_t kAnySpecialEquipSlot = 0xFFFE;
+
 // 产物生成方式。
 enum class ProductMode : uint8_t {
     kFixedCategory,   // 产物 = `product` 类别新建（原版掷值），放料/合成语义不变
     kScaleFirstItem,  // 产物 = **第 1 格物品自身**（同类别），宝石数值 × `scale_permille/1000`，
                       // 并保留源物品的随机等级与属性类型（bits11-23 原样搬用）
+    kMaxSocketEnchantFirstItem,  // 产物 = **第 1 格物品自身**（同类别）新建，并把两段位域写到最大值：
+                                 //   宝石孔总数 = `I_SOCKET` bits4-7 = 0xF（15，该段 4 位）
+                                 //   剩余强化次数 = `I_ENCHANT` bits2-5 = 0xF（15，该段 4 位）
+                                 // 只动这两段，其余位（已镶数 / 已强化次数 / 强化 ID）保持产物原值不写
 };
 
 struct ThreeSlotRecipe {
@@ -87,13 +97,72 @@ struct ThreeSlotRecipe {
     uint16_t product;  // kFixedCategory 的产物类别（kScaleFirstItem 时不使用，填 0）
     ProductMode product_mode;   // 产物生成方式
     uint16_t scale_permille;    // kScaleFirstItem 的数值缩放（千分比：1200 = ×1.2 向上取整；其它模式填 0）
+    // 槽 0 与槽 2 必须为同一类别（「两件相同的 X」类配方）。放在末尾并带默认值，
+    // 既有条目无需改动。仅在 ordered 行有意义。
+    bool same_first_last = false;
 };
 
 // 3 格配方表（唯一真源）；out_count 回传条目数。表序即匹配优先级（首个命中者胜出）。
 const ThreeSlotRecipe* three_slot_recipes(size_t* out_count);
 
 // 按 3 格类别（0=空）匹配；未命中返回 nullptr。ordered=false 用多重集比较。
-const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3]);
+// is_special_equip：类别 → 是否特殊装备（供 `kAnySpecialEquipSlot` 判定）。
+// nullptr = 不支持该通配符（相关配方不命中），其余配方不受影响。
+// 查表顺序 = **静态表优先，其后动态表**（见下文），首个命中者胜出。
+const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
+                                        bool (*is_special_equip)(uint16_t category) = nullptr);
+
+// ---------------------------------------------------------------------------
+// 动态特殊装备配方（进档时随机重建）
+// ---------------------------------------------------------------------------
+//
+// 语义：每件特殊装备各有一条隐式配方 —— 3 个**互不相同**的材料，**顺序严格**；产物为该装备
+// 本身（`kFixedCategory`，原版掷值）。材料与装备的对应关系**每次进入存档时重新随机**，
+// 因此玩家无法预知，只能试（用户裁决 2026-09-16：「无信息」）。
+//
+// 目录层只负责「纯逻辑生成 + 查表」；随机源与进档时机由平台侧注入（见 game_ui_custom_recipe.cpp）。
+
+// 动态配方容量上限。
+constexpr size_t kMaxDynamicRecipes = 64;
+
+// 动态配方允许出现空槽（用户裁决 2026-09-16）：生成时把「空」当作一个普通候选**并入材料池**
+// 一起随机（不是单独的空概率）。空项映射为类别 0，与三格匹配语义一致：`slots[i] == 0`
+// 表示该格必须为空。「3 个不同」按池下标去重 ⇒ 空项最多出现一次。
+
+// 材料池：ITEMDATABASE 中用途类型（记录 +2）== 27 的全部 14 条。
+// 来源：apk/static-data 的 ITEMDATABASE 全表扫描（type 27 = 材料，与宝石 25 / 卷轴 24 /
+// 药水 22-23 并列）。改版若增删材料需同步本表。
+inline constexpr uint16_t kMaterialPool[] = {
+    33, 34, 35, 36, 37, 38, 39, 40, 41, 57, 58, 59, 60, 61,
+};
+inline constexpr size_t kMaterialPoolSize = sizeof(kMaterialPool) / sizeof(kMaterialPool[0]);
+
+// 特殊装备：ITEMDATABASE 记录 +7 bit4 置位的全部 26 条，与 `feature/special_equip` 放行的
+// 是同一组。来源：ITEMDATABASE 全表扫描（cat 485-506 敌方/剧情组、785-787 誓约之剑/
+// 神速长靴/真实的板甲、948 伪装用面具）。
+inline constexpr uint16_t kSpecialEquipCategories[] = {
+    485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497,
+    498, 499, 500, 501, 502, 503, 504, 505, 506, 785, 786, 787, 948,
+};
+inline constexpr size_t kSpecialEquipCategoryCount =
+    sizeof(kSpecialEquipCategories) / sizeof(kSpecialEquipCategories[0]);
+
+// 纯逻辑：为 equip_categories 的每件装备各抽 3 个**互不相同**的材料，写入 out。
+// rand_inclusive(lo, hi) 须在闭区间内均匀返回整数（生产用 MATH_GetRandom）。
+// 每条的 slots = 抽出的 3 个材料（**抽取次序即槽位次序**）、ordered = true、
+// product = 该装备、product_mode = kFixedCategory、scale_permille = 0。
+// 返回实际写入条数；pool_size < 3、rand_inclusive 为空、out 为空 → 返回 0（fail-closed）。
+size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
+                             const uint16_t* material_pool, size_t pool_size,
+                             int (*rand_inclusive)(int, int), ThreeSlotRecipe* out,
+                             size_t out_capacity);
+
+// 注入/清空动态配方表（进档时调用；游戏主线程）。recipes 为空或 count 为 0 → 清空。
+// count 超 kMaxDynamicRecipes → 截断。
+void set_dynamic_three_slot_recipes(const ThreeSlotRecipe* recipes, size_t count);
+
+// 当前动态配方条数。
+size_t dynamic_three_slot_recipe_count();
 
 // 静态配方目录；out_count 回传条目数 N。**目录顺序即注入记录的 mixType 升序，也是
 // MakeRecipeList 按记录下标写数组后的配方按钮顺序**（原版按 b11 命中记录的遍历序 = 下标序）。

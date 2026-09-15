@@ -421,7 +421,7 @@ static void test_chaos_scroll_recipe() {
     size_t n = 0;
     const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
     CHECK(recipes != nullptr);
-    CHECK(n == 7);  // 6 条既有配方 + 本条
+    CHECK(n == 8);  // 6 条既有 + 混沌卷轴 + 特殊装备拉满
 
     // 任意宝石类别都能填第 1 格（通配槽 28..32）。
     for (uint16_t gem = 28; gem <= 32; ++gem) {
@@ -457,6 +457,162 @@ static void test_chaos_scroll_recipe() {
     const uint16_t three_gems[3] = {28, 28, 28};
     const cr::ThreeSlotRecipe* gem_hit = cr::match_three_slot(three_gems);
     CHECK(gem_hit != nullptr && gem_hit->product == 29);
+}
+
+// ---------------------------------------------------------------------------
+// 「两件相同特殊装备 + 元气恢复药水」配方：槽位严格顺序 + 槽0/槽2 必须同类别 + 通配特殊装备槽。
+// ---------------------------------------------------------------------------
+static bool fake_is_special(uint16_t category) {
+    return category == 485 || category == 493 || category == 948;
+}
+
+static void test_max_socket_enchant_recipe() {
+    size_t n = 0;
+    const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
+    CHECK(recipes != nullptr);
+    CHECK(n == 8);
+    const cr::ThreeSlotRecipe* r = &recipes[7];
+    CHECK(r->ordered);
+    CHECK(r->same_first_last);
+    CHECK(r->product_mode == cr::ProductMode::kMaxSocketEnchantFirstItem);
+    CHECK(r->slots[0] == cr::kAnySpecialEquipSlot);
+    CHECK(r->slots[1] == 14);  // 元气恢复药水
+    CHECK(r->slots[2] == cr::kAnySpecialEquipSlot);
+
+    // 命中：两件同类别特殊装备 + 药水，顺序 = 装备 / 药水 / 装备。
+    const uint16_t ok[3] = {485, 14, 485};
+    CHECK(cr::match_three_slot(ok, &fake_is_special) == r);
+    const uint16_t ok2[3] = {948, 14, 948};
+    CHECK(cr::match_three_slot(ok2, &fake_is_special) == r);
+
+    // 顺序严格：药水挪到 1/3 位都不命中。
+    const uint16_t wrong1[3] = {14, 485, 485};
+    CHECK(cr::match_three_slot(wrong1, &fake_is_special) == nullptr);
+    const uint16_t wrong2[3] = {485, 485, 14};
+    CHECK(cr::match_three_slot(wrong2, &fake_is_special) == nullptr);
+
+    // 两件必须同类：混不同特殊装备不命中。
+    const uint16_t mixed[3] = {485, 14, 493};
+    CHECK(cr::match_three_slot(mixed, &fake_is_special) == nullptr);
+
+    // 非特殊装备不命中；谓词缺省时该配方同样不命中（fail-closed）。
+    const uint16_t plain[3] = {334, 14, 334};
+    CHECK(cr::match_three_slot(plain, &fake_is_special) == nullptr);
+    CHECK(cr::match_three_slot(ok) == nullptr);
+
+    // 谓词缺省不得影响其它配方。
+    const uint16_t three_gems[3] = {28, 28, 28};
+    CHECK(cr::match_three_slot(three_gems) != nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// 动态特殊装备配方：进档随机生成「装备 → 3 个不同材料（顺序严格）」的映射。
+// ---------------------------------------------------------------------------
+static const int* g_rand_seq = nullptr;
+static size_t g_rand_len = 0;
+static size_t g_rand_pos = 0;
+
+// 可编程随机序列：取值 = lo + (seq[i] mod span)。测试用它同时驱动「是否为空」与「选哪个材料」。
+static void set_rand_seq(const int* seq, size_t len) {
+    g_rand_seq = seq;
+    g_rand_len = len;
+    g_rand_pos = 0;
+}
+
+static int fake_rand(int lo, int hi) {
+    const int span = hi - lo + 1;
+    if (span <= 0 || g_rand_seq == nullptr || g_rand_len == 0) return lo;
+    const int v = g_rand_seq[g_rand_pos++ % g_rand_len];
+    return lo + (v % span);
+}
+
+static void test_dynamic_special_recipes() {
+    cr::set_dynamic_three_slot_recipes(nullptr, 0);  // 前置：从空表开始
+    const uint16_t equips[2] = {485, 493};
+    const uint16_t pool[4] = {33, 35, 41, 57};  // 秘银/皮革/魔法衣料/生命之叶
+    // 池下标 4（== pool_size）是「空」项 → 类别 0。
+    constexpr size_t kEmptyIdx = 4;
+    cr::ThreeSlotRecipe out[8];
+
+    // A) 三格全有料：抽到池下标 0/1/2 → 33/35/41。顺序 = 抽取次序。
+    {
+        const int seq[] = {0, 1, 2};
+        set_rand_seq(seq, 3);
+        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        CHECK(n == 1);
+        CHECK(out[0].ordered);
+        CHECK(out[0].product == 485);
+        CHECK(out[0].product_mode == cr::ProductMode::kFixedCategory);
+        CHECK(out[0].slots[0] == 33);
+        CHECK(out[0].slots[1] == 35);
+        CHECK(out[0].slots[2] == 41);
+    }
+
+    // B) 「空」是池里的普通候选：抽到空项 → 该格写 0（匹配语义 = 该格必须为空）。
+    {
+        const int seq[] = {0, 1, static_cast<int>(kEmptyIdx)};
+        set_rand_seq(seq, 3);
+        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        CHECK(n == 1);
+        CHECK(out[0].slots[0] == 33);
+        CHECK(out[0].slots[1] == 35);
+        CHECK(out[0].slots[2] == 0);
+    }
+
+    // C) 空可以落在任意格（含第 0 格）。
+    {
+        const int seq[] = {static_cast<int>(kEmptyIdx), 1, 2};
+        set_rand_seq(seq, 3);
+        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        CHECK(n == 1);
+        CHECK(out[0].slots[0] == 0);
+        CHECK(out[0].slots[1] == 35);
+        CHECK(out[0].slots[2] == 41);
+    }
+
+    // D) 「3 个不同」按池下标去重 ⇒ 空项最多出现一次（不可能三格全空）。
+    {
+        const int seq[] = {static_cast<int>(kEmptyIdx), static_cast<int>(kEmptyIdx), 2, 3};
+        set_rand_seq(seq, 4);
+        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        CHECK(n == 1);
+        const int zeros = (out[0].slots[0] == 0) + (out[0].slots[1] == 0) + (out[0].slots[2] == 0);
+        CHECK(zeros <= 1);
+    }
+
+    // E) 两条装备各生成一条；空格语义经 match_three_slot 生效（空格要求该格确实为空）。
+    {
+        const int seq[] = {0, 1, 2, static_cast<int>(kEmptyIdx), 3, 0};
+        set_rand_seq(seq, 6);
+        const size_t n = cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 8);
+        CHECK(n == 2);
+        CHECK(out[0].product == 485);
+        CHECK(out[1].product == 493);
+        cr::set_dynamic_three_slot_recipes(out, n);
+        CHECK(cr::dynamic_three_slot_recipe_count() == 2);
+        const uint16_t hit0[3] = {out[0].slots[0], out[0].slots[1], out[0].slots[2]};
+        const cr::ThreeSlotRecipe* h0 = cr::match_three_slot(hit0);
+        CHECK(h0 != nullptr && h0->product == 485);
+        // 顺序严格：换位后不得再命中 485。
+        const uint16_t swap0[3] = {out[0].slots[1], out[0].slots[0], out[0].slots[2]};
+        const cr::ThreeSlotRecipe* s0 = cr::match_three_slot(swap0);
+        CHECK(s0 == nullptr || s0->product != 485);
+        // 第 2 条含空格：把该格填上料就不该命中。
+        if (out[1].slots[0] == 0) {
+            const uint16_t filled[3] = {33, out[1].slots[1], out[1].slots[2]};
+            const cr::ThreeSlotRecipe* f = cr::match_three_slot(filled);
+            CHECK(f == nullptr || f->product != 493);
+        }
+    }
+
+    // FAIL-CLOSED：池不足 3 条 / 随机源为空 / 容量为 0。
+    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 2, &fake_rand, out, 8) == 0);
+    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, nullptr, out, 8) == 0);
+    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 0) == 0);
+
+    // 清空后动态配方立即失效。
+    cr::set_dynamic_three_slot_recipes(nullptr, 0);
+    CHECK(cr::dynamic_three_slot_recipe_count() == 0);
 }
 
 // 宝石数值缩放：**ceil**(value × permille / 1000)，钳到 [0, 2047]。
@@ -528,6 +684,8 @@ int main() {
     test_module_recipe_desc_constants();
     test_three_slot_stack_rules();
     test_chaos_scroll_recipe();
+    test_max_socket_enchant_recipe();
+    test_dynamic_special_recipes();
     test_scaled_jewel_value();
     test_recipe_book_bit_invariant();
     std::printf("custom_recipe_tests: %d passed, %d failed\n", g_pass, g_fail);

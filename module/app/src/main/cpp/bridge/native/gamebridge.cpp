@@ -14,6 +14,7 @@
 #include "feature/ui/module_text.h"
 #include "feature/quest/quest_resync.h"
 #include "feature/simple_mode/simple_mode.h"
+#include "feature/special_equip/special_equip.h"
 #include "feature/world_teleport/world_teleport.h"
 
 namespace {
@@ -74,8 +75,10 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
         world_teleport_install_if_ready();  // 世界传送：地图名入口 patch + choice ExecuteProc hook
-        custom_recipe_ui_install_if_ready();  // 自定义合成配方：UIMix 放料/合成/产物三处函数级 hook
+        craft_ui_install_if_ready();  // 合成器界面层：全部 UIMix hook 的唯一挂载处（界面归界面）
+        custom_recipe::register_dynamic_recipes();  // 动态特殊装备配方：进档后随机重建材料映射
         simple_mode_install_if_ready();  // 简单模式：CHAR_AddDamage 伤害倍率 + CHAR_UpdateAttrFromMonster 最大生命减半
+        special_equip_install_if_ready();  // 特殊装备解锁：CanEquipItem/CanUnequipItem 放行 +7 bit4（保留角色闸门）
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }

@@ -21,7 +21,6 @@ interface ConfigApiService {
         oldStack: Boolean,
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
-        oldGemCraft: Boolean,
         oldCustomRecipe: Boolean,
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
@@ -46,8 +45,6 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.info(LogDomain.CONFIG, "moveMergeEnabled=${ModuleConfig.moveMergeEnabled} applied=$moveMergeApplied")
         val extensionApplied = NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
         LogFile.info(LogDomain.CONFIG, "extensionBagEnabled=${ModuleConfig.extensionBagEnabled} applied=$extensionApplied")
-        val gemCraftApplied = NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
-        LogFile.info(LogDomain.CONFIG, "gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
         val customRecipeApplied = NativeBridge.nativeSetCustomRecipeEnabled(ModuleConfig.customRecipeEnabled)
         LogFile.info(LogDomain.CONFIG, "customRecipeEnabled=${ModuleConfig.customRecipeEnabled} applied=$customRecipeApplied")
         val simpleModeApplied = NativeBridge.nativeSetSimpleModeEnabled(ModuleConfig.simpleModeEnabled)
@@ -65,7 +62,6 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldStack: Boolean,
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
-        oldGemCraft: Boolean,
         oldCustomRecipe: Boolean,
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
@@ -86,9 +82,6 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.extensionBagEnabled != oldExtensionBag) {
             NativeBridge.nativeSetExtensionBagEnabled(ModuleConfig.extensionBagEnabled)
-        }
-        if (ModuleConfig.gemCraftOptimize != oldGemCraft) {
-            NativeBridge.nativeSetGemCraftOptimizeEnabled(ModuleConfig.gemCraftOptimize)
         }
         if (ModuleConfig.customRecipeEnabled != oldCustomRecipe) {
             NativeBridge.nativeSetCustomRecipeEnabled(ModuleConfig.customRecipeEnabled)

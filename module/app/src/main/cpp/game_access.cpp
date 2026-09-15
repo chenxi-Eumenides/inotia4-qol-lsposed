@@ -291,6 +291,8 @@ bool bridge_init() {
   fn_equip_item_from_inven_to_slot = reinterpret_cast<EquipItemFromInvenToSlotFn>(g_base + fn_resolve("F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA", F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA));
     fn_unequip = reinterpret_cast<UnequipFn>(g_base + fn_resolve("F_UNEQUIP_VMA", F_UNEQUIP_VMA));
     fn_can_equip = reinterpret_cast<CanEquipFn>(g_base + fn_resolve("F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA));
+    fn_can_unequip = reinterpret_cast<CanUnequipFn>(g_base + fn_resolve("F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA));
+    fn_char_can_change_equip = reinterpret_cast<CanChangeEquipFn>(g_base + fn_resolve("F_CAN_CHANGE_EQUIP_VMA", F_CAN_CHANGE_EQUIP_VMA));
     fn_find_equip_slot = reinterpret_cast<FindEquipSlotFn>(g_base + fn_resolve("F_FIND_EQUIP_SLOT_VMA", F_FIND_EQUIP_SLOT_VMA));
     fn_get_equip_item = reinterpret_cast<GetEquipItemFn>(g_base + fn_resolve("F_GET_EQUIP_ITEM_VMA", F_GET_EQUIP_ITEM_VMA));
     fn_set_equip_item = reinterpret_cast<SetEquipItemFn>(g_base + fn_resolve("F_SET_EQUIP_ITEM_VMA", F_SET_EQUIP_ITEM_VMA));
@@ -348,6 +350,8 @@ bool bridge_init() {
     fn_is_use = reinterpret_cast<ItemIsUseFn>(g_base + fn_resolve("F_ITEMDATA_IS_USE_VMA", F_ITEMDATA_IS_USE_VMA));
     fn_item_is_real_equip = reinterpret_cast<IsRealEquipFn>(
         g_base + fn_resolve("F_ITEM_IS_REAL_EQUIP_VMA", F_ITEM_IS_REAL_EQUIP_VMA));
+    fn_item_get_equip_level = reinterpret_cast<ItemGetEquipLevelFn>(
+        g_base + fn_resolve("F_ITEM_GET_EQUIP_LEVEL_VMA", F_ITEM_GET_EQUIP_LEVEL_VMA));
     // ---- 佣兵徽章使用链（R-63）----
     fn_is_mercenary_seal = reinterpret_cast<ItemSystemIsMercenarySealFn>(
         g_base + fn_resolve("F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA", F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA));

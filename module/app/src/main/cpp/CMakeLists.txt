@@ -94,8 +94,6 @@ target_sources(gamebridge PRIVATE
 
 # 合成器宝石合成操作优化（gem-craft-optimization 阶段1，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/gemcraft/gemcraft_rules.cpp
-    feature/ui/game_ui_gemcraft.cpp
 )
 
 # 状态转换派发（go_main_menu/enter_slot/create_slot 跨线程收敛到逻辑帧点，末尾追加）
@@ -113,6 +111,13 @@ target_sources(gamebridge PRIVATE
     feature/simple_mode/simple_mode_rules.cpp
     feature/simple_mode/simple_mode.cpp
     bridge/native/gamebridge_simple_mode.cpp
+)
+
+# 特殊装备解锁：CHAR_CanEquipItem / CHAR_CanUnequipItem 双点包裹，
+# 放行 ITEMDATABASE +7 bit4（NPC 专属保护）对非特殊 NPC 的约束。
+# **常开，无配置开关**：游戏无获取途径，关闭只会让已持有该装备的角色无法穿脱（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/special_equip/special_equip.cpp
 )
 
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
@@ -136,11 +141,18 @@ target_sources(gamebridge PRIVATE
     feature/custom_recipe/custom_recipe_catalog.cpp
     feature/custom_recipe/custom_recipe_rules.cpp
     feature/custom_recipe/custom_recipe_table.cpp
-    feature/custom_recipe/game_ui_custom_recipe.cpp
+    feature/custom_recipe/custom_recipe_api.cpp
+    feature/craft_ui/craft_ui_hooks.cpp
 )
 
 # 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     feature/ui/game_ui_charinfo_zh.cpp
     feature/ui/module_text.cpp
+)
+
+# 合成器界面能力层（craft_ui）：UIMix 控件读写与界面动作的唯一实现处。
+# 宝石合成与自定义配方共用；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/craft_ui/craft_ui.cpp
 )

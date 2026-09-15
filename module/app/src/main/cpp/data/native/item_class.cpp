@@ -30,3 +30,12 @@ bool item_is_backpack(int category) {
     const uint8_t stride = size_ptr != nullptr ? *size_ptr : 0;
     return item_is_backpack_from_class_data(category, class_data, stride);
 }
+
+bool category_is_no_equip(int category) {
+    if (g_base == 0 || category < 0) return false;
+    uint8_t* class_data =
+        *reinterpret_cast<uint8_t**>(*reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    const uint8_t stride = size_ptr != nullptr ? *size_ptr : 0;
+    return category_is_no_equip_from_class_data(category, class_data, stride);
+}

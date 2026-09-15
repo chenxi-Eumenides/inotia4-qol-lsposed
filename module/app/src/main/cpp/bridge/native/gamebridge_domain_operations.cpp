@@ -181,11 +181,14 @@ Java_com_inotia4_qol_NativeBridge_nativeSetExtensionBagEnabled(JNIEnv*, jclass, 
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetGemCraftOptimizeEnabled(JNIEnv*, jclass, jboolean enabled) {
-    return set_gemcraft_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+    // 开关已合并：原 gemcraftEnabled 与 customRecipeEnabled 共用同一条通路，
+    // 界面行为归 feature/craft_ui，配方规则归 feature/custom_recipe。此导出保留为兼容 stub。
+    (void)enabled;
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetCustomRecipeEnabled(JNIEnv*, jclass, jboolean enabled) {
-    return set_custom_recipe_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+    return custom_recipe::set_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 

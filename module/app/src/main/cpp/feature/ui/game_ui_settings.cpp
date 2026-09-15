@@ -113,8 +113,7 @@ static const SettingsItem kSettingsItems[] = {
     {"autoSellEnabled", "自动出售", 1},
     {"simpleModeEnabled", "简单模式", 1},
     {"moveMergeEnabled", "拖拽合并", 2},
-    {"gemCraftOptimize", "宝石优化", 2},
-    {"customRecipeEnabled", "自定义配方", 2},
+    {"customRecipeEnabled", "新合成系统", 2},
     {"debugLogEnabled", "调试日志", 2},
     {"opEnabled", "OP能力", 3},
 };

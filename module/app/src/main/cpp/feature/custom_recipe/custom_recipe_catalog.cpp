@@ -12,7 +12,7 @@ constexpr uint16_t kElixirOfExcellenceItemId = 15;
 // 材料条目，仅用于该页材料格/费用**显示**保持原样；能否合成与实际产物由 `kThreeSlotRecipes`
 // 按 3 格内容查表决定（§2.8/§4.12），不走原版 3:1 路径。
 constexpr uint16_t kLowJewelItemId = 28;
-constexpr uint8_t kGemCraftStuffCount = 3;
+constexpr uint8_t kThreeSlotMaterialCount = 3;
 // 配方按钮文本 wordId（复用既有本地化串，见 §7.2）：35216「合成」。
 // 「宝石强化」条目复用 35291，但按钮显示由 MEMORYTEXT_GetText 替换为模块字面量
 // 「宝石升阶」（custom_recipe_catalog.h 的 kJewelTierUpLabel）。
@@ -31,7 +31,7 @@ constexpr uint16_t kJewelTierUpCostWordId = 188;
 constexpr uint8_t kPageGroupJewelCraft = 3;
 
 const Material kNativeMaterials[] = {
-    {kLowJewelItemId, kGemCraftStuffCount},
+    {kLowJewelItemId, kThreeSlotMaterialCount},
 };
 
 const Material kJewelTierUpMaterials[] = {
@@ -77,6 +77,7 @@ constexpr uint16_t kCategoryTopJewel = 31;
 constexpr uint16_t kCategoryChaosJewel = 32;
 constexpr uint16_t kCategoryLeather = 35;
 constexpr uint16_t kCategoryMagicCloth = 41;
+constexpr uint16_t kCategoryVitalityPotion = 14;  // 元气恢复药水（ITEMDATABASE 记录下标）
 
 const ThreeSlotRecipe kThreeSlotRecipes[] = {
     // 皮革 + 空槽 + 魔法衣料 → 背包（大）：槽位严格匹配（第 2 格必须空）。
@@ -98,6 +99,11 @@ const ThreeSlotRecipe kThreeSlotRecipes[] = {
     // 第 1 格接受任意宝石（28..32），产物沿用源宝石的类别、随机等级与属性类型，只缩放数值位。
     {{kAnyJewelSlot, kCategoryChaosWeaponScroll, kCategoryChaosArmorScroll}, true, 0,
      ProductMode::kScaleFirstItem, 1200},
+    // 两件**相同**的特殊装备（槽 0/2，各一件）+ 元气恢复药水(14) → 同类别特殊装备新建，
+    // 宝石孔总数与剩余强化次数拉满（槽位严格顺序；两件装备必须同类别，见 same_first_last）。
+    // 「特殊装备」= ITEMCLASSBASE 记录 +7 bit4 置位的那 26 条，判定由调用方注入谓词。
+    {{kAnySpecialEquipSlot, kCategoryVitalityPotion, kAnySpecialEquipSlot}, true, 0,
+     ProductMode::kMaxSocketEnchantFirstItem, 0, true},
 };
 
 constexpr size_t kThreeSlotRecipeLen = sizeof(kThreeSlotRecipes) / sizeof(kThreeSlotRecipes[0]);
@@ -125,6 +131,10 @@ bool is_jewel_category(uint16_t category) {
 uint16_t g_base_record_count = 0;
 bool g_bound = false;
 
+// 动态配方表（进档时由 set_dynamic_three_slot_recipes 重建；只在游戏主线程读写）。
+ThreeSlotRecipe g_dynamic_recipes[kMaxDynamicRecipes];
+size_t g_dynamic_recipe_count = 0;
+
 }  // namespace
 
 const Def* catalog(size_t* out_count) {
@@ -137,19 +147,33 @@ const ThreeSlotRecipe* three_slot_recipes(size_t* out_count) {
     return kThreeSlotRecipes;
 }
 
-const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3]) {
-    if (slots == nullptr) return nullptr;
+namespace {
+
+// 在给定配方表里按 3 格类别匹配（静态表与动态表共用同一套匹配语义）。
+const ThreeSlotRecipe* match_in_table(const ThreeSlotRecipe* table, size_t count,
+                                      const uint16_t slots[3],
+                                      bool (*is_special_equip)(uint16_t category)) {
     uint16_t sorted_actual[kThreeSlotCount] = {slots[0], slots[1], slots[2]};
     sort_three(sorted_actual);
-    for (size_t i = 0; i < kThreeSlotRecipeLen; ++i) {
-        const ThreeSlotRecipe& recipe = kThreeSlotRecipes[i];
+    for (size_t i = 0; i < count; ++i) {
+        const ThreeSlotRecipe& recipe = table[i];
         if (recipe.ordered) {
+            // 「两件相同的 X」：槽 0 与槽 2 必须同类别（先判，避免通配符把它们各自放宽）。
+            if (recipe.same_first_last && slots[0] != slots[2]) continue;
             bool hit = true;
             for (size_t s = 0; s < kThreeSlotCount; ++s) {
                 const uint16_t want = recipe.slots[s];
                 if (want == kAnyJewelSlot) {
                     // 通配：该格接受任意宝石类别（28..32）。
                     if (!is_jewel_category(slots[s])) {
+                        hit = false;
+                        break;
+                    }
+                    continue;
+                }
+                if (want == kAnySpecialEquipSlot) {
+                    // 通配：该格接受任意特殊装备（+7 bit4）。谓词缺省 → 该配方不命中（fail-closed）。
+                    if (is_special_equip == nullptr || !is_special_equip(slots[s])) {
                         hit = false;
                         break;
                     }
@@ -176,6 +200,78 @@ const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3]) {
         if (hit) return &recipe;
     }
     return nullptr;
+}
+
+}  // namespace
+
+size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
+                             const uint16_t* material_pool, size_t pool_size,
+                             int (*rand_inclusive)(int, int), ThreeSlotRecipe* out,
+                             size_t out_capacity) {
+    if (equip_categories == nullptr || material_pool == nullptr || rand_inclusive == nullptr ||
+        out == nullptr || pool_size < kThreeSlotCount || out_capacity == 0) {
+        return 0;
+    }
+    size_t written = 0;
+    for (size_t e = 0; e < equip_count && written < out_capacity; ++e) {
+        // 「空」作为一个普通候选放进池子（用户裁决 2026-09-16：「空不用单独的概率，就把它加入
+        // 池子，然后随机就行」）。池 = material_pool 的 pool_size 项 + 1 个「空」项；
+        // 空项映射为类别 0，与三格匹配语义一致：`slots[i] == 0` 表示**该格必须为空**。
+        // 「3 个不同」的约束按池下标去重，因此空项最多出现一次（不会出现「三格全空」）。
+        const size_t pool_total = pool_size + 1;
+        size_t picked[kThreeSlotCount] = {0, 0, 0};
+        size_t got = 0;
+        int guard = 0;
+        while (got < kThreeSlotCount && guard < 256) {
+            ++guard;
+            const int idx = rand_inclusive(0, static_cast<int>(pool_total) - 1);
+            if (idx < 0 || static_cast<size_t>(idx) >= pool_total) continue;
+            bool dup = false;
+            for (size_t k = 0; k < got; ++k) {
+                if (picked[k] == static_cast<size_t>(idx)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+            picked[got++] = static_cast<size_t>(idx);
+        }
+        if (got < kThreeSlotCount) continue;  // 随机源异常：跳过该件（fail-closed）
+        ThreeSlotRecipe& r = out[written];
+        for (size_t s = 0; s < kThreeSlotCount; ++s) {
+            r.slots[s] =
+                (picked[s] == pool_size) ? 0 : material_pool[picked[s]];
+        }
+        r.ordered = true;  // 顺序严格（抽取次序即槽位次序；空格写 0）
+        r.product = equip_categories[e];    // 产物 = 该装备本身
+        r.product_mode = ProductMode::kFixedCategory;
+        r.scale_permille = 0;
+        r.same_first_last = false;
+        ++written;
+    }
+    return written;
+}
+
+void set_dynamic_three_slot_recipes(const ThreeSlotRecipe* recipes, size_t count) {
+    if (recipes == nullptr || count == 0) {
+        g_dynamic_recipe_count = 0;
+        return;
+    }
+    if (count > kMaxDynamicRecipes) count = kMaxDynamicRecipes;
+    for (size_t i = 0; i < count; ++i) g_dynamic_recipes[i] = recipes[i];
+    g_dynamic_recipe_count = count;
+}
+
+size_t dynamic_three_slot_recipe_count() { return g_dynamic_recipe_count; }
+
+const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
+                                        bool (*is_special_equip)(uint16_t category)) {
+    if (slots == nullptr) return nullptr;
+    // 静态表优先（固定配方语义不受动态表影响），未命中再查进档随机生成的动态表。
+    const ThreeSlotRecipe* hit =
+        match_in_table(kThreeSlotRecipes, kThreeSlotRecipeLen, slots, is_special_equip);
+    if (hit != nullptr) return hit;
+    return match_in_table(g_dynamic_recipes, g_dynamic_recipe_count, slots, is_special_equip);
 }
 
 bool catalog_ready() { return g_bound; }

@@ -601,6 +601,9 @@ constexpr uintptr_t F_CAN_EQUIP_VMA = 0xe4eb4;         // int (void*, void*) 可
 constexpr uintptr_t F_FIND_EQUIP_SLOT_VMA = 0xe4fd0;   // int (void*, void*) 计算目标装备槽（-1=不可装备）
 constexpr uintptr_t F_GET_EQUIP_ITEM_VMA = 0xda20c;    // void* (void*, int32) 读指定装备槽物品指针
 constexpr uintptr_t F_IS_SPECIAL_NPC_VMA = 0xe4d90;    // int (void*) 是否任务特殊 NPC（type==2 且表 bit2）
+constexpr uintptr_t F_CAN_UNEQUIP_VMA = 0xe4e2c;       // int (void*, void*) 可否脱下：0xe4e74-0xe4e80 读 ITEMDATABASE[cat].+7 bit4，命中返回 0；否则 0xe4e98 返回 CHAR_CanChangeEquip(ch)
+constexpr uintptr_t F_CAN_CHANGE_EQUIP_VMA = 0xe4df4;  // int (void*) 角色装备操作权限：0xe4e00 [ch+0x352] >= 0（s8，<0 拒绝）且 !CHAR_IsSpecialNPC(ch)。「特殊 NPC 不可动装备」的唯一闸门，同时是 CHAR_CanEquipItem/CHAR_CanUnequipItem 的第③/②道检查；它**不读 ITEMDATABASE**
+constexpr uintptr_t F_ITEM_GET_EQUIP_LEVEL_VMA = 0x1097ac; // int (void*) 装备所需等级（CHAR_CanEquipItem 0xe4f58 调用，与 ch[C_LEVEL] 做 32 位有符号比较）
 constexpr uintptr_t F_LEARN_ACTION_VMA = 0xe2390;      // void* (void*, int32, int32) 学习/升级技能
 constexpr uintptr_t F_SET_ACTIVE_PLAYER_VMA = 0x11f584; // int (int32) 切换主控角色
 constexpr uintptr_t F_PARTY_SWAP_VMA = 0x11ff5c;       // void (int32, int32) 交换队伍槽
@@ -1044,6 +1047,9 @@ using ButtonEquipExeFn = void (*)(void*);  // UIEquip_ButtonEquipExe(button)：�
 using ButtonDestroyExeFn = void (*)(void*);  // UIEquip_ButtonDestroyExe(button)：详情出售按钮，创建确认弹窗前先预演 OKDestroyItem 取展示金额
 using ButtonUnequipExeFn = void (*)(void*);  // UIEquip_ButtonUnequipExe(button)
 using CanEquipFn = int (*)(void*, void*);
+using CanUnequipFn = int (*)(void*, void*);          // CHAR_CanUnequipItem(ch, item) → 非 0 = 可脱下
+using CanChangeEquipFn = int (*)(void*);             // CHAR_CanChangeEquip(ch) → 非 0 = 该角色可动装备
+using ItemGetEquipLevelFn = int (*)(void*);          // ITEM_GetEquipLevel(item) → 装备所需等级
 using FindEquipSlotFn = int (*)(void*, void*);
 using GetEquipItemFn = void* (*)(void*, int32_t);
 using SetEquipItemFn = void (*)(void*, int32_t, void*);

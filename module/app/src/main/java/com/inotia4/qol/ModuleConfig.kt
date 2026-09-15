@@ -25,8 +25,7 @@ import java.io.File
  * - opEnabled：OP 能力全局开关（/api/op 门禁，architecture §9.1-2）。
  *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
  * - extensionBagEnabled：是否启用扩展背包，默认 true。
- * - gemCraftOptimize：是否启用合成器宝石合成操作优化，默认 false。
- * - customRecipeEnabled：是否启用合成器自定义配方，默认 false；禁用不回滚已注入的表（custom-craft-recipe §4.8）。
+ * - customRecipeEnabled：新合成系统（界面 + 配方），默认 false；禁用不回滚已注入的表（custom-craft-recipe §4.8）。
  * - simpleModeEnabled：简单模式，默认 false。开启后怪物最大生命减半、玩家侧打敌人伤害 ×1.5、
  *   玩家侧受到伤害 ×0.5；关闭即时生效（怪物在下一次属性重算写回满值）。变更时下发 native。
  * - autoSellEnabled：自动出售全局开关，默认 false；开启后背包页显示入口按钮并启用扫描。
@@ -46,7 +45,6 @@ object ModuleConfig {
     const val DEFAULT_MOVE_MERGE_ENABLED = false
     const val DEFAULT_OP_ENABLED = false
     const val DEFAULT_EXTENSION_BAG_ENABLED = true
-    const val DEFAULT_GEM_CRAFT_OPTIMIZE = false
     const val DEFAULT_CUSTOM_RECIPE_ENABLED = false
     const val DEFAULT_SIMPLE_MODE_ENABLED = false
     const val DEFAULT_AUTO_SELL_ENABLED = false
@@ -89,12 +87,8 @@ object ModuleConfig {
     var extensionBagEnabled: Boolean = DEFAULT_EXTENSION_BAG_ENABLED
         private set
 
-    /** 是否启用合成器宝石合成操作优化（默认 false） */
-    @Volatile
-    var gemCraftOptimize: Boolean = DEFAULT_GEM_CRAFT_OPTIMIZE
-        private set
 
-    /** 是否启用合成器自定义配方（默认 false）：禁用不回滚已注入的配方表 */
+    /** 新合成系统（默认 false）：禁用不回滚已注入的配方表 */
     @Volatile
     var customRecipeEnabled: Boolean = DEFAULT_CUSTOM_RECIPE_ENABLED
         private set
@@ -143,14 +137,13 @@ object ModuleConfig {
             moveMergeEnabled = json.optBoolean("moveMergeEnabled", DEFAULT_MOVE_MERGE_ENABLED)
             opEnabled = json.optBoolean("opEnabled", DEFAULT_OP_ENABLED)
             extensionBagEnabled = json.optBoolean("extensionBagEnabled", DEFAULT_EXTENSION_BAG_ENABLED)
-            gemCraftOptimize = json.optBoolean("gemCraftOptimize", DEFAULT_GEM_CRAFT_OPTIMIZE)
             customRecipeEnabled = json.optBoolean("customRecipeEnabled", DEFAULT_CUSTOM_RECIPE_ENABLED)
             simpleModeEnabled = json.optBoolean("simpleModeEnabled", DEFAULT_SIMPLE_MODE_ENABLED)
             autoSellEnabled = json.optBoolean("autoSellEnabled", DEFAULT_AUTO_SELL_ENABLED)
             apiEnabled = json.optBoolean("apiEnabled", DEFAULT_API_ENABLED)
             debugLogEnabled = json.optBoolean("debugLogEnabled", DEFAULT_DEBUG_LOG_ENABLED)
             if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") ||
-                !json.has("gemCraftOptimize") || !json.has("customRecipeEnabled") ||
+                !json.has("customRecipeEnabled") ||
                 !json.has("simpleModeEnabled") || !json.has("autoSellEnabled") ||
                 !json.has("apiEnabled") || !json.has("debugLogEnabled") ||
                 json.has("jewelBatchMix")
@@ -162,7 +155,7 @@ object ModuleConfig {
                 LogDomain.CONFIG,
                 "config loaded: listenAddress=$listenAddress listenPort=$listenPort " +
                     "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled " +
-                    "gemCraftOptimize=$gemCraftOptimize customRecipeEnabled=$customRecipeEnabled " +
+                    "customRecipeEnabled=$customRecipeEnabled " +
                     "simpleModeEnabled=$simpleModeEnabled autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled " +
                     "debugLogEnabled=$debugLogEnabled"
             )
@@ -188,7 +181,6 @@ object ModuleConfig {
         var newMoveMerge = moveMergeEnabled
         var newOp = opEnabled
         var newExtensionBag = extensionBagEnabled
-        var newGemCraft = gemCraftOptimize
         var newCustomRecipe = customRecipeEnabled
         var newSimpleMode = simpleModeEnabled
         var newAutoSell = autoSellEnabled
@@ -208,7 +200,6 @@ object ModuleConfig {
         if (json.has("moveMergeEnabled")) newMoveMerge = json.optBoolean("moveMergeEnabled", newMoveMerge)
         if (json.has("opEnabled")) newOp = json.optBoolean("opEnabled", newOp)
         if (json.has("extensionBagEnabled")) newExtensionBag = json.optBoolean("extensionBagEnabled", newExtensionBag)
-        if (json.has("gemCraftOptimize")) newGemCraft = json.optBoolean("gemCraftOptimize", newGemCraft)
         if (json.has("customRecipeEnabled")) newCustomRecipe = json.optBoolean("customRecipeEnabled", newCustomRecipe)
         if (json.has("simpleModeEnabled")) newSimpleMode = json.optBoolean("simpleModeEnabled", newSimpleMode)
         if (json.has("autoSellEnabled")) newAutoSell = json.optBoolean("autoSellEnabled", newAutoSell)
@@ -221,7 +212,6 @@ object ModuleConfig {
             .put("moveMergeEnabled", newMoveMerge)
             .put("opEnabled", newOp)
             .put("extensionBagEnabled", newExtensionBag)
-            .put("gemCraftOptimize", newGemCraft)
             .put("customRecipeEnabled", newCustomRecipe)
             .put("simpleModeEnabled", newSimpleMode)
             .put("autoSellEnabled", newAutoSell)
@@ -234,7 +224,6 @@ object ModuleConfig {
         moveMergeEnabled = newMoveMerge
         opEnabled = newOp
         extensionBagEnabled = newExtensionBag
-        gemCraftOptimize = newGemCraft
         customRecipeEnabled = newCustomRecipe
         simpleModeEnabled = newSimpleMode
         autoSellEnabled = newAutoSell
@@ -251,7 +240,6 @@ object ModuleConfig {
         put("moveMergeEnabled", moveMergeEnabled)
         put("opEnabled", opEnabled)
         put("extensionBagEnabled", extensionBagEnabled)
-        put("gemCraftOptimize", gemCraftOptimize)
         put("customRecipeEnabled", customRecipeEnabled)
         put("simpleModeEnabled", simpleModeEnabled)
         put("autoSellEnabled", autoSellEnabled)

@@ -16,6 +16,7 @@ enum class QolDomain : uint8_t {
     kSave, kSaveBackup, kAutosell, kGemCraft, kAttrRange, kUi, kConfig, kCatalog,
     kCustomRecipe,
     kSimpleMode,
+    kSpecialEquip,
 };
 
 const char* qol_domain_token(QolDomain domain);          // 小写 token，见实现表

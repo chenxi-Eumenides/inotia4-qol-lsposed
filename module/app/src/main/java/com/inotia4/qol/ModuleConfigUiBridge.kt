@@ -14,7 +14,7 @@ import org.json.JSONObject
 object ModuleConfigUiBridge {
 
     private val BOOL_KEYS = setOf(
-        "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize",
+        "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled",
         "customRecipeEnabled",
         "autoSellEnabled", "apiEnabled", "debugLogEnabled",
         "simpleModeEnabled"
@@ -34,7 +34,6 @@ object ModuleConfigUiBridge {
         val oldStack = ModuleConfig.stackLimitIncrease
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
-        val oldGemCraft = ModuleConfig.gemCraftOptimize
         val oldCustomRecipe = ModuleConfig.customRecipeEnabled
         val oldAutoSell = ModuleConfig.autoSellEnabled
         val oldApiEnabled = ModuleConfig.apiEnabled
@@ -45,7 +44,6 @@ object ModuleConfigUiBridge {
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
             "opEnabled" -> ModuleConfig.opEnabled
             "extensionBagEnabled" -> ModuleConfig.extensionBagEnabled
-            "gemCraftOptimize" -> ModuleConfig.gemCraftOptimize
             "customRecipeEnabled" -> ModuleConfig.customRecipeEnabled
             "autoSellEnabled" -> ModuleConfig.autoSellEnabled
             "apiEnabled" -> ModuleConfig.apiEnabled
@@ -63,7 +61,7 @@ object ModuleConfigUiBridge {
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldCustomRecipe, oldAutoSell, oldApiEnabled,
+            oldStack, oldMoveMerge, oldExtensionBag, oldCustomRecipe, oldAutoSell, oldApiEnabled,
             oldDebugLog, oldSimpleMode
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
