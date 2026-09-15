@@ -131,3 +131,8 @@ target_sources(gamebridge PRIVATE
     feature/custom_recipe/custom_recipe_table.cpp
     feature/custom_recipe/game_ui_custom_recipe.cpp
 )
+
+# 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/ui/game_ui_charinfo_zh.cpp
+)

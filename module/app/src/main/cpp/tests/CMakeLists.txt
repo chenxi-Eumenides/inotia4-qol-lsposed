@@ -182,3 +182,13 @@ target_include_directories(native_choice_tests PRIVATE
 )
 target_compile_features(native_choice_tests PRIVATE cxx_std_17)
 add_test(NAME native_choice_tests COMMAND native_choice_tests)
+
+# 角色属性面板标签中文化白名单 host 测试（纯表逻辑，header-inline，末尾追加）
+add_executable(charinfo_zh_tests
+    test_charinfo_zh.cpp
+)
+target_include_directories(charinfo_zh_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(charinfo_zh_tests PRIVATE cxx_std_17)
+add_test(NAME charinfo_zh_tests COMMAND charinfo_zh_tests)

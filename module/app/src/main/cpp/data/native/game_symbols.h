@@ -262,6 +262,9 @@ constexpr uintptr_t G_MERC_NAME_TABLE_DATA_GOT_VMA = 0x2f6000 + 0x598; // 佣兵
 
 // ---- UI 面板 enter VMA（g_sPopupStateList 27 条 × 64B 中 enter@+0x10 的匹配值；panel_close 栈顶识别 / panel_open 白名单）----
 constexpr uintptr_t F_PANEL_CHARACTER_INFO_ENTER = 0x148950; // character_info 角色信息
+// 角色属性面板每帧绘制入口（character-info-zh-labels：仅在此绘制期间替换文本表标签）。
+// 签名 void ()；llvm-readelf .dynsym 核对：0x14977c GLOBAL FUNC Scene_Draw_POPUP_SC_CHARACTER_INFO
+constexpr uintptr_t F_SCENE_DRAW_POPUP_SC_CHARACTER_INFO_VMA = 0x14977c;
 constexpr uintptr_t F_PANEL_CHOICE_ENTER = 0x14a664;          // choice 选择框（事件驱动）
 constexpr uintptr_t F_PANEL_INVENTORY_ENTER = 0x14a8b0;       // inventory 背包（可开）
 constexpr uintptr_t F_SCENE_PROCESS_EQUIP_VMA = 0x14ac2c;     // void () Scene_Process_POPUP_SC_EQUIP
@@ -992,6 +995,8 @@ using UiChoiceInitFn = void (*)(void*); // UIChoice_Init(control)
 using SceneEventPopupScChoiceFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using MapchangeSetFn = void (*)(int32_t, int32_t, int32_t, int32_t);
 using MemorytextGetTextFn = const char* (*)(uint16_t);
+// Scene_Draw_POPUP_SC_CHARACTER_INFO()：角色属性面板每帧绘制入口（无参、无返回值）。
+using SceneDrawCharinfoFn = void (*)();
 
 // ---- 合法操作函数签名 ----
 using MoveAsPathFn = int (*)(void*);
