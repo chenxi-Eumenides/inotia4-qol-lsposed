@@ -44,8 +44,8 @@ std::string data_op_add_money(int64_t delta) {
     return r ? op_ok() : op_err("add money failed");
 }
 
-std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t socket_filled,
-                             int32_t enhance_count, int32_t enhance_low4, int32_t rarity_group) {
+std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
+                             int32_t rarity_group) {
     if (!game_in_world()) return op_err("not in game");
     if (count <= 0) return op_err("bad count");
     if (fn_create_item == nullptr || fn_inven_save_item == nullptr || fn_inven_find_save_slot == nullptr ||
@@ -54,27 +54,25 @@ std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_tot
     // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
     void* item = fn_create_item(category, 0, 0, 0);
     if (item == nullptr) return op_err("create item failed");
-    // 孔位/强化构造（仅测试用，验证自动出售筛选 + 位级 A/B 实测）：CreateItem 产物
-    // I_SOCKET/I_ENCHANT 恒为 0，各段缺省 0 时写入等价于不写。分段读改写、保留其余位：
-    // I_SOCKET bits4-7=总孔数（0..15）、bits0-3=已镶嵌数（0..15）；
-    // I_ENCHANT bits6-10=已强化次数（0..31）、bits2-5=enhance_low4（0..15，语义待实测，
-    // 疑为剩余次数）、bits11-15=强化 ID 不动（保持 0 → 零副作用）、bit0-1（混沌等）不动。
+    // 孔位/强化构造（仅测试用，验证自动出售筛选 + 位级 A/B 实测；用户裁决 2026-09-15：
+    // 只设「总孔位」与「剩余强化次数」两段）。CreateItem 产物 I_SOCKET/I_ENCHANT 恒为 0，
+    // 缺省 0 时写入等价于不写。读改写、保留其余位：
+    // I_SOCKET bits4-7=总孔数 socket_total（钳 0..15），bits0-3=已镶嵌数保持 0 不写；
+    // I_ENCHANT bits2-5=剩余强化次数 enhance_remaining（钳 0..15，写 0 → 游戏内强化时
+    // 提示耐久不足），bits6-10=已强化次数与 bits11-15=强化 ID 保持 0 不写，bit0/bit1 不动。
+    // 已镶嵌数/已强化次数/强化 ID 由游戏自行维护（首次强化时游戏写强化 ID、镶嵌时游戏写
+    // 已镶数），人工写入会造成游戏内不可能状态——实测：已强化=2 且强化 ID=0 时
+    // ITEMSYSTEM_EnchantItem 返回 2、弹「与一般的强化卷轴不同」。
     // 消费方（自动出售筛选、图标、战斗）均为即时位域直读，无派生缓存需同步。
-    // 负值按 0，超上限钳到上限（socket_total/socket_filled/enhance_low4 15，enhance_count 31）。
+    // 负值按 0，超上限钳到上限（均 15）。
     if (socket_total < 0) socket_total = 0;
     if (socket_total > 15) socket_total = 15;
-    if (socket_filled < 0) socket_filled = 0;
-    if (socket_filled > 15) socket_filled = 15;
-    if (enhance_count < 0) enhance_count = 0;
-    if (enhance_count > 31) enhance_count = 31;
-    if (enhance_low4 < 0) enhance_low4 = 0;
-    if (enhance_low4 > 15) enhance_low4 = 15;
+    if (enhance_remaining < 0) enhance_remaining = 0;
+    if (enhance_remaining > 15) enhance_remaining = 15;
     uint8_t* p_socket = reinterpret_cast<uint8_t*>(item) + I_SOCKET;
     *p_socket = static_cast<uint8_t>((*p_socket & 0x0F) | ((socket_total & 0x0F) << 4));
-    *p_socket = static_cast<uint8_t>((*p_socket & 0xF0) | (socket_filled & 0x0F));
     uint16_t* p_enchant = reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_ENCHANT);
-    *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x1F << 6)) | ((enhance_count & 0x1F) << 6));
-    *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x0F << 2)) | ((enhance_low4 & 0x0F) << 2));
+    *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x0F << 2)) | ((enhance_remaining & 0x0F) << 2));
     // 品质构造（仅测试用，验证自动出售品质筛选）：CreateItem 的 ApplyGrade 会随机掷
     // I_TYPE bits2-5 raw grade；rarity_group=-1（缺省）保留随机，0..4 指定档位
     // （白/绿/蓝/黄/紫）。其余值钳到 [-1,4]：所有负值视同 -1，>4 视同 4。

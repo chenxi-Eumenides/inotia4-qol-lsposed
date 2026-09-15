@@ -76,7 +76,7 @@ object NativeBridge {
     external fun nativeOpSetHp(role: Int, hp: Int): String
     external fun nativeOpSetMp(role: Int, mp: Int): String
     external fun nativeOpSetAttr(role: Int, attrIndex: Int, value: Int): String
-    external fun nativeOpAddItem(category: Int, count: Int, socket: Int, socketFilled: Int, enhance: Int, enhanceLow4: Int, rarity: Int): String
+    external fun nativeOpAddItem(category: Int, count: Int, socket: Int, enhanceRemaining: Int, rarity: Int): String
     external fun nativeOpAddStat(role: Int, attr: Int): String
     external fun nativeOpStatReset(role: Int): String
     external fun nativeOpSkillReset(role: Int): String

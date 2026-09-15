@@ -163,14 +163,12 @@ class OpController {
         val category = o.optInt("category", -1)
         val count = o.optInt("count", 1)
         if (category < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "category required")
-        // socket/socketFilled/enhance/enhanceLow4 可选（缺省 0，产物恒 0 → 等价不写）：
-        // 构造带总孔数/已镶嵌数/已强化次数/未知低位段的测试装备，钳制在 native 侧
+        // socket/enhanceRemaining 可选（缺省 0，产物恒 0 → 等价不写）：只构造总孔数与
+        // 剩余强化次数（已镶嵌/已强化/强化ID 由游戏维护），钳制在 native 侧
         val socket = o.optInt("socket", 0)
-        val socketFilled = o.optInt("socketFilled", 0)
-        val enhance = o.optInt("enhance", 0)
-        val enhanceLow4 = o.optInt("enhanceLow4", 0)
+        val enhanceRemaining = o.optInt("enhanceRemaining", 0)
         // rarity 可选（缺省 -1 保留随机）：品质档位 0..4 白绿蓝黄紫，钳制在 native 侧
         val rarity = o.optInt("rarity", -1)
-        return ControllerGuard.guard { ApiServices.op.addItem(category, count, socket, socketFilled, enhance, enhanceLow4, rarity) }
+        return ControllerGuard.guard { ApiServices.op.addItem(category, count, socket, enhanceRemaining, rarity) }
     }
 }

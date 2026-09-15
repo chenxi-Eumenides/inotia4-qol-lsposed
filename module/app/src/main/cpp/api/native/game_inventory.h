@@ -11,12 +11,12 @@
 std::string data_op_set_money(int64_t money);
 std::string data_op_add_money(int64_t delta);
 std::string data_op_minus_money(int64_t delta);
-// socket_total/socket_filled：I_SOCKET bits4-7 总孔数 / bits0-3 已镶嵌数（各 0..15）；
-// enhance_count/enhance_low4：I_ENCHANT bits6-10 已强化次数（0..31）/ bits2-5 未知段位
-// （0..15，语义待实测）。均仅供测试构造；缺省由调用方传 0（CreateItem 产物该两处恒 0，写 0 等价不写）。
+// socket_total：I_SOCKET bits4-7 总孔数（0..15）；enhance_remaining：I_ENCHANT bits2-5
+// 剩余强化次数（0..15）。仅供测试构造；已镶嵌数/已强化次数/强化 ID 由游戏维护，本接口不写。
+// 缺省由调用方传 0（CreateItem 产物该两处恒 0，写 0 等价不写）。
 // rarity_group：I_TYPE bits2-5 品质档位（0..4 白绿蓝黄紫），-1 保留 CreateItem 随机掷级；缺省由调用方传 -1。
-std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t socket_filled,
-                             int32_t enhance_count, int32_t enhance_low4, int32_t rarity_group);
+std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
+                             int32_t rarity_group);
 std::string data_op_remove_item(int32_t category);
 
 std::string data_op_jewel(int role, int bag, int slot, int equip_slot);

@@ -1754,12 +1754,12 @@
 
 `POST /api/op/inventory/add`
 
-**请求格式**：`{ "category": 1, "count": 5 }` 或 `{ "category": 1, "count": 1, "socket": 3, "socketFilled": 1, "enhance": 5, "enhanceLow4": 0, "rarity": 4 }`
+**请求格式**：`{ "category": 1, "count": 5 }` 或 `{ "category": 1, "count": 1, "socket": 3, "enhanceRemaining": 5, "rarity": 4 }`
 
 **返回格式**：`{"ok":true,"state":<Inventory 模型>}`
 
 **注意**：ITEMSYSTEM_CreateItem + INVEN_SaveItem；`stackLimitIncrease=false` 时可堆叠上限 99，开启时上限 999；两种状态都使用固定 bit22-31 格式；背包满→`inventory full`。
-- `socket`/`socketFilled`/`enhance`/`enhanceLow4` 可选（缺省 0；CreateItem 产物这两字段恒 0，缺省写 0 等价不写）：分段直写 `I_SOCKET` bits4-7=总孔数（0..15）/ bits0-3=已镶嵌数（0..15）、`I_ENCHANT` bits6-10=已强化次数（0..31）/ bits2-5=未知低位段（0..15，语义待实测，疑为剩余次数；可用 `/api/debug/item/raw` A/B 观测），用于构造带孔位/强化的测试装备以验证自动出售筛选；越界钳制到区间（负值按 0）。混沌位（bit0）与强化 ID（bits11-15）不动，无副作用；只传 `{category,count}` 时行为不变。
+- `socket`/`enhanceRemaining` 可选（缺省 0；CreateItem 产物恒 0，缺省写 0 等价不写）：`socket`=`I_SOCKET` bits4-7 总孔数（0..15），`enhanceRemaining`=`I_ENCHANT` bits2-5 剩余强化次数（0..15，**写 0 会导致强化时提示耐久不足**），用于构造带孔位/强化耐久的测试装备以验证自动出售筛选；越界钳制到区间（负值按 0）。**已强化次数（bits6-10）/已镶嵌数（bits0-3）/强化 ID（bits11-15）由游戏维护，本接口不设置**（人工写入会造成游戏内不可能状态：实测已强化=2 且强化 ID=0 时 `ITEMSYSTEM_EnchantItem` 弹「与一般的强化卷轴不同」；首次强化游戏自写强化 ID、镶嵌自写已镶数）。只传 `{category,count}` 时行为不变。
 - `rarity` 可选（缺省 -1）：指定品质档位写入 `I_TYPE` bits2-5（raw grade，读改写保留 bits0-1 与 bits6-15 类别位），0..4 = 白/绿/蓝/黄/紫，用于验证自动出售「品质」筛选；-1 = 保留 CreateItem 的随机掷级。档位→raw 映射取 `{0,4,7,10,11}`，**待真机核实**，档位不符时调整 `game_inventory_basic.inc` 的 `kRarityRawForGroup` 表即可；越界钳制到 [-1,4]（负值视同 -1）。
 
 #### 修改金币
