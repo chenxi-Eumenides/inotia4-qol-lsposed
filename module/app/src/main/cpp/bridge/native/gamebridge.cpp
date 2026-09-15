@@ -12,6 +12,7 @@
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
 #include "feature/quest/quest_resync.h"
+#include "feature/simple_mode/simple_mode.h"
 #include "feature/world_teleport/world_teleport.h"
 
 namespace {
@@ -70,6 +71,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
         world_teleport_install_if_ready();  // 世界传送：地图名入口 patch + choice ExecuteProc hook
         custom_recipe_ui_install_if_ready();  // 自定义合成配方：UIMix 放料/合成/产物三处函数级 hook
+        simple_mode_install_if_ready();  // 简单模式：CHAR_AddDamage 伤害倍率 + CHAR_UpdateAttrFromMonster 最大生命减半
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }

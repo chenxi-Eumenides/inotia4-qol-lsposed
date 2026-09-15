@@ -142,6 +142,7 @@ data 层 → 仅 STL
 | `api/native/game_save_preflight.*` | API native 域（纯逻辑） | 存档预检判决：槽结构状态/失败码 → valid/corrupt/missing/incompatible/unknown + 阶段名 + 结构化 JSON；零游戏依赖，编入 host 单测 | 无（纯 STL） |
 | `game_system.*` | parse 域 | **系统聚合域（唯一允许 include 其他域头的聚合域）**：build_gamestate_json / build_snapshot_json + frame_count / init_report / events / emit / take_snapshot | data + 引擎 + 各域头 |
 | `feature/patch/game_patch.*` | patch | **注入/修改补丁域**：IAP 屏蔽 / 沉浸模式 / 堆叠上限（47 patch 点）/ craft 三函数 / recover_after_hive_block / migrate_stack（§2.5） | data + game_ptr_hook.h |
+| `feature/simple_mode/*` | feature | **简单模式**：包裹 `CHAR_AddDamage`（打敌人 ×2、受到伤害 ×0.5）与 `CHAR_UpdateAttrFromMonster`（怪物最大生命减半）；含阵营判定原语、mod 跳板跟随与半血幂等账本（§2.6） | data + core + `native_hook_func()` |
 | `feature/extension_bag/game_ui_virtbag.*` | feature | 扩展背包运行时：状态、投影、拖拽、绘制、生命周期与扩展背包操作 | data + core + patch |
 | `feature/extension_bag/extension_bag_port.cpp` | feature adapter | 将扩展背包内部实现适配为 `core/native/extension_bag_port.h` 稳定端口 | extension_bag runtime |
 | `feature/extension_bag/extension_bag_context.h` | feature internal | 持久化拆分使用的内部上下文访问点，不对外形成 API/core 契约 | extension_bag runtime |
@@ -222,6 +223,8 @@ data 层 → 仅 STL
 
 推荐顺序固定为：**直接读写内存 → 调用游戏函数指针 → `PtrHook` → 指令 `patch` → LSPosed Native Hook API**。这不是绝对的技术强弱排序，而是从低执行流风险到高执行流风险的决策顺序：先选择能满足需求且不改函数入口的机制，只有前四种都无法实现时，才引入 LSPosed Native Hook API。参考：[LSPosed Native Hook](https://github.com/LSPosed/LSPosed/wiki/Native-Hook)、[LSPosed native API 实现](https://github.com/LSPosed/LSPosed/blob/master/core/src/main/jni/src/native_api.cpp)。
 
+当前已落地使用该机制的功能：`feature/attribute_range`（包裹 `MATH_GetRandom` 做只读掷值区间截获）、`feature/simple_mode`（§2.6，包裹 `CHAR_AddDamage` 与 `CHAR_UpdateAttrFromMonster`）。
+
 ### 2.3 帧同步采集缓存层（v0.4.57）
 
 **位置**：`game_cache.cpp`（重构前在 game_data.cpp，P3 迁入）。**动机**：高频请求时每次实时读游戏内存 + 构造 JSON（units 含 BFS）→ 响应慢/线程爆炸；且请求线程碰游戏内存与主循环竞争。
@@ -289,6 +292,18 @@ data 层 `game_state.*` 提供两个跨域遍历原语，**收编全部同构遍
 **game_ptr_hook.h**（v0.5.18）：函数指针包装——覆盖游戏内存中的函数指针字段（按钮 ExecuteProc、控件 Proc/ControlProc、回调表），wrapper 内可回调原函数。与指令 patch 互补：只改数据段指针，无需 mprotect/指令缓存刷新，无入口重定向的 lr 污染问题。**调用约定约束**：wrapper 签名必须与被覆盖函数完全一致（参数寄存器 x0-x7、返回值、被调用者保存寄存器 x19-x28、16 字节栈对齐）。
 
 **Kotlin**：`patch/IapBlocker.kt` / `patch/ImmersiveMode.kt`（模块启动期经 ConfigApiService 下发 native 生效）。
+
+### 2.6 简单模式（simple-mode）
+
+**native**：`feature/simple_mode/`（`simple_mode.cpp` 域实现、`simple_mode_rules.{h,cpp}` 纯逻辑、`bridge/native/gamebridge_simple_mode.cpp` JNI 薄层）。
+
+功能语义、真机验收数据与文件清单见 `docs/development/features/simple-mode.md`（唯一权威）。以下只记跨域的**结构性事实**：
+
+- **两个落点都是 LSPosed Native Hook API 单点包裹**（§2.2.1 第五档）：`CHAR_AddDamage`（伤害结算唯一汇合点，15 个静态调用点全部经此，函数体第 3 条语句即唯一扣血点 `CHAR_AddLife`）与 `CHAR_UpdateAttrFromMonster`（`CHAR_UpdateAttr` 对 `C_TYPE==1` 的唯一分派目标，属性脏位惰性重算必经）。两者都无函数指针槽，`PtrHook` 不适用。
+- **mod 跳板跟随**：monster 全系把 `CHAR_AddDamage` 入口改写成无条件 `b` 跳板（v20 → `.text` 内 `0x14e280`；v23-v27 → 第二可执行段 `0x7450b8`），原版与大修是干净序言。安装前读入口首字，若是 `b` 则解码 26 位有符号立即数跟随一次（目标须 4 字节对齐且在可执行映射内）。跳板入口先 `stp x0..x8` 保存，故跳板目标处 ABI 与函数入口一致；该跳板专用于 `CHAR_AddDamage`（`.text` 全量反汇编中仅 1 处引用）。
+- **半血必须幂等**：`CHAR_UpdateAttrFromMonster` 是「读旧槽值 → 变换 → 写回」的幂等调整层（唯一写点 `e011c`，`w20` 初值读自同一槽 `e008c`），对它再做非幂等变换会随每次重算累积。域内按角色池槽维护幂等账本；定位不到池槽时不改写（fail-safe）。
+- **阵营判定原语**（本次一并修正了 `C_TYPE` 的错误注释）：`C_TYPE(ch+0x09)` 取值即 `CHARSYSTEM_Produce` 的 type 参数 —— **0 = 玩家侧角色、1 = 怪物、2 = NPC/装饰物**。原语组合见 features/simple-mode.md §3；`CHAR_GetPartyIndex`（主角+队友）与 `CHAR_IsActivePlayerGroup`（主控+主控召唤物）都不覆盖「队友的召唤物」，须用 `CHAR_GetSummoner` 递归补齐。
+- **热路径开关**：开关是 `std::atomic<bool>`，JVM 线程写、游戏线程读；wrapper 内不得读文件或反调 Kotlin。
 
 ## 3. Kotlin 层文件职责
 

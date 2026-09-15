@@ -240,8 +240,6 @@ bool bridge_init() {
     fn_evt_set_state = reinterpret_cast<EvtSetStateFn>(g_base + fn_resolve("F_EVT_SET_STATE_VMA", F_EVT_SET_STATE_VMA));
     fn_textctrl_move_next_page = reinterpret_cast<TextctrlMoveNextPageFn>(g_base + fn_resolve("F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA", F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA));
     fn_key_set_code = reinterpret_cast<KeySetCodeFn>(g_base + fn_resolve("F_KEY_SET_CODE_VMA", F_KEY_SET_CODE_VMA));
-    fn_wipeout_button_revive = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_WIPEOUT_BUTTON_REVIVE_VMA", F_WIPEOUT_BUTTON_REVIVE_VMA));
-    fn_wipeout_button_special_revive = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_WIPEOUT_BUTTON_SPECIAL_REVIVE_VMA", F_WIPEOUT_BUTTON_SPECIAL_REVIVE_VMA));
     fn_wipeout_button_gameover = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_WIPEOUT_BUTTON_GAMEOVER_VMA", F_WIPEOUT_BUTTON_GAMEOVER_VMA));
     fn_event_button_ok_exe = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_EVENT_BUTTON_OK_EXE_VMA", F_EVENT_BUTTON_OK_EXE_VMA));
     fn_event_button_skip_exe = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_EVENT_BUTTON_SKIP_EXE_VMA", F_EVENT_BUTTON_SKIP_EXE_VMA));
@@ -329,6 +327,16 @@ bool bridge_init() {
     fn_go_map_link_by_char = reinterpret_cast<GoMapLinkByCharFn>(g_base + fn_resolve("F_GAMEPLAY_GO_MAP_LINK_BY_CHAR_VMA", F_GAMEPLAY_GO_MAP_LINK_BY_CHAR_VMA));
     fn_char_set_target = reinterpret_cast<CharSetTargetFn>(g_base + fn_resolve("F_CHAR_SET_TARGET_VMA", F_CHAR_SET_TARGET_VMA));
     fn_char_stop_combat = reinterpret_cast<CharStopCombatFn>(g_base + fn_resolve("F_CHAR_STOP_COMBAT_VMA", F_CHAR_STOP_COMBAT_VMA));
+    fn_char_add_damage = reinterpret_cast<CharAddDamageFn>(
+        g_base + fn_resolve("F_CHAR_ADD_DAMAGE_VMA", F_CHAR_ADD_DAMAGE_VMA));
+    fn_char_update_attr_from_monster = reinterpret_cast<CharUpdateAttrFromMonsterFn>(
+        g_base + fn_resolve("F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA", F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA));
+    fn_char_get_party_index = reinterpret_cast<CharGetPartyIndexFn>(
+        g_base + fn_resolve("F_CHAR_GET_PARTY_INDEX_VMA", F_CHAR_GET_PARTY_INDEX_VMA));
+    fn_char_is_active_player_group = reinterpret_cast<CharIsActivePlayerGroupFn>(
+        g_base + fn_resolve("F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA", F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA));
+    fn_char_get_summoner = reinterpret_cast<CharGetSummonerFn>(
+        g_base + fn_resolve("F_CHAR_GET_SUMMONER_VMA", F_CHAR_GET_SUMMONER_VMA));
     fn_consume_item = reinterpret_cast<ConsumeItemFn>(g_base + fn_resolve("F_CONSUME_ITEM_VMA", F_CONSUME_ITEM_VMA));
     fn_char_use_item_ex = reinterpret_cast<CharUseItemExFn>(g_base + fn_resolve("F_CHAR_USE_ITEM_EX_VMA", F_CHAR_USE_ITEM_EX_VMA));
     fn_char_process_shortcut = reinterpret_cast<CharProcessShortcutFn>(

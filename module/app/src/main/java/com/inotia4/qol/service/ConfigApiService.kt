@@ -24,7 +24,8 @@ interface ConfigApiService {
         oldCustomRecipe: Boolean,
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
-        oldDebugLog: Boolean
+        oldDebugLog: Boolean,
+        oldSimpleMode: Boolean
     )
 
     /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵 2026-08-12） */
@@ -48,6 +49,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.info(LogDomain.CONFIG, "gemCraftOptimize=${ModuleConfig.gemCraftOptimize} applied=$gemCraftApplied")
         val customRecipeApplied = NativeBridge.nativeSetCustomRecipeEnabled(ModuleConfig.customRecipeEnabled)
         LogFile.info(LogDomain.CONFIG, "customRecipeEnabled=${ModuleConfig.customRecipeEnabled} applied=$customRecipeApplied")
+        val simpleModeApplied = NativeBridge.nativeSetSimpleModeEnabled(ModuleConfig.simpleModeEnabled)
+        LogFile.info(LogDomain.CONFIG, "simpleModeEnabled=${ModuleConfig.simpleModeEnabled} applied=$simpleModeApplied")
         val autoSellApplied = NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
         LogFile.info(LogDomain.CONFIG, "autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
         val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
@@ -65,7 +68,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldCustomRecipe: Boolean,
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
-        oldDebugLog: Boolean
+        oldDebugLog: Boolean,
+        oldSimpleMode: Boolean
     ) {
         if (!NativeBridge.ready) return
         if (ModuleConfig.stackLimitIncrease != oldStack) {
@@ -82,6 +86,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.customRecipeEnabled != oldCustomRecipe) {
             NativeBridge.nativeSetCustomRecipeEnabled(ModuleConfig.customRecipeEnabled)
+        }
+        if (ModuleConfig.simpleModeEnabled != oldSimpleMode) {
+            NativeBridge.nativeSetSimpleModeEnabled(ModuleConfig.simpleModeEnabled)
         }
         if (ModuleConfig.autoSellEnabled != oldAutoSell) {
             NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)

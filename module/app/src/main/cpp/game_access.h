@@ -127,8 +127,6 @@ extern SearchPathFn fn_search_path;
 extern EvtSetStateFn fn_evt_set_state;
 extern TextctrlMoveNextPageFn fn_textctrl_move_next_page;
 extern KeySetCodeFn fn_key_set_code;
-extern IntVoidFn fn_wipeout_button_revive;
-extern IntVoidFn fn_wipeout_button_special_revive;
 extern IntVoidFn fn_wipeout_button_gameover;
 extern IntVoidFn fn_event_button_ok_exe;
 extern IntVoidFn fn_event_button_skip_exe;
@@ -202,6 +200,15 @@ extern MapSetFocusFn fn_map_set_focus;
 extern GoMapLinkByCharFn fn_go_map_link_by_char;
 extern CharSetTargetFn fn_char_set_target;
 extern CharStopCombatFn fn_char_stop_combat;
+// ---- 简单模式落点（伤害汇合点 / 怪物属性重算 / 阵营判定原语）----
+// ⚠️ 这四个函数均为纯读、无写回副作用，但只应在游戏线程调用（它们读角色池与队伍全局）。
+extern CharAddDamageFn fn_char_add_damage;
+extern CharUpdateAttrFromMonsterFn fn_char_update_attr_from_monster;
+extern CharGetPartyIndexFn fn_char_get_party_index;
+// CHAR_IsActivePlayerGroup(ch)：非 0 = ch 是当前主控角色本人，或 ch 的召唤者是当前主控。
+// 只覆盖主控的召唤物，不含队友的召唤物（队友召唤物须由 fn_char_get_summoner 递归补齐）。
+extern CharIsActivePlayerGroupFn fn_char_is_active_player_group;
+extern CharGetSummonerFn fn_char_get_summoner;
 extern ConsumeItemFn fn_consume_item;
 extern CharUseItemExFn fn_char_use_item_ex;
 extern CharProcessShortcutFn fn_char_process_shortcut;

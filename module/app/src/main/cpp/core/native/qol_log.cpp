@@ -52,6 +52,7 @@ const DomainEntry kDomainTable[] = {
     {QolDomain::kConfig, "config"},
     {QolDomain::kCatalog, "catalog"},
     {QolDomain::kCustomRecipe, "custom_recipe"},
+    {QolDomain::kSimpleMode, "simple_mode"},
 };
 
 std::atomic<QolFrameProvider> g_frame_provider{nullptr};

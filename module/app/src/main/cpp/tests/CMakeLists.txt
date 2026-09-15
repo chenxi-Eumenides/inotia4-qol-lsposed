@@ -192,3 +192,14 @@ target_include_directories(charinfo_zh_tests PRIVATE
 )
 target_compile_features(charinfo_zh_tests PRIVATE cxx_std_17)
 add_test(NAME charinfo_zh_tests COMMAND charinfo_zh_tests)
+
+# 简单模式纯逻辑 host 测试（阵营矩阵 / 倍率 / 边界钳制，末尾追加）
+add_executable(simple_mode_rules_tests
+    test_simple_mode_rules.cpp
+    ${CPP_DIR}/feature/simple_mode/simple_mode_rules.cpp
+)
+target_include_directories(simple_mode_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(simple_mode_rules_tests PRIVATE cxx_std_17)
+add_test(NAME simple_mode_rules_tests COMMAND simple_mode_rules_tests)

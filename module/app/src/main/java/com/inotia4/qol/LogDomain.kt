@@ -22,5 +22,6 @@ enum class LogDomain(val token: String) {
     UI("ui"),
     CONFIG("config"),
     CATALOG("catalog"),
-    CUSTOM_RECIPE("custom_recipe");
+    CUSTOM_RECIPE("custom_recipe"),
+    SIMPLE_MODE("simple_mode");
 }

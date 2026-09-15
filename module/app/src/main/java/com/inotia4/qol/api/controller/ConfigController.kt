@@ -35,11 +35,13 @@ class ConfigController {
         val oldAutoSell = ModuleConfig.autoSellEnabled
         val oldApiEnabled = ModuleConfig.apiEnabled
         val oldDebugLog = ModuleConfig.debugLogEnabled
+        val oldSimpleMode = ModuleConfig.simpleModeEnabled
         val err = ModuleConfig.apply(json)
         if (err != null) throw ApiException(StatusCode.SC_BAD_REQUEST, err)
         // v0.5.46 收边：native 直调收口到 ConfigApiService（内部判断 ready + 增量生效）
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldCustomRecipe, oldAutoSell, oldApiEnabled, oldDebugLog
+            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldCustomRecipe, oldAutoSell, oldApiEnabled,
+            oldDebugLog, oldSimpleMode
         )
         val restartNeeded = ModuleConfig.listenAddress != oldAddress || ModuleConfig.listenPort != oldPort
         val apiEnabledChanged = ModuleConfig.apiEnabled != oldApiEnabled

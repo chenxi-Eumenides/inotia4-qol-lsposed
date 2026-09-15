@@ -108,6 +108,13 @@ target_sources(gamebridge PRIVATE
     feature/quest/quest_resync.cpp
 )
 
+# 简单模式：伤害倍率 + 怪物最大生命减半 + 阵营判定（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/simple_mode/simple_mode_rules.cpp
+    feature/simple_mode/simple_mode.cpp
+    bridge/native/gamebridge_simple_mode.cpp
+)
+
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     core/native/qol_log.cpp

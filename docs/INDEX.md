@@ -54,6 +54,8 @@
 
 合成器自定义配方（custom-craft-recipe）：`development/features/custom-craft-recipe.md`（向混沌合成面板注入模块配方、选中时改写放料与合成按钮；配方 1 = 1 宝石 + 1 卓越灵药 → 宝石数值提升一档；表注入落位、档位定义、共存方案与 VM 验收卡；设计稿，未实现）。
 
+简单模式（simple-mode）：`development/features/simple-mode.md`（怪物最大生命减半 + 玩家侧打敌人伤害 ×2 + 玩家侧受到伤害 ×0.5；双 Native Hook 落点、阵营判定原语、mod 跳板跟随与半血幂等账本；已实现并真机验证）。
+
 帧派发宿主（frame-dispatch-host）：`development/features/frame-dispatch-host.md`（FrameTaskManager 是否可用 hook 重构、游戏帧周期 §2 逆向结论、锚点与相位模型、统一 `frame_tick` + `frame_host` 设计与分阶段实施、真机验证开放项；可行性调查与设计稿，未实现）。
 
 进入存档回调（save-enter-callback）：`development/features/save-enter-callback.md`（存档生命周期回调：读档/新档加载完成进入 world 后触发一次；world→主菜单退出触发一次；call_patch 发起点 + frame_task world 就绪检测；切图返回不触发。进入回调已真机验证，退出回调未真机验证）。

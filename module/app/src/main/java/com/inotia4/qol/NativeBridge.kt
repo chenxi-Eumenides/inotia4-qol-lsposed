@@ -34,6 +34,7 @@ object NativeBridge {
     external fun nativeQolLogInit()
     external fun nativeQolLogWrite(level: Int, domain: String, src: String, msg: String)
     external fun nativeQolLogSetDebugEnabled(enabled: Boolean)
+    external fun nativeSetSimpleModeEnabled(enabled: Boolean): Boolean
 
     external fun nativeRegisterConfigBridge(bridge: Class<*>)
     external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)

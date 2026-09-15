@@ -90,14 +90,16 @@ static void test_domain_tokens() {
         QolDomain::kExtensionBag, QolDomain::kSave,      QolDomain::kSaveBackup,
         QolDomain::kAutosell,   QolDomain::kGemCraft,    QolDomain::kAttrRange,
         QolDomain::kUi,         QolDomain::kConfig,      QolDomain::kCatalog,
+        QolDomain::kSimpleMode,
     };
     const char* tokens[] = {
         "platform", "core",  "http",   "api",        "op",
         "inventory", "extension_bag", "save", "save_backup", "autosell",
         "gem_craft", "attr_range", "ui", "config", "catalog",
+        "simple_mode",
     };
     const size_t count = sizeof(domains) / sizeof(domains[0]);
-    CHECK(count == 15);
+    CHECK(count == 16);
     for (size_t i = 0; i < count; ++i) {
         CHECK(std::strcmp(qol_domain_token(domains[i]), tokens[i]) == 0);
         CHECK(qol_domain_from_token(tokens[i]) == domains[i]);

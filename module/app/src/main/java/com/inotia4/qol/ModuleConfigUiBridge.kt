@@ -16,7 +16,8 @@ object ModuleConfigUiBridge {
     private val BOOL_KEYS = setOf(
         "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled", "gemCraftOptimize",
         "customRecipeEnabled",
-        "autoSellEnabled", "apiEnabled", "debugLogEnabled"
+        "autoSellEnabled", "apiEnabled", "debugLogEnabled",
+        "simpleModeEnabled"
     )
 
     @JvmStatic
@@ -38,6 +39,7 @@ object ModuleConfigUiBridge {
         val oldAutoSell = ModuleConfig.autoSellEnabled
         val oldApiEnabled = ModuleConfig.apiEnabled
         val oldDebugLog = ModuleConfig.debugLogEnabled
+        val oldSimpleMode = ModuleConfig.simpleModeEnabled
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
@@ -48,6 +50,7 @@ object ModuleConfigUiBridge {
             "autoSellEnabled" -> ModuleConfig.autoSellEnabled
             "apiEnabled" -> ModuleConfig.apiEnabled
             "debugLogEnabled" -> ModuleConfig.debugLogEnabled
+            "simpleModeEnabled" -> ModuleConfig.simpleModeEnabled
             else -> {
                 // BOOL_KEYS 与分支必须逐项同步：未来新增 key 未接线时显式失败，
                 // 杜绝静默落到某个既有开关（历史上 opEnabled 曾靠 else 兜底）。
@@ -60,7 +63,8 @@ object ModuleConfigUiBridge {
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldCustomRecipe, oldAutoSell, oldApiEnabled, oldDebugLog
+            oldStack, oldMoveMerge, oldExtensionBag, oldGemCraft, oldCustomRecipe, oldAutoSell, oldApiEnabled,
+            oldDebugLog, oldSimpleMode
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
         // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。

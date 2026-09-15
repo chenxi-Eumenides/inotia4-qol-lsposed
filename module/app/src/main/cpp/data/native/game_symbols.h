@@ -12,7 +12,7 @@
 
 // ---- 角色结构体偏移 ----
 constexpr size_t C_SITUATION = 0x00; // u8 角色情形码（CHAR_SetSituation 0xdc310 写 obj[0]；引擎碰撞 CHARSYSTEM_GetCharacterBlock 0xddaac 要求==1 才判阻挡；尸体死亡→SetSituation(6)/Free(0)，situation!=1 不再阻挡）
-constexpr size_t C_TYPE = 0x09;      // int8 角色类型 (0=英雄 1=佣兵)
+constexpr size_t C_TYPE = 0x09;      // int8 角色类型（取值即 CHARSYSTEM_Produce 的 type 参数：0=玩家侧角色 1=怪物 2=NPC/装饰物）。证据：GENSYSTEM_ProduceMonster 尾部扫池按 `ldrsb w1,[ch+0x9]; cmp w1,#1` 筛怪物；CHAR_UpdateAttr 对 type==1 分派 CHAR_UpdateAttrFromMonster(0xe0048)；本模块 game_world_readers.inc 的 enemies 过滤亦用 type==1。早期注释「0=英雄 1=佣兵」为错误口径，已纠正
 constexpr size_t C_NAME_ID = 0x0A;   // u16 名称相关 ID（非 text_id；角色名称须用 CHAR_GetName 获取）
 constexpr size_t C_CLASS = 0x0D;     // int8 职业索引（0-5；CHARSYSTEM_Produce type==0 分支 f39c0 strb w21(class_idx),[ch+0xd]；type==2 装饰物此字段=type 值）
 constexpr size_t C_LEVEL = 0x0E;     // int8 等级
@@ -621,6 +621,33 @@ constexpr uintptr_t F_MAP_SET_FOCUS_VMA = 0x11336c;    // void (int32 x, int32 y
 constexpr uintptr_t F_GAMEPLAY_GO_MAP_LINK_BY_CHAR_VMA = 0x9cdc0;  // int (void* ch, int32 tile_x, int32 tile_y) 按角色触发出口检测→MAPCHANGE_Set→切图状态机
 constexpr uintptr_t F_CHAR_SET_TARGET_VMA = 0xdc754;    // void (void*, void*) 设置攻击目标（写 [ch+0x278]）
 constexpr uintptr_t F_CHAR_STOP_COMBAT_VMA = 0xe7c24;   // void (void*) 停止战斗（清战斗标志+移除仇恨+动作复位）
+
+// ---- 简单模式落点（伤害汇合点 / 怪物属性重算 / 阵营判定原语）----
+// 逐版核对结论（llvm-objdump -T/-d，2026-09-15）：下表 5 个符号在 原版 v1.3.2、monster v20/v23/v25/v26/v27、
+// 大修 20260704/20260830 共 8 个构建中 VMA 与 size 全部逐字节一致；运行期仍优先按 .dynsym 符号名解析。
+//
+// CHAR_AddDamage：伤害结算唯一汇合点。函数体第 3 条语句即 `neg w1,w2; mov x0,受害者; bl CHAR_AddLife`
+// （0xea330），故入口即「生效前最后一刻」；普攻/物理技能/法术/DOT/怪物动作/防御兜底共 15 处静态调用点
+// 全部经此单点（13 bl + CHAR_AddDamageByDefaultCheck 内 2 处尾调用 b），无函数指针间接分发。
+// ⚠️ 入口指令形态逐版不同：原版与大修为干净序言 `stp x29,x30,[sp,#-0x40]!`；monster v20 为 `b 0x14e280`、
+// v23-v27 为 `b 0x7450b8`（mod 插入的跳板，落于第二可执行段）。跳板入口先 `stp x0..x8` 保存再修改寄存器，
+// 故跳板目标处 ABI 与函数入口完全一致；安装 hook 前必须读入口首字判断是否为无条件 b 并跟随一次。
+constexpr uintptr_t F_CHAR_ADD_DAMAGE_VMA = 0xea2d8;   // void (void* 攻击者, void* 受害者, int32 伤害, int32 标记(1=暴击 8=DOT), int32 0=物理 非0=法术)
+// CHAR_UpdateAttrFromMonster：怪物属性重算/调整层，CHAR_UpdateAttr 对 C_TYPE==1 分派至此（0xdfd0c）。
+// 全部 8 个构建入口均为干净序言 `stp x29,x30,[sp,#-0x60]!`，无跳板（最安全的落点）。
+// ⚠️ 本函数是「读旧槽值 → 变换 → 写回」的幂等调整层：唯一属性槽写点 e011c `str w20,[x19,#0x24]`，
+// 而 w20 初值读自同一槽（e008c `ldr w20,[x0,#0x24]`），之后只有召唤继承/难度缩放/上限钳制三类变换。
+// 因此外部对槽值再做变换时「必须自行保证幂等」，否则会随每次重算累积（1/2 → 1/4 → 1/8）。
+constexpr uintptr_t F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA = 0xe0048;  // void (void* ch, int32 attr_id) attr_id==0x1e(ATTR_MAX_HP) 即最大生命槽 ch+0x9c
+// CHAR_GetPartyIndex：for i in 0..2 查 PARTY_GetMember(i)==ch → 返回 0/1/2，否则 -1。
+// 覆盖主角 + 2 名队友，**不含召唤物**。纯读、无写回副作用。
+constexpr uintptr_t F_CHAR_GET_PARTY_INDEX_VMA = 0xdca10;   // int32 (void* ch)
+// CHAR_IsActivePlayerGroup：ch==当前主控 或 ch 的召唤者(char-state type 7 节点 [+8])==当前主控。
+// 覆盖「主控本人 + 主控的召唤物」，**不含队友的召唤物**。纯读、无写回副作用。
+constexpr uintptr_t F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA = 0xe6d1c;   // int32 (void* ch)
+// CHAR_GetSummoner：经 CHAR_FindCharState(ch,7) 反查召唤者指针（另有 [ch+0x2d0] 链式查找）。
+// 用于补齐「队友的召唤物」这一归属缺口（前两个原语都不覆盖）。纯读、无写回副作用。
+constexpr uintptr_t F_CHAR_GET_SUMMONER_VMA = 0xdb730;   // void* (void* ch)
 constexpr uintptr_t F_CONSUME_ITEM_VMA = 0x1047bc;     // void (void*) 消耗 1 个（使用药水/卷轴）
 constexpr uintptr_t F_CHAR_USE_ITEM_EX_VMA = 0xeb670;  // void (void* ch, void* item, int flag) 物品效果分派核心
 constexpr uintptr_t F_CHAR_PROCESS_SHORTCUT_VMA = 0xec028; // int (void* ch, int shortcut) 快捷栏处理
@@ -1033,6 +1060,14 @@ using MapSetFocusFn = void (*)(int32_t, int32_t);
 using GoMapLinkByCharFn = int (*)(void*, int32_t, int32_t, int32_t);  // 4参: (ch, tile_x, tile_y, use_dir)，use_dir=0 走 MAP_FindMapLinkNoDir（不查角色朝向，只查出口 tile 坐标）
 using CharSetTargetFn = void (*)(void*, void*);
 using CharStopCombatFn = void (*)(void*);
+// ---- 简单模式落点函数签名 ----
+// CHAR_AddDamage(攻击者, 受害者, 最终伤害, 标记(1=暴击 8=DOT), 0=物理 非0=法术)
+using CharAddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
+// CHAR_UpdateAttrFromMonster(ch, attr_id)：attr_id==0x1e 时槽位为 ch+0x9c（最大生命）
+using CharUpdateAttrFromMonsterFn = void (*)(void*, int32_t);
+using CharGetPartyIndexFn = int32_t (*)(void*);
+using CharIsActivePlayerGroupFn = int32_t (*)(void*);
+using CharGetSummonerFn = void* (*)(void*);
 using ConsumeItemFn = void (*)(void*);
 using CharUseItemExFn = int (*)(void*, void*, int);  // 返回 1=成功(内部已消耗) 0=失败
 using UiEquipOkConfirmUseItemFn = void (*)(void*);  // UIEquip_OKConfrimUseItem(item)：确认使用回调
