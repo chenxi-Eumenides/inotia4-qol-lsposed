@@ -3,8 +3,9 @@
 #include <cstdint>
 #include <cstdio>
 
-// host 单测：autosell 纯规则引擎 should_sell 的命中/不命中、边界、同类 OR、
-// 跨类独立、值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
+// host 单测：autosell 纯规则引擎 should_sell 的命中/不命中、边界、
+// 装备三规则同类 AND（0=关不参与）、宝石同类 OR、跨类 OR、
+// 值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
 // 特殊多选与「无规则不出售」；硬保护（已强化/已镶嵌永不出售，用户 2026-09-15）。
 // 强化口径 = 剩余强化次数 enhance_remaining（I_ENCHANT bits2-5，UI 名称「强化耐久度」）。
 // 风格与 tests/test_attribute_range.cpp 一致（自带断言计数）。
@@ -348,52 +349,91 @@ static void test_gem_range_only_jewels_and_or() {
     CHECK(!should_sell(jewel, off));
 }
 
-static void test_equip_rules_or() {
-    // 同类内 OR：三条装备规则中只开启命中的一条也出售。
+static void test_equip_rules_and() {
+    // 装备三规则同类 AND（用户 2026-09-16）：0=关不参与；已开启项须同时命中才出售。
+    // 物品：rarity 2 / enhance_remaining 3 / socket_total 2。
+    // 命中档位：rarity 值 3→阈值 2、enhance 值 4→阈值 3、socket 值 3→阈值 2。
     ItemView item = equip_item();
     item.rarity = 2;
     item.enhance_remaining = 3;
     item.socket_total = 2;
 
-    // 仅品质开启且不命中（值 2 → 阈值 1，rarity 2 不命中），其余关闭 -> 不出售。
-    Config only_rarity_miss;
-    only_rarity_miss.enabled = true;
-    only_rarity_miss.rarity = 2;
-    CHECK(!should_sell(item, only_rarity_miss));
+    // 三条全开且全部命中 -> 出售。
+    Config all_hit;
+    all_hit.enabled = true;
+    all_hit.rarity = 3;
+    all_hit.enhance = 4;
+    all_hit.socket = 3;
+    CHECK(should_sell(item, all_hit));
 
-    // 仅品质命中（值 3 → 阈值 2）-> 出售。
+    // 单条开启：单条 AND 退化为「该条命中即出售」。
     Config only_rarity;
     only_rarity.enabled = true;
     only_rarity.rarity = 3;
     CHECK(should_sell(item, only_rarity));
 
-    // 仅强化命中（值 4 → 阈值 3）-> 出售。
     Config only_enhance;
     only_enhance.enabled = true;
     only_enhance.enhance = 4;
     CHECK(should_sell(item, only_enhance));
 
-    // 仅孔位命中（值 3 → 阈值 2）-> 出售。
     Config only_socket;
     only_socket.enabled = true;
     only_socket.socket = 3;
     CHECK(should_sell(item, only_socket));
 
-    // 品质/强化均不命中，仅孔位命中（阈值 2）-> 出售（OR）。
-    Config rarity_miss_enhance_miss_socket_hit;
-    rarity_miss_enhance_miss_socket_hit.enabled = true;
-    rarity_miss_enhance_miss_socket_hit.rarity = 2;  // 阈值 1，不命中
-    rarity_miss_enhance_miss_socket_hit.enhance = 3;  // 阈值 2，不命中
-    rarity_miss_enhance_miss_socket_hit.socket = 3;   // 阈值 2，命中
-    CHECK(should_sell(item, rarity_miss_enhance_miss_socket_hit));
+    // 单条开启但不命中 -> 不出售。
+    Config only_rarity_miss;
+    only_rarity_miss.enabled = true;
+    only_rarity_miss.rarity = 2;  // 阈值 1，rarity 2 不命中
+    CHECK(!should_sell(item, only_rarity_miss));
 
-    // 三条均不命中 -> 不出售。
-    Config none_hit;
-    none_hit.enabled = true;
-    none_hit.rarity = 2;   // 阈值 1
-    none_hit.enhance = 3;  // 阈值 2
-    none_hit.socket = 2;   // 阈值 1
-    CHECK(!should_sell(item, none_hit));
+    // 三条全开但中间一条（强化）不命中 -> 不出售（AND）。
+    Config enhance_miss;
+    enhance_miss.enabled = true;
+    enhance_miss.rarity = 3;   // 阈值 2，命中
+    enhance_miss.enhance = 3;  // 阈值 2，enhance 3 不命中
+    enhance_miss.socket = 3;   // 阈值 2，命中
+    CHECK(!should_sell(item, enhance_miss));
+
+    // 三条全开但首条（品质）不命中 -> 不出售（AND）。
+    Config rarity_miss;
+    rarity_miss.enabled = true;
+    rarity_miss.rarity = 2;   // 阈值 1，rarity 2 不命中
+    rarity_miss.enhance = 4;  // 阈值 3，命中
+    rarity_miss.socket = 3;   // 阈值 2，命中
+    CHECK(!should_sell(item, rarity_miss));
+
+    // 三条全开但末条（孔位）不命中 -> 不出售（AND）。
+    Config socket_miss;
+    socket_miss.enabled = true;
+    socket_miss.rarity = 3;   // 阈值 2，命中
+    socket_miss.enhance = 4;  // 阈值 3，命中
+    socket_miss.socket = 2;   // 阈值 1，socket 2 不命中
+    CHECK(!should_sell(item, socket_miss));
+
+    // 关闭项不参与：两条开启且均命中、第三条关闭 -> 出售。
+    Config socket_off;
+    socket_off.enabled = true;
+    socket_off.rarity = 3;
+    socket_off.enhance = 4;
+    socket_off.socket = 0;  // 关闭
+    CHECK(should_sell(item, socket_off));
+
+    Config rarity_off;
+    rarity_off.enabled = true;
+    rarity_off.rarity = 0;  // 关闭
+    rarity_off.enhance = 4;
+    rarity_off.socket = 3;
+    CHECK(should_sell(item, rarity_off));
+
+    // 三条全部关闭 -> 不参与，不出售。
+    Config none_enabled;
+    none_enabled.enabled = true;
+    none_enabled.rarity = 0;
+    none_enabled.enhance = 0;
+    none_enabled.socket = 0;
+    CHECK(!should_sell(item, none_enabled));
 }
 
 static void test_disable_dimension() {
@@ -565,7 +605,7 @@ int main() {
     test_gem_tier_value_switch();
     test_gem_range_value_switch();
     test_gem_range_only_jewels_and_or();
-    test_equip_rules_or();
+    test_equip_rules_and();
     test_disable_dimension();
     test_cross_category_independence();
     test_special_mask();

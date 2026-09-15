@@ -4,20 +4,33 @@ namespace autosell {
 
 namespace {
 
-// 装备类规则：任一已开启规则命中即真（同类内 OR）。值 0=关；值 v → 阈值 v-1。
+// 装备类规则：三条规则之间为 AND（用户 2026-09-16 裁决）——值 0=关、不参与判定；
+// 所有已开启（值 v>0）的规则必须同时命中才为真；三条全关时不参与（返回 false）。
+// 比较方向统一 `<=`：值 v → 阈值 v-1。
 bool equip_rule_hit(const ItemView& item, const Config& cfg) {
-    if (cfg.rarity > 0 && item.rarity <= cfg.rarity - 1) {
-        return true;
+    bool any_enabled = false;
+
+    if (cfg.rarity > 0) {
+        any_enabled = true;
+        if (item.rarity > cfg.rarity - 1) {
+            return false;
+        }
     }
     // 强化口径（用户 2026-09-15 裁决）：比较「剩余强化次数」enhance_remaining（bits2-5），
     // 界面名称「强化耐久度」；不再读已强化次数 bits6-10（该字段改由硬保护使用）。
-    if (cfg.enhance > 0 && item.enhance_remaining <= cfg.enhance - 1) {
-        return true;
+    if (cfg.enhance > 0) {
+        any_enabled = true;
+        if (item.enhance_remaining > cfg.enhance - 1) {
+            return false;
+        }
     }
-    if (cfg.socket > 0 && item.socket_total <= cfg.socket - 1) {
-        return true;
+    if (cfg.socket > 0) {
+        any_enabled = true;
+        if (item.socket_total > cfg.socket - 1) {
+            return false;
+        }
     }
-    return false;
+    return any_enabled;
 }
 
 // 宝石属性范围档位 -> 属性百分位阈值（1→30 / 2→60 / 3→75 / 4→90 / 5→99）。
