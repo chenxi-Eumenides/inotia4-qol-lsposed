@@ -130,32 +130,72 @@ static void test_random_matches_target() {
 }
 
 // ---------------------------------------------------------------------------
-// §5.1(3) 目录映射：N=1（真实目录）与合成 N=3。
+// §5.1(3) 目录映射：N=2（真实目录，两条均挂宝石强化页 group 3）与合成 N=3。
 // ---------------------------------------------------------------------------
 static void test_catalog_mapping() {
     size_t n = 0;
     const cr::Def* real = cr::catalog(&n);
-    CHECK(n == 1);
+    CHECK(n == 2);
     CHECK(real != nullptr);
+    // 第 1 条「合成」= kThreeSlotCraft（3 格隐式配方，§2.8/§4.12）：材料/费用字段仍镜像原版
+    // record 12（低级宝石×3 / 188）仅供该页材料格与费用**显示**保持原样；能否合成与实际产物
+    // 由 `kThreeSlotRecipes` 按 3 格内容决定，放料/合成两条路径都不转调原函数。
+    CHECK(real[0].label_word_id == 35216);
+    CHECK(real[0].kind == cr::Kind::kThreeSlotCraft);
     CHECK(real[0].material_count == 1);
-    CHECK(real[0].materials[0].item_id == 15);
-    CHECK(real[0].kind == cr::Kind::kJewelTierUp);
+    CHECK(real[0].materials[0].item_id == 28);
+    CHECK(real[0].materials[0].count == 3);
+    CHECK(real[0].cost_word_id == 188);
+    CHECK(real[0].count_rule == cr::CountRule::kFixed);
+    CHECK(real[0].form == cr::Form::kMultiInputCreate);
+    CHECK(real[0].group == 3);
+    // 第 2 条「宝石强化」= kJewelTierUp：借 type 3（目标物 + 材料 → 原地修改）形态。
+    CHECK(real[1].label_word_id == 35291);
+    CHECK(real[1].kind == cr::Kind::kJewelTierUp);
+    CHECK(real[1].material_count == 1);
+    CHECK(real[1].materials[0].item_id == 15);
+    // 必须填合法公式 wordId（不能为 0）：宝石强化页是 type 1，而 UIMix_ButtonRecipeExe 内部
+    // 自带一次 InitMixingState，其 type==1 分支会用本记录 b8-9 求值 CAL_Calculate —— 填 0 会给
+    // CAL_Calculate 传空公式并崩溃（真机实证，见设计册 §7.27）。实际费用由放料 hook 强制 0。
+    CHECK(real[1].cost_word_id == 188);
+    CHECK(real[1].count_rule == cr::CountRule::kJewelGradeAndLevel);
+    CHECK(real[1].form == cr::Form::kTargetAndCreate);
+    CHECK(real[1].group == 3);
+    // b11 组位推导：1 << group；group >= 8 视为非法（不占任何页）。
+    CHECK(cr::recipe_group_bit(3) == 0x08);
+    CHECK(cr::recipe_group_bit(6) == 0x40);
+    CHECK(cr::recipe_group_bit(8) == 0);
 
     const uint16_t base_rec = 69;
     const uint16_t base_mat = 189;
     CHECK(cr::mix_type_at(base_rec, 0) == 69);
+    CHECK(cr::mix_type_at(base_rec, 1) == 70);
     CHECK(cr::material_start_at(base_mat, real, n, 0) == 189);
-    CHECK(cr::material_total(real, n) == 1);
-    CHECK(real[0].count_rule == cr::CountRule::kJewelGradeAndLevel);
+    CHECK(cr::material_start_at(base_mat, real, n, 1) == 190);  // 189 + 1
+    CHECK(cr::material_total(real, n) == 2);
+    // host 进程不注入表 → bind 前读回 0（未绑定）。
+    CHECK(cr::bound_base_record_count() == 0);
 
-    // 合成 3 条目录：材料条目数分别 1 / 2 / 3。
+    // bind 后 mixType→Def 按「目录顺序 = 记录下标升序」映射：group 3 配方列表 = [69, 70]。
+    cr::bind_base_record_count(base_rec);
+    CHECK(cr::catalog_ready());
+    CHECK(cr::def_for_mix_type(69) == &real[0]);
+    CHECK(cr::def_for_mix_type(70) == &real[1]);
+    CHECK(cr::def_for_mix_type(12) == nullptr);  // 原版宝石记录 12..15 不是模块配方
+    CHECK(cr::def_for_mix_type(68) == nullptr);
+    CHECK(cr::def_for_mix_type(71) == nullptr);  // 越界（base+2 之后）
+
+    // 合成 3 条目录：材料条目数分别 1 / 2 / 3，组位不同以覆盖映射通用性。
     const cr::Material m1[] = {{15, 1}};
     const cr::Material m2[] = {{15, 1}, {16, 2}};
     const cr::Material m3[] = {{15, 1}, {16, 1}, {17, 1}};
     const cr::Def synth[3] = {
-        {35291, cr::Kind::kJewelTierUp, m1, 1, 0, cr::CountRule::kFixed},
-        {35292, cr::Kind::kJewelTierUp, m2, 2, 0, cr::CountRule::kFixed},
-        {35293, cr::Kind::kJewelTierUp, m3, 3, 0, cr::CountRule::kFixed},
+        {35291, cr::Kind::kJewelTierUp, m1, 1, 0, cr::CountRule::kFixed,
+         cr::Form::kTargetAndCreate, 3},
+        {35292, cr::Kind::kNativePassThrough, m2, 2, 0, cr::CountRule::kFixed,
+         cr::Form::kConsumeToCreate, 1},
+        {35293, cr::Kind::kJewelTierUp, m3, 3, 0, cr::CountRule::kFixed,
+         cr::Form::kMultiInputCreate, 3},
     };
     CHECK(cr::mix_type_at(base_rec, 0) == 69);
     CHECK(cr::mix_type_at(base_rec, 1) == 70);
@@ -167,25 +207,39 @@ static void test_catalog_mapping() {
 }
 
 // ---------------------------------------------------------------------------
-// §5.1(4) 表注入字节断言（伪造原表，不依赖游戏内存）。
+// §5.1(4) 表注入字节断言（伪造原表，不依赖游戏内存）：
+// - 注入后记录数 = base + 2（目录两条），注入记录 b11 = 0x08（group 3）；
+// - 原版 group-3 记录（模拟 12..15）的 b11 组位被清且**其它字节逐字节不变**；
+// - 材料条目按目录顺序追加（「合成」在前、「宝石强化」在后）。
 // ---------------------------------------------------------------------------
 static void test_inject_bytes() {
-    // 伪造 RECIPEBASE：3 条原版记录，12B/条。材料引用尾部最大 = record2: b4-5=10,b6=4 → 14。
+    // 伪造 RECIPEBASE：3 条原版记录，12B/条，字段填原版风格值（断言注入「只动 b11」）。
+    // record0 模拟宝石记录 12..15：b11=0x08（仅 group 3）；
+    // record1 模拟混沌配方：b11=0x03（不含 group 3 位 → 不得被触碰）；
+    // record2 模拟带配方书位的宝石记录：b11=0x28（bit5+bit3 → 清后剩 0x20）。
     uint8_t orig_recipe[3 * cr::kRecipeRecordSize];
     std::memset(orig_recipe, 0, sizeof(orig_recipe));
     auto put = [&](uint8_t* rec, size_t off, uint16_t v) {
         rec[off] = static_cast<uint8_t>(v & 0xff);
         rec[off + 1] = static_cast<uint8_t>(v >> 8);
     };
-    // record0: start=0 count=4 → end 4
-    put(orig_recipe + 0, cr::kRbMaterialStart, 0);
-    orig_recipe[0 * cr::kRecipeRecordSize + cr::kRbMaterialCount] = 4;
-    // record1: start=4 count=3 → end 7
-    put(orig_recipe + 1 * cr::kRecipeRecordSize, cr::kRbMaterialStart, 4);
-    orig_recipe[1 * cr::kRecipeRecordSize + cr::kRbMaterialCount] = 3;
-    // record2: start=10 count=4 → end 14 (max)
-    put(orig_recipe + 2 * cr::kRecipeRecordSize, cr::kRbMaterialStart, 10);
-    orig_recipe[2 * cr::kRecipeRecordSize + cr::kRbMaterialCount] = 4;
+    auto fill = [&](size_t r, uint16_t label, uint16_t result, uint16_t start, uint8_t count,
+                    uint16_t cost, uint8_t unlock, uint8_t group) {
+        uint8_t* rec = orig_recipe + r * cr::kRecipeRecordSize;
+        put(rec, cr::kRbLabel, label);
+        put(rec, cr::kRbResultId, result);
+        put(rec, cr::kRbMaterialStart, start);
+        rec[cr::kRbMaterialCount] = count;
+        rec[cr::kRbFlag7] = 1;
+        put(rec, cr::kRbCostWord, cost);
+        rec[cr::kRbUnlockGate] = unlock;
+        rec[cr::kRbGroup] = group;
+    };
+    // record0: start=0 count=4 → end 4；record1: start=4 count=3 → end 7；
+    // record2: start=10 count=4 → end 14（材料尾部最大值）。
+    fill(0, 1163, 29, 0, 4, 188, 1, 0x08);
+    fill(1, 1152, 64, 4, 3, 190, 1, 0x03);
+    fill(2, 1166, 32, 10, 4, 191, 1, 0x28);
     // 伪造 MIXTUREBASE：14 条 3B 材料，填可辨识字节 0xA0+idx。
     uint8_t orig_mixture[14 * cr::kMixtureRecordSize];
     for (size_t i = 0; i < 14; ++i) {
@@ -196,41 +250,64 @@ static void test_inject_bytes() {
     CHECK(cr::derive_material_count(orig_recipe, 3, cr::kRecipeRecordSize) == 14);
 
     size_t n = 0;
-    const cr::Def* cat = cr::catalog(&n);  // N=1，材料 1 条 {15,1}
+    const cr::Def* cat = cr::catalog(&n);  // N=2：{28,3} 与 {15,1}，均 group 3。
+    CHECK(n == 2);
 
-    uint8_t out_recipe[4 * cr::kRecipeRecordSize];
-    uint8_t out_mixture[(14 + 1) * cr::kMixtureRecordSize];
+    uint8_t out_recipe[5 * cr::kRecipeRecordSize];
+    uint8_t out_mixture[(14 + 2) * cr::kMixtureRecordSize];
     std::memset(out_recipe, 0, sizeof(out_recipe));
     std::memset(out_mixture, 0, sizeof(out_mixture));
 
     const uint32_t result =
         cr::inject_into_buffers(orig_recipe, 3, cr::kRecipeRecordSize, orig_mixture,
                                 cr::kMixtureRecordSize, cat, n, out_recipe, out_mixture);
-    CHECK(result == 4);  // base 3 + N 1
+    CHECK(result == 5);  // base 3 + N 2（真机 = 69 + 2 = 71）
 
-    // 前段原样复制。
-    CHECK(std::memcmp(out_recipe, orig_recipe, sizeof(orig_recipe)) == 0);
+    // 原版记录：b0..b10 逐字节不变（12..15 的字段仍是 gemcraft 合成与费用读取的依据），
+    // b11 仅被清掉模块占用的组位（0x08）。
+    for (size_t r = 0; r < 3; ++r) {
+        const uint8_t* src = orig_recipe + r * cr::kRecipeRecordSize;
+        const uint8_t* dst = out_recipe + r * cr::kRecipeRecordSize;
+        CHECK(std::memcmp(src, dst, cr::kRbGroup) == 0);
+    }
+    CHECK(out_recipe[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x00);  // 0x08 → 0x00
+    CHECK(out_recipe[1 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x03);  // 不含 bit3 → 原样
+    CHECK(out_recipe[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x20);  // 0x28 → 0x20（bit5 保留）
+
+    // MIXTUREBASE 前段原样复制（14 条 = 42B）。
     CHECK(std::memcmp(out_mixture, orig_mixture, sizeof(orig_mixture)) == 0);
 
-    // 注入记录字段逐个正确。
-    const uint8_t* inj = out_recipe + 3 * cr::kRecipeRecordSize;
-    CHECK(rd_u16(inj + cr::kRbLabel) == 35291);
-    CHECK(rd_u16(inj + cr::kRbResultId) == 0);
-    CHECK(rd_u16(inj + cr::kRbMaterialStart) == 14);       // base_material_count
-    CHECK(inj[cr::kRbMaterialCount] == 1);
-    CHECK(inj[cr::kRbFlag7] == 1);
-    CHECK(rd_u16(inj + cr::kRbCostWord) == 0);
-    CHECK(inj[cr::kRbUnlockGate] == 0);                     // 必须 0（§7.8）
-    CHECK(inj[cr::kRbGroup] == 0x02);                       // bit1 组，bit0/bit5 清
+    // 注入记录 1（下标 base → 「合成」）：镜像 record 12 的材料/费用，b11=0x08。
+    const uint8_t* inj0 = out_recipe + 3 * cr::kRecipeRecordSize;
+    CHECK(rd_u16(inj0 + cr::kRbLabel) == 35216);
+    CHECK(rd_u16(inj0 + cr::kRbResultId) == 0);
+    CHECK(rd_u16(inj0 + cr::kRbMaterialStart) == 14);  // base_material_count
+    CHECK(inj0[cr::kRbMaterialCount] == 1);
+    CHECK(inj0[cr::kRbFlag7] == 1);
+    CHECK(rd_u16(inj0 + cr::kRbCostWord) == 188);
+    CHECK(inj0[cr::kRbUnlockGate] == 0);                // 必须 0（§7.8）
+    CHECK(inj0[cr::kRbGroup] == 0x08);                 // bit3=group3（宝石强化页）；bit0/bit5 清
 
-    // 追加材料条目：MIXTUREBASE[14] = {15,1}。
-    const uint8_t* mat = out_mixture + 14 * cr::kMixtureRecordSize;
-    CHECK(rd_u16(mat) == 15);
-    CHECK(mat[2] == 1);
+    // 注入记录 2（下标 base+1 → 「宝石强化」）：费用公式必须合法（188，同 record 12），b11=0x08。
+    const uint8_t* inj1 = out_recipe + 4 * cr::kRecipeRecordSize;
+    CHECK(rd_u16(inj1 + cr::kRbLabel) == 35291);
+    CHECK(rd_u16(inj1 + cr::kRbMaterialStart) == 15);  // 14 + 1
+    CHECK(inj1[cr::kRbMaterialCount] == 1);
+    CHECK(rd_u16(inj1 + cr::kRbCostWord) == 188);
+    CHECK(inj1[cr::kRbUnlockGate] == 0);
+    CHECK(inj1[cr::kRbGroup] == 0x08);
+
+    // 追加材料条目：MIXTUREBASE[14] = {28,3}（合成），[15] = {15,1}（宝石强化）。
+    const uint8_t* mat0 = out_mixture + 14 * cr::kMixtureRecordSize;
+    CHECK(rd_u16(mat0) == 28);
+    CHECK(mat0[2] == 3);
+    const uint8_t* mat1 = out_mixture + 15 * cr::kMixtureRecordSize;
+    CHECK(rd_u16(mat1) == 15);
+    CHECK(mat1[2] == 1);
 
     // 幂等：相同输入重复调用产生完全相同的输出。
-    uint8_t out_recipe2[4 * cr::kRecipeRecordSize];
-    uint8_t out_mixture2[(14 + 1) * cr::kMixtureRecordSize];
+    uint8_t out_recipe2[5 * cr::kRecipeRecordSize];
+    uint8_t out_mixture2[(14 + 2) * cr::kMixtureRecordSize];
     const uint32_t result2 =
         cr::inject_into_buffers(orig_recipe, 3, cr::kRecipeRecordSize, orig_mixture,
                                 cr::kMixtureRecordSize, cat, n, out_recipe2, out_mixture2);
@@ -298,12 +375,51 @@ static void test_material_count() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 模块配方描述文案常量：hook 门控与刷新的字节预算前提。
+// kModuleRecipeDesc 必须 = 36 字节 UTF-8 + NUL = 37，且 ≤ 刷新 max_len 0x166(358)；
+// 结果占位 itemId 必须 = 0（注入记录 b2-3，门控据此识别「配方描述」调用）。
+// ---------------------------------------------------------------------------
+static void test_module_recipe_desc_constants() {
+    CHECK(sizeof(cr::kModuleRecipeDesc) == 20);
+    CHECK(std::strlen(cr::kModuleRecipeDesc) == 19);
+    CHECK(std::strcmp(cr::kModuleRecipeDesc, "用3个材料合成") == 0);
+    CHECK(cr::kModuleRecipeResultItemId == 0);
+}
+
+// ---------------------------------------------------------------------------
+// §2.8 3 格配方：可堆叠物品的放料上限与合成前库存复核（纯逻辑）
+// 语义：每格 = 1 件；可堆叠物品 = 1 个单位，同一个堆可以占多格，但受**类别持有总数**约束。
+// ---------------------------------------------------------------------------
+static void test_three_slot_stack_rules() {
+    // 放料上限：该类别已占格数必须**严格小于**类别持有总数（「2 个物品不能添加 3 次」）。
+    CHECK(cr::slot_add_allowed(0, 2));
+    CHECK(cr::slot_add_allowed(1, 2));
+    CHECK(!cr::slot_add_allowed(2, 2));  // 已占 2 格、堆内 2 个 → 第 3 次拒绝
+    CHECK(cr::slot_add_allowed(1, 5));
+    CHECK(!cr::slot_add_allowed(5, 5));
+    // 非法输入 fail-closed。
+    CHECK(!cr::slot_add_allowed(-1, 5));
+    CHECK(!cr::slot_add_allowed(0, 0));
+    CHECK(!cr::slot_add_allowed(0, -3));
+
+    // 合成前复核：需扣单位数 ≤ 类别持有总数；无需扣减（units<=0）恒通过。
+    CHECK(cr::stack_units_available(2, 2));
+    CHECK(!cr::stack_units_available(3, 2));  // 库存不足 → 调用方必须中止且不消耗
+    CHECK(cr::stack_units_available(1, 1));
+    CHECK(!cr::stack_units_available(1, 0));
+    CHECK(cr::stack_units_available(0, 0));
+    CHECK(cr::stack_units_available(-1, 0));
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
     test_catalog_mapping();
     test_inject_bytes();
     test_material_count();
+    test_module_recipe_desc_constants();
+    test_three_slot_stack_rules();
     std::printf("custom_recipe_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

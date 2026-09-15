@@ -146,6 +146,8 @@ extern InvenGetEmptySaveSlotExFn fn_inven_get_empty_save_slot_ex;
 extern InvenGetNeededSaveSlotExFn fn_inven_get_needed_save_slot_ex;
 extern InvenGetCumulateSaveSlotExFn fn_inven_get_cumulate_save_slot_ex;
 extern RemoveItemFn fn_remove_item;
+extern InvenRemoveItemDataFn fn_inven_remove_item_data;  // 按类别扣 N 个（可堆叠物品「每格 1 个单位」用）
+extern GetItemCountFn fn_inven_get_item_count;           // INVEN_GetItemCount(category)：原版类别持有总数（3 格放料上限判定）
 extern ItemGetPriceFn fn_item_get_price;
 extern ItemGetSellPriceFn fn_item_get_sell_price;
 extern IntIntFn fn_item_is_no_sell;
@@ -153,6 +155,7 @@ extern ItemGetAbilityLevelFn fn_item_get_ability_level;
 extern ItemGetBuyPriceFn fn_item_get_buy_price;
 extern ItemSystemGetOptionValueFn fn_item_system_get_option_value;
 extern ItemSystemGetJewelOptionValueFn fn_item_system_get_jewel_option_value;
+extern ItemCreatePerfectItemFn fn_item_create_perfect_item;  // 按类别分派的统一创建入口（宝石/装备数值在此产生）
 extern MathGetRandomFn fn_math_get_random;  // MATH_GetRandom(min,max) 闭区间随机（custom-craft-recipe 产物取值）
 extern InvenFindSaveSlotFn fn_inven_find_save_slot;
 extern InvenSaveItemFn fn_inven_save_item;
@@ -239,6 +242,8 @@ extern UIMixButtonMenuListExeFn fn_uimix_button_menu_list_exe;
 extern UIMixButtonRecipeExeFn fn_uimix_button_recipe_exe;
 extern UIMixInitMixingStateFn fn_uimix_init_mixing_state;
 extern UIMixResetStuffItemControlFn fn_uimix_reset_stuff_item_control;
+// ---- UIMix 自定义配方 Form 分派（custom-craft-recipe §4.11）----
+extern UIMixSetTypeFn fn_uimix_set_type;
 extern ControlObjectGetCursorFn fn_control_object_get_cursor;
 extern UiPopupMsgCreateOkFromTextDataFn fn_popup_create_ok_from_textdata;
 extern UiEquipUpdateCharEquipFn fn_ui_equip_update_char_equip;

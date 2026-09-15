@@ -390,6 +390,9 @@ constexpr size_t UIMIX_SLOT_SELECTED_STUFF = 0x128;  // i64 当前选中填入�
 constexpr size_t UIMIX_SLOT_RECIPE_GROUP = 0x18;     // 配方组控件槽（UIMix_CreateRecipeGroupControl 0xbfbb4 str x0,[x19,#0x18]；子按钮 ExecuteProc=UIMix_ButtonRecipeExe）
 constexpr size_t UIMIX_SLOT_MENU_BUTTON_BASE = 0x60; // 5 个类型/菜单按钮槽起始（UIMix_CreateMainControl 0xbf6f4 add x21,x19,#0x60 + 0xbf700 str x0,[x21,x20,lsl#3]，步长 8）
 constexpr int UIMIX_MENU_BUTTON_COUNT = 5;           // 类型/菜单按钮数量（槽 0x60..0x80）
+constexpr size_t UIMIX_SLOT_SELECTED_RECIPE_BASE = 0x100; // 各 type 已选配方下标数组基址（i64 [+0x100+type*8]；UIMix_Enter 0xc0fd8-0xc0fe8 清零、UIMix_ButtonRecipeExe 0xc03c0 写入）
+constexpr size_t UIMIX_SLOT_SELECTED_RECIPE_STRIDE = 8;   // 已选配方下标元素步长（i64）
+constexpr int UIMIX_RECIPE_TYPE_COUNT = 5;                // 合法 type 数（0..4；type>=5 触发 ResetActiveControl 未初始化寄存器路径，禁止 SetType(5)）
 constexpr size_t UIMIX_SLOT_CRAFT_BUTTON = 0x98;     // 合成按钮槽（UIMix_CreateMainControl 0xbf7d8 str x0,[x19,#0x98]；ExecuteProc=UIMix_ButtonMixingExe）
 constexpr size_t UIMIX_SLOT_MIXTYPE = 0x48;          // u32 当前 mixType（所选配方；UIMix_ButtonMixingExe 0xc222c 读 [+0xf8] 前由配方写入；阶段2 前置改写）
 constexpr size_t UIMIX_SLOT_COST = 0xf8;             // i64 合成费用（UIMix_InitMixingState 依配方费用文本 CAL_Calculate 写入；UIMix_ButtonMixingExe 0xc2230 读）
@@ -564,6 +567,17 @@ constexpr uintptr_t F_ITEM_GET_ABILITY_LEVEL_VMA = 0x1091f4; // int (void*) ITEM
 // ---- 属性显示范围（attribute-range-display）----
 constexpr uintptr_t F_ITEMSYSTEM_GET_OPTION_VALUE_VMA = 0x109020;      // int (int optionIndex, int level, int flag, void* item) 词缀值：CAL 公式 + 修正后在 [base/2, base] 掷一次随机（0x109020 反汇编）
 constexpr uintptr_t F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA = 0x108f90; // int (int type, void* item) 宝石值：按 (类别,类型) 算 X 后在 [X, 2X] 掷一次随机（0x108f90 反汇编）
+// ITEMSYSTEM_CreatePerfectItem 是「按类别分派的统一创建入口」（全库 8 个调用者，含 MIXSYSTEM_MakeItem /
+// ITEMSYSTEM_MakeItem / ITEMSYSTEM_ProcessUnpack）。0x10c600 反汇编：CreateItem(category) →
+// IsJewel(category) ? MakeJewel(item)（内部 GetJewelOptionValue@0x108f90 掷数值 + 写属性位）
+// : (0x10be70(category) ? SetBitValue(word,7,0, MATH_GetRandom(0, 档数-1)) 掷品质 : 原样返回)。
+// **宝石/装备的合法数值只能经它（或它分派的 MakeJewel）产生** —— 直接 CreateItem 只得到默认值
+// （真机实测宝石 bits0-10 = 1024 = 0x400、属性恒 0）。
+constexpr uintptr_t F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA = 0x10c600;
+// 「宝石数值」与「装备词缀值」是两条**独立**掷值路径，底层随机源统一为 MATH_GetRandom@0xa8bcc：
+//   宝石 → ITEMSYSTEM_GetJewelOptionValue@0x108f90（全库唯一调用者 = ITEMSYSTEM_MakeJewel@0x10b974，0x10bc04）
+//   词缀 → ITEMSYSTEM_GetOptionValue@0x109020（全库唯一调用者 = ITEMSYSTEM_MakeOptionEx，0x109554）
+constexpr uintptr_t F_ITEMSYSTEM_MAKE_JEWEL_VMA = 0x10b974; // void* (void* item) 给已建对象补齐宝石属性+数值；失败返回 0（调用方须回收对象，CreatePerfectItem 0x10c65c 同款）
 constexpr uintptr_t F_MATH_GET_RANDOM_VMA = 0xa8bcc;                   // int (int min, int max) 闭区间随机数（0xa8bcc 反汇编）
 constexpr uintptr_t F_UIDESC_ADD_OPTION_VMA = 0xb343c;                 // void (void* builder, int type, int optIdx, int value) 详情选项行：写 "$<码>…$B" 内联颜色串（0xb343c 反汇编）
 constexpr uintptr_t F_UIDESC_MAKE_ITEM_VMA = 0xb36a0;                  // 物品详情构造入口；x0=item（0xb36a0 反汇编）
@@ -664,6 +678,8 @@ constexpr uintptr_t F_UIMIX_BUTTON_RECIPE_EXE_VMA = 0xc0390;   // void (void*) U
 constexpr uintptr_t F_UIMIX_BUTTON_MIXING_EXE_VMA = 0xc21ec;   // void (void*) UIMix_ButtonMixingExe：合成按钮 ExecuteProc，type1 读 [+0xf8] 费用判金币后弹 YesNo 确认（readelf .dynsym 核对）
 constexpr uintptr_t F_UIMIX_INIT_MIXING_STATE_VMA = 0xc0038;   // void () UIMix_InitMixingState：依 mixType 重算 stuffList 与费用 [+0xf8]（不清填入格；readelf .dynsym 核对）
 constexpr uintptr_t F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA = 0xc0240; // void () UIMix_ResetStuffItemControl：清空填入格（readelf .dynsym 核对）
+// ---- UIMix 自定义配方 Form 分派（custom-craft-recipe §4.11，readelf .dynsym 核对）----
+constexpr uintptr_t F_UIMIX_SET_TYPE_VMA = 0xbfe44;  // void (int64_t) UIMix_SetType：写 [g+0x38] 类型字节（配方点击 hook 换型用；type 仅限 0..4，禁 SetType(5)）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_CURSOR_VMA = 0x9ea7c; // void* (void*) ControlObject_GetCursor：父控件返回选中子控件 [+0x70]，否则 0（readelf .dynsym 核对）
 constexpr size_t F_UIMIX_START_MIX_RESET_STUFF_CALL_OFF = 0x258; // UIMix_StartMix 内 bl UIMix_ResetStuffItemControl 调用点偏移（0xc0ac8，原字 0x97fffdde）
 // 三个按钮 ExecuteProc 初值 GOT 槽（新建按钮即从这些槽读取；R_AARCH64_RELATIVE 核对）。
@@ -708,8 +724,13 @@ constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
 constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
+constexpr uintptr_t F_CONTROL_ITEM_DRAW_VMA = 0xaaedc;  // void (void* ctrl) ControlItem_Draw：图标 + 稀有度贴图；数量由内部 bl ITEM_DrawPorting 以 show_count=1 画出（0xaaf24 mov w4,#1）
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_UIDESC_GET_DATA_VMA = 0xb2bd0;  // void* UIDesc_GetData()：当前 desc 面板物品对象（ButtonEquipExe b7c2c 同源）
+// ---- UIDesc 描述刷新链（custom-craft-recipe 模块配方描述文案修正）----
+constexpr uintptr_t F_XTEXTCTRL_SET_TEXT_CONTROL_VMA = 0xb181c;  // void (ctrl,text,max_len,c,10,14) X_TEXTCTRL_SetTextControl：解析文本至 NUL、拷贝进控件布局；游戏每次刷描述都重复调用（readelf .dynsym 核对）
+constexpr uintptr_t F_GRPX_GET_FONT_HEIGHT_VMA = 0x8fc04;  // uint64_t (uint32_t idx) GRPX_GetFontHeight：*(font表[[0x2f5968]]+idx*8)；描述刷新以 idx=0 取默认行高（readelf .dynsym 核对）
+constexpr uintptr_t F_CONTROLSCROLL_SET_OPTION_VMA = 0xab130;  // void (scroll, wrap_width, font_height) ControlScroll_SetOption：写 textobj +0x18/+0x20/+0x28 并按 +0 标志重排（0xb3068 描述刷新第三步；readelf .dynsym 核对）
 constexpr uintptr_t F_UIDESC_DRAW_VMA = 0xb56f4;      // void () UIDesc_Draw：物品详情面板绘制（Scene_Draw_POPUP_SC_EQUIP +0x1cc bl）
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
@@ -746,7 +767,7 @@ constexpr uintptr_t F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_BY_SORT_VMA = 0x9f580; /
 constexpr uintptr_t F_CONTROL_OBJECT_SET_RECT_VMA = 0x9de74;  // void (void*, i64 x, i64 y, i64 w, i64 h) 写 rect@+0x18/20/28/30
 constexpr uintptr_t F_CONTROL_OBJECT_SET_CONTROL_EVENT_CALL_TYPE_VMA = 0x9dcf8; // u32 (void*, u32) 写 EventCallType@+0x88（0x200=点击触发）
 constexpr uintptr_t F_CONTROL_OBJECT_SET_DATA_VMA = 0x9df2c;   // void* (void*, void*) 写 Data@+0x50
-constexpr uintptr_t F_CONTROL_BUTTON_CREATE_VMA = 0xaa710;     // void* (void* parent, char* text) 建按钮（type=3 + MEM_Malloc 0x78 按钮数据）
+constexpr uintptr_t F_CONTROL_BUTTON_CREATE_VMA = 0xaa710;     // void* (void* parent, void* execute_proc) 建按钮（type=3 + MEM_Malloc 0x78 按钮私有数据；第二参存 priv+0x20 ExecuteProc——0xaa72c mov x20,x1 / 0xaa79c str x20,[priv,#0x20] 反汇编核对，原版 UIMix 传 GOT 0x2f6658=UIMix_ButtonMenuListExe；自动挂 parent 子链表）
 constexpr uintptr_t F_CONTROL_BUTTON_SET_TEXT_VMA = 0xaa7dc;   // void (void*, char*) 写按钮文本 data+0x00（32B）
 constexpr uintptr_t F_CONTROL_BUTTON_SET_DRAW_TYPE_VMA = 0xaaa88; // void (void*, u32) 写 DrawType@+0x28
 constexpr uintptr_t F_CONTROL_BUTTON_SET_DRAW_ID_VMA = 0xaaaa8;  // void (void*, i64) 写 DrawID@+0x30
@@ -907,6 +928,7 @@ using TouchHandleResetMovingControlFn = void (*)();
 using TouchHandleResetSelectedControlFn = uint64_t (*)();
 using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using ItemDrawPortingFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t);
+using ControlItemDrawFn = void (*)(void*);  // ControlItem_Draw(ctrl)
 using SetExpFn = void (*)(void*, int32_t);
 using SetLevelFn = int (*)(void*, int32_t);   // CHAR_SetLevel(0xe05a0)：返回 1=成功（升级/同级）/ 0=降级拒绝
 using AddExpFn = int (*)(void*, int32_t, uint8_t);
@@ -1031,6 +1053,7 @@ using IsSealedFn = int (*)(int32_t);
 using IsItemBoxFn = int (*)(int32_t);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
 using CreateItemFn = void* (*)(int32_t, int32_t, int32_t, int32_t);
+using ItemCreatePerfectItemFn = void* (*)(int32_t category);  // ITEMSYSTEM_CreatePerfectItem：按类别分派（宝石→MakeJewel 掷数值+属性、装备类→掷品质）；失败返回 nullptr
 using NetworkStoreSetStateFn = void (*)(int);
 using MakeMixFn = int (*)(int32_t, void**);       // MIXSYSTEM_MakeItem：0=成功（*outItem 已填），非 0=失败
 using GetCostFn = int64_t (*)(int32_t, void*);    // MIXSYSTEM_GetCost：合成费用（负数=非法配方）
@@ -1044,7 +1067,7 @@ using ControlObjectAddFn = void* (*)(void* parent, void* x1, void* x2, uint32_t 
 using ControlObjectSetRectFn = void (*)(void* ctrl, int64_t x, int64_t y, int64_t w, int64_t h);
 using ControlObjectSetEventCallTypeFn = uint32_t (*)(void* ctrl, uint32_t type);
 using ControlObjectSetDataFn = void* (*)(void* ctrl, void* data);
-using ControlButtonCreateFn = void* (*)(void* parent, char* text);
+using ControlButtonCreateFn = void* (*)(void* parent, void* execute_proc);  // 第 2 参 = ExecuteProc（存 priv+0x20），不是文本；文本用 ControlButton_SetText 另写
 using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
 using ControlButtonSetDrawTypeFn = void (*)(void* ctrl, uint32_t type);
 using ControlButtonSetDrawIDFn = void (*)(void* ctrl, int64_t id);
@@ -1104,6 +1127,14 @@ using UIMixButtonRecipeExeFn = void (*)(void*);             // UIMix_ButtonRecip
 using UIMixButtonMixingExeFn = void (*)(void*);             // UIMix_ButtonMixingExe(ctrl)：合成按钮 ExecuteProc
 using UIMixInitMixingStateFn = void (*)();                  // UIMix_InitMixingState()：依当前 mixType 重算 stuffList/费用
 using UIMixResetStuffItemControlFn = void (*)();            // UIMix_ResetStuffItemControl()
+
+// ---- UIMix 自定义配方 Form 分派函数签名（custom-craft-recipe §4.11）----
+using UIMixSetTypeFn = void (*)(int64_t);                     // UIMix_SetType(type)：写 [g+0x38]（仅 0..4）
+// ---- UIDesc 描述刷新链签名（custom-craft-recipe 模块配方描述文案修正）----
+// 描述文案替换钩在两条写入路径的共用文本落点 X_TEXTCTRL_SetTextControl@0xb181c。
+using XTextCtrlSetTextControlFn = void (*)(void* ctrl, const char* text, uint32_t max_len,
+                                           uint32_t field_c, uint32_t field_10,
+                                           int32_t field_14);  // 0xb3028-0xb3044 实参组 (ctrl,text,0x166,0,0,-1)
 
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主调用点（auto-sell）----
 // 符号存在性已用 NDK r26d llvm-objdump 核对：GAMESTATE_DrawPlay@0x9d6cc。

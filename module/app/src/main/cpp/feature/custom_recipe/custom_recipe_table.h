@@ -23,11 +23,17 @@ constexpr size_t kRbMaterialCount = 6;  // b6 材料条目数（u8）
 constexpr size_t kRbFlag7 = 7;          // b7（u8，原版恒 1）
 constexpr size_t kRbCostWord = 8;       // b8-9 费用公式 wordId（u16）
 constexpr size_t kRbUnlockGate = 10;    // b10 解锁门槛（u8，注入记录必须为 0，§7.8）
-constexpr size_t kRbGroup = 11;         // b11 组位图（u8）
+constexpr size_t kRbGroup = 11;         // b11 组位图（u8，bit g = group g）
 
 constexpr uint8_t kRbFlag7Value = 1;
 constexpr uint8_t kRbUnlockGateValue = 0;
-constexpr uint8_t kRbGroupValue = 0x02;  // bit1=group1；bit0=0（免装备校验）；bit5=0（非配方书）
+constexpr uint8_t kRbGroupBitCount = 8;  // b11 位宽（Def::group 须 < 8；越界视为非法，注入记录不占任何组）
+
+// 注入记录 b11 的组位：`1 << Def::group`（bit0=0 免装备校验：CheckMixture 直接返回 0、
+// MakeItem 走通用路径由 hook 拦截；bit5=0 非配方书）。group >= 8 返回 0（该记录不出现在任何页）。
+constexpr uint8_t recipe_group_bit(uint8_t group) {
+    return group < kRbGroupBitCount ? static_cast<uint8_t>(1u << group) : 0u;
+}
 
 // 按目录派生一条注入用 RECIPEBASE 记录（12 字节，小端）。
 void build_record_bytes(const Def& def, uint16_t material_start, uint8_t out[kRecipeRecordSize]);
@@ -35,7 +41,8 @@ void build_record_bytes(const Def& def, uint16_t material_start, uint8_t out[kRe
 // 遍历原版 RECIPEBASE 求 max(b4-5 + b6)（原版 = 189）；record_count==0 → 0。
 uint32_t derive_material_count(const uint8_t* recipe, uint16_t record_count, uint8_t record_size);
 
-// 纯注入：把原表复制进 out_recipe / out_mixture，尾部追加各配方记录与材料条目。
+// 纯注入：把原表复制进 out_recipe / out_mixture（复制后清掉原版记录上模块占用的组位，只动
+// b11），尾部追加各配方记录与材料条目。
 // out_recipe 容量 >= (base_record_count + n) * recipe_size；
 // out_mixture 容量 >= (derived_material_count + material_total) * mixture_size。
 // 返回注入后 RECIPEBASE 记录数（= base_record_count + n）。

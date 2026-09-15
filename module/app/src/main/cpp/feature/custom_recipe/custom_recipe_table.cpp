@@ -26,7 +26,7 @@ void build_record_bytes(const Def& def, uint16_t material_start, uint8_t out[kRe
     out[kRbFlag7] = kRbFlag7Value;
     put_u16(out + kRbCostWord, def.cost_word_id);
     out[kRbUnlockGate] = kRbUnlockGateValue;
-    out[kRbGroup] = kRbGroupValue;
+    out[kRbGroup] = recipe_group_bit(def.group);
 }
 
 uint32_t derive_material_count(const uint8_t* recipe, uint16_t record_count, uint8_t record_size) {
@@ -52,10 +52,24 @@ uint32_t inject_into_buffers(const uint8_t* orig_recipe, uint16_t base_record_co
         mixture_size == 0) {
         return base_record_count;
     }
-    // 1) RECIPEBASE 前段原样复制。
+    // 1) RECIPEBASE 前段复制，并把模块配方占用的组位从**原版记录**上清掉（只动 b11）：
+    //    使模块注入记录成为该页（如 group 3 = 宝石强化页）的唯一拥有者——原版 12..15 的
+    //    b11 由 0x08 变 0x00，不再从该页配方列表出现。其余字段（b0-3 / b4-9 / b10）必须
+    //    原样保留：gemcraft 仍把 [+0x48] 改写为 12..15 走原版合成，MIXSYSTEM_MakeItem /
+    //    CheckMixture 都按下标读记录，与组位无关。
     if (orig_recipe != nullptr) {
         std::memcpy(out_recipe, orig_recipe,
                     static_cast<size_t>(base_record_count) * recipe_size);
+    }
+    uint8_t module_group_bits = 0;
+    for (size_t i = 0; i < n; ++i) {
+        module_group_bits |= recipe_group_bit(cat[i].group);
+    }
+    if (orig_recipe != nullptr && module_group_bits != 0 && recipe_size >= kRbGroup + 1) {
+        for (uint16_t r = 0; r < base_record_count; ++r) {
+            uint8_t* rec = out_recipe + static_cast<size_t>(r) * recipe_size;
+            rec[kRbGroup] = static_cast<uint8_t>(rec[kRbGroup] & ~module_group_bits);
+        }
     }
     // 2) 原版材料尾下标（= 被引用的最大 b4-5 + b6）。
     const uint32_t base_material_count =

@@ -65,4 +65,16 @@ int jewel_grade_from_category(int category);
 // 边界：level=105 → 0（满级不耗材料）；level≤1 且 grade=5 → 5；grade=1、level=1 → 1。
 int material_count_for(int base_count, int grade, int level);
 
+// ---- 3 格隐式配方的放料/扣料数量判定（纯逻辑，host 可测；需求见 §2.8）----
+// 语义：**每格 = 1 件**。不可堆叠物品 = 1 个对象（同一对象不得占两格）；
+// 可堆叠物品 = 1 个单位（同一个堆可以占多格，受**类别持有总数**约束：「2 个物品不能添加 3 次」）。
+
+// 可堆叠物品：该**类别**已被占 placed_slots 格、当前持有总数 held_count 个 → 是否还允许再占一格。
+// placed_slots < 0 或 held_count <= 0 → false（fail-closed）。
+bool slot_add_allowed(int placed_slots, int held_count);
+
+// 合成前复核：该**类别**本次需扣 units 个单位、当前持有总数 held_count 个 → 是否足够。
+// units <= 0 → true（该类别无需扣减）；held_count 不足或为负 → false（调用方须中止且不消耗）。
+bool stack_units_available(int units, int held_count);
+
 }  // namespace custom_recipe

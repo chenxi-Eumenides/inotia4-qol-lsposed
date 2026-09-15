@@ -2,6 +2,7 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
+#include "feature/custom_recipe/game_ui_custom_recipe.h"
 #include "feature/gemcraft/gemcraft_rules.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
@@ -203,6 +204,15 @@ void gemcraft_show_level_error() {
 // 未填满或非宝石视图/功能关闭 → 转调原函数（沿用原版行为）。
 void gemcraft_craft_execute(void* ctrl) {
     if (g_craft_hook.orig == nullptr) return;
+    // 3 格自定义配方模式让路（custom-craft-recipe §4.12）：该模式的匹配/产出由
+    // custom_recipe 在同一函数的 inline hook 里自实现。若继续走下面的「填满但混档」分支，
+    // 会先弹 98「该宝石不能进行合成。」并 return，使它的合成 hook 永远轮不到
+    //（真机实证：2 恢复药水（小）+1 低级武器强化卷轴 应命中 {5,5,16}→顶级宝石，却弹 98）。
+    // 故此处直接转调原函数 —— 原函数入口即 custom_recipe 的 inline hook。
+    if (custom_recipe_three_slot_mode_active()) {
+        g_craft_hook.call_orig<void>(ctrl);
+        return;
+    }
     if (!g_gemcraft_enabled.load(std::memory_order_acquire) || g_uimix == nullptr ||
         fn_uimix_get_type == nullptr || fn_uimix_get_type() != 1) {
         g_craft_hook.call_orig<void>(ctrl);

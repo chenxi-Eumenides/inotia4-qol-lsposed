@@ -265,12 +265,15 @@ bool bridge_init() {
      fn_inven_get_cumulate_save_slot_ex = reinterpret_cast<InvenGetCumulateSaveSlotExFn>(
          g_base + fn_resolve("F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA", F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA));
     fn_remove_item = reinterpret_cast<RemoveItemFn>(g_base + fn_resolve("F_REMOVE_ITEM_VMA", F_REMOVE_ITEM_VMA));
+    fn_inven_remove_item_data = reinterpret_cast<InvenRemoveItemDataFn>(g_base + fn_resolve("F_INVEN_REMOVE_ITEM_DATA_VMA", F_INVEN_REMOVE_ITEM_DATA_VMA));
+    fn_inven_get_item_count = reinterpret_cast<GetItemCountFn>(g_base + fn_resolve("F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA));
      fn_item_get_price = reinterpret_cast<ItemGetPriceFn>(g_base + fn_resolve("F_ITEM_GET_PRICE_VMA", F_ITEM_GET_PRICE_VMA));
      fn_item_get_sell_price = reinterpret_cast<ItemGetSellPriceFn>(g_base + fn_resolve("F_ITEM_GET_SELL_PRICE_VMA", F_ITEM_GET_SELL_PRICE_VMA));
      fn_item_is_no_sell = reinterpret_cast<IntIntFn>(g_base + fn_resolve("F_ITEMDATABASE_IS_NO_SELL_VMA", F_ITEMDATABASE_IS_NO_SELL_VMA));
     fn_item_get_ability_level = reinterpret_cast<ItemGetAbilityLevelFn>(g_base + fn_resolve("F_ITEM_GET_ABILITY_LEVEL_VMA", F_ITEM_GET_ABILITY_LEVEL_VMA));
     fn_item_get_buy_price = reinterpret_cast<ItemGetBuyPriceFn>(g_base + fn_resolve("F_ITEM_GET_BUY_PRICE_VMA", F_ITEM_GET_BUY_PRICE_VMA));
     fn_item_system_get_option_value = reinterpret_cast<ItemSystemGetOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_OPTION_VALUE_VMA));
+    fn_item_create_perfect_item = reinterpret_cast<ItemCreatePerfectItemFn>(g_base + fn_resolve("F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA", F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA));
     fn_item_system_get_jewel_option_value = reinterpret_cast<ItemSystemGetJewelOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA));
     fn_math_get_random = reinterpret_cast<MathGetRandomFn>(g_base + fn_resolve("F_MATH_GET_RANDOM_VMA", F_MATH_GET_RANDOM_VMA));
     fn_inven_find_save_slot = reinterpret_cast<InvenFindSaveSlotFn>(g_base + fn_resolve("F_INVEN_FIND_SAVE_SLOT_VMA", F_INVEN_FIND_SAVE_SLOT_VMA));
@@ -377,6 +380,9 @@ bool bridge_init() {
         g_base + fn_resolve("F_UIMIX_INIT_MIXING_STATE_VMA", F_UIMIX_INIT_MIXING_STATE_VMA));
     fn_uimix_reset_stuff_item_control = reinterpret_cast<UIMixResetStuffItemControlFn>(
         g_base + fn_resolve("F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA", F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA));
+    // ---- UIMix 自定义配方 Form 分派（custom-craft-recipe §4.11）----
+    fn_uimix_set_type = reinterpret_cast<UIMixSetTypeFn>(
+        g_base + fn_resolve("F_UIMIX_SET_TYPE_VMA", F_UIMIX_SET_TYPE_VMA));
     fn_control_object_get_cursor = reinterpret_cast<ControlObjectGetCursorFn>(
         g_base + fn_resolve("F_CONTROL_OBJECT_GET_CURSOR_VMA", F_CONTROL_OBJECT_GET_CURSOR_VMA));
     fn_popup_create_ok_from_textdata = reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(

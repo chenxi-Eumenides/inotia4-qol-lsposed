@@ -126,8 +126,10 @@ std::string data_exp2_add_control() {
     // 挂根控件的新按钮不会被绘制 → 注入按钮必须写回枚举槽（与 craft 按钮注入同模式）。
     void* old_btn = settings_btn2();
     if (old_btn == nullptr) return op_err("btn2 slot empty");
-    static char text[CB_TEXT_SIZE] = "EXP2-BTN";
-    void* btn = fn_ctrl_btn_create(root, text);
+    // ControlButton_Create 第 2 参是 ExecuteProc（不是文本，见 game_symbols ControlButtonCreateFn
+    // 注释）；本实验随后 memcpy 覆盖整个 priv 并显式写 CB_EXECUTE_PROC → 创建时传 nullptr 即可，
+    // 文本由下方 fn_ctrl_btn_set_text 写入。
+    void* btn = fn_ctrl_btn_create(root, nullptr);
     if (btn == nullptr) return op_err("button create failed");
     fn_ctrl_set_event_call_type(btn, 0x200);
     uint8_t* new_data = btn_data(btn);

@@ -105,4 +105,15 @@ int material_count_for(int base_count, int grade, int level) {
     return static_cast<int>((numer + kMaxCharacterLevel - 1) / kMaxCharacterLevel);
 }
 
+bool slot_add_allowed(int placed_slots, int stack_count) {
+    if (placed_slots < 0 || stack_count <= 0) return false;
+    // 每格代表 1 个单位：已占格数必须严格小于堆内数量才能再占一格。
+    return placed_slots < stack_count;
+}
+
+bool stack_units_available(int units, int stack_count) {
+    if (units <= 0) return true;
+    return stack_count >= units;
+}
+
 }  // namespace custom_recipe
