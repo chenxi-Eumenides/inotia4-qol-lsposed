@@ -5,7 +5,7 @@
 #include <jni.h>
 
 // 模块设置 UI 域（ui-settings v0.6.9）：钩住主菜单「更多游戏」按钮 ExecuteProc
-// → 点击打开模块设置面板（配置开关可切换 + 监听地址/端口只读显示），不再用 OPTION 入口。
+// → 点击打开模块设置面板（配置开关可切换 + 顶部只读显示模块版本「QoL模块 vX.Y.Z」），不再用 OPTION 入口。
 // 机制：注入 INAP_GEMSHOP 死条目 state（exp6 先例）+ PtrHook 覆盖更多游戏按钮 ExecuteProc
 // （更多游戏按钮槽 0x3099f8，原 ExecuteProc 0x151e38→GotoShowMoreGames 打开网页）
 // + process 内 LCD/GRPX 绘制（exp6 验证色块）+ 半透明面板透出主菜单背景。

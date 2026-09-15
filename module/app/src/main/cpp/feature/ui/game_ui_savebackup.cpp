@@ -114,8 +114,8 @@
 #define LIST_PAGE_BTN_H 0x30
 #define LIST_PAGE_BTN_W 0x78
 #define PAGE_ROW_Y (FRAME_Y + FRAME_H + 0x08)
-// 顶部消息/标题区：与设置页 addr 标签同高（settings.cpp ADDR_Y=0x18，label rect 高 ADDR_H=0x28）。
-//   MSG_Y + root.y == 0x18（root.y=0 → MSG_Y=0x18）；文本绘制偏移同 settings address_draw 的 0x18。
+// 顶部消息/标题区：与设置页 header 标签同高（settings.cpp HEADER_Y=0x18，label rect 高 HEADER_H=0x28）。
+//   MSG_Y + root.y == 0x18（root.y=0 → MSG_Y=0x18）；文本绘制偏移同 settings header_draw 的 0x18。
 #define MSG_X (ROOT_W / 2 - MSG_W / 2)
 #define MSG_Y 0x18
 #define MSG_W 0x120

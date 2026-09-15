@@ -74,9 +74,12 @@ void parse_config_into_rows(const char* json) {
         while (*p == ' ' || *p == '\t') ++p;
         snprintf(g_row_status[i], CB_TEXT_SIZE, "%s", (*p == 't' || *p == '1') ? "开" : "关");
     }
-    const char* addr = strstr(json, "listenAddress");
-    if (addr != nullptr) {
-        const char* colon = strchr(addr, ':');
+    // 顶部标题：从快照提取 moduleVersion（只读），格式化为 "QoL模块 v<version>"；
+    // 缺失/空值退化为 "QoL模块"。
+    char version_text[CB_TEXT_SIZE] = {0};
+    const char* version = strstr(json, "moduleVersion");
+    if (version != nullptr) {
+        const char* colon = strchr(version, ':');
         if (colon != nullptr) {
             const char* q1 = strchr(colon, '"');
             if (q1 != nullptr) {
@@ -84,23 +87,16 @@ void parse_config_into_rows(const char* json) {
                 if (q2 != nullptr) {
                     size_t len = static_cast<size_t>(q2 - q1 - 1);
                     if (len >= CB_TEXT_SIZE) len = CB_TEXT_SIZE - 1;
-                    memcpy(g_addr_text, q1 + 1, len);
-                    g_addr_text[len] = 0;
+                    memcpy(version_text, q1 + 1, len);
+                    version_text[len] = 0;
                 }
             }
         }
     }
-    const char* port = strstr(json, "listenPort");
-    if (port != nullptr) {
-        const char* colon = strchr(port, ':');
-        if (colon != nullptr) {
-            char* end = nullptr;
-            long v = strtol(colon + 1, &end, 10);
-            if (end != nullptr && end != colon + 1) {
-                snprintf(g_addr_text + strlen(g_addr_text), CB_TEXT_SIZE - strlen(g_addr_text),
-                         ":%ld", v);
-            }
-        }
+    if (version_text[0] != 0) {
+        snprintf(g_header_text, CB_TEXT_SIZE, "QoL模块 v%s", version_text);
+    } else {
+        snprintf(g_header_text, CB_TEXT_SIZE, "QoL模块");
     }
 }
 

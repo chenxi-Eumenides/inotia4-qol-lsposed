@@ -410,8 +410,8 @@ void msg_label_draw(void* ctrl) {
                                    static_cast<int32_t>((color >> 16) & 0xff));
     }
     if (fn_grpx_draw_string_with_font != nullptr) {
-        // 垂直位置与设置页 address_draw 一致（ui_draw_text 偏移 0x18，font=1）：
-        // MSG_Y=0x18 + 0x18 = 绝对 y 0x30，与设置页 addr 文本同高。
+        // 垂直位置与设置页 header_draw 一致（ui_draw_text 偏移 0x18，font=1）：
+        // MSG_Y=0x18 + 0x18 = 绝对 y 0x30，与设置页 header 文本同高。
         fn_grpx_draw_string_with_font(const_cast<char*>(text),
                                       static_cast<int>(cx), static_cast<int>(pt[1]) + 0x18, 2, 1);
     }

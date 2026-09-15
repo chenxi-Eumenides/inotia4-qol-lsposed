@@ -50,11 +50,12 @@ void settings_panel_enter() {
         g_rows[i].btn = btn;
         g_rows[i].desc = desc;
     }
-    void* addr = ui_create_label(root,
-                                   {ROOT_W / 2 - 0x38, ADDR_Y, 0x120, ADDR_H},
-                                   g_addr_text, &address_draw);
-    if (addr != nullptr) {
-        g_addr_desc = addr;
+    // 顶部版本标题：整宽矩形 + header_draw 水平居中绘制（面板逻辑中心 x）。
+    void* header = ui_create_label(root,
+                                   {0, HEADER_Y, ROOT_W, HEADER_H},
+                                   g_header_text, &header_draw);
+    if (header != nullptr) {
+        g_header_label = header;
     }
     g_prev_page_btn = ui_create_button(root, settings_page_button_rect(false), "",
                                        &settings_page_clicked, &page_btn_draw);
@@ -65,7 +66,7 @@ void settings_panel_enter() {
     g_panel_active = true;
     g_close_delay_frames = 0;
     g_back_pressed = false;
-    SETTINGS_LOG("settings panel enter: root=%p items=%d pages=%d addr created",
+    SETTINGS_LOG("settings panel enter: root=%p items=%d pages=%d header created",
                  root, kSettingsItemCount, g_total_pages);
 }
 
@@ -112,7 +113,7 @@ void settings_panel_process() {
         if (g_rows[item].btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[item].btn);
         if (g_rows[item].desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[item].desc);
     }
-    if (g_addr_desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_addr_desc);
+    if (g_header_label != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_header_label);
     if (g_prev_page_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_prev_page_btn);
     if (g_next_page_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_next_page_btn);
     settings_page_indicator_draw(root_rect);

@@ -20,8 +20,27 @@ void row_desc_draw(void* ctrl) {
     ui_draw_text(ctrl, 0, 0x8, UI_GOLD);
 }
 
-void address_draw(void* ctrl) {
-    ui_draw_text(ctrl, 0, 0x18, UI_GOLD);
+// 顶部版本标题（"QoL模块 vX.Y.Z"）：与 settings_page_indicator_draw 同款水平居中绘制
+// （align=2 以 x 为中心），x 取控件绝对矩形中心，垂直偏移沿用原标题文字的 0x18。
+void header_draw(void* ctrl) {
+    if (ctrl == nullptr) return;
+    if (fn_grpx_set_font_color_rgb == nullptr || fn_grpx_draw_string_with_font == nullptr) return;
+    uint8_t* data = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(ctrl) + CO_DATA);
+    if (data == nullptr || data[0] == 0) return;
+    int64_t x = 0;
+    int64_t y = 0;
+    for (void* current = ctrl; current != nullptr;) {
+        uint8_t* current_data = static_cast<uint8_t*>(current);
+        x += *reinterpret_cast<int64_t*>(current_data + CO_RECT_X);
+        y += *reinterpret_cast<int64_t*>(current_data + CO_RECT_Y);
+        current = *reinterpret_cast<void**>(current_data + CO_PARENT);
+    }
+    x += *reinterpret_cast<int64_t*>(static_cast<uint8_t*>(ctrl) + CO_RECT_W) / 2;
+    fn_grpx_set_font_color_rgb(static_cast<int32_t>(UI_GOLD & 0xff),
+                               static_cast<int32_t>((UI_GOLD >> 8) & 0xff),
+                               static_cast<int32_t>((UI_GOLD >> 16) & 0xff));
+    fn_grpx_draw_string_with_font(reinterpret_cast<char*>(data), static_cast<int>(x),
+                                  static_cast<int>(y) + 0x18, 2, 1);
 }
 
 void back_btn_draw(void* ctrl) {

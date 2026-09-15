@@ -6,9 +6,10 @@ import org.json.JSONObject
 /**
  * 模块设置 UI 的 native→Kotlin 配置桥接（ui-settings v0.6.9）。
  * 游戏主循环线程（native 侧经 JNI 反调）读取/翻转配置：
- * - [getConfigJson]：面板打开时下拉当前配置快照（3 布尔 + 监听地址/端口）
+ * - [getConfigJson]：面板打开时下拉当前配置快照（布尔项 + 监听地址/端口 + moduleVersion）
  * - [toggleConfig]：点击开关翻转对应布尔配置（持久化 + 增量下发 native）
- * 只允许翻转布尔项；listenAddress/listenPort 为只读。
+ * 只允许翻转布尔项；listenAddress/listenPort/moduleVersion 为只读。
+ * moduleVersion 只用于面板顶部版本标题，不落盘 config.json（故不在 ModuleConfig.toJson 中）。
  */
 object ModuleConfigUiBridge {
 
@@ -19,7 +20,12 @@ object ModuleConfigUiBridge {
     )
 
     @JvmStatic
-    fun getConfigJson(): String = ModuleConfig.toJson().toString()
+    fun getConfigJson(): String {
+        val json = ModuleConfig.toJson()
+        // moduleVersion 仅注入这份 UI 快照供面板顶部标题使用，不进入持久化的 ModuleConfig.toJson()。
+        json.put("moduleVersion", BuildConfig.VERSION_NAME)
+        return json.toString()
+    }
 
     @JvmStatic
     fun toggleConfig(key: String): String {

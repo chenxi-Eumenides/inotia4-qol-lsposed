@@ -45,7 +45,7 @@
 #define PAGE_INDICATOR_H 0x20
 #define PAGE_NAV_Y (GRID_Y + GRID_H + 0x08)
 #define PAGE_INDICATOR_Y (PAGE_NAV_Y + (PAGE_BUTTON_H - PAGE_INDICATOR_H) / 2)
-#define ADDR_H 0x28
+#define HEADER_H 0x28
 #define ROW_BTN_W 0xa8
 #define ROW_BTN_H 0x28
 // 存档备份格：按钮复用原版物品详情「使用」贴图（UIDesc_DrawMenuButton + loc 0x0e）。
@@ -56,7 +56,7 @@
 // （UIEquip_SetDescMenu 反汇编实证：使用/确认使用/佣兵徽章/骰子/开箱/解封共用）。
 #define USE_BUTTON_LOC 0x0e
 #define CELL_PADDING 0x20
-#define ADDR_Y 0x18
+#define HEADER_Y 0x18
 #define BACK_BTN_W 0x4a
 #define BACK_BTN_H 0x51
 #define UI_GOLD 0xFF00B4D7
@@ -124,7 +124,7 @@ SettingsRow g_rows[kSettingsItemCount];
 void* g_prev_page_btn = nullptr;
 void* g_next_page_btn = nullptr;
 void* g_back_btn = nullptr;
-void* g_addr_desc = nullptr;
+void* g_header_label = nullptr;
 int g_page_index = 0;
 int g_total_pages = 1;
 
@@ -132,7 +132,7 @@ int g_total_pages = 1;
 static char g_row_status[kSettingsItemCount][CB_TEXT_SIZE] = {
     "", "关", "关", "开", "关", "关", "关", "关", "关", "关"
 };
-static char g_addr_text[CB_TEXT_SIZE] = "";
+static char g_header_text[CB_TEXT_SIZE] = "QoL模块";
 
 bool inject_state_entry_locked();
 void settings_row_clicked(void* ctrl);
