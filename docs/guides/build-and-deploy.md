@@ -361,6 +361,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 12. **通知栏遮挡启动**（2026-08-12 实测）：设备重启后首屏可能是 NotificationShade（`dumpsys window` mCurrentFocus 显示），monkey 启动游戏前先 `input keyevent 4` 关闭通知栏回到桌面，否则游戏未真正启动（8088 无监听）。
 13. **真机部署**：部署与验收在真机上进行；除启动弹窗前置例外使用触摸脚本外，其余完全用 API 操控。详见 §3.5。
 14. **真机启动弹窗**（2026-08-27 实测）：monkey 启动后可能出现无 API 跳过的弹窗；启动流程必须追加 `ANDROID_SERIAL=<设备序列号> uv run python scripts/device/touch_automation.py --inject input click <启动弹窗坐标> 1.0`，点击后再轮询 `/api/health` 和 `/api/ui/screen`。除该弹窗前置外，不使用真机触摸坐标。
+15. **`adb push` 到 app 外部目录的文件 app 读不到**（2026-09-16 实测）：`adb push` 写入 `/sdcard/Android/data/<pkg>/files/...` 的文件 SELinux 标签为 `u:object_r:storage_file:s0`，app 进程（`untrusted_app`）对其 `stat`/读被拒，表现为模块列目录时静默跳过（无日志）。需 `su -c "chcon u:object_r:media_rw_data_file:s0 <file>"` 修正标签（`ls -Z` 可见差异）；真实用户场景（浏览器下载 → 文件管理器复制）写入的标签为 `media_rw_data_file`，不受影响。属主/权限（`chown u0_a187`、`chmod 664`）单独修正无效。
 
 ## 6. 关联文档
 
