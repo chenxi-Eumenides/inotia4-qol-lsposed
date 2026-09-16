@@ -1497,7 +1497,7 @@
 { "ok": true, "backup": <BackupMeta>, "deduplicated": true }
 ```
 
-**注意**：先算出 `checksum`，再扫描 `save_backup/*.qol_save`：已存在同 `checksum` 备份 → 不写入新文件直接返回；不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
+**注意**：先算出 `checksum`，再扫描 `save_backup/*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中。不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
 
 ##### 备份列表
 
@@ -1519,7 +1519,7 @@
 
 **返回格式**：`{"ok":true,"backup":<BackupMeta>}`
 
-**注意**：按 `checksum` 定位 bundle。校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。写入前把目标槽现存原版文件与 sidecar 复制到 `save_backup/.rollback/`，任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
+**注意**：按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol_save` 后缀。校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。写入前把目标槽现存原版文件与 sidecar 复制到 `save_backup/.rollback/`，任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
 
 ##### 删除备份
 
@@ -1531,7 +1531,7 @@
 
 **返回格式**：`{"ok":true}`
 
-**注意**：校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
+**注意**：定位规则与导入一致（内部 `checksum` 匹配，文件名不参与）。校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
 
 **BackupMeta 字段**：`file_name`（含导出时间与 `checksum` 前缀）、`size_bytes`、`source_slot`（导出源槽）、`export_time`（ms）、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（备份标识，12 位小写 hex）。
 

@@ -66,12 +66,12 @@ u32 crc32                      # 覆盖此前全部字节
 3. native 收集个人仓库伴生文件（monster 改版）：`locate_save_directory` 定位存档目录后，取该目录下文件名以 `save{slot}.dat.wh4-` 开头的**普通文件**（含游戏自建 `.bak`；排除目录与 `.tmp`/`.wh-tmp` 写入中间态），按文件名升序（确定性）逐个读入；单文件 >1MiB 视为异常跳过并记日志；目录不可得/无命中则为空列表。
    - **导出解密（v3）**：对每个 wh4 取容器负载（`len-3`）用本机密钥 `ENCRYPT_Process2(mode=1)` 解密；成功 → 以明文 + `flags=1` 入包（导入端用目标设备密钥重加密，跨设备可移植）；失败（长度不足/无 key/双校验和不通过）→ 原样存密文 + `flags=0` 兜底，并记 `warehouse kept as ciphertext (decrypt unavailable)`。主文件与 `.bak` 各自独立处理，后缀原样保留。
    - **导出统一分离（内嵌段剥离为外部 wh4）**：**仅当本次确实收齐了外部 wh4** 时，在存档明文 block3 内定位 ASCII `WH96v002` 段（读 u32 段长，段总长 = 8 + 段长），**仅当该段之后只剩零填充（或恰好结束于 block3 末尾）**才剥离，使存档退回基础形态、仓库一律走外部 wh4。剥离时**连同段后零填充一起截断**（真机实测：只去段、保留零填充会让改版校验失败并崩溃；截断是已验证形式）。剥离后把各块按索引顺序重排为连续布局、重写块表项（`offset_rel`/`len`），`origLen` 缩短；随后的 `original_sha256`/`checksum`/尾部 CRC32 自然重算（见第 4/5 步）。保守规则：段后存在非零字节或块表异常 → 维持原状并记日志；无外部 wh4 → 不剥离（否则丢仓库）并记日志。
-4. 算 `checksum = sha256(origPlain ‖ module ‖ warehouseBlob)` 前 12 位 → 按 `_<checksum>.qol_save` 后缀扫描 `save_backup/*.qol_save` 去重：已存在同 `checksum` 备份则**不写新文件**，返回既有备份 meta（`deduplicated:true`）。
+4. 算 `checksum = sha256(origPlain ‖ module ‖ warehouseBlob)` 前 12 位 → 扫描 `save_backup/*.qol_save` 去重：逐个解析候选，任一既有备份的内部 `checksum`（metaJson 权威值，`parse_bundle` 通过 CRC32 门禁）与新算值相同则**不写新文件**，返回既有备份 meta（`deduplicated:true`）。
 5. 组装 `.qol_save`（v3，CRC32，metaJson 含 `checksum`/`warehouse_count`/`warehouse_sha256`）→ tmp+rename 原子写入。
 
 ## 5. 导入流程
 
-0. native 按 `checksum` 定位 bundle（`_<checksum>.qol_save` 后缀；未命中→`backup not found`）。
+0. native 按 `checksum` 定位 bundle：目录下全部 `*.qol_save` 均为候选，逐个完整解析后比对内部值（metaJson 权威值）；文件名不参与匹配（重命名/浏览器重名后缀 `(1)` 均可导入），仅旧备份 metaJson 缺失该字段时退回 `_<checksum>.qol_save` 后缀；未命中→`backup not found`。
 
 1. 读并校验 magic/version/CRC/分段边界（`save_backup_bundle.cpp`）；v2/v3 额外解码 `warehouseBlob`（v2 = 无 flags 旧编码，v3 = 带 flags），`has_warehouse=true`；v1 无仓库段，`has_warehouse=false`。
 2. native `encrypt_plain_to_slot(targetSlot, origPlain)`：块0 slot 写目标槽 → `ENCRYPT_Process2(mode=0)` → 密文（len+3 字节）。
@@ -156,10 +156,22 @@ u32 crc32                      # 覆盖此前全部字节
 - **崩溃韧性**：删档后立即 force-stop + monkey 重启，`module-saves/` 仍只有 `slot-0.*`，slot-1 不重建。
 - **未覆盖（残余）**：`SaveSlot_GoToNewGame`（点空槽开始新游戏）与 `SAVE_FileDelete`（Hive 云上传前清空）未经该 GOT 槽；本轮未对「删档后在游戏内新建档并打开扩展背包」单独构造实测。
 
+### 8.5 定位不依赖文件名的导入（2026-09-16，原版包）
+
+真机：Phh-Treble（`192.168.3.54:5555`），模块 debug `0.7.12`（`output/inotia4_qol_lsposed_debug_2609161107_dc669a56009c.apk`）。流程：安装 → force-stop + monkey 重启 → 同意页 `POST /api/ui/dialog/select {"action":"ok"}` → 轮询 `/api/health` → 主菜单。
+
+- **样本与场景**：复现浏览器重名下载的 `20260916-094238_s2_2af71f42901c(1).qol_save`（13951 B，v3，`checksum=2af71f42901c`，`source_slot=2`，`hero_level=21`、`map_id=130`、`class 黑暗骑士`）原样推入设备 `save_backup/`，文件名保留 `(1)`。
+- **定位（本次改动点）**：`GET /api/system/backup/list` 返回 20 项且含该文件；`POST /api/system/backup/import {"checksum":"2af71f42901c","slot":2}` → `ok:true`，logcat `save backup imported: 20260916-094238_s2_2af71f42901c(1).qol_save -> slot2`。改动前同一操作因文件名不含 `_<checksum>.qol_save` 后缀返回 `backup not found`。
+- **进档**：`/api/system/info` slot2 `exists=true`、`hero_level=21`；`POST /api/system/enter_slot {"slot":2}` → `ok:true`，`/api/ui/screen` = `world`，`/api/health` `ok:true`；`GET /api/character/leader` = 凯恩 / 黑暗骑士 **Lv21**、HP 15272/15272、MP 233/233；`GET /api/character/party/count` = 3；`GET /api/world/map/id` = `130 怪人之家`（与 bundle meta 一致）。
+- **仓库跳过（既有变体门禁，非本次改动）**：logcat `warehouse companion unsupported (unsupported), skip 4 file(s)`——当前游戏构建的 `kWarehouseCompanionFile` 判定为 unsupported，导入按既有行为整步跳过 4 个 wh4 写回；该存档 block3 无内嵌仓库段（导出时已统一分离），游戏走 wh4 缺失容忍分支（[`save.md` §14](../../reference/game/save.md)），进档不受影响，仓库内容未随本次导入落盘。
+- **环境提示（非产品缺陷）**：`adb push` 写入的文件 SELinux 标签为 `u:object_r:storage_file:s0`，app 侧 `stat` 被拒而不进列表；改为文件管理器/浏览器写入等价的 `media_rw_data_file` 标签后即可见。真实用户场景（下载 → 文件管理器复制）不受影响。
+- host tests 全绿（15/15，`save_warehouse_validate_tests` 含新增 `bundle_matches_checksum` 用例）；`scripts/build-debug.sh` `BUILD SUCCESSFUL`。
+
 ## 9. 约束与残余
 
 - **时机**：导出读已落盘文件，不触发保存；导入不刷新内存态。调用方负责时序。
 - **已实现（2026-09-12 改造）**：`checksum` 作为备份标识（metaJson 权威 + 文件名兜底）；导出按 `checksum` 去重（命中不写新文件，响应带 `deduplicated:true`）；`backup/delete` 按 `checksum` 删除。
+- **已实现（2026-09-16 定位不依赖文件名）**：`find_by_checksum` 改为把目录内全部 `*.qol_save` 作为候选，逐个完整解析后按内部 `checksum`（metaJson 权威值，`parse_bundle` 的 CRC32 门禁保证与内容一致）匹配；文件名仅在旧备份 metaJson 缺失该字段时兜底（`bundle_matches_checksum`，纯逻辑、host 可测）。导出/导入/删除三处共用同一函数。效果：重命名或携带浏览器重名后缀（如 `(1)`）的备份可正常导入、去重与删除。真机证据见 §8.5。
 - **已实现（2026-09-12 底层迁移，方案 A）**：bundle 逻辑下沉 native `feature/save_backup/`（详见 §7）；技术原语 native 自实现（SHA-256/MD5/CRC32/base64/`clock_gettime` 毫秒/`localtime_r` 时间戳/MD5 目录名/扁平 metaJson 提取），删除 Kotlin `SaveBackupStore.kt` 与 `api/native/game_save_export.{h,cpp}`；sidecar 导入从「`ModuleSaveStore.importContainer` 按 section 解码重编码」改为「native 直改第 6 字节 slot + 重算尾部 CRC32」。迁移后四端点已真机回归（§8.1）。
 - **已实现（2026-09-12 阶段 2 游戏内 UI）**：见 §10。
 - **已实现（2026-09-12 个人仓库随存档备份）**：bundle 升到 v2（v1 仍可读）；导出收集 `save{slot}.dat.wh4-*`（含 `.bak`），导入 additive 写回目标槽（仅 v2 且 `has_warehouse`）。决策见 §3/§5。

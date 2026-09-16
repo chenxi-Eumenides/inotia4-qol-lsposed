@@ -259,6 +259,41 @@ void test_parse_bundle_version_dispatch() {
     CHECK(parsed_v1.warehouse.empty());
 }
 
+// ---------------- bundle_matches_checksum ----------------
+
+void test_bundle_matches_checksum_internal_wins() {
+    namespace sb = save_backup;
+    const std::string ck = "001122334455";
+    std::vector<uint8_t> v3;
+    sb::build_bundle(2, 7, {1, 2, 3}, {}, {}, "{\"checksum\":\"" + ck + "\"}", v3);
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(v3.data(), v3.size(), parsed));
+
+    // 内部值命中：文件名无关——含浏览器重名后缀 `(1)`、或完全无 checksum 后缀都成立。
+    CHECK(sb::bundle_matches_checksum("20260916-094238_s2_001122334455(1).qol_save", parsed, ck));
+    CHECK(sb::bundle_matches_checksum("renamed.qol_save", parsed, ck));
+    // 内部值不匹配：即使文件名恰好携带该 checksum 后缀也不得命中（内部值为权威）。
+    CHECK(!sb::bundle_matches_checksum("20260101_s1_" + ck + ".qol_save", parsed, "ffffffffffff"));
+    // 目标值非法 → 不命中。
+    CHECK(!sb::bundle_matches_checksum("x.qol_save", parsed, "00112233445"));
+}
+
+void test_bundle_matches_checksum_name_fallback() {
+    namespace sb = save_backup;
+    const std::string ck = "001122334455";
+    sb::ParsedBundle legacy;  // 旧备份形态：metaJson 无 checksum 字段
+    legacy.meta_json = "{\"map_id\":1}";
+    CHECK(sb::bundle_matches_checksum("20260101_s1_" + ck + ".qol_save", legacy, ck));
+    CHECK(!sb::bundle_matches_checksum("20260101_s1.qol_save", legacy, ck));
+    CHECK(!sb::bundle_matches_checksum("x.qol_save", legacy, ck));
+
+    // metaJson 中 checksum 值非法 → 视为缺失，退回文件名。
+    sb::ParsedBundle bad_inner;
+    bad_inner.meta_json = "{\"checksum\":\"not-hex\"}";
+    CHECK(sb::bundle_matches_checksum("20260101_s1_" + ck + ".qol_save", bad_inner, ck));
+    CHECK(!sb::bundle_matches_checksum("20260101_s1.qol_save", bad_inner, ck));
+}
+
 // ---------------- warehouse_reencrypt_for_slot ----------------
 
 enum class DecMode { kKeep, kFail, kBreakMagic, kBreakSlot, kBreakHash };
@@ -585,6 +620,8 @@ int main() {
     test_warehouse_v3_roundtrip();
     test_warehouse_v2_legacy_encoding();
     test_parse_bundle_version_dispatch();
+    test_bundle_matches_checksum_internal_wins();
+    test_bundle_matches_checksum_name_fallback();
     test_integrity_hash_known_vectors();
     test_integrity_hash_scope_and_write();
     test_reencrypt_cross_slot_ok();

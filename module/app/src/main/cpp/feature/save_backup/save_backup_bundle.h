@@ -228,6 +228,13 @@ bool valid_checksum(const std::string& value);
 // 从文件名后缀 `_([0-9a-f]{12}).qol_save` 提取 checksum。
 bool extract_checksum_from_name(const std::string& file_name, std::string& out);
 
+// 判定候选备份是否对应目标 checksum：以 bundle 内部 metaJson 的 `checksum` 字段为权威
+//（parse_bundle 已通过 CRC32 门禁，该字段与文件内容一致）；metaJson 缺失该字段或其值
+// 非法的旧备份，退回文件名 `_([0-9a-f]{12}).qol_save` 后缀。file_name 为不含目录的目录项名。
+// 目标 checksum 非法时直接返回 false。
+bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& parsed,
+                             const std::string& checksum);
+
 // ---- 模块 sidecar 容器（MSAV）最小操作（不解析 section）----
 //
 // 容器布局（大端）：u32 magic "MSAV" | u16 ver | u8 slot | u64 generation |

@@ -927,6 +927,18 @@ bool extract_checksum_from_name(const std::string& file_name, std::string& out) 
     return true;
 }
 
+bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& parsed,
+                             const std::string& checksum) {
+    if (!valid_checksum(checksum)) return false;
+    std::string inner;
+    if (json_find_string(parsed.meta_json, "checksum", inner) && valid_checksum(inner)) {
+        return inner == checksum;
+    }
+    std::string from_name;
+    if (!extract_checksum_from_name(file_name, from_name)) return false;
+    return from_name == checksum;
+}
+
 // ---- 模块 sidecar 容器（MSAV）最小操作 ----
 
 namespace {

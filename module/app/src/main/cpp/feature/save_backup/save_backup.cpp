@@ -290,27 +290,6 @@ bool dir_contains_save_dat(const std::string& dir) {
     return found;
 }
 
-// 按文件名后缀 `_<checksum>.qol_save` 定位备份；未命中返回空串。
-std::string find_by_checksum(const std::string& dir, const std::string& checksum) {
-    const std::string suffix = std::string("_") + checksum + kBundleSuffix;
-    DIR* d = ::opendir(dir.c_str());
-    if (d == nullptr) return std::string();
-    std::string hit;
-    while (dirent* ent = ::readdir(d)) {
-        const std::string name = ent->d_name;
-        if (name.size() <= suffix.size()) continue;
-        const std::string full = dir + "/" + name;
-        struct stat st{};
-        if (::stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
-        if (name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
-            hit = full;
-            break;
-        }
-    }
-    ::closedir(d);
-    return hit;
-}
-
 // 列出目录下全部 .qol_save 文件名；目录不可读返回 false。
 bool list_bundle_files(const std::string& dir, std::vector<std::string>& out) {
     DIR* d = ::opendir(dir.c_str());
@@ -324,6 +303,26 @@ bool list_bundle_files(const std::string& dir, std::vector<std::string>& out) {
     }
     ::closedir(d);
     return true;
+}
+
+// 按 bundle 内部 checksum 定位备份：目录下全部 `*.qol_save` 均为候选，逐个读入并完整解析
+//（parse_bundle 含逐段边界与 CRC32 校验）后比对内部值；解析失败或非 bundle 的候选跳过。
+// 文件名不参与匹配（`bundle_matches_checksum` 仅在旧备份 metaJson 缺失 checksum 字段时
+// 回退文件名后缀）。同 checksum 的多个候选返回目录序中的第一个；未命中返回空串。
+std::string find_by_checksum(const std::string& dir, const std::string& checksum) {
+    std::vector<std::string> names;
+    if (!list_bundle_files(dir, names)) return std::string();
+    for (const std::string& name : names) {
+        const std::string full = dir + "/" + name;
+        std::vector<uint8_t> bytes;
+        save_backup::ParsedBundle parsed;
+        if (!read_file_bytes(full, bytes) ||
+            !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
+            continue;
+        }
+        if (save_backup::bundle_matches_checksum(name, parsed, checksum)) return full;
+    }
+    return std::string();
 }
 
 // ---- 时间 ----
