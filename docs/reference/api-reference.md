@@ -1811,6 +1811,18 @@
 - 阻挡：静态瓦片矩阵 `TILE_BLOCK_BIT`（bit3，与寻路同口径）置位时拒绝。
 - 目标图静态矩阵缺失时无法校验，放行。
 
+#### 推动增强
+
+`POST /api/op/movement/push_all`
+
+**请求格式**：`{ "on": true }`
+
+**返回格式**：`{"ok":true}`（成功）；`{"ok":false,"error":"game not loaded"}` 或 `"patch failed (word mismatch or mprotect denied)"`。
+
+**注意**：nativeOpPushAll 运行时 patch `CHAR_Move(0xe9808)` 推动分支的两个 blocker 资格闸门，使主控/队友移动可推开**怪物/队友/召唤物**；场景设施（NPC、商人等）保持不可推。安装与还原均 fail-closed（指令字校验不符即拒绝，不改写任何字节）；32 位构建下偏移指令字不匹配，install 自然拒绝。进程重启后回到关闭态。
+- 闸门一（`CHAR_Move+0x168`）：`bl CHAR_GetPartyIndex(blocker)` 经 BL 重定向到模块 wrapper——怪物（`C_TYPE==1`）与召唤物（`CHAR_IsActivePlayerGroup`）伪装为队伍成员使其可推，其余走原函数（队友可推，`C_TYPE==2` 的场景设施返回 -1 不可推）。
+- 闸门二（`CHAR_Move+0x180`）：`CHAR_IsCurrentActionStand(blocker)` 的 `cbz` 置 NOP——战斗中/行动中的怪物非站立，不放开则推不动。
+
 ### 8.2 未实现
 
 以下端点结构已定稿，待开发（需权限获取机制 + 端点组）：
