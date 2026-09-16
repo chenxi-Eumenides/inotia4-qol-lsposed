@@ -54,6 +54,11 @@ std::string data_op_discharge(int mercenary_slot) {
     if (ch == nullptr) return op_err("mercenary not found");
     if (fn_get_member(0) == ch) return op_err("cannot discharge leader");
     if (fn_is_special_npc != nullptr && fn_is_special_npc(ch)) return op_err("cannot discharge quest npc");
+    // 原版 MERCENARYSYSTEM_Release(0x118ab4) 内部完整链：FindAsMercenarySlot → 清角色
+    // +0x352/-0x3cc 槽标志 → MERCENARYSLOT_Initialize → GAMESTATE_SetState，遣散副作用
+    // 由原版函数内部承接。已知行为（与原版一致的观察）：遣散在队成员时 party 角色实例
+    // 残留在队槽（backlog「mercenary/party 两套索引一致性」跟踪项），无证据表明原版 UI
+    // 遣散链有额外的队槽清理步骤，故不额外修改，维持与原版函数相同的行为。
     fn_mercenary_release(mercenary_slot);
     return op_ok();
 }
@@ -63,6 +68,12 @@ std::string data_op_withdraw(int mercenary_slot, int32_t equip_slot) {
     void* ch = find_char_by_merc_slot(mercenary_slot);
     if (ch == nullptr) return op_err("mercenary not found");
     if (equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) return op_err("bad slot");
+    // 与 data_op_unequip 同口径：原版脱装备按钮链先经 CHAR_CanUnequipItem 判定
+    // （不可脱标记 + 特殊 NPC 闸门）再执行，API 无按钮链须显式补同一判定。
+    if (fn_can_unequip != nullptr) {
+        void* item = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(ch) + C_EQUIP + equip_slot * 8);
+        if (item != nullptr && fn_can_unequip(ch, item) == 0) return op_err("cannot unequip");
+    }
     int r = fn_unequip(ch, equip_slot);
     return r ? op_ok() : op_err("withdraw failed");
 }

@@ -14,6 +14,16 @@ std::string data_op_use_item(int bag, int slot) {
     if (fn_get_bit == nullptr) return op_err("symbol not resolved");
     void* item = item_ref.native_item;
     const int category = item_ref.category;
+    // 弹窗链检查（API 直连确认回调核心，不调用确认弹窗）：原版使用按钮两类——
+    //   ① 普通物品 UIEquip_ButtonUseExe(0xb80b8) 直接调 CHAR_UseItemEx（无弹窗）；
+    //   ② IsUseAfterConfirm 类物品 UIEquip_ButtonUseAfterConfirmExe(0xb95f8) 先关详情
+    //      面板再弹 YesNo 确认（UIEquip_ConfirmUseItem 0xb943c），其 OK 回调
+    //      UIEquip_OKConfrimUseItem(0xb8478) = INVEN_FindItemSlot 重新定位物品后调
+    //      CHAR_UseItemEx（game_symbols.h 反汇编结论）。
+    //   即两类按钮的实质执行体都是 CHAR_UseItemEx，弹窗前步骤全部是 UI 收尾（关面板、
+    //   弹框），无业务副作用；CHAR_UseItemEx(0xeb670) 函数体内无任何 UIPopupMsg_Create*
+    //   调用（objdump 核实）。API 已持有 item 指针，直调 CHAR_UseItemEx 即确认回调的
+    //   核心逻辑，跳过弹窗与 UI 收尾是安全的。
     // 解封/开箱/骰子类物品 fn_is_use 返回 0（IsUseAfterConfirm 判定集不含这些类别），
     // 但它们有自己的独立使用路径，不受 fn_is_use 限制
     bool sealed_or_box = (fn_is_sealed != nullptr && fn_is_sealed(category)) ||

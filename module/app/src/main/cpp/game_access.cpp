@@ -279,6 +279,7 @@ bool bridge_init() {
     fn_inven_save_item_direct = reinterpret_cast<InvenSaveItemDirectFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA));
     fn_inven_save_item_on_empty = reinterpret_cast<InvenSaveItemOnEmptyFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA", F_INVEN_SAVE_ITEM_ON_EMPTY_VMA));
     fn_dealsystem_find_sale_by_id = reinterpret_cast<DealSystemFindSaleByIdFn>(g_base + fn_resolve("F_DEALSYSTEM_FIND_SALE_BY_ID_VMA", F_DEALSYSTEM_FIND_SALE_BY_ID_VMA));
+    fn_dealsystem_clear_item = reinterpret_cast<DealSystemClearItemFn>(g_base + fn_resolve("F_DEALSYSTEM_CLEAR_ITEM_VMA", F_DEALSYSTEM_CLEAR_ITEM_VMA));
     fn_inven_move_item = reinterpret_cast<InvenMoveItemFn>(g_base + fn_resolve("F_INVEN_MOVE_ITEM_VMA", F_INVEN_MOVE_ITEM_VMA));
     fn_item_system_divide = reinterpret_cast<ItemSystemDivideFn>(
         g_base + fn_resolve("F_ITEMSYSTEM_DIVIDE_VMA", F_ITEMSYSTEM_DIVIDE_VMA));
@@ -362,6 +363,8 @@ bool bridge_init() {
         g_base + fn_resolve("F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA",
                             F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA));
     fn_popup_exist = reinterpret_cast<PopupStateExistFn>(g_base + fn_resolve("F_POPUPSTATE_EXIST_VMA", F_POPUPSTATE_EXIST_VMA));
+    fn_button_ok_exe = reinterpret_cast<PopupButtonExeFn>(g_base + fn_resolve("F_BUTTON_OK_EXE_VMA", F_BUTTON_OK_EXE_VMA));
+    fn_button_cancel_exe = reinterpret_cast<PopupButtonExeFn>(g_base + fn_resolve("F_BUTTON_CANCEL_EXE_VMA", F_BUTTON_CANCEL_EXE_VMA));
     fn_networkstore_set_state = reinterpret_cast<NetworkStoreSetStateFn>(g_base + fn_resolve("F_NETWORKSTORE_SET_STATE_VMA", F_NETWORKSTORE_SET_STATE_VMA));
     fn_open_item_box = reinterpret_cast<OpenItemBoxFn>(g_base + fn_resolve("F_OPEN_ITEM_BOX_VMA", F_OPEN_ITEM_BOX_VMA));
     fn_release_sealed = reinterpret_cast<ReleaseSealedFn>(g_base + fn_resolve("F_RELEASE_SEALED_VMA", F_RELEASE_SEALED_VMA));

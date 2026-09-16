@@ -59,6 +59,11 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     const int category = fn_get_bit(flags, 15, 6);
     result.category = category;
     result.count = item_ref.count;
+    // 弹窗链检查（API 直连确认回调核心，不调用确认弹窗）：原版丢弃/出售按钮
+    // UIEquip_ButtonDestroyExe(0xb6240) 仅做金额预演（x23=0x666 标记）+ 创建确认弹窗；
+    // 弹窗 OK 回调 UIEquip_OKDestroyItem(0xb83d0) 才是真实结算（背包分支走 0x1261c4
+    // 删物品 + 加钱，game_symbols.h 反汇编结论）。弹窗前步骤无业务副作用，API 在此
+    // 直连结算语义：金额计算 + INVEN_RemoveItem（经 Stage4 Hook，扩展物品透明路由）。
     if (fn_item_is_no_sell(category) != 0) {
         QOL_LOG_WARN(QolDomain::kInventory,
                      "sell price reject reason=no_sell source=%s category=%d count=%d "
@@ -89,6 +94,13 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
                      static_cast<uint32_t>(count), stack_limit_enabled())),
                  static_cast<long long>(unit_price), static_cast<long long>(price));
     result.price = price;
+    // 与原版 UIStore_SellItem(0xd25f0) 的对照：
+    //   原版链 = INVEN_RemoveItem(item) 成功后 INVEN_AddMoney(价格)，无回购列表（普通
+    //   NPC 商店卖出的物品不进入货架）；本实现先加钱后删除、删除失败回退金币——顺序
+    //   相反但最终状态一致，先加钱是为了并发下失败路径无需触碰已删除对象。
+    //   原版 UI 按件出售：可堆叠物品数量 >1 时先 ITEMSYSTEM_Divide 拆分再删（0xd26b8
+    //   分支），一次只卖 1 件；本原语语义为整槽出售（单价 × 数量），属 API 明确选择的
+    //   语义差异（调用方需要按件卖可自行配合 move_item 拆分槽位）。
     if (!fn_add_money(price)) {
         result.status = Status::kCreditFailed;
         return result;

@@ -65,6 +65,10 @@ std::string data_op_cast(int role, int32_t action_id) {
     // 获取合法敌人目标（无目标不释放）
     void* target = fn_char_get_enemy_target(ch, 0, 0);
     if (target == nullptr) return op_err("no target");
+    // 与原版按键施放链（UIPlay 按钮→CHAR_SetActionId 由 AI 帧执行）一致：MP 消耗与
+    // 冷却判定发生在 AI 帧执行时（CHAR_SetActionId 只登记动作），因此此处不做 MP 预检，
+    // MP 不足时 AI 帧自然不执行该技能（与原版表现相同）；失败时返回 on cooldown 语义由
+    // use/cast 调用方观察状态获知。attack=仅锁定、cast 5=普攻的行为口径见 api-reference。
     fn_char_set_action_id(ch, action_id, target);
     return op_ok();
 }
@@ -146,6 +150,10 @@ std::string data_op_add_stat(int role, int32_t attr) {
         fn_set_status_point == nullptr)
         return op_err("symbol not resolved");
     if (attr < 0 || attr > 4) return op_err("bad attr");
+    // 模拟原版属性分配流程：游戏内没有「分配 1 点属性」的原子函数（原版分配逻辑内联在
+    // UIStatus 面板分配按钮链中：读剩余能力点→判 >0→属性 +1→能力点 -1），无法直接调用，
+    // 故按原版按钮链的三步效果逐项复刻。三步间的一致性由本函数同步执行保证（单请求内
+    // 无并发窗口）；与原版的已知差异是原版按钮链在 UI 层会刷新面板显示，API 无 UI 不复刻。
     int32_t points = fn_get_status_point(ch);
     if (points <= 0) return op_err("no status point");
     int32_t cur = fn_get_stat_main(ch, attr);
@@ -177,6 +185,12 @@ std::string data_op_learn_action(int role, int32_t action_id, int32_t level) {
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_err("role not found");
     if (fn_learn_action == nullptr) return op_err("symbol not resolved");
+    // 调用原版 CHAR_LearnAction(0xe2390)（已学→CHAR_InitializeFromSkill 设级，未学→
+    // CHAR_LearnActionDirect 学习）。与原版流程的已知差异：原版技能学习/升级走 UI 技能
+    // 面板按钮链，会在调 CHAR_LearnAction 前按 SKILLTRAINPOINTBASE 表校验并扣减技能点；
+    // 底层函数本身不扣点（真机实测 skillPoints 不变），故本端点为「不消耗技能点的学习」
+    // 越权语义。需要扣点语义时可配合 /api/op/character/{role}/skill-point 手动扣减；
+    // 消耗表公式（SKILLTRAINPOINTBASE）未逆向，暂无法在 API 内复刻原版扣点链。
     fn_learn_action(ch, action_id, level);
     return op_ok();
 }

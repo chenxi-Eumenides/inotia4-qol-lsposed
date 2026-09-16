@@ -50,6 +50,11 @@ std::string data_save_slots_json() {
 
 std::string data_op_save() {
     if (!game_in_world()) return op_err("not in game");
+    // 原版保存只发生在世界完全就绪后（保存点/存档菜单，角色链表与主控均已加载）。
+    // 进档后世界异步加载期（约 1-3 秒）角色/主控指针尚未就绪，此时调 SAVE_Save 会在
+    // CHAR_GetStatusPoint 解引用空角色指针 SIGSEGV（真机 tombstone 实测，见 backlog
+    // P0「世界加载完成前保存的崩溃防护」）——对齐原版前置：主控未就绪即拒绝保存。
+    if (member_or_null(0) == nullptr) return op_err("world not ready");
     if (const char* ui_block = savebackup_ui_block_reason()) return op_err(ui_block);
     if (fn_save == nullptr) return op_err("symbol not resolved");
     return module_save_game() ? op_ok() : op_err("save failed");

@@ -160,6 +160,7 @@ extern InvenSaveItemFn fn_inven_save_item;
 extern InvenSaveItemDirectFn fn_inven_save_item_direct;
 extern InvenSaveItemOnEmptyFn fn_inven_save_item_on_empty;
 extern DealSystemFindSaleByIdFn fn_dealsystem_find_sale_by_id;
+extern DealSystemClearItemFn fn_dealsystem_clear_item;
 extern InvenMoveItemFn fn_inven_move_item;
 extern ItemSystemDivideFn fn_item_system_divide;
 extern SetExpFn fn_set_exp;
@@ -226,6 +227,8 @@ extern ItemSystemIsMercenarySealFn fn_is_mercenary_seal;
 extern MercenarySystemIsEmptyManagerSlotFn fn_mercenary_is_empty_manager_slot;
 extern MercenarySystemMakeMercenaryFn fn_mercenary_make_mercenary;
 extern PopupStateExistFn fn_popup_exist;
+extern PopupButtonExeFn fn_button_ok_exe;      // 弹窗确定按钮（dialog_ok 原版执行函数，经本层解析调用）
+extern PopupButtonExeFn fn_button_cancel_exe;  // 弹窗取消按钮（dialog_cancel 原版执行函数，经本层解析调用）
 extern NetworkStoreSetStateFn fn_networkstore_set_state;
 extern OpenItemBoxFn fn_open_item_box;
 extern ReleaseSealedFn fn_release_sealed;
