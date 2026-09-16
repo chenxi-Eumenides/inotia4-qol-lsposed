@@ -211,6 +211,7 @@ bool bridge_init() {
     fn_ui_set_popup_process_info = reinterpret_cast<UiSetPopupProcessInfoFn>(g_base + fn_resolve("F_UI_SET_POPUP_PROCESS_INFO_VMA", F_UI_SET_POPUP_PROCESS_INFO_VMA));
     fn_game_start_resume_game = reinterpret_cast<GameStartResumeGameFn>(g_base + fn_resolve("F_GAME_START_RESUME_GAME_VMA", F_GAME_START_RESUME_GAME_VMA));
     fn_save_create_save_slot = reinterpret_cast<SaveCreateSaveSlotFn>(g_base + fn_resolve("F_SAVE_CREATE_SAVE_SLOT_VMA", F_SAVE_CREATE_SAVE_SLOT_VMA));
+    fn_save_destroy_save_slot = reinterpret_cast<SaveDestroySaveSlotFn>(g_base + fn_resolve("F_SAVE_DESTROY_SAVE_SLOT_VMA", F_SAVE_DESTROY_SAVE_SLOT_VMA));
     fn_saveslot_get_hero = reinterpret_cast<SaveslotGetHeroFn>(g_base + fn_resolve("F_SAVESLOT_GET_HERO_VMA", F_SAVESLOT_GET_HERO_VMA));
     fn_state_set = reinterpret_cast<StateSetFn>(g_base + fn_resolve("F_STATE_SET_VMA", F_STATE_SET_VMA));
     fn_state_next_start_process = reinterpret_cast<StateNextStartProcessFn>(g_base + fn_resolve("F_STATE_NEXT_START_PROCESS_VMA", F_STATE_NEXT_START_PROCESS_VMA));
@@ -510,6 +511,37 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     });
     g_bridge_ready.store(true, std::memory_order_release);
     return true;
+}
+
+// 槽区刷新状态：g_slots_state = 最近一次观察到的游戏状态（0xFFFF = 尚未观察），
+// g_slots_stale = 槽文件自上次重载后被改动/尚未重载。见 game_access.h 刷新策略注释。
+static std::atomic<bool> g_slots_stale{true};
+static std::atomic<uint16_t> g_slots_state{0xFFFF};
+
+// 存档槽区重载：先释放三槽已挂接角色对象，再重载。与游戏自身 SaveSlot_Delete 的清理惯用法一致
+// （SAVE_DestroySaveSlot → SAVE_CreateSaveSlot）；原因、副作用与调用约束见 game_access.h 注释。
+void save_slots_reload() {
+    if (fn_save_destroy_save_slot != nullptr) fn_save_destroy_save_slot();
+    if (fn_save_create_save_slot != nullptr) fn_save_create_save_slot();
+    g_slots_stale.store(false, std::memory_order_release);
+}
+
+void save_slots_mark_stale() {
+    g_slots_stale.store(true, std::memory_order_release);
+}
+
+// 仅在本轮主菜单停留内尚未重载、或槽文件被改动后重载。非主菜单（world/过渡态）只记录状态、
+// 不做任何重载——槽区结构在该状态下必须保持只读（重载会覆盖世界态全局）。
+void save_slots_refresh_if_stale() {
+    if (g_state == nullptr || fn_save_create_save_slot == nullptr) return;
+    const uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
+    const uint16_t prev = g_slots_state.exchange(st, std::memory_order_acq_rel);
+    if (st != 4) {
+        // 已离开主菜单：下一次回到主菜单必须重载（世界内保存/删档都发生在这个区间）。
+        g_slots_stale.store(true, std::memory_order_release);
+        return;
+    }
+    if (prev != 4 || g_slots_stale.load(std::memory_order_acquire)) save_slots_reload();
 }
 
 // 当前地图真实 ID（v0.4.28）：GOT 双层解引用 u32 = MAPINFOBASE 记录下标。

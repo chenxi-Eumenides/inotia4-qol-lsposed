@@ -97,6 +97,7 @@ extern SaveLoadSaveSlotFn fn_save_load_save_slot;
 extern UiSetPopupProcessInfoFn fn_ui_set_popup_process_info;
 extern GameStartResumeGameFn fn_game_start_resume_game;
 extern SaveCreateSaveSlotFn fn_save_create_save_slot;
+extern SaveDestroySaveSlotFn fn_save_destroy_save_slot;
 extern SaveslotGetHeroFn fn_saveslot_get_hero;
 extern StateSetFn fn_state_set;
 extern StateNextStartProcessFn fn_state_next_start_process;
@@ -352,6 +353,25 @@ extern ControlButtonDrawFn fn_ctrl_btn_draw;
 extern std::vector<std::pair<const char*, bool>> g_symbol_report;
 extern std::string g_dl_error;
 extern std::string g_lib_path;
+
+// 存档槽区重载与刷新策略
+//
+// 重载惯用法与游戏自身 SaveSlot_Delete 一致：SAVE_DestroySaveSlot（逐槽 SAVESLOT_Unload，
+// 释放已挂接角色对象）→ SAVE_CreateSaveSlot（逐槽 SAVESLOT_Initialize + SAVE_LoadSaveSlot）。
+// 必须成对使用：SAVE_LoadSaveSlot 起始会 SAVESLOT_Initialize 清槽，但只清槽内 3 个角色指针、
+// 不释放对象；唯一释放路径 SAVESLOT_Unload 只被 SAVE_DestroySaveSlot 调用，读档链自身不释放。
+//
+// 即便如此，重载本身仍会逐次净增游戏侧对象：实测同一进程内在主菜单反复重载 20 余轮后，
+// SAVE_LoadSaveSlot 在角色阶段失败（阶段码 7），进档被判槽损坏，重启进程才恢复；而游戏自身
+// 只在存档面板打开时重载一次，且之前先做 GAME_Initialize 全系统复位，所以不会累积。
+// 因此模块侧同样不得在主菜单停留期内反复重载：
+//   - save_slots_refresh_if_stale()：常规调用入口，仅「本次主菜单停留内尚未重载」或
+//     「槽文件被改动」时重载，其余情况复用当前槽结构；
+//   - save_slots_reload()：需要无条件重载时使用（如新建档前）；
+//   - save_slots_mark_stale()：模块或游戏改动了槽文件后调用，使下一次读取重新重载。
+void save_slots_reload();
+void save_slots_refresh_if_stale();
+void save_slots_mark_stale();
 
 // 函数符号解析：返回相对 g_base 的偏移（运行时地址 = g_base + 返回值 + 函数内 offset）。
 // 供 game_patch 计算 patch 点绝对地址（禁止裸地址）。

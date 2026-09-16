@@ -336,11 +336,11 @@ void apply_backups_locked(std::vector<BackupEntry>& entries) {
 // 其余状态只读现有槽结构。feature 侧只经 game_access.h 的 fn_* 与 game_symbols.h 常量访问游戏。
 void read_slots_into(SlotInfo out[3]) {
     for (int i = 0; i < 3; ++i) out[i] = SlotInfo{};
-    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr) return;
-    if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 4 &&
-        fn_save_create_save_slot != nullptr) {
-        fn_save_create_save_slot();
-    }
+    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr ||
+        fn_save_destroy_save_slot == nullptr || fn_save_create_save_slot == nullptr) return;
+    // 与 data_save_slots_json / read_hero_meta 口径一致：同一次主菜单停留内只重载一次
+    // （反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
+    save_slots_refresh_if_stale();
     for (int i = 0; i < 3; ++i) {
         void* slot = fn_save_get_save_slot(i);
         if (slot == nullptr) continue;

@@ -67,6 +67,7 @@ SaveLoadSaveSlotFn fn_save_load_save_slot = nullptr;
 UiSetPopupProcessInfoFn fn_ui_set_popup_process_info = nullptr;
 GameStartResumeGameFn fn_game_start_resume_game = nullptr;
 SaveCreateSaveSlotFn fn_save_create_save_slot = nullptr;
+SaveDestroySaveSlotFn fn_save_destroy_save_slot = nullptr;
 SaveslotGetHeroFn fn_saveslot_get_hero = nullptr;
 StateSetFn fn_state_set = nullptr;
 StateNextStartProcessFn fn_state_next_start_process = nullptr;

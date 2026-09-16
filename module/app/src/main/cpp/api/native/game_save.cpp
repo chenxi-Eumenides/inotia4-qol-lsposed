@@ -23,12 +23,13 @@ std::string data_current_save_slot_json() {
 }
 
 std::string data_save_slots_json() {
-    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr || fn_save_create_save_slot == nullptr)
+    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr ||
+        fn_save_destroy_save_slot == nullptr || fn_save_create_save_slot == nullptr)
         return op_err("symbol not resolved");
-    // SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局；只允许在主菜单刷新。
+    // SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局；只允许在主菜单刷新，且同一次主菜单停留内
+    // 只重载一次（反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
     // world/启动过渡阶段查询 save_slots 必须只读现有槽结构，不能因 GET /system/info 破坏当前游戏。
-    if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 4)
-        fn_save_create_save_slot();
+    save_slots_refresh_if_stale();
     std::string s = "{\"slots\":[";
     for (int i = 0; i < 3; ++i) {
         if (i > 0) s += ",";
@@ -60,13 +61,14 @@ std::string data_op_save() {
     return module_save_game() ? op_ok() : op_err("save failed");
 }
 
-// 预检（backlog P0②）：仅主菜单（STATE==4）刷新判决——非主菜单调 CreateSaveSlot 会让
-// SAVE_LoadInformation 覆盖世界态全局（版本/时长等，docs/system/save.md §3），故其余状态
-// 一律返回 unknown，不刷新、只读当前槽结构字节。
+// 预检（backlog P0②）：仅主菜单（STATE==4）可取判决——非主菜单调 CreateSaveSlot 会让
+// SAVE_LoadInformation 覆盖世界态全局（版本/时长等，docs/reference/game/save.md §3），故其余
+// 状态返回 unknown/not in main menu，不刷新、只读当前槽结构字节。判决由槽区重载产生
+// （同一次主菜单停留内只重载一次，见 game_access.h 刷新策略注释），调用方不得再额外读档。
 static std::string save_preflight_for_enter(int32_t slot) {
     if (g_state == nullptr) return op_err("libgame not ready");
-    if (fn_save_get_save_slot == nullptr || fn_save_load_save_slot == nullptr ||
-        fn_saveslot_get_hero == nullptr)
+    if (fn_save_get_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||
+        fn_save_create_save_slot == nullptr || fn_saveslot_get_hero == nullptr)
         return op_err("symbol not resolved");
     if (slot < 0 || slot > 2) return op_err("bad slot");
     uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
@@ -79,9 +81,13 @@ static std::string save_preflight_for_enter(int32_t slot) {
     if (const char* ui_block = savebackup_ui_block_reason()) {
         return op_err(ui_block);
     }
+    // 判决来自槽区重载（内部 SAVE_CreateSaveSlot 逐槽 SAVESLOT_Initialize + SAVE_LoadSaveSlot，
+    // 与游戏存档面板同源）；本次主菜单停留内已重载过则直接复用，不重复重载。
+    // 此处不得再对目标槽单独调 SAVE_LoadSaveSlot：那是重复读档，会额外累积游戏侧对象，
+    // 使本次及后续读档在角色阶段失败（原因见 game_access.h 刷新策略注释）。
+    save_slots_refresh_if_stale();
     void* ss = fn_save_get_save_slot(slot);
     if (ss == nullptr) return op_err("bad slot");
-    fn_save_load_save_slot(slot, ss);
     uint8_t* p = reinterpret_cast<uint8_t*>(ss);
     uint8_t slot_state = p[2];
     uint8_t slot_err = p[3];
@@ -141,11 +147,11 @@ static std::string enter_slot_locked(int32_t slot) {
         return op_err(e.c_str());
     }
     if (fn_save_get_save_slot == nullptr || fn_ui_set_popup_process_info == nullptr ||
-        fn_game_start_resume_game == nullptr || fn_save_create_save_slot == nullptr ||
-        fn_save_load_save_slot == nullptr || fn_saveslot_get_hero == nullptr)
+        fn_game_start_resume_game == nullptr || fn_saveslot_get_hero == nullptr)
         return op_err("symbol not resolved");
     if (slot < 0 || slot > 2) return op_err("bad slot");
-    fn_save_create_save_slot();
+    // 槽区刷新由预检内部完成（save_slots_refresh_if_stale）；此处不得再刷新，多一次重载就多
+    // 一批未释放的角色对象（见 game_access.h 刷新策略注释）。
     std::string preflight = save_preflight_for_enter(slot);
     if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);
@@ -194,16 +200,19 @@ static std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     if (!extension_bag_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; create slot blocked");
     }
-    if (fn_save_create_save_slot == nullptr || fn_game_exit_save_slot_select_char == nullptr ||
+    if (fn_save_create_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||
+        fn_game_exit_save_slot_select_char == nullptr ||
         fn_select_character_start_game == nullptr || fn_tutorial_start == nullptr ||
         fn_save_get_save_file_name == nullptr || fn_cs_fs_remove == nullptr)
         return op_err("symbol not resolved");
-    // 槽区初始化（SAVE_CreateSaveSlot 循环加载 3 槽存档到内存，确保槽位状态可用）
-    fn_save_create_save_slot();
+    // 槽区初始化（重载三槽存档到内存，确保槽位状态可用；先释放上一批角色对象）
+    save_slots_reload();
     // 删除目标槽旧存档文件（SaveSlot_GoToNewGame 官方链：SAVE_GetSaveFileName + CS_fsRemove）
     char fname[128] = {0};
     fn_save_get_save_file_name(slot, fname);
     if (fname[0] != '\0') fn_cs_fs_remove(fname, 1);
+    // 槽文件已改动：槽区结构不再代表磁盘状态，下一次读取必须重载。
+    save_slots_mark_stale();
     // 当前槽位（SaveSlot_GoToNewGame：*[0x2f4000+0xd20] = slot）
     uint8_t** cur_slot = reinterpret_cast<uint8_t**>(g_base + G_CURRENT_SLOT_GOT_VMA);
     if (cur_slot == nullptr || *cur_slot == nullptr) return op_err("save slot state not ready");

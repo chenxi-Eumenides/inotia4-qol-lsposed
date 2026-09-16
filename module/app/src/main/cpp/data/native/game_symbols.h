@@ -502,6 +502,7 @@ constexpr uintptr_t F_SAVE_GET_SAVE_SLOT_VMA = 0x1289e4;    // void* (int32_t) �
 constexpr uintptr_t F_UI_SET_POPUP_PROCESS_INFO_VMA = 0xaecc8;  // int (int32_t id, int32_t data) 注册 popup 流程（Array_Add 到 popup 数组 [0x2f5000+0xc38]）
 constexpr uintptr_t F_GAME_START_RESUME_GAME_VMA = 0x1002e8;  // int (int32_t slot) 启动游戏读档（GAME_Initialize → [0x2f6000+0xd20]=slot → STATE_Set(5) → MAPCHANGE_Set → GAMESTATE_SetState(3) → 主循环读档进 world）
 constexpr uintptr_t F_SAVE_CREATE_SAVE_SLOT_VMA = 0x129b38;    // void (void) 初始化全部 3 槽（循环 SAVESLOT_Initialize + SAVE_LoadSaveSlot 加载存档到槽区）
+constexpr uintptr_t F_SAVE_DESTROY_SAVE_SLOT_VMA = 0x128a08;   // void (void) 循环 SAVESLOT_Unload 释放三槽已挂接角色对象并复位槽结构（不触碰存档文件）
 constexpr uintptr_t F_SAVE_LOAD_SAVE_SLOT_VMA = 0x1298dc;      // int (int32_t, void*) 按槽加载单个存档到 SAVESLOT 结构
 constexpr uintptr_t F_SAVESLOT_GET_HERO_VMA = 0x14cda4;       // void* (void*) 取主控角色指针（[slot+0x1c] 索引 → [slot+0x4+idx*8]）
 constexpr uintptr_t F_STATE_HIDE_MODULE_MAIN_MENU_VMA = 0x152ff4;  // void () 主菜单模块隐藏桩（空实现）；同段 +0x30 = 主菜单「开始游戏」按钮 ExecuteProc（未导出局部函数，STATE_EnterMainMenu 0x151fac 经 ControlButton_Create 传入），+0x48 = 其 isAuthUser() 判定分支（cbz w0 → Hive 登录询问弹窗）
@@ -1027,6 +1028,7 @@ using SaveLoadSaveSlotFn = int (*)(int32_t, void*);
 using UiSetPopupProcessInfoFn = int (*)(int32_t, int32_t);
 using GameStartResumeGameFn = int (*)(int32_t);
 using SaveCreateSaveSlotFn = void (*)();
+using SaveDestroySaveSlotFn = void (*)();
 using SaveslotGetHeroFn = void* (*)(void*);
 using StateSetFn = void (*)(int32_t);
 using GameExitSaveSlotSelectCharFn = void (*)();

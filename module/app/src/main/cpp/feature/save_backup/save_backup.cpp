@@ -259,6 +259,8 @@ void slot_delete_hook_wrapper(int32_t slot) {
         remove_file(last_good);
         SB_LOG("slot delete hook: removed last-good %s", last_good.c_str());
     }
+    // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
+    save_slots_mark_stale();
 }
 
 // 文件名全匹配 `save\d*\.dat`（与迁移前 Kotlin Regex 一致）。
@@ -364,12 +366,11 @@ void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_i
     hero_level = -1;
     hero_index = -1;
     class_idx = -1;
-    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr) return;
-    // 主菜单（STATE==4）下槽结构未随启动刷新；与 data_save_slots_json 一致，仅此状态重载三槽。
-    if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 4 &&
-        fn_save_create_save_slot != nullptr) {
-        fn_save_create_save_slot();
-    }
+    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr ||
+        fn_save_destroy_save_slot == nullptr || fn_save_create_save_slot == nullptr) return;
+    // 主菜单（STATE==4）下槽结构未随启动刷新；与 data_save_slots_json 一致，仅此状态重载三槽，
+    // 且同一次主菜单停留内只重载一次（反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
+    save_slots_refresh_if_stale();
     void* slot_struct = fn_save_get_save_slot(slot);
     if (slot_struct == nullptr) return;
     uint8_t* p = reinterpret_cast<uint8_t*>(slot_struct);
@@ -1036,6 +1037,8 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     if (iit != g_map_names.end()) entry.map_name = iit->second;
     entry.class_name = save_backup_class_name(entry.class_idx);
     SB_LOG("save backup imported: %s -> slot%d", name.c_str(), slot);
+    // 目标槽文件已被覆盖：槽区结构不再代表磁盘状态，下一次读取必须重载。
+    save_slots_mark_stale();
     return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
 }
 
@@ -1094,5 +1097,7 @@ std::string save_backup_delete_slot_json(int slot) {
     }
     SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d last_good=%d)", slot, dat_existed,
            sidecar_existed, last_good_existed);
+    // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。
+    save_slots_mark_stale();
     return "{\"ok\":true,\"deleted_slot\":" + std::to_string(slot) + "}";
 }
