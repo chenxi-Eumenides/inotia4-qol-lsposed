@@ -1,6 +1,6 @@
 # 属性显示范围（attribute-range-display）功能设计
 
-> 状态：IMPLEMENTED + 真机验证（装备随机词缀着色端到端可用；独立宝石详情代码路径已实现，尚未取得 UI 截图证据）
+> 状态：IMPLEMENTED + 真机验证（装备随机词缀与固定词缀表词缀着色端到端可用；独立宝石详情代码路径已实现，尚未取得 UI 截图证据）
 > 来源需求：`idea.md` 第 2 项「属性显示范围」；关联 `../planning/backlog.md` P2「宝石随机属性优秀程度标注」。
 > 本文是「按随机属性在其可能范围内的百分位着色」这一功能的唯一设计册。端点/UI 契约在定稿前不进入 `../../reference/api-reference.md`。
 > 可行性测试记录见 §9；实现与真机证据见 §10。测试探针位于 `.tmp/attr-range-feasibility/`（临时，不入库）。
@@ -32,7 +32,8 @@
 > **装备基础属性移出范围**：经真机测试为确定性值、无逐物品随机范围（§9.4）。
 > **已镶嵌宝石移出范围（E7 裁决）**：镶嵌时宝石类别/等级被丢弃，无法精确求范围；按值归类仅 17%–39% 唯一。
 > **混沌/附魔移出范围（E8 裁决）**：混沌为确定性值；附魔值 = `base + ITEMENCHANTBASE[等级]增量`（随机只决定成功/降级），均无逐物品范围。
-> **超域固定值兜底**：数值超出其可计算范围时（特殊/固定物品，如「战神的斗篷」）**视为满值，着金色**。
+> **固定词缀表类别**：`ITEMDATABASE[cat].+6` bit1 置位的类别，值域由 `ITEMSTATICOPTBASE` 记录的百分比对决定（§3.5），不走 `[base/2, base]`。
+> **超域固定值兜底**：数值超出其可计算范围时（无任何表来源的固定值）**视为满值，着金色**。
 
 ### 2.3 范围获取原则
 
@@ -101,11 +102,26 @@
 - 可复用原生 UI 组件层 `game_ui_kit` 与 `game_ui_components`（见 `../../reference/game/ui-kit.md`）。
 - 物品 JSON 读取已暴露 `base`/`bonus`/`gem`/`chaos`/`enchant` 结构（`api/native/game_inventory.*`；契约见 `../../reference/api-reference.md` Inventory 段）。
 
+### 3.5 词缀值域的两条路径（决定 min/max 的唯一开关）
+
+`ITEMSYSTEM_MakeOption`（0x10dbe4）读 `ITEMDATABASE[cat].+6` bit1：**置位 → 直接返回 1、不生成随机词缀**（0x10dc34 `tbz w0,#0x1` 的落空分支即随机词缀体 0x10dc48）；该类别的词缀由 `ITEMSYSTEM_CreateItem`（0x10be9c）在 0x10c124 按 **ITEMSTATICOPTBASE** 表逐条生成。该位同时是 `ITEMSYSTEM_CanChangeOption`（0x10d500）的否定条件（0x10d5a4 `ubfx x0,x0,#1,#1; eor w0,w0,#1`），即**这类装备不可洗练** —— 其词缀不可能来自随机路径，两条路径不会混用。
+
+| 路径 | 触发 | 值域 | 依据 |
+|---|---|---|---|
+| 随机词缀 | `+6` bit1 = 0 | `[base/2, base]` | `GetOptionValue` 0x109148-0x109158 |
+| 固定词缀 | `+6` bit1 = 1 | `[base + base*p1/100, base + base*p2/100]` | `CreateItem` 0x10c290-0x10c334 |
+
+- 两条路径的 `base` 完全相同：`CAL_Calculate(formula-e[ITEMOPTINFOBASE[idx]+4], ITEM_GetAbilityLevel(item), 1)`，类别辅助表 bit4 置位再 ×180%，最后 `max(base,1)` 钳制；整数除法向零截断（游戏 `smull/lsr` 序列），C++ 同语义。
+- `ITEMSTATICOPTBASE` 布局 5B/条：`+0` u16 类别、`+2` s8 词缀索引、`+3` s8 p1、`+4` s8 p2；同一 (类别, 索引) 重复出现时**后写覆盖**（`ITEM_AddOptionEx` 0x10600c 对 type=0 同索引节点是覆盖分支，跳表 0x24b570 = `[7,2,-36,-36]`）。静态数据在 `apk/static-data/json/tables/ITEMSTATICOPTBASE.json`（1409 条 / 445 类别）；运行时描述符 GOT `0x2f3210`（表基址，双层解引用）/`0x2f46f8`（记录大小）/`0x2f5250`（记录数）。
+- 百分比分布：`p1==p2` 共 464 条（157 条 `(0,0)` + 307 条正值固定档）；`p1≠p2` 945 条，其中 `(-35,+35)` 594 条 / 231 类别、`(-50,+50)` 336 条 / 113 类别、`(0,+70)` 与 `(-70,0)` 各 5 条（破影之弓/漆黑之匕首/血饮狂刀/凶暴的古老之牙/猎手的皮甲）。
+- 词缀索引 ↔ 名称（`ITEMOPTINFOBASE` 记录 `+0` 文本 id 1114 起）：0 力量 / 1 敏捷 / 2 体力 / 3 智力 / 4 精力 / 5 暴击率 / 6 命中率 / 8 魔法抵抗率 / 9 回避率 / 12 MP增加 / 13 MP恢复 / 15 暴击伤害增加率 / 16 HP吸收 / 17..24 各元素与冰霜 / 36 技能书占位（资格位掩码 u32 = 0，随机路径永不选中）。
+- 同名词缀属性在不同类别可不同：`ITEMSTATICOPTBASE` 按 category 建键，例如 cat456 战争斗篷 idx0/9/15/16 全为 `(-50,50)`，cat874 战神的斗篷 idx5 `(100,100)`、idx24 `(60,60)`。
+
 ## 4. 探索结论（可行性测试后）
 
 | # | 问题 | 结论 | 状态 |
 |---|---|---|---|
-| E1 | 每类数值的动态 min/max 来源 | **装备词缀（type=0）已解**：`range = [floor(base/2), base]`，`base = ITEMSYSTEM_GetOptionValue(optIdx, ITEM_GetAbilityLevel(item), flag=1, item)` 掷值前上界；base 可由 `CAL_Calculate(formula-e[ITEMOPTINFOBASE[optIdx].textId], abilityLevel, 1)` + 同款修正动态复算。真机 8/8 词缀命中。宝石（`GetJewelOptionValue`）公式已解（`[X, 2X]`）。 | ✅ 装备词缀/独立宝石可行 |
+| E1 | 每类数值的动态 min/max 来源 | **随机词缀类别（`+6` bit1=0）已解**：`range = [floor(base/2), base]`，`base = ITEMSYSTEM_GetOptionValue(optIdx, ITEM_GetAbilityLevel(item), flag=1, item)` 掷值前上界；base 可由 `CAL_Calculate(formula-e[ITEMOPTINFOBASE[optIdx].textId], abilityLevel, 1)` + 同款修正动态复算。真机 8/8 词缀命中。宝石（`GetJewelOptionValue`）公式已解（`[X, 2X]`）。固定词缀类别见 E11。 | ✅ 装备词缀/独立宝石可行 |
 | E2 | 随机值 vs 固定值判定 | **已裁决**：装备基础属性为确定性（无范围）→ 移出着色范围；特殊/固定物品词缀值超出公式域 → 视为满值着金色。 | ✅ 已定规则 |
 | E3 | 颜色码 → 金/紫/蓝/绿/白/灰 | **已解**：16 色表已 dump，6 目标色均有对应码 —— 金 `$Y`(0xffe0)、紫 `$V`(0x981f，或 `$Q` 0xbced 浅紫)、蓝 `$L`(0x0099，或 `$T` 0x7bdf)、绿 `$C`(0x07e0)、白 `$W`(0xffff)、灰 `$G`(0x8410)。 | ✅ |
 | E4 | 注入点上下文是否足够 | **已解**：`UIDesc_AddOption` 只有 (type, optIdx, value)，无物品指针。装备词缀分支前驱 `ITEM_GetOptionValue(item, node)` 紧邻调用可捕获 item；宝石分支（`UIDesc_MakeItem` @0xb4208 直接调 AddOption）需改为 hook `UIDesc_MakeItem` 入口缓存 item。 | ✅ |
@@ -114,6 +130,9 @@
 | E7 | 已镶嵌宝石（node type=1）范围 | **负结论 + 重叠量化**：`ITEMSYSTEM_PutJewel` 只写入属性类型与值，宝石**类别与等级丢失**。范围依赖类别（X=3×(cat−27)，cat∈{28..32}）。真机 37 个属性类型的重叠统计：按值唯一归类仅 **17%–39%**。**已裁决：不处理镶嵌宝石**。 | ✅ 已裁决（不处理） |
 | E8 | 混沌 / 附魔数值范围 | **分开结论**：混沌——产生/应用链内**无随机调用**，值为确定性。附魔——`EnchantItem` 内含 `CAL_Calculate` 阈值 vs `random(1,998)` 的**成功率判定**（公式 `1500/(5×等级)`，失败降级），但显示值仍由存储的 ID+等级确定。两者均无逐物品范围。**已裁决：都不处理**。 | ✅ 已裁决（不处理） |
 | E9 | 宝石**详情**（独立宝石物品）着色 | **可行**：宝石 item 保留 category(+8)、type(bits18-23)、value(bits0-10)；`UIDesc_MakeItem` 宝石分支 `AddOption(buf, 1, type, value)` 直接可着色；范围 = `GetJewelOptionValue(type, gemItem)` 的 `[X,2X]`（真机 CreateItem+MakeJewel 验证：cat28→[3,6]、cat29→[6,12]…cat32→[15,30] 等按类别成比例）。 | ✅ 可行（需捕获 item 上下文） |
+
+| E11 | 固定词缀类别（`ITEMDATABASE[cat].+6` bit1=1，423/1020 类别）的值域 | **已解**：值域 = `[base + base*p1/100, base + base*p2/100]`，`(p1,p2)` 取自 `ITEMSTATICOPTBASE`（§3.5）；随机路径的 `[base/2, base]` 只是它的特例形状，故按 `[base/2, base]` 计算会把真实上半区间一律判金（`(-50,+50)` 时真实上限为模块上限的 1.5 倍）。真机 cat456 战争斗篷（能力等级 74）：力量 idx0 base=12 → `[6,18]`、回避率 idx9 base=24 → `[12,36]`、暴击伤害增加率 idx15 base=97 → `[49,145]`。 | ✅ 已修（§10.1/§10.2） |
+| E12 | `GetJewelOptionValue` 的调用点数量 | **两个**：`ITEMSYSTEM_MakeJewel`（0x10bc04）与本地函数 0x1ef6dc（由宝石合成 `UIMix_StartMix` 调用链 0x1261ac 进入；先写 item+0x10 bits18-23 属性类型、再掷值写 bits0-10）。两者共用同一值域 `[X/2, X]`。 | ✅ 已核对 |
 
 ## 5. 方案设计（初步，待 §4 探索确认后定稿）
 
@@ -150,13 +169,14 @@ feature/attribute_range/range_provider.inc         动态范围解析（按类�
 
 ## 6. 验收计划（定稿后执行）
 
-- host 单测：百分位→分档边界（0/30/60/75/90/100 及 max==min、负值边界）。
+- host 单测：百分位→分档边界（0/30/60/75/90/100 及 max==min、负值边界）；固定词缀值域（`fixed_option_range` 的百分比偏移、向零截断、`base<=0` 钳制、单值区间）。
 - 真机验收（VM 草案，需补正式卡号与日志）：
   - VM-A1：独立宝石详情，同一宝石多次重开详情颜色稳定且与百分位一致；
-  - VM-A2：装备随机词缀着色正确；
-  - VM-A3：超域固定值（战神的斗篷）着金色，且不崩溃；
+  - VM-A2：装备随机词缀（`+6` bit1=0 类别）着色正确；
+  - VM-A3：超域固定值着金色，且不崩溃；
   - VM-A4：无范围数值（基础属性/镶嵌宝石/混沌附魔）不着色；
   - VM-A5：大修→monster→原版切换后颜色仍正确（动态路线验证）。
+  - VM-A6：固定词缀表类别（`+6` bit1=1，如战争斗篷 cat456）按表内百分比区间着色，`value >= base` 不再一律判金（真机日志见 §10.3）。
 - 交付定义遵循根 `AGENTS.md`：触及行为面必须有真机证据，否则记 `NOT_ACCEPTED`。
 
 ## 7. 决策与理由（思考，非事实）
@@ -170,6 +190,8 @@ feature/attribute_range/range_provider.inc         动态范围解析（按类�
 - **为什么镶嵌宝石不处理**：用户 2026-09-12 裁决。类别/等级丢弃，按值归类不可靠，近似会误导。
 - **为什么混沌/附魔不处理**：用户 2026-09-12 裁决。混沌值确定；附魔随机只决定成功/降级，显示值仍确定。
 - **为什么超域值着金色**：用户 2026-09-12 裁决。特殊/固定物品的数值无法给百分位，视为满值最不误导。
+- **为什么固定词缀类别改为读 `ITEMSTATICOPTBASE` 百分比对**：该表是这类装备词缀的唯一来源（`MakeOption` 对 `+6` bit1 置位类别直接返回，且 `CanChangeOption` 读同一位判不可洗练，故不存在随机路径词缀混入），只按 `[base/2, base]` 计算会把真实上半区间一律判金。查表而不是写死区间，是因为百分比由 game.dat 加载、随版本/难度可变，而 `base` 仍取自游戏自身函数，保持一致。
+- **为什么不做「按值反推类别/路径」**：路径由 `ITEMDATABASE[cat].+6` bit1 唯一决定，按值猜测会引入不可解释的误判（同索引重复记录时后写覆盖，值域可重叠）。
 - **为什么先写设计不实现**：用户要求先对齐目标、文档先行；核心范围来源（E1）未解，直接编码会返工。
 - **为什么先做可行性测试**：用户 2026-09-12 要求。测试确认装备词缀范围与渲染注入可行（§9.3/§9.5），并推翻了两个假设（基础属性有范围、所有词缀均随机），据以修正本册 §2.2/§4。
 
@@ -265,13 +287,13 @@ type=0 oi=24 val=480 -> "$R冰霜: 48.0%$B"
 
 **E10 多版本（静态数据解码对比）**
 
-| 版本 | libgame.so 目标函数地址 | memorytext_e | ITEMOPTINFOBASE | game.dat |
-|---|---|---|---|---|
-| 大修 | 0x109020（GetOptionValue）… | md5 4abd90de… | 37 条，零差异 | md5 64dd7dc9… |
-| monster v23 | 与大修完全相同 | md5 4abd90de…（相同） | 与大修零差异 | md5 e5b0d27f…（多 2 条 ITEMDATABASE） |
-| 原版 v1.3.2 | 全部不同（GetOptionValue 0x1b7c78、CAL 0x17fa28、AddOption 0x15076c…） | md5 4abd90de…（相同） | 与大修零差异 | md5 64dd7dc9…（与大修相同） |
+| 版本 | libgame.so 目标函数地址 | memorytext_e | ITEMOPTINFOBASE | ITEMSTATICOPTBASE | game.dat |
+|---|---|---|---|---|---|
+| 大修 | 0x109020（GetOptionValue）… | md5 4abd90de… | 37 条，零差异 | 1409 条 / 5B，基准 | md5 64dd7dc9… |
+| monster v23 | 与大修完全相同 | md5 4abd90de…（相同） | 与大修零差异 | 与大修逐字节相同 | md5 e5b0d27f…（多 2 条 ITEMDATABASE） |
+| 原版 v1.3.2 | 全部不同（GetOptionValue 0x1b7c78、CAL 0x17fa28、AddOption 0x15076c…） | md5 4abd90de…（相同） | 与大修零差异 | 未取到解码样本 | md5 64dd7dc9…（与大修相同） |
 
-三版函数均按符号名导出；公式表与选项表三版一致。**结论：公式层无需版本分支；VMA 必须走动态符号解析，公式读运行时当前版本数据即天然兼容。**
+三版函数均按符号名导出；公式表与选项表三版一致；固定词缀表在 monster 与大修逐字节相同。**结论：公式层无需版本分支；VMA 必须走动态符号解析，公式读运行时当前版本数据即天然兼容。**
 
 ### 9.8 遗留裁决（2026-09-12）
 
@@ -284,12 +306,12 @@ type=0 oi=24 val=480 -> "$R冰霜: 48.0%$B"
 
 | 层 | 内容 |
 |---|---|
-| 纯逻辑 | `module/app/src/main/cpp/feature/attribute_range/attribute_range.{h,cpp}`：`classify(value,min,max)` 百分位分档 + `color_code(Tier)`（`G/W/C/L/V/Y`）；host 单测 `tests/test_attribute_range.cpp`（33 断言，编入 `attribute_range_tests`） |
-| 注入 | `module/app/src/main/cpp/feature/attribute_range/game_ui_attr_range.{h,cpp}`：`attr_range_ui_install_if_ready()`，用 `native_hook_func()` 安装 3 个 hook |
-| 符号 | `game_symbols.h` 新增 `F_ITEMSYSTEM_GET_OPTION_VALUE_VMA`(0x109020)、`F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA`(0x108f90)、`F_MATH_GET_RANDOM_VMA`(0xa8bcc)、`F_UIDESC_ADD_OPTION_VMA`(0xb343c)、`F_UIDESC_MAKE_ITEM_VMA`(0xb36a0)、`G_UIDESC_TEXT_BUF_VMA`(0x303dc0)/`G_UIDESC_TEXT_BUF_SIZE`(0x200) + 对应 typedef；`symbol_registry.h` 登记 F_* 项；`game_access.{h,cpp}`/`game_access_globals.inc` 解析 `fn_item_system_get_option_value`/`fn_item_system_get_jewel_option_value`（复用已有 `fn_item_get_ability_level`、`fn_is_jewel`） |
+| 纯逻辑 | `module/app/src/main/cpp/feature/attribute_range/attribute_range.{h,cpp}`：`classify(value,min,max)` 百分位分档 + `color_code(Tier)`（`G/W/C/L/V/Y`）+ `fixed_option_range(base,p1,p2,*min,*max)`（固定词缀表值域）；host 单测 `tests/test_attribute_range.cpp`（81 断言，编入 `attribute_range_tests`） |
+| 注入 | `module/app/src/main/cpp/feature/attribute_range/game_ui_attr_range.{h,cpp}`：`attr_range_ui_install_if_ready()`，用 `native_hook_func()` 安装 3 个 hook；`item_uses_fixed_option_table()` + `fixed_option_percent_pair()` 读 `ITEMDATABASE`/`ITEMSTATICOPTBASE` |
+| 符号 | `game_symbols.h` 新增 `F_ITEMSYSTEM_GET_OPTION_VALUE_VMA`(0x109020)、`F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA`(0x108f90)、`F_MATH_GET_RANDOM_VMA`(0xa8bcc)、`F_UIDESC_ADD_OPTION_VMA`(0xb343c)、`F_UIDESC_MAKE_ITEM_VMA`(0xb36a0)、`G_UIDESC_TEXT_BUF_VMA`(0x303dc0)/`G_UIDESC_TEXT_BUF_SIZE`(0x200)、`G_ITEMSTATICOPT_TABLE_{DATA,SIZE,COUNT}_GOT_VMA`(0x2f3210/0x2f46f8/0x2f5250) + 对应 typedef；`symbol_registry.h` 登记 F_* 项；`game_access.{h,cpp}`/`game_access_globals.inc` 解析 `fn_item_system_get_option_value`/`fn_item_system_get_jewel_option_value`（复用已有 `fn_item_get_ability_level`、`fn_is_jewel`） |
 | 接线 | `bridge/native/gamebridge.cpp` `nativeInit` 在 `bridge_init` 成功后调用 `attr_range_ui_install_if_ready()`；`CMakeLists.txt` 加入两个 cpp |
 
-**范围获取机制**：`MATH_GetRandom` 上装一个 wrapper；probe 时置 thread_local 捕获标志，调一次游戏自身函数（词缀 `ITEMSYSTEM_GetOptionValue`、宝石 `ITEMSYSTEM_GetJewelOptionValue`），wrapper 截获其掷值区间 `[min,max]` 并返回上界（不调用原函数，不消耗游戏 RNG 状态）。这样范围完全用当前版本游戏自身算术，无 VMA/公式复制。
+**范围获取机制**：`MATH_GetRandom` 上装一个 wrapper；probe 时置 thread_local 捕获标志，调一次游戏自身函数（词缀 `ITEMSYSTEM_GetOptionValue`、宝石 `ITEMSYSTEM_GetJewelOptionValue`），wrapper 截获其掷值区间 `[min,max]` 并返回上界（不调用原函数，不消耗游戏 RNG 状态）。这样范围完全用当前版本游戏自身算术，无 VMA/公式复制。该上界即公式 `base`，因此固定词缀类别只需再读一次 `ITEMSTATICOPTBASE` 的 `(p1,p2)` 用 `fixed_option_range` 重算 min/max（`type=0` 且 `ITEMDATABASE[cat].+6` bit1 置位分支）；`p1==p2` 时退化为单值区间，仍由 `classify` 判满值金。
 
 **颜色改写（只染数值）**：hook `UIDesc_MakeItem` 入口缓存当前物品；hook `UIDesc_AddOption`，调原函数后用缓存物品与 `(type, optIdx, value)` 求 `color_code`。该行格式为 `$<原色><标签>: <数值>$B`；游戏内联色约定是 `$<码>文本$B`（段内着色、`$B` 收束），直接插入 `$<码>` 会让标签段回落默认色（真机实测标签变白）。因此在数值前**插入 `$B$<目标色>`**（先关闭标签段、再开值段），标签保持原色、行尾 `$B` 收束。插入前用 `G_UIDESC_TEXT_BUF_VMA + 0x200` 做容量边界检查（+4 字节），不足则不改写。`type=1` 仅当当前物品自身是宝石（`ITEMSYSTEM_IsJewel(category)`）才处理，装备上已镶嵌宝石跳过（E7）。退化区间（如低等级基础属性 `[1,1]`）按有效范围处理，`classify` 判为满值金。
 
@@ -312,9 +334,34 @@ color type=0 oi=24 value=480 range=[150,300] code=Y line=$T冰霜: $B$Y48.0%$B
 - 早期版本直接插入 `$Y` 会导致标签段回落默认白（游戏解析器要求 `$<码>文本$B` 成段）；改为插入 `$B$Y` 后修复。
 - 退化区间 `[1,1]`（低等级基础属性、MP恢复常量公式）此前被误判无效而不着色，已修正为有效范围 → 满值金。
 
-### 10.3 残余与未验证
+### 10.3 固定词缀表值域修正的真机证据（2026-09-16，大修版，设备 `192.168.3.54`）
+
+安装 `output/inotia4_qol_lsposed_debug_2609160915_11b320543a46.apk`（APK md5 与设备 `pm path` 一致）。frida 只读探针（`.tmp/attr-range-monster/probe1_table.js`，临时，不入库）按模块同一组 GOT 常量核对运行时表：
+
+```
+itemstaticopt = { stride: 5, count: 1409 }        # 与静态 JSON 一致
+itemdatabase  = { stride: 23 }
+cat456_dbrecord = { plus2_aux_index: 17, plus3_ability_level: 74, plus6_flags: 2, plus7_flags: 36 }
+cat456_table_rows = [ {idx:0,p1:-50,p2:50}, {idx:15,...}, {idx:16,...}, {idx:9,p1:-50,p2:50} ]
+```
+
+再用游戏自身 `ITEMSYSTEM_CreateItem(456)` 造一件战争斗篷并调 `UIDesc_MakeItem` 触发模块 hook（`probe2_color.js`），模块日志：
+
+```
+color type=0 oi=0  value=10 range=[6,18]   code=W line=$T力量: $B$W10$B
+color type=0 oi=15 value=99 range=[49,145] code=W line=$T暴击伤害增加率: $B$W9.9…
+color type=0 oi=16 value=5  range=[5,15]   code=G line=$THP吸收: $B$G0.5%$B
+color type=0 oi=9  value=12 range=[12,36]  code=G line=$T回避率: $B$G1.2%$B
+```
+
+修正前同一批值会得到 `range=[6,12] code=C`（力量 10 → 66%）与 `range=[48,97] code=Y`（暴击伤害增加率 99 → 满值金），即日志中的 `[6,18]`/`[12,36]`/`[49,145]`/`[5,15]` 只能来自固定词缀表分支。探针的 `character` 入参取到 0，`UIDesc_MakeItem` 在词缀行之后触发空指针访问被 frida 报错，游戏进程未崩溃、`/api/health` 正常，随后重启游戏并跑 `scripts/verification/smoke_all.py`（117 路由 pass=101 warn=16 fail=0）。
+
+用户报告的两件战争斗篷（力量 17/14、回避率 3.3%/3.0% 全金）修正后预期：力量 17 → 91% 紫、14 → 66% 绿；回避率 33 → 88% 蓝、30 → 75% 蓝。
+
+### 10.4 残余与未验证
 
 - 独立宝石详情（E9）代码路径已实现并复用同一 `UIDesc_AddOption`，尚无持有独立宝石的存档做真机截图；待补 VM-A1。
 - 未取得「详情面板可见改色」的截图证据（真机 2 无触摸坐标预案，本节以真实 `UIDesc_MakeItem` 调用链 + 缓冲区改写日志为证）。
 - `game_ui_attr_range.cpp` 保留**有界诊断日志**（每进程 16 条，`patch …`/`color …`），用于真机验收与后续排障。
 - 多版本（monster/原版）仅静态核对公式与符号（§9.7 E10），未逐一真机运行；原版 VMA 不同但符号按名解析。
+- 技能书类词缀节点（type=0、索引 36，值为技能 id）不是公式域数值；其类别（如 cat51）在 `ITEMSTATICOPTBASE` 中无记录，本次修改不改变其现有行为，是否在详情面板出现该行未在真机确认。

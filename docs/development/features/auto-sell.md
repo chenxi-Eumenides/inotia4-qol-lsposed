@@ -60,7 +60,7 @@
 - 档位名（`ITEMDATABASE.json` 记录 28..32）：**28 低级 / 29 中级 / 30 高级 / 31 顶级 / 32 混沌**（实为 5 档，非用户口述的 3 档）。
 - 宝石实例随机等级：`item+0x10` 位域 **bits11-17**（`ITEMSYSTEM_MakeJewel@0x10b974`；`attribute-range-display.md:76,109`）；但更稳的档位判据是 category（§3.2 上）。
 - 宝石自身属性：`item+0x10` **bits0-10 = 属性值、bits11-17 = 随机等级、bits18-23 = 属性类型**（`attribute-range-display.md:76`、`game_symbols.h:658-674`）。**现有 inventory JSON 不输出独立宝石自身的 `+0x10`**（只输出装备链表的 `options`，`game_inventory_read.inc:26-63`），自动出售宝石侧需新增读取。
-- 属性取值范围：**运行时随机函数，不落表**。`ITEMSYSTEM_GetJewelOptionValue` `0x108f90`（`game_symbols.h:461`）→ `MATH_GetRandom(min,max)` `0xa8bcc`（`:462`），宝石区间 `[X,2X]`；`MATH_GetRandom` 为闭区间（`attribute-range-display.md:83`）。静态表无 min/max。
+- 属性取值范围：**运行时随机函数，不落表**。`ITEMSYSTEM_GetJewelOptionValue` `0x108f90`（`game_symbols.h:461`）→ `MATH_GetRandom(min,max)` `0xa8bcc`（`:462`），宝石区间 `[X,2X]`；`MATH_GetRandom` 为闭区间（`attribute-range-display.md:83`）。宝石段静态表无 min/max（装备词缀另有 `ITEMSTATICOPTBASE` 百分比表，见 `attribute-range-display.md` §3.5；本域只用宝石）。
 
 ### 3.3 特殊类型判定（运行时 category 谓词）
 

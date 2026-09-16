@@ -12,6 +12,7 @@ static int g_fail = 0;
 
 using attr_range::classify;
 using attr_range::color_code;
+using attr_range::fixed_option_range;
 using attr_range::percentile;
 using attr_range::Tier;
 
@@ -130,6 +131,57 @@ static void test_no_int_overflow() {
     CHECK(classify(80000000, 50000000, 100000000) == Tier::Green);
 }
 
+static void test_fixed_option_range() {
+    int lo = 0;
+    int hi = 0;
+
+    // 战争斗篷（cat456，能力等级 74）实测：p 对为 (-50, 50)。
+    // 力量公式 a16*100/1+ -> base=12；回避率公式 a5/10+ -> base=24。
+    fixed_option_range(12, -50, 50, &lo, &hi);
+    CHECK(lo == 6 && hi == 18);
+    fixed_option_range(24, -50, 50, &lo, &hi);
+    CHECK(lo == 12 && hi == 36);
+
+    // 负百分比对 100 取整向零截断：97*-50/100 = -48（非 -49）。
+    fixed_option_range(97, -50, 50, &lo, &hi);
+    CHECK(lo == 49 && hi == 145);
+
+    // 战神斗篷（cat874，能力等级 1）p1==p2：退化为单值区间。
+    fixed_option_range(10, 100, 100, &lo, &hi);
+    CHECK(lo == 20 && hi == 20);
+    fixed_option_range(60, 30, 30, &lo, &hi);
+    CHECK(lo == 78 && hi == 78);
+    fixed_option_range(300, 60, 60, &lo, &hi);
+    CHECK(lo == 480 && hi == 480);
+    fixed_option_range(12, 0, 0, &lo, &hi);
+    CHECK(lo == 12 && hi == 12);
+
+    // base <= 0 时游戏取 1（CreateItem csinc）。
+    fixed_option_range(0, -50, 50, &lo, &hi);
+    CHECK(lo == 1 && hi == 1);
+    fixed_option_range(-5, -70, 0, &lo, &hi);
+    CHECK(lo == 1 && hi == 1);
+
+    // 全负区间的边界：(0, 70) 下界等于 base，( -70, 0) 上界等于 base。
+    fixed_option_range(100, 0, 70, &lo, &hi);
+    CHECK(lo == 100 && hi == 170);
+    fixed_option_range(100, -70, 0, &lo, &hi);
+    CHECK(lo == 30 && hi == 100);
+
+    // 实测值在固定词缀范围内的分档（修正前的验收目标）：
+    // 力量 17 -> 91% 紫、14 -> 66% 绿；回避率 33 -> 87% 蓝、30 -> 75% 蓝。
+    fixed_option_range(12, -50, 50, &lo, &hi);
+    CHECK(classify(17, lo, hi) == Tier::Purple);
+    CHECK(classify(14, lo, hi) == Tier::Green);
+    fixed_option_range(24, -50, 50, &lo, &hi);
+    CHECK(classify(33, lo, hi) == Tier::Blue);
+    CHECK(classify(30, lo, hi) == Tier::Blue);
+
+    // 单值区间仍按满值处理（固定值约定不变）。
+    fixed_option_range(60, 30, 30, &lo, &hi);
+    CHECK(classify(78, lo, hi) == Tier::Gold);
+}
+
 int main() {
     test_bounds();
     test_percentile_thresholds();
@@ -138,6 +190,7 @@ int main() {
     test_color_code();
     test_nonzero_min();
     test_no_int_overflow();
+    test_fixed_option_range();
     std::printf("attribute_range_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

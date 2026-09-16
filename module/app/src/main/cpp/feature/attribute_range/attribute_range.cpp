@@ -66,4 +66,14 @@ int percentile(int value, int min, int max) {
     return static_cast<int>((static_cast<int64_t>(value) - min) * 100 / (max - min));
 }
 
+void fixed_option_range(int base, int p1, int p2, int* out_min, int* out_max) {
+    const int safe_base = base > 0 ? base : 1;
+    if (out_min != nullptr) {
+        *out_min = safe_base + safe_base * p1 / 100;
+    }
+    if (out_max != nullptr) {
+        *out_max = safe_base + safe_base * p2 / 100;
+    }
+}
+
 }  // namespace attr_range

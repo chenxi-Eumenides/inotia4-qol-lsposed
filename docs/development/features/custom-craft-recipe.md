@@ -277,8 +277,8 @@
 | 层 | 函数 | 结论 |
 |---|---|---|
 | 底层随机源 | `MATH_GetRandom@0xa8bcc` | **全库统一**（168 个调用点） |
-| 宝石数值 | `ITEMSYSTEM_GetJewelOptionValue@0x108f90` | 全库**唯一调用者** = `ITEMSYSTEM_MakeJewel@0x10b974`（调用点 `0x10bc04`） |
-| 装备词缀值 | `ITEMSYSTEM_GetOptionValue@0x109020` | 全库**唯一调用者** = `ITEMSYSTEM_MakeOptionEx`（调用点 `0x109554`） |
+| 宝石数值 | `ITEMSYSTEM_GetJewelOptionValue@0x108f90` | 调用者 2 处：`ITEMSYSTEM_MakeJewel@0x10b974`（调用点 `0x10bc04`）与宝石合成重掷 0x1ef6dc（`UIMix_StartMix` 链 `0x1261ac` 进入）；两者共用值域 |
+| 装备词缀值 | `ITEMSYSTEM_GetOptionValue@0x109020` | 全库**唯一调用者** = `ITEMSYSTEM_MakeOptionEx`（调用点 `0x109554`）；另有不经公式的固定词缀表路径 `ITEMSTATICOPTBASE`（`CreateItem` 0x10c124，见 `attribute-range-display.md` §3.5） |
 | **统一分派层** | `ITEMSYSTEM_CreatePerfectItem@0x10c600` | 8 个调用者（含 `MIXSYSTEM_MakeItem`、`ITEMSYSTEM_MakeItem`、`ITEMSYSTEM_ProcessUnpack`） |
 
 `ITEMSYSTEM_CreatePerfectItem(category)` 内部：`CreateItem(category)` → `ITEMSYSTEM_IsJewel@0x10b964` 为真 ? `ITEMSYSTEM_MakeJewel(item)`（失败则 `ITEMPOOL_Free` 并返回 null）: (`0x10be70(category)` 为真 ? `MATH_GetRandom(0, *(GOT 0x2f3638) 指向的 u16 − 1)` → `SetBitValue(word, 7, 0, 值)` 掷品质 : 原样返回)。

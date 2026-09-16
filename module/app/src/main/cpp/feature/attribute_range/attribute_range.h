@@ -23,4 +23,10 @@ Tier classify(int value, int min, int max);
 //  4) pct = (value - min) * 100 / (max - min)   // 向下取整
 int percentile(int value, int min, int max);
 
+// 固定词缀表（ITEMSTATICOPTBASE）驱动的范围：值域为 [base + base*p1/100, base + base*p2/100]。
+//  p1/p2 为记录中的 s8 百分比，除法向零截断，与游戏 ITEMSYSTEM_CreateItem 0x10c2a4-0x10c304 的
+//  smull/lsr 序列一致；base <= 0 时游戏取 1（同处 csinc），此处保持一致。
+//  p1 == p2 时退化为单值区间，由 classify/percentile 按满值处理。
+void fixed_option_range(int base, int p1, int p2, int* out_min, int* out_max);
+
 }  // namespace attr_range

@@ -248,6 +248,9 @@ constexpr uintptr_t G_DEFAULT_ATTR_SIZE_GOT_VMA = 0x2f5000 + 0xa18;    // 默认
 constexpr uintptr_t G_DEFAULT_ATTR_DATA_GOT_VMA = 0x2f6000 + 0xe38;    // 默认属性表数据（双层解引用；22 条实测：attr0=30/attr3=1000/attr31=200 等）
 constexpr uintptr_t G_EQUIP_OPT_TABLE_DATA_GOT_VMA = 0x2f5000 + 0x5b0; // 装备词缀表数据（双层解引用；记录+2=类型(int8,==1属性加成)、+3=目标attr id；CHAR_UpdateAttrFromEquipOpt 0xda9d8）
 constexpr uintptr_t G_EQUIP_OPT_TABLE_SIZE_GOT_VMA = 0x2f3000 + 0xb08; // 装备词缀表记录大小（u8）
+constexpr uintptr_t G_ITEMSTATICOPT_TABLE_DATA_GOT_VMA = 0x2f3000 + 0x210;  // ITEMSTATICOPTBASE 固定词缀表数据（双层解引用；记录 5B：+0 u16 类别、+2 s8 词缀索引、+3 s8 最小百分比、+4 s8 最大百分比；ITEMSYSTEM_CreateItem 0x10c124 固定词缀分支，记录跨度为 5 故按字节拼 u16 读）
+constexpr uintptr_t G_ITEMSTATICOPT_TABLE_SIZE_GOT_VMA = 0x2f4000 + 0x6f8;  // ITEMSTATICOPTBASE 记录大小（u8，=5）
+constexpr uintptr_t G_ITEMSTATICOPT_TABLE_COUNT_GOT_VMA = 0x2f5000 + 0x250; // ITEMSTATICOPTBASE 记录数（u16，monster 与大修均为 1409）
 
 // ---- 佣兵/名字表符号地址（.bss 直接符号，base+VMA；v0.5.4 研究新增，libgame-symbols.txt 核对）----
 constexpr uintptr_t MERCENARYINFOBASE_PDATA_VMA = 0x301590;       // 佣兵模板表数据指针（47 条 × 8B：+0 特性/初始装备 text、+2 职业索引|变体、+4 佣兵名 text、+6 特性参数）

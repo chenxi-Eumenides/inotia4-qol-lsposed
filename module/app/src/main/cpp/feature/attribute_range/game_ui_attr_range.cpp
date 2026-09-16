@@ -75,22 +75,76 @@ bool probe_jewel_range(int type, void* item, int* out_min, int* out_max) {
     return true;
 }
 
+int item_category(void* item) {
+    if (item == nullptr) return -1;
+    const uint16_t flags = *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(item) + I_TYPE);
+    return static_cast<int>((flags >> 6) & 0x3FF);
+}
+
+// 装备词缀存在两条生成路径（ITEMSYSTEM_MakeOption 0x10dc34）：ITEMDATABASE[cat].+6 bit1 置位时
+// MakeOption 直接返回、词缀由 ITEMSYSTEM_CreateItem 0x10c124 按 ITEMSTATICOPTBASE 生成；
+// 该位同时是 ITEMSYSTEM_CanChangeOption 0x10d5a4 的「不可洗练」条件，故这类装备的词缀
+// 只可能来自固定词缀表，不会与随机路径的 [base/2, base] 混淆。
+bool item_uses_fixed_option_table(int category) {
+    if (g_base == 0 || category < 0) return false;
+    uint8_t* base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    if (base == nullptr || size_ptr == nullptr) return false;
+    const uint8_t stride = *size_ptr;
+    if (stride <= 6) return false;
+    return (base[static_cast<size_t>(category) * stride + 6] & 0x02) != 0;
+}
+
+// 查 ITEMSTATICOPTBASE 记录：(类别, 词缀索引) -> (最小百分比, 最大百分比)。
+// 记录跨度为 5，故按字节拼 u16 类别，避免非对齐 u16 读取。
+// 同索引重复出现时不提前退出：游戏对该类节点是覆盖语义，最后一条生效。
+bool fixed_option_percent_pair(int category, int option_index, int* out_p1, int* out_p2) {
+    if (g_base == 0 || category < 0 || option_index < 0) return false;
+    uint8_t* base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_ITEMSTATICOPT_TABLE_DATA_GOT_VMA));
+    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMSTATICOPT_TABLE_SIZE_GOT_VMA);
+    uint8_t* count_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMSTATICOPT_TABLE_COUNT_GOT_VMA);
+    if (base == nullptr || size_ptr == nullptr || count_ptr == nullptr) return false;
+    const uint8_t stride = *size_ptr;
+    if (stride < 5) return false;
+    const uint16_t count = static_cast<uint16_t>(count_ptr[0] | (count_ptr[1] << 8));
+    bool found = false;
+    for (uint16_t i = 0; i < count; ++i) {
+        const uint8_t* record = base + static_cast<size_t>(i) * stride;
+        const uint16_t record_category = static_cast<uint16_t>(record[0] | (record[1] << 8));
+        if (record_category != static_cast<uint16_t>(category)) continue;
+        if (static_cast<int>(static_cast<int8_t>(record[2])) != option_index) continue;
+        *out_p1 = static_cast<int>(static_cast<int8_t>(record[3]));
+        *out_p2 = static_cast<int>(static_cast<int8_t>(record[4]));
+        found = true;
+    }
+    return found;
+}
+
 // 返回目标颜色码；0 表示不改写（非目标类型/无法取范围）。out_lo/out_hi 为动态范围。
 char decide_color_code(int type, int option_index, int value, int* out_lo, int* out_hi) {
     void* item = t_current_item;
     if (item == nullptr) return 0;
     int lo = 0;
     int hi = 0;
+    const int category = item_category(item);
     if (type == 0) {
-        // 装备随机词缀：flag=1（标准生成路径；特例物品区间外 → classify 判 Gold）。
+        // 装备词缀：flag=1（标准生成路径）。probe 返回的区间上界即公式 base
+        // （GetOptionValue 掷 [base/2, base]，base 已含 +180% 修正与 >=1 钳制）。
         const int level = (fn_item_get_ability_level != nullptr) ? fn_item_get_ability_level(item) : 0;
         if (!probe_option_range(option_index, level, 1, item, &lo, &hi)) return 0;
+        int p1 = 0;
+        int p2 = 0;
+        if (item_uses_fixed_option_table(category) &&
+            fixed_option_percent_pair(category, option_index, &p1, &p2)) {
+            // 固定词缀表路径：范围以同一 base 为基准按记录百分比偏移。
+            attr_range::fixed_option_range(hi, p1, p2, &lo, &hi);
+        }
     } else if (type == 1) {
         // 仅处理「独立宝石详情」：当前物品自身必须是宝石（category ∈ 宝石类别）。
         // 装备上已镶嵌的宝石节点（type=1）不处理——镶嵌时类别/等级已丢弃，无法求范围（设计文档 E7）。
         if (fn_is_jewel == nullptr) return 0;
-        const uint16_t type_flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        const int category = (type_flags >> 6) & 0x3ff;
         if (!fn_is_jewel(category)) return 0;
         if (!probe_jewel_range(option_index, item, &lo, &hi)) return 0;
     } else {
