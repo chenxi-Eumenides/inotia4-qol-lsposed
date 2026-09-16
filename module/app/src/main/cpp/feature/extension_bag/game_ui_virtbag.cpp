@@ -15,6 +15,7 @@
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/module_save_port.h"
+#include "core/native/popup_enter_alias.h"
 #include "feature/extension_bag/extension_bag_context.h"
 #include "feature/extension_bag/extension_bag_geometry.h"
 #include "feature/extension_bag/extension_bag_logging.h"

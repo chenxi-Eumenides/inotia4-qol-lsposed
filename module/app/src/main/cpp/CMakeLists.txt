@@ -156,3 +156,8 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     feature/craft_ui/craft_ui.cpp
 )
+
+# 模块替换 PopupState enter 回调后的 UI 态反查表（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    core/native/popup_enter_alias.cpp
+)

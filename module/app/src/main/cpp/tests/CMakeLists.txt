@@ -194,3 +194,14 @@ target_include_directories(simple_mode_rules_tests PRIVATE
 )
 target_compile_features(simple_mode_rules_tests PRIVATE cxx_std_17)
 add_test(NAME simple_mode_rules_tests COMMAND simple_mode_rules_tests)
+
+# 模块 wrapper enter → 原版面板 VMA 反查注册表 host 测试（末尾追加）
+add_executable(popup_enter_alias_tests
+    test_popup_enter_alias.cpp
+    ${CPP_DIR}/core/native/popup_enter_alias.cpp
+)
+target_include_directories(popup_enter_alias_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(popup_enter_alias_tests PRIVATE cxx_std_17)
+add_test(NAME popup_enter_alias_tests COMMAND popup_enter_alias_tests)

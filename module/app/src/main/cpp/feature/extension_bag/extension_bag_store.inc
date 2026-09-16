@@ -807,6 +807,10 @@ bool install_store_hooks_locked() {
             *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT));
         *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_ENTER) =
             reinterpret_cast<uintptr_t>(&store_enter_wrapper);
+        // UI 判定层按 popup 栈顶 enter 识别面板；这里换成模块 wrapper 后，栈顶保存的是
+        // 模块 .so 地址，必须登记回原版 enter VMA，否则商店打开时 screen 误报 world。
+        popup_enter_alias_register(reinterpret_cast<uintptr_t>(&store_enter_wrapper),
+                                   F_PANEL_SHOP_ENTER);
         *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_F3) =
             reinterpret_cast<uintptr_t>(&store_f3_wrapper);
         *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT) =

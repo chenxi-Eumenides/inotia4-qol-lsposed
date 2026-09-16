@@ -65,6 +65,8 @@ std::string data_op_panel_close() {
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     uintptr_t vma = enter > g_base ? enter - g_base : 0;
     if (extension_bag_is_inventory_enter(enter)) vma = F_PANEL_INVENTORY_ENTER;
+    // 模块 wrapper 的 enter 不是 libgame 地址，上面的换算会归 0；经反查表还原原版 VMA。
+    if (vma == 0) vma = popup_enter_alias_resolve(enter);
     if (!popup_vma_is_panel(vma)) return op_err("top of stack is not a panel");
     // 官方 ButtonBackExe 链：SOUNDSYSTEM_Play(0) + 流程3 + HUD 开关恢复
     fn_ui_set_popup_process_info(3, 0);

@@ -475,6 +475,9 @@ bool install_mix_hooks_locked() {
             *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_F3));
         *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_ENTER) =
             reinterpret_cast<uintptr_t>(&mix_enter_wrapper);
+        // 同商店宿主：栈顶 enter 换模块 wrapper 后需登记原版 VMA，供 UI 判定层反查。
+        popup_enter_alias_register(reinterpret_cast<uintptr_t>(&mix_enter_wrapper),
+                                   F_PANEL_CRAFT_ENTER);
         *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_F3) =
             reinterpret_cast<uintptr_t>(&mix_f3_wrapper);
     }

@@ -800,6 +800,9 @@ bool inject_locked() {
         *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
         *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
         g_state_entry = entry;
+        // 栈顶 enter 换模块 wrapper 后需登记原版 VMA（UI 判定层的统一反查入口）。
+        popup_enter_alias_register(reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper),
+                                   F_PANEL_INVENTORY_ENTER);
         QOL_LOG_INFO(QolDomain::kExtensionBag, "inventory event callback wrapped; original renderer is reused for module views");
     }
     if (!g_save_panel_hook_installed) {
@@ -811,6 +814,9 @@ bool inject_locked() {
             *reinterpret_cast<uintptr_t*>(save_entry + POPUP_ENTRY_ENTER) =
                 reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper);
             g_save_panel_hook_installed = true;
+            popup_enter_alias_register(
+                reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper),
+                F_PANEL_SAVE_SLOT_ENTER);
             QOL_LOG_INFO(QolDomain::kExtensionBag, "save panel enter hook installed entry=%p", save_entry);
         } else {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "save panel entry not ready; injection will retry");

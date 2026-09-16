@@ -70,6 +70,22 @@ std::string data_debug_ui_json() {
         ru16(G_UI_QUEST_MENU_SUB_SIZE_VMA, "questMenuSubListSize");
         ru32(G_POPUP_FPCANCEL_VMA, "popupFpCancelLo");
     }
+    // popup 栈顶原始字段（诊断用）：data_popup_top_vma 只返回「减去 g_base 后的 VMA」，
+    // 当 enter 字段本身不是绝对地址时该换算会得到 0，无法区分「栈空」与「enter 非绝对地址」。
+    if (g_popup_stack != nullptr) {
+        uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
+        uint32_t count = *reinterpret_cast<uint32_t*>(stk + POPUP_STACK_COUNT);
+        uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
+        s += ",\"popup_count\":" + std::to_string(count);
+        s += ",\"popup_data\":" + std::to_string(data);
+        s += ",\"g_base\":" + std::to_string(g_base);
+        if (data != 0 && count > 0 && count <= 27) {
+            uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
+            s += ",\"popup_top_enter\":" +
+                 std::to_string(*reinterpret_cast<uint64_t*>(top + POPUP_ENTRY_ENTER));
+            s += ",\"popup_top_enter_vma\":" + std::to_string(data_popup_top_vma());
+        }
+    }
 
     s += "}";
     return s;
@@ -85,6 +101,10 @@ uintptr_t data_popup_top_vma() {
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     if (extension_bag_is_inventory_enter(enter)) return F_PANEL_INVENTORY_ENTER;
+    // 模块替换过 enter 回调的面板（商店/合成/存档槽等）在栈里存的是模块 wrapper 地址，
+    // 「enter - g_base」会得到负值而被当成无面板，须先经反查表还原成原版 VMA。
+    const uintptr_t aliased = popup_enter_alias_resolve(enter);
+    if (aliased != kPopupEnterAliasNone) return aliased;
     return enter > g_base ? enter - g_base : 0;
 }
 
