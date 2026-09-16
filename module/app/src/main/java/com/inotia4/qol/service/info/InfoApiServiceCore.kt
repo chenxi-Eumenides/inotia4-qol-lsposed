@@ -396,6 +396,12 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun health(): String = InfoSystemQueries.health()
 
+    // 原生功能状态 JSON 原样透传（不经 StaticData/名称注入）。HTTP 路径由 ControllerGuard 在
+    // ready=false 时先抛 503；此处的 ready 判定是给非 HTTP 调用方的兜底——libgamebridge 未加载
+    // 时调用 JNI 会抛 UnsatisfiedLinkError。
+    override fun featureStatusJson(): String =
+        if (NativeBridge.ready) NativeBridge.nativeFeatureStatusJson() else JsonUtil.NOT_READY
+
     /**
      * native 数据函数在非 world 状态（主菜单等）下返回 {"error":"..."}（与写操作 game_in_world() 一致）。
      * Kotlin 侧不自判游戏状态，只诚实转发：顶层含 "error" 字段 → 原样返回。顶层判定避免嵌套字段误报。

@@ -44,6 +44,7 @@ interface InfoApiService {
     fun gameFrame(): String
     fun events(since: Long?): String
     fun health(): String
+    fun featureStatusJson(): String
     fun npcDialogOptions(): String
     fun shopItems(): String
     fun debugUi(): String

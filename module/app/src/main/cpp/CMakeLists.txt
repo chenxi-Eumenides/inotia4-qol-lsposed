@@ -177,3 +177,9 @@ target_sources(gamebridge PRIVATE
     infra/status.cpp
     game/clock.cpp
 )
+
+# P1 最小诊断接口：功能状态 JSON（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    host/status_json.cpp
+    bridge/native/gamebridge_status.cpp
+)

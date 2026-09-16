@@ -183,4 +183,7 @@ object NativeBridge {
     ): Boolean
     external fun nativeAutoSellRunNow(): Boolean
     external fun nativeAutoSellStatusJson(): String
+
+    // ---- 功能诊断（P1 最小诊断接口：原生功能状态汇总 JSON）----
+    external fun nativeFeatureStatusJson(): String
 }

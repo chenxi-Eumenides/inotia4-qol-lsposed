@@ -1699,6 +1699,21 @@
 - `apiEnabled=false` 时延迟约 500ms 停止 HTTP 服务（先让本响应送达），此后 `GET/POST /api/config/*` 不可达；重新开启须经游戏内设置页（HTTP 已不可达）
 - 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
 - **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）
+
+### 7.7 功能诊断 features（v0.8.0 起）
+
+`GET /api/system/features`
+
+**用途**：获取原生功能（feature）状态汇总，用于最小诊断。
+
+**返回格式**：
+```json
+{ "ok": true, "features": [
+  { "id": "core", "state": "enabled", "enabled": true, "error": null, "version": null, "resource_count": 0 }
+] }
+```
+
+**注意**：响应体由 native `nativeFeatureStatusJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 ---
 
 ## 八、op（越权操作）— POST /api/op/*
