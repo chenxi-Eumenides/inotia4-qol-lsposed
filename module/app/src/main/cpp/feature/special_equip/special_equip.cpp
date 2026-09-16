@@ -137,12 +137,34 @@ int can_unequip_wrapper(void* ch, void* item) {
     return 1;
 }
 
+// 详情出售按钮门禁谓词（注册到 native_inventory_hook 的 ButtonDestroyExe wrapper）：
+// 原版出售路径无任何角色校验——UIEquip_OKDestroyItem 装备分支（desc_type==0）直接取
+// 身上装备卖钱清槽，既不查 ITEMDATABASE_IsNoSell（bit3，且 cat 785-787/948 本就无
+// bit3），也不查穿脱判定。本域放开 bit4 穿脱锁后，特殊装备得以穿到 NPC 佣兵身上并被
+// 原样卖出。此处对装备详情（desc_type==0，物品在角色身上）校验菜单角色的装备操作
+// 权限 CHAR_CanChangeEquip（与穿脱第③/②道闸门同一语义：[ch+0x352]>=0 且非特殊 NPC），
+// 特殊 NPC 佣兵身上装备拒绝出售；背包物品详情（desc_type==2）已是玩家财产，放行。
+// 拦截发生在创建确认弹窗之前，按钮无效果即拦截反馈。
+// ButtonDestroyExe 已被 inventory 域 hook（同址不可重复 hook，rc=-1），故经谓词注册协作。
+bool sell_gate_should_block() {
+    if (g_base == 0) return false;
+    const uint8_t desc_type = *reinterpret_cast<const uint8_t*>(
+        g_base + G_UIEQUIP_DESC_TYPE_VMA);
+    if (desc_type != 0) return false;
+    void* ch = fn_get_menu_character != nullptr ? fn_get_menu_character() : nullptr;
+    if (ch == nullptr || fn_char_can_change_equip == nullptr) return false;
+    if (fn_char_can_change_equip(ch) != 0) return false;
+    QOL_LOG_INFO(QolDomain::kSpecialEquip,
+                 "sell rejected: menu char cannot change equip ch=%p", ch);
+    return true;
+}
+
 // 依赖是否齐备。缺任一即不安装（fail-closed），也不重试（避免每帧刷日志，
 // 与 attribute_range / simple_mode 的 once 语义一致）。
 bool deps_ready() {
     return fn_can_equip != nullptr && fn_can_unequip != nullptr &&
            fn_item_is_real_equip != nullptr && fn_char_can_change_equip != nullptr &&
-           fn_item_get_equip_level != nullptr;
+           fn_item_get_equip_level != nullptr && fn_get_menu_character != nullptr;
 }
 
 bool install_one(NativeHookFunType hook, uintptr_t target, void* replacement, void** backup,
@@ -170,10 +192,10 @@ void special_equip_install_if_ready() {
     if (!deps_ready()) {
         QOL_LOG_ERROR(QolDomain::kSpecialEquip,
                       "symbols unresolved (can_equip=%d can_unequip=%d is_real_equip=%d "
-                      "can_change_equip=%d equip_level=%d); not installed",
+                      "can_change_equip=%d equip_level=%d menu_char=%d); not installed",
                       fn_can_equip != nullptr, fn_can_unequip != nullptr,
                       fn_item_is_real_equip != nullptr, fn_char_can_change_equip != nullptr,
-                      fn_item_get_equip_level != nullptr);
+                      fn_item_get_equip_level != nullptr, fn_get_menu_character != nullptr);
         return;
     }
 
@@ -187,9 +209,12 @@ void special_equip_install_if_ready() {
                      reinterpret_cast<void**>(&g_backup_can_unequip), "CHAR_CanUnequipItem")) {
         return;
     }
+    // 出售门禁：ButtonDestroyExe 已被 inventory 域 hook（同址重复 hook rc=-1），
+    // 经其注册接口挂谓词，wrapper 入口统一执行。
+    inventory_native_hook_set_sell_gate(&sell_gate_should_block);
 
     g_installed.store(true, std::memory_order_release);
     QOL_LOG_INFO(QolDomain::kSpecialEquip,
-                 "hooks installed (always-on, no config gate): canEquip=%p canUnequip=%p",
+                 "hooks installed (always-on, no config gate): canEquip=%p canUnequip=%p saleGate=1",
                  reinterpret_cast<void*>(fn_can_equip), reinterpret_cast<void*>(fn_can_unequip));
 }

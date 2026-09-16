@@ -829,7 +829,16 @@ void button_equip_exe_wrapper(void* button) {
 // R-55：详情出售按钮函数级标记。原按钮在同一调用内先调 UIEquip_OKDestroyItem
 // 预演（x23=0x666）取确认框展示金额、再创建 YesNo 弹窗；预演期间置 thread_local
 // 标记，供 ok_destroy_item_wrapper 区分「预演」与「弹窗 OK 真实结算」。
+// 出售门禁谓词（special_equip 注册）：ButtonDestroyExe 已被本域 hook，同址不可
+// 重复 hook（NativeHook rc=-1），功能域经 inventory_native_hook_set_sell_gate
+// 注册校验，wrapper 入口统一执行。setter 定义在匿名命名空间之外（文件尾部）。
+SellGatePredicate g_sell_gate = nullptr;
+
 void button_destroy_exe_wrapper(void* button) {
+    if (g_sell_gate != nullptr && g_sell_gate()) {
+        QOL_LOG_INFO(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
+        return;
+    }
     const bool previous = g_in_equip_destroy_button;
     g_in_equip_destroy_button = true;
     if (g_backup_button_destroy_exe != nullptr) g_backup_button_destroy_exe(button);
@@ -1336,6 +1345,12 @@ void inventory_native_hook_install_if_ready() {
 
 NativeHookFunType native_hook_func() { return g_hook_func; }
 NativeUnhookFunType native_unhook_func() { return g_unhook_func; }
+
+// 出售门禁谓词注册（见文件内 g_sell_gate 注释）：功能域挂入，ButtonDestroyExe
+// wrapper 入口统一执行；传 nullptr 可卸载。
+void inventory_native_hook_set_sell_gate(SellGatePredicate predicate) {
+    g_sell_gate = predicate;
+}
 
 extern "C" [[gnu::visibility("default")]] [[gnu::used]]
 NativeOnModuleLoaded native_init(const NativeAPIEntries* entries) {

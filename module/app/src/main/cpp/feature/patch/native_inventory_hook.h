@@ -23,6 +23,12 @@ void inventory_native_hook_install_if_ready();
 // 模块主动刷新必须走 backup/trampoline，避免经被 Hook 地址回入 wrapper 后重复加锁。
 void inventory_native_hook_call_refresh_item_area_original();
 
+// 详情出售按钮（UIEquip_ButtonDestroyExe）门禁谓词：功能域注册，wrapper 入口调用；
+// 返回 true 拦截本次按钮（不创建确认弹窗）。因 NativeHook 不允许同址重复 hook，
+// 需要在出售按钮上追加校验的功能域只能经此注册，不得自行 hook 同址。
+using SellGatePredicate = bool (*)();
+void inventory_native_hook_set_sell_gate(SellGatePredicate predicate);
+
 // 暴露框架原生 hook/unhook（native_init 时注入）；供扩展背包等功能按函数入口安装 hook。
 NativeHookFunType native_hook_func();
 NativeUnhookFunType native_unhook_func();

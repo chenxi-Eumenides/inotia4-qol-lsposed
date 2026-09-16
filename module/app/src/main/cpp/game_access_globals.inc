@@ -145,6 +145,7 @@ UnequipFn fn_unequip = nullptr;
 CanEquipFn fn_can_equip = nullptr;
 CanUnequipFn fn_can_unequip = nullptr;
 CanChangeEquipFn fn_char_can_change_equip = nullptr;
+GetMenuCharacterFn fn_get_menu_character = nullptr;
 FindEquipSlotFn fn_find_equip_slot = nullptr;
 GetEquipItemFn fn_get_equip_item = nullptr;
 SetEquipItemFn fn_set_equip_item = nullptr;

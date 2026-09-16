@@ -294,6 +294,7 @@ bool bridge_init() {
     fn_can_equip = reinterpret_cast<CanEquipFn>(g_base + fn_resolve("F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA));
     fn_can_unequip = reinterpret_cast<CanUnequipFn>(g_base + fn_resolve("F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA));
     fn_char_can_change_equip = reinterpret_cast<CanChangeEquipFn>(g_base + fn_resolve("F_CAN_CHANGE_EQUIP_VMA", F_CAN_CHANGE_EQUIP_VMA));
+    fn_get_menu_character = reinterpret_cast<GetMenuCharacterFn>(g_base + fn_resolve("F_GET_MENU_CHARACTER_VMA", F_GET_MENU_CHARACTER_VMA));
     fn_find_equip_slot = reinterpret_cast<FindEquipSlotFn>(g_base + fn_resolve("F_FIND_EQUIP_SLOT_VMA", F_FIND_EQUIP_SLOT_VMA));
     fn_get_equip_item = reinterpret_cast<GetEquipItemFn>(g_base + fn_resolve("F_GET_EQUIP_ITEM_VMA", F_GET_EQUIP_ITEM_VMA));
     fn_set_equip_item = reinterpret_cast<SetEquipItemFn>(g_base + fn_resolve("F_SET_EQUIP_ITEM_VMA", F_SET_EQUIP_ITEM_VMA));

@@ -174,6 +174,7 @@ extern UnequipFn fn_unequip;
 extern CanEquipFn fn_can_equip;
 extern CanUnequipFn fn_can_unequip;
 extern CanChangeEquipFn fn_char_can_change_equip;
+extern GetMenuCharacterFn fn_get_menu_character;
 extern FindEquipSlotFn fn_find_equip_slot;
 extern GetEquipItemFn fn_get_equip_item;
 extern SetEquipItemFn fn_set_equip_item;

@@ -9,8 +9,11 @@
 //   cat 948      伪装用面具
 // 该位同时是「不可装备」与「不可脱下」的唯一开关（两个判定函数各读它一次）。
 //
-// 机制（architecture.md §2.2.1 准入顺序第五档 · LSPosed NativeHook API 单点包裹 x2）：
-// 包裹 `CHAR_CanEquipItem(0xe4eb4)` 与 `CHAR_CanUnequipItem(0xe4e2c)`。原版判定链：
+// 机制（architecture.md §2.2.1 准入顺序第五档 · LSPosed NativeHook API 单点包裹 x2
+// + 出售门禁谓词 x1）：
+// 包裹 `CHAR_CanEquipItem(0xe4eb4)` 与 `CHAR_CanUnequipItem(0xe4e2c)`；出售按钮
+// `UIEquip_ButtonDestroyExe(0xb6240)` 已被 inventory 域 hook（同址重复 hook 返回 -1），
+// 经 `inventory_native_hook_set_sell_gate` 注册谓词挂入门禁。原版判定链：
 //   CanEquipItem:   ① ITEM_IsRealEquip(item) → ② !(rec[+7] & 0x10)
 //                   → ③ CHAR_CanChangeEquip(ch) → ④ ch[C_LEVEL] >= ITEM_GetEquipLevel(item)
 //   CanUnequipItem: ① !(rec[+7] & 0x10) → ② CHAR_CanChangeEquip(ch)
@@ -30,7 +33,11 @@
 // 于是「特殊 NPC 身上的无法穿脱」由原版逻辑保证——任务特殊 NPC 与不在队伍槽的角色（怪物、
 // 场景 NPC）照旧被拒，本域不参与角色判定。
 //
-// 出售侧（`ITEMDATABASE_IsNoSell` / +6 bit3）本域**完全不触碰**：带 bit3 的装备保持不可出售。
+// 出售侧（装备详情菜单的出售按钮）：原版 UIEquip_ButtonDestroyExe → OKDestroyItem
+// 装备分支无任何门禁（不查 IsNoSell/bit3——cat 785-787/948 本就无 bit3，也不查穿脱
+// 判定与角色归属），特殊装备穿到 NPC 佣兵身上后可被原样卖出。注册到出售按钮 wrapper
+// 的谓词在创建确认弹窗前校验菜单角色 CHAR_CanChangeEquip（与穿脱闸门同一角色语义），
+// 特殊 NPC 佣兵身上装备拒绝出售；背包物品（desc_type==2）放行。
 //
 // **常开，无配置开关**：该位只影响「能否穿脱」，字符侧没有获取途径，开启不产生任何新行为；
 // 而一旦关闭，已持有这些装备的角色会被重新锁住、无法穿脱，所以不提供开关。
