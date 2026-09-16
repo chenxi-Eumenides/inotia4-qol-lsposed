@@ -25,7 +25,8 @@ interface ConfigApiService {
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
         oldDebugLog: Boolean,
-        oldSimpleMode: Boolean
+        oldSimpleMode: Boolean,
+        oldPushAll: Boolean
     )
 
     /** 加载静态瓦片矩阵入 native（替代运行时读内存，P0#瓦片矩阵） */
@@ -49,6 +50,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.info(LogDomain.CONFIG, "customRecipeEnabled=${ModuleConfig.customRecipeEnabled} applied=$customRecipeApplied")
         val simpleModeApplied = NativeBridge.nativeSetSimpleModeEnabled(ModuleConfig.simpleModeEnabled)
         LogFile.info(LogDomain.CONFIG, "simpleModeEnabled=${ModuleConfig.simpleModeEnabled} applied=$simpleModeApplied")
+        val pushAllApplied = NativeBridge.nativeSetPushAllEnabled(ModuleConfig.pushAllEnabled)
+        LogFile.info(LogDomain.CONFIG, "pushAllEnabled=${ModuleConfig.pushAllEnabled} applied=$pushAllApplied")
         val autoSellApplied = NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)
         LogFile.info(LogDomain.CONFIG, "autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
         val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
@@ -66,7 +69,8 @@ class ConfigApiServiceImpl : ConfigApiService {
         oldAutoSell: Boolean,
         oldApiEnabled: Boolean,
         oldDebugLog: Boolean,
-        oldSimpleMode: Boolean
+        oldSimpleMode: Boolean,
+        oldPushAll: Boolean
     ) {
         // 水印颜色跟随简单模式开关，属纯 Kotlin 视图层装饰，与 native 就绪无关，
         // 故放在 ready 检查之前（native 未就绪时也要让水印颜色正确）。
@@ -88,6 +92,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         }
         if (ModuleConfig.simpleModeEnabled != oldSimpleMode) {
             NativeBridge.nativeSetSimpleModeEnabled(ModuleConfig.simpleModeEnabled)
+        }
+        if (ModuleConfig.pushAllEnabled != oldPushAll) {
+            NativeBridge.nativeSetPushAllEnabled(ModuleConfig.pushAllEnabled)
         }
         if (ModuleConfig.autoSellEnabled != oldAutoSell) {
             NativeBridge.nativeSetAutoSellEnabled(ModuleConfig.autoSellEnabled)

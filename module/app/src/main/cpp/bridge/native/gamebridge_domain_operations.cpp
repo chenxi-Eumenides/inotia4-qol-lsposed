@@ -54,11 +54,6 @@ Java_com_inotia4_qol_NativeBridge_nativeOpTeleportEx(JNIEnv* env, jclass, jint m
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeOpPushAll(JNIEnv* env, jclass, jboolean on) {
-    return op_result(env, "op_push_all", ("on=" + str_of(static_cast<int>(on))), data_op_push_all(on == JNI_TRUE));
-}
-
-extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpRemoveItem(JNIEnv* env, jclass, jint category) {
     return op_result(env, "op_remove_item", ("category=" + str_of(category)), data_op_remove_item(static_cast<int32_t>(category)));
 }

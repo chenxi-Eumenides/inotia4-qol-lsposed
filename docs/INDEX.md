@@ -56,6 +56,8 @@
 
 简单模式（simple-mode）：`development/features/simple-mode.md`（怪物最大生命减半 + 玩家侧打敌人伤害 ×2 + 玩家侧受到伤害 ×0.5；双 Native Hook 落点、阵营判定原语、mod 跳板跟随与半血幂等账本；已实现并真机验证）。
 
+推怪（push-all）：`development/features/push-all.md`（`CHAR_Move` 推动分支双闸门 patch 的全局配置开关 `pushAllEnabled`：可推开怪物/队友/召唤物、场景设施不可推；fail-closed 指令字校验与部分失败回滚；已实现，待真机验证）。
+
 模块自定义文本层（custom-text）：`development/features/custom-text.md`（独占 `MEMORYTEXT_GetText` 单一 hook + 窗口作用域替换 + 内置语义键表；角色面板属性标签与合成器配方按钮文案的服务者；已实现并真机验证）。
 
 帧派发宿主（frame-dispatch-host）：`development/features/frame-dispatch-host.md`（FrameTaskManager 是否可用 hook 重构、游戏帧周期 §2 逆向结论、锚点与相位模型、统一 `frame_tick` + `frame_host` 设计与分阶段实施、真机验证开放项；可行性调查与设计稿，未实现）。

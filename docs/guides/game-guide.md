@@ -806,6 +806,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `listenPort` | int | 8088 | HTTP 监听端口（1-65535；越界报 `listenPort must be 1-65535`） |
 | `stackLimitIncrease` | bool | `false` | 堆叠上限提升（变化即时通知 native，无需重启） |
 | `moveMergeEnabled` | bool | `false` | 背包内拖拽同类可堆叠物品时自动合并（变化即时安装或还原 native hook，无需重启） |
+| `pushAllEnabled` | bool | `false` | 推怪（推动增强）：patch `CHAR_Move` 推动分支的两个 blocker 资格闸门，可推开怪物/队友/召唤物；场景设施（NPC/商人）保持不可推（变化即时下发 native，无需重启） |
 | `opEnabled` | bool | `false` | **OP 越权操作全局开关（v0.5.47）**——开启后 `/api/op/*` 可用；关闭时全部 OP 端点返回 403 `op disabled` |
 
 > ⚠️ 修改 `listenAddress`/`listenPort` 后返回 `restart:true` 并**自动重启 HTTP 服务**（延迟约 500ms 先让响应送达）；重启后旧地址/端口连接断开，需按新配置访问。**新端口被占用时自动回退默认端口 8088** 并同步修正配置。

@@ -16,9 +16,6 @@ std::string data_op_teleport(int32_t map_id, int32_t x, int32_t y, bool force);
 std::string data_op_move(int32_t x, int32_t y);
 std::string data_op_walk(int32_t direction);
 std::string data_op_walk_stop();
-// 推动增强开关：patch CHAR_Move 内「blocker 须站立」检查为 NOP（game_symbols.h
-// CHAR_MOVE_PUSH_STAND_*），使主控/队友移动可推开非站立单位。on=false 还原原指令。
-std::string data_op_push_all(bool on);
 std::string data_op_interact();
 
 // 数据读取（read 域拆分）：位置/地图/瓦片/单位/掉落 JSON 构造。

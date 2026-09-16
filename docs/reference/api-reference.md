@@ -1636,6 +1636,7 @@
 > - `apiEnabled` API 全局开关，默认 `true`；`false` 时不启动 HTTP 服务与 native 缓存预取线程（`nativeSetApiEnabled(false)` → `frame_cache_stop()`），`GET/POST /api/config/*` 随之不可达。**`apiEnabled=false` 不影响 feature 初始化**——`ApiServer.bootstrap` 已把 feature 初始化（设置页/扩展背包/存档/自动出售等）与 HTTP 启动拆开，关闭仅停 HTTP 与预取线程。关闭后唯一恢复通道为**游戏内设置页第一项「API服务」开关**（走 `ModuleConfigUiBridge` JNI，不依赖 HTTP；false→true 经 `ApiServer.startFromConfig` 重启 HTTP）；由 HTTP 置 `false` 时延迟约 500ms 停止以先送回本响应
 > - `debugLogEnabled` 统一日志 debug 级别运行时开关，默认 `false`；变化即时经 `nativeQolLogSetDebugEnabled` 下发 native 门控，无需重启。info/warn/error 不受该开关影响（常开）。接入游戏内**设置页第 8 行「调试日志」**；日志格式与规则见 `docs/development/logging.md`
 > - `simpleModeEnabled` 简单模式，默认 `false`；开启后怪物最大生命减半、玩家侧打敌人的伤害 ×1.5、玩家侧受到的伤害 ×0.5。变化即时经 `nativeSetSimpleModeEnabled` 下发 native（热路径只读一个 C++ 原子量），无需重启。接入游戏内**设置页「简单模式」**；落点、阵营判定与真机验收数据见 `docs/development/features/simple-mode.md`
+> - `pushAllEnabled` 推怪（推动增强）全局开关，默认 `false`；开启后 patch 游戏 `CHAR_Move` 推动分支的两个 blocker 资格闸门（`CHAR_Move+0x168` 的 `bl CHAR_GetPartyIndex` 重定向到模块 wrapper → 怪物与召唤物可推；`CHAR_Move+0x180` 的站立检查 `cbz` 置 NOP → 战斗/行动中的单位也可推），使主控/队友移动可推开**怪物/队友/召唤物**，场景设施（NPC/商人）保持不可推。变化即时经 `nativeSetPushAllEnabled` 下发 native（安装/还原均做运行前指令字校验，fail-closed；开启时第二条闸门失败会回滚第一条），无需重启。接入游戏内**设置页第 2 页「推怪」**；闸门落点、回滚语义与验收状态见 `docs/development/features/push-all.md`
 
 #### 读取配置
 
@@ -1654,6 +1655,7 @@
   "opEnabled": false,
   "autoSellEnabled": false,
   "simpleModeEnabled": false,
+  "pushAllEnabled": false,
   "apiEnabled": true,
   "debugLogEnabled": false
 }
@@ -1685,6 +1687,7 @@
   "opEnabled": false,
   "autoSellEnabled": false,
   "simpleModeEnabled": false,
+  "pushAllEnabled": false,
   "apiEnabled": true,
   "debugLogEnabled": true
 }
@@ -1692,7 +1695,7 @@
 
 **注意**：
 - `listenAddress` 非空必填；`listenPort` 合法范围 1-65535，越界返回 `{"ok":false,"error":"listenPort must be 1-65535"}`；body 非法返回 `{"error":"bad request"}`；持久化失败返回 `{"ok":false,"error":"config save failed"}`（内存不提交）
-- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`autoSellEnabled`/`apiEnabled`/`debugLogEnabled`/`simpleModeEnabled` 时 `restart=false`
+- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`autoSellEnabled`/`apiEnabled`/`debugLogEnabled`/`simpleModeEnabled`/`pushAllEnabled` 时 `restart=false`
 - `apiEnabled=false` 时延迟约 500ms 停止 HTTP 服务（先让本响应送达），此后 `GET/POST /api/config/*` 不可达；重新开启须经游戏内设置页（HTTP 已不可达）
 - 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
 - **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）
@@ -1812,18 +1815,6 @@
 - 地界：目标图越出静态数据 `width`/`height` 直接拒绝（引擎不校验地界，越界会把角色放到地图数据之外，表现为角色不出现且不可操作，需重进档恢复）。
 - 阻挡：静态瓦片矩阵 `TILE_BLOCK_BIT`（bit3，与寻路同口径）置位时拒绝。
 - 目标图静态矩阵缺失时无法校验，放行。
-
-#### 推动增强
-
-`POST /api/op/movement/push_all`
-
-**请求格式**：`{ "on": true }`
-
-**返回格式**：`{"ok":true}`（成功）；`{"ok":false,"error":"game not loaded"}` 或 `"patch failed (word mismatch or mprotect denied)"`。
-
-**注意**：nativeOpPushAll 运行时 patch `CHAR_Move(0xe9808)` 推动分支的两个 blocker 资格闸门，使主控/队友移动可推开**怪物/队友/召唤物**；场景设施（NPC、商人等）保持不可推。安装与还原均 fail-closed（指令字校验不符即拒绝，不改写任何字节）；32 位构建下偏移指令字不匹配，install 自然拒绝。进程重启后回到关闭态。
-- 闸门一（`CHAR_Move+0x168`）：`bl CHAR_GetPartyIndex(blocker)` 经 BL 重定向到模块 wrapper——怪物（`C_TYPE==1`）与召唤物（`CHAR_IsActivePlayerGroup`）伪装为队伍成员使其可推，其余走原函数（队友可推，`C_TYPE==2` 的场景设施返回 -1 不可推）。
-- 闸门二（`CHAR_Move+0x180`）：`CHAR_IsCurrentActionStand(blocker)` 的 `cbz` 置 NOP——战斗中/行动中的怪物非站立，不放开则推不动。
 
 ### 8.2 未实现
 

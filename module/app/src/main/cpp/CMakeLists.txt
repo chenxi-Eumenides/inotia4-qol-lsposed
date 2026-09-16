@@ -161,3 +161,9 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     core/native/popup_enter_alias.cpp
 )
+
+# 推怪（推动增强）全局开关：CHAR_Move 推动分支双闸门 patch（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    feature/push_all/push_all.cpp
+    bridge/native/gamebridge_push_all.cpp
+)

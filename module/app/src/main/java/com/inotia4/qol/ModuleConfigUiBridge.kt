@@ -17,7 +17,7 @@ object ModuleConfigUiBridge {
         "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled",
         "customRecipeEnabled",
         "autoSellEnabled", "apiEnabled", "debugLogEnabled",
-        "simpleModeEnabled"
+        "simpleModeEnabled", "pushAllEnabled"
     )
 
     @JvmStatic
@@ -39,6 +39,7 @@ object ModuleConfigUiBridge {
         val oldApiEnabled = ModuleConfig.apiEnabled
         val oldDebugLog = ModuleConfig.debugLogEnabled
         val oldSimpleMode = ModuleConfig.simpleModeEnabled
+        val oldPushAll = ModuleConfig.pushAllEnabled
         val current = when (key) {
             "stackLimitIncrease" -> ModuleConfig.stackLimitIncrease
             "moveMergeEnabled" -> ModuleConfig.moveMergeEnabled
@@ -49,6 +50,7 @@ object ModuleConfigUiBridge {
             "apiEnabled" -> ModuleConfig.apiEnabled
             "debugLogEnabled" -> ModuleConfig.debugLogEnabled
             "simpleModeEnabled" -> ModuleConfig.simpleModeEnabled
+            "pushAllEnabled" -> ModuleConfig.pushAllEnabled
             else -> {
                 // BOOL_KEYS 与分支必须逐项同步：未来新增 key 未接线时显式失败，
                 // 杜绝静默落到某个既有开关（历史上 opEnabled 曾靠 else 兜底）。
@@ -62,7 +64,7 @@ object ModuleConfigUiBridge {
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
             oldStack, oldMoveMerge, oldExtensionBag, oldCustomRecipe, oldAutoSell, oldApiEnabled,
-            oldDebugLog, oldSimpleMode
+            oldDebugLog, oldSimpleMode, oldPushAll
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
         // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。

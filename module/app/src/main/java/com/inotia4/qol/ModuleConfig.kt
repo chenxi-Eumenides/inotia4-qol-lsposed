@@ -28,6 +28,9 @@ import java.io.File
  * - customRecipeEnabled：新合成系统（界面 + 配方），默认 false；禁用不回滚已注入的表（custom-craft-recipe §4.8）。
  * - simpleModeEnabled：简单模式，默认 false。开启后怪物最大生命减半、玩家侧打敌人伤害 ×1.5、
  *   玩家侧受到伤害 ×0.5；关闭即时生效（怪物在下一次属性重算写回满值）。变更时下发 native。
+ * - pushAllEnabled：推怪（推动增强）全局开关，默认 false。开启后 patch CHAR_Move 推动分支的
+ *   两个 blocker 资格闸门，使主控/队友移动可推开怪物/队友/召唤物；场景设施（NPC/商人）保持
+ *   不可推。变更时下发 native（安装/还原 fail-closed），无需重启。
  * - autoSellEnabled：自动出售全局开关，默认 false；开启后背包页显示入口按钮并启用扫描。
  * - apiEnabled：API 全局开关，默认 true；关闭时不启动 HTTP 服务与 native 缓存预取线程，
  *   唯一恢复通道为游戏内设置页（ModuleConfigUiBridge JNI，不依赖 HTTP）。
@@ -47,6 +50,7 @@ object ModuleConfig {
     const val DEFAULT_EXTENSION_BAG_ENABLED = true
     const val DEFAULT_CUSTOM_RECIPE_ENABLED = false
     const val DEFAULT_SIMPLE_MODE_ENABLED = false
+    const val DEFAULT_PUSH_ALL_ENABLED = false
     const val DEFAULT_AUTO_SELL_ENABLED = false
     const val DEFAULT_API_ENABLED = true
     const val DEFAULT_DEBUG_LOG_ENABLED = false
@@ -98,6 +102,11 @@ object ModuleConfig {
     var simpleModeEnabled: Boolean = DEFAULT_SIMPLE_MODE_ENABLED
         private set
 
+    /** 推怪（推动增强）全局开关（默认 false）：patch CHAR_Move 推动分支的两个 blocker 资格闸门 */
+    @Volatile
+    var pushAllEnabled: Boolean = DEFAULT_PUSH_ALL_ENABLED
+        private set
+
     /** 自动出售全局开关（默认 false）：开启后背包页显示入口按钮并启用扫描 */
     @Volatile
     var autoSellEnabled: Boolean = DEFAULT_AUTO_SELL_ENABLED
@@ -139,12 +148,14 @@ object ModuleConfig {
             extensionBagEnabled = json.optBoolean("extensionBagEnabled", DEFAULT_EXTENSION_BAG_ENABLED)
             customRecipeEnabled = json.optBoolean("customRecipeEnabled", DEFAULT_CUSTOM_RECIPE_ENABLED)
             simpleModeEnabled = json.optBoolean("simpleModeEnabled", DEFAULT_SIMPLE_MODE_ENABLED)
+            pushAllEnabled = json.optBoolean("pushAllEnabled", DEFAULT_PUSH_ALL_ENABLED)
             autoSellEnabled = json.optBoolean("autoSellEnabled", DEFAULT_AUTO_SELL_ENABLED)
             apiEnabled = json.optBoolean("apiEnabled", DEFAULT_API_ENABLED)
             debugLogEnabled = json.optBoolean("debugLogEnabled", DEFAULT_DEBUG_LOG_ENABLED)
             if (!json.has("moveMergeEnabled") || !json.has("extensionBagEnabled") ||
                 !json.has("customRecipeEnabled") ||
-                !json.has("simpleModeEnabled") || !json.has("autoSellEnabled") ||
+                !json.has("simpleModeEnabled") || !json.has("pushAllEnabled") ||
+                !json.has("autoSellEnabled") ||
                 !json.has("apiEnabled") || !json.has("debugLogEnabled") ||
                 json.has("jewelBatchMix")
             ) {
@@ -156,7 +167,8 @@ object ModuleConfig {
                 "config loaded: listenAddress=$listenAddress listenPort=$listenPort " +
                     "stackLimitIncrease=$stackLimitIncrease moveMergeEnabled=$moveMergeEnabled opEnabled=$opEnabled " +
                     "customRecipeEnabled=$customRecipeEnabled " +
-                    "simpleModeEnabled=$simpleModeEnabled autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled " +
+                    "simpleModeEnabled=$simpleModeEnabled pushAllEnabled=$pushAllEnabled " +
+                    "autoSellEnabled=$autoSellEnabled apiEnabled=$apiEnabled " +
                     "debugLogEnabled=$debugLogEnabled"
             )
         } catch (t: Throwable) {
@@ -183,6 +195,7 @@ object ModuleConfig {
         var newExtensionBag = extensionBagEnabled
         var newCustomRecipe = customRecipeEnabled
         var newSimpleMode = simpleModeEnabled
+        var newPushAll = pushAllEnabled
         var newAutoSell = autoSellEnabled
         var newApiEnabled = apiEnabled
         var newDebugLog = debugLogEnabled
@@ -202,6 +215,7 @@ object ModuleConfig {
         if (json.has("extensionBagEnabled")) newExtensionBag = json.optBoolean("extensionBagEnabled", newExtensionBag)
         if (json.has("customRecipeEnabled")) newCustomRecipe = json.optBoolean("customRecipeEnabled", newCustomRecipe)
         if (json.has("simpleModeEnabled")) newSimpleMode = json.optBoolean("simpleModeEnabled", newSimpleMode)
+        if (json.has("pushAllEnabled")) newPushAll = json.optBoolean("pushAllEnabled", newPushAll)
         if (json.has("autoSellEnabled")) newAutoSell = json.optBoolean("autoSellEnabled", newAutoSell)
         if (json.has("apiEnabled")) newApiEnabled = json.optBoolean("apiEnabled", newApiEnabled)
         if (json.has("debugLogEnabled")) newDebugLog = json.optBoolean("debugLogEnabled", newDebugLog)
@@ -214,6 +228,7 @@ object ModuleConfig {
             .put("extensionBagEnabled", newExtensionBag)
             .put("customRecipeEnabled", newCustomRecipe)
             .put("simpleModeEnabled", newSimpleMode)
+            .put("pushAllEnabled", newPushAll)
             .put("autoSellEnabled", newAutoSell)
             .put("apiEnabled", newApiEnabled)
             .put("debugLogEnabled", newDebugLog)
@@ -226,6 +241,7 @@ object ModuleConfig {
         extensionBagEnabled = newExtensionBag
         customRecipeEnabled = newCustomRecipe
         simpleModeEnabled = newSimpleMode
+        pushAllEnabled = newPushAll
         autoSellEnabled = newAutoSell
         apiEnabled = newApiEnabled
         debugLogEnabled = newDebugLog
@@ -242,6 +258,7 @@ object ModuleConfig {
         put("extensionBagEnabled", extensionBagEnabled)
         put("customRecipeEnabled", customRecipeEnabled)
         put("simpleModeEnabled", simpleModeEnabled)
+        put("pushAllEnabled", pushAllEnabled)
         put("autoSellEnabled", autoSellEnabled)
         put("apiEnabled", apiEnabled)
         put("debugLogEnabled", debugLogEnabled)

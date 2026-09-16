@@ -114,6 +114,7 @@ static const SettingsItem kSettingsItems[] = {
     {"simpleModeEnabled", "简单模式", 1},
     {"moveMergeEnabled", "拖拽合并", 2},
     {"customRecipeEnabled", "新合成系统", 2},
+    {"pushAllEnabled", "推怪", 2},
     {"debugLogEnabled", "调试日志", 2},
     {"opEnabled", "OP能力", 3},
 };
@@ -130,7 +131,7 @@ int g_total_pages = 1;
 
 // 当前配置值缓存（面板打开时从 Kotlin 拉取，切换时本地翻转+上抛）
 static char g_row_status[kSettingsItemCount][CB_TEXT_SIZE] = {
-    "", "关", "关", "开", "关", "关", "关", "关", "关", "关"
+    "", "关", "关", "开", "关", "关", "关", "关", "关", "关", "关"
 };
 static char g_header_text[CB_TEXT_SIZE] = "QoL模块";
 
