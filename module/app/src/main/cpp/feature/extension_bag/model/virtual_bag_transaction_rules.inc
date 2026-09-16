@@ -337,10 +337,13 @@ inline PlacePlan place_plan(
         plan.outcome = PlaceOutcome::kNoSpace;
         return plan;
     }
-    // 空槽扫描：与 adopt 现状同域（kSlotCount 全扫；运行时谓词保证 assignable）。
+    // 空槽扫描：上界与合并扫描一致，取派生容量（capacity ∩ kSlotCount）。
+    // 容量外槽位不是可放置目标；不设容量上界会让容量内槽满后把新物品写进
+    // slot >= capacity。
     for (int bag = 0; bag < kBagCount; ++bag) {
         if (types[bag] == 0) continue;
-        for (int slot = 0; slot < kSlotCount; ++slot) {
+        const int capacity = capacities[bag];
+        for (int slot = 0; slot < capacity && slot < kSlotCount; ++slot) {
             const bool assignable = slot_assignable != nullptr
                 ? slot_assignable(bag, slot)
                 : descriptor_slot_empty(items[bag][slot]);

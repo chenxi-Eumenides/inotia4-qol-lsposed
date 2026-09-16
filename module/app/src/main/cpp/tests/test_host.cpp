@@ -1237,6 +1237,84 @@ static void test_place_plan() {
                       incoming.payload_size) == 0);
 }
 
+// 容量上界（R-05 派生容量即有效槽范围；物理 16 槽不是落位/写入目标）。
+static void test_virtual_bag_capacity_bounds() {
+    using Outcome = virtual_bag::PlaceOutcome;
+    using ItemGrid =
+        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kBagCount>;
+
+    ItemGrid items{};
+    std::array<uint8_t, virtual_bag::kBagCount> types{};
+    std::array<uint8_t, virtual_bag::kBagCount> capacities{};
+    types[0] = 1;  // BagType 1 → 容量 4
+    capacities[0] = virtual_bag::derive_capacity(1);
+    for (int slot = 0; slot < capacities[0]; ++slot) {
+        virtual_bag::Item filler{};
+        filler.category = 401;
+        filler.count = 1;
+        make_s2_payload(&filler, 1);
+        filler.payload[16] ^= static_cast<uint8_t>(slot + 1);  // 与 source 身份不同
+        items[0][slot] = filler;
+    }
+    virtual_bag::Item incoming{};
+    incoming.category = 401;
+    incoming.count = 1;
+    make_s2_payload(&incoming, 1);
+
+    // 容量 4 的袋 0..3 全满：不得继续落到 slot 4..15（16 槽全空也不落）。
+    const virtual_bag::PlacePlan over_capacity = virtual_bag::place_plan(
+        items, types, capacities, incoming, /*allow_new_slot=*/true, true,
+        host_category_uses_stack_count);
+    CHECK(over_capacity.outcome == Outcome::kNoSpace);
+    CHECK(over_capacity.slot < 0);
+
+    // 另有已装备袋存在容量内空槽 → 落到该袋容量内槽位（不落容量外）。
+    types[1] = 2;  // 容量 8
+    capacities[1] = virtual_bag::derive_capacity(2);
+    const virtual_bag::PlacePlan to_other = virtual_bag::place_plan(
+        items, types, capacities, incoming, /*allow_new_slot=*/true, true,
+        host_category_uses_stack_count);
+    CHECK(to_other.outcome == Outcome::kPlacedNewSlot);
+    CHECK_EQ(to_other.bag, 1);
+    CHECK_EQ(to_other.slot, 0);
+
+    // set_item：容量外槽位拒绝写入，容量内成功。
+    virtual_bag::State state{};
+    CHECK(!virtual_bag::set_item(&state, 0, 0, 401, 1));  // 未装备 → 容量 0
+    CHECK(virtual_bag::set_test_equipped(&state, 0, 1));   // 容量 4
+    CHECK(virtual_bag::set_item(&state, 0, 3, 401, 1));
+    CHECK(!virtual_bag::set_item(&state, 0, 4, 401, 1));
+    CHECK_EQ(state.items[0][4].category, 0);
+
+    // set_test_equipped：把已占用槽挤出容量的类型变更被拒绝。
+    CHECK(virtual_bag::set_test_equipped(&state, 1, 4));  // 容量 16
+    CHECK(virtual_bag::set_item(&state, 1, 10, 55, 1));
+    CHECK(!virtual_bag::set_test_equipped(&state, 1, 1));  // slot10 超容量 4
+    CHECK_EQ((int)state.capacities[1], 16);
+
+    // equip_bag：新容量之外的残留物品使装备被拒（未装备袋容量 0，残留即超容）。
+    virtual_bag::State residue{};
+    residue.items[2][10].category = 7;
+    residue.items[2][10].count = 1;
+    virtual_bag::normalize(&residue);
+    CHECK(!virtual_bag::equip_bag(&residue, 2, 2));  // slot10 超容量 8
+    CHECK_EQ((int)residue.types[2], 0);
+
+    // discard_over_capacity：容量外丢弃、容量内保留、幂等。
+    virtual_bag::State dirty{};
+    dirty.types = {1, 0, 0, 0, 0};
+    dirty.items[0][2].category = 401;
+    dirty.items[0][2].count = 1;
+    dirty.items[0][9].category = 55;
+    dirty.items[0][9].count = 1;
+    virtual_bag::normalize(&dirty);
+    CHECK_EQ((int)dirty.capacities[0], 4);
+    CHECK_EQ(virtual_bag::discard_over_capacity(&dirty), 1);
+    CHECK_EQ(dirty.items[0][2].category, 401);
+    CHECK_EQ(dirty.items[0][9].category, 0);
+    CHECK_EQ(virtual_bag::discard_over_capacity(&dirty), 0);
+}
+
 // VM-40：ext→orig 事务的投影宿主守卫判定。
 static void test_ext2orig_host_guards() {
     // 宿主容量字恢复：仅当投影安装中且目标袋 == 投影宿主袋。
@@ -3025,6 +3103,7 @@ int main() {
     test_sell_divide_s2_read_window();
     test_adopt_merge_plan();
     test_place_plan();
+    test_virtual_bag_capacity_bounds();
     test_ext2orig_host_guards();
     test_virtual_bag_json_roundtrip();
     test_virtual_bag_json_count_clamp();

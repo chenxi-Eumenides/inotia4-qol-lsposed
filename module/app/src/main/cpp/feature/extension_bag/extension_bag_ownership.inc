@@ -238,9 +238,13 @@ void release_tracked_item_locked(uint32_t handle, void* item, const char* contex
     log_ownership_audit_locked(context);
 }
 
+// 槽位可分配 = 位于该袋**派生容量**内且 descriptor/对象/handle/use 全部为空态。
+// 容量外槽位一律不可分配：数组固定 16 槽只是物理上限，有效范围是
+// derive_capacity(types[bag])；缺少容量上界会让入库/收编在容量内槽满后继续
+// 占用 slot >= capacity 的槽（超容写入）。
 bool module_slot_is_assignable_locked(int bag, int slot) {
     if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 ||
-        slot >= virtual_bag::kSlotCount) {
+        slot >= g_virtual_bag_state.capacities[bag]) {
         return false;
     }
     const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];

@@ -66,9 +66,16 @@ inline void begin_exit_module(State* state) {
     state->inspected = -1;
 }
 
+// 测试注入：设置袋类型。若该袋在**新容量之外**已有物品，变更会造成超容数据，
+// 因此拒绝（与正常装备路径 equip_bag 同一约束）。
 inline bool set_test_equipped(State* state, int index, int bag_type) {
     if (state == nullptr || !valid_index(index) || !valid_type(bag_type) || bag_type == 0) {
         return false;
+    }
+    const int new_capacity = derive_capacity(bag_type);
+    for (int slot = new_capacity; slot < kSlotCount; ++slot) {
+        const Item& item = state->items[index][slot];
+        if (item.category > 0 || item.count > 0) return false;
     }
     state->types[index] = static_cast<uint8_t>(bag_type);
     normalize(state);
@@ -97,6 +104,13 @@ inline bool equip_bag(State* state, int index, int bag_type) {
         return false;
     }
     if (state->types[index] != 0) return false;
+    // 新容量之外的残留物品会在装备后混入有效槽；存在即拒绝（未装备袋的残留
+    // 由加载期容量外丢弃清理，此处是运行期的同一约束）。
+    const int new_capacity = derive_capacity(bag_type);
+    for (int slot = new_capacity; slot < kSlotCount; ++slot) {
+        const Item& item = state->items[index][slot];
+        if (item.category > 0 || item.count > 0) return false;
+    }
     state->types[index] = static_cast<uint8_t>(bag_type);
     normalize(state);
     return true;
@@ -122,13 +136,34 @@ inline ClickResult click(State* state, int index) {
     return ClickResult::kSelected;
 }
 
+// 容量外槽位拒绝写入：数组 16 槽只是物理上限，有效槽范围是派生容量
+// （derive_capacity(types[bag])）；写入 slot >= capacity 会造成超容数据。
 inline bool set_item(State* state, int bag, int slot, int category, int count) {
-    if (state == nullptr || !valid_index(bag) || slot < 0 || slot >= kSlotCount ||
-        category < 0 || count < 0) {
+    if (state == nullptr || !valid_index(bag) || slot < 0 ||
+        slot >= state->capacities[bag] || category < 0 || count < 0) {
         return false;
     }
     state->items[bag][slot] = Item{category, count};
     return true;
+}
+
+// 丢弃派生容量之外的槽位数据，返回丢弃条数（调用方负责日志与 dirty 标记）。
+// 扩展袋有效槽范围是 derive_capacity(types[bag])，数组 16 槽只是物理上限；
+// 容量外数据会让袋被判「非空」而无法卸下袋对象，并可能在重新装备后混入有效槽。
+// 前置：调用方已确认该槽没有对象缓存/账本引用（加载期缓存已清空）。
+inline int discard_over_capacity(State* state) {
+    if (state == nullptr) return 0;
+    int discarded = 0;
+    for (int bag = 0; bag < kBagCount; ++bag) {
+        const int capacity = state->capacities[bag];
+        for (int slot = capacity; slot < kSlotCount; ++slot) {
+            Item& item = state->items[bag][slot];
+            if (item.category <= 0 && item.count <= 0 && item.payload_size == 0) continue;
+            item = {};
+            ++discarded;
+        }
+    }
+    return discarded;
 }
 
 // ---- JSON 桥接（Kotlin ExtensionBagUiBridge 往返，payload 以 base64 安全编码）----

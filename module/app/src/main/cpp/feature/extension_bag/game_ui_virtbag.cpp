@@ -564,9 +564,10 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
             refresh_module_item_area_locked(bag);
         }
         if (g_pending_jewel_detail_item != nullptr &&
+            virtual_bag::valid_index(g_module_view_index) &&
             g_pending_jewel_detail_bag == g_module_view_index &&
             g_pending_jewel_detail_slot >= 0 &&
-            g_pending_jewel_detail_slot < virtual_bag::kSlotCount &&
+            g_pending_jewel_detail_slot < g_virtual_bag_state.capacities[g_module_view_index] &&
             g_module_view_installed && g_projected_item_root != nullptr &&
             fn_control_item_set_item != nullptr) {
             detail_control = valid_child_locked(g_projected_item_root,
@@ -771,7 +772,8 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
             if (bag == internal_bag) continue;  // 排除正在解除的袋（见上）
             if (g_virtual_bag_state.types[bag] == 0) continue;
-            for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            const int capacity = g_virtual_bag_state.capacities[bag];
+            for (int slot = 0; slot < capacity; ++slot) {
                 if (module_slot_is_assignable_locked(bag, slot)) {
                     adopt_bag = bag;
                     adopt_slot = slot;
@@ -990,7 +992,8 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     int dst_slot = -1;
     for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
         if (g_virtual_bag_state.types[bag] == 0) continue;
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+        const int capacity = g_virtual_bag_state.capacities[bag];
+        for (int slot = 0; slot < capacity; ++slot) {
             if (module_slot_is_assignable_locked(bag, slot)) {
                 dst_bag = bag;
                 dst_slot = slot;
@@ -1442,7 +1445,8 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     int adopt_slot = -1;
     for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
         if (g_virtual_bag_state.types[bag] == 0) continue;
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+        const int capacity = g_virtual_bag_state.capacities[bag];
+        for (int slot = 0; slot < capacity; ++slot) {
             if (module_slot_is_assignable_locked(bag, slot)) {
                 adopt_bag = bag;
                 adopt_slot = slot;

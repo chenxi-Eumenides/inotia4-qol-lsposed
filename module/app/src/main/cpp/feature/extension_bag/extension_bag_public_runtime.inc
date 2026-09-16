@@ -456,12 +456,50 @@ bool virtual_bag_prepare_main_menu() {
     return prepare_main_menu_locked();
 }
 
+// 模块级保存 prepare 中扩展背包自己的校验部分。模块级协调在
+// core/native/module_save.cpp 的 participants prepare 阶段，各功能只负责自己数据的
+// 校验与收敛；本函数即扩展背包在 prepare 中的唯一校验/清理落点。调用方必须已持有
+// g_virtual_bag_mtx。
+// 1) 归一化 types → capacities（派生容量的唯一来源）；
+// 2) 剔除派生容量之外的槽位数据：超容数据不参与 sidecar 序列化、不落盘；
+// 3) 容量外槽若仍持有物化对象或账本句柄（写入路径全部收紧后不可达），拒绝保存并记
+//    ERROR，避免半持久化与悬挂引用。
+bool virtual_bag_module_save_validate_locked() {
+    virtual_bag::normalize(&g_virtual_bag_state);
+    int discarded = 0;
+    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        const int capacity = g_virtual_bag_state.capacities[bag];
+        for (int slot = capacity; slot < virtual_bag::kSlotCount; ++slot) {
+            const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
+            if (item.category <= 0 && item.count <= 0) continue;
+            if (g_module_objects[bag][slot] != nullptr ||
+                g_module_object_handles[bag][slot] != 0) {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "save validation reject: over-capacity slot holds live object bag=%d slot=%d",
+                              bag, slot);
+                return false;
+            }
+            ++discarded;
+        }
+    }
+    if (discarded > 0) {
+        virtual_bag::discard_over_capacity(&g_virtual_bag_state);
+        g_item_state_dirty = true;
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "save validation discarded %d over-capacity item(s)", discarded);
+    }
+    return true;
+}
+
 bool virtual_bag_module_save_prepare(int slot, const char* transaction_id) {
     if (transaction_id == nullptr) return false;
     std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     if (g_module_view_installed) restore_module_view_locked();
     recover_pending_transaction_locked(lock);
+    // 扩展背包在模块级保存 prepare 中完成自己的校验（容量归一化 + 容量外数据剔除）；
+    // 未通过则拒绝本次保存。
+    if (!virtual_bag_module_save_validate_locked()) return false;
     return extension_bag_prepare_save_to_store(slot, transaction_id);
 }
 

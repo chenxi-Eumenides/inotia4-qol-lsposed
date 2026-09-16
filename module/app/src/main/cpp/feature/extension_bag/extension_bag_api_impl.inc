@@ -340,7 +340,9 @@ std::string virtual_bag_inventory_bags_json() {
         const int capacity = g_virtual_bag_state.capacities[bag];
         int filled = 0;
         std::string items;
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+        // 只遍历派生容量内的槽位：容量外不是有效槽（R-05），不参与 items 输出
+        // 与 slot_count 统计。
+        for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
             const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
             if (item.category <= 0 || item.count <= 0) continue;
             if (filled > 0) items += ",";

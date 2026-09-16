@@ -1186,7 +1186,35 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   `save_item_direct_wrapper`、`consume_item_wrapper`、`remove_item_data_wrapper`）。
 - **验证锚**：Host `stage4_hook_tests::test_s2_writeback_gate` 断言
   (ext,stack)∈{(false,false)=false,(false,true)=true,(true,false)=true,(true,true)=true}；
-  真机 `VM-49`（堆叠开+扩展关 99+99→198，切换配置读回一致）。
+   真机 `VM-49`（堆叠开+扩展关 99+99→198，切换配置读回一致）。
+
+### R-66 派生容量是扩展袋的有效槽范围，写入/放置/统计与保存校验都必须以它为界
+
+- **规则一句话**：扩展数组固定 5×16 槽只是**物理上限**，有效槽范围是
+  `derive_capacity(types[bag])`；所有写入与放置路径（入库落位 `place_plan`、收编/adopt、
+  测试注入、类型变更）必须拒绝 `slot >= capacity`，「是否已满/占用统计」只计容量内槽；
+  读档不做丢弃，容量外数据由**模块级保存 prepare 中扩展背包自己的校验**
+  `virtual_bag_module_save_validate_locked`（`extension_bag_public_runtime.inc`）统一剔除，
+  它是扩展背包唯一的保存前清理点。
+- **为什么**：`module_slot_is_assignable_locked`、`place_plan` 空槽扫描与 3 处收编选槽
+  曾以 `kSlotCount`(16) 为上界；袋内 `0..capacity-1` 占满后，入库/收编会把新物品写入
+  `slot >= capacity`。sidecar 序列化写全 16 槽、读档解析同样全 16 槽且不 clamp，使超容
+  数据持久化并可随备份跨设备传播——真机实测 `capacity=4` 的袋有 12 件物品占 slot 4..15、
+  另一袋 4 件占 slot 4..7。超容数据还会让袋被判「非空」而无法卸下袋对象
+  （`unequip_bag` 全 16 槽检查），并在重新装备后混入有效槽（`equip_bag` 不改 items）。
+- **与 R-38/R-47/R-48 的边界**：本条只约束**槽位范围**，不改变 canonical 数量的持久化
+  语义：读档既不对 `count` 做配置相关截断，也不在加载期丢弃容量外槽；丢弃只发生在保存
+  prepare 的校验中（`discard_over_capacity` 的唯一调用点）。
+- **判据单源**：容量上界一律取 `capacities[bag]`（`derive_capacity` 派生，R-05）；禁止在
+  调用点用 `kSlotCount` 充当可放置上界，也禁止另写一套容量区间。
+- **典型破坏方式**：把 `kSlotCount` 当落位上界；只改谓词不改扫描循环（或反之）；在加载期
+  或纯模型 `normalize` 里丢弃容量外槽（运行期槽可能持有物化对象/账本句柄，清 descriptor
+  会留悬挂引用，违反 R-15/R-36）；为「统一校验」再加一层与 participant 并行的注册表
+  （校验属于各功能 participant.prepare 的职责，见 `core/native/module_save.cpp:61-111`）。
+- **验证锚**：Host `test_virtual_bag_capacity_bounds`（`tests/test_host.cpp`：空槽扫描不落
+  容量外 + `set_item`/`set_test_equipped`/`equip_bag` 拒绝越容 + `discard_over_capacity`
+  丢弃与幂等）；既有 `test_place_plan`、`test_equip_bag`、`test_unequip_bag`、
+  `test_virtual_bag_state` 保持通过（`host_tests: 2595 passed, 0 failed`）；真机 `VM-50`。
 
 ## §6 禁止事项汇总
 
@@ -1251,7 +1279,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-64`，共 64 条。
+1. 本册规则总数：`R-01..R-66`，共 66 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -1273,8 +1301,10 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
      开关唯一门控）、`R-59`（monster 物品数量上界由模块按特征码动态放行）、`R-60`（save
      gate 按符号 hook `SAVE_SaveInventory` 函数入口）、`R-61`（扩展视图 moving 控件清理
      避开空闲态、不清原版活动手势）、`R-62`（所有权账本容量覆盖扩展物品上限且交接终态槽回收）、
-     `R-63`（佣兵徽章使用函数级 H-24 接管并复用原版 MakeMercenary 链，API 豁免 `fn_is_use`）、
-     `R-64`（扩展详情按钮观察 hook 不得依赖面板偏移与按钮一一对应）。
+      `R-63`（佣兵徽章使用函数级 H-24 接管并复用原版 MakeMercenary 链，API 豁免 `fn_is_use`）、
+      `R-64`（扩展详情按钮观察 hook 不得依赖面板偏移与按钮一一对应）、
+      `R-65`（S2 写侧回写门控必须与读侧同源）、`R-66`（派生容量是有效槽范围，
+      写入/放置/统计与保存 prepare 校验以它为界）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、

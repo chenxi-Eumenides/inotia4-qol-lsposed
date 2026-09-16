@@ -559,6 +559,10 @@ void* load_item_payload_locked(const uint8_t* payload, int payload_size, const c
     return nullptr;
 }
 
+// 容量外槽位剔除的模型层实现见 virtual_bag::discard_over_capacity（Host 可测）；
+// 唯一调用点是模块级保存 prepare 中扩展背包自己的校验
+// virtual_bag_module_save_validate_locked，其他路径不做任何丢弃。
+
 void ensure_state_loaded_locked() {
     const int slot = current_save_slot();
     if (slot < 0 || slot > 2 || slot == g_loaded_slot) return;

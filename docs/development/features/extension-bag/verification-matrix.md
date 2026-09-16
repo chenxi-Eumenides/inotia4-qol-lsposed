@@ -47,7 +47,7 @@
 - **共享状态读写**：读 `capacities`、`types`、descriptor、对象和 token；原版 `bag_table` 只在投影窗口临时读写并必须恢复。
 - **必须保持的不变式(引 R-xx)**：容量统一派生，任务袋不成为扩展目标，空槽不能只看 descriptor（R-05、R-21、R-22、R-26）；`include_task_bag!=0` 的任务袋域查询不得被扩展空位兜底改判为可放，扩展兜底只回答 `include_task_bag==0` 的普通袋域（R-05）。
 - **失败语义**：容量 0/无可分配槽返回满或拒绝；`needed<=0` 由当前 `stage4_is_having_empty_slot` 明确返回 `1`（可放行，不调用 backup 或扩展 fallback）；任务袋域（`include_task_bag!=0`）原版返回 0 时直接返回 0，不查扩展、不改判；袋 5 扩展目标直接拒绝。
-- **Host 测试名(现有或「缺口」)**：`test_queries`（`test_inventory_hook_stage4.cpp:137-157` 断言：普通域原版 0 → 扩展 1；任务袋域原版 0 → 0 且 `empty_extension` 未被调用；`needed<=0` 两域均返回 `1` 且不查扩展）、`test_virtual_bag_state`；缺口：`test_virtual_bag_empty_slot_predicate`（断言派生容量、active/token 对空槽的影响及 bag 5 排除）。
+- **Host 测试名(现有或「缺口」)**：`test_queries`（`test_inventory_hook_stage4.cpp:137-157` 断言：普通域原版 0 → 扩展 1；任务袋域原版 0 → 0 且 `empty_extension` 未被调用；`needed<=0` 两域均返回 `1` 且不查扩展）、`test_virtual_bag_state`、`test_virtual_bag_capacity_bounds`（断言派生容量即有效槽范围：空槽扫描不落容量外、`set_item`/`set_test_equipped`/`equip_bag` 拒绝越容、`discard_over_capacity` 丢弃与幂等，R-66）；仍缺 `test_virtual_bag_empty_slot_predicate` 的 active/token 与 bag 5 排除部分。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-02`：①读取 `/api/item/inventory/bag/{bag}/info`；②分别检查未装备、4/8/12/16 容量袋；③向 bag 5 发起一次移动；预期容量与 `derive_capacity` 一致，bag 5 返回 `task bag excluded`。
 - **证据锚类型**：Host + API 真机 + 源码。
 
@@ -710,6 +710,20 @@
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-49`：①扩展关+堆叠开，两组 99 拖拽合并→显示/查询 198（日志 `S2 writeback MoveItem merge ... 99+99->198`）；②切堆叠关→读 70（b 视图，R-47 决策 b 既定语义），再切回→198；③扩展开+堆叠关同操作与原版逐位一致；④非可堆叠（装备/宝石）合并不触碰 bits22–24。
 - **证据锚类型**：真机必需 + 源码；不能由 Host 单独通过。
 
+### VM-50 容量上界与保存前校验（R-66）
+
+- **状态**：已取证（2026-09-16 真机；debug APK `cdc008ffae99`）。日志锚：进档后内存保留容量外数据（不丢弃）；保存时 `save validation discarded 15 over-capacity item(s)`，随后 `sidecar prepare` 输出已不含容量外槽、`save complete slot=2 tx=save-1`。
+- **操作**：令 sidecar 中含容量外物品（历史数据或测试注入），依次执行「进档 → 读 state/API → 保存 → 复查」。
+- **设备/APK/快照前置**：真机 `192.168.3.54:5555`、debug APK SHA-256 `cdc008ffae99...`；记录进档前 `GET /api/item/inventory` 的 `capacity`/`slot_count` 与 `GET /api/debug/extension_bag/status` 的 `state.items` 占用槽。
+- **原版链(VMA)**：无（纯模块逻辑）；保存时机来自 `core/native/module_save.cpp:61-111` 的 participants prepare 阶段。
+- **扩展接管点(文件:函数)**：`extension_bag_ownership.inc:module_slot_is_assignable_locked`；`virtual_bag_transaction_rules.inc:place_plan`（空槽扫描上界）；`virtual_bag_state_ops.inc:set_item`/`set_test_equipped`/`equip_bag`/`discard_over_capacity`；`extension_bag_public_runtime.inc:virtual_bag_module_save_validate_locked`（扩展背包在模块级 prepare 中的唯一校验/清理点）；`extension_bag_api_impl.inc:virtual_bag_inventory_bags_json`（占用统计只计容量内）。
+- **共享状态读写**：持 `g_virtual_bag_mtx`；读 `types/capacities/items` 与对象/句柄；写 `items`（剔除容量外槽）与 `g_item_state_dirty`。
+- **必须保持的不变式(引 R-xx)**：容量上界取 `capacities[bag]`（R-05、R-66）；读档不丢弃、不按配置 clamp（R-38、R-47、R-48）；剔除前必须确认槽内无物化对象/账本句柄（R-15、R-36）；保存校验属于扩展背包 participant.prepare，不新增与 participant 并行的注册表。
+- **失败语义**：容量外槽仍持有物化对象或账本句柄时记 `save validation reject: over-capacity slot holds live object` 并拒绝保存（fail-closed）；容量内无可用槽时落位返回 `kNoSpace` 并转原版路径。
+- **Host 测试名(现有或「缺口」)**：`test_virtual_bag_capacity_bounds`（已落地）；`test_place_plan`、`test_equip_bag`、`test_unequip_bag`、`test_virtual_bag_state` 保持通过。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-50`：①构造 sidecar 含容量外物品（本档为历史数据：bag6 有 12 件占 slot 4..15、bag7 有 4 件占 slot 4..7）；②进档后 `status.state.items` 仍保留这些槽（不丢弃），`GET /api/item/inventory` 的 `slot_count` 只计容量内（bag6=0、bag7=1）；③`POST /api/system/save` → 日志 `save validation discarded 15 over-capacity item(s)`，`sidecar prepare` 输出不含容量外槽，保存后 `state.items` 容量外槽为空；④容量内物品的写入与保存读取不受影响。
+- **证据锚类型**：真机必需 + Host。
+
 ## 2.1 VM-B 原版基线行为包
 
 > VM-B01～VM-B04 对应规则册 B-01～B-04 的原版基线。前置条件：扩展背包已启用；每张
@@ -813,7 +827,7 @@
 | R-02 | VM-10、VM-11、VM-14、VM-15、VM-26 | `test_p52_drag_session` + VM-10 装备槽拖放和三方向 API/真机。
 | R-03 | VM-01、VM-03、VM-06 | Host 有 ledger 部分；对象/descriptor/控件同步仍需缺口测试。
 | R-04 | VM-06、VM-24 | 现有 `test_object_operations` 覆盖 fallback；view/窗口配对需真机。
-| R-05 | VM-02、VM-13、VM-19、VM-20 | `test_queries`/模型容量 + 生产者真机。
+| R-05 | VM-02、VM-13、VM-19、VM-20、VM-50 | `test_queries`/`test_virtual_bag_capacity_bounds`（派生容量即有效槽范围）+ 生产者真机。
 | R-06 | VM-07、VM-11 | 三态按钮 Host 缺口、投影 drop 有 `test_p52_drag_session`。
 | R-07 | VM-03、VM-08、VM-10、VM-21、VM-22 | `test_object_operations` 只覆盖 Remove/Consume seam；生产者真机未闭合。
 | R-08 | VM-05、VM-06 | `test_object_operations` 已覆盖 view fallback；orig→ext 装备真机。
@@ -870,6 +884,7 @@
 | R-63 | VM-47 / VM-48 | H-24 函数级 Hook `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `extension_use_mercenary_seal`（原版顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗经 H-04）；API `data_op_use_item`/`extension_bag_api_use_item_impl` 对 `IsMercenarySeal` 豁免 `fn_is_use` 并走 `MakeMercenary`。Host 缺口 `test_mercenary_seal_takeover_token`；真机归 VM-47（UI）/VM-48（API）。 |
 | R-64 | 取证任务（无 VM 卡） | 详情按钮观察 hook 的面板偏移/去重漂移取证（真机 dump 11 偏移 button/data/orig + 物品 category）；独立任务，不阻塞 R-63。 |
 | R-65 | VM-49 | `s2_writeback_gate` 改经 `stack_codec::writeback_needed(ext, stack)`，写侧门控与读侧 `stack_limit_enabled()` 同源；Host `stage4_hook_tests::test_s2_writeback_gate` 断言四组合真值表；真机 VM-49（堆叠开+扩展关 99+99→198）。 |
+| R-66 | VM-02、VM-50 | 容量上界统一取 `capacities[bag]`：`module_slot_is_assignable_locked` 加容量判定、`place_plan` 空槽扫描与 3 处收编选槽改容量上界、`set_item`/`set_test_equipped`/`equip_bag` 拒绝越容、API 占用统计只计容量内、保存 prepare 由 `virtual_bag_module_save_validate_locked` 统一剔除容量外槽（唯一清理点）。Host `test_virtual_bag_capacity_bounds`；真机归 VM-50（进档保留 + `save validation discarded 15 over-capacity item(s)` + sidecar 干净）。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 
@@ -879,7 +894,7 @@
 |---|---|---|
 | R-01 | 可 VM | VM-04；确认成功后扩展控件不残留失效对象、详情身份清理、消费数量与最新 state 一致。
 | R-03 | 可 Host | 缺口 `test_projection_descriptor_object_sync`；断言 descriptor、object、hash、handle 和 control `data[0]` 五者在消费/交换/清槽后相同。
-| R-05 | 可 Host | 缺口 `test_virtual_bag_empty_slot_predicate`；断言派生 capacity、descriptor、object/token 不可分配条件共同决定结果，bag 5 不被计为扩展目标。
+| R-05 | 可 Host | 容量上界部分已由 `test_virtual_bag_capacity_bounds` 覆盖（派生 capacity 即有效槽范围、越容写入被拒、容量外剔除幂等，R-66）；仍缺 `test_virtual_bag_empty_slot_predicate` 的 active/token 不可分配条件与 bag 5 排除断言。
 | R-06 | 可 Host | 缺口 `test_equip_button_three_state`；断言 Handled/Blocked/NotExtension 分别为不 backup/不 backup/一次 backup。
 | R-11 | 可 VM | VM-19；商店投影开启时 SaveItem backup 前原版容量恢复，买入不落真实容量外槽。
 | R-12 | 可 VM | VM-18；扩展卖出后剩余商店列仍是商店 projection，原版刷新不覆盖扩展项。
@@ -964,14 +979,14 @@
 
 ### 6.1 现有测试名（完整清单）
 
-`test_host.cpp`：`test_p7_stage4_find_item_poc`、`test_json_escape`、`test_base64_decode`、`test_parse_int_field`、`test_tiles_parse`、`test_nav_bfs`、`test_nav_bfs_multi`、`test_stack_codec`、`test_stack_codec_s2`、`test_stack_codec_effective_mode`、`test_stack_codec_mode_invariance`、`test_sell_price_bounds`、`test_virtual_bag_state`、`test_extension_bag_exit_rendering_state`、`test_virtual_bag_payload_bridge`、`test_virtual_bag_base64`、`test_virtual_bag_payload_helpers`、`test_virtual_bag_merge_count`、`test_virtual_bag_mergeable_items`、`test_virtual_bag_mode_aware_ops`、`test_virtual_bag_json_roundtrip`、`test_virtual_bag_json_count_clamp`、`test_virtual_bag_cross_config_roundtrip`、`test_virtual_bag_legacy_json`、`test_virtual_bag_normalize_payload`、`test_virtual_bag_recovery`、`test_virtual_bag_transaction_domain`、`test_sell_divide_s2_read_window`、`test_adopt_merge_plan`、`test_ext2orig_host_guards`、`test_save_preflight_classify`、`test_save_preflight_stage`、`test_save_preflight_json`、`test_prepare_journal`、`test_ownership_ledger`、`test_ownership_ledger_p43`、`test_unequip_bag`、`test_equip_bag`、`test_p44_transaction_stages`、`test_p52_drag_session`、`test_p45_isolation`。
+`test_host.cpp`：`test_p7_stage4_find_item_poc`、`test_json_escape`、`test_base64_decode`、`test_parse_int_field`、`test_tiles_parse`、`test_nav_bfs`、`test_nav_bfs_multi`、`test_stack_codec`、`test_stack_codec_s2`、`test_stack_codec_effective_mode`、`test_stack_codec_mode_invariance`、`test_sell_price_bounds`、`test_virtual_bag_state`、`test_extension_bag_exit_rendering_state`、`test_virtual_bag_payload_bridge`、`test_virtual_bag_base64`、`test_virtual_bag_payload_helpers`、`test_virtual_bag_merge_count`、`test_virtual_bag_mergeable_items`、`test_virtual_bag_mode_aware_ops`、`test_virtual_bag_json_roundtrip`、`test_virtual_bag_json_count_clamp`、`test_virtual_bag_cross_config_roundtrip`、`test_virtual_bag_legacy_json`、`test_virtual_bag_capacity_bounds`、`test_virtual_bag_normalize_payload`、`test_virtual_bag_recovery`、`test_virtual_bag_transaction_domain`、`test_sell_divide_s2_read_window`、`test_adopt_merge_plan`、`test_ext2orig_host_guards`、`test_save_preflight_classify`、`test_save_preflight_stage`、`test_save_preflight_json`、`test_prepare_journal`、`test_ownership_ledger`、`test_ownership_ledger_p43`、`test_unequip_bag`、`test_equip_bag`、`test_p44_transaction_stages`、`test_p52_drag_session`、`test_p45_isolation`。
 
 `test_inventory_hook_stage4.cpp`：`test_queries`、`test_original_only_queries`、`test_get_cumulate_count_s2`、`test_remove_item_data_plan`、`test_native_equip_sell_count`、`test_equip_sell_redirect_mapping`、`test_make_item_writeback_count`、`test_vanilla_sell_takeover`、`test_object_operations`、`test_unequip_to_inven`、`test_install_transaction`。
 
 ### 6.2 Host 测试缺口清单
 
 * `test_projection_descriptor_object_sync`
-* `test_virtual_bag_empty_slot_predicate`
+* `test_virtual_bag_empty_slot_predicate`（容量上界部分已由 `test_virtual_bag_capacity_bounds` 覆盖；active/token 与 bag 5 排除仍缺）
 * `test_equip_button_three_state`
 * `test_confirm_use_token_and_projection_refresh`
 * `test_original_to_extension_bag_equip_commit`
