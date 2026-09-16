@@ -167,3 +167,13 @@ target_sources(gamebridge PRIVATE
     feature/push_all/push_all.cpp
     bridge/native/gamebridge_push_all.cpp
 )
+
+# P1 最小骨架：infra 运行时（命令队列/事件/能力/状态）+ game 时钟适配（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    infra/command_queue.cpp
+    infra/runtime.cpp
+    infra/events.cpp
+    infra/capabilities.cpp
+    infra/status.cpp
+    game/clock.cpp
+)

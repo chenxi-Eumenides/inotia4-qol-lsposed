@@ -134,8 +134,33 @@ _CORE_OVERRIDES = {
 }
 
 
+_TARGET_PREFIXES = (
+    ("contracts/", "contracts"),
+    ("game/", "game"),
+    ("infra/", "infra"),
+    ("hooks/", "hooks"),
+    ("patch/", "patch"),
+    ("domains/", "domains"),
+    ("features/", "features"),  # 必须先于 feature/（前缀包含关系）
+    ("products/", "products"),
+    ("host/", "host"),
+)
+
+
 def classify(rel: str) -> str:
-    """把 cpp 根下的相对路径映射到目标层；无法映射返回 'unknown'。"""
+    """把 cpp 根下的相对路径映射到目标层；无法映射返回 'unknown'。
+
+    目标目录（新架构）优先；其余走重构期映射（_classify_transition）。
+    """
+    for prefix, layer in _TARGET_PREFIXES:
+        if rel.startswith(prefix):
+            if prefix in ("domains/", "features/", "products/") and rel.count("/") > 1:
+                return layer + "/" + rel.split("/", 2)[1]
+            return layer
+    return _classify_transition(rel)
+
+
+def _classify_transition(rel: str) -> str:
     if rel in _ROOT_OVERRIDES:
         return _ROOT_OVERRIDES[rel]
     if "/" not in rel:

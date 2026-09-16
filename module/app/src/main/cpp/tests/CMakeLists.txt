@@ -205,3 +205,27 @@ target_include_directories(popup_enter_alias_tests PRIVATE
 )
 target_compile_features(popup_enter_alias_tests PRIVATE cxx_std_17)
 add_test(NAME popup_enter_alias_tests COMMAND popup_enter_alias_tests)
+
+# P1 最小骨架：infra 骨架 host 单测（快照/命令队列/事件/能力与状态，末尾追加）
+# 一个测试文件一个可执行目标（每个文件自带 main）；test_reset.cpp 提供聚合重置。
+set(INFRA_TEST_SOURCES
+    ${CPP_DIR}/infra/command_queue.cpp
+    ${CPP_DIR}/infra/runtime.cpp
+    ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
+    ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/infra/test_reset.cpp
+)
+find_package(Threads REQUIRED)
+foreach(infra_case snapshot command_queue events capabilities_status)
+    add_executable(infra_${infra_case}_tests
+        test_infra_${infra_case}.cpp
+        ${INFRA_TEST_SOURCES}
+    )
+    target_include_directories(infra_${infra_case}_tests PRIVATE
+        ${CPP_DIR}
+    )
+    target_compile_features(infra_${infra_case}_tests PRIVATE cxx_std_17)
+    target_link_libraries(infra_${infra_case}_tests PRIVATE Threads::Threads)
+    add_test(NAME infra_${infra_case}_tests COMMAND infra_${infra_case}_tests)
+endforeach()
