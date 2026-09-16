@@ -124,6 +124,7 @@ object NativeBridge {
     external fun nativeOpUnequip(role: Int, slot: Int): String
     external fun nativeOpSwitchPlayer(slot: Int): String
     external fun nativeOpTeleport(mapId: Int, x: Int, y: Int): String
+    external fun nativeOpTeleportEx(mapId: Int, x: Int, y: Int, force: Boolean): String
     external fun nativeOpRemoveItem(category: Int): String
     external fun nativeOpLearnAction(role: Int, actionId: Int, level: Int): String
     external fun nativeGetEventsJson(): String

@@ -168,8 +168,9 @@ std::string build_snapshot_json() {
     s += ",\"map_id\":" + std::to_string(current_map_id());
     void* hero = lead_member();
     if (hero != nullptr) {
-        s += ",\"x\":" + std::to_string(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_X));
-        s += ",\"y\":" + std::to_string(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_Y));
+        // API 坐标统一瓦片（B 方案）：像素 >> 4；与 units/interactives/exits 同单位
+        s += ",\"x\":" + std::to_string(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_X) >> 4);
+        s += ",\"y\":" + std::to_string(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_Y) >> 4);
     } else {
         s += ",\"x\":-1,\"y\":-1";
     }

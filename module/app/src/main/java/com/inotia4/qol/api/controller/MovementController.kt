@@ -16,10 +16,11 @@ class MovementController {
     @PostMapping("/api/world/movement/move_to")
     fun move(@RequestBody body: String): String {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        // API 坐标统一瓦片（B 方案）：输入瓦片索引，native 寻路仍收像素（tile*16+8 = tile 中心）
         val x = o.optInt("x", -1)
         val y = o.optInt("y", -1)
         if (x < 0 || y < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "x/y required")
-        return ControllerGuard.guard { ApiServices.action.move(x, y) }
+        return ControllerGuard.guard { ApiServices.action.move(x * 16 + 8, y * 16 + 8) }
     }
 
     @PostMapping("/api/world/movement/walk_dir")

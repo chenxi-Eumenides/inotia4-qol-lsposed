@@ -114,8 +114,9 @@ static std::string build_units_json_impl(int mode, bool include_charloc) {
                 }
                 if (emitted > 0) s += ",";
                 s += "{\"slot\":" + std::to_string(i);
-                s += ",\"x\":" + std::to_string(x);
-                s += ",\"y\":" + std::to_string(y);
+                // API 坐标统一瓦片（B 方案）：像素 >> 4；snapshot/exits/teleport 同单位
+                s += ",\"x\":" + std::to_string(x >> 4);
+                s += ",\"y\":" + std::to_string(y >> 4);
                 s += ",\"type\":" + std::to_string(type);
                 s += ",\"status\":" + std::to_string(status);
                 s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(obj)[C_LEVEL]));
@@ -176,8 +177,9 @@ static std::string build_units_json_impl(int mode, bool include_charloc) {
                     uint8_t* loc = cl_pool + i * CHARLOC_SIZE;
                     if (i > 0) s += ",";
                     s += "{\"f0\":" + std::to_string(static_cast<int>(loc[0]));
-                    s += ",\"x\":" + std::to_string(*reinterpret_cast<uint16_t*>(loc + 2));
-                    s += ",\"y\":" + std::to_string(*reinterpret_cast<uint16_t*>(loc + 4)) + "}";
+                    // API 坐标统一瓦片（B 方案）：像素 >> 4
+                    s += ",\"x\":" + std::to_string(*reinterpret_cast<uint16_t*>(loc + 2) >> 4);
+                    s += ",\"y\":" + std::to_string(*reinterpret_cast<uint16_t*>(loc + 4) >> 4) + "}";
                 }
                 s += "]";
             }

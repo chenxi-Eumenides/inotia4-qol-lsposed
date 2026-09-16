@@ -60,7 +60,7 @@
 |---|---|
 | `money` | 金币（实时） |
 | `map_id` | 实时地图 ID（MAPINFOBASE 记录下标，0-415） |
-| `x`/`y` | 玩家实时坐标（像素） |
+| `x`/`y` | 玩家实时坐标（**瓦片索引**；全 API 坐标统一瓦片，像素 = tile×16+8） |
 | `active_quest` | 当前激活任务 ID |
 | `leader_slot` | 当前主控角色对应出战槽 |
 | `party_count` | 出战人数 |
@@ -748,7 +748,7 @@
 
 **返回格式**：`{ "exits": [ { "x": 24, "y": 19, "targetMapId": 30, "targetX": 2, "targetY": 10 }, ... ] }`
 
-**字段**：`x`/`y` = 出口瓦片坐标（像素 = ×16）；`targetMapId` = 目标地图 id（MAPINFOBASE 索引）；`targetX`/`targetY` = 目标点瓦片坐标。
+**字段**：`x`/`y` = 出口瓦片坐标（全 API 坐标统一瓦片；像素 = tile×16+8）；`targetMapId` = 目标地图 id（MAPINFOBASE 索引）；`targetX`/`targetY` = 目标点瓦片坐标。
 
 #### 场景单位
 
@@ -759,12 +759,13 @@
 **返回格式**：
 ```json
 { "units": [ { "slot": 0, "status": 1, "type": 1, "level": 27, "hp": 10598, "mp": 200,
-  "x": 320, "y": 480, "name": "凯恩", "distance": 0, "nearest_distance": -1 },
+  "x": 20, "y": 30, "name": "凯恩", "distance": 0, "nearest_distance": -1 },
   { "slot": 7, "status": 2, "type": 2, "level": 1, "hp": 792, "mp": 200,
-  "x": 312, "y": 152, "name": "路障", "func_display": 120, "interactable": true, "distance": 1 }, ... ] }
+  "x": 19, "y": 9, "name": "路障", "func_display": 120, "interactable": true, "distance": 1 }, ... ] }
 ```
 
 **注意**：
+- `x`/`y` 为**瓦片索引**（全 API 坐标统一瓦片；像素 = tile×16+8）。
 - `distance` = 玩家到「能紧贴该对象的相邻可达格」的最短 BFS 路径长度（对象自身 tile 被单位阻挡标记恒不可达，故取上下左右 4 邻格中可达者的最小深度）；4 邻格全部不可达 → `distance=-1` 且附 `nearest_distance`（最近可达点距离）。
 - type==2 装饰物额外输出 `func_display`（npc+0xa u16，NPCSYSTEM_CheckFunctionDisplay 入参）+ `interactable`（funcDisplay 非不可交互，即 CheckFunctionDisplay≠2）。可交互装饰物如路障（120）/宝箱（36）；纯装饰如火把（127）/地图出口（371）/巨石。
 
@@ -814,7 +815,7 @@
 
 `POST /api/world/movement/move_to`
 
-**用途**：寻路移动玩家到目标像素坐标（自研 BFS 导航，后台线程逐帧移动，正常走路非瞬移）。
+**用途**：寻路移动玩家到目标瓦片坐标（自研 BFS 导航，后台线程逐帧移动，正常走路非瞬移）。`x`/`y` 为**瓦片索引**（全 API 坐标统一瓦片；native 寻路内部以 tile 中心像素 tile×16+8 为目标）。
 
 **请求格式**：
 ```json
@@ -918,7 +919,7 @@
 { "map_id": 30, "src": "static", "exits": [ { "x": 24, "y": 19, "targetMapId": 30, "targetX": 2, "targetY": 10 }, ... ] }
 ```
 
-**字段**：`x`/`y` = 出口瓦片坐标（像素 = ×16）；`targetMapId` = 目标地图 id（MAPINFOBASE 记录下标）；`targetX`/`targetY` = 目标点瓦片坐标。
+**字段**：`x`/`y` = 出口瓦片坐标（全 API 坐标统一瓦片；像素 = tile×16+8）；`targetMapId` = 目标地图 id（MAPINFOBASE 记录下标）；`targetX`/`targetY` = 目标点瓦片坐标。
 
 **注意**：出口条目 6 字节逆向完成（2026-08-16）：byte5=目标地图 ID、byte2-3=目标点坐标；当前地图出口见 §3.1 `/api/world/map/exits`。
 ---
@@ -1799,11 +1800,16 @@
 
 `POST /api/op/movement/teleport`
 
-**请求格式**：`{ "map_id": 20, "x": 15, "y": 10 }`
+**请求格式**：`{ "map_id": 20, "x": 15, "y": 10 }`（可选 `"force": true`）
 
-**返回格式**：`{"ok":true,"state":<Map 模型>}`
+**返回格式**：`{"ok":true,"state":<Map 模型>}`；落点被拒时 `{"ok":false,"error":"tile (x,y) out of map bounds WxH (force to override)"}` 或 `"tile (x,y) not walkable (force to override)"`。
 
-**注意**：nativeOpTeleport 传送至指定地图坐标（v0.5.47 接线，D4）；`map_id`/`x`/`y` 均必填。**坐标语义（P1-47 真机验证）**：`map_id>0` 时 `x`/`y` 为**瓦片索引**（走 fn_change_map 切图）；`map_id=0` 时 `x`/`y` 为**像素坐标**（走 fn_set_position 原地传送）。
+**注意**：nativeOpTeleportEx 传送至指定地图坐标（经 MAPCHANGE_Set + GAMESTATE_SetState(MAP_CHANGE) 官方切图状态机，在游戏主线程发起；旧的 fn_change_map 直调与 fn_set_position 同图瞬移因镜头体系断裂已废弃）。nativeOpTeleport（三参）保留，等价于 `force:false`。`map_id`/`x`/`y` 均必填。**坐标语义（全 API 坐标统一瓦片）**：`x`/`y` 为**瓦片索引**；`map_id>0` 传送至目标图，`map_id=0` 表示当前图（同图重入）。
+
+**落点校验**：默认校验落点，`force: true` 跳过。
+- 地界：目标图越出静态数据 `width`/`height` 直接拒绝（引擎不校验地界，越界会把角色放到地图数据之外，表现为角色不出现且不可操作，需重进档恢复）。
+- 阻挡：静态瓦片矩阵 `TILE_BLOCK_BIT`（bit3，与寻路同口径）置位时拒绝。
+- 目标图静态矩阵缺失时无法校验，放行。
 
 ### 8.2 未实现
 

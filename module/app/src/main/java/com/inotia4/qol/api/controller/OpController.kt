@@ -95,7 +95,9 @@ class OpController {
         val x = o.optInt("x", -1)
         val y = o.optInt("y", -1)
         if (mapId < 0 || x < 0 || y < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "map_id/x/y required")
-        return ControllerGuard.guard { ApiServices.op.teleport(mapId, x, y) }
+        // force=true 跳过落点瓦片阻挡校验（默认校验静态瓦片矩阵覆盖范围内的阻挡位）
+        val force = o.optBoolean("force", false)
+        return ControllerGuard.guard { ApiServices.op.teleport(mapId, x, y, force) }
     }
 
     // ---- 已实现 OP 端点（v0.5.46 迁移自 CharacterController，路由全路径注解逐字保留） ----

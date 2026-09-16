@@ -44,7 +44,13 @@ Java_com_inotia4_qol_NativeBridge_nativeOpPartySwap(JNIEnv* env, jclass, jint a,
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpTeleport(JNIEnv* env, jclass, jint mapId, jint x, jint y) {
-    return op_result(env, "op_teleport", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y)), data_op_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y)));
+    // 旧三参导出保留（JNI 面冻结），固定 force=false；新调用方走 nativeOpTeleportEx
+    return op_result(env, "op_teleport", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y)), data_op_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y), false));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeOpTeleportEx(JNIEnv* env, jclass, jint mapId, jint x, jint y, jboolean force) {
+    return op_result(env, "op_teleport_ex", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y) + " force=" + str_of(static_cast<int>(force))), data_op_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y), force == JNI_TRUE));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
