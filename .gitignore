@@ -73,6 +73,7 @@ log/
 # ---- 其他文件 ----
 docs/history/experiments/改版作者的一些探索文档
 
-# ---- 根目录仅 README 入库；其余根级 md（本地设备信息/代理规则/笔记）不提交 ----
+# ---- 根目录仅 README 与目标架构设计书入库；其余根级 md（本地设备信息/代理规则/笔记）不提交 ----
 /*.md
 !/README.md
+!/ARCHITECTURE.md
