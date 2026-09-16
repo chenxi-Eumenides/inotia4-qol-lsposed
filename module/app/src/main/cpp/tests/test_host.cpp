@@ -17,6 +17,7 @@
 #include "game_nav.h"
 #include "game_save_preflight.h"
 #include "game_tiles.h"
+#include "core/native/call_patch.h"
 #include "feature/extension_bag/model/ownership_ledger.h"
 #include "core/native/stack_codec.h"
 #include "core/native/sell_price.h"
@@ -78,8 +79,30 @@ static void* p7_find_recursive_original_stub(int32_t category) {
     return nullptr;
 }
 
-static void test_p7_stage4_find_item_poc() {
-    bool recursive_guard = false;
+// call_patch 通用字替换：栈上变量作 patch 目标（host Linux 允许栈页 mprotect RWX）。
+// 覆盖 fail-closed 拒判 / 安装改写 / 幂等 / mismatch 不改写 / 还原。
+static void test_call_patch_word() {
+    constexpr uint32_t kOrig = 0x34fffde0u;   // CHAR_Move 推动 cbz 原字（语义示例）
+    constexpr uint32_t kNop = 0xd503201fu;    // ARM64 NOP
+
+    CHECK(call_patch_install_word(0, kOrig, kNop) == false);        // addr=0 拒绝
+    CHECK(call_patch_revert_word(0, kOrig) == false);               // addr=0 拒绝
+
+    uint32_t word = kOrig;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(&word);
+    CHECK(call_patch_install_word(addr, kOrig, kNop) == true);      // 安装成功
+    CHECK(word == kNop);                                            // 值已被改写
+    CHECK(call_patch_install_word(addr, kOrig, kNop) == true);      // 幂等：已安装
+    CHECK(word == kNop);
+    CHECK(call_patch_install_word(addr, 0x11111111u, 0x22222222u) == false);  // mismatch 拒绝
+    CHECK(word == kNop);                                            // fail-closed：未改写
+    CHECK(call_patch_revert_word(addr, kOrig) == true);             // 还原成功
+    CHECK(word == kOrig);
+    CHECK(call_patch_revert_word(addr, kOrig) == true);             // 幂等：已还原
+    CHECK(word == kOrig);
+}
+
+static void test_p7_stage4_find_item_poc() {    bool recursive_guard = false;
     g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x101));
     g_find_extension_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x202));
     g_find_original_calls = 0;
@@ -3071,6 +3094,7 @@ static void test_p45_isolation() {
 }
 
 int main() {
+    test_call_patch_word();
     test_p7_stage4_find_item_poc();
     test_world_teleport_target_map_id();
     test_json_escape();

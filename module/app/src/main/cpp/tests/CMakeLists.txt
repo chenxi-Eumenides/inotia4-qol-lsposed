@@ -16,6 +16,8 @@ add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
     ${CPP_DIR}/feature/patch/inventory_find_item_poc.cpp
+    ${CPP_DIR}/core/native/call_patch.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
     ${CPP_DIR}/core/native/game_json.cpp
     ${CPP_DIR}/core/native/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp

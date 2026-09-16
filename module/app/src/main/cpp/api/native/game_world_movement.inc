@@ -250,3 +250,45 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
     return !map_link_check(n->ch);
 }
 
+// 推动增强：两个 patch 协同放开 CHAR_Move 推动分支的 blocker 资格限制。
+// 原版 blocker 须同时满足「在队伍（CHAR_GetPartyIndex(blocker)!=-1）」且「站立」：
+//   patch B：BL 重定向 CHAR_Move+0x168 的 bl CHAR_GetPartyIndex → 模块 wrapper。
+//            怪物(type=1)伪装为队伍成员使其可推；其余走原函数（队友可推、NPC type=2
+//            保持 -1 不可推——场景设施不应被推走）。
+//   patch A：CHAR_Move+0x180 站立检查 cbz 置 NOP。战斗中/行动中的怪物非站立，
+//            不放开则推不动（真机已验证：仅 patch A 时怪物仍不可推）。
+// wrapper 在游戏主线程 CHAR_Move 调用链内执行：只读 C_TYPE + 调 fn_* 纯内存读，无线程安全问题。
+// 资格矩阵（需求规格 2026-09-16）：怪物/队友/召唤物可推，场景设施（商人等 NPC）不可推。
+// 注意 C_TYPE 语义：0=主控、1=怪物、2=队友/NPC/装饰物/召唤物混合——type=2 不能直接拒，
+// 队友（祭司/拉卡诺斯 units 实测 type=2）必须靠 GetPartyIndex 区分。
+static int push_all_party_filter(void* ch) {
+    if (ch == nullptr) return -1;
+    const uint8_t type = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(ch) + C_TYPE);
+    if (type == 1) return 0;   // 怪物：可推（本功能新增语义）
+    // type=0/2：主控、队友、召唤物、NPC 混合。召唤物不在队伍（原判 -1），经
+    // CHAR_IsActivePlayerGroup（主控及其召唤物群体）放开；其余交原版判定——
+    // 队友 GetPartyIndex>=0 可推，场景设施返回 -1 不可推。
+    if (fn_char_is_active_player_group != nullptr &&
+        fn_char_is_active_player_group(ch) != 0) {
+        return 0;
+    }
+    return fn_char_get_party_index(ch);
+}
+
+std::string data_op_push_all(bool on) {
+    if (g_base == 0) return op_err("game not loaded");
+    const uintptr_t party_addr = g_base + F_CHAR_MOVE_VMA + CHAR_MOVE_PUSH_PARTY_BL_OFF;
+    const uintptr_t stand_addr = g_base + F_CHAR_MOVE_VMA + CHAR_MOVE_PUSH_STAND_CBZ_OFF;
+    // 先装恢复侧 patch 再装资格 patch，关时逆序，保证任一状态下两 patch 同相。
+    const bool b_ok = on
+        ? call_patch_install_bl(party_addr, CHAR_MOVE_PUSH_PARTY_BL_WORD,
+                                reinterpret_cast<void*>(&push_all_party_filter))
+        : call_patch_revert_bl(party_addr, CHAR_MOVE_PUSH_PARTY_BL_WORD);
+    if (!b_ok) return op_err("party-gate patch failed (word mismatch or mprotect denied)");
+    const bool a_ok = on
+        ? call_patch_install_word(stand_addr, CHAR_MOVE_PUSH_STAND_CBZ_WORD, ARM64_NOP_WORD)
+        : call_patch_revert_word(stand_addr, CHAR_MOVE_PUSH_STAND_CBZ_WORD);
+    if (!a_ok) return op_err("stand-check patch failed (word mismatch or mprotect denied)");
+    return op_ok();
+}
+

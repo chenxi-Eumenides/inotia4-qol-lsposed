@@ -15,3 +15,10 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
 
 // 恢复 call_addr 处原始指令字 original_word。
 bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word);
+
+// 通用指令字替换（如条件分支→NOP）。fail-closed：当前指令字 != expected_word 时
+// 不改写并返回 false；当前指令字 == new_word 视为已安装，幂等返回 true。
+bool call_patch_install_word(uintptr_t addr, uint32_t expected_word, uint32_t new_word);
+
+// 恢复 addr 处原始指令字 original_word；当前指令字已是 original_word 时幂等返回 true。
+bool call_patch_revert_word(uintptr_t addr, uint32_t original_word);

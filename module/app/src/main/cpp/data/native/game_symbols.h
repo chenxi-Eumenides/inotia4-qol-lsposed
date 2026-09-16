@@ -617,6 +617,18 @@ constexpr uintptr_t F_CHANGE_MAP_VMA = 0x114fc4;       // void (int32, int32, in
 // ---- 合法操作函数 VMA（v0.3.1，玩家游戏内可做的事，见 control-capability.md §5.1）----
 constexpr uintptr_t F_MOVE_AS_PATH_VMA = 0xe9db8;      // int (void*) 沿已存路径移动（读 +0x2f0 PATHLIST）
 constexpr uintptr_t F_CHAR_MOVE_VMA = 0xe9808;         // int (void*, int, int*, u8) 方向键移动（mode 0-3=上/下/右/左，delta 像素/帧，flag 方向键状态）
+// 推动增强 patch 点（CHAR_Move + 0x180，2026-09-16 反汇编确证）：
+// 原指令 `cbz w0, +0xe9944`（CHAR_IsCurrentActionStand(blocker)==0 → 不推）。
+// 置 NOP 后 blocker 无论动作状态都进入推动分支（3 候选方向 SearchPath + SetActionID(2)），
+// 使主控/队友移动可推开非站立单位（战斗中怪物、NPC 等）。fail-closed：字不匹配即拒装。
+constexpr uint32_t CHAR_MOVE_PUSH_STAND_CBZ_OFF = 0x180;
+constexpr uint32_t CHAR_MOVE_PUSH_STAND_CBZ_WORD = 0x34fffde0;  // cbz w0, 0xe9944
+constexpr uint32_t ARM64_NOP_WORD = 0xd503201f;
+// 推动分支的队伍闸门（CHAR_Move + 0x168）：`bl CHAR_GetPartyIndex(blocker)`。
+// blocker 不在队伍（怪物/NPC）→ e9978 `b.eq` 直接不推。BL 重定向到模块 wrapper：
+// 怪物(type=1)伪装为队伍成员使其可推，其余保持原判（队友可推、NPC type=2 仍 -1 不可推）。
+constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_OFF = 0x168;
+constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_WORD = 0x97ffcc28;   // bl 0xdca10
 constexpr uintptr_t F_CHAR_PICK_ITEM_ALL_VMA = 0xec4d8; // int (void*, int32_t) 拾取范围内所有掉落物（CHAR_PickItemAll，官方移动按键链 GAMESTATE_PressKeyPlay 0x9d10c 以半径 0x18=24px 调用；后台线程调用会触发拾取音效 SOUNDSYSTEM_Play 空句柄崩溃，模块改用 nav_pick_items 复刻数据路径跳过音效）
 constexpr uintptr_t F_MEM_MALLOC_VMA = 0xa8d94;         // void* (size_t) 游戏堆分配（节点须用游戏堆，回调 CHAR_ActivePickupEvent 内部 MEM_Free 释放，跨堆 free 会崩）
 constexpr uintptr_t F_NOTIFIER_ADD_VMA = 0x11e1b8;     // void (int type, int seq, void* callback, void* data) 延迟回调入队（NOTIFIER_Add→Create+AddTail，主线程 NOTIFIER_Process 回调；type=1 拾取，seq=0/2/4 递增）

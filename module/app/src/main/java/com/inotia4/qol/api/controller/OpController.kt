@@ -100,6 +100,14 @@ class OpController {
         return ControllerGuard.guard { ApiServices.op.teleport(mapId, x, y, force) }
     }
 
+    @PostMapping("/api/op/movement/push_all")
+    fun pushAll(@RequestBody body: String): String {
+        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        if (!o.has("on")) throw ApiException(StatusCode.SC_BAD_REQUEST, "on required")
+        val on = o.optBoolean("on", false)
+        return ControllerGuard.guard { ApiServices.op.pushAll(on) }
+    }
+
     // ---- 已实现 OP 端点（v0.5.46 迁移自 CharacterController，路由全路径注解逐字保留） ----
 
     @PostMapping("/api/op/character/{role}/hp")

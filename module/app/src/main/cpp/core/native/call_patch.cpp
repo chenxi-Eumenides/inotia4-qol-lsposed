@@ -210,3 +210,33 @@ bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word) {
                  reinterpret_cast<void*>(call_addr), original_word);
     return true;
 }
+
+bool call_patch_install_word(uintptr_t addr, uint32_t expected_word, uint32_t new_word) {
+    if (addr == 0) return false;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(addr);
+    if (current == new_word) return true;  // 幂等：已安装
+    if (current != expected_word) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "word patch mismatch addr=%p got=0x%08x expected=0x%08x",
+                      reinterpret_cast<void*>(addr), current, expected_word);
+        return false;  // fail-closed：不改写任何字节
+    }
+    if (!write_code_word(addr, new_word)) return false;
+    QOL_LOG_INFO(QolDomain::kPlatform, "patched word addr=%p new=0x%08x",
+                 reinterpret_cast<void*>(addr), new_word);
+    return true;
+}
+
+bool call_patch_revert_word(uintptr_t addr, uint32_t original_word) {
+    if (addr == 0) return false;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(addr);
+    if (current == original_word) return true;  // 幂等：已还原
+    if (!write_code_word(addr, original_word)) return false;
+    QOL_LOG_INFO(QolDomain::kPlatform, "reverted word addr=%p original=0x%08x",
+                 reinterpret_cast<void*>(addr), original_word);
+    return true;
+}
