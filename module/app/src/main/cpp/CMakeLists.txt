@@ -189,3 +189,11 @@ target_sources(gamebridge PRIVATE
     host/variant_json.cpp
     bridge/native/gamebridge_variant.cpp
 )
+
+# P2 纵向样板基础层：hooks 资源登记/安装引擎 + infra 配置与命令端口（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    hooks/registry.cpp
+    hooks/install.cpp
+    infra/config.cpp
+    infra/commands.cpp
+)

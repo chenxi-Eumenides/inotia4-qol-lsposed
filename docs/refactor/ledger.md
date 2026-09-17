@@ -10,7 +10,7 @@
 | P0 | 校验脚本族 + 基线棘轮冻结 | ✅ 完成 | `check_arch.py` 可运行；基线冻结 124 条（提交 `050e93c`） |
 | — | 目标架构设计书入库 | ✅ 完成 | 根目录 `ARCHITECTURE.md` v0.3（提交 `1fa9ef2`） |
 | P1 | 骨架：`contracts/` + `infra/` + `game/`；最小诊断接口 | ✅ 完成 | host 20/20（`e472d52`）；`GET /api/system/features` 与 `/api/health`（加法扩展 ready/variant）真机通过（`18f0a91` + 后续提交，卡见 `verification.md` VM-P1-02/03） |
-| P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端） | ⬜ 未开始 | 样板真机验收卡通过；状态 API 可见 |
+| P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | 🔄 进行中 | 基础层完成（contracts/hooks/infra，host 22/22；设计 v0.3.2/v0.3.3）；待集成与真机卡 VM-P2-01 |
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ⬜ 未开始 | 故障注入与并发测试通过；内部接口冻结 |
 | P4 | 批量迁移其余插件（内置静态轨） | ⬜ 未开始 | 每插件：单测 + 验收卡；豁免清零 |
 | P5 | `products/` + `host/` 收口；脚本收紧；删除旧路径 | ⬜ 未开始 | `check_*` 全绿、双轨消失 |

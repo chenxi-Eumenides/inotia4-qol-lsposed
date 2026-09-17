@@ -229,3 +229,34 @@ foreach(infra_case snapshot command_queue events capabilities_status)
     target_link_libraries(infra_${infra_case}_tests PRIVATE Threads::Threads)
     add_test(NAME infra_${infra_case}_tests COMMAND infra_${infra_case}_tests)
 endforeach()
+
+# P2 纵向样板基础层：hooks 资源登记/安装 host 测试（末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 按 §3.3 使用字段名 requires，而 host 编译器
+# 默认 C++20（requires 是关键字）；Android 构建本身固定 -std=c++17，这里与之一致。
+add_executable(hooks_registry_tests
+    test_hooks_registry.cpp
+    ${CPP_DIR}/hooks/registry.cpp
+    ${CPP_DIR}/hooks/install.cpp
+)
+target_include_directories(hooks_registry_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(hooks_registry_tests PRIVATE cxx_std_17)
+set_target_properties(hooks_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME hooks_registry_tests COMMAND hooks_registry_tests)
+
+# P2 纵向样板基础层：infra 配置与命令端口 host 测试（末尾追加）
+add_executable(infra_config_commands_tests
+    test_infra_config_commands.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/commands.cpp
+    ${CPP_DIR}/infra/command_queue.cpp
+    ${CPP_DIR}/infra/events.cpp
+)
+target_include_directories(infra_config_commands_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(infra_config_commands_tests PRIVATE cxx_std_17)
+set_target_properties(infra_config_commands_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(infra_config_commands_tests PRIVATE Threads::Threads)
+add_test(NAME infra_config_commands_tests COMMAND infra_config_commands_tests)

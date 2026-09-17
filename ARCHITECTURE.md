@@ -11,6 +11,8 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.3 | P2 实施校准：`PluginDescriptor` 增加 `on_resource_ready`——宿主声明式安装后须把 backup（原函数入口）交还所有者，否则 wrapper 无法调用原函数 |
+| v0.3.2 | P2 实施校准：资源声明补充 `handler`（所有者提供的替换入口）——否则「宿主声明式安装」在入口 hook 机制下无可执行体 |
 | v0.3.1 | 实施校准（P1）：诊断接口按实测收敛——`features` 为 `{"ok":true,"features":[...]}` 信封并含 `version/resource_count`；`/api/health` 以加法扩展承载 `ready/variant`；`safeMode` 移至 P6 |
 | v0.3 | 闭合第二轮审阅：contracts 定为 L0 中立契约层、跨线程访问矩阵、能力撤销级联事务、hook 物理归还与 tombstone、外部 Host API 只读默认档、资源异步安装状态机、分派三段式与短路唯一、required/optional × failure 状态映射、外部更新仅重启生效、迁移阶段依赖修正 |
 
@@ -196,6 +198,7 @@ struct PluginDescriptor {
     void (*on_enabled)(PluginContext&);    // 可选；禁止资源操作
     void (*on_disabled)(PluginContext&);   // 可选；禁止资源操作
     void (*fill_status)(PluginStatusOut&); // 宿主传入 out 参数填充
+    void (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup); // 可选；资源安装成功后宿主通知（backup = 原函数入口）
 };
 ```
 
@@ -204,6 +207,7 @@ struct PluginDescriptor {
 - **存活期**：描述符内的字符串、数组、函数指针均为**静态存储**，生命周期 ≥ 进程；宿主注册时可直接引用。
 - **状态所有权**：`fill_status` 用宿主传入的 out 参数填充，避免跨边界所有权问题。
 - **资源与能力的启停由宿主通用执行**（声明式）；`install/deactivate` 只做插件自身初始化与清理；`on_enabled/on_disabled` 不得申请/释放资源。
+- **backup 交还**：宿主在资源安装成功后经 `on_resource_ready` 把原函数入口交还所有者；插件不得自行安装资源。
 - 拓扑排序输入 = `requires` + `provides`；缺 `requires` → `blocked`；缺 `optional_requires` → `degraded`。
 
 ### 3.4 能力契约与命令端口
@@ -351,8 +355,11 @@ struct ResourceDescriptor {
     const char* reason;        // 选择该机制的理由
     const char* gate;          // 开关配置键
     uint32_t    step_budget;   // 安装/还原允许的帧数预算
+    void*       handler;       // 所有者提供的替换入口（入口 hook/patch 的 wrapper）；共享资源为 nullptr
 };
 ```
+
+`handler` 是声明式安装的执行体：宿主按 `mechanism` 选择机制引擎并把 `handler` 交给它，不解释其语义（§3.3「资源与能力的启停由宿主通用执行」）。
 
 登记表是**代码事实**，由 `check_resources.py` 汇总并与文档表比对。
 
