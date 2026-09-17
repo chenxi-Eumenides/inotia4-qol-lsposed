@@ -2,6 +2,7 @@
 
 #include "contracts/commands.h"
 #include "infra/commands.h"
+#include "infra/config.h"
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, jint bag, jint slot, jint equipSlot) {
@@ -200,6 +201,9 @@ Java_com_inotia4_qol_NativeBridge_nativeSetExtensionBagEnabled(JNIEnv*, jclass, 
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetCustomRecipeEnabled(JNIEnv*, jclass, jboolean enabled) {
-    return custom_recipe::set_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+    // 迁移为配置门禁单一写者（名称/签名冻结）：写 customRecipeEnabled + 广播；宿主帧步进
+    // sync_gates 据此安装/还原 craft_ui 的 UIMix hook 与 custom_recipe 的表注入所有权。
+    return qol::infra::config_set_bool("customRecipeEnabled", enabled == JNI_TRUE) ? JNI_TRUE
+                                                                                   : JNI_FALSE;
 }
 

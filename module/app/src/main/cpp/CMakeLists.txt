@@ -135,13 +135,13 @@ target_sources(gamebridge PRIVATE
     core/native/game_feature.cpp
 )
 
-# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/UI hook，末尾追加，不改上方既有行）
+# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     features/custom_recipe/catalog.cpp
     features/custom_recipe/rules.cpp
     features/custom_recipe/table.cpp
-    feature/custom_recipe/custom_recipe_api.cpp
-    feature/craft_ui/craft_ui_hooks.cpp
+    features/custom_recipe/feature.cpp
+    features/custom_recipe/plugin.cpp
 )
 
 # 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
@@ -152,10 +152,12 @@ target_sources(gamebridge PRIVATE
     features/text_layer/plugin.cpp
 )
 
-# 合成器界面能力层（craft_ui）：UIMix 控件读写与界面动作的唯一实现处。
+# 合成器界面层（craft_ui 插件）：UIMix 控件写入收口 game/access/craft + 12 条入口 hook 声明。
 # 宝石合成与自定义配方共用；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/craft_ui/craft_ui.cpp
+    game/access/craft.cpp
+    features/craft_ui/feature.cpp
+    features/craft_ui/plugin.cpp
 )
 
 # 模块替换 PopupState enter 回调后的 UI 态反查表（末尾追加，不改上方既有行）

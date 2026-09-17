@@ -4,8 +4,8 @@
 
 // 自定义合成「结果层」能力契约（ARCHITECTURE.md §3.4；C2 Step 2）。
 //
-// 定位：把 feature/custom_recipe 的合成结果层（3 格隐式配方 + 宝石升阶）暴露为只读/纯决策
-// 能力，供界面层 feature/craft_ui 作为消费者经能力注册表获取，消除 craft_ui ↔ custom_recipe
+// 定位：把 features/custom_recipe 的合成结果层（3 格隐式配方 + 宝石升阶）暴露为只读/纯决策
+// 能力，供界面层 features/craft_ui 作为消费者经能力注册表获取，消除 craft_ui ↔ custom_recipe
 // 的源码级双向 include（C2 Step 3/4 接线；本文件当前只声明、不注册）。
 //
 // 边界（界面归界面，结果归结果）：
@@ -21,7 +21,7 @@ constexpr const char* kCraftResultCapabilityId = "craft_result";
 constexpr int32_t kCraftResultVersionMajor = 1;
 constexpr int32_t kCraftResultVersionMinor = 0;
 
-// 放料（3 格隐式配方）结果（与 feature/custom_recipe 现枚举同名同值）。
+// 放料（3 格隐式配方）结果（与 features/custom_recipe 现枚举同名同值）。
 enum class PlaceOutcome : uint8_t {
     kNotMine = 0,        // 不是 3 格模式 → 调用方转调原版
     kPlaced = 1,         // 已放入；调用方随即选中下一空格

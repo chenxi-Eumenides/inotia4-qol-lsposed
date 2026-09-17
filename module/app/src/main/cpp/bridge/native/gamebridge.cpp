@@ -65,8 +65,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
         // 世界传送已迁移为 world_teleport 插件：入口 patch 与 native_choice 安装
         // 由插件 install 负责（assembly_init 装配）。
-        craft_ui_install_if_ready();  // 合成器界面层：全部 UIMix hook 的唯一挂载处（界面归界面）
-        custom_recipe::register_dynamic_recipes();  // 动态特殊装备配方：进档后随机重建材料映射
+        // 合成器界面层已迁移为 craft_ui 插件（assembly 注册，声明式安装 12 条 UIMix hook）；
+        // 结果层 custom_recipe 插件 provides `craft_result`，动态配方重建在插件 install 内注册。
         qol::host::assembly_init();  // 插件装配：注册内置静态插件 + 声明式安装资源 + 命令帧排空
         // 特殊装备解锁已迁移为 special_equip 插件（assembly 注册，宿主声明式安装两个入口 hook）。
     }

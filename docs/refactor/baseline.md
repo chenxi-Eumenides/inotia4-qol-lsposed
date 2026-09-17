@@ -35,7 +35,7 @@
 | `features/attribute_range` | 4 |
 | `features/autosell` | 12 |
 | `features/craft_ui` | 4 |
-| `features/custom_recipe` | 11 |
+| `features/custom_recipe` | 10 |
 | `features/extension_bag` | 32 |
 | `features/inventory_hooks` | 2 |
 | `features/patch` | 9 |
@@ -48,12 +48,12 @@
 | `features/text_layer` | 4 |
 | `features/ui` | 31 |
 | `features/world_teleport` | 6 |
-| `game` | 37 |
+| `game` | 39 |
 | `hooks` | 8 |
 | `host` | 28 |
 | `infra` | 45 |
 | `patch` | 7 |
-| **合计** | **327** |
+| **合计** | **328** |
 
 ### 1.2 迁移期映射摘要
 
@@ -134,11 +134,11 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 145 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 143 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `infra` | 31 |
+| `host` | `infra` | 32 |
 | `features/ui` | `game` | 22 |
 | `features/ui` | `infra` | 13 |
 | `host` | `contracts` | 12 |
@@ -149,10 +149,10 @@
 | `infra` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `domains/world` | `game` | 7 |
+| `features/custom_recipe` | `contracts` | 7 |
+| `features/custom_recipe` | `infra` | 7 |
 | `features/extension_bag` | `contracts` | 7 |
 | `host` | `hooks` | 7 |
-| `host` | `patch` | 7 |
-| `features/extension_bag` | `infra` | 6 |
 
 ### 2.2 include 环
 
@@ -160,9 +160,9 @@
 
 ## 3. 基线债务
 
-基线共 3 组、81 条。
+基线共 3 组、72 条。
 
-### layer_direction（50 条）
+### layer_direction（43 条）
 
 - `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|domains/character → domains/inventory`
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
@@ -184,9 +184,9 @@
 - `layer_direction|core/native/game_variant.cpp|core/native/qol_log.h|game → infra`
 - `layer_direction|core/native/save_enter.cpp|core/native/call_patch.h|infra → patch`
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
-- …（其余 30 条省略）
+- …（其余 23 条省略）
 
-### offsets_symbols_header（23 条）
+### offsets_symbols_header（21 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
@@ -194,9 +194,6 @@
 - `offsets_symbols_header|core/native/inventory_trade.cpp|data/native/game_symbols.h|domains/inventory 层引用符号头`
 - `offsets_symbols_header|core/native/save_enter.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/save_exit.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|feature/craft_ui/craft_ui.cpp|data/native/game_symbols.h|features/craft_ui 层引用符号头`
-- `offsets_symbols_header|feature/craft_ui/craft_ui_hooks.cpp|data/native/game_symbols.h|features/craft_ui 层引用符号头`
-- `offsets_symbols_header|feature/custom_recipe/custom_recipe_api.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头`
 - `offsets_symbols_header|feature/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
@@ -208,7 +205,10 @@
 - `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_savebackup.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- …（其余 3 条省略）
+- `offsets_symbols_header|feature/ui/game_ui_settings.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/native_choice.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
+- `offsets_symbols_header|features/custom_recipe/feature.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头`
+- …（其余 1 条省略）
 
 ### resource_unknown_symbol（8 条）
 
@@ -225,15 +225,15 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 24 个 / 文件 15 个 / 去重符号 11 个 / 无法归属 8 个。
+扫描合计：安装点 23 个 / 文件 14 个 / 去重符号 10 个 / 无法归属 8 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 5 | 8 | 5 |
+| entry hook | 4 | 7 | 4 |
 | call patch | 3 | 7 | 4 |
 | ptr slot | 8 | 9 | 4 |
 
-去重符号 → 文件（前 11 条，共 11 条；`--verbose` 列全部）：
+去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_SAVESLOT_DELETE_VMA` → `features/save_backup/plugin.cpp`
@@ -244,7 +244,6 @@
 - `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `feature/extension_bag/extension_bag_equip.inc`
 - `F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA` → `feature/patch/game_patch.cpp`
-- `F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA` → `feature/craft_ui/craft_ui_hooks.cpp`
 - `F_UISTORE_SELL_ITEM_VMA` → `feature/extension_bag/extension_bag_store.inc`
 
 ## 5. JNI 面
@@ -259,25 +258,24 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 5 个）与已迁移 `features/*`（12 个）共 17 个域。
+旧 `feature/*`（待迁移 3 个）与已迁移 `features/*`（13 个）共 16 个域。
 
-### 6.1 旧 `feature/*`（待迁移，5）
+### 6.1 旧 `feature/*`（待迁移，3）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `craft_ui` | `features/craft_ui` | 4 |
-| `custom_recipe` | `features/custom_recipe` | 5 |
 | `extension_bag` | `features/extension_bag` | 32 |
 | `patch` | `features/patch` | 9 |
 | `ui` | `features/ui` | 31 |
 
-### 6.2 已迁移 `features/*`（12）
+### 6.2 已迁移 `features/*`（13）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_range` | `features/attribute_range` | 4 |
 | `autosell` | `features/autosell` | 12 |
-| `custom_recipe` | `features/custom_recipe` | 6 |
+| `craft_ui` | `features/craft_ui` | 4 |
+| `custom_recipe` | `features/custom_recipe` | 10 |
 | `inventory_hooks` | `features/inventory_hooks` | 2 |
 | `push_all` | `features/push_all` | 6 |
 | `quest` | `features/quest` | 4 |

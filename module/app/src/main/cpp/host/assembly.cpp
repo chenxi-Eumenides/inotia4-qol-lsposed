@@ -8,6 +8,8 @@
 #include "feature/patch/native_inventory_hook.h"
 #include "features/attribute_range/plugin.h"
 #include "features/autosell/plugin.h"
+#include "features/craft_ui/plugin.h"
+#include "features/custom_recipe/plugin.h"
 #include "features/inventory_hooks/plugin.h"
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
@@ -196,6 +198,17 @@ bool assembly_init() {
     // world_teleport：零资源常驻插件；install 安装入口指令 patch + native_choice（legacy 过渡机制）。
     if (!register_plugin(features::world_teleport::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: world_teleport registration failed");
+        return false;
+    }
+    // custom_recipe 先于 craft_ui 注册：前者 provides `craft_result`，后者 optional_requires 消费；
+    // 拓扑顺序保证 craft_ui 安装/启用时能力已注册。
+    if (!register_plugin(features::custom_recipe::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: custom_recipe registration failed");
+        return false;
+    }
+    // craft_ui：12 条 UIMix 入口 hook（5 核心 + 7 装饰），配方判定经 craft_result 能力。
+    if (!register_plugin(features::craft_ui::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: craft_ui registration failed");
         return false;
     }
 
