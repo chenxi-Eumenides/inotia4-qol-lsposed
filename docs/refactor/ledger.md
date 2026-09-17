@@ -91,7 +91,7 @@
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
 | B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | ✅ 完成（VM-P4-06 PASS：两 hook `live`；**用户真机确认功能正常**——普通队友/主角可穿脱专属位装备且可售，特殊 NPC 队友维持原版锁定） |
-| B2 | `feature/patch` 业务拆分 | 2,888 行 | A1、A4 | 🔄 进行中（**B2a-1 ✅**：VM-P4-07 PASS——24/24 `live` + 用户冒烟正常；**B2a-2 ✅ 待真机卡**：game_patch 机制收敛——`host/core_patches` 13 条 + `features/stack_limit` 6 条 clamp 声明式化、`stack_limit` 状态归 `core/native`、JNI/面板改命令端口；余：extension_bag 契约、wrapper 业务搬迁 B2c、`move_merge`/ptr_slot B2a-3） |
+| B2 | `feature/patch` 业务拆分 | 2,888 行 | A1、A4 | 🔄 进行中（**B2a-1 ✅**：VM-P4-07 PASS——24/24 `live` + 用户冒烟正常；**B2a-2 ✅**（VM-P4-08：core 15/15 `live`、`stack_limit` 两态、启动守卫缺陷修复）；余：extension_bag 契约、wrapper 业务搬迁 B2c、`move_merge`/ptr_slot B2a-3） |
 | B3 | `autosell` | 1,030 行 | A3 | ⬜ |
 | B4 | `save_backup` + `infra/store`（`infra/store` 属核心件：先在集成分支落地并冻结，再开插件 lane） | 2,371 行 | A2 | ⬜ |
 
