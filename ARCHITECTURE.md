@@ -1,6 +1,6 @@
 # 架构设计书：分层收口与插件化
 
-> 状态：**v0.3.9（P4 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-17
+> 状态：**v0.3.11（P5 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-18
 > 签署定义：签署 = 外部复审无阻断项 且 版本记录与未决项表逐项有结论。P0–P3 的「完成」仅指各阶段出口条件达成，**不表示**本设计书已签署或未决项已闭合（见 §12.3）。
 > 适用范围：**§1–§9、§11、§12 对内置插件轨（含全部核心架构）为权威规范**；**§3.7/§3.8 外部插件轨为未冻结设计草案**（P6 前允许大改，不构成实施承诺）。
 > 权威层级：架构规则以本文为准；校验脚本输出只代表「当前实现事实」。二者不一致时构建失败，必须显式走「改设计」或「登记临时豁免（带文档锚点）」之一。
@@ -12,6 +12,8 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.11 | P5 前出口面与动态能力校准：`core.api` 收缩为 HTTP 传输/注册内核，只保留基础端点；既有 API 路径与插件 id 解耦并保持冻结，内置路由按 owner 表归属、外部路由限定 `/api/ext/<id>/...`；capability 采用“静态声明 + 低频动态发布/撤销 + 接口内高频就绪状态”模型，补撤销 lease、失败与 `degraded` 清除语义 |
+| v0.3.10 | P5 前架构拍平（ADR-0004）：删除 `products/` 层，`features/` 更名 `plugins/`；出口面成为内置插件 `core.api`/`core.ui`（`http.registry` 注册口：封装/信封/门控/线程归 api，语义解析归各插件）；新增能力注册/注销事件（§3.4.5）支撑 optional 依赖延迟注册；新增 R8 自举兜底红线（log + 外部 config）；分层收敛为五层八目录；P5 执行 |
 | v0.3.9 | P6 外部插件方向校准：外部形态收敛为数据扩展与**未签名、全权 native 插件**；删除证书白名单、`read-only/trusted-write` 权限分级及同进程 `.so` 可受限的假设；Host API 改为托管协作面 + raw 便利面，补 TargetRegistry、跨插件能力、托管保证边界、用户显式启用与启动故障恢复 |
 | v0.3.8 | P4-A4 实施校准：分派权限以注册期 `ConsumerKind` 表达（类型化句柄为别名）；**新增阶段参数**（before/after）与「每个回调每次分派只调用一次」规则；Intercept 短路后 after 仅 Observe 生效 |
 | v0.3.7 | P4-A1 实施校准：`patch/` 以**注入原语**实现（`core/native/call_patch` 的物理迁移推迟 P5，避免过渡期 include 越层）；非入口机制经 host 注入分派（`TxDeps.install_other/release_other`），保持 `hooks → patch` 禁止；`kCallPatch` 禁用即物理还原 + 单指令门禁翻转同步执行写入 §4.2 规则 6 |
@@ -29,9 +31,9 @@
 
 | 项 | 结论 |
 |---|---|
-| 分层 | **六个逻辑层**（含 L0 契约层）、**九个顶层目录**：`contracts / game / infra / hooks / patch / domains / features / products / host` |
+| 分层 | **五个逻辑层**（含 L0 契约层）、**八个顶层目录**：`contracts / game / infra / hooks / patch / domains / plugins / host` |
 | 依赖 | 完整依赖矩阵（§2.2），环由结构与脚本双重排除 |
-| 功能形态 | **一切功能皆插件**：内置静态插件（默认）；外部数据扩展与全权 native 插件（P6 草案） |
+| 功能形态 | **一切功能皆插件**：内置插件（含出口面 `core.api`/`core.ui`）；外部数据扩展与全权 native 插件（P6 草案） |
 | hook 资源 | 资源集中在 `hooks/`：一资源一安装者 + 消费者注册；插件只声明与注册，机制由宿主执行 |
 | 生命周期 | 十态状态机（§3.2），异步跨帧迁移，幂等、可回滚 |
 | 线程 | **跨线程访问矩阵**（§6.1）：HTTP 只读快照与票据；游戏状态访问仅主线程 |
@@ -63,6 +65,7 @@
 | R5 | 行为改动手段有五种：直读写内存、调游戏函数、指针槽覆盖、指令 patch、入口 hook。**机制选择按需求决定，不设固定风险序**：风险来自缺少目标校验、失败回滚、开关与状态上报 | 真机验证 |
 | R6 | 同进程内**无法隔离崩溃**：非法内存访问、ABI 破坏、栈溢出会导致游戏进程终止。任何「失败隔离」承诺仅限「消费者返回可恢复错误」 | 运行时事实 |
 | R7 | 外部 native `.so` 一经加载即拥有游戏进程内的完整代码执行能力；符号隐藏、linker namespace、Host API 裁剪和清单声明均不能限制其读取/修改内存、调用系统接口或绕过资源登记 | Linux/Android 进程模型 |
+| R8 | 最后观测手段是 `infra/log`（内核设施），最后恢复手段是外部 `config.json` + 重启；二者必须独立于插件系统运行，不得依赖任何插件（自举兜底） | 设计决策（ADR-0004）+ 运行时事实 |
 
 ---
 
@@ -77,32 +80,29 @@ L2  infra/      运行时：调度/命令队列/快照/事件/能力注册表/�
 L2  hooks/      入口 hook 资源层：登记、仲裁、分派、生命周期（唯一调 LSPosed API 处）
 L2  patch/      指令 patch 与指针槽机制（占用声明、原字校验、回滚）
 L3  domains/    语义域：游戏事实 → 传输无关 DTO 与领域操作
-L3  features/<id>/   模块增强功能（插件）
-L4  products/   产品面：api_export（HTTP/JSON） ‖ qol（游戏内 UI 面）
-L5  host/       模块入口、JNI 边界、HTTP server、装配与拓扑、插件注册表
+L3  plugins/<id>/   功能与出口面（插件）：含内置出口插件 core.api / core.ui
+L4  host/       模块入口、JNI 边界、平台原语注入、装配与拓扑、插件注册表
 ```
 
 `contracts` 是 **L0 中立横切层**：不计入业务分层，不依赖任何层，被所有层允许依赖（见矩阵）。
 
 ### 2.2 依赖矩阵（机器可读，脚本以此为准）
 
-| 目录 | contracts | game | infra | hooks | patch | domains | features | products | host |
-|---|---|---|---|---|---|---|---|---|---|
-| `contracts/` | 自身 | — | — | — | — | — | — | — | — |
-| `game/` | ✓ | 自身 | — | — | — | — | — | — | — |
-| `infra/` | ✓ | —（经注入接口） | 自身 | — | — | — | — | — | — |
-| `hooks/` | ✓ | ✓ | ✓ | 自身 | — | — | — | — | — |
-| `patch/` | ✓ | ✓ | ✓ | — | 自身 | — | — | — | — |
-| `domains/` | ✓ | ✓ | ✓ | — | — | 自身（聚合域例外） | — | — | — |
-| `features/<id>/` | ✓ | ✓ | ✓ | ✓（仅声明资源） | ✓（仅声明资源） | ✓ | —（零 include） | — | — |
-| `products/api_export/` | ✓ | — | ✓ | — | — | ✓ | — | 自身 | — |
-| `products/qol/` | ✓ | — | ✓ | — | — | ✓ | —（经能力注册表） | 自身 | — |
-| `host/` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 自身 |
+| 目录 | contracts | game | infra | hooks | patch | domains | plugins | host |
+|---|---|---|---|---|---|---|---|---|
+| `contracts/` | 自身 | — | — | — | — | — | — | — |
+| `game/` | ✓ | 自身 | — | — | — | — | — | — |
+| `infra/` | ✓ | —（经注入接口） | 自身 | — | — | — | — | — |
+| `hooks/` | ✓ | ✓ | ✓ | 自身 | — | — | — | — |
+| `patch/` | ✓ | ✓ | ✓ | — | 自身 | — | — | — |
+| `domains/` | ✓ | ✓ | ✓ | — | — | 自身（聚合域例外） | — | — |
+| `plugins/<id>/` | ✓ | ✓ | ✓ | ✓（仅声明资源） | ✓（仅声明资源） | ✓ | —（零 include） | — |
+| `host/` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 自身 |
 
 规则：
-- `domains` **不依赖 hooks/patch**：域层不感知机制；资源声明归 `features` 或独立资源提供者。
-- `products/*` **不依赖 features 实现**：经 `infra/capabilities` 注册表取接口（接口类型在 `contracts/`），因此不存在编译期 feature 依赖。
-- `products/api_export` **不依赖 game**：所有游戏读取经 `domains`。
+- `domains` **不依赖 hooks/patch**：域层不感知机制；资源声明归 `plugins` 或独立资源提供者。
+- `plugins` 之间**零编译期依赖**：彼此只经 `infra/capabilities` 注册表取接口（接口类型在 `contracts/`）；出口面插件（`core.api`/`core.ui`）与功能插件同规则，不存在编译期互依赖。
+- `core.api` 不做游戏语义计算：除 `/api/health`、`/api/system/routes` 等传输级基础端点外不自带业务 API；路由 handler 由内置 API 提供插件或功能插件注册，只读请求读快照/登记数据，变更请求经命令票据；游戏读取由 owner 插件经 `domains`/快照完成。
 - `domains/system` 是唯一允许 include 其他 domain 头的聚合域；其余域禁止水平互调；跨域复用原语下沉 `game/`（读）或 `contracts/`（类型）。
 - `infra → game` 禁止：帧时钟、主线程派发、变体信息由 `host` 以注入接口提供。
 - `contracts` 只使用固定宽度 C 类型（§3.4），不使用 STL 容器、虚函数、异常。
@@ -111,11 +111,9 @@ L5  host/       模块入口、JNI 边界、HTTP server、装配与拓扑、插�
 
 | 层 | 职责 | 禁止 |
 |---|---|---|
-| `host/` | 模块入口、JNI 薄层（按插件分组）、HTTP 服务、装配顺序、插件注册表 | 业务逻辑；直接读写游戏内存 |
-| `products/api_export/` | 端点、参数校验、JSON 序列化、路由注册 | 调 JNI；直接读游戏；include feature 实现 |
-| `products/qol/` | 游戏内 UI **容器与共享控件**：设置页框架、`ui_kit`、面板注册与容器装配、文案装配 | 游戏语义计算；实现功能面板（归 features） |
-| `features/<id>/` | 一个增强功能：生命周期、规则、自有界面（`ui/`）、对外能力与命令 | include 其他 feature；执行 hook/patch 机制；出现裸地址；在命令路径之外调用 `game/write/**`、`game/ops/**` |
-| `domains/` | 语义域：`LiveApi`（主线程 live model）与 `ReadModel`（快照）两套接口 | 依赖 features/products；输出 JSON；依赖 hooks/patch；水平互调（聚合域除外） |
+| `host/` | 模块入口、JNI 薄层（按插件分组）、平台原语注入（帧时钟/主线程派发/hook/patch/HTTP 传输）、装配顺序、插件注册表 | 业务逻辑；直接读写游戏内存 |
+| `plugins/<id>/` | 一个插件：生命周期、规则、自有界面（`ui/`）、对外能力与命令；出口面插件（`core.api`/`core.ui`）同规则，仅额外拥有注册口能力（§7.1） | include 其他插件；执行 hook/patch 机制；出现裸地址；在命令路径之外调用 `game/write/**`、`game/ops/**` |
+| `domains/` | 语义域：`LiveApi`（主线程 live model）与 `ReadModel`（快照）两套接口 | 依赖 plugins；输出 JSON；依赖 hooks/patch；水平互调（聚合域除外） |
 | `hooks/` | 资源登记与仲裁、安装/还原引擎、consumer 分派 | 业务语义 |
 | `patch/` | 指令 patch、指针槽：占用声明、原字校验、回滚 | 业务语义 |
 | `infra/` | 调度、命令队列、快照、事件、能力注册表、命令端口、日志、配置、存储、Result | 依赖 game；持有游戏语义 |
@@ -126,11 +124,11 @@ L5  host/       模块入口、JNI 边界、HTTP server、装配与拓扑、插�
 
 ```
 module/app/src/main/cpp/
-  host/        gateway.cpp / assembly.cpp / surface/http.cpp / plugin_registry.{h,cpp}
-  products/
-    api_export/ endpoints/*.cpp
-    qol/        panels/*.cpp
-  features/<id>/  plugin.cpp  rules.{h,cpp}  ui/*.cpp  api.cpp  ports.h
+  host/        gateway.cpp / assembly.cpp / surface/http.cpp（传输原语）/ plugin_registry.{h,cpp}
+  plugins/
+    core.api/   server/（http.registry 注册口 + §9.1 既有诊断端点）
+    core.ui/    panels/（容器与 ui_kit）
+    <id>/       plugin.cpp  rules.{h,cpp}  ui/*.cpp  api.cpp  ports.h
   domains/        character/ party/ inventory/ world/ quest/ ui/ shop/ save/ dialog/ system/
   contracts/      <capability_id>.h   <resource_id>.h   result.h
   hooks/          registry.{h,cpp} install.{h,cpp} dispatch.{h,cpp} resources/*.h
@@ -149,7 +147,7 @@ module/app/src/main/cpp/
 
 | 轨道 | 形态 | 何时用 | 成本 |
 |---|---|---|---|
-| **内置静态插件**（默认） | 编译进主 `.so`，以 `PluginDescriptor` 注册；CMake target 独立 | 全部内置功能 | 零 ABI 成本，编译期类型安全 |
+| **内置静态插件**（默认） | 编译进主 `.so`，以 `PluginDescriptor` 注册；CMake target 独立；含出口面 `core.api`（HTTP）/ `core.ui`（游戏内 UI 容器） | 全部内置功能 | 零 ABI 成本，编译期类型安全 |
 | **外部数据扩展**（P6 草案） | 未签名 ZIP：JSON、表、资源；不含可执行代码 | 静态规则、配方、文本、资源 | 宿主可完整校验和撤销；不能表达任意逻辑 |
 | **外部 native 插件**（P6 草案） | 未签名 ZIP + `.so` + C ABI | 需要逻辑、hook、patch 或跨插件协作 | 进程内全权代码；无安全隔离保证 |
 
@@ -202,7 +200,7 @@ struct PluginDescriptor {
     uint32_t optional_count;
     const CapabilityRequirement* optional_requires;// 可选能力（缺失 → degraded）
     uint32_t provides_count;
-    const CapabilityProvision* provides;           // 提供的能力（id + 版本 + 接口指针）
+    const CapabilityProvision* provides;           // 静态声明的能力（id + 版本 + 接口指针 + publish_mode）
     uint32_t resources_count;
     const ResourceClaim* resources;                // 资源声明（不执行）
     uint32_t jni_count;
@@ -221,6 +219,7 @@ struct PluginDescriptor {
 - **存活期**：描述符内的字符串、数组、函数指针均为**静态存储**，生命周期 ≥ 进程；宿主注册时可直接引用。
 - **状态所有权**：`fill_status` 用宿主传入的 out 参数填充，避免跨边界所有权问题。
 - **资源与能力的启停由宿主通用执行**（声明式）；`install/deactivate` 只做插件自身初始化与清理；`on_enabled/on_disabled` 不得申请/释放资源。
+- **能力身份静态、可用性动态**：内置插件可发布的 capability id、版本、接口类型和 `publish_mode` 必须全部列在 `provides`；运行时不得凭空创建未声明能力。`kOnEnabled` 随插件启用自动发布，`kDynamic` 由宿主在条件成立时发布、条件失效时撤销（§3.4.6）。
 - **backup 交还**：宿主在资源安装成功后经 `on_resource_ready` 把原函数入口交还所有者；插件不得自行安装资源。
 - **`on_resource_ready` 是受限生命周期回调**，不属于 §4.4「安装期间不得调用插件业务代码」中的业务代码：只允许缓存 backup、更新门禁/原子量等常数时间操作；禁止资源操作、游戏内存读写、跨线程等待与长逻辑。返回非 0 → 宿主**按插件安装事务逆序回滚该插件全部已安装资源**，再置 `failed`（reason=`resource_ready_failed`）；**任一资源回滚失败 → 该资源 `tombstone` + 隔离**（§3.2 语义 5「禁止半装状态对外可见」）。
 - 拓扑排序输入 = `requires` + `provides`；缺 `requires` → `blocked`；缺 `optional_requires` → 健康标记 `degraded`（生命周期态不变，见 §3.2）。
@@ -243,7 +242,7 @@ struct PluginDescriptor {
 provider 停用（disable/deactivate）时：
 
 1. capability 置 `revoking`：拒绝新调用，记录在途计数。
-2. `optional_requires` 的消费者收到 `degraded` 事件，置健康标记 `degraded=true`（生命周期态不变，§3.2）。
+2. `optional_requires` 的消费者收到 `capability_revoked` 事件，摘除接入并置健康标记 `degraded=true`（生命周期态不变，§3.2）。
 3. `requires` 的消费者按**逆拓扑序**（深度最深者先）disable（生命周期态 `installed_disabled`，reason=`cascade_stopped`）。
 4. 帧回调等待在途归零；超过帧数预算 → provider `failed`（隔离），消费者保持 `degraded` 标记。
 5. 注销 capability。
@@ -276,21 +275,47 @@ typedef struct QolCommands {
 
 | 阶段 | `provides` 行为 | 可调用性 |
 |---|---|---|
-| `install`（自身初始化） | 不注册 | 不可用 |
-| `resolving` 校验通过 | **不注册**（尚未启用） | 不可用；必需消费者 `blocked`、可选消费者 `degraded` 标记 |
-| 进入 `enabled` | 注册（`register_capability`，幂等） | 可用（只读查询） |
+| `install`（自身初始化） | 只记录静态声明，不发布 | 不可用 |
+| `resolving` 校验通过 | **不发布**（尚未启用） | 不可用；必需消费者 `blocked`、可选消费者 `degraded` 标记 |
+| 进入 `enabled` | `kOnEnabled` 自动发布；`kDynamic` 保持未发布，等待 §3.4.6 条件 | 已发布项可用；动态项尚不可用 |
 | `installed_disabled`（disable 后） | 已按撤销事务注销 | 不可用 |
 | `disable` 事务 | 置 `revoking` → §3.4.1 级联 → 注销 | 撤销期间拒绝新调用；在途归零后不可用 |
-| 重新 `enable` | 重新注册 | 可用 |
+| 重新 `enable` | `kOnEnabled` 重新发布；`kDynamic` 回到未发布并等待条件 | 自动发布项可用；动态项等待运行时判定 |
 | `deactivate` | 同 disable 撤销路径；终态 `inactive` 不注册 | 不可用 |
 
-消费者拓扑安装与 provider 注册同步进行：注册发生的同帧内，等待中的消费者按拓扑序继续解析。
+消费者拓扑安装与 provider 发布同步进行：发布发生的同帧内，等待中的消费者按拓扑序继续解析。`provides` 的静态声明参与 DAG 构建，但只有实际发布后才满足 `requires` 的运行时可用条件。
+
+**3.4.5 能力可用性事件**
+
+| 项 | 规定 |
+|---|---|
+| 事件 | `capability_registered(id, version)` / `capability_revoked(id)`，经 §6.3 事件总线在主线程派发 |
+| 用途 | `optional_requires` 的消费者在已 `enabled` 后等待能力出现并**延迟接入**（典型：插件先于 `core.api` 启用时，收到 `registered(http.registry)` 后补注册 HTTP 路由；收到 `revoked` 后反注册） |
+| 边界 | `requires` 的必需依赖仍走 `blocked` 等待与 §3.4.1 撤销事务，不依赖本事件；事件只是 optional 依赖的补齐通道，禁止用事件重实现必需依赖 |
+
+事件处理规则：
+
+- optional capability 补接成功后清除该依赖对应的 `degraded` reason；仍有其它降级原因时 `degraded` 保持为 true。
+- 补接失败、重复 route/consumer 冲突或版本不满足时保持 `enabled + degraded`，记录 reason；不得把事件回调失败冒泡为 provider 发布失败。
+- 注册/撤销事件按 `(capability_id, generation)` 幂等；消费者处理过同一 generation 后不得重复接入。
+- capability 撤销时先阻止新 lease，再发 `revoked` 让 optional 消费者摘除接入，最后等待在途 lease 归零；消费者不得跨帧缓存裸接口指针。
+
+**3.4.6 动态能力可用性**
+
+动态能力用于“provider 已安装，但能力是否存在只能在游戏运行过程中低频确定”的场景，例如延迟加载子系统、进入存档后才能完成的一次性目标解析。规则如下：
+
+1. 插件仍须在 `PluginDescriptor.provides` 静态声明 id、版本、接口对象和 `publish_mode=kDynamic`；静态声明用于 DAG、冲突和 ABI 校验，不代表当前可调用。
+2. provider 只提交 `set_capability_available(id, available, reason)` 请求；真正的 publish/revoke 由主线程生命周期执行器串行执行，并复用 §3.4.1 与 §3.4.5。
+3. `unavailable → available` 发布新 generation；`available → unavailable` 先进入 `revoking`，拒绝新 lease、通知消费者并等待在途归零后撤销。重复请求幂等。
+4. `requires` 消费者在动态能力未发布时保持/进入 `blocked`，撤销时按 required 级联；`optional_requires` 消费者保持 `enabled + degraded`，发布后延迟接入，撤销后退回降级路径。
+5. **禁止用 publish/revoke 表达高频游戏上下文**：进档/退档、当前面板、商店是否打开、当前角色是否存在等频繁变化由稳定 capability 内的 `availability()/probe()`、快照或领域事件表达；接口返回 `not_ready` 不触发生命周期级联。
+6. 内置插件不得动态创建未声明 id；P6 外部 namespaced capability 的运行时发现规则另行冻结。
 
 ### 3.5 配置、日志、状态
 
 - 配置：每插件命名空间 `plugin.<id>.*`；读写经 `infra/config`；变更经事件广播。
 - 日志：统一经 `infra/log` 单写者，domain = 插件 id；热路径使用环形缓冲或节流。
-- 状态：`{id, source, enabled, state, error, resources[], requires[], provides[], variant, degraded, managed_resources, guarantees}`（§9.1）。外部 native 的 `guarantees` 固定说明保证仅覆盖宿主管理资源；不得用插件自报字段声称其受到安全限制。
+- 状态：`{id, source, enabled, state, error, resources[], requires[], provides[], variant, degraded, managed_resources, guarantees}`（§9.1）；每个 `provides[]` 项至少含 `{id, version, publish_mode, availability, generation, reason}`，使动态能力的未发布/可用/撤销中状态可查询。外部 native 的 `guarantees` 固定说明保证仅覆盖宿主管理资源；不得用插件自报字段声称其受到安全限制。
 
 ### 3.6 数据级插件（声明式规则）
 
@@ -334,6 +359,7 @@ plugins/
 log | config/store(命名空间) | events | commands | scheduler | snapshot/data
 capabilities.provide/require | native_services.provide/require
 targets.provide/resolve | resources.declare | status
+http.routes（经 `core.api` 注册，命名空间 `/api/ext/<插件id>/...`，受其门控与线程纪律约束）
 ```
 
 宿主统一处理托管资源的冲突、安装、回滚、状态和依赖级联。插件间共享只读事实使用 §3.4 的 capability；任意 native 逻辑使用带版本的 C ABI `native_service` 函数表。两者都经宿主注册表查找，不直接依赖另一插件的 ELF 符号；字符串、数组和函数表所有权遵守 §3.4 的跨边界类型与生命周期规则。`native_service` 可包含写副作用，其行为不享有命令端口的串行化保证，调用方继承提供者的全权 native 风险。数据扩展只能消费带声明式 schema 的 capability/命令，不能调用任意 C ABI `native_service`。
@@ -502,7 +528,7 @@ HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` �
 ### 6.4 能力注册表与命令
 
 - `capabilities.register(id, iface, version)` / `require(id, range)`；未注册 `require` 返回空，消费者必须降级并上报 `degraded`。
-- 撤销按 §3.4.1 事务执行。
+- 撤销按 §3.4.1 事务执行；注册/注销发布 §3.4.5 能力可用性事件。
 - 命令端口见 §3.4.3；票据状态可查询；HTTP 端点 `GET /api/system/tickets/{id}` 与首个返回票据的端点**同时交付**（§9.1）。
 
 ### 6.5 日志 / 配置 / 存储 / Result
@@ -514,38 +540,57 @@ HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` �
 
 ---
 
-## 7. products/ 与 host/
+## 7. 出口面插件与 host/
 
-### 7.1 产品与依赖
+### 7.1 出口面内置插件
 
-| 产品 | 依赖 | 说明 |
-|---|---|---|
-| `products/api_export` | `domains`、`infra`、`contracts` | HTTP/JSON 端点面；不依赖 game / features |
-| `products/qol` | `domains`、`infra`、`contracts`（经注册表取能力接口） | 游戏内 UI 面 |
+| 插件 | 依赖 | 职责 | 禁止 |
+|---|---|---|---|
+| `core.api` | `contracts`、`infra`（HTTP 传输原语由 `host` 注入） | HTTP 服务器、`http.registry` 注册口、路由分派、JSON 信封/错误映射、`/api/op` 门控、线程纪律与在途请求 lease；自身只保留 `/api/health`、`/api/system/routes` 等传输级基础端点 | 游戏语义计算；直接读游戏内存；承载 character/world/item 等业务端点 |
+| 内置 API 提供插件 | `contracts`、`infra`、`domains` | 注册现有冻结路由并拥有其参数/DTO/语义；默认按领域拆分（如 `api.character`、`api.world`），也允许为独立裁剪边界拆成 `api.info`/`api.action` | 改写既有 URL；绕过命令端口执行变更 |
+| `core.ui` | `contracts`、`infra`、`domains`（UI 原语经 `game/access/ui*`，由 `host` 注入 adapter） | 设置页容器、共享控件（`ui_kit`）、面板注册与导航 | 实现功能面板（归各插件 `ui/`）；游戏语义计算；直接依赖 `game/` |
 
-两者互不依赖；共享部分下沉 `domains`/`infra`。
+**注册口契约（P5 冻结，U10）**：
 
-**UI 边界**：`features/<id>/ui/` 拥有该功能的面板实现与交互；`products/qol` 只提供设置页容器、共享控件（`ui_kit`）与面板注册表，不实现功能面板。
+```c
+typedef struct HttpRoute {
+    const char* method;    /* GET | POST */
+    const char* path;      /* 内置：API 权威文档中的冻结路径；外部：必须为 "/api/ext/<插件id>/..." */
+    uint8_t     kind;      /* query | command */
+    uint8_t     op_gated;  /* 1 → api 统一执行 /api/op 门控 */
+    int32_t   (*handler)(const HttpReq* req, HttpRes* res); /* C ABI；HttpReq/HttpRes 为 POD，body 为原始 JSON 字符串 */
+} HttpRoute;
+```
+
+**路由归属与兼容规则**：
+
+- 插件 id 是内部所有权标识，**不决定内置 URL 前缀**。`docs/reference/api-reference.md` 中既有路径、方法、成功响应保持冻结；P5 产出“冻结路由 → 唯一 owner 插件”表并由 `check_plugins.py` 校验重复/遗漏。
+- 新增内置路由按领域命名并进入 API 权威文档评审；外部插件只允许 `/api/ext/<插件id>/...`，不得占用既有命名空间。
+- `query` handler 只能在 HTTP 线程读取快照、不可变配置和登记数据；`command` handler 只做语义解析并提交命令，返回票据。`op_gated` 在 handler 前由 `core.api` 统一检查。
+- 默认按领域组织 API provider，保持 DTO 与读写语义内聚；`api.info`/`api.action` 可作为需要独立启停的部署边界，但不得据此改变 URL 或复制领域逻辑。
+
+**生命周期与分工原则**：封装/解包、信封、门控、线程纪律归 `core.api`；语义解析与执行归 owner 插件 handler。`core.api` 被禁用时先停止接受新请求并冻结路由表，等待在途 route lease 归零，再撤销 `http.registry` 和关闭 server；超出帧预算进入 `failed + isolated`。依赖它的插件以 `optional_requires` 声明，并按 §3.4.5 在能力发布/撤销时延迟注册或反注册；route 注册失败只使该插件的 HTTP 出口降级，不影响其游戏内主体功能。
+
+**UI 边界**：`plugins/<id>/ui/` 拥有该插件的面板实现与交互；`core.ui` 只提供设置页容器、共享控件（`ui_kit`）与面板注册表，不实现功能面板。
 
 ### 7.2 host 装配与 JNI
 
 - JNI 薄层按插件分组命名：`native<Feature><Action>`；绑定元数据来自 `PluginDescriptor.jni`（`contracts/` 定义 `JniBinding`）。
 - `check_jni.py` 校验三向一致：Kotlin `external fun` ↔ native 导出符号 ↔ 描述符 `jni` 表。
-- 装配顺序：`game` 解析 → `infra` 启动 → `hooks/patch` 引擎就绪 → `features` 拓扑安装 → `products` 起 HTTP/UI → 状态上报。
+- 装配顺序：`game` 解析 → `infra` 启动 → `hooks/patch` 引擎就绪 → 插件按 `requires/provides` 拓扑安装（含 `core.api`/`core.ui`）→ 状态上报。
 - **生命周期执行器**：唯一执行器为主线程，事件驱动（命令队列 + 帧回调）；初始化线程只投递；所有迁移幂等串行，带帧数预算与回滚。
 
 ### 7.3 Kotlin 侧镜像
 
 ```
 com.inotia4.qol/
-  host/       入口、ApiServer、JNI 桥
+  host/       入口、传输设施、JNI 桥
   platform/   配置、日志、静态数据、存储、hook 安装（Java 侧）
-  products/   api_export 端点面、qol 界面面
-  features/<id>/  与 native 插件同 id：service、bridge、UI
+  plugins/<id>/  与 native 插件同 id：service、bridge、UI（含 core.api/core.ui 对应面）
   services/   服务契约与实现（可多通道复用）
 ```
 
-规则：controller 只路由 + 参数校验；JNI 只在 `host`/`platform`/feature bridge 出现；feature 之间通过服务契约或配置事件交互，不互相 import；feature 界面实现位于 `features/<id>/ui/`，容器与共享控件位于 `products/qol`。
+规则：controller 只路由 + 参数校验；JNI 只在 `host`/`platform`/插件 bridge 出现；插件之间通过服务契约或配置事件交互，不互相 import；插件界面实现位于 `plugins/<id>/ui/`，容器与共享控件位于 `core.ui`。
 
 ---
 
@@ -584,6 +629,8 @@ P1 最小诊断接口（必须）：
 | `GET /api/health`（既有端点，**加法扩展**） | `{"ok":true,"ready":true,"variant":{"series","version","known","capabilities"}}` | `ok` 保持不变；`ready` 与 503 语义一致；`variant` 取自 `game/` 变体表 |
 
 P2 已落地：`features` 追加 `resources[]/requires[]/provides[]/degraded`。
+
+P5 扩展：`provides[]` 追加 `publish_mode/availability/generation/reason`；新增 `/api/system/routes` 输出 `{method,path,owner,kind,op_gated,state,in_flight}`，用于核对冻结路由 owner、动态接入与在途归零。
 
 P3 落地：
 
@@ -664,14 +711,14 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 | P2 | **纵向样板插件**（覆盖入口 hook + 配置 + 状态 + 命令）：只验 `install → enabled` 路径 | 样板真机验收卡通过；状态 API 可见 | P1 |
 | P3 | 最小资源事务（异步步进、回滚、在途归零、帧预算）+ `disable/deactivate/tombstone` 全路径 | 故障注入与并发测试通过；接口冻结（内部） | P2 |
 | P4 | 批量迁移其余插件（内置静态轨），每插件一个提交 | 每插件：单测 + 验收卡；临时豁免逐条清零 | P3 |
-| P5 | `products/` + `host/` 收口：JNI 分组、端点归位、状态 API 完整化；收紧脚本；删除旧路径 | `check_*` 全绿、豁免清零、双轨消失 | P4 |
+| P5 | `plugins/` 单层收口：`core.api` 传输内核、内置 API provider、`core.ui` 与注册口落地；冻结路由 owner 表；动态 capability 协议、JNI 分组、状态 API 完整化；收紧脚本；删除旧路径 | 既有 API 路径/响应兼容；动态发布/撤销与在途归零通过；`check_*` 全绿、豁免清零、单轨（legacy 路径）消失 | P4 |
 | P6（可选） | 外部插件轨（未冻结草案）：数据扩展、未签名全权 native、TargetRegistry、Host API/SDK、导入加载、安全模式、更新/回滚语义 | 数据 schema 拒绝；native 显式启用/加载/禁用；托管资源回收；启动故障恢复；更新/回滚真机通过 | P5 |
 
 单插件迁移动作：建目录与元数据 → 资源改为声明 → 依赖改能力/命令 → 开关与状态接入 → 单测 + 验收卡。
 
-**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P3 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.9**（P3 后实施校准累积版，含 P4-A1/A4 与外部插件方向校准）。
+**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P4 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.11**（P5 开工基线候选，含插件拍平、API 出口面与动态 capability 校准）；P5 未签署前不得开工。
 
-冻结与兼容：JNI 导出在重构期保持名称与签名稳定；新增按插件分组命名，P5 一次性切换。数据格式（sidecar / `.qol_save`）向前兼容，必要时升版本并写迁移。
+冻结与兼容：JNI 导出在重构期保持名称与签名稳定；新增按插件分组命名，P5 一次性切换。既有 HTTP 路径、方法和成功响应保持兼容，P5 只迁移 owner，不改变调用方契约。数据格式（sidecar / `.qol_save`）向前兼容，必要时升版本并写迁移。
 
 回滚：每阶段出口不达标则回滚该阶段改动，不动其它插件。
 
@@ -686,6 +733,7 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 | 接入期两套路径并存 | 纵向样板先行；阶段出口脚本强制收敛；豁免逐步清零 |
 | 资源数量失控 | 登记强制填写选择理由与验收卡；`check_resources` 统计趋势 |
 | 外部 native 可崩溃、破坏数据或绕过宿主 | 导入后默认关闭、用户显式启用、全权风险提示、启动阶段日志与安全模式；不承诺隔离 |
+| 出口面插件（`core.api` 等）故障导致不可观测 | 最后观测 = `infra/log`（内核设施，R8）；最后恢复 = 外部 `config.json` + 重启；诊断端点自身不做插件间依赖 |
 | 真机验证成本 | 每插件独立提交 + 验收卡；host fake 覆盖失败路径 |
 | 外部 ABI 成本被低估 | P6 前不冻结、不发布 SDK；冻结时采用带 size/version 的 C ABI 函数表并保留 capability 版本协商 |
 | 主线程被长操作占用 | 全部资源操作异步帧步进；禁止阻塞等待 |
@@ -713,6 +761,7 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 | U7 | Host API、TargetDescriptor、外部 capability/native-service 函数表的首个 C ABI 版本与 SDK 边界 | P6 | ⬜ 开放 |
 | U8 | `tombstone` 回收策略与人工清除流程 | P5（随隔离语义收口） | ⬜ 开放 |
 | U9 | 需要 `atomic_before` 两阶段分派的资源清单 | P4/P5 | ⬜ 开放 |
+| U10 | `http.registry` v1 的 `HttpReq`/`HttpRes` ABI、冻结路由 owner 表与冲突错误码；路由兼容、线程种类、动态注册/撤销和在途 lease 语义已由 v0.3.11 冻结 | P5 出口前 | ⬜ 开放 |
 
 说明：**P0–P3 的出口条件不依赖上述开放项**（「P0–P3 完成」不等于设计书已签署，见 §11 签署规则）；开放项必须在对应阶段开工前闭合，否则该阶段不得宣称完成。
 
