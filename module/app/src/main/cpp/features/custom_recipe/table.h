@@ -78,6 +78,21 @@ uint32_t inject_into_buffers(const uint8_t* orig_recipe, uint16_t base_record_co
                              uint8_t mixture_size, const Def* cat, size_t n,
                              uint8_t* out_recipe, uint8_t* out_mixture);
 
+// 模块占用组位（目录派生 OR）；cat==nullptr / n==0 → 0。
+uint8_t module_group_bits(const Def* cat, size_t n);
+
+// 停用还原（纯逻辑）：把模块缓冲**原版段**（前 base_record_count 条）的 b11 逐记录还原为
+// original_group_bits 快照值（注入前逐记录 b11，长度 >= base_record_count）。
+// 目的：撤销 inject_into_buffers 对原版记录 b11 的组位清除。否则停用后模块页（如宝石强化
+// group 3）的原版记录组位已被清掉，页面配方列表为空 → 标签页执行链空指针（真机 SIGSEGV）。
+void restore_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint8_t recipe_size,
+                                 const uint8_t* original_group_bits);
+
+// 重新激活（纯逻辑）：按模块占用组位重新清除原版段 b11（与 inject_into_buffers 的清位一致），
+// 保证注入态下原版记录不占用模块页（避免与原版记录重复出现在同一页）。
+void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint8_t recipe_size,
+                               const uint8_t* original_group_bits, uint8_t module_bits);
+
 // Android：校验并（重新）注入；幂等、可重复调用。
 // - 已注入且游戏侧指针仍指向模块缓冲 → 只把记录数归位到 base + N 并返回 true；
 // - 游戏重新装载静态表导致指针被改写 → 用新原表重新注入；

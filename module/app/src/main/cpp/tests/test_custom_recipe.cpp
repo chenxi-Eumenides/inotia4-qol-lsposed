@@ -715,6 +715,43 @@ static void test_table_invalid_log_dedupe() {
     CHECK(!cr::table_invalid_log_needed(6, 3, 71, 6, 3, 71));
 }
 
+// ---------------------------------------------------------------------------
+// 表停用组位还原：inject 会清掉原版记录 b11 的模块组位；停用必须逐字节还原，否则模块页
+// （宝石强化 group 3）原版配方列表为空 → 标签页执行链空指针崩溃。重激活需重新清除。
+// ---------------------------------------------------------------------------
+static void test_table_group_bits_restore() {
+    size_t n = 0;
+    const cr::Def* cat = cr::catalog(&n);
+    CHECK(cr::module_group_bits(cat, n) == 0x08);  // 两条注入记录都挂 group 3
+    CHECK(cr::module_group_bits(nullptr, n) == 0);
+
+    uint8_t buf[3 * cr::kRecipeRecordSize];
+    std::memset(buf, 0, sizeof(buf));
+    buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x08;
+    buf[1 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x03;  // 不含模块位 → 清位后不变
+    buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x28;  // bit5 + bit3 → 清后剩 0x20
+    const uint8_t snapshot[3] = {0x08, 0x03, 0x28};
+
+    // 重激活：以快照为基清除模块位（幂等，不累积）。
+    cr::clear_original_group_bits(buf, 3, cr::kRecipeRecordSize, snapshot, 0x08);
+    CHECK(buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x00);
+    CHECK(buf[1 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x03);
+    CHECK(buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x20);
+    cr::clear_original_group_bits(buf, 3, cr::kRecipeRecordSize, snapshot, 0x08);
+    CHECK(buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x20);
+
+    // 停用还原：逐字节回到快照（原版配方列表恢复）。
+    cr::restore_original_group_bits(buf, 3, cr::kRecipeRecordSize, snapshot);
+    CHECK(buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x08);
+    CHECK(buf[1 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x03);
+    CHECK(buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x28);
+
+    // 空指针 / recipe_size 过小：安全 no-op。
+    cr::restore_original_group_bits(nullptr, 3, cr::kRecipeRecordSize, snapshot);
+    cr::clear_original_group_bits(buf, 3, cr::kRbGroup, snapshot, 0x08);
+    CHECK(buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x08);
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
@@ -725,6 +762,7 @@ int main() {
     test_three_slot_stack_rules();
     test_execute_token_valid();
     test_table_invalid_log_dedupe();
+    test_table_group_bits_restore();
     test_chaos_scroll_recipe();
     test_max_socket_enchant_recipe();
     test_dynamic_special_recipes();

@@ -116,6 +116,31 @@ uint32_t inject_into_buffers(const uint8_t* orig_recipe, uint16_t base_record_co
     return static_cast<uint32_t>(base_record_count) + static_cast<uint32_t>(n);
 }
 
+uint8_t module_group_bits(const Def* cat, size_t n) {
+    if (cat == nullptr) return 0;
+    uint8_t bits = 0;
+    for (size_t i = 0; i < n; ++i) bits |= recipe_group_bit(cat[i].group);
+    return bits;
+}
+
+void restore_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint8_t recipe_size,
+                                 const uint8_t* original_group_bits) {
+    if (buffer == nullptr || original_group_bits == nullptr || recipe_size <= kRbGroup) return;
+    for (uint16_t r = 0; r < base_record_count; ++r) {
+        buffer[static_cast<size_t>(r) * recipe_size + kRbGroup] = original_group_bits[r];
+    }
+}
+
+void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint8_t recipe_size,
+                               const uint8_t* original_group_bits, uint8_t module_bits) {
+    if (buffer == nullptr || original_group_bits == nullptr || recipe_size <= kRbGroup) return;
+    for (uint16_t r = 0; r < base_record_count; ++r) {
+        uint8_t* slot = buffer + static_cast<size_t>(r) * recipe_size + kRbGroup;
+        // 以快照为基（幂等：重复清除不累积），与 inject_into_buffers 的清位语义一致。
+        *slot = static_cast<uint8_t>(original_group_bits[r] & ~module_bits);
+    }
+}
+
 }  // namespace custom_recipe
 
 // ---------------------------------------------------------------------------
@@ -140,6 +165,33 @@ uint8_t* g_recipe_buffer = nullptr;
 uint8_t* g_mixture_buffer = nullptr;
 uint16_t g_base_record_count_cache = 0;
 std::atomic<bool> g_busy{false};
+
+// 原版 base 段 b11 快照（注入前逐记录值）：停用时逐字节还原、重激活时按模块组位重清。
+// 停用若不还原，模块页（如宝石强化 group 3）的原版记录组位已被 inject 清掉 → 页面配方列表为空
+// → 标签页执行链空指针（真机 SIGSEGV）。见 table.h restore_original_group_bits 注释。
+uint8_t* g_original_group_bits = nullptr;
+uint16_t g_original_group_count = 0;
+uint8_t g_original_group_recipe_size = 0;
+
+void capture_original_group_bits(const uint8_t* orig_recipe, uint16_t base_count,
+                                 uint8_t recipe_size) {
+    if (orig_recipe == nullptr || recipe_size <= kRbGroup || base_count == 0) return;
+    if (g_original_group_bits == nullptr || g_original_group_count < base_count ||
+        g_original_group_recipe_size != recipe_size) {
+        std::free(g_original_group_bits);
+        g_original_group_bits = static_cast<uint8_t*>(std::malloc(base_count));
+        if (g_original_group_bits == nullptr) {
+            g_original_group_count = 0;
+            g_original_group_recipe_size = 0;
+            return;
+        }
+        g_original_group_count = base_count;
+        g_original_group_recipe_size = recipe_size;
+    }
+    for (uint16_t r = 0; r < base_count; ++r) {
+        g_original_group_bits[r] = orig_recipe[static_cast<size_t>(r) * recipe_size + kRbGroup];
+    }
+}
 
 // 「全局未就绪」日志去重：只在与上次不同的尺寸/计数时记录，避免门禁逐帧重试刷屏。
 constexpr uint8_t kInvalidLogSentinelU8 = 0xFF;
@@ -166,14 +218,20 @@ bool ensure_impl() {
     auto* mixture_ptr_global = reinterpret_cast<void**>(bss(G_MIXTUREBASE_DATA_VMA));
     auto* mixture_size_global = reinterpret_cast<uint8_t*>(bss(G_MIXTUREBASE_SIZE_VMA));
 
-    // 1) 已注入且游戏侧指针仍指向模块缓冲 → 只需把记录数归位（可能被 deactivate 改回原值）。
+    // 1) 已注入且游戏侧指针仍指向模块缓冲 → 记录数归位 + 重新清除原版段组位（可能被 deactivate 还原过）。
     if (g_recipe_buffer != nullptr && *recipe_ptr_global == g_recipe_buffer) {
         size_t n = 0;
-        catalog(&n);
+        const Def* cat = catalog(&n);
         const uint16_t want = static_cast<uint16_t>(g_base_record_count_cache + n);
         if (*recipe_count_global != want) {
             *recipe_count_global = want;
             QOL_LOG_INFO(QolDomain::kCustomRecipe, "recipe table reactivated records=%u", want);
+        }
+        // 与首次注入一致：注入态下原版记录不得占用模块页（否则与原版记录重复出现在同一页）。
+        if (g_original_group_recipe_size == *recipe_size_global) {
+            clear_original_group_bits(g_recipe_buffer, g_base_record_count_cache,
+                                      *recipe_size_global, g_original_group_bits,
+                                      module_group_bits(cat, n));
         }
         if (!catalog_ready()) bind_base_record_count(g_base_record_count_cache);
         reset_invalid_log_dedupe();  // 就绪后允许未来新一轮失败重新记录
@@ -220,6 +278,8 @@ bool ensure_impl() {
     if (cat == nullptr || n == 0) return false;
 
     const uint16_t base_record_count = cur_count;
+    // 注入前抓原版段 b11 快照：停用时逐字节还原（页面回到原版配方列表）。
+    capture_original_group_bits(recipe_data, base_record_count, recipe_size);
     // 书名册大小不变式：注入 N 条后 GetRecipeCount(5) 增加 N（每条注入记录都带 kRbRecipeBookBit），
     // 而书名册缓冲是游戏按**注入前**的 (count5+7)/8 分配的、存档位图长度也按它决定 → 必须相等。
     // 不相等时 fail-closed 拒绝注入：宁可模块配方不出现，也不要越界读写书名册或改存档格式长度。
@@ -289,12 +349,19 @@ bool custom_recipe_table_ensure() {
 void custom_recipe_table_deactivate() {
     if (g_base == 0 || g_recipe_buffer == nullptr) return;
     auto* recipe_ptr_global = reinterpret_cast<void**>(bss(G_RECIPEBASE_DATA_VMA));
+    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(G_RECIPEBASE_SIZE_VMA));
     auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(G_RECIPEBASE_COUNT_VMA));
     // 指针已被游戏改写 → 注入本就已失效，清模块状态即可，绝不把原表指针写回（可能已陈旧）。
     if (*recipe_ptr_global != g_recipe_buffer) {
         g_recipe_buffer = nullptr;
         g_mixture_buffer = nullptr;
         return;
+    }
+    // 还原原版段组位（撤销 inject 的清位）→ 各页面回到原版配方列表；否则模块页原版记录组位
+    // 已被清空，停用后点该页标签会在空配方列表上崩溃（真机 SIGSEGV）。
+    if (g_original_group_recipe_size == *recipe_size_global) {
+        restore_original_group_bits(g_recipe_buffer, g_base_record_count_cache, *recipe_size_global,
+                                    g_original_group_bits);
     }
     // 只收记录数，指向模块缓冲的指针保持不变：所有下标都仍在缓冲界内，
     // 面板残留数组里的注入下标不会造成越界读；查询不会再命中注入记录。

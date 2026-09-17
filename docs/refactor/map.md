@@ -30,16 +30,16 @@
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 285 |
 | `domains/` | 2 | 111 |
-| `features/` | 72 | 8726 |
+| `features/` | 72 | 8808 |
 | `host/` | 12 | 1941 |
-| **合计** | **150** | **16582** |
+| **合计** | **150** | **16664** |
 
 ### 已迁移插件（`features/*`）
 
 - `features/attribute_range/`：4 文件 / 303 行
 - `features/autosell/`：12 文件 / 1068 行
 - `features/craft_ui/`：4 文件 / 670 行
-- `features/custom_recipe/`：10 文件 / 1857 行
+- `features/custom_recipe/`：10 文件 / 1939 行
 - `features/inventory_hooks/`：2 文件 / 98 行
 - `features/push_all/`：6 文件 / 267 行
 - `features/quest/`：4 文件 / 162 行
