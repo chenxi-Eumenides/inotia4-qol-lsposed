@@ -101,7 +101,7 @@
 
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
-| C1 | `world_teleport` | 525 行 | A4 | 🔄 进行中（迁移完成：零资源插件 + `game/access/world` 收口，基线 83→81；**待用户真机**：面板/±delta/越界回绕/余额不足/API op） |
+| C1 | `world_teleport` | 525 行 | A4 | ✅ 完成（VM-45 用户真机确认；基线 83→81） |
 | C2 | `craft_ui` + `custom_recipe`（同 lane，双向依赖） | 2,597 行 | A4 | ⬜ |
 
 ### 阶段 D：大件
