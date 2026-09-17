@@ -87,4 +87,31 @@ void* char_get_summoner(void* ch) {
     return fn_char_get_summoner != nullptr ? fn_char_get_summoner(ch) : nullptr;
 }
 
+int char_level(const void* ch) {
+    if (ch == nullptr) return -1;
+    return *reinterpret_cast<const uint8_t*>(reinterpret_cast<const uint8_t*>(ch) + C_LEVEL);
+}
+
+int char_merc_slot(const void* ch) {
+    if (ch == nullptr) return -1;
+    return *reinterpret_cast<const int8_t*>(reinterpret_cast<const uint8_t*>(ch) + C_MERC_SLOT);
+}
+
+bool char_can_change_equip(const void* ch) {
+    return fn_char_can_change_equip != nullptr && ch != nullptr &&
+           fn_char_can_change_equip(const_cast<void*>(ch)) != 0;
+}
+
+void* char_menu_character() {
+    return fn_get_menu_character != nullptr ? fn_get_menu_character() : nullptr;
+}
+
+bool char_can_change_equip_resolved() {
+    return fn_char_can_change_equip != nullptr;
+}
+
+bool char_menu_character_resolved() {
+    return fn_get_menu_character != nullptr;
+}
+
 }  // namespace qol::game

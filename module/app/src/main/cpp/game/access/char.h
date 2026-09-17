@@ -49,4 +49,22 @@ bool char_is_active_player_group(void* ch);
 // 召唤者反查；无召唤者或依赖缺失返回 nullptr。
 void* char_get_summoner(void* ch);
 
+// 等级：C_LEVEL 的零扩展 u8（原版 `ldrb` 口径）；ch 为空返回 -1。
+int char_level(const void* ch);
+
+// 佣兵槽索引：C_MERC_SLOT 的 s8（-1=非佣兵）；ch 为空返回 -1。
+int char_merc_slot(const void* ch);
+
+// 角色装备操作权限 CHAR_CanChangeEquip(ch)：[ch+0x352] >= 0 且非特殊 NPC。
+// 「特殊 NPC 不可动装备」的唯一闸门，同时也是 CanEquipItem/CanUnequipItem 的第③/②道检查。
+// 未解析或 ch 为空返回 false；调用方须先经 char_can_change_equip_resolved() 判定（fail-closed）。
+bool char_can_change_equip(const void* ch);
+
+// 当前装备/物品菜单选中角色 PARTY_GetMenuCharacter()；未解析返回 nullptr。
+void* char_menu_character();
+
+// 原语解析状态（诊断与 fail-closed 门控）。
+bool char_can_change_equip_resolved();
+bool char_menu_character_resolved();
+
 }  // namespace qol::game
