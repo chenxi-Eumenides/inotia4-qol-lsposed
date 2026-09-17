@@ -21,7 +21,7 @@ add_executable(host_tests
     ${CPP_DIR}/core/native/game_json.cpp
     ${CPP_DIR}/core/native/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp
-    ${CPP_DIR}/feature/save_backup/save_backup_bundle.cpp
+    ${CPP_DIR}/features/save_backup/bundle.cpp
     ${CPP_DIR}/feature/world_teleport/world_teleport_rules.cpp
 )
 
@@ -156,7 +156,7 @@ add_test(NAME game_feature_tests COMMAND game_feature_tests)
 # wh4 容器可用性判定纯逻辑测试（末尾追加）
 add_executable(save_warehouse_validate_tests
     test_save_warehouse_validate.cpp
-    ${CPP_DIR}/feature/save_backup/save_backup_bundle.cpp
+    ${CPP_DIR}/features/save_backup/bundle.cpp
 )
 target_include_directories(save_warehouse_validate_tests PRIVATE
     ${CPP_DIR}

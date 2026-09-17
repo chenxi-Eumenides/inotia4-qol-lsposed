@@ -1,4 +1,4 @@
-#include "feature/save_backup/save_backup_bundle.h"
+#include "features/save_backup/bundle.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -937,36 +937,6 @@ bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& p
     std::string from_name;
     if (!extract_checksum_from_name(file_name, from_name)) return false;
     return from_name == checksum;
-}
-
-// ---- 模块 sidecar 容器（MSAV）最小操作 ----
-
-namespace {
-// 与 ModuleSaveStore 一致的最小容器大小：magic(4)+ver(2)+slot(1)+generation(8)+count(2)+crc(4)。
-constexpr size_t kMinContainerBytes = 21;
-constexpr uint32_t kContainerMagic = 0x4D534156u;  // "MSAV"
-constexpr size_t kMaxContainerBytes = 4 * 1024 * 1024;
-constexpr size_t kContainerSlotOffset = 6;
-}  // namespace
-
-bool module_container_valid(const std::vector<uint8_t>& bytes) {
-    if (bytes.size() < kMinContainerBytes || bytes.size() > kMaxContainerBytes) return false;
-    if (be32(bytes.data()) != kContainerMagic) return false;
-    const size_t body = bytes.size() - 4;
-    return crc32_ieee(bytes.data(), body) == be32(bytes.data() + body);
-}
-
-bool module_container_reslot(std::vector<uint8_t>& bytes, int slot) {
-    if (slot < 0 || slot > 255) return false;
-    if (!module_container_valid(bytes)) return false;
-    bytes[kContainerSlotOffset] = static_cast<uint8_t>(slot);
-    const size_t body = bytes.size() - 4;
-    const uint32_t crc = crc32_ieee(bytes.data(), body);
-    bytes[body] = static_cast<uint8_t>(crc >> 24);
-    bytes[body + 1] = static_cast<uint8_t>(crc >> 16);
-    bytes[body + 2] = static_cast<uint8_t>(crc >> 8);
-    bytes[body + 3] = static_cast<uint8_t>(crc);
-    return true;
 }
 
 }  // namespace save_backup

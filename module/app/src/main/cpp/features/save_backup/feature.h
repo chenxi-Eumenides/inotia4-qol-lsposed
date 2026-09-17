@@ -1,11 +1,13 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 // 存档管理器备份 feature（save-backup）：
 // .qol_save bundle 的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
 // 返回值即 HTTP 响应 JSON（{"ok":true,...} / {"ok":false,"error":"..."}）。
-// 依赖方向：feature → core（op_err 信封）+ data（game_access fn 指针）；不依赖 api/native。
+// 依赖方向：feature → core（op_err 信封）+ infra/store（sidecar 容器）+ game/access/save
+// （存档域原语）；不依赖 api/native。插件清单位于 features/save_backup/plugin.cpp。
 
 // 幂等初始化：记录 dataDir（原版存档根目录）与 externalFilesDir（备份/sidecar 根目录）。
 void save_backup_init(const char* data_dir, const char* external_files_dir);
@@ -36,13 +38,12 @@ std::string save_backup_import_json(const char* checksum, int slot);
 // POST /api/system/backup/delete 响应体。
 std::string save_backup_delete_json(const char* checksum);
 
+// 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的 sidecar 同步体：
+// 游戏内存档面板删档确认后，按槽删除模块 sidecar（slot-{n}.module-save + .last-good）并标记槽区 stale。
+// 由插件删档 PtrHook wrapper 在原函数返回后调用（锁序 g_sb_mtx → store）；slot 越界直接返回。
+void save_backup_slot_deleted_sync(int32_t slot);
+
 // 删除指定槽的游戏存档（原版 save{slot}.dat + 模块 sidecar slot-{slot}.module-save/.last-good）。
 // 只作用于该 slot 的精确文件名，不触碰其它槽；未找到任何目标文件返回结构化错误。
 // 与 save_backup_delete_json 同风格（HTTP 风格 {"ok":true,...}/{"ok":false,"error":"..."}）。
 std::string save_backup_delete_slot_json(int slot);
-
-// 安装对游戏删档回调 SaveSlot_Delete 的 GOT 槽 PtrHook（槽 VMA 0x2f3fa8，G_SAVESLOT_DELETE_GOT_VMA）：
-// 游戏内存档面板删档确认后，同步删除该槽模块 sidecar（slot-{n}.module-save + .last-good）。
-// 由 nativeInit 在 bridge_init 成功后调用；fail-closed（GOT 当前值 != SaveSlot_Delete 时不安装）。
-// 覆盖范围仅「存档面板删档按钮路径」；SaveSlot_GoToNewGame 与 SAVE_FileDelete 不在覆盖内。
-void save_backup_slot_delete_hook_install_if_ready();

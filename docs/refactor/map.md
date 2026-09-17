@@ -25,14 +25,14 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 8 | 372 |
-| `game/` | 14 | 935 |
+| `game/` | 16 | 1079 |
 | `infra/` | 22 | 2007 |
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 285 |
 | `domains/` | 2 | 111 |
-| `features/` | 46 | 3236 |
-| `host/` | 12 | 1781 |
-| **合计** | **116** | **10007** |
+| `features/` | 52 | 5635 |
+| `host/` | 12 | 1787 |
+| **合计** | **124** | **12556** |
 
 ### 已迁移插件（`features/*`）
 
@@ -41,6 +41,7 @@
 - `features/inventory_hooks/`：2 文件 / 98 行
 - `features/push_all/`：6 文件 / 267 行
 - `features/quest/`：4 文件 / 162 行
+- `features/save_backup/`：6 文件 / 2399 行
 - `features/simple_mode/`：6 文件 / 462 行
 - `features/special_equip/`：6 文件 / 423 行
 - `features/stack_limit/`：2 文件 / 103 行
@@ -49,14 +50,14 @@
 ### CTest target 分类
 
 - 全仓 target 总数：**33**
-- 新架构/已迁移：**22**（机制/宿主 15 + 已迁移功能 7）
-- legacy：**11**
+- 新架构/已迁移：**23**（机制/宿主 15 + 已迁移功能 8）
+- legacy：**10**
 
-新架构/已迁移（22）：
+新架构/已迁移（23）：
 - 机制/宿主（15）：`capability_lifecycle_tests`、`hooks_dispatch_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
-- 已迁移功能（7）：`attribute_range_tests`、`autosell_rules_tests`、`autosell_store_tests`、`module_text_tests`、`push_all_rules_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
+- 已迁移功能（8）：`attribute_range_tests`、`autosell_rules_tests`、`autosell_store_tests`、`module_text_tests`、`push_all_rules_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
 
-legacy（11）：`custom_recipe_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`native_choice_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_warehouse_validate_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
+legacy（10）：`custom_recipe_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`native_choice_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
 <!-- END GENERATED:stats -->
 
 ## 人工导航

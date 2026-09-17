@@ -1,4 +1,4 @@
-// save_backup.cpp —— 存档管理器备份 feature（save-export 底层迁移自 Kotlin SaveBackupStore）。
+// save_backup feature.cpp —— 存档管理器备份业务层（save-export 底层迁移自 Kotlin SaveBackupStore）。
 //
 // 职责：.qol_save bundle（原版存档明文 + 模块 sidecar + 元信息）的导出/导入/列表/删除；
 // 导出按 checksum 去重；导入为「原版 .dat 重加密 + sidecar 重定槽」两段事务，
@@ -10,19 +10,17 @@
 //   块 i 数据 = plain + 8 + u16(plain + 8 + i*4)。
 //   块0：+0 u8 slot（SAVE_IsValidInformation 要求 == 请求槽）、+13 u64 save_time、+29 u32 version（≤5）。
 //   块1：+0 i16 map_id。
-// 全部 VMA/偏移经 game_symbols.h 常量；游戏函数经 game_access fn 指针。
+// 全部存档域 VMA/偏移/函数指针经 game/access/save 语义函数收口；本层不出现裸地址。
 
-#include "feature/save_backup/save_backup.h"
+#include "features/save_backup/feature.h"
 
 #include <dirent.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <cerrno>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -32,10 +30,8 @@
 #include "core/native/game_feature.h"
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
-#include "feature/save_backup/save_backup_bundle.h"
-#include "game_access.h"
-#include "game_ptr_hook.h"
-#include "game_symbols.h"
+#include "features/save_backup/bundle.h"
+#include "game/access/save.h"
 #include "infra/store.h"
 
 namespace {
@@ -50,12 +46,6 @@ constexpr const char* kBundleSuffix = ".qol_save";
 std::mutex g_sb_mtx;
 std::string g_sb_data_dir;
 std::string g_sb_external_dir;
-
-// 游戏删档回调 GOT 槽覆盖（save-delete-sync）。见 save_backup.h 声明注释。
-// wrapper 内先回调原函数，再取 g_sb_mtx 调 infra/store::delete_slot（锁序 g_sb_mtx → store），
-// 与导出/导入的 g_sb_mtx 串行；不取 g_virtual_bag_mtx、不走 JNI。
-constexpr size_t kSlotDeletePageSize = 0x1000;
-PtrHook g_slot_delete_hook;
 
 // ---- 地图名表（Kotlin 启动期从 MAPINFOBASE 下发：map_id → 中文名） ----
 // 解析失败/空 JSON 视为空表（entry_json 输出空 map_name，UI 显示「未知地图」）。
@@ -224,29 +214,6 @@ bool backup_dir(std::string& out) {
 // sidecar 容器操作（读 primary/校验/回退、重定槽双写、删除）统一经 infra/store；
 // 本文件不再自行拼接 module-saves/ 路径或直接读写 sidecar 文件。
 
-// SaveSlot_Delete 的 PtrHook wrapper。执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），
-// x0 = slot(int32_t)。约束：
-//  - 只回调原函数（删 save{n}.dat + 重载三槽）并经 store 删除该槽 sidecar；
-//  - 不取 g_virtual_bag_mtx、不走 JNI/Kotlin（避免跨层锁序与主线程阻塞）；
-//  - 不在本函数内再调 SAVE_CreateSaveSlot（原函数已调）；
-//  - 短取 g_sb_mtx，与 save_backup 导入/导出串行（锁序 g_sb_mtx → store）。
-void slot_delete_hook_wrapper(int32_t slot) {
-    if (g_slot_delete_hook.installed()) {
-        g_slot_delete_hook.call_orig(slot);
-    }
-    if (slot < 0 || slot > 2) return;
-    std::lock_guard<std::mutex> lk(g_sb_mtx);
-    const qol::infra::store::Status status = qol::infra::store::delete_slot(slot);
-    if (status == qol::infra::store::Status::kOk) {
-        SB_LOG("slot delete hook: removed sidecar slot=%d", slot);
-    } else {
-        SB_LOG("slot delete hook: sidecar delete skipped/failed slot=%d status=%s", slot,
-               qol::infra::store::status_name(status));
-    }
-    // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
-    save_slots_mark_stale();
-}
-
 // 文件名全匹配 `save\d*\.dat`（与迁移前 Kotlin Regex 一致）。
 bool is_save_dat_name(const std::string& n) {
     if (n.size() < 8) return false;
@@ -350,22 +317,19 @@ void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_i
     hero_level = -1;
     hero_index = -1;
     class_idx = -1;
-    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr ||
-        fn_save_destroy_save_slot == nullptr || fn_save_create_save_slot == nullptr) return;
+    if (!qol::game::save_slot_meta_deps_ready()) return;
     // 主菜单（STATE==4）下槽结构未随启动刷新；与 data_save_slots_json 一致，仅此状态重载三槽，
     // 且同一次主菜单停留内只重载一次（反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
-    save_slots_refresh_if_stale();
-    void* slot_struct = fn_save_get_save_slot(slot);
+    qol::game::save_slots_refresh_if_stale();
+    void* slot_struct = qol::game::save_slot_struct(slot);
     if (slot_struct == nullptr) return;
-    uint8_t* p = reinterpret_cast<uint8_t*>(slot_struct);
-    if (p[SAVESLOT_EXISTS] == 0) return;
-    hero_index = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(p + SAVESLOT_HERO_INDEX));
-    void* hero = fn_saveslot_get_hero(slot_struct);
+    if (!qol::game::save_slot_exists(slot_struct)) return;
+    hero_index = qol::game::save_slot_hero_index(slot_struct);
+    void* hero = qol::game::save_slot_hero(slot_struct);
     if (hero == nullptr) return;
-    uint8_t* hp = reinterpret_cast<uint8_t*>(hero);
-    hero_level = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_LEVEL));
+    hero_level = qol::game::save_hero_level(hero);
     // 职业索引（0-5）；type==2 装饰物该字段非职业，但本路径取的是主角 hero 结构。
-    class_idx = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_CLASS));
+    class_idx = qol::game::save_hero_class(hero);
 }
 
 // 读槽明文并归一化：SAVE_LoadData 解密 → 拷出并 MEM_Free → 块0 slot 写 0xFF。
@@ -373,20 +337,20 @@ void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_i
 bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
                          long long& save_time, int& version, int& hero_level, int& hero_index,
                          int& class_idx, std::string& err) {
-    if (fn_save_load_data == nullptr || fn_mem_free == nullptr) {
+    if (!qol::game::save_load_deps_ready()) {
         err = "symbol not resolved";
         return false;
     }
     void* buf = nullptr;
     int len = 0;
-    if (fn_save_load_data(slot, &buf, &len) != 1 || buf == nullptr || len < 8) {
-        if (buf != nullptr) fn_mem_free(buf);
+    if (qol::game::save_load_data(slot, &buf, &len) != 1 || buf == nullptr || len < 8) {
+        if (buf != nullptr) qol::game::save_mem_free(buf);
         err = "load failed";
         return false;
     }
     // 明文拷出后立即归还游戏堆，后续处理与游戏内存解耦。
     plain.assign(static_cast<const uint8_t*>(buf), static_cast<const uint8_t*>(buf) + len);
-    fn_mem_free(buf);
+    qol::game::save_mem_free(buf);
 
     const size_t block0 = 8 + rd_u16(plain.data() + 8);
     const size_t block1 = 8 + rd_u16(plain.data() + 12);
@@ -411,7 +375,7 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
 // 原版明文加密到目标槽：块0 slot 字节写目标槽 → ENCRYPT_Process2(mode=0)，密文 len+3 字节。
 bool encrypt_plain_to_slot(int32_t slot, const std::vector<uint8_t>& plain,
                            std::vector<uint8_t>& cipher) {
-    if (fn_encrypt_process2 == nullptr || fn_hub_save_get_key == nullptr) return false;
+    if (!qol::game::save_encrypt_available()) return false;
     if (plain.size() < 8) return false;
     const size_t block0 = 8 + rd_u16(plain.data() + 8);
     if (block0 >= plain.size()) return false;
@@ -420,38 +384,40 @@ bool encrypt_plain_to_slot(int32_t slot, const std::vector<uint8_t>& plain,
     buf[block0] = static_cast<uint8_t>(slot);
     // ENCRYPT_Process2 加密就地追加 3 字节，需 len+3 容量。
     buf.resize(plain.size() + 3, 0);
-    const char* key = fn_hub_save_get_key();
+    const char* key = qol::game::save_hub_get_key();
     if (key == nullptr) return false;
-    if (fn_encrypt_process2(buf.data(), static_cast<int>(plain.size()), 0, key) != 1) return false;
+    if (qol::game::save_encrypt_process2(buf.data(), static_cast<int>(plain.size()), 0, key) != 1) {
+        return false;
+    }
     cipher.swap(buf);
     return true;
 }
 
 // wh4 容器与 saveN.dat 同方案；mode=1 为解密，返回 1 表示双校验和通过（本机密钥可解）。
 int warehouse_decrypt_mode1(void* buf, int len, const char* key) {
-    return fn_encrypt_process2(buf, len, 1, key);
+    return qol::game::save_encrypt_process2(buf, len, 1, key);
 }
 
 // mode=0 为加密，就地写入 len+3 字节（需 len+3 容量），返回 1 成功。
 int warehouse_encrypt_mode0(void* buf, int len, const char* key) {
-    return fn_encrypt_process2(buf, len, 0, key);
+    return qol::game::save_encrypt_process2(buf, len, 0, key);
 }
 
 // 判断 bundle 内的 wh4 容器在本机是否可用（可解密）。用于导入时拦截「换设备后解不开」的 wh4：
 // 这类文件落盘会导致进档时 block3 校验失败 → SAVE_Load 提前返回 → SIGSEGV。
-// fn_encrypt_process2 缺失时传 nullptr 回调解密，纯逻辑层放行（无法判定时不拦）。
+// 加解密函数缺失时传 nullptr 回调解密，纯逻辑层放行（无法判定时不拦）。
 bool warehouse_blob_usable_on_this_device(const uint8_t* data, size_t len, const char* key) {
     const save_backup::WarehouseDecryptFn decrypt =
-        (fn_encrypt_process2 != nullptr) ? &warehouse_decrypt_mode1 : nullptr;
+        qol::game::save_encrypt_available() ? &warehouse_decrypt_mode1 : nullptr;
     return save_backup::warehouse_blob_decryptable(data, len, key, decrypt);
 }
 
 // v3 flags=1 明文项：补目标 slot + 用本机密钥重加密 + 往返自检。
-// fn 指针缺失时传 nullptr，纯逻辑层返回 kNoKey（宁缺勿错，不写盘）。
+// 加解密函数缺失时传 nullptr，纯逻辑层返回 kNoKey（宁缺勿错，不写盘）。
 save_backup::WarehouseReencryptStatus warehouse_reencrypt_on_device(
     const save_backup::WarehouseFile& wf, int slot, const char* key,
     std::vector<uint8_t>& out_cipher) {
-    const bool available = fn_encrypt_process2 != nullptr;
+    const bool available = qol::game::save_encrypt_available();
     const save_backup::WarehouseEncryptFn encrypt =
         available ? &warehouse_encrypt_mode0 : nullptr;
     const save_backup::WarehouseDecryptFn decrypt =
@@ -481,8 +447,7 @@ int locate_save_directory(std::string& out) {
             ::closedir(d);
         }
     }
-    if (fn_hub_save_get_key == nullptr) return 1;
-    const char* key = fn_hub_save_get_key();
+    const char* key = qol::game::save_hub_get_key();
     if (key == nullptr) return 1;
     const std::string dir_name = save_backup::md5_hex(reinterpret_cast<const uint8_t*>(key),
                                                       std::strlen(key));
@@ -522,35 +487,24 @@ void save_backup_init(const char* data_dir, const char* external_files_dir) {
     g_sb_external_dir = external_files_dir != nullptr ? external_files_dir : "";
 }
 
-void save_backup_slot_delete_hook_install_if_ready() {
-    if (g_slot_delete_hook.installed()) return;
-    if (!bridge_ready() || g_base == 0) return;
-    const uintptr_t expected =
-        g_base + fn_resolve("F_SAVESLOT_DELETE_VMA", F_SAVESLOT_DELETE_VMA);
-    if (expected == g_base) {
-        SB_LOG("slot delete hook: F_SAVESLOT_DELETE_VMA unresolved");
-        return;
+// 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的同步体：游戏内存档面板删档确认后，
+// 同步删除该槽模块 sidecar（slot-{n}.module-save + .last-good）。
+// 执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），slot 由 wrapper 传入。约束：
+//  - 不取 g_virtual_bag_mtx、不走 JNI/Kotlin（避免跨层锁序与主线程阻塞）；
+//  - 不在本函数内再调 SAVE_CreateSaveSlot（原函数已调）；
+//  - 短取 g_sb_mtx，与 save_backup 导入/导出串行（锁序 g_sb_mtx → store）。
+void save_backup_slot_deleted_sync(int32_t slot) {
+    if (slot < 0 || slot > 2) return;
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    const qol::infra::store::Status status = qol::infra::store::delete_slot(slot);
+    if (status == qol::infra::store::Status::kOk) {
+        SB_LOG("slot delete hook: removed sidecar slot=%d", slot);
+    } else {
+        SB_LOG("slot delete hook: sidecar delete skipped/failed slot=%d status=%s", slot,
+               qol::infra::store::status_name(status));
     }
-    void** slot = reinterpret_cast<void**>(g_base + G_SAVESLOT_DELETE_GOT_VMA);
-    if (!game_memory_accessible(slot, sizeof(void*), 'r')) {
-        SB_LOG("slot delete hook: got not accessible slot=%p", slot);
-        return;
-    }
-    if (*slot != reinterpret_cast<void*>(expected)) {
-        SB_LOG("slot delete hook: unexpected got value=%p expected=%p", *slot,
-               reinterpret_cast<void*>(expected));
-        return;
-    }
-    const uintptr_t page = reinterpret_cast<uintptr_t>(slot) & ~(kSlotDeletePageSize - 1);
-    if (mprotect(reinterpret_cast<void*>(page), kSlotDeletePageSize, PROT_READ | PROT_WRITE) != 0) {
-        SB_LOG("slot delete hook: mprotect failed errno=%d", errno);
-        return;
-    }
-    if (!g_slot_delete_hook.install_typed(slot, &slot_delete_hook_wrapper)) {
-        SB_LOG("slot delete hook: install failed slot=%p", slot);
-        return;
-    }
-    SB_LOG("slot delete hook installed slot=%p orig=%p", slot, g_slot_delete_hook.orig);
+    // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
+    qol::game::save_slots_mark_stale();
 }
 
 void save_backup_set_map_names(const char* json) {
@@ -702,14 +656,13 @@ std::string save_backup_export_json(int slot) {
                     // 注意：mode=1 会读 buf[len-3 .. len) 的尾部 3 字节做校验，必须传**完整容器**，
                     // 只传 payload 会越界读到垃圾导致必然返回 0（真机实测）。
                     bool decrypted = false;
-                    if (bytes.size() >= 4 && fn_hub_save_get_key != nullptr &&
-                        fn_encrypt_process2 != nullptr) {
-                        const char* wh_key = fn_hub_save_get_key();
+                    if (bytes.size() >= 4 && qol::game::save_encrypt_available()) {
+                        const char* wh_key = qol::game::save_hub_get_key();
                         if (wh_key != nullptr) {
                             const size_t payload_len = bytes.size() - 3;
                             std::vector<uint8_t> buf = bytes;
-                            if (fn_encrypt_process2(buf.data(), static_cast<int>(payload_len), 1,
-                                                    wh_key) == 1) {
+                            if (qol::game::save_encrypt_process2(
+                                    buf.data(), static_cast<int>(payload_len), 1, wh_key) == 1) {
                                 wf.data.assign(buf.begin(), buf.begin() + payload_len);
                                 wf.flags = save_backup::kWarehouseFlagPlain;
                                 decrypted = true;
@@ -880,8 +833,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                    slot, qol::game_feature_state_name(wh_state), parsed.warehouse.size());
         } else {
             wh_write = true;
-            const char* wh_key =
-                (fn_hub_save_get_key != nullptr) ? fn_hub_save_get_key() : nullptr;
+            const char* wh_key = qol::game::save_hub_get_key();
             wh_payloads.resize(parsed.warehouse.size());
             for (size_t i = 0; i < parsed.warehouse.size(); ++i) {
                 const save_backup::WarehouseFile& wf = parsed.warehouse[i];
@@ -1014,7 +966,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     entry.class_name = save_backup_class_name(entry.class_idx);
     SB_LOG("save backup imported: %s -> slot%d", name.c_str(), slot);
     // 目标槽文件已被覆盖：槽区结构不再代表磁盘状态，下一次读取必须重载。
-    save_slots_mark_stale();
+    qol::game::save_slots_mark_stale();
     return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
 }
 
@@ -1074,6 +1026,6 @@ std::string save_backup_delete_slot_json(int slot) {
     }
     SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d)", slot, dat_existed, sidecar_existed);
     // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。
-    save_slots_mark_stale();
+    qol::game::save_slots_mark_stale();
     return "{\"ok\":true,\"deleted_slot\":" + std::to_string(slot) + "}";
 }

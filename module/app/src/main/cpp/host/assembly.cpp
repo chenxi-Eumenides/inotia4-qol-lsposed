@@ -10,6 +10,7 @@
 #include "features/inventory_hooks/plugin.h"
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
+#include "features/save_backup/plugin.h"
 #include "features/simple_mode/plugin.h"
 #include "features/special_equip/plugin.h"
 #include "features/stack_limit/plugin.h"
@@ -170,6 +171,11 @@ bool assembly_init() {
     }
     if (!register_plugin(features::special_equip::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: special_equip registration failed");
+        return false;
+    }
+    // save_backup：零资源常驻插件；install 安装删档同步 PtrHook（legacy 过渡机制）。
+    if (!register_plugin(features::save_backup::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: save_backup registration failed");
         return false;
     }
 

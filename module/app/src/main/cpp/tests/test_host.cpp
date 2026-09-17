@@ -23,7 +23,7 @@
 #include "core/native/sell_price.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "feature/patch/inventory_find_item_poc.h"
-#include "feature/save_backup/save_backup_bundle.h"
+#include "features/save_backup/bundle.h"
 #include "feature/world_teleport/world_teleport_rules.h"
 #include "../data/native/game_tiles.cpp"
 
@@ -1824,7 +1824,7 @@ static void test_save_preflight_json() {
     CHECK(semantic.find("hero pointer is null") != npos);
 }
 
-// save-backup 纯逻辑层（feature/save_backup/save_backup_bundle.cpp，编译真实被测源文件）：
+// save-backup 纯逻辑层（features/save_backup/bundle.cpp，编译真实被测源文件）：
 
 static void test_save_backup_digests() {
     namespace sb = save_backup;
@@ -2060,47 +2060,6 @@ static void test_save_backup_checksum_name() {
     CHECK(!sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.txt", out));
     CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol_save", out));  // 缺 `_` 前缀
     CHECK(!sb::extract_checksum_from_name("short.qol_save", out));
-}
-
-static void test_save_backup_module_container() {
-    namespace sb = save_backup;
-    using sb::Entry; using sb::ParsedBundle;
-    // 构造 fake MSAV 容器：magic + ver + slot + generation + count + 6 字节负载 + crc。
-    std::vector<uint8_t> container;
-    container.push_back(0x4D); container.push_back(0x53); container.push_back(0x41); container.push_back(0x56);
-    container.push_back(0x00); container.push_back(0x01);
-    container.push_back(0x00);  // slot=0
-    for (int i = 0; i < 8; ++i) container.push_back(0);
-    container.push_back(0x00); container.push_back(0x01);
-    const uint8_t payload[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-    container.insert(container.end(), payload, payload + sizeof(payload));
-    const uint32_t crc = sb::crc32_ieee(container.data(), container.size());
-    container.push_back(static_cast<uint8_t>(crc >> 24));
-    container.push_back(static_cast<uint8_t>(crc >> 16));
-    container.push_back(static_cast<uint8_t>(crc >> 8));
-    container.push_back(static_cast<uint8_t>(crc));
-    CHECK(sb::module_container_valid(container));
-
-    // 重定槽：第 6 字节改目标槽 + CRC 重算后仍校验通过，其余字节不变。
-    std::vector<uint8_t> reslotted = container;
-    CHECK(sb::module_container_reslot(reslotted, 2));
-    CHECK_EQ(static_cast<int>(reslotted[6]), 2);
-    CHECK(sb::module_container_valid(reslotted));
-    CHECK(std::memcmp(reslotted.data(), container.data(), 6) == 0);
-    // 第 6 字节之后、尾部 CRC 之前的字节不变。
-    CHECK(std::memcmp(reslotted.data() + 7, container.data() + 7, container.size() - 11) == 0);
-
-    // 损坏拒绝：翻转 payload 一字节 → CRC 失配。
-    std::vector<uint8_t> broken = container;
-    broken[15] ^= 1;
-    CHECK(!sb::module_container_valid(broken));
-    CHECK(!sb::module_container_reslot(broken, 1));
-    // 过小/坏 magic 拒绝。
-    std::vector<uint8_t> tiny = {0x4D, 0x53, 0x41};
-    CHECK(!sb::module_container_valid(tiny));
-    std::vector<uint8_t> bad_magic = container;
-    bad_magic[0] = 'X';
-    CHECK(!sb::module_container_valid(bad_magic));
 }
 
 // 个人仓库段（v2 bundle）：encode/decode 往返、build/parse 携带、v1 兼容、
@@ -3145,7 +3104,6 @@ int main() {
     test_save_backup_meta_entry();
     test_save_backup_entry_map_name();
     test_save_backup_checksum_name();
-    test_save_backup_module_container();
     test_save_backup_warehouse();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);

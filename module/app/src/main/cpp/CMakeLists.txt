@@ -25,8 +25,8 @@ add_library(gamebridge SHARED
     api/native/game_shop.cpp
     api/native/game_save.cpp
     api/native/game_save_preflight.cpp
-    feature/save_backup/save_backup_bundle.cpp
-    feature/save_backup/save_backup.cpp
+    features/save_backup/bundle.cpp
+    features/save_backup/feature.cpp
     game_system.cpp
     data/native/game_tiles.cpp
     api/native/game_character.cpp
@@ -260,4 +260,10 @@ target_sources(gamebridge PRIVATE
 # module-saves/ 唯一文件读写者）
 target_sources(gamebridge PRIVATE
     bridge/native/gamebridge_store.cpp
+)
+
+# B4-5：save_backup 本体迁移为插件（零资源常驻 + 存档域原语收口 game/access/save）
+target_sources(gamebridge PRIVATE
+    game/access/save.cpp
+    features/save_backup/plugin.cpp
 )

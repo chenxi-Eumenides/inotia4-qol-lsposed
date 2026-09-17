@@ -41,19 +41,19 @@
 | `features/patch` | 9 |
 | `features/push_all` | 6 |
 | `features/quest` | 4 |
-| `features/save_backup` | 4 |
+| `features/save_backup` | 6 |
 | `features/simple_mode` | 6 |
 | `features/special_equip` | 6 |
 | `features/stack_limit` | 2 |
 | `features/text_layer` | 4 |
 | `features/ui` | 31 |
 | `features/world_teleport` | 4 |
-| `game` | 33 |
+| `game` | 35 |
 | `hooks` | 8 |
 | `host` | 28 |
 | `infra` | 45 |
 | `patch` | 7 |
-| **合计** | **314** |
+| **合计** | **318** |
 
 ### 1.2 迁移期映射摘要
 
@@ -134,7 +134,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 143 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 144 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -160,7 +160,7 @@
 
 ## 3. 基线债务
 
-基线共 3 组、85 条。
+基线共 3 组、83 条。
 
 ### layer_direction（50 条）
 
@@ -186,7 +186,7 @@
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
 - …（其余 30 条省略）
 
-### offsets_symbols_header（26 条）
+### offsets_symbols_header（25 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
@@ -202,19 +202,18 @@
 - `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
 - `offsets_symbols_header|feature/patch/inventory_hook_stage4.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
-- `offsets_symbols_header|feature/save_backup/save_backup.cpp|data/native/game_symbols.h|features/save_backup 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_autosell.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_charinfo_zh.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_custom.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- …（其余 6 条省略）
+- `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
+- …（其余 5 条省略）
 
-### resource_unknown_symbol（9 条）
+### resource_unknown_symbol（8 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/save_backup/save_backup.cpp:58||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_custom.cpp:43||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_exp.cpp:25||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_settings.cpp:80||ptr slot 无法归属符号`
@@ -226,17 +225,18 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 24 个 / 文件 15 个 / 去重符号 10 个 / 无法归属 9 个。
+扫描合计：安装点 24 个 / 文件 15 个 / 去重符号 11 个 / 无法归属 8 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 5 | 8 | 5 |
 | call patch | 3 | 7 | 4 |
-| ptr slot | 8 | 9 | 3 |
+| ptr slot | 8 | 9 | 4 |
 
-去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
+去重符号 → 文件（前 11 条，共 11 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
+- `F_SAVESLOT_DELETE_VMA` → `features/save_backup/plugin.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
 - `F_SCENE_DRAW_EQUIP_VMA` → `feature/ui/game_ui_autosell.cpp`
@@ -259,9 +259,9 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 7 个）与已迁移 `features/*`（9 个）共 16 个域。
+旧 `feature/*`（待迁移 6 个）与已迁移 `features/*`（10 个）共 16 个域。
 
-### 6.1 旧 `feature/*`（待迁移，7）
+### 6.1 旧 `feature/*`（待迁移，6）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -269,11 +269,10 @@
 | `custom_recipe` | `features/custom_recipe` | 8 |
 | `extension_bag` | `features/extension_bag` | 32 |
 | `patch` | `features/patch` | 9 |
-| `save_backup` | `features/save_backup` | 4 |
 | `ui` | `features/ui` | 31 |
 | `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（9）
+### 6.2 已迁移 `features/*`（10）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -282,6 +281,7 @@
 | `inventory_hooks` | `features/inventory_hooks` | 2 |
 | `push_all` | `features/push_all` | 6 |
 | `quest` | `features/quest` | 4 |
+| `save_backup` | `features/save_backup` | 6 |
 | `simple_mode` | `features/simple_mode` | 6 |
 | `special_equip` | `features/special_equip` | 6 |
 | `stack_limit` | `features/stack_limit` | 2 |

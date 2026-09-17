@@ -5,7 +5,7 @@
 #include <vector>
 
 // save-backup 纯逻辑层：.qol_save bundle 编解码、摘要/校验原语、极简 metaJson 字段提取。
-// 零游戏/Android 依赖（纯 STL，编入 host 单测）；文件 IO 与游戏函数调用在 save_backup.cpp。
+// 零游戏/Android 依赖（纯 STL，编入 host 单测）；文件 IO 与游戏函数调用在 feature.cpp。
 //
 // bundle 布局（大端，与 docs/development/features/save-backup.md §3 一致）：
 // v1：
@@ -234,15 +234,5 @@ bool extract_checksum_from_name(const std::string& file_name, std::string& out);
 // 目标 checksum 非法时直接返回 false。
 bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& parsed,
                              const std::string& checksum);
-
-// ---- 模块 sidecar 容器（MSAV）最小操作（不解析 section）----
-//
-// 容器布局（大端）：u32 magic "MSAV" | u16 ver | u8 slot | u64 generation |
-// u16 sectionCount | [sections...] | u32 crc32(body = 除末 4 字节)。
-
-// 最小校验：大小/上限 + magic + 尾部 CRC32。
-bool module_container_valid(const std::vector<uint8_t>& bytes);
-// 导入重定槽：源容器最小校验通过后，把第 6 字节写为目标槽并重算尾部 CRC32。
-bool module_container_reslot(std::vector<uint8_t>& bytes, int slot);
 
 }  // namespace save_backup

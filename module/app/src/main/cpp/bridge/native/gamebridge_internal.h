@@ -12,7 +12,7 @@
 #include "game_party.h"
 #include "game_quest.h"
 #include "api/native/game_save.h"
-#include "feature/save_backup/save_backup.h"
+#include "features/save_backup/feature.h"
 #include "game_shop.h"
 #include "game_state.h"
 #include "game_system.h"

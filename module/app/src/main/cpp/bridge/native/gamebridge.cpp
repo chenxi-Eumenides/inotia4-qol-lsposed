@@ -3,7 +3,6 @@
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
 #include "features/autosell/config.h"
-#include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
 #include "feature/world_teleport/world_teleport.h"
@@ -45,7 +44,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力，assembly 注册）；
         // 角色面板绘制窗口的作用域标记仍在本处安装（绘制侧功能，不迁移）。
         charinfo_zh_install_if_ready();  // 角色面板：把绘制窗口标记为 kCharacterPanel 作用域
-        save_backup_slot_delete_hook_install_if_ready();
+        // 删档同步 PtrHook 已随 save_backup 插件迁移：由其 install 安装（assembly_init）。
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
         // 进入存档后由 autosell 插件注册的 save-enter 回调按存档配置同步（见 plugin.cpp）。
         if (qol::host::frame_source_install()) {
