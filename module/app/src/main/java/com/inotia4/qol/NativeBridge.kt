@@ -187,6 +187,12 @@ object NativeBridge {
     // ---- 功能诊断（P1 最小诊断接口：原生功能状态汇总 JSON）----
     external fun nativeFeatureStatusJson(): String
 
+    // ---- P3 资源登记表与生命周期控制 ----
+    // 资源登记表导出 JSON（/api/system/resources）
+    external fun nativeSystemResourcesJson(): String
+    // 生命周期动作下发：返回命令票据（0 = 投递失败）；action 取 native 侧 kFeatureLifecycle*
+    external fun nativeFeatureLifecycle(pluginId: String, action: Int): Long
+
     // 游戏变体诊断（P1）：libgame.so 查表结果 JSON，供 /api/health 加法扩展使用
     external fun nativeGetVariantJson(): String
 }

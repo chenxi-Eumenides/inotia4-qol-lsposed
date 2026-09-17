@@ -100,6 +100,17 @@ class OpController {
         return ControllerGuard.guard { ApiServices.op.teleport(mapId, x, y, force) }
     }
 
+    // ---- P3 生命周期控制（/api/op/features/lifecycle）----
+    // body {id, action}；action 名称在 service 层映射为 native kFeatureLifecycle* 数值。
+    @PostMapping("/api/op/features/lifecycle")
+    fun featureLifecycle(@RequestBody body: String): String {
+        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val id = o.optString("id", "")
+        val action = o.optString("action", "")
+        if (id.isEmpty() || action.isEmpty()) throw ApiException(StatusCode.SC_BAD_REQUEST, "id and action required")
+        return ControllerGuard.guard { ApiServices.op.featureLifecycle(id, action) }
+    }
+
     // ---- 已实现 OP 端点（v0.5.46 迁移自 CharacterController，路由全路径注解逐字保留） ----
 
     @PostMapping("/api/op/character/{role}/hp")

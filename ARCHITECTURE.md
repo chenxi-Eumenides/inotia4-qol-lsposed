@@ -536,7 +536,7 @@ P3 落地：
 | 端点 | 响应 | 说明 |
 |---|---|---|
 | `GET /api/system/resources` | `{"ok":true,"resources":[{id, owner, mechanism, policy, state, in_flight, isolated}]}` | 资源登记表导出；`state` = free/disabled/live/tombstone |
-| `POST /api/op/features/lifecycle` | `{"ok":true,"ticket":N}` | `op` 门控；body `{id, action: enable\|disable\|deactivate\|activate}`，经命令端口投递、主线程帧步进执行；查询走 `features` 状态 |
+| `POST /api/op/features/lifecycle` | `{"ok":true,"ticket":N}` | `op` 门控；body `{id, action: deactivate\|activate}`，经命令端口投递、主线程帧步进执行；`enable/disable` 仍由配置门禁（`/api/config/set`）承担，保持单一写者；查询走 `features` 状态 |
 
 `GET /api/system/tickets/{id}` 随首个异步 HTTP 命令（P4）落地。
 

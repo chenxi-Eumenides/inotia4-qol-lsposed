@@ -6,7 +6,7 @@ import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.RestController
 
 /**
- * 系统功能诊断：/api/system/features（api-reference §7.7）。
+ * 系统功能诊断：/api/system/features（api-reference §7.7）、/api/system/resources（§7.8）。
  * 路由统一全路径写法（无类级 RequestMapping，见 architecture §3）。
  */
 @RestController
@@ -14,4 +14,7 @@ class SystemFeatureController {
 
     @GetMapping("/api/system/features")
     fun features(): String = ControllerGuard.guard(ApiServices.info::featureStatusJson)
+
+    @GetMapping("/api/system/resources")
+    fun resources(): String = ControllerGuard.guard(ApiServices.info::systemResourcesJson)
 }

@@ -304,18 +304,9 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
     contracts::PluginContext ctx{};
     switch (action) {
         case contracts::kFeatureLifecycleEnable:
-            // 幂等：已 enabled 直接成功；仅 installed_disabled 可入。
-            if (status.state == infra::FeatureState::kEnabled) return true;
-            if (status.state != infra::FeatureState::kInstalledDisabled) return false;
-            if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
-            return infra::status_update(plugin->id, infra::FeatureState::kEnabled, true, nullptr);
-
         case contracts::kFeatureLifecycleDisable:
-            if (status.state == infra::FeatureState::kInstalledDisabled) return true;
-            if (status.state != infra::FeatureState::kEnabled) return false;
-            if (plugin->on_disabled != nullptr) plugin->on_disabled(ctx);
-            return infra::status_update(plugin->id, infra::FeatureState::kInstalledDisabled, false,
-                                        nullptr);
+            // 开关语义归配置门禁（/api/config/set），本端点为单一写者：不接受 enable/disable。
+            return false;
 
         case contracts::kFeatureLifecycleDeactivate: {
             if (status.state != infra::FeatureState::kEnabled &&
@@ -344,8 +335,19 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
         }
 
         case contracts::kFeatureLifecycleActivate: {
-            if (status.state != infra::FeatureState::kInactive) return false;
+            // §3.2：inactive → resolving 为幂等重入；failed → resolving 为显式重试
+            // （隔离态已在函数前置拒绝中拦截，未隔离的失败可安全重装）。
+            if (status.state != infra::FeatureState::kInactive &&
+                status.state != infra::FeatureState::kFailed) {
+                return false;
+            }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
+            // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。
+            if (plugin->install != nullptr && plugin->install(ctx) != 0) {
+                infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
+                                     "plugin install failed");
+                return false;
+            }
             const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kInstall);
             if (tx_id == 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
@@ -406,6 +408,8 @@ uint32_t lifecycle_step() {
                     if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
                 }
             } else {
+                // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
+                if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, infra::FeatureState::kInactive, false, nullptr);
             }
         } else {

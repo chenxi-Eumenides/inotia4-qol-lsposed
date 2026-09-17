@@ -1,7 +1,7 @@
 // host 生命周期全路径 host 单测（P3 Lane B）：
 // 用假描述符 + 假 tx 依赖（resolve/hook/unhook/gate）+ 真实 registry/tx/status/config，
-// 覆盖 activate/deactivate 事务全路径、enable/disable 幂等与非法迁移、busy、isolated、
-// 失败事务（unhook 失败）→ kFailed + tombstone/isolated。
+// 覆盖 activate/deactivate 事务全路径与插件自身回调、安装失败不启动事务、enable/disable
+// 被拒（单写者）、busy、isolated、失败事务（unhook 失败）→ kFailed + tombstone/isolated。
 
 #include "host/plugin_registry.h"
 
@@ -106,14 +106,15 @@ struct PluginProbe {
     int enabled_calls = 0;
     int disabled_calls = 0;
     int ready_calls = 0;
-    void* ready_backups[4] = {};
+    int install_rc = 0;  // 非 0 = install 回调失败
+    void* ready_backups[8] = {};
 };
 
 PluginProbe g_probe;
 
 int probe_install(PluginContext&) {
     ++g_probe.install_calls;
-    return 0;
+    return g_probe.install_rc;
 }
 void probe_deactivate(PluginContext&) { ++g_probe.deactivate_calls; }
 void probe_enabled(PluginContext&) { ++g_probe.enabled_calls; }
@@ -121,7 +122,7 @@ void probe_disabled(PluginContext&) { ++g_probe.disabled_calls; }
 void probe_ready(PluginContext&, const char* resource_id, void* backup) {
     (void)resource_id;
     ++g_probe.ready_calls;
-    if (g_probe.ready_calls <= 4) {
+    if (g_probe.ready_calls <= 8) {
         g_probe.ready_backups[g_probe.ready_calls - 1] = backup;
     }
 }
@@ -202,51 +203,110 @@ int drive_lifecycle() {
     return steps;
 }
 
+// 启动装配（同步 install_all）后经 deactivate 事务回到 kInactive。
+// 返回 false 表示前置状态未达预期。
+bool boot_then_deactivate(bool gate) {
+    qol::infra::config_set_bool("test.gate", gate);
+    if (!register_plugin(make_descriptor())) return false;
+    if (install_all(make_host_deps()) != 0) return false;
+    if (!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDeactivate)) return false;
+    drive_lifecycle();
+    return feature_state_is("test_lc", FeatureState::kInactive);
+}
+
 // ---------------------------------------------------------------------------
 // 用例
 // ---------------------------------------------------------------------------
 
-void test_activate_gate_off() {
+void test_activate_calls_install_and_hands_backup() {
     reset_all();
-    CHECK(register_plugin(make_descriptor()));
-    CHECK(qol::infra::status_register("test_lc", "0.1.0"));
-    CHECK(qol::infra::status_update("test_lc", FeatureState::kInactive, false, nullptr));
+    // boot 装配：install 回调 1 次、两条资源 backup 交还。
+    CHECK(boot_then_deactivate(false));
+    CHECK(g_probe.install_calls == 1);
+    CHECK(g_probe.deactivate_calls == 1);
+    CHECK(g_probe.disabled_calls == 1);  // boot 时 gate 关
+    CHECK(g_probe.ready_calls == 2);
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kFree);
 
+    // activate：先调插件 install（第 2 次），再启动安装事务。
     CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(g_probe.install_calls == 2);
     CHECK(feature_state_is("test_lc", FeatureState::kResolving));
     // 事务在途：第二个动作被 busy 拒绝。
     CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
 
     drive_lifecycle();
-    // gate 关闭（配置默认 false）→ installed_disabled + 资源 disabled。
+    // gate 关闭（配置 false）→ installed_disabled + 资源 disabled；backup 再次交还。
     CHECK(feature_state_is("test_lc", FeatureState::kInstalledDisabled));
     CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kDisabled);
     CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kDisabled);
-    // backup 经 on_resource_ready 交还（两条资源各一次）。
-    CHECK(g_probe.ready_calls == 2);
-    CHECK(g_probe.ready_backups[0] != nullptr);
-    CHECK(g_probe.ready_backups[1] != nullptr);
-    CHECK(g_probe.disabled_calls == 1);
+    CHECK(g_probe.ready_calls == 4);
+    CHECK(g_probe.ready_backups[2] != nullptr);
+    CHECK(g_probe.ready_backups[3] != nullptr);
+    CHECK(g_probe.disabled_calls == 2);
     CHECK(g_probe.enabled_calls == 0);
 }
 
-void test_activate_gate_on() {
+void test_activate_gate_on_reentry_is_idempotent() {
     reset_all();
-    qol::infra::config_set_bool("test.gate", true);
+    CHECK(boot_then_deactivate(true));
+    CHECK(g_probe.install_calls == 1);
+    CHECK(g_probe.deactivate_calls == 1);
+    CHECK(g_probe.enabled_calls == 1);  // boot 时 gate 开
+
+    // 第一次 activate。
+    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(g_probe.install_calls == 2);
+    drive_lifecycle();
+    CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kLive);
+    CHECK(g_probe.enabled_calls == 2);
+
+    // 幂等重入：deactivate → activate 再一轮，install 回调再 +1。
+    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDeactivate));
+    drive_lifecycle();
+    CHECK(feature_state_is("test_lc", FeatureState::kInactive));
+    CHECK(g_probe.deactivate_calls == 2);
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
+
+    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(g_probe.install_calls == 3);
+    drive_lifecycle();
+    CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
+    CHECK(g_probe.enabled_calls == 3);
+}
+
+void test_install_failure_marks_failed_without_transaction() {
+    reset_all();
     CHECK(register_plugin(make_descriptor()));
     CHECK(qol::infra::status_register("test_lc", "0.1.0"));
     CHECK(qol::infra::status_update("test_lc", FeatureState::kInactive, false, nullptr));
 
+    g_probe.install_rc = -1;
+    CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(g_probe.install_calls == 1);
+    CHECK(feature_state_is("test_lc", FeatureState::kFailed));
+    // 未启动事务：无 hook 调用、资源保持 free、无在途可推进。
+    CHECK(g_backend.hook_calls == 0);
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kFree);
+    CHECK(lifecycle_step() == 0);
+
+    // §3.2：failed 可显式重试——install 恢复后 activate 重新走 resolving → 安装事务；
+    // gate 默认关，故终态为 installed_disabled + 资源 disabled。
+    g_probe.install_rc = 0;
     CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(feature_state_is("test_lc", FeatureState::kResolving));
     drive_lifecycle();
-    CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
-    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kLive);
-    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kLive);
-    CHECK(g_probe.ready_calls == 2);
-    CHECK(g_probe.enabled_calls == 1);
+    CHECK(g_probe.install_calls == 2);
+    CHECK(g_backend.hook_calls == 2);
+    CHECK(feature_state_is("test_lc", FeatureState::kInstalledDisabled));
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kDisabled);
+    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kDisabled);
 }
 
-void test_deactivate_returns_to_inactive() {
+void test_deactivate_calls_plugin_and_returns_inactive() {
     reset_all();
     qol::infra::config_set_bool("test.gate", true);
     CHECK(register_plugin(make_descriptor()));
@@ -256,42 +316,33 @@ void test_deactivate_returns_to_inactive() {
     CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDeactivate));
     CHECK(feature_state_is("test_lc", FeatureState::kDeactivating));
     drive_lifecycle();
+    // 终态成功：先调插件自身 deactivate 清理，再置 inactive。
+    CHECK(g_probe.deactivate_calls == 1);
     CHECK(feature_state_is("test_lc", FeatureState::kInactive));
     CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
     CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kFree);
     CHECK(g_backend.unhook_calls == 2);
 }
 
-void test_enable_disable_idempotent_and_illegal() {
+void test_enable_disable_rejected() {
     reset_all();
     qol::infra::config_set_bool("test.gate", true);
     CHECK(register_plugin(make_descriptor()));
     CHECK(install_all(make_host_deps()) == 0);
     CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
+    const int enabled_calls = g_probe.enabled_calls;
+    const int disabled_calls = g_probe.disabled_calls;
 
-    // enable 幂等。
-    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleEnable));
+    // 开关语义归配置门禁：本端点拒绝 enable/disable，状态与回调计数不变。
+    CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleEnable));
+    CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDisable));
     CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
-
-    // disable → installed_disabled；再次 disable 幂等。
-    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDisable));
-    CHECK(feature_state_is("test_lc", FeatureState::kInstalledDisabled));
-    CHECK(g_probe.disabled_calls == 1);
-    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDisable));
-    CHECK(g_probe.disabled_calls == 1);
-
-    // 非法迁移：installed_disabled 不可 activate（仅 inactive 可入）。
-    CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
-
-    // enable 回到 enabled。
-    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleEnable));
-    CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
-    CHECK(g_probe.enabled_calls == 2);  // install 一次 + enable 一次
-
-    // 未知插件 / 未知动作。
-    CHECK(!lifecycle_apply("no_such_plugin", qol::contracts::kFeatureLifecycleEnable));
+    CHECK(g_probe.enabled_calls == enabled_calls);
+    CHECK(g_probe.disabled_calls == disabled_calls);
+    // 未知动作同样拒绝。
     CHECK(!lifecycle_apply("test_lc", 99));
-    CHECK(!lifecycle_apply(nullptr, qol::contracts::kFeatureLifecycleEnable));
+    CHECK(!lifecycle_apply("no_such_plugin", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(!lifecycle_apply(nullptr, qol::contracts::kFeatureLifecycleActivate));
 }
 
 void test_isolated_rejects_lifecycle() {
@@ -324,6 +375,8 @@ void test_failed_release_tombstones_and_isolates() {
     CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kTombstone);
     CHECK(qol::hooks::isolated_get("hook:lc:b"));
     CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kLive);
+    // 失败终态不调用插件 deactivate。
+    CHECK(g_probe.deactivate_calls == 0);
 
     // 隔离后同插件生命周期动作继续被拒。
     CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDeactivate));
@@ -332,10 +385,11 @@ void test_failed_release_tombstones_and_isolates() {
 }  // namespace
 
 int main() {
-    test_activate_gate_off();
-    test_activate_gate_on();
-    test_deactivate_returns_to_inactive();
-    test_enable_disable_idempotent_and_illegal();
+    test_activate_calls_install_and_hands_backup();
+    test_activate_gate_on_reentry_is_idempotent();
+    test_install_failure_marks_failed_without_transaction();
+    test_deactivate_calls_plugin_and_returns_inactive();
+    test_enable_disable_rejected();
     test_isolated_rejects_lifecycle();
     test_failed_release_tombstones_and_isolates();
     std::printf("plugin_lifecycle: pass=%d fail=%d\n", g_pass, g_fail);

@@ -1896,16 +1896,14 @@
 
 `POST /api/op/features/lifecycle`
 
-**请求格式**：`{ "id": "simple_mode", "action": "enable" }`
+**请求格式**：`{ "id": "simple_mode", "action": "deactivate" }`
 
 **返回格式**：`{"ok":true,"ticket":N}`（N = 命令票据，0 表示投递失败）；未知动作 `{"ok":false,"error":"unknown action"}`；投递失败 `{"ok":false,"error":"lifecycle rejected"}`。
 
-**注意（v0.8.0 P3）**：`action` ∈ `enable|disable|deactivate|activate`，经命令端口投递、主线程帧步进执行；状态查询走 `GET /api/system/features`（`ticket` 查询端点随 P4 首个异步 HTTP 命令落地）。`op` 门控同 §8 其它端点。状态机（ARCHITECTURE.md §3.2）：
+**注意（v0.8.0 P3）**：`action` 仅接受 `deactivate|activate`，经命令端口投递、主线程帧步进执行；状态查询走 `GET /api/system/features`，资源占用/在途/隔离走 `GET /api/system/resources`（`ticket` 查询端点随 P4 首个异步 HTTP 命令落地）。`op` 门控同 §8 其它端点。**开关语义归配置门禁**（`POST /api/config/set`，如 `simpleModeEnabled`）：本端点不做 `enable/disable`，避免生命周期端点与门禁成为双写者。状态机（ARCHITECTURE.md §3.2）：
 
-- `enable`：`installed_disabled → enabled`（幂等；其它非 enabled 状态拒绝）；
-- `disable`：`enabled → installed_disabled`（幂等；其它非 installed_disabled 状态拒绝）；
-- `deactivate`：`enabled`/`installed_disabled → deactivating`，逆序还原资源（含物理 unhook、在途归零）→ `inactive`；还原失败 → `failed` + 资源 `tombstone`/隔离；
-- `activate`：`inactive → resolving`，按声明顺序安装资源 → 终态按门禁 `enabled`/`installed_disabled`；安装失败 → `failed`（逆序回滚已装子集）。
+- `deactivate`：`enabled`/`installed_disabled → deactivating`，调用插件自身 `deactivate` 清理、逆序还原资源（含物理 unhook、在途归零）→ `inactive`；资源状态可在 `GET /api/system/resources` 观察为 `free`；还原失败 → `failed` + 资源 `tombstone`/隔离；
+- `activate`：`inactive → resolving`，调用插件自身 `install` 初始化后按声明顺序安装资源 → 终态按门禁 `enabled`/`installed_disabled`；安装失败 → `failed`（插件初始化失败不启动事务；安装中途失败逆序回滚已装子集）。
 
 ### 8.2 未实现
 

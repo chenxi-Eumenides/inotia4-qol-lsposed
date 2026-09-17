@@ -70,15 +70,19 @@ const contracts::JniBinding kJni[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
-    // 初始门禁取自配置（默认关闭）；后续变更经 kEventConfigChanged 订阅热切换。
+    // inactive → resolving 是幂等重入（§3.2）：门禁读取可重复执行，订阅已有则不重复订阅
+    // （重复订阅会在 deactivate 退订后留下孤儿订阅）。
     set_gate(infra::config_get_bool(kGateKey, false));
-    g_config_subscription =
-        infra::subscribe(contracts::kEventConfigChanged, &on_config_changed, nullptr);
+    if (g_config_subscription == 0) {
+        g_config_subscription =
+            infra::subscribe(contracts::kEventConfigChanged, &on_config_changed, nullptr);
+    }
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    // 幂等：退订后置 0，便于再次 install 重新订阅；重复调用安全。
     if (g_config_subscription != 0) {
         infra::unsubscribe(g_config_subscription);
         g_config_subscription = 0;
