@@ -41,7 +41,12 @@
 |---|---|---|---|
 | VM-P1-01 | `infra` 骨架（快照/命令队列/事件/能力/状态） | host：`cmake --build build && ctest --test-dir build` | PASS（20/20，含快照并发撕裂断言）；范围：host-only，未接线运行时 |
 | VM-P1-02 | 最小诊断接口 `GET /api/system/features` | 真机：安装 debug APK → force-stop → monkey → `dialog/select {"action":"ok"}` → `curl` | PASS（HTTP 200；`{"ok":true,"features":[{"id":"core","version":"0.1.0","state":"enabled",...}]}`；`enter_slot 0` 后复测一致） |
+| VM-P1-03 | `/api/health` 加法扩展 `ready` + `variant` | 真机：安装 debug APK → force-stop → monkey → `curl /api/health` | PASS（`{"ok":true,"ready":true,"variant":{"series":"monster","version":"v27","known":true,"capabilities":3}}`） |
 | VM-P0-01 | 校验脚本族 + 基线棘轮 | 脚本：`check_arch.py`（含 `--freeze` 拒绝扩容验证） | PASS（124 条基线；新增违规失败；已消除条目可收缩：125→124） |
+
+> VM-P1-03 执行时发现并修复线上缺陷：变体表停在 monster v26，设备 v27 查表失败
+> （`known=0`、能力位 0，靠 `WH4JRN01` 回退分类）；重新生成后补入 v27/v29，设备命中
+> `known=1, version=v27, caps=0x3`。该修复需同步到主线（见 `ledger.md` §5）。
 
 ## 5. 待建立
 

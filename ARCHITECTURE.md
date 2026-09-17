@@ -11,6 +11,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.1 | 实施校准（P1）：诊断接口按实测收敛——`features` 为 `{"ok":true,"features":[...]}` 信封并含 `version/resource_count`；`/api/health` 以加法扩展承载 `ready/variant`；`safeMode` 移至 P6 |
 | v0.3 | 闭合第二轮审阅：contracts 定为 L0 中立契约层、跨线程访问矩阵、能力撤销级联事务、hook 物理归还与 tombstone、外部 Host API 只读默认档、资源异步安装状态机、分派三段式与短路唯一、required/optional × failure 状态映射、外部更新仅重启生效、迁移阶段依赖修正 |
 
 ---
@@ -513,16 +514,16 @@ com.inotia4.qol/
 
 ### 9.1 状态 API
 
-```
-P1 最小诊断接口（必须）
-GET /api/system/features   → [{id, state, enabled, error}]                  # 最小字段集
-GET /api/system/health     → {ready, variant, safeMode}
+P1 最小诊断接口（必须）：
 
-P2 起扩展
-GET /api/system/features   → 追加 resources[]/requires[]/provides[]/degraded/variant
-GET /api/system/resources  → 资源占用状态（free/disabled/live/tombstone）、消费者、权限类型、失败模式
-GET /api/system/tickets/{id} → 命令票据状态
-```
+| 端点 | 响应 | 说明 |
+|---|---|---|
+| `GET /api/system/features` | `{"ok":true,"features":[{id, version, state, enabled, error, resource_count}]}` | 状态登记表导出；`state` 为英文枚举名 |
+| `GET /api/health`（既有端点，**加法扩展**） | `{"ok":true,"ready":true,"variant":{"series","version","known","capabilities"}}` | `ok` 保持不变；`ready` 与 503 语义一致；`variant` 取自 `game/` 变体表 |
+
+P2 起扩展：`features` 追加 `resources[]/requires[]/provides[]/degraded`；新增 `GET /api/system/resources`（资源占用状态、消费者、权限类型、失败模式）与 `GET /api/system/tickets/{id}`（命令票据状态）。
+
+`safeMode` 移到 P6（外部插件轨）：P1–P5 不存在可禁用的外部插件，恒定 `false` 无诊断价值。
 
 ### 9.2 校验脚本族与能力边界
 

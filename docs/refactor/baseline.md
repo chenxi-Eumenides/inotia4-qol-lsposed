@@ -45,10 +45,10 @@
 | `features/ui` | 33 |
 | `features/world_teleport` | 4 |
 | `game` | 21 |
-| `host` | 15 |
+| `host` | 18 |
 | `infra` | 35 |
 | `patch` | 3 |
-| **合计** | **242** |
+| **合计** | **245** |
 
 ### 1.2 迁移期映射摘要
 
@@ -138,8 +138,8 @@
 | `infra` | `game` | 12 |
 | `features/patch` | `game` | 11 |
 | `features/extension_bag` | `game` | 10 |
+| `host` | `infra` | 10 |
 | `domains/inventory` | `game` | 9 |
-| `host` | `infra` | 9 |
 | `features/autosell` | `game` | 8 |
 | `domains/world` | `game` | 7 |
 | `features/extension_bag` | `contracts` | 7 |
@@ -258,8 +258,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：138 个
-- native 导出：138 个
+- Kotlin `external fun`：139 个
+- native 导出：139 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：

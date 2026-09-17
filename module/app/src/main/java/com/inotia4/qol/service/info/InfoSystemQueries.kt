@@ -24,5 +24,9 @@ internal object InfoSystemQueries {
     fun extensionBagTestEquip(index: Int, bagType: Int): String = NativeBridge.nativeExtensionBagTestEquip(index, bagType)
     fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String =
         NativeBridge.nativeExtensionBagTestItem(index, slot, category, count)
-    fun health(): String = JsonUtil.wrap("ok" to true)
+    fun health(): String = JsonUtil.wrap(
+        "ok" to true,
+        "ready" to NativeBridge.ready,
+        "variant" to JsonUtil.parseObj(NativeBridge.nativeGetVariantJson())
+    )
 }

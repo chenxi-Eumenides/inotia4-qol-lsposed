@@ -186,4 +186,7 @@ object NativeBridge {
 
     // ---- 功能诊断（P1 最小诊断接口：原生功能状态汇总 JSON）----
     external fun nativeFeatureStatusJson(): String
+
+    // 游戏变体诊断（P1）：libgame.so 查表结果 JSON，供 /api/health 加法扩展使用
+    external fun nativeGetVariantJson(): String
 }

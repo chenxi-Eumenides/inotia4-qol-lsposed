@@ -9,7 +9,7 @@
 |---|---|---|---|
 | P0 | 校验脚本族 + 基线棘轮冻结 | ✅ 完成 | `check_arch.py` 可运行；基线冻结 124 条（提交 `050e93c`） |
 | — | 目标架构设计书入库 | ✅ 完成 | 根目录 `ARCHITECTURE.md` v0.3（提交 `1fa9ef2`） |
-| P1 | 骨架：`contracts/` + `infra/` + `game/`；最小诊断接口 | ✅ 完成 | host 20/20（提交 `e472d52`）；`GET /api/system/features` 真机 200（提交 `18f0a91`） |
+| P1 | 骨架：`contracts/` + `infra/` + `game/`；最小诊断接口 | ✅ 完成 | host 20/20（`e472d52`）；`GET /api/system/features` 与 `/api/health`（加法扩展 ready/variant）真机通过（`18f0a91` + 后续提交，卡见 `verification.md` VM-P1-02/03） |
 | P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端） | ⬜ 未开始 | 样板真机验收卡通过；状态 API 可见 |
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ⬜ 未开始 | 故障注入与并发测试通过；内部接口冻结 |
 | P4 | 批量迁移其余插件（内置静态轨） | ⬜ 未开始 | 每插件：单测 + 验收卡；豁免清零 |
@@ -58,3 +58,10 @@
 | `resource_unknown_symbol` | 19 | 间接安装点（符号在 `game_access` 全局解析），待人工归属 |
 
 完整清单与样例见 `docs/refactor/baseline.md` §3；核对命令：`uv run python scripts/maintenance/check_arch.py`。
+
+## 5. 跨分支事项
+
+| # | 事项 | 状态 | 说明 |
+|---|---|---|---|
+| 1 | 变体表补入 monster v27/v29 | ✅ 已在重构分支完成 | 修复 v27 用户 `known=0`（能力位误为 0）；主线仍需 cherry-pick（用户决定合并节奏） |
+| 2 | 主线 `1d8bb97`（R-67/R-68 闪退修复）合入重构分支 | ⬜ 待办（用户指示暂不合并） | 合并前重构分支不含该修复 |
