@@ -27,6 +27,32 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     // 特殊装备解锁：+7 bit4 的两个判定入口（入口 hook，owner=special_equip）。
     {"F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA},
     {"F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA},
+    // 库存行为域入口 hook（owner=inventory_hooks，B2a-1 声明式化）：24 条 wrapper 的
+    // 挂载点；handler 在 feature/patch/native_inventory_hook.cpp 取址。
+    {"F_FIND_ITEM_VMA", F_FIND_ITEM_VMA},
+    {"F_INVEN_HAVE_ITEM_VMA", F_INVEN_HAVE_ITEM_VMA},
+    {"F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA},
+    {"F_GET_CUMULATE_COUNT_VMA", F_GET_CUMULATE_COUNT_VMA},
+    {"F_CONSUME_ITEM_VMA", F_CONSUME_ITEM_VMA},
+    {"F_REMOVE_ITEM_VMA", F_REMOVE_ITEM_VMA},
+    {"F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA", F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA},
+    {"F_PUT_JEWEL_VMA", F_PUT_JEWEL_VMA},
+    {"F_INVEN_IS_HAVING_EMPTY_SLOT_VMA", F_INVEN_IS_HAVING_EMPTY_SLOT_VMA},
+    {"F_UNEQUIP_VMA", F_UNEQUIP_VMA},
+    {"F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA},
+    {"F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA", F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA},
+    {"F_UIEQUIP_BUTTON_DESTROY_EXE_VMA", F_UIEQUIP_BUTTON_DESTROY_EXE_VMA},
+    {"F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA", F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA},
+    {"F_UIEQUIP_OK_DESTROY_ITEM_VMA", F_UIEQUIP_OK_DESTROY_ITEM_VMA},
+    {"F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA", F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA},
+    {"F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA},
+    {"F_INVEN_MOVE_ITEM_VMA", F_INVEN_MOVE_ITEM_VMA},
+    {"F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA},
+    {"F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA},
+    {"F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA},
+    {"F_ITEMSYSTEM_DIVIDE_VMA", F_ITEMSYSTEM_DIVIDE_VMA},
+    {"F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA},
+    {"F_INVEN_REMOVE_ITEM_DATA_VMA", F_INVEN_REMOVE_ITEM_DATA_VMA},
 };
 
 // 解析可安装 hook 的入口地址。
@@ -42,7 +68,14 @@ uintptr_t hookable_entry(uintptr_t symbol_entry, bool* out_followed) {
     const uint32_t word = *reinterpret_cast<const uint32_t*>(symbol_entry);
     constexpr uint32_t k_branch_mask = 0xFC000000u;   // b/bl/ret 等 opcode 掩码
     constexpr uint32_t k_b_opcode = 0x14000000u;      // B（无条件、不写 x30）
-    if ((word & k_branch_mask) != k_b_opcode) return symbol_entry;
+    if ((word & k_branch_mask) != k_b_opcode) {
+        // 非跳板：入口必须落在可执行映射内，否则按未解析处理（fail-closed）。
+        // 旧自研安装引擎曾对每个目标做同一判定（引擎已在 B2a-1 删除）；声明式安装改为在
+        // 解析层收口，避免把不可执行地址交给 hook 原语。
+        return game_memory_accessible(reinterpret_cast<void*>(symbol_entry), 4, 'x')
+                   ? symbol_entry
+                   : 0;
+    }
 
     int64_t offset = static_cast<int64_t>(word & 0x03FFFFFFu);
     if ((offset & 0x02000000) != 0) offset -= 0x04000000;  // 26 位有符号立即数
