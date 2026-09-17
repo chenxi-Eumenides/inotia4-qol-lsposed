@@ -93,6 +93,8 @@ bool install_frame_claim(const contracts::ResourceClaim& claim) {
                       outcome.error != nullptr ? outcome.error : "?");
         return false;
     }
+    // 物理安装成功 → 登记表状态置 live（与事务引擎对非入口机制的语义一致；gate=nullptr 常驻）。
+    hooks::set_state(claim.id, contracts::ResourceState::kLive);
     hooks::runtime_set(claim.id, site.addr, nullptr);
     return true;
 }
