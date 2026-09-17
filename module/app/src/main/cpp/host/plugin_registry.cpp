@@ -6,6 +6,7 @@
 
 #include "core/native/qol_log.h"
 #include "contracts/commands.h"
+#include "contracts/ownership.h"
 #include "game/access/patches.h"
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
@@ -65,9 +66,19 @@ const char* check_requires(const contracts::PluginDescriptor& plugin) {
     return nullptr;
 }
 
-// 非入口机制（call patch）的同步安装：解析站点并交 patch 层；成功后登记运行期地址。
+// 非入口机制的同步安装（kCallPatch / kOwnership）；成功后登记运行期地址。
 // 返回 nullptr 成功，否则静态错误文本。
 const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintptr_t* out_target) {
+    // kOwnership：claim.handler 指向 OwnershipOps，不经 patch 站点。
+    if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+        const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
+        if (ops == nullptr || ops->acquire == nullptr) return "ownership ops missing";
+        if (contracts::ownership_acquire(ops, claim.id) != 0) return "ownership acquire rejected";
+        if (out_target != nullptr) {
+            *out_target = 0;
+        }
+        return nullptr;
+    }
     qol::game::PatchSite site{};
     if (!qol::game::patch_site(claim.symbol, &site)) {
         return "symbol unresolved";
@@ -83,8 +94,12 @@ const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintp
     return nullptr;
 }
 
-// 非入口机制的物理还原：站点取自运行期记录（安装时写入）。
+// 非入口机制的物理还原：kOwnership 调 ops->release（幂等）；kCallPatch 站点取自运行期记录。
 bool release_non_entry_claim(const contracts::ResourceClaim& claim) {
+    if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+        contracts::ownership_release(contracts::ownership_ops(claim.handler), claim.id);
+        return true;
+    }
     hooks::ResourceRuntime runtime{};
     const uintptr_t target = hooks::runtime_of(claim.id, &runtime) ? runtime.resolved_entry : 0;
     const qol::patch::Outcome outcome = qol::patch::release_claim(claim, target);
@@ -437,15 +452,38 @@ int install_all(const HostDeps& deps) {
             continue;
         }
 
-        // 3) 资源逐条声明式安装；任一失败逆序回滚。
+        // 3) 资源逐条声明式安装；失败按 §8 逐资源策略处置：
+        //    kRequired×kFailClosed → 逆序回滚 + failed；其余（kRequired×kFailSoft /
+        //    kOptional×任一）→ 记录 + degraded，跳过该资源继续安装其余。
         const contracts::ResourceClaim* installed_claims[kMaxResourcesPerPlugin];
         uintptr_t installed_entries[kMaxResourcesPerPlugin];
         uint32_t installed_count = 0;
         bool all_gates_on = true;
         bool resource_failed = false;
         bool plugin_aborted = false;  // 受限回调失败已置 failed，跳过统一回滚分支
+        bool degraded = false;
         const char* failed_claim_id = nullptr;
         const char* resource_error = nullptr;
+        const char* degraded_claim_id = nullptr;
+        const char* degraded_error = nullptr;
+
+        // 返回 true = 该资源失败必须整体回滚（required + fail-closed）。
+        auto handle_claim_failure = [&](const contracts::ResourceClaim& claim,
+                                        const char* error) -> bool {
+            const bool fail_closed_required =
+                claim.requirement == contracts::ResourceRequirement::kRequired &&
+                claim.failure == contracts::ResourceFailure::kFailClosed;
+            if (fail_closed_required) {
+                resource_failed = true;
+                failed_claim_id = claim.id;
+                resource_error = error;
+                return true;
+            }
+            degraded = true;
+            degraded_claim_id = claim.id;
+            degraded_error = error;
+            return false;
+        };
 
         for (uint32_t r = 0; r < plugin.resources_count; ++r) {
             const contracts::ResourceClaim& claim = plugin.resources[r];
@@ -453,7 +491,7 @@ int install_all(const HostDeps& deps) {
                 claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
             if (claim.gate != nullptr && !gate_on) all_gates_on = false;
 
-            // 非入口机制（call patch）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
+            // 非入口机制（call patch / ownership）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
             if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
                 if (claim.gate != nullptr && !gate_on) {
                     continue;
@@ -461,11 +499,11 @@ int install_all(const HostDeps& deps) {
                 uintptr_t target = 0;
                 const char* error = install_non_entry_claim(claim, &target);
                 if (error != nullptr) {
-                    resource_failed = true;
-                    failed_claim_id = claim.id;
-                    resource_error = error;
-                    break;
+                    if (handle_claim_failure(claim, error)) break;
+                    continue;
                 }
+                // 安装成功登记 live（与入口 hook 路径一致；sync_gates 路径随后会再写同值）。
+                hooks::set_state(claim.id, contracts::ResourceState::kLive);
                 installed_claims[installed_count] = &claim;
                 installed_entries[installed_count] = target;
                 ++installed_count;
@@ -476,19 +514,18 @@ int install_all(const HostDeps& deps) {
             const uintptr_t entry =
                 deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
             if (entry == 0) {
-                resource_failed = true;
-                failed_claim_id = claim.id;
-                resource_error = "symbol unresolved";
-                break;
+                if (handle_claim_failure(claim, "symbol unresolved")) break;
+                continue;
             }
 
             const hooks::InstallOutcome outcome =
                 hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, gate_on);
             if (outcome.ok != 0) {
-                resource_failed = true;
-                failed_claim_id = claim.id;
-                resource_error = outcome.error != nullptr ? outcome.error : "install failed";
-                break;
+                if (handle_claim_failure(
+                        claim, outcome.error != nullptr ? outcome.error : "install failed")) {
+                    break;
+                }
+                continue;
             }
             // 同步路径同样登记运行期入口：运行期 deactivate/撤回的物理归还要用 resolved_entry。
             hooks::runtime_set(claim.id, entry, outcome.backup);
@@ -529,12 +566,23 @@ int install_all(const HostDeps& deps) {
             continue;
         }
 
-        // 4) 全部成功：带 gate 的资源全开 → enabled；否则 installed_disabled。
+        // 4) 全部成功（含 fail-soft 跳过）：带 gate 的资源全开 → enabled；否则 installed_disabled。
+        //    fail-soft 失败只置 degraded 标记 + error 文案，不改生命周期态（§8）。
         const bool enabled = all_gates_on;
+        const char* status_error = nullptr;
+        if (degraded) {
+            std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
+                          degraded_claim_id != nullptr ? degraded_claim_id : "?",
+                          degraded_error != nullptr ? degraded_error : "failed");
+            status_error = g_error_text[i];
+            infra::status_set_degraded(plugin.id, true);
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
+                         degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
+        }
         infra::status_update(
             plugin.id,
             enabled ? infra::FeatureState::kEnabled : infra::FeatureState::kInstalledDisabled,
-            enabled, nullptr);
+            enabled, status_error);
         if (enabled) {
             if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
             // §3.4.4：进入 enabled 时注册能力（提供者门禁已由 on_enabled 打开）。

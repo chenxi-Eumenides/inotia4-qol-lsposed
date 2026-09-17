@@ -6,6 +6,8 @@
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 
+#include "contracts/ownership.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -138,6 +140,45 @@ MechanismOutcome fake_release_other(const ResourceClaim& claim, uintptr_t target
     return MechanismOutcome{0, nullptr};
 }
 
+// kOwnership：模拟宿主分派（assembly 的 dispatch_install/release）——调 claim.handler
+// 指向的 OwnershipOps。事务引擎只按 mechanism 选择 install_other/release_other，
+// 资源顺序与还原逆序由事务层保证。
+int g_own_acquire_calls = 0;
+int g_own_release_calls = 0;
+char g_own_acquire_order[8][32] = {};
+char g_own_release_order[8][32] = {};
+
+int32_t probe_ownership_acquire(const char* id) {
+    const int call = ++g_own_acquire_calls;
+    if (id != nullptr && call <= 8) {
+        std::snprintf(g_own_acquire_order[call - 1], sizeof(g_own_acquire_order[0]), "%s", id);
+    }
+    return 0;
+}
+
+void probe_ownership_release(const char* id) {
+    const int call = ++g_own_release_calls;
+    if (id != nullptr && call <= 8) {
+        std::snprintf(g_own_release_order[call - 1], sizeof(g_own_release_order[0]), "%s", id);
+    }
+}
+
+const qol::contracts::OwnershipOps g_probe_ownership_ops = {&probe_ownership_acquire,
+                                                            &probe_ownership_release};
+
+MechanismOutcome ownership_install_other(const ResourceClaim& claim, uintptr_t target) {
+    (void)target;
+    const int32_t rc =
+        qol::contracts::ownership_acquire(qol::contracts::ownership_ops(claim.handler), claim.id);
+    return MechanismOutcome{rc, rc == 0 ? nullptr : "ownership acquire rejected"};
+}
+
+MechanismOutcome ownership_release_other(const ResourceClaim& claim, uintptr_t target) {
+    (void)target;
+    qol::contracts::ownership_release(qol::contracts::ownership_ops(claim.handler), claim.id);
+    return MechanismOutcome{0, nullptr};
+}
+
 void reset_all() {
     registry_reset_for_test();
     tx_reset_for_test();
@@ -155,6 +196,10 @@ void reset_all() {
     g_other_release_rc = 0;
     g_other_last_target = 0;
     g_other_last_claim = nullptr;
+    g_own_acquire_calls = 0;
+    g_own_release_calls = 0;
+    std::memset(g_own_acquire_order, 0, sizeof(g_own_acquire_order));
+    std::memset(g_own_release_order, 0, sizeof(g_own_release_order));
     std::memset(g_hook_targets, 0, sizeof(g_hook_targets));
     std::memset(g_hook_replacements, 0, sizeof(g_hook_replacements));
 }
@@ -676,6 +721,58 @@ void test_call_patch_mechanism_transaction() {
     CHECK(state_of("patch:C") == ResourceState::kFree);
 }
 
+// kOwnership 资源经事务引擎：acquire 按声明序、release 逆序；不触入口 hook 原语。
+void test_ownership_mechanism_transaction() {
+    reset_all();
+    TxDeps deps{};
+    deps.resolve_entry = fake_resolve;
+    deps.hook_fn = fake_hook;
+    deps.unhook_fn = fake_unhook;
+    deps.gate_on = fake_gate;
+    deps.install_other = ownership_install_other;
+    deps.release_other = ownership_release_other;
+    tx_set_deps(deps);
+
+    const char* ids[] = {"own:A", "own:B", "own:C"};
+    for (const char* id : ids) {
+        ResourceClaim c = make_claim(id, "own_plugin", "gateOn");
+        c.mechanism = ResourceMechanism::kOwnership;
+        c.symbol = "ownership:test";
+        c.handler = const_cast<qol::contracts::OwnershipOps*>(&g_probe_ownership_ops);
+        CHECK(register_claim(c));
+    }
+
+    uint64_t tx = tx_begin("own_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));   // A
+    CHECK(tx_step(tx, &step));   // B
+    CHECK(!tx_step(tx, &step));  // C（终态）
+    CHECK(step.finished);
+    CHECK(g_own_acquire_calls == 3);
+    CHECK(std::strcmp(g_own_acquire_order[0], "own:A") == 0);
+    CHECK(std::strcmp(g_own_acquire_order[1], "own:B") == 0);
+    CHECK(std::strcmp(g_own_acquire_order[2], "own:C") == 0);
+    CHECK(g_hook_calls == 0);  // 不得误走入口 hook 原语
+    CHECK(state_of("own:A") == ResourceState::kLive);
+    CHECK(state_of("own:B") == ResourceState::kLive);
+    CHECK(state_of("own:C") == ResourceState::kLive);
+
+    // 还原：事务逆序 release（C → B → A）。
+    tx = tx_begin("own_plugin", TxKind::kRelease);
+    CHECK(tx != 0);
+    CHECK(tx_step(tx, &step));
+    CHECK(tx_step(tx, &step));
+    CHECK(!tx_step(tx, &step));
+    CHECK(g_own_release_calls == 3);
+    CHECK(std::strcmp(g_own_release_order[0], "own:C") == 0);
+    CHECK(std::strcmp(g_own_release_order[1], "own:B") == 0);
+    CHECK(std::strcmp(g_own_release_order[2], "own:A") == 0);
+    CHECK(state_of("own:A") == ResourceState::kFree);
+    CHECK(state_of("own:B") == ResourceState::kFree);
+    CHECK(state_of("own:C") == ResourceState::kFree);
+}
+
 }  // namespace
 
 int main() {
@@ -692,6 +789,7 @@ int main() {
     test_install_anchor_failures();
     test_release_anchors();
     test_call_patch_mechanism_transaction();
+    test_ownership_mechanism_transaction();
     test_terminal_retention_evicts_oldest();
     std::printf("hooks_transaction: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

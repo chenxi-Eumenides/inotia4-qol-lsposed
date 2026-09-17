@@ -137,9 +137,9 @@ target_sources(gamebridge PRIVATE
 
 # 自定义合成配方（custom-craft-recipe：目录/规则/表注入/UI hook，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/custom_recipe/custom_recipe_catalog.cpp
-    feature/custom_recipe/custom_recipe_rules.cpp
-    feature/custom_recipe/custom_recipe_table.cpp
+    features/custom_recipe/catalog.cpp
+    features/custom_recipe/rules.cpp
+    features/custom_recipe/table.cpp
     feature/custom_recipe/custom_recipe_api.cpp
     feature/craft_ui/craft_ui_hooks.cpp
 )

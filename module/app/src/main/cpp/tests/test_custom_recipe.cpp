@@ -1,6 +1,6 @@
-#include "feature/custom_recipe/custom_recipe_catalog.h"
-#include "feature/custom_recipe/custom_recipe_rules.h"
-#include "feature/custom_recipe/custom_recipe_table.h"
+#include "features/custom_recipe/catalog.h"
+#include "features/custom_recipe/rules.h"
+#include "features/custom_recipe/table.h"
 
 #include "domains/attribute_range/rules.h"
 
@@ -675,6 +675,27 @@ static void test_recipe_book_bit_invariant() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Step 0（停用 fail-closed）：确认框回调的 pending/token 校验（纯逻辑）。
+// 场景：残留面板上关总开关后点「确认合成」——停用 + 代际已在 set_enabled(false) 自增，
+// 校验必须拒绝，调用方按 kStaleSlots 处理（不消耗、不产出）。
+// ---------------------------------------------------------------------------
+static void test_execute_token_valid() {
+    // 启用 + 存在待确认条目 + 代际一致 → 放行。
+    CHECK(cr::execute_token_valid(true, 7, 7));
+    CHECK(cr::execute_token_valid(true, 1, 1));
+    // 停用：即使 pending/token 一致也必须拒绝。
+    CHECK(!cr::execute_token_valid(false, 7, 7));
+    // 无待确认（pending_token==0）→ 拒绝（未 prepare / 重复回调）。
+    CHECK(!cr::execute_token_valid(true, 0, 0));
+    CHECK(!cr::execute_token_valid(true, 0, 7));
+    // 代际不一致（停用/表重载已作废该确认）→ 拒绝。
+    CHECK(!cr::execute_token_valid(true, 6, 7));
+    CHECK(!cr::execute_token_valid(true, 8, 7));
+    // 停用且代际不一致的组合同样拒绝。
+    CHECK(!cr::execute_token_valid(false, 6, 7));
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
@@ -683,6 +704,7 @@ int main() {
     test_material_count();
     test_module_recipe_desc_constants();
     test_three_slot_stack_rules();
+    test_execute_token_valid();
     test_chaos_scroll_recipe();
     test_max_socket_enchant_recipe();
     test_dynamic_special_recipes();

@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "contracts/plugin.h"
+#include "contracts/ownership.h"
 #include "hooks/registry.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
@@ -132,6 +133,38 @@ void probe_fill_status(PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// kOwnership 探针：记录 acquire/release 调用与顺序（最多 8 条）。
+struct OwnershipProbe {
+    int acquire_calls = 0;
+    int release_calls = 0;
+    int fail_acquire_at = 0;  // 1-based；0 = 不失败
+    char acquire_order[8][32] = {};
+    char release_order[8][32] = {};
+};
+
+OwnershipProbe g_ownership;
+
+int32_t ownership_acquire_probe(const char* id) {
+    const int call = ++g_ownership.acquire_calls;
+    if (id != nullptr && call <= 8) {
+        std::snprintf(g_ownership.acquire_order[call - 1], sizeof(g_ownership.acquire_order[0]),
+                      "%s", id);
+    }
+    if (g_ownership.fail_acquire_at != 0 && call == g_ownership.fail_acquire_at) return -1;
+    return 0;
+}
+
+void ownership_release_probe(const char* id) {
+    const int call = ++g_ownership.release_calls;
+    if (id != nullptr && call <= 8) {
+        std::snprintf(g_ownership.release_order[call - 1], sizeof(g_ownership.release_order[0]),
+                      "%s", id);
+    }
+}
+
+const qol::contracts::OwnershipOps g_ownership_ops = {&ownership_acquire_probe,
+                                                      &ownership_release_probe};
+
 ResourceClaim claim(const char* id, const char* owner, const char* gate) {
     ResourceClaim c{};
     c.id = id;
@@ -146,6 +179,32 @@ ResourceClaim claim(const char* id, const char* owner, const char* gate) {
     c.gate = gate;
     c.step_budget = 120;
     c.handler = &g_dummy_handler;
+    return c;
+}
+
+// optional + fail-soft 入口 hook 资源（install 失败只置 degraded、不整体失败，§8）。
+ResourceClaim optional_claim(const char* id, const char* owner) {
+    ResourceClaim c = claim(id, owner, nullptr);
+    c.requirement = ResourceRequirement::kOptional;
+    c.failure = ResourceFailure::kFailSoft;
+    return c;
+}
+
+// kOwnership 资源：handler 指向 OwnershipOps；symbol 仅占位（机制不经站点解析）。
+ResourceClaim ownership_claim(const char* id, const char* owner) {
+    ResourceClaim c{};
+    c.id = id;
+    c.symbol = "ownership:test";
+    c.mechanism = ResourceMechanism::kOwnership;
+    c.policy = ResourcePolicy::kPrivate;
+    c.requirement = ResourceRequirement::kRequired;
+    c.failure = ResourceFailure::kFailClosed;
+    c.resumable = true;
+    c.owner = owner;
+    c.reason = "test";
+    c.gate = nullptr;
+    c.step_budget = 120;
+    c.handler = const_cast<qol::contracts::OwnershipOps*>(&g_ownership_ops);
     return c;
 }
 
@@ -167,6 +226,27 @@ ResourceClaim g_gate2_resources[] = {
 
 CapabilityRequirement g_missing_requires[] = {
     {"cap:missing", QolVersionRange{1, 0}},
+};
+
+// optional/fail-soft：第 2 条为 optional+fail-soft，注入 hook 失败时其余仍装、插件 degraded。
+ResourceClaim g_optional_resources[] = {
+    claim("hook:test:opt:a", "test_opt", nullptr),
+    optional_claim("hook:test:opt:b", "test_opt"),
+    claim("hook:test:opt:c", "test_opt", nullptr),
+};
+
+// required+fail-closed 失败必须整体回滚（即使存在 optional 资源）。
+ResourceClaim g_required_then_optional[] = {
+    claim("hook:test:req:a", "test_req", nullptr),
+    claim("hook:test:req:b", "test_req", nullptr),
+    optional_claim("hook:test:req:c", "test_req"),
+};
+
+// kOwnership 分派：三条按声明序 acquire；失败时逆序 release。
+ResourceClaim g_ownership_resources[] = {
+    ownership_claim("own:test:a", "test_own"),
+    ownership_claim("own:test:b", "test_own"),
+    ownership_claim("own:test:c", "test_own"),
 };
 
 PluginDescriptor make_descriptor(const char* id, const ResourceClaim* resources,
@@ -203,6 +283,7 @@ void reset_all() {
     qol::infra::events_reset_for_test();
     g_backend = FakeBackend{};
     g_probe = PluginProbe{};
+    g_ownership = OwnershipProbe{};
 }
 
 bool feature_of(const char* id, FeatureState* state, bool* enabled, const char** error) {
@@ -223,6 +304,18 @@ bool feature_of(const char* id, FeatureState* state, bool* enabled, const char**
 bool feature_state_is(const char* id, FeatureState expected) {
     FeatureState state = FeatureState::kRegistered;
     return feature_of(id, &state, nullptr, nullptr) && state == expected;
+}
+
+bool feature_degraded(const char* id) {
+    qol::infra::FeatureStatus features[8];
+    uint32_t written = 0;
+    if (!qol::infra::status_snapshot(features, 8, &written)) return false;
+    for (uint32_t i = 0; i < written; ++i) {
+        if (features[i].id != nullptr && std::strcmp(features[i].id, id) == 0) {
+            return features[i].degraded;
+        }
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +577,95 @@ void test_zero_resource_plugin() {
     CHECK(g_probe.disabled_calls == 0);
 }
 
+// §8 optional × fail-soft：第 2 条 optional 入口 hook 安装失败 → 只置 degraded，
+// 跳过该资源继续安装其余；插件仍 enabled，失败资源保持 free。
+void test_optional_fail_soft_degraded() {
+    reset_all();
+    g_backend.fail_hook_call = 2;
+    const PluginDescriptor d =
+        make_descriptor("test_opt", g_optional_resources, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 0);  // 不算失败插件
+    CHECK(g_backend.hook_calls == 3);      // 失败后继续装第 3 条
+    CHECK(g_backend.unhook_calls == 0);    // 不回滚已装成功的资源
+    CHECK(qol::hooks::state_of("hook:test:opt:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:test:opt:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:opt:c") == ResourceState::kLive);
+
+    FeatureState state = FeatureState::kRegistered;
+    bool enabled = false;
+    const char* error = nullptr;
+    CHECK(feature_of("test_opt", &state, &enabled, &error));
+    CHECK(state == FeatureState::kEnabled);
+    CHECK(enabled);
+    CHECK(feature_degraded("test_opt"));
+    CHECK(error != nullptr);
+    CHECK(std::strstr(error, "hook:test:opt:b") != nullptr);
+    CHECK(g_probe.enabled_calls == 1);
+    CHECK(g_probe.disabled_calls == 0);
+}
+
+// §8 required × fail-closed：失败必须逆序回滚已装资源并置 failed；
+// 即使其后还有 optional 资源也不得继续安装。
+void test_required_fail_closed_rolls_back_with_optional() {
+    reset_all();
+    g_backend.fail_hook_call = 2;
+    const PluginDescriptor d =
+        make_descriptor("test_req", g_required_then_optional, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(g_backend.hook_calls == 2);    // 第 2 条失败后中止，不再装第 3 条
+    CHECK(g_backend.unhook_calls == 1);  // 逆序回滚第 1 条
+    CHECK(qol::hooks::state_of("hook:test:req:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:req:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:req:c") == ResourceState::kFree);
+    CHECK(feature_state_is("test_req", FeatureState::kFailed));
+    CHECK(!feature_degraded("test_req"));
+}
+
+// kOwnership 分派：claim.handler 指向 OwnershipOps，acquire 按声明序调用；
+// 全部成功 → 资源 live，不经 patch 站点、不触 hook/unhook。
+void test_ownership_acquire_order_live() {
+    reset_all();
+    const PluginDescriptor d =
+        make_descriptor("test_own", g_ownership_resources, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_ownership.acquire_calls == 3);
+    CHECK(g_ownership.release_calls == 0);
+    CHECK(std::strcmp(g_ownership.acquire_order[0], "own:test:a") == 0);
+    CHECK(std::strcmp(g_ownership.acquire_order[1], "own:test:b") == 0);
+    CHECK(std::strcmp(g_ownership.acquire_order[2], "own:test:c") == 0);
+    CHECK(g_backend.hook_calls == 0);
+    CHECK(g_backend.unhook_calls == 0);
+    CHECK(qol::hooks::state_of("own:test:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("own:test:b") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("own:test:c") == ResourceState::kLive);
+    CHECK(feature_state_is("test_own", FeatureState::kEnabled));
+}
+
+// kOwnership 回滚：第 3 条 acquire 失败 → 逆序 release 第 2、第 1 条；插件 failed。
+void test_ownership_release_reverse_on_rollback() {
+    reset_all();
+    g_ownership.fail_acquire_at = 3;
+    const PluginDescriptor d =
+        make_descriptor("test_own", g_ownership_resources, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(g_ownership.acquire_calls == 3);
+    CHECK(g_ownership.release_calls == 2);
+    CHECK(std::strcmp(g_ownership.release_order[0], "own:test:b") == 0);  // 逆序
+    CHECK(std::strcmp(g_ownership.release_order[1], "own:test:a") == 0);
+    CHECK(qol::hooks::state_of("own:test:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("own:test:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("own:test:c") == ResourceState::kFree);
+    CHECK(feature_state_is("test_own", FeatureState::kFailed));
+}
+
 }  // namespace
 
 int main() {
@@ -499,6 +681,10 @@ int main() {
     test_sync_gates_leaves_tombstone();
     test_reset_is_clean();
     test_zero_resource_plugin();
+    test_optional_fail_soft_degraded();
+    test_required_fail_closed_rolls_back_with_optional();
+    test_ownership_acquire_order_live();
+    test_ownership_release_reverse_on_rollback();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

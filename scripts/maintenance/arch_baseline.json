@@ -61,7 +61,7 @@
     "offsets_symbols_header|feature/craft_ui/craft_ui.cpp|data/native/game_symbols.h|features/craft_ui 层引用符号头",
     "offsets_symbols_header|feature/craft_ui/craft_ui_hooks.cpp|data/native/game_symbols.h|features/craft_ui 层引用符号头",
     "offsets_symbols_header|feature/custom_recipe/custom_recipe_api.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头",
-    "offsets_symbols_header|feature/custom_recipe/custom_recipe_table.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头",
+    "offsets_symbols_header|features/custom_recipe/table.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头",
     "offsets_symbols_header|feature/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头",
     "offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头",
     "offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|features/patch 层引用符号头",

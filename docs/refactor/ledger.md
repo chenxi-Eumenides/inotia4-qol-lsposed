@@ -102,7 +102,7 @@
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
 | C1 | `world_teleport` | 525 行 | A4 | ✅ 完成（VM-45 用户真机确认；基线 83→81） |
-| C2 | `craft_ui` + `custom_recipe`（同 lane，双向依赖） | 2,597 行 | A4 | ⬜ |
+| C2 | `craft_ui` + `custom_recipe`（同 lane，双向依赖） | 2,597 行 | A4 | 🔄 进行中（**C2-1 ✅**：Step 0 停用 fail-closed 修复 + Step 1 引擎补全（kOwnership 分派 / §8 optional-fail-soft）+ Step 2 `contracts/craft_result.h` 与纯逻辑落位 + ADR-0005；**Step 0 待用户真机**；C2-2 = Step 3/4 迁移待做） |
 
 ### 阶段 D：大件
 

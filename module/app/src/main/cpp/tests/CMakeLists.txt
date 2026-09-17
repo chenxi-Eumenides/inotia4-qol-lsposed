@@ -62,9 +62,9 @@ add_test(NAME attribute_range_tests COMMAND attribute_range_tests)
 add_executable(custom_recipe_tests
     test_custom_recipe.cpp
     ${CPP_DIR}/domains/attribute_range/rules.cpp
-    ${CPP_DIR}/feature/custom_recipe/custom_recipe_rules.cpp
-    ${CPP_DIR}/feature/custom_recipe/custom_recipe_catalog.cpp
-    ${CPP_DIR}/feature/custom_recipe/custom_recipe_table.cpp
+    ${CPP_DIR}/features/custom_recipe/rules.cpp
+    ${CPP_DIR}/features/custom_recipe/catalog.cpp
+    ${CPP_DIR}/features/custom_recipe/table.cpp
 )
 target_include_directories(custom_recipe_tests PRIVATE
     ${CPP_DIR}

@@ -184,6 +184,10 @@ void apply_material_count(const custom_recipe::Def* def, void* jewel) {
 // 回调经 x3 传入、上下文只能用模块自有全局（x6/param 会被原版当钱数渲染，见 game_symbols
 // F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA 注释）。
 const custom_recipe::ThreeSlotRecipe* g_pending_three_slot = nullptr;
+// pending/token 代际：每次 prepare 命中自增并写 pending_token；停用时自增使任何在途确认失效
+// （残留面板上关开关后点确认 = token 不匹配 → 不消耗不产出）。
+uint32_t g_three_slot_token_seq = 0;
+uint32_t g_pending_three_slot_token = 0;
 
 // 3 格模式的介入判定：总开关启用 + 当前页面为宝石强化页（type 1）+ `[+0x48]` 命中
 // kThreeSlotCraft。停用后（含表已收回记录数的残留面板）一律回落原版行为（VM-D7）。
@@ -214,6 +218,11 @@ bool set_enabled(bool enabled_value) {
         // 停用：收回注入记录数，使任何配方查询都不再命中注入记录（保留模块缓冲作为表体，
         // 避免面板残留数组里的注入下标越界读）。再次启用时 ensure() 会把记录数归位。
         custom_recipe::custom_recipe_table_deactivate();
+        // 作废任何在途确认（残留面板上的 YesNo）：代际自增 + 清 pending，使后续
+        // three_slot_execute 的 token 校验失败（不消耗、不产出、不扣费）。
+        g_pending_three_slot = nullptr;
+        g_pending_three_slot_token = 0;
+        ++g_three_slot_token_seq;
         return true;
     }
     if (!craft_ui_install_if_ready()) {
@@ -229,9 +238,10 @@ bool set_enabled(bool enabled_value) {
 bool enabled() { return g_custom_recipe_enabled.load(std::memory_order_acquire); }
 
 // 当前所选配方是否为「3 格隐式配方」模式（供其它 feature 判断是否让路，§4.12）。
-// 只按 `[g_uimix+0x48]` → 目录 kind 判定，**不含总开关**：停用后表记录数收回，
-// `def_for_mix_type` 自然不再命中注入记录，因此本函数返回 false。
+// 门控 = 总开关启用 + `[g_uimix+0x48]` → 目录 kind。停用后立即返回 false：残留面板
+// （表记录数收回但面板数组仍持有注入下标）上的放料/合成键一律回落原版，不得再合成。
 bool three_slot_mode_active() {
+    if (!enabled()) return false;
     if (g_uimix == nullptr) return false;
     const custom_recipe::Def* def = custom_recipe::def_for_mix_type(craft_ui::mix_type());
     return def != nullptr && def->kind == custom_recipe::Kind::kThreeSlotCraft;
@@ -307,6 +317,8 @@ bool is_jewel_item(void* item) { return item_is_jewel(item); }
 void apply_material_count_for(const Def* def, void* jewel) { apply_material_count(def, jewel); }
 
 int64_t form_ui_type_for_mix_type(uint32_t mix_type) {
+    // 停用后不再映射到模块借用 type：残留面板上的配方点击不得触发 SetType 换型。
+    if (!enabled()) return kNoBorrowedType;
     const Def* def = def_for_mix_type(mix_type);
     if (def == nullptr) return kNoBorrowedType;
     return form_borrowed_type(def->form);
@@ -314,8 +326,9 @@ int64_t form_ui_type_for_mix_type(uint32_t mix_type) {
 
 bool desc_should_replace(const char* text) {
     // 门控（按**内容**而非指针，见设计册 §7.28 的真机日志定案）：
-    //   ① 当前 [+0x48] 命中模块记录 ② 文本以原版模板前缀「用3个」开头
-    //   ③ 原文本不短于模块文案（**只做缩短替换**，绝不放长，避免越界写堆缓冲）。
+    //   ① 总开关启用 ② 当前 [+0x48] 命中模块记录 ③ 文本以原版模板前缀「用3个」开头
+    //   ④ 原文本不短于模块文案（**只做缩短替换**，绝不放长，避免越界写堆缓冲）。
+    if (!enabled()) return false;
     if (g_base == 0 || def_for_mix_type(craft_ui::mix_type()) == nullptr) return false;
     if (!desc_text_matches_recipe_template(text)) return false;
     return text_length_bounded(text, kDescTextScanMax) >= (sizeof(kModuleRecipeDesc) - 1);
@@ -388,13 +401,21 @@ PrepareOutcome three_slot_prepare() {
         return PrepareOutcome::kNoMatch;
     }
     g_pending_three_slot = recipe;  // 待 YesNo 确认；确认框由界面层弹
+    g_pending_three_slot_token = ++g_three_slot_token_seq;
     return PrepareOutcome::kConfirmPending;
 }
 
 CraftOutcome three_slot_execute() {
     const ThreeSlotRecipe* recipe = g_pending_three_slot;
+    const uint32_t token = g_pending_three_slot_token;
     g_pending_three_slot = nullptr;
-    if (recipe == nullptr) return CraftOutcome::kStaleSlots;  // 重复回调/已被消费：按「格子已变」处理
+    g_pending_three_slot_token = 0;
+    // 停用/无待确认/代际失效（残留面板上关开关后点确认）→ 按「格子已变」处理：
+    // 不消耗材料、不产出、不扣费。token 校验为纯函数（rules.h，host 可测）。
+    if (!execute_token_valid(enabled(), token, g_three_slot_token_seq)) {
+        return CraftOutcome::kStaleSlots;
+    }
+    if (recipe == nullptr) return CraftOutcome::kStaleSlots;  // 重复回调/已被消费
 
     // 回调前重新读格：确认框停留期间用户可能改动填入格，一律以回调时刻的格子内容为准。
     void* items[kThreeSlotStuffCount] = {nullptr, nullptr, nullptr};

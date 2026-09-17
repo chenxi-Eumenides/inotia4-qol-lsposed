@@ -20,7 +20,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 11 |
+| `contracts` | 13 |
 | `domains/attribute_range` | 2 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
@@ -35,7 +35,7 @@
 | `features/attribute_range` | 4 |
 | `features/autosell` | 12 |
 | `features/craft_ui` | 4 |
-| `features/custom_recipe` | 8 |
+| `features/custom_recipe` | 11 |
 | `features/extension_bag` | 32 |
 | `features/inventory_hooks` | 2 |
 | `features/patch` | 9 |
@@ -53,7 +53,7 @@
 | `host` | 28 |
 | `infra` | 45 |
 | `patch` | 7 |
-| **合计** | **322** |
+| **合计** | **327** |
 
 ### 1.2 迁移期映射摘要
 
@@ -141,11 +141,11 @@
 | `host` | `infra` | 31 |
 | `features/ui` | `game` | 22 |
 | `features/ui` | `infra` | 13 |
+| `host` | `contracts` | 12 |
 | `host` | `game` | 12 |
 | `features/patch` | `game` | 11 |
 | `features/autosell` | `infra` | 10 |
 | `features/extension_bag` | `game` | 10 |
-| `host` | `contracts` | 10 |
 | `infra` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `domains/world` | `game` | 7 |
@@ -197,7 +197,6 @@
 - `offsets_symbols_header|feature/craft_ui/craft_ui.cpp|data/native/game_symbols.h|features/craft_ui 层引用符号头`
 - `offsets_symbols_header|feature/craft_ui/craft_ui_hooks.cpp|data/native/game_symbols.h|features/craft_ui 层引用符号头`
 - `offsets_symbols_header|feature/custom_recipe/custom_recipe_api.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头`
-- `offsets_symbols_header|feature/custom_recipe/custom_recipe_table.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头`
 - `offsets_symbols_header|feature/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
@@ -208,6 +207,7 @@
 - `offsets_symbols_header|feature/ui/game_ui_custom.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_savebackup.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - …（其余 3 条省略）
 
 ### resource_unknown_symbol（8 条）
@@ -259,24 +259,25 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 5 个）与已迁移 `features/*`（11 个）共 16 个域。
+旧 `feature/*`（待迁移 5 个）与已迁移 `features/*`（12 个）共 17 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，5）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `craft_ui` | `features/craft_ui` | 4 |
-| `custom_recipe` | `features/custom_recipe` | 8 |
+| `custom_recipe` | `features/custom_recipe` | 5 |
 | `extension_bag` | `features/extension_bag` | 32 |
 | `patch` | `features/patch` | 9 |
 | `ui` | `features/ui` | 31 |
 
-### 6.2 已迁移 `features/*`（11）
+### 6.2 已迁移 `features/*`（12）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_range` | `features/attribute_range` | 4 |
 | `autosell` | `features/autosell` | 12 |
+| `custom_recipe` | `features/custom_recipe` | 6 |
 | `inventory_hooks` | `features/inventory_hooks` | 2 |
 | `push_all` | `features/push_all` | 6 |
 | `quest` | `features/quest` | 4 |

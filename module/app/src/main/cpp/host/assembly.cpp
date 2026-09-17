@@ -4,6 +4,7 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
+#include "contracts/ownership.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "features/attribute_range/plugin.h"
 #include "features/autosell/plugin.h"
@@ -41,9 +42,18 @@ bool gate_on(const char* key) {
 }
 
 // 非入口机制的物理安装/释放分派（hooks/ 不依赖 patch/，机制归宿主注入）。
-// call patch 的站点由 game/access/patches 解析后交给 patch/instr_patch。
+// kCallPatch 的站点由 game/access/patches 解析后交给 patch/instr_patch；
+// kOwnership 直接调 claim.handler 指向的 OwnershipOps（不经 patch 站点）。
 MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr_t target) {
     (void)target;  // call patch 的站点由本层解析，引擎无需预解析
+    if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+        const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
+        if (ops == nullptr || ops->acquire == nullptr) {
+            return MechanismOutcome{1, "ownership ops missing"};
+        }
+        const int32_t rc = contracts::ownership_acquire(ops, claim.id);
+        return MechanismOutcome{rc, rc == 0 ? nullptr : "ownership acquire rejected"};
+    }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};
     }
@@ -57,6 +67,10 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
 
 MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr_t target) {
     (void)target;
+    if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+        contracts::ownership_release(contracts::ownership_ops(claim.handler), claim.id);
+        return MechanismOutcome{0, nullptr};
+    }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};
     }

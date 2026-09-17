@@ -1,4 +1,4 @@
-#include "custom_recipe_table.h"
+#include "features/custom_recipe/table.h"
 
 #include <cstring>
 
@@ -26,7 +26,7 @@ void build_record_bytes(const Def& def, uint16_t material_start, uint8_t out[kRe
     out[kRbFlag7] = kRbFlag7Value;
     put_u16(out + kRbCostWord, def.cost_word_id);
     out[kRbUnlockGate] = kRbUnlockGateValue;
-    // 组位 + 配方书位（bit5）：后者是计数不变式所必需，见 custom_recipe_table.h 的 kRbRecipeBookBit 注释。
+    // 组位 + 配方书位（bit5）：后者是计数不变式所必需，见 table.h 的 kRbRecipeBookBit 注释。
     out[kRbGroup] = static_cast<uint8_t>(recipe_group_bit(def.group) | kRbRecipeBookBit);
 }
 

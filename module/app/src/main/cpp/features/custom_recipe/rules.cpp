@@ -1,4 +1,4 @@
-#include "custom_recipe_rules.h"
+#include "features/custom_recipe/rules.h"
 
 namespace custom_recipe {
 
@@ -114,6 +114,11 @@ bool slot_add_allowed(int placed_slots, int stack_count) {
 bool stack_units_available(int units, int stack_count) {
     if (units <= 0) return true;
     return stack_count >= units;
+}
+
+bool execute_token_valid(bool enabled, uint32_t pending_token, uint32_t current_token) {
+    if (!enabled) return false;
+    return pending_token != 0 && pending_token == current_token;
 }
 
 int scaled_jewel_value(int value, uint16_t scale_permille) {

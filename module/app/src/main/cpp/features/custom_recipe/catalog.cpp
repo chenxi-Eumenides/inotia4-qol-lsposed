@@ -1,6 +1,6 @@
-#include "custom_recipe_catalog.h"
+#include "features/custom_recipe/catalog.h"
 
-#include "custom_recipe_rules.h"
+#include "features/custom_recipe/rules.h"
 
 namespace custom_recipe {
 
@@ -15,7 +15,7 @@ constexpr uint16_t kLowJewelItemId = 28;
 constexpr uint8_t kThreeSlotMaterialCount = 3;
 // 配方按钮文本 wordId（复用既有本地化串，见 §7.2）：35216「合成」。
 // 「宝石强化」条目复用 35291，但按钮显示由 MEMORYTEXT_GetText 替换为模块字面量
-// 「宝石升阶」（custom_recipe_catalog.h 的 kJewelTierUpLabel）。
+// 「宝石升阶」（catalog.h 的 kJewelTierUpLabel）。
 constexpr uint16_t kNativeLabelWordId = 35216;
 // 「合成」入口费用公式 wordId：镜像原版 record 12（费用显示走原版公式，不由模块强制 0）。
 constexpr uint16_t kNativeCostWordId = 188;
