@@ -51,9 +51,9 @@
 | `game` | 33 |
 | `hooks` | 8 |
 | `host` | 27 |
-| `infra` | 42 |
+| `infra` | 43 |
 | `patch` | 7 |
-| **合计** | **307** |
+| **合计** | **308** |
 
 ### 1.2 迁移期映射摘要
 
@@ -160,7 +160,7 @@
 
 ## 3. 基线债务
 
-基线共 3 组、91 条。
+基线共 3 组、90 条。
 
 ### layer_direction（53 条）
 
@@ -210,10 +210,9 @@
 - `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - …（其余 8 条省略）
 
-### resource_unknown_symbol（10 条）
+### resource_unknown_symbol（9 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/extension_bag/extension_bag_store.inc:20||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/save_backup/save_backup.cpp:58||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_custom.cpp:43||ptr slot 无法归属符号`
@@ -227,15 +226,15 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 23 个 / 文件 15 个 / 去重符号 9 个 / 无法归属 10 个。
+扫描合计：安装点 24 个 / 文件 15 个 / 去重符号 10 个 / 无法归属 9 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 4 | 6 | 4 |
+| entry hook | 5 | 8 | 5 |
 | call patch | 3 | 7 | 4 |
-| ptr slot | 9 | 10 | 3 |
+| ptr slot | 8 | 9 | 3 |
 
-去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
+去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
@@ -246,6 +245,7 @@
 - `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `feature/extension_bag/extension_bag_equip.inc`
 - `F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA` → `feature/patch/game_patch.cpp`
 - `F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA` → `feature/craft_ui/craft_ui_hooks.cpp`
+- `F_UISTORE_SELL_ITEM_VMA` → `feature/extension_bag/extension_bag_store.inc`
 
 ## 5. JNI 面
 

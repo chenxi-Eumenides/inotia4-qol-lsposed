@@ -1,8 +1,9 @@
 // 商店宿主只管理 UIStore 自己的控件、投影和详情事务，不复用 UIEquip 的视图状态。
 
+#include "core/native/store_sell_rules.h"
+
 using StoreSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using StoreSceneNoArgFn = void (*)();
-using StorePopupCallbackFn = void (*)(void*);
 
 bool store_view_installed = false;
 int store_view_bag = -1;
@@ -17,13 +18,11 @@ uint64_t store_tab_generation = 0;
 int store_pending_tab = -1;
 uint64_t store_pending_tab_generation = 0;
 bool store_frame_active = false;
-PtrHook store_desc_sell_hook{};
-void* store_desc_item = nullptr;
-int store_desc_item_bag = -1;
-int store_desc_item_slot = -1;
-uint64_t store_desc_item_generation = 0;
-StorePopupCallbackFn store_sell_original_ok = nullptr;
-StorePopupCallbackFn store_sell_original_cancel = nullptr;
+// W1 商店扩展物品出售：UIStore_SellItem@0xd25f0 函数入口 hook（backup 存本全局）。
+// 原版数量面板/确认/取消全部保留；模块物品在入口层按「弹窗载荷 / 单价」反推数量后
+// 接管整堆删除或部分递减，原版物品一律 backup。
+using StoreSellItemFn = int64_t (*)(int64_t);
+void* g_backup_store_sell_item = nullptr;
 
 StoreSceneEventFn store_original_event = nullptr;
 StoreSceneNoArgFn store_original_f3 = nullptr;
@@ -41,37 +40,13 @@ void* store_buy_gate_1_thunk = nullptr;
 void* store_buy_gate_2_thunk = nullptr;
 bool store_hooks_ready = false;
 
-void store_sell_ok(void*);
-void store_sell_cancel(void*);
-void store_desc_sell_execute(void*);
 uint64_t store_tab_item_proc(void*, uint64_t, void*, void*);
 
 bool store_hooks_installed() {
     return store_hooks_ready;
 }
 
-void store_restore_popup_callbacks_locked() {
-    if (g_base != 0) {
-        auto* ok_slot = reinterpret_cast<StorePopupCallbackFn*>(g_base + G_POPUP_FPOK_VMA);
-        auto* cancel_slot = reinterpret_cast<StorePopupCallbackFn*>(g_base + G_POPUP_FPCANCEL_VMA);
-        if (*ok_slot == &store_sell_ok) *ok_slot = store_sell_original_ok;
-        if (*cancel_slot == &store_sell_cancel) *cancel_slot = store_sell_original_cancel;
-    }
-    store_sell_original_ok = nullptr;
-    store_sell_original_cancel = nullptr;
-}
-
-void store_reset_desc_hook_locked() {
-    store_desc_sell_hook.uninstall();
-    store_restore_popup_callbacks_locked();
-    store_desc_item = nullptr;
-    store_desc_item_bag = -1;
-    store_desc_item_slot = -1;
-    store_desc_item_generation = 0;
-}
-
 void store_clear_desc_locked() {
-    store_reset_desc_hook_locked();
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
 }
 
@@ -442,268 +417,180 @@ void store_draw_end_wrapper() {
 }
 
 void store_make_desc_gate(void* ctrl, void* arg) {
+    // 详情打开仍走原版 MakeDesc。W1 不再在此捕获详情身份、也不再替换出售按钮回调
+    // （原全局 popup OK/Cancel 槽劫持与按钮 PtrHook 已删除）；扩展出售改为
+    // UIStore_SellItem 函数入口按 cursor item 识别，原版面板/确认/取消全部保留。
     const uintptr_t raw = g_base != 0
         ? g_base + fn_resolve("F_UISTORE_MAKE_DESC_VMA", F_UISTORE_MAKE_DESC_VMA) : 0;
     if (raw == 0 || ctrl == nullptr) return;
     reinterpret_cast<UiStoreMakeDescFn>(raw)(ctrl, arg);
+}
 
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    store_reset_desc_hook_locked();
-    if (!store_view_installed || fn_control_object_get_data == nullptr ||
-        !game_memory_accessible(ctrl, CO_DATA + sizeof(void*), 'r')) return;
-    void* data = fn_control_object_get_data(ctrl);
-    if (data == nullptr || !game_memory_accessible(data, sizeof(void*), 'r')) return;
-    void* item = *reinterpret_cast<void**>(data);
-    int bag = -1;
-    int slot = -1;
-    if (item == nullptr || !module_slot_of_item_locked(item, &bag, &slot) ||
-        bag != store_view_bag) return;
-    store_desc_item = item;
-    store_desc_item_bag = bag;
-    store_desc_item_slot = slot;
-    store_desc_item_generation = g_module_object_use[bag][slot].generation;
-
-    void* button = *reinterpret_cast<void**>(g_base + G_UISTORE_SELL_BTN_VMA);
-    const uintptr_t sell_raw = g_base + fn_resolve(
-        "F_UISTORE_BUTTON_SELL_EXE_VMA", F_UISTORE_BUTTON_SELL_EXE_VMA);
-    if (button == nullptr || !game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) return;
-    data = fn_control_object_get_data(button);
-    if (data == nullptr || !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) return;
-    void** execute_slot = reinterpret_cast<void**>(static_cast<uint8_t*>(data) + CB_EXECUTE_PROC);
-    if (!game_memory_accessible(execute_slot, sizeof(void*), 'w') ||
-        *execute_slot != reinterpret_cast<void*>(sell_raw)) return;
-    if (!store_desc_sell_hook.install_typed(execute_slot, &store_desc_sell_execute)) {
-        store_desc_item = nullptr;
-        store_desc_item_bag = -1;
-        store_desc_item_slot = -1;
-        store_desc_item_generation = 0;
-        VIRTBAG_LOG("store sell hook install failed button=%p", button);
+void store_sell_popup(uint32_t text_id) {
+    if (fn_popup_create_ok_from_textdata != nullptr) {
+        fn_popup_create_ok_from_textdata(text_id, 0, 0, 0);
     }
 }
 
-void store_sell_cancel(void*) {
-    StorePopupCallbackFn original_cancel = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        original_cancel = store_sell_original_cancel;
-        store_reset_desc_hook_locked();
+// W1 部分出售：把模式视图数量从 view 递减 count（不调用原版 ITEMSYSTEM_Divide）。
+// 写回经 effective_write_count（R-47 决策 b：启用态拆段进位、关闭态只写 b 保留 a），
+// 随后重序列化 payload 并把 descriptor.count 回写为 canonical（R-38/R-48）。
+bool decrement_extension_item_view_locked(int bag, int slot, void* item, int count,
+                                          const char* context) {
+    if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount ||
+        item == nullptr || count <= 0) {
+        return false;
     }
-    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-    if (original_cancel != nullptr) original_cancel(nullptr);
+    virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+    const int view = static_cast<int>(stack_codec::effective_view_count(
+        static_cast<uint32_t>(descriptor.count), stack_limit_enabled()));
+    if (count >= view) return false;  // 整堆由调用方走删除分支
+    const uint32_t old_field = *reinterpret_cast<uint32_t*>(
+        reinterpret_cast<uint8_t*>(item) + I_COUNT);
+    const uint32_t new_field = stack_codec::effective_write_count(
+        old_field, static_cast<uint32_t>(view - count), stack_limit_enabled());
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = new_field;
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    int payload_size = 0;
+    if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
+        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = old_field;
+        VIRTBAG_LOG("store sell reserialize failed context=%s bag=%d slot=%d", context, bag, slot);
+        return false;
+    }
+    descriptor.payload = payload;
+    descriptor.payload_size = payload_size;
+    descriptor.count = static_cast<int>(stack_codec::s2_read_count(new_field));
+    g_module_object_categories[bag][slot] = descriptor.category;
+    g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
+    g_item_state_dirty = true;
+    return true;
 }
 
-void store_sell_ok(void*) {
+// W1：UIStore_SellItem@0xd25f0 入口接管。原版只收总价 x0（弹窗载荷），数量由函数内部
+// 自行读取并走 INVEN_RemoveItem/ITEMSYSTEM_Divide；模块在入口层用同一「载荷/单价」
+// 反推数量后接管结算，原版物品一律 backup。
+int64_t store_sell_item_wrapper(int64_t displayed_price) {
+    if (g_backup_store_sell_item == nullptr) return 0;
+    if (!g_virtual_bag_enabled.load()) return reinterpret_cast<StoreSellItemFn>(g_backup_store_sell_item)(displayed_price);
+
     void* item = nullptr;
     int bag = -1;
     int slot = -1;
-    int count = 0;
-    int64_t price = -1;
-    uint64_t generation = 0;
+    int view = 0;
+    bool item_encoded = false;
+    bool module_item = false;
+    bool reject = false;
+    qol::store_sell::Plan plan{};
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        store_restore_popup_callbacks_locked();
-        item = store_desc_item;
-        bag = store_desc_item_bag;
-        slot = store_desc_item_slot;
-        generation = store_desc_item_generation;
-        if (item != nullptr && virtual_bag::valid_index(bag) &&
-            slot >= 0 && slot < virtual_bag::kSlotCount &&
-            g_module_objects[bag][slot] == item &&
-            g_module_object_use[bag][slot].generation == generation &&
-            module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
-            fn_get_bit != nullptr && fn_item_is_no_sell != nullptr &&
-            fn_item_get_sell_price != nullptr) {
-            // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
-            count = static_cast<int>(stack_codec::effective_view_count(
-                static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
-                stack_limit_enabled()));
-            const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            const int category = fn_get_bit(flags, 15, 6);
-            if (fn_item_is_no_sell(category) == 0 && count > 0) {
-                const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-                price = extension_bag_sell_price(item, count, false);
-                if (price >= 0) {
-                    VIRTBAG_LOG(
-                        "sell price source=store category=%d count=%d unit=%lld variant=100 final=%lld payload=%u gen=%llu",
-                        category,
-                        static_cast<int>(stack_codec::effective_clamp(
-                            static_cast<uint32_t>(count), stack_limit_enabled())),
-                        static_cast<long long>(unit_price), static_cast<long long>(price),
-                        virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
-                        static_cast<unsigned long long>(generation));
+        if (store_view_installed && g_base != 0 && fn_control_object_get_cursor != nullptr &&
+            fn_control_item_get_item != nullptr && fn_item_get_sell_price != nullptr) {
+            void* ctrl = *reinterpret_cast<void**>(g_base + G_UISTORE_ITEM_CTRL_VMA);
+            void* cursor = ctrl != nullptr ? fn_control_object_get_cursor(ctrl) : nullptr;
+            item = cursor != nullptr ? fn_control_item_get_item(cursor) : nullptr;
+            if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot)) {
+                module_item = true;
+                const bool identity_ok =
+                    bag == store_view_bag && virtual_bag::valid_index(bag) && slot >= 0 &&
+                    slot < virtual_bag::kSlotCount && g_module_objects[bag][slot] == item &&
+                    module_object_release_allowed_locked(bag, slot, item, "store sell", false,
+                                                         nullptr);
+                const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+                const bool descriptor_ok =
+                    descriptor.category > 0 && descriptor.count > 0 &&
+                    g_module_object_categories[bag][slot] == descriptor.category &&
+                    g_module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
+                if (!identity_ok || !descriptor_ok) {
+                    reject = true;
                 } else {
-                    VIRTBAG_LOG(
-                        "sell price reject reason=price_bounds source=store category=%d count=%d unit=%lld variant=100 payload=%u gen=%llu",
-                        category, count, static_cast<long long>(unit_price),
-                        virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
-                        static_cast<unsigned long long>(generation));
+                    view = static_cast<int>(stack_codec::effective_view_count(
+                        static_cast<uint32_t>(descriptor.count), stack_limit_enabled()));
+                    item_encoded = item_count_encoding(item) == stack_codec::CountEncoding::kEncoded;
+                    const int64_t unit = static_cast<int64_t>(fn_item_get_sell_price(item));
+                    plan = qol::store_sell::plan(item_encoded, view, unit, displayed_price);
+                    if (plan.kind == qol::store_sell::PlanKind::kReject) reject = true;
                 }
-            } else {
-                VIRTBAG_LOG("sell price reject reason=no_sell_or_count source=store category=%d count=%d variant=100",
-                            category, count);
             }
-        } else {
-            VIRTBAG_LOG("sell price reject reason=stale_or_release_guard source=store bag=%d slot=%d gen=%llu",
-                        bag, slot, static_cast<unsigned long long>(generation));
         }
     }
-    if (price < 0 || fn_add_money == nullptr || fn_minus_money == nullptr ||
-        fn_item_is_no_sell == nullptr || !fn_add_money(price)) {
+    if (!module_item) return reinterpret_cast<StoreSellItemFn>(g_backup_store_sell_item)(displayed_price);
+    if (reject) {
+        VIRTBAG_LOG("store sell reject reason=identity_or_plan bag=%d slot=%d", bag, slot);
+        store_sell_popup(0xc);
+        return 0;
+    }
+
+    const int count = plan.kind == qol::store_sell::PlanKind::kWhole ? 1 : plan.count;
+    const int64_t price = extension_bag_sell_price(item, count, false);
+    if (price < 0 || price != displayed_price || fn_add_money == nullptr ||
+        fn_minus_money == nullptr) {
+        VIRTBAG_LOG("store sell reject reason=price_mismatch bag=%d slot=%d count=%d price=%lld displayed=%lld",
+                    bag, slot, count, static_cast<long long>(price),
+                    static_cast<long long>(displayed_price));
+        store_sell_popup(0xc);
+        return 0;
+    }
+    if (!fn_add_money(price)) {
         VIRTBAG_LOG("store sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                     static_cast<long long>(price));
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        store_reset_desc_hook_locked();
-        if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-        return;
+        store_sell_popup(0xc);
+        return 0;
     }
 
-    bool removed = false;
+    bool committed = false;
+    bool whole = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        const bool current = item != nullptr && virtual_bag::valid_index(bag) &&
-                             slot >= 0 && slot < virtual_bag::kSlotCount &&
-                             g_module_objects[bag][slot] == item &&
-                             stack_codec::effective_view_count(
-                                 static_cast<uint32_t>(
-                                     g_virtual_bag_state.items[bag][slot].count),
-                                 stack_limit_enabled()) ==
-                                 static_cast<uint32_t>(count) &&
-                             module_object_release_allowed_locked(
-                                 bag, slot, item, "store sell", false, nullptr);
+        const bool current =
+            virtual_bag::valid_index(bag) && slot >= 0 && slot < virtual_bag::kSlotCount &&
+            g_module_objects[bag][slot] == item &&
+            module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
+            (!item_encoded ||
+             static_cast<int>(stack_codec::effective_view_count(
+                 static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
+                 stack_limit_enabled())) == view);
         if (current) {
-            const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
-            g_virtual_bag_state.items[bag][slot] = {};
-            g_item_state_dirty = true;
-            if (!free_module_object_locked(bag, slot)) {
-                g_virtual_bag_state.items[bag][slot] = previous_item;
-                persist_state_locked();
-                VIRTBAG_LOG("store sell rejected object release bag=%d slot=%d", bag, slot);
-            } else {
-                persist_state_locked();
-                // 只用商店投影刷新：调用原版 UIStore_RefreshInvenItem 会把整列控件
-                // 刷回窗口原版袋的 INVEN 内容，破坏扩展投影（equip 宿主等价用
-                // refresh_module_item_area_locked）。store_refresh_projection_locked
-                // 会把已删除槽置 null、其余槽保持扩展物品。
-                if (store_view_installed && store_view_bag == bag) {
-                    store_refresh_projection_locked();
-                }
-                removed = true;
-            }
-        }
-        store_reset_desc_hook_locked();
-        if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-    }
-    if (!removed) {
-        const bool refunded = fn_minus_money(price) != 0;
-        VIRTBAG_LOG("store sell remove failed bag=%d slot=%d price=%lld refunded=%d", bag, slot,
-                    static_cast<long long>(price), refunded ? 1 : 0);
-        return;
-    }
-    VIRTBAG_LOG("store sell committed bag=%d slot=%d price=%lld", bag, slot,
-                static_cast<long long>(price));
-}
-
-void store_desc_sell_execute(void* button) {
-    int bag = -1;
-    int slot = -1;
-    void* item = nullptr;
-    int64_t price = -1;
-    bool valid = false;
-    uint64_t generation = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        const bool current = store_desc_item != nullptr &&
-                             virtual_bag::valid_index(store_desc_item_bag) &&
-                             store_desc_item_slot >= 0 &&
-                             store_desc_item_slot < virtual_bag::kSlotCount &&
-                             g_module_objects[store_desc_item_bag][store_desc_item_slot] ==
-                                 store_desc_item &&
-                             g_module_object_use[store_desc_item_bag][store_desc_item_slot].generation ==
-                                 store_desc_item_generation &&
-                             module_object_release_allowed_locked(
-                                 store_desc_item_bag, store_desc_item_slot, store_desc_item,
-                                 "store sell popup", false, nullptr);
-        if (current) {
-            item = store_desc_item;
-            bag = store_desc_item_bag;
-            slot = store_desc_item_slot;
-            generation = store_desc_item_generation;
-            // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
-            const int count = static_cast<int>(stack_codec::effective_view_count(
-                static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
-                stack_limit_enabled()));
-            if (fn_item_is_no_sell != nullptr && fn_get_bit != nullptr &&
-                fn_item_get_sell_price != nullptr && count > 0) {
-                const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                    reinterpret_cast<uint8_t*>(item) + I_TYPE);
-                const int category = fn_get_bit(flags, 15, 6);
-                if (fn_item_is_no_sell(category) == 0) {
-                    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-                    price = extension_bag_sell_price(item, count, false);
-                    valid = price >= 0;
-                    if (valid) {
-                        VIRTBAG_LOG(
-                            "sell price source=store category=%d count=%d unit=%lld variant=100 final=%lld payload=%u gen=%llu",
-                            category,
-                            static_cast<int>(stack_codec::effective_clamp(
-                                static_cast<uint32_t>(count), stack_limit_enabled())),
-                            static_cast<long long>(unit_price), static_cast<long long>(price),
-                            virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
-                            static_cast<unsigned long long>(generation));
-                    } else {
-                        VIRTBAG_LOG(
-                            "sell price reject reason=price_bounds source=store category=%d count=%d unit=%lld variant=100 payload=%u gen=%llu",
-                            category, count, static_cast<long long>(unit_price),
-                            virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
-                            static_cast<unsigned long long>(generation));
-                    }
+            whole = plan.kind == qol::store_sell::PlanKind::kWhole || count >= view;
+            if (whole) {
+                const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
+                g_virtual_bag_state.items[bag][slot] = {};
+                g_item_state_dirty = true;
+                if (!free_module_object_locked(bag, slot)) {
+                    g_virtual_bag_state.items[bag][slot] = previous_item;
+                    persist_state_locked();
+                    VIRTBAG_LOG("store sell rejected object release bag=%d slot=%d", bag, slot);
                 } else {
-                    VIRTBAG_LOG("sell price reject reason=no_sell_or_count source=store category=%d count=%d variant=100",
-                                category, count);
+                    persist_state_locked();
+                    committed = true;
                 }
-            } else {
-                VIRTBAG_LOG("sell price reject reason=symbols_or_count source=store bag=%d slot=%d",
-                            bag, slot);
+            } else if (decrement_extension_item_view_locked(bag, slot, item, count, "store sell")) {
+                persist_state_locked();
+                committed = true;
             }
-        } else {
-            VIRTBAG_LOG("sell price reject reason=stale_or_release_guard source=store bag=%d slot=%d gen=%llu",
-                        store_desc_item_bag, store_desc_item_slot,
-                        static_cast<unsigned long long>(store_desc_item_generation));
+        }
+        if (committed && store_view_installed && store_view_bag == bag) {
+            // R-12：只用商店投影刷新；调用原版 UIStore_RefreshInvenItem 会把整列刷回
+            // 窗口原版袋内容，破坏扩展投影。
+            store_refresh_projection_locked();
         }
     }
-    const uintptr_t original_ok = g_base != 0
-        ? g_base + fn_resolve("F_UISTORE_SELL_ITEM_VMA", F_UISTORE_SELL_ITEM_VMA) : 0;
-    const bool popup_created = valid && price <= UINT32_MAX && original_ok != 0 &&
-                               fn_popup_create_yesno_from_textdata != nullptr;
-    if (popup_created) {
-        if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-        // 弹窗先登记原版 UIStore_SellItem，再替换全局回调实现扩展袋事务。
-        fn_popup_create_yesno_from_textdata(
-            9, 0, 2, reinterpret_cast<void*>(original_ok), nullptr,
-            reinterpret_cast<void*>(static_cast<uintptr_t>(price)));
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        auto* ok_slot = reinterpret_cast<StorePopupCallbackFn*>(g_base + G_POPUP_FPOK_VMA);
-        auto* cancel_slot = reinterpret_cast<StorePopupCallbackFn*>(g_base + G_POPUP_FPCANCEL_VMA);
-        store_sell_original_ok = *ok_slot;
-        store_sell_original_cancel = *cancel_slot;
-        *ok_slot = &store_sell_ok;
-        *cancel_slot = &store_sell_cancel;
-        store_desc_sell_hook.uninstall();
-    } else {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        store_reset_desc_hook_locked();
-        if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
-        VIRTBAG_LOG("sell price reject reason=popup_unavailable source=store bag=%d slot=%d valid=%d",
-                    bag, slot, valid ? 1 : 0);
+    if (!committed) {
+        const bool refunded = fn_minus_money(price) != 0;
+        VIRTBAG_LOG("store sell remove failed bag=%d slot=%d count=%d price=%lld refunded=%d",
+                    bag, slot, count, static_cast<long long>(price), refunded ? 1 : 0);
+        store_sell_popup(0xc);
+        return 0;
     }
-    (void)button;
+    store_sell_popup(0x1f);
+    VIRTBAG_LOG("store sell committed bag=%d slot=%d count=%d whole=%d view=%d price=%lld",
+                bag, slot, count, whole ? 1 : 0, view, static_cast<long long>(price));
+    return 0;
 }
+
 
 void store_teardown_locked() {
     store_restore_module_view_locked();
     store_disable_tab_buttons_locked();
-    store_reset_desc_hook_locked();
     for (void*& item : store_tab_bag_items) {
         if (item != nullptr) {
             if (defer_item_free_locked(item)) item = nullptr;
@@ -849,6 +736,27 @@ bool install_store_hooks_locked() {
     if (!store_patch_bl_locked(buy_gate_2, 0x9400c508,
                                reinterpret_cast<void*>(&store_buy_find_slot_gate),
                                &store_buy_gate_2_thunk, &store_buy_gate_2_patch_addr)) return false;
+
+    // W1 扩展物品商店出售：hook UIStore_SellItem@0xd25f0 函数入口。模块物品在入口层
+    // 按弹窗载荷反推数量后接管（整堆删除/部分递减）；原版物品、未启用、投影未安装时
+    // 经 backup 透传，原版物品商店流程逐指令不变。
+    if (g_backup_store_sell_item == nullptr) {
+        const uintptr_t sell_item =
+            g_base + fn_resolve("F_UISTORE_SELL_ITEM_VMA", F_UISTORE_SELL_ITEM_VMA);
+        const NativeHookFunType hook_func = native_hook_func();
+        if (hook_func == nullptr) return false;
+        void* backup = nullptr;
+        const int result = hook_func(reinterpret_cast<void*>(sell_item),
+                                     reinterpret_cast<void*>(&store_sell_item_wrapper), &backup);
+        if (result != 0 || backup == nullptr) {
+            VIRTBAG_LOG("store sell hook failed target=%p result=%d backup=%p",
+                        reinterpret_cast<void*>(sell_item), result, backup);
+            return false;
+        }
+        g_backup_store_sell_item = backup;
+        VIRTBAG_LOG("store sell hook installed target=%p backup=%p",
+                    reinterpret_cast<void*>(sell_item), backup);
+    }
 
     store_hooks_ready = true;
     VIRTBAG_LOG("store host hooks installed state=%p", store_state_entry);

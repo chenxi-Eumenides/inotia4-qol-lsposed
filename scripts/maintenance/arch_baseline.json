@@ -84,7 +84,6 @@
     "offsets_symbols_header|feature/world_teleport/world_teleport.cpp|data/native/game_symbols.h|features/world_teleport 层引用符号头",
     "offsets_symbols_header|feature/world_teleport/world_teleport_rules.h|data/native/game_symbols.h|features/world_teleport 层引用符号头",
     "resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号",
-    "resource_unknown_symbol|feature/extension_bag/extension_bag_store.inc:20||ptr slot 无法归属符号",
     "resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号",
     "resource_unknown_symbol|feature/save_backup/save_backup.cpp:58||ptr slot 无法归属符号",
     "resource_unknown_symbol|feature/ui/game_ui_custom.cpp:43||ptr slot 无法归属符号",

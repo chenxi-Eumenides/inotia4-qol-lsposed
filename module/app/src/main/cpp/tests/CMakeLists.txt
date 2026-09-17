@@ -434,3 +434,13 @@ target_include_directories(special_equip_rules_tests PRIVATE
 target_compile_features(special_equip_rules_tests PRIVATE cxx_std_17)
 set_target_properties(special_equip_rules_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME special_equip_rules_tests COMMAND special_equip_rules_tests)
+
+# W1：商店扩展物品出售计数/计价纯函数 host 测试（header-only，末尾追加）
+add_executable(store_sell_rules_tests
+    test_store_sell_rules.cpp
+)
+target_include_directories(store_sell_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(store_sell_rules_tests PRIVATE cxx_std_17)
+add_test(NAME store_sell_rules_tests COMMAND store_sell_rules_tests)
