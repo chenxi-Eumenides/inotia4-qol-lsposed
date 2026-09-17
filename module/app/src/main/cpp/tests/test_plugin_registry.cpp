@@ -117,7 +117,7 @@ int probe_install(PluginContext&) {
 void probe_deactivate(PluginContext&) { ++g_probe.deactivate_calls; }
 void probe_enabled(PluginContext&) { ++g_probe.enabled_calls; }
 void probe_disabled(PluginContext&) { ++g_probe.disabled_calls; }
-void probe_ready(PluginContext&, const char* resource_id, void* backup) {
+int32_t probe_ready(PluginContext&, const char* resource_id, void* backup) {
     ++g_probe.ready_calls;
     if (resource_id != nullptr) {
         std::snprintf(g_probe.last_ready_id, sizeof(g_probe.last_ready_id), "%s", resource_id);
@@ -125,6 +125,7 @@ void probe_ready(PluginContext&, const char* resource_id, void* backup) {
     if (g_probe.ready_calls <= 4) {
         g_probe.ready_backups[g_probe.ready_calls - 1] = backup;
     }
+    return 0;
 }
 void probe_fill_status(PluginStatusOut& out) {
     out.enabled = false;

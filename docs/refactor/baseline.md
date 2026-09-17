@@ -135,7 +135,7 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `features/ui` | `game` | 24 |
-| `host` | `infra` | 21 |
+| `host` | `infra` | 22 |
 | `features/ui` | `infra` | 12 |
 | `infra` | `game` | 12 |
 | `features/patch` | `game` | 11 |
@@ -258,8 +258,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：141 个
-- native 导出：141 个
+- Kotlin `external fun`：142 个
+- native 导出：142 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：

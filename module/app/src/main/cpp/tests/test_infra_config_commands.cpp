@@ -26,6 +26,7 @@ using qol::contracts::kCommandSetConfigBool;
 using qol::contracts::QolCommand;
 using qol::contracts::QolCommandTicket;
 using qol::infra::command_queue_reset_for_test;
+using qol::infra::command_state_name;
 using qol::infra::CommandState;
 using qol::infra::commands_drain;
 using qol::infra::commands_port;
@@ -234,6 +235,20 @@ void test_commands_invalid() {
     CHECK(port.state(0) == static_cast<int32_t>(CommandState::kFailed)); // 未知票据
 }
 
+// command_state_name：4 态稳定英文名 + 越界 unknown。
+void test_command_state_name() {
+    CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kPending)),
+                      "pending") == 0);
+    CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kDone)), "done") == 0);
+    CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kFailed)),
+                      "failed") == 0);
+    CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kCancelled)),
+                      "cancelled") == 0);
+    CHECK(std::strcmp(command_state_name(-1), "unknown") == 0);
+    CHECK(std::strcmp(command_state_name(4), "unknown") == 0);
+    CHECK(std::strcmp(command_state_name(999), "unknown") == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -246,6 +261,7 @@ int main() {
     test_commands_cancel();
     test_commands_unknown_kind();
     test_commands_slot_capacity_and_reclaim();
+    test_command_state_name();
     test_commands_invalid();
     std::printf("infra_config_commands: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -31,3 +31,14 @@ Java_com_inotia4_qol_NativeBridge_nativeSystemResourcesJson(JNIEnv* env, jclass)
     }
     return env->NewStringUTF("{\"ok\":false,\"error\":\"oom\"}");
 }
+
+// P3 命令票据状态（/api/system/tickets/{id}）：ticket 为 jlong，0 由 host 判为无效。
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeTicketStateJson(JNIEnv* env, jclass, jlong ticket) {
+    const std::string json = qol::host::host_ticket_json(static_cast<uint64_t>(ticket));
+    jstring result = env->NewStringUTF(json.c_str());
+    if (result != nullptr) {
+        return result;
+    }
+    return env->NewStringUTF("{\"ok\":false,\"error\":\"oom\"}");
+}

@@ -132,8 +132,10 @@ struct PluginDescriptor {
     void (*on_enabled)(PluginContext&);
     void (*on_disabled)(PluginContext&);
     void (*fill_status)(PluginStatusOut&);
-    // 可选；资源安装成功后由宿主通知，backup 为该资源对应的原函数入口（§3.3「backup 交还」）。
-    void (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup);
+    // 可选；受限生命周期回调（§3.3）：资源安装成功后宿主交还 backup（原函数入口）。
+    // 只允许缓存 backup/更新门禁等常数时间操作，禁止资源操作、游戏内存读写与跨线程等待。
+    // 返回非 0 → 宿主把该资源按还原释放撤回，并把插件置 failed（reason=resource_ready_failed）。
+    int32_t (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup);
 };
 
 }  // namespace qol::contracts

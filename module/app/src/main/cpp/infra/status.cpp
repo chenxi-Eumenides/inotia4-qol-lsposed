@@ -36,7 +36,6 @@ const char* feature_state_name(FeatureState state) {
         case FeatureState::kDeactivating: return "deactivating";
         case FeatureState::kInactive: return "inactive";
         case FeatureState::kFailed: return "failed";
-        case FeatureState::kDegraded: return "degraded";
     }
     // 诊断接口对越界/未知值也不得崩溃或返回空指针。
     return "unknown";
@@ -59,6 +58,7 @@ bool status_register(const char* id, const char* version) {
             slot.state = FeatureState::kRegistered;
             slot.error = nullptr;
             slot.resource_count = 0;
+            slot.degraded = false;
             return true;
         }
     }
@@ -76,6 +76,18 @@ bool status_update(const char* id, FeatureState state, bool enabled, const char*
     g_features[slot].state = state;
     g_features[slot].enabled = enabled;
     g_features[slot].error = error;  // nullptr 表示清除错误
+    return true;
+}
+
+bool status_set_degraded(const char* id, bool degraded) {
+    if (id == nullptr) {
+        return false;
+    }
+    const uint32_t slot = find_feature(id);
+    if (slot == kMaxFeatures) {
+        return false;
+    }
+    g_features[slot].degraded = degraded;
     return true;
 }
 

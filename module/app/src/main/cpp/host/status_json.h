@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 // P1 最小诊断接口的数据源：把 infra 状态登记表导出为 JSON。
@@ -15,5 +16,9 @@ std::string host_feature_status_json();
 // 返回 {"ok":true,"resources":[{id, owner, mechanism, policy, state, in_flight, isolated}, ...]}。
 // 资源登记表全量导出（ARCHITECTURE.md §9.1 P3）：state = free/disabled/live/tombstone。
 std::string host_resources_json();
+
+// 返回 {"ok":true,"ticket":N,"state":"pending|done|failed|cancelled"}；
+// ticket==0 返回 {"ok":false,"error":"invalid ticket"}（ARCHITECTURE.md §9.1 P3）。
+std::string host_ticket_json(uint64_t ticket);
 
 }  // namespace qol::host

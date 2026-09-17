@@ -406,6 +406,10 @@ class InfoApiServiceCore : InfoApiService {
     override fun systemResourcesJson(): String =
         if (NativeBridge.ready) NativeBridge.nativeSystemResourcesJson() else JsonUtil.NOT_READY
 
+    // P3 命令票据状态 JSON 原样透传（/api/system/tickets/{id}），就绪判定同上。
+    override fun ticketStateJson(ticket: Long): String =
+        if (NativeBridge.ready) NativeBridge.nativeTicketStateJson(ticket) else JsonUtil.NOT_READY
+
     /**
      * native 数据函数在非 world 状态（主菜单等）下返回 {"error":"..."}（与写操作 game_in_world() 一致）。
      * Kotlin 侧不自判游戏状态，只诚实转发：顶层含 "error" 字段 → 原样返回。顶层判定避免嵌套字段误报。

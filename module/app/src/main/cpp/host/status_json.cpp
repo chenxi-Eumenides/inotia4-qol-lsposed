@@ -7,6 +7,7 @@
 #include "core/native/game_json.h"
 #include "hooks/registry.h"
 #include "host/plugin_registry.h"
+#include "infra/commands.h"
 #include "infra/status.h"
 
 namespace qol::host {
@@ -31,7 +32,7 @@ void ensure_bootstrap_registered() {
 // P2 起 features 追加字段（ARCHITECTURE.md §9.1）：
 // - resources：该插件 owner 的资源声明 {id,state}，state 取登记表当前占用状态；
 // - requires/provides：描述符声明，仅输出 id 与版本（接口指针不外泄）；
-// - degraded：P2 恒 false（尚无 optional_requires 消费者）；P3 接可选能力后由能力注册表驱动。
+// - degraded：正交健康标记（§3.2），非生命周期态；optional_requires 缺失/可选依赖失效时置位。
 void append_resources(std::string& out, const char* plugin_id) {
     out += ",\"resources\":[";
     bool first = true;
@@ -168,7 +169,8 @@ std::string host_feature_status_json() {
         append_resources(out, feature.id);
         append_requires(out, plugin);
         append_provides(out, plugin);
-        out += ",\"degraded\":false";
+        out += ",\"degraded\":";
+        out += feature.degraded ? "true" : "false";
         out += "}";
     }
     out += "]}";
@@ -214,6 +216,19 @@ std::string host_resources_json() {
         out += "}";
     }
     out += "]}";
+    return out;
+}
+
+std::string host_ticket_json(uint64_t ticket) {
+    if (ticket == 0) {
+        return "{\"ok\":false,\"error\":\"invalid ticket\"}";
+    }
+    const int32_t state = qol::infra::commands_port().state(ticket);
+    std::string out = "{\"ok\":true,\"ticket\":";
+    out += std::to_string(ticket);
+    out += ",\"state\":\"";
+    out += qol::infra::command_state_name(state);
+    out += "\"}";
     return out;
 }
 

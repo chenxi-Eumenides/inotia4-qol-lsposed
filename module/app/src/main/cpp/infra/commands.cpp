@@ -159,4 +159,18 @@ void commands_reset_for_test() {
     }
 }
 
+const char* command_state_name(int32_t state) {
+    switch (static_cast<CommandState>(state)) {
+        case CommandState::kPending:
+            return "pending";
+        case CommandState::kDone:
+            return "done";
+        case CommandState::kFailed:
+            return "failed";
+        case CommandState::kCancelled:
+            return "cancelled";
+    }
+    return "unknown";
+}
+
 }  // namespace qol::infra

@@ -46,6 +46,7 @@ interface InfoApiService {
     fun health(): String
     fun featureStatusJson(): String
     fun systemResourcesJson(): String
+    fun ticketStateJson(ticket: Long): String
     fun npcDialogOptions(): String
     fun shopItems(): String
     fun debugUi(): String

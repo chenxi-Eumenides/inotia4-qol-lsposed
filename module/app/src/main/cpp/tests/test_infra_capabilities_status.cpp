@@ -38,6 +38,7 @@ using qol::infra::require_capability;
 using qol::infra::reset_for_test;
 using qol::infra::status_count;
 using qol::infra::status_register;
+using qol::infra::status_set_degraded;
 using qol::infra::status_snapshot;
 using qol::infra::status_update;
 using qol::infra::unregister_capability;
@@ -150,11 +151,38 @@ static void test_status_lifecycle() {
     CHECK(out[0].error != nullptr && std::strcmp(out[0].error, "boom") == 0);
 
     // error 传 nullptr 表示清除。
-    CHECK(status_update("feat.a", FeatureState::kDegraded, false, nullptr));
+    CHECK(status_update("feat.a", FeatureState::kInstalledDisabled, false, nullptr));
     CHECK(status_snapshot(out, 4, &written));
-    CHECK(out[0].state == FeatureState::kDegraded);
+    CHECK(out[0].state == FeatureState::kInstalledDisabled);
     CHECK(!out[0].enabled);
     CHECK(out[0].error == nullptr);
+}
+
+// 4b. degraded 为正交健康标记：可与任意生命周期态同时存在，快照可读出。
+static void test_status_degraded_flag() {
+    reset_for_test();
+    CHECK(status_register("d.a", "1.0.0"));
+
+    FeatureStatus out[4]{};
+    uint32_t written = 0;
+    CHECK(status_snapshot(out, 4, &written));
+    CHECK(!out[0].degraded);  // 注册初值 false
+
+    CHECK(status_set_degraded("d.a", true));
+    CHECK(status_snapshot(out, 4, &written));
+    CHECK(out[0].degraded);
+    // 生命周期态未被 degraded 影响。
+    CHECK(out[0].state == FeatureState::kRegistered);
+
+    CHECK(status_update("d.a", FeatureState::kEnabled, true, nullptr));
+    CHECK(status_set_degraded("d.a", false));
+    CHECK(status_snapshot(out, 4, &written));
+    CHECK(!out[0].degraded);
+    CHECK(out[0].state == FeatureState::kEnabled);
+
+    // 未注册（含 nullptr）拒绝。
+    CHECK(!status_set_degraded("d.missing", true));
+    CHECK(!status_set_degraded(nullptr, true));
 }
 
 // 5. 快照：注册顺序、容量截断、非法参数。
@@ -189,7 +217,7 @@ static void test_status_snapshot() {
     CHECK(!status_snapshot(out, 4, nullptr));
 }
 
-// 6. feature_state_name：11 个枚举全部稳定命名，越界返回 unknown。
+// 6. feature_state_name：10 个生命周期态全部稳定命名，越界返回 unknown。
 static void test_feature_state_names() {
     const FeatureState all[] = {
         FeatureState::kRegistered,        FeatureState::kResolving,
@@ -197,20 +225,19 @@ static void test_feature_state_names() {
         FeatureState::kInvalid,           FeatureState::kInstalledDisabled,
         FeatureState::kEnabled,           FeatureState::kDeactivating,
         FeatureState::kInactive,          FeatureState::kFailed,
-        FeatureState::kDegraded,
     };
     const char* expected[] = {
         "registered",        "resolving", "blocked",  "unsupported", "invalid",
-        "installed_disabled", "enabled",  "deactivating", "inactive", "failed", "degraded",
+        "installed_disabled", "enabled",  "deactivating", "inactive", "failed",
     };
-    for (int i = 0; i < 11; ++i) {
+    for (int i = 0; i < 10; ++i) {
         const char* name = feature_state_name(all[i]);
         CHECK(name != nullptr);
         CHECK(std::strcmp(name, "unknown") != 0);
         CHECK(std::strcmp(name, expected[i]) == 0);
     }
     CHECK(std::strcmp(feature_state_name(static_cast<FeatureState>(-1)), "unknown") == 0);
-    CHECK(std::strcmp(feature_state_name(static_cast<FeatureState>(11)), "unknown") == 0);
+    CHECK(std::strcmp(feature_state_name(static_cast<FeatureState>(10)), "unknown") == 0);
     CHECK(std::strcmp(feature_state_name(static_cast<FeatureState>(100)), "unknown") == 0);
 }
 
@@ -248,6 +275,7 @@ int main() {
     test_capability_lifecycle();
     test_capability_capacity();
     test_status_lifecycle();
+    test_status_degraded_flag();
     test_status_snapshot();
     test_feature_state_names();
     test_reset_isolation();

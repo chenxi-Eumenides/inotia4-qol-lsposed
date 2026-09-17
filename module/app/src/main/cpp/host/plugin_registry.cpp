@@ -32,6 +32,10 @@ struct PluginEntry {
 PluginEntry g_plugins[kMaxPlugins];
 uint32_t g_plugin_count = 0;
 
+// 装配依赖：install_all 时存入本 TU 静态，供运行期 lifecycle_step 的受限回调失败撤回
+// （以及 release 复用同一 hook/unhook 原语）；assembly.cpp 已在装配期传入。
+HostDeps g_install_deps{};
+
 // 失败文本静态存储：infra/status 只保存指针，生命周期须 ≥ 进程。
 char g_error_text[kMaxPlugins][kMaxErrorText];
 
@@ -78,6 +82,21 @@ void rollback_resources(const contracts::ResourceClaim* const* claims,
     }
 }
 
+// 撤回单条已安装资源（§3.3 受限回调失败路径）：成功 → kFree + runtime 清除；
+// 失败 → kTombstone + 隔离（保留占用，禁止重试直到进程重启）。
+void revoke_resource(const char* resource_id, const HostDeps& deps) {
+    const contracts::ResourceClaim* claim = hooks::find_claim(resource_id);
+    if (claim == nullptr) return;
+    hooks::ResourceRuntime runtime{};
+    const uintptr_t entry = hooks::runtime_of(resource_id, &runtime) ? runtime.resolved_entry : 0;
+    const hooks::ReleaseOutcome outcome =
+        hooks::release_claim_entry_hook(*claim, entry, deps.unhook_fn);
+    if (outcome.ok != 0) {
+        hooks::set_state(resource_id, contracts::ResourceState::kTombstone);
+        hooks::isolated_set(resource_id, true);
+    }
+}
+
 // 门禁监督辅助：同步某插件带 gate 资源的登记状态，并汇总目标态。
 // 只改写 disabled/live 两态：free（未安装）与 tombstone（保留占用）不得被监督改写。
 void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_has_gate,
@@ -105,6 +124,7 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_
 
 struct LifecycleTx {
     bool in_use = false;
+    bool ready_failed = false;  // 受限回调失败已置 failed：终态不再覆盖
     uint64_t tx_id = 0;
     uint32_t plugin_index = 0;
     hooks::TxKind kind = hooks::TxKind::kInstall;
@@ -167,6 +187,7 @@ bool register_plugin(const contracts::PluginDescriptor& plugin) {
 }
 
 int install_all(const HostDeps& deps) {
+    g_install_deps = deps;
     int failed_plugins = 0;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
@@ -195,6 +216,7 @@ int install_all(const HostDeps& deps) {
         uint32_t installed_count = 0;
         bool all_gates_on = true;
         bool resource_failed = false;
+        bool plugin_aborted = false;  // 受限回调失败已置 failed，跳过统一回滚分支
         const char* failed_claim_id = nullptr;
         const char* resource_error = nullptr;
 
@@ -221,15 +243,28 @@ int install_all(const HostDeps& deps) {
                 resource_error = outcome.error != nullptr ? outcome.error : "install failed";
                 break;
             }
+            // 同步路径同样登记运行期入口：运行期 deactivate/撤回的物理归还要用 resolved_entry。
+            hooks::runtime_set(claim.id, entry, outcome.backup);
+            // 立即把原函数入口交还所有者（§3.3「backup 交还」）。返回非 0 = 受限回调失败：
+            // 撤回该资源（撤回失败 → tombstone + 隔离），插件置 failed。
+            if (plugin.on_resource_ready != nullptr &&
+                plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+                revoke_resource(claim.id, deps);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "resource_ready_failed");
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
+                             claim.id);
+                ++failed_plugins;
+                plugin_aborted = true;
+                break;
+            }
             installed_claims[installed_count] = &claim;
             installed_entries[installed_count] = entry;
             ++installed_count;
-            // 同步路径同样登记运行期入口：运行期 deactivate 的物理归还要用 resolved_entry。
-            hooks::runtime_set(claim.id, entry, outcome.backup);
-            // 立即把原函数入口交还所有者（§3.3「backup 交还」）。
-            if (plugin.on_resource_ready != nullptr) {
-                plugin.on_resource_ready(ctx, claim.id, outcome.backup);
-            }
+        }
+
+        if (plugin_aborted) {
+            continue;
         }
 
         if (resource_failed) {
@@ -386,9 +421,26 @@ uint32_t lifecycle_step() {
         if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
             out.backup != nullptr && plugin.on_resource_ready != nullptr) {
             contracts::PluginContext ctx{};
-            plugin.on_resource_ready(ctx, out.resource_id, out.backup);
+            if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
+                // 受限回调失败：撤回该资源（撤回失败 → tombstone + 隔离），插件置 failed；
+                // 终态不再覆盖该 failed（事务仍自行走到终态以释放槽位）。
+                revoke_resource(out.resource_id, g_install_deps);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "resource_ready_failed");
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
+                             out.resource_id);
+                slot.ready_failed = true;
+            }
         }
         if (!out.finished) continue;
+
+        if (slot.ready_failed) {
+            // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
+            slot.in_use = false;
+            slot.ready_failed = false;
+            slot.tx_id = 0;
+            continue;
+        }
 
         hooks::TxStatus status{};
         const bool have_status = hooks::tx_query(slot.tx_id, &status);
@@ -445,6 +497,7 @@ uint32_t plugin_count() {
 
 void plugin_registry_reset_for_test() {
     g_plugin_count = 0;
+    g_install_deps = HostDeps{};
     for (LifecycleTx& slot : g_lifecycle_txs) {
         slot = LifecycleTx{};
     }

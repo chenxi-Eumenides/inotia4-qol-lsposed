@@ -24,4 +24,7 @@ void commands_set_lifecycle_handler(bool (*handler)(const char* plugin_id, int32
 // 测试用：清空槽位表。
 void commands_reset_for_test();
 
+// 票据状态稳定英文名（pending/done/failed/cancelled；越界 "unknown"），供诊断接口输出。
+const char* command_state_name(int32_t state);
+
 }  // namespace qol::infra

@@ -7,7 +7,8 @@
 
 namespace qol::infra {
 
-// 与 §3.2 状态机一一对应。
+// 与 §3.2 生命周期状态机一一对应（10 态）；数值仅为诊断/内部表示，不作跨边界契约。
+// degraded 不是生命周期态，而是正交健康标记（见 FeatureStatus.degraded）。
 enum class FeatureState : int32_t {
     kRegistered = 0,
     kResolving = 1,
@@ -19,7 +20,6 @@ enum class FeatureState : int32_t {
     kDeactivating = 7,
     kInactive = 8,
     kFailed = 9,
-    kDegraded = 10,
 };
 
 const char* feature_state_name(FeatureState state);
@@ -31,6 +31,8 @@ struct FeatureStatus {
     FeatureState state = FeatureState::kRegistered;
     const char* error = nullptr;   // 静态字符串或持久错误；nullptr 表示无错误
     uint32_t resource_count = 0;
+    // 正交健康标记（§3.2）：optional_requires 缺失/可选依赖失效时置位，生命周期态不变。
+    bool degraded = false;
 };
 
 // 注册（幂等：同 id 重复注册返回 false）；id/version 必须为静态存储。
@@ -38,6 +40,9 @@ bool status_register(const char* id, const char* version);
 
 // 更新状态；未注册 id 返回 false。error 必须为静态字符串或 nullptr。
 bool status_update(const char* id, FeatureState state, bool enabled, const char* error);
+
+// 设置正交健康标记 degraded（§3.2）；未注册 id 返回 false。
+bool status_set_degraded(const char* id, bool degraded);
 
 uint32_t status_count();
 

@@ -107,6 +107,7 @@ struct PluginProbe {
     int disabled_calls = 0;
     int ready_calls = 0;
     int install_rc = 0;  // 非 0 = install 回调失败
+    int ready_rc = 0;    // 非 0 = on_resource_ready 受限回调失败
     void* ready_backups[8] = {};
 };
 
@@ -119,12 +120,13 @@ int probe_install(PluginContext&) {
 void probe_deactivate(PluginContext&) { ++g_probe.deactivate_calls; }
 void probe_enabled(PluginContext&) { ++g_probe.enabled_calls; }
 void probe_disabled(PluginContext&) { ++g_probe.disabled_calls; }
-void probe_ready(PluginContext&, const char* resource_id, void* backup) {
+int probe_ready(PluginContext&, const char* resource_id, void* backup) {
     (void)resource_id;
     ++g_probe.ready_calls;
     if (g_probe.ready_calls <= 8) {
         g_probe.ready_backups[g_probe.ready_calls - 1] = backup;
     }
+    return g_probe.ready_rc;
 }
 void probe_fill_status(PluginStatusOut& out) {
     out.enabled = false;
@@ -306,8 +308,45 @@ void test_install_failure_marks_failed_without_transaction() {
     CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kDisabled);
 }
 
-void test_deactivate_calls_plugin_and_returns_inactive() {
+// 受限回调失败（同步安装路径）：撤回该资源 kFree + 插件 kFailed + reason=resource_ready_failed。
+void test_resource_ready_failure_aborts_plugin() {
     reset_all();
+    qol::infra::config_set_bool("test.gate", true);
+    CHECK(register_plugin(make_descriptor()));
+    g_probe.ready_rc = 1;
+    CHECK(install_all(make_host_deps()) == 1);
+
+    // 第一条资源安装后回调失败 → 撤回该资源；后续资源不再安装。
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kFree);
+    CHECK(g_backend.hook_calls == 1);
+    CHECK(g_backend.unhook_calls == 1);
+    CHECK(g_probe.ready_calls == 1);
+
+    qol::infra::FeatureStatus status{};
+    CHECK(qol::infra::status_get("test_lc", &status));
+    CHECK(status.state == FeatureState::kFailed);
+    CHECK(status.error != nullptr && std::strcmp(status.error, "resource_ready_failed") == 0);
+}
+
+// 受限回调失败（activate 事务路径）：各安装步资源均被撤回，终态不覆盖 failed。
+void test_resource_ready_failure_during_activate() {
+    reset_all();
+    CHECK(boot_then_deactivate(true));  // boot 期间回调返回 0
+    g_probe.ready_rc = 1;
+
+    CHECK(lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    drive_lifecycle();
+
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kFree);
+    qol::infra::FeatureStatus status{};
+    CHECK(qol::infra::status_get("test_lc", &status));
+    CHECK(status.state == FeatureState::kFailed);
+    CHECK(status.error != nullptr && std::strcmp(status.error, "resource_ready_failed") == 0);
+}
+
+void test_deactivate_calls_plugin_and_returns_inactive() {    reset_all();
     qol::infra::config_set_bool("test.gate", true);
     CHECK(register_plugin(make_descriptor()));
     CHECK(install_all(make_host_deps()) == 0);
@@ -388,6 +427,8 @@ int main() {
     test_activate_calls_install_and_hands_backup();
     test_activate_gate_on_reentry_is_idempotent();
     test_install_failure_marks_failed_without_transaction();
+    test_resource_ready_failure_aborts_plugin();
+    test_resource_ready_failure_during_activate();
     test_deactivate_calls_plugin_and_returns_inactive();
     test_enable_disable_rejected();
     test_isolated_rejects_lifecycle();

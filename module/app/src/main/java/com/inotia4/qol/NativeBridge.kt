@@ -192,6 +192,8 @@ object NativeBridge {
     external fun nativeSystemResourcesJson(): String
     // 生命周期动作下发：返回命令票据（0 = 投递失败）；action 取 native 侧 kFeatureLifecycle*
     external fun nativeFeatureLifecycle(pluginId: String, action: Int): Long
+    // 命令票据状态 JSON（/api/system/tickets/{id}）
+    external fun nativeTicketStateJson(ticket: Long): String
 
     // 游戏变体诊断（P1）：libgame.so 查表结果 JSON，供 /api/health 加法扩展使用
     external fun nativeGetVariantJson(): String

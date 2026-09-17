@@ -1739,13 +1739,13 @@
 ```
 
 **字段说明**：
-- `state`：状态机英文枚举名（`registered`/`resolving`/`blocked`/`unsupported`/`invalid`/`installed_disabled`/`enabled`/`deactivating`/`inactive`/`failed`/`degraded`）。
+- `state`：状态机英文枚举名（`registered`/`resolving`/`blocked`/`unsupported`/`invalid`/`installed_disabled`/`enabled`/`deactivating`/`inactive`/`failed`）。
 - `enabled`：宿主按门禁判定的运行时启用态；开关关闭（含资源已装但门禁关）时为 `false`。
 - `error`：失败/阻断的静态错误文本，无错误为 `null`（资源安装失败时含失败资源 id）。
 - `resource_count`：infra 状态登记表计数（P2 恒 `0`）；资源明细以 `resources[]` 为准。
 - `resources`：该插件 `owner` 的资源声明明细，`state` 取资源登记表占用状态（`free`/`disabled`/`live`/`tombstone`）。
 - `requires` / `provides`：描述符声明的能力需求/提供，仅输出 `{id, major, minor}`（接口指针不外泄）。
-- `degraded`：P2 恒 `false`（尚无 `optional_requires` 消费者）；P3 接可选能力后由能力注册表驱动。
+- `degraded`：正交健康标记（非生命周期态，§3.2）；`optional_requires` 缺失/可选依赖失效时置 `true`，插件继续工作（通常 `state` 仍为 `enabled`）。
 
 **注意**：响应体由 native `nativeFeatureStatusJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 ---
@@ -1775,6 +1775,24 @@
 - `isolated`：进程级隔离标记；`true` 表示禁止重试直到进程重启（物理归还未完成或声明不可还原）。
 
 **注意**：响应体由 native `nativeSystemResourcesJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+---
+
+### 7.9 命令票据 tickets（v0.8.0 起，P3 落地）
+
+`GET /api/system/tickets/{id}`
+
+**用途**：查询命令票据状态（与首个返回票据的端点 `POST /api/op/features/lifecycle` 同时交付），供客户端轮询异步命令结果（ARCHITECTURE.md §9.1 P3）。
+
+**返回格式**：
+```json
+{ "ok": true, "ticket": 7, "state": "pending" }
+```
+
+**字段说明**：
+- `ticket`：路径参数回显（`id` 为十进制票据号）。
+- `state`：`pending`（排队/执行中）/`done`（成功）/`failed`（执行失败或未知票据）/`cancelled`（已取消）。
+
+**注意**：`id` 为 0 → `{"ok":false,"error":"invalid ticket"}`；未知票据在 native 侧同样返回 `failed`（与命令队列「未知票据」语义一致）。响应体由 native `nativeTicketStateJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 ---
 
 ## 八、op（越权操作）— POST /api/op/*
