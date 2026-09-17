@@ -10,7 +10,7 @@
 #include "game_ui_kit.h"
 #include "game_ui_components.h"
 #include "game_ui_savebackup.h"
-
+#include "core/native/call_patch.h"  // call_patch_install_bl：主菜单绘制 BL 调用点包裹
 #include "core/native/qol_log.h"
 
 #include <atomic>
@@ -78,6 +78,12 @@ std::atomic<bool> g_thread_started{false};
 jclass g_config_bridge_class = nullptr;
 bool g_more_games_injected = false;
 PtrHook g_more_games_hook;
+
+// 主菜单绘制覆盖（STATE_ProcessMainMenu 内 `bl STATE_DrawMainMenu` 调用点 patch）：
+// 与「更多游戏」点击 hook 相互独立，只改绘制层、不改控件/触摸链；安装幂等，
+// 失败静默保持原版绘制。
+bool g_mainmenu_overlay_installed = false;
+StateDrawMainMenuFn fn_state_draw_main_menu = nullptr;
 
 bool g_panel_active = false;
 uint8_t* g_state_entry = nullptr;

@@ -1,5 +1,7 @@
 
 void settings_ui_start_auto_inject() {
+    // 主菜单绘制覆盖（「更多游戏」显示为「QoL模块设置」）：随设置域一并安装，幂等。
+    install_more_games_overlay_if_ready();
     ensure_inject_thread();
 }
 

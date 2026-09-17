@@ -1234,3 +1234,12 @@ constexpr uintptr_t F_GAMESTATE_DRAWPLAY_VMA = 0x9d6cc;  // void GAMESTATE_DrawP
 constexpr uintptr_t F_MAP_DRAWBASE_VMA = 0x111d14;              // void MAP_DrawBase()
 constexpr size_t F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF = 0x20; // GAMESTATE_DrawPlay 内 bl MAP_DrawBase
 using MapDrawBaseFn = void (*)();                               // void MAP_DrawBase()
+// 主菜单绘制入口：STATE_ProcessMainMenu(0x152fb0) 在 GRPX_Start 之后调用，主菜单按钮贴图
+// 以各控件 ControlObject_GetAbsoluteRect 定位后经 GRPX_DrawPart 画出。三个支持版本
+// （原版 v1.3.2 / monster v27 / 大修 20260830）.dynsym 均为 GLOBAL FUNC 0x152430 size 2940。
+constexpr uintptr_t F_STATE_DRAW_MAIN_MENU_VMA = 0x152430;     // void () 主菜单绘制（STATE_DrawMainMenu）
+constexpr uintptr_t F_STATE_PROCESS_MAIN_MENU_VMA = 0x152fb0;  // void () 主菜单每帧处理（GRPX_Start→Draw→GRPX_End）
+// STATE_ProcessMainMenu 内 +0xc 的 `bl STATE_DrawMainMenu`（原字 0x97fffd1d）；三个支持版本逐字节一致。
+constexpr size_t F_STATE_PROCESS_MAIN_MENU_DRAW_CALL_OFF = 0xc;
+constexpr uint32_t STATE_PROCESS_MAIN_MENU_DRAW_BL_WORD = 0x97fffd1d;
+using StateDrawMainMenuFn = void (*)();      // STATE_DrawMainMenu()：主菜单每帧绘制（无参、无返回值）
