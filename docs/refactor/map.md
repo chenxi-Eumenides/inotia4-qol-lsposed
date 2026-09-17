@@ -25,14 +25,14 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 7 | 326 |
-| `game/` | 12 | 695 |
+| `game/` | 14 | 841 |
 | `infra/` | 20 | 1385 |
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 241 |
 | `domains/` | 2 | 111 |
-| `features/` | 24 | 1544 |
-| `host/` | 10 | 1520 |
-| **合计** | **87** | **7102** |
+| `features/` | 30 | 1967 |
+| `host/` | 10 | 1525 |
+| **合计** | **95** | **7676** |
 
 ### 已迁移插件（`features/*`）
 
@@ -40,17 +40,18 @@
 - `features/push_all/`：6 文件 / 267 行
 - `features/quest/`：4 文件 / 162 行
 - `features/simple_mode/`：6 文件 / 462 行
+- `features/special_equip/`：6 文件 / 423 行
 - `features/text_layer/`：4 文件 / 350 行
 
 ### CTest target 分类
 
-- 全仓 target 总数：**30**
-- 新架构/已迁移：**17**（机制/宿主 13 + 已迁移功能 4）
+- 全仓 target 总数：**31**
+- 新架构/已迁移：**18**（机制/宿主 13 + 已迁移功能 5）
 - legacy：**13**
 
-新架构/已迁移（17）：
+新架构/已迁移（18）：
 - 机制/宿主（13）：`capability_lifecycle_tests`、`hooks_dispatch_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`
-- 已迁移功能（4）：`attribute_range_tests`、`module_text_tests`、`push_all_rules_tests`、`simple_mode_rules_tests`
+- 已迁移功能（5）：`attribute_range_tests`、`module_text_tests`、`push_all_rules_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
 
 legacy（13）：`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`native_choice_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_warehouse_validate_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
 <!-- END GENERATED:stats -->
@@ -113,6 +114,7 @@ legacy（13）：`autosell_rules_tests`、`autosell_store_tests`、`custom_recip
 | `host/assembly.cpp` | bootstrap 顺序收敛；hook/patch 原语注入仍取自 `feature/patch` 与 `core/native/call_patch` | P5 |
 | `host/frame_source.cpp` | 帧源在 `assembly` 之前被调用，故自注入 patch 原语（与 `assembly` 重复） | P5 |
 | `features/quest/plugin.cpp` | 进档回调仍借用 legacy `core/native/save_enter` 设施 | 随存档域迁移（C/D 阶段） |
+| `features/special_equip/plugin.cpp` | 出售门禁谓词注册调用 legacy `inventory_native_hook_set_sell_gate`（前置声明，避免 feature→feature include） | B2 拆分 inventory 域后改为共享分派消费者 |
 
 ## 验证附录
 

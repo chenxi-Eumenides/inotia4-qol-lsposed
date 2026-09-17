@@ -422,3 +422,15 @@ target_compile_features(infra_scheduler_tests PRIVATE cxx_std_17)
 set_target_properties(infra_scheduler_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(infra_scheduler_tests PRIVATE Threads::Threads)
 add_test(NAME infra_scheduler_tests COMMAND infra_scheduler_tests)
+
+# P4 阶段 B1：special_equip 纯逻辑 host 测试（跳过 bit4 重放判定 / 出售门禁决策，末尾追加）
+add_executable(special_equip_rules_tests
+    test_special_equip_rules.cpp
+    ${CPP_DIR}/features/special_equip/rules.cpp
+)
+target_include_directories(special_equip_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(special_equip_rules_tests PRIVATE cxx_std_17)
+set_target_properties(special_equip_rules_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME special_equip_rules_tests COMMAND special_equip_rules_tests)

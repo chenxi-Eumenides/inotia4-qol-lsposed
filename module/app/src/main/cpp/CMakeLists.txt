@@ -109,11 +109,13 @@ target_sources(gamebridge PRIVATE
     features/quest/plugin.cpp
 )
 
-# 特殊装备解锁：CHAR_CanEquipItem / CHAR_CanUnequipItem 双点包裹，
-# 放行 ITEMDATABASE +7 bit4（NPC 专属保护）对非特殊 NPC 的约束。
-# **常开，无配置开关**：游戏无获取途径，关闭只会让已持有该装备的角色无法穿脱（末尾追加，不改上方既有行）
+# P4 阶段 B1：special_equip 迁移为插件（game/access/item_class 收口 ITEMCLASS/GOT 读取，
+# 入口 hook 声明式化 + 出售门禁谓词过渡依赖；末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/special_equip/special_equip.cpp
+    game/access/item_class.cpp
+    features/special_equip/rules.cpp
+    features/special_equip/feature.cpp
+    features/special_equip/plugin.cpp
 )
 
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）

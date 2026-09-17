@@ -9,6 +9,7 @@
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
 #include "features/simple_mode/plugin.h"
+#include "features/special_equip/plugin.h"
 #include "features/text_layer/plugin.h"
 #include "game/access/patches.h"
 #include "game/access/symbols.h"
@@ -148,6 +149,10 @@ bool assembly_init() {
     }
     if (!register_plugin(features::text_layer::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: text_layer registration failed");
+        return false;
+    }
+    if (!register_plugin(features::special_equip::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: special_equip registration failed");
         return false;
     }
 

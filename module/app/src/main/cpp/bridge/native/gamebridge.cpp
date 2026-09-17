@@ -9,7 +9,6 @@
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
-#include "feature/special_equip/special_equip.h"
 #include "feature/world_teleport/world_teleport.h"
 #include "host/assembly.h"
 #include "host/frame_source.h"
@@ -75,7 +74,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         craft_ui_install_if_ready();  // 合成器界面层：全部 UIMix hook 的唯一挂载处（界面归界面）
         custom_recipe::register_dynamic_recipes();  // 动态特殊装备配方：进档后随机重建材料映射
         qol::host::assembly_init();  // 插件装配：注册内置静态插件 + 声明式安装资源 + 命令帧排空
-        special_equip_install_if_ready();  // 特殊装备解锁：CanEquipItem/CanUnequipItem 放行 +7 bit4（保留角色闸门）
+        // 特殊装备解锁已迁移为 special_equip 插件（assembly 注册，宿主声明式安装两个入口 hook）。
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }
