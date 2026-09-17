@@ -90,7 +90,7 @@
 
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
-| B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | 🔄 进行中（核心件已提交；待真机卡） |
+| B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | 🔄 进行中（VM-P4-06 状态面 PASS：两 hook `live`；行为面待用户确认） |
 | B2 | `feature/patch` 业务拆分 | 2,888 行 | A1、A4 | ⬜ |
 | B3 | `autosell` | 1,030 行 | A3 | ⬜ |
 | B4 | `save_backup` + `infra/store`（`infra/store` 属核心件：先在集成分支落地并冻结，再开插件 lane） | 2,371 行 | A2 | ⬜ |
