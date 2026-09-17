@@ -235,3 +235,9 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     bridge/native/gamebridge_lifecycle.cpp
 )
+
+# B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体仍在
+# feature/patch，经全局桥函数交还 backup。末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    features/inventory_hooks/plugin.cpp
+)

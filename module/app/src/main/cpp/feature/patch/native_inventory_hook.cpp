@@ -2,6 +2,7 @@
 #include "inventory_find_item_poc.h"
 #include "inventory_hook_stage4.h"
 
+#include "contracts/plugin.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/qol_log.h"
 #include "core/native/stack_codec.h"
@@ -25,9 +26,6 @@ constexpr uint32_t kNativeApiVersion = 2;
 std::mutex g_hook_mutex;
 NativeHookFunType g_hook_func = nullptr;
 NativeUnhookFunType g_unhook_func = nullptr;
-std::atomic<bool> g_installing{false};
-std::atomic<bool> g_installed{false};
-std::atomic<bool> g_install_blocked{false};
 
 FindItemFn g_backup_find_item = nullptr;
 HaveItemFn g_backup_have_item = nullptr;
@@ -61,12 +59,6 @@ InvenRemoveItemDataFn g_backup_remove_item_data = nullptr;
 std::atomic<uint64_t> g_find_item_calls{0};
 std::atomic<uint64_t> g_consume_item_calls{0};
 std::atomic<uint64_t> g_remove_item_calls{0};
-
-struct InstalledHook {
-    void* target;
-    void** backup;
-    const char* name;
-};
 
 thread_local bool g_in_find_item = false;
 thread_local bool g_in_have_item = false;
@@ -1000,308 +992,134 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
         ? 0 : g_backup_equip_control_event_proc(control, event, x2, param);
 }
 
-bool target_is_executable(uintptr_t target, const char* name) {
-    if (target == 0 || !game_memory_accessible(reinterpret_cast<void*>(target), 4, 'x')) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
-                            "%s target invalid: %p", name,
-                            reinterpret_cast<void*>(target));
-        return false;
-    }
-    QOL_LOG_INFO(QolDomain::kInventory,
-                        "%s target validated: %p", name,
-                        reinterpret_cast<void*>(target));
-    return true;
-}
+// ---------------------------------------------------------------------------
+// 声明式资源声明（B2a-1）：24 条入口 hook 的 claims 表。wrapper 业务体在本 TU，
+// handler 取址只能在此处；插件 features/inventory_hooks 经全局桥函数
+// inventory_hooks_claims / inventory_hooks_bind_backup 取得本表并交还 backup。
+// 安装顺序、失败回滚与物理还原归宿主声明式引擎（hooks/install + hooks/transaction +
+// host/plugin_registry），本 TU 不再自带安装引擎。
+// ---------------------------------------------------------------------------
+constexpr const char* kClaimOwner = "inventory_hooks";
+constexpr const char* kClaimReason =
+    "库存行为 wrapper 的函数级入口：扩展袋读改写、S2 写侧进位/借位、出售门禁与 "
+    "R-55/R-56 回调层接管均需在函数入口分流；业务体过渡期留在 feature/patch（B2c 迁移）";
 
-bool rollback_installed_hooks(const InstalledHook* hooks, std::size_t count) {
-    bool rolled_back = true;
-    for (std::size_t index = count; index > 0; --index) {
-        const InstalledHook& hook = hooks[index - 1];
-        const int result = g_unhook_func == nullptr || hook.target == nullptr
-            ? -1 : g_unhook_func(hook.target);
-        if (result == 0) {
-            if (hook.backup != nullptr) *hook.backup = nullptr;
-            QOL_LOG_INFO(QolDomain::kInventory,
-                                "hook rollback OK name=%s", hook.name);
-        } else {
-            rolled_back = false;
-            QOL_LOG_ERROR(QolDomain::kInventory,
-                                "hook rollback failed name=%s result=%d", hook.name, result);
-        }
-    }
-    if (!rolled_back) {
-        g_install_blocked.store(true, std::memory_order_release);
-        QOL_LOG_ERROR(QolDomain::kInventory,
-                            "hook rollback incomplete; retry blocked");
-    }
-    return rolled_back;
-}
+#define INVENTORY_HOOK_CLAIM(CLAIM_ID, CLAIM_SYMBOL, HANDLER)                          \
+    {CLAIM_ID, CLAIM_SYMBOL, qol::contracts::ResourceMechanism::kEntryHook,           \
+     qol::contracts::ResourcePolicy::kPrivate, qol::contracts::ResourceRequirement::kRequired, \
+     qol::contracts::ResourceFailure::kFailClosed, true, kClaimOwner, kClaimReason,    \
+     nullptr, 120, reinterpret_cast<void*>(&HANDLER)}
 
-bool install_locked() {
-    if (g_installed.load(std::memory_order_acquire)) {
-        QOL_LOG_INFO(QolDomain::kInventory, "hook install skipped: already installed");
-        return true;
-    }
-    if (g_install_blocked.load(std::memory_order_acquire)) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
-                            "hook install blocked after rollback failure");
-        return false;
-    }
-    if (g_hook_func == nullptr || !bridge_ready()) {
-        QOL_LOG_INFO(QolDomain::kInventory,
-                            "hook install deferred: hook_func=%p base=%p",
-                            reinterpret_cast<void*>(g_hook_func),
-                            reinterpret_cast<void*>(g_base));
-        return false;
-    }
+const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
+    INVENTORY_HOOK_CLAIM("hook:INVEN_FindItem", "F_FIND_ITEM_VMA", find_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_HaveItem", "F_INVEN_HAVE_ITEM_VMA", have_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_GetItemCount", "F_INVEN_GET_ITEM_COUNT_VMA",
+                         get_item_count_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:ITEM_GetCumulateCount", "F_GET_CUMULATE_COUNT_VMA",
+                         get_cumulate_count_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_ConsumeItem", "F_CONSUME_ITEM_VMA", consume_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_RemoveItem", "F_REMOVE_ITEM_VMA", remove_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:CHAR_EquipItemFromInvenToSlot",
+                         "F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA",
+                         equip_item_from_inven_to_slot_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_PutJewel", "F_PUT_JEWEL_VMA", put_jewel_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_IsHavingEmptySlot", "F_INVEN_IS_HAVING_EMPTY_SLOT_VMA",
+                         is_having_empty_slot_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:CHAR_UnequipItemToInven", "F_UNEQUIP_VMA",
+                         unequip_item_to_inven_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonEquipExe", "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA",
+                         button_equip_exe_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonUnequipExe", "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA",
+                         button_unequip_exe_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonDestroyExe", "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA",
+                         button_destroy_exe_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_OKConfirmUseItem", "F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA",
+                         ok_confirm_use_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_OKDestroyItem", "F_UIEQUIP_OK_DESTROY_ITEM_VMA",
+                         ok_destroy_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonUseMercenarySealExe",
+                         "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA",
+                         button_use_mercenary_seal_exe_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_SaveItem", "F_INVEN_SAVE_ITEM_VMA", save_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_MoveItem", "F_INVEN_MOVE_ITEM_VMA", move_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_EquipControlEventProc",
+                         "F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA",
+                         equip_control_event_proc_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:UIEquip_RefreshItemArea", "F_UIEQUIP_REFRESH_ITEM_AREA_VMA",
+                         refresh_item_area_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_SaveItemDirect", "F_INVEN_SAVE_ITEM_DIRECT_VMA",
+                         save_item_direct_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_Divide", "F_ITEMSYSTEM_DIVIDE_VMA",
+                         item_system_divide_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_MakeItem", "F_MAKE_ITEM_VMA", make_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_RemoveItemData", "F_INVEN_REMOVE_ITEM_DATA_VMA",
+                         remove_item_data_wrapper),
+};
+#undef INVENTORY_HOOK_CLAIM
 
-    const uintptr_t find_item = g_base + fn_resolve("F_FIND_ITEM_VMA", F_FIND_ITEM_VMA);
-    const uintptr_t have_item = g_base + fn_resolve("F_INVEN_HAVE_ITEM_VMA", F_INVEN_HAVE_ITEM_VMA);
-    const uintptr_t get_item_count = g_base + fn_resolve("F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA);
-    const uintptr_t get_cumulate_count = g_base + fn_resolve(
-        "F_GET_CUMULATE_COUNT_VMA", F_GET_CUMULATE_COUNT_VMA);
-    const uintptr_t consume_item = g_base + fn_resolve("F_CONSUME_ITEM_VMA", F_CONSUME_ITEM_VMA);
-    const uintptr_t remove_item = g_base + fn_resolve("F_REMOVE_ITEM_VMA", F_REMOVE_ITEM_VMA);
-    const uintptr_t equip_item_from_inven_to_slot =
-        g_base + fn_resolve("F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA", F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA);
-    const uintptr_t put_jewel = g_base + fn_resolve("F_PUT_JEWEL_VMA", F_PUT_JEWEL_VMA);
-    const uintptr_t is_having_empty_slot = g_base + fn_resolve(
-        "F_INVEN_IS_HAVING_EMPTY_SLOT_VMA", F_INVEN_IS_HAVING_EMPTY_SLOT_VMA);
-    const uintptr_t unequip_item_to_inven = g_base + fn_resolve(
-        "F_UNEQUIP_VMA", F_UNEQUIP_VMA);
-    const uintptr_t button_equip_exe = g_base + fn_resolve(
-        "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA);
-    const uintptr_t button_unequip_exe = g_base + fn_resolve(
-        "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA", F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA);
-    // R-55 详情出售按钮：预演标记源（与 ok_destroy_item 同事务安装）。
-    const uintptr_t button_destroy_exe = g_base + fn_resolve(
-        "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA", F_UIEQUIP_BUTTON_DESTROY_EXE_VMA);
-    const uintptr_t ok_confirm_use_item = g_base + fn_resolve(
-        "F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA", F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA);
-    // R-55 原版背包详情出售接管（追加链尾）。
-    const uintptr_t ok_destroy_item = g_base + fn_resolve(
-        "F_UIEQUIP_OK_DESTROY_ITEM_VMA", F_UIEQUIP_OK_DESTROY_ITEM_VMA);
-    // R-63 佣兵徽章使用按钮（追加链尾）。
-    const uintptr_t button_use_mercenary_seal_exe = g_base + fn_resolve(
-        "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA",
-        F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA);
-    const uintptr_t save_item = g_base + fn_resolve(
-        "F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA);
-    const uintptr_t move_item = g_base + fn_resolve(
-        "F_INVEN_MOVE_ITEM_VMA", F_INVEN_MOVE_ITEM_VMA);
-    const uintptr_t equip_control_event_proc = g_base + fn_resolve(
-        "F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA);
-    const uintptr_t refresh_item_area = g_base + fn_resolve(
-        "F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA);
-    // S2 写侧进位框架新增（H-18..H-21，追加链尾；符号/typedef 沿用既有登记，
-    // 无新增 VMA 常量）。
-    const uintptr_t save_item_direct = g_base + fn_resolve(
-        "F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA);
-    const uintptr_t item_system_divide = g_base + fn_resolve(
-        "F_ITEMSYSTEM_DIVIDE_VMA", F_ITEMSYSTEM_DIVIDE_VMA);
-    const uintptr_t make_item = g_base + fn_resolve(
-        "F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA);
-    const uintptr_t remove_item_data = g_base + fn_resolve(
-        "F_INVEN_REMOVE_ITEM_DATA_VMA", F_INVEN_REMOVE_ITEM_DATA_VMA);
-    if (!target_is_executable(find_item, "INVEN_FindItem") ||
-        !target_is_executable(have_item, "INVEN_HaveItem") ||
-        !target_is_executable(get_item_count, "INVEN_GetItemCount") ||
-        !target_is_executable(get_cumulate_count, "ITEM_GetCumulateCount") ||
-        !target_is_executable(consume_item, "INVEN_ConsumeItem") ||
-        !target_is_executable(remove_item, "INVEN_RemoveItem") ||
-        !target_is_executable(equip_item_from_inven_to_slot, "CHAR_EquipItemFromInvenToSlot") ||
-        !target_is_executable(put_jewel, "ITEMSYSTEM_PutJewel") ||
-        !target_is_executable(is_having_empty_slot, "INVEN_IsHavingEmptySlot") ||
-        !target_is_executable(unequip_item_to_inven, "CHAR_UnequipItemToInven") ||
-        !target_is_executable(button_equip_exe, "UIEquip_ButtonEquipExe") ||
-        !target_is_executable(button_unequip_exe, "UIEquip_ButtonUnequipExe") ||
-        !target_is_executable(button_destroy_exe, "UIEquip_ButtonDestroyExe") ||
-        !target_is_executable(ok_confirm_use_item, "UIEquip_OKConfrimUseItem") ||
-        !target_is_executable(ok_destroy_item, "UIEquip_OKDestroyItem") ||
-        !target_is_executable(button_use_mercenary_seal_exe, "UIEquip_ButtonUseMercenarySealExe") ||
-        !target_is_executable(save_item, "INVEN_SaveItem") ||
-        !target_is_executable(move_item, "INVEN_MoveItem") ||
-        !target_is_executable(equip_control_event_proc, "UIEquip_EquipControlEventProc") ||
-        !target_is_executable(refresh_item_area, "UIEquip_RefreshItemArea") ||
-        !target_is_executable(save_item_direct, "INVEN_SaveItemDirect") ||
-        !target_is_executable(item_system_divide, "ITEMSYSTEM_Divide") ||
-        !target_is_executable(make_item, "ITEMSYSTEM_MakeItem") ||
-        !target_is_executable(remove_item_data, "INVEN_RemoveItemData")) {
-        return false;
-    }
+constexpr uint32_t kInventoryHookClaimCount =
+    sizeof(kInventoryHookClaims) / sizeof(kInventoryHookClaims[0]);
 
-    g_backup_find_item = nullptr;
-    g_backup_have_item = nullptr;
-    g_backup_get_item_count = nullptr;
-    g_backup_get_cumulate_count = nullptr;
-    g_backup_consume_item = nullptr;
-    g_backup_remove_item = nullptr;
-    g_backup_equip_item_from_inven_to_slot = nullptr;
-    g_backup_put_jewel = nullptr;
-    g_backup_is_having_empty_slot = nullptr;
-    g_backup_unequip_item_to_inven = nullptr;
-    g_backup_button_equip_exe = nullptr;
-    g_backup_button_unequip_exe = nullptr;
-    g_backup_button_destroy_exe = nullptr;
-    g_backup_ok_confirm_use_item = nullptr;
-    g_backup_ok_destroy_item = nullptr;
-    g_backup_button_use_mercenary_seal_exe = nullptr;
-    g_backup_save_item = nullptr;
-    g_backup_move_item = nullptr;
-    g_backup_refresh_item_area = nullptr;
-    g_backup_equip_control_event_proc = nullptr;
-    g_backup_save_item_direct = nullptr;
-    g_backup_item_system_divide = nullptr;
-    g_backup_make_item = nullptr;
-    g_backup_remove_item_data = nullptr;
-
-    InstalledHook installed[24]{};
-    std::size_t installed_count = 0;
-    const auto install_hook = [&](void* target, void* replacement, void** backup,
-                                  const char* name) -> bool {
-        const int result = g_hook_func(target, replacement, backup);
-        if (result == 0) {
-            installed[installed_count++] = {target, backup, name};
-        }
-        if (result != 0 || backup == nullptr || *backup == nullptr) {
-            QOL_LOG_ERROR(QolDomain::kInventory,
-                                "%s hook failed result=%d backup=%p; rolling back %zu hooks",
-                                name, result, backup == nullptr ? nullptr : *backup,
-                                installed_count);
-            rollback_installed_hooks(installed, installed_count);
-            return false;
-        }
-        return true;
-    };
-
-    if (!install_hook(reinterpret_cast<void*>(find_item),
-                      reinterpret_cast<void*>(find_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_find_item), "FindItem") ||
-        !install_hook(reinterpret_cast<void*>(have_item),
-                      reinterpret_cast<void*>(have_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_have_item), "HaveItem") ||
-        !install_hook(reinterpret_cast<void*>(get_item_count),
-                      reinterpret_cast<void*>(get_item_count_wrapper),
-                      reinterpret_cast<void**>(&g_backup_get_item_count), "GetItemCount") ||
-        !install_hook(reinterpret_cast<void*>(get_cumulate_count),
-                      reinterpret_cast<void*>(get_cumulate_count_wrapper),
-                      reinterpret_cast<void**>(&g_backup_get_cumulate_count),
-                      "GetCumulateCount") ||
-        !install_hook(reinterpret_cast<void*>(consume_item),
-                      reinterpret_cast<void*>(consume_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_consume_item), "ConsumeItem") ||
-        !install_hook(reinterpret_cast<void*>(remove_item),
-                      reinterpret_cast<void*>(remove_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_remove_item), "RemoveItem") ||
-        !install_hook(reinterpret_cast<void*>(equip_item_from_inven_to_slot),
-                      reinterpret_cast<void*>(equip_item_from_inven_to_slot_wrapper),
-                      reinterpret_cast<void**>(&g_backup_equip_item_from_inven_to_slot),
-                      "EquipItemFromInvenToSlot") ||
-        !install_hook(reinterpret_cast<void*>(put_jewel),
-                      reinterpret_cast<void*>(put_jewel_wrapper),
-                      reinterpret_cast<void**>(&g_backup_put_jewel), "PutJewel") ||
-        !install_hook(reinterpret_cast<void*>(is_having_empty_slot),
-                      reinterpret_cast<void*>(is_having_empty_slot_wrapper),
-                      reinterpret_cast<void**>(&g_backup_is_having_empty_slot),
-                      "IsHavingEmptySlot") ||
-        !install_hook(reinterpret_cast<void*>(unequip_item_to_inven),
-                      reinterpret_cast<void*>(unequip_item_to_inven_wrapper),
-                      reinterpret_cast<void**>(&g_backup_unequip_item_to_inven),
-                      "UnequipItemToInven") ||
-        !install_hook(reinterpret_cast<void*>(button_equip_exe),
-                      reinterpret_cast<void*>(button_equip_exe_wrapper),
-                      reinterpret_cast<void**>(&g_backup_button_equip_exe),
-                      "ButtonEquipExe") ||
-        !install_hook(reinterpret_cast<void*>(button_unequip_exe),
-                      reinterpret_cast<void*>(button_unequip_exe_wrapper),
-                      reinterpret_cast<void**>(&g_backup_button_unequip_exe),
-                      "ButtonUnequipExe") ||
-        !install_hook(reinterpret_cast<void*>(button_destroy_exe),
-                      reinterpret_cast<void*>(button_destroy_exe_wrapper),
-                      reinterpret_cast<void**>(&g_backup_button_destroy_exe),
-                      "ButtonDestroyExe") ||
-        !install_hook(reinterpret_cast<void*>(ok_confirm_use_item),
-                      reinterpret_cast<void*>(ok_confirm_use_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_ok_confirm_use_item),
-                      "UIEquip_OKConfrimUseItem") ||
-        !install_hook(reinterpret_cast<void*>(ok_destroy_item),
-                      reinterpret_cast<void*>(ok_destroy_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_ok_destroy_item),
-                      "UIEquip_OKDestroyItem") ||
-        !install_hook(reinterpret_cast<void*>(button_use_mercenary_seal_exe),
-                      reinterpret_cast<void*>(button_use_mercenary_seal_exe_wrapper),
-                      reinterpret_cast<void**>(&g_backup_button_use_mercenary_seal_exe),
-                      "UIEquip_ButtonUseMercenarySealExe") ||
-        !install_hook(reinterpret_cast<void*>(save_item),
-                      reinterpret_cast<void*>(save_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_save_item),
-                      "SaveItem") ||
-        !install_hook(reinterpret_cast<void*>(move_item),
-                      reinterpret_cast<void*>(move_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_move_item),
-                      "MoveItem") ||
-        !install_hook(reinterpret_cast<void*>(equip_control_event_proc),
-                      reinterpret_cast<void*>(equip_control_event_proc_wrapper),
-                      reinterpret_cast<void**>(&g_backup_equip_control_event_proc),
-                      "UIEquip_EquipControlEventProc") ||
-        !install_hook(reinterpret_cast<void*>(refresh_item_area),
-                      reinterpret_cast<void*>(refresh_item_area_wrapper),
-                      reinterpret_cast<void**>(&g_backup_refresh_item_area),
-                      "UIEquip_RefreshItemArea") ||
-        !install_hook(reinterpret_cast<void*>(save_item_direct),
-                      reinterpret_cast<void*>(save_item_direct_wrapper),
-                      reinterpret_cast<void**>(&g_backup_save_item_direct),
-                      "SaveItemDirect") ||
-        !install_hook(reinterpret_cast<void*>(item_system_divide),
-                      reinterpret_cast<void*>(item_system_divide_wrapper),
-                      reinterpret_cast<void**>(&g_backup_item_system_divide),
-                      "ItemSystemDivide") ||
-        !install_hook(reinterpret_cast<void*>(make_item),
-                      reinterpret_cast<void*>(make_item_wrapper),
-                      reinterpret_cast<void**>(&g_backup_make_item),
-                      "ItemSystemMakeItem") ||
-        !install_hook(reinterpret_cast<void*>(remove_item_data),
-                      reinterpret_cast<void*>(remove_item_data_wrapper),
-                      reinterpret_cast<void**>(&g_backup_remove_item_data),
-                      "RemoveItemData")) {
-        return false;
-    }
-
-    g_installed.store(true, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kInventory,
-                        "hook install OK api=%u count=24 FindItem=%p/%p GetItemCount=%p/%p GetCumulateCount=%p/%p ConsumeItem=%p/%p RemoveItem=%p/%p OKConfirmUseItem=%p/%p OKDestroyItem=%p/%p EquipItemFromInvenToSlot=%p/%p MoveItem=%p/%p EquipControlEventProc=%p/%p RefreshItemArea=%p/%p SaveItemDirect=%p/%p ItemSystemDivide=%p/%p ItemSystemMakeItem=%p/%p RemoveItemData=%p/%p ButtonDestroyExe=%p/%p ButtonUseMercenarySealExe=%p/%p",
-                        kNativeApiVersion,
-                        reinterpret_cast<void*>(find_item), reinterpret_cast<void*>(g_backup_find_item),
-                        reinterpret_cast<void*>(get_item_count), reinterpret_cast<void*>(g_backup_get_item_count),
-                        reinterpret_cast<void*>(get_cumulate_count), reinterpret_cast<void*>(g_backup_get_cumulate_count),
-                        reinterpret_cast<void*>(consume_item), reinterpret_cast<void*>(g_backup_consume_item),
-                        reinterpret_cast<void*>(remove_item), reinterpret_cast<void*>(g_backup_remove_item),
-                        reinterpret_cast<void*>(ok_confirm_use_item), reinterpret_cast<void*>(g_backup_ok_confirm_use_item),
-                        reinterpret_cast<void*>(ok_destroy_item), reinterpret_cast<void*>(g_backup_ok_destroy_item),
-                        reinterpret_cast<void*>(equip_item_from_inven_to_slot),
-                        reinterpret_cast<void*>(g_backup_equip_item_from_inven_to_slot),
-                        reinterpret_cast<void*>(move_item),
-                        reinterpret_cast<void*>(g_backup_move_item),
-                        reinterpret_cast<void*>(equip_control_event_proc),
-                        reinterpret_cast<void*>(g_backup_equip_control_event_proc),
-                        reinterpret_cast<void*>(refresh_item_area),
-                        reinterpret_cast<void*>(g_backup_refresh_item_area),
-                        reinterpret_cast<void*>(save_item_direct),
-                        reinterpret_cast<void*>(g_backup_save_item_direct),
-                        reinterpret_cast<void*>(item_system_divide),
-                        reinterpret_cast<void*>(g_backup_item_system_divide),
-                        reinterpret_cast<void*>(make_item),
-                        reinterpret_cast<void*>(g_backup_make_item),
-                        reinterpret_cast<void*>(remove_item_data),
-                        reinterpret_cast<void*>(g_backup_remove_item_data),
-                        reinterpret_cast<void*>(button_destroy_exe),
-                        reinterpret_cast<void*>(g_backup_button_destroy_exe),
-                        reinterpret_cast<void*>(button_use_mercenary_seal_exe),
-                        reinterpret_cast<void*>(g_backup_button_use_mercenary_seal_exe));
-    return true;
+// claim.handler → 该 wrapper 的 backup 槽（原有 g_backup_* 全局）。以 handler 做唯一映射，
+// 避免 id 表与 backup 表两处重复维护；未登记 handler 返回 nullptr，桥按 fail-closed 处理。
+// g_backup_* 是有类型函数指针，槽地址统一 reinterpret_cast<void**> 交给机制层。
+void** backup_slot_for_handler(void* handler) {
+#define BACKUP_SLOT(HANDLER, SLOT) \
+    if (handler == reinterpret_cast<void*>(&HANDLER)) return reinterpret_cast<void**>(&SLOT)
+    BACKUP_SLOT(find_item_wrapper, g_backup_find_item);
+    BACKUP_SLOT(have_item_wrapper, g_backup_have_item);
+    BACKUP_SLOT(get_item_count_wrapper, g_backup_get_item_count);
+    BACKUP_SLOT(get_cumulate_count_wrapper, g_backup_get_cumulate_count);
+    BACKUP_SLOT(consume_item_wrapper, g_backup_consume_item);
+    BACKUP_SLOT(remove_item_wrapper, g_backup_remove_item);
+    BACKUP_SLOT(equip_item_from_inven_to_slot_wrapper, g_backup_equip_item_from_inven_to_slot);
+    BACKUP_SLOT(put_jewel_wrapper, g_backup_put_jewel);
+    BACKUP_SLOT(is_having_empty_slot_wrapper, g_backup_is_having_empty_slot);
+    BACKUP_SLOT(unequip_item_to_inven_wrapper, g_backup_unequip_item_to_inven);
+    BACKUP_SLOT(button_equip_exe_wrapper, g_backup_button_equip_exe);
+    BACKUP_SLOT(button_unequip_exe_wrapper, g_backup_button_unequip_exe);
+    BACKUP_SLOT(button_destroy_exe_wrapper, g_backup_button_destroy_exe);
+    BACKUP_SLOT(ok_confirm_use_item_wrapper, g_backup_ok_confirm_use_item);
+    BACKUP_SLOT(ok_destroy_item_wrapper, g_backup_ok_destroy_item);
+    BACKUP_SLOT(button_use_mercenary_seal_exe_wrapper, g_backup_button_use_mercenary_seal_exe);
+    BACKUP_SLOT(save_item_wrapper, g_backup_save_item);
+    BACKUP_SLOT(move_item_wrapper, g_backup_move_item);
+    BACKUP_SLOT(equip_control_event_proc_wrapper, g_backup_equip_control_event_proc);
+    BACKUP_SLOT(refresh_item_area_wrapper, g_backup_refresh_item_area);
+    BACKUP_SLOT(save_item_direct_wrapper, g_backup_save_item_direct);
+    BACKUP_SLOT(item_system_divide_wrapper, g_backup_item_system_divide);
+    BACKUP_SLOT(make_item_wrapper, g_backup_make_item);
+    BACKUP_SLOT(remove_item_data_wrapper, g_backup_remove_item_data);
+#undef BACKUP_SLOT
+    return nullptr;
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// 全局桥：插件 features/inventory_hooks 的访问入口（双向不 include，见 plugin.cpp 头注释）。
+// 清除阶段：B2c 业务迁入 features/inventory_hooks 后两函数随业务迁入并删除。
+// ---------------------------------------------------------------------------
+
+const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
+    if (out_count != nullptr) *out_count = kInventoryHookClaimCount;
+    return kInventoryHookClaims;
+}
+
+int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
+    // 空 backup 或未知 id 一律非 0 → 宿主逆序回滚并置 failed（fail-closed）。
+    if (resource_id == nullptr || backup == nullptr) return 1;
+    for (const qol::contracts::ResourceClaim& claim : kInventoryHookClaims) {
+        if (std::strcmp(claim.id, resource_id) != 0) continue;
+        void** slot = backup_slot_for_handler(claim.handler);
+        if (slot == nullptr) return 1;
+        *slot = backup;
+        return 0;
+    }
+    QOL_LOG_ERROR(QolDomain::kInventory,
+                  "inventory_hooks bind backup: unknown resource id %s", resource_id);
+    return 1;
+}
 
 void inventory_native_hook_call_refresh_item_area_original() {
     const UiEquipRefreshItemAreaFn original = g_backup_refresh_item_area != nullptr
@@ -1325,22 +1143,13 @@ void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
     QOL_LOG_INFO(QolDomain::kInventory,
                         "native_init called api_version=%u hook_func=%p",
                         entries->version, reinterpret_cast<void*>(g_hook_func));
-    install_locked();
+    // 资源安装由宿主声明式引擎在 assembly 装配期执行（features/inventory_hooks 插件）。
 }
 
 void inventory_native_hook_on_module_loaded(const char* name, void*) {
     if (name == nullptr || std::strstr(name, "libgame.so") == nullptr) return;
     QOL_LOG_INFO(QolDomain::kInventory, "module loaded: %s", name);
-    inventory_native_hook_install_if_ready();
-}
-
-void inventory_native_hook_install_if_ready() {
-    if (g_installing.exchange(true, std::memory_order_acq_rel)) return;
-    {
-        std::lock_guard<std::mutex> lock(g_hook_mutex);
-        install_locked();
-    }
-    g_installing.store(false, std::memory_order_release);
+    // 纯日志：安装时机改由 assembly 声明式装配决定，模块加载不再自行触发安装。
 }
 
 NativeHookFunType native_hook_func() { return g_hook_func; }

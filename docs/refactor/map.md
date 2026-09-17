@@ -25,18 +25,19 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 7 | 326 |
-| `game/` | 14 | 841 |
+| `game/` | 14 | 874 |
 | `infra/` | 20 | 1385 |
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 241 |
 | `domains/` | 2 | 111 |
-| `features/` | 30 | 1967 |
-| `host/` | 10 | 1525 |
-| **合计** | **95** | **7676** |
+| `features/` | 32 | 2065 |
+| `host/` | 10 | 1531 |
+| **合计** | **97** | **7813** |
 
 ### 已迁移插件（`features/*`）
 
 - `features/attribute_range/`：4 文件 / 303 行
+- `features/inventory_hooks/`：2 文件 / 98 行
 - `features/push_all/`：6 文件 / 267 行
 - `features/quest/`：4 文件 / 162 行
 - `features/simple_mode/`：6 文件 / 462 行
@@ -114,7 +115,10 @@ legacy（13）：`autosell_rules_tests`、`autosell_store_tests`、`custom_recip
 | `host/assembly.cpp` | bootstrap 顺序收敛；hook/patch 原语注入仍取自 `feature/patch` 与 `core/native/call_patch` | P5 |
 | `host/frame_source.cpp` | 帧源在 `assembly` 之前被调用，故自注入 patch 原语（与 `assembly` 重复） | P5 |
 | `features/quest/plugin.cpp` | 进档回调仍借用 legacy `core/native/save_enter` 设施 | 随存档域迁移（C/D 阶段） |
-| `features/special_equip/plugin.cpp` | 出售门禁谓词注册调用 legacy `inventory_native_hook_set_sell_gate`（前置声明，避免 feature→feature include） | B2 拆分 inventory 域后改为共享分派消费者 |
+| `features/special_equip/plugin.cpp` | 出售门禁谓词注册调用 legacy `inventory_native_hook_set_sell_gate`（前置声明，避免 feature→feature include） | B2c 库存业务搬迁后改为共享分派消费者 |
+| `features/inventory_hooks/plugin.cpp` + `feature/patch/native_inventory_hook.cpp` | claims 表与 backup 目标仍留 `feature/patch`（handler 只能在该 TU 取址），经 `inventory_hooks_claims` / `inventory_hooks_bind_backup` 两个自由函数桥接（双向不 include，避免 feature→feature 依赖）；24 条资源由宿主声明式安装 | claims/backup 随 B2c 业务搬迁迁入 `features/inventory_hooks` |
+| `features/inventory_hooks`（B2a-1） | **禁止 deactivate**：extension_bag / 自动出售 / 合成等 legacy 消费者依赖这 24 个 wrapper（扩展袋读取、扩展补扣、出售门禁）；物理释放在插件 `deactivate` 路径会执行，消费者将在 wrapper 缺失下运行。宿主无「不可 deactivate」标志，靠流程约束 | 消费者改经 capability requires 收口后（B2c/D2）解除 |
+| `feature/patch/native_inventory_hook.h` | 过渡导出：`inventory_native_hook_call_refresh_item_area_original`（refresh → B2c）、`inventory_native_hook_set_sell_gate`（sell-gate → B2c）、`native_hook_func` / `native_unhook_func` 机制原语（→ P5） | refresh/sell-gate：B2c；原语：P5 |
 
 ## 验证附录
 

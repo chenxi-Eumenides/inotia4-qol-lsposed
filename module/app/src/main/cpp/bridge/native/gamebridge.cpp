@@ -3,7 +3,6 @@
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
 #include "feature/autosell/autosell_config.h"
-#include "feature/patch/native_inventory_hook.h"
 #include "feature/autosell/autosell_scan.h"
 #include "feature/autosell/autosell_store.h"
 #include "feature/save_backup/save_backup.h"
@@ -45,7 +44,7 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     bool ok = bridge_init();
     if (ok) {
-        inventory_native_hook_install_if_ready();
+        // 库存行为 hook 已迁移为 inventory_hooks 插件（assembly 注册，宿主声明式安装 24 条入口）。
         // 属性显示范围已迁移为 attribute_range 插件（assembly 注册，宿主张成资源与能力）。
         // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力，assembly 注册）；
         // 角色面板绘制窗口的作用域标记仍在本处安装（绘制侧功能，不迁移）。

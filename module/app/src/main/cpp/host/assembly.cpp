@@ -6,6 +6,7 @@
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "features/attribute_range/plugin.h"
+#include "features/inventory_hooks/plugin.h"
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
 #include "features/simple_mode/plugin.h"
@@ -131,6 +132,11 @@ bool assembly_init() {
     });
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
+    // inventory_hooks 先注册：沿用旧 nativeInit「库存 hook 早于其余插件安装」的时序。
+    if (!register_plugin(features::inventory_hooks::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: inventory_hooks registration failed");
+        return false;
+    }
     if (!register_plugin(features::simple_mode::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: simple_mode registration failed");
         return false;

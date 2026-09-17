@@ -37,7 +37,8 @@
 | `features/craft_ui` | 4 |
 | `features/custom_recipe` | 8 |
 | `features/extension_bag` | 32 |
-| `features/patch` | 12 |
+| `features/inventory_hooks` | 2 |
+| `features/patch` | 11 |
 | `features/push_all` | 6 |
 | `features/quest` | 4 |
 | `features/save_backup` | 4 |
@@ -51,7 +52,7 @@
 | `host` | 25 |
 | `infra` | 41 |
 | `patch` | 7 |
-| **合计** | **303** |
+| **合计** | **304** |
 
 ### 1.2 迁移期映射摘要
 
@@ -132,7 +133,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 141 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 142 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -158,9 +159,9 @@
 
 ## 3. 基线债务
 
-基线共 3 组、100 条。
+基线共 3 组、95 条。
 
-### layer_direction（57 条）
+### layer_direction（56 条）
 
 - `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|domains/character → domains/inventory`
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
@@ -182,7 +183,7 @@
 - `layer_direction|core/native/game_variant.cpp|core/native/qol_log.h|game → infra`
 - `layer_direction|core/native/save_enter.cpp|core/native/call_patch.h|infra → patch`
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
-- …（其余 37 条省略）
+- …（其余 36 条省略）
 
 ### offsets_symbols_header（28 条）
 
@@ -208,16 +209,12 @@
 - `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - …（其余 8 条省略）
 
-### resource_unknown_symbol（15 条）
+### resource_unknown_symbol（11 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_store.inc:20||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/patch/game_patch.cpp:36||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/patch/game_patch.cpp:41||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/patch/game_patch_core.inc:75||call patch 无法归属符号`
-- `resource_unknown_symbol|feature/patch/native_inventory_hook.cpp:1021||entry hook 无法归属符号`
-- `resource_unknown_symbol|feature/patch/native_inventory_hook.cpp:1162||entry hook 无法归属符号`
 - `resource_unknown_symbol|feature/save_backup/save_backup.cpp:58||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_custom.cpp:43||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_exp.cpp:25||ptr slot 无法归属符号`
@@ -230,15 +227,15 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 28 个 / 文件 17 个 / 去重符号 9 个 / 无法归属 15 个。
+扫描合计：安装点 25 个 / 文件 16 个 / 去重符号 10 个 / 无法归属 11 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 5 | 8 | 4 |
+| entry hook | 4 | 6 | 4 |
 | call patch | 4 | 9 | 6 |
-| ptr slot | 9 | 11 | 2 |
+| ptr slot | 9 | 10 | 3 |
 
-去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
+去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_INVEN_FIND_SAVE_SLOT_VMA` → `feature/patch/game_patch_core.inc`
@@ -248,6 +245,7 @@
 - `F_SCENE_DRAW_POPUP_SC_CHARACTER_INFO_VMA` → `feature/ui/game_ui_charinfo_zh.cpp`
 - `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `feature/extension_bag/extension_bag_equip.inc`
+- `F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA` → `feature/patch/game_patch.cpp`
 - `F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA` → `feature/craft_ui/craft_ui_hooks.cpp`
 
 ## 5. JNI 面
@@ -262,7 +260,7 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 8 个）与已迁移 `features/*`（6 个）共 14 个域。
+旧 `feature/*`（待迁移 8 个）与已迁移 `features/*`（7 个）共 15 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，8）
 
@@ -272,16 +270,17 @@
 | `craft_ui` | `features/craft_ui` | 4 |
 | `custom_recipe` | `features/custom_recipe` | 8 |
 | `extension_bag` | `features/extension_bag` | 32 |
-| `patch` | `features/patch` | 12 |
+| `patch` | `features/patch` | 11 |
 | `save_backup` | `features/save_backup` | 4 |
 | `ui` | `features/ui` | 31 |
 | `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（6）
+### 6.2 已迁移 `features/*`（7）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_range` | `features/attribute_range` | 4 |
+| `inventory_hooks` | `features/inventory_hooks` | 2 |
 | `push_all` | `features/push_all` | 6 |
 | `quest` | `features/quest` | 4 |
 | `simple_mode` | `features/simple_mode` | 6 |
