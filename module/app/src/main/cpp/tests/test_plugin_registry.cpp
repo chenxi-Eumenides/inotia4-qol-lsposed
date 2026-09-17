@@ -448,6 +448,42 @@ void test_reset_is_clean() {
     CHECK(find_plugin(nullptr) == nullptr);
 }
 
+// 零资源插件（如 quest）：无资源声明、无门禁，install_all 后直接 enabled；
+// 不触 hook/unhook/on_resource_ready，fill_status 可调用。
+void test_zero_resource_plugin() {
+    reset_all();
+    const PluginDescriptor d = make_descriptor("test_zero", nullptr, 0, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(plugin_count() == 1);
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_backend.hook_calls == 0);
+    CHECK(g_backend.unhook_calls == 0);
+    CHECK(g_probe.install_calls == 1);
+    CHECK(g_probe.enabled_calls == 1);
+    CHECK(g_probe.disabled_calls == 0);
+    CHECK(g_probe.ready_calls == 0);
+
+    FeatureState state = FeatureState::kRegistered;
+    bool enabled = false;
+    const char* error = nullptr;
+    CHECK(feature_of("test_zero", &state, &enabled, &error));
+    CHECK(state == FeatureState::kEnabled);
+    CHECK(enabled);
+    CHECK(error == nullptr);
+
+    // fill_status 正常可调用（probe 固定写 enabled=false / error=nullptr）。
+    PluginStatusOut out{};
+    d.fill_status(out);
+    CHECK(!out.enabled);
+    CHECK(out.error == nullptr);
+
+    // 无门禁资源：sync_gates 不参与监督，幂等返回 0。
+    CHECK(sync_gates() == 0);
+    CHECK(g_probe.enabled_calls == 1);
+    CHECK(g_probe.disabled_calls == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -462,6 +498,7 @@ int main() {
     test_sync_gates_hot_switch();
     test_sync_gates_leaves_tombstone();
     test_reset_is_clean();
+    test_zero_resource_plugin();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

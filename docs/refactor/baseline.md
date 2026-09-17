@@ -38,18 +38,18 @@
 | `features/extension_bag` | 32 |
 | `features/patch` | 12 |
 | `features/push_all` | 6 |
-| `features/quest` | 2 |
+| `features/quest` | 4 |
 | `features/save_backup` | 4 |
 | `features/simple_mode` | 6 |
 | `features/special_equip` | 2 |
 | `features/ui` | 33 |
 | `features/world_teleport` | 4 |
-| `game` | 27 |
+| `game` | 29 |
 | `hooks` | 6 |
 | `host` | 25 |
 | `infra` | 40 |
 | `patch` | 7 |
-| **合计** | **282** |
+| **合计** | **286** |
 
 ### 1.2 迁移期映射摘要
 
@@ -130,7 +130,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 136 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 137 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -231,12 +231,12 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 33 个 / 文件 21 个 / 去重符号 11 个 / 无法归属 18 个。
+扫描合计：安装点 31 个 / 文件 20 个 / 去重符号 11 个 / 无法归属 16 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 8 | 11 | 6 |
-| call patch | 5 | 11 | 6 |
+| call patch | 4 | 9 | 6 |
 | ptr slot | 9 | 11 | 2 |
 
 去重符号 → 文件（前 11 条，共 11 条；`--verbose` 列全部）：
@@ -265,9 +265,9 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 11 个）与已迁移 `features/*`（2 个）共 13 个域。
+旧 `feature/*`（待迁移 10 个）与已迁移 `features/*`（3 个）共 13 个域。
 
-### 6.1 旧 `feature/*`（待迁移，11）
+### 6.1 旧 `feature/*`（待迁移，10）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -277,17 +277,17 @@
 | `custom_recipe` | `features/custom_recipe` | 8 |
 | `extension_bag` | `features/extension_bag` | 32 |
 | `patch` | `features/patch` | 12 |
-| `quest` | `features/quest` | 2 |
 | `save_backup` | `features/save_backup` | 4 |
 | `special_equip` | `features/special_equip` | 2 |
 | `ui` | `features/ui` | 33 |
 | `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（2）
+### 6.2 已迁移 `features/*`（3）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `push_all` | `features/push_all` | 6 |
+| `quest` | `features/quest` | 4 |
 | `simple_mode` | `features/simple_mode` | 6 |
 
 ## 校验入口

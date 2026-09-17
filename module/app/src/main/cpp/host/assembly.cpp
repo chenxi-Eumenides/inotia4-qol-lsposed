@@ -6,6 +6,7 @@
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "features/push_all/plugin.h"
+#include "features/quest/plugin.h"
 #include "features/simple_mode/plugin.h"
 #include "game/access/patches.h"
 #include "game/access/symbols.h"
@@ -133,6 +134,10 @@ bool assembly_init() {
     }
     if (!register_plugin(features::push_all::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: push_all registration failed");
+        return false;
+    }
+    if (!register_plugin(features::quest::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: quest registration failed");
         return false;
     }
 

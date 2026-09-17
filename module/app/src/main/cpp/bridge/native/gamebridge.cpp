@@ -11,7 +11,6 @@
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
 #include "feature/ui/module_text.h"
-#include "feature/quest/quest_resync.h"
 #include "feature/special_equip/special_equip.h"
 #include "feature/world_teleport/world_teleport.h"
 #include "host/assembly.h"
@@ -66,11 +65,12 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         char_next_exp_cache_start();
         transition_dispatch_init();           // 状态转换：逻辑帧点消费（go_main_menu/enter_slot/create_slot）
         save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
-        save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点 call_patch
-        save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点 call_patch
+        save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点（指令改写）
+        save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点（指令改写）
         autosell_register_save_enter();       // 自动出售：进档加载 sidecar 配置并注册扫描任务
         autosell_register_save_exit();        // 自动出售：退档删除扫描任务
-        quest_resync_register_save_enter();   // 任务完成度进档重算：world 就绪后一次性补 state=2
+        // 任务完成度进档重算已迁移为 quest 插件（plugin.cpp install 注册 save_enter 回调），
+        // 由 assembly_init 统一装配。
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主

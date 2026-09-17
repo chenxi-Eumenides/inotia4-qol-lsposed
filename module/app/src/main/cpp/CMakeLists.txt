@@ -100,9 +100,11 @@ target_sources(gamebridge PRIVATE
     core/native/transition_dispatch.cpp
 )
 
-# 任务完成度进档重算（quest-resync，末尾追加，不改上方既有行）
+# 任务完成度进档重算（quest 插件迁移：零资源常驻 + infra/scheduler 帧节拍；旧 quest_resync 删除）
 target_sources(gamebridge PRIVATE
-    feature/quest/quest_resync.cpp
+    game/access/quest.cpp
+    features/quest/feature.cpp
+    features/quest/plugin.cpp
 )
 
 # 特殊装备解锁：CHAR_CanEquipItem / CHAR_CanUnequipItem 双点包裹，
