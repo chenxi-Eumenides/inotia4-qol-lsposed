@@ -5,7 +5,6 @@
 #include "features/autosell/config.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
-#include "feature/world_teleport/world_teleport.h"
 #include "host/assembly.h"
 #include "host/core_patches.h"
 #include "host/frame_source.h"
@@ -64,7 +63,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
-        world_teleport_install_if_ready();  // 世界传送：地图名入口 patch + choice ExecuteProc hook
+        // 世界传送已迁移为 world_teleport 插件：入口 patch 与 native_choice 安装
+        // 由插件 install 负责（assembly_init 装配）。
         craft_ui_install_if_ready();  // 合成器界面层：全部 UIMix hook 的唯一挂载处（界面归界面）
         custom_recipe::register_dynamic_recipes();  // 动态特殊装备配方：进档后随机重建材料映射
         qol::host::assembly_init();  // 插件装配：注册内置静态插件 + 声明式安装资源 + 命令帧排空

@@ -24,7 +24,7 @@
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "feature/patch/inventory_find_item_poc.h"
 #include "features/save_backup/bundle.h"
-#include "feature/world_teleport/world_teleport_rules.h"
+#include "features/world_teleport/rules.h"
 #include "../data/native/game_tiles.cpp"
 
 extern void set_host_stack_limit_enabled(bool enabled);

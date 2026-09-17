@@ -51,8 +51,8 @@ add_library(gamebridge SHARED
     game/access/attr_range_ui.cpp
     features/attribute_range/feature.cpp
     features/attribute_range/plugin.cpp
-    feature/world_teleport/world_teleport.cpp
-    feature/world_teleport/world_teleport_rules.cpp
+    features/world_teleport/feature.cpp
+    features/world_teleport/rules.cpp
 )
 
 find_library(log-lib log)
@@ -266,4 +266,10 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     game/access/save.cpp
     features/save_backup/plugin.cpp
+)
+
+# C1：world_teleport 迁移为插件（零资源常驻 + 世界/地图访问收口 game/access/world）
+target_sources(gamebridge PRIVATE
+    game/access/world.cpp
+    features/world_teleport/plugin.cpp
 )

@@ -15,6 +15,7 @@
 #include "features/special_equip/plugin.h"
 #include "features/stack_limit/plugin.h"
 #include "features/text_layer/plugin.h"
+#include "features/world_teleport/plugin.h"
 #include "game/access/patches.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
@@ -176,6 +177,11 @@ bool assembly_init() {
     // save_backup：零资源常驻插件；install 安装删档同步 PtrHook（legacy 过渡机制）。
     if (!register_plugin(features::save_backup::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: save_backup registration failed");
+        return false;
+    }
+    // world_teleport：零资源常驻插件；install 安装入口指令 patch + native_choice（legacy 过渡机制）。
+    if (!register_plugin(features::world_teleport::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: world_teleport registration failed");
         return false;
     }
 

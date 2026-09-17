@@ -1,4 +1,4 @@
-#include "feature/world_teleport/world_teleport_rules.h"
+#include "features/world_teleport/rules.h"
 
 #include <algorithm>
 

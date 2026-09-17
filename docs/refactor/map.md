@@ -25,14 +25,14 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 8 | 372 |
-| `game/` | 16 | 1079 |
+| `game/` | 18 | 1330 |
 | `infra/` | 22 | 2007 |
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 285 |
 | `domains/` | 2 | 111 |
-| `features/` | 52 | 5635 |
-| `host/` | 12 | 1787 |
-| **合计** | **124** | **12556** |
+| `features/` | 58 | 6199 |
+| `host/` | 12 | 1793 |
+| **合计** | **132** | **13377** |
 
 ### 已迁移插件（`features/*`）
 
@@ -46,6 +46,7 @@
 - `features/special_equip/`：6 文件 / 423 行
 - `features/stack_limit/`：2 文件 / 103 行
 - `features/text_layer/`：4 文件 / 350 行
+- `features/world_teleport/`：6 文件 / 564 行
 
 ### CTest target 分类
 

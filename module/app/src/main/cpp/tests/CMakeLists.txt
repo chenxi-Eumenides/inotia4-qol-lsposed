@@ -22,7 +22,7 @@ add_executable(host_tests
     ${CPP_DIR}/core/native/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp
     ${CPP_DIR}/features/save_backup/bundle.cpp
-    ${CPP_DIR}/feature/world_teleport/world_teleport_rules.cpp
+    ${CPP_DIR}/features/world_teleport/rules.cpp
 )
 
 target_include_directories(host_tests PRIVATE

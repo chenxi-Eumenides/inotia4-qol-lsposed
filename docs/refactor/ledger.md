@@ -94,14 +94,14 @@
 | B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | ✅ 完成（VM-P4-06 PASS：两 hook `live`；**用户真机确认功能正常**——普通队友/主角可穿脱专属位装备且可售，特殊 NPC 队友维持原版锁定） |
 | B2 | `feature/patch` 业务拆分 | 2,888 行 | A1、A4 | 🔄 进行中（**B2a-1 ✅**：VM-P4-07 PASS——24/24 `live` + 用户冒烟正常；**B2a-2 ✅**（VM-P4-08：core 15/15 `live`、`stack_limit` 两态、启动守卫缺陷修复）；余：extension_bag 契约、wrapper 业务搬迁 B2c、`move_merge`/ptr_slot B2a-3） |
 | B3 | `autosell` | 1,030 行 | A3 | ✅ 完成（VM-44——用户真机确认自动出售正确；证据：host 130+102 断言、基线 90→85） |
-| B4 | `save_backup` + `infra/store`（`infra/store` 属核心件：先在集成分支落地并冻结，再开插件 lane） | 2,371 行 | A2 | 🔄 进行中（**B4-1 ✅ 容器层 / B4-2 ✅ 单写者 / B4-3 ✅ autosell 直连 / B4-4 ✅ save_backup 接 store**；用户回归通过：autosell 持久化、扩展背包存读档、存档导出/删改；余 **B4-5** 本体迁移；UI 留 D1） |
+| B4 | `save_backup` + `infra/store`（`infra/store` 属核心件：先在集成分支落地并冻结，再开插件 lane） | 2,371 行 | A2 | ✅ 完成（B4-1 容器层 / B4-2 单写者 / B4-3 autosell 直连 / B4-4 save_backup 接 store / B4-5 本体迁移；用户回归通过：autosell 持久化、扩展背包存读档、存档导出/导入/删档；UI 面板留 D1） |
 | W1 | 扩展背包：商店出售支持数量选择（部分出售） | 插单（用户请求；**非 B2 回归**——商店投影出售自 `0858eb2` 起即为模块接管整堆事务，无部分出售实现） | 受影响规则：R-12/R-13/R-47 决策 b/R-55（须全量读扩展背包规则书与 VM 卡） | ✅ 完成（VM-43——用户真机确认：部分出售/全量/取消/上限随开关均正常；证据归档 `docs/history/store-sell-disassembly.md`） |
 
 ### 阶段 C：中件
 
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
-| C1 | `world_teleport` | 525 行 | A4 | ⬜ |
+| C1 | `world_teleport` | 525 行 | A4 | 🔄 进行中（迁移完成：零资源插件 + `game/access/world` 收口，基线 83→81；**待用户真机**：面板/±delta/越界回绕/余额不足/API op） |
 | C2 | `craft_ui` + `custom_recipe`（同 lane，双向依赖） | 2,597 行 | A4 | ⬜ |
 
 ### 阶段 D：大件

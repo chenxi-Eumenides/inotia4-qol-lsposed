@@ -47,13 +47,13 @@
 | `features/stack_limit` | 2 |
 | `features/text_layer` | 4 |
 | `features/ui` | 31 |
-| `features/world_teleport` | 4 |
-| `game` | 35 |
+| `features/world_teleport` | 6 |
+| `game` | 37 |
 | `hooks` | 8 |
 | `host` | 28 |
 | `infra` | 45 |
 | `patch` | 7 |
-| **合计** | **318** |
+| **合计** | **322** |
 
 ### 1.2 迁移期映射摘要
 
@@ -134,7 +134,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 144 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 145 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -160,7 +160,7 @@
 
 ## 3. 基线债务
 
-基线共 3 组、83 条。
+基线共 3 组、81 条。
 
 ### layer_direction（50 条）
 
@@ -186,7 +186,7 @@
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
 - …（其余 30 条省略）
 
-### offsets_symbols_header（25 条）
+### offsets_symbols_header（23 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
@@ -208,7 +208,7 @@
 - `offsets_symbols_header|feature/ui/game_ui_custom.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- …（其余 5 条省略）
+- …（其余 3 条省略）
 
 ### resource_unknown_symbol（8 条）
 
@@ -259,9 +259,9 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 6 个）与已迁移 `features/*`（10 个）共 16 个域。
+旧 `feature/*`（待迁移 5 个）与已迁移 `features/*`（11 个）共 16 个域。
 
-### 6.1 旧 `feature/*`（待迁移，6）
+### 6.1 旧 `feature/*`（待迁移，5）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -270,9 +270,8 @@
 | `extension_bag` | `features/extension_bag` | 32 |
 | `patch` | `features/patch` | 9 |
 | `ui` | `features/ui` | 31 |
-| `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（10）
+### 6.2 已迁移 `features/*`（11）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -286,6 +285,7 @@
 | `special_equip` | `features/special_equip` | 6 |
 | `stack_limit` | `features/stack_limit` | 2 |
 | `text_layer` | `features/text_layer` | 4 |
+| `world_teleport` | `features/world_teleport` | 6 |
 
 ## 校验入口
 
