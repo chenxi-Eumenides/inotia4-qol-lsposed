@@ -83,7 +83,7 @@
 | A1 | `patch/` 机制 + `push_all` | push_all（85 行） | 指令 patch、占用声明、原字校验与回滚 | ✅ 完成（VM-P4-01 PASS：两 patch live、BL 重定向日志证据、物理还原；**用户真机确认推怪生效**） |
 | A2 | 帧源/调度形式化 + `quest` | quest（79 行） | `infra/scheduler` + 帧源注入 | ✅ 完成（VM-P4-02/03 PASS：core 两条 `live`、命令排空经新 scheduler；quest 零资源插件 `enabled` + 进档 `quest resync: fixed=0` 日志。遗留：`save_enter` 回调设施未迁移，随存档域收口） |
 | A3 | 能力契约 + `attribute_range` | attribute_range（396 行） | capability 提供/消费 + 撤销级联（§3.4.1） | ✅ 完成（VM-P4-04 PASS：3 条 hook `live`；deactivate → `inactive`+全 `free`（逆序归还+注销能力）；activate → `enabled`+全 `live`；feature→feature 依赖已消除） |
-| A4 | `hooks/dispatch` + `ui` 文本层拆分 | `MEMORYTEXT_GetText` 共享资源 | before/original/after、Observe/Modify/Intercept | ⬜ |
+| A4 | `hooks/dispatch` + `ui` 文本层拆分 | `MEMORYTEXT_GetText` 共享资源 | before/original/after、Observe/Modify/Intercept | ✅ 完成（VM-P4-05 PASS：共享资源 `live`；deactivate → `free`、重复动作被拒（ticket failed）、activate → `live`；撤销期文本透传正常；设计 v0.3.8 阶段语义） |
 
 ### 阶段 B：依赖对与并行小件
 
