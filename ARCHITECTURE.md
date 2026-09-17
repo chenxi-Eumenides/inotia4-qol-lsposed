@@ -1,6 +1,7 @@
 # 架构设计书：分层收口与插件化
 
-> 状态：设计稿 **v0.3**｜日期：2026-09-16
+> 状态：**v0.3.5（P4 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-17
+> 签署定义：签署 = 外部复审无阻断项 且 版本记录与未决项表逐项有结论。P0–P3 的「完成」仅指各阶段出口条件达成，**不表示**本设计书已签署或未决项已闭合（见 §12.3）。
 > 适用范围：**§1–§9、§11、§12 对内置插件轨（含全部核心架构）为权威规范**；**§3.7/§3.8 外部插件轨为未冻结设计草案**（P6 前允许大改，不构成实施承诺）。
 > 权威层级：架构规则以本文为准；校验脚本输出只代表「当前实现事实」。二者不一致时构建失败，必须显式走「改设计」或「登记临时豁免（带文档锚点）」之一。
 > 本文只描述目标结构；结构类内容由脚本生成或校验，人工只维护「为什么」。
@@ -11,6 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.5 | 闭合第三轮审阅：`degraded` 定为正交健康标记、`cascade_stopped` 降为原因码（生命周期收敛为 10 态）；共享资源同样由 owner 提供 `handler`；`on_resource_ready` 定为受限生命周期回调并带失败回滚语义；物理还原失败统一 `failed + isolated`；删除 HTTP 同步等待例外；ticket 查询随首个返回票据的端点落地；feature 对 `game/write\|ops` 的调用限定主线程命令路径；补 capability 注册时序；明确 feature UI 与 products/qol 边界；首页版本/签署状态与未决项归属校准 |
 | v0.3.4 | P3 实施校准：状态 API 补 `GET /api/system/resources` 与 `POST /api/op/features/lifecycle`（生命周期控制经命令端口，`op` 门控）；票据查询端点明确推迟到 P4 |
 | v0.3.3 | P2 实施校准：`PluginDescriptor` 增加 `on_resource_ready`——宿主声明式安装后须把 backup（原函数入口）交还所有者，否则 wrapper 无法调用原函数 |
 | v0.3.2 | P2 实施校准：资源声明补充 `handler`（所有者提供的替换入口）——否则「宿主声明式安装」在入口 hook 机制下无可执行体 |
@@ -106,8 +108,8 @@ L5  host/       模块入口、JNI 边界、HTTP server、装配与拓扑、插�
 |---|---|---|
 | `host/` | 模块入口、JNI 薄层（按插件分组）、HTTP 服务、装配顺序、插件注册表 | 业务逻辑；直接读写游戏内存 |
 | `products/api_export/` | 端点、参数校验、JSON 序列化、路由注册 | 调 JNI；直接读游戏；include feature 实现 |
-| `products/qol/` | 游戏内 UI 面：设置页、面板、文案与布局装配 | 游戏语义计算 |
-| `features/<id>/` | 一个增强功能：生命周期、规则、UI、对外能力与命令 | include 其他 feature；执行 hook/patch 机制；出现裸地址 |
+| `products/qol/` | 游戏内 UI **容器与共享控件**：设置页框架、`ui_kit`、面板注册与容器装配、文案装配 | 游戏语义计算；实现功能面板（归 features） |
+| `features/<id>/` | 一个增强功能：生命周期、规则、自有界面（`ui/`）、对外能力与命令 | include 其他 feature；执行 hook/patch 机制；出现裸地址；在命令路径之外调用 `game/write/**`、`game/ops/**` |
 | `domains/` | 语义域：`LiveApi`（主线程 live model）与 `ReadModel`（快照）两套接口 | 依赖 features/products；输出 JSON；依赖 hooks/patch；水平互调（聚合域除外） |
 | `hooks/` | 资源登记与仲裁、安装/还原引擎、consumer 分派 | 业务语义 |
 | `patch/` | 指令 patch、指针槽：占用声明、原字校验、回滚 | 业务语义 |
@@ -168,6 +170,11 @@ registered → resolving → { installed_disabled ⇄ enabled } → deactivating
 | `inactive` | 资源已还原、能力已注销 | → resolving（幂等重入） |
 | `failed` | 安装或回滚失败（**可重试**，非 terminal） | → resolving（显式重试） |
 
+**正交维度（不属于生命周期态）**：
+
+- `degraded`：**健康标记**（bool）。`optional_requires` 缺失或可选依赖失效时置位，插件继续工作；生命周期态不变（通常仍为 `enabled`）。§9.1 状态 API 的 `degraded` 字段即此标记。
+- **原因码（`reason`）**：描述进入当前态的原因，不新增状态。`cascade_stopped`（必需依赖被撤销后由宿主停用）→ 生命周期态 `installed_disabled` + `reason=cascade_stopped`；`in_flight_timeout` / `unhook_failed` / `resource_ready_failed` → `failed` + 对应 reason。
+
 语义定义：
 
 1. **disable（enabled → installed_disabled）**：注销消费者、关闭门禁、清空能力暴露；允许保留**空转安装点**（wrapper 存在但立即透传原函数，fail-closed）。
@@ -199,7 +206,7 @@ struct PluginDescriptor {
     void (*on_enabled)(PluginContext&);    // 可选；禁止资源操作
     void (*on_disabled)(PluginContext&);   // 可选；禁止资源操作
     void (*fill_status)(PluginStatusOut&); // 宿主传入 out 参数填充
-    void (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup); // 可选；资源安装成功后宿主通知（backup = 原函数入口）
+    int32_t (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup); // 可选；受限生命周期回调，0=成功（非业务回调）
 };
 ```
 
@@ -209,7 +216,8 @@ struct PluginDescriptor {
 - **状态所有权**：`fill_status` 用宿主传入的 out 参数填充，避免跨边界所有权问题。
 - **资源与能力的启停由宿主通用执行**（声明式）；`install/deactivate` 只做插件自身初始化与清理；`on_enabled/on_disabled` 不得申请/释放资源。
 - **backup 交还**：宿主在资源安装成功后经 `on_resource_ready` 把原函数入口交还所有者；插件不得自行安装资源。
-- 拓扑排序输入 = `requires` + `provides`；缺 `requires` → `blocked`；缺 `optional_requires` → `degraded`。
+- **`on_resource_ready` 是受限生命周期回调**，不属于 §4.4「安装期间不得调用插件业务代码」中的业务代码：只允许缓存 backup、更新门禁/原子量等常数时间操作；禁止资源操作、游戏内存读写、跨线程等待与长逻辑。返回非 0 → 宿主将**该资源**按还原释放撤回，并把插件置 `failed`（reason=`resource_ready_failed`）。
+- 拓扑排序输入 = `requires` + `provides`；缺 `requires` → `blocked`；缺 `optional_requires` → 健康标记 `degraded`（生命周期态不变，见 §3.2）。
 
 ### 3.4 能力契约与命令端口
 
@@ -229,11 +237,11 @@ struct PluginDescriptor {
 provider 停用（disable/deactivate）时：
 
 1. capability 置 `revoking`：拒绝新调用，记录在途计数。
-2. `optional_requires` 的消费者收到 `degraded` 事件，状态置 `degraded`。
-3. `requires` 的消费者按**逆拓扑序**（深度最深者先）disable，状态置 `cascade_stopped`。
-4. 帧回调等待在途归零；超过帧数预算 → provider `failed`（隔离），消费者保持 `degraded`。
+2. `optional_requires` 的消费者收到 `degraded` 事件，置健康标记 `degraded=true`（生命周期态不变，§3.2）。
+3. `requires` 的消费者按**逆拓扑序**（深度最深者先）disable（生命周期态 `installed_disabled`，reason=`cascade_stopped`）。
+4. 帧回调等待在途归零；超过帧数预算 → provider `failed`（隔离），消费者保持 `degraded` 标记。
 5. 注销 capability。
-6. provider 恢复后**不自动重启** `cascade_stopped` 消费者，需显式 enable（避免抖动）。
+6. provider 恢复后**不自动重启** `cascade_stopped` 的消费者（保持 `installed_disabled` + reason），需显式 enable（避免抖动）。
 
 **3.4.2 Result（跨边界统一）**
 
@@ -257,6 +265,20 @@ typedef struct QolCommands {
 ```
 
 命令类型为 POD（`contracts/` 定义）；结果写回票据，可选主线程回调。
+
+**3.4.4 能力注册时序**
+
+| 阶段 | `provides` 行为 | 可调用性 |
+|---|---|---|
+| `install`（自身初始化） | 不注册 | 不可用 |
+| `resolving` 校验通过 | **不注册**（尚未启用） | 不可用；必需消费者 `blocked`、可选消费者 `degraded` 标记 |
+| 进入 `enabled` | 注册（`register_capability`，幂等） | 可用（只读查询） |
+| `installed_disabled`（disable 后） | 已按撤销事务注销 | 不可用 |
+| `disable` 事务 | 置 `revoking` → §3.4.1 级联 → 注销 | 撤销期间拒绝新调用；在途归零后不可用 |
+| 重新 `enable` | 重新注册 | 可用 |
+| `deactivate` | 同 disable 撤销路径；终态 `inactive` 不注册 | 不可用 |
+
+消费者拓扑安装与 provider 注册同步进行：注册发生的同帧内，等待中的消费者按拓扑序继续解析。
 
 ### 3.5 配置、日志、状态
 
@@ -356,11 +378,11 @@ struct ResourceDescriptor {
     const char* reason;        // 选择该机制的理由
     const char* gate;          // 开关配置键
     uint32_t    step_budget;   // 安装/还原允许的帧数预算
-    void*       handler;       // 所有者提供的替换入口（入口 hook/patch 的 wrapper）；共享资源为 nullptr
+    void*       handler;       // 所有者提供的替换入口（入口 hook/patch 的 wrapper）；共享资源同样由 owner 提供，消费者经登记回调接入（§4.5）
 };
 ```
 
-`handler` 是声明式安装的执行体：宿主按 `mechanism` 选择机制引擎并把 `handler` 交给它，不解释其语义（§3.3「资源与能力的启停由宿主通用执行」）。
+`handler` 是声明式安装的执行体：宿主按 `mechanism` 选择机制引擎并把 `handler` 交给它，不解释其语义（§3.3「资源与能力的启停由宿主通用执行」）。**共享资源与私有资源一样由 owner 提供 `handler`**——owner 的 wrapper 内部负责按 §4.5 分派消费者回调；消费者只登记回调/数据，不提供可安装执行体。
 
 登记表是**代码事实**，由 `check_resources.py` 汇总并与文档表比对。
 
@@ -413,6 +435,7 @@ game/
 
 规则：
 - 只有 `game/` 允许 include `game/symbols/*` 并出现十六进制地址；其余层**禁止 include symbols 头**（结构性阻止），`check_offsets.py` 做补充文本扫描。
+- `game/write/**` 与 `game/ops/**` 只允许在**主线程命令处理器与受限生命周期回调**中调用（写入口原则，§3.4）；feature 对 `game/` 的其余依赖（read/abi）不受限。
 - 变体未知或必需符号缺失 → 依赖该能力的插件置 `unsupported`，不启动、不半装（§8）。
 - 换版本流程脚本化：提取 so → 符号校验 → 生成变体差异 → 真机验证清单。
 
@@ -434,7 +457,7 @@ game/
 - `LiveApi`：主线程专用，直接读游戏内存并返回 DTO。
 - `ReadModel`：主线程发布到快照，任意线程只读。
 
-HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` 返回 **202 + 票据**，客户端轮询票据或 `GET /api/system/tickets/{id}`；可选同步等待上限（默认 200ms，可配置），超时返回票据。
+HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` 返回 **202 + 票据**，客户端轮询票据或 `GET /api/system/tickets/{id}`。**HTTP 线程一律不做同步等待**——无「短超时同步返回」例外。
 
 ### 6.2 快照规范
 
@@ -455,7 +478,7 @@ HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` �
 
 - `capabilities.register(id, iface, version)` / `require(id, range)`；未注册 `require` 返回空，消费者必须降级并上报 `degraded`。
 - 撤销按 §3.4.1 事务执行。
-- 命令端口见 §3.4.3；票据状态可查询（HTTP 暴露见 §9.1）。
+- 命令端口见 §3.4.3；票据状态可查询；HTTP 端点 `GET /api/system/tickets/{id}` 与首个返回票据的端点**同时交付**（§9.1）。
 
 ### 6.5 日志 / 配置 / 存储 / Result
 
@@ -477,6 +500,8 @@ HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` �
 
 两者互不依赖；共享部分下沉 `domains`/`infra`。
 
+**UI 边界**：`features/<id>/ui/` 拥有该功能的面板实现与交互；`products/qol` 只提供设置页容器、共享控件（`ui_kit`）与面板注册表，不实现功能面板。
+
 ### 7.2 host 装配与 JNI
 
 - JNI 薄层按插件分组命名：`native<Feature><Action>`；绑定元数据来自 `PluginDescriptor.jni`（`contracts/` 定义 `JniBinding`）。
@@ -495,7 +520,7 @@ com.inotia4.qol/
   services/   服务契约与实现（可多通道复用）
 ```
 
-规则：controller 只路由 + 参数校验；JNI 只在 `host`/`platform`/feature bridge 出现；feature 之间通过服务契约或配置事件交互，不互相 import。
+规则：controller 只路由 + 参数校验；JNI 只在 `host`/`platform`/feature bridge 出现；feature 之间通过服务契约或配置事件交互，不互相 import；feature 界面实现位于 `features/<id>/ui/`，容器与共享控件位于 `products/qol`。
 
 ---
 
@@ -505,16 +530,18 @@ com.inotia4.qol/
 |---|---|---|
 | variant | 原版 / 大修 / monster / unknown | `unknown` → 依赖具体符号的插件 `unsupported` |
 | plugin | `supportedVariants` 声明 | 不命中 → `blocked`（可配置强制忽略，风险自担） |
-| capability | major 相等 + minor 满足 | 不满足 → `blocked`；optional 缺失 → `degraded` |
+| capability | major 相等 + minor 满足 | 不满足 → `blocked`；optional 缺失 → 健康标记 `degraded` |
 | resource 声明 | 符号存在 + 变体能力位 + 原字节校验 | 任一失败 → 按 `requirement` 判定（下表） |
 
 **资源失败 → 插件状态映射**
 
-| 资源 `requirement` | 安装失败 | 运行期消费者错误（可恢复） | 回滚失败 |
+| 资源 `requirement` | 安装失败 | 运行期消费者错误（可恢复） | 回滚 / 还原失败 |
 |---|---|---|---|
-| `kRequired` + `kFailClosed` | `failed`（回滚全部） | 资源降级透传，插件 `degraded` | `tombstone` + `failed`（隔离） |
-| `kRequired` + `kFailSoft` | `degraded`（功能受限，记录） | 记录并继续，插件保持 `enabled` | `tombstone` + `failed`（隔离） |
-| `kOptional` + 任一 | `degraded`（记录，不影响其它） | 记录并继续 | `tombstone` + `degraded` |
+| `kRequired` + `kFailClosed` | `failed`（回滚全部） | 资源降级透传，插件置健康标记 `degraded` | `tombstone` + `failed`（隔离） |
+| `kRequired` + `kFailSoft` | `degraded` 标记（功能受限，记录） | 记录并继续，插件保持 `enabled` | `tombstone` + `failed`（隔离） |
+| `kOptional` + 任一 | `degraded` 标记（记录，不影响其它） | 记录并继续 | `tombstone` + `failed`（隔离） |
+
+**物理还原失败不按 `required/optional` 区分**：unhook 失败或 `resumable=false` 一律 `tombstone` + `failed` + 隔离（§4.2）。`requirement` 只影响安装失败与运行期可恢复错误的处置。
 
 ---
 
@@ -537,8 +564,9 @@ P3 落地：
 |---|---|---|
 | `GET /api/system/resources` | `{"ok":true,"resources":[{id, owner, mechanism, policy, state, in_flight, isolated}]}` | 资源登记表导出；`state` = free/disabled/live/tombstone |
 | `POST /api/op/features/lifecycle` | `{"ok":true,"ticket":N}` | `op` 门控；body `{id, action: deactivate\|activate}`，经命令端口投递、主线程帧步进执行；`enable/disable` 仍由配置门禁（`/api/config/set`）承担，保持单一写者；查询走 `features` 状态 |
+| `GET /api/system/tickets/{id}` | `{"ok":true,"ticket":N,"state":"pending\|done\|failed\|cancelled"}` | 命令票据状态（P3 起，与首个返回票据的端点同时交付） |
 
-`GET /api/system/tickets/{id}` 随首个异步 HTTP 命令（P4）落地。
+`GET /api/system/tickets/{id}` 已随 P3 生命周期端点落地（见上表）。
 
 `safeMode` 移到 P6（外部插件轨）：P1–P5 不存在可禁用的外部插件，恒定 `false` 无诊断价值。
 
@@ -600,7 +628,7 @@ P3 落地：
 
 | 阶段 | 内容 | 出口验收 | 依赖 |
 |---|---|---|---|
-| P0 | 签署本设计 + **校验脚本族落地 + 基线棘轮冻结**（check_layers / check_offsets / check_resources / check_jni） | 评审通过无阻断项；脚本可运行；基线快照已冻结，新增违规即失败 | — |
+| P0 | **校验脚本族落地 + 基线棘轮冻结**（check_layers / check_offsets / check_resources / check_jni）；开工基线签署见下方签署规则 | 第二轮审阅通过无阻断项（设计 v0.3）；脚本可运行；基线快照已冻结，新增违规即失败 | — |
 | P1 | 最小骨架：`contracts/` + `infra/`（命令队列、快照、事件、能力、命令端口）+ `game/` 最小面 + **最小诊断接口** | 骨架可编译、host 单测通过、无行为改动、`/api/system/features` 最小字段可用 | P0 |
 | P2 | **纵向样板插件**（覆盖入口 hook + 配置 + 状态 + 命令）：只验 `install → enabled` 路径 | 样板真机验收卡通过；状态 API 可见 | P1 |
 | P3 | 最小资源事务（异步步进、回滚、在途归零、帧预算）+ `disable/deactivate/tombstone` 全路径 | 故障注入与并发测试通过；接口冻结（内部） | P2 |
@@ -609,6 +637,8 @@ P3 落地：
 | P6（可选） | 外部插件轨（未冻结草案）：容器校验、导入、`dlopen`、白名单、安全模式、更新/回滚语义 | 导入/拒绝/禁用/崩溃兜底真机通过 | P5 |
 
 单插件迁移动作：建目录与元数据 → 资源改为声明 → 依赖改能力/命令 → 开关与状态接入 → 单测 + 验收卡。
+
+**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P3 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.5**（第三轮审阅修复版）。
 
 冻结与兼容：JNI 导出在重构期保持名称与签名稳定；新增按插件分组命名，P5 一次性切换。数据格式（sidecar / `.qol_save`）向前兼容，必要时升版本并写迁移。
 
@@ -639,19 +669,21 @@ P3 落地：
 - 不追求 feature 之间零依赖（能力/命令/事件已足够）。
 - 不引入逐功能接口样板：统一能力注册表 + 资源登记。
 
-### 12.3 未决项（实现前必须闭合）
+### 12.3 未决项（逐项归属与结论）
 
-| # | 未决项 | 归属 |
-|---|---|---|
-| U1 | 非功能指标阈值回填（§10） | P1/P2 真机测量 |
-| U2 | 共享资源清单与所有者划分 | P2/P3 |
-| U3 | 外部插件签名校验可用性（`signingInfo` 空回退） | P6 真机探针 |
-| U4 | 快照类型清单与发布方式 | P1 |
-| U5 | 命令取消语义清单 | P2/P3 |
-| U6 | `unhook` 后同地址重新挂载的安全性 | P3 真机探针 |
-| U7 | `trusted-write` 高权限档的证书策略 | P6 |
-| U8 | `tombstone` 回收策略与人工清除流程 | P3 |
-| U9 | 需要 `atomic_before` 两阶段分派的资源清单 | P3/P4 |
+| # | 未决项 | 归属 | 状态 |
+|---|---|---|---|
+| U1 | 非功能指标阈值回填（§10） | P4 真机测量 | ⬜ 开放（不阻塞 P4 开工） |
+| U2 | 共享资源清单与所有者划分 | P4 A4（`hooks/dispatch` 落地时产出） | ⬜ 开放 |
+| U3 | 外部插件签名校验可用性（`signingInfo` 空回退） | P6 真机探针 | ⬜ 开放 |
+| U4 | 快照类型清单与发布方式 | P4/P5（随首个 `domains`/`ReadModel`） | ⬜ 开放 |
+| U5 | 命令取消语义清单 | P4（随首个可取消命令） | ⬜ 开放 |
+| U6 | `unhook` 后同地址重新挂载的安全性 | — | ✅ 已闭合（证据：`verification.md` VM-P3-01，同址二次挂载 rc=0、行为恢复） |
+| U7 | `trusted-write` 高权限档的证书策略 | P6 | ⬜ 开放 |
+| U8 | `tombstone` 回收策略与人工清除流程 | P5（随隔离语义收口） | ⬜ 开放 |
+| U9 | 需要 `atomic_before` 两阶段分派的资源清单 | P4/P5 | ⬜ 开放 |
+
+说明：**P0–P3 的出口条件不依赖上述开放项**（「P0–P3 完成」不等于设计书已签署，见 §11 签署规则）；开放项必须在对应阶段开工前闭合，否则该阶段不得宣称完成。
 
 ---
 
