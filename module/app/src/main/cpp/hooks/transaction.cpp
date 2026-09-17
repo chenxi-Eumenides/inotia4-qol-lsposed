@@ -1,7 +1,7 @@
 #include "hooks/transaction.h"
 
 // 资源事务引擎实现（见 hooks/transaction.h 的接口契约与 ARCHITECTURE.md §4.4）。
-// 固定容量静态数组：登记表上限 64 条，事务资源数不会超过它；终态记录保留最近 16 个。
+// 固定容量静态数组：登记表上限 128 条，事务资源数不会超过它；终态记录保留最近 16 个。
 
 #include <cstring>
 
@@ -11,7 +11,7 @@ namespace qol::hooks {
 namespace {
 
 // 登记表容量（hooks/registry.cpp 同值）；事务资源列表按此设置上限。
-constexpr uint32_t kMaxResources = 64;
+constexpr uint32_t kMaxResources = 128;
 // 终态事务保留条数：环形覆盖最旧，淘汰后查询返回 false。
 constexpr uint32_t kMaxTerminal = 16;
 // 并发未终态事务槽位数（每插件至多一个）。

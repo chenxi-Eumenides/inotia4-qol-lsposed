@@ -24,6 +24,16 @@ static int g_fail = 0;
 // patches.cpp 依赖的游戏基址；测试可控（game/access/patches.cpp 取 g_base + VMA + 偏移）。
 uintptr_t g_base = 0;
 
+// kBlRedirectToSymbol 站点由 patches.cpp 经 fn_resolve 解析目标函数；本测试提供确定性
+// stub：默认恒等返回 vma（目标地址 = g_base + vma）。bias/misalign 用于覆盖目标越界
+// 与未对齐时的 fail-closed 分支。
+static uintptr_t g_fn_resolve_bias = 0;
+static uintptr_t g_fn_resolve_misalign = 0;
+
+uintptr_t fn_resolve(const char* /*macro_name*/, uintptr_t vma) {
+    return vma + g_fn_resolve_bias + g_fn_resolve_misalign;
+}
+
 using qol::contracts::ResourceClaim;
 using qol::contracts::ResourceFailure;
 using qol::contracts::ResourceMechanism;
@@ -34,6 +44,7 @@ using qol::patch::claim_point;
 using qol::patch::claimed_count;
 using qol::patch::claims_reset_for_test;
 using qol::patch::install_claim;
+using qol::patch::install_word_at;
 using qol::patch::Outcome;
 using qol::patch::point_owner;
 using qol::patch::Primitives;
@@ -104,6 +115,8 @@ void reset_all() {
     claims_reset_for_test();
     g_prims = FakePrims{};
     g_base = kBase;
+    g_fn_resolve_bias = 0;
+    g_fn_resolve_misalign = 0;
     use_fake_primitives();
 }
 
@@ -231,6 +244,90 @@ void test_install_word_success() {
     CHECK(std::strcmp(point_owner(addr), "patch:b") == 0);
 }
 
+void test_bl_redirect_to_symbol_success() {
+    reset_all();
+    PatchSite site{};
+    CHECK(qol::game::patch_site("P_UISTORE_SELL_ITEM_D26B8_CALL", &site));
+    CHECK(site.kind == qol::game::PatchKind::kBlRedirectToSymbol);
+    CHECK(site.redirect_target == g_base + F_GET_CUMULATE_COUNT_VMA);
+    const uintptr_t addr = g_base + F_UISTORE_SELL_ITEM_VMA + 0xd4;
+    CHECK(site.addr == addr);
+    CHECK(site.expected_word == 0x9401b799u);
+
+    const ResourceClaim claim =
+        make_patch_claim("patch:redir", "P_UISTORE_SELL_ITEM_D26B8_CALL", nullptr);
+    const Outcome outcome = install_claim(claim, addr);
+    CHECK(outcome.ok == 0);
+    CHECK(g_prims.install_bl_calls == 1);
+    CHECK(g_prims.install_word_calls == 0);
+    CHECK(g_prims.last_addr == addr);
+    CHECK(g_prims.last_expected == 0x9401b799u);
+    CHECK(g_prims.last_wrapper == reinterpret_cast<void*>(g_base + F_GET_CUMULATE_COUNT_VMA));
+    CHECK(std::strcmp(point_owner(addr), "patch:redir") == 0);
+
+    CHECK(release_claim(claim, addr).ok == 0);
+    CHECK(g_prims.revert_bl_calls == 1);
+    CHECK(point_owner(addr) == nullptr);
+}
+
+void test_bl_redirect_to_symbol_mismatch() {
+    reset_all();
+    // 符号型 BL 无透传执行体：带 handler 必须拒绝。
+    const ResourceClaim with_handler =
+        make_patch_claim("patch:redir", "P_UISTORE_SELL_ITEM_D26B8_CALL", &g_dummy_handler);
+    CHECK(error_is(install_claim(with_handler, g_base + F_UISTORE_SELL_ITEM_VMA + 0xd4),
+                   "kind mismatch"));
+    CHECK(g_prims.install_bl_calls == 0);
+}
+
+void test_bl_redirect_to_symbol_range_and_alignment() {
+    const ResourceClaim claim =
+        make_patch_claim("patch:redir", "P_UISTORE_SELL_ITEM_D26B8_CALL", nullptr);
+    const uintptr_t addr = g_base + F_UISTORE_SELL_ITEM_VMA + 0xd4;
+
+    // 越界：目标偏出 ±128MB（不落 thunk，直接 fail-closed）。
+    reset_all();
+    g_fn_resolve_bias = 0x10000000u;
+    CHECK(error_is(install_claim(claim, addr), "branch target out of BL range"));
+    CHECK(g_prims.install_bl_calls == 0);
+    CHECK(point_owner(addr) == nullptr);
+
+    // 未对齐：目标非 4 字节对齐。
+    reset_all();
+    g_fn_resolve_misalign = 2;
+    CHECK(error_is(install_claim(claim, addr), "branch target out of BL range"));
+    CHECK(g_prims.install_bl_calls == 0);
+    CHECK(point_owner(addr) == nullptr);
+}
+
+void test_install_word_at() {
+    reset_all();
+    const uintptr_t addr = 0x12345678;
+    CHECK(install_word_at("patch:scan", addr, 0x7101891Fu, 0x7101FD1Fu).ok == 0);
+    CHECK(g_prims.install_word_calls == 1);
+    CHECK(g_prims.last_addr == addr);
+    CHECK(g_prims.last_expected == 0x7101891Fu);
+    CHECK(g_prims.last_new_word == 0x7101FD1Fu);
+    CHECK(std::strcmp(point_owner(addr), "patch:scan") == 0);
+
+    // 同地址不同 owner → 占用冲突，不重复改写。
+    CHECK(error_is(install_word_at("patch:other", addr, 0x7101891Fu, 0x7101FD1Fu),
+                   "point already claimed"));
+    CHECK(g_prims.install_word_calls == 1);
+
+    // 原语拒绝：撤销占用，不留半装。
+    reset_all();
+    g_prims.install_word_ok = false;
+    CHECK(error_is(install_word_at("patch:scan", addr, 0x7101891Fu, 0x7101FD1Fu),
+                   "primitive rejected"));
+    CHECK(point_owner(addr) == nullptr);
+
+    // 空 claim_id / addr=0 拒绝。
+    reset_all();
+    CHECK(error_is(install_word_at(nullptr, addr, 0, 0), "site not found"));
+    CHECK(error_is(install_word_at("patch:scan", 0, 0, 0), "site not found"));
+}
+
 void test_kind_mismatch() {
     reset_all();
     // BL 点缺 handler。
@@ -347,6 +444,10 @@ int main() {
     test_claims_capacity();
     test_install_bl_success();
     test_install_word_success();
+    test_bl_redirect_to_symbol_success();
+    test_bl_redirect_to_symbol_mismatch();
+    test_bl_redirect_to_symbol_range_and_alignment();
+    test_install_word_at();
     test_kind_mismatch();
     test_site_and_address_errors();
     test_point_already_claimed();

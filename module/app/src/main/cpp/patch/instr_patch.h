@@ -37,4 +37,10 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
 // 还原失败不释放占用（保留 owner），由引擎按 tombstone + 隔离语义处理。
 Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr);
 
+// 扫描式例外：按运行期地址直接占用 + 字替换，不要求站点预先登记。仅用于按特征字节
+// 定位的兼容 patch（monster 物品数量上界；地址无法在 game/access/patches 静态登记）。
+// 与 install_claim 共用同一占用表与注入原语，是「扫描命中」而非「声明式站点」。
+Outcome install_word_at(const char* claim_id, uintptr_t addr, uint32_t expected_word,
+                        uint32_t new_word);
+
 }  // namespace qol::patch

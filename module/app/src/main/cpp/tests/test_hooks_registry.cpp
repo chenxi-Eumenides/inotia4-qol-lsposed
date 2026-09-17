@@ -154,17 +154,17 @@ void test_state_transitions_and_count() {
 
 void test_capacity() {
     registry_reset_for_test();
-    static char ids[64][16];
-    for (int i = 0; i < 64; ++i) {
+    static char ids[128][16];
+    for (int i = 0; i < 128; ++i) {
         std::snprintf(ids[i], sizeof(ids[i]), "hook:%d", i);
         CHECK(register_claim(make_claim(ids[i], "owner")));
     }
-    CHECK(claim_count() == 64);
+    CHECK(claim_count() == 128);
     CHECK(!register_claim(make_claim("hook:overflow", "owner")));
-    CHECK(claim_count() == 64);
+    CHECK(claim_count() == 128);
     // 满容时同 id 幂等仍成立，不误判为冲突。
     CHECK(register_claim(make_claim(ids[0], "owner")));
-    CHECK(claim_count() == 64);
+    CHECK(claim_count() == 128);
 }
 
 void test_reset() {

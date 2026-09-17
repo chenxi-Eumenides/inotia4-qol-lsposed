@@ -8,9 +8,17 @@ namespace {
 
 Primitives g_primitives{};
 bool g_primitives_set = false;
+// BL imm26 可达范围（±128MB）；本层在安装前收口，避免落到 core/native 的 thunk 路径。
+constexpr int64_t kBlRange = 0x08000000LL;
 
 Outcome failure(const char* error) {
     return Outcome{1, error};
+}
+
+// 同 .so 内 BL 直编可达性：4 字节对齐 + imm26 范围。不足即 fail-closed（不分配 thunk）。
+bool bl_target_encodable(uintptr_t call_addr, uintptr_t target) {
+    const int64_t delta = static_cast<int64_t>(target) - static_cast<int64_t>(call_addr);
+    return (delta & 0x3) == 0 && delta > -kBlRange && delta < kBlRange;
 }
 
 // 站点解析 + 地址一致性 + kind/handler 匹配；任一不满足写出静态错误文本。
@@ -33,9 +41,11 @@ bool resolve_site(const contracts::ResourceClaim& claim, uintptr_t site_addr,
         *error = failure("site address mismatch");
         return false;
     }
-    // BL 重定向必须有 wrapper；字替换没有可透传执行体，handler 必须为空。
-    const bool bl = site.kind == qol::game::PatchKind::kBlRedirect;
-    if ((bl && claim.handler == nullptr) || (!bl && claim.handler != nullptr)) {
+    // 只有 handler 型 BL 需要 wrapper；字替换与符号型 BL 没有可透传执行体，handler 必须为空。
+    const bool needs_handler = site.kind == qol::game::PatchKind::kBlRedirect;
+    const bool handler_ok =
+        needs_handler ? (claim.handler != nullptr) : (claim.handler == nullptr);
+    if (!handler_ok) {
         *error = failure("kind mismatch");
         return false;
     }
@@ -56,6 +66,11 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (!resolve_site(claim, site_addr, &site, &error)) {
         return error;
     }
+    // 符号型 BL 目标可达性预检：越界/未对齐 fail-closed，不落到 thunk 分配。
+    if (site.kind == qol::game::PatchKind::kBlRedirectToSymbol &&
+        !bl_target_encodable(site.addr, site.redirect_target)) {
+        return failure("branch target out of BL range");
+    }
     if (!claim_point(site.addr, claim.id)) {
         return failure("point already claimed");
     }
@@ -64,6 +79,10 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (site.kind == qol::game::PatchKind::kBlRedirect) {
         applied = g_primitives.install_bl != nullptr &&
                   g_primitives.install_bl(site.addr, site.expected_word, claim.handler);
+    } else if (site.kind == qol::game::PatchKind::kBlRedirectToSymbol) {
+        applied = g_primitives.install_bl != nullptr &&
+                  g_primitives.install_bl(site.addr, site.expected_word,
+                                          reinterpret_cast<void*>(site.redirect_target));
     } else {
         applied = g_primitives.install_word != nullptr &&
                   g_primitives.install_word(site.addr, site.expected_word, site.replacement_word);
@@ -71,6 +90,25 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (!applied) {
         // 未生效即撤销占用：否则失败安装会把地址锁死给新所有者。
         release_point(site.addr);
+        return failure("primitive rejected");
+    }
+    return Outcome{0, nullptr};
+}
+
+Outcome install_word_at(const char* claim_id, uintptr_t addr, uint32_t expected_word,
+                        uint32_t new_word) {
+    if (!g_primitives_set) {
+        return failure("primitives not set");
+    }
+    if (claim_id == nullptr || addr == 0) {
+        return failure("site not found");
+    }
+    if (!claim_point(addr, claim_id)) {
+        return failure("point already claimed");
+    }
+    if (g_primitives.install_word == nullptr ||
+        !g_primitives.install_word(addr, expected_word, new_word)) {
+        release_point(addr);
         return failure("primitive rejected");
     }
     return Outcome{0, nullptr};
@@ -85,12 +123,12 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     // §4.2 物理归还：先还原原字，成功后才释放占用。还原失败时保留占用——否则点可被
     // 重新声明，而旧指令字可能仍在（tombstone 语义丢失），由引擎按 tombstone + 隔离处理。
     bool applied = false;
-    if (site.kind == qol::game::PatchKind::kBlRedirect) {
-        applied = g_primitives.revert_bl != nullptr &&
-                  g_primitives.revert_bl(site.addr, site.expected_word);
-    } else {
+    if (site.kind == qol::game::PatchKind::kWordReplace) {
         applied = g_primitives.revert_word != nullptr &&
                   g_primitives.revert_word(site.addr, site.expected_word);
+    } else {
+        applied = g_primitives.revert_bl != nullptr &&
+                  g_primitives.revert_bl(site.addr, site.expected_word);
     }
     if (!applied) {
         return failure("primitive rejected");
