@@ -182,7 +182,22 @@ target_include_directories(module_text_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(module_text_tests PRIVATE cxx_std_17)
+# 显式锚定 C++17：features/text_layer/feature.h 经 contracts/plugin.h 使用字段名 requires。
+set_target_properties(module_text_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME module_text_tests COMMAND module_text_tests)
+
+# P4 阶段 A4：共享资源分派 host 测试（§4.5；末尾追加）
+add_executable(hooks_dispatch_tests
+    test_hooks_dispatch.cpp
+    ${CPP_DIR}/hooks/dispatch.cpp
+)
+target_include_directories(hooks_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(hooks_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(hooks_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(hooks_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME hooks_dispatch_tests COMMAND hooks_dispatch_tests)
 
 # 简单模式纯逻辑 host 测试（阵营矩阵 / 倍率 / 边界钳制，末尾追加）
 add_executable(simple_mode_rules_tests

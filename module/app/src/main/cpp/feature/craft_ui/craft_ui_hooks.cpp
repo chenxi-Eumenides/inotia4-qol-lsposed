@@ -6,7 +6,7 @@
 #include "feature/custom_recipe/custom_recipe_catalog.h"
 #include "feature/custom_recipe/custom_recipe_table.h"
 #include "feature/patch/native_inventory_hook.h"
-#include "feature/ui/module_text.h"
+#include "infra/text_scope.h"
 #include "game_access.h"
 #include "game_symbols.h"
 
@@ -374,17 +374,17 @@ void item_draw_porting_execute(void* item, int32_t x, int32_t y, int32_t type, i
 //   ③ 宝石强化页页签 UIMix_ButtonMenuListDraw  → **必须保持原文「宝石强化」**
 // ③ 在 ② 内部被嵌套调用，靠 TextScopeGuard 的保存/恢复语义把作用域压成 kUimixPageTab。
 void button_recipe_draw_execute(void* ctrl) {
-    module_text::TextScopeGuard scope(module_text::Scope::kUimixRecipeButton);
+    qol::infra::TextScopeGuard scope(qol::infra::TextScope::kUimixRecipeButton);
     if (g_backup_button_recipe_draw != nullptr) g_backup_button_recipe_draw(ctrl);
 }
 
 void uimix_draw_execute() {
-    module_text::TextScopeGuard scope(module_text::Scope::kUimixPanelTitle);
+    qol::infra::TextScopeGuard scope(qol::infra::TextScope::kUimixPanelTitle);
     if (g_backup_uimix_draw != nullptr) g_backup_uimix_draw();
 }
 
 void menu_list_draw_execute(void* ctrl) {
-    module_text::TextScopeGuard scope(module_text::Scope::kUimixPageTab);
+    qol::infra::TextScopeGuard scope(qol::infra::TextScope::kUimixPageTab);
     if (g_backup_menu_list_draw != nullptr) g_backup_menu_list_draw(ctrl);
 }
 

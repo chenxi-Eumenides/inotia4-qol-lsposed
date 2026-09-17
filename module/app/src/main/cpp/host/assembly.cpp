@@ -9,6 +9,7 @@
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
 #include "features/simple_mode/plugin.h"
+#include "features/text_layer/plugin.h"
 #include "game/access/patches.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
@@ -143,6 +144,10 @@ bool assembly_init() {
     }
     if (!register_plugin(features::attribute_range::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_range registration failed");
+        return false;
+    }
+    if (!register_plugin(features::text_layer::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: text_layer registration failed");
         return false;
     }
 

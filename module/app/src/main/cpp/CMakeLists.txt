@@ -144,7 +144,9 @@ target_sources(gamebridge PRIVATE
 # 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     feature/ui/game_ui_charinfo_zh.cpp
-    feature/ui/module_text.cpp
+    hooks/dispatch.cpp
+    features/text_layer/feature.cpp
+    features/text_layer/plugin.cpp
 )
 
 # 合成器界面能力层（craft_ui）：UIMix 控件读写与界面动作的唯一实现处。

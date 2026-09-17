@@ -22,6 +22,8 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_MATH_GET_RANDOM_VMA", F_MATH_GET_RANDOM_VMA},
     {"F_UIDESC_ADD_OPTION_VMA", F_UIDESC_ADD_OPTION_VMA},
     {"F_UIDESC_MAKE_ITEM_VMA", F_UIDESC_MAKE_ITEM_VMA},
+    // 文本层：全游戏唯一文本读取热点（共享资源，owner=text_layer）。
+    {"F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA},
 };
 
 // 解析可安装 hook 的入口地址。

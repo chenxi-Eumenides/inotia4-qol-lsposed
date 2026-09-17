@@ -12,6 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.8 | P4-A4 实施校准：分派权限以注册期 `ConsumerKind` 表达（类型化句柄为别名）；**新增阶段参数**（before/after）与「每个回调每次分派只调用一次」规则；Intercept 短路后 after 仅 Observe 生效 |
 | v0.3.7 | P4-A1 实施校准：`patch/` 以**注入原语**实现（`core/native/call_patch` 的物理迁移推迟 P5，避免过渡期 include 越层）；非入口机制经 host 注入分派（`TxDeps.install_other/release_other`），保持 `hooks → patch` 禁止；`kCallPatch` 禁用即物理还原 + 单指令门禁翻转同步执行写入 §4.2 规则 6 |
 | v0.3.6 | 闭合第四轮审阅：`on_resource_ready` 失败改为**全量逆序回滚**（与 §3.2 语义 5 及实现一致；回滚失败 → tombstone+隔离）；删除写入口的「生命周期回调」例外（`game/write\|ops` 仅主线程命令处理器）；内置插件变体约束改由**必需资源的符号/能力位条件**表达（删除 §8 的 `supportedVariants` 行）；§3.2 补 `resolving → failed` 迁移边、`invalid` 移除「契约 major 不兼容」 |
 | v0.3.5 | 闭合第三轮审阅：`degraded` 定为正交健康标记、`cascade_stopped` 降为原因码（生命周期收敛为 10 态）；共享资源同样由 owner 提供 `handler`；`on_resource_ready` 定为受限生命周期回调并带失败回滚语义；物理还原失败统一 `failed + isolated`；删除 HTTP 同步等待例外；ticket 查询随首个返回票据的端点落地；feature 对 `game/write\|ops` 的调用限定主线程命令路径；补 capability 注册时序；明确 feature UI 与 products/qol 边界；首页版本/签署状态与未决项归属校准 |
@@ -407,10 +408,10 @@ struct ResourceDescriptor {
 | 项 | 规定 |
 |---|---|
 | 顺序产生 | 依赖拓扑序 → 插件 id 字典序 → 注册调用序；启动期确定，不提供运行期重排 |
-| 权限类型（类型系统强制） | `ObserveHandle`（只读，返回副本）/ `ModifyHandle`（可改参数与返回值）/ `InterceptHandle`（唯一，可短路）；不使用权限枚举 |
+| 权限类型 | 注册时声明 `ConsumerKind`：`Observe`（只读，返回值忽略）/ `Modify`（可改参数或返回值）/ `Intercept`（唯一，可短路）；宿主在注册期强制（Intercept 唯一性、Observe 返回值忽略），并以类型化句柄别名（`ObserveHandle`/`ModifyHandle`/`InterceptHandle` = 同一 `DispatchId`）表达权限 |
 | 短路唯一性 | **同一资源最多一个 `InterceptHandle`**；第二个申请者在安装期失败（`resource already has interceptor`） |
-| 阶段 | `before`（顺序执行，参数修改累积）→ `original`（若未被短路）→ `after`（**逆序**执行，返回值覆盖，逆序对称） |
-| 短路 | 仅 Intercept 可短路；短路后 `after` 仍执行（可观察，不可改） |
+| 阶段 | 消费者注册时声明阶段：`before`（注册顺序，输入/参数修改累积）→ `original`（若未被短路）→ `after`（**逆序**，返回值覆盖）。**每个回调每次分派只调用一次** |
+| 短路 | 仅 Intercept 可短路；短路后 `after` 仍执行但仅 Observe 生效（可观察，不可改） |
 | 原子 before（可选） | 资源可声明 `atomic_before`：先跑全体「校验阶段」，全部通过后再跑「提交阶段」；否则参数修改不回滚 |
 | 失败语义 | 消费者返回可恢复错误 → 记录（fail-soft 继续 / fail-closed 资源降级透传）；崩溃/非法访问/ABI 破坏**不可隔离**（R6） |
 | 幂等与重入 | 回调内重入同资源由 `thread_local` 门禁拒绝 |

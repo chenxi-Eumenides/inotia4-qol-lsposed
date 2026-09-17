@@ -1,6 +1,6 @@
 #include "game_ui_charinfo_zh.h"
 
-#include "feature/ui/module_text.h"
+#include "infra/text_scope.h"
 
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
@@ -20,7 +20,7 @@ std::atomic<bool> g_attempted{false};
 // 面板每帧绘制入口：进出各写一次作用域（守卫析构时恢复上一层），把整个绘制窗口标记为
 // kCharacterPanel。文案与 id 表由 module_text 持有 —— 这里只负责「画的是哪个窗口」。
 void scene_draw_charinfo_wrapper() {
-    module_text::TextScopeGuard scope(module_text::Scope::kCharacterPanel);
+    qol::infra::TextScopeGuard scope(qol::infra::TextScope::kCharacterPanel);
     if (g_backup_scene_draw_charinfo != nullptr) g_backup_scene_draw_charinfo();
 }
 

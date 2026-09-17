@@ -9,7 +9,6 @@
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
-#include "feature/ui/module_text.h"
 #include "feature/special_equip/special_equip.h"
 #include "feature/world_teleport/world_teleport.h"
 #include "host/assembly.h"
@@ -49,9 +48,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         inventory_native_hook_install_if_ready();
         // 属性显示范围已迁移为 attribute_range 插件（assembly 注册，宿主张成资源与能力）。
-        // 模块自定义文本层：独占 MEMORYTEXT_GetText 热点 hook（全库唯一 owner），必须在
-        // 任何「标记文本作用域」的功能之前安装 —— 否则消费者标了窗口也没有替换者。
-        module_text::module_text_install_if_ready();
+        // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力，assembly 注册）；
+        // 角色面板绘制窗口的作用域标记仍在本处安装（绘制侧功能，不迁移）。
         charinfo_zh_install_if_ready();  // 角色面板：把绘制窗口标记为 kCharacterPanel 作用域
         save_backup_slot_delete_hook_install_if_ready();
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +

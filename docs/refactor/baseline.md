@@ -20,7 +20,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 9 |
+| `contracts` | 10 |
 | `domains/attribute_range` | 2 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
@@ -43,14 +43,15 @@
 | `features/save_backup` | 4 |
 | `features/simple_mode` | 6 |
 | `features/special_equip` | 2 |
-| `features/ui` | 33 |
+| `features/text_layer` | 4 |
+| `features/ui` | 31 |
 | `features/world_teleport` | 4 |
 | `game` | 31 |
-| `hooks` | 6 |
+| `hooks` | 8 |
 | `host` | 25 |
-| `infra` | 40 |
+| `infra` | 41 |
 | `patch` | 7 |
-| **合计** | **291** |
+| **合计** | **297** |
 
 ### 1.2 迁移期映射摘要
 
@@ -131,12 +132,12 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 139 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 141 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 26 |
-| `features/ui` | `game` | 24 |
+| `features/ui` | `game` | 22 |
 | `features/ui` | `infra` | 12 |
 | `features/patch` | `game` | 11 |
 | `features/extension_bag` | `game` | 10 |
@@ -147,9 +148,9 @@
 | `domains/world` | `game` | 7 |
 | `features/extension_bag` | `contracts` | 7 |
 | `host` | `contracts` | 7 |
-| `host` | `features/ui` | 7 |
 | `features/autosell` | `infra` | 6 |
 | `features/ui` | `patch` | 6 |
+| `host` | `features/autosell` | 6 |
 
 ### 2.2 include 环
 
@@ -232,19 +233,18 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 30 个 / 文件 19 个 / 去重符号 10 个 / 无法归属 16 个。
+扫描合计：安装点 29 个 / 文件 18 个 / 去重符号 9 个 / 无法归属 16 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 7 | 10 | 5 |
+| entry hook | 6 | 9 | 4 |
 | call patch | 4 | 9 | 6 |
 | ptr slot | 9 | 11 | 2 |
 
-去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
+去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_INVEN_FIND_SAVE_SLOT_VMA` → `feature/patch/game_patch_core.inc`
-- `F_MEMORYTEXT_GET_TEXT_VMA` → `feature/ui/module_text.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
 - `F_SCENE_DRAW_EQUIP_VMA` → `feature/ui/game_ui_autosell.cpp`
@@ -265,7 +265,7 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 9 个）与已迁移 `features/*`（4 个）共 13 个域。
+旧 `feature/*`（待迁移 9 个）与已迁移 `features/*`（5 个）共 14 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，9）
 
@@ -278,10 +278,10 @@
 | `patch` | `features/patch` | 12 |
 | `save_backup` | `features/save_backup` | 4 |
 | `special_equip` | `features/special_equip` | 2 |
-| `ui` | `features/ui` | 33 |
+| `ui` | `features/ui` | 31 |
 | `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（4）
+### 6.2 已迁移 `features/*`（5）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -289,6 +289,7 @@
 | `push_all` | `features/push_all` | 6 |
 | `quest` | `features/quest` | 4 |
 | `simple_mode` | `features/simple_mode` | 6 |
+| `text_layer` | `features/text_layer` | 4 |
 
 ## 校验入口
 
