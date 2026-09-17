@@ -132,6 +132,8 @@ struct PluginDescriptor {
     void (*on_enabled)(PluginContext&);
     void (*on_disabled)(PluginContext&);
     void (*fill_status)(PluginStatusOut&);
+    // 可选；资源安装成功后由宿主通知，backup 为该资源对应的原函数入口（§3.3「backup 交还」）。
+    void (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup);
 };
 
 }  // namespace qol::contracts
