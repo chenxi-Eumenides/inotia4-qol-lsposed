@@ -41,6 +41,10 @@ HostDeps g_install_deps{};
 
 // 失败文本静态存储：infra/status 只保存指针，生命周期须 ≥ 进程。
 char g_error_text[kMaxPlugins][kMaxErrorText];
+// 门禁应用失败（fail-soft）的 degraded 记录：仅记录由本路径置位的 degraded，避免清除
+// optional_requires 级联设置的 degraded；error 文本同为静态存储。
+char g_gate_error_text[kMaxPlugins][kMaxErrorText];
+bool g_gate_degraded[kMaxPlugins];
 
 bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.id == nullptr || plugin.id[0] == '\0') return false;
@@ -175,14 +179,23 @@ void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const
 
 // 门禁监督辅助：同步某插件带 gate 资源的登记状态，并汇总目标态。
 // 入口 hook 只改写 disabled/live 两态：free（未安装）与 tombstone（保留占用）不得被监督改写。
-// 非入口机制（call patch）不支持空转（§4.2 规则 6）：门禁变化直接物理安装/还原。
+// 非入口机制（call patch / ownership）不支持空转（§4.2 规则 6）：门禁变化直接物理安装/还原。
+// 安装失败按 §8 逐资源策略处置（与 install_all 一致）：
+//   · kRequired×kFailClosed → tombstone + isolated + mechanism_failed（不可重试，插件 failed）；
+//   · 其余（kOptional×任一 / kRequired×kFailSoft）→ 保持 free 供下一逻辑帧重试，
+//     经 out_degraded/out_error_* 记录原因（degraded，不改生命周期态）。
+// 释放/还原失败仍是不可重试形态 → tombstone + isolated（§4.2）。
 // 同步执行原因：单一指令字改写为同步 fail-closed 原语，且没有在途 wrapper 需等待；
 // 生命周期安装/还原仍走事务引擎（lifecycle_apply/lifecycle_step）。
 void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_has_gate,
-                           bool* out_all_want, bool* out_mechanism_failed) {
+                           bool* out_all_want, bool* out_mechanism_failed, bool* out_degraded,
+                           const char** out_error_claim, const char** out_error_reason) {
     bool has_gate = false;
     bool all_want = true;
     bool mechanism_failed = false;
+    bool degraded = false;
+    const char* error_claim = nullptr;
+    const char* error_reason = nullptr;
     // 本次门禁同步新装成功的非入口资源；失败时逆序还原，禁止半装对外可见。
     const contracts::ResourceClaim* installed[kMaxResourcesPerPlugin];
     uint32_t installed_count = 0;
@@ -205,9 +218,20 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_
             uintptr_t target = 0;
             const char* error = install_non_entry_claim(claim, &target);
             if (error != nullptr) {
-                hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
-                hooks::isolated_set(claim.id, true);
-                mechanism_failed = true;
+                const bool fail_closed_required =
+                    claim.requirement == contracts::ResourceRequirement::kRequired &&
+                    claim.failure == contracts::ResourceFailure::kFailClosed;
+                if (fail_closed_required) {
+                    hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
+                    hooks::isolated_set(claim.id, true);
+                    mechanism_failed = true;
+                } else {
+                    // fail-soft：保持 free，门禁每逻辑帧重试；只记 degraded + 原因。
+                    hooks::set_state(claim.id, contracts::ResourceState::kFree);
+                    degraded = true;
+                    error_claim = claim.id;
+                    error_reason = error;
+                }
             } else {
                 hooks::set_state(claim.id, contracts::ResourceState::kLive);
                 installed[installed_count++] = &claim;
@@ -238,6 +262,9 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_
     *out_has_gate = has_gate;
     *out_all_want = all_want;
     *out_mechanism_failed = mechanism_failed;
+    *out_degraded = degraded;
+    if (out_error_claim != nullptr) *out_error_claim = error_claim;
+    if (out_error_reason != nullptr) *out_error_reason = error_reason;
 }
 
 // ---- 生命周期事务跟踪（主线程唯一执行器；每插件至多一个在途事务）----
@@ -576,6 +603,8 @@ int install_all(const HostDeps& deps) {
                           degraded_error != nullptr ? degraded_error : "failed");
             status_error = g_error_text[i];
             infra::status_set_degraded(plugin.id, true);
+            // 记录由本路径置位，供 sync_gates 在资源重试成功后清除标记。
+            g_gate_degraded[i] = true;
             QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
                          degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
         }
@@ -623,9 +652,14 @@ uint32_t sync_gates() {
         bool has_gate = false;
         bool all_want = true;
         bool mechanism_failed = false;
-        sync_plugin_resources(plugin, &has_gate, &all_want, &mechanism_failed);
+        bool gate_degraded = false;
+        const char* gate_error_claim = nullptr;
+        const char* gate_error_reason = nullptr;
+        sync_plugin_resources(plugin, &has_gate, &all_want, &mechanism_failed, &gate_degraded,
+                              &gate_error_claim, &gate_error_reason);
         if (mechanism_failed) {
-            // 机制门禁应用失败：保留占用并隔离，插件置 failed。
+            // 机制门禁应用失败（fail-closed 安装失败 / 释放失败）：保留占用并隔离，插件置 failed。
+            g_gate_degraded[i] = false;
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
                                  "mechanism gate apply failed");
             ++changed;
@@ -634,6 +668,44 @@ uint32_t sync_gates() {
         const bool target_enabled = all_want;
         const infra::FeatureState target_state = target_enabled
             ? infra::FeatureState::kEnabled : infra::FeatureState::kInstalledDisabled;
+
+        // fail-soft 安装失败：资源保持 free 供下一逻辑帧重试；插件 degraded + error，不改生命周期态。
+        // 日志只在失败streak首帧输出，避免逐帧刷屏（同因去重）。
+        if (gate_degraded) {
+            const bool newly_degraded = !g_gate_degraded[i];
+            std::snprintf(g_gate_error_text[i], sizeof(g_gate_error_text[i]), "resource %s: %s",
+                          gate_error_claim != nullptr ? gate_error_claim : "?",
+                          gate_error_reason != nullptr ? gate_error_reason : "failed");
+            if (newly_degraded) {
+                g_gate_degraded[i] = true;
+                infra::status_set_degraded(plugin.id, true);
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s gate install deferred on %s: %s", plugin.id,
+                             gate_error_claim != nullptr ? gate_error_claim : "?",
+                             g_gate_error_text[i]);
+            }
+            contracts::PluginContext ctx{};
+            if (status.state != target_state) {
+                infra::status_update(plugin.id, target_state, target_enabled, g_gate_error_text[i]);
+                if (target_enabled) {
+                    if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+                    register_provided_capabilities(i);
+                } else if (!plugin_provides_capability(plugin)) {
+                    if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
+                }
+                ++changed;
+            } else {
+                infra::status_update(plugin.id, target_state, target_enabled, g_gate_error_text[i]);
+            }
+            continue;
+        }
+        // 本轮无门禁失败：若之前由本路径置位 degraded，现资源已就绪 → 清除标记与 error。
+        if (g_gate_degraded[i]) {
+            g_gate_degraded[i] = false;
+            infra::status_set_degraded(plugin.id, false);
+            if (status.error != nullptr) {
+                infra::status_update(plugin.id, status.state, status.enabled, nullptr);
+            }
+        }
         if (status.state == target_state) continue;
 
         contracts::PluginContext ctx{};
@@ -847,6 +919,7 @@ void plugin_registry_reset_for_test() {
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
         g_cascade_visited[i] = false;
+        g_gate_degraded[i] = false;
     }
 }
 

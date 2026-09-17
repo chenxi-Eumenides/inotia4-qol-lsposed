@@ -127,6 +127,7 @@ uint32_t inject_into_buffers(const uint8_t* orig_recipe, uint16_t base_record_co
 #include <cstdlib>
 
 #include "core/native/qol_log.h"
+#include "features/custom_recipe/rules.h"
 #include "game_access.h"
 #include "game_symbols.h"
 
@@ -139,6 +140,19 @@ uint8_t* g_recipe_buffer = nullptr;
 uint8_t* g_mixture_buffer = nullptr;
 uint16_t g_base_record_count_cache = 0;
 std::atomic<bool> g_busy{false};
+
+// 「全局未就绪」日志去重：只在与上次不同的尺寸/计数时记录，避免门禁逐帧重试刷屏。
+constexpr uint8_t kInvalidLogSentinelU8 = 0xFF;
+constexpr uint16_t kInvalidLogSentinelU16 = 0xFFFF;
+uint8_t g_last_invalid_recipe_size = kInvalidLogSentinelU8;
+uint8_t g_last_invalid_mixture_size = kInvalidLogSentinelU8;
+uint16_t g_last_invalid_count = kInvalidLogSentinelU16;
+
+void reset_invalid_log_dedupe() {
+    g_last_invalid_recipe_size = kInvalidLogSentinelU8;
+    g_last_invalid_mixture_size = kInvalidLogSentinelU8;
+    g_last_invalid_count = kInvalidLogSentinelU16;
+}
 
 // 读 .bss 全局。
 inline uintptr_t bss(uintptr_t vma) { return g_base + vma; }
@@ -162,6 +176,7 @@ bool ensure_impl() {
             QOL_LOG_INFO(QolDomain::kCustomRecipe, "recipe table reactivated records=%u", want);
         }
         if (!catalog_ready()) bind_base_record_count(g_base_record_count_cache);
+        reset_invalid_log_dedupe();  // 就绪后允许未来新一轮失败重新记录
         return catalog_ready();
     }
     // 2) 游戏重新装载了静态表（指针被改写回原表）→ 用新原表重新注入。
@@ -186,9 +201,17 @@ bool ensure_impl() {
     if (recipe_data == nullptr || mixture_data == nullptr || recipe_size == 0 ||
         recipe_size > kMaxRecipeSize || mixture_size == 0 || mixture_size > kMaxMixtureSize ||
         cur_count == 0 || cur_count > kMaxRecordCount) {
-        QOL_LOG_ERROR(QolDomain::kCustomRecipe,
-                      "table globals invalid recipe_size=%u mixture_size=%u count=%u",
-                      recipe_size, mixture_size, cur_count);
+        // 门禁每逻辑帧重试期间，同因只记一条（WARN，含尺寸/计数），避免刷屏。
+        if (table_invalid_log_needed(recipe_size, mixture_size, cur_count,
+                                     g_last_invalid_recipe_size, g_last_invalid_mixture_size,
+                                     g_last_invalid_count)) {
+            g_last_invalid_recipe_size = recipe_size;
+            g_last_invalid_mixture_size = mixture_size;
+            g_last_invalid_count = cur_count;
+            QOL_LOG_WARN(QolDomain::kCustomRecipe,
+                         "recipe table not ready recipe_size=%u mixture_size=%u count=%u",
+                         recipe_size, mixture_size, cur_count);
+        }
         return false;
     }
 
@@ -246,6 +269,7 @@ bool ensure_impl() {
                  static_cast<unsigned>(base_record_count + n),
                  static_cast<unsigned>(base_material_count + material_total_count),
                  book_bytes_after);
+    reset_invalid_log_dedupe();  // 就绪后允许未来新一轮失败重新记录
     return true;
 }
 

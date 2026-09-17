@@ -208,6 +208,14 @@ ResourceClaim ownership_claim(const char* id, const char* owner) {
     return c;
 }
 
+// required × fail-soft + gate：安装失败应保持 free/degraded、可重试（§8，门禁路径）。
+ResourceClaim ownership_soft_claim(const char* id, const char* owner, const char* gate) {
+    ResourceClaim c = ownership_claim(id, owner);
+    c.failure = ResourceFailure::kFailSoft;
+    c.gate = gate;
+    return c;
+}
+
 ResourceClaim g_ok_resources[] = {
     claim("hook:test:ok:a", "test_ok", nullptr),
     claim("hook:test:ok:b", "test_ok", nullptr),
@@ -247,6 +255,11 @@ ResourceClaim g_ownership_resources[] = {
     ownership_claim("own:test:a", "test_own"),
     ownership_claim("own:test:b", "test_own"),
     ownership_claim("own:test:c", "test_own"),
+};
+
+// 门禁 fail-soft：acquire 失败不得 tombstone/failed，保持 free 供逐帧重试。
+ResourceClaim g_own_soft_resources[] = {
+    ownership_soft_claim("own:soft:a", "test_own_soft", "test.gate"),
 };
 
 PluginDescriptor make_descriptor(const char* id, const ResourceClaim* resources,
@@ -666,6 +679,44 @@ void test_ownership_release_reverse_on_rollback() {
     CHECK(feature_state_is("test_own", FeatureState::kFailed));
 }
 
+// 门禁 fail-soft（§8）：kOwnership required×fail-soft acquire 失败 → 资源保持 free（可重试）、
+// 插件 enabled + degraded、error 记录原因、不置 tombstone；下一逻辑帧重试成功 → live + 清 degraded。
+void test_ownership_fail_soft_gate_retry() {
+    reset_all();
+    qol::infra::config_set_bool("test.gate", true);
+    g_ownership.fail_acquire_at = 1;
+    const PluginDescriptor d =
+        make_descriptor("test_own_soft", g_own_soft_resources, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    // 启动安装：acquire 失败 → fail-soft（不得 tombstone / 插件 failed）。
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_ownership.acquire_calls == 1);
+    CHECK(qol::hooks::state_of("own:soft:a") == ResourceState::kFree);
+    CHECK(!qol::hooks::isolated_get("own:soft:a"));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    CHECK(feature_state_is("test_own_soft", FeatureState::kEnabled));
+    CHECK(feature_degraded("test_own_soft"));
+    {
+        FeatureState state = FeatureState::kRegistered;
+        bool enabled = false;
+        const char* error = nullptr;
+        CHECK(feature_of("test_own_soft", &state, &enabled, &error));
+        CHECK(enabled);
+        CHECK(error != nullptr);
+        CHECK(std::strstr(error, "own:soft:a") != nullptr);
+    }
+
+    // 门禁每逻辑帧重试：本轮 acquire 成功 → live + 清 degraded。
+    g_ownership.fail_acquire_at = 0;
+    sync_gates();
+    CHECK(g_ownership.acquire_calls == 2);
+    CHECK(qol::hooks::state_of("own:soft:a") == ResourceState::kLive);
+    CHECK(!feature_degraded("test_own_soft"));
+    CHECK(feature_state_is("test_own_soft", FeatureState::kEnabled));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -685,6 +736,7 @@ int main() {
     test_required_fail_closed_rolls_back_with_optional();
     test_ownership_acquire_order_live();
     test_ownership_release_reverse_on_rollback();
+    test_ownership_fail_soft_gate_retry();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

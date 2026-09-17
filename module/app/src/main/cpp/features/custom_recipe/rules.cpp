@@ -121,6 +121,13 @@ bool execute_token_valid(bool enabled, uint32_t pending_token, uint32_t current_
     return pending_token != 0 && pending_token == current_token;
 }
 
+bool table_invalid_log_needed(uint8_t recipe_size, uint8_t mixture_size, uint16_t count,
+                              uint8_t last_recipe_size, uint8_t last_mixture_size,
+                              uint16_t last_count) {
+    return recipe_size != last_recipe_size || mixture_size != last_mixture_size ||
+           count != last_count;
+}
+
 int scaled_jewel_value(int value, uint16_t scale_permille) {
     if (value <= 0) return 0;
     // 0 视为未配置：fail-closed 返回原值，绝不把数值清零。

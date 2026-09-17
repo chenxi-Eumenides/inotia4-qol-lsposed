@@ -83,6 +83,12 @@ bool stack_units_available(int units, int held_count);
 // 调用方按「格子已变」（kStaleSlots）处理：不消耗任何材料、不产出、不扣费。
 bool execute_token_valid(bool enabled, uint32_t pending_token, uint32_t current_token);
 
+// 表注入「全局未就绪」日志去重（纯逻辑）：尺寸/计数与上次不同才需记录，避免逐帧重试刷屏。
+// 首次调用时 last_* 传哨兵（如 0xFF/0xFFFF）即可保证记录一条。
+bool table_invalid_log_needed(uint8_t recipe_size, uint8_t mixture_size, uint16_t count,
+                              uint8_t last_recipe_size, uint8_t last_mixture_size,
+                              uint16_t last_count);
+
 // ---- 宝石数值缩放（§2.8「宝石 + 混沌武器卷轴 + 混沌防具卷轴」配方）----
 
 // 宝石数值位的上限（= game_symbols.h 的 JEWEL_VALUE_MASK，item+0x10 的 bits0-10）。

@@ -696,6 +696,25 @@ static void test_execute_token_valid() {
     CHECK(!cr::execute_token_valid(false, 6, 7));
 }
 
+// ---------------------------------------------------------------------------
+// 表注入「全局未就绪」日志去重（门禁 fail-soft 逐帧重试期间同因只记一条）。
+// ---------------------------------------------------------------------------
+static void test_table_invalid_log_dedupe() {
+    constexpr uint8_t kSu8 = 0xFF;
+    constexpr uint16_t kSu16 = 0xFFFF;
+    // 首次（哨兵）→ 记录。
+    CHECK(cr::table_invalid_log_needed(0, 0, 0, kSu8, kSu8, kSu16));
+    // 同因（尺寸/计数完全一致）→ 不记录（去重）。
+    CHECK(!cr::table_invalid_log_needed(0, 0, 0, 0, 0, 0));
+    CHECK(!cr::table_invalid_log_needed(6, 0, 0, 6, 0, 0));
+    // 尺寸变化 → 记录。
+    CHECK(cr::table_invalid_log_needed(6, 0, 0, 0, 0, 0));
+    CHECK(cr::table_invalid_log_needed(6, 3, 71, 6, 0, 71));
+    // 计数变化 → 记录。
+    CHECK(cr::table_invalid_log_needed(6, 3, 71, 6, 3, 70));
+    CHECK(!cr::table_invalid_log_needed(6, 3, 71, 6, 3, 71));
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
@@ -705,6 +724,7 @@ int main() {
     test_module_recipe_desc_constants();
     test_three_slot_stack_rules();
     test_execute_token_valid();
+    test_table_invalid_log_dedupe();
     test_chaos_scroll_recipe();
     test_max_socket_enchant_recipe();
     test_dynamic_special_recipes();
