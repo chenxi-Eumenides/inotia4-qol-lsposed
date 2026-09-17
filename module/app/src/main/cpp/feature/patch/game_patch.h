@@ -97,11 +97,5 @@ bool set_move_merge_enabled(bool enabled);
 bool move_merge_enabled();
 bool set_extension_source_protection_enabled(bool enabled);
 
-// ---- IAP 恢复 + 批量宝石合成按钮 ----
-void data_op_mix_gem_batch(void* ctrl);
-bool data_craft_btn_inject();
-void data_craft_btn_remove();
-void data_craft_btn_set_enabled(bool enabled);
-
 // ---- IAP 恢复（v0.5.18 hive 屏蔽恢复）----
 std::string data_recover_after_hive_block();

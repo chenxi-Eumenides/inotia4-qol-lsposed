@@ -485,21 +485,10 @@ static void test_native_equip_sell_count() {
     CHECK(native_equip_sell_count(99u << 25) == 99u);
 }
 
-// 装备页详情出售结算点（0x1261c4）重定向指令映射（VM-37 装备页分支）：
-// 反汇编原字节 → 重定向表条目逐位固定；替换 arg 必须是 mov x0,x21（物品指针在
-// x21），不能套用其它点的 mov x0,x19。重定向表（game_patch_core.inc）与 Host
-// 共用 inventory_hook_stage4.h 的同一常量，避免表与证据漂移。
-static void test_equip_sell_redirect_mapping() {
-    CHECK(kEquipSellRedirectArgOriginal == 0xb94012a0u);   // ldr w0,[x21,#0x10]
-    CHECK(kEquipSellRedirectCallOriginal == 0x940068c8u);  // bl UTIL_GetBitValue
-    CHECK(kEquipSellRedirectArgReplacement == (0xaa0003e0u | (21u << 16)));  // mov x0,x21
-    CHECK(stage4_equip_sell_redirect_matches(kEquipSellRedirectArgOriginal,
-                                             kEquipSellRedirectCallOriginal));
-    // x19 版本的 arg 原字节（商店/拆堆点）不得被装备页条目误匹配。
-    CHECK(!stage4_equip_sell_redirect_matches(0xb9401260u, kEquipSellRedirectCallOriginal));
-    CHECK(!stage4_equip_sell_redirect_matches(kEquipSellRedirectArgOriginal, 0x9401bb13u));
-    // 重定向语义：canonical 199（a=1,b=71）原版读 71（546 缺陷基线），
-    // 重定向后的 getter 读 199。
+// 装备页详情出售结算点（0x1261c4）原版直读语义：R-51 重定向已证伪回退，启用态由
+// R-55 回调层接管；本函数（native_equip_sell_count）是原版回退参照，canonical 199
+//（a=1,b=71）原版读 71（546 缺陷基线），R-55 回调层经 hooked getter 读 199。
+static void test_equip_sell_settle_semantics() {
     const uint32_t field = stack_codec::s2_write_count(0u, 199u);
     CHECK(native_equip_sell_count(field) == 71u);
     CHECK(stack_codec::effective_read_count(field, true) == 199u);
@@ -575,7 +564,7 @@ int main() {
     test_remove_item_data_plan();
     test_remove_data_extension_shortfall();
     test_native_equip_sell_count();
-    test_equip_sell_redirect_mapping();
+    test_equip_sell_settle_semantics();
     test_make_item_writeback_count();
     test_vanilla_sell_takeover();
     test_object_operations();

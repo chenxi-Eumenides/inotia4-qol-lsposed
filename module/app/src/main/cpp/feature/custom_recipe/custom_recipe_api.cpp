@@ -11,7 +11,6 @@
 
 #include "data/native/item_class.h"
 #include "contracts/attribute_range.h"
-#include "feature/patch/native_inventory_hook.h"
 #include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_symbols.h"

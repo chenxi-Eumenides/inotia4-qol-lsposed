@@ -51,18 +51,11 @@ int stage4_get_cumulate_count(void* item, uint32_t raw_count_field,
 uint32_t native_equip_sell_count(uint32_t field) {
     // 原版 0x1261c4 的 b 段直读 + clamp（证据见头注释）：只解释 bits25–31，
     // 不读 a 段、不读 descriptor canonical。b==0 或 b>99 一律回退 1（装备 marker
-    // 100 与 b∈[100,127] 的误判区间由此兜底）。重定向安装后运行时不再走此语义，
-    // 仅在重定向未安装/回滚时作为原版回退参照。
+    // 100 与 b∈[100,127] 的误判区间由此兜底）。R-51 重定向已证伪回退，运行时启用态
+    // 改由 R-55 回调层接管；本函数是原版直读路径的回退语义参照。
     const uint32_t b = (field >> stack_codec::kS2ShiftB) &
                        ((1u << stack_codec::kS2BitsB) - 1u);
     return (b >= 1u && b <= 99u) ? b : 1u;
-}
-
-bool stage4_equip_sell_redirect_matches(uint32_t arg_orig, uint32_t call_orig) {
-    // 重定向表（game_patch_core.inc 的 F_UIEQUIP_SELL_SETTLE_VMA 条目）必须与
-    // 反汇编原字节逐位一致；调用方用本谓词校验，Host 用同一常量断言。
-    return arg_orig == kEquipSellRedirectArgOriginal &&
-           call_orig == kEquipSellRedirectCallOriginal;
 }
 
 VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run) {

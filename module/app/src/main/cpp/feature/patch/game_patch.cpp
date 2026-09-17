@@ -10,17 +10,13 @@
 #include "stack_codec.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "feature/patch/native_inventory_hook.h"
-#include "feature/patch/inventory_hook_stage4.h"
 
 #include <atomic>
 #include <cerrno>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <sys/mman.h>
-#include <thread>
-#include <unistd.h>
 
 #define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kPlatform, __VA_ARGS__)
 
@@ -29,15 +25,8 @@ namespace {
 std::recursive_mutex g_patch_mtx;
 std::atomic<bool> g_stack_enabled{false};
 
-// 合成器批量宝石合成 + 自定义 UI 按钮（v0.5.18）注入状态
-std::mutex g_craft_mtx;            // 注入/还原互斥（串行化 enable/disable）
-bool g_craft_injected = false;     // 是否已注入
-void* g_craft_orig = nullptr;      // 原宝石按钮 ControlObject*（还原槽指针用）
-PtrHook g_craft_exec_hook;         // 原宝石按钮 ExecuteProc 的函数指针 hook（覆盖为批量合成）
-void* g_craft_mmap = nullptr;      // mmap 区域（ControlObject + 按钮数据）
-size_t g_craft_mmap_len = 0;       // mmap 长度
-std::atomic<bool> g_craft_want{false};           // 是否期望注入（配置开关）
-std::atomic<bool> g_craft_thread_started{false};
+// GOT 槽指针 hook：目标 F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA
+//（G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA 槽）；启用态覆盖为 move wrapper。
 PtrHook g_move_merge_hook;
 std::mutex g_move_merge_mtx;
 std::atomic<bool> g_move_merge_requested{false};
@@ -73,5 +62,4 @@ void write_back(const PatchEntry* entries, size_t upto) {
 
 #include "game_patch_core.inc"
 #include "game_patch_move_merge.inc"
-#include "game_patch_craft.inc"
 #include "game_patch_hub_login.inc"

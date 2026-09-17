@@ -34,22 +34,13 @@ int stage4_get_cumulate_count(void* item, uint32_t raw_count_field,
 // UIEquip_ButtonDestroyExe(0xb6240) → UIEquip_OKDestroyItem(0xb83d0) → 0xb8468
 // bl 0x1261c4；0x1261c4 在 0x1261fc `ldr w0,[x21,#0x10]` + 0x126208
 // `bl UTIL_GetBitValue(_,31,25)` 直接读 +0x10 的 b 段（bits25–31），随后 clamp：
-// b∈[1,99] 取 b，否则取 1，再 `unit*b*7/10`。该读点曾绕过 S2 getter（R-51 重定向表
-// 未覆盖，真机 199 个按 b=71 结算 546），现已由
-// `g_stack_getter_redirect_patches` 覆盖（见下）；本函数保留为「重定向未安装/回滚时」
-// 的原版回退语义参照，并作为 VM-37 缺陷基线。
+// b∈[1,99] 取 b，否则取 1，再 `unit*b*7/10`。该读点曾计划以 R-51 重定向改指
+// ITEM_GetCumulateCount；该方案已证伪并回退，重定向表
+//（g_stack_getter_redirect_patches）不含此点。现由 R-55 UIEquip_OKDestroyItem
+// 回调层在启用态接管结算（取 hooked getter 的 canonical），关闭态与未知调用者仍走
+// 原版直读。本函数保留为原版回退语义参照，并作为 VM-37 缺陷基线。
 //   b = (field >> 25) & 0x7F;  return (b >= 1 && b <= 99) ? b : 1;
 uint32_t native_equip_sell_count(uint32_t field);
-
-// 装备页详情出售结算点（0x1261c4）重定向指令映射（纯常量 + 校验，供 Host 断言）。
-// 物品指针在 x21（0x1261f0 `mov x21,x0`），故 arg 点原字节是 `ldr w0,[x21,#0x10]`、
-// 替换必须是 `mov x0,x21`（0xaa1503e0），而非表内其它点的 `mov x0,x19`；call 点是
-// `bl UTIL_GetBitValue`（0x940068c8），重定向目标为 ITEM_GetCumulateCount。
-// 反汇编地址/字节：0x1261fc=0xb94012a0、0x126208=0x940068c8（函数基址 0x1261c4）。
-constexpr uint32_t kEquipSellRedirectArgOriginal = 0xb94012a0u;     // ldr w0,[x21,#0x10]
-constexpr uint32_t kEquipSellRedirectArgReplacement = 0xaa1503e0u;  // mov x0,x21
-constexpr uint32_t kEquipSellRedirectCallOriginal = 0x940068c8u;    // bl UTIL_GetBitValue
-bool stage4_equip_sell_redirect_matches(uint32_t arg_orig, uint32_t call_orig);
 
 // ---------------------------------------------------------------------------
 // 原版背包详情出售接管（R-55，VM-41）。UIEquip_OKDestroyItem(0xb83d0) 无参，背包

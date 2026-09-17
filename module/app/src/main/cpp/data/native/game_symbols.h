@@ -900,8 +900,9 @@ constexpr uint8_t kUIEquipBagDescType = 2;
 // 装备页详情出售结算（无名局部函数；唯一调用点 UIEquip_OKDestroyItem@0xb8468 bl 0x1261c4，
 // .dynsym 无符号，fn_resolve 无符号名回退本 VMA）。0x1261fc `ldr w0,[x21,#0x10]` +
 // 0x126208 `bl UTIL_GetBitValue(_,31,25)` 只读 b 段（S2 下 199→71 结算缺陷根因）；
-// 物品指针在 x21（0x1261f0 `mov x21,x0`），由 R-51 重定向为
-// `mov x0,x21; bl ITEM_GetCumulateCount`。同一函数返回的弹窗 i32Param 即确认框金额。
+// 物品指针在 x21（0x1261f0 `mov x21,x0`）。曾计划的 R-51 重定向（改指
+// ITEM_GetCumulateCount）已证伪回退，重定向表不含此点；现由 R-55 UIEquip_OKDestroyItem
+// 回调层在启用态接管结算。同一函数返回的弹窗 i32Param 即确认框金额。
 constexpr uintptr_t F_UIEQUIP_SELL_SETTLE_VMA = 0x1261c4;
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
