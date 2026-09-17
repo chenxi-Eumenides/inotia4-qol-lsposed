@@ -1,8 +1,8 @@
-#include "feature/simple_mode/simple_mode_rules.h"
+#include "features/simple_mode/rules.h"
 
 #include <limits>
 
-namespace simple_mode {
+namespace qol::features::simple_mode {
 
 int damage_percent(Side attacker, Side victim) {
     // 先判受害者：玩家侧受到的伤害一律减半，与本模式外的攻击者身份无关。
@@ -42,4 +42,4 @@ std::int32_t halved_max_hp(std::int32_t max_hp) {
     return max_hp / 2;
 }
 
-}  // namespace simple_mode
+}  // namespace qol::features::simple_mode

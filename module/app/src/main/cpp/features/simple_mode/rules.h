@@ -4,8 +4,8 @@
 
 // 简单模式纯逻辑层（不触内存、不调游戏函数、无平台依赖）：
 // 只做「阵营 → 倍率」与「整数缩放」的决定，供 host test 穷举矩阵；
-// 阵营判定本身在 simple_mode.cpp（需读游戏内存与调游戏函数）。
-namespace simple_mode {
+// 阵营判定本身在 feature.cpp（需读游戏内存与调游戏函数）。
+namespace qol::features::simple_mode {
 
 // 角色阵营归类结果。判定输入是查询结果而非角色指针，便于纯逻辑穷举。
 enum class Side {
@@ -37,4 +37,4 @@ std::int32_t scale_by_percent(std::int32_t value, int percent);
 // 最大生命的半血结果：向下取整，下限 1（非法/极小值不会变成 0）。
 std::int32_t halved_max_hp(std::int32_t max_hp);
 
-}  // namespace simple_mode
+}  // namespace qol::features::simple_mode

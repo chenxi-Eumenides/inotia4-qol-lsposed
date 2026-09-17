@@ -1719,7 +1719,7 @@
 - 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
 - **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）
 
-### 7.7 功能诊断 features（v0.8.0 起）
+### 7.7 功能诊断 features（v0.8.0 起；P2 起追加 resources/requires/provides/degraded）
 
 `GET /api/system/features`
 
@@ -1728,9 +1728,24 @@
 **返回格式**：
 ```json
 { "ok": true, "features": [
-  { "id": "core", "state": "enabled", "enabled": true, "error": null, "version": null, "resource_count": 0 }
+  { "id": "core", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
+    "resource_count": 0, "resources": [], "requires": [], "provides": [], "degraded": false },
+  { "id": "simple_mode", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
+    "resource_count": 0,
+    "resources": [ { "id": "hook:CHAR_AddDamage", "state": "live" },
+                   { "id": "hook:CHAR_UpdateAttrFromMonster", "state": "live" } ],
+    "requires": [], "provides": [], "degraded": false }
 ] }
 ```
+
+**字段说明**：
+- `state`：状态机英文枚举名（`registered`/`resolving`/`blocked`/`unsupported`/`invalid`/`installed_disabled`/`enabled`/`deactivating`/`inactive`/`failed`/`degraded`）。
+- `enabled`：宿主按门禁判定的运行时启用态；开关关闭（含资源已装但门禁关）时为 `false`。
+- `error`：失败/阻断的静态错误文本，无错误为 `null`（资源安装失败时含失败资源 id）。
+- `resource_count`：infra 状态登记表计数（P2 恒 `0`）；资源明细以 `resources[]` 为准。
+- `resources`：该插件 `owner` 的资源声明明细，`state` 取资源登记表占用状态（`free`/`disabled`/`live`/`tombstone`）。
+- `requires` / `provides`：描述符声明的能力需求/提供，仅输出 `{id, major, minor}`（接口指针不外泄）。
+- `degraded`：P2 恒 `false`（尚无 `optional_requires` 消费者）；P3 接可选能力后由能力注册表驱动。
 
 **注意**：响应体由 native `nativeFeatureStatusJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 ---

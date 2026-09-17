@@ -1,8 +1,12 @@
 #include "host/status_json.h"
 
 #include <cstdint>
+#include <cstring>
 
+#include "contracts/plugin.h"
 #include "core/native/game_json.h"
+#include "hooks/registry.h"
+#include "host/plugin_registry.h"
 #include "infra/status.h"
 
 namespace qol::host {
@@ -22,6 +26,73 @@ void ensure_bootstrap_registered() {
         return true;
     }();
     (void)registered;
+}
+
+// P2 起 features 追加字段（ARCHITECTURE.md §9.1）：
+// - resources：该插件 owner 的资源声明 {id,state}，state 取登记表当前占用状态；
+// - requires/provides：描述符声明，仅输出 id 与版本（接口指针不外泄）；
+// - degraded：P2 恒 false（尚无 optional_requires 消费者）；P3 接可选能力后由能力注册表驱动。
+void append_resources(std::string& out, const char* plugin_id) {
+    out += ",\"resources\":[";
+    bool first = true;
+    const uint32_t count = qol::hooks::claim_count();
+    for (uint32_t i = 0; i < count; ++i) {
+        const qol::contracts::ResourceClaim* claim = qol::hooks::claim_at(i);
+        if (claim == nullptr || claim->id == nullptr || claim->owner == nullptr ||
+            std::strcmp(claim->owner, plugin_id) != 0) {
+            continue;
+        }
+        if (!first) out += ",";
+        first = false;
+        out += "{\"id\":\"";
+        out += json_escape(claim->id);
+        out += "\",\"state\":\"";
+        out += qol::contracts::resource_state_name(qol::hooks::state_of(claim->id));
+        out += "\"}";
+    }
+    out += "]";
+}
+
+void append_requires(std::string& out, const qol::contracts::PluginDescriptor* plugin) {
+    out += ",\"requires\":[";
+    if (plugin != nullptr) {
+        bool first = true;
+        for (uint32_t i = 0; i < plugin->requires_count; ++i) {
+            const qol::contracts::CapabilityRequirement& req = plugin->requires[i];
+            if (req.id == nullptr) continue;
+            if (!first) out += ",";
+            first = false;
+            out += "{\"id\":\"";
+            out += json_escape(req.id);
+            out += "\",\"major\":";
+            out += std::to_string(req.range.major);
+            out += ",\"minor\":";
+            out += std::to_string(req.range.min_minor);
+            out += "}";
+        }
+    }
+    out += "]";
+}
+
+void append_provides(std::string& out, const qol::contracts::PluginDescriptor* plugin) {
+    out += ",\"provides\":[";
+    if (plugin != nullptr) {
+        bool first = true;
+        for (uint32_t i = 0; i < plugin->provides_count; ++i) {
+            const qol::contracts::CapabilityProvisionRef& provision = plugin->provides[i];
+            if (provision.id == nullptr) continue;
+            if (!first) out += ",";
+            first = false;
+            out += "{\"id\":\"";
+            out += json_escape(provision.id);
+            out += "\",\"major\":";
+            out += std::to_string(provision.version.major);
+            out += ",\"minor\":";
+            out += std::to_string(provision.version.minor);
+            out += "}";
+        }
+    }
+    out += "]";
 }
 
 }  // namespace
@@ -72,6 +143,12 @@ std::string host_feature_status_json() {
         }
         out += ",\"resource_count\":";
         out += std::to_string(feature.resource_count);
+
+        const qol::contracts::PluginDescriptor* plugin = find_plugin(feature.id);
+        append_resources(out, feature.id);
+        append_requires(out, plugin);
+        append_provides(out, plugin);
+        out += ",\"degraded\":false";
         out += "}";
     }
     out += "]}";

@@ -10,7 +10,7 @@
 | P0 | 校验脚本族 + 基线棘轮冻结 | ✅ 完成 | `check_arch.py` 可运行；基线冻结 124 条（提交 `050e93c`） |
 | — | 目标架构设计书入库 | ✅ 完成 | 根目录 `ARCHITECTURE.md` v0.3（提交 `1fa9ef2`） |
 | P1 | 骨架：`contracts/` + `infra/` + `game/`；最小诊断接口 | ✅ 完成 | host 20/20（`e472d52`）；`GET /api/system/features` 与 `/api/health`（加法扩展 ready/variant）真机通过（`18f0a91` + 后续提交，卡见 `verification.md` VM-P1-02/03） |
-| P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | 🔄 进行中 | 基础层完成（contracts/hooks/infra，host 22/22；设计 v0.3.2/v0.3.3）；待集成与真机卡 VM-P2-01 |
+| P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | ✅ 完成 | 真机卡 VM-P2-01 PASS（两态翻转 + 状态一致 + 半血 A/B 135↔270 + 无崩溃）；host 23/23；基线 124→121 |
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ⬜ 未开始 | 故障注入与并发测试通过；内部接口冻结 |
 | P4 | 批量迁移其余插件（内置静态轨） | ⬜ 未开始 | 每插件：单测 + 验收卡；豁免清零 |
 | P5 | `products/` + `host/` 收口；脚本收紧；删除旧路径 | ⬜ 未开始 | `check_*` 全绿、双轨消失 |
@@ -31,7 +31,7 @@
 | `feature/attribute_range` | 纯规则 → `core`/`game`；界面 → `features/ui` | 4 | entry hook ×3 | 被 3 个域依赖；符号头引用 | P4 |
 | `feature/craft_ui` | `features/craft_ui` | 4 | entry hook ×11（单一挂载处） | 与 `feature/custom_recipe` 双向 | P4 |
 | `feature/save_backup` | `features/save_backup` | 4 | 无（纯逻辑 + 文件事务） | 被 `feature/ui` 依赖 | P4 |
-| `feature/simple_mode` | `features/simple_mode` | 4 | entry hook ×2 | 符号头引用 | **P2 样板候选** |
+| `feature/simple_mode` | `features/simple_mode` | 4 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
 | `feature/world_teleport` | `features/world_teleport` | 4 | ptr slot、调用点 patch | 依赖 `feature/ui`（native_choice） | P4 |
 | `feature/push_all` | `features/push_all` | 2 | call patch ×2 闸门 | 无已知域间依赖（干净样板） | P2 备选 |
 | `feature/quest` | `features/quest` | 2 | 进档回调 | 无已知域间依赖 | P4 |
@@ -53,9 +53,11 @@
 
 | 规则 | 条数 | 说明 |
 |---|---|---|
-| `layer_direction` | 71 | 域间水平互调、feature↔feature、`game→infra/domains`、`infra→domains` |
-| `offsets_symbols_header` | 34 | 非 `game/` 层直接 include 符号头 |
-| `resource_unknown_symbol` | 19 | 间接安装点（符号在 `game_access` 全局解析），待人工归属 |
+| `layer_direction` | 70 | 域间水平互调、feature↔feature、`game→infra/domains`、`infra→domains` |
+| `offsets_symbols_header` | 33 | 非 `game/` 层直接 include 符号头 |
+| `resource_unknown_symbol` | 18 | 间接安装点（符号在 `game_access` 全局解析），待人工归属 |
+
+（P2 由 124 收缩至 121：simple_mode 迁移消除 3 条。）
 
 完整清单与样例见 `docs/refactor/baseline.md` §3；核对命令：`uv run python scripts/maintenance/check_arch.py`。
 

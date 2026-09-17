@@ -1,4 +1,4 @@
-#include "feature/simple_mode/simple_mode_rules.h"
+#include "features/simple_mode/rules.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -12,11 +12,11 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using simple_mode::damage_percent;
-using simple_mode::halved_max_hp;
-using simple_mode::max_hp_percent;
-using simple_mode::scale_by_percent;
-using simple_mode::Side;
+using qol::features::simple_mode::damage_percent;
+using qol::features::simple_mode::halved_max_hp;
+using qol::features::simple_mode::max_hp_percent;
+using qol::features::simple_mode::scale_by_percent;
+using qol::features::simple_mode::Side;
 
 // 阵营矩阵穷举：3×3 全部组合，逐条钉死倍率语义。
 static void test_damage_matrix() {

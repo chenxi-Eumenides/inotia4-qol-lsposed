@@ -106,13 +106,6 @@ target_sources(gamebridge PRIVATE
     feature/quest/quest_resync.cpp
 )
 
-# 简单模式：伤害倍率 + 怪物最大生命减半 + 阵营判定（末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    feature/simple_mode/simple_mode_rules.cpp
-    feature/simple_mode/simple_mode.cpp
-    bridge/native/gamebridge_simple_mode.cpp
-)
-
 # 特殊装备解锁：CHAR_CanEquipItem / CHAR_CanUnequipItem 双点包裹，
 # 放行 ITEMDATABASE +7 bit4（NPC 专属保护）对非特殊 NPC 的约束。
 # **常开，无配置开关**：游戏无获取途径，关闭只会让已持有该装备的角色无法穿脱（末尾追加，不改上方既有行）
@@ -196,4 +189,17 @@ target_sources(gamebridge PRIVATE
     hooks/install.cpp
     infra/config.cpp
     infra/commands.cpp
+)
+
+# P2 纵向样板插件：simple_mode（入口 hook 声明 + 配置门禁 + 状态 + 命令端口）。
+# game/access 收口符号解析与角色读写；host 插件注册表声明式安装资源（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    game/access/symbols.cpp
+    game/access/char.cpp
+    features/simple_mode/rules.cpp
+    features/simple_mode/feature.cpp
+    features/simple_mode/plugin.cpp
+    host/plugin_registry.cpp
+    host/assembly.cpp
+    bridge/native/gamebridge_simple_mode.cpp
 )

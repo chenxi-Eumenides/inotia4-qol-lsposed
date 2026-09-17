@@ -89,6 +89,18 @@ uint32_t status_count() {
     return count;
 }
 
+bool status_get(const char* id, FeatureStatus* out) {
+    if (id == nullptr || out == nullptr) {
+        return false;
+    }
+    const uint32_t slot = find_feature(id);
+    if (slot == kMaxFeatures) {
+        return false;
+    }
+    *out = g_features[slot];
+    return true;
+}
+
 bool status_snapshot(FeatureStatus* out, uint32_t capacity, uint32_t* written) {
     if (out == nullptr || written == nullptr) {
         return false;

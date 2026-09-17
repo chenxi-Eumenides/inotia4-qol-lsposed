@@ -42,6 +42,7 @@
 | VM-P1-01 | `infra` 骨架（快照/命令队列/事件/能力/状态） | host：`cmake --build build && ctest --test-dir build` | PASS（20/20，含快照并发撕裂断言）；范围：host-only，未接线运行时 |
 | VM-P1-02 | 最小诊断接口 `GET /api/system/features` | 真机：安装 debug APK → force-stop → monkey → `dialog/select {"action":"ok"}` → `curl` | PASS（HTTP 200；`{"ok":true,"features":[{"id":"core","version":"0.1.0","state":"enabled",...}]}`；`enter_slot 0` 后复测一致） |
 | VM-P1-03 | `/api/health` 加法扩展 `ready` + `variant` | 真机：安装 debug APK → force-stop → monkey → `curl /api/health` | PASS（`{"ok":true,"ready":true,"variant":{"series":"monster","version":"v27","known":true,"capabilities":3}}`） |
+| VM-P2-01 | P2 纵向样板 `simple_mode`（入口 hook ×2 + 配置 + 状态 + 命令） | 真机：安装 debug APK → 启动 → 关协议页 → `enter_slot 0` → `curl /api/system/features` → `POST /api/config/set` 两态 → 传送到怪物图读 `/api/world/map/enemies` 做 A/B | PASS（启动 `installed_disabled`/两条资源 `disabled`；开 → `enabled`/两条 `live` + 日志 `simple_mode enabled=1`；关 → 回 `installed_disabled`/`disabled` + 日志 `enabled=0`；**半血 A/B**：门禁开时 老鼠/喝醉的蝙蝠 lvl3 `hp=135`，关门禁后刷图 `hp=270`（恰 2×）；无 FATAL/崩溃；基线 124→121 收缩）。范围说明：伤害倍率（×1.5/×0.5）本轮未重复定量测量，规则层由 host 断言覆盖（33 条），历史真机证据见 `archive/docs/development/features/simple-mode.md` |
 | VM-P0-01 | 校验脚本族 + 基线棘轮 | 脚本：`check_arch.py`（含 `--freeze` 拒绝扩容验证） | PASS（124 条基线；新增违规失败；已消除条目可收缩：125→124） |
 
 > VM-P1-03 执行时发现并修复线上缺陷：变体表停在 monster v26，设备 v27 查表失败
@@ -52,7 +53,6 @@
 
 | 阶段 | 卡片 | 说明 |
 |---|---|---|
-| P2 | 样板插件卡（`simple_mode` 或 `push_all`） | 覆盖入口 hook 安装/停用、配置热切换、状态上报、命令端口 |
 | P3 | 资源事务卡 | 部分安装失败回滚、在途归零、帧预算超时、`tombstone` 保留 |
 | P3 | `unhook` 后重新挂载探针（U6） | 真机确认物理还原与再次挂载的安全性 |
 | P4 | 每插件一张迁移卡 | 行为等价回归 + 开关两态 + 变体矩阵 |

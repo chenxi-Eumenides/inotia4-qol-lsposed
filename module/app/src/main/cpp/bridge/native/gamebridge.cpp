@@ -13,9 +13,9 @@
 #include "feature/ui/game_ui_charinfo_zh.h"
 #include "feature/ui/module_text.h"
 #include "feature/quest/quest_resync.h"
-#include "feature/simple_mode/simple_mode.h"
 #include "feature/special_equip/special_equip.h"
 #include "feature/world_teleport/world_teleport.h"
+#include "host/assembly.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -77,7 +77,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         world_teleport_install_if_ready();  // 世界传送：地图名入口 patch + choice ExecuteProc hook
         craft_ui_install_if_ready();  // 合成器界面层：全部 UIMix hook 的唯一挂载处（界面归界面）
         custom_recipe::register_dynamic_recipes();  // 动态特殊装备配方：进档后随机重建材料映射
-        simple_mode_install_if_ready();  // 简单模式：CHAR_AddDamage 伤害倍率 + CHAR_UpdateAttrFromMonster 最大生命减半
+        qol::host::assembly_init();  // 插件装配：注册内置静态插件 + 声明式安装资源 + 命令帧排空
         special_equip_install_if_ready();  // 特殊装备解锁：CanEquipItem/CanUnequipItem 放行 +7 bit4（保留角色闸门）
     }
     return ok ? JNI_TRUE : JNI_FALSE;

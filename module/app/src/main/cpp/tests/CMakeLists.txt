@@ -187,7 +187,7 @@ add_test(NAME module_text_tests COMMAND module_text_tests)
 # 简单模式纯逻辑 host 测试（阵营矩阵 / 倍率 / 边界钳制，末尾追加）
 add_executable(simple_mode_rules_tests
     test_simple_mode_rules.cpp
-    ${CPP_DIR}/feature/simple_mode/simple_mode_rules.cpp
+    ${CPP_DIR}/features/simple_mode/rules.cpp
 )
 target_include_directories(simple_mode_rules_tests PRIVATE
     ${CPP_DIR}
@@ -260,3 +260,26 @@ target_compile_features(infra_config_commands_tests PRIVATE cxx_std_17)
 set_target_properties(infra_config_commands_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(infra_config_commands_tests PRIVATE Threads::Threads)
 add_test(NAME infra_config_commands_tests COMMAND infra_config_commands_tests)
+
+# P2 纵向样板：host 插件注册表与声明式安装 host 测试（fake 后端，末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 按 §3.3 使用字段名 requires，而 host 编译器
+# 默认 C++20（requires 是关键字）；Android 构建本身固定 -std=c++17，这里与之一致。
+add_executable(plugin_registry_tests
+    test_plugin_registry.cpp
+    ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/hooks/registry.cpp
+    ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(plugin_registry_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(plugin_registry_tests PRIVATE cxx_std_17)
+set_target_properties(plugin_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(plugin_registry_tests PRIVATE Threads::Threads)
+add_test(NAME plugin_registry_tests COMMAND plugin_registry_tests)

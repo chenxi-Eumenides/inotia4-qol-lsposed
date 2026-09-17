@@ -40,16 +40,16 @@
 | `features/push_all` | 2 |
 | `features/quest` | 2 |
 | `features/save_backup` | 4 |
-| `features/simple_mode` | 4 |
+| `features/simple_mode` | 6 |
 | `features/special_equip` | 2 |
 | `features/ui` | 33 |
 | `features/world_teleport` | 4 |
-| `game` | 21 |
+| `game` | 25 |
 | `hooks` | 4 |
-| `host` | 18 |
+| `host` | 22 |
 | `infra` | 39 |
 | `patch` | 3 |
-| **合计** | **256** |
+| **合计** | **266** |
 
 ### 1.2 迁移期映射摘要
 
@@ -130,16 +130,16 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 131 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 133 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `features/ui` | `game` | 24 |
+| `host` | `infra` | 19 |
 | `features/ui` | `infra` | 12 |
 | `infra` | `game` | 12 |
 | `features/patch` | `game` | 11 |
 | `features/extension_bag` | `game` | 10 |
-| `host` | `infra` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `features/autosell` | `game` | 8 |
 | `domains/world` | `game` | 7 |
@@ -147,8 +147,8 @@
 | `host` | `features/ui` | 7 |
 | `features/ui` | `patch` | 6 |
 | `host` | `features/autosell` | 6 |
+| `host` | `game` | 6 |
 | `domains/save` | `infra` | 5 |
-| `domains/world` | `infra` | 5 |
 
 ### 2.2 include 环
 
@@ -156,9 +156,9 @@
 
 ## 3. 基线债务
 
-基线共 3 组、124 条。
+基线共 3 组、121 条。
 
-### layer_direction（71 条）
+### layer_direction（70 条）
 
 - `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|domains/character → domains/inventory`
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
@@ -180,9 +180,9 @@
 - `layer_direction|core/native/game_cache.cpp|game_system.h|infra → domains/system`
 - `layer_direction|core/native/game_json.cpp|data/native/game_symbols.h|infra → game`
 - `layer_direction|core/native/game_json.cpp|game_access.h|infra → game`
-- …（其余 51 条省略）
+- …（其余 50 条省略）
 
-### offsets_symbols_header（34 条）
+### offsets_symbols_header（33 条）
 
 - `offsets_symbols_header|core/native/frame_host.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
@@ -204,9 +204,9 @@
 - `offsets_symbols_header|feature/patch/inventory_hook_stage4.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
 - `offsets_symbols_header|feature/push_all/push_all.cpp|data/native/game_symbols.h|features/push_all 层引用符号头`
 - `offsets_symbols_header|feature/save_backup/save_backup.cpp|data/native/game_symbols.h|features/save_backup 层引用符号头`
-- …（其余 14 条省略）
+- …（其余 13 条省略）
 
-### resource_unknown_symbol（19 条）
+### resource_unknown_symbol（18 条）
 
 - `resource_unknown_symbol|bridge/native/gamebridge.cpp:69||call patch 无法归属符号`
 - `resource_unknown_symbol|bridge/native/gamebridge.cpp:70||call patch 无法归属符号`
@@ -219,7 +219,6 @@
 - `resource_unknown_symbol|feature/patch/native_inventory_hook.cpp:1021||entry hook 无法归属符号`
 - `resource_unknown_symbol|feature/patch/native_inventory_hook.cpp:1162||entry hook 无法归属符号`
 - `resource_unknown_symbol|feature/save_backup/save_backup.cpp:58||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/simple_mode/simple_mode.cpp:240||entry hook 无法归属符号`
 - `resource_unknown_symbol|feature/special_equip/special_equip.cpp:186||entry hook 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_custom.cpp:43||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_exp.cpp:25||ptr slot 无法归属符号`
@@ -232,11 +231,11 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 43 个 / 文件 24 个 / 去重符号 14 个 / 无法归属 19 个。
+扫描合计：安装点 42 个 / 文件 23 个 / 去重符号 14 个 / 无法归属 18 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 9 | 12 | 6 |
+| entry hook | 8 | 11 | 6 |
 | call patch | 7 | 20 | 9 |
 | ptr slot | 9 | 11 | 2 |
 
@@ -269,7 +268,7 @@
 
 ## 6. 功能域清单
 
-`feature/*` 共 13 个域。
+`feature/*` 共 12 个域。
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -282,7 +281,6 @@
 | `push_all` | `features/push_all` | 2 |
 | `quest` | `features/quest` | 2 |
 | `save_backup` | `features/save_backup` | 4 |
-| `simple_mode` | `features/simple_mode` | 4 |
 | `special_equip` | `features/special_equip` | 2 |
 | `ui` | `features/ui` | 33 |
 | `world_teleport` | `features/world_teleport` | 4 |
