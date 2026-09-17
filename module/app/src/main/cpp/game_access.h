@@ -377,5 +377,11 @@ void save_slots_mark_stale();
 // 供 game_patch 计算 patch 点绝对地址（禁止裸地址）。
 uintptr_t fn_resolve(const char* macro_name, uintptr_t vma);
 
+// 启动期常驻指令 patch 注入（原 game_patch 的 apply_* 序列）：bridge_init 在解析完
+// libgame 基址与符号后、置 ready 前调用。返回 false = fail-closed 步骤失败，bridge
+// 不得就绪（与旧 apply_fixed_stack_layout 失败分支同语义）。未注入时 bridge_init 失败。
+using BridgeBootPatchFn = bool (*)();
+void bridge_set_boot_patch_hook(BridgeBootPatchFn fn);
+
 bool bridge_init();
 bool bridge_ready();

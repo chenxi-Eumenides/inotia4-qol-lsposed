@@ -10,7 +10,7 @@
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "game_access.h"
 #include "game_inventory.h"
-#include "game_patch.h"
+#include "core/native/stack_limit_port.h"
 #include "game_state.h"
 
 #include <atomic>

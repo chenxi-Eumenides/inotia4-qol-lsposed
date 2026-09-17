@@ -3,7 +3,7 @@
 #include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_ops_common.h"
-#include "feature/patch/game_patch.h"
+#include "core/native/stack_limit_port.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"
@@ -96,6 +96,11 @@ int font_id() {
     return *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(*got) + 4);
 }
 
+
+// 堆叠上限面板开关经命令端口下发（与 JNI 同构）。include 放在匿名命名空间之后，
+// 保持文件前段行号稳定（早段有按行登记的静态检查锚点）。
+#include "contracts/commands.h"
+#include "infra/commands.h"
 
 #include "game_ui_custom_panel.inc"
 #include "game_ui_custom_injection.inc"

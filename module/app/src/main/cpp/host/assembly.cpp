@@ -11,6 +11,7 @@
 #include "features/quest/plugin.h"
 #include "features/simple_mode/plugin.h"
 #include "features/special_equip/plugin.h"
+#include "features/stack_limit/plugin.h"
 #include "features/text_layer/plugin.h"
 #include "game/access/patches.h"
 #include "game/access/symbols.h"
@@ -135,6 +136,10 @@ bool assembly_init() {
     // inventory_hooks 先注册：沿用旧 nativeInit「库存 hook 早于其余插件安装」的时序。
     if (!register_plugin(features::inventory_hooks::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: inventory_hooks registration failed");
+        return false;
+    }
+    if (!register_plugin(features::stack_limit::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: stack_limit registration failed");
         return false;
     }
     if (!register_plugin(features::simple_mode::plugin_descriptor())) {

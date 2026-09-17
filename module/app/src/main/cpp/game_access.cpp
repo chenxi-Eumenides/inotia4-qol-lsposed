@@ -1,5 +1,4 @@
 #include "game_access.h"
-#include "feature/patch/game_patch.h"
 #include "symbol_resolver.h"
 #include "game_system.h"
 #include "core/native/qol_log.h"
@@ -22,6 +21,9 @@ namespace {
 
 std::mutex g_mutex;
 std::atomic<bool> g_bridge_ready{false};
+
+// 启动期常驻 patch 入口（host 在 nativeInit 早段注入；见 game_access.h 的 BridgeBootPatchFn）。
+BridgeBootPatchFn g_boot_patch_hook = nullptr;
 
 bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
     if (address == 0 || size == 0 || address > std::numeric_limits<uintptr_t>::max() - size) {
@@ -109,6 +111,10 @@ bool game_memory_accessible(const void* address, size_t size, char permission) {
 
 bool bridge_ready() {
     return g_bridge_ready.load(std::memory_order_acquire);
+}
+
+void bridge_set_boot_patch_hook(BridgeBootPatchFn fn) {
+    g_boot_patch_hook = fn;
 }
 
 // 函数指针地址：同 resolve_global（返回相对偏移，调用方拼 g_base）
@@ -480,23 +486,22 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ctrl_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
     fn_ctrl_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
     fn_ctrl_btn_draw = reinterpret_cast<ControlButtonDrawFn>(g_base + fn_resolve("F_CONTROL_BUTTON_DRAW_VMA", F_CONTROL_BUTTON_DRAW_VMA));
-    if (!apply_fixed_stack_layout()) {
+    // 统一日志：注入帧 provider（data_frame_count）并打开文件 sink（截断 + 横幅）。
+    qol_log_set_frame_provider(&data_frame_count);
+    qol_log_init();
+    // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
+    // 日志 sink 未初始化时发出的日志会被丢弃。
+    // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。
+    qol::game_variant_init();
+    // 启动期常驻指令 patch（S2 位段缩窄/直接位读重定向/上限 clamp/monster 兼容/hub 登录
+    // 跳过）由 host 注入的 core_patches 一次声明式安装。必需步骤失败 = fail-closed：
+    // bridge 不就绪且清 g_base（与旧 apply_fixed_stack_layout 失败分支同语义）。
+    if (g_boot_patch_hook == nullptr || !g_boot_patch_hook()) {
         g_bridge_ready.store(false, std::memory_order_release);
         g_dl_error = "fixed stack layout patch failed";
         g_base = 0;
         return false;
     }
-    apply_monster_item_count_compat();  // monster 版物品数量上界兼容；非 monster 版无操作
-    // 统一日志：注入帧 provider（data_frame_count）并打开文件 sink（截断 + 横幅）。
-    qol_log_set_frame_provider(&data_frame_count);
-    qol_log_init();
-    // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
-    // 日志 sink 未初始化时发出的日志会被丢弃（同 apply_monster_item_count_compat 的日志）。
-    // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。
-    qol::game_variant_init();
-    // 主菜单「开始游戏」不再弹 Com2uS Hive 注册/登录询问，直接进存档选择。
-    // 非致命：指令特征匹配失败只记日志，不阻断 bridge。
-    apply_hub_login_popup_skip();
     // 功能可用性注入：仓库相关功能依赖存档加解密链是否已解析；其余功能不依赖运行时条件。
     qol::game_feature_set_usability_fn([](qol::GameFeature feature) -> bool {
         switch (feature) {

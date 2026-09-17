@@ -5,9 +5,18 @@ void cell0_log_clicked(void* ctrl) {
 }
 
 void cell1_stack_clicked(void* ctrl) {
-    bool target = !stack_limit_enabled();
-    bool ok = set_stack_limit_enabled(target);
-    CUSTOM_LOG("CUSTOM-PANEL: cell1 stack limit %s -> %s", target ? "ON" : "OFF", ok ? "ok" : "failed");
+    // 与 JNI 同构：开关只下发命令，主线程下一逻辑帧写配置；面板按钮文字按目标态乐观显示，
+    // 权威状态由 stack_limit_enabled()（端口）读取（注入/设置 JSON 即读端口）。
+    const bool target = !stack_limit_enabled();
+    const qol::contracts::QolCommand command{
+        qol::contracts::kCommandSetConfigBool,
+        "plugin.stack_limit.enabled",
+        target ? 1 : 0,
+    };
+    qol::contracts::QolCommandTicket ticket = 0;
+    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
+    const bool ok = qol::contracts::succeeded(result);
+    CUSTOM_LOG("CUSTOM-PANEL: cell1 stack limit %s -> %s", target ? "ON" : "OFF", ok ? "queued" : "failed");
     if (ok && g_cells[1].btn != nullptr && fn_ctrl_btn_set_text != nullptr) {
         static char t[CB_TEXT_SIZE];
         snprintf(t, sizeof(t), "堆叠上限:%s", target ? "开" : "关");

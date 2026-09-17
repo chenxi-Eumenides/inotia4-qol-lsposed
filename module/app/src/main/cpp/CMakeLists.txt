@@ -241,3 +241,11 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     features/inventory_hooks/plugin.cpp
 )
+
+# B2a-2：常驻指令 patch 声明式化（core_patches 13 条 + stack_limit 6 条 clamp）
+# 与 stack_limit 有效态归属。末尾追加，不改上方既有行
+target_sources(gamebridge PRIVATE
+    host/core_patches.cpp
+    core/native/stack_limit_state.cpp
+    features/stack_limit/plugin.cpp
+)

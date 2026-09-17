@@ -2,7 +2,7 @@
 
 #include "game_access.h"
 #include "game_ops_common.h"
-#include "feature/patch/game_patch.h"
+#include "core/native/stack_limit_port.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"

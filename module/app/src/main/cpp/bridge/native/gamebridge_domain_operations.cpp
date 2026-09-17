@@ -1,5 +1,8 @@
 #include "gamebridge_internal.h"
 
+#include "contracts/commands.h"
+#include "infra/commands.h"
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, jint bag, jint slot, jint equipSlot) {
     return op_result(env, "op_jewel", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)), data_op_jewel(static_cast<int>(role), static_cast<int>(bag),
@@ -172,7 +175,17 @@ Java_com_inotia4_qol_NativeBridge_nativeOpAddItem(JNIEnv* env, jclass, jint cate
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetStackLimitEnabled(JNIEnv*, jclass, jboolean enabled) {
-    return set_stack_limit_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
+    // 写配置，stack_limit 插件的门禁随 sync_gates 安装/还原 clamp 并更新有效态。
+    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetSimpleModeEnabled 同构）。
+    const qol::contracts::QolCommand command{
+        qol::contracts::kCommandSetConfigBool,
+        "plugin.stack_limit.enabled",
+        enabled == JNI_TRUE ? 1 : 0,
+    };
+    qol::contracts::QolCommandTicket ticket = 0;
+    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
+    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

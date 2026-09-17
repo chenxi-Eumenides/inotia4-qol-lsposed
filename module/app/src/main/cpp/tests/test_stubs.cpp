@@ -9,6 +9,10 @@
 
 uintptr_t g_base = 0;
 
+// game/access/patches.cpp 的 kBlRedirectToSymbol 站点经 fn_resolve 解析目标；纯算法测试
+// 不解析真实符号，恒等返回 vma。
+uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
+
 uint32_t current_map_id() { return 0; }
 
 void* lead_member() { return nullptr; }

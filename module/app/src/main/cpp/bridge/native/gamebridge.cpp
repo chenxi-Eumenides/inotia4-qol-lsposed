@@ -10,6 +10,7 @@
 #include "feature/ui/game_ui_charinfo_zh.h"
 #include "feature/world_teleport/world_teleport.h"
 #include "host/assembly.h"
+#include "host/core_patches.h"
 #include "host/frame_source.h"
 
 namespace {
@@ -42,6 +43,8 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterAutoSellStoreBridge(JNIEnv* env,
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
+    // 启动期常驻 patch 入口注入：必须在 bridge_init() 之前（bridge_init 内调用）。
+    bridge_set_boot_patch_hook(&qol::host::core_patches_install);
     bool ok = bridge_init();
     if (ok) {
         // 库存行为 hook 已迁移为 inventory_hooks 插件（assembly 注册，宿主声明式安装 24 条入口）。

@@ -1,11 +1,12 @@
 #include "game_patch.h"
 
 #include "core/native/qol_log.h"
+#include "core/native/stack_limit_port.h"
 #include "game_access.h"
 #include "game_inventory.h"
+#include "game_ops_common.h"
 #include "game_state.h"
 #include "data/native/game_symbols.h"
-#include "game_ops_common.h"
 #include "game_ptr_hook.h"
 #include "stack_codec.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
@@ -18,12 +19,11 @@
 #include <mutex>
 #include <sys/mman.h>
 
+// move_merge 的 GOT 槽指针 hook（B2a-3）。常驻指令 patch 与 stack_limit 状态已分别迁
+// host/core_patches 与 core/native/stack_limit_state；本 TU 只保留 move_merge wrapper。
 #define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kPlatform, __VA_ARGS__)
 
 namespace {
-
-std::recursive_mutex g_patch_mtx;
-std::atomic<bool> g_stack_enabled{false};
 
 // GOT 槽指针 hook：目标 F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA
 //（G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA 槽）；启用态覆盖为 move wrapper。
@@ -32,34 +32,20 @@ std::mutex g_move_merge_mtx;
 std::atomic<bool> g_move_merge_requested{false};
 std::atomic<bool> g_extension_source_protection_requested{false};
 
-uintptr_t patch_addr(const PatchEntry& e) {
-    if (g_base == 0) return 0;
-    return g_base + fn_resolve(e.func_macro, e.func_vma) + e.func_offset;
-}
-
-bool write_insn(uintptr_t addr, uint32_t value) {
-    const uintptr_t page = addr & ~uintptr_t{0xFFF};
-    const size_t plen = (addr + sizeof(uint32_t) - page + 0xFFF) & ~size_t{0xFFF};
-    if (mprotect(reinterpret_cast<void*>(page), plen, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        QOL_LOG_ERROR(QolDomain::kPlatform, "patch: mprotect(0x%lx) failed errno=%d", static_cast<unsigned long>(page), errno);
-        return false;
-    }
-    *reinterpret_cast<uint32_t*>(addr) = value;
-    __builtin___clear_cache(reinterpret_cast<char*>(addr),
-                            reinterpret_cast<char*>(addr + sizeof(uint32_t)));
-    return true;
-}
-
-void write_back(const PatchEntry* entries, size_t upto) {
-    for (size_t i = 0; i < upto; ++i) {
-        uintptr_t addr = patch_addr(entries[i]);
-        if (addr == 0) continue;
-        write_insn(addr, entries[i].orig);
-    }
-}
-
 }  // namespace
 
-#include "game_patch_core.inc"
 #include "game_patch_move_merge.inc"
-#include "game_patch_hub_login.inc"
+
+// IAP 恢复：屏蔽 Com2uS Hive 阻断态（常驻指令/全局位读写，不属于常驻 patch 表）。
+std::string data_recover_after_hive_block() {
+    if (g_base == 0) return op_err("base not ready");
+    if (fn_ui_set_popup_process_info == nullptr) return op_err("symbol not resolved");
+    if (fn_networkstore_set_state == nullptr) return op_err("symbol not resolved");
+    uint32_t** daily_trigger = reinterpret_cast<uint32_t**>(g_base + G_DAILY_TRIGGER_GOT_VMA);
+    if (*daily_trigger != nullptr) **daily_trigger = 1;
+    uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+    if (*hud_gate != nullptr) **hud_gate = 1;
+    fn_networkstore_set_state(0);
+    fn_ui_set_popup_process_info(4, 0);
+    return op_ok();
+}
