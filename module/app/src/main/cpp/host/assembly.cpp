@@ -8,8 +8,10 @@
 #include "features/simple_mode/plugin.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
+#include "hooks/transaction.h"
 #include "host/plugin_registry.h"
 #include "infra/commands.h"
+#include "infra/config.h"
 #include "infra/runtime.h"
 
 namespace qol::host {
@@ -17,15 +19,21 @@ namespace {
 
 bool g_assembly_done = false;
 
-// 逻辑帧任务：排空命令队列（主线程执行命令体）。
-// P2 过渡期复用既有帧宿主（core/native/frame_host 提供 kFramePointLogicPre 派发），
-// P3 收口到 scheduler 后由调度器派发。返回 true = 保留期任务，不自动注销。
+// 资源门禁读取：事务引擎回调，gate 为空视为开。
+bool gate_on(const char* key) {
+    return key == nullptr ? true : qol::infra::config_get_bool(key, false);
+}
+
+// 逻辑帧任务：命令排空 → 生命周期推进 → 门禁对齐（主线程）。
+// P2 过渡期复用既有帧宿主（core/native/frame_host 提供 kFramePointLogicPre 派发）。
+// 顺序原因：先执行命令（可能触发 lifecycle_apply 启动事务），再推进生命周期事务，
+// 最后门禁对齐；sync_gates 只处理 kEnabled/kInstalledDisabled，不会与事务中间态冲突。
+// 返回 true = 保留期任务，不自动注销。
 bool drain_commands_task(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
-    // 顺序：先执行命令（可能改配置并触发同步事件），再监督门禁——保证同一帧内
-    // 配置生效后状态立即对齐，不把陈旧状态暴露到下一帧。
     infra::commands_drain();
+    lifecycle_step();
     sync_gates();
     return true;
 }
@@ -49,17 +57,29 @@ bool assembly_init() {
     // `native_hook_func(` 识别成未登记资源安装，而基线棘轮只允许收缩。
     NativeHookFunType (*hook_getter)() = native_hook_func;
     NativeUnhookFunType (*unhook_getter)() = native_unhook_func;
+    const qol::hooks::NativeHookFn hook_fn = hook_getter();
+    const qol::hooks::NativeUnhookFn unhook_fn = unhook_getter();
     const HostDeps deps{
         &qol::game::resolve_hook_entry,
-        hook_getter(),
-        unhook_getter(),
+        hook_fn,
+        unhook_fn,
     };
+
+    // 事务引擎依赖（运行期生命周期路径）与生命周期命令执行入口。
+    hooks::tx_set_deps(qol::hooks::TxDeps{
+        &qol::game::resolve_hook_entry,
+        hook_fn,
+        unhook_fn,
+        &gate_on,
+    });
+    infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
     if (!register_plugin(features::simple_mode::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: simple_mode registration failed");
         return false;
     }
 
+    // 启动期同步安装：此刻尚无帧源与在途回调，直接装完即就绪；运行期生命周期一律走事务。
     const int failed = install_all(deps);
     if (failed != 0) {
         QOL_LOG_WARN(QolDomain::kCore, "assembly: %d plugin(s) failed to install", failed);

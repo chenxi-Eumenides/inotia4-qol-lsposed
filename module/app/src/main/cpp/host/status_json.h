@@ -12,4 +12,8 @@ namespace qol::host {
 // 首次调用会幂等注册 bootstrap 条目（见 .cpp）。
 std::string host_feature_status_json();
 
+// 返回 {"ok":true,"resources":[{id, owner, mechanism, policy, state, in_flight, isolated}, ...]}。
+// 资源登记表全量导出（ARCHITECTURE.md §9.1 P3）：state = free/disabled/live/tombstone。
+std::string host_resources_json();
+
 }  // namespace qol::host

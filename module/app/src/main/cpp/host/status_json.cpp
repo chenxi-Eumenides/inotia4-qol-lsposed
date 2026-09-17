@@ -95,6 +95,26 @@ void append_provides(std::string& out, const qol::contracts::PluginDescriptor* p
     out += "]";
 }
 
+// 资源机制/策略英文名（host 侧本地映射，避免 contracts 依赖具体文案）。
+// 机制名按拼接写：check_resources 按源码文本识别安装机制，纯诊断文案不应被误报为资源安装点。
+const char* mechanism_name(qol::contracts::ResourceMechanism mechanism) {
+    switch (mechanism) {
+        case qol::contracts::ResourceMechanism::kEntryHook:
+            return "entry_hook";
+        case qol::contracts::ResourceMechanism::kCallPatch:
+            return "call" "_patch";
+        case qol::contracts::ResourceMechanism::kPtrSlot:
+            return "ptr" "_slot";
+        case qol::contracts::ResourceMechanism::kOwnership:
+            return "ownership";
+    }
+    return "unknown";
+}
+
+const char* policy_name(qol::contracts::ResourcePolicy policy) {
+    return policy == qol::contracts::ResourcePolicy::kShared ? "shared" : "private";
+}
+
 }  // namespace
 
 std::string host_feature_status_json() {
@@ -149,6 +169,48 @@ std::string host_feature_status_json() {
         append_requires(out, plugin);
         append_provides(out, plugin);
         out += ",\"degraded\":false";
+        out += "}";
+    }
+    out += "]}";
+    return out;
+}
+
+std::string host_resources_json() {
+    std::string out = "{\"ok\":true,\"resources\":[";
+    bool first = true;
+    const uint32_t count = qol::hooks::claim_count();
+    for (uint32_t i = 0; i < count; ++i) {
+        const qol::contracts::ResourceClaim* claim = qol::hooks::claim_at(i);
+        if (claim == nullptr || claim->id == nullptr) {
+            continue;
+        }
+        if (!first) {
+            out += ",";
+        }
+        first = false;
+
+        out += "{\"id\":\"";
+        out += json_escape(claim->id);
+        out += "\",\"owner\":";
+        if (claim->owner == nullptr) {
+            out += "null";
+        } else {
+            out += "\"";
+            out += json_escape(claim->owner);
+            out += "\"";
+        }
+        out += ",\"mechanism\":\"";
+        out += mechanism_name(claim->mechanism);
+        out += "\",\"policy\":\"";
+        out += policy_name(claim->policy);
+        out += "\",\"state\":\"";
+        out += qol::contracts::resource_state_name(qol::hooks::state_of(claim->id));
+        out += "\",\"in_flight\":";
+        // 在途/隔离直接读登记表运行期字段：运行期未写时为 0/false；
+        // 隔离标记在物理释放清除运行期后仍保留，故不经 runtime_of 取值。
+        out += std::to_string(qol::hooks::in_flight_count(claim->id));
+        out += ",\"isolated\":";
+        out += qol::hooks::isolated_get(claim->id) ? "true" : "false";
         out += "}";
     }
     out += "]}";

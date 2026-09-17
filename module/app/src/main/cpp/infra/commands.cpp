@@ -12,6 +12,7 @@
 // post 持槽位锁期间调用 command_queue::post，锁序恒为 slots → command_queue，
 // 回收路径先释放 command_queue 锁再取槽位锁，不存在反向锁序。
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 
@@ -22,15 +23,22 @@ namespace qol::infra {
 namespace {
 
 constexpr uint32_t kCommandSlots = 64;
+constexpr uint32_t kMaxKeyLength = 63; // 槽位内联键缓冲 64（含 NUL）
 
 struct Slot {
     bool in_use = false;
     contracts::QolCommand command{};
+    // 槽位自有键缓冲：命令体是外部字符串（如 JNI 侧栈缓冲），post 返回后源缓冲可能失效，
+    // 而命令要到下次 drain 才执行；因此入队时按值拷贝键，command.key 指向本缓冲。
+    char key[kMaxKeyLength + 1] = {};
     contracts::QolCommandTicket ticket = 0;
 };
 
 std::mutex g_slots_mtx;
 Slot g_slots[kCommandSlots];
+
+// 生命周期执行入口（宿主装配期注入）。
+bool (*g_lifecycle_handler)(const char* plugin_id, int32_t action) = nullptr;
 
 // 命令体：按 kind 分派。未知 kind 返回 false，让票据进入 kFailed，不静默成功。
 // ctx 指向的槽位在票据进入终态前不会被回收（回收只在 commands_drain 内、run 之后）。
@@ -39,6 +47,10 @@ bool command_run(void* ctx) {
     switch (slot->command.kind) {
         case contracts::kCommandSetConfigBool:
             return config_set_bool(slot->command.key, slot->command.int_value != 0);
+        case contracts::kCommandFeatureLifecycle:
+            // infra 不依赖 host：执行体由宿主注入，未注入即失败。
+            return g_lifecycle_handler != nullptr &&
+                   g_lifecycle_handler(slot->command.key, slot->command.int_value);
         default:
             return false;
     }
@@ -89,6 +101,9 @@ QolResult commands_post(contracts::QolCommandTicket* out,
     }
 
     slot->command = *cmd;
+    // 拷贝键到槽位自有缓冲（见 Slot.key 注释）；超长截断，配置/插件查找按截断串失败而非越界。
+    std::snprintf(slot->key, sizeof(slot->key), "%s", cmd->key);
+    slot->command.key = slot->key;
     slot->in_use = true;
     const Command queued{"qol.command", command_run, slot, true};
     const CommandTicket ticket = post(queued);
@@ -129,6 +144,11 @@ uint32_t commands_drain() {
     std::lock_guard<std::mutex> lock(g_slots_mtx);
     reap_terminal_slots_locked();
     return executed;
+}
+
+void commands_set_lifecycle_handler(bool (*handler)(const char* plugin_id, int32_t action)) {
+    std::lock_guard<std::mutex> lock(g_slots_mtx);
+    g_lifecycle_handler = handler;
 }
 
 void commands_reset_for_test() {

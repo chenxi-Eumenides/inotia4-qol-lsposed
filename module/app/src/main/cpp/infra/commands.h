@@ -17,6 +17,10 @@ const contracts::QolCommands& commands_port();
 // 主线程调用：执行本轮 pending 命令并回收已终态槽位，返回本轮执行条数。
 uint32_t commands_drain();
 
+// 功能生命周期命令（kCommandFeatureLifecycle）的执行入口。宿主装配期注入；
+// 未注入时该 kind 的票据置 kFailed（infra 不依赖 host，执行体由宿主提供）。
+void commands_set_lifecycle_handler(bool (*handler)(const char* plugin_id, int32_t action));
+
 // 测试用：清空槽位表。
 void commands_reset_for_test();
 

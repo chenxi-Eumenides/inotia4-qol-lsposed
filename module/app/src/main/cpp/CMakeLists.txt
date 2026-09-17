@@ -208,3 +208,8 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     hooks/transaction.cpp
 )
+
+# P3 Lane B：生命周期 JNI 薄层（控制端点经命令端口投递，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    bridge/native/gamebridge_lifecycle.cpp
+)

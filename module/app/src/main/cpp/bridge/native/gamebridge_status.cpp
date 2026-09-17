@@ -20,3 +20,14 @@ Java_com_inotia4_qol_NativeBridge_nativeFeatureStatusJson(JNIEnv* env, jclass) {
     // NewStringUTF 失败（OOM）时不得抛异常、不得返回 null，退回错误 JSON。
     return env->NewStringUTF("{\"ok\":false,\"error\":\"oom\"}");
 }
+
+// P3 资源登记表导出（/api/system/resources）：与 features 同模式。
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSystemResourcesJson(JNIEnv* env, jclass) {
+    const std::string json = qol::host::host_resources_json();
+    jstring result = env->NewStringUTF(json.c_str());
+    if (result != nullptr) {
+        return result;
+    }
+    return env->NewStringUTF("{\"ok\":false,\"error\":\"oom\"}");
+}

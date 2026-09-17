@@ -269,6 +269,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -299,3 +300,26 @@ target_include_directories(hooks_transaction_tests PRIVATE
 target_compile_features(hooks_transaction_tests PRIVATE cxx_std_17)
 set_target_properties(hooks_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME hooks_transaction_tests COMMAND hooks_transaction_tests)
+
+# P3 Lane B：生命周期全路径 host 测试（真实 registry/tx/status/config + 假 tx 依赖，末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
+add_executable(plugin_lifecycle_tests
+    test_plugin_lifecycle.cpp
+    ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/hooks/registry.cpp
+    ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/hooks/transaction.cpp
+    ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(plugin_lifecycle_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(plugin_lifecycle_tests PRIVATE cxx_std_17)
+set_target_properties(plugin_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(plugin_lifecycle_tests PRIVATE Threads::Threads)
+add_test(NAME plugin_lifecycle_tests COMMAND plugin_lifecycle_tests)

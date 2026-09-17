@@ -5,7 +5,9 @@
 #include <cstring>
 
 #include "core/native/qol_log.h"
+#include "contracts/commands.h"
 #include "hooks/registry.h"
+#include "hooks/transaction.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
 #include "infra/status.h"
@@ -68,6 +70,9 @@ void rollback_resources(const contracts::ResourceClaim* const* claims,
         if (claim.resumable && deps.unhook_fn != nullptr) {
             rc = deps.unhook_fn(reinterpret_cast<void*>(entries[i - 1]));
         }
+        if (rc == 0) {
+            hooks::runtime_clear(claim.id);
+        }
         hooks::set_state(claim.id, rc == 0 ? contracts::ResourceState::kFree
                                            : contracts::ResourceState::kTombstone);
     }
@@ -94,6 +99,52 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_
     }
     *out_has_gate = has_gate;
     *out_all_want = all_want;
+}
+
+// ---- 生命周期事务跟踪（主线程唯一执行器；每插件至多一个在途事务）----
+
+struct LifecycleTx {
+    bool in_use = false;
+    uint64_t tx_id = 0;
+    uint32_t plugin_index = 0;
+    hooks::TxKind kind = hooks::TxKind::kInstall;
+};
+
+// 槽位与插件同容量：事务引擎保证每插件至多一个未终态事务。
+LifecycleTx g_lifecycle_txs[kMaxPlugins];
+
+uint32_t plugin_index_of(const char* plugin_id) {
+    if (plugin_id == nullptr) return kMaxPlugins;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin_id) == 0) return i;
+    }
+    return kMaxPlugins;
+}
+
+bool plugin_has_active_tx(const char* plugin_id) {
+    if (plugin_id == nullptr) return false;
+    for (const LifecycleTx& slot : g_lifecycle_txs) {
+        if (!slot.in_use) continue;
+        if (std::strcmp(g_plugins[slot.plugin_index].descriptor.id, plugin_id) == 0) return true;
+    }
+    return false;
+}
+
+bool plugin_isolated(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (hooks::isolated_get(plugin.resources[i].id)) return true;
+    }
+    return false;
+}
+
+// 全部带 gate 资源是否都开启；无 gate 资源视为开（与 install 路径一致）。
+bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.gate == nullptr) continue;
+        if (!infra::config_get_bool(claim.gate, false)) return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -173,6 +224,8 @@ int install_all(const HostDeps& deps) {
             installed_claims[installed_count] = &claim;
             installed_entries[installed_count] = entry;
             ++installed_count;
+            // 同步路径同样登记运行期入口：运行期 deactivate 的物理归还要用 resolved_entry。
+            hooks::runtime_set(claim.id, entry, outcome.backup);
             // 立即把原函数入口交还所有者（§3.3「backup 交还」）。
             if (plugin.on_resource_ready != nullptr) {
                 plugin.on_resource_ready(ctx, claim.id, outcome.backup);
@@ -238,6 +291,140 @@ uint32_t sync_gates() {
     return changed;
 }
 
+bool lifecycle_apply(const char* plugin_id, int32_t action) {
+    const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
+    if (plugin == nullptr) return false;
+    // 前置拒绝：同插件在途事务 / 任一资源已隔离（隔离后禁止重试，直到进程重启）。
+    if (plugin_has_active_tx(plugin->id)) return false;
+    if (plugin_isolated(*plugin)) return false;
+
+    infra::FeatureStatus status{};
+    if (!infra::status_get(plugin->id, &status)) return false;
+
+    contracts::PluginContext ctx{};
+    switch (action) {
+        case contracts::kFeatureLifecycleEnable:
+            // 幂等：已 enabled 直接成功；仅 installed_disabled 可入。
+            if (status.state == infra::FeatureState::kEnabled) return true;
+            if (status.state != infra::FeatureState::kInstalledDisabled) return false;
+            if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
+            return infra::status_update(plugin->id, infra::FeatureState::kEnabled, true, nullptr);
+
+        case contracts::kFeatureLifecycleDisable:
+            if (status.state == infra::FeatureState::kInstalledDisabled) return true;
+            if (status.state != infra::FeatureState::kEnabled) return false;
+            if (plugin->on_disabled != nullptr) plugin->on_disabled(ctx);
+            return infra::status_update(plugin->id, infra::FeatureState::kInstalledDisabled, false,
+                                        nullptr);
+
+        case contracts::kFeatureLifecycleDeactivate: {
+            if (status.state != infra::FeatureState::kEnabled &&
+                status.state != infra::FeatureState::kInstalledDisabled) {
+                return false;
+            }
+            const infra::FeatureState previous = status.state;
+            infra::status_update(plugin->id, infra::FeatureState::kDeactivating, false, nullptr);
+            const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kRelease);
+            if (tx_id == 0) {
+                // 进入 deactivating 失败：回滚为原状态。
+                infra::status_update(plugin->id, previous,
+                                     previous == infra::FeatureState::kEnabled, nullptr);
+                return false;
+            }
+            const uint32_t index = plugin_index_of(plugin->id);
+            for (LifecycleTx& slot : g_lifecycle_txs) {
+                if (slot.in_use) continue;
+                slot.in_use = true;
+                slot.tx_id = tx_id;
+                slot.plugin_index = index;
+                slot.kind = hooks::TxKind::kRelease;
+                return true;
+            }
+            return false;  // 槽位与插件同容量，正常不可达
+        }
+
+        case contracts::kFeatureLifecycleActivate: {
+            if (status.state != infra::FeatureState::kInactive) return false;
+            infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
+            const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kInstall);
+            if (tx_id == 0) {
+                infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
+                return false;
+            }
+            const uint32_t index = plugin_index_of(plugin->id);
+            for (LifecycleTx& slot : g_lifecycle_txs) {
+                if (slot.in_use) continue;
+                slot.in_use = true;
+                slot.tx_id = tx_id;
+                slot.plugin_index = index;
+                slot.kind = hooks::TxKind::kInstall;
+                return true;
+            }
+            return false;  // 槽位与插件同容量，正常不可达
+        }
+
+        default:
+            return false;
+    }
+}
+
+uint32_t lifecycle_step() {
+    uint32_t advanced = 0;
+    for (LifecycleTx& slot : g_lifecycle_txs) {
+        if (!slot.in_use) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[slot.plugin_index].descriptor;
+
+        hooks::TxStep out{};
+        hooks::tx_step(slot.tx_id, &out);
+        ++advanced;
+
+        // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
+        // backup 非空是「本步真实安装」的判据：幂等跳过步 backup 为 null，交还会把
+        // 插件已持有的有效入口覆盖成 null（wrapper 随即 fail-closed），故跳过。
+        if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
+            out.backup != nullptr && plugin.on_resource_ready != nullptr) {
+            contracts::PluginContext ctx{};
+            plugin.on_resource_ready(ctx, out.resource_id, out.backup);
+        }
+        if (!out.finished) continue;
+
+        hooks::TxStatus status{};
+        const bool have_status = hooks::tx_query(slot.tx_id, &status);
+        const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
+        contracts::PluginContext ctx{};
+        if (succeeded) {
+            if (slot.kind == hooks::TxKind::kInstall) {
+                const bool enabled = plugin_all_gates_want(plugin);
+                infra::status_update(
+                    plugin.id,
+                    enabled ? infra::FeatureState::kEnabled
+                            : infra::FeatureState::kInstalledDisabled,
+                    enabled, nullptr);
+                if (enabled) {
+                    if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+                } else {
+                    if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
+                }
+            } else {
+                infra::status_update(plugin.id, infra::FeatureState::kInactive, false, nullptr);
+            }
+        } else {
+            // 失败原因取事务记录；两者均无则用固定静态文本。
+            const char* error =
+                have_status && status.error != nullptr
+                    ? status.error
+                    : (have_status && status.failed_resource_id != nullptr
+                           ? status.failed_resource_id
+                           : "lifecycle transaction failed");
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id, error);
+        }
+        slot.in_use = false;
+        slot.tx_id = 0;
+    }
+    return advanced;
+}
+
 const contracts::PluginDescriptor* find_plugin(const char* id) {
     if (id == nullptr) return nullptr;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
@@ -254,6 +441,9 @@ uint32_t plugin_count() {
 
 void plugin_registry_reset_for_test() {
     g_plugin_count = 0;
+    for (LifecycleTx& slot : g_lifecycle_txs) {
+        slot = LifecycleTx{};
+    }
 }
 
 }  // namespace qol::host

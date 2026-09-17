@@ -32,6 +32,14 @@ int install_all(const HostDeps& deps);
 // 返回本轮发生状态变化的插件数。仅处理处于 kEnabled/kInstalledDisabled 的插件；幂等。
 uint32_t sync_gates();
 
+// 生命周期动作（主线程唯一执行器；命令经命令端口投递后由本函数执行）。
+// action 取 contracts::kFeatureLifecycle*；状态机见 ARCHITECTURE.md §3.2。
+// 前置拒绝（返回 false）：插件不存在 / 该插件有未终态事务 / 任一资源已隔离。
+bool lifecycle_apply(const char* plugin_id, int32_t action);
+
+// 帧驱动：推进在途生命周期事务并同步状态/回调；返回本轮推进数（0 = 无事可做）。
+uint32_t lifecycle_step();
+
 // 未注册返回 nullptr。
 const contracts::PluginDescriptor* find_plugin(const char* id);
 

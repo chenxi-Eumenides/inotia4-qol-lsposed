@@ -13,6 +13,15 @@ using QolCommandTicket = uint64_t; // 0 = 无效票据
 
 enum : uint32_t {
     kCommandSetConfigBool = 1,
+    kCommandFeatureLifecycle = 2,
+};
+
+// 生命周期命令动作（kind == kCommandFeatureLifecycle 时有效）；key = 插件 id。
+enum : int32_t {
+    kFeatureLifecycleEnable = 1,
+    kFeatureLifecycleDisable = 2,
+    kFeatureLifecycleDeactivate = 3,
+    kFeatureLifecycleActivate = 4,
 };
 
 struct QolCommand {

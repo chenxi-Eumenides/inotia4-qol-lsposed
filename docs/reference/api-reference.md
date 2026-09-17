@@ -1750,6 +1750,33 @@
 **注意**：响应体由 native `nativeFeatureStatusJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 ---
 
+### 7.8 资源诊断 resources（v0.8.0 起，P3 落地）
+
+`GET /api/system/resources`
+
+**用途**：资源登记表全量导出，用于诊断资源占用/在途/隔离状态（ARCHITECTURE.md §9.1 P3）。
+
+**返回格式**：
+```json
+{ "ok": true, "resources": [
+  { "id": "hook:CHAR_AddDamage", "owner": "simple_mode", "mechanism": "entry_hook",
+    "policy": "private", "state": "live", "in_flight": 0, "isolated": false },
+  { "id": "hook:CHAR_UpdateAttrFromMonster", "owner": "simple_mode", "mechanism": "entry_hook",
+    "policy": "private", "state": "live", "in_flight": 0, "isolated": false }
+] }
+```
+
+**字段说明**：
+- `owner`：资源所有者插件 id（共享资源为资源层 owner）。
+- `mechanism`：`entry_hook`/`call_patch`/`ptr_slot`/`ownership`。
+- `policy`：`private`/`shared`。
+- `state`：占用状态 `free`/`disabled`/`live`/`tombstone`（`disabled` = 已装但门禁关闭的空转透传）。
+- `in_flight`：该资源当前在途回调数（跨帧等待归零的依据）。
+- `isolated`：进程级隔离标记；`true` 表示禁止重试直到进程重启（物理归还未完成或声明不可还原）。
+
+**注意**：响应体由 native `nativeSystemResourcesJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+---
+
 ## 八、op（越权操作）— POST /api/op/*
 
 游戏内做不到的操作（改数据/强行操作）。**OP 全局开关（v0.5.47）**：默认关闭；`config.json` 中 `opEnabled=true` 或 `POST /api/config/set {"opEnabled":true}` 开启后，§8.1 各端点才可用；开关关闭时所有 OP 端点返回 **403 + `{"ok":false,"error":"op disabled"}`**。门禁在 OpApiService 统一入口（controller 无法绕过）。OP 端点与合法操作物理隔离。
@@ -1864,6 +1891,21 @@
 - 地界：目标图越出静态数据 `width`/`height` 直接拒绝（引擎不校验地界，越界会把角色放到地图数据之外，表现为角色不出现且不可操作，需重进档恢复）。
 - 阻挡：静态瓦片矩阵 `TILE_BLOCK_BIT`（bit3，与寻路同口径）置位时拒绝。
 - 目标图静态矩阵缺失时无法校验，放行。
+
+#### 功能生命周期
+
+`POST /api/op/features/lifecycle`
+
+**请求格式**：`{ "id": "simple_mode", "action": "enable" }`
+
+**返回格式**：`{"ok":true,"ticket":N}`（N = 命令票据，0 表示投递失败）；未知动作 `{"ok":false,"error":"unknown action"}`；投递失败 `{"ok":false,"error":"lifecycle rejected"}`。
+
+**注意（v0.8.0 P3）**：`action` ∈ `enable|disable|deactivate|activate`，经命令端口投递、主线程帧步进执行；状态查询走 `GET /api/system/features`（`ticket` 查询端点随 P4 首个异步 HTTP 命令落地）。`op` 门控同 §8 其它端点。状态机（ARCHITECTURE.md §3.2）：
+
+- `enable`：`installed_disabled → enabled`（幂等；其它非 enabled 状态拒绝）；
+- `disable`：`enabled → installed_disabled`（幂等；其它非 installed_disabled 状态拒绝）；
+- `deactivate`：`enabled`/`installed_disabled → deactivating`，逆序还原资源（含物理 unhook、在途归零）→ `inactive`；还原失败 → `failed` + 资源 `tombstone`/隔离；
+- `activate`：`inactive → resolving`，按声明顺序安装资源 → 终态按门禁 `enabled`/`installed_disabled`；安装失败 → `failed`（逆序回滚已装子集）。
 
 ### 8.2 未实现
 
