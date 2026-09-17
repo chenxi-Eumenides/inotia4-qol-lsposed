@@ -25,14 +25,14 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 7 | 326 |
-| `game/` | 14 | 874 |
+| `game/` | 14 | 935 |
 | `infra/` | 20 | 1385 |
 | `hooks/` | 8 | 1280 |
-| `patch/` | 4 | 241 |
+| `patch/` | 4 | 285 |
 | `domains/` | 2 | 111 |
-| `features/` | 32 | 2065 |
-| `host/` | 10 | 1531 |
-| **合计** | **97** | **7813** |
+| `features/` | 34 | 2167 |
+| `host/` | 12 | 1772 |
+| **合计** | **101** | **8261** |
 
 ### 已迁移插件（`features/*`）
 
@@ -42,6 +42,7 @@
 - `features/quest/`：4 文件 / 162 行
 - `features/simple_mode/`：6 文件 / 462 行
 - `features/special_equip/`：6 文件 / 423 行
+- `features/stack_limit/`：2 文件 / 102 行
 - `features/text_layer/`：4 文件 / 350 行
 
 ### CTest target 分类
@@ -119,6 +120,9 @@ legacy（13）：`autosell_rules_tests`、`autosell_store_tests`、`custom_recip
 | `features/inventory_hooks/plugin.cpp` + `feature/patch/native_inventory_hook.cpp` | claims 表与 backup 目标仍留 `feature/patch`（handler 只能在该 TU 取址），经 `inventory_hooks_claims` / `inventory_hooks_bind_backup` 两个自由函数桥接（双向不 include，避免 feature→feature 依赖）；24 条资源由宿主声明式安装 | claims/backup 随 B2c 业务搬迁迁入 `features/inventory_hooks` |
 | `features/inventory_hooks`（B2a-1） | **禁止 deactivate**：extension_bag / 自动出售 / 合成等 legacy 消费者依赖这 24 个 wrapper（扩展袋读取、扩展补扣、出售门禁）；物理释放在插件 `deactivate` 路径会执行，消费者将在 wrapper 缺失下运行。宿主无「不可 deactivate」标志，靠流程约束 | 消费者改经 capability requires 收口后（B2c/D2）解除 |
 | `feature/patch/native_inventory_hook.h` | 过渡导出：`inventory_native_hook_call_refresh_item_area_original`（refresh → B2c）、`inventory_native_hook_set_sell_gate`（sell-gate → B2c）、`native_hook_func` / `native_unhook_func` 机制原语（→ P5） | refresh/sell-gate：B2c；原语：P5 |
+| `host/core_patches.cpp` + `game/access/patches.cpp`（B2a-2） | 常驻指令 patch 声明式化：19 条站点登记（位段缩窄 ×2 / clamp ×6 / 重定向 arg ×5 + call ×5 / hub ×1），`kBlRedirectToSymbol` 目标经 `fn_resolve` 解析。monster 兼容是**扫描式例外**：地址按运行时特征字节定位，无法静态登记，经 `patch::install_word_at` 占用同一张点表、不入 `hooks/registry` 资源表 | 扫描式例外长期保留（特征字节定位方式不变，无清除阶段） |
+| `feature/patch/game_patch.{h,cpp}`（B2a-2） | 常驻 patch 原语与 stack_limit 状态已迁出，仅保留 move_merge 开关（GOT 槽指针 hook）与 IAP 恢复；`game_ui_virtbag.cpp` 仍因 move_merge 开关 include 本头（feature→feature 过渡依赖） | move_merge 相关随 B2a-3 迁移后删除 |
+| `core/native/stack_limit_state.cpp`（B2a-2） | stack_limit 有效态实现放在 `core/native/`（`arch_common` 过渡映射为 `infra` 层）；只读端口 `stack_limit_port.h` 冻结 | P5 迁入 `infra/` 正式路径后转正 |
 
 ## 验证附录
 
