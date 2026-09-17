@@ -11,7 +11,7 @@
 | — | 目标架构设计书入库 | ✅ 完成 | 根目录 `ARCHITECTURE.md` v0.3（提交 `1fa9ef2`） |
 | P1 | 骨架：`contracts/` + `infra/` + `game/`；最小诊断接口 | ✅ 完成 | host 20/20（`e472d52`）；`GET /api/system/features` 与 `/api/health`（加法扩展 ready/variant）真机通过（`18f0a91` + 后续提交，卡见 `verification.md` VM-P1-02/03） |
 | P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | ✅ 完成 | 真机卡 VM-P2-01 PASS（两态翻转 + 状态一致 + 半血 A/B 135↔270 + 无崩溃）；host 23/23；基线 124→121 |
-| P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ✅ 完成 | 真机卡 VM-P3-01 PASS（deactivate→`free`、物理归还 A/B `hp=270`、activate 重挂载 `hp=135`，U6 闭合）；故障注入 host-only（VM-P3-02，277+84 断言）；host 25/25 |
+| P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ✅ 完成 | 真机卡 VM-P3-01/VM-P3-03 PASS（deactivate→`free`、物理归还 A/B `hp=270`、activate 重挂载 `hp=135`，U6 闭合；10 态 API + tickets `pending→done`）；故障注入 host-only（VM-P3-02，277+115 断言）；host 25/25 |
 | P4 | 批量迁移其余插件（内置静态轨） | ⬜ 未开始 | 每插件：单测 + 验收卡；豁免清零 |
 | P5 | `products/` + `host/` 收口；脚本收紧；删除旧路径 | ⬜ 未开始 | `check_*` 全绿、双轨消失 |
 | P6（可选） | 外部插件轨（草案） | ⬜ 未开始 | 导入/拒绝/禁用/崩溃兜底真机通过 |
@@ -71,7 +71,7 @@
 ## 6. P4 执行顺序与依赖
 
 原则：**依赖驱动 + 机制先行**——每个新机制先用最小载体点亮并冻结接口，再迁大件；大件提前"开拆"冻结接口、实现放最后。
-约束（ADR-0003）：每条 lane 一条子分支 + worktree；`contracts/`、`infra/`、`hooks/`、`patch/` 同一时间只允许一条 lane 修改。
+约束（ADR-0003）：阶段 A（核心机制 + 最小验证载体）在**集成分支串行**；阶段 B 起独立插件迁移每 lane 一条子分支 + worktree；若某 lane 需改核心（如 B4 的 `infra/store`），**先在集成分支完成并冻结该核心件**，再开插件子分支；`contracts/`、`infra/`、`hooks/`、`patch/` 同一时间只允许一条 lane 修改。
 规划载体约定：**每域不单独建"规划书"**——规划=本节 + §2 台账；实现规格=任务规格（临时，不落库）；证据=`verification.md` 验收卡。
 
 ### 阶段 A：机制铺路（核心串行）
@@ -92,7 +92,7 @@
 | B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | ⬜ |
 | B2 | `feature/patch` 业务拆分 | 2,888 行 | A1、A4 | ⬜ |
 | B3 | `autosell` | 1,030 行 | A3 | ⬜ |
-| B4 | `save_backup` + `infra/store` | 2,371 行 | A2 | ⬜ |
+| B4 | `save_backup` + `infra/store`（`infra/store` 属核心件：先在集成分支落地并冻结，再开插件 lane） | 2,371 行 | A2 | ⬜ |
 
 ### 阶段 C：中件
 

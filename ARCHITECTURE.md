@@ -1,6 +1,6 @@
 # 架构设计书：分层收口与插件化
 
-> 状态：**v0.3.5（P4 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-17
+> 状态：**v0.3.6（P4 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-17
 > 签署定义：签署 = 外部复审无阻断项 且 版本记录与未决项表逐项有结论。P0–P3 的「完成」仅指各阶段出口条件达成，**不表示**本设计书已签署或未决项已闭合（见 §12.3）。
 > 适用范围：**§1–§9、§11、§12 对内置插件轨（含全部核心架构）为权威规范**；**§3.7/§3.8 外部插件轨为未冻结设计草案**（P6 前允许大改，不构成实施承诺）。
 > 权威层级：架构规则以本文为准；校验脚本输出只代表「当前实现事实」。二者不一致时构建失败，必须显式走「改设计」或「登记临时豁免（带文档锚点）」之一。
@@ -12,6 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.6 | 闭合第四轮审阅：`on_resource_ready` 失败改为**全量逆序回滚**（与 §3.2 语义 5 及实现一致；回滚失败 → tombstone+隔离）；删除写入口的「生命周期回调」例外（`game/write\|ops` 仅主线程命令处理器）；内置插件变体约束改由**必需资源的符号/能力位条件**表达（删除 §8 的 `supportedVariants` 行）；§3.2 补 `resolving → failed` 迁移边、`invalid` 移除「契约 major 不兼容」 |
 | v0.3.5 | 闭合第三轮审阅：`degraded` 定为正交健康标记、`cascade_stopped` 降为原因码（生命周期收敛为 10 态）；共享资源同样由 owner 提供 `handler`；`on_resource_ready` 定为受限生命周期回调并带失败回滚语义；物理还原失败统一 `failed + isolated`；删除 HTTP 同步等待例外；ticket 查询随首个返回票据的端点落地；feature 对 `game/write\|ops` 的调用限定主线程命令路径；补 capability 注册时序；明确 feature UI 与 products/qol 边界；首页版本/签署状态与未决项归属校准 |
 | v0.3.4 | P3 实施校准：状态 API 补 `GET /api/system/resources` 与 `POST /api/op/features/lifecycle`（生命周期控制经命令端口，`op` 门控）；票据查询端点明确推迟到 P4 |
 | v0.3.3 | P2 实施校准：`PluginDescriptor` 增加 `on_resource_ready`——宿主声明式安装后须把 backup（原函数入口）交还所有者，否则 wrapper 无法调用原函数 |
@@ -151,8 +152,8 @@ module/app/src/main/cpp/
 
 ```
 registered → resolving → { installed_disabled ⇄ enabled } → deactivating → inactive
-                ↓                ↓
-             blocked         failed（可显式重试）
+                ↓    ↘           ↓
+             blocked   failed（可显式重试）
                 ↓
           unsupported / invalid（不可重试，除非条件改变/人工修正）
 ```
@@ -160,10 +161,10 @@ registered → resolving → { installed_disabled ⇄ enabled } → deactivating
 | 状态 | 含义 | 迁移 |
 |---|---|---|
 | `registered` | 已注册，未解析 | → resolving |
-| `resolving` | 依赖/变体/清单校验中 | → installed_disabled / blocked / unsupported / invalid |
+| `resolving` | 依赖/变体/清单校验中 | → installed_disabled / blocked / unsupported / invalid / **failed（安装失败）** |
 | `blocked` | 必需能力缺失（可补齐） | → resolving（显式重试或依赖提供者恢复） |
 | `unsupported` | 变体或符号不支持（非错误） | 条件改变（换变体）后 → resolving |
-| `invalid` | 清单不合法 / 契约 major 不兼容 / 签名校验失败 | 人工修正后 → resolving |
+| `invalid` | 清单不合法 / 签名校验失败 | 人工修正后 → resolving |
 | `installed_disabled` | 资源已声明、开关关闭；消费者未注册、门禁关闭、无业务副作用 | ⇄ enabled；→ deactivating |
 | `enabled` | 资源生效、消费者已注册 | → installed_disabled / deactivating |
 | `deactivating` | 摘消费者、等待在途归零、还原资源 | → inactive / failed |
@@ -216,7 +217,7 @@ struct PluginDescriptor {
 - **状态所有权**：`fill_status` 用宿主传入的 out 参数填充，避免跨边界所有权问题。
 - **资源与能力的启停由宿主通用执行**（声明式）；`install/deactivate` 只做插件自身初始化与清理；`on_enabled/on_disabled` 不得申请/释放资源。
 - **backup 交还**：宿主在资源安装成功后经 `on_resource_ready` 把原函数入口交还所有者；插件不得自行安装资源。
-- **`on_resource_ready` 是受限生命周期回调**，不属于 §4.4「安装期间不得调用插件业务代码」中的业务代码：只允许缓存 backup、更新门禁/原子量等常数时间操作；禁止资源操作、游戏内存读写、跨线程等待与长逻辑。返回非 0 → 宿主将**该资源**按还原释放撤回，并把插件置 `failed`（reason=`resource_ready_failed`）。
+- **`on_resource_ready` 是受限生命周期回调**，不属于 §4.4「安装期间不得调用插件业务代码」中的业务代码：只允许缓存 backup、更新门禁/原子量等常数时间操作；禁止资源操作、游戏内存读写、跨线程等待与长逻辑。返回非 0 → 宿主**按插件安装事务逆序回滚该插件全部已安装资源**，再置 `failed`（reason=`resource_ready_failed`）；**任一资源回滚失败 → 该资源 `tombstone` + 隔离**（§3.2 语义 5「禁止半装状态对外可见」）。
 - 拓扑排序输入 = `requires` + `provides`；缺 `requires` → `blocked`；缺 `optional_requires` → 健康标记 `degraded`（生命周期态不变，见 §3.2）。
 
 ### 3.4 能力契约与命令端口
@@ -435,7 +436,7 @@ game/
 
 规则：
 - 只有 `game/` 允许 include `game/symbols/*` 并出现十六进制地址；其余层**禁止 include symbols 头**（结构性阻止），`check_offsets.py` 做补充文本扫描。
-- `game/write/**` 与 `game/ops/**` 只允许在**主线程命令处理器与受限生命周期回调**中调用（写入口原则，§3.4）；feature 对 `game/` 的其余依赖（read/abi）不受限。
+- `game/write/**` 与 `game/ops/**` **只允许在主线程命令处理器中调用**（写入口原则，§3.4）；无生命周期回调例外——`install/on_enabled/on_disabled/on_resource_ready/deactivate` 均不得调用；feature 对 `game/` 的其余依赖（read/abi）不受限。
 - 变体未知或必需符号缺失 → 依赖该能力的插件置 `unsupported`，不启动、不半装（§8）。
 - 换版本流程脚本化：提取 so → 符号校验 → 生成变体差异 → 真机验证清单。
 
@@ -529,9 +530,11 @@ com.inotia4.qol/
 | 维度 | 取值 | 判定 |
 |---|---|---|
 | variant | 原版 / 大修 / monster / unknown | `unknown` → 依赖具体符号的插件 `unsupported` |
-| plugin | `supportedVariants` 声明 | 不命中 → `blocked`（可配置强制忽略，风险自担） |
+| plugin 变体约束 | 无独立字段：由 `requires` 资源的**符号存在 + 变体能力位**条件表达（§5） | 不满足 → `unsupported`（reason 指明资源与条件）；`blocked` 仅用于能力缺失 |
 | capability | major 相等 + minor 满足 | 不满足 → `blocked`；optional 缺失 → 健康标记 `degraded` |
 | resource 声明 | 符号存在 + 变体能力位 + 原字节校验 | 任一失败 → 按 `requirement` 判定（下表） |
+
+> 内置插件**不设** `supportedVariants` 字段；外部轨清单的同名字段（§3.7 草案）只用于**容器导入拒绝**，不影响内置轨判定。`resolve` 期的变体条件预检（符号存在性 + 能力位，产出 `unsupported` + reason）随首个受变体约束的插件落地（P4）。
 
 **资源失败 → 插件状态映射**
 
