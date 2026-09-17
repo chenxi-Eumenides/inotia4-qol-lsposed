@@ -1,5 +1,4 @@
 #include "gamebridge_internal.h"
-#include "core/native/frame_host.h"
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
@@ -16,6 +15,7 @@
 #include "feature/special_equip/special_equip.h"
 #include "feature/world_teleport/world_teleport.h"
 #include "host/assembly.h"
+#include "host/frame_source.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -58,7 +58,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         save_backup_slot_delete_hook_install_if_ready();
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
         // 进入存档后由 autosell_register_save_enter 的回调注册（见 autosell_scan.cpp）。
-        if (frame_host_install_if_ready()) {
+        if (qol::host::frame_source_install()) {
             autosell_set_host_installed(true);
         }
         // 角色升级所需经验游戏线程缓存：注册常驻逻辑帧任务（CHAR_GetNextExperience 非纯读，

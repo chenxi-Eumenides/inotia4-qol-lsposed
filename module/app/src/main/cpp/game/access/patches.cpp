@@ -12,7 +12,7 @@ namespace {
 struct SiteEntry {
     const char* name;
     uintptr_t vma;
-    uint32_t offset;
+    size_t offset;
     uint32_t expected_word;
     uint32_t replacement_word;
     PatchKind kind;
@@ -25,6 +25,12 @@ constexpr SiteEntry kSites[] = {
     // 站立闸门：条件分支置 NOP，无透传执行体。
     {"P_CHAR_MOVE_PUSH_STAND", F_CHAR_MOVE_VMA, CHAR_MOVE_PUSH_STAND_CBZ_OFF,
      CHAR_MOVE_PUSH_STAND_CBZ_WORD, ARM64_NOP_WORD, PatchKind::kWordReplace},
+    // 帧源锚点（常驻，owner=core）：BL 重定向到帧派发 wrapper。
+    {"P_GAMESTATE_DRAWPLAY_DRAWBASE", F_GAMESTATE_DRAWPLAY_VMA,
+     F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF, GAMESTATE_DRAWPLAY_DRAWBASE_CALL_WORD, 0,
+     PatchKind::kBlRedirect},
+    {"P_MAINPROCESS_NEXT_STATE", F_MAINPROCESS_VMA, F_MAINPROCESS_NEXT_STATE_CALL_OFF,
+     MAINPROCESS_NEXT_STATE_CALL_WORD, 0, PatchKind::kBlRedirect},
 };
 
 }  // namespace

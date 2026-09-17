@@ -512,7 +512,8 @@ constexpr uintptr_t F_STATE_SET_VMA = 0xd46a8;                // void (int32_t) 
 // wrapper 先派发 kFramePointLogicPre，再复刻原调用；消费点位于帧计数自增与 Draw 之前，
 // 状态切换会在旧态 Process/Draw 空指针门（GAMESTATE_SetState 清函数指针）保护下安全落地。
 constexpr uintptr_t F_MAINPROCESS_VMA = 0xd4984;                          // void MainProcess()（游戏逻辑帧根，GLThread）
-constexpr size_t F_MAINPROCESS_NEXT_STATE_CALL_OFF = 0x40;                // 内 bl STATE_NextStartProcess（字 0x97ffff3d）
+constexpr size_t F_MAINPROCESS_NEXT_STATE_CALL_OFF = 0x40;                // 内 bl STATE_NextStartProcess
+constexpr uint32_t MAINPROCESS_NEXT_STATE_CALL_WORD = 0x97ffff3d;         // MainProcess +0x40 原 bl 指令字（llvm-objdump 核对）
 constexpr uintptr_t F_STATE_NEXT_START_PROCESS_VMA = 0xd46b8;             // void STATE_NextStartProcess()
 constexpr uintptr_t F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA = 0x10013c;  // void (void) 点空槽进选角（GAME_Initialize + MAP_Load(6) + MAINMENU_CreateSelectCharList；SaveSlot_GoToNewGame 调用）
 constexpr uintptr_t F_SELECT_CHARACTER_START_GAME_VMA = 0x14de98;      // void (void) 选角确认开始（[0x2f5000+0xa00]=选中职业 + STATE_Set(5) + UI_SetPopupProcessInfo(4,0) + Flurry 统计；SelectCharacter_ButtonStartExe 调用）
@@ -1225,4 +1226,5 @@ constexpr uintptr_t F_GAMESTATE_DRAWPLAY_VMA = 0x9d6cc;  // void GAMESTATE_DrawP
 // 故每次 DrawPlay 必执行。
 constexpr uintptr_t F_MAP_DRAWBASE_VMA = 0x111d14;              // void MAP_DrawBase()
 constexpr size_t F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF = 0x20; // GAMESTATE_DrawPlay 内 bl MAP_DrawBase
+constexpr uint32_t GAMESTATE_DRAWPLAY_DRAWBASE_CALL_WORD = 0x9401d18a;  // GAMESTATE_DrawPlay +0x20 原 bl 指令字（llvm-objdump 核对）
 using MapDrawBaseFn = void (*)();                               // void MAP_DrawBase()

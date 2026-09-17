@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include "core/native/call_patch.h"
-#include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "features/push_all/plugin.h"
@@ -12,10 +11,12 @@
 #include "game/access/symbols.h"
 #include "game/clock.h"
 #include "hooks/transaction.h"
+#include "host/frame_source.h"
 #include "host/plugin_registry.h"
 #include "infra/commands.h"
 #include "infra/config.h"
 #include "infra/runtime.h"
+#include "infra/scheduler.h"
 #include "patch/instr_patch.h"
 
 namespace qol::host {
@@ -59,7 +60,9 @@ MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr
 }
 
 // 逻辑帧任务：命令排空 → 生命周期推进 → 门禁对齐（主线程）。
-// P2 过渡期复用既有帧宿主（core/native/frame_host 提供 kFramePointLogicPre 派发）。
+// 经 infra::scheduler 逻辑帧点派发；帧源 wrapper 同时派发 legacy frame_task，
+// 未迁移消费者（autosell/quest/save_enter/transition_dispatch/char_next_exp_cache 等）
+// 在各自迁移前继续由 legacy 管理器工作。
 // 顺序原因：先执行命令（可能触发 lifecycle_apply 启动事务），再推进生命周期事务，
 // 最后门禁对齐；sync_gates 只处理 kEnabled/kInstalledDisabled，不会与事务中间态冲突。
 // 返回 true = 保留期任务，不自动注销。
@@ -81,8 +84,14 @@ bool assembly_init() {
     // 帧时钟注入：infra 不依赖 game，游戏事实由 host 装配时提供（见 infra/runtime.h）。
     infra::runtime_init(infra::Clock{&qol::game::frame_count});
 
+    // 帧源常驻资源：渲染/逻辑锚点。未就绪时 fail-closed 返回 false；不阻断插件注册，
+    // 后续可重试（gamebridge 在 bridge 就绪后亦会先调用一次）。
+    if (!frame_source_install()) {
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: frame source not ready");
+    }
+
     // 命令通道每逻辑帧排空一次；命令体在主线程执行（§6.1）。
-    frame_task_add(kFramePointLogicPre, &drain_commands_task, nullptr, 1, 0);
+    infra::scheduler_add(infra::FramePoint::kLogicPre, &drain_commands_task, nullptr, 1, 0);
 
     // hook/unhook 原语过渡期取自 feature/patch；P5 迁往 patch/ 后改引 patch 层。
     // native_hook_func/native_unhook_func 是机制原语的获取器（返回函数指针）；这里先取获取器

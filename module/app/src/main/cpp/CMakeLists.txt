@@ -66,7 +66,6 @@ target_link_libraries(gamebridge ${log-lib} dl)
 target_sources(gamebridge PRIVATE
     core/native/call_patch.cpp
     core/native/frame_task.cpp
-    core/native/frame_host.cpp
     core/native/save_enter.cpp
     core/native/save_exit.cpp
     core/native/inventory_trade.cpp
@@ -216,6 +215,12 @@ target_sources(gamebridge PRIVATE
     features/push_all/rules.cpp
     features/push_all/feature.cpp
     features/push_all/plugin.cpp
+)
+
+# P4 阶段 A2a：infra/scheduler 形式化 + 帧源声明式 core 资源（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    infra/scheduler.cpp
+    host/frame_source.cpp
 )
 
 # P3 Lane B：生命周期 JNI 薄层（控制端点经命令端口投递，末尾追加，不改上方既有行）

@@ -46,10 +46,10 @@
 | `features/world_teleport` | 4 |
 | `game` | 27 |
 | `hooks` | 6 |
-| `host` | 23 |
-| `infra` | 39 |
+| `host` | 25 |
+| `infra` | 40 |
 | `patch` | 7 |
-| **合计** | **279** |
+| **合计** | **282** |
 
 ### 1.2 迁移期映射摘要
 
@@ -134,20 +134,20 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
+| `host` | `infra` | 26 |
 | `features/ui` | `game` | 24 |
-| `host` | `infra` | 23 |
 | `features/ui` | `infra` | 12 |
-| `infra` | `game` | 12 |
 | `features/patch` | `game` | 11 |
 | `features/extension_bag` | `game` | 10 |
+| `host` | `game` | 10 |
+| `infra` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `features/autosell` | `game` | 8 |
-| `host` | `game` | 8 |
 | `domains/world` | `game` | 7 |
 | `features/extension_bag` | `contracts` | 7 |
+| `host` | `contracts` | 7 |
 | `host` | `features/ui` | 7 |
 | `features/ui` | `patch` | 6 |
-| `host` | `contracts` | 6 |
 | `host` | `features/autosell` | 6 |
 
 ### 2.2 include 环
@@ -231,20 +231,18 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 37 个 / 文件 22 个 / 去重符号 13 个 / 无法归属 18 个。
+扫描合计：安装点 33 个 / 文件 21 个 / 去重符号 11 个 / 无法归属 18 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 8 | 11 | 6 |
-| call patch | 6 | 15 | 8 |
+| call patch | 5 | 11 | 6 |
 | ptr slot | 9 | 11 | 2 |
 
-去重符号 → 文件（前 13 条，共 13 条；`--verbose` 列全部）：
+去重符号 → 文件（前 11 条，共 11 条；`--verbose` 列全部）：
 
-- `F_GAMESTATE_DRAWPLAY_VMA` → `core/native/frame_host.cpp`
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_INVEN_FIND_SAVE_SLOT_VMA` → `feature/patch/game_patch_core.inc`
-- `F_MAINPROCESS_VMA` → `core/native/frame_host.cpp`
 - `F_MATH_GET_RANDOM_VMA` → `feature/attribute_range/game_ui_attr_range.cpp`
 - `F_MEMORYTEXT_GET_TEXT_VMA` → `feature/ui/module_text.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`

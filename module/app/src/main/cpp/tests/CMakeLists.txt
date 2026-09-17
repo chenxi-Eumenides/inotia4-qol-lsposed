@@ -364,3 +364,17 @@ target_include_directories(push_all_rules_tests PRIVATE
 target_compile_features(push_all_rules_tests PRIVATE cxx_std_17)
 set_target_properties(push_all_rules_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME push_all_rules_tests COMMAND push_all_rules_tests)
+
+# P4 阶段 A2a：infra/scheduler 形式化 host 测试（末尾追加）
+add_executable(infra_scheduler_tests
+    test_infra_scheduler.cpp
+    ${CPP_DIR}/infra/scheduler.cpp
+    ${CPP_DIR}/infra/runtime.cpp
+)
+target_include_directories(infra_scheduler_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(infra_scheduler_tests PRIVATE cxx_std_17)
+set_target_properties(infra_scheduler_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(infra_scheduler_tests PRIVATE Threads::Threads)
+add_test(NAME infra_scheduler_tests COMMAND infra_scheduler_tests)
