@@ -90,7 +90,7 @@
 
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
-| B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | 🔄 进行中（VM-P4-06 状态面 PASS：两 hook `live`；行为面待用户确认） |
+| B1 | `special_equip` | 272 行 | —（入口 hook 机制已由 P2 验证，可并行） | ✅ 完成（VM-P4-06 PASS：两 hook `live`；**用户真机确认功能正常**——普通队友/主角可穿脱专属位装备且可售，特殊 NPC 队友维持原版锁定） |
 | B2 | `feature/patch` 业务拆分 | 2,888 行 | A1、A4 | ⬜ |
 | B3 | `autosell` | 1,030 行 | A3 | ⬜ |
 | B4 | `save_backup` + `infra/store`（`infra/store` 属核心件：先在集成分支落地并冻结，再开插件 lane） | 2,371 行 | A2 | ⬜ |
