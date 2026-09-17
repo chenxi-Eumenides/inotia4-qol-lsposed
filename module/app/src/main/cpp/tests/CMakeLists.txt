@@ -283,3 +283,19 @@ target_compile_features(plugin_registry_tests PRIVATE cxx_std_17)
 set_target_properties(plugin_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(plugin_registry_tests PRIVATE Threads::Threads)
 add_test(NAME plugin_registry_tests COMMAND plugin_registry_tests)
+
+# P3 Lane A：资源事务引擎 host 测试（运行期记录/在途/隔离/物理释放/帧步进事务，末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 按 §3.3 使用字段名 requires，而 host 编译器
+# 默认 C++20（requires 是关键字）；Android 构建本身固定 -std=c++17，这里与之一致。
+add_executable(hooks_transaction_tests
+    test_hooks_transaction.cpp
+    ${CPP_DIR}/hooks/registry.cpp
+    ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/hooks/transaction.cpp
+)
+target_include_directories(hooks_transaction_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(hooks_transaction_tests PRIVATE cxx_std_17)
+set_target_properties(hooks_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME hooks_transaction_tests COMMAND hooks_transaction_tests)

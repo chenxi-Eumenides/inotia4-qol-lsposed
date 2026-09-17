@@ -37,4 +37,23 @@ InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
                                         NativeHookFn hook_fn,
                                         bool gate_on);
 
+// 宿主注入的 unhook 原语：func 为原函数入口（resolved_entry），成功返回 0。
+using NativeUnhookFn = int (*)(void* func);
+
+// ok 非 0 = 失败；error 为静态字符串（成功时为 nullptr）。
+struct ReleaseOutcome {
+    int32_t ok;
+    const char* error;
+};
+
+// 释放单条入口 hook 资源（§4.2 物理归还）：成功 → 状态置 kFree 并 runtime_clear。
+// 失败时不改登记表状态，error 为静态字符串：
+// - claim 未登记 → "claim not registered"；
+// - mechanism != kEntryHook → "mechanism mismatch"；
+// - resolved_entry == 0 或 unhook_fn == nullptr → "not ready"；
+// - unhook 返回值非 0 → "native unhook failed"。
+ReleaseOutcome release_claim_entry_hook(const contracts::ResourceClaim& claim,
+                                        uintptr_t resolved_entry,
+                                        NativeUnhookFn unhook_fn);
+
 }  // namespace qol::hooks

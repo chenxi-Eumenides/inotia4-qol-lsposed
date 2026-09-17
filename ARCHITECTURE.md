@@ -11,6 +11,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.4 | P3 实施校准：状态 API 补 `GET /api/system/resources` 与 `POST /api/op/features/lifecycle`（生命周期控制经命令端口，`op` 门控）；票据查询端点明确推迟到 P4 |
 | v0.3.3 | P2 实施校准：`PluginDescriptor` 增加 `on_resource_ready`——宿主声明式安装后须把 backup（原函数入口）交还所有者，否则 wrapper 无法调用原函数 |
 | v0.3.2 | P2 实施校准：资源声明补充 `handler`（所有者提供的替换入口）——否则「宿主声明式安装」在入口 hook 机制下无可执行体 |
 | v0.3.1 | 实施校准（P1）：诊断接口按实测收敛——`features` 为 `{"ok":true,"features":[...]}` 信封并含 `version/resource_count`；`/api/health` 以加法扩展承载 `ready/variant`；`safeMode` 移至 P6 |
@@ -528,7 +529,16 @@ P1 最小诊断接口（必须）：
 | `GET /api/system/features` | `{"ok":true,"features":[{id, version, state, enabled, error, resource_count}]}` | 状态登记表导出；`state` 为英文枚举名 |
 | `GET /api/health`（既有端点，**加法扩展**） | `{"ok":true,"ready":true,"variant":{"series","version","known","capabilities"}}` | `ok` 保持不变；`ready` 与 503 语义一致；`variant` 取自 `game/` 变体表 |
 
-P2 起扩展：`features` 追加 `resources[]/requires[]/provides[]/degraded`；新增 `GET /api/system/resources`（资源占用状态、消费者、权限类型、失败模式）与 `GET /api/system/tickets/{id}`（命令票据状态）。
+P2 已落地：`features` 追加 `resources[]/requires[]/provides[]/degraded`。
+
+P3 落地：
+
+| 端点 | 响应 | 说明 |
+|---|---|---|
+| `GET /api/system/resources` | `{"ok":true,"resources":[{id, owner, mechanism, policy, state, in_flight, isolated}]}` | 资源登记表导出；`state` = free/disabled/live/tombstone |
+| `POST /api/op/features/lifecycle` | `{"ok":true,"ticket":N}` | `op` 门控；body `{id, action: enable\|disable\|deactivate\|activate}`，经命令端口投递、主线程帧步进执行；查询走 `features` 状态 |
+
+`GET /api/system/tickets/{id}` 随首个异步 HTTP 命令（P4）落地。
 
 `safeMode` 移到 P6（外部插件轨）：P1–P5 不存在可禁用的外部插件，恒定 `false` 无诊断价值。
 

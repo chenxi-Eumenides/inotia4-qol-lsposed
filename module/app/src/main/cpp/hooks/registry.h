@@ -33,7 +33,40 @@ const contracts::ResourceClaim* claim_at(uint32_t index);
 
 uint32_t count_by_state(contracts::ResourceState state);
 
-// 测试用：清空登记表。
+// 资源运行期记录（安装成功后登记；释放成功后清除）。
+// 运行期字段与登记声明同表存储：事务引擎与宿主诊断均从此处读取。
+struct ResourceRuntime {
+    uintptr_t resolved_entry = 0;
+    void* backup = nullptr;
+    uint32_t in_flight = 0;   // 快照值；写路径见 in_flight_enter/leave
+    bool isolated = false;
+};
+
+// 登记运行期解析结果：已登记 → 写入 entry/backup 并返回 true；未登记 → false。
+// 只写 resolved_entry/backup，不改变 in_flight/isolated。
+bool runtime_set(const char* resource_id, uintptr_t resolved_entry, void* backup);
+
+// 清除运行期记录（物理释放成功后登记表回到 free）：已登记 → 清零 entry/backup/in_flight 并返回 true。
+// isolated 是进程级隔离标记，不随运行期记录清除。
+bool runtime_clear(const char* resource_id);
+
+// 未登记或未写运行期（resolved_entry==0）→ false。
+bool runtime_of(const char* resource_id, ResourceRuntime* out);
+
+// 在途计数原子 +1；未登记 → false。
+bool in_flight_enter(const char* resource_id);
+
+// 在途计数原子 -1（下界 0）；未登记 → false。
+bool in_flight_leave(const char* resource_id);
+
+// 未登记 → 0。
+uint32_t in_flight_count(const char* resource_id);
+
+// 隔离标记写入/读取；未登记 → false。
+bool isolated_set(const char* resource_id, bool isolated);
+bool isolated_get(const char* resource_id);
+
+// 测试用：清空登记表与全部运行期字段。
 void registry_reset_for_test();
 
 }  // namespace qol::hooks

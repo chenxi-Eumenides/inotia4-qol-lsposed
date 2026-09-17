@@ -45,11 +45,11 @@
 | `features/ui` | 33 |
 | `features/world_teleport` | 4 |
 | `game` | 25 |
-| `hooks` | 4 |
+| `hooks` | 6 |
 | `host` | 22 |
 | `infra` | 39 |
 | `patch` | 3 |
-| **合计** | **266** |
+| **合计** | **268** |
 
 ### 1.2 迁移期映射摘要
 
