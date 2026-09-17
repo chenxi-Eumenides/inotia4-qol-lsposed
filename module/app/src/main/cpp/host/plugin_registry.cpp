@@ -97,6 +97,26 @@ void revoke_resource(const char* resource_id, const HostDeps& deps) {
     }
 }
 
+// 逆序撤回一组已记录资源（§3.2 语义 5：禁止半装对外可见）。
+void rollback_installed(const contracts::ResourceClaim* const* claims, uint32_t count,
+                        const HostDeps& deps) {
+    for (uint32_t i = count; i > 0; --i) {
+        revoke_resource(claims[i - 1]->id, deps);
+    }
+}
+
+// 逆序撤回插件当前处于已装态（live/disabled）的全部资源；用于还原事务启动失败时的同步兜底。
+void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const HostDeps& deps) {
+    for (uint32_t i = plugin.resources_count; i > 0; --i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i - 1];
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            revoke_resource(claim.id, deps);
+        }
+    }
+}
+
 // 门禁监督辅助：同步某插件带 gate 资源的登记状态，并汇总目标态。
 // 只改写 disabled/live 两态：free（未安装）与 tombstone（保留占用）不得被监督改写。
 void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_has_gate,
@@ -246,10 +266,13 @@ int install_all(const HostDeps& deps) {
             // 同步路径同样登记运行期入口：运行期 deactivate/撤回的物理归还要用 resolved_entry。
             hooks::runtime_set(claim.id, entry, outcome.backup);
             // 立即把原函数入口交还所有者（§3.3「backup 交还」）。返回非 0 = 受限回调失败：
-            // 撤回该资源（撤回失败 → tombstone + 隔离），插件置 failed。
+            // 按逆序同步撤回本插件全部已装资源（含本条），禁止半装对外可见（§3.2 语义 5）。
             if (plugin.on_resource_ready != nullptr &&
                 plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
-                revoke_resource(claim.id, deps);
+                installed_claims[installed_count] = &claim;
+                installed_entries[installed_count] = entry;
+                ++installed_count;
+                rollback_installed(installed_claims, installed_count, deps);
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
                                      "resource_ready_failed");
                 QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
@@ -418,20 +441,35 @@ uint32_t lifecycle_step() {
         // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
         // backup 非空是「本步真实安装」的判据：幂等跳过步 backup 为 null，交还会把
         // 插件已持有的有效入口覆盖成 null（wrapper 随即 fail-closed），故跳过。
+        bool switched_to_release = false;
         if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
-            out.backup != nullptr && plugin.on_resource_ready != nullptr) {
-            contracts::PluginContext ctx{};
-            if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
-                // 受限回调失败：撤回该资源（撤回失败 → tombstone + 隔离），插件置 failed；
-                // 终态不再覆盖该 failed（事务仍自行走到终态以释放槽位）。
+            out.backup != nullptr) {
+            if (slot.ready_failed) {
+                // 已进入回滚：安装事务后续步新装出的资源立即撤回，禁止半装对外可见。
                 revoke_resource(out.resource_id, g_install_deps);
-                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                     "resource_ready_failed");
-                QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
-                             out.resource_id);
-                slot.ready_failed = true;
+            } else if (plugin.on_resource_ready != nullptr) {
+                contracts::PluginContext ctx{};
+                if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
+                    // 受限回调失败：置 failed，并启动还原事务回滚全部已装资源（§3.2 语义 5）。
+                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                         "resource_ready_failed");
+                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                                 plugin.id, out.resource_id);
+                    slot.ready_failed = true;
+                    const uint64_t release = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+                    if (release != 0) {
+                        // 安装事务已终态：改为驱动还原事务。
+                        slot.tx_id = release;
+                        slot.kind = hooks::TxKind::kRelease;
+                        switched_to_release = true;
+                    } else {
+                        // 安装事务仍在途：退化为逐条同步撤回兜底（后续步新装资源亦即时撤回）。
+                        revoke_installed_resources(plugin, g_install_deps);
+                    }
+                }
             }
         }
+        if (switched_to_release) continue;
         if (!out.finished) continue;
 
         if (slot.ready_failed) {

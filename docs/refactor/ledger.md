@@ -31,7 +31,7 @@
 | `feature/attribute_range` | 纯规则 → `core`/`game`；界面 → `features/ui` | 4 | entry hook ×3 | 被 3 个域依赖；符号头引用 | P4 |
 | `feature/craft_ui` | `features/craft_ui` | 4 | entry hook ×11（单一挂载处） | 与 `feature/custom_recipe` 双向 | P4 |
 | `feature/save_backup` | `features/save_backup` | 4 | 无（纯逻辑 + 文件事务） | 被 `feature/ui` 依赖 | P4 |
-| `feature/simple_mode` | `features/simple_mode` | 4 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
+| `feature/simple_mode` | `features/simple_mode` | 6 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
 | `feature/world_teleport` | `features/world_teleport` | 4 | ptr slot、调用点 patch | 依赖 `feature/ui`（native_choice） | P4 |
 | `feature/push_all` | `features/push_all` | 2 | call patch ×2 闸门 | 无已知域间依赖（干净样板） | P2 备选 |
 | `feature/quest` | `features/quest` | 2 | 进档回调 | 无已知域间依赖 | P4 |
@@ -75,6 +75,8 @@
 规划载体约定：**每域不单独建"规划书"**——规划=本节 + §2 台账；实现规格=任务规格（临时，不落库）；证据=`verification.md` 验收卡。
 
 ### 阶段 A：机制铺路（核心串行）
+
+（核心机制 + 最小验证载体：集成分支串行）
 
 | # | lane | 载体（规模） | 点亮机制 | 状态 |
 |---|---|---|---|---|

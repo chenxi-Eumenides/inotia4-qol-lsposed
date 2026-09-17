@@ -36,7 +36,8 @@ void set_gate(bool enabled);
 bool gate_enabled();
 
 // 宿主在资源安装成功后交还 backup（原函数入口）；未知 resource_id 记一次告警后忽略。
-void on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
+// 受限生命周期回调（§3.3）：只缓存 backup，恒返回 0（本插件无失败路径）。
+int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 
 // 两个入口 wrapper：由 plugin_descriptor 的 ResourceClaim.handler 声明，宿主安装。
 void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32_t damage_flag,

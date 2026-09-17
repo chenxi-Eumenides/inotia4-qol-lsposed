@@ -11,6 +11,9 @@
 | **NOT_ACCEPTED** | 触及行为面但缺少真机证据；或以静态审查、Debug 构建、API 成功替代真机回归 |
 | **BLOCKED** | 设备/环境不可用导致无法取证；必须写明待补项与复现命令 |
 
+证据定义：**证据 = 命令 + 该命令的实际输出**；短输出内联在卡片内，长输出给出项目内可复现位置
+（如 `docs/history/` 或 `archive/`）。仅有过程摘要、无命令或无输出者**不算证据**。
+
 证据位置约定：真机证据写入 `.tmp/<task>/` 后迁 `docs/history/` 或 `archive/`；脚本证据以命令与输出为准（可复跑）。
 
 ## 2. 测试分层
@@ -42,10 +45,10 @@
 | VM-P1-01 | `infra` 骨架（快照/命令队列/事件/能力/状态） | host：`cmake --build build && ctest --test-dir build` | PASS（20/20，含快照并发撕裂断言）；范围：host-only，未接线运行时 |
 | VM-P1-02 | 最小诊断接口 `GET /api/system/features` | 真机：安装 debug APK → force-stop → monkey → `dialog/select {"action":"ok"}` → `curl` | PASS（HTTP 200；`{"ok":true,"features":[{"id":"core","version":"0.1.0","state":"enabled",...}]}`；`enter_slot 0` 后复测一致） |
 | VM-P1-03 | `/api/health` 加法扩展 `ready` + `variant` | 真机：安装 debug APK → force-stop → monkey → `curl /api/health` | PASS（`{"ok":true,"ready":true,"variant":{"series":"monster","version":"v27","known":true,"capabilities":3}}`） |
-| VM-P2-01 | P2 纵向样板 `simple_mode`（入口 hook ×2 + 配置 + 状态 + 命令） | 真机：安装 debug APK → 启动 → 关协议页 → `enter_slot 0` → `curl /api/system/features` → `POST /api/config/set` 两态 → 传送到怪物图读 `/api/world/map/enemies` 做 A/B | PASS（启动 `installed_disabled`/两条资源 `disabled`；开 → `enabled`/两条 `live` + 日志 `simple_mode enabled=1`；关 → 回 `installed_disabled`/`disabled` + 日志 `enabled=0`；**半血 A/B**：门禁开时 老鼠/喝醉的蝙蝠 lvl3 `hp=135`，关门禁后刷图 `hp=270`（恰 2×）；无 FATAL/崩溃；基线 124→121 收缩）。范围说明：伤害倍率（×1.5/×0.5）本轮未重复定量测量，规则层由 host 断言覆盖（33 条），历史真机证据见 `archive/docs/development/features/simple-mode.md` |
+| VM-P2-01 | P2 纵向样板 `simple_mode`（入口 hook ×2 + 配置 + 状态 + 命令） | 真机：安装 debug APK → 启动 → 关协议页 → `enter_slot 0` → `curl /api/system/features` → `POST /api/config/set` 两态 → 传送到怪物图读 `/api/world/map/enemies` 做 A/B | PASS（启动 `installed_disabled`/两条资源 `disabled`；开 → `enabled`/两条 `live` + 日志 `simple_mode enabled=1`；关 → 回 `installed_disabled`/`disabled` + 日志 `enabled=0`；**半血 A/B**：门禁开时 老鼠/喝醉的蝙蝠 lvl3 `hp=135`，关门禁后刷图 `hp=270`（恰 2×）；无 FATAL/崩溃；基线 124→121 收缩）。范围说明：伤害倍率子项：**非本卡证据**（历史归档，本轮未复测）；规则层由 host 断言覆盖（33 条），历史记录见 `archive/docs/development/features/simple-mode.md` |
 | VM-P3-01 | P3 生命周期全路径：`deactivate` 物理归还 / `activate` 重挂载 + 资源状态端点 | 真机：安装 debug APK → 进世界 → `config/set {"simpleModeEnabled":true}` → 刷图读 `/api/world/map/enemies` → `POST /api/op/features/lifecycle` 两次（`opEnabled` 临时开启） | PASS（门禁开 `hp=135`；`deactivate` ticket=3 → `inactive` + 两资源 `free`；**物理归还后刷图 `hp=270`**；`activate` ticket=4 → `enabled` + 两资源 `live`；**重挂载后刷图 `hp=135`**；`GET /api/system/resources` 全程一致；无 FATAL）。**U6 闭合：unhook 后重新挂载安全** |
 | VM-P3-02 | 资源事务故障注入与并发（host-only） | `ctest`：`hooks_transaction_tests`（13 用例/277 断言）+ `plugin_lifecycle_tests`（7 用例/84 断言） | PASS(host-only)：安装失败逆序回滚、回滚失败→`tombstone`+隔离、`resumable=false`、在途等待与 `step_budget` 超时、隔离拒绝、同插件单事务、`failed` 显式重试、busy/非法迁移拒绝 |
-| VM-P0-01 | 校验脚本族 + 基线棘轮 | 脚本：`check_arch.py`（含 `--freeze` 拒绝扩容验证） | PASS（124 条基线；新增违规失败；已消除条目可收缩：125→124） |
+| VM-P0-01 | 校验脚本族 + 基线棘轮 | 脚本：`uv run python scripts/maintenance/check_arch.py`（含 `--freeze` 拒绝扩容验证） | PASS（124 条基线；新增违规失败；已消除条目可收缩：125→124） |
 
 > VM-P1-03 执行时发现并修复线上缺陷：变体表停在 monster v26，设备 v27 查表失败
 > （`known=0`、能力位 0，靠 `WH4JRN01` 回退分类）；重新生成后补入 v27/v29，设备命中

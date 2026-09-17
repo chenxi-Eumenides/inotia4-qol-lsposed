@@ -106,14 +106,6 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
-// 受限生命周期回调适配（§3.3）：feature 层 on_resource_ready 保持既有实现（仅缓存 backup），
-// 描述符要求 int32_t 返回（0=成功）；本适配只转发并恒返回 0。
-int32_t plugin_on_resource_ready(contracts::PluginContext& ctx, const char* resource_id,
-                                 void* backup) {
-    on_resource_ready(ctx, resource_id, backup);
-    return 0;
-}
-
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -127,7 +119,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_enabled,
     &plugin_on_disabled,
     &plugin_fill_status,
-    &plugin_on_resource_ready,
+    &on_resource_ready,
 };
 
 }  // namespace

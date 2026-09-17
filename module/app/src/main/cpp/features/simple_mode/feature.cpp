@@ -168,18 +168,20 @@ bool gate_enabled() {
     return g_gate.load(std::memory_order_acquire);
 }
 
-void on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
+// 受限生命周期回调（§3.3）：只缓存 backup，恒返回 0。
+int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
     (void)ctx;
-    if (resource_id == nullptr) return;
+    if (resource_id == nullptr) return 0;
     if (std::strcmp(resource_id, kResourceIdAddDamage) == 0) {
         g_backup_add_damage.store(backup, std::memory_order_release);
-        return;
+        return 0;
     }
     if (std::strcmp(resource_id, kResourceIdUpdateAttrFromMonster) == 0) {
         g_backup_update_attr_from_monster.store(backup, std::memory_order_release);
-        return;
+        return 0;
     }
     QOL_LOG_WARN(QolDomain::kSimpleMode, "unknown resource id: %s", resource_id);
+    return 0;
 }
 
 }  // namespace qol::features::simple_mode

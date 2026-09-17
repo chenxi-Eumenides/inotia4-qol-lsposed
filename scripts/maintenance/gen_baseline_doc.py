@@ -132,21 +132,38 @@ def collect_jni() -> dict:
     }
 
 
-def collect_features(graph: ac.IncludeGraph) -> list[tuple[str, str, int]]:
-    counts: Counter[str] = Counter()
+def collect_features(
+    graph: ac.IncludeGraph,
+) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
+    """返回（旧 `feature/*` 待迁移域，已迁移 `features/*` 域），各为 (name, layer, 文件数)。
+
+    口径区分：`feature/`（旧路径，待迁移）与 `features/`（目标层，已迁移）必须分列，
+    否则同名域名（如 `ui`）会在迁移期互相覆盖，表行数与迁移进度也不可比。
+    """
+    legacy: Counter[str] = Counter()
+    migrated: Counter[str] = Counter()
     for rel in graph.paths:
         parts = rel.split("/")
-        if rel.startswith("feature/") and len(parts) > 2:
-            counts[parts[1]] += 1
-    out: list[tuple[str, str, int]] = []
-    for name in sorted(counts):
-        layer = ""
-        for rel in sorted(graph.paths):
-            if rel.startswith(f"feature/{name}/"):
-                layer = graph.layer(rel)
-                break
-        out.append((name, layer, counts[name]))
-    return out
+        if len(parts) <= 2:
+            continue
+        if rel.startswith("feature/"):
+            legacy[parts[1]] += 1
+        elif rel.startswith("features/"):
+            migrated[parts[1]] += 1
+
+    def build(counts: Counter[str], root: str) -> list[tuple[str, str, int]]:
+        out: list[tuple[str, str, int]] = []
+        for name in sorted(counts):
+            prefix = f"{root}/{name}/"
+            layer = ""
+            for rel in sorted(graph.paths):
+                if rel.startswith(prefix):
+                    layer = graph.layer(rel)
+                    break
+            out.append((name, layer, counts[name]))
+        return out
+
+    return build(legacy, "feature"), build(migrated, "features")
 
 
 # --------------------------------------------------------------------------
@@ -323,11 +340,29 @@ def render_jni(jni: dict) -> list[str]:
 
 
 def render_features(graph: ac.IncludeGraph) -> list[str]:
-    features = collect_features(graph)
-    lines = ["## 6. 功能域清单", "", f"`feature/*` 共 {len(features)} 个域。", ""]
-    lines += ["| 域 | 目标层 | 文件数 |", "| --- | --- | --- |"]
-    for name, layer, count in features:
+    legacy, migrated = collect_features(graph)
+    total = len(legacy) + len(migrated)
+    lines = [
+        "## 6. 功能域清单",
+        "",
+        f"旧 `feature/*`（待迁移 {len(legacy)} 个）与已迁移 `features/*`（{len(migrated)} 个）"
+        f"共 {total} 个域。",
+        "",
+        f"### 6.1 旧 `feature/*`（待迁移，{len(legacy)}）",
+        "",
+        "| 域 | 目标层 | 文件数 |",
+        "| --- | --- | --- |",
+    ]
+    for name, layer, count in legacy:
         lines.append(f"| `{name}` | `{layer}` | {count} |")
+    lines.append("")
+    lines += [f"### 6.2 已迁移 `features/*`（{len(migrated)}）", ""]
+    if migrated:
+        lines += ["| 域 | 目标层 | 文件数 |", "| --- | --- | --- |"]
+        for name, layer, count in migrated:
+            lines.append(f"| `{name}` | `{layer}` | {count} |")
+    else:
+        lines.append("（无）")
     lines.append("")
     return lines
 

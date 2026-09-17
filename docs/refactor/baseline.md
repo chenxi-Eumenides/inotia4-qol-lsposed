@@ -268,7 +268,9 @@
 
 ## 6. 功能域清单
 
-`feature/*` 共 12 个域。
+旧 `feature/*`（待迁移 12 个）与已迁移 `features/*`（1 个）共 13 个域。
+
+### 6.1 旧 `feature/*`（待迁移，12）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -284,6 +286,12 @@
 | `special_equip` | `features/special_equip` | 2 |
 | `ui` | `features/ui` | 33 |
 | `world_teleport` | `features/world_teleport` | 4 |
+
+### 6.2 已迁移 `features/*`（1）
+
+| 域 | 目标层 | 文件数 |
+| --- | --- | --- |
+| `simple_mode` | `features/simple_mode` | 6 |
 
 ## 校验入口
 
