@@ -173,7 +173,10 @@ bool core_patches_install() {
         &call_patch_revert_word,
     });
 
-    if (!bridge_ready() || g_base == 0) {
+    // 未就绪守卫：本入口在 bridge_init() 内部、g_bridge_ready 置位之前被调用，
+    // 因此**不得**以 bridge_ready() 判断（会恒为未就绪并静默失败）；只需 g_base 已定位。
+    // 站点/符号缺失由 install_site 逐条 fail-closed 并记日志。
+    if (g_base == 0) {
         g_installing.store(false, std::memory_order_release);
         return false;  // 未就绪：不改写字节，允许后续重试
     }
