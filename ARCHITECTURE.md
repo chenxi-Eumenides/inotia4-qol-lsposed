@@ -1,6 +1,6 @@
 # 架构设计书：分层收口与插件化
 
-> 状态：**v0.3.8（P4 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-17
+> 状态：**v0.3.9（P4 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-17
 > 签署定义：签署 = 外部复审无阻断项 且 版本记录与未决项表逐项有结论。P0–P3 的「完成」仅指各阶段出口条件达成，**不表示**本设计书已签署或未决项已闭合（见 §12.3）。
 > 适用范围：**§1–§9、§11、§12 对内置插件轨（含全部核心架构）为权威规范**；**§3.7/§3.8 外部插件轨为未冻结设计草案**（P6 前允许大改，不构成实施承诺）。
 > 权威层级：架构规则以本文为准；校验脚本输出只代表「当前实现事实」。二者不一致时构建失败，必须显式走「改设计」或「登记临时豁免（带文档锚点）」之一。
@@ -12,6 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.9 | P6 外部插件方向校准：外部形态收敛为数据扩展与**未签名、全权 native 插件**；删除证书白名单、`read-only/trusted-write` 权限分级及同进程 `.so` 可受限的假设；Host API 改为托管协作面 + raw 便利面，补 TargetRegistry、跨插件能力、托管保证边界、用户显式启用与启动故障恢复 |
 | v0.3.8 | P4-A4 实施校准：分派权限以注册期 `ConsumerKind` 表达（类型化句柄为别名）；**新增阶段参数**（before/after）与「每个回调每次分派只调用一次」规则；Intercept 短路后 after 仅 Observe 生效 |
 | v0.3.7 | P4-A1 实施校准：`patch/` 以**注入原语**实现（`core/native/call_patch` 的物理迁移推迟 P5，避免过渡期 include 越层）；非入口机制经 host 注入分派（`TxDeps.install_other/release_other`），保持 `hooks → patch` 禁止；`kCallPatch` 禁用即物理还原 + 单指令门禁翻转同步执行写入 §4.2 规则 6 |
 | v0.3.6 | 闭合第四轮审阅：`on_resource_ready` 失败改为**全量逆序回滚**（与 §3.2 语义 5 及实现一致；回滚失败 → tombstone+隔离）；删除写入口的「生命周期回调」例外（`game/write\|ops` 仅主线程命令处理器）；内置插件变体约束改由**必需资源的符号/能力位条件**表达（删除 §8 的 `supportedVariants` 行）；§3.2 补 `resolving → failed` 迁移边、`invalid` 移除「契约 major 不兼容」 |
@@ -30,7 +31,7 @@
 |---|---|
 | 分层 | **六个逻辑层**（含 L0 契约层）、**九个顶层目录**：`contracts / game / infra / hooks / patch / domains / features / products / host` |
 | 依赖 | 完整依赖矩阵（§2.2），环由结构与脚本双重排除 |
-| 功能形态 | **一切功能皆插件**：内置静态插件（默认），外部动态插件（P6 草案） |
+| 功能形态 | **一切功能皆插件**：内置静态插件（默认）；外部数据扩展与全权 native 插件（P6 草案） |
 | hook 资源 | 资源集中在 `hooks/`：一资源一安装者 + 消费者注册；插件只声明与注册，机制由宿主执行 |
 | 生命周期 | 十态状态机（§3.2），异步跨帧迁移，幂等、可回滚 |
 | 线程 | **跨线程访问矩阵**（§6.1）：HTTP 只读快照与票据；游戏状态访问仅主线程 |
@@ -61,6 +62,7 @@
 | R4 | 平台加载规则：app 私有目录 `.so` 可 `dlopen`；`/sdcard` 为 noexec；宿主符号对插件不保证可见，能力必须用函数指针表传递；`android_dlopen_ext` 无 flag 可绕过限制；Android 17（target 37）起 `System.load` 要求只读 | 官方文档 + AOSP bionic/sepolicy |
 | R5 | 行为改动手段有五种：直读写内存、调游戏函数、指针槽覆盖、指令 patch、入口 hook。**机制选择按需求决定，不设固定风险序**：风险来自缺少目标校验、失败回滚、开关与状态上报 | 真机验证 |
 | R6 | 同进程内**无法隔离崩溃**：非法内存访问、ABI 破坏、栈溢出会导致游戏进程终止。任何「失败隔离」承诺仅限「消费者返回可恢复错误」 | 运行时事实 |
+| R7 | 外部 native `.so` 一经加载即拥有游戏进程内的完整代码执行能力；符号隐藏、linker namespace、Host API 裁剪和清单声明均不能限制其读取/修改内存、调用系统接口或绕过资源登记 | Linux/Android 进程模型 |
 
 ---
 
@@ -143,12 +145,13 @@ module/app/src/main/cpp/
 
 ## 3. 插件体系
 
-### 3.1 双轨模型
+### 3.1 内置轨与外部形态
 
 | 轨道 | 形态 | 何时用 | 成本 |
 |---|---|---|---|
 | **内置静态插件**（默认） | 编译进主 `.so`，以 `PluginDescriptor` 注册；CMake target 独立 | 全部内置功能 | 零 ABI 成本，编译期类型安全 |
-| **外部动态插件**（P6 草案） | 签名容器 + `dlopen` + C ABI | 第三方扩展 | ABI 版本管理与同进程崩溃面 |
+| **外部数据扩展**（P6 草案） | 未签名 ZIP：JSON、表、资源；不含可执行代码 | 静态规则、配方、文本、资源 | 宿主可完整校验和撤销；不能表达任意逻辑 |
+| **外部 native 插件**（P6 草案） | 未签名 ZIP + `.so` + C ABI | 需要逻辑、hook、patch 或跨插件协作 | 进程内全权代码；无安全隔离保证 |
 
 ### 3.2 生命周期状态机（正式定义）
 
@@ -166,7 +169,7 @@ registered → resolving → { installed_disabled ⇄ enabled } → deactivating
 | `resolving` | 依赖/变体/清单校验中 | → installed_disabled / blocked / unsupported / invalid / **failed（安装失败）** |
 | `blocked` | 必需能力缺失（可补齐） | → resolving（显式重试或依赖提供者恢复） |
 | `unsupported` | 变体或符号不支持（非错误） | 条件改变（换变体）后 → resolving |
-| `invalid` | 清单不合法 / 签名校验失败 | 人工修正后 → resolving |
+| `invalid` | 清单不合法 / 容器损坏 / Host API major 不兼容 | 人工修正后 → resolving |
 | `installed_disabled` | 资源已声明、开关关闭；消费者未注册、门禁关闭、无业务副作用 | ⇄ enabled；→ deactivating |
 | `enabled` | 资源生效、消费者已注册 | → installed_disabled / deactivating |
 | `deactivating` | 摘消费者、等待在途归零、还原资源 | → inactive / failed |
@@ -182,7 +185,7 @@ registered → resolving → { installed_disabled ⇄ enabled } → deactivating
 
 1. **disable（enabled → installed_disabled）**：注销消费者、关闭门禁、清空能力暴露；允许保留**空转安装点**（wrapper 存在但立即透传原函数，fail-closed）。
 2. **deactivate（→ deactivating → inactive）**：摘消费者 → 等待在途归零 → 还原资源（含物理 unhook，见 §4.2）→ 注销能力。**异步跨帧推进，禁止主线程阻塞等待**（§4.4）。
-3. **「零残留」可验证定义**：零业务副作用 + 零消费者 + 零能力暴露 + 登记表占用为 `free` 或 `tombstone`（tombstone 是显式保留占用，见 §4.2）。**不要求** `dlclose`。
+3. **「零残留」可验证定义**：零业务副作用 + 零消费者 + 零能力暴露 + 登记表占用为 `free` 或 `tombstone`（tombstone 是显式保留占用，见 §4.2）。**不要求** `dlclose`。该保证覆盖内置插件、数据扩展和外部 native 插件的**宿主管理部分**；外部 native 自行创建的线程、hook、patch、内存写入及其它 raw 副作用不在保证范围内。
 4. **幂等**：`enable/disable/deactivate` 重复调用返回当前状态；并发调用由唯一执行器串行化。
 5. **部分安装失败**：按逆序回滚已申请部分 → `failed`，失败资源与错误码写入状态；禁止半装状态对外可见。
 6. **在途不归零**：超过帧数预算（§4.4）→ 资源转 `tombstone`，插件 `failed`（reason=`in_flight_timeout`），并进入隔离：禁止重试直到进程重启。
@@ -287,28 +290,31 @@ typedef struct QolCommands {
 
 - 配置：每插件命名空间 `plugin.<id>.*`；读写经 `infra/config`；变更经事件广播。
 - 日志：统一经 `infra/log` 单写者，domain = 插件 id；热路径使用环形缓冲或节流。
-- 状态：`{id, source, enabled, state, error, resources[], requires[], provides[], variant, degraded}`（§9.1）。
+- 状态：`{id, source, enabled, state, error, resources[], requires[], provides[], variant, degraded, managed_resources, guarantees}`（§9.1）。外部 native 的 `guarantees` 固定说明保证仅覆盖宿主管理资源；不得用插件自报字段声称其受到安全限制。
 
 ### 3.6 数据级插件（声明式规则）
 
 - 外部 JSON/表定义规则/配方/阈值/词表；宿主按固定词汇表 + schema 校验；非法项拒收并上报。
 - 只用于非热路径查表；热路径不做解释执行；数据文件默认关闭、可禁用；来源与哈希记录在状态中。
+- 数据扩展**不包含通用逻辑代码**。需要条件、动作或组合时，只能使用宿主已定义的声明式 schema；需要任意逻辑时必须使用外部 native 插件，并接受 §3.7 的全权代码模型。
 
 ### 3.7 外部插件轨（**未冻结设计草案**）
 
-**容器**：签名 APK（zip）：`plugin.json` + `lib/arm64-v8a/lib<id>.so` + 可选 `assets/`。清单不再包含 `signature` 字段（签名由容器承担），可选 `contentHash`。
+**信任模型**：不做作者认证、证书白名单或插件签名。外部 native 插件定义为「来源未经认证、由用户显式授权加载的游戏进程内全权代码」；模块不保证其不会崩溃、破坏数据、访问文件/网络或绕过宿主。数据扩展因不含可执行代码，可由宿主完整校验。
+
+**容器**：未签名 ZIP（建议扩展名 `.qolplugin`）：`plugin.json` + 可选 `lib/arm64-v8a/lib<id>.so`、`targets/*.json`、`assets/`。宿主计算 SHA-256 仅用于版本识别、完整性诊断和变更记录，**不代表可信身份**。
 
 **目录模型（版本化 + 原子切换）**：
 
 ```
 plugins/
   staging/<id>-<hash>/          # 导入区（校验前）
-  active/<id>/<version>/        # 已校验版本（0444，目录 app 私有）
+  active/<id>/<version>/        # 已导入版本（0444，目录 app 私有）
   active/<id>/current           # 指针文件，内容为版本号（原子 rename 更新）
   cache/                        # 可选解压缓存
 ```
 
-**导入流程**：staging → 校验（证书白名单 + `apiVersion` + `supportedVariants` + 可选 `contentHash`）→ 写入 `active/<id>/<version>/` → 原子更新 `current` → 记录导入日志（来源/哈希/签名/时间）。
+**导入流程**：staging → 校验容器结构、路径穿越、`id/version/apiVersion/abi`、数据 schema 与可选目标描述 → 计算哈希 → 写入 `active/<id>/<version>/` → 原子更新 `current` → 记录导入日志（来源/哈希/时间）。同 id 多来源不表达身份关系；并存冲突时拒绝加载，由用户选择当前版本。
 
 **更新与回滚语义（重要）**：
 
@@ -316,20 +322,34 @@ plugins/
 - 当前进程**禁止加载同一插件的新版本**；回滚同样是「改 `current` → 重启后生效」。
 - 保留最近 N 个版本（配置），旧版本可清理。
 
-**安全模式**：启动配置可禁用全部外部插件；外部插件默认不加载。开放前不冻结 ABI、不发布 SDK。
+**加载与恢复**：导入后默认关闭，用户逐插件显式启用；每进程每 id 只 `dlopen` 一个版本，不承诺 `dlclose`。宿主在 `dlopen`、入口调用及每个启动回调前持久化启动阶段标记，成功后清除；下次启动发现未清除标记时进入安全模式并提示疑似插件。用户可强制重新启用，宿主不永久拉黑、不把时间相邻自动等同于根因。
 
 ### 3.8 外部 Host API（**未冻结设计草案**）
 
-**默认档 `read-only`（只读能力表）**：
+同进程 native `.so` 无法实施「受限/全权」权限分级，因此所有外部 native 插件获得同一版 Host API。API 是开发便利与协作协议，**不是安全边界**；清单中的 `managed_only`、`uses_raw_access` 等字段最多用于诊断，不构成权限保证。
+
+**托管协作面（推荐）**：
 
 ```
-log | sym.resolve + 常量表 | mem.read | data(静态表) | frame(主线程投递 + 只读快照)
-resources.declare（声明，不执行） | commands.post | config(命名空间) | status
+log | config/store(命名空间) | events | commands | scheduler | snapshot/data
+capabilities.provide/require | native_services.provide/require
+targets.provide/resolve | resources.declare | status
 ```
 
-- **不暴露** `mem.write`、裸游戏函数指针表、`patch/slot` 执行入口。
-- 需要写操作 → 声明资源（宿主执行安装）+ 命令端口提交命令；游戏函数调用一律由宿主命令实现。
-- 高权限档 `trusted-write`（P6 再议，未冻结）：仅对签名证书属于「官方白名单」的插件授予；该档位下写侧不再受控，文档必须显式说明风险。
+宿主统一处理托管资源的冲突、安装、回滚、状态和依赖级联。插件间共享只读事实使用 §3.4 的 capability；任意 native 逻辑使用带版本的 C ABI `native_service` 函数表。两者都经宿主注册表查找，不直接依赖另一插件的 ELF 符号；字符串、数组和函数表所有权遵守 §3.4 的跨边界类型与生命周期规则。`native_service` 可包含写副作用，其行为不享有命令端口的串行化保证，调用方继承提供者的全权 native 风险。数据扩展只能消费带声明式 schema 的 capability/命令，不能调用任意 C ABI `native_service`。
+
+**raw 便利面（全权，非保证面）**：
+
+```
+modules/maps/base | targets.resolve | mem.read/write/protect | 原始函数地址
+hook/patch/slot 低层入口 | 主线程投递
+```
+
+即使宿主不暴露上述入口，native 插件仍可自行实现同等操作；提供 raw 面的目的只是减少重复适配。插件绕过资源登记后，宿主不负责冲突检测、回滚、状态一致性或停用后的副作用。
+
+**TargetRegistry**：宿主内置公共语义目标；symbol pack 或插件可注册 namespaced 目标（如 `author.plugin:some_target`），按游戏变体提供 VMA、ELF 符号或特征定位、预期原字节和 ABI 描述。宿主可校验映射范围与原字并按最终地址仲裁；未知函数签名的正确性无法运行时证明，由 native 插件作者与启用用户承担。模块不预打包未来全部地址和签名。
+
+**保证边界**：`disable/deactivate` 停止宿主回调并回收托管资源、能力和订阅；插件自行创建的线程、直接内存写入及自行安装的 hook/patch 不保证停止或还原。状态 API 必须显示 `source=external_native`、托管资源数以及 `guarantees=managed-resources-only`，不得把生命周期成功解释为该插件已零残留。
 
 ---
 
@@ -366,6 +386,7 @@ resources.declare（声明，不执行） | commands.post | config(命名空间)
    - 还原失败，或资源声明 `resumable=false` → 占用置 `tombstone`，插件 `failed`，并进入隔离（禁止重试直到进程重启）。
 5. `tombstone` 的回收策略（何时允许人工清除、是否进程重启后重试）见 U8。
 6. **机制差异（空转能力）**：`kEntryHook` 与 `kPtrSlot` 支持禁用时保留**空转安装点**（wrapper 透传原函数）；**`kCallPatch` 不支持空转**——禁用即物理还原（字替换无可透传的执行体；BL 重定向若需透传由 wrapper 自决，但禁用态统一按还原处理，避免同一机制出现两种禁用语义）。门禁翻转驱动的**单指令 patch** 安装/还原允许在**帧回调内同步完成**（有界原子写，非阻塞等待）；生命周期 `activate/deactivate` 仍走帧步进事务。
+7. 外部 native 只有通过 `resources.declare` 进入本登记表的资源才受本节约束；插件自行安装的资源属于 raw 副作用，不参与一资源一安装者、tombstone 或物理归还保证，状态中必须与托管资源区分。
 
 ### 4.3 资源描述符与登记表
 
@@ -576,6 +597,8 @@ P3 落地：
 
 `safeMode` 移到 P6（外部插件轨）：P1–P5 不存在可禁用的外部插件，恒定 `false` 无诊断价值。
 
+P6 外部插件状态追加：`source=data_extension|external_native`、`content_hash`、`managed_resources`、`guarantees`、`startup_stage`；`uses_raw_access` 若提供只能是插件自报诊断值，不得用于安全判断。
+
 ### 9.2 校验脚本族与能力边界
 
 | 脚本 | 检查方式 | 能保证 | 不能保证 |
@@ -642,11 +665,11 @@ P3 落地：
 | P3 | 最小资源事务（异步步进、回滚、在途归零、帧预算）+ `disable/deactivate/tombstone` 全路径 | 故障注入与并发测试通过；接口冻结（内部） | P2 |
 | P4 | 批量迁移其余插件（内置静态轨），每插件一个提交 | 每插件：单测 + 验收卡；临时豁免逐条清零 | P3 |
 | P5 | `products/` + `host/` 收口：JNI 分组、端点归位、状态 API 完整化；收紧脚本；删除旧路径 | `check_*` 全绿、豁免清零、双轨消失 | P4 |
-| P6（可选） | 外部插件轨（未冻结草案）：容器校验、导入、`dlopen`、白名单、安全模式、更新/回滚语义 | 导入/拒绝/禁用/崩溃兜底真机通过 | P5 |
+| P6（可选） | 外部插件轨（未冻结草案）：数据扩展、未签名全权 native、TargetRegistry、Host API/SDK、导入加载、安全模式、更新/回滚语义 | 数据 schema 拒绝；native 显式启用/加载/禁用；托管资源回收；启动故障恢复；更新/回滚真机通过 | P5 |
 
 单插件迁移动作：建目录与元数据 → 资源改为声明 → 依赖改能力/命令 → 开关与状态接入 → 单测 + 验收卡。
 
-**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P3 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.8**（P3 后实施校准累积版，含 P4-A1/A4 校准）。
+**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P3 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.9**（P3 后实施校准累积版，含 P4-A1/A4 与外部插件方向校准）。
 
 冻结与兼容：JNI 导出在重构期保持名称与签名稳定；新增按插件分组命名，P5 一次性切换。数据格式（sidecar / `.qol_save`）向前兼容，必要时升版本并写迁移。
 
@@ -662,17 +685,17 @@ P3 落地：
 |---|---|
 | 接入期两套路径并存 | 纵向样板先行；阶段出口脚本强制收敛；豁免逐步清零 |
 | 资源数量失控 | 登记强制填写选择理由与验收卡；`check_resources` 统计趋势 |
-| 同进程崩溃无法隔离 | 外部默认关闭 + 白名单 + 安全模式；内置插件随宿主编译 |
+| 外部 native 可崩溃、破坏数据或绕过宿主 | 导入后默认关闭、用户显式启用、全权风险提示、启动阶段日志与安全模式；不承诺隔离 |
 | 真机验证成本 | 每插件独立提交 + 验收卡；host fake 覆盖失败路径 |
-| ABI 成本被低估 | 开放前不冻结、不承诺；冻结时一次性设计版本协商与签名 |
+| 外部 ABI 成本被低估 | P6 前不冻结、不发布 SDK；冻结时采用带 size/version 的 C ABI 函数表并保留 capability 版本协商 |
 | 主线程被长操作占用 | 全部资源操作异步帧步进；禁止阻塞等待 |
 | 文档再次腐烂 | 结构由脚本生成/校验；权威层级明确（§9.4） |
 
 ### 12.2 明确不做（YAGNI）
 
-- 不做沙箱/权限隔离（外部轨默认只读档 + 白名单）。
+- 不对同进程 native `.so` 伪造受限权限模型；所有外部 native 均按全权代码处理。
+- P6 首版不引入 WASM、脚本解释器或隔离进程；需要真正受限的逻辑插件时另立阶段设计。
 - 不为内置插件冻结 ABI、不发布 SDK（P6 再议）。
-- 不引入脚本解释器执行任意逻辑；只做声明式数据规则。
 - 不做插件市场、在线下载、自动更新；更新仅重启生效。
 - 不追求 feature 之间零依赖（能力/命令/事件已足够）。
 - 不引入逐功能接口样板：统一能力注册表 + 资源登记。
@@ -683,11 +706,11 @@ P3 落地：
 |---|---|---|---|
 | U1 | 非功能指标阈值回填（§10） | P4 真机测量 | ⬜ 开放（不阻塞 P4 开工） |
 | U2 | 共享资源清单与所有者划分 | P4 A4（`hooks/dispatch` 落地时产出） | ⬜ 开放 |
-| U3 | 外部插件签名校验可用性（`signingInfo` 空回退） | P6 真机探针 | ⬜ 开放 |
+| U3 | 未签名容器导入、app 私有目录 `dlopen` 与启动阶段日志的真机可用性 | P6 真机探针 | ⬜ 开放 |
 | U4 | 快照类型清单与发布方式 | P4/P5（随首个 `domains`/`ReadModel`） | ⬜ 开放 |
 | U5 | 命令取消语义清单 | P4（随首个可取消命令） | ⬜ 开放 |
 | U6 | `unhook` 后同地址重新挂载的安全性 | — | ✅ 已闭合（证据：`verification.md` VM-P3-01，同址二次挂载 rc=0、行为恢复） |
-| U7 | `trusted-write` 高权限档的证书策略 | P6 | ⬜ 开放 |
+| U7 | Host API、TargetDescriptor、外部 capability/native-service 函数表的首个 C ABI 版本与 SDK 边界 | P6 | ⬜ 开放 |
 | U8 | `tombstone` 回收策略与人工清除流程 | P5（随隔离语义收口） | ⬜ 开放 |
 | U9 | 需要 `atomic_before` 两阶段分派的资源清单 | P4/P5 | ⬜ 开放 |
 
@@ -705,6 +728,6 @@ P3 落地：
 
 ## 附录 B：插件容器与清单（外部轨草案）
 
-容器：签名 APK（`plugin.json` + `lib/<abi>/lib<id>.so` + 可选 `assets/`）。
-清单字段：`id / version / apiVersion / supportedVariants / requires[] / optionalRequires[] / provides[] / resources[] / entry / contentHash?`（签名由容器承担）。
+容器：未签名 ZIP / `.qolplugin`（`plugin.json` + 可选 `lib/<abi>/lib<id>.so`、`targets/*.json`、`assets/`）。
+清单字段：`id / version / kind(data|native) / apiVersion / abi? / supportedVariants / requires[] / optionalRequires[] / provides[] / resources[] / targets[] / entry?`。宿主计算内容哈希用于诊断，不做作者认证。
 目录：`plugins/staging/<id>-<hash>/` → `plugins/active/<id>/<version>/` + `current` 指针；更新与回滚仅在下次进程启动生效。
