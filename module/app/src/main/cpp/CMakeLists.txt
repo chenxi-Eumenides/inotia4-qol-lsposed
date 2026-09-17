@@ -25,8 +25,8 @@ add_library(gamebridge SHARED
     api/native/game_shop.cpp
     api/native/game_save.cpp
     api/native/game_save_preflight.cpp
-    features/save_backup/bundle.cpp
-    features/save_backup/feature.cpp
+    plugins/save_backup/bundle.cpp
+    plugins/save_backup/feature.cpp
     game_system.cpp
     data/native/game_tiles.cpp
     api/native/game_character.cpp
@@ -49,10 +49,10 @@ add_library(gamebridge SHARED
     feature/extension_bag/extension_bag_api.cpp
     domains/attribute_range/rules.cpp
     game/access/attr_range_ui.cpp
-    features/attribute_range/feature.cpp
-    features/attribute_range/plugin.cpp
-    features/world_teleport/feature.cpp
-    features/world_teleport/rules.cpp
+    plugins/attribute_range/feature.cpp
+    plugins/attribute_range/plugin.cpp
+    plugins/world_teleport/feature.cpp
+    plugins/world_teleport/rules.cpp
 )
 
 find_library(log-lib log)
@@ -74,19 +74,19 @@ target_sources(gamebridge PRIVATE
     data/native/item_class.cpp
 )
 
-# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（P4-B3 迁移至 features/autosell）
+# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（P4-B3 迁移至 plugins/autosell）
 target_sources(gamebridge PRIVATE
-    features/autosell/rules.cpp
-    features/autosell/config.cpp
-    features/autosell/view.cpp
-    features/autosell/scan.cpp
-    features/autosell/plugin.cpp
+    plugins/autosell/rules.cpp
+    plugins/autosell/config.cpp
+    plugins/autosell/view.cpp
+    plugins/autosell/scan.cpp
+    plugins/autosell/plugin.cpp
     bridge/native/gamebridge_autosell.cpp
 )
 
-# 自动出售按存档配置 sidecar（P4-B3 迁移至 features/autosell）
+# 自动出售按存档配置 sidecar（P4-B3 迁移至 plugins/autosell）
 target_sources(gamebridge PRIVATE
-    features/autosell/store.cpp
+    plugins/autosell/store.cpp
 )
 
 # 自动出售 UI 原型：背包页入口按钮 + 只读占位面板（末尾追加，不改上方既有行）
@@ -106,17 +106,17 @@ target_sources(gamebridge PRIVATE
 # 任务完成度进档重算（quest 插件迁移：零资源常驻 + infra/scheduler 帧节拍；旧 quest_resync 删除）
 target_sources(gamebridge PRIVATE
     game/access/quest.cpp
-    features/quest/feature.cpp
-    features/quest/plugin.cpp
+    plugins/quest/feature.cpp
+    plugins/quest/plugin.cpp
 )
 
 # P4 阶段 B1：special_equip 迁移为插件（game/access/item_class 收口 ITEMCLASS/GOT 读取，
 # 入口 hook 声明式化 + 出售门禁谓词过渡依赖；末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     game/access/item_class.cpp
-    features/special_equip/rules.cpp
-    features/special_equip/feature.cpp
-    features/special_equip/plugin.cpp
+    plugins/special_equip/rules.cpp
+    plugins/special_equip/feature.cpp
+    plugins/special_equip/plugin.cpp
 )
 
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
@@ -137,27 +137,27 @@ target_sources(gamebridge PRIVATE
 
 # 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    features/custom_recipe/catalog.cpp
-    features/custom_recipe/rules.cpp
-    features/custom_recipe/table.cpp
-    features/custom_recipe/feature.cpp
-    features/custom_recipe/plugin.cpp
+    plugins/custom_recipe/catalog.cpp
+    plugins/custom_recipe/rules.cpp
+    plugins/custom_recipe/table.cpp
+    plugins/custom_recipe/feature.cpp
+    plugins/custom_recipe/plugin.cpp
 )
 
 # 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     feature/ui/game_ui_charinfo_zh.cpp
     hooks/dispatch.cpp
-    features/text_layer/feature.cpp
-    features/text_layer/plugin.cpp
+    plugins/text_layer/feature.cpp
+    plugins/text_layer/plugin.cpp
 )
 
 # 合成器界面层（craft_ui 插件）：UIMix 控件写入收口 game/access/craft + 12 条入口 hook 声明。
 # 宝石合成与自定义配方共用；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     game/access/craft.cpp
-    features/craft_ui/feature.cpp
-    features/craft_ui/plugin.cpp
+    plugins/craft_ui/feature.cpp
+    plugins/craft_ui/plugin.cpp
 )
 
 # 模块替换 PopupState enter 回调后的 UI 态反查表（末尾追加，不改上方既有行）
@@ -165,7 +165,7 @@ target_sources(gamebridge PRIVATE
     core/native/popup_enter_alias.cpp
 )
 
-# 推怪（推动增强）全局开关：JNI 薄层（插件实现已迁 features/push_all，末尾追加，不改上方既有行）
+# 推怪（推动增强）全局开关：JNI 薄层（插件实现已迁 plugins/push_all，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     bridge/native/gamebridge_push_all.cpp
 )
@@ -205,9 +205,9 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     game/access/symbols.cpp
     game/access/char.cpp
-    features/simple_mode/rules.cpp
-    features/simple_mode/feature.cpp
-    features/simple_mode/plugin.cpp
+    plugins/simple_mode/rules.cpp
+    plugins/simple_mode/feature.cpp
+    plugins/simple_mode/plugin.cpp
     host/plugin_registry.cpp
     host/assembly.cpp
     bridge/native/gamebridge_simple_mode.cpp
@@ -223,9 +223,9 @@ target_sources(gamebridge PRIVATE
     game/access/patches.cpp
     patch/claims.cpp
     patch/instr_patch.cpp
-    features/push_all/rules.cpp
-    features/push_all/feature.cpp
-    features/push_all/plugin.cpp
+    plugins/push_all/rules.cpp
+    plugins/push_all/feature.cpp
+    plugins/push_all/plugin.cpp
 )
 
 # P4 阶段 A2a：infra/scheduler 形式化 + 帧源声明式 core 资源（末尾追加，不改上方既有行）
@@ -242,7 +242,7 @@ target_sources(gamebridge PRIVATE
 # B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体仍在
 # feature/patch，经全局桥函数交还 backup。末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    features/inventory_hooks/plugin.cpp
+    plugins/inventory_hooks/plugin.cpp
 )
 
 # B2a-2：常驻指令 patch 声明式化（core_patches 13 条 + stack_limit 6 条 clamp）
@@ -250,7 +250,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/core_patches.cpp
     core/native/stack_limit_state.cpp
-    features/stack_limit/plugin.cpp
+    plugins/stack_limit/plugin.cpp
 )
 
 # B4-1：infra/store MSAV 容器层（冻结核心件；零行为改动，不切换消费者）
@@ -267,11 +267,11 @@ target_sources(gamebridge PRIVATE
 # B4-5：save_backup 本体迁移为插件（零资源常驻 + 存档域原语收口 game/access/save）
 target_sources(gamebridge PRIVATE
     game/access/save.cpp
-    features/save_backup/plugin.cpp
+    plugins/save_backup/plugin.cpp
 )
 
 # C1：world_teleport 迁移为插件（零资源常驻 + 世界/地图访问收口 game/access/world）
 target_sources(gamebridge PRIVATE
     game/access/world.cpp
-    features/world_teleport/plugin.cpp
+    plugins/world_teleport/plugin.cpp
 )

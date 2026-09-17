@@ -21,8 +21,8 @@ add_executable(host_tests
     ${CPP_DIR}/core/native/game_json.cpp
     ${CPP_DIR}/core/native/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp
-    ${CPP_DIR}/features/save_backup/bundle.cpp
-    ${CPP_DIR}/features/world_teleport/rules.cpp
+    ${CPP_DIR}/plugins/save_backup/bundle.cpp
+    ${CPP_DIR}/plugins/world_teleport/rules.cpp
 )
 
 target_include_directories(host_tests PRIVATE
@@ -62,9 +62,9 @@ add_test(NAME attribute_range_tests COMMAND attribute_range_tests)
 add_executable(custom_recipe_tests
     test_custom_recipe.cpp
     ${CPP_DIR}/domains/attribute_range/rules.cpp
-    ${CPP_DIR}/features/custom_recipe/rules.cpp
-    ${CPP_DIR}/features/custom_recipe/catalog.cpp
-    ${CPP_DIR}/features/custom_recipe/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table.cpp
 )
 target_include_directories(custom_recipe_tests PRIVATE
     ${CPP_DIR}
@@ -74,7 +74,7 @@ add_test(NAME custom_recipe_tests COMMAND custom_recipe_tests)
 
 add_executable(autosell_rules_tests
     test_autosell_rules.cpp
-    ${CPP_DIR}/features/autosell/rules.cpp
+    ${CPP_DIR}/plugins/autosell/rules.cpp
 )
 target_include_directories(autosell_rules_tests PRIVATE
     ${CPP_DIR}
@@ -156,7 +156,7 @@ add_test(NAME game_feature_tests COMMAND game_feature_tests)
 # wh4 容器可用性判定纯逻辑测试（末尾追加）
 add_executable(save_warehouse_validate_tests
     test_save_warehouse_validate.cpp
-    ${CPP_DIR}/features/save_backup/bundle.cpp
+    ${CPP_DIR}/plugins/save_backup/bundle.cpp
 )
 target_include_directories(save_warehouse_validate_tests PRIVATE
     ${CPP_DIR}
@@ -182,7 +182,7 @@ target_include_directories(module_text_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(module_text_tests PRIVATE cxx_std_17)
-# 显式锚定 C++17：features/text_layer/feature.h 经 contracts/plugin.h 使用字段名 requires。
+# 显式锚定 C++17：plugins/text_layer/feature.h 经 contracts/plugin.h 使用字段名 requires。
 set_target_properties(module_text_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME module_text_tests COMMAND module_text_tests)
 
@@ -202,7 +202,7 @@ add_test(NAME hooks_dispatch_tests COMMAND hooks_dispatch_tests)
 # 简单模式纯逻辑 host 测试（阵营矩阵 / 倍率 / 边界钳制，末尾追加）
 add_executable(simple_mode_rules_tests
     test_simple_mode_rules.cpp
-    ${CPP_DIR}/features/simple_mode/rules.cpp
+    ${CPP_DIR}/plugins/simple_mode/rules.cpp
 )
 target_include_directories(simple_mode_rules_tests PRIVATE
     ${CPP_DIR}
@@ -400,7 +400,7 @@ add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
 # P4 阶段 A1：push_all 纯逻辑 host 测试（party_decision 矩阵，末尾追加）
 add_executable(push_all_rules_tests
     test_push_all_rules.cpp
-    ${CPP_DIR}/features/push_all/rules.cpp
+    ${CPP_DIR}/plugins/push_all/rules.cpp
 )
 target_include_directories(push_all_rules_tests PRIVATE
     ${CPP_DIR}
@@ -426,7 +426,7 @@ add_test(NAME infra_scheduler_tests COMMAND infra_scheduler_tests)
 # P4 阶段 B1：special_equip 纯逻辑 host 测试（跳过 bit4 重放判定 / 出售门禁决策，末尾追加）
 add_executable(special_equip_rules_tests
     test_special_equip_rules.cpp
-    ${CPP_DIR}/features/special_equip/rules.cpp
+    ${CPP_DIR}/plugins/special_equip/rules.cpp
 )
 target_include_directories(special_equip_rules_tests PRIVATE
     ${CPP_DIR}

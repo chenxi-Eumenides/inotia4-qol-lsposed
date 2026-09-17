@@ -20,7 +20,7 @@ using NativeOnModuleLoaded = void (*)(const char* name, void* handle);
 void inventory_native_hook_on_api(const NativeAPIEntries* entries);
 void inventory_native_hook_on_module_loaded(const char* name, void* handle);
 // 模块主动刷新必须走 backup/trampoline，避免经被 Hook 地址回入 wrapper 后重复加锁。
-// 过渡导出（清除阶段 B2c）：refresh 消费者迁入 features/inventory_hooks 后删除。
+// 过渡导出（清除阶段 B2c）：refresh 消费者迁入 plugins/inventory_hooks 后删除。
 void inventory_native_hook_call_refresh_item_area_original();
 
 // 详情出售按钮（UIEquip_ButtonDestroyExe）门禁谓词：功能域注册，wrapper 入口调用；

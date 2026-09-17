@@ -15,7 +15,7 @@
 namespace qol::game {
 
 // 静态地图 ID 上限（原版/改版共同；MAPINFOBASE_STATIC_MAX_MAP_ID 的 game 层别名）。
-// 纯逻辑规则（features/world_teleport/rules.h）经本常量取上限，避免直接 include 符号头。
+// 纯逻辑规则（plugins/world_teleport/rules.h）经本常量取上限，避免直接 include 符号头。
 inline constexpr int kWorldStaticMaxMapId = MAPINFOBASE_STATIC_MAX_MAP_ID;
 
 // ---- 世界状态 ----

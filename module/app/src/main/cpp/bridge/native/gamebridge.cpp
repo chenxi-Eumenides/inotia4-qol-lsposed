@@ -2,7 +2,7 @@
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
-#include "features/autosell/config.h"
+#include "plugins/autosell/config.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
 #include "host/assembly.h"

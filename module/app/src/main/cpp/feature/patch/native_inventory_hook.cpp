@@ -994,7 +994,7 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
 
 // ---------------------------------------------------------------------------
 // 声明式资源声明（B2a-1）：24 条入口 hook 的 claims 表。wrapper 业务体在本 TU，
-// handler 取址只能在此处；插件 features/inventory_hooks 经全局桥函数
+// handler 取址只能在此处；插件 plugins/inventory_hooks 经全局桥函数
 // inventory_hooks_claims / inventory_hooks_bind_backup 取得本表并交还 backup。
 // 安装顺序、失败回滚与物理还原归宿主声明式引擎（hooks/install + hooks/transaction +
 // host/plugin_registry），本 TU 不再自带安装引擎。
@@ -1097,8 +1097,8 @@ void** backup_slot_for_handler(void* handler) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// 全局桥：插件 features/inventory_hooks 的访问入口（双向不 include，见 plugin.cpp 头注释）。
-// 清除阶段：B2c 业务迁入 features/inventory_hooks 后两函数随业务迁入并删除。
+// 全局桥：插件 plugins/inventory_hooks 的访问入口（双向不 include，见 plugin.cpp 头注释）。
+// 清除阶段：B2c 业务迁入 plugins/inventory_hooks 后两函数随业务迁入并删除。
 // ---------------------------------------------------------------------------
 
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
@@ -1143,7 +1143,7 @@ void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
     QOL_LOG_INFO(QolDomain::kInventory,
                         "native_init called api_version=%u hook_func=%p",
                         entries->version, reinterpret_cast<void*>(g_hook_func));
-    // 资源安装由宿主声明式引擎在 assembly 装配期执行（features/inventory_hooks 插件）。
+    // 资源安装由宿主声明式引擎在 assembly 装配期执行（plugins/inventory_hooks 插件）。
 }
 
 void inventory_native_hook_on_module_loaded(const char* name, void*) {

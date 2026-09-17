@@ -44,6 +44,7 @@ DATA_SOURCES = (
     "scripts/maintenance/check_resources.py",
     "scripts/maintenance/check_jni.py",
     "module/app/src/main/cpp/feature/*/",
+    "module/app/src/main/cpp/plugins/*/",
 )
 
 MECHANISM_ORDER = ("entry hook", "call patch", "ptr slot")
@@ -135,9 +136,9 @@ def collect_jni() -> dict:
 def collect_features(
     graph: ac.IncludeGraph,
 ) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
-    """返回（旧 `feature/*` 待迁移域，已迁移 `features/*` 域），各为 (name, layer, 文件数)。
+    """返回（旧 `feature/*` 待迁移域，已迁移 `plugins/*` 域），各为 (name, layer, 文件数)。
 
-    口径区分：`feature/`（旧路径，待迁移）与 `features/`（目标层，已迁移）必须分列，
+    口径区分：`feature/`（旧路径，待迁移）与 `plugins/`（目标层，已迁移）必须分列，
     否则同名域名（如 `ui`）会在迁移期互相覆盖，表行数与迁移进度也不可比。
     """
     legacy: Counter[str] = Counter()
@@ -148,7 +149,7 @@ def collect_features(
             continue
         if rel.startswith("feature/"):
             legacy[parts[1]] += 1
-        elif rel.startswith("features/"):
+        elif rel.startswith("plugins/"):
             migrated[parts[1]] += 1
 
     def build(counts: Counter[str], root: str) -> list[tuple[str, str, int]]:
@@ -163,7 +164,7 @@ def collect_features(
             out.append((name, layer, counts[name]))
         return out
 
-    return build(legacy, "feature"), build(migrated, "features")
+    return build(legacy, "feature"), build(migrated, "plugins")
 
 
 # --------------------------------------------------------------------------
@@ -236,7 +237,8 @@ def render_mapping() -> list[str]:
         "目标层",
     )
     lines += [
-        "> 说明：`_TARGET_PREFIXES` 为有序元组，`features/` 必须先于 `feature/` 匹配；",
+        "> 说明：`_TARGET_PREFIXES` 为有序元组，`plugins/` 为目标插件层前缀；",
+        "> legacy `feature/` 经重构期映射归入 `plugins/<id>`（待迁移分列）；",
         "> 其余无法映射的路径落入 `unknown`（由 `check_layers` 以警告上报）。",
         "",
     ]
@@ -345,7 +347,7 @@ def render_features(graph: ac.IncludeGraph) -> list[str]:
     lines = [
         "## 6. 功能域清单",
         "",
-        f"旧 `feature/*`（待迁移 {len(legacy)} 个）与已迁移 `features/*`（{len(migrated)} 个）"
+        f"旧 `feature/*`（待迁移 {len(legacy)} 个）与已迁移 `plugins/*`（{len(migrated)} 个）"
         f"共 {total} 个域。",
         "",
         f"### 6.1 旧 `feature/*`（待迁移，{len(legacy)}）",
@@ -356,7 +358,7 @@ def render_features(graph: ac.IncludeGraph) -> list[str]:
     for name, layer, count in legacy:
         lines.append(f"| `{name}` | `{layer}` | {count} |")
     lines.append("")
-    lines += [f"### 6.2 已迁移 `features/*`（{len(migrated)}）", ""]
+    lines += [f"### 6.2 已迁移 `plugins/*`（{len(migrated)}）", ""]
     if migrated:
         lines += ["| 域 | 目标层 | 文件数 |", "| --- | --- | --- |"]
         for name, layer, count in migrated:

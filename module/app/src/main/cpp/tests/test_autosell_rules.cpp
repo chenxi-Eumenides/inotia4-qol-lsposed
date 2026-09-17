@@ -1,4 +1,4 @@
-#include "features/autosell/rules.h"
+#include "plugins/autosell/rules.h"
 
 #include <cstdint>
 #include <cstdio>

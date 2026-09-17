@@ -1,4 +1,4 @@
-#include "features/simple_mode/rules.h"
+#include "plugins/simple_mode/rules.h"
 
 #include <cstdint>
 #include <cstdio>

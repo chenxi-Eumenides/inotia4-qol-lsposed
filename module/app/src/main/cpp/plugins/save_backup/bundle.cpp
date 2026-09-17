@@ -1,0 +1,942 @@
+#include "plugins/save_backup/bundle.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <utility>
+
+namespace save_backup {
+namespace {
+
+// ---- 大端读写（bundle 与 sidecar 容器均为大端布局）----
+
+void wb16(std::vector<uint8_t>& out, uint16_t v) {
+    out.push_back(static_cast<uint8_t>(v >> 8));
+    out.push_back(static_cast<uint8_t>(v));
+}
+
+void wb32(std::vector<uint8_t>& out, uint32_t v) {
+    out.push_back(static_cast<uint8_t>(v >> 24));
+    out.push_back(static_cast<uint8_t>(v >> 16));
+    out.push_back(static_cast<uint8_t>(v >> 8));
+    out.push_back(static_cast<uint8_t>(v));
+}
+
+void wb64(std::vector<uint8_t>& out, uint64_t v) {
+    for (int i = 7; i >= 0; --i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+}
+
+uint16_t be16(const uint8_t* p) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) << 8 | static_cast<uint16_t>(p[1]));
+}
+
+uint32_t be32(const uint8_t* p) {
+    return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | uint32_t(p[3]);
+}
+
+// wh4 / 存档明文的字段为游戏原生小端（ARM64），与 bundle 自身的大端编码区分开。
+uint16_t le16(const uint8_t* p) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) | static_cast<uint16_t>(p[1]) << 8);
+}
+
+uint32_t le32(const uint8_t* p) {
+    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
+}
+
+void wle16(std::vector<uint8_t>& out, size_t offset, uint16_t v) {
+    out[offset] = static_cast<uint8_t>(v);
+    out[offset + 1] = static_cast<uint8_t>(v >> 8);
+}
+
+void wle32(std::vector<uint8_t>& out, size_t offset, uint32_t v) {
+    out[offset] = static_cast<uint8_t>(v);
+    out[offset + 1] = static_cast<uint8_t>(v >> 8);
+    out[offset + 2] = static_cast<uint8_t>(v >> 16);
+    out[offset + 3] = static_cast<uint8_t>(v >> 24);
+}
+
+uint64_t le64(const uint8_t* p) {
+    return uint64_t(le32(p)) | uint64_t(le32(p + 4)) << 32;
+}
+
+uint64_t be64(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v = v << 8 | p[i];
+    return v;
+}
+
+// ---- SHA-256（FIPS 180-4）----
+
+struct Sha256Ctx {
+    uint32_t h[8];
+    uint64_t total_len;
+    uint8_t buf[64];
+    size_t buf_len;
+};
+
+constexpr uint32_t kSha256K[64] = {
+    0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u,
+    0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+    0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u, 0xe49b69c1u, 0xefbe4786u,
+    0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+    0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
+    0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+    0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u, 0xa2bfe8a1u, 0xa81a664bu,
+    0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+    0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au,
+    0x5b9cca4fu, 0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+    0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u,
+};
+
+uint32_t rotr32(uint32_t v, int n) { return v >> n | v << (32 - n); }
+
+void sha256_init(Sha256Ctx& c) {
+    c.h[0] = 0x6a09e667u;
+    c.h[1] = 0xbb67ae85u;
+    c.h[2] = 0x3c6ef372u;
+    c.h[3] = 0xa54ff53au;
+    c.h[4] = 0x510e527fu;
+    c.h[5] = 0x9b05688cu;
+    c.h[6] = 0x1f83d9abu;
+    c.h[7] = 0x5be0cd19u;
+    c.total_len = 0;
+    c.buf_len = 0;
+}
+
+void sha256_block(Sha256Ctx& c, const uint8_t* p) {
+    uint32_t w[64];
+    for (int i = 0; i < 16; ++i) {
+        w[i] = uint32_t(p[i * 4]) << 24 | uint32_t(p[i * 4 + 1]) << 16 |
+               uint32_t(p[i * 4 + 2]) << 8 | uint32_t(p[i * 4 + 3]);
+    }
+    for (int i = 16; i < 64; ++i) {
+        const uint32_t s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        const uint32_t s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    uint32_t a = c.h[0], b = c.h[1], cc = c.h[2], d = c.h[3];
+    uint32_t e = c.h[4], f = c.h[5], g = c.h[6], h = c.h[7];
+    for (int i = 0; i < 64; ++i) {
+        const uint32_t s1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
+        const uint32_t ch = (e & f) ^ (~e & g);
+        const uint32_t t1 = h + s1 + ch + kSha256K[i] + w[i];
+        const uint32_t s0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
+        const uint32_t maj = (a & b) ^ (a & cc) ^ (b & cc);
+        const uint32_t t2 = s0 + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = cc;
+        cc = b;
+        b = a;
+        a = t1 + t2;
+    }
+    c.h[0] += a;
+    c.h[1] += b;
+    c.h[2] += cc;
+    c.h[3] += d;
+    c.h[4] += e;
+    c.h[5] += f;
+    c.h[6] += g;
+    c.h[7] += h;
+}
+
+void sha256_update(Sha256Ctx& c, const uint8_t* data, size_t len) {
+    c.total_len += len;
+    while (len > 0) {
+        if (c.buf_len == 0 && len >= 64) {
+            sha256_block(c, data);
+            data += 64;
+            len -= 64;
+            continue;
+        }
+        const size_t take = len < 64 - c.buf_len ? len : 64 - c.buf_len;
+        std::memcpy(c.buf + c.buf_len, data, take);
+        c.buf_len += take;
+        data += take;
+        len -= take;
+        if (c.buf_len == 64) {
+            sha256_block(c, c.buf);
+            c.buf_len = 0;
+        }
+    }
+}
+
+void sha256_final(Sha256Ctx& c, uint8_t digest[32]) {
+    const uint64_t bit_len = c.total_len * 8;
+    const uint8_t pad = 0x80;
+    sha256_update(c, &pad, 1);
+    const uint8_t zero = 0;
+    while (c.buf_len != 56) sha256_update(c, &zero, 1);
+    uint8_t len_bytes[8];
+    for (int i = 0; i < 8; ++i) len_bytes[i] = static_cast<uint8_t>(bit_len >> (8 * (7 - i)));
+    sha256_update(c, len_bytes, 8);
+    for (int i = 0; i < 8; ++i) {
+        digest[i * 4] = static_cast<uint8_t>(c.h[i] >> 24);
+        digest[i * 4 + 1] = static_cast<uint8_t>(c.h[i] >> 16);
+        digest[i * 4 + 2] = static_cast<uint8_t>(c.h[i] >> 8);
+        digest[i * 4 + 3] = static_cast<uint8_t>(c.h[i]);
+    }
+}
+
+std::string bytes_to_hex(const uint8_t* data, size_t len) {
+    static const char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        out += kHex[data[i] >> 4];
+        out += kHex[data[i] & 0x0F];
+    }
+    return out;
+}
+
+// ---- MD5（RFC 1321）----
+
+struct Md5Ctx {
+    uint32_t a, b, cc, d;
+    uint64_t total_len;
+    uint8_t buf[64];
+    size_t buf_len;
+};
+
+uint32_t rotl32(uint32_t v, int n) { return v << n | v >> (32 - n); }
+
+void md5_init(Md5Ctx& c) {
+    c.a = 0x67452301u;
+    c.b = 0xefcdab89u;
+    c.cc = 0x98badcfeu;
+    c.d = 0x10325476u;
+    c.total_len = 0;
+    c.buf_len = 0;
+}
+
+void md5_block(Md5Ctx& c, const uint8_t* p) {
+    static const uint32_t k[64] = {
+        0xd76aa478u, 0xe8c7b756u, 0x242070dbu, 0xc1bdceeeu, 0xf57c0fafu, 0x4787c62au,
+        0xa8304613u, 0xfd469501u, 0x698098d8u, 0x8b44f7afu, 0xffff5bb1u, 0x895cd7beu,
+        0x6b901122u, 0xfd987193u, 0xa679438eu, 0x49b40821u, 0xf61e2562u, 0xc040b340u,
+        0x265e5a51u, 0xe9b6c7aau, 0xd62f105du, 0x02441453u, 0xd8a1e681u, 0xe7d3fbc8u,
+        0x21e1cde6u, 0xc33707d6u, 0xf4d50d87u, 0x455a14edu, 0xa9e3e905u, 0xfcefa3f8u,
+        0x676f02d9u, 0x8d2a4c8au, 0xfffa3942u, 0x8771f681u, 0x6d9d6122u, 0xfde5380cu,
+        0xa4beea44u, 0x4bdecfa9u, 0xf6bb4b60u, 0xbebfbc70u, 0x289b7ec6u, 0xeaa127fau,
+        0xd4ef3085u, 0x04881d05u, 0xd9d4d039u, 0xe6db99e5u, 0x1fa27cf8u, 0xc4ac5665u,
+        0xf4292244u, 0x432aff97u, 0xab9423a7u, 0xfc93a039u, 0x655b59c3u, 0x8f0ccc92u,
+        0xffeff47du, 0x85845dd1u, 0x6fa87e4fu, 0xfe2ce6e0u, 0xa3014314u, 0x4e0811a1u,
+        0xf7537e82u, 0xbd3af235u, 0x2ad7d2bbu, 0xeb86d391u,
+    };
+    static const int r[64] = {7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+                              5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20,
+                              4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+                              6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
+    uint32_t m[16];
+    for (int i = 0; i < 16; ++i) {
+        m[i] = uint32_t(p[i * 4]) | uint32_t(p[i * 4 + 1]) << 8 | uint32_t(p[i * 4 + 2]) << 16 |
+               uint32_t(p[i * 4 + 3]) << 24;
+    }
+    uint32_t a = c.a, b = c.b, cc = c.cc, d = c.d;
+    for (int i = 0; i < 64; ++i) {
+        uint32_t f;
+        int g;
+        if (i < 16) {
+            f = (b & cc) | (~b & d);
+            g = i;
+        } else if (i < 32) {
+            f = (d & b) | (~d & cc);
+            g = (5 * i + 1) % 16;
+        } else if (i < 48) {
+            f = b ^ cc ^ d;
+            g = (3 * i + 5) % 16;
+        } else {
+            f = cc ^ (b | ~d);
+            g = (7 * i) % 16;
+        }
+        const uint32_t tmp = d;
+        d = cc;
+        cc = b;
+        b = b + rotl32(a + f + k[i] + m[g], r[i]);
+        a = tmp;
+    }
+    c.a += a;
+    c.b += b;
+    c.cc += cc;
+    c.d += d;
+}
+
+void md5_update(Md5Ctx& c, const uint8_t* data, size_t len) {
+    c.total_len += len;
+    while (len > 0) {
+        const size_t take = len < 64 - c.buf_len ? len : 64 - c.buf_len;
+        std::memcpy(c.buf + c.buf_len, data, take);
+        c.buf_len += take;
+        data += take;
+        len -= take;
+        if (c.buf_len == 64) {
+            md5_block(c, c.buf);
+            c.buf_len = 0;
+        }
+    }
+}
+
+void md5_final(Md5Ctx& c, uint8_t digest[16]) {
+    const uint64_t bit_len = c.total_len * 8;
+    const uint8_t pad = 0x80;
+    md5_update(c, &pad, 1);
+    const uint8_t zero = 0;
+    while (c.buf_len != 56) md5_update(c, &zero, 1);
+    uint8_t len_bytes[8];
+    for (int i = 0; i < 8; ++i) len_bytes[i] = static_cast<uint8_t>(bit_len >> (8 * i));
+    md5_update(c, len_bytes, 8);
+    for (int i = 0; i < 4; ++i) {
+        digest[i] = static_cast<uint8_t>(c.a >> (8 * i));
+        digest[4 + i] = static_cast<uint8_t>(c.b >> (8 * i));
+        digest[8 + i] = static_cast<uint8_t>(c.cc >> (8 * i));
+        digest[12 + i] = static_cast<uint8_t>(c.d >> (8 * i));
+    }
+}
+
+// ---- 扁平 JSON 字段定位 ----
+
+// 返回 key 对应 value 的起始指针（跳过 ':' 与空白）；未命中返回 nullptr。
+const char* find_key_value(const std::string& json, const char* key) {
+    const std::string pat = std::string("\"") + key + "\"";
+    size_t pos = 0;
+    while ((pos = json.find(pat, pos)) != std::string::npos) {
+        size_t p = pos + pat.size();
+        while (p < json.size() && (json[p] == ' ' || json[p] == '\t' || json[p] == '\n' ||
+                                   json[p] == '\r')) {
+            ++p;
+        }
+        if (p < json.size() && json[p] == ':') {
+            ++p;
+            while (p < json.size() && (json[p] == ' ' || json[p] == '\t' || json[p] == '\n' ||
+                                       json[p] == '\r')) {
+                ++p;
+            }
+            return json.c_str() + p;
+        }
+        pos += 1;
+    }
+    return nullptr;
+}
+
+bool ends_with(const std::string& s, const char* suffix, size_t suffix_len) {
+    return s.size() >= suffix_len && s.compare(s.size() - suffix_len, suffix_len, suffix) == 0;
+}
+
+}  // namespace
+
+// ---- 摘要与编码原语 ----
+
+std::string sha256_hex(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    Sha256Ctx c;
+    sha256_init(c);
+    sha256_update(c, a.data(), a.size());
+    sha256_update(c, b.data(), b.size());
+    uint8_t digest[32];
+    sha256_final(c, digest);
+    return bytes_to_hex(digest, 32);
+}
+
+std::string md5_hex(const uint8_t* data, size_t len) {
+    Md5Ctx c;
+    md5_init(c);
+    md5_update(c, data, len);
+    uint8_t digest[16];
+    md5_final(c, digest);
+    return bytes_to_hex(digest, 16);
+}
+
+uint32_t crc32_ieee(const uint8_t* data, size_t len) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int k = 0; k < 8; ++k) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+std::string base64_encode(const uint8_t* data, size_t size) {
+    static const char kTable[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((size + 2) / 3 * 4);
+    size_t i = 0;
+    for (; i + 3 <= size; i += 3) {
+        const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8) | data[i + 2];
+        out += kTable[(v >> 18) & 0x3F];
+        out += kTable[(v >> 12) & 0x3F];
+        out += kTable[(v >> 6) & 0x3F];
+        out += kTable[v & 0x3F];
+    }
+    if (i + 1 == size) {
+        const uint32_t v = uint32_t(data[i]) << 16;
+        out += kTable[(v >> 18) & 0x3F];
+        out += kTable[(v >> 12) & 0x3F];
+        out += "==";
+    } else if (i + 2 == size) {
+        const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8);
+        out += kTable[(v >> 18) & 0x3F];
+        out += kTable[(v >> 12) & 0x3F];
+        out += kTable[(v >> 6) & 0x3F];
+        out += '=';
+    }
+    return out;
+}
+
+bool base64_decode(const std::string& in, std::vector<uint8_t>& out) {
+    out.clear();
+    if (in.size() % 4 != 0) return false;
+    auto value = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    out.reserve(in.size() / 4 * 3);
+    for (size_t i = 0; i < in.size(); i += 4) {
+        int v[4] = {0, 0, 0, 0};
+        for (int k = 0; k < 4; ++k) {
+            if (in[i + k] == '=') {
+                v[k] = -2;
+            } else {
+                v[k] = value(in[i + k]);
+                if (v[k] < 0) {
+                    out.clear();
+                    return false;
+                }
+            }
+        }
+        if (v[0] < 0 || v[1] < 0) {
+            out.clear();
+            return false;
+        }
+        const uint32_t a = uint32_t(v[0]) << 18 | uint32_t(v[1]) << 12;
+        if (v[2] == -2) {
+            if (v[3] != -2) {
+                out.clear();
+                return false;
+            }
+            out.push_back(static_cast<uint8_t>(a >> 16));
+            continue;
+        }
+        if (v[3] == -2) {
+            const uint32_t b = a | uint32_t(v[2]) << 6;
+            out.push_back(static_cast<uint8_t>(b >> 16));
+            out.push_back(static_cast<uint8_t>((b >> 8) & 0xFF));
+            continue;
+        }
+        const uint32_t b = a | uint32_t(v[2]) << 6 | uint32_t(v[3]);
+        out.push_back(static_cast<uint8_t>(b >> 16));
+        out.push_back(static_cast<uint8_t>((b >> 8) & 0xFF));
+        out.push_back(static_cast<uint8_t>(b & 0xFF));
+    }
+    return true;
+}
+
+// ---- 个人仓库段编解码 ----
+
+bool valid_warehouse_suffix(const std::string& s) {
+    if (s.size() < 5 || s.size() > kMaxWarehouseSuffixBytes) return false;
+    if (s.compare(0, 5, ".wh4-") != 0) return false;
+    if (s.find("..") != std::string::npos) return false;
+    // 字符白名单为 ASCII 字母数字 + '.' + '-'：既覆盖 `.wh4-`/`.bak` 等固定字面量
+    //（含 hex 之外的 w/h/k），又排除路径分隔符与其它控制字符；`..` 已在上面单独拒绝。
+    for (char c : s) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+                        (c >= 'A' && c <= 'Z') || c == '.' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool warehouse_blob_decryptable(const uint8_t* data, size_t len, const char* key,
+                                WarehouseDecryptFn decrypt) {
+    // 容器为 payload + sum_cipher + seed + sum_plain：解密长度 = len-3，须 >=1。
+    if (data == nullptr || len < 4) return false;
+    // 无密钥或无解密函数：无法判定，放行（宁可不拦，保持既有导入行为）。
+    if (key == nullptr || decrypt == nullptr) return true;
+    // 必须把**完整容器**（含尾部 3 字节）交给回调：游戏 ENCRYPT_Process2(mode=1) 会读取
+    // buf[len-3 .. len) 的 sum/seed/sum_plain 做双重校验，缓冲被截断则校验必然失败
+    // （真机实测：同一文件同一密钥，截断传 len-3 → 返回 0；传完整容器 + 解密长度 len-3 → 返回 1）。
+    std::vector<uint8_t> copy(data, data + len);
+    return decrypt(copy.data(), static_cast<int>(len - 3), key) == 1;
+}
+
+const char* warehouse_reencrypt_status_name(WarehouseReencryptStatus s) {
+    switch (s) {
+        case WarehouseReencryptStatus::kOk: return "ok";
+        case WarehouseReencryptStatus::kNoKey: return "no key";
+        case WarehouseReencryptStatus::kBadPlain: return "bad plain";
+        case WarehouseReencryptStatus::kRoundtripFailed: return "roundtrip failed";
+    }
+    return "unknown";
+}
+
+namespace {
+
+uint64_t integrity_hash_range(const uint8_t* data, size_t len) {
+    if (data == nullptr || len < kWh4HashBodyStart) return 0;
+    uint64_t h = kWh4FnvOffsetBasis;
+    for (size_t i = 0; i < kWh4HashOffset; ++i) {
+        h = (h ^ data[i]) * kWh4FnvPrime;
+    }
+    for (size_t i = kWh4HashBodyStart; i < len; ++i) {
+        h = (h ^ data[i]) * kWh4FnvPrime;
+    }
+    return h;
+}
+
+}  // namespace
+
+uint64_t warehouse_plain_integrity_hash(const std::vector<uint8_t>& plain) {
+    return integrity_hash_range(plain.data(), plain.size());
+}
+
+void warehouse_plain_write_integrity_hash(std::vector<uint8_t>& plain) {
+    if (plain.size() < kWh4HashBodyStart) return;
+    const uint64_t h = warehouse_plain_integrity_hash(plain);
+    for (int i = 0; i < 8; ++i) {
+        plain[kWh4HashOffset + static_cast<size_t>(i)] =
+            static_cast<uint8_t>((h >> (8 * i)) & 0xffu);
+    }
+}
+
+WarehouseReencryptStatus warehouse_reencrypt_for_slot(
+    const std::vector<uint8_t>& plain, int slot, const char* key,
+    WarehouseEncryptFn encrypt, WarehouseDecryptFn decrypt,
+    std::vector<uint8_t>& out_cipher) {
+    out_cipher.clear();
+    if (slot < 0 || slot > 255) return WarehouseReencryptStatus::kBadPlain;
+    // 至少覆盖到 +0x38 校验字段之后，才能改写槽位并重算校验。
+    if (plain.size() < kWh4PlainMinBytes) return WarehouseReencryptStatus::kBadPlain;
+    if (key == nullptr || encrypt == nullptr || decrypt == nullptr) {
+        return WarehouseReencryptStatus::kNoKey;
+    }
+
+    std::vector<uint8_t> buf = plain;
+    // +0x14 可改写：写目标槽后必须同步重算 +0x38 完整性校验，否则游戏拒绝。
+    wle32(buf, kWh4PlainSlotOffset, static_cast<uint32_t>(slot));
+    warehouse_plain_write_integrity_hash(buf);
+    // mode=0 加密就地写入 len+3 字节，需预留容量。
+    buf.resize(plain.size() + 3, 0);
+    if (encrypt(buf.data(), static_cast<int>(plain.size()), key) != 1) {
+        return WarehouseReencryptStatus::kRoundtripFailed;
+    }
+
+    // 往返自检：解密返回 1、magic 正确、slot 正确，且重算 hash == 存储值。
+    // 注意：hash 只覆盖**明文**部分（plain.size()），不含 mode=0 追加的 3 字节容器尾。
+    std::vector<uint8_t> check = buf;
+    if (decrypt(check.data(), static_cast<int>(check.size() - 3), key) != 1 ||
+        std::memcmp(check.data(), kWh4PlainMagic, 8) != 0 ||
+        le32(check.data() + kWh4PlainSlotOffset) != static_cast<uint32_t>(slot) ||
+        integrity_hash_range(check.data(), plain.size()) != le64(check.data() + kWh4HashOffset)) {
+        return WarehouseReencryptStatus::kRoundtripFailed;
+    }
+
+    out_cipher.swap(buf);
+    return WarehouseReencryptStatus::kOk;
+}
+
+const char* inline_warehouse_strip_name(InlineWarehouseStrip s) {
+    switch (s) {
+        case InlineWarehouseStrip::kStripped: return "stripped";
+        case InlineWarehouseStrip::kNoSegment: return "no segment";
+        case InlineWarehouseStrip::kNotAtEnd: return "not at block end";
+        case InlineWarehouseStrip::kMalformed: return "malformed block table";
+    }
+    return "unknown";
+}
+
+InlineWarehouseStrip warehouse_strip_inline_segment(std::vector<uint8_t>& plain) {
+    constexpr size_t kMagicLen = 8;      // "WH96v002"
+    constexpr size_t kBlockCountMin = 4; // 需要 block3
+    constexpr size_t kBlockCountMax = 64;
+    // 头 8 字节 + 块表（每项 u16 offset_rel + u16 len）。
+    if (plain.size() < 8 + kBlockCountMin * 4) return InlineWarehouseStrip::kMalformed;
+    const uint16_t off0 = le16(plain.data() + 8);
+    if (off0 == 0 || off0 % 4 != 0) return InlineWarehouseStrip::kMalformed;
+    const size_t block_count = off0 / 4;  // 块0 数据紧跟块表 → offset_rel0 == 表字节数
+    if (block_count < kBlockCountMin || block_count > kBlockCountMax) {
+        return InlineWarehouseStrip::kMalformed;
+    }
+    const size_t table_end = 8 + block_count * 4;
+    if (table_end > plain.size()) return InlineWarehouseStrip::kMalformed;
+
+    struct Span {
+        size_t start;
+        size_t len;
+    };
+    std::vector<Span> spans(block_count);
+    for (size_t i = 0; i < block_count; ++i) {
+        const uint16_t off = le16(plain.data() + 8 + i * 4);
+        const uint16_t len = le16(plain.data() + 8 + i * 4 + 2);
+        const size_t start = 8 + static_cast<size_t>(off);
+        if (start < table_end || start > plain.size() ||
+            static_cast<size_t>(len) > plain.size() - start) {
+            return InlineWarehouseStrip::kMalformed;
+        }
+        spans[i] = Span{start, static_cast<size_t>(len)};
+    }
+    // 块必须无重叠、无空隙地铺满 [table_end, plain.size())（允许索引顺序≠物理顺序，重排时纠正）。
+    {
+        std::vector<size_t> order(block_count);
+        for (size_t i = 0; i < block_count; ++i) order[i] = i;
+        std::sort(order.begin(), order.end(),
+                  [&spans](size_t a, size_t b) { return spans[a].start < spans[b].start; });
+        size_t cursor = table_end;
+        for (size_t idx : order) {
+            if (spans[idx].start != cursor) return InlineWarehouseStrip::kMalformed;
+            cursor += spans[idx].len;
+        }
+        if (cursor != plain.size()) return InlineWarehouseStrip::kMalformed;
+    }
+
+    // block3 内定位**最后一个** WH96v002 段。
+    const Span& b3 = spans[3];
+    const size_t b3_end = b3.start + b3.len;
+    size_t seg_pos = std::string::npos;
+    for (size_t p = b3.start; p + kMagicLen <= b3_end; ++p) {
+        if (std::memcmp(plain.data() + p, kInlineWarehouseMagic, kMagicLen) == 0) {
+            seg_pos = p;
+        }
+    }
+    if (seg_pos == std::string::npos) return InlineWarehouseStrip::kNoSegment;
+    if (seg_pos + kMagicLen + 4 > b3_end) return InlineWarehouseStrip::kNotAtEnd;
+    const uint32_t seg_len = le32(plain.data() + seg_pos + kMagicLen);
+    const size_t seg_total = kMagicLen + static_cast<size_t>(seg_len);
+    // 段必须落在 block3 内，且其后只允许**零填充**（0x00 对改版与基础两个解析器都等价于
+    // “空记录、前进 1 字节”，真机 probe24 实测）——否则保持原样不剥离。
+    // 剥离时**连同零填充一起截断**：真机实测「只去段、保留零填充」会让改版校验失败
+    // （slot0 复现崩溃），而截断到段起点是已验证可通过的形式（slot2 实测进档正常）。
+    const size_t trailer_begin = seg_pos + seg_total;
+    if (trailer_begin > b3_end) return InlineWarehouseStrip::kNotAtEnd;
+    for (size_t p = trailer_begin; p < b3_end; ++p) {
+        if (plain[p] != 0) return InlineWarehouseStrip::kNotAtEnd;
+    }
+
+    // 重排为连续布局：header + 块表(index 顺序) + 各块数据；block3 截断到段起点。
+    std::vector<size_t> new_len(block_count);
+    for (size_t i = 0; i < block_count; ++i) new_len[i] = spans[i].len;
+    new_len[3] = seg_pos - b3.start;
+
+    std::vector<uint8_t> out;
+    out.reserve(plain.size() - seg_total);
+    out.insert(out.end(), plain.begin(), plain.begin() + static_cast<std::ptrdiff_t>(table_end));
+    size_t offset = block_count * 4;  // offset_rel 相对 plain+8
+    for (size_t i = 0; i < block_count; ++i) {
+        if (offset > 0xFFFFu) return InlineWarehouseStrip::kMalformed;  // offset_rel 为 u16
+        wle16(out, 8 + i * 4, static_cast<uint16_t>(offset));
+        wle16(out, 8 + i * 4 + 2, static_cast<uint16_t>(new_len[i]));
+        out.insert(out.end(), plain.begin() + static_cast<std::ptrdiff_t>(spans[i].start),
+                   plain.begin() + static_cast<std::ptrdiff_t>(spans[i].start + new_len[i]));
+        offset += new_len[i];
+    }
+    plain.swap(out);
+    return InlineWarehouseStrip::kStripped;
+}
+
+namespace {
+
+std::vector<uint8_t> encode_warehouse_impl(const std::vector<WarehouseFile>& files,
+                                           bool with_flags) {
+    // 空列表编码为空 blob：无仓库时 bundle 与旧版 checksum 逐字节一致（硬约束）。
+    if (files.empty()) return std::vector<uint8_t>();
+    std::vector<uint8_t> out;
+    wb16(out, static_cast<uint16_t>(files.size()));
+    for (const WarehouseFile& f : files) {
+        wb16(out, static_cast<uint16_t>(f.suffix.size()));
+        out.insert(out.end(), f.suffix.begin(), f.suffix.end());
+        wb32(out, static_cast<uint32_t>(f.data.size()));
+        if (with_flags) out.push_back(f.flags);
+        out.insert(out.end(), f.data.begin(), f.data.end());
+    }
+    return out;
+}
+
+bool decode_warehouse_impl(const uint8_t* data, size_t size, bool with_flags,
+                           std::vector<WarehouseFile>& out) {
+    out.clear();
+    if (size == 0) return true;  // 空 blob = 无仓库文件
+    if (data == nullptr || size < 2) return false;
+    const uint16_t count = be16(data);
+    if (count > kMaxWarehouseFiles) return false;
+    size_t off = 2;
+    std::vector<WarehouseFile> files;
+    files.reserve(count);
+    for (uint16_t i = 0; i < count; ++i) {
+        if (off + 2 > size) return false;
+        const uint16_t suffix_len = be16(data + off);
+        off += 2;
+        if (suffix_len == 0 || suffix_len > kMaxWarehouseSuffixBytes) return false;
+        if (off + suffix_len > size) return false;
+        std::string suffix(reinterpret_cast<const char*>(data + off), suffix_len);
+        off += suffix_len;
+        if (!valid_warehouse_suffix(suffix)) return false;
+        if (off + 4 > size) return false;
+        const uint32_t data_len = be32(data + off);
+        off += 4;
+        if (data_len > kMaxWarehouseDataBytes) return false;
+        uint8_t flags = 0;
+        if (with_flags) {
+            if (off + 1 > size) return false;
+            flags = data[off];
+            off += 1;
+            // 未知 flags 位 fail-closed（当前仅定义 bit0=明文）。
+            if ((flags & ~kWarehouseFlagPlain) != 0) return false;
+        }
+        if (off + data_len > size) return false;
+        WarehouseFile f;
+        f.suffix = std::move(suffix);
+        f.flags = flags;
+        f.data.assign(data + off, data + off + data_len);
+        off += data_len;
+        files.push_back(std::move(f));
+    }
+    if (off != size) return false;
+    out = std::move(files);
+    return true;
+}
+
+}  // namespace
+
+std::vector<uint8_t> encode_warehouse(const std::vector<WarehouseFile>& files) {
+    return encode_warehouse_impl(files, /*with_flags=*/true);
+}
+
+std::vector<uint8_t> encode_warehouse_v2(const std::vector<WarehouseFile>& files) {
+    return encode_warehouse_impl(files, /*with_flags=*/false);
+}
+
+bool decode_warehouse(const uint8_t* data, size_t size, std::vector<WarehouseFile>& out) {
+    return decode_warehouse_impl(data, size, /*with_flags=*/true, out);
+}
+
+bool decode_warehouse_v2(const uint8_t* data, size_t size, std::vector<WarehouseFile>& out) {
+    return decode_warehouse_impl(data, size, /*with_flags=*/false, out);
+}
+
+// ---- bundle 组装与解析 ----
+
+std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,
+                            int hero_index, int save_version, long long save_time,
+                            const std::string& original_sha256, const std::string& module_sha256,
+                            const std::string& checksum, int class_idx,
+                            const std::string& class_name, int warehouse_count,
+                            const std::string& warehouse_sha256) {
+    std::string s = "{\"source_slot\":";
+    s += std::to_string(source_slot);
+    s += ",\"export_time\":" + std::to_string(export_time_ms);
+    s += ",\"map_id\":" + std::to_string(map_id);
+    s += ",\"hero_level\":" + std::to_string(hero_level);
+    s += ",\"hero_index\":" + std::to_string(hero_index);
+    s += ",\"save_version\":" + std::to_string(save_version);
+    s += ",\"save_time\":" + std::to_string(save_time);
+    s += ",\"original_sha256\":\"" + original_sha256 + "\"";
+    s += ",\"module_sha256\":\"" + module_sha256 + "\"";
+    s += ",\"checksum\":\"" + checksum + "\"";
+    // 职业（v0.7.x 追加）：class_idx 数字 + class_name 中文名（name 为纯中文/ASCII，无转义）。
+    s += ",\"class_idx\":" + std::to_string(class_idx);
+    s += ",\"class_name\":\"" + class_name + "\"";
+    // 个人仓库（v0.8.x 追加）：数量与 blob 的 SHA-256（空仓库时 count=0、sha 为空串）。
+    s += ",\"warehouse_count\":" + std::to_string(warehouse_count);
+    s += ",\"warehouse_sha256\":\"" + warehouse_sha256 + "\"";
+    s += "}";
+    return s;
+}
+
+void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
+                  const std::vector<uint8_t>& module,
+                  const std::vector<uint8_t>& warehouse_blob, const std::string& meta_json,
+                  std::vector<uint8_t>& out) {
+    out.clear();
+    wb32(out, kBundleMagic);
+    wb16(out, kBundleVersion);
+    out.push_back(static_cast<uint8_t>(source_slot));
+    out.push_back(0);
+    out.push_back(0);
+    out.push_back(0);
+    wb64(out, static_cast<uint64_t>(export_time_ms));
+    wb32(out, static_cast<uint32_t>(plain.size()));
+    out.insert(out.end(), plain.begin(), plain.end());
+    wb32(out, static_cast<uint32_t>(module.size()));
+    out.insert(out.end(), module.begin(), module.end());
+    // 个人仓库段（空 blob 时仅写入 u32 0）。
+    wb32(out, static_cast<uint32_t>(warehouse_blob.size()));
+    out.insert(out.end(), warehouse_blob.begin(), warehouse_blob.end());
+    wb16(out, static_cast<uint16_t>(meta_json.size()));
+    out.insert(out.end(), meta_json.begin(), meta_json.end());
+    wb32(out, crc32_ieee(out.data(), out.size()));
+}
+
+bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
+    if (bytes == nullptr || size < kMinBundleBytes) return false;
+    const size_t body_size = size - 4;
+    if (crc32_ieee(bytes, body_size) != be32(bytes + body_size)) return false;
+    if (be32(bytes) != kBundleMagic) return false;
+    const uint16_t version = be16(bytes + 4);
+    // 接受 v1（无仓库段）、v2（仓库段无 flags）、v3（仓库段带 flags）。
+    if (version != kBundleVersion && version != kBundleVersionV2 &&
+        version != kBundleVersionV1) {
+        return false;
+    }
+    const int source_slot = bytes[6];
+    if (source_slot > 2) return false;
+    const long long export_time_ms = static_cast<long long>(be64(bytes + 10));
+    size_t off = 18;
+    if (off + 4 > body_size) return false;
+    const uint32_t orig_len = be32(bytes + off);
+    off += 4;
+    if (orig_len > body_size || off + orig_len > body_size) return false;
+    const uint8_t* orig_plain = bytes + off;
+    off += orig_len;
+    if (off + 4 > body_size) return false;
+    const uint32_t module_len = be32(bytes + off);
+    off += 4;
+    if (module_len > body_size || off + module_len > body_size) return false;
+    const uint8_t* module = bytes + off;
+    off += module_len;
+
+    std::vector<WarehouseFile> warehouse;
+    bool has_warehouse = false;
+    if (version == kBundleVersionV2 || version == kBundleVersion) {
+        if (off + 4 > body_size) return false;
+        const uint32_t warehouse_len = be32(bytes + off);
+        off += 4;
+        if (warehouse_len > kMaxWarehouseBlobBytes || off + warehouse_len > body_size) return false;
+        const bool decoded = (version == kBundleVersionV2)
+                                 ? decode_warehouse_v2(bytes + off, warehouse_len, warehouse)
+                                 : decode_warehouse(bytes + off, warehouse_len, warehouse);
+        if (!decoded) return false;
+        off += warehouse_len;
+        has_warehouse = true;
+    }
+
+    if (off + 2 > body_size) return false;
+    const uint16_t meta_len = be16(bytes + off);
+    off += 2;
+    if (off + meta_len != body_size) return false;
+
+    out.source_slot = source_slot;
+    out.export_time_ms = export_time_ms;
+    out.orig_plain.assign(orig_plain, orig_plain + orig_len);
+    out.module.assign(module, module + module_len);
+    out.warehouse = std::move(warehouse);
+    out.has_warehouse = has_warehouse;
+    out.meta_json.assign(reinterpret_cast<const char*>(bytes + off), meta_len);
+    out.size_bytes = static_cast<long long>(size);
+    return true;
+}
+
+std::string entry_json(const Entry& e) {
+    std::string s = "{\"file_name\":\"" + e.file_name + "\"";
+    s += ",\"size_bytes\":" + std::to_string(e.size_bytes);
+    s += ",\"source_slot\":" + std::to_string(e.source_slot);
+    s += ",\"export_time\":" + std::to_string(e.export_time_ms);
+    s += ",\"map_id\":" + std::to_string(e.map_id);
+    // map_name 缺省空串：启动前/未命中时让上层走"未知地图"显示而非丢弃字段。
+    s += ",\"map_name\":\"" + e.map_name + "\"";
+    s += ",\"hero_level\":" + std::to_string(e.hero_level);
+    s += ",\"hero_index\":" + std::to_string(e.hero_index);
+    s += ",\"class_idx\":" + std::to_string(e.class_idx);
+    s += ",\"class_name\":\"" + e.class_name + "\"";
+    s += ",\"save_version\":" + std::to_string(e.save_version);
+    s += ",\"save_time\":" + std::to_string(e.save_time);
+    s += ",\"original_sha256\":\"" + e.original_sha256 + "\"";
+    s += ",\"module_sha256\":\"" + e.module_sha256 + "\"";
+    s += ",\"checksum\":\"" + e.checksum + "\"";
+    s += "}";
+    return s;
+}
+
+void entry_from_bundle(const std::string& file_name, const ParsedBundle& p, Entry& out) {
+    out = Entry{};
+    out.file_name = file_name;
+    out.size_bytes = p.size_bytes;
+    out.source_slot = p.source_slot;
+    out.export_time_ms = p.export_time_ms;
+    long long v = 0;
+    std::string s;
+    if (json_find_int(p.meta_json, "map_id", v)) out.map_id = static_cast<int>(v);
+    if (json_find_int(p.meta_json, "hero_level", v)) out.hero_level = static_cast<int>(v);
+    if (json_find_int(p.meta_json, "hero_index", v)) out.hero_index = static_cast<int>(v);
+    // 职业：旧备份无 class_idx/class_name → 保持默认 -1/空，UI 退化显示。
+    if (json_find_int(p.meta_json, "class_idx", v)) out.class_idx = static_cast<int>(v);
+    if (json_find_string(p.meta_json, "class_name", s)) out.class_name = s;
+    if (json_find_int(p.meta_json, "save_version", v)) out.save_version = static_cast<int>(v);
+    if (json_find_int(p.meta_json, "save_time", v)) out.save_time = v;
+    if (json_find_string(p.meta_json, "original_sha256", s)) out.original_sha256 = s;
+    if (json_find_string(p.meta_json, "module_sha256", s)) out.module_sha256 = s;
+    // checksum 以 metaJson 为权威；旧备份缺失时从文件名兜底（与 Kotlin 一致）。
+    if (!json_find_string(p.meta_json, "checksum", s) || s.empty()) {
+        s = extract_checksum_from_name(file_name, s) ? s : std::string();
+    }
+    out.checksum = s;
+}
+
+// ---- 极简扁平 JSON 字段提取 ----
+
+bool json_find_int(const std::string& json, const char* key, long long& out) {
+    const char* p = find_key_value(json, key);
+    if (p == nullptr) return false;
+    char* end = nullptr;
+    const long long v = std::strtoll(p, &end, 10);
+    if (end == p) return false;
+    out = v;
+    return true;
+}
+
+bool json_find_string(const std::string& json, const char* key, std::string& out) {
+    const char* p = find_key_value(json, key);
+    if (p == nullptr || *p != '"') return false;
+    ++p;
+    const char* end = std::strchr(p, '"');
+    if (end == nullptr) return false;
+    out.assign(p, static_cast<size_t>(end - p));
+    return true;
+}
+
+bool valid_checksum(const std::string& value) {
+    if (value.size() != 12) return false;
+    for (char c : value) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool extract_checksum_from_name(const std::string& file_name, std::string& out) {
+    // `_([0-9a-f]{12}).qol_save$`
+    constexpr size_t kPat = 12 + 10;  // '_' + 12 hex + ".qol_save"
+    if (file_name.size() < kPat) return false;
+    if (!ends_with(file_name, ".qol_save", 9)) return false;
+    const size_t start = file_name.size() - 9 - 12;
+    if (file_name[start - 1] != '_') return false;
+    for (size_t i = 0; i < 12; ++i) {
+        const char c = file_name[start + i];
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        if (!ok) return false;
+    }
+    out = file_name.substr(start, 12);
+    return true;
+}
+
+bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& parsed,
+                             const std::string& checksum) {
+    if (!valid_checksum(checksum)) return false;
+    std::string inner;
+    if (json_find_string(parsed.meta_json, "checksum", inner) && valid_checksum(inner)) {
+        return inner == checksum;
+    }
+    std::string from_name;
+    if (!extract_checksum_from_name(file_name, from_name)) return false;
+    return from_name == checksum;
+}
+
+}  // namespace save_backup

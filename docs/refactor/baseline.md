@@ -13,6 +13,7 @@
   - `scripts/maintenance/check_resources.py`
   - `scripts/maintenance/check_jni.py`
   - `module/app/src/main/cpp/feature/*/`
+  - `module/app/src/main/cpp/plugins/*/`
 
 ## 1. 层分布与迁移期映射
 
@@ -32,27 +33,27 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `features/attribute_range` | 4 |
-| `features/autosell` | 12 |
-| `features/craft_ui` | 4 |
-| `features/custom_recipe` | 10 |
-| `features/extension_bag` | 32 |
-| `features/inventory_hooks` | 2 |
-| `features/patch` | 9 |
-| `features/push_all` | 6 |
-| `features/quest` | 4 |
-| `features/save_backup` | 6 |
-| `features/simple_mode` | 6 |
-| `features/special_equip` | 6 |
-| `features/stack_limit` | 2 |
-| `features/text_layer` | 4 |
-| `features/ui` | 31 |
-| `features/world_teleport` | 6 |
 | `game` | 39 |
 | `hooks` | 8 |
 | `host` | 28 |
 | `infra` | 45 |
 | `patch` | 7 |
+| `plugins/attribute_range` | 4 |
+| `plugins/autosell` | 12 |
+| `plugins/craft_ui` | 4 |
+| `plugins/custom_recipe` | 10 |
+| `plugins/extension_bag` | 32 |
+| `plugins/inventory_hooks` | 2 |
+| `plugins/patch` | 9 |
+| `plugins/push_all` | 6 |
+| `plugins/quest` | 4 |
+| `plugins/save_backup` | 6 |
+| `plugins/simple_mode` | 6 |
+| `plugins/special_equip` | 6 |
+| `plugins/stack_limit` | 2 |
+| `plugins/text_layer` | 4 |
+| `plugins/ui` | 31 |
+| `plugins/world_teleport` | 6 |
 | **合计** | **328** |
 
 ### 1.2 迁移期映射摘要
@@ -66,13 +67,12 @@
 | --- | --- |
 | `contracts/` | contracts |
 | `domains/` | domains |
-| `features/` | features |
 | `game/` | game |
 | `hooks/` | hooks |
 | `host/` | host |
 | `infra/` | infra |
 | `patch/` | patch |
-| `products/` | products |
+| `plugins/` | plugins |
 
 **重构期根目录覆盖（`arch_common._ROOT_OVERRIDES`）**
 
@@ -127,7 +127,8 @@
 | `game_ui*` | domains/ui |
 | `game_world*` | domains/world |
 
-> 说明：`_TARGET_PREFIXES` 为有序元组，`features/` 必须先于 `feature/` 匹配；
+> 说明：`_TARGET_PREFIXES` 为有序元组，`plugins/` 为目标插件层前缀；
+> legacy `feature/` 经重构期映射归入 `plugins/<id>`（待迁移分列）；
 > 其余无法映射的路径落入 `unknown`（由 `check_layers` 以警告上报）。
 
 ## 2. 跨层依赖与 include 环
@@ -139,20 +140,20 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
-| `features/ui` | `game` | 22 |
-| `features/ui` | `infra` | 13 |
+| `plugins/ui` | `game` | 22 |
+| `plugins/ui` | `infra` | 13 |
 | `host` | `contracts` | 12 |
 | `host` | `game` | 12 |
-| `features/patch` | `game` | 11 |
-| `features/autosell` | `infra` | 10 |
-| `features/extension_bag` | `game` | 10 |
+| `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
+| `plugins/autosell` | `infra` | 10 |
+| `plugins/extension_bag` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `domains/world` | `game` | 7 |
-| `features/custom_recipe` | `contracts` | 7 |
-| `features/custom_recipe` | `infra` | 7 |
-| `features/extension_bag` | `contracts` | 7 |
 | `host` | `hooks` | 7 |
+| `host` | `patch` | 7 |
+| `plugins/custom_recipe` | `contracts` | 7 |
+| `plugins/custom_recipe` | `infra` | 7 |
 
 ### 2.2 include 环
 
@@ -168,7 +169,7 @@
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
 - `layer_direction|api/native/game_party.cpp|api/native/game_character.h|domains/party → domains/character`
 - `layer_direction|api/native/game_party.cpp|api/native/game_world.h|domains/party → domains/world`
-- `layer_direction|api/native/game_save.cpp|feature/ui/game_ui_savebackup.h|domains/save → features/ui`
+- `layer_direction|api/native/game_save.cpp|feature/ui/game_ui_savebackup.h|domains/save → plugins/ui`
 - `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|domains/ui → domains/world`
 - `layer_direction|core/native/frame_task.cpp|game_system.h|infra → domains/system`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_character.h|infra → domains/character`
@@ -194,20 +195,20 @@
 - `offsets_symbols_header|core/native/inventory_trade.cpp|data/native/game_symbols.h|domains/inventory 层引用符号头`
 - `offsets_symbols_header|core/native/save_enter.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/save_exit.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|feature/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
-- `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|features/extension_bag 层引用符号头`
-- `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
-- `offsets_symbols_header|feature/patch/inventory_hook_stage4.cpp|data/native/game_symbols.h|features/patch 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_autosell.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_charinfo_zh.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_custom.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_savebackup.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_settings.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/native_choice.cpp|data/native/game_symbols.h|features/ui 层引用符号头`
-- `offsets_symbols_header|features/custom_recipe/feature.cpp|data/native/game_symbols.h|features/custom_recipe 层引用符号头`
+- `offsets_symbols_header|feature/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
+- `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
+- `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|plugins/patch 层引用符号头`
+- `offsets_symbols_header|feature/patch/inventory_hook_stage4.cpp|data/native/game_symbols.h|plugins/patch 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_autosell.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_charinfo_zh.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_custom.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_savebackup.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/game_ui_settings.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|feature/ui/native_choice.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
+- `offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
 - …（其余 1 条省略）
 
 ### resource_unknown_symbol（8 条）
@@ -236,7 +237,7 @@
 去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
-- `F_SAVESLOT_DELETE_VMA` → `features/save_backup/plugin.cpp`
+- `F_SAVESLOT_DELETE_VMA` → `plugins/save_backup/plugin.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
 - `F_SCENE_DRAW_EQUIP_VMA` → `feature/ui/game_ui_autosell.cpp`
@@ -258,33 +259,33 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 3 个）与已迁移 `features/*`（13 个）共 16 个域。
+旧 `feature/*`（待迁移 3 个）与已迁移 `plugins/*`（13 个）共 16 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，3）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `extension_bag` | `features/extension_bag` | 32 |
-| `patch` | `features/patch` | 9 |
-| `ui` | `features/ui` | 31 |
+| `extension_bag` | `plugins/extension_bag` | 32 |
+| `patch` | `plugins/patch` | 9 |
+| `ui` | `plugins/ui` | 31 |
 
-### 6.2 已迁移 `features/*`（13）
+### 6.2 已迁移 `plugins/*`（13）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `attribute_range` | `features/attribute_range` | 4 |
-| `autosell` | `features/autosell` | 12 |
-| `craft_ui` | `features/craft_ui` | 4 |
-| `custom_recipe` | `features/custom_recipe` | 10 |
-| `inventory_hooks` | `features/inventory_hooks` | 2 |
-| `push_all` | `features/push_all` | 6 |
-| `quest` | `features/quest` | 4 |
-| `save_backup` | `features/save_backup` | 6 |
-| `simple_mode` | `features/simple_mode` | 6 |
-| `special_equip` | `features/special_equip` | 6 |
-| `stack_limit` | `features/stack_limit` | 2 |
-| `text_layer` | `features/text_layer` | 4 |
-| `world_teleport` | `features/world_teleport` | 6 |
+| `attribute_range` | `plugins/attribute_range` | 4 |
+| `autosell` | `plugins/autosell` | 12 |
+| `craft_ui` | `plugins/craft_ui` | 4 |
+| `custom_recipe` | `plugins/custom_recipe` | 10 |
+| `inventory_hooks` | `plugins/inventory_hooks` | 2 |
+| `push_all` | `plugins/push_all` | 6 |
+| `quest` | `plugins/quest` | 4 |
+| `save_backup` | `plugins/save_backup` | 6 |
+| `simple_mode` | `plugins/simple_mode` | 6 |
+| `special_equip` | `plugins/special_equip` | 6 |
+| `stack_limit` | `plugins/stack_limit` | 2 |
+| `text_layer` | `plugins/text_layer` | 4 |
+| `world_teleport` | `plugins/world_teleport` | 6 |
 
 ## 校验入口
 

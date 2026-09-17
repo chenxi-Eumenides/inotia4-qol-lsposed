@@ -145,7 +145,7 @@ def parse_block_table(plain: bytes) -> dict:
     """明文块表：[0..8) 头，[8+i*4) 每项 u16 offset_rel + u16 len，块数据 = plain + offset_rel + 8。
 
     块数按 C++ 剥离实现同一规则精确得出：块 0 数据紧跟块表 ⇒ offset_rel0 == 表字节数，
-    block_count = offset_rel0 / 4（与 features/save_backup/bundle.cpp warehouse_strip_inline_segment 一致）。
+    block_count = offset_rel0 / 4（与 plugins/save_backup/bundle.cpp warehouse_strip_inline_segment 一致）。
     """
     if len(plain) < 12:
         raise ParseError("plain too small for block table")

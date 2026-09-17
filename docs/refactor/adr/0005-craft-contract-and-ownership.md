@@ -1,6 +1,6 @@
 # ADR-0005：合成结果层能力契约与行为所有权
 
-- 状态：已采纳（C2 实施中）
+- 状态：已采纳（C2 已完成，VM-46）
 - 关联：`ARCHITECTURE.md` §3.4（能力契约）/§4.1（kOwnership）/§8（资源失败→状态映射）、
   `contracts/craft_result.h`、`contracts/ownership.h`、`docs/refactor/ledger.md` C2
 
@@ -8,7 +8,7 @@
 
 - `feature/craft_ui` 与 `feature/custom_recipe` 当前是**源码级双向依赖**：craft_ui 的 hook
   wrapper 直接 include custom_recipe 的头调结果层；custom_recipe 又反调 craft_ui 的只读状态
-  原语（读格、读 mixType、读选中格）。依赖矩阵禁止 features 间水平互调，双向依赖必须在 C2 收口。
+  原语（读格、读 mixType、读选中格）。依赖矩阵禁止 plugins 间水平互调，双向依赖必须在 C2 收口。
 - custom_recipe 的合成结果层（3 格隐式配方、宝石升阶）逻辑复杂且已有完整 host 单测，适合作为
   **能力提供者**；craft_ui 是其唯一消费者。
 - 结果层的历史接口从控件状态读入参（provider 读 UIMix），与「界面归界面、结果归结果」的边界

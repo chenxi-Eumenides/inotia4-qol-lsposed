@@ -4,7 +4,7 @@
 //   * warehouse_blob_decryptable：合法/非法容器、len<4、回调 0/1、回调缺失放行；
 //   * warehouse_reencrypt_for_slot：补 slot + 重加密 + 往返自检的决策（no key / bad plain /
 //     roundtrip failed / ok），全部用可注入假加解密函数。
-#include "features/save_backup/bundle.h"
+#include "plugins/save_backup/bundle.h"
 
 #include <cstdint>
 #include <cstdio>

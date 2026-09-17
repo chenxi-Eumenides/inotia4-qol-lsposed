@@ -1,7 +1,7 @@
 // special_equip 纯逻辑 host 测试：原版判定链「跳过 bit4」后的重放判定与出售门禁决策。
-// 只链接 features/special_equip/rules.cpp，不依赖游戏进程。
+// 只链接 plugins/special_equip/rules.cpp，不依赖游戏进程。
 
-#include "features/special_equip/rules.h"
+#include "plugins/special_equip/rules.h"
 
 #include <cstdio>
 

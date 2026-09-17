@@ -4,7 +4,7 @@
 
 // 自动出售稳定端口（ARCHITECTURE.md §3.4 契约/端口风格；与 contracts/attribute_range.h、
 // core/native/*_port.h 同类）。只放消费者（UI/JNI）需要的纯类型与函数声明，实现由
-// features/autosell 提供。UI 经本头访问，避免 features/ui → features/autosell 的
+// plugins/autosell 提供。UI 经本头访问，避免 plugins/ui → plugins/autosell 的
 // feature→feature include（属 P4-B3 迁移的正常收口）。
 
 namespace autosell {
@@ -39,8 +39,8 @@ struct Config {
 
 }  // namespace autosell
 
-// 运行时配置与持久化接口：声明在全局命名空间（实现见 features/autosell），
-// 与 features/autosell 内的定义同名同签名；消费者（UI/JNI）经本头调用。
+// 运行时配置与持久化接口：声明在全局命名空间（实现见 plugins/autosell），
+// 与 plugins/autosell 内的定义同名同签名；消费者（UI/JNI）经本头调用。
 autosell::Config autosell_get_runtime_config();
 void autosell_apply_config(const autosell::Config& config);
 bool autosell_store_persist(int slot, const autosell::Config& config);

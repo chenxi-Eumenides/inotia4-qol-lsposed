@@ -23,8 +23,8 @@
 #include "core/native/sell_price.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"
 #include "feature/patch/inventory_find_item_poc.h"
-#include "features/save_backup/bundle.h"
-#include "features/world_teleport/rules.h"
+#include "plugins/save_backup/bundle.h"
+#include "plugins/world_teleport/rules.h"
 #include "../data/native/game_tiles.cpp"
 
 extern void set_host_stack_limit_enabled(bool enabled);
@@ -1824,7 +1824,7 @@ static void test_save_preflight_json() {
     CHECK(semantic.find("hero pointer is null") != npos);
 }
 
-// save-backup 纯逻辑层（features/save_backup/bundle.cpp，编译真实被测源文件）：
+// save-backup 纯逻辑层（plugins/save_backup/bundle.cpp，编译真实被测源文件）：
 
 static void test_save_backup_digests() {
     namespace sb = save_backup;

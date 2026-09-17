@@ -3,7 +3,7 @@
 #include <atomic>
 
 // stack_limit 有效态唯一持有者（原 feature/patch/game_patch.cpp 的 g_stack_enabled）。
-// 只读签名 stack_limit_enabled() 冻结；写入只允许 features/stack_limit 插件经
+// 只读签名 stack_limit_enabled() 冻结；写入只允许 plugins/stack_limit 插件经
 // stack_limit_set_effective 调用。指令 clamp 的物理安装/还原由宿主声明式资源完成，
 // 本文件不接触游戏内存。
 

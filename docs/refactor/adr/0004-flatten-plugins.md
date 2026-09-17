@@ -20,7 +20,7 @@
 5. **能力身份静态、可用性动态**：capability id、版本、接口和发布模式必须静态列入 `PluginDescriptor.provides`；`kDynamic` 能力可在运行期低频 publish/revoke，并发布 `capability_registered/revoked` 事件。`optional_requires` 据此延迟接入/反注册；required 依赖仍走 blocked/级联。进档、面板、商店等高频上下文不反复注册能力，由稳定接口的 `availability()/probe()`、快照或领域事件表达。
 6. **自举兜底红线（R8）**：最后观测手段是 `infra/log`（内核设施），最后恢复手段是外部 `config.json` + 重启；二者不得依赖任何插件。据此**不需要**"不可禁用插件"分类——`core.api`/`core.ui` 均为普通可禁用插件，自举悖论由内核设施而非特权插件化解。
 7. **不引入 before/after 装配顺序**：`requires/provides` 拓扑排序已覆盖出口依赖排序，不需要第二套排序机制。
-8. **执行节点 = P5**：`products/` 从未创建，无迁移成本；P5 收口时按新结构落地 `core.api`/`core.ui`、内置 API provider 和动态 capability 协议（U10：`http.registry` v1 剩余 ABI 与 owner 表）。
+8. **执行节点 = P5**：`products/` 从未创建，无迁移成本；P5 收口时按新结构落地 `core.api`/`core.ui`、内置 API provider 和动态 capability 协议（U10：`http.registry` v1 剩余 ABI 与 owner 表）。**更名已于 P4-D0 提前执行（用户裁决，避免 D1/D2 二次搬迁）**：`features/` → `plugins/` 机械搬迁、工具链与基线同步；P5 只承担 `core.api`/`core.ui`、动态能力、JNI 与脚本收紧。
 
 ## 后果
 

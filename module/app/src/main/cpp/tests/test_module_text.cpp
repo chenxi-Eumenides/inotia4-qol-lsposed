@@ -1,6 +1,6 @@
-#include "features/text_layer/feature.h"
+#include "plugins/text_layer/feature.h"
 
-#include "features/custom_recipe/catalog.h"
+#include "plugins/custom_recipe/catalog.h"
 #include "infra/text_scope.h"
 
 #include <cstddef>

@@ -33,10 +33,10 @@ EXEMPTIONS_PATH = ARCH_DIR / "arch_exemptions.json"
 # --------------------------------------------------------------------------
 
 BASE_LAYERS = frozenset(
-    {"contracts", "game", "infra", "hooks", "patch", "domains", "features", "products", "host"}
+    {"contracts", "game", "infra", "hooks", "patch", "domains", "plugins", "host"}
 )
 
-# 同层内部允许互相 include（features / products 除外，见 allows()）
+# 同层内部允许互相 include（plugins 除外，见 allows()）
 _SIMPLE_ALLOW = {
     "contracts": {"contracts"},
     "game": {"contracts", "game"},
@@ -64,17 +64,11 @@ def allows(src_layer: str, dst_layer: str) -> bool:
             # 同域内部允许；域间水平互调仅 system 聚合方向允许
             return src_layer == dst_layer or src_layer == "domains/system"
         return False
-    if sb == "features":
+    if sb == "plugins":
         if db in {"contracts", "game", "infra", "hooks", "patch", "domains"}:
             return True
-        if db == "features":
+        if db == "plugins":
             return src_layer == dst_layer  # 同一插件内部允许
-        return False
-    if sb == "products":
-        if db in {"contracts", "infra", "domains"}:
-            return True
-        if db == "products":
-            return src_layer == dst_layer
         return False
     return False
 
@@ -141,8 +135,7 @@ _TARGET_PREFIXES = (
     ("hooks/", "hooks"),
     ("patch/", "patch"),
     ("domains/", "domains"),
-    ("features/", "features"),  # 必须先于 feature/（前缀包含关系）
-    ("products/", "products"),
+    ("plugins/", "plugins"),
     ("host/", "host"),
 )
 
@@ -154,7 +147,7 @@ def classify(rel: str) -> str:
     """
     for prefix, layer in _TARGET_PREFIXES:
         if rel.startswith(prefix):
-            if prefix in ("domains/", "features/", "products/") and rel.count("/") > 1:
+            if prefix in ("domains/", "plugins/") and rel.count("/") > 1:
                 return layer + "/" + rel.split("/", 2)[1]
             return layer
     return _classify_transition(rel)
@@ -180,7 +173,7 @@ def _classify_transition(rel: str) -> str:
         return "domains"
     if rel.startswith("feature/"):
         parts = rel.split("/")
-        return "features/" + parts[1] if len(parts) > 2 else "features"
+        return "plugins/" + parts[1] if len(parts) > 2 else "plugins"
     if rel.startswith("tests/"):
         return "tests"
     return "unknown"

@@ -1,13 +1,13 @@
 // gamebridge_autosell.cpp —— 自动出售 JNI 薄层（阶段 B）。
 //
-// 仅做 JNI 参数/返回值转换；配置与状态逻辑在 features/autosell/*。
+// 仅做 JNI 参数/返回值转换；配置与状态逻辑在 plugins/autosell/*。
 
 #include "gamebridge_internal.h"
 
 #include "contracts/commands.h"
-#include "features/autosell/config.h"
-#include "features/autosell/scan.h"
-#include "features/autosell/store.h"
+#include "plugins/autosell/config.h"
+#include "plugins/autosell/scan.h"
+#include "plugins/autosell/store.h"
 #include "infra/commands.h"
 
 namespace {
@@ -36,7 +36,7 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     cfg.socket = clamp_range(static_cast<int>(socket), 0, 16);
     cfg.gem_tier = clamp_range(static_cast<int>(gemTier), 0, 5);
     cfg.gem_range = clamp_range(static_cast<int>(gemRange), 0, 5);
-    // 特殊类型入参为 JSON 数组文本（如 ["dice"]）；null/坏串 -> 空集（名字->位表在 features/autosell/store.h）。
+    // 特殊类型入参为 JSON 数组文本（如 ["dice"]）；null/坏串 -> 空集（名字->位表在 plugins/autosell/store.h）。
     const char* special_chars =
         specialJson != nullptr ? env->GetStringUTFChars(specialJson, nullptr) : nullptr;
     cfg.special_mask = autosell_special_parse_array(special_chars);

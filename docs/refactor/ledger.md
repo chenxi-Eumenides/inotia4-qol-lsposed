@@ -13,7 +13,7 @@
 | P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | ✅ 完成 | 真机卡 VM-P2-01 PASS（两态翻转 + 状态一致 + 半血 A/B 135↔270 + 无崩溃）；host 23/23；基线 124→121 |
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ✅ 完成 | 真机卡 VM-P3-01/VM-P3-03 PASS（deactivate→`free`、物理归还 A/B `hp=270`、activate 重挂载 `hp=135`，U6 闭合；10 态 API + tickets `pending→done`）；故障注入 host-only（VM-P3-02，277+115 断言）；host 25/25 |
 | P4 | 批量迁移其余插件（内置静态轨） | 🔄 进行中（**阶段 A ✅**：A1–A4，证据 VM-P4-01..05） | 每插件：单测 + 验收卡；豁免清零 |
-| P5 | `plugins/` 单层收口（ADR-0004）：`core.api` 传输内核、内置 API provider、`core.ui`、动态 capability 与注册口落地；JNI 分组、脚本收紧、删除旧路径 | ⬜ 未开始 | 冻结 API 路径/响应兼容；路由 owner 表无重复/遗漏；动态能力发布/撤销与 route/capability lease 验收；`check_*` 全绿、豁免清零、单轨消失；U10 剩余 ABI 冻结 |
+| P5 | `plugins/` 单层收口（ADR-0004）：`core.api` 传输内核、内置 API provider、`core.ui`、动态 capability 与注册口落地；JNI 分组、脚本收紧、删除旧路径（**P4-D0 已完成 `features/`→`plugins/` 更名；P5 只做 `core.api`/`core.ui`、动态能力、JNI 与脚本收紧**） | ⬜ 未开始 | 冻结 API 路径/响应兼容；路由 owner 表无重复/遗漏；动态能力发布/撤销与 route/capability lease 验收；`check_*` 全绿、豁免清零、单轨消失；U10 剩余 ABI 冻结 |
 | P6（可选） | 外部插件轨（草案）：数据扩展 + 未签名全权 native | ⬜ 未开始 | schema 拒绝、用户显式启用、native 加载/禁用、托管资源回收、启动故障恢复与更新/回滚真机通过 |
 
 ## 2. 功能域迁移台账
@@ -23,20 +23,20 @@
 
 | 域 | 目标归属 | 规模 | 机制占用 | 已知债务 | 迁移阶段 |
 |---|---|---|---|---|---|
-| `feature/ui` | `features/ui` + 基础层拆分（`ui_kit`） | 33 | entry hook ×4 安装者 | 符号头引用 ×10；域间依赖（→ autosell/patch/save_backup） | P2（样板候选）/P4 |
-| `feature/extension_bag` | `features/extension_bag` | 32 | entry hook、call patch、ptr slot | 符号头引用；与 `feature/patch` 双向依赖 | P4 |
-| `feature/patch` | `patch/` 机制 + `features/inventory_hooks` 业务 | 12 | entry hook、call patch | 符号头引用；被 7 个域依赖 | P3/P4 |
-| `feature/autosell` | `features/autosell` | 10 | 帧任务消费者 | 域间依赖（→ attribute_range） | P4 |
-| `feature/custom_recipe` | `features/custom_recipe` | 8 | entry hook（经 craft_ui） | 与 `feature/craft_ui` 双向 | P4 |
-| `feature/attribute_range` | `features/attribute_range`（插件）+ `domains/attribute_range`（纯规则）+ `game/access`（界面接入） | 4 | entry hook ×3 | 已清除（符号头引用随迁移消除；feature→feature 依赖已消除） | ✅ P4-A3 完成（VM-P4-04） |
-| `feature/craft_ui` | `features/craft_ui` | 4 | entry hook ×11（单一挂载处） | 与 `feature/custom_recipe` 双向 | P4 |
-| `feature/save_backup` | `features/save_backup` | 4 | 无（纯逻辑 + 文件事务） | 被 `feature/ui` 依赖 | P4 |
-| `feature/simple_mode` | `features/simple_mode` | 6 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
-| `feature/ui`（文本层子项） | `features/text_layer` | 4 | 共享资源 `hook:MEMORYTEXT_GetText`（owner）+ 能力 `text_layer` | 无（消费者改经 `hooks/dispatch` 分派，不再各自挂同址 hook） | ✅ P4-A4 完成（VM-P4-05） |
-| `feature/world_teleport` | `features/world_teleport` | 4 | ptr slot、调用点 patch | 依赖 `feature/ui`（native_choice） | P4 |
-| `feature/push_all` | `features/push_all` | 2 | call patch ×2 闸门 | 已清除（无已知域间依赖，干净样板） | ✅ P4-A1 完成（VM-P4-01） |
-| `feature/quest` | `features/quest`（零资源常驻） | 2 | 帧节拍（进档回调暂借 legacy `save_enter` 设施） | 无已知域间依赖 | ✅ P4-A2 完成（VM-P4-03） |
-| `feature/special_equip` | `features/special_equip` | 2 | entry hook ×2 | 无已知域间依赖 | P2 备选 |
+| `feature/ui` | `plugins/ui` + 基础层拆分（`ui_kit`） | 33 | entry hook ×4 安装者 | 符号头引用 ×10；域间依赖（→ autosell/patch/save_backup） | P2（样板候选）/P4 |
+| `feature/extension_bag` | `plugins/extension_bag` | 32 | entry hook、call patch、ptr slot | 符号头引用；与 `feature/patch` 双向依赖 | P4 |
+| `feature/patch` | `patch/` 机制 + `plugins/inventory_hooks` 业务 | 12 | entry hook、call patch | 符号头引用；被 7 个域依赖 | P3/P4 |
+| `feature/autosell` | `plugins/autosell` | 10 | 帧任务消费者 | 域间依赖（→ attribute_range） | P4 |
+| `feature/custom_recipe` | `plugins/custom_recipe` | 8 | entry hook（经 craft_ui） | 与 `feature/craft_ui` 双向 | P4 |
+| `feature/attribute_range` | `plugins/attribute_range`（插件）+ `domains/attribute_range`（纯规则）+ `game/access`（界面接入） | 4 | entry hook ×3 | 已清除（符号头引用随迁移消除；feature→feature 依赖已消除） | ✅ P4-A3 完成（VM-P4-04） |
+| `feature/craft_ui` | `plugins/craft_ui` | 4 | entry hook ×11（单一挂载处） | 与 `feature/custom_recipe` 双向 | P4 |
+| `feature/save_backup` | `plugins/save_backup` | 4 | 无（纯逻辑 + 文件事务） | 被 `feature/ui` 依赖 | P4 |
+| `feature/simple_mode` | `plugins/simple_mode` | 6 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
+| `feature/ui`（文本层子项） | `plugins/text_layer` | 4 | 共享资源 `hook:MEMORYTEXT_GetText`（owner）+ 能力 `text_layer` | 无（消费者改经 `hooks/dispatch` 分派，不再各自挂同址 hook） | ✅ P4-A4 完成（VM-P4-05） |
+| `feature/world_teleport` | `plugins/world_teleport` | 4 | ptr slot、调用点 patch | 依赖 `feature/ui`（native_choice） | P4 |
+| `feature/push_all` | `plugins/push_all` | 2 | call patch ×2 闸门 | 已清除（无已知域间依赖，干净样板） | ✅ P4-A1 完成（VM-P4-01） |
+| `feature/quest` | `plugins/quest`（零资源常驻） | 2 | 帧节拍（进档回调暂借 legacy `save_enter` 设施） | 无已知域间依赖 | ✅ P4-A2 完成（VM-P4-03） |
+| `feature/special_equip` | `plugins/special_equip` | 2 | entry hook ×2 | 无已知域间依赖 | P2 备选 |
 
 > 说明：域间依赖与资源占用的完整清单见 `baseline.md` §2/§4；本表只做归属与阶段决策，不复制明细。
 
@@ -113,6 +113,6 @@
 
 ### 迁移边界（包含什么 / 不包含什么）
 
-- **包含**（目标架构强制，属迁移本身）：拆层与拆分（机制/业务、`ui_kit` 基础层）、接口替换（features 不触符号头 → `game/access`）、依赖方向修正（消除 feature↔feature）、hook/patch 声明式化（资源声明 + 事务）。
+- **包含**（目标架构强制，属迁移本身）：拆层与拆分（机制/业务、`ui_kit` 基础层）、接口替换（plugins 不触符号头 → `game/access`）、依赖方向修正（消除 feature↔feature）、hook/patch 声明式化（资源声明 + 事务）。
 - **不包含**（推迟或明确不做）：业务语义重写、算法与性能优化（性能阈值走 §10 / U1 回填）、顺手重构无关代码（AGENTS：只移动职责）。
 - 迁移中发现的缺陷单独提交，不与迁移混在一起（例：P2 的 v27 变体表缺口）。

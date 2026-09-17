@@ -40,7 +40,7 @@ std::string data_op_teleport(int32_t map_id, int32_t x, int32_t y, bool force) {
     // GoMapLinkByChar / 世界传送）。API 曾在 HTTP worker 线程直调 fn_change_map，与
     // 渲染并发导致 SPR_Draw SIGSEGV（真机 tombstone 两次复现）——与 main_menu/enter_slot
     // 同机理，切图发起必须经 transition_run 排到游戏主线程逻辑帧点执行。
-    // 发起链复刻真机验证过的世界传送功能（features/world_teleport）：MAPCHANGE_Set
+    // 发起链复刻真机验证过的世界传送功能（plugins/world_teleport）：MAPCHANGE_Set
     // 写目标图与落点 + GAMESTATE_SetState(MAP_CHANGE) 把控制权交给官方切图状态机
     // （清理/加载/定位/镜头/恢复控制全部由状态机完成）。直调 fn_change_map 或
     // SET_POSITION 绕过状态机的方案均已真机否决：前者镜头体系断裂（传送后手动移动

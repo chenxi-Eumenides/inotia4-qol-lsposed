@@ -7,9 +7,9 @@
 
 人工导航区、过渡依赖区与验证附录原样保留（本脚本不读也不改）。统计区数据源：
 
-- `module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,features,host}`
+- `module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,plugins,host}`
   新架构目录的文件数与行数（`wc -l` 口径，含空行与注释；不含 `bridge/`、`tests/` 与 legacy 路径）
-- `module/app/src/main/cpp/features/*`  已迁移插件
+- `module/app/src/main/cpp/plugins/*`  已迁移插件
 - `module/app/src/main/cpp/tests/CMakeLists.txt`  CTest target 总数与分类
 
 CTest 分类规则（显式映射，不按源文件路径推断）：
@@ -39,13 +39,13 @@ import arch_common as ac  # noqa: E402
 SCRIPT_NAME = Path(__file__).name
 DEFAULT_OUTPUT = ac.ROOT / "docs" / "refactor" / "map.md"
 TESTS_CMAKE = ac.CPP_ROOT / "tests" / "CMakeLists.txt"
-FEATURES_DIR = ac.CPP_ROOT / "features"
+PLUGINS_DIR = ac.CPP_ROOT / "plugins"
 
 BEGIN_MARKER = "<!-- BEGIN GENERATED:stats -->"
 END_MARKER = "<!-- END GENERATED:stats -->"
 
-# 新架构顶层目录（ARCHITECTURE.md §0：九个顶层目录去掉 P5 才落地的 products/）。
-NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "domains", "features", "host")
+# 新架构顶层目录（ARCHITECTURE.md §0：八个顶层目录，plugins/ 单层，ADR-0004）。
+NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "domains", "plugins", "host")
 
 # --------------------------------------------------------------------------
 # CTest 分类白名单（显式映射）
@@ -251,7 +251,7 @@ def collect_dir_stats() -> tuple[list[tuple[str, int, int]], int, int]:
 
 def collect_features() -> list[tuple[str, int, int]]:
     out: list[tuple[str, int, int]] = []
-    for directory in sorted(path for path in FEATURES_DIR.iterdir() if path.is_dir()):
+    for directory in sorted(path for path in PLUGINS_DIR.iterdir() if path.is_dir()):
         files = sorted(
             path
             for path in directory.rglob("*")
@@ -318,8 +318,8 @@ def render_stats() -> str:
         "> 本节由 `scripts/maintenance/gen_map_doc.py` 生成，**禁止手工编辑**；",
         "> 手工改动会在 `--check` 下被判定为不一致。",
         "",
-        "- 数据源：`module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,features,host}`、"
-        "`module/app/src/main/cpp/features/*`、`module/app/src/main/cpp/tests/CMakeLists.txt`",
+        "- 数据源：`module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,plugins,host}`、"
+        "`module/app/src/main/cpp/plugins/*`、`module/app/src/main/cpp/tests/CMakeLists.txt`",
         "- 口径：行数按 `wc -l`（换行符计数，含空行与注释）；文件限 `.cpp`/`.h`/`.inc`；"
         "不含 `bridge/`、`tests/` 与 legacy 路径",
         "- CTest 分类规则：`gen_map_doc.py` 的显式白名单（测试源文件 → 机制/宿主或已迁移功能）"
@@ -334,10 +334,10 @@ def render_stats() -> str:
         lines.append(f"| `{name}/` | {files} | {line_count} |")
     lines += [f"| **合计** | **{total_files}** | **{total_lines}** |", ""]
 
-    lines += ["### 已迁移插件（`features/*`）", ""]
+    lines += ["### 已迁移插件（`plugins/*`）", ""]
     if features:
         for name, files, line_count in features:
-            lines.append(f"- `features/{name}/`：{files} 文件 / {line_count} 行")
+            lines.append(f"- `plugins/{name}/`：{files} 文件 / {line_count} 行")
     else:
         lines.append("（无）")
     lines.append("")

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // 游戏层：属性范围详情渲染所需的符号/GOT 原语（ARCHITECTURE.md §5「版本耦合唯一收口」）。
-// features/attribute_range 只调用本层语义函数；符号常量与 fn_* 指针收口在 game/。
+// plugins/attribute_range 只调用本层语义函数；符号常量与 fn_* 指针收口在 game/。
 //
 // 线程纪律：以下函数只在游戏主线程（详情渲染 / 帧回调）调用；捕获窗口为 thread_local。
 

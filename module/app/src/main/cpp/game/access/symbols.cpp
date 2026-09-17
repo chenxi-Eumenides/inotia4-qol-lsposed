@@ -54,7 +54,7 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA},
     {"F_INVEN_REMOVE_ITEM_DATA_VMA", F_INVEN_REMOVE_ITEM_DATA_VMA},
     // 合成器界面层入口 hook（owner=craft_ui，C2 Step 3 声明式化）：12 条 wrapper 的挂载点；
-    // handler 在 features/craft_ui/plugin.cpp 取址。
+    // handler 在 plugins/craft_ui/plugin.cpp 取址。
     {"F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA", F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA},
     {"F_UIMIX_BUTTON_MIXING_EXE_VMA", F_UIMIX_BUTTON_MIXING_EXE_VMA},
     {"F_MAKE_MIX_VMA", F_MAKE_MIX_VMA},

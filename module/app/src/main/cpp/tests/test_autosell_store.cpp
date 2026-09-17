@@ -1,4 +1,4 @@
-#include "features/autosell/store.h"
+#include "plugins/autosell/store.h"
 
 #include <cstdint>
 #include <cstdio>

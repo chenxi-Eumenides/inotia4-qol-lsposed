@@ -9,7 +9,7 @@
 // 本文件只剩一件事：把角色面板的绘制窗口标记为 `kCharacterPanel` 作用域。module_text 的
 // GetText wrapper 只在当前线程处于该作用域时才替换 35185..35196 的返回值，其它界面一律原样。
 //
-// 设计依据：docs/development/features/custom-text.md（模块自定义文本层）、
+// 设计依据：docs/development/plugins/custom-text.md（模块自定义文本层）、
 // docs/reference/game/ui.md §5（文本表）、architecture.md §2.2.1（Native Hook 选型）。
 
 // 安装角色面板绘制窗口 hook（幂等；bridge 未就绪时静默返回，可后续重试）。

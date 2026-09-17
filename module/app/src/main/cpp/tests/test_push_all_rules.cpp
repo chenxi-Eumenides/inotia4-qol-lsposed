@@ -1,7 +1,7 @@
-// features/push_all/rules.h host 单测：party_decision 矩阵（纯逻辑，不触游戏内存）。
+// plugins/push_all/rules.h host 单测：party_decision 矩阵（纯逻辑，不触游戏内存）。
 // 判定顺序：type==1（怪物）→ 0；active group → 0；否则返回 party_index。
 
-#include "features/push_all/rules.h"
+#include "plugins/push_all/rules.h"
 
 #include <cstdio>
 

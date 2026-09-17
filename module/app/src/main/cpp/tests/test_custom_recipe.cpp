@@ -1,6 +1,6 @@
-#include "features/custom_recipe/catalog.h"
-#include "features/custom_recipe/rules.h"
-#include "features/custom_recipe/table.h"
+#include "plugins/custom_recipe/catalog.h"
+#include "plugins/custom_recipe/rules.h"
+#include "plugins/custom_recipe/table.h"
 
 #include "domains/attribute_range/rules.h"
 
