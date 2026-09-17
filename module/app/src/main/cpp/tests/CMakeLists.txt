@@ -444,3 +444,14 @@ target_include_directories(store_sell_rules_tests PRIVATE
 )
 target_compile_features(store_sell_rules_tests PRIVATE cxx_std_17)
 add_test(NAME store_sell_rules_tests COMMAND store_sell_rules_tests)
+
+# B4-1：infra/store MSAV 容器层 host 测试（末尾追加）
+add_executable(infra_store_tests
+    test_infra_store.cpp
+    ${CPP_DIR}/infra/store.cpp
+)
+target_include_directories(infra_store_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(infra_store_tests PRIVATE cxx_std_17)
+add_test(NAME infra_store_tests COMMAND infra_store_tests)
