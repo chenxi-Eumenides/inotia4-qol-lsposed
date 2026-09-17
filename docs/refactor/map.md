@@ -30,14 +30,14 @@
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 285 |
 | `domains/` | 2 | 111 |
-| `features/` | 46 | 3319 |
+| `features/` | 46 | 3236 |
 | `host/` | 12 | 1781 |
-| **合计** | **116** | **10090** |
+| **合计** | **116** | **10007** |
 
 ### 已迁移插件（`features/*`）
 
 - `features/attribute_range/`：4 文件 / 303 行
-- `features/autosell/`：12 文件 / 1151 行
+- `features/autosell/`：12 文件 / 1068 行
 - `features/inventory_hooks/`：2 文件 / 98 行
 - `features/push_all/`：6 文件 / 267 行
 - `features/quest/`：4 文件 / 162 行

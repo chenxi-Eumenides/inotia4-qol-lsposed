@@ -1,7 +1,5 @@
 #pragma once
 
-#include <jni.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +14,8 @@
 // 的 participant/journal，不触碰 `extensionbags.items` / `extensionbags.journal`，
 // 不持 g_virtual_bag_mtx。
 //
-// 纯序列化函数为 inline（可 host 测，零 Android/游戏依赖）；JNI 桥与直写在 .cpp。
+// 纯序列化函数为 inline（可 host 测，零 Android/游戏依赖）；section 读写经 infra/store
+// 在 .cpp（无 JNI 桥）。
 
 namespace autosell_store_detail {
 
@@ -193,13 +192,10 @@ inline bool autosell_config_from_json(const char* json, autosell::Config* out) {
     return true;
 }
 
-// 注册 Kotlin AutoSellConfigStore（jclass + load/save 静态方法 id）。
-void autosell_store_register_bridge(JNIEnv* env, jclass bridge_class);
-
-// 进档时经桥读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
+// 进档时读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
 // 由 `autosell_register_save_enter` 的 save-enter 回调（游戏主线程）调用一次；任务
 // 生命周期见 autosell_scan.h（全局开关 + 已进档）。
 void autosell_store_ensure_loaded(int slot);
 
-// 序列化并写回 `autosell` section；slot 非法或桥失败返回 false。
+// 序列化并写回 `autosell` section；slot 非法或 store 写失败返回 false。
 bool autosell_store_persist(int slot, const autosell::Config& config);

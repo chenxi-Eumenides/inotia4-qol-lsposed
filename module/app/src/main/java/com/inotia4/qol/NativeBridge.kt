@@ -19,7 +19,6 @@ object NativeBridge {
         ready = try {
             nativeRegisterConfigBridge(ModuleConfigUiBridge::class.java)
         nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
-            nativeRegisterAutoSellStoreBridge(AutoSellConfigStore::class.java)
             nativeInit()
         } catch (t: Throwable) {
             LogFile.error(LogDomain.PLATFORM, "nativeInit failed", t)
@@ -39,7 +38,6 @@ object NativeBridge {
 
     external fun nativeRegisterConfigBridge(bridge: Class<*>)
     external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)
-    external fun nativeRegisterAutoSellStoreBridge(bridge: Class<*>)
     external fun nativeGetInitReport(): String
     external fun nativeGetBaseAddr(): Long
     external fun nativeGetFrameCount(): Long

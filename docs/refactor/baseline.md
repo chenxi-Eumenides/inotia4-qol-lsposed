@@ -143,16 +143,16 @@
 | `features/ui` | `infra` | 13 |
 | `host` | `game` | 12 |
 | `features/patch` | `game` | 11 |
+| `features/autosell` | `infra` | 10 |
 | `features/extension_bag` | `game` | 10 |
 | `host` | `contracts` | 10 |
 | `infra` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
-| `features/autosell` | `infra` | 9 |
 | `domains/world` | `game` | 7 |
 | `features/extension_bag` | `contracts` | 7 |
 | `host` | `hooks` | 7 |
 | `host` | `patch` | 7 |
-| `features/autosell` | `game` | 6 |
+| `features/extension_bag` | `infra` | 6 |
 
 ### 2.2 include 环
 
@@ -249,8 +249,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：151 个
-- native 导出：151 个
+- Kotlin `external fun`：150 个
+- native 导出：150 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：

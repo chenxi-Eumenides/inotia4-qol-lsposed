@@ -36,6 +36,7 @@
 #include "game_access.h"
 #include "game_ptr_hook.h"
 #include "game_symbols.h"
+#include "infra/store.h"
 
 namespace {
 
@@ -45,15 +46,14 @@ namespace {
 constexpr const char* kBackupDirName = "save_backup";
 constexpr const char* kRollbackDirName = ".rollback";
 constexpr const char* kBundleSuffix = ".qol_save";
-constexpr const char* kModuleSaveDirName = "module-saves";
-constexpr const char* kModuleSaveSuffix = ".module-save";
-constexpr const char* kLastGoodSuffix = ".last-good";
 
 std::mutex g_sb_mtx;
 std::string g_sb_data_dir;
 std::string g_sb_external_dir;
 
 // 游戏删档回调 GOT 槽覆盖（save-delete-sync）。见 save_backup.h 声明注释。
+// wrapper 内先回调原函数，再取 g_sb_mtx 调 infra/store::delete_slot（锁序 g_sb_mtx → store），
+// 与导出/导入的 g_sb_mtx 串行；不取 g_virtual_bag_mtx、不走 JNI。
 constexpr size_t kSlotDeletePageSize = 0x1000;
 PtrHook g_slot_delete_hook;
 
@@ -221,43 +221,27 @@ bool backup_dir(std::string& out) {
     return true;
 }
 
-// sidecar 路径：<external>/module-saves/slot-{n}.module-save（primary）+ .last-good。
-// external 未初始化或 module-saves 目录不可得时 sidecar 主路径为空。
-void module_sidecar_paths(int slot, std::string& primary, std::string& last_good) {
-    primary.clear();
-    last_good.clear();
-    if (g_sb_external_dir.empty()) return;
-    const std::string dir = g_sb_external_dir + "/" + kModuleSaveDirName;
-    if (!ensure_dir(dir)) {
-        SB_LOG("module save unavailable: mkdir failed: %s", dir.c_str());
-        return;
-    }
-    primary = dir + "/slot-" + std::to_string(slot) + kModuleSaveSuffix;
-    last_good = primary + kLastGoodSuffix;
-}
+// sidecar 容器操作（读 primary/校验/回退、重定槽双写、删除）统一经 infra/store；
+// 本文件不再自行拼接 module-saves/ 路径或直接读写 sidecar 文件。
 
 // SaveSlot_Delete 的 PtrHook wrapper。执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），
 // x0 = slot(int32_t)。约束：
-//  - 只回调原函数（删 save{n}.dat + 重载三槽）并 unlink 该槽模块 sidecar 两文件；
+//  - 只回调原函数（删 save{n}.dat + 重载三槽）并经 store 删除该槽 sidecar；
 //  - 不取 g_virtual_bag_mtx、不走 JNI/Kotlin（避免跨层锁序与主线程阻塞）；
 //  - 不在本函数内再调 SAVE_CreateSaveSlot（原函数已调）；
-//  - 短取 g_sb_mtx，与 save_backup 导入/导出串行。
+//  - 短取 g_sb_mtx，与 save_backup 导入/导出串行（锁序 g_sb_mtx → store）。
 void slot_delete_hook_wrapper(int32_t slot) {
     if (g_slot_delete_hook.installed()) {
         g_slot_delete_hook.call_orig(slot);
     }
     if (slot < 0 || slot > 2) return;
     std::lock_guard<std::mutex> lk(g_sb_mtx);
-    std::string primary;
-    std::string last_good;
-    module_sidecar_paths(slot, primary, last_good);
-    if (file_exists(primary)) {
-        remove_file(primary);
-        SB_LOG("slot delete hook: removed sidecar %s", primary.c_str());
-    }
-    if (file_exists(last_good)) {
-        remove_file(last_good);
-        SB_LOG("slot delete hook: removed last-good %s", last_good.c_str());
+    const qol::infra::store::Status status = qol::infra::store::delete_slot(slot);
+    if (status == qol::infra::store::Status::kOk) {
+        SB_LOG("slot delete hook: removed sidecar slot=%d", slot);
+    } else {
+        SB_LOG("slot delete hook: sidecar delete skipped/failed slot=%d status=%s", slot,
+               qol::infra::store::status_name(status));
     }
     // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_slots_mark_stale();
@@ -509,25 +493,25 @@ int locate_save_directory(std::string& out) {
     return 0;
 }
 
-// 导入失败还原：dat 与 sidecar 的 existed/not-existed 两种情形都覆盖。
-void restore_from_rollback(const std::string& dat_path, const std::string& rb_dat,
-                           bool dat_existed, const std::string& sidecar_path,
-                           const std::string& rb_sidecar, bool sidecar_existed) {
+// 导入失败还原：dat 按 .rollback 副本还原；sidecar 仅在本次已改动时经 store 还原为
+// 导入前快照（prev_container）。导入前无可用 primary（prev_container_exists=false）时删除该槽 sidecar。
+void restore_from_rollback(int slot, const std::string& dat_path, const std::string& rb_dat,
+                           bool dat_existed, const std::vector<uint8_t>& prev_container,
+                           bool prev_container_exists, bool sidecar_touched) {
     if (dat_existed) {
         if (file_exists(rb_dat)) copy_file(rb_dat, dat_path);
     } else {
         remove_file(dat_path);
     }
-    if (!sidecar_path.empty()) {
-        if (sidecar_existed) {
-            if (file_exists(rb_sidecar)) copy_file(rb_sidecar, sidecar_path);
+    if (sidecar_touched) {
+        if (prev_container_exists) {
+            qol::infra::store::import_container(slot, prev_container.data(),
+                                                prev_container.size());
         } else {
-            remove_file(sidecar_path);
-            remove_file(sidecar_path + kLastGoodSuffix);
+            qol::infra::store::delete_slot(slot);
         }
     }
     remove_file(rb_dat);
-    remove_file(rb_sidecar);
 }
 
 }  // namespace
@@ -655,15 +639,13 @@ std::string save_backup_export_json(int slot) {
     }
 
     // sidecar 缺失（如从未经 API 进档的槽）或损坏时仅导出原版明文；导入侧跳过 sidecar 步骤。
+    // read_container 只读 primary 且完整解码，损坏/缺失均返回非 ok（损坏 primary 不 quarantine）。
     std::vector<uint8_t> module;
     {
-        std::string sidecar_path;
-        std::string last_good;
-        module_sidecar_paths(slot, sidecar_path, last_good);
-        std::vector<uint8_t> bytes;
-        if (!sidecar_path.empty() && read_file_bytes(sidecar_path, bytes) &&
-            save_backup::module_container_valid(bytes)) {
-            module.swap(bytes);
+        std::vector<uint8_t> container;
+        if (qol::infra::store::read_container(slot, &container) ==
+            qol::infra::store::Status::kOk) {
+            module.swap(container);
         } else {
             SB_LOG("save backup export slot=%d: module sidecar unavailable, exporting original only",
                    slot);
@@ -923,45 +905,40 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
 
-    // 3) 安全备份现存文件到 .rollback/。
+    // 3) 安全备份现存文件到 .rollback/（dat 落副本；sidecar 现状快照留在内存，失败时经 store 还原）。
     const std::string rollback_dir = dir + "/" + kRollbackDirName;
     if (!ensure_dir(rollback_dir)) return op_err("rollback dir mkdir failed");
     const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
-    std::string sidecar_path;
-    std::string sidecar_last_good;
-    module_sidecar_paths(slot, sidecar_path, sidecar_last_good);
     const bool dat_existed = file_exists(dat_path);
-    const bool sidecar_existed = !sidecar_path.empty() && file_exists(sidecar_path);
     const std::string rb_dat = rollback_dir + "/save" + std::to_string(slot) + ".dat";
-    std::string rb_sidecar;
-    if (!sidecar_path.empty()) rb_sidecar = rollback_dir + "/" + file_name_of(sidecar_path);
     if (dat_existed && !copy_file(dat_path, rb_dat)) return op_err("rollback backup failed");
-    if (sidecar_existed && !copy_file(sidecar_path, rb_sidecar)) {
-        return op_err("rollback backup failed");
+    std::vector<uint8_t> prev_container;
+    bool prev_container_exists = false;
+    {
+        std::vector<uint8_t> probe;
+        if (qol::infra::store::read_container(slot, &probe) == qol::infra::store::Status::kOk) {
+            prev_container.swap(probe);
+            prev_container_exists = true;
+        }
     }
+    bool sidecar_touched = false;
 
     // 4) 原子写原版 .dat（tmp+rename）。
     if (!write_file_bytes_atomic(dat_path, cipher.data(), cipher.size())) {
-        restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
-                              sidecar_existed);
+        restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
+                              prev_container_exists, sidecar_touched);
         return op_err("save file write failed");
     }
 
-    // 5) sidecar：只改容器第 6 字节 slot + 重算尾部 u32 CRC32（不解析 section），
-    //    primary 与 last-good 都写（空 module = 仅原版备份，跳过）。
+    // 5) sidecar：经 infra/store 重定槽（按源容器头槽号校验）并双写 primary + last-good；
+    //    generation 由 store 按容器语义递增（空 module = 仅原版备份，跳过）。
     if (!parsed.module.empty()) {
-        std::vector<uint8_t> container = parsed.module;
-        bool sidecar_ok = save_backup::module_container_reslot(container, slot);
-        if (sidecar_ok && !sidecar_path.empty()) {
-            sidecar_ok = write_file_bytes_atomic(sidecar_path, container.data(), container.size()) &&
-                         write_file_bytes_atomic(sidecar_last_good, container.data(),
-                                                 container.size());
-        } else {
-            sidecar_ok = false;
-        }
-        if (!sidecar_ok) {
-            restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
-                                  sidecar_existed);
+        sidecar_touched = true;
+        const qol::infra::store::Status status = qol::infra::store::import_container(
+            slot, parsed.module.data(), parsed.module.size());
+        if (status != qol::infra::store::Status::kOk) {
+            restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
+                                  prev_container_exists, sidecar_touched);
             return op_err("module container import failed");
         }
     }
@@ -1005,16 +982,16 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                 if (!copy_file(target, rb)) {
                     remove_file(rb);  // 清理可能写了一半的副本
                     restore_warehouse();
-                    restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
-                                          sidecar_existed);
+                    restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
+                                          prev_container_exists, sidecar_touched);
                     return op_err("rollback backup failed");
                 }
             }
             wh_rollback.push_back(WhRollback{target, rb, existed});
             if (!write_file_bytes_atomic(target, payload.data(), payload.size())) {
                 restore_warehouse();
-                restore_from_rollback(dat_path, rb_dat, dat_existed, sidecar_path, rb_sidecar,
-                                      sidecar_existed);
+                restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
+                                      prev_container_exists, sidecar_touched);
                 return op_err("warehouse file write failed");
             }
             ++wh_written;
@@ -1027,10 +1004,9 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
 
-    // 7) 成功：清理该槽回滚副本（dat/sidecar 与 wh 副本）。
+    // 7) 成功：清理该槽回滚副本（dat 与 wh 副本；sidecar 无需副本）。
     for (const WhRollback& item : wh_rollback) remove_file(item.rb);
     remove_file(rb_dat);
-    remove_file(rb_sidecar);
     save_backup::Entry entry;
     save_backup::entry_from_bundle(name, parsed, entry);
     auto iit = g_map_names.find(entry.map_id);
@@ -1058,9 +1034,9 @@ std::string save_backup_delete_json(const char* checksum) {
     return "{\"ok\":true}";
 }
 
-// 删除某个槽的游戏存档：原版 save{slot}.dat + 模块 sidecar（module-saves/slot-{slot}.module-save
-// 与 .last-good）。安全边界：路径由整型 slot 精确拼接（save0/1/2.dat、slot-0/1/2.*），
-// 不含通配/遍历，绝不删除其它槽；只删存在的目标，缺失的目标跳过。
+// 删除某个槽的游戏存档：原版 save{slot}.dat（游戏目录，本文件直接删除）+ 模块 sidecar
+// （经 infra/store::delete_slot 删除 primary/.last-good）。安全边界：路径由整型 slot 精确
+// 拼接（save0/1/2.dat），不含通配/遍历，绝不删除其它槽；缺失的目标跳过。
 // 全部失败路径返回结构化 op_err，不吞异常；无任何目标文件时返回 not found。
 std::string save_backup_delete_slot_json(int slot) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
@@ -1075,28 +1051,28 @@ std::string save_backup_delete_slot_json(int slot) {
             return op_err("save directory not found");
     }
     const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
-    std::string sidecar_path;
-    std::string sidecar_last_good;
-    module_sidecar_paths(slot, sidecar_path, sidecar_last_good);
     const bool dat_existed = file_exists(dat_path);
-    const bool sidecar_existed = !sidecar_path.empty() && file_exists(sidecar_path);
-    const bool last_good_existed = !sidecar_last_good.empty() && file_exists(sidecar_last_good);
-    if (!dat_existed && !sidecar_existed && !last_good_existed) return op_err("save not found");
+    // store 无独立「是否存在」查询：read_container 对可解码 primary 返回 kOk；损坏 primary
+    // 返回 kCorrupt（文件存在但不可用），两者都视为该槽存在 sidecar；kNotFound 视为不存在。
+    std::vector<uint8_t> probe;
+    const qol::infra::store::Status probe_status = qol::infra::store::read_container(slot, &probe);
+    const bool sidecar_existed = probe_status == qol::infra::store::Status::kOk ||
+                                 probe_status == qol::infra::store::Status::kCorrupt;
+    if (!dat_existed && !sidecar_existed) return op_err("save not found");
     // 逐个删除并检查返回值：任一失败立即返回结构化错误（已删除的部分不回滚，与单文件删除语义一致）。
     if (dat_existed && ::unlink(dat_path.c_str()) != 0) {
         SB_LOG("save slot delete failed: %s", dat_path.c_str());
         return op_err("delete save failed");
     }
-    if (sidecar_existed && ::unlink(sidecar_path.c_str()) != 0) {
-        SB_LOG("save slot delete failed: %s", sidecar_path.c_str());
-        return op_err("delete sidecar failed");
+    if (sidecar_existed) {
+        const qol::infra::store::Status del = qol::infra::store::delete_slot(slot);
+        if (del != qol::infra::store::Status::kOk) {
+            SB_LOG("save slot delete failed: slot=%d sidecar status=%s", slot,
+                   qol::infra::store::status_name(del));
+            return op_err("delete sidecar failed");
+        }
     }
-    if (last_good_existed && ::unlink(sidecar_last_good.c_str()) != 0) {
-        SB_LOG("save slot delete failed: %s", sidecar_last_good.c_str());
-        return op_err("delete sidecar failed");
-    }
-    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d last_good=%d)", slot, dat_existed,
-           sidecar_existed, last_good_existed);
+    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d)", slot, dat_existed, sidecar_existed);
     // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_slots_mark_stale();
     return "{\"ok\":true,\"deleted_slot\":" + std::to_string(slot) + "}";

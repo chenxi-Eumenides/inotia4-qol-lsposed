@@ -3,7 +3,6 @@
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
 #include "features/autosell/config.h"
-#include "features/autosell/store.h"
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
@@ -31,11 +30,6 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterConfigBridge(JNIEnv* env, jclass
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env, jclass, jclass bridge_class) {
     virtual_bag_ui_register_bridge(env, bridge_class);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeRegisterAutoSellStoreBridge(JNIEnv* env, jclass, jclass bridge_class) {
-    autosell_store_register_bridge(env, bridge_class);
 }
 
 // JNI 导出层：仅做参数传递与字符串转换，逻辑在 game_access / game_data。
