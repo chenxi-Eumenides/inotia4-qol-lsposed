@@ -1,5 +1,7 @@
 #include "gamebridge_internal.h"
 
+#include "infra/store.h"
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetMoney(JNIEnv* env, jclass, jlong money) {
     return op_result(env, "op_set_money", ("money=" + str_of(money)), data_op_set_money(static_cast<int64_t>(money)));
@@ -72,6 +74,9 @@ Java_com_inotia4_qol_NativeBridge_nativeSaveBackupInit(JNIEnv* env, jclass, jstr
     const char* d = dataDir != nullptr ? env->GetStringUTFChars(dataDir, nullptr) : nullptr;
     const char* e = externalDir != nullptr ? env->GetStringUTFChars(externalDir, nullptr) : nullptr;
     save_backup_init(d, e);
+    // B4-1 过渡：infra/store 沿用同一 externalFilesDir 注入点（B4-2/B4-3 收敛为
+    // 独立 store 初始化边界）；此处仅初始化容器层，不切换任何消费者。
+    qol::infra::store::init(e);
     if (d != nullptr) env->ReleaseStringUTFChars(dataDir, d);
     if (e != nullptr) env->ReleaseStringUTFChars(externalDir, e);
 }

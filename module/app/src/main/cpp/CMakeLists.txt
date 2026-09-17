@@ -255,3 +255,9 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     infra/store.cpp
 )
+
+# B4-2：infra/store JNI 薄层（Kotlin ModuleSaveStore 委托 native；native 成为
+# module-saves/ 唯一文件读写者）
+target_sources(gamebridge PRIVATE
+    bridge/native/gamebridge_store.cpp
+)

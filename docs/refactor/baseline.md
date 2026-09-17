@@ -50,10 +50,10 @@
 | `features/world_teleport` | 4 |
 | `game` | 33 |
 | `hooks` | 8 |
-| `host` | 27 |
+| `host` | 28 |
 | `infra` | 45 |
 | `patch` | 7 |
-| **合计** | **313** |
+| **合计** | **314** |
 
 ### 1.2 迁移期映射摘要
 
@@ -138,7 +138,7 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `infra` | 30 |
+| `host` | `infra` | 31 |
 | `features/ui` | `game` | 22 |
 | `features/ui` | `infra` | 13 |
 | `host` | `game` | 12 |
@@ -249,8 +249,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：142 个
-- native 导出：142 个
+- Kotlin `external fun`：151 个
+- native 导出：151 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：

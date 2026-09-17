@@ -1,7 +1,7 @@
 // autosell_store.cpp —— 自动出售按存档配置持久化（sidecar section `autosell`，直写）。
 //
 // 桥调用遵循 game_ui_settings_config.inc 的 JVM 获取范式：GetEnv/AttachCurrentThread
-// + 缓存 jclass/jmethodID；IO 在 Kotlin ModuleSaveStore（AtomicFile）侧完成。
+// + 缓存 jclass/jmethodID；IO 经 Kotlin ModuleSaveStore 委托 native infra/store 完成。
 // 与扩展背包 section/journal 完全隔离，不注册 participant。
 
 #include "features/autosell/store.h"

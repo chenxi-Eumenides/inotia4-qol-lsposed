@@ -184,6 +184,23 @@ object NativeBridge {
     external fun nativeAutoSellRunNow(): Boolean
     external fun nativeAutoSellStatusJson(): String
 
+    // ---- module sidecar 容器（infra/store：MSAV 单写者；返回 infra/store::Status 码，0=ok）----
+    external fun nativeStoreAvailable(): Boolean
+    external fun nativeStoreEnsureSlot(slot: Int): Int
+    external fun nativeStoreResetSlot(slot: Int): Int
+    external fun nativeStoreReadSection(slot: Int, name: String, versionOut: IntArray): ByteArray?
+    external fun nativeStoreWriteSection(slot: Int, name: String, version: Int, payload: ByteArray): Int
+    external fun nativeStoreRemoveSection(slot: Int, name: String): Int
+    external fun nativeStoreReplaceSections(
+        slot: Int,
+        names: Array<String>,
+        versions: IntArray,
+        payloads: Array<ByteArray>,
+        removals: Array<String>,
+    ): Int
+    external fun nativeStoreReadContainer(slot: Int): ByteArray?
+    external fun nativeStoreImportContainer(slot: Int, payload: ByteArray): Int
+
     // ---- 功能诊断（P1 最小诊断接口：原生功能状态汇总 JSON）----
     external fun nativeFeatureStatusJson(): String
 
