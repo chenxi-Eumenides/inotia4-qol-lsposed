@@ -12,7 +12,7 @@
 | P1 | 骨架：`contracts/` + `infra/` + `game/`；最小诊断接口 | ✅ 完成 | host 20/20（`e472d52`）；`GET /api/system/features` 与 `/api/health`（加法扩展 ready/variant）真机通过（`18f0a91` + 后续提交，卡见 `verification.md` VM-P1-02/03） |
 | P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | ✅ 完成 | 真机卡 VM-P2-01 PASS（两态翻转 + 状态一致 + 半血 A/B 135↔270 + 无崩溃）；host 23/23；基线 124→121 |
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ✅ 完成 | 真机卡 VM-P3-01/VM-P3-03 PASS（deactivate→`free`、物理归还 A/B `hp=270`、activate 重挂载 `hp=135`，U6 闭合；10 态 API + tickets `pending→done`）；故障注入 host-only（VM-P3-02，277+115 断言）；host 25/25 |
-| P4 | 批量迁移其余插件（内置静态轨） | ⬜ 未开始 | 每插件：单测 + 验收卡；豁免清零 |
+| P4 | 批量迁移其余插件（内置静态轨） | 🔄 进行中（**阶段 A ✅**：A1–A4，证据 VM-P4-01..05） | 每插件：单测 + 验收卡；豁免清零 |
 | P5 | `products/` + `host/` 收口；脚本收紧；删除旧路径 | ⬜ 未开始 | `check_*` 全绿、双轨消失 |
 | P6（可选） | 外部插件轨（草案） | ⬜ 未开始 | 导入/拒绝/禁用/崩溃兜底真机通过 |
 
@@ -28,13 +28,14 @@
 | `feature/patch` | `patch/` 机制 + `features/inventory_hooks` 业务 | 12 | entry hook、call patch | 符号头引用；被 7 个域依赖 | P3/P4 |
 | `feature/autosell` | `features/autosell` | 10 | 帧任务消费者 | 域间依赖（→ attribute_range） | P4 |
 | `feature/custom_recipe` | `features/custom_recipe` | 8 | entry hook（经 craft_ui） | 与 `feature/craft_ui` 双向 | P4 |
-| `feature/attribute_range` | 纯规则 → `core`/`game`；界面 → `features/ui` | 4 | entry hook ×3 | 被 3 个域依赖；符号头引用 | P4 |
+| `feature/attribute_range` | `features/attribute_range`（插件）+ `domains/attribute_range`（纯规则）+ `game/access`（界面接入） | 4 | entry hook ×3 | 已清除（符号头引用随迁移消除；feature→feature 依赖已消除） | ✅ P4-A3 完成（VM-P4-04） |
 | `feature/craft_ui` | `features/craft_ui` | 4 | entry hook ×11（单一挂载处） | 与 `feature/custom_recipe` 双向 | P4 |
 | `feature/save_backup` | `features/save_backup` | 4 | 无（纯逻辑 + 文件事务） | 被 `feature/ui` 依赖 | P4 |
 | `feature/simple_mode` | `features/simple_mode` | 6 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
+| `feature/ui`（文本层子项） | `features/text_layer` | 4 | 共享资源 `hook:MEMORYTEXT_GetText`（owner）+ 能力 `text_layer` | 无（消费者改经 `hooks/dispatch` 分派，不再各自挂同址 hook） | ✅ P4-A4 完成（VM-P4-05） |
 | `feature/world_teleport` | `features/world_teleport` | 4 | ptr slot、调用点 patch | 依赖 `feature/ui`（native_choice） | P4 |
-| `feature/push_all` | `features/push_all` | 2 | call patch ×2 闸门 | 无已知域间依赖（干净样板） | P2 备选 |
-| `feature/quest` | `features/quest` | 2 | 进档回调 | 无已知域间依赖 | P4 |
+| `feature/push_all` | `features/push_all` | 2 | call patch ×2 闸门 | 已清除（无已知域间依赖，干净样板） | ✅ P4-A1 完成（VM-P4-01） |
+| `feature/quest` | `features/quest`（零资源常驻） | 2 | 帧节拍（进档回调暂借 legacy `save_enter` 设施） | 无已知域间依赖 | ✅ P4-A2 完成（VM-P4-03） |
 | `feature/special_equip` | `features/special_equip` | 2 | entry hook ×2 | 无已知域间依赖 | P2 备选 |
 
 > 说明：域间依赖与资源占用的完整清单见 `baseline.md` §2/§4；本表只做归属与阶段决策，不复制明细。
