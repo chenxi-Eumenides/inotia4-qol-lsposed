@@ -70,6 +70,11 @@ bool char_summoner_resolved() {
     return fn_char_get_summoner != nullptr;
 }
 
+int char_party_index(const void* ch) {
+    if (ch == nullptr || fn_char_get_party_index == nullptr) return -1;
+    return fn_char_get_party_index(const_cast<void*>(ch));
+}
+
 bool char_is_party_member(void* ch) {
     return fn_char_get_party_index != nullptr && fn_char_get_party_index(ch) != -1;
 }

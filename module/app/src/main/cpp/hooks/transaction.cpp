@@ -102,9 +102,24 @@ void finalize_terminal(Tx& tx) {
     tx.in_use = false;
 }
 
+// 释放一条非入口机制资源（机制分派在宿主）；true = 成功。
+bool release_non_entry(const contracts::ResourceClaim& claim, const char** out_error) {
+    if (g_deps.release_other == nullptr) {
+        *out_error = "mechanism unsupported";
+        return false;
+    }
+    const TxDeps::MechanismOutcome outcome = g_deps.release_other(claim, 0);
+    if (outcome.ok != 0) {
+        *out_error = outcome.error != nullptr ? outcome.error : "mechanism release failed";
+        return false;
+    }
+    return true;
+}
+
 // 安装失败后按逆序释放本事务已安装的子集：
-// - resumable==false → 不调 unhook，保留占用并隔离；
-// - unhook 失败 → tombstone + 隔离；成功 → release 内部置 kFree。
+// - resumable==false → 不调释放原语，保留占用并隔离；
+// - 释放失败 → tombstone + 隔离；成功 → 入口 hook 由 release 内部置 kFree，
+//   其它机制由本层置 kFree 并清运行期记录。
 void rollback_install(Tx& tx) {
     for (uint32_t i = tx.step; i-- > 0;) {
         TxEntry& entry = tx.entries[i];
@@ -115,6 +130,17 @@ void rollback_install(Tx& tx) {
         if (!claim.resumable) {
             set_state(claim.id, contracts::ResourceState::kTombstone);
             isolated_set(claim.id, true);
+            continue;
+        }
+        if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+            const char* error = nullptr;
+            if (!release_non_entry(claim, &error)) {
+                set_state(claim.id, contracts::ResourceState::kTombstone);
+                isolated_set(claim.id, true);
+            } else {
+                set_state(claim.id, contracts::ResourceState::kFree);
+                runtime_clear(claim.id);
+            }
             continue;
         }
         ResourceRuntime runtime{};
@@ -152,6 +178,74 @@ bool fail_restore(Tx& tx, const char* resource_id, const char* error, TxStep* ou
     return false;
 }
 
+// 非入口机制安装步：call patch 不支持空转（§4.2 规则 6），gate 关不安装、登记保持 free。
+bool install_other_step(Tx& tx, const contracts::ResourceClaim& claim, uint32_t index,
+                        TxStep* out) {
+    bool want = true;
+    if (g_deps.gate_on != nullptr && claim.gate != nullptr) {
+        want = g_deps.gate_on(claim.gate);
+    }
+    if (!want) {
+        ++tx.step;
+        out->resource_id = claim.id;
+        out->ok = 0;
+        out->finished = tx.step >= tx.total;
+        if (out->finished) {
+            tx.state = TxState::kSucceeded;
+            finalize_terminal(tx);
+        }
+        return !out->finished;
+    }
+    if (g_deps.install_other == nullptr) {
+        return fail_install(tx, claim.id, "mechanism unsupported", out);
+    }
+    const TxDeps::MechanismOutcome outcome = g_deps.install_other(claim, 0);
+    if (outcome.ok != 0) {
+        return fail_install(tx, claim.id,
+                            outcome.error != nullptr ? outcome.error : "mechanism install failed",
+                            out);
+    }
+    set_state(claim.id, contracts::ResourceState::kLive);
+    runtime_set(claim.id, 0, nullptr);
+    tx.entries[index].installed = true;
+    ++tx.step;
+    out->resource_id = claim.id;
+    out->ok = 0;
+    out->backup = nullptr;
+    out->finished = tx.step >= tx.total;
+    if (out->finished) {
+        tx.state = TxState::kSucceeded;
+        finalize_terminal(tx);
+    }
+    return !out->finished;
+}
+
+// 非入口机制还原步：无 wrapper 故无在途等待，直接按 resumable 决定释放或保留占用。
+bool restore_other_step(Tx& tx, const contracts::ResourceClaim& claim, TxStep* out) {
+    if (!claim.resumable) {
+        set_state(claim.id, contracts::ResourceState::kTombstone);
+        isolated_set(claim.id, true);
+        return fail_restore(tx, claim.id, "not resumable", out);
+    }
+    const char* error = nullptr;
+    if (!release_non_entry(claim, &error)) {
+        set_state(claim.id, contracts::ResourceState::kTombstone);
+        isolated_set(claim.id, true);
+        return fail_restore(tx, claim.id, error, out);
+    }
+    set_state(claim.id, contracts::ResourceState::kFree);
+    runtime_clear(claim.id);
+    ++tx.step;
+    out->resource_id = claim.id;
+    out->ok = 0;
+    out->finished = tx.step >= tx.total;
+    if (out->finished) {
+        tx.state = TxState::kSucceeded;
+        finalize_terminal(tx);
+    }
+    return !out->finished;
+}
+
 bool install_step(Tx& tx, TxStep* out) {
     if (tx.step >= tx.total) {
         tx.state = TxState::kSucceeded;
@@ -178,6 +272,10 @@ bool install_step(Tx& tx, TxStep* out) {
     }
     if (state != contracts::ResourceState::kFree) {
         return fail_install(tx, claim.id, "resource not free", out);
+    }
+    // 机制分派：入口 hook 走既有路径；其它机制交宿主注入的 install_other。
+    if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+        return install_other_step(tx, claim, index, out);
     }
 
     bool followed = false;
@@ -242,6 +340,10 @@ bool restore_step(Tx& tx, TxStep* out) {
 
     if (isolated_get(claim.id)) {
         return fail_restore(tx, claim.id, "isolated", out);
+    }
+    // 机制分派：非入口机制无 wrapper、无在途等待，直接释放。
+    if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+        return restore_other_step(tx, claim, out);
     }
 
     if (in_flight_count(claim.id) > 0) {

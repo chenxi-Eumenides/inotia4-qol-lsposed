@@ -6,11 +6,13 @@
 
 #include "core/native/qol_log.h"
 #include "contracts/commands.h"
+#include "game/access/patches.h"
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
 #include "infra/status.h"
+#include "patch/instr_patch.h"
 
 // contracts/plugin.h 在 P2 只前向声明 PluginContext（空载体，宿主服务端口待 P3 冻结）。
 // 安装器需要实体才能调用按引用传参的插件回调，故在此补全定义；P3 端口冻结后移回 contracts/。
@@ -63,22 +65,53 @@ const char* check_requires(const contracts::PluginDescriptor& plugin) {
     return nullptr;
 }
 
+// 非入口机制（call patch）的同步安装：解析站点并交 patch 层；成功后登记运行期地址。
+// 返回 nullptr 成功，否则静态错误文本。
+const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintptr_t* out_target) {
+    qol::game::PatchSite site{};
+    if (!qol::game::patch_site(claim.symbol, &site)) {
+        return "symbol unresolved";
+    }
+    const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
+    if (outcome.ok != 0) {
+        return outcome.error != nullptr ? outcome.error : "install failed";
+    }
+    hooks::runtime_set(claim.id, site.addr, nullptr);
+    if (out_target != nullptr) {
+        *out_target = site.addr;
+    }
+    return nullptr;
+}
+
+// 非入口机制的物理还原：站点取自运行期记录（安装时写入）。
+bool release_non_entry_claim(const contracts::ResourceClaim& claim) {
+    hooks::ResourceRuntime runtime{};
+    const uintptr_t target = hooks::runtime_of(claim.id, &runtime) ? runtime.resolved_entry : 0;
+    const qol::patch::Outcome outcome = qol::patch::release_claim(claim, target);
+    return outcome.ok == 0;
+}
+
 // 逆序回滚本插件已安装资源：
-// resumable==false 或 unhook 缺失/失败 → kTombstone，成功 → kFree（§4.2 物理归还）。
+// resumable==false 或释放失败 → kTombstone，成功 → kFree（§4.2 物理归还）。
 void rollback_resources(const contracts::ResourceClaim* const* claims,
                         const uintptr_t* entries, uint32_t count,
                         const HostDeps& deps) {
     for (uint32_t i = count; i > 0; --i) {
         const contracts::ResourceClaim& claim = *claims[i - 1];
-        int rc = -1;
-        if (claim.resumable && deps.unhook_fn != nullptr) {
-            rc = deps.unhook_fn(reinterpret_cast<void*>(entries[i - 1]));
+        bool released = false;
+        if (claim.resumable) {
+            if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+                released = deps.unhook_fn != nullptr &&
+                           deps.unhook_fn(reinterpret_cast<void*>(entries[i - 1])) == 0;
+            } else {
+                released = release_non_entry_claim(claim);
+            }
         }
-        if (rc == 0) {
+        if (released) {
             hooks::runtime_clear(claim.id);
         }
-        hooks::set_state(claim.id, rc == 0 ? contracts::ResourceState::kFree
-                                           : contracts::ResourceState::kTombstone);
+        hooks::set_state(claim.id, released ? contracts::ResourceState::kFree
+                                            : contracts::ResourceState::kTombstone);
     }
 }
 
@@ -87,11 +120,19 @@ void rollback_resources(const contracts::ResourceClaim* const* claims,
 void revoke_resource(const char* resource_id, const HostDeps& deps) {
     const contracts::ResourceClaim* claim = hooks::find_claim(resource_id);
     if (claim == nullptr) return;
-    hooks::ResourceRuntime runtime{};
-    const uintptr_t entry = hooks::runtime_of(resource_id, &runtime) ? runtime.resolved_entry : 0;
-    const hooks::ReleaseOutcome outcome =
-        hooks::release_claim_entry_hook(*claim, entry, deps.unhook_fn);
-    if (outcome.ok != 0) {
+    bool released = false;
+    if (claim->mechanism == contracts::ResourceMechanism::kEntryHook) {
+        hooks::ResourceRuntime runtime{};
+        const uintptr_t entry =
+            hooks::runtime_of(resource_id, &runtime) ? runtime.resolved_entry : 0;
+        released = hooks::release_claim_entry_hook(*claim, entry, deps.unhook_fn).ok == 0;
+    } else {
+        released = claim->resumable && release_non_entry_claim(*claim);
+    }
+    if (released) {
+        hooks::set_state(resource_id, contracts::ResourceState::kFree);
+        hooks::runtime_clear(resource_id);
+    } else {
         hooks::set_state(resource_id, contracts::ResourceState::kTombstone);
         hooks::isolated_set(resource_id, true);
     }
@@ -118,26 +159,70 @@ void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const
 }
 
 // 门禁监督辅助：同步某插件带 gate 资源的登记状态，并汇总目标态。
-// 只改写 disabled/live 两态：free（未安装）与 tombstone（保留占用）不得被监督改写。
+// 入口 hook 只改写 disabled/live 两态：free（未安装）与 tombstone（保留占用）不得被监督改写。
+// 非入口机制（call patch）不支持空转（§4.2 规则 6）：门禁变化直接物理安装/还原。
+// 同步执行原因：单一指令字改写为同步 fail-closed 原语，且没有在途 wrapper 需等待；
+// 生命周期安装/还原仍走事务引擎（lifecycle_apply/lifecycle_step）。
 void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_has_gate,
-                           bool* out_all_want) {
+                           bool* out_all_want, bool* out_mechanism_failed) {
     bool has_gate = false;
     bool all_want = true;
+    bool mechanism_failed = false;
+    // 本次门禁同步新装成功的非入口资源；失败时逆序还原，禁止半装对外可见。
+    const contracts::ResourceClaim* installed[kMaxResourcesPerPlugin];
+    uint32_t installed_count = 0;
     for (uint32_t r = 0; r < plugin.resources_count; ++r) {
         const contracts::ResourceClaim& claim = plugin.resources[r];
         if (claim.gate == nullptr) continue;
         has_gate = true;
         const bool want = infra::config_get_bool(claim.gate, false);
-        const contracts::ResourceState now = hooks::state_of(claim.id);
-        if (want && now == contracts::ResourceState::kDisabled) {
-            hooks::set_state(claim.id, contracts::ResourceState::kLive);
-        } else if (!want && now == contracts::ResourceState::kLive) {
-            hooks::set_state(claim.id, contracts::ResourceState::kDisabled);
-        }
         if (!want) all_want = false;
+        const contracts::ResourceState now = hooks::state_of(claim.id);
+        if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+            if (want && now == contracts::ResourceState::kDisabled) {
+                hooks::set_state(claim.id, contracts::ResourceState::kLive);
+            } else if (!want && now == contracts::ResourceState::kLive) {
+                hooks::set_state(claim.id, contracts::ResourceState::kDisabled);
+            }
+            continue;
+        }
+        if (want && now == contracts::ResourceState::kFree) {
+            uintptr_t target = 0;
+            const char* error = install_non_entry_claim(claim, &target);
+            if (error != nullptr) {
+                hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
+                hooks::isolated_set(claim.id, true);
+                mechanism_failed = true;
+            } else {
+                hooks::set_state(claim.id, contracts::ResourceState::kLive);
+                installed[installed_count++] = &claim;
+            }
+        } else if (!want && now == contracts::ResourceState::kLive) {
+            if (release_non_entry_claim(claim)) {
+                hooks::set_state(claim.id, contracts::ResourceState::kFree);
+                hooks::runtime_clear(claim.id);
+            } else {
+                hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
+                hooks::isolated_set(claim.id, true);
+                mechanism_failed = true;
+            }
+        }
+    }
+    if (mechanism_failed) {
+        for (uint32_t i = installed_count; i > 0; --i) {
+            const contracts::ResourceClaim& claim = *installed[i - 1];
+            if (release_non_entry_claim(claim)) {
+                hooks::set_state(claim.id, contracts::ResourceState::kFree);
+                hooks::runtime_clear(claim.id);
+            } else {
+                hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
+                hooks::isolated_set(claim.id, true);
+            }
+        }
     }
     *out_has_gate = has_gate;
     *out_all_want = all_want;
+    *out_mechanism_failed = mechanism_failed;
 }
 
 // ---- 生命周期事务跟踪（主线程唯一执行器；每插件至多一个在途事务）----
@@ -242,6 +327,29 @@ int install_all(const HostDeps& deps) {
 
         for (uint32_t r = 0; r < plugin.resources_count; ++r) {
             const contracts::ResourceClaim& claim = plugin.resources[r];
+            const bool gate_on =
+                claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
+            if (claim.gate != nullptr && !gate_on) all_gates_on = false;
+
+            // 非入口机制（call patch）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
+            if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+                if (claim.gate != nullptr && !gate_on) {
+                    continue;
+                }
+                uintptr_t target = 0;
+                const char* error = install_non_entry_claim(claim, &target);
+                if (error != nullptr) {
+                    resource_failed = true;
+                    failed_claim_id = claim.id;
+                    resource_error = error;
+                    break;
+                }
+                installed_claims[installed_count] = &claim;
+                installed_entries[installed_count] = target;
+                ++installed_count;
+                continue;
+            }
+
             bool followed = false;
             const uintptr_t entry =
                 deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
@@ -251,9 +359,6 @@ int install_all(const HostDeps& deps) {
                 resource_error = "symbol unresolved";
                 break;
             }
-            const bool gate_on =
-                claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
-            if (claim.gate != nullptr && !gate_on) all_gates_on = false;
 
             const hooks::InstallOutcome outcome =
                 hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, gate_on);
@@ -328,10 +433,21 @@ uint32_t sync_gates() {
             status.state != infra::FeatureState::kInstalledDisabled) {
             continue;
         }
+        // 隔离或在途事务期间不参与门禁监督，避免与事务中间态冲突。
+        if (plugin_isolated(plugin)) continue;
+        if (plugin_has_active_tx(plugin.id)) continue;
         bool has_gate = false;
         bool all_want = true;
-        sync_plugin_resources(plugin, &has_gate, &all_want);
+        bool mechanism_failed = false;
+        sync_plugin_resources(plugin, &has_gate, &all_want, &mechanism_failed);
         if (!has_gate) continue;  // 无带 gate 资源 → 不参与门禁监督
+        if (mechanism_failed) {
+            // 机制门禁应用失败：保留占用并隔离，插件置 failed。
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                 "mechanism gate apply failed");
+            ++changed;
+            continue;
+        }
         const bool target_enabled = all_want;
         const infra::FeatureState target_state = target_enabled
             ? infra::FeatureState::kEnabled : infra::FeatureState::kInstalledDisabled;

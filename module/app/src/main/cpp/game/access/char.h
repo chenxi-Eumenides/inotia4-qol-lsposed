@@ -39,6 +39,9 @@ bool char_party_index_resolved();
 bool char_active_group_resolved();
 bool char_summoner_resolved();
 
+// 队伍索引：CHAR_GetPartyIndex(ch) 原值；-1 = 不在队伍。ch 为空或原语未解析同样返回 -1。
+int char_party_index(const void* ch);
+
 // 主角/队友判定：CHAR_GetPartyIndex(ch) != -1。
 bool char_is_party_member(void* ch);
 // 当前主控或主控召唤物判定：CHAR_IsActivePlayerGroup(ch) != 0。

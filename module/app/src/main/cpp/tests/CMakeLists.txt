@@ -266,10 +266,14 @@ add_test(NAME infra_config_commands_tests COMMAND infra_config_commands_tests)
 # 默认 C++20（requires 是关键字）；Android 构建本身固定 -std=c++17，这里与之一致。
 add_executable(plugin_registry_tests
     test_plugin_registry.cpp
+    test_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
+    ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/patch/claims.cpp
+    ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -279,6 +283,8 @@ add_executable(plugin_registry_tests
 target_include_directories(plugin_registry_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(plugin_registry_tests PRIVATE cxx_std_17)
 set_target_properties(plugin_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
@@ -305,10 +311,14 @@ add_test(NAME hooks_transaction_tests COMMAND hooks_transaction_tests)
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
 add_executable(plugin_lifecycle_tests
     test_plugin_lifecycle.cpp
+    test_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
+    ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/patch/claims.cpp
+    ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -318,8 +328,39 @@ add_executable(plugin_lifecycle_tests
 target_include_directories(plugin_lifecycle_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(plugin_lifecycle_tests PRIVATE cxx_std_17)
 set_target_properties(plugin_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(plugin_lifecycle_tests PRIVATE Threads::Threads)
 add_test(NAME plugin_lifecycle_tests COMMAND plugin_lifecycle_tests)
+
+# P4 阶段 A1：patch/ 机制层 host 测试（claims + instr_patch + game patch 点，假原语，末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
+add_executable(patch_layer_tests
+    test_patch_layer.cpp
+    ${CPP_DIR}/patch/claims.cpp
+    ${CPP_DIR}/patch/instr_patch.cpp
+    ${CPP_DIR}/game/access/patches.cpp
+)
+target_include_directories(patch_layer_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(patch_layer_tests PRIVATE cxx_std_17)
+set_target_properties(patch_layer_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
+
+# P4 阶段 A1：push_all 纯逻辑 host 测试（party_decision 矩阵，末尾追加）
+add_executable(push_all_rules_tests
+    test_push_all_rules.cpp
+    ${CPP_DIR}/features/push_all/rules.cpp
+)
+target_include_directories(push_all_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(push_all_rules_tests PRIVATE cxx_std_17)
+set_target_properties(push_all_rules_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME push_all_rules_tests COMMAND push_all_rules_tests)

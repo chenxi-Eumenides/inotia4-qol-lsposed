@@ -23,6 +23,17 @@ struct TxDeps {
     NativeHookFn hook_fn;      // 必填
     NativeUnhookFn unhook_fn;  // 必填
     bool (*gate_on)(const char* gate_key);  // nullptr = 一切 gate 视为开
+
+    // 非入口 hook 机制（如 kCallPatch）的物理安装/释放；由 host 注入（nullptr → 该机制不可用）。
+    // hooks/ 不依赖 patch/：机制分派保持在宿主，本模块只按 mechanism 选择回调。
+    struct MechanismOutcome {
+        int32_t ok;
+        const char* error;
+    };
+    MechanismOutcome (*install_other)(const contracts::ResourceClaim& claim, uintptr_t target) =
+        nullptr;
+    MechanismOutcome (*release_other)(const contracts::ResourceClaim& claim, uintptr_t target) =
+        nullptr;
 };
 void tx_set_deps(const TxDeps& deps);   // 装配期一次；未设置时 tx_begin 返回 0
 

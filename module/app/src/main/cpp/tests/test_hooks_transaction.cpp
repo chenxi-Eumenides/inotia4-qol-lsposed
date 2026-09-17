@@ -109,6 +109,35 @@ bool fake_gate(const char* key) {
     return key == nullptr || std::strcmp(key, "gateOff") != 0;
 }
 
+// 非入口机制分派（kCallPatch）：记录调用与目标，可注入失败。
+using MechanismOutcome = TxDeps::MechanismOutcome;
+int g_other_install_calls = 0;
+int g_other_release_calls = 0;
+int g_other_install_rc = 0;
+int g_other_release_rc = 0;
+uintptr_t g_other_last_target = 0;
+const ResourceClaim* g_other_last_claim = nullptr;
+
+MechanismOutcome fake_install_other(const ResourceClaim& claim, uintptr_t target) {
+    ++g_other_install_calls;
+    g_other_last_claim = &claim;
+    g_other_last_target = target;
+    if (g_other_install_rc != 0) {
+        return MechanismOutcome{1, "primitive rejected"};
+    }
+    return MechanismOutcome{0, nullptr};
+}
+
+MechanismOutcome fake_release_other(const ResourceClaim& claim, uintptr_t target) {
+    ++g_other_release_calls;
+    g_other_last_claim = &claim;
+    g_other_last_target = target;
+    if (g_other_release_rc != 0) {
+        return MechanismOutcome{1, "primitive rejected"};
+    }
+    return MechanismOutcome{0, nullptr};
+}
+
 void reset_all() {
     registry_reset_for_test();
     tx_reset_for_test();
@@ -120,6 +149,12 @@ void reset_all() {
     g_unhook_fail_at = -1;
     g_last_unhook_arg = nullptr;
     g_gate_calls = 0;
+    g_other_install_calls = 0;
+    g_other_release_calls = 0;
+    g_other_install_rc = 0;
+    g_other_release_rc = 0;
+    g_other_last_target = 0;
+    g_other_last_claim = nullptr;
     std::memset(g_hook_targets, 0, sizeof(g_hook_targets));
     std::memset(g_hook_replacements, 0, sizeof(g_hook_replacements));
 }
@@ -130,6 +165,8 @@ void set_deps() {
     deps.hook_fn = fake_hook;
     deps.unhook_fn = fake_unhook;
     deps.gate_on = fake_gate;
+    deps.install_other = fake_install_other;
+    deps.release_other = fake_release_other;
     tx_set_deps(deps);
 }
 
@@ -569,6 +606,76 @@ void test_terminal_retention_evicts_oldest() {
     CHECK(status.state == TxState::kSucceeded);
 }
 
+// kCallPatch 资源走宿主注入的 install_other/release_other；入口 hook 路径不受影响。
+void test_call_patch_mechanism_transaction() {
+    reset_all();
+    set_deps();
+    ResourceClaim claim = make_claim("patch:A", "patch_plugin", "gateOn");
+    claim.mechanism = ResourceMechanism::kCallPatch;
+    claim.handler = &g_handler_a;
+    CHECK(register_claim(claim));
+
+    // gate 开：调 install_other + 状态 kLive；调用点 patch 无 backup。
+    uint64_t tx = tx_begin("patch_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished);
+    CHECK(step.resource_id != nullptr);
+    CHECK(std::strcmp(step.resource_id, "patch:A") == 0);
+    CHECK(step.ok == 0);
+    CHECK(step.backup == nullptr);
+    CHECK(g_other_install_calls == 1);
+    CHECK(g_other_last_claim != nullptr);
+    CHECK(std::strcmp(g_other_last_claim->id, "patch:A") == 0);
+    CHECK(state_of("patch:A") == ResourceState::kLive);
+    CHECK(g_hook_calls == 0);  // 不得误走入口 hook 原语
+
+    // 还原：调 release_other，成功后 kFree。
+    tx = tx_begin("patch_plugin", TxKind::kRelease);
+    CHECK(tx != 0);
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished);
+    CHECK(g_other_release_calls == 1);
+    CHECK(state_of("patch:A") == ResourceState::kFree);
+
+    // gate 关：call patch 不支持空转，不安装、状态保持 free。
+    reset_all();
+    set_deps();
+    ResourceClaim off = make_claim("patch:B", "patch_plugin", "gateOff");
+    off.mechanism = ResourceMechanism::kCallPatch;
+    off.handler = &g_handler_a;
+    CHECK(register_claim(off));
+    tx = tx_begin("patch_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished);
+    CHECK(g_other_install_calls == 0);
+    CHECK(state_of("patch:B") == ResourceState::kFree);
+
+    // install_other 失败：事务失败并记录原因，资源保持 free。
+    reset_all();
+    set_deps();
+    g_other_install_rc = 1;
+    ResourceClaim fail = make_claim("patch:C", "patch_plugin", "gateOn");
+    fail.mechanism = ResourceMechanism::kCallPatch;
+    fail.handler = &g_handler_a;
+    CHECK(register_claim(fail));
+    tx = tx_begin("patch_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished);
+    CHECK(step.ok != 0);
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    CHECK(status.error != nullptr);
+    CHECK(std::strcmp(status.error, "primitive rejected") == 0);
+    CHECK(status.failed_resource_id != nullptr);
+    CHECK(std::strcmp(status.failed_resource_id, "patch:C") == 0);
+    CHECK(state_of("patch:C") == ResourceState::kFree);
+}
+
 }  // namespace
 
 int main() {
@@ -584,6 +691,7 @@ int main() {
     test_query_terminal_and_reset();
     test_install_anchor_failures();
     test_release_anchors();
+    test_call_patch_mechanism_transaction();
     test_terminal_retention_evicts_oldest();
     std::printf("hooks_transaction: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

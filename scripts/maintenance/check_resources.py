@@ -65,6 +65,10 @@ _MECHANISM_FILES = frozenset(
 # 及 `native_hook_func() { return g_hook_func; }`），不是「某符号被安装」的登记。
 _MECH_API_LINE = re.compile(r"\bNative(Hook|Unhook)FunType\s+(?:native_)?(?:un)?hook_func\s*\(")
 
+# 机制原语注入：host 装配期取 call_patch 原语地址交给 patch/ 层（`&call_patch_install_bl` 等）。
+# 这是把机制本体注入机制层，不是某个游戏符号的安装点；若无此排除会记为无法归属资源。
+_MECH_WIRING_LINE = re.compile(r"&\s*call_patch_(?:install|revert)_(?:bl|word)\b")
+
 _SKIP_LINE_PREFIXES = ("//", "*", "/*", "#include")
 _SYMBOL_STRING = re.compile(r'fn_resolve\(\s*"(F_[A-Z0-9_]+_VMA)"')
 _SYMBOL_BARE = re.compile(r"\b(F_[A-Z0-9_]+_VMA)\b")
@@ -112,7 +116,7 @@ def scan() -> list[InstallPoint]:
             stripped = raw.strip()
             if not stripped or stripped.startswith(_SKIP_LINE_PREFIXES):
                 continue
-            if _MECH_API_LINE.search(raw):
+            if _MECH_API_LINE.search(raw) or _MECH_WIRING_LINE.search(raw):
                 continue
             for mechanism, pattern in _MECHANISMS:
                 if pattern.search(raw):

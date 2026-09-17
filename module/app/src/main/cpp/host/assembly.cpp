@@ -2,10 +2,13 @@
 
 #include <cstdint>
 
+#include "core/native/call_patch.h"
 #include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
+#include "features/push_all/plugin.h"
 #include "features/simple_mode/plugin.h"
+#include "game/access/patches.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
 #include "hooks/transaction.h"
@@ -13,15 +16,46 @@
 #include "infra/commands.h"
 #include "infra/config.h"
 #include "infra/runtime.h"
+#include "patch/instr_patch.h"
 
 namespace qol::host {
 namespace {
 
 bool g_assembly_done = false;
 
+using MechanismOutcome = qol::hooks::TxDeps::MechanismOutcome;
+
 // 资源门禁读取：事务引擎回调，gate 为空视为开。
 bool gate_on(const char* key) {
     return key == nullptr ? true : qol::infra::config_get_bool(key, false);
+}
+
+// 非入口机制的物理安装/释放分派（hooks/ 不依赖 patch/，机制归宿主注入）。
+// call patch 的站点由 game/access/patches 解析后交给 patch/instr_patch。
+MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr_t target) {
+    (void)target;  // call patch 的站点由本层解析，引擎无需预解析
+    if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
+        return MechanismOutcome{1, "mechanism unsupported"};
+    }
+    qol::game::PatchSite site{};
+    if (!qol::game::patch_site(claim.symbol, &site)) {
+        return MechanismOutcome{1, "site not found"};
+    }
+    const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
+    return MechanismOutcome{outcome.ok, outcome.error};
+}
+
+MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr_t target) {
+    (void)target;
+    if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
+        return MechanismOutcome{1, "mechanism unsupported"};
+    }
+    qol::game::PatchSite site{};
+    if (!qol::game::patch_site(claim.symbol, &site)) {
+        return MechanismOutcome{1, "site not found"};
+    }
+    const qol::patch::Outcome outcome = qol::patch::release_claim(claim, site.addr);
+    return MechanismOutcome{outcome.ok, outcome.error};
 }
 
 // 逻辑帧任务：命令排空 → 生命周期推进 → 门禁对齐（主线程）。
@@ -65,17 +99,31 @@ bool assembly_init() {
         unhook_fn,
     };
 
+    // 指令 patch 原语注入：过渡期指向 core/native/call_patch；P5 原语迁入 patch/ 后本处改指 patch 层。
+    patch::set_primitives(qol::patch::Primitives{
+        &call_patch_install_bl,
+        &call_patch_revert_bl,
+        &call_patch_install_word,
+        &call_patch_revert_word,
+    });
+
     // 事务引擎依赖（运行期生命周期路径）与生命周期命令执行入口。
     hooks::tx_set_deps(qol::hooks::TxDeps{
         &qol::game::resolve_hook_entry,
         hook_fn,
         unhook_fn,
         &gate_on,
+        &dispatch_install,
+        &dispatch_release,
     });
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
     if (!register_plugin(features::simple_mode::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: simple_mode registration failed");
+        return false;
+    }
+    if (!register_plugin(features::push_all::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: push_all registration failed");
         return false;
     }
 

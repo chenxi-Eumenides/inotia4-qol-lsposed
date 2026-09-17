@@ -12,6 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.7 | P4-A1 实施校准：`patch/` 以**注入原语**实现（`core/native/call_patch` 的物理迁移推迟 P5，避免过渡期 include 越层）；非入口机制经 host 注入分派（`TxDeps.install_other/release_other`），保持 `hooks → patch` 禁止；`kCallPatch` 禁用即物理还原 + 单指令门禁翻转同步执行写入 §4.2 规则 6 |
 | v0.3.6 | 闭合第四轮审阅：`on_resource_ready` 失败改为**全量逆序回滚**（与 §3.2 语义 5 及实现一致；回滚失败 → tombstone+隔离）；删除写入口的「生命周期回调」例外（`game/write\|ops` 仅主线程命令处理器）；内置插件变体约束改由**必需资源的符号/能力位条件**表达（删除 §8 的 `supportedVariants` 行）；§3.2 补 `resolving → failed` 迁移边、`invalid` 移除「契约 major 不兼容」 |
 | v0.3.5 | 闭合第三轮审阅：`degraded` 定为正交健康标记、`cascade_stopped` 降为原因码（生命周期收敛为 10 态）；共享资源同样由 owner 提供 `handler`；`on_resource_ready` 定为受限生命周期回调并带失败回滚语义；物理还原失败统一 `failed + isolated`；删除 HTTP 同步等待例外；ticket 查询随首个返回票据的端点落地；feature 对 `game/write\|ops` 的调用限定主线程命令路径；补 capability 注册时序；明确 feature UI 与 products/qol 边界；首页版本/签署状态与未决项归属校准 |
 | v0.3.4 | P3 实施校准：状态 API 补 `GET /api/system/resources` 与 `POST /api/op/features/lifecycle`（生命周期控制经命令端口，`op` 门控）；票据查询端点明确推迟到 P4 |
@@ -363,6 +364,7 @@ resources.declare（声明，不执行） | commands.post | config(命名空间)
    - 还原成功 → 占用置 `free`（可重新分配）。
    - 还原失败，或资源声明 `resumable=false` → 占用置 `tombstone`，插件 `failed`，并进入隔离（禁止重试直到进程重启）。
 5. `tombstone` 的回收策略（何时允许人工清除、是否进程重启后重试）见 U8。
+6. **机制差异（空转能力）**：`kEntryHook` 与 `kPtrSlot` 支持禁用时保留**空转安装点**（wrapper 透传原函数）；**`kCallPatch` 不支持空转**——禁用即物理还原（字替换无可透传的执行体；BL 重定向若需透传由 wrapper 自决，但禁用态统一按还原处理，避免同一机制出现两种禁用语义）。门禁翻转驱动的**单指令 patch** 安装/还原允许在**帧回调内同步完成**（有界原子写，非阻塞等待）；生命周期 `activate/deactivate` 仍走帧步进事务。
 
 ### 4.3 资源描述符与登记表
 

@@ -155,9 +155,8 @@ target_sources(gamebridge PRIVATE
     core/native/popup_enter_alias.cpp
 )
 
-# 推怪（推动增强）全局开关：CHAR_Move 推动分支双闸门 patch（末尾追加，不改上方既有行）
+# 推怪（推动增强）全局开关：JNI 薄层（插件实现已迁 features/push_all，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/push_all/push_all.cpp
     bridge/native/gamebridge_push_all.cpp
 )
 
@@ -207,6 +206,16 @@ target_sources(gamebridge PRIVATE
 # P3 Lane A：资源事务引擎（运行期记录/在途计数/隔离/物理释放/帧步进事务，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     hooks/transaction.cpp
+)
+
+# P4 阶段 A1：patch/ 机制层 + push_all 迁移（指令 patch 占用声明/原字校验/回滚，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    game/access/patches.cpp
+    patch/claims.cpp
+    patch/instr_patch.cpp
+    features/push_all/rules.cpp
+    features/push_all/feature.cpp
+    features/push_all/plugin.cpp
 )
 
 # P3 Lane B：生命周期 JNI 薄层（控制端点经命令端口投递，末尾追加，不改上方既有行）

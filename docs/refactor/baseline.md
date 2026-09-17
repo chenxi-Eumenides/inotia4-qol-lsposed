@@ -37,19 +37,19 @@
 | `features/custom_recipe` | 8 |
 | `features/extension_bag` | 32 |
 | `features/patch` | 12 |
-| `features/push_all` | 2 |
+| `features/push_all` | 6 |
 | `features/quest` | 2 |
 | `features/save_backup` | 4 |
 | `features/simple_mode` | 6 |
 | `features/special_equip` | 2 |
 | `features/ui` | 33 |
 | `features/world_teleport` | 4 |
-| `game` | 25 |
+| `game` | 27 |
 | `hooks` | 6 |
 | `host` | 23 |
 | `infra` | 39 |
-| `patch` | 3 |
-| **合计** | **269** |
+| `patch` | 7 |
+| **合计** | **279** |
 
 ### 1.2 迁移期映射摘要
 
@@ -130,25 +130,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 133 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 136 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `features/ui` | `game` | 24 |
-| `host` | `infra` | 22 |
+| `host` | `infra` | 23 |
 | `features/ui` | `infra` | 12 |
 | `infra` | `game` | 12 |
 | `features/patch` | `game` | 11 |
 | `features/extension_bag` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `features/autosell` | `game` | 8 |
+| `host` | `game` | 8 |
 | `domains/world` | `game` | 7 |
 | `features/extension_bag` | `contracts` | 7 |
 | `host` | `features/ui` | 7 |
 | `features/ui` | `patch` | 6 |
+| `host` | `contracts` | 6 |
 | `host` | `features/autosell` | 6 |
-| `host` | `game` | 6 |
-| `domains/save` | `infra` | 5 |
 
 ### 2.2 include 环
 
@@ -231,17 +231,16 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 42 个 / 文件 23 个 / 去重符号 14 个 / 无法归属 18 个。
+扫描合计：安装点 37 个 / 文件 22 个 / 去重符号 13 个 / 无法归属 18 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 8 | 11 | 6 |
-| call patch | 7 | 20 | 9 |
+| call patch | 6 | 15 | 8 |
 | ptr slot | 9 | 11 | 2 |
 
-去重符号 → 文件（前 14 条，共 14 条；`--verbose` 列全部）：
+去重符号 → 文件（前 13 条，共 13 条；`--verbose` 列全部）：
 
-- `F_CHAR_MOVE_VMA` → `feature/push_all/push_all.cpp`
 - `F_GAMESTATE_DRAWPLAY_VMA` → `core/native/frame_host.cpp`
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_INVEN_FIND_SAVE_SLOT_VMA` → `feature/patch/game_patch_core.inc`
@@ -268,9 +267,9 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 12 个）与已迁移 `features/*`（1 个）共 13 个域。
+旧 `feature/*`（待迁移 11 个）与已迁移 `features/*`（2 个）共 13 个域。
 
-### 6.1 旧 `feature/*`（待迁移，12）
+### 6.1 旧 `feature/*`（待迁移，11）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -280,17 +279,17 @@
 | `custom_recipe` | `features/custom_recipe` | 8 |
 | `extension_bag` | `features/extension_bag` | 32 |
 | `patch` | `features/patch` | 12 |
-| `push_all` | `features/push_all` | 2 |
 | `quest` | `features/quest` | 2 |
 | `save_backup` | `features/save_backup` | 4 |
 | `special_equip` | `features/special_equip` | 2 |
 | `ui` | `features/ui` | 33 |
 | `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（1）
+### 6.2 已迁移 `features/*`（2）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
+| `push_all` | `features/push_all` | 6 |
 | `simple_mode` | `features/simple_mode` | 6 |
 
 ## 校验入口
