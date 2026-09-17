@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把 `.qol_save` 备份 bundle 完整解析为可读 JSON。
 
-解析层次（格式依据 docs/development/features/save-backup.md §3、docs/reference/game/save.md）：
+解析层次（格式依据 archive/docs/development/features/save-backup.md §3、docs/reference/game/save.md）：
   1. bundle 容器：magic/formatVersion/分段边界/CRC32/checksum（sha256(origPlain‖module‖wh) 前 12 位）。
   2. metaJson 元数据。
   3. 原版存档明文 origPlain：块表、块 0 Information、块 3 Inventory（含内嵌 WH96v002 段检测）。

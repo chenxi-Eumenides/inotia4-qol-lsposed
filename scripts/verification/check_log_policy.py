@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """统一日志系统合规检查（P4）。
 
-权威规范：`docs/development/logging.md`。本脚本静态检查代码是否满足该规范：
+权威规范：`archive/docs/development/logging.md`。本脚本静态检查代码是否满足该规范：
 
   R1 唯一出口    native 中除 `core/native/qol_log.cpp` 与 host 桩外不得出现 __android_log_print；
                  Kotlin 中除 `LogFile.kt` 外不得出现 android.util.Log

@@ -104,11 +104,12 @@ GitHub Releases：<https://github.com/chenxi-Eumenides/inotia4-qol-lsposed/relea
 
 ## 开发者
 
-- 代码架构与规范：`docs/development/architecture.md`
+- 目标架构（重构期唯一权威）：根目录 `ARCHITECTURE.md`
+- 重构执行文档：`docs/refactor/`
 - 构建、设备与部署：`docs/guides/build-and-deploy.md`
-- 开发待办：`docs/development/planning/backlog.md`
 - 文档索引：`docs/INDEX.md`
 - 贡献与代理工作规则：`AGENTS.md`
+- 历史开发文档（已归档，仅供参考）：`archive/docs/development/`
 
 ## 致谢
 
