@@ -6,14 +6,18 @@
 
 #include "contracts/plugin.h"
 #include "contracts/text_layer.h"
+#include "hooks/dispatch.h"
 #include "infra/text_scope.h"
 
-// 模块自定义文本层（text_layer 插件，ARCHITECTURE.md §3.3/§4.5）。
+// 模块自定义文本层（text_layer 插件，ARCHITECTURE.md §3.3/§4.5/§4.6）。
 //
 // 提供共享资源 `hook:MEMORYTEXT_GetText`（全游戏唯一文本读取热点，232 调用点）与
-// text_layer v1 能力。**行为等价于原 feature/ui/module_text**：
-//   wrapper：先调原函数 → 查本层内置表（按当前线程作用域）→ 命中则用模块字面量，否则用原值；
-//   在此基础上把最终基准交给 hooks/dispatch 三段式分派（无消费者时逐字等价）。
+// text_layer v1 能力。分派顺序严格按 §4.5：before → original → after：
+//   wrapper：调原函数得到**原始文本**，作为 `original` 交给 dispatch_run_text；
+//   owner 的 14 条内置表是 after 阶段的 Modify 消费者（install 时最先注册 →
+//   after 逆序最后执行 → 内置文案仍覆盖第三方修改，与旧行为等价）。
+// 值类型资源的 `original` 由 owner 在进入分派前计算（输入不可变），故 before 阶段消费者
+// 看到的是原函数文本，语义等价于 §4.5 的 `before → original → after`。
 //
 // 消费者不再各自挂 GetText（LSPosed 同址二次挂载会失败），改经能力 subscribe；
 // 本文件的表与查表逻辑是纯逻辑（不触游戏内存），编入 host 单测。
@@ -105,6 +109,25 @@ inline const Entry* entry_by_key(const char* key) {
 // 业务门禁：true = 表替换与能力查询生效；false = 撤销期，wrapper 透传原函数。
 void set_active(bool active);
 bool active();
+
+// 内置表消费者（声明式登记，§4.6）：after 阶段 Modify——在 after 逆序链最后执行，
+// 使内置文案覆盖第三方修改（install 时最先注册）。
+inline constexpr qol::hooks::DispatchPhase kOwnerTablePhase = qol::hooks::DispatchPhase::kAfter;
+inline constexpr qol::hooks::ConsumerKind kOwnerTableKind = qol::hooks::ConsumerKind::kModify;
+
+// 内置表 after-Modify 的纯逻辑：按当前线程作用域查表；命中返回字面量，未命中返回 nullptr。
+// 可在 host 单测直接断言（不触游戏内存、不依赖分派链接）。
+inline const char* owner_table_lookup(uint32_t text_id) {
+    return lookup(static_cast<uint16_t>(text_id), qol::infra::active_text_scope());
+}
+
+// 内置表 Modify 回调体（分派消费者）：委托 owner_table_lookup；纯函数（无副作用）。
+const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx);
+
+// 注册内置表消费者（install 调用，幂等）；容量满等失败返回 false → install 失败（fail-closed）。
+bool register_builtin_consumers();
+// 注销内置表消费者（deactivate 调用，幂等）。
+void unregister_builtin_consumers();
 
 // 宿主在资源安装成功后交还 backup（原函数入口）；未知 id 忽略，恒返回 0。
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);

@@ -33,7 +33,8 @@ struct Outcome {
 // 已占用（不同 claim）"point already claimed"；原语返回 false "primitive rejected"。
 Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr);
 
-// 还原：claims 释放 → 原语还原（用 site.expected_word 作为原字）。
+// 还原（§4.2 物理归还）：先原语还原（用 site.expected_word 作为原字），成功后才释放占用；
+// 还原失败不释放占用（保留 owner），由引擎按 tombstone + 隔离语义处理。
 Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr);
 
 }  // namespace qol::patch

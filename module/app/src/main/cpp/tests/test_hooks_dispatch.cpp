@@ -278,6 +278,49 @@ void test_capacity_and_count() {
     CHECK(dispatch_consumer_count(kRes, kBefore, ConsumerKind::kModify) == 0);
 }
 
+// 方案 X（§4.6 登记表即声明式消费者）：owner 内置表最先注册为 after+Modify，
+// before 阶段消费者应看到**原函数文本**（非 owner 表文本）；owner 表在 after 逆序链
+// 最后执行，覆盖第三方 Modify 的结果。
+const char* g_probe_seen = nullptr;
+const char* g_owner_seen = nullptr;
+int g_probe_calls = 0, g_third_calls = 0, g_owner_calls = 0;
+
+const char* before_probe_cb(uint32_t, const char* cur, void*) {
+    ++g_probe_calls;
+    g_probe_seen = cur;
+    return "IGNORED";
+}
+const char* third_mod_cb(uint32_t, const char* cur, void*) {
+    (void)cur;
+    ++g_third_calls;
+    return "THIRD";
+}
+const char* owner_mod_cb(uint32_t, const char* cur, void*) {
+    ++g_owner_calls;
+    g_owner_seen = cur;
+    return "TABLE";
+}
+
+void test_owner_table_after_precedence() {
+    dispatch_reset_for_test();
+    g_probe_seen = nullptr;
+    g_owner_seen = nullptr;
+    g_probe_calls = g_third_calls = g_owner_calls = 0;
+    // owner 内置表最先注册（after+Modify）。
+    CHECK(dispatch_subscribe(kRes, kAfter, ConsumerKind::kModify, owner_mod_cb, nullptr) != 0);
+    // before 观察者。
+    CHECK(dispatch_subscribe(kRes, kBefore, ConsumerKind::kObserve, before_probe_cb, nullptr) != 0);
+    // 第三方 Modify 后注册（after；逆序先执行）。
+    CHECK(dispatch_subscribe(kRes, kAfter, ConsumerKind::kModify, third_mod_cb, nullptr) != 0);
+
+    CHECK(std::strcmp(dispatch_run_text(kRes, 35185, "GAME"), "TABLE") == 0);
+    // before 看到原函数文本，而非 owner 表文本。
+    CHECK(g_probe_seen != nullptr && std::strcmp(g_probe_seen, "GAME") == 0);
+    // owner 在 after 链最后执行，看到第三方结果并被覆盖。
+    CHECK(g_owner_seen != nullptr && std::strcmp(g_owner_seen, "THIRD") == 0);
+    CHECK(g_probe_calls == 1 && g_third_calls == 1 && g_owner_calls == 1);
+}
+
 void test_count_unsubscribe_reset() {
     dispatch_reset_for_test();
     const ObserveHandle o = dispatch_subscribe(kRes, kBefore, ConsumerKind::kObserve, obs_a, nullptr);
@@ -308,6 +351,7 @@ int main() {
     test_intercept_null_falls_back();
     test_snapshot_semantics();
     test_capacity_and_count();
+    test_owner_table_after_precedence();
     test_count_unsubscribe_reset();
     std::printf("hooks_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

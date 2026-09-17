@@ -82,9 +82,8 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (!resolve_site(claim, site_addr, &site, &error)) {
         return error;
     }
-    // 归还流程：先释放占用，再还原原字（与 §4.2 物理归还顺序一致）。
-    release_point(site.addr);
-
+    // §4.2 物理归还：先还原原字，成功后才释放占用。还原失败时保留占用——否则点可被
+    // 重新声明，而旧指令字可能仍在（tombstone 语义丢失），由引擎按 tombstone + 隔离处理。
     bool applied = false;
     if (site.kind == qol::game::PatchKind::kBlRedirect) {
         applied = g_primitives.revert_bl != nullptr &&
@@ -96,6 +95,7 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (!applied) {
         return failure("primitive rejected");
     }
+    release_point(site.addr);
     return Outcome{0, nullptr};
 }
 

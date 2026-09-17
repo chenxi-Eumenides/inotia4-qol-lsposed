@@ -17,7 +17,30 @@ GetTextFn g_backup_memorytext_get_text = nullptr;
 
 std::atomic<bool> g_active{false};
 
+// 内置表消费者句柄（install 注册；0 = 未注册）。
+hooks::DispatchId g_builtin_consumer = 0;
+
 }  // namespace
+
+const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx) {
+    (void)current;
+    (void)ctx;
+    // 命中返回模块字面量；未命中/占位 nullptr 返回 nullptr（不改）。
+    return owner_table_lookup(text_id);
+}
+
+bool register_builtin_consumers() {
+    if (g_builtin_consumer != 0) return true;  // 幂等（activate 重入）
+    g_builtin_consumer = hooks::dispatch_subscribe(kResourceIdGetText, kOwnerTablePhase,
+                                                   kOwnerTableKind, &owner_table_modify, nullptr);
+    return g_builtin_consumer != 0;
+}
+
+void unregister_builtin_consumers() {
+    if (g_builtin_consumer == 0) return;
+    hooks::dispatch_unsubscribe(kResourceIdGetText, g_builtin_consumer);
+    g_builtin_consumer = 0;
+}
 
 void set_active(bool active) {
     g_active.store(active, std::memory_order_release);
@@ -60,16 +83,13 @@ void api_unsubscribe(uint64_t id) {
 }
 
 const char* memorytext_get_text_wrapper(uint16_t text_id) {
-    // 逐字对照旧 module_text wrapper：先无条件调原函数（保持原版行为与内部副作用），
-    // 再按当前线程作用域查模块表；命中用模块字面量，否则用原值。
+    // 先无条件调原函数（保持原版行为与内部副作用），得到**原始文本**。
     const char* original =
         (g_backup_memorytext_get_text != nullptr) ? g_backup_memorytext_get_text(text_id) : nullptr;
     if (!g_active.load(std::memory_order_acquire)) return original;  // 撤销期/停用：透传原函数
-
-    const char* owner_text = lookup(text_id, qol::infra::active_text_scope());
-    const char* base = (owner_text != nullptr) ? owner_text : original;
-    // 无消费者时 dispatch 直接返回 base，与旧行为逐字等价。
-    return hooks::dispatch_run_text(kResourceIdGetText, text_id, base);
+    // §4.5：值类型资源的 original 由 owner 在进入分派前计算（输入不可变），故该参数即
+    // original 阶段的值；内置表作为 after 阶段 Modify 消费者随后生效。
+    return hooks::dispatch_run_text(kResourceIdGetText, text_id, original);
 }
 
 }  // namespace qol::features::text_layer

@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "contracts/text_layer.h"
+#include "core/native/qol_log.h"
 #include "features/text_layer/feature.h"
 
 namespace qol::features::text_layer {
@@ -43,12 +44,19 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
+    // 内置表消费者（after+Modify）在 install 注册；失败（容量满等）→ fail-closed，
+    // 宿主按 install 失败回滚并把插件置 failed（§3.2 部分安装失败）。
+    if (!register_builtin_consumers()) {
+        QOL_LOG_ERROR(QolDomain::kUi, "text_layer builtin table consumer registration failed");
+        return 1;
+    }
     set_active(true);
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    unregister_builtin_consumers();
     set_active(false);
 }
 

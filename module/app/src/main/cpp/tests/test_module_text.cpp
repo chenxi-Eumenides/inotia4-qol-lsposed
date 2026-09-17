@@ -141,12 +141,39 @@ static void test_scope_guard_restore() {
     CHECK(qol::infra::active_text_scope() == TextScope::kNone);
 }
 
+// ---------------------------------------------------------------------------
+// 方案 X：内置表是 after 阶段 Modify 消费者——注册参数为 after+Modify；回调体只按当前
+// 作用域查表（命中返回字面量、占位/未命中返回 nullptr）。分派级顺序断言见
+// tests/test_hooks_dispatch.cpp（本测试目标不链接 hooks/dispatch）。
+// ---------------------------------------------------------------------------
+static void test_owner_table_after_modify_body() {
+    CHECK(tl::kOwnerTablePhase == qol::hooks::DispatchPhase::kAfter);
+    CHECK(tl::kOwnerTableKind == qol::hooks::ConsumerKind::kModify);
+
+    {
+        qol::infra::TextScopeGuard scope(TextScope::kCharacterPanel);
+        CHECK(std::strcmp(tl::owner_table_lookup(35185), "物攻") == 0);
+        CHECK(tl::owner_table_lookup(35188) == nullptr);  // 显式占位（保持原文）
+        CHECK(tl::owner_table_lookup(35184) == nullptr);  // 不在表内
+    }
+    CHECK(tl::owner_table_lookup(35185) == nullptr);  // 非窗口（kNone）
+    {
+        qol::infra::TextScopeGuard scope(TextScope::kUimixRecipeButton);
+        CHECK(std::strcmp(tl::owner_table_lookup(35291), "宝石升阶") == 0);
+    }
+    {
+        qol::infra::TextScopeGuard scope(TextScope::kUimixPageTab);
+        CHECK(tl::owner_table_lookup(35291) == nullptr);  // 页签保持原文
+    }
+}
+
 int main() {
     test_table_integrity();
     test_charinfo_block_contiguous();
     test_lookup_scope_gating();
     test_key_lookup_and_id_sync();
     test_scope_guard_restore();
+    test_owner_table_after_modify_body();
     std::printf("module_text_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

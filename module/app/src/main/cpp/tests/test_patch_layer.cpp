@@ -313,16 +313,30 @@ void test_release_success() {
     CHECK(point_owner(stand_addr()) == nullptr);
 }
 
-void test_release_primitive_rejected() {
+void test_release_primitive_rejected_keeps_owner() {
     reset_all();
     const ResourceClaim word = make_patch_claim("patch:b", "P_CHAR_MOVE_PUSH_STAND", nullptr);
     CHECK(install_claim(word, stand_addr()).ok == 0);
+
+    // 物理还原失败：保留占用（§4.2），点不得被重新声明。
     g_prims.revert_word_ok = false;
     const Outcome outcome = release_claim(word, stand_addr());
     CHECK(error_is(outcome, "primitive rejected"));
-    // 归还是「先释放占用、再还原原字」：原语失败仍已释放占用。
-    CHECK(point_owner(stand_addr()) == nullptr);
+    CHECK(point_owner(stand_addr()) != nullptr);
+    CHECK(std::strcmp(point_owner(stand_addr()), "patch:b") == 0);
     CHECK(g_prims.revert_word_calls == 1);
+
+    const ResourceClaim other = make_patch_claim("patch:c", "P_CHAR_MOVE_PUSH_STAND", nullptr);
+    CHECK(error_is(install_claim(other, stand_addr()), "point already claimed"));
+    CHECK(std::strcmp(point_owner(stand_addr()), "patch:b") == 0);
+
+    // 原语恢复后重试还原：成功后释放占用，点可被重新声明。
+    g_prims.revert_word_ok = true;
+    CHECK(release_claim(word, stand_addr()).ok == 0);
+    CHECK(point_owner(stand_addr()) == nullptr);
+    CHECK(claimed_count() == 0);
+    CHECK(install_claim(other, stand_addr()).ok == 0);
+    CHECK(std::strcmp(point_owner(stand_addr()), "patch:c") == 0);
 }
 
 }  // namespace
@@ -338,7 +352,7 @@ int main() {
     test_point_already_claimed();
     test_primitive_rejected_releases_claim();
     test_release_success();
-    test_release_primitive_rejected();
+    test_release_primitive_rejected_keeps_owner();
     std::printf("patch_layer: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
