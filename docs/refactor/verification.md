@@ -58,6 +58,8 @@
 | VM-P4-06 | P4-B1：`special_equip` 迁移为插件（2 entry hook、常开）+ 核心件 `game/access/item_class` | `curl -s http://192.168.3.54:8088/api/system/features` | `special_equip enabled` + `hook:CHAR_CanEquipItem` / `hook:CHAR_CanUnequipItem` = `live`（声明式 fail-closed 安装）；无 FATAL。**用户真机确认（2026-09-17）：功能正常**。行为语义（用户校正后）：① **该功能逻辑**——普通队友、主角可穿脱 26 条「NPC 专属位」装备（cat 485-506 / 785-787 / 948），且其身上的专属位装备**可出售**；② **原版逻辑不变**——特殊 NPC 队友（任务入队）原生装备无法脱下、不存在穿上；其身上的专属位装备**不可出售**（出售门禁拦截）；普通装备穿脱售正常、不可穿到特殊 NPC 队友身上 |
 | VM-P4-07 | P4-B2a-1：inventory hook 引擎声明式替换（24 条 `kEntryHook`、`gate=nullptr`） | `curl -s http://192.168.3.54:8088/api/system/features` | `inventory_hooks enabled` + **24/24 资源 `live`**（声明式 fail-closed 安装；自研引擎与 `g_install_blocked` 已删除）；其余插件不受符号表扩充与 `'x'` 校验前移影响（attribute_range 3/3、text_layer 1/1、special_equip 2/2、core 2/2、simple_mode/push_all 维持门禁关态）；无 FATAL。**用户真机冒烟确认（2026-09-17）：扩展背包移动/合并/装备/镶嵌、S2 堆叠、R-55 出售、R-63 徽章、入库收编均正常** |
 | VM-P4-08 | P4-B2a-2：`game_patch` 机制收敛（`core_patches` 13 条 + `stack_limit` 6 条声明式；S2 符号型 BL 重定向入表） | `curl -s http://192.168.3.54:8088/api/system/features`；`curl -s -X POST http://192.168.3.54:8088/api/config/set -H 'Content-Type: application/json' -d '{"stackLimitIncrease":true\|false}'`；`adb -s 192.168.3.54:5555 shell "grep -i core_patches /sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/inotia4-export.log"` | 启动 `core enabled` + **15/15 `live`**（13 core_patches + 2 帧源）；日志 `core_patches installed 12 + hub`、`monster compat: 0x7279574818 cmp w8,#0x62 -> #0x7F`；进世界（帧 135→173）后 `stack_limit` 两态随配置：`true` → `enabled` + 6/6 `live`，`false` → `installed_disabled` + 6/6 `free`（物理还原）；无 FATAL。**执行中发现并修复启动缺陷**：`core_patches_install` 误用 `bridge_ready()` 守卫（本入口在 `bridge_init()` 内部执行、该标志结尾才置位 → 恒未就绪、静默 fail-closed、API 不就绪、每秒重试）；改为仅判 `g_base` 后 bridge `ready:true`。行为面（S2 大堆叠出售/拆堆、monster 读档、主菜单 hub 跳过、999 clamp 两态）待用户冒烟确认 |
+| VM-43 | W1：扩展背包·商店出售支持数量选择（部分出售） | 商店页对扩展袋物品：200 可堆叠 → 选 150 卖 → 余 50、金额 = 150×单价；选上限（全部）→ 槽消失；选 1 → 余 199；取消面板/二次确认 → 零变化；关闭堆叠上限后面板上限随 b 段；原版物品流程与金额不变；装备页整堆不变 | **用户真机确认（2026-09-17）：功能测试完成、没问题**。实现：新增 `UIStore_SellItem` 入口 hook（结算点接管，原版面板/确认/取消保留）；删除按钮 execute 替换 + 全局 popup 劫持（R-13 商店/装备 popup 状态互斥风险消除）；部分出售 canonical 递减写回 + 仅刷新商店投影（R-12）+ 失败退款；host `store_sell_rules` 22 断言 |
+| VM-44 | P4-B3：`autosell` 迁移为零资源插件（命令端口门禁 + `infra::scheduler` 60 帧节拍 + 进/退档回调） | 设置页全局开关两态；进档后按规则自动出售（60 帧节流）；重进档规则保留（sidecar）；关开关停售；商店/装备页出售回归 | **用户真机确认（2026-09-17）：自动出售实测正确**。host `autosell_rules_tests` 130 + `autosell_store_tests` 102 断言；基线纯收缩 90→85（UI→autosell 的 feature→feature ×3、符号头 ×2 消除）；过渡依赖 save_enter/exit、sidecar 桥 → B4 |
 
 > VM-P1-03 执行时发现并修复线上缺陷：变体表停在 monster v26，设备 v27 查表失败
 > （`known=0`、能力位 0，靠 `WH4JRN01` 回退分类）；重新生成后补入 v27/v29，设备命中
@@ -68,7 +70,7 @@
 | 阶段 | 卡片 | 说明 |
 |---|---|---|
 | P4 | 每插件一张迁移卡 | 行为等价回归 + 开关两态 + 变体矩阵 |
-| P6 | 外部插件轨卡 | 导入/拒绝/禁用/崩溃兜底 |
+| P6 | 外部插件轨卡 | 数据 schema 拒绝；未签名 native 显式启用/加载/禁用；托管资源回收；启动故障恢复；更新/回滚 |
 
 ## 6. 失败判据（任一命中即 NOT_ACCEPTED）
 
