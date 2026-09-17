@@ -130,16 +130,24 @@
 
 ### VM-29 页签拖放与原版页签对照
 
-- **操作**：覆盖扩展源→空页签装备、扩展源→其它页签移动和原版源→页签对照。
+- **操作**：覆盖扩展源→空页签装备、扩展源→其它页签移动和原版源→页签对照；并在背包
+  视图关闭状态下刷宝箱/拾取材料并入扩展堆，核对延迟释放排空。
 - **步骤**：①准备类别 1..4 的扩展背包源和空页签；②拖放并确认扩展袋装备；③准备非
   背包类扩展源，拖到其它页签；④准备原版物品，按原版页签/drop 操作拖到页签；⑤切换
-  页签并读取扩展逻辑袋、原版物理袋和 session。
+  页签并读取扩展逻辑袋、原版物理袋和 session；⑥关闭背包视图，刷宝箱/拾取材料使源对象
+  并入扩展堆，读取 `deferred free enqueue`/`deferred free drain` 与 drain 行的池占用（仅诊断）。
 - **预期**：①扩展背包源装备到空页签并清理原扩展源；②非背包类扩展源提交 ext→ext
   移动；③原版源不进入扩展事务；三种操作均无 stale moving。触摸窗口内释放先入队，
-  队列满时保留 custody 且事务继续成功，draw-end 关闭窗口后再按控件/槽位引用排空。
-- **日志锚**：`tab commit handled=1`、`deferred free enqueue`、`deferred free queue full; custody retained`、`deferred free drain`；
-  原版对照使用原版 `MoveItem pre/post` 或 tab proc 日志，不能只用 UI 结果判定。
-- **关联规则**：R-02、R-19、R-30、R-35、R-36；S-05 已解决。
+  队列满时保留 custody 且事务继续成功；排空由 draw-end 或世界态 `kFramePointLogicPre`
+  帧任务在引用检查通过后执行，**背包视图未打开时也必须排空**。多次 drain 后 `freed`
+   与 `count` 一致（`freed-count==0`），不出现 `freed>count`；drain 行可读到
+  `pool=used/total`（仅诊断，不参与门禁）且池占用不单调上升。
+- **日志锚**：`tab commit handled=1`、`deferred free enqueue`、`deferred free queue full; custody retained`、`deferred free drain count=... freed=... kept=... pool=used/total`、
+  `deferred free frame task registered`；不得出现 `ERROR deferred free drain freed bound
+  exceeded`、`ERROR deferred free drain kept overflow queue` 或 `ERROR deferred free drain
+  null ... item`；原版对照使用原版 `MoveItem pre/post` 或 tab proc 日志，不能只用 UI 结果判定。
+- **关联规则**：R-02、R-19、R-30、R-35、R-36、R-67、R-68；S-05 已解决；世界态排空的
+  专项真机卡为 VM-B06。
 
 ### VM-06 扩展物品装备到角色
 
@@ -797,6 +805,24 @@
 - **日志锚**：模块 `txn prepared/committed` 或失败日志、source protection 和 projection
   更新；原版四象限结论不由本卡替代。
 
+### VM-B06 世界态延迟释放排空与池诊断
+
+- **对应契约**：R-36、R-67、R-68。
+- **步骤**：①扩展开启，刷宝箱/拾取材料并入扩展堆（源对象进延迟释放队列）且不打开背包
+  视图，持续 ≥3 分钟；②按固定间隔记录 `deferred free enqueue`/`custody retained`/
+  `deferred free drain` 与 drain 行的 `pool=used/total`；③核对背包视图未打开时也出现
+  `deferred free drain`；④在触摸窗口内触发延迟释放，确认窗口结束后按帧龄下限正常排空
+  （池占用不改变门禁）；⑤抬高池占用越过 276 后回落，确认 `WARN pool critical` 仅在跨越
+  水位 276（`kCriticalWatermark`）时出现一次。
+- **预期**：池占用不单调上升、无闪退；多次 drain 后 `freed` 与 `count` 一致
+  （`freed-count==0`），不出现 `freed>count`；队列/custody 在背包关闭状态下也最终排空；
+  触摸窗口与帧龄下限始终生效，池占用仅作诊断不影响释放，逐对象引用检查始终生效——仍被
+  投影控件或逻辑槽持有的对象必须保留、不被释放。
+- **日志锚**：`deferred free frame task registered`、`deferred free drain count=... freed=...
+  kept=... pool=used/total`、`WARN pool critical used=... total=...`；不得出现
+  `ERROR deferred free drain freed bound exceeded`、`ERROR deferred free drain kept overflow
+  queue` 或 `ERROR deferred free drain null ... item`。
+
 ### VM-28 吞掉 release 的原版清理变体
 
 - **对应契约**：R-33；覆盖 owner/terminal、非世界取消、capture 空坐标、capture
@@ -819,7 +845,7 @@
 
 ## 3. 规则锚表
 
-下表是 R-01..R-55 的反查表；“卡”列列出覆盖该规则的主卡。
+下表是 R-01..R-68 的反查表；“卡”列列出覆盖该规则的主卡。
 
 | 规则 | 被哪些卡覆盖 | 当前锚结论 |
 |---|---|---|
@@ -858,7 +884,7 @@
 | R-33 | VM-28 | 五个吞掉 `0x18` 出口统一经 `complete_original_release_cleanup_locked`；handled/unhandled 变体和锁外原版清理需真机日志确认。
 | R-34 | VM-B01～VM-B04 | Host 可静态核对六条件表达式；真机已确认 draw-end 不逐帧写控件、非活 stale moving 被清理。 |
 | R-35 | S-05、VM-29 | 页签先于网格解析；真机已确认页签装备、跨页签移动和原版对照。 |
-| R-36 | S-05、VM-29 | 触摸窗口释放使用延迟队列；队列满转 custody 保管且事务继续；以 `deferred free enqueue/drain`、`queue full; custody retained` 和 `tab commit` 日志核对。 |
+| R-36 | S-05、VM-29、VM-B06 | 触摸窗口释放使用延迟队列；队列满转 custody 保管且事务继续；排空点含 draw-end 与世界态 `kFramePointLogicPre` 帧任务（R-67），触摸窗口与跨帧帧龄下限始终生效，240/276 池占用仅作诊断不参与门禁（276 跨越 WARN 一次）；以 `deferred free enqueue/drain`、`queue full; custody retained`、`pool=used/total` 和 `tab commit` 日志核对。 |
 | R-37 | VM-17、VM-18、VM-30 | Host 价格边界/clamp 断言 + 真机装备/商店弹窗与 API 对照；非法价格不得写弹窗或结算。 |
 | R-38 | VM-30 | `test_virtual_bag_json_count_clamp` 断言非堆叠装备 payload 逐字节不变、可堆叠超限才收敛、合法数量幂等；真机存档回归仍需核对 payload 语义。 |
 | R-39 | VM-09、VM-31 | `test_stack_codec` 断言 marker 只改 bit25..31 且保留 bit0..24；真机核对袋容量、切换和 `count=24` 安装日志。 |
@@ -885,6 +911,8 @@
 | R-64 | 取证任务（无 VM 卡） | 详情按钮观察 hook 的面板偏移/去重漂移取证（真机 dump 11 偏移 button/data/orig + 物品 category）；独立任务，不阻塞 R-63。 |
 | R-65 | VM-49 | `s2_writeback_gate` 改经 `stack_codec::writeback_needed(ext, stack)`，写侧门控与读侧 `stack_limit_enabled()` 同源；Host `stage4_hook_tests::test_s2_writeback_gate` 断言四组合真值表；真机 VM-49（堆叠开+扩展关 99+99→198）。 |
 | R-66 | VM-02、VM-50 | 容量上界统一取 `capacities[bag]`：`module_slot_is_assignable_locked` 加容量判定、`place_plan` 空槽扫描与 3 处收编选槽改容量上界、`set_item`/`set_test_equipped`/`equip_bag` 拒绝越容、API 占用统计只计容量内、保存 prepare 由 `virtual_bag_module_save_validate_locked` 统一剔除容量外槽（唯一清理点）。Host `test_virtual_bag_capacity_bounds`；真机归 VM-50（进档保留 + `save validation discarded 15 over-capacity item(s)` + sidecar 干净）。 |
+| R-67 | VM-B06 | 世界态 `kFramePointLogicPre` 帧任务 `extension_bag_deferred_free_tick` 逐帧排空（`try_lock` 拿不到下帧重试、注册幂等、关闭扩展开关不注销），并有跨帧帧龄下限（帧号不可用回退 50ms）；禁止只绑定背包界面 draw-end。真机归 VM-B06（背包关闭刷宝箱也排空、无闪退）。 |
+| R-68 | VM-29、VM-B06 | drain 第一段只遍历队列自身条目、custody 独立遍历；`kept` 容量 16+128=144、回填 ≤16；`freed ≤ queue+custody` 校验；null 项显式跳过。Host `deferred_free_rules_tests`（含 `legacy_free_calls(16,14)=44`、custody 不重复遍历）；真机归 VM-29/VM-B06（`freed-count==0`、无 `freed>count`）。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案
 
@@ -951,6 +979,7 @@
 * `test_p52_drag_session`
 * `test_virtual_bag_mergeable_items`
 * `test_ownership_ledger_p43`
+* 触及延迟释放排空、队列/custody 容量或帧龄判定时追加 `deferred_free_rules_tests`。
 * 受影响函数组对应的 `test_queries`、`test_object_operations`、`test_unequip_to_inven` 或 `stage4_hook_tests` 中同名测试。
 
 ### 5.2 每类改动的最小 VM 集
@@ -963,10 +992,13 @@
 | 拖动/移动/合并 | VM-11、VM-12、VM-13、VM-14、VM-15、VM-27 |
 | 商店/生产者 | VM-18、VM-19、VM-20、VM-21、VM-22 |
 | 投影/页签/保存 | VM-23、VM-25；涉及问题 B 时追加 VM-12 |
+| 延迟释放/池诊断/drain | VM-29、VM-B06 |
 | `event`/`proc`/Hook 安装层 | **VM-B01、VM-B02、VM-B03、VM-B04 全跑**；模块合并改动追加 VM-B05；不得只跑受影响的修复卡 |
 
 **硬规则**：diff 触及 event、proc 或 Hook 安装层任一层时，必须全跑原版基线 VM-B01～B04；
-涉及模块同堆合并时追加 VM-B05。只跑修复闭环或只依赖静态审查，不构成回归通过。
+涉及模块同堆合并时追加 VM-B05；触及延迟释放队列、帧任务排空或池水位门禁时追加 VM-B06
+（背包关闭状态下刷宝箱/拾取，核对背包未打开也排空、`freed-count==0` 与池水位可观测）。
+只跑修复闭环或只依赖静态审查，不构成回归通过。
 
 ### 5.3 通过条件
 
@@ -982,6 +1014,8 @@
 `test_host.cpp`：`test_p7_stage4_find_item_poc`、`test_json_escape`、`test_base64_decode`、`test_parse_int_field`、`test_tiles_parse`、`test_nav_bfs`、`test_nav_bfs_multi`、`test_stack_codec`、`test_stack_codec_s2`、`test_stack_codec_effective_mode`、`test_stack_codec_mode_invariance`、`test_sell_price_bounds`、`test_virtual_bag_state`、`test_extension_bag_exit_rendering_state`、`test_virtual_bag_payload_bridge`、`test_virtual_bag_base64`、`test_virtual_bag_payload_helpers`、`test_virtual_bag_merge_count`、`test_virtual_bag_mergeable_items`、`test_virtual_bag_mode_aware_ops`、`test_virtual_bag_json_roundtrip`、`test_virtual_bag_json_count_clamp`、`test_virtual_bag_cross_config_roundtrip`、`test_virtual_bag_legacy_json`、`test_virtual_bag_capacity_bounds`、`test_virtual_bag_normalize_payload`、`test_virtual_bag_recovery`、`test_virtual_bag_transaction_domain`、`test_sell_divide_s2_read_window`、`test_adopt_merge_plan`、`test_ext2orig_host_guards`、`test_save_preflight_classify`、`test_save_preflight_stage`、`test_save_preflight_json`、`test_prepare_journal`、`test_ownership_ledger`、`test_ownership_ledger_p43`、`test_unequip_bag`、`test_equip_bag`、`test_p44_transaction_stages`、`test_p52_drag_session`、`test_p45_isolation`。
 
 `test_inventory_hook_stage4.cpp`：`test_queries`、`test_original_only_queries`、`test_get_cumulate_count_s2`、`test_remove_item_data_plan`、`test_native_equip_sell_count`、`test_equip_sell_redirect_mapping`、`test_make_item_writeback_count`、`test_vanilla_sell_takeover`、`test_object_operations`、`test_unequip_to_inven`、`test_install_transaction`。
+
+`test_deferred_free_rules.cpp`（`deferred_free_rules_tests` target，R-68）：队列遍历上界修复、`legacy_free_calls(16,14)=44`、kept=144 回填不越界、帧龄真值表、入队去重、null 跳过、custody 不重复遍历。
 
 ### 6.2 Host 测试缺口清单
 
@@ -1019,5 +1053,5 @@
 
 * SaveItem 的 H-13 函数处置、caller 未覆盖边界，见
   [`inventory-integration-decision-plan.md §2.2、§3.2`](inventory-integration-decision-plan.md)。
-* 规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-55` 为准；本册只保留操作卡覆盖关系。
+* 规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-68` 为准；本册只保留操作卡覆盖关系。
 * `IsHavingEmptySlot` 的 `needed<=0` 返回 `1` 事实及源码/Host 锚，见库存册 §2.1；VM-02 只负责验收。

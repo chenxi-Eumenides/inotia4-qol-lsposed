@@ -351,6 +351,17 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
 void virtual_bag_ui_start_auto_inject() {
     ensure_inject_thread();
     ensure_lifecycle_thread();
+    // 世界态延迟释放排空：与背包界面无关，扩展启用期间常驻。锚点未安装前注册安全
+    //（惰性不派发，同 char_next_exp_cache_start）；关闭扩展时不注销，因为队列/custody
+    // 内仍可能残留旧对象需要继续排空。
+    static std::atomic<bool> deferred_free_task_registered{false};
+    if (deferred_free_task_registered.exchange(true, std::memory_order_acq_rel)) return;
+    if (frame_task_add(kFramePointLogicPre, &extension_bag_deferred_free_tick, nullptr, 1, 0) == 0) {
+        deferred_free_task_registered.store(false, std::memory_order_release);
+        VIRTBAG_LOG_WARN("deferred free frame task registration failed");
+    } else {
+        VIRTBAG_LOG("deferred free frame task registered");
+    }
 }
 
 bool virtual_bag_module_view_installed() {

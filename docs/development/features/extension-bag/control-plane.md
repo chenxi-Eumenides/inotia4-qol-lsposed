@@ -74,7 +74,7 @@ S2 数量编码契约已批准并进入开发：可堆叠数量固定为 `128a+b
 | 册 | 文件 | 唯一职责 | 不负责的内容 |
 |---|---|---|---|
 | Hub | `control-plane.md` | 范围、最终目标、阶段状态、问题登记、路由、决策索引 | 实现细节和操作契约正文 |
-| 规则册 | `rulebook.md` | 袋号、锁纪律、Hook 铁律、共享状态写者、`R-01..R-55` | 阶段结论和逐操作验收 |
+| 规则册 | `rulebook.md` | 袋号、锁纪律、Hook 铁律、共享状态写者、`R-01..R-68` | 阶段结论和逐操作验收 |
 | 架构册 | `runtime-architecture.md` | 代码层级、依赖、原版链与模块链、选型、替代方案、未知限制 | 规则编号和状态总览 |
 | 库存册 | `inventory-integration-decision-plan.md` | 原版库存/物品函数逐函数 hook、旁路、保留和理由 | 拖动 session 与 sidecar 时序 |
 | 拖动册 | `drag-protocol.md` | press/move/release、session、投影、drop owner、三方向事务和问题 B 取证 | 全局 Hook 清单和保存容器 |
@@ -274,6 +274,7 @@ S2 完成（含 S2-P6 验收）不改变 Overall `NOT_ACCEPTED` 口径；S2 各�
 | 2026-09-13 | 移除扩展背包 sidecar 的「游戏签名身份门禁」：兼容性改由容器 `formatVersion` + section 版本判定，未知版本按当前布局尽力解析。理由：签名门禁按游戏 APK 签名摘要匹配，同一份 sidecar 在换签名/换集成方式（LSPosed 注入与 NPatch 集成签名不同）后被判为不可读、整袋回退为空，阻止了合法的旧存档恢复。 | `module-save-store.md` §5.2、§6.1；`ExtensionBagUiBridge.kt:loadStateJson` |
 | 2026-09-13 | 删除 `virtualbags.items` legacy 兼容读取：核实其从未被任何发布版本写入（v0.6.11 及以前无 sidecar 代码，v0.7.0 起只写 `extensionbags.items` v4），仅存在于开发期数据；`virtualbags.ui-test` 从未出现在任何提交或发布中。 | `module-save-store.md` §5.2；`ExtensionBagUiBridge.kt:loadStateJson` |
 | 2026-09-13 | 桥接改 v4-only：删除 v2 `capacities` 迁移、v3 迁移回写；依据首个发布 v0.7.0 即 v4，v2/v3 只在开发期存在。未知 section 版本仍按 v4 布局尽力解析，失败回退空状态。 | `module-save-store.md` §5.2；`runtime-architecture.md` §5.3；`ExtensionBagUiBridge.kt:loadStateJson` |
+| 2026-09-17 | 延迟释放排空从「仅背包/装备界面 draw-end」扩为世界态 `kFramePointLogicPre` 帧任务：`extension_bag_deferred_free_tick`（`try_lock` 拿不到下帧重试、幂等注册、关闭扩展开关不注销）与 draw-end 并存，并加跨帧帧龄下限（帧号不可用回退 50ms）。drain 遍历上界改为队列自身条目、custody 独立遍历、kept 容量 144、`freed ≤ queue+custody` 校验、null 项跳过；新增只读池占用（GOT 槽 → `&ITEMPOOL_pPool` → 池基址，两层解引用 + 布局守卫）；240/276 池占用仅作诊断、不参与排空门禁（276 状态跨越时 WARN 一次），触摸窗口与帧龄下限始终生效，逐对象引用检查仍生效。 | `rulebook.md` R-36、R-67、R-68；`runtime-architecture.md` §1.3、§2.3、§3.6；`drag-protocol.md` §2.9；`verification-matrix.md` VM-29、VM-B06；Host `deferred_free_rules_tests` |
 
 ### 5.1 决策索引使用规则
 

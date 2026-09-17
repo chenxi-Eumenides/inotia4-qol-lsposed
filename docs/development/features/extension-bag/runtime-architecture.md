@@ -104,6 +104,9 @@ include 顺序中展开；以下按当前 include 点核对。
 model 的 `virtual_bag_drag_model/transaction_rules/state_ops/serialization/state_json.inc`
 展开于 `model/virtual_bag_state.h:54,105-108`，提供 session、谓词、normalize、payload、
 JSON；`virtual_bag_transaction_types.h` 是同头展开的类型头，不是 `.inc`。
+`model/deferred_free_rules.h` 是纯头（只依赖 STL，host 测试共用），提供延迟释放排空的
+遍历上界、kept 容量、释放上界与帧龄判据，由 `game_ui_virtbag.cpp:13` 引入、drain 实现与
+`deferred_free_rules_tests` 共用。
 
 主 TU `game_ui_virtbag.cpp` 的 include 点：`observation.inc:187`、`tabs.inc:191`、
 `drag_session.inc:216`（观测/标签/session）；`runtime.inc:218` 并在
@@ -336,10 +339,14 @@ monster 版重写背包加载器（`SAVE_LoadFile+0xd0` 的 `bl` 改指注入段
    `extension_bag_lifecycle.inc:297-315`、`extension_bag_transaction.inc:791-872`。
 3. 失败时仍吞掉 release，避免原版 `INVEN_MoveItem` 二次改真实槽；guard 做物理数组
    pre/post digest，见 `extension_bag_lifecycle.inc:120-165`。
-4. 触摸窗口内的 custody release 进入 `extension_bag_ownership.inc:35-53` 的延迟队列，
-   draw-end 由 `extension_bag_render.inc:712-770` 调用排空；排空逐项检查
-   `g_module_objects` 和 projection 控件引用，无引用时才调用 `ITEMPOOL_Free`
-   （`extension_bag_ownership.inc:71-119`）。
+4. 触摸窗口内的 custody release 进入 `extension_bag_ownership.inc:48-82` 的延迟队列，
+   排空由两处触发：draw-end（`extension_bag_render.inc:729,735,747,777`）与世界态
+   `kFramePointLogicPre` 帧任务 `extension_bag_deferred_free_tick`
+   （`extension_bag_ownership.inc:245-259`，注册于
+   `extension_bag_public_runtime.inc:351-365`，`try_lock` 拿不到即下帧重试），触摸窗口与跨帧
+   帧龄下限始终生效；240/276 池占用仅作诊断（276 跨越 WARN 一次，不参与门禁，R-67）。排空逐项
+   检查 `g_module_objects` 和 projection 控件引用，无引用时才调用 `ITEMPOOL_Free`
+   （`extension_bag_ownership.inc:96-240`）。
 5. ext→orig 事务的投影宿主守卫（R-54/VM-40）：目标袋 == 投影宿主袋时，事务期用
    `HostCapacityGuard` 临时恢复被投影替换的宿主容量字（`INVEN_GetBagSize` /
    `INVEN_SaveItemOnEmpty` 按真实容量判定），任何出口写回投影值；投影中不改写
@@ -518,6 +525,12 @@ Java section `ExtensionBagUiBridge.kt:11-24,110-168`；8 处 callsite
 辅助；它不表示不存在 H-13。wrapper 的存在也不证明 18 条 caller 已完成身份、失败释放
 和真机覆盖，生产者验收仍属 P7 stage-5。问题无法仅靠静态安装链闭合时，按验收册
 VM-19/VM-20/VM-21/VM-22 取证。
+
+`SaveItem` 合并/adopt 路径并入扩展堆后，原版源对象不在本帧同步释放，而是进入延迟释放
+队列（`enqueue_deferred_item_free_locked`，`extension_bag_ownership.inc:48-82`），由
+世界态 `kFramePointLogicPre` 帧任务与 draw-end 在引用检查通过后回收（R-36/R-67/R-68）。
+因此生产者路径不受触摸窗口阻塞，也不依赖背包界面被绘制；重进存档/切地图期间队列/custody
+不会被清空，仍由同一帧任务继续排空。
 
 ### 3.7 S2 数量编码的 hook 分层（S2-P2 读侧、S2-P3 写侧、S2-P5 关闭态语义已落地）
 
@@ -700,9 +713,10 @@ kUnknown/空指针 fail-closed 走 backup、启用/关闭两态视图与切换�
 participant 风险更小，故不采用。
 
 触摸窗口内的 custody 释放由 `extension_bag_ownership.inc` 的 16 项定长环形队列接管；
-draw-end 在窗口关闭后逐项检查 `g_projected_item_root` 控件 `data[0]` 与
-`g_module_objects` 引用，只有无引用对象才调用 `ITEMPOOL_Free`，满队列或仍有引用时保持
-队列项以 fail-safe 避免 UAF。
+排空由 draw-end 与世界态 `kFramePointLogicPre` 帧任务执行，逐项检查
+`g_projected_item_root` 控件 `data[0]` 与 `g_module_objects` 引用，只有无引用对象才调用
+`ITEMPOOL_Free`，满队列或仍有引用时保持队列项以 fail-safe 避免 UAF；帧任务使排空不再
+依赖背包界面被绘制（R-67），kept 容量、遍历上界与 `freed ≤ queue+custody` 校验见 R-68。
 
 ## 5. 未知与限制
 

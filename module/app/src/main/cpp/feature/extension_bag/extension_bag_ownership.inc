@@ -7,9 +7,16 @@ struct DeferredItemFree {
     uint32_t handle = 0;
     uint64_t generation = 0;
     uint64_t enqueued_at_ms = 0;
+    // 入队时的逻辑帧号（data_frame_count()；未就绪为 -1）。释放要求跨过帧边界，
+    // 避免调用方在同一帧内仍然使用该对象；帧号不可用时回退到 enqueued_at_ms 下限。
+    int64_t enqueued_frame = -1;
 };
 
 constexpr size_t kDeferredFreeQueueCapacity = 16;
+// 帧龄下限（毫秒）：仅覆盖帧号不可用的早期路径；正常路径按帧号判定跨帧。
+constexpr uint64_t kDeferredFreeMinResidenceMs = 50;
+// 池临界水位：池占用仅作诊断，状态跨越该值时记一次 WARN，不参与释放门禁。
+constexpr size_t kCriticalWatermark = 276;
 std::array<DeferredItemFree, kDeferredFreeQueueCapacity> g_deferred_free_queue{};
 size_t g_deferred_free_queue_head = 0;
 size_t g_deferred_free_queue_size = 0;
@@ -46,7 +53,7 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
         if (g_deferred_free_custody[index].item == item) return true;
     }
     const DeferredItemFree entry = {
-        item, handle, generation, deferred_free_now_ms_locked()};
+        item, handle, generation, deferred_free_now_ms_locked(), data_frame_count()};
     if (g_deferred_free_queue_size >= kDeferredFreeQueueCapacity) {
         // 正常调用方均持有 ownership ledger handle；该保管区容量覆盖 ledger
         // 上限，因此队列满不会把释放失败传播给事务或丢失对象指针。
@@ -106,18 +113,72 @@ bool deferred_item_referenced_locked(void* item) {
     return item_pointer_known_locked(item);
 }
 
+// 只读物品对象池占用。池 GOT 或基址未就绪（主菜单早期 / 池销毁重建）时返回 false，
+// 不阻塞任何调用路径；调用方据 false 跳过诊断。占用位取对象 +0x1c bit0。
+// GOT 槽内值是 &ITEMPOOL_pPool 而非池基址，须先校验槽值再解一层；校验失败说明
+// 重定位未就绪或版本不符，此时不盲扫，直接返回 false。池对象步长 0x28，池基址实测
+// 4 字节对齐（地址 ≡ 4 mod 8），8 字节检查会误拒。
+bool extension_bag_item_pool_usage(size_t* out_used, size_t* out_total) {
+    if (out_used == nullptr || out_total == nullptr) return false;
+    *out_used = 0;
+    *out_total = 0;
+    if (g_base == 0) return false;
+    const uint8_t* const* got_slot =
+        reinterpret_cast<const uint8_t* const*>(g_base + G_ITEMPOOL_BASE_GOT_VMA);
+    const uint8_t* got = *got_slot;
+    if (got != reinterpret_cast<const uint8_t*>(g_base + ITEMPOOL_POOL_VAR_VMA)) return false;
+    const uint8_t* pool = *reinterpret_cast<const uint8_t* const*>(got);
+    if (pool == nullptr || (reinterpret_cast<uintptr_t>(pool) & 0x3u) != 0) return false;
+    size_t used = 0;
+    for (size_t index = 0; index < ITEMPOOL_CAPACITY; ++index) {
+        const uint8_t flags = pool[index * ITEMPOOL_OBJECT_STRIDE + ITEMPOOL_USED_FLAG_OFFSET];
+        if ((flags & 1u) != 0) ++used;
+    }
+    *out_used = used;
+    *out_total = ITEMPOOL_CAPACITY;
+    return true;
+}
+
+// 触摸窗口与帧龄下限始终生效，逐对象引用检查始终生效。池水位不参与门禁：控件释放把
+// data 先清再入队时，moving 控件身份与未扫描 UI 持有无法被逐对象检查覆盖，放宽门禁
+// 会在该窗口释放仍被引用的对象。
 void drain_deferred_frees_locked() {
     if (object_touch_window_active_locked()) return;
-    const size_t count = g_deferred_free_queue_size + g_deferred_free_custody_size;
-    if (count == 0) return;
+    const size_t queue_size = g_deferred_free_queue_size;
+    const size_t custody_size = g_deferred_free_custody_size;
+    if (queue_size + custody_size == 0) return;
 
-    std::array<DeferredItemFree, kDeferredFreeQueueCapacity> kept{};
+    const int64_t current_frame = data_frame_count();
+    const uint64_t now_ms = deferred_free_now_ms_locked();
+    const auto residence_ready = [&](const DeferredItemFree& entry) {
+        const uint64_t elapsed =
+            now_ms >= entry.enqueued_at_ms ? now_ms - entry.enqueued_at_ms : 0;
+        return deferred_free_rules::residence_met(entry.enqueued_frame, current_frame, elapsed,
+                                                  kDeferredFreeMinResidenceMs);
+    };
+
+    // 第一段只遍历环形队列；custody 由第二段独立遍历，避免 custody 项被环形回绕重复访问。
+    std::array<DeferredItemFree,
+               deferred_free_rules::kept_capacity(kDeferredFreeQueueCapacity,
+                                                  ownership::kLedgerCapacity)>
+        kept{};
     size_t kept_count = 0;
     size_t freed_count = 0;
-    for (size_t offset = 0; offset < count; ++offset) {
+    bool logged_null_queue = false;
+    const size_t queue_bound =
+        deferred_free_rules::queue_iteration_bound(queue_size, custody_size);
+    for (size_t offset = 0; offset < queue_bound; ++offset) {
         const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
         const DeferredItemFree entry = g_deferred_free_queue[index];
-        if (deferred_item_referenced_locked(entry.item) || fn_itempool_free == nullptr) {
+        if (entry.item == nullptr) {
+            if (!logged_null_queue) {
+                VIRTBAG_LOG_ERROR("ERROR deferred free drain null queue item index=%zu", index);
+                logged_null_queue = true;
+            }
+            continue;
+        }
+        if (!residence_ready(entry) || deferred_item_referenced_locked(entry.item) ||
+            fn_itempool_free == nullptr) {
             kept[kept_count++] = entry;
             continue;
         }
@@ -127,16 +188,31 @@ void drain_deferred_frees_locked() {
     g_deferred_free_queue = {};
     g_deferred_free_queue_head = 0;
     g_deferred_free_queue_size = 0;
-    for (size_t index = 0; index < kept_count; ++index) {
-        g_deferred_free_queue[index] = kept[index];
+    // 队列回填上界是队列容量；第一段只产生队列项，越界即记账错误而非扩容。
+    if (kept_count <= kDeferredFreeQueueCapacity) {
+        for (size_t index = 0; index < kept_count; ++index) {
+            g_deferred_free_queue[index] = kept[index];
+        }
+        g_deferred_free_queue_size = kept_count;
+    } else {
+        VIRTBAG_LOG_ERROR("ERROR deferred free drain kept overflow queue kept=%zu capacity=%zu",
+                          kept_count, kDeferredFreeQueueCapacity);
     }
-    g_deferred_free_queue_size = kept_count;
 
     std::array<DeferredItemFree, ownership::kLedgerCapacity> kept_custody{};
     size_t kept_custody_count = 0;
-    for (size_t index = 0; index < g_deferred_free_custody_size; ++index) {
+    bool logged_null_custody = false;
+    for (size_t index = 0; index < custody_size; ++index) {
         const DeferredItemFree entry = g_deferred_free_custody[index];
-        if (deferred_item_referenced_locked(entry.item) || fn_itempool_free == nullptr) {
+        if (entry.item == nullptr) {
+            if (!logged_null_custody) {
+                VIRTBAG_LOG_ERROR("ERROR deferred free drain null custody item index=%zu", index);
+                logged_null_custody = true;
+            }
+            continue;
+        }
+        if (!residence_ready(entry) || deferred_item_referenced_locked(entry.item) ||
+            fn_itempool_free == nullptr) {
             kept_custody[kept_custody_count++] = entry;
             continue;
         }
@@ -148,8 +224,43 @@ void drain_deferred_frees_locked() {
     for (size_t index = 0; index < kept_custody_count; ++index) {
         g_deferred_free_custody[index] = kept_custody[index];
     }
-    VIRTBAG_LOG("deferred free drain count=%zu freed=%zu kept=%zu", count, freed_count,
-                kept_count + kept_custody_count);
+
+    if (!deferred_free_rules::freed_within_bound(freed_count, queue_size, custody_size)) {
+        VIRTBAG_LOG_ERROR(
+            "ERROR deferred free drain freed bound exceeded freed=%zu queue=%zu custody=%zu",
+            freed_count, queue_size, custody_size);
+    }
+    size_t pool_used = 0;
+    size_t pool_total = 0;
+    if (extension_bag_item_pool_usage(&pool_used, &pool_total)) {
+        VIRTBAG_LOG("deferred free drain count=%zu freed=%zu kept=%zu pool=%zu/%zu",
+                    queue_size + custody_size, freed_count, kept_count + kept_custody_count,
+                    pool_used, pool_total);
+    } else {
+        VIRTBAG_LOG("deferred free drain count=%zu freed=%zu kept=%zu",
+                    queue_size + custody_size, freed_count, kept_count + kept_custody_count);
+    }
+}
+
+// 世界态帧任务（kFramePointLogicPre）：在任意界面/世界状态按帧排空延迟释放队列，
+// 使排空不再依赖背包/装备界面被绘制（Scene_Draw_EQUIP draw-end）。try_lock 拿不到锁
+// 时直接返回，下帧重试，避免主线程等待 JNI/HTTP/lifecycle 线程持锁。
+bool extension_bag_deferred_free_tick(int64_t /*frame*/, void* /*ctx*/) {
+    if (g_deferred_free_queue_size + g_deferred_free_custody_size == 0) return true;
+    size_t pool_used = 0;
+    size_t pool_total = 0;
+    // 池占用仅作诊断，不参与门禁；仅记录 critical 状态的跨越沿，避免每帧刷屏。
+    const bool pool_known = extension_bag_item_pool_usage(&pool_used, &pool_total);
+    const bool critical = pool_known && pool_used >= kCriticalWatermark;
+    static bool s_critical_logged = false;
+    if (critical && !s_critical_logged) {
+        VIRTBAG_LOG_WARN("WARN pool critical used=%zu total=%zu", pool_used, pool_total);
+    }
+    s_critical_logged = critical;
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return true;
+    drain_deferred_frees_locked();
+    return true;
 }
 
 void log_ownership_audit_locked(const char* context) {

@@ -348,6 +348,14 @@ constexpr uintptr_t F_UISTORE_BUY_FIND_SLOT_CALL_2_VMA = 0xd2540;  // CopyAsNewU
 constexpr uintptr_t F_SAVE_SAVE_ITEM_VMA = 0x1274f0;    // int (uint8_t* out, void* item) SAVE_SaveItem：序列化物品到 out（u8 长度前缀 + 18B 头 + 4B×N 词缀；总长 ≤255，返回总字节）
 constexpr uintptr_t F_SAVE_LOAD_ITEM_VMA = 0x1278a0;    // int (const uint8_t* in, void** out, int* consumed) SAVE_LoadItem：ITEMPOOL_Allocate 重建物品；consumed=前缀+1=记录总长；失败返回 0 且 *out 不清空（调用方须先置空）
 constexpr uintptr_t F_ITEMPOOL_FREE_VMA = 0x108160;     // void (void*) ITEMPOOL_Free：释放物品对象回游戏对象池
+// ---- 物品对象池（ITEMPOOL）布局：池压力诊断 ----
+// GOT 槽，值为 &ITEMPOOL_pPool；池基址 = *(g_base + ITEMPOOL_POOL_VAR_VMA)，须两层解引用，
+// 直接把槽内值当池基址会把 libgame .bss 当池扫描（ITEMPOOL_Allocate 0x10810c adrp 0x2f6000 + ldr #0xc28）
+constexpr uintptr_t G_ITEMPOOL_BASE_GOT_VMA = 0x2f6000 + 0xc28;
+constexpr uintptr_t ITEMPOOL_POOL_VAR_VMA = 0x713510; // ITEMPOOL_pPool 变量地址；池基址 = *(g_base + 此偏移)
+constexpr size_t ITEMPOOL_OBJECT_STRIDE = 0x28;   // 池内每对象 40B
+constexpr size_t ITEMPOOL_CAPACITY = 300;         // 0x2ee0/0x28：ITEMPOOL_Create 0x10809c MEM_Malloc(0x2ee0)
+constexpr size_t ITEMPOOL_USED_FLAG_OFFSET = 0x1c; // 对象 +0x1c bit0=占用（ITEMPOOL_Allocate 0x108128 tbnz #0）
 constexpr uintptr_t G_TOUCH_STATE_VMA = 0x301000 + 0xcf8; // TouchHandle 全局状态（匿名 .bss）：+0x30=拖动中控件 +0x50=释放参数(+0x50=释放控件 +0x58=拖动源控件 +0x60=释放坐标)
 constexpr size_t TOUCH_STATE_PREFIX_SIZE = 0x10;           // TouchHandle_ResetMovingControl 清零前缀
 constexpr size_t TOUCH_STATE_ACTIVE_CTRL = 0x10;           // TouchHandle 当前激活控件

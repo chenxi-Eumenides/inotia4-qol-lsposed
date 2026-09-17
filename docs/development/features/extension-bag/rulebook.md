@@ -445,10 +445,10 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   `active=false` 也必须拒绝 `pending_release=true` 的重复释放并记录日志；ownership ledger
   耗尽时拒绝登记；触摸窗口内的释放请求必须进入定长延迟回收队列并以成功释放路径返回，
   排空前通过投影控件和对象缓存引用检查。
-- **为什么**：`module_slot_is_assignable_locked` 和 release guard 同时检查 token 状态；`retire_custody_item_locked` 在触摸窗口内只退 custody、不立即物理释放，队列排空由 draw-end 安全点执行（`extension_bag_ownership.inc`）。
+- **为什么**：`module_slot_is_assignable_locked` 和 release guard 同时检查 token 状态；`retire_custody_item_locked` 在触摸窗口内只退 custody、不立即物理释放，队列排空由 draw-end 与世界态 `kFramePointLogicPre` 帧任务执行（R-36、R-67，`extension_bag_ownership.inc`）。
 - **典型破坏方式**：确认使用尚未完成时释放对象，产生悬挂指针和 token mismatch；在无可用 handle 时继续登记对象。
-- **验证锚**：`deferred free enqueue`/`deferred free drain`；S-05、VM-29；源码
-  `extension_bag_ownership.inc:35-53,71-119,147-171,237-254`。
+- **验证锚**：`deferred free enqueue`/`deferred free drain`；S-05、VM-29、VM-B06；源码
+  `extension_bag_ownership.inc:48-82,96-119,141-240,286-311`。
 
 ### R-16 交换必须同步 descriptor/object/hash/handle
 
@@ -612,13 +612,17 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 - **规则一句话**：触摸窗口内的释放请求必须先进入延迟释放队列并返回成功，禁止直接调用
   `ITEMPOOL_Free`，也不得因触摸窗口活动或延迟队列已满而拒绝事务提交；队列满时将对象放入
   有界 custody 保管区，保持对象 live，事务继续成功。非触摸窗口的排空只在无投影控件和
-  逻辑槽引用时调用 `ITEMPOOL_Free`。
+  逻辑槽引用时调用 `ITEMPOOL_Free`，排空点包括 draw-end 与世界态 `kFramePointLogicPre`
+   帧任务（R-67），且排空项必须跨过入队帧边界（帧号不可用时回退 50ms 下限）。触摸窗口与
+   帧龄下限对排空始终生效；池占用 240/276 不参与门禁，仅作诊断，276 状态跨越时 WARN 一次。
+   逐对象引用检查始终生效。
 - **为什么**：触摸窗口仍可能由 moving 控件、projection 或逻辑槽持有对象；直接释放或
   拒绝 source release 会分别形成 UAF 风险或 `extension merge source release rejected`
-  事务失败。队列、队列满时的 custody 保管区、引用检查和 draw-end 排空见
-  `extension_bag_ownership.inc:35-53,71-119,147-171` 与 `extension_bag_render.inc:712-770`。
+  事务失败。队列、队列满时的 custody 保管区、引用检查和排空实现见
+  `extension_bag_ownership.inc:5-21,48-82,96-119,141-240`；世界态排空点与帧龄下限的
+  原因见 R-67，遍历上界与 kept 容量契约见 R-68。
 - **验证锚**：日志 `deferred free enqueue`/`deferred free queue full; custody retained`/
-  `deferred free drain`；S-05、VM-29。
+  `deferred free drain`（drain 行含 `pool=used/total`）；S-05、VM-29、VM-B06。
 
 ### R-37 卖出价格必须先收敛堆叠和数值边界
 
@@ -1216,6 +1220,44 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   丢弃与幂等）；既有 `test_place_plan`、`test_equip_bag`、`test_unequip_bag`、
   `test_virtual_bag_state` 保持通过（`host_tests: 2595 passed, 0 failed`）；真机 `VM-50`。
 
+### R-67 延迟释放排空必须由世界态帧锚点驱动
+
+- **规则一句话**：延迟释放队列的排空必须在世界态帧锚点 `kFramePointLogicPre` 的常驻帧任务
+  `extension_bag_deferred_free_tick` 中逐帧尝试，不得只绑定在背包/装备界面被绘制时的
+  draw-end 调用；该帧任务自持 `g_virtual_bag_mtx` 且用 `try_lock`，拿不到锁时直接返回并由
+  下一帧重试；注册是幂等的（`frame_task_add(..., interval=1, count=0)`），且不随扩展背包
+  开关关闭而注销（关闭态不再产生新滞留，但队列/custody 内仍可能有旧对象需要继续排空）。
+  排空项还必须跨过入队帧边界：`enqueued_frame` 有效时要求 `current_frame > enqueued_frame`，
+  帧号不可用（主菜单早期/world 未就绪）时回退到 `kDeferredFreeMinResidenceMs=50ms` 下限。
+  池占用只读读取（GOT 槽 → `&ITEMPOOL_pPool` → 池基址，两层解引用 + 布局守卫）仅用于诊断，
+  276 状态跨越时 WARN 一次，不参与排空门禁。
+- **为什么**：draw-end wrapper 挂在 `Scene_Draw_EQUIP` 的 `GRPX_End` 调用点，只有背包/装备
+  界面被绘制时才运行；世界里刷宝箱、切地图、人物属性界面等不绘制该界面，入队对象无法回收，
+  池占用单调上升到 300 槽后 `ITEMSYSTEM_CreateItem` 返回 NULL，游戏 `MakeEquipDetail`
+  `0x10dd60` 无判空解引用触发 SEGV。把排空挂到与界面无关的 `kFramePointLogicPre` 后，任意
+  世界/界面状态都能回收；draw-end 的 4 个原调用点保留（drain 幂等）。帧龄下限保证调用方
+  同帧仍可安全使用该对象（原版 `INVEN_SaveItemDirect` 同帧释放说明跨帧即安全，模块取更
+  保守的一帧延迟）；`try_lock` 失败不阻塞游戏主线程。
+- **验证锚**：日志 `deferred free frame task registered`、`deferred free drain`（含
+  `pool=used/total`）；VM-B06；源码 `extension_bag_ownership.inc:5-21,141-240,245-259`、
+  `extension_bag_public_runtime.inc:351-365`、`extension_bag_render.inc:729,735,747,777`。
+
+### R-68 drain 遍历上界必须与存储容量一一对应
+
+- **规则一句话**：`drain_deferred_frees_locked` 第一段只能遍历环形队列自身的
+  `g_deferred_free_queue_size` 个条目，custody 由第二段独立遍历；`kept` 回填缓冲容量必须
+  ≥ 队列容量 + 保管区容量（16+128=144），回填量必须 ≤ 队列容量；一次 drain 的释放数必须
+  ≤ `queue_size + custody_size`，不满足时记录 ERROR 而不是按越界数量继续统计；`item ==
+  nullptr` 的条目显式跳过，不计入释放或保留。
+- **为什么**：旧实现把 `queue_size + custody_size` 当作环形队列的遍历上界，custody 非空时
+  队首 custody 项被回绕二次访问，重复调用 `ITEMPOOL_Free`；`kept` 只有 16 槽而上界可达
+  144，回填会越界写栈。判据集中在纯头 `model/deferred_free_rules.h`
+  （`queue_iteration_bound`/`kept_capacity`/`freed_within_bound`/`residence_met`），drain
+  实现与 host 测试共用同一组函数。
+- **验证锚**：Host `deferred_free_rules_tests`（上界修复、`legacy_free_calls(16,14)=44`、
+  kept=144 回填不越界、帧龄真值表、入队去重、null 跳过、custody 不重复遍历）；源码
+  `extension_bag_ownership.inc:141-240`、`model/deferred_free_rules.h`。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；AGENTS.md 的通用禁止项不在此重复。通用依赖方向链接到
@@ -1279,7 +1321,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 ### 7.4 本册交付核对
 
-1. 本册规则总数：`R-01..R-66`，共 66 条。
+1. 本册规则总数：`R-01..R-68`，共 68 条。
 2. 当前规则包含：`R-26`（窗口袋与 view index 分离）、`R-27`（direct/GOT 成对恢复）、
    `R-28`（source protection 与 merge 解耦）、`R-29`（pending/journal 分域）、
    `R-30`（root 重建与 stale event 门禁）、`R-31`（扩展对象禁入原版移动链）、
@@ -1304,7 +1346,9 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
       `R-63`（佣兵徽章使用函数级 H-24 接管并复用原版 MakeMercenary 链，API 豁免 `fn_is_use`）、
       `R-64`（扩展详情按钮观察 hook 不得依赖面板偏移与按钮一一对应）、
       `R-65`（S2 写侧回写门控必须与读侧同源）、`R-66`（派生容量是有效槽范围，
-      写入/放置/统计与保存 prepare 校验以它为界）。
+      写入/放置/统计与保存 prepare 校验以它为界）、`R-67`（延迟释放排空由世界态
+      `kFramePointLogicPre` 帧任务驱动，禁止只绑定背包界面绘制；含跨帧帧龄下限）、
+      `R-68`（drain 遍历上界与 kept 容量一一对应，`freed ≤ queue+custody` 可观测）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、

@@ -82,6 +82,16 @@ target_include_directories(autosell_rules_tests PRIVATE
 target_compile_features(autosell_rules_tests PRIVATE cxx_std_17)
 add_test(NAME autosell_rules_tests COMMAND autosell_rules_tests)
 
+# 延迟释放排空纯规则 host 测试（遍历上界/容量/帧龄/去重/null/custody 不重复遍历；末尾追加）
+add_executable(deferred_free_rules_tests
+    test_deferred_free_rules.cpp
+)
+target_include_directories(deferred_free_rules_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(deferred_free_rules_tests PRIVATE cxx_std_17)
+add_test(NAME deferred_free_rules_tests COMMAND deferred_free_rules_tests)
+
 # 自动出售阶段 A 纯逻辑 host 测试（按帧去重 + 物品编码分支）
 add_executable(infra_data_tests
     test_infra_data.cpp

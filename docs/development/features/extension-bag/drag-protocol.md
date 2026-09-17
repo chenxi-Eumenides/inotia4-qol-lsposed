@@ -13,7 +13,7 @@
 >   （本册缩写 **INVEN**），引用格式 `UI:行号` / `INVEN:行号`；VMA 只在基线文件内核对。
 > - 模块代码行号按当前工作树核实（commit `19dbc77`）；后续修改代码
 >   后必须重新核对全部 `文件:行` 锚点。
-> - 规则交叉引用以规则册已冻结的 `R-01..R-36` 为准；本册不得另行定义编号。
+> - 规则交叉引用以规则册已冻结的 `R-01..R-68` 为准；本册不得另行定义编号。
 
 ## 1. 原版触摸输入事实基线
 
@@ -343,20 +343,28 @@ phase ∈ {Pressed, NativeMoving, TargetResolved, TransactionInFlight}
 
 ### 2.9 触摸窗口内的延迟释放
 
-所有权账本在 `extension_bag_ownership.inc:5-15` 定义 16 项定长延迟释放队列；入队时
-按对象去重，并保存 item、handle、generation 和入队时间
-（`extension_bag_ownership.inc:35-53`）。`retire_custody_item_locked` 在触摸窗口内把
+所有权账本在 `extension_bag_ownership.inc:5-21` 定义 16 项定长延迟释放队列；入队时
+按对象去重，并保存 item、handle、generation、入队时间和入队帧号
+（`extension_bag_ownership.inc:48-82`）。`retire_custody_item_locked` 在触摸窗口内把
 释放请求送入队列后完成 ownership release，不在该窗口直接调用 `ITEMPOOL_Free`
-（`extension_bag_ownership.inc:147-171`）；因此释放请求可以返回成功，事务继续提交。
+（`extension_bag_ownership.inc:286-311`）；因此释放请求可以返回成功，事务继续提交。
 
-draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
-（`extension_bag_render.inc:712-723`、`:725-729`、`:737-741`、`:768-770`）。排空逐项
-检查逻辑槽和投影控件 `data[0]` 引用（`extension_bag_ownership.inc:71-90`、`:93-119`），
-无引用时才调用 `ITEMPOOL_Free`；仍有引用的项保留在队列中。日志锚为
-`deferred free enqueue` 与 `deferred free drain`。
+排空由两处触发：draw-end（`extension_bag_render.inc:729,735,747,777`）与世界态
+`kFramePointLogicPre` 帧任务 `extension_bag_deferred_free_tick`
+（`extension_bag_ownership.inc:245-259`，注册于
+`extension_bag_public_runtime.inc:351-365`，`try_lock` 拿不到锁即下帧重试）。帧任务使
+排空不再依赖背包/装备界面被绘制：世界里刷宝箱、切地图、人物属性界面同样会排空
+（R-67）。排空逐项检查逻辑槽和投影控件 `data[0]` 引用
+（`extension_bag_ownership.inc:96-240`），无引用且已跨过入队帧边界（帧号不可用回退
+50ms 下限）时才调用 `ITEMPOOL_Free`；仍有引用的项保留在队列中。触摸窗口与帧龄下限始终
+生效；240/276 池占用不参与门禁，仅作诊断（276 跨越 WARN 一次），逐对象引用检查始终生效。
+只读池占用经 `extension_bag_item_pool_usage`（`extension_bag_ownership.inc:120-139`）读取：
+GOT 槽 → `&ITEMPOOL_pPool` → 池基址（两层解引用 + 布局守卫）。
 
-当前日志锚为 `deferred free enqueue` 与 `deferred free drain`；触摸窗口内释放请求进入队列，
-事务继续提交，排空阶段只释放无逻辑槽和投影控件引用的对象。
+日志锚为 `deferred free enqueue`、`deferred free queue full; custody retained`、
+`deferred free frame task registered` 与 `deferred free drain`（drain 行含
+`pool=used/total`）；触摸窗口内释放请求进入队列，事务继续提交，排空阶段只释放无逻辑槽和
+投影控件引用的对象。
 
 ## 3. 侵入面清单
 
@@ -393,7 +401,7 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 **当前验证状态**：
 
 - 页签命中先于网格解析；重叠坐标按页签意图路由，R1/R2 页签装备与跨页签分支可达。
-- 触摸窗口内释放请求进入延迟队列，由 draw-end 在引用检查通过后排空。
+- 触摸窗口内释放请求进入延迟队列，由世界态 `kFramePointLogicPre` 帧任务或 draw-end 在引用检查通过后排空（R-67）。
 - 真机已确认扩展拖动、扩展交换、消耗品使用、确认后使用、装备空槽、装备替换、扩展源
   →其它页签移动、背包类源→空页签装备和同袋 apply 分支均正常；原版四象限 VM-B01～VM-B04
   正常。apply 分支覆盖宝石镶嵌与强化卷轴强化，结果类型按目标类别分流：目标为装备类
@@ -428,7 +436,7 @@ draw-end 在触摸窗口关闭后调用 `drain_deferred_frees_locked`
 | moving 只在六条件全真时保留 | draw-end 不再逐帧写投影控件；无刷新事务定点同步受影响槽，stale moving 清 TouchState 与控件 flags | `rulebook.md` R-34；`verification-matrix.md` VM-B01～VM-B04 |
 | 吞掉 `0x18` 必须做原版等价清理且放锁派发 | 只清扩展 session 会保持 TouchState、moving/on 标志与选中控件，下一次点击可能进入幽灵拖拽；原版 UI 回调可重入模块，持锁派发会死锁 | `rulebook.md` R-33（`rulebook.md:552-562`）；实现 `extension_bag_input.inc:79-116` |
 | 页签与网格命中重叠时页签优先 | 当前页签矩形与网格行 y 区间重叠；先解析页签才能保留切袋意图，避免格子命中短路页签事务 | `rulebook.md` R-35；实现 `extension_bag_transaction.inc:791-812`；S-05/VM-29 |
-| 触摸窗口释放采用延迟队列 | 触摸窗口内直接释放会让事务在 source release 阶段拒绝；入队并延后到 draw-end 检查引用，使事务提交与对象安全释放分离 | `rulebook.md` R-36；实现 `extension_bag_ownership.inc:35-53,71-119,147-171`；`.tmp/tab-drop-260909/logcat-tagged.txt:8546-8548`；commit `3539918` |
+| 触摸窗口释放采用延迟队列 | 触摸窗口内直接释放会让事务在 source release 阶段拒绝；入队并在世界态 `kFramePointLogicPre` 帧任务或 draw-end 检查引用后再释放，使事务提交与对象安全释放分离，且排空不依赖背包界面被绘制 | `rulebook.md` R-36、R-67；实现 `extension_bag_ownership.inc:48-82,141-259`、`extension_bag_public_runtime.inc:351-365` |
 | 物理快照守卫只做「比较+恢复」，不承诺覆盖全部写点 | 它包住 `g_orig_event` 调用，无法观察不经过该调用的写入；问题 B 仍按「未解决+已布防」判定 | `rulebook.md` R-20（`rulebook.md:461-467`）；`control-plane.md` §4.1 |
 | R-27/R-26 窗口袋号与 direct/GOT 成对恢复；R-30 root 重建门禁；R-19 generation 递增 | 视图切换与控件重建后失效事件不得提交到当前视图；具体正文的编号引用归规则册 §5 | `rulebook.md:454-466`、`503-537`；本册 §2.2/§2.4 为实现锚 |
 
