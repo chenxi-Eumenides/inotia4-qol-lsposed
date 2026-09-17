@@ -5,6 +5,7 @@
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
+#include "features/attribute_range/plugin.h"
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
 #include "features/simple_mode/plugin.h"
@@ -138,6 +139,10 @@ bool assembly_init() {
     }
     if (!register_plugin(features::quest::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: quest registration failed");
+        return false;
+    }
+    if (!register_plugin(features::attribute_range::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_range registration failed");
         return false;
     }
 

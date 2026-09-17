@@ -272,6 +272,128 @@ bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
     return true;
 }
 
+bool plugin_has_gate(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (plugin.resources[i].gate != nullptr) return true;
+    }
+    return false;
+}
+
+// ---- 能力注册与撤销级联（§3.4.1 / §3.4.4）----
+
+enum class CapRegistration : uint8_t { kNone = 0, kRegistered = 1, kRevoking = 2 };
+CapRegistration g_cap_registration[kMaxPlugins];
+bool g_cascade_visited[kMaxPlugins];
+
+bool plugin_provides_capability(const contracts::PluginDescriptor& plugin) {
+    return plugin.provides_count > 0 && plugin.provides != nullptr;
+}
+
+// 进入 enabled 时注册（§3.4.4；幂等：已注册跳过）。
+void register_provided_capabilities(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (!plugin_provides_capability(plugin)) return;
+    if (g_cap_registration[index] == CapRegistration::kRegistered) return;
+    for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
+        if (ref.id == nullptr || ref.iface == nullptr) continue;
+        // 重复注册（同 id）返回 false，视为已注册；容量满/非法同样只记录、不阻断。
+        infra::register_capability(infra::CapabilityProvision{ref.id, ref.version, ref.iface});
+    }
+    g_cap_registration[index] = CapRegistration::kRegistered;
+}
+
+void unregister_provided_capabilities(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (!plugin_provides_capability(plugin)) return;
+    for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        if (plugin.provides[i].id != nullptr) {
+            infra::unregister_capability(plugin.provides[i].id);
+        }
+    }
+    g_cap_registration[index] = CapRegistration::kNone;
+}
+
+void cascade_dependents(const char* capability_id);
+
+// 级联停用 required 消费者（§3.4.1 第 3 条）：关消费者门禁 → 释放资源 →
+// 递归撤销其自身提供的能力 → 置 installed_disabled + reason=cascade_stopped。
+void cascade_stop_plugin(uint32_t index) {
+    if (index >= g_plugin_count || g_cascade_visited[index]) return;
+    g_cascade_visited[index] = true;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (plugin.on_disabled != nullptr) {
+        contracts::PluginContext ctx{};
+        plugin.on_disabled(ctx);
+    }
+    // 释放消费者资源：走同步回滚路径（§3.4.1 允许事务或同步回滚）。
+    for (uint32_t r = plugin.resources_count; r > 0; --r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r - 1];
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            revoke_resource(claim.id, g_install_deps);
+        }
+    }
+    // 消费者自身提供的能力：注销并继续级联（递归即逆拓扑序）。
+    if (g_cap_registration[index] == CapRegistration::kRegistered) {
+        g_cap_registration[index] = CapRegistration::kRevoking;
+        for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+            cascade_dependents(plugin.provides[i].id);
+        }
+        unregister_provided_capabilities(index);
+    }
+    infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
+                         "cascade_stopped");
+}
+
+// 依赖失效级联：requires 命中 → 逆拓扑停用；optional_requires 命中 → degraded 标记。
+void cascade_dependents(const char* capability_id) {
+    if (capability_id == nullptr) return;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        bool required = false;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            if (plugin.requires[r].id != nullptr &&
+                std::strcmp(plugin.requires[r].id, capability_id) == 0) {
+                required = true;
+                break;
+            }
+        }
+        if (required) {
+            infra::FeatureStatus st{};
+            if (infra::status_get(plugin.id, &st) &&
+                (st.state == infra::FeatureState::kEnabled ||
+                 st.state == infra::FeatureState::kInstalledDisabled)) {
+                cascade_stop_plugin(i);
+            }
+            continue;
+        }
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            if (plugin.optional_requires[o].id != nullptr &&
+                std::strcmp(plugin.optional_requires[o].id, capability_id) == 0) {
+                infra::status_set_degraded(plugin.id, true);
+            }
+        }
+    }
+}
+
+// 提供者撤销（§3.4.4）：关闭提供者门禁（撤销期拒绝新调用）→ 级联 → 注销。
+void begin_revoke_provider(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (!plugin_provides_capability(plugin)) return;
+    if (plugin.on_disabled != nullptr) {
+        contracts::PluginContext ctx{};
+        plugin.on_disabled(ctx);
+    }
+    if (g_cap_registration[index] != CapRegistration::kRegistered) return;
+    g_cap_registration[index] = CapRegistration::kRevoking;
+    for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        cascade_dependents(plugin.provides[i].id);
+    }
+    unregister_provided_capabilities(index);
+}
+
 }  // namespace
 
 bool register_plugin(const contracts::PluginDescriptor& plugin) {
@@ -415,6 +537,8 @@ int install_all(const HostDeps& deps) {
             enabled, nullptr);
         if (enabled) {
             if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+            // §3.4.4：进入 enabled 时注册能力（提供者门禁已由 on_enabled 打开）。
+            register_provided_capabilities(i);
         } else {
             if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
         }
@@ -436,11 +560,22 @@ uint32_t sync_gates() {
         // 隔离或在途事务期间不参与门禁监督，避免与事务中间态冲突。
         if (plugin_isolated(plugin)) continue;
         if (plugin_has_active_tx(plugin.id)) continue;
+        // 级联停用不自动恢复（§3.4.1 第 6 条）：保留显式 enable 路径。
+        if (status.error != nullptr && std::strcmp(status.error, "cascade_stopped") == 0) {
+            continue;
+        }
+        if (!plugin_has_gate(plugin)) continue;  // 无带 gate 资源 → 不参与门禁监督
+
+        // 撤销先于关资源（§3.4.4）：provider 由 enabled 转 disable 时先关提供者门禁并级联注销。
+        if (status.state == infra::FeatureState::kEnabled && !plugin_all_gates_want(plugin) &&
+            plugin_provides_capability(plugin)) {
+            begin_revoke_provider(i);
+        }
+
         bool has_gate = false;
         bool all_want = true;
         bool mechanism_failed = false;
         sync_plugin_resources(plugin, &has_gate, &all_want, &mechanism_failed);
-        if (!has_gate) continue;  // 无带 gate 资源 → 不参与门禁监督
         if (mechanism_failed) {
             // 机制门禁应用失败：保留占用并隔离，插件置 failed。
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
@@ -457,7 +592,9 @@ uint32_t sync_gates() {
         infra::status_update(plugin.id, target_state, target_enabled, nullptr);
         if (target_enabled) {
             if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-        } else {
+            register_provided_capabilities(i);
+        } else if (!plugin_provides_capability(plugin)) {
+            // provider 的 on_disabled 已由 begin_revoke_provider 调用（避免重复）。
             if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
         }
         ++changed;
@@ -497,6 +634,8 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 return false;
             }
             const uint32_t index = plugin_index_of(plugin->id);
+            // §3.4.4：deactivate 走 disable 撤销路径——关提供者门禁 → 级联 → 注销。
+            begin_revoke_provider(index);
             for (LifecycleTx& slot : g_lifecycle_txs) {
                 if (slot.in_use) continue;
                 slot.in_use = true;
@@ -610,6 +749,8 @@ uint32_t lifecycle_step() {
                     enabled, nullptr);
                 if (enabled) {
                     if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+                    // §3.4.4：install 成功后进入 enabled 时注册能力。
+                    register_provided_capabilities(slot.plugin_index);
                 } else {
                     if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
                 }
@@ -654,6 +795,10 @@ void plugin_registry_reset_for_test() {
     g_install_deps = HostDeps{};
     for (LifecycleTx& slot : g_lifecycle_txs) {
         slot = LifecycleTx{};
+    }
+    for (uint32_t i = 0; i < kMaxPlugins; ++i) {
+        g_cap_registration[i] = CapRegistration::kNone;
+        g_cascade_visited[i] = false;
     }
 }
 

@@ -10,13 +10,13 @@
 #include "core/native/save_enter.h"
 
 #include "data/native/item_class.h"
-#include "feature/attribute_range/attribute_range.h"
-#include "feature/attribute_range/game_ui_attr_range.h"
+#include "contracts/attribute_range.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/ui/module_text.h"
 #include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_symbols.h"
+#include "infra/capabilities.h"
 
 #include <atomic>
 #include <cstddef>
@@ -81,17 +81,28 @@ bool item_is_jewel(void* item) {
     return fn_is_jewel(static_cast<int>(item_category(item))) != 0;
 }
 
-// 读宝石数值位域并按 attr_range classify 判定当前档；探测失败返回 false。
+// 过渡期消费方式：每次调用按能力查找 attr_range 提供者，不缓存指针跨帧使用。
+// 消费者迁移为插件后改声明式 requires（B/C 阶段）。
+const qol::contracts::AttrRangeApi* attr_range_api() {
+    return static_cast<const qol::contracts::AttrRangeApi*>(qol::infra::require_capability(
+        qol::contracts::kAttrRangeCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMinor)}));
+}
+
+// 读宝石数值位域并按 attr_range classify 判定当前档；能力不可用/探测失败返回 false。
 bool jewel_tier(void* item, attr_range::Tier* out_tier, int* out_value, int* out_min,
                 int* out_max) {
     if (item == nullptr || out_tier == nullptr) return false;
+    const qol::contracts::AttrRangeApi* api = attr_range_api();
+    if (api == nullptr || api->probe_jewel_range == nullptr) return false;
     const uint32_t word =
         *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + I_JEWEL_VALUE_WORD);
     const int type = static_cast<int>((word >> JEWEL_TYPE_SHIFT) & JEWEL_TYPE_MASK);
     const int value = static_cast<int>(word & JEWEL_VALUE_MASK);
     int min = 0;
     int max = 0;
-    if (!attr_range_probe_jewel_range(type, item, &min, &max)) return false;
+    if (!api->probe_jewel_range(type, item, &min, &max)) return false;
     *out_tier = attr_range::classify(value, min, max);
     if (out_value != nullptr) *out_value = value;
     if (out_min != nullptr) *out_min = min;
@@ -526,7 +537,9 @@ int make_item(int32_t mix_type, void** out_item) {
     const int value = static_cast<int>(word & JEWEL_VALUE_MASK);
     int min = 0;
     int max = 0;
-    if (!attr_range_probe_jewel_range(type, item, &min, &max)) return 1;
+    const qol::contracts::AttrRangeApi* api = attr_range_api();
+    if (api == nullptr || api->probe_jewel_range == nullptr) return 1;  // 降级：不扣料不生成
+    if (!api->probe_jewel_range(type, item, &min, &max)) return 1;
     attr_range::Tier target = attr_range::Tier::Grey;
     int new_value = 0;
     const UpgradeResult result =

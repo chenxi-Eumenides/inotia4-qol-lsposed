@@ -4,9 +4,10 @@
 
 #include "data/native/game_symbols.h"
 #include "data/native/item_class.h"
-#include "feature/attribute_range/attribute_range.h"
-#include "feature/attribute_range/game_ui_attr_range.h"
+#include "contracts/attribute_range.h"
+#include "domains/attribute_range/rules.h"
 #include "game_access.h"
+#include "infra/capabilities.h"
 
 #include <cstdint>
 
@@ -58,17 +59,22 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
         out->jewel_tier = category - kJewelCategoryFirst;
 
         // 宝石属性范围：独立宝石自身位域 item+I_COUNT 的 bits0-10=属性值、
-        // bits18-23=属性类型。复用 attribute_range feature 探测该属性值的随机区间
-        // [X, 2X]（不复制其内部实现）。探测未安装/失败时保持 -1（fail-closed，
-        // gemRange 规则不命中，不得默认 0 触发误售）。
+        // bits18-23=属性类型。经 attr_range 能力探测该属性值的随机区间 [X, 2X]。
+        // 过渡期消费方式：每次调用按能力查找（不缓存指针跨帧）；不可用/撤销中/探测失败
+        // 时保持 -1（fail-closed，gemRange 规则不命中，不得默认 0 触发误售）。
         const uint32_t jewel_bits = *reinterpret_cast<uint32_t*>(item + I_COUNT);
         const int jewel_value = static_cast<int>(jewel_bits & 0x7FF);
         const int jewel_attr_type = static_cast<int>((jewel_bits >> 18) & 0x3F);
-        if (attr_range_ready()) {
+        const auto* attr_api = static_cast<const qol::contracts::AttrRangeApi*>(
+            qol::infra::require_capability(
+                qol::contracts::kAttrRangeCapabilityId,
+                QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMajor),
+                                static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMinor)}));
+        if (attr_api != nullptr && attr_api->probe_jewel_range != nullptr) {
             int range_min = 0;
             int range_max = 0;
-            if (attr_range_probe_jewel_range(jewel_attr_type, ref.native_item, &range_min,
-                                             &range_max)) {
+            if (attr_api->probe_jewel_range(jewel_attr_type, ref.native_item, &range_min,
+                                            &range_max)) {
                 out->jewel_percentile = attr_range::percentile(jewel_value, range_min, range_max);
             }
         }

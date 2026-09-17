@@ -18,6 +18,10 @@ struct HookEntrySymbol {
 constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_CHAR_ADD_DAMAGE_VMA", F_CHAR_ADD_DAMAGE_VMA},
     {"F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA", F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA},
+    // 属性显示范围：详情渲染三点（MATH_GetRandom 截获 / 选项行改写 / 构造入口缓存）。
+    {"F_MATH_GET_RANDOM_VMA", F_MATH_GET_RANDOM_VMA},
+    {"F_UIDESC_ADD_OPTION_VMA", F_UIDESC_ADD_OPTION_VMA},
+    {"F_UIDESC_MAKE_ITEM_VMA", F_UIDESC_MAKE_ITEM_VMA},
 };
 
 // 解析可安装 hook 的入口地址。

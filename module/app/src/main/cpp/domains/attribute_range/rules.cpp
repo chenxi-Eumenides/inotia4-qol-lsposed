@@ -1,4 +1,4 @@
-#include "feature/attribute_range/attribute_range.h"
+#include "domains/attribute_range/rules.h"
 
 #include <cstdint>
 

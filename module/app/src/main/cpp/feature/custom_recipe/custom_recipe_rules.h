@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "feature/attribute_range/attribute_range.h"
+#include "domains/attribute_range/rules.h"
 
 // 自定义合成配方「提升一档」纯逻辑（custom-craft-recipe §4.6 / §2.4）。
 //

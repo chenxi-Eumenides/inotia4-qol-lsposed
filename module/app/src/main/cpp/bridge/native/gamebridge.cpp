@@ -4,7 +4,6 @@
 #include "core/native/transition_dispatch.h"
 #include "feature/autosell/autosell_config.h"
 #include "feature/patch/native_inventory_hook.h"
-#include "feature/attribute_range/game_ui_attr_range.h"
 #include "feature/autosell/autosell_scan.h"
 #include "feature/autosell/autosell_store.h"
 #include "feature/save_backup/save_backup.h"
@@ -49,7 +48,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     bool ok = bridge_init();
     if (ok) {
         inventory_native_hook_install_if_ready();
-        attr_range_ui_install_if_ready();
+        // 属性显示范围已迁移为 attribute_range 插件（assembly 注册，宿主张成资源与能力）。
         // 模块自定义文本层：独占 MEMORYTEXT_GetText 热点 hook（全库唯一 owner），必须在
         // 任何「标记文本作用域」的功能之前安装 —— 否则消费者标了窗口也没有替换者。
         module_text::module_text_install_if_ready();

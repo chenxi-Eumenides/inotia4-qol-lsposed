@@ -50,7 +50,7 @@ add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 
 add_executable(attribute_range_tests
     test_attribute_range.cpp
-    ${CPP_DIR}/feature/attribute_range/attribute_range.cpp
+    ${CPP_DIR}/domains/attribute_range/rules.cpp
 )
 target_include_directories(attribute_range_tests PRIVATE
     ${CPP_DIR}
@@ -61,7 +61,7 @@ add_test(NAME attribute_range_tests COMMAND attribute_range_tests)
 # 自定义合成配方纯逻辑 host 测试（档位互逆 / 目录映射 / 表注入字节；末尾追加）
 add_executable(custom_recipe_tests
     test_custom_recipe.cpp
-    ${CPP_DIR}/feature/attribute_range/attribute_range.cpp
+    ${CPP_DIR}/domains/attribute_range/rules.cpp
     ${CPP_DIR}/feature/custom_recipe/custom_recipe_rules.cpp
     ${CPP_DIR}/feature/custom_recipe/custom_recipe_catalog.cpp
     ${CPP_DIR}/feature/custom_recipe/custom_recipe_table.cpp
@@ -335,6 +335,35 @@ target_compile_features(plugin_lifecycle_tests PRIVATE cxx_std_17)
 set_target_properties(plugin_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(plugin_lifecycle_tests PRIVATE Threads::Threads)
 add_test(NAME plugin_lifecycle_tests COMMAND plugin_lifecycle_tests)
+
+# P4 阶段 A3：能力时序与撤销级联 host 测试（真实 registry/capabilities/status/config，末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
+add_executable(capability_lifecycle_tests
+    test_capability_lifecycle.cpp
+    test_stubs.cpp
+    ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/hooks/registry.cpp
+    ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/hooks/transaction.cpp
+    ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/patch/claims.cpp
+    ${CPP_DIR}/patch/instr_patch.cpp
+    ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(capability_lifecycle_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(capability_lifecycle_tests PRIVATE cxx_std_17)
+set_target_properties(capability_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(capability_lifecycle_tests PRIVATE Threads::Threads)
+add_test(NAME capability_lifecycle_tests COMMAND capability_lifecycle_tests)
 
 # P4 阶段 A1：patch/ 机制层 host 测试（claims + instr_patch + game patch 点，假原语，末尾追加）
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。

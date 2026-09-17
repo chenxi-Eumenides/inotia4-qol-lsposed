@@ -70,10 +70,12 @@ struct CapabilityRequirement {
     QolVersionRange range;
 };
 
-// 能力提供声明：仅声明用途；运行期注册仍走 infra/capabilities.h。
+// 能力提供声明：id + 版本 + 接口指针（§3.3）。宿主在插件进入 enabled 时按本声明
+// 调 infra/capabilities 注册；消费者经 require_capability 取得同一 iface。
 struct CapabilityProvisionRef {
     const char* id;
     QolVersion version;
+    const void* iface;
 };
 
 // 资源声明（= §4.3 ResourceDescriptor）：插件只声明，机制由宿主通用执行。

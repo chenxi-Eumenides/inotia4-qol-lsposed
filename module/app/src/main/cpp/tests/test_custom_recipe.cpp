@@ -2,7 +2,7 @@
 #include "feature/custom_recipe/custom_recipe_rules.h"
 #include "feature/custom_recipe/custom_recipe_table.h"
 
-#include "feature/attribute_range/attribute_range.h"
+#include "domains/attribute_range/rules.h"
 
 #include <cstdint>
 #include <cstdio>

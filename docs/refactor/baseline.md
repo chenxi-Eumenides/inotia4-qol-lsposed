@@ -20,7 +20,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 8 |
+| `contracts` | 9 |
+| `domains/attribute_range` | 2 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
 | `domains/inventory` | 9 |
@@ -44,12 +45,12 @@
 | `features/special_equip` | 2 |
 | `features/ui` | 33 |
 | `features/world_teleport` | 4 |
-| `game` | 29 |
+| `game` | 31 |
 | `hooks` | 6 |
 | `host` | 25 |
 | `infra` | 40 |
 | `patch` | 7 |
-| **合计** | **286** |
+| **合计** | **291** |
 
 ### 1.2 迁移期映射摘要
 
@@ -130,7 +131,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 137 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 139 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -147,8 +148,8 @@
 | `features/extension_bag` | `contracts` | 7 |
 | `host` | `contracts` | 7 |
 | `host` | `features/ui` | 7 |
+| `features/autosell` | `infra` | 6 |
 | `features/ui` | `patch` | 6 |
-| `host` | `features/autosell` | 6 |
 
 ### 2.2 include 环
 
@@ -231,19 +232,18 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 31 个 / 文件 20 个 / 去重符号 11 个 / 无法归属 16 个。
+扫描合计：安装点 30 个 / 文件 19 个 / 去重符号 10 个 / 无法归属 16 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 8 | 11 | 6 |
+| entry hook | 7 | 10 | 5 |
 | call patch | 4 | 9 | 6 |
 | ptr slot | 9 | 11 | 2 |
 
-去重符号 → 文件（前 11 条，共 11 条；`--verbose` 列全部）：
+去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_INVEN_FIND_SAVE_SLOT_VMA` → `feature/patch/game_patch_core.inc`
-- `F_MATH_GET_RANDOM_VMA` → `feature/attribute_range/game_ui_attr_range.cpp`
 - `F_MEMORYTEXT_GET_TEXT_VMA` → `feature/ui/module_text.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
@@ -265,13 +265,12 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 10 个）与已迁移 `features/*`（3 个）共 13 个域。
+旧 `feature/*`（待迁移 9 个）与已迁移 `features/*`（4 个）共 13 个域。
 
-### 6.1 旧 `feature/*`（待迁移，10）
+### 6.1 旧 `feature/*`（待迁移，9）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `attribute_range` | `features/attribute_range` | 4 |
 | `autosell` | `features/autosell` | 10 |
 | `craft_ui` | `features/craft_ui` | 4 |
 | `custom_recipe` | `features/custom_recipe` | 8 |
@@ -282,10 +281,11 @@
 | `ui` | `features/ui` | 33 |
 | `world_teleport` | `features/world_teleport` | 4 |
 
-### 6.2 已迁移 `features/*`（3）
+### 6.2 已迁移 `features/*`（4）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
+| `attribute_range` | `features/attribute_range` | 4 |
 | `push_all` | `features/push_all` | 6 |
 | `quest` | `features/quest` | 4 |
 | `simple_mode` | `features/simple_mode` | 6 |
