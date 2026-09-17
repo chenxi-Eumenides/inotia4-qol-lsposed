@@ -74,18 +74,19 @@ target_sources(gamebridge PRIVATE
     data/native/item_class.cpp
 )
 
-# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（末尾追加，不改上方既有行）
+# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（P4-B3 迁移至 features/autosell）
 target_sources(gamebridge PRIVATE
-    feature/autosell/autosell_rules.cpp
-    feature/autosell/autosell_config.cpp
-    feature/autosell/autosell_view.cpp
-    feature/autosell/autosell_scan.cpp
+    features/autosell/rules.cpp
+    features/autosell/config.cpp
+    features/autosell/view.cpp
+    features/autosell/scan.cpp
+    features/autosell/plugin.cpp
     bridge/native/gamebridge_autosell.cpp
 )
 
-# 自动出售按存档配置 sidecar（末尾追加，不改上方既有行）
+# 自动出售按存档配置 sidecar（P4-B3 迁移至 features/autosell）
 target_sources(gamebridge PRIVATE
-    feature/autosell/autosell_store.cpp
+    features/autosell/store.cpp
 )
 
 # 自动出售 UI 原型：背包页入口按钮 + 只读占位面板（末尾追加，不改上方既有行）

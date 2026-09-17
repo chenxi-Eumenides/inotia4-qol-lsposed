@@ -6,20 +6,19 @@
 // 处置：autosell_build_view -> should_sell -> NoSell 预过滤
 //       -> inventory_trade::sell(bag, slot, ref.native_item, "autosell")（I-1 身份复核）。
 
-#include "feature/autosell/autosell_scan.h"
+#include "features/autosell/scan.h"
 
 #include "core/native/extension_bag_port.h"
-#include "core/native/frame_task.h"
 #include "core/native/inventory_trade.h"
 #include "core/native/qol_log.h"
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
-#include "data/native/game_symbols.h"
-#include "feature/autosell/autosell_config.h"
-#include "feature/autosell/autosell_store.h"
-#include "feature/autosell/autosell_view.h"
+#include "features/autosell/config.h"
+#include "features/autosell/store.h"
+#include "features/autosell/view.h"
 #include "game_access.h"
 #include "game_state.h"
+#include "infra/scheduler.h"
 
 #include <atomic>
 #include <cstdint>
@@ -34,7 +33,7 @@ constexpr int kSlotCount = 16;
 
 std::mutex g_scan_mtx;
 std::mutex g_task_mtx;
-FrameTaskId g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
+qol::infra::FrameTaskId g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
 std::atomic<bool> g_global_enabled{false};  // 全局开关；JVM 线程写、主线程读
 std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置位）；主线程写
 
@@ -132,7 +131,7 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
     }
 }
 
-// frame_task 回调：每次调用现取运行时配置，无跨帧状态；60 帧节流由 frame_task 的
+// scheduler 回调：每次调用现取运行时配置，无跨帧状态；60 帧节流由 scheduler 的
 // interval 负责。返回 false = 任务完成（自动注销）；本任务无限期运行，恒返回 true。
 bool autosell_tick(int64_t frame, void* /*ctx*/) {
     // 全局开关防御：关闭态不应有任务存在；即使任务删除存在竞态也直接跳过。
@@ -150,7 +149,7 @@ bool autosell_tick(int64_t frame, void* /*ctx*/) {
 void remove_task_if_any() {
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task == 0) return;
-    frame_task_remove(g_task);
+    qol::infra::scheduler_remove(g_task);
     g_task = 0;
     QOL_LOG_INFO(QolDomain::kAutosell, "task removed");
 }
@@ -167,8 +166,8 @@ void sync_task() {
     }
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task != 0) return;
-    g_task = frame_task_add(kFramePointRenderPre, &autosell_tick, nullptr,
-                            kAutoSellScanIntervalFrames, 0);
+    g_task = qol::infra::scheduler_add(qol::infra::FramePoint::kRenderPre, &autosell_tick,
+                                       nullptr, kAutoSellScanIntervalFrames, 0);
     QOL_LOG_INFO(QolDomain::kAutosell, "task registered id=%llu",
                         static_cast<unsigned long long>(g_task));
 }
@@ -227,4 +226,10 @@ void autosell_register_save_enter() {
 void autosell_register_save_exit() {
     // 幂等：world -> 主菜单时若已有任务即删除。
     save_exit_register(&autosell_on_save_exit, nullptr);
+}
+
+void autosell_unregister_save_callbacks() {
+    // 与注册成对（插件 deactivate）；legacy 设施迁移（B4）后随设施调整。
+    save_enter_unregister(&autosell_on_save_enter, nullptr);
+    save_exit_unregister(&autosell_on_save_exit, nullptr);
 }

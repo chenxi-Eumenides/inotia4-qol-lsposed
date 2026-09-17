@@ -1,13 +1,14 @@
 // gamebridge_autosell.cpp —— 自动出售 JNI 薄层（阶段 B）。
 //
-// 仅做 JNI 参数/返回值转换；配置与状态逻辑在 feature/autosell/autosell_config.*。
+// 仅做 JNI 参数/返回值转换；配置与状态逻辑在 features/autosell/*。
 
 #include "gamebridge_internal.h"
 
-#include "feature/autosell/autosell_config.h"
-#include "feature/autosell/autosell_scan.h"
-#include "feature/autosell/autosell_store.h"
-#include "feature/ui/game_ui_autosell.h"
+#include "contracts/commands.h"
+#include "features/autosell/config.h"
+#include "features/autosell/scan.h"
+#include "features/autosell/store.h"
+#include "infra/commands.h"
 
 namespace {
 
@@ -35,7 +36,7 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     cfg.socket = clamp_range(static_cast<int>(socket), 0, 16);
     cfg.gem_tier = clamp_range(static_cast<int>(gemTier), 0, 5);
     cfg.gem_range = clamp_range(static_cast<int>(gemRange), 0, 5);
-    // 特殊类型入参为 JSON 数组文本（如 ["dice"]）；null/坏串 -> 空集（名字->位表在 autosell_store.h）。
+    // 特殊类型入参为 JSON 数组文本（如 ["dice"]）；null/坏串 -> 空集（名字->位表在 features/autosell/store.h）。
     const char* special_chars =
         specialJson != nullptr ? env->GetStringUTFChars(specialJson, nullptr) : nullptr;
     cfg.special_mask = autosell_special_parse_array(special_chars);
@@ -54,10 +55,17 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboolean enabled) {
-    // 全局开关同时驱动：扫描任务注册/删除 + 背包页入口按钮/面板门控。
-    autosell_set_global_enabled(enabled == JNI_TRUE);
-    autosell_ui_set_enabled(enabled == JNI_TRUE);
-    return JNI_TRUE;
+    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
+    // 写配置；autosell 插件的 on_enabled/on_disabled 与配置事件据此同步扫描任务与 UI 门控。
+    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetSimpleModeEnabled 同构）。
+    const qol::contracts::QolCommand command{
+        qol::contracts::kCommandSetConfigBool,
+        "plugin.autosell.enabled",
+        enabled == JNI_TRUE ? 1 : 0,
+    };
+    qol::contracts::QolCommandTicket ticket = 0;
+    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
+    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

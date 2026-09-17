@@ -74,7 +74,7 @@ add_test(NAME custom_recipe_tests COMMAND custom_recipe_tests)
 
 add_executable(autosell_rules_tests
     test_autosell_rules.cpp
-    ${CPP_DIR}/feature/autosell/autosell_rules.cpp
+    ${CPP_DIR}/features/autosell/rules.cpp
 )
 target_include_directories(autosell_rules_tests PRIVATE
     ${CPP_DIR}

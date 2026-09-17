@@ -24,19 +24,20 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 7 | 326 |
+| `contracts/` | 8 | 372 |
 | `game/` | 14 | 935 |
 | `infra/` | 20 | 1385 |
 | `hooks/` | 8 | 1280 |
 | `patch/` | 4 | 285 |
 | `domains/` | 2 | 111 |
-| `features/` | 34 | 2168 |
-| `host/` | 12 | 1775 |
-| **合计** | **101** | **8265** |
+| `features/` | 46 | 3319 |
+| `host/` | 12 | 1781 |
+| **合计** | **114** | **9468** |
 
 ### 已迁移插件（`features/*`）
 
 - `features/attribute_range/`：4 文件 / 303 行
+- `features/autosell/`：12 文件 / 1151 行
 - `features/inventory_hooks/`：2 文件 / 98 行
 - `features/push_all/`：6 文件 / 267 行
 - `features/quest/`：4 文件 / 162 行
@@ -48,14 +49,14 @@
 ### CTest target 分类
 
 - 全仓 target 总数：**32**
-- 新架构/已迁移：**19**（机制/宿主 14 + 已迁移功能 5）
-- legacy：**13**
+- 新架构/已迁移：**21**（机制/宿主 14 + 已迁移功能 7）
+- legacy：**11**
 
-新架构/已迁移（19）：
+新架构/已迁移（21）：
 - 机制/宿主（14）：`capability_lifecycle_tests`、`hooks_dispatch_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
-- 已迁移功能（5）：`attribute_range_tests`、`module_text_tests`、`push_all_rules_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
+- 已迁移功能（7）：`attribute_range_tests`、`autosell_rules_tests`、`autosell_store_tests`、`module_text_tests`、`push_all_rules_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
 
-legacy（13）：`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`native_choice_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_warehouse_validate_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
+legacy（11）：`custom_recipe_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`native_choice_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_warehouse_validate_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
 <!-- END GENERATED:stats -->
 
 ## 人工导航

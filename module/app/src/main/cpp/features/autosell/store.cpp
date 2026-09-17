@@ -4,10 +4,10 @@
 // + 缓存 jclass/jmethodID；IO 在 Kotlin ModuleSaveStore（AtomicFile）侧完成。
 // 与扩展背包 section/journal 完全隔离，不注册 participant。
 
-#include "feature/autosell/autosell_store.h"
+#include "features/autosell/store.h"
 
 #include "core/native/qol_log.h"
-#include "feature/autosell/autosell_config.h"
+#include "features/autosell/config.h"
 #include "game_access.h"
 
 #include <cstring>

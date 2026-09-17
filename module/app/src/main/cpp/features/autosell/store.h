@@ -8,7 +8,7 @@
 #include <cstring>
 #include <string>
 
-#include "feature/autosell/autosell_rules.h"
+#include "features/autosell/rules.h"
 
 // 自动出售按存档配置持久化（sidecar section `autosell` v2，UTF-8 JSON，直写）。
 //

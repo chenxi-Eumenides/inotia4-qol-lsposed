@@ -2,8 +2,12 @@
 
 #include <cstdint>
 
+#include "contracts/autosell.h"
+
 // 自动出售纯规则引擎：只做「给定物品视图 + 配置 -> 是否出售」的判定。
 // 零游戏/Android 依赖（纯 STL，编入 host 单测）；扫描、处置与 UI 由上层负责。
+// 配置类型（autosell::Config / SpecialType）在 contracts/autosell.h（稳定端口，
+// UI 消费者经该头访问，避免 feature→feature）。
 //
 // 语义依据 docs/development/features/auto-sell.md §4.3、§4.4、§9：
 //   - 总开关关闭恒不出售。
@@ -20,34 +24,6 @@
 //     或已镶嵌（I_SOCKET bits0-3>0）的装备永不出售，在规则判定之前先行排除。
 
 namespace autosell {
-
-// 特殊类型位标志（多选；ItemView.special_types 与 Config.special_mask 按位匹配）。
-enum SpecialType : uint32_t {
-    kSpecialBackpack  = 1u << 0,  // 背包类
-    kSpecialNormalSeal = 1u << 1,  // 普通徽章：勇士徽章 category 42..47
-    kSpecialDice      = 1u << 2,  // 骰子
-};
-
-// 面板配置快照（与 sidecar `autosell` section 键一一对应；0 = 关闭，正整数为 1-based 档位）。
-struct Config {
-    bool enabled = false;  // 总开关；false 时恒不售
-
-    // 装备规则（仅 is_equip 生效，三条之间为 AND：0=关不参与；已开启项须同时命中）。
-    // 值 v：0=关；1..N → 出售对应量 <= v-1。
-    int rarity = 0;   // 0=关；1..5 → 出售 rarity <= 值-1（1=白…5=紫，4 为最高品质）
-    int enhance = 0;  // 0=关；1..32 → 出售 enhance_remaining(I_ENCHANT bits2-5) <= 值-1；UI 名称「强化耐久度」
-    int socket = 0;   // 0=关；1..16 → 出售 socket_total(I_SOCKET bits4-7) <= 值-1
-
-    // 宝石规则（仅 is_jewel 生效，同类内 OR）。
-    int gem_tier = 0;  // 0=关；1..5 → 出售 jewel_tier(category-28) <= 值-1
-
-    // 宝石属性范围规则（仅 is_jewel 生效，与 gem_tier 同类内 OR）。
-    // 0=关；1..5 → 出售属性百分位 <= 阈值（1→30 / 2→60 / 3→75 / 4→90 / 5→100）。
-    int gem_range = 0;
-
-    // 特殊类型规则（对任意物品生效；0=关，非 0 位掩码与物品位标志按位与命中即出售）。
-    uint32_t special_mask = 0;
-};
 
 // 物品视图（由上层从游戏内存/扩展袋读取后填充；本层不触碰游戏内存）。
 struct ItemView {

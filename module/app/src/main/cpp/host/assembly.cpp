@@ -6,6 +6,7 @@
 #include "core/native/qol_log.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "features/attribute_range/plugin.h"
+#include "features/autosell/plugin.h"
 #include "features/inventory_hooks/plugin.h"
 #include "features/push_all/plugin.h"
 #include "features/quest/plugin.h"
@@ -140,6 +141,11 @@ bool assembly_init() {
     }
     if (!register_plugin(features::stack_limit::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: stack_limit registration failed");
+        return false;
+    }
+    // autosell：零资源常驻插件；install 注册 save-enter/exit 回调并按配置门禁同步扫描任务。
+    if (!register_plugin(features::autosell::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: autosell registration failed");
         return false;
     }
     if (!register_plugin(features::simple_mode::plugin_descriptor())) {

@@ -16,10 +16,8 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
+#include "contracts/autosell.h"
 #include "data/native/game_symbols.h"
-#include "feature/autosell/autosell_config.h"
-#include "feature/autosell/autosell_scan.h"
-#include "feature/autosell/autosell_store.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_ui_kit.h"

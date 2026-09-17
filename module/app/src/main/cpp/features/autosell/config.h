@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "feature/autosell/autosell_rules.h"
+#include "features/autosell/rules.h"
 
 // 自动出售运行时配置/状态存储（阶段 B）。
 //

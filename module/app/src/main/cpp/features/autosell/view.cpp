@@ -1,8 +1,7 @@
 // autosell_view.cpp —— 数据层物品引用 -> 纯规则视图（阶段 B）。
 
-#include "feature/autosell/autosell_view.h"
+#include "features/autosell/view.h"
 
-#include "data/native/game_symbols.h"
 #include "data/native/item_class.h"
 #include "contracts/attribute_range.h"
 #include "domains/attribute_range/rules.h"

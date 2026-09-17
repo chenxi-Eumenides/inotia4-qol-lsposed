@@ -1,6 +1,6 @@
 #pragma once
 
-#include "feature/autosell/autosell_rules.h"
+#include "features/autosell/rules.h"
 #include "game_state.h"
 
 // 把数据层物品引用转成纯规则视图（阶段 B）。

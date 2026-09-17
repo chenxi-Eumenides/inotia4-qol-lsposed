@@ -80,6 +80,8 @@ MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_attribute_range",
     "test_module_text",
     "test_special_equip_rules",
+    "test_autosell_rules",
+    "test_autosell_store",
 )
 
 MIGRATED_TEST_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (

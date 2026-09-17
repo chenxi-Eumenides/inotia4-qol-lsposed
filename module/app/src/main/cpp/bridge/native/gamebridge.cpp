@@ -2,9 +2,8 @@
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
-#include "feature/autosell/autosell_config.h"
-#include "feature/autosell/autosell_scan.h"
-#include "feature/autosell/autosell_store.h"
+#include "features/autosell/config.h"
+#include "features/autosell/store.h"
 #include "feature/save_backup/save_backup.h"
 #include "feature/ui/game_ui_autosell.h"
 #include "feature/ui/game_ui_charinfo_zh.h"
@@ -54,7 +53,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         charinfo_zh_install_if_ready();  // 角色面板：把绘制窗口标记为 kCharacterPanel 作用域
         save_backup_slot_delete_hook_install_if_ready();
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
-        // 进入存档后由 autosell_register_save_enter 的回调注册（见 autosell_scan.cpp）。
+        // 进入存档后由 autosell 插件注册的 save-enter 回调按存档配置同步（见 plugin.cpp）。
         if (qol::host::frame_source_install()) {
             autosell_set_host_installed(true);
         }
@@ -65,8 +64,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
         save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点（指令改写）
         save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点（指令改写）
-        autosell_register_save_enter();       // 自动出售：进档加载 sidecar 配置并注册扫描任务
-        autosell_register_save_exit();        // 自动出售：退档删除扫描任务
+        // 自动出售已迁移为 autosell 插件（assembly 注册）：save_enter/save_exit 回调与
+        // 扫描任务生命周期由插件 install/on_enabled 管理。
         // 任务完成度进档重算已迁移为 quest 插件（plugin.cpp install 注册 save_enter 回调），
         // 由 assembly_init 统一装配。
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
