@@ -81,7 +81,7 @@
 | # | lane | 载体（规模） | 点亮机制 | 状态 |
 |---|---|---|---|---|
 | A1 | `patch/` 机制 + `push_all` | push_all（85 行） | 指令 patch、占用声明、原字校验与回滚 | ✅ 完成（VM-P4-01 PASS：两 patch live、BL 重定向日志证据、物理还原；**用户真机确认推怪生效**） |
-| A2 | 帧源/调度形式化 + `quest` | quest（79 行） | `infra/scheduler` + 帧源注入 | 🔄 进行中（**A2a ✅**：VM-P4-02 PASS——core 两条 `live`、命令排空经新 scheduler 两态翻转；A2b quest 待迁移） |
+| A2 | 帧源/调度形式化 + `quest` | quest（79 行） | `infra/scheduler` + 帧源注入 | ✅ 完成（VM-P4-02/03 PASS：core 两条 `live`、命令排空经新 scheduler；quest 零资源插件 `enabled` + 进档 `quest resync: fixed=0` 日志。遗留：`save_enter` 回调设施未迁移，随存档域收口） |
 | A3 | 能力契约 + `attribute_range` | attribute_range（396 行） | capability 提供/消费 + 撤销级联（§3.4.1） | ⬜ |
 | A4 | `hooks/dispatch` + `ui` 文本层拆分 | `MEMORYTEXT_GetText` 共享资源 | before/original/after、Observe/Modify/Intercept | ⬜ |
 
