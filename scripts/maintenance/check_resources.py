@@ -58,6 +58,10 @@ _MECHANISM_FILES = frozenset(
         "core/native/call_patch.h",
         "feature/patch/game_patch.h",
         "game_ptr_hook.h",
+        "patch/ptr_slot.cpp",
+        "patch/ptr_slot.h",
+        "game/access/ptr_slots.cpp",
+        "game/access/ptr_slots.h",
     }
 )
 
@@ -67,7 +71,13 @@ _MECH_API_LINE = re.compile(r"\bNative(Hook|Unhook)FunType\s+(?:native_)?(?:un)?
 
 # 机制原语注入：host 装配期取 call_patch 原语地址交给 patch/ 层（`&call_patch_install_bl` 等）。
 # 这是把机制本体注入机制层，不是某个游戏符号的安装点；若无此排除会记为无法归属资源。
-_MECH_WIRING_LINE = re.compile(r"&\s*call_patch_(?:install|revert)_(?:bl|word)\b")
+# `ptr_slot_site(` 同理：host/plugin_registry 按 kPtrSlot 声明解析槽站点，是机制分派而非安装点
+# （真实安装点在插件的 ResourceClaim，文本扫描无法识别该声明式形态）。
+_MECH_WIRING_LINE = re.compile(
+    r"&\s*call_patch_(?:install|revert)_(?:bl|word)\b"
+    r"|&\s*(?:qol::patch::)?ptr_slot_(?:write|restore)_raw\b"
+    r"|\bptr_slot_site\s*\("
+)
 
 _SKIP_LINE_PREFIXES = ("//", "*", "/*", "#include")
 _SYMBOL_STRING = re.compile(r'fn_resolve\(\s*"(F_[A-Z0-9_]+_VMA)"')

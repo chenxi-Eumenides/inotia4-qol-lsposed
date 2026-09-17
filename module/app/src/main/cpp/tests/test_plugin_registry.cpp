@@ -15,6 +15,16 @@
 #include "infra/config.h"
 #include "infra/events.h"
 #include "infra/status.h"
+#include "patch/claims.h"
+#include "patch/instr_patch.h"
+
+// game/access/ptr_slots.cpp 经 save_slot_delete_hook_target 解析槽站点；test_stubs.cpp 提供
+// 可控实现，测试经这三个全局量构造站点（host 不依赖真实游戏 GOT）。
+namespace qol::game {
+extern void* g_ptr_slot_test_addr;
+extern uintptr_t g_ptr_slot_test_expected;
+extern bool g_ptr_slot_test_resolvable;
+}  // namespace qol::game
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -90,6 +100,37 @@ int fake_unhook(void* target) {
 
 HostDeps make_deps() {
     return HostDeps{&fake_resolve, &fake_hook, &fake_unhook};
+}
+
+// ---------------------------------------------------------------------------
+// 指针槽（kPtrSlot）测试夹具：假原语直接写测试槽，站点经 test_stubs 的
+// save_slot_delete_hook_target 可控返回。
+// ---------------------------------------------------------------------------
+
+int g_ptr_slot_wrapper = 0;        // 被写入槽的 wrapper（与 expected 区分）
+void* g_ptr_slot_storage = nullptr;  // 模拟函数指针槽
+
+bool fake_write_ptr(uintptr_t slot_addr, void* value) {
+    *reinterpret_cast<void**>(slot_addr) = value;
+    return true;
+}
+
+bool fake_restore_ptr(uintptr_t slot_addr, void* value) {
+    *reinterpret_cast<void**>(slot_addr) = value;
+    return true;
+}
+
+void use_fake_ptr_primitives() {
+    qol::patch::set_primitives(qol::patch::Primitives{nullptr, nullptr, nullptr, nullptr,
+                                                      &fake_write_ptr, &fake_restore_ptr});
+}
+
+// 构造可控站点：槽值 = expected，登记名匹配 game/access/ptr_slots 的 kSlots 条目。
+void arm_ptr_slot(void* expected) {
+    g_ptr_slot_storage = expected;
+    qol::game::g_ptr_slot_test_addr = &g_ptr_slot_storage;
+    qol::game::g_ptr_slot_test_expected = reinterpret_cast<uintptr_t>(expected);
+    qol::game::g_ptr_slot_test_resolvable = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +257,24 @@ ResourceClaim ownership_soft_claim(const char* id, const char* owner, const char
     return c;
 }
 
+// kPtrSlot 资源：symbol 必须等于 game/access/ptr_slots 的登记名；handler 为写入槽的 wrapper。
+ResourceClaim ptr_slot_claim(const char* id, const char* owner) {
+    ResourceClaim c{};
+    c.id = id;
+    c.symbol = "ptrslot:SAVESLOT_DELETE_GOT";
+    c.mechanism = ResourceMechanism::kPtrSlot;
+    c.policy = ResourcePolicy::kPrivate;
+    c.requirement = ResourceRequirement::kRequired;
+    c.failure = ResourceFailure::kFailClosed;
+    c.resumable = true;
+    c.owner = owner;
+    c.reason = "test";
+    c.gate = nullptr;
+    c.step_budget = 120;
+    c.handler = &g_ptr_slot_wrapper;
+    return c;
+}
+
 ResourceClaim g_ok_resources[] = {
     claim("hook:test:ok:a", "test_ok", nullptr),
     claim("hook:test:ok:b", "test_ok", nullptr),
@@ -262,6 +321,17 @@ ResourceClaim g_own_soft_resources[] = {
     ownership_soft_claim("own:soft:a", "test_own_soft", "test.gate"),
 };
 
+// kPtrSlot 分派：单条指针槽资源，成功安装后槽值为 wrapper，backup 交还。
+ResourceClaim g_ptr_slot_resources[] = {
+    ptr_slot_claim("ptrslot:test:a", "test_ptrslot"),
+};
+
+// kPtrSlot 回滚：指针槽先装成功，随后的入口 hook 失败 → 逆序归还指针槽（写回 expected）。
+ResourceClaim g_ptr_slot_release_resources[] = {
+    ptr_slot_claim("ptrslot:test:rb", "test_ptrslot_rb"),
+    claim("hook:test:ptr:rb", "test_ptrslot_rb", nullptr),
+};
+
 PluginDescriptor make_descriptor(const char* id, const ResourceClaim* resources,
                                  uint32_t resource_count, const CapabilityRequirement* requires,
                                  uint32_t requires_count) {
@@ -297,6 +367,12 @@ void reset_all() {
     g_backend = FakeBackend{};
     g_probe = PluginProbe{};
     g_ownership = OwnershipProbe{};
+    g_ptr_slot_storage = nullptr;
+    qol::game::g_ptr_slot_test_addr = nullptr;
+    qol::game::g_ptr_slot_test_expected = 0;
+    qol::game::g_ptr_slot_test_resolvable = false;
+    qol::patch::claims_reset_for_test();
+    use_fake_ptr_primitives();
 }
 
 bool feature_of(const char* id, FeatureState* state, bool* enabled, const char** error) {
@@ -717,6 +793,59 @@ void test_ownership_fail_soft_gate_retry() {
     CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
 }
 
+// kPtrSlot 分派：站点经 game::ptr_slot_site 解析，槽值写入 wrapper，资源 live；
+// backup（槽期望值 = 原函数入口）经 on_resource_ready 交还所有者（§3.3）。
+void test_ptr_slot_dispatch_live_and_backup_handover() {
+    reset_all();
+    arm_ptr_slot(&g_dummy_handler);
+    const PluginDescriptor d =
+        make_descriptor("test_ptrslot", g_ptr_slot_resources, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_backend.hook_calls == 0);
+    CHECK(g_ptr_slot_storage == &g_ptr_slot_wrapper);
+    CHECK(qol::hooks::state_of("ptrslot:test:a") == ResourceState::kLive);
+    CHECK(feature_state_is("test_ptrslot", FeatureState::kEnabled));
+    CHECK(g_probe.ready_calls == 1);
+    CHECK(g_probe.ready_backups[0] == &g_dummy_handler);
+}
+
+// kPtrSlot 回滚：指针槽先装成功，随后的入口 hook 失败 → 逆序归还指针槽
+// （写回 expected、释放占用），插件 failed，无半装残留。
+void test_ptr_slot_rollback_releases_slot() {
+    reset_all();
+    arm_ptr_slot(&g_dummy_handler);
+    g_backend.fail_hook_call = 1;  // 第二条（入口 hook）安装失败
+    const PluginDescriptor d =
+        make_descriptor("test_ptrslot_rb", g_ptr_slot_release_resources, 2, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(g_ptr_slot_storage == &g_dummy_handler);
+    CHECK(qol::patch::point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)) == nullptr);
+    CHECK(qol::hooks::state_of("ptrslot:test:rb") == ResourceState::kFree);
+    CHECK(qol::patch::claimed_count() == 0);
+    CHECK(feature_state_is("test_ptrslot_rb", FeatureState::kFailed));
+}
+
+// kPtrSlot 槽值不符：fail-closed 拒绝安装，不写槽、不占点、插件 failed。
+void test_ptr_slot_value_mismatch_fail_closed() {
+    reset_all();
+    arm_ptr_slot(&g_dummy_handler);
+    g_ptr_slot_storage = &g_ptr_slot_wrapper;  // 槽当前值 != expected
+    const PluginDescriptor d =
+        make_descriptor("test_ptrslot", g_ptr_slot_resources, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(g_ptr_slot_storage == &g_ptr_slot_wrapper);  // 未被改写
+    CHECK(qol::patch::point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)) == nullptr);
+    CHECK(qol::hooks::state_of("ptrslot:test:a") == ResourceState::kFree);
+    CHECK(!feature_degraded("test_ptrslot"));
+    CHECK(feature_state_is("test_ptrslot", FeatureState::kFailed));
+}
+
 }  // namespace
 
 int main() {
@@ -737,6 +866,9 @@ int main() {
     test_ownership_acquire_order_live();
     test_ownership_release_reverse_on_rollback();
     test_ownership_fail_soft_gate_retry();
+    test_ptr_slot_dispatch_live_and_backup_handover();
+    test_ptr_slot_rollback_releases_slot();
+    test_ptr_slot_value_mismatch_fail_closed();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

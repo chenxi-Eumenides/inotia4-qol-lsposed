@@ -16,8 +16,15 @@ struct Primitives {   // 由 host 注入（过渡期指向 core/native 的调用
     bool (*revert_bl)(uintptr_t addr, uint32_t original_word);
     bool (*install_word)(uintptr_t addr, uint32_t expected_word, uint32_t new_word);
     bool (*revert_word)(uintptr_t addr, uint32_t original_word);
+    // 指针槽机制（kPtrSlot）：写/还原 8 字节函数指针；失败必须 fail-closed（返回 false 且不保证已写）。
+    bool (*write_ptr)(uintptr_t slot_addr, void* value);
+    bool (*restore_ptr)(uintptr_t slot_addr, void* value);
 };
 void set_primitives(const Primitives& primitives);
+
+// 已注入原语表；未注入返回 nullptr。供同层 kPtrSlot 机制（patch/ptr_slot.cpp）读取共享表，
+// 避免两个机制各维护一份注入状态而在 host 单测中出现分歧。
+const Primitives* primitives();
 
 struct Outcome {
     int32_t ok;

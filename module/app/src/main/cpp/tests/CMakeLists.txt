@@ -287,8 +287,10 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
+    ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -332,8 +334,10 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
+    ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -361,8 +365,10 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
+    ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -386,6 +392,7 @@ add_executable(patch_layer_tests
     test_patch_layer.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
+    ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/game/access/patches.cpp
 )
 target_include_directories(patch_layer_tests PRIVATE

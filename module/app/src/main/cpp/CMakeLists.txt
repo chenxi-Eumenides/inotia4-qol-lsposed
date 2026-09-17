@@ -275,3 +275,9 @@ target_sources(gamebridge PRIVATE
     game/access/world.cpp
     plugins/world_teleport/plugin.cpp
 )
+
+# B2a-3：指针槽声明式机制（kPtrSlot）+ save_backup 删档 PtrHook 迁移（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    game/access/ptr_slots.cpp
+    patch/ptr_slot.cpp
+)

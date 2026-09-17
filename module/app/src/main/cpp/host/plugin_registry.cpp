@@ -8,12 +8,14 @@
 #include "contracts/commands.h"
 #include "contracts/ownership.h"
 #include "game/access/patches.h"
+#include "game/access/ptr_slots.h"
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
 #include "infra/status.h"
 #include "patch/instr_patch.h"
+#include "patch/ptr_slot.h"
 
 // contracts/plugin.h 在 P2 只前向声明 PluginContext（空载体，宿主服务端口待 P3 冻结）。
 // 安装器需要实体才能调用按引用传参的插件回调，故在此补全定义；P3 端口冻结后移回 contracts/。
@@ -70,9 +72,14 @@ const char* check_requires(const contracts::PluginDescriptor& plugin) {
     return nullptr;
 }
 
-// 非入口机制的同步安装（kCallPatch / kOwnership）；成功后登记运行期地址。
-// 返回 nullptr 成功，否则静态错误文本。
-const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintptr_t* out_target) {
+// 非入口机制的同步安装（kCallPatch / kPtrSlot / kOwnership）；成功后登记运行期地址。
+// out_backup 为非 nullptr 时回填「原函数入口」：kPtrSlot 为其槽期望值（供 §3.3 backup 交还），
+// 其余机制为 nullptr。返回 nullptr 成功，否则静态错误文本。
+const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintptr_t* out_target,
+                                    void** out_backup) {
+    if (out_backup != nullptr) {
+        *out_backup = nullptr;
+    }
     // kOwnership：claim.handler 指向 OwnershipOps，不经 patch 站点。
     if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
         const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
@@ -80,6 +87,25 @@ const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintp
         if (contracts::ownership_acquire(ops, claim.id) != 0) return "ownership acquire rejected";
         if (out_target != nullptr) {
             *out_target = 0;
+        }
+        return nullptr;
+    }
+    // kPtrSlot：槽站点由 game/access/ptr_slots 解析（禁止裸地址），机制体在 patch/ptr_slot。
+    if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+        qol::game::PtrSlotSite site{};
+        if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+            return "slot not found";
+        }
+        const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site);
+        if (outcome.ok != 0) {
+            return outcome.error != nullptr ? outcome.error : "install failed";
+        }
+        hooks::runtime_set(claim.id, site.slot_addr, site.expected_value);
+        if (out_target != nullptr) {
+            *out_target = site.slot_addr;
+        }
+        if (out_backup != nullptr) {
+            *out_backup = site.expected_value;
         }
         return nullptr;
     }
@@ -98,11 +124,20 @@ const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintp
     return nullptr;
 }
 
-// 非入口机制的物理还原：kOwnership 调 ops->release（幂等）；kCallPatch 站点取自运行期记录。
+// 非入口机制的物理还原：kOwnership 调 ops->release（幂等）；kCallPatch/kPtrSlot 站点
+// 由 game/access 重新解析（符号地址在进程内稳定）。
 bool release_non_entry_claim(const contracts::ResourceClaim& claim) {
     if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
         contracts::ownership_release(contracts::ownership_ops(claim.handler), claim.id);
         return true;
+    }
+    if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+        qol::game::PtrSlotSite site{};
+        if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+            return false;
+        }
+        const qol::patch::Outcome outcome = qol::patch::release_claim(claim, site);
+        return outcome.ok == 0;
     }
     hooks::ResourceRuntime runtime{};
     const uintptr_t target = hooks::runtime_of(claim.id, &runtime) ? runtime.resolved_entry : 0;
@@ -216,7 +251,9 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_
         }
         if (want && now == contracts::ResourceState::kFree) {
             uintptr_t target = 0;
-            const char* error = install_non_entry_claim(claim, &target);
+            // 门禁路径不交还 backup：本路径仅服务带 gate 的资源，其安装点由 sync_gates
+            // 逐帧监督，无启动期 on_resource_ready 语义（当前无 kPtrSlot 带 gate 资源）。
+            const char* error = install_non_entry_claim(claim, &target, nullptr);
             if (error != nullptr) {
                 const bool fail_closed_required =
                     claim.requirement == contracts::ResourceRequirement::kRequired &&
@@ -518,13 +555,14 @@ int install_all(const HostDeps& deps) {
                 claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
             if (claim.gate != nullptr && !gate_on) all_gates_on = false;
 
-            // 非入口机制（call patch / ownership）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
+            // 非入口机制（call patch / ptr slot / ownership）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
             if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
                 if (claim.gate != nullptr && !gate_on) {
                     continue;
                 }
                 uintptr_t target = 0;
-                const char* error = install_non_entry_claim(claim, &target);
+                void* backup = nullptr;
+                const char* error = install_non_entry_claim(claim, &target, &backup);
                 if (error != nullptr) {
                     if (handle_claim_failure(claim, error)) break;
                     continue;
@@ -534,6 +572,19 @@ int install_all(const HostDeps& deps) {
                 installed_claims[installed_count] = &claim;
                 installed_entries[installed_count] = target;
                 ++installed_count;
+                // kPtrSlot 的原函数入口 = 槽期望值：与入口 hook 同规则立即交还所有者（§3.3）。
+                // kCallPatch/kOwnership 无 backup，跳过。
+                if (backup != nullptr && plugin.on_resource_ready != nullptr &&
+                    plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
+                    rollback_installed(installed_claims, installed_count, deps);
+                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                         "resource_ready_failed");
+                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                                 plugin.id, claim.id);
+                    ++failed_plugins;
+                    plugin_aborted = true;
+                    break;
+                }
                 continue;
             }
 

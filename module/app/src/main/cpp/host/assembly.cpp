@@ -20,6 +20,7 @@
 #include "plugins/text_layer/plugin.h"
 #include "plugins/world_teleport/plugin.h"
 #include "game/access/patches.h"
+#include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
 #include "hooks/transaction.h"
@@ -30,6 +31,7 @@
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
 #include "patch/instr_patch.h"
+#include "patch/ptr_slot.h"
 
 namespace qol::host {
 namespace {
@@ -45,6 +47,7 @@ bool gate_on(const char* key) {
 
 // 非入口机制的物理安装/释放分派（hooks/ 不依赖 patch/，机制归宿主注入）。
 // kCallPatch 的站点由 game/access/patches 解析后交给 patch/instr_patch；
+// kPtrSlot 的槽站点由 game/access/ptr_slots 解析后交给 patch/ptr_slot；
 // kOwnership 直接调 claim.handler 指向的 OwnershipOps（不经 patch 站点）。
 MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr_t target) {
     (void)target;  // call patch 的站点由本层解析，引擎无需预解析
@@ -55,6 +58,14 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
         }
         const int32_t rc = contracts::ownership_acquire(ops, claim.id);
         return MechanismOutcome{rc, rc == 0 ? nullptr : "ownership acquire rejected"};
+    }
+    if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+        qol::game::PtrSlotSite site{};
+        if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+            return MechanismOutcome{1, "slot not found"};
+        }
+        const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site);
+        return MechanismOutcome{outcome.ok, outcome.error};
     }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};
@@ -72,6 +83,14 @@ MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr
     if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
         contracts::ownership_release(contracts::ownership_ops(claim.handler), claim.id);
         return MechanismOutcome{0, nullptr};
+    }
+    if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+        qol::game::PtrSlotSite site{};
+        if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+            return MechanismOutcome{1, "slot not found"};
+        }
+        const qol::patch::Outcome outcome = qol::patch::release_claim(claim, site);
+        return MechanismOutcome{outcome.ok, outcome.error};
     }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};
@@ -134,11 +153,14 @@ bool assembly_init() {
     };
 
     // 指令 patch 原语注入：过渡期指向 core/native/call_patch；P5 原语迁入 patch/ 后本处改指 patch 层。
+    // 指针槽原语（write_ptr/restore_ptr）由 patch/ptr_slot 实现（mprotect + 8 字节写，fail-closed）。
     patch::set_primitives(qol::patch::Primitives{
         &call_patch_install_bl,
         &call_patch_revert_bl,
         &call_patch_install_word,
         &call_patch_revert_word,
+        &qol::patch::ptr_slot_write_raw,
+        &qol::patch::ptr_slot_restore_raw,
     });
 
     // 事务引擎依赖（运行期生命周期路径）与生命周期命令执行入口。

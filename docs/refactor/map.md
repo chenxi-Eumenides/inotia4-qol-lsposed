@@ -25,14 +25,14 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 10 | 541 |
-| `game/` | 20 | 1691 |
+| `game/` | 22 | 1768 |
 | `infra/` | 22 | 2007 |
 | `hooks/` | 8 | 1280 |
-| `patch/` | 4 | 285 |
+| `patch/` | 6 | 430 |
 | `domains/` | 2 | 111 |
-| `plugins/` | 72 | 8808 |
-| `host/` | 12 | 1941 |
-| **合计** | **150** | **16664** |
+| `plugins/` | 72 | 8802 |
+| `host/` | 12 | 2014 |
+| **合计** | **154** | **16953** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -43,7 +43,7 @@
 - `plugins/inventory_hooks/`：2 文件 / 98 行
 - `plugins/push_all/`：6 文件 / 267 行
 - `plugins/quest/`：4 文件 / 162 行
-- `plugins/save_backup/`：6 文件 / 2399 行
+- `plugins/save_backup/`：6 文件 / 2393 行
 - `plugins/simple_mode/`：6 文件 / 462 行
 - `plugins/special_equip/`：6 文件 / 423 行
 - `plugins/stack_limit/`：2 文件 / 103 行

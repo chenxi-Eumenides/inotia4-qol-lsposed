@@ -33,11 +33,11 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 39 |
+| `game` | 41 |
 | `hooks` | 8 |
 | `host` | 28 |
 | `infra` | 45 |
-| `patch` | 7 |
+| `patch` | 9 |
 | `plugins/attribute_range` | 4 |
 | `plugins/autosell` | 12 |
 | `plugins/craft_ui` | 4 |
@@ -54,7 +54,7 @@
 | `plugins/text_layer` | 4 |
 | `plugins/ui` | 31 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **328** |
+| **合计** | **332** |
 
 ### 1.2 迁移期映射摘要
 
@@ -135,23 +135,23 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 143 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 142 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
 | `plugins/ui` | `game` | 22 |
+| `host` | `game` | 14 |
 | `plugins/ui` | `infra` | 13 |
 | `host` | `contracts` | 12 |
-| `host` | `game` | 12 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
 | `plugins/autosell` | `infra` | 10 |
 | `plugins/extension_bag` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
+| `host` | `patch` | 9 |
 | `domains/world` | `game` | 7 |
 | `host` | `hooks` | 7 |
-| `host` | `patch` | 7 |
 | `plugins/custom_recipe` | `contracts` | 7 |
 | `plugins/custom_recipe` | `infra` | 7 |
 
@@ -226,18 +226,17 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 23 个 / 文件 14 个 / 去重符号 10 个 / 无法归属 8 个。
+扫描合计：安装点 22 个 / 文件 13 个 / 去重符号 9 个 / 无法归属 8 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 4 | 7 | 4 |
 | call patch | 3 | 7 | 4 |
-| ptr slot | 8 | 9 | 4 |
+| ptr slot | 7 | 8 | 3 |
 
-去重符号 → 文件（前 10 条，共 10 条；`--verbose` 列全部）：
+去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
-- `F_SAVESLOT_DELETE_VMA` → `plugins/save_backup/plugin.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
 - `F_SCENE_DRAW_EQUIP_VMA` → `feature/ui/game_ui_autosell.cpp`

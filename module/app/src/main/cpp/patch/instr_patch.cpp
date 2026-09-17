@@ -60,6 +60,10 @@ void set_primitives(const Primitives& primitives) {
     g_primitives_set = true;
 }
 
+const Primitives* primitives() {
+    return g_primitives_set ? &g_primitives : nullptr;
+}
+
 Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr) {
     qol::game::PatchSite site{};
     Outcome error{};

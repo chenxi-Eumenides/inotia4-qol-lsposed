@@ -1,9 +1,10 @@
-// patch/claims.h + patch/instr_patch.h + game/access/patches.h host 单测：
-// 覆盖占用声明仲裁（重复/幂等/容量/释放）与指令 patch 安装/还原的
-// 站点校验、kind/handler 匹配、原语拒绝与占用释放。
+// patch/claims.h + patch/instr_patch.h + patch/ptr_slot.h + game/access/patches.h host 单测：
+// 覆盖占用声明仲裁（重复/幂等/容量/释放）、指令 patch 安装/还原的站点校验/kind/handler 匹配/
+// 原语拒绝与占用释放，以及指针槽机制（kPtrSlot）的槽值校验、占用、归还与 tombstone 语义。
 
 #include "patch/claims.h"
 #include "patch/instr_patch.h"
+#include "patch/ptr_slot.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include "contracts/plugin.h"
 #include "data/native/game_symbols.h"
 #include "game/access/patches.h"
+#include "game/access/ptr_slots.h"
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -40,6 +42,7 @@ using qol::contracts::ResourceMechanism;
 using qol::contracts::ResourcePolicy;
 using qol::contracts::ResourceRequirement;
 using qol::game::PatchSite;
+using qol::game::PtrSlotSite;
 using qol::patch::claim_point;
 using qol::patch::claimed_count;
 using qol::patch::claims_reset_for_test;
@@ -106,14 +109,47 @@ bool fake_revert_word(uintptr_t addr, uint32_t original_word) {
     return g_prims.revert_word_ok;
 }
 
+// 指针槽原语：真实写入测试可控的槽存储，便于断言「写生效/未生效」与 tombstone 保留占用。
+struct FakePtrPrims {
+    int write_calls = 0;
+    int restore_calls = 0;
+    bool write_ok = true;
+    bool restore_ok = true;
+    uintptr_t last_addr = 0;
+    void* last_value = nullptr;
+};
+
+FakePtrPrims g_ptr_prims;
+void* g_ptr_slot_storage = nullptr;  // 模拟函数指针槽：site.slot_addr 指向它
+
+bool fake_write_ptr(uintptr_t slot_addr, void* value) {
+    ++g_ptr_prims.write_calls;
+    g_ptr_prims.last_addr = slot_addr;
+    g_ptr_prims.last_value = value;
+    if (!g_ptr_prims.write_ok) return false;
+    *reinterpret_cast<void**>(slot_addr) = value;
+    return true;
+}
+
+bool fake_restore_ptr(uintptr_t slot_addr, void* value) {
+    ++g_ptr_prims.restore_calls;
+    g_ptr_prims.last_addr = slot_addr;
+    g_ptr_prims.last_value = value;
+    if (!g_ptr_prims.restore_ok) return false;
+    *reinterpret_cast<void**>(slot_addr) = value;
+    return true;
+}
+
 void use_fake_primitives() {
     set_primitives(Primitives{&fake_install_bl, &fake_revert_bl, &fake_install_word,
-                              &fake_revert_word});
+                              &fake_revert_word, &fake_write_ptr, &fake_restore_ptr});
 }
 
 void reset_all() {
     claims_reset_for_test();
     g_prims = FakePrims{};
+    g_ptr_prims = FakePtrPrims{};
+    g_ptr_slot_storage = nullptr;
     g_base = kBase;
     g_fn_resolve_bias = 0;
     g_fn_resolve_misalign = 0;
@@ -143,6 +179,30 @@ ResourceClaim make_patch_claim(const char* id, const char* symbol, void* handler
     claim.step_budget = 120;
     claim.handler = handler;
     return claim;
+}
+
+ResourceClaim make_ptr_slot_claim(const char* id, void* handler) {
+    ResourceClaim claim{};
+    claim.id = id;
+    claim.symbol = "ptrslot:TEST";
+    claim.mechanism = ResourceMechanism::kPtrSlot;
+    claim.policy = ResourcePolicy::kPrivate;
+    claim.requirement = ResourceRequirement::kRequired;
+    claim.failure = ResourceFailure::kFailClosed;
+    claim.resumable = true;
+    claim.owner = "test";
+    claim.reason = "test";
+    claim.gate = nullptr;
+    claim.step_budget = 120;
+    claim.handler = handler;
+    return claim;
+}
+
+PtrSlotSite ptr_site(void* expected) {
+    PtrSlotSite site{};
+    site.slot_addr = reinterpret_cast<uintptr_t>(&g_ptr_slot_storage);
+    site.expected_value = expected;
+    return site;
 }
 
 bool error_is(const Outcome& outcome, const char* expected) {
@@ -199,6 +259,11 @@ void test_primitives_not_set() {
     g_base = kBase;
     const Outcome outcome = install_claim(claim, party_addr());
     CHECK(error_is(outcome, "primitives not set"));
+
+    void* storage = reinterpret_cast<void*>(&g_dummy_handler);
+    g_ptr_slot_storage = storage;
+    const ResourceClaim ptr_claim = make_ptr_slot_claim("ptrslot:x", &g_dummy_handler);
+    CHECK(error_is(install_claim(ptr_claim, ptr_site(storage)), "primitives not set"));
 }
 
 void test_install_bl_success() {
@@ -436,6 +501,123 @@ void test_release_primitive_rejected_keeps_owner() {
     CHECK(std::strcmp(point_owner(stand_addr()), "patch:c") == 0);
 }
 
+// ---- kPtrSlot 指针槽机制 ----
+
+void test_ptr_slot_install_success() {
+    reset_all();
+    void* expected = reinterpret_cast<void*>(0x1111);
+    g_ptr_slot_storage = expected;
+    const ResourceClaim claim = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+    const Outcome outcome = install_claim(claim, ptr_site(expected));
+    CHECK(outcome.ok == 0);
+    CHECK(outcome.error == nullptr);
+    CHECK(g_ptr_prims.write_calls == 1);
+    CHECK(g_ptr_prims.last_addr == reinterpret_cast<uintptr_t>(&g_ptr_slot_storage));
+    CHECK(g_ptr_prims.last_value == &g_dummy_handler);
+    CHECK(g_ptr_slot_storage == &g_dummy_handler);
+    CHECK(std::strcmp(point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)), "ptrslot:a") ==
+          0);
+}
+
+void test_ptr_slot_site_and_handler_errors() {
+    reset_all();
+    void* expected = reinterpret_cast<void*>(0x2222);
+    g_ptr_slot_storage = expected;
+    const ResourceClaim claim = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+
+    PtrSlotSite empty{};
+    CHECK(error_is(install_claim(claim, empty), "slot not found"));
+    CHECK(error_is(release_claim(claim, empty), "slot not found"));
+
+    const ResourceClaim no_handler = make_ptr_slot_claim("ptrslot:b", nullptr);
+    CHECK(error_is(install_claim(no_handler, ptr_site(expected)), "handler missing"));
+    CHECK(g_ptr_prims.write_calls == 0);
+    CHECK(claimed_count() == 0);
+}
+
+void test_ptr_slot_value_mismatch() {
+    reset_all();
+    const void* expected = reinterpret_cast<void*>(0x3333);
+    g_ptr_slot_storage = reinterpret_cast<void*>(0x4444);  // 槽值 != expected
+    const ResourceClaim claim = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+    CHECK(error_is(install_claim(claim, ptr_site(const_cast<void*>(expected))),
+                   "slot value mismatch"));
+    CHECK(g_ptr_prims.write_calls == 0);
+    CHECK(claimed_count() == 0);
+    CHECK(g_ptr_slot_storage == reinterpret_cast<void*>(0x4444));
+}
+
+void test_ptr_slot_point_already_claimed() {
+    reset_all();
+    void* expected = reinterpret_cast<void*>(0x5555);
+    g_ptr_slot_storage = expected;
+    const ResourceClaim first = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+    CHECK(install_claim(first, ptr_site(expected)).ok == 0);
+    CHECK(g_ptr_slot_storage == &g_dummy_handler);
+
+    // 第二个 claim 观察到当前值即其 expected（绕开值校验），占用冲突拒绝。
+    const ResourceClaim second = make_ptr_slot_claim("ptrslot:b", &g_other_handler);
+    CHECK(error_is(install_claim(second, ptr_site(&g_dummy_handler)), "point already claimed"));
+    CHECK(g_ptr_prims.write_calls == 1);
+    CHECK(std::strcmp(point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)), "ptrslot:a") ==
+          0);
+}
+
+void test_ptr_slot_install_idempotent() {
+    reset_all();
+    void* expected = reinterpret_cast<void*>(0x6666);
+    g_ptr_slot_storage = expected;
+    const ResourceClaim claim = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+    CHECK(install_claim(claim, ptr_site(expected)).ok == 0);
+    // 同 claim 重复安装：值已是 handler → 幂等，不重复写。
+    CHECK(install_claim(claim, ptr_site(expected)).ok == 0);
+    CHECK(g_ptr_prims.write_calls == 1);
+}
+
+void test_ptr_slot_release_success_and_idempotent() {
+    reset_all();
+    void* expected = reinterpret_cast<void*>(0x7777);
+    g_ptr_slot_storage = expected;
+    const ResourceClaim claim = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+    CHECK(install_claim(claim, ptr_site(expected)).ok == 0);
+
+    const Outcome released = release_claim(claim, ptr_site(expected));
+    CHECK(released.ok == 0);
+    CHECK(g_ptr_prims.restore_calls == 1);
+    CHECK(g_ptr_prims.last_value == expected);
+    CHECK(g_ptr_slot_storage == expected);
+    CHECK(point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)) == nullptr);
+
+    // 槽已是原值：重复归还幂等成功，不重复写。
+    CHECK(release_claim(claim, ptr_site(expected)).ok == 0);
+    CHECK(g_ptr_prims.restore_calls == 1);
+}
+
+void test_ptr_slot_release_failure_keeps_owner() {
+    reset_all();
+    void* expected = reinterpret_cast<void*>(0x8888);
+    g_ptr_slot_storage = expected;
+    const ResourceClaim claim = make_ptr_slot_claim("ptrslot:a", &g_dummy_handler);
+    CHECK(install_claim(claim, ptr_site(expected)).ok == 0);
+
+    // 物理还原失败：保留占用与旧值（§4.2 tombstone 语义），槽不得被新 owner 覆盖。
+    g_ptr_prims.restore_ok = false;
+    CHECK(error_is(release_claim(claim, ptr_site(expected)), "primitive rejected"));
+    CHECK(g_ptr_slot_storage == &g_dummy_handler);
+    CHECK(std::strcmp(point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)), "ptrslot:a") ==
+          0);
+    const ResourceClaim other = make_ptr_slot_claim("ptrslot:b", &g_other_handler);
+    CHECK(error_is(install_claim(other, ptr_site(&g_dummy_handler)), "point already claimed"));
+
+    // 原语恢复后重试归还：写回原值、释放占用，槽可被重新声明。
+    g_ptr_prims.restore_ok = true;
+    CHECK(release_claim(claim, ptr_site(expected)).ok == 0);
+    CHECK(g_ptr_slot_storage == expected);
+    CHECK(point_owner(reinterpret_cast<uintptr_t>(&g_ptr_slot_storage)) == nullptr);
+    CHECK(install_claim(other, ptr_site(expected)).ok == 0);
+    CHECK(g_ptr_slot_storage == &g_other_handler);
+}
+
 }  // namespace
 
 int main() {
@@ -454,6 +636,13 @@ int main() {
     test_primitive_rejected_releases_claim();
     test_release_success();
     test_release_primitive_rejected_keeps_owner();
+    test_ptr_slot_install_success();
+    test_ptr_slot_site_and_handler_errors();
+    test_ptr_slot_value_mismatch();
+    test_ptr_slot_point_already_claimed();
+    test_ptr_slot_install_idempotent();
+    test_ptr_slot_release_success_and_idempotent();
+    test_ptr_slot_release_failure_keeps_owner();
     std::printf("patch_layer: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
