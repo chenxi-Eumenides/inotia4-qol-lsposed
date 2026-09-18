@@ -173,7 +173,10 @@ static std::string enter_slot_locked(int32_t slot) {
     if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);
     if (slot_struct == nullptr || fn_saveslot_get_hero(slot_struct) == nullptr) return op_err("slot corrupt");
-    if (!extension_bag_prepare_save_slot_load()) {
+    // D2b：扩展袋清理经能力接口现取；能力缺失 = EB disabled，无扩展态需清理，
+    // 放行（与 port 在 disabled 下返回 true 的放行行为一致）。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->prepare_save_slot_load != nullptr && !eb->prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; enter slot blocked");
     }
     fn_ui_set_popup_process_info(4, 0);
@@ -214,7 +217,9 @@ static std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     if (slot < 0 || slot > 2) return op_err("bad slot");
     if (class_idx < 0 || class_idx > 5) return op_err("bad class");
     if (g_base == 0) return op_err("libgame not ready");
-    if (!extension_bag_prepare_save_slot_load()) {
+    // D2b：同 enter_slot_locked；能力缺失 = EB disabled，放行。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->prepare_save_slot_load != nullptr && !eb->prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; create slot blocked");
     }
     if (fn_save_create_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||

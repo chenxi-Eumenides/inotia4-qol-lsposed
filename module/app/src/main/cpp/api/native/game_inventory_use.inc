@@ -1,5 +1,8 @@
 std::string data_op_use_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
+    // D2b：投影同步经能力接口现取；能力缺失 = EB disabled（无模块视图），跳过同步等价。
+    // 扩展物品使用本身走 port（use_item 为 std::string 面，契约 v1.0 不含，D2d 收口）。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
     if (bag == 5) return op_err("task bag excluded");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
@@ -59,7 +62,7 @@ std::string data_op_use_item(int bag, int slot) {
         // 无 pending 时掷骰即消耗（原版 ButtonRollExe 语义），置 flag 待确认
         if (fn_consume_item != nullptr) fn_consume_item(item);
         if (flag != nullptr) *flag |= 1u;
-        extension_bag_sync_projected_slot(bag, slot);
+        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
         std::string s = "{\"ok\":true,\"base\":[";
         for (int i = 0; i < 5; ++i) {
             if (i > 0) s += ",";
@@ -88,7 +91,7 @@ std::string data_op_use_item(int bag, int slot) {
         int ok = fn_release_sealed(category);
         if (ok) {
             if (fn_consume_item != nullptr) fn_consume_item(item);
-            extension_bag_sync_projected_slot(bag, slot);
+            if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
             return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
         }
         return op_err("release sealed failed");
@@ -103,7 +106,7 @@ std::string data_op_use_item(int bag, int slot) {
         int ok = fn_open_item_box(category);
         if (ok) {
             if (fn_consume_item != nullptr) fn_consume_item(item);
-            extension_bag_sync_projected_slot(bag, slot);
+            if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
             return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
         }
         return op_err("open box failed");
@@ -121,7 +124,7 @@ std::string data_op_use_item(int bag, int slot) {
         if (fn_save_is_ok() == 0) return op_err("save busy");
         if (fn_mercenary_is_empty_manager_slot() == 0) return op_err("mercenary slots full");
         if (fn_mercenary_make_mercenary(item) == nullptr) return op_err("make mercenary failed");
-        extension_bag_sync_projected_slot(bag, slot);
+        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
         return op_ok();
     }
 
@@ -132,7 +135,7 @@ std::string data_op_use_item(int bag, int slot) {
     int ok = fn_char_use_item_ex(leader, item, 0);
     // 用药成功且药水教学激活（obj170==6）→ 复现官方 0xec340 教学完成链（CHAR_ProcessShortcut 用药后检查）
     if (ok && tutorial_state() == 6) tutorial_cancel();
-    if (ok) extension_bag_sync_projected_slot(bag, slot);
+    if (ok && eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
     return ok ? op_ok() : op_err("on cooldown");
 }
 std::string data_op_dice_accept() {
@@ -240,12 +243,17 @@ std::string data_op_sell_item(int bag, int slot) {
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
     if (!game_in_world()) return op_err("not in game");
     if (bag == 5 || to_bag == 5) return op_err("task bag excluded");
-    if (extension_bag_is_logical_bag(bag) || extension_bag_is_logical_bag(to_bag)) {
+    // D2b：逻辑袋判定 / 模块视图门禁经能力接口现取；能力缺失 = EB disabled，
+    // 逻辑袋视为不存在、视图视为未安装（与 D2b-1 的降级口径一致）。
+    // 扩展→扩展移动本身走 port（move_item 为 std::string 面，契约 v1.0 不含，D2d 收口）。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->is_logical_bag != nullptr &&
+        (eb->is_logical_bag(bag) || eb->is_logical_bag(to_bag))) {
         if (count <= 0) return op_err("bad count");
         if (to_slot < 0 || to_slot >= 16) return op_err("bad target");
         return extension_bag_move_item(bag, slot, to_bag, to_slot);
     }
-    if (extension_bag_module_view_installed()) {
+    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
         return op_err("extension view open; movement disabled (P2)");
     }
     if (fn_inven_move_item == nullptr) return op_err("symbol not resolved");
@@ -261,8 +269,10 @@ std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_s
     int r = fn_inven_move_item(item, count, to_bag, to_slot);
     // 返回 1=成功（mov w1,#0x1），0/失败返回空——按目标槽是否有物品判定
     if (r) {
-        extension_bag_sync_projected_slot(bag, slot);
-        extension_bag_sync_projected_slot(to_bag, to_slot);
+        if (eb != nullptr && eb->sync_projected_slot != nullptr) {
+            eb->sync_projected_slot(bag, slot);
+            eb->sync_projected_slot(to_bag, to_slot);
+        }
     }
     return r ? op_ok() : op_err("move failed");
 }

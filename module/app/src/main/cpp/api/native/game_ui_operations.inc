@@ -37,7 +37,9 @@ std::string data_op_main_menu() {
         if (!wait_for_popup_stack_empty()) return op_err("panel close pending");
     }
     // 扩展背包清理保持原调用时机（切换前）；游戏状态机切换走逻辑帧点。
-    if (!extension_bag_prepare_main_menu()) {
+    // D2b：经能力接口现取；能力缺失 = EB disabled，无扩展态需清理，放行。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->prepare_main_menu != nullptr && !eb->prepare_main_menu()) {
         return op_err("extension bag cleanup failed; main menu transition blocked");
     }
     // 游戏状态机切换（GAMESTATE_SetState -> GAME_Exit）必须在游戏主线程的逻辑帧点执行；
@@ -64,7 +66,11 @@ std::string data_op_panel_close() {
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     uintptr_t vma = enter > g_base ? enter - g_base : 0;
-    if (extension_bag_is_inventory_enter(enter)) vma = F_PANEL_INVENTORY_ENTER;
+    // D2b：扩展袋 inventory enter 识别经能力接口现取；能力缺失 = EB disabled，视为非扩展 enter。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->is_inventory_enter != nullptr && eb->is_inventory_enter(enter)) {
+        vma = F_PANEL_INVENTORY_ENTER;
+    }
     // 模块 wrapper 的 enter 不是 libgame 地址，上面的换算会归 0；经反查表还原原版 VMA。
     if (vma == 0) vma = popup_enter_alias_resolve(enter);
     if (!popup_vma_is_panel(vma)) return op_err("top of stack is not a panel");
@@ -123,7 +129,12 @@ std::string data_op_panel_open(const std::string& panel) {
     // 扫描 state list 找 enter == g_base+target 的 state id
     uint8_t* list = *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
     if (list == nullptr) return op_err("state list not ready");
-    int state_id = p == "inventory" ? extension_bag_inventory_state_id() : -1;
+    int state_id = -1;
+    if (p == "inventory") {
+        // D2b：扩展袋 inventory state id 经能力接口现取；能力缺失 = EB disabled，返回 -1。
+        const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+        if (eb != nullptr && eb->inventory_state_id != nullptr) state_id = eb->inventory_state_id();
+    }
     for (int i = 0; state_id < 0 && i < 27; ++i) {
         uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);
         if (enter == g_base + target) { state_id = i; break; }

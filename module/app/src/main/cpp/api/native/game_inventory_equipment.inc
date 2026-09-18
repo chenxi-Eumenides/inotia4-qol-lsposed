@@ -1,6 +1,9 @@
 std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     if (!game_in_world()) return op_err("not in game");
-    if (extension_bag_is_logical_bag(bag)) {
+    // D2b：逻辑袋判定 / 扩展物品反查 / 投影同步经能力接口现取；能力缺失 = EB disabled，
+    // 逻辑袋视为不存在，落回物理路径（与 D2b-1 的降级口径一致）。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->is_logical_bag != nullptr && eb->is_logical_bag(bag)) {
         return extension_bag_put_jewel(role, bag, slot, equip_slot);
     }
     void* ch = member_or_null(role);
@@ -13,7 +16,8 @@ std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     if (jewel == nullptr) return op_err("jewel not found");
     int extension_bag = -1;
     int extension_slot = -1;
-    if (extension_bag_identify_native_item(jewel, &extension_bag, &extension_slot)) {
+    if (eb != nullptr && eb->identify_native_item != nullptr &&
+        eb->identify_native_item(jewel, &extension_bag, &extension_slot)) {
         return extension_bag_put_jewel(role, extension_bag + 6, extension_slot, equip_slot);
     }
     void* equip = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(ch) + C_EQUIP + equip_slot * 8);
@@ -28,7 +32,8 @@ std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
     // 引擎句柄为空会崩溃）与失败弹窗（UIPopupMsg_CreateOK，API 场景会向游戏内注入弹窗），
     // 故拆用其内部分派的原版底层函数 PutJewel + ConsumeItem，效果与原版一致。
     fn_consume_item(jewel);
-    extension_bag_sync_projected_slot(bag, slot);
+    // 投影同步：port 在 disabled 下为 no-op，能力缺失时跳过等价。
+    if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
     return op_ok();
 }
 std::string data_op_enchant(int role, int bag, int slot, int equip_slot) {
@@ -55,7 +60,9 @@ std::string data_op_enchant(int role, int bag, int slot, int equip_slot) {
     int r = fn_enchant_item(equip, scroll_cat);
     if (r != 0) return r == 7 ? op_err("not enchantable") : op_err("enchant failed");
     fn_consume_item(scroll);
-    extension_bag_sync_projected_slot(bag, slot);
+    // 投影同步：port 在 disabled 下为 no-op，能力缺失时跳过等价。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
     return op_ok();
 }
 std::string data_op_equip(int role, int bag, int slot) {
@@ -82,7 +89,11 @@ std::string data_op_equip(int role, int bag, int slot) {
     const int target = fn_find_equip_slot(ch, item);
     if (target < 0 || target >= C_EQUIP_SLOTS) return op_err("cannot equip");
     const int r = fn_equip_item_from_inven_to_slot(ch, bag, slot, target);
-    if (r) extension_bag_sync_projected_bag();
+    if (r) {
+        // 投影同步：port 在 disabled 下为 no-op，能力缺失时跳过等价。
+        const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+        if (eb != nullptr && eb->sync_projected_bag != nullptr) eb->sync_projected_bag();
+    }
     return r ? op_ok() : op_err("equip failed");
 }
 std::string data_op_unequip(int role, int32_t equip_slot) {
@@ -99,6 +110,10 @@ std::string data_op_unequip(int role, int32_t equip_slot) {
     // API 无 UI 按钮链，必须显式补同一判定，避免对原版 UI 永远不会脱下的装备直调执行函数。
     if (fn_can_unequip != nullptr && fn_can_unequip(ch, item) == 0) return op_err("cannot unequip");
     int r = fn_unequip(ch, equip_slot);
-    if (r) extension_bag_sync_projected_bag();
+    if (r) {
+        // 投影同步：port 在 disabled 下为 no-op，能力缺失时跳过等价。
+        const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+        if (eb != nullptr && eb->sync_projected_bag != nullptr) eb->sync_projected_bag();
+    }
     return r ? op_ok() : op_err("unequip failed");
 }

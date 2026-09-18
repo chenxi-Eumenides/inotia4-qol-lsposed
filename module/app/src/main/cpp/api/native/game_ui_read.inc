@@ -100,7 +100,11 @@ uintptr_t data_popup_top_vma() {
     if (data == 0) return 0;
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
-    if (extension_bag_is_inventory_enter(enter)) return F_PANEL_INVENTORY_ENTER;
+    // D2b：扩展袋 inventory enter 识别经能力接口现取；能力缺失 = EB disabled，视为非扩展 enter。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->is_inventory_enter != nullptr && eb->is_inventory_enter(enter)) {
+        return F_PANEL_INVENTORY_ENTER;
+    }
     // 模块替换过 enter 回调的面板（商店/合成/存档槽等）在栈里存的是模块 wrapper 地址，
     // 「enter - g_base」会得到负值而被当成无面板，须先经反查表还原成原版 VMA。
     const uintptr_t aliased = popup_enter_alias_resolve(enter);
