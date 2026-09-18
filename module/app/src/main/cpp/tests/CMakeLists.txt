@@ -40,7 +40,7 @@ add_test(NAME host_tests COMMAND host_tests)
 
 add_executable(stage4_hook_tests
     test_inventory_hook_stage4.cpp
-    ${CPP_DIR}/feature/patch/inventory_hook_stage4.cpp
+    ${CPP_DIR}/plugins/inventory_hooks/inventory_hook_stage4.cpp
 )
 target_include_directories(stage4_hook_tests PRIVATE
     ${CPP_DIR}

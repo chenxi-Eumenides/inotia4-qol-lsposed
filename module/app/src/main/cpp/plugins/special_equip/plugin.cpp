@@ -7,7 +7,7 @@
 
 // 过渡依赖（B2 拆分 inventory 域后清除）：出售按钮 UIEquip_ButtonDestroyExe 已被 legacy
 // inventory hook 单点占用（同址 NativeHook 二次挂载 rc=-1），本插件只能注册谓词。
-// 此处前置声明注册入口而不 include feature/patch/native_inventory_hook.h：该头归属
+// 此处前置声明注册入口而不 include plugins/inventory_hooks/native_inventory_hook.h：该头归属
 // plugins/patch，include 会形成 feature→feature 层依赖（新增架构违规）。B2 拆分 inventory
 // 域后改为共享资源分派消费者，此声明随之删除。
 void inventory_native_hook_set_sell_gate(bool (*predicate)());

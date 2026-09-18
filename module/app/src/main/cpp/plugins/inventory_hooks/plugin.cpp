@@ -1,15 +1,12 @@
 #include "plugins/inventory_hooks/plugin.h"
+#include "plugins/inventory_hooks/claims.h"
 
 #include <cstdint>
 
-// 过渡依赖（B2a-1 → B2c）：库存 wrapper 的 claims 表与 backup 目标仍留在
-// feature/patch/native_inventory_hook.cpp（handler 只能在该 TU 取址），本插件经两个
-// 自由函数桥接。两个方向都不 include 对方头文件：include 会形成 feature→feature 层
-// 依赖（架构违规），与 plugins/special_equip/plugin.cpp 的前置声明先例一致。
-// 清除阶段：B2c 把 wrapper 业务搬入本插件后，两函数随业务迁入并删除前置声明。
-const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count);
-int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup);
-
+// D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
+// feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
+// feature→feature 层依赖而设的跨层全局桥前置声明已删除。
+//
 // B2a-1 禁止 deactivate：extension_bag / 自动出售 / 合成等 legacy 消费者直接依赖这 24 个
 // hook 的 wrapper 语义（扩展袋读取、扩展补扣、出售门禁等）。deactivate 会由宿主物理
 // 释放全部资源，令 legacy 消费者在 wrapper 缺失下运行；本阶段只允许进程内常驻。
@@ -25,7 +22,7 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
-    // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体仍在 feature/patch。
+    // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体在本插件 TU。
     return 0;
 }
 
@@ -50,15 +47,15 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
     (void)ctx;
-    // 原函数入口交还 wrapper 所有者；桥对未知 id / 空 backup 返回非 0 → 宿主逆序回滚本
-    // 插件全部资源并置 failed（fail-closed，禁止 wrapper 在 backup 缺失下运行）。
+    // 原函数入口交还 wrapper 所有者；同目录 claims.h 入口对未知 id / 空 backup 返回非 0
+    // → 宿主逆序回滚本插件全部资源并置 failed（fail-closed，禁止 wrapper 在 backup 缺失下运行）。
     return inventory_hooks_bind_backup(resource_id, backup);
 }
 
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
-    // claims 表本体在 feature/patch（handler 取址限制），此处首次调用经桥取得 24 条声明；
+    // claims 表本体在 native_inventory_hook.cpp（handler 取址限制），本插件同层直接引用；
     // 函数内静态保证描述符生命周期 ≥ 进程。
     static const contracts::PluginDescriptor descriptor = [] {
         uint32_t count = 0;

@@ -1,4 +1,4 @@
-#include "feature/patch/inventory_hook_stage4.h"
+#include "plugins/inventory_hooks/inventory_hook_stage4.h"
 
 #include "data/native/game_symbols.h"
 

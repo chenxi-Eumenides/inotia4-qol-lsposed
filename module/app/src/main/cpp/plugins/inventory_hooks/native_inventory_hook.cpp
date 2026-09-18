@@ -1,13 +1,20 @@
 #include "native_inventory_hook.h"
-#include "inventory_find_item_poc.h"
 #include "inventory_hook_stage4.h"
+#include "claims.h"
+
+// D2c-2a：inventory_find_item_poc 留 feature/patch（D2c-2b/2c 处理）；include 它会新增
+// plugins/inventory_hooks → plugins/patch 跨插件层依赖，故本 TU 仅前置声明其入口，
+// 定义仍留在 feature/patch（与既有前置声明先例一致），D2c-2b 收口时改建正式依赖。
+using InventoryFindItemCallback = void* (*)(int32_t);
+void* inventory_find_item_original_first(int32_t category, InventoryFindItemCallback backup,
+                                         InventoryFindItemCallback extension_fallback,
+                                         bool& recursive_guard);
 
 #include "contracts/plugin.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/qol_log.h"
 #include "game/read/stack_codec.h"
 #include "data/native/item_class.h"
-#include "plugins/extension_bag/game_ui_virtbag.h"
 #include "game_access.h"
 #include "game_inventory.h"
 #include "contracts/stack_limit.h"
@@ -22,6 +29,28 @@
 namespace {
 
 constexpr uint32_t kNativeApiVersion = 2;
+
+// D2c-2a：扩展背包经 capability 现取（不缓存跨帧指针）。能力缺失或 enabled()==false
+// 与原 extension_bag_enabled()==false 等价（EB disabled）；调用方按 disabled 降级
+// （与 D2b-1/D2b-2 口径一致）。本 TU 不再直接依赖 EB 头与 EB 符号（弹窗 UI 见
+// 下方消费者侧内联）。
+const qol::contracts::ExtensionBagApi* eb_active() {
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb == nullptr || eb->enabled == nullptr || !eb->enabled()) return nullptr;
+    return eb;
+}
+
+// D2c-2a：原 EB port extension_bag_show_*_popup（TextData 6=背包已满 / 7=袋非空）在
+// 消费者侧内联。契约 ExtensionBagApi 未导出弹窗入口（handle_original_bag_unequip 只
+// 回传标志），弹窗为纯游戏 UI 调用，由本消费者自持，避免直接依赖 EB 符号。
+void show_inventory_popup(int text_id) {
+    if (g_base == 0) return;
+    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+    if (popup == 0) return;
+    typedef void (*UiPopupFn)(int, int, int, int);
+    reinterpret_cast<UiPopupFn>(popup)(text_id, 0, 0, 0);
+}
 
 std::mutex g_hook_mutex;
 NativeHookFunType g_hook_func = nullptr;
@@ -154,8 +183,9 @@ bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
 // bits18–23、袋容量 bits0–24）一律返回 false，调用方保持原版行为；堆叠上限关闭态按
 // R-47 决策 b 以模式视图（b 域）参与取证与回写，effective_write_count 只写 b、保留 a。
 bool s2_writeback_gate(void* item) {
+    const bool extension_enabled = eb_active() != nullptr;
     return item != nullptr &&
-           stack_codec::writeback_needed(extension_bag_enabled(), stack_limit_enabled()) &&
+           stack_codec::writeback_needed(extension_enabled, stack_limit_enabled()) &&
            item_count_encoding(item) == stack_codec::CountEncoding::kEncoded;
 }
 
@@ -226,13 +256,14 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
 
 void log_extension_item_observation(const char* operation, void* item, bool recursive,
                                     int result_known, int result) {
-    if (virtual_bag_native_call_active()) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
         QOL_LOG_INFO(QolDomain::kInventory,
                             "%s original-only native_call=1 recursive=%d result_known=%d result=%d",
                             operation, recursive ? 1 : 0, result_known, result);
         return;
     }
-    if (!extension_bag_enabled()) {
+    if (eb == nullptr) {
         QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "%s extension disabled recursive=%d result_known=%d result=%d",
                             operation, recursive ? 1 : 0, result_known, result);
@@ -240,7 +271,8 @@ void log_extension_item_observation(const char* operation, void* item, bool recu
     }
     int bag = -1;
     int slot = -1;
-    const bool extension_item = extension_bag_identify_native_item(item, &bag, &slot);
+    const bool extension_item = eb->identify_native_item != nullptr &&
+                                eb->identify_native_item(item, &bag, &slot);
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "%s extension_item=%d bag=%d slot=%d recursive=%d result_known=%d result=%d",
                         operation, extension_item ? 1 : 0, bag, slot, recursive ? 1 : 0,
@@ -248,8 +280,11 @@ void log_extension_item_observation(const char* operation, void* item, bool recu
 }
 
 void* find_item_wrapper(int32_t category) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
     const uint64_t call = g_find_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (virtual_bag_native_call_active() || g_in_find_item || g_backup_find_item == nullptr) {
+    const bool native_call =
+        eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active();
+    if (native_call || g_in_find_item || g_backup_find_item == nullptr) {
         QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "FindItem call=%llu category=%d recursive=%d backup=%p",
                             static_cast<unsigned long long>(call), category,
@@ -266,16 +301,20 @@ void* find_item_wrapper(int32_t category) {
                         reinterpret_cast<void*>(g_backup_find_item));
     void* result = inventory_find_item_original_first(
         category, g_backup_find_item,
-        extension_bag_enabled() ? extension_bag_find_native_item : nullptr,
+        (eb != nullptr && eb->find_native_item != nullptr) ? eb->find_native_item : nullptr,
         g_in_find_item);
     log_extension_item_observation("FindItem", result, false, 1, result != nullptr ? 1 : 0);
     return result;
 }
 
 int extension_item_count(int32_t category) {
-    if (virtual_bag_native_call_active()) return 0;
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb == nullptr) return 0;
+    if (eb->native_call_active != nullptr && eb->native_call_active()) return 0;
+    if (eb->for_each_logical_item == nullptr) return 0;
     struct Context { int32_t category; int count; } context{category, 0};
-    extension_bag_for_each_logical_item([](int, int, int item_category, int item_count, void* raw) -> bool {
+    eb->for_each_logical_item([](int32_t, int32_t, int32_t item_category, int32_t item_count,
+                                 void* raw) -> bool {
         Context* context = static_cast<Context*>(raw);
         if (item_category == context->category && item_count > 0) context->count += item_count;
         return false;
@@ -284,21 +323,23 @@ int extension_item_count(int32_t category) {
 }
 
 int have_item_wrapper(int32_t category) {
-    if (virtual_bag_native_call_active()) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
         return stage4_have_item_original_only(category, g_backup_have_item, g_in_have_item);
     }
     return stage4_have_item(category, g_backup_have_item,
-                            extension_bag_enabled() ? extension_item_count : nullptr,
+                            eb != nullptr ? extension_item_count : nullptr,
                             g_in_have_item);
 }
 
 int get_item_count_wrapper(int32_t category) {
-    if (virtual_bag_native_call_active()) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
         return stage4_get_item_count_original_only(category, g_backup_get_item_count,
                                                    g_in_get_item_count);
     }
     return stage4_get_item_count(category, g_backup_get_item_count,
-                                 extension_bag_enabled() ? extension_item_count : nullptr,
+                                 eb != nullptr ? extension_item_count : nullptr,
                                  g_in_get_item_count);
 }
 
@@ -326,22 +367,27 @@ int get_cumulate_count_wrapper(void* item) {
 }
 
 int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
-    if (virtual_bag_native_call_active()) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
         return stage4_is_having_empty_slot_original_only(
             needed, include_task_bag, g_backup_is_having_empty_slot,
             g_in_is_having_empty_slot);
     }
     return stage4_is_having_empty_slot(needed, include_task_bag,
                                         g_backup_is_having_empty_slot,
-                                        extension_bag_enabled() ? extension_bag_has_empty_slots : nullptr,
+                                        (eb != nullptr && eb->has_empty_slots != nullptr)
+                                            ? eb->has_empty_slots
+                                            : nullptr,
                                         g_in_is_having_empty_slot);
 }
 
 int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
     const int result = stage4_unequip_item_to_inven(character, equip_slot,
                                                     g_backup_unequip_item_to_inven,
-                                                    extension_bag_enabled()
-                                                        ? extension_bag_adopt_unequipped_item
+                                                    (eb != nullptr &&
+                                                     eb->adopt_unequipped_item != nullptr)
+                                                        ? eb->adopt_unequipped_item
                                                         : nullptr,
                                                     g_in_unequip_item_to_inven);
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
@@ -359,9 +405,10 @@ void consume_item_wrapper(void* item) {
                         reinterpret_cast<void*>(g_backup_consume_item));
     int extension_bag = -1;
     int extension_slot = -1;
-    const bool extension_item = extension_bag_enabled() &&
-                                extension_bag_identify_native_item(item, &extension_bag,
-                                                                   &extension_slot);
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    const bool extension_item = eb != nullptr && eb->identify_native_item != nullptr &&
+                                eb->identify_native_item(item, &extension_bag,
+                                                         &extension_slot);
     // S2 写侧借位（减语义；R-45/R-46/R-49，仅启用态）：原版读 b 判 count>1——
     // b≤1 且全量≥2（a≥1）时原版落入整堆删除分支，a 段随对象一起丢失。处置：
     // backup 前把 b 预置为 2（a 与低位原样），原版按 b=2>1 走 b-1 递减写 b=1；
@@ -388,8 +435,9 @@ void consume_item_wrapper(void* item) {
         }
     }
     const bool dispatched = stage4_consume_item(
-        item, extension_bag_enabled() ? extension_bag_identify_native_item : nullptr,
-        extension_bag_enabled() ? extension_bag_consume_native_item : nullptr,
+        item,
+        (eb != nullptr && eb->identify_native_item != nullptr) ? eb->identify_native_item : nullptr,
+        (eb != nullptr && eb->consume_native_item != nullptr) ? eb->consume_native_item : nullptr,
         g_backup_consume_item, g_in_consume_item);
     if (s2_borrow_armed && !extension_item) {
         if (s2_physical_slot_item(borrow_bag, borrow_slot) != item) {
@@ -435,9 +483,14 @@ int remove_item_wrapper(void* item) {
                         static_cast<unsigned long long>(call), item,
                         g_in_remove_item ? 1 : 0,
                         reinterpret_cast<void*>(g_backup_remove_item));
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
     return stage4_remove_item(item,
-                              extension_bag_enabled() ? extension_bag_identify_native_item : nullptr,
-                              extension_bag_enabled() ? extension_bag_remove_native_item : nullptr,
+                              (eb != nullptr && eb->identify_native_item != nullptr)
+                                  ? eb->identify_native_item
+                                  : nullptr,
+                              (eb != nullptr && eb->remove_native_item != nullptr)
+                                  ? eb->remove_native_item
+                                  : nullptr,
                               g_backup_remove_item,
                               g_in_remove_item);
 }
@@ -450,17 +503,20 @@ int save_item_wrapper(void* item) {
     // 发奖代码零改动即支持扩展背包。
     // 商店扩展视图会把窗口原版袋容量字临时放大；买入等原版写入若以放大
     // 容量扫空槽会把物品写进超过真实容量的槽位。backup 前先恢复商店投影。
-    if (extension_bag_enabled()) {
-        extension_bag_store_restore_for_original_write();
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr) {
+        if (eb->store_restore_for_original_write != nullptr) {
+            eb->store_restore_for_original_write();
+        }
         // S2 拾取并入扩展同类堆（R-52）：物品可堆叠且扩展袋存在同 category、
         // 归一化 payload 相同的堆，且模式视图相加不超上限时直接并入扩展堆并
         // 上报成功；否则保持原版入库（含原版同类堆合并）。修复拾取可堆叠
         // 物品在原版背包新开格、不并入扩展同类堆的缺陷。
-        if (extension_bag_merge_native_item(item)) return 1;
+        if (eb->merge_native_item != nullptr && eb->merge_native_item(item)) return 1;
     }
     const int result = g_backup_save_item(item);
     if (result != 0) return result;
-    if (extension_bag_adopt_native_item(item)) return 1;
+    if (eb != nullptr && eb->adopt_native_item != nullptr && eb->adopt_native_item(item)) return 1;
     return 0;
 }
 
@@ -657,8 +713,8 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
     // 部分按 category 从扩展袋补扣（合成药水/宝石孔/混沌/传说等按类别批量扣料即
     // 自动生效）。物理实扣 = 调用前后 H-03 总数差（H-03 = 物理 + 扩展，原版不动
     // 扩展，故差值即物理实扣）。
-    const bool extension_fallback =
-        count > 0 && category > 0 && extension_bag_enabled();
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    const bool extension_fallback = count > 0 && category > 0 && eb != nullptr;
     const int total_before =
         extension_fallback ? get_item_count_wrapper(category) : 0;
     S2RemoveDataCapture capture{};
@@ -672,8 +728,8 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
         const int total_after = get_item_count_wrapper(category);
         const int shortfall =
             stage4_remove_data_extension_shortfall(total_before, total_after, count);
-        if (shortfall > 0) {
-            const int consumed = extension_bag_consume_category(category, shortfall);
+        if (shortfall > 0 && eb->consume_category != nullptr) {
+            const int consumed = eb->consume_category(category, shortfall);
             if (consumed < shortfall) {
                 QOL_LOG_INFO(QolDomain::kInventory,
                                     "RemoveItemData extension fallback category=%d "
@@ -691,7 +747,12 @@ void refresh_item_area_wrapper() {
         return;
     }
     ++g_refresh_depth;
-    virtual_bag_refresh_item_area_with_gate();
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->refresh_item_area_with_gate != nullptr) {
+        eb->refresh_item_area_with_gate();
+    } else {
+        inventory_native_hook_call_refresh_item_area_original();
+    }
     --g_refresh_depth;
 }
 
@@ -702,7 +763,7 @@ uint64_t move_item_caller_offset() {
 
 void log_move_item_observation(const char* phase, void* item, int count, int target_bag,
                                int target_slot, uint64_t caller_offset,
-                               const VirtualBagMoveItemObservation& observation) {
+                               const qol::contracts::ExtensionBagMoveObservation& observation) {
     QOL_LOG_INFO(QolDomain::kInventory,
         "MoveItem %s item=%p count=%d target=%d/%d caller=libgame+0x%llx "
         "extension=%d/%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_ptr=%p target_ptr=%p "
@@ -720,13 +781,16 @@ void log_move_item_observation(const char* phase, void* item, int count, int tar
 int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     // 身份与取证数据在 g_virtual_bag_mtx 短临界区内采集，返回后立即放锁；禁止持锁
     // 调 backup，因为原版函数可能进入 RemoveItem/SaveItem/ConsumeItem hooks 再 try_lock。
-    VirtualBagMoveItemObservation before{};
-    const bool captured = virtual_bag_capture_move_item_observation(
-        item, target_bag, target_slot, &before);
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    qol::contracts::ExtensionBagMoveObservation before{};
+    const bool captured = eb != nullptr && eb->capture_move_item_observation != nullptr &&
+                          eb->capture_move_item_observation(item, target_bag, target_slot, &before);
     const uint64_t caller_offset = move_item_caller_offset();
     // 仅允许装备交换 wrapper 主动借入物理槽时通过；普通投影/拖动仍必须
     // 拒绝 backup，避免扩展对象进入原版移动链。该例外不放宽其它 caller。
-    if (captured && before.extension_item && !extension_bag_internal_equip_active()) {
+    const bool internal_equip_active =
+        eb != nullptr && eb->internal_equip_active != nullptr && eb->internal_equip_active();
+    if (captured && before.extension_item && !internal_equip_active) {
         QOL_LOG_ERROR(QolDomain::kInventory,
             "MoveItem GUARD reject item=%p count=%d target=%d/%d caller=libgame+0x%llx "
             "extension=%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_ptr=%p target_ptr=%p "
@@ -758,8 +822,9 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
         ? 0 : g_backup_move_item(item, count, target_bag, target_slot);
     s2_merge_writeback(move_merge, "MoveItem");
     if (observe) {
-        VirtualBagMoveItemObservation after{};
-        if (virtual_bag_capture_move_item_observation(item, target_bag, target_slot, &after)) {
+        qol::contracts::ExtensionBagMoveObservation after{};
+        if (eb != nullptr && eb->capture_move_item_observation != nullptr &&
+            eb->capture_move_item_observation(item, target_bag, target_slot, &after)) {
             log_move_item_observation("post", item, count, target_bag, target_slot,
                                       caller_offset, after);
         }
@@ -775,21 +840,17 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
 
 int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t slot,
                                           int32_t equip_slot) {
-    if (extension_bag_internal_equip_active()) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->internal_equip_active != nullptr && eb->internal_equip_active()) {
         if (g_backup_equip_item_from_inven_to_slot == nullptr) return 0;
         return g_backup_equip_item_from_inven_to_slot(character, bag, slot, equip_slot);
     }
-    const int result = stage4_equip_item(character, bag, slot, equip_slot, inventory_item_at,
-                                         extension_bag_enabled()
-                                             ? extension_bag_identify_native_item
-                                             : nullptr,
-                                         extension_bag_enabled()
-                                             ? extension_bag_equip_projected_item
-                                             : nullptr,
-                                         g_backup_equip_item_from_inven_to_slot,
-                                         extension_bag_enabled()
-                                             ? extension_bag_view_item_at
-                                             : nullptr);
+    const int result = stage4_equip_item(
+        character, bag, slot, equip_slot, inventory_item_at,
+        (eb != nullptr && eb->identify_native_item != nullptr) ? eb->identify_native_item : nullptr,
+        (eb != nullptr && eb->equip_projected_item != nullptr) ? eb->equip_projected_item : nullptr,
+        g_backup_equip_item_from_inven_to_slot,
+        (eb != nullptr && eb->view_item_at != nullptr) ? eb->view_item_at : nullptr);
     QOL_LOG_INFO(QolDomain::kInventory,
                         "EquipItemFromInvenToSlot bag=%d slot=%d equip_slot=%d result=%d",
                         bag, slot, equip_slot, result);
@@ -797,20 +858,25 @@ int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t 
 }
 
 int put_jewel_wrapper(void* equip_item, void* jewel_item) {
-    return stage4_put_jewel(equip_item, jewel_item,
-                            extension_bag_enabled() ? extension_bag_identify_native_item : nullptr,
-                            g_backup_put_jewel,
-                            extension_bag_enabled() ? virtual_bag_put_jewel_native : nullptr);
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    return stage4_put_jewel(
+        equip_item, jewel_item,
+        (eb != nullptr && eb->identify_native_item != nullptr) ? eb->identify_native_item : nullptr,
+        g_backup_put_jewel,
+        (eb != nullptr && eb->put_jewel_native != nullptr) ? eb->put_jewel_native : nullptr);
 }
 
 void button_equip_exe_wrapper(void* button) {
     // 装备按钮函数级接管：详情物品为扩展槽背包物品时在原函数内联删源
     // （b7e04）之前分流，源物品销毁与袋表移交由扩展事务完成；其余一律
     // 走原函数，保持完全原版流程。
-    const VirtualBagEquipButtonResult result =
-        virtual_bag_handle_backpack_button_equip_result();
-    if (result == VirtualBagEquipButtonResult::kHandled) return;
-    if (result == VirtualBagEquipButtonResult::kBlocked) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    const qol::contracts::ExtensionBagEquipButtonResult result =
+        (eb != nullptr && eb->handle_backpack_button_equip_result != nullptr)
+            ? eb->handle_backpack_button_equip_result()
+            : qol::contracts::ExtensionBagEquipButtonResult::kNotExtension;
+    if (result == qol::contracts::ExtensionBagEquipButtonResult::kHandled) return;
+    if (result == qol::contracts::ExtensionBagEquipButtonResult::kBlocked) {
         QOL_LOG_WARN(QolDomain::kInventory,
                             "ButtonEquipExe extension item blocked; original backup skipped");
         return;
@@ -843,11 +909,13 @@ void button_unequip_exe_wrapper(void* button) {
     // 卸装备与其他场景一律走原函数。
     bool no_space = false;
     bool not_empty = false;
-    if (extension_bag_handle_original_bag_unequip(&no_space, &not_empty)) {
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->handle_original_bag_unequip != nullptr &&
+        eb->handle_original_bag_unequip(&no_space, &not_empty)) {
         if (not_empty) {
-            extension_bag_show_not_empty_popup();
+            show_inventory_popup(7);  // TextData 7 = "袋非空"
         } else if (no_space) {
-            extension_bag_show_no_space_popup();
+            show_inventory_popup(6);  // TextData 6 = "背包已满"
         }
         return;
     }
@@ -855,7 +923,11 @@ void button_unequip_exe_wrapper(void* button) {
 }
 
 void ok_confirm_use_item_wrapper(void* item) {
-    if (virtual_bag_handle_confirm_use_item(item)) return;
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->handle_confirm_use_item != nullptr &&
+        eb->handle_confirm_use_item(item)) {
+        return;
+    }
     if (g_backup_ok_confirm_use_item == nullptr) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "UIEquip_OKConfrimUseItem backup unavailable item=%p", item);
@@ -868,7 +940,11 @@ void ok_confirm_use_item_wrapper(void* item) {
 // （用模块详情身份调原版 MakeMercenary，消耗交给已 Hook 的 INVEN_RemoveItem）；
 // 其余（原版袋物品/非佣兵徽章）一律透传原函数，保持完全原版流程。
 void button_use_mercenary_seal_exe_wrapper(void* button) {
-    if (virtual_bag_handle_use_mercenary_seal()) return;
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->handle_use_mercenary_seal != nullptr &&
+        eb->handle_use_mercenary_seal()) {
+        return;
+    }
     if (g_backup_button_use_mercenary_seal_exe == nullptr) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "UIEquip_ButtonUseMercenarySealExe backup unavailable button=%p",
@@ -982,19 +1058,21 @@ uint64_t ok_destroy_item_wrapper() {
 
 uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
     uint64_t original_result = 0;
-    const VirtualBagEquipControlEventResult result =
-        virtual_bag_handle_equip_control_event(
-            control, event, x2, param,
-            g_backup_equip_control_event_proc, &original_result);
-    if (result == VirtualBagEquipControlEventResult::kHandled) return original_result;
-    if (result == VirtualBagEquipControlEventResult::kBlocked) return 0;
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    const qol::contracts::ExtensionBagEquipEventResult result =
+        (eb != nullptr && eb->handle_equip_control_event != nullptr)
+            ? eb->handle_equip_control_event(control, event, x2, param,
+                                             g_backup_equip_control_event_proc, &original_result)
+            : qol::contracts::ExtensionBagEquipEventResult::kNotExtension;
+    if (result == qol::contracts::ExtensionBagEquipEventResult::kHandled) return original_result;
+    if (result == qol::contracts::ExtensionBagEquipEventResult::kBlocked) return 0;
     return g_backup_equip_control_event_proc == nullptr
         ? 0 : g_backup_equip_control_event_proc(control, event, x2, param);
 }
 
 // ---------------------------------------------------------------------------
 // 声明式资源声明（B2a-1）：24 条入口 hook 的 claims 表。wrapper 业务体在本 TU，
-// handler 取址只能在此处；插件 plugins/inventory_hooks 经全局桥函数
+// handler 取址只能在此处；同插件的 plugin.cpp 经本目录 claims.h 直接引用
 // inventory_hooks_claims / inventory_hooks_bind_backup 取得本表并交还 backup。
 // 安装顺序、失败回滚与物理还原归宿主声明式引擎（hooks/install + hooks/transaction +
 // host/plugin_registry），本 TU 不再自带安装引擎。
@@ -1002,7 +1080,7 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
 constexpr const char* kClaimOwner = "inventory_hooks";
 constexpr const char* kClaimReason =
     "库存行为 wrapper 的函数级入口：扩展袋读改写、S2 写侧进位/借位、出售门禁与 "
-    "R-55/R-56 回调层接管均需在函数入口分流；业务体过渡期留在 feature/patch（B2c 迁移）";
+    "R-55/R-56 回调层接管均需在函数入口分流；业务体随 D2c-2a 迁入本插件（plugins/inventory_hooks）";
 
 #define INVENTORY_HOOK_CLAIM(CLAIM_ID, CLAIM_SYMBOL, HANDLER)                          \
     {CLAIM_ID, CLAIM_SYMBOL, qol::contracts::ResourceMechanism::kEntryHook,           \

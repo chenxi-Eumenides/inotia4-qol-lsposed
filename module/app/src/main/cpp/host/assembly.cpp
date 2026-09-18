@@ -5,7 +5,7 @@
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
 #include "contracts/ownership.h"
-#include "feature/patch/native_inventory_hook.h"
+#include "plugins/inventory_hooks/native_inventory_hook.h"
 #include "plugins/attribute_range/plugin.h"
 #include "plugins/autosell/plugin.h"
 #include "plugins/core.ui/plugin.h"

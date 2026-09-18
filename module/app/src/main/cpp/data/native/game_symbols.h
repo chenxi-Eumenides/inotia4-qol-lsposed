@@ -892,7 +892,7 @@ constexpr uintptr_t F_UIEQUIP_OK_DESTROY_ITEM_VMA = 0xb83d0;    // void () 销�
 //    OKDestroyItem 尾声把金额放 x0 返回给弹窗第 6 参（确认框显示金额）。
 //  - 弹窗 OK：UIPopupMsg_ButtonOKExe 0xcaa14 `blr x1`（fpOK）；真实结算。
 // 两态由 hook 的 thread_local「正在 UIEquip_ButtonDestroyExe 内」标记区分（返回地址
-// 经 Dobby 桥后不可信，见 native_inventory_hook.cpp）。仅弹窗 OK 真实接管；按钮预演
+// 经 Dobby 桥后不可信，见 plugins/inventory_hooks/native_inventory_hook.cpp）。仅弹窗 OK 真实接管；按钮预演
 // 只回填展示金额，否则按下按钮即提前售出、取消无法回滚。
 // G_UIEQUIP_DESC_TYPE_VMA == 2 表示「背包物品详情」（0=装备详情、1=扩展/其它袋详情）。
 // 原版 OKDestroyItem 仅 2 走 0x1261c4 背包结算分支。
