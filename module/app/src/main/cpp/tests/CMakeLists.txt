@@ -654,3 +654,15 @@ target_compile_features(host_adapter_tests PRIVATE cxx_std_17)
 set_target_properties(host_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(host_adapter_tests PRIVATE Threads::Threads)
 add_test(NAME host_adapter_tests COMMAND host_adapter_tests)
+
+# U11-1：UI contract ABI + host ui-kit adapter 转发/错误语义测试。
+add_executable(ui_adapter_tests
+    test_ui_adapter.cpp
+    ${CPP_DIR}/host/ui_adapter.cpp
+)
+target_include_directories(ui_adapter_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(ui_adapter_tests PRIVATE cxx_std_17)
+set_target_properties(ui_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME ui_adapter_tests COMMAND ui_adapter_tests)

@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 17 | 1281 |
+| `contracts/` | 18 | 1401 |
 | `game/` | 37 | 2734 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 462 |
 | `plugins/` | 152 | 28948 |
-| `host/` | 15 | 3635 |
-| **合计** | **261** | **40779** |
+| `host/` | 17 | 3871 |
+| **合计** | **264** | **41135** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -55,15 +55,15 @@
 
 ### CTest target 分类
 
-- 全仓 target 总数：**45**
+- 全仓 target 总数：**46**
 - 新架构/已迁移：**32**（机制/宿主 18 + 已迁移功能 14）
-- legacy：**13**
+- legacy：**14**
 
 新架构/已迁移（32）：
 - 机制/宿主（18）：`capability_lifecycle_tests`、`extension_bag_contract_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_panels_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
 - 已迁移功能（14）：`attribute_quality_tests`、`attribute_range_display_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`quest_lifecycle_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`、`text_layer_plugin_tests`
 
-legacy（13）：`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_adapter_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`world_teleport_status_tests`
+legacy（14）：`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_adapter_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`ui_adapter_tests`、`world_teleport_status_tests`
 <!-- END GENERATED:stats -->
 
 ## 人工导航

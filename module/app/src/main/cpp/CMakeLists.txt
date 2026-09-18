@@ -182,6 +182,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
     host/game_host.cpp
+    host/ui_adapter.cpp
 )
 
 # P1 最小诊断接口：功能状态 JSON（末尾追加，不改上方既有行）

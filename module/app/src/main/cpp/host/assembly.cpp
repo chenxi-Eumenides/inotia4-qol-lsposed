@@ -33,6 +33,7 @@
 #include "host/adapters.h"
 #include "host/frame_source.h"
 #include "host/plugin_registry.h"
+#include "host/ui_adapter.h"
 #include "infra/commands.h"
 #include "infra/config.h"
 #include "infra/runtime.h"
@@ -131,6 +132,8 @@ bool drain_commands_task(int64_t frame, void* ctx) {
 
 bool assembly_init() {
     game_host_mark_main_thread();
+    // g_host_sdk 是 ABI 生命周期对象；adapter 在宿主装配期注入，随后由所有插件共享。
+    const_cast<contracts::QolHostSdk&>(g_host_sdk).ui = ui_adapter();
     // 仅在完整成功后置位：失败可重试，成功则幂等。
     if (g_assembly_done) return true;
 
