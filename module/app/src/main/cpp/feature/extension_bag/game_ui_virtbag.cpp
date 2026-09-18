@@ -19,7 +19,7 @@
 #include "feature/extension_bag/extension_bag_context.h"
 #include "feature/extension_bag/extension_bag_geometry.h"
 #include "feature/extension_bag/extension_bag_logging.h"
-#include "feature/ui/game_ui_kit.h"
+#include "game/access/ui_kit.h"
 
 #include <atomic>
 #include <cerrno>

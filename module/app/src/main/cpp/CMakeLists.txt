@@ -37,8 +37,8 @@ add_library(gamebridge SHARED
     feature/patch/inventory_find_item_poc.cpp
     feature/patch/inventory_hook_stage4.cpp
     feature/ui/game_ui_exp.cpp
-    feature/ui/game_ui_kit.cpp
-    feature/ui/game_ui_components.cpp
+    game/access/ui_kit.cpp
+    game/access/ui_components.cpp
     feature/ui/game_ui_settings.cpp
     feature/ui/game_ui_savebackup.cpp
     feature/ui/native_choice.cpp

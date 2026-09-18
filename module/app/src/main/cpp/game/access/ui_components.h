@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game_ui_kit.h"
+#include "game/access/ui_kit.h"
 
 namespace ui_original {
 

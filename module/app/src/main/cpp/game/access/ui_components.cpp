@@ -1,4 +1,4 @@
-#include "game_ui_components.h"
+#include "game/access/ui_components.h"
 
 #include "game_symbols.h"
 

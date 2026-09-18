@@ -9,7 +9,7 @@
 // 导出选中槽 / 导入选中备份到选中槽 / 删除选中备份 + 二次确认 + 结果提示。
 //
 // 设计要点（与 game_ui_settings.cpp 同构，独立文件避免混入设置页逻辑）：
-// - 控件原语全部走 feature/ui/game_ui_kit.h，无列表/滚动控件，自造带翻页的虚拟列表。
+// - 控件原语全部走 game/access/ui_kit.h，无列表/滚动控件，自造带翻页的虚拟列表。
 // - root 不入控件树，触摸事件在 PopupState event 内自分发；root 的 CO_CONTROL_PROC
 //   必须清零（否则 GetData=null SIGSEGV）。
 // - 注入生命周期：仅在 main_menu 注入 state 条目；离开主菜单还原原始回调。

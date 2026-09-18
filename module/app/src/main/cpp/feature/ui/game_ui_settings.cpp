@@ -7,8 +7,8 @@
 #include "game_state.h"
 #include "game_symbols.h"
 #include "game_ui.h"
-#include "game_ui_kit.h"
-#include "game_ui_components.h"
+#include "game/access/ui_kit.h"
+#include "game/access/ui_components.h"
 #include "game_ui_savebackup.h"
 
 #include "core/native/qol_log.h"

@@ -1,4 +1,4 @@
-#include "game_ui_kit.h"
+#include "game/access/ui_kit.h"
 
 #include "game_access.h"
 #include "game_symbols.h"
@@ -41,5 +41,5 @@ void set_execute_proc(void* ctrl, UiClickProc proc) {
 }  // namespace
 
 
-#include "game_ui_kit_controls.inc"
-#include "game_ui_kit_render.inc"
+#include "game/access/ui_kit_controls.inc"
+#include "game/access/ui_kit_render.inc"

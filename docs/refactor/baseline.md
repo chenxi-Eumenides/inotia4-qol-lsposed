@@ -33,7 +33,7 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 41 |
+| `game` | 47 |
 | `hooks` | 8 |
 | `host` | 28 |
 | `infra` | 45 |
@@ -52,7 +52,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 4 |
-| `plugins/ui` | 31 |
+| `plugins/ui` | 25 |
 | `plugins/world_teleport` | 6 |
 | **合计** | **332** |
 
@@ -135,19 +135,19 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 142 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 141 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
-| `plugins/ui` | `game` | 22 |
+| `plugins/ui` | `game` | 24 |
 | `host` | `game` | 14 |
 | `plugins/ui` | `infra` | 13 |
 | `host` | `contracts` | 12 |
+| `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
 | `plugins/autosell` | `infra` | 10 |
-| `plugins/extension_bag` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `host` | `patch` | 9 |
 | `domains/world` | `game` | 7 |
@@ -266,7 +266,7 @@
 | --- | --- | --- |
 | `extension_bag` | `plugins/extension_bag` | 32 |
 | `patch` | `plugins/patch` | 9 |
-| `ui` | `plugins/ui` | 31 |
+| `ui` | `plugins/ui` | 25 |
 
 ### 6.2 已迁移 `plugins/*`（13）
 
