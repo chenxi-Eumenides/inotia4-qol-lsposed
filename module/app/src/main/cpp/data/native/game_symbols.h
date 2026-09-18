@@ -513,6 +513,7 @@ constexpr uintptr_t F_STATE_SET_VMA = 0xd46a8;                // void (int32_t) 
 constexpr uintptr_t F_MAINPROCESS_VMA = 0xd4984;                          // void MainProcess()（游戏逻辑帧根，GLThread）
 constexpr size_t F_MAINPROCESS_NEXT_STATE_CALL_OFF = 0x40;                // 内 bl STATE_NextStartProcess
 constexpr uint32_t MAINPROCESS_NEXT_STATE_CALL_WORD = 0x97ffff3d;         // MainProcess +0x40 原 bl 指令字（llvm-objdump 核对）
+constexpr uint32_t F_SCENE_DRAW_EQUIP_DESC_CALL_WORD = 0x97fdaadb;       // Scene_Draw_POPUP_SC_EQUIP +0x1cc 原 bl UIDesc_Draw 指令字（自动出售入口按钮绘制宿主；llvm-objdump 核对）
 constexpr uintptr_t F_STATE_NEXT_START_PROCESS_VMA = 0xd46b8;             // void STATE_NextStartProcess()
 constexpr uintptr_t F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA = 0x10013c;  // void (void) 点空槽进选角（GAME_Initialize + MAP_Load(6) + MAINMENU_CreateSelectCharList；SaveSlot_GoToNewGame 调用）
 constexpr uintptr_t F_SELECT_CHARACTER_START_GAME_VMA = 0x14de98;      // void (void) 选角确认开始（[0x2f5000+0xa00]=选中职业 + STATE_Set(5) + UI_SetPopupProcessInfo(4,0) + Flurry 统计；SelectCharacter_ButtonStartExe 调用）

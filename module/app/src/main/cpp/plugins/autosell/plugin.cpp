@@ -4,26 +4,30 @@
 #include <cstring>
 
 #include "contracts/events.h"
+#include "contracts/ownership.h"
+#include "contracts/panels.h"
 #include "core/native/qol_log.h"
 #include "plugins/autosell/config.h"
 #include "plugins/autosell/scan.h"
+#include "plugins/autosell/ui/panel.h"
 #include "infra/config.h"
 #include "infra/events.h"
+#include "infra/panels.h"
 
-// 自动出售插件：零资源常驻。门禁来源为配置键 `plugin.autosell.enabled`
-// （nativeSetAutoSellEnabled → kCommandSetConfigBool）。零资源插件没有宿主资源 gate，
-// 因此经 kEventConfigChanged 订阅驱动；install/on_enabled 时按配置初值应用一次。
+// 自动出售插件：门禁来源为配置键 `plugin.autosell.enabled`
+// （nativeSetAutoSellEnabled → kCommandSetConfigBool）。门禁经 kEventConfigChanged 订阅驱动；
+// install/on_enabled 时按配置初值应用一次。
+//
+// 资源（2 条，均常驻 gate=nullptr）：
+//   · patch:SCENE_DRAW_EQUIP+0x1cc（kCallPatch/kFailClosed）：背包页入口按钮绘制宿主；
+//   · own:popup.autosell（kOwnership/kFailSoft）：PopupState 死条目 F_PANEL_UNK3_ENTER 占用。
+// UI（入口按钮 + 面板）为插件自有 ui/panel.*，provider 登记到 infra/panels。
 //
 // 过渡依赖（清除阶段）：
 // - save_enter/save_exit legacy 设施 → B4（本插件的进档/退档回调随之迁移）。
 // - sidecar 经 Kotlin ModuleSaveStore 桥 → B4 `infra/store`。
 // - `game_access.h/game_state.h/game_symbols.h` 直取 → game/access 批次。
 // - `inventory_trade` → `domains/inventory`。
-//
-// UI 门控入口 `autosell_ui_set_enabled` 定义在 feature/ui（D1 迁移）：此处前置声明，
-// 避免 feature→feature include（special_equip 先例）；D1 后改为 UI 侧消费者接口。
-
-void autosell_ui_set_enabled(bool enabled);
 
 namespace qol::features::autosell {
 namespace {
@@ -34,6 +38,54 @@ constexpr const char* kGateKey = "plugin.autosell.enabled";
 
 infra::SubscriptionId g_config_subscription = 0;
 std::atomic<bool> g_gate{false};
+
+// 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
+const contracts::PanelProviderSpec kPanelProvider = {
+    "autosell",
+    kPluginId,
+    &autosell_provider_open,
+    &autosell_provider_close,
+    &autosell_provider_active,
+    &autosell_provider_block_reason,
+};
+
+// own:popup.autosell 的 OwnershipOps：acquire/release 走 hooks/popup_state 原语。
+const contracts::OwnershipOps kPopupOwnershipOps{
+    &autosell_popup_acquire,
+    &autosell_popup_release,
+};
+
+// 2 条声明式资源（见文件头注释）：入口 call patch + PopupState 死条目占用。
+const contracts::ResourceClaim kResources[] = {
+    {
+        "patch:SCENE_DRAW_EQUIP+0x1cc",  // id
+        "P_SCENE_DRAW_EQUIP_DESC",       // symbol（game/access/patches 站点名）
+        contracts::ResourceMechanism::kCallPatch,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,                            // resumable
+        kPluginId,                       // owner
+        "背包页入口按钮绘制宿主：+0x1cc 原 bl UIDesc_Draw 改指模块 wrapper",  // reason
+        nullptr,                         // gate（常驻）
+        120,                             // step_budget
+        reinterpret_cast<void*>(&autosell_equip_desc_draw_wrapper),  // handler
+    },
+    {
+        "own:popup.autosell",  // id
+        "own:popup.autosell",  // symbol（kOwnership 不使用站点解析，保留 id 作诊断标识）
+        contracts::ResourceMechanism::kOwnership,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailSoft,
+        true,                  // resumable
+        kPluginId,             // owner
+        "面板以 PopupState 死条目 F_PANEL_UNK3_ENTER 承载，需整段占用 5 回调并承诺写回快照",  // reason
+        nullptr,               // gate（常驻）
+        120,                   // step_budget
+        reinterpret_cast<void*>(const_cast<contracts::OwnershipOps*>(&kPopupOwnershipOps)),  // handler
+    },
+};
 
 // 门禁应用：同步扫描任务「已武装」标志与 UI 入口按钮/面板门控（现行为不变）。
 void apply_gate(bool enabled) {
@@ -62,6 +114,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_config_subscription = infra::subscribe(contracts::kEventConfigChanged,
                                                  &on_config_changed, nullptr);
     }
+    // 自身初始化：资源由宿主声明式安装；本面板登记 provider 供 core.ui 容器打开。
+    if (!infra::panels_register_provider(kPanelProvider)) return 1;
     return 0;
 }
 
@@ -73,10 +127,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     autosell_unregister_save_callbacks();
     apply_gate(false);
+    infra::panels_unregister_owner(kPluginId);
 }
 
-// 零资源、无资源 gate：启停只切业务门禁，不做资源操作（§3.3）。宿主对零资源插件
-// 会在装配时调用 on_enabled，这里按配置初值应用，不无条件开启。
+// 有资源（2 条常驻）但无资源 gate：启停只切业务门禁与 UI 门控；资源物理装卸由宿主负责。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     apply_gate(infra::config_get_bool(kGateKey, false));
@@ -98,14 +152,14 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,   // requires
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
-    0, nullptr,   // resources（零资源）
+    2, kResources,// resources（入口 call patch + own:popup.autosell）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）
     &plugin_install,
     &plugin_deactivate,
     &plugin_on_enabled,
     &plugin_on_disabled,
     &plugin_fill_status,
-    nullptr,      // on_resource_ready（无资源）
+    nullptr,      // on_resource_ready（kCallPatch/kOwnership 无 backup）
 };
 
 }  // namespace

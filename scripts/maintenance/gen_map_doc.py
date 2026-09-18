@@ -88,6 +88,7 @@ MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_save_warehouse_validate",
     "test_custom_recipe",
     "test_native_choice",
+    "test_autosell_plugin",
 )
 
 MIGRATED_TEST_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (

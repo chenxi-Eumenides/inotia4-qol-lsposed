@@ -507,3 +507,16 @@ target_include_directories(core_ui_panels_tests PRIVATE
 target_compile_features(core_ui_panels_tests PRIVATE cxx_std_17)
 set_target_properties(core_ui_panels_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_ui_panels_tests COMMAND core_ui_panels_tests)
+
+# D1-b3：autosell 插件清单/资源 host 测试（声明式 claim + provider 登记；末尾追加）
+add_executable(autosell_plugin_tests
+    test_autosell_plugin.cpp
+    ${CPP_DIR}/plugins/autosell/plugin.cpp
+    ${CPP_DIR}/infra/panels.cpp
+)
+target_include_directories(autosell_plugin_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(autosell_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(autosell_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME autosell_plugin_tests COMMAND autosell_plugin_tests)

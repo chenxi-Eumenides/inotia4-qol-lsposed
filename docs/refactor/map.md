@@ -25,19 +25,19 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 12 | 637 |
-| `game/` | 32 | 2529 |
+| `game/` | 32 | 2532 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1439 |
 | `patch/` | 6 | 430 |
 | `domains/` | 2 | 111 |
-| `plugins/` | 95 | 12543 |
+| `plugins/` | 97 | 13384 |
 | `host/` | 12 | 2029 |
-| **合计** | **193** | **21872** |
+| **合计** | **195** | **22716** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_range/`：4 文件 / 303 行
-- `plugins/autosell/`：12 文件 / 1068 行
+- `plugins/autosell/`：14 文件 / 1909 行
 - `plugins/core.ui/`：14 文件 / 1522 行
 - `plugins/craft_ui/`：4 文件 / 670 行
 - `plugins/custom_recipe/`：10 文件 / 1939 行
@@ -54,13 +54,13 @@
 
 ### CTest target 分类
 
-- 全仓 target 总数：**36**
-- 新架构/已迁移：**27**（机制/宿主 17 + 已迁移功能 10）
+- 全仓 target 总数：**37**
+- 新架构/已迁移：**28**（机制/宿主 17 + 已迁移功能 11）
 - legacy：**9**
 
-新架构/已迁移（27）：
+新架构/已迁移（28）：
 - 机制/宿主（17）：`capability_lifecycle_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_panels_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
-- 已迁移功能（10）：`attribute_range_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
+- 已迁移功能（11）：`attribute_range_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
 
 legacy（9）：`core_ui_panels_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
 <!-- END GENERATED:stats -->

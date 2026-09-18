@@ -39,7 +39,7 @@
 | `infra` | 47 |
 | `patch` | 9 |
 | `plugins/attribute_range` | 4 |
-| `plugins/autosell` | 12 |
+| `plugins/autosell` | 14 |
 | `plugins/core.ui` | 14 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
@@ -54,7 +54,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 4 |
-| `plugins/ui` | 4 |
+| `plugins/ui` | 2 |
 | `plugins/world_teleport` | 6 |
 | **合计** | **344** |
 
@@ -137,25 +137,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 152 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 151 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
 | `host` | `game` | 14 |
 | `host` | `contracts` | 12 |
+| `plugins/autosell` | `infra` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
-| `plugins/autosell` | `infra` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `host` | `patch` | 9 |
+| `plugins/autosell` | `contracts` | 9 |
+| `plugins/autosell` | `game` | 8 |
 | `plugins/save_backup` | `infra` | 8 |
 | `domains/world` | `game` | 7 |
 | `host` | `hooks` | 7 |
 | `plugins/core.ui` | `contracts` | 7 |
-| `plugins/custom_recipe` | `contracts` | 7 |
-| `plugins/custom_recipe` | `infra` | 7 |
 
 ### 2.2 include 环
 
@@ -224,20 +224,19 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 17 个 / 文件 10 个 / 去重符号 9 个 / 无法归属 3 个。
+扫描合计：安装点 16 个 / 文件 9 个 / 去重符号 8 个 / 无法归属 3 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 3 | 5 | 3 |
-| call patch | 3 | 7 | 4 |
+| call patch | 2 | 6 | 3 |
 | ptr slot | 4 | 5 | 3 |
 
-去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
+去重符号 → 文件（前 8 条，共 8 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
-- `F_SCENE_DRAW_EQUIP_VMA` → `feature/ui/game_ui_autosell.cpp`
 - `F_SCENE_DRAW_POPUP_SC_CHARACTER_INFO_VMA` → `feature/ui/game_ui_charinfo_zh.cpp`
 - `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `feature/extension_bag/extension_bag_equip.inc`
@@ -264,14 +263,14 @@
 | --- | --- | --- |
 | `extension_bag` | `plugins/extension_bag` | 32 |
 | `patch` | `plugins/patch` | 9 |
-| `ui` | `plugins/ui` | 4 |
+| `ui` | `plugins/ui` | 2 |
 
 ### 6.2 已迁移 `plugins/*`（15）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_range` | `plugins/attribute_range` | 4 |
-| `autosell` | `plugins/autosell` | 12 |
+| `autosell` | `plugins/autosell` | 14 |
 | `core.ui` | `plugins/core.ui` | 14 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |

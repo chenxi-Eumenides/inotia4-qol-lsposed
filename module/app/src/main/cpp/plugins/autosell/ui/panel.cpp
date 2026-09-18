@@ -1,4 +1,4 @@
-// game_ui_autosell.cpp —— 自动出售 UI（背包入口 + 按存档配置面板）。
+// panel.cpp —— 自动出售 UI（背包入口 + 按存档配置面板；原 feature/ui/game_ui_autosell.cpp）。
 //
 // 机制来源（已确认）：
 // - 入口按钮挂载/点击：与扩展背包页签同宿主（原版袋容器），ControlButton 的
@@ -12,15 +12,15 @@
 //
 // 配置面板只在关闭按钮释放时提交 draft：先写运行时，再按当前存档槽直写 sidecar。
 
-#include "game_ui_autosell.h"
+#include "plugins/autosell/ui/panel.h"
 
-#include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
 #include "contracts/autosell.h"
-#include "data/native/game_symbols.h"
+#include "contracts/panels.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game/access/ui_kit.h"
+#include "hooks/popup_state.h"
 
 #include <atomic>
 #include <cstdint>
@@ -30,13 +30,8 @@
 
 #define AUTOSELLUI_LOG(...) QOL_LOG_INFO(QolDomain::kAutosell, __VA_ARGS__)
 
+namespace qol::features::autosell {
 namespace {
-
-// Scene_Draw_POPUP_SC_EQUIP +0x1cc 处原 `bl UIDesc_Draw` 指令字（llvm-objdump 核对）。
-constexpr uint32_t kUidescDrawBlWord = 0x97fdaadb;
-
-constexpr size_t kPopupStateSize = 0x40;
-constexpr int kPopupStateCount = 27;
 
 // 入口按钮：与原版袋列（袋 0）同列右移 68、扩展页签（行距 70）之后的行 5。
 // 由扩展页签公式换算：x = 袋0绝对 + 68，y = 袋0绝对 + 2 + 5×70（尺寸 57×57）。
@@ -94,9 +89,9 @@ constexpr const char* kSpecialLabels[] = {
     "背包", "普通徽章", "骰子",
 };
 constexpr uint32_t kSpecialBits[] = {
-    autosell::kSpecialBackpack,
-    autosell::kSpecialNormalSeal,
-    autosell::kSpecialDice,
+    ::autosell::kSpecialBackpack,
+    ::autosell::kSpecialNormalSeal,
+    ::autosell::kSpecialDice,
 };
 
 struct PressTarget {
@@ -104,7 +99,6 @@ struct PressTarget {
     int index = -1;
 };
 
-bool g_installed = false;
 // 开关：JVM 线程写、游戏主线程读；默认关闭。
 std::atomic<bool> g_enabled{false};
 // 面板是否激活：主线程写、JVM 线程读（关闭时判断是否需要关闭面板）。
@@ -115,16 +109,14 @@ void* g_entry_ctrl = nullptr;       // 当前已挂载的入口按钮控件
 void* g_entry_container = nullptr;  // 挂载入口按钮的容器句柄（变化即旧控件失效）
 int g_close_delay = 0;              // 仅游戏主线程访问
 PressTarget g_pressed_target;       // 仅游戏主线程访问
-autosell::Config g_draft;           // 面板草稿；打开时读取，关闭时一次性提交
+::autosell::Config g_draft;           // 面板草稿；打开时读取，关闭时一次性提交
 void* g_hit_root = nullptr;         // 仅用于复用 ui_hit_test 的绝对区域
 bool g_gear_image_loaded = false;    // 首次成功加载后不重复调用 unit loader
 bool g_gear_failure_logged = false;  // 仅游戏主线程访问
-uint8_t* g_state_entry = nullptr;   // 被改写的 PopupState 条目（仅主线程访问）
-uint8_t g_state_backup[kPopupStateSize] = {};
+// own:popup.autosell 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
+hooks::PopupStateEntry g_popup_entry{};
 int g_state_id = -1;
 
-void autosell_equip_desc_draw_wrapper();
-bool autosell_ensure_state_injected();
 void autosell_panel_enter();
 void autosell_panel_process();
 void autosell_panel_f3();
@@ -352,14 +344,8 @@ void autosell_commit_draft() {
 
 void autosell_entry_clicked(void* ctrl) {
     (void)ctrl;
-    // 关闭态残留控件（不销毁原版控件）不得再打开面板。
-    if (!g_enabled.load(std::memory_order_acquire)) return;
-    if (g_state_id < 0 || fn_ui_set_popup_process_info == nullptr) {
-        AUTOSELLUI_LOG("entry clicked but state not injected");
-        return;
-    }
-    AUTOSELLUI_LOG("entry clicked -> open panel state=%d", g_state_id);
-    fn_ui_set_popup_process_info(1, g_state_id);
+    // 关闭态残留控件（不销毁原版控件）不得再打开面板；门禁/state 校验在 provider_open 内。
+    autosell_provider_open();
 }
 
 void autosell_entry_draw(void* ctrl) {
@@ -492,8 +478,8 @@ void autosell_on_equip_draw() {
         g_entry_container = nullptr;
         return;
     }
-    // 入口按钮点击需要已注入的面板 state id；在面板打开前、能绘制入口时注入。
-    autosell_ensure_state_injected();
+    // own:popup.autosell 的资源事务已在 install 期占用 state 条目并写入回调；
+    // 此处不再懒注入（原 autosell_ensure_state_injected 已删除）。
     void* container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
     if (container == nullptr) {
         g_entry_ctrl = nullptr;
@@ -519,40 +505,8 @@ void autosell_on_equip_draw() {
 
 // ---- 面板 ----
 
-bool autosell_ensure_state_injected() {
-    if (g_state_entry != nullptr) return true;
-    if (g_base == 0) return false;
-    void** got = reinterpret_cast<void**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
-    if (got == nullptr || *got == nullptr) return false;
-    uint8_t* list = reinterpret_cast<uint8_t*>(*got);
-    for (int i = 0; i < kPopupStateCount; ++i) {
-        uint8_t* entry = list + i * kPopupStateSize;
-        if (*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) !=
-            g_base + F_PANEL_UNK3_ENTER) {
-            continue;
-        }
-        std::memcpy(g_state_backup, entry, kPopupStateSize);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) =
-            reinterpret_cast<uintptr_t>(&autosell_panel_enter);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_PROCESS) =
-            reinterpret_cast<uintptr_t>(&autosell_panel_process);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) =
-            reinterpret_cast<uintptr_t>(&autosell_panel_f3);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F4) =
-            reinterpret_cast<uintptr_t>(&autosell_panel_f4);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) =
-            reinterpret_cast<uintptr_t>(&autosell_panel_event);
-        g_state_entry = entry;
-        g_state_id = *reinterpret_cast<int32_t*>(entry);
-        AUTOSELLUI_LOG("state entry %d injected (INAPP_HOT dead entry)", g_state_id);
-        return true;
-    }
-    return false;
-}
-
 void autosell_panel_enter() {
     AUTOSELLUI_LOG("panel enter");
-    autosell_ensure_state_injected();
     g_draft = autosell_get_runtime_config();
     if (g_hit_root == nullptr) g_hit_root = ui_create_root({0, 0, 1, 1});
     g_panel_active.store(true, std::memory_order_release);
@@ -693,29 +647,13 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
     return 1;
 }
 
+}  // namespace
+
 // 复刻原 `bl UIDesc_Draw`，随后绘制入口按钮（独立于扩展背包绘制宿主）。
+// kCallPatch 站点 `patch:SCENE_DRAW_EQUIP+0x1cc` 的 handler（宿主安装时写入 BL）。
 void autosell_equip_desc_draw_wrapper() {
     if (fn_uidesc_draw != nullptr) fn_uidesc_draw();
     autosell_on_equip_draw();
-}
-
-}  // namespace
-
-bool autosell_ui_install_if_ready() {
-    if (g_installed) return true;
-    if (!bridge_ready() || g_base == 0) return false;
-    const uintptr_t call_addr =
-        g_base + fn_resolve("F_SCENE_DRAW_EQUIP_VMA", F_SCENE_DRAW_EQUIP_VMA) +
-        F_SCENE_DRAW_EQUIP_DESC_CALL_OFF;
-    if (!call_patch_install_bl(call_addr, kUidescDrawBlWord,
-                               reinterpret_cast<void*>(&autosell_equip_desc_draw_wrapper))) {
-        AUTOSELLUI_LOG("scene draw patch install failed call=%p expected=0x%08x",
-                       reinterpret_cast<void*>(call_addr), kUidescDrawBlWord);
-        return false;
-    }
-    g_installed = true;
-    AUTOSELLUI_LOG("scene draw patch installed call=%p", reinterpret_cast<void*>(call_addr));
-    return true;
 }
 
 bool autosell_ui_enabled() {
@@ -740,3 +678,69 @@ void autosell_ui_set_enabled(bool enabled) {
         AUTOSELLUI_LOG("disabled -> panel close requested");
     }
 }
+
+// ============== PanelProviderSpec（panel_id="autosell"）==============
+
+bool autosell_provider_open() {
+    // 与旧入口按钮点击同门禁：关闭态不得打开面板（含经 core.ui 面板栈打开）。
+    if (!g_enabled.load(std::memory_order_acquire)) return false;
+    if (g_state_id < 0 || fn_ui_set_popup_process_info == nullptr) {
+        AUTOSELLUI_LOG("provider open rejected: state not injected");
+        return false;
+    }
+    AUTOSELLUI_LOG("provider open panel state=%d", g_state_id);
+    fn_ui_set_popup_process_info(1, g_state_id);
+    return true;
+}
+
+void autosell_provider_close() {
+    if (!g_panel_active.exchange(false, std::memory_order_acq_rel)) return;  // 幂等
+    if (fn_ui_set_popup_process_info != nullptr) fn_ui_set_popup_process_info(3, 0);
+    AUTOSELLUI_LOG("provider close requested");
+}
+
+bool autosell_provider_active() {
+    return g_panel_active.load(std::memory_order_acquire);
+}
+
+const char* autosell_provider_block_reason() {
+    return nullptr;  // 现有实现无占用文案
+}
+
+// ============== own:popup.autosell（kOwnership）==============
+
+int32_t autosell_popup_acquire(const char* id) {
+    (void)id;
+    if (g_popup_entry.slot != nullptr) return 0;
+    hooks::PopupStateEntry entry{};
+    if (!hooks::popup_state_resolve_symbol("F_PANEL_UNK3_ENTER", &entry)) {
+        AUTOSELLUI_LOG("popup.autosell: state entry (INAPP_HOT) not found");
+        return 1;
+    }
+    const hooks::PopupStateHooks hooks{
+        &autosell_panel_enter,
+        &autosell_panel_process,
+        &autosell_panel_f3,
+        &autosell_panel_f4,
+        &autosell_panel_event,
+    };
+    if (!hooks::popup_state_acquire(&entry, hooks)) {
+        AUTOSELLUI_LOG("popup.autosell: acquire rejected");
+        return 1;
+    }
+    g_popup_entry = entry;
+    g_state_id = entry.state_id;
+    AUTOSELLUI_LOG("popup.autosell acquired: state id=%d", g_state_id);
+    return 0;
+}
+
+void autosell_popup_release(const char* id) {
+    (void)id;
+    if (g_popup_entry.slot != nullptr) {
+        hooks::popup_state_restore(&g_popup_entry);
+    }
+    g_state_id = -1;
+    AUTOSELLUI_LOG("popup.autosell released");
+}
+
+}  // namespace qol::features::autosell

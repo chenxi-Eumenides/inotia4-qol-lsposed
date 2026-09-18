@@ -85,9 +85,9 @@ target_sources(gamebridge PRIVATE
     plugins/autosell/store.cpp
 )
 
-# 自动出售 UI 原型：背包页入口按钮 + 只读占位面板（末尾追加，不改上方既有行）
+# 自动出售 UI：背包页入口按钮 + 配置面板（D1-b3 迁入 plugins/autosell/ui）
 target_sources(gamebridge PRIVATE
-    feature/ui/game_ui_autosell.cpp
+    plugins/autosell/ui/panel.cpp
 )
 
 # 合成器宝石合成操作优化（gem-craft-optimization 阶段1，末尾追加，不改上方既有行）

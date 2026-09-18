@@ -34,6 +34,9 @@ constexpr SiteEntry kSites[] = {
      PatchKind::kBlRedirect},
     {"P_MAINPROCESS_NEXT_STATE", F_MAINPROCESS_VMA, F_MAINPROCESS_NEXT_STATE_CALL_OFF,
      MAINPROCESS_NEXT_STATE_CALL_WORD, 0, PatchKind::kBlRedirect},
+    // 自动出售入口按钮绘制宿主（owner=autosell）：+0x1cc 原 bl UIDesc_Draw 改指模块 wrapper。
+    {"P_SCENE_DRAW_EQUIP_DESC", F_SCENE_DRAW_EQUIP_VMA, F_SCENE_DRAW_EQUIP_DESC_CALL_OFF,
+     F_SCENE_DRAW_EQUIP_DESC_CALL_WORD, 0, PatchKind::kBlRedirect},
 
     // ---- B2a-2：常驻 core patch 站点（原 game_patch_core.inc / game_patch_hub_login.inc）----
     // 位段缩窄 ×2（原 core.inc:15-16）：存档子物品检查位段避开数量高位段 a。
