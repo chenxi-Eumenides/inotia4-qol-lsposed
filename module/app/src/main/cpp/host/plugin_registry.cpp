@@ -310,6 +310,42 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
                 hooks::set_state(claim.id, contracts::ResourceState::kLive);
             } else if (!want && now == contracts::ResourceState::kLive) {
                 hooks::set_state(claim.id, contracts::ResourceState::kDisabled);
+            } else if (want && now == contracts::ResourceState::kFree) {
+                // 装配期 fail-soft 未装成功：门禁每逻辑帧重试到成功（§8；语义等价旧
+                // 300ms 重试线程，且状态可观测）。安装成功立即交还 backup；受限回调
+                // 失败撤回本条并保持 degraded，供下一逻辑帧再试。
+                bool followed = false;
+                const uintptr_t entry =
+                    deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+                if (entry == 0) {
+                    degraded = true;
+                    error_claim = claim.id;
+                    error_reason = "symbol unresolved";
+                } else {
+                    const hooks::InstallOutcome outcome =
+                        hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, true);
+                    if (outcome.ok != 0) {
+                        degraded = true;
+                        error_claim = claim.id;
+                        error_reason = outcome.error != nullptr ? outcome.error : "install failed";
+                    } else {
+                        hooks::runtime_set(claim.id, entry, outcome.backup);
+                        bool ready_ok = true;
+                        if (plugin.on_resource_ready != nullptr) {
+                            contracts::PluginContext ready_ctx{};
+                            ready_ok =
+                                plugin.on_resource_ready(ready_ctx, claim.id, outcome.backup) == 0;
+                        }
+                        if (!ready_ok) {
+                            revoke_resource(claim.id, deps);
+                            degraded = true;
+                            error_claim = claim.id;
+                            error_reason = "resource_ready_failed";
+                        } else {
+                            installed[installed_count++] = &claim;
+                        }
+                    }
+                }
             }
             continue;
         }
@@ -351,6 +387,11 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
     if (mechanism_failed) {
         for (uint32_t i = installed_count; i > 0; --i) {
             const contracts::ResourceClaim& claim = *installed[i - 1];
+            if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+                // 门禁重试新装的入口 hook：走统一撤回（free 或 tombstone+isolated）。
+                revoke_resource(claim.id, deps);
+                continue;
+            }
             if (release_non_entry_claim(claim)) {
                 hooks::set_state(claim.id, contracts::ResourceState::kFree);
                 hooks::runtime_clear(claim.id);

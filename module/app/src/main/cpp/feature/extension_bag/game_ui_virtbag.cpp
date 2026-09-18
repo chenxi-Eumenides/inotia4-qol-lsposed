@@ -3,8 +3,11 @@
 #include "game_access.h"
 #include "game_inventory.h"
 #include "game_ops_common.h"
+#include "contracts/ownership.h"
 #include "feature/patch/game_patch.h"
 #include "feature/patch/native_inventory_hook.h"
+#include "hooks/popup_state.h"
+#include "patch/game_patch_bridge.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"
@@ -1509,3 +1512,6 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 }
 
 #include "feature/extension_bag/extension_bag_api_impl.inc"
+
+// D2a-3b-1：8 条声明式资源（须在全部 wrapper/全局定义之后）。
+#include "feature/extension_bag/extension_bag_claims.inc"

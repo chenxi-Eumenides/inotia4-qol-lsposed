@@ -458,29 +458,6 @@ void mix_draw_inven_bag_group_wrapper() {
 bool install_mix_hooks_locked() {
     if (mix_hooks_ready) return true;
     if (g_base == 0) return false;
-    if (mix_state_entry == nullptr) {
-        mix_state_entry = find_popup_state_entry(g_base + fn_resolve(
-            "F_PANEL_CRAFT_ENTER", F_PANEL_CRAFT_ENTER));
-        if (mix_state_entry == nullptr) return false;
-        const uintptr_t expected_event = g_base + fn_resolve(
-            "F_SCENE_EVENT_MIX_VMA", F_SCENE_EVENT_MIX_VMA);
-        if (*reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_EVENT) != expected_event) {
-            mix_state_entry = nullptr;
-            VIRTBAG_LOG("mix state callbacks differ from expected symbols");
-            return false;
-        }
-        mix_original_enter = reinterpret_cast<MixSceneNoArgFn>(
-            *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_ENTER));
-        mix_original_f3 = reinterpret_cast<MixSceneNoArgFn>(
-            *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_F3));
-        *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_ENTER) =
-            reinterpret_cast<uintptr_t>(&mix_enter_wrapper);
-        // 同商店宿主：栈顶 enter 换模块 wrapper 后需登记原版 VMA，供 UI 判定层反查。
-        popup_enter_alias_register(reinterpret_cast<uintptr_t>(&mix_enter_wrapper),
-                                   F_PANEL_CRAFT_ENTER);
-        *reinterpret_cast<uintptr_t*>(mix_state_entry + POPUP_ENTRY_F3) =
-            reinterpret_cast<uintptr_t>(&mix_f3_wrapper);
-    }
 
     const uintptr_t draw_call = g_base + fn_resolve(
         "F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA", F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA);

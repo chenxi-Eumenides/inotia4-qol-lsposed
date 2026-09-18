@@ -515,21 +515,7 @@ bool inject_locked() {
                     static_cast<unsigned long long>(g_base));
         return false;
     }
-    const bool install_inventory_hook = g_state_entry == nullptr;
-    uint8_t* entry = g_state_entry;
-    if (install_inventory_hook) {
-        entry = find_inventory_state_entry();
-        if (entry == nullptr) return false;
-        const uintptr_t expected_event =
-            g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
-        if (*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) != expected_event) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory state callbacks differ from expected symbols");
-            return false;
-        }
-        g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT));
-        g_orig_f3 = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3));
-        g_orig_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER));
-    }
+    if (g_state_entry == nullptr || !g_save_panel_hook_installed) return false;
 
     const uintptr_t equip_draw = g_base + fn_resolve("F_UIEQUIP_DRAW_VMA", F_UIEQUIP_DRAW_VMA);
     const uintptr_t item_draw_call = equip_draw + 0x94;
@@ -643,31 +629,6 @@ bool inject_locked() {
         __builtin___clear_cache(reinterpret_cast<char*>(call_addr), reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
         g_draw_patch_addr = call_addr;
         QOL_LOG_INFO(QolDomain::kExtensionBag, "inventory draw restore hook patched call=%p replacement=0x%08x", reinterpret_cast<void*>(call_addr), replacement);
-    }
-
-    if (g_backup_save_inventory == nullptr) {
-        // 按符号 hook SAVE_SaveInventory 函数入口（调用方无关）：
-        // monster mod 把 SAVE_Save 内对它的调用改指到自己的包装器（最终仍调用本函数），
-        // 旧的「改写调用点 + 原指令字校验」会因此 fail-closed 中止整条注入链。
-        const uintptr_t target =
-            g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_VMA", F_SAVE_SAVE_INVENTORY_VMA);
-        const NativeHookFunType hook_func = native_hook_func();
-        if (hook_func == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "save gate: native hook func unavailable");
-            return false;
-        }
-        void* backup = nullptr;
-        const int result = hook_func(reinterpret_cast<void*>(target),
-                                     reinterpret_cast<void*>(&save_inventory_wrapper), &backup);
-        if (result != 0 || backup == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "save gate: hook failed target=%p result=%d backup=%p",
-                        reinterpret_cast<void*>(target), result, backup);
-            return false;
-        }
-        g_backup_save_inventory = backup;
-        g_save_inventory_patch_addr = target;
-        QOL_LOG_INFO(QolDomain::kExtensionBag, "save gate hook installed target=%p backup=%p",
-                    reinterpret_cast<void*>(target), backup);
     }
 
     if (!patch_all_save_callsites()) return false;
@@ -794,33 +755,6 @@ bool inject_locked() {
         g_desc_open_patch_addr = call_addr;
         QOL_LOG_INFO(QolDomain::kExtensionBag, "desc open gate hook patched call=%p replacement=0x%08x",
                     reinterpret_cast<void*>(call_addr), replacement);
-    }
-    if (install_inventory_hook) {
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) = reinterpret_cast<uintptr_t>(&virtual_bag_f3_wrapper);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) = reinterpret_cast<uintptr_t>(&virtual_bag_event);
-        *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) = reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper);
-        g_state_entry = entry;
-        // 栈顶 enter 换模块 wrapper 后需登记原版 VMA（UI 判定层的统一反查入口）。
-        popup_enter_alias_register(reinterpret_cast<uintptr_t>(&virtual_bag_inventory_enter_wrapper),
-                                   F_PANEL_INVENTORY_ENTER);
-        QOL_LOG_INFO(QolDomain::kExtensionBag, "inventory event callback wrapped; original renderer is reused for module views");
-    }
-    if (!g_save_panel_hook_installed) {
-        uint8_t* save_entry = find_popup_state_entry(
-            g_base + fn_resolve("F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER));
-        if (save_entry != nullptr && save_entry != entry) {
-            g_save_state_entry = save_entry;
-            g_orig_save_enter = reinterpret_cast<PopupNoArgFn>(*reinterpret_cast<uintptr_t*>(save_entry + POPUP_ENTRY_ENTER));
-            *reinterpret_cast<uintptr_t*>(save_entry + POPUP_ENTRY_ENTER) =
-                reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper);
-            g_save_panel_hook_installed = true;
-            popup_enter_alias_register(
-                reinterpret_cast<uintptr_t>(&virtual_bag_save_panel_enter_wrapper),
-                F_PANEL_SAVE_SLOT_ENTER);
-            QOL_LOG_INFO(QolDomain::kExtensionBag, "save panel enter hook installed entry=%p", save_entry);
-        } else {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "save panel entry not ready; injection will retry");
-        }
     }
     if (!install_store_hooks_locked()) return false;
     if (!install_mix_hooks_locked()) return false;

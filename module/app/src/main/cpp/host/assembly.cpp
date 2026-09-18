@@ -11,6 +11,7 @@
 #include "plugins/core.ui/plugin.h"
 #include "plugins/craft_ui/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
+#include "plugins/extension_bag/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
 #include "plugins/native_choice/plugin.h"
 #include "plugins/push_all/plugin.h"
@@ -248,6 +249,13 @@ bool assembly_init() {
     // craft_ui：12 条 UIMix 入口 hook（5 核心 + 7 装饰），配方判定经 craft_result 能力。
     if (!register_plugin(features::craft_ui::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: craft_ui registration failed");
+        return false;
+    }
+    // extension_bag：8 条声明式资源（M1/M2 入口 hook、P1–P4 PopupState、S1 desc 槽命名空间、
+    // X1 move_merge 指针槽）。最后注册：C1–C21 raw call patch 与两条轮询线程仍保留，由插件
+    // on_enabled 驱动，须在其它插件装配完成后启动。
+    if (!register_plugin(features::extension_bag::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: extension_bag registration failed");
         return false;
     }
 

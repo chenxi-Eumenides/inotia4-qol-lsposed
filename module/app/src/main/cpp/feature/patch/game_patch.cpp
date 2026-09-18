@@ -7,7 +7,7 @@
 #include "game_ops_common.h"
 #include "game_state.h"
 #include "data/native/game_symbols.h"
-#include "game_ptr_hook.h"
+#include "patch/game_patch_bridge.h"
 #include "game/read/stack_codec.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "feature/patch/native_inventory_hook.h"
@@ -17,17 +17,15 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
-#include <sys/mman.h>
 
-// move_merge 的 GOT 槽指针 hook（B2a-3）。常驻指令 patch 与 stack_limit 状态已分别迁
-// host/core_patches 与 core/native/stack_limit_state；本 TU 只保留 move_merge wrapper。
+// move_merge 的 GOT 槽指针槽（B2a-3 机制；D2a-3b-1 改声明式）。常驻指令 patch 与
+// stack_limit 状态已分别迁 host/core_patches 与 core/native/stack_limit_state；
+// 本 TU 只保留 move_merge wrapper 与开关标志。GOT 槽由 plugins/extension_bag 的
+// X1 常驻 kPtrSlot 资源声明、宿主装配期安装，wrapper 内自门控。
 #define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kPlatform, __VA_ARGS__)
 
 namespace {
 
-// GOT 槽指针 hook：目标 F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA
-//（G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA 槽）；启用态覆盖为 move wrapper。
-PtrHook g_move_merge_hook;
 std::mutex g_move_merge_mtx;
 std::atomic<bool> g_move_merge_requested{false};
 std::atomic<bool> g_extension_source_protection_requested{false};
@@ -35,6 +33,14 @@ std::atomic<bool> g_extension_source_protection_requested{false};
 }  // namespace
 
 #include "game_patch_move_merge.inc"
+
+namespace qol::features::game_patch {
+
+void* game_patch_move_merge_wrapper() {
+    return reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper);
+}
+
+}  // namespace qol::features::game_patch
 
 // IAP 恢复：屏蔽 Com2uS Hive 阻断态（常驻指令/全局位读写，不属于常驻 patch 表）。
 std::string data_recover_after_hive_block() {

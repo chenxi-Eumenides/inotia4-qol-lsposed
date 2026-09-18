@@ -35,13 +35,17 @@
 4. **机制全量声明式（29 条；口径校正：M1/M2 + C1–C21 + P1–P4 + S1 + X1）**：
    原「25 条」为侦察期粗算；逐点核对 raw 安装面后修正为 29，D2a-3a 已按 21 条 call
    patch 站点登记（`game/access/patches.cpp` 的 `P_EXT_*`）。
-   - M1/M2 entry hook：`required` × `failClosed`，gate = `extensionBagEnabled`。
+    - M1/M2 entry hook：`required` × `failSoft`（D2a-3b-1 按晚就绪语义校正：原记录为
+      `failClosed`，与旧 300ms 线程重试语义不符；装配期失败保持 `free` + 插件 `degraded`，
+      gate 开且 `free` 时宿主每逻辑帧重试到成功），gate = `extensionBagEnabled`。
    - C1–C21 call patch（8 save callsite + 6 draw/gate + 5 store + 2 mix）：功能型 `required` × `failSoft`，
      装饰型 `optional` × `failSoft`；**save callsite 机制 owner = `extension_bag`，
      行为编排 owner = `core/native/module_save.cpp`**；P5 若出现第二参与者再迁 `save_flow`。
    - P1–P4 popup-state：`kOwnership`，`required` × `failSoft`。
-   - S1：11 个动态 desc 实例槽用 `kOwnership` 登记 + **保留 raw `PtrHook` 写入**（过渡形态，
-     清除条件 = U11 动态绑定器）。
+    - S1：11 个动态 desc 实例槽申报 `own:desc_button_execute_slots`（kOwnership，
+      gate = `extensionBagEnabled`）；`acquire` 只登记命名空间所有权、`release` 调全量
+      `reset_extension_desc_item_hooks_locked`，**per-item 安装仍保留业务路径 raw `PtrHook`
+      写入**（过渡形态，清除条件 = U11 动态绑定器）。
    - X1：`ptrslot:MOVE_MERGE_GOT`（gate = nullptr，wrapper 内自门控
      `move_merge_enabled() || extension_source_protection_enabled()`，R-28）。
    - X2：删自制 `allocate_draw_thunk`，改用宿主 thunk 池；新增 `PatchKind::kBranchRedirect`（B 尾调用）。

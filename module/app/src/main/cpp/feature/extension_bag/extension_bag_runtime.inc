@@ -228,25 +228,6 @@ void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, ui
                 static_cast<unsigned int>(g_original_current_got));
 }
 
-uint8_t* find_popup_state_entry(uintptr_t enter_target) {
-    if (g_base == 0) return nullptr;
-    void** got = reinterpret_cast<void**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
-    if (got == nullptr || *got == nullptr) return nullptr;
-    uint8_t* list = reinterpret_cast<uint8_t*>(*got);
-    for (int index = 0; index < kPopupStateCount; ++index) {
-        uint8_t* entry = list + index * kPopupStateSize;
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER);
-        if (enter == enter_target) {
-            return entry;
-        }
-    }
-    return nullptr;
-}
-
-uint8_t* find_inventory_state_entry() {
-    return find_popup_state_entry(g_base + fn_resolve("F_PANEL_INVENTORY_ENTER", F_PANEL_INVENTORY_ENTER));
-}
-
 JNIEnv* current_env() {
     JavaVM* jvm = g_jvm();
     if (jvm == nullptr) return nullptr;

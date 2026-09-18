@@ -675,34 +675,6 @@ void store_draw_inven_bag_group_wrapper() {
 bool install_store_hooks_locked() {
     if (store_hooks_ready) return true;
     if (g_base == 0) return false;
-    if (store_state_entry == nullptr) {
-        store_state_entry = find_popup_state_entry(g_base + fn_resolve(
-            "F_PANEL_SHOP_ENTER", F_PANEL_SHOP_ENTER));
-        if (store_state_entry == nullptr) return false;
-        const uintptr_t expected_event = g_base + fn_resolve(
-            "F_SCENE_EVENT_STORE_VMA", F_SCENE_EVENT_STORE_VMA);
-        if (*reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT) != expected_event) {
-            store_state_entry = nullptr;
-            VIRTBAG_LOG("store state callbacks differ from expected symbols");
-            return false;
-        }
-        store_original_enter = reinterpret_cast<StoreSceneNoArgFn>(
-            *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_ENTER));
-        store_original_f3 = reinterpret_cast<StoreSceneNoArgFn>(
-            *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_F3));
-        store_original_event = reinterpret_cast<StoreSceneEventFn>(
-            *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT));
-        *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_ENTER) =
-            reinterpret_cast<uintptr_t>(&store_enter_wrapper);
-        // UI 判定层按 popup 栈顶 enter 识别面板；这里换成模块 wrapper 后，栈顶保存的是
-        // 模块 .so 地址，必须登记回原版 enter VMA，否则商店打开时 screen 误报 world。
-        popup_enter_alias_register(reinterpret_cast<uintptr_t>(&store_enter_wrapper),
-                                   F_PANEL_SHOP_ENTER);
-        *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_F3) =
-            reinterpret_cast<uintptr_t>(&store_f3_wrapper);
-        *reinterpret_cast<uintptr_t*>(store_state_entry + POPUP_ENTRY_EVENT) =
-            reinterpret_cast<uintptr_t>(&store_event_wrapper);
-    }
 
     const uintptr_t desc_call = g_base + fn_resolve(
         "F_UISTORE_DESC_MAKE_DESC_CALL_VMA", F_UISTORE_DESC_MAKE_DESC_CALL_VMA);
@@ -736,27 +708,6 @@ bool install_store_hooks_locked() {
     if (!store_patch_bl_locked(buy_gate_2, 0x9400c508,
                                reinterpret_cast<void*>(&store_buy_find_slot_gate),
                                &store_buy_gate_2_thunk, &store_buy_gate_2_patch_addr)) return false;
-
-    // W1 扩展物品商店出售：hook UIStore_SellItem@0xd25f0 函数入口。模块物品在入口层
-    // 按弹窗载荷反推数量后接管（整堆删除/部分递减）；原版物品、未启用、投影未安装时
-    // 经 backup 透传，原版物品商店流程逐指令不变。
-    if (g_backup_store_sell_item == nullptr) {
-        const uintptr_t sell_item =
-            g_base + fn_resolve("F_UISTORE_SELL_ITEM_VMA", F_UISTORE_SELL_ITEM_VMA);
-        const NativeHookFunType hook_func = native_hook_func();
-        if (hook_func == nullptr) return false;
-        void* backup = nullptr;
-        const int result = hook_func(reinterpret_cast<void*>(sell_item),
-                                     reinterpret_cast<void*>(&store_sell_item_wrapper), &backup);
-        if (result != 0 || backup == nullptr) {
-            VIRTBAG_LOG("store sell hook failed target=%p result=%d backup=%p",
-                        reinterpret_cast<void*>(sell_item), result, backup);
-            return false;
-        }
-        g_backup_store_sell_item = backup;
-        VIRTBAG_LOG("store sell hook installed target=%p backup=%p",
-                    reinterpret_cast<void*>(sell_item), backup);
-    }
 
     store_hooks_ready = true;
     VIRTBAG_LOG("store host hooks installed state=%p", store_state_entry);

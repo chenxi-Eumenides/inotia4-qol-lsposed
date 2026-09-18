@@ -37,13 +37,13 @@
 | `hooks` | 10 |
 | `host` | 28 |
 | `infra` | 47 |
-| `patch` | 9 |
+| `patch` | 10 |
 | `plugins/attribute_range` | 4 |
 | `plugins/autosell` | 14 |
 | `plugins/core.ui` | 14 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
-| `plugins/extension_bag` | 32 |
+| `plugins/extension_bag` | 36 |
 | `plugins/inventory_hooks` | 2 |
 | `plugins/native_choice` | 4 |
 | `plugins/patch` | 9 |
@@ -55,7 +55,7 @@
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **347** |
+| **合计** | **352** |
 
 ### 1.2 迁移期映射摘要
 
@@ -134,7 +134,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 147 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 148 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -142,6 +142,7 @@
 | `host` | `game` | 14 |
 | `host` | `contracts` | 12 |
 | `plugins/autosell` | `infra` | 12 |
+| `plugins/extension_bag` | `contracts` | 11 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
@@ -152,7 +153,6 @@
 | `plugins/save_backup` | `infra` | 8 |
 | `domains/world` | `game` | 7 |
 | `host` | `hooks` | 7 |
-| `plugins/core.ui` | `contracts` | 7 |
 
 ### 2.2 include 环
 
@@ -204,29 +204,26 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号`
+- `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:164||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 15 个 / 文件 8 个 / 去重符号 7 个 / 无法归属 3 个。
+扫描合计：安装点 10 个 / 文件 5 个 / 去重符号 4 个 / 无法归属 3 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 2 | 4 | 2 |
+| entry hook | 0 | 0 | 0 |
 | call patch | 2 | 6 | 3 |
-| ptr slot | 4 | 5 | 3 |
+| ptr slot | 3 | 4 | 2 |
 
-去重符号 → 文件（前 7 条，共 7 条；`--verbose` 列全部）：
+去重符号 → 文件（前 4 条，共 4 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
-- `F_SAVE_SAVE_INVENTORY_VMA` → `feature/extension_bag/extension_bag_lifecycle.inc`
 - `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `feature/extension_bag/extension_bag_equip.inc`
-- `F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA` → `feature/patch/game_patch.cpp`
-- `F_UISTORE_SELL_ITEM_VMA` → `feature/extension_bag/extension_bag_store.inc`
 
 ## 5. JNI 面
 
@@ -240,16 +237,16 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 2 个）与已迁移 `plugins/*`（15 个）共 17 个域。
+旧 `feature/*`（待迁移 2 个）与已迁移 `plugins/*`（16 个）共 18 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，2）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `extension_bag` | `plugins/extension_bag` | 32 |
+| `extension_bag` | `plugins/extension_bag` | 34 |
 | `patch` | `plugins/patch` | 9 |
 
-### 6.2 已迁移 `plugins/*`（15）
+### 6.2 已迁移 `plugins/*`（16）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -258,6 +255,7 @@
 | `core.ui` | `plugins/core.ui` | 14 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
+| `extension_bag` | `plugins/extension_bag` | 2 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 2 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |

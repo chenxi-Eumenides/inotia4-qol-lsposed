@@ -159,6 +159,17 @@ ResourceClaim g_resources[] = {
     claim("hook:lc:b", "test_lc", "test.gate"),
 };
 
+// D2a-3b-1：带 gate 的 kEntryHook fail-soft 资源（晚就绪重试用例）。
+ResourceClaim soft_claim() {
+    ResourceClaim c = claim("hook:lc:soft", "test_lc_soft", "test.gate");
+    c.failure = ResourceFailure::kFailSoft;
+    return c;
+}
+
+ResourceClaim g_soft_resources[] = {
+    soft_claim(),
+};
+
 PluginDescriptor make_descriptor() {
     PluginDescriptor d{};
     d.id = "test_lc";
@@ -171,6 +182,29 @@ PluginDescriptor make_descriptor() {
     d.provides = nullptr;
     d.resources_count = 2;
     d.resources = g_resources;
+    d.jni_count = 0;
+    d.jni = nullptr;
+    d.install = &probe_install;
+    d.deactivate = &probe_deactivate;
+    d.on_enabled = &probe_enabled;
+    d.on_disabled = &probe_disabled;
+    d.fill_status = &probe_fill_status;
+    d.on_resource_ready = &probe_ready;
+    return d;
+}
+
+PluginDescriptor make_soft_descriptor() {
+    PluginDescriptor d{};
+    d.id = "test_lc_soft";
+    d.version = "0.1.0";
+    d.requires_count = 0;
+    d.requires = nullptr;
+    d.optional_count = 0;
+    d.optional_requires = nullptr;
+    d.provides_count = 0;
+    d.provides = nullptr;
+    d.resources_count = 1;
+    d.resources = g_soft_resources;
     d.jni_count = 0;
     d.jni = nullptr;
     d.install = &probe_install;
@@ -444,6 +478,29 @@ void test_failed_release_tombstones_and_isolates() {
     CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleDeactivate));
 }
 
+// D2a-3b-1：带 gate 的 kEntryHook 装配期 fail-soft 失败 → 资源保持 free + 插件 degraded；
+// 门禁开且 free 时宿主每逻辑帧重试到成功，backup 交还后清除 degraded（语义等价旧重试线程）。
+void test_gated_entry_failsoft_retries_on_sync_gates() {
+    reset_all();
+    qol::infra::config_set_bool("test.gate", true);
+    g_backend.hook_rc = -1;  // 装配期入口 hook 安装失败
+    CHECK(register_plugin(make_soft_descriptor()));
+    CHECK(install_all(make_host_deps()) == 0);  // fail-soft：不整体失败
+    CHECK(qol::hooks::state_of("hook:lc:soft") == ResourceState::kFree);
+    CHECK(feature_state_is("test_lc_soft", FeatureState::kEnabled));
+    qol::infra::FeatureStatus status{};
+    CHECK(qol::infra::status_get("test_lc_soft", &status) && status.degraded);
+
+    // 原语恢复 → 门禁监督重试；安装成功并交还 backup，degraded 清除。
+    g_backend.hook_rc = 0;
+    qol::host::sync_gates();
+    CHECK(qol::hooks::state_of("hook:lc:soft") == ResourceState::kLive);
+    CHECK(g_probe.ready_calls == 1);
+    CHECK(g_probe.ready_backups[0] != nullptr);
+    CHECK(qol::infra::status_get("test_lc_soft", &status));
+    CHECK(!status.degraded);
+}
+
 }  // namespace
 
 int main() {
@@ -457,6 +514,7 @@ int main() {
     test_enable_disable_rejected();
     test_isolated_rejects_lifecycle();
     test_failed_release_tombstones_and_isolates();
+    test_gated_entry_failsoft_retries_on_sync_gates();
     std::printf("plugin_lifecycle: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

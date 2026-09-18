@@ -1,0 +1,28 @@
+#pragma once
+
+// 扩展背包声明式资源桥（D2a-3b-1）。
+//
+// 与 inventory_hooks 同构：wrapper / OwnershipOps 业务体仍在 feature/extension_bag
+// （本桥实现收口在 game_ui_virbag.cpp 尾部的 extension_bag_claims.inc），
+// plugins/extension_bag 只经本头取得 8 条资源声明表、交还入口 hook backup、
+// 驱动门禁两态，避免插件 include feature/extension_bag 内部头。
+
+#include <cstdint>
+
+#include "contracts/plugin.h"
+
+namespace qol::features::extension_bag {
+
+// 8 条声明式资源声明表（静态存储，生命周期 ≥ 进程）；out_count 可空。
+// 顺序：M1/M2 入口 hook → P1–P4 PopupState 占用 → S1 desc 槽命名空间 → X1 move_merge 指针槽。
+const qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count);
+
+// 入口 hook backup 交还（宿主 on_resource_ready 调用）：按资源 id 写入对应 wrapper 的
+// 原函数槽；X1 指针槽 wrapper 直走 game_access 解析入口，接收即成功；未知 id 返回非 0。
+int32_t extension_bag_bind_backup(const char* resource_id, void* backup);
+
+// 门禁两态：宿主 on_enabled/on_disabled 调用；副作用与旧 set_virtual_bag_enabled 逐字一致。
+bool extension_bag_set_enabled(bool enabled);
+bool extension_bag_enabled();
+
+}  // namespace qol::features::extension_bag

@@ -129,71 +129,20 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     return finish(result);
 }
 
-bool update_move_merge_hook_locked() {
-    if (g_base == 0) return false;
-    void** slot = reinterpret_cast<void**>(g_base + G_UIEQUIP_INVEN_ITEM_PROC_GOT_VMA);
-    if (slot == nullptr || *slot == nullptr) {
-        MOVE_LOG("move_merge: invalid proc_got=%p value=%p", slot, slot == nullptr ? nullptr : *slot);
-        return false;
-    }
-    const void* replacement = reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper);
-    const bool should_install = g_move_merge_requested.load() ||
-                                g_extension_source_protection_requested.load();
-    if (should_install) {
-        if (g_move_merge_hook.orig != nullptr) return true;
-        const void* expected = reinterpret_cast<void*>(fn_ui_equip_inven_item_control_event_proc);
-        if (expected == nullptr || *slot != expected) {
-            MOVE_LOG("move_merge: unexpected proc_got=%p value=%p expected=%p", slot, *slot, expected);
-            return false;
-        }
-    } else if (g_move_merge_hook.orig != nullptr && *slot != replacement) {
-        MOVE_LOG("move_merge: hook slot changed externally proc_got=%p value=%p", slot, *slot);
-        return false;
-    }
-    const uintptr_t page = reinterpret_cast<uintptr_t>(slot) & ~uintptr_t{0xFFF};
-    if (mprotect(reinterpret_cast<void*>(page), 0x1000, PROT_READ | PROT_WRITE) != 0) {
-        MOVE_LOG("move_merge: mprotect failed errno=%d", errno);
-        return false;
-    }
-    if (should_install) {
-        bool ok = g_move_merge_hook.install_typed(slot, &ui_equip_inven_item_proc_wrapper);
-        if (ok) {
-            MOVE_LOG("move_merge: wrapper installed proc_got=%p orig=%p replacement=%p merge=%d extension_protection=%d",
-                     slot, g_move_merge_hook.orig,
-                     reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
-                     g_move_merge_requested.load() ? 1 : 0,
-                     g_extension_source_protection_requested.load() ? 1 : 0);
-        }
-        return ok;
-    }
-    if (g_move_merge_hook.orig == nullptr) return true;
-    g_move_merge_hook.uninstall();
-    MOVE_LOG("move_merge: disabled");
-    return true;
-}
-
 bool set_move_merge_enabled(bool enabled) {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
     g_move_merge_requested.store(enabled);
-    const bool ok = update_move_merge_hook_locked();
-    if (ok) {
-        MOVE_LOG("move_merge: behavior=%d wrapper=%d extension_protection=%d",
-                 enabled ? 1 : 0, g_move_merge_hook.orig != nullptr ? 1 : 0,
-                 g_extension_source_protection_requested.load() ? 1 : 0);
-    }
-    return ok;
+    MOVE_LOG("move_merge: behavior=%d extension_protection=%d (wrapper resident)",
+             enabled ? 1 : 0, g_extension_source_protection_requested.load() ? 1 : 0);
+    return true;
 }
 
 bool set_extension_source_protection_enabled(bool enabled) {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
     g_extension_source_protection_requested.store(enabled);
-    const bool ok = update_move_merge_hook_locked();
-    if (ok) {
-        MOVE_LOG("move_merge: extension_source_protection=%d wrapper=%d merge=%d",
-                 enabled ? 1 : 0, g_move_merge_hook.orig != nullptr ? 1 : 0,
-                 g_move_merge_requested.load() ? 1 : 0);
-    }
-    return ok;
+    MOVE_LOG("move_merge: extension_source_protection=%d merge=%d (wrapper resident)",
+             enabled ? 1 : 0, g_move_merge_requested.load() ? 1 : 0);
+    return true;
 }
 
 bool move_merge_enabled() {

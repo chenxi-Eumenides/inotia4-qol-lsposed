@@ -314,3 +314,9 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     plugins/save_backup/ui/panel.cpp
 )
+
+# D2a-3b-1：extension_bag 声明式资源插件（8 条 claim；wrapper 业务体仍在 feature/extension_bag
+# 与 feature/patch，经 extension_bag_bridge.h / game_patch_bridge.h 交还）
+target_sources(gamebridge PRIVATE
+    plugins/extension_bag/plugin.cpp
+)
