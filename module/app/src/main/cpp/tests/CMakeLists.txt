@@ -48,20 +48,20 @@ target_include_directories(stage4_hook_tests PRIVATE
 target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
 add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 
-add_executable(attribute_range_tests
-    test_attribute_range.cpp
-    ${CPP_DIR}/domains/attribute_range/rules.cpp
+add_executable(attribute_quality_tests
+    test_attribute_quality.cpp
+    ${CPP_DIR}/plugins/attribute_quality/rules.cpp
 )
-target_include_directories(attribute_range_tests PRIVATE
+target_include_directories(attribute_quality_tests PRIVATE
     ${CPP_DIR}
 )
-target_compile_features(attribute_range_tests PRIVATE cxx_std_17)
-add_test(NAME attribute_range_tests COMMAND attribute_range_tests)
+target_compile_features(attribute_quality_tests PRIVATE cxx_std_17)
+add_test(NAME attribute_quality_tests COMMAND attribute_quality_tests)
 
 # 自定义合成配方纯逻辑 host 测试（档位互逆 / 目录映射 / 表注入字节；末尾追加）
 add_executable(custom_recipe_tests
     test_custom_recipe.cpp
-    ${CPP_DIR}/domains/attribute_range/rules.cpp
+    ${CPP_DIR}/plugins/attribute_quality/rules.cpp
     ${CPP_DIR}/plugins/custom_recipe/rules.cpp
     ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
     ${CPP_DIR}/plugins/custom_recipe/table.cpp
@@ -577,21 +577,21 @@ set_target_properties(quest_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STAND
 target_link_libraries(quest_lifecycle_tests PRIVATE Threads::Threads)
 add_test(NAME quest_lifecycle_tests COMMAND quest_lifecycle_tests)
 
-# attribute_range wrapper 撤销期透传 host 测试。
-add_executable(attribute_range_wrapper_tests
-    test_attribute_range_wrappers.cpp
-    ${CPP_DIR}/plugins/attribute_range/feature.cpp
-    ${CPP_DIR}/domains/attribute_range/rules.cpp
+# attribute_range_display wrapper 撤销期透传 host 测试。
+add_executable(attribute_range_display_tests
+    test_attribute_range_display.cpp
+    ${CPP_DIR}/plugins/attribute_range_display/feature.cpp
+    ${CPP_DIR}/plugins/attribute_quality/rules.cpp
     ${CPP_DIR}/core/native/qol_log.cpp
 )
-target_include_directories(attribute_range_wrapper_tests PRIVATE
+target_include_directories(attribute_range_display_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
 )
-target_compile_features(attribute_range_wrapper_tests PRIVATE cxx_std_17)
-set_target_properties(attribute_range_wrapper_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(attribute_range_wrapper_tests PRIVATE Threads::Threads)
-add_test(NAME attribute_range_wrapper_tests COMMAND attribute_range_wrapper_tests)
+target_compile_features(attribute_range_display_tests PRIVATE cxx_std_17)
+set_target_properties(attribute_range_display_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(attribute_range_display_tests PRIVATE Threads::Threads)
+add_test(NAME attribute_range_display_tests COMMAND attribute_range_display_tests)
 
 # world_teleport 安装结果语义 host 测试。
 add_executable(world_teleport_status_tests

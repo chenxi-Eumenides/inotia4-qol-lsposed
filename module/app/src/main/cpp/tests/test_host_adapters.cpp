@@ -44,16 +44,17 @@ int char_party_index(const void*) { return 0; }
 int attr_item_category(const void*) { return 4; }
 bool attr_is_jewel_category(int) { return true; }
 int attr_ability_level(const void*) { return 3; }
-bool attr_probe_option_range(int, int, int, void*, int* out_min, int* out_max) {
-    *out_min = 1;
-    *out_max = 4;
+bool attr_call_option_value(int, int, int, void*, int* out_value) {
+    *out_value = 3;
     return true;
 }
-bool attr_probe_jewel_range(int, void*, int* out_min, int* out_max) {
-    *out_min = 2;
-    *out_max = 8;
+bool attr_call_jewel_value(int, void*, int* out_value) {
+    *out_value = 4;
     return true;
 }
+bool attr_item_uses_fixed_option_table(int) { return false; }
+bool attr_fixed_option_percent_pair(int, int, int*, int*) { return false; }
+bool attr_insert_value_color(char*, char*, char) { return true; }
 int64_t craft_ui_type() { return 1; }
 uint8_t craft_panel_state() { return 2; }
 uint32_t craft_mix_type() { return 3; }
@@ -164,6 +165,12 @@ int main() {
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
     assert(game.thread.frame_count() == 99);
+    assert(game.ui_primitive.insert_inline_color != nullptr);
+    char bounded_text[] = "value";
+    char* bounded_builder = bounded_text;
+    assert(game.ui_primitive.insert_inline_color(&bounded_builder, 4, 'Y').ok ==
+           kQolErrBlocked);
+    assert(bounded_builder == bounded_text);
     int32_t character_type = -1;
     assert(game.read.character.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
     assert(character_type == 2);

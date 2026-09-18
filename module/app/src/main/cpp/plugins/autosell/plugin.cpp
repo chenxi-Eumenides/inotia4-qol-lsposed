@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "contracts/events.h"
+#include "contracts/attribute_quality.h"
 #include "contracts/ownership.h"
 #include "contracts/panels.h"
 #include "core/native/qol_log.h"
@@ -35,6 +36,11 @@ namespace {
 constexpr const char* kPluginId = "autosell";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kGateKey = "plugin.autosell.enabled";
+
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kAttributeQualityCapabilityId,
+     {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
+};
 
 infra::SubscriptionId g_config_subscription = 0;
 std::atomic<bool> g_gate{false};
@@ -149,7 +155,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires,  // requires=attribute.quality
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）

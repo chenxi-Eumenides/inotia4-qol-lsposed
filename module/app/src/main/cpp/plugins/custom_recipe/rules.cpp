@@ -2,9 +2,6 @@
 
 namespace custom_recipe {
 
-using attr_range::classify;
-using attr_range::Tier;
-
 int tier_ordinal(Tier tier) {
     switch (tier) {
         case Tier::Grey:   return 0;
@@ -23,7 +20,8 @@ Tier tier_from_ordinal(int ordinal) {
     return static_cast<Tier>(ordinal);
 }
 
-int tier_lower_bound(Tier target, int min, int max) {
+int tier_lower_bound(Tier target, int min, int max, ClassifyFn classify_fn) {
+    if (classify_fn == nullptr) return max;
     // classify(v,min,max) 对 v 单调不减（v<min→Grey，[min,max)→按百分位升档，>=max→Gold），
     // 故二分查找首个 ordinal(classify(v)) >= 目标序数 的 v。
     const int t = tier_ordinal(target);
@@ -31,7 +29,7 @@ int tier_lower_bound(Tier target, int min, int max) {
     int hi = max;
     while (lo < hi) {
         const int mid = lo + (hi - lo) / 2;
-        if (tier_ordinal(classify(mid, min, max)) >= t) {
+        if (tier_ordinal(classify_fn(mid, min, max)) >= t) {
             hi = mid;
         } else {
             lo = mid + 1;
@@ -41,9 +39,9 @@ int tier_lower_bound(Tier target, int min, int max) {
 }
 
 bool next_tier_interval(int current_value, int min, int max, Tier* out_target,
-                        int* out_lo, int* out_hi) {
-    if (max <= min) return false;
-    const int current_ordinal = tier_ordinal(classify(current_value, min, max));
+                        int* out_lo, int* out_hi, ClassifyFn classify_fn) {
+    if (max <= min || classify_fn == nullptr || out_lo == nullptr || out_hi == nullptr) return false;
+    const int current_ordinal = tier_ordinal(classify_fn(current_value, min, max));
     if (current_value >= max && current_ordinal == tier_ordinal(Tier::Gold)) {
         return false;  // 已金档（含金值 >= max）
     }
@@ -51,10 +49,10 @@ bool next_tier_interval(int current_value, int min, int max, Tier* out_target,
     // 金档 [max,max] 恒有代表值，故循环必在 ord<=5 内命中。
     for (int ord = current_ordinal + 1; ord <= tier_ordinal(Tier::Gold); ++ord) {
         const Tier target = tier_from_ordinal(ord);
-        const int lo = tier_lower_bound(target, min, max);
+        const int lo = tier_lower_bound(target, min, max, classify_fn);
         const int hi = (ord == tier_ordinal(Tier::Gold))
                            ? max
-                           : tier_lower_bound(tier_from_ordinal(ord + 1), min, max) - 1;
+                           : tier_lower_bound(tier_from_ordinal(ord + 1), min, max, classify_fn) - 1;
         if (lo <= hi) {
             if (out_target != nullptr) *out_target = target;
             *out_lo = lo;
@@ -66,16 +64,16 @@ bool next_tier_interval(int current_value, int min, int max, Tier* out_target,
 }
 
 UpgradeResult compute_tier_up_value(int current_value, int min, int max,
-                                    int (*rand_inclusive)(int, int), Tier* out_target,
-                                    int* out_new_value) {
-    if (max <= min) return UpgradeResult::kDegenerate;
-    if (tier_ordinal(classify(current_value, min, max)) == tier_ordinal(Tier::Gold)) {
+                                     ClassifyFn classify_fn, int (*rand_inclusive)(int, int), Tier* out_target,
+                                     int* out_new_value) {
+    if (max <= min || classify_fn == nullptr) return UpgradeResult::kDegenerate;
+    if (tier_ordinal(classify_fn(current_value, min, max)) == tier_ordinal(Tier::Gold)) {
         return UpgradeResult::kAlreadyGold;
     }
     Tier target = Tier::Grey;
     int lo = 0;
     int hi = 0;
-    if (!next_tier_interval(current_value, min, max, &target, &lo, &hi)) {
+    if (!next_tier_interval(current_value, min, max, &target, &lo, &hi, classify_fn)) {
         return UpgradeResult::kAlreadyGold;
     }
     if (rand_inclusive == nullptr) return UpgradeResult::kDegenerate;

@@ -2,7 +2,7 @@
 #include "plugins/custom_recipe/rules.h"
 #include "plugins/custom_recipe/table.h"
 
-#include "domains/attribute_range/rules.h"
+#include "plugins/attribute_quality/rules.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -17,8 +17,8 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using attr_range::classify;
-using attr_range::Tier;
+using attribute_quality::classify;
+using attribute_quality::Tier;
 namespace cr = custom_recipe;
 
 static uint16_t rd_u16(const uint8_t* p) {
@@ -30,9 +30,9 @@ static uint16_t rd_u16(const uint8_t* p) {
 // ---------------------------------------------------------------------------
 static void test_interval_inverse_boundaries() {
     // 退化（max<=min）恒金档、不可升。
-    CHECK(cr::compute_tier_up_value(5, 10, 10, nullptr, nullptr, nullptr) ==
+    CHECK(cr::compute_tier_up_value(5, 10, 10, &classify, nullptr, nullptr, nullptr) ==
           cr::UpgradeResult::kDegenerate);
-    CHECK(cr::compute_tier_up_value(0, 0, 0, nullptr, nullptr, nullptr) ==
+    CHECK(cr::compute_tier_up_value(0, 0, 0, &classify, nullptr, nullptr, nullptr) ==
           cr::UpgradeResult::kDegenerate);
 
     // 穷举小范围：对每个非金档 value，next_tier_interval 得到的 [lo,hi] 内所有值
@@ -46,7 +46,7 @@ static void test_interval_inverse_boundaries() {
         Tier target = Tier::Grey;
         int lo = 0;
         int hi = 0;
-        if (!cr::next_tier_interval(v, min, max, &target, &lo, &hi)) {
+        if (!cr::next_tier_interval(v, min, max, &target, &lo, &hi, &classify)) {
             ++g_fail;
             std::printf("FAIL interval missing for v=%d\n", v);
             continue;
@@ -72,9 +72,9 @@ static void test_interval_inverse_boundaries() {
     CHECK(seen_tiers > 0);
 
     // 金档不可升（v>=max）。
-    CHECK(cr::compute_tier_up_value(100, 0, 100, nullptr, nullptr, nullptr) ==
+    CHECK(cr::compute_tier_up_value(100, 0, 100, &classify, nullptr, nullptr, nullptr) ==
           cr::UpgradeResult::kAlreadyGold);
-    CHECK(cr::compute_tier_up_value(150, 0, 100, nullptr, nullptr, nullptr) ==
+    CHECK(cr::compute_tier_up_value(150, 0, 100, &classify, nullptr, nullptr, nullptr) ==
           cr::UpgradeResult::kAlreadyGold);
 }
 
@@ -105,7 +105,8 @@ static void test_random_matches_target() {
         for (int (*rand)(int, int) : {rand_lo, rand_hi}) {
             Tier target = Tier::Grey;
             int out = 0;
-            const auto r = cr::compute_tier_up_value(c.value, c.min, c.max, rand, &target, &out);
+            const auto r = cr::compute_tier_up_value(c.value, c.min, c.max, &classify, rand,
+                                                     &target, &out);
             CHECK(r == cr::UpgradeResult::kOk);
             CHECK(classify(out, c.min, c.max) == target);
             CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(cur) + 1);
@@ -114,12 +115,12 @@ static void test_random_matches_target() {
         Tier target = Tier::Grey;
         int lo = 0;
         int hi = 0;
-        CHECK(cr::next_tier_interval(c.value, c.min, c.max, &target, &lo, &hi));
+        CHECK(cr::next_tier_interval(c.value, c.min, c.max, &target, &lo, &hi, &classify));
         for (int i = 0; i <= hi - lo; ++i) {
             g_rand_cursor = i;
             int out = 0;
             Tier t2 = Tier::Grey;
-            CHECK(cr::compute_tier_up_value(c.value, c.min, c.max, rand_sweep, &t2, &out) ==
+            CHECK(cr::compute_tier_up_value(c.value, c.min, c.max, &classify, rand_sweep, &t2, &out) ==
                   cr::UpgradeResult::kOk);
             CHECK(out >= lo && out <= hi);
             CHECK(t2 == target);

@@ -37,7 +37,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     bool ok = bridge_init();
     if (ok) {
         // 库存行为 hook 已迁移为 inventory_hooks 插件（assembly 注册，宿主声明式安装 24 条入口）。
-        // 属性显示范围已迁移为 attribute_range 插件（assembly 注册，宿主张成资源与能力）。
+        // 属性范围已拆为 attribute_quality provider 与 attribute_range_display 消费者。
         // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力 + 角色面板作用域标记，
         // assembly 注册，宿主声明式安装）。
         // 删档同步 PtrHook 已随 save_backup 插件迁移：由其 install 安装（assembly_init）。

@@ -26,9 +26,9 @@
 | `feature/ui` | `plugins/core.ui` + `plugins/text_layer` + 面板归各插件；基础层 `game/access`（`ui_kit`/`ui_components`） | 33 | entry hook ×4 安装者 | 已清除（符号头引用与域间依赖随迁移消除） | ✅ D1 完成（VM-D1 待真机） |
 | `feature/extension_bag` | `plugins/extension_bag` | 32 | entry hook、call patch、ptr slot | 已清除（符号头引用与 feature/patch 双向依赖随 D2c-2 消除） | ✅ D2c-2 完成（feature/ 目录已空；余 D2d 收尾） |
 | `feature/patch` | 已删除（D2c-2b-2）：inventory 业务 → `plugins/inventory_hooks`；move_merge/X1 → `plugins/extension_bag`；IAP → `game/access`；机制 → `patch/`/`host/` | 12 | entry hook、call patch | 已清除（域删除） | ✅ D2c-2 完成 |
-| `feature/autosell` | `plugins/autosell` | 10 | 帧任务消费者 | 域间依赖（→ attribute_range） | P4 |
+| `feature/autosell` | `plugins/autosell` | 10 | 帧任务消费者 | capability 消费（→ attribute.quality） | P4 |
 | `feature/custom_recipe` | `plugins/custom_recipe` | 8 | entry hook（经 craft_ui） | 与 `feature/craft_ui` 双向 | P4 |
-| `feature/attribute_range` | `plugins/attribute_range`（插件）+ `domains/attribute_range`（纯规则）+ `game/access`（界面接入） | 4 | entry hook ×3 | 已清除（符号头引用随迁移消除；feature→feature 依赖已消除） | ✅ P4-A3 完成（VM-P4-04） |
+| `feature/attribute_range` | `plugins/attribute_quality`（provider）+ `plugins/attribute_range_display`（消费者）+ `game/access`（Host 原语） | 8 | entry hook ×3 | L3 拆分完成；provider/display 仅经 contracts 与 Host SDK/Game Host 协作 | L3 host-only 验证中 |
 | `feature/craft_ui` | `plugins/craft_ui` | 4 | entry hook ×11（单一挂载处） | 与 `feature/custom_recipe` 双向 | P4 |
 | `feature/save_backup` | `plugins/save_backup` | 4 | 无（纯逻辑 + 文件事务） | 被 `feature/ui` 依赖 | P4 |
 | `feature/simple_mode` | `plugins/simple_mode` | 6 | entry hook ×2 | 已清除（符号头引用随迁移消除） | ✅ P2 完成（样板） |
@@ -148,7 +148,7 @@
 |---|---|---|
 | L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
 | L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
-| L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ⬜ 待办 |
+| L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | 🟡 实现与 host-only 验证完成；真机卡待执行（本任务不装机） |
 | L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ⬜ 待办 |
 | L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ⬜ 待办 |
 | L6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
@@ -156,4 +156,4 @@
 
 当前迁移债基线：`plugins → game` 24 文件、`plugins → infra` 22 文件、
 `plugins → hooks` 8 文件、`plugins → patch` 0 文件、`plugins → host` 0 文件；
-`domains/` 仍有 2 个文件。上述违规面待 L7 切换校验口径时处理，不在本批新增基线。
+`domains/` 已清零。上述插件胶囊迁移债待后续 lane 处理，不在本批新增基线。

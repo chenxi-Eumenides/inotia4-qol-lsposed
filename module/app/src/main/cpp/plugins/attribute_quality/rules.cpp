@@ -1,26 +1,8 @@
-#include "domains/attribute_range/rules.h"
+#include "plugins/attribute_quality/rules.h"
 
 #include <cstdint>
 
-namespace attr_range {
-
-char color_code(Tier tier) {
-    switch (tier) {
-        case Tier::Grey:
-            return 'G';
-        case Tier::White:
-            return 'W';
-        case Tier::Green:
-            return 'C';
-        case Tier::Blue:
-            return 'L';
-        case Tier::Purple:
-            return 'V';
-        case Tier::Gold:
-            return 'Y';
-    }
-    return 'G';
-}
+namespace attribute_quality {
 
 Tier classify(int value, int min, int max) {
     // 退化区间（max <= min）无法计算百分位，统一视为满值。
@@ -76,4 +58,4 @@ void fixed_option_range(int base, int p1, int p2, int* out_min, int* out_max) {
     }
 }
 
-}  // namespace attr_range
+}  // namespace attribute_quality

@@ -43,10 +43,12 @@ add_library(gamebridge SHARED
     plugins/extension_bag/extension_bag_persistence.cpp
     plugins/extension_bag/extension_bag_geometry.cpp
     plugins/extension_bag/extension_bag_api.cpp
-    domains/attribute_range/rules.cpp
     game/access/attr_range_ui.cpp
-    plugins/attribute_range/feature.cpp
-    plugins/attribute_range/plugin.cpp
+    plugins/attribute_quality/rules.cpp
+    plugins/attribute_quality/feature.cpp
+    plugins/attribute_quality/plugin.cpp
+    plugins/attribute_range_display/feature.cpp
+    plugins/attribute_range_display/plugin.cpp
     plugins/world_teleport/feature.cpp
     plugins/world_teleport/rules.cpp
 )

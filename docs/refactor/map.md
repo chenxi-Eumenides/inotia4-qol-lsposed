@@ -6,7 +6,7 @@
 > - 阶段状态与功能域归属：`docs/refactor/ledger.md`
 > - 机器事实快照（层分布、基线债务）：`docs/refactor/baseline.md`（脚本生成）
 >
-> **范围声明**：本文件只覆盖**已迁入新架构**的实现（`contracts/ game/ infra/ hooks/ patch/ domains/ plugins/ host/`）。
+> **范围声明**：本文件只覆盖**已迁入新架构**的实现（`contracts/ game/ infra/ hooks/ patch/ plugins/ host/`）。
 > **排除** `core/`、`feature/`、`api/`、`data/` 与其余 legacy bridge（`bridge/native/*` 除验证附录列出的 JNI 薄层外）。
 > 目标结构与设计理由不在此重复，见 `ARCHITECTURE.md`。
 
@@ -16,7 +16,7 @@
 > 本节由 `scripts/maintenance/gen_map_doc.py` 生成，**禁止手工编辑**；
 > 手工改动会在 `--check` 下被判定为不一致。
 
-- 数据源：`module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,plugins,host}`、`module/app/src/main/cpp/plugins/*`、`module/app/src/main/cpp/tests/CMakeLists.txt`
+- 数据源：`module/app/src/main/cpp/{contracts,game,infra,hooks,patch,plugins,host}`、`module/app/src/main/cpp/plugins/*`、`module/app/src/main/cpp/tests/CMakeLists.txt`
 - 口径：行数按 `wc -l`（换行符计数，含空行与注释）；文件限 `.cpp`/`.h`/`.inc`；不含 `bridge/`、`tests/` 与 legacy 路径
 - CTest 分类规则：`gen_map_doc.py` 的显式白名单（测试源文件 → 机制/宿主或已迁移功能）确定新架构/已迁移 target，其余归 legacy；白名单条目须存在于 `tests/CMakeLists.txt`，两类互斥
 
@@ -24,23 +24,23 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 17 | 1110 |
-| `game/` | 37 | 2790 |
+| `contracts/` | 17 | 1148 |
+| `game/` | 37 | 2734 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 462 |
-| `domains/` | 2 | 111 |
-| `plugins/` | 146 | 28591 |
-| `host/` | 12 | 2230 |
-| **合计** | **254** | **39013** |
+| `plugins/` | 152 | 28948 |
+| `host/` | 15 | 3078 |
+| **合计** | **261** | **40089** |
 
 ### 已迁移插件（`plugins/*`）
 
-- `plugins/attribute_range/`：4 文件 / 313 行
-- `plugins/autosell/`：14 文件 / 1925 行
+- `plugins/attribute_quality/`：6 文件 / 411 行
+- `plugins/attribute_range_display/`：4 文件 / 237 行
+- `plugins/autosell/`：14 文件 / 1931 行
 - `plugins/core.ui/`：14 文件 / 1522 行
 - `plugins/craft_ui/`：4 文件 / 690 行
-- `plugins/custom_recipe/`：10 文件 / 1943 行
+- `plugins/custom_recipe/`：10 文件 / 1959 行
 - `plugins/extension_bag/`：39 文件 / 13112 行
 - `plugins/inventory_hooks/`：9 文件 / 1922 行
 - `plugins/native_choice/`：4 文件 / 466 行
@@ -55,15 +55,15 @@
 
 ### CTest target 分类
 
-- 全仓 target 总数：**44**
+- 全仓 target 总数：**45**
 - 新架构/已迁移：**32**（机制/宿主 18 + 已迁移功能 14）
-- legacy：**12**
+- legacy：**13**
 
 新架构/已迁移（32）：
 - 机制/宿主（18）：`capability_lifecycle_tests`、`extension_bag_contract_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_panels_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
-- 已迁移功能（14）：`attribute_range_tests`、`attribute_range_wrapper_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`quest_lifecycle_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`、`text_layer_plugin_tests`
+- 已迁移功能（14）：`attribute_quality_tests`、`attribute_range_display_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`quest_lifecycle_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`、`text_layer_plugin_tests`
 
-legacy（12）：`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`world_teleport_status_tests`
+legacy（13）：`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_adapter_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`world_teleport_status_tests`
 <!-- END GENERATED:stats -->
 
 ## 人工导航
@@ -77,7 +77,6 @@ legacy（12）：`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature
 | `infra/` | 运行时骨架：命令队列/命令端口、事件、能力、配置、状态、快照、调度器 | `infra/command_queue.h`、`infra/commands.h`、`infra/scheduler.h`、`infra/runtime.h` |
 | `hooks/` | 资源机制层：登记表、安装引擎、事务引擎、共享资源分派协议 | `hooks/registry.h`、`hooks/install.h`、`hooks/transaction.h`、`hooks/dispatch.h` |
 | `patch/` | 指令 patch 机制：占用声明、原字校验、BL/word 安装与还原 | `patch/claims.h`、`patch/instr_patch.h` |
-| `domains/` | 中立领域逻辑（可被多个插件消费），当前仅 `attribute_range` | `domains/attribute_range/rules.h` |
 | `plugins/` | 内置静态插件（一插件一目录，清单见生成统计区） | 各 `plugins/<id>/plugin.h` 的 `plugin_descriptor()` |
 | `host/` | 宿主装配与系统级 JSON：启动装配、插件注册表、帧源、状态/变体导出 | `host/assembly.h`、`host/plugin_registry.h`、`host/frame_source.h`、`host/status_json.h` |
 

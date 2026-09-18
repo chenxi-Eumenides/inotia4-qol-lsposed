@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "contracts/attribute_range.h"
+#include "contracts/attribute_quality.h"
 #include "contracts/commands.h"
 #include "contracts/plugin.h"
 #include "hooks/registry.h"
@@ -27,7 +27,9 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using qol::contracts::AttrRangeApi;
+using qol::contracts::AttributeQualityApi;
+using qol::contracts::AttributeQualityResult;
+using qol::contracts::AttributeQualityTier;
 using qol::contracts::CapabilityProvisionRef;
 using qol::contracts::CapabilityRequirement;
 using qol::contracts::PluginContext;
@@ -98,14 +100,22 @@ int g_provider_deactivate_calls = 0;
 int g_provider_enabled_calls = 0;
 int g_provider_disabled_calls = 0;
 
-bool fake_probe_jewel_range(int type, void* item, int* out_min, int* out_max) {
-    (void)type;
-    (void)item;
-    (void)out_min;
-    (void)out_max;
-    return !g_provider_revoking;  // 撤销期拒绝新调用
+QolResult fake_probe_jewel(const void*, int32_t, int32_t, AttributeQualityResult*) {
+    return g_provider_revoking ? qol::contracts::error(kQolErrNotReady, "revoking", 8)
+                                : qol::contracts::ok();
 }
-const AttrRangeApi g_provider_api{&fake_probe_jewel_range};
+QolResult fake_probe_option(const void*, int32_t, int32_t, int32_t, int32_t,
+                            AttributeQualityResult*) {
+    return qol::contracts::ok();
+}
+QolResult fake_classify(int32_t, int32_t, int32_t, AttributeQualityTier*) {
+    return qol::contracts::ok();
+}
+QolResult fake_percentile(int32_t, int32_t, int32_t, int32_t*) {
+    return qol::contracts::ok();
+}
+const AttributeQualityApi g_provider_api{&fake_probe_jewel, &fake_probe_option, &fake_classify,
+                                        &fake_percentile};
 
 int provider_install(PluginContext&) { ++g_provider_install_calls; return 0; }
 void provider_deactivate(PluginContext&) { ++g_provider_deactivate_calls; }
@@ -158,13 +168,13 @@ ResourceClaim g_opt_resources[] = {
 };
 
 CapabilityProvisionRef g_provides[] = {
-    {qol::contracts::kAttrRangeCapabilityId, {1, 0}, &g_provider_api},
+    {qol::contracts::kAttributeQualityCapabilityId, {1, 0}, &g_provider_api},
 };
 CapabilityRequirement g_requires[] = {
-    {qol::contracts::kAttrRangeCapabilityId, {1, 0}},
+    {qol::contracts::kAttributeQualityCapabilityId, {1, 0}},
 };
 CapabilityRequirement g_optional[] = {
-    {qol::contracts::kAttrRangeCapabilityId, {1, 0}},
+    {qol::contracts::kAttributeQualityCapabilityId, {1, 0}},
 };
 
 PluginDescriptor make_provider() {
@@ -263,11 +273,11 @@ bool feature_status(const char* id, FeatureStatus* out) {
     return qol::infra::status_get(id, out);
 }
 
-const AttrRangeApi* require_attr_range() {
-    return static_cast<const AttrRangeApi*>(qol::infra::require_capability(
-        qol::contracts::kAttrRangeCapabilityId,
-        QolVersionRange{qol::contracts::kAttrRangeVersionMajor,
-                        qol::contracts::kAttrRangeVersionMinor}));
+const AttributeQualityApi* require_attribute_quality() {
+    return static_cast<const AttributeQualityApi*>(qol::infra::require_capability(
+        qol::contracts::kAttributeQualityCapabilityId,
+        QolVersionRange{qol::contracts::kAttributeQualityVersionMajor,
+                        qol::contracts::kAttributeQualityVersionMinor}));
 }
 
 int drive_lifecycle() {
@@ -287,7 +297,7 @@ void test_enabled_registers_capability() {
     CHECK(install_all(make_host_deps()) == 0);
     CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
     CHECK(qol::infra::capability_count() == 1);
-    CHECK(require_attr_range() == &g_provider_api);
+    CHECK(require_attribute_quality() == &g_provider_api);
     CHECK(g_provider_enabled_calls == 1);
 }
 
@@ -298,7 +308,7 @@ void test_installed_disabled_does_not_register() {
     CHECK(install_all(make_host_deps()) == 0);
     CHECK(feature_state_is("cap_provider", FeatureState::kInstalledDisabled));
     CHECK(qol::infra::capability_count() == 0);
-    CHECK(require_attr_range() == nullptr);
+    CHECK(require_attribute_quality() == nullptr);
     CHECK(g_provider_disabled_calls == 1);
 }
 
@@ -321,7 +331,7 @@ void test_disable_revokes_and_cascades() {
     CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kLive);
     CHECK(qol::hooks::state_of("hook:cap:opt") == ResourceState::kLive);
 
-    const AttrRangeApi* saved = require_attr_range();
+    const AttributeQualityApi* saved = require_attribute_quality();
     CHECK(saved != nullptr);
     CHECK(in_flight_enter("hook:cap:req"));
     g_unhook_calls = 0;
@@ -331,11 +341,11 @@ void test_disable_revokes_and_cascades() {
     CHECK(sync_gates() >= 1);
 
     CHECK(qol::infra::capability_count() == 0);
-    CHECK(require_attr_range() == nullptr);
+    CHECK(require_attribute_quality() == nullptr);
     CHECK(g_provider_disabled_calls == 1);  // 提供者门禁已关
     CHECK(g_provider_revoking);
     // 撤销期新调用被提供者拒绝（能力仍在撤销事务内，指针尚未失效）。
-    CHECK(!saved->probe_jewel_range(0, nullptr, nullptr, nullptr));
+    CHECK(saved->probe_jewel(nullptr, 0, 0, nullptr).ok != kQolOk);
 
     // required 消费者先进入 release 事务：在途未归零时保持 live/deactivating。
     FeatureStatus req{};
@@ -428,7 +438,7 @@ void test_deactivate_revokes_capability() {
 
     CHECK(feature_state_is("cap_provider", FeatureState::kInactive));
     CHECK(qol::infra::capability_count() == 0);
-    CHECK(require_attr_range() == nullptr);
+    CHECK(require_attribute_quality() == nullptr);
     CHECK(g_provider_disabled_calls == 1);   // 撤销期关提供者门禁
     CHECK(g_provider_deactivate_calls == 1); // 终态插件自身清理
     CHECK(qol::hooks::state_of("hook:cap:prov") == ResourceState::kFree);

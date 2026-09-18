@@ -2,14 +2,17 @@
 
 #include <cstdint>
 
-#include "domains/attribute_range/rules.h"
+#include "contracts/attribute_quality.h"
 
 // 自定义合成配方「提升一档」纯逻辑（custom-craft-recipe §4.6 / §2.4）。
 //
-// 档位区间必须与 attr_range::classify 严格互逆：本模块用 classify 作为唯一真值判定
+// 档位区间必须与 attribute_quality::classify 严格互逆：本模块用 classify 作为唯一真值判定
 // 某整数落在哪一档，并以二分查找求出每一档在闭区间 [min,max] 内的代表值区间；
 // 不使用浮点、不写死百分位，从而杜绝端点漂移。
 namespace custom_recipe {
+
+using Tier = qol::contracts::AttributeQualityTier;
+using ClassifyFn = Tier (*)(int value, int min, int max);
 
 // 「提升一档」结果状态。
 enum class UpgradeResult : uint8_t {
@@ -19,16 +22,16 @@ enum class UpgradeResult : uint8_t {
 };
 
 // 档位序数（低→高）：Grey=0, White=1, Green=2, Blue=3, Purple=4, Gold=5。
-int tier_ordinal(attr_range::Tier tier);
+int tier_ordinal(Tier tier);
 
 // 由序数还原档位（0..5）；越界钳制到 [Grey, Gold]。
-attr_range::Tier tier_from_ordinal(int ordinal);
+Tier tier_from_ordinal(int ordinal);
 
 // 求目标档位在闭区间 [min,max] 内的最小代表值：
 //   smallest v ∈ [min,max] 使 ordinal(classify(v,min,max)) >= ordinal(target)。
 // 依赖 classify 对 v 单调不减，二分查找实现，边界严格互逆于 classify。
 // 前置：max > min。target==Gold 时返回 max。
-int tier_lower_bound(attr_range::Tier target, int min, int max);
+int tier_lower_bound(Tier target, int min, int max, ClassifyFn classify_fn);
 
 // 求「当前数值所在档的上一档」代表闭区间 [out_lo,out_hi]（升序，out_lo<=out_hi）。
 // 若紧邻上一档在 [min,max] 内无整数代表值（区间过窄），继续向上走到下一个有代表值
@@ -36,15 +39,15 @@ int tier_lower_bound(attr_range::Tier target, int min, int max);
 // out_target（可空）回传区间所属目标档。
 // 返回 false：max<=min（退化）或当前已金档（无可升目标）。
 bool next_tier_interval(int current_value, int min, int max,
-                        attr_range::Tier* out_target, int* out_lo, int* out_hi);
+                        Tier* out_target, int* out_lo, int* out_hi, ClassifyFn classify_fn);
 
 // 在 next_tier_interval 得到的闭区间内用 rand_inclusive 取新数值。
 // rand_inclusive(lo,hi) 须在闭区间 [lo,hi] 均匀返回整数（生产用 MATH_GetRandom）。
 // 取回值钳制进 [lo,hi]，故 classify(新值)==out_target（若 out_target 非空则回传）。
 // 退化/已金档 → 对应 UpgradeResult，*out_new_value 不写。
 UpgradeResult compute_tier_up_value(int current_value, int min, int max,
-                                    int (*rand_inclusive)(int, int),
-                                    attr_range::Tier* out_target, int* out_new_value);
+                                    ClassifyFn classify_fn, int (*rand_inclusive)(int, int),
+                                    Tier* out_target, int* out_new_value);
 
 // ---------------------------------------------------------------------------
 // 材料需求数量（custom-craft-recipe §4.7 / CountRule::kJewelGradeAndLevel）

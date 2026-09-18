@@ -181,26 +181,63 @@ QolResult read_quest_state(int32_t* out) {
     return unsupported();
 }
 
-QolResult read_attr_range(int32_t type, const void* item, int32_t option_index, int32_t* out_min,
-                          int32_t* out_max) {
-    if (item == nullptr || out_min == nullptr || out_max == nullptr || option_index < 0) {
+QolResult read_attr_option_value(int32_t option_index, int32_t level, int32_t flag,
+                                 const void* item, int32_t* out_value) {
+    if (item == nullptr || out_value == nullptr || option_index < 0 || level < 0 || flag < 0) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    int minimum = 0;
-    int maximum = 0;
-    bool ok = false;
-    if (type == 0) {
-        ok = qol::game::attr_probe_option_range(option_index, qol::game::attr_ability_level(item), 1,
-                                                const_cast<void*>(item), &minimum, &maximum);
-    } else if (type == 1) {
-        ok = qol::game::attr_probe_jewel_range(option_index, const_cast<void*>(item), &minimum,
-                                               &maximum);
-    } else {
+    if (!qol::game::attr_call_option_value(option_index, level, flag, const_cast<void*>(item),
+                                           out_value)) {
+        return not_ready();
+    }
+    return contracts::ok();
+}
+
+QolResult read_attr_jewel_value(int32_t attribute_type, const void* item, int32_t* out_value) {
+    if (item == nullptr || out_value == nullptr || attribute_type < 0) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    if (!ok) return not_ready();
-    *out_min = minimum;
-    *out_max = maximum;
+    if (!qol::game::attr_call_jewel_value(attribute_type, const_cast<void*>(item), out_value)) {
+        return not_ready();
+    }
+    return contracts::ok();
+}
+
+QolResult read_attr_uses_fixed_option_table(int32_t category, int32_t* out_value) {
+    if (category < 0 || out_value == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_value = qol::game::attr_item_uses_fixed_option_table(category) ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult read_attr_fixed_option_percent_pair(int32_t category, int32_t option_index,
+                                              int32_t* out_p1, int32_t* out_p2) {
+    if (category < 0 || option_index < 0 || out_p1 == nullptr || out_p2 == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (!qol::game::attr_fixed_option_percent_pair(category, option_index, out_p1, out_p2)) {
+        return not_ready();
+    }
+    return contracts::ok();
+}
+
+QolResult ui_insert_inline_color(void* builder, uint32_t max_text_bytes, uint8_t color_code) {
+    constexpr uint32_t kMaxTextBytes = 4096;
+    if (builder == nullptr || max_text_bytes == 0 || max_text_bytes > kMaxTextBytes ||
+        color_code == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    auto** text_slot = reinterpret_cast<char**>(builder);
+    char* text = *text_slot;
+    if (text == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const size_t length = strnlen(text, static_cast<size_t>(max_text_bytes) + 1);
+    if (length > max_text_bytes) return error_result(kQolErrBlocked, "text exceeds bound");
+    if (!qol::game::attr_insert_value_color(text, text + length,
+                                            static_cast<char>(color_code))) {
+        return not_ready();
+    }
+    *text_slot = text + length + 4;
     return contracts::ok();
 }
 
@@ -253,11 +290,14 @@ contracts::QolGameHost make_game_host() {
                        &read_craft_character_level};
     host.read.save = {&read_save_slot_state};
     host.read.quest = {&read_quest_state};
-    host.read.attr_range = {&read_attr_range};
+    host.read.attr_range = {&read_attr_option_value, &read_attr_jewel_value,
+                            &read_attr_uses_fixed_option_table,
+                            &read_attr_fixed_option_percent_pair};
     host.write.craft = {&write_craft_stuff_need, &write_craft_stuff_item,
                         &write_craft_target_item, &write_craft_cost_zero};
     host.call = {&game_call_known};
     host.ui_primitive = {};
+    host.ui_primitive.insert_inline_color = &ui_insert_inline_color;
     return host;
 }
 

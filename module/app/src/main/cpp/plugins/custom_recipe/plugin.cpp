@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cstring>
 
-#include "contracts/attribute_range.h"
+#include "contracts/attribute_quality.h"
 #include "contracts/craft_result.h"
 #include "contracts/events.h"
 #include "core/native/qol_log.h"
@@ -75,11 +75,11 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
-// optional_requires=[attr_range]：可选依赖缺失/失效只置 degraded，不级联停用。
+// optional_requires=[attribute.quality]：可选依赖缺失/失效只置 degraded，不级联停用。
 const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kAttrRangeCapabilityId,
-     QolVersionRange{static_cast<uint16_t>(contracts::kAttrRangeVersionMajor),
-                     static_cast<uint16_t>(contracts::kAttrRangeVersionMinor)}},
+    {contracts::kAttributeQualityCapabilityId,
+     QolVersionRange{static_cast<uint16_t>(contracts::kAttributeQualityVersionMajor),
+                     static_cast<uint16_t>(contracts::kAttributeQualityVersionMinor)}},
 };
 
 // provides=craft_result v1.0（结果层能力，消费者=craft_ui）。
@@ -114,7 +114,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         kPluginId,
         kPluginVersion,
         0, nullptr,             // requires
-        1, kOptionalRequires,    // optional_requires=[attr_range]
+        1, kOptionalRequires,    // optional_requires=[attribute.quality]
         1, kProvides,            // provides=craft_result
         1, kClaims,              // resources=ownership
         0, nullptr,              // jni

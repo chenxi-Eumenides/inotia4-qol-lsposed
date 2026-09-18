@@ -1,4 +1,4 @@
-#include "domains/attribute_range/rules.h"
+#include "plugins/attribute_quality/rules.h"
 
 #include <cstdio>
 
@@ -10,11 +10,10 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using attr_range::classify;
-using attr_range::color_code;
-using attr_range::fixed_option_range;
-using attr_range::percentile;
-using attr_range::Tier;
+using attribute_quality::classify;
+using attribute_quality::fixed_option_range;
+using attribute_quality::percentile;
+using attribute_quality::Tier;
 
 static void test_bounds() {
     // value == max -> Gold；value > max -> Gold。
@@ -94,15 +93,6 @@ static void test_percentile_values() {
     CHECK(percentile(99999999, 0, 100000000) == 99);
     CHECK(percentile(50000000, 0, 100000000) == 50);
     CHECK(percentile(80000000, 50000000, 100000000) == 60);
-}
-
-static void test_color_code() {
-    CHECK(color_code(Tier::Grey) == 'G');
-    CHECK(color_code(Tier::White) == 'W');
-    CHECK(color_code(Tier::Green) == 'C');
-    CHECK(color_code(Tier::Blue) == 'L');
-    CHECK(color_code(Tier::Purple) == 'V');
-    CHECK(color_code(Tier::Gold) == 'Y');
 }
 
 static void test_nonzero_min() {
@@ -187,10 +177,9 @@ int main() {
     test_percentile_thresholds();
     test_percentile_bounds();
     test_percentile_values();
-    test_color_code();
     test_nonzero_min();
     test_no_int_overflow();
     test_fixed_option_range();
-    std::printf("attribute_range_tests: %d passed, %d failed\n", g_pass, g_fail);
+    std::printf("attribute_quality_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

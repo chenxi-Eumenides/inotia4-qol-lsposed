@@ -14,7 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "contracts/attribute_range.h"
+#include "contracts/attribute_quality.h"
 #include "core/native/qol_log.h"
 #include "core/native/save_enter.h"
 #include "data/native/item_class.h"
@@ -84,31 +84,40 @@ bool item_is_jewel(void* item) {
     return fn_is_jewel(static_cast<int>(item_category(item))) != 0;
 }
 
-// 过渡期消费方式：每次调用按能力查找 attr_range 提供者，不缓存指针跨帧使用。
-const qol::contracts::AttrRangeApi* attr_range_api() {
-    return static_cast<const qol::contracts::AttrRangeApi*>(qol::infra::require_capability(
-        qol::contracts::kAttrRangeCapabilityId,
-        QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMajor),
-                        static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMinor)}));
+// 每次调用按能力查找 attribute.quality 提供者，不缓存指针跨帧使用。
+const qol::contracts::AttributeQualityApi* attribute_quality_api() {
+    return static_cast<const qol::contracts::AttributeQualityApi*>(qol::infra::require_capability(
+        qol::contracts::kAttributeQualityCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)}));
 }
 
-// 读宝石数值位域并按 attr_range classify 判定当前档；能力不可用/探测失败返回 false。
-bool jewel_tier(void* item, attr_range::Tier* out_tier, int* out_value, int* out_min,
+::custom_recipe::Tier classify_with_attribute_quality(int value, int minimum, int maximum) {
+    const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
+    if (api == nullptr || api->classify == nullptr) return ::custom_recipe::Tier::Grey;
+    ::custom_recipe::Tier tier = ::custom_recipe::Tier::Grey;
+    if (api->classify(value, minimum, maximum, &tier).ok != kQolOk) {
+        return ::custom_recipe::Tier::Grey;
+    }
+    return tier;
+}
+
+// 读宝石数值位域并按 attribute.quality classify 判定当前档；能力不可用/探测失败返回 false。
+bool jewel_tier(void* item, ::custom_recipe::Tier* out_tier, int* out_value, int* out_min,
                 int* out_max) {
     if (item == nullptr || out_tier == nullptr) return false;
-    const qol::contracts::AttrRangeApi* api = attr_range_api();
-    if (api == nullptr || api->probe_jewel_range == nullptr) return false;
+    const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
+    if (api == nullptr || api->probe_jewel == nullptr || api->classify == nullptr) return false;
     const uint32_t word =
         *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + I_JEWEL_VALUE_WORD);
     const int type = static_cast<int>((word >> JEWEL_TYPE_SHIFT) & JEWEL_TYPE_MASK);
     const int value = static_cast<int>(word & JEWEL_VALUE_MASK);
-    int min = 0;
-    int max = 0;
-    if (!api->probe_jewel_range(type, item, &min, &max)) return false;
-    *out_tier = attr_range::classify(value, min, max);
+    qol::contracts::AttributeQualityResult quality{};
+    if (api->probe_jewel(item, type, value, &quality).ok != kQolOk) return false;
+    if (api->classify(value, quality.min, quality.max, out_tier).ok != kQolOk) return false;
     if (out_value != nullptr) *out_value = value;
-    if (out_min != nullptr) *out_min = min;
-    if (out_max != nullptr) *out_max = max;
+    if (out_min != nullptr) *out_min = quality.min;
+    if (out_max != nullptr) *out_max = quality.max;
     return true;
 }
 
@@ -229,9 +238,9 @@ int64_t api_form_ui_type_for_mix_type(uint32_t mix_type) {
 qol::contracts::CraftGate api_craft_gate(void* target_item) {
     using qol::contracts::CraftGate;
     if (target_item == nullptr || !item_is_jewel(target_item)) return CraftGate::kNotJewel;
-    attr_range::Tier tier = attr_range::Tier::Grey;
+    ::custom_recipe::Tier tier = ::custom_recipe::Tier::Grey;
     if (jewel_tier(target_item, &tier, nullptr, nullptr, nullptr) &&
-        tier == attr_range::Tier::Gold) {
+        tier == ::custom_recipe::Tier::Gold) {
         return CraftGate::kAlreadyGold;
     }
     return CraftGate::kPass;
@@ -439,14 +448,20 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
     const int value = static_cast<int>(word & JEWEL_VALUE_MASK);
     int min = 0;
     int max = 0;
-    const qol::contracts::AttrRangeApi* api = attr_range_api();
-    if (api == nullptr || api->probe_jewel_range == nullptr) return 1;  // 降级：不扣料不生成
-    if (!api->probe_jewel_range(type, item, &min, &max)) return 1;
-    attr_range::Tier target = attr_range::Tier::Grey;
+    const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
+    if (api == nullptr || api->probe_jewel == nullptr || api->classify == nullptr) {
+        return 1;  // 降级：不扣料不生成
+    }
+    qol::contracts::AttributeQualityResult quality{};
+    if (api->probe_jewel(item, type, value, &quality).ok != kQolOk) return 1;
+    min = quality.min;
+    max = quality.max;
+    ::custom_recipe::Tier target = ::custom_recipe::Tier::Grey;
     int new_value = 0;
     g_make_item_input = in;
     const UpgradeResult result =
-        compute_tier_up_value(value, min, max, &make_item_rand_bridge, &target, &new_value);
+        compute_tier_up_value(value, min, max, &classify_with_attribute_quality,
+                              &make_item_rand_bridge, &target, &new_value);
     g_make_item_input = nullptr;
     if (result != UpgradeResult::kOk) {
         return 1;  // 金档 / 退化 → 失败兜底（与合成键前置拦截互为双保险）

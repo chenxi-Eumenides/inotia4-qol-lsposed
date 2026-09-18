@@ -58,8 +58,12 @@ struct QolQuestReadApi {
     QolResult (*state)(int32_t* out_state);
 };
 struct QolAttrRangeReadApi {
-    QolResult (*probe)(int32_t type, const void* item, int32_t option_index,
-                      int32_t* out_min, int32_t* out_max);
+    QolResult (*option_value)(int32_t option_index, int32_t level, int32_t flag,
+                              const void* item, int32_t* out_value);
+    QolResult (*jewel_value)(int32_t attribute_type, const void* item, int32_t* out_value);
+    QolResult (*uses_fixed_option_table)(int32_t category, int32_t* out_value);
+    QolResult (*fixed_option_percent_pair)(int32_t category, int32_t option_index,
+                                           int32_t* out_p1, int32_t* out_p2);
 };
 struct QolReadApi {
     QolCharReadApi character;
@@ -93,6 +97,7 @@ struct QolUiPrimitiveApi {
     QolResult (*draw_text)(void* canvas, const char* text, uint32_t text_len);
     QolResult (*draw_rect)(void* canvas, int32_t left, int32_t top, int32_t right, int32_t bottom);
     QolResult (*draw_image)(void* canvas, const void* image, int32_t x, int32_t y);
+    QolResult (*insert_inline_color)(void* builder, uint32_t max_text_bytes, uint8_t color_code);
     QolResult (*popup_show)(uint32_t popup_id);
     QolResult (*popup_close)(uint32_t popup_id);
 };

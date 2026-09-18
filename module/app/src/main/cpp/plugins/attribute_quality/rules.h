@@ -1,13 +1,12 @@
 #pragma once
 
-namespace attr_range {
+#include <cstdint>
 
-// 颜色档位（由低到高）
-enum class Tier { Grey, White, Green, Blue, Purple, Gold };
+#include "contracts/attribute_quality.h"
 
-// 档位 -> 游戏内联文本颜色码（用于 "$<code>文本$B" 的 code 字符）
-// Grey='G', White='W', Green='C', Blue='L', Purple='V', Gold='Y'
-char color_code(Tier tier);
+namespace attribute_quality {
+
+using Tier = qol::contracts::AttributeQualityTier;
 
 // 按 [min, max] 闭区间内的百分位分档（整数运算）：
 //  1) max <= min              -> Gold
@@ -29,4 +28,4 @@ int percentile(int value, int min, int max);
 //  p1 == p2 时退化为单值区间，由 classify/percentile 按满值处理。
 void fixed_option_range(int base, int p1, int p2, int* out_min, int* out_max);
 
-}  // namespace attr_range
+}  // namespace attribute_quality

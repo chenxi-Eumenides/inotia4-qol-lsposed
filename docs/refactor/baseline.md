@@ -22,7 +22,6 @@
 | 目标层 | 文件数 |
 | --- | --- |
 | `contracts` | 19 |
-| `domains/attribute_range` | 2 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
 | `domains/inventory` | 9 |
@@ -35,10 +34,11 @@
 | `domains/world` | 9 |
 | `game` | 55 |
 | `hooks` | 10 |
-| `host` | 28 |
+| `host` | 31 |
 | `infra` | 47 |
 | `patch` | 9 |
-| `plugins/attribute_range` | 4 |
+| `plugins/attribute_quality` | 6 |
+| `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 14 |
 | `plugins/core.ui` | 14 |
 | `plugins/craft_ui` | 4 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **358** |
+| **合计** | **365** |
 
 ### 1.2 迁移期映射摘要
 
@@ -133,25 +133,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 145 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 142 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `infra` | 32 |
-| `host` | `game` | 15 |
-| `host` | `contracts` | 14 |
+| `host` | `infra` | 41 |
+| `host` | `game` | 25 |
+| `host` | `contracts` | 16 |
 | `plugins/extension_bag` | `contracts` | 14 |
 | `plugins/autosell` | `infra` | 13 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/extension_bag` | `infra` | 11 |
 | `infra` | `game` | 10 |
+| `plugins/autosell` | `contracts` | 10 |
 | `domains/inventory` | `game` | 9 |
+| `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
-| `plugins/autosell` | `contracts` | 9 |
 | `plugins/autosell` | `game` | 8 |
+| `plugins/custom_recipe` | `contracts` | 8 |
 | `plugins/save_backup` | `infra` | 8 |
-| `domains/world` | `game` | 7 |
-| `host` | `hooks` | 7 |
 
 ### 2.2 include 环
 
@@ -235,18 +235,19 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（16 个）共 16 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（17 个）共 17 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（16）
+### 6.2 已迁移 `plugins/*`（17）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `attribute_range` | `plugins/attribute_range` | 4 |
+| `attribute_quality` | `plugins/attribute_quality` | 6 |
+| `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 14 |
 | `core.ui` | `plugins/core.ui` | 14 |
 | `craft_ui` | `plugins/craft_ui` | 4 |

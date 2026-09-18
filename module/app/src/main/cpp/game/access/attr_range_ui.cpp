@@ -9,18 +9,6 @@
 namespace qol::game {
 namespace {
 
-// LSPosed native hook 写入的原始函数指针（宿主经 on_resource_ready 交还）。
-void* g_backup_math_get_random = nullptr;
-void* g_backup_add_option = nullptr;
-void* g_backup_make_item = nullptr;
-
-// 同一线程内：详情渲染依次经过 MakeItem → GetOptionValue → MATH_GetRandom → AddOption。
-// capture 只在 probe 调用的同步窗口内置位，MATH_GetRandom wrapper 命中后立即清除并
-// 返回上界（不调用原函数，因此不消耗游戏 RNG 状态）。
-thread_local bool t_capture_armed = false;
-thread_local int t_capture_min = 0;
-thread_local int t_capture_max = 0;
-
 }  // namespace
 
 int attr_item_category(const void* item) {
@@ -75,59 +63,22 @@ bool attr_is_jewel_category(int category) {
     return fn_is_jewel != nullptr && fn_is_jewel(category) != 0;
 }
 
-bool attr_probe_option_range(int option_index, int level, int flag, void* item, int* out_min,
-                             int* out_max) {
+bool attr_call_option_value(int option_index, int level, int flag, void* item, int* out_value) {
     if (fn_item_system_get_option_value == nullptr || item == nullptr || option_index < 0 ||
-        out_min == nullptr || out_max == nullptr) {
+        out_value == nullptr) {
         return false;
     }
-    t_capture_armed = true;
-    t_capture_min = 0;
-    t_capture_max = 0;
-    (void)fn_item_system_get_option_value(option_index, level, flag, item);
-    const bool captured = !t_capture_armed;
-    t_capture_armed = false;
-    if (!captured) return false;  // 退化区间 [1,1] 也算有效（未命中才是失败）
-    *out_min = t_capture_min;
-    *out_max = t_capture_max;
+    *out_value = fn_item_system_get_option_value(option_index, level, flag, item);
     return true;
 }
 
-bool attr_probe_jewel_range(int type, void* item, int* out_min, int* out_max) {
+bool attr_call_jewel_value(int type, void* item, int* out_value) {
     if (fn_item_system_get_jewel_option_value == nullptr || item == nullptr || type < 0 ||
-        out_min == nullptr || out_max == nullptr) {
+        out_value == nullptr) {
         return false;
     }
-    t_capture_armed = true;
-    t_capture_min = 0;
-    t_capture_max = 0;
-    (void)fn_item_system_get_jewel_option_value(type, item);
-    const bool captured = !t_capture_armed;
-    t_capture_armed = false;
-    if (!captured) return false;
-    *out_min = t_capture_min;
-    *out_max = t_capture_max;
+    *out_value = fn_item_system_get_jewel_option_value(type, item);
     return true;
-}
-
-void attr_set_math_backup(void* fn) { g_backup_math_get_random = fn; }
-void attr_set_add_option_backup(void* fn) { g_backup_add_option = fn; }
-void attr_set_make_item_backup(void* fn) { g_backup_make_item = fn; }
-
-bool attr_math_ready() { return g_backup_math_get_random != nullptr; }
-
-void* attr_backup_add_option() { return g_backup_add_option; }
-void* attr_backup_make_item() { return g_backup_make_item; }
-
-int attr_math_get_random(int min, int max) {
-    if (t_capture_armed) {
-        t_capture_armed = false;
-        t_capture_min = min;
-        t_capture_max = max;
-        return max;
-    }
-    if (g_backup_math_get_random == nullptr) return min;
-    return reinterpret_cast<MathGetRandomFn>(g_backup_math_get_random)(min, max);
 }
 
 bool attr_insert_value_color(char* before, char* after, char code) {

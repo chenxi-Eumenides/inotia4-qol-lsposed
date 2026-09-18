@@ -3,8 +3,7 @@
 #include "plugins/autosell/view.h"
 
 #include "data/native/item_class.h"
-#include "contracts/attribute_range.h"
-#include "domains/attribute_range/rules.h"
+#include "contracts/attribute_quality.h"
 #include "game_access.h"
 #include "infra/capabilities.h"
 
@@ -58,23 +57,24 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
         out->jewel_tier = category - kJewelCategoryFirst;
 
         // 宝石属性范围：独立宝石自身位域 item+I_COUNT 的 bits0-10=属性值、
-        // bits18-23=属性类型。经 attr_range 能力探测该属性值的随机区间 [X, 2X]。
+        // bits18-23=属性类型。经 attribute.quality 能力探测该属性值的随机区间 [X, 2X]。
         // 过渡期消费方式：每次调用按能力查找（不缓存指针跨帧）；不可用/撤销中/探测失败
         // 时保持 -1（fail-closed，gemRange 规则不命中，不得默认 0 触发误售）。
         const uint32_t jewel_bits = *reinterpret_cast<uint32_t*>(item + I_COUNT);
         const int jewel_value = static_cast<int>(jewel_bits & 0x7FF);
         const int jewel_attr_type = static_cast<int>((jewel_bits >> 18) & 0x3F);
-        const auto* attr_api = static_cast<const qol::contracts::AttrRangeApi*>(
+        const auto* attr_api = static_cast<const qol::contracts::AttributeQualityApi*>(
             qol::infra::require_capability(
-                qol::contracts::kAttrRangeCapabilityId,
-                QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMajor),
-                                static_cast<uint16_t>(qol::contracts::kAttrRangeVersionMinor)}));
-        if (attr_api != nullptr && attr_api->probe_jewel_range != nullptr) {
-            int range_min = 0;
-            int range_max = 0;
-            if (attr_api->probe_jewel_range(jewel_attr_type, ref.native_item, &range_min,
-                                            &range_max)) {
-                out->jewel_percentile = attr_range::percentile(jewel_value, range_min, range_max);
+                qol::contracts::kAttributeQualityCapabilityId,
+                QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMajor),
+                                static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)}));
+        if (attr_api != nullptr && attr_api->probe_jewel != nullptr &&
+            attr_api->percentile != nullptr) {
+            qol::contracts::AttributeQualityResult quality{};
+            if (attr_api->probe_jewel(ref.native_item, jewel_attr_type, jewel_value, &quality).ok ==
+                    kQolOk &&
+                attr_api->percentile(jewel_value, quality.min, quality.max,
+                                     &out->jewel_percentile).ok == kQolOk) {
             }
         }
     }

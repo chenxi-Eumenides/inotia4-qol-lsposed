@@ -8,7 +8,8 @@
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
-#include "plugins/attribute_range/plugin.h"
+#include "plugins/attribute_quality/plugin.h"
+#include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
 #include "plugins/core.ui/plugin.h"
 #include "plugins/craft_ui/plugin.h"
@@ -210,8 +211,12 @@ bool assembly_init() {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: quest registration failed");
         return false;
     }
-    if (!register_plugin(features::attribute_range::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_range registration failed");
+    if (!register_plugin(features::attribute_quality::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_quality registration failed");
+        return false;
+    }
+    if (!register_plugin(features::attribute_range_display::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_range_display registration failed");
         return false;
     }
     if (!register_plugin(features::text_layer::plugin_descriptor())) {

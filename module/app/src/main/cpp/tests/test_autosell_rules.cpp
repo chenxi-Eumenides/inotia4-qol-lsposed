@@ -8,7 +8,7 @@
 // 值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
 // 特殊多选与「无规则不出售」；硬保护（已强化/已镶嵌永不出售）。
 // 强化口径 = 剩余强化次数 enhance_remaining（I_ENCHANT bits2-5，UI 名称「强化耐久度」）。
-// 风格与 tests/test_attribute_range.cpp 一致（自带断言计数）。
+// 风格与 tests/test_attribute_quality.cpp 一致（自带断言计数）。
 
 static int g_pass = 0;
 static int g_fail = 0;

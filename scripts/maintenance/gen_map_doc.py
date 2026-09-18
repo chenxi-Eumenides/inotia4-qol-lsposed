@@ -7,7 +7,7 @@
 
 人工导航区、过渡依赖区与验证附录原样保留（本脚本不读也不改）。统计区数据源：
 
-- `module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,plugins,host}`
+- `module/app/src/main/cpp/{contracts,game,infra,hooks,patch,plugins,host}`
   新架构目录的文件数与行数（`wc -l` 口径，含空行与注释；不含 `bridge/`、`tests/` 与 legacy 路径）
 - `module/app/src/main/cpp/plugins/*`  已迁移插件
 - `module/app/src/main/cpp/tests/CMakeLists.txt`  CTest target 总数与分类
@@ -45,7 +45,7 @@ BEGIN_MARKER = "<!-- BEGIN GENERATED:stats -->"
 END_MARKER = "<!-- END GENERATED:stats -->"
 
 # 新架构顶层目录（ARCHITECTURE.md §0：八个顶层目录，plugins/ 单层，ADR-0004）。
-NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "domains", "plugins", "host")
+NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "plugins", "host")
 
 # --------------------------------------------------------------------------
 # CTest 分类白名单（显式映射）
@@ -81,7 +81,7 @@ MECHANISM_HOST_TESTS: tuple[str, ...] = (
 MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_simple_mode_rules",
     "test_push_all_rules",
-    "test_attribute_range",
+    "test_attribute_quality",
     "test_module_text",
     "test_special_equip_rules",
     "test_autosell_rules",
@@ -92,7 +92,7 @@ MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_autosell_plugin",
     "test_text_layer_plugin",
     "test_quest_lifecycle",
-    "test_attribute_range_wrappers",
+    "test_attribute_range_display",
 )
 
 MIGRATED_TEST_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -326,7 +326,7 @@ def render_stats() -> str:
         "> 本节由 `scripts/maintenance/gen_map_doc.py` 生成，**禁止手工编辑**；",
         "> 手工改动会在 `--check` 下被判定为不一致。",
         "",
-        "- 数据源：`module/app/src/main/cpp/{contracts,game,infra,hooks,patch,domains,plugins,host}`、"
+        "- 数据源：`module/app/src/main/cpp/{contracts,game,infra,hooks,patch,plugins,host}`、"
         "`module/app/src/main/cpp/plugins/*`、`module/app/src/main/cpp/tests/CMakeLists.txt`",
         "- 口径：行数按 `wc -l`（换行符计数，含空行与注释）；文件限 `.cpp`/`.h`/`.inc`；"
         "不含 `bridge/`、`tests/` 与 legacy 路径",
