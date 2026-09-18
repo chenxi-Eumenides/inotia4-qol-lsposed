@@ -4,6 +4,7 @@
 
 #include "contracts/text_layer.h"
 #include "core/native/qol_log.h"
+#include "plugins/text_layer/charinfo_scope.h"
 #include "plugins/text_layer/feature.h"
 
 namespace qol::features::text_layer {
@@ -31,6 +32,21 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,                   // gate（常驻）
         120,                       // step_budget
         reinterpret_cast<void*>(&memorytext_get_text_wrapper),  // handler
+    },
+    {
+        kResourceIdCharinfoScope,  // id
+        "F_SCENE_DRAW_POPUP_SC_CHARACTER_INFO_VMA",  // symbol
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        // fail-soft：安装失败记为 degraded，不整体失败；文本层其余资源与能力继续。
+        contracts::ResourceFailure::kFailSoft,
+        true,                      // resumable
+        kPluginId,                 // owner
+        "角色面板绘制窗口标记 kCharacterPanel 作用域；文案与 id 表由 text_layer 持有",
+        nullptr,                   // gate（常驻）
+        120,                       // step_budget
+        reinterpret_cast<void*>(&scene_draw_charinfo_wrapper),  // handler
     },
 };
 
@@ -81,7 +97,7 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,   // requires
     0, nullptr,   // optional_requires
     1, kProvides, // provides（text_layer v1）
-    1, kResources,
+    2, kResources,
     0, nullptr,   // jni
     &plugin_install,
     &plugin_deactivate,

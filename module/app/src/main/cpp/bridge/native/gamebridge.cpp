@@ -3,7 +3,6 @@
 #include "core/native/save_exit.h"
 #include "core/native/transition_dispatch.h"
 #include "plugins/autosell/config.h"
-#include "feature/ui/game_ui_charinfo_zh.h"
 #include "host/assembly.h"
 #include "host/core_patches.h"
 #include "host/frame_source.h"
@@ -39,9 +38,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     if (ok) {
         // 库存行为 hook 已迁移为 inventory_hooks 插件（assembly 注册，宿主声明式安装 24 条入口）。
         // 属性显示范围已迁移为 attribute_range 插件（assembly 注册，宿主张成资源与能力）。
-        // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力，assembly 注册）；
-        // 角色面板绘制窗口的作用域标记仍在本处安装（绘制侧功能，不迁移）。
-        charinfo_zh_install_if_ready();  // 角色面板：把绘制窗口标记为 kCharacterPanel 作用域
+        // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力 + 角色面板作用域标记，
+        // assembly 注册，宿主声明式安装）。
         // 删档同步 PtrHook 已随 save_backup 插件迁移：由其 install 安装（assembly_init）。
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
         // 进入存档后由 autosell 插件注册的 save-enter 回调按存档配置同步（见 plugin.cpp）。

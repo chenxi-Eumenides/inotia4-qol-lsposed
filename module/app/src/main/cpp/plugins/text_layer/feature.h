@@ -26,6 +26,8 @@ namespace qol::features::text_layer {
 
 // 资源 id：plugin.cpp 的 ResourceClaim 与 wrapper 的分派键共用。
 inline constexpr const char* kResourceIdGetText = "hook:MEMORYTEXT_GetText";
+// 角色面板绘制窗口入口 hook（私有资源，owner=text_layer）：handler 见 charinfo_scope.h。
+inline constexpr const char* kResourceIdCharinfoScope = "hook:Scene_Draw_Popup_SC_CharacterInfo";
 
 struct Entry {
     const char* key;              // 语义键（唯一；下方 host test 断言唯一性）

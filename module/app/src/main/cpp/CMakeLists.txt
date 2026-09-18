@@ -140,9 +140,9 @@ target_sources(gamebridge PRIVATE
     plugins/custom_recipe/plugin.cpp
 )
 
-# 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
+# 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 text_layer 插件）
 target_sources(gamebridge PRIVATE
-    feature/ui/game_ui_charinfo_zh.cpp
+    plugins/text_layer/charinfo_scope.cpp
     hooks/dispatch.cpp
     plugins/text_layer/feature.cpp
     plugins/text_layer/plugin.cpp

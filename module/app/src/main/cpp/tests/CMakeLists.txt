@@ -520,3 +520,22 @@ target_include_directories(autosell_plugin_tests PRIVATE
 target_compile_features(autosell_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(autosell_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME autosell_plugin_tests COMMAND autosell_plugin_tests)
+
+# D1-b4：text_layer 插件清单/资源 host 测试（2 条入口 hook claim + backup 交付；末尾追加）
+# 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
+add_executable(text_layer_plugin_tests
+    test_text_layer_plugin.cpp
+    ${CPP_DIR}/plugins/text_layer/plugin.cpp
+    ${CPP_DIR}/plugins/text_layer/feature.cpp
+    ${CPP_DIR}/plugins/text_layer/charinfo_scope.cpp
+    ${CPP_DIR}/hooks/dispatch.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(text_layer_plugin_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(text_layer_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(text_layer_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(text_layer_plugin_tests PRIVATE Threads::Threads)
+add_test(NAME text_layer_plugin_tests COMMAND text_layer_plugin_tests)

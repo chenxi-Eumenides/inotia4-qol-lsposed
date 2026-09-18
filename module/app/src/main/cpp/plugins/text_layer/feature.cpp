@@ -5,6 +5,7 @@
 
 #include "core/native/qol_log.h"
 #include "hooks/dispatch.h"
+#include "plugins/text_layer/charinfo_scope.h"
 
 namespace qol::features::text_layer {
 namespace {
@@ -56,6 +57,9 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     if (std::strcmp(resource_id, kResourceIdGetText) == 0) {
         g_backup_memorytext_get_text = reinterpret_cast<GetTextFn>(backup);
         return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdCharinfoScope) == 0) {
+        return charinfo_scope_on_resource_ready(backup);
     }
     QOL_LOG_WARN(QolDomain::kUi, "text_layer unknown resource id: %s", resource_id);
     return 0;
