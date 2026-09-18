@@ -71,6 +71,7 @@ MECHANISM_HOST_TESTS: tuple[str, ...] = (
     "test_plugin_registry",
     "test_plugin_lifecycle",
     "test_capability_lifecycle",
+    "test_hooks_popup_state",
     "test_store_sell_rules",
     "test_infra_store",
 )

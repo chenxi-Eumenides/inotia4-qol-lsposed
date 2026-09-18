@@ -281,3 +281,10 @@ target_sources(gamebridge PRIVATE
     game/access/ptr_slots.cpp
     patch/ptr_slot.cpp
 )
+
+# D1-a2：PopupState state 表注入机制（hooks/popup_state 原语 + game/access 条目访问收口；
+# 本 lane 只落机制，生产注入点转换在 D1-b/D1-c）
+target_sources(gamebridge PRIVATE
+    game/access/popup_state.cpp
+    hooks/popup_state.cpp
+)

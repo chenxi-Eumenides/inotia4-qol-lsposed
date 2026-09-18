@@ -404,6 +404,22 @@ target_compile_features(patch_layer_tests PRIVATE cxx_std_17)
 set_target_properties(patch_layer_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
 
+# D1-a2：PopupState state 表注入机制 host 测试（假 state 表；占用/幂等/还原；末尾追加）
+add_executable(hooks_popup_state_tests
+    test_hooks_popup_state.cpp
+    ${CPP_DIR}/hooks/popup_state.cpp
+    ${CPP_DIR}/game/access/popup_state.cpp
+    ${CPP_DIR}/core/native/popup_enter_alias.cpp
+)
+target_include_directories(hooks_popup_state_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(hooks_popup_state_tests PRIVATE cxx_std_17)
+set_target_properties(hooks_popup_state_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME hooks_popup_state_tests COMMAND hooks_popup_state_tests)
+
 # P4 阶段 A1：push_all 纯逻辑 host 测试（party_decision 矩阵，末尾追加）
 add_executable(push_all_rules_tests
     test_push_all_rules.cpp
