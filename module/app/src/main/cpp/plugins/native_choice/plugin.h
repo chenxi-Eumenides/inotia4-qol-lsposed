@@ -13,5 +13,7 @@
 namespace qol::features::native_choice {
 
 const contracts::PluginDescriptor& plugin_descriptor();
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
 
 }  // namespace qol::features::native_choice

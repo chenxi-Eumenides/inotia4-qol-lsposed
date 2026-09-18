@@ -17,8 +17,8 @@ bool equip_replay_allows(bool is_real_equip, bool can_change_equip, int char_lev
 bool unequip_replay_allows(bool can_change_equip);
 
 // 出售门禁决策：仅装备详情（desc_type==0）且菜单角色存在、装备操作原语已解析、
-// 角色失去装备操作权限（特殊 NPC 佣兵）时拦截。desc_type<0（未就绪）、角色缺失或
-// 原语未解析一律放行——fail-open 到原版行为，绝不误拦玩家背包物品。
+// 角色失去装备操作权限（特殊 NPC 佣兵）时放行原版链；关键事实缺失时拦截，避免
+// 未确认物品归属就进入出售副作用路径。
 bool sell_gate_decides_block(int desc_type, bool menu_char_present,
                              bool can_change_equip_resolved, bool can_change_equip);
 

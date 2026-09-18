@@ -11,6 +11,9 @@ namespace {
 constexpr const char* kPluginId = "native_choice";
 constexpr const char* kPluginVersion = "0.1.0";
 
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
+
 // 能力接口实例：函数地址为编译期常量，无跨 TU 静态初始化顺序问题；宿主进入 enabled 时注册。
 constexpr contracts::UiChoiceApi kUiChoiceApi{
     &native_choice_open,
@@ -60,7 +63,9 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_sdk = ctx.sdk;
+    g_game = ctx.game;
+    if (g_sdk == nullptr || g_game == nullptr) return 1;
     // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
     return 0;
 }
@@ -106,5 +111,9 @@ const contracts::PluginDescriptor kDescriptor = {
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
 }
+
+const contracts::QolHostSdk* host_sdk() { return g_sdk; }
+
+const contracts::QolGameHost* game_host() { return g_game; }
 
 }  // namespace qol::features::native_choice

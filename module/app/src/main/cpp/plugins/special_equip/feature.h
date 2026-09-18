@@ -51,6 +51,14 @@
 
 namespace qol::features::special_equip {
 
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
+
+void log_debug(const char* format, ...);
+void log_info(const char* format, ...);
+void log_warn(const char* format, ...);
+void log_error(const char* format, ...);
+
 // 资源 id：plugin.cpp 的 ResourceClaim 与本层 on_resource_ready 分派共用同一常量。
 inline constexpr const char* kResourceIdCanEquipItem = "hook:CHAR_CanEquipItem";
 inline constexpr const char* kResourceIdCanUnequipItem = "hook:CHAR_CanUnequipItem";
@@ -77,6 +85,6 @@ int can_unequip_wrapper(void* ch, void* item);
 
 // 出售门禁谓词（D2c-2b-1）：经 hooks/dispatch 布尔门登记到 inventory_hooks 的
 // UIEquip_ButtonDestroyExe wrapper；入口先判业务门禁。ctx 未使用（保留签名）。
-bool sell_gate_should_block(void* ctx);
+int32_t sell_gate_should_block(void* ctx);
 
 }  // namespace qol::features::special_equip

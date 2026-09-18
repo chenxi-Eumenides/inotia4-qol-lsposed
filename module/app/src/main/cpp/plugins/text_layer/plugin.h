@@ -10,5 +10,7 @@
 namespace qol::features::text_layer {
 
 const contracts::PluginDescriptor& plugin_descriptor();
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
 
 }  // namespace qol::features::text_layer

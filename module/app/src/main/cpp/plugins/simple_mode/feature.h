@@ -27,6 +27,10 @@
 
 namespace qol::features::simple_mode {
 
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
+
+
 // 资源 id：plugin.cpp 的 ResourceClaim 与本层 on_resource_ready 分派共用同一常量。
 inline constexpr const char* kResourceIdAddDamage = "hook:CHAR_AddDamage";
 inline constexpr const char* kResourceIdUpdateAttrFromMonster = "hook:CHAR_UpdateAttrFromMonster";

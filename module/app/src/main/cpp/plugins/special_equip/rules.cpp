@@ -16,9 +16,8 @@ bool unequip_replay_allows(bool can_change_equip) {
 
 bool sell_gate_decides_block(int desc_type, bool menu_char_present,
                              bool can_change_equip_resolved, bool can_change_equip) {
+    if (desc_type < 0 || !menu_char_present || !can_change_equip_resolved) return true;
     if (desc_type != 0) return false;  // 仅装备详情（物品在角色身上）
-    if (!menu_char_present) return false;
-    if (!can_change_equip_resolved) return false;
     return !can_change_equip;
 }
 

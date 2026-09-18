@@ -1,7 +1,13 @@
 #pragma once
 
 #include "contracts/craft_result.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
+
+namespace qol::contracts {
+struct PluginContext;
+}
 
 // 自定义合成配方结果层 feature（C2 Step 4）：结果判定/扣料/产物与 RECIPEBASE/MIXTUREBASE
 // 表注入所有权的实现。
@@ -12,6 +18,11 @@
 //   · 扣料/产物/入包与 stuffList 需求写回属「写入执行」，同步留在本 feature。
 
 namespace qol::features::custom_recipe {
+
+void set_context(const contracts::PluginContext& ctx);
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
+void log_message(int32_t level, const char* format, ...);
 
 // CraftResultApi 实例（provides `craft_result` v1.0）。
 const qol::contracts::CraftResultApi& craft_result_api();

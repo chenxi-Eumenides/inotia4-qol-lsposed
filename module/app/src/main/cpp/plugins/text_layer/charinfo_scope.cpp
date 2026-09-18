@@ -1,6 +1,7 @@
 #include "plugins/text_layer/charinfo_scope.h"
 
-#include "infra/text_scope.h"
+#include "plugins/text_layer/feature.h"
+#include "plugins/text_layer/plugin.h"
 
 namespace qol::features::text_layer {
 namespace {
@@ -16,8 +17,16 @@ SceneDrawCharinfoFn g_backup_scene_draw_charinfo = nullptr;
 // 面板每帧绘制入口：进出各写一次作用域（守卫析构时恢复上一层），把整个绘制窗口标记为
 // kCharacterPanel。文案与 id 表由 text_layer 持有 —— 这里只负责「画的是哪个窗口」。
 void scene_draw_charinfo_wrapper() {
-    qol::infra::TextScopeGuard scope(qol::infra::TextScope::kCharacterPanel);
+    const contracts::QolHostSdk* sdk = host_sdk();
+    const uint8_t previous_scope = active_scope_value();
+    const bool pushed = sdk != nullptr && sdk->text_scope.push != nullptr &&
+        contracts::succeeded(sdk->text_scope.push(1));
+    if (pushed) set_active_scope_value(1);
     if (g_backup_scene_draw_charinfo != nullptr) g_backup_scene_draw_charinfo();
+    if (pushed) set_active_scope_value(previous_scope);
+    if (pushed && sdk != nullptr && sdk->text_scope.pop != nullptr) {
+        (void)sdk->text_scope.pop();
+    }
 }
 
 int32_t charinfo_scope_on_resource_ready(void* backup) {

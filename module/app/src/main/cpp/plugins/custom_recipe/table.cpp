@@ -1,6 +1,10 @@
 #include "plugins/custom_recipe/table.h"
 
 #include <cstring>
+#include <cstdarg>
+#include <cstdio>
+
+#include "plugins/custom_recipe/rules.h"
 
 namespace custom_recipe {
 
@@ -151,14 +155,34 @@ void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint
 #include <atomic>
 #include <cstdlib>
 
-#include "core/native/qol_log.h"
-#include "plugins/custom_recipe/rules.h"
-#include "game_access.h"
-#include "game_symbols.h"
+extern uintptr_t g_base;
 
 namespace custom_recipe {
 
 namespace {
+
+constexpr uintptr_t kRecipeDataSlot = 3152304;
+constexpr uintptr_t kRecipeSizeSlot = 3152312;
+constexpr uintptr_t kRecipeCountSlot = 3152314;
+constexpr uintptr_t kMixtureDataSlot = 3152288;
+constexpr uintptr_t kMixtureSizeSlot = 3152296;
+
+const qol::contracts::QolGameHost* g_game = nullptr;
+const qol::contracts::QolHostSdk* g_sdk = nullptr;
+
+void table_log(int32_t level, const char* format, ...) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
+    char message[qol::contracts::kMessageCap + 1]{};
+    va_list args;
+    va_start(args, format);
+    const int length = std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (length <= 0) return;
+    const uint32_t size = static_cast<uint32_t>(length) >= qol::contracts::kMessageCap
+                              ? qol::contracts::kMessageCap
+                              : static_cast<uint32_t>(length);
+    (void)g_sdk->log.write(level, 15, "plugins/custom_recipe/table", message, size);
+}
 
 // 模块自有表缓冲。游戏若重新装载静态表会把指针全局改回原表，ensure_impl 会据此重新注入。
 uint8_t* g_recipe_buffer = nullptr;
@@ -207,16 +231,16 @@ void reset_invalid_log_dedupe() {
 }
 
 // 读 .bss 全局。
-inline uintptr_t bss(uintptr_t vma) { return g_base + vma; }
+inline uintptr_t bss(uintptr_t vma) { return ::g_base + vma; }
 
 bool ensure_impl() {
-    if (g_base == 0) return false;
+    if (::g_base == 0) return false;
 
-    auto* recipe_ptr_global = reinterpret_cast<void**>(bss(G_RECIPEBASE_DATA_VMA));
-    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(G_RECIPEBASE_SIZE_VMA));
-    auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(G_RECIPEBASE_COUNT_VMA));
-    auto* mixture_ptr_global = reinterpret_cast<void**>(bss(G_MIXTUREBASE_DATA_VMA));
-    auto* mixture_size_global = reinterpret_cast<uint8_t*>(bss(G_MIXTUREBASE_SIZE_VMA));
+    auto* recipe_ptr_global = reinterpret_cast<void**>(bss(kRecipeDataSlot));
+    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(kRecipeSizeSlot));
+    auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(kRecipeCountSlot));
+    auto* mixture_ptr_global = reinterpret_cast<void**>(bss(kMixtureDataSlot));
+    auto* mixture_size_global = reinterpret_cast<uint8_t*>(bss(kMixtureSizeSlot));
 
     // 1) 已注入且游戏侧指针仍指向模块缓冲 → 记录数归位 + 重新清除原版段组位（可能被 deactivate 还原过）。
     if (g_recipe_buffer != nullptr && *recipe_ptr_global == g_recipe_buffer) {
@@ -225,7 +249,7 @@ bool ensure_impl() {
         const uint16_t want = static_cast<uint16_t>(g_base_record_count_cache + n);
         if (*recipe_count_global != want) {
             *recipe_count_global = want;
-            QOL_LOG_INFO(QolDomain::kCustomRecipe, "recipe table reactivated records=%u", want);
+            table_log(1, "recipe table reactivated records=%u", want);
         }
         // 与首次注入一致：注入态下原版记录不得占用模块页（否则与原版记录重复出现在同一页）。
         if (g_original_group_recipe_size == *recipe_size_global) {
@@ -240,8 +264,7 @@ bool ensure_impl() {
     // 2) 游戏重新装载了静态表（指针被改写回原表）→ 用新原表重新注入。
     //    刻意不释放旧缓冲：游戏可能仍持有指向模块缓冲内部的局部指针，泄漏一份远优于悬空访问。
     if (g_recipe_buffer != nullptr) {
-        QOL_LOG_WARN(QolDomain::kCustomRecipe,
-                     "recipe table replaced by game, re-inject count=%u", *recipe_count_global);
+        table_log(2, "recipe table replaced by game, re-inject count=%u", *recipe_count_global);
         g_recipe_buffer = nullptr;
         g_mixture_buffer = nullptr;
     }
@@ -266,9 +289,8 @@ bool ensure_impl() {
             g_last_invalid_recipe_size = recipe_size;
             g_last_invalid_mixture_size = mixture_size;
             g_last_invalid_count = cur_count;
-            QOL_LOG_WARN(QolDomain::kCustomRecipe,
-                         "recipe table not ready recipe_size=%u mixture_size=%u count=%u",
-                         recipe_size, mixture_size, cur_count);
+            table_log(2, "recipe table not ready recipe_size=%u mixture_size=%u count=%u",
+                      recipe_size, mixture_size, cur_count);
         }
         return false;
     }
@@ -287,10 +309,10 @@ bool ensure_impl() {
     const uint32_t book_bytes_before = recipe_book_bytes(book_count);
     const uint32_t book_bytes_after = recipe_book_bytes(book_count + static_cast<uint32_t>(n));
     if (book_bytes_before != book_bytes_after) {
-        QOL_LOG_ERROR(QolDomain::kCustomRecipe,
-                      "recipe book byte size would change (%u -> %u, bit5=%u n=%u); injection "
-                      "refused to avoid out-of-bounds book access and save-format length change",
-                      book_bytes_before, book_bytes_after, book_count, static_cast<unsigned>(n));
+        table_log(3,
+                  "recipe book byte size would change (%u -> %u, bit5=%u n=%u); injection "
+                  "refused to avoid out-of-bounds book access and save-format length change",
+                  book_bytes_before, book_bytes_after, book_count, static_cast<unsigned>(n));
         return false;
     }
     const uint32_t base_material_count =
@@ -307,8 +329,7 @@ bool ensure_impl() {
     if (new_recipe == nullptr || new_mixture == nullptr) {
         std::free(new_recipe);
         std::free(new_mixture);
-        QOL_LOG_ERROR(QolDomain::kCustomRecipe, "table alloc failed bytes=%zu/%zu",
-                      new_recipe_bytes, new_mixture_bytes);
+        table_log(3, "table alloc failed bytes=%zu/%zu", new_recipe_bytes, new_mixture_bytes);
         return false;
     }
 
@@ -324,16 +345,20 @@ bool ensure_impl() {
     g_mixture_buffer = new_mixture;
     g_base_record_count_cache = base_record_count;
     bind_base_record_count(base_record_count);
-    QOL_LOG_INFO(QolDomain::kCustomRecipe,
-                 "recipe table injected base=%u records=%u materials=%u book_bytes=%u", base_record_count,
-                 static_cast<unsigned>(base_record_count + n),
-                 static_cast<unsigned>(base_material_count + material_total_count),
-                 book_bytes_after);
+    table_log(1, "recipe table injected base=%u records=%u materials=%u book_bytes=%u",
+              base_record_count, static_cast<unsigned>(base_record_count + n),
+              static_cast<unsigned>(base_material_count + material_total_count), book_bytes_after);
     reset_invalid_log_dedupe();  // 就绪后允许未来新一轮失败重新记录
     return true;
 }
 
 }  // namespace
+
+void set_context(const qol::contracts::QolGameHost* game,
+                 const qol::contracts::QolHostSdk* sdk) {
+    g_game = game;
+    g_sdk = sdk;
+}
 
 bool custom_recipe_table_ensure() {
     // 只做互斥，不缓存「已尝试」状态：表未装载 / 被游戏重装都必须允许后续重试。
@@ -347,10 +372,10 @@ bool custom_recipe_table_ensure() {
 }
 
 void custom_recipe_table_deactivate() {
-    if (g_base == 0 || g_recipe_buffer == nullptr) return;
-    auto* recipe_ptr_global = reinterpret_cast<void**>(bss(G_RECIPEBASE_DATA_VMA));
-    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(G_RECIPEBASE_SIZE_VMA));
-    auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(G_RECIPEBASE_COUNT_VMA));
+    if (::g_base == 0 || g_recipe_buffer == nullptr) return;
+    auto* recipe_ptr_global = reinterpret_cast<void**>(bss(kRecipeDataSlot));
+    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(kRecipeSizeSlot));
+    auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(kRecipeCountSlot));
     // 指针已被游戏改写 → 注入本就已失效，清模块状态即可，绝不把原表指针写回（可能已陈旧）。
     if (*recipe_ptr_global != g_recipe_buffer) {
         g_recipe_buffer = nullptr;
@@ -366,8 +391,7 @@ void custom_recipe_table_deactivate() {
     // 只收记录数，指向模块缓冲的指针保持不变：所有下标都仍在缓冲界内，
     // 面板残留数组里的注入下标不会造成越界读；查询不会再命中注入记录。
     *recipe_count_global = g_base_record_count_cache;
-    QOL_LOG_INFO(QolDomain::kCustomRecipe, "recipe table deactivated records=%u",
-                 g_base_record_count_cache);
+    table_log(1, "recipe table deactivated records=%u", g_base_record_count_cache);
 }
 
 }  // namespace custom_recipe

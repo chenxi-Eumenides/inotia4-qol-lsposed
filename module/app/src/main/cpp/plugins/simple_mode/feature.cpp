@@ -1,14 +1,13 @@
 #include "plugins/simple_mode/feature.h"
 
 #include <atomic>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 
-#include "contracts/plugin.h"
-#include "core/native/qol_log.h"
 #include "plugins/simple_mode/rules.h"
-#include "game/access/char.h"
 
 namespace qol::features::simple_mode {
 namespace {
@@ -26,23 +25,42 @@ std::atomic<void*> g_backup_update_attr_from_monster{nullptr};
 std::atomic<bool> g_faction_deps_missing_logged{false};
 std::atomic<bool> g_pool_slot_unresolved_logged{false};
 
+void log_write(int32_t level, const char* format, va_list args) {
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    char message[contracts::kMessageCap + 1]{};
+    const int length = std::vsnprintf(message, sizeof(message), format, args);
+    if (length < 0) return;
+    const uint32_t message_length = static_cast<uint32_t>(
+        length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
+    (void)sdk->log.write(level, 16, "plugins/simple_mode/feature.cpp", message, message_length);
+}
+
+void log_info(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(1, format, args);
+    va_end(args);
+}
+
+void log_warn(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(2, format, args);
+    va_end(args);
+}
+
 // ---------------------------------------------------------------------------
 // 阵营判定
 // ---------------------------------------------------------------------------
 
 // 阵营判定依赖的三个游戏函数是否都已解析。缺失时一律判为「非玩家侧」并只记一次日志：
 // fail-safe 方向是「不发加成」，绝不因缺符号而把敌人误判成友方（那会让玩家挨打不掉血）。
-bool faction_deps_ready() {
-    return game::char_faction_deps_ready();
-}
-
-void note_faction_deps_missing_once() {
+void note_faction_deps_missing_once(bool party_index, bool active_group, bool summoner) {
     if (g_faction_deps_missing_logged.exchange(true)) return;
-    QOL_LOG_WARN(QolDomain::kSimpleMode,
-                 "faction symbols unresolved (party_index=%d active_group=%d summoner=%d); "
-                 "no bonus will be applied",
-                 game::char_party_index_resolved(), game::char_active_group_resolved(),
-                 game::char_summoner_resolved());
+    log_warn("faction symbols unresolved (party_index=%d active_group=%d summoner=%d); "
+             "no bonus will be applied",
+             party_index, active_group, summoner);
 }
 
 // 召唤链递归深度上限：正常链路只有「召唤者 → 召唤物」一层，留余量防异常数据自环。
@@ -55,15 +73,31 @@ constexpr int k_max_summon_depth = 4;
 //   CHAR_GetSummoner         反查召唤者，用于递归补齐「队友的召唤物」。
 bool is_player_side_impl(const void* ch, int depth) {
     if (ch == nullptr) return false;
-    if (!faction_deps_ready()) {
-        note_faction_deps_missing_once();
+    const auto* game = game_host();
+    if (game == nullptr || game->extra.character.is_party_member == nullptr ||
+        game->extra.character.summoner == nullptr ||
+        game->read.character.is_active_player_group == nullptr) {
+        note_faction_deps_missing_once(
+            game != nullptr && game->extra.character.is_party_member != nullptr,
+            game != nullptr && game->read.character.is_active_player_group != nullptr,
+            game != nullptr && game->extra.character.summoner != nullptr);
         return false;
     }
     void* mutable_ch = const_cast<void*>(ch);
-    if (game::char_is_party_member(mutable_ch)) return true;
-    if (game::char_is_active_player_group(mutable_ch)) return true;
+    int32_t party_member = 0;
+    int32_t active_group = 0;
+    void* summoner = nullptr;
+    const bool party_ok = game->extra.character.is_party_member(mutable_ch, &party_member).ok == kQolOk;
+    const bool active_ok =
+        game->read.character.is_active_player_group(mutable_ch, &active_group).ok == kQolOk;
+    const bool summoner_ok = game->extra.character.summoner(mutable_ch, &summoner).ok == kQolOk;
+    if (!party_ok || !active_ok || !summoner_ok) {
+        note_faction_deps_missing_once(party_ok, active_ok, summoner_ok);
+        return false;
+    }
+    if (party_member != 0) return true;
+    if (active_group != 0) return true;
     if (depth >= k_max_summon_depth) return false;
-    void* summoner = game::char_get_summoner(mutable_ch);
     if (summoner == nullptr || summoner == ch) return false;
     return is_player_side_impl(summoner, depth + 1);
 }
@@ -73,7 +107,12 @@ bool is_player_side_impl(const void* ch, int depth) {
 Side classify(const void* ch) {
     if (ch == nullptr) return Side::kNeutral;
     if (is_player_side_impl(ch, 0)) return Side::kPlayer;
-    const int type = game::char_type(ch);
+    int32_t type = -1;
+    const auto* game = game_host();
+    if (game == nullptr || game->read.character.type == nullptr ||
+        game->read.character.type(ch, &type).ok != kQolOk) {
+        return Side::kNeutral;
+    }
     return type == 1 ? Side::kMonster : Side::kNeutral;
 }
 
@@ -94,7 +133,9 @@ struct HalfHpMark {
     int32_t halved;
 };
 
-HalfHpMark g_half_marks[game::kCharPoolSlots] = {};
+constexpr int kCharPoolSlots = 100;
+constexpr int32_t kMaxHpAttribute = 0x1e;
+HalfHpMark g_half_marks[kCharPoolSlots] = {};
 
 }  // namespace
 
@@ -124,22 +165,31 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     backup(ch, attr);
     if (!g_gate.load(std::memory_order_relaxed)) return;
     // 只处理最大生命槽；1/2 的 attr 走其它分支，热路径上尽早退出。
-    if (ch == nullptr || !game::char_attr_is_max_hp(attr)) return;
+    if (ch == nullptr || attr != kMaxHpAttribute) return;
 
-    if (game::char_type(ch) != 1) return;   // 本函数只被 C_TYPE==1 分派，此处为双保险
+    const auto* game = game_host();
+    if (game == nullptr || game->read.character.type == nullptr ||
+        game->extra.character.pool_slot == nullptr || game->extra.character.max_hp == nullptr ||
+        game->extra.character_write.max_hp == nullptr || game->extra.character.hp == nullptr ||
+        game->extra.character_write.hp == nullptr) {
+        return;
+    }
+    int32_t type = -1;
+    if (game->read.character.type(ch, &type).ok != kQolOk || type != 1) return;
     if (is_player_side_impl(ch, 0)) return;  // 玩家侧召唤物不减半
 
     int slot = 0;
-    if (!game::char_pool_slot(ch, &slot)) {
+    if (game->extra.character.pool_slot(ch, &slot).ok != kQolOk || slot < 0 ||
+        slot >= kCharPoolSlots) {
         // 定位不到池槽就无法保证幂等（会累积减半），故不改写——fail-safe 方向是「怪物保持满血」。
         if (!g_pool_slot_unresolved_logged.exchange(true)) {
-            QOL_LOG_WARN(QolDomain::kSimpleMode, "char not in pool; max-hp halving skipped");
+            log_warn("char not in pool; max-hp halving skipped");
         }
         return;
     }
 
     int32_t raw = 0;
-    if (!game::char_read_max_hp(ch, &raw)) return;
+    if (game->extra.character.max_hp(ch, &raw).ok != kQolOk) return;
     HalfHpMark& mark = g_half_marks[slot];
     if (mark.ch != ch) {  // 槽被新角色占用（或首次见）→ 重置该槽账本
         mark.ch = ch;
@@ -149,19 +199,19 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
 
     const int32_t half = halved_max_hp(raw);
     if (half == raw) return;  // 已是下限 1，无意义
-    game::char_write_max_hp(ch, half);
+    if (game->extra.character_write.max_hp(ch, half).ok != kQolOk) return;
     mark.halved = half;
 
     // 同步钳制当前 HP：否则「上限已半、当前血仍是满值」会表现为血条超上限。
     int32_t hp = 0;
-    if (game::char_read_hp(ch, &hp) && hp > half) {
-        game::char_write_hp(ch, half);
+    if (game->extra.character.hp(ch, &hp).ok == kQolOk && hp > half) {
+        (void)game->extra.character_write.hp(ch, half);
     }
 }
 
 void set_gate(bool enabled) {
     g_gate.store(enabled, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kSimpleMode, "enabled=%d", enabled);
+    log_info("enabled=%d", enabled);
 }
 
 bool gate_enabled() {
@@ -180,7 +230,7 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
         g_backup_update_attr_from_monster.store(backup, std::memory_order_release);
         return 0;
     }
-    QOL_LOG_WARN(QolDomain::kSimpleMode, "unknown resource id: %s", resource_id);
+    log_warn("unknown resource id: %s", resource_id);
     return 0;
 }
 

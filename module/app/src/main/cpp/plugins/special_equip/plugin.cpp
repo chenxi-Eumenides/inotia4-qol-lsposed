@@ -2,8 +2,6 @@
 
 #include <cstdint>
 
-#include "core/native/qol_log.h"
-#include "hooks/dispatch.h"
 #include "plugins/special_equip/feature.h"
 
 // D2c-2b-1：出售按钮 UIEquip_ButtonDestroyExe 已被 inventory_hooks 单点 hook（同址
@@ -16,6 +14,9 @@ namespace {
 constexpr const char* kPluginId = "special_equip";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kSellGateResourceId = "hook:UIEquip_ButtonDestroyExe";
+
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
 
 // 资源声明（ARCHITECTURE.md §4.3 字段顺序）：两个入口 hook 均为私有、必需、fail-closed。
 // gate=nullptr = 常驻，无配置开关；理由见 feature.h §「常开，无配置开关」——关闭只会把
@@ -53,7 +54,14 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_sdk = ctx.sdk;
+    g_game = ctx.game;
+    if (ctx.struct_size < sizeof(contracts::PluginContext) ||
+        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
     // 常开，无配置开关：只置业务门禁并注册出售门禁谓词；资源由宿主声明式安装。
     // 依赖缺失即 fail-closed 返回非 0，宿主不安装资源并置 failed（与旧 install_if_ready
     // 的 deps_ready 门一致）。重复调用幂等（activate 重入）。
@@ -65,18 +73,20 @@ int plugin_install(contracts::PluginContext& ctx) {
     // 出售门禁登记到 hooks/dispatch 布尔门（resource_id = claim id）。fail-soft：登记失败
     // （已被他人占用/容量满，当前实际不可达）仅告警，不使 CanEquip/CanUnequip 主功能失败；
     // 代价 = 本次出售门禁不生效。activate 重入同 fn 幂等成功，不重复告警。
-    if (!hooks::dispatch_set_intercept(kSellGateResourceId, &sell_gate_should_block, nullptr)) {
-        QOL_LOG_WARN(QolDomain::kSpecialEquip,
-                     "sell gate intercept register rejected id=%s", kSellGateResourceId);
+    if (g_sdk->hooks.set_intercept == nullptr ||
+        g_sdk->hooks.set_intercept(kSellGateResourceId, &sell_gate_should_block, nullptr).ok !=
+            kQolOk) {
+        log_warn("sell gate intercept register rejected id=%s", kSellGateResourceId);
     }
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    (void)ctx;
     // 门禁置 false 并注销布尔门（幂等）；重复调用安全。
     set_gate(false);
-    hooks::dispatch_clear_intercept(kSellGateResourceId);
+    if (g_sdk != nullptr && g_sdk->hooks.clear_intercept != nullptr) {
+        (void)g_sdk->hooks.clear_intercept(kSellGateResourceId);
+    }
 }
 
 // 启停仅切门禁，不做资源操作（§3.3）。
@@ -112,6 +122,10 @@ const contracts::PluginDescriptor kDescriptor = {
 };
 
 }  // namespace
+
+const contracts::QolHostSdk* host_sdk() { return g_sdk; }
+
+const contracts::QolGameHost* game_host() { return g_game; }
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;

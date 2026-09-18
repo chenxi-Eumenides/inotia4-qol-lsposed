@@ -1,16 +1,13 @@
 #include "plugins/custom_recipe/plugin.h"
 
-#include <atomic>
 #include <cstring>
+#include <cstdint>
 
 #include "contracts/attribute_quality.h"
 #include "contracts/craft_result.h"
 #include "contracts/events.h"
-#include "core/native/qol_log.h"
 #include "plugins/custom_recipe/feature.h"
 #include "plugins/custom_recipe/table.h"
-#include "infra/config.h"
-#include "infra/events.h"
 
 // 自定义合成配方插件：结果层能力提供者 + 表注入行为所有权（C2 Step 4）。
 //
@@ -24,9 +21,7 @@ namespace {
 constexpr const char* kPluginId = "custom_recipe";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kGateKey = "customRecipeEnabled";
-constexpr QolDomain kDomain = QolDomain::kCustomRecipe;
-
-infra::SubscriptionId g_config_subscription = 0;
+uint64_t g_config_subscription = 0;
 
 void on_config_changed(void* /*ctx*/, const void* payload) {
     if (payload == nullptr) return;
@@ -36,14 +31,21 @@ void on_config_changed(void* /*ctx*/, const void* payload) {
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    if (ctx.sdk == nullptr || ctx.game == nullptr) return 1;
+    set_context(ctx);
     // 进档重建动态特殊装备配方（save_enter 设施迁移前直接注册 legacy 回调；register 幂等）。
     register_dynamic_recipes();
     // 门禁初值取配置；订阅配置变更（重复订阅会留孤儿订阅，已订阅则跳过）。
-    set_enabled(infra::config_get_bool(kGateKey, false));
+    int32_t enabled_value = 0;
+    if (host_sdk()->config.get_bool != nullptr) {
+        (void)host_sdk()->config.get_bool(kGateKey, 0, &enabled_value);
+    }
+    set_enabled(enabled_value != 0);
     if (g_config_subscription == 0) {
-        g_config_subscription =
-            infra::subscribe(contracts::kEventConfigChanged, &on_config_changed, nullptr);
+        if (host_sdk()->events.subscribe != nullptr) {
+            (void)host_sdk()->events.subscribe(contracts::kEventConfigChanged, &on_config_changed,
+                                                nullptr, &g_config_subscription);
+        }
     }
     return 0;
 }
@@ -51,7 +53,9 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     if (g_config_subscription != 0) {
-        infra::unsubscribe(g_config_subscription);
+        if (host_sdk()->events.unsubscribe != nullptr) {
+            (void)host_sdk()->events.unsubscribe(g_config_subscription);
+        }
         g_config_subscription = 0;
     }
     set_enabled(false);
@@ -59,8 +63,13 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    (void)ctx;
-    set_enabled(infra::config_get_bool(kGateKey, false));
+    if (ctx.sdk == nullptr || ctx.game == nullptr) return;
+    set_context(ctx);
+    int32_t enabled_value = 0;
+    if (host_sdk()->config.get_bool != nullptr) {
+        (void)host_sdk()->config.get_bool(kGateKey, 0, &enabled_value);
+    }
+    set_enabled(enabled_value != 0);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {

@@ -4,6 +4,8 @@
 #include <cstdint>
 
 #include "plugins/custom_recipe/catalog.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
 
 // 自定义合成配方的 RECIPEBASE / MIXTUREBASE 表注入（custom-craft-recipe §4.3）。
 //
@@ -11,6 +13,9 @@
 // 内存，可 host 单测；custom_recipe_table_ensure() 为 Android 专属（读 .bss 指针全局、分配
 // 模块自有缓冲、改写字段全局、绑定目录）。
 namespace custom_recipe {
+
+void set_context(const qol::contracts::QolGameHost* game,
+                 const qol::contracts::QolHostSdk* sdk);
 
 // 注入记录布局常量（RECIPEBASE 12B / MIXTUREBASE 3B；字段语义见设计书 §3.2）。
 constexpr size_t kRecipeRecordSize = 12;

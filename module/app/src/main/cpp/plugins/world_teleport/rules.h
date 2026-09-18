@@ -1,12 +1,9 @@
 #pragma once
 
-#include "game/access/world.h"
-
 namespace world_teleport {
 
-// 静态地图 ID 上限：经 game/access/world 的 game 层别名取得（MAPINFOBASE_STATIC_MAX_MAP_ID
-// 单一来源；本层不直接 include 符号头）。
-constexpr int kMaxMapId = qol::game::kWorldStaticMaxMapId;
+// Game Host ABI 尚未提供共同静态地图上限；运行时 record_count 可用时优先采用它。
+constexpr int kMaxMapId = 414;
 
 // 从运行时 MAPINFOBASE_nRecordCount 推导本次传送允许的最大地图 ID。
 // count<=0 表示运行时字段不可用，回退到静态上限；调用方仍需记录该情况。

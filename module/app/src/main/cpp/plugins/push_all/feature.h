@@ -17,6 +17,9 @@
 
 namespace qol::features::push_all {
 
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
+
 // 资源 id：plugin.cpp 的 ResourceClaim 与宿主诊断共用同一常量。
 inline constexpr const char* kResourceIdParty = "patch:CHAR_Move+0x168";
 inline constexpr const char* kResourceIdStand = "patch:CHAR_Move+0x180";

@@ -5,13 +5,12 @@
 #include "plugins/special_equip/feature.h"
 
 #include <atomic>
+#include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 
-#include "core/native/qol_log.h"
 #include "plugins/special_equip/rules.h"
-#include "game/access/char.h"
-#include "game/access/item_class.h"
 
 namespace qol::features::special_equip {
 namespace {
@@ -32,63 +31,138 @@ std::atomic<uint64_t> g_override_count{0};
 // 真机排障用的「未放行原因」预算：UI 每次构建详情菜单都会调，不设上限会刷爆日志。
 std::atomic<int> g_reject_log_budget{120};
 
+void log_write(int32_t level, const char* format, va_list args) {
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    char message[contracts::kMessageCap + 1]{};
+    const int length = std::vsnprintf(message, sizeof(message), format, args);
+    if (length < 0) return;
+    const uint32_t message_length = static_cast<uint32_t>(
+        length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
+    (void)sdk->log.write(level, 17, "plugins/special_equip/feature.cpp", message, message_length);
+}
+
+void log_debug_impl(const char* format, ...) {
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr || sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0) {
+        return;
+    }
+    va_list args;
+    va_start(args, format);
+    log_write(0, format, args);
+    va_end(args);
+}
+
 // 原版判定链重放依赖（不含「菜单角色」——那只在出售门禁与安装门控需要）。
 bool replay_deps_ready() {
-    return game::item_equip_primitives_ready() && game::char_can_change_equip_resolved();
+    const auto* game = game_host();
+    return game != nullptr && game->extra.item.is_real_equip != nullptr &&
+           game->extra.item.equip_level != nullptr &&
+           game->extra.character.can_change_equip != nullptr;
 }
 
 // 仅 debug 日志开启时记录，避免热路径噪声（穿装/卸下都是用户操作级频率，无需预算门控）。
 void log_override(const char* what, void* ch, void* item) {
-    if (!qol_log_debug_enabled()) return;
-    QOL_LOG_DEBUG(QolDomain::kSpecialEquip, "%s overridden ch=%p item=%p count=%llu", what, ch, item,
-                  static_cast<unsigned long long>(g_override_count.load(std::memory_order_relaxed)));
+    log_debug_impl("%s overridden ch=%p item=%p count=%llu", what, ch, item,
+              static_cast<unsigned long long>(g_override_count.load(std::memory_order_relaxed)));
 }
 
 // 「原版拒绝且本域也未放行」的原因快照。UI 的装备按钮灰化正是走这条路径，
 // 打出来即可判定是 ①真装备 / ③角色权限 / ④等级 中的哪一道挡住的。
 void log_reject(int category, void* ch, void* item) {
-    if (!qol_log_debug_enabled()) return;
     if (g_reject_log_budget.fetch_sub(1, std::memory_order_relaxed) <= 0) return;
-    const uint8_t* rec = category >= 0
-        ? static_cast<const uint8_t*>(game::item_class_record(static_cast<uint16_t>(category)))
-        : nullptr;
-    QOL_LOG_DEBUG(QolDomain::kSpecialEquip,
-                  "not overridden ch=%p item=%p cat=%d bit4=%d ctype=%d mercSlot=%d "
-                  "realEquip=%d canChange=%d chLv=%d itemLv=%d",
-                  ch, item, category,
-                  rec != nullptr ? (game::item_class_no_equip_bit(rec) ? 1 : 0) : -1,
-                  game::char_type(ch), game::char_merc_slot(ch),
-                  game::item_equip_primitives_ready()
-                      ? (game::item_is_real_equip(item) ? 1 : 0)
-                      : -1,
-                  game::char_can_change_equip_resolved()
-                      ? (game::char_can_change_equip(ch) ? 1 : 0)
-                      : -1,
-                  game::char_level(ch),
-                  game::item_equip_primitives_ready() ? game::item_equip_level(item) : -1);
+    const auto* game = game_host();
+    int32_t type = -1;
+    int32_t merc_slot = -1;
+    int32_t level = -1;
+    int32_t can_change = 0;
+    int32_t real_equip = 0;
+    int32_t item_level = -1;
+    if (game != nullptr && game->read.character.type != nullptr) {
+        (void)game->read.character.type(ch, &type);
+    }
+    if (game != nullptr && game->extra.character.merc_slot != nullptr) {
+        (void)game->extra.character.merc_slot(ch, &merc_slot);
+    }
+    if (game != nullptr && game->extra.character.level != nullptr) {
+        (void)game->extra.character.level(ch, &level);
+    }
+    if (game != nullptr && game->extra.character.can_change_equip != nullptr) {
+        (void)game->extra.character.can_change_equip(ch, &can_change);
+    }
+    if (game != nullptr && game->extra.item.is_real_equip != nullptr) {
+        (void)game->extra.item.is_real_equip(item, &real_equip);
+    }
+    if (game != nullptr && game->extra.item.equip_level != nullptr) {
+        (void)game->extra.item.equip_level(item, &item_level);
+    }
+    int32_t item_category = category;
+    int32_t no_equip_bit = -1;
+    if (game != nullptr && game->read.item.category != nullptr) {
+        (void)game->read.item.category(item, &item_category);
+    }
+    if (game != nullptr && game->extra.item.class_no_equip_bit != nullptr && item_category >= 0) {
+        (void)game->extra.item.class_no_equip_bit(item_category, &no_equip_bit);
+    }
+    log_debug_impl("not overridden ch=%p item=%p cat=%d bit4=%d ctype=%d mercSlot=%d "
+              "realEquip=%d canChange=%d chLv=%d itemLv=%d",
+              ch, item, item_category, no_equip_bit, type, merc_slot, real_equip, can_change, level,
+              item_level);
 }
 
 }  // namespace
+
+void log_debug(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(0, format, args);
+    va_end(args);
+}
+
+void log_info(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(1, format, args);
+    va_end(args);
+}
+
+void log_warn(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(2, format, args);
+    va_end(args);
+}
+
+void log_error(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(3, format, args);
+    va_end(args);
+}
 
 // 依赖是否齐备。缺任一即 fail-closed（与 attribute_range / simple_mode 的 once 语义一致）：
 // 两个入口 hook 的符号解析由宿主负责（解析失败会使插件 failed），此处只校验原版判定链
 // 重放所需的游戏原语：ITEM_IsRealEquip / ITEM_GetEquipLevel / CHAR_CanChangeEquip /
 // PARTY_GetMenuCharacter。
 bool deps_ready() {
-    return replay_deps_ready() && game::char_menu_character_resolved();
+    const auto* game = game_host();
+    return replay_deps_ready() && game != nullptr &&
+           game->extra.character.menu_character != nullptr;
 }
 
 void log_deps_missing() {
-    QOL_LOG_ERROR(QolDomain::kSpecialEquip,
-                  "symbols unresolved (is_real_equip=%d can_change_equip=%d equip_level=%d "
-                  "menu_char=%d); not installed",
-                  game::item_is_real_equip_resolved(), game::char_can_change_equip_resolved(),
-                  game::item_equip_level_resolved(), game::char_menu_character_resolved());
+    const auto* game = game_host();
+    log_error("symbols unresolved (is_real_equip=%d can_change_equip=%d equip_level=%d "
+              "menu_char=%d); not installed",
+              game != nullptr && game->extra.item.is_real_equip != nullptr,
+              game != nullptr && game->extra.character.can_change_equip != nullptr,
+              game != nullptr && game->extra.item.equip_level != nullptr,
+              game != nullptr && game->extra.character.menu_character != nullptr);
 }
 
 void set_gate(bool enabled) {
     g_gate.store(enabled, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kSpecialEquip, "enabled=%d", enabled);
+    log_info("enabled=%d", enabled);
 }
 
 bool gate_enabled() {
@@ -106,7 +180,7 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
         g_backup_can_unequip.store(backup, std::memory_order_release);
         return 0;
     }
-    QOL_LOG_WARN(QolDomain::kSpecialEquip, "unknown resource id: %s", resource_id);
+    log_warn("unknown resource id: %s", resource_id);
     return 0;
 }
 
@@ -117,12 +191,23 @@ int can_equip_wrapper(void* ch, void* item) {
     if (backup(ch, item) != 0) return 1;              // 原版放行 → 快速路径，不介入
     if (ch == nullptr || item == nullptr) return 0;
     if (!replay_deps_ready()) {
-        log_reject(game::item_class_category(item), ch, item);
+        log_reject(-1, ch, item);
         return 0;                                     // 依赖缺失：fail-closed，保持原版拒绝
     }
-    if (!equip_replay_allows(game::item_is_real_equip(item), game::char_can_change_equip(ch),
-                             game::char_level(ch), game::item_equip_level(item))) {
-        log_reject(game::item_class_category(item), ch, item);  // UI 灰化走这条路径
+    const auto* game = game_host();
+    int32_t is_real_equip = 0;
+    int32_t can_change_equip = 0;
+    int32_t char_level = -1;
+    int32_t item_level = -1;
+    if (game == nullptr || game->extra.item.is_real_equip(item, &is_real_equip).ok != kQolOk ||
+        game->extra.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
+        game->extra.character.level(ch, &char_level).ok != kQolOk ||
+        game->extra.item.equip_level(item, &item_level).ok != kQolOk) {
+        log_reject(-1, ch, item);
+        return 0;
+    }
+    if (!equip_replay_allows(is_real_equip != 0, can_change_equip != 0, char_level, item_level)) {
+        log_reject(-1, ch, item);  // UI 灰化走这条路径
         return 0;
     }
     g_override_count.fetch_add(1, std::memory_order_relaxed);
@@ -136,12 +221,15 @@ int can_unequip_wrapper(void* ch, void* item) {
     if (backup == nullptr) return 0;
     if (backup(ch, item) != 0) return 1;
     if (ch == nullptr || item == nullptr) return 0;
-    if (!game::char_can_change_equip_resolved()) {
-        log_reject(game::item_class_category(item), ch, item);
+    const auto* game = game_host();
+    if (game == nullptr || game->extra.character.can_change_equip == nullptr) {
+        log_reject(-1, ch, item);
         return 0;
     }
-    if (!unequip_replay_allows(game::char_can_change_equip(ch))) {
-        log_reject(game::item_class_category(item), ch, item);
+    int32_t can_change_equip = 0;
+    if (game->extra.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
+        !unequip_replay_allows(can_change_equip != 0)) {
+        log_reject(-1, ch, item);
         return 0;
     }
     g_override_count.fetch_add(1, std::memory_order_relaxed);
@@ -149,19 +237,26 @@ int can_unequip_wrapper(void* ch, void* item) {
     return 1;
 }
 
-bool sell_gate_should_block(void* ctx) {
+int32_t sell_gate_should_block(void* ctx) {
     (void)ctx;
-    if (!gate_enabled()) return false;  // 插件未启用：谓词常驻但空转放行
-    const int desc_type = game::equip_desc_role_type();
-    void* ch = game::char_menu_character();
-    const bool resolved = game::char_can_change_equip_resolved();
-    const bool can_change = resolved && ch != nullptr && game::char_can_change_equip(ch);
-    if (!sell_gate_decides_block(desc_type, ch != nullptr, resolved, can_change)) {
-        return false;
+    if (!gate_enabled()) return 0;  // 插件未启用：谓词常驻但空转放行
+    const auto* game = game_host();
+    if (game == nullptr || game->extra.character.menu_character == nullptr ||
+        game->extra.character.can_change_equip == nullptr ||
+        game->extra.item.equip_desc_role_type == nullptr) {
+        return 1;
     }
-    QOL_LOG_INFO(QolDomain::kSpecialEquip,
-                 "sell rejected: menu char cannot change equip ch=%p", ch);
-    return true;
+    void* ch = nullptr;
+    int32_t can_change = 0;
+    if (game->extra.character.menu_character(&ch).ok != kQolOk || ch == nullptr ||
+        game->extra.character.can_change_equip(ch, &can_change).ok != kQolOk) {
+        return 1;
+    }
+    int32_t desc_type = -1;
+    if (game->extra.item.equip_desc_role_type(&desc_type).ok != kQolOk) return 1;
+    if (!sell_gate_decides_block(desc_type, true, true, can_change != 0)) return 0;
+    log_info("sell rejected: menu char cannot change equip ch=%p", ch);
+    return 1;
 }
 
 }  // namespace qol::features::special_equip

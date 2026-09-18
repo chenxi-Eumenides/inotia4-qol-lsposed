@@ -1,9 +1,10 @@
 #include "plugins/text_layer/plugin.h"
 
 #include <cstdint>
+#include <cstdarg>
+#include <cstdio>
 
 #include "contracts/text_layer.h"
-#include "core/native/qol_log.h"
 #include "plugins/text_layer/charinfo_scope.h"
 #include "plugins/text_layer/feature.h"
 
@@ -12,6 +13,22 @@ namespace {
 
 constexpr const char* kPluginId = "text_layer";
 constexpr const char* kPluginVersion = "0.1.0";
+
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
+
+void log_message(int32_t level, const char* format, ...) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
+    char message[contracts::kMessageCap + 1]{};
+    va_list args;
+    va_start(args, format);
+    const int written = std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (written < 0) return;
+    const uint32_t length = static_cast<uint32_t>(written) < contracts::kMessageCap
+        ? static_cast<uint32_t>(written) : contracts::kMessageCap;
+    (void)g_sdk->log.write(level, 12, __FILE__, message, length);
+}
 
 // 能力接口实例：函数地址为编译期常量，无跨 TU 静态初始化顺序问题。
 constexpr contracts::TextLayerApi kTextLayerApi{&api_subscribe, &api_unsubscribe};
@@ -59,11 +76,13 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_sdk = ctx.sdk;
+    g_game = ctx.game;
+    if (g_sdk == nullptr || g_game == nullptr) return 1;
     // 内置表消费者（after+Modify）在 install 注册；失败（容量满等）→ fail-closed，
     // 宿主按 install 失败回滚并把插件置 failed（§3.2 部分安装失败）。
     if (!register_builtin_consumers()) {
-        QOL_LOG_ERROR(QolDomain::kUi, "text_layer builtin table consumer registration failed");
+        log_message(3, "text_layer builtin table consumer registration failed");
         return 1;
     }
     set_active(true);
@@ -112,5 +131,9 @@ const contracts::PluginDescriptor kDescriptor = {
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
 }
+
+const contracts::QolHostSdk* host_sdk() { return g_sdk; }
+
+const contracts::QolGameHost* game_host() { return g_game; }
 
 }  // namespace qol::features::text_layer

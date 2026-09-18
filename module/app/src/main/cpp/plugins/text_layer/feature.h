@@ -6,8 +6,16 @@
 
 #include "contracts/plugin.h"
 #include "contracts/text_layer.h"
-#include "hooks/dispatch.h"
-#include "infra/text_scope.h"
+
+namespace qol::hooks {
+enum class DispatchPhase : int32_t { kBefore = 0, kAfter = 1 };
+enum class ConsumerKind : int32_t { kObserve = 0, kModify = 1, kIntercept = 2 };
+}  // namespace qol::hooks
+
+namespace qol::infra {
+enum class TextScope : uint8_t;
+TextScope active_text_scope();
+}  // namespace qol::infra
 
 // 模块自定义文本层（text_layer 插件，ARCHITECTURE.md §3.3/§4.5/§4.6）。
 //
@@ -32,7 +40,7 @@ inline constexpr const char* kResourceIdCharinfoScope = "hook:Scene_Draw_Popup_S
 struct Entry {
     const char* key;              // 语义键（唯一；下方 host test 断言唯一性）
     uint16_t text_id;             // 被替换的游戏 text id
-    qol::infra::TextScope scope;  // 生效窗口
+    qol::infra::TextScope scope;  // 生效窗口（与 Host SDK scope 数值一致）
     // nullptr = 明确保持游戏原文（占位用，维持连续 id 区间不被打破），不做替换。
     const char* text;
 };
@@ -49,20 +57,20 @@ struct Entry {
 //    不在本作用域内，故只有配方按钮改名（见 lookup 矩阵用例）。文案表里不存在这一串，
 //    因此只能由模块提供。
 inline constexpr Entry kEntries[] = {
-    {"charinfo.dmg", 35185, qol::infra::TextScope::kCharacterPanel, "物攻"},        // DMG
-    {"charinfo.magic_dmg", 35186, qol::infra::TextScope::kCharacterPanel, "法攻"},  // M. DMG
-    {"charinfo.def", 35187, qol::infra::TextScope::kCharacterPanel, "防御力"},      // DEF
-    {"charinfo.magic_def", 35188, qol::infra::TextScope::kCharacterPanel, nullptr},  // 面板未显示
-    {"charinfo.crit_rate", 35189, qol::infra::TextScope::kCharacterPanel, "暴击率"},
-    {"charinfo.hit_rate", 35190, qol::infra::TextScope::kCharacterPanel, "命中率"},
-    {"charinfo.crit_dmg", 35191, qol::infra::TextScope::kCharacterPanel, "爆伤"},
-    {"charinfo.phys_res", 35192, qol::infra::TextScope::kCharacterPanel, "物抗"},
-    {"charinfo.magic_res", 35193, qol::infra::TextScope::kCharacterPanel, "法抗"},
-    {"charinfo.evade", 35194, qol::infra::TextScope::kCharacterPanel, "闪避率"},
-    {"charinfo.weapon_block", 35195, qol::infra::TextScope::kCharacterPanel, "武器格挡"},
-    {"charinfo.shield_block", 35196, qol::infra::TextScope::kCharacterPanel, "盾牌格挡"},
-    {"recipe.jewel_tier_up", 35291, qol::infra::TextScope::kUimixRecipeButton, "宝石升阶"},
-    {"recipe.jewel_tier_up.title", 35291, qol::infra::TextScope::kUimixPanelTitle, "宝石升阶"},
+    {"charinfo.dmg", 35185, static_cast<qol::infra::TextScope>(1), "物攻"},        // DMG
+    {"charinfo.magic_dmg", 35186, static_cast<qol::infra::TextScope>(1), "法攻"},  // M. DMG
+    {"charinfo.def", 35187, static_cast<qol::infra::TextScope>(1), "防御力"},      // DEF
+    {"charinfo.magic_def", 35188, static_cast<qol::infra::TextScope>(1), nullptr},  // 面板未显示
+    {"charinfo.crit_rate", 35189, static_cast<qol::infra::TextScope>(1), "暴击率"},
+    {"charinfo.hit_rate", 35190, static_cast<qol::infra::TextScope>(1), "命中率"},
+    {"charinfo.crit_dmg", 35191, static_cast<qol::infra::TextScope>(1), "爆伤"},
+    {"charinfo.phys_res", 35192, static_cast<qol::infra::TextScope>(1), "物抗"},
+    {"charinfo.magic_res", 35193, static_cast<qol::infra::TextScope>(1), "法抗"},
+    {"charinfo.evade", 35194, static_cast<qol::infra::TextScope>(1), "闪避率"},
+    {"charinfo.weapon_block", 35195, static_cast<qol::infra::TextScope>(1), "武器格挡"},
+    {"charinfo.shield_block", 35196, static_cast<qol::infra::TextScope>(1), "盾牌格挡"},
+    {"recipe.jewel_tier_up", 35291, static_cast<qol::infra::TextScope>(2), "宝石升阶"},
+    {"recipe.jewel_tier_up.title", 35291, static_cast<qol::infra::TextScope>(3), "宝石升阶"},
 };
 
 inline constexpr size_t kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
@@ -73,11 +81,11 @@ inline constexpr uint16_t kCharinfoIdMax = 35196;
 inline constexpr size_t kCharinfoIdCount = static_cast<size_t>(kCharinfoIdMax - kCharinfoIdMin) + 1;
 constexpr bool charinfo_block_ok() {
     for (size_t i = 0; i < kCharinfoIdCount; ++i) {
-        if (kEntries[i].scope != qol::infra::TextScope::kCharacterPanel) return false;
+        if (static_cast<uint8_t>(kEntries[i].scope) != 1) return false;
         if (kEntries[i].text_id != static_cast<uint16_t>(kCharinfoIdMin + i)) return false;
     }
     return kEntryCount > kCharinfoIdCount &&
-           kEntries[kCharinfoIdCount].scope != qol::infra::TextScope::kCharacterPanel;
+           static_cast<uint8_t>(kEntries[kCharinfoIdCount].scope) != 1;
 }
 static_assert(charinfo_block_ok(),
               "角色面板文本段必须位于表首并覆盖 35185..35196 连续升序、无空洞");
@@ -89,7 +97,7 @@ inline const Entry* entries(size_t* out_count) {
 
 // 查表：text_id 命中、scope == active、且 text != nullptr 时返回字面量；否则 nullptr。
 inline const char* lookup(uint16_t text_id, qol::infra::TextScope active) {
-    if (active == qol::infra::TextScope::kNone) return nullptr;
+    if (static_cast<uint8_t>(active) == 0) return nullptr;
     for (size_t i = 0; i < kEntryCount; ++i) {
         if (kEntries[i].text_id != text_id) continue;
         if (kEntries[i].scope != active) continue;
@@ -111,11 +119,15 @@ inline const Entry* entry_by_key(const char* key) {
 // 业务门禁：true = 表替换与能力查询生效；false = 撤销期，wrapper 透传原函数。
 void set_active(bool active);
 bool active();
+uint8_t active_scope_value();
+void set_active_scope_value(uint8_t value);
 
 // 内置表消费者（声明式登记，§4.6）：after 阶段 Modify——在 after 逆序链最后执行，
 // 使内置文案覆盖第三方修改（install 时最先注册）。
-inline constexpr qol::hooks::DispatchPhase kOwnerTablePhase = qol::hooks::DispatchPhase::kAfter;
-inline constexpr qol::hooks::ConsumerKind kOwnerTableKind = qol::hooks::ConsumerKind::kModify;
+inline constexpr qol::hooks::DispatchPhase kOwnerTablePhase =
+    static_cast<qol::hooks::DispatchPhase>(1);
+inline constexpr qol::hooks::ConsumerKind kOwnerTableKind =
+    static_cast<qol::hooks::ConsumerKind>(1);
 
 // 内置表 after-Modify 的纯逻辑：按当前线程作用域查表；命中返回字面量，未命中返回 nullptr。
 // 可在 host 单测直接断言（不触游戏内存、不依赖分派链接）。

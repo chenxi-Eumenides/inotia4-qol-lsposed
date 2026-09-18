@@ -4,10 +4,7 @@
 #include <cstring>
 
 #include "contracts/events.h"
-#include "core/native/qol_log.h"
 #include "plugins/simple_mode/feature.h"
-#include "infra/config.h"
-#include "infra/events.h"
 
 namespace qol::features::simple_mode {
 namespace {
@@ -17,7 +14,9 @@ constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kGateKey = "plugin.simple_mode.enabled";
 
 // 配置变更订阅句柄；deactivate 时成对注销。
-infra::SubscriptionId g_config_subscription = 0;
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
+uint64_t g_config_subscription = 0;
 
 void on_config_changed(void* ctx, const void* payload) {
     (void)ctx;
@@ -69,22 +68,32 @@ const contracts::JniBinding kJni[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_sdk = ctx.sdk;
+    g_game = ctx.game;
+    if (ctx.struct_size < sizeof(contracts::PluginContext) ||
+        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
     // inactive → resolving 是幂等重入（§3.2）：门禁读取可重复执行，订阅已有则不重复订阅
     // （重复订阅会在 deactivate 退订后留下孤儿订阅）。
-    set_gate(infra::config_get_bool(kGateKey, false));
-    if (g_config_subscription == 0) {
-        g_config_subscription =
-            infra::subscribe(contracts::kEventConfigChanged, &on_config_changed, nullptr);
+    int32_t enabled = 0;
+    if (g_sdk->config.get_bool != nullptr) {
+        (void)g_sdk->config.get_bool(kGateKey, 0, &enabled);
+    }
+    set_gate(enabled != 0);
+    if (g_config_subscription == 0 && g_sdk->events.subscribe != nullptr) {
+        (void)g_sdk->events.subscribe(contracts::kEventConfigChanged, &on_config_changed, nullptr,
+                                       &g_config_subscription);
     }
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    (void)ctx;
     // 幂等：退订后置 0，便于再次 install 重新订阅；重复调用安全。
-    if (g_config_subscription != 0) {
-        infra::unsubscribe(g_config_subscription);
+    if (g_config_subscription != 0 && g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_config_subscription);
         g_config_subscription = 0;
     }
     set_gate(false);
@@ -123,6 +132,10 @@ const contracts::PluginDescriptor kDescriptor = {
 };
 
 }  // namespace
+
+const contracts::QolHostSdk* host_sdk() { return g_sdk; }
+
+const contracts::QolGameHost* game_host() { return g_game; }
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
