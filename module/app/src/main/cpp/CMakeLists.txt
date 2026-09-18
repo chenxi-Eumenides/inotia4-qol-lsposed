@@ -224,6 +224,11 @@ target_sources(gamebridge PRIVATE
     plugins/push_all/plugin.cpp
 )
 
+# D2a-3a：extension_bag 指针槽站点解析（UIEquip 事件 proc GOT，末尾追加）
+target_sources(gamebridge PRIVATE
+    game/access/ui_equip.cpp
+)
+
 # P4 阶段 A2a：infra/scheduler 形式化 + 帧源声明式 core 资源（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     infra/scheduler.cpp

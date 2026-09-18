@@ -42,3 +42,7 @@ bool ui_draw_control_title_image_part(void* ctrl, int32_t loc);
 void ui_draw_button_background(void* ctrl, UiRect size, uint32_t color);
 void ui_draw_button_border(void* ctrl, UiRect size, uint32_t color, int thickness);
 void ui_draw_control_alpha_overlay(void* ctrl, UiRect size, uint32_t color, uint32_t alpha);
+
+// 原版单按钮文本弹窗（word_id 文案）。内部按 game_symbols 解析创建入口；基址未就绪
+// 或符号未解析时静默返回。调用方须在释放扩展锁后调用（锁内零 UI）。
+void ui_show_text_popup(int32_t text_id);

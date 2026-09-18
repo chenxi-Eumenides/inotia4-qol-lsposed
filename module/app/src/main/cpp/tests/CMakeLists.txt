@@ -292,6 +292,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
+    ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/patch/ptr_slot.cpp
@@ -339,6 +340,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
+    ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/patch/ptr_slot.cpp
@@ -370,6 +372,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
+    ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
     ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/patch/ptr_slot.cpp
@@ -407,6 +410,22 @@ target_include_directories(patch_layer_tests PRIVATE
 target_compile_features(patch_layer_tests PRIVATE cxx_std_17)
 set_target_properties(patch_layer_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
+
+# D2a-3a：extension_bag 契约 + 声明式站点登记 host 测试（假 g_base；末尾追加）
+add_executable(extension_bag_contract_tests
+    test_extension_bag_contract.cpp
+    ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/game/access/ptr_slots.cpp
+    ${CPP_DIR}/game/access/ui_equip.cpp
+)
+target_include_directories(extension_bag_contract_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_contract_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_contract_tests COMMAND extension_bag_contract_tests)
 
 # D1-a2：PopupState state 表注入机制 host 测试（假 state 表；占用/幂等/还原；末尾追加）
 add_executable(hooks_popup_state_tests

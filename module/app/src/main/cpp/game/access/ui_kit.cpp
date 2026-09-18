@@ -24,3 +24,12 @@ void set_execute_proc(void* ctrl, UiClickProc proc) {
 
 #include "game/access/ui_kit_controls.inc"
 #include "game/access/ui_kit_render.inc"
+
+void ui_show_text_popup(int32_t text_id) {
+    if (g_base == 0) return;
+    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
+                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
+    if (popup == 0) return;
+    reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(
+        static_cast<uint32_t>(text_id), 0, 0, 0);
+}

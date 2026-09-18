@@ -82,6 +82,52 @@ constexpr SiteEntry kSites[] = {
     // 主菜单跳过 Com2uS Hive 登录询问 ×1（原 hub_login.inc:19-21）：cbz 分支目标改写。
     {"P_HUB_LOGIN_SKIP", F_STATE_HIDE_MODULE_MAIN_MENU_VMA, 0x48, 0x34000100, 0x34000360,
      PatchKind::kWordReplace},
+
+    // ---- D2a-3a：extension_bag 声明式站点（owner=plugins/extension_bag；地址/原字与
+    // 原 raw 实现逐一核对一致）----
+    // 8 条 save callsite（行为编排 owner=core/native/module_save.cpp，见 ADR-0007 §4）。
+    {"P_EXT_SAVE_REVIVE", F_SAVE_CALLSITE_REVIVE_VMA, 0, 0x9401945e, 0, PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_QUEST_CLEAR_1", F_SAVE_CALLSITE_QUEST_CLEAR_1_VMA, 0, 0x940175d8, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_QUEST_CLEAR_2", F_SAVE_CALLSITE_QUEST_CLEAR_2_VMA, 0, 0x940175ad, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_QUEST_REVIEW", F_SAVE_CALLSITE_QUEST_REVIEW_VMA, 0, 0x94000e5e, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_PROCESS", F_SAVE_CALLSITE_PROCESS_VMA, 0, 0x97ffff6c, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_NETWORK_ADD", F_SAVE_CALLSITE_NETWORK_ADD_VMA, 0, 0x97ff2fbe, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_NETWORK_PROCESS_1", F_SAVE_CALLSITE_NETWORK_PROCESS_1_VMA, 0, 0x97ff2edf, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_SAVE_NETWORK_PROCESS_2", F_SAVE_CALLSITE_NETWORK_PROCESS_2_VMA, 0, 0x97ff2e44, 0,
+     PatchKind::kBlRedirect},
+    // C9-C14 draw/gate（功能型 required，装饰型 optional；store 尾调用为 B）。
+    {"P_EXT_INVEN_ITEM_DRAW", F_UIEQUIP_DRAW_VMA, 0x94, 0x97fffe33, 0, PatchKind::kBlRedirect},
+    {"P_EXT_INVEN_BAG_DRAW", F_UIEQUIP_DRAW_VMA, 0x98, 0x97fffee8, 0, PatchKind::kBlRedirect},
+    {"P_EXT_INVEN_DRAW_END", F_SCENE_DRAW_EQUIP_VMA, 0x210, 0x97fd11d2, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_DROP_GATE", F_SAVE_ITEM_ON_EMPTY_CALL_VMA, 0, 0x94012fc8, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_DRAW_GATE", F_ITEM_DRAW_PORTING_CALL_VMA, 0, 0x94016d49, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_DESC_OPEN_GATE", F_UIEQUIP_ITEM_DESC_MAKE_DESC_CALL_VMA, 0, 0x97fffdfe, 0,
+     PatchKind::kBlRedirect},
+    // C15-C18 store。
+    {"P_EXT_STORE_DESC", F_UISTORE_DESC_MAKE_DESC_CALL_VMA, 0, 0x97ffffc9, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_STORE_DRAW_END", F_SCENE_DRAW_STORE_GRPX_END_CALL_VMA, 0, 0x97fcff36, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_STORE_BAG_DRAW", F_UISTORE_DRAW_INVEN_BAG_GROUP_CALL_VMA, 0, 0x17ffff1e, 0,
+     PatchKind::kBranchRedirect},
+    {"P_EXT_STORE_BUY_GATE_1", F_UISTORE_BUY_FIND_SLOT_CALL_1_VMA, 0, 0x9400c530, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_STORE_BUY_GATE_2", F_UISTORE_BUY_FIND_SLOT_CALL_2_VMA, 0, 0x9400c508, 0,
+     PatchKind::kBlRedirect},
+    // C19-C20 mix。
+    {"P_EXT_MIX_DRAW_END", F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA, 0, 0x97fd0fa8, 0,
+     PatchKind::kBlRedirect},
+    {"P_EXT_MIX_BAG_DRAW", F_UIMIX_DRAW_INVEN_BAG_GROUP_CALL_VMA, 0, 0x97fffe5e, 0,
+     PatchKind::kBlRedirect},
 };
 
 // 测试覆盖表：仅 host 测试经 patch_site_override_for_test 写入，生产路径容量恒为 0。

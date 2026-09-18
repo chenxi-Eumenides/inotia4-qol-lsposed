@@ -116,7 +116,7 @@
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
 | D1 | `ui` 主体（拆 `ui_kit` / 文本 / 面板） | 5,320 行（实测 31 文件） | B3 ✅、C2 ✅ | ✅ 完成（D1-a1/a2/b0/b1/b2/b3/b4/b4a/c0；待真机卡 VM-D1）——共享 UI 原语下沉 `game/access`，文本层归 `text_layer`，面板归 `core.ui`/`autosell`/`save_backup`/`native_choice`；D1-c0 删 `custom` 与 `exp1-5` 实验面；D1-c 清 `UiPopupState*` 死代码、基线 68→51 |
-| D2 | `extension_bag` | 12,742 行 | A1、B2、B4、D1 | 🔄 进行中（冻结设计见 `docs/refactor/adr/0007-extension-bag-contract-and-mechanisms.md`；阶段：**D2a-1** 机制前置（popup_state 部分 wrap + `kBranchRedirect`，可并行）→ **D2a-2** stack 头归位 ✅（`stack_codec`→`game/read`、`stack_limit_port`→`contracts/`）；TU 拆分延后（棘轮按文件/行号记账，机械拆分需受控基线重定位，建议与 P5 检查器口径一并处理） → **D2a-3** 契约 + 25 条 claim + 删线程 + bridge 适配 → **D2b** 消费者切换/删反向引用 → **D2c** B2c 业务搬迁（c1 迁 `native_inventory_hook`/stage4、c2 sell gate→dispatch+refresh capability、c3 删 `feature/patch` + `inventory_hooks` 改依赖）→ **D2d** 收尾/冻结） |
+| D2 | `extension_bag` | 12,742 行 | A1、B2、B4、D1 | 🔄 进行中（冻结设计见 `docs/refactor/adr/0007-extension-bag-contract-and-mechanisms.md`；阶段：**D2a-1** 机制前置（popup_state 部分 wrap + `kBranchRedirect`，可并行）→ **D2a-2** stack 头归位 ✅（`stack_codec`→`game/read`、`stack_limit_port`→`contracts/`）；TU 拆分延后（棘轮按文件/行号记账，机械拆分需受控基线重定位，建议与 P5 检查器口径一并处理） → **D2a-3** 契约 + 29 条 claim（M1/M2 + C1–C21 + P1–P4 + S1 + X1，口径校正）+ 删线程 + bridge 适配 → **D2b** 消费者切换/删反向引用 → **D2c** B2c 业务搬迁（c1 迁 `native_inventory_hook`/stage4、c2 sell gate→dispatch+refresh capability、c3 删 `feature/patch` + `inventory_hooks` 改依赖）→ **D2d** 收尾/冻结） |
 
 > **D2 VM 命名空间**（D2 冻结设计验收；防与 `verification.md` 现有 VM-43..46 撞号）：
 > - `VM-D2-01`：开关两态 + 25 资源 + 存读档。

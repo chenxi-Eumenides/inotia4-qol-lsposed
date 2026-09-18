@@ -34,6 +34,12 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_PANEL_UNK2_ENTER", F_PANEL_UNK2_ENTER},
     {"F_PANEL_UNK3_ENTER", F_PANEL_UNK3_ENTER},
     {"F_PANEL_INVENTORY_ENTER", F_PANEL_INVENTORY_ENTER},
+    // 扩展背包（D2a-3a）：两个入口 hook 目标 + 三个 PopupState 面板 enter（部分 wrap 定位）。
+    {"F_SAVE_SAVE_INVENTORY_VMA", F_SAVE_SAVE_INVENTORY_VMA},
+    {"F_UISTORE_SELL_ITEM_VMA", F_UISTORE_SELL_ITEM_VMA},
+    {"F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER},
+    {"F_PANEL_SHOP_ENTER", F_PANEL_SHOP_ENTER},
+    {"F_PANEL_CRAFT_ENTER", F_PANEL_CRAFT_ENTER},
     // 调试端点 nativeSettingsUiOpenOption：主菜单环境设置 state 的按名定位。
     {"F_PANEL_OPTIONS_ENTER", F_PANEL_OPTIONS_ENTER},
     // 特殊装备解锁：+7 bit4 的两个判定入口（入口 hook，owner=special_equip）。

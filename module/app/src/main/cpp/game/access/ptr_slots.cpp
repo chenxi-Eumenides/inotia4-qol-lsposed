@@ -4,6 +4,7 @@
 
 #include "game/access/save.h"
 #include "game/access/ui_choice.h"
+#include "game/access/ui_equip.h"
 #include "game_access.h"
 
 namespace qol::game {
@@ -23,6 +24,8 @@ constexpr SlotEntry kSlots[] = {
     {"ptrslot:SAVESLOT_DELETE_GOT", &save_slot_delete_hook_target},
     // 原生选择框按钮 ExecuteProc 的 GOT 槽（模块截获选择索引以驱动业务回调）。
     {"ptrslot:g_uichoice_button_list_exe_got", &ui_choice_button_slot_target},
+    // UIEquip 背包物品事件 proc 的 GOT 槽（move_merge 常驻指针槽，wrapper 内自门控）。
+    {"ptrslot:MOVE_MERGE_GOT", &ui_equip_move_merge_slot_target},
 };
 
 }  // namespace

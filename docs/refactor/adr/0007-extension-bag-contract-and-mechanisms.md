@@ -9,7 +9,7 @@
 
 - `feature/extension_bag` 共 32 文件 / 12,742 行：5 个编译 `.cpp`、14 个顶层 `.inc`、
   `model/` 9 个 header-only（4 `.h` + 5 `.inc`）。当前为 `feature/` 旧路径，未拍平到 `plugins/`。
-- 机制**零声明式**：2 条 entry hook + 20 条 call patch + 4 处 popup-state 裸写 +
+- 机制**零声明式**：2 条 entry hook + 21 条 call patch + 4 处 popup-state 裸写 +
   11 个动态 desc 实例槽的 `PtrHook` + `move_merge` GOT + 自制 RX thunk；安装、回滚、占用声明均手写，
   不可由宿主机制枚举、观测与归还。
 - 与 `feature/patch` 存在**编译期双向依赖**。
@@ -32,9 +32,11 @@
 2. **`model/` 9 文件留在 `plugins/extension_bag/model/`，不进 `domains/`**：插件私有状态机，无第二消费者。
 3. **两个头归位**：`stack_codec.h` → `game/read/`（纯位编解码）；`stack_limit_port.h` →
    `contracts/stack_limit.h`（声明与实现分离，实现暂留 `core/native/stack_limit_state.cpp`，P5 收口）。
-4. **机制全量声明式（25 条）**：
+4. **机制全量声明式（29 条；口径校正：M1/M2 + C1–C21 + P1–P4 + S1 + X1）**：
+   原「25 条」为侦察期粗算；逐点核对 raw 安装面后修正为 29，D2a-3a 已按 21 条 call
+   patch 站点登记（`game/access/patches.cpp` 的 `P_EXT_*`）。
    - M1/M2 entry hook：`required` × `failClosed`，gate = `extensionBagEnabled`。
-   - C1–C20 call patch（8 条 save callsite + draw/gate + store + mix）：功能型 `required` × `failSoft`，
+   - C1–C21 call patch（8 save callsite + 6 draw/gate + 5 store + 2 mix）：功能型 `required` × `failSoft`，
      装饰型 `optional` × `failSoft`；**save callsite 机制 owner = `extension_bag`，
      行为编排 owner = `core/native/module_save.cpp`**；P5 若出现第二参与者再迁 `save_flow`。
    - P1–P4 popup-state：`kOwnership`，`required` × `failSoft`。
