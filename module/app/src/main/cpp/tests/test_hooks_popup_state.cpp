@@ -29,6 +29,16 @@ uintptr_t g_base = 0;
 static bool g_memory_accessible = true;
 bool game_memory_accessible(const void*, size_t, char) { return g_memory_accessible; }
 
+// 假符号表：popup_state_resolve_symbol 经 qol::game::resolve_hook_entry 解析；
+// 本 target 不编译 game/access/symbols.cpp，用可控桩（0 = 未解析）。
+namespace qol::game {
+uintptr_t g_test_resolve_entry = 0;
+uintptr_t resolve_hook_entry(const char*, bool* out_followed) {
+    if (out_followed != nullptr) *out_followed = false;
+    return g_test_resolve_entry;
+}
+}  // namespace qol::game
+
 namespace {
 
 using qol::hooks::PopupStateEntry;
@@ -36,6 +46,7 @@ using qol::hooks::PopupStateHooks;
 using qol::hooks::popup_state_acquire;
 using qol::hooks::popup_state_reset_for_test;
 using qol::hooks::popup_state_resolve;
+using qol::hooks::popup_state_resolve_symbol;
 using qol::hooks::popup_state_restore;
 
 void fake_enter() {}
@@ -219,6 +230,33 @@ void test_restore_noop_on_empty() {
     CHECK(true);
 }
 
+// 按符号名定位：假符号表返回 0（未解析）→ false；返回条目绝对地址 → 命中并快照；
+// 非法入参 / 解析结果 <= g_base → false。
+void test_resolve_symbol() {
+    arm_fake_table();
+    uint8_t* entry = put_entry(2, 5, &fake_enter);
+    const uintptr_t enter_abs = reinterpret_cast<uintptr_t>(&fake_enter);
+    PopupStateEntry out{};
+
+    qol::game::g_test_resolve_entry = 0;  // 未解析
+    CHECK(!popup_state_resolve_symbol("F_PANEL_UNK1_ENTER", &out));
+    CHECK(!popup_state_resolve_symbol(nullptr, &out));
+    CHECK(!popup_state_resolve_symbol("F_PANEL_UNK1_ENTER", nullptr));
+
+    qol::game::g_test_resolve_entry = enter_abs;  // 命中
+    CHECK(popup_state_resolve_symbol("F_PANEL_UNK1_ENTER", &out));
+    CHECK(out.slot == entry);
+    CHECK(out.state_id == 5);
+    CHECK(std::memcmp(out.backup, entry, POPUP_ENTRY_SIZE) == 0);
+
+    qol::game::g_test_resolve_entry = g_base;  // <= g_base
+    CHECK(!popup_state_resolve_symbol("F_PANEL_UNK1_ENTER", &out));
+
+    // 解析到未登记进 state 表的地址（未命中条目）→ false。
+    qol::game::g_test_resolve_entry = reinterpret_cast<uintptr_t>(&fake_process);
+    CHECK(!popup_state_resolve_symbol("F_PANEL_UNK1_ENTER", &out));
+}
+
 }  // namespace
 
 int main() {
@@ -231,6 +269,7 @@ int main() {
     test_acquire_null_args();
     test_restore_total_and_reacquire();
     test_restore_noop_on_empty();
+    test_resolve_symbol();
     std::printf("hooks_popup_state: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

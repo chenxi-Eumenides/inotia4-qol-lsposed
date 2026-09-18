@@ -4,6 +4,8 @@
 
 #include "core/native/popup_enter_alias.h"
 #include "game/access/popup_state.h"
+#include "game/access/symbols.h"
+#include "game_access.h"
 
 namespace qol::hooks {
 namespace {
@@ -40,6 +42,14 @@ bool popup_state_resolve(uintptr_t enter_vma, PopupStateEntry* out) {
     out->state_id = slot.state_id;
     qol::game::popup_state_read(slot, out->backup);
     return true;
+}
+
+bool popup_state_resolve_symbol(const char* symbol_name, PopupStateEntry* out) {
+    if (symbol_name == nullptr || out == nullptr) return false;
+    bool followed = false;
+    const uintptr_t entry = qol::game::resolve_hook_entry(symbol_name, &followed);
+    if (entry == 0 || g_base == 0 || entry <= g_base) return false;
+    return popup_state_resolve(entry - g_base, out);
 }
 
 bool popup_state_acquire(PopupStateEntry* e, const PopupStateHooks& h) {

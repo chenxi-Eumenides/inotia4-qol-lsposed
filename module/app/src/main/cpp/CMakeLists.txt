@@ -293,3 +293,8 @@ target_sources(gamebridge PRIVATE
     plugins/native_choice/feature.cpp
     plugins/native_choice/plugin.cpp
 )
+
+# D1-b0：面板注册表（纯数据面，零 game 依赖）+ PopupState 按名定位入口
+target_sources(gamebridge PRIVATE
+    infra/panels.cpp
+)

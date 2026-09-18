@@ -24,15 +24,15 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 11 | 582 |
-| `game/` | 32 | 2521 |
-| `infra/` | 22 | 2007 |
-| `hooks/` | 10 | 1423 |
+| `contracts/` | 12 | 637 |
+| `game/` | 32 | 2527 |
+| `infra/` | 24 | 2154 |
+| `hooks/` | 10 | 1439 |
 | `patch/` | 6 | 430 |
 | `domains/` | 2 | 111 |
 | `plugins/` | 76 | 9289 |
 | `host/` | 12 | 2022 |
-| **合计** | **171** | **18385** |
+| **合计** | **174** | **18609** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -53,12 +53,12 @@
 
 ### CTest target 分类
 
-- 全仓 target 总数：**34**
-- 新架构/已迁移：**26**（机制/宿主 16 + 已迁移功能 10）
+- 全仓 target 总数：**35**
+- 新架构/已迁移：**27**（机制/宿主 17 + 已迁移功能 10）
 - legacy：**8**
 
-新架构/已迁移（26）：
-- 机制/宿主（16）：`capability_lifecycle_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
+新架构/已迁移（27）：
+- 机制/宿主（17）：`capability_lifecycle_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_panels_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
 - 已迁移功能（10）：`attribute_range_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`
 
 legacy（8）：`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`stage4_hook_tests`、`transition_dispatch_tests`

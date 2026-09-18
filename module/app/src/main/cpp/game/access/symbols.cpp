@@ -26,6 +26,12 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA},
     // 原生选择框（owner=native_choice，D1-b1 声明式化）：标题改写 wrapper 的挂载点。
     {"F_UI_CHOICE_INIT_VMA", F_UI_CHOICE_INIT_VMA},
+    // 面板插件（D1-b0 前置）：UI 面板注入所复用的 PopupState 死条目/可开面板 enter 回调，
+    // 供 hooks::popup_state_resolve_symbol 按名解析（禁止面板出现裸 VMA）。
+    {"F_PANEL_UNK1_ENTER", F_PANEL_UNK1_ENTER},
+    {"F_PANEL_UNK2_ENTER", F_PANEL_UNK2_ENTER},
+    {"F_PANEL_UNK3_ENTER", F_PANEL_UNK3_ENTER},
+    {"F_PANEL_INVENTORY_ENTER", F_PANEL_INVENTORY_ENTER},
     // 特殊装备解锁：+7 bit4 的两个判定入口（入口 hook，owner=special_equip）。
     {"F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA},
     {"F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA},

@@ -482,3 +482,15 @@ target_include_directories(infra_store_tests PRIVATE
 )
 target_compile_features(infra_store_tests PRIVATE cxx_std_17)
 add_test(NAME infra_store_tests COMMAND infra_store_tests)
+
+# D1-b0：面板注册表纯数据面 host 测试（末尾追加）
+add_executable(infra_panels_tests
+    test_infra_panels.cpp
+    ${CPP_DIR}/infra/panels.cpp
+)
+target_include_directories(infra_panels_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(infra_panels_tests PRIVATE cxx_std_17)
+set_target_properties(infra_panels_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME infra_panels_tests COMMAND infra_panels_tests)

@@ -64,6 +64,7 @@ MECHANISM_HOST_TESTS: tuple[str, ...] = (
     "test_infra_capabilities_status",
     "test_infra_config_commands",
     "test_infra_scheduler",
+    "test_infra_panels",
     "test_hooks_registry",
     "test_hooks_transaction",
     "test_hooks_dispatch",

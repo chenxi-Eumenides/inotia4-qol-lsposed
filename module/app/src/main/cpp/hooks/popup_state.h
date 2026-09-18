@@ -36,6 +36,12 @@ struct PopupStateEntry {
 // 未命中 / 不可读 / 基址未就绪 → false。
 bool popup_state_resolve(uintptr_t enter_vma, PopupStateEntry* out);
 
+// 只读定位（按符号名）：用 game::resolve_hook_entry 解析 symbol_name（如
+// "F_PANEL_UNK1_ENTER"，须在 game/access/symbols 登记）→ 减 g_base 得 enter VMA →
+// 调 popup_state_resolve。未解析 / 未就绪 / 未命中 → false。
+// 供面板插件在 acquire 前定位 state 条目（禁止裸 VMA）。
+bool popup_state_resolve_symbol(const char* symbol_name, PopupStateEntry* out);
+
 // 占用并写入 5 个钩子（主线程）：一 entry 一 owner；同 owner（hooks.enter 相同）幂等返回 true，
 // 并把首次安装前的快照回填到 e->backup（重入方持有的是已注入快照，restore 仍能整段还原）；
 // 不同 owner 或容量耗尽 → false。成功后登记原版 enter VMA 别名（防 UI 判定误报 screen）。
