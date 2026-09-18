@@ -116,7 +116,14 @@
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
 | D1 | `ui` 主体（拆 `ui_kit` / 文本 / 面板） | 5,320 行（实测 31 文件） | B3 ✅、C2 ✅ | ✅ 完成（D1-a1/a2/b0/b1/b2/b3/b4/b4a/c0；待真机卡 VM-D1）——共享 UI 原语下沉 `game/access`，文本层归 `text_layer`，面板归 `core.ui`/`autosell`/`save_backup`/`native_choice`；D1-c0 删 `custom` 与 `exp1-5` 实验面；D1-c 清 `UiPopupState*` 死代码、基线 68→51 |
-| D2 | `extension_bag` | 12,834 行 | A1、B2、B4、D1 | ⬜ |
+| D2 | `extension_bag` | 12,834 行 | A1、B2、B4、D1 | 🔄 进行中（冻结设计见 `docs/refactor/adr/0007-extension-bag-contract-and-mechanisms.md`；阶段：**D2a-1** 机制前置（popup_state 部分 wrap + `kBranchRedirect`，可并行）→ **D2a-2** TU 拆分 + `stack_codec`/`stack_limit` 上移 → **D2a-3** 契约 + 25 条 claim + 删线程 + bridge 适配 → **D2b** 消费者切换/删反向引用 → **D2c** B2c 业务搬迁（c1 迁 `native_inventory_hook`/stage4、c2 sell gate→dispatch+refresh capability、c3 删 `feature/patch` + `inventory_hooks` 改依赖）→ **D2d** 收尾/冻结） |
+
+> **D2 VM 命名空间**（D2 冻结设计验收；防与 `verification.md` 现有 VM-43..46 撞号）：
+> - `VM-D2-01`：开关两态 + 25 资源 + 存读档。
+> - `VM-D2-02`：消费者/API/JNI/autosell 联动。
+> - `VM-D2-03`：deactivate 往返 + 出售链。
+> - `VM-D2-04`：投影/拖拽/收编规则回归。
+> 附注：归档规则册 VM 编号（VM-43..46/49/50 等）与 `docs/refactor` 编号冲突，引用以 `archive/docs/development/features/extension-bag/verification-matrix.md` 为准。
 
 > **D1 延后项登记**（D1 未实现，已指定目标阶段；对应 `map.md` 过渡依赖区）：
 > - 设置项数据化与配置源（Kotlin JSON → native config）：**P5**（决策 D；`ARCHITECTURE.md` §7.3 跨栈边界）。
