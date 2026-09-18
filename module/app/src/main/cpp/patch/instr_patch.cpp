@@ -44,7 +44,8 @@ bool resolve_site(const contracts::ResourceClaim& claim, uintptr_t site_addr,
     // 只有 handler 型重定向（BL / B 尾调用）需要 wrapper；字替换与符号型 BL 没有可透传
     // 执行体，handler 必须为空。
     const bool needs_handler = site.kind == qol::game::PatchKind::kBlRedirect ||
-                               site.kind == qol::game::PatchKind::kBranchRedirect;
+                               site.kind == qol::game::PatchKind::kBranchRedirect ||
+                               site.kind == qol::game::PatchKind::kBranchRedirectWithReturn;
     const bool handler_ok =
         needs_handler ? (claim.handler != nullptr) : (claim.handler == nullptr);
     if (!handler_ok) {
@@ -103,6 +104,18 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
         return Outcome{0, nullptr};
     }
 
+    if (site.kind == qol::game::PatchKind::kBranchRedirectWithReturn) {
+        const bool applied = g_primitives.install_branch_with_return != nullptr &&
+            g_primitives.install_branch_with_return(
+                site.addr, site.expected_word, site.alternate_expected_word, claim.handler,
+                site.return_addr, site.tail_word);
+        if (!applied) {
+            release_point(site.addr);
+            return failure("primitive rejected");
+        }
+        return Outcome{0, nullptr};
+    }
+
     bool applied = false;
     if (site.kind == qol::game::PatchKind::kBlRedirect) {
         applied = g_primitives.install_bl != nullptr &&
@@ -157,6 +170,10 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     } else if (site.kind == qol::game::PatchKind::kBranchRedirect) {
         applied = g_primitives.revert_branch != nullptr &&
                   g_primitives.revert_branch(site.addr, site.expected_word);
+    } else if (site.kind == qol::game::PatchKind::kBranchRedirectWithReturn) {
+        applied = g_primitives.revert_branch_with_return != nullptr &&
+                  g_primitives.revert_branch_with_return(
+                      site.addr, site.expected_word, site.alternate_expected_word);
     } else {
         applied = g_primitives.revert_bl != nullptr &&
                   g_primitives.revert_bl(site.addr, site.expected_word);

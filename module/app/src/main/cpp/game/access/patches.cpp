@@ -19,7 +19,19 @@ struct SiteEntry {
     PatchKind kind;
     const char* target_macro = nullptr;
     uintptr_t target_vma = 0;
+    uintptr_t return_vma = 0;
+    uint32_t tail_word = 0;
 };
+
+constexpr bool encode_branch(uintptr_t from, uintptr_t to, uint32_t* out) {
+    if (from == 0 || to == 0 || out == nullptr) return false;
+    const int64_t delta = static_cast<int64_t>(to) - static_cast<int64_t>(from);
+    constexpr int64_t kMin = -(int64_t{1} << 27);
+    constexpr int64_t kMax = (int64_t{1} << 27) - 4;
+    if ((delta & 0x3) != 0 || delta < kMin || delta > kMax) return false;
+    *out = 0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+    return true;
+}
 
 constexpr SiteEntry kSites[] = {
     // 队伍闸门：BL 重定向到 handler，replacement_word 由 wrapper 地址生成。
@@ -32,6 +44,12 @@ constexpr SiteEntry kSites[] = {
     {"P_GAMESTATE_DRAWPLAY_DRAWBASE", F_GAMESTATE_DRAWPLAY_VMA,
      F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF, GAMESTATE_DRAWPLAY_DRAWBASE_CALL_WORD, 0,
      PatchKind::kBlRedirect},
+    // 世界传送入口：原版为 mov x0,#1，改版可能已有 B 到旧注入块；两者统一进入模块
+    // handler，固定回写 mov x0,#1 后跳回函数尾部。
+    {"P_UI_PLAY_CALL_MAP_NAME", F_UI_PLAY_CALL_MAP_NAME_VMA,
+     F_UI_PLAY_CALL_MAP_NAME_PATCH_OFF, 0xd2800020u, 0,
+     PatchKind::kBranchRedirectWithReturn, nullptr, 0,
+     F_UI_PLAY_CALL_MAP_NAME_EPILOGUE_OFF, 0xd2800020u},
     {"P_MAINPROCESS_NEXT_STATE", F_MAINPROCESS_VMA, F_MAINPROCESS_NEXT_STATE_CALL_OFF,
      MAINPROCESS_NEXT_STATE_CALL_WORD, 0, PatchKind::kBlRedirect},
     // 自动出售入口按钮绘制宿主（owner=autosell）：+0x1cc 原 bl UIDesc_Draw 改指模块 wrapper。
@@ -164,6 +182,17 @@ bool patch_site(const char* name, PatchSite* out) {
         out->replacement_word = entry.replacement_word;
         out->redirect_target = 0;
         out->kind = entry.kind;
+        out->alternate_expected_word = 0;
+        out->return_addr = entry.return_vma == 0 ? 0 :
+            g_base + entry.vma + entry.return_vma;
+        out->tail_word = entry.tail_word;
+        if (entry.kind == PatchKind::kBranchRedirectWithReturn &&
+            entry.target_vma == 0) {
+            const uintptr_t legacy_target = g_base + F_UI_PLAY_CALL_MAP_NAME_LEGACY_TARGET_VMA;
+            if (!encode_branch(out->addr, legacy_target, &out->alternate_expected_word)) {
+                return false;
+            }
+        }
         if (entry.kind == PatchKind::kBlRedirectToSymbol) {
             // 目标缺失即视为站点登记无效（fail-closed），不猜测符号。
             if (entry.target_macro == nullptr || entry.target_vma == 0) {

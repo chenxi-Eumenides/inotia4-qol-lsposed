@@ -13,6 +13,7 @@ enum class PatchKind : uint8_t {
     kWordReplace = 1,         // 单指令字替换（无透传执行体）
     kBlRedirectToSymbol = 2,  // BL 重定向到站点声明的符号目标（无 handler）
     kBranchRedirect = 3,      // B 尾调用重定向到 claim.handler（宿主分配近址 thunk）
+    kBranchRedirectWithReturn = 4,  // 入口尾部重定向，handler 后固定回写并跳回 epilogue
 };
 
 struct PatchSite {
@@ -21,6 +22,9 @@ struct PatchSite {
     uint32_t replacement_word = 0;   // kWordReplace 的替换字；BL 类为 0
     uintptr_t redirect_target = 0;   // kBlRedirectToSymbol：BL 目标绝对地址（其余为 0）
     PatchKind kind = PatchKind::kBlRedirect;
+    uint32_t alternate_expected_word = 0;
+    uintptr_t return_addr = 0;
+    uint32_t tail_word = 0;
 };
 
 // 按登记名解析 patch 点；未登记或 g_base==0 → false。

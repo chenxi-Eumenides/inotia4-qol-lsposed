@@ -129,6 +129,8 @@ struct QolItemExtraReadApi {
     QolResult (*is_no_sell)(int32_t category, int32_t* out_value);
     QolResult (*is_dice)(int32_t category, int32_t* out_value);
     QolResult (*cumulate_count)(const void* item, int32_t* out_count);
+    QolResult (*class_no_equip_bit)(int32_t category, int32_t* out_value);
+    QolResult (*equip_desc_role_type)(int32_t* out_type);
 };
 
 struct QolInventoryReadApi {
@@ -215,6 +217,17 @@ struct QolQuestExtraWriteApi {
 
 struct QolChoiceExtraReadApi {
     QolResult (*state_id)(int32_t* out_state_id);
+    QolResult (*selected_index)(int32_t* out_index);
+    QolResult (*text_owns)(const char* const* items, uint32_t count, int32_t* out_owned);
+};
+
+struct QolChoiceExtraCallApi {
+    QolResult (*write_items)(const char* const* items, uint32_t count);
+    QolResult (*write_title)(const char* title);
+    QolResult (*write_focus)(int32_t index);
+    QolResult (*push)();
+    QolResult (*close_popup)();
+    QolResult (*play_sound)(int32_t sound_id);
 };
 
 struct QolGameHostExtraApi {
@@ -232,6 +245,7 @@ struct QolGameHostExtraApi {
     QolQuestExtraReadApi quest;
     QolQuestExtraWriteApi quest_write;
     QolChoiceExtraReadApi choice;
+    QolChoiceExtraCallApi choice_call;
 };
 
 struct QolGameHost {

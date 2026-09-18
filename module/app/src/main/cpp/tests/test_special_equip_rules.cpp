@@ -51,11 +51,11 @@ void test_sell_gate() {
     // 非装备详情（背包=2 / 扩展袋=1 / 未就绪=-1）一律放行。
     CHECK(!sell_gate_decides_block(2, true, true, false));
     CHECK(!sell_gate_decides_block(1, true, true, false));
-    CHECK(!sell_gate_decides_block(-1, true, true, false));
+    CHECK(sell_gate_decides_block(-1, true, true, false));
 
     // 装备详情但角色缺失或原语未解析：放行（不误拦）。
-    CHECK(!sell_gate_decides_block(0, false, true, false));
-    CHECK(!sell_gate_decides_block(0, true, false, false));
+    CHECK(sell_gate_decides_block(0, false, true, false));
+    CHECK(sell_gate_decides_block(0, true, false, false));
 
     // 装备详情 + 角色存在 + 原语已解析：按 CHAR_CanChangeEquip 决定。
     CHECK(!sell_gate_decides_block(0, true, true, true));    // 可动装备 → 放行

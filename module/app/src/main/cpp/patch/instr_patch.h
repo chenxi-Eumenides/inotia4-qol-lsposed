@@ -24,6 +24,11 @@ struct Primitives {   // 由 host 注入（过渡期指向 core/native 的调用
     // 0 = 失败（未改写任何字节）。返回地址供本层收口 B 编码可达性。
     uintptr_t (*install_branch)(uintptr_t addr, uint32_t expected_word, void* handler);
     bool (*revert_branch)(uintptr_t addr, uint32_t original_word);
+    bool (*install_branch_with_return)(uintptr_t addr, uint32_t expected_word,
+                                       uint32_t alternate_expected_word, void* handler,
+                                       uintptr_t return_addr, uint32_t tail_word);
+    bool (*revert_branch_with_return)(uintptr_t addr, uint32_t expected_word,
+                                      uint32_t alternate_expected_word);
 };
 void set_primitives(const Primitives& primitives);
 

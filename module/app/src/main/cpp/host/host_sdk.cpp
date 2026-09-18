@@ -67,6 +67,10 @@ QolResult sdk_log_write(int32_t level, int32_t domain, const char* source, const
     return contracts::ok();
 }
 
+int32_t sdk_log_debug_enabled() {
+    return qol_log_debug_enabled() ? 1 : 0;
+}
+
 QolResult sdk_config_get_bool(const char* key, int32_t default_value, int32_t* out_value) {
     if (key == nullptr || out_value == nullptr) {
         return result_error(kQolErrInvalidArgument, kNullArgument);
@@ -497,7 +501,7 @@ QolResult store_result(infra::store::Status status) {
 contracts::QolHostSdk make_host_sdk() {
     contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor};
-    sdk.log = {&sdk_log_write};
+    sdk.log = {&sdk_log_write, &sdk_log_debug_enabled};
     sdk.config = {&sdk_config_get_bool, &sdk_config_get_i32, &sdk_config_set_bool,
                   &sdk_config_set_i32};
     sdk.scheduler = {&sdk_scheduler_add, &sdk_scheduler_remove};

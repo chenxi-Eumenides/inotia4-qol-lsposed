@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 18 | 1401 |
-| `game/` | 37 | 2734 |
+| `contracts/` | 18 | 1417 |
+| `game/` | 37 | 2856 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
-| `patch/` | 6 | 462 |
-| `plugins/` | 152 | 28948 |
-| `host/` | 17 | 3871 |
-| **合计** | **264** | **41135** |
+| `patch/` | 6 | 484 |
+| `plugins/` | 152 | 29606 |
+| `host/` | 17 | 3942 |
+| **合计** | **264** | **42024** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -39,19 +39,19 @@
 - `plugins/attribute_range_display/`：4 文件 / 237 行
 - `plugins/autosell/`：14 文件 / 1931 行
 - `plugins/core.ui/`：14 文件 / 1522 行
-- `plugins/craft_ui/`：4 文件 / 690 行
-- `plugins/custom_recipe/`：10 文件 / 1959 行
+- `plugins/craft_ui/`：4 文件 / 997 行
+- `plugins/custom_recipe/`：10 文件 / 2091 行
 - `plugins/extension_bag/`：39 文件 / 13112 行
 - `plugins/inventory_hooks/`：9 文件 / 1922 行
-- `plugins/native_choice/`：4 文件 / 466 行
-- `plugins/push_all/`：6 文件 / 267 行
-- `plugins/quest/`：4 文件 / 177 行
+- `plugins/native_choice/`：4 文件 / 402 行
+- `plugins/push_all/`：6 文件 / 308 行
+- `plugins/quest/`：4 文件 / 255 行
 - `plugins/save_backup/`：12 文件 / 4205 行
-- `plugins/simple_mode/`：6 文件 / 462 行
-- `plugins/special_equip/`：6 文件 / 431 行
+- `plugins/simple_mode/`：6 文件 / 529 行
+- `plugins/special_equip/`：6 文件 / 547 行
 - `plugins/stack_limit/`：2 文件 / 103 行
-- `plugins/text_layer/`：6 文件 / 427 行
-- `plugins/world_teleport/`：6 文件 / 626 行
+- `plugins/text_layer/`：6 文件 / 494 行
+- `plugins/world_teleport/`：6 文件 / 540 行
 
 ### CTest target 分类
 

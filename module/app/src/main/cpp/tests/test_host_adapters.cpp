@@ -108,6 +108,9 @@ bool item_is_real_equip_resolved() { return true; }
 bool item_equip_level_resolved() { return true; }
 bool item_is_real_equip(const void*) { return true; }
 int item_equip_level(const void*) { return 12; }
+void* item_class_record(uint16_t) { return reinterpret_cast<void*>(0x8); }
+bool item_class_no_equip_bit(const void*) { return false; }
+int equip_desc_role_type() { return 0; }
 int64_t craft_ui_type() { return 1; }
 uint8_t craft_panel_state() { return 2; }
 uint32_t craft_mix_type() { return 3; }
@@ -179,6 +182,17 @@ int32_t quest_state(uint16_t) { return 1; }
 bool quest_is_complete(uint16_t) { return true; }
 bool quest_set_state(uint16_t, int32_t) { return true; }
 int ui_choice_state_id() { return 42; }
+bool ui_choice_write_items(const char* const*, uint32_t) { return true; }
+bool ui_choice_write_title(const char*) { return true; }
+bool ui_choice_write_focus(int32_t) { return true; }
+bool ui_choice_push() { return true; }
+bool ui_choice_close_popup() { return true; }
+bool ui_choice_play_sound(int32_t) { return true; }
+bool ui_choice_selected_index(int32_t* out) {
+    if (out != nullptr) *out = 0;
+    return out != nullptr;
+}
+bool ui_choice_text_owns(const char* const*, uint32_t) { return true; }
 int64_t frame_count() { return 99; }
 
 }  // namespace qol::game

@@ -39,8 +39,10 @@ struct QolAbiHeader {
 
 using QolLogWriteFn = QolResult (*)(int32_t level, int32_t domain, const char* source,
                                     const char* message, uint32_t message_len);
+using QolLogDebugEnabledFn = int32_t (*)();
 struct QolLogApi {
     QolLogWriteFn write;
+    QolLogDebugEnabledFn debug_enabled;
 };
 
 using QolConfigGetBoolFn = QolResult (*)(const char* key, int32_t default_value,

@@ -328,6 +328,24 @@ QolResult read_item_cumulate_count(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
+QolResult read_item_class_no_equip_bit(int32_t category, int32_t* out) {
+    if (category < 0 || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    void* record = qol::game::item_class_record(static_cast<uint16_t>(category));
+    if (record == nullptr) return not_ready();
+    *out = qol::game::item_class_no_equip_bit(record) ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult read_item_equip_desc_role_type(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const int value = qol::game::equip_desc_role_type();
+    if (value < 0) return not_ready();
+    *out = value;
+    return contracts::ok();
+}
+
 QolResult read_inventory_bit_range(int32_t value, int32_t high_bit, int32_t low_bit,
                                    int32_t* out) {
     if (out == nullptr || high_bit < 0 || high_bit > 31 || low_bit < 0 || low_bit > high_bit) {
@@ -692,6 +710,48 @@ QolResult read_choice_state_id(int32_t* out) {
     return contracts::ok();
 }
 
+QolResult read_choice_selected_index(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    return qol::game::ui_choice_selected_index(out) ? contracts::ok() : not_ready();
+}
+
+QolResult read_choice_text_owns(const char* const* items, uint32_t count, int32_t* out) {
+    if (items == nullptr || out == nullptr || count == 0 || count > 6) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out = qol::game::ui_choice_text_owns(items, count) ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult call_choice_write_items(const char* const* items, uint32_t count) {
+    if (items == nullptr || count == 0 || count > 6) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    return qol::game::ui_choice_write_items(items, count) ? contracts::ok() : not_ready();
+}
+
+QolResult call_choice_write_title(const char* title) {
+    if (title == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    return qol::game::ui_choice_write_title(title) ? contracts::ok() : not_ready();
+}
+
+QolResult call_choice_write_focus(int32_t index) {
+    if (index < 0 || index > 255) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    return qol::game::ui_choice_write_focus(index) ? contracts::ok() : not_ready();
+}
+
+QolResult call_choice_push() {
+    return qol::game::ui_choice_push() ? contracts::ok() : not_ready();
+}
+
+QolResult call_choice_close_popup() {
+    return qol::game::ui_choice_close_popup() ? contracts::ok() : not_ready();
+}
+
+QolResult call_choice_play_sound(int32_t sound_id) {
+    return qol::game::ui_choice_play_sound(sound_id) ? contracts::ok() : not_ready();
+}
+
 QolResult read_attr_option_value(int32_t option_index, int32_t level, int32_t flag,
                                  const void* item, int32_t* out_value) {
     if (item == nullptr || out_value == nullptr || option_index < 0 || level < 0 || flag < 0) {
@@ -815,7 +875,8 @@ contracts::QolGameHost make_game_host() {
                             &read_char_hp};
     host.extra.character_write = {&write_char_max_hp, &write_char_hp};
     host.extra.item = {&read_item_rarity, &read_item_real_equip, &read_item_equip_level,
-                       &read_item_no_sell, &read_item_dice, &read_item_cumulate_count};
+                       &read_item_no_sell, &read_item_dice, &read_item_cumulate_count,
+                       &read_item_class_no_equip_bit, &read_item_equip_desc_role_type};
     host.extra.inventory = {&read_inventory_bit_range};
     host.extra.inventory_write = {&write_inventory_remove_item_data,
                                   &write_inventory_remove_item,
@@ -854,7 +915,11 @@ contracts::QolGameHost make_game_host() {
                             return read_quest_value(quest_id, out, true);
                         }};
     host.extra.quest_write = {&write_quest_state};
-    host.extra.choice = {&read_choice_state_id};
+    host.extra.choice = {&read_choice_state_id, &read_choice_selected_index,
+                         &read_choice_text_owns};
+    host.extra.choice_call = {&call_choice_write_items, &call_choice_write_title,
+                              &call_choice_write_focus, &call_choice_push,
+                              &call_choice_close_popup, &call_choice_play_sound};
     return host;
 }
 

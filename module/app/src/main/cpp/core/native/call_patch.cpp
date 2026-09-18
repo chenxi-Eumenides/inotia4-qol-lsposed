@@ -96,6 +96,34 @@ void emit_branch_thunk(void* slot, uintptr_t handler) {
                             reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + kThunkSlot));
 }
 
+bool encode_branch(uintptr_t from, uintptr_t to, uint32_t* out) {
+    if (from == 0 || to == 0 || out == nullptr) return false;
+    const int64_t delta = static_cast<int64_t>(to) - static_cast<int64_t>(from);
+    constexpr int64_t kMin = -(int64_t{1} << 27);
+    constexpr int64_t kMax = (int64_t{1} << 27) - 4;
+    if ((delta & 0x3) != 0 || delta < kMin || delta > kMax) return false;
+    *out = 0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+    return true;
+}
+
+void emit_branch_return_thunk(void* slot, uintptr_t handler, uintptr_t return_addr,
+                              uint32_t tail_word) {
+    uint32_t return_branch = 0;
+    if (!encode_branch(reinterpret_cast<uintptr_t>(slot) + 12, return_addr, &return_branch)) {
+        return;
+    }
+    const uint32_t code[] = {
+        0x58000090u,  // ldr x16, #16
+        0xd63f0200u,  // blr x16
+        tail_word,    // fixed epilogue value, normally mov x0,#1
+        return_branch,
+    };
+    std::memcpy(slot, code, sizeof(code));
+    *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(slot) + 16) = handler;
+    __builtin___clear_cache(reinterpret_cast<char*>(slot),
+                            reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + 24));
+}
+
 // 从近址池取一个可用 thunk 槽（32B 对齐，不写内容）；调用方持锁。
 // 槽必落在 call_addr ±128MB 内，否则返回 nullptr。
 void* acquire_thunk_slot_locked(uintptr_t call_addr) {
@@ -326,4 +354,66 @@ bool call_patch_revert_branch(uintptr_t call_addr, uint32_t original_word) {
     QOL_LOG_INFO(QolDomain::kPlatform, "reverted branch call=%p original=0x%08x",
                  reinterpret_cast<void*>(call_addr), original_word);
     return true;
+}
+
+bool call_patch_install_branch_with_return(uintptr_t call_addr, uint32_t expected_word,
+                                           uint32_t alternate_expected_word, void* handler,
+                                           uintptr_t return_addr, uint32_t tail_word) {
+    if (call_addr == 0 || handler == nullptr || return_addr == 0 || tail_word == 0) return false;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    uintptr_t existing = 0;
+    if (find_patched_locked(call_addr, handler, &existing)) return true;
+
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
+    if (current != expected_word &&
+        (alternate_expected_word == 0 || current != alternate_expected_word)) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "branch-return original word mismatch call=%p got=0x%08x expected=0x%08x alt=0x%08x",
+                      reinterpret_cast<void*>(call_addr), current, expected_word,
+                      alternate_expected_word);
+        return false;
+    }
+    void* thunk = acquire_thunk_slot_locked(call_addr);
+    if (thunk == nullptr) return false;
+    uint32_t return_branch = 0;
+    if (!encode_branch(reinterpret_cast<uintptr_t>(thunk) + 12, return_addr, &return_branch)) {
+        return false;
+    }
+    emit_branch_return_thunk(thunk, reinterpret_cast<uintptr_t>(handler), return_addr, tail_word);
+    const uintptr_t thunk_addr = reinterpret_cast<uintptr_t>(thunk);
+    uint32_t replacement = 0;
+    if (!encode_branch(call_addr, thunk_addr, &replacement)) return false;
+    if (!write_code_word(call_addr, replacement)) return false;
+    remember_patched_locked(call_addr, handler, replacement, thunk_addr);
+    (void)return_branch;
+    return true;
+}
+
+bool call_patch_revert_branch_with_return(uintptr_t call_addr, uint32_t expected_word,
+                                          uint32_t alternate_expected_word) {
+    if (call_addr == 0) return false;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
+    if (current == expected_word ||
+        (alternate_expected_word != 0 && current == alternate_expected_word)) {
+        forget_patched_locked(call_addr);
+        return true;
+    }
+    if ((current & 0xFC000000u) != 0x14000000u) return false;
+    if (!write_code_word(call_addr, expected_word)) return false;
+    forget_patched_locked(call_addr);
+    return true;
+}
+
+bool branch_return_install(uintptr_t call_addr, uint32_t expected_word,
+                           uint32_t alternate_expected_word, void* handler,
+                           uintptr_t return_addr, uint32_t tail_word) {
+    return call_patch_install_branch_with_return(
+        call_addr, expected_word, alternate_expected_word, handler, return_addr, tail_word);
+}
+
+bool branch_return_revert(uintptr_t call_addr, uint32_t expected_word,
+                          uint32_t alternate_expected_word) {
+    return call_patch_revert_branch_with_return(call_addr, expected_word,
+                                                alternate_expected_word);
 }
