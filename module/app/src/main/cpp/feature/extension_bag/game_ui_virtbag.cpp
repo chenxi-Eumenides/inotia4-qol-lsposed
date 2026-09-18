@@ -23,6 +23,7 @@
 #include "feature/extension_bag/extension_bag_geometry.h"
 #include "feature/extension_bag/extension_bag_logging.h"
 #include "game/access/ui_kit.h"
+#include "infra/scheduler.h"
 
 #include <atomic>
 #include <chrono>
@@ -73,7 +74,9 @@ using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 
 std::mutex g_virtual_bag_mtx;
-std::atomic<bool> g_lifecycle_thread_started{false};
+// 生命周期节拍帧任务（D2a-3c：原 150ms 线程体迁 infra::scheduler，主线程执行）。
+qol::infra::FrameTaskId g_lifecycle_task = 0;
+int g_lifecycle_last_state = -1;
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
 std::atomic<bool> g_virtual_bag_enabled{false};
 std::atomic<uint64_t> g_exit_trace_sequence{0};

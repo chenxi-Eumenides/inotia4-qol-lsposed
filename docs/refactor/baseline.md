@@ -142,7 +142,7 @@
 | `host` | `game` | 14 |
 | `host` | `contracts` | 12 |
 | `plugins/autosell` | `infra` | 12 |
-| `plugins/extension_bag` | `contracts` | 11 |
+| `plugins/extension_bag` | `contracts` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
@@ -204,7 +204,7 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:146||ptr slot 无法归属符号`
+- `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:149||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 

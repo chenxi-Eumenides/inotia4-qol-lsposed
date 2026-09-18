@@ -52,6 +52,6 @@
     "offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头",
     "offsets_symbols_header|plugins/custom_recipe/table.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头",
     "resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号",
-    "resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:146||ptr slot 无法归属符号"
+    "resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:149||ptr slot 无法归属符号"
   ]
 }

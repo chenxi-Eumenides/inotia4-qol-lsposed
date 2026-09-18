@@ -437,36 +437,47 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     return result;
 }
 
-void ensure_lifecycle_thread() {
-    if (g_lifecycle_thread_started.exchange(true)) return;
-    std::thread([]() {
-        int last_state = -1;
-        for (;;) {
-            if (g_state != nullptr) {
-                const int state = static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
-                if (last_state == 5 && state != 5) {
-                    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-                    if (!prepare_main_menu_locked()) {
-                        g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
-                        QOL_LOG_WARN(QolDomain::kExtensionBag, "lifecycle main-menu cleanup failed; retry scheduled");
-                    } else {
-                        g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
-                    }
-                } else if (state != 5 &&
-                           g_main_menu_cleanup_dirty.load(std::memory_order_acquire)) {
-                    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-                    if (prepare_main_menu_locked()) {
-                        g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
-                        QOL_LOG_INFO(QolDomain::kExtensionBag, "lifecycle main-menu cleanup retry succeeded");
-                    } else {
-                        QOL_LOG_WARN(QolDomain::kExtensionBag, "lifecycle main-menu cleanup retry failed");
-                    }
-                }
-                last_state = state;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+// 生命周期节拍（D2a-3c）：原 150ms 轮询线程体的主线程化，改由 infra::scheduler 帧任务
+// （kLogicPre，节流 30 帧，count=0 常驻）。锁纪律与原线程逐点一致：g_virtual_bag_mtx
+// 短临界区包住 prepare_main_menu_locked；R-44 不变量不变。
+bool extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
+    (void)frame;
+    (void)ctx;
+    if (g_state == nullptr) return true;
+    const int state = static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
+    if (g_lifecycle_last_state == 5 && state != 5) {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!prepare_main_menu_locked()) {
+            g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "lifecycle main-menu cleanup failed; retry scheduled");
+        } else {
+            g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }
-    }).detach();
+    } else if (state != 5 && g_main_menu_cleanup_dirty.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (prepare_main_menu_locked()) {
+            g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+            QOL_LOG_INFO(QolDomain::kExtensionBag, "lifecycle main-menu cleanup retry succeeded");
+        } else {
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "lifecycle main-menu cleanup retry failed");
+        }
+    }
+    g_lifecycle_last_state = state;
+    return true;
+}
+
+void ensure_lifecycle_task() {
+    if (g_lifecycle_task != 0) return;
+    g_lifecycle_last_state = -1;
+    g_lifecycle_task = ::qol::infra::scheduler_add(
+        ::qol::infra::FramePoint::kLogicPre, &extension_bag_lifecycle_tick, nullptr, 30, 0);
+}
+
+void remove_lifecycle_task() {
+    if (g_lifecycle_task == 0) return;
+    ::qol::infra::scheduler_remove(g_lifecycle_task);
+    g_lifecycle_task = 0;
 }
 
 bool prepare_main_menu_locked() {

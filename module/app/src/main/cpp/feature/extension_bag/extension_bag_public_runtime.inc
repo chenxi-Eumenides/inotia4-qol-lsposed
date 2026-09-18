@@ -420,7 +420,11 @@ bool set_virtual_bag_enabled(bool enabled) {
         VIRTBAG_LOG("extension source protection update deferred enabled=%d",
                     enabled ? 1 : 0);
     }
-    if (enabled) ensure_lifecycle_thread();
+    if (enabled) {
+        ensure_lifecycle_task();
+    } else {
+        remove_lifecycle_task();
+    }
     return true;
 }
 

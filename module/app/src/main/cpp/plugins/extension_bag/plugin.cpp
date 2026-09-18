@@ -5,12 +5,16 @@
 #include "feature/extension_bag/extension_bag_bridge.h"
 
 // ===========================================================================
-// 扩展背包插件（D2a-3b-1）：8 条声明式资源的 owner
+// 扩展背包插件（D2a-3b-1 / D2a-3c）：29 条声明式资源的 owner + extension_bag v1.0 provider
 // ===========================================================================
 //
-// 本批只把「入口 hook / PopupState 占用 / desc 槽命名空间 / move_merge 指针槽」
-// 声明式化；C1–C21 call patch 与两条轮询线程保留（a3b-2 收口）。wrapper 业务体
-// 逐字留在 feature/extension_bag 与 feature/patch，本文件只做声明与门禁接线。
+// 资源面（a3b-1/a3b-2）：入口 hook / PopupState 占用 / desc 槽命名空间 / move_merge 指针槽
+// 与 C1–C21 call patch 全部声明式化；wrapper 业务体逐字留在 feature/extension_bag 与
+// feature/patch，本文件只做声明与门禁接线。
+//
+// 能力面（a3c）：provides `extension_bag` v1.0（contracts/extension_bag.h 的 ExtensionBagApi），
+// iface 由 extension_bag_api_table() 提供（EB TU 逐条转发既有 port）。宿主在 enabled 时注册、
+// revoking 时注销（§3.4.4 既有路径）；本文件不新增 JNI / 资源。
 //
 // M1/M2 校正（D2a-3b-1）：ADR-0007 表中 M1/M2 记为 required × failClosed；
 // 按晚就绪语义校正为 required × failSoft —— 装配期失败时资源保持 free、插件
@@ -26,6 +30,17 @@ constexpr const char* kPluginVersion = "0.1.0";
 // 资源表在 extension_bag_claims() 首次调用时构造（函数内静态，无跨 TU 静态初始化顺序问题）。
 uint32_t g_resource_count = 0;
 const qol::contracts::ResourceClaim* g_resources = extension_bag_claims(&g_resource_count);
+
+// 能力提供声明：extension_bag v1.0，iface = EB TU 的 ExtensionBagApi 静态表。
+// 注册失败（iface 空/容量满/重复）由宿主只记录不阻断（plugin_registry 既有口径）。
+const qol::contracts::CapabilityProvisionRef kProvides[] = {
+    {
+        qol::contracts::kExtensionBagCapabilityId,
+        {static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
+         static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
+        extension_bag_api_table(),
+    },
+};
 
 int plugin_install(qol::contracts::PluginContext& ctx) {
     (void)ctx;
@@ -68,8 +83,8 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     0, nullptr,   // requires
     0, nullptr,   // optional_requires
-    0, nullptr,   // provides
-    g_resource_count, g_resources,  // resources（8 条）
+    1, kProvides,  // provides（extension_bag v1.0）
+    g_resource_count, g_resources,  // resources（29 条）
     0, nullptr,   // jni（JNI 入口由 bridge/native 保留，名/签名冻结）
     &plugin_install,
     &plugin_deactivate,

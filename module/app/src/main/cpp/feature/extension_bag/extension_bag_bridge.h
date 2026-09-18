@@ -9,6 +9,7 @@
 
 #include <cstdint>
 
+#include "contracts/extension_bag.h"
 #include "contracts/plugin.h"
 
 namespace qol::features::extension_bag {
@@ -24,5 +25,10 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup);
 // 门禁两态：宿主 on_enabled/on_disabled 调用；副作用与旧 set_virtual_bag_enabled 逐字一致。
 bool extension_bag_set_enabled(bool enabled);
 bool extension_bag_enabled();
+
+// 能力 v1.0 接口表（ExtensionBagApi，37 函数）：成员逐条转发既有 extension_bag_* /
+// virtual_bag_* port 实现（实现收口 feature/extension_bag/extension_bag_port.cpp）。
+// 静态存储、生命周期 ≥ 进程；provides 于插件 enabled 时注册、revoking 时注销。
+const qol::contracts::ExtensionBagApi* extension_bag_api_table();
 
 }  // namespace qol::features::extension_bag
