@@ -67,14 +67,21 @@ struct FakePrims {
     int revert_bl_calls = 0;
     int install_word_calls = 0;
     int revert_word_calls = 0;
+    int install_branch_calls = 0;
+    int revert_branch_calls = 0;
     bool install_bl_ok = true;
     bool revert_bl_ok = true;
     bool install_word_ok = true;
     bool revert_word_ok = true;
+    bool install_branch_ok = true;
+    bool revert_branch_ok = true;
+    // 假 thunk 相对站点偏移：默认 +0x100（可达）；可设为超 ±128MB 覆盖越界分支。
+    int64_t install_branch_thunk_delta = 0x100;
     uintptr_t last_addr = 0;
     uint32_t last_expected = 0;
     uint32_t last_new_word = 0;
     void* last_wrapper = nullptr;
+    uintptr_t last_branch_thunk = 0;
 };
 
 FakePrims g_prims;
@@ -107,6 +114,26 @@ bool fake_revert_word(uintptr_t addr, uint32_t original_word) {
     g_prims.last_addr = addr;
     g_prims.last_expected = original_word;
     return g_prims.revert_word_ok;
+}
+
+// B 尾调用原语：返回站点附近（默认 +0x100）的 thunk 地址；0 = 分配失败。
+uintptr_t fake_install_branch(uintptr_t addr, uint32_t expected_word, void* handler) {
+    ++g_prims.install_branch_calls;
+    g_prims.last_addr = addr;
+    g_prims.last_expected = expected_word;
+    g_prims.last_wrapper = handler;
+    if (!g_prims.install_branch_ok) return 0;
+    const uintptr_t thunk = static_cast<uintptr_t>(
+        static_cast<int64_t>(addr) + g_prims.install_branch_thunk_delta);
+    g_prims.last_branch_thunk = thunk;
+    return thunk;
+}
+
+bool fake_revert_branch(uintptr_t addr, uint32_t original_word) {
+    ++g_prims.revert_branch_calls;
+    g_prims.last_addr = addr;
+    g_prims.last_expected = original_word;
+    return g_prims.revert_branch_ok;
 }
 
 // 指针槽原语：真实写入测试可控的槽存储，便于断言「写生效/未生效」与 tombstone 保留占用。
@@ -142,11 +169,13 @@ bool fake_restore_ptr(uintptr_t slot_addr, void* value) {
 
 void use_fake_primitives() {
     set_primitives(Primitives{&fake_install_bl, &fake_revert_bl, &fake_install_word,
-                              &fake_revert_word, &fake_write_ptr, &fake_restore_ptr});
+                              &fake_revert_word, &fake_write_ptr, &fake_restore_ptr,
+                              &fake_install_branch, &fake_revert_branch});
 }
 
 void reset_all() {
     claims_reset_for_test();
+    qol::game::patch_site_clear_overrides_for_test();
     g_prims = FakePrims{};
     g_ptr_prims = FakePtrPrims{};
     g_ptr_slot_storage = nullptr;
@@ -162,6 +191,18 @@ uintptr_t party_addr() {
 
 uintptr_t stand_addr() {
     return g_base + F_CHAR_MOVE_VMA + CHAR_MOVE_PUSH_STAND_CBZ_OFF;
+}
+
+// B 尾调用站点：生产 kSites 尚无 B 站点（EB 站点留 D2a-3 登记），测试经覆盖表构造。
+constexpr uintptr_t kBranchSiteAddr = kBase + 0x5000u;
+constexpr uint32_t kBranchExpectedWord = 0x17ffff1eu;  // B 指令原字（测试构造）
+
+bool arm_branch_site() {
+    PatchSite site{};
+    site.addr = kBranchSiteAddr;
+    site.expected_word = kBranchExpectedWord;
+    site.kind = qol::game::PatchKind::kBranchRedirect;
+    return qol::game::patch_site_override_for_test("P_TEST_BRANCH", site);
 }
 
 ResourceClaim make_patch_claim(const char* id, const char* symbol, void* handler) {
@@ -407,6 +448,88 @@ void test_kind_mismatch() {
     CHECK(claimed_count() == 0);
 }
 
+// ---- kBranchRedirect B 尾调用机制 ----
+
+// B 重定向成功：原语收到站点地址/原字/handler，占用登记在站点。
+void test_install_branch_success() {
+    reset_all();
+    CHECK(arm_branch_site());
+    const ResourceClaim claim = make_patch_claim("patch:br", "P_TEST_BRANCH", &g_dummy_handler);
+    const Outcome outcome = install_claim(claim, kBranchSiteAddr);
+    CHECK(outcome.ok == 0);
+    CHECK(outcome.error == nullptr);
+    CHECK(g_prims.install_branch_calls == 1);
+    CHECK(g_prims.install_bl_calls == 0);
+    CHECK(g_prims.install_word_calls == 0);
+    CHECK(g_prims.last_addr == kBranchSiteAddr);
+    CHECK(g_prims.last_expected == kBranchExpectedWord);
+    CHECK(g_prims.last_wrapper == &g_dummy_handler);
+    CHECK(point_owner(kBranchSiteAddr) != nullptr);
+    CHECK(std::strcmp(point_owner(kBranchSiteAddr), "patch:br") == 0);
+}
+
+// 原语返回的 thunk 超出站点 ±128MB → 明确失败、撤回已写、不占点。
+void test_install_branch_out_of_range() {
+    reset_all();
+    CHECK(arm_branch_site());
+    g_prims.install_branch_thunk_delta = 0x10000000;  // 越界
+    const ResourceClaim claim = make_patch_claim("patch:br", "P_TEST_BRANCH", &g_dummy_handler);
+    CHECK(error_is(install_claim(claim, kBranchSiteAddr), "branch target out of BL range"));
+    CHECK(g_prims.install_branch_calls == 1);
+    CHECK(g_prims.revert_branch_calls == 1);  // 已写 B 被撤回
+    CHECK(point_owner(kBranchSiteAddr) == nullptr);
+}
+
+// 原语分配 thunk 失败（返回 0）→ primitive rejected，不占点。
+void test_install_branch_primitive_failure() {
+    reset_all();
+    CHECK(arm_branch_site());
+    g_prims.install_branch_ok = false;
+    const ResourceClaim claim = make_patch_claim("patch:br", "P_TEST_BRANCH", &g_dummy_handler);
+    CHECK(error_is(install_claim(claim, kBranchSiteAddr), "primitive rejected"));
+    CHECK(g_prims.install_branch_calls == 1);
+    CHECK(point_owner(kBranchSiteAddr) == nullptr);
+}
+
+// 归还：写回原字并释放占用。
+void test_release_branch_writes_back_and_releases() {
+    reset_all();
+    CHECK(arm_branch_site());
+    const ResourceClaim claim = make_patch_claim("patch:br", "P_TEST_BRANCH", &g_dummy_handler);
+    CHECK(install_claim(claim, kBranchSiteAddr).ok == 0);
+    const Outcome released = release_claim(claim, kBranchSiteAddr);
+    CHECK(released.ok == 0);
+    CHECK(released.error == nullptr);
+    CHECK(g_prims.revert_branch_calls == 1);
+    CHECK(g_prims.last_addr == kBranchSiteAddr);
+    CHECK(g_prims.last_expected == kBranchExpectedWord);
+    CHECK(point_owner(kBranchSiteAddr) == nullptr);
+
+    // 原语拒绝还原：保留占用（§4.2 tombstone 语义）。
+    const ResourceClaim again = make_patch_claim("patch:br2", "P_TEST_BRANCH", &g_dummy_handler);
+    CHECK(install_claim(again, kBranchSiteAddr).ok == 0);
+    g_prims.revert_branch_ok = false;
+    CHECK(error_is(release_claim(again, kBranchSiteAddr), "primitive rejected"));
+    CHECK(point_owner(kBranchSiteAddr) != nullptr);
+}
+
+// kind/handler 不匹配：B 站点缺 handler → 拒绝，不调用原语、不占点。
+void test_branch_handler_mismatch() {
+    reset_all();
+    CHECK(arm_branch_site());
+    const ResourceClaim no_handler = make_patch_claim("patch:br", "P_TEST_BRANCH", nullptr);
+    CHECK(error_is(install_claim(no_handler, kBranchSiteAddr), "kind mismatch"));
+    CHECK(g_prims.install_branch_calls == 0);
+    CHECK(point_owner(kBranchSiteAddr) == nullptr);
+
+    // 字替换点带 handler → 拒绝（既有语义回归）。
+    const ResourceClaim word =
+        make_patch_claim("patch:b", "P_CHAR_MOVE_PUSH_STAND", &g_dummy_handler);
+    CHECK(error_is(install_claim(word, stand_addr()), "kind mismatch"));
+    CHECK(g_prims.install_word_calls == 0);
+    CHECK(claimed_count() == 0);
+}
+
 void test_site_and_address_errors() {
     reset_all();
     const ResourceClaim unknown =
@@ -631,6 +754,11 @@ int main() {
     test_bl_redirect_to_symbol_range_and_alignment();
     test_install_word_at();
     test_kind_mismatch();
+    test_install_branch_success();
+    test_install_branch_out_of_range();
+    test_install_branch_primitive_failure();
+    test_release_branch_writes_back_and_releases();
+    test_branch_handler_mismatch();
     test_site_and_address_errors();
     test_point_already_claimed();
     test_primitive_rejected_releases_claim();

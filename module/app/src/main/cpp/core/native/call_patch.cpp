@@ -34,23 +34,27 @@ struct PatchedCall {
     uintptr_t call_addr;
     void* wrapper;
     uint32_t replacement;
+    uintptr_t target;  // 实际写入的分支目标（BL：wrapper/thunk；B：thunk）
 };
 std::array<PatchedCall, 16> g_patched_calls{};
 size_t g_patched_call_count = 0;
 
-bool find_patched_locked(uintptr_t call_addr, void* wrapper) {
+// out_target 可空；命中时回填上次写入的分支目标（B 幂等复用既有 thunk 用）。
+bool find_patched_locked(uintptr_t call_addr, void* wrapper, uintptr_t* out_target = nullptr) {
     for (size_t i = 0; i < g_patched_call_count; ++i) {
         if (g_patched_calls[i].call_addr == call_addr && g_patched_calls[i].wrapper == wrapper) {
+            if (out_target != nullptr) *out_target = g_patched_calls[i].target;
             return true;
         }
     }
     return false;
 }
 
-void remember_patched_locked(uintptr_t call_addr, void* wrapper, uint32_t replacement) {
+void remember_patched_locked(uintptr_t call_addr, void* wrapper, uint32_t replacement,
+                             uintptr_t target) {
     if (find_patched_locked(call_addr, wrapper)) return;
     if (g_patched_call_count < g_patched_calls.size()) {
-        g_patched_calls[g_patched_call_count++] = {call_addr, wrapper, replacement};
+        g_patched_calls[g_patched_call_count++] = {call_addr, wrapper, replacement, target};
     }
 }
 
@@ -65,7 +69,7 @@ void forget_patched_locked(uintptr_t call_addr) {
     }
 }
 
-void emit_thunk(void* slot, uintptr_t wrapper) {
+void emit_call_thunk(void* slot, uintptr_t wrapper) {
     uint32_t code[] = {
         0xa9bf7bf0,  // stp x16, x30, [sp, #-16]!
         0x58000090,  // ldr x16, #16 (literal at thunk+20)
@@ -79,14 +83,27 @@ void emit_thunk(void* slot, uintptr_t wrapper) {
                             reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + kThunkSlot));
 }
 
-// 返回可使用/已写入 thunk 的槽地址；调用方持锁。
-void* allocate_thunk_locked(uintptr_t call_addr, uintptr_t wrapper) {
+// B 尾调用 thunk：`ldr x16, #8; br x16` + thunk+8 的 handler 字面量。B 不改写 x30，
+// `br` 进入 handler 后其 `ret` 直接返回原调用者，等价原尾调用。
+void emit_branch_thunk(void* slot, uintptr_t handler) {
+    uint32_t code[] = {
+        0x58000050,  // ldr x16, #8 (literal at thunk+8)
+        0xd61f0200,  // br x16
+    };
+    std::memcpy(slot, code, sizeof(code));
+    *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(slot) + 8) = handler;
+    __builtin___clear_cache(reinterpret_cast<char*>(slot),
+                            reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + kThunkSlot));
+}
+
+// 从近址池取一个可用 thunk 槽（32B 对齐，不写内容）；调用方持锁。
+// 槽必落在 call_addr ±128MB 内，否则返回 nullptr。
+void* acquire_thunk_slot_locked(uintptr_t call_addr) {
 #ifndef MAP_FIXED_NOREPLACE
     (void)call_addr;
-    (void)wrapper;
     return nullptr;
 #else
-    // 1) 已有页 carving（校验对本调用点的 BL 可达性）。
+    // 1) 已有页 carving（校验对本调用点的 BL/B 可达性）。
     if (g_thunk_page_count > 0) {
         void* page = g_thunk_pages[g_thunk_page_count - 1];
         void* slot = reinterpret_cast<uint8_t*>(page) + g_thunk_page_used * kThunkSlot;
@@ -95,7 +112,6 @@ void* allocate_thunk_locked(uintptr_t call_addr, uintptr_t wrapper) {
         if ((g_thunk_page_used + 1) * kThunkSlot <= kPageSize && reach > -kBlRange &&
             reach < kBlRange) {
             ++g_thunk_page_used;
-            emit_thunk(slot, wrapper);
             return slot;
         }
     }
@@ -111,7 +127,6 @@ void* allocate_thunk_locked(uintptr_t call_addr, uintptr_t wrapper) {
                                     kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
                                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
                 if (region == MAP_FAILED) continue;
-                emit_thunk(region, wrapper);
                 if (g_thunk_page_count < g_thunk_pages.size()) {
                     g_thunk_pages[g_thunk_page_count++] = region;
                     g_thunk_page_used = 1;
@@ -122,6 +137,14 @@ void* allocate_thunk_locked(uintptr_t call_addr, uintptr_t wrapper) {
     }
     return nullptr;
 #endif
+}
+
+// BL thunk：取槽 + 写 call 型 thunk。
+void* allocate_thunk_locked(uintptr_t call_addr, uintptr_t wrapper) {
+    void* slot = acquire_thunk_slot_locked(call_addr);
+    if (slot == nullptr) return nullptr;
+    emit_call_thunk(slot, wrapper);
+    return slot;
 }
 
 bool write_code_word(uintptr_t addr, uint32_t word) {
@@ -173,7 +196,7 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
 
     const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
     if (current == replacement) {  // 幂等：已安装
-        remember_patched_locked(call_addr, wrapper, replacement);
+        remember_patched_locked(call_addr, wrapper, replacement, branch_target);
         return true;
     }
     if (current != expected_word) {
@@ -183,7 +206,7 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
         return false;  // fail-closed：不改写任何字节
     }
     if (!write_code_word(call_addr, replacement)) return false;
-    remember_patched_locked(call_addr, wrapper, replacement);
+    remember_patched_locked(call_addr, wrapper, replacement, branch_target);
     QOL_LOG_INFO(QolDomain::kPlatform, "patched call=%p replacement=0x%08x",
                  reinterpret_cast<void*>(call_addr), replacement);
     return true;
@@ -238,5 +261,69 @@ bool call_patch_revert_word(uintptr_t addr, uint32_t original_word) {
     if (!write_code_word(addr, original_word)) return false;
     QOL_LOG_INFO(QolDomain::kPlatform, "reverted word addr=%p original=0x%08x",
                  reinterpret_cast<void*>(addr), original_word);
+    return true;
+}
+
+uintptr_t call_patch_install_branch(uintptr_t call_addr, uint32_t expected_word, void* handler) {
+    if (call_addr == 0 || handler == nullptr) return 0;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+
+    // 幂等：同一站点 + 同一 handler 已安装成功 → 返回既有 thunk，不重复分配。
+    uintptr_t existing = 0;
+    if (find_patched_locked(call_addr, handler, &existing)) return existing;
+
+    // fail-closed：先校验原字，避免为失败的安装分配（泄漏）thunk。
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
+    if (current != expected_word) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "branch original word mismatch call=%p got=0x%08x expected=0x%08x",
+                      reinterpret_cast<void*>(call_addr), current, expected_word);
+        return 0;
+    }
+    void* thunk = acquire_thunk_slot_locked(call_addr);
+    if (thunk == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "branch target out of BL range call=%p handler=%p",
+                      reinterpret_cast<void*>(call_addr), handler);
+        return 0;
+    }
+    emit_branch_thunk(thunk, reinterpret_cast<uintptr_t>(handler));
+    const uintptr_t thunk_addr = reinterpret_cast<uintptr_t>(thunk);
+    const int64_t delta = static_cast<int64_t>(thunk_addr) - static_cast<int64_t>(call_addr);
+    if ((delta & 0x3) != 0 || delta <= -kBlRange || delta >= kBlRange) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "branch target out of BL range call=%p thunk=%p",
+                      reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(thunk_addr));
+        return 0;
+    }
+    const uint32_t replacement =
+        0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
+    if (!write_code_word(call_addr, replacement)) return 0;
+    remember_patched_locked(call_addr, handler, replacement, thunk_addr);
+    QOL_LOG_INFO(QolDomain::kPlatform, "patched branch call=%p thunk=%p replacement=0x%08x",
+                 reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(thunk_addr),
+                 replacement);
+    return thunk_addr;
+}
+
+bool call_patch_revert_branch(uintptr_t call_addr, uint32_t original_word) {
+    if (call_addr == 0) return false;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
+    if (current == original_word) {  // 幂等：已还原
+        forget_patched_locked(call_addr);
+        return true;
+    }
+    if ((current & 0xFC000000u) != 0x14000000u) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "revert target is not a B branch call=%p current=0x%08x",
+                      reinterpret_cast<void*>(call_addr), current);
+        return false;  // fail-closed：不覆盖非 B 指令
+    }
+    if (!write_code_word(call_addr, original_word)) return false;
+    forget_patched_locked(call_addr);
+    QOL_LOG_INFO(QolDomain::kPlatform, "reverted branch call=%p original=0x%08x",
+                 reinterpret_cast<void*>(call_addr), original_word);
     return true;
 }

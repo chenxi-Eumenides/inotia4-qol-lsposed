@@ -74,7 +74,7 @@ _MECH_API_LINE = re.compile(r"\bNative(Hook|Unhook)FunType\s+(?:native_)?(?:un)?
 # `ptr_slot_site(` 同理：host/plugin_registry 按 kPtrSlot 声明解析槽站点，是机制分派而非安装点
 # （真实安装点在插件的 ResourceClaim，文本扫描无法识别该声明式形态）。
 _MECH_WIRING_LINE = re.compile(
-    r"&\s*call_patch_(?:install|revert)_(?:bl|word)\b"
+    r"&\s*call_patch_(?:install|revert)_(?:bl|word|branch)\b"
     r"|&\s*(?:qol::patch::)?ptr_slot_(?:write|restore)_raw\b"
     r"|\bptr_slot_site\s*\("
 )

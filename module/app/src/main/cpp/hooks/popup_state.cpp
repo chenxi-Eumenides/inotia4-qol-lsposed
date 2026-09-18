@@ -65,11 +65,20 @@ bool popup_state_acquire(PopupStateEntry* e, const PopupStateHooks& h) {
     }
     if (g_occupied_count >= kMaxOccupied) return false;
 
+    // 部分 wrap：空指针槽从安装前快照取原值回写，保持该槽不变（backup 为全 0x40 快照）。
     const qol::game::PopupStateSlot slot{e->slot, e->state_id};
+    const auto keep_or_original = [e](void* hook, size_t offset) -> const void* {
+        if (hook != nullptr) return hook;
+        uintptr_t original = 0;
+        std::memcpy(&original, e->backup + offset, sizeof(original));
+        return reinterpret_cast<const void*>(original);
+    };
     qol::game::popup_state_write_hooks(
-        slot, reinterpret_cast<const void*>(h.enter), reinterpret_cast<const void*>(h.process),
-        reinterpret_cast<const void*>(h.f3), reinterpret_cast<const void*>(h.f4),
-        reinterpret_cast<const void*>(h.event));
+        slot, keep_or_original(reinterpret_cast<void*>(h.enter), POPUP_ENTRY_ENTER),
+        keep_or_original(reinterpret_cast<void*>(h.process), POPUP_ENTRY_PROCESS),
+        keep_or_original(reinterpret_cast<void*>(h.f3), POPUP_ENTRY_F3),
+        keep_or_original(reinterpret_cast<void*>(h.f4), POPUP_ENTRY_F4),
+        keep_or_original(reinterpret_cast<void*>(h.event), POPUP_ENTRY_EVENT));
     g_occupied[g_occupied_count].slot = e->slot;
     g_occupied[g_occupied_count].owner = owner;
     std::memcpy(g_occupied[g_occupied_count].backup, e->backup, sizeof(e->backup));

@@ -19,6 +19,11 @@ struct Primitives {   // 由 host 注入（过渡期指向 core/native 的调用
     // 指针槽机制（kPtrSlot）：写/还原 8 字节函数指针；失败必须 fail-closed（返回 false 且不保证已写）。
     bool (*write_ptr)(uintptr_t slot_addr, void* value);
     bool (*restore_ptr)(uintptr_t slot_addr, void* value);
+    // B 尾调用机制（kBranchRedirect）：宿主在站点 ±128MB 内分配 thunk
+    //（`ldr x16,#8; br x16; .quad handler`）并把站点 B 改指 thunk；返回 thunk 运行期地址，
+    // 0 = 失败（未改写任何字节）。返回地址供本层收口 B 编码可达性。
+    uintptr_t (*install_branch)(uintptr_t addr, uint32_t expected_word, void* handler);
+    bool (*revert_branch)(uintptr_t addr, uint32_t original_word);
 };
 void set_primitives(const Primitives& primitives);
 

@@ -163,6 +163,8 @@ bool assembly_init() {
         &call_patch_revert_word,
         &qol::patch::ptr_slot_write_raw,
         &qol::patch::ptr_slot_restore_raw,
+        &call_patch_install_branch,
+        &call_patch_revert_branch,
     });
 
     // 事务引擎依赖（运行期生命周期路径）与生命周期命令执行入口。

@@ -42,9 +42,13 @@ bool popup_state_resolve(uintptr_t enter_vma, PopupStateEntry* out);
 // 供面板插件在 acquire 前定位 state 条目（禁止裸 VMA）。
 bool popup_state_resolve_symbol(const char* symbol_name, PopupStateEntry* out);
 
-// 占用并写入 5 个钩子（主线程）：一 entry 一 owner；同 owner（hooks.enter 相同）幂等返回 true，
+// 占用并写入钩子（主线程）：一 entry 一 owner；同 owner（hooks.enter 相同）幂等返回 true，
 // 并把首次安装前的快照回填到 e->backup（重入方持有的是已注入快照，restore 仍能整段还原）；
 // 不同 owner 或容量耗尽 → false。成功后登记原版 enter VMA 别名（防 UI 判定误报 screen）。
+//
+// 部分 wrap：h 中任一函数指针为 nullptr → 该槽保留游戏原值不写（从安装前快照回填同值），
+// 只有非空槽被替换；backup 快照仍为注入前全 0x40，restore 仍整段写回。
+// enter == nullptr 非法（一 entry 一 owner 以 enter 地址作 owner token）。
 bool popup_state_acquire(PopupStateEntry* e, const PopupStateHooks& h);
 
 // 写回 0x40 快照（total，无失败路径；主线程）；释放占用。别名不反登记（按 wrapper 单调）。

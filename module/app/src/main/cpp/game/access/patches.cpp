@@ -84,10 +84,29 @@ constexpr SiteEntry kSites[] = {
      PatchKind::kWordReplace},
 };
 
+// 测试覆盖表：仅 host 测试经 patch_site_override_for_test 写入，生产路径容量恒为 0。
+// 用于构造尚未登记的站点（如 B 站点）而无需污染生产的 kSites。
+constexpr uint32_t kMaxOverrides = 4;
+struct SiteOverride {
+    const char* name = nullptr;
+    PatchSite site{};
+};
+SiteOverride g_overrides[kMaxOverrides];
+uint32_t g_override_count = 0;
+
 }  // namespace
 
 bool patch_site(const char* name, PatchSite* out) {
-    if (name == nullptr || out == nullptr || g_base == 0) {
+    if (name == nullptr || out == nullptr) {
+        return false;
+    }
+    for (uint32_t i = 0; i < g_override_count; ++i) {
+        if (std::strcmp(g_overrides[i].name, name) == 0) {
+            *out = g_overrides[i].site;
+            return true;
+        }
+    }
+    if (g_base == 0) {
         return false;
     }
     for (const SiteEntry& entry : kSites) {
@@ -109,6 +128,32 @@ bool patch_site(const char* name, PatchSite* out) {
         return true;
     }
     return false;
+}
+
+bool patch_site_override_for_test(const char* name, const PatchSite& site) {
+    if (name == nullptr) {
+        return false;
+    }
+    for (uint32_t i = 0; i < g_override_count; ++i) {
+        if (std::strcmp(g_overrides[i].name, name) == 0) {
+            g_overrides[i].site = site;
+            return true;
+        }
+    }
+    if (g_override_count >= kMaxOverrides) {
+        return false;
+    }
+    g_overrides[g_override_count].name = name;
+    g_overrides[g_override_count].site = site;
+    ++g_override_count;
+    return true;
+}
+
+void patch_site_clear_overrides_for_test() {
+    for (uint32_t i = 0; i < kMaxOverrides; ++i) {
+        g_overrides[i] = SiteOverride{};
+    }
+    g_override_count = 0;
 }
 
 }  // namespace qol::game

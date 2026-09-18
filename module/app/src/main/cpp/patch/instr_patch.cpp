@@ -41,8 +41,10 @@ bool resolve_site(const contracts::ResourceClaim& claim, uintptr_t site_addr,
         *error = failure("site address mismatch");
         return false;
     }
-    // 只有 handler 型 BL 需要 wrapper；字替换与符号型 BL 没有可透传执行体，handler 必须为空。
-    const bool needs_handler = site.kind == qol::game::PatchKind::kBlRedirect;
+    // 只有 handler 型重定向（BL / B 尾调用）需要 wrapper；字替换与符号型 BL 没有可透传
+    // 执行体，handler 必须为空。
+    const bool needs_handler = site.kind == qol::game::PatchKind::kBlRedirect ||
+                               site.kind == qol::game::PatchKind::kBranchRedirect;
     const bool handler_ok =
         needs_handler ? (claim.handler != nullptr) : (claim.handler == nullptr);
     if (!handler_ok) {
@@ -77,6 +79,28 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     }
     if (!claim_point(site.addr, claim.id)) {
         return failure("point already claimed");
+    }
+
+    if (site.kind == qol::game::PatchKind::kBranchRedirect) {
+        // B 尾调用：宿主在近址池分配 thunk 并把站点 B 改指 thunk，返回 thunk 运行期地址；
+        // 本层收口 B 编码可达性（thunk 必须落在站点 ±128MB 内）。
+        const uintptr_t thunk =
+            g_primitives.install_branch != nullptr
+                ? g_primitives.install_branch(site.addr, site.expected_word, claim.handler)
+                : 0;
+        if (thunk == 0) {
+            release_point(site.addr);
+            return failure("primitive rejected");
+        }
+        if (!bl_target_encodable(site.addr, thunk)) {
+            // 宿主返回越界 thunk：撤回已写 B，释放占用，不半装。
+            if (g_primitives.revert_branch != nullptr) {
+                g_primitives.revert_branch(site.addr, site.expected_word);
+            }
+            release_point(site.addr);
+            return failure("branch target out of BL range");
+        }
+        return Outcome{0, nullptr};
     }
 
     bool applied = false;
@@ -130,6 +154,9 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (site.kind == qol::game::PatchKind::kWordReplace) {
         applied = g_primitives.revert_word != nullptr &&
                   g_primitives.revert_word(site.addr, site.expected_word);
+    } else if (site.kind == qol::game::PatchKind::kBranchRedirect) {
+        applied = g_primitives.revert_branch != nullptr &&
+                  g_primitives.revert_branch(site.addr, site.expected_word);
     } else {
         applied = g_primitives.revert_bl != nullptr &&
                   g_primitives.revert_bl(site.addr, site.expected_word);

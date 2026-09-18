@@ -12,6 +12,7 @@ enum class PatchKind : uint8_t {
     kBlRedirect = 0,          // BL 重定向到 claim.handler（wrapper 地址）
     kWordReplace = 1,         // 单指令字替换（无透传执行体）
     kBlRedirectToSymbol = 2,  // BL 重定向到站点声明的符号目标（无 handler）
+    kBranchRedirect = 3,      // B 尾调用重定向到 claim.handler（宿主分配近址 thunk）
 };
 
 struct PatchSite {
@@ -24,5 +25,11 @@ struct PatchSite {
 
 // 按登记名解析 patch 点；未登记或 g_base==0 → false。
 bool patch_site(const char* name, PatchSite* out);
+
+// 测试用：以 name 覆盖解析结果（host 测试构造未登记的 kind，如 B 站点）；同名覆盖旧值，
+// 容量耗尽返回 false。生产路径不调用。
+bool patch_site_override_for_test(const char* name, const PatchSite& site);
+// 测试用：清除全部覆盖。
+void patch_site_clear_overrides_for_test();
 
 }  // namespace qol::game

@@ -146,6 +146,39 @@ void test_acquire_writes_hooks_and_alias() {
           vma_of(&fake_enter));
 }
 
+// 部分 wrap：仅 enter+event 非空 → 其余 3 槽保留原值；backup 仍为注入前全量；restore 全量还原。
+void test_acquire_partial_wrap_keeps_original_slots() {
+    arm_fake_table();
+    uint8_t* entry = put_entry(6, 13, &fake_enter);
+    uint8_t before[POPUP_ENTRY_SIZE];
+    std::memcpy(before, entry, POPUP_ENTRY_SIZE);
+
+    PopupStateEntry out{};
+    CHECK(popup_state_resolve(vma_of(&fake_enter), &out));
+    CHECK(std::memcmp(out.backup, before, POPUP_ENTRY_SIZE) == 0);  // 快照仍为全量
+
+    PopupStateHooks h = hooks_of(&fake_enter);
+    h.process = nullptr;
+    h.f3 = nullptr;
+    h.f4 = nullptr;
+    CHECK(popup_state_acquire(&out, h));
+
+    // 非空槽被替换。
+    CHECK(entry_field_eq(entry, POPUP_ENTRY_ENTER, reinterpret_cast<uintptr_t>(&fake_enter)));
+    CHECK(entry_field_eq(entry, POPUP_ENTRY_EVENT, reinterpret_cast<uintptr_t>(&fake_event)));
+    // 空指针槽保留原值。
+    CHECK(entry_field_eq(entry, POPUP_ENTRY_PROCESS,
+                         *reinterpret_cast<uintptr_t*>(before + POPUP_ENTRY_PROCESS)));
+    CHECK(entry_field_eq(entry, POPUP_ENTRY_F3,
+                         *reinterpret_cast<uintptr_t*>(before + POPUP_ENTRY_F3)));
+    CHECK(entry_field_eq(entry, POPUP_ENTRY_F4,
+                         *reinterpret_cast<uintptr_t*>(before + POPUP_ENTRY_F4)));
+
+    // restore 整段写回注入前快照。
+    popup_state_restore(&out);
+    CHECK(std::memcmp(entry, before, POPUP_ENTRY_SIZE) == 0);
+}
+
 void test_one_entry_one_owner() {
     arm_fake_table();
     uint8_t* entry = put_entry(0, 1, &fake_enter);
@@ -264,6 +297,7 @@ int main() {
     test_resolve_miss_and_invalid();
     test_resolve_not_readable_or_not_ready();
     test_acquire_writes_hooks_and_alias();
+    test_acquire_partial_wrap_keeps_original_slots();
     test_one_entry_one_owner();
     test_same_owner_idempotent();
     test_acquire_null_args();
