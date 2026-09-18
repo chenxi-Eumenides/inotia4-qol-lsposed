@@ -121,6 +121,7 @@
 > **D1 延后项登记**（D1 未实现，已指定目标阶段；对应 `map.md` 过渡依赖区）：
 > - 设置项数据化与配置源（Kotlin JSON → native config）：**P5**（决策 D；`ARCHITECTURE.md` §7.3 跨栈边界）。
 > - U11 ui-kit adapter（动态 UI 绑定管理器）：**P5**；覆盖 `plugins/core.ui/panels/settings.cpp` 运行时 ptr-slot 的临时豁免（`arch_exemptions.json`）。
+> - UI 组件层实施（ADR-0006）：第一阶段组件抽取（Panel/Button/Label/Toggle/Select/ScrollView）+ `contracts/ui.h` 标准组件接口冻结 + `core.ui` 通用组件实现——**待排期，不改现有面板行为**（用户审阅记录，见 `docs/refactor/adr/0006-ui-component-layering.md`）。
 > - `core.ui` 直依 `game/access/ui*`（过渡依赖）：随 **P5** `core.ui` 收口清除。
 
 ### 迁移边界（包含什么 / 不包含什么）

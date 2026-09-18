@@ -1,6 +1,6 @@
 # 架构设计书：分层收口与插件化
 
-> 状态：**v0.3.12（P5 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-18
+> 状态：**v0.3.13（P5 开工基线候选，待外部复审后签署）**｜基线日期：2026-09-18
 > 签署定义：签署 = 外部复审无阻断项 且 版本记录与未决项表逐项有结论。P0–P3 的「完成」仅指各阶段出口条件达成，**不表示**本设计书已签署或未决项已闭合（见 §12.3）。
 > 适用范围：**§1–§9、§11、§12 对内置插件轨（含全部核心架构）为权威规范**；**§3.7/§3.8 外部插件轨为未冻结设计草案**（P6 前允许大改，不构成实施承诺）。
 > 权威层级：架构规则以本文为准；校验脚本输出只代表「当前实现事实」。二者不一致时构建失败，必须显式走「改设计」或「登记临时豁免（带文档锚点）」之一。
@@ -12,6 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
+| v0.3.13 | UI 组件分层审阅记录（ADR-0006）：`game/access/ui*`（底层资源与绘制）→ `contracts/ui.h`（标准组件接口）→ `plugins/core.ui`（通用组件）→ 普通插件组合；方框两拆与首期组件清单（Panel/Button/Label/Toggle/Select/ScrollView）与 2–3 使用者提升规则；记录，实施待排期 |
 | v0.3.12 | B/D 决策落地与复盘校准：HTTP 传输保持 Kotlin（`core.api` 持有路由表/注册口/信封/门控/线程，Kotlin 承担 AndServer 传输，跨栈边界见 §7.3）；外部 `config.json` 改由 native `infra/config` 启动早期自读（R8 重写）；`check_*` 能力边界按「已落地/规划」重述；过渡映射清除条件、`core.ui` adapter 自我约束、`provides[]` 字段标注 P5 目标、动态能力章节号对齐（可用性事件 §3.4.5、动态能力 §3.4.6） |
 | v0.3.11 | P5 前出口面与动态能力校准：`core.api` 收缩为 HTTP 传输/注册内核，只保留基础端点；既有 API 路径与插件 id 解耦并保持冻结，内置路由按 owner 表归属、外部路由限定 `/api/ext/<id>/...`；capability 采用“静态声明 + 低频动态发布/撤销 + 接口内高频就绪状态”模型，补撤销 lease、失败与 `degraded` 清除语义（可用性事件 §3.4.5；动态能力 §3.4.6） |
 | v0.3.10 | P5 前架构拍平（ADR-0004）：删除 `products/` 层，`features/` 更名 `plugins/`；出口面成为内置插件 `core.api`/`core.ui`（`http.registry` 注册口：封装/信封/门控/线程归 api，语义解析归各插件）；新增能力注册/注销事件（§3.4.5）支撑 optional 依赖延迟注册；新增 R8 自举兜底红线（log + 外部 config）；分层收敛为五层八目录；P5 执行 |
@@ -129,7 +130,7 @@ module/app/src/main/cpp/
   host/        gateway.cpp / assembly.cpp / transport_bridge.{h,cpp}（向 core.api 注入 native↔Kotlin 传输桥）/ plugin_registry.{h,cpp}
   plugins/
     core.api/   server/（http.registry 注册口 + §9.1 既有诊断端点）
-    core.ui/    panels/（容器与 ui_kit）
+    core.ui/    panels/（容器、通用组件；底层 ui_kit 在 game/access/ui*，见 ADR-0006）
     <id>/       plugin.cpp  rules.{h,cpp}  ui/*.cpp  api.cpp  ports.h
   domains/        character/ party/ inventory/ world/ quest/ ui/ shop/ save/ dialog/ system/
   contracts/      <capability_id>.h   <resource_id>.h   result.h
@@ -550,7 +551,7 @@ HTTP 取实时数据的路径：优先读 `ReadModel`；必须实时时 `POST` �
 |---|---|---|---|
 | `core.api` | `contracts`、`infra`（HTTP 传输由 Kotlin 侧 AndServer 承担，native 经 `host` 注入的传输桥交互，§7.3） | `http.registry` 注册口与**路由表唯一真源**、路由分派、JSON 信封/错误映射、`/api/op` 门控、线程纪律与在途请求 lease；自身只保留 `/api/health`、`/api/system/routes` 等传输级基础端点；不实现 socket/HTTP 解析与监听（归 Kotlin 传输层） | 游戏语义计算；直接读游戏内存；承载 character/world/item 等业务端点 |
 | 内置 API 提供插件 | `contracts`、`infra`、`domains` | 注册现有冻结路由并拥有其参数/DTO/语义；默认按领域拆分（如 `api.character`、`api.world`），也允许为独立裁剪边界拆成 `api.info`/`api.action` | 改写既有 URL；绕过命令端口执行变更 |
-| `core.ui` | `contracts`、`infra`、`domains`（UI 原语经 `contracts/` 的 ui-kit 接口 + `host` 注入 adapter，adapter 背后为 `game/access/ui*`；自我约束见 §2.2） | 设置页容器、共享控件（`ui_kit`）、面板注册与导航 | 实现功能面板（归各插件 `ui/`）；游戏语义计算；直接依赖 `game/` |
+| `core.ui` | `contracts`、`infra`、`domains`（UI 原语经 `contracts/` 的 ui-kit 接口 + `host` 注入 adapter，adapter 背后为 `game/access/ui*`；自我约束见 §2.2） | 设置页容器、共享控件（`ui_kit`）、面板注册与导航；实现通用组件（首期 `Panel`/`Button`/`Label`/`Toggle`/`Select`/`ScrollView`，见 ADR-0006） | 实现功能面板（归各插件 `ui/`）；游戏语义计算；直接依赖 `game/` |
 
 **注册口契约（P5 冻结，U10）**：
 
@@ -573,7 +574,7 @@ typedef struct HttpRoute {
 
 **生命周期与分工原则**：封装/解包、信封、门控、线程纪律归 `core.api`；语义解析与执行归 owner 插件 handler。`core.api` 被禁用时先停止接受新请求并冻结路由表，等待在途 route lease 归零，再撤销 `http.registry` 和关闭 server；超出帧预算进入 `failed + isolated`。依赖它的插件以 `optional_requires` 声明，并按 §3.4.5 在能力发布/撤销时延迟注册或反注册；route 注册失败只使该插件的 HTTP 出口降级，不影响其游戏内主体功能。
 
-**UI 边界**：`plugins/<id>/ui/` 拥有该插件的面板实现与交互；`core.ui` 只提供设置页容器、共享控件（`ui_kit`）与面板注册表，不实现功能面板。
+**UI 边界**：`plugins/<id>/ui/` 拥有该插件的面板实现与交互；`core.ui` 提供设置页容器、**通用组件**与面板注册表，不实现功能面板；组件分层、方框两拆与首期组件清单见 ADR-0006（记录，实施待排期）。
 
 ### 7.2 host 装配与 JNI
 
@@ -733,7 +734,7 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 
 单插件迁移动作：建目录与元数据 → 资源改为声明 → 依赖改能力/命令 → 开关与状态接入 → 单测 + 验收卡。
 
-**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P4 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.12**（P5 开工基线候选，含插件拍平、API 出口面与动态 capability 校准、HTTP 传输保持 Kotlin 与外部 config native 自读决策及复盘校准）；P5 未签署前不得开工。
+**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P4 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.13**（P5 开工基线候选，含插件拍平、API 出口面与动态 capability 校准、HTTP 传输保持 Kotlin 与外部 config native 自读决策及复盘校准、UI 组件分层审阅记录 ADR-0006）；P5 未签署前不得开工。
 
 冻结与兼容：JNI 导出在重构期保持名称与签名稳定；新增按插件分组命名，P5 一次性切换。既有 HTTP 路径、方法和成功响应保持兼容，P5 只迁移 owner，不改变调用方契约。数据格式（sidecar / `.qol_save`）向前兼容，必要时升版本并写迁移。
 
@@ -779,7 +780,7 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 | U8 | `tombstone` 回收策略与人工清除流程 | P5（随隔离语义收口） | ⬜ 开放 |
 | U9 | 需要 `atomic_before` 两阶段分派的资源清单 | P4/P5 | ⬜ 开放 |
 | U10 | `http.registry` v1 的 `HttpReq`/`HttpRes` ABI、冻结路由 owner 表与冲突错误码；路由兼容、线程种类、动态注册/撤销和在途 lease 语义已由 v0.3.11 冻结 | P5 出口前 | ⬜ 开放 |
-| U11 | `core.ui` 的 ui-kit adapter 接口冻结（`contracts/` 类型 + `host` 注入函数表；adapter 背后为 `game/access/ui*`） | P5 出口前 | ⬜ 开放 |
+| U11 | `core.ui` 的 ui-kit adapter 接口冻结（`contracts/` 类型 + `host` 注入函数表；adapter 背后为 `game/access/ui*`）；**由 ADR-0006 收敛为 `contracts/ui.h` 标准组件接口（记录，实施待排期）** | P5 出口前 | ⬜ 开放 |
 
 说明：**P0–P3 的出口条件不依赖上述开放项**（「P0–P3 完成」不等于设计书已签署，见 §11 签署规则）；开放项必须在对应阶段开工前闭合，否则该阶段不得宣称完成。
 
