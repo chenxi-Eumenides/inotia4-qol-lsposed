@@ -666,3 +666,15 @@ target_include_directories(ui_adapter_tests PRIVATE
 target_compile_features(ui_adapter_tests PRIVATE cxx_std_17)
 set_target_properties(ui_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME ui_adapter_tests COMMAND ui_adapter_tests)
+
+# U11-2：core.ui 标准组件创建/更新/命中/销毁与错误语义 host 测试。
+add_executable(core_ui_components_tests
+    test_core_ui_components.cpp
+    ${CPP_DIR}/plugins/core.ui/ui_components.cpp
+)
+target_include_directories(core_ui_components_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(core_ui_components_tests PRIVATE cxx_std_17)
+set_target_properties(core_ui_components_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_ui_components_tests COMMAND core_ui_components_tests)

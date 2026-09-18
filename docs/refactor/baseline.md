@@ -40,7 +40,7 @@
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 14 |
-| `plugins/core.ui` | 14 |
+| `plugins/core.ui` | 16 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
 | `plugins/extension_bag` | 39 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **368** |
+| **合计** | **370** |
 
 ### 1.2 迁移期映射摘要
 
@@ -151,7 +151,7 @@
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
 | `plugins/autosell` | `game` | 8 |
-| `plugins/save_backup` | `infra` | 8 |
+| `plugins/core.ui` | `contracts` | 8 |
 
 ### 2.2 include 环
 
@@ -249,7 +249,7 @@
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 14 |
-| `core.ui` | `plugins/core.ui` | 14 |
+| `core.ui` | `plugins/core.ui` | 16 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `extension_bag` | `plugins/extension_bag` | 39 |

@@ -2,8 +2,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
 #include "game/access/ui_kit.h"
+
+using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
+using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
+using ControlButtonDrawFn = void (*)(void* ctrl);
+
+extern ControlButtonSetTextFn fn_ctrl_btn_set_text;
+extern ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc;
+extern ControlButtonDrawFn fn_ctrl_btn_draw;
 
 namespace qol::host {
 namespace {
@@ -17,6 +27,14 @@ using contracts::UiRect;
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotReady = "ui primitive not ready";
 constexpr const char* kUnsupported = "ui primitive unsupported";
+
+struct ClickBinding {
+    contracts::QolUiClickFn callback;
+    void* user;
+};
+
+std::mutex g_click_mtx;
+std::unordered_map<QolUiHandle, ClickBinding> g_click_bindings;
 
 QolResult invalid_argument() {
     return contracts::error(kQolErrInvalidArgument, kInvalidArgument, 16);
@@ -79,20 +97,41 @@ QolResult get_rect(QolUiHandle control, UiRect* out) {
 
 QolResult set_text(QolUiHandle control, const char* text) {
     if (control == nullptr || text == nullptr) return invalid_argument();
-    // ui_kit exposes text assignment only during control creation; U11-2 owns component text state.
-    return unsupported();
+    if (fn_ctrl_btn_set_text == nullptr) return not_ready();
+    fn_ctrl_btn_set_text(control, const_cast<char*>(text));
+    return contracts::ok();
 }
 
 QolResult set_draw_proc(QolUiHandle control, QolUiDrawFn draw_proc) {
     if (control == nullptr || draw_proc == nullptr) return invalid_argument();
-    // ui_kit has no public post-creation draw-proc setter.
-    return unsupported();
+    if (fn_ctrl_btn_set_draw_proc == nullptr) return not_ready();
+    fn_ctrl_btn_set_draw_proc(control, reinterpret_cast<void*>(draw_proc));
+    return contracts::ok();
 }
 
-QolResult set_click_proc(QolUiHandle control, contracts::QolUiClickFn click_proc, void*) {
+void click_proc_trampoline(void* control) {
+    ClickBinding binding{};
+    {
+        std::lock_guard<std::mutex> lock(g_click_mtx);
+        const auto it = g_click_bindings.find(control);
+        if (it == g_click_bindings.end()) return;
+        binding = it->second;
+    }
+    binding.callback(binding.user);
+}
+
+QolResult set_click_proc(QolUiHandle control, contracts::QolUiClickFn click_proc, void* user) {
     if (control == nullptr || click_proc == nullptr) return invalid_argument();
-    // ui_kit binds the callback only while creating a button and has no user-data setter.
-    return unsupported();
+    {
+        std::lock_guard<std::mutex> lock(g_click_mtx);
+        g_click_bindings[control] = ClickBinding{click_proc, user};
+    }
+    if (!ui_clone_button_style(control, control, &click_proc_trampoline)) {
+        std::lock_guard<std::mutex> lock(g_click_mtx);
+        g_click_bindings.erase(control);
+        return not_ready();
+    }
+    return contracts::ok();
 }
 
 int32_t hit_test(QolUiHandle control, int64_t x, int64_t y, UiRect rect) {
@@ -102,8 +141,9 @@ int32_t hit_test(QolUiHandle control, int64_t x, int64_t y, UiRect rect) {
 
 QolResult draw_control(QolUiHandle control) {
     if (control == nullptr) return invalid_argument();
-    // Drawing is callback-driven by the game control tree; no public imperative primitive exists.
-    return unsupported();
+    if (fn_ctrl_btn_draw == nullptr) return not_ready();
+    fn_ctrl_btn_draw(control);
+    return contracts::ok();
 }
 
 QolResult begin_frame() {

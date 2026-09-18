@@ -7,6 +7,7 @@
 #include "plugins/core.ui/feature.h"
 #include "plugins/core.ui/panels/settings.h"
 #include "plugins/core.ui/panels/stack.h"
+#include "plugins/core.ui/ui_components.h"
 
 namespace qol::features::core_ui {
 namespace {
@@ -23,6 +24,11 @@ constexpr contracts::UiPanelsApi kUiPanelsApi{
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
+    {
+        contracts::kUiComponentsCapabilityId,
+        {contracts::kUiContractMajor, contracts::kUiContractMinor},
+        ui_components_api(),
+    },
     {
         contracts::kUiPanelsCapabilityId,
         {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor},
@@ -54,7 +60,7 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    if (ctx.sdk == nullptr || !ui_components_bind(ctx.sdk->ui)) return 1;
     // install 只做自身初始化：注册设置页 provider + 存档备份动作项 + 按钮绑定帧任务。
     // 资源由宿主声明式安装，backup 经 on_resource_ready 交还。
     if (!panels_register()) return 1;
@@ -88,7 +94,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     0, nullptr,      // requires
     0, nullptr,      // optional_requires
-    1, kProvides,    // provides（ui_panels v1.0）
+    2, kProvides,    // provides（ui_components/ui_panels v1.0）
     1, kResources,   // resources（own:popup.settings）
     0, nullptr,      // jni（JNI 入口由 bridge/native/gamebridge_settings.cpp 保留）
     &plugin_install,

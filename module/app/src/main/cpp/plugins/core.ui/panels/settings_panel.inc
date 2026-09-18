@@ -106,16 +106,16 @@ void settings_panel_process() {
         ui_draw_vertical_line(root_rect.x + CONTENT_X + i * CELL_W, root_rect.y + GRID_Y,
                               GRID_H, UI_GOLD, 3);
     }
-    if (g_back_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_back_btn);
+    if (g_back_btn != nullptr) ui_draw_control(g_back_btn);
     for (int cell = 0; cell < SETTINGS_PAGE_CAPACITY; ++cell) {
         const int item = settings_item_index_at_cell(cell);
         if (item < 0) continue;
-        if (g_rows[item].btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[item].btn);
-        if (g_rows[item].desc != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_rows[item].desc);
+        if (g_rows[item].btn != nullptr) ui_draw_control(g_rows[item].btn);
+        if (g_rows[item].desc != nullptr) ui_draw_control(g_rows[item].desc);
     }
-    if (g_header_label != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_header_label);
-    if (g_prev_page_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_prev_page_btn);
-    if (g_next_page_btn != nullptr && fn_ctrl_btn_draw != nullptr) fn_ctrl_btn_draw(g_next_page_btn);
+    if (g_header_label != nullptr) ui_draw_control(g_header_label);
+    if (g_prev_page_btn != nullptr) ui_draw_control(g_prev_page_btn);
+    if (g_next_page_btn != nullptr) ui_draw_control(g_next_page_btn);
     settings_page_indicator_draw(root_rect);
     ui_end_frame();
 }

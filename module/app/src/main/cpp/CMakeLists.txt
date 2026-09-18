@@ -315,6 +315,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     plugins/core.ui/plugin.cpp
     plugins/core.ui/feature.cpp
+    plugins/core.ui/ui_components.cpp
     plugins/core.ui/panels/settings.cpp
     plugins/core.ui/panels/stack.cpp
 )

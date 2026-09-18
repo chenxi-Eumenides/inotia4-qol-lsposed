@@ -4,8 +4,6 @@
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
 #include "contracts/stack_limit.h"
-#include "game/access/ui_components.h"
-#include "game/access/ui_kit.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
@@ -14,6 +12,7 @@
 #include "infra/capabilities.h"
 #include "plugins/core.ui/panels/rules.h"
 #include "plugins/core.ui/panels/stack.h"
+#include "plugins/core.ui/ui_components.h"
 
 #include <atomic>
 #include <cstdint>

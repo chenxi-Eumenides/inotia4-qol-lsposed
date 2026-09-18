@@ -16,10 +16,28 @@ int g_set_rect_calls = 0;
 int g_get_rect_calls = 0;
 int g_hit_test_calls = 0;
 int g_fill_rect_calls = 0;
+int g_set_text_calls = 0;
+int g_set_draw_proc_calls = 0;
+int g_draw_control_calls = 0;
+UiClickProc g_click_proc = nullptr;
+void* g_click_user = nullptr;
 
 void draw_proc(void*) {}
+void click_proc(void* user) { g_click_user = user; }
+
+void fake_set_text(void*, char*) { ++g_set_text_calls; }
+void fake_set_draw_proc(void*, void*) { ++g_set_draw_proc_calls; }
+void fake_draw_control(void*) { ++g_draw_control_calls; }
 
 }  // namespace
+
+using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
+using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
+using ControlButtonDrawFn = void (*)(void* ctrl);
+
+ControlButtonSetTextFn fn_ctrl_btn_set_text = &fake_set_text;
+ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc = &fake_set_draw_proc;
+ControlButtonDrawFn fn_ctrl_btn_draw = &fake_draw_control;
 
 void* ui_create_root(UiRect) { return nullptr; }
 void* ui_create_button(void*, UiRect, const char*, UiClickProc, UiDrawProc) { return nullptr; }
@@ -34,6 +52,12 @@ bool ui_get_rect(void* ctrl, UiRect* rect) {
     ++g_get_rect_calls;
     if (ctrl == nullptr || rect == nullptr) return false;
     *rect = static_cast<FakeControl*>(ctrl)->rect;
+    return true;
+}
+
+bool ui_clone_button_style(void* target, void* source, UiClickProc on_click) {
+    if (target == nullptr || source == nullptr || on_click == nullptr) return false;
+    g_click_proc = on_click;
     return true;
 }
 
@@ -104,9 +128,17 @@ int main() {
     qol::contracts::QolUiHandle created = nullptr;
     CHECK(adapter->create_control(1, nullptr, &created).code == kQolErrInvalidArgument);
     CHECK(adapter->set_text(&control, nullptr).code == kQolErrInvalidArgument);
-    CHECK(adapter->set_text(&control, "text").code == kQolErrUnsupported);
-    CHECK(adapter->set_draw_proc(&control, &draw_proc).code == kQolErrUnsupported);
-    CHECK(adapter->draw_control(&control).code == kQolErrUnsupported);
+    CHECK(adapter->set_text(&control, "text").ok == kQolOk);
+    CHECK(g_set_text_calls == 1);
+    CHECK(adapter->set_draw_proc(&control, &draw_proc).ok == kQolOk);
+    CHECK(g_set_draw_proc_calls == 1);
+    int click_marker = 0;
+    CHECK(adapter->set_click_proc(&control, &click_proc, &click_marker).ok == kQolOk);
+    CHECK(g_click_proc != nullptr);
+    g_click_proc(&control);
+    CHECK(g_click_user == &click_marker);
+    CHECK(adapter->draw_control(&control).ok == kQolOk);
+    CHECK(g_draw_control_calls == 1);
 
     std::printf("ui_adapter assertions: %d\n", assertions);
     return 0;
