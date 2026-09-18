@@ -29,6 +29,7 @@
 #include "game/access/symbols.h"
 #include "game/clock.h"
 #include "hooks/transaction.h"
+#include "host/adapters.h"
 #include "host/frame_source.h"
 #include "host/plugin_registry.h"
 #include "infra/commands.h"
@@ -39,16 +40,6 @@
 #include "patch/ptr_slot.h"
 
 namespace qol::host {
-
-// L1 只冻结 ABI 表的归属、版本头与字段布局；各函数指针由 L2 host adapter 注入。
-// 空表是迁移期占位，不改变当前插件仍直接使用内部实现的行为。
-extern const contracts::QolHostSdk g_host_sdk{
-    {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor},
-    {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, nullptr};
-
-extern const contracts::QolGameHost g_game_host{
-    {sizeof(contracts::QolGameHost), contracts::kGameHostMajor, contracts::kGameHostMinor},
-    {}, {}, {}, {}, {}, {}};
 
 namespace {
 
@@ -138,6 +129,7 @@ bool drain_commands_task(int64_t frame, void* ctx) {
 }  // namespace
 
 bool assembly_init() {
+    game_host_mark_main_thread();
     // 仅在完整成功后置位：失败可重试，成功则幂等。
     if (g_assembly_done) return true;
 

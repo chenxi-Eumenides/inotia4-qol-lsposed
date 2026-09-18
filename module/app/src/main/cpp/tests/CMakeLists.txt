@@ -622,3 +622,35 @@ target_include_directories(craft_ui_guard_tests PRIVATE
 )
 target_compile_features(craft_ui_guard_tests PRIVATE cxx_std_17)
 add_test(NAME craft_ui_guard_tests COMMAND craft_ui_guard_tests)
+
+# L2：Host SDK adapter 表转发与生命周期句柄 host 测试。
+add_executable(host_adapter_tests
+    test_host_adapters.cpp
+    ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/game_host.cpp
+    ${CPP_DIR}/infra/command_queue.cpp
+    ${CPP_DIR}/infra/commands.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
+    ${CPP_DIR}/infra/runtime.cpp
+    ${CPP_DIR}/infra/scheduler.cpp
+    ${CPP_DIR}/infra/store.cpp
+    ${CPP_DIR}/infra/panels.cpp
+    ${CPP_DIR}/hooks/dispatch.cpp
+    ${CPP_DIR}/hooks/popup_state.cpp
+    ${CPP_DIR}/game/access/popup_state.cpp
+    ${CPP_DIR}/game/access/symbols.cpp
+    ${CPP_DIR}/core/native/popup_enter_alias.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(host_adapter_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(host_adapter_tests PRIVATE cxx_std_17)
+set_target_properties(host_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(host_adapter_tests PRIVATE Threads::Threads)
+add_test(NAME host_adapter_tests COMMAND host_adapter_tests)

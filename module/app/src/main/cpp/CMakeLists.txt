@@ -176,6 +176,12 @@ target_sources(gamebridge PRIVATE
     game/clock.cpp
 )
 
+# L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
+target_sources(gamebridge PRIVATE
+    host/host_sdk.cpp
+    host/game_host.cpp
+)
+
 # P1 最小诊断接口：功能状态 JSON（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     host/status_json.cpp

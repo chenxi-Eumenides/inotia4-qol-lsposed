@@ -147,7 +147,7 @@
 | lane | 范围 | 状态 |
 |---|---|---|
 | L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
-| L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ⬜ 待办 |
+| L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
 | L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ⬜ 待办 |
 | L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ⬜ 待办 |
 | L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ⬜ 待办 |
