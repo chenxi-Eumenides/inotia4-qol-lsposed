@@ -12,6 +12,7 @@
 #include "game/access/craft.h"
 #include "game_access.h"
 #include "infra/capabilities.h"
+#include "infra/config.h"
 #include "infra/text_scope.h"
 
 // ===========================================================================
@@ -136,6 +137,10 @@ void place_execute(void* ctrl) {
     if (g_backup_place == nullptr) return;
     const contracts::CraftResultApi* api = craft_api();
     if (api == nullptr) {
+        if (craft_result_unavailable_is_fail_closed(infra::config_get_bool(kGateKey, false))) {
+            QOL_LOG_WARN(kDomain, "place blocked reason=craft_result unavailable");
+            return;
+        }
         g_backup_place(ctrl);
         return;
     }
@@ -224,6 +229,10 @@ void craft_execute(void* ctrl) {
     if (g_backup_mixing == nullptr) return;
     const contracts::CraftResultApi* api = craft_api();
     if (api == nullptr) {
+        if (craft_result_unavailable_is_fail_closed(infra::config_get_bool(kGateKey, false))) {
+            QOL_LOG_WARN(kDomain, "craft blocked reason=craft_result unavailable");
+            return;
+        }
         g_backup_mixing(ctrl);
         return;
     }
@@ -287,6 +296,11 @@ int64_t craft_rand64_adapter(int lo, int hi) {
 int make_item_execute(int32_t mix_type, void** out_item) {
     int32_t result = -1;
     const contracts::CraftResultApi* api = craft_api();
+    if (api == nullptr &&
+        craft_result_unavailable_is_fail_closed(infra::config_get_bool(kGateKey, false))) {
+        QOL_LOG_WARN(kDomain, "make item blocked reason=craft_result unavailable");
+        return 1;
+    }
     if (api != nullptr && out_item != nullptr) {
         contracts::CraftMakeItemInput in{};
         in.mix_type = static_cast<uint32_t>(mix_type);

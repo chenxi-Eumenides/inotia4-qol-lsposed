@@ -11,6 +11,7 @@ namespace qol::features::quest {
 namespace {
 
 std::atomic<bool> g_gate{false};
+infra::FrameTaskId g_resync_task = 0;
 
 }  // namespace
 
@@ -22,16 +23,25 @@ bool gate_enabled() {
     return g_gate.load(std::memory_order_acquire);
 }
 
+void cancel_resync_task() {
+    const infra::FrameTaskId task = g_resync_task;
+    g_resync_task = 0;
+    infra::scheduler_remove(task);
+}
+
 void on_save_enter(void* ctx) {
     (void)ctx;
+    cancel_resync_task();
     if (!g_gate.load(std::memory_order_acquire)) return;  // deactivate 后 no-op
     // world 已就绪；在下一个逻辑帧点执行一次（count=1，触发后自动注销）。
-    infra::scheduler_add(infra::FramePoint::kLogicPre, &resync_tick, nullptr, 1, 1);
+    g_resync_task = infra::scheduler_add(infra::FramePoint::kLogicPre, &resync_tick,
+                                         nullptr, 1, 1);
 }
 
 bool resync_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
+    g_resync_task = 0;
     if (!g_gate.load(std::memory_order_acquire)) return false;  // 一次性：无论如何注销
     if (!game_in_world()) return false;
 

@@ -8,6 +8,7 @@
 #include "contracts/events.h"
 #include "core/native/qol_log.h"
 #include "plugins/custom_recipe/feature.h"
+#include "plugins/custom_recipe/table.h"
 #include "infra/config.h"
 #include "infra/events.h"
 
@@ -54,6 +55,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         g_config_subscription = 0;
     }
     set_enabled(false);
+    ::custom_recipe::custom_recipe_table_deactivate();
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -64,6 +66,8 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_enabled(false);
+    // 先于 capability 注销撤回表注入，避免撤销窗口出现「表仍在、craft_result 已缺失」。
+    ::custom_recipe::custom_recipe_table_deactivate();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

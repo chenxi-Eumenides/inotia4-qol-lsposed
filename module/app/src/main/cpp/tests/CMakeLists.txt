@@ -558,3 +558,67 @@ target_compile_features(text_layer_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(text_layer_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(text_layer_plugin_tests PRIVATE Threads::Threads)
 add_test(NAME text_layer_plugin_tests COMMAND text_layer_plugin_tests)
+
+# Quest scheduler 生命周期与撤销门禁 host 测试。
+add_executable(quest_lifecycle_tests
+    test_quest_lifecycle.cpp
+    ${CPP_DIR}/plugins/quest/plugin.cpp
+    ${CPP_DIR}/plugins/quest/feature.cpp
+    ${CPP_DIR}/infra/scheduler.cpp
+    ${CPP_DIR}/infra/runtime.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(quest_lifecycle_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(quest_lifecycle_tests PRIVATE cxx_std_17)
+set_target_properties(quest_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(quest_lifecycle_tests PRIVATE Threads::Threads)
+add_test(NAME quest_lifecycle_tests COMMAND quest_lifecycle_tests)
+
+# attribute_range wrapper 撤销期透传 host 测试。
+add_executable(attribute_range_wrapper_tests
+    test_attribute_range_wrappers.cpp
+    ${CPP_DIR}/plugins/attribute_range/feature.cpp
+    ${CPP_DIR}/domains/attribute_range/rules.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(attribute_range_wrapper_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(attribute_range_wrapper_tests PRIVATE cxx_std_17)
+set_target_properties(attribute_range_wrapper_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(attribute_range_wrapper_tests PRIVATE Threads::Threads)
+add_test(NAME attribute_range_wrapper_tests COMMAND attribute_range_wrapper_tests)
+
+# world_teleport 安装结果语义 host 测试。
+add_executable(world_teleport_status_tests
+    test_world_teleport_status.cpp
+)
+target_include_directories(world_teleport_status_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(world_teleport_status_tests PRIVATE cxx_std_17)
+add_test(NAME world_teleport_status_tests COMMAND world_teleport_status_tests)
+
+# save_backup 回滚结构化结果 host 测试。
+add_executable(save_backup_rollback_tests
+    test_save_backup_rollback.cpp
+)
+target_include_directories(save_backup_rollback_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(save_backup_rollback_tests PRIVATE cxx_std_17)
+add_test(NAME save_backup_rollback_tests COMMAND save_backup_rollback_tests)
+
+# craft_ui 能力缺失时的 fail-closed 门禁纯逻辑 host 测试。
+add_executable(craft_ui_guard_tests
+    test_craft_ui_guard.cpp
+)
+target_include_directories(craft_ui_guard_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(craft_ui_guard_tests PRIVATE cxx_std_17)
+add_test(NAME craft_ui_guard_tests COMMAND craft_ui_guard_tests)

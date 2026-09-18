@@ -23,6 +23,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
+    cancel_resync_task();
     // 注销 legacy 回调：设施迁移前与注册成对，避免停用后仍收到 save_enter。
     save_enter_unregister(&on_save_enter, nullptr);
 }
@@ -36,6 +37,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
+    cancel_resync_task();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

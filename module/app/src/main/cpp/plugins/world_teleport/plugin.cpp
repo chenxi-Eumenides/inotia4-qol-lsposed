@@ -29,6 +29,8 @@ constexpr int64_t kBranchRange = 0x08000000LL;
 std::mutex g_world_teleport_mtx;
 bool g_installed = false;
 void* g_trampoline = nullptr;
+InstallDisposition g_install_disposition = InstallDisposition::kFailed;
+const char* g_install_error = nullptr;
 
 bool encode_b(uintptr_t from, uintptr_t to, uint32_t* out) {
     if (from == 0 || to == 0 || out == nullptr) return false;
@@ -154,13 +156,27 @@ bool install_entry_patch(bool* supported) {
 bool install_world_teleport_if_ready() {
     std::lock_guard<std::mutex> lock(g_world_teleport_mtx);
     if (g_installed) return true;
-    if (!bridge_ready() || g_base == 0) return false;
+    if (!bridge_ready() || g_base == 0) {
+        g_install_disposition = InstallDisposition::kFailed;
+        g_install_error = "install failed: world teleport dependencies not ready";
+        return false;
+    }
     bool supported = false;
-    if (!install_entry_patch(&supported)) return false;
-    if (!supported) return true;
+    if (!install_entry_patch(&supported)) {
+        g_install_disposition = InstallDisposition::kFailed;
+        g_install_error = "install failed: world teleport entry patch unavailable";
+        return false;
+    }
+    if (!supported) {
+        g_install_disposition = InstallDisposition::kUnsupported;
+        g_install_error = install_error(g_install_disposition);
+        return false;
+    }
     // 选择框组件已迁移为独立插件（provider=plugins/native_choice）：经 optional_requires
     // 声明消费，不再由本插件安装。
     g_installed = true;
+    g_install_disposition = InstallDisposition::kInstalled;
+    g_install_error = nullptr;
     return true;
 }
 
@@ -176,10 +192,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
-    // 入口 patch 为 legacy 机制（见 plugin.h）；失败只记日志，不影响装机（与迁移前
-    // nativeInit 忽略 world_teleport_install_if_ready 返回值一致）。
-    install_world_teleport_if_ready();
-    return 0;
+    // 入口 patch 为 legacy 机制（见 plugin.h）；安装失败必须进入 failed，不能伪装成常驻成功。
+    return install_world_teleport_if_ready() && install_succeeded(g_install_disposition) ? 0 : 1;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
@@ -197,8 +211,8 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
-    out.enabled = true;  // 零资源、无配置门禁：常开
-    out.error = nullptr;
+    out.enabled = g_installed;  // 零资源、无配置门禁：仅安装成功时常开
+    out.error = g_install_error != nullptr ? g_install_error : install_error(g_install_disposition);
 }
 
 const contracts::PluginDescriptor kDescriptor = {

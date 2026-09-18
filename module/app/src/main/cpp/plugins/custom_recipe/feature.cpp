@@ -210,7 +210,6 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
 bool api_enabled() { return enabled(); }
 
 bool api_three_slot_mode_active(uint32_t mix_type) {
-    if (!enabled()) return false;
     const ::custom_recipe::Def* def = ::custom_recipe::def_for_mix_type(mix_type);
     return def != nullptr && def->kind == ::custom_recipe::Kind::kThreeSlotCraft;
 }

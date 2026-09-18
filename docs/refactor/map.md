@@ -30,40 +30,40 @@
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 462 |
 | `domains/` | 2 | 111 |
-| `plugins/` | 145 | 28422 |
-| `host/` | 12 | 2140 |
-| **合计** | **251** | **38445** |
+| `plugins/` | 146 | 28591 |
+| `host/` | 12 | 2210 |
+| **合计** | **252** | **38684** |
 
 ### 已迁移插件（`plugins/*`）
 
-- `plugins/attribute_range/`：4 文件 / 303 行
+- `plugins/attribute_range/`：4 文件 / 313 行
 - `plugins/autosell/`：14 文件 / 1925 行
 - `plugins/core.ui/`：14 文件 / 1522 行
-- `plugins/craft_ui/`：4 文件 / 670 行
-- `plugins/custom_recipe/`：10 文件 / 1940 行
+- `plugins/craft_ui/`：4 文件 / 690 行
+- `plugins/custom_recipe/`：10 文件 / 1943 行
 - `plugins/extension_bag/`：39 文件 / 13112 行
 - `plugins/inventory_hooks/`：9 文件 / 1922 行
 - `plugins/native_choice/`：4 文件 / 466 行
 - `plugins/push_all/`：6 文件 / 267 行
-- `plugins/quest/`：4 文件 / 162 行
-- `plugins/save_backup/`：11 文件 / 4125 行
+- `plugins/quest/`：4 文件 / 177 行
+- `plugins/save_backup/`：12 文件 / 4205 行
 - `plugins/simple_mode/`：6 文件 / 462 行
 - `plugins/special_equip/`：6 文件 / 431 行
 - `plugins/stack_limit/`：2 文件 / 103 行
 - `plugins/text_layer/`：6 文件 / 427 行
-- `plugins/world_teleport/`：6 文件 / 585 行
+- `plugins/world_teleport/`：6 文件 / 626 行
 
 ### CTest target 分类
 
-- 全仓 target 总数：**39**
-- 新架构/已迁移：**30**（机制/宿主 18 + 已迁移功能 12）
-- legacy：**9**
+- 全仓 target 总数：**44**
+- 新架构/已迁移：**32**（机制/宿主 18 + 已迁移功能 14）
+- legacy：**12**
 
-新架构/已迁移（30）：
+新架构/已迁移（32）：
 - 机制/宿主（18）：`capability_lifecycle_tests`、`extension_bag_contract_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_panels_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
-- 已迁移功能（12）：`attribute_range_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`、`text_layer_plugin_tests`
+- 已迁移功能（14）：`attribute_range_tests`、`attribute_range_wrapper_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`quest_lifecycle_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`、`text_layer_plugin_tests`
 
-legacy（9）：`core_ui_panels_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`stage4_hook_tests`、`transition_dispatch_tests`
+legacy（12）：`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`world_teleport_status_tests`
 <!-- END GENERATED:stats -->
 
 ## 人工导航

@@ -19,6 +19,12 @@ namespace qol::features::craft_ui {
 // 填入格数量（与 game/access/craft 同值）。
 constexpr size_t kStuffSlotCount = qol::game::kCraftStuffSlotCount;
 
+// 配置仍开启但结果能力缺失时，hook 仍处于模块上下文，必须拒绝原版回落；配置关闭时
+// 旧面板撤销窗口仍允许透传原版路径。
+constexpr bool craft_result_unavailable_is_fail_closed(bool module_gate_enabled) {
+    return module_gate_enabled;
+}
+
 // ---- 文案与音效：界面层的知识（出什么结果该说什么话）----
 constexpr uint32_t kTextNoBagSpace = 5;             // 「背包空间不足，无法进行操作。」
 constexpr uint32_t kTextOnlyJewel = 97;             // 「只有宝石道具才可以。」

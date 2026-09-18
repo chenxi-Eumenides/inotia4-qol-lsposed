@@ -64,10 +64,16 @@ bool active() {
 }
 
 int math_get_random_wrapper(int min, int max) {
+    if (!active()) return qol::game::attr_math_get_random(min, max);
     return qol::game::attr_math_get_random(min, max);
 }
 
 void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int value) {
+    if (!active()) {
+        const auto backup = reinterpret_cast<AddOptionFn>(qol::game::attr_backup_add_option());
+        if (backup != nullptr) backup(builder, type, option_index, value);
+        return;
+    }
     char* before = (builder != nullptr) ? *reinterpret_cast<char**>(builder) : nullptr;
     const auto backup = reinterpret_cast<AddOptionFn>(qol::game::attr_backup_add_option());
     if (backup != nullptr) backup(builder, type, option_index, value);
@@ -92,6 +98,10 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
 }
 
 uintptr_t uid_desc_make_item_wrapper(void* item, void* character, void* arg2) {
+    if (!active()) {
+        const auto backup = reinterpret_cast<MakeItemFn>(qol::game::attr_backup_make_item());
+        return (backup != nullptr) ? backup(item, character, arg2) : 0;
+    }
     void* previous = t_current_item;
     t_current_item = item;
     uintptr_t result = 0;

@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -31,6 +32,7 @@
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
 #include "plugins/save_backup/bundle.h"
+#include "plugins/save_backup/rollback.h"
 #include "game/access/save.h"
 #include "infra/store.h"
 
@@ -180,9 +182,9 @@ bool copy_file(const std::string& from, const std::string& to) {
     return ok;
 }
 
-void remove_file(const std::string& path) {
-    if (path.empty()) return;
-    ::unlink(path.c_str());
+bool remove_file(const std::string& path) {
+    if (path.empty()) return true;
+    return ::unlink(path.c_str()) == 0 || errno == ENOENT;
 }
 
 std::string file_name_of(const std::string& path) {
@@ -460,23 +462,56 @@ int locate_save_directory(std::string& out) {
 
 // 导入失败还原：dat 按 .rollback 副本还原；sidecar 仅在本次已改动时经 store 还原为
 // 导入前快照（prev_container）。导入前无可用 primary（prev_container_exists=false）时删除该槽 sidecar。
-void restore_from_rollback(int slot, const std::string& dat_path, const std::string& rb_dat,
-                           bool dat_existed, const std::vector<uint8_t>& prev_container,
-                           bool prev_container_exists, bool sidecar_touched) {
+bool preserve_rollback_record(const std::string& path, const uint8_t* data, size_t size) {
+    return write_file_bytes_atomic(path, data, size);
+}
+
+save_backup::RollbackResult restore_from_rollback(
+    int slot, const std::string& dat_path, const std::string& rb_dat, bool dat_existed,
+    const std::vector<uint8_t>& prev_container, bool prev_container_exists, bool sidecar_touched) {
+    save_backup::RollbackResult result;
     if (dat_existed) {
-        if (file_exists(rb_dat)) copy_file(rb_dat, dat_path);
+        result.dat_restored = file_exists(rb_dat) && copy_file(rb_dat, dat_path);
     } else {
-        remove_file(dat_path);
+        result.dat_restored = remove_file(dat_path);
     }
     if (sidecar_touched) {
         if (prev_container_exists) {
-            qol::infra::store::import_container(slot, prev_container.data(),
-                                                prev_container.size());
+            result.sidecar_restored = qol::infra::store::import_container(
+                                         slot, prev_container.data(), prev_container.size()) ==
+                                     qol::infra::store::Status::kOk;
         } else {
-            qol::infra::store::delete_slot(slot);
+            result.sidecar_restored =
+                qol::infra::store::delete_slot(slot) == qol::infra::store::Status::kOk;
         }
     }
-    remove_file(rb_dat);
+    if (result.complete()) {
+        remove_file(rb_dat);
+        return result;
+    }
+
+    // 还原不完整时保留已有副本；sidecar 原状只在内存快照中，另写一份记录供人工恢复。
+    if (dat_existed && !file_exists(rb_dat)) result.evidence_preserved = false;
+    if (!dat_existed && !result.dat_restored) {
+        result.evidence_preserved = preserve_rollback_record(rb_dat + ".dat-missing", nullptr, 0) &&
+                                    result.evidence_preserved;
+    }
+    if (sidecar_touched && !result.sidecar_restored) {
+        const std::string sidecar_record = rb_dat + ".module-save";
+        if (prev_container_exists) {
+            result.evidence_preserved =
+                preserve_rollback_record(sidecar_record, prev_container.data(), prev_container.size()) &&
+                result.evidence_preserved;
+        } else {
+            static constexpr char kMissingSidecar[] = "missing\n";
+            result.evidence_preserved = preserve_rollback_record(
+                                            sidecar_record,
+                                            reinterpret_cast<const uint8_t*>(kMissingSidecar),
+                                            sizeof(kMissingSidecar) - 1) &&
+                                        result.evidence_preserved;
+        }
+    }
+    return result;
 }
 
 }  // namespace
@@ -877,9 +912,11 @@ std::string save_backup_import_json(const char* checksum, int slot) {
 
     // 4) 原子写原版 .dat（tmp+rename）。
     if (!write_file_bytes_atomic(dat_path, cipher.data(), cipher.size())) {
-        restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
-                              prev_container_exists, sidecar_touched);
-        return op_err("save file write failed");
+        const save_backup::RollbackResult rollback = restore_from_rollback(
+            slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+            sidecar_touched);
+        return op_err(rollback.complete() ? "save file write failed"
+                                           : "save file write failed; rollback failed");
     }
 
     // 5) sidecar：经 infra/store 重定槽（按源容器头槽号校验）并双写 primary + last-good；
@@ -889,9 +926,11 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         const qol::infra::store::Status status = qol::infra::store::import_container(
             slot, parsed.module.data(), parsed.module.size());
         if (status != qol::infra::store::Status::kOk) {
-            restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
-                                  prev_container_exists, sidecar_touched);
-            return op_err("module container import failed");
+            const save_backup::RollbackResult rollback = restore_from_rollback(
+                slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                sidecar_touched);
+            return op_err(rollback.complete() ? "module container import failed"
+                                               : "module container import failed; rollback failed");
         }
     }
 
@@ -910,14 +949,31 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     };
     std::vector<WhRollback> wh_rollback;
     auto restore_warehouse = [&wh_rollback]() {
+        save_backup::RollbackResult result;
         for (auto it = wh_rollback.rbegin(); it != wh_rollback.rend(); ++it) {
+            bool restored = true;
             if (it->existed) {
-                if (file_exists(it->rb)) copy_file(it->rb, it->target);
+                restored = file_exists(it->rb) && copy_file(it->rb, it->target);
             } else {
-                remove_file(it->target);
+                restored = remove_file(it->target);
             }
-            remove_file(it->rb);
+            if (restored) {
+                remove_file(it->rb);
+            } else {
+                result.warehouse_restored = false;
+                if (it->existed) {
+                    result.evidence_preserved = file_exists(it->rb) && result.evidence_preserved;
+                } else {
+                    static constexpr char kMissingWarehouse[] = "warehouse target was absent\n";
+                    result.evidence_preserved = preserve_rollback_record(
+                                                    it->target + ".rollback-failed",
+                                                    reinterpret_cast<const uint8_t*>(kMissingWarehouse),
+                                                    sizeof(kMissingWarehouse) - 1) &&
+                                                result.evidence_preserved;
+                }
+            }
         }
+        return result;
     };
     if (wh_write) {
         size_t wh_written = 0;
@@ -933,18 +989,24 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                 rb = rollback_dir + "/" + file_name_of(target);
                 if (!copy_file(target, rb)) {
                     remove_file(rb);  // 清理可能写了一半的副本
-                    restore_warehouse();
-                    restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
-                                          prev_container_exists, sidecar_touched);
-                    return op_err("rollback backup failed");
+                    const save_backup::RollbackResult warehouse_rollback = restore_warehouse();
+                    const save_backup::RollbackResult core_rollback = restore_from_rollback(
+                        slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                        sidecar_touched);
+                    return op_err(warehouse_rollback.complete() && core_rollback.complete()
+                                      ? "rollback backup failed"
+                                      : "rollback backup failed; rollback failed");
                 }
             }
             wh_rollback.push_back(WhRollback{target, rb, existed});
             if (!write_file_bytes_atomic(target, payload.data(), payload.size())) {
-                restore_warehouse();
-                restore_from_rollback(slot, dat_path, rb_dat, dat_existed, prev_container,
-                                      prev_container_exists, sidecar_touched);
-                return op_err("warehouse file write failed");
+                const save_backup::RollbackResult warehouse_rollback = restore_warehouse();
+                const save_backup::RollbackResult core_rollback = restore_from_rollback(
+                    slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                    sidecar_touched);
+                return op_err(warehouse_rollback.complete() && core_rollback.complete()
+                                  ? "warehouse file write failed"
+                                  : "warehouse file write failed; rollback failed");
             }
             ++wh_written;
             if ((wf.flags & save_backup::kWarehouseFlagPlain) != 0) ++wh_reencrypted;

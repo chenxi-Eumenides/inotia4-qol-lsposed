@@ -1,5 +1,32 @@
 #pragma once
 
+#include <cstdint>
+
+namespace qol::features::world_teleport {
+
+enum class InstallDisposition : uint8_t {
+    kInstalled = 0,
+    kUnsupported = 1,
+    kFailed = 2,
+};
+
+constexpr bool install_succeeded(InstallDisposition disposition) {
+    return disposition == InstallDisposition::kInstalled;
+}
+
+constexpr const char* install_error(InstallDisposition disposition) {
+    switch (disposition) {
+        case InstallDisposition::kInstalled:
+            return nullptr;
+        case InstallDisposition::kUnsupported:
+            return "unsupported: world teleport entry instruction fingerprint";
+        case InstallDisposition::kFailed:
+            return "install failed: world teleport entry patch unavailable";
+    }
+    return "install failed: world teleport entry patch unavailable";
+}
+
+}  // namespace qol::features::world_teleport
 // 世界传送 4 选项插件业务层：拦截地图名横幅尾部，改为原生 UICHOICE 面板。
 // 入口指令 patch（UIPlay_CallMapName 尾部）属过渡期 legacy 机制，由 plugin.cpp 的
 // install 安装（见 plugin.h 说明）；本层只做面板/确认/扣费/切图的业务编排。

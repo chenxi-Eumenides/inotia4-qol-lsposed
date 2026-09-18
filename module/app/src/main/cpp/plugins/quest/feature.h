@@ -22,6 +22,9 @@ namespace qol::features::quest {
 void set_gate(bool enabled);
 bool gate_enabled();
 
+// 移除当前一次性重算任务；停用和重新进档前调用，保证不会遗留旧任务。
+void cancel_resync_task();
+
 // save_enter 回调（游戏主线程、world 就绪后触发）：注册一次性逻辑帧任务。
 void on_save_enter(void* ctx);
 
