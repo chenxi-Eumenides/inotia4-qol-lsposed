@@ -140,8 +140,8 @@
 | --- | --- | --- |
 | `host` | `infra` | 32 |
 | `host` | `game` | 14 |
+| `plugins/autosell` | `infra` | 13 |
 | `host` | `contracts` | 12 |
-| `plugins/autosell` | `infra` | 12 |
 | `plugins/extension_bag` | `contracts` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
@@ -150,9 +150,9 @@
 | `host` | `patch` | 9 |
 | `plugins/autosell` | `contracts` | 9 |
 | `plugins/autosell` | `game` | 8 |
+| `plugins/extension_bag` | `infra` | 8 |
 | `plugins/save_backup` | `infra` | 8 |
 | `domains/world` | `game` | 7 |
-| `host` | `hooks` | 7 |
 
 ### 2.2 include 环
 

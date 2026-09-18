@@ -8,6 +8,16 @@
 #include "core/native/sell_price.h"
 #include "game/read/stack_codec.h"
 #include "contracts/stack_limit.h"
+#include "infra/capabilities.h"
+
+// D2b 过渡访问器（声明见 core/native/extension_bag_port.h）：game 层不能直接 require
+// infra，经此后取能力接口。每次调用 require，不缓存；能力缺失/撤销中返回 nullptr。
+const qol::contracts::ExtensionBagApi* extension_bag_capability() {
+    return static_cast<const qol::contracts::ExtensionBagApi*>(qol::infra::require_capability(
+        qol::contracts::kExtensionBagCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)}));
+}
 
 namespace {
 

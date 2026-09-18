@@ -6,13 +6,15 @@
 
 #include "inventory_trade.h"
 
-#include "core/native/extension_bag_port.h"
+#include "contracts/extension_bag.h"
 #include "core/native/qol_log.h"
+#include "core/native/sell_price.h"
 #include "game/read/stack_codec.h"
 #include "contracts/stack_limit.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_symbols.h"
+#include "infra/capabilities.h"
 
 #include <cstdint>
 #include <mutex>
@@ -22,6 +24,35 @@ namespace inventory_trade {
 namespace {
 
 std::mutex g_inventory_trade_mtx;
+
+// D2b：extension_bag 能力每次调用现取（不缓存跨帧指针）。能力缺失 = EB disabled。
+const qol::contracts::ExtensionBagApi* extension_bag_api() {
+    return static_cast<const qol::contracts::ExtensionBagApi*>(qol::infra::require_capability(
+        qol::contracts::kExtensionBagCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)}));
+}
+
+// 能力可用时走 provider 的 sell_price；缺失时按 provider 同一算法复现。
+// 原因：port 的 sell_price 内部没有 enabled 门禁，是纯价格计算（变体折扣 R-23、堆叠
+// 收敛与边界 R-37），EB 关闭时物理袋出售/自动出售仍需结算；直接降级为 -1 会破坏行为中性。
+int64_t sell_price_with_fallback(const qol::contracts::ExtensionBagApi* api, void* item, int count) {
+    if (api != nullptr && api->sell_price != nullptr) {
+        return api->sell_price(item, count, true);
+    }
+    if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
+    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
+    const uint32_t legal_count = stack_codec::effective_clamp(
+        static_cast<uint32_t>(count), stack_limit_enabled());
+    int64_t final_price = 0;
+    if (!sell_price::calculate(unit_price, legal_count, true, &final_price)) return -1;
+    return final_price;
+}
+
+// 投影同步：port 在 EB disabled 时实际为 no-op（无模块视图）；能力缺失时跳过等价。
+void sync_projected_slot_if_available(const qol::contracts::ExtensionBagApi* api, int bag, int slot) {
+    if (api != nullptr && api->sync_projected_slot != nullptr) api->sync_projected_slot(bag, slot);
+}
 
 Result sell_locked(int bag, int slot, const void* expected_item, const char* source) {
     Result result;
@@ -76,7 +107,8 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         ? fn_get_cumulate_count(item) : 1;
     result.count = count;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const int64_t price = extension_bag_sell_price(item, count);  // 默认变体折扣 70%
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_api();
+    const int64_t price = sell_price_with_fallback(eb, item, count);  // 默认变体折扣 70%
     if (price < 0) {
         QOL_LOG_WARN(QolDomain::kInventory,
                      "sell price reject reason=price_bounds source=%s category=%d count=%d "
@@ -112,7 +144,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kRemoveFailed;
         return result;
     }
-    extension_bag_sync_projected_slot(bag, slot);
+    sync_projected_slot_if_available(eb, bag, slot);
     result.status = Status::kOk;
     return result;
 }
@@ -130,7 +162,7 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
     }
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
     if (fn_remove_item(item_ref.native_item) == 0) return Status::kRemoveFailed;
-    extension_bag_sync_projected_slot(bag, slot);
+    sync_projected_slot_if_available(extension_bag_api(), bag, slot);
     return Status::kOk;
 }
 

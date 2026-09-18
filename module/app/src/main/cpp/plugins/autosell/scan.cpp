@@ -1,14 +1,14 @@
 // autosell_scan.cpp —— 自动出售扫描与主线程逐帧 tick（阶段 B）。
 //
 // 扫描范围：原版物理袋 0..4（for_each_bag_slot，排除任务袋 5）+ 扩展逻辑袋 5 个
-// （6..10，经稳定端口 inventory_item_ref_at 逐槽读取，每次调用自行取放锁；
-// 不在 extension_bag_for_each_logical_item 回调内处置）。
+// （6..10，经稳定原语 inventory_item_ref_at 逐槽读取，每次调用自行取放锁；
+// 不在逻辑袋遍历回调内处置）。
 // 处置：autosell_build_view -> should_sell -> NoSell 预过滤
 //       -> inventory_trade::sell(bag, slot, ref.native_item, "autosell")（I-1 身份复核）。
 
 #include "plugins/autosell/scan.h"
 
-#include "core/native/extension_bag_port.h"
+#include "contracts/extension_bag.h"
 #include "core/native/inventory_trade.h"
 #include "core/native/qol_log.h"
 #include "core/native/save_enter.h"
@@ -18,6 +18,7 @@
 #include "plugins/autosell/view.h"
 #include "game_access.h"
 #include "game_state.h"
+#include "infra/capabilities.h"
 #include "infra/scheduler.h"
 
 #include <atomic>
@@ -37,6 +38,14 @@ qol::infra::FrameTaskId g_task = 0;  // 周期扫描任务句柄（0=未注册�
 std::atomic<bool> g_global_enabled{false};  // 全局开关；JVM 线程写、主线程读
 std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置位）；主线程写
 
+// D2b：extension_bag 能力每次调用现取（不缓存跨帧指针）；能力缺失 = EB disabled。
+const qol::contracts::ExtensionBagApi* extension_bag_api() {
+    return static_cast<const qol::contracts::ExtensionBagApi*>(qol::infra::require_capability(
+        qol::contracts::kExtensionBagCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)}));
+}
+
 struct ScanStats {
     int sold = 0;
     int failed = 0;
@@ -47,13 +56,16 @@ struct PhysicalScanCtx {
     ScanStats* stats;
 };
 
-// 安全门控：世界态 + g_gamestate==0 + 扩展背包模块视图未安装。
+// 安全门控：世界态 + g_gamestate==0 + 扩展背包模块视图未安装（能力缺失视为未安装）。
 bool scan_gates_ok() {
     if (!game_in_world()) return false;
     const uint32_t gamestate =
         g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
     if (gamestate != 0) return false;
-    if (extension_bag_module_view_installed()) return false;
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_api();
+    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
+        return false;
+    }
     return true;
 }
 
@@ -111,15 +123,19 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
         return false;  // 继续遍历
     }, &physical);
 
-    // 扩展逻辑袋 6..10：逐槽经稳定端口读取（每次自行取放锁）。
-    for (int bag = kLogicalBagScanFirst; bag < kLogicalBagScanFirst + kLogicalBagScanCount; ++bag) {
-        if (!extension_bag_is_logical_bag(bag)) continue;
-        for (int slot = 0; slot < kSlotCount; ++slot) {
-            InventoryItemRef ref;
-            if (!inventory_item_ref_at(bag, slot, &ref)) continue;
-            if (ref.kind != InventoryItemKind::kExtension) continue;
-            if (ref.native_item == nullptr || ref.category <= 0) continue;
-            process_ref(ref, cfg, &stats);
+    // 扩展逻辑袋 6..10：逐槽经能力接口读取（每次自行取放锁）。能力缺失 = EB disabled，
+    // 逻辑袋视为不存在，不进入扩展扫描。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_api();
+    if (eb != nullptr && eb->is_logical_bag != nullptr) {
+        for (int bag = kLogicalBagScanFirst; bag < kLogicalBagScanFirst + kLogicalBagScanCount; ++bag) {
+            if (!eb->is_logical_bag(bag)) continue;
+            for (int slot = 0; slot < kSlotCount; ++slot) {
+                InventoryItemRef ref;
+                if (!inventory_item_ref_at(bag, slot, &ref)) continue;
+                if (ref.kind != InventoryItemKind::kExtension) continue;
+                if (ref.native_item == nullptr || ref.category <= 0) continue;
+                process_ref(ref, cfg, &stats);
+            }
         }
     }
 

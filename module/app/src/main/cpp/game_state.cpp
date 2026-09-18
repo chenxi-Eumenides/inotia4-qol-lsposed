@@ -7,6 +7,8 @@
 #include "core/native/extension_bag_port.h"
 #include "core/native/frame_task.h"
 
+#include "contracts/extension_bag.h"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -213,19 +215,26 @@ bool find_inventory_item_ref(int category, InventoryItemRef* out) {
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
     *out = {};
-    if (extension_bag_is_logical_bag(bag)) {
+    // D2b：扩展逻辑袋读取经能力接口现取（不缓存跨帧指针）。能力缺失 = EB disabled：
+    // 逻辑袋 6..10 视为不存在，直接落回下方物理袋路径（bag >= 5 返回 false）。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->is_logical_bag != nullptr && eb->is_logical_bag(bag)) {
         struct Ctx { int bag; int slot; InventoryItemRef* out; } ctx{bag, slot, out};
-        extension_bag_for_each_logical_item([](int item_bag, int item_slot, int category, int count,
-                                               void* c) -> bool {
+        if (eb->for_each_logical_item == nullptr || eb->internal_index == nullptr ||
+            eb->item_at == nullptr) {
+            return false;
+        }
+        eb->for_each_logical_item([](int32_t item_bag, int32_t item_slot, int32_t category,
+                                     int32_t count, void* c) -> bool {
             Ctx* p = static_cast<Ctx*>(c);
             if (item_bag != p->bag || item_slot != p->slot) return false;
             *p->out = {InventoryItemKind::kExtension, item_bag, item_slot, category, count, nullptr};
             return true;
         }, &ctx);
         if (out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot) {
-            const int internal_bag = extension_bag_internal_index(bag);
+            const int internal_bag = eb->internal_index(bag);
             if (internal_bag < 0) return false;
-            out->native_item = extension_bag_item_at(internal_bag, slot);
+            out->native_item = eb->item_at(internal_bag, slot);
         }
         return out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot;
     }
@@ -256,7 +265,11 @@ void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
         }, &state);
     }
     if (state.stopped) return;
-    extension_bag_for_each_logical_item([](int bag, int slot, int category, int count, void* c) -> bool {
+    // D2b：逻辑袋遍历经能力接口现取；能力缺失 = EB disabled，不并扩展袋（与原 disabled 路径一致）。
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb == nullptr || eb->for_each_logical_item == nullptr) return;
+    eb->for_each_logical_item([](int32_t bag, int32_t slot, int32_t category, int32_t count,
+                                 void* c) -> bool {
         Ctx* p = static_cast<Ctx*>(c);
         const InventoryItemRef ref{InventoryItemKind::kExtension, bag, slot, category, count, nullptr};
         p->stopped = p->fn(ref, p->ctx);

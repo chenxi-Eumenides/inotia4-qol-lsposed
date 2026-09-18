@@ -3,6 +3,8 @@
 #include <string>
 #include <cstdint>
 
+#include "contracts/extension_bag.h"
+
 using LogicalInventoryItemFn = bool (*)(int bag, int slot, int category, int count, void* ctx);
 
 // Optional extension-bag projection port used by the API inventory view.
@@ -61,3 +63,9 @@ void extension_bag_show_not_empty_popup();
 std::string extension_bag_use_item(int bag, int slot);
 std::string extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot);
+
+// D2b 过渡访问器：game 层不能直接 include infra（依赖矩阵禁止 game → infra），
+// 经本函数按需取 extension_bag 能力接口（能力缺失/撤销中返回 nullptr）。
+// 每次调用现取；返回值禁止跨帧缓存（capability 撤销后接口对象失效）。
+// D2d：扩展袋库存聚合逻辑迁 domains/inventory 后由 domain 直接 require_capability，删除本访问器。
+const qol::contracts::ExtensionBagApi* extension_bag_capability();

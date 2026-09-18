@@ -30,14 +30,14 @@
 | `hooks/` | 10 | 1479 |
 | `patch/` | 7 | 479 |
 | `domains/` | 2 | 111 |
-| `plugins/` | 101 | 13574 |
+| `plugins/` | 101 | 13590 |
 | `host/` | 12 | 2140 |
-| **合计** | **205** | **23466** |
+| **合计** | **205** | **23482** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_range/`：4 文件 / 303 行
-- `plugins/autosell/`：14 文件 / 1909 行
+- `plugins/autosell/`：14 文件 / 1925 行
 - `plugins/core.ui/`：14 文件 / 1522 行
 - `plugins/craft_ui/`：4 文件 / 670 行
 - `plugins/custom_recipe/`：10 文件 / 1940 行
