@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string>
 
-#include "feature/extension_bag/model/virtual_bag_state.h"
+#include "plugins/extension_bag/model/virtual_bag_state.h"
 
 // Internal-only context accessors. They are not part of the API/core port.
 JNIEnv* extension_bag_current_env();

@@ -12,16 +12,16 @@
 #include "game_state.h"
 #include "game_symbols.h"
 #include "feature/patch/inventory_hook_stage4.h"
-#include "feature/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/ownership_ledger.h"
 #include "game/read/stack_codec.h"
 #include "contracts/stack_limit.h"
-#include "feature/extension_bag/model/virtual_bag_state.h"
+#include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/module_save_port.h"
 #include "core/native/popup_enter_alias.h"
-#include "feature/extension_bag/extension_bag_context.h"
-#include "feature/extension_bag/extension_bag_geometry.h"
-#include "feature/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
 #include "game/access/ui_kit.h"
 #include "infra/scheduler.h"
 
@@ -200,11 +200,11 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
 void store_teardown_locked();
 void mix_teardown_locked();
 
-#include "feature/extension_bag/extension_bag_observation.inc"
+#include "plugins/extension_bag/extension_bag_observation.inc"
 
 void extension_tab_button_clicked(void* ctrl);
 
-#include "feature/extension_bag/extension_bag_tabs.inc"
+#include "plugins/extension_bag/extension_bag_tabs.inc"
 
 // 扩展标签控件事件处理：TouchHandle 转发的控件事件（0x02=click 松开确认，
 // 0x04=drop 到袋）。挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定。
@@ -260,9 +260,9 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
                                                 const char* context, void* use_token);
 
-#include "feature/extension_bag/extension_bag_drag_session.inc"
+#include "plugins/extension_bag/extension_bag_drag_session.inc"
 
-#include "feature/extension_bag/extension_bag_runtime.inc"
+#include "plugins/extension_bag/extension_bag_runtime.inc"
 }  // namespace
 
 bool virtual_bag_native_call_active() {
@@ -630,7 +630,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
     return 0;
 }
 
-#include "feature/extension_bag/extension_bag_public_runtime.inc"
+#include "plugins/extension_bag/extension_bag_public_runtime.inc"
 namespace {
 
 const char* extension_recovery_action_name_locked() {
@@ -900,9 +900,9 @@ void show_extension_bag_no_space_popup() {
 // 派生）→ persist；失败回滚（清位 + 按备份 payload 重建入库）。
 // P4.3：源物品在移除确认后入账本保管，提交/回滚均经 retire 终止保管
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
-#include "feature/extension_bag/extension_bag_equip.inc"
-#include "feature/extension_bag/extension_bag_store.inc"
-#include "feature/extension_bag/extension_bag_mix.inc"
+#include "plugins/extension_bag/extension_bag_equip.inc"
+#include "plugins/extension_bag/extension_bag_store.inc"
+#include "plugins/extension_bag/extension_bag_mix.inc"
 
 }  // namespace
 
@@ -1492,7 +1492,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     return true;
 }
 
-#include "feature/extension_bag/extension_bag_api_impl.inc"
+#include "plugins/extension_bag/extension_bag_api_impl.inc"
 
 // D2a-3b-1：8 条声明式资源（须在全部 wrapper/全局定义之后）。
-#include "feature/extension_bag/extension_bag_claims.inc"
+#include "plugins/extension_bag/extension_bag_claims.inc"

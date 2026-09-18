@@ -1,5 +1,5 @@
-#include "feature/extension_bag/game_ui_virtbag.h"
-#include "feature/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/extension_bag_context.h"
 
 std::string data_op_extension_bag_status_json() {
     return extension_bag_api_status_json_impl();

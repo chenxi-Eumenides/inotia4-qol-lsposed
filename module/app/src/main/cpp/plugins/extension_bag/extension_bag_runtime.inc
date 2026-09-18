@@ -857,14 +857,14 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
 }
 
 
-#include "feature/extension_bag/extension_bag_ownership.inc"
+#include "plugins/extension_bag/extension_bag_ownership.inc"
 
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
     return load_item_payload_locked(descriptor.payload.data(), descriptor.payload_size,
                                     "materialize_module_item");
 }
 
-#include "feature/extension_bag/extension_bag_input.inc"
+#include "plugins/extension_bag/extension_bag_input.inc"
 
 stack_codec::CountEncoding category_is_equip(int category) {
     if (g_base == 0 || category <= 0) return stack_codec::CountEncoding::kUnknown;
@@ -896,7 +896,7 @@ bool category_is_extension_backpack(int category) {
     return class_data[category * stride + 2] == 0x1f;
 }
 
-#include "feature/extension_bag/extension_bag_transaction.inc"
+#include "plugins/extension_bag/extension_bag_transaction.inc"
 bool persist_state_locked(bool force) {
     (void)force;
     // Sidecar writes are owned exclusively by core module_save_game's
@@ -971,5 +971,5 @@ bool item_pointer_known_locked(void* item) {
 // 扩展标签绘制。挂在 DrawInvenBag wrapper（原版袋标签之后、DrawMovingItem 之前）
 // 以避免遮挡拖动中的物品。绘制顺序对齐原版 UIEquip_Draw：
 //   DrawInvenBackground 底框倒序(5→0) → DrawInvenBag 图标+高亮正序(0→5)。
-#include "feature/extension_bag/extension_bag_render.inc"
-#include "feature/extension_bag/extension_bag_lifecycle.inc"
+#include "plugins/extension_bag/extension_bag_render.inc"
+#include "plugins/extension_bag/extension_bag_lifecycle.inc"

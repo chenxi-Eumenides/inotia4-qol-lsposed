@@ -1,6 +1,6 @@
-#include "feature/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/extension_bag_geometry.h"
 
-#include "feature/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_context.h"
 #include "core/native/grid_geometry.h"
 #include "game_access.h"
 #include "game_symbols.h"

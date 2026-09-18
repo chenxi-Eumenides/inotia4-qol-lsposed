@@ -1,10 +1,10 @@
-#include "feature/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_context.h"
 
 #include <algorithm>
 #include <cstring>
 
 #include "core/native/qol_log.h"
-#include "feature/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
 
 namespace {
 

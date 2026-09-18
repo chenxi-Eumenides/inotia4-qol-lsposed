@@ -38,11 +38,11 @@ add_library(gamebridge SHARED
     feature/patch/inventory_hook_stage4.cpp
     game/access/ui_kit.cpp
     game/access/ui_components.cpp
-    feature/extension_bag/game_ui_virtbag.cpp
-    feature/extension_bag/extension_bag_port.cpp
-    feature/extension_bag/extension_bag_persistence.cpp
-    feature/extension_bag/extension_bag_geometry.cpp
-    feature/extension_bag/extension_bag_api.cpp
+    plugins/extension_bag/game_ui_virtbag.cpp
+    plugins/extension_bag/extension_bag_port.cpp
+    plugins/extension_bag/extension_bag_persistence.cpp
+    plugins/extension_bag/extension_bag_geometry.cpp
+    plugins/extension_bag/extension_bag_api.cpp
     domains/attribute_range/rules.cpp
     game/access/attr_range_ui.cpp
     plugins/attribute_range/feature.cpp
@@ -315,7 +315,7 @@ target_sources(gamebridge PRIVATE
     plugins/save_backup/ui/panel.cpp
 )
 
-# D2a-3b-1：extension_bag 声明式资源插件（8 条 claim；wrapper 业务体仍在 feature/extension_bag
+# D2a-3b-1：extension_bag 声明式资源插件（8 条 claim；wrapper 业务体仍在 plugins/extension_bag
 # 与 feature/patch，经 extension_bag_bridge.h / game_patch_bridge.h 交还）
 target_sources(gamebridge PRIVATE
     plugins/extension_bag/plugin.cpp

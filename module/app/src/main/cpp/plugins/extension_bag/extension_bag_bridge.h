@@ -2,10 +2,10 @@
 
 // 扩展背包声明式资源桥（D2a-3b-1）。
 //
-// 与 inventory_hooks 同构：wrapper / OwnershipOps 业务体仍在 feature/extension_bag
+// 与 inventory_hooks 同构：wrapper / OwnershipOps 业务体仍在 plugins/extension_bag
 // （本桥实现收口在 game_ui_virbag.cpp 尾部的 extension_bag_claims.inc），
 // plugins/extension_bag 只经本头取得 8 条资源声明表、交还入口 hook backup、
-// 驱动门禁两态，避免插件 include feature/extension_bag 内部头。
+// 驱动门禁两态，避免插件 include plugins/extension_bag 内部头。
 
 #include <cstdint>
 
@@ -27,7 +27,7 @@ bool extension_bag_set_enabled(bool enabled);
 bool extension_bag_enabled();
 
 // 能力 v1.0 接口表（ExtensionBagApi，37 函数）：成员逐条转发既有 extension_bag_* /
-// virtual_bag_* port 实现（实现收口 feature/extension_bag/extension_bag_port.cpp）。
+// virtual_bag_* port 实现（实现收口 plugins/extension_bag/extension_bag_port.cpp）。
 // 静态存储、生命周期 ≥ 进程；provides 于插件 enabled 时注册、revoking 时注销。
 const qol::contracts::ExtensionBagApi* extension_bag_api_table();
 

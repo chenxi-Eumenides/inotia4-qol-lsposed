@@ -194,17 +194,17 @@
 - `offsets_symbols_header|core/native/inventory_trade.cpp|data/native/game_symbols.h|domains/inventory 层引用符号头`
 - `offsets_symbols_header|core/native/save_enter.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/save_exit.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|feature/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
-- `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|plugins/patch 层引用符号头`
 - `offsets_symbols_header|feature/patch/inventory_hook_stage4.cpp|data/native/game_symbols.h|plugins/patch 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/table.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
+- `offsets_symbols_header|plugins/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
+- `offsets_symbols_header|plugins/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
 
 ### resource_unknown_symbol（2 条）
 
-- `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:149||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:149||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 
@@ -223,7 +223,7 @@
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
-- `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `feature/extension_bag/extension_bag_equip.inc`
+- `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `plugins/extension_bag/extension_bag_equip.inc`
 
 ## 5. JNI 面
 
@@ -237,13 +237,12 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 2 个）与已迁移 `plugins/*`（16 个）共 18 个域。
+旧 `feature/*`（待迁移 1 个）与已迁移 `plugins/*`（16 个）共 17 个域。
 
-### 6.1 旧 `feature/*`（待迁移，2）
+### 6.1 旧 `feature/*`（待迁移，1）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `extension_bag` | `plugins/extension_bag` | 34 |
 | `patch` | `plugins/patch` | 9 |
 
 ### 6.2 已迁移 `plugins/*`（16）
@@ -255,7 +254,7 @@
 | `core.ui` | `plugins/core.ui` | 14 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
-| `extension_bag` | `plugins/extension_bag` | 2 |
+| `extension_bag` | `plugins/extension_bag` | 36 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 2 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |

@@ -2,14 +2,14 @@
 
 #include <cstdint>
 
-#include "feature/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/extension_bag_bridge.h"
 
 // ===========================================================================
 // 扩展背包插件（D2a-3b-1 / D2a-3c）：29 条声明式资源的 owner + extension_bag v1.0 provider
 // ===========================================================================
 //
 // 资源面（a3b-1/a3b-2）：入口 hook / PopupState 占用 / desc 槽命名空间 / move_merge 指针槽
-// 与 C1–C21 call patch 全部声明式化；wrapper 业务体逐字留在 feature/extension_bag 与
+// 与 C1–C21 call patch 全部声明式化；wrapper 业务体逐字留在 plugins/extension_bag 与
 // feature/patch，本文件只做声明与门禁接线。
 //
 // 能力面（a3c）：provides `extension_bag` v1.0（contracts/extension_bag.h 的 ExtensionBagApi），

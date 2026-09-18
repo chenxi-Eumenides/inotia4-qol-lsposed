@@ -7,7 +7,7 @@
 #include "core/native/qol_log.h"
 #include "game/read/stack_codec.h"
 #include "data/native/item_class.h"
-#include "feature/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
 #include "game_access.h"
 #include "game_inventory.h"
 #include "contracts/stack_limit.h"

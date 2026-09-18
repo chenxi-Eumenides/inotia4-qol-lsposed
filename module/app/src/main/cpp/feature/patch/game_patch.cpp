@@ -9,7 +9,7 @@
 #include "data/native/game_symbols.h"
 #include "patch/game_patch_bridge.h"
 #include "game/read/stack_codec.h"
-#include "feature/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
 #include "feature/patch/native_inventory_hook.h"
 
 #include <atomic>

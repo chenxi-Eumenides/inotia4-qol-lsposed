@@ -36,7 +36,7 @@ constexpr size_t kPayloadHeaderSize = 19;      // 1 前缀 + 18 头（真实物�
 constexpr size_t kPayloadCountOffset = 11;     // 载荷内 u32 数量位域偏移（小端）
 constexpr size_t kSerializedItemProbeBuffer = 1024;  // SaveItem 尾部写入校验窗口
 
-#include "feature/extension_bag/model/virtual_bag_payload.h"
+#include "plugins/extension_bag/model/virtual_bag_payload.h"
 
 enum class BagType : uint8_t {
     kNone = 0,
@@ -53,8 +53,8 @@ enum class Mode {
 };
 
 // P5.2a 纯 session 模型。此层不保存 native 指针，也不解释原版 ABI。
-#include "feature/extension_bag/model/virtual_bag_drag_model.inc"
-#include "feature/extension_bag/model/virtual_bag_transaction_types.h"
+#include "plugins/extension_bag/model/virtual_bag_drag_model.inc"
+#include "plugins/extension_bag/model/virtual_bag_transaction_types.h"
 
 struct State {
     std::array<uint8_t, kBagCount> types{};      // 各扩展袋已装备的背包物品 BagType（0=未装备）
@@ -104,8 +104,8 @@ enum class RecoveryAction {
     kNone,       // 无 pending
 };
 
-#include "feature/extension_bag/model/virtual_bag_transaction_rules.inc"
-#include "feature/extension_bag/model/virtual_bag_state_ops.inc"
-#include "feature/extension_bag/model/virtual_bag_serialization.inc"
-#include "feature/extension_bag/model/virtual_bag_state_json.inc"
+#include "plugins/extension_bag/model/virtual_bag_transaction_rules.inc"
+#include "plugins/extension_bag/model/virtual_bag_state_ops.inc"
+#include "plugins/extension_bag/model/virtual_bag_serialization.inc"
+#include "plugins/extension_bag/model/virtual_bag_state_json.inc"
 }  // namespace virtual_bag
