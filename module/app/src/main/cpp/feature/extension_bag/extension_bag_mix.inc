@@ -26,11 +26,6 @@ bool mix_frame_active = false;
 MixSceneNoArgFn mix_original_enter = nullptr;
 MixSceneNoArgFn mix_original_f3 = nullptr;
 uint8_t* mix_state_entry = nullptr;
-uintptr_t mix_draw_patch_addr = 0;
-void* mix_draw_thunk = nullptr;
-uintptr_t mix_bag_draw_patch_addr = 0;
-void* mix_bag_draw_thunk = nullptr;
-bool mix_hooks_ready = false;
 
 uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*);
 void mix_install_module_view_locked(int bag);
@@ -51,10 +46,6 @@ void* mix_item_root_locked() {
 int mix_state_locked() {
     if (g_uimix == nullptr) return 0;
     return *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_STATE);
-}
-
-bool mix_hooks_installed() {
-    return mix_hooks_ready;
 }
 
 int mix_tab_index(void* ctrl) {
@@ -403,34 +394,6 @@ void mix_teardown_locked() {
     mix_frame_active = false;
 }
 
-bool mix_patch_bl_locked(uintptr_t call_addr, uint32_t original_instruction,
-                         void* wrapper, void** thunk, uintptr_t* patched_addr) {
-    if (*patched_addr != 0) return true;
-    const int64_t direct_delta = static_cast<int64_t>(reinterpret_cast<uintptr_t>(wrapper)) -
-                                 static_cast<int64_t>(call_addr);
-    uintptr_t branch_target = reinterpret_cast<uintptr_t>(wrapper);
-    if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL ||
-        direct_delta >= 0x08000000LL) {
-        *thunk = allocate_draw_thunk(call_addr, reinterpret_cast<uintptr_t>(wrapper));
-        if (*thunk == nullptr) return false;
-        branch_target = reinterpret_cast<uintptr_t>(*thunk);
-    }
-    const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
-    if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) return false;
-    const uint32_t replacement = 0x94000000u |
-                                 (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
-    constexpr size_t kPageSize = 4096;
-    const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-    if (mprotect(reinterpret_cast<void*>(page), kPageSize,
-                 PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return false;
-    const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
-    if (current != original_instruction && current != replacement) return false;
-    *reinterpret_cast<uint32_t*>(call_addr) = replacement;
-    __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
-                             reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
-    *patched_addr = call_addr;
-    return true;
-}
 
 // R-57 原版袋列高亮遮蔽：进入扩展视图时，画原版 UIMix_DrawInvenBagGroup 前把当前袋
 // GOT 临时置 kNoOriginalBagSelected(6)，画完恢复 → 原版 6 袋不再高亮（与扩展页
@@ -453,26 +416,4 @@ void mix_draw_inven_bag_group_wrapper() {
     }
     reinterpret_cast<void (*)()>(raw)();
     if (masked) **current_bag = saved_current;
-}
-
-bool install_mix_hooks_locked() {
-    if (mix_hooks_ready) return true;
-    if (g_base == 0) return false;
-
-    const uintptr_t draw_call = g_base + fn_resolve(
-        "F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA", F_SCENE_DRAW_MIX_GRPX_END_CALL_VMA);
-    if (!mix_patch_bl_locked(draw_call, 0x97fd0fa8,
-                             reinterpret_cast<void*>(&mix_draw_end_wrapper),
-                             &mix_draw_thunk, &mix_draw_patch_addr)) return false;
-
-    // R-57 原版袋列高亮遮蔽：UIMix_Draw 内 bl UIMix_DrawInvenBagGroup 调用点。
-    const uintptr_t bag_draw_call = g_base + fn_resolve(
-        "F_UIMIX_DRAW_INVEN_BAG_GROUP_CALL_VMA", F_UIMIX_DRAW_INVEN_BAG_GROUP_CALL_VMA);
-    if (!mix_patch_bl_locked(bag_draw_call, 0x97fffe5e,
-                             reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
-                             &mix_bag_draw_thunk, &mix_bag_draw_patch_addr)) return false;
-
-    mix_hooks_ready = true;
-    VIRTBAG_LOG("mix host hooks installed state=%p", mix_state_entry);
-    return true;
 }

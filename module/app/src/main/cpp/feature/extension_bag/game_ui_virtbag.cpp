@@ -25,7 +25,6 @@
 #include "game/access/ui_kit.h"
 
 #include <atomic>
-#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -33,7 +32,6 @@
 #include <cstring>
 #include <functional>
 #include <mutex>
-#include <sys/mman.h>
 #include <thread>
 #include <unistd.h>
 
@@ -75,7 +73,6 @@ using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 
 std::mutex g_virtual_bag_mtx;
-std::atomic<bool> g_inject_thread_started{false};
 std::atomic<bool> g_lifecycle_thread_started{false};
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
 std::atomic<bool> g_virtual_bag_enabled{false};
@@ -88,22 +85,7 @@ PopupNoArgFn g_orig_enter = nullptr;
 PopupNoArgFn g_orig_save_enter = nullptr;
 uint8_t* g_save_state_entry = nullptr;
 bool g_save_panel_hook_installed = false;
-uintptr_t g_draw_patch_addr = 0;
-uintptr_t g_bag_draw_patch_addr = 0;
-uintptr_t g_save_inventory_patch_addr = 0;
-void* g_save_inventory_thunk = nullptr;
 void* g_backup_save_inventory = nullptr;
-std::array<uintptr_t, 8> g_save_callsite_patch_addrs{};
-uintptr_t g_drop_gate_patch_addr = 0;
-void* g_drop_gate_thunk = nullptr;
-uintptr_t g_draw_gate_patch_addr = 0;
-void* g_draw_gate_thunk = nullptr;
-uintptr_t g_item_draw_patch_addr = 0;
-uintptr_t g_desc_open_patch_addr = 0;
-void* g_desc_open_thunk = nullptr;
-void* g_draw_thunk = nullptr;
-void* g_bag_draw_thunk = nullptr;
-void* g_item_draw_thunk = nullptr;
 virtual_bag::State g_virtual_bag_state{};
 int g_loaded_slot = -2;
 
@@ -213,11 +195,7 @@ bool module_object_generation_advance_locked(int bag, int slot, const char* cont
 bool module_object_release_allowed_locked(int bag, int slot, void* item, const char* context,
                                           bool allow_owner, const ModuleUseToken* token);
 void store_teardown_locked();
-bool install_store_hooks_locked();
-bool store_hooks_installed();
 void mix_teardown_locked();
-bool install_mix_hooks_locked();
-bool mix_hooks_installed();
 
 #include "feature/extension_bag/extension_bag_observation.inc"
 

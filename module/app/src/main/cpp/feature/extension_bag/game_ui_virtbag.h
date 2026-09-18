@@ -9,7 +9,6 @@
 
 #include "core/native/extension_bag_port.h"
 
-void virtual_bag_ui_start_auto_inject();
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
 
 bool virtual_bag_module_view_installed();

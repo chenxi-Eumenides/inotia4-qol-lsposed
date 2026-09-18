@@ -1,8 +1,8 @@
 // call_patch.cpp —— 通用 BL 调用点 patch（自动出售阶段 A 基础设施）。
 //
-// thunk/mprotect 逻辑参考扩展背包 extension_bag_render.inc 的 allocate_draw_thunk
-// 已验证实现（近址页 carving + 64KB 粗扫/4KB 细扫 + MAP_FIXED_NOREPLACE），
-// 本文件为独立副本，不改动扩展背包文件。
+// thunk/mprotect 逻辑源自扩展背包原 allocate_draw_thunk 的已验证实现（近址页 carving +
+// 64KB 粗扫/4KB 细扫 + MAP_FIXED_NOREPLACE）；D2a-3b-2 后扩展背包改用本机制，
+// 本文件为唯一实现。
 
 #include "call_patch.h"
 

@@ -28,23 +28,8 @@ StoreSceneEventFn store_original_event = nullptr;
 StoreSceneNoArgFn store_original_f3 = nullptr;
 StoreSceneNoArgFn store_original_enter = nullptr;
 uint8_t* store_state_entry = nullptr;
-uintptr_t store_desc_open_patch_addr = 0;
-uintptr_t store_draw_patch_addr = 0;
-uintptr_t store_bag_draw_patch_addr = 0;
-uintptr_t store_buy_gate_1_patch_addr = 0;
-uintptr_t store_buy_gate_2_patch_addr = 0;
-void* store_desc_open_thunk = nullptr;
-void* store_draw_thunk = nullptr;
-void* store_bag_draw_thunk = nullptr;
-void* store_buy_gate_1_thunk = nullptr;
-void* store_buy_gate_2_thunk = nullptr;
-bool store_hooks_ready = false;
 
 uint64_t store_tab_item_proc(void*, uint64_t, void*, void*);
-
-bool store_hooks_installed() {
-    return store_hooks_ready;
-}
 
 void store_clear_desc_locked() {
     if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
@@ -615,38 +600,6 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     return 0;
 }
 
-bool store_patch_bl_locked(uintptr_t call_addr, uint32_t original_instruction,
-                           void* wrapper, void** thunk, uintptr_t* patched_addr,
-                           bool is_call = true) {
-    if (*patched_addr != 0) return true;
-    const int64_t direct_delta = static_cast<int64_t>(reinterpret_cast<uintptr_t>(wrapper)) -
-                                 static_cast<int64_t>(call_addr);
-    uintptr_t branch_target = reinterpret_cast<uintptr_t>(wrapper);
-    if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL ||
-        direct_delta >= 0x08000000LL) {
-        *thunk = allocate_draw_thunk(call_addr, reinterpret_cast<uintptr_t>(wrapper));
-        if (*thunk == nullptr) return false;
-        branch_target = reinterpret_cast<uintptr_t>(*thunk);
-    }
-    const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
-    if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) return false;
-    // is_call=true → BL(0x94)；false → B(0x14)：UIStore_Draw 末尾尾调用 UIStore_DrawInvenBagGroup
-    // 已被原函数恢复 x29/x30，跳 thunk（blr→wrapper→ret）语义等价于原尾调用。
-    const uint32_t opcode = is_call ? 0x94000000u : 0x14000000u;
-    const uint32_t replacement = opcode |
-                                 (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
-    constexpr size_t kPageSize = 4096;
-    const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-    if (mprotect(reinterpret_cast<void*>(page), kPageSize,
-                 PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return false;
-    const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
-    if (current != original_instruction && current != replacement) return false;
-    *reinterpret_cast<uint32_t*>(call_addr) = replacement;
-    __builtin___clear_cache(reinterpret_cast<char*>(call_addr),
-                             reinterpret_cast<char*>(call_addr + sizeof(uint32_t)));
-    *patched_addr = call_addr;
-    return true;
-}
 
 // R-57 原版袋列高亮遮蔽（商店）：进入扩展视图时，画原版 UIStore_DrawInvenBagGroup
 // 前把当前袋 GOT 临时置 kNoOriginalBagSelected(6)，画完恢复 → 原版 6 袋不再高亮
@@ -670,46 +623,4 @@ void store_draw_inven_bag_group_wrapper() {
     }
     reinterpret_cast<void (*)()>(raw)();
     if (masked) **current_bag = saved_current;
-}
-
-bool install_store_hooks_locked() {
-    if (store_hooks_ready) return true;
-    if (g_base == 0) return false;
-
-    const uintptr_t desc_call = g_base + fn_resolve(
-        "F_UISTORE_DESC_MAKE_DESC_CALL_VMA", F_UISTORE_DESC_MAKE_DESC_CALL_VMA);
-    if (!store_patch_bl_locked(desc_call, 0x97ffffc9,
-                               reinterpret_cast<void*>(&store_make_desc_gate),
-                               &store_desc_open_thunk, &store_desc_open_patch_addr)) return false;
-    const uintptr_t draw_call = g_base + fn_resolve(
-        "F_SCENE_DRAW_STORE_GRPX_END_CALL_VMA", F_SCENE_DRAW_STORE_GRPX_END_CALL_VMA);
-    if (!store_patch_bl_locked(draw_call, 0x97fcff36,
-                               reinterpret_cast<void*>(&store_draw_end_wrapper),
-                               &store_draw_thunk, &store_draw_patch_addr)) return false;
-
-    // R-57 原版袋列高亮遮蔽：UIStore_Draw 末尾尾调用 b UIStore_DrawInvenBagGroup
-    // （尾调用前已恢复 x29/x30，用 B patch 跳 thunk→wrapper）。
-    const uintptr_t bag_draw_call = g_base + fn_resolve(
-        "F_UISTORE_DRAW_INVEN_BAG_GROUP_CALL_VMA", F_UISTORE_DRAW_INVEN_BAG_GROUP_CALL_VMA);
-    if (!store_patch_bl_locked(bag_draw_call, 0x17ffff1e,
-                               reinterpret_cast<void*>(&store_draw_inven_bag_group_wrapper),
-                               &store_bag_draw_thunk, &store_bag_draw_patch_addr, false)) return false;
-
-    // 买入预检 gate：UIStore_BuyItem 内两处 bl INVEN_FindSaveSlot 改写为
-    // store_buy_find_slot_gate。原版袋无空位但扩展袋有空位时返回非 0，
-    // 让流程继续调 INVEN_SaveItem → save_item_wrapper 触发扩展 adopt。
-    const uintptr_t buy_gate_1 = g_base + fn_resolve(
-        "F_UISTORE_BUY_FIND_SLOT_CALL_1_VMA", F_UISTORE_BUY_FIND_SLOT_CALL_1_VMA);
-    if (!store_patch_bl_locked(buy_gate_1, 0x9400c530,
-                               reinterpret_cast<void*>(&store_buy_find_slot_gate),
-                               &store_buy_gate_1_thunk, &store_buy_gate_1_patch_addr)) return false;
-    const uintptr_t buy_gate_2 = g_base + fn_resolve(
-        "F_UISTORE_BUY_FIND_SLOT_CALL_2_VMA", F_UISTORE_BUY_FIND_SLOT_CALL_2_VMA);
-    if (!store_patch_bl_locked(buy_gate_2, 0x9400c508,
-                               reinterpret_cast<void*>(&store_buy_find_slot_gate),
-                               &store_buy_gate_2_thunk, &store_buy_gate_2_patch_addr)) return false;
-
-    store_hooks_ready = true;
-    VIRTBAG_LOG("store host hooks installed state=%p", store_state_entry);
-    return true;
 }

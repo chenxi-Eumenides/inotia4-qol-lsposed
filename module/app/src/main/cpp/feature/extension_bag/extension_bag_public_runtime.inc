@@ -348,11 +348,6 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     return VirtualBagProjectionDropResult::kRejected;
 }
 
-void virtual_bag_ui_start_auto_inject() {
-    ensure_inject_thread();
-    ensure_lifecycle_thread();
-}
-
 bool virtual_bag_module_view_installed() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     return g_module_view_installed;
@@ -425,7 +420,7 @@ bool set_virtual_bag_enabled(bool enabled) {
         VIRTBAG_LOG("extension source protection update deferred enabled=%d",
                     enabled ? 1 : 0);
     }
-    if (enabled) virtual_bag_ui_start_auto_inject();
+    if (enabled) ensure_lifecycle_thread();
     return true;
 }
 
