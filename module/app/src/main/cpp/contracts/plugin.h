@@ -11,6 +11,8 @@
 
 #include <cstdint>
 
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
 #include "contracts/version.h"
 
 namespace qol::contracts {
@@ -112,8 +114,16 @@ struct PluginStatusOut {
     const char* error;
 };
 
-// P2 为空载体，宿主服务端口待 P3 按需冻结。
-struct PluginContext;
+// 插件回调上下文：迁移期允许 sdk/game == nullptr，供尚未切换到胶囊 ABI 的插件继续运行。
+// P5 收口后，sdk/game 为空应视为安装失败；plugin_id 由宿主持有，生命周期 ≥ 进程。
+struct PluginContext {
+    uint32_t struct_size;
+    uint16_t sdk_major;
+    uint16_t sdk_minor;
+    const QolHostSdk* sdk;
+    const QolGameHost* game;
+    const char* plugin_id;
+};
 
 // 插件清单（§3.3 逐字段）。数量字段显式，不使用哨兵终止。
 struct PluginDescriptor {

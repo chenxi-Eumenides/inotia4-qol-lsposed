@@ -1,0 +1,186 @@
+#pragma once
+
+// Host SDK ABI 骨架（ARCHITECTURE.md §2.1–§2.4、§3.8、§7.1；ADR-0008）。
+//
+// 这是插件胶囊访问宿主设施的唯一表类型。所有成员均为固定宽度 C 类型与函数指针，
+// 不暴露 STL、异常、虚函数或宿主私有对象。内置表可随 P1–P4 迁移继续演进；P6
+// 才冻结对外兼容边界。
+//
+// 各组替代关系：
+//   log          → core/native/qol_log.h
+//   config       → infra/config.h
+//   scheduler    → infra/scheduler.h
+//   commands     → contracts/commands.h / infra/commands.h
+//   events       → infra/events.h / contracts/events.h
+//   capabilities → infra/capabilities.h
+//   store        → infra/store.h（以调用方提供的 buffer/数组替代 STL 容器）
+//   panels       → infra/panels.h / contracts/panels.h
+//   hooks        → hooks/dispatch.h / hooks/popup_state.h
+//   text_scope   → infra/text_scope.h
+//
+// hooks::registry/install/transaction、patch::*、game/access/patches、game/access/ptr_slots、
+// game_symbols.h、host/* 与 core/native/call_patch 均为内核私有，不进入本表。
+
+#include <cstddef>
+#include <cstdint>
+
+#include "contracts/commands.h"
+#include "contracts/panels.h"
+#include "contracts/result.h"
+#include "contracts/version.h"
+
+namespace qol::contracts {
+
+struct QolAbiHeader {
+    uint32_t size;
+    uint16_t major;
+    uint16_t minor;
+};
+
+using QolLogWriteFn = QolResult (*)(int32_t level, int32_t domain, const char* source,
+                                    const char* message, uint32_t message_len);
+struct QolLogApi {
+    QolLogWriteFn write;
+};
+
+using QolConfigGetBoolFn = QolResult (*)(const char* key, int32_t default_value,
+                                         int32_t* out_value);
+using QolConfigGetI32Fn = QolResult (*)(const char* key, int32_t default_value,
+                                        int32_t* out_value);
+using QolConfigSetBoolFn = QolResult (*)(const char* key, int32_t value);
+using QolConfigSetI32Fn = QolResult (*)(const char* key, int32_t value);
+struct QolConfigApi {
+    QolConfigGetBoolFn get_bool;
+    QolConfigGetI32Fn get_i32;
+    QolConfigSetBoolFn set_bool;
+    QolConfigSetI32Fn set_i32;
+};
+
+using QolFrameHandler = int32_t (*)(int64_t frame, void* ctx);
+using QolSchedulerAddFn = QolResult (*)(int32_t point, QolFrameHandler handler, void* ctx,
+                                        int32_t interval, int32_t count, uint64_t* out_id);
+using QolSchedulerRemoveFn = QolResult (*)(uint64_t id);
+struct QolSchedulerApi {
+    QolSchedulerAddFn add;
+    QolSchedulerRemoveFn remove;
+};
+
+using QolEventHandler = void (*)(void* ctx, const void* payload);
+using QolEventsSubscribeFn = QolResult (*)(uint32_t type, QolEventHandler handler, void* ctx,
+                                           uint64_t* out_id);
+using QolEventsUnsubscribeFn = QolResult (*)(uint64_t id);
+struct QolEventsApi {
+    QolEventsSubscribeFn subscribe;
+    QolEventsUnsubscribeFn unsubscribe;
+};
+
+using QolCapabilityRequireFn = QolResult (*)(const char* id, QolVersionRange range,
+                                             const void** out_iface);
+using QolCapabilityLeaseEnterFn = QolResult (*)(const char* id, QolVersionRange range,
+                                                uint64_t* out_lease);
+using QolCapabilityLeaseLeaveFn = QolResult (*)(uint64_t lease);
+using QolCapabilitySetAvailableFn = QolResult (*)(const char* provider_id, int32_t available);
+struct QolCapabilitiesApi {
+    QolCapabilityRequireFn require;
+    QolCapabilityLeaseEnterFn lease_enter;
+    QolCapabilityLeaseLeaveFn lease_leave;
+    QolCapabilitySetAvailableFn set_available;
+};
+
+struct QolStoreSection {
+    const char* name;
+    uint16_t version;
+    const uint8_t* data;
+    uint32_t size;
+};
+struct QolStoreBuffer {
+    uint8_t* data;
+    uint32_t size;
+    uint32_t capacity;
+};
+using QolStoreReadFn = QolResult (*)(int32_t slot, const char* name, QolStoreBuffer* out,
+                                     uint16_t* out_version);
+using QolStoreWriteFn = QolResult (*)(int32_t slot, const char* name, uint16_t version,
+                                      const uint8_t* data, uint32_t size);
+using QolStoreRemoveFn = QolResult (*)(int32_t slot, const char* name);
+using QolStoreReplaceSectionsFn = QolResult (*)(int32_t slot,
+                                                const QolStoreSection* replacements,
+                                                uint32_t replacement_count,
+                                                const char* const* removals,
+                                                uint32_t removal_count);
+struct QolStoreApi {
+    QolStoreReadFn read;
+    QolStoreWriteFn write;
+    QolStoreRemoveFn remove;
+    QolStoreReplaceSectionsFn replace_sections;
+};
+
+using QolPanelFindFn = QolResult (*)(const char* panel_id, const PanelProviderSpec** out_provider);
+using QolPanelRegisterItemFn = QolResult (*)(const PanelItemSpec* item);
+using QolPanelRegisterProviderFn = QolResult (*)(const PanelProviderSpec* provider);
+using QolPanelUnregisterOwnerFn = QolResult (*)(const char* owner);
+using QolPanelOpenFn = QolResult (*)(const char* panel_id);
+using QolPanelCloseFn = QolResult (*)(const char* panel_id);
+using QolPanelActiveFn = QolResult (*)(const char* panel_id, int32_t* out_active);
+struct QolPanelsApi {
+    QolPanelRegisterItemFn register_item;
+    QolPanelRegisterProviderFn register_provider;
+    QolPanelUnregisterOwnerFn unregister_owner;
+    QolPanelFindFn find;
+    QolPanelOpenFn open;
+    QolPanelCloseFn close;
+    QolPanelActiveFn active;
+};
+
+using QolTextDispatchFn = const char* (*)(uint32_t text_id, const char* current, void* ctx);
+using QolHooksTextSubscribeFn = QolResult (*)(const char* resource_id, int32_t phase,
+                                              int32_t kind, QolTextDispatchFn fn, void* ctx,
+                                              uint64_t* out_id);
+using QolHooksTextUnsubscribeFn = QolResult (*)(const char* resource_id, uint64_t id);
+using QolHooksRunTextFn = QolResult (*)(const char* resource_id, uint32_t text_id,
+                                        const char* original, const char** out_text);
+using QolHooksSetInterceptFn = QolResult (*)(const char* resource_id,
+                                             int32_t (*predicate)(void* ctx), void* ctx);
+using QolHooksClearInterceptFn = QolResult (*)(const char* resource_id);
+using QolHooksPopupResolveFn = QolResult (*)(const char* symbol, void* out_entry);
+using QolHooksPopupAcquireFn = QolResult (*)(void* entry, const void* hooks);
+using QolHooksPopupRestoreFn = QolResult (*)(void* entry);
+struct QolHooksApi {
+    QolHooksTextSubscribeFn text_subscribe;
+    QolHooksTextUnsubscribeFn text_unsubscribe;
+    QolHooksRunTextFn run_text;
+    QolHooksSetInterceptFn set_intercept;
+    QolHooksClearInterceptFn clear_intercept;
+    QolHooksPopupResolveFn popup_resolve;
+    QolHooksPopupAcquireFn popup_acquire;
+    QolHooksPopupRestoreFn popup_restore;
+};
+
+using QolTextScopePushFn = QolResult (*)(int32_t scope);
+using QolTextScopePopFn = QolResult (*)();
+struct QolTextScopeApi {
+    QolTextScopePushFn push;
+    QolTextScopePopFn pop;
+};
+
+struct QolUiAdapter;
+
+struct QolHostSdk {
+    QolAbiHeader abi;
+    QolLogApi log;
+    QolConfigApi config;
+    QolSchedulerApi scheduler;
+    QolCommands commands;
+    QolEventsApi events;
+    QolCapabilitiesApi capabilities;
+    QolStoreApi store;
+    QolPanelsApi panels;
+    QolHooksApi hooks;
+    QolTextScopeApi text_scope;
+    const QolUiAdapter* ui;
+};
+
+constexpr uint16_t kHostSdkMajor = 1;
+constexpr uint16_t kHostSdkMinor = 0;
+
+}  // namespace qol::contracts

@@ -4,6 +4,8 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
 #include "plugins/attribute_range/plugin.h"
@@ -37,6 +39,17 @@
 #include "patch/ptr_slot.h"
 
 namespace qol::host {
+
+// L1 只冻结 ABI 表的归属、版本头与字段布局；各函数指针由 L2 host adapter 注入。
+// 空表是迁移期占位，不改变当前插件仍直接使用内部实现的行为。
+extern const contracts::QolHostSdk g_host_sdk{
+    {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor},
+    {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, nullptr};
+
+extern const contracts::QolGameHost g_game_host{
+    {sizeof(contracts::QolGameHost), contracts::kGameHostMajor, contracts::kGameHostMinor},
+    {}, {}, {}, {}, {}, {}};
+
 namespace {
 
 bool g_assembly_done = false;

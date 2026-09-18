@@ -4,12 +4,24 @@
 
 #include <cstdint>
 
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
 #include "game/access/save.h"
 #include "game/access/ui_choice.h"
 #include "game_access.h"
 #include "game_state.h"
 
 uintptr_t g_base = 0;
+
+// plugin_registry host 单测不链接 assembly.cpp，提供与宿主相同布局的空 ABI 表桩。
+namespace qol::host {
+extern const contracts::QolHostSdk g_host_sdk{
+    {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor},
+    {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, nullptr};
+extern const contracts::QolGameHost g_game_host{
+    {sizeof(contracts::QolGameHost), contracts::kGameHostMajor, contracts::kGameHostMinor},
+    {}, {}, {}, {}, {}, {}};
+}  // namespace qol::host
 
 // game/access/patches.cpp 的 kBlRedirectToSymbol 站点经 fn_resolve 解析目标；纯算法测试
 // 不解析真实符号，恒等返回 vma。

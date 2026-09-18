@@ -7,10 +7,6 @@
 #include "plugins/quest/feature.h"
 #include "plugins/quest/plugin.h"
 
-namespace qol::contracts {
-struct PluginContext {};
-}
-
 namespace {
 
 int64_t g_frame = 1;

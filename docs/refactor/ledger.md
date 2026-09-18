@@ -137,3 +137,23 @@
 - **包含**（目标架构强制，属迁移本身）：拆层与拆分（机制/业务、`ui_kit` 基础层）、接口替换（plugins 不触符号头 → `game/access`）、依赖方向修正（消除 feature↔feature）、hook/patch 声明式化（资源声明 + 事务）。
 - **不包含**（推迟或明确不做）：业务语义重写、算法与性能优化（性能阈值走 §10 / U1 回填）、顺手重构无关代码（AGENTS：只移动职责）。
 - 迁移中发现的缺陷单独提交，不与迁移混在一起（例：P2 的 v27 变体表缺口）。
+
+## 7. 胶囊迁移计划（P1–P4 范围）
+
+该计划依据 ADR-0008 执行。用户裁决：胶囊迁移属于 **P1–P4 范围**；设计在 P4 后修改，
+不受 P5 签署门禁约束。L1 只冻结 Host SDK / Game Host API 的 ABI 骨架与 `PluginContext`
+接缝，具体表成员可在后续 lane 演进；P6 才冻结对外兼容边界。
+
+| lane | 范围 | 状态 |
+|---|---|---|
+| L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
+| L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ⬜ 待办 |
+| L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ⬜ 待办 |
+| L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ⬜ 待办 |
+| L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ⬜ 待办 |
+| L6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
+| L7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
+
+当前迁移债基线：`plugins → game` 24 文件、`plugins → infra` 22 文件、
+`plugins → hooks` 8 文件、`plugins → patch` 0 文件、`plugins → host` 0 文件；
+`domains/` 仍有 2 个文件。上述违规面待 L7 切换校验口径时处理，不在本批新增基线。

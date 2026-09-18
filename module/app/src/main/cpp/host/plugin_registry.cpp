@@ -17,14 +17,21 @@
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
 
-// contracts/plugin.h 在 P2 只前向声明 PluginContext（空载体，宿主服务端口待 P3 冻结）。
-// 安装器需要实体才能调用按引用传参的插件回调，故在此补全定义；P3 端口冻结后移回 contracts/。
-namespace qol::contracts {
-struct PluginContext {};
-}  // namespace qol::contracts
-
 namespace qol::host {
+
+extern const contracts::QolHostSdk g_host_sdk;
+extern const contracts::QolGameHost g_game_host;
+
 namespace {
+
+contracts::PluginContext make_plugin_context(const char* plugin_id) {
+    return contracts::PluginContext{sizeof(contracts::PluginContext),
+                                    g_host_sdk.abi.major,
+                                    g_host_sdk.abi.minor,
+                                    &g_host_sdk,
+                                    &g_game_host,
+                                    plugin_id};
+}
 
 constexpr uint32_t kMaxPlugins = 32;
 constexpr uint32_t kMaxResourcesPerPlugin = 32;
@@ -294,7 +301,7 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
             // 未置位者保持一次性安装语义，不做无谓重装。
             if (!hooks::retry_pending_get(claim.id)) continue;
             if (hooks::state_of(claim.id) != contracts::ResourceState::kFree) continue;
-            contracts::PluginContext retry_ctx{};
+            contracts::PluginContext retry_ctx = make_plugin_context(plugin.id);
             const char* retry_error = retry_resident_claim(plugin, retry_ctx, claim, deps);
             if (retry_error != nullptr) {
                 const bool fail_closed_required =
@@ -343,7 +350,7 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
                         hooks::runtime_set(claim.id, entry, outcome.backup);
                         bool ready_ok = true;
                         if (plugin.on_resource_ready != nullptr) {
-                            contracts::PluginContext ready_ctx{};
+                            contracts::PluginContext ready_ctx = make_plugin_context(plugin.id);
                             ready_ok =
                                 plugin.on_resource_ready(ready_ctx, claim.id, outcome.backup) == 0;
                         }
@@ -539,7 +546,7 @@ void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
     context.visited[index] = true;
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (plugin.on_disabled != nullptr) {
-        contracts::PluginContext ctx{};
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
         plugin.on_disabled(ctx);
     }
     // 释放消费者资源：走与 deactivate 相同的帧步进还原事务，等待在途归零。
@@ -598,7 +605,7 @@ void begin_revoke_provider(uint32_t index) {
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (!plugin_provides_capability(plugin)) return;
     if (plugin.on_disabled != nullptr) {
-        contracts::PluginContext ctx{};
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
         plugin.on_disabled(ctx);
     }
     if (g_cap_registration[index] != CapRegistration::kRegistered) return;
@@ -647,7 +654,7 @@ int install_all(const HostDeps& deps) {
         }
 
         // 2) 插件自身初始化。
-        contracts::PluginContext ctx{};
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
         if (plugin.install(ctx) != 0) {
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
             ++failed_plugins;
@@ -875,7 +882,7 @@ uint32_t sync_gates() {
                              gate_error_claim != nullptr ? gate_error_claim : "?",
                              g_gate_error_text[i]);
             }
-            contracts::PluginContext ctx{};
+            contracts::PluginContext ctx = make_plugin_context(plugin.id);
             if (status.state != target_state) {
                 infra::status_update(plugin.id, target_state, target_enabled, g_gate_error_text[i]);
                 if (target_enabled) {
@@ -900,7 +907,7 @@ uint32_t sync_gates() {
         }
         if (status.state == target_state) continue;
 
-        contracts::PluginContext ctx{};
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
         infra::status_update(plugin.id, target_state, target_enabled, nullptr);
         if (target_enabled) {
             if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
@@ -924,7 +931,7 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
     infra::FeatureStatus status{};
     if (!infra::status_get(plugin->id, &status)) return false;
 
-    contracts::PluginContext ctx{};
+    contracts::PluginContext ctx = make_plugin_context(plugin->id);
     switch (action) {
         case contracts::kFeatureLifecycleEnable:
         case contracts::kFeatureLifecycleDisable:
@@ -1041,7 +1048,7 @@ uint32_t lifecycle_step() {
                 // 已进入回滚：安装事务后续步新装出的资源立即撤回，禁止半装对外可见。
                 revoke_resource(out.resource_id, g_install_deps);
             } else if (plugin.on_resource_ready != nullptr) {
-                contracts::PluginContext ctx{};
+                contracts::PluginContext ctx = make_plugin_context(plugin.id);
                 if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
                     // 受限回调失败：置 failed，并启动还原事务回滚全部已装资源（§3.2 语义 5）。
                     infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
@@ -1077,7 +1084,7 @@ uint32_t lifecycle_step() {
         hooks::TxStatus status{};
         const bool have_status = hooks::tx_query(slot.tx_id, &status);
         const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
-        contracts::PluginContext ctx{};
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
         if (succeeded) {
             if (slot.kind == hooks::TxKind::kInstall) {
                 const bool enabled = plugin_all_gates_want(plugin);

@@ -25,11 +25,6 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-// plugin.cpp 以按引用传参调用 callbacks，需要 PluginContext 实体（同 host/plugin_registry.cpp）。
-namespace qol::contracts {
-struct PluginContext {};
-}  // namespace qol::contracts
-
 // ---- plugin.cpp 外部依赖桩（UI/扫描/配置/事件；真机验证运行时行为）----
 namespace qol::features::autosell {
 

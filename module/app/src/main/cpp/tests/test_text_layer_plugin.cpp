@@ -23,11 +23,6 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-// plugin.cpp/feature.cpp 以按引用传参调用生命周期回调，需要 PluginContext 实体。
-namespace qol::contracts {
-struct PluginContext {};
-}  // namespace qol::contracts
-
 namespace {
 
 using qol::contracts::ResourceFailure;
