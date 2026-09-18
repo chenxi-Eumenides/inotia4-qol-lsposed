@@ -149,7 +149,7 @@
 | L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
 | L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
 | L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | 🟡 实现与 host-only 验证完成；真机卡待执行（本任务不装机） |
-| L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ⬜ 待办 |
+| L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | 🟡 L4-0 ABI 冻结完成；插件迁移待办 |
 | L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ⬜ 待办 |
 | L6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
 | L7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
@@ -157,3 +157,33 @@
 当前迁移债基线：`plugins → game` 24 文件、`plugins → infra` 22 文件、
 `plugins → hooks` 8 文件、`plugins → patch` 0 文件、`plugins → host` 0 文件；
 `domains/` 已清零。上述插件胶囊迁移债待后续 lane 处理，不在本批新增基线。
+
+### L4-0 Host SDK / Game Host ABI 冻结
+
+L4-0 追加冻结 `QolGameHost` minor `1`。既有字段顺序与签名保持不变，新增成员统一位于
+`QolGameHost::extra`，由 `host/game_host.cpp` 实现；`QolHostSdk` 的 UI adapter 仍为
+`nullptr`，不在本批建立 U11。
+
+`extra` 当前包含以下最小成员组：
+
+- 角色：阵营链、等级、佣兵槽、装备权限、主控角色、池槽、HP 读写；
+- 物品与库存：品质、真装备/装备等级、禁售/骰子/堆叠数、位段读取，以及合成产物创建、
+  扣料、入库和释放；
+- 合成：填入槽控件/目标物品/配方状态读取，以及初始化、重置、刷新、选空槽、类型、音效、
+  文本和描述关闭调用；
+- 世界：地图记录/当前地图/地图名/朝向/金币读取，以及扣钱、切图、关闭弹窗、HUD 恢复、
+  横幅调用；
+- 存档与任务：槽位元数据、文件加载/密钥/加解密/释放/脏标记，任务槽读取、状态判定与状态写入。
+
+成员返回 `QolResult`，指针和文件缓冲区所有权在契约中明确；未解析、越界或非法参数统一
+fail-closed。副作用成员只允许 owner 插件主线程命令处理器调用。
+
+本批仍未覆盖：
+
+- U11 ui-kit adapter：`core.ui`、`autosell` 面板和 `save_backup` 游戏内面板；
+- `extension_bag` / `inventory_hooks` 的库存遍历、控件树、指针槽、hook/patch 资源迁移；
+- `custom_recipe` 的配方表直读；
+- `game_symbols.h`、`game/access/patches`、`ptr_slots`、hook/patch 安装机制等内核私有面。
+
+L4 插件源码未在 L4-0 修改；后续胶囊迁移必须只依赖本节追加契约或另行登记的 U11/L5
+契约缺口。
