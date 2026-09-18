@@ -23,7 +23,7 @@
 
 | 域 | 目标归属 | 规模 | 机制占用 | 已知债务 | 迁移阶段 |
 |---|---|---|---|---|---|
-| `feature/ui` | `plugins/ui` + 基础层拆分（`ui_kit`） | 33 | entry hook ×4 安装者 | 符号头引用 ×10；域间依赖（→ autosell/patch/save_backup） | P2（样板候选）/P4 |
+| `feature/ui` | `plugins/core.ui` + `plugins/text_layer` + 面板归各插件；基础层 `game/access`（`ui_kit`/`ui_components`） | 33 | entry hook ×4 安装者 | 已清除（符号头引用与域间依赖随迁移消除） | ✅ D1 完成（VM-D1 待真机） |
 | `feature/extension_bag` | `plugins/extension_bag` | 32 | entry hook、call patch、ptr slot | 符号头引用；与 `feature/patch` 双向依赖 | P4 |
 | `feature/patch` | `patch/` 机制 + `plugins/inventory_hooks` 业务 | 12 | entry hook、call patch | 符号头引用；被 7 个域依赖 | P3/P4 |
 | `feature/autosell` | `plugins/autosell` | 10 | 帧任务消费者 | 域间依赖（→ attribute_range） | P4 |
@@ -42,7 +42,12 @@
 
 ## 3. 临时豁免
 
-当前 **0 条**（`scripts/maintenance/arch_exemptions.json` 为空）。
+当前 **1 条**（`scripts/maintenance/arch_exemptions.json`）：
+
+- `resource_unknown_symbol` @ `plugins/core.ui/panels/settings.cpp`（主菜单「更多游戏」按钮运行时 ExecuteProc 槽）：
+  该槽是运行时控件实例槽、非生命周期内稳定 GOT 槽，D1 暂以主线程帧任务管理绑定，`check_resources` 无法静态归属。
+  清除阶段 **P5/U11**：动态 UI 绑定管理器建立后改申报 `own:ui.main_menu.more_games_entry`（kOwnership）＋运行期 lease。
+  锚点：`ARCHITECTURE.md` §2.2 core.ui 自我约束 + §12.3 U11。
 
 新增豁免必须包含：`规则名`、`路径/目标`、`理由`、`批准范围`、`清除阶段`、`到期条件`、`文档锚点`；
 无文档锚点的豁免视为未登记（`check_layers` 会失败）。豁免与基线是两种机制：
@@ -54,11 +59,13 @@
 
 | 规则 | 条数 | 说明 |
 |---|---|---|
-| `layer_direction` | 70 | 域间水平互调、feature↔feature、`game→infra/domains`、`infra→domains` |
-| `offsets_symbols_header` | 33 | 非 `game/` 层直接 include 符号头 |
-| `resource_unknown_symbol` | 18 | 间接安装点（符号在 `game_access` 全局解析），待人工归属 |
+| `layer_direction` | 37 | 域间水平互调、feature↔feature、`game→infra/domains`、`infra→domains` |
+| `offsets_symbols_header` | 12 | 非 `game/` 层直接 include 符号头 |
+| `resource_unknown_symbol` | 2 | 间接安装点（符号在 `game_access` 全局解析），待人工归属 |
 
-（P2 由 124 收缩至 121：simple_mode 迁移消除 3 条。）
+（本次 D1 冻结由 68 收缩至 **51**：D1-c0 72→68；D1-c 68→51，其中 `layer_direction` 43→37、
+`offsets_symbols_header` 19→12、`resource_unknown_symbol` 6→2。另 1 条 `resource_unknown_symbol`
+为 §3 登记的有意豁免，不计入基线债务。）
 
 完整清单与样例见 `docs/refactor/baseline.md` §3；核对命令：`uv run python scripts/maintenance/check_arch.py`。
 
@@ -108,8 +115,13 @@
 
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
-| D1 | `ui` 主体（拆 `ui_kit` / 文本 / 面板） | 5,320 行（实测 31 文件） | B3 ✅、C2 ✅ | 🔄 进行中（侦察完成：共享控件 600 / 面板 4,277 / 机制 376；拆分与归属设计冻结中；D1-c0 已删 `custom`（商店返回键调试）与 `exp1-5` 实验面及其 native/Kotlin/端点，设置页认领 `F_PANEL_UNK1_ENTER` 前置就绪） |
+| D1 | `ui` 主体（拆 `ui_kit` / 文本 / 面板） | 5,320 行（实测 31 文件） | B3 ✅、C2 ✅ | ✅ 完成（D1-a1/a2/b0/b1/b2/b3/b4/b4a/c0；待真机卡 VM-D1）——共享 UI 原语下沉 `game/access`，文本层归 `text_layer`，面板归 `core.ui`/`autosell`/`save_backup`/`native_choice`；D1-c0 删 `custom` 与 `exp1-5` 实验面；D1-c 清 `UiPopupState*` 死代码、基线 68→51 |
 | D2 | `extension_bag` | 12,834 行 | A1、B2、B4、D1 | ⬜ |
+
+> **D1 延后项登记**（D1 未实现，已指定目标阶段；对应 `map.md` 过渡依赖区）：
+> - 设置项数据化与配置源（Kotlin JSON → native config）：**P5**（决策 D；`ARCHITECTURE.md` §7.3 跨栈边界）。
+> - U11 ui-kit adapter（动态 UI 绑定管理器）：**P5**；覆盖 `plugins/core.ui/panels/settings.cpp` 运行时 ptr-slot 的临时豁免（`arch_exemptions.json`）。
+> - `core.ui` 直依 `game/access/ui*`（过渡依赖）：随 **P5** `core.ui` 收口清除。
 
 ### 迁移边界（包含什么 / 不包含什么）
 

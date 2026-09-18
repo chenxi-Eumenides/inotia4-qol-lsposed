@@ -162,15 +162,14 @@
 
 ## 3. 基线债务
 
-基线共 3 组、68 条。
+基线共 3 组、51 条。
 
-### layer_direction（43 条）
+### layer_direction（37 条）
 
 - `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|domains/character → domains/inventory`
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
 - `layer_direction|api/native/game_party.cpp|api/native/game_character.h|domains/party → domains/character`
 - `layer_direction|api/native/game_party.cpp|api/native/game_world.h|domains/party → domains/world`
-- `layer_direction|api/native/game_save.cpp|feature/ui/game_ui_savebackup.h|domains/save → plugins/ui`
 - `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|domains/ui → domains/world`
 - `layer_direction|core/native/frame_task.cpp|game_system.h|infra → domains/system`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_character.h|infra → domains/character`
@@ -186,9 +185,10 @@
 - `layer_direction|core/native/game_variant.cpp|core/native/qol_log.h|game → infra`
 - `layer_direction|core/native/save_enter.cpp|core/native/call_patch.h|infra → patch`
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
-- …（其余 23 条省略）
+- `layer_direction|core/native/save_enter.cpp|game_access.h|infra → game`
+- …（其余 17 条省略）
 
-### offsets_symbols_header（19 条）
+### offsets_symbols_header（12 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
@@ -200,24 +200,13 @@
 - `offsets_symbols_header|feature/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
 - `offsets_symbols_header|feature/patch/game_patch.cpp|data/native/game_symbols.h|plugins/patch 层引用符号头`
 - `offsets_symbols_header|feature/patch/inventory_hook_stage4.cpp|data/native/game_symbols.h|plugins/patch 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_autosell.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_charinfo_zh.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_savebackup.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_settings.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/native_choice.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/table.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
 
-### resource_unknown_symbol（6 条）
+### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/ui/game_ui_settings.cpp:80||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/ui/native_choice.cpp:232||entry hook 无法归属符号`
-- `resource_unknown_symbol|feature/ui/native_choice.cpp:255||entry hook 无法归属符号`
-- `resource_unknown_symbol|feature/ui/native_choice.cpp:25||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 

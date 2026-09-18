@@ -53,7 +53,7 @@ constexpr char kModuleRecipeDesc[] = "用3个材料合成";
 
 // 「宝石强化」页签下 `Kind::kJewelTierUp` 条目的按钮文案 wordId。
 // 该条目复用原版 35291 —— 它同时是**页签名**「宝石强化」（由 `UIMix_ButtonMenuListDraw` 绘制），
-// 且文本表里不存在「宝石升阶」这一串。因此按钮实际显示由 `feature/ui/module_text` 的
+// 且文本表里不存在「宝石升阶」这一串。因此按钮实际显示由 `plugins/text_layer` 的
 // `recipe.jewel_tier_up` 条目在 `Scope::kUimixRecipeButton` 窗口内替换（页签不受影响）；
 // 未挂上 hook 时退化为显示原版「宝石强化」，不崩、不影响功能。
 // 本常量是**配方数据**（`Def::label_word_id` 取值）；module_text 侧的同名 id 由 host test
@@ -62,7 +62,8 @@ inline constexpr uint16_t kJewelTierUpLabelWordId = 35291;
 
 // 注入记录的 RECIPEBASE 结果物品 id（b2-3，u16）恒为 0（table.h kRbResultId
 // 「注入记录填 0」）。描述文案替换的门控依赖「当前 mixType 命中模块记录」这一条（另一条是
-// 「被写的文本就是原版配方模板」），见 game_ui_custom_recipe.cpp 的 custom_set_desc_text_wrapper。
+// 「被写的文本就是原版配方模板」），见 `plugins/custom_recipe/feature.cpp` 的
+// `desc_text_matches_recipe_template`。
 constexpr uint32_t kModuleRecipeResultItemId = 0;
 
 // 3 格隐式配方（宝石强化页 UIMix type 1 的 3 个填入格；设计册 §2.8 / §4.12）。
@@ -120,7 +121,7 @@ const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
 // 本身（`kFixedCategory`，原版掷值）。材料与装备的对应关系**每次进入存档时重新随机**，
 // 因此玩家无法预知，只能试（「无信息」）。
 //
-// 目录层只负责「纯逻辑生成 + 查表」；随机源与进档时机由平台侧注入（见 game_ui_custom_recipe.cpp）。
+// 目录层只负责「纯逻辑生成 + 查表」；随机源与进档时机由平台侧注入（见 `plugins/custom_recipe/feature.cpp`）。
 
 // 动态配方容量上限。
 constexpr size_t kMaxDynamicRecipes = 64;
@@ -137,7 +138,7 @@ inline constexpr uint16_t kMaterialPool[] = {
 };
 inline constexpr size_t kMaterialPoolSize = sizeof(kMaterialPool) / sizeof(kMaterialPool[0]);
 
-// 特殊装备：ITEMDATABASE 记录 +7 bit4 置位的全部 26 条，与 `feature/special_equip` 放行的
+// 特殊装备：ITEMDATABASE 记录 +7 bit4 置位的全部 26 条，与 `plugins/special_equip` 放行的
 // 是同一组。来源：ITEMDATABASE 全表扫描（cat 485-506 敌方/剧情组、785-787 誓约之剑/
 // 神速长靴/真实的板甲、948 伪装用面具）。
 inline constexpr uint16_t kSpecialEquipCategories[] = {

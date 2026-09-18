@@ -25,14 +25,14 @@
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
 | `contracts/` | 12 | 637 |
-| `game/` | 32 | 2534 |
+| `game/` | 32 | 2467 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1466 |
 | `patch/` | 6 | 430 |
 | `domains/` | 2 | 111 |
-| `plugins/` | 99 | 13461 |
+| `plugins/` | 99 | 13462 |
 | `host/` | 12 | 2089 |
-| **合计** | **197** | **22882** |
+| **合计** | **197** | **22816** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -40,7 +40,7 @@
 - `plugins/autosell/`：14 文件 / 1909 行
 - `plugins/core.ui/`：14 文件 / 1522 行
 - `plugins/craft_ui/`：4 文件 / 670 行
-- `plugins/custom_recipe/`：10 文件 / 1939 行
+- `plugins/custom_recipe/`：10 文件 / 1940 行
 - `plugins/inventory_hooks/`：2 文件 / 98 行
 - `plugins/native_choice/`：4 文件 / 466 行
 - `plugins/push_all/`：6 文件 / 267 行
@@ -130,6 +130,9 @@ legacy（9）：`core_ui_panels_tests`、`game_feature_tests`、`game_variant_te
 | `host/core_patches.cpp` + `game/access/patches.cpp`（B2a-2） | 常驻指令 patch 声明式化：19 条站点登记（位段缩窄 ×2 / clamp ×6 / 重定向 arg ×5 + call ×5 / hub ×1），`kBlRedirectToSymbol` 目标经 `fn_resolve` 解析。monster 兼容是**扫描式例外**：地址按运行时特征字节定位，无法静态登记，经 `patch::install_word_at` 占用同一张点表、不入 `hooks/registry` 资源表 | 扫描式例外长期保留（特征字节定位方式不变，无清除阶段） |
 | `feature/patch/game_patch.{h,cpp}`（B2a-2） | 常驻 patch 原语与 stack_limit 状态已迁出，仅保留 move_merge 开关（GOT 槽指针 hook）与 IAP 恢复；`game_ui_virtbag.cpp` 仍因 move_merge 开关 include 本头（feature→feature 过渡依赖） | move_merge 相关随 B2a-3 迁移后删除 |
 | `core/native/stack_limit_state.cpp`（B2a-2） | stack_limit 有效态实现放在 `core/native/`（`arch_common` 过渡映射为 `infra` 层）；只读端口 `stack_limit_port.h` 冻结 | P5 迁入 `infra/` 正式路径后转正 |
+| `plugins/core.ui`（+ `autosell`/`save_backup` 面板）（D1） | 面板直接依赖基础层 `game/access/ui_kit` / `ui_components`，未走可替换的 ui-kit 接口（U11 adapter 未建立） | P5（U11） |
+| `plugins/core.ui/panels/settings_config.inc`（D1） | 设置页读取/写入开关经 JNI 调 Kotlin `ModuleConfigUiBridge.getConfigJson`/`toggleConfig`（Kotlin JSON 配置源） | P5（决策 D：配置源迁 native config） |
+| `feature/extension_bag`（D2 范围） | 扩展背包整体未迁移：自带 `find_popup_state_entry` 表查找、与 `feature/patch` 双向 include；并作为 `inventory_hooks` 24 wrapper 的消费者（不得在消费者收口前 deactivate） | D2 |
 
 ## 验证附录
 

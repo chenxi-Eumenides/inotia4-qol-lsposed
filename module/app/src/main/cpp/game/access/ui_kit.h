@@ -42,22 +42,3 @@ bool ui_draw_control_title_image_part(void* ctrl, int32_t loc);
 void ui_draw_button_background(void* ctrl, UiRect size, uint32_t color);
 void ui_draw_button_border(void* ctrl, UiRect size, uint32_t color, int thickness);
 void ui_draw_control_alpha_overlay(void* ctrl, UiRect size, uint32_t color, uint32_t alpha);
-
-struct UiPopupStateHooks {
-    void (*enter)();
-    void (*process)();
-    void (*f3)();
-    void (*f4)();
-    uint32_t (*event)(uint64_t event, uint64_t param, uint64_t param2);
-};
-
-struct UiPopupStateHandle {
-    uint8_t* entry = nullptr;
-    int32_t state_id = -1;
-    uint8_t backup[0x40] = {};
-};
-
-bool ui_popup_state_inject(UiPopupStateHandle* handle, uintptr_t enter_vma,
-                           const UiPopupStateHooks& hooks);
-void* ui_popup_state_callback(uintptr_t enter_vma, size_t offset);
-void ui_popup_state_restore(UiPopupStateHandle* handle);

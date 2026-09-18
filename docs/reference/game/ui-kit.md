@@ -2,7 +2,7 @@
 
 ## 目标
 
-`game_ui_kit.h/.cpp` 是轻量的游戏内 UI 组件层，不提供完整布局系统，只封装创建少量原生风格控件所需的重复样板。
+`game/access/ui_kit.{h,cpp}` 是轻量的游戏内 UI 组件层，不提供完整布局系统，只封装创建少量原生风格控件所需的重复样板。
 
 ## 基础控件
 
@@ -46,21 +46,9 @@ ui_end_frame();
 
 ## Popup state
 
-`UiPopupStateHooks` 和 `UiPopupStateHandle` 封装 27 项 PopupState 表的查找、备份、回调注入和恢复：
-
-```cpp
-UiPopupStateHandle state;
-UiPopupStateHooks hooks{enter, process, f3, f4, event};
-ui_popup_state_inject(&state, F_PANEL_UNK1_ENTER, hooks);
-// UI_SetPopupProcessInfo(1, state.state_id)
-ui_popup_state_restore(&state);
-```
-
-## PtrHook 与 PatchSet
-
-- `PtrHook::install_typed(slot, replacement)`：按函数签名安装函数指针 Hook，避免重复的函数指针转换。
-- `PtrHook::installed()`：检查当前 Hook 是否有效。
-- `PatchSet patches(entries, count)`：统一调用 `apply()` / `revert()` 管理一组可逆指令 Patch，并保留 `patch_apply` 的指令校验和失败回滚。
+PopupState 表的注入不再由 `ui_kit` 提供。按 enter 符号定位与「一 entry 一 owner」的事务占用、
+快照/写回由 `hooks/popup_state`（机制层，经 `game/access/popup_state` 访问原版 27×0x40 表）
+负责；面板插件以资源声明方式消费，见各 `plugins/*/plugin.cpp` 的资源表。
 
 ## 约束
 
@@ -70,7 +58,7 @@ ui_popup_state_restore(&state);
 
 ## 原版资源组件
 
-`game_ui_components.h` 将原版资源和自绘降级路径分离：
+`game/access/ui_components.h` 将原版资源和自绘降级路径分离：
 
 - `ui_original::load_option_images` / `unload_option_images` 管理 Options 图像单元生命周期。
 - `ui_original::draw_back_button(ctrl, pressed)` 先绘制 `0x59/0x3` 正常态；按下时再叠加 `0x59/0x2`，仅向左偏移 3 逻辑单位。

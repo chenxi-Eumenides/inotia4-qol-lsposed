@@ -4,8 +4,8 @@
 
 // 原生选择框能力契约（ARCHITECTURE.md §3.4；D1-b1）。
 //
-// 定位：把 feature/ui/native_choice 的公开函数（打开/查询/关闭原生 UICHOICE 面板）暴露为
-// provider `plugins/native_choice` 的能力接口，供 world_teleport 等消费者经能力注册表获取，
+// 定位：把 `plugins/native_choice` 的公开函数（打开/查询/关闭原生 UICHOICE 面板）暴露为
+// 该 provider 的能力接口，供 world_teleport 等消费者经能力注册表获取，
 // 消除消费者对 native_choice 源码/头的直接依赖。
 //
 // 语义与迁移前 native_choice_open/active/close 逐字一致：

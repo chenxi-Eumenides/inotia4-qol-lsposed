@@ -74,7 +74,8 @@ object ApiServer {
         } catch (t: Throwable) {
             LogFile.error(LogDomain.HTTP, "savebackup set map names failed", t)
         }
-        // 启动游戏内备份面板的懒注入线程（注入 INAP_GOODS 死条目 + 设置页存档备份按钮）
+        // 存档面板启动期初始化：native 侧幂等占用 PopupState 死条目（INAP_GOODS）并读目录自检。
+        // D1-b2 起面板占用主路径为 own:popup.savebackup 声明式资源，原懒注入线程已删除。
         try {
             val r = NativeBridge.nativeSaveBackupUiInject()
             LogFile.info(LogDomain.HTTP, "savebackup ui inject: $r")

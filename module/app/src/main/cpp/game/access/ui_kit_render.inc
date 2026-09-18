@@ -227,32 +227,3 @@ void ui_draw_control_alpha_overlay(void* ctrl, UiRect size, uint32_t color, uint
     fn_grpx_fill_rect_alpha(static_cast<int>(x), static_cast<int>(y), static_cast<int>(size.w),
                             static_cast<int>(size.h), color, alpha);
 }
-
-bool ui_popup_state_inject(UiPopupStateHandle* handle, uintptr_t enter_vma,
-                           const UiPopupStateHooks& hooks) {
-    if (handle == nullptr || g_base == 0 || handle->entry != nullptr) return false;
-    uint8_t* entry = find_popup_state(enter_vma);
-    if (entry == nullptr) return false;
-    std::memcpy(handle->backup, entry, kPopupStateSize);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) = reinterpret_cast<uintptr_t>(hooks.enter);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_PROCESS) = reinterpret_cast<uintptr_t>(hooks.process);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) = reinterpret_cast<uintptr_t>(hooks.f3);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F4) = reinterpret_cast<uintptr_t>(hooks.f4);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) = reinterpret_cast<uintptr_t>(hooks.event);
-    handle->entry = entry;
-    handle->state_id = *reinterpret_cast<int32_t*>(entry);
-    return true;
-}
-
-void* ui_popup_state_callback(uintptr_t enter_vma, size_t offset) {
-    uint8_t* entry = find_popup_state(enter_vma);
-    if (entry == nullptr || offset >= kPopupStateSize) return nullptr;
-    return *reinterpret_cast<void**>(entry + offset);
-}
-
-void ui_popup_state_restore(UiPopupStateHandle* handle) {
-    if (handle == nullptr || handle->entry == nullptr) return;
-    std::memcpy(handle->entry, handle->backup, kPopupStateSize);
-    handle->entry = nullptr;
-    handle->state_id = -1;
-}
