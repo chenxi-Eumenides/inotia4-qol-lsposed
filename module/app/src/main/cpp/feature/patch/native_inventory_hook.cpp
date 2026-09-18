@@ -5,12 +5,12 @@
 #include "contracts/plugin.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/qol_log.h"
-#include "core/native/stack_codec.h"
+#include "game/read/stack_codec.h"
 #include "data/native/item_class.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "game_access.h"
 #include "game_inventory.h"
-#include "core/native/stack_limit_port.h"
+#include "contracts/stack_limit.h"
 #include "game_state.h"
 
 #include <atomic>

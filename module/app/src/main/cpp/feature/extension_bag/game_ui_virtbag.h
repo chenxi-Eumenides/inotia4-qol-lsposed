@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/native/stack_codec.h"
+#include "game/read/stack_codec.h"
 
 #include <jni.h>
 

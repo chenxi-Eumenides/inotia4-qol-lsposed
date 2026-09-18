@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "core/native/stack_limit_port.h"
+#include "contracts/stack_limit.h"
 
 // 堆叠上限：6 条 clamp 指令 patch 的声明式所有者。原实现（feature/patch/game_patch.cpp
 // 的 g_stack_enabled + PatchSet）在 B2a-2 拆除，有效态改由 core/native/stack_limit_state

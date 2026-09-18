@@ -3,7 +3,7 @@
 #include "contracts/panels.h"
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
-#include "core/native/stack_limit_port.h"
+#include "contracts/stack_limit.h"
 #include "game/access/ui_components.h"
 #include "game/access/ui_kit.h"
 #include "game_access.h"

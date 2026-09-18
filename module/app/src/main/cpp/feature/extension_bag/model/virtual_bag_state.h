@@ -8,8 +8,8 @@
 #include <string>
 #include <type_traits>
 
-#include "core/native/stack_codec.h"
-#include "core/native/stack_limit_port.h"
+#include "game/read/stack_codec.h"
+#include "contracts/stack_limit.h"
 
 namespace virtual_bag {
 

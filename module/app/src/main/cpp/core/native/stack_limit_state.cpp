@@ -1,4 +1,4 @@
-#include "core/native/stack_limit_port.h"
+#include "contracts/stack_limit.h"
 
 #include <atomic>
 

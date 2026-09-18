@@ -8,7 +8,7 @@
 #include "core/native/frame_task.h"
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
-#include "core/native/stack_codec.h"
+#include "game/read/stack_codec.h"
 #include "data/native/item_class.h"
 
 #include <cstdint>

@@ -111,8 +111,6 @@
 | `module_save.h` | domains/save |
 | `module_save_port.h` | contracts |
 | `sell_price.h` | domains/inventory |
-| `stack_codec.h` | game |
-| `stack_limit_port.h` | contracts |
 
 **重构期 `api/native/` 文件名前缀 → 域（`arch_common._DOMAIN_BY_STEM`）**
 

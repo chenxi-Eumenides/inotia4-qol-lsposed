@@ -8,8 +8,8 @@
 
 #include "core/native/extension_bag_port.h"
 #include "core/native/qol_log.h"
-#include "core/native/stack_codec.h"
-#include "core/native/stack_limit_port.h"
+#include "game/read/stack_codec.h"
+#include "contracts/stack_limit.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_symbols.h"

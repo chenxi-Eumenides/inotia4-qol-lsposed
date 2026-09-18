@@ -1,14 +1,14 @@
 #include "game_patch.h"
 
 #include "core/native/qol_log.h"
-#include "core/native/stack_limit_port.h"
+#include "contracts/stack_limit.h"
 #include "game_access.h"
 #include "game_inventory.h"
 #include "game_ops_common.h"
 #include "game_state.h"
 #include "data/native/game_symbols.h"
 #include "game_ptr_hook.h"
-#include "stack_codec.h"
+#include "game/read/stack_codec.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "feature/patch/native_inventory_hook.h"
 

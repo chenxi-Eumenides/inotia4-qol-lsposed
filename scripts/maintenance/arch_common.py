@@ -114,7 +114,6 @@ _CORE_OVERRIDES = {
     "game_variant.h": "game",
     "game_feature.cpp": "game",
     "game_feature.h": "game",
-    "stack_codec.h": "game",
     "game_nav.cpp": "domains/world",
     "game_nav.h": "domains/world",
     "inventory_trade.cpp": "domains/inventory",
@@ -122,7 +121,6 @@ _CORE_OVERRIDES = {
     "module_save.cpp": "domains/save",
     "module_save.h": "domains/save",
     "module_save_port.h": "contracts",
-    "stack_limit_port.h": "contracts",
     "extension_bag_port.h": "contracts",
     "sell_price.h": "domains/inventory",
 }
