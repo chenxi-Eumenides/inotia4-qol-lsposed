@@ -101,13 +101,6 @@ object NativeBridge {
     external fun nativeOpPanelClose(): String
     external fun nativeOpPanelOpen(panel: String): String
     external fun nativeRecoverAfterHiveBlock(): String
-    external fun nativeExp1BtnBehavior(): String
-    external fun nativeExp2AddControl(): String
-    external fun nativeExp3CustomDialog(text: String): String
-    external fun nativeExp4TextAppearance(): String
-    external fun nativeExp5NewPanel(): String
-    external fun nativeExpRestoreAll(): String
-    external fun nativeExpStatus(): String
     external fun nativeSaveSlotsJson(): String
     external fun nativeOpNpcInteract(): String
     external fun nativeNpcDialogOptions(): String

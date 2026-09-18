@@ -1946,6 +1946,8 @@
 
 ## 九、debug（调试）
 
+> **端点下线（D1-c0）**：ui-exp 实验端点 `/api/debug/exp/status`、`/api/debug/exp/1..5`、`/api/debug/exp/restore` 与其 native/Kotlin 实现、`custom`（商店返回键调试）面板面已整体删除，不再属于路由面。以下仅列当前有效路由。
+
 `GET /api/debug/ui`
 
 **用途**：获取调试用 UI 状态原始 JSON。

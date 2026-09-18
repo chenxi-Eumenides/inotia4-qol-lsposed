@@ -52,13 +52,6 @@ interface InfoApiService {
     fun debugUi(): String
     fun debugPath(tx: Int, ty: Int): String
     fun debugItemRaw(bag: Int, slot: Int): String
-    fun exp1BtnBehavior(): String
-    fun exp2AddControl(): String
-    fun exp3CustomDialog(text: String): String
-    fun exp4TextAppearance(): String
-    fun exp5NewPanel(): String
-    fun expRestoreAll(): String
-    fun expStatus(): String
     fun settingsUiInject(): String
     fun settingsUiStatus(): String
     fun settingsUiRestore(): String

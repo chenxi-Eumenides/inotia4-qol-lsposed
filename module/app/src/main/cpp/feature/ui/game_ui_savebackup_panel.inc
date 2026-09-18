@@ -282,7 +282,7 @@ void savebackup_panel_f3() {
     // 返回设置页后 back_btn_draw 取不到贴图退化为「方框+文字」（用户实测 bug）；
     // 卸载 TITLE_BACKGROUND_* 还会导致主菜单重绘 GRPX_DrawPart 空指针崩溃（tombstone_30）。
     // 卸载职责在所有者（settings_panel_f3 / 主菜单）。
-    // 控件树保留复用（同 game_ui_custom_panel：递归删除 SIGBUS）
+    // 控件树保留复用（递归删除 SIGBUS）
 }
 
 void savebackup_panel_f4() {}

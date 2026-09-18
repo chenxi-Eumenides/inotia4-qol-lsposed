@@ -20,7 +20,6 @@
 #include "game_world.h"
 #include "game_tiles.h"
 #include "feature/patch/game_patch.h"
-#include "feature/ui/game_ui_exp.h"
 #include "feature/ui/game_ui_settings.h"
 #include "feature/ui/game_ui_savebackup.h"
 #include "feature/extension_bag/game_ui_virtbag.h"

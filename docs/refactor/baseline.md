@@ -53,9 +53,9 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 4 |
-| `plugins/ui` | 23 |
+| `plugins/ui` | 17 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **341** |
+| **合计** | **335** |
 
 ### 1.2 迁移期映射摘要
 
@@ -141,10 +141,9 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
-| `plugins/ui` | `game` | 22 |
+| `plugins/ui` | `game` | 16 |
 | `host` | `game` | 14 |
 | `host` | `contracts` | 12 |
-| `plugins/ui` | `infra` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
@@ -155,6 +154,7 @@
 | `host` | `hooks` | 7 |
 | `plugins/custom_recipe` | `contracts` | 7 |
 | `plugins/custom_recipe` | `infra` | 7 |
+| `plugins/extension_bag` | `contracts` | 7 |
 
 ### 2.2 include 环
 
@@ -162,7 +162,7 @@
 
 ## 3. 基线债务
 
-基线共 3 组、72 条。
+基线共 3 组、68 条。
 
 ### layer_direction（43 条）
 
@@ -188,7 +188,7 @@
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
 - …（其余 23 条省略）
 
-### offsets_symbols_header（21 条）
+### offsets_symbols_header（19 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
@@ -203,21 +203,17 @@
 - `offsets_symbols_header|feature/ui/game_ui_autosell.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_charinfo_zh.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_components.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_custom.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
-- `offsets_symbols_header|feature/ui/game_ui_exp.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_kit.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_savebackup.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/game_ui_settings.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|feature/ui/native_choice.cpp|data/native/game_symbols.h|plugins/ui 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
-- …（其余 1 条省略）
+- `offsets_symbols_header|plugins/custom_recipe/table.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
 
-### resource_unknown_symbol（8 条）
+### resource_unknown_symbol（6 条）
 
 - `resource_unknown_symbol|feature/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/extension_bag/game_ui_virtbag.cpp:161||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/ui/game_ui_custom.cpp:43||ptr slot 无法归属符号`
-- `resource_unknown_symbol|feature/ui/game_ui_exp.cpp:25||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/game_ui_settings.cpp:80||ptr slot 无法归属符号`
 - `resource_unknown_symbol|feature/ui/native_choice.cpp:232||entry hook 无法归属符号`
 - `resource_unknown_symbol|feature/ui/native_choice.cpp:255||entry hook 无法归属符号`
@@ -227,13 +223,13 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 19 个 / 文件 12 个 / 去重符号 9 个 / 无法归属 5 个。
+扫描合计：安装点 17 个 / 文件 10 个 / 去重符号 9 个 / 无法归属 3 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 3 | 5 | 3 |
 | call patch | 3 | 7 | 4 |
-| ptr slot | 6 | 7 | 3 |
+| ptr slot | 4 | 5 | 3 |
 
 去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
 
@@ -249,8 +245,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：150 个
-- native 导出：150 个
+- Kotlin `external fun`：143 个
+- native 导出：143 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -267,7 +263,7 @@
 | --- | --- | --- |
 | `extension_bag` | `plugins/extension_bag` | 32 |
 | `patch` | `plugins/patch` | 9 |
-| `ui` | `plugins/ui` | 23 |
+| `ui` | `plugins/ui` | 17 |
 
 ### 6.2 已迁移 `plugins/*`（14）
 
