@@ -149,7 +149,8 @@ int can_unequip_wrapper(void* ch, void* item) {
     return 1;
 }
 
-bool sell_gate_should_block() {
+bool sell_gate_should_block(void* ctx) {
+    (void)ctx;
     if (!gate_enabled()) return false;  // 插件未启用：谓词常驻但空转放行
     const int desc_type = game::equip_desc_role_type();
     void* ch = game::char_menu_character();

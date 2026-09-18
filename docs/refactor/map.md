@@ -24,15 +24,15 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 14 | 774 |
+| `contracts/` | 15 | 801 |
 | `game/` | 35 | 2755 |
 | `infra/` | 24 | 2154 |
-| `hooks/` | 10 | 1479 |
+| `hooks/` | 10 | 1565 |
 | `patch/` | 7 | 479 |
 | `domains/` | 2 | 111 |
-| `plugins/` | 140 | 28156 |
+| `plugins/` | 142 | 28206 |
 | `host/` | 12 | 2140 |
-| **合计** | **244** | **38048** |
+| **合计** | **247** | **38211** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -41,14 +41,14 @@
 - `plugins/core.ui/`：14 文件 / 1522 行
 - `plugins/craft_ui/`：4 文件 / 670 行
 - `plugins/custom_recipe/`：10 文件 / 1940 行
-- `plugins/extension_bag/`：36 文件 / 12851 行
-- `plugins/inventory_hooks/`：7 文件 / 1925 行
+- `plugins/extension_bag/`：36 文件 / 12862 行
+- `plugins/inventory_hooks/`：9 文件 / 1956 行
 - `plugins/native_choice/`：4 文件 / 466 行
 - `plugins/push_all/`：6 文件 / 267 行
 - `plugins/quest/`：4 文件 / 162 行
 - `plugins/save_backup/`：11 文件 / 4125 行
 - `plugins/simple_mode/`：6 文件 / 462 行
-- `plugins/special_equip/`：6 文件 / 423 行
+- `plugins/special_equip/`：6 文件 / 431 行
 - `plugins/stack_limit/`：2 文件 / 103 行
 - `plugins/text_layer/`：6 文件 / 427 行
 - `plugins/world_teleport/`：6 文件 / 585 行
@@ -124,15 +124,14 @@ legacy（9）：`core_ui_panels_tests`、`game_feature_tests`、`game_variant_te
 | `host/assembly.cpp` | bootstrap 顺序收敛；hook/patch 原语注入仍取自 `feature/patch` 与 `core/native/call_patch` | P5 |
 | `host/frame_source.cpp` | 帧源在 `assembly` 之前被调用，故自注入 patch 原语（与 `assembly` 重复） | P5 |
 | `plugins/quest/plugin.cpp` | 进档回调仍借用 legacy `core/native/save_enter` 设施 | 随存档域迁移（C/D 阶段） |
-| `plugins/special_equip/plugin.cpp` | 出售门禁谓词注册调用 legacy `inventory_native_hook_set_sell_gate`（前置声明，避免 feature→feature include） | B2c 库存业务搬迁后改为共享分派消费者 |
 | `plugins/inventory_hooks`（B2a-1） | **禁止 deactivate**：extension_bag / 自动出售 / 合成等 legacy 消费者依赖这 24 个 wrapper（扩展袋读取、扩展补扣、出售门禁）；物理释放在插件 `deactivate` 路径会执行，消费者将在 wrapper 缺失下运行。宿主无「不可 deactivate」标志，靠流程约束 | 消费者改经 capability requires 收口后（B2c/D2）解除 |
-| `plugins/inventory_hooks/native_inventory_hook.h`（D2c-2a） | 过渡导出：`inventory_native_hook_call_refresh_item_area_original`（refresh → D2c-2b）、`inventory_native_hook_set_sell_gate`（sell-gate → D2c-2b）、`native_hook_func` / `native_unhook_func` 机制原语（→ P5） | refresh/sell-gate：D2c-2b；原语：P5 |
+| `plugins/inventory_hooks/native_inventory_hook.h`（D2c-2b-1） | 过渡导出仅剩 `native_hook_func` / `native_unhook_func` 机制原语（→ P5）；`inventory_native_hook_call_refresh_item_area_original` 已经 `inventory_refresh` capability 收口，出售门禁已经 `hooks/dispatch` 布尔门收口 | 原语：P5 |
 | `host/core_patches.cpp` + `game/access/patches.cpp`（B2a-2） | 常驻指令 patch 声明式化：19 条站点登记（位段缩窄 ×2 / clamp ×6 / 重定向 arg ×5 + call ×5 / hub ×1），`kBlRedirectToSymbol` 目标经 `fn_resolve` 解析。monster 兼容是**扫描式例外**：地址按运行时特征字节定位，无法静态登记，经 `patch::install_word_at` 占用同一张点表、不入 `hooks/registry` 资源表 | 扫描式例外长期保留（特征字节定位方式不变，无清除阶段） |
 | `feature/patch/game_patch.{h,cpp}`（B2a-2） | 常驻 patch 原语与 stack_limit 状态已迁出，仅保留 move_merge 开关（GOT 槽指针 hook）与 IAP 恢复；`plugins/extension_bag/game_ui_virtbag.cpp` 仍 include 本头（feature→feature 过渡依赖） | move_merge 相关随 D2c-2 迁移后删除 |
 | `core/native/stack_limit_state.cpp`（B2a-2） | stack_limit 有效态实现放在 `core/native/`（`arch_common` 过渡映射为 `infra` 层）；只读端口 `stack_limit_port.h` 冻结 | P5 迁入 `infra/` 正式路径后转正 |
 | `plugins/core.ui`（+ `autosell`/`save_backup` 面板）（D1） | 面板直接依赖基础层 `game/access/ui_kit` / `ui_components`，未走可替换的 ui-kit 接口（U11 adapter 未建立） | P5（U11） |
 | `plugins/core.ui/panels/settings_config.inc`（D1） | 设置页读取/写入开关经 JNI 调 Kotlin `ModuleConfigUiBridge.getConfigJson`/`toggleConfig`（Kotlin JSON 配置源） | P5（决策 D：配置源迁 native config） |
-| `plugins/extension_bag`（D2） | 已物理迁移（D2c-1，34 文件）：`game_ui_virtbag.cpp` 仍 include `feature/patch`（game_patch）与 `plugins/inventory_hooks`（native_inventory_hook / inventory_hook_stage4）及 `patch/game_patch_bridge.h`，并作为 `inventory_hooks` 24 wrapper 的消费者（不得在消费者收口前 deactivate）；`native_inventory_hook.cpp` 已切 capability 现取（D2c-2a） | D2c-2 |
+| `plugins/extension_bag`（D2） | 已物理迁移（D2c-1，34 文件）：`game_ui_virtbag.cpp` 仍 include `feature/patch`（game_patch）与 `plugins/inventory_hooks`（`inventory_hook_stage4.h` 纯逻辑）及 `patch/game_patch_bridge.h`，并作为 `inventory_hooks` 24 wrapper 的消费者（不得在消费者收口前 deactivate）；refresh 已经 `inventory_refresh` capability、出售门禁已经 dispatch（D2c-2b-1） | D2c-2 |
 
 ## 验证附录
 

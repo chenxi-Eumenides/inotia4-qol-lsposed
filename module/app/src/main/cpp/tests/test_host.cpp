@@ -22,7 +22,7 @@
 #include "game/read/stack_codec.h"
 #include "core/native/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
-#include "feature/patch/inventory_find_item_poc.h"
+#include "plugins/inventory_hooks/inventory_find_item_poc.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/world_teleport/rules.h"
 #include "../data/native/game_tiles.cpp"

@@ -15,7 +15,7 @@
 //
 // 机制：包裹 `CHAR_CanEquipItem` 与 `CHAR_CanUnequipItem` 两个入口 hook（资源由宿主
 // 声明式安装，见 plugin.cpp）；出售按钮 `UIEquip_ButtonDestroyExe` 已被 inventory 域 hook
-// （同址重复 hook 返回 -1），经 `inventory_native_hook_set_sell_gate` 注册谓词挂入门禁。
+// （同址重复 hook 返回 -1），经 hooks/dispatch 布尔门登记谓词挂入门禁（D2c-2b-1）。
 // 原版判定链：
 //   CanEquipItem:   ① ITEM_IsRealEquip(item) → ② !(rec[+7] & 0x10)
 //                   → ③ CHAR_CanChangeEquip(ch) → ④ ch[C_LEVEL] >= ITEM_GetEquipLevel(item)
@@ -75,7 +75,8 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 int can_equip_wrapper(void* ch, void* item);
 int can_unequip_wrapper(void* ch, void* item);
 
-// 出售门禁谓词：注册到 legacy inventory 出售按钮 wrapper；入口先判业务门禁。
-bool sell_gate_should_block();
+// 出售门禁谓词（D2c-2b-1）：经 hooks/dispatch 布尔门登记到 inventory_hooks 的
+// UIEquip_ButtonDestroyExe wrapper；入口先判业务门禁。ctx 未使用（保留签名）。
+bool sell_gate_should_block(void* ctx);
 
 }  // namespace qol::features::special_equip

@@ -1,14 +1,7 @@
 #include "native_inventory_hook.h"
 #include "inventory_hook_stage4.h"
+#include "inventory_find_item_poc.h"
 #include "claims.h"
-
-// D2c-2a：inventory_find_item_poc 留 feature/patch（D2c-2b/2c 处理）；include 它会新增
-// plugins/inventory_hooks → plugins/patch 跨插件层依赖，故本 TU 仅前置声明其入口，
-// 定义仍留在 feature/patch（与既有前置声明先例一致），D2c-2b 收口时改建正式依赖。
-using InventoryFindItemCallback = void* (*)(int32_t);
-void* inventory_find_item_original_first(int32_t category, InventoryFindItemCallback backup,
-                                         InventoryFindItemCallback extension_fallback,
-                                         bool& recursive_guard);
 
 #include "contracts/plugin.h"
 #include "core/native/extension_bag_port.h"
@@ -19,6 +12,7 @@ void* inventory_find_item_original_first(int32_t category, InventoryFindItemCall
 #include "game_inventory.h"
 #include "contracts/stack_limit.h"
 #include "game_state.h"
+#include "hooks/dispatch.h"
 
 #include <atomic>
 #include <cstddef>
@@ -887,13 +881,11 @@ void button_equip_exe_wrapper(void* button) {
 // R-55：详情出售按钮函数级标记。原按钮在同一调用内先调 UIEquip_OKDestroyItem
 // 预演（x23=0x666）取确认框展示金额、再创建 YesNo 弹窗；预演期间置 thread_local
 // 标记，供 ok_destroy_item_wrapper 区分「预演」与「弹窗 OK 真实结算」。
-// 出售门禁谓词（special_equip 注册）：ButtonDestroyExe 已被本域 hook，同址不可
-// 重复 hook（NativeHook rc=-1），功能域经 inventory_native_hook_set_sell_gate
-// 注册校验，wrapper 入口统一执行。setter 定义在匿名命名空间之外（文件尾部）。
-SellGatePredicate g_sell_gate = nullptr;
-
+// 出售门禁（D2c-2b-1）：ButtonDestroyExe 已被本域 hook，同址不可二次 NativeHook，
+// 功能域（special_equip）经 hooks/dispatch 布尔门登记谓词，wrapper 入口统一查询；
+// resource_id 与本 claim 一致。未登记即放行（与旧 g_sell_gate==nullptr 同义）。
 void button_destroy_exe_wrapper(void* button) {
-    if (g_sell_gate != nullptr && g_sell_gate()) {
+    if (qol::hooks::dispatch_intercept_blocks("hook:UIEquip_ButtonDestroyExe", nullptr)) {
         QOL_LOG_INFO(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
         return;
     }
@@ -1199,10 +1191,12 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
     return 1;
 }
 
-void inventory_native_hook_call_refresh_item_area_original() {
+bool inventory_native_hook_call_refresh_item_area_original() {
     const UiEquipRefreshItemAreaFn original = g_backup_refresh_item_area != nullptr
         ? g_backup_refresh_item_area : fn_ui_equip_refresh_item_area;
-    if (original != nullptr) original();
+    if (original == nullptr) return false;
+    original();
+    return true;
 }
 
 void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
@@ -1232,12 +1226,6 @@ void inventory_native_hook_on_module_loaded(const char* name, void*) {
 
 NativeHookFunType native_hook_func() { return g_hook_func; }
 NativeUnhookFunType native_unhook_func() { return g_unhook_func; }
-
-// 出售门禁谓词注册（见文件内 g_sell_gate 注释）：功能域挂入，ButtonDestroyExe
-// wrapper 入口统一执行；传 nullptr 可卸载。
-void inventory_native_hook_set_sell_gate(SellGatePredicate predicate) {
-    g_sell_gate = predicate;
-}
 
 extern "C" [[gnu::visibility("default")]] [[gnu::used]]
 NativeOnModuleLoaded native_init(const NativeAPIEntries* entries) {

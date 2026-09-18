@@ -3,20 +3,19 @@
 #include <cstdint>
 
 #include "core/native/qol_log.h"
+#include "hooks/dispatch.h"
 #include "plugins/special_equip/feature.h"
 
-// 过渡依赖（B2 拆分 inventory 域后清除）：出售按钮 UIEquip_ButtonDestroyExe 已被 legacy
-// inventory hook 单点占用（同址 NativeHook 二次挂载 rc=-1），本插件只能注册谓词。
-// 此处前置声明注册入口而不 include plugins/inventory_hooks/native_inventory_hook.h：该头归属
-// plugins/patch，include 会形成 feature→feature 层依赖（新增架构违规）。B2 拆分 inventory
-// 域后改为共享资源分派消费者，此声明随之删除。
-void inventory_native_hook_set_sell_gate(bool (*predicate)());
+// D2c-2b-1：出售按钮 UIEquip_ButtonDestroyExe 已被 inventory_hooks 单点 hook（同址
+// NativeHook 二次挂载 rc=-1），本插件经 hooks/dispatch 布尔门登记谓词，不再前置声明
+// inventory_hooks 的 set_sell_gate（跨插件符号依赖已切断）。resource_id 与 claim 一致。
 
 namespace qol::features::special_equip {
 namespace {
 
 constexpr const char* kPluginId = "special_equip";
 constexpr const char* kPluginVersion = "0.1.0";
+constexpr const char* kSellGateResourceId = "hook:UIEquip_ButtonDestroyExe";
 
 // 资源声明（ARCHITECTURE.md §4.3 字段顺序）：两个入口 hook 均为私有、必需、fail-closed。
 // gate=nullptr = 常驻，无配置开关；理由见 feature.h §「常开，无配置开关」——关闭只会把
@@ -63,14 +62,21 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     set_gate(true);
-    inventory_native_hook_set_sell_gate(&sell_gate_should_block);
+    // 出售门禁登记到 hooks/dispatch 布尔门（resource_id = claim id）。fail-soft：登记失败
+    // （已被他人占用/容量满，当前实际不可达）仅告警，不使 CanEquip/CanUnequip 主功能失败；
+    // 代价 = 本次出售门禁不生效。activate 重入同 fn 幂等成功，不重复告警。
+    if (!hooks::dispatch_set_intercept(kSellGateResourceId, &sell_gate_should_block, nullptr)) {
+        QOL_LOG_WARN(QolDomain::kSpecialEquip,
+                     "sell gate intercept register rejected id=%s", kSellGateResourceId);
+    }
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
-    // 门禁置 false；谓词无注销接口，常驻但入口先判门禁即放行。重复调用幂等。
+    // 门禁置 false 并注销布尔门（幂等）；重复调用安全。
     set_gate(false);
+    hooks::dispatch_clear_intercept(kSellGateResourceId);
 }
 
 // 启停仅切门禁，不做资源操作（§3.3）。

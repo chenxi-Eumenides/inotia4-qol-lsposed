@@ -10,10 +10,8 @@
 #include "patch/game_patch_bridge.h"
 #include "game/read/stack_codec.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
-
-// D2c-2a：native_inventory_hook 已迁 plugins/inventory_hooks；本 TU 仅需 refresh 入口。
-// 前置声明以避免新增 plugins/patch → plugins/inventory_hooks 跨插件层依赖（D2c-2b 收口）。
-void inventory_native_hook_call_refresh_item_area_original();
+#include "contracts/inventory_refresh.h"
+#include "infra/capabilities.h"
 
 #include <atomic>
 #include <cerrno>

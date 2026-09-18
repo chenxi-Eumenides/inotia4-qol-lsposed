@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 16 |
+| `contracts` | 17 |
 | `domains/attribute_range` | 2 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
@@ -44,9 +44,9 @@
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
 | `plugins/extension_bag` | 36 |
-| `plugins/inventory_hooks` | 7 |
+| `plugins/inventory_hooks` | 9 |
 | `plugins/native_choice` | 4 |
-| `plugins/patch` | 5 |
+| `plugins/patch` | 3 |
 | `plugins/push_all` | 6 |
 | `plugins/quest` | 4 |
 | `plugins/save_backup` | 11 |
@@ -55,7 +55,7 @@
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **353** |
+| **合计** | **354** |
 
 ### 1.2 迁移期映射摘要
 
@@ -134,22 +134,22 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 152 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 154 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
 | `host` | `game` | 14 |
 | `plugins/autosell` | `infra` | 13 |
+| `plugins/extension_bag` | `contracts` | 13 |
 | `host` | `contracts` | 12 |
-| `plugins/extension_bag` | `contracts` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
 | `infra` | `game` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `host` | `patch` | 9 |
 | `plugins/autosell` | `contracts` | 9 |
+| `plugins/extension_bag` | `infra` | 9 |
 | `plugins/autosell` | `game` | 8 |
-| `plugins/extension_bag` | `infra` | 8 |
 | `plugins/save_backup` | `infra` | 8 |
 | `domains/world` | `game` | 7 |
 | `host` | `hooks` | 7 |
@@ -160,9 +160,9 @@
 
 ## 3. 基线债务
 
-基线共 3 组、50 条。
+基线共 3 组、49 条。
 
-### layer_direction（36 条）
+### layer_direction（35 条）
 
 - `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|domains/character → domains/inventory`
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
@@ -184,7 +184,7 @@
 - `layer_direction|core/native/save_enter.cpp|core/native/call_patch.h|infra → patch`
 - `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
 - `layer_direction|core/native/save_enter.cpp|game_access.h|infra → game`
-- …（其余 16 条省略）
+- …（其余 15 条省略）
 
 ### offsets_symbols_header（12 条）
 
@@ -204,7 +204,7 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:149||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:150||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 
@@ -243,7 +243,7 @@
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
-| `patch` | `plugins/patch` | 5 |
+| `patch` | `plugins/patch` | 3 |
 
 ### 6.2 已迁移 `plugins/*`（16）
 
@@ -255,7 +255,7 @@
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `extension_bag` | `plugins/extension_bag` | 36 |
-| `inventory_hooks` | `plugins/inventory_hooks` | 7 |
+| `inventory_hooks` | `plugins/inventory_hooks` | 9 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
 | `quest` | `plugins/quest` | 4 |

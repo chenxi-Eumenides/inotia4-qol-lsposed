@@ -29,7 +29,6 @@
     "layer_direction|data/native/game_tiles.cpp|core/native/qol_log.h|game → infra",
     "layer_direction|plugins/extension_bag/game_ui_virtbag.cpp|feature/patch/game_patch.h|plugins/extension_bag → plugins/patch",
     "layer_direction|plugins/extension_bag/game_ui_virtbag.cpp|plugins/inventory_hooks/inventory_hook_stage4.h|plugins/extension_bag → plugins/inventory_hooks",
-    "layer_direction|plugins/extension_bag/game_ui_virtbag.cpp|plugins/inventory_hooks/native_inventory_hook.h|plugins/extension_bag → plugins/inventory_hooks",
     "layer_direction|feature/patch/game_patch.cpp|plugins/extension_bag/game_ui_virtbag.h|plugins/patch → plugins/extension_bag",
     "layer_direction|game_access.cpp|core/native/qol_log.h|game → infra",
     "layer_direction|game_access.cpp|game_system.h|game → domains/system",
@@ -51,6 +50,6 @@
     "offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头",
     "offsets_symbols_header|plugins/custom_recipe/table.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头",
     "resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号",
-    "resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:149||ptr slot 无法归属符号"
+    "resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:150||ptr slot 无法归属符号"
   ]
 }

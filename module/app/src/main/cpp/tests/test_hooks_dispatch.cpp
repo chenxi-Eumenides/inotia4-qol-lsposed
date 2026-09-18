@@ -18,9 +18,12 @@ static int g_fail = 0;
 } while (0)
 
 using qol::hooks::ConsumerKind;
+using qol::hooks::dispatch_clear_intercept;
 using qol::hooks::dispatch_consumer_count;
+using qol::hooks::dispatch_intercept_blocks;
 using qol::hooks::dispatch_reset_for_test;
 using qol::hooks::dispatch_run_text;
+using qol::hooks::dispatch_set_intercept;
 using qol::hooks::dispatch_subscribe;
 using qol::hooks::dispatch_unsubscribe;
 using qol::hooks::DispatchId;
@@ -336,6 +339,51 @@ void test_count_unsubscribe_reset() {
     CHECK(std::strcmp(dispatch_run_text(kRes, 7, "O"), "O") == 0);
 }
 
+// D2c-2b-1：布尔门型 Intercept（独立于文本链 kIntercept 的按资源登记表）。
+int g_gate_calls = 0;
+void* g_gate_seen_ctx = nullptr;
+bool gate_block(void* ctx) {
+    ++g_gate_calls;
+    g_gate_seen_ctx = ctx;
+    return true;
+}
+bool gate_allow(void* ctx) {
+    (void)ctx;
+    return false;
+}
+
+void test_boolean_intercept_gate() {
+    dispatch_reset_for_test();
+    g_gate_calls = 0;
+    g_gate_seen_ctx = nullptr;
+    // 未登记：放行。
+    CHECK(!dispatch_intercept_blocks(kRes, nullptr));
+    // 非法/空参拒绝。
+    CHECK(!dispatch_set_intercept(nullptr, gate_block, nullptr));
+    CHECK(!dispatch_set_intercept("", gate_block, nullptr));
+    CHECK(!dispatch_set_intercept(kRes, nullptr, nullptr));
+    // 登记 + 查询：查询 ctx 非空覆盖注册 ctx。
+    CHECK(dispatch_set_intercept(kRes, gate_block, reinterpret_cast<void*>(0x2)));
+    CHECK(dispatch_intercept_blocks(kRes, nullptr));
+    CHECK(g_gate_seen_ctx == reinterpret_cast<void*>(0x2));
+    CHECK(dispatch_intercept_blocks(kRes, reinterpret_cast<void*>(0x3)));
+    CHECK(g_gate_seen_ctx == reinterpret_cast<void*>(0x3));
+    CHECK(g_gate_calls == 2);
+    // 唯一性：同 fn 幂等 true，异 fn 拒绝。
+    CHECK(dispatch_set_intercept(kRes, gate_block, nullptr));
+    CHECK(!dispatch_set_intercept(kRes, gate_allow, nullptr));
+    // clear：移除后放行；重复 clear false。
+    CHECK(dispatch_clear_intercept(kRes));
+    CHECK(!dispatch_clear_intercept(kRes));
+    CHECK(!dispatch_intercept_blocks(kRes, nullptr));
+    // 文本链与布尔门键空间独立：同名资源互不影响。
+    CHECK(dispatch_subscribe(kRes, kBefore, ConsumerKind::kObserve, obs_a, nullptr) != 0);
+    CHECK(dispatch_set_intercept(kRes, gate_allow, nullptr));
+    CHECK(!dispatch_intercept_blocks(kRes, nullptr));  // gate_allow 恒放行
+    CHECK(dispatch_clear_intercept(kRes));
+    dispatch_reset_for_test();
+}
+
 }  // namespace
 
 int main() {
@@ -353,6 +401,7 @@ int main() {
     test_capacity_and_count();
     test_owner_table_after_precedence();
     test_count_unsubscribe_reset();
+    test_boolean_intercept_gate();
     std::printf("hooks_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

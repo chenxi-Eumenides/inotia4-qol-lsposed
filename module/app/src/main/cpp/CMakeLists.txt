@@ -34,7 +34,7 @@ add_library(gamebridge SHARED
     api/native/game_inventory.cpp
     feature/patch/game_patch.cpp
     plugins/inventory_hooks/native_inventory_hook.cpp
-    feature/patch/inventory_find_item_poc.cpp
+    plugins/inventory_hooks/inventory_find_item_poc.cpp
     plugins/inventory_hooks/inventory_hook_stage4.cpp
     game/access/ui_kit.cpp
     game/access/ui_components.cpp

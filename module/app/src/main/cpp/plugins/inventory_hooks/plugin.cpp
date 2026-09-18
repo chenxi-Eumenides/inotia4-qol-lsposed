@@ -1,11 +1,18 @@
 #include "plugins/inventory_hooks/plugin.h"
 #include "plugins/inventory_hooks/claims.h"
+#include "plugins/inventory_hooks/native_inventory_hook.h"
 
 #include <cstdint>
+
+#include "contracts/inventory_refresh.h"
 
 // D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
 // feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
 // feature→feature 层依赖而设的跨层全局桥前置声明已删除。
+//
+// D2c-2b-1：经 `inventory_refresh` capability 暴露 raw-original refresh trampoline，
+// 供 extension_bag / game_patch 等消费者现取；出售门禁改由 hooks/dispatch 布尔门承载
+// （谓词注册方 special_equip），本插件不再导出 set_sell_gate。
 //
 // B2a-1 禁止 deactivate：extension_bag / 自动出售 / 合成等 legacy 消费者直接依赖这 24 个
 // hook 的 wrapper 语义（扩展袋读取、扩展补扣、出售门禁等）。deactivate 会由宿主物理
@@ -19,6 +26,19 @@ namespace {
 
 constexpr const char* kPluginId = "inventory_hooks";
 constexpr const char* kPluginVersion = "0.1.0";
+
+// 能力接口实例：函数地址编译期常量；宿主在 enabled 时注册、revoking 时注销。
+constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
+    &inventory_native_hook_call_refresh_item_area_original,
+};
+
+const contracts::CapabilityProvisionRef kProvides[] = {
+    {
+        contracts::kInventoryRefreshCapabilityId,
+        {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
+        &kInventoryRefreshApi,
+    },
+};
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
@@ -65,7 +85,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             kPluginVersion,
             0, nullptr,   // requires
             0, nullptr,   // optional_requires
-            0, nullptr,   // provides
+            1, kProvides,  // provides（inventory_refresh v1.0）
             count, claims,
             0, nullptr,   // jni
             &plugin_install,

@@ -4,8 +4,8 @@
 #include "game_inventory.h"
 #include "game_ops_common.h"
 #include "contracts/ownership.h"
+#include "contracts/inventory_refresh.h"
 #include "feature/patch/game_patch.h"
-#include "plugins/inventory_hooks/native_inventory_hook.h"
 #include "hooks/popup_state.h"
 #include "patch/game_patch_bridge.h"
 #include "game_ptr_hook.h"
@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/extension_bag_logging.h"
 #include "game/access/ui_kit.h"
+#include "infra/capabilities.h"
 #include "infra/scheduler.h"
 
 #include <atomic>
@@ -271,7 +272,17 @@ bool virtual_bag_native_call_active() {
 
 void virtual_bag_call_original_refresh_item_area_with_guard() {
     NativeCallScope native_call;
-    inventory_native_hook_call_refresh_item_area_original();
+    // D2c-2b-1：经 inventory_refresh capability 现取 raw-original trampoline；能力缺失
+    // （provider 未安装/撤销中）按既有 no-op 降级——不直呼 fn_ui_equip_refresh_item_area，
+    // 否则会经已被 hook 的入口回入 wrapper（原 trampoline 存在的唯一原因）。
+    const auto* refresh = static_cast<const qol::contracts::InventoryRefreshApi*>(
+        qol::infra::require_capability(
+            qol::contracts::kInventoryRefreshCapabilityId,
+            QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
+                            static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)}));
+    if (refresh != nullptr && refresh->call_original != nullptr) {
+        refresh->call_original();
+    }
 }
 
 // 与 item_count_encoding/ITEM_GetCumulateCount 使用同一 ITEMCLASSBASE +6 bit0 语义：

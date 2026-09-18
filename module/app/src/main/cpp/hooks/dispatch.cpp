@@ -33,6 +33,26 @@ ResourceGroup g_groups[kMaxResources];
 std::mutex g_mtx;
 uint64_t g_next_id = 1;  // 0 保留为无效句柄
 
+// 布尔门型 Intercept（D2c-2b-1）：独立于文本链 ConsumerKind::kIntercept 的按资源登记表。
+constexpr uint32_t kMaxInterceptGates = 8;
+
+struct InterceptGate {
+    const char* id = nullptr;  // nullptr = 空槽
+    InterceptGateFn fn = nullptr;
+    void* ctx = nullptr;
+};
+
+InterceptGate g_gates[kMaxInterceptGates];
+
+int find_gate(const char* resource_id) {
+    for (uint32_t i = 0; i < kMaxInterceptGates; ++i) {
+        if (g_gates[i].id != nullptr && std::strcmp(g_gates[i].id, resource_id) == 0) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 bool is_empty(const char* text) { return text == nullptr || text[0] == '\0'; }
 
 int find_group(const char* resource_id) {
@@ -218,10 +238,56 @@ const char* dispatch_run_text(const char* resource_id, uint32_t text_id, const c
     return current;
 }
 
+bool dispatch_set_intercept(const char* resource_id, InterceptGateFn fn, void* ctx) {
+    if (is_empty(resource_id) || fn == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_mtx);
+    const int existing = find_gate(resource_id);
+    if (existing >= 0) {
+        // 同一资源最多 1 个；同 fn 幂等，异 fn 拒绝（§4.5 唯一性）。
+        return g_gates[existing].fn == fn;
+    }
+    for (uint32_t i = 0; i < kMaxInterceptGates; ++i) {
+        if (g_gates[i].id != nullptr) continue;
+        g_gates[i].id = resource_id;
+        g_gates[i].fn = fn;
+        g_gates[i].ctx = ctx;
+        return true;
+    }
+    return false;  // 门槽满
+}
+
+bool dispatch_clear_intercept(const char* resource_id) {
+    if (is_empty(resource_id)) return false;
+    std::lock_guard<std::mutex> lock(g_mtx);
+    const int index = find_gate(resource_id);
+    if (index < 0) return false;
+    g_gates[index] = InterceptGate{};
+    return true;
+}
+
+bool dispatch_intercept_blocks(const char* resource_id, void* ctx) {
+    if (is_empty(resource_id)) return false;
+    // 先持锁快照，再锁外调用回调（§4.4 死锁规则）。
+    InterceptGateFn fn = nullptr;
+    void* registered_ctx = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_mtx);
+        const int index = find_gate(resource_id);
+        if (index < 0) return false;
+        fn = g_gates[index].fn;
+        registered_ctx = g_gates[index].ctx;
+    }
+    if (fn == nullptr) return false;
+    return fn(ctx != nullptr ? ctx : registered_ctx);
+}
+
 void dispatch_reset_for_test() {
     std::lock_guard<std::mutex> lock(g_mtx);
     for (uint32_t i = 0; i < kMaxResources; ++i) {
         g_groups[i] = ResourceGroup{};
+    }
+    for (uint32_t i = 0; i < kMaxInterceptGates; ++i) {
+        g_gates[i] = InterceptGate{};
     }
     g_next_id = 1;
 }

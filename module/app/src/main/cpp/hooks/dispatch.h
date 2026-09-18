@@ -47,6 +47,26 @@ uint32_t dispatch_consumer_count(const char* resource_id, DispatchPhase phase, C
 //   同资源重入直接返回 original；未注册资源直接返回 original。
 const char* dispatch_run_text(const char* resource_id, uint32_t text_id, const char* original);
 
+// ---- 布尔门型 Intercept（D2c-2b-1，§4.5 扩展）------------------------------------------
+//
+// 场景：资源入口已被唯一 owner hook（同址不可二次 NativeHook），其余功能域只能登记一个
+// 布尔谓词，由 owner 的 wrapper 在入口查询（例：UIEquip_ButtonDestroyExe 出售门禁，
+// owner=plugins/inventory_hooks，谓词由 plugins/special_equip 登记）。
+// 键为逻辑 resource_id（与 owner 的 claim id 一致）；同一资源最多 1 个；容量 8。
+// 线程纪律同本模块：set/clear 可来自任意线程；blocks 在 owner wrapper（游戏主线程）执行
+// 回调，先持锁快照再锁外调用。
+//
+// 命名说明：本组 API 的 "intercept" 指「布尔门拦截」，与 ConsumerKind::kIntercept
+// （文本链短路消费者，返回替换文本）语义不同，二者键空间与实现互相独立。
+using InterceptGateFn = bool (*)(void* ctx);
+
+// 登记布尔门：同 resource_id 已登记同一 fn → 幂等 true；已登记不同 fn / 空参 / 容量满 → false。
+bool dispatch_set_intercept(const char* resource_id, InterceptGateFn fn, void* ctx);
+// 移除登记；未登记返回 false。
+bool dispatch_clear_intercept(const char* resource_id);
+// 查询：未登记返回 false；已登记调用 fn(ctx != nullptr ? ctx : 注册时 ctx)。
+bool dispatch_intercept_blocks(const char* resource_id, void* ctx);
+
 void dispatch_reset_for_test();
 
 }  // namespace qol::hooks

@@ -85,8 +85,21 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             virtual_bag_sync_projected_slot(bag, src_slot);
                             virtual_bag_sync_projected_slot(bag, dst_slot);
                         }
-                        if (fn_ui_equip_refresh_item_area != nullptr) {
-                            inventory_native_hook_call_refresh_item_area_original();
+                        // D2c-2b-1：原 `if (fn_ui_equip_refresh_item_area != nullptr) 直呼
+                        // refresh trampoline` 改经 inventory_refresh capability 现取；能力缺失
+                        // （provider 未安装/撤销中）保持既有 no-op 语义（不直呼符号入口，避免
+                        // 经 hook 回入 wrapper）。
+                        const auto* refresh =
+                            static_cast<const qol::contracts::InventoryRefreshApi*>(
+                                qol::infra::require_capability(
+                                    qol::contracts::kInventoryRefreshCapabilityId,
+                                    QolVersionRange{
+                                        static_cast<uint16_t>(
+                                            qol::contracts::kInventoryRefreshVersionMajor),
+                                        static_cast<uint16_t>(
+                                            qol::contracts::kInventoryRefreshVersionMinor)}));
+                        if (refresh != nullptr && refresh->call_original != nullptr) {
+                            refresh->call_original();
                         }
                         void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
                         if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
