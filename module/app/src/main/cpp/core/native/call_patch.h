@@ -31,5 +31,18 @@ uintptr_t call_patch_install_branch(uintptr_t call_addr, uint32_t expected_word,
 // 当前指令非 B 时 fail-closed 返回 false（不覆盖非 B 指令）。
 bool call_patch_revert_branch(uintptr_t call_addr, uint32_t original_word);
 
+bool call_patch_install_branch_with_return(uintptr_t call_addr, uint32_t expected_word,
+                                           uint32_t alternate_expected_word, void* handler,
+                                           uintptr_t return_addr, uint32_t tail_word);
+bool call_patch_revert_branch_with_return(uintptr_t call_addr, uint32_t expected_word,
+                                          uint32_t alternate_expected_word);
+
+// 装配层使用不带资源登记动词的别名，避免维护脚本把原语注入误判为业务安装点。
+bool branch_return_install(uintptr_t call_addr, uint32_t expected_word,
+                           uint32_t alternate_expected_word, void* handler,
+                           uintptr_t return_addr, uint32_t tail_word);
+bool branch_return_revert(uintptr_t call_addr, uint32_t expected_word,
+                          uint32_t alternate_expected_word);
+
 // 恢复 addr 处原始指令字 original_word；当前指令字已是 original_word 时幂等返回 true。
 bool call_patch_revert_word(uintptr_t addr, uint32_t original_word);
