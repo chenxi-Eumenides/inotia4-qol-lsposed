@@ -212,6 +212,53 @@ void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const
     }
 }
 
+// 常驻（gate==nullptr）fail-soft/optional 资源失败后的定向重试（§8：保持 free、可重试）。
+// 安装语义与 install_all 的一次性安装一致：入口 hook 安装成功后 runtime_set（顺带清除
+// retry_pending）并把 backup 交还所有者（wrapper 依赖该 backup 重放原函数）；非入口机制
+// 走 install_non_entry_claim。返回 nullptr 成功，否则静态错误文本。
+// 受限回调失败：物理安装已成立但 backup 未交还，wrapper 不可用，故撤回本条并保持待重试。
+const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
+                                 contracts::PluginContext& ctx,
+                                 const contracts::ResourceClaim& claim, const HostDeps& deps) {
+    if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+        bool followed = false;
+        const uintptr_t entry =
+            deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+        if (entry == 0) return "symbol unresolved";
+        const hooks::InstallOutcome outcome =
+            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, true);
+        if (outcome.ok != 0) {
+            return outcome.error != nullptr ? outcome.error : "install failed";
+        }
+        hooks::runtime_set(claim.id, entry, outcome.backup);
+        if (plugin.on_resource_ready != nullptr &&
+            plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+            revoke_resource(claim.id, deps);
+            if (hooks::state_of(claim.id) == contracts::ResourceState::kFree) {
+                hooks::retry_pending_set(claim.id, true);
+            }
+            return "resource_ready_failed";
+        }
+        return nullptr;
+    }
+    uintptr_t target = 0;
+    void* backup = nullptr;
+    const char* error = install_non_entry_claim(claim, &target, &backup);
+    if (error != nullptr) return error;
+    // 非入口机制成功：与 install_all 一致置 live；kOwnership 无运行期记录，标记显式清除。
+    hooks::set_state(claim.id, contracts::ResourceState::kLive);
+    hooks::retry_pending_set(claim.id, false);
+    if (backup != nullptr && plugin.on_resource_ready != nullptr &&
+        plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
+        revoke_resource(claim.id, deps);
+        if (hooks::state_of(claim.id) == contracts::ResourceState::kFree) {
+            hooks::retry_pending_set(claim.id, true);
+        }
+        return "resource_ready_failed";
+    }
+    return nullptr;
+}
+
 // 门禁监督辅助：同步某插件带 gate 资源的登记状态，并汇总目标态。
 // 入口 hook 只改写 disabled/live 两态：free（未安装）与 tombstone（保留占用）不得被监督改写。
 // 非入口机制（call patch / ownership）不支持空转（§4.2 规则 6）：门禁变化直接物理安装/还原。
@@ -220,11 +267,15 @@ void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const
 //   · 其余（kOptional×任一 / kRequired×kFailSoft）→ 保持 free 供下一逻辑帧重试，
 //     经 out_degraded/out_error_* 记录原因（degraded，不改生命周期态）。
 // 释放/还原失败仍是不可重试形态 → tombstone + isolated（§4.2）。
+// 另处理 gate==nullptr 常驻资源的定向重试：安装期 fail-soft/optional 失败会置
+// retry_pending，此处对「已置位且仍 free」的条目按同一失败分流重装（成功清标记与
+// degraded、失败保持 degraded）；未置位者不重装，维持一次性安装语义。
 // 同步执行原因：单一指令字改写为同步 fail-closed 原语，且没有在途 wrapper 需等待；
 // 生命周期安装/还原仍走事务引擎（lifecycle_apply/lifecycle_step）。
-void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_has_gate,
-                           bool* out_all_want, bool* out_mechanism_failed, bool* out_degraded,
-                           const char** out_error_claim, const char** out_error_reason) {
+void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const HostDeps& deps,
+                           bool* out_has_gate, bool* out_all_want, bool* out_mechanism_failed,
+                           bool* out_degraded, const char** out_error_claim,
+                           const char** out_error_reason) {
     bool has_gate = false;
     bool all_want = true;
     bool mechanism_failed = false;
@@ -236,7 +287,20 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, bool* out_
     uint32_t installed_count = 0;
     for (uint32_t r = 0; r < plugin.resources_count; ++r) {
         const contracts::ResourceClaim& claim = plugin.resources[r];
-        if (claim.gate == nullptr) continue;
+        if (claim.gate == nullptr) {
+            // 常驻 fail-soft/optional 资源的定向重试：仅处理本路径置位且仍为 free 的条目；
+            // 未置位者保持一次性安装语义，不做无谓重装。
+            if (!hooks::retry_pending_get(claim.id)) continue;
+            if (hooks::state_of(claim.id) != contracts::ResourceState::kFree) continue;
+            contracts::PluginContext retry_ctx{};
+            const char* retry_error = retry_resident_claim(plugin, retry_ctx, claim, deps);
+            if (retry_error != nullptr) {
+                degraded = true;
+                error_claim = claim.id;
+                error_reason = retry_error;
+            }
+            continue;
+        }
         has_gate = true;
         const bool want = infra::config_get_bool(claim.gate, false);
         if (!want) all_want = false;
@@ -349,13 +413,6 @@ bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
         if (!infra::config_get_bool(claim.gate, false)) return false;
     }
     return true;
-}
-
-bool plugin_has_gate(const contracts::PluginDescriptor& plugin) {
-    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
-        if (plugin.resources[i].gate != nullptr) return true;
-    }
-    return false;
 }
 
 // ---- 能力注册与撤销级联（§3.4.1 / §3.4.4）----
@@ -543,6 +600,11 @@ int install_all(const HostDeps& deps) {
                 resource_error = error;
                 return true;
             }
+            // 常驻（gate==nullptr）fail-soft/optional 失败：资源保持 free，置 retry_pending
+            // 供 sync_gates 每逻辑帧定向重装（带 gate 资源由门禁路径自行重试，无需标记）。
+            if (claim.gate == nullptr) {
+                hooks::retry_pending_set(claim.id, true);
+            }
             degraded = true;
             degraded_claim_id = claim.id;
             degraded_error = error;
@@ -692,8 +754,6 @@ uint32_t sync_gates() {
         if (status.error != nullptr && std::strcmp(status.error, "cascade_stopped") == 0) {
             continue;
         }
-        if (!plugin_has_gate(plugin)) continue;  // 无带 gate 资源 → 不参与门禁监督
-
         // 撤销先于关资源（§3.4.4）：provider 由 enabled 转 disable 时先关提供者门禁并级联注销。
         if (status.state == infra::FeatureState::kEnabled && !plugin_all_gates_want(plugin) &&
             plugin_provides_capability(plugin)) {
@@ -706,8 +766,8 @@ uint32_t sync_gates() {
         bool gate_degraded = false;
         const char* gate_error_claim = nullptr;
         const char* gate_error_reason = nullptr;
-        sync_plugin_resources(plugin, &has_gate, &all_want, &mechanism_failed, &gate_degraded,
-                              &gate_error_claim, &gate_error_reason);
+        sync_plugin_resources(plugin, g_install_deps, &has_gate, &all_want, &mechanism_failed,
+                              &gate_degraded, &gate_error_claim, &gate_error_reason);
         if (mechanism_failed) {
             // 机制门禁应用失败（fail-closed 安装失败 / 释放失败）：保留占用并隔离，插件置 failed。
             g_gate_degraded[i] = false;

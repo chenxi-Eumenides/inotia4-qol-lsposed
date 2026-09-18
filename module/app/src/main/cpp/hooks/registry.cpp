@@ -20,6 +20,7 @@ struct Entry {
     void* backup;
     std::atomic<uint32_t> in_flight;  // 跨帧等待在途归零，读写均需原子
     bool isolated;                    // 隔离后禁止重试，直到进程重启
+    bool retry_pending;               // 常驻 fail-soft 资源安装失败待重试；成功安装/归还清除
 };
 
 Entry g_entries[kMaxClaims];
@@ -61,6 +62,7 @@ bool register_claim(const contracts::ResourceClaim& claim) {
     entry.backup = nullptr;
     entry.in_flight.store(0);
     entry.isolated = false;
+    entry.retry_pending = false;
     ++g_count;
     return true;
 }
@@ -112,6 +114,8 @@ bool runtime_set(const char* resource_id, uintptr_t resolved_entry, void* backup
     }
     entry->resolved_entry = resolved_entry;
     entry->backup = backup;
+    // 安装成功即清除定向重试标记。
+    entry->retry_pending = false;
     return true;
 }
 
@@ -124,6 +128,8 @@ bool runtime_clear(const char* resource_id) {
     entry->backup = nullptr;
     // 物理释放以在途归零为前提，清零避免残留计数阻塞后续复用。
     entry->in_flight.store(0);
+    // 归还成功即清除定向重试标记。
+    entry->retry_pending = false;
     return true;
 }
 
@@ -186,6 +192,20 @@ bool isolated_get(const char* resource_id) {
     return entry != nullptr && entry->isolated;
 }
 
+bool retry_pending_set(const char* resource_id, bool pending) {
+    Entry* entry = find_entry(resource_id);
+    if (entry == nullptr) {
+        return false;
+    }
+    entry->retry_pending = pending;
+    return true;
+}
+
+bool retry_pending_get(const char* resource_id) {
+    const Entry* entry = find_entry(resource_id);
+    return entry != nullptr && entry->retry_pending;
+}
+
 void registry_reset_for_test() {
     // 全表清零：register_claim 复用槽位时不再单独依赖此清理，但重入测试需彻底复位。
     for (uint32_t i = 0; i < kMaxClaims; ++i) {
@@ -193,6 +213,7 @@ void registry_reset_for_test() {
         g_entries[i].backup = nullptr;
         g_entries[i].in_flight.store(0);
         g_entries[i].isolated = false;
+        g_entries[i].retry_pending = false;
     }
     g_count = 0;
 }

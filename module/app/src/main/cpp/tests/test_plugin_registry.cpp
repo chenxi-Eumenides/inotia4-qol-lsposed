@@ -321,6 +321,26 @@ ResourceClaim g_own_soft_resources[] = {
     ownership_soft_claim("own:soft:a", "test_own_soft", "test.gate"),
 };
 
+// 常驻（gate==nullptr）fail-soft：安装失败置 retry_pending，sync_gates 定向重试；
+// 未置位成功资源不得重装。
+ResourceClaim g_own_resident_soft_resources[] = {
+    ownership_soft_claim("own:resident:soft", "test_own_resident", nullptr),
+};
+ResourceClaim g_own_resident_ok_resources[] = {
+    ownership_claim("own:resident:ok", "test_own_resident_ok"),
+};
+
+// 常驻 fail-soft 入口 hook：重试须重装 hook 并交还 backup（wrapper 依赖 backup）。
+ResourceClaim resident_soft_hook(const char* id, const char* owner) {
+    ResourceClaim c = claim(id, owner, nullptr);
+    c.requirement = ResourceRequirement::kRequired;
+    c.failure = ResourceFailure::kFailSoft;
+    return c;
+}
+ResourceClaim g_resident_soft_hook[] = {
+    resident_soft_hook("hook:test:resident:hook", "test_resident_hook"),
+};
+
 // kPtrSlot 分派：单条指针槽资源，成功安装后槽值为 wrapper，backup 交还。
 ResourceClaim g_ptr_slot_resources[] = {
     ptr_slot_claim("ptrslot:test:a", "test_ptrslot"),
@@ -846,6 +866,95 @@ void test_ptr_slot_value_mismatch_fail_closed() {
     CHECK(feature_state_is("test_ptrslot", FeatureState::kFailed));
 }
 
+// 常驻（gate==nullptr）required×fail-soft：安装失败保持 free + degraded + retry_pending，
+// 插件仍 enabled、不 tombstone/isolated；sync_gates 定向重试，成功 → live、清标记/degraded，
+// 失败 → 保持 free/degraded/retry_pending。
+void test_resident_fail_soft_retry() {
+    reset_all();
+    g_ownership.fail_acquire_at = 1;
+    const PluginDescriptor d =
+        make_descriptor("test_own_resident", g_own_resident_soft_resources, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_ownership.acquire_calls == 1);
+    CHECK(qol::hooks::state_of("own:resident:soft") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("own:resident:soft"));
+    CHECK(!qol::hooks::isolated_get("own:resident:soft"));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    CHECK(feature_state_is("test_own_resident", FeatureState::kEnabled));
+    CHECK(feature_degraded("test_own_resident"));
+
+    // 重试仍失败（第 2 次 acquire）：保持 free/degraded/retry_pending，不 tombstone/isolated。
+    g_ownership.fail_acquire_at = 2;
+    sync_gates();
+    CHECK(g_ownership.acquire_calls == 2);
+    CHECK(qol::hooks::state_of("own:resident:soft") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("own:resident:soft"));
+    CHECK(feature_degraded("test_own_resident"));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+
+    // 重试成功：live、清 retry_pending/degraded，无 tombstone/isolated。
+    g_ownership.fail_acquire_at = 0;
+    sync_gates();
+    CHECK(g_ownership.acquire_calls == 3);
+    CHECK(qol::hooks::state_of("own:resident:soft") == ResourceState::kLive);
+    CHECK(!qol::hooks::retry_pending_get("own:resident:soft"));
+    CHECK(!feature_degraded("test_own_resident"));
+    CHECK(feature_state_is("test_own_resident", FeatureState::kEnabled));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    CHECK(!qol::hooks::isolated_get("own:resident:soft"));
+}
+
+// 常驻（gate==nullptr）安装成功的资源：retry_pending 未置位，sync_gates 不得重装。
+void test_resident_success_not_reinstalled() {
+    reset_all();
+    const PluginDescriptor d =
+        make_descriptor("test_own_resident_ok", g_own_resident_ok_resources, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_ownership.acquire_calls == 1);
+    CHECK(qol::hooks::state_of("own:resident:ok") == ResourceState::kLive);
+    CHECK(!qol::hooks::retry_pending_get("own:resident:ok"));
+
+    CHECK(sync_gates() == 0);
+    CHECK(g_ownership.acquire_calls == 1);  // 调用计数不变
+    CHECK(qol::hooks::state_of("own:resident:ok") == ResourceState::kLive);
+    CHECK(!qol::hooks::retry_pending_get("own:resident:ok"));
+}
+
+// 常驻 fail-soft 入口 hook：安装失败 free + retry_pending；sync_gates 重装成功并交还 backup。
+void test_resident_entry_hook_fail_soft_retry() {
+    reset_all();
+    g_backend.fail_hook_call = 1;
+    const PluginDescriptor d =
+        make_descriptor("test_resident_hook", g_resident_soft_hook, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_backend.hook_calls == 1);
+    CHECK(qol::hooks::state_of("hook:test:resident:hook") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("hook:test:resident:hook"));
+    CHECK(g_probe.ready_calls == 0);
+    CHECK(feature_state_is("test_resident_hook", FeatureState::kEnabled));
+    CHECK(feature_degraded("test_resident_hook"));
+
+    // 定向重试成功：重装 hook、交还 backup、清 retry_pending/degraded。
+    g_backend.fail_hook_call = 0;
+    sync_gates();
+    CHECK(g_backend.hook_calls == 2);
+    CHECK(qol::hooks::state_of("hook:test:resident:hook") == ResourceState::kLive);
+    CHECK(!qol::hooks::retry_pending_get("hook:test:resident:hook"));
+    CHECK(g_probe.ready_calls == 1);
+    CHECK(!feature_degraded("test_resident_hook"));
+    CHECK(feature_state_is("test_resident_hook", FeatureState::kEnabled));
+
+    // 已恢复：再次同步不重装。
+    sync_gates();
+    CHECK(g_backend.hook_calls == 2);
+    CHECK(g_probe.ready_calls == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -869,6 +978,9 @@ int main() {
     test_ptr_slot_dispatch_live_and_backup_handover();
     test_ptr_slot_rollback_releases_slot();
     test_ptr_slot_value_mismatch_fail_closed();
+    test_resident_fail_soft_retry();
+    test_resident_success_not_reinstalled();
+    test_resident_entry_hook_fail_soft_retry();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

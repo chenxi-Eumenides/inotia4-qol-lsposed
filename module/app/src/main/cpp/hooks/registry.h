@@ -42,12 +42,12 @@ struct ResourceRuntime {
     bool isolated = false;
 };
 
-// 登记运行期解析结果：已登记 → 写入 entry/backup 并返回 true；未登记 → false。
-// 只写 resolved_entry/backup，不改变 in_flight/isolated。
+// 登记运行期解析结果：已登记 → 写入 entry/backup、清除 retry_pending 并返回 true；未登记 → false。
+// 只写 resolved_entry/backup/retry_pending，不改变 in_flight/isolated。
 bool runtime_set(const char* resource_id, uintptr_t resolved_entry, void* backup);
 
-// 清除运行期记录（物理释放成功后登记表回到 free）：已登记 → 清零 entry/backup/in_flight 并返回 true。
-// isolated 是进程级隔离标记，不随运行期记录清除。
+// 清除运行期记录（物理释放成功后登记表回到 free）：已登记 → 清零 entry/backup/in_flight/retry_pending
+// 并返回 true。isolated 是进程级隔离标记，不随运行期记录清除。
 bool runtime_clear(const char* resource_id);
 
 // 未登记或未写运行期（resolved_entry==0）→ false。
@@ -65,6 +65,12 @@ uint32_t in_flight_count(const char* resource_id);
 // 隔离标记写入/读取；未登记 → false。
 bool isolated_set(const char* resource_id, bool isolated);
 bool isolated_get(const char* resource_id);
+
+// 常驻资源定向重试标记：fail-soft/optional 且 gate==nullptr 的资源安装失败后置位，
+// 供宿主每逻辑帧定向重装（旧逐帧注入语义）；成功安装（runtime_set）或物理归还
+// （runtime_clear）后清除。与 isolated 同为独立运行期字段；未登记 → false（set 返回 false）。
+bool retry_pending_set(const char* resource_id, bool pending);
+bool retry_pending_get(const char* resource_id);
 
 // 测试用：清空登记表与全部运行期字段。
 void registry_reset_for_test();
