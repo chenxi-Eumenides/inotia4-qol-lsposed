@@ -275,6 +275,12 @@ ResourceClaim ptr_slot_claim(const char* id, const char* owner) {
     return c;
 }
 
+ResourceClaim ptr_slot_gate_claim(const char* id, const char* owner, const char* gate) {
+    ResourceClaim c = ptr_slot_claim(id, owner);
+    c.gate = gate;
+    return c;
+}
+
 ResourceClaim g_ok_resources[] = {
     claim("hook:test:ok:a", "test_ok", nullptr),
     claim("hook:test:ok:b", "test_ok", nullptr),
@@ -339,6 +345,13 @@ ResourceClaim resident_soft_hook(const char* id, const char* owner) {
 }
 ResourceClaim g_resident_soft_hook[] = {
     resident_soft_hook("hook:test:resident:hook", "test_resident_hook"),
+};
+
+// 常驻重试成功后，后续必需 fail-closed 资源失败：前者必须纳入同一回滚列表。
+ResourceClaim g_resident_retry_then_fail[] = {
+    resident_soft_hook("hook:test:resident:rollback", "test_resident_rollback"),
+    ptr_slot_gate_claim("ptrslot:test:resident:rollback", "test_resident_rollback",
+                        "test.resident.rollback"),
 };
 
 // kPtrSlot 分派：单条指针槽资源，成功安装后槽值为 wrapper，backup 交还。
@@ -527,6 +540,7 @@ void test_unhook_failure_leaves_tombstone() {
     CHECK(install_all(make_deps()) == 1);
     CHECK(g_backend.unhook_calls == 1);
     CHECK(qol::hooks::state_of("hook:test:fail:a") == ResourceState::kTombstone);
+    CHECK(qol::hooks::isolated_get("hook:test:fail:a"));
     CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 1);
 
     FeatureState state = FeatureState::kRegistered;
@@ -955,6 +969,34 @@ void test_resident_entry_hook_fail_soft_retry() {
     CHECK(g_probe.ready_calls == 1);
 }
 
+void test_resident_retry_is_rolled_back_with_later_failure() {
+    reset_all();
+    qol::infra::config_set_bool("test.resident.rollback", false);
+    g_backend.fail_hook_call = 1;
+    arm_ptr_slot(&g_dummy_handler);
+    const PluginDescriptor d =
+        make_descriptor("test_resident_rollback", g_resident_retry_then_fail, 2, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(qol::hooks::state_of("hook:test:resident:rollback") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("hook:test:resident:rollback"));
+    CHECK(qol::hooks::state_of("ptrslot:test:resident:rollback") == ResourceState::kFree);
+
+    // 常驻重试先成功；随后 ptr slot 的 required×fail-closed 安装失败。
+    g_backend.fail_hook_call = 0;
+    g_ptr_slot_storage = &g_ptr_slot_wrapper;
+    qol::infra::config_set_bool("test.resident.rollback", true);
+    CHECK(sync_gates() == 1);
+    CHECK(feature_state_is("test_resident_rollback", FeatureState::kFailed));
+    CHECK(g_backend.unhook_calls == 1);
+    CHECK(qol::hooks::state_of("hook:test:resident:rollback") == ResourceState::kFree);
+    CHECK(!qol::hooks::retry_pending_get("hook:test:resident:rollback"));
+    CHECK(!qol::hooks::isolated_get("hook:test:resident:rollback"));
+    CHECK(qol::hooks::state_of("ptrslot:test:resident:rollback") == ResourceState::kTombstone);
+    CHECK(qol::hooks::isolated_get("ptrslot:test:resident:rollback"));
+}
+
 }  // namespace
 
 int main() {
@@ -981,6 +1023,7 @@ int main() {
     test_resident_fail_soft_retry();
     test_resident_success_not_reinstalled();
     test_resident_entry_hook_fail_soft_retry();
+    test_resident_retry_is_rolled_back_with_later_failure();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

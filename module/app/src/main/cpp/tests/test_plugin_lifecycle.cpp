@@ -216,6 +216,14 @@ PluginDescriptor make_soft_descriptor() {
     return d;
 }
 
+PluginDescriptor make_zero_descriptor() {
+    PluginDescriptor d = make_descriptor();
+    d.id = "test_zero_lifecycle";
+    d.resources_count = 0;
+    d.resources = nullptr;
+    return d;
+}
+
 void reset_all() {
     plugin_registry_reset_for_test();
     qol::hooks::registry_reset_for_test();
@@ -315,6 +323,29 @@ void test_activate_gate_on_reentry_is_idempotent() {
     drive_lifecycle();
     CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
     CHECK(g_probe.enabled_calls == 3);
+}
+
+void test_zero_resource_lifecycle_is_explicit_noop() {
+    reset_all();
+    const PluginDescriptor d = make_zero_descriptor();
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_host_deps()) == 0);
+    CHECK(feature_state_is("test_zero_lifecycle", FeatureState::kEnabled));
+    CHECK(g_probe.install_calls == 1);
+    CHECK(g_probe.enabled_calls == 1);
+
+    // 无资源插件仍需执行 deactivate 回调并直接进入 inactive，不启动事务。
+    CHECK(lifecycle_apply("test_zero_lifecycle", qol::contracts::kFeatureLifecycleDeactivate));
+    CHECK(feature_state_is("test_zero_lifecycle", FeatureState::kInactive));
+    CHECK(g_probe.deactivate_calls == 1);
+    CHECK(lifecycle_step() == 0);
+
+    // activate 仍执行 install，并按无 gate 终态 enabled，不留下 install 副作用。
+    CHECK(lifecycle_apply("test_zero_lifecycle", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(feature_state_is("test_zero_lifecycle", FeatureState::kEnabled));
+    CHECK(g_probe.install_calls == 2);
+    CHECK(g_probe.enabled_calls == 2);
+    CHECK(lifecycle_step() == 0);
 }
 
 void test_install_failure_marks_failed_without_transaction() {
@@ -506,6 +537,7 @@ void test_gated_entry_failsoft_retries_on_sync_gates() {
 int main() {
     test_activate_calls_install_and_hands_backup();
     test_activate_gate_on_reentry_is_idempotent();
+    test_zero_resource_lifecycle_is_explicit_noop();
     test_install_failure_marks_failed_without_transaction();
     test_resource_ready_failure_rolls_back_installed();
     test_resource_ready_failure_during_activate_fallback();

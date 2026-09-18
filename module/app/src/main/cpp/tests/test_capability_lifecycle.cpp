@@ -48,6 +48,8 @@ using qol::host::register_plugin;
 using qol::host::sync_gates;
 using qol::infra::FeatureState;
 using qol::infra::FeatureStatus;
+using qol::hooks::in_flight_enter;
+using qol::hooks::in_flight_leave;
 
 namespace {
 
@@ -115,7 +117,8 @@ int g_req_enabled_calls = 0;
 int g_req_disabled_calls = 0;
 int g_req_install_calls = 0;
 int req_install(PluginContext&) { ++g_req_install_calls; return 0; }
-void req_deactivate(PluginContext&) {}
+int g_req_deactivate_calls = 0;
+void req_deactivate(PluginContext&) { ++g_req_deactivate_calls; }
 void req_on_enabled(PluginContext&) { ++g_req_enabled_calls; }
 void req_on_disabled(PluginContext&) { ++g_req_disabled_calls; }
 void req_fill_status(PluginStatusOut& out) { out.enabled = false; out.error = nullptr; }
@@ -247,6 +250,7 @@ void reset_all() {
     g_req_enabled_calls = 0;
     g_req_disabled_calls = 0;
     g_req_install_calls = 0;
+    g_req_deactivate_calls = 0;
     g_opt_enabled_calls = 0;
 }
 
@@ -319,6 +323,7 @@ void test_disable_revokes_and_cascades() {
 
     const AttrRangeApi* saved = require_attr_range();
     CHECK(saved != nullptr);
+    CHECK(in_flight_enter("hook:cap:req"));
     g_unhook_calls = 0;
 
     // 关闭 provider 门禁：下一轮 sync_gates 走撤销路径（先 revoking，再级联，再注销）。
@@ -332,15 +337,26 @@ void test_disable_revokes_and_cascades() {
     // 撤销期新调用被提供者拒绝（能力仍在撤销事务内，指针尚未失效）。
     CHECK(!saved->probe_jewel_range(0, nullptr, nullptr, nullptr));
 
-    // required 消费者：installed_disabled + reason=cascade_stopped + 资源已释放。
+    // required 消费者先进入 release 事务：在途未归零时保持 live/deactivating。
     FeatureStatus req{};
     CHECK(feature_status("cap_consumer_req", &req));
-    CHECK(req.state == FeatureState::kInstalledDisabled);
+    CHECK(req.state == FeatureState::kDeactivating);
     CHECK(!req.enabled);
-    CHECK(req.error != nullptr && std::strcmp(req.error, "cascade_stopped") == 0);
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kLive);
     CHECK(g_req_disabled_calls == 1);
+    CHECK(g_unhook_calls == 0);
+
+    CHECK(lifecycle_step() > 0);
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kDeactivating));
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kLive);
+    CHECK(in_flight_leave("hook:cap:req"));
+    CHECK(lifecycle_step() > 0);
+    CHECK(feature_status("cap_consumer_req", &req));
+    CHECK(req.state == FeatureState::kInstalledDisabled);
+    CHECK(req.error != nullptr && std::strcmp(req.error, "cascade_stopped") == 0);
     CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kFree);
     CHECK(g_unhook_calls == 1);
+    CHECK(g_req_deactivate_calls == 0);
 
     // optional 消费者：仅 degraded 标记，生命周期态与资源不变。
     FeatureStatus opt_after{};
@@ -360,6 +376,7 @@ void test_no_auto_recovery() {
 
     qol::infra::config_set_bool("cap.provider.on", false);
     CHECK(sync_gates() >= 1);
+    drive_lifecycle();
     CHECK(feature_state_is("cap_consumer_req", FeatureState::kInstalledDisabled));
 
     // provider 恢复：重新注册能力，但被级联停用的消费者不自动恢复（§3.4.1 第 6 条）。
@@ -377,6 +394,26 @@ void test_no_auto_recovery() {
     // 继续同步仍不恢复。
     CHECK(sync_gates() == 0);
     CHECK(feature_state_is("cap_consumer_req", FeatureState::kInstalledDisabled));
+
+    // 新一轮撤销事务必须重新建立 visited；旧的全局 visited 会漏掉这次回调。
+    qol::infra::config_set_bool("cap.provider.on", false);
+    CHECK(sync_gates() >= 1);
+    drive_lifecycle();
+    CHECK(g_req_disabled_calls == 2);
+}
+
+void test_required_consumer_before_provider_is_blocked() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", true);
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    // install_all 不会对已 blocked 的 required 消费者做 provider 后注册重试。
+    CHECK(register_plugin(make_required_consumer()));
+    CHECK(register_plugin(make_provider()));
+    CHECK(install_all(make_host_deps()) == 1);
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kBlocked));
+    CHECK(g_req_install_calls == 0);
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(qol::infra::capability_count() == 1);
 }
 
 void test_deactivate_revokes_capability() {
@@ -404,6 +441,7 @@ int main() {
     test_installed_disabled_does_not_register();
     test_disable_revokes_and_cascades();
     test_no_auto_recovery();
+    test_required_consumer_before_provider_is_blocked();
     test_deactivate_revokes_capability();
     std::printf("capability_lifecycle: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

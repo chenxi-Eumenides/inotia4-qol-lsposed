@@ -163,9 +163,11 @@ void rollback_resources(const contracts::ResourceClaim* const* claims,
         }
         if (released) {
             hooks::runtime_clear(claim.id);
+            hooks::set_state(claim.id, contracts::ResourceState::kFree);
+        } else {
+            hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
+            hooks::isolated_set(claim.id, true);
         }
-        hooks::set_state(claim.id, released ? contracts::ResourceState::kFree
-                                            : contracts::ResourceState::kTombstone);
     }
 }
 
@@ -295,9 +297,18 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
             contracts::PluginContext retry_ctx{};
             const char* retry_error = retry_resident_claim(plugin, retry_ctx, claim, deps);
             if (retry_error != nullptr) {
-                degraded = true;
-                error_claim = claim.id;
-                error_reason = retry_error;
+                const bool fail_closed_required =
+                    claim.requirement == contracts::ResourceRequirement::kRequired &&
+                    claim.failure == contracts::ResourceFailure::kFailClosed;
+                if (fail_closed_required) {
+                    mechanism_failed = true;
+                } else {
+                    degraded = true;
+                    error_claim = claim.id;
+                    error_reason = retry_error;
+                }
+            } else {
+                installed[installed_count++] = &claim;
             }
             continue;
         }
@@ -385,6 +396,8 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
         }
     }
     if (mechanism_failed) {
+        // fail-closed 只标记本轮事务失败，不提前中止遍历；其余新装资源也纳入
+        // installed，循环结束后统一逆序回滚，fail-soft 资源则保持 free/degraded 继续。
         for (uint32_t i = installed_count; i > 0; --i) {
             const contracts::ResourceClaim& claim = *installed[i - 1];
             if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
@@ -414,6 +427,7 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
 struct LifecycleTx {
     bool in_use = false;
     bool ready_failed = false;  // 受限回调失败已置 failed：终态不再覆盖
+    bool cascade = false;       // 级联撤销：成功后保持 installed_disabled，不调用 deactivate
     uint64_t tx_id = 0;
     uint32_t plugin_index = 0;
     hooks::TxKind kind = hooks::TxKind::kInstall;
@@ -460,7 +474,10 @@ bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
 
 enum class CapRegistration : uint8_t { kNone = 0, kRegistered = 1, kRevoking = 2 };
 CapRegistration g_cap_registration[kMaxPlugins];
-bool g_cascade_visited[kMaxPlugins];
+
+struct CascadeContext {
+    bool visited[kMaxPlugins] = {};
+};
 
 bool plugin_provides_capability(const contracts::PluginDescriptor& plugin) {
     return plugin.provides_count > 0 && plugin.provides != nullptr;
@@ -491,41 +508,62 @@ void unregister_provided_capabilities(uint32_t index) {
     g_cap_registration[index] = CapRegistration::kNone;
 }
 
-void cascade_dependents(const char* capability_id);
+void cascade_dependents(const char* capability_id, CascadeContext& context);
+
+bool schedule_release(uint32_t index, bool cascade) {
+    if (index >= g_plugin_count) return false;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    LifecycleTx* slot = nullptr;
+    for (LifecycleTx& candidate : g_lifecycle_txs) {
+        if (!candidate.in_use) {
+            slot = &candidate;
+            break;
+        }
+    }
+    if (slot == nullptr) return false;
+    const uint64_t tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+    if (tx_id == 0) return false;
+    slot->in_use = true;
+    slot->ready_failed = false;
+    slot->cascade = cascade;
+    slot->tx_id = tx_id;
+    slot->plugin_index = index;
+    slot->kind = hooks::TxKind::kRelease;
+    return true;
+}
 
 // 级联停用 required 消费者（§3.4.1 第 3 条）：关消费者门禁 → 释放资源 →
 // 递归撤销其自身提供的能力 → 置 installed_disabled + reason=cascade_stopped。
-void cascade_stop_plugin(uint32_t index) {
-    if (index >= g_plugin_count || g_cascade_visited[index]) return;
-    g_cascade_visited[index] = true;
+void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
+    if (index >= g_plugin_count || context.visited[index]) return;
+    context.visited[index] = true;
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (plugin.on_disabled != nullptr) {
         contracts::PluginContext ctx{};
         plugin.on_disabled(ctx);
     }
-    // 释放消费者资源：走同步回滚路径（§3.4.1 允许事务或同步回滚）。
-    for (uint32_t r = plugin.resources_count; r > 0; --r) {
-        const contracts::ResourceClaim& claim = plugin.resources[r - 1];
-        const contracts::ResourceState state = hooks::state_of(claim.id);
-        if (state == contracts::ResourceState::kLive ||
-            state == contracts::ResourceState::kDisabled) {
-            revoke_resource(claim.id, g_install_deps);
-        }
+    // 释放消费者资源：走与 deactivate 相同的帧步进还原事务，等待在途归零。
+    if (plugin.resources_count == 0) {
+        infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
+                             "cascade_stopped");
+    } else if (schedule_release(index, true)) {
+        infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
+    } else {
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                             "cascade release unavailable");
     }
     // 消费者自身提供的能力：注销并继续级联（递归即逆拓扑序）。
     if (g_cap_registration[index] == CapRegistration::kRegistered) {
         g_cap_registration[index] = CapRegistration::kRevoking;
         for (uint32_t i = 0; i < plugin.provides_count; ++i) {
-            cascade_dependents(plugin.provides[i].id);
+            cascade_dependents(plugin.provides[i].id, context);
         }
         unregister_provided_capabilities(index);
     }
-    infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
-                         "cascade_stopped");
 }
 
 // 依赖失效级联：requires 命中 → 逆拓扑停用；optional_requires 命中 → degraded 标记。
-void cascade_dependents(const char* capability_id) {
+void cascade_dependents(const char* capability_id, CascadeContext& context) {
     if (capability_id == nullptr) return;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
@@ -542,7 +580,7 @@ void cascade_dependents(const char* capability_id) {
             if (infra::status_get(plugin.id, &st) &&
                 (st.state == infra::FeatureState::kEnabled ||
                  st.state == infra::FeatureState::kInstalledDisabled)) {
-                cascade_stop_plugin(i);
+                cascade_stop_plugin(i, context);
             }
             continue;
         }
@@ -565,8 +603,10 @@ void begin_revoke_provider(uint32_t index) {
     }
     if (g_cap_registration[index] != CapRegistration::kRegistered) return;
     g_cap_registration[index] = CapRegistration::kRevoking;
+    CascadeContext context{};
+    context.visited[index] = true;
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
-        cascade_dependents(plugin.provides[i].id);
+        cascade_dependents(plugin.provides[i].id, context);
     }
     unregister_provided_capabilities(index);
 }
@@ -900,6 +940,13 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             infra::status_update(plugin->id, infra::FeatureState::kDeactivating, false, nullptr);
             const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kRelease);
             if (tx_id == 0) {
+                if (plugin->resources_count == 0) {
+                    const uint32_t index = plugin_index_of(plugin->id);
+                    begin_revoke_provider(index);
+                    if (plugin->deactivate != nullptr) plugin->deactivate(ctx);
+                    infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
+                    return true;
+                }
                 // 进入 deactivating 失败：回滚为原状态。
                 infra::status_update(plugin->id, previous,
                                      previous == infra::FeatureState::kEnabled, nullptr);
@@ -911,6 +958,8 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             for (LifecycleTx& slot : g_lifecycle_txs) {
                 if (slot.in_use) continue;
                 slot.in_use = true;
+                slot.ready_failed = false;
+                slot.cascade = false;
                 slot.tx_id = tx_id;
                 slot.plugin_index = index;
                 slot.kind = hooks::TxKind::kRelease;
@@ -933,6 +982,21 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                                      "plugin install failed");
                 return false;
             }
+            if (plugin->resources_count == 0) {
+                const bool enabled = plugin_all_gates_want(*plugin);
+                infra::status_update(
+                    plugin->id,
+                    enabled ? infra::FeatureState::kEnabled
+                            : infra::FeatureState::kInstalledDisabled,
+                    enabled, nullptr);
+                if (enabled) {
+                    if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
+                    register_provided_capabilities(plugin_index_of(plugin->id));
+                } else if (plugin->on_disabled != nullptr) {
+                    plugin->on_disabled(ctx);
+                }
+                return true;
+            }
             const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kInstall);
             if (tx_id == 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
@@ -942,6 +1006,8 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             for (LifecycleTx& slot : g_lifecycle_txs) {
                 if (slot.in_use) continue;
                 slot.in_use = true;
+                slot.ready_failed = false;
+                slot.cascade = false;
                 slot.tx_id = tx_id;
                 slot.plugin_index = index;
                 slot.kind = hooks::TxKind::kInstall;
@@ -1003,6 +1069,7 @@ uint32_t lifecycle_step() {
             // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
             slot.in_use = false;
             slot.ready_failed = false;
+            slot.cascade = false;
             slot.tx_id = 0;
             continue;
         }
@@ -1026,6 +1093,9 @@ uint32_t lifecycle_step() {
                 } else {
                     if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
                 }
+            } else if (slot.cascade) {
+                infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
+                                     "cascade_stopped");
             } else {
                 // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
                 if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
@@ -1043,6 +1113,7 @@ uint32_t lifecycle_step() {
             QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id, error);
         }
         slot.in_use = false;
+        slot.cascade = false;
         slot.tx_id = 0;
     }
     return advanced;
@@ -1070,7 +1141,6 @@ void plugin_registry_reset_for_test() {
     }
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
-        g_cascade_visited[i] = false;
         g_gate_degraded[i] = false;
     }
 }
