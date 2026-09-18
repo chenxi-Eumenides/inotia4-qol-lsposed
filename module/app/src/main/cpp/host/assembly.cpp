@@ -11,6 +11,7 @@
 #include "plugins/craft_ui/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
+#include "plugins/native_choice/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
@@ -217,7 +218,14 @@ bool assembly_init() {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: save_backup registration failed");
         return false;
     }
-    // world_teleport：零资源常驻插件；install 安装入口指令 patch + native_choice（legacy 过渡机制）。
+    // native_choice：2 条常驻资源（UIChoice_Init 入口 hook + ExecuteProc 指针槽），
+    // provides `ui_choice`；先于 world_teleport 注册，保证消费者进入 enabled 时能力已发布。
+    if (!register_plugin(features::native_choice::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: native_choice registration failed");
+        return false;
+    }
+    // world_teleport：零资源常驻插件；install 安装入口指令 patch（legacy 过渡机制）；
+    // 选择框组件经 optional_requires=[ui_choice] 消费。
     if (!register_plugin(features::world_teleport::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: world_teleport registration failed");
         return false;

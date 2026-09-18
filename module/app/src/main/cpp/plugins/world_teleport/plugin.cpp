@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "core/native/qol_log.h"
+#include "contracts/ui_choice.h"
 #include "plugins/world_teleport/feature.h"
 #include "game/access/world.h"
 #include "game_access.h"
@@ -157,16 +158,21 @@ bool install_world_teleport_if_ready() {
     bool supported = false;
     if (!install_entry_patch(&supported)) return false;
     if (!supported) return true;
-    if (!world_teleport_native_choice_install()) {
-        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: native choice install failed");
-        return false;
-    }
+    // 选择框组件已迁移为独立插件（provider=plugins/native_choice）：经 optional_requires
+    // 声明消费，不再由本插件安装。
     g_installed = true;
     return true;
 }
 
 constexpr const char* kPluginId = "world_teleport";
 constexpr const char* kPluginVersion = "0.1.0";
+
+// optional_requires=[ui_choice]：能力缺失/撤销只置 degraded，不级联停用；运行时每次现取。
+const contracts::CapabilityRequirement kOptionalRequires[] = {
+    {contracts::kUiChoiceCapabilityId,
+     QolVersionRange{static_cast<uint16_t>(contracts::kUiChoiceVersionMajor),
+                     static_cast<uint16_t>(contracts::kUiChoiceVersionMinor)}},
+};
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
@@ -198,8 +204,8 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
-    0, nullptr,   // optional_requires
+    0, nullptr,            // requires
+    1, kOptionalRequires,  // optional_requires=[ui_choice]
     0, nullptr,   // provides
     0, nullptr,   // resources（零资源：入口 patch 为 legacy 机制，见 plugin.h）
     0, nullptr,   // jni

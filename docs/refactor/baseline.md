@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 13 |
+| `contracts` | 14 |
 | `domains/attribute_range` | 2 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
@@ -33,7 +33,7 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 49 |
+| `game` | 51 |
 | `hooks` | 10 |
 | `host` | 28 |
 | `infra` | 45 |
@@ -44,6 +44,7 @@
 | `plugins/custom_recipe` | 10 |
 | `plugins/extension_bag` | 32 |
 | `plugins/inventory_hooks` | 2 |
+| `plugins/native_choice` | 4 |
 | `plugins/patch` | 9 |
 | `plugins/push_all` | 6 |
 | `plugins/quest` | 4 |
@@ -52,9 +53,9 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 4 |
-| `plugins/ui` | 25 |
+| `plugins/ui` | 23 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **336** |
+| **合计** | **341** |
 
 ### 1.2 迁移期映射摘要
 
@@ -135,15 +136,15 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 143 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 146 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
-| `plugins/ui` | `game` | 24 |
+| `plugins/ui` | `game` | 22 |
 | `host` | `game` | 14 |
-| `plugins/ui` | `infra` | 13 |
 | `host` | `contracts` | 12 |
+| `plugins/ui` | `infra` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
 | `plugins/patch` | `game` | 11 |
 | `infra` | `game` | 10 |
@@ -226,13 +227,13 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 22 个 / 文件 13 个 / 去重符号 9 个 / 无法归属 8 个。
+扫描合计：安装点 19 个 / 文件 12 个 / 去重符号 9 个 / 无法归属 5 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
-| entry hook | 4 | 7 | 4 |
+| entry hook | 3 | 5 | 3 |
 | call patch | 3 | 7 | 4 |
-| ptr slot | 7 | 8 | 3 |
+| ptr slot | 6 | 7 | 3 |
 
 去重符号 → 文件（前 9 条，共 9 条；`--verbose` 列全部）：
 
@@ -258,7 +259,7 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 3 个）与已迁移 `plugins/*`（13 个）共 16 个域。
+旧 `feature/*`（待迁移 3 个）与已迁移 `plugins/*`（14 个）共 17 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，3）
 
@@ -266,9 +267,9 @@
 | --- | --- | --- |
 | `extension_bag` | `plugins/extension_bag` | 32 |
 | `patch` | `plugins/patch` | 9 |
-| `ui` | `plugins/ui` | 25 |
+| `ui` | `plugins/ui` | 23 |
 
-### 6.2 已迁移 `plugins/*`（13）
+### 6.2 已迁移 `plugins/*`（14）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -277,6 +278,7 @@
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 2 |
+| `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
 | `quest` | `plugins/quest` | 4 |
 | `save_backup` | `plugins/save_backup` | 6 |

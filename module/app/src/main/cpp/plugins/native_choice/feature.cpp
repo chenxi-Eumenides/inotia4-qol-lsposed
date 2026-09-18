@@ -1,20 +1,27 @@
-#include "feature/ui/native_choice.h"
+// native_choice feature.cpp —— 原生 UICHOICE 选择框插件业务层（原 feature/ui/native_choice.cpp）。
+//
+// 资源由宿主声明式安装（plugin.cpp）：
+//   · hook:UIChoice_Init：标题改写 wrapper（进入选择框后把主标题指到模块缓冲）；
+//   · ptrslot:g_uichoice_button_list_exe_got：按钮 ExecuteProc 槽，wrapper 截获选择索引、
+//     写 focus，并按规格回调业务 on_select 或走原版清理链。
+// 资源失败回滚由宿主事务逆序承担（原实现「按钮槽失败则手动 unhook」的等价物）。
+//
+// 全部游戏读取经 game/access（ui_choice / popup_state）与 game_access 类型化指针收口；
+// 本层不出现裸地址、不直接 include 符号头。
 
-#include "core/native/qol_log.h"
-#include "feature/patch/native_inventory_hook.h"
-#include "game_access.h"
-#include "game_ptr_hook.h"
-#include "game_symbols.h"
+#include "plugins/native_choice/feature.h"
 
 #include <array>
-#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
-#include <sys/mman.h>
-#include <unistd.h>
 
+#include "core/native/qol_log.h"
+#include "game/access/ui_choice.h"
+#include "game_access.h"
+
+namespace qol::features::native_choice {
 namespace {
 
 constexpr size_t kTextBufferSize = 256;
@@ -22,13 +29,12 @@ constexpr size_t kTextBufferSize = 256;
 using ChoiceButtonExecuteFn = void (*)(void* control);
 
 std::mutex g_mutex;
-PtrHook g_button_hook;
-UiChoiceInitFn g_init_original = nullptr;
-bool g_init_hook_installed = false;
+UiChoiceInitFn g_init_original = nullptr;  // 经 on_resource_ready 交还
+ChoiceButtonExecuteFn g_button_original = nullptr;  // 经 on_resource_ready 交还
 bool g_installed = false;
 bool g_active = false;
 uint64_t g_generation = 0;
-NativeChoiceSpec g_active_spec{};
+contracts::UiChoiceSpec g_active_spec{};
 std::array<std::array<char, kTextBufferSize>, native_choice_detail::kMaxItems> g_item_text{};
 std::array<char, kTextBufferSize> g_title{};
 bool g_pending_title = false;
@@ -72,7 +78,7 @@ bool component_text_owned_locked() {
 }
 
 ChoiceButtonExecuteFn original_button_locked() {
-    return reinterpret_cast<ChoiceButtonExecuteFn>(g_button_hook.orig);
+    return g_button_original;
 }
 
 void call_original(ChoiceButtonExecuteFn original, void* control) {
@@ -83,25 +89,7 @@ void call_original(ChoiceButtonExecuteFn original, void* control) {
     }
 }
 
-int choice_state_id_locked() {
-    if (g_base == 0) return -1;
-    auto* list_slot = reinterpret_cast<void**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
-    if (!game_memory_accessible(list_slot, sizeof(void*), 'r') || *list_slot == nullptr) {
-        return -1;
-    }
-    auto* list = static_cast<uint8_t*>(*list_slot);
-    if (!game_memory_accessible(list, POPUP_STATE_COUNT * POPUP_ENTRY_SIZE, 'r')) {
-        return -1;
-    }
-    for (size_t index = 0; index < POPUP_STATE_COUNT; ++index) {
-        auto* entry = list + index * POPUP_ENTRY_SIZE;
-        const uintptr_t enter = *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER);
-        if (enter == g_base + F_PANEL_CHOICE_ENTER) {
-            return static_cast<int>(*reinterpret_cast<uint32_t*>(entry));
-        }
-    }
-    return -1;
-}
+}  // namespace
 
 void choice_init_wrapper(void* control) {
     const UiChoiceInitFn original = g_init_original;
@@ -120,7 +108,7 @@ void choice_init_wrapper(void* control) {
 
 void choice_button_execute(void* control) {
     ChoiceButtonExecuteFn original = nullptr;
-    NativeChoiceSpec spec{};
+    contracts::UiChoiceSpec spec{};
     bool handle_module_choice = false;
     bool ownership_failed = false;
     uint64_t generation = 0;
@@ -202,77 +190,15 @@ void choice_button_execute(void* control) {
     if (spec.on_select != nullptr) spec.on_select(index, spec.user);
 }
 
-bool install_button_hook_locked() {
-    if (g_button_hook.installed()) return true;
-    if (g_uichoice_button_list_exe_got == nullptr || fn_uichoice_button_list_exe == nullptr) {
-        return false;
-    }
-    auto* slot = static_cast<void**>(g_uichoice_button_list_exe_got);
-    if (!game_memory_accessible(slot, sizeof(void*), 'r')) return false;
-    if (*slot != reinterpret_cast<void*>(fn_uichoice_button_list_exe)) {
-        QOL_LOG_ERROR(QolDomain::kUi,
-                      "native choice: ExecuteProc slot mismatch slot=%p got=%p expected=%p",
-                      slot, *slot, reinterpret_cast<void*>(fn_uichoice_button_list_exe));
-        return false;
-    }
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size <= 0) page_size = 0x1000;
-    const uintptr_t page = reinterpret_cast<uintptr_t>(slot) &
-                           ~(static_cast<uintptr_t>(page_size) - 1);
-    if (mprotect(reinterpret_cast<void*>(page), static_cast<size_t>(page_size),
-                 PROT_READ | PROT_WRITE) != 0) {
-        QOL_LOG_ERROR(QolDomain::kUi, "native choice: ExecuteProc mprotect failed errno=%d", errno);
-        return false;
-    }
-    return g_button_hook.install_typed(slot, &choice_button_execute);
-}
-
-bool install_init_hook_locked() {
-    if (g_init_hook_installed) return true;
-    const NativeHookFunType hook = native_hook_func();
-    if (hook == nullptr || fn_uichoice_init == nullptr) return false;
-    void* backup = nullptr;
-    const int rc = hook(reinterpret_cast<void*>(fn_uichoice_init),
-                        reinterpret_cast<void*>(&choice_init_wrapper), &backup);
-    if (rc != 0 || backup == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kUi, "native choice: UIChoice_Init hook failed rc=%d", rc);
-        return false;
-    }
-    g_init_original = reinterpret_cast<UiChoiceInitFn>(backup);
-    g_init_hook_installed = true;
-    return true;
-}
-
-}  // namespace
-
-bool native_choice_install_if_ready() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_installed) return true;
-    if (!bridge_ready() || g_base == 0 || !choice_symbols_ready()) return false;
-
-    if (!install_init_hook_locked()) return false;
-    if (!install_button_hook_locked()) {
-        const NativeUnhookFunType unhook = native_unhook_func();
-        if (unhook != nullptr && g_init_hook_installed) {
-            unhook(reinterpret_cast<void*>(fn_uichoice_init));
-        }
-        g_init_original = nullptr;
-        g_init_hook_installed = false;
-        return false;
-    }
-    g_installed = true;
-    QOL_LOG_INFO(QolDomain::kUi, "native choice: hooks installed");
-    return true;
-}
-
-bool native_choice_open(const NativeChoiceSpec& spec) {
+bool native_choice_open(const contracts::UiChoiceSpec& spec) {
     uint64_t generation = 0;
     int state_id = -1;
 
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (!g_installed || !native_choice_detail::can_open(g_active, spec)) return false;
-        if (!choice_symbols_ready() || choice_state_id_locked() < 0 ||
+        state_id = qol::game::ui_choice_state_id();
+        if (!choice_symbols_ready() || state_id < 0 ||
             !game_memory_accessible(g_uichoice_itemtext,
                                     sizeof(char*) * static_cast<size_t>(spec.count), 'w') ||
             !game_memory_accessible(g_uichoice_count, sizeof(uint8_t), 'w') ||
@@ -298,7 +224,6 @@ bool native_choice_open(const NativeChoiceSpec& spec) {
         g_pending_title = g_active_spec.title != nullptr;
         g_popup_closed = false;
         generation = ++g_generation;
-        state_id = choice_state_id_locked();
     }
 
     if (state_id < 0 || fn_popupstate_push(static_cast<uint32_t>(state_id)) == 0) {
@@ -328,3 +253,25 @@ void native_choice_close() {
         fn_ui_set_popup_process_info(3, 0);
     }
 }
+
+int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
+    (void)ctx;
+    if (resource_id == nullptr) return 1;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (std::strcmp(resource_id, "hook:UIChoice_Init") == 0) {
+        g_init_original = reinterpret_cast<UiChoiceInitFn>(backup);
+        return 0;
+    }
+    if (std::strcmp(resource_id, "ptrslot:g_uichoice_button_list_exe_got") == 0) {
+        g_button_original = reinterpret_cast<ChoiceButtonExecuteFn>(backup);
+        return 0;
+    }
+    return 1;  // 未知资源：fail-closed（宿主按 resource_ready_failed 回滚）
+}
+
+void native_choice_set_installed(bool installed) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_installed = installed;
+}
+
+}  // namespace qol::features::native_choice

@@ -1,9 +1,30 @@
-#include "feature/ui/native_choice.h"
+// plugins/native_choice 纯逻辑 host 测试：
+// 选择框规格边界/重复打开/关闭项/地址归属（native_choice_detail），以及插件清单
+// （ui_choice 能力提供 + 2 条声明式资源的机制/handler/门禁）。
+//
+// 本 target 只链接 plugin.cpp，feature.cpp 的运行时实现以桩替代（真机验证）；
+// 纯逻辑走 feature.h 的 header-inline，不触碰游戏内存。
+
+#include "plugins/native_choice/feature.h"
+#include "plugins/native_choice/plugin.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+
+#include "contracts/ui_choice.h"
 
 namespace {
+
+using qol::contracts::ResourceFailure;
+using qol::contracts::ResourceMechanism;
+using qol::contracts::ResourceRequirement;
+using qol::contracts::UiChoiceApi;
+using qol::contracts::UiChoiceSpec;
+using qol::features::native_choice::native_choice_detail::address_in_range;
+using qol::features::native_choice::native_choice_detail::can_open;
+using qol::features::native_choice::native_choice_detail::is_close_index;
+using qol::features::native_choice::native_choice_detail::valid_spec;
 
 int g_pass = 0;
 int g_fail = 0;
@@ -15,48 +36,101 @@ int g_fail = 0;
 
 void on_select(int, void*) {}
 
-NativeChoiceSpec valid_spec(int count = 2, int close_index = 1) {
+UiChoiceSpec valid_spec_of(int count = 2, int close_index = 1) {
     static const char* const items[] = {"one", "two", "three", "four", "five", "six"};
     return {items, count, "title", close_index, &on_select, nullptr};
 }
 
 void test_spec_bounds() {
-    CHECK(!native_choice_detail::valid_spec(valid_spec(0)));
-    CHECK(native_choice_detail::valid_spec(valid_spec(1, -1)));
-    CHECK(native_choice_detail::valid_spec(valid_spec(6, 5)));
-    CHECK(!native_choice_detail::valid_spec(valid_spec(7)));
-    CHECK(!native_choice_detail::valid_spec(valid_spec(2, 2)));
+    CHECK(!valid_spec(valid_spec_of(0)));
+    CHECK(valid_spec(valid_spec_of(1, -1)));
+    CHECK(valid_spec(valid_spec_of(6, 5)));
+    CHECK(!valid_spec(valid_spec_of(7)));
+    CHECK(!valid_spec(valid_spec_of(2, 2)));
 }
 
 void test_repeated_open() {
-    const NativeChoiceSpec spec = valid_spec();
-    CHECK(native_choice_detail::can_open(false, spec));
-    CHECK(!native_choice_detail::can_open(true, spec));
+    const UiChoiceSpec spec = valid_spec_of();
+    CHECK(can_open(false, spec));
+    CHECK(!can_open(true, spec));
 }
 
 void test_close_index() {
-    CHECK(native_choice_detail::is_close_index(1, 1));
-    CHECK(!native_choice_detail::is_close_index(0, 1));
-    CHECK(!native_choice_detail::is_close_index(0, -1));
-    CHECK(native_choice_detail::valid_spec(valid_spec(1, 0)));
+    CHECK(is_close_index(1, 1));
+    CHECK(!is_close_index(0, 1));
+    CHECK(!is_close_index(0, -1));
+    CHECK(valid_spec(valid_spec_of(1, 0)));
 }
 
 void test_address_ownership_range() {
     constexpr uintptr_t begin = 0x1000;
-    CHECK(native_choice_detail::address_in_range(begin, begin, 256));
-    CHECK(native_choice_detail::address_in_range(begin + 255, begin, 256));
-    CHECK(!native_choice_detail::address_in_range(begin + 256, begin, 256));
-    CHECK(!native_choice_detail::address_in_range(begin - 1, begin, 256));
-    CHECK(!native_choice_detail::address_in_range(begin, begin, 0));
+    CHECK(address_in_range(begin, begin, 256));
+    CHECK(address_in_range(begin + 255, begin, 256));
+    CHECK(!address_in_range(begin + 256, begin, 256));
+    CHECK(!address_in_range(begin - 1, begin, 256));
+    CHECK(!address_in_range(begin, begin, 0));
+}
+
+// 插件清单：provides `ui_choice` v1.0；2 条资源各自机制/handler/门禁正确。
+void test_plugin_manifest() {
+    const qol::contracts::PluginDescriptor& d =
+        qol::features::native_choice::plugin_descriptor();
+    CHECK(std::strcmp(d.id, "native_choice") == 0);
+    CHECK(d.requires_count == 0 && d.optional_count == 0);
+    CHECK(d.provides_count == 1);
+    CHECK(std::strcmp(d.provides[0].id, qol::contracts::kUiChoiceCapabilityId) == 0);
+    CHECK(d.provides[0].version.major == qol::contracts::kUiChoiceVersionMajor);
+    CHECK(d.provides[0].version.minor == qol::contracts::kUiChoiceVersionMinor);
+    CHECK(d.provides[0].iface != nullptr);
+    const auto* api = static_cast<const UiChoiceApi*>(d.provides[0].iface);
+    CHECK(api->open != nullptr && api->active != nullptr && api->close != nullptr);
+    CHECK(!api->active());
+
+    CHECK(d.resources_count == 2);
+    const qol::contracts::ResourceClaim& init = d.resources[0];
+    CHECK(std::strcmp(init.id, "hook:UIChoice_Init") == 0);
+    CHECK(std::strcmp(init.symbol, "F_UI_CHOICE_INIT_VMA") == 0);
+    CHECK(init.mechanism == ResourceMechanism::kEntryHook);
+    CHECK(init.handler != nullptr);
+    CHECK(init.gate == nullptr);
+    CHECK(init.resumable);
+    CHECK(init.requirement == ResourceRequirement::kRequired);
+    CHECK(init.failure == ResourceFailure::kFailClosed);
+
+    const qol::contracts::ResourceClaim& button = d.resources[1];
+    CHECK(std::strcmp(button.id, "ptrslot:g_uichoice_button_list_exe_got") == 0);
+    CHECK(std::strcmp(button.symbol, "ptrslot:g_uichoice_button_list_exe_got") == 0);
+    CHECK(button.mechanism == ResourceMechanism::kPtrSlot);
+    CHECK(button.handler != nullptr);
+    CHECK(button.gate == nullptr);
+    CHECK(button.resumable);
+    CHECK(button.requirement == ResourceRequirement::kRequired);
+    CHECK(button.failure == ResourceFailure::kFailClosed);
+
+    CHECK(d.on_resource_ready != nullptr);
 }
 
 }  // namespace
+
+// feature.cpp 运行时实现的桩：本 target 只验证清单与纯逻辑，真机验证安装/选择行为。
+namespace qol::features::native_choice {
+
+bool native_choice_open(const contracts::UiChoiceSpec&) { return false; }
+bool native_choice_active() { return false; }
+void native_choice_close() {}
+void choice_init_wrapper(void*) {}
+void choice_button_execute(void*) {}
+int32_t on_resource_ready(contracts::PluginContext&, const char*, void*) { return 0; }
+void native_choice_set_installed(bool) {}
+
+}  // namespace qol::features::native_choice
 
 int main() {
     test_spec_bounds();
     test_repeated_open();
     test_close_index();
     test_address_ownership_range();
+    test_plugin_manifest();
     std::printf("native_choice_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

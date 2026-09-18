@@ -41,7 +41,6 @@ add_library(gamebridge SHARED
     game/access/ui_components.cpp
     feature/ui/game_ui_settings.cpp
     feature/ui/game_ui_savebackup.cpp
-    feature/ui/native_choice.cpp
     feature/extension_bag/game_ui_virtbag.cpp
     feature/extension_bag/extension_bag_port.cpp
     feature/extension_bag/extension_bag_persistence.cpp
@@ -287,4 +286,11 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     game/access/popup_state.cpp
     hooks/popup_state.cpp
+)
+
+# D1-b1：native_choice 迁移为插件（provider `ui_choice`）+ 选择框语义收口 game/access/ui_choice
+target_sources(gamebridge PRIVATE
+    game/access/ui_choice.cpp
+    plugins/native_choice/feature.cpp
+    plugins/native_choice/plugin.cpp
 )

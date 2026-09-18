@@ -63,8 +63,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
         settings_ui_start_auto_inject();
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
-        // 世界传送已迁移为 world_teleport 插件：入口 patch 与 native_choice 安装
-        // 由插件 install 负责（assembly_init 装配）。
+        // 世界传送已迁移为 world_teleport 插件：入口 patch 由插件 install 负责（assembly_init 装配）；
+        // 选择框组件为独立插件 native_choice（provides `ui_choice`），消费者经能力契约获取。
         // 合成器界面层已迁移为 craft_ui 插件（assembly 注册，声明式安装 12 条 UIMix hook）；
         // 结果层 custom_recipe 插件 provides `craft_result`，动态配方重建在插件 install 内注册。
         qol::host::assembly_init();  // 插件装配：注册内置静态插件 + 声明式安装资源 + 命令帧排空

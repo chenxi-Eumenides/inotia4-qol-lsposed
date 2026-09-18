@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "game/access/save.h"
+#include "game/access/ui_choice.h"
 #include "game_access.h"
 #include "game_state.h"
 
@@ -27,6 +28,13 @@ bool save_slot_delete_hook_target(void** out_slot, uintptr_t* out_expected) {
     if (out_slot != nullptr) *out_slot = g_ptr_slot_test_addr;
     if (out_expected != nullptr) *out_expected = g_ptr_slot_test_expected;
     return true;
+}
+
+// UIChoice 按钮槽站点：本组测试不涉及，恒不可解析（ptr_slots.cpp 的登记表仍可链接）。
+bool ui_choice_button_slot_target(void** out_slot, uintptr_t* out_expected) {
+    if (out_slot != nullptr) *out_slot = nullptr;
+    if (out_expected != nullptr) *out_expected = 0;
+    return false;
 }
 
 }  // namespace qol::game

@@ -24,6 +24,8 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_UIDESC_MAKE_ITEM_VMA", F_UIDESC_MAKE_ITEM_VMA},
     // 文本层：全游戏唯一文本读取热点（共享资源，owner=text_layer）。
     {"F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA},
+    // 原生选择框（owner=native_choice，D1-b1 声明式化）：标题改写 wrapper 的挂载点。
+    {"F_UI_CHOICE_INIT_VMA", F_UI_CHOICE_INIT_VMA},
     // 特殊装备解锁：+7 bit4 的两个判定入口（入口 hook，owner=special_equip）。
     {"F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA},
     {"F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA},

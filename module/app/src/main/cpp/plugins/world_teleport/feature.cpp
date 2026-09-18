@@ -16,7 +16,8 @@
 
 #include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
-#include "feature/ui/native_choice.h"
+#include "contracts/ui_choice.h"
+#include "infra/capabilities.h"
 #include "plugins/world_teleport/rules.h"
 #include "game/access/world.h"
 
@@ -49,6 +50,20 @@ constexpr char kUnknownMapName[] = "未知地图";
 // 在值 >0 时用 MONEY_DrawWithUnit 渲染价格栏），不能携带指针；待传送目标改由
 // 此静态全局在确认/取消回调间传递。
 ChoiceTarget g_pending_target{};
+
+// 选择框能力（provider=plugins/native_choice）：每次现取、不缓存裸指针（provider 撤销期
+// require 返回 nullptr → 消费者降级）。
+const qol::contracts::UiChoiceApi* ui_choice_api() {
+    return static_cast<const qol::contracts::UiChoiceApi*>(qol::infra::require_capability(
+        qol::contracts::kUiChoiceCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kUiChoiceVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kUiChoiceVersionMinor)}));
+}
+
+void close_choice_panel() {
+    const qol::contracts::UiChoiceApi* api = ui_choice_api();
+    if (api != nullptr && api->close != nullptr) api->close();
+}
 
 void teleport_confirmed(void* param);
 void teleport_cancelled(void* param);
@@ -96,9 +111,16 @@ void open_choice_panel() {
     std::array<char, kMapNameBufferSize> title{};
     std::snprintf(title.data(), title.size(), "当前地图：%s(id:%d)",
                   map_name(current_id), current_id);
-    const NativeChoiceSpec spec{items.data(), static_cast<int>(kChoiceCount), title.data(),
-                                static_cast<int>(kCloseChoiceIndex), &teleport_on_select, nullptr};
-    if (!native_choice_open(spec)) {
+    const qol::contracts::UiChoiceSpec spec{items.data(), static_cast<int>(kChoiceCount),
+                                            title.data(),
+                                            static_cast<int>(kCloseChoiceIndex),
+                                            &teleport_on_select, nullptr};
+    const qol::contracts::UiChoiceApi* api = ui_choice_api();
+    if (api == nullptr || api->open == nullptr) {
+        QOL_LOG_ERROR(QolDomain::kUi, "world teleport: ui_choice capability unavailable");
+        return;
+    }
+    if (!api->open(spec)) {
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice open failed");
         return;
     }
@@ -218,14 +240,14 @@ void teleport_cancelled(void*) {
 
 void teleport_on_select(int index, void*) {
     if (!qol::game::world_create_yesno_ready()) {
-        native_choice_close();
+        close_choice_panel();
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: confirm symbols not resolved");
         return;
     }
     const ChoiceTarget& target = g_targets[static_cast<size_t>(index)];
     if (!target.valid) {
         show_message("目标地图无效，无法传送");
-        native_choice_close();
+        close_choice_panel();
         QOL_LOG_WARN(QolDomain::kUi,
                      "world teleport: invalid target index=%d map_id=%d",
                      index, target.map_id);
@@ -237,11 +259,11 @@ void teleport_on_select(int index, void*) {
     // 实际画面仍会继续绘制 choice，导致用户看不到确认框。先按官方关闭流程
     // 清掉 choice，再在下一逻辑帧创建 YesNo；取消回调会重新打开 choice。
     if (!qol::game::world_close_popup_ready()) {
-        native_choice_close();
+        close_choice_panel();
         QOL_LOG_ERROR(QolDomain::kUi, "world teleport: choice close symbols not resolved");
         return;
     }
-    native_choice_close();
+    close_choice_panel();
     qol::game::world_restore_hud_gate();
     g_pending_target = target;
     if (frame_task_add(kFramePointLogicPre, delayed_open_confirmation,
@@ -263,8 +285,4 @@ void world_teleport_call_map_name() {
         return;
     }
     request_open_choice();
-}
-
-bool world_teleport_native_choice_install() {
-    return native_choice_install_if_ready();
 }
