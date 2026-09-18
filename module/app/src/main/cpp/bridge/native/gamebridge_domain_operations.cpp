@@ -191,7 +191,18 @@ Java_com_inotia4_qol_NativeBridge_nativeSetStackLimitEnabled(JNIEnv*, jclass, jb
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetMoveMergeEnabled(JNIEnv*, jclass, jboolean enabled) {
-    return set_move_merge_enabled(enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
+    // 写配置键 moveMergeEnabled；extension_bag 插件订阅 kEventConfigChanged 应用
+    // set_move_merge_enabled（extension source protection 联动逐字保持）。
+    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetExtensionBagEnabled 同构）。
+    const qol::contracts::QolCommand command{
+        qol::contracts::kCommandSetConfigBool,
+        "moveMergeEnabled",
+        enabled == JNI_TRUE ? 1 : 0,
+    };
+    qol::contracts::QolCommandTicket ticket = 0;
+    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
+    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

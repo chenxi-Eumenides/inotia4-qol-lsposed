@@ -107,23 +107,6 @@ using Stage4JewelExtension = int (*)(void* equip_item, void* jewel_item,
 int stage4_put_jewel(void* equip_item, void* jewel_item, Stage4IdentifyItem identify,
                      Stage4JewelBackup backup, Stage4JewelExtension extension_put);
 
-// 只有拖放事件的扩展 apply 材料源落到装备槽才进入装备槽事件适配；其余源必须 backup。
-bool stage4_is_extension_equip_control_source(uint64_t event, bool extension_source,
-                                               bool source_is_apply_material,
-                                               bool target_is_equip_slot);
-
-// S-03 apply 准入判据（R-50）：仅同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
-// IsApplyStuff 判真才进入 apply。任一不满足（含类别数据不可用被调用方按非装备
-// fail-closed 映射为 target_is_equip=false）都不得进入 apply，调用方必须回退
-// 既有扩展交换/移动，不得吞事件或 Blocked。
-bool stage4_is_extension_apply_candidate(bool same_bag,
-                                         bool source_is_apply_material,
-                                         bool target_is_equip,
-                                         bool apply_stuff_allowed);
-
-// finish 失败后必须进入 abort/isolation 出口；finished=true 时 token 已由 finish 收尾。
-bool stage4_finish_requires_abort(bool finished);
-
 // ---------------------------------------------------------------------------
 // S2 写侧 INVEN_RemoveItemData 修正计划（R-45/R-49，纯函数供 Host 断言）。
 // 原版（0x1040a8）顺序遍历 6 袋 × 槽，对匹配类别的可堆叠堆：整堆删除累计

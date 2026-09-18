@@ -56,7 +56,10 @@
 7. **B2c**：`inventory_hooks` 业务迁入 `plugins/inventory_hooks`，改 `optional_requires = [extension_bag]`、
    可 deactivate（「禁止 deactivate」文档保留至 VM-D2-03 通过）。
 8. **U11（ui-kit adapter）未冻结前，EB 直依 `game/access/ui_kit`**（过渡依赖登记）。
-9. **`feature/patch` 目录在 D2c 完成后删除**。
+9. **`feature/patch` 目录在 D2c 完成后删除**（D2c-2b-2 已删除：`game_patch` 残壳拆分迁
+   `plugins/extension_bag`（move_merge/X1/source protection）与 `game/access/hive_iap`（IAP），
+   3 个 EB 语义 stage4 谓词归 EB 本地；`feature/` 目录自此为空，仅余 `arch_common.py` 的
+   `feature/` 过渡回退映射待 P5 删除）。
 
 ## 后果
 

@@ -322,7 +322,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             "UIEquip 物品事件 proc GOT 槽常驻 wrapper（move_merge / 扩展源保护在 wrapper 内自门控）",
             nullptr,
             120,
-            ::qol::features::game_patch::game_patch_move_merge_wrapper(),
+            reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
         },
         // ---- D2a-3b-2：C1–C8 存档 callsite（行为编排 owner=core/native/module_save）----
         // 站点已在 a3a 登记（game/access/patches 的 P_EXT_SAVE_*）；handler 为模块存档编排

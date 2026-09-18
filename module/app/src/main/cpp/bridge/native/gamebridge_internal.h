@@ -19,7 +19,7 @@
 #include "api/native/game_ui.h"
 #include "game_world.h"
 #include "game_tiles.h"
-#include "feature/patch/game_patch.h"
+#include "game/access/hive_iap.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/core.ui/panels/settings.h"
 #include "plugins/save_backup/ui/panel.h"

@@ -323,7 +323,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     const bool apply_stuff_allowed = fn_ui_equip_is_apply_stuff != nullptr &&
                                      target_item != nullptr &&
                                      fn_ui_equip_is_apply_stuff(target_item, item) != 0;
-    const bool apply_candidate = stage4_is_extension_apply_candidate(
+    const bool apply_candidate = extension_bag_is_apply_candidate(
         src_bag == dst_bag, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
     if (apply_candidate) {

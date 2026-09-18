@@ -946,7 +946,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     const bool apply_stuff_allowed = fn_ui_equip_is_apply_stuff != nullptr &&
                                      material != nullptr && target_item != nullptr &&
                                      fn_ui_equip_is_apply_stuff(target_item, material) != 0;
-    const bool apply_candidate = stage4_is_extension_apply_candidate(
+    const bool apply_candidate = extension_bag_is_apply_candidate(
         source_bag == target_bag && target_slot >= 0, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
     if (apply_candidate) {

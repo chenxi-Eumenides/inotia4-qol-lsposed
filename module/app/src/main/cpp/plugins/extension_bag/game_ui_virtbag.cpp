@@ -5,13 +5,12 @@
 #include "game_ops_common.h"
 #include "contracts/ownership.h"
 #include "contracts/inventory_refresh.h"
-#include "feature/patch/game_patch.h"
 #include "hooks/popup_state.h"
-#include "patch/game_patch_bridge.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"
-#include "plugins/inventory_hooks/inventory_hook_stage4.h"
+#include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "game/read/stack_codec.h"
 #include "contracts/stack_limit.h"
@@ -75,6 +74,11 @@ using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 
 std::mutex g_virtual_bag_mtx;
+// move_merge / extension source protection 请求标志（D2c-2b-2 由 feature/patch 迁入；
+// X1 wrapper 常驻自门控，set_*_enabled 只切标志）。
+std::mutex g_move_merge_mtx;
+std::atomic<bool> g_move_merge_requested{false};
+std::atomic<bool> g_extension_source_protection_requested{false};
 // 生命周期节拍帧任务（D2a-3c：原 150ms 线程体迁 infra::scheduler，主线程执行）。
 qol::infra::FrameTaskId g_lifecycle_task = 0;
 int g_lifecycle_last_state = -1;
@@ -340,7 +344,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         // backup，不得 Blocked），且落点是装备槽控件（slot index >= 16）。
         const bool target_is_equip_slot = target_item != nullptr &&
             item_is_equip(target_item) && target_slot_index >= 16;
-        if (!stage4_is_extension_equip_control_source(
+        if (!extension_bag_is_equip_control_source(
                 event, extension_source, source_is_apply_material, target_is_equip_slot)) {
             return VirtualBagEquipControlEventResult::kNotExtension;
         }
@@ -387,7 +391,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         finished = module_use_finish_locked(use_token, &consumed, &release_plan);
-        if (stage4_finish_requires_abort(finished)) {
+        if (extension_bag_finish_requires_abort(finished)) {
             const bool aborted = module_use_abort_locked(use_token);
             const bool isolated = aborted || module_use_abort_isolate_locked(use_token);
             VIRTBAG_LOG_ERROR("ERROR equip control token finish failed source=%p/%d/%d aborted=%d isolated=%d",
@@ -1504,6 +1508,9 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 }
 
 #include "plugins/extension_bag/extension_bag_api_impl.inc"
+
+// D2c-2b-2：move_merge / source protection wrapper（X1 handler；须在 claims 之前定义）。
+#include "plugins/extension_bag/move_merge.inc"
 
 // D2a-3b-1：8 条声明式资源（须在全部 wrapper/全局定义之后）。
 #include "plugins/extension_bag/extension_bag_claims.inc"

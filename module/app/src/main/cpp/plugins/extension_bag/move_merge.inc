@@ -1,3 +1,10 @@
+// move_merge / extension source protection（D2c-2b-2 由 feature/patch/game_patch_move_merge.inc
+// 迁入 EB；wrapper 业务体与自门控语义逐字）。include 于 plugins/extension_bag/game_ui_virtbag.cpp
+// 末尾（claims 之前），全局标志 g_move_merge_mtx / g_move_merge_requested /
+// g_extension_source_protection_requested 定义在该 TU 首部匿名命名空间。
+
+#define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kPlatform, __VA_ARGS__)
+
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
     const uint64_t observation_token = virtual_bag_observe_item_proc_pre(control, event, x2, param);
     const auto finish = [observation_token, control, event, x2, param](uint64_t result) {
@@ -90,14 +97,14 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                         // （provider 未安装/撤销中）保持既有 no-op 语义（不直呼符号入口，避免
                         // 经 hook 回入 wrapper）。
                         const auto* refresh =
-                            static_cast<const qol::contracts::InventoryRefreshApi*>(
-                                qol::infra::require_capability(
-                                    qol::contracts::kInventoryRefreshCapabilityId,
+                            static_cast<const ::qol::contracts::InventoryRefreshApi*>(
+                                ::qol::infra::require_capability(
+                                    ::qol::contracts::kInventoryRefreshCapabilityId,
                                     QolVersionRange{
                                         static_cast<uint16_t>(
-                                            qol::contracts::kInventoryRefreshVersionMajor),
+                                            ::qol::contracts::kInventoryRefreshVersionMajor),
                                         static_cast<uint16_t>(
-                                            qol::contracts::kInventoryRefreshVersionMinor)}));
+                                            ::qol::contracts::kInventoryRefreshVersionMinor)}));
                         if (refresh != nullptr && refresh->call_original != nullptr) {
                             refresh->call_original();
                         }
@@ -162,3 +169,5 @@ bool move_merge_enabled() {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
     return g_move_merge_requested.load();
 }
+
+#undef MOVE_LOG

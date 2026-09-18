@@ -140,7 +140,7 @@ bool assembly_init() {
     // 命令通道每逻辑帧排空一次；命令体在主线程执行（§6.1）。
     infra::scheduler_add(infra::FramePoint::kLogicPre, &drain_commands_task, nullptr, 1, 0);
 
-    // hook/unhook 原语过渡期取自 feature/patch；P5 迁往 patch/ 后改引 patch 层。
+    // hook/unhook 原语过渡期取自 plugins/inventory_hooks；P5 迁往 patch/ 后改引 patch 层。
     // native_hook_func/native_unhook_func 是机制原语的获取器（返回函数指针）；这里先取获取器
     // 地址再调用：本处只是把机制原语注入宿主，不构成某个游戏符号的安装点（真实安装点在
     // 插件描述符声明、由插件注册表执行），直接写调用式会被 check_resources 按文本

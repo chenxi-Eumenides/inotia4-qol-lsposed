@@ -1,4 +1,5 @@
 #include "plugins/inventory_hooks/inventory_hook_stage4.h"
+#include "plugins/extension_bag/extension_bag_equip_rules.h"
 
 #include "data/native/game_symbols.h"
 
@@ -228,26 +229,26 @@ static void test_object_operations() {
 
     // EquipControlEventProc 的 wrapper 判据：只有 event=0x04、扩展宝石源且目标为
     // 装备槽才进入扩展分支；原版源、扩展非宝石、非装备目标和其它事件均必须 backup。
-    CHECK(stage4_is_extension_equip_control_source(0x04, true, true, true));
-    CHECK(!stage4_is_extension_equip_control_source(0x04, true, true, false));
-    CHECK(!stage4_is_extension_equip_control_source(0x04, true, false, true));
-    CHECK(!stage4_is_extension_equip_control_source(0x04, false, true, true));
-    CHECK(!stage4_is_extension_equip_control_source(0x02, true, true, true));
-    CHECK(stage4_is_extension_equip_control_source(0x04, true, true, true));
+    CHECK(extension_bag_is_equip_control_source(0x04, true, true, true));
+    CHECK(!extension_bag_is_equip_control_source(0x04, true, true, false));
+    CHECK(!extension_bag_is_equip_control_source(0x04, true, false, true));
+    CHECK(!extension_bag_is_equip_control_source(0x04, false, true, true));
+    CHECK(!extension_bag_is_equip_control_source(0x02, true, true, true));
+    CHECK(extension_bag_is_equip_control_source(0x04, true, true, true));
 
     // S-03/R-50 apply 准入判据：宝石/卷轴 + 装备类目标 + IsApplyStuff 判真才进入
     // apply；宝石/卷轴 + 普通物品目标必须非 apply（回退扩展交换/移动）；普通物品
     // 源 + 任意目标一律非 apply；类别数据不可用由调用方映射为 target_is_equip=false，
     // 与普通物品目标同路径 fail-closed。
-    CHECK(stage4_is_extension_apply_candidate(true, true, true, true));
-    CHECK(stage4_is_extension_apply_candidate(true, true, true, false) == false);
-    CHECK(stage4_is_extension_apply_candidate(true, true, false, true) == false);
-    CHECK(stage4_is_extension_apply_candidate(true, true, false, false) == false);
-    CHECK(stage4_is_extension_apply_candidate(false, true, true, true) == false);
-    CHECK(stage4_is_extension_apply_candidate(true, false, true, true) == false);
-    CHECK(stage4_is_extension_apply_candidate(false, false, false, false) == false);
-    CHECK(stage4_finish_requires_abort(false));
-    CHECK(!stage4_finish_requires_abort(true));
+    CHECK(extension_bag_is_apply_candidate(true, true, true, true));
+    CHECK(extension_bag_is_apply_candidate(true, true, true, false) == false);
+    CHECK(extension_bag_is_apply_candidate(true, true, false, true) == false);
+    CHECK(extension_bag_is_apply_candidate(true, true, false, false) == false);
+    CHECK(extension_bag_is_apply_candidate(false, true, true, true) == false);
+    CHECK(extension_bag_is_apply_candidate(true, false, true, true) == false);
+    CHECK(extension_bag_is_apply_candidate(false, false, false, false) == false);
+    CHECK(extension_bag_finish_requires_abort(false));
+    CHECK(!extension_bag_finish_requires_abort(true));
 }
 
 static void test_unequip_to_inven() {
