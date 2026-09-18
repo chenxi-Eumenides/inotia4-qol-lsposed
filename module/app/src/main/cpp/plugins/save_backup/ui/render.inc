@@ -1,4 +1,4 @@
-// 控件 DrawProc：与 game_ui_settings 同一套视觉语言
+// 控件 DrawProc：与 core.ui 设置页同一套视觉语言
 //
 // - 背景：title background 贴图左右两半 + 半透明遮罩（root_decor_draw，同
 //   settings_panel_process 的背景/遮罩口径），不再自绘面板底色/边框矩形。
@@ -27,7 +27,7 @@
 //   次行 COLOR_TEXT_WHITE；正文 UI_OPTION_TEXT、次要/提示 UI_GOLD。
 //   左栏/右栏首行文案：<职业名> Lv<L> <地图名>（职业→等级→地图）；旧备份无职业字段时退化。
 //
-// 颜色均为 ABGR（与 game_ui_settings 同值：UI_GOLD=0xFF00B4D7，UI_OPTION_TEXT=0xFFCB9EE2），
+// 颜色均为 ABGR（与 core.ui 设置页同值：UI_GOLD=0xFF00B4D7，UI_OPTION_TEXT=0xFFCB9EE2），
 // 唯一例外是选中底色（ui_fill_rect_alpha 用 RGB565+百分比 alpha，见上）。
 
 // 画一个 3px 分区框：上下边线（含行分割线）走 ui_draw_panel_decor，左右边线走
@@ -105,7 +105,7 @@ void root_decor_draw() {
             static_cast<int>(root_rect.y + FRAME_Y + FRAME_H / 2 - 0x0e), 2, 1);
     }
     // ⑥ 页码指示（如「1/2」）：上一页/下一页两按钮正中间（LIST_COL_X + LIST_COL_W/2，
-    //    见 game_ui_savebackup.cpp 翻页按钮注释的间隙验算），只画文字、不画任何框。
+    //    见 panel.cpp 翻页按钮注释的间隙验算），只画文字、不画任何框。
     //    align=2 才是真正以 x 为中心（align=1 是右对齐：文字右缘贴 x，页码会整体左偏）。
     //    垂直：按钮高 0x30、文本高约 0x18 → y = PAGE_ROW_Y + (0x30-0x18)/2 = +0x0C（同按钮文本口径）。
     if (fn_grpx_draw_string_with_font != nullptr) {

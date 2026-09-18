@@ -1,5 +1,17 @@
 #include "gamebridge_internal.h"
 
+// 面板插件 API（D1-b2 迁移：core.ui 设置页容器 / save_backup 备份面板）。
+using qol::features::core_ui::data_settings_ui_inject;
+using qol::features::core_ui::data_settings_ui_open_option;
+using qol::features::core_ui::data_settings_ui_open_panel;
+using qol::features::core_ui::data_settings_ui_restore;
+using qol::features::core_ui::data_settings_ui_status_json;
+using qol::features::save_backup::data_savebackup_ui_inject;
+using qol::features::save_backup::data_savebackup_ui_open_panel;
+using qol::features::save_backup::data_savebackup_ui_restore;
+using qol::features::save_backup::data_savebackup_ui_self_check;
+using qol::features::save_backup::data_savebackup_ui_status_json;
+
 // ---- 模块设置 UI 端点（ui-settings v0.6.9）----
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSettingsUiInject(JNIEnv* env, jclass) {

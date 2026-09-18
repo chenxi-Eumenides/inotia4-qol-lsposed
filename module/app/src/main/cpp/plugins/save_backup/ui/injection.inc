@@ -1,81 +1,5 @@
-// PopupState 注入 / 还原 + 懒注入线程
-
-uint8_t* find_state_entry(uintptr_t enter_vma) {
-    if (g_base == 0) return nullptr;
-    void** got = reinterpret_cast<void**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
-    if (got == nullptr || *got == nullptr) return nullptr;
-    uint8_t* list = reinterpret_cast<uint8_t*>(*got);
-    for (int i = 0; i < 27; ++i) {
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_STATE_SIZE + POPUP_ENTRY_ENTER);
-        if (enter == g_base + enter_vma) return list + i * POPUP_STATE_SIZE;
-    }
-    return nullptr;
-}
-
-bool inject_state_entry_locked() {
-    if (g_state_entry != nullptr) return true;
-    if (g_base == 0) return false;
-    uint8_t* entry = find_state_entry(F_PANEL_UNK2_ENTER);  // INAP_GOODS（IAP 屏蔽=死条目）
-    if (entry == nullptr) {
-        SB_UI_LOG("state entry (INAP_GOODS) not found");
-        return false;
-    }
-    memcpy(g_state_backup, entry, POPUP_STATE_SIZE);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_ENTER) =
-        reinterpret_cast<uintptr_t>(&savebackup_panel_enter);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_PROCESS) =
-        reinterpret_cast<uintptr_t>(&savebackup_panel_process);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F3) =
-        reinterpret_cast<uintptr_t>(&savebackup_panel_f3);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_F4) =
-        reinterpret_cast<uintptr_t>(&savebackup_panel_f4);
-    *reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) =
-        reinterpret_cast<uintptr_t>(&savebackup_panel_event);
-    g_state_entry = entry;
-    g_state_id = *reinterpret_cast<int32_t*>(entry);
-    SB_UI_LOG("state entry %d injected (INAP_GOODS, enter/process/f3/f4/event)",
-              g_state_id);
-    return true;
-}
-
-void restore_state_entry_locked() {
-    if (g_state_entry == nullptr) return;
-    memcpy(g_state_entry, g_state_backup, POPUP_STATE_SIZE);
-    SB_UI_LOG("state entry %d restored from backup", g_state_id);
-    g_state_entry = nullptr;
-    g_state_id = -1;
-}
-
-void ensure_inject_thread() {
-    if (g_thread_started.exchange(true)) return;
-    std::thread([]() {
-        for (;;) {
-            const char* screen = data_ui_screen();
-            const bool on_main_menu = screen != nullptr &&
-                                      (strncmp(screen, "main_menu", 9) == 0);
-            {
-                std::lock_guard<std::mutex> lock(g_sbui_mtx);
-                if (on_main_menu) {
-                    // 进入主菜单：若已被还原（离开过主菜单）则重新注入。
-                    if (g_state_entry == nullptr) {
-                        inject_state_entry_locked();
-                    }
-                } else {
-                    // 离开主菜单：还原原始回调，不永久占用 IAP 死条目
-                    // （与 game_ui_settings 同设计：避免 27 条状态被长期拦截影响游戏内 IAP 检测路径）。
-                    if (g_state_entry != nullptr) {
-                        restore_state_entry_locked();
-                        g_panel_active = false;
-                    }
-                }
-            }
-            // 锁必须在 sleep 前释放：否则每轮持锁睡 300ms，会饿死其它 g_sbui_mtx 持有者
-            // （self_check / 面板 enter 曾因此卡死或延迟数秒）。
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        }
-    }).detach();
-}
-
+// 面板操作回调 + 事件分发（原 game_ui_savebackup_injection 的 79-340 行）。
+// PopupState 懒注入部分已删除，改由 own:popup.savebackup 经 hooks/popup_state 承担。
 // ============== 操作回调（按钮点击）==============
 //
 // 两步确认（面板内，不依赖原版 YesNo 弹窗——自定义面板下该弹窗不渲染）：
@@ -313,28 +237,13 @@ void on_btn_clicked(void* ctrl) {
     // 以防 ui_create_button 自动调 click（实测：ui_create_button 不会自动调 ExecuteProc）
 }
 
-// 「← 返回」点击：清待确认/提示 → 停用面板 → 关闭当前 PopupState。
+// 「← 返回」点击：走 provider.close（清待确认/提示 → 停用面板 → 关闭当前 PopupState）。
 // 契约：调用方（savebackup_panel_event 命中测试）不持 g_sbui_mtx。
 // 关闭走 fn_ui_set_popup_process_info(3, 0)（push state 0 + clear draw flag，官方 close
-// panel 路径，data_savebackup_ui_open_panel 切换式兜底同款）：无独立 pop 符号，push 模式
-// 下弹出本层回设置页，切换式下回主菜单。游戏消费 (3,0) pop 时会调 savebackup_panel_f3
-// 再次清状态（幂等）；本函数先置 g_panel_active=false，使 (3,0) 生效前的帧立即停止
-// event/process 处理。fn_ui_set_popup_process_info 必须锁外调用：pop 链会触发
-// savebackup_panel_f3 拿 g_sbui_mtx（非递归），持锁调用会死锁。
+// panel 路径）：无独立 pop 符号，push 模式弹出本层回设置页。游戏消费 (3,0) pop 时会调
+// savebackup_panel_f3 再次清状态（幂等）。pop 后 core.ui 面板栈的记录由 provider.active()
+// 在下次 open 时剔除；本函数自身不操作栈。
 void on_back_clicked(void* ctrl) {
-    if (ctrl == nullptr) return;
-    {
-        std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        if (!g_panel_active || ctrl != g_back_btn) return;
-        clear_pending_locked();
-        set_msg_locked("", UI_OPTION_TEXT, false);
-        g_panel_active = false;
-        g_close_delay_frames = 0;
-        g_back_pressed = 0;
-        // 控件树保留复用（同 f3：递归删除 SIGBUS）；再次进入走 enter 的 resumed 分支。
-    }
-    if (fn_ui_set_popup_process_info != nullptr) {
-        fn_ui_set_popup_process_info(3, 0);
-    }
-    SB_UI_LOG("back clicked: panel closed");
+    if (ctrl == nullptr || ctrl != g_back_btn) return;
+    savebackup_provider_close();
 }

@@ -17,7 +17,7 @@ bool is_savebackup_at_stack_top() {
     uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
     if (data == 0) return false;
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data))
-                   + (count - 1) * POPUP_STATE_SIZE;
+                   + (count - 1) * POPUP_ENTRY_SIZE;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     return enter == reinterpret_cast<uintptr_t>(&savebackup_panel_enter);
 }
@@ -254,9 +254,9 @@ void savebackup_panel_process() {
     // 列表条目数/页码变化后在此把最新 rect 写回控件，使引擎侧的控件 rect 与计算 rect 一致
     // （命中/绘制另用 panel_abs_origin + 计算 rect，双保险）。
     sync_list_btn_rects_locked();
-    // 帧封装与 game_ui_settings_panel_process 同款（ui_begin_frame 内含 SaveLCD/RestoreLCD）
+    // 帧封装与 core.ui settings_panel_process 同款（ui_begin_frame 内含 SaveLCD/RestoreLCD）
     ui_begin_frame();
-    // 背景/遮罩/分割线/标题（设置页同款视觉语言，见 game_ui_savebackup_render.inc）
+    // 背景/遮罩/分割线/标题（设置页同款视觉语言，见 render.inc）
     root_decor_draw();
     if (fn_ctrl_btn_draw != nullptr) {
         for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) fn_ctrl_btn_draw(g_slot_btns[i]);

@@ -4,8 +4,12 @@
 #include <cstdint>
 #include <cstring>
 
+#include "contracts/ownership.h"
+#include "contracts/panels.h"
 #include "core/native/qol_log.h"
+#include "infra/panels.h"
 #include "plugins/save_backup/feature.h"
+#include "plugins/save_backup/ui/panel.h"
 
 namespace qol::features::save_backup {
 namespace {
@@ -17,6 +21,23 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 // 指针槽资源登记名：与 game/access/ptr_slots 的 kSlots 条目一一对应。
 constexpr const char* kSlotDeleteResourceId = "ptrslot:SAVESLOT_DELETE_GOT";
+
+// 游戏内备份面板 provider：由 core.ui 容器（设置页「存档备份」动作项）经 ui_panels 打开。
+const contracts::PanelProviderSpec kPanelProvider = {
+    "save_backup",
+    kPluginId,
+    &savebackup_provider_open,
+    &savebackup_provider_close,
+    &savebackup_provider_active,
+    &savebackup_provider_block_reason,
+};
+
+// own:popup.savebackup：PopupState 死条目 F_PANEL_UNK2_ENTER 的 kOwnership 占用。
+// kFailSoft（工具类面板，不因死条目缺失而终态化插件）；acquire/release 走 hooks/popup_state。
+const contracts::OwnershipOps kPopupOwnershipOps{
+    &savebackup_popup_acquire,
+    &savebackup_popup_release,
+};
 
 // 常开标记：无配置门禁；仅用于 fill_status 上报（HTTP/UI 业务不受其门控）。
 std::atomic<bool> g_active{true};
@@ -35,7 +56,7 @@ void slot_delete_hook_wrapper(int32_t slot) {
     save_backup_slot_deleted_sync(slot);
 }
 
-// 声明式资源：删档回调 SaveSlot_Delete 的 GOT 槽（PtrHook 语义，宿主通用执行）。
+// 声明式资源：own:popup.savebackup（PopupState 死条目占用，工具面板） + 删档回调 GOT 槽。
 // 槽址/期望值由 game/access/ptr_slots 解析；handler 为本 wrapper；常驻（gate=nullptr）、
 // 必需、fail-closed、可物理还原（归还时写回期望值）。
 const contracts::ResourceClaim kResources[] = {
@@ -53,12 +74,27 @@ const contracts::ResourceClaim kResources[] = {
         120,                     // step_budget
         reinterpret_cast<void*>(&slot_delete_hook_wrapper),  // handler
     },
+    {
+        "own:popup.savebackup",  // id
+        "own:popup.savebackup",  // symbol（kOwnership 不使用站点解析，保留 id 作诊断标识）
+        contracts::ResourceMechanism::kOwnership,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailSoft,
+        true,                    // resumable
+        kPluginId,               // owner
+        "备份面板以 PopupState 死条目承载，需整段占用 5 回调并承诺写回快照",  // reason
+        nullptr,                 // gate（常驻）
+        120,                     // step_budget
+        reinterpret_cast<void*>(const_cast<contracts::OwnershipOps*>(&kPopupOwnershipOps)),  // handler
+    },
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
     (void)ctx;
     g_active.store(true, std::memory_order_release);
-    // 自身初始化不再直接装 hook：资源由宿主按 kPtrSlot 声明式安装（幂等重入安全）。
+    // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
+    if (!infra::panels_register_provider(kPanelProvider)) return 1;
     return 0;
 }
 
@@ -66,6 +102,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     // 资源归还包括物理写回原槽值（宿主引擎执行）；本回调只翻转上报标记（幂等）。
     g_active.store(false, std::memory_order_release);
+    infra::panels_unregister_owner(kPluginId);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -100,7 +137,7 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,   // requires
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
-    1, kResources,// resources（1 条 kPtrSlot：删档回调 GOT 槽）
+    2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_operations.cpp 保留）
     &plugin_install,
     &plugin_deactivate,

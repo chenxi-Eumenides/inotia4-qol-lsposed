@@ -40,6 +40,7 @@
 | `patch` | 9 |
 | `plugins/attribute_range` | 4 |
 | `plugins/autosell` | 12 |
+| `plugins/core.ui` | 14 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
 | `plugins/extension_bag` | 32 |
@@ -48,14 +49,14 @@
 | `plugins/patch` | 9 |
 | `plugins/push_all` | 6 |
 | `plugins/quest` | 4 |
-| `plugins/save_backup` | 6 |
+| `plugins/save_backup` | 11 |
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 4 |
-| `plugins/ui` | 17 |
+| `plugins/ui` | 4 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **338** |
+| **合计** | **344** |
 
 ### 1.2 迁移期映射摘要
 
@@ -136,12 +137,11 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 146 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 152 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 32 |
-| `plugins/ui` | `game` | 16 |
 | `host` | `game` | 14 |
 | `host` | `contracts` | 12 |
 | `plugins/extension_bag` | `game` | 11 |
@@ -150,11 +150,12 @@
 | `plugins/autosell` | `infra` | 10 |
 | `domains/inventory` | `game` | 9 |
 | `host` | `patch` | 9 |
+| `plugins/save_backup` | `infra` | 8 |
 | `domains/world` | `game` | 7 |
 | `host` | `hooks` | 7 |
+| `plugins/core.ui` | `contracts` | 7 |
 | `plugins/custom_recipe` | `contracts` | 7 |
 | `plugins/custom_recipe` | `infra` | 7 |
-| `plugins/extension_bag` | `contracts` | 7 |
 
 ### 2.2 include 环
 
@@ -255,7 +256,7 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 3 个）与已迁移 `plugins/*`（14 个）共 17 个域。
+旧 `feature/*`（待迁移 3 个）与已迁移 `plugins/*`（15 个）共 18 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，3）
 
@@ -263,21 +264,22 @@
 | --- | --- | --- |
 | `extension_bag` | `plugins/extension_bag` | 32 |
 | `patch` | `plugins/patch` | 9 |
-| `ui` | `plugins/ui` | 17 |
+| `ui` | `plugins/ui` | 4 |
 
-### 6.2 已迁移 `plugins/*`（14）
+### 6.2 已迁移 `plugins/*`（15）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_range` | `plugins/attribute_range` | 4 |
 | `autosell` | `plugins/autosell` | 12 |
+| `core.ui` | `plugins/core.ui` | 14 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 2 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
 | `quest` | `plugins/quest` | 4 |
-| `save_backup` | `plugins/save_backup` | 6 |
+| `save_backup` | `plugins/save_backup` | 11 |
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
 | `stack_limit` | `plugins/stack_limit` | 2 |

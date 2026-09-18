@@ -38,8 +38,6 @@ add_library(gamebridge SHARED
     feature/patch/inventory_hook_stage4.cpp
     game/access/ui_kit.cpp
     game/access/ui_components.cpp
-    feature/ui/game_ui_settings.cpp
-    feature/ui/game_ui_savebackup.cpp
     feature/extension_bag/game_ui_virtbag.cpp
     feature/extension_bag/extension_bag_port.cpp
     feature/extension_bag/extension_bag_persistence.cpp
@@ -297,4 +295,17 @@ target_sources(gamebridge PRIVATE
 # D1-b0：面板注册表（纯数据面，零 game 依赖）+ PopupState 按名定位入口
 target_sources(gamebridge PRIVATE
     infra/panels.cpp
+)
+
+# D1-b2：core.ui 出口面插件（设置页容器 + 面板栈 + ui_panels 能力；own:popup.settings）
+target_sources(gamebridge PRIVATE
+    plugins/core.ui/plugin.cpp
+    plugins/core.ui/feature.cpp
+    plugins/core.ui/panels/settings.cpp
+    plugins/core.ui/panels/stack.cpp
+)
+
+# D1-b2：save_backup 游戏内面板迁入插件（provider save_backup + own:popup.savebackup）
+target_sources(gamebridge PRIVATE
+    plugins/save_backup/ui/panel.cpp
 )

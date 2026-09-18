@@ -8,6 +8,7 @@
 #include "feature/patch/native_inventory_hook.h"
 #include "plugins/attribute_range/plugin.h"
 #include "plugins/autosell/plugin.h"
+#include "plugins/core.ui/plugin.h"
 #include "plugins/craft_ui/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
@@ -213,7 +214,13 @@ bool assembly_init() {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: special_equip registration failed");
         return false;
     }
-    // save_backup：零资源常驻插件；install 安装删档同步 PtrHook（legacy 过渡机制）。
+    // core.ui：出口面 UI 容器（provides `ui_panels`）+ own:popup.settings；先于面板消费者
+    // （save_backup）注册，保证 save_backup 的 provider 注册时容器已就绪、能力随后发布。
+    if (!register_plugin(features::core_ui::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: core.ui registration failed");
+        return false;
+    }
+    // save_backup：常驻插件；删档同步 PtrHook 声明式资源 + own:popup.savebackup + provider 注册。
     if (!register_plugin(features::save_backup::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: save_backup registration failed");
         return false;

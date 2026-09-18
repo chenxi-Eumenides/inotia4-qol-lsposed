@@ -22,7 +22,7 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeRegisterConfigBridge(JNIEnv* env, jclass, jclass bridge_class) {
-    settings_register_config_bridge(env, bridge_class);
+    qol::features::core_ui::settings_register_config_bridge(env, bridge_class);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -61,7 +61,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 任务完成度进档重算已迁移为 quest 插件（plugin.cpp install 注册 save_enter 回调），
         // 由 assembly_init 统一装配。
         // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
-        settings_ui_start_auto_inject();
+        // 设置页/备份面板注入已迁移为插件：core.ui 的 own:popup.settings 与 save_backup 的
+        // own:popup.savebackup 由 assembly_init 经资源事务声明式安装（无 nativeInit 直调）。
         autosell_ui_install_if_ready();  // 自动出售 UI：背包页入口按钮绘制宿主
         // 世界传送已迁移为 world_teleport 插件：入口 patch 由插件 install 负责（assembly_init 装配）；
         // 选择框组件为独立插件 native_choice（provides `ui_choice`），消费者经能力契约获取。

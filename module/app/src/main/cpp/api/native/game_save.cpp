@@ -7,7 +7,7 @@
 #include <atomic>
 #include <unistd.h>
 
-#include "feature/ui/game_ui_savebackup.h"
+#include "contracts/panels.h"
 #include "game_access.h"
 #include "game_ops_common.h"
 #include "game_save_preflight.h"
@@ -16,6 +16,23 @@
 #include "core/native/extension_bag_port.h"
 #include "core/native/save_enter.h"
 #include "core/native/transition_dispatch.h"
+#include "infra/capabilities.h"
+
+namespace {
+
+// UI 占用守卫：面板插件经 `ui_panels` 能力提供占用原因（文案由各 provider 持有，
+// 逐字保持 "ui occupied: backup panel" / "ui occupied: settings panel"）。
+// 每次现取能力、不缓存：core.ui 被停用/撤销后 require 返回 nullptr，守卫自动失效不阻塞。
+const char* savebackup_ui_block_reason() {
+    const auto* api = static_cast<const qol::contracts::UiPanelsApi*>(
+        qol::infra::require_capability(
+            qol::contracts::kUiPanelsCapabilityId,
+            {qol::contracts::kUiPanelsVersionMajor, qol::contracts::kUiPanelsVersionMinor}));
+    if (api == nullptr || api->block_reason == nullptr) return nullptr;
+    return api->block_reason();
+}
+
+}  // namespace
 
 // v0.5.5：当前加载存档槽（S5）——G_CURRENT_SLOT 双层解引用（SaveSlot_GoToNewGame/STATE_EnterGame 写，v0.5.5 frida 实测 world=0）
 std::string data_current_save_slot_json() {

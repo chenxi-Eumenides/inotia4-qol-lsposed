@@ -1,0 +1,15 @@
+{
+  "说明": "有意保留的架构例外（人工登记；与自动基线是两种机制）。每条必须写清理由、清除阶段、到期条件与文档锚点。",
+  "exemptions": [
+    {
+      "rule": "resource_unknown_symbol",
+      "src": "plugins/core.ui/panels/settings.cpp:*",
+      "reason": "主菜单「更多游戏」按钮是运行时控件实例的 ExecuteProc 槽（非生命周期内稳定的 GOT 槽），D1 暂以 PtrHook 绑定、infra/scheduler 主线程帧任务管理安装/释放；check_resources 无法为其归属静态符号。该槽不得伪装成启动期静态 kPtrSlot。",
+      "scope": "仅 core.ui 的 more_games_entry 运行时槽绑定；不含 own:popup.settings 常驻占用",
+      "clear_stage": "P5/U11：目标架构建立动态 UI 绑定管理器后，改申报 own:ui.main_menu.more_games_entry（kOwnership），内部按实例 generation 申请/释放运行期 ptr-slot lease，槽地址进入 patch::claims 仲裁与状态输出。",
+      "expiry": "P5 动态 UI adapter/U11 落地并删除本豁免",
+      "anchor": "ARCHITECTURE.md §2.2 core.ui 自我约束 + §12.3 U11；docs/refactor/ledger.md D1",
+      "approved": "编排者裁决（D1-b2）：选 A 迁移、目标方案 C（动态实例绑定）"
+    }
+  ]
+}

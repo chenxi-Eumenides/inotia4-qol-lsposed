@@ -1,16 +1,16 @@
-#include "game_ui_savebackup.h"
+#include "plugins/save_backup/ui/panel.h"
 
+#include "contracts/panels.h"
+#include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
-#include "plugins/save_backup/feature.h"
-#include "game_access.h"
-#include "game_ops_common.h"
-#include "game_ptr_hook.h"
-#include "game_state.h"
-#include "game_symbols.h"
-#include "game_ui.h"
 #include "game/access/ui_components.h"
 #include "game/access/ui_kit.h"
-#include "game_ui_settings.h"
+#include "game_access.h"
+#include "game_state.h"
+#include "game_ui.h"
+#include "hooks/popup_state.h"
+#include "infra/capabilities.h"
+#include "plugins/save_backup/feature.h"
 
 #include <atomic>
 #include <chrono>
@@ -26,10 +26,9 @@
 
 #define SB_UI_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
 
-#define POPUP_STATE_SIZE 0x40
 #define CB_TEXT_SIZE 0x40
 
-// 面板布局（与 game_ui_settings 同构：逻辑坐标 0-960×0-640 空间，root 相对全屏居中）
+// 面板布局（与 core.ui 设置页同构：逻辑坐标 0-960×0-640 空间，root 相对全屏居中）
 // 视觉与设置页同一套：顶部居中消息/标题区（同设置页 addr 标签位）+ 左上角「返回」
 // 原版贴图按钮（屏幕 (8,8)，同设置页位置/尺寸）；主体左（存档框）/中（操作按钮，无组框，
 // 居中于左右栏之间）/右（备份列表框）三栏，左右两栏同宽、右缘=内容区右缘；
@@ -120,15 +119,15 @@
 #define MSG_Y 0x18
 #define MSG_W 0x120
 #define MSG_H 0x28
-// 返回按钮：与 game_ui_settings 完全同尺寸（原版 option 贴图量级），屏幕左上 (8,8)。
+// 返回按钮：与 core.ui 设置页完全同尺寸（原版 option 贴图量级），屏幕左上 (8,8)。
 #define BACK_BTN_W 0x4a
 #define BACK_BTN_H 0x51
-// 背景贴图 unit/loc：与 game_ui_settings 同值（title background 左右两半）。
+// 背景贴图 unit/loc：与 core.ui 设置页同值（title background 左右两半）。
 #define TITLE_BACKGROUND_LEFT_UNIT 0x4f
 #define TITLE_BACKGROUND_RIGHT_UNIT 0x50
 #define TITLE_BACKGROUND_LOC 0x0
 
-// 颜色（ABGR 0xAABBGGRR，文字/框线/按钮用）：与 game_ui_settings 同一套视觉语言——
+// 颜色（ABGR 0xAABBGGRR，文字/框线/按钮用）：与 core.ui 设置页同一套视觉语言——
 // UI_GOLD 金色 = 分割线/框线/次要文本/左栏有档槽文本/右栏首行文本/中栏可用按钮文字；
 // UI_OPTION_TEXT = 正文文字；COLOR_TEXT_WHITE = 右栏次行（时间+校验）；
 // COLOR_TEXT_GRAY = 左栏空槽文本 / 中栏不可用按钮文字。
@@ -155,21 +154,22 @@
 #define COLOR_ERR 0xFFE89C9C
 #define COLOR_INFO 0xFF9CC2E8
 
+namespace qol::features::save_backup {
 namespace {
 
 // ============== 全局状态 ==============
 std::mutex g_sbui_mtx;
-std::atomic<bool> g_thread_started{false};
 
 bool g_panel_active = false;
-uint8_t* g_state_entry = nullptr;
-uint8_t g_state_backup[POPUP_STATE_SIZE] = {0};
 int g_state_id = -1;
 void* g_root = nullptr;
 int g_back_pressed = 0;
 int g_close_delay_frames = 0;
 const char* kTitle = "存档备份";
-// 视觉资源（与 game_ui_settings 同款）：面板背景贴图两半 + 原版返回按钮贴图（unit 0x59）。
+// own:popup.savebackup 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
+hooks::PopupStateEntry g_popup_entry{};
+bool g_popup_acquired = false;
+// 视觉资源（与 core.ui 设置页同款）：面板背景贴图两半 + 原版返回按钮贴图（unit 0x59）。
 // 注意：option 贴图单元与设置页共用，本面板不做「已加载」标志——enter 无条件确保加载
 // （幂等）、f3 不卸载（所有者是设置页）；返回按钮绘制直接尝试贴图、失败退化自绘，
 // 避免标志与实际单元状态不一致（设置页 f3 卸载后本面板 resumed 时标志仍为 true 的窗口）。
@@ -234,10 +234,6 @@ std::atomic<bool> g_refresh_queued{false};
 std::atomic<bool> g_backups_loading{false};  // 右栏空列表时显示「加载中…」
 
 // ============== 控件 ID（ExecuteProc 复用）==============
-struct ClickId {
-    int kind;       // 0=slot, 1=ops, 2=list, 3=prev, 4=next
-    int index;
-};
 // 三栏控件共用同一 UiClickProc（点击后用 ctrl 指针反查 g_slot_btns/g_ops_btns/g_list_btns 识别）。
 void on_btn_clicked(void* ctrl);
 void on_back_clicked(void* ctrl);
@@ -245,10 +241,6 @@ void on_back_clicked(void* ctrl);
 // 列表按钮 rect 依赖当前页条目数（垂直居中分布），定义在 panel.inc；
 // apply_backups_locked 在 inc 之前先用到，此处前置声明。
 void sync_list_btn_rects_locked();
-
-// 设置页互斥引用：通过 settings 模块函数询问其面板是否激活。
-// settings_panel_active_for_savebackup 已在 game_ui_settings.h（全局命名空间）声明，
-// 此处位于匿名命名空间内，unqualified lookup 仍可解析到全局版本。
 
 // 解析 save_backup_list_json() 输出到 entries（纯 CPU，无共享状态，锁外调用）。
 void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entries) {
@@ -423,8 +415,6 @@ void set_msg_locked(const char* text, uint32_t color, bool is_error) {
     }
 }
 
-bool settings_panel_active() { return settings_panel_active_for_savebackup(); }
-
 // ============== DrawProc（控件内容绘制）==============
 void slot_btn_draw(void* ctrl);
 void ops_btn_draw(void* ctrl);
@@ -444,28 +434,126 @@ UiRect msg_label_rect();
 UiRect back_btn_rect();
 int page_entry_count();
 
-// ============== PopupState 注入 ==============
-uint8_t* find_state_entry(uintptr_t enter_vma);
-bool inject_state_entry_locked();
-void restore_state_entry_locked();
-void ensure_inject_thread();
-
+// ============== 面板回调 ==============
 void savebackup_panel_enter();
 void savebackup_panel_process();
 void savebackup_panel_f3();
 void savebackup_panel_f4();
 uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2);
 
-#include "game_ui_savebackup_panel.inc"
-#include "game_ui_savebackup_render.inc"
-#include "game_ui_savebackup_injection.inc"
+#include "plugins/save_backup/ui/panel.inc"
+#include "plugins/save_backup/ui/render.inc"
+#include "plugins/save_backup/ui/injection.inc"
 
 }  // namespace
 
-// ============== 对外 API ==============
+// ============== own:popup.savebackup（kOwnership）==============
+
+int32_t savebackup_popup_acquire(const char* id) {
+    (void)id;
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (g_popup_entry.slot != nullptr) return 0;
+    hooks::PopupStateEntry entry{};
+    if (!hooks::popup_state_resolve_symbol("F_PANEL_UNK2_ENTER", &entry)) {
+        SB_UI_LOG("popup.savebackup: state entry (INAP_GOODS) not found");
+        return 1;
+    }
+    const hooks::PopupStateHooks hooks{
+        &savebackup_panel_enter,
+        &savebackup_panel_process,
+        &savebackup_panel_f3,
+        &savebackup_panel_f4,
+        &savebackup_panel_event,
+    };
+    if (!hooks::popup_state_acquire(&entry, hooks)) {
+        SB_UI_LOG("popup.savebackup: acquire rejected");
+        return 1;
+    }
+    g_popup_entry = entry;
+    g_state_id = entry.state_id;
+    g_popup_acquired = true;
+    SB_UI_LOG("popup.savebackup acquired: state id=%d", g_state_id);
+    return 0;
+}
+
+void savebackup_popup_release(const char* id) {
+    (void)id;
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (g_popup_entry.slot != nullptr) {
+        hooks::popup_state_restore(&g_popup_entry);
+    }
+    g_popup_acquired = false;
+    g_state_id = -1;
+    SB_UI_LOG("popup.savebackup released");
+}
+
+// ============== PanelProviderSpec ==============
+
+bool savebackup_provider_open() {
+    if (g_popup_entry.slot == nullptr) return false;
+    if (fn_ui_set_popup_process_info == nullptr) return false;
+
+    // 优先尝试嵌套 push（保持设置页 keep open 在栈下方）。
+    // 真机实测：fn_popupstate_push(0x122424) 内部 Array_Add 失败但 GetTop 返回当前栈顶
+    // 地址（设置页 entry），导致原代码 rc==0 当 success 的判断逻辑误报失败，
+    // 而实际栈顶未切换为 savebackup entry。修复：
+    //   1) rc != 0 才视为 push 成功（按反汇编：rc=0 = enter NULL / push 内部失败）
+    //   2) 校验栈顶 enter_func 必须是 &savebackup_panel_enter（防止 GetTop 返回旧栈顶）
+    // 未切换栈顶时返回 false，由 core.ui 面板栈关栈顶后重试（原切换式兜底已上移）。
+    if (fn_popupstate_push != nullptr) {
+        const int rc = fn_popupstate_push(static_cast<uint32_t>(g_state_id));
+        SB_UI_LOG("open save backup panel via push: state=%d rc=0x%x", g_state_id, rc);
+        if (rc != 0 && is_savebackup_at_stack_top()) {
+            return true;
+        }
+        // 未切换栈顶：返回 false，由 core.ui 面板栈关栈顶后重试（原切换式兜底已上移）。
+        SB_UI_LOG("push didn't switch stack top (rc=0x%x); stack will close top and retry", rc);
+        return false;
+    }
+    // 无 push 符号：切换式兜底（关当前 UI → 异步打开本面板）。栈记录由 active() 在下次 open 剔除。
+    fn_ui_set_popup_process_info(3, 0);
+    fn_ui_set_popup_process_info(1, g_state_id);
+    SB_UI_LOG("open save backup panel via switch: state=%d", g_state_id);
+    return true;
+}
+
+void savebackup_provider_close() {
+    bool was_active = false;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        was_active = g_panel_active;
+        clear_pending_locked();
+        set_msg_locked("", UI_OPTION_TEXT, false);
+        g_panel_active = false;
+        g_close_delay_frames = 0;
+        g_back_pressed = 0;
+        // 控件树保留复用（同 f3：递归删除 SIGBUS）；再次进入走 enter 的 resumed 分支。
+    }
+    // 幂等：未激活时不触碰游戏 UI（避免栈对陈旧栈顶调用 close 时误关当前顶层面板）。
+    if (!was_active) return;
+    // fn_ui_set_popup_process_info 必须锁外调用：pop 链会触发 savebackup_panel_f3 拿
+    // g_sbui_mtx（非递归），持锁调用会死锁。
+    if (fn_ui_set_popup_process_info != nullptr) {
+        fn_ui_set_popup_process_info(3, 0);
+    }
+    SB_UI_LOG("back clicked: panel closed");
+}
+
+bool savebackup_provider_active() {
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    return g_panel_active;
+}
+
+const char* savebackup_provider_block_reason() {
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (g_popup_entry.slot == nullptr) return nullptr;  // 未注入 → 不阻塞
+    return g_panel_active ? "ui occupied: backup panel" : nullptr;
+}
+
+// ============== 对外 API（原 data_savebackup_ui_*）==============
+
 std::string data_savebackup_ui_inject() {
-    if (!inject_state_entry_locked()) return op_err("state entry inject failed");
-    ensure_inject_thread();
+    if (savebackup_popup_acquire(nullptr) != 0) return op_err("state entry inject failed");
     return op_ok();
 }
 
@@ -480,7 +568,7 @@ std::string data_savebackup_ui_status_json() {
         "\"page_index\":%d,\"total_pages\":%d,\"backup_count\":%zu,"
         "\"msg\":\"%s\",\"msg_is_error\":%s,"
         "\"screen\":\"%s\"}",
-        g_state_id, g_state_entry != nullptr ? "true" : "false",
+        g_state_id, g_popup_acquired ? "true" : "false",
         g_panel_active ? "true" : "false", g_root,
         g_selected_slot, g_selected_backup,
         g_page_index, g_total_pages, g_backups.size(),
@@ -490,46 +578,22 @@ std::string data_savebackup_ui_status_json() {
 }
 
 std::string data_savebackup_ui_restore() {
-    std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    restore_state_entry_locked();
-    g_panel_active = false;
-    g_close_delay_frames = 0;
-    g_back_pressed = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        g_panel_active = false;
+        g_close_delay_frames = 0;
+        g_back_pressed = 0;
+    }
+    savebackup_popup_release(nullptr);
     return op_ok();
 }
 
 std::string data_savebackup_ui_open_panel() {
-    if (!inject_state_entry_locked()) return op_err("state entry inject failed");
-    if (fn_ui_set_popup_process_info == nullptr) return op_err("symbol not resolved");
-
-    // 优先尝试嵌套 push（保持设置页 keep open 在栈下方）。
-    // 真机实测：fn_popupstate_push(0x122424) 内部 Array_Add 失败但 GetTop 返回当前栈顶
-    // 地址（设置页 entry），导致原代码 rc==0 当 success 的判断逻辑误报失败，
-    // 而实际栈顶未切换为 savebackup entry。修复：
-    //   1) rc != 0 才视为 push 成功（按反汇编：rc=0 = enter NULL / push 内部失败）
-    //   2) 校验栈顶 enter_func 必须是 &savebackup_panel_enter（防止 GetTop 返回旧栈顶）
-    if (fn_popupstate_push != nullptr) {
-        const int rc = fn_popupstate_push(static_cast<uint32_t>(g_state_id));
-        SB_UI_LOG("open save backup panel via push: state=%d rc=0x%x", g_state_id, rc);
-        if (rc != 0 && is_savebackup_at_stack_top()) {
-            return op_ok();
-        }
-        SB_UI_LOG("push didn't switch stack top (rc=0x%x); fallback to switch mode", rc);
-    }
-
-    // 切换式兜底（game_ui_savebackup.h 注释约定的退化路径）：
-    //   1) settings_ui_close_panel 清理设置页 panel 状态 + 还原注入的 state entry
-    //   2) fn_ui_set_popup_process_info(3, 0) 关闭 settings UI（push state 0 + clear draw flag，
-    //      即游戏内部官方 close panel 路径，data_op_panel_close 已验证）
-    //   3) fn_ui_set_popup_process_info(1, g_state_id) 异步 push savebackup 到 popup_array
-    // 主循环 UI_PopupProcess 按 FIFO 消费 popup_array：先关再开。
-    // 副作用：settings_panel_f3 被调用清状态，settings 不在栈中保留；
-    //        关闭 backup panel 后回到主菜单（不再回设置页），符合"嵌套 push 失败时退化"约定。
-    settings_ui_close_panel();
-    fn_ui_set_popup_process_info(3, 0);
-    fn_ui_set_popup_process_info(1, g_state_id);
-    SB_UI_LOG("open save backup panel via switch: state=%d", g_state_id);
-    return op_ok();
+    const auto* api = static_cast<const contracts::UiPanelsApi*>(
+        infra::require_capability(contracts::kUiPanelsCapabilityId,
+                                  {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}));
+    if (api == nullptr || api->open == nullptr) return op_err("ui_panels unavailable");
+    return api->open("save_backup") ? op_ok() : op_err("panel open failed");
 }
 
 std::string data_savebackup_ui_self_check() {
@@ -559,9 +623,4 @@ void save_backup_inject_map_names_for_test(const char* json) {
     save_backup_set_map_names(json);
 }
 
-const char* savebackup_ui_block_reason() {
-    if (g_state_entry == nullptr) return nullptr;  // 未注入 → 不阻塞
-    if (g_panel_active) return "ui occupied: backup panel";
-    if (settings_panel_active()) return "ui occupied: settings panel";
-    return nullptr;
-}
+}  // namespace qol::features::save_backup

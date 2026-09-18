@@ -230,13 +230,11 @@ uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
 }
 
 void settings_savebackup_clicked(void* ctrl) {
+    (void)ctrl;
     SETTINGS_LOG("settings savebackup button clicked");
-    // 嵌套 push：保持设置页在栈中第 N 位；备份面板成为新栈顶；
-    // 关闭备份面板后回到设置页（实测如 push 行为异常，退化为切换式：先关闭自身再开备份面板）。
-    const std::string r = data_savebackup_ui_open_panel();
-    if (r.find("\"ok\":true") == std::string::npos) {
-        SETTINGS_LOG("savebackup open failed: %s", r.c_str());
+    // 嵌套 push：保持设置页在栈中第 N 位；备份面板成为新栈顶；关闭备份面板后回到设置页。
+    // 栈的「关栈顶再开」兜底由 core.ui 面板栈统一承担（原 settings_ui_close_panel 直调已删除）。
+    if (!ui_panels_open("save_backup")) {
+        SETTINGS_LOG("savebackup open failed");
     }
 }
-
-// ---- 主菜单「更多游戏」按钮钩子 ----

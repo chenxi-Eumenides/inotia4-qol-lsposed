@@ -20,9 +20,9 @@
 #include "game_world.h"
 #include "game_tiles.h"
 #include "feature/patch/game_patch.h"
-#include "feature/ui/game_ui_settings.h"
-#include "feature/ui/game_ui_savebackup.h"
 #include "feature/extension_bag/game_ui_virtbag.h"
+#include "plugins/core.ui/panels/settings.h"
+#include "plugins/save_backup/ui/panel.h"
 
 #include "core/native/qol_log.h"
 

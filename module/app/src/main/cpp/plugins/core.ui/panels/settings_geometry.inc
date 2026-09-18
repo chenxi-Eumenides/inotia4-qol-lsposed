@@ -6,86 +6,38 @@ UiRect settings_root_rect() {
     return {(logical_w - ROOT_W) / 2, 0, ROOT_W, ROOT_H};
 }
 
+// 分页规则唯一实现在 panels/rules.h（host 可测）；本文件只做表/状态薄封装。
 int settings_collect_logical_pages(int* pages) {
-    if (pages == nullptr) return 0;
-    int count = 0;
-    for (int i = 0; i < kSettingsItemCount; ++i) {
-        const int logical_page = kSettingsItems[i].page;
-        if (logical_page <= 0) continue;
-        int pos = 0;
-        while (pos < count && pages[pos] < logical_page) ++pos;
-        if (pos < count && pages[pos] == logical_page) continue;
-        for (int j = count; j > pos; --j) pages[j] = pages[j - 1];
-        pages[pos] = logical_page;
-        ++count;
-    }
-    return count;
+    return panels_rules::collect_logical_pages(kSettingsItems, kSettingsItemCount, pages,
+                                               kSettingsItemCount);
 }
 
 int settings_page_count() {
-    int pages[kSettingsItemCount] = {};
-    return settings_collect_logical_pages(pages);
+    return panels_rules::page_count(kSettingsItems, kSettingsItemCount);
 }
 
 int settings_logical_page_at(int physical_page) {
-    int pages[kSettingsItemCount] = {};
-    const int page_count = settings_collect_logical_pages(pages);
-    if (physical_page < 0 || physical_page >= page_count) return -1;
-    return pages[physical_page];
+    return panels_rules::logical_page_at(kSettingsItems, kSettingsItemCount, physical_page);
 }
 
 int settings_item_physical_page(int index) {
-    if (index < 0 || index >= kSettingsItemCount) return -1;
-    const int logical_page = kSettingsItems[index].page;
-    if (logical_page <= 0) return -1;
-    int pages[kSettingsItemCount] = {};
-    const int page_count = settings_collect_logical_pages(pages);
-    for (int i = 0; i < page_count; ++i) {
-        if (pages[i] == logical_page) return i;
-    }
-    return -1;
+    return panels_rules::item_physical_page(kSettingsItems, kSettingsItemCount, index);
 }
 
 bool settings_item_is_savebackup(int index) {
-    return index >= 0 && index < kSettingsItemCount &&
-           kSettingsItems[index].key != nullptr && kSettingsItems[index].key[0] == 0;
+    return panels_rules::item_is_action(kSettingsItems, kSettingsItemCount, index);
 }
 
 int settings_item_index_at_cell(int cell) {
-    if (cell < 0 || cell >= SETTINGS_PAGE_CAPACITY) return -1;
-    const int logical_page = settings_logical_page_at(g_page_index);
-    if (logical_page < 0) return -1;
-    int local_cell = 0;
-    for (int i = 0; i < kSettingsItemCount; ++i) {
-        if (kSettingsItems[i].page != logical_page) continue;
-        if (local_cell == cell) return i;
-        ++local_cell;
-    }
-    return -1;
+    return panels_rules::item_index_at_cell(kSettingsItems, kSettingsItemCount, g_page_index, cell);
 }
 
 int settings_item_cell_at_current_page(int index) {
-    if (index < 0 || index >= kSettingsItemCount) return -1;
-    if (settings_item_physical_page(index) != g_page_index) return -1;
-    const int logical_page = settings_logical_page_at(g_page_index);
-    if (logical_page < 0) return -1;
-    int cell = 0;
-    for (int i = 0; i < index; ++i) {
-        if (kSettingsItems[i].page == logical_page) ++cell;
-    }
-    return cell < SETTINGS_PAGE_CAPACITY ? cell : -1;
+    return panels_rules::item_cell_at_page(kSettingsItems, kSettingsItemCount, index, g_page_index);
 }
 
 void settings_sync_page_state() {
-    g_total_pages = settings_page_count();
-    if (g_total_pages <= 0) {
-        g_total_pages = 1;
-        g_page_index = 0;
-    } else if (g_page_index >= g_total_pages) {
-        g_page_index = g_total_pages - 1;
-    } else if (g_page_index < 0) {
-        g_page_index = 0;
-    }
+    panels_rules::sync_page_state(kSettingsItems, kSettingsItemCount, &g_page_index, &g_total_pages);
 }
 
 UiRect settings_row_rect(int cell) {
