@@ -178,6 +178,15 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 | C6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
 | C7 | native config 自读、脚本切七目录与边界违规硬失败 | ⬜ 待办 |
 
+### C8：每插件 CMake 片段与父级自动发现
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| 构建片段 | ✅ 已落地 | `plugins/<id>/CMakeLists.txt` 定义各自 `qol_plugin_<id>`；本批仅 `simple_mode` 建立片段，源文件未再列入 `gamebridge` |
+| 自动发现 | ✅ 已落地 | `plugins/CMakeLists.txt` 通过 `file(GLOB ... CONFIGURE_DEPENDS)` 自动发现同名子目录片段，集中设置 PIC、C++17、`-Wall -Wextra`、`contracts/` + 自身目录 include，并链接进 `gamebridge` |
+| 边界与重复编译 | ✅ 已验证 | `simple_mode` 的宿主头负例编译失败；构建目标源清单确认 3 个插件源只属于 `qol_plugin_simple_mode`，未重复进入 `gamebridge` |
+| 行为验收 | 不适用 | 本批只调整构建结构，行为零变化；不新增受影响 VM-B 卡，不安装真机 |
+
 **插件边界合规现状（P0 修正）**：口径必须分开陈述——**目录前缀口径**（`game/ infra/ hooks/ patch/ host/` 与跨插件）为 **0**；**legacy 口径**（`core/native/**`、`data/native/**`、根部裸名头）仍有 **19 个文件**未清（逐文件见 `layers.md` §1.6）。因此此前"17/17 合规"的表述**不成立**，属审阅 P3（≈C7）清除目标。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-BOUNDARY：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。C1–C5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
 
 **插件边界合规现状（P0 修正）**：目录前缀口径 **0**；legacy 口径 **19 文件未清**（同上）。故"plugins → game/infra/hooks 迁移债已清偿"**不成立**——基线内仍有层方向 32 条、符号/裸地址 9 条、资源 3 条。剩余债务＝legacy include 清偿（P3）+ 引擎级未闭合项（`verification.md` VM-FIX-01）+ C6/C7 范围。

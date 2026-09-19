@@ -217,3 +217,42 @@ Host SDK、Game Host 或 provider capability 的契约面。每次只新增该�
 POD/函数指针成员，不开放宿主根目录、不恢复 legacy include；target 能独立编译后，
 再从 `gamebridge` 源列表移除对应 `.cpp` 并链接插件 target。行为面仍须使用受影响 VM
 卡的真机日志验收，独立编译成功本身不替代行为证据。
+
+### 构建结构：每插件 CMake 片段 + 自动发现
+
+插件构建入口现收敛到以下结构：
+
+```text
+module/app/src/main/cpp/
+  CMakeLists.txt                 # 定义 gamebridge，并 add_subdirectory(plugins)
+  plugins/
+    CMakeLists.txt               # 自动发现 */CMakeLists.txt，收口公共属性和链接
+    simple_mode/
+      CMakeLists.txt             # 只定义 qol_plugin_simple_mode 的源文件
+      rules.cpp
+      feature.cpp
+      plugin.cpp
+```
+
+`plugins/CMakeLists.txt` 使用 `file(GLOB ... CONFIGURE_DEPENDS)` 发现
+`plugins/<id>/CMakeLists.txt`，按目录名要求片段定义 `qol_plugin_<id>`。发现后统一设置
+静态插件的 PIC、C++17、`-Wall -Wextra`，并且只向该 target 添加两个私有 include 目录：
+`contracts/` 与 `plugins/<id>/`；随后把 target 以 `PRIVATE` 方式链接进已定义的
+`gamebridge`。因此新增插件不需要修改父级源列表或链接列表。
+
+新增插件的操作步骤：
+
+1. 创建 `plugins/<id>/CMakeLists.txt`，只在其中定义 `qol_plugin_<id>`，源文件只列该
+   插件目录内的实现文件；可参照 `simple_mode/CMakeLists.txt`。
+2. 确认插件源文件只通过相对路径或 `contracts/`、自身目录头文件完成包含；不得依赖
+   `game/`、`infra/`、`hooks/`、`patch/`、`host/` 或其它插件目录。父级不会向插件 target
+   注入 `${CMAKE_CURRENT_SOURCE_DIR}` 根目录 include。
+3. 从父级 `CMakeLists.txt` 的 `gamebridge` 源列表删除已经下沉的同一批 `.cpp`；未下沉
+   插件继续保持原列表。自动发现只负责定义并链接 target，不会替父级去重。
+4. 运行 host tests、Android debug 构建和独立 include 边界负例；确认目标的编译命令中
+   没有宿主私有 include 路径，且同一 `.cpp` 只出现在插件 target 或 `gamebridge` 之一。
+
+边界要求是结构约束而非约定：在 `plugins/<id>/` 临时加入
+`#include "host/assembly.h"` 必须使该插件 target 编译失败，验证后移除；插件源文件不得
+以扩大父级 include 路径或把宿主源文件加入插件 target 的方式绕过失败。此批只迁移
+`simple_mode`，其它插件不创建 target，后续 lane 只需新增各自目录片段即可接入自动发现。
