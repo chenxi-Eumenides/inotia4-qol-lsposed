@@ -31,7 +31,7 @@
 | L1 | `game/` | 36 / 2,725 | 唯一承接游戏版本耦合（VMA/偏移/ABI/函数调用）；**禁止业务规则** |
 | L2 | `infra/` + `hooks/` + `patch/` | 40 / 4,203 | 运行时机制：调度/队列/事件/能力/状态/配置/存储 + 资源登记/事务/分派 + 指令改写 |
 | L3 | `plugins/` | 154 / 30,974 | 17 个内置插件（功能实现 + 能力 provider/consumer + 面板）；胶囊约束：只能 include `contracts/` 与自身目录 |
-| L4 | （原 `products/`，已取消） | — | 出口面职责现由 `plugins/core.api`（路由内核，待 L6）与 `plugins/core.ui`（UI 容器与通用组件）承担 |
+| L4 | （原 `products/`，已取消） | — | 出口面职责现由 `plugins/core.api`（路由内核，待 C6）与 `plugins/core.ui`（UI 容器与通用组件）承担 |
 | L5 | `host/` | 17 / 4,229 | 宿主：装配、插件生命周期执行器、Host SDK/Game Host 实现、帧源、core 常驻补丁、状态 JSON |
 
 ## 1.1 `contracts/`（19）
