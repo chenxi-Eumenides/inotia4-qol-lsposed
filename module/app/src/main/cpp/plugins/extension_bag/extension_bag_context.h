@@ -5,7 +5,11 @@
 #include <cstdint>
 #include <string>
 
+#include "contracts/ui.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
+
+// 控件矩形使用契约层类型；插件内既有代码以短名 `UiRect` 引用（与其它插件一致）。
+using UiRect = qol::contracts::UiRect;
 
 // Internal-only context accessors. They are not part of the API/core port.
 JNIEnv* extension_bag_current_env();
