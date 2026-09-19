@@ -1,22 +1,16 @@
-// autosell_scan.cpp —— 自动出售扫描与主线程逐帧 tick（阶段 B）。
-//
-// 扫描范围：原版物理袋 0..4（for_each_bag_slot，排除任务袋 5）+ 扩展逻辑袋 5 个
-// （6..10，经稳定原语 inventory_item_ref_at 逐槽读取，每次调用自行取放锁；
-// 不在逻辑袋遍历回调内处置）。
-// 处置：autosell_build_view -> should_sell -> NoSell 预过滤
-//       -> inventory_trade::sell(bag, slot, ref.native_item, "autosell")（I-1 身份复核）。
+// 自动出售扫描与主线程逐帧 tick。
 
-#include "plugins/autosell/scan.h"
+#include "scan.h"
 
-#include "contracts/extension_bag.h"
-#include "contracts/events.h"
-#include "core/native/inventory_trade.h"
-#include "plugins/autosell/config.h"
-#include "plugins/autosell/log.h"
-#include "plugins/autosell/plugin.h"
-#include "plugins/autosell/store.h"
-#include "plugins/autosell/view.h"
-#include "game_access.h"
+#include "../../contracts/events.h"
+#include "../../contracts/extension_bag.h"
+#include "../../contracts/inventory_action.h"
+#include "config.h"
+#include "log.h"
+#include "plugin.h"
+#include "read_only.h"
+#include "store.h"
+#include "view.h"
 
 #include <atomic>
 #include <cstdint>
@@ -31,15 +25,15 @@ constexpr int kSlotCount = 16;
 
 std::mutex g_scan_mtx;
 std::mutex g_task_mtx;
-uint64_t g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
+uint64_t g_task = 0;
 uint64_t g_save_enter_subscription = 0;
 uint64_t g_save_exit_subscription = 0;
-std::atomic<bool> g_global_enabled{false};  // 全局开关；JVM 线程写、主线程读
-std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置位）；主线程写
+std::atomic<bool> g_global_enabled{false};
+std::atomic<bool> g_save_active{false};
+std::atomic<int> g_save_slot{-1};
 
-// D2b：extension_bag 能力每次调用现取（不缓存跨帧指针）；能力缺失 = EB disabled。
 const qol::contracts::ExtensionBagApi* extension_bag_api() {
-    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
     const void* iface = nullptr;
     const QolResult result = sdk->capabilities.require(
@@ -49,6 +43,19 @@ const qol::contracts::ExtensionBagApi* extension_bag_api() {
         &iface);
     if (result.ok != kQolOk || iface == nullptr) return nullptr;
     return static_cast<const qol::contracts::ExtensionBagApi*>(iface);
+}
+
+const qol::contracts::InventoryActionApi* inventory_action_api() {
+    const auto* sdk = qol::features::autosell::host_sdk();
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = sdk->capabilities.require(
+        qol::contracts::kInventoryActionCapabilityId,
+        QolVersionRange{qol::contracts::kInventoryActionVersionMajor,
+                        qol::contracts::kInventoryActionVersionMinor},
+        &iface);
+    if (result.ok != kQolOk || iface == nullptr) return nullptr;
+    return static_cast<const qol::contracts::InventoryActionApi*>(iface);
 }
 
 struct ScanStats {
@@ -61,100 +68,77 @@ struct PhysicalScanCtx {
     ScanStats* stats;
 };
 
-// 安全门控：世界态 + g_gamestate==0 + 扩展背包模块视图未安装（能力缺失视为未安装）。
 bool scan_gates_ok() {
-    const auto* game = qol::features::autosell::game_host();
-    if (game == nullptr || game->read_only.world.state == nullptr) return false;
     int32_t world_state = -1;
-    if (!qol::contracts::succeeded(game->read_only.world.state(&world_state)) ||
-        world_state != 5) {
+    if (!qol::features::autosell::read_only::world_state(&world_state) || world_state != 5) {
         return false;
     }
-    const uint32_t gamestate =
-        g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
-    if (gamestate != 0) return false;
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_api();
-    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
+    int32_t state_gate = 0;
+    if (!qol::features::autosell::read_only::game_state_gate(&state_gate) || state_gate == 0) {
         return false;
     }
-    return true;
+    const auto* eb = extension_bag_api();
+    return eb == nullptr || eb->module_view_installed == nullptr || !eb->module_view_installed();
 }
 
-void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanStats* stats) {
+void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref,
+                 const autosell::Config& cfg, ScanStats* stats) {
     autosell::ItemView view;
-    if (!autosell_build_view(ref, &view)) return;
-    if (!autosell::should_sell(view, cfg)) return;
+    if (!autosell_build_view(ref, &view) || !autosell::should_sell(view, cfg)) return;
 
-    // I-2 NoSell 预过滤：不可售物品直接跳过，不计失败、不打 WARN
-    // （否则 inventory_trade::sell 会以 WARN 记 no_sell 并计入失败）。
-    const auto* game = qol::features::autosell::game_host();
-    if (game != nullptr && game->read_only.item.is_no_sell != nullptr) {
-        int32_t no_sell = 0;
-        if (qol::contracts::succeeded(game->read_only.item.is_no_sell(ref.category, &no_sell)) &&
-            no_sell != 0) return;
+    int32_t no_sell = 0;
+    if (qol::features::autosell::read_only::item_is_no_sell(ref.category, &no_sell) &&
+        no_sell != 0) {
+        return;
     }
 
-    // I-1：把建视图用的物品指针传入，处置前做身份复核（并发槽位改动则不结算）。
-    const inventory_trade::Result result =
-        inventory_trade::sell(ref.bag, ref.slot, ref.native_item, "autosell");
-    if (result.status == inventory_trade::Status::kOk) {
+    const auto* actions = inventory_action_api();
+    if (actions == nullptr || actions->sell == nullptr) return;
+    const qol::contracts::InventorySellResult result =
+        actions->sell(ref.bag, ref.slot, ref.native_item, "autosell");
+    if (result.status == qol::contracts::InventorySellStatus::kOk) {
         ++stats->sold;
         return;
     }
-    // 槽位已变/物品已不在（kStale/kEmptySlot/kNoNativeItem）：跳过，不计失败。
-    if (result.status == inventory_trade::Status::kStale ||
-        result.status == inventory_trade::Status::kEmptySlot ||
-        result.status == inventory_trade::Status::kNoNativeItem) {
+    if (result.status == qol::contracts::InventorySellStatus::kStale ||
+        result.status == qol::contracts::InventorySellStatus::kEmptySlot ||
+        result.status == qol::contracts::InventorySellStatus::kNoNativeItem) {
         return;
     }
     ++stats->failed;
-    AUTOSELL_LOG_WARN(
-                 "sell failed bag=%d slot=%d category=%d status=%d",
-                        ref.bag, ref.slot, ref.category, static_cast<int>(result.status));
+    AUTOSELL_LOG_WARN("sell failed bag=%d slot=%d category=%d status=%d", ref.bag, ref.slot,
+                      ref.category, static_cast<int>(result.status));
 }
 
 void scan_body(const autosell::Config& cfg, int64_t frame) {
     ScanStats stats;
-
-    // 原版物理袋 0..4（for_each_bag_slot 含任务袋 5，回调内排除）。
     PhysicalScanCtx physical{&cfg, &stats};
-    for_each_bag_slot([](void* item, int bag, int slot, void* ctx) -> bool {
-        if (bag > kLastPhysicalBag) return false;
-        if (item == nullptr) return false;
-        PhysicalScanCtx* c = static_cast<PhysicalScanCtx*>(ctx);
-        const auto* game = qol::features::autosell::game_host();
-        if (game == nullptr || game->read_only.item.category == nullptr) return false;
-        int32_t category = 0;
-        if (!qol::contracts::succeeded(game->read_only.item.category(item, &category)) ||
-            category <= 0) return false;
-        InventoryItemRef ref;
-        ref.kind = InventoryItemKind::kOriginal;
-        ref.bag = bag;
-        ref.slot = slot;
-        ref.category = category;
-        ref.count = 1;
-        if (game->read_only.item.cumulate_count != nullptr) {
-            int32_t count = 0;
-            if (qol::contracts::succeeded(game->read_only.item.cumulate_count(item, &count))) {
-                ref.count = count;
-            }
-        }
-        ref.native_item = item;
-        process_ref(ref, *c->cfg, c->stats);
-        return false;  // 继续遍历
-    }, &physical);
+    (void)qol::features::autosell::read_only::for_each_bag_slot(
+        [](const qol::features::autosell::read_only::InventoryItemRef* source, void* ctx) -> int32_t {
+            if (source == nullptr || source->bag > kLastPhysicalBag) return 0;
+            auto* scan = static_cast<PhysicalScanCtx*>(ctx);
+            auto ref = *source;
+            qol::features::autosell::read_only::refresh_item_count(&ref);
+            process_ref(ref, *scan->cfg, scan->stats);
+            return 0;
+        },
+        &physical);
 
-    // 扩展逻辑袋 6..10：逐槽经能力接口读取（每次自行取放锁）。能力缺失 = EB disabled，
-    // 逻辑袋视为不存在，不进入扩展扫描。
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_api();
+    const auto* eb = extension_bag_api();
     if (eb != nullptr && eb->is_logical_bag != nullptr) {
-        for (int bag = kLogicalBagScanFirst; bag < kLogicalBagScanFirst + kLogicalBagScanCount; ++bag) {
+        for (int bag = kLogicalBagScanFirst; bag < kLogicalBagScanFirst + kLogicalBagScanCount;
+             ++bag) {
             if (!eb->is_logical_bag(bag)) continue;
             for (int slot = 0; slot < kSlotCount; ++slot) {
-                InventoryItemRef ref;
-                if (!inventory_item_ref_at(bag, slot, &ref)) continue;
-                if (ref.kind != InventoryItemKind::kExtension) continue;
-                if (ref.native_item == nullptr || ref.category <= 0) continue;
+                qol::features::autosell::read_only::InventoryItemRef ref{};
+                const QolResult result =
+                    qol::features::autosell::read_only::inventory_item_ref_at(bag, slot, &ref);
+                if (result.ok != kQolOk ||
+                    ref.kind != static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kExtension) ||
+                    ref.native_item == nullptr || ref.category <= 0) {
+                    continue;
+                }
+                qol::features::autosell::read_only::refresh_item_count(&ref);
                 process_ref(ref, cfg, &stats);
             }
         }
@@ -162,40 +146,29 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
 
     autosell_note_scan(frame, stats.sold, stats.failed);
     if (stats.sold > 0 || stats.failed > 0) {
-        AUTOSELL_LOG_INFO(
-                     "scan frame=%lld sold=%d failed=%d",
-                            static_cast<long long>(frame), stats.sold, stats.failed);
+        AUTOSELL_LOG_INFO("scan frame=%lld sold=%d failed=%d", static_cast<long long>(frame),
+                          stats.sold, stats.failed);
     }
 }
 
-// scheduler 回调：每次调用现取运行时配置，无跨帧状态；60 帧节流由 scheduler 的
-// interval 负责。返回 false = 任务完成（自动注销）；本任务无限期运行，恒返回 true。
-int32_t autosell_tick(int64_t frame, void* /*ctx*/) {
-    // 全局开关防御：关闭态不应有任务存在；即使任务删除存在竞态也直接跳过。
+int32_t autosell_tick(int64_t frame, void*) {
     if (!g_global_enabled.load(std::memory_order_acquire)) return 1;
     const autosell::Config cfg = autosell_get_runtime_config();
-    if (!cfg.enabled) return 1;   // 防御：关闭态不应有任务存在
-    if (!scan_gates_ok()) return 1;
-
+    if (!cfg.enabled || !scan_gates_ok()) return 1;
     std::lock_guard<std::mutex> lock(g_scan_mtx);
     scan_body(cfg, frame);
     return 1;
 }
 
-// 无条件删除已注册任务（兜底）：不读取全局/存档配置状态，已有任务即删除。
 void remove_task_if_any() {
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task == 0) return;
-    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
-    if (sdk != nullptr && sdk->scheduler.remove != nullptr) {
-        (void)sdk->scheduler.remove(g_task);
-    }
+    const auto* sdk = qol::features::autosell::host_sdk();
+    if (sdk != nullptr && sdk->scheduler.remove != nullptr) (void)sdk->scheduler.remove(g_task);
     g_task = 0;
     AUTOSELL_LOG_INFO("task removed");
 }
 
-// 按「全局开关已武装 && 已进入存档 && 存档配置总开关开启」同步 60 帧周期任务；幂等。
-// 满足则注册；不满足一律走 remove_task_if_any 兜底删除（不依赖配置状态）。
 void sync_task() {
     const bool want = g_global_enabled.load(std::memory_order_acquire) &&
                       g_save_active.load(std::memory_order_acquire) &&
@@ -206,31 +179,29 @@ void sync_task() {
     }
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task != 0) return;
-    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk == nullptr || sdk->scheduler.add == nullptr) return;
     uint64_t task = 0;
-    const QolResult result = sdk->scheduler.add(
-        0, &autosell_tick, nullptr, kAutoSellScanIntervalFrames, 0, &task);
+    const QolResult result = sdk->scheduler.add(0, &autosell_tick, nullptr,
+                                                kAutoSellScanIntervalFrames, 0, &task);
     if (result.ok != kQolOk) return;
     g_task = task;
-    AUTOSELL_LOG_INFO("task registered id=%llu",
-                        static_cast<unsigned long long>(g_task));
+    AUTOSELL_LOG_INFO("task registered id=%llu", static_cast<unsigned long long>(g_task));
 }
 
-// save_enter 回调（游戏主线程）：按当前存档槽加载 sidecar 配置应用到运行时，再同步任务。
-void autosell_on_save_enter(void* /*ctx*/, const void* payload) {
+void autosell_on_save_enter(void*, const void* payload) {
     const auto* event = static_cast<const qol::contracts::SaveEnterEvent*>(payload);
-    const int slot = event == nullptr ? current_save_slot() : event->slot;
+    const int slot = event == nullptr ? -1 : event->slot;
+    g_save_slot.store(slot, std::memory_order_release);
     autosell_store_ensure_loaded(slot);
     g_save_active.store(true, std::memory_order_release);
     AUTOSELL_LOG_INFO("save enter slot=%d; sync task", slot);
     sync_task();
 }
 
-// save_exit 回调（游戏主线程）：退出存档（world -> 主菜单）时置「未进档」并无条件删除任务
-// （兜底：不依赖存档配置的开启状态）。
-void autosell_on_save_exit(void* /*ctx*/, const void* /*payload*/) {
+void autosell_on_save_exit(void*, const void*) {
     g_save_active.store(false, std::memory_order_release);
+    g_save_slot.store(-1, std::memory_order_release);
     AUTOSELL_LOG_INFO("save exit; remove task");
     remove_task_if_any();
 }
@@ -238,38 +209,27 @@ void autosell_on_save_exit(void* /*ctx*/, const void* /*payload*/) {
 }  // namespace
 
 void autosell_apply_config(const autosell::Config& config) {
-    // UI 关闭/销毁时提交一次（面板内编辑不实时持久化）：写入运行时配置后，**仅当存档总开关
-    // enabled 发生切换**才同步任务；规则/阈值等改动不触碰任务生命周期（减少注册/删除时机）。
     const bool old_enabled = autosell_get_runtime_config().enabled;
     autosell_set_runtime_config(config);
     if (old_enabled == config.enabled) return;
-    AUTOSELL_LOG_INFO("save master switch %d -> %d",
-                        old_enabled ? 1 : 0, config.enabled ? 1 : 0);
-    if (config.enabled) {
-        sync_task();                 // 开：按条件注册
-    } else {
-        remove_task_if_any();        // 关：无条件删除（兜底，不依赖配置状态）
-    }
+    AUTOSELL_LOG_INFO("save master switch %d -> %d", old_enabled ? 1 : 0, config.enabled ? 1 : 0);
+    if (config.enabled) sync_task();
+    else remove_task_if_any();
 }
 
 void autosell_set_global_enabled(bool enabled) {
     g_global_enabled.store(enabled, std::memory_order_release);
-    AUTOSELL_LOG_INFO("global enabled=%d save_active=%d",
-                        enabled ? 1 : 0,
-                        g_save_active.load(std::memory_order_acquire) ? 1 : 0);
-    if (enabled) {
-        sync_task();                 // 开：按条件注册
-    } else {
-        remove_task_if_any();        // 关：无条件删除（兜底，不依赖配置状态）
-    }
+    AUTOSELL_LOG_INFO("global enabled=%d save_active=%d", enabled ? 1 : 0,
+                      g_save_active.load(std::memory_order_acquire) ? 1 : 0);
+    if (enabled) sync_task();
+    else remove_task_if_any();
 }
 
 void autosell_register_save_enter() {
     if (g_save_enter_subscription != 0) return;
     const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk == nullptr || sdk->events.subscribe == nullptr) return;
-    (void)sdk->events.subscribe(qol::contracts::kEventSaveEnter,
-                                &autosell_on_save_enter, nullptr,
+    (void)sdk->events.subscribe(qol::contracts::kEventSaveEnter, &autosell_on_save_enter, nullptr,
                                 &g_save_enter_subscription);
 }
 
@@ -277,21 +237,18 @@ void autosell_register_save_exit() {
     if (g_save_exit_subscription != 0) return;
     const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk == nullptr || sdk->events.subscribe == nullptr) return;
-    (void)sdk->events.subscribe(qol::contracts::kEventSaveExit,
-                                &autosell_on_save_exit, nullptr,
+    (void)sdk->events.subscribe(qol::contracts::kEventSaveExit, &autosell_on_save_exit, nullptr,
                                 &g_save_exit_subscription);
 }
 
 void autosell_unregister_save_callbacks() {
     const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk != nullptr && sdk->events.unsubscribe != nullptr) {
-        if (g_save_enter_subscription != 0) {
-            (void)sdk->events.unsubscribe(g_save_enter_subscription);
-        }
-        if (g_save_exit_subscription != 0) {
-            (void)sdk->events.unsubscribe(g_save_exit_subscription);
-        }
+        if (g_save_enter_subscription != 0) (void)sdk->events.unsubscribe(g_save_enter_subscription);
+        if (g_save_exit_subscription != 0) (void)sdk->events.unsubscribe(g_save_exit_subscription);
     }
     g_save_enter_subscription = 0;
     g_save_exit_subscription = 0;
 }
+
+int autosell_active_save_slot() { return g_save_slot.load(std::memory_order_acquire); }

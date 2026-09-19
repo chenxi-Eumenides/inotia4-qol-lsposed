@@ -3,8 +3,8 @@
 #include <cstdarg>
 #include <cstdio>
 
-#include "contracts/host_sdk.h"
-#include "plugins/autosell/plugin.h"
+#include "../../contracts/host_sdk.h"
+#include "plugin.h"
 
 namespace qol::features::autosell::private_log {
 

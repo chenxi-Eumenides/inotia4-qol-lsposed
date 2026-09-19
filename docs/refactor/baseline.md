@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 20 |
+| `contracts` | 21 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
 | `domains/inventory` | 9 |
@@ -39,7 +39,7 @@
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
-| `plugins/autosell` | 15 |
+| `plugins/autosell` | 17 |
 | `plugins/core.ui` | 17 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **377** |
+| **合计** | **380** |
 
 ### 1.2 迁移期映射摘要
 
@@ -133,21 +133,21 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 117 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 116 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 41 |
 | `host` | `game` | 31 |
 | `host` | `contracts` | 19 |
+| `plugins/autosell` | `contracts` | 17 |
 | `plugins/extension_bag` | `contracts` | 17 |
-| `plugins/autosell` | `contracts` | 14 |
 | `plugins/custom_recipe` | `contracts` | 14 |
 | `plugins/core.ui` | `contracts` | 11 |
 | `infra` | `game` | 10 |
+| `plugins/inventory_hooks` | `contracts` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
-| `plugins/inventory_hooks` | `contracts` | 9 |
 | `plugins/save_backup` | `contracts` | 8 |
 | `domains/world` | `game` | 7 |
 | `domains/inventory` | `game` | 6 |
@@ -248,7 +248,7 @@
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
-| `autosell` | `plugins/autosell` | 15 |
+| `autosell` | `plugins/autosell` | 17 |
 | `core.ui` | `plugins/core.ui` | 17 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |

@@ -6,7 +6,7 @@
 #include <cstring>
 #include <string>
 
-#include "plugins/autosell/rules.h"
+#include "rules.h"
 
 // 自动出售按存档配置持久化（sidecar section `autosell` v2，UTF-8 JSON，直写）。
 //

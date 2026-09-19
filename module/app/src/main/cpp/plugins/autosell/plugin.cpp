@@ -1,16 +1,17 @@
-#include "plugins/autosell/plugin.h"
+#include "plugin.h"
 
 #include <atomic>
 #include <cstring>
 
-#include "contracts/events.h"
-#include "contracts/attribute_quality.h"
-#include "contracts/ownership.h"
-#include "contracts/panels.h"
-#include "plugins/autosell/config.h"
-#include "plugins/autosell/log.h"
-#include "plugins/autosell/scan.h"
-#include "plugins/autosell/ui/panel.h"
+#include "../../contracts/events.h"
+#include "../../contracts/attribute_quality.h"
+#include "../../contracts/inventory_action.h"
+#include "../../contracts/ownership.h"
+#include "../../contracts/panels.h"
+#include "config.h"
+#include "log.h"
+#include "scan.h"
+#include "ui/panel.h"
 
 // 自动出售插件：门禁来源为配置键 `plugin.autosell.enabled`
 // （nativeSetAutoSellEnabled → kCommandSetConfigBool）。门禁经 kEventConfigChanged 订阅驱动；
@@ -21,11 +22,8 @@
 //   · own:popup.autosell（kOwnership/kFailSoft）：PopupState 死条目 F_PANEL_UNK3_ENTER 占用。
 // UI（入口按钮 + 面板）为插件自有 ui/panel.*，provider 登记到 infra/panels。
 //
-// 过渡依赖（清除阶段）：
-// - save_enter/save_exit legacy 设施 → B4（本插件的进档/退档回调随之迁移）。
-// - sidecar 经 Kotlin ModuleSaveStore 桥 → B4 `infra/store`。
-// - `game_access.h/game_state.h/game_symbols.h` 直取 → game/access 批次。
-// - `inventory_trade` → `domains/inventory`。
+// 过渡依赖：save_enter/save_exit 事件设施仍由共享基础设施提供；sidecar 读写仍经
+// infra/store；出售副作用由 inventory_hooks 提供的 inventory.action capability 承载。
 
 namespace qol::features::autosell {
 namespace {
@@ -37,6 +35,8 @@ constexpr const char* kGateKey = "plugin.autosell.enabled";
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
      {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
+    {contracts::kInventoryActionCapabilityId,
+     {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor}},
 };
 
 uint64_t g_config_subscription = 0;
@@ -175,7 +175,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    1, kRequires,  // requires=attribute.quality
+    2, kRequires,  // requires=attribute.quality + inventory.action
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）

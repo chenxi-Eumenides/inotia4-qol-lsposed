@@ -13,7 +13,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 1;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 2;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -158,6 +158,14 @@ struct QolUiAdapter {
     QolUiDrawToggleFn draw_toggle;
     QolUiDrawItemIconFn draw_item_icon;
     QolUiCustomButtonFn draw_custom_button;
+
+    // U11-3：原版背包入口需要的容器定位与控件身份查询。
+    QolResult (*find_original_bag_container)(QolUiHandle*);
+    QolResult (*control_type)(QolUiHandle, int32_t*);
+    QolResult (*control_active)(QolUiHandle, int32_t*);
+    QolResult (*control_data)(QolUiHandle, QolUiHandle*);
+    QolResult (*execute_proc_matches)(QolUiHandle, QolUiClickFn, int32_t*);
+    QolResult (*control_absolute_origin)(QolUiHandle, int64_t*, int64_t*);
 };
 
 }  // namespace qol::contracts

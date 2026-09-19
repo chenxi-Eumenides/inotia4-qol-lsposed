@@ -12,15 +12,14 @@
 //
 // 配置面板只在关闭按钮释放时提交 draft：先写运行时，再按当前存档槽直写 sidecar。
 
-#include "plugins/autosell/ui/panel.h"
+#include "panel.h"
 
-#include "contracts/autosell.h"
-#include "contracts/panels.h"
-#include "contracts/ui.h"
-#include "plugins/autosell/log.h"
-#include "plugins/autosell/plugin.h"
-#include "game_access.h"
-#include "game_state.h"
+#include "../../../contracts/panels.h"
+#include "../../../contracts/ui.h"
+#include "config.h"
+#include "log.h"
+#include "plugin.h"
+#include "scan.h"
 
 #include <atomic>
 #include <cstdint>
@@ -305,16 +304,12 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2);
 
 // 控件绝对坐标（父链累加，同扩展背包/自定义面板口径）。
 void autosell_ctrl_abs(void* ctrl, int64_t* x, int64_t* y) {
-    int64_t ax = 0;
-    int64_t ay = 0;
-    for (void* current = ctrl; current != nullptr;) {
-        uint8_t* data = static_cast<uint8_t*>(current);
-        ax += *reinterpret_cast<int64_t*>(data + CO_RECT_X);
-        ay += *reinterpret_cast<int64_t*>(data + CO_RECT_Y);
-        current = *reinterpret_cast<void**>(data + CO_PARENT);
+    const auto* ui = ui_api();
+    if (ui == nullptr || ui->control_absolute_origin == nullptr || x == nullptr || y == nullptr ||
+        ui->control_absolute_origin(ctrl, x, y).ok != kQolOk) {
+        if (x != nullptr) *x = 0;
+        if (y != nullptr) *y = 0;
     }
-    *x = ax;
-    *y = ay;
 }
 
 // 文本绘制（独立 PopupState 下 ui_draw_text_centered 不出字；用 RGB + 官方字体封装）。
@@ -511,7 +506,7 @@ void autosell_draw_selector(UiRect selector, const char* value, bool active) {
 
 void autosell_commit_draft() {
     autosell_apply_config(g_draft);
-    const int slot = current_save_slot();
+    const int slot = autosell_active_save_slot();
     if (slot < 0 || slot >= 3) {
         AUTOSELLUI_LOG("panel close applied config; no valid save slot=%d, skip persist", slot);
         return;
@@ -586,13 +581,23 @@ bool autosell_is_child(void* parent, void* child) {
 bool autosell_entry_valid(void* container) {
     if (container == nullptr || g_entry_ctrl == nullptr) return false;
     if (!autosell_is_child(container, g_entry_ctrl)) return false;
-    uint8_t* ctrl = static_cast<uint8_t*>(g_entry_ctrl);
-    if (*reinterpret_cast<uint32_t*>(ctrl + CO_TYPE) != 3) return false;    // 按钮类型
-    if (*reinterpret_cast<uint32_t*>(ctrl + CO_ACTIVE) != 0x20) return false;  // 激活态
-    uint8_t* data = *reinterpret_cast<uint8_t**>(ctrl + CO_DATA);
-    if (data == nullptr) return false;
-    return *reinterpret_cast<void**>(data + CB_EXECUTE_PROC) ==
-           reinterpret_cast<void*>(&autosell_entry_clicked);
+    const auto* ui = ui_api();
+    if (ui == nullptr || ui->control_type == nullptr || ui->control_active == nullptr ||
+        ui->control_data == nullptr || ui->execute_proc_matches == nullptr) {
+        return false;
+    }
+    int32_t type = 0;
+    int32_t active = 0;
+    qol::contracts::QolUiHandle data = nullptr;
+    int32_t execute_matches = 0;
+    if (ui->control_type(g_entry_ctrl, &type).ok != kQolOk || type != 3 ||
+        ui->control_active(g_entry_ctrl, &active).ok != kQolOk || active != 0x20 ||
+        ui->control_data(g_entry_ctrl, &data).ok != kQolOk || data == nullptr ||
+        ui->execute_proc_matches(g_entry_ctrl, &autosell_entry_clicked, &execute_matches).ok !=
+            kQolOk) {
+        return false;
+    }
+    return execute_matches != 0;
 }
 
 // 动态定位入口：与扩展背包页签同一套算法（extension_bag_mix.inc:134-148）——
@@ -654,7 +659,6 @@ void autosell_install_entry(void* container) {
 
 // 每帧（EQUIP 页）确保入口按钮存在并绘制。关闭态直接移除引用。
 void autosell_on_equip_draw() {
-    if (g_base == 0) return;
     std::lock_guard<std::mutex> lock(g_entry_mtx);
     if (!g_enabled.load(std::memory_order_acquire)) {
         g_entry_ctrl = nullptr;
@@ -663,8 +667,10 @@ void autosell_on_equip_draw() {
     }
     // own:popup.autosell 的资源事务已在 install 期占用 state 条目并写入回调；
     // 此处不再懒注入（原 autosell_ensure_state_injected 已删除）。
-    void* container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
-    if (container == nullptr) {
+    const auto* ui = ui_api();
+    void* container = nullptr;
+    if (ui == nullptr || ui->find_original_bag_container == nullptr ||
+        ui->find_original_bag_container(&container).ok != kQolOk || container == nullptr) {
         g_entry_ctrl = nullptr;
         g_entry_container = nullptr;
         return;
@@ -697,7 +703,7 @@ void autosell_panel_enter() {
 }
 
 void autosell_panel_process() {
-    if (!g_panel_active.load(std::memory_order_acquire) || g_base == 0) return;
+    if (!g_panel_active.load(std::memory_order_acquire) || ui_api() == nullptr) return;
     if (g_close_delay > 0) {
         --g_close_delay;
         if (g_close_delay == 0) {

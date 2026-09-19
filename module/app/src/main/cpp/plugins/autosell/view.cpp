@@ -1,10 +1,9 @@
 // autosell_view.cpp —— 数据层物品引用 -> 纯规则视图（阶段 B）。
 
-#include "plugins/autosell/view.h"
+#include "view.h"
 
-#include "game_access.h"
-#include "contracts/attribute_quality.h"
-#include "plugins/autosell/plugin.h"
+#include "../../contracts/attribute_quality.h"
+#include "plugin.h"
 
 #include <cstdint>
 
@@ -19,48 +18,37 @@ constexpr int kNormalSealLast = 47;
 
 }  // namespace
 
-bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
+bool autosell_build_view(
+    const qol::features::autosell::read_only::InventoryItemRef& ref, autosell::ItemView* out) {
     if (out == nullptr) return false;
     *out = autosell::ItemView{};
     if (ref.native_item == nullptr) return false;
     if (ref.category <= 0) return false;
-    const auto* game = qol::features::autosell::game_host();
-    if (game == nullptr || game->read_only.item.rarity == nullptr ||
-        game->read_only.item.is_jewel_category == nullptr ||
-        game->read_only.item.is_real_equip == nullptr ||
-        game->read_only.item.enchant_remaining == nullptr ||
-        game->read_only.item.socket_filled == nullptr ||
-        game->read_only.item.socket_total == nullptr) {
-        return false;
-    }
-
-    uint8_t* item = reinterpret_cast<uint8_t*>(ref.native_item);
     const int category = ref.category;
 
     // 装备判据用游戏自身的 ITEM_IsRealEquip：不可堆叠（item_is_equip）会把宝石/背包/
     // 徽章等非装备也判为真，导致 rarity/强化/孔数规则过匹配。
     int32_t value = 0;
-    if (!qol::contracts::succeeded(game->read_only.item.is_real_equip(ref.native_item, &value))) {
+    if (!qol::features::autosell::read_only::item_is_real_equip(ref.native_item, &value)) {
         return false;
     }
     out->is_equip = value != 0;
-    if (!qol::contracts::succeeded(game->read_only.item.rarity(ref.native_item, &out->rarity))) {
+    if (!qol::features::autosell::read_only::item_rarity(ref.native_item, &out->rarity)) {
         return false;
     }
 
     // 强化/孔位位段拆解（auto-sell.md §3.1）：bits2-5=剩余强化次数（筛选口径）、
     // bits6-10=已强化次数、I_SOCKET bits0-3=已镶嵌数（后两者 >0 触发硬保护）、bits4-7=总孔数。
-    if (!qol::contracts::succeeded(
-            game->read_only.item.enchant_remaining(ref.native_item, &out->enhance_remaining)) ||
-        !qol::contracts::succeeded(
-            game->read_only.item.socket_filled(ref.native_item, &out->socket_filled)) ||
-        !qol::contracts::succeeded(
-            game->read_only.item.socket_total(ref.native_item, &out->socket_total))) {
+    if (!qol::features::autosell::read_only::item_enchant_remaining(
+            ref.native_item, &out->enhance_remaining) ||
+        !qol::features::autosell::read_only::item_socket_filled(ref.native_item,
+                                                                &out->socket_filled) ||
+        !qol::features::autosell::read_only::item_socket_total(ref.native_item,
+                                                               &out->socket_total)) {
         return false;
     }
 
-    if (!qol::contracts::succeeded(
-            game->read_only.item.is_jewel_category(category, &value))) {
+    if (!qol::features::autosell::read_only::item_is_jewel(category, &value)) {
         return false;
     }
     out->is_jewel = value != 0;
@@ -74,9 +62,13 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
         // bits18-23=属性类型。经 attribute.quality 能力探测该属性值的随机区间 [X, 2X]。
         // 过渡期消费方式：每次调用按能力查找（不缓存指针跨帧）；不可用/撤销中/探测失败
         // 时保持 -1（fail-closed，gemRange 规则不命中，不得默认 0 触发误售）。
-        const uint32_t jewel_bits = *reinterpret_cast<uint32_t*>(item + I_COUNT);
-        const int jewel_value = static_cast<int>(jewel_bits & 0x7FF);
-        const int jewel_attr_type = static_cast<int>((jewel_bits >> 18) & 0x3F);
+        int jewel_value = 0;
+        int jewel_attr_type = 0;
+        if (!qol::features::autosell::read_only::item_jewel_value(ref.native_item, &jewel_value) ||
+            !qol::features::autosell::read_only::item_jewel_attribute_type(ref.native_item,
+                                                                            &jewel_attr_type)) {
+            return false;
+        }
         const auto* sdk = qol::features::autosell::host_sdk();
         const void* iface = nullptr;
         if (sdk != nullptr && sdk->capabilities.require != nullptr) {
@@ -99,16 +91,13 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
     }
 
     uint32_t specials = 0;
-    if (game->read_only.item.is_backpack_category != nullptr &&
-        qol::contracts::succeeded(game->read_only.item.is_backpack_category(category, &value)) &&
-        value != 0) {
+    if (qol::features::autosell::read_only::item_is_backpack(category, &value) && value != 0) {
         specials |= autosell::kSpecialBackpack;
     }
     if (category >= kNormalSealFirst && category <= kNormalSealLast) {
         specials |= autosell::kSpecialNormalSeal;
     }
-    if (game->read_only.item.is_dice != nullptr &&
-        qol::contracts::succeeded(game->read_only.item.is_dice(category, &value)) && value != 0) {
+    if (qol::features::autosell::read_only::item_is_dice(category, &value) && value != 0) {
         specials |= autosell::kSpecialDice;
     }
     out->special_types = specials;

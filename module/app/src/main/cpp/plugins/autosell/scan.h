@@ -1,15 +1,15 @@
 #pragma once
 
-#include "plugins/autosell/rules.h"
+#include "rules.h"
 
 // 自动出售扫描与主线程逐帧 tick（阶段 B）。
 //
 // 线程纪律：仅在游戏主线程执行（由 host/frame_source 的渲染开始前锚点经
 // infra::scheduler 的 kRenderPre 派发）；内部不取 g_virtual_bag_mtx、不调用 op_ok()、
-// 不主动 save。扩展袋逐槽读取自身取放锁；处置走 inventory_trade::sell（H-04 已 Hook）。
+// 不主动 save。扩展袋逐槽读取自身取放锁；出售经 inventory.action capability 调用 owner。
 //
-// 过渡依赖（清除阶段）：save_enter/save_exit 设施 → B4；inventory_trade →
-// domains/inventory 批次。
+// 过渡依赖：save_enter/save_exit 设施由共享基础设施提供，inventory.action 由
+// inventory_hooks 提供。
 
 // 扫描间隔（帧）：作为 scheduler_add 的 interval，由统一帧调度器按帧节流。
 constexpr int kAutoSellScanIntervalFrames = 60;
@@ -27,8 +27,10 @@ void autosell_apply_config(const autosell::Config& config);
 // autosell_register_save_enter 的回调按当前存档配置注册。
 void autosell_set_global_enabled(bool enabled);
 
+int autosell_active_save_slot();
+
 // 注册「进入存档」回调（插件 install 调用，幂等）：读档 / 新档加载完成进入 world 后
-// 触发一次，按当前存档槽 `current_save_slot()` 读取 sidecar `autosell` 配置应用到运行时，
+// 触发一次，按事件携带的当前存档槽读取 sidecar `autosell` 配置应用到运行时，
 // 再按「全局开关 + 已进档 + 存档总开关」同步 60 帧扫描任务。回调在游戏主线程执行。
 void autosell_register_save_enter();
 

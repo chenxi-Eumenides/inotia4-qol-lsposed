@@ -22,6 +22,12 @@ bool ui_get_rect(void* ctrl, UiRect* rect);
 void* ui_find_child_in_area(void* parent, UiRect area);
 bool ui_clone_button_style(void* target, void* source, UiClickProc on_click);
 bool ui_hit_test(void* ctrl, int64_t x, int64_t y, UiRect rect);
+void* ui_original_bag_container();
+bool ui_control_type(void* ctrl, int32_t* out_type);
+bool ui_control_active(void* ctrl, int32_t* out_active);
+void* ui_control_data(void* ctrl);
+bool ui_execute_proc_matches(void* ctrl, UiClickProc expected);
+bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y);
 
 void ui_begin_frame();
 void ui_begin_frame(UiRect mask, UiRect panel, uint32_t panel_color);

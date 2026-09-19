@@ -1,4 +1,4 @@
-#include "plugins/autosell/rules.h"
+#include "rules.h"
 
 namespace autosell {
 

@@ -118,3 +118,49 @@ bool ui_hit_test(void* ctrl, int64_t x, int64_t y, UiRect rect) {
     return x >= absolute_x && x < absolute_x + rect.w && y >= absolute_y && y < absolute_y + rect.h;
 }
 
+void* ui_original_bag_container() {
+    if (g_base == 0) return nullptr;
+    return *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
+}
+
+bool ui_control_type(void* ctrl, int32_t* out_type) {
+    if (ctrl == nullptr || out_type == nullptr) return false;
+    *out_type = static_cast<int32_t>(
+        *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl) + CO_TYPE));
+    return true;
+}
+
+bool ui_control_active(void* ctrl, int32_t* out_active) {
+    if (ctrl == nullptr || out_active == nullptr) return false;
+    *out_active = static_cast<int32_t>(
+        *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl) + CO_ACTIVE));
+    return true;
+}
+
+void* ui_control_data(void* ctrl) {
+    if (ctrl == nullptr) return nullptr;
+    return *reinterpret_cast<void**>(static_cast<uint8_t*>(ctrl) + CO_DATA);
+}
+
+bool ui_execute_proc_matches(void* ctrl, UiClickProc expected) {
+    if (ctrl == nullptr || expected == nullptr) return false;
+    uint8_t* data = static_cast<uint8_t*>(ui_control_data(ctrl));
+    if (data == nullptr) return false;
+    return *reinterpret_cast<void**>(data + CB_EXECUTE_PROC) ==
+           reinterpret_cast<void*>(expected);
+}
+
+bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y) {
+    if (ctrl == nullptr || out_x == nullptr || out_y == nullptr) return false;
+    int64_t absolute_x = 0;
+    int64_t absolute_y = 0;
+    for (void* current = ctrl; current != nullptr;) {
+        uint8_t* data = static_cast<uint8_t*>(current);
+        absolute_x += *reinterpret_cast<int64_t*>(data + CO_RECT_X);
+        absolute_y += *reinterpret_cast<int64_t*>(data + CO_RECT_Y);
+        current = *reinterpret_cast<void**>(data + CO_PARENT);
+    }
+    *out_x = absolute_x;
+    *out_y = absolute_y;
+    return true;
+}

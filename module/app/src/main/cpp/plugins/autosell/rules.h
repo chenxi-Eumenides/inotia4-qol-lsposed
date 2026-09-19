@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/autosell.h"
+#include "../../contracts/autosell.h"
 
 // 自动出售纯规则引擎：只做「给定物品视图 + 配置 -> 是否出售」的判定。
 // 零游戏/Android 依赖（纯 STL，编入 host 单测）；扫描、处置与 UI 由上层负责。

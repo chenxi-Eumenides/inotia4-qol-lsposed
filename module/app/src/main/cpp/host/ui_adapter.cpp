@@ -401,6 +401,40 @@ QolResult draw_custom_button(QolUiHandle control, UiRect size, uint32_t backgrou
     return contracts::ok();
 }
 
+QolResult find_original_bag_container(QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = ui_original_bag_container();
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult control_type(QolUiHandle control, int32_t* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    return ui_control_type(control, out) ? contracts::ok() : not_ready();
+}
+
+QolResult control_active(QolUiHandle control, int32_t* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    return ui_control_active(control, out) ? contracts::ok() : not_ready();
+}
+
+QolResult control_data(QolUiHandle control, QolUiHandle* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    *out = ui_control_data(control);
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult execute_proc_matches(QolUiHandle control, contracts::QolUiClickFn expected,
+                               int32_t* out) {
+    if (control == nullptr || expected == nullptr || out == nullptr) return invalid_argument();
+    *out = ui_execute_proc_matches(control, expected) ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult control_absolute_origin(QolUiHandle control, int64_t* out_x, int64_t* out_y) {
+    if (control == nullptr || out_x == nullptr || out_y == nullptr) return invalid_argument();
+    return ui_control_absolute_origin(control, out_x, out_y) ? contracts::ok() : not_ready();
+}
+
 const QolUiAdapter g_ui_adapter{
     sizeof(QolUiAdapter), contracts::kUiAdapterMajor, contracts::kUiAdapterMinor,
     &create_control,
@@ -452,6 +486,12 @@ const QolUiAdapter g_ui_adapter{
      &draw_toggle,
      &draw_item_icon,
      &draw_custom_button,
+     &find_original_bag_container,
+     &control_type,
+     &control_active,
+     &control_data,
+     &execute_proc_matches,
+     &control_absolute_origin,
 };
 
 }  // namespace

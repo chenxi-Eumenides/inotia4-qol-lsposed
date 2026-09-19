@@ -4,7 +4,9 @@
 
 #include <cstdint>
 
+#include "contracts/inventory_action.h"
 #include "contracts/inventory_refresh.h"
+#include "core/native/inventory_trade.h"
 
 // D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
 // feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
@@ -32,11 +34,33 @@ constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
     &inventory_native_hook_call_refresh_item_area_original,
 };
 
+contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
+                                                     const void* expected_item,
+                                                     const char* source) {
+    const inventory_trade::Result result =
+        inventory_trade::sell(bag, slot, expected_item, source);
+    return {
+        static_cast<contracts::InventorySellStatus>(static_cast<int32_t>(result.status)),
+        result.price,
+        result.category,
+        result.count,
+    };
+}
+
+constexpr contracts::InventoryActionApi kInventoryActionApi{
+    &inventory_action_sell,
+};
+
 const contracts::CapabilityProvisionRef kProvides[] = {
     {
         contracts::kInventoryRefreshCapabilityId,
         {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
         &kInventoryRefreshApi,
+    },
+    {
+        contracts::kInventoryActionCapabilityId,
+        {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor},
+        &kInventoryActionApi,
     },
 };
 
@@ -93,7 +117,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             kPluginVersion,
             0, nullptr,   // requires
             0, nullptr,   // optional_requires
-            1, kProvides,  // provides（inventory_refresh v1.0）
+            2, kProvides,  // provides（inventory_refresh + inventory.action v1.0）
             count, claims,
             0, nullptr,   // jni
             &plugin_install,

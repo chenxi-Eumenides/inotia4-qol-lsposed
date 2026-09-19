@@ -1,6 +1,6 @@
 // autosell_config.cpp —— 自动出售运行时配置/状态存储（阶段 B）。
 
-#include "plugins/autosell/config.h"
+#include "config.h"
 
 #include <atomic>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <string>
 
 // 名字 <-> 位映射复用 store 头唯一表（autosell_special_to_array）。
-#include "plugins/autosell/store.h"
+#include "store.h"
 
 namespace {
 

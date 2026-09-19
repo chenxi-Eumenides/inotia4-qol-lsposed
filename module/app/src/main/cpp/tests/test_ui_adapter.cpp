@@ -92,6 +92,13 @@ bool ui_hit_test(void* ctrl, int64_t x, int64_t y, UiRect rect) {
     return x >= origin.x && x < origin.x + rect.w && y >= origin.y && y < origin.y + rect.h;
 }
 
+void* ui_original_bag_container() { return nullptr; }
+bool ui_control_type(void*, int32_t*) { return false; }
+bool ui_control_active(void*, int32_t*) { return false; }
+void* ui_control_data(void*) { return nullptr; }
+bool ui_execute_proc_matches(void*, UiClickProc) { return false; }
+bool ui_control_absolute_origin(void*, int64_t*, int64_t*) { return false; }
+
 void ui_begin_frame() {}
 void ui_fill_rect_alpha(UiRect, uint32_t, uint32_t) { ++g_fill_rect_calls; }
 void ui_end_frame() {}

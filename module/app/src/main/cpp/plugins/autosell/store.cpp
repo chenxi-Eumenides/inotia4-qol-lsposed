@@ -1,14 +1,14 @@
 // autosell_store.cpp —— 自动出售按存档配置持久化（sidecar section `autosell`，直写）。
 //
 // 读写经 infra/store（模块 sidecar 容器 MSAV 单写者）：section 名 `autosell`、version 2，
-// slot 由调用方按 current_save_slot() 传入。纯序列化/解析在 store.h（inline，可 host 测）；
+// slot 由进档事件传入并由调用方传递。纯序列化/解析在 store.h（inline，可 host 测）；
 // 本文件只做 section 读写与运行时加载状态。与扩展背包 section/journal 完全隔离，不注册 participant。
 
-#include "plugins/autosell/store.h"
+#include "store.h"
 
-#include "plugins/autosell/config.h"
-#include "plugins/autosell/log.h"
-#include "plugins/autosell/plugin.h"
+#include "config.h"
+#include "log.h"
+#include "plugin.h"
 
 #include <mutex>
 #include <string>
