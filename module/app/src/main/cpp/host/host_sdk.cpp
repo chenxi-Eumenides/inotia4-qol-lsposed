@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -22,6 +23,13 @@ namespace qol::host {
 namespace {
 
 using QolResult = ::QolResult;
+
+static_assert(sizeof(contracts::QolPopupStateEntry) == sizeof(hooks::PopupStateEntry));
+static_assert(offsetof(contracts::QolPopupStateEntry, slot) ==
+              offsetof(hooks::PopupStateEntry, slot));
+static_assert(offsetof(contracts::QolPopupStateEntry, state_id) ==
+              offsetof(hooks::PopupStateEntry, state_id));
+static_assert(sizeof(contracts::QolPopupStateHooks) == sizeof(hooks::PopupStateHooks));
 
 constexpr const char* kNullArgument = "null argument";
 constexpr const char* kInvalidArgument = "invalid argument";
@@ -433,28 +441,29 @@ QolResult sdk_hooks_clear_intercept(const char* resource_id) {
                             kNotFound);
 }
 
-QolResult sdk_hooks_popup_resolve(const char* symbol, void* out_entry) {
+QolResult sdk_hooks_popup_resolve(const char* symbol, contracts::QolPopupStateEntry* out_entry) {
     if (symbol == nullptr || out_entry == nullptr) {
         return result_error(kQolErrInvalidArgument, kInvalidArgument);
     }
     return result_from_bool(hooks::popup_state_resolve_symbol(
-                                symbol, static_cast<hooks::PopupStateEntry*>(out_entry)),
+                                symbol, reinterpret_cast<hooks::PopupStateEntry*>(out_entry)),
                             kQolErrNotFound, kNotFound);
 }
 
-QolResult sdk_hooks_popup_acquire(void* entry, const void* popup_hooks) {
+QolResult sdk_hooks_popup_acquire(contracts::QolPopupStateEntry* entry,
+                                  const contracts::QolPopupStateHooks* popup_hooks) {
     if (entry == nullptr || popup_hooks == nullptr) {
         return result_error(kQolErrInvalidArgument, kInvalidArgument);
     }
     return result_from_bool(
-        hooks::popup_state_acquire(static_cast<hooks::PopupStateEntry*>(entry),
-                                   *static_cast<const hooks::PopupStateHooks*>(popup_hooks)),
+        hooks::popup_state_acquire(reinterpret_cast<hooks::PopupStateEntry*>(entry),
+                                   *reinterpret_cast<const hooks::PopupStateHooks*>(popup_hooks)),
         kQolErrConflict, kConflict);
 }
 
-QolResult sdk_hooks_popup_restore(void* entry) {
+QolResult sdk_hooks_popup_restore(contracts::QolPopupStateEntry* entry) {
     if (entry == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
-    hooks::popup_state_restore(static_cast<hooks::PopupStateEntry*>(entry));
+    hooks::popup_state_restore(reinterpret_cast<hooks::PopupStateEntry*>(entry));
     return contracts::ok();
 }
 

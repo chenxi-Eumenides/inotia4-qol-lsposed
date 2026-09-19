@@ -5,19 +5,20 @@
 //   · panels/stack：open 幂等、push 成功、push 失败「关栈顶再开」兜底、陈旧栈顶剔除、
 //     栈深 4 上限、close（含其上层）、block_reason 栈顶优先。
 //
-// fake provider 经 infra/panels 注册；不触碰游戏内存/真实 UI。
+// fake provider 经 Host SDK panels.find 提供；不触碰游戏内存/真实 UI。
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 #include "contracts/panels.h"
-#include "infra/panels.h"
+#include "contracts/host_sdk.h"
 #include "plugins/core.ui/panels/rules.h"
 #include "plugins/core.ui/panels/stack.h"
 
 using qol::contracts::PanelItemKind;
 using qol::contracts::PanelProviderSpec;
+using qol::contracts::QolHostSdk;
 using qol::features::core_ui::ui_panels_active;
 using qol::features::core_ui::ui_panels_block_reason;
 using qol::features::core_ui::ui_panels_close;
@@ -169,6 +170,20 @@ const PanelProviderSpec kProviders[] = {
     {"pe", "core.ui", &e_open, &e_close, &e_active, &e_reason},
 };
 
+QolResult fake_panels_find(const char* panel_id, const PanelProviderSpec** out_provider) {
+    if (panel_id == nullptr || out_provider == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out_provider = nullptr;
+    for (const PanelProviderSpec& provider : kProviders) {
+        if (std::strcmp(provider.panel_id, panel_id) == 0) {
+            *out_provider = &provider;
+            return qol::contracts::ok();
+        }
+    }
+    return qol::contracts::error(kQolErrNotFound, "not found", 9);
+}
+
 void reset_fakes() {
     for (Fake& f : g_f) {
         f = Fake{};
@@ -262,10 +277,9 @@ void test_stack_depth_limit_and_close() {
 }  // namespace
 
 int main() {
-    qol::infra::panels_reset_for_test();
-    for (const PanelProviderSpec& provider : kProviders) {
-        CHECK(qol::infra::panels_register_provider(provider));
-    }
+    QolHostSdk sdk{};
+    sdk.panels.find = &fake_panels_find;
+    qol::features::core_ui::ui_panels_bind_sdk(&sdk);
 
     test_rules_pages();
     test_stack_open_idempotent();

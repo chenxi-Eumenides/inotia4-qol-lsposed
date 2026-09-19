@@ -142,11 +142,29 @@ using QolHooksTextUnsubscribeFn = QolResult (*)(const char* resource_id, uint64_
 using QolHooksRunTextFn = QolResult (*)(const char* resource_id, uint32_t text_id,
                                         const char* original, const char** out_text);
 using QolHooksSetInterceptFn = QolResult (*)(const char* resource_id,
-                                             int32_t (*predicate)(void* ctx), void* ctx);
+                                              int32_t (*predicate)(void* ctx), void* ctx);
 using QolHooksClearInterceptFn = QolResult (*)(const char* resource_id);
-using QolHooksPopupResolveFn = QolResult (*)(const char* symbol, void* out_entry);
-using QolHooksPopupAcquireFn = QolResult (*)(void* entry, const void* hooks);
-using QolHooksPopupRestoreFn = QolResult (*)(void* entry);
+
+// PopupState 的跨边界 POD 镜像。backup 必须完整保留原版 0x40 字节状态，slot/state_id
+// 仅由宿主定位并填充；插件只持有该快照并通过 hooks API 交还宿主。
+struct QolPopupStateHooks {
+    void (*enter)();
+    void (*process)();
+    void (*f3)();
+    void (*f4)();
+    uint32_t (*event)(uint64_t, uint64_t, uint64_t);
+};
+
+struct QolPopupStateEntry {
+    uint8_t backup[0x40];
+    uint8_t* slot;
+    int32_t state_id;
+};
+
+using QolHooksPopupResolveFn = QolResult (*)(const char* symbol, QolPopupStateEntry* out_entry);
+using QolHooksPopupAcquireFn = QolResult (*)(QolPopupStateEntry* entry,
+                                              const QolPopupStateHooks* hooks);
+using QolHooksPopupRestoreFn = QolResult (*)(QolPopupStateEntry* entry);
 struct QolHooksApi {
     QolHooksTextSubscribeFn text_subscribe;
     QolHooksTextUnsubscribeFn text_unsubscribe;
@@ -183,6 +201,6 @@ struct QolHostSdk {
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 0;
+constexpr uint16_t kHostSdkMinor = 1;
 
 }  // namespace qol::contracts

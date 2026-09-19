@@ -4,6 +4,8 @@
 #include <jni.h>
 #include <string>
 
+#include "contracts/host_sdk.h"
+
 // core.ui 设置面板（原 feature/ui/game_ui_settings，D1-b2 迁移）。
 //
 // 面板本体：主菜单「更多游戏」按钮 ExecuteProc → ui_panels.open("settings") → 本 provider
@@ -17,6 +19,8 @@
 // PtrHook + infra/scheduler 主线程帧任务绑定/释放；登记迁移豁免，P5/U11 由动态 UI 绑定器收口。
 
 namespace qol::features::core_ui {
+
+void settings_bind_sdk(const contracts::QolHostSdk* sdk);
 
 // ---- JNI / 调试端点（原 data_settings_ui_*，名与签名保持）----
 std::string data_settings_ui_inject();

@@ -2,16 +2,18 @@
 
 #include <cstring>
 
-#include "infra/panels.h"
-
 namespace qol::features::core_ui {
 namespace {
 
+const contracts::QolHostSdk* g_sdk = nullptr;
 const char* g_stack[kPanelStackDepth] = {};
 int g_depth = 0;
 
 const contracts::PanelProviderSpec* provider_of(const char* panel_id) {
-    return infra::panels_find_provider(panel_id);
+    if (g_sdk == nullptr || g_sdk->panels.find == nullptr) return nullptr;
+    const contracts::PanelProviderSpec* provider = nullptr;
+    if (!contracts::succeeded(g_sdk->panels.find(panel_id, &provider))) return nullptr;
+    return provider;
 }
 
 bool active_of(const char* panel_id) {
@@ -51,6 +53,8 @@ void prune_inactive_top() {
 }
 
 }  // namespace
+
+void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) { g_sdk = sdk; }
 
 bool ui_panels_open(const char* panel_id) {
     if (panel_id == nullptr || panel_id[0] == '\0') return false;

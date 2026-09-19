@@ -518,7 +518,6 @@ add_test(NAME infra_panels_tests COMMAND infra_panels_tests)
 add_executable(core_ui_panels_tests
     test_core_ui_panels.cpp
     ${CPP_DIR}/plugins/core.ui/panels/stack.cpp
-    ${CPP_DIR}/infra/panels.cpp
 )
 target_include_directories(core_ui_panels_tests PRIVATE
     ${CPP_DIR}

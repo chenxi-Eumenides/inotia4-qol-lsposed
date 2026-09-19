@@ -61,6 +61,7 @@ const contracts::ResourceClaim kResources[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || !ui_components_bind(ctx.sdk->ui)) return 1;
+    panels_bind_sdk(ctx.sdk);
     // install 只做自身初始化：注册设置页 provider + 存档备份动作项 + 按钮绑定帧任务。
     // 资源由宿主声明式安装，backup 经 on_resource_ready 交还。
     if (!panels_register()) return 1;

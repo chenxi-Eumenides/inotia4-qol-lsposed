@@ -24,21 +24,21 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 18 | 1417 |
+| `contracts/` | 18 | 1435 |
 | `game/` | 37 | 2856 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 154 | 30241 |
-| `host/` | 17 | 3982 |
-| **合计** | **266** | **42699** |
+| `plugins/` | 154 | 30281 |
+| `host/` | 17 | 3991 |
+| **合计** | **266** | **42766** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_quality/`：6 文件 / 411 行
 - `plugins/attribute_range_display/`：4 文件 / 237 行
 - `plugins/autosell/`：14 文件 / 1931 行
-- `plugins/core.ui/`：16 文件 / 2157 行
+- `plugins/core.ui/`：16 文件 / 2197 行
 - `plugins/craft_ui/`：4 文件 / 997 行
 - `plugins/custom_recipe/`：10 文件 / 2091 行
 - `plugins/extension_bag/`：39 文件 / 13112 行

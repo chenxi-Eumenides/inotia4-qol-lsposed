@@ -129,16 +129,16 @@
 > **D1 延后项登记**（D1 未实现，已指定目标阶段；对应 `map.md` 过渡依赖区）：
 > - 设置项数据化与配置源（Kotlin JSON → native config）：**P5**（决策 D；`ARCHITECTURE.md` §7.3 跨栈边界）。
 > - U11-1 ui-kit adapter 契约与 host 注入面：**✅ 完成**；动态 UI 绑定管理器仍待 U11-3，覆盖 `plugins/core.ui/panels/settings.cpp` 运行时 ptr-slot 的临时豁免（`arch_exemptions.json`）。
-> - U11-2 UI 组件层实施（ADR-0006）：第一阶段组件抽取（Panel/Button/Label/Toggle/Select/ScrollView）+ `contracts/ui.h` 标准组件接口已冻结；`core.ui` 通用组件实现**待办**，不改现有面板行为。
+> - U11-2 UI 组件层实施（ADR-0006）：第一阶段组件抽取（Panel/Button/Label/Toggle/Select/ScrollView）+ `contracts/ui.h` 标准组件接口已冻结；`core.ui` 通用组件实现**已完成**，宿主面板/调度器/PopupState 调用经 Host SDK 转发。
 > - U11-3 面板消费者迁移：`settings`、`autosell`、`save_backup` **待办**，迁移后普通插件不再直接处理底层 UI。
-> - `core.ui` 直依 `game/access/ui*`（过渡依赖）：随 **P5** `core.ui` 收口清除。
+> - `core.ui` 直依 `game/access/ui*`（过渡依赖）：U11-2 已经由 `contracts/ui.h` + Host SDK UI adapter 收口；动态 UI 绑定器仍留给 U11-3。
 
 ### U11 UI 收口状态
 
 | 子任务 | 状态 | 当前交付 / 待办 |
 |---|---|---|
 | U11-1 | ✅ 完成 | `contracts/ui.h` 标准组件契约；`host/ui_adapter.cpp` 逐成员接入现有 ui-kit 原语；`QolHostSdk::ui` 在 host 装配期注入 |
-| U11-2 | ⬜ 待办 | `core.ui` 实现 Panel/Button/Label/Toggle/Select/ScrollView 组件，复制描述符字符串并保持主线程约束 |
+| U11-2 | ✅ 完成 | `core.ui` 实现 Panel/Button/Label/Toggle/Select/ScrollView 组件，复制描述符字符串并保持主线程约束；5 处宿主私有 include 已切换至 Host SDK |
 | U11-3 | ⬜ 待办 | 迁移 `settings`、`autosell`、`save_backup` 面板消费者 |
 
 U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_backup` 多行/两步确认、`settings` ExecuteProc 槽绑定、`native_choice` PopupState 链。
@@ -173,7 +173,7 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 
 L4-0 追加冻结 `QolGameHost` minor `1`。既有字段顺序与签名保持不变，新增成员统一位于
 `QolGameHost::extra`，由 `host/game_host.cpp` 实现；U11-1 已建立 `QolHostSdk::ui` 的
-UI adapter 注入面，组件实现与消费者迁移分别留给 U11-2/U11-3。
+UI adapter 注入面，U11-2 已完成组件实现，消费者迁移留给 U11-3。
 
 `extra` 当前包含以下最小成员组：
 
@@ -191,7 +191,7 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 
 本批仍未覆盖：
 
-- U11-2/U11-3：`core.ui` 组件实现，以及 `core.ui`、`autosell` 面板和 `save_backup` 游戏内面板迁移；
+- U11-3：`core.ui`、`autosell` 面板和 `save_backup` 游戏内面板的完整消费者迁移；
 - U11 未覆盖：扩展背包控件树与拖放、齿轮贴图 raw、`save_backup` 多行/两步确认、
   `settings` ExecuteProc 槽绑定、`native_choice` PopupState 链；
 - `extension_bag` / `inventory_hooks` 的库存遍历、控件树、指针槽、hook/patch 资源迁移；

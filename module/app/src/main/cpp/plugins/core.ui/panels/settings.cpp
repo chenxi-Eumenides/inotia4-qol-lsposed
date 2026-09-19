@@ -8,8 +8,6 @@
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_ui.h"
-#include "hooks/popup_state.h"
-#include "infra/capabilities.h"
 #include "plugins/core.ui/panels/rules.h"
 #include "plugins/core.ui/panels/stack.h"
 #include "plugins/core.ui/ui_components.h"
@@ -73,6 +71,7 @@ namespace qol::features::core_ui {
 namespace {
 
 std::mutex g_settings_mtx;
+const contracts::QolHostSdk* g_sdk = nullptr;
 jclass g_config_bridge_class = nullptr;
 bool g_more_games_injected = false;
 PtrHook g_more_games_hook;
@@ -92,7 +91,7 @@ int g_close_delay_frames = 0;
 bool g_back_pressed = false;
 
 // own:popup.settings 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
-hooks::PopupStateEntry g_popup_entry{};
+contracts::QolPopupStateEntry g_popup_entry{};
 bool g_popup_acquired = false;
 
 struct SettingsRow {
@@ -149,25 +148,32 @@ void page_btn_draw(void* ctrl);
 #include "plugins/core.ui/panels/settings_injection.inc"
 }  // namespace
 
+void settings_bind_sdk(const contracts::QolHostSdk* sdk) { g_sdk = sdk; }
+
 // ---- own:popup.settings（kOwnership）：整段占用 F_PANEL_UNK1_ENTER 的 5 回调 ----
 
 int32_t settings_popup_acquire(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_settings_mtx);
     if (g_popup_entry.slot != nullptr) return 0;
-    hooks::PopupStateEntry entry{};
-    if (!hooks::popup_state_resolve_symbol("F_PANEL_UNK1_ENTER", &entry)) {
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
+        g_sdk->hooks.popup_acquire == nullptr) {
+        SETTINGS_LOG("popup.settings: hooks API not ready");
+        return 1;
+    }
+    contracts::QolPopupStateEntry entry{};
+    if (!contracts::succeeded(g_sdk->hooks.popup_resolve("F_PANEL_UNK1_ENTER", &entry))) {
         SETTINGS_LOG("popup.settings: state entry (INAP_GEMSHOP) not found");
         return 1;
     }
-    const hooks::PopupStateHooks hooks{
+    const contracts::QolPopupStateHooks popup_hooks{
         &settings_panel_enter,
         &settings_panel_process,
         &settings_panel_f3,
         &settings_panel_f4,
         &settings_panel_event,
     };
-    if (!hooks::popup_state_acquire(&entry, hooks)) {
+    if (!contracts::succeeded(g_sdk->hooks.popup_acquire(&entry, &popup_hooks))) {
         SETTINGS_LOG("popup.settings: acquire rejected");
         return 1;
     }
@@ -181,8 +187,9 @@ int32_t settings_popup_acquire(const char* id) {
 void settings_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_settings_mtx);
-    if (g_popup_entry.slot != nullptr) {
-        hooks::popup_state_restore(&g_popup_entry);
+    if (g_popup_entry.slot != nullptr && g_sdk != nullptr &&
+        g_sdk->hooks.popup_restore != nullptr) {
+        (void)g_sdk->hooks.popup_restore(&g_popup_entry);
     }
     g_popup_acquired = false;
     g_state_id = -1;
@@ -307,8 +314,11 @@ std::string data_settings_ui_open_panel() {
 std::string data_settings_ui_open_option() {
     if (g_base == 0) return op_err("libgame not ready");
     if (fn_ui_set_popup_process_info == nullptr) return op_err("symbol not resolved");
-    hooks::PopupStateEntry entry{};
-    if (!hooks::popup_state_resolve_symbol("F_PANEL_OPTIONS_ENTER", &entry)) {
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr) {
+        return op_err("hooks API unavailable");
+    }
+    contracts::QolPopupStateEntry entry{};
+    if (!contracts::succeeded(g_sdk->hooks.popup_resolve("F_PANEL_OPTIONS_ENTER", &entry))) {
         return op_err("option state not found");
     }
     fn_ui_set_popup_process_info(1, entry.state_id);

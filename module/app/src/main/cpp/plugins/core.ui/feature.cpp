@@ -4,24 +4,24 @@
 #include <cstdint>
 
 #include "contracts/panels.h"
-#include "infra/panels.h"
-#include "infra/scheduler.h"
 #include "plugins/core.ui/panels/settings.h"
+#include "plugins/core.ui/panels/stack.h"
 
 namespace qol::features::core_ui {
 namespace {
 
 std::atomic<bool> g_enabled{false};
-infra::FrameTaskId g_frame_task = 0;
+const contracts::QolHostSdk* g_sdk = nullptr;
+uint64_t g_frame_task = 0;
 
 // 主线程帧任务：替代原后台轮询线程，推进「更多游戏」按钮绑定/重绑定。
-bool frame_tick(int64_t frame, void* ctx) {
+int32_t frame_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
     if (g_enabled.load(std::memory_order_acquire)) {
         settings_more_games_tick();
     }
-    return true;  // 常驻：主菜单多次重建需重新绑定
+    return 1;  // 常驻：主菜单多次重建需重新绑定
 }
 
 // 设置页容器 provider（panel_id="settings"）。
@@ -48,6 +48,12 @@ const contracts::PanelItemSpec kSaveBackupItem = {
 
 }  // namespace
 
+void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
+    g_sdk = sdk;
+    settings_bind_sdk(sdk);
+    ui_panels_bind_sdk(sdk);
+}
+
 bool plugin_enabled() {
     return g_enabled.load(std::memory_order_acquire);
 }
@@ -61,23 +67,32 @@ void plugin_set_enabled(bool enabled) {
 }
 
 bool panels_register() {
-    if (!infra::panels_register_provider(kSettingsProvider)) return false;
-    if (!infra::panels_register_item(kSaveBackupItem)) return false;
-    if (g_frame_task == 0) {
+    if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
+        g_sdk->panels.register_item == nullptr) return false;
+    if (!contracts::succeeded(g_sdk->panels.register_provider(&kSettingsProvider))) return false;
+    if (!contracts::succeeded(g_sdk->panels.register_item(&kSaveBackupItem))) return false;
+    if (g_frame_task == 0 && g_sdk->scheduler.add != nullptr) {
         // 15 帧一次（≈250ms，接近原轮询线程 300ms 粒度）：绑定动作轻量，无需逐帧。
-        g_frame_task = infra::scheduler_add(infra::FramePoint::kLogicPre, &frame_tick, nullptr, 15, 0);
+        uint64_t task = 0;
+        if (contracts::succeeded(g_sdk->scheduler.add(1, &frame_tick, nullptr, 15, 0, &task))) {
+            g_frame_task = task;
+        }
     }
     return true;
 }
 
 void panels_unregister() {
     if (g_frame_task != 0) {
-        (void)infra::scheduler_remove(g_frame_task);
+        if (g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+            (void)g_sdk->scheduler.remove(g_frame_task);
+        }
         g_frame_task = 0;
     }
     settings_release_more_games();
     g_enabled.store(false, std::memory_order_release);
-    infra::panels_unregister_owner("core.ui");
+    if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
+        (void)g_sdk->panels.unregister_owner("core.ui");
+    }
 }
 
 }  // namespace qol::features::core_ui
