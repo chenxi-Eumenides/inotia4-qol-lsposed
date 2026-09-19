@@ -1,8 +1,8 @@
-#include "plugins/special_equip/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 
-#include "plugins/special_equip/feature.h"
+#include "feature.h"
 
 // D2c-2b-1：出售按钮 UIEquip_ButtonDestroyExe 已被 inventory_hooks 单点 hook（同址
 // NativeHook 二次挂载 rc=-1），本插件经 hooks/dispatch 布尔门登记谓词，不再前置声明

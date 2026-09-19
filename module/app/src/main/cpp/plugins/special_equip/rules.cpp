@@ -1,4 +1,4 @@
-#include "plugins/special_equip/rules.h"
+#include "rules.h"
 
 namespace qol::features::special_equip {
 

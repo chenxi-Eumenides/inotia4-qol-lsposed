@@ -1,4 +1,4 @@
-#include "plugins/quest/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdarg>

@@ -1,10 +1,10 @@
-#include "plugins/custom_recipe/table.h"
+#include "table.h"
 
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
 
-#include "plugins/custom_recipe/rules.h"
+#include "rules.h"
 
 namespace custom_recipe {
 

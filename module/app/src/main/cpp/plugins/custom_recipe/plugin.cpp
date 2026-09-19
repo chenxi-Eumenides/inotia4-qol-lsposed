@@ -1,13 +1,13 @@
-#include "plugins/custom_recipe/plugin.h"
+#include "plugin.h"
 
 #include <cstring>
 #include <cstdint>
 
-#include "contracts/attribute_quality.h"
-#include "contracts/craft_result.h"
-#include "contracts/events.h"
-#include "plugins/custom_recipe/feature.h"
-#include "plugins/custom_recipe/table.h"
+#include "../../contracts/attribute_quality.h"
+#include "../../contracts/craft_result.h"
+#include "../../contracts/events.h"
+#include "feature.h"
+#include "table.h"
 
 // 自定义合成配方插件：结果层能力提供者 + 表注入行为所有权（C2 Step 4）。
 //

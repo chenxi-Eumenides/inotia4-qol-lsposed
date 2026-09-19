@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/plugin.h"
-#include "contracts/text_layer.h"
+#include "../../contracts/plugin.h"
+#include "../../contracts/text_layer.h"
 
 namespace qol::hooks {
 enum class DispatchPhase : int32_t { kBefore = 0, kAfter = 1 };

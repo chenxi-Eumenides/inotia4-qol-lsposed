@@ -1,10 +1,10 @@
-#include "plugins/attribute_quality/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 
-#include "plugins/attribute_quality/rules.h"
+#include "rules.h"
 
 namespace qol::features::attribute_quality {
 namespace {

@@ -1,6 +1,6 @@
-#include "plugins/custom_recipe/catalog.h"
+#include "catalog.h"
 
-#include "plugins/custom_recipe/rules.h"
+#include "rules.h"
 
 namespace custom_recipe {
 

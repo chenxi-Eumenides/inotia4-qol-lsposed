@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/game_host.h"
+#include "../../contracts/game_host.h"
 
 // S2 编解码、99/999 策略与有效视图只属于 stack_limit 插件。调用方通过
 // QolItemCountApi 访问这些语义，不得依赖本头。

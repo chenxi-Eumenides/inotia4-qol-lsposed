@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 合成器界面层插件清单入口（ARCHITECTURE.md §3.3；C2 Step 3）。
 //

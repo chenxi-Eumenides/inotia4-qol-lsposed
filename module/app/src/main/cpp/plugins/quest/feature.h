@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 任务完成度进档重算（quest 插件业务层，ARCHITECTURE.md §3.3）。
 //

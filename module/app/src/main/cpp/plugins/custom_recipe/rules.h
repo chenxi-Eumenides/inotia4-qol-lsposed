@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/attribute_quality.h"
+#include "../../contracts/attribute_quality.h"
 
 // 自定义合成配方「提升一档」纯逻辑（custom-craft-recipe §4.6 / §2.4）。
 //

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 自定义合成配方插件清单入口（ARCHITECTURE.md §3.3；C2 Step 4）。
 //

@@ -1,12 +1,12 @@
-#include "plugins/craft_ui/plugin.h"
+#include "plugin.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/craft_result.h"
-#include "plugins/craft_ui/feature.h"
+#include "../../contracts/craft_result.h"
+#include "feature.h"
 
 // ===========================================================================
 // 合成器界面层插件：全部 UIMix hook 的唯一挂载处（C2 Step 3）

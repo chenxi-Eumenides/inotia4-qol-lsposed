@@ -1,6 +1,6 @@
 // 原生 UICHOICE 选择框插件业务层。
 
-#include "plugins/native_choice/feature.h"
+#include "feature.h"
 
 #include <array>
 #include <cstdint>
@@ -8,7 +8,7 @@
 #include <cstring>
 #include <mutex>
 
-#include "plugins/native_choice/plugin.h"
+#include "plugin.h"
 
 namespace qol::features::native_choice {
 namespace {

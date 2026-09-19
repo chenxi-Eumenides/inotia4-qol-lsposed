@@ -1,10 +1,10 @@
-#include "plugins/attribute_range_display/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/attribute_quality.h"
+#include "../../contracts/attribute_quality.h"
 
 namespace qol::features::attribute_range_display {
 namespace {

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/attribute_quality.h"
+#include "../../contracts/attribute_quality.h"
 
 namespace attribute_quality {
 

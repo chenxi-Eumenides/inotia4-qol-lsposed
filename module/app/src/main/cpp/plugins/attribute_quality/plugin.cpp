@@ -1,9 +1,9 @@
-#include "plugins/attribute_quality/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 
-#include "contracts/attribute_quality.h"
-#include "plugins/attribute_quality/feature.h"
+#include "../../contracts/attribute_quality.h"
+#include "feature.h"
 
 namespace qol::features::attribute_quality {
 namespace {

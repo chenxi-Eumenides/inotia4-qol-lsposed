@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "contracts/plugin.h"
-#include "contracts/ui_choice.h"
+#include "../../contracts/plugin.h"
+#include "../../contracts/ui_choice.h"
 
 // 原生选择框插件业务层（原 feature/ui/native_choice，D1-b1 迁移）。
 //

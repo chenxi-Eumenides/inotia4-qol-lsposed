@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 特殊装备解锁（special-equip）插件业务层。
 //

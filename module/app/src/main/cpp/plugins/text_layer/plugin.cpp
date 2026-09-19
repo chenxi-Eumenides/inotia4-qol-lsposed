@@ -1,12 +1,12 @@
-#include "plugins/text_layer/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 #include <cstdarg>
 #include <cstdio>
 
-#include "contracts/text_layer.h"
-#include "plugins/text_layer/charinfo_scope.h"
-#include "plugins/text_layer/feature.h"
+#include "../../contracts/text_layer.h"
+#include "charinfo_scope.h"
+#include "feature.h"
 
 namespace qol::features::text_layer {
 namespace {

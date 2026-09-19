@@ -1,4 +1,4 @@
-#include "plugins/custom_recipe/rules.h"
+#include "rules.h"
 
 namespace custom_recipe {
 

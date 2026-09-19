@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 文本层插件清单入口（ARCHITECTURE.md §3.3）：2 条入口 hook 资源 + text_layer v1 能力。
 // - hook:MEMORYTEXT_GetText：共享资源（owner 独占，消费者经 dispatch）；

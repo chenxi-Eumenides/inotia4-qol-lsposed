@@ -1,7 +1,7 @@
-#include "plugins/world_teleport/plugin.h"
+#include "plugin.h"
 
-#include "contracts/ui_choice.h"
-#include "plugins/world_teleport/feature.h"
+#include "../../contracts/ui_choice.h"
+#include "feature.h"
 
 namespace qol::features::world_teleport {
 namespace {

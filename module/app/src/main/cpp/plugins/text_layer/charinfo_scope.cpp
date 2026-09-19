@@ -1,7 +1,7 @@
-#include "plugins/text_layer/charinfo_scope.h"
+#include "charinfo_scope.h"
 
-#include "plugins/text_layer/feature.h"
-#include "plugins/text_layer/plugin.h"
+#include "feature.h"
+#include "plugin.h"
 
 namespace qol::features::text_layer {
 namespace {

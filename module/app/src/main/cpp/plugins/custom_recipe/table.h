@@ -3,9 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "plugins/custom_recipe/catalog.h"
-#include "contracts/game_host.h"
-#include "contracts/host_sdk.h"
+#include "catalog.h"
+#include "../../contracts/game_host.h"
+#include "../../contracts/host_sdk.h"
 
 // 自定义合成配方的 RECIPEBASE / MIXTUREBASE 表注入（custom-craft-recipe §4.3）。
 //

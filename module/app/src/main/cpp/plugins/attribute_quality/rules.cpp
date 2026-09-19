@@ -1,4 +1,4 @@
-#include "plugins/attribute_quality/rules.h"
+#include "rules.h"
 
 #include <cstdint>
 

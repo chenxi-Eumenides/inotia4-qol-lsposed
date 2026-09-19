@@ -1,6 +1,6 @@
 // 世界传送 4 选项业务层。声明式入口 patch 的 handler 转入本文件。
 
-#include "plugins/world_teleport/feature.h"
+#include "feature.h"
 
 #include <array>
 #include <cstdarg>
@@ -8,9 +8,9 @@
 #include <cstdio>
 #include <cstring>
 
-#include "contracts/ui_choice.h"
-#include "plugins/world_teleport/plugin.h"
-#include "plugins/world_teleport/rules.h"
+#include "../../contracts/ui_choice.h"
+#include "plugin.h"
+#include "rules.h"
 
 namespace {
 

@@ -1,9 +1,9 @@
-#include "plugins/native_choice/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 
-#include "contracts/ui_choice.h"
-#include "plugins/native_choice/feature.h"
+#include "../../contracts/ui_choice.h"
+#include "feature.h"
 
 namespace qol::features::native_choice {
 namespace {

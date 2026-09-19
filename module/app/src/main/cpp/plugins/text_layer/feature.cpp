@@ -1,10 +1,10 @@
-#include "plugins/text_layer/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdint>
 
-#include "plugins/text_layer/charinfo_scope.h"
-#include "plugins/text_layer/plugin.h"
+#include "charinfo_scope.h"
+#include "plugin.h"
 
 namespace qol::features::text_layer {
 namespace {

@@ -1,11 +1,11 @@
-#include "plugins/craft_ui/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 namespace qol::features::craft_ui {
 

@@ -1,7 +1,7 @@
-#include "plugins/attribute_range_display/plugin.h"
+#include "plugin.h"
 
-#include "contracts/attribute_quality.h"
-#include "plugins/attribute_range_display/feature.h"
+#include "../../contracts/attribute_quality.h"
+#include "feature.h"
 
 namespace qol::features::attribute_range_display {
 namespace {

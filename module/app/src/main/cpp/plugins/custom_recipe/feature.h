@@ -1,9 +1,9 @@
 #pragma once
 
-#include "contracts/craft_result.h"
-#include "contracts/game_host.h"
-#include "contracts/host_sdk.h"
-#include "contracts/ownership.h"
+#include "../../contracts/craft_result.h"
+#include "../../contracts/game_host.h"
+#include "../../contracts/host_sdk.h"
+#include "../../contracts/ownership.h"
 
 namespace qol::contracts {
 struct PluginContext;

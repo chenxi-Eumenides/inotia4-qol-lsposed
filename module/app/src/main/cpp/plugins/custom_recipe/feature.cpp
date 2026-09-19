@@ -8,7 +8,7 @@
 //   · 本层只回答「这 3 格是什么结果 / 该产出什么 / 该扣什么」，不认识界面。
 //   · 界面层 plugins/craft_ui 经 infra/capabilities 的 `craft_result` 能力消费本层结果。
 
-#include "plugins/custom_recipe/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstddef>
@@ -17,12 +17,12 @@
 #include <cstdio>
 #include <cstring>
 
-#include "contracts/attribute_quality.h"
-#include "contracts/events.h"
-#include "contracts/plugin.h"
-#include "plugins/custom_recipe/catalog.h"
-#include "plugins/custom_recipe/rules.h"
-#include "plugins/custom_recipe/table.h"
+#include "../../contracts/attribute_quality.h"
+#include "../../contracts/events.h"
+#include "../../contracts/plugin.h"
+#include "catalog.h"
+#include "rules.h"
+#include "table.h"
 
 extern int (*fn_math_get_random)(int, int);
 

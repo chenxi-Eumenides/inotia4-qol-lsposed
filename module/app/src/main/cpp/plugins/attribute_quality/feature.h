@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "contracts/attribute_quality.h"
-#include "contracts/plugin.h"
+#include "../../contracts/attribute_quality.h"
+#include "../../contracts/plugin.h"
 
 // 属性质量 provider：范围探测、百分位和档位判定。颜色码与文本改写不属于本目录。
 

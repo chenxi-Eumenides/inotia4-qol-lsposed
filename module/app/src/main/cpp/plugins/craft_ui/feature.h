@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "contracts/game_host.h"
-#include "contracts/host_sdk.h"
+#include "../../contracts/game_host.h"
+#include "../../contracts/host_sdk.h"
 
 namespace qol::contracts {
 struct PluginContext;

@@ -2,7 +2,7 @@
 //
 // 设计口径、取舍理由与角色闸门归属见 feature.h 头部注释。
 
-#include "plugins/special_equip/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -10,7 +10,7 @@
 #include <cstring>
 #include <cstdio>
 
-#include "plugins/special_equip/rules.h"
+#include "rules.h"
 
 namespace qol::features::special_equip {
 namespace {

@@ -1,10 +1,10 @@
-#include "plugins/stack_limit/plugin.h"
+#include "plugin.h"
 
 #include <atomic>
 #include <cstdint>
 
-#include "contracts/result.h"
-#include "plugins/stack_limit/stack_codec_impl.h"
+#include "../../contracts/result.h"
+#include "stack_codec_impl.h"
 
 // 堆叠上限：999 功能组的声明式所有者。S2 的 codec 与 facade provider 均在本插件内，
 // 资源的物理安装/还原交宿主按 gate 同步。inventory_hooks 持有的消费 wrapper 尚未迁入

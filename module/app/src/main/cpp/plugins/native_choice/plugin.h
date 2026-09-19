@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 原生选择框插件清单入口（ARCHITECTURE.md §3.3）：2 条 kRequired/kFailClosed 常驻资源，
 // 并向消费者提供 `ui_choice` 能力（v1.0）。

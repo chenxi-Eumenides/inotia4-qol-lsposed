@@ -1,8 +1,8 @@
-#include "plugins/quest/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 
-#include "plugins/quest/feature.h"
+#include "feature.h"
 
 namespace qol::features::quest {
 namespace {
