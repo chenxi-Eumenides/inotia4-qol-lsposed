@@ -10,17 +10,12 @@
 
 ## 0. 编号与「胶囊」口径
 
-**架构分层只有一套：L0–L5**（L0 contracts / L1 game / L2 infra+hooks+patch / L3 plugins / L4 出口面 / L5 host）。设计的七目录为 `contracts/game/infra/hooks/patch/plugins/host`，**没有"胶囊层/胶囊目录"**。
+**架构分层只有一套：L0–L5**（L0 contracts / L1 game / L2 infra+hooks+patch / L3 plugins / L4 出口面 / L5 host）；七目录为 `contracts/game/infra/hooks/patch/plugins/host`。
 
-**「胶囊」（可外置插件）的定位——以下均为设计原文口径**（`ARCHITECTURE.md` v0.3.14 / ADR-0008）：
+**「胶囊」不是层，也不作为本文条目**：它是设计对 **L3 `plugins/<id>/`** 的形态约束——「所有内置插件从目标结构上必须是可外置胶囊」（ADR-0008 决策 1；`ARCHITECTURE.md` §2.1 `:85`、§2.2 `:107`、§2.3 `:121`）；Host SDK / Game Host API 属宿主内核，§3.8 `:378` 明确「不属于胶囊模型」。
+**此类设计解释以设计为权威，本文不复述、不推演。**
 
-1. **胶囊 = L3 `plugins/<id>/` 的形态定义**（*不是新层*）：该目录拥有全部私有规则、UI、生命周期实现与测试；源码只允许 include ①公共 `contracts/` ②自身目录。
-   依据：§2.1（`:85`「L3 plugins/<id>/ 可外置胶囊」）、§2.2（`:107`）、§2.3（`:121`）、ADR-0008 决策 1。
-2. **Host SDK / Game Host API 属宿主内核设施，设计明确它们「不属于胶囊模型」**：不参与插件生命周期、不可停用，由 `host/` 实现并经 `PluginContext` 注入；其**类型/函数表**位于 `contracts/`。
-   依据：§3.8（`:360`、`:378`）、ADR-0008 决策 3/4。
-3. 因此正确关系是：胶囊（L3 的约束）**引用** L0 的契约与 L5 的实现，而**不能**把 Host SDK / Game Host API 说成"胶囊的组件"（本文早前一处表述即此处失准，已按设计改正）。
-
-> 施工阶段（工作分解顺序）另有编号 **C1–C7**，仅记录在 `ledger.md` §7，**不是分层编号**。
+> 施工阶段（工作分解顺序）编号 **C1–C7** 仅记录在 `ledger.md` §7，**不是分层编号**。
 
 ---
 
@@ -31,7 +26,7 @@
 | L0 | `contracts/` | 19 / 1,630 | 跨层稳定接口：POD、能力契约、宿主 SDK / Game Host 函数表；**不含游戏逻辑** |
 | L1 | `game/` | 36 / 2,725 | 唯一承接游戏版本耦合（VMA/偏移/ABI/函数调用）；**禁止业务规则** |
 | L2 | `infra/` + `hooks/` + `patch/` | 40 / 4,203 | 运行时机制：调度/队列/事件/能力/状态/配置/存储 + 资源登记/事务/分派 + 指令改写 |
-| L3 | `plugins/` | 154 / 30,974 | 17 个内置插件（功能实现 + 能力 provider/consumer + 面板）；胶囊约束：只能 include `contracts/` 与自身目录 |
+| L3 | `plugins/` | 154 / 30,974 | 17 个内置插件（功能实现 + 能力 provider/consumer + 面板）；目录形态受「可外置胶囊」约束（ADR-0008，只允许 include `contracts/` 与自身目录） |
 | L4 | （原 `products/`，已取消） | — | 出口面职责现由 `plugins/core.api`（路由内核，待 C6）与 `plugins/core.ui`（UI 容器与通用组件）承担 |
 | L5 | `host/` | 17 / 4,229 | 宿主：装配、插件生命周期执行器、Host SDK/Game Host 实现、帧源、core 常驻补丁、状态 JSON |
 
