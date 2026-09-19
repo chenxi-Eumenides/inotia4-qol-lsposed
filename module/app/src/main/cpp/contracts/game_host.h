@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "contracts/host_sdk.h"
+#include "host_sdk.h"
 
 namespace qol::contracts {
 

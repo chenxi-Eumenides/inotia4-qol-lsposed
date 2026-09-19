@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/result.h"
+#include "result.h"
 
 // 属性质量只读能力（ARCHITECTURE.md §7.4 / ADR-0008）。
 // provider 只返回范围、百分位与语义档位；游戏内联颜色码属于 display 消费者。

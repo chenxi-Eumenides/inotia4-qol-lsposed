@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 简单模式插件业务层（ARCHITECTURE.md §3.3）。
 //

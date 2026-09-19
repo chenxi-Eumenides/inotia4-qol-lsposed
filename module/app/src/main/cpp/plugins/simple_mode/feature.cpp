@@ -1,4 +1,4 @@
-#include "plugins/simple_mode/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -7,7 +7,7 @@
 #include <cstring>
 #include <cstdio>
 
-#include "plugins/simple_mode/rules.h"
+#include "rules.h"
 
 namespace qol::features::simple_mode {
 namespace {

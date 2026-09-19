@@ -160,3 +160,60 @@ P2-B4 待删，UI primitive 的替代面为已覆盖的 `UiAdapter`；本批不�
 本批 host adapter 测试使用 fake game access 覆盖正常、空指针和未就绪错误；fake 只
 证明转发表和错误语义，不证明真实游戏内存位域的运行时布局。按 ADR 的行为证据规则，
 本批不装真机，行为面仍为 `NOT_ACCEPTED`。
+
+## 模块侧插件原型（simple_mode）
+
+### CMake 边界做法
+
+`module/app/src/main/cpp/CMakeLists.txt` 为 `plugins/simple_mode/*.cpp` 建立独立的
+`qol_plugin_simple_mode` 静态 target，target 只编译 `rules.cpp`、`feature.cpp` 和
+`plugin.cpp`，并将其以 `PRIVATE` 方式链接进 `gamebridge`。这三个源文件不再作为
+`gamebridge` 的源文件重复编译，因此插件实现的链接入口已经由独立 target 提供，装配
+顺序和运行时注册代码仍在宿主 `host/assembly.cpp`。
+
+该 target 的 include 目录严格只有：
+
+```cmake
+${CMAKE_CURRENT_SOURCE_DIR}/contracts
+${CMAKE_CURRENT_SOURCE_DIR}/plugins/simple_mode
+```
+
+没有继承 `gamebridge` 的 include 目录，也没有把 `${CMAKE_CURRENT_SOURCE_DIR}` 加入
+插件 target。插件源文件使用自身目录的头和 contracts 目录的契约；contracts 内部头
+也使用同目录引用，以便在不开放宿主根目录的情况下完成传递包含。故插件 target 对
+`host/`、`infra/`、`game/`、`hooks/`、`patch/`、legacy 目录均无可用 include 搜索路径。
+
+边界复现：在 `plugins/simple_mode/plugin.cpp` 临时加入
+`#include "host/assembly.h"`，执行 Android native 构建或直接对该 target 构建时应因
+找不到头文件失败；删除该行后构建恢复。该行不应保留在源码中。
+
+### simple_mode 实际 ABI 清单
+
+| ABI 面 | 实际使用 | 状态 |
+|---|---|---|
+| `PluginDescriptor` | `id`、`version`；`requires`/`optional_requires`/`provides` 的数量与空指针；`resources_count/resources`；`jni_count/jni`；`install`、`deactivate`、`on_enabled`、`on_disabled`、`fill_status`、`on_resource_ready` | 已够用 |
+| `ResourceClaim` | 两条 `kEntryHook` 声明：`id`、`symbol`、`policy`、`requirement`、`failure`、`resumable`、`owner`、`reason`、`gate`、`step_budget`、`handler`；`atomic` 使用默认 `false` | 已够用 |
+| `JniBinding` | `kotlin_method`、`native_symbol`、`signature_hash=nullptr` | 当前已够用；签名哈希值属于 P5 后续缺面，不阻塞本原型 |
+| `PluginContext` | `struct_size`、`sdk_major`、`sdk`、`game`；`sdk_minor/plugin_id` 由宿主填充但本插件不读取 | 已够用 |
+| Host SDK `log` | `QolHostSdk::log.write(level, domain, source, message, message_len)` | 已够用 |
+| Host SDK `config` | `QolHostSdk::config.get_bool(key, default_value, out_value)` | 已够用 |
+| Host SDK `events` | `subscribe(type, handler, ctx, out_id)`、`unsubscribe(id)` | 已够用 |
+| 事件类型 | `kEventConfigChanged` 与 `ConfigChangedEvent{key, int_value}` | 已够用；不使用 save 事件 |
+| Game Host 角色读面 | `read.character.type`、`read.character.is_active_player_group` | 已够用 |
+| Game Host 兼容角色读面 | `extra.character.is_party_member`、`summoner`、`pool_slot`、`max_hp`、`hp` | 已够用；后续可迁至按域只读面后保持签名语义 |
+| Game Host 角色写面 | `extra.character_write.max_hp`、`hp` | 已够用；仅 wrapper 在游戏线程调用 |
+| Result | 所有上述函数的 `QolResult` 与 `kQolOk` | 已够用 |
+
+本插件不使用 Host SDK 的 scheduler、commands、capabilities、store、panels、hooks、
+text_scope、UI，也不使用 Game Host 的 target/thread、item、world、craft、save、quest、
+choice、write/call 其它成员。当前行为所需 ABI 没有缺面；唯一显式延期项是
+`JniBinding.signature_hash` 的实际哈希值，待 P5 三向 JNI 校验落地时补齐。
+
+### 后续逐插件推进
+
+每迁移一个插件，先把该插件现有实现拆入自己的独立 target，并将 target include 目录
+限制为 `contracts/` 与该插件自身目录；再根据编译器暴露的真实调用点逐项增补
+Host SDK、Game Host 或 provider capability 的契约面。每次只新增该插件实际需要的
+POD/函数指针成员，不开放宿主根目录、不恢复 legacy include；target 能独立编译后，
+再从 `gamebridge` 源列表移除对应 `.cpp` 并链接插件 target。行为面仍须使用受影响 VM
+卡的真机日志验收，独立编译成功本身不替代行为证据。

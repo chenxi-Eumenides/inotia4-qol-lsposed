@@ -11,9 +11,9 @@
 
 #include <cstdint>
 
-#include "contracts/game_host.h"
-#include "contracts/host_sdk.h"
-#include "contracts/version.h"
+#include "game_host.h"
+#include "host_sdk.h"
+#include "version.h"
 
 namespace qol::contracts {
 

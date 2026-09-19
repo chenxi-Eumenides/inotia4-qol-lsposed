@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(gamebridge)
 
+add_library(qol_plugin_simple_mode STATIC
+    plugins/simple_mode/rules.cpp
+    plugins/simple_mode/feature.cpp
+    plugins/simple_mode/plugin.cpp
+)
+set_target_properties(qol_plugin_simple_mode PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(qol_plugin_simple_mode PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/contracts
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/simple_mode
+)
+target_compile_features(qol_plugin_simple_mode PRIVATE cxx_std_17)
+
 add_library(gamebridge SHARED
     bridge/native/gamebridge.cpp
     bridge/native/gamebridge_data.cpp
@@ -60,7 +72,7 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/core/native
     ${CMAKE_CURRENT_SOURCE_DIR}/data/native
 )
-target_link_libraries(gamebridge ${log-lib} dl)
+target_link_libraries(gamebridge PRIVATE ${log-lib} dl qol_plugin_simple_mode)
 
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
@@ -211,9 +223,6 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     game/access/symbols.cpp
     game/access/char.cpp
-    plugins/simple_mode/rules.cpp
-    plugins/simple_mode/feature.cpp
-    plugins/simple_mode/plugin.cpp
     host/plugin_registry.cpp
     host/assembly.cpp
     bridge/native/gamebridge_simple_mode.cpp

@@ -24,10 +24,10 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "contracts/commands.h"
-#include "contracts/panels.h"
-#include "contracts/result.h"
-#include "contracts/version.h"
+#include "commands.h"
+#include "panels.h"
+#include "result.h"
+#include "version.h"
 
 namespace qol::contracts {
 

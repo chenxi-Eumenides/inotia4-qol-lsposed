@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/game_host.h"
+#include "game_host.h"
 
 namespace qol::contracts {
 

@@ -1,10 +1,10 @@
-#include "plugins/simple_mode/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/events.h"
-#include "plugins/simple_mode/feature.h"
+#include "events.h"
+#include "feature.h"
 
 namespace qol::features::simple_mode {
 namespace {

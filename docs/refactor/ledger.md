@@ -251,6 +251,8 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本节追加契约或另行登记的 U11/C5
 契约缺口。
 
+| C4-原型 | `simple_mode` 独立 target 与 include 边界 | ✅ 已落地 | `qol_plugin_simple_mode` 仅编译插件自身 3 个源文件，仅 include `contracts/` 与自身目录；链接进 `gamebridge`，ABI 清单与复现命令见 ADR-0010「模块侧插件原型（simple_mode）」 |
+
 ### P2-A：日志与存档事件迁移（ADR-0010）
 
 | 项 | 状态 | 当前事实 / 证据 |

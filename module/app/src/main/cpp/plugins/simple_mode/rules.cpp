@@ -1,4 +1,4 @@
-#include "plugins/simple_mode/rules.h"
+#include "rules.h"
 
 #include <limits>
 

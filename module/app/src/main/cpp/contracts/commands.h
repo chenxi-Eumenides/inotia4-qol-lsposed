@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-#include "contracts/result.h"
+#include "result.h"
 
 namespace qol::contracts {
 
