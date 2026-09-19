@@ -4,9 +4,11 @@
 > - 架构权威：根目录 `ARCHITECTURE.md`（当前 v0.3.14，待外部复审签署）
 > - 阶段与验收状态：`docs/refactor/ledger.md`、`docs/refactor/verification.md`
 > - 结构基线：`docs/refactor/baseline.md`、`docs/refactor/map.md`（脚本生成）
-> - 生成时点：2026-09-19，仓库 HEAD `7e77af0`；来源＝`module/app/src/main/cpp/` 物理文件清单
+> - 生成时点：2026-09-19（**P0 事实修正版**），仓库 HEAD `6fc6098`；来源＝`module/app/src/main/cpp/` 物理文件清单 + `scripts/maintenance/` 脚本实测输出
 > - 口径：文件数/行数为 `wc -l`（含空行与注释）；只列**当前实际存在**的模块，设计提及但未落地的在「收口项」标注
+> - **三态标记（全篇适用）**：**当前事实**＝可由源码/脚本输出直接定位；**迁移债**＝当前存在但已有目标归属与清除阶段；**目标设计问题**＝目标边界本身过宽或缺少硬约束
 > - 用途：给人快速理解现状（含**依赖链**：插件↔插件 / 插件↔组件 / 组件↔组件）；**任何决策请回到权威文档**，本文件不得作为落地依据
+> - **基线可信度**：`check_arch.py` 全部通过只代表「无新增违规」（基线棘轮），**不代表七目录合规**；基线内仍有层方向 32 条、符号/裸地址 9 条、资源 3 条（2026-09-19 实测）——均属**迁移债**
 
 ## 0. 编号口径
 
@@ -39,7 +41,7 @@
 | `events.h` / `commands.h` | 事件类型（配置变更等）/ 命令端口（票据 id、状态、kind） |
 | `ownership.h` | 所有权机制契约（`acquire/release`）——表注入、弹窗状态占用等「所有权型」资源 |
 | `panels.h` | 设置页项与面板 provider 注册契约（`UiPanelsApi`：open/close/active/block_reason） |
-| `stack_codec.h` | S2 数量编码（canonical ↔ a/b 段、视图计数/钳制/回写判定）——原 `game/read/` 迁入，供多插件共享 |
+| `stack_codec.h` | S2 数量编码（canonical ↔ a/b 段、视图计数/钳制/回写判定）——原 `game/read/` 迁入，供多插件共享。**目标设计问题**（审阅 §8.5）：混装 codec、99/999 策略、marker 与写回门控；计划 P1 下沉为 `stack_limit` 实现头，公共面只留 `item_count` facade |
 | `stack_limit.h` | 上限状态只读端口声明（实现在宿主过渡侧） |
 | `attribute_quality.h` | `attribute.quality` 能力（档位/百分位/区间探测，**不输出颜色码**） |
 | `craft_result.h` | 合成结果能力（12 函数：模式判定/放料/准备/执行/材料需求/产物/描述替换） |
@@ -133,7 +135,16 @@
 | `world_teleport` | 地图传送（零资源 + 声明式双指纹入口 patch；消费 `ui_choice`） |
 | `extension_bag` | 扩展背包整域（29 条声明式资源；状态机/事务/投影/出售/合成/装备/持久化；发布 `extension_bag`） |
 
-**插件边界合规**：17/17 插件对 `game/ infra/ hooks/ patch/ host/` 及跨插件 include 计数为 **0**；真机 smoke 通过（VM-BOUNDARY）。
+**插件边界合规（P0 修正：两种口径必须分开陈述）**
+
+| 口径 | 结果 | 三态 |
+|---|---|---|
+| 带目录前缀 `(game\|infra\|hooks\|patch\|host)/` 与跨插件 include | **0** 条 | 当前事实（新架构前缀已无直引） |
+| legacy 路径：`core/native/**`、`data/native/**`、根部裸名头（`game_access.h` / `game_state.h` / `game_symbols.h` / `qol_log.h` / `game_ops_common.h` / `game_feature.h` / `inventory_trade.h` / `sell_price.h` / `save_enter.h` / `save_exit.h` / `game_ptr_hook.h` / `item_class.h`） | **19 个文件**（12 个去重头） | **迁移债**（宿主/legacy 私有面直引，待 P3 清除） |
+
+**当前事实（逐文件，共 19 个）**：`extension_bag/game_ui_virtbag.cpp`(10)、`inventory_hooks/native_inventory_hook.cpp`(6)、`core.ui/panels/settings.cpp`(6)、`autosell/scan.cpp`(6)、`save_backup/ui/panel.cpp`(5)、`save_backup/feature.cpp`(3)、`extension_bag/extension_bag_port.cpp`(3)、`extension_bag/extension_bag_geometry.cpp`(3)、`autosell/ui/panel.cpp`(3)、`inventory_hooks/inventory_hook_stage4.cpp`(2)、`autosell/view.cpp`(2)、`save_backup/plugin.cpp`(1)、`extension_bag/game_ui_virtbag.h`(1)、`extension_bag/extension_bag_store.inc`(1)、`extension_bag/extension_bag_persistence.cpp`(1)、`extension_bag/extension_bag_logging.h`(1)、`autosell/view.h`(1)、`autosell/store.cpp`(1)、`autosell/plugin.cpp`(1)。
+
+**结论**：此前"17/17 合规"是**口径漏检**的结论；真实结论＝"目录前缀口径 0、legacy 口径 19 文件未清"。真机 smoke（VM-BOUNDARY）只证明启动/门禁/生命周期面，**不构成边界合规证据**。
 
 ## 1.7 `host/`（17）
 
@@ -238,7 +249,7 @@
 | `text_layer` | hooks, log, text_scope | — | plugin, text_layer |
 | `world_teleport` | capabilities, log, scheduler | — | plugin, ui_choice |
 
-**读法**：全部插件只 include `contracts/` 与自身目录（插件边界合规 17/17）；对宿主设施一律经 `sdk->`/`game->` 函数表，不出现 `game/infra/hooks/patch/host` 的直接 include。
+**读法**：插件对宿主设施的**新架构访问面**（Host SDK / Game Host / contracts）见上表；但**尚有 19 个文件保留 legacy 私有 include**（`core/native/**`、`data/native/**`、根部裸名头，逐文件见 §1.6），故"全部插件只 include `contracts/` 与自身目录"**当前不成立**，属 P3（≈C7）清除目标。
 
 ## 3.3 组件 ↔ 组件（编译期 include 边，实测）
 
@@ -294,3 +305,36 @@
    - thunk 池在门禁关闭时不回收（约 51 次开关往返耗尽）；`g_patched_calls` 去重表容量 16 < 21 站点。
 4. **契约缺口**：`contracts/ui.h` 部分 raw 面仍由 adapter 提供；`extension_bag` JSON 面 `write_json` 为 v1.1 预留。
 5. **过渡依赖**：`stack_limit.h` 实现、`game/access/ui_*` 背后实现、`core/native/*` 多处仍在遗留位置（见 `map.md` 过渡依赖区）。
+
+---
+
+# 五、2026-09-19 架构审阅：已核验的阻断事实（P0 冻结）
+
+> 审阅记录：`docs/refactor/architecture-review-2026-09-19.md`（结论 **NOT_ACCEPTED**）。以下 6 条已逐条核验**成立**（核验方式＝源码定位 + 脚本实测），未作任何代码改动。
+
+| # | 事实 | 三态 | 证据 |
+|---|---|---|---|
+| 1 | 插件存在 19 个文件的 legacy 私有 include（目录前缀口径为 0） | 迁移债 | §1.6 双口径表；`check_layers` 层方向 32 条 |
+| 2 | `arch_common.py` 过渡规则仍允许 `plugins → game/infra/hooks/patch/domains`，`BASE_LAYERS` 含 `domains`，另有 `_ROOT_OVERRIDES`/`_CORE_OVERRIDES`/`_TARGET_PREFIXES` 三张映射 | 迁移债 + **目标设计问题** | `arch_common.py:36,67-72,95,110,129` |
+| 3 | 校验器"通过"＝无新增而非合规（层方向 32 / 符号·裸地址 9 / 资源 3 落在基线内，豁免 1） | 迁移债 | `check_layers/offsets/resources` 实测输出 |
+| 4 | 单一 `gamebridge` target，无独立插件 target（无法证明插件可独立编译/不链接宿主私有符号） | 迁移债 | `CMakeLists.txt:4` + 144 条源文件 |
+| 5 | `QolGameHostExtraApi` 过宽（`host/game_host.cpp` 15 处 `extra.*` 注入；跨域业务聚合） | **目标设计问题** | `contracts/game_host.h:233,259`；`host/game_host.cpp` |
+| 6 | `contracts` 存在绕过 capability 的全局业务函数（`stack_limit.h`、`autosell.h`）；`host/core_patches` 把 S2 与 hub 混在同 owner/reason | **目标设计问题** | `contracts/stack_limit.h:5,9`、`contracts/autosell.h:44-46`、`host/core_patches.cpp:26-34` |
+
+**审阅裁决（本轮目标，非当前事实）**：`core.*` 保持 **2 个**（`core.api` + `core.ui`，插件总数 17→18）；S2（codec / getter / 写路径 / 99–999 策略）最终归 `stack_limit`；Hub 兼容补丁不再与 S2 同 owner；`core.game` / `core.inventory` / `core.save` / `core.diagnostics` / `core.compat` / `core.config` / `core.log` / `core.registry` **一律不创建**（正确归属见审阅 §5）。
+
+# 六、收口计划（P0–P6，2026-09-19 审阅版）
+
+> **编号区分**：`C1–C7`＝已完成的插件边界迁移施工阶段（见 `ledger.md` §7）；`P0–P6`＝本轮审阅后的收口顺序。映射关系：P2≈C7 的 ABI 补齐、P3≈C7 的脚本硬失败与 include 清零、P5≈C6。
+
+| 阶段 | 目标 | 关键交付 | 依赖 |
+|---|---|---|---|
+| **P0** | 冻结事实与词汇 | 本文双口径事实表 + 三态标记；`ledger.md` §7 记录审阅裁决与 P0–P6 | — |
+| **P1** | 公共契约纯度 + S2 seam | 冻结 Game Host `item_count` facade；`stack_codec.h` 下沉为 `stack_limit` 实现头；消除 `stack_limit.h`/`autosell.h` 全局函数（改 provider 函数表/SDK）；明确 marker 与库存写回归属 | P0 |
+| **P2** | Game Host / SDK ABI 面补齐 | 逐项冻结缺口面（log/config、save/quest/world、item_class、craft、EB 端口、UI 原语），配 fake 注入 host 测试 | P1 |
+| **P3** | 插件 include 清零 + 独立构建 + 脚本硬失败 | 19 文件 legacy include 清除；per-plugin target（或等价链接矩阵）；`check_layers` 删过渡规则并硬失败 | P2 |
+| **P4** | provider 声明 + capability DAG + extra 拆分 | 7 provider 补 provides/requires；`install_all` 改 DAG 执行；拆 `QolGameHostExtraApi`；修 5 条未声明消费 | P3 |
+| **P5** | `core.api` / `core.ui` 出口收口 | 149 路由 owner 表 + `http.registry`；两 core 走普通生命周期，停用只降级出口 | P4 |
+| **P6** | S2 residency + 收口与签署门禁 | S2 claims 迁 `stack_limit`（含 boot 时序论证）；provider residency × feature enabled 双态；清过渡映射与豁免 | P5 |
+
+**单写者纪律**：`contracts/**`、`arch_common.py`、`host/` 内核、`ARCHITECTURE.md` 全程单一写者；并行仅限 `plugins/<id>/`。
