@@ -107,6 +107,45 @@ QolResult read_item_ability(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
+QolResult read_item_enchant_remaining(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const int value = qol::game::item_enchant_remaining(item);
+    if (value < 0) return not_ready();
+    *out = value;
+    return contracts::ok();
+}
+
+QolResult read_item_socket_filled(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const int value = qol::game::item_socket_filled(item);
+    if (value < 0) return not_ready();
+    *out = value;
+    return contracts::ok();
+}
+
+QolResult read_item_socket_total(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const int value = qol::game::item_socket_total(item);
+    if (value < 0) return not_ready();
+    *out = value;
+    return contracts::ok();
+}
+
+QolResult read_item_backpack_category(int32_t category, int32_t* out) {
+    if (category < 0 || category > 0x3FF || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (!qol::game::item_class_table_ready()) return not_ready();
+    *out = qol::game::item_is_backpack_category(category) ? 1 : 0;
+    return contracts::ok();
+}
+
 QolResult read_world_position(const void*, int32_t*, int32_t*) { return unsupported(); }
 
 QolResult read_world_state(int32_t* out) {
@@ -920,6 +959,38 @@ contracts::QolGameHost make_game_host() {
     host.extra.choice_call = {&call_choice_write_items, &call_choice_write_title,
                               &call_choice_write_focus, &call_choice_push,
                               &call_choice_close_popup, &call_choice_play_sound};
+    host.read_only.character = {
+        &read_char_type, &read_char_active, &read_char_party, &read_char_party_member,
+        &read_char_summoner, &read_char_level, &read_char_merc_slot,
+        &read_char_can_change_equip, &read_char_menu_character, &read_char_pool_slot,
+        &read_char_max_hp, &read_char_hp};
+    host.read_only.item = {
+        &read_item_category, &read_item_jewel, &read_item_ability, &read_item_rarity,
+        &read_item_real_equip, &read_item_equip_level, &read_item_no_sell, &read_item_dice,
+        &read_item_cumulate_count, &read_item_class_no_equip_bit,
+        &read_item_equip_desc_role_type, &read_item_enchant_remaining,
+        &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category};
+    host.read_only.world = {&read_world_position, &read_world_state,
+                            &read_world_map_record_count, &read_world_current_map_id,
+                            &read_world_map_name, &read_world_direction, &read_world_money};
+    host.read_only.craft = {
+        &read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
+        &read_craft_selected_index, &read_craft_selected_item, &read_craft_stuff_item,
+        &read_craft_category_count, &read_craft_character_level, &read_craft_slot_control,
+        &read_craft_target_item, &read_craft_selected_inventory_item,
+        &read_craft_selected_recipe, &read_craft_slot_count};
+    host.read_only.save = {
+        &read_save_slot_state, &read_save_slot_exists, &read_save_slot_hero_index,
+        [](int32_t slot, int32_t* out) { return read_save_hero_value(slot, out, true); },
+        [](int32_t slot, int32_t* out) { return read_save_hero_value(slot, out, false); },
+        &read_save_load_data, &read_save_hub_key};
+    host.read_only.quest = {
+        &read_quest_state, &read_quest_active_slot_count, &read_quest_active_slot_id,
+        &read_quest_total_count,
+        [](uint32_t quest_id, int32_t* out) { return read_quest_value(quest_id, out, false); },
+        [](uint32_t quest_id, int32_t* out) { return read_quest_value(quest_id, out, true); }};
+    host.read_only.choice = {&read_choice_state_id, &read_choice_selected_index,
+                             &read_choice_text_owns};
     return host;
 }
 

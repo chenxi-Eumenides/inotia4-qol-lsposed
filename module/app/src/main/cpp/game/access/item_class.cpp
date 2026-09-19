@@ -32,6 +32,42 @@ int item_class_category(const void* item) {
     return static_cast<int>((flags >> 6) & 0x3FF);
 }
 
+int item_enchant_remaining(const void* item) {
+    if (item == nullptr) return -1;
+    const uint16_t raw =
+        *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(item) + I_ENCHANT);
+    return static_cast<int>((raw >> 2) & 0x0F);
+}
+
+int item_socket_filled(const void* item) {
+    if (item == nullptr) return -1;
+    const uint8_t raw =
+        *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(item) + I_SOCKET);
+    return static_cast<int>(raw & 0x0F);
+}
+
+int item_socket_total(const void* item) {
+    if (item == nullptr) return -1;
+    const uint8_t raw =
+        *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(item) + I_SOCKET);
+    return static_cast<int>((raw >> 4) & 0x0F);
+}
+
+bool item_class_table_ready() {
+    if (g_base == 0) return false;
+    uint8_t* base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    return base != nullptr && size_ptr != nullptr && *size_ptr != 0;
+}
+
+bool item_is_backpack_category(int category) {
+    if (category < 0 || category > 0x3FF || !item_class_table_ready()) return false;
+    const auto* record = static_cast<const uint8_t*>(item_class_record(
+        static_cast<uint16_t>(category)));
+    return record != nullptr && record[2] == 0x1F;
+}
+
 int equip_desc_role_type() {
     if (g_base == 0) return -1;
     return *reinterpret_cast<const uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);

@@ -119,3 +119,44 @@ host 测试、Debug APK 或 VM-BOUNDARY 不得替代该证据。
   `NOT_ACCEPTED`，不能用 host 测试或 Debug 构建替代真机证据。
 - legacy 回调 API 在全部消费者迁移前必须保留；事件总线使用快照派发，注销当轮可能仍被
   调用一次，消费者不得依赖“注销后当轮立即生效”。
+
+## P2-B1：按域只读面与 item 缺口（纯加法）
+
+本批在 `QolGameHost` 尾部追加 `read_only`，不改变既有成员的顺序、偏移或签名；
+`kGameHostMinor` 从 2 递增为 3。`read_only` 下列子表只包含读事实，函数统一返回
+`QolResult`：
+
+| 域 | 新面成员 | 实现落点 |
+|---|---|---|
+| character | `type`、`is_active_player_group`、`party_index`、`is_party_member`、`summoner`、`level`、`merc_slot`、`can_change_equip`、`menu_character`、`pool_slot`、`max_hp`、`hp` | `host/game_host.cpp` → `game/access/char.*` |
+| item | `category`、`is_jewel_category`、`ability_level`、`rarity`、`is_real_equip`、`equip_level`、`is_no_sell`、`is_dice`、`cumulate_count`、`class_no_equip_bit`、`equip_desc_role_type`、`enchant_remaining`、`socket_filled`、`socket_total`、`is_backpack_category` | `host/game_host.cpp`；缺口原语 → `game/access/item_class.*` |
+| world | `position`、`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`、`money` | `host/game_host.cpp` → `game/access/world.*` |
+| craft | `ui_type`、`panel_state`、`mix_type`、`selected_stuff_index`、`selected_stuff_item`、`stuff_item`、`category_held_count`、`character_level`、`stuff_slot_control`、`target_slot_item`、`selected_inventory_item`、`selected_recipe`、`stuff_slot_count` | `host/game_host.cpp` → `game/access/craft.*` |
+| save | `slot_state`、`slot_exists`、`slot_hero_index`、`hero_level`、`hero_class`、`load_data`、`hub_key` | `host/game_host.cpp` → `game/access/save.*` |
+| quest | `state`、`active_slot_count`、`active_slot_id`、`total_count`、`quest_state`、`is_complete` | `host/game_host.cpp` → `game/access/quest.*` |
+| choice | `state_id`、`selected_index`、`text_owns` | `host/game_host.cpp` → `game/access/ui_choice.*` |
+
+以上成员的完整 C 签名以 `contracts/game_host.h` 的 `Qol*ReadOnlyApi` 声明为准；指针、
+数组和存档数据继续遵守既有所有权契约。item 缺口的位域知识只在
+`game/access/item_class.*`：`I_ENCHANT` bits2–5、`I_SOCKET` 低/高 nibble，以及
+`ITEMCLASSBASE` 记录 +2 的 `0x1f` 判定；插件不获得 `I_ENCHANT`/`I_SOCKET`/`I_COUNT`/`g_base`。
+
+`QolGameHostExtraApi` 保留为 deprecated 兼容 shim，继续指向既有实现；P2-B2/B3 迁移
+消费者后于 P2-B4 删除。`QolCallApi::call_known` 与 `QolUiPrimitiveApi` 均标为
+P2-B4 待删，UI primitive 的替代面为已覆盖的 `UiAdapter`；本批不删除，避免消费者
+编译断裂。
+
+## 后续 lane 切分与验收
+
+- **P2-B2**：迁移 character/item/world/craft 的只读消费者，改用 `read_only`，并补
+  provider capability lookup；验收为旧 `extra` 读成员无新增消费者、错误码保持
+  `invalid_argument/not_ready`。
+- **P2-B3**：迁移 save/quest/choice 读消费者与 inventory/item provider；副作用改由
+  owner command 承载，验收为主线程执行、失败不写默认值、相关消费者不再依赖 `extra`。
+- **P2-B4**：完成所有消费者迁移后删除 `extra`、`call_known` 与 `QolUiPrimitiveApi`
+  兼容面，统一 `UiAdapter`；验收为 ABI minor/size 断言、全量 host tests、插件独立
+  include/link 检查和受影响 VM 卡真机日志。
+
+本批 host adapter 测试使用 fake game access 覆盖正常、空指针和未就绪错误；fake 只
+证明转发表和错误语义，不证明真实游戏内存位域的运行时布局。按 ADR 的行为证据规则，
+本批不装真机，行为面仍为 `NOT_ACCEPTED`。

@@ -20,6 +20,15 @@ bool item_class_no_equip_bit(const void* record);
 // 物品类别 = item+I_TYPE bits6-15；item 为空返回 -1。
 int item_class_category(const void* item);
 
+// 物品只读位域原语；item 为空返回 -1。
+int item_enchant_remaining(const void* item);
+int item_socket_filled(const void* item);
+int item_socket_total(const void* item);
+
+// ITEMCLASSBASE 记录 +2 == 0x1f 的背包类别判定；表未就绪返回 false。
+bool item_class_table_ready();
+bool item_is_backpack_category(int category);
+
 // 装备详情菜单角色类型（UIEquip desc_type）；未就绪 → -1。
 int equip_desc_role_type();
 

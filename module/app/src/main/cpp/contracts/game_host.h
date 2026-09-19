@@ -88,11 +88,12 @@ struct QolWriteApi {
 };
 
 struct QolCallApi {
+    [[deprecated("P2-B4 待删：插件不得通过泛型逃生口绕过稳定契约")]]
     QolResult (*call_known)(uint32_t call_id, const void* args, uint32_t args_size,
                             void* out, uint32_t out_size);
 };
 
-struct QolUiPrimitiveApi {
+struct [[deprecated("P2-B4 待删：UiAdapter 已覆盖 UI primitive")]] QolUiPrimitiveApi {
     QolResult (*create_control)(uint32_t kind, void** out_control);
     QolResult (*set_rect)(void* control, int32_t left, int32_t top, int32_t right, int32_t bottom);
     int32_t (*hit_test)(const void* control, int32_t x, int32_t y);
@@ -282,7 +283,10 @@ struct QolChoiceExtraCallApi {
     QolResult (*play_sound)(int32_t sound_id);
 };
 
-struct QolGameHostExtraApi {
+// 兼容 shim：P2-B2/B3 迁移消费者后于 P2-B4 删除。成员在本批继续指向既有实现，
+// 不要求先转发到新的按域只读面。
+struct [[deprecated("P2-B4 待删：迁移消费者后由按域读面/provider/owner command 替代")]]
+QolGameHostExtraApi {
     QolCharExtraReadApi character;
     QolCharExtraWriteApi character_write;
     QolItemExtraReadApi item;
@@ -300,6 +304,108 @@ struct QolGameHostExtraApi {
     QolChoiceExtraCallApi choice_call;
 };
 
+// P2-B1 新增的按域只读面。所有成员均为只读事实查询；副作用操作继续留在 extra
+// shim，后续迁移到 owner command/capability。该表作为 QolGameHost 的尾部扩展追加，
+// 不改变既有 read/write/call/ui_primitive/item_count/extra 的顺序与偏移。
+struct QolCharacterReadOnlyApi {
+    QolResult (*type)(const void* character, int32_t* out_type);
+    QolResult (*is_active_player_group)(const void* character, int32_t* out_active);
+    QolResult (*party_index)(const void* character, int32_t* out_index);
+    QolResult (*is_party_member)(const void* character, int32_t* out_member);
+    QolResult (*summoner)(const void* character, void** out_summoner);
+    QolResult (*level)(const void* character, int32_t* out_level);
+    QolResult (*merc_slot)(const void* character, int32_t* out_slot);
+    QolResult (*can_change_equip)(const void* character, int32_t* out_allowed);
+    QolResult (*menu_character)(void** out_character);
+    QolResult (*pool_slot)(const void* character, int32_t* out_slot);
+    QolResult (*max_hp)(const void* character, int32_t* out_value);
+    QolResult (*hp)(const void* character, int32_t* out_value);
+};
+
+struct QolItemReadOnlyApi {
+    QolResult (*category)(const void* item, int32_t* out_category);
+    QolResult (*is_jewel_category)(int32_t category, int32_t* out_is_jewel);
+    QolResult (*ability_level)(const void* item, int32_t* out_level);
+    QolResult (*rarity)(const void* item, int32_t* out_rarity);
+    QolResult (*is_real_equip)(const void* item, int32_t* out_value);
+    QolResult (*equip_level)(const void* item, int32_t* out_level);
+    QolResult (*is_no_sell)(int32_t category, int32_t* out_value);
+    QolResult (*is_dice)(int32_t category, int32_t* out_value);
+    QolResult (*cumulate_count)(const void* item, int32_t* out_count);
+    QolResult (*class_no_equip_bit)(int32_t category, int32_t* out_value);
+    QolResult (*equip_desc_role_type)(int32_t* out_type);
+    QolResult (*enchant_remaining)(const void* item, int32_t* out_value);
+    QolResult (*socket_filled)(const void* item, int32_t* out_value);
+    QolResult (*socket_total)(const void* item, int32_t* out_value);
+    QolResult (*is_backpack_category)(int32_t category, int32_t* out_value);
+};
+
+struct QolWorldReadOnlyApi {
+    QolResult (*position)(const void* world, int32_t* out_x, int32_t* out_y);
+    QolResult (*state)(int32_t* out_state);
+    QolResult (*map_record_count)(int32_t* out_count);
+    QolResult (*current_map_id)(int32_t* out_map_id);
+    QolResult (*map_name)(int32_t map_id, const char** out_name);
+    QolResult (*active_player_direction)(int32_t* out_direction);
+    QolResult (*money)(int64_t* out_money);
+};
+
+struct QolCraftReadOnlyApi {
+    QolResult (*ui_type)(uint32_t* out_type);
+    QolResult (*panel_state)(int32_t* out_state);
+    QolResult (*mix_type)(uint32_t* out_type);
+    QolResult (*selected_stuff_index)(int64_t* out_index);
+    QolResult (*selected_stuff_item)(void** out_item);
+    QolResult (*stuff_item)(uint32_t index, void** out_item);
+    QolResult (*category_held_count)(int32_t category, int32_t* out_count);
+    QolResult (*character_level)(int32_t* out_level);
+    QolResult (*stuff_slot_control)(uint32_t index, void** out_control);
+    QolResult (*target_slot_item)(void** out_item);
+    QolResult (*selected_inventory_item)(void** out_item);
+    QolResult (*selected_recipe)(int32_t type, int64_t* out_recipe);
+    QolResult (*stuff_slot_count)(uint32_t* out_count);
+};
+
+struct QolSaveReadOnlyApi {
+    QolResult (*slot_state)(int32_t slot, int32_t* out_state);
+    QolResult (*slot_exists)(int32_t slot, int32_t* out_exists);
+    QolResult (*slot_hero_index)(int32_t slot, int32_t* out_index);
+    QolResult (*hero_level)(int32_t slot, int32_t* out_level);
+    QolResult (*hero_class)(int32_t slot, int32_t* out_class);
+    QolResult (*load_data)(int32_t slot, void** out_data, int32_t* out_size);
+    QolResult (*hub_key)(const char** out_key);
+};
+
+struct QolQuestReadOnlyApi {
+    QolResult (*state)(int32_t* out_state);
+    QolResult (*active_slot_count)(uint32_t* out_count);
+    QolResult (*active_slot_id)(uint32_t index, uint32_t* out_id);
+    QolResult (*total_count)(uint32_t* out_count);
+    QolResult (*quest_state)(uint32_t quest_id, int32_t* out_state);
+    QolResult (*is_complete)(uint32_t quest_id, int32_t* out_complete);
+};
+
+struct QolChoiceReadOnlyApi {
+    QolResult (*state_id)(int32_t* out_state_id);
+    QolResult (*selected_index)(int32_t* out_index);
+    QolResult (*text_owns)(const char* const* items, uint32_t count, int32_t* out_owned);
+};
+
+struct QolReadOnlyApi {
+    QolCharacterReadOnlyApi character;
+    QolItemReadOnlyApi item;
+    QolWorldReadOnlyApi world;
+    QolCraftReadOnlyApi craft;
+    QolSaveReadOnlyApi save;
+    QolQuestReadOnlyApi quest;
+    QolChoiceReadOnlyApi choice;
+};
+
+static_assert(std::is_standard_layout<QolReadOnlyApi>::value,
+              "QolReadOnlyApi must remain standard layout");
+static_assert(std::is_trivially_copyable<QolReadOnlyApi>::value,
+              "QolReadOnlyApi must remain trivially copyable");
+
 struct QolGameHost {
     QolAbiHeader abi;
     QolTargetApi target;
@@ -310,6 +416,7 @@ struct QolGameHost {
     QolUiPrimitiveApi ui_primitive;
     QolItemCountApi item_count;
     QolGameHostExtraApi extra;
+    QolReadOnlyApi read_only;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -322,10 +429,13 @@ static_assert(offsetof(QolGameHost, item_count) ==
 static_assert(offsetof(QolGameHost, extra) ==
                   offsetof(QolGameHost, item_count) + sizeof(QolItemCountApi),
               "QolGameHost extra ABI offset changed");
-static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, extra) + sizeof(QolGameHostExtraApi),
+static_assert(offsetof(QolGameHost, read_only) ==
+                  offsetof(QolGameHost, extra) + sizeof(QolGameHostExtraApi),
+              "QolGameHost read_only ABI offset changed");
+static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 2;
+constexpr uint16_t kGameHostMinor = 3;
 
 }  // namespace qol::contracts

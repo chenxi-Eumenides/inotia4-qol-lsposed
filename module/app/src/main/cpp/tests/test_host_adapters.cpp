@@ -49,6 +49,11 @@ decltype(fn_control_object_get_cursor) fn_control_object_get_cursor = nullptr;
 decltype(fn_control_object_get_data) fn_control_object_get_data = nullptr;
 decltype(fn_control_item_get_item) fn_control_item_get_item = nullptr;
 
+int fake_item_rarity(void*) { return 9; }
+int fake_item_no_sell(int32_t) { return 0; }
+int fake_item_dice(int32_t) { return 0; }
+int fake_item_cumulate_count(void*) { return 6; }
+
 uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 
 bool game_memory_accessible(const void*, size_t, char) { return false; }
@@ -63,6 +68,8 @@ const GameVariant& game_variant() { return g_test_variant; }
 }  // namespace qol
 
 namespace qol::game {
+
+bool g_item_class_table_ready = true;
 
 int char_type(const void*) { return 2; }
 bool char_faction_deps_ready() { return true; }
@@ -96,6 +103,13 @@ bool char_write_hp(void*, int32_t) { return true; }
 int attr_item_category(const void*) { return 4; }
 bool attr_is_jewel_category(int) { return true; }
 int attr_ability_level(const void*) { return 3; }
+int item_enchant_remaining(const void*) { return g_item_class_table_ready ? 7 : -1; }
+int item_socket_filled(const void*) { return g_item_class_table_ready ? 2 : -1; }
+int item_socket_total(const void*) { return g_item_class_table_ready ? 5 : -1; }
+bool item_class_table_ready() { return g_item_class_table_ready; }
+bool item_is_backpack_category(int category) {
+    return g_item_class_table_ready && category == 4;
+}
 bool attr_call_option_value(int, int, int, void*, int* out_value) {
     *out_value = 3;
     return true;
@@ -224,6 +238,10 @@ const char* panel_block_reason() { return nullptr; }
 }  // namespace
 
 int main() {
+    fn_get_rarity = &fake_item_rarity;
+    fn_item_is_no_sell = &fake_item_no_sell;
+    fn_is_dice = &fake_item_dice;
+    fn_get_cumulate_count = &fake_item_cumulate_count;
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
@@ -335,6 +353,14 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
+    static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
+                  "read-only face must remain standard layout");
+    static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==
+                      offsetof(qol::contracts::QolGameHost, extra) +
+                          sizeof(qol::contracts::QolGameHostExtraApi),
+                  "read-only face must be append-only");
+    assert(reinterpret_cast<const char*>(&game.read_only) ==
+           reinterpret_cast<const char*>(&game.extra) + sizeof(game.extra));
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
     assert(game.thread.frame_count() == 99);
@@ -373,6 +399,111 @@ int main() {
     int32_t choice_state = -1;
     assert(game.extra.choice.state_id(&choice_state).ok == kQolOk);
     assert(choice_state == 42);
+    assert(game.read_only.character.type(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 2);
+    assert(game.read_only.character.is_active_player_group(reinterpret_cast<void*>(0x1), &value).ok ==
+           kQolOk);
+    assert(value == 1);
+    assert(game.read_only.character.party_index(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 0);
+    assert(game.read_only.character.is_party_member(reinterpret_cast<void*>(0x1), &value).ok ==
+           kQolOk);
+    assert(value == 1);
+    void* pointer_value = nullptr;
+    assert(game.read_only.character.summoner(reinterpret_cast<void*>(0x1), &pointer_value).ok ==
+           kQolOk);
+    assert(game.read_only.character.level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 10);
+    assert(game.read_only.character.merc_slot(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(game.read_only.character.can_change_equip(reinterpret_cast<void*>(0x1), &value).ok ==
+           kQolOk);
+    assert(value == 1);
+    assert(game.read_only.character.menu_character(&pointer_value).ok == kQolOk);
+    assert(pointer_value == reinterpret_cast<void*>(0x2));
+    assert(game.read_only.character.pool_slot(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(game.read_only.character.max_hp(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 100);
+    assert(game.read_only.character.hp(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 80);
+
+    assert(game.read_only.item.category(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 4);
+    assert(game.read_only.item.is_jewel_category(4, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.item.ability_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 3);
+    assert(game.read_only.item.rarity(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(game.read_only.item.is_real_equip(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(game.read_only.item.equip_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 12);
+    assert(game.read_only.item.is_no_sell(4, &value).ok == kQolOk);
+    assert(game.read_only.item.is_dice(4, &value).ok == kQolOk);
+    assert(game.read_only.item.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(game.read_only.item.class_no_equip_bit(4, &value).ok == kQolOk);
+    assert(game.read_only.item.equip_desc_role_type(&value).ok == kQolOk);
+    assert(game.read_only.item.enchant_remaining(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 7);
+    assert(game.read_only.item.socket_filled(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 2);
+    assert(game.read_only.item.socket_total(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 5);
+    assert(game.read_only.item.is_backpack_category(4, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.item.is_backpack_category(0x400, &value).code ==
+           kQolErrInvalidArgument);
+    assert(game.read_only.item.enchant_remaining(nullptr, &value).code == kQolErrInvalidArgument);
+    qol::game::g_item_class_table_ready = false;
+    assert(game.read_only.item.enchant_remaining(reinterpret_cast<void*>(0x1), &value).code ==
+           kQolErrNotReady);
+    assert(game.read_only.item.is_backpack_category(4, &value).code == kQolErrNotReady);
+    qol::game::g_item_class_table_ready = true;
+
+    int32_t x = 0;
+    int32_t y = 0;
+    assert(game.read_only.world.position(reinterpret_cast<void*>(0x1), &x, &y).code ==
+           kQolErrUnsupported);
+    assert(game.read_only.world.state(&value).ok == kQolOk && value == 7);
+    assert(game.read_only.world.map_record_count(&value).ok == kQolOk && value == 3);
+    assert(game.read_only.world.current_map_id(&value).ok == kQolOk && value == 1);
+    assert(game.read_only.world.map_name(1, &map_name).ok == kQolOk);
+    assert(game.read_only.world.active_player_direction(&value).ok == kQolOk && value == 2);
+    int64_t money = 0;
+    assert(game.read_only.world.money(&money).ok == kQolOk && money == 1000);
+
+    uint32_t u32_value = 0;
+    int64_t i64_value = 0;
+    assert(game.read_only.craft.ui_type(&u32_value).ok == kQolOk && u32_value == 1);
+    assert(game.read_only.craft.panel_state(&value).ok == kQolOk && value == 2);
+    assert(game.read_only.craft.mix_type(&u32_value).ok == kQolOk && u32_value == 3);
+    assert(game.read_only.craft.selected_stuff_index(&i64_value).ok == kQolOk && i64_value == 0);
+    assert(game.read_only.craft.selected_stuff_item(&pointer_value).ok == kQolOk);
+    assert(game.read_only.craft.stuff_item(0, &pointer_value).ok == kQolOk);
+    assert(game.read_only.craft.category_held_count(4, &value).ok == kQolOk && value == 5);
+    assert(game.read_only.craft.character_level(&value).ok == kQolOk && value == 10);
+    assert(game.read_only.craft.stuff_slot_control(0, &pointer_value).ok == kQolOk);
+    assert(game.read_only.craft.target_slot_item(&pointer_value).ok == kQolOk);
+    assert(game.read_only.craft.selected_inventory_item(&pointer_value).ok == kQolOk);
+    assert(game.read_only.craft.selected_recipe(0, &i64_value).ok == kQolOk);
+    assert(game.read_only.craft.stuff_slot_count(&u32_value).ok == kQolOk && u32_value == 3);
+
+    assert(game.read_only.save.slot_state(0, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.save.slot_exists(0, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.save.slot_hero_index(0, &value).ok == kQolOk && value == 0);
+    assert(game.read_only.save.hero_level(0, &value).ok == kQolOk && value == 10);
+    assert(game.read_only.save.hero_class(0, &value).ok == kQolOk && value == 2);
+    int32_t data_size = 0;
+    assert(game.read_only.save.load_data(0, &pointer_value, &data_size).ok == kQolOk);
+    assert(game.read_only.save.hub_key(&map_name).ok == kQolOk);
+
+    assert(game.read_only.quest.state(&value).code == kQolErrUnsupported);
+    assert(game.read_only.quest.active_slot_count(&u32_value).ok == kQolOk && u32_value == 1);
+    assert(game.read_only.quest.active_slot_id(0, &u32_value).ok == kQolOk && u32_value == 7);
+    assert(game.read_only.quest.total_count(&u32_value).ok == kQolOk && u32_value == 10);
+    assert(game.read_only.quest.quest_state(7, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.quest.is_complete(7, &value).ok == kQolOk && value == 1);
+    const char* choice_items[] = {"a"};
+    assert(game.read_only.choice.state_id(&value).ok == kQolOk && value == 42);
+    assert(game.read_only.choice.selected_index(&value).ok == kQolOk && value == 0);
+    assert(game.read_only.choice.text_owns(choice_items, 1, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.choice.selected_index(nullptr).code == kQolErrInvalidArgument);
     assert(game.call.call_known(1, nullptr, 0, nullptr, 0).ok == kQolErrUnsupported);
     return 0;
 }
