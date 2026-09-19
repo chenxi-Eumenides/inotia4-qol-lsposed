@@ -8,12 +8,18 @@
 > - 口径：文件数/行数为 `wc -l`（含空行与注释）；只列**当前实际存在**的模块，设计提及但未落地的在「收口项」标注
 > - 用途：给人快速理解现状；**任何决策请回到权威文档**，本文件不得作为落地依据
 
-## 0. 两套编号（勿混用）
+## 0. 编号口径
 
-| 编号体系 | 含义 | 定义位置 | 形式 |
-|---|---|---|---|
-| **分层编号 L0–L5** | 架构分层（原设计六逻辑层；ADR-0004 拍平后取消 `products/`、`features/`→`plugins/`） | `ARCHITECTURE.md` §2.2–§2.4 | 连续层，含 L0/L1/L2/L3/L4(出口面)/L5 |
-| **迁移阶段 L1–L7** | 可外置胶囊迁移的实施阶段（**从 L1 起，无 L0**） | `ledger.md` §7 | 阶段 1..7，L1–L5 已完成 |
+**架构分层只有一套：L0–L5**（L0 contracts / L1 game / L2 infra+hooks+patch / L3 plugins / L4 出口面 / L5 host）。
+「胶囊」（可外置插件）**不是新层**，而是既有各层内的组件与约束：
+
+| 胶囊要素 | 所属层 | 具体组件 |
+|---|---|---|
+| Host SDK / Game Host / UI 契约 | **L0** | `contracts/host_sdk.h`、`contracts/game_host.h`、`contracts/ui.h` |
+| 宿主 ABI 实现 | **L5** | `host/host_sdk.cpp`、`host/game_host.cpp`、`host/ui_adapter.cpp` |
+| 插件边界约束 | **L3** | `plugins/<id>/` 只允许 include `contracts/` 与自身目录（17/17 已合规） |
+
+> 施工阶段（工作分解顺序）另有编号 **C1–C7**，仅记录在 `ledger.md` §7，**不是分层编号**。
 
 ---
 
@@ -153,33 +159,33 @@
 ## 1.8 出口面（不属于六层）
 
 - `bridge/native/`：16 个 JNI 薄层（名/签名冻结；`check_jni` 143↔143）。
-- Kotlin（`ModuleConfig` / `ApiServer` / controllers / services）：HTTP 传输（AndServer）、配置、sidecar 桥——L6/L7 收敛点。
-- **遗留目录**：`core/`(37 文件)、`api/`(30)、`data/`(9)——待 L6（api→API provider）与 L7（data→game 符号收口、core→infra/game）吸收。
+- Kotlin（`ModuleConfig` / `ApiServer` / controllers / services）：HTTP 传输（AndServer）、配置、sidecar 桥——C6/C7 收敛点。
+- **遗留目录**：`core/`(37 文件)、`api/`(30)、`data/`(9)——待 C6（api→API provider）与 C7（data→game 符号收口、core→infra/game）吸收。
 
 ---
 
-# 二、迁移阶段（L1–L7）
+# 二、胶囊迁移施工阶段（C1–C7，**非分层编号**）
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 完成 |
-| L2 | 宿主 adapter：SDK / Game Host 函数体与注入 | ✅ 完成 |
-| L3 | `domains/` 取消：拆 `attribute_quality`(provider) + `attribute_range_display`(消费者) | ✅ 完成 |
-| L4 | 小中插件胶囊化（9 个）+ U11-1 契约/adapter + U11-2 `core.ui` 组件实现 | ✅ 完成 |
-| L5 | `inventory_hooks` + `extension_bag` 胶囊化（含 `save_backup`/`autosell`；`stack_codec` 迁 contracts、store 容器级 ABI、SDK `intercept_blocks`） | ✅ 完成 |
-| L6 | `core.api` 路由内核与 API provider 拆分（149 路由 owner 表、U10） | ⬜ 待办 |
-| L7 | native config 早期自读、脚本切七目录、**胶囊硬失败**（`check_layers` 收紧、删过渡映射） | ⬜ 待办 |
+| C1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 完成 |
+| C2 | 宿主 adapter：SDK / Game Host 函数体与注入 | ✅ 完成 |
+| C3 | `domains/` 取消：拆 `attribute_quality`(provider) + `attribute_range_display`(消费者) | ✅ 完成 |
+| C4 | 小中插件胶囊化（9 个）+ U11-1 契约/adapter + U11-2 `core.ui` 组件实现 | ✅ 完成 |
+| C5 | `inventory_hooks` + `extension_bag` 胶囊化（含 `save_backup`/`autosell`；`stack_codec` 迁 contracts、store 容器级 ABI、SDK `intercept_blocks`） | ✅ 完成 |
+| C6 | `core.api` 路由内核与 API provider 拆分（149 路由 owner 表、U10） | ⬜ 待办 |
+| C7 | native config 早期自读、脚本切七目录、**胶囊硬失败**（`check_layers` 收紧、删过渡映射） | ⬜ 待办 |
 
-**验证状态**：L1–L5 已通过真机 smoke（启动状态 + 门禁两态 + 生命周期往返，见 VM-CAPSULE）；各插件的**功能细则**仍按各自 VM 卡待补。L6/L7 未开工。
+**验证状态**：C1–C5 已通过真机 smoke（启动状态 + 门禁两态 + 生命周期往返，见 VM-CAPSULE）；各插件的**功能细则**仍按各自 VM 卡待补。C6/C7 未开工。
 
 ---
 
 # 三、当前收口项与已知缺口
 
-1. **L6/L7 未完成**：`core.api` 路由内核与 API provider 未落地（149 路由仍在 Kotlin controllers）；native config 早期自读未实现；架构脚本仍是八目录过渡映射，胶囊约束未硬失败。
+1. **C6/C7 未完成**：`core.api` 路由内核与 API provider 未落地（149 路由仍在 Kotlin controllers）；native config 早期自读未实现；架构脚本仍是八目录过渡映射，胶囊约束未硬失败。
 2. **遗留目录**：`core/`、`api/`、`data/` 共 76 文件未吸收。
 3. **引擎缺口**：
-   - required consumer 在 provider 之后注册会**永久 `blocked`**（无重试）——已在真机复现一次（autosell），当前靠装配顺序规避；建议 L7 的 `check_plugins` 加静态校验或引擎补重试。
+   - required consumer 在 provider 之后注册会**永久 `blocked`**（无重试）——已在真机复现一次（autosell），当前靠装配顺序规避；建议 C7 的 `check_plugins` 加静态校验或引擎补重试。
    - `in_flight_enter/leave` 未在插件 wrapper 接线（级联撤销的等待暂无真实计数来源）。
    - thunk 池在门禁关闭时不回收（约 51 次开关往返耗尽）；`g_patched_calls` 去重表容量 16 < 21 站点。
 4. **契约缺口**：`contracts/ui.h` 部分 raw 面仍由 adapter 提供；`extension_bag` JSON 面 `write_json` 为 v1.1 预留。

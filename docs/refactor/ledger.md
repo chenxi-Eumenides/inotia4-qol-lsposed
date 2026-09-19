@@ -149,31 +149,34 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 - **不包含**（推迟或明确不做）：业务语义重写、算法与性能优化（性能阈值走 §10 / U1 回填）、顺手重构无关代码（AGENTS：只移动职责）。
 - 迁移中发现的缺陷单独提交，不与迁移混在一起（例：P2 的 v27 变体表缺口）。
 
-## 7. 胶囊迁移计划（P1–P4 范围）
+## 7. 胶囊迁移施工阶段（P1–P4 范围；阶段编号 C1–C7）
+
+> **编号口径（勿混用）**：架构分层只有 **L0–L5**（`ARCHITECTURE.md` §2.2–§2.4、`docs/refactor/layers.md`）。
+> 本节使用 **C1–C7** 表示胶囊迁移的**施工阶段**（C = capsule），是工作分解顺序，**不是架构层级**。
+> 胶囊不是新增层，而是既有层内的组件与约束：L0 的 `host_sdk.h`/`game_host.h`/`ui.h` 契约、
+> L3 的「插件只依赖 contracts 与自身目录」约束、L5 的 `host/host_sdk.cpp`/`game_host.cpp`/`ui_adapter.cpp` 实现。
 
 该计划依据 ADR-0008 执行。用户裁决：胶囊迁移属于 **P1–P4 范围**；设计在 P4 后修改，
-不受 P5 签署门禁约束。L1 只冻结 Host SDK / Game Host API 的 ABI 骨架与 `PluginContext`
+不受 P5 签署门禁约束。C1 只冻结 Host SDK / Game Host API 的 ABI 骨架与 `PluginContext`
 接缝，具体表成员可在后续 lane 演进；P6 才冻结对外兼容边界。
 
-| lane | 范围 | 状态 |
+| 阶段 | 范围 | 状态 |
 |---|---|---|
-| L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
-| L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
-| L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | 🟡 实现与 host-only 验证完成；真机卡待执行（本任务不装机） |
-| L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ✅ 完成（9 插件迁移 + U11-1 契约/adapter + U11-2 `core.ui` 实现 `QolUiComponents` 并收口；`core.ui` 私有 include = 0） |
-| L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ✅ 完成（含 `save_backup`/`autosell`；`stack_codec` 迁 `contracts/`、`QolStoreApi` 容器级 ABI、SDK `hooks.intercept_blocks`、Host SDK PopupState ABI） |
-| L6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
-| L7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
+| C1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
+| C2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
+| C3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ✅ 实现与 host-only 验证完成；真机 smoke 已过（VM-CAPSULE） |
+| C4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ✅ 完成（9 插件迁移 + U11-1 契约/adapter + U11-2 `core.ui` 实现 `QolUiComponents` 并收口；`core.ui` 私有 include = 0） |
+| C5 | `inventory_hooks` + `extension_bag` 胶囊化 | ✅ 完成（含 `save_backup`/`autosell`；`stack_codec` 迁 `contracts/`、`QolStoreApi` 容器级 ABI、SDK `hooks.intercept_blocks`、Host SDK PopupState ABI） |
+| C6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
+| C7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
 
-**胶囊合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的 VM-CAPSULE 卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-CAPSULE：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。L1–L5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
+**胶囊合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的 VM-CAPSULE 卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-CAPSULE：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。C1–C5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
 
-当前迁移债基线：`plugins → game` 24 文件、`plugins → infra` 22 文件、
-`plugins → hooks` 8 文件、`plugins → patch` 0 文件、`plugins → host` 0 文件；
-`domains/` 已清零。上述插件胶囊迁移债待后续 lane 处理，不在本批新增基线。
+**胶囊合规现状**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/` 及跨插件 include 计数为 **0**（C1–C5 完成后的既成事实；复核命令见 `docs/refactor/verification.md` 的 VM-CAPSULE 卡）。因此**此前登记的「plugins → game/infra/hooks」迁移债已清偿**（`check_layers` 当前 0 新增、基线只收缩）。剩余债务为引擎级（见 `verification.md` VM-FIX-01 未闭合项）与 C6/C7 范围。
 
-### L4-0 Host SDK / Game Host ABI 冻结
+### C4-0 Host SDK / Game Host ABI 冻结
 
-L4-0 追加冻结 `QolGameHost` minor `1`。既有字段顺序与签名保持不变，新增成员统一位于
+C4-0 追加冻结 `QolGameHost` minor `1`。既有字段顺序与签名保持不变，新增成员统一位于
 `QolGameHost::extra`，由 `host/game_host.cpp` 实现；U11-1 已建立 `QolHostSdk::ui` 的
 UI adapter 注入面，U11-2 已完成组件实现，消费者迁移留给 U11-3。
 
@@ -200,10 +203,10 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 - `custom_recipe` 的配方表直读；
 - `game_symbols.h`、`game/access/patches`、`ptr_slots`、hook/patch 安装机制等内核私有面。
 
-L4 插件源码未在 L4-0 修改；后续胶囊迁移必须只依赖本节追加契约或另行登记的 U11/L5
+C4 插件源码未在 C4-0 修改；后续胶囊迁移必须只依赖本节追加契约或另行登记的 U11/C5
 契约缺口。
 
-### L5 ABI freeze：四插件迁移前置契约
+### C5 ABI freeze：四插件迁移前置契约
 
 本批冻结四个插件后续迁移所需的公共面，不修改插件业务体：
 
