@@ -636,12 +636,12 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         // 999/99。拆段写回经 patch_payload_count 的模式感知写：启用态全量进位
         // 内建，关闭态只写 b、保留 a；descriptor.count 恒回写 canonical
         // （重开后读回完整值）。
-        const bool limit_enabled = stack_limit_enabled();
-        const uint32_t existing_view = stack_codec::effective_view_count(
-            static_cast<uint32_t>(existing.count), limit_enabled);
-        const uint32_t source_view = stack_codec::effective_view_count(
-            static_cast<uint32_t>(source.count), limit_enabled);
-        const uint32_t limit = stack_codec::max_count(limit_enabled);
+        const uint32_t existing_view = virtual_bag_effective_count(
+            g_module_objects[dst_bag][slot], static_cast<uint32_t>(existing.count));
+        const uint32_t source_view = virtual_bag_effective_count(
+            g_module_objects[src_bag][src_slot], static_cast<uint32_t>(source.count));
+        const bool extended = virtual_bag_extended_mode(g_module_objects[dst_bag][slot]);
+        const uint32_t limit = extended ? stack_codec::kExtendedMax : stack_codec::kLegacyMax;
         const uint64_t total = static_cast<uint64_t>(existing_view) +
                                static_cast<uint64_t>(source_view);
         if (total > limit) return false;
@@ -649,8 +649,8 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         if (!virtual_bag::patch_payload_count(
                 &committed,
                 virtual_bag::merge_count(static_cast<int>(existing_view),
-                                         static_cast<int>(source_view), limit_enabled),
-                virtual_bag_category_uses_stack_count, limit_enabled)) {
+                                         static_cast<int>(source_view), extended),
+                virtual_bag_category_uses_stack_count, extended)) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension merge count gate src=%d/%d dst=%d/%d",
                         src_bag, src_slot, dst_bag, slot);
             return false;

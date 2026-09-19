@@ -7,7 +7,6 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/sell_price.h"
 #include "contracts/stack_codec.h"
-#include "contracts/stack_limit.h"
 #include "contracts/host_sdk.h"
 
 namespace {
@@ -142,8 +141,7 @@ int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_disco
     if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     // count 为调用方传入的模式视图数量（R-47 决策 b），按模式上限收敛。
-    const uint32_t legal_count = stack_codec::effective_clamp(
-        static_cast<uint32_t>(count), stack_limit_enabled());
+    const uint32_t legal_count = static_cast<uint32_t>(count);
     int64_t final_price = 0;
     if (!sell_price::calculate(unit_price, legal_count, apply_variant_discount, &final_price)) {
         return -1;

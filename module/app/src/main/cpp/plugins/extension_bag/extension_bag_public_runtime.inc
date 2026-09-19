@@ -586,15 +586,14 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     ensure_state_loaded_locked();
     // 输出模式视图数量（R-47 决策 b）：启用态 canonical、关闭态 b。占位判定
     // 仍按 descriptor canonical（结构性判断与模式无关）。
-    const bool limit_enabled = stack_limit_enabled();
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         const int capacity = g_virtual_bag_state.capacities[bag];
         for (int slot = 0; slot < capacity; ++slot) {
             const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
             if (item.category <= 0 || item.count <= 0) continue;
             if (fn(virtual_bag::kExtensionLogicalBagFirst + bag, slot, item.category,
-                   static_cast<int>(stack_codec::effective_view_count(
-                       static_cast<uint32_t>(item.count), limit_enabled)),
+                   static_cast<int>(virtual_bag_effective_count(
+                       g_module_objects[bag][slot], static_cast<uint32_t>(item.count))),
                    ctx)) {
                 return;
             }

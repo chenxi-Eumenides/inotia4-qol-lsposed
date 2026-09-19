@@ -40,6 +40,34 @@ QolResult writeback_needed(const void*, uint32_t count, int32_t* out) {
 const qol::contracts::QolItemCountApi kProvider = {
     &canonical, &effective, &is_encoded, &write_effective, &writeback_needed};
 
+QolResult boundary_write(void*, uint32_t count) {
+    assert(count == 99 || count == 100 || count == 127 || count == 128 || count == 199 ||
+           count == 999);
+    return qol::contracts::ok();
+}
+
+QolResult boundary_writeback(const void*, uint32_t count, int32_t* out) {
+    assert(out != nullptr);
+    *out = count > 99 ? 1 : 0;
+    return qol::contracts::ok();
+}
+
+void assert_writeback_boundary_forwarding() {
+    const qol::contracts::QolItemCountApi provider = {
+        nullptr, nullptr, nullptr, &boundary_write, &boundary_writeback};
+    qol::host::host_item_count_set_provider(&provider);
+    const uint32_t boundaries[] = {99, 100, 127, 128, 199, 999};
+    for (uint32_t count : boundaries) {
+        int32_t needed = -1;
+        assert(qol::host::host_item_count_api().writeback_needed(
+                   reinterpret_cast<void*>(1), count, &needed).ok == 0);
+        assert(needed == (count > 99 ? 1 : 0));
+        assert(qol::host::host_item_count_api().write_effective(
+                   reinterpret_cast<void*>(1), count).ok == 0);
+    }
+    qol::host::host_item_count_set_provider(nullptr);
+}
+
 void assert_not_ready_without_provider() {
     qol::host::host_item_count_set_provider(nullptr);
     assert(qol::contracts::item_count_api() == nullptr);
@@ -167,5 +195,6 @@ int main() {
     assert_unknown_is_not_guessed();
     assert_not_encoded_state_is_preserved();
     assert_provider_forwarding_and_null_arguments();
+    assert_writeback_boundary_forwarding();
     return 0;
 }

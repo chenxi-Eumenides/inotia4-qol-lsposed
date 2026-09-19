@@ -80,7 +80,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 const int src_slot = ctrl_src != nullptr ? fn_ui_equip_get_item_slot_index(ctrl_src) : -1;
                 const int count = fn_get_cumulate_count(item_a);
                 const int target_count = fn_get_cumulate_count(item_b);
-                const uint32_t stack_limit = stack_codec::max_count(stack_limit_enabled());
+                const bool extended = virtual_bag_extended_mode(item_b);
+                 const uint32_t stack_limit = extended ? stack_codec::kExtendedMax
+                                                        : stack_codec::kLegacyMax;
                 const bool valid_slots = bag >= 0 && bag < 6 && src_slot >= 0 && src_slot < 16 &&
                                          dst_slot >= 0 && dst_slot < 16;
                 const bool has_merge_room = target_count > 0 && count > 0 &&

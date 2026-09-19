@@ -139,19 +139,19 @@
 | --- | --- | --- |
 | `host` | `infra` | 41 |
 | `host` | `game` | 30 |
-| `plugins/extension_bag` | `contracts` | 23 |
+| `plugins/extension_bag` | `contracts` | 21 |
 | `host` | `contracts` | 19 |
 | `plugins/custom_recipe` | `contracts` | 13 |
-| `plugins/inventory_hooks` | `contracts` | 13 |
+| `plugins/inventory_hooks` | `contracts` | 12 |
 | `plugins/autosell` | `contracts` | 11 |
-| `plugins/core.ui` | `contracts` | 11 |
 | `infra` | `game` | 10 |
+| `plugins/core.ui` | `contracts` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
-| `domains/inventory` | `contracts` | 7 |
 | `domains/world` | `game` | 7 |
 | `plugins/autosell` | `game` | 7 |
 | `plugins/save_backup` | `contracts` | 7 |
+| `domains/inventory` | `contracts` | 6 |
 
 ### 2.2 include 环
 

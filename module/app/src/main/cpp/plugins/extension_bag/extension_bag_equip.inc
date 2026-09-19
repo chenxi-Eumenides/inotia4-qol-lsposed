@@ -452,9 +452,8 @@ void extension_sell_ok(void*) {
             return;
         }
                 // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
-                count = static_cast<int>(stack_codec::effective_view_count(
-                    static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
-                    stack_limit_enabled()));
+                count = static_cast<int>(virtual_bag_effective_count(
+                    item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
         const uint16_t flags = *reinterpret_cast<uint16_t*>(
             reinterpret_cast<uint8_t*>(item) + I_TYPE);
         const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
@@ -479,8 +478,7 @@ void extension_sell_ok(void*) {
         QOL_LOG_INFO(QolDomain::kExtensionBag,
             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
             category,
-            static_cast<int>(stack_codec::effective_clamp(static_cast<uint32_t>(count),
-                                                          stack_limit_enabled())),
+            count,
             static_cast<long long>(unit_price), apply_variant_discount ? 70 : 100,
             static_cast<long long>(price),
             virtual_bag::payload_hash(g_virtual_bag_state.items[bag][slot]),
@@ -501,10 +499,7 @@ void extension_sell_ok(void*) {
                                   g_extension_desc_item_bag == bag &&
                                   g_extension_desc_item_slot == slot &&
                                   g_module_objects[bag][slot] == item &&
-                                  stack_codec::effective_view_count(
-                                      static_cast<uint32_t>(
-                                          g_virtual_bag_state.items[bag][slot].count),
-                                      stack_limit_enabled()) ==
+                                  virtual_bag_effective_count(item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)) ==
                                       static_cast<uint32_t>(count) &&
                                   module_object_release_allowed_locked(
                                       bag, slot, item, "extension sell commit", false, nullptr);
@@ -630,10 +625,12 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     // 启用态拆段写回借位自动完成（a 借位 → b+128）；关闭态只写 b、保留 a——
     // descriptor 随后回写 canonical 解码值，重开后读回完整值。非可堆叠类别已在
     // 上方按 CountEncoding 门控拒绝，不会触碰 bits22-24。
-    const uint32_t new_count_field = stack_codec::effective_write_count(
-        old_count_flags, static_cast<uint32_t>(count), stack_limit_enabled());
-    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-        new_count_field;
+    if (!virtual_bag_write_effective(item, static_cast<uint32_t>(count))) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension consume rejected count write context=%s bag=%d slot=%d",
+                     context, bag, slot);
+        return false;
+    }
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
@@ -646,7 +643,8 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
     // descriptor.count 恒为 canonical：关闭态 b 写保留 a，重开读回完整值。
-    descriptor.count = static_cast<int>(stack_codec::s2_read_count(new_count_field));
+    descriptor.count = static_cast<int>(virtual_bag_canonical_count(
+        item, stack_codec::s2_read_count(old_count_flags)));
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     // ApplyStuff consumes a stacked material through H-04. Keep the token's
@@ -1095,9 +1093,7 @@ void extension_desc_item_execute(void* button) {
             if (current_item && fn_item_get_sell_price != nullptr &&
                 fn_item_is_no_sell != nullptr && fn_get_bit != nullptr) {
         // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
-        count = static_cast<int>(stack_codec::effective_view_count(
-            static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
-            stack_limit_enabled()));
+        count = static_cast<int>(virtual_bag_effective_count(item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
                 const uint16_t flags = *reinterpret_cast<uint16_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_TYPE);
                 category = fn_get_bit(flags, 15, 6);
@@ -1110,8 +1106,7 @@ void extension_desc_item_execute(void* button) {
                         const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
                         payload = virtual_bag::payload_hash(descriptor);
                         generation = g_module_object_use[bag][slot].generation;
-                        const int legal_count = static_cast<int>(stack_codec::effective_clamp(
-                            static_cast<uint32_t>(count), stack_limit_enabled()));
+                        const int legal_count = count;
                         QOL_LOG_INFO(QolDomain::kExtensionBag,
                             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
                             category, legal_count, static_cast<long long>(unit_price),

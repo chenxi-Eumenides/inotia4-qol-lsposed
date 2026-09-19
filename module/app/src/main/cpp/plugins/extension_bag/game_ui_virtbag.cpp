@@ -15,7 +15,7 @@
 #include "plugins/extension_bag/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "contracts/stack_codec.h"
-#include "contracts/stack_limit.h"
+
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/module_save_port.h"
@@ -269,6 +269,26 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 #include "plugins/extension_bag/extension_bag_drag_session.inc"
 
 #include "plugins/extension_bag/extension_bag_runtime.inc"
+
+const qol::contracts::QolItemCountApi* item_count_api() {
+    return g_game == nullptr ? nullptr : &g_game->item_count;
+}
+
+uint32_t original_count_view(uint32_t field) {
+    return (field >> stack_codec::kS2ShiftB) & ((1u << stack_codec::kS2BitsB) - 1u);
+}
+
+bool original_count_write(void* item, uint32_t count) {
+    if (item == nullptr) return false;
+    uint32_t field = *reinterpret_cast<const uint32_t*>(
+        reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+    const uint32_t bounded = count > stack_codec::kLegacyMax ? stack_codec::kLegacyMax : count;
+    field = (field & ~stack_codec::kS2MaskB) |
+            (stack_codec::s2_split_b(bounded) << stack_codec::kS2ShiftB);
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = field;
+    return true;
+}
+
 }  // namespace
 
 namespace qol::features::extension_bag {
@@ -295,6 +315,67 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
 }
 
 }  // namespace qol::features::extension_bag
+
+uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->effective != nullptr && item != nullptr) {
+        uint32_t count = 0;
+        const QolResult result = api->effective(item, &count);
+        if (qol::contracts::succeeded(result)) return count;
+        if (result.code != kQolErrNotReady) return 0;
+    }
+    if (item != nullptr) {
+        const uint32_t field = *reinterpret_cast<const uint32_t*>(
+            reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+        return original_count_view(field);
+    }
+    return fallback_canonical & ((1u << stack_codec::kS2BitsB) - 1u);
+}
+
+uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->canonical != nullptr && item != nullptr) {
+        uint32_t count = 0;
+        const QolResult result = api->canonical(item, &count);
+        if (qol::contracts::succeeded(result)) return count;
+        if (result.code == kQolErrUnsupported) return fallback_canonical;
+    }
+    if (item != nullptr) {
+        const uint32_t field = *reinterpret_cast<const uint32_t*>(
+            reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+        return stack_codec::s2_read_count(field);
+    }
+    return fallback_canonical;
+}
+
+bool virtual_bag_extended_mode(const void* item) {
+    if (item == nullptr || g_sdk == nullptr || g_sdk->config.get_bool == nullptr) return false;
+    int32_t enabled = 0;
+    const QolResult gate_result =
+        g_sdk->config.get_bool("plugin.stack_limit.enabled", 0, &enabled);
+    if (!qol::contracts::succeeded(gate_result) || enabled == 0) return false;
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api == nullptr || api->effective == nullptr) return false;
+    uint32_t effective = 0;
+    const QolResult effective_result = api->effective(item, &effective);
+    return qol::contracts::succeeded(effective_result);
+}
+
+bool virtual_bag_write_effective(void* item, uint32_t count) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api == nullptr || api->write_effective == nullptr ||
+        api->writeback_needed == nullptr || item == nullptr) {
+        return false;
+    }
+    int32_t needed = 0;
+    const QolResult needed_result = api->writeback_needed(item, count, &needed);
+    if (needed_result.code == kQolErrNotReady) return original_count_write(item, count);
+    if (!qol::contracts::succeeded(needed_result)) return false;
+    if (needed == 0) return true;
+    const QolResult write_result = api->write_effective(item, count);
+    if (write_result.code == kQolErrNotReady) return original_count_write(item, count);
+    return qol::contracts::succeeded(write_result);
+}
 
 bool virtual_bag_native_call_active() {
     return g_in_native_call;
@@ -579,9 +660,8 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
         }
         // 消耗前数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b，
         // 与 getter 的 observed_before 同域参与扣减判定。
-        const int before_count = static_cast<int>(stack_codec::effective_view_count(
-            static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
-            stack_limit_enabled()));
+        const int before_count = static_cast<int>(virtual_bag_effective_count(
+            item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
         const int observed_before = fn_get_cumulate_count != nullptr
             ? fn_get_cumulate_count(item) : before_count;
         if (!consume_extension_item_after_native_locked(
@@ -1122,7 +1202,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     int canonical_count = fn_get_cumulate_count != nullptr
         ? canonical_item_count(req.item) : 1;
     if (canonical_count <= 0) canonical_count = 1;
-    const bool limit_enabled = stack_limit_enabled();
+    const bool limit_enabled = virtual_bag_extended_mode(req.item);
     virtual_bag::Item source{};
     source.category = category;
     source.count = canonical_count;
@@ -1143,14 +1223,14 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
         // adopt_merge_into 的 mergeable_items 门控内已拒绝，R-46）。
         void* materialized = g_module_objects[bag][slot];
         if (materialized != nullptr) {
-            const uint32_t written = stack_codec::effective_write_count(
-                *reinterpret_cast<const uint32_t*>(
-                    reinterpret_cast<const uint8_t*>(materialized) + I_COUNT),
-                static_cast<uint32_t>(stack_codec::effective_view_count(
-                    static_cast<uint32_t>(merged.count), limit_enabled)),
-                limit_enabled);
-            *reinterpret_cast<uint32_t*>(
-                reinterpret_cast<uint8_t*>(materialized) + I_COUNT) = written;
+            const uint32_t merged_view = merged.count <= static_cast<int>(stack_codec::kLegacyMax)
+                ? static_cast<uint32_t>(merged.count)
+                : (virtual_bag_effective_count(materialized,
+                    static_cast<uint32_t>(merged.count)) ==
+                       static_cast<uint32_t>(merged.count)
+                       ? static_cast<uint32_t>(merged.count)
+                       : static_cast<uint32_t>(merged.count) & ((1u << stack_codec::kS2BitsB) - 1u));
+            (void)virtual_bag_write_effective(materialized, merged_view);
         }
         g_virtual_bag_state.items[bag][slot] = merged;
         g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(merged);

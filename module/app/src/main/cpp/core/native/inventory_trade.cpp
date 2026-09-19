@@ -7,10 +7,9 @@
 #include "inventory_trade.h"
 
 #include "contracts/extension_bag.h"
+#include "contracts/item_count.h"
 #include "core/native/qol_log.h"
 #include "core/native/sell_price.h"
-#include "contracts/stack_codec.h"
-#include "contracts/stack_limit.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_symbols.h"
@@ -42,8 +41,13 @@ int64_t sell_price_with_fallback(const qol::contracts::ExtensionBagApi* api, voi
     }
     if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const uint32_t legal_count = stack_codec::effective_clamp(
-        static_cast<uint32_t>(count), stack_limit_enabled());
+    uint32_t legal_count = static_cast<uint32_t>(count);
+    const qol::contracts::QolItemCountApi* item_count = qol::contracts::item_count_api();
+    if (item_count != nullptr && item_count->effective != nullptr) {
+        uint32_t effective = 0;
+        const QolResult result = item_count->effective(item, &effective);
+        if (qol::contracts::succeeded(result)) legal_count = effective;
+    }
     int64_t final_price = 0;
     if (!sell_price::calculate(unit_price, legal_count, true, &final_price)) return -1;
     return final_price;
@@ -117,13 +121,19 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kPriceInvalid;
         return result;
     }
+    uint32_t log_count = static_cast<uint32_t>(count > 0 ? count : 0);
+    const qol::contracts::QolItemCountApi* log_item_count = qol::contracts::item_count_api();
+    if (log_item_count != nullptr && log_item_count->effective != nullptr) {
+        uint32_t effective = 0;
+        const QolResult effective_result = log_item_count->effective(item, &effective);
+        if (qol::contracts::succeeded(effective_result)) log_count = effective;
+    }
     QOL_LOG_INFO(QolDomain::kInventory,
                  "sell price source=%s category=%d count=%d unit=%lld variant=100 "
                  "final=%lld payload=0 gen=0",
                  source,
                  category,
-                 static_cast<int>(stack_codec::effective_clamp(
-                     static_cast<uint32_t>(count), stack_limit_enabled())),
+                 static_cast<int>(log_count),
                  static_cast<long long>(unit_price), static_cast<long long>(price));
     result.price = price;
     // 与原版 UIStore_SellItem(0xd25f0) 的对照：

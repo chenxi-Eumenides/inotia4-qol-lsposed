@@ -85,8 +85,7 @@ std::string extension_bag_api_click_item_impl(int logical_bag, int slot) {
            ",\"slot\":" + std::to_string(slot) +
            ",\"category\":" + std::to_string(item.category) +
            ",\"count\":" +
-           std::to_string(static_cast<int>(stack_codec::effective_view_count(
-               static_cast<uint32_t>(item.count), stack_limit_enabled()))) +
+           std::to_string(static_cast<int>(virtual_bag_effective_count(g_module_objects[internal_bag][slot], static_cast<uint32_t>(item.count)))) +
            ",\"payload\":\"" +
            virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
 }
@@ -279,8 +278,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         if (equip == nullptr) return op_err("equip slot empty");
 
         // 消耗前数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
-        before_count = static_cast<int>(stack_codec::effective_view_count(
-            static_cast<uint32_t>(descriptor.count), stack_limit_enabled()));
+        before_count = static_cast<int>(virtual_bag_effective_count(jewel, static_cast<uint32_t>(descriptor.count)));
         if (!module_use_begin_locked(bag, slot, jewel, &use_token)) {
             return op_err("extension jewel already in use");
         }
@@ -350,8 +348,7 @@ std::string virtual_bag_inventory_bags_json() {
             items += "{\"slot\":" + std::to_string(slot) +
                      ",\"category\":" + std::to_string(item.category) +
                      ",\"count\":" +
-                     std::to_string(static_cast<int>(stack_codec::effective_view_count(
-                         static_cast<uint32_t>(item.count), stack_limit_enabled()))) +
+                     std::to_string(static_cast<int>(virtual_bag_effective_count(g_module_objects[bag][slot], static_cast<uint32_t>(item.count)))) +
                      "}";
             ++filled;
         }

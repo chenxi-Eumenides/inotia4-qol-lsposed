@@ -62,17 +62,17 @@ inline bool original_count_write_confirmed(uint32_t pre_field, uint32_t post_fie
 
 // 加法回写全量：old_full + delta 后按模式上限收敛（启用 999 / 关闭 99，
 // R-47 决策 b：old_full 必须是模式视图数量——启用态 128a+b、关闭态 b；
-// 关闭态结果落在 b 域，effective_write_count 只写 b、保留 a）；delta 先按
+// 关闭态结果落在 b 域；facade 负责当前视图的上限收敛，delta 先按
 // 编码上限收敛，避免极端入参溢出。
-inline uint32_t added_count(uint32_t old_full, uint32_t delta, bool limit_enabled) {
+inline uint32_t added_count(uint32_t old_full, uint32_t delta) {
     const uint32_t bounded = delta > stack_codec::kS2Max ? stack_codec::kS2Max : delta;
-    return stack_codec::effective_clamp(old_full + bounded, limit_enabled);
+    return old_full + bounded;
 }
 
 // 减法回写全量：old_full - sub（调用方须保证 old_full > sub；old_full 为模式
-// 视图数量，关闭态结果同样落在 b 域）；clamp 同口径。
-inline uint32_t subtracted_count(uint32_t old_full, uint32_t sub, bool limit_enabled) {
-    return old_full > sub ? stack_codec::effective_clamp(old_full - sub, limit_enabled) : 0u;
+// 视图数量，关闭态结果同样落在 b 域）。
+inline uint32_t subtracted_count(uint32_t old_full, uint32_t sub) {
+    return old_full > sub ? old_full - sub : 0u;
 }
 
 // 减 1 借位回写全量（old_full ≥ 2 时调用）。

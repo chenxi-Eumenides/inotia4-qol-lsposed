@@ -3,7 +3,6 @@
 #include "contracts/panels.h"
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
-#include "contracts/stack_limit.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
@@ -285,7 +284,7 @@ std::string data_settings_ui_status_json() {
         settings_more_games_bind_state(),
         g_state_id, g_popup_acquired ? "true" : "false",
         g_panel_active ? "true" : "false", g_root,
-        stack_limit_enabled() ? "true" : "false",
+        (g_sdk != nullptr && g_sdk->config.get_bool != nullptr && [&]() { int32_t enabled = 0; (void)g_sdk->config.get_bool("plugin.stack_limit.enabled", 0, &enabled); return enabled != 0; }()) ? "true" : "false",
         data_ui_screen());
     return std::string(buf);
 }

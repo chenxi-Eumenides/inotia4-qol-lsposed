@@ -427,14 +427,12 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
         return false;
     }
     virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
-    const int view = static_cast<int>(stack_codec::effective_view_count(
-        static_cast<uint32_t>(descriptor.count), stack_limit_enabled()));
+    const int view = static_cast<int>(virtual_bag_effective_count(
+        item, static_cast<uint32_t>(descriptor.count)));
     if (count >= view) return false;  // 整堆由调用方走删除分支
     const uint32_t old_field = *reinterpret_cast<uint32_t*>(
         reinterpret_cast<uint8_t*>(item) + I_COUNT);
-    const uint32_t new_field = stack_codec::effective_write_count(
-        old_field, static_cast<uint32_t>(view - count), stack_limit_enabled());
-    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = new_field;
+    if (!virtual_bag_write_effective(item, static_cast<uint32_t>(view - count))) return false;
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
@@ -444,7 +442,8 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
     }
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
-    descriptor.count = static_cast<int>(stack_codec::s2_read_count(new_field));
+    descriptor.count = static_cast<int>(virtual_bag_canonical_count(
+        item, stack_codec::s2_read_count(old_field)));
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     g_item_state_dirty = true;
@@ -488,8 +487,8 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                 if (!identity_ok || !descriptor_ok) {
                     reject = true;
                 } else {
-                    view = static_cast<int>(stack_codec::effective_view_count(
-                        static_cast<uint32_t>(descriptor.count), stack_limit_enabled()));
+                    view = static_cast<int>(virtual_bag_effective_count(
+                        item, static_cast<uint32_t>(descriptor.count)));
                     item_encoded = item_count_encoding(item) == stack_codec::CountEncoding::kEncoded;
                     const int64_t unit = static_cast<int64_t>(fn_item_get_sell_price(item));
                     plan = qol::store_sell::plan(item_encoded, view, unit, displayed_price);
@@ -531,9 +530,8 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
             g_module_objects[bag][slot] == item &&
             module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
             (!item_encoded ||
-             static_cast<int>(stack_codec::effective_view_count(
-                 static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count),
-                 stack_limit_enabled())) == view);
+             static_cast<int>(virtual_bag_effective_count(
+                 item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count))) == view);
         if (current) {
             whole = plan.kind == qol::store_sell::PlanKind::kWhole || count >= view;
             if (whole) {
