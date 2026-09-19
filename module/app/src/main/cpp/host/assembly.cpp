@@ -32,6 +32,7 @@
 #include "hooks/transaction.h"
 #include "host/adapters.h"
 #include "host/frame_source.h"
+#include "host/item_count_facade.h"
 #include "host/plugin_registry.h"
 #include "host/ui_adapter.h"
 #include "infra/commands.h"
@@ -40,6 +41,7 @@
 #include "infra/scheduler.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
+#include "host/adapters.h"
 
 namespace qol::host {
 
@@ -134,6 +136,8 @@ bool assembly_init() {
     game_host_mark_main_thread();
     // g_host_sdk 是 ABI 生命周期对象；adapter 在宿主装配期注入，随后由所有插件共享。
     const_cast<contracts::QolHostSdk&>(g_host_sdk).ui = ui_adapter();
+    // item_count facade 是宿主稳定表；P1-B 注册 provider 前保持 not_ready。
+    const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     // 仅在完整成功后置位：失败可重试，成功则幂等。
     if (g_assembly_done) return true;
 

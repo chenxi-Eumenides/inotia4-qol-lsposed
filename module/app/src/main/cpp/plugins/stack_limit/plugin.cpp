@@ -10,6 +10,8 @@
 //
 // 门禁：descriptor.resources 的 6 条 gate 全为 "plugin.stack_limit.enabled"；宿主
 // install_all/sync_gates 据此安装/还原，并调用本插件的 on_enabled/on_disabled 更新有效态。
+// 六条 clamp 与 P1-B 将迁入的 12 条 S2 布局及 getter/写路径共同组成同一原子组；在
+// P1-B 完成前，布局仍由 host boot 路径保证。
 
 namespace qol::features::stack_limit {
 namespace {
@@ -25,7 +27,7 @@ constexpr const char* kReason =
     {NAME, NAME, contracts::ResourceMechanism::kCallPatch,                             \
      contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kRequired,   \
      contracts::ResourceFailure::kFailClosed, true, kPluginId, kReason, kGate, 120,    \
-     nullptr}
+     nullptr, true}
 
 const contracts::ResourceClaim kResources[] = {
     STACK_LIMIT_CLAIM("P_INVEN_MOVE_ITEM_CLAMP_150"),

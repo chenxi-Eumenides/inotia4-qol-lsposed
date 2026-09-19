@@ -6,7 +6,9 @@
 // 线程使用；write 与有副作用 call 只能由 owner 插件的主线程命令处理器调用，表内不
 // 提供同步等待原语。内置表可在 P1–P4 迁移期演进，P6 才冻结对外兼容。
 
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "contracts/host_sdk.h"
 
@@ -101,6 +103,40 @@ struct QolUiPrimitiveApi {
     QolResult (*popup_show)(uint32_t popup_id);
     QolResult (*popup_close)(uint32_t popup_id);
 };
+
+enum class QolItemCountEncoding : uint8_t {
+    kUnknown = 0,
+    kNotEncoded = 1,
+    kEncoded = 2,
+};
+
+static_assert(sizeof(QolItemCountEncoding) == sizeof(uint8_t),
+              "QolItemCountEncoding underlying type changed");
+
+struct QolItemCountApi {
+    QolResult (*canonical)(const void* item, uint32_t* out_count);
+    QolResult (*effective)(const void* item, uint32_t* out_count);
+    QolResult (*is_encoded)(const void* item, QolItemCountEncoding* out_encoding);
+    QolResult (*write_effective)(void* item, uint32_t count);
+    QolResult (*writeback_needed)(const void* item, uint32_t count, int32_t* out_needed);
+};
+
+static_assert(std::is_standard_layout<QolItemCountApi>::value,
+              "QolItemCountApi must remain standard layout");
+static_assert(std::is_trivially_copyable<QolItemCountApi>::value,
+              "QolItemCountApi must remain trivially copyable");
+static_assert(offsetof(QolItemCountApi, canonical) == 0,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, effective) == sizeof(QolItemCountApi::canonical),
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, is_encoded) == sizeof(QolItemCountApi::canonical) * 2,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, write_effective) == sizeof(QolItemCountApi::canonical) * 3,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, writeback_needed) == sizeof(QolItemCountApi::canonical) * 4,
+              "QolItemCountApi ABI layout changed");
+static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 5,
+              "QolItemCountApi ABI size changed");
 
 // L4-0 追加面：只覆盖已审计插件迁移所需的低层游戏原语。该面仍是宿主内核 ABI，
 // 不暴露 game/ 内部类型、符号常量或 STL；有副作用的成员只能由 owner 插件的主线程
@@ -256,8 +292,22 @@ struct QolGameHost {
     QolWriteApi write;
     QolCallApi call;
     QolUiPrimitiveApi ui_primitive;
+    QolItemCountApi item_count;
     QolGameHostExtraApi extra;
 };
+
+static_assert(std::is_standard_layout<QolGameHost>::value,
+              "QolGameHost must remain standard layout");
+static_assert(std::is_trivially_copyable<QolGameHost>::value,
+              "QolGameHost must remain trivially copyable");
+static_assert(offsetof(QolGameHost, item_count) ==
+                  offsetof(QolGameHost, ui_primitive) + sizeof(QolUiPrimitiveApi),
+              "QolGameHost item_count ABI offset changed");
+static_assert(offsetof(QolGameHost, extra) ==
+                  offsetof(QolGameHost, item_count) + sizeof(QolItemCountApi),
+              "QolGameHost extra ABI offset changed");
+static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, extra) + sizeof(QolGameHostExtraApi),
+              "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
 constexpr uint16_t kGameHostMinor = 1;

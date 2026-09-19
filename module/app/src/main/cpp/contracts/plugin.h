@@ -96,6 +96,7 @@ struct ResourceClaim {
     const char* gate;
     uint32_t step_budget;
     void* handler;
+    bool atomic = false;
 };
 
 // JNI 绑定元数据（§7.2）：三向校验（Kotlin external ↔ native 导出 ↔ 本表）

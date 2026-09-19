@@ -287,6 +287,7 @@ add_executable(plugin_registry_tests
     test_plugin_registry.cpp
     test_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
@@ -680,3 +681,15 @@ target_include_directories(core_ui_components_tests PRIVATE
 target_compile_features(core_ui_components_tests PRIVATE cxx_std_17)
 set_target_properties(core_ui_components_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_ui_components_tests COMMAND core_ui_components_tests)
+
+# P1-A：item_count facade provider 槽、未驻留错误与空参数契约。
+add_executable(item_count_facade_tests
+    test_item_count_facade.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
+)
+target_include_directories(item_count_facade_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(item_count_facade_tests PRIVATE cxx_std_17)
+set_target_properties(item_count_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME item_count_facade_tests COMMAND item_count_facade_tests)

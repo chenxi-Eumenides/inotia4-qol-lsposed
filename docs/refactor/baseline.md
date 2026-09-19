@@ -34,7 +34,7 @@
 | `domains/world` | 9 |
 | `game` | 54 |
 | `hooks` | 10 |
-| `host` | 33 |
+| `host` | 35 |
 | `infra` | 47 |
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 2 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **370** |
+| **合计** | **372** |
 
 ### 1.2 迁移期映射摘要
 
@@ -140,7 +140,7 @@
 | `host` | `infra` | 41 |
 | `host` | `game` | 30 |
 | `plugins/extension_bag` | `contracts` | 23 |
-| `host` | `contracts` | 17 |
+| `host` | `contracts` | 19 |
 | `plugins/custom_recipe` | `contracts` | 13 |
 | `plugins/autosell` | `contracts` | 11 |
 | `plugins/core.ui` | `contracts` | 11 |

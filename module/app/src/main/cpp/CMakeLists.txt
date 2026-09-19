@@ -182,6 +182,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
     host/game_host.cpp
+    host/item_count_facade.cpp
     host/ui_adapter.cpp
 )
 

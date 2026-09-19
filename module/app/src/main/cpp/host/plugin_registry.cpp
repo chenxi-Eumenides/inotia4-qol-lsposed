@@ -221,6 +221,177 @@ void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const
     }
 }
 
+bool plugin_has_atomic_claims(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (plugin.resources[i].atomic) return true;
+    }
+    return false;
+}
+
+bool atomic_group_satisfied(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.atomic && hooks::state_of(claim.id) != contracts::ResourceState::kLive) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const contracts::ResourceClaim* atomic_claim_by_id(const contracts::PluginDescriptor& plugin,
+                                                   const char* resource_id) {
+    if (resource_id == nullptr) return nullptr;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (plugin.resources[i].atomic && std::strcmp(plugin.resources[i].id, resource_id) == 0) {
+            return &plugin.resources[i];
+        }
+    }
+    return nullptr;
+}
+
+bool atomic_group_want(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.atomic && claim.gate != nullptr &&
+            !infra::config_get_bool(claim.gate, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 原子组失败时释放组内所有已占用成员，而不是只释放本轮新装成员。这样上一轮
+// 已 live 的成员也不会在组失败时继续对外提供部分功能。
+void rollback_atomic_group(const contracts::PluginDescriptor& plugin, const HostDeps& deps,
+                           bool* out_mechanism_failed) {
+    for (uint32_t i = plugin.resources_count; i > 0; --i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i - 1];
+        if (!claim.atomic) continue;
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            revoke_resource(claim.id, deps);
+        }
+        const contracts::ResourceState final_state = hooks::state_of(claim.id);
+        if (final_state == contracts::ResourceState::kFree) {
+            hooks::retry_pending_set(claim.id, true);
+        } else if (final_state == contracts::ResourceState::kTombstone) {
+            if (out_mechanism_failed != nullptr) *out_mechanism_failed = true;
+        }
+    }
+}
+
+// 以一条同步事务安装同一插件的原子组。返回 true 表示本轮出现失败；失败后组成员
+// 已统一回到 free（物理回滚失败则保留 tombstone），并通过 retry_pending 进入逐帧重试。
+bool install_atomic_group(const contracts::PluginDescriptor& plugin,
+                          contracts::PluginContext& ctx, const HostDeps& deps,
+                          const contracts::ResourceClaim** installed_claims,
+                          uintptr_t* installed_entries, uint32_t* installed_count,
+                          bool* out_mechanism_failed, const char** out_failed_id,
+                          const char** out_error) {
+    if (!plugin_has_atomic_claims(plugin)) return false;
+
+    const bool group_want = atomic_group_want(plugin);
+    const char* failed_id = nullptr;
+    const char* error = nullptr;
+    bool failed = false;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (!claim.atomic) continue;
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            continue;
+        }
+        // 非入口资源在门禁关闭时没有空转态；整组保持 free，待门禁开启后再尝试。
+        if (!group_want && claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+            continue;
+        }
+        if (state != contracts::ResourceState::kFree) {
+            failed = true;
+            failed_id = claim.id;
+            error = "resource not free";
+            break;
+        }
+
+        if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+            bool followed = false;
+            const uintptr_t entry = deps.resolve_entry != nullptr
+                                        ? deps.resolve_entry(claim.symbol, &followed)
+                                        : 0;
+            if (entry == 0) {
+                failed = true;
+                failed_id = claim.id;
+                error = "symbol unresolved";
+                break;
+            }
+            const hooks::InstallOutcome outcome = hooks::install_claim_entry_hook(
+                claim, entry, deps.hook_fn, false);
+            if (outcome.ok != 0) {
+                failed = true;
+                failed_id = claim.id;
+                error = outcome.error != nullptr ? outcome.error : "install failed";
+                break;
+            }
+            hooks::runtime_set(claim.id, entry, outcome.backup);
+            if (plugin.on_resource_ready != nullptr &&
+                plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+                failed = true;
+                failed_id = claim.id;
+                error = "resource_ready_failed";
+                break;
+            }
+            if (installed_claims != nullptr && installed_entries != nullptr &&
+                installed_count != nullptr) {
+                installed_claims[*installed_count] = &claim;
+                installed_entries[*installed_count] = entry;
+                ++*installed_count;
+            }
+            continue;
+        }
+
+        uintptr_t target = 0;
+        void* backup = nullptr;
+        const char* install_error = install_non_entry_claim(claim, &target, &backup);
+        if (install_error != nullptr) {
+            failed = true;
+            failed_id = claim.id;
+            error = install_error;
+            break;
+        }
+        // 非入口机制没有空转态；原子组仍先保持非 live 登记，待全部成员完成后统一
+        // 发布，失败路径由 rollback_atomic_group 物理释放。
+        hooks::set_state(claim.id, contracts::ResourceState::kDisabled);
+        hooks::retry_pending_set(claim.id, false);
+        if (installed_claims != nullptr && installed_entries != nullptr &&
+            installed_count != nullptr) {
+            installed_claims[*installed_count] = &claim;
+            installed_entries[*installed_count] = target;
+            ++*installed_count;
+        }
+    }
+
+    if (failed) {
+        rollback_atomic_group(plugin, deps, out_mechanism_failed);
+        if (out_failed_id != nullptr) *out_failed_id = failed_id;
+        if (out_error != nullptr) *out_error = error;
+        return true;
+    }
+
+    // 门禁从关闭切换为开启时，entry hook 已可能处于 disabled；只有整组走到这里
+    // 才把它们统一切为 live，避免中间态触发功能 wrapper。
+    if (group_want) {
+        for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+            const contracts::ResourceClaim& claim = plugin.resources[i];
+            if (claim.atomic && hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
+                hooks::set_state(claim.id, contracts::ResourceState::kLive);
+            }
+            if (claim.atomic) hooks::retry_pending_set(claim.id, false);
+        }
+    }
+    return false;
+}
+
 // 常驻（gate==nullptr）fail-soft/optional 资源失败后的定向重试（§8：保持 free、可重试）。
 // 安装语义与 install_all 的一次性安装一致：入口 hook 安装成功后 runtime_set（顺带清除
 // retry_pending）并把 backup 交还所有者（wrapper 依赖该 backup 重放原函数）；非入口机制
@@ -293,9 +464,29 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
     const char* error_reason = nullptr;
     // 本次门禁同步新装成功的非入口资源；失败时逆序还原，禁止半装对外可见。
     const contracts::ResourceClaim* installed[kMaxResourcesPerPlugin];
+    uintptr_t installed_entries[kMaxResourcesPerPlugin];
     uint32_t installed_count = 0;
+    const bool has_atomic = plugin_has_atomic_claims(plugin);
+    const bool atomic_want = atomic_group_want(plugin);
+    if (has_atomic && atomic_want) {
+        contracts::PluginContext atomic_ctx = make_plugin_context(plugin.id);
+        const bool atomic_failed = install_atomic_group(
+            plugin, atomic_ctx, deps, installed, installed_entries,
+            &installed_count,
+            &mechanism_failed, &error_claim, &error_reason);
+        if (atomic_failed) {
+            if (mechanism_failed) {
+                error_claim = nullptr;
+                error_reason = nullptr;
+            } else {
+                degraded = true;
+            }
+            installed_count = 0;
+        }
+    }
     for (uint32_t r = 0; r < plugin.resources_count; ++r) {
         const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (claim.atomic && atomic_want) continue;
         if (claim.gate == nullptr) {
             // 常驻 fail-soft/optional 资源的定向重试：仅处理本路径置位且仍为 free 的条目；
             // 未置位者保持一次性安装语义，不做无谓重装。
@@ -699,11 +890,36 @@ int install_all(const HostDeps& deps) {
             return false;
         };
 
+        // 原子组先作为一个整体尝试；组内失败由专用回滚处理，避免后续普通资源路径
+        // 把已经回滚的成员再次当作本轮已装资源释放。
+        if (plugin_has_atomic_claims(plugin)) {
+            const bool atomic_failed = install_atomic_group(
+                plugin, ctx, deps, installed_claims, installed_entries, &installed_count,
+                &resource_failed, &failed_claim_id, &resource_error);
+            if (atomic_failed) {
+                const bool rollback_failed = resource_failed;
+                installed_count = 0;
+                if (rollback_failed) {
+                    // 物理回滚失败已由 rollback_atomic_group 置 tombstone + isolated。
+                    // 该状态不得伪装为可重试的 free。
+                } else {
+                    degraded = true;
+                    degraded_claim_id = failed_claim_id;
+                    degraded_error = resource_error;
+                    failed_claim_id = nullptr;
+                    resource_error = nullptr;
+                }
+            }
+        }
+
         for (uint32_t r = 0; r < plugin.resources_count; ++r) {
             const contracts::ResourceClaim& claim = plugin.resources[r];
             const bool gate_on =
                 claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
             if (claim.gate != nullptr && !gate_on) all_gates_on = false;
+
+            // 原子成员已由上面的组事务处理；组失败时不得落入逐条安装路径。
+            if (claim.atomic) continue;
 
             // 非入口机制（call patch / ptr slot / ownership）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
             if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
@@ -782,6 +998,13 @@ int install_all(const HostDeps& deps) {
             continue;
         }
 
+        if (resource_failed && failed_claim_id == nullptr && installed_count == 0) {
+            // 原子组物理回滚失败时已完成状态落盘，直接保持 failed；不再重复释放。
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                 "atomic group rollback failed");
+            continue;
+        }
+
         if (resource_failed) {
             rollback_resources(installed_claims, installed_entries, installed_count, deps);
             std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
@@ -796,7 +1019,7 @@ int install_all(const HostDeps& deps) {
 
         // 4) 全部成功（含 fail-soft 跳过）：带 gate 的资源全开 → enabled；否则 installed_disabled。
         //    fail-soft 失败只置 degraded 标记 + error 文案，不改生命周期态（§8）。
-        const bool enabled = all_gates_on;
+        const bool enabled = all_gates_on && atomic_group_satisfied(plugin);
         const char* status_error = nullptr;
         if (degraded) {
             std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
@@ -843,9 +1066,11 @@ uint32_t sync_gates() {
             continue;
         }
         // 撤销先于关资源（§3.4.4）：provider 由 enabled 转 disable 时先关提供者门禁并级联注销。
+        bool provider_revoke_started = false;
         if (status.state == infra::FeatureState::kEnabled && !plugin_all_gates_want(plugin) &&
             plugin_provides_capability(plugin)) {
             begin_revoke_provider(i);
+            provider_revoke_started = true;
         }
 
         bool has_gate = false;
@@ -864,9 +1089,17 @@ uint32_t sync_gates() {
             ++changed;
             continue;
         }
-        const bool target_enabled = all_want;
+        const bool target_enabled = all_want && atomic_group_satisfied(plugin);
         const infra::FeatureState target_state = target_enabled
             ? infra::FeatureState::kEnabled : infra::FeatureState::kInstalledDisabled;
+
+        // 原子组失败同样会使 provider 失效；撤销必须先于状态转移，避免能力在组不完整
+        // 时继续可见。门禁关闭路径已在上方完成撤销，避免重复 on_disabled。
+        if (status.state == infra::FeatureState::kEnabled && !target_enabled &&
+            plugin_provides_capability(plugin) && !provider_revoke_started) {
+            begin_revoke_provider(i);
+            provider_revoke_started = true;
+        }
 
         // fail-soft 安装失败：资源保持 free 供下一逻辑帧重试；插件 degraded + error，不改生命周期态。
         // 日志只在失败streak首帧输出，避免逐帧刷屏（同因去重）。
@@ -1038,6 +1271,13 @@ uint32_t lifecycle_step() {
         hooks::tx_step(slot.tx_id, &out);
         ++advanced;
 
+        // 生命周期事务跨帧推进时，原子成员即使已物理安装也先保持非 live 登记；
+        // 下一成员失败或事务仍在途时，能力与 wrapper 不得观察到部分组。
+        if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr && out.ok == 0 &&
+            atomic_claim_by_id(plugin, out.resource_id) != nullptr) {
+            hooks::set_state(out.resource_id, contracts::ResourceState::kDisabled);
+        }
+
         // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
         // backup 非空是「本步真实安装」的判据：幂等跳过步 backup 为 null，交还会把
         // 插件已持有的有效入口覆盖成 null（wrapper 随即 fail-closed），故跳过。
@@ -1087,7 +1327,21 @@ uint32_t lifecycle_step() {
         contracts::PluginContext ctx = make_plugin_context(plugin.id);
         if (succeeded) {
             if (slot.kind == hooks::TxKind::kInstall) {
-                const bool enabled = plugin_all_gates_want(plugin);
+                if (plugin_all_gates_want(plugin)) {
+                    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+                        const contracts::ResourceClaim& claim = plugin.resources[i];
+                        if (claim.atomic &&
+                            hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
+                            hooks::set_state(claim.id, contracts::ResourceState::kLive);
+                        }
+                    }
+                }
+                const bool enabled = plugin_all_gates_want(plugin) && atomic_group_satisfied(plugin);
+                const uint32_t plugin_index = slot.plugin_index;
+                if (enabled && g_gate_degraded[plugin_index]) {
+                    g_gate_degraded[plugin_index] = false;
+                    infra::status_set_degraded(plugin.id, false);
+                }
                 infra::status_update(
                     plugin.id,
                     enabled ? infra::FeatureState::kEnabled
@@ -1116,8 +1370,33 @@ uint32_t lifecycle_step() {
                     : (have_status && status.failed_resource_id != nullptr
                            ? status.failed_resource_id
                            : "lifecycle transaction failed");
-            infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
-            QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id, error);
+            const contracts::ResourceClaim* failed_atomic =
+                plugin_has_atomic_claims(plugin)
+                    ? atomic_claim_by_id(plugin, have_status ? status.failed_resource_id : nullptr)
+                    : nullptr;
+            if (failed_atomic != nullptr) {
+                bool rollback_failed = false;
+                rollback_atomic_group(plugin, g_install_deps, &rollback_failed);
+                if (!rollback_failed) {
+                    std::snprintf(g_error_text[slot.plugin_index],
+                                  sizeof(g_error_text[slot.plugin_index]), "resource %s: %s",
+                                  failed_atomic->id, error != nullptr ? error : "failed");
+                    g_gate_degraded[slot.plugin_index] = true;
+                    infra::status_set_degraded(plugin.id, true);
+                    infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled,
+                                         false, g_error_text[slot.plugin_index]);
+                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
+                                 g_error_text[slot.plugin_index]);
+                } else {
+                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
+                                 error);
+                }
+            } else {
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
+                             error);
+            }
         }
         slot.in_use = false;
         slot.cascade = false;

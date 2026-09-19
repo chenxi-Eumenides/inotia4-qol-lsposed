@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 19 | 1630 |
+| `contracts/` | 19 | 1681 |
 | `game/` | 36 | 2725 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 154 | 30974 |
-| `host/` | 17 | 4229 |
-| **合计** | **266** | **43761** |
+| `plugins/` | 154 | 30976 |
+| `host/` | 19 | 4596 |
+| **合计** | **268** | **44181** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -49,21 +49,21 @@
 - `plugins/save_backup/`：12 文件 / 4504 行
 - `plugins/simple_mode/`：6 文件 / 529 行
 - `plugins/special_equip/`：6 文件 / 547 行
-- `plugins/stack_limit/`：2 文件 / 103 行
+- `plugins/stack_limit/`：2 文件 / 105 行
 - `plugins/text_layer/`：6 文件 / 494 行
 - `plugins/world_teleport/`：6 文件 / 540 行
 
 ### CTest target 分类
 
-- 全仓 target 总数：**47**
+- 全仓 target 总数：**48**
 - 新架构/已迁移：**32**（机制/宿主 18 + 已迁移功能 14）
-- legacy：**15**
+- legacy：**16**
 
 新架构/已迁移（32）：
 - 机制/宿主（18）：`capability_lifecycle_tests`、`extension_bag_contract_tests`、`hooks_dispatch_tests`、`hooks_popup_state_tests`、`hooks_registry_tests`、`hooks_transaction_tests`、`infra_capabilities_status_tests`、`infra_command_queue_tests`、`infra_config_commands_tests`、`infra_events_tests`、`infra_panels_tests`、`infra_scheduler_tests`、`infra_snapshot_tests`、`infra_store_tests`、`patch_layer_tests`、`plugin_lifecycle_tests`、`plugin_registry_tests`、`store_sell_rules_tests`
 - 已迁移功能（14）：`attribute_quality_tests`、`attribute_range_display_tests`、`autosell_plugin_tests`、`autosell_rules_tests`、`autosell_store_tests`、`custom_recipe_tests`、`module_text_tests`、`native_choice_tests`、`push_all_rules_tests`、`quest_lifecycle_tests`、`save_warehouse_validate_tests`、`simple_mode_rules_tests`、`special_equip_rules_tests`、`text_layer_plugin_tests`
 
-legacy（15）：`core_ui_components_tests`、`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_adapter_tests`、`host_tests`、`infra_data_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`ui_adapter_tests`、`world_teleport_status_tests`
+legacy（16）：`core_ui_components_tests`、`core_ui_panels_tests`、`craft_ui_guard_tests`、`game_feature_tests`、`game_variant_tests`、`host_adapter_tests`、`host_tests`、`infra_data_tests`、`item_count_facade_tests`、`popup_enter_alias_tests`、`qol_log_tests`、`save_backup_rollback_tests`、`stage4_hook_tests`、`transition_dispatch_tests`、`ui_adapter_tests`、`world_teleport_status_tests`
 <!-- END GENERATED:stats -->
 
 ## 人工导航

@@ -3,6 +3,7 @@
 // 缺 requires 阻断与注册表 reset。资源安装原语与符号解析均由 HostDeps 注入 fake。
 
 #include "host/plugin_registry.h"
+#include "host/item_count_facade.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -343,6 +344,46 @@ ResourceClaim resident_soft_hook(const char* id, const char* owner) {
     c.failure = ResourceFailure::kFailSoft;
     return c;
 }
+
+ResourceClaim atomic_claim(const char* id, const char* owner, const char* gate = nullptr) {
+    ResourceClaim c = claim(id, owner, gate);
+    c.atomic = true;
+    return c;
+}
+
+ResourceClaim g_atomic_first[] = {
+    atomic_claim("hook:test:atomic:first:a", "test_atomic_first"),
+    atomic_claim("hook:test:atomic:first:b", "test_atomic_first"),
+    atomic_claim("hook:test:atomic:first:c", "test_atomic_first"),
+};
+ResourceClaim g_atomic_middle[] = {
+    atomic_claim("hook:test:atomic:middle:a", "test_atomic_middle"),
+    atomic_claim("hook:test:atomic:middle:b", "test_atomic_middle"),
+    atomic_claim("hook:test:atomic:middle:c", "test_atomic_middle"),
+};
+ResourceClaim g_atomic_live[] = {
+    atomic_claim("hook:test:atomic:live:a", "test_atomic_live"),
+    atomic_claim("hook:test:atomic:live:b", "test_atomic_live"),
+    atomic_claim("hook:test:atomic:live:c", "test_atomic_live"),
+};
+ResourceClaim g_atomic_retry[] = {
+    atomic_claim("hook:test:atomic:retry:a", "test_atomic_retry"),
+    atomic_claim("hook:test:atomic:retry:b", "test_atomic_retry"),
+    atomic_claim("hook:test:atomic:retry:c", "test_atomic_retry"),
+};
+ResourceClaim g_atomic_visible[] = {
+    atomic_claim("hook:test:atomic:visible:a", "test_atomic_visible"),
+    atomic_claim("hook:test:atomic:visible:b", "test_atomic_visible"),
+};
+ResourceClaim g_atomic_gate[] = {
+    atomic_claim("hook:test:atomic:gate:a", "test_atomic_gate", "test.atomic.gate"),
+    atomic_claim("hook:test:atomic:gate:b", "test_atomic_gate", "test.atomic.gate"),
+};
+
+int g_atomic_capability_iface = 0;
+const qol::contracts::CapabilityProvisionRef g_atomic_provides[] = {
+    {"cap:test.atomic", QolVersion{1, 0}, &g_atomic_capability_iface},
+};
 ResourceClaim g_resident_soft_hook[] = {
     resident_soft_hook("hook:test:resident:hook", "test_resident_hook"),
 };
@@ -997,6 +1038,126 @@ void test_resident_retry_is_rolled_back_with_later_failure() {
     CHECK(qol::hooks::isolated_get("ptrslot:test:resident:rollback"));
 }
 
+void test_atomic_first_member_failure_is_degraded_and_pending() {
+    reset_all();
+    g_backend.fail_hook_call = 1;
+    const PluginDescriptor d =
+        make_descriptor("test_atomic_first", g_atomic_first, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("test_atomic_first", FeatureState::kInstalledDisabled));
+    const char* error = nullptr;
+    CHECK(feature_of("test_atomic_first", nullptr, nullptr, &error));
+    CHECK(error != nullptr);
+    CHECK(std::strstr(error, "hook:test:atomic:first:a") != nullptr);
+    CHECK(feature_degraded("test_atomic_first"));
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(qol::hooks::state_of("hook:test:atomic:first:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:atomic:first:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:atomic:first:c") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:first:a"));
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:first:b"));
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:first:c"));
+}
+
+void test_atomic_middle_member_failure_rolls_back_prefix_and_stays_free() {
+    reset_all();
+    g_backend.fail_hook_call = 2;
+    const PluginDescriptor d =
+        make_descriptor("test_atomic_middle", g_atomic_middle, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_backend.unhook_calls == 1);
+    CHECK(feature_state_is("test_atomic_middle", FeatureState::kInstalledDisabled));
+    CHECK(feature_degraded("test_atomic_middle"));
+    CHECK(qol::hooks::state_of("hook:test:atomic:middle:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:atomic:middle:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:atomic:middle:c") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:middle:a"));
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:middle:b"));
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:middle:c"));
+}
+
+void test_atomic_failure_releases_members_live_from_previous_round() {
+    reset_all();
+    const PluginDescriptor d = make_descriptor("test_atomic_live", g_atomic_live, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("test_atomic_live", FeatureState::kEnabled));
+
+    CHECK(qol::hooks::set_state("hook:test:atomic:live:b", ResourceState::kFree));
+    qol::hooks::runtime_clear("hook:test:atomic:live:b");
+    qol::hooks::retry_pending_set("hook:test:atomic:live:b", true);
+    g_backend.fail_hook_call = g_backend.hook_calls + 1;
+    CHECK(sync_gates() == 1);
+    CHECK(feature_state_is("test_atomic_live", FeatureState::kInstalledDisabled));
+    CHECK(feature_degraded("test_atomic_live"));
+    CHECK(qol::hooks::state_of("hook:test:atomic:live:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:atomic:live:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:test:atomic:live:c") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:live:a"));
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:live:b"));
+    CHECK(qol::hooks::retry_pending_get("hook:test:atomic:live:c"));
+}
+
+void test_atomic_retry_success_is_enabled_once_and_clears_degraded() {
+    reset_all();
+    g_backend.fail_hook_call = 2;
+    const PluginDescriptor d = make_descriptor("test_atomic_retry", g_atomic_retry, 3, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(feature_degraded("test_atomic_retry"));
+
+    g_backend.fail_hook_call = 0;
+    CHECK(sync_gates() == 1);
+    CHECK(feature_state_is("test_atomic_retry", FeatureState::kEnabled));
+    CHECK(!feature_degraded("test_atomic_retry"));
+    CHECK(g_probe.enabled_calls == 1);
+    CHECK(qol::hooks::state_of("hook:test:atomic:retry:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:test:atomic:retry:b") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:test:atomic:retry:c") == ResourceState::kLive);
+    CHECK(sync_gates() == 0);
+    CHECK(g_probe.enabled_calls == 1);
+}
+
+void test_atomic_partial_install_publishes_no_capability_or_facade_provider() {
+    reset_all();
+    g_backend.fail_hook_call = 2;
+    PluginDescriptor d = make_descriptor("test_atomic_visible", g_atomic_visible, 2, nullptr, 0);
+    d.provides_count = 1;
+    d.provides = g_atomic_provides;
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("test_atomic_visible", FeatureState::kInstalledDisabled));
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(qol::infra::require_capability("cap:test.atomic", QolVersionRange{1, 0}) ==
+          nullptr);
+    uint32_t count = 41;
+    CHECK(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
+          kQolErrNotReady);
+    CHECK(count == 41);
+}
+
+void test_atomic_gate_closed_does_not_call_on_enabled() {
+    reset_all();
+    qol::infra::config_set_bool("test.atomic.gate", false);
+    const PluginDescriptor d = make_descriptor("test_atomic_gate", g_atomic_gate, 2, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("test_atomic_gate", FeatureState::kInstalledDisabled));
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(qol::hooks::state_of("hook:test:atomic:gate:a") == ResourceState::kDisabled);
+    CHECK(qol::hooks::state_of("hook:test:atomic:gate:b") == ResourceState::kDisabled);
+
+    qol::infra::config_set_bool("test.atomic.gate", true);
+    CHECK(sync_gates() == 1);
+    CHECK(feature_state_is("test_atomic_gate", FeatureState::kEnabled));
+    CHECK(g_probe.enabled_calls == 1);
+    CHECK(qol::hooks::state_of("hook:test:atomic:gate:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:test:atomic:gate:b") == ResourceState::kLive);
+}
+
 }  // namespace
 
 int main() {
@@ -1024,6 +1185,12 @@ int main() {
     test_resident_success_not_reinstalled();
     test_resident_entry_hook_fail_soft_retry();
     test_resident_retry_is_rolled_back_with_later_failure();
+    test_atomic_first_member_failure_is_degraded_and_pending();
+    test_atomic_middle_member_failure_rolls_back_prefix_and_stays_free();
+    test_atomic_failure_releases_members_live_from_previous_round();
+    test_atomic_retry_success_is_enabled_once_and_clears_degraded();
+    test_atomic_partial_install_publishes_no_capability_or_facade_provider();
+    test_atomic_gate_closed_does_not_call_on_enabled();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
