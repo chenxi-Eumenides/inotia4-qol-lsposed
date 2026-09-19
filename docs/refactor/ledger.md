@@ -165,7 +165,7 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 | L6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
 | L7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
 
-**胶囊合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的胶囊卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位)。L1–L5 行为面均**未经真机验证**（`NOT_ACCEPTED`），待按 VM 卡补证。
+**胶囊合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的 VM-CAPSULE 卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-CAPSULE：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。L1–L5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
 
 当前迁移债基线：`plugins → game` 24 文件、`plugins → infra` 22 文件、
 `plugins → hooks` 8 文件、`plugins → patch` 0 文件、`plugins → host` 0 文件；
