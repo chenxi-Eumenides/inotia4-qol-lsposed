@@ -153,8 +153,8 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 
 > **编号口径（勿混用）**：架构分层只有 **L0–L5**（`ARCHITECTURE.md` §2.2–§2.4、`docs/refactor/layers.md`）。
 > 本节使用 **C1–C7** 表示胶囊迁移的**施工阶段**（C = capsule），是工作分解顺序，**不是架构层级**。
-> 胶囊不是新增层，而是既有层内的组件与约束：L0 的 `host_sdk.h`/`game_host.h`/`ui.h` 契约、
-> L3 的「插件只依赖 contracts 与自身目录」约束、L5 的 `host/host_sdk.cpp`/`game_host.cpp`/`ui_adapter.cpp` 实现。
+> 「胶囊」是设计对 L3 `plugins/<id>/` 的**形态约束**（可外置、目录自包含、只依赖 `contracts/` 与自身目录；ADR-0008 决策 1）；
+> Host SDK / Game Host API 属宿主内核，§3.8 `:378` 明示「不属于胶囊模型」，不是胶囊的组成部件。
 
 该计划依据 ADR-0008 执行。用户裁决：胶囊迁移属于 **P1–P4 范围**；设计在 P4 后修改，
 不受 P5 签署门禁约束。C1 只冻结 Host SDK / Game Host API 的 ABI 骨架与 `PluginContext`
