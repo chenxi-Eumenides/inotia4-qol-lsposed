@@ -211,5 +211,8 @@ L4 插件源码未在 L4-0 修改；后续胶囊迁移必须只依赖本节追�
   `0=放行`，非法资源 id 返回负错误码。
 - `QolUiAdapter` minor `1`：补齐控件树查询、PopupState/UIDesc 调度、分辨率、字体/贴图
   原语、原版按钮/开关/物品图标和自定义按钮绘制；实现统一经 `host/ui_adapter.cpp`。
+- `QolHostSdk` minor `2`：`QolStoreApi` 增加 caller-owned 的容器级
+  `read_container`、`import_container`、`delete_slot`；容量不足返回错误并报告所需长度。
+  未增加 `ensure_slot`/`reset_slot`，因为 save_backup 当前迁移面不调用这两个操作。
 - `QolGameHost::extra` 的既有角色、物品、库存、存档、世界、任务与选择框子表继续作为
   四插件迁移入口；未新增 game 内部类型、地址或 STL。

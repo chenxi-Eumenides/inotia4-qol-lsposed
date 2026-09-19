@@ -340,6 +340,37 @@ QolResult sdk_store_replace(int32_t slot, const contracts::QolStoreSection* repl
     return store_result(infra::store::replace_sections(slot, replacement_map, removal_set));
 }
 
+QolResult sdk_store_read_container(int32_t slot, uint8_t* out, uint32_t capacity,
+                                   uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (slot < 0 || out_size == nullptr || (capacity > 0 && out == nullptr)) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+
+    std::vector<uint8_t> bytes;
+    const infra::store::Status status = infra::store::read_container(slot, &bytes);
+    if (status != infra::store::Status::kOk) return store_result(status);
+    if (bytes.size() > capacity) {
+        *out_size = static_cast<uint32_t>(bytes.size());
+        return result_error(kQolErrInvalidArgument, "buffer too small");
+    }
+    if (!bytes.empty()) std::memcpy(out, bytes.data(), bytes.size());
+    *out_size = static_cast<uint32_t>(bytes.size());
+    return contracts::ok();
+}
+
+QolResult sdk_store_import_container(int32_t slot, const uint8_t* data, uint32_t size) {
+    if (slot < 0 || (size > 0 && data == nullptr)) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    return store_result(infra::store::import_container(slot, data, size));
+}
+
+QolResult sdk_store_delete_slot(int32_t slot) {
+    if (slot < 0) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    return store_result(infra::store::delete_slot(slot));
+}
+
 QolResult sdk_panels_register_item(const contracts::PanelItemSpec* item) {
     if (item == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
     return result_from_bool(infra::panels_register_item(*item), kQolErrConflict, kConflict);
@@ -523,7 +554,8 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.events = {&sdk_events_subscribe, &sdk_events_unsubscribe};
     sdk.capabilities = {&sdk_capability_require, &sdk_capability_lease_enter,
                         &sdk_capability_lease_leave, &sdk_capability_set_available};
-    sdk.store = {&sdk_store_read, &sdk_store_write, &sdk_store_remove, &sdk_store_replace};
+    sdk.store = {&sdk_store_read, &sdk_store_write, &sdk_store_remove, &sdk_store_replace,
+                 &sdk_store_read_container, &sdk_store_import_container, &sdk_store_delete_slot};
     sdk.panels = {&sdk_panels_register_item, &sdk_panels_register_provider,
                   &sdk_panels_unregister_owner, &sdk_panels_find, &sdk_panels_open,
                   &sdk_panels_close, &sdk_panels_active};

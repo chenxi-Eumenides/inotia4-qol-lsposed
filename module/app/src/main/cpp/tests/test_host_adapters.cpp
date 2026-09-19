@@ -1,6 +1,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
+#include <iterator>
+#include <vector>
 
 #include "contracts/panels.h"
 #include "core/native/game_variant.h"
@@ -18,6 +21,7 @@
 #include "infra/events.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
+#include "infra/store.h"
 #include "infra/text_scope.h"
 
 uintptr_t g_base = 0;
@@ -228,6 +232,49 @@ int main() {
     assert(sdk.scheduler.add != nullptr);
     assert(sdk.events.subscribe != nullptr);
     assert(sdk.hooks.intercept_blocks != nullptr);
+    assert(sdk.store.read_container != nullptr);
+    assert(sdk.store.import_container != nullptr);
+    assert(sdk.store.delete_slot != nullptr);
+
+    static_assert(sizeof(qol::contracts::QolStoreApi) == sizeof(void*) * 7,
+                  "store ABI member count changed");
+
+    uint32_t container_size = 0;
+    assert(sdk.store.read_container(0, nullptr, 0, &container_size).code == kQolErrNotReady);
+    assert(sdk.store.read_container(-1, nullptr, 0, &container_size).code ==
+           kQolErrInvalidArgument);
+    assert(sdk.store.read_container(0, nullptr, 0, nullptr).code == kQolErrInvalidArgument);
+    assert(sdk.store.import_container(0, nullptr, 1).code == kQolErrInvalidArgument);
+    assert(sdk.store.delete_slot(-1).code == kQolErrInvalidArgument);
+
+    qol::infra::store::init(".");
+    assert(sdk.store.delete_slot(0).ok == kQolOk);
+    assert(sdk.store.delete_slot(1).ok == kQolOk);
+
+    const uint8_t section_data[] = {0x11, 0x22, 0x33, 0x44};
+    assert(sdk.store.write(0, "adapter", 1, section_data, sizeof(section_data)).ok == kQolOk);
+
+    uint8_t tiny_container[1] = {};
+    container_size = 0;
+    assert(sdk.store.read_container(0, tiny_container, sizeof(tiny_container), &container_size).code ==
+           kQolErrInvalidArgument);
+    assert(container_size > sizeof(tiny_container));
+
+    std::vector<uint8_t> container(container_size);
+    assert(sdk.store.read_container(0, container.data(), static_cast<uint32_t>(container.size()),
+                                    &container_size)
+               .ok == kQolOk);
+    assert(container_size == container.size());
+    assert(sdk.store.import_container(1, container.data(), container_size).ok == kQolOk);
+
+    uint8_t section_out[sizeof(section_data)] = {};
+    qol::contracts::QolStoreBuffer section_buffer{section_out, 0, sizeof(section_out)};
+    uint16_t section_version = 0;
+    assert(sdk.store.read(1, "adapter", &section_buffer, &section_version).ok == kQolOk);
+    assert(section_version == 1 && section_buffer.size == sizeof(section_data));
+    assert(std::equal(std::begin(section_data), std::end(section_data), section_out));
+    assert(sdk.store.delete_slot(1).ok == kQolOk);
+    assert(sdk.store.read(1, "adapter", &section_buffer, &section_version).code == kQolErrNotFound);
 
     int32_t value = 0;
     assert(sdk.config.set_bool("adapter.test", 1).ok == kQolOk);

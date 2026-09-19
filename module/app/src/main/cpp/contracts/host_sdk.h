@@ -106,16 +106,32 @@ using QolStoreWriteFn = QolResult (*)(int32_t slot, const char* name, uint16_t v
                                       const uint8_t* data, uint32_t size);
 using QolStoreRemoveFn = QolResult (*)(int32_t slot, const char* name);
 using QolStoreReplaceSectionsFn = QolResult (*)(int32_t slot,
-                                                const QolStoreSection* replacements,
-                                                uint32_t replacement_count,
-                                                const char* const* removals,
-                                                uint32_t removal_count);
+                                                 const QolStoreSection* replacements,
+                                                 uint32_t replacement_count,
+                                                 const char* const* removals,
+                                                 uint32_t removal_count);
+using QolStoreReadContainerFn = QolResult (*)(int32_t slot, uint8_t* out, uint32_t capacity,
+                                              uint32_t* out_size);
+using QolStoreImportContainerFn = QolResult (*)(int32_t slot, const uint8_t* data, uint32_t size);
+using QolStoreDeleteSlotFn = QolResult (*)(int32_t slot);
 struct QolStoreApi {
     QolStoreReadFn read;
     QolStoreWriteFn write;
     QolStoreRemoveFn remove;
     QolStoreReplaceSectionsFn replace_sections;
+    QolStoreReadContainerFn read_container;
+    QolStoreImportContainerFn import_container;
+    QolStoreDeleteSlotFn delete_slot;
 };
+
+static_assert(offsetof(QolStoreApi, read_container) == sizeof(QolStoreReadFn) * 4,
+              "QolStoreApi section ABI layout changed");
+static_assert(offsetof(QolStoreApi, import_container) == sizeof(QolStoreReadFn) * 5,
+              "QolStoreApi container ABI layout changed");
+static_assert(offsetof(QolStoreApi, delete_slot) == sizeof(QolStoreReadFn) * 6,
+              "QolStoreApi container ABI layout changed");
+static_assert(sizeof(QolStoreApi) == sizeof(QolStoreReadFn) * 7,
+              "QolStoreApi ABI size changed");
 
 using QolPanelFindFn = QolResult (*)(const char* panel_id, const PanelProviderSpec** out_provider);
 using QolPanelRegisterItemFn = QolResult (*)(const PanelItemSpec* item);
@@ -203,6 +219,6 @@ struct QolHostSdk {
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 1;
+constexpr uint16_t kHostSdkMinor = 2;
 
 }  // namespace qol::contracts

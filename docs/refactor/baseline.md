@@ -133,7 +133,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 122 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 121 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -141,17 +141,17 @@
 | `host` | `game` | 30 |
 | `plugins/extension_bag` | `contracts` | 18 |
 | `host` | `contracts` | 17 |
-| `plugins/autosell` | `infra` | 13 |
 | `plugins/custom_recipe` | `contracts` | 13 |
+| `plugins/autosell` | `contracts` | 11 |
 | `plugins/core.ui` | `contracts` | 11 |
 | `plugins/extension_bag` | `infra` | 11 |
 | `infra` | `game` | 10 |
-| `plugins/autosell` | `contracts` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
 | `plugins/inventory_hooks` | `contracts` | 9 |
-| `plugins/autosell` | `game` | 8 |
 | `plugins/save_backup` | `infra` | 8 |
+| `domains/inventory` | `contracts` | 7 |
+| `domains/world` | `game` | 7 |
 
 ### 2.2 include 环
 
