@@ -13,100 +13,52 @@
 #include "hooks/registry.h"
 #include "patch/instr_patch.h"
 
-// 启动期常驻 patch 的声明式安装实现（见 .h）。所有站点地址/指令字来自
-// game/access/patches 的登记表（常量单源 game_symbols.h），本文件不写裸地址。
-//
-// monster 兼容是扫描式例外：地址由运行时特征字节匹配得出，无法静态登记，
-// 故直接经 patch/instr_patch 的 install_word_at 占用同一张点表，不进 hooks/registry
-// 资源表；仍属同一占用仲裁与原语，失败仅记录（fail-soft）。
+// 本文件只保留宿主兼容 patch。S2 数量布局、直接位读重定向与 clamp 全部由
+// plugins/stack_limit 的 999 原子组声明，避免 boot 阶段把数量功能变成 fatal 依赖。
 
 namespace qol::host {
 namespace {
 
-constexpr const char* kOwner = "core";
-constexpr const char* kReason =
-    "常驻指令 patch：S2 数量布局/直接位读重定向/上限 clamp/登录弹窗跳过；"
-    "调用点无函数指针槽可挂，需改指令字或 BL 目标";
-constexpr const char* kMonsterClaimId = "patch:MONSTER_ITEM_COUNT_COMPAT";
+constexpr const char* kOwner = "host";
+constexpr const char* kReason = "Hive 登录跳过";
+constexpr const char* kHubClaimId = "P_HUB_LOGIN_SKIP";
 
-// 12 条必需（fail-closed）+ 1 条 hub（fail-soft）。顺序 = 安装顺序：
-// 位段缩窄 ×2 → S2 重定向 arg/call ×10 → hub ×1。
-#define CORE_PATCH_CLAIM(NAME, REQ, FAIL)                                             \
-    {NAME, NAME, contracts::ResourceMechanism::kCallPatch,                            \
-     contracts::ResourcePolicy::kPrivate, REQ, FAIL, true, kOwner, kReason, nullptr,  \
-     120, nullptr}
-
-const contracts::ResourceClaim kClaims[] = {
-    CORE_PATCH_CLAIM("P_SAVE_SAVE_INVENTORY_BITEND", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_SAVE_LOAD_INVENTORY_BITEND", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_UISTORE_BUTTON_SELL_EXE_D18D0_ARG",
-                     contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_UISTORE_BUTTON_SELL_EXE_D18D0_CALL",
-                     contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_UISTORE_BUTTON_SELL_EXE_D18E8_ARG",
-                     contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_UISTORE_BUTTON_SELL_EXE_D18E8_CALL",
-                     contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_UISTORE_SELL_ITEM_D26B8_ARG", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_UISTORE_SELL_ITEM_D26B8_CALL", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_ITEMSYSTEM_DIVIDE_108458_ARG", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_ITEMSYSTEM_DIVIDE_108458_CALL", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_ITEMSYSTEM_DIVIDE_10848C_ARG", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_ITEMSYSTEM_DIVIDE_10848C_CALL", contracts::ResourceRequirement::kRequired,
-                     contracts::ResourceFailure::kFailClosed),
-    CORE_PATCH_CLAIM("P_HUB_LOGIN_SKIP", contracts::ResourceRequirement::kOptional,
-                     contracts::ResourceFailure::kFailSoft),
+const contracts::ResourceClaim kHubClaim{
+    kHubClaimId,
+    kHubClaimId,
+    contracts::ResourceMechanism::kCallPatch,
+    contracts::ResourcePolicy::kPrivate,
+    contracts::ResourceRequirement::kOptional,
+    contracts::ResourceFailure::kFailSoft,
+    true,
+    kOwner,
+    kReason,
+    nullptr,
+    120,
+    nullptr,
+    false,
 };
-#undef CORE_PATCH_CLAIM
 
-constexpr uint32_t kRequiredCount = 12;
-constexpr uint32_t kHubIndex = 12;
+constexpr const char* kMonsterClaimId = "patch:MONSTER_ITEM_COUNT_COMPAT";
 
 std::atomic<bool> g_installed{false};
 std::atomic<bool> g_installing{false};
 
-// 解析站点并物理安装；成功后置 live 并登记运行期地址。
-bool install_site(const contracts::ResourceClaim& claim) {
+bool install_hub() {
     qol::game::PatchSite site{};
-    if (!qol::game::patch_site(claim.symbol, &site)) {
-        QOL_LOG_ERROR(QolDomain::kCore, "core_patches: site not found %s", claim.symbol);
+    if (!qol::game::patch_site(kHubClaim.symbol, &site)) {
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches: hub site not found");
         return false;
     }
-    const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
+    const qol::patch::Outcome outcome = qol::patch::install_claim(kHubClaim, site.addr);
     if (outcome.ok != 0) {
-        QOL_LOG_ERROR(QolDomain::kCore, "core_patches: install failed %s: %s", claim.id,
-                      outcome.error != nullptr ? outcome.error : "?");
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches: hub install failed: %s",
+                     outcome.error != nullptr ? outcome.error : "?");
         return false;
     }
-    hooks::set_state(claim.id, contracts::ResourceState::kLive);
-    hooks::runtime_set(claim.id, site.addr, nullptr);
+    hooks::set_state(kHubClaim.id, contracts::ResourceState::kLive);
+    hooks::runtime_set(kHubClaim.id, site.addr, nullptr);
     return true;
-}
-
-// 物理释放；成功置 free、失败置 tombstone + 隔离（与宿主回滚语义一致）。
-void release_site(const contracts::ResourceClaim& claim) {
-    qol::game::PatchSite site{};
-    const bool released =
-        qol::game::patch_site(claim.symbol, &site) &&
-        qol::patch::release_claim(claim, site.addr).ok == 0;
-    if (released) {
-        hooks::set_state(claim.id, contracts::ResourceState::kFree);
-        hooks::runtime_clear(claim.id);
-    } else {
-        hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
-        hooks::isolated_set(claim.id, true);
-    }
 }
 
 // monster 版（大黄猫改版）物品数量上界兼容：mod 在 SAVE_LoadFile 内用自写包装器逐件
@@ -116,8 +68,8 @@ void release_site(const contracts::ResourceClaim& claim) {
 void apply_monster_compat() {
     if (g_base == 0) return;
     static const uint8_t kSig[8] = {0x1F, 0x89, 0x01, 0x71, 0x68, 0x00, 0x00, 0x54};
-    constexpr uint32_t kOrig = 0x7101891Fu;  // cmp w8, #0x62
-    constexpr uint32_t kRepl = 0x7101FD1Fu;  // cmp w8, #0x7F
+    constexpr uint32_t kOrig = 0x7101891Fu;
+    constexpr uint32_t kRepl = 0x7101FD1Fu;
     int hits = 0;
     FILE* f = fopen("/proc/self/maps", "r");
     if (f == nullptr) return;
@@ -144,9 +96,9 @@ void apply_monster_compat() {
                              "core_patches monster compat: 0x%lx cmp w8,#0x62 -> #0x7F",
                              static_cast<unsigned long>(p));
             } else {
-                QOL_LOG_ERROR(QolDomain::kCore, "core_patches monster compat failed 0x%lx: %s",
-                              static_cast<unsigned long>(p),
-                              outcome.error != nullptr ? outcome.error : "?");
+                QOL_LOG_WARN(QolDomain::kCore, "core_patches monster compat failed 0x%lx: %s",
+                             static_cast<unsigned long>(p),
+                             outcome.error != nullptr ? outcome.error : "?");
             }
         }
     }
@@ -164,8 +116,6 @@ bool core_patches_install() {
         return g_installed.load(std::memory_order_acquire);
     }
 
-    // patch 原语注入：本入口在 assembly 装配前、bridge_init 内被调用，须自包含
-    // （与 host/frame_source 同构；P5 原语迁入 patch/ 后两处一并改指）。
     patch::set_primitives(qol::patch::Primitives{
         &call_patch_install_bl,
         &call_patch_revert_bl,
@@ -173,47 +123,15 @@ bool core_patches_install() {
         &call_patch_revert_word,
     });
 
-    // 未就绪守卫：本入口在 bridge_init() 内部、g_bridge_ready 置位之前被调用，
-    // 因此**不得**以 bridge_ready() 判断（会恒为未就绪并静默失败）；只需 g_base 已定位。
-    // 站点/符号缺失由 install_site 逐条 fail-closed 并记日志。
+    // boot hook 只负责宿主兼容；g_base 尚未就绪时允许 bridge_init 后续重试。
     if (g_base == 0) {
         g_installing.store(false, std::memory_order_release);
-        return false;  // 未就绪：不改写字节，允许后续重试
+        return true;
     }
 
-    for (const contracts::ResourceClaim& claim : kClaims) {
-        if (!hooks::register_claim(claim)) {
-            QOL_LOG_ERROR(QolDomain::kCore, "core_patches: claim registration failed %s", claim.id);
-            g_installing.store(false, std::memory_order_release);
-            return false;
-        }
-    }
-
-    // 必需 12 条：全成或全退（fail-closed，禁止半装）。
-    uint32_t installed = 0;
-    for (; installed < kRequiredCount; ++installed) {
-        if (!install_site(kClaims[installed])) break;
-    }
-    if (installed < kRequiredCount) {
-        for (uint32_t i = installed; i > 0; --i) release_site(kClaims[i - 1]);
-        hooks::set_state(kClaims[installed].id, contracts::ResourceState::kTombstone);
-        hooks::isolated_set(kClaims[installed].id, true);
-        QOL_LOG_ERROR(QolDomain::kCore, "core_patches: fail-closed at %s",
-                      kClaims[installed].id);
-        g_installing.store(false, std::memory_order_release);
-        return false;
-    }
-
+    hooks::register_claim(kHubClaim);
+    (void)install_hub();
     apply_monster_compat();
-
-    // hub 软失败：登录弹窗跳过是体验优化，匹配失败只记日志、不阻断 bridge。
-    const contracts::ResourceClaim& hub = kClaims[kHubIndex];
-    if (install_site(hub)) {
-        QOL_LOG_INFO(QolDomain::kCore, "core_patches installed %u + hub", kRequiredCount);
-    } else {
-        QOL_LOG_WARN(QolDomain::kCore, "core_patches hub skipped (soft fail) %s", hub.id);
-    }
-
     g_installed.store(true, std::memory_order_release);
     g_installing.store(false, std::memory_order_release);
     return true;

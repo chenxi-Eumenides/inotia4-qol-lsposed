@@ -292,6 +292,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/data/native/item_class.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -340,6 +341,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/data/native/item_class.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -372,6 +374,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/data/native/item_class.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -402,6 +405,7 @@ add_executable(patch_layer_tests
     ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/data/native/item_class.cpp
 )
 target_include_directories(patch_layer_tests PRIVATE
     ${CPP_DIR}
@@ -416,6 +420,7 @@ add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
 add_executable(extension_bag_contract_tests
     test_extension_bag_contract.cpp
     ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/data/native/item_class.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
 )
@@ -693,3 +698,29 @@ target_include_directories(item_count_facade_tests PRIVATE
 target_compile_features(item_count_facade_tests PRIVATE cxx_std_17)
 set_target_properties(item_count_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_count_facade_tests COMMAND item_count_facade_tests)
+
+# P1-B1：stack_limit 999 原子组 claim 清单、provider 驻留/注销与未知类别 fail-closed。
+add_executable(stack_limit_plugin_tests
+    test_stack_limit_plugin.cpp
+    ${CPP_DIR}/plugins/stack_limit/plugin.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/access/patches.cpp
+    ${CPP_DIR}/data/native/item_class.cpp
+)
+target_include_directories(stack_limit_plugin_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(stack_limit_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(stack_limit_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME stack_limit_plugin_tests COMMAND stack_limit_plugin_tests)
+
+# P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
+add_executable(core_patches_shape_tests test_core_patches_shape.cpp)
+target_compile_definitions(core_patches_shape_tests PRIVATE
+    QOL_CORE_PATCHES_SOURCE="${CPP_DIR}/host/core_patches.cpp"
+)
+target_compile_features(core_patches_shape_tests PRIVATE cxx_std_17)
+set_target_properties(core_patches_shape_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_patches_shape_tests COMMAND core_patches_shape_tests)

@@ -256,8 +256,8 @@ target_sources(gamebridge PRIVATE
     plugins/inventory_hooks/plugin.cpp
 )
 
-# B2a-2：常驻指令 patch 声明式化（core_patches 13 条 + stack_limit 6 条 clamp）
-# 与 stack_limit 有效态归属。末尾追加，不改上方既有行
+# B2a-2/P1-B1：宿主仅保留 Hive 兼容 patch；S2 12 条与 6 条 clamp 归 stack_limit 999
+# 原子组。末尾追加，不改上方既有行
 target_sources(gamebridge PRIVATE
     host/core_patches.cpp
     core/native/stack_limit_state.cpp

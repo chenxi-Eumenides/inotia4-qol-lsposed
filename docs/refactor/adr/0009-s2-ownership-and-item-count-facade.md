@@ -29,6 +29,21 @@
 - 读写在**同一调用窗内同步完成**（R-47/R-49，禁止退化为跨帧命令）。
 - **不进入公共 contracts**：`stack_codec` 全部 `constexpr`、S2 位移/掩码、`max_count`、`effective_*`、`writeback_needed`、`stack_limit_enabled()`/`stack_limit_set_effective()`、native bag marker。
 
+### residency 归属
+
+`item_count` provider 的驻留跟随 `stack_limit` 插件自身的安装状态，而不是 999
+功能组的有效态：`plugin_install` 成功后注册 provider，`plugin_deactivate` 注销 provider。
+`on_disabled` 只清除 999 有效态，不注销 provider，且可重复调用。因而 provider 驻留时
+`canonical` 始终可读；`gate_want && atomic_group_satisfied` 只决定
+`effective`、`write_effective` 与 `writeback_needed` 的语义。
+
+| 状态 | provider | `canonical` | `effective` / `write_effective` / `writeback_needed` |
+|---|---|---|---|
+| gate 关 + 已安装 | 驻留 | 可读 | 原始语义（成功） |
+| gate 开 + 原子组未满足 | 驻留 | 可读 | `kQolErrNotReady` |
+| gate 开 + 组全 live | 驻留 | 可读 | S2 语义 |
+| 未安装 / deactivate | 注销 | `kQolErrNotReady` | `kQolErrNotReady` |
+
 ## 决策 2：S2 归 `stack_limit` 的 999 功能组，不做 boot-fatal（用户裁决）
 
 - **目的**：开关**不改变数据的存读方式**；关闭态不使用额外数据位。
@@ -72,6 +87,10 @@
 - 全组：`kRequired + kFailClosed + resumable=true + atomic=true`，gate=`plugin.stack_limit.enabled`。
 - **`host/core_patches` 迁移后**仅保留：`P_HUB_LOGIN_SKIP`（owner=`host`，reason 只述 Hive 登录跳过）+ monster 特征扫描（不建 claim、不入组、不伪装 S2 资源）；删除 S2 owner/reason 与 12 条 claim。不创建 `core.compat`。
 
+本批已登记 18 条声明式资源（6 条 clamp + 12 条 S2 claim）。上述 getter/写路径仍是 B2
+迁移缺口：在消费者读写同批切换前，不宣称其已纳入 999 原子组；`ITEMSYSTEM_MakeItem`
+继续明确排除。
+
 ## 消费者迁移批次（30 文件）
 
 | 批次 | 文件 | 替换方式 | 关键约束 |
@@ -93,3 +112,15 @@
 
 - **正向**：公共 `contracts/` 零 codec 语义；S2 归属与失效语义明确；关闭"部分安装即启用"漏洞；原子组可复用（`craft_ui` 5 核心等）。
 - **代价**：引擎新增原子组语义与测试；facade 引入一次间接调用（热路径）；`core_patches`→`stack_limit` 的资源迁移需真机验证 boot→assembly 时序与失败回落。
+
+## 实施序列 B1–B5
+
+| 批次 | 范围 | 约束 |
+|---|---|---|
+| **B1（本批）** | `stack_limit` 私有实现头、facade provider、999 原子资源组；S2 claims 从 `host/core_patches` 迁入，`core_patches` 仅保留 Hive 登录跳过与 monster 特征扫描 | 过渡期 `stack_codec_impl.h` 继续 include `contracts/stack_codec.h` 并转发符号；所有 codec 只有这一份实现来源。S2 在 assembly 期安装，不再由 boot 入口承担 boot-fatal；provider 在 install 后驻留，gate 关闭使用原始语义，gate 开但组未就绪时 `effective`/写路径返回 `kQolErrNotReady`，由调用方回落原版；未驻留/未知类别按错误码拒绝 |
+| **B2** | 消费者读侧与写侧同批切换到 `item_count` facade | 读写不得分批提交，避免出现读 S2、写原始的混合态；`api/native`、`core/native`、`data/native`、`extension_bag`、`inventory_hooks` 的现有 `stack_codec.h` include 在 B1 保持不变 |
+| **B3** | `extension_bag` model 与 marker 私有化 | canonical sidecar 始终使用 S2；native bag marker 留在 `extension_bag`，不进入 facade |
+| **B4** | 完整 host/VM 验证与消费者回归 | 覆盖原子组失败回滚、重试、能力/响应可见性及开关往返；行为面以 VM-B 真机证据为准 |
+| **B5** | 删除 `contracts/stack_codec.h`，并清除 `contracts/stack_limit.h` 的全局函数 | codec、策略常量与有效态完全留在 `stack_limit` 私有实现；消费者只经 facade/能力访问 |
+
+B1–B4 期间，`stack_codec_impl.h` 是避免双份 codec 实现的单一过渡入口；B5 完成整体搬迁后删除该公共头及其过渡 include。

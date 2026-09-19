@@ -199,6 +199,8 @@ bool assembly_init() {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: inventory_hooks registration failed");
         return false;
     }
+    // S2 布局与 clamp 在 bridge boot 后、此处 assembly 期作为 stack_limit 的 999 原子组
+    // 安装；boot 阶段只保留 host 的 Hive 登录兼容 patch，不再承担数量组就绪。
     if (!register_plugin(features::stack_limit::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: stack_limit registration failed");
         return false;

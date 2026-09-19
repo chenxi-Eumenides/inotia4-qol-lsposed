@@ -51,10 +51,10 @@
 | `plugins/save_backup` | 12 |
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
-| `plugins/stack_limit` | 2 |
+| `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **372** |
+| **合计** | **373** |
 
 ### 1.2 迁移期映射摘要
 
@@ -260,7 +260,7 @@
 | `save_backup` | `plugins/save_backup` | 12 |
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
-| `stack_limit` | `plugins/stack_limit` | 2 |
+| `stack_limit` | `plugins/stack_limit` | 3 |
 | `text_layer` | `plugins/text_layer` | 6 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 

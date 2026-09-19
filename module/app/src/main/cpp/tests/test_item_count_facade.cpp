@@ -57,6 +57,53 @@ void assert_not_ready_without_provider() {
     assert(count == 77);
     assert(encoding == qol::contracts::QolItemCountEncoding::kUnknown);
     assert(needed == 77);
+
+    assert(qol::host::host_item_count_api().canonical(nullptr, &count).code ==
+           kQolErrInvalidArgument);
+    assert(qol::host::host_item_count_api().write_effective(nullptr, 1).code ==
+           kQolErrInvalidArgument);
+    assert(count == 77);
+}
+
+QolResult unknown_canonical(const void*, uint32_t*) {
+    return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+}
+QolResult unknown_effective(const void*, uint32_t*) {
+    return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+}
+QolResult unknown_is_encoded(const void*, qol::contracts::QolItemCountEncoding* out) {
+    *out = qol::contracts::QolItemCountEncoding::kUnknown;
+    return qol::contracts::ok();
+}
+QolResult unknown_write(void*, uint32_t) {
+    return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+}
+QolResult unknown_writeback(const void*, uint32_t, int32_t*) {
+    return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+}
+
+void assert_unknown_is_not_guessed() {
+    const qol::contracts::QolItemCountApi provider = {
+        &unknown_canonical, &unknown_effective, &unknown_is_encoded, &unknown_write,
+        &unknown_writeback};
+    qol::host::host_item_count_set_provider(&provider);
+    uint32_t count = 77;
+    int32_t needed = 77;
+    auto encoding = qol::contracts::QolItemCountEncoding::kEncoded;
+    assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
+           kQolErrUnsupported);
+    assert(qol::host::host_item_count_api().effective(reinterpret_cast<void*>(1), &count).code ==
+           kQolErrUnsupported);
+    assert(qol::host::host_item_count_api().is_encoded(reinterpret_cast<void*>(1), &encoding).ok ==
+           0);
+    assert(encoding == qol::contracts::QolItemCountEncoding::kUnknown);
+    assert(qol::host::host_item_count_api().write_effective(reinterpret_cast<void*>(1), 999).code ==
+           kQolErrUnsupported);
+    assert(qol::host::host_item_count_api().writeback_needed(reinterpret_cast<void*>(1), 999,
+                                                             &needed).code == kQolErrUnsupported);
+    assert(count == 77);
+    assert(needed == 77);
+    qol::host::host_item_count_set_provider(nullptr);
 }
 
 void assert_provider_forwarding_and_null_arguments() {
@@ -98,6 +145,7 @@ void assert_provider_forwarding_and_null_arguments() {
 
 int main() {
     assert_not_ready_without_provider();
+    assert_unknown_is_not_guessed();
     assert_provider_forwarding_and_null_arguments();
     return 0;
 }

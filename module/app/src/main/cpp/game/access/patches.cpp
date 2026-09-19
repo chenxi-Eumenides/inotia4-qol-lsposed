@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "data/native/game_symbols.h"
+#include "data/native/item_class.h"
 #include "game_access.h"
 
 namespace qol::game {
@@ -232,3 +233,24 @@ void patch_site_clear_overrides_for_test() {
 }
 
 }  // namespace qol::game
+
+namespace qol::features::stack_limit::impl {
+
+uint8_t item_count_encoding(const void* item) {
+    return static_cast<uint8_t>(::item_count_encoding(const_cast<void*>(item)));
+}
+
+bool read_item_count_field(const void* item, uint32_t* out_value) {
+    if (g_base == 0 || item == nullptr || out_value == nullptr) return false;
+    *out_value = *reinterpret_cast<const uint32_t*>(
+        reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+    return true;
+}
+
+bool write_item_count_field(void* item, uint32_t value) {
+    if (g_base == 0 || item == nullptr) return false;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = value;
+    return true;
+}
+
+}  // namespace qol::features::stack_limit::impl

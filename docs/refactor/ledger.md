@@ -239,6 +239,18 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本节追加契约或另行登记的 U11/C5
 契约缺口。
 
+### P1-B1：`stack_limit` S2 所有者迁移
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| 私有 codec 入口 | ✅ 已落地（过渡） | `plugins/stack_limit/stack_codec_impl.h` 暂时转发 `contracts/stack_codec.h`；B5 删除公共 codec 头 |
+| 999 原子组 | ✅ 已落地 | `stack_limit` 6 条 clamp + 12 条 S2 claim，共 18 条，统一 `required + fail-closed + resumable + atomic + plugin.stack_limit.enabled` |
+| facade provider | ✅ 已落地（host-only） | provider 在 `plugin_install` 成功后驻留、`plugin_deactivate` 注销；`on_disabled` 只清 999 有效态；gate 关闭保留原始语义，gate 开且原子组未满足时 effective/写路径返回 `kQolErrNotReady`；未知类别与未就绪路径不写默认 out |
+| `core_patches` | ✅ 已收窄 | 仅保留 `P_HUB_LOGIN_SKIP` 与 monster 特征扫描；S2 由 assembly 期 `stack_limit` 安装 |
+| getter/写路径 | ⚠️ 已登记缺口 | ADR-0009 §999 清单中的 `ITEM_GetCumulateCount`、`INVEN_ConsumeItem`、`INVEN_SaveItem`、`INVEN_MoveItem`、`INVEN_SaveItemDirect`、`ITEMSYSTEM_Divide`、`INVEN_RemoveItemData` 尚未全部切到 facade/999 声明式资源；B2 与读侧同批迁移 |
+| 消费者 | ⬜ B2 | 本批按约束不修改 `api/native`、`core/native`、`data/native`、`extension_bag`、`inventory_hooks`；其写 wrapper 缺口见 B2 |
+| 验收 | ⬜ 真机待 B4 | host 断言已补；行为面仍需 VM-B 真机证据，未因 host/build 通过而宣称接受 |
+
 ### C5 ABI freeze：四插件迁移前置契约
 
 本批冻结四个插件后续迁移所需的公共面，不修改插件业务体：
