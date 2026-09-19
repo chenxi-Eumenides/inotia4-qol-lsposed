@@ -6,7 +6,7 @@
 > - 结构基线：`docs/refactor/baseline.md`、`docs/refactor/map.md`（脚本生成）
 > - 生成时点：2026-09-19，仓库 HEAD `7e77af0`；来源＝`module/app/src/main/cpp/` 物理文件清单
 > - 口径：文件数/行数为 `wc -l`（含空行与注释）；只列**当前实际存在**的模块，设计提及但未落地的在「收口项」标注
-> - 用途：给人快速理解现状；**任何决策请回到权威文档**，本文件不得作为落地依据
+> - 用途：给人快速理解现状（含**依赖链**：插件↔插件 / 插件↔组件 / 组件↔组件）；**任何决策请回到权威文档**，本文件不得作为落地依据
 
 ## 0. 编号口径
 
@@ -173,7 +173,118 @@
 
 ---
 
-# 三、当前收口项与已知缺口
+# 三、依赖链
+
+> 数据源：插件 descriptor（`plugins/*/plugin.cpp`）、全仓 `require_capability` 调用点、`arch_common.IncludeGraph` 实测 include 边（提取脚本 `.tmp/dep-graph/extract.py`，HEAD `7f93fa5` 时点）。
+
+## 3.1 插件 ↔ 插件：**无 include 边**，全部经 capability
+
+插件目录之间 include 边 = **0 条**（脚本核验）。
+
+**提供的 capability（8 个）**
+
+| capability | 提供者 |
+|---|---|
+| `attribute.quality` | `attribute_quality` |
+| `craft_result` | `custom_recipe` |
+| `extension_bag` | `extension_bag` |
+| `inventory_refresh` | `inventory_hooks` |
+| `text_layer` | `text_layer` |
+| `ui_choice` | `native_choice` |
+| `ui_components` | `core.ui` |
+| `ui_panels` | `core.ui` |
+
+**声明式依赖（descriptor 的 `requires` / `optional_requires`）**
+
+| 消费者 | capability | 类型 | 提供者 |
+|---|---|---|---|
+| `autosell` | `attribute.quality` | **required** | `attribute_quality` |
+| `attribute_range_display` | `attribute.quality` | optional | `attribute_quality` |
+| `custom_recipe` | `attribute.quality` | optional | `attribute_quality` |
+| `craft_ui` | `craft_result` | optional | `custom_recipe` |
+| `world_teleport` | `ui_choice` | optional | `native_choice` |
+
+**运行期消费但未在 descriptor 声明**（实测；属 C6 应收口的「声明与消费不一致」）
+
+| 消费者 | capability | 位置 |
+|---|---|---|
+| `extension_bag` | `inventory_refresh` | `game_ui_virtbag.cpp:311`、`move_merge.inc:96` |
+| `autosell` | `extension_bag` | `scan.cpp`（经 POD 成员） |
+| `save_backup` | `ui_panels` | `ui/panel.cpp:779` |
+| `api/native/game_save.cpp` | `ui_panels` | 宿主侧 API 消费者（非插件） |
+| `core/native/inventory_trade.cpp` | `extension_bag` | legacy 宿主侧消费者（待 C6） |
+
+**提供但当前无消费者**：`text_layer`（消费者已并入自身）、`ui_components`（消费者迁移属 U11-3）。
+
+## 3.2 插件 → 组件（Host SDK 组 / Game Host 组 / contracts 头）
+
+| 插件 | Host SDK（`sdk->…`） | Game Host（`game->…`） | contracts 头 |
+|---|---|---|---|
+| `attribute_quality` | — | `read` | attribute_quality, plugin |
+| `attribute_range_display` | capabilities | `read, ui_primitive` | attribute_quality, plugin |
+| `autosell` | capabilities, config, events, hooks, panels, scheduler, store | — | attribute_quality, autosell, events, extension_bag, ownership, panels, plugin, ui |
+| `core.ui` | hooks, panels, scheduler | — | host_sdk, ownership, panels, plugin, stack_limit, ui |
+| `craft_ui` | capabilities, config, log | `extra, read, write` | craft_result, game_host, host_sdk, plugin |
+| `custom_recipe` | capabilities, log | `extra, read, write` | attribute_quality, craft_result, events, game_host, host_sdk, ownership, plugin |
+| `extension_bag` | capabilities, config, events, hooks, scheduler（+ `abi`） | `abi` | events, extension_bag, game_host, host_sdk, inventory_refresh, ownership, plugin, stack_codec, stack_limit, ui |
+| `inventory_hooks` | hooks | — | host_sdk, inventory_refresh, plugin, stack_codec, stack_limit |
+| `native_choice` | — | — | plugin, ui_choice |
+| `push_all` | config, events, log | `read` | events, plugin |
+| `quest` | log, scheduler | `extra, read` | plugin |
+| `save_backup` | capabilities, hooks, panels, store | `extra` | game_host, host_sdk, ownership, panels, plugin, ui |
+| `simple_mode` | config, events, log | `extra, read` | events, plugin |
+| `special_equip` | hooks, log | `extra, read` | plugin |
+| `stack_limit` | — | — | plugin, stack_limit |
+| `text_layer` | hooks, log, text_scope | — | plugin, text_layer |
+| `world_teleport` | capabilities, log, scheduler | — | plugin, ui_choice |
+
+**读法**：全部插件只 include `contracts/` 与自身目录（插件边界合规 17/17）；对宿主设施一律经 `sdk->`/`game->` 函数表，不出现 `game/infra/hooks/patch/host` 的直接 include。
+
+## 3.3 组件 ↔ 组件（编译期 include 边，实测）
+
+**依赖方向规则**（设计 §2.2）：`contracts` ← 所有层；`infra` / `hooks` / `patch` ← `host`（及 hooks/patch 内部）；`game` ← `host` / `patch`（且 `game` 只被宿主实现使用）；`plugins` ← `contracts`（其余经运行期注册表）；`host` ← `plugins` **仅组合根**；`bridge` 属宿主侧，可跨 `host/infra/contracts/game`。
+
+**层 → 层边（计数，Top）**
+
+| 源 → 目标 | 边数 | 说明 |
+|---|---|---|
+| `host` → `infra` | 26 | 宿主驱动运行时机制 |
+| `host` → `game` | 21 | `game_host.cpp` 逐访问器转发 |
+| `host` → `contracts` | 17 | 契约类型/函数表 |
+| `host` → `plugins/*` | 17 | **组合根**（assembly/plugin_registry 引用描述符 + SDK 分发） |
+| `host` → `hooks` | 9 | registry/transaction/install/dispatch/popup_state |
+| `host` → `patch` | 6 | instr_patch/ptr_slot |
+| `host` → `host` | 27 | 宿主内部 |
+| `infra` → `contracts` | 4 | version / commands / events / panels |
+| `hooks` → `contracts` | 3 | `plugin.h`（资源声明类型） |
+| `hooks` → `game` | 2 | `popup_state.cpp` → `game/access/{popup_state,symbols}`（game 层收口） |
+| `patch` → `contracts` | 2 | `plugin.h` |
+| `patch` → `game` | 2 | 站点表：`game/access/{patches,ptr_slots}` |
+| `bridge` → `host` / `infra` / `contracts` / `game` | 见下 | 宿主侧入口 |
+| `plugins/*` → `contracts` | 多数 | 唯一跨层出口 |
+| **`plugins/*` → `plugins/*`（其他插件）** | **0** | 插件边界要求 |
+
+**关键链路（逐条，实测文件边）**
+
+- 契约聚合：`contracts/plugin.h → {host_sdk.h, game_host.h, version.h}`；`host_sdk.h → {commands.h, panels.h, result.h, version.h}`；`game_host.h → host_sdk.h`
+- 装配根：`host/assembly.cpp → host/{plugin_registry,frame_source,ui_adapter,adapters} + infra/{commands,config,runtime,scheduler} + game/{patches,ptr_slots,symbols,clock} + hooks/transaction + patch/{instr_patch,ptr_slot} + contracts/{host_sdk,game_host,ownership}`
+- 插件执行器：`host/plugin_registry.cpp → hooks/{registry,transaction,install} + patch/{instr_patch,ptr_slot} + infra/{capabilities,config,status} + game/{patches,ptr_slots} + contracts/{plugin,commands,ownership}`
+- SDK 实现：`host/host_sdk.cpp → infra/{capabilities,commands,config,events,panels,scheduler,store,text_scope} + hooks/{dispatch,popup_state} + host/adapters.h`
+- Game Host 实现：`host/game_host.cpp → game/access/{char,item_class,world,craft,save,quest,attr_range_ui,symbols,ui_choice} + game/clock`
+- UI adapter：`host/ui_adapter.cpp → game/access/{ui_kit,ui_components}`
+- 资源机制：`hooks/transaction.cpp → hooks/{registry,install} + contracts/plugin.h`；`hooks/popup_state.cpp → game/access/{popup_state,symbols}`；`patch/instr_patch.cpp → patch/claims.h + game/access/patches.h`；`patch/ptr_slot.cpp → patch/{claims,instr_patch} + game/access/ptr_slots.h`
+- 运行时机制：`infra/commands.cpp → infra/{command_queue,config}`；`infra/config.cpp → contracts/events.h`；`infra/capabilities.h → contracts/version.h`；`infra/panels.h → contracts/panels.h`
+- 入口桥：`bridge/gamebridge.cpp → host/{assembly,frame_source,core_patches} + bridge/native/gamebridge_internal.h`；`bridge/gamebridge_{autosell,lifecycle,push_all,simple_mode,domain_operations}.cpp → contracts/commands.h + infra/commands.h`；`bridge/gamebridge_store.cpp → infra/store.h`；`bridge/gamebridge_status.cpp → host/status_json.h`；`bridge/gamebridge_variant.cpp → host/variant_json.h`
+
+## 3.4 三条运行期通道（编译期边之外）
+
+| 通道 | 用途 | 关键设施 |
+|---|---|---|
+| **capability** | 插件/宿主间功能面（3.1 表） | `contracts/host_sdk.h` 的 `capabilities.require/lease_*` → `host/host_sdk.cpp` → `infra/capabilities` |
+| **命令端口** | 跨线程副作用请求（HTTP/JVM → 主线程） | `contracts/commands.h` → `host/host_sdk.cpp` 的 `commands` → `infra/{commands,command_queue}` |
+| **事件总线** | 配置变更等低频通知 | `contracts/events.h` → `infra/events`（订阅经 `sdk->events`） |
+
+# 四、当前收口项与已知缺口
 
 1. **C6/C7 未完成**：`core.api` 路由内核与 API provider 未落地（149 路由仍在 Kotlin controllers）；native config 早期自读未实现；架构脚本仍是八目录过渡映射，边界约束未硬失败。
 2. **遗留目录**：`core/`、`api/`、`data/` 共 76 文件未吸收。
