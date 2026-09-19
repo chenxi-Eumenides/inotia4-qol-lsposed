@@ -232,6 +232,11 @@ module/app/src/main/cpp/
       rules.cpp
       feature.cpp
       plugin.cpp
+    push_all/
+      CMakeLists.txt             # 只定义 qol_plugin_push_all 的源文件
+      rules.cpp
+      feature.cpp
+      plugin.cpp
 ```
 
 `plugins/CMakeLists.txt` 使用 `file(GLOB ... CONFIGURE_DEPENDS)` 发现
@@ -247,12 +252,41 @@ module/app/src/main/cpp/
 2. 确认插件源文件只通过相对路径或 `contracts/`、自身目录头文件完成包含；不得依赖
    `game/`、`infra/`、`hooks/`、`patch/`、`host/` 或其它插件目录。父级不会向插件 target
    注入 `${CMAKE_CURRENT_SOURCE_DIR}` 根目录 include。
-3. 从父级 `CMakeLists.txt` 的 `gamebridge` 源列表删除已经下沉的同一批 `.cpp`；未下沉
-   插件继续保持原列表。自动发现只负责定义并链接 target，不会替父级去重。
+3. 不再从父级 `CMakeLists.txt` 的 `gamebridge` 源列表删除已经下沉的 `.cpp`；片段被发现
+   后，父级会按插件目录前缀自动过滤该批源。未下沉插件继续保持原列表。
 4. 运行 host tests、Android debug 构建和独立 include 边界负例；确认目标的编译命令中
    没有宿主私有 include 路径，且同一 `.cpp` 只出现在插件 target 或 `gamebridge` 之一。
 
 边界要求是结构约束而非约定：在 `plugins/<id>/` 临时加入
 `#include "host/assembly.h"` 必须使该插件 target 编译失败，验证后移除；插件源文件不得
 以扩大父级 include 路径或把宿主源文件加入插件 target 的方式绕过失败。此批只迁移
-`simple_mode`，其它插件不创建 target，后续 lane 只需新增各自目录片段即可接入自动发现。
+`simple_mode`，并以 `push_all` 验证片段发现后的自动摘除；其它插件后续只需新增各自目录
+片段即可接入自动发现。
+
+### 并行迁移前置：自动摘除机制
+
+为避免并行 lane 在迁移同一插件时同时编辑根级源列表，根
+`CMakeLists.txt` 只维护一次 `QOL_BRIDGE_PLUGIN_SOURCES` 集中清单。插件父级在
+`add_subdirectory(plugins)` 配置各插件片段后，按已发现的 `plugins/<id>/` 路径前缀从
+该清单中过滤对应源文件，再把剩余源加入 `gamebridge`。因此独立插件 target 与
+`gamebridge` 不会重复编译同一插件源；过滤使用路径前缀而不是插件名正则，避免插件 id
+中的正则字符改变匹配含义。
+
+该机制选择“根级集中清单 + 父级按已发现 id 过滤”，因为现有根 target 仍需保留尚未
+迁移插件的直接源，且新增片段只需改变父级的配置期发现结果，不需要再次编辑根文件。
+`file(GLOB ... CONFIGURE_DEPENDS)` 会在新增或删除片段后触发重新配置；仅改变片段内容
+仍按普通 CMake 配置依赖处理。
+
+新增插件只需两步：
+
+1. 创建 `plugins/<id>/CMakeLists.txt`，定义 `qol_plugin_<id>`，列出该插件自己的源；
+   父级会自动发现片段、设置公共 target 属性并链接到 `gamebridge`，同时自动摘除集中清单
+   中 `plugins/<id>/` 前缀的源。
+2. 修越界：根据独立 target 的编译错误，补齐 `contracts/`、自身目录或已冻结的 Host
+   SDK/Game Host API 契约，消除对宿主私有目录和其它插件源码的 include；不再修改根
+   `CMakeLists.txt` 的插件源条目。
+
+`push_all` 作为本机制的试点：新增片段后其三个源只属于
+`qol_plugin_push_all`，根 `gamebridge` 保留 JNI 薄层和 patch 机制源但不再直接编译
+`plugins/push_all/*.cpp`。本试点只改变编译归属与链接方式，不改变装配顺序、描述符或
+运行时逻辑；行为面仍按既有 VM-P4-01 真机证据约束，不以构建结果替代真机验收。

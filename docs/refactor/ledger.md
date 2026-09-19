@@ -309,3 +309,14 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
   四插件迁移入口；未新增 game 内部类型、地址或 STL。
 
 > 协作纪律：委托代理一律禁止使用 question 工具；遇阻返回报告，由编排者裁决。
+
+### C8-1：并行迁移前置——插件源自动摘除
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| 集中源清单 | ✅ 已落地 | 根 `CMakeLists.txt` 只维护一次 `QOL_BRIDGE_PLUGIN_SOURCES`；现有插件源均由该清单提供给 `gamebridge` 的过渡直接源集合 |
+| 自动摘除 | ✅ 已落地 | `plugins/CMakeLists.txt` 在 `file(GLOB ... CONFIGURE_DEPENDS)` 发现片段后，按 `plugins/<id>/` 路径前缀过滤已下沉插件源，再回写父级变量 |
+| 试点 | ✅ 已落地 | `push_all` 片段定义 `qol_plugin_push_all`；三个插件源从 `gamebridge` 直接源移除并由插件静态 target 链接 |
+| 新增插件操作 | ✅ 已冻结 | 仅执行“建片段 → 修越界”两步；不再编辑根 CMakeLists 的插件源条目 |
+| 配置期语义 | ✅ 已登记 | 新增/删除片段依赖 CMake 重新配置；`CONFIGURE_DEPENDS` 负责触发重新配置，非运行期动态发现 |
+| 行为验收 | NOT_ACCEPTED | 本任务不安装真机；构建与 host/静态检查只能证明编译归属，不能替代受影响 VM-P4-01 的真机日志 |

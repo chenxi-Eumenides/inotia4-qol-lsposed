@@ -1,4 +1,4 @@
-#include "plugins/push_all/rules.h"
+#include "rules.h"
 
 namespace qol::features::push_all {
 

@@ -1,11 +1,11 @@
-#include "plugins/push_all/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 
-#include "plugins/push_all/rules.h"
+#include "rules.h"
 
 namespace qol::features::push_all {
 namespace {

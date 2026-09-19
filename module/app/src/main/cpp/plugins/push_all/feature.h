@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 推怪（推动增强）业务层（ARCHITECTURE.md §3.3）。
 //

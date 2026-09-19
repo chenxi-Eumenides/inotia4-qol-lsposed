@@ -1,10 +1,10 @@
-#include "plugins/push_all/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/events.h"
-#include "plugins/push_all/feature.h"
+#include "../../contracts/events.h"
+#include "feature.h"
 
 namespace qol::features::push_all {
 namespace {

@@ -1,6 +1,64 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(gamebridge)
 
+set(QOL_BRIDGE_PLUGIN_SOURCES
+    plugins/save_backup/bundle.cpp
+    plugins/save_backup/feature.cpp
+    plugins/inventory_hooks/native_inventory_hook.cpp
+    plugins/inventory_hooks/inventory_find_item_poc.cpp
+    plugins/inventory_hooks/inventory_hook_stage4.cpp
+    plugins/extension_bag/game_ui_virtbag.cpp
+    plugins/extension_bag/extension_bag_port.cpp
+    plugins/extension_bag/extension_bag_persistence.cpp
+    plugins/extension_bag/extension_bag_geometry.cpp
+    plugins/extension_bag/extension_bag_api.cpp
+    plugins/attribute_quality/rules.cpp
+    plugins/attribute_quality/feature.cpp
+    plugins/attribute_quality/plugin.cpp
+    plugins/attribute_range_display/feature.cpp
+    plugins/attribute_range_display/plugin.cpp
+    plugins/world_teleport/feature.cpp
+    plugins/world_teleport/rules.cpp
+    plugins/autosell/rules.cpp
+    plugins/autosell/config.cpp
+    plugins/autosell/view.cpp
+    plugins/autosell/scan.cpp
+    plugins/autosell/plugin.cpp
+    plugins/autosell/store.cpp
+    plugins/autosell/ui/panel.cpp
+    plugins/quest/feature.cpp
+    plugins/quest/plugin.cpp
+    plugins/special_equip/rules.cpp
+    plugins/special_equip/feature.cpp
+    plugins/special_equip/plugin.cpp
+    plugins/custom_recipe/catalog.cpp
+    plugins/custom_recipe/rules.cpp
+    plugins/custom_recipe/table.cpp
+    plugins/custom_recipe/feature.cpp
+    plugins/custom_recipe/plugin.cpp
+    plugins/text_layer/charinfo_scope.cpp
+    plugins/text_layer/feature.cpp
+    plugins/text_layer/plugin.cpp
+    plugins/craft_ui/feature.cpp
+    plugins/craft_ui/plugin.cpp
+    plugins/push_all/rules.cpp
+    plugins/push_all/feature.cpp
+    plugins/push_all/plugin.cpp
+    plugins/inventory_hooks/plugin.cpp
+    plugins/stack_limit/plugin.cpp
+    plugins/save_backup/plugin.cpp
+    plugins/world_teleport/plugin.cpp
+    plugins/native_choice/feature.cpp
+    plugins/native_choice/plugin.cpp
+    plugins/core.ui/plugin.cpp
+    plugins/core.ui/feature.cpp
+    plugins/core.ui/ui_components.cpp
+    plugins/core.ui/panels/settings.cpp
+    plugins/core.ui/panels/stack.cpp
+    plugins/save_backup/ui/panel.cpp
+    plugins/extension_bag/plugin.cpp
+)
+
 add_library(gamebridge SHARED
     bridge/native/gamebridge.cpp
     bridge/native/gamebridge_data.cpp
@@ -25,32 +83,15 @@ add_library(gamebridge SHARED
     api/native/game_shop.cpp
     api/native/game_save.cpp
     api/native/game_save_preflight.cpp
-    plugins/save_backup/bundle.cpp
-    plugins/save_backup/feature.cpp
     game_system.cpp
     data/native/game_tiles.cpp
     api/native/game_character.cpp
     api/native/game_party.cpp
     api/native/game_inventory.cpp
     game/access/hive_iap.cpp
-    plugins/inventory_hooks/native_inventory_hook.cpp
-    plugins/inventory_hooks/inventory_find_item_poc.cpp
-    plugins/inventory_hooks/inventory_hook_stage4.cpp
     game/access/ui_kit.cpp
     game/access/ui_components.cpp
-    plugins/extension_bag/game_ui_virtbag.cpp
-    plugins/extension_bag/extension_bag_port.cpp
-    plugins/extension_bag/extension_bag_persistence.cpp
-    plugins/extension_bag/extension_bag_geometry.cpp
-    plugins/extension_bag/extension_bag_api.cpp
     game/access/attr_range_ui.cpp
-    plugins/attribute_quality/rules.cpp
-    plugins/attribute_quality/feature.cpp
-    plugins/attribute_quality/plugin.cpp
-    plugins/attribute_range_display/feature.cpp
-    plugins/attribute_range_display/plugin.cpp
-    plugins/world_teleport/feature.cpp
-    plugins/world_teleport/rules.cpp
 )
 
 find_library(log-lib log)
@@ -61,6 +102,7 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/data/native
 )
 add_subdirectory(plugins)
+target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
 target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
@@ -75,22 +117,15 @@ target_sources(gamebridge PRIVATE
 
 # 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（P4-B3 迁移至 plugins/autosell）
 target_sources(gamebridge PRIVATE
-    plugins/autosell/rules.cpp
-    plugins/autosell/config.cpp
-    plugins/autosell/view.cpp
-    plugins/autosell/scan.cpp
-    plugins/autosell/plugin.cpp
     bridge/native/gamebridge_autosell.cpp
 )
 
 # 自动出售按存档配置 sidecar（P4-B3 迁移至 plugins/autosell）
 target_sources(gamebridge PRIVATE
-    plugins/autosell/store.cpp
 )
 
 # 自动出售 UI：背包页入口按钮 + 配置面板（D1-b3 迁入 plugins/autosell/ui）
 target_sources(gamebridge PRIVATE
-    plugins/autosell/ui/panel.cpp
 )
 
 # 合成器宝石合成操作优化（gem-craft-optimization 阶段1，末尾追加，不改上方既有行）
@@ -105,17 +140,12 @@ target_sources(gamebridge PRIVATE
 # 任务完成度进档重算（quest 插件迁移：零资源常驻 + infra/scheduler 帧节拍；旧 quest_resync 删除）
 target_sources(gamebridge PRIVATE
     game/access/quest.cpp
-    plugins/quest/feature.cpp
-    plugins/quest/plugin.cpp
 )
 
 # P4 阶段 B1：special_equip 迁移为插件（game/access/item_class 收口 ITEMCLASS/GOT 读取，
 # 入口 hook 声明式化 + 出售门禁谓词过渡依赖；末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     game/access/item_class.cpp
-    plugins/special_equip/rules.cpp
-    plugins/special_equip/feature.cpp
-    plugins/special_equip/plugin.cpp
 )
 
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
@@ -136,27 +166,17 @@ target_sources(gamebridge PRIVATE
 
 # 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    plugins/custom_recipe/catalog.cpp
-    plugins/custom_recipe/rules.cpp
-    plugins/custom_recipe/table.cpp
-    plugins/custom_recipe/feature.cpp
-    plugins/custom_recipe/plugin.cpp
 )
 
 # 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 text_layer 插件）
 target_sources(gamebridge PRIVATE
-    plugins/text_layer/charinfo_scope.cpp
     hooks/dispatch.cpp
-    plugins/text_layer/feature.cpp
-    plugins/text_layer/plugin.cpp
 )
 
 # 合成器界面层（craft_ui 插件）：UIMix 控件写入收口 game/access/craft + 12 条入口 hook 声明。
 # 宝石合成与自定义配方共用；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     game/access/craft.cpp
-    plugins/craft_ui/feature.cpp
-    plugins/craft_ui/plugin.cpp
 )
 
 # 模块替换 PopupState enter 回调后的 UI 态反查表（末尾追加，不改上方既有行）
@@ -227,9 +247,6 @@ target_sources(gamebridge PRIVATE
     game/access/patches.cpp
     patch/claims.cpp
     patch/instr_patch.cpp
-    plugins/push_all/rules.cpp
-    plugins/push_all/feature.cpp
-    plugins/push_all/plugin.cpp
 )
 
 # D2a-3a：extension_bag 指针槽站点解析（UIEquip 事件 proc GOT，末尾追加）
@@ -251,14 +268,12 @@ target_sources(gamebridge PRIVATE
 # B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体已随 D2c-2a
 # 迁入 plugins/inventory_hooks，同目录 claims.h 直接引用。末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    plugins/inventory_hooks/plugin.cpp
 )
 
 # B2a-2/P1-B1：宿主仅保留 Hive 兼容 patch；S2 12 条与 6 条 clamp 归 stack_limit 999
 # 原子组。末尾追加，不改上方既有行
 target_sources(gamebridge PRIVATE
     host/core_patches.cpp
-    plugins/stack_limit/plugin.cpp
 )
 
 # B4-1：infra/store MSAV 容器层（冻结核心件；零行为改动，不切换消费者）
@@ -275,13 +290,11 @@ target_sources(gamebridge PRIVATE
 # B4-5：save_backup 本体迁移为插件（零资源常驻 + 存档域原语收口 game/access/save）
 target_sources(gamebridge PRIVATE
     game/access/save.cpp
-    plugins/save_backup/plugin.cpp
 )
 
 # C1：world_teleport 迁移为插件（零资源常驻 + 世界/地图访问收口 game/access/world）
 target_sources(gamebridge PRIVATE
     game/access/world.cpp
-    plugins/world_teleport/plugin.cpp
 )
 
 # B2a-3：指针槽声明式机制（kPtrSlot）+ save_backup 删档 PtrHook 迁移（末尾追加，不改上方既有行）
@@ -300,8 +313,6 @@ target_sources(gamebridge PRIVATE
 # D1-b1：native_choice 迁移为插件（provider `ui_choice`）+ 选择框语义收口 game/access/ui_choice
 target_sources(gamebridge PRIVATE
     game/access/ui_choice.cpp
-    plugins/native_choice/feature.cpp
-    plugins/native_choice/plugin.cpp
 )
 
 # D1-b0：面板注册表（纯数据面，零 game 依赖）+ PopupState 按名定位入口
@@ -311,20 +322,13 @@ target_sources(gamebridge PRIVATE
 
 # D1-b2：core.ui 出口面插件（设置页容器 + 面板栈 + ui_panels 能力；own:popup.settings）
 target_sources(gamebridge PRIVATE
-    plugins/core.ui/plugin.cpp
-    plugins/core.ui/feature.cpp
-    plugins/core.ui/ui_components.cpp
-    plugins/core.ui/panels/settings.cpp
-    plugins/core.ui/panels/stack.cpp
 )
 
 # D1-b2：save_backup 游戏内面板迁入插件（provider save_backup + own:popup.savebackup）
 target_sources(gamebridge PRIVATE
-    plugins/save_backup/ui/panel.cpp
 )
 
 # D2a-3b-1 / D2c-2b-2：extension_bag 声明式资源插件（29 条 claim；wrapper 业务体随
 # D2c-2b-2 全部收口在 plugins/extension_bag，features/patch 已删除）
 target_sources(gamebridge PRIVATE
-    plugins/extension_bag/plugin.cpp
 )
