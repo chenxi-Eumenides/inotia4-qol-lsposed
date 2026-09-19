@@ -26,6 +26,10 @@ bool world_ready();
 // g_state 指向的当前 state（u16）；未就绪返回 -1。世界态值由调用方判定。
 int world_state();
 
+// g_gamestate 门禁原语；空指针按原扫描实现解释为 0，其他值为游戏中的原始状态。
+// 调用方将原始值等于 0 解释为 autosell 的可扫描门禁。
+int world_game_state_gate();
+
 // ---- 地图信息（MAPINFOBASE + MEMORYTEXT）----
 
 // 运行时地图记录数（u16）；未就绪/不可读返回 0。

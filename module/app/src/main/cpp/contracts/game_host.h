@@ -338,6 +338,10 @@ struct QolItemReadOnlyApi {
     QolResult (*socket_filled)(const void* item, int32_t* out_value);
     QolResult (*socket_total)(const void* item, int32_t* out_value);
     QolResult (*is_backpack_category)(int32_t category, int32_t* out_value);
+    // 宝石 item+0x10 bits0-10；原落点：plugins/autosell/view.cpp:77。
+    QolResult (*jewel_value)(const void* item, int32_t* out_value);
+    // 宝石 item+0x10 bits18-23；原落点：plugins/autosell/view.cpp:79。
+    QolResult (*jewel_attribute_type)(const void* item, int32_t* out_type);
 };
 
 struct QolWorldReadOnlyApi {
@@ -348,6 +352,8 @@ struct QolWorldReadOnlyApi {
     QolResult (*map_name)(int32_t map_id, const char** out_name);
     QolResult (*active_player_direction)(int32_t* out_direction);
     QolResult (*money)(int64_t* out_money);
+    // g_gamestate == 0 的门禁判定；原落点：plugins/autosell/scan.cpp:64-75。
+    QolResult (*game_state_gate)(int32_t* out_open);
 };
 
 struct QolCraftReadOnlyApi {
@@ -391,6 +397,30 @@ struct QolChoiceReadOnlyApi {
     QolResult (*text_owns)(const char* const* items, uint32_t count, int32_t* out_owned);
 };
 
+enum class QolInventoryItemKind : int32_t {
+    kOriginal = 0,
+    kExtension = 1,
+};
+
+struct QolInventoryItemRef {
+    int32_t kind;
+    int32_t bag;
+    int32_t slot;
+    int32_t category;
+    int32_t count;
+    void* native_item;
+};
+
+using QolInventoryBagSlotFn = int32_t (*)(const QolInventoryItemRef* item, void* ctx);
+
+struct QolInventoryReadOnlyApi {
+    // 库存引用按袋/槽读取；原落点：game_state.cpp:215-250、plugins/autosell/scan.cpp:155。
+    QolResult (*item_ref_at)(int32_t bag, int32_t slot, QolInventoryItemRef* out);
+    // 遍历原版物理袋 0..5，回调返回 1 停止；原落点：game_state.cpp:280-292、
+    // plugins/autosell/scan.cpp:119-145。
+    QolResult (*for_each_bag_slot)(QolInventoryBagSlotFn callback, void* ctx);
+};
+
 struct QolReadOnlyApi {
     QolCharacterReadOnlyApi character;
     QolItemReadOnlyApi item;
@@ -399,6 +429,7 @@ struct QolReadOnlyApi {
     QolSaveReadOnlyApi save;
     QolQuestReadOnlyApi quest;
     QolChoiceReadOnlyApi choice;
+    QolInventoryReadOnlyApi inventory;
 };
 
 static_assert(std::is_standard_layout<QolReadOnlyApi>::value,
@@ -436,6 +467,6 @@ static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, read_only) + sizeof(Q
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 3;
+constexpr uint16_t kGameHostMinor = 4;
 
 }  // namespace qol::contracts

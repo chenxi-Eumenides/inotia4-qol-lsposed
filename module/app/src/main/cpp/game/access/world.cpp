@@ -13,6 +13,11 @@ int world_state() {
     return static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
 }
 
+int world_game_state_gate() {
+    if (g_gamestate == nullptr) return 0;
+    return static_cast<int>(*reinterpret_cast<uint32_t*>(g_gamestate));
+}
+
 int world_map_record_count() {
     if (g_mapinfo_record_count == nullptr ||
         !game_memory_accessible(g_mapinfo_record_count, sizeof(uint16_t), 'r')) {

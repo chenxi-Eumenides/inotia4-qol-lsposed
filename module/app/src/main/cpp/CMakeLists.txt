@@ -92,6 +92,7 @@ add_library(gamebridge SHARED
     game/access/ui_kit.cpp
     game/access/ui_components.cpp
     game/access/attr_range_ui.cpp
+    game/access/inventory.cpp
 )
 
 find_library(log-lib log)

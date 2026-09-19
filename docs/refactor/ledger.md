@@ -320,3 +320,12 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | 新增插件操作 | ✅ 已冻结 | 仅执行“建片段 → 修越界”两步；不再编辑根 CMakeLists 的插件源条目 |
 | 配置期语义 | ✅ 已登记 | 新增/删除片段依赖 CMake 重新配置；`CONFIGURE_DEPENDS` 负责触发重新配置，非运行期动态发现 |
 | 行为验收 | NOT_ACCEPTED | 本任务不安装真机；构建与 host/静态检查只能证明编译归属，不能替代受影响 VM-P4-01 的真机日志 |
+
+### P2-ABI-1：autosell 按需只读面增补
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| ABI | ✅ 已落地 | `QolGameHost::read_only.item` 追加宝石属性值/类型，`world` 追加 `game_state_gate`，新增 `inventory.item_ref_at` 与 `inventory.for_each_bag_slot`；既有成员 append-only；`kGameHostMinor=4`。 |
+| game/access | ✅ 已落地 | `item_class` 收口 `item+I_COUNT` 宝石位域，`world` 收口 `g_gamestate` 读面，`inventory` 转发原库存引用/聚合遍历语义；插件不获得 symbols/base/裸偏移。 |
+| host 测试 | ✅ 已补 | `test_host_adapters.cpp` 覆盖新增转发表、正常值、空参数、空槽、未就绪；库存 fake 使用 contracts 引用，不依赖真实游戏内存。 |
+| autosell 迁移 | ⬜ 后续 lane | 本批不修改 `plugins/autosell` 消费者；出售事务与 UI 控件身份面仍未覆盖。行为证据受影响卡为 VM-44、VM-AS4/5/8/12/13，按要求不装真机，不能宣称 PASS。 |

@@ -25,6 +25,11 @@ int item_enchant_remaining(const void* item);
 int item_socket_filled(const void* item);
 int item_socket_total(const void* item);
 
+// 独立宝石 item+I_COUNT 的属性值 bits0-10；item 为空返回 -1。
+int item_jewel_value(const void* item);
+// 独立宝石 item+I_COUNT 的属性类型 bits18-23；item 为空返回 -1。
+int item_jewel_attribute_type(const void* item);
+
 // ITEMCLASSBASE 记录 +2 == 0x1f 的背包类别判定；表未就绪返回 false。
 bool item_class_table_ready();
 bool item_is_backpack_category(int category);

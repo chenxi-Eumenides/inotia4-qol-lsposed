@@ -9,6 +9,7 @@
 #include "game/access/char.h"
 #include "game/access/craft.h"
 #include "game/access/item_class.h"
+#include "game/access/inventory.h"
 #include "game/access/quest.h"
 #include "game/access/save.h"
 #include "game/access/symbols.h"
@@ -146,6 +147,26 @@ QolResult read_item_backpack_category(int32_t category, int32_t* out) {
     return contracts::ok();
 }
 
+QolResult read_item_jewel_value(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const int value = qol::game::item_jewel_value(item);
+    if (value < 0) return not_ready();
+    *out = value;
+    return contracts::ok();
+}
+
+QolResult read_item_jewel_attribute_type(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const int value = qol::game::item_jewel_attribute_type(item);
+    if (value < 0) return not_ready();
+    *out = value;
+    return contracts::ok();
+}
+
 QolResult read_world_position(const void*, int32_t*, int32_t*) { return unsupported(); }
 
 QolResult read_world_state(int32_t* out) {
@@ -154,6 +175,27 @@ QolResult read_world_state(int32_t* out) {
     if (value < 0) return not_ready();
     *out = value;
     return contracts::ok();
+}
+
+QolResult read_world_game_state_gate(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const int value = qol::game::world_game_state_gate();
+    if (value < 0) return not_ready();
+    *out = value == 0 ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult read_inventory_item_ref_at(int32_t bag, int32_t slot,
+                                     contracts::QolInventoryItemRef* out) {
+    if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    return qol::game::inventory_item_ref_at(bag, slot, out);
+}
+
+QolResult read_inventory_for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx) {
+    if (callback == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    return qol::game::for_each_bag_slot(callback, ctx);
 }
 
 QolResult read_craft_ui_type(uint32_t* out) {
@@ -969,10 +1011,12 @@ contracts::QolGameHost make_game_host() {
         &read_item_real_equip, &read_item_equip_level, &read_item_no_sell, &read_item_dice,
         &read_item_cumulate_count, &read_item_class_no_equip_bit,
         &read_item_equip_desc_role_type, &read_item_enchant_remaining,
-        &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category};
+        &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category,
+        &read_item_jewel_value, &read_item_jewel_attribute_type};
     host.read_only.world = {&read_world_position, &read_world_state,
                             &read_world_map_record_count, &read_world_current_map_id,
-                            &read_world_map_name, &read_world_direction, &read_world_money};
+                            &read_world_map_name, &read_world_direction, &read_world_money,
+                            &read_world_game_state_gate};
     host.read_only.craft = {
         &read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
         &read_craft_selected_index, &read_craft_selected_item, &read_craft_stuff_item,
@@ -991,6 +1035,7 @@ contracts::QolGameHost make_game_host() {
         [](uint32_t quest_id, int32_t* out) { return read_quest_value(quest_id, out, true); }};
     host.read_only.choice = {&read_choice_state_id, &read_choice_selected_index,
                              &read_choice_text_owns};
+    host.read_only.inventory = {&read_inventory_item_ref_at, &read_inventory_for_each_bag_slot};
     return host;
 }
 

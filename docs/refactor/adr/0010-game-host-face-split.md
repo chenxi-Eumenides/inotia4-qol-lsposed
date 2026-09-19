@@ -161,6 +161,26 @@ P2-B4 待删，UI primitive 的替代面为已覆盖的 `UiAdapter`；本批不�
 证明转发表和错误语义，不证明真实游戏内存位域的运行时布局。按 ADR 的行为证据规则，
 本批不装真机，行为面仍为 `NOT_ACCEPTED`。
 
+## P2-ABI-1：按需增补 autosell 只读面
+
+本批只在既有 `read_only` 子表尾部追加成员，`QolGameHost` 的既有成员顺序不变，
+`kGameHostMinor` 从 3 递增为 4。宝石位域、库存遍历/引用和 `g_gamestate` 门禁均由
+`game/access/*` 适配，插件 ABI 不暴露 `g_base`、裸偏移或 `game_symbols.h`。
+
+| 域 | 成员 / 签名 | 语义与原落点 |
+|---|---|---|
+| item | `jewel_value(const void*, int32_t*)` | 读取宝石 `item+0x10` bits0–10；原落点 `plugins/autosell/view.cpp:77`，原语 `game/access/item_class.cpp`。 |
+| item | `jewel_attribute_type(const void*, int32_t*)` | 读取宝石 `item+0x10` bits18–23；原落点 `plugins/autosell/view.cpp:79`，原语 `game/access/item_class.cpp`。 |
+| world | `game_state_gate(int32_t*)` | 读取 `g_gamestate` 并输出 `1` 当且仅当原值为 0；`g_gamestate` 空指针按原实现取 0。与原扫描门禁 `world.state == 5` 之外的独立判定逐字等价，原落点 `plugins/autosell/scan.cpp:64-75`。 |
+| inventory | `item_ref_at(int32_t, int32_t, QolInventoryItemRef*)` | 保留 `InventoryItemRef` 的 kind/bag/slot/category/count/native_item 语义；空槽为 `not_found`，物理库存未就绪为 `not_ready`。原落点 `game_state.cpp:215-250`、`plugins/autosell/scan.cpp:155`。 |
+| inventory | `for_each_bag_slot(QolInventoryBagSlotFn, void*)` | 聚合遍历物理袋 `0..5`，回调返回 1 停止；引用仅在回调期间有效。原落点 `game_state.cpp:280-292`、`plugins/autosell/scan.cpp:119-145`。 |
+
+本批不迁移 `autosell` 消费者。缺面映射为：宝石属性值 → `read_only.item.jewel_value`；
+宝石属性类型 → `read_only.item.jewel_attribute_type`；库存槽遍历 →
+`read_only.inventory.for_each_bag_slot`；库存引用 → `read_only.inventory.item_ref_at`；
+in-world 的 `g_gamestate == 0` 门禁 → `read_only.world.game_state_gate`。出售事务
+（金额、扣减、扩展袋 owner）和 UI 控件身份面仍未覆盖，留给后续 lane。
+
 ## 模块侧插件原型（simple_mode）
 
 ### CMake 边界做法

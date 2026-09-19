@@ -32,7 +32,7 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 54 |
+| `game` | 56 |
 | `hooks` | 10 |
 | `host` | 35 |
 | `infra` | 46 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **375** |
+| **合计** | **377** |
 
 ### 1.2 迁移期映射摘要
 
@@ -138,7 +138,7 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 41 |
-| `host` | `game` | 30 |
+| `host` | `game` | 31 |
 | `host` | `contracts` | 19 |
 | `plugins/extension_bag` | `contracts` | 17 |
 | `plugins/autosell` | `contracts` | 14 |

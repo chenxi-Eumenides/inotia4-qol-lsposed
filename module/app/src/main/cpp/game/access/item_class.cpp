@@ -53,6 +53,20 @@ int item_socket_total(const void* item) {
     return static_cast<int>((raw >> 4) & 0x0F);
 }
 
+int item_jewel_value(const void* item) {
+    if (item == nullptr) return -1;
+    const uint32_t raw =
+        *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(item) + I_COUNT);
+    return static_cast<int>(raw & 0x7FFu);
+}
+
+int item_jewel_attribute_type(const void* item) {
+    if (item == nullptr) return -1;
+    const uint32_t raw =
+        *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(item) + I_COUNT);
+    return static_cast<int>((raw >> 18) & 0x3Fu);
+}
+
 bool item_class_table_ready() {
     if (g_base == 0) return false;
     uint8_t* base = *reinterpret_cast<uint8_t**>(

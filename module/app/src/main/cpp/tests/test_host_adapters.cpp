@@ -26,6 +26,10 @@
 
 uintptr_t g_base = 0;
 
+enum class FakeInventoryMode { kReady, kEmpty, kNotReady };
+FakeInventoryMode g_inventory_mode = FakeInventoryMode::kReady;
+int g_world_game_state_gate = 0;
+
 decltype(fn_get_rarity) fn_get_rarity = nullptr;
 decltype(fn_item_is_no_sell) fn_item_is_no_sell = nullptr;
 decltype(fn_is_dice) fn_is_dice = nullptr;
@@ -106,6 +110,8 @@ int attr_ability_level(const void*) { return 3; }
 int item_enchant_remaining(const void*) { return g_item_class_table_ready ? 7 : -1; }
 int item_socket_filled(const void*) { return g_item_class_table_ready ? 2 : -1; }
 int item_socket_total(const void*) { return g_item_class_table_ready ? 5 : -1; }
+int item_jewel_value(const void*) { return 321; }
+int item_jewel_attribute_type(const void*) { return 17; }
 bool item_class_table_ready() { return g_item_class_table_ready; }
 bool item_is_backpack_category(int category) {
     return g_item_class_table_ready && category == 4;
@@ -175,6 +181,7 @@ bool save_encrypt_available() { return true; }
 int save_encrypt_process2(void*, int, int, const char*) { return 1; }
 void save_slots_mark_stale() {}
 int world_state() { return 7; }
+int world_game_state_gate() { return g_world_game_state_gate; }
 bool world_ready() { return true; }
 int world_map_record_count() { return 3; }
 int world_current_map_id() { return 1; }
@@ -213,6 +220,35 @@ bool ui_choice_selected_index(int32_t* out) {
 bool ui_choice_text_owns(const char* const*, uint32_t) { return true; }
 int64_t frame_count() { return 99; }
 
+QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
+                                contracts::QolInventoryItemRef* out) {
+    if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16) {
+        return contracts::error(kQolErrInvalidArgument, "invalid argument", 17);
+    }
+    if (g_inventory_mode == FakeInventoryMode::kNotReady) {
+        return contracts::error(kQolErrNotReady, "inventory not ready", 20);
+    }
+    if (g_inventory_mode == FakeInventoryMode::kEmpty) {
+        return contracts::error(kQolErrNotFound, "inventory slot is empty", 24);
+    }
+    *out = {static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal), bag, slot, 28, 4,
+            reinterpret_cast<void*>(0x9)};
+    return contracts::ok();
+}
+
+QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx) {
+    if (callback == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid argument", 17);
+    if (g_inventory_mode == FakeInventoryMode::kNotReady) {
+        return contracts::error(kQolErrNotReady, "inventory not ready", 20);
+    }
+    if (g_inventory_mode == FakeInventoryMode::kEmpty) return contracts::ok();
+    const contracts::QolInventoryItemRef ref{
+        static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal), 1, 2, 28, 4,
+        reinterpret_cast<void*>(0x9)};
+    (void)callback(&ref, ctx);
+    return contracts::ok();
+}
+
 }  // namespace qol::game
 
 namespace {
@@ -226,6 +262,14 @@ void event_handler(void*, const void*) { ++g_event_calls; }
 
 int32_t scheduler_handler(int64_t frame, void* ctx) {
     assert(frame == g_frame);
+    ++*static_cast<int*>(ctx);
+    return 0;
+}
+
+int32_t inventory_callback(const qol::contracts::QolInventoryItemRef* ref, void* ctx) {
+    assert(ref != nullptr);
+    assert(ref->kind == static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal));
+    assert(ref->category == 28 && ref->count == 4);
     ++*static_cast<int*>(ctx);
     return 0;
 }
@@ -447,6 +491,12 @@ int main() {
     assert(game.read_only.item.socket_total(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 5);
     assert(game.read_only.item.is_backpack_category(4, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.item.jewel_value(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 321);
+    assert(game.read_only.item.jewel_attribute_type(reinterpret_cast<void*>(0x1), &value).ok ==
+           kQolOk);
+    assert(value == 17);
+    assert(game.read_only.item.jewel_value(nullptr, &value).code == kQolErrInvalidArgument);
     assert(game.read_only.item.is_backpack_category(0x400, &value).code ==
            kQolErrInvalidArgument);
     assert(game.read_only.item.enchant_remaining(nullptr, &value).code == kQolErrInvalidArgument);
@@ -467,6 +517,7 @@ int main() {
     assert(game.read_only.world.active_player_direction(&value).ok == kQolOk && value == 2);
     int64_t money = 0;
     assert(game.read_only.world.money(&money).ok == kQolOk && money == 1000);
+    assert(game.read_only.world.game_state_gate(&value).ok == kQolOk && value == 1);
 
     uint32_t u32_value = 0;
     int64_t i64_value = 0;
@@ -504,6 +555,31 @@ int main() {
     assert(game.read_only.choice.selected_index(&value).ok == kQolOk && value == 0);
     assert(game.read_only.choice.text_owns(choice_items, 1, &value).ok == kQolOk && value == 1);
     assert(game.read_only.choice.selected_index(nullptr).code == kQolErrInvalidArgument);
+    qol::contracts::QolInventoryItemRef inventory_ref{};
+    assert(game.read_only.inventory.item_ref_at(1, 2, &inventory_ref).ok == kQolOk);
+    assert(inventory_ref.bag == 1 && inventory_ref.slot == 2 && inventory_ref.native_item != nullptr);
+    assert(game.read_only.inventory.item_ref_at(1, 2, nullptr).code == kQolErrInvalidArgument);
+    g_inventory_mode = FakeInventoryMode::kEmpty;
+    assert(game.read_only.inventory.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotFound);
+    g_inventory_mode = FakeInventoryMode::kNotReady;
+    assert(game.read_only.inventory.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotReady);
+    int inventory_callback_calls = 0;
+    g_inventory_mode = FakeInventoryMode::kReady;
+    assert(game.read_only.inventory.for_each_bag_slot(&inventory_callback,
+                                                      &inventory_callback_calls)
+               .ok == kQolOk);
+    assert(inventory_callback_calls == 1);
+    assert(game.read_only.inventory.for_each_bag_slot(nullptr, nullptr).code ==
+           kQolErrInvalidArgument);
+    g_inventory_mode = FakeInventoryMode::kNotReady;
+    assert(game.read_only.inventory.for_each_bag_slot(&inventory_callback,
+                                                      &inventory_callback_calls)
+               .code == kQolErrNotReady);
+    g_inventory_mode = FakeInventoryMode::kReady;
+    assert(game.read_only.world.game_state_gate(nullptr).code == kQolErrInvalidArgument);
+    g_world_game_state_gate = -1;
+    assert(game.read_only.world.game_state_gate(&value).code == kQolErrNotReady);
+    g_world_game_state_gate = 0;
     assert(game.call.call_known(1, nullptr, 0, nullptr, 0).ok == kQolErrUnsupported);
     return 0;
 }
