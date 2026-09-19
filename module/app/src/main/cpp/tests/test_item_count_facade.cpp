@@ -74,6 +74,10 @@ void assert_not_ready_without_provider() {
     uint32_t count = 77;
     auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
     int32_t needed = 77;
+    uint32_t field = 77;
+    uint32_t canonical = 77;
+    uint32_t view = 77;
+    uint32_t limit = 77;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
            kQolErrNotReady);
     assert(qol::host::host_item_count_api().effective(reinterpret_cast<void*>(1), &count).code ==
@@ -84,13 +88,32 @@ void assert_not_ready_without_provider() {
            kQolErrNotReady);
     assert(qol::host::host_item_count_api().writeback_needed(reinterpret_cast<void*>(1), 1, &needed).code ==
            kQolErrNotReady);
+    assert(qol::host::host_item_count_api().field_from_canonical(1, 1, 0, &field).code ==
+           kQolErrNotReady);
+    assert(qol::host::host_item_count_api().canonical_from_field(1, &canonical).code ==
+           kQolErrNotReady);
+    assert(qol::host::host_item_count_api().view_from_canonical(1, 0, &view).code ==
+           kQolErrNotReady);
+    assert(qol::host::host_item_count_api().view_limit(0, &limit).code == kQolErrNotReady);
     assert(count == 77);
     assert(encoding == qol::contracts::QolItemCountEncoding::kUnknown);
     assert(needed == 77);
+    assert(field == 77);
+    assert(canonical == 77);
+    assert(view == 77);
+    assert(limit == 77);
 
     assert(qol::host::host_item_count_api().canonical(nullptr, &count).code ==
            kQolErrInvalidArgument);
     assert(qol::host::host_item_count_api().write_effective(nullptr, 1).code ==
+           kQolErrInvalidArgument);
+    assert(qol::host::host_item_count_api().field_from_canonical(1, 1, 0, nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(qol::host::host_item_count_api().canonical_from_field(1, nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(qol::host::host_item_count_api().view_from_canonical(1, 0, nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(qol::host::host_item_count_api().view_limit(0, nullptr).code ==
            kQolErrInvalidArgument);
     assert(count == 77);
 }

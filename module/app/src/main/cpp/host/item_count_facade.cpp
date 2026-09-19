@@ -54,12 +54,48 @@ QolResult writeback_needed(const void* item, uint32_t count, int32_t* out_needed
                : g_provider->writeback_needed(item, count, out_needed);
 }
 
+QolResult field_from_canonical(uint32_t field, uint32_t canonical_count, int32_t extended,
+                               uint32_t* out_field) {
+    if (out_field == nullptr) return invalid_argument();
+    if (g_provider == nullptr) return not_ready();
+    return g_provider->field_from_canonical == nullptr
+               ? not_ready()
+               : g_provider->field_from_canonical(field, canonical_count, extended, out_field);
+}
+
+QolResult canonical_from_field(uint32_t field, uint32_t* out_canonical) {
+    if (out_canonical == nullptr) return invalid_argument();
+    if (g_provider == nullptr) return not_ready();
+    return g_provider->canonical_from_field == nullptr
+               ? not_ready()
+               : g_provider->canonical_from_field(field, out_canonical);
+}
+
+QolResult view_from_canonical(uint32_t canonical_count, int32_t extended, uint32_t* out_view) {
+    if (out_view == nullptr) return invalid_argument();
+    if (g_provider == nullptr) return not_ready();
+    return g_provider->view_from_canonical == nullptr
+               ? not_ready()
+               : g_provider->view_from_canonical(canonical_count, extended, out_view);
+}
+
+QolResult view_limit(int32_t extended, uint32_t* out_limit) {
+    if (out_limit == nullptr) return invalid_argument();
+    if (g_provider == nullptr) return not_ready();
+    return g_provider->view_limit == nullptr ? not_ready()
+                                              : g_provider->view_limit(extended, out_limit);
+}
+
 const contracts::QolItemCountApi kFacade = {
     &canonical,
     &effective,
     &is_encoded,
     &write_effective,
     &writeback_needed,
+    &field_from_canonical,
+    &canonical_from_field,
+    &view_from_canonical,
+    &view_limit,
 };
 
 }  // namespace

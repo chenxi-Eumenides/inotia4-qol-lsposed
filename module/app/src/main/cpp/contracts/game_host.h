@@ -119,6 +119,11 @@ struct QolItemCountApi {
     QolResult (*is_encoded)(const void* item, QolItemCountEncoding* out_encoding);
     QolResult (*write_effective)(void* item, uint32_t count);
     QolResult (*writeback_needed)(const void* item, uint32_t count, int32_t* out_needed);
+    QolResult (*field_from_canonical)(uint32_t field, uint32_t canonical, int32_t extended,
+                                      uint32_t* out_field);
+    QolResult (*canonical_from_field)(uint32_t field, uint32_t* out_canonical);
+    QolResult (*view_from_canonical)(uint32_t canonical, int32_t extended, uint32_t* out_view);
+    QolResult (*view_limit)(int32_t extended, uint32_t* out_limit);
 };
 
 static_assert(std::is_standard_layout<QolItemCountApi>::value,
@@ -135,7 +140,18 @@ static_assert(offsetof(QolItemCountApi, write_effective) == sizeof(QolItemCountA
               "QolItemCountApi ABI layout changed");
 static_assert(offsetof(QolItemCountApi, writeback_needed) == sizeof(QolItemCountApi::canonical) * 4,
               "QolItemCountApi ABI layout changed");
-static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 5,
+static_assert(offsetof(QolItemCountApi, field_from_canonical) ==
+                  sizeof(QolItemCountApi::canonical) * 5,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, canonical_from_field) ==
+                  sizeof(QolItemCountApi::canonical) * 6,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, view_from_canonical) ==
+                  sizeof(QolItemCountApi::canonical) * 7,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, view_limit) == sizeof(QolItemCountApi::canonical) * 8,
+              "QolItemCountApi ABI layout changed");
+static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 9,
               "QolItemCountApi ABI size changed");
 
 // L4-0 追加面：只覆盖已审计插件迁移所需的低层游戏原语。该面仍是宿主内核 ABI，
@@ -310,6 +326,6 @@ static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, extra) + sizeof(QolGa
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 1;
+constexpr uint16_t kGameHostMinor = 2;
 
 }  // namespace qol::contracts

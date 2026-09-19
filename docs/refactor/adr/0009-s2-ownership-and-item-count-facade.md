@@ -138,3 +138,68 @@
 | **B5** | 删除 `contracts/stack_codec.h`，并清除 `contracts/stack_limit.h` 的全局函数 | codec、策略常量与有效态完全留在 `stack_limit` 私有实现；消费者只经 facade/能力访问 |
 
 B1–B4 期间，`stack_codec_impl.h` 是避免双份 codec 实现的单一过渡入口；B5 完成整体搬迁后删除该公共头及其过渡 include。
+
+## P1-B5-0：`QolItemCountApi` 增量查询/转换面冻结
+
+本批只追加接口成员，不迁移消费者，不删除 `contracts/stack_codec.h`。原有前 5 个成员的
+顺序与签名保持不变；新增成员固定追加在 `writeback_needed` 之后：
+
+| 成员 | 签名 | 语义 |
+|---|---|---|
+| `field_from_canonical` | `QolResult (*)(uint32_t field, uint32_t canonical, int32_t extended, uint32_t* out_field)` | `extended != 0` 时按 `0..999` 经 S2 A+B 编码；否则先取 `canonical mod 128`，再钳至 `0..99`，只修改 B 段并保留 A 段与 bits0–21；纯转换，不写游戏内存 |
+| `canonical_from_field` | `QolResult (*)(uint32_t field, uint32_t* out_canonical)` | 无视 gate，完整解码 `128a+b`；用于 sidecar canonical |
+| `view_from_canonical` | `QolResult (*)(uint32_t canonical, int32_t extended, uint32_t* out_view)` | 开启态 `min(canonical, 999)`；关闭态 `min(canonical mod 128, 99)` |
+| `view_limit` | `QolResult (*)(int32_t extended, uint32_t* out_limit)` | 开启态返回 `999`，关闭态返回 `99` |
+
+四个成员都要求 provider 已驻留；未驻留返回 `kQolErrNotReady`，`out == nullptr` 返回
+`kQolErrInvalidArgument`，错误时不得修改任何 out。`uint32_t field` 的全部位型均为合法
+语法值；marker 与非编码类别的语义判定仍由 `is_encoded` 返回 `kUnknown`/
+`kNotEncoded` 后处理。
+
+这四个成员属于纯转换/查询面：只依赖 provider 驻留，不要求 999 原子组满足，也不受
+gate 影响。理由是它们不读写游戏内存、不宣告 999 功能可用，也不改变关闭态/开启态的
+资源生命周期；原子组门控只约束 `effective`、`write_effective`、`writeback_needed`
+这些依赖当前布局有效性的 item 操作。
+
+### marker 与 S2 的重叠规则
+
+当前 `kNativeBagObjectMarkerMask == kS2MaskB`，marker 与 S2 的 B 段完全重叠。因此禁止
+“facade 先产出 S2 段、再 OR marker”的组合写法，该写法会破坏数量。native bag object
+属于非编码类别，由 `extension_bag` 先写 marker；禁止对 native bag object 调用
+`write_effective` 或其它 S2 编码入口。只有未来两种 mask 不重叠时才允许组合，并且必须
+增加静态断言 `marker_mask & s2_mask == 0`。
+
+### 15 符号迁移映射（冻结结论）
+
+| 现有符号 | B5 后归宿 |
+|---|---|
+| `stack_codec::CountEncoding` | `contracts::QolItemCountEncoding` |
+| `stack_codec::kLegacyMax` | `plugins/stack_limit/stack_codec_impl.h` 私有策略常量 |
+| `stack_codec::kExtendedMax` | `plugins/stack_limit/stack_codec_impl.h` 私有策略常量 |
+| `stack_codec::max_count` | `plugins/stack_limit/stack_codec_impl.h` 私有策略函数 |
+| `stack_codec::s2_split_a` | `plugins/stack_limit/stack_codec_impl.h` 私有 S2 原语 |
+| `stack_codec::s2_split_b` | `plugins/stack_limit/stack_codec_impl.h` 私有 S2 原语 |
+| `stack_codec::s2_combine` | `plugins/stack_limit/stack_codec_impl.h` 私有 S2 原语 |
+| `stack_codec::s2_read_count` | `QolItemCountApi::canonical_from_field` 的私有实现 |
+| `stack_codec::s2_write_count` | `QolItemCountApi::field_from_canonical` 的私有实现 |
+| `stack_codec::s2_clamp` | `plugins/stack_limit/stack_codec_impl.h` 私有 clamp 原语 |
+| `stack_codec::effective_read_count` | 消费者改用 `QolItemCountApi::effective` |
+| `stack_codec::effective_write_count` | `QolItemCountApi::write_effective` 内部私有实现 |
+| `stack_codec::effective_clamp` | `write_effective` 内部复用私有 clamp；不新增 ABI 成员 |
+| `stack_codec::effective_view_count` | `QolItemCountApi::view_from_canonical` |
+| `stack_codec::writeback_needed` | `QolItemCountApi::writeback_needed` |
+
+`kContractMajor/kContractMinor` 随公共 codec 头删除；S2 shift/bits/mask 与 `kS2Max` 是
+上述私有原语的实现细节；marker 三个符号归 `extension_bag` 私有头，不进入 item-count
+facade。该说明不改变本批“保留 `contracts/stack_codec.h`、不迁移消费者”的范围。
+
+### B5a/B5b/B5c 顺序
+
+- **B5a：接口冻结**——追加上述 4 个成员、更新 `QolItemCountApi` ABI 断言与
+  `QolGameHost` minor；完成 host 契约和错误语义测试。
+- **B5b：私有实现与插件验证**——`stack_limit` 实现四个纯转换成员，确认纯转换不受
+  原子组门控；消费者仍保持现有 include 与调用方式。
+- **B5c：公共 codec 清除**——最后删除 `contracts/stack_codec.h`，清除过渡 include，
+  并完成所有消费者迁移后的全量行为验收。
+
+B5a 与 B5b 在接口冻结后可并行；B5c 必须最后执行。

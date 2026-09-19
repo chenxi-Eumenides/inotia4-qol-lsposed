@@ -236,9 +236,9 @@ void patch_site_clear_overrides_for_test() {
 
 namespace qol::features::stack_limit::impl {
 
-uint8_t item_count_encoding(const void* item) {
+contracts::QolItemCountEncoding item_count_encoding(const void* item) {
     if (g_base == 0 || item == nullptr) {
-        return static_cast<uint8_t>(contracts::QolItemCountEncoding::kUnknown);
+        return contracts::QolItemCountEncoding::kUnknown;
     }
     const uint8_t* it = reinterpret_cast<const uint8_t*>(item);
     const uint16_t flags = *reinterpret_cast<const uint16_t*>(it + I_TYPE);
@@ -246,7 +246,7 @@ uint8_t item_count_encoding(const void* item) {
         *reinterpret_cast<uint8_t**>(*reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
     uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
     const uint8_t stride = size_ptr != nullptr ? *size_ptr : 0;
-    return static_cast<uint8_t>(item_count_encoding_from_flags(flags, class_data, stride));
+    return item_count_encoding_from_flags(flags, class_data, stride);
 }
 
 bool read_item_count_field(const void* item, uint32_t* out_value) {

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 
 #include "contracts/result.h"
 #include "contracts/stack_limit.h"
@@ -38,6 +39,51 @@ const qol::contracts::QolGameHost kGame = {
 
 bool stack_limit_enabled() { return g_effective; }
 void stack_limit_set_effective(bool enabled) { g_effective = enabled; }
+
+void assert_pure_conversion_api() {
+    const qol::contracts::QolItemCountApi& api = qol::host::host_item_count_api();
+    constexpr uint32_t kMaskA = 0x7u << 22;
+    constexpr uint32_t kMaskB = 0x7fu << 25;
+    const uint32_t field = 0x00123456u | (5u << 22) | (77u << 25);
+    const uint32_t canonical_values[] = {99, 100, 127, 128, 199, 999};
+
+    uint32_t canonical = 0;
+    assert(api.canonical_from_field(field, &canonical).ok == 0);
+    assert(canonical == 5u * 128u + 77u);
+
+    for (uint32_t value : canonical_values) {
+        for (int32_t extended : {0, 1, -1}) {
+            uint32_t converted = 0;
+            assert(api.field_from_canonical(field, value, extended, &converted).ok == 0);
+            const uint32_t view = extended == 0 ? (value % 128u > 99u ? 99u : value % 128u)
+                                                : (value > 999u ? 999u : value);
+            const uint32_t expected = extended == 0
+                                          ? (field & ~kMaskB) | ((view & 0x7fu) << 25)
+                                          : (field & ~(kMaskA | kMaskB)) |
+                                                (((view >> 7) & 0x7u) << 22) |
+                                                ((view & 0x7fu) << 25);
+            assert(converted == expected);
+            if (extended == 0) assert((converted & ~kMaskB) == (field & ~kMaskB));
+
+            uint32_t round_view = 0;
+            assert(api.view_from_canonical(value, extended, &round_view).ok == 0);
+            assert(round_view == view);
+        }
+    }
+
+    uint32_t limit = 0;
+    assert(api.view_limit(0, &limit).ok == 0);
+    assert(limit == 99);
+    assert(api.view_limit(1, &limit).ok == 0);
+    assert(limit == 999);
+
+    uint32_t untouched = 0xabcdef01u;
+    assert(api.field_from_canonical(field, 99, 0, nullptr).code == kQolErrInvalidArgument);
+    assert(api.canonical_from_field(field, nullptr).code == kQolErrInvalidArgument);
+    assert(api.view_from_canonical(99, 0, nullptr).code == kQolErrInvalidArgument);
+    assert(api.view_limit(0, nullptr).code == kQolErrInvalidArgument);
+    assert(untouched == 0xabcdef01u);
+}
 
 int main() {
     const qol::contracts::PluginDescriptor& descriptor =
@@ -86,6 +132,7 @@ int main() {
         "stack_limit",
     };
     assert(descriptor.install(context) == 0);
+    assert_pure_conversion_api();
     uint32_t resident_count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &resident_count).code ==
            kQolErrUnsupported);
@@ -108,6 +155,7 @@ int main() {
     descriptor.on_disabled(context);
     assert(!stack_limit_enabled());
     g_gate = true;
+    assert_pure_conversion_api();
     count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
            kQolErrUnsupported);
@@ -118,11 +166,19 @@ int main() {
     assert(qol::host::host_item_count_api().writeback_needed(reinterpret_cast<void*>(1), 1, &needed).code ==
            kQolErrNotReady);
     assert(needed == 41);
+    assert(qol::host::host_item_count_api().effective(reinterpret_cast<void*>(1), &count).code ==
+           kQolErrNotReady);
+    assert(qol::host::host_item_count_api().write_effective(reinterpret_cast<void*>(1), 1).code ==
+           kQolErrNotReady);
     g_gate = false;
     descriptor.deactivate(context);
     count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
            kQolErrNotReady);
     assert(count == 41);
+    uint32_t field = 41;
+    assert(qol::host::host_item_count_api().field_from_canonical(0, 99, 0, &field).code ==
+           kQolErrNotReady);
+    assert(field == 41);
     return 0;
 }
