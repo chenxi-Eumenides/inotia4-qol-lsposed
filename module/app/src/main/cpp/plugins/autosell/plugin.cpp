@@ -11,9 +11,6 @@
 #include "plugins/autosell/config.h"
 #include "plugins/autosell/scan.h"
 #include "plugins/autosell/ui/panel.h"
-#include "infra/config.h"
-#include "infra/events.h"
-#include "infra/panels.h"
 
 // 自动出售插件：门禁来源为配置键 `plugin.autosell.enabled`
 // （nativeSetAutoSellEnabled → kCommandSetConfigBool）。门禁经 kEventConfigChanged 订阅驱动；
@@ -42,7 +39,8 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
 };
 
-infra::SubscriptionId g_config_subscription = 0;
+uint64_t g_config_subscription = 0;
+const contracts::QolHostSdk* g_sdk = nullptr;
 std::atomic<bool> g_gate{false};
 
 // 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
@@ -108,38 +106,57 @@ void on_config_changed(void* ctx, const void* payload) {
     apply_gate(event->int_value != 0);
 }
 
+bool config_enabled() {
+    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr) return false;
+    int32_t value = 0;
+    if (g_sdk->config.get_bool(kGateKey, 0, &value).ok != kQolOk) return false;
+    return value != 0;
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_sdk = ctx.sdk;
+    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr ||
+        g_sdk->events.subscribe == nullptr || g_sdk->events.unsubscribe == nullptr ||
+        g_sdk->panels.register_provider == nullptr ||
+        g_sdk->panels.unregister_owner == nullptr) {
+        return 1;
+    }
     // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
     // activate 重入安全。
     autosell_register_save_enter();
     autosell_register_save_exit();
     // 门禁初值取配置；订阅配置变更（重复订阅会留孤儿订阅，已订阅则跳过）。
-    apply_gate(infra::config_get_bool(kGateKey, false));
+    apply_gate(config_enabled());
     if (g_config_subscription == 0) {
-        g_config_subscription = infra::subscribe(contracts::kEventConfigChanged,
-                                                 &on_config_changed, nullptr);
+        const QolResult result = g_sdk->events.subscribe(contracts::kEventConfigChanged,
+                                                         &on_config_changed, nullptr,
+                                                         &g_config_subscription);
+        if (result.ok != kQolOk) return 1;
     }
     // 自身初始化：资源由宿主声明式安装；本面板登记 provider 供 core.ui 容器打开。
-    if (!infra::panels_register_provider(kPanelProvider)) return 1;
+    if (g_sdk->panels.register_provider(&kPanelProvider).ok != kQolOk) return 1;
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     if (g_config_subscription != 0) {
-        infra::unsubscribe(g_config_subscription);
+        if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+            (void)g_sdk->events.unsubscribe(g_config_subscription);
+        }
         g_config_subscription = 0;
     }
     autosell_unregister_save_callbacks();
     apply_gate(false);
-    infra::panels_unregister_owner(kPluginId);
+    if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
+        (void)g_sdk->panels.unregister_owner(kPluginId);
+    }
 }
 
 // 有资源（2 条常驻）但无资源 gate：启停只切业务门禁与 UI 门控；资源物理装卸由宿主负责。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
-    apply_gate(infra::config_get_bool(kGateKey, false));
+    apply_gate(config_enabled());
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
@@ -172,6 +189,10 @@ const contracts::PluginDescriptor kDescriptor = {
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
+}
+
+const contracts::QolHostSdk* host_sdk() {
+    return g_sdk;
 }
 
 }  // namespace qol::features::autosell

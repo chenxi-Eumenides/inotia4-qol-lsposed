@@ -8,7 +8,7 @@
 
 #include "core/native/qol_log.h"
 #include "plugins/autosell/config.h"
-#include "infra/store.h"
+#include "plugins/autosell/plugin.h"
 
 #include <mutex>
 #include <string>
@@ -26,6 +26,36 @@ int g_loaded_slot = -1;          // 运行时配置当前对应的存档槽
 bool g_last_persist_ok = false;  // 最近一次持久化结果
 
 bool valid_slot(int slot) { return slot >= 0 && slot < kSlotCount; }
+
+enum class ReadOutcome { kOk, kUnavailable, kOther };
+
+ReadOutcome read_section(int slot, std::vector<uint8_t>* payload, uint16_t* version) {
+    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    if (sdk == nullptr || sdk->store.read == nullptr || payload == nullptr || version == nullptr) {
+        return ReadOutcome::kUnavailable;
+    }
+
+    payload->resize(4096);
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        qol::contracts::QolStoreBuffer buffer{
+            payload->empty() ? nullptr : payload->data(),
+            0,
+            static_cast<uint32_t>(payload->size()),
+        };
+        const QolResult result = sdk->store.read(slot, kSectionName, &buffer, version);
+        if (result.ok == kQolOk) {
+            payload->resize(buffer.size);
+            return ReadOutcome::kOk;
+        }
+        if (result.ok == kQolErrInvalidArgument && buffer.size > buffer.capacity) {
+            payload->resize(buffer.size);
+            continue;
+        }
+        if (result.ok == kQolErrNotReady) return ReadOutcome::kUnavailable;
+        return ReadOutcome::kOther;
+    }
+    return ReadOutcome::kOther;
+}
 
 }  // namespace
 
@@ -48,9 +78,8 @@ void autosell_store_ensure_loaded(int slot) {
 
     std::vector<uint8_t> payload;
     uint16_t version = 0;
-    const qol::infra::store::Status status =
-        qol::infra::store::read_section(slot, kSectionName, &payload, &version);
-    if (status == qol::infra::store::Status::kUnavailable) {
+    const ReadOutcome outcome = read_section(slot, &payload, &version);
+    if (outcome == ReadOutcome::kUnavailable) {
         // 存储尚未初始化/异常：不覆盖运行时配置，也不标记 loaded，下帧重试。
         autosell_set_store_status(slot, loaded, persisted);
         return;
@@ -59,7 +88,7 @@ void autosell_store_ensure_loaded(int slot) {
     //（空白/无 '{' 与 v>2 均由 autosell_config_from_json 判 false）。
     autosell::Config cfg;
     bool parsed = false;
-    if (status == qol::infra::store::Status::kOk) {
+    if (outcome == ReadOutcome::kOk) {
         const std::string json(payload.begin(), payload.end());
         parsed = autosell_config_from_json(json.c_str(), &cfg);
     }
@@ -78,10 +107,14 @@ void autosell_store_ensure_loaded(int slot) {
 bool autosell_store_persist(int slot, const autosell::Config& config) {
     if (!valid_slot(slot)) return false;
     const std::string json = autosell_config_to_json(config);
-    const qol::infra::store::Status status = qol::infra::store::write_section(
-        slot, kSectionName, kSectionVersion,
-        reinterpret_cast<const uint8_t*>(json.data()), json.size());
-    const bool ok = (status == qol::infra::store::Status::kOk);
+    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    const QolResult result =
+        sdk != nullptr && sdk->store.write != nullptr
+            ? sdk->store.write(slot, kSectionName, kSectionVersion,
+                               reinterpret_cast<const uint8_t*>(json.data()),
+                               static_cast<uint32_t>(json.size()))
+            : QolResult{kQolErrNotReady, kQolErrNotReady, nullptr, 0};
+    const bool ok = (result.ok == kQolOk);
     int loaded = -1;
     {
         std::lock_guard<std::mutex> lock(g_store_mtx);

@@ -8,5 +8,6 @@
 namespace qol::features::autosell {
 
 const contracts::PluginDescriptor& plugin_descriptor();
+const contracts::QolHostSdk* host_sdk();
 
 }  // namespace qol::features::autosell

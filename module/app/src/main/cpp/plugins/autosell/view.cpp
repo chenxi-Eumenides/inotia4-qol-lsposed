@@ -4,8 +4,8 @@
 
 #include "data/native/item_class.h"
 #include "contracts/attribute_quality.h"
+#include "plugins/autosell/plugin.h"
 #include "game_access.h"
-#include "infra/capabilities.h"
 
 #include <cstdint>
 
@@ -63,11 +63,16 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
         const uint32_t jewel_bits = *reinterpret_cast<uint32_t*>(item + I_COUNT);
         const int jewel_value = static_cast<int>(jewel_bits & 0x7FF);
         const int jewel_attr_type = static_cast<int>((jewel_bits >> 18) & 0x3F);
-        const auto* attr_api = static_cast<const qol::contracts::AttributeQualityApi*>(
-            qol::infra::require_capability(
+        const auto* sdk = qol::features::autosell::host_sdk();
+        const void* iface = nullptr;
+        if (sdk != nullptr && sdk->capabilities.require != nullptr) {
+            (void)sdk->capabilities.require(
                 qol::contracts::kAttributeQualityCapabilityId,
                 QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMajor),
-                                static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)}));
+                                static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)},
+                &iface);
+        }
+        const auto* attr_api = static_cast<const qol::contracts::AttributeQualityApi*>(iface);
         if (attr_api != nullptr && attr_api->probe_jewel != nullptr &&
             attr_api->percentile != nullptr) {
             qol::contracts::AttributeQualityResult quality{};

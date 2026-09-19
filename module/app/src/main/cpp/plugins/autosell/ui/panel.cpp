@@ -17,10 +17,10 @@
 #include "core/native/qol_log.h"
 #include "contracts/autosell.h"
 #include "contracts/panels.h"
+#include "contracts/ui.h"
+#include "plugins/autosell/plugin.h"
 #include "game_access.h"
 #include "game_state.h"
-#include "game/access/ui_kit.h"
-#include "hooks/popup_state.h"
 
 #include <atomic>
 #include <cstdint>
@@ -32,6 +32,186 @@
 
 namespace qol::features::autosell {
 namespace {
+
+using UiRect = qol::contracts::UiRect;
+
+const qol::contracts::QolUiAdapter* ui_api() {
+    const qol::contracts::QolHostSdk* sdk = host_sdk();
+    return sdk == nullptr ? nullptr : sdk->ui;
+}
+
+bool ui_set_rect(void* ctrl, UiRect rect) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->set_rect != nullptr && ui->set_rect(ctrl, rect).ok == kQolOk;
+}
+
+bool ui_get_rect(void* ctrl, UiRect* rect) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->get_rect != nullptr && ui->get_rect(ctrl, rect).ok == kQolOk;
+}
+
+void* ui_create_root(UiRect rect) {
+    const auto* ui = ui_api();
+    if (ui == nullptr || ui->create_control == nullptr) return nullptr;
+    void* ctrl = nullptr;
+    if (ui->create_control(0, nullptr, &ctrl).ok != kQolOk || !ui_set_rect(ctrl, rect)) {
+        return nullptr;
+    }
+    return ctrl;
+}
+
+void* ui_create_button(void* parent, UiRect rect, const char* text,
+                       void (*on_click)(void*), void (*draw_proc)(void*)) {
+    const auto* ui = ui_api();
+    if (ui == nullptr || ui->create_control == nullptr) return nullptr;
+    void* ctrl = nullptr;
+    if (ui->create_control(1, parent, &ctrl).ok != kQolOk || !ui_set_rect(ctrl, rect)) {
+        return nullptr;
+    }
+    if (text != nullptr && (ui->set_text == nullptr || ui->set_text(ctrl, text).ok != kQolOk)) {
+        return nullptr;
+    }
+    if (on_click != nullptr &&
+        (ui->set_click_proc == nullptr || ui->set_click_proc(ctrl, on_click, ctrl).ok != kQolOk)) {
+        return nullptr;
+    }
+    if (draw_proc != nullptr &&
+        (ui->set_draw_proc == nullptr || ui->set_draw_proc(ctrl, draw_proc).ok != kQolOk)) {
+        return nullptr;
+    }
+    return ctrl;
+}
+
+bool ui_hit_test(void* ctrl, int64_t x, int64_t y, UiRect rect) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->hit_test != nullptr && ui->hit_test(ctrl, x, y, rect) != 0;
+}
+
+void ui_begin_frame() {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->begin_frame != nullptr) (void)ui->begin_frame();
+}
+
+void ui_end_frame() {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->end_frame != nullptr) (void)ui->end_frame();
+}
+
+void ui_fill_rect_alpha(UiRect rect, uint32_t color, uint32_t alpha) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->fill_rect_alpha != nullptr) {
+        (void)ui->fill_rect_alpha(rect, color, alpha);
+    }
+}
+
+void ui_draw_panel_decor(UiRect rect, const int64_t* separators, uint32_t count, uint32_t color) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->draw_panel_decor != nullptr) {
+        (void)ui->draw_panel_decor(rect, separators, count, color);
+    }
+}
+
+void ui_draw_vertical_line(int64_t x, int64_t y, int64_t h, uint32_t color, int thickness) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->draw_vertical_line != nullptr) {
+        (void)ui->draw_vertical_line(x, y, h, color, thickness);
+    }
+}
+
+bool ui_load_image_unit(int32_t unit) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->load_image_unit != nullptr && ui->load_image_unit(unit).ok == kQolOk;
+}
+
+bool ui_draw_image_part(int32_t unit, int32_t loc, int32_t x, int32_t y, int32_t type, int32_t flip) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->draw_image_part != nullptr &&
+           ui->draw_image_part(unit, loc, x, y, type, flip).ok == kQolOk;
+}
+
+void ui_draw_button_background(void* ctrl, UiRect rect, uint32_t color) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->draw_button_background != nullptr) {
+        (void)ui->draw_button_background(ctrl, rect, color);
+    }
+}
+
+void ui_draw_button_border(void* ctrl, UiRect rect, uint32_t color, int thickness) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->draw_button_border != nullptr) {
+        (void)ui->draw_button_border(ctrl, rect, color, thickness);
+    }
+}
+
+bool ui_screen_inset_width(int32_t* out) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->screen_inset_width != nullptr &&
+           ui->screen_inset_width(out).ok == kQolOk;
+}
+
+bool ui_screen_inset_height(int32_t* out) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->screen_inset_height != nullptr &&
+           ui->screen_inset_height(out).ok == kQolOk;
+}
+
+bool ui_image_group(int32_t unit, void** out) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->image_group != nullptr && ui->image_group(unit, out).ok == kQolOk;
+}
+
+bool ui_image_loc(int32_t unit, int32_t loc, void** out) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->image_loc != nullptr && ui->image_loc(unit, loc, out).ok == kQolOk;
+}
+
+bool ui_child_count(void* parent, uint32_t* out) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->child_count != nullptr && ui->child_count(parent, out).ok == kQolOk;
+}
+
+bool ui_child_at(void* parent, uint32_t index, void** out) {
+    const auto* ui = ui_api();
+    return ui != nullptr && ui->child_at != nullptr && ui->child_at(parent, index, out).ok == kQolOk;
+}
+
+void ui_unuse_control_event_move(void* ctrl) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->unuse_control_event_move != nullptr) {
+        (void)ui->unuse_control_event_move(ctrl);
+    }
+}
+
+void ui_set_popup_process_info(int32_t mode, int32_t state_id) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->set_popup_process_info != nullptr) {
+        (void)ui->set_popup_process_info(mode, state_id);
+    }
+}
+
+void ui_draw_control(void* ctrl) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->draw_control != nullptr) (void)ui->draw_control(ctrl);
+}
+
+void ui_uidesc_draw() {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->uidesc_draw != nullptr) (void)ui->uidesc_draw();
+}
+
+void ui_set_font_color_rgb(int32_t red, int32_t green, int32_t blue) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->set_font_color_rgb != nullptr) {
+        (void)ui->set_font_color_rgb(red, green, blue);
+    }
+}
+
+void ui_draw_string_with_font(const char* text, int32_t x, int32_t y, int32_t align, int32_t scale) {
+    const auto* ui = ui_api();
+    if (ui != nullptr && ui->draw_string_with_font != nullptr) {
+        (void)ui->draw_string_with_font(text, x, y, align, scale);
+    }
+}
 
 // 入口按钮：与原版袋列（袋 0）同列右移 68、扩展页签（行距 70）之后的行 5。
 // 由扩展页签公式换算：x = 袋0绝对 + 68，y = 袋0绝对 + 2 + 5×70（尺寸 57×57）。
@@ -114,7 +294,7 @@ void* g_hit_root = nullptr;         // 仅用于复用 ui_hit_test 的绝对区�
 bool g_gear_image_loaded = false;    // 首次成功加载后不重复调用 unit loader
 bool g_gear_failure_logged = false;  // 仅游戏主线程访问
 // own:popup.autosell 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
-hooks::PopupStateEntry g_popup_entry{};
+qol::contracts::QolPopupStateEntry g_popup_entry{};
 int g_state_id = -1;
 
 void autosell_panel_enter();
@@ -141,19 +321,19 @@ void autosell_ctrl_abs(void* ctrl, int64_t* x, int64_t* y) {
 // align：0=左 / 1=右 / 2=中。
 void autosell_draw_text_at(int64_t x, int64_t y, const char* text, uint32_t color, int align) {
     if (text == nullptr || text[0] == 0) return;
-    if (fn_grpx_set_font_color_rgb == nullptr || fn_grpx_draw_string_with_font == nullptr) return;
-    fn_grpx_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                               static_cast<int32_t>((color >> 8) & 0xff),
-                               static_cast<int32_t>((color >> 16) & 0xff));
-    fn_grpx_draw_string_with_font(const_cast<char*>(text), static_cast<int>(x),
-                                  static_cast<int>(y), align, 1);
+    ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
+                          static_cast<int32_t>((color >> 8) & 0xff),
+                          static_cast<int32_t>((color >> 16) & 0xff));
+    ui_draw_string_with_font(text, static_cast<int32_t>(x), static_cast<int32_t>(y), align, 1);
 }
 
 UiRect autosell_panel_rect() {
     int64_t logical_w = kBaseW;
-    if (fn_calc_res_width != nullptr && fn_calc_res_height != nullptr) {
-        const int64_t screen_w = kBaseW + static_cast<int64_t>(fn_calc_res_width()) * 2;
-        const int64_t screen_h = kBaseH + static_cast<int64_t>(fn_calc_res_height()) * 2;
+    int32_t inset_w = 0;
+    int32_t inset_h = 0;
+    if (ui_screen_inset_width(&inset_w) && ui_screen_inset_height(&inset_h)) {
+        const int64_t screen_w = kBaseW + static_cast<int64_t>(inset_w) * 2;
+        const int64_t screen_h = kBaseH + static_cast<int64_t>(inset_h) * 2;
         if (screen_w > 0 && screen_h > 0) logical_w = screen_w * kBaseH / screen_h;
     }
     const int64_t x = (logical_w - kPanelW) / 2;
@@ -354,8 +534,10 @@ void autosell_entry_draw(void* ctrl) {
     if (!g_gear_image_loaded) {
         g_gear_image_loaded = ui_load_image_unit(kGearImageUnit);
     }
-    void* gear_group = fn_imgsys_get_group != nullptr ? fn_imgsys_get_group(kGearImageUnit) : nullptr;
-    void* gear_loc = fn_imgsys_get_loc != nullptr ? fn_imgsys_get_loc(kGearImageUnit, kGearImageLoc) : nullptr;
+    void* gear_group = nullptr;
+    void* gear_loc = nullptr;
+    (void)ui_image_group(kGearImageUnit, &gear_group);
+    (void)ui_image_loc(kGearImageUnit, kGearImageLoc, &gear_loc);
     // 贴图约定（同扩展背包页签 extension_bag_render.inc:59-72）：fn_grpx_draw_part 以控制
     // 左上为基准，需自行内缩居中（47x47 图标内缩 5）。ui_draw_control_image_part_centered
     // 会在绝对坐标上再加 w/2,h/2，导致绘制落在右下（约半个图标），故此处不用它。
@@ -386,13 +568,14 @@ void autosell_entry_draw(void* ctrl) {
 }
 
 bool autosell_is_child(void* parent, void* child) {
-    if (parent == nullptr || child == nullptr || fn_ctrl_get_count == nullptr ||
-        fn_ctrl_get_child == nullptr) {
+    if (parent == nullptr || child == nullptr) {
         return false;
     }
-    const uint32_t count = fn_ctrl_get_count(parent);
+    uint32_t count = 0;
+    if (!ui_child_count(parent, &count)) return false;
     for (uint32_t i = 0; i < count; ++i) {
-        if (fn_ctrl_get_child(parent, i) == child) return true;
+        void* candidate = nullptr;
+        if (ui_child_at(parent, i, &candidate) && candidate == child) return true;
     }
     return false;
 }
@@ -418,8 +601,9 @@ bool autosell_entry_valid(void* container) {
 // 不使用绝对坐标，也不依赖子控件顺序（袋 0 = child 0）。读取失败时退回常量兜底。
 UiRect autosell_entry_rect(void* container) {
     UiRect out{kEntryRelX, kEntryRelY, kEntrySize, kEntrySize};
-    if (container == nullptr || fn_ctrl_get_child == nullptr) return out;
-    void* bag0 = fn_ctrl_get_child(container, 0);
+    if (container == nullptr) return out;
+    void* bag0 = nullptr;
+    if (!ui_child_at(container, 0, &bag0)) return out;
     if (bag0 == nullptr || bag0 == g_entry_ctrl) return out;
     const UiRect bag0_rect = [&]() {
         UiRect r{};
@@ -438,7 +622,8 @@ UiRect autosell_entry_rect(void* container) {
     out.x = bag0_abs_x + 68 - mount_abs_x + kEntryNudgeX;
     // y 取「任务背包」实际 rect（袋列第 6 个 = child 5）：实测原版袋标签 y 为
     // 0/70/139/208/277/347，并非严格的 2+index*70（第 6 个差 5），故用实际值对齐。
-    void* task_bag = fn_ctrl_get_child(container, 5);
+    void* task_bag = nullptr;
+    (void)ui_child_at(container, 5, &task_bag);
     UiRect task{};
     if (task_bag != nullptr && task_bag != g_entry_ctrl && ui_get_rect(task_bag, &task) &&
         task.h > 0) {
@@ -460,9 +645,7 @@ void autosell_install_entry(void* container) {
         AUTOSELLUI_LOG("entry create failed container=%p", container);
         return;
     }
-    if (fn_touch_handle_unuse_control_event_move != nullptr) {
-        fn_touch_handle_unuse_control_event_move(btn);
-    }
+    ui_unuse_control_event_move(btn);
     g_entry_ctrl = btn;
     AUTOSELLUI_LOG("entry installed container=%p ctrl=%p rect=(%lld,%lld)",
                    container, btn, static_cast<long long>(rect.x),
@@ -471,7 +654,7 @@ void autosell_install_entry(void* container) {
 
 // 每帧（EQUIP 页）确保入口按钮存在并绘制。关闭态直接移除引用。
 void autosell_on_equip_draw() {
-    if (g_base == 0 || fn_ctrl_get_count == nullptr) return;
+    if (g_base == 0) return;
     std::lock_guard<std::mutex> lock(g_entry_mtx);
     if (!g_enabled.load(std::memory_order_acquire)) {
         g_entry_ctrl = nullptr;
@@ -492,15 +675,14 @@ void autosell_on_equip_draw() {
         g_entry_container = container;
     }
     // 容器就位守卫：面板打开初期为占位容器（无原版 6 袋标签），此时不挂载。
-    if (fn_ctrl_get_count(container) < 6) return;
+    uint32_t child_count = 0;
+    if (!ui_child_count(container, &child_count) || child_count < 6) return;
     // 强校验；任一不符即置空并重建。绝不绘制未通过校验的控件。
     if (!autosell_entry_valid(container)) {
         g_entry_ctrl = nullptr;
         autosell_install_entry(container);
     }
-    if (g_entry_ctrl != nullptr && fn_ctrl_btn_draw != nullptr) {
-        fn_ctrl_btn_draw(g_entry_ctrl);
-    }
+    if (g_entry_ctrl != nullptr) ui_draw_control(g_entry_ctrl);
 }
 
 // ---- 面板 ----
@@ -519,7 +701,7 @@ void autosell_panel_process() {
     if (g_close_delay > 0) {
         --g_close_delay;
         if (g_close_delay == 0) {
-            if (fn_ui_set_popup_process_info != nullptr) fn_ui_set_popup_process_info(3, 0);
+            ui_set_popup_process_info(3, 0);
             return;
         }
     }
@@ -652,7 +834,7 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
 // 复刻原 `bl UIDesc_Draw`，随后绘制入口按钮（独立于扩展背包绘制宿主）。
 // kCallPatch 站点 `patch:SCENE_DRAW_EQUIP+0x1cc` 的 handler（宿主安装时写入 BL）。
 void autosell_equip_desc_draw_wrapper() {
-    if (fn_uidesc_draw != nullptr) fn_uidesc_draw();
+    ui_uidesc_draw();
     autosell_on_equip_draw();
 }
 
@@ -674,7 +856,7 @@ void autosell_ui_set_enabled(bool enabled) {
     }
     // 面板正打开则请求关闭（弹栈后游戏会回调 f3 清理面板状态）。
     if (g_panel_active.exchange(false, std::memory_order_acq_rel)) {
-        if (fn_ui_set_popup_process_info != nullptr) fn_ui_set_popup_process_info(3, 0);
+        ui_set_popup_process_info(3, 0);
         AUTOSELLUI_LOG("disabled -> panel close requested");
     }
 }
@@ -684,18 +866,18 @@ void autosell_ui_set_enabled(bool enabled) {
 bool autosell_provider_open() {
     // 与旧入口按钮点击同门禁：关闭态不得打开面板（含经 core.ui 面板栈打开）。
     if (!g_enabled.load(std::memory_order_acquire)) return false;
-    if (g_state_id < 0 || fn_ui_set_popup_process_info == nullptr) {
+    if (g_state_id < 0 || ui_api() == nullptr) {
         AUTOSELLUI_LOG("provider open rejected: state not injected");
         return false;
     }
     AUTOSELLUI_LOG("provider open panel state=%d", g_state_id);
-    fn_ui_set_popup_process_info(1, g_state_id);
+    ui_set_popup_process_info(1, g_state_id);
     return true;
 }
 
 void autosell_provider_close() {
     if (!g_panel_active.exchange(false, std::memory_order_acq_rel)) return;  // 幂等
-    if (fn_ui_set_popup_process_info != nullptr) fn_ui_set_popup_process_info(3, 0);
+    ui_set_popup_process_info(3, 0);
     AUTOSELLUI_LOG("provider close requested");
 }
 
@@ -712,19 +894,25 @@ const char* autosell_provider_block_reason() {
 int32_t autosell_popup_acquire(const char* id) {
     (void)id;
     if (g_popup_entry.slot != nullptr) return 0;
-    hooks::PopupStateEntry entry{};
-    if (!hooks::popup_state_resolve_symbol("F_PANEL_UNK3_ENTER", &entry)) {
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr || sdk->hooks.popup_resolve == nullptr ||
+        sdk->hooks.popup_acquire == nullptr) {
+        AUTOSELLUI_LOG("popup.autosell: hook API unavailable");
+        return 1;
+    }
+    qol::contracts::QolPopupStateEntry entry{};
+    if (sdk->hooks.popup_resolve("F_PANEL_UNK3_ENTER", &entry).ok != kQolOk) {
         AUTOSELLUI_LOG("popup.autosell: state entry (INAPP_HOT) not found");
         return 1;
     }
-    const hooks::PopupStateHooks hooks{
+    const qol::contracts::QolPopupStateHooks popup_hooks{
         &autosell_panel_enter,
         &autosell_panel_process,
         &autosell_panel_f3,
         &autosell_panel_f4,
         &autosell_panel_event,
     };
-    if (!hooks::popup_state_acquire(&entry, hooks)) {
+    if (sdk->hooks.popup_acquire(&entry, &popup_hooks).ok != kQolOk) {
         AUTOSELLUI_LOG("popup.autosell: acquire rejected");
         return 1;
     }
@@ -737,7 +925,10 @@ int32_t autosell_popup_acquire(const char* id) {
 void autosell_popup_release(const char* id) {
     (void)id;
     if (g_popup_entry.slot != nullptr) {
-        hooks::popup_state_restore(&g_popup_entry);
+        const auto* sdk = host_sdk();
+        if (sdk != nullptr && sdk->hooks.popup_restore != nullptr) {
+            (void)sdk->hooks.popup_restore(&g_popup_entry);
+        }
     }
     g_state_id = -1;
     AUTOSELLUI_LOG("popup.autosell released");

@@ -13,8 +13,6 @@
 #include "contracts/ownership.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
-#include "infra/config.h"
-#include "infra/events.h"
 #include "infra/panels.h"
 
 static int g_pass = 0;
@@ -44,18 +42,58 @@ void autosell_register_save_enter() {}
 void autosell_register_save_exit() {}
 void autosell_unregister_save_callbacks() {}
 
-namespace qol::infra {
-bool config_get_bool(const char*, bool) { return false; }
-SubscriptionId subscribe(EventTypeId, EventHandler, void*) { return 0; }
-bool unsubscribe(SubscriptionId) { return true; }
-}  // namespace qol::infra
-
 namespace {
 
 using qol::contracts::OwnershipOps;
 using qol::contracts::ResourceFailure;
 using qol::contracts::ResourceMechanism;
 using qol::contracts::ResourceRequirement;
+
+QolResult fake_config_get_bool(const char*, int32_t default_value, int32_t* out_value) {
+    if (out_value == nullptr) return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    *out_value = default_value;
+    return qol::contracts::ok();
+}
+
+QolResult fake_events_subscribe(uint32_t, qol::contracts::QolEventHandler, void*, uint64_t* out_id) {
+    if (out_id == nullptr) return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    *out_id = 1;
+    return qol::contracts::ok();
+}
+
+QolResult fake_events_unsubscribe(uint64_t id) {
+    return id == 1 ? qol::contracts::ok()
+                   : QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
+}
+
+QolResult fake_panels_register_provider(const qol::contracts::PanelProviderSpec* provider) {
+    if (provider == nullptr) {
+        return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    }
+    return qol::infra::panels_register_provider(*provider)
+               ? qol::contracts::ok()
+               : QolResult{kQolErrConflict, kQolErrConflict, nullptr, 0};
+}
+
+QolResult fake_panels_unregister_owner(const char* owner) {
+    if (owner == nullptr) {
+        return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    }
+    qol::infra::panels_unregister_owner(owner);
+    return qol::contracts::ok();
+}
+
+qol::contracts::QolHostSdk fake_sdk() {
+    qol::contracts::QolHostSdk sdk{};
+    sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
+               qol::contracts::kHostSdkMinor};
+    sdk.config.get_bool = &fake_config_get_bool;
+    sdk.events.subscribe = &fake_events_subscribe;
+    sdk.events.unsubscribe = &fake_events_unsubscribe;
+    sdk.panels.register_provider = &fake_panels_register_provider;
+    sdk.panels.unregister_owner = &fake_panels_unregister_owner;
+    return sdk;
+}
 
 void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
@@ -92,7 +130,15 @@ void test_manifest() {
 
 void test_provider_registration() {
     qol::infra::panels_reset_for_test();
-    qol::contracts::PluginContext ctx{};
+    const qol::contracts::QolHostSdk sdk = fake_sdk();
+    qol::contracts::PluginContext ctx{
+        sizeof(qol::contracts::PluginContext),
+        qol::contracts::kHostSdkMajor,
+        qol::contracts::kHostSdkMinor,
+        &sdk,
+        nullptr,
+        "autosell",
+    };
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
 
@@ -111,10 +157,19 @@ void test_provider_registration() {
     CHECK(qol::infra::panels_find_provider("autosell") == nullptr);
 }
 
+void test_null_sdk_is_safe() {
+    qol::contracts::PluginContext ctx{};
+    const qol::contracts::PluginDescriptor& d =
+        qol::features::autosell::plugin_descriptor();
+    CHECK(d.install(ctx) == 1);
+    d.deactivate(ctx);
+}
+
 }  // namespace
 
 int main() {
     test_manifest();
+    test_null_sdk_is_safe();
     test_provider_registration();
     std::printf("autosell_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

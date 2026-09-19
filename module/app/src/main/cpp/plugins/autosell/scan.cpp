@@ -14,12 +14,11 @@
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "plugins/autosell/config.h"
+#include "plugins/autosell/plugin.h"
 #include "plugins/autosell/store.h"
 #include "plugins/autosell/view.h"
 #include "game_access.h"
 #include "game_state.h"
-#include "infra/capabilities.h"
-#include "infra/scheduler.h"
 
 #include <atomic>
 #include <cstdint>
@@ -34,16 +33,22 @@ constexpr int kSlotCount = 16;
 
 std::mutex g_scan_mtx;
 std::mutex g_task_mtx;
-qol::infra::FrameTaskId g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
+uint64_t g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
 std::atomic<bool> g_global_enabled{false};  // 全局开关；JVM 线程写、主线程读
 std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置位）；主线程写
 
 // D2b：extension_bag 能力每次调用现取（不缓存跨帧指针）；能力缺失 = EB disabled。
 const qol::contracts::ExtensionBagApi* extension_bag_api() {
-    return static_cast<const qol::contracts::ExtensionBagApi*>(qol::infra::require_capability(
+    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = sdk->capabilities.require(
         qol::contracts::kExtensionBagCapabilityId,
         QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
-                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)}));
+                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
+        &iface);
+    if (result.ok != kQolOk || iface == nullptr) return nullptr;
+    return static_cast<const qol::contracts::ExtensionBagApi*>(iface);
 }
 
 struct ScanStats {
@@ -149,23 +154,26 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
 
 // scheduler 回调：每次调用现取运行时配置，无跨帧状态；60 帧节流由 scheduler 的
 // interval 负责。返回 false = 任务完成（自动注销）；本任务无限期运行，恒返回 true。
-bool autosell_tick(int64_t frame, void* /*ctx*/) {
+int32_t autosell_tick(int64_t frame, void* /*ctx*/) {
     // 全局开关防御：关闭态不应有任务存在；即使任务删除存在竞态也直接跳过。
-    if (!g_global_enabled.load(std::memory_order_acquire)) return true;
+    if (!g_global_enabled.load(std::memory_order_acquire)) return 1;
     const autosell::Config cfg = autosell_get_runtime_config();
-    if (!cfg.enabled) return true;   // 防御：关闭态不应有任务存在
-    if (!scan_gates_ok()) return true;
+    if (!cfg.enabled) return 1;   // 防御：关闭态不应有任务存在
+    if (!scan_gates_ok()) return 1;
 
     std::lock_guard<std::mutex> lock(g_scan_mtx);
     scan_body(cfg, frame);
-    return true;
+    return 1;
 }
 
 // 无条件删除已注册任务（兜底）：不读取全局/存档配置状态，已有任务即删除。
 void remove_task_if_any() {
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task == 0) return;
-    qol::infra::scheduler_remove(g_task);
+    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    if (sdk != nullptr && sdk->scheduler.remove != nullptr) {
+        (void)sdk->scheduler.remove(g_task);
+    }
     g_task = 0;
     QOL_LOG_INFO(QolDomain::kAutosell, "task removed");
 }
@@ -182,8 +190,13 @@ void sync_task() {
     }
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task != 0) return;
-    g_task = qol::infra::scheduler_add(qol::infra::FramePoint::kRenderPre, &autosell_tick,
-                                       nullptr, kAutoSellScanIntervalFrames, 0);
+    const qol::contracts::QolHostSdk* sdk = qol::features::autosell::host_sdk();
+    if (sdk == nullptr || sdk->scheduler.add == nullptr) return;
+    uint64_t task = 0;
+    const QolResult result = sdk->scheduler.add(
+        0, &autosell_tick, nullptr, kAutoSellScanIntervalFrames, 0, &task);
+    if (result.ok != kQolOk) return;
+    g_task = task;
     QOL_LOG_INFO(QolDomain::kAutosell, "task registered id=%llu",
                         static_cast<unsigned long long>(g_task));
 }
