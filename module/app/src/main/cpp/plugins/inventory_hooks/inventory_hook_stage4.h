@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 
 using Stage4HaveBackup = int (*)(int32_t);
 using Stage4CountBackup = int (*)(int32_t);

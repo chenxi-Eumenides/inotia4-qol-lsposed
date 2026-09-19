@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 20 |
+| `contracts` | 21 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
 | `domains/inventory` | 9 |
@@ -32,7 +32,7 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 55 |
+| `game` | 54 |
 | `hooks` | 10 |
 | `host` | 33 |
 | `infra` | 47 |
@@ -138,20 +138,20 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 41 |
-| `host` | `game` | 28 |
+| `host` | `game` | 30 |
+| `plugins/extension_bag` | `contracts` | 18 |
 | `host` | `contracts` | 17 |
-| `plugins/extension_bag` | `contracts` | 14 |
 | `plugins/autosell` | `infra` | 13 |
 | `plugins/custom_recipe` | `contracts` | 13 |
 | `plugins/core.ui` | `contracts` | 11 |
-| `plugins/extension_bag` | `game` | 11 |
 | `plugins/extension_bag` | `infra` | 11 |
 | `infra` | `game` | 10 |
 | `plugins/autosell` | `contracts` | 10 |
-| `domains/inventory` | `game` | 9 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
+| `plugins/inventory_hooks` | `contracts` | 9 |
 | `plugins/autosell` | `game` | 8 |
+| `plugins/save_backup` | `infra` | 8 |
 
 ### 2.2 include 环
 

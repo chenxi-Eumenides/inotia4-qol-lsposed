@@ -3,7 +3,9 @@
 #include <cstdio>
 
 #include "contracts/ui.h"
+#include "game_access.h"
 #include "game/access/ui_kit.h"
+#include "game/access/ui_components.h"
 #include "host/ui_adapter.h"
 
 namespace {
@@ -31,6 +33,8 @@ void fake_draw_control(void*) { ++g_draw_control_calls; }
 
 }  // namespace
 
+uintptr_t g_base = 0;
+
 using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
 using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
 using ControlButtonDrawFn = void (*)(void* ctrl);
@@ -39,9 +43,29 @@ ControlButtonSetTextFn fn_ctrl_btn_set_text = &fake_set_text;
 ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc = &fake_set_draw_proc;
 ControlButtonDrawFn fn_ctrl_btn_draw = &fake_draw_control;
 
+decltype(fn_ui_set_popup_process_info) fn_ui_set_popup_process_info = nullptr;
+decltype(fn_ctrl_get_count) fn_ctrl_get_count = nullptr;
+decltype(fn_ctrl_get_child) fn_ctrl_get_child = nullptr;
+decltype(fn_calc_res_width) fn_calc_res_width = nullptr;
+decltype(fn_calc_res_height) fn_calc_res_height = nullptr;
+decltype(fn_touch_handle_unuse_control_event_move) fn_touch_handle_unuse_control_event_move = nullptr;
+decltype(fn_popupstate_push) fn_popupstate_push = nullptr;
+decltype(fn_uidesc_draw) fn_uidesc_draw = nullptr;
+decltype(fn_grpx_set_font_color) fn_grpx_set_font_color = nullptr;
+decltype(fn_grpx_set_font_color_rgb) fn_grpx_set_font_color_rgb = nullptr;
+decltype(fn_grpx_draw_string_with_font) fn_grpx_draw_string_with_font = nullptr;
+decltype(fn_grpx_draw_part) fn_grpx_draw_part = nullptr;
+decltype(fn_imgsys_unit_load) fn_imgsys_unit_load = nullptr;
+decltype(fn_imgsys_unit_unload) fn_imgsys_unit_unload = nullptr;
+decltype(fn_imgsys_get_group) fn_imgsys_get_group = nullptr;
+decltype(fn_imgsys_get_loc) fn_imgsys_get_loc = nullptr;
+
 void* ui_create_root(UiRect) { return nullptr; }
 void* ui_create_button(void*, UiRect, const char*, UiClickProc, UiDrawProc) { return nullptr; }
 void* ui_create_label(void*, UiRect, const char*, UiDrawProc) { return nullptr; }
+void* ui_find_child_in_area(void*, UiRect) { return nullptr; }
+bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
+void ui_show_text_popup(int32_t) {}
 
 void ui_set_rect(void* ctrl, UiRect rect) {
     ++g_set_rect_calls;
@@ -84,6 +108,18 @@ void ui_draw_button_background(void*, UiRect, uint32_t) {}
 void ui_draw_button_border(void*, UiRect, uint32_t, int) {}
 void ui_draw_control_alpha_overlay(void*, UiRect, uint32_t, uint32_t) {}
 
+namespace ui_original {
+bool load_option_images() { return true; }
+void unload_option_images() {}
+bool draw_back_button(void*, bool) { return true; }
+bool draw_toggle(void*, bool) { return true; }
+bool draw_item_icon(void*, const ItemIcon&) { return true; }
+}  // namespace ui_original
+
+namespace ui_custom {
+void draw_button(void*, UiRect, uint32_t, uint32_t, int, const char*, uint32_t, int, int) {}
+}  // namespace ui_custom
+
 int main() {
     int assertions = 0;
 #define CHECK(condition) \
@@ -95,8 +131,11 @@ int main() {
     const qol::contracts::QolUiAdapter* adapter = qol::host::ui_adapter();
     CHECK(adapter != nullptr);
     CHECK(adapter->size == sizeof(qol::contracts::QolUiAdapter));
-    CHECK(adapter->major == qol::contracts::kUiContractMajor);
-    CHECK(adapter->minor == qol::contracts::kUiContractMinor);
+    CHECK(adapter->major == qol::contracts::kUiAdapterMajor);
+    CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
+    CHECK(adapter->find_child_in_area != nullptr);
+    CHECK(adapter->set_popup_process_info != nullptr);
+    CHECK(adapter->draw_custom_button != nullptr);
 
     qol::contracts::QolUiComponents components{};
     components.size = sizeof(components);

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "data/native/item_class.h"
 
 // 背包域（parse 域）：背包/装备/金钱操作。

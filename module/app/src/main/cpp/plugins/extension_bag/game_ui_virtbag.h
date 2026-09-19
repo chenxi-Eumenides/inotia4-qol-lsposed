@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 
 #include <jni.h>
 

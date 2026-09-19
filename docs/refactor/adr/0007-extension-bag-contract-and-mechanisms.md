@@ -30,7 +30,7 @@
    `std::string` JSON 函数**不进契约**（留插件 `api.h`，仅 bridge/host 调用）；
    `bags_json` 若需跨插件则改缓冲式 `int32_t (*write_json)(char*, uint32_t)`。
 2. **`model/` 9 文件留在 `plugins/extension_bag/model/`，不进 `domains/`**：插件私有状态机，无第二消费者。
-3. **两个头归位**：`stack_codec.h` → `game/read/`（纯位编解码）；`stack_limit_port.h` →
+3. **两个头归位**：`stack_codec.h` → `contracts/`（纯位编解码 ABI）；`stack_limit_port.h` →
    `contracts/stack_limit.h`（声明与实现分离，实现暂留 `core/native/stack_limit_state.cpp`，P5 收口）。
 4. **机制全量声明式（29 条；口径校正：M1/M2 + C1–C21 + P1–P4 + S1 + X1）**：
    原「25 条」为侦察期粗算；逐点核对 raw 安装面后修正为 29，D2a-3a 已按 21 条 call

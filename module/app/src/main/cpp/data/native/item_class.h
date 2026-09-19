@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 
 // 数据层物品类别原语：ITEMCLASSBASE 记录 +6 bit0 的可堆叠/装备判定，
 // 以及记录 +2 的背包类判定。从 api/native/game_inventory_read.inc 下沉

@@ -4,6 +4,9 @@
 
 namespace stack_codec {
 
+constexpr uint16_t kContractMajor = 1;
+constexpr uint16_t kContractMinor = 0;
+
 enum class CountEncoding : uint8_t {
     kUnknown,
     kNotEncoded,

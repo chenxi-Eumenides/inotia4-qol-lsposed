@@ -144,6 +144,7 @@ using QolHooksRunTextFn = QolResult (*)(const char* resource_id, uint32_t text_i
 using QolHooksSetInterceptFn = QolResult (*)(const char* resource_id,
                                               int32_t (*predicate)(void* ctx), void* ctx);
 using QolHooksClearInterceptFn = QolResult (*)(const char* resource_id);
+using QolHooksInterceptBlocksFn = int32_t (*)(const char* resource_id, void* ctx);
 
 // PopupState 的跨边界 POD 镜像。backup 必须完整保留原版 0x40 字节状态，slot/state_id
 // 仅由宿主定位并填充；插件只持有该快照并通过 hooks API 交还宿主。
@@ -171,6 +172,7 @@ struct QolHooksApi {
     QolHooksRunTextFn run_text;
     QolHooksSetInterceptFn set_intercept;
     QolHooksClearInterceptFn clear_intercept;
+    QolHooksInterceptBlocksFn intercept_blocks;
     QolHooksPopupResolveFn popup_resolve;
     QolHooksPopupAcquireFn popup_acquire;
     QolHooksPopupRestoreFn popup_restore;

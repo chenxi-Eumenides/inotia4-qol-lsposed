@@ -19,7 +19,7 @@
 #include "game_tiles.h"
 #include "core/native/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "core/native/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/inventory_hooks/inventory_find_item_poc.h"
@@ -391,7 +391,7 @@ static void test_stack_codec_s2() {
              stack_codec::kS2MaskA | stack_codec::kS2MaskB);
     // 位保留：构造含 bits0–21 数据位与 marker 位（bits25–31）的值，写 count 后
     // bits0–21 不变；bits22–31 完全被 S2 编码接管（marker 区归 b 段，
-    // 装备/宝石/袋容量类别禁止走 s2 写，见 game/read/stack_codec.h 门控注释）。
+    // 装备/宝石/袋容量类别禁止走 s2 写，见 contracts/stack_codec.h 门控注释）。
     const uint32_t mixed = 0x0003A55Fu | (0x7u << 22) | (0x55u << 25);
     for (uint32_t count : {0u, 1u, 128u, 999u, 1023u}) {
         const uint32_t encoded = stack_codec::s2_write_count(mixed, count);

@@ -13,6 +13,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 1;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -88,6 +89,20 @@ struct QolUiComponents {
 };
 
 using QolUiDrawFn = void (*)(void* control);
+struct QolUiItemIcon {
+    int32_t image_unit;
+    int32_t image_loc;
+    int32_t draw_type;
+    int32_t flip;
+    uint8_t centered;
+};
+using QolUiLoadOptionImagesFn = QolResult (*)();
+using QolUiUnloadOptionImagesFn = QolResult (*)();
+using QolUiDrawBackButtonFn = QolResult (*)(QolUiHandle, uint8_t pressed);
+using QolUiDrawToggleFn = QolResult (*)(QolUiHandle, uint8_t enabled);
+using QolUiDrawItemIconFn = QolResult (*)(QolUiHandle, QolUiItemIcon);
+using QolUiCustomButtonFn = QolResult (*)(QolUiHandle, UiRect, uint32_t, uint32_t, int32_t,
+                                          const char*, uint32_t, int32_t, int32_t);
 struct QolUiAdapter {
     /* host 注入，背后 game/access/ui_kit|ui_components */
     uint32_t size;
@@ -115,6 +130,34 @@ struct QolUiAdapter {
     QolResult (*draw_button_border)(QolUiHandle, UiRect, uint32_t, int32_t);
     QolResult (*draw_control_alpha_overlay)(QolUiHandle, UiRect, uint32_t, uint32_t);
     QolResult (*end_frame)();
+
+    // U11-3：面板消费者仍需使用的控件树、原版绘制和弹窗原语。
+    QolResult (*find_child_in_area)(QolUiHandle, UiRect, QolUiHandle*);
+    QolResult (*clone_button_style)(QolUiHandle, QolUiHandle, QolUiClickFn, void*);
+    QolResult (*draw_control_title_image_part)(QolUiHandle, int32_t);
+    QolResult (*show_text_popup)(int32_t);
+    QolResult (*child_count)(QolUiHandle, uint32_t*);
+    QolResult (*child_at)(QolUiHandle, uint32_t, QolUiHandle*);
+    QolResult (*screen_inset_width)(int32_t*);
+    QolResult (*screen_inset_height)(int32_t*);
+    QolResult (*unuse_control_event_move)(QolUiHandle);
+    QolResult (*set_popup_process_info)(int32_t, int32_t);
+    QolResult (*push_popup_state)(uint32_t);
+    QolResult (*uidesc_draw)();
+    QolResult (*set_font_color)(uint32_t);
+    QolResult (*set_font_color_rgb)(int32_t, int32_t, int32_t);
+    QolResult (*draw_string_with_font)(const char*, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*draw_part)(QolUiHandle, int32_t, int32_t, QolUiHandle, int32_t, int32_t);
+    QolResult (*image_unit_load)(int32_t);
+    QolResult (*image_unit_unload)(int32_t);
+    QolResult (*image_group)(int32_t, QolUiHandle*);
+    QolResult (*image_loc)(int32_t, int32_t, QolUiHandle*);
+    QolUiLoadOptionImagesFn load_option_images;
+    QolUiUnloadOptionImagesFn unload_option_images;
+    QolUiDrawBackButtonFn draw_back_button;
+    QolUiDrawToggleFn draw_toggle;
+    QolUiDrawItemIconFn draw_item_icon;
+    QolUiCustomButtonFn draw_custom_button;
 };
 
 }  // namespace qol::contracts

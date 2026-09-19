@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 
 using NativeHookFunType = int (*)(void* func, void* replace, void** backup);
 using NativeUnhookFunType = int (*)(void* func);

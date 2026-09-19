@@ -9,7 +9,7 @@
 #include "contracts/extension_bag.h"
 #include "core/native/qol_log.h"
 #include "core/native/sell_price.h"
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "contracts/stack_limit.h"
 #include "game_access.h"
 #include "game_state.h"

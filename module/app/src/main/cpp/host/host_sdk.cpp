@@ -441,6 +441,11 @@ QolResult sdk_hooks_clear_intercept(const char* resource_id) {
                             kNotFound);
 }
 
+int32_t sdk_hooks_intercept_blocks(const char* resource_id, void* ctx) {
+    if (resource_id == nullptr) return -kQolErrInvalidArgument;
+    return hooks::dispatch_intercept_blocks(resource_id, ctx) ? 1 : 0;
+}
+
 QolResult sdk_hooks_popup_resolve(const char* symbol, contracts::QolPopupStateEntry* out_entry) {
     if (symbol == nullptr || out_entry == nullptr) {
         return result_error(kQolErrInvalidArgument, kInvalidArgument);
@@ -523,8 +528,8 @@ contracts::QolHostSdk make_host_sdk() {
                   &sdk_panels_unregister_owner, &sdk_panels_find, &sdk_panels_open,
                   &sdk_panels_close, &sdk_panels_active};
     sdk.hooks = {&sdk_hooks_text_subscribe, &sdk_hooks_text_unsubscribe, &sdk_hooks_run_text,
-                 &sdk_hooks_set_intercept, &sdk_hooks_clear_intercept, &sdk_hooks_popup_resolve,
-                 &sdk_hooks_popup_acquire, &sdk_hooks_popup_restore};
+                 &sdk_hooks_set_intercept, &sdk_hooks_clear_intercept, &sdk_hooks_intercept_blocks,
+                 &sdk_hooks_popup_resolve, &sdk_hooks_popup_acquire, &sdk_hooks_popup_restore};
     sdk.text_scope = {&sdk_text_scope_push, &sdk_text_scope_pop};
     sdk.ui = nullptr;
     return sdk;

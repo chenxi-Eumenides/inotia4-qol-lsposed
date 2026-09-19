@@ -660,7 +660,10 @@ add_executable(ui_adapter_tests
     ${CPP_DIR}/host/ui_adapter.cpp
 )
 target_include_directories(ui_adapter_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
+    ${CPP_DIR}/data/native
+    ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(ui_adapter_tests PRIVATE cxx_std_17)
 set_target_properties(ui_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

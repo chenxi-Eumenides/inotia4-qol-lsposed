@@ -227,6 +227,7 @@ int main() {
     assert(sdk.config.get_bool != nullptr);
     assert(sdk.scheduler.add != nullptr);
     assert(sdk.events.subscribe != nullptr);
+    assert(sdk.hooks.intercept_blocks != nullptr);
 
     int32_t value = 0;
     assert(sdk.config.set_bool("adapter.test", 1).ok == kQolOk);

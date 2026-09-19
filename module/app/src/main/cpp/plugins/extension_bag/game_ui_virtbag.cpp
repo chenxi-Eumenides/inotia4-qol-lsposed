@@ -12,7 +12,7 @@
 #include "plugins/extension_bag/extension_bag_equip_rules.h"
 #include "plugins/extension_bag/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "contracts/stack_limit.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/extension_bag_port.h"

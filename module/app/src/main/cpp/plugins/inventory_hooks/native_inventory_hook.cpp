@@ -6,7 +6,7 @@
 #include "contracts/plugin.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/qol_log.h"
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "data/native/item_class.h"
 #include "game_access.h"
 #include "game_inventory.h"

@@ -5,7 +5,7 @@
 #include "core/native/extension_bag_port.h"
 #include "core/native/inventory_trade.h"
 #include "core/native/qol_log.h"
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "contracts/stack_limit.h"
 #include <cstdint>
 #include <string>

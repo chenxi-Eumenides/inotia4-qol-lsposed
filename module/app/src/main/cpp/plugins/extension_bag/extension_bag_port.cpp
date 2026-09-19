@@ -6,7 +6,7 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/sell_price.h"
-#include "game/read/stack_codec.h"
+#include "contracts/stack_codec.h"
 #include "contracts/stack_limit.h"
 #include "infra/capabilities.h"
 
