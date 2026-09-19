@@ -133,25 +133,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 121 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 118 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 41 |
 | `host` | `game` | 30 |
-| `plugins/extension_bag` | `contracts` | 18 |
+| `plugins/extension_bag` | `contracts` | 22 |
 | `host` | `contracts` | 17 |
 | `plugins/custom_recipe` | `contracts` | 13 |
 | `plugins/autosell` | `contracts` | 11 |
 | `plugins/core.ui` | `contracts` | 11 |
-| `plugins/extension_bag` | `infra` | 11 |
+| `plugins/inventory_hooks` | `contracts` | 11 |
 | `infra` | `game` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
-| `plugins/inventory_hooks` | `contracts` | 9 |
-| `plugins/save_backup` | `infra` | 8 |
 | `domains/inventory` | `contracts` | 7 |
 | `domains/world` | `game` | 7 |
+| `plugins/autosell` | `game` | 7 |
+| `plugins/save_backup` | `contracts` | 7 |
 
 ### 2.2 include 环
 
@@ -202,7 +202,7 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:154||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:155||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 
