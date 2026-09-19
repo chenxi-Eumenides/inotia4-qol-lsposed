@@ -7,7 +7,6 @@
 #include "contracts/ownership.h"
 #include "contracts/panels.h"
 #include "core/native/qol_log.h"
-#include "infra/panels.h"
 #include "plugins/save_backup/feature.h"
 #include "plugins/save_backup/ui/panel.h"
 
@@ -91,18 +90,22 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    save_backup_bind_context(ctx.sdk, ctx.game);
     g_active.store(true, std::memory_order_release);
     // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
-    if (!infra::panels_register_provider(kPanelProvider)) return 1;
+    if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
+        !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
+        return 1;
+    }
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    (void)ctx;
     // 资源归还包括物理写回原槽值（宿主引擎执行）；本回调只翻转上报标记（幂等）。
     g_active.store(false, std::memory_order_release);
-    infra::panels_unregister_owner(kPluginId);
+    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
+        (void)ctx.sdk->panels.unregister_owner(kPluginId);
+    }
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {

@@ -63,7 +63,7 @@ void root_decor_draw() {
     //    {0, 0, ROOT_W+root.x*2, ROOT_H}（屏幕逻辑空间，顶固定 0、高 ROOT_H），
     //    不随 root.y 扩展 —— 与背景图同一固定基准，无上下偏移。
     ui_fill_rect_alpha({0, 0, ROOT_W + root_rect.x * 2, ROOT_H}, 0xFF000000, 0x50);
-    if (fn_grpx_fill_rect == nullptr) return;
+    if (ui_adapter() == nullptr || ui_adapter()->draw_panel_decor == nullptr) return;
     // ③ 左栏框（存档区）：与其他栏同宽（COL_W），高度按行阵精确计算（SLOT_FRAME_H=3*ROW_H+2*3-4），
     //    框顶 SLOT_FRAME_Y（三栏公共水平中线对齐，见 cpp 常量区验算）。
     //    行分割线落在行间 4px 空隙内：y = 框内顶 + i*ROW_H - SLOT_ROW_GAP，3px 线占
@@ -92,14 +92,12 @@ void root_decor_draw() {
     draw_frame_box(list_frame, list_seps, list_sep_count);
     // ⑤ 空列表提示：右框中心（加载中 / 暂无备份）。走 fn_grpx_draw_string_with_font align=2
     //    居中（align 语义见文件头；fn_ui_draw_string_halign 在自定义面板下不出字，勿用）。
-    if (n == 0 && fn_grpx_draw_string_with_font != nullptr) {
+    if (n == 0 && ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
         const bool loading = g_backups_loading.load() && g_backups.empty();
-        if (fn_grpx_set_font_color_rgb != nullptr) {
-            fn_grpx_set_font_color_rgb(static_cast<int32_t>(UI_GOLD & 0xff),
-                                       static_cast<int32_t>((UI_GOLD >> 8) & 0xff),
-                                       static_cast<int32_t>((UI_GOLD >> 16) & 0xff));
-        }
-        fn_grpx_draw_string_with_font(
+        (void)ui_set_font_color_rgb(static_cast<int32_t>(UI_GOLD & 0xff),
+                                    static_cast<int32_t>((UI_GOLD >> 8) & 0xff),
+                                    static_cast<int32_t>((UI_GOLD >> 16) & 0xff));
+        (void)ui_draw_string_with_font(
             const_cast<char*>(loading ? "加载中…" : "暂无备份"),
             static_cast<int>(root_rect.x + LIST_COL_X + LIST_COL_W / 2),
             static_cast<int>(root_rect.y + FRAME_Y + FRAME_H / 2 - 0x0e), 2, 1);
@@ -108,16 +106,14 @@ void root_decor_draw() {
     //    见 panel.cpp 翻页按钮注释的间隙验算），只画文字、不画任何框。
     //    align=2 才是真正以 x 为中心（align=1 是右对齐：文字右缘贴 x，页码会整体左偏）。
     //    垂直：按钮高 0x30、文本高约 0x18 → y = PAGE_ROW_Y + (0x30-0x18)/2 = +0x0C（同按钮文本口径）。
-    if (fn_grpx_draw_string_with_font != nullptr) {
+    if (ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
         char page_buf[16];
         snprintf(page_buf, sizeof(page_buf), "%d/%d", g_page_index + 1,
                  g_total_pages > 0 ? g_total_pages : 1);
-        if (fn_grpx_set_font_color_rgb != nullptr) {
-            fn_grpx_set_font_color_rgb(static_cast<int32_t>(UI_OPTION_TEXT & 0xff),
-                                       static_cast<int32_t>((UI_OPTION_TEXT >> 8) & 0xff),
-                                       static_cast<int32_t>((UI_OPTION_TEXT >> 16) & 0xff));
-        }
-        fn_grpx_draw_string_with_font(
+        (void)ui_set_font_color_rgb(static_cast<int32_t>(UI_OPTION_TEXT & 0xff),
+                                    static_cast<int32_t>((UI_OPTION_TEXT >> 8) & 0xff),
+                                    static_cast<int32_t>((UI_OPTION_TEXT >> 16) & 0xff));
+        (void)ui_draw_string_with_font(
             page_buf,
             static_cast<int>(root_rect.x + LIST_COL_X + LIST_COL_W / 2),
             static_cast<int>(root_rect.y + PAGE_ROW_Y + 0x0C), 2, 1);
@@ -165,11 +161,12 @@ static void sb_truncate_utf8_font3(char* s, int max_w) {
 
 static void draw_string_at_font(int x, int y, const char* s, uint32_t color, int font) {
     if (s == nullptr || s[0] == 0) return;
-    if (fn_grpx_set_font_color_rgb == nullptr || fn_grpx_draw_string_with_font == nullptr) return;
-    fn_grpx_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                               static_cast<int32_t>((color >> 8) & 0xff),
-                               static_cast<int32_t>((color >> 16) & 0xff));
-    fn_grpx_draw_string_with_font(const_cast<char*>(s), x, y, 0, font);
+    if (ui_adapter() == nullptr || ui_adapter()->set_font_color_rgb == nullptr ||
+        ui_adapter()->draw_string_with_font == nullptr) return;
+    (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
+                                static_cast<int32_t>((color >> 8) & 0xff),
+                                static_cast<int32_t>((color >> 16) & 0xff));
+    (void)ui_draw_string_with_font(s, x, y, 0, font);
 }
 
 static void draw_string_at(int x, int y, const char* s, uint32_t color) {
@@ -188,11 +185,12 @@ static void draw_two_line_text_font(int x, int y, const char* line1, const char*
 // 不得用 fn_ui_draw_string_halign / ui_draw_text_centered（自定义面板下不出字）。
 static void draw_string_centered_at(int cx, int y, const char* s, uint32_t color) {
     if (s == nullptr || s[0] == 0) return;
-    if (fn_grpx_set_font_color_rgb == nullptr || fn_grpx_draw_string_with_font == nullptr) return;
-    fn_grpx_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                               static_cast<int32_t>((color >> 8) & 0xff),
-                               static_cast<int32_t>((color >> 16) & 0xff));
-    fn_grpx_draw_string_with_font(const_cast<char*>(s), cx, y, 2, 1);
+    if (ui_adapter() == nullptr || ui_adapter()->set_font_color_rgb == nullptr ||
+        ui_adapter()->draw_string_with_font == nullptr) return;
+    (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
+                                static_cast<int32_t>((color >> 8) & 0xff),
+                                static_cast<int32_t>((color >> 16) & 0xff));
+    (void)ui_draw_string_with_font(s, cx, y, 2, 1);
 }
 
 void slot_btn_draw(void* ctrl) {
@@ -404,15 +402,13 @@ void msg_label_draw(void* ctrl) {
     const int64_t cx = pt[0] +
         *reinterpret_cast<int64_t*>(reinterpret_cast<uint8_t*>(ctrl) + CO_RECT_W) / 2;
     const uint32_t color = g_msg_text.empty() ? UI_GOLD : g_msg_color;
-    if (fn_grpx_set_font_color_rgb != nullptr) {
-        fn_grpx_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                                   static_cast<int32_t>((color >> 8) & 0xff),
-                                   static_cast<int32_t>((color >> 16) & 0xff));
-    }
-    if (fn_grpx_draw_string_with_font != nullptr) {
+    if (ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
+        (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
+                                    static_cast<int32_t>((color >> 8) & 0xff),
+                                    static_cast<int32_t>((color >> 16) & 0xff));
         // 垂直位置与设置页 header_draw 一致（ui_draw_text 偏移 0x18，font=1）：
         // MSG_Y=0x18 + 0x18 = 绝对 y 0x30，与设置页 header 文本同高。
-        fn_grpx_draw_string_with_font(const_cast<char*>(text),
-                                      static_cast<int>(cx), static_cast<int>(pt[1]) + 0x18, 2, 1);
+        (void)ui_draw_string_with_font(text, static_cast<int>(cx),
+                                       static_cast<int>(pt[1]) + 0x18, 2, 1);
     }
 }

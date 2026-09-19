@@ -23,8 +23,13 @@ bool is_savebackup_at_stack_top() {
 }
 
 UiRect panel_root_rect() {
-    const int64_t screen_w = ROOT_W + static_cast<int64_t>(fn_calc_res_width()) * 2;
-    const int64_t screen_h = ROOT_H + static_cast<int64_t>(fn_calc_res_height()) * 2;
+    int32_t inset_width = 0;
+    int32_t inset_height = 0;
+    if (!ui_resolution_width(&inset_width) || !ui_resolution_height(&inset_height)) {
+        return {0, 0, ROOT_W, ROOT_H};
+    }
+    const int64_t screen_w = ROOT_W + static_cast<int64_t>(inset_width) * 2;
+    const int64_t screen_h = ROOT_H + static_cast<int64_t>(inset_height) * 2;
     if (screen_w <= 0 || screen_h <= 0) return {0, 0, ROOT_W, ROOT_H};
     // 与 settings_root_rect 完全同投影口径（y=0）。整体上移后内容顶 FRAME_Y=0x60 与设置页
     // 网格 GRID_Y=0x60 同高；标题/消息 MSG_Y=0x18 与设置页 header HEADER_Y=0x18 同高（绝对 y=0x18）。
@@ -184,8 +189,8 @@ void create_panel_controls_locked() {
     g_back_btn = ui_create_button(root, g_back_btn_rect, "", &on_back_clicked, &back_btn_draw);
     g_msg_label = ui_create_label(root, msg_label_rect(), "", &msg_label_draw);
     // 控件文本 = 当前提示或标题（msg_label_draw 用 ui_draw_text_centered 绘制控件文本）。
-    if (g_msg_label != nullptr && fn_ctrl_btn_set_text != nullptr) {
-        fn_ctrl_btn_set_text(g_msg_label,
+    if (g_msg_label != nullptr && ui_adapter() != nullptr && ui_adapter()->set_text != nullptr) {
+        ui_set_text(g_msg_label,
                              g_msg_text.empty() ? const_cast<char*>(kTitle)
                                                 : const_cast<char*>(g_msg_text.c_str()));
     }
@@ -218,7 +223,7 @@ void savebackup_panel_enter() {
             // 页码/条目缓存可能在隐藏期间被 self_check/刷新改动，列表按钮 rect 重对齐。
             sync_list_btn_rects_locked();
             resumed = true;
-        } else if (g_base == 0 || fn_calc_res_width == nullptr || fn_calc_res_height == nullptr) {
+        } else if (g_base == 0 || !ui_resolution_ready()) {
             SB_UI_LOG("savebackup panel enter: symbols not resolved");
             return;
         } else {
@@ -244,12 +249,14 @@ void savebackup_panel_process() {
     if (g_root == nullptr || g_base == 0) return;
     if (g_close_delay_frames > 0) {
         --g_close_delay_frames;
-        if (g_close_delay_frames == 0 && fn_ui_set_popup_process_info != nullptr) {
-            fn_ui_set_popup_process_info(3, 0);
+        if (g_close_delay_frames == 0) {
+            (void)ui_set_popup_process_info(3, 0);
             return;
         }
     }
-    if (fn_grpx_start == nullptr || fn_grpx_end == nullptr) return;
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->begin_frame == nullptr || ui->end_frame == nullptr ||
+        ui->draw_control == nullptr) return;
     // 控件 rect 写回只在游戏线程（本函数）执行：后台刷新线程不直接 ui_set_rect。
     // 列表条目数/页码变化后在此把最新 rect 写回控件，使引擎侧的控件 rect 与计算 rect 一致
     // （命中/绘制另用 panel_abs_origin + 计算 rect，双保险）。
@@ -258,15 +265,13 @@ void savebackup_panel_process() {
     ui_begin_frame();
     // 背景/遮罩/分割线/标题（设置页同款视觉语言，见 render.inc）
     root_decor_draw();
-    if (fn_ctrl_btn_draw != nullptr) {
-        for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) fn_ctrl_btn_draw(g_slot_btns[i]);
-        for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) fn_ctrl_btn_draw(g_ops_btns[i]);
-        for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) fn_ctrl_btn_draw(g_list_btns[i]);
-        if (g_prev_btn) fn_ctrl_btn_draw(g_prev_btn);
-        if (g_next_btn) fn_ctrl_btn_draw(g_next_btn);
-        if (g_back_btn) fn_ctrl_btn_draw(g_back_btn);
-        if (g_msg_label) fn_ctrl_btn_draw(g_msg_label);
-    }
+    for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) ui_draw_control(g_slot_btns[i]);
+    for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ui_draw_control(g_ops_btns[i]);
+    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) ui_draw_control(g_list_btns[i]);
+    if (g_prev_btn) ui_draw_control(g_prev_btn);
+    if (g_next_btn) ui_draw_control(g_next_btn);
+    if (g_back_btn) ui_draw_control(g_back_btn);
+    if (g_msg_label) ui_draw_control(g_msg_label);
     ui_end_frame();
 }
 

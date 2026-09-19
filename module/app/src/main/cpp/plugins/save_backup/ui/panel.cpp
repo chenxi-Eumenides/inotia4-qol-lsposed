@@ -1,15 +1,12 @@
 #include "plugins/save_backup/ui/panel.h"
 
 #include "contracts/panels.h"
+#include "contracts/ui.h"
 #include "core/native/game_ops_common.h"
 #include "core/native/qol_log.h"
-#include "game/access/ui_components.h"
-#include "game/access/ui_kit.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_ui.h"
-#include "hooks/popup_state.h"
-#include "infra/capabilities.h"
 #include "plugins/save_backup/feature.h"
 
 #include <atomic>
@@ -157,6 +154,186 @@
 namespace qol::features::save_backup {
 namespace {
 
+using UiRect = contracts::UiRect;
+using UiClickProc = contracts::QolUiClickFn;
+using UiDrawProc = contracts::QolUiDrawFn;
+
+const contracts::QolUiAdapter* ui_adapter() {
+    const contracts::QolHostSdk* sdk = save_backup_host_sdk();
+    return sdk == nullptr ? nullptr : sdk->ui;
+}
+
+bool ui_ok(const QolResult& result) { return contracts::succeeded(result); }
+
+void* ui_create_control(uint32_t kind, void* parent, UiRect rect, const char* text,
+                        UiClickProc click_proc, UiDrawProc draw_proc) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->create_control == nullptr || ui->set_rect == nullptr) return nullptr;
+    void* control = nullptr;
+    if (!ui_ok(ui->create_control(kind, parent, &control)) || control == nullptr) return nullptr;
+    if (!ui_ok(ui->set_rect(control, rect))) return nullptr;
+    if (text != nullptr && (ui->set_text == nullptr || !ui_ok(ui->set_text(control, text)))) {
+        return nullptr;
+    }
+    if (click_proc != nullptr &&
+        (ui->set_click_proc == nullptr || !ui_ok(ui->set_click_proc(control, click_proc, control)))) {
+        return nullptr;
+    }
+    if (draw_proc != nullptr &&
+        (ui->set_draw_proc == nullptr || !ui_ok(ui->set_draw_proc(control, draw_proc)))) {
+        return nullptr;
+    }
+    return control;
+}
+
+void* ui_create_root(UiRect rect) {
+    return ui_create_control(0, nullptr, rect, nullptr, nullptr, nullptr);
+}
+
+void* ui_create_button(void* parent, UiRect rect, const char* text, UiClickProc click_proc,
+                       UiDrawProc draw_proc) {
+    return ui_create_control(1, parent, rect, text, click_proc, draw_proc);
+}
+
+void* ui_create_label(void* parent, UiRect rect, const char* text, UiDrawProc draw_proc) {
+    return ui_create_control(2, parent, rect, text, nullptr, draw_proc);
+}
+
+void ui_set_rect(void* control, UiRect rect) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->set_rect != nullptr) (void)ui->set_rect(control, rect);
+}
+
+bool ui_get_rect(void* control, UiRect* rect) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->get_rect != nullptr && rect != nullptr &&
+           ui_ok(ui->get_rect(control, rect));
+}
+
+void ui_begin_frame() {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->begin_frame != nullptr) (void)ui->begin_frame();
+}
+
+void ui_end_frame() {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->end_frame != nullptr) (void)ui->end_frame();
+}
+
+void ui_fill_rect_alpha(UiRect rect, uint32_t color, uint32_t alpha) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->fill_rect_alpha != nullptr) {
+        (void)ui->fill_rect_alpha(rect, color, alpha);
+    }
+}
+
+void ui_draw_panel_decor(UiRect panel, const int64_t* separators, size_t count, uint32_t color) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->draw_panel_decor != nullptr) {
+        (void)ui->draw_panel_decor(panel, separators, static_cast<uint32_t>(count), color);
+    }
+}
+
+void ui_draw_vertical_line(int64_t x, int64_t y, int64_t height, uint32_t color, int thickness) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->draw_vertical_line != nullptr) {
+        (void)ui->draw_vertical_line(x, y, height, color, thickness);
+    }
+}
+
+bool ui_load_image_unit(int32_t unit) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->load_image_unit != nullptr && ui_ok(ui->load_image_unit(unit));
+}
+
+bool ui_draw_image_part(int32_t unit, int32_t loc, int32_t x, int32_t y, int32_t type,
+                        int32_t flip) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->draw_image_part != nullptr &&
+           ui_ok(ui->draw_image_part(unit, loc, x, y, type, flip));
+}
+
+void ui_set_text(void* control, const char* text) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->set_text != nullptr) (void)ui->set_text(control, text);
+}
+
+void ui_draw_control(void* control) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->draw_control != nullptr) (void)ui->draw_control(control);
+}
+
+bool ui_resolution_width(int32_t* out) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->screen_inset_width != nullptr && out != nullptr &&
+           ui_ok(ui->screen_inset_width(out));
+}
+
+bool ui_resolution_height(int32_t* out) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->screen_inset_height != nullptr && out != nullptr &&
+           ui_ok(ui->screen_inset_height(out));
+}
+
+bool ui_resolution_ready() {
+    int32_t width = 0;
+    int32_t height = 0;
+    return ui_resolution_width(&width) && ui_resolution_height(&height);
+}
+
+bool ui_set_popup_process_info(int32_t process, int32_t state_id) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->set_popup_process_info != nullptr &&
+           ui_ok(ui->set_popup_process_info(process, state_id));
+}
+
+bool ui_push_popup_state(uint32_t state_id) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->push_popup_state != nullptr &&
+           ui_ok(ui->push_popup_state(state_id));
+}
+
+bool ui_set_font_color_rgb(int32_t red, int32_t green, int32_t blue) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->set_font_color_rgb != nullptr &&
+           ui_ok(ui->set_font_color_rgb(red, green, blue));
+}
+
+bool ui_draw_string_with_font(const char* text, int32_t x, int32_t y, int32_t align, int32_t font) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->draw_string_with_font != nullptr &&
+           ui_ok(ui->draw_string_with_font(text, x, y, align, font));
+}
+
+namespace ui_original {
+
+bool load_option_images() {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->load_option_images != nullptr && ui_ok(ui->load_option_images());
+}
+
+bool draw_back_button(void* control, bool pressed) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->draw_back_button != nullptr &&
+           ui_ok(ui->draw_back_button(control, pressed ? 1 : 0));
+}
+
+}  // namespace ui_original
+
+namespace ui_custom {
+
+void draw_button(void* control, UiRect size, uint32_t background, uint32_t border,
+                 int border_thickness, const char* text, uint32_t text_color, int text_x,
+                 int text_y) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->draw_custom_button != nullptr) {
+        (void)ui->draw_custom_button(control, size, background, border, border_thickness, text,
+                                      text_color, text_x, text_y);
+    }
+}
+
+}  // namespace ui_custom
+
 // ============== 全局状态 ==============
 std::mutex g_sbui_mtx;
 
@@ -167,7 +344,7 @@ int g_back_pressed = 0;
 int g_close_delay_frames = 0;
 const char* kTitle = "存档备份";
 // own:popup.savebackup 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
-hooks::PopupStateEntry g_popup_entry{};
+contracts::QolPopupStateEntry g_popup_entry{};
 bool g_popup_acquired = false;
 // 视觉资源（与 core.ui 设置页同款）：面板背景贴图两半 + 原版返回按钮贴图（unit 0x59）。
 // 注意：option 贴图单元与设置页共用，本面板不做「已加载」标志——enter 无条件确保加载
@@ -408,10 +585,9 @@ void set_msg_locked(const char* text, uint32_t color, bool is_error) {
     g_msg_is_error = is_error;
     // 提示文本写入控件自身（msg_label_draw 用 ui_draw_text_centered 绘制控件文本）；
     // 无消息时控件文本回退为面板标题。
-    if (g_msg_label != nullptr && fn_ctrl_btn_set_text != nullptr) {
-        fn_ctrl_btn_set_text(g_msg_label,
-                             g_msg_text.empty() ? const_cast<char*>(kTitle)
-                                                : const_cast<char*>(g_msg_text.c_str()));
+    if (g_msg_label != nullptr && ui_adapter() != nullptr && ui_adapter()->set_text != nullptr) {
+        ui_set_text(g_msg_label,
+                    g_msg_text.empty() ? kTitle : g_msg_text.c_str());
     }
 }
 
@@ -453,19 +629,22 @@ int32_t savebackup_popup_acquire(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     if (g_popup_entry.slot != nullptr) return 0;
-    hooks::PopupStateEntry entry{};
-    if (!hooks::popup_state_resolve_symbol("F_PANEL_UNK2_ENTER", &entry)) {
+    contracts::QolPopupStateEntry entry{};
+    const contracts::QolHostSdk* sdk = save_backup_host_sdk();
+    if (sdk == nullptr || sdk->hooks.popup_resolve == nullptr ||
+        !ui_ok(sdk->hooks.popup_resolve("F_PANEL_UNK2_ENTER", &entry))) {
         SB_UI_LOG("popup.savebackup: state entry (INAP_GOODS) not found");
         return 1;
     }
-    const hooks::PopupStateHooks hooks{
+    const contracts::QolPopupStateHooks popup_hooks{
         &savebackup_panel_enter,
         &savebackup_panel_process,
         &savebackup_panel_f3,
         &savebackup_panel_f4,
         &savebackup_panel_event,
     };
-    if (!hooks::popup_state_acquire(&entry, hooks)) {
+    if (sdk->hooks.popup_acquire == nullptr ||
+        !ui_ok(sdk->hooks.popup_acquire(&entry, &popup_hooks))) {
         SB_UI_LOG("popup.savebackup: acquire rejected");
         return 1;
     }
@@ -479,8 +658,9 @@ int32_t savebackup_popup_acquire(const char* id) {
 void savebackup_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    if (g_popup_entry.slot != nullptr) {
-        hooks::popup_state_restore(&g_popup_entry);
+    const contracts::QolHostSdk* sdk = save_backup_host_sdk();
+    if (g_popup_entry.slot != nullptr && sdk != nullptr && sdk->hooks.popup_restore != nullptr) {
+        (void)sdk->hooks.popup_restore(&g_popup_entry);
     }
     g_popup_acquired = false;
     g_state_id = -1;
@@ -491,7 +671,8 @@ void savebackup_popup_release(const char* id) {
 
 bool savebackup_provider_open() {
     if (g_popup_entry.slot == nullptr) return false;
-    if (fn_ui_set_popup_process_info == nullptr) return false;
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->set_popup_process_info == nullptr) return false;
 
     // 优先尝试嵌套 push（保持设置页 keep open 在栈下方）。
     // 真机实测：fn_popupstate_push(0x122424) 内部 Array_Add 失败但 GetTop 返回当前栈顶
@@ -500,19 +681,21 @@ bool savebackup_provider_open() {
     //   1) rc != 0 才视为 push 成功（按反汇编：rc=0 = enter NULL / push 内部失败）
     //   2) 校验栈顶 enter_func 必须是 &savebackup_panel_enter（防止 GetTop 返回旧栈顶）
     // 未切换栈顶时返回 false，由 core.ui 面板栈关栈顶后重试（原切换式兜底已上移）。
-    if (fn_popupstate_push != nullptr) {
-        const int rc = fn_popupstate_push(static_cast<uint32_t>(g_state_id));
-        SB_UI_LOG("open save backup panel via push: state=%d rc=0x%x", g_state_id, rc);
-        if (rc != 0 && is_savebackup_at_stack_top()) {
+    if (ui != nullptr && ui->push_popup_state != nullptr) {
+        const bool pushed = ui_push_popup_state(static_cast<uint32_t>(g_state_id));
+        SB_UI_LOG("open save backup panel via push: state=%d rc=%d", g_state_id, pushed ? 1 : 0);
+        if (pushed && is_savebackup_at_stack_top()) {
             return true;
         }
         // 未切换栈顶：返回 false，由 core.ui 面板栈关栈顶后重试（原切换式兜底已上移）。
-        SB_UI_LOG("push didn't switch stack top (rc=0x%x); stack will close top and retry", rc);
+        SB_UI_LOG("push didn't switch stack top (rc=%d); stack will close top and retry",
+                  pushed ? 1 : 0);
         return false;
     }
     // 无 push 符号：切换式兜底（关当前 UI → 异步打开本面板）。栈记录由 active() 在下次 open 剔除。
-    fn_ui_set_popup_process_info(3, 0);
-    fn_ui_set_popup_process_info(1, g_state_id);
+    if (!ui_set_popup_process_info(3, 0) || !ui_set_popup_process_info(1, g_state_id)) {
+        return false;
+    }
     SB_UI_LOG("open save backup panel via switch: state=%d", g_state_id);
     return true;
 }
@@ -533,9 +716,7 @@ void savebackup_provider_close() {
     if (!was_active) return;
     // fn_ui_set_popup_process_info 必须锁外调用：pop 链会触发 savebackup_panel_f3 拿
     // g_sbui_mtx（非递归），持锁调用会死锁。
-    if (fn_ui_set_popup_process_info != nullptr) {
-        fn_ui_set_popup_process_info(3, 0);
-    }
+    (void)ui_set_popup_process_info(3, 0);
     SB_UI_LOG("back clicked: panel closed");
 }
 
@@ -589,10 +770,20 @@ std::string data_savebackup_ui_restore() {
 }
 
 std::string data_savebackup_ui_open_panel() {
-    const auto* api = static_cast<const contracts::UiPanelsApi*>(
-        infra::require_capability(contracts::kUiPanelsCapabilityId,
-                                  {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}));
-    if (api == nullptr || api->open == nullptr) return op_err("ui_panels unavailable");
+    const contracts::QolHostSdk* sdk = save_backup_host_sdk();
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) {
+        return op_err("ui_panels unavailable");
+    }
+    const void* iface = nullptr;
+    if (!ui_ok(sdk->capabilities.require(
+            contracts::kUiPanelsCapabilityId,
+            {static_cast<uint16_t>(contracts::kUiPanelsVersionMajor),
+             static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)},
+            &iface))) {
+        return op_err("ui_panels unavailable");
+    }
+    const auto* api = static_cast<const contracts::UiPanelsApi*>(iface);
+    if (api->open == nullptr) return op_err("ui_panels unavailable");
     return api->open("save_backup") ? op_ok() : op_err("panel open failed");
 }
 
