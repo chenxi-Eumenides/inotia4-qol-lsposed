@@ -291,65 +291,69 @@ static int g_cumulate_backup_result = 0;
 static int g_cumulate_backup_calls = 0;
 static int cumulate_backup(void*) { ++g_cumulate_backup_calls; return g_cumulate_backup_result; }
 
-// H-17 读侧分流（R-45/R-46/R-47/R-49）：仅 count-encoded 类别按模式视图解码
-//（启用态 128a+b、关闭态只读 b），非可堆叠与 kUnknown fail-closed 走 backup；
-// kEncoded 不先调 backup（§3.2 1.1 例外）。
+enum class EffectiveResultMode : uint8_t { kOk, kNotReady, kUnsupported };
+static uint32_t g_effective_count = 0;
+static EffectiveResultMode g_effective_result_mode = EffectiveResultMode::kOk;
+
+static QolResult fake_effective(const void*, uint32_t* out_count) {
+    if (g_effective_result_mode == EffectiveResultMode::kNotReady) {
+        return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+    }
+    if (g_effective_result_mode == EffectiveResultMode::kUnsupported) {
+        return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+    }
+    *out_count = g_effective_count;
+    return qol::contracts::ok();
+}
+
+static const qol::contracts::QolItemCountApi kStage4ItemCountApi = {
+    nullptr, &fake_effective, nullptr, nullptr, nullptr};
+
+// H-17 读侧分流（R-45/R-46/R-47/R-49）：effective facade 成功时直接返回，
+// 未驻留/未就绪与 unsupported 走原版 backup。
 static void test_get_cumulate_count_s2() {
     void* nonnull_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x417));
-    using stack_codec::CountEncoding;
     using stack_codec::s2_write_count;
 
-    // kEncoded 启用态：S2 全量解码直达，backup 保持未调用（数量 0/99/100/127/128/199/999/1023）。
+    // facade 成功：返回 facade 值，backup 保持未调用（数量 0/99/100/127/128/199/999/1023）。
     const uint32_t counts[] = {0u, 99u, 100u, 127u, 128u, 199u, 999u, 1023u};
     for (const uint32_t count : counts) {
         g_cumulate_backup_calls = 0;
         g_cumulate_backup_result = -1;
-        CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, count),
-                                        CountEncoding::kEncoded,
-                                        cumulate_backup, true) == static_cast<int>(count));
+        g_effective_result_mode = EffectiveResultMode::kOk;
+        g_effective_count = count;
+        CHECK(stage4_get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+                                        cumulate_backup) == static_cast<int>(count));
         CHECK(g_cumulate_backup_calls == 0);
     }
-    // kEncoded 关闭态（R-47 决策 b）：只读 b 段（count mod 128），a 不读不参与。
-    for (const uint32_t count : counts) {
-        g_cumulate_backup_calls = 0;
-        g_cumulate_backup_result = -1;
-        CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, count),
-                                        CountEncoding::kEncoded,
-                                        cumulate_backup, false) ==
-              static_cast<int>(count & 0x7Fu));
-        CHECK(g_cumulate_backup_calls == 0);
-    }
-    // 模式切换不丢值：canonical 199 关闭态读 71，重开读 199。
-    CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, 199u),
-                                    CountEncoding::kEncoded, cumulate_backup, false) == 71);
-    CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, 199u),
-                                    CountEncoding::kEncoded, cumulate_backup, true) == 199);
     // a 段进位边界：127 = b 满（b=127<<25）、128 = a=1（1<<22）、999 = b=103、a=7。
     CHECK(s2_write_count(0u, 127u) == (127u << 25));
     CHECK(s2_write_count(0u, 128u) == (1u << 22));
     CHECK(s2_write_count(0u, 999u) == ((103u << 25) | (7u << 22)));
 
-    // 非可堆叠：original-first backup（装备 marker/宝石选项/袋容量不解释 bits22–31）。
+    // kNotReady：provider 未驻留/999 原子组未就绪时 original-first backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0xFFFFFFFFu, CountEncoding::kNotEncoded,
-                                    cumulate_backup, true) == 1);
+    g_effective_result_mode = EffectiveResultMode::kNotReady;
+    CHECK(stage4_get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+                                    cumulate_backup) == 1);
     CHECK(g_cumulate_backup_calls == 1);
 
-    // fail-closed：类别表不可用（kUnknown）必须走 backup，不得按可堆叠解码。
+    // kUnsupported：类别判定不可用时 fail-closed 走 backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0xFFFFFFFFu, CountEncoding::kUnknown,
-                                    cumulate_backup, false) == 1);
+    g_effective_result_mode = EffectiveResultMode::kUnsupported;
+    CHECK(stage4_get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+                                    cumulate_backup) == 1);
     CHECK(g_cumulate_backup_calls == 1);
 
     // 空指针：原版语义返回 0（backup(nullptr)）。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 0;
-    CHECK(stage4_get_cumulate_count(nullptr, 0u, CountEncoding::kUnknown,
-                                    cumulate_backup, true) == 0);
+    CHECK(stage4_get_cumulate_count(nullptr, &kStage4ItemCountApi,
+                                    cumulate_backup) == 0);
     CHECK(g_cumulate_backup_calls == 1);
 
-    // backup 缺失兜底：非可堆叠/未知返回 0，不崩。
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0u, CountEncoding::kNotEncoded, nullptr, true) == 0);
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0u, CountEncoding::kUnknown, nullptr, false) == 0);
+    // facade 未驻留与 backup 缺失兜底：返回 0，不崩。
+    CHECK(stage4_get_cumulate_count(nonnull_item, nullptr, nullptr) == 0);
+    g_effective_result_mode = EffectiveResultMode::kOk;
 }
 
 // H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：部分删堆 remain 修正、

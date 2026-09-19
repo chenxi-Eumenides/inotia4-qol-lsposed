@@ -68,4 +68,14 @@ void host_item_count_set_provider(const contracts::QolItemCountApi* api) { g_pro
 
 const contracts::QolItemCountApi& host_item_count_api() { return kFacade; }
 
+const contracts::QolItemCountApi* host_item_count_api_if_resident() {
+    return g_provider == nullptr ? nullptr : &kFacade;
+}
+
 }  // namespace qol::host
+
+namespace qol::contracts {
+
+const QolItemCountApi* item_count_api() { return host::host_item_count_api_if_resident(); }
+
+}  // namespace qol::contracts

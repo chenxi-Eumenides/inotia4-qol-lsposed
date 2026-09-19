@@ -87,10 +87,10 @@ std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_tot
     }
     // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（与 ITEM_GetCumulateCount 同源）。
     // 类别表不可用时拒绝多数量写入，不能把未知类别当作可堆叠物品。
-    const stack_codec::CountEncoding count_encoding = item_count_encoding(item);
-    if (count > 1 && count_encoding != stack_codec::CountEncoding::kEncoded) {
+    const qol::contracts::QolItemCountEncoding count_encoding = item_count_encoding(item);
+    if (count > 1 && count_encoding != qol::contracts::QolItemCountEncoding::kEncoded) {
         fn_itempool_free(item);
-        return op_err(count_encoding == stack_codec::CountEncoding::kUnknown
+        return op_err(count_encoding == qol::contracts::QolItemCountEncoding::kUnknown
                           ? "item category unavailable"
                           : "item not stackable");
     }

@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "contracts/result.h"
+#include "contracts/item_count.h"
 
 namespace {
 
@@ -41,6 +42,7 @@ const qol::contracts::QolItemCountApi kProvider = {
 
 void assert_not_ready_without_provider() {
     qol::host::host_item_count_set_provider(nullptr);
+    assert(qol::contracts::item_count_api() == nullptr);
     uint32_t count = 77;
     auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
     int32_t needed = 77;
@@ -75,6 +77,10 @@ QolResult unknown_is_encoded(const void*, qol::contracts::QolItemCountEncoding* 
     *out = qol::contracts::QolItemCountEncoding::kUnknown;
     return qol::contracts::ok();
 }
+QolResult not_encoded(const void*, qol::contracts::QolItemCountEncoding* out) {
+    *out = qol::contracts::QolItemCountEncoding::kNotEncoded;
+    return qol::contracts::ok();
+}
 QolResult unknown_write(void*, uint32_t) {
     return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
 }
@@ -106,9 +112,21 @@ void assert_unknown_is_not_guessed() {
     qol::host::host_item_count_set_provider(nullptr);
 }
 
+void assert_not_encoded_state_is_preserved() {
+    const qol::contracts::QolItemCountApi provider = {
+        nullptr, nullptr, &not_encoded, nullptr, nullptr};
+    qol::host::host_item_count_set_provider(&provider);
+    auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
+    assert(qol::contracts::item_count_api()->is_encoded(reinterpret_cast<void*>(1), &encoding).ok ==
+           0);
+    assert(encoding == qol::contracts::QolItemCountEncoding::kNotEncoded);
+    qol::host::host_item_count_set_provider(nullptr);
+}
+
 void assert_provider_forwarding_and_null_arguments() {
     g_calls = 0;
     qol::host::host_item_count_set_provider(&kProvider);
+    assert(qol::contracts::item_count_api() != nullptr);
     uint32_t count = 0;
     auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
     int32_t needed = 0;
@@ -139,6 +157,7 @@ void assert_provider_forwarding_and_null_arguments() {
     assert(count == 77);
 
     qol::host::host_item_count_set_provider(nullptr);
+    assert(qol::contracts::item_count_api() == nullptr);
 }
 
 }  // namespace
@@ -146,6 +165,7 @@ void assert_provider_forwarding_and_null_arguments() {
 int main() {
     assert_not_ready_without_provider();
     assert_unknown_is_not_guessed();
+    assert_not_encoded_state_is_preserved();
     assert_provider_forwarding_and_null_arguments();
     return 0;
 }

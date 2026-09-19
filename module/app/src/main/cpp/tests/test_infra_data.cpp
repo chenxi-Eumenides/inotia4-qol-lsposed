@@ -9,6 +9,7 @@
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "contracts/stack_codec.h"
+#include "contracts/game_host.h"
 #include "data/native/item_class.h"
 
 #include <cstdint>
@@ -22,7 +23,7 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using stack_codec::CountEncoding;
+using qol::contracts::QolItemCountEncoding;
 
 // save_exit 无纯逻辑可测；此处仅以编译性断言保证主机端可包含该头。
 static_assert(sizeof(SaveExitFn) > 0, "SaveExitFn must be complete");
@@ -94,39 +95,42 @@ static void test_item_is_equip_encoding() {
     const uint8_t stride = 8;
 
     CHECK(item_count_encoding_from_flags(type_flags_for(0), table, stride) ==
-          CountEncoding::kNotEncoded);
+          QolItemCountEncoding::kNotEncoded);
     CHECK(item_count_encoding_from_flags(type_flags_for(1), table, stride) ==
-          CountEncoding::kEncoded);
+          QolItemCountEncoding::kEncoded);
     CHECK(item_count_encoding_from_flags(type_flags_for(2), table, stride) ==
-          CountEncoding::kEncoded);
+          QolItemCountEncoding::kEncoded);
     CHECK(item_count_encoding_from_flags(type_flags_for(3), table, stride) ==
-          CountEncoding::kNotEncoded);
+          QolItemCountEncoding::kNotEncoded);
 
     // item_is_equip 口径：仅 kNotEncoded 是装备；kEncoded/kUnknown 均非装备。
     for (int c = 0; c < 4; ++c) {
         const bool equip =
             item_count_encoding_from_flags(type_flags_for(c), table, stride) ==
-            CountEncoding::kNotEncoded;
+            QolItemCountEncoding::kNotEncoded;
         CHECK(equip == (c == 0 || c == 3));
     }
 
     // rarity 位（bit2-5）与低位不影响 category 解析。
     const uint16_t with_rarity = static_cast<uint16_t>(type_flags_for(1) | (0x3 << 2));
-    CHECK(item_count_encoding_from_flags(with_rarity, table, stride) == CountEncoding::kEncoded);
+    CHECK(item_count_encoding_from_flags(with_rarity, table, stride) ==
+          QolItemCountEncoding::kEncoded);
 
     // 表不可用：base=nullptr / stride=0 一律 fail-closed 为 kUnknown -> 非装备。
     CHECK(item_count_encoding_from_flags(type_flags_for(0), nullptr, stride) ==
-          CountEncoding::kUnknown);
+          QolItemCountEncoding::kUnknown);
     CHECK(item_count_encoding_from_flags(type_flags_for(0), table, 0) ==
-          CountEncoding::kUnknown);
+          QolItemCountEncoding::kUnknown);
     CHECK(!(item_count_encoding_from_flags(type_flags_for(1), nullptr, stride) ==
-            CountEncoding::kNotEncoded));
+            QolItemCountEncoding::kNotEncoded));
 
     // 不同 stride 下定位公式 category*stride+6 正确。
     uint8_t table4[8 * 4] = {};
     table4[5 * 4 + 6] = 0x01;
-    CHECK(item_count_encoding_from_flags(type_flags_for(5), table4, 4) == CountEncoding::kEncoded);
-    CHECK(item_count_encoding_from_flags(type_flags_for(6), table4, 4) == CountEncoding::kNotEncoded);
+    CHECK(item_count_encoding_from_flags(type_flags_for(5), table4, 4) ==
+          QolItemCountEncoding::kEncoded);
+    CHECK(item_count_encoding_from_flags(type_flags_for(6), table4, 4) ==
+          QolItemCountEncoding::kNotEncoded);
 }
 
 static void test_item_is_backpack_encoding() {

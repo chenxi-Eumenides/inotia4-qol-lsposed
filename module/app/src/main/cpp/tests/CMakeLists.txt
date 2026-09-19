@@ -342,6 +342,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -375,6 +376,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -406,6 +408,7 @@ add_executable(patch_layer_tests
     ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
 )
 target_include_directories(patch_layer_tests PRIVATE
     ${CPP_DIR}
@@ -421,6 +424,7 @@ add_executable(extension_bag_contract_tests
     test_extension_bag_contract.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
 )

@@ -42,11 +42,12 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
-        ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr) {
+        ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.game == nullptr) {
         (void)inventory_native_hook_bind_sdk(nullptr);
+        (void)inventory_native_hook_bind_game(nullptr);
         return 1;
     }
-    if (!inventory_native_hook_bind_sdk(ctx.sdk)) {
+    if (!inventory_native_hook_bind_sdk(ctx.sdk) || !inventory_native_hook_bind_game(ctx.game)) {
         return 1;
     }
     // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体在本插件 TU。

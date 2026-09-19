@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 21 |
+| `contracts` | 22 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
 | `domains/inventory` | 9 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **373** |
+| **合计** | **374** |
 
 ### 1.2 迁移期映射摘要
 
@@ -142,9 +142,9 @@
 | `plugins/extension_bag` | `contracts` | 23 |
 | `host` | `contracts` | 19 |
 | `plugins/custom_recipe` | `contracts` | 13 |
+| `plugins/inventory_hooks` | `contracts` | 13 |
 | `plugins/autosell` | `contracts` | 11 |
 | `plugins/core.ui` | `contracts` | 11 |
-| `plugins/inventory_hooks` | `contracts` | 11 |
 | `infra` | `game` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |

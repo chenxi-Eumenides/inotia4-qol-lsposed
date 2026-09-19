@@ -2,24 +2,25 @@
 
 #include "item_class.h"
 
+#include "contracts/item_count.h"
 #include "game_access.h"
 #include "game_symbols.h"
 
 #include <cstdint>
 
-stack_codec::CountEncoding item_count_encoding(void* item) {
-    if (g_base == 0 || item == nullptr) return stack_codec::CountEncoding::kUnknown;
-    uint8_t* it = reinterpret_cast<uint8_t*>(item);
-    const uint16_t flags = *reinterpret_cast<uint16_t*>(it + I_TYPE);
-    uint8_t* class_data =
-        *reinterpret_cast<uint8_t**>(*reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
-    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    const uint8_t stride = size_ptr != nullptr ? *size_ptr : 0;
-    return item_count_encoding_from_flags(flags, class_data, stride);
+qol::contracts::QolItemCountEncoding item_count_encoding(void* item) {
+    if (item == nullptr) return qol::contracts::QolItemCountEncoding::kUnknown;
+    const qol::contracts::QolItemCountApi* api = qol::contracts::item_count_api();
+    if (api == nullptr || api->is_encoded == nullptr) {
+        return qol::contracts::QolItemCountEncoding::kUnknown;
+    }
+    qol::contracts::QolItemCountEncoding encoding = qol::contracts::QolItemCountEncoding::kUnknown;
+    const QolResult result = api->is_encoded(item, &encoding);
+    return qol::contracts::succeeded(result) ? encoding : qol::contracts::QolItemCountEncoding::kUnknown;
 }
 
 bool item_is_equip(void* item) {
-    return item_count_encoding(item) == stack_codec::CountEncoding::kNotEncoded;
+    return item_count_encoding(item) == qol::contracts::QolItemCountEncoding::kNotEncoded;
 }
 
 bool item_is_backpack(int category) {

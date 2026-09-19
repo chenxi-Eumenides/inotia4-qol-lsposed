@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 19 | 1680 |
-| `game/` | 36 | 2747 |
+| `contracts/` | 20 | 1689 |
+| `game/` | 36 | 2756 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 155 | 31167 |
-| `host/` | 19 | 4514 |
-| **合计** | **269** | **44311** |
+| `plugins/` | 155 | 31170 |
+| `host/` | 19 | 4524 |
+| **合计** | **270** | **44342** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -42,14 +42,14 @@
 - `plugins/craft_ui/`：4 文件 / 997 行
 - `plugins/custom_recipe/`：10 文件 / 2091 行
 - `plugins/extension_bag/`：39 文件 / 13222 行
-- `plugins/inventory_hooks/`：9 文件 / 1942 行
+- `plugins/inventory_hooks/`：9 文件 / 1946 行
 - `plugins/native_choice/`：4 文件 / 402 行
 - `plugins/push_all/`：6 文件 / 308 行
 - `plugins/quest/`：4 文件 / 255 行
 - `plugins/save_backup/`：12 文件 / 4504 行
 - `plugins/simple_mode/`：6 文件 / 529 行
 - `plugins/special_equip/`：6 文件 / 547 行
-- `plugins/stack_limit/`：3 文件 / 296 行
+- `plugins/stack_limit/`：3 文件 / 295 行
 - `plugins/text_layer/`：6 文件 / 494 行
 - `plugins/world_teleport/`：6 文件 / 540 行
 

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "contracts/game_host.h"
 #include "contracts/stack_codec.h"
 
 using Stage4HaveBackup = int (*)(int32_t);
@@ -21,13 +22,11 @@ int stage4_get_item_count_original_only(int32_t category, Stage4CountBackup back
                                         bool& recursive_guard);
 
 using Stage4CumulateBackup = int (*)(void*);
-// S2 读侧统一入口（R-49）的纯逻辑分流：kEncoded 类别按模式视图解码（R-45/R-47
-// 决策 b：启用态 128a+b 全量、关闭态只读 b 段），与 backup 无关；非可堆叠/类别
-// 未知（kUnknown）original-first 走 backup，backup 缺失按 0（与既有查询 wrapper
-// 的 backup 兜底一致）。
-int stage4_get_cumulate_count(void* item, uint32_t raw_count_field,
-                              stack_codec::CountEncoding encoding,
-                              Stage4CumulateBackup backup, bool limit_enabled);
+// S2 读侧统一入口（R-49）的纯逻辑分流：通过插件上下文注入的 item_count facade 读取
+// effective；facade 未驻留/未就绪或返回 unsupported 时 original-first 走 backup，
+// backup 缺失按 0。插件侧不经 contracts/item_count.h 的宿主访问器。
+int stage4_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi* item_count,
+                              Stage4CumulateBackup backup);
 
 // 原版装备页出售/销毁结算数量语义（纯函数，供 Host 断言）。
 // 反汇编（基线 .tmp/dualmode-full.asm，本次 .tmp/sell-vanilla/1261c4.asm 复核）：

@@ -2,16 +2,15 @@
 
 #include <cstdint>
 
+#include "contracts/game_host.h"
+
 namespace stack_codec {
 
 constexpr uint16_t kContractMajor = 1;
 constexpr uint16_t kContractMinor = 0;
 
-enum class CountEncoding : uint8_t {
-    kUnknown,
-    kNotEncoded,
-    kEncoded,
-};
+// B2 过渡别名：三态事实已归公共 item_count ABI，codec 仍保留至 B5。
+using CountEncoding = qol::contracts::QolItemCountEncoding;
 
 constexpr uint32_t kLegacyMax = 99;
 constexpr uint32_t kExtendedMax = 999;

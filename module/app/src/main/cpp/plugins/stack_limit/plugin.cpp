@@ -101,11 +101,10 @@ QolResult canonical_impl(const void* item, uint32_t* out_count) {
         *out_count = impl::s2_read_count(raw);
         return contracts::ok();
     }
-    if (g_game->extra.item.cumulate_count == nullptr) return not_ready();
-    int32_t count = 0;
-    const QolResult count_result = g_game->extra.item.cumulate_count(item, &count);
-    if (!contracts::succeeded(count_result) || count < 0) return not_ready();
-    *out_count = static_cast<uint32_t>(count);
+    // ITEM_GetCumulateCount 对非编码类别的原版结果恒为 1。这里不能再次调用
+    // Game Host 的 getter：inventory_hooks 的 getter wrapper 本身经 facade 回到本函数，
+    // 会形成递归；非编码类别直接保留原版归一化结果。
+    *out_count = 1;
     return contracts::ok();
 }
 

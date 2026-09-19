@@ -50,6 +50,7 @@ std::mutex g_hook_mutex;
 NativeHookFunType g_hook_func = nullptr;
 NativeUnhookFunType g_unhook_func = nullptr;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
+const qol::contracts::QolGameHost* g_game = nullptr;
 
 FindItemFn g_backup_find_item = nullptr;
 HaveItemFn g_backup_have_item = nullptr;
@@ -348,17 +349,9 @@ int get_item_count_wrapper(int32_t category) {
 // 状态，因此无需 TLS 直通守卫；数量位偏移使用 game_symbols.h 的 I_COUNT，不写
 // 裸偏移。分流逻辑在 stage4_get_cumulate_count（纯函数，供后续 Host 断言）。
 int get_cumulate_count_wrapper(void* item) {
-    const stack_codec::CountEncoding encoding =
-        item == nullptr ? stack_codec::CountEncoding::kUnknown
-                        : item_count_encoding(item);
-    const uint32_t raw_count_field =
-        item == nullptr
-            ? 0u
-            : *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(item) +
-                                                 I_COUNT);
-    return stage4_get_cumulate_count(item, raw_count_field, encoding,
-                                     g_backup_get_cumulate_count,
-                                     stack_limit_enabled());
+    const qol::contracts::QolItemCountApi* item_count =
+        g_game == nullptr ? nullptr : &g_game->item_count;
+    return stage4_get_cumulate_count(item, item_count, g_backup_get_cumulate_count);
 }
 
 int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
@@ -1207,6 +1200,15 @@ bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk) {
         return false;
     }
     g_sdk = sdk;
+    return true;
+}
+
+bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game) {
+    if (game == nullptr || game->item_count.effective == nullptr) {
+        g_game = nullptr;
+        return false;
+    }
+    g_game = game;
     return true;
 }
 

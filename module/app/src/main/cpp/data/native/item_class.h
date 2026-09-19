@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "contracts/stack_codec.h"
+#include "contracts/game_host.h"
 
 // 数据层物品类别原语：ITEMCLASSBASE 记录 +6 bit0 的可堆叠/装备判定，
 // 以及记录 +2 的背包类判定。从 api/native/game_inventory_read.inc 下沉
@@ -11,7 +11,7 @@
 
 // 返回物品类别的计数编码；表基址/步长不可用或 item 为空返回 kUnknown，
 // 调用方不得按可堆叠处理。
-stack_codec::CountEncoding item_count_encoding(void* item);
+qol::contracts::QolItemCountEncoding item_count_encoding(void* item);
 
 bool item_is_equip(void* item);
 
@@ -51,12 +51,13 @@ inline bool category_is_no_equip_from_class_data(int category, const uint8_t* cl
 //   type_flags = I_TYPE 位域（bit6-15 = category）
 //   class_data = ITEMCLASSBASE 表基址，stride = 每条记录步长
 // class_data 为空或 stride==0 时 fail-closed 返回 kUnknown。
-inline stack_codec::CountEncoding item_count_encoding_from_flags(uint16_t type_flags,
-                                                                 const uint8_t* class_data,
-                                                                 uint8_t stride) {
-    if (class_data == nullptr || stride == 0) return stack_codec::CountEncoding::kUnknown;
+inline qol::contracts::QolItemCountEncoding item_count_encoding_from_flags(
+    uint16_t type_flags, const uint8_t* class_data, uint8_t stride) {
+    if (class_data == nullptr || stride == 0) {
+        return qol::contracts::QolItemCountEncoding::kUnknown;
+    }
     const int category = (type_flags >> 6) & 0x3FF;
     return (class_data[category * stride + 6] & 1) == 0
-        ? stack_codec::CountEncoding::kNotEncoded
-        : stack_codec::CountEncoding::kEncoded;
+        ? qol::contracts::QolItemCountEncoding::kNotEncoded
+        : qol::contracts::QolItemCountEncoding::kEncoded;
 }

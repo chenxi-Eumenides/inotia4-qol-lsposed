@@ -1,5 +1,7 @@
 #include "inventory_hook_stage4.h"
 
+#include <cassert>
+
 #include "core/native/sell_price.h"
 #include "data/native/game_symbols.h"
 
@@ -35,15 +37,13 @@ int stage4_get_item_count_original_only(int32_t category, Stage4CountBackup back
     return stage4_get_item_count(category, backup, nullptr, recursive_guard);
 }
 
-int stage4_get_cumulate_count(void* item, uint32_t raw_count_field,
-                              stack_codec::CountEncoding encoding,
-                              Stage4CumulateBackup backup, bool limit_enabled) {
-    // 只有 count-encoded 类别解释数量位段；装备 marker、宝石选项、袋容量等位段
-    // 语义一律交还原版 backup（R-46 fail-closed：kUnknown 也走 backup）。
-    // 解码值按模式视图（R-47 决策 b）：启用态 S2 全量 128a+b，关闭态只读 b 段。
-    if (item != nullptr && encoding == stack_codec::CountEncoding::kEncoded) {
-        return static_cast<int>(
-            stack_codec::effective_read_count(raw_count_field, limit_enabled));
+int stage4_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi* item_count,
+                              Stage4CumulateBackup backup) {
+    if (item != nullptr && item_count != nullptr && item_count->effective != nullptr) {
+        uint32_t count = 0;
+        const QolResult result = item_count->effective(item, &count);
+        assert(result.code != kQolErrInvalidArgument);
+        if (qol::contracts::succeeded(result)) return static_cast<int>(count);
     }
     return backup == nullptr ? 0 : backup(item);
 }

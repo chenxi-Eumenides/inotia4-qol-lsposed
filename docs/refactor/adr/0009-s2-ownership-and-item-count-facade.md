@@ -44,6 +44,20 @@
 | gate 开 + 组全 live | 驻留 | 可读 | S2 语义 |
 | 未安装 / deactivate | 注销 | `kQolErrNotReady` | `kQolErrNotReady` |
 
+### 宿主侧遗留消费者访问器（B2a 补充）
+
+`api/native`、`core/native`、`data/native` 的遗留消费者按层规则不能 include
+`host/**`，因此新增 `contracts/item_count.h` 的 `item_count_api()`。它只返回只读的
+`const QolItemCountApi*` 函数表指针；provider 未驻留返回 `nullptr`，驻留后由同一 TU
+中的 facade 负责转发错误码。调用方对 `nullptr`/`kQolErrNotReady` 回落原版 getter，
+对 `kQolErrUnsupported` 保持既有 fail-closed 分支。
+
+该访问器与审阅 §9.6 批评的“全局业务函数”（`stack_limit_enabled()`、
+`stack_limit_set_effective()` 及 autosell 配置全局函数）性质不同：访问器不承载业务
+状态、不执行状态读写、不提供 setter，只暴露 ABI 函数表地址。它不取代 capability，
+仅服务宿主侧遗留消费者；C6/C7 收口完成后随这些遗留消费者一并清理。插件侧消费者
+不使用该访问器，统一从 `PluginContext.game->item_count` 获取函数表。
+
 ## 决策 2：S2 归 `stack_limit` 的 999 功能组，不做 boot-fatal（用户裁决）
 
 - **目的**：开关**不改变数据的存读方式**；关闭态不使用额外数据位。
