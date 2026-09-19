@@ -8,16 +8,17 @@
 > - 口径：文件数/行数为 `wc -l`（含空行与注释）；只列**当前实际存在**的模块，设计提及但未落地的在「收口项」标注
 > - 用途：给人快速理解现状；**任何决策请回到权威文档**，本文件不得作为落地依据
 
-## 0. 编号口径
+## 0. 编号与「胶囊」口径
 
-**架构分层只有一套：L0–L5**（L0 contracts / L1 game / L2 infra+hooks+patch / L3 plugins / L4 出口面 / L5 host）。
-「胶囊」（可外置插件）**不是新层**，而是既有各层内的组件与约束：
+**架构分层只有一套：L0–L5**（L0 contracts / L1 game / L2 infra+hooks+patch / L3 plugins / L4 出口面 / L5 host）。设计的七目录为 `contracts/game/infra/hooks/patch/plugins/host`，**没有"胶囊层/胶囊目录"**。
 
-| 胶囊要素 | 所属层 | 具体组件 |
-|---|---|---|
-| Host SDK / Game Host / UI 契约 | **L0** | `contracts/host_sdk.h`、`contracts/game_host.h`、`contracts/ui.h` |
-| 宿主 ABI 实现 | **L5** | `host/host_sdk.cpp`、`host/game_host.cpp`、`host/ui_adapter.cpp` |
-| 插件边界约束 | **L3** | `plugins/<id>/` 只允许 include `contracts/` 与自身目录（17/17 已合规） |
+**「胶囊」（可外置插件）的定位——以下均为设计原文口径**（`ARCHITECTURE.md` v0.3.14 / ADR-0008）：
+
+1. **胶囊 = L3 `plugins/<id>/` 的形态定义**（*不是新层*）：该目录拥有全部私有规则、UI、生命周期实现与测试；源码只允许 include ①公共 `contracts/` ②自身目录。
+   依据：§2.1（`:85`「L3 plugins/<id>/ 可外置胶囊」）、§2.2（`:107`）、§2.3（`:121`）、ADR-0008 决策 1。
+2. **Host SDK / Game Host API 属宿主内核设施，设计明确它们「不属于胶囊模型」**：不参与插件生命周期、不可停用，由 `host/` 实现并经 `PluginContext` 注入；其**类型/函数表**位于 `contracts/`。
+   依据：§3.8（`:360`、`:378`）、ADR-0008 决策 3/4。
+3. 因此正确关系是：胶囊（L3 的约束）**引用** L0 的契约与 L5 的实现，而**不能**把 Host SDK / Game Host API 说成"胶囊的组件"（本文早前一处表述即此处失准，已按设计改正）。
 
 > 施工阶段（工作分解顺序）另有编号 **C1–C7**，仅记录在 `ledger.md` §7，**不是分层编号**。
 
