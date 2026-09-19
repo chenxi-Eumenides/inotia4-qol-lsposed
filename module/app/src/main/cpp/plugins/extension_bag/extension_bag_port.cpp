@@ -1,23 +1,53 @@
 #include "core/native/extension_bag_port.h"
 
+#include "plugins/extension_bag/extension_bag_port.h"
 #include "game_access.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/sell_price.h"
-#include "contracts/stack_codec.h"
 #include "contracts/host_sdk.h"
+#include "contracts/stack_codec.h"
 
 namespace {
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
+
+uint32_t canonical_count_from_field(uint32_t field) {
+    return stack_codec::s2_read_count(field);
+}
+
+uint32_t view_count_from_canonical(uint32_t canonical, bool extended) {
+    return stack_codec::effective_view_count(canonical, extended);
+}
+
+uint32_t write_view_to_field(uint32_t field, uint32_t count, bool extended) {
+    return stack_codec::effective_write_count(field, count, extended);
+}
+
+uint32_t write_canonical_to_field(uint32_t field, uint32_t canonical) {
+    return stack_codec::effective_write_count(field, canonical, true);
+}
+
+uint32_t count_limit(bool extended) {
+    return stack_codec::max_count(extended);
+}
+
+const virtual_bag::CountPolicy kCountPolicy{
+    &canonical_count_from_field,
+    &view_count_from_canonical,
+    &write_view_to_field,
+    &write_canonical_to_field,
+    &count_limit,
+};
 
 }
 
 void qol::features::extension_bag::extension_bag_bind_port_sdk(
     const qol::contracts::QolHostSdk* sdk) {
     g_sdk = sdk;
+    virtual_bag::set_count_policy(sdk == nullptr ? nullptr : &kCountPolicy);
 }
 
 // D2b 过渡访问器（声明见 core/native/extension_bag_port.h）：每次调用 require，不缓存

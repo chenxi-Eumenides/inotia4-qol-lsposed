@@ -29,9 +29,9 @@
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 155 | 31304 |
+| `plugins/` | 156 | 31400 |
 | `host/` | 19 | 4524 |
-| **合计** | **270** | **44476** |
+| **合计** | **271** | **44572** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -41,7 +41,7 @@
 - `plugins/core.ui/`：16 文件 / 2196 行
 - `plugins/craft_ui/`：4 文件 / 997 行
 - `plugins/custom_recipe/`：10 文件 / 2091 行
-- `plugins/extension_bag/`：39 文件 / 13296 行
+- `plugins/extension_bag/`：40 文件 / 13392 行
 - `plugins/inventory_hooks/`：9 文件 / 2007 行
 - `plugins/native_choice/`：4 文件 / 402 行
 - `plugins/push_all/`：6 文件 / 308 行

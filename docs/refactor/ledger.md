@@ -251,6 +251,15 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | 消费者 | ⬜ B2 | 本批按约束不修改 `api/native`、`core/native`、`data/native`、`extension_bag`、`inventory_hooks`；其写 wrapper 缺口见 B2 |
 | 验收 | ⬜ 真机待 B4 | host 断言已补；行为面仍需 VM-B 真机证据，未因 host/build 通过而宣称接受 |
 
+### P1-B3/B4：extension_bag model 与 host 测试去 codec
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| model 边界 | ✅ 已落地 | `virtual_bag_state.h`、`virtual_bag_state_json.inc`、`virtual_bag_transaction_rules.inc` 不再 include 或调用 S2 codec；canonical/view/clamp 由 `CountPolicy` 入参提供 |
+| marker | ✅ 已落地 | native bag marker 私有化到 `plugins/extension_bag/extension_bag_port.h`；未进入 `item_count` facade |
+| host 测试 | ✅ 已落地 | `test_host.cpp`、`test_infra_data.cpp`、`test_inventory_hook_stage4.cpp` 删除公共 codec 直测，保留模型整数边界、三态 facade 与 fail-closed 断言 |
+| 验证 | ⚠️ 行为面未闭合 | host tests、debug build、架构/资源/基线/map check 已通过；真机已完成启动、资源态与进世界 smoke（`VM-P1-S2-01` 部分证据），但 S2 开关往返/写拆堆/持久化卡未完成，故行为面仍不宣称接受 |
+
 ### C5 ABI freeze：四插件迁移前置契约
 
 本批冻结四个插件后续迁移所需的公共面，不修改插件业务体：

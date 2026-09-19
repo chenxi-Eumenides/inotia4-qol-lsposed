@@ -43,7 +43,7 @@
 | `plugins/core.ui` | 16 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
-| `plugins/extension_bag` | 39 |
+| `plugins/extension_bag` | 40 |
 | `plugins/inventory_hooks` | 9 |
 | `plugins/native_choice` | 4 |
 | `plugins/push_all` | 6 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **374** |
+| **合计** | **375** |
 
 ### 1.2 迁移期映射摘要
 
@@ -139,8 +139,8 @@
 | --- | --- | --- |
 | `host` | `infra` | 41 |
 | `host` | `game` | 30 |
-| `plugins/extension_bag` | `contracts` | 21 |
 | `host` | `contracts` | 19 |
+| `plugins/extension_bag` | `contracts` | 19 |
 | `plugins/custom_recipe` | `contracts` | 13 |
 | `plugins/inventory_hooks` | `contracts` | 12 |
 | `plugins/autosell` | `contracts` | 11 |
@@ -252,7 +252,7 @@
 | `core.ui` | `plugins/core.ui` | 16 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
-| `extension_bag` | `plugins/extension_bag` | 39 |
+| `extension_bag` | `plugins/extension_bag` | 40 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 9 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |

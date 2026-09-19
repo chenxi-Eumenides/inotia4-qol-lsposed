@@ -96,41 +96,31 @@ inline bool valid_payload(const Item& item) {
 
 inline uint32_t payload_count(const Item& item) {
     uint32_t v = 0;
-    for (size_t i = 0; i < 4; ++i) {
-        v |= uint32_t(item.payload[kPayloadCountOffset + i]) << (8 * i);
-    }
+    std::memcpy(&v, item.payload.data() + kPayloadCountOffset, sizeof(v));
     return v;
 }
 
-using CategoryStackCountPredicate = stack_codec::CountEncoding (*)(int category);
+template <typename CategoryPredicate>
+inline bool category_is_encoded(CategoryPredicate predicate, int category) {
+    return predicate != nullptr && static_cast<int>(predicate(category)) == 2;
+}
 
-// S2 数量写入唯一入口（模块侧）：
-// - 类别门控 fail-closed：仅 count-encoded（可堆叠）类别可写；宝石（bits18-23 选项位）、
-//   袋容量（bits0-24）、装备 marker（bits25-31）等非可堆叠类别一律拒绝，绝不触碰
-//   bits22-24（R-46）。
-// - 进位/借位内建：count 为当前模式视图数量（启用态 0..999 / 关闭态 0..99，调用方
-//   先按模式 clamp 与视图换算），写入经 effective_write_count（R-47 决策 b）：
-//   enabled=true 全量 s2_write_count 拆段（a=count>>7、b=count&0x7F，b 溢出 127
-//   自动进位到 a、a 借位自动落到 b+128）；enabled=false 只写 b 段、a（bits22-24）
-//   与 bits0-21 原样保留。默认 enabled=true（canonical 全量语义），供身份归一化等
-//   与模式无关的比较路径使用；调用方只做模式视图算术，不得自行拆写单个位段
-//   （R-45/R-49）。
+// 数量写入唯一入口：类别门控 fail-closed；模型只负责委托调用方提供的写回策略。
+template <typename CategoryPredicate>
 inline bool patch_payload_count(Item* item, uint32_t count,
-                                CategoryStackCountPredicate is_count_encoded,
-                                bool enabled = true) {
+                                CategoryPredicate is_count_encoded,
+                                bool enabled = true,
+                                const CountPolicy* policy = nullptr) {
     if (item == nullptr || !valid_payload(*item)) return false;
-    if (is_count_encoded == nullptr ||
-        is_count_encoded(item->category) != stack_codec::CountEncoding::kEncoded) {
+    if (!category_is_encoded(is_count_encoded, item->category)) {
         std::fprintf(stderr,
                      "virtual_bag patch_payload_count ignored category=%d reason=not_count_encoded\n",
                      item->category);
         return false;
     }
-    const uint32_t updated =
-        stack_codec::effective_write_count(payload_count(*item), count, enabled);
-    for (size_t i = 0; i < 4; ++i) {
-        item->payload[kPayloadCountOffset + i] = static_cast<uint8_t>((updated >> (8 * i)) & 0xFF);
-    }
+    const CountPolicy& count_rules = policy == nullptr ? count_policy() : *policy;
+    const uint32_t updated = count_rules.write_view(payload_count(*item), count, enabled);
+    std::memcpy(item->payload.data() + kPayloadCountOffset, &updated, sizeof(updated));
     return true;
 }
 
@@ -149,22 +139,26 @@ inline uint32_t payload_hash(const Item& item) {
     return h;
 }
 
-// 合并数量：入参为当前模式视图数量（启用态 canonical 128a+b / 关闭态 b 视图），
-// 相加后按堆叠上限（stack_limit_enabled ? 999 : 99）clamp；clamp 结果经
-// patch_payload_count 的模式感知写回（启用态全量拆段进位内建、关闭态只写 b
-// 保留 a，R-47 决策 b）。
+// 合并数量：入参为当前模式视图数量，相加后按调用方提供的上限 clamp。
 inline uint32_t merge_count(int existing_count, int added_count, bool extended) {
     const int64_t sum = static_cast<int64_t>(existing_count) + added_count;
     if (sum <= 0) return 0;
-    return stack_codec::effective_clamp(static_cast<uint32_t>(sum), extended);
+    const uint32_t limit = count_policy().limit(extended);
+    return sum > limit ? limit : static_cast<uint32_t>(sum);
+}
+
+inline uint32_t merge_view_counts(uint32_t existing_view, uint32_t added_view,
+                                  uint32_t limit) {
+    const uint64_t sum = static_cast<uint64_t>(existing_view) + added_view;
+    return sum > limit ? limit : static_cast<uint32_t>(sum);
 }
 
 // ---- 堆叠身份判据（VM-39 拾取不并入扩展堆的缺陷根因修复）----
 // SAVE_SaveItem@0x1274f0 序列化布局（payload = u8 长度前缀 + 18B 头 + 4B×N 词缀）：
 //   payload[0]      长度前缀（= size-1，结构字段）
 //   payload[1..8]   u64 UID（item+0x00，APPINFO_AllocateItemUID 产物）
-//   payload[9..10]  u16 I_TYPE 位域（bit2-5 稀有度 + bit6-15 类别）
-//   payload[11..14] u32 数量位域（bits22-31，S2 a/b 段）
+//   payload[9..10]  u16 I_TYPE 元数据
+//   payload[11..14] u32 数量字段（由调用方的 CountPolicy 解释）
 //   payload[15]     u8 I_MAGIC_RATE
 //   payload[16]     u8 I_SOCKET（镶嵌）
 //   payload[17..18] u16 I_ENCHANT
@@ -173,11 +167,11 @@ inline uint32_t merge_count(int existing_count, int added_count, bool extended) 
 // 原版「同类可堆叠」身份判据（反汇编基线）：
 //   INVEN_FindSaveSlot@0x103b48-0x103b9c：先读 ITEMCLASSBASE[category]+6 bit0
 //     （可堆叠位，判据同 ITEM_GetCumulateCount@0x1060e0-0x1060f8），再比较
-//     I_TYPE bit6-15（类别，0x103b48-0x103b74），两堆 ITEM_GetCumulateCount 之和
+//     I_TYPE 类别字段（0x103b48-0x103b74），两堆数量之和
 //     ≤0x63（99）才选中；全程不比较 UID/词缀/镶嵌。
 //   INVEN_SaveItemDirect@0x103c88-0x103cb0：同样只比较类别 + 可堆叠位。
 //   INVEN_MoveItem@0x104a50-0x104a7c：同样只比较类别 + 可堆叠位。
-// 因此 UID 与数量位绝不参与合并判据。模块为保护扩展 sidecar 的 payload 身份，
+// 因此 UID 与数量字段绝不参与合并判据。模块为保护扩展 sidecar 的 payload 身份，
 // 在类别之外把 I_TYPE 其余位、镶嵌、附魔与词缀链一并纳入比较（这些是堆叠身份
 // 字段），仅排除 UID 与数量位两个每实例可变字段；绝不整份 memcmp（缺陷根因：
 // 拾取对象与扩展堆 UID 不同 → 整份 memcmp 永不相等 → 永不合并）。
@@ -189,8 +183,8 @@ constexpr size_t kPayloadCountSize = 4;        // 数量位域字节数
 constexpr size_t kPayloadPostCountOffset = kPayloadCountOffset + kPayloadCountSize;  // 15
 
 // 载荷身份比较（不含类别与可堆叠门控，见 mergeable_items）：
-// 只比较 I_TYPE 位域 [9,11) 与数量位域之后的身份区 [15,size)（magic/socket/
-// enchant/词缀链），排除长度前缀、UID [1,9) 与数量位域 [11,15)。词缀条数属于
+// 只比较 I_TYPE 元数据 [9,11) 与数量字段之后的身份区 [15,size)（magic/socket/
+// enchant/词缀链），排除长度前缀、UID [1,9) 与数量字段 [11,15)。词缀条数属于
 // 身份（条数不同 = 身份不同），长度差异在身份区逐字节比较中体现，不做整份预拒。
 inline bool mergeable_identity_equal(const Item& existing, const Item& source) {
     if (existing.payload_size < kPayloadHeaderSize ||
@@ -211,15 +205,15 @@ inline bool mergeable_identity_equal(const Item& existing, const Item& source) {
                        source.payload.data() + kPayloadPostCountOffset, existing_tail) == 0;
 }
 
+template <typename CategoryPredicate>
 inline bool mergeable_items(const Item& existing, const Item& source,
-                            CategoryStackCountPredicate is_count_encoded) {
+                            CategoryPredicate is_count_encoded) {
     if (existing.category <= 0 || existing.count <= 0 || source.category <= 0 ||
         source.count <= 0 || existing.category != source.category) {
         return false;
     }
-    if (is_count_encoded == nullptr ||
-        is_count_encoded(existing.category) != stack_codec::CountEncoding::kEncoded ||
-        is_count_encoded(source.category) != stack_codec::CountEncoding::kEncoded) {
+    if (!category_is_encoded(is_count_encoded, existing.category) ||
+        !category_is_encoded(is_count_encoded, source.category)) {
         return false;
     }
     if (!valid_payload(existing) || !valid_payload(source)) return false;
@@ -230,8 +224,9 @@ inline bool same_extension_bag_merge_allowed(int src_bag, int dst_bag) {
     return src_bag == dst_bag;
 }
 
+template <typename CategoryPredicate>
 inline bool same_extension_bag_mergeable_items(const Item& existing, const Item& source,
-                                                CategoryStackCountPredicate is_count_encoded) {
+                                                CategoryPredicate is_count_encoded) {
     return mergeable_items(existing, source, is_count_encoded);
 }
 
@@ -240,35 +235,34 @@ inline bool same_extension_bag_mergeable_items(const Item& existing, const Item&
 // 必须先尝试并入扩展袋已有同类堆：原版 SaveItem→FindSaveSlot 对物理袋自带
 // 「同类堆自动合并」语义，adopt 替代的是同一入库动作的失败分支，因此合并
 // 不受 move_merge_enabled（拖动合并开关）门控。判据与移动合并同源：
-// mergeable_items（category + mergeable_identity_equal，UID/数量位不参与）+ 模式
-// 视图总量 ≤ 上限（启用 999 / 关闭 99，R-47）。合并产物 canonical 与移动合并
-// 一致：保留 existing payload、按模式视图相加后经 patch_payload_count 写回、
-// descriptor.count 回填 s2 解码 canonical。
+// mergeable_items（category + mergeable_identity_equal，UID/数量字段不参与）+ 模式
+// 视图总量 ≤ 上限。合并产物保留 existing payload，并由调用方策略回填 canonical。
 // 返回 false = 不合并（判据不符/超上限/门控失败），调用方走新建空槽。
+template <typename CategoryPredicate>
 inline bool adopt_merge_into(const Item& existing, const Item& source,
-                             CategoryStackCountPredicate is_count_encoded,
-                             bool limit_enabled, Item* merged_out) {
+                             CategoryPredicate is_count_encoded,
+                             bool limit_enabled, Item* merged_out,
+                             const CountPolicy* policy = nullptr) {
     if (merged_out == nullptr) return false;
     if (!same_extension_bag_mergeable_items(existing, source, is_count_encoded)) {
         return false;
     }
+    const CountPolicy& count_rules = policy == nullptr ? count_policy() : *policy;
     const uint32_t existing_view =
-        stack_codec::effective_view_count(static_cast<uint32_t>(existing.count),
-                                          limit_enabled);
+        count_rules.view_count(static_cast<uint32_t>(existing.count), limit_enabled);
     const uint32_t source_view =
-        stack_codec::effective_view_count(static_cast<uint32_t>(source.count),
-                                          limit_enabled);
+        count_rules.view_count(static_cast<uint32_t>(source.count), limit_enabled);
     const uint64_t total = static_cast<uint64_t>(existing_view) +
                            static_cast<uint64_t>(source_view);
-    if (total > stack_codec::max_count(limit_enabled)) return false;
+    if (total > count_rules.limit(limit_enabled)) return false;
     Item merged = existing;
     if (!patch_payload_count(&merged,
                              merge_count(static_cast<int>(existing_view),
                                          static_cast<int>(source_view), limit_enabled),
-                             is_count_encoded, limit_enabled)) {
+                             is_count_encoded, limit_enabled, policy)) {
         return false;
     }
-    merged.count = static_cast<int>(stack_codec::s2_read_count(payload_count(merged)));
+    merged.count = static_cast<int>(count_rules.canonical_count(payload_count(merged)));
     *merged_out = merged;
     return true;
 }
@@ -304,12 +298,14 @@ inline bool descriptor_slot_empty(const Item& item) {
     return item.category == 0 && item.count == 0 && item.payload_size == 0;
 }
 
+template <typename CategoryPredicate>
 inline PlacePlan place_plan(
     const std::array<std::array<Item, kSlotCount>, kBagCount>& items,
     const std::array<uint8_t, kBagCount>& types,
     const std::array<uint8_t, kBagCount>& capacities, const Item& source,
-    bool allow_new_slot, bool limit_enabled, CategoryStackCountPredicate is_count_encoded,
-    SlotAssignablePredicate slot_assignable = nullptr) {
+    bool allow_new_slot, bool limit_enabled, CategoryPredicate is_count_encoded,
+    SlotAssignablePredicate slot_assignable = nullptr,
+    const CountPolicy* policy = nullptr) {
     PlacePlan plan{};
     if (source.category <= 0 || source.count <= 0 || !valid_payload(source)) {
         plan.outcome = PlaceOutcome::kRejected;
@@ -323,7 +319,8 @@ inline PlacePlan place_plan(
             const Item& existing = items[bag][slot];
             if (existing.category <= 0 || existing.count <= 0) continue;
             Item merged{};
-            if (!adopt_merge_into(existing, source, is_count_encoded, limit_enabled, &merged)) {
+            if (!adopt_merge_into(existing, source, is_count_encoded, limit_enabled, &merged,
+                                  policy)) {
                 continue;
             }
             plan.outcome = PlaceOutcome::kMerged;

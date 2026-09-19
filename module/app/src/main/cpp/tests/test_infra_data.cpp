@@ -8,7 +8,6 @@
 #include "core/native/frame_task.h"
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
-#include "contracts/stack_codec.h"
 #include "contracts/game_host.h"
 #include "data/native/item_class.h"
 

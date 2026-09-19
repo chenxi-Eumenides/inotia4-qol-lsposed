@@ -311,10 +311,8 @@ static const qol::contracts::QolItemCountApi kStage4ItemCountApi = {
 
 // H-17 读侧分流（R-45/R-46/R-47/R-49）：effective facade 成功时直接返回，
 // 未驻留/未就绪与 unsupported 走原版 backup。
-static void test_get_cumulate_count_s2() {
+static void test_get_cumulate_count_facade() {
     void* nonnull_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x417));
-    using stack_codec::s2_write_count;
-
     // facade 成功：返回 facade 值，backup 保持未调用（数量 0/99/100/127/128/199/999/1023）。
     const uint32_t counts[] = {0u, 99u, 100u, 127u, 128u, 199u, 999u, 1023u};
     for (const uint32_t count : counts) {
@@ -326,11 +324,6 @@ static void test_get_cumulate_count_s2() {
                                         cumulate_backup) == static_cast<int>(count));
         CHECK(g_cumulate_backup_calls == 0);
     }
-    // a 段进位边界：127 = b 满（b=127<<25）、128 = a=1（1<<22）、999 = b=103、a=7。
-    CHECK(s2_write_count(0u, 127u) == (127u << 25));
-    CHECK(s2_write_count(0u, 128u) == (1u << 22));
-    CHECK(s2_write_count(0u, 999u) == ((103u << 25) | (7u << 22)));
-
     // kNotReady：provider 未驻留/999 原子组未就绪时 original-first backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
     g_effective_result_mode = EffectiveResultMode::kNotReady;
@@ -362,8 +355,6 @@ static void test_remove_item_data_plan() {
     void* a = reinterpret_cast<void*>(static_cast<uintptr_t>(0x501));
     void* b = reinterpret_cast<void*>(static_cast<uintptr_t>(0x502));
     void* c = reinterpret_cast<void*>(static_cast<uintptr_t>(0x503));
-    using stack_codec::s2_write_count;
-
     // 场景 1（启用态跨 127 借位，单一部分删堆）：堆 199 + 堆 50，删 60。
     // 原版顺序（0x1040a8）：60 < 199 → 首堆即部分删，remain=199+0-60=139>127，
     // b 写截断（post_view = a 残留 0 + b=11），堆 2 不动。计划应修正 entry 0 → 139。
@@ -442,10 +433,7 @@ static void test_remove_item_data_plan() {
         Stage4RemoveDataPost post[] = {{a, 999u}};
         CHECK(!stage4_remove_item_data_plan(pre, post, 1, 1).correct);
     }
-    // 场景 11（S2 编码交叉验证：139 = a1 + b11、9 = a0 + b9）。
-    CHECK(s2_write_count(0u, 139u) == ((1u << 22) | (11u << 25)));
-    CHECK(s2_write_count(0u, 9u) == (9u << 25));
-    // 场景 12（空/退化入参）→ 不修正。
+    // 场景 11（空/退化入参）→ 不修正。
     CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, 0, 5).correct);
 }
 
@@ -467,36 +455,6 @@ static void test_remove_data_extension_shortfall() {
     CHECK(stage4_remove_data_extension_shortfall(5, 5, -1) == 0);
     // 数据反向（after>before）按物理零扣处理，返回全额，绝不产生负补扣。
     CHECK(stage4_remove_data_extension_shortfall(5, 6, 4) == 4);
-}
-
-// 原版装备页出售/销毁结算数量语义（0x1261c4 直读 b 段 + clamp）：把 canonical
-// 编码成原生 +0x10 字段后，函数必须复现实测表（199→71→546 的价格基数）。
-static void test_native_equip_sell_count() {
-    using stack_codec::s2_write_count;
-    const auto field = [](uint32_t canonical) { return s2_write_count(0u, canonical); };
-    // 实测：100..129→1（b∈{0,1} 或 b=100..127），130→2，199→71，227→99，228→1。
-    CHECK(native_equip_sell_count(field(100u)) == 1u);
-    CHECK(native_equip_sell_count(field(128u)) == 1u);
-    CHECK(native_equip_sell_count(field(129u)) == 1u);
-    CHECK(native_equip_sell_count(field(130u)) == 2u);
-    CHECK(native_equip_sell_count(field(199u)) == 71u);
-    CHECK(native_equip_sell_count(field(227u)) == 99u);
-    CHECK(native_equip_sell_count(field(228u)) == 1u);
-    CHECK(native_equip_sell_count(field(999u)) == 1u);
-    // 裸字段边界：b=0（128 的 a 段单独）与 b=100（228）都必须回退 1。
-    CHECK(native_equip_sell_count(0u) == 1u);
-    CHECK(native_equip_sell_count(1u << 22) == 1u);
-    CHECK(native_equip_sell_count(100u << 25) == 1u);
-    CHECK(native_equip_sell_count(99u << 25) == 99u);
-}
-
-// 装备页详情出售结算点（0x1261c4）原版直读语义：R-51 重定向已证伪回退，启用态由
-// R-55 回调层接管；本函数（native_equip_sell_count）是原版回退参照，canonical 199
-//（a=1,b=71）原版读 71（546 缺陷基线），R-55 回调层经 hooked getter 读 199。
-static void test_equip_sell_settle_semantics() {
-    const uint32_t field = stack_codec::s2_write_count(0u, 199u);
-    CHECK(native_equip_sell_count(field) == 71u);
-    CHECK(stack_codec::effective_read_count(field, true) == 199u);
 }
 
 // VM-38：ITEMSYSTEM_MakeItem 数量回写计划——arg2 是静态表查找/品质参数
@@ -553,29 +511,17 @@ static void test_vanilla_sell_takeover() {
     CHECK(vanilla_sell_money(0, 10u, &price) && price == 0);
 }
 
-// S2 写侧回写门控必须与读侧 getter 门控（stack_limit_enabled）对齐：
-// 堆叠上限开启即需要写侧进位，与扩展背包开关无关；扩展背包开启保持既有行为。
-static void test_s2_writeback_gate() {
-    CHECK(!stack_codec::writeback_needed(false, false));
-    CHECK(stack_codec::writeback_needed(false, true));   // 堆叠开 + 扩展关：修复点
-    CHECK(stack_codec::writeback_needed(true, false));
-    CHECK(stack_codec::writeback_needed(true, true));
-}
-
 int main() {
     test_queries();
     test_original_only_queries();
-    test_get_cumulate_count_s2();
+    test_get_cumulate_count_facade();
     test_remove_item_data_plan();
     test_remove_data_extension_shortfall();
-    test_native_equip_sell_count();
-    test_equip_sell_settle_semantics();
     test_make_item_writeback_count();
     test_vanilla_sell_takeover();
     test_object_operations();
     test_unequip_to_inven();
     test_install_transaction();
-    test_s2_writeback_gate();
     std::printf("stage4_hook_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

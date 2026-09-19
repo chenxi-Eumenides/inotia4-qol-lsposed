@@ -1,5 +1,5 @@
 inline std::string state_json(const State& state, bool include_isolations = false) {
-    // 无版本标识：sidecar 数量位只有 S2 一种布局，读写统一 s2_*，与运行时配置无关。
+    // 无版本标识：sidecar 数量始终保存 canonical，和运行时开关无关。
     std::string json = "{\"mode\":\"";
     json += state.mode == Mode::kModule ? "module" : "original";
     json += "\",\"originalSelected\":" + std::to_string(state.original_selected);
@@ -195,17 +195,16 @@ inline bool parse_pending_transfer(const char* json, PendingTransfer* out) {
 
 // 把 32 位数量字段写回 payload 数量位（仅 count-encoded 类别调用）。
 inline void store_payload_count_field(Item* item, uint32_t field_value) {
-    for (size_t i = 0; i < 4; ++i) {
-        item->payload[kPayloadCountOffset + i] =
-            static_cast<uint8_t>((field_value >> (8 * i)) & 0xFF);
-    }
+    std::memcpy(item->payload.data() + kPayloadCountOffset, &field_value, sizeof(field_value));
 }
 
+template <typename CategoryPredicate>
 inline bool parse_state_json(const char* json, State* state,
-                             CategoryStackCountPredicate is_count_encoded = nullptr) {
+                             CategoryPredicate is_count_encoded,
+                             const CountPolicy* policy = nullptr) {
     if (json == nullptr || state == nullptr) return false;
     // 宽容忽略旧字段：历史 sidecar 可能携带 \"encodingVersion\"，当前无版本标识、
-    // 数量位统一 S2 布局，读到该字段直接忽略，不报错、不迁移。
+    // 数量字段没有版本迁移，读到历史字段直接忽略。
     const char* types = strstr(json, "\"types\":[");
     if (types == nullptr) return false;
     const char* cursor = types + strlen("\"types\":[");
@@ -282,26 +281,23 @@ inline bool parse_state_json(const char* json, State* state,
             }
             Item& item = parsed.items[bag][slot];
             item.category = static_cast<int>(category_value);
-            const stack_codec::CountEncoding count_encoding = item.category <= 0
-                ? stack_codec::CountEncoding::kNotEncoded
-                : (is_count_encoded == nullptr
-                       ? stack_codec::CountEncoding::kUnknown
-                       : is_count_encoded(item.category));
-            if (is_count_encoded != nullptr &&
-                count_encoding == stack_codec::CountEncoding::kUnknown) {
+            const int count_encoding = item.category <= 0
+                ? 1
+                : (is_count_encoded == nullptr ? 0 : static_cast<int>(is_count_encoded(item.category)));
+            if (is_count_encoded != nullptr && count_encoding == 0) {
                 std::fprintf(stderr,
                              "virtual_bag state_json rejected category=%d reason=category_unavailable\n",
                              item.category);
                 return false;
             }
             // canonical 数量是 sidecar 的持久化语义，与当前运行时配置无关。
-            // stack_limit_enabled() 只允许出现在新建/合并/消费/派生操作中；读档
-            // 不能把启用态保存的 199 截成关闭态的 99。
+            // 读档不能把启用态保存的 canonical 数量截成关闭态视图。
+            const CountPolicy& count_rules = policy == nullptr ? count_policy() : *policy;
             const uint32_t canonical_count =
-                count_value > static_cast<long>(stack_codec::kExtendedMax)
-                    ? stack_codec::kExtendedMax
+                count_value > static_cast<long>(count_rules.limit(true))
+                    ? count_rules.limit(true)
                     : static_cast<uint32_t>(count_value);
-            if (count_value > static_cast<long>(stack_codec::kExtendedMax)) {
+            if (count_value > static_cast<long>(count_rules.limit(true))) {
                 std::fprintf(stderr,
                              "virtual_bag state_json count canonicalized category=%d "
                              "from=%ld to=%u reason=absolute_max\n",
@@ -326,12 +322,12 @@ inline bool parse_state_json(const char* json, State* state,
                 item.payload_size = static_cast<uint16_t>(decoded);
                 // payload 只需与 descriptor 的 canonical 数量同步。不能按当前配置
                 // 判断“是否超限”，否则跨配置读档会改写已有数量。
-                // 可堆叠类别：payload 数量位按 S2 解码，与 canonical 不一致时以
-                // S2 重编码对齐；非可堆叠类别逐字节保留（R-46）。
-                if (count_encoding == stack_codec::CountEncoding::kEncoded) {
+                // 可堆叠类别：payload 数量字段与 canonical 不一致时对齐；非可堆叠
+                // 类别逐字节保留（R-46）。
+                if (count_encoding == 2) {
                     uint32_t count_field = payload_count(item);
-                    if (stack_codec::s2_read_count(count_field) != canonical_count) {
-                        count_field = stack_codec::s2_write_count(count_field, canonical_count);
+                    if (count_rules.canonical_count(count_field) != canonical_count) {
+                        count_field = count_rules.write_canonical(count_field, canonical_count);
                     }
                     store_payload_count_field(&item, count_field);
                 }
@@ -351,12 +347,18 @@ inline bool parse_state_json(const char* json, State* state,
     return true;
 }
 
+inline bool parse_state_json(const char* json, State* state) {
+    return parse_state_json(json, state, static_cast<bool (*)(int)>(nullptr));
+}
+
 // 同 parse_state_json，但为隔离记录注入观察时间（P4.5）。
+template <typename CategoryPredicate>
 inline bool parse_state_json_at(const char* json, State* state, uint64_t observed_at_ms,
-                                CategoryStackCountPredicate is_count_encoded = nullptr) {
+                                CategoryPredicate is_count_encoded,
+                                const CountPolicy* policy = nullptr) {
     if (state == nullptr) return false;
     State parsed;
-    if (!parse_state_json(json, &parsed, is_count_encoded)) return false;
+    if (!parse_state_json(json, &parsed, is_count_encoded, policy)) return false;
     for (size_t index = 0; index < kMaxIsolationRecords; ++index) {
         if (parsed.isolations[index].valid && parsed.isolations[index].observed_at_ms == 0) {
             parsed.isolations[index].observed_at_ms = observed_at_ms;
@@ -364,4 +366,9 @@ inline bool parse_state_json_at(const char* json, State* state, uint64_t observe
     }
     *state = parsed;
     return true;
+}
+
+inline bool parse_state_json_at(const char* json, State* state, uint64_t observed_at_ms) {
+    return parse_state_json_at(json, state, observed_at_ms,
+                               static_cast<bool (*)(int)>(nullptr));
 }

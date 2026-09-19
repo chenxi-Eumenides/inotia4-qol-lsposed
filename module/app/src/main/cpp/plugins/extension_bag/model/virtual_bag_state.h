@@ -5,13 +5,60 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <type_traits>
 
-#include "contracts/stack_codec.h"
-#include "contracts/stack_limit.h"
-
 namespace virtual_bag {
+
+// 数量模型只消费调用方准备好的 canonical/view 转换结果。实际的布局
+// 解释器由 extension_bag 边界注入，模型不持有位段布局知识。
+struct CountPolicy {
+    uint32_t (*canonical_count)(uint32_t field);
+    uint32_t (*view_count)(uint32_t canonical, bool extended);
+    uint32_t (*write_view)(uint32_t field, uint32_t count, bool extended);
+    uint32_t (*write_canonical)(uint32_t field, uint32_t canonical);
+    uint32_t (*limit)(bool extended);
+};
+
+inline uint32_t default_canonical_count(uint32_t field) { return field; }
+
+inline uint32_t default_view_count(uint32_t canonical, bool extended) {
+    (void)extended;
+    return canonical;
+}
+
+inline uint32_t default_write_view(uint32_t field, uint32_t count, bool extended) {
+    (void)field;
+    (void)extended;
+    return count;
+}
+
+inline uint32_t default_write_canonical(uint32_t field, uint32_t canonical) {
+    (void)field;
+    return canonical;
+}
+
+inline uint32_t default_limit(bool extended) {
+    (void)extended;
+    return std::numeric_limits<uint32_t>::max();
+}
+
+inline const CountPolicy kDefaultCountPolicy{
+    &default_canonical_count,
+    &default_view_count,
+    &default_write_view,
+    &default_write_canonical,
+    &default_limit,
+};
+
+inline const CountPolicy* g_count_policy = &kDefaultCountPolicy;
+
+inline void set_count_policy(const CountPolicy* policy) {
+    g_count_policy = policy == nullptr ? &kDefaultCountPolicy : policy;
+}
+
+inline const CountPolicy& count_policy() { return *g_count_policy; }
 
 constexpr int kBagCount = 5;
 constexpr int kMaxCapacity = 16;
