@@ -136,7 +136,7 @@
 | `world_teleport` | 地图传送（零资源 + 声明式双指纹入口 patch；消费 `ui_choice`） |
 | `extension_bag` | 扩展背包整域（29 条声明式资源；状态机/事务/投影/出售/合成/装备/持久化；发布 `extension_bag`） |
 
-**胶囊合规**：17/17 插件对 `game/ infra/ hooks/ patch/ host/` 及跨插件 include 计数为 **0**；真机 smoke 通过（VM-CAPSULE）。
+**插件边界合规**：17/17 插件对 `game/ infra/ hooks/ patch/ host/` 及跨插件 include 计数为 **0**；真机 smoke 通过（VM-BOUNDARY）。
 
 ## 1.7 `host/`（17）
 
@@ -160,25 +160,25 @@
 
 ---
 
-# 二、胶囊迁移施工阶段（C1–C7，**非分层编号**）
+# 二、插件边界迁移施工阶段（C1–C7，**非分层编号**）
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | C1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 完成 |
 | C2 | 宿主 adapter：SDK / Game Host 函数体与注入 | ✅ 完成 |
 | C3 | `domains/` 取消：拆 `attribute_quality`(provider) + `attribute_range_display`(消费者) | ✅ 完成 |
-| C4 | 小中插件胶囊化（9 个）+ U11-1 契约/adapter + U11-2 `core.ui` 组件实现 | ✅ 完成 |
-| C5 | `inventory_hooks` + `extension_bag` 胶囊化（含 `save_backup`/`autosell`；`stack_codec` 迁 contracts、store 容器级 ABI、SDK `intercept_blocks`） | ✅ 完成 |
+| C4 | 小中插件边界化（9 个）+ U11-1 契约/adapter + U11-2 `core.ui` 组件实现 | ✅ 完成 |
+| C5 | `inventory_hooks` + `extension_bag` 边界化（含 `save_backup`/`autosell`；`stack_codec` 迁 contracts、store 容器级 ABI、SDK `intercept_blocks`） | ✅ 完成 |
 | C6 | `core.api` 路由内核与 API provider 拆分（149 路由 owner 表、U10） | ⬜ 待办 |
-| C7 | native config 早期自读、脚本切七目录、**胶囊硬失败**（`check_layers` 收紧、删过渡映射） | ⬜ 待办 |
+| C7 | native config 早期自读、脚本切七目录、**边界违规硬失败**（`check_layers` 收紧、删过渡映射） | ⬜ 待办 |
 
-**验证状态**：C1–C5 已通过真机 smoke（启动状态 + 门禁两态 + 生命周期往返，见 VM-CAPSULE）；各插件的**功能细则**仍按各自 VM 卡待补。C6/C7 未开工。
+**验证状态**：C1–C5 已通过真机 smoke（启动状态 + 门禁两态 + 生命周期往返，见 VM-BOUNDARY）；各插件的**功能细则**仍按各自 VM 卡待补。C6/C7 未开工。
 
 ---
 
 # 三、当前收口项与已知缺口
 
-1. **C6/C7 未完成**：`core.api` 路由内核与 API provider 未落地（149 路由仍在 Kotlin controllers）；native config 早期自读未实现；架构脚本仍是八目录过渡映射，胶囊约束未硬失败。
+1. **C6/C7 未完成**：`core.api` 路由内核与 API provider 未落地（149 路由仍在 Kotlin controllers）；native config 早期自读未实现；架构脚本仍是八目录过渡映射，边界约束未硬失败。
 2. **遗留目录**：`core/`、`api/`、`data/` 共 76 文件未吸收。
 3. **引擎缺口**：
    - required consumer 在 provider 之后注册会**永久 `blocked`**（无重试）——已在真机复现一次（autosell），当前靠装配顺序规避；建议 C7 的 `check_plugins` 加静态校验或引擎补重试。

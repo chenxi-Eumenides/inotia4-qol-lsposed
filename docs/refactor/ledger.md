@@ -149,14 +149,14 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 - **不包含**（推迟或明确不做）：业务语义重写、算法与性能优化（性能阈值走 §10 / U1 回填）、顺手重构无关代码（AGENTS：只移动职责）。
 - 迁移中发现的缺陷单独提交，不与迁移混在一起（例：P2 的 v27 变体表缺口）。
 
-## 7. 胶囊迁移施工阶段（P1–P4 范围；阶段编号 C1–C7）
+## 7. 插件边界迁移施工阶段（P1–P4 范围；阶段编号 C1–C7）
 
 > **编号口径（勿混用）**：架构分层只有 **L0–L5**（`ARCHITECTURE.md` §2.2–§2.4、`docs/refactor/layers.md`）。
-> 本节使用 **C1–C7** 表示胶囊迁移的**施工阶段**（C = capsule），是工作分解顺序，**不是架构层级**。
+> 本节使用 **C1–C7** 表示插件边界迁移的**施工阶段**（C = 施工阶段序号），是工作分解顺序，**不是架构层级**。
 > 「胶囊」是设计对 L3 `plugins/<id>/` 的**形态约束**（可外置、目录自包含、只依赖 `contracts/` 与自身目录；ADR-0008 决策 1）；
 > Host SDK / Game Host API 属宿主内核，§3.8 `:378` 明示「不属于胶囊模型」，不是胶囊的组成部件。
 
-该计划依据 ADR-0008 执行。用户裁决：胶囊迁移属于 **P1–P4 范围**；设计在 P4 后修改，
+该计划依据 ADR-0008 执行。用户裁决：插件边界迁移属于 **P1–P4 范围**；设计在 P4 后修改，
 不受 P5 签署门禁约束。C1 只冻结 Host SDK / Game Host API 的 ABI 骨架与 `PluginContext`
 接缝，具体表成员可在后续 lane 演进；P6 才冻结对外兼容边界。
 
@@ -164,15 +164,15 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 |---|---|---|
 | C1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
 | C2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
-| C3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ✅ 实现与 host-only 验证完成；真机 smoke 已过（VM-CAPSULE） |
-| C4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ✅ 完成（9 插件迁移 + U11-1 契约/adapter + U11-2 `core.ui` 实现 `QolUiComponents` 并收口；`core.ui` 私有 include = 0） |
-| C5 | `inventory_hooks` + `extension_bag` 胶囊化 | ✅ 完成（含 `save_backup`/`autosell`；`stack_codec` 迁 `contracts/`、`QolStoreApi` 容器级 ABI、SDK `hooks.intercept_blocks`、Host SDK PopupState ABI） |
+| C3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ✅ 实现与 host-only 验证完成；真机 smoke 已过（VM-BOUNDARY） |
+| C4 | 小中型插件边界化与 Host SDK/Game Host API 迁移 | ✅ 完成（9 插件迁移 + U11-1 契约/adapter + U11-2 `core.ui` 实现 `QolUiComponents` 并收口；`core.ui` 私有 include = 0） |
+| C5 | `inventory_hooks` + `extension_bag` 边界化 | ✅ 完成（含 `save_backup`/`autosell`；`stack_codec` 迁 `contracts/`、`QolStoreApi` 容器级 ABI、SDK `hooks.intercept_blocks`、Host SDK PopupState ABI） |
 | C6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
-| C7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
+| C7 | native config 自读、脚本切七目录与边界违规硬失败 | ⬜ 待办 |
 
-**胶囊合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的 VM-CAPSULE 卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-CAPSULE：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。C1–C5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
+**插件边界合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的 VM-BOUNDARY 卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-BOUNDARY：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。C1–C5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
 
-**胶囊合规现状**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/` 及跨插件 include 计数为 **0**（C1–C5 完成后的既成事实；复核命令见 `docs/refactor/verification.md` 的 VM-CAPSULE 卡）。因此**此前登记的「plugins → game/infra/hooks」迁移债已清偿**（`check_layers` 当前 0 新增、基线只收缩）。剩余债务为引擎级（见 `verification.md` VM-FIX-01 未闭合项）与 C6/C7 范围。
+**插件边界合规现状**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/` 及跨插件 include 计数为 **0**（C1–C5 完成后的既成事实；复核命令见 `docs/refactor/verification.md` 的 VM-BOUNDARY 卡）。因此**此前登记的「plugins → game/infra/hooks」迁移债已清偿**（`check_layers` 当前 0 新增、基线只收缩）。剩余债务为引擎级（见 `verification.md` VM-FIX-01 未闭合项）与 C6/C7 范围。
 
 ### C4-0 Host SDK / Game Host ABI 冻结
 
@@ -203,7 +203,7 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 - `custom_recipe` 的配方表直读；
 - `game_symbols.h`、`game/access/patches`、`ptr_slots`、hook/patch 安装机制等内核私有面。
 
-C4 插件源码未在 C4-0 修改；后续胶囊迁移必须只依赖本节追加契约或另行登记的 U11/C5
+C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本节追加契约或另行登记的 U11/C5
 契约缺口。
 
 ### C5 ABI freeze：四插件迁移前置契约
