@@ -3,11 +3,11 @@
 #include "contracts/panels.h"
 #include "contracts/ui.h"
 #include "core/native/game_ops_common.h"
-#include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_ui.h"
 #include "plugins/save_backup/feature.h"
+#include "plugins/save_backup/log.h"
 
 #include <atomic>
 #include <chrono>
@@ -21,7 +21,7 @@
 #include <thread>
 #include <vector>
 
-#define SB_UI_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
+#define SB_UI_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
 
 #define CB_TEXT_SIZE 0x40
 

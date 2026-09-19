@@ -18,13 +18,12 @@
 #include <cstring>
 
 #include "contracts/attribute_quality.h"
+#include "contracts/events.h"
 #include "contracts/plugin.h"
 #include "plugins/custom_recipe/catalog.h"
 #include "plugins/custom_recipe/rules.h"
 #include "plugins/custom_recipe/table.h"
 
-using CustomSaveEnterFn = void (*)(void*);
-extern bool save_enter_register(CustomSaveEnterFn fn, void* ctx);
 extern int (*fn_math_get_random)(int, int);
 
 namespace qol::features::custom_recipe {
@@ -40,6 +39,7 @@ constexpr uint32_t kJewelTypeMask = 63;
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+uint64_t g_save_enter_subscription = 0;
 
 }  // namespace
 
@@ -280,6 +280,10 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
     log_message(1, "dynamic special recipes rebuilt count=%zu equip=%zu materialPool=%zu", n,
                 ::custom_recipe::kSpecialEquipCategoryCount,
                 ::custom_recipe::kMaterialPoolSize);
+}
+
+void refresh_dynamic_recipes_event(void* /*ctx*/, const void* /*payload*/) {
+    refresh_dynamic_recipes(nullptr);
 }
 
 // ===========================================================================
@@ -614,8 +618,21 @@ bool set_enabled(bool enabled_value) {
 }
 
 void register_dynamic_recipes() {
-    // save_enter_register 对同一 fn+ctx 幂等，重复调用不会叠加。
-    save_enter_register(&refresh_dynamic_recipes, nullptr);
+    if (g_save_enter_subscription != 0 || g_sdk == nullptr ||
+        g_sdk->events.subscribe == nullptr) {
+        return;
+    }
+    (void)g_sdk->events.subscribe(contracts::kEventSaveEnter,
+                                   &refresh_dynamic_recipes_event, nullptr,
+                                   &g_save_enter_subscription);
+}
+
+void unregister_dynamic_recipes() {
+    if (g_save_enter_subscription != 0 && g_sdk != nullptr &&
+        g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_save_enter_subscription);
+    }
+    g_save_enter_subscription = 0;
 }
 
 const qol::contracts::CraftResultApi& craft_result_api() { return kCraftResultApi; }

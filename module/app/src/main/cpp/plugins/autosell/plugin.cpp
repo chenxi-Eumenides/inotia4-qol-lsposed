@@ -7,8 +7,8 @@
 #include "contracts/attribute_quality.h"
 #include "contracts/ownership.h"
 #include "contracts/panels.h"
-#include "core/native/qol_log.h"
 #include "plugins/autosell/config.h"
+#include "plugins/autosell/log.h"
 #include "plugins/autosell/scan.h"
 #include "plugins/autosell/ui/panel.h"
 

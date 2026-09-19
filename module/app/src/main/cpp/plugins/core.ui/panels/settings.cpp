@@ -2,11 +2,11 @@
 
 #include "contracts/panels.h"
 #include "core/native/game_ops_common.h"
-#include "core/native/qol_log.h"
 #include "game_access.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_ui.h"
+#include "plugins/core.ui/log.h"
 #include "plugins/core.ui/panels/rules.h"
 #include "plugins/core.ui/panels/stack.h"
 #include "plugins/core.ui/ui_components.h"
@@ -17,7 +17,7 @@
 #include <cstring>
 #include <mutex>
 
-#define SETTINGS_LOG(...) QOL_LOG_INFO(QolDomain::kUi, __VA_ARGS__)
+#define SETTINGS_LOG(...) CORE_UI_LOG_INFO(__VA_ARGS__)
 
 #define CB_TEXT_SIZE 0x20
 

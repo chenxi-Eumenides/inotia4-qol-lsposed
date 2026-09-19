@@ -91,7 +91,7 @@ void settings_panel_process() {
                            static_cast<int32_t>(root_rect.y + ROOT_H / 2), 2, 1);
     if (!background_drawn && !g_background_unavailable_logged) {
         // 逐帧回调内的呈现诊断：降为 DEBUG，并以 once 标志兜底节流（进程内仅尝试一次）。
-        QOL_LOG_DEBUG(QolDomain::kUi, "settings background image unavailable; using restored LCD");
+        CORE_UI_LOG_DEBUG("settings background image unavailable; using restored LCD");
         g_background_unavailable_logged = true;
     }
     UiRect screen_rect = {0, 0, ROOT_W + root_rect.x * 2, ROOT_H};

@@ -6,8 +6,8 @@
 
 #include "plugins/autosell/store.h"
 
-#include "core/native/qol_log.h"
 #include "plugins/autosell/config.h"
+#include "plugins/autosell/log.h"
 #include "plugins/autosell/plugin.h"
 
 #include <mutex>
@@ -100,8 +100,7 @@ void autosell_store_ensure_loaded(int slot) {
         persisted = g_last_persist_ok;
     }
     autosell_set_store_status(slot, loaded, persisted);
-    QOL_LOG_INFO(QolDomain::kAutosell, "sidecar config load slot=%d parsed=%d",
-                 slot, parsed ? 1 : 0);
+    AUTOSELL_LOG_INFO("sidecar config load slot=%d parsed=%d", slot, parsed ? 1 : 0);
 }
 
 bool autosell_store_persist(int slot, const autosell::Config& config) {
@@ -122,7 +121,6 @@ bool autosell_store_persist(int slot, const autosell::Config& config) {
         loaded = g_loaded_slot;
     }
     autosell_set_store_status(slot, loaded, ok);
-    QOL_LOG_INFO(QolDomain::kAutosell, "sidecar config persist slot=%d ok=%d",
-                 slot, ok ? 1 : 0);
+    AUTOSELL_LOG_INFO("sidecar config persist slot=%d ok=%d", slot, ok ? 1 : 0);
     return ok;
 }

@@ -30,14 +30,14 @@
 
 #include "core/native/game_feature.h"
 #include "core/native/game_ops_common.h"
-#include "core/native/qol_log.h"
 #include "plugins/save_backup/bundle.h"
+#include "plugins/save_backup/log.h"
 #include "plugins/save_backup/rollback.h"
 
 namespace {
 
-#define SB_LOG(...) QOL_LOG_INFO(QolDomain::kSaveBackup, __VA_ARGS__)
-#define SB_LOG_WARN(...) QOL_LOG_WARN(QolDomain::kSaveBackup, __VA_ARGS__)
+#define SB_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
+#define SB_LOG_WARN(...) SAVE_BACKUP_LOG_WARN(__VA_ARGS__)
 
 constexpr const char* kBackupDirName = "save_backup";
 constexpr const char* kRollbackDirName = ".rollback";

@@ -251,6 +251,15 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本节追加契约或另行登记的 U11/C5
 契约缺口。
 
+### P2-A：日志与存档事件迁移（ADR-0010）
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| Host SDK log | ⚠️ 部分落地 | `autosell`、`save_backup`、`core.ui` 的日志使用者改经插件私有薄封装调用 `sdk->log.write`；`inventory_hooks` 与 `extension_bag` 仍受本任务禁止改动范围/缺少 SDK accessor 约束，未宣称清零 |
+| Save events | ✅ host-only | `contracts/events.h` 新增 `kEventSaveEnter`/`kEventSaveExit` 与 `int32_t slot` POD；legacy save_enter/save_exit 发布点发布事件；autosell 与 custom_recipe 改经 SDK events 订阅；旧注册 API 保留 |
+| 迁移证据 | ⬜ 行为面待补 | `infra_events_tests` 覆盖事件类型隔离与 slot 载荷；真机不执行，受影响 VM 卡不能标 PASS |
+| 设计冻结 | ✅ 完成 | `docs/refactor/adr/0010-game-host-face-split.md`：extra 拆分、五项拆除、缺面、lane 与风险 |
+
 ### P1-B1：`stack_limit` S2 所有者迁移
 
 | 项 | 状态 | 当前事实 / 证据 |

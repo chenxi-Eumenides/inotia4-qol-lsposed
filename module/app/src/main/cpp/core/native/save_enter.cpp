@@ -9,9 +9,11 @@
 #include "core/native/call_patch.h"
 #include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
+#include "contracts/events.h"
 #include "data/native/game_symbols.h"
 #include "game_access.h"
 #include "game_state.h"
+#include "infra/events.h"
 
 #include <atomic>
 #include <mutex>
@@ -61,6 +63,8 @@ bool save_enter_tick(int64_t /*frame*/, void* /*ctx*/) {
     for (const auto& entry : snapshot) {
         entry.first(entry.second);
     }
+    const qol::contracts::SaveEnterEvent event{current_save_slot()};
+    (void)qol::infra::publish(qol::contracts::kEventSaveEnter, &event);
     // 由 g_pending.exchange 保证每次 pending 只触发一次（非逐帧），保持 INFO。
     QOL_LOG_INFO(QolDomain::kSave, "save enter fired callbacks=%zu", snapshot.size());
     return true;

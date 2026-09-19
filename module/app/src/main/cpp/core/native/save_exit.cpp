@@ -8,13 +8,17 @@
 
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
+#include "contracts/events.h"
 #include "data/native/game_symbols.h"
 #include "game_access.h"
+#include "infra/events.h"
 
 #include <atomic>
 #include <mutex>
 #include <utility>
 #include <vector>
+
+extern int current_save_slot();
 
 namespace {
 
@@ -37,6 +41,8 @@ void save_exit_fire() {
     for (const auto& entry : snapshot) {
         entry.first(entry.second);
     }
+    const qol::contracts::SaveExitEvent event{current_save_slot()};
+    (void)qol::infra::publish(qol::contracts::kEventSaveExit, &event);
     QOL_LOG_INFO(QolDomain::kSave, "save exit fired callbacks=%zu", snapshot.size());
 }
 

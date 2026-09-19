@@ -100,7 +100,7 @@ void page_btn_draw(void* ctrl) {
         return;
     }
     if (!g_page_arrow_unavailable_logged) {
-        QOL_LOG_DEBUG(QolDomain::kUi, "settings page arrow image unavailable: unit=0x%x", OPTION_IMAGE_UNIT);
+        CORE_UI_LOG_DEBUG("settings page arrow image unavailable: unit=0x%x", OPTION_IMAGE_UNIT);
         g_page_arrow_unavailable_logged = true;
     }
 }

@@ -36,5 +36,6 @@ bool set_enabled(bool enabled);
 
 // 注册「进档重建动态特殊装备配方」回调（幂等）。
 void register_dynamic_recipes();
+void unregister_dynamic_recipes();
 
 }  // namespace qol::features::custom_recipe

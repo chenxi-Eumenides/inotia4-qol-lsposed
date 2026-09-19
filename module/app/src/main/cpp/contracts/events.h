@@ -9,11 +9,21 @@ namespace qol::contracts {
 
 enum : uint32_t {
     kEventConfigChanged = 1,
+    kEventSaveEnter = 2,
+    kEventSaveExit = 3,
 };
 
 struct ConfigChangedEvent {
     const char* key;   // 静态字符串
     int32_t int_value; // 变更后的值
+};
+
+struct SaveEnterEvent {
+    int32_t slot;
+};
+
+struct SaveExitEvent {
+    int32_t slot;
 };
 
 }  // namespace qol::contracts

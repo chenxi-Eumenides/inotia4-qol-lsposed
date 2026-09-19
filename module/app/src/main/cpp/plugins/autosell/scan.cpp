@@ -9,11 +9,10 @@
 #include "plugins/autosell/scan.h"
 
 #include "contracts/extension_bag.h"
+#include "contracts/events.h"
 #include "core/native/inventory_trade.h"
-#include "core/native/qol_log.h"
-#include "core/native/save_enter.h"
-#include "core/native/save_exit.h"
 #include "plugins/autosell/config.h"
+#include "plugins/autosell/log.h"
 #include "plugins/autosell/plugin.h"
 #include "plugins/autosell/store.h"
 #include "plugins/autosell/view.h"
@@ -34,6 +33,8 @@ constexpr int kSlotCount = 16;
 std::mutex g_scan_mtx;
 std::mutex g_task_mtx;
 uint64_t g_task = 0;  // 周期扫描任务句柄（0=未注册）；仅持 g_task_mtx 访问
+uint64_t g_save_enter_subscription = 0;
+uint64_t g_save_exit_subscription = 0;
 std::atomic<bool> g_global_enabled{false};  // 全局开关；JVM 线程写、主线程读
 std::atomic<bool> g_save_active{false};     // 已进入存档（save-enter 置位）；主线程写
 
@@ -99,7 +100,7 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
         return;
     }
     ++stats->failed;
-    QOL_LOG_WARN(QolDomain::kAutosell,
+    AUTOSELL_LOG_WARN(
                  "sell failed bag=%d slot=%d category=%d status=%d",
                         ref.bag, ref.slot, ref.category, static_cast<int>(result.status));
 }
@@ -146,7 +147,7 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
 
     autosell_note_scan(frame, stats.sold, stats.failed);
     if (stats.sold > 0 || stats.failed > 0) {
-        QOL_LOG_INFO(QolDomain::kAutosell,
+        AUTOSELL_LOG_INFO(
                      "scan frame=%lld sold=%d failed=%d",
                             static_cast<long long>(frame), stats.sold, stats.failed);
     }
@@ -175,7 +176,7 @@ void remove_task_if_any() {
         (void)sdk->scheduler.remove(g_task);
     }
     g_task = 0;
-    QOL_LOG_INFO(QolDomain::kAutosell, "task removed");
+    AUTOSELL_LOG_INFO("task removed");
 }
 
 // 按「全局开关已武装 && 已进入存档 && 存档配置总开关开启」同步 60 帧周期任务；幂等。
@@ -197,24 +198,25 @@ void sync_task() {
         0, &autosell_tick, nullptr, kAutoSellScanIntervalFrames, 0, &task);
     if (result.ok != kQolOk) return;
     g_task = task;
-    QOL_LOG_INFO(QolDomain::kAutosell, "task registered id=%llu",
+    AUTOSELL_LOG_INFO("task registered id=%llu",
                         static_cast<unsigned long long>(g_task));
 }
 
 // save_enter 回调（游戏主线程）：按当前存档槽加载 sidecar 配置应用到运行时，再同步任务。
-void autosell_on_save_enter(void* /*ctx*/) {
-    const int slot = current_save_slot();
+void autosell_on_save_enter(void* /*ctx*/, const void* payload) {
+    const auto* event = static_cast<const qol::contracts::SaveEnterEvent*>(payload);
+    const int slot = event == nullptr ? current_save_slot() : event->slot;
     autosell_store_ensure_loaded(slot);
     g_save_active.store(true, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kAutosell, "save enter slot=%d; sync task", slot);
+    AUTOSELL_LOG_INFO("save enter slot=%d; sync task", slot);
     sync_task();
 }
 
 // save_exit 回调（游戏主线程）：退出存档（world -> 主菜单）时置「未进档」并无条件删除任务
 // （兜底：不依赖存档配置的开启状态）。
-void autosell_on_save_exit(void* /*ctx*/) {
+void autosell_on_save_exit(void* /*ctx*/, const void* /*payload*/) {
     g_save_active.store(false, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kAutosell, "save exit; remove task");
+    AUTOSELL_LOG_INFO("save exit; remove task");
     remove_task_if_any();
 }
 
@@ -226,7 +228,7 @@ void autosell_apply_config(const autosell::Config& config) {
     const bool old_enabled = autosell_get_runtime_config().enabled;
     autosell_set_runtime_config(config);
     if (old_enabled == config.enabled) return;
-    QOL_LOG_INFO(QolDomain::kAutosell, "save master switch %d -> %d",
+    AUTOSELL_LOG_INFO("save master switch %d -> %d",
                         old_enabled ? 1 : 0, config.enabled ? 1 : 0);
     if (config.enabled) {
         sync_task();                 // 开：按条件注册
@@ -237,7 +239,7 @@ void autosell_apply_config(const autosell::Config& config) {
 
 void autosell_set_global_enabled(bool enabled) {
     g_global_enabled.store(enabled, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kAutosell, "global enabled=%d save_active=%d",
+    AUTOSELL_LOG_INFO("global enabled=%d save_active=%d",
                         enabled ? 1 : 0,
                         g_save_active.load(std::memory_order_acquire) ? 1 : 0);
     if (enabled) {
@@ -248,17 +250,33 @@ void autosell_set_global_enabled(bool enabled) {
 }
 
 void autosell_register_save_enter() {
-    // 幂等：同一 fn+ctx 重复注册不会叠加。
-    save_enter_register(&autosell_on_save_enter, nullptr);
+    if (g_save_enter_subscription != 0) return;
+    const auto* sdk = qol::features::autosell::host_sdk();
+    if (sdk == nullptr || sdk->events.subscribe == nullptr) return;
+    (void)sdk->events.subscribe(qol::contracts::kEventSaveEnter,
+                                &autosell_on_save_enter, nullptr,
+                                &g_save_enter_subscription);
 }
 
 void autosell_register_save_exit() {
-    // 幂等：world -> 主菜单时若已有任务即删除。
-    save_exit_register(&autosell_on_save_exit, nullptr);
+    if (g_save_exit_subscription != 0) return;
+    const auto* sdk = qol::features::autosell::host_sdk();
+    if (sdk == nullptr || sdk->events.subscribe == nullptr) return;
+    (void)sdk->events.subscribe(qol::contracts::kEventSaveExit,
+                                &autosell_on_save_exit, nullptr,
+                                &g_save_exit_subscription);
 }
 
 void autosell_unregister_save_callbacks() {
-    // 与注册成对（插件 deactivate）；legacy 设施迁移（B4）后随设施调整。
-    save_enter_unregister(&autosell_on_save_enter, nullptr);
-    save_exit_unregister(&autosell_on_save_exit, nullptr);
+    const auto* sdk = qol::features::autosell::host_sdk();
+    if (sdk != nullptr && sdk->events.unsubscribe != nullptr) {
+        if (g_save_enter_subscription != 0) {
+            (void)sdk->events.unsubscribe(g_save_enter_subscription);
+        }
+        if (g_save_exit_subscription != 0) {
+            (void)sdk->events.unsubscribe(g_save_exit_subscription);
+        }
+    }
+    g_save_enter_subscription = 0;
+    g_save_exit_subscription = 0;
 }

@@ -14,10 +14,10 @@
 
 #include "plugins/autosell/ui/panel.h"
 
-#include "core/native/qol_log.h"
 #include "contracts/autosell.h"
 #include "contracts/panels.h"
 #include "contracts/ui.h"
+#include "plugins/autosell/log.h"
 #include "plugins/autosell/plugin.h"
 #include "game_access.h"
 #include "game_state.h"
@@ -28,7 +28,7 @@
 #include <cstring>
 #include <mutex>
 
-#define AUTOSELLUI_LOG(...) QOL_LOG_INFO(QolDomain::kAutosell, __VA_ARGS__)
+#define AUTOSELLUI_LOG(...) AUTOSELL_LOG_INFO(__VA_ARGS__)
 
 namespace qol::features::autosell {
 namespace {

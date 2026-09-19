@@ -33,7 +33,7 @@ void on_config_changed(void* /*ctx*/, const void* payload) {
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr) return 1;
     set_context(ctx);
-    // 进档重建动态特殊装备配方（save_enter 设施迁移前直接注册 legacy 回调；register 幂等）。
+    // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
     register_dynamic_recipes();
     // 门禁初值取配置；订阅配置变更（重复订阅会留孤儿订阅，已订阅则跳过）。
     int32_t enabled_value = 0;
@@ -58,6 +58,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         }
         g_config_subscription = 0;
     }
+    unregister_dynamic_recipes();
     set_enabled(false);
     ::custom_recipe::custom_recipe_table_deactivate();
 }

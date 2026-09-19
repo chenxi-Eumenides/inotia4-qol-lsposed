@@ -6,14 +6,14 @@
 
 #include "contracts/ownership.h"
 #include "contracts/panels.h"
-#include "core/native/qol_log.h"
 #include "plugins/save_backup/feature.h"
+#include "plugins/save_backup/log.h"
 #include "plugins/save_backup/ui/panel.h"
 
 namespace qol::features::save_backup {
 namespace {
 
-#define SB_LOG(...) QOL_LOG_INFO(QolDomain::kSaveBackup, __VA_ARGS__)
+#define SB_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
 
 constexpr const char* kPluginId = "save_backup";
 constexpr const char* kPluginVersion = "0.1.0";

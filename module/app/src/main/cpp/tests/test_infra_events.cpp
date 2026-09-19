@@ -1,6 +1,7 @@
 // infra/events.h host 单测：订阅顺序、类型隔离、注销幂等、容量上限、快照派发语义。
 // 编译方式见 tests/CMakeLists.txt 的 infra_tests 目标。
 
+#include "contracts/events.h"
 #include "infra/events.h"
 #include "infra/test_reset.h"
 
@@ -99,6 +100,26 @@ void test_type_isolation_and_empty_publish() {
     reset_log();
     CHECK(publish(99, nullptr) == 0);
     CHECK(g_order.empty());
+}
+
+void test_save_event_payload_contract() {
+    qol::infra::reset_for_test();
+    reset_log();
+
+    HandlerCtx enter{1};
+    HandlerCtx exit{2};
+    subscribe(qol::contracts::kEventSaveEnter, record, &enter);
+    subscribe(qol::contracts::kEventSaveExit, record, &exit);
+    const qol::contracts::SaveEnterEvent enter_event{2};
+    const qol::contracts::SaveExitEvent exit_event{2};
+
+    CHECK(publish(qol::contracts::kEventSaveEnter, &enter_event) == 1);
+    CHECK(g_payloads.size() == 1 && g_payloads[0] == &enter_event);
+    CHECK(static_cast<const qol::contracts::SaveEnterEvent*>(g_payloads[0])->slot == 2);
+    reset_log();
+    CHECK(publish(qol::contracts::kEventSaveExit, &exit_event) == 1);
+    CHECK(g_payloads.size() == 1 && g_payloads[0] == &exit_event);
+    CHECK(static_cast<const qol::contracts::SaveExitEvent*>(g_payloads[0])->slot == 2);
 }
 
 void test_unsubscribe() {
@@ -220,6 +241,7 @@ void test_clear_all() {
 int main() {
     test_subscription_order_and_payload();
     test_type_isolation_and_empty_publish();
+    test_save_event_payload_contract();
     test_unsubscribe();
     test_unsubscribe_during_dispatch_self();
     test_unsubscribe_during_dispatch_other();
