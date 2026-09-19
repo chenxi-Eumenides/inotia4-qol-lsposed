@@ -4,7 +4,6 @@
 #include <cstdint>
 
 #include "contracts/game_host.h"
-#include "contracts/stack_codec.h"
 
 using Stage4HaveBackup = int (*)(int32_t);
 using Stage4CountBackup = int (*)(int32_t);
@@ -38,8 +37,9 @@ int stage4_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi*
 //（g_stack_getter_redirect_patches）不含此点。现由 R-55 UIEquip_OKDestroyItem
 // 回调层在启用态接管结算（取 hooked getter 的 canonical），关闭态与未知调用者仍走
 // 原版直读。本函数保留为原版回退语义参照，并作为 VM-37 缺陷基线。
-//   b = (field >> 25) & 0x7F;  return (b >= 1 && b <= 99) ? b : 1;
-uint32_t native_equip_sell_count(uint32_t field);
+//   低位视图 b∈[1,99] 时取 b，否则取 1。
+uint32_t native_equip_sell_count(uint32_t field,
+                                 const qol::contracts::QolItemCountApi* item_count);
 
 // ---------------------------------------------------------------------------
 // 原版背包详情出售接管（R-55，VM-41）。UIEquip_OKDestroyItem(0xb83d0) 无参，背包
@@ -58,7 +58,8 @@ enum class VanillaSellRoute : uint8_t { kBackup, kPreview, kTakeover };
 VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run);
 // 0.7 结算金额（canonical 模式视图）：unit_price × min(canonical,999) × 7 / 10，
 // 沿用 sell_price 边界与溢出校验；canonical==0 / unit_price 越界 / 结果越界 → false。
-bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price);
+bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price,
+                        const qol::contracts::QolItemCountApi* item_count);
 
 // ITEMSYSTEM_MakeItem 数量回写计划（VM-38 缺陷修复，纯函数供 Host 断言）。
 // 反汇编证明（0x10c6c8，基线 .tmp/dualmode-full.asm）：arg2（w1）是与静态表
@@ -134,9 +135,9 @@ struct Stage4RemoveDataPlan {
 // count、remain 越域、守恒不成立）→ fail-closed 不修正；缩减唯一且 remain !=
 // post_view → 修正。关闭态（R-47）原版 b 写天然正确，调用方不应以启用态数据
 // 调用本函数。
-Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* pre,
-                                                  const Stage4RemoveDataPost* post,
-                                                  int entry_count, int32_t count);
+Stage4RemoveDataPlan stage4_remove_item_data_plan(
+    const qol::contracts::QolItemCountApi* item_count, const Stage4RemoveDataEntry* pre,
+    const Stage4RemoveDataPost* post, int entry_count, int32_t count);
 
 // H-21 扩展桥接（R-56）物理实扣量 → 扩展补扣量（纯函数供 Host 断言）。
 // 原版 INVEN_RemoveItemData 只遍历物理袋 0..5；物理实扣 = 调用前后 H-03 总数差

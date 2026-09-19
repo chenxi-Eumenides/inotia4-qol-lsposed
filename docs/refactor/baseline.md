@@ -140,18 +140,18 @@
 | `host` | `infra` | 41 |
 | `host` | `game` | 30 |
 | `host` | `contracts` | 19 |
-| `plugins/extension_bag` | `contracts` | 19 |
+| `plugins/extension_bag` | `contracts` | 17 |
 | `plugins/custom_recipe` | `contracts` | 13 |
-| `plugins/inventory_hooks` | `contracts` | 12 |
 | `plugins/autosell` | `contracts` | 11 |
 | `infra` | `game` | 10 |
 | `plugins/core.ui` | `contracts` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
+| `plugins/inventory_hooks` | `contracts` | 9 |
 | `domains/world` | `game` | 7 |
 | `plugins/autosell` | `game` | 7 |
 | `plugins/save_backup` | `contracts` | 7 |
-| `domains/inventory` | `contracts` | 6 |
+| `domains/inventory` | `game` | 6 |
 
 ### 2.2 include 环
 
@@ -202,7 +202,7 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:155||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:154||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 

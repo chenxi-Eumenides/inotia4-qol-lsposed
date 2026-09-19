@@ -614,17 +614,17 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
         }
         return true;
     }
-    const stack_codec::CountEncoding count_encoding = item_count_encoding(item);
-    if (count_encoding != stack_codec::CountEncoding::kEncoded) {
+    const ::qol::contracts::QolItemCountEncoding count_encoding = item_count_encoding(item);
+    if (count_encoding != ::qol::contracts::QolItemCountEncoding::kEncoded) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "extension consume rejected count encoding=%d context=%s bag=%d slot=%d",
                     static_cast<int>(count_encoding), context, bag, slot);
         return false;
     }
     // S2 写回（R-47 决策 b 模式感知）：count 为 getter 返回的模式视图数量
-    //（启用态 canonical 128a+b、关闭态 b），扣减后的写回经 effective_write_count：
+    //（启用态 canonical 128a+b、关闭态 b），扣减后的写回经 item-count facade：
     // 启用态拆段写回借位自动完成（a 借位 → b+128）；关闭态只写 b、保留 a——
     // descriptor 随后回写 canonical 解码值，重开后读回完整值。非可堆叠类别已在
-    // 上方按 CountEncoding 门控拒绝，不会触碰 bits22-24。
+    // 上方按三态类别门控拒绝，不会触碰 marker/S2 重叠位段。
     if (!virtual_bag_write_effective(item, static_cast<uint32_t>(count))) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
                      "extension consume rejected count write context=%s bag=%d slot=%d",
@@ -644,7 +644,8 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     descriptor.payload_size = payload_size;
     // descriptor.count 恒为 canonical：关闭态 b 写保留 a，重开读回完整值。
     descriptor.count = static_cast<int>(virtual_bag_canonical_count(
-        item, stack_codec::s2_read_count(old_count_flags)));
+        item, virtual_bag_canonical_from_field(old_count_flags,
+                                               static_cast<uint32_t>(descriptor.count))));
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     // ApplyStuff consumes a stacked material through H-04. Keep the token's
@@ -1058,7 +1059,7 @@ void extension_desc_item_execute(void* button) {
     // 装备页出售（0.7 倍率、只能全卖）走原版销毁链：真实 execute proc 可能是
     // UIEquip_ButtonDestroyExe（创建确认弹窗），也可能是其结算入口
     // UIEquip_OKDestroyItem（0xb83d0）。两者都属目标 proc，任一命中即由模块
-    // 接管并走 canonical（下方 effective_view_count）；其余 proc 行为不变（非目标
+    // 接管并走 canonical（下方 item-count facade）；其余 proc 行为不变（非目标
     // proc 直通 call_orig）。
     const uintptr_t destroy_ok_raw = g_base != 0
         ? g_base + fn_resolve("F_UIEQUIP_OK_DESTROY_ITEM_VMA", F_UIEQUIP_OK_DESTROY_ITEM_VMA)

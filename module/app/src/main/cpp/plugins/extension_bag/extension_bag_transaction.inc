@@ -641,7 +641,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         const uint32_t source_view = virtual_bag_effective_count(
             g_module_objects[src_bag][src_slot], static_cast<uint32_t>(source.count));
         const bool extended = virtual_bag_extended_mode(g_module_objects[dst_bag][slot]);
-        const uint32_t limit = extended ? stack_codec::kExtendedMax : stack_codec::kLegacyMax;
+        const uint32_t limit = virtual_bag_count_limit(extended);
         const uint64_t total = static_cast<uint64_t>(existing_view) +
                                static_cast<uint64_t>(source_view);
         if (total > limit) return false;
@@ -655,8 +655,8 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                         src_bag, src_slot, dst_bag, slot);
             return false;
         }
-        committed.count = static_cast<int>(
-            stack_codec::s2_read_count(virtual_bag::payload_count(committed)));
+        committed.count = static_cast<int>(virtual_bag_canonical_from_field(
+            virtual_bag::payload_count(committed), static_cast<uint32_t>(committed.count)));
         dst_slot = slot;
         merged = true;
         return true;

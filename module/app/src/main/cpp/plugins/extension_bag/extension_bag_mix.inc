@@ -78,7 +78,7 @@ void mix_refresh_tab_bag_items_locked() {
                 const uint32_t flags = *reinterpret_cast<uint32_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_COUNT);
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-                    stack_codec::write_native_bag_object_marker(flags);
+                    ::qol::features::extension_bag::write_native_bag_object_marker(flags);
             }
         }
     }

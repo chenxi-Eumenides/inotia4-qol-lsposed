@@ -12,10 +12,9 @@
 #include "game_state.h"
 #include "game_symbols.h"
 #include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
-#include "contracts/stack_codec.h"
-
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/module_save_port.h"
@@ -275,17 +274,18 @@ const qol::contracts::QolItemCountApi* item_count_api() {
 }
 
 uint32_t original_count_view(uint32_t field) {
-    return (field >> stack_codec::kS2ShiftB) & ((1u << stack_codec::kS2BitsB) - 1u);
+    return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
 }
 
 bool original_count_write(void* item, uint32_t count) {
-    if (item == nullptr) return false;
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api == nullptr || api->field_from_canonical == nullptr || item == nullptr) return false;
     uint32_t field = *reinterpret_cast<const uint32_t*>(
         reinterpret_cast<const uint8_t*>(item) + I_COUNT);
-    const uint32_t bounded = count > stack_codec::kLegacyMax ? stack_codec::kLegacyMax : count;
-    field = (field & ~stack_codec::kS2MaskB) |
-            (stack_codec::s2_split_b(bounded) << stack_codec::kS2ShiftB);
-    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = field;
+    uint32_t updated = field;
+    const QolResult result = api->field_from_canonical(field, count, 0, &updated);
+    if (!qol::contracts::succeeded(result)) return false;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = updated;
     return true;
 }
 
@@ -329,7 +329,48 @@ uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonic
             reinterpret_cast<const uint8_t*>(item) + I_COUNT);
         return original_count_view(field);
     }
-    return fallback_canonical & ((1u << stack_codec::kS2BitsB) - 1u);
+    return virtual_bag_view_from_canonical(fallback_canonical, false);
+}
+
+uint32_t virtual_bag_canonical_from_field(uint32_t field, uint32_t fallback_canonical) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->canonical_from_field != nullptr) {
+        uint32_t canonical = fallback_canonical;
+        const QolResult result = api->canonical_from_field(field, &canonical);
+        if (qol::contracts::succeeded(result)) return canonical;
+    }
+    return fallback_canonical;
+}
+
+uint32_t virtual_bag_field_from_canonical(uint32_t field, uint32_t canonical, bool extended) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->field_from_canonical != nullptr) {
+        uint32_t updated = field;
+        const QolResult result = api->field_from_canonical(
+            field, canonical, extended ? 1 : 0, &updated);
+        if (qol::contracts::succeeded(result)) return updated;
+    }
+    return field;
+}
+
+uint32_t virtual_bag_view_from_canonical(uint32_t canonical, bool extended) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->view_from_canonical != nullptr) {
+        uint32_t view = canonical;
+        const QolResult result = api->view_from_canonical(canonical, extended ? 1 : 0, &view);
+        if (qol::contracts::succeeded(result)) return view;
+    }
+    return canonical;
+}
+
+uint32_t virtual_bag_count_limit(bool extended) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->view_limit != nullptr) {
+        uint32_t limit = 0;
+        const QolResult result = api->view_limit(extended ? 1 : 0, &limit);
+        if (qol::contracts::succeeded(result)) return limit;
+    }
+    return 0;
 }
 
 uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical) {
@@ -338,12 +379,14 @@ uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonic
         uint32_t count = 0;
         const QolResult result = api->canonical(item, &count);
         if (qol::contracts::succeeded(result)) return count;
-        if (result.code == kQolErrUnsupported) return fallback_canonical;
+        if (result.code == kQolErrUnsupported) {
+            return fallback_canonical;
+        }
     }
     if (item != nullptr) {
         const uint32_t field = *reinterpret_cast<const uint32_t*>(
             reinterpret_cast<const uint8_t*>(item) + I_COUNT);
-        return stack_codec::s2_read_count(field);
+        return virtual_bag_canonical_from_field(field, fallback_canonical);
     }
     return fallback_canonical;
 }
@@ -402,7 +445,7 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
 
 // 与 item_count_encoding/ITEM_GetCumulateCount 使用同一 ITEMCLASSBASE +6 bit0 语义：
 // kUnknown 必须继续向载入/合并调用方传播，不能降级成可堆叠。
-stack_codec::CountEncoding virtual_bag_category_uses_stack_count(int category) {
+::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category) {
     return category_is_equip(category);
 }
 
@@ -843,13 +886,13 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     }
     // 袋对象 +0x10 的 bit0..24 是容量，ITEMSYSTEM_CreateItem（0x10be9c）已按
     // ITEMSTATICBASE[category]（1→4、2→8、3→12、4→16）自动写入。只改
-    // bit25..31，禁止用 s2_write_count；统一经
-    // write_native_bag_object_marker 保留容量位段。
+    // bit25..31，native bag object 只写 marker；禁止先做 S2 编码再叠加 marker，
+    // 因为当前 marker mask 与 S2 B 段重叠。
     {
         const uint32_t flags = *reinterpret_cast<uint32_t*>(
             reinterpret_cast<uint8_t*>(item) + I_COUNT);
         *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-            stack_codec::write_native_bag_object_marker(flags);
+            ::qol::features::extension_bag::write_native_bag_object_marker(flags);
     }
 
     int preferred = original_bag_locked();
@@ -1223,13 +1266,8 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
         // adopt_merge_into 的 mergeable_items 门控内已拒绝，R-46）。
         void* materialized = g_module_objects[bag][slot];
         if (materialized != nullptr) {
-            const uint32_t merged_view = merged.count <= static_cast<int>(stack_codec::kLegacyMax)
-                ? static_cast<uint32_t>(merged.count)
-                : (virtual_bag_effective_count(materialized,
-                    static_cast<uint32_t>(merged.count)) ==
-                       static_cast<uint32_t>(merged.count)
-                       ? static_cast<uint32_t>(merged.count)
-                       : static_cast<uint32_t>(merged.count) & ((1u << stack_codec::kS2BitsB) - 1u));
+            const uint32_t merged_view = virtual_bag_view_from_canonical(
+                static_cast<uint32_t>(merged.count), virtual_bag_extended_mode(materialized));
             (void)virtual_bag_write_effective(materialized, merged_view);
         }
         g_virtual_bag_state.items[bag][slot] = merged;
@@ -1345,13 +1383,13 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     if (!category_is_extension_backpack(category)) {
         // 扩展槽装备物品 → 装备到角色（原详情按钮 PtrHook 职责，函数 hook 化；
         // 装备按钮 proc 恒为 ButtonEquipExe，见 native 第 10 hook）。
-        const stack_codec::CountEncoding item_encoding = item_count_encoding(item);
-        if (from_extension && item_encoding == stack_codec::CountEncoding::kUnknown) {
+        const ::qol::contracts::QolItemCountEncoding item_encoding = item_count_encoding(item);
+        if (from_extension && item_encoding == ::qol::contracts::QolItemCountEncoding::kUnknown) {
             VIRTBAG_LOG("extension equip button blocked: category unavailable bag=%d slot=%d",
                         src_bag, src_slot);
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        if (from_extension && item_encoding == stack_codec::CountEncoding::kNotEncoded) {
+        if (from_extension && item_encoding == ::qol::contracts::QolItemCountEncoding::kNotEncoded) {
             if (!module_object_replacement_allowed_locked(src_bag, src_slot,
                                                           "character equip button")) {
                 VIRTBAG_LOG("extension character equip button blocked bag=%d slot=%d",

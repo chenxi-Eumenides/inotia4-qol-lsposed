@@ -349,6 +349,28 @@ static void test_get_cumulate_count_facade() {
     g_effective_result_mode = EffectiveResultMode::kOk;
 }
 
+static QolResult fake_conversion_view(uint32_t canonical, int32_t extended,
+                                      uint32_t* out_view) {
+    if (out_view == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    if (extended != 0) {
+        *out_view = canonical > 999u ? 999u : canonical;
+    } else {
+        const uint32_t view = canonical % 128u;
+        *out_view = view > 99u ? 99u : view;
+    }
+    return qol::contracts::ok();
+}
+
+static QolResult fake_conversion_limit(int32_t extended, uint32_t* out_limit) {
+    if (out_limit == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    *out_limit = extended != 0 ? 999u : 99u;
+    return qol::contracts::ok();
+}
+
+static const qol::contracts::QolItemCountApi kStage4ConversionApi = {
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    &fake_conversion_view, &fake_conversion_limit};
+
 // H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：部分删堆 remain 修正、
 // 整删消失堆求和、count<=0 / 无缩减 / 多缩减 / 越域 / 已正确各分支 fail-closed。
 static void test_remove_item_data_plan() {
@@ -361,7 +383,8 @@ static void test_remove_item_data_plan() {
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
         Stage4RemoveDataPost post[] = {{a, 11u}, {b, 50u}};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 2, 60);
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 60);
         CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 139u);
     }
     // 场景 1b（整删后跨堆部分删）：堆 199 + 堆 50，删 220：199 整删（w22=199），
@@ -370,14 +393,15 @@ static void test_remove_item_data_plan() {
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
         Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 29u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 220).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 220).correct);
     }
     // 场景 2（remain ≤127 但旧 a 残留）：堆 199 部分删 190 → remain=9，
     // 原版 b 写后 post_view = 旧 a(1)*128 + 9 = 137 ≠ 9 → 修正为 9。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}};
         Stage4RemoveDataPost post[] = {{a, 137u}};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 190);
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 190);
         CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 9u);
     }
     // 场景 3（remain ≤127 且 a 原本为 0）：堆 50 删 10 → remain=40，原版已写对
@@ -385,56 +409,57 @@ static void test_remove_item_data_plan() {
     {
         Stage4RemoveDataEntry pre[] = {{a, 50u}};
         Stage4RemoveDataPost post[] = {{a, 40u}};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 10);
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 10);
         CHECK(!plan.correct);
     }
     // 场景 4（全部整删，无部分删堆）：count ≥ 总量 → 无修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
         Stage4RemoveDataPost post[] = {{nullptr, 0u}, {nullptr, 0u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 249).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 9999).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 249).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 9999).correct);
     }
     // 场景 5（count<=0：语义未冻结/空操作）→ 不修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}};
         Stage4RemoveDataPost post[] = {{a, 137u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 0).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, -1).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 1, 0).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 1, -1).correct);
     }
     // 场景 6（fail-closed：缩减堆不唯一）→ 不修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 199u}};
         Stage4RemoveDataPost post[] = {{a, 100u}, {b, 100u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 198).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 198).correct);
     }
     // 场景 7（fail-closed：未触堆数量被改/增长）→ 不修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
         Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 70u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 60).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 60).correct);
     }
     // 场景 8（fail-closed：count 小于整删累计，数据矛盾）→ 不修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
         Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 61u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 10).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 10).correct);
     }
     // 场景 9（fail-closed：deleted_here 恰等于部分删堆全量——原版该走整删分支，
     // remain=0 矛盾）→ 不修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
         Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 0u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 249).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 249).correct);
     }
     // 场景 10（堆未被触及时原样通过）：无缩减 → 不修正。
     {
         Stage4RemoveDataEntry pre[] = {{a, 999u}};
         Stage4RemoveDataPost post[] = {{a, 999u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 1).correct);
+        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 1, 1).correct);
     }
     // 场景 11（空/退化入参）→ 不修正。
-    CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, 0, 5).correct);
+    CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, nullptr, nullptr, 0, 5).correct);
 }
 
 // H-21 扩展桥接（R-56）补扣量纯函数：物理实扣 = 前后 H-03 总数差，扩展补扣 =
@@ -494,21 +519,23 @@ static void test_vanilla_sell_takeover() {
 
     // 金额：unit × canonical × 7 / 10。
     int64_t price = -1;
-    CHECK(vanilla_sell_money(10, 1u, &price) && price == 7);
-    CHECK(vanilla_sell_money(10, 99u, &price) && price == 693);
-    CHECK(vanilla_sell_money(10, 100u, &price) && price == 700);
-    CHECK(vanilla_sell_money(10, 199u, &price) && price == 1393);
-    CHECK(vanilla_sell_money(10, 999u, &price) && price == 6993);
+    CHECK(vanilla_sell_money(10, 1u, &price, &kStage4ConversionApi) && price == 7);
+    CHECK(vanilla_sell_money(10, 99u, &price, &kStage4ConversionApi) && price == 693);
+    CHECK(vanilla_sell_money(10, 100u, &price, &kStage4ConversionApi) && price == 700);
+    CHECK(vanilla_sell_money(10, 127u, &price, &kStage4ConversionApi) && price == 889);
+    CHECK(vanilla_sell_money(10, 128u, &price, &kStage4ConversionApi) && price == 896);
+    CHECK(vanilla_sell_money(10, 199u, &price, &kStage4ConversionApi) && price == 1393);
+    CHECK(vanilla_sell_money(10, 999u, &price, &kStage4ConversionApi) && price == 6993);
     // canonical 0 拒绝；越界 canonical 按启用态上限 999 收敛。
-    CHECK(!vanilla_sell_money(10, 0u, &price));
-    CHECK(vanilla_sell_money(10, 1023u, &price) && price == 6993);
-    CHECK(vanilla_sell_money(10, 1000u, &price) && price == 6993);
+    CHECK(!vanilla_sell_money(10, 0u, &price, &kStage4ConversionApi));
+    CHECK(vanilla_sell_money(10, 1023u, &price, &kStage4ConversionApi) && price == 6993);
+    CHECK(vanilla_sell_money(10, 1000u, &price, &kStage4ConversionApi) && price == 6993);
     // 越界拒绝：负单价 / 结果超出 int32 / 空出参。
-    CHECK(!vanilla_sell_money(-1, 10u, &price));
-    CHECK(!vanilla_sell_money(INT32_MAX, 999u, &price));
-    CHECK(!vanilla_sell_money(10, 10u, nullptr));
+    CHECK(!vanilla_sell_money(-1, 10u, &price, &kStage4ConversionApi));
+    CHECK(!vanilla_sell_money(INT32_MAX, 999u, &price, &kStage4ConversionApi));
+    CHECK(!vanilla_sell_money(10, 10u, nullptr, &kStage4ConversionApi));
     // 单价 0 合法（金额 0），不得因结果 0 被误拒。
-    CHECK(vanilla_sell_money(0, 10u, &price) && price == 0);
+    CHECK(vanilla_sell_money(0, 10u, &price, &kStage4ConversionApi) && price == 0);
 }
 
 int main() {

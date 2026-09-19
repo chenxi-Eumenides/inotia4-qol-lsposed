@@ -68,8 +68,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         void* item_b = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
         if (item_a != nullptr && item_b != nullptr &&
             !fn_ui_equip_is_apply_stuff(item_b, item_a) &&
-            item_count_encoding(item_a) == stack_codec::CountEncoding::kEncoded &&
-            item_count_encoding(item_b) == stack_codec::CountEncoding::kEncoded) {
+            item_count_encoding(item_a) == ::qol::contracts::QolItemCountEncoding::kEncoded &&
+            item_count_encoding(item_b) == ::qol::contracts::QolItemCountEncoding::kEncoded) {
             const uint16_t flags_a =
                 *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_a) + I_TYPE);
             const uint16_t flags_b =
@@ -81,8 +81,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 const int count = fn_get_cumulate_count(item_a);
                 const int target_count = fn_get_cumulate_count(item_b);
                 const bool extended = virtual_bag_extended_mode(item_b);
-                 const uint32_t stack_limit = extended ? stack_codec::kExtendedMax
-                                                        : stack_codec::kLegacyMax;
+                 const uint32_t stack_limit = virtual_bag_count_limit(extended);
                 const bool valid_slots = bag >= 0 && bag < 6 && src_slot >= 0 && src_slot < 16 &&
                                          dst_slot >= 0 && dst_slot < 16;
                 const bool has_merge_room = target_count > 0 && count > 0 &&

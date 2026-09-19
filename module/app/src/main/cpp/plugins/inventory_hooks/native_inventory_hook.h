@@ -4,7 +4,6 @@
 
 #include "contracts/host_sdk.h"
 #include "contracts/game_host.h"
-#include "contracts/stack_codec.h"
 
 using NativeHookFunType = int (*)(void* func, void* replace, void** backup);
 using NativeUnhookFunType = int (*)(void* func);
@@ -44,28 +43,44 @@ NativeOnModuleLoaded native_init(const NativeAPIEntries* entries);
 // ---------------------------------------------------------------------------
 namespace s2_writeback {
 
-// 原版数量写点结果预测：UTIL_SetBitValue(旧字段值, 25, 31, 新b) 只改 bits25–31
-// （b 段），a（bits22–24）与 bits0–21 原样保留。
-inline uint32_t predicted_original_b_write(uint32_t pre_field, uint32_t new_count) {
-    return (pre_field & ~stack_codec::kS2MaskB) |
-           (stack_codec::s2_split_b(new_count) << stack_codec::kS2ShiftB);
-}
-
 // original-only 写后确认：post 与 pre 不同、且恰好等于原版对 new_count 的 b 写
 // 结果时，才认定「原版确实执行了该次数量写」。post == pre（含 delta≡0 mod 128
 // 的退化与原版拒绝合并）一律 fail-closed 跳过，不得凭相等推断写发生。
-inline bool original_count_write_confirmed(uint32_t pre_field, uint32_t post_field,
-                                            uint32_t new_count) {
-    return post_field != pre_field &&
-           post_field == predicted_original_b_write(pre_field, new_count);
+inline bool original_count_write_confirmed(const qol::contracts::QolItemCountApi* api,
+                                           uint32_t pre_field, uint32_t post_field,
+                                           uint32_t new_count) {
+    if (api == nullptr || api->canonical_from_field == nullptr ||
+        api->field_from_canonical == nullptr || post_field == pre_field) {
+        return false;
+    }
+    uint32_t pre_canonical = 0;
+    uint32_t post_canonical = 0;
+    uint32_t pre_without_b = 0;
+    uint32_t post_without_b = 0;
+    if (!qol::contracts::succeeded(api->canonical_from_field(pre_field, &pre_canonical)) ||
+        !qol::contracts::succeeded(api->canonical_from_field(post_field, &post_canonical)) ||
+        !qol::contracts::succeeded(api->field_from_canonical(pre_field, 0, 0, &pre_without_b)) ||
+        !qol::contracts::succeeded(api->field_from_canonical(post_field, 0, 0,
+                                                             &post_without_b))) {
+        return false;
+    }
+    // field_from_canonical(..., 0, false) preserves the non-B field bits. The
+    // canonical remainder identifies the original setter's seven-bit value
+    // without duplicating its bit layout here.
+    return pre_without_b == post_without_b &&
+           (post_canonical % 128u) == (new_count % 128u);
 }
 
 // 加法回写全量：old_full + delta 后按模式上限收敛（启用 999 / 关闭 99，
 // R-47 决策 b：old_full 必须是模式视图数量——启用态 128a+b、关闭态 b；
 // 关闭态结果落在 b 域；facade 负责当前视图的上限收敛，delta 先按
 // 编码上限收敛，避免极端入参溢出。
-inline uint32_t added_count(uint32_t old_full, uint32_t delta) {
-    const uint32_t bounded = delta > stack_codec::kS2Max ? stack_codec::kS2Max : delta;
+inline uint32_t added_count(const qol::contracts::QolItemCountApi* api,
+                            uint32_t old_full, uint32_t delta) {
+    if (api == nullptr || api->view_limit == nullptr) return old_full;
+    uint32_t limit = 0;
+    if (!qol::contracts::succeeded(api->view_limit(1, &limit))) return old_full;
+    const uint32_t bounded = delta > limit ? limit : delta;
     return old_full + bounded;
 }
 

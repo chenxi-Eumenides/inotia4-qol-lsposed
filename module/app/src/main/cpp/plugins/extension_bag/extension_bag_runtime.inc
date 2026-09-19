@@ -866,19 +866,21 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
 
 #include "plugins/extension_bag/extension_bag_input.inc"
 
-stack_codec::CountEncoding category_is_equip(int category) {
-    if (g_base == 0 || category <= 0) return stack_codec::CountEncoding::kUnknown;
+::qol::contracts::QolItemCountEncoding category_is_equip(int category) {
+    if (g_base == 0 || category <= 0) {
+        return ::qol::contracts::QolItemCountEncoding::kUnknown;
+    }
     uint8_t* class_data = *reinterpret_cast<uint8_t**>(
         *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
     uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
     if (class_data == nullptr || size_ptr == nullptr) {
-        return stack_codec::CountEncoding::kUnknown;
+        return ::qol::contracts::QolItemCountEncoding::kUnknown;
     }
     const uint8_t stride = *size_ptr;
-    if (stride == 0) return stack_codec::CountEncoding::kUnknown;
+    if (stride == 0) return ::qol::contracts::QolItemCountEncoding::kUnknown;
     return (class_data[category * stride + 6] & 1) == 0
-        ? stack_codec::CountEncoding::kNotEncoded
-        : stack_codec::CountEncoding::kEncoded;
+        ? ::qol::contracts::QolItemCountEncoding::kNotEncoded
+        : ::qol::contracts::QolItemCountEncoding::kEncoded;
 }
 
 // 原版 ButtonEquipExe 的背包身份判定（反汇编 b7c74）：ITEMCLASSBASE 记录

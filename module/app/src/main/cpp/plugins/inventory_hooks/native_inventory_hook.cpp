@@ -6,7 +6,6 @@
 #include "contracts/plugin.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/qol_log.h"
-#include "contracts/stack_codec.h"
 #include "data/native/item_class.h"
 #include "game_access.h"
 #include "game_inventory.h"
@@ -95,7 +94,7 @@ thread_local bool g_in_remove_item = false;
 thread_local bool g_in_equip_destroy_button = false;
 thread_local int g_refresh_depth = 0;
 
-uint32_t s2_read_count_field(const void* item);
+uint32_t read_count_field(const void* item);
 
 enum class ItemCountWriteResult : uint8_t {
     kApplied,
@@ -123,13 +122,9 @@ bool item_count_effective(void* item, uint32_t* out_count) {
     if (api != nullptr && api->effective != nullptr) {
         const QolResult result = api->effective(item, out_count);
         if (qol::contracts::succeeded(result)) return true;
-        if (result.code == kQolErrUnsupported) return false;
-        if (result.code != kQolErrNotReady) return false;
+        return false;
     }
-    const uint32_t field = s2_read_count_field(item);
-    *out_count = (field >> stack_codec::kS2ShiftB) &
-                 ((1u << stack_codec::kS2BitsB) - 1u);
-    return true;
+    return false;
 }
 
 ItemCountWriteResult item_count_write_effective(void* item, uint32_t count) {
@@ -215,7 +210,7 @@ void* s2_physical_slot_item(int bag, int slot) {
                                      static_cast<size_t>(slot) * sizeof(void*));
 }
 
-uint32_t s2_read_count_field(const void* item) {
+uint32_t read_count_field(const void* item) {
     return *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(item) + I_COUNT);
 }
 
@@ -241,10 +236,10 @@ bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
 }
 
 // S2 写侧回写总门控（R-46 fail-closed + R-47 门控对齐）：堆叠上限开启即需要写侧
-// 进位（与读侧 getter 门控 stack_limit_enabled 对齐，见 stack_codec::writeback_needed）；
-// 对象有效且 count-encoded。kUnknown 与非可堆叠（装备 marker bits25–31、宝石选项
+// 进位（与读侧 getter 门控 stack_limit_enabled 对齐）；对象有效且 count-encoded。
+// kUnknown 与非可堆叠（装备 marker、宝石选项
 // bits18–23、袋容量 bits0–24）一律返回 false，调用方保持原版行为；堆叠上限关闭态按
-// R-47 决策 b 以模式视图（b 域）参与取证与回写，effective_write_count 只写 b、保留 a。
+// R-47 决策 b 以模式视图（b 域）参与取证与回写，facade 只写当前模式视图并保留不可见段。
 bool s2_writeback_gate(void* item) {
     return item != nullptr && item_count_is_encoded(item);
 }
@@ -273,14 +268,14 @@ void s2_capture_merge(void* moved_item, int bag, int slot, int32_t delta, S2Merg
     cap->target = occupant;
     cap->bag = bag;
     cap->slot = slot;
-    cap->pre_field = s2_read_count_field(occupant);
+    cap->pre_field = read_count_field(occupant);
     // 模式视图旧全量（R-47 决策 b）：启用态 128a+b，关闭态只读 b。
     if (!item_count_effective(occupant, &cap->pre_full)) {
         cap->armed = false;
         return;
     }
     cap->delta = static_cast<uint32_t>(delta);
-    cap->new_full = s2_writeback::added_count(cap->pre_full, cap->delta);
+    cap->new_full = s2_writeback::added_count(item_count_api(), cap->pre_full, cap->delta);
 }
 
 // backup 后确认回写：目标槽仍指向同一对象（防替换/释放后的 UAF 读）、原版确实
@@ -290,7 +285,7 @@ void s2_capture_merge(void* moved_item, int bag, int slot, int32_t delta, S2Merg
 void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
     if (!cap.armed) return;
     if (s2_physical_slot_item(cap.bag, cap.slot) != cap.target) return;
-    const uint32_t post_field = s2_read_count_field(cap.target);
+    const uint32_t post_field = read_count_field(cap.target);
     if (post_field == cap.pre_field) {
         if ((cap.delta % 128) == 0) {
             QOL_LOG_INFO(QolDomain::kInventory,
@@ -299,7 +294,8 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
         }
         return;
     }
-    if (!s2_writeback::original_count_write_confirmed(cap.pre_field, post_field, cap.new_full)) {
+    if (!s2_writeback::original_count_write_confirmed(item_count_api(), cap.pre_field, post_field,
+                                                      cap.new_full)) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "S2 writeback %s mismatch skip target=%p pre=0x%x post=0x%x expect_full=%u",
                             op, cap.target, cap.pre_field, post_field, cap.new_full);
@@ -315,7 +311,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
                       op, cap.target, cap.new_full);
         return;
     }
-    const uint32_t written = s2_read_count_field(cap.target);
+    const uint32_t written = read_count_field(cap.target);
     QOL_LOG_INFO(QolDomain::kInventory,
                         "S2 writeback %s merge target=%p %u+%u->%u field=0x%x",
                         op, cap.target, cap.pre_full, cap.delta, cap.new_full, written);
@@ -485,13 +481,21 @@ void consume_item_wrapper(void* item) {
         item_count_feature_enabled(item) &&
         s2_writeback_gate(item) &&
         s2_find_physical_slot(item, &borrow_bag, &borrow_slot)) {
-        borrow_pre_field = s2_read_count_field(item);
+        borrow_pre_field = read_count_field(item);
+        uint32_t borrow_view = 0;
+        const qol::contracts::QolItemCountApi* api = item_count_api();
         if (item_count_effective(item, &borrow_pre_full) &&
-            borrow_pre_full >= 2 && stack_codec::s2_split_b(borrow_pre_full) <= 1) {
-            s2_write_count_field(item,
-                                 (borrow_pre_field & ~stack_codec::kS2MaskB) |
-                                     (stack_codec::s2_split_b(2) << stack_codec::kS2ShiftB));
-            s2_borrow_armed = true;
+            api != nullptr && api->view_from_canonical != nullptr &&
+            qol::contracts::succeeded(api->view_from_canonical(borrow_pre_full, 0,
+                                                                &borrow_view)) &&
+            borrow_pre_full >= 2 && borrow_view <= 1) {
+            uint32_t preset_field = 0;
+            if (api->field_from_canonical != nullptr &&
+                qol::contracts::succeeded(api->field_from_canonical(borrow_pre_field, 2, 0,
+                                                                      &preset_field))) {
+                s2_write_count_field(item, preset_field);
+                s2_borrow_armed = true;
+            }
         }
     }
     const bool dispatched = stage4_consume_item(
@@ -508,11 +512,9 @@ void consume_item_wrapper(void* item) {
                                 "item=%p bag=%d slot=%d pre_full=%u",
                                 item, borrow_bag, borrow_slot, borrow_pre_full);
         } else {
-            const uint32_t post_field = s2_read_count_field(item);
-            const uint32_t expected =
-                (borrow_pre_field & ~stack_codec::kS2MaskB) |
-                (stack_codec::s2_split_b(1) << stack_codec::kS2ShiftB);
-            if (post_field == expected) {
+            const uint32_t post_field = read_count_field(item);
+            if (s2_writeback::original_count_write_confirmed(item_count_api(), borrow_pre_field,
+                                                             post_field, 1)) {
                 const uint32_t new_full = s2_writeback::decremented_count(borrow_pre_full);
                 const ItemCountWriteResult write_result =
                     item_count_write_effective(item, new_full);
@@ -619,7 +621,7 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
     uint32_t pre_field = 0;
     uint32_t pre_full = 0;
     if (gate) {
-        pre_field = s2_read_count_field(item);
+        pre_field = read_count_field(item);
         // 模式视图旧全量（R-47 决策 b）：启用态 128a+b，关闭态只读 b。
         if (!item_count_effective(item, &pre_full)) gate = false;
     }
@@ -629,10 +631,11 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
     if (pre_full > static_cast<uint32_t>(count)) {
         // 源堆保留剩余（不释放），此读安全；整堆拆分（pre_full==count）时
         // 原版可能已释放源对象，不做任何源堆触磁。
-        const uint32_t post_field = s2_read_count_field(item);
+        const uint32_t post_field = read_count_field(item);
         const uint32_t remain = s2_writeback::subtracted_count(
             pre_full, static_cast<uint32_t>(count));
-        if (s2_writeback::original_count_write_confirmed(pre_field, post_field, remain)) {
+        if (s2_writeback::original_count_write_confirmed(item_count_api(), pre_field, post_field,
+                                                         remain)) {
             const ItemCountWriteResult write_result =
                 item_count_write_effective(item, remain);
             if (write_result == ItemCountWriteResult::kFailed) return new_item;
@@ -732,7 +735,7 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
         }
     }
     const Stage4RemoveDataPlan plan =
-        stage4_remove_item_data_plan(pre, post, cap.entry_count, count);
+        stage4_remove_item_data_plan(item_count_api(), pre, post, cap.entry_count, count);
     if (!plan.correct) return;
     const int index = plan.entry_index;
     void* item = s2_physical_slot_item(cap.bags[index], cap.slots[index]);
@@ -740,7 +743,7 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
     const ItemCountWriteResult write_result =
         item_count_write_effective(item, plan.remain);
     if (write_result != ItemCountWriteResult::kApplied) return;
-    const uint32_t written = s2_read_count_field(item);
+    const uint32_t written = read_count_field(item);
     QOL_LOG_INFO(QolDomain::kInventory,
                         "S2 writeback RemoveItemData category=%d count=%d item=%p "
                         "%u->%u field=0x%x",
@@ -1053,7 +1056,7 @@ uint64_t ok_destroy_item_wrapper() {
     const uint32_t canonical = static_cast<uint32_t>(fn_get_cumulate_count(item));
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     int64_t price = 0;
-    if (!vanilla_sell_money(unit_price, canonical, &price)) {
+    if (!vanilla_sell_money(unit_price, canonical, &price, item_count_api())) {
         QOL_LOG_INFO(QolDomain::kInventory,
             "vanilla sell backup reason=price_bounds bag=%d slot=%d category=%d canonical=%u unit=%lld",
             bag, slot, category, canonical, static_cast<long long>(unit_price));

@@ -48,13 +48,17 @@ int stage4_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi*
     return backup == nullptr ? 0 : backup(item);
 }
 
-uint32_t native_equip_sell_count(uint32_t field) {
-    // 原版 0x1261c4 的 b 段直读 + clamp（证据见头注释）：只解释 bits25–31，
-    // 不读 a 段、不读 descriptor canonical。b==0 或 b>99 一律回退 1（装备 marker
-    // 100 与 b∈[100,127] 的误判区间由此兜底）。R-51 重定向已证伪回退，运行时启用态
-    // 改由 R-55 回调层接管；本函数是原版直读路径的回退语义参照。
-    const uint32_t b = (field >> stack_codec::kS2ShiftB) &
-                       ((1u << stack_codec::kS2BitsB) - 1u);
+uint32_t native_equip_sell_count(uint32_t field,
+                                 const qol::contracts::QolItemCountApi* item_count) {
+    // 原版 0x1261c4 的 b 段直读 + clamp（证据见头注释）：只解释低七位视图，
+    // b==0 或 b>99 一律回退 1（装备 marker 100 与 b∈[100,127] 的误判区间由此兜底）。
+    // 通过 facade 先解码，再按原版范围判断，避免在消费者复制字段布局。
+    if (item_count == nullptr || item_count->canonical_from_field == nullptr) return 1u;
+    uint32_t canonical = 0;
+    if (!qol::contracts::succeeded(item_count->canonical_from_field(field, &canonical))) {
+        return 1u;
+    }
+    const uint32_t b = canonical % 128u;
     return (b >= 1u && b <= 99u) ? b : 1u;
 }
 
@@ -65,10 +69,16 @@ VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run) {
     return button_dry_run ? VanillaSellRoute::kPreview : VanillaSellRoute::kTakeover;
 }
 
-bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price) {
+bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price,
+                        const qol::contracts::QolItemCountApi* item_count) {
     if (out_price == nullptr || canonical_count == 0) return false;
-    // 启用态上限 999；canonical 已是 128a+b 全量，越界按模式上限收敛（与扩展出售同口径）。
-    const uint32_t legal_count = stack_codec::effective_clamp(canonical_count, true);
+    // 启用态上限 999；canonical 已是完整数量，越界按 facade 视图上限收敛。
+    if (item_count == nullptr || item_count->view_from_canonical == nullptr) return false;
+    uint32_t legal_count = 0;
+    if (!qol::contracts::succeeded(
+            item_count->view_from_canonical(canonical_count, 1, &legal_count))) {
+        return false;
+    }
     if (legal_count == 0) return false;
     return sell_price::calculate(unit_price, legal_count, /*apply_variant_discount=*/true,
                                  out_price);
@@ -229,11 +239,14 @@ bool stage4_install_transaction(const Stage4HookSpec* hooks, std::size_t count,
     return true;
 }
 
-Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* pre,
-                                                  const Stage4RemoveDataPost* post,
-                                                  int entry_count, int32_t count) {
+Stage4RemoveDataPlan stage4_remove_item_data_plan(
+    const qol::contracts::QolItemCountApi* item_count, const Stage4RemoveDataEntry* pre,
+    const Stage4RemoveDataPost* post, int entry_count, int32_t count) {
     Stage4RemoveDataPlan plan;
     if (pre == nullptr || post == nullptr || entry_count <= 0 || count <= 0) return plan;
+    if (item_count == nullptr || item_count->view_limit == nullptr) return plan;
+    uint32_t count_limit = 0;
+    if (!qol::contracts::succeeded(item_count->view_limit(1, &count_limit))) return plan;
     // 顺序（与原版一致）：先整删后部分删，部分删堆唯一。先汇总整删（快照对象
     // 已不在槽内/被替换）并定位唯一缩减堆；任何第二缩减堆或增长堆都是数据矛盾，
     // fail-closed 放弃修正。
@@ -262,7 +275,7 @@ Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* p
     if (deleted_here >= pre_full) return Stage4RemoveDataPlan{};
     const uint32_t remain = pre_full - deleted_here;
     const uint32_t post_view = post[shrunk_index].post_view;
-    if (remain > stack_codec::kS2Max) return Stage4RemoveDataPlan{};
+    if (remain > count_limit) return Stage4RemoveDataPlan{};
     if (remain == post_view) return plan;  // 原版 b 写已完整表达 remain（含 a=0）
     plan.correct = true;
     plan.entry_index = shrunk_index;

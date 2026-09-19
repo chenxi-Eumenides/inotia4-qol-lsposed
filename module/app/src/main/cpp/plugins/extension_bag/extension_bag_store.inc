@@ -65,7 +65,7 @@ void store_refresh_tab_bag_items_locked() {
                 const uint32_t flags = *reinterpret_cast<uint32_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_COUNT);
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-                    stack_codec::write_native_bag_object_marker(flags);
+                    ::qol::features::extension_bag::write_native_bag_object_marker(flags);
             }
         }
     }
@@ -418,7 +418,7 @@ void store_sell_popup(uint32_t text_id) {
 }
 
 // W1 部分出售：把模式视图数量从 view 递减 count（不调用原版 ITEMSYSTEM_Divide）。
-// 写回经 effective_write_count（R-47 决策 b：启用态拆段进位、关闭态只写 b 保留 a），
+// 写回经 item-count facade（R-47 决策 b：启用态拆段进位、关闭态只写 b 保留 a），
 // 随后重序列化 payload 并把 descriptor.count 回写为 canonical（R-38/R-48）。
 bool decrement_extension_item_view_locked(int bag, int slot, void* item, int count,
                                           const char* context) {
@@ -443,7 +443,7 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
     descriptor.count = static_cast<int>(virtual_bag_canonical_count(
-        item, stack_codec::s2_read_count(old_field)));
+        item, virtual_bag_canonical_from_field(old_field, static_cast<uint32_t>(descriptor.count))));
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     g_item_state_dirty = true;
@@ -489,7 +489,8 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                 } else {
                     view = static_cast<int>(virtual_bag_effective_count(
                         item, static_cast<uint32_t>(descriptor.count)));
-                    item_encoded = item_count_encoding(item) == stack_codec::CountEncoding::kEncoded;
+                    item_encoded = item_count_encoding(item) ==
+                                   ::qol::contracts::QolItemCountEncoding::kEncoded;
                     const int64_t unit = static_cast<int64_t>(fn_item_get_sell_price(item));
                     plan = qol::store_sell::plan(item_encoded, view, unit, displayed_price);
                     if (plan.kind == qol::store_sell::PlanKind::kReject) reject = true;

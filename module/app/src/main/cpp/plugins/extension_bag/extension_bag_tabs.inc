@@ -31,7 +31,7 @@ void refresh_tab_bag_items_locked() {
             const uint32_t count_flags =
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT);
             *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT) =
-                stack_codec::write_native_bag_object_marker(count_flags);
+                ::qol::features::extension_bag::write_native_bag_object_marker(count_flags);
         }
     }
 }

@@ -8,30 +8,29 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "core/native/sell_price.h"
 #include "contracts/host_sdk.h"
-#include "contracts/stack_codec.h"
 
 namespace {
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 
 uint32_t canonical_count_from_field(uint32_t field) {
-    return stack_codec::s2_read_count(field);
+    return virtual_bag_canonical_from_field(field, field);
 }
 
 uint32_t view_count_from_canonical(uint32_t canonical, bool extended) {
-    return stack_codec::effective_view_count(canonical, extended);
+    return virtual_bag_view_from_canonical(canonical, extended);
 }
 
 uint32_t write_view_to_field(uint32_t field, uint32_t count, bool extended) {
-    return stack_codec::effective_write_count(field, count, extended);
+    return virtual_bag_field_from_canonical(field, count, extended);
 }
 
 uint32_t write_canonical_to_field(uint32_t field, uint32_t canonical) {
-    return stack_codec::effective_write_count(field, canonical, true);
+    return write_view_to_field(field, canonical, true);
 }
 
 uint32_t count_limit(bool extended) {
-    return stack_codec::max_count(extended);
+    return virtual_bag_count_limit(extended);
 }
 
 const virtual_bag::CountPolicy kCountPolicy{

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/stack_codec.h"
+#include "contracts/game_host.h"
 
 #include <jni.h>
 
@@ -54,11 +54,15 @@ std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_
 std::string virtual_bag_inventory_bags_json();
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
 void* virtual_bag_item_at(int bag, int slot);
-// 按 ITEMCLASSBASE +6 bit0 统一判定 payload 数量字段是否为 stack_codec 语义。
-stack_codec::CountEncoding virtual_bag_category_uses_stack_count(int category);
+// 按 ITEMCLASSBASE +6 bit0 统一判定 payload 数量字段是否为 S2 数量语义。
+::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category);
 // 数量 facade 适配：NotReady 时仅回落原版低 b 位写法；Unsupported 保持失败关闭。
 uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical);
 uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical);
+uint32_t virtual_bag_canonical_from_field(uint32_t field, uint32_t fallback_canonical);
+uint32_t virtual_bag_field_from_canonical(uint32_t field, uint32_t canonical, bool extended);
+uint32_t virtual_bag_view_from_canonical(uint32_t canonical, bool extended);
+uint32_t virtual_bag_count_limit(bool extended);
 bool virtual_bag_extended_mode(const void* item);
 bool virtual_bag_write_effective(void* item, uint32_t count);
 // 视图门禁版：仅当 bag 处于扩展视图（控件 index 与扩展槽 1:1 对应）时物化，
