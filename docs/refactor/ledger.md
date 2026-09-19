@@ -188,6 +188,25 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 - **收口计划 P0–P6**：见 `layers.md` §六（P0 事实 → P1 契约纯度/S2 seam → P2 ABI 补齐 → P3 include 清零+独立构建+脚本硬失败 → P4 provider DAG+extra 拆分 → P5 core.api/core.ui → P6 S2 residency+签署门禁）。
 - **口径纪律**：施工阶段 C1–C7 与收口阶段 P0–P6 不混用；`check_arch.py` 通过 ≠ 合规。
 
+### P1 裁决冻结（2026-09-19，用户）
+
+**裁决 1：`item_count` facade 采读+写（方案 B）**
+
+- 成员：`canonical(item,out)`、`effective(item,out)`、`is_encoded(item,out)`、`write_effective(item,new)`、`writeback_needed(item,new,out)`；位段/常量/写回门控的**知识全部留在 `stack_limit` 实现**。
+- **native bag marker 不进 facade**（审阅 §8.4：marker 属 `extension_bag`）。
+- 公共 `contracts/` 不再暴露 `stack_codec.h` 的 codec 语义。
+- 语义约束：读写在**同一调用窗内同步完成**（R-47/R-49 不可退化为跨帧命令）。
+
+**裁决 2：S2 布局不做 boot-fatal，按"开关不改变存读方式"处理**
+
+- S2 布局的目的是：**开启/关闭不改变数据的存读方式**；关闭态不使用额外数据位。
+- **不变量（P1 验收硬约束）**：
+  1. **开启时写必须走 S2 布局**（否则启用态写会破坏 S2 数据）；
+  2. **关闭 / provider 失败时读走原始方式**（低 7 位/native 视图），写同样回落原始语义；
+  3. **写侧与布局补丁同生共死**：布局补丁未就绪 ⇒ 999 功能视为不可用（`degraded`）⇒ 读写均回落原始语义，**不允许出现"启用态用 S2 写、布局补丁缺失"**。
+- 因此：S2 布局补丁与 6 条 clamp、getter/写路径同属 `stack_limit` 的 **999 功能组**（gate 开则装、关/失败则回落），**不需要**新的 host "boot-required 资源"通道，也**不要求**失败致命。
+- 上述取代审阅 §8.2 的"host 绝不在启用/停用时改函数表"的字面约束：布局补丁仍由宿主机制安装（`patch/` 资源通道），但**归属与生命周期**归 `stack_limit` 的 999 功能组。
+
 ### C4-0 Host SDK / Game Host ABI 冻结
 
 C4-0 追加冻结 `QolGameHost` minor `1`。既有字段顺序与签名保持不变，新增成员统一位于
