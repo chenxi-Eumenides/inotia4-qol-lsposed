@@ -29,24 +29,24 @@
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 159 | 31774 |
+| `plugins/` | 159 | 31859 |
 | `host/` | 19 | 4631 |
-| **合计** | **272** | **45093** |
+| **合计** | **272** | **45178** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_quality/`：6 文件 / 411 行
 - `plugins/attribute_range_display/`：4 文件 / 237 行
-- `plugins/autosell/`：15 文件 / 2259 行
+- `plugins/autosell/`：15 文件 / 2302 行
 - `plugins/core.ui/`：17 文件 / 2238 行
 - `plugins/craft_ui/`：4 文件 / 997 行
 - `plugins/custom_recipe/`：10 文件 / 2110 行
-- `plugins/extension_bag/`：40 文件 / 13439 行
-- `plugins/inventory_hooks/`：9 文件 / 2039 行
+- `plugins/extension_bag/`：40 文件 / 13464 行
+- `plugins/inventory_hooks/`：9 文件 / 2044 行
 - `plugins/native_choice/`：4 文件 / 402 行
 - `plugins/push_all/`：6 文件 / 308 行
 - `plugins/quest/`：4 文件 / 255 行
-- `plugins/save_backup/`：13 文件 / 4555 行
+- `plugins/save_backup/`：13 文件 / 4567 行
 - `plugins/simple_mode/`：6 文件 / 529 行
 - `plugins/special_equip/`：6 文件 / 547 行
 - `plugins/stack_limit/`：3 文件 / 414 行

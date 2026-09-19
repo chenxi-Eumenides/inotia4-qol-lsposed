@@ -2,10 +2,9 @@
 
 #include "plugins/autosell/view.h"
 
-#include "data/native/item_class.h"
+#include "game_access.h"
 #include "contracts/attribute_quality.h"
 #include "plugins/autosell/plugin.h"
-#include "game_access.h"
 
 #include <cstdint>
 
@@ -25,31 +24,46 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
     *out = autosell::ItemView{};
     if (ref.native_item == nullptr) return false;
     if (ref.category <= 0) return false;
-    // M-3 fail-closed：必需符号未解析（或 g_base 未就绪）时跳过该物品，
-    // 不得喂默认值（如 rarity=0）触发误售。
-    if (fn_get_rarity == nullptr || fn_is_jewel == nullptr || fn_item_is_real_equip == nullptr) {
+    const auto* game = qol::features::autosell::game_host();
+    if (game == nullptr || game->read_only.item.rarity == nullptr ||
+        game->read_only.item.is_jewel_category == nullptr ||
+        game->read_only.item.is_real_equip == nullptr ||
+        game->read_only.item.enchant_remaining == nullptr ||
+        game->read_only.item.socket_filled == nullptr ||
+        game->read_only.item.socket_total == nullptr) {
         return false;
     }
-    if (g_base == 0) return false;
 
     uint8_t* item = reinterpret_cast<uint8_t*>(ref.native_item);
     const int category = ref.category;
 
     // 装备判据用游戏自身的 ITEM_IsRealEquip：不可堆叠（item_is_equip）会把宝石/背包/
     // 徽章等非装备也判为真，导致 rarity/强化/孔数规则过匹配。
-    out->is_equip = fn_item_is_real_equip(ref.native_item) != 0;
-    out->rarity = fn_get_rarity(ref.native_item);
+    int32_t value = 0;
+    if (!qol::contracts::succeeded(game->read_only.item.is_real_equip(ref.native_item, &value))) {
+        return false;
+    }
+    out->is_equip = value != 0;
+    if (!qol::contracts::succeeded(game->read_only.item.rarity(ref.native_item, &out->rarity))) {
+        return false;
+    }
 
     // 强化/孔位位段拆解（auto-sell.md §3.1）：bits2-5=剩余强化次数（筛选口径）、
     // bits6-10=已强化次数、I_SOCKET bits0-3=已镶嵌数（后两者 >0 触发硬保护）、bits4-7=总孔数。
-    const uint16_t enchant = *reinterpret_cast<uint16_t*>(item + I_ENCHANT);
-    out->enhance_remaining = static_cast<int>((enchant >> 2) & 0x0F);
-    out->enhance_level = static_cast<int>((enchant >> 6) & 0x1F);
-    const uint8_t socket = *reinterpret_cast<uint8_t*>(item + I_SOCKET);
-    out->socket_filled = static_cast<int>(socket & 0x0F);
-    out->socket_total = static_cast<int>((socket >> 4) & 0x0F);
+    if (!qol::contracts::succeeded(
+            game->read_only.item.enchant_remaining(ref.native_item, &out->enhance_remaining)) ||
+        !qol::contracts::succeeded(
+            game->read_only.item.socket_filled(ref.native_item, &out->socket_filled)) ||
+        !qol::contracts::succeeded(
+            game->read_only.item.socket_total(ref.native_item, &out->socket_total))) {
+        return false;
+    }
 
-    out->is_jewel = fn_is_jewel(category) != 0;
+    if (!qol::contracts::succeeded(
+            game->read_only.item.is_jewel_category(category, &value))) {
+        return false;
+    }
+    out->is_jewel = value != 0;
     if (out->is_jewel) {
         // M-4：IsJewel 命中却 category < 28（闭区间 28..32）属异常，跳过，
         // 避免负 tier 落入宝石阈值命中区间。
@@ -85,11 +99,16 @@ bool autosell_build_view(const InventoryItemRef& ref, autosell::ItemView* out) {
     }
 
     uint32_t specials = 0;
-    if (item_is_backpack(category)) specials |= autosell::kSpecialBackpack;
+    if (game->read_only.item.is_backpack_category != nullptr &&
+        qol::contracts::succeeded(game->read_only.item.is_backpack_category(category, &value)) &&
+        value != 0) {
+        specials |= autosell::kSpecialBackpack;
+    }
     if (category >= kNormalSealFirst && category <= kNormalSealLast) {
         specials |= autosell::kSpecialNormalSeal;
     }
-    if (fn_is_dice != nullptr && fn_is_dice(category) != 0) {
+    if (game->read_only.item.is_dice != nullptr &&
+        qol::contracts::succeeded(game->read_only.item.is_dice(category, &value)) && value != 0) {
         specials |= autosell::kSpecialDice;
     }
     out->special_types = specials;

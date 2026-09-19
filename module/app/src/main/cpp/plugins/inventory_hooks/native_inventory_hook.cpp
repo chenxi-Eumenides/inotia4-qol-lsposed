@@ -1039,21 +1039,27 @@ uint64_t ok_destroy_item_wrapper() {
                             bag, slot, item);
         return call_backup();
     }
-    if (fn_get_bit == nullptr || fn_item_is_no_sell == nullptr ||
-        fn_item_get_sell_price == nullptr || fn_get_cumulate_count == nullptr) {
+    if (g_game == nullptr || g_game->read_only.item.category == nullptr ||
+        g_game->read_only.item.is_no_sell == nullptr ||
+        g_game->read_only.item.cumulate_count == nullptr ||
+        fn_item_get_sell_price == nullptr) {
         return call_backup();
     }
-    const uint16_t flags =
-        *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-    const int category = fn_get_bit(flags, 15, 6);
-    if (category <= 0 || fn_item_is_no_sell(category) != 0) {
+    int32_t category = 0;
+    int32_t no_sell = 0;
+    if (!qol::contracts::succeeded(g_game->read_only.item.category(item, &category)) ||
+        !qol::contracts::succeeded(g_game->read_only.item.is_no_sell(category, &no_sell)) ||
+        category <= 0 || no_sell != 0) {
         QOL_LOG_INFO(QolDomain::kInventory,
                             "vanilla sell backup reason=no_sell bag=%d slot=%d category=%d", bag,
                             slot, category);
         return call_backup();
     }
     // canonical 经已 hook 的 getter：启用态返回 128a+b 全量（R-49）。
-    const uint32_t canonical = static_cast<uint32_t>(fn_get_cumulate_count(item));
+    int32_t count = 0;
+    if (!qol::contracts::succeeded(g_game->read_only.item.cumulate_count(item, &count)) ||
+        count <= 0) return call_backup();
+    const uint32_t canonical = static_cast<uint32_t>(count);
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     int64_t price = 0;
     if (!vanilla_sell_money(unit_price, canonical, &price, item_count_api())) {

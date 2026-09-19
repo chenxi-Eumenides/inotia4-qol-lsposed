@@ -17,7 +17,6 @@
 #include "plugins/autosell/store.h"
 #include "plugins/autosell/view.h"
 #include "game_access.h"
-#include "game_state.h"
 
 #include <atomic>
 #include <cstdint>
@@ -64,7 +63,13 @@ struct PhysicalScanCtx {
 
 // 安全门控：世界态 + g_gamestate==0 + 扩展背包模块视图未安装（能力缺失视为未安装）。
 bool scan_gates_ok() {
-    if (!game_in_world()) return false;
+    const auto* game = qol::features::autosell::game_host();
+    if (game == nullptr || game->read_only.world.state == nullptr) return false;
+    int32_t world_state = -1;
+    if (!qol::contracts::succeeded(game->read_only.world.state(&world_state)) ||
+        world_state != 5) {
+        return false;
+    }
     const uint32_t gamestate =
         g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
     if (gamestate != 0) return false;
@@ -82,8 +87,11 @@ void process_ref(const InventoryItemRef& ref, const autosell::Config& cfg, ScanS
 
     // I-2 NoSell 预过滤：不可售物品直接跳过，不计失败、不打 WARN
     // （否则 inventory_trade::sell 会以 WARN 记 no_sell 并计入失败）。
-    if (fn_item_is_no_sell != nullptr && fn_item_is_no_sell(ref.category) != 0) {
-        return;
+    const auto* game = qol::features::autosell::game_host();
+    if (game != nullptr && game->read_only.item.is_no_sell != nullptr) {
+        int32_t no_sell = 0;
+        if (qol::contracts::succeeded(game->read_only.item.is_no_sell(ref.category, &no_sell)) &&
+            no_sell != 0) return;
     }
 
     // I-1：把建视图用的物品指针传入，处置前做身份复核（并发槽位改动则不结算）。
@@ -114,16 +122,23 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
         if (bag > kLastPhysicalBag) return false;
         if (item == nullptr) return false;
         PhysicalScanCtx* c = static_cast<PhysicalScanCtx*>(ctx);
-        const uint16_t flags =
-            *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : 0;
-        if (category <= 0) return false;
+        const auto* game = qol::features::autosell::game_host();
+        if (game == nullptr || game->read_only.item.category == nullptr) return false;
+        int32_t category = 0;
+        if (!qol::contracts::succeeded(game->read_only.item.category(item, &category)) ||
+            category <= 0) return false;
         InventoryItemRef ref;
         ref.kind = InventoryItemKind::kOriginal;
         ref.bag = bag;
         ref.slot = slot;
         ref.category = category;
-        ref.count = fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1;
+        ref.count = 1;
+        if (game->read_only.item.cumulate_count != nullptr) {
+            int32_t count = 0;
+            if (qol::contracts::succeeded(game->read_only.item.cumulate_count(item, &count))) {
+                ref.count = count;
+            }
+        }
         ref.native_item = item;
         process_ref(ref, *c->cfg, c->stats);
         return false;  // 继续遍历

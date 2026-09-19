@@ -182,6 +182,40 @@ thread_local bool g_refresh_restore_suppress = false;
 thread_local bool g_in_native_call = false;
 void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
+bool read_item_category(const void* item, int* out_category) {
+    if (g_game == nullptr || g_game->read_only.item.category == nullptr ||
+        item == nullptr || out_category == nullptr) return false;
+    int32_t category = 0;
+    if (!qol::contracts::succeeded(
+            g_game->read_only.item.category(item, &category))) return false;
+    *out_category = category;
+    return true;
+}
+
+bool read_item_cumulate_count(const void* item, int* out_count) {
+    if (g_game == nullptr || g_game->read_only.item.cumulate_count == nullptr ||
+        item == nullptr || out_count == nullptr) return false;
+    int32_t count = 0;
+    if (!qol::contracts::succeeded(
+            g_game->read_only.item.cumulate_count(item, &count))) return false;
+    *out_count = count;
+    return true;
+}
+
+bool read_item_is_jewel(int category) {
+    if (g_game == nullptr || g_game->read_only.item.is_jewel_category == nullptr) return false;
+    int32_t is_jewel = 0;
+    return qol::contracts::succeeded(
+               g_game->read_only.item.is_jewel_category(category, &is_jewel)) &&
+           is_jewel != 0;
+}
+
+bool read_world_in_world() {
+    if (g_game == nullptr || g_game->read_only.world.state == nullptr) return false;
+    int32_t state = -1;
+    return qol::contracts::succeeded(g_game->read_only.world.state(&state)) && state == 5;
+}
+
 struct NativeCallScope {
     const bool previous = g_in_native_call;
 
@@ -491,7 +525,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         const int source_category = extension_source
             ? g_virtual_bag_state.items[source_bag][source_slot].category : 0;
         const bool source_is_apply_material = extension_source &&
-            ((fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
+            (read_item_is_jewel(source_category) ||
              (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0));
         // H-15 装备槽事件适配（R-50）：目标必须是装备类（item_is_equip 判定；
         // 类别数据不可用时 item_is_equip 为假，按非装备 fail-closed 直通原版
@@ -705,8 +739,8 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
         // 与 getter 的 observed_before 同域参与扣减判定。
         const int before_count = static_cast<int>(virtual_bag_effective_count(
             item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
-        const int observed_before = fn_get_cumulate_count != nullptr
-            ? fn_get_cumulate_count(item) : before_count;
+        int observed_before = before_count;
+        (void)read_item_cumulate_count(item, &observed_before);
         if (!consume_extension_item_after_native_locked(
                 bag, slot, item, before_count, observed_before, "native_consume", use_token)) {
             return false;
@@ -789,8 +823,10 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
         equip_descriptor.payload = payload;
         equip_descriptor.payload_size = payload_size;
         // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
-        equip_descriptor.count = fn_get_cumulate_count != nullptr
-            ? canonical_item_count(equip_item) : equip_descriptor.count;
+        int equip_count = 0;
+        if (read_item_cumulate_count(equip_item, &equip_count)) {
+            equip_descriptor.count = canonical_item_count(equip_item);
+        }
         g_module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
         g_item_state_dirty = true;
         persist_state_locked();
@@ -828,7 +864,7 @@ std::string extension_bag_not_ready_error_locked() {
 }
 
 bool extension_bag_ready_locked() {
-    return g_virtual_bag_enabled.load() && game_in_world();
+    return g_virtual_bag_enabled.load() && read_world_in_world();
 }
 
 int extension_internal_bag(int logical_bag) {
@@ -948,10 +984,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         virtual_bag::Item& descriptor = g_virtual_bag_state.items[adopt_bag][adopt_slot];
         descriptor.payload = payload;
         descriptor.payload_size = payload_size;
-        descriptor.category = fn_get_bit != nullptr
-            ? fn_get_bit(*reinterpret_cast<uint16_t*>(
-                  reinterpret_cast<uint8_t*>(item) + I_TYPE), 15, 6)
-            : 0;
+        (void)read_item_category(item, &descriptor.category);
         // 袋对象 count 恒为 1（本路径只处理袋物品）。不能用
         // fn_get_cumulate_count：CreateItem 后 +0x10 高位 count 区为 0，
         // 读得 0 会让收编袋显示为空槽（下次收编仍会选中它）。
@@ -1158,14 +1191,14 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     virtual_bag::Item& descriptor = g_virtual_bag_state.items[dst_bag][dst_slot];
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
-    descriptor.category = fn_get_bit != nullptr
-        ? fn_get_bit(*reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE),
-                     15, 6)
-        : 0;
+    (void)read_item_category(item, &descriptor.category);
     // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）：
     // 卸下收编的物品数量位保留完整 128a+b。
-    descriptor.count = fn_get_cumulate_count != nullptr
-        ? canonical_item_count(item) : 1;
+    descriptor.count = 1;
+    int item_count = 0;
+    if (read_item_cumulate_count(item, &item_count)) {
+        descriptor.count = canonical_item_count(item);
+    }
     // 装备槽对象仍被原版 UI（装备槽 desc/控件缓存）引用，不能释放给对象池；
     // 直接收编为扩展槽的物化对象（与 equip_module_item_on_character_locked
     // 对旧装备的收编同规则）。
@@ -1221,7 +1254,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     if (req.item == nullptr || !g_virtual_bag_enabled.load()) {
         return VirtualBagPlaceOutcome::kNotApplicable;
     }
-    if (req.require_world && !game_in_world()) {
+    if (req.require_world && !read_world_in_world()) {
         return VirtualBagPlaceOutcome::kNotApplicable;
     }
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -1236,14 +1269,11 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     if (!serialize_item_payload_locked(req.item, &payload, &payload_size)) {
         return VirtualBagPlaceOutcome::kRejected;
     }
-    const int category = fn_get_bit != nullptr
-        ? fn_get_bit(*reinterpret_cast<uint16_t*>(
-              reinterpret_cast<uint8_t*>(req.item) + I_TYPE), 15, 6)
-        : 0;
+    int category = 0;
+    (void)read_item_category(req.item, &category);
     // descriptor.count 恒为 canonical（R-38/R-48）：getter 关闭态只返回 b 视图，
     // 必须按 S2 解码保存完整 128a+b，否则 sidecar 读档会把 a 段对齐抹掉。
-    int canonical_count = fn_get_cumulate_count != nullptr
-        ? canonical_item_count(req.item) : 1;
+    int canonical_count = canonical_item_count(req.item);
     if (canonical_count <= 0) canonical_count = 1;
     const bool limit_enabled = virtual_bag_extended_mode(req.item);
     virtual_bag::Item source{};
@@ -1358,7 +1388,7 @@ bool virtual_bag_adopt_native_item(void* item) {
 // 定义在匿名 namespace 之外（port 跨 TU 调用）；依赖的本 TU 匿名 namespace
 // 函数（category_is_extension_backpack 等）在 TU 内可见。
 VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
-    if (!g_virtual_bag_enabled.load() || !game_in_world()) {
+    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) {
         return VirtualBagEquipButtonResult::kNotExtension;
     }
     std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
@@ -1374,11 +1404,9 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     int src_bag = -1;
     int src_slot = -1;
     const bool from_extension = module_slot_of_item_locked(item, &src_bag, &src_slot);
-    const uint16_t flags =
-        *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-    const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
-    const bool jewel =
-        category >= 0 && fn_is_jewel != nullptr && fn_is_jewel(category) != 0;
+    int category = -1;
+    const bool category_read = read_item_category(item, &category);
+    const bool jewel = category_read && read_item_is_jewel(category);
     if (jewel) return VirtualBagEquipButtonResult::kNotExtension;
     if (!category_is_extension_backpack(category)) {
         // 扩展槽装备物品 → 装备到角色（原详情按钮 PtrHook 职责，函数 hook 化；
@@ -1507,7 +1535,7 @@ bool virtual_bag_handle_backpack_button_equip() {
 bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
     if (out_no_space != nullptr) *out_no_space = false;
     if (out_not_empty != nullptr) *out_not_empty = false;
-    if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
+    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return false;
     std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     if (g_base == 0) return false;
@@ -1618,10 +1646,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     virtual_bag::Item& descriptor = g_virtual_bag_state.items[adopt_bag][adopt_slot];
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
-    descriptor.category = fn_get_bit != nullptr
-        ? fn_get_bit(*reinterpret_cast<uint16_t*>(
-              reinterpret_cast<uint8_t*>(item) + I_TYPE), 15, 6)
-        : 0;
+    (void)read_item_category(item, &descriptor.category);
     descriptor.count = 1;
     uint32_t adopted_handle = 0;
     if (ownership::allocate(&g_ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {

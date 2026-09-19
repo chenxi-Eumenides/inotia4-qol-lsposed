@@ -502,30 +502,41 @@ void apply_backups_locked(std::vector<BackupEntry>& entries) {
 // 读三槽元数据到 out（无共享状态，锁外调用；必须在游戏线程执行，见 refresh_slots_on_game_thread）。
 // 口径与 save_backup.cpp:read_hero_meta / api/native/game_save.cpp:data_save_slots_json 一致：
 // 主菜单（STATE==4）下 SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局，仅此状态调用；
-// 其余状态只读现有槽结构。feature 侧只经 game_access.h 的 fn_* 与 game_symbols.h 常量访问游戏。
+// 其余状态只读现有槽结构。槽元数据经 Game Host 读取；map_id 尚未进入契约，保留旧字段读取。
 void read_slots_into(SlotInfo out[3]) {
     for (int i = 0; i < 3; ++i) out[i] = SlotInfo{};
-    if (fn_save_get_save_slot == nullptr || fn_saveslot_get_hero == nullptr ||
-        fn_save_destroy_save_slot == nullptr || fn_save_create_save_slot == nullptr) return;
+    const auto* game = save_backup_game_host();
+    if (game == nullptr || game->read_only.save.slot_exists == nullptr ||
+        game->read_only.save.slot_hero_index == nullptr ||
+        game->read_only.save.hero_level == nullptr ||
+        game->read_only.save.hero_class == nullptr ||
+        fn_save_get_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||
+        fn_save_create_save_slot == nullptr) return;
     // 与 data_save_slots_json / read_hero_meta 口径一致：同一次主菜单停留内只重载一次
     // （反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
     save_slots_refresh_if_stale();
     for (int i = 0; i < 3; ++i) {
-        void* slot = fn_save_get_save_slot(i);
-        if (slot == nullptr) continue;
-        uint8_t* p = reinterpret_cast<uint8_t*>(slot);
-        if (p[SAVESLOT_EXISTS] == 0) continue;
+        int32_t exists = 0;
+        if (!qol::contracts::succeeded(game->read_only.save.slot_exists(i, &exists)) ||
+            exists == 0) continue;
         out[i].exists = true;
-        out[i].hero_index = static_cast<int8_t>(
-            *reinterpret_cast<const int8_t*>(p + SAVESLOT_HERO_INDEX));
-        out[i].map_id = static_cast<int>(
-            *reinterpret_cast<const uint16_t*>(p + SAVESLOT_MAP_ID));
-        void* hero = fn_saveslot_get_hero(slot);
-        if (hero == nullptr) continue;
-        uint8_t* hp = reinterpret_cast<uint8_t*>(hero);
-        out[i].hero_level = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_LEVEL));
-        // 职业索引 0-5（hero 结构 C_CLASS）；越界/异常值由 UI 端 save_backup_class_name 兜底。
-        out[i].class_idx = static_cast<int8_t>(*reinterpret_cast<const int8_t*>(hp + C_CLASS));
+        int32_t value = 0;
+        if (qol::contracts::succeeded(game->read_only.save.slot_hero_index(i, &value))) {
+            out[i].hero_index = value;
+        }
+        if (qol::contracts::succeeded(game->read_only.save.hero_level(i, &value))) {
+            out[i].hero_level = value;
+        }
+        if (qol::contracts::succeeded(game->read_only.save.hero_class(i, &value))) {
+            out[i].class_idx = value;
+        }
+        // QolSaveReadOnlyApi 尚未暴露 map_id；仅保留该字段的旧读取路径。
+        void* slot = fn_save_get_save_slot(i);
+        if (slot != nullptr) {
+            const uint8_t* p = reinterpret_cast<const uint8_t*>(slot);
+            out[i].map_id = static_cast<int>(
+                *reinterpret_cast<const uint16_t*>(p + SAVESLOT_MAP_ID));
+        }
     }
 }
 

@@ -97,7 +97,7 @@ ContainerStatus store_delete_slot(int slot) {
 }
 
 bool save_api_ready() {
-    return g_game != nullptr && g_game->extra.save.load_data != nullptr &&
+    return g_game != nullptr && g_game->read_only.save.load_data != nullptr &&
            g_game->extra.save_call.free_data != nullptr;
 }
 
@@ -106,9 +106,9 @@ bool save_encrypt_available() {
 }
 
 const char* save_hub_key() {
-    if (g_game == nullptr || g_game->extra.save.hub_key == nullptr) return nullptr;
+    if (g_game == nullptr || g_game->read_only.save.hub_key == nullptr) return nullptr;
     const char* key = nullptr;
-    if (!qol::contracts::succeeded(g_game->extra.save.hub_key(&key))) return nullptr;
+    if (!qol::contracts::succeeded(g_game->read_only.save.hub_key(&key))) return nullptr;
     return key;
 }
 
@@ -398,24 +398,25 @@ void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_i
     hero_level = -1;
     hero_index = -1;
     class_idx = -1;
-    if (g_game == nullptr || g_game->extra.save.slot_exists == nullptr ||
-        g_game->extra.save.slot_hero_index == nullptr ||
-        g_game->extra.save.hero_level == nullptr || g_game->extra.save.hero_class == nullptr) {
+    if (g_game == nullptr || g_game->read_only.save.slot_exists == nullptr ||
+        g_game->read_only.save.slot_hero_index == nullptr ||
+        g_game->read_only.save.hero_level == nullptr ||
+        g_game->read_only.save.hero_class == nullptr) {
         return;
     }
     int32_t exists = 0;
-    if (!qol::contracts::succeeded(g_game->extra.save.slot_exists(slot, &exists)) || exists == 0) {
+    if (!qol::contracts::succeeded(g_game->read_only.save.slot_exists(slot, &exists)) || exists == 0) {
         return;
     }
     int32_t value = 0;
-    if (qol::contracts::succeeded(g_game->extra.save.slot_hero_index(slot, &value))) {
+    if (qol::contracts::succeeded(g_game->read_only.save.slot_hero_index(slot, &value))) {
         hero_index = value;
     }
-    if (qol::contracts::succeeded(g_game->extra.save.hero_level(slot, &value))) {
+    if (qol::contracts::succeeded(g_game->read_only.save.hero_level(slot, &value))) {
         hero_level = value;
     }
     // 职业索引（0-5）；type==2 装饰物该字段非职业，但本路径取的是主角 hero 结构。
-    if (qol::contracts::succeeded(g_game->extra.save.hero_class(slot, &value))) {
+    if (qol::contracts::succeeded(g_game->read_only.save.hero_class(slot, &value))) {
         class_idx = value;
     }
 }
@@ -431,7 +432,7 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
     }
     void* buf = nullptr;
     int len = 0;
-    const QolResult load_result = g_game->extra.save.load_data(slot, &buf, &len);
+    const QolResult load_result = g_game->read_only.save.load_data(slot, &buf, &len);
     if (!qol::contracts::succeeded(load_result) || buf == nullptr || len < 8) {
         if (buf != nullptr) (void)g_game->extra.save_call.free_data(buf);
         if (load_result.code == kQolErrNotReady) err = "symbol not resolved";

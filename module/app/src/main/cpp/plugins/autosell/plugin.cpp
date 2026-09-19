@@ -41,6 +41,7 @@ const contracts::CapabilityRequirement kRequires[] = {
 
 uint64_t g_config_subscription = 0;
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
 std::atomic<bool> g_gate{false};
 
 // 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
@@ -115,6 +116,7 @@ bool config_enabled() {
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
+    g_game = ctx.game;
     if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr ||
         g_sdk->events.subscribe == nullptr || g_sdk->events.unsubscribe == nullptr ||
         g_sdk->panels.register_provider == nullptr ||
@@ -147,6 +149,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         g_config_subscription = 0;
     }
     autosell_unregister_save_callbacks();
+    g_game = nullptr;
     apply_gate(false);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
         (void)g_sdk->panels.unregister_owner(kPluginId);
@@ -193,6 +196,10 @@ const contracts::PluginDescriptor& plugin_descriptor() {
 
 const contracts::QolHostSdk* host_sdk() {
     return g_sdk;
+}
+
+const contracts::QolGameHost* game_host() {
+    return g_game;
 }
 
 }  // namespace qol::features::autosell

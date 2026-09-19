@@ -3,7 +3,6 @@
 #include <cassert>
 
 #include "core/native/sell_price.h"
-#include "data/native/game_symbols.h"
 
 int stage4_have_item(int32_t category, Stage4HaveBackup backup,
                      Stage4CountExtension extension_count, bool& recursive_guard) {
