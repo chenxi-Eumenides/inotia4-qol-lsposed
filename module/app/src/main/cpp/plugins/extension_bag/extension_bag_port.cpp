@@ -8,15 +8,31 @@
 #include "core/native/sell_price.h"
 #include "contracts/stack_codec.h"
 #include "contracts/stack_limit.h"
-#include "infra/capabilities.h"
+#include "contracts/host_sdk.h"
 
-// D2b 过渡访问器（声明见 core/native/extension_bag_port.h）：game 层不能直接 require
-// infra，经此后取能力接口。每次调用 require，不缓存；能力缺失/撤销中返回 nullptr。
+namespace {
+
+const qol::contracts::QolHostSdk* g_sdk = nullptr;
+
+}
+
+void qol::features::extension_bag::extension_bag_bind_port_sdk(
+    const qol::contracts::QolHostSdk* sdk) {
+    g_sdk = sdk;
+}
+
+// D2b 过渡访问器（声明见 core/native/extension_bag_port.h）：每次调用 require，不缓存
+// capability 接口；能力缺失/撤销中返回 nullptr。
 const qol::contracts::ExtensionBagApi* extension_bag_capability() {
-    return static_cast<const qol::contracts::ExtensionBagApi*>(qol::infra::require_capability(
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
         qol::contracts::kExtensionBagCapabilityId,
         QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
-                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)}));
+                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
+        &iface);
+    if (result.ok != kQolOk) return nullptr;
+    return static_cast<const qol::contracts::ExtensionBagApi*>(iface);
 }
 
 namespace {

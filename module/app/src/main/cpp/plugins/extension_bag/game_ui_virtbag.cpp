@@ -3,9 +3,11 @@
 #include "game_access.h"
 #include "game_inventory.h"
 #include "game_ops_common.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
+#include "contracts/ui.h"
 #include "contracts/ownership.h"
 #include "contracts/inventory_refresh.h"
-#include "hooks/popup_state.h"
 #include "game_ptr_hook.h"
 #include "game_state.h"
 #include "game_symbols.h"
@@ -21,9 +23,6 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/extension_bag_logging.h"
-#include "game/access/ui_kit.h"
-#include "infra/capabilities.h"
-#include "infra/scheduler.h"
 
 #include <atomic>
 #include <chrono>
@@ -80,7 +79,9 @@ std::mutex g_move_merge_mtx;
 std::atomic<bool> g_move_merge_requested{false};
 std::atomic<bool> g_extension_source_protection_requested{false};
 // 生命周期节拍帧任务（D2a-3c：原 150ms 线程体迁 infra::scheduler，主线程执行）。
-qol::infra::FrameTaskId g_lifecycle_task = 0;
+uint64_t g_lifecycle_task = 0;
+const qol::contracts::QolHostSdk* g_sdk = nullptr;
+const qol::contracts::QolGameHost* g_game = nullptr;
 int g_lifecycle_last_state = -1;
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
 std::atomic<bool> g_virtual_bag_enabled{false};
@@ -270,6 +271,31 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 #include "plugins/extension_bag/extension_bag_runtime.inc"
 }  // namespace
 
+namespace qol::features::extension_bag {
+
+bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
+                             const qol::contracts::QolGameHost* game) {
+    if (sdk == nullptr || game == nullptr || sdk->ui == nullptr ||
+        sdk->abi.size < sizeof(qol::contracts::QolHostSdk) ||
+        sdk->abi.major != qol::contracts::kHostSdkMajor ||
+        game->abi.size < sizeof(qol::contracts::QolGameHost) ||
+        game->abi.major != qol::contracts::kGameHostMajor ||
+        sdk->ui->size < sizeof(qol::contracts::QolUiAdapter) ||
+        sdk->ui->major != qol::contracts::kUiAdapterMajor ||
+        sdk->hooks.popup_resolve == nullptr || sdk->hooks.popup_acquire == nullptr ||
+        sdk->hooks.popup_restore == nullptr || sdk->scheduler.add == nullptr ||
+        sdk->scheduler.remove == nullptr || sdk->capabilities.require == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return false;
+    }
+    g_sdk = sdk;
+    g_game = game;
+    return true;
+}
+
+}  // namespace qol::features::extension_bag
+
 bool virtual_bag_native_call_active() {
     return g_in_native_call;
 }
@@ -279,11 +305,15 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
     // D2c-2b-1：经 inventory_refresh capability 现取 raw-original trampoline；能力缺失
     // （provider 未安装/撤销中）按既有 no-op 降级——不直呼 fn_ui_equip_refresh_item_area，
     // 否则会经已被 hook 的入口回入 wrapper（原 trampoline 存在的唯一原因）。
-    const auto* refresh = static_cast<const qol::contracts::InventoryRefreshApi*>(
-        qol::infra::require_capability(
-            qol::contracts::kInventoryRefreshCapabilityId,
-            QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
-                            static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)}));
+    const void* refresh_iface = nullptr;
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return;
+    const QolResult refresh_result = g_sdk->capabilities.require(
+        qol::contracts::kInventoryRefreshCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)},
+        &refresh_iface);
+    const auto* refresh = refresh_result.ok == kQolOk
+        ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface) : nullptr;
     if (refresh != nullptr && refresh->call_original != nullptr) {
         refresh->call_original();
     }

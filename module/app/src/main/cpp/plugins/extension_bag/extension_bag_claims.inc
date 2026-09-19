@@ -26,10 +26,10 @@ constexpr const char* kEbX1MoveMerge = "ptrslot:MOVE_MERGE_GOT";
 constexpr const char* kEbGateKey = "extensionBagEnabled";
 
 // PopupState 占用条目：资源事务 acquire 写入、release 写回（主线程）。
-::qol::hooks::PopupStateEntry g_inventory_popup_entry{};
-::qol::hooks::PopupStateEntry g_save_popup_entry{};
-::qol::hooks::PopupStateEntry g_store_popup_entry{};
-::qol::hooks::PopupStateEntry g_mix_popup_entry{};
+::qol::contracts::QolPopupStateEntry g_inventory_popup_entry{};
+::qol::contracts::QolPopupStateEntry g_save_popup_entry{};
+::qol::contracts::QolPopupStateEntry g_store_popup_entry{};
+::qol::contracts::QolPopupStateEntry g_mix_popup_entry{};
 
 // 从安装前快照读取函数指针/整数（部分 wrap 与原生 backup 同源）。
 template <typename T>
@@ -57,19 +57,21 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_inventory_popup_entry.slot != nullptr) return 0;
-    ::qol::hooks::PopupStateEntry entry{};
-    if (!::qol::hooks::popup_state_resolve_symbol("F_PANEL_INVENTORY_ENTER", &entry)) return 1;
+    ::qol::contracts::QolPopupStateEntry entry{};
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
+        g_sdk->hooks.popup_resolve("F_PANEL_INVENTORY_ENTER", &entry).ok != kQolOk) return 1;
     const uintptr_t expected_event =
         g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
     if (extension_bag_backup_uptr(entry.backup, POPUP_ENTRY_EVENT) != expected_event) return 1;
-    const ::qol::hooks::PopupStateHooks h{
+    const ::qol::contracts::QolPopupStateHooks h{
         &virtual_bag_inventory_enter_wrapper,
         nullptr,
         &virtual_bag_f3_wrapper,
         nullptr,
         &virtual_bag_event_32,
     };
-    if (!::qol::hooks::popup_state_acquire(&entry, h)) return 1;
+    if (g_sdk->hooks.popup_acquire == nullptr ||
+        g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_inventory_popup_entry = entry;
     g_state_entry = entry.slot;
     g_orig_enter = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
@@ -80,7 +82,10 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
 void extension_bag_inventory_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_inventory_popup_entry.slot != nullptr) ::qol::hooks::popup_state_restore(&g_inventory_popup_entry);
+    if (g_inventory_popup_entry.slot != nullptr && g_sdk != nullptr &&
+        g_sdk->hooks.popup_restore != nullptr) {
+        (void)g_sdk->hooks.popup_restore(&g_inventory_popup_entry);
+    }
     g_state_entry = nullptr;
     g_orig_enter = nullptr;
     g_orig_f3 = nullptr;
@@ -92,11 +97,13 @@ int32_t extension_bag_save_popup_acquire(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_save_popup_entry.slot != nullptr) return 0;
-    ::qol::hooks::PopupStateEntry entry{};
-    if (!::qol::hooks::popup_state_resolve_symbol("F_PANEL_SAVE_SLOT_ENTER", &entry)) return 1;
-    const ::qol::hooks::PopupStateHooks h{
+    ::qol::contracts::QolPopupStateEntry entry{};
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
+        g_sdk->hooks.popup_resolve("F_PANEL_SAVE_SLOT_ENTER", &entry).ok != kQolOk) return 1;
+    const ::qol::contracts::QolPopupStateHooks h{
         &virtual_bag_save_panel_enter_wrapper, nullptr, nullptr, nullptr, nullptr};
-    if (!::qol::hooks::popup_state_acquire(&entry, h)) return 1;
+    if (g_sdk->hooks.popup_acquire == nullptr ||
+        g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_save_popup_entry = entry;
     g_save_state_entry = entry.slot;
     g_orig_save_enter = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
@@ -106,7 +113,10 @@ int32_t extension_bag_save_popup_acquire(const char* id) {
 void extension_bag_save_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_save_popup_entry.slot != nullptr) ::qol::hooks::popup_state_restore(&g_save_popup_entry);
+    if (g_save_popup_entry.slot != nullptr && g_sdk != nullptr &&
+        g_sdk->hooks.popup_restore != nullptr) {
+        (void)g_sdk->hooks.popup_restore(&g_save_popup_entry);
+    }
     g_save_state_entry = nullptr;
     g_orig_save_enter = nullptr;
     g_save_panel_hook_installed = false;
@@ -117,19 +127,21 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_store_popup_entry.slot != nullptr) return 0;
-    ::qol::hooks::PopupStateEntry entry{};
-    if (!::qol::hooks::popup_state_resolve_symbol("F_PANEL_SHOP_ENTER", &entry)) return 1;
+    ::qol::contracts::QolPopupStateEntry entry{};
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
+        g_sdk->hooks.popup_resolve("F_PANEL_SHOP_ENTER", &entry).ok != kQolOk) return 1;
     const uintptr_t expected_event =
         g_base + fn_resolve("F_SCENE_EVENT_STORE_VMA", F_SCENE_EVENT_STORE_VMA);
     if (extension_bag_backup_uptr(entry.backup, POPUP_ENTRY_EVENT) != expected_event) return 1;
-    const ::qol::hooks::PopupStateHooks h{
+    const ::qol::contracts::QolPopupStateHooks h{
         &store_enter_wrapper,
         nullptr,
         &store_f3_wrapper,
         nullptr,
         &store_event_32,
     };
-    if (!::qol::hooks::popup_state_acquire(&entry, h)) return 1;
+    if (g_sdk->hooks.popup_acquire == nullptr ||
+        g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_store_popup_entry = entry;
     store_state_entry = entry.slot;
     store_original_enter =
@@ -143,7 +155,10 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
 void extension_bag_store_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_store_popup_entry.slot != nullptr) ::qol::hooks::popup_state_restore(&g_store_popup_entry);
+    if (g_store_popup_entry.slot != nullptr && g_sdk != nullptr &&
+        g_sdk->hooks.popup_restore != nullptr) {
+        (void)g_sdk->hooks.popup_restore(&g_store_popup_entry);
+    }
     store_state_entry = nullptr;
     store_original_enter = nullptr;
     store_original_f3 = nullptr;
@@ -155,14 +170,16 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_mix_popup_entry.slot != nullptr) return 0;
-    ::qol::hooks::PopupStateEntry entry{};
-    if (!::qol::hooks::popup_state_resolve_symbol("F_PANEL_CRAFT_ENTER", &entry)) return 1;
+    ::qol::contracts::QolPopupStateEntry entry{};
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
+        g_sdk->hooks.popup_resolve("F_PANEL_CRAFT_ENTER", &entry).ok != kQolOk) return 1;
     const uintptr_t expected_event =
         g_base + fn_resolve("F_SCENE_EVENT_MIX_VMA", F_SCENE_EVENT_MIX_VMA);
     if (extension_bag_backup_uptr(entry.backup, POPUP_ENTRY_EVENT) != expected_event) return 1;
-    const ::qol::hooks::PopupStateHooks h{
+    const ::qol::contracts::QolPopupStateHooks h{
         &mix_enter_wrapper, nullptr, &mix_f3_wrapper, nullptr, nullptr};
-    if (!::qol::hooks::popup_state_acquire(&entry, h)) return 1;
+    if (g_sdk->hooks.popup_acquire == nullptr ||
+        g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_mix_popup_entry = entry;
     mix_state_entry = entry.slot;
     mix_original_enter =
@@ -173,7 +190,10 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
 void extension_bag_mix_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_mix_popup_entry.slot != nullptr) ::qol::hooks::popup_state_restore(&g_mix_popup_entry);
+    if (g_mix_popup_entry.slot != nullptr && g_sdk != nullptr &&
+        g_sdk->hooks.popup_restore != nullptr) {
+        (void)g_sdk->hooks.popup_restore(&g_mix_popup_entry);
+    }
     mix_state_entry = nullptr;
     mix_original_enter = nullptr;
     mix_original_f3 = nullptr;

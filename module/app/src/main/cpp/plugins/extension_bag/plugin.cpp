@@ -4,8 +4,6 @@
 #include <cstring>
 
 #include "contracts/events.h"
-#include "infra/config.h"
-#include "infra/events.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/move_merge.h"
 
@@ -37,8 +35,11 @@ constexpr const char* kPluginId = "extension_bag";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kMoveMergeGateKey = "moveMergeEnabled";
 
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
+
 // moveMergeEnabled 配置变更订阅句柄；deactivate 时成对注销（install 幂等重入）。
-infra::SubscriptionId g_config_subscription = 0;
+uint64_t g_config_subscription = 0;
 
 void on_config_changed(void* ctx, const void* payload) {
     (void)ctx;
@@ -64,14 +65,34 @@ const qol::contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 int plugin_install(qol::contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_sdk = ctx.sdk;
+    g_game = ctx.game;
+    if (ctx.struct_size < sizeof(qol::contracts::PluginContext) ||
+        ctx.sdk_major != qol::contracts::kHostSdkMajor ||
+        ctx.sdk == nullptr || ctx.game == nullptr ||
+        ctx.sdk->config.get_bool == nullptr || ctx.sdk->events.subscribe == nullptr ||
+        ctx.sdk->events.unsubscribe == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        extension_bag_bind_port_sdk(nullptr);
+        return 1;
+    }
+    if (!extension_bag_bind_host(g_sdk, g_game)) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        extension_bag_bind_port_sdk(nullptr);
+        return 1;
+    }
+    extension_bag_bind_port_sdk(g_sdk);
     // 自身初始化：资源由宿主声明式安装；gate 键 extensionBagEnabled 由
     // nativeSetExtensionBagEnabled 经命令端口写入。moveMergeEnabled 读初始值并订阅
     // 配置变更（inactive→resolving 幂等重入：已订阅不重复订阅）。
-    set_move_merge_enabled(infra::config_get_bool(kMoveMergeGateKey, false));
+    int32_t move_merge_enabled = 0;
+    (void)g_sdk->config.get_bool(kMoveMergeGateKey, 0, &move_merge_enabled);
+    set_move_merge_enabled(move_merge_enabled != 0);
     if (g_config_subscription == 0) {
-        g_config_subscription =
-            infra::subscribe(qol::contracts::kEventConfigChanged, &on_config_changed, nullptr);
+        (void)g_sdk->events.subscribe(qol::contracts::kEventConfigChanged, &on_config_changed,
+                                      nullptr, &g_config_subscription);
     }
     return 0;
 }
@@ -81,8 +102,9 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     // 幂等：退订后置 0，便于再次 install 重新订阅；move_merge 请求标志保持（与旧
     // 独立 JNI 开关语义一致，deactivate 不重置），资源归还包括 PopupState 回写与
     // X1 槽还原（宿主引擎执行）；本回调只关业务启用标志。
-    if (g_config_subscription != 0) {
-        infra::unsubscribe(g_config_subscription);
+    if (g_config_subscription != 0 && g_sdk != nullptr &&
+        g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_config_subscription);
         g_config_subscription = 0;
     }
     extension_bag_set_enabled(false);

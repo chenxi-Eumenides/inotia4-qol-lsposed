@@ -440,10 +440,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 // 生命周期节拍（D2a-3c）：原 150ms 轮询线程体的主线程化，改由 infra::scheduler 帧任务
 // （kLogicPre，节流 30 帧，count=0 常驻）。锁纪律与原线程逐点一致：g_virtual_bag_mtx
 // 短临界区包住 prepare_main_menu_locked；R-44 不变量不变。
-bool extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
+int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
-    if (g_state == nullptr) return true;
+    if (g_state == nullptr) return 1;
     const int state = static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
     if (g_lifecycle_last_state == 5 && state != 5) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -464,19 +464,24 @@ bool extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
         }
     }
     g_lifecycle_last_state = state;
-    return true;
+    return 1;
 }
 
 void ensure_lifecycle_task() {
     if (g_lifecycle_task != 0) return;
     g_lifecycle_last_state = -1;
-    g_lifecycle_task = ::qol::infra::scheduler_add(
-        ::qol::infra::FramePoint::kLogicPre, &extension_bag_lifecycle_tick, nullptr, 30, 0);
+    if (g_sdk == nullptr || g_sdk->scheduler.add == nullptr) return;
+    uint64_t task = 0;
+    const QolResult result = g_sdk->scheduler.add(1, &extension_bag_lifecycle_tick, nullptr, 30, 0,
+                                                  &task);
+    if (result.ok == kQolOk) g_lifecycle_task = task;
 }
 
 void remove_lifecycle_task() {
     if (g_lifecycle_task == 0) return;
-    ::qol::infra::scheduler_remove(g_lifecycle_task);
+    if (g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+        (void)g_sdk->scheduler.remove(g_lifecycle_task);
+    }
     g_lifecycle_task = 0;
 }
 

@@ -96,15 +96,22 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                         // refresh trampoline` 改经 inventory_refresh capability 现取；能力缺失
                         // （provider 未安装/撤销中）保持既有 no-op 语义（不直呼符号入口，避免
                         // 经 hook 回入 wrapper）。
-                        const auto* refresh =
-                            static_cast<const ::qol::contracts::InventoryRefreshApi*>(
-                                ::qol::infra::require_capability(
-                                    ::qol::contracts::kInventoryRefreshCapabilityId,
-                                    QolVersionRange{
-                                        static_cast<uint16_t>(
-                                            ::qol::contracts::kInventoryRefreshVersionMajor),
-                                        static_cast<uint16_t>(
-                                            ::qol::contracts::kInventoryRefreshVersionMinor)}));
+                        const void* refresh_iface = nullptr;
+                        const QolResult refresh_result =
+                            g_sdk != nullptr && g_sdk->capabilities.require != nullptr
+                                ? g_sdk->capabilities.require(
+                                      ::qol::contracts::kInventoryRefreshCapabilityId,
+                                      QolVersionRange{
+                                          static_cast<uint16_t>(
+                                              ::qol::contracts::kInventoryRefreshVersionMajor),
+                                          static_cast<uint16_t>(
+                                              ::qol::contracts::kInventoryRefreshVersionMinor)},
+                                      &refresh_iface)
+                                : QolResult{1, kQolErrNotReady, nullptr, 0};
+                        const auto* refresh = refresh_result.ok == kQolOk
+                            ? static_cast<const ::qol::contracts::InventoryRefreshApi*>(
+                                  refresh_iface)
+                            : nullptr;
                         if (refresh != nullptr && refresh->call_original != nullptr) {
                             refresh->call_original();
                         }

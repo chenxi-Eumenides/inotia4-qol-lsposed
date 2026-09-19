@@ -26,6 +26,12 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup);
 bool extension_bag_set_enabled(bool enabled);
 bool extension_bag_enabled();
 
+// 插件安装期注入 Host SDK/Game Host。game_ui_virtbag.cpp 是 unity TU，其 inc
+// 直接读取这里缓存的句柄；独立 TU 由各自的 bridge setter 缓存所需表。
+bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
+                             const qol::contracts::QolGameHost* game);
+void extension_bag_bind_port_sdk(const qol::contracts::QolHostSdk* sdk);
+
 // 能力 v1.0 接口表（ExtensionBagApi，37 函数）：成员逐条转发既有 extension_bag_* /
 // virtual_bag_* port 实现（实现收口 plugins/extension_bag/extension_bag_port.cpp）。
 // 静态存储、生命周期 ≥ 进程；provides 于插件 enabled 时注册、revoking 时注销。
