@@ -80,7 +80,7 @@
 | `access/hive_iap.*` | IAP 拦截后恢复（GOT 改写 + 调原版恢复状态） |
 | `clock.*` | 帧计数（GOT 取值，供宿主注入帧时钟） |
 
-**收口项**：`game/write`、`game/ops`、`game/variant` 未独立落地；变体表、`qol_log`、`module_save`、`save_enter/exit`、`stack_limit_state` 仍在遗留 `core/native`；`data/native/game_symbols.h` 待 L7 收口。
+**收口项**：`game/write`、`game/ops`、`game/variant` 未独立落地；变体表、`qol_log`、`module_save`、`save_enter/exit`、`stack_limit_state` 仍在遗留 `core/native`；`data/native/game_symbols.h` 待 C7 收口。
 
 ## 1.3 `infra/`（24）
 
