@@ -160,10 +160,12 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 | L1 | ABI 骨架：`contracts/host_sdk.h`、`contracts/game_host.h`、`PluginContext` 注入 | ✅ 本批冻结骨架 |
 | L2 | 宿主 adapter：Host SDK / Game Host API 的函数体与注入实现 | ✅ 已落地 adapter 与 host 测试；UI primitive 及动态 capability availability 仍按契约返回 unsupported |
 | L3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | 🟡 实现与 host-only 验证完成；真机卡待执行（本任务不装机） |
-| L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | 🟡 L4-0 ABI 冻结完成；插件迁移待办 |
-| L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ⬜ 待办 |
+| L4 | 小中型插件胶囊化与 Host SDK/Game Host API 迁移 | ✅ 完成（9 插件迁移 + U11-1 契约/adapter + U11-2 `core.ui` 实现 `QolUiComponents` 并收口；`core.ui` 私有 include = 0） |
+| L5 | `inventory_hooks` + `extension_bag` 胶囊化 | ✅ 完成（含 `save_backup`/`autosell`；`stack_codec` 迁 `contracts/`、`QolStoreApi` 容器级 ABI、SDK `hooks.intercept_blocks`、Host SDK PopupState ABI） |
 | L6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
 | L7 | native config 自读、脚本切七目录与胶囊硬失败 | ⬜ 待办 |
+
+**胶囊合规现状（本批复核）**：`plugins/` 下 **17/17 个插件**对 `game/ infra/ hooks/ patch/ host/ plugins/`（其他插件）的私有 include 计数为 **0**（复核命令见 `docs/refactor/verification.md` 的胶囊卡）。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位)。L1–L5 行为面均**未经真机验证**（`NOT_ACCEPTED`），待按 VM 卡补证。
 
 当前迁移债基线：`plugins → game` 24 文件、`plugins → infra` 22 文件、
 `plugins → hooks` 8 文件、`plugins → patch` 0 文件、`plugins → host` 0 文件；
