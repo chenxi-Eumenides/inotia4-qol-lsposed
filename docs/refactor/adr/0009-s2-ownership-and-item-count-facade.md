@@ -203,3 +203,10 @@ facade。该说明不改变本批“保留 `contracts/stack_codec.h`、不迁移
   并完成所有消费者迁移后的全量行为验收。
 
 B5a 与 B5b 在接口冻结后可并行；B5c 必须最后执行。
+
+## P1-B5c 完成注记
+
+- 实现落点：`plugins/stack_limit/stack_codec_impl.h` 已实体化 99/999 策略、S2 位段原语、模式感知读写、clamp、view 与纯转换函数；`plugins/stack_limit/plugin.cpp` 仅经该私有实现头提供 `QolItemCountApi`。
+- 999 有效态由 `stack_limit` 插件内部原子量持有；对外仍经 `QolItemCountApi` 的 `effective`/`view_from_canonical`/`view_limit` 以及 `/api/system/features` 的 `stack_limit` 状态表达，不重建公共布尔函数。
+- marker 继续归 `plugins/extension_bag/extension_bag_port.h`；stack_limit 不需要 marker。
+- 清理证据：`contracts/stack_codec.h`、`contracts/stack_limit.h`、`core/native/stack_limit_state.cpp` 已删除，CMake 状态源已移除；Native 源码不再包含公共 codec/stack-limit 头或调用两个全局函数。

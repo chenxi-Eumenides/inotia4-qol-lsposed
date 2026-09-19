@@ -6,7 +6,6 @@
 #include <initializer_list>
 
 #include "contracts/result.h"
-#include "contracts/stack_limit.h"
 #include "host/item_count_facade.h"
 
 uintptr_t g_base = 0;
@@ -15,7 +14,6 @@ uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 
 namespace {
 
-bool g_effective = false;
 bool g_gate = false;
 
 QolResult config_get_bool(const char*, int32_t default_value, int32_t* out_value) {
@@ -36,9 +34,6 @@ const qol::contracts::QolGameHost kGame = {
 };
 
 }  // namespace
-
-bool stack_limit_enabled() { return g_effective; }
-void stack_limit_set_effective(bool enabled) { g_effective = enabled; }
 
 void assert_pure_conversion_api() {
     const qol::contracts::QolItemCountApi& api = qol::host::host_item_count_api();
@@ -138,7 +133,9 @@ int main() {
            kQolErrUnsupported);
     assert(resident_count == 41);
     descriptor.on_enabled(context);
-    assert(stack_limit_enabled());
+    qol::contracts::PluginStatusOut status{};
+    descriptor.fill_status(status);
+    assert(status.enabled);
 
     uint32_t count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
@@ -153,7 +150,9 @@ int main() {
 
     descriptor.on_disabled(context);
     descriptor.on_disabled(context);
-    assert(!stack_limit_enabled());
+    status = {};
+    descriptor.fill_status(status);
+    assert(!status.enabled);
     g_gate = true;
     assert_pure_conversion_api();
     count = 41;

@@ -73,7 +73,9 @@
 2. **`arch_common.py` 过渡规则**：`BASE_LAYERS` 含 `domains`；`allows()` 放行 `plugins→game/infra/hooks/patch/domains`；`_ROOT_OVERRIDES`/`_CORE_OVERRIDES`/`_TARGET_PREFIXES` 三张映射（P3 删除并硬失败）。
 3. **单一 `gamebridge` target**：无独立插件 target，无法证明插件可独立编译/不链接宿主私有符号（P3）。
 4. **`QolGameHostExtraApi` 过宽**（15 处 `extra.*` 注入）——目标设计问题（P4 拆分）。
-5. **`contracts` 全局业务函数**（`stack_limit.h:5,9`、`autosell.h:44-46`）绕过 capability；**`host/core_patches` 把 S2 与 hub 混在同 owner/reason**（P1/P6 收口）。
+5. **`contracts` 全局业务函数**（`autosell.h:44-46`）仍绕过 capability；`stack_limit.h` 的两个全局函数已在 P1-B5c 删除。**`host/core_patches` 把 S2 与 hub 混在同 owner/reason**已在 P1 收口。
+
+P1 债务变化：S2 公共契约已删除，codec、策略常量和 999 有效态均归 `plugins/stack_limit` 私有实现；native bag marker 保持在 `plugins/extension_bag` 私有头。
 
 完整清单与样例见 `docs/refactor/baseline.md` §3；核对命令：`uv run python scripts/maintenance/check_arch.py`。
 
@@ -236,6 +238,16 @@ fail-closed。副作用成员只允许 owner 插件主线程命令处理器调�
 - `custom_recipe` 的配方表直读；
 - `game_symbols.h`、`game/access/patches`、`ptr_slots`、hook/patch 安装机制等内核私有面。
 
+### P1 收口：B1/B2a/B2b/B3/B4/B5-0/B5a/B5b/B5c
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| P1 总体代码出口 | ✅ 完成 | B1、B2a、B2b、B3、B4、B5-0、B5a、B5b、B5c 均已落地；本批为 P1 最后一步代码 |
+| B5c 公共 codec 清除 | ✅ 完成 | `contracts/stack_codec.h`、`contracts/stack_limit.h` 与 `core/native/stack_limit_state.cpp` 已删除；`CMakeLists.txt` 已移除状态实现；`plugins/stack_limit/stack_codec_impl.h` 现为唯一 S2 实现 |
+| 999 有效态 | ✅ 完成 | `plugins/stack_limit/plugin.cpp` 内部原子量持有有效态；`QolItemCountApi` facade 与插件状态 API 仍是对外可观测路径 |
+| marker | ✅ 完成 | `write_native_bag_object_marker` 继续只存在于 `plugins/extension_bag/extension_bag_port.h`，stack_limit 不再依赖 marker |
+| 行为验收 | ⬜ 待真机 | `VM-P1-S2-01..05` 仍是行为面证据要求；本任务按要求不装真机，不以 host/build 替代真机证据 |
+
 C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本节追加契约或另行登记的 U11/C5
 契约缺口。
 
@@ -243,7 +255,7 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 
 | 项 | 状态 | 当前事实 / 证据 |
 |---|---|---|
-| 私有 codec 入口 | ✅ 已落地（过渡） | `plugins/stack_limit/stack_codec_impl.h` 暂时转发 `contracts/stack_codec.h`；B5 删除公共 codec 头 |
+| 私有 codec 入口 | ✅ 已落地 | `plugins/stack_limit/stack_codec_impl.h` 已实体化 S2 codec 与 99/999 策略；不再转发公共头 |
 | 999 原子组 | ✅ 已落地 | `stack_limit` 6 条 clamp + 12 条 S2 claim，共 18 条，统一 `required + fail-closed + resumable + atomic + plugin.stack_limit.enabled` |
 | facade provider | ✅ 已落地（host-only） | provider 在 `plugin_install` 成功后驻留、`plugin_deactivate` 注销；`on_disabled` 只清 999 有效态；gate 关闭保留原始语义，gate 开且原子组未满足时 effective/写路径返回 `kQolErrNotReady`；未知类别与未就绪路径不写默认 out |
 | `core_patches` | ✅ 已收窄 | 仅保留 `P_HUB_LOGIN_SKIP` 与 monster 特征扫描；S2 由 assembly 期 `stack_limit` 安装 |
@@ -264,8 +276,8 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 
 本批冻结四个插件后续迁移所需的公共面，不修改插件业务体：
 
-- `contracts/stack_codec.h`：纯位编解码从 `game/read/` 移入 L0 契约层，版本为 `1.0`；
-  `extension_bag` 与 `inventory_hooks` 仅同步 include 路径。
+- `contracts/stack_codec.h`：P1-B5c 已删除；纯位编解码现由 `plugins/stack_limit` 私有实现持有，
+  `extension_bag` 与 `inventory_hooks` 经 facade/自身私有规则访问。
 - `QolHostSdk::hooks.intercept_blocks`：暴露共享 Intercept 门查询，返回值为 `1=阻断`、
   `0=放行`，非法资源 id 返回负错误码。
 - `QolUiAdapter` minor `1`：补齐控件树查询、PopupState/UIDesc 调度、分辨率、字体/贴图

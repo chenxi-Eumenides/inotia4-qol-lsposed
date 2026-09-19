@@ -1292,7 +1292,7 @@ static void test_virtual_bag_json_count_clamp() {
 
 // 跨配置往返（读档不改写 canonical）：
 // 已持久化的 canonical 数量与 payload 数量位在启用/关闭切换与反复读档下
-// 原样保留——读档路径与 stack_limit_enabled() 完全解耦，解码永远按 S2，
+// 原样保留——读档路径与 999 有效态完全解耦，解码永远按 S2，
 // 模式只影响写路径 clamp。无版本标识：切换不依赖任何 encodingVersion 状态。
 static void test_virtual_bag_cross_config_roundtrip() {
     using namespace virtual_bag;

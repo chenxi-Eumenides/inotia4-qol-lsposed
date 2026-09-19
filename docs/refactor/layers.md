@@ -22,7 +22,7 @@
 
 | 层 | 目录 | 文件/行数 | 职责 |
 |---|---|---|---|
-| L0 | `contracts/` | 19 / 1,630 | 跨层稳定接口：POD、能力契约、宿主 SDK / Game Host 函数表；**不含游戏逻辑** |
+| L0 | `contracts/` | 18 / 1,564 | 跨层稳定接口：POD、能力契约、宿主 SDK / Game Host 函数表；**不含游戏逻辑** |
 | L1 | `game/` | 36 / 2,725 | 唯一承接游戏版本耦合（VMA/偏移/ABI/函数调用）；**禁止业务规则** |
 | L2 | `infra/` + `hooks/` + `patch/` | 40 / 4,203 | 运行时机制：调度/队列/事件/能力/状态/配置/存储 + 资源登记/事务/分派 + 指令改写 |
 | L3 | `plugins/` | 154 / 30,974 | 17 个内置插件（功能实现 + 能力 provider/consumer + 面板）；目录形态受「可外置插件」约束（ADR-0008，只允许 include `contracts/` 与自身目录） |
@@ -41,8 +41,6 @@
 | `events.h` / `commands.h` | 事件类型（配置变更等）/ 命令端口（票据 id、状态、kind） |
 | `ownership.h` | 所有权机制契约（`acquire/release`）——表注入、弹窗状态占用等「所有权型」资源 |
 | `panels.h` | 设置页项与面板 provider 注册契约（`UiPanelsApi`：open/close/active/block_reason） |
-| `stack_codec.h` | S2 数量编码（canonical ↔ a/b 段、视图计数/钳制/回写判定）——原 `game/read/` 迁入，供多插件共享。**目标设计问题**（审阅 §8.5）：混装 codec、99/999 策略、marker 与写回门控；计划 P1 下沉为 `stack_limit` 实现头，公共面只留 `item_count` facade |
-| `stack_limit.h` | 上限状态只读端口声明（实现在宿主过渡侧） |
 | `attribute_quality.h` | `attribute.quality` 能力（档位/百分位/区间探测，**不输出颜色码**） |
 | `craft_result.h` | 合成结果能力（12 函数：模式判定/放料/准备/执行/材料需求/产物/描述替换） |
 | `extension_bag.h` | 扩展背包能力（`ExtensionBagApi` 37 函数 7 组 + `ExtensionBagMoveObservation` + 3 枚举） |
@@ -50,6 +48,7 @@
 | `text_layer.h` | 文本层能力（subscribe/unsubscribe） |
 | `ui_choice.h` | 原生选择框能力（`UiChoiceSpec` + open/active/close） |
 | `autosell.h` | 自动出售端口（配置/特殊类型 + 运行时读取/提交/持久化声明） |
+| P1 收口 | `contracts/stack_codec.h`、`contracts/stack_limit.h` 已删除（P1） |
 
 **收口项**：`contracts/ui.h` 已落地但部分 raw 面（角标贴图、扩展背包页签/拖放等）仍走 adapter；`extension_bag` 的 JSON 面 `write_json` 为 v1.1 预留。
 

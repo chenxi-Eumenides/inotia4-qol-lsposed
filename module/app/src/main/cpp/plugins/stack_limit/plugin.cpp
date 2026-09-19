@@ -50,6 +50,7 @@ const contracts::ResourceClaim kResources[] = {
 #undef STACK_LIMIT_CLAIM
 
 std::atomic<bool> g_provider_resident{false};
+std::atomic<bool> g_feature_999_enabled{false};
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolHostSdk* g_sdk = nullptr;
 
@@ -79,7 +80,9 @@ bool gate_enabled() {
     return result.ok == kQolOk && enabled != 0;
 }
 
-bool atomic_group_satisfied() { return stack_limit_enabled(); }
+bool atomic_group_satisfied() {
+    return g_feature_999_enabled.load(std::memory_order_acquire);
+}
 
 bool feature_999_usable() { return gate_enabled() && atomic_group_satisfied(); }
 
@@ -238,25 +241,26 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     host::host_item_count_set_provider(nullptr);
     g_provider_resident.store(false, std::memory_order_release);
+    g_feature_999_enabled.store(false, std::memory_order_release);
     g_sdk = nullptr;
     g_game = nullptr;
-    stack_limit_set_effective(false);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
-    stack_limit_set_effective(true);
+    g_feature_999_enabled.store(true, std::memory_order_release);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     // provider 跟随 install/deactivate 驻留；禁用只撤销 999 有效态，canonical 仍可读。
-    stack_limit_set_effective(false);
+    g_feature_999_enabled.store(false, std::memory_order_release);
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
-    out.enabled = g_provider_resident.load(std::memory_order_acquire) && stack_limit_enabled();
+    out.enabled = g_provider_resident.load(std::memory_order_acquire) &&
+                  g_feature_999_enabled.load(std::memory_order_acquire);
     out.error = nullptr;
 }
 

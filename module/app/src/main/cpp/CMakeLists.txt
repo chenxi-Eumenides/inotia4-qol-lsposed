@@ -260,7 +260,6 @@ target_sources(gamebridge PRIVATE
 # 原子组。末尾追加，不改上方既有行
 target_sources(gamebridge PRIVATE
     host/core_patches.cpp
-    core/native/stack_limit_state.cpp
     plugins/stack_limit/plugin.cpp
 )
 

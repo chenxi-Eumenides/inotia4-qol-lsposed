@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 20 | 1705 |
+| `contracts/` | 18 | 1564 |
 | `game/` | 36 | 2756 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 156 | 31531 |
+| `plugins/` | 156 | 31598 |
 | `host/` | 19 | 4560 |
-| **合计** | **271** | **44755** |
+| **合计** | **269** | **44681** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -49,7 +49,7 @@
 - `plugins/save_backup/`：12 文件 / 4504 行
 - `plugins/simple_mode/`：6 文件 / 529 行
 - `plugins/special_equip/`：6 文件 / 547 行
-- `plugins/stack_limit/`：3 文件 / 347 行
+- `plugins/stack_limit/`：3 文件 / 414 行
 - `plugins/text_layer/`：6 文件 / 494 行
 - `plugins/world_teleport/`：6 文件 / 540 行
 
