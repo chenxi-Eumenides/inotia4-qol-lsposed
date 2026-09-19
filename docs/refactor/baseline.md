@@ -141,8 +141,8 @@
 | `host` | `game` | 30 |
 | `host` | `contracts` | 19 |
 | `plugins/extension_bag` | `contracts` | 17 |
+| `plugins/autosell` | `contracts` | 14 |
 | `plugins/custom_recipe` | `contracts` | 14 |
-| `plugins/autosell` | `contracts` | 13 |
 | `plugins/core.ui` | `contracts` | 11 |
 | `infra` | `game` | 10 |
 | `host` | `hooks` | 9 |
@@ -150,8 +150,8 @@
 | `plugins/inventory_hooks` | `contracts` | 9 |
 | `plugins/save_backup` | `contracts` | 8 |
 | `domains/world` | `game` | 7 |
-| `plugins/autosell` | `game` | 7 |
 | `domains/inventory` | `game` | 6 |
+| `domains/save` | `infra` | 6 |
 
 ### 2.2 include 环
 
