@@ -199,6 +199,13 @@ bool assembly_init() {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: stack_limit registration failed");
         return false;
     }
+    // capability provider 必须先于消费者注册：install_all 只做一次 check_requires，
+    // 消费者声明 required 依赖时若 provider 尚未注册会永久 blocked（VM-FIX-01 未闭合项②）。
+    // autosell 声明 required `attribute.quality`，故 attribute_quality 排在它之前。
+    if (!register_plugin(features::attribute_quality::plugin_descriptor())) {
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_quality registration failed");
+        return false;
+    }
     // autosell：零资源常驻插件；install 注册 save-enter/exit 回调并按配置门禁同步扫描任务。
     if (!register_plugin(features::autosell::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: autosell registration failed");
@@ -214,10 +221,6 @@ bool assembly_init() {
     }
     if (!register_plugin(features::quest::plugin_descriptor())) {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: quest registration failed");
-        return false;
-    }
-    if (!register_plugin(features::attribute_quality::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_quality registration failed");
         return false;
     }
     if (!register_plugin(features::attribute_range_display::plugin_descriptor())) {
