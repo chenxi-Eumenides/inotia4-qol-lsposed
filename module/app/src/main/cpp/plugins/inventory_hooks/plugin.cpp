@@ -41,7 +41,14 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    (void)ctx;
+    if (ctx.struct_size < sizeof(contracts::PluginContext) ||
+        ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr) {
+        (void)inventory_native_hook_bind_sdk(nullptr);
+        return 1;
+    }
+    if (!inventory_native_hook_bind_sdk(ctx.sdk)) {
+        return 1;
+    }
     // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体在本插件 TU。
     return 0;
 }

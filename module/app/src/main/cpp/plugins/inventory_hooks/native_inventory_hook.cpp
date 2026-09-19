@@ -12,7 +12,7 @@
 #include "game_inventory.h"
 #include "contracts/stack_limit.h"
 #include "game_state.h"
-#include "hooks/dispatch.h"
+#include "contracts/host_sdk.h"
 
 #include <atomic>
 #include <cstddef>
@@ -49,6 +49,7 @@ void show_inventory_popup(int text_id) {
 std::mutex g_hook_mutex;
 NativeHookFunType g_hook_func = nullptr;
 NativeUnhookFunType g_unhook_func = nullptr;
+const qol::contracts::QolHostSdk* g_sdk = nullptr;
 
 FindItemFn g_backup_find_item = nullptr;
 HaveItemFn g_backup_have_item = nullptr;
@@ -885,7 +886,8 @@ void button_equip_exe_wrapper(void* button) {
 // 功能域（special_equip）经 hooks/dispatch 布尔门登记谓词，wrapper 入口统一查询；
 // resource_id 与本 claim 一致。未登记即放行（与旧 g_sell_gate==nullptr 同义）。
 void button_destroy_exe_wrapper(void* button) {
-    if (qol::hooks::dispatch_intercept_blocks("hook:UIEquip_ButtonDestroyExe", nullptr)) {
+    if (g_sdk != nullptr && g_sdk->hooks.intercept_blocks != nullptr &&
+        g_sdk->hooks.intercept_blocks("hook:UIEquip_ButtonDestroyExe", nullptr) > 0) {
         QOL_LOG_INFO(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
         return;
     }
@@ -1196,6 +1198,15 @@ bool inventory_native_hook_call_refresh_item_area_original() {
         ? g_backup_refresh_item_area : fn_ui_equip_refresh_item_area;
     if (original == nullptr) return false;
     original();
+    return true;
+}
+
+bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr || sdk->hooks.intercept_blocks == nullptr) {
+        g_sdk = nullptr;
+        return false;
+    }
+    g_sdk = sdk;
     return true;
 }
 
