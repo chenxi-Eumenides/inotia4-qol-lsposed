@@ -157,7 +157,7 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 ### 5.1 主菜单环境设置资源（v0.6.8 反汇编 + 真机验证）
 
 - `Scene_Init_POPUP_SC_OPTION_MMENU` 会 `IMGSYS_UnitLoad(0x59)`；该单元提供声音图标、语言箭头等 Options 专用静态分片。左上返回正常态为 `loc 0x3`，按下态为 `loc 0x2`，按下态叠加在正常态上并向左偏移 3 逻辑单位。
-- 原版“开/关”胶囊按钮使用 `GetGroupTitleImgType()` 返回的当前语言主题图组，并以 `IMGSYS_GetLoc(group, 0x0f/0x10)` 和 `GRPX_DrawPart(..., type=2, flip=1)` 居中绘制；真机确认 `0x0f=开`、`0x10=关`。非激活胶囊额外居中绘制同图组 `loc 0x9` 的暗态叠加精灵（`UIOption_ButtonListDraw`）。
+- 原版“开/关”开关按钮使用 `GetGroupTitleImgType()` 返回的当前语言主题图组，并以 `IMGSYS_GetLoc(group, 0x0f/0x10)` 和 `GRPX_DrawPart(..., type=2, flip=1)` 居中绘制；真机确认 `0x0f=开`、`0x10=关`。非激活按钮额外居中绘制同图组 `loc 0x9` 的暗态叠加精灵（`UIOption_ButtonListDraw`）。
 - 原版 Options 字体可通过 `GRPX_SetFontColorFromRGB(r,g,b)` + `GRPX_DrawStringWithFont(text,x,y,align,font)` 使用；`UIOption_UIButtonListDraw` 使用 RGB `(0xe2,0x9e,0xcb)`，font=1。
 - 自定义 PopupState 可加载 `IMGSYS_UnitLoad(0x59)` 后复用这些分片；必须先检查 `IMGSYS_GetGroup/GetLoc` 非空。此前 `GRPX_DrawPart` 崩溃的主因是未加载图像单元导致空分片，而非 Process 回调本身不可绘制。
 - `GAMELOADER_DrawBackGround` 是主菜单场景背景调用，不是可独立复用的单张贴图；自定义面板继续以 LCD 保存/恢复后的暗色遮罩作为安全背景路径。

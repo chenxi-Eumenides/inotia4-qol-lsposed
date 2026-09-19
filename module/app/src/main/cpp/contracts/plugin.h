@@ -114,7 +114,7 @@ struct PluginStatusOut {
     const char* error;
 };
 
-// 插件回调上下文：迁移期允许 sdk/game == nullptr，供尚未切换到胶囊 ABI 的插件继续运行。
+// 插件回调上下文：迁移期允许 sdk/game == nullptr，供尚未切换到 Host SDK / Game Host ABI 的插件继续运行。
 // P5 收口后，sdk/game 为空应视为安装失败；plugin_id 由宿主持有，生命周期 ≥ 进程。
 struct PluginContext {
     uint32_t struct_size;

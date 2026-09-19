@@ -12,7 +12,7 @@
 |---|---|
 | v0.1 | 初稿：分层、资源仲裁、版本收口、线程约束、插件化 |
 | v0.2 | 闭合第一轮审阅：依赖矩阵、生命周期、能力契约、资源所有权、分发模型、脚本边界、纵向迁移 |
-| v0.3.14 | ADR-0008：内置插件统一按可外置胶囊设计；取消目标层 `domains/`，跨插件语义由 provider 插件发布；确立 Game Host API 为不可停用的宿主内核 ABI 子表（具体函数表待冻结）；目标目录收敛为七目录；属性范围拆分为 provider 与显示插件示例 |
+| v0.3.14 | ADR-0008：内置插件统一按可独立外置设计；取消目标层 `domains/`，跨插件语义由 provider 插件发布；确立 Game Host API 为不可停用的宿主内核 ABI 子表（具体函数表待冻结）；目标目录收敛为七目录；属性范围拆分为 provider 与显示插件示例 |
 | v0.3.13 | UI 组件分层审阅记录（ADR-0006）：`game/access/ui*`（底层资源与绘制）→ `contracts/ui.h`（标准组件接口）→ `plugins/core.ui`（通用组件）→ 普通插件组合；方框两拆与首期组件清单（Panel/Button/Label/Toggle/Select/ScrollView）与 2–3 使用者提升规则；记录，实施待排期 |
 | v0.3.12 | B/D 决策落地与复盘校准：HTTP 传输保持 Kotlin（`core.api` 持有路由表/注册口/信封/门控/线程，Kotlin 承担 AndServer 传输，跨栈边界见 §7.3）；外部 `config.json` 改由 native `infra/config` 启动早期自读（R8 重写）；`check_*` 能力边界按「已落地/规划」重述；过渡映射清除条件、`core.ui` adapter 自我约束、`provides[]` 字段标注 P5 目标、动态能力章节号对齐（可用性事件 §3.4.5、动态能力 §3.4.6） |
 | v0.3.11 | P5 前出口面与动态能力校准：`core.api` 收缩为 HTTP 传输/注册内核，只保留基础端点；既有 API 路径与插件 id 解耦并保持冻结，内置路由按 owner 表归属、外部路由限定 `/api/ext/<id>/...`；capability 采用“静态声明 + 低频动态发布/撤销 + 接口内高频就绪状态”模型，补撤销 lease、失败与 `degraded` 清除语义（可用性事件 §3.4.5；动态能力 §3.4.6） |
@@ -36,7 +36,7 @@
 |---|---|
 | 分层 | **五个逻辑层**（含 L0 契约层）、**七个顶层目录**：`contracts / game / infra / hooks / patch / plugins / host` |
 | 依赖 | 完整依赖矩阵（§2.2），环由结构与脚本双重排除 |
-| 功能形态 | **一切业务功能皆插件**：每个内置插件均按可外置胶囊设计（含出口面 `core.api`/`core.ui`）；日志、配置自举、加载器、资源机制、Game Host API 等属于不可停用的宿主内核设施 |
+| 功能形态 | **一切业务功能皆插件**：每个内置插件均按可独立外置设计（含出口面 `core.api`/`core.ui`）；日志、配置自举、加载器、资源机制、Game Host API 等属于不可停用的宿主内核设施 |
 | hook 资源 | 资源集中在 `hooks/`：一资源一安装者 + 消费者注册；插件只声明与注册，机制由宿主执行 |
 | 生命周期 | 十态状态机（§3.2），异步跨帧迁移，幂等、可回滚 |
 | 线程 | **跨线程访问矩阵**（§6.1）：HTTP 只读快照与票据；游戏状态访问仅主线程 |
@@ -54,7 +54,7 @@
 2. **可验证**：每个功能有独立状态上报与验收卡；安装结果（含失败原因）可查询。
 3. **可迁移**：换游戏版本只改 `game/`；功能层不感知变体差异。
 4. **可并行**：功能之间零编译期依赖，可多人/多代理并行开发与真机验证。
-5. **可开放**：结构上支持将来加载外部插件（native `.so`）；每个插件按**可外置胶囊**设计（私有规则/UI/生命周期/测试自包含，只依赖公共契约与注册表，§2.2/ADR-0008），开放前不付对外 ABI 冻结成本。
+5. **可开放**：结构上支持将来加载外部插件（native `.so`）；每个插件按**可独立外置**设计（私有规则/UI/生命周期/测试自包含，只依赖公共契约与注册表，§2.2/ADR-0008），开放前不付对外 ABI 冻结成本。
 6. **防复发**：同地址二次挂载、非主线程调用游戏函数这两类失败必须由结构阻止。
 
 ### 1.2 物理事实红线
@@ -82,7 +82,7 @@ L1  game/       游戏耦合唯一收口：变体、符号、ABI 签名、强类
 L2  infra/      运行时：调度/命令队列/快照/事件/能力注册表/命令端口/日志/配置/存储/Result
 L2  hooks/      入口 hook 资源层：登记、仲裁、分派、生命周期（唯一调 LSPosed API 处）
 L2  patch/      指令 patch 与指针槽机制（占用声明、原字校验、回滚）
-L3  plugins/<id>/   可外置胶囊：一个插件目录拥有全部私有规则、UI、生命周期实现与测试（含内置出口插件 core.api / core.ui）
+L3  plugins/<id>/   可独立外置：一个插件目录拥有全部私有规则、UI、生命周期实现与测试（含内置出口插件 core.api / core.ui）
 L4  host/       模块入口、JNI 边界、平台原语注入、装配与拓扑、插件注册表、Game Host API 实现与注入
 ```
 
@@ -104,7 +104,7 @@ L4  host/       模块入口、JNI 边界、平台原语注入、装配与拓扑
 
 规则：
 - `plugins` 之间**零编译期依赖**：彼此只经 Host SDK 的 capability 注册表取接口（接口类型在 `contracts/`）；出口面插件（`core.api`/`core.ui`）与功能插件同规则，不存在编译期互依赖。
-- **插件是可外置胶囊**：每个 `plugins/<id>/` 拥有全部私有规则、UI、生命周期实现与测试；源码只允许 include ①公共 `contracts/`（Host SDK ABI、能力/命令接口）②自身目录。运行时通过 Host SDK 函数表使用能力注册表、命令端口、快照、事件、配置、存储及 hook/patch 资源**声明**入口，并通过注册表消费其他插件发布的 capability/native_service。**禁止 include 其他插件源码，禁止依赖宿主私有实现 `game/`、`infra/`、`hooks/`、`patch/`、`host/`**。内置静态插件与未来外部 native 插件仅**加载/分发形态**不同（§3.1、ADR-0008），胶囊边界相同。
+- **插件可独立外置**：每个 `plugins/<id>/` 拥有全部私有规则、UI、生命周期实现与测试；源码只允许 include ①公共 `contracts/`（Host SDK ABI、能力/命令接口）②自身目录。运行时通过 Host SDK 函数表使用能力注册表、命令端口、快照、事件、配置、存储及 hook/patch 资源**声明**入口，并通过注册表消费其他插件发布的 capability/native_service。**禁止 include 其他插件源码，禁止依赖宿主私有实现 `game/`、`infra/`、`hooks/`、`patch/`、`host/`**。内置静态插件与未来外部 native 插件仅**加载/分发形态**不同（§3.1、ADR-0008），插件边界相同。
 - 插件获取游戏事实的通道：只读经其他 owner 插件发布的 capability、快照或 Game Host API 的受控读取面；写入与有副作用调用经 owner 插件的命令端口。插件不得直接 `#include game/**`；`game/` 的强类型原语只经 `host` 注入的 Game Host API 函数表暴露（§3.8）。
 - `hooks/` 与 `patch/` 作为宿主机制层，**允许依赖 `game/` 内部 adapter**（符号解析、VMA、ABI 签名），因为它们执行宿主管理的安装/还原；该例外不适用于 `plugins/`。
 - `core.ui` 的 UI 原语经 `contracts/ui.h` 标准组件接口 + `host` 注入的 adapter（adapter 背后为 `game/access/ui*`），使容器与控件装配可在无 `game/` 的环境下测试；adapter 接口冻结登记为 U11（§12.3）。此约束现已并入「插件禁止依赖 `game/`」的全局规则。
@@ -118,7 +118,7 @@ L4  host/       模块入口、JNI 边界、平台原语注入、装配与拓扑
 | 层 | 职责 | 禁止 |
 |---|---|---|
 | `host/` | 模块入口、JNI 薄层（按插件分组）、平台原语注入（帧时钟/主线程派发/hook/patch/HTTP 传输桥）、Game Host API 实现与注入、装配顺序、插件注册表 | 业务逻辑；绕过 `game/` adapter 直接读写游戏内存；把 Game Host API 实现暴露为插件可 include 的头 |
-| `plugins/<id>/` | **可外置胶囊**：生命周期、私有规则、自有界面（`ui/`）、对外能力与命令、私有 live 读取/快照实现和测试；出口面插件（`core.api`/`core.ui`）同规则，仅额外拥有注册口能力（§7.1） | include 其他插件或宿主私有实现目录；执行 hook/patch 机制；出现裸地址；在命令路径之外调用写入口 |
+| `plugins/<id>/` | **可独立外置**：生命周期、私有规则、自有界面（`ui/`）、对外能力与命令、私有 live 读取/快照实现和测试；出口面插件（`core.api`/`core.ui`）同规则，仅额外拥有注册口能力（§7.1） | include 其他插件或宿主私有实现目录；执行 hook/patch 机制；出现裸地址；在命令路径之外调用写入口 |
 | `hooks/` | 资源登记与仲裁、安装/还原引擎、consumer 分派 | 业务语义 |
 | `patch/` | 指令 patch、指针槽：占用声明、原字校验、回滚 | 业务语义 |
 | `infra/` | 调度、命令队列、快照、事件、能力注册表、命令端口、日志、配置、存储、Result | 依赖 game；持有游戏语义 |
@@ -153,11 +153,11 @@ module/app/src/main/cpp/
 
 | 轨道 | 形态 | 何时用 | 成本 |
 |---|---|---|---|
-| **内置静态插件**（默认） | 编译进主 `.so`，以 `PluginDescriptor` 注册；CMake target 独立；**每个插件目录即一个自包含胶囊**（§2.2）；含出口面 `core.api`（HTTP）/ `core.ui`（游戏内 UI 容器） | 全部内置功能 | 无动态加载成本；仍按未来公共 C ABI 形状约束 |
+| **内置静态插件**（默认） | 编译进主 `.so`，以 `PluginDescriptor` 注册；CMake target 独立；**每个插件目录即一个自包含单元**（§2.2）；含出口面 `core.api`（HTTP）/ `core.ui`（游戏内 UI 容器） | 全部内置功能 | 无动态加载成本；仍按未来公共 C ABI 形状约束 |
 | **外部数据扩展**（P6 草案） | 未签名 ZIP：JSON、表、资源；不含可执行代码 | 静态规则、配方、文本、资源 | 宿主可完整校验和撤销；不能表达任意逻辑 |
 | **外部 native 插件**（P6 草案） | 未签名 ZIP + `.so` + C ABI | 需要逻辑、hook、patch 或跨插件协作 | 进程内全权代码；无安全隔离保证 |
 
-**胶囊一致性（ADR-0008）**：内置静态插件与外部 native 插件**仅加载/分发形态不同**，目标胶囊边界相同——一个插件目录拥有其全部私有规则、UI、生命周期实现与测试，插件之间零编译期依赖、不 include 宿主私有实现。编译进主 `.so` 是当前分发形态，不构成对未来外置的解耦豁免。
+**边界一致性（ADR-0008）**：内置静态插件与外部 native 插件**仅加载/分发形态不同**，目标插件边界相同——一个插件目录拥有其全部私有规则、UI、生命周期实现与测试，插件之间零编译期依赖、不 include 宿主私有实现。编译进主 `.so` 是当前分发形态，不构成对未来外置的解耦豁免。
 
 ### 3.2 生命周期状态机（正式定义）
 
@@ -375,7 +375,7 @@ plugins/
 - 业务写操作由 **owner 插件经命令端口**执行；
 - 高阶功能（自动出售、传送、推怪等）是**独立插件**，消费上述 provider 能力或 Game Host API 原语。
 
-**「一切业务功能皆插件」不包含内核设施**：日志与配置自举（R8）、插件加载器、资源机制（§4）、Game Host API 与 Host SDK 均属宿主内核，不参与插件生命周期、不可停用、不属于胶囊模型。
+**「一切业务功能皆插件」不包含内核设施**：日志与配置自举（R8）、插件加载器、资源机制（§4）、Game Host API 与 Host SDK 均属宿主内核，不参与插件生命周期、不可停用、不属于插件边界模型。
 
 **冻结边界（本节与 §3.9 的分工）**：
 
@@ -585,7 +585,7 @@ HTTP 取实时数据的路径：优先读 owner 插件发布的快照；必须�
 |---|---|---|---|
 | `core.api` | `contracts`、Host SDK（HTTP 传输由 Kotlin 侧 AndServer 承担，native 经注入的传输桥交互，§7.3） | `http.registry` 注册口与**路由表唯一真源**、路由分派、JSON 信封/错误映射、`/api/op` 门控、线程纪律与在途请求 lease；自身只保留 `/api/health`、`/api/system/routes` 等传输级基础端点；不实现 socket/HTTP 解析与监听（归 Kotlin 传输层） | 游戏语义计算；直接读游戏内存；承载 character/world/item 等业务端点 |
 | 内置 API 提供插件 | `contracts`、Host SDK / Game Host API（经 `PluginContext` 注入；游戏事实读取经自身私有 provider 与快照，禁止 include 宿主实现目录） | 注册现有冻结路由并拥有其参数/DTO/语义；默认按领域拆分（如 `api.character`、`api.world`），也允许为独立裁剪边界拆成 `api.info`/`api.action` | 改写既有 URL；绕过命令端口执行变更 |
-| `core.ui` | `contracts`、Host SDK（UI 原语经 `contracts/ui.h` 标准组件接口 + `host` 注入 adapter，adapter 背后为 `game/access/ui*`；胶囊边界见 §2.2） | 设置页容器、共享控件（`ui_kit`）、面板注册与导航；实现通用组件（首期 `Panel`/`Button`/`Label`/`Toggle`/`Select`/`ScrollView`，见 ADR-0006） | 实现功能面板（归各插件 `ui/`）；游戏语义计算；直接依赖宿主实现目录 |
+| `core.ui` | `contracts`、Host SDK（UI 原语经 `contracts/ui.h` 标准组件接口 + `host` 注入 adapter，adapter 背后为 `game/access/ui*`；插件边界见 §2.2） | 设置页容器、共享控件（`ui_kit`）、面板注册与导航；实现通用组件（首期 `Panel`/`Button`/`Label`/`Toggle`/`Select`/`ScrollView`，见 ADR-0006） | 实现功能面板（归各插件 `ui/`）；游戏语义计算；直接依赖宿主实现目录 |
 
 **注册口契约（P5 冻结，U10）**：
 
@@ -747,7 +747,7 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 - 不一致 → 构建失败；处理方式二选一：修改设计（走版本记录）或登记临时豁免（路径 + 允许目标 + 文档锚点 + 清除条件）。
 - **基线棘轮**：首次运行生成基线快照（记录既有违规）；此后新增违规即失败，已消除违规在重冻结时移除——基线只允许收缩，不允许扩张。
 - **过渡映射寿命**：`arch_common` 的 legacy→目标层过渡映射（`_ROOT_OVERRIDES`/`_CORE_OVERRIDES` 与 `feature/` 前缀映射）随 legacy 目录清空而**删除**；删除后 `unknown_layer` 由警告收紧为**硬失败**（P5 出口条件之一）。
-- **v0.3.14 胶囊迁移窗口**：当前 `check_layers.py` 与生成脚本仍描述八目录实现事实，尚未强制七目录胶囊边界；P5 必须同步删除 `domains` 映射，并把 `plugins/<id>` 对宿主私有 `game/infra/hooks/patch/host` 的 include/link 边收紧为硬失败。在此之前，脚本通过只表示没有新增旧规则违规，不表示已符合 ADR-0008。
+- **v0.3.14 插件边界迁移窗口**：当前 `check_layers.py` 与生成脚本仍描述八目录实现事实，尚未强制七目录插件边界；P5 必须同步删除 `domains` 映射，并把 `plugins/<id>` 对宿主私有 `game/infra/hooks/patch/host` 的 include/link 边收紧为硬失败。在此之前，脚本通过只表示没有新增旧规则违规，不表示已符合 ADR-0008。
 - 「结构」类内容由脚本生成或校验，不手写；人工只维护「为什么」。
 
 ---
@@ -780,12 +780,12 @@ P6 外部插件状态追加：`source=data_extension|external_native`、`content
 | P2 | **纵向样板插件**（覆盖入口 hook + 配置 + 状态 + 命令）：只验 `install → enabled` 路径 | 样板真机验收卡通过；状态 API 可见 | P1 |
 | P3 | 最小资源事务（异步步进、回滚、在途归零、帧预算）+ `disable/deactivate/tombstone` 全路径 | 故障注入与并发测试通过；接口冻结（内部） | P2 |
 | P4 | 批量迁移其余插件（内置静态轨），每插件一个提交 | 每插件：单测 + 验收卡；临时豁免逐条清零 | P3 |
-| P5 | `plugins/` 单层收口：`core.api` 路由/注册内核（**HTTP 传输保持 Kotlin AndServer，不迁移**）、内置 API provider、`core.ui` 与注册口落地；冻结路由 owner 表；动态 capability 协议、JNI 分组、状态 API 完整化；**落地 Host SDK / Game Host API 内置函数表并迁移内置插件**；**删除宿主 `domains/`，跨插件只读语义改由 provider 插件发布（含 `attribute_range` 拆为 `attribute_quality` provider + `attribute_range_display` 消费者，§7.4）**；插件胶囊边界收口（include 图无宿主私有实现边）；**外部 `config.json` 由 native 启动早期自读、Kotlin `ModuleConfig` 收敛为 JNI 读写/只读镜像**；收紧脚本；删除旧路径与过渡映射 | 既有 API 路径/响应兼容；动态发布/撤销与在途归零通过；Host SDK / Game Host API 内置函数表与线程纪律测试通过；`domains/` 目录与引用清零；胶囊边界校验通过；native 自读 config 可用且与 Kotlin 边界收敛；`check_*` 全绿、豁免清零、单轨（legacy 路径）消失、过渡映射删除 | P4 |
+| P5 | `plugins/` 单层收口：`core.api` 路由/注册内核（**HTTP 传输保持 Kotlin AndServer，不迁移**）、内置 API provider、`core.ui` 与注册口落地；冻结路由 owner 表；动态 capability 协议、JNI 分组、状态 API 完整化；**落地 Host SDK / Game Host API 内置函数表并迁移内置插件**；**删除宿主 `domains/`，跨插件只读语义改由 provider 插件发布（含 `attribute_range` 拆为 `attribute_quality` provider + `attribute_range_display` 消费者，§7.4）**；插件边界收口（include 图无宿主私有实现边）；**外部 `config.json` 由 native 启动早期自读、Kotlin `ModuleConfig` 收敛为 JNI 读写/只读镜像**；收紧脚本；删除旧路径与过渡映射 | 既有 API 路径/响应兼容；动态发布/撤销与在途归零通过；Host SDK / Game Host API 内置函数表与线程纪律测试通过；`domains/` 目录与引用清零；插件边界校验通过；native 自读 config 可用且与 Kotlin 边界收敛；`check_*` 全绿、豁免清零、单轨（legacy 路径）消失、过渡映射删除 | P4 |
 | P6（可选） | 外部插件轨（未冻结草案）：数据扩展、未签名全权 native、外部容器、**具体 C ABI 与 SDK 兼容边界**、TargetRegistry、导入加载、安全模式、更新/回滚语义 | 数据 schema 拒绝；native 显式启用/加载/禁用；托管资源回收；启动故障恢复；更新/回滚真机通过；外部 SDK 版本协商字段冻结 | P5 |
 
 单插件迁移动作：建目录与元数据 → 资源改为声明 → 依赖改能力/命令 → 开关与状态接入 → 单测 + 验收卡。
 
-**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P4 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.14**（P5 开工基线候选，含插件拍平、API 出口面与动态 capability 校准、HTTP 传输保持 Kotlin 与外部 config native 自读决策及复盘校准、UI 组件分层审阅记录 ADR-0006、可外置胶囊、Game Host API 归属及取消目标层 `domains/` 决策 ADR-0008）；P5 未签署前不得开工。
+**签署规则**：每次设计校准（v0.3.x）在**下一阶段开工前**必须通过一次外部复审；「P0–P4 完成」仅指各阶段出口条件达成，**不等于**设计书已签署。当前待签基线 = **v0.3.14**（P5 开工基线候选，含插件拍平、API 出口面与动态 capability 校准、HTTP 传输保持 Kotlin 与外部 config native 自读决策及复盘校准、UI 组件分层审阅记录 ADR-0006、可外置插件、Game Host API 归属及取消目标层 `domains/` 决策 ADR-0008）；P5 未签署前不得开工。
 
 冻结与兼容：JNI 导出在重构期保持名称与签名稳定；新增按插件分组命名，P5 一次性切换。既有 HTTP 路径、方法和成功响应保持兼容，P5 只迁移 owner，不改变调用方契约。数据格式（sidecar / `.qol_save`）向前兼容，必要时升版本并写迁移。
 
