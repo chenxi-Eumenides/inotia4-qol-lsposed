@@ -39,8 +39,8 @@
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
-| `plugins/autosell` | 14 |
-| `plugins/core.ui` | 16 |
+| `plugins/autosell` | 15 |
+| `plugins/core.ui` | 17 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
 | `plugins/extension_bag` | 40 |
@@ -48,13 +48,13 @@
 | `plugins/native_choice` | 4 |
 | `plugins/push_all` | 6 |
 | `plugins/quest` | 4 |
-| `plugins/save_backup` | 12 |
+| `plugins/save_backup` | 13 |
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **372** |
+| **合计** | **375** |
 
 ### 1.2 迁移期映射摘要
 
@@ -133,7 +133,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 118 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 117 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -141,16 +141,16 @@
 | `host` | `game` | 30 |
 | `host` | `contracts` | 19 |
 | `plugins/extension_bag` | `contracts` | 17 |
-| `plugins/custom_recipe` | `contracts` | 13 |
-| `plugins/autosell` | `contracts` | 11 |
+| `plugins/custom_recipe` | `contracts` | 14 |
+| `plugins/autosell` | `contracts` | 13 |
+| `plugins/core.ui` | `contracts` | 11 |
 | `infra` | `game` | 10 |
-| `plugins/core.ui` | `contracts` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
 | `plugins/inventory_hooks` | `contracts` | 9 |
+| `plugins/save_backup` | `contracts` | 8 |
 | `domains/world` | `game` | 7 |
 | `plugins/autosell` | `game` | 7 |
-| `plugins/save_backup` | `contracts` | 7 |
 | `domains/inventory` | `game` | 6 |
 
 ### 2.2 include 环
@@ -248,8 +248,8 @@
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
-| `autosell` | `plugins/autosell` | 14 |
-| `core.ui` | `plugins/core.ui` | 16 |
+| `autosell` | `plugins/autosell` | 15 |
+| `core.ui` | `plugins/core.ui` | 17 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `extension_bag` | `plugins/extension_bag` | 40 |
@@ -257,7 +257,7 @@
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
 | `quest` | `plugins/quest` | 4 |
-| `save_backup` | `plugins/save_backup` | 12 |
+| `save_backup` | `plugins/save_backup` | 13 |
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
 | `stack_limit` | `plugins/stack_limit` | 3 |
