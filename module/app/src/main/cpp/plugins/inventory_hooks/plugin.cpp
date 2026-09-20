@@ -1,12 +1,13 @@
-#include "plugins/inventory_hooks/plugin.h"
-#include "plugins/inventory_hooks/claims.h"
-#include "plugins/inventory_hooks/native_inventory_hook.h"
+#include "plugin.h"
+#include "claims.h"
+#include "native_inventory_hook.h"
 
 #include <cstdint>
 
-#include "contracts/inventory_action.h"
-#include "contracts/inventory_refresh.h"
-#include "core/native/inventory_trade.h"
+#include "../../contracts/extension_bag.h"
+#include "../../contracts/inventory_action.h"
+#include "../../contracts/inventory_refresh.h"
+#include "../../contracts/sell_price.h"
 
 // D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
 // feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
@@ -29,6 +30,9 @@ namespace {
 constexpr const char* kPluginId = "inventory_hooks";
 constexpr const char* kPluginVersion = "0.1.0";
 
+const contracts::QolHostSdk* g_action_sdk = nullptr;
+const contracts::QolGameHost* g_action_game = nullptr;
+
 // 能力接口实例：函数地址编译期常量；宿主在 enabled 时注册、revoking 时注销。
 constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
     &inventory_native_hook_call_refresh_item_area_original,
@@ -37,14 +41,108 @@ constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
 contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
                                                      const void* expected_item,
                                                      const char* source) {
-    const inventory_trade::Result result =
-        inventory_trade::sell(bag, slot, expected_item, source);
-    return {
-        static_cast<contracts::InventorySellStatus>(static_cast<int32_t>(result.status)),
-        result.price,
-        result.category,
-        result.count,
-    };
+    contracts::InventorySellResult result{};
+    if (g_action_game == nullptr || g_action_game->read_only.world.state == nullptr ||
+        g_action_game->read_only.inventory.item_ref_at == nullptr) {
+        result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
+        return result;
+    }
+    int32_t world_state = 0;
+    if (!contracts::succeeded(g_action_game->read_only.world.state(&world_state)) ||
+        world_state != 5) {
+        result.status = contracts::InventorySellStatus::kNotInWorld;
+        return result;
+    }
+    if (bag == 5) {
+        result.status = contracts::InventorySellStatus::kTaskBagExcluded;
+        return result;
+    }
+    contracts::QolInventoryItemRef item_ref{};
+    if (!contracts::succeeded(g_action_game->read_only.inventory.item_ref_at(bag, slot, &item_ref))) {
+        result.status = contracts::InventorySellStatus::kEmptySlot;
+        return result;
+    }
+    if (item_ref.native_item == nullptr) {
+        result.status = contracts::InventorySellStatus::kNoNativeItem;
+        return result;
+    }
+    if (expected_item != nullptr && expected_item != item_ref.native_item) {
+        result.status = contracts::InventorySellStatus::kStale;
+        return result;
+    }
+    result.category = item_ref.category;
+    result.count = item_ref.count;
+    if (g_action_game->read_only.item.is_no_sell == nullptr ||
+        g_action_game->read_only.item.cumulate_count == nullptr ||
+        g_action_game->read_only.item.sell_price == nullptr) {
+        result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
+        return result;
+    }
+    int32_t no_sell = 0;
+    if (!contracts::succeeded(
+            g_action_game->read_only.item.is_no_sell(result.category, &no_sell))) {
+        result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
+        return result;
+    }
+    if (no_sell != 0) {
+        result.status = contracts::InventorySellStatus::kNoSell;
+        return result;
+    }
+    int32_t count = 0;
+    if (!contracts::succeeded(
+            g_action_game->read_only.item.cumulate_count(item_ref.native_item, &count)) ||
+        count <= 0) {
+        result.status = contracts::InventorySellStatus::kPriceInvalid;
+        return result;
+    }
+    int64_t unit_price = 0;
+    if (!contracts::succeeded(
+            g_action_game->read_only.item.sell_price(item_ref.native_item, &unit_price))) {
+        result.status = contracts::InventorySellStatus::kPriceInvalid;
+        return result;
+    }
+    int64_t price = 0;
+    const contracts::ExtensionBagApi* eb = nullptr;
+    if (g_action_sdk != nullptr && g_action_sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        const QolResult capability_result = g_action_sdk->capabilities.require(
+            contracts::kExtensionBagCapabilityId,
+            QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+                            static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
+            &iface);
+        if (contracts::succeeded(capability_result)) {
+            eb = static_cast<const contracts::ExtensionBagApi*>(iface);
+        }
+    }
+    if (eb != nullptr && eb->sell_price != nullptr) {
+        price = eb->sell_price(item_ref.native_item, count, true);
+    } else if (!contracts::sell_price::calculate(unit_price, static_cast<uint32_t>(count), true,
+                                                 &price)) {
+        result.status = contracts::InventorySellStatus::kPriceInvalid;
+        return result;
+    }
+    if (price < 0 || g_action_game->extra.world_call.add_money == nullptr ||
+        g_action_game->extra.world_call.minus_money == nullptr ||
+        g_action_game->extra.inventory_write.remove_item == nullptr) {
+        result.status = contracts::InventorySellStatus::kPriceInvalid;
+        return result;
+    }
+    result.price = price;
+    result.count = count;
+    if (!contracts::succeeded(g_action_game->extra.world_call.add_money(price))) {
+        result.status = contracts::InventorySellStatus::kCreditFailed;
+        return result;
+    }
+    if (!contracts::succeeded(
+            g_action_game->extra.inventory_write.remove_item(item_ref.native_item))) {
+        (void)g_action_game->extra.world_call.minus_money(price);
+        result.status = contracts::InventorySellStatus::kRemoveFailed;
+        return result;
+    }
+    if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
+    (void)source;
+    result.status = contracts::InventorySellStatus::kOk;
+    return result;
 }
 
 constexpr contracts::InventoryActionApi kInventoryActionApi{
@@ -74,6 +172,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!inventory_native_hook_bind_sdk(ctx.sdk) || !inventory_native_hook_bind_game(ctx.game)) {
         return 1;
     }
+    g_action_sdk = ctx.sdk;
+    g_action_game = ctx.game;
     // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体在本插件 TU。
     return 0;
 }
@@ -81,10 +181,13 @@ int plugin_install(contracts::PluginContext& ctx) {
 // 空操作幂等：资源物理释放由宿主逆序执行，本插件无额外状态需要清理。
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    g_action_sdk = nullptr;
+    g_action_game = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    (void)ctx;
+    g_action_sdk = ctx.sdk;
+    g_action_game = ctx.game;
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {

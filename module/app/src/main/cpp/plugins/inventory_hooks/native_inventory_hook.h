@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "contracts/host_sdk.h"
-#include "contracts/game_host.h"
+#include "../../contracts/host_sdk.h"
+#include "../../contracts/game_host.h"
 
 using NativeHookFunType = int (*)(void* func, void* replace, void** backup);
 using NativeUnhookFunType = int (*)(void* func);

@@ -70,4 +70,58 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
     return contracts::ok();
 }
 
+QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
+    if (out_item == nullptr || bag < 0 || bag >= 6 || slot < 0 || slot >= 16) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_item = nullptr;
+    if (g_inven == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    struct Context {
+        int32_t bag;
+        int32_t slot;
+        void** out;
+    } context{bag, slot, out_item};
+    ::for_each_bag_slot([](void* item, int bag_index, int slot_index, void* raw) -> bool {
+        auto* context = static_cast<Context*>(raw);
+        if (context->bag == bag_index && context->slot == slot_index) {
+            *context->out = item;
+            return true;
+        }
+        return false;
+    }, &context);
+    return *out_item == nullptr ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
+}
+
+QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control) {
+    if (out_desc_type == nullptr || out_bag == nullptr || out_control == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (g_base == 0) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    auto* desc_type = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);
+    auto* current_bag = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+    auto** panel_control = reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+    if (!game_memory_accessible(desc_type, sizeof(*desc_type), 'r') ||
+        !game_memory_accessible(current_bag, sizeof(*current_bag), 'r') ||
+        !game_memory_accessible(panel_control, sizeof(*panel_control), 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *out_desc_type = *desc_type;
+    *out_bag = *current_bag;
+    *out_control = *panel_control;
+    return *out_control == nullptr ? error_result(kQolErrNotReady, kNotReady) : contracts::ok();
+}
+
+QolResult cursor_index(const void* control, int32_t* out_slot) {
+    if (control == nullptr || out_slot == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_control_object_get_cursor_index == nullptr) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *out_slot = fn_control_object_get_cursor_index(const_cast<void*>(control));
+    return *out_slot < 0 ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
+}
+
 }  // namespace qol::game

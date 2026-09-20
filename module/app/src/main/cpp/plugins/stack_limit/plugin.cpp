@@ -123,6 +123,18 @@ QolResult provider_view_limit(int32_t extended, uint32_t* out_limit) {
     return contracts::ok();
 }
 
+QolResult provider_read_encoded_field(const void* item, uint32_t* out_field) {
+    if (item == nullptr || out_field == nullptr) return invalid_argument();
+    if (!provider_ready()) return not_ready();
+    return impl::read_item_count_field(item, out_field) ? contracts::ok() : not_ready();
+}
+
+QolResult provider_write_encoded_field(void* item, uint32_t field) {
+    if (item == nullptr) return invalid_argument();
+    if (!provider_ready()) return not_ready();
+    return impl::write_item_count_field(item, field) ? contracts::ok() : not_ready();
+}
+
 QolResult canonical_impl(const void* item, uint32_t* out_count) {
     if (!provider_ready()) return not_ready();
     const contracts::QolItemCountEncoding encoding = item_encoding(item);
@@ -222,6 +234,8 @@ const contracts::QolItemCountApi kItemCountApi = {
     &provider_canonical_from_field,
     &provider_view_from_canonical,
     &provider_view_limit,
+    &provider_read_encoded_field,
+    &provider_write_encoded_field,
 };
 
 // 自身初始化：只缓存 Host ABI，资源仍由宿主按原子组安装。

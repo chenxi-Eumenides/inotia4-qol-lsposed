@@ -635,6 +635,7 @@ add_test(NAME craft_ui_guard_tests COMMAND craft_ui_guard_tests)
 # L2：Host SDK adapter 表转发与生命周期句柄 host 测试。
 add_executable(host_adapter_tests
     test_host_adapters.cpp
+    test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/game_host.cpp
     ${CPP_DIR}/core/native/game_feature.cpp

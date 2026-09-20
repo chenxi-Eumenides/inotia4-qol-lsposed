@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 24 条入口 hook 的声明表（静态存储，生命周期 ≥ 进程）；out_count 可空。
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count);

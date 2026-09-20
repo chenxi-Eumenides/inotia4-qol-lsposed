@@ -132,6 +132,9 @@ struct QolItemCountApi {
     QolResult (*canonical_from_field)(uint32_t field, uint32_t* out_canonical);
     QolResult (*view_from_canonical)(uint32_t canonical, int32_t extended, uint32_t* out_view);
     QolResult (*view_limit)(int32_t extended, uint32_t* out_limit);
+    // provider 持有编码字段布局；插件只读写不透明字段值，不接触偏移。
+    QolResult (*read_encoded_field)(const void* item, uint32_t* out_field);
+    QolResult (*write_encoded_field)(void* item, uint32_t field);
 };
 
 static_assert(std::is_standard_layout<QolItemCountApi>::value,
@@ -159,7 +162,13 @@ static_assert(offsetof(QolItemCountApi, view_from_canonical) ==
               "QolItemCountApi ABI layout changed");
 static_assert(offsetof(QolItemCountApi, view_limit) == sizeof(QolItemCountApi::canonical) * 8,
               "QolItemCountApi ABI layout changed");
-static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 9,
+static_assert(offsetof(QolItemCountApi, read_encoded_field) ==
+                  sizeof(QolItemCountApi::canonical) * 9,
+              "QolItemCountApi ABI layout changed");
+static_assert(offsetof(QolItemCountApi, write_encoded_field) ==
+                  sizeof(QolItemCountApi::canonical) * 10,
+              "QolItemCountApi ABI layout changed");
+static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 11,
               "QolItemCountApi ABI size changed");
 
 // L4-0 追加面：只覆盖已审计插件迁移所需的低层游戏原语。该面仍是宿主内核 ABI，
@@ -205,6 +214,7 @@ struct QolInventoryWriteApi {
                              void** out_item);
     QolResult (*save_item)(void* item, void* param, int32_t* out_saved);
     QolResult (*free_item)(void* item);
+    QolResult (*remove_item_direct)(int32_t bag, int32_t slot);
 };
 
 struct QolCraftExtraReadApi {
@@ -244,6 +254,7 @@ struct QolWorldExtraCallApi {
     QolResult (*close_popup)();
     QolResult (*restore_hud)();
     QolResult (*show_banner)(const char* text);
+    QolResult (*add_money)(int64_t amount);
 };
 
 struct QolSaveExtraReadApi {
@@ -349,6 +360,7 @@ struct QolItemReadOnlyApi {
     QolResult (*jewel_value)(const void* item, int32_t* out_value);
     // 宝石 item+0x10 bits18-23；原落点：plugins/autosell/view.cpp:79。
     QolResult (*jewel_attribute_type)(const void* item, int32_t* out_type);
+    QolResult (*sell_price)(const void* item, int64_t* out_price);
 };
 
 struct QolWorldReadOnlyApi {
@@ -434,6 +446,9 @@ struct QolInventoryReadOnlyApi {
     // 遍历原版物理袋 0..5，回调返回 1 停止；原落点：game_state.cpp:280-292、
     // plugins/autosell/scan.cpp:119-145。
     QolResult (*for_each_bag_slot)(QolInventoryBagSlotFn callback, void* ctx);
+    QolResult (*physical_item_at)(int32_t bag, int32_t slot, void** out_item);
+    QolResult (*detail_context)(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
+    QolResult (*cursor_index)(const void* control, int32_t* out_slot);
 };
 
 struct QolReadOnlyApi {
@@ -486,6 +501,6 @@ static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, save_call) + sizeof(Q
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 6;
+constexpr uint16_t kGameHostMinor = 7;
 
 }  // namespace qol::contracts

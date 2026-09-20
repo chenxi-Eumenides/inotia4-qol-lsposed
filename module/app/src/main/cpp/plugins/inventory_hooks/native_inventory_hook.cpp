@@ -2,15 +2,12 @@
 #include "inventory_hook_stage4.h"
 #include "inventory_find_item_poc.h"
 #include "claims.h"
+#include "inventory_logging.h"
 
-#include "contracts/plugin.h"
-#include "core/native/extension_bag_port.h"
-#include "core/native/qol_log.h"
-#include "data/native/item_class.h"
-#include "game_access.h"
-#include "game_inventory.h"
-#include "game_state.h"
-#include "contracts/host_sdk.h"
+#include "../../contracts/plugin.h"
+#include "../../contracts/extension_bag.h"
+#include "../../contracts/host_sdk.h"
+#include "../../contracts/ui.h"
 
 #include <atomic>
 #include <cstddef>
@@ -20,14 +17,51 @@
 
 namespace {
 
+using FindItemFn = void* (*)(int32_t);
+using HaveItemFn = int (*)(int32_t);
+using GetItemCountFn = int (*)(int32_t);
+using GetCumulateCountFn = int (*)(void*);
+using ConsumeItemFn = void (*)(void*);
+using RemoveItemFn = int (*)(void*);
+using SaveItemFn = int (*)(void*);
+using InvenMoveItemFn = int (*)(void*, int, int, int);
+using UiEquipRefreshItemAreaFn = void (*)();
+using EquipItemFromInvenToSlotFn = int (*)(void*, int32_t, int32_t, int32_t);
+using PutJewelFn = int (*)(void*, void*);
+using IsHavingEmptySlotFn = int (*)(int32_t, int32_t);
+using UnequipFn = int (*)(void*, int32_t);
+using ButtonEquipExeFn = void (*)(void*);
+using ButtonDestroyExeFn = void (*)(void*);
+using ButtonUnequipExeFn = void (*)(void*);
+using UiEquipOkConfirmUseItemFn = void (*)(void*);
+using UiEquipButtonUseMercenarySealExeFn = void (*)(void*);
+using UiEquipOkDestroyItemFn = uint64_t (*)();
+using UiEquipEquipControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
+using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);
+using ItemSystemDivideFn = void* (*)(void*, int32_t);
+using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
+using InvenRemoveItemDataFn = int (*)(int32_t, int32_t);
+
 constexpr uint32_t kNativeApiVersion = 2;
+
+const qol::contracts::QolHostSdk* g_sdk = nullptr;
+const qol::contracts::QolGameHost* g_game = nullptr;
 
 // D2c-2a：扩展背包经 capability 现取（不缓存跨帧指针）。能力缺失或 enabled()==false
 // 与原 extension_bag_enabled()==false 等价（EB disabled）；调用方按 disabled 降级
 // （与 D2b-1/D2b-2 口径一致）。本 TU 不再直接依赖 EB 头与 EB 符号（弹窗 UI 见
 // 下方消费者侧内联）。
 const qol::contracts::ExtensionBagApi* eb_active() {
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        qol::contracts::kExtensionBagCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
+        &iface);
+    if (!qol::contracts::succeeded(result)) return nullptr;
+    const qol::contracts::ExtensionBagApi* eb =
+        static_cast<const qol::contracts::ExtensionBagApi*>(iface);
     if (eb == nullptr || eb->enabled == nullptr || !eb->enabled()) return nullptr;
     return eb;
 }
@@ -36,19 +70,13 @@ const qol::contracts::ExtensionBagApi* eb_active() {
 // 消费者侧内联。契约 ExtensionBagApi 未导出弹窗入口（handle_original_bag_unequip 只
 // 回传标志），弹窗为纯游戏 UI 调用，由本消费者自持，避免直接依赖 EB 符号。
 void show_inventory_popup(int text_id) {
-    if (g_base == 0) return;
-    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
-                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
-    if (popup == 0) return;
-    typedef void (*UiPopupFn)(int, int, int, int);
-    reinterpret_cast<UiPopupFn>(popup)(text_id, 0, 0, 0);
+    if (g_sdk == nullptr || g_sdk->ui == nullptr || g_sdk->ui->show_text_popup == nullptr) return;
+    (void)g_sdk->ui->show_text_popup(text_id);
 }
 
 std::mutex g_hook_mutex;
 NativeHookFunType g_hook_func = nullptr;
 NativeUnhookFunType g_unhook_func = nullptr;
-const qol::contracts::QolHostSdk* g_sdk = nullptr;
-const qol::contracts::QolGameHost* g_game = nullptr;
 
 FindItemFn g_backup_find_item = nullptr;
 HaveItemFn g_backup_have_item = nullptr;
@@ -104,6 +132,20 @@ enum class ItemCountWriteResult : uint8_t {
 
 const qol::contracts::QolItemCountApi* item_count_api() {
     return g_game == nullptr ? nullptr : &g_game->item_count;
+}
+
+void* physical_item_at(int bag, int slot) {
+    if (g_game == nullptr || g_game->read_only.inventory.physical_item_at == nullptr) return nullptr;
+    void* item = nullptr;
+    const QolResult result = g_game->read_only.inventory.physical_item_at(bag, slot, &item);
+    return qol::contracts::succeeded(result) ? item : nullptr;
+}
+
+void* inventory_item_at(int bag, int slot) {
+    if (g_game == nullptr || g_game->read_only.inventory.item_ref_at == nullptr) return nullptr;
+    qol::contracts::QolInventoryItemRef ref{};
+    const QolResult result = g_game->read_only.inventory.item_ref_at(bag, slot, &ref);
+    return qol::contracts::succeeded(result) ? ref.native_item : nullptr;
 }
 
 bool item_count_is_encoded(void* item) {
@@ -191,31 +233,36 @@ bool item_count_feature_enabled(void* item) {
 // | NetworkStore_AddItem          | 1    | 设（接收量）   | 网络收货数据 +0x18 字段        | CreateItem 产物（返回值非对象） | 待勘察：写点 0x15d7cc 区 `w3=[收货数据+0x18]`，数量域同上不可达；勘察方法同上 |
 // ---------------------------------------------------------------------------
 
-// G_INVEN_VMA 槽位布局（game_symbols.h：6 袋 × 0x80 步长，每袋 16 槽、每槽 8B 指针，
-// 含任务袋 5）。写侧回写需要绕过扩展端口直接读物理槽，避免扩展物化路径取锁。
+// 物理库存包含 6 袋（含任务袋 5）；写侧读取经 Game Host 物理槽原语，避免扩展物化路径取锁。
 constexpr int kInvenPhysicalBagCount = 6;
 constexpr int kInvenSlotsPerBag = 16;
 constexpr size_t kInvenBagStride = 0x80;
 
 // 纯内存读物理袋槽物品指针（bag 0..5，含任务袋；越界/未就绪返回 nullptr）。
-// 刻意不经 inventory_item_at：该函数对逻辑袋走扩展物化、对物理袋调 H-17 getter，
-// 写侧取证只需原始指针，不需要两者。
+// 该函数只读取物理槽，不经过逻辑袋物化。
 void* s2_physical_slot_item(int bag, int slot) {
     if (bag < 0 || bag >= kInvenPhysicalBagCount || slot < 0 || slot >= kInvenSlotsPerBag ||
-        g_inven == nullptr) {
+        g_game == nullptr) {
         return nullptr;
     }
-    return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(g_inven) +
-                                     static_cast<size_t>(bag) * kInvenBagStride +
-                                     static_cast<size_t>(slot) * sizeof(void*));
+    return physical_item_at(bag, slot);
 }
 
 uint32_t read_count_field(const void* item) {
-    return *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+    const auto* api = item_count_api();
+    uint32_t field = 0;
+    if (api == nullptr || api->read_encoded_field == nullptr || item == nullptr ||
+        !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+        return 0;
+    }
+    return field;
 }
 
 void s2_write_count_field(void* item, uint32_t field) {
-    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = field;
+    const auto* api = item_count_api();
+    if (api != nullptr && api->write_encoded_field != nullptr && item != nullptr) {
+        (void)api->write_encoded_field(item, field);
+    }
 }
 
 // 在物理袋 0..5（含任务袋）定位对象所在槽；找不到返回 false。
@@ -413,8 +460,8 @@ int get_item_count_wrapper(int32_t category) {
 // marker/宝石选项/袋容量）不解释 bits22–24，一律 original-first。纪律：backup
 // 是纯读原版函数（UTIL_GetBitValue/MEM_ReadUint8，反汇编 0x106094–0x106124
 // 证实），不回调任何被 Hook 函数；wrapper 不取 g_virtual_bag_mtx、不读模块
-// 状态，因此无需 TLS 直通守卫；数量位偏移使用 game_symbols.h 的 I_COUNT，不写
-// 裸偏移。分流逻辑在 stage4_get_cumulate_count（纯函数，供后续 Host 断言）。
+// 状态，因此无需 TLS 直通守卫；数量字段经 item_count ABI 访问。分流逻辑在
+// stage4_get_cumulate_count（纯函数，供 Host 断言）。
 int get_cumulate_count_wrapper(void* item) {
     const qol::contracts::QolItemCountApi* item_count =
         g_game == nullptr ? nullptr : &g_game->item_count;
@@ -675,7 +722,7 @@ void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
     return item;
 }
 
-// INVEN_RemoveItemData 快照条目上限：6 袋 × 16 槽（game_symbols.h G_INVEN_VMA 布局）。
+// INVEN_RemoveItemData 快照条目上限：6 袋 × 16 槽。
 constexpr int kS2RemoveDataMaxEntries = kInvenPhysicalBagCount * kInvenSlotsPerBag;
 
 struct S2RemoveDataCapture {
@@ -699,10 +746,12 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
             void* item = s2_physical_slot_item(bag, slot);
             if (item == nullptr) continue;
             if (!item_count_is_encoded(item)) continue;
-            const uint16_t flags =
-                *reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(item) +
-                                                   I_TYPE);
-            if (((flags >> 6) & 0x3FF) != category) continue;
+            if (g_game == nullptr || g_game->read_only.item.category == nullptr) continue;
+            int32_t item_category = -1;
+            if (!qol::contracts::succeeded(g_game->read_only.item.category(item, &item_category)) ||
+                item_category != category) {
+                continue;
+            }
             if (cap->entry_count >= kS2RemoveDataMaxEntries) return;  // 不可能：上限即全袋
             cap->items[cap->entry_count] = item;
             cap->bags[cap->entry_count] = bag;
@@ -809,8 +858,7 @@ void refresh_item_area_wrapper() {
 }
 
 uint64_t move_item_caller_offset() {
-    const uintptr_t caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-    return g_base != 0 && caller >= g_base ? static_cast<uint64_t>(caller - g_base) : 0;
+    return 0;
 }
 
 void log_move_item_observation(const char* phase, void* item, int count, int target_bag,
@@ -1020,14 +1068,21 @@ uint64_t ok_destroy_item_wrapper() {
     if (route == VanillaSellRoute::kBackup) return call_backup();
 
     // 仅背包物品详情（desc_type==2）走结算；装备详情(0)/扩展袋(1) 回原版。
-    if (g_base == 0 || fn_control_object_get_cursor_index == nullptr) return call_backup();
-    const uint8_t desc_type = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);
-    if (desc_type != kUIEquipBagDescType) return call_backup();
-
-    const uint8_t bag = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
-    void* ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
-    if (ctrl == nullptr) return call_backup();
-    const int slot = fn_control_object_get_cursor_index(ctrl);
+    if (g_game == nullptr || g_game->read_only.inventory.detail_context == nullptr ||
+        g_game->read_only.inventory.cursor_index == nullptr) {
+        return call_backup();
+    }
+    int32_t desc_type = 0;
+    int32_t bag = 0;
+    void* ctrl = nullptr;
+    if (!qol::contracts::succeeded(g_game->read_only.inventory.detail_context(
+            &desc_type, &bag, &ctrl)) || desc_type != 2 || ctrl == nullptr) {
+        return call_backup();
+    }
+    int32_t slot = -1;
+    if (!qol::contracts::succeeded(g_game->read_only.inventory.cursor_index(ctrl, &slot))) {
+        return call_backup();
+    }
     if (slot < 0 || slot >= kInvenSlotsPerBag) return call_backup();
 
     void* item = s2_physical_slot_item(bag, slot);
@@ -1042,7 +1097,7 @@ uint64_t ok_destroy_item_wrapper() {
     if (g_game == nullptr || g_game->read_only.item.category == nullptr ||
         g_game->read_only.item.is_no_sell == nullptr ||
         g_game->read_only.item.cumulate_count == nullptr ||
-        fn_item_get_sell_price == nullptr) {
+        g_game->read_only.item.sell_price == nullptr) {
         return call_backup();
     }
     int32_t category = 0;
@@ -1060,7 +1115,10 @@ uint64_t ok_destroy_item_wrapper() {
     if (!qol::contracts::succeeded(g_game->read_only.item.cumulate_count(item, &count)) ||
         count <= 0) return call_backup();
     const uint32_t canonical = static_cast<uint32_t>(count);
-    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
+    int64_t unit_price = 0;
+    if (!qol::contracts::succeeded(g_game->read_only.item.sell_price(item, &unit_price))) {
+        return call_backup();
+    }
     int64_t price = 0;
     if (!vanilla_sell_money(unit_price, canonical, &price, item_count_api())) {
         QOL_LOG_INFO(QolDomain::kInventory,
@@ -1080,11 +1138,12 @@ uint64_t ok_destroy_item_wrapper() {
 
     // kTakeover：加钱 → 删整堆 → 刷新。加钱/删堆失败不回 backup（避免按原版错误
     // 金额二次结算），失败即退款中止。
-    if (fn_add_money == nullptr || fn_minus_money == nullptr ||
-        fn_remove_item_direct == nullptr) {
+    if (g_game->extra.world_call.add_money == nullptr ||
+        g_game->extra.world_call.minus_money == nullptr ||
+        g_game->extra.inventory_write.remove_item_direct == nullptr) {
         return call_backup();
     }
-    if (!fn_add_money(price)) {
+    if (!qol::contracts::succeeded(g_game->extra.world_call.add_money(price))) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                             static_cast<long long>(price));
@@ -1092,20 +1151,20 @@ uint64_t ok_destroy_item_wrapper() {
     }
     // 提交前复核槽内对象未变（防并发替换/释放）。
     if (s2_physical_slot_item(bag, slot) != item) {
-        fn_minus_money(price);
+        (void)g_game->extra.world_call.minus_money(price);
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell stale before remove bag=%d slot=%d refunded=1", bag,
                             slot);
         return 0;
     }
-    fn_remove_item_direct(bag, slot);
+    (void)g_game->extra.inventory_write.remove_item_direct(bag, slot);
     if (s2_physical_slot_item(bag, slot) == item) {
-        fn_minus_money(price);
+        (void)g_game->extra.world_call.minus_money(price);
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell remove failed bag=%d slot=%d refunded=1", bag, slot);
         return 0;
     }
-    if (fn_ui_equip_refresh_item_area != nullptr) fn_ui_equip_refresh_item_area();
+    (void)inventory_native_hook_call_refresh_item_area_original();
     QOL_LOG_INFO(QolDomain::kInventory,
         "vanilla sell committed bag=%d slot=%d category=%d canonical=%u unit=%lld price=%lld",
         bag, slot, category, canonical, static_cast<long long>(unit_price),
@@ -1257,8 +1316,7 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
 }
 
 bool inventory_native_hook_call_refresh_item_area_original() {
-    const UiEquipRefreshItemAreaFn original = g_backup_refresh_item_area != nullptr
-        ? g_backup_refresh_item_area : fn_ui_equip_refresh_item_area;
+    const UiEquipRefreshItemAreaFn original = g_backup_refresh_item_area;
     if (original == nullptr) return false;
     original();
     return true;
@@ -1267,9 +1325,11 @@ bool inventory_native_hook_call_refresh_item_area_original() {
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk) {
     if (sdk == nullptr || sdk->hooks.intercept_blocks == nullptr) {
         g_sdk = nullptr;
+        inventory_log_bind_sdk(nullptr);
         return false;
     }
     g_sdk = sdk;
+    inventory_log_bind_sdk(sdk);
     return true;
 }
 

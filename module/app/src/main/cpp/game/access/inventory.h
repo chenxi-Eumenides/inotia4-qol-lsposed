@@ -16,4 +16,11 @@ QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
 // 遍历原版物理袋 0..5；回调返回 1 时停止。回调期间引用有效，返回后不得保存。
 QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx);
 
+// 读取物理袋对象；包含任务袋 5，返回的不透明对象只在当前游戏线程调用窗内使用。
+QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item);
+
+// 读取原版装备详情的当前描述类型、袋号和控件句柄。
+QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
+QolResult cursor_index(const void* control, int32_t* out_slot);
+
 }  // namespace qol::game

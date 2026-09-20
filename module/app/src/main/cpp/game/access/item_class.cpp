@@ -67,6 +67,11 @@ int item_jewel_attribute_type(const void* item) {
     return static_cast<int>((raw >> 18) & 0x3Fu);
 }
 
+int item_sell_price(const void* item) {
+    if (item == nullptr || fn_item_get_sell_price == nullptr) return -1;
+    return fn_item_get_sell_price(const_cast<void*>(item));
+}
+
 bool item_class_table_ready() {
     if (g_base == 0) return false;
     uint8_t* base = *reinterpret_cast<uint8_t**>(

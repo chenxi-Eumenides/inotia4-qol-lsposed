@@ -86,6 +86,21 @@ QolResult view_limit(int32_t extended, uint32_t* out_limit) {
                                               : g_provider->view_limit(extended, out_limit);
 }
 
+QolResult read_encoded_field(const void* item, uint32_t* out_field) {
+    if (item == nullptr || out_field == nullptr) return invalid_argument();
+    if (g_provider == nullptr) return not_ready();
+    return g_provider->read_encoded_field == nullptr ? not_ready()
+                                                       : g_provider->read_encoded_field(item, out_field);
+}
+
+QolResult write_encoded_field(void* item, uint32_t field) {
+    if (item == nullptr) return invalid_argument();
+    if (g_provider == nullptr) return not_ready();
+    return g_provider->write_encoded_field == nullptr
+               ? not_ready()
+               : g_provider->write_encoded_field(item, field);
+}
+
 const contracts::QolItemCountApi kFacade = {
     &canonical,
     &effective,
@@ -96,6 +111,8 @@ const contracts::QolItemCountApi kFacade = {
     &canonical_from_field,
     &view_from_canonical,
     &view_limit,
+    &read_encoded_field,
+    &write_encoded_field,
 };
 
 }  // namespace

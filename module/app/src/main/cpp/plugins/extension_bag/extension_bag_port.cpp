@@ -6,7 +6,7 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
-#include "core/native/sell_price.h"
+#include "contracts/sell_price.h"
 #include "contracts/host_sdk.h"
 
 namespace {
@@ -172,7 +172,8 @@ int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_disco
     // count 为调用方传入的模式视图数量（R-47 决策 b），按模式上限收敛。
     const uint32_t legal_count = static_cast<uint32_t>(count);
     int64_t final_price = 0;
-    if (!sell_price::calculate(unit_price, legal_count, apply_variant_discount, &final_price)) {
+    if (!qol::contracts::sell_price::calculate(unit_price, legal_count,
+                                               apply_variant_discount, &final_price)) {
         return -1;
     }
     // 原版商店为单位售价×数量；详情页粉碎改出售路径再乘 70%。

@@ -30,6 +30,9 @@ int item_jewel_value(const void* item);
 // 独立宝石 item+I_COUNT 的属性类型 bits18-23；item 为空返回 -1。
 int item_jewel_attribute_type(const void* item);
 
+// 读取游戏提供的基础出售单价；未解析或 item 为空返回 -1。
+int item_sell_price(const void* item);
+
 // ITEMCLASSBASE 记录 +2 == 0x1f 的背包类别判定；表未就绪返回 false。
 bool item_class_table_ready();
 bool item_is_backpack_category(int category);

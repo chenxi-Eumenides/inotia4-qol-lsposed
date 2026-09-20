@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // 库存副作用动作能力。出售事务的 owner 是 inventory_hooks；消费者只通过此表
-// 调用既有 inventory_trade::sell，不接触交易实现或游戏私有库存类型。
+// 调用 owner 的出售实现，不接触交易实现或游戏私有库存类型。
 
 namespace qol::contracts {
 

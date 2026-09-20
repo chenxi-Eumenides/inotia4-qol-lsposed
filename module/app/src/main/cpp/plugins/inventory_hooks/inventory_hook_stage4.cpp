@@ -2,7 +2,7 @@
 
 #include <cassert>
 
-#include "core/native/sell_price.h"
+#include "../../contracts/sell_price.h"
 
 int stage4_have_item(int32_t category, Stage4HaveBackup backup,
                      Stage4CountExtension extension_count, bool& recursive_guard) {
@@ -79,8 +79,8 @@ bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* o
         return false;
     }
     if (legal_count == 0) return false;
-    return sell_price::calculate(unit_price, legal_count, /*apply_variant_discount=*/true,
-                                 out_price);
+    return qol::contracts::sell_price::calculate(unit_price, legal_count,
+                                                 /*apply_variant_discount=*/true, out_price);
 }
 
 uint32_t stage4_make_item_writeback_count(int32_t category, int32_t arg2, int32_t flag) {

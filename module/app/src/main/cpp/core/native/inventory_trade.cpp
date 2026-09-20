@@ -9,7 +9,7 @@
 #include "contracts/extension_bag.h"
 #include "contracts/item_count.h"
 #include "core/native/qol_log.h"
-#include "core/native/sell_price.h"
+#include "contracts/sell_price.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "game_symbols.h"
@@ -49,7 +49,9 @@ int64_t sell_price_with_fallback(const qol::contracts::ExtensionBagApi* api, voi
         if (qol::contracts::succeeded(result)) legal_count = effective;
     }
     int64_t final_price = 0;
-    if (!sell_price::calculate(unit_price, legal_count, true, &final_price)) return -1;
+    if (!qol::contracts::sell_price::calculate(unit_price, legal_count, true, &final_price)) {
+        return -1;
+    }
     return final_price;
 }
 
