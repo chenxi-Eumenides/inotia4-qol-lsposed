@@ -14,7 +14,8 @@
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ✅ 完成 | 真机卡 VM-P3-01/VM-P3-03 PASS（deactivate→`free`、物理归还 A/B `hp=270`、activate 重挂载 `hp=135`，U6 闭合；10 态 API + tickets `pending→done`）；故障注入 host-only（VM-P3-02，277+115 断言）；host 25/25 |
 | P4 | 批量迁移其余插件（内置静态轨） | 🔄 进行中（**阶段 A ✅**：A1–A4，证据 VM-P4-01..05） | 每插件：单测 + 验收卡；豁免清零 |
 | P5 | `plugins/` 单层收口（ADR-0004）：`core.api` 传输内核、内置 API provider、`core.ui`、动态 capability 与注册口落地；JNI 分组、脚本收紧、删除旧路径（**P4-D0 已完成 `features/`→`plugins/` 更名；P5 只做 `core.api`/`core.ui`、动态能力、JNI 与脚本收紧**） | 🔄 进行中（首步完成：`http.registry`、143 条冻结 owner 表、`/api/system/routes`） | 冻结 API 路径/响应兼容；业务 provider/分派、动态能力发布/撤销与 route/capability lease 验收；`check_*` 全绿、豁免清零、单轨消失；U10 剩余 ABI 冻结 |
-| P6（可选） | 外部插件轨（草案）：数据扩展 + 未签名全权 native | ⬜ 未开始 | schema 拒绝、用户显式启用、native 加载/禁用、托管资源回收、启动故障恢复与更新/回滚真机通过 |
+| P6 | S2 residency 与收口门禁：S2 codec/getter/写路径/99–999 策略归 `stack_limit`；Host 只持不可变函数表与安全 dispatch slot；`provider residency` 与 `feature enabled` 双态分别上报；持久 S2 数据存在时 provider 与解释资源不得卸载；清理并登记 legacy 目录、脚本过渡映射、contracts 过渡面、宿主遗留消费者与 Kotlin 路由业务 | 🔄 进行中（本轮：双态实现 + 状态输出 + host 测试 + 设计/台账登记） | 双态切换与 provider 常驻 host 测试通过；`/api/system/features` 可见 `residency` 与 `feature_enabled` 分离；受影响 VM 真机卡取得日志；过渡项逐条满足清除条件；设计书保持未签署 |
+| P7（可选） | 外部插件轨（草案）：数据扩展 + 未签名全权 native | ⬜ 未开始 | schema 拒绝、用户显式启用、native 加载/禁用、托管资源回收、启动故障恢复与更新/回滚真机通过 |
 
 ## 2. 功能域迁移台账
 
@@ -166,7 +167,7 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 
 该计划依据 ADR-0008 执行。用户裁决：插件边界迁移属于 **P1–P4 范围**；设计在 P4 后修改，
 不受 P5 签署门禁约束。C1 只冻结 Host SDK / Game Host API 的 ABI 骨架与 `PluginContext`
-接缝，具体表成员可在后续 lane 演进；P6 才冻结对外兼容边界。
+接缝，具体表成员可在后续 lane 演进；对外兼容边界由外部插件轨（现编号 P7）冻结。
 
 | 阶段 | 范围 | 状态 |
 |---|---|---|
@@ -349,3 +350,25 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | G3 UI | NOT_ACCEPTED（无真机） | `QolUiAdapter` minor 追加控件身份/item/slot、touch state、rect fill、原版物品绘制、parent/root 查询；EB 的控件定位、树遍历、命中、页签/格子绘制、物品数据与释放坐标读取已切换到 `ctx.sdk->ui` 薄封装。Host 编译与 Debug 构建通过；Popup enter alias、Host fake/独立 include、架构/资源/基线/map 检查及 VM-B 真机证据尚未完成。受影响规则 R-12/R-13/R-18/R-47/R-48/R-49，行为证据按要求不能以构建替代。 |
 | G4 副作用与所有权 | NOT_ACCEPTED（无真机） | `QolGameHost::extension_bag_write` 尾部追加，`kGameHostMinor=9`；按 inventory/equipment/ui 分组，保留原游戏整数返回值与 fail-closed 语义。EB 装备、跨袋入库、移动合并、镶嵌、使用、佣兵生成、金币、序列化/重建和释放路径已切换；原版刷新 trampoline、Popup/PtrHook 安装和控件树写仍为 G5/S1 缺口。Host 50/50 通过；受影响 R-12/R-18/R-34/R-38/R-40/R-41/R-47/R-48/R-49/R-50/R-55/R-63，对应 VM-B01..B05、VM-34、VM-40、VM-41，未执行真机。 |
 | G5 收口 | ⬜ 未开始 | 待插件片段、独立编译、边界负例与零遗留 grep。 |
+
+### P6：S2 residency 与功能启用双态
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| 双态接口 | ✅ 已落地 | `plugins/stack_limit/plugin.h` 公开 `provider_resident()`、`feature_enabled()`；`plugin.cpp` 以 `g_provider_resident` 与 `g_feature_999_enabled` 两个原子量分别持有，`feature_enabled()` = residency ∧ 999 有效态 |
+| provider 常驻 | ✅ 已落地 | `plugin_install` 注册 facade provider 并置 resident；`plugin_deactivate` 不再调用 `host_item_count_set_provider(nullptr)`、不再清 `g_sdk`/`g_game`，只清 999 有效态（已有 S2 数据无迁移方案，解释器不得随普通停用卸载） |
+| 状态输出 | ✅ 已落地 | `host/status_json.cpp` 对 `stack_limit` 条目追加 `residency`（`resident`/`not_resident`）与 `feature_enabled`；两者与 `enabled`/`state` 相互独立 |
+| host 证据 | ✅ host-only | `ctest`：`stack_limit_plugin_tests` 覆盖 install→enabled→disabled→deactivate 四态的 residency/enabled 断言；deactivate 后 facade 仍可调用纯转换（`canonical` 按未知类别返回 `kQolErrUnsupported`，不再返回 `kQolErrNotReady`） |
+| 设计冻结 | ✅ 已落地 | `ARCHITECTURE.md` §3.8「S2 数量上限的最终归属与双态」+ §4.1 `core.*` 前缀与拒绝名单 + §9.1 状态字段；版本升至 v0.3.15 |
+| 行为验收 | ⬜ 待真机 | 双态开关往返、provider 常驻与 `/api/system/features` 字段需真机日志；按交付定义不得以 host/构建替代（对应 VM-B 真机卡待建） |
+
+#### P6 过渡项登记与清除条件
+
+| # | 过渡项 | 位置 | 清除条件 | 验收方式 |
+|---|---|---|---|---|
+| 1 | legacy native 目录 | `module/app/src/main/cpp/{core,api,data}/` | 各文件职责分别吸收到 `game/`、`infra/`、`plugins/`、`contracts/` 后目录清空 | `check_arch.py` 无对应 legacy 边、目录删除、基线条目移除 |
+| 2 | 脚本 legacy 过渡映射 | `scripts/maintenance/arch_common.py` 的 `_ROOT_OVERRIDES`/`_CORE_OVERRIDES`/`_TARGET_PREFIXES` 与 `domains` 放行 | legacy 目录吸收完成、插件 include/link 校验通过、基线收缩后删除映射，`unknown_layer` 收紧为硬失败 | 删除后 `check_arch.py` 全绿且边界负例非零退出 |
+| 3 | contracts 过渡入口 | 除 `contracts/item_count.h` 外仍存在的迁移期头（`module_save_port.h`、`popup_enter_alias.h`、`in_flight.h`、`inventory_action.h`、`sell_price.h` 等） | 每个入口的消费者切到 Host SDK / Game Host 函数表或 owner capability 后删除头文件 | 迁移后对应插件不再 include 该头；host 测试与 `check_arch.py` 全绿 |
+| 4 | 宿主侧遗留消费者 | `api/native/**`、`core/native/**`、`data/native/**` 中消费插件 capability 的代码 | 消费者迁入对应 owner 插件或改经 Game Host API 后删除 legacy 文件 | 迁移后对应文件删除、调用点 grep 清零 |
+| 5 | Kotlin 路由业务 | `module/app/src/main/java/com/inotia4/qol/api/controller/**`（23 个 controller 的业务实现） | 路由语义下沉 native `core.api`，Kotlin 只保留 AndServer 传输适配；冻结路径/方法/成功响应不变 | `/api/system/routes` owner 表无重复/遗漏；既有路由回归兼容 |
+| 6 | `contracts/autosell.h` 全局函数 | `contracts/autosell.h` | 改为 provider 函数表或 Host SDK 面后删除全局函数 | `check_arch.py` 与 host 测试全绿 |

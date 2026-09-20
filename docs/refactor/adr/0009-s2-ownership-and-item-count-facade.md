@@ -31,18 +31,28 @@
 
 ### residency 归属
 
-`item_count` provider 的驻留跟随 `stack_limit` 插件自身的安装状态，而不是 999
-功能组的有效态：`plugin_install` 成功后注册 provider，`plugin_deactivate` 注销 provider。
-`on_disabled` 只清除 999 有效态，不注销 provider，且可重复调用。因而 provider 驻留时
+`item_count` provider 的驻留跟随 `stack_limit` 插件的安装生命周期，而不是 999
+功能组的有效态：`plugin_install` 成功后注册 provider 并置 `provider_resident`；普通
+`disable` 与 `deactivate` 都不注销 provider（已有 S2 数据没有迁移方案，解释器不得随
+普通停用卸载），只清除 999 有效态。`on_disabled` 可重复调用。因而 provider 驻留时
 `canonical` 始终可读；`gate_want && atomic_group_satisfied` 只决定
 `effective`、`write_effective` 与 `writeback_needed` 的语义。
+
+provider 驻留与功能启用是两个独立可观测维度：`/api/system/features` 的
+`stack_limit` 条目分别输出 `residency` 与 `feature_enabled`（另见
+`ARCHITECTURE.md` §3.8「S2 数量上限的最终归属与双态」）。
 
 | 状态 | provider | `canonical` | `effective` / `write_effective` / `writeback_needed` |
 |---|---|---|---|
 | gate 关 + 已安装 | 驻留 | 可读 | 原始语义（成功） |
 | gate 开 + 原子组未满足 | 驻留 | 可读 | `kQolErrNotReady` |
 | gate 开 + 组全 live | 驻留 | 可读 | S2 语义 |
-| 未安装 / deactivate | 注销 | `kQolErrNotReady` | `kQolErrNotReady` |
+| 未安装 | 未驻留 | `kQolErrNotReady` | `kQolErrNotReady` |
+| deactivate（已安装过） | **驻留** | 可读 | 原始语义（成功） |
+
+> P6 修订（2026-09-20）：原表将 `deactivate` 与「未安装」并列并注销 provider；改为
+> provider 在进程内单向驻留。依据是「已有持久 S2 数据时不得卸载其解释器」，且
+> `deactivate` 只应撤销 999 功能有效态。未安装与已安装后 deactivate 因此是两种不同状态。
 
 ### 宿主侧遗留消费者访问器（B2a 补充）
 
@@ -210,3 +220,22 @@ B5a 与 B5b 在接口冻结后可并行；B5c 必须最后执行。
 - 999 有效态由 `stack_limit` 插件内部原子量持有；对外仍经 `QolItemCountApi` 的 `effective`/`view_from_canonical`/`view_limit` 以及 `/api/system/features` 的 `stack_limit` 状态表达，不重建公共布尔函数。
 - marker 继续归 `plugins/extension_bag/extension_bag_port.h`；stack_limit 不需要 marker。
 - 清理证据：`contracts/stack_codec.h`、`contracts/stack_limit.h`、`core/native/stack_limit_state.cpp` 已删除，CMake 状态源已移除；Native 源码不再包含公共 codec/stack-limit 头或调用两个全局函数。
+
+## P6：provider 单向驻留与双态诊断（2026-09-20）
+
+本批把「provider residency」从 `plugin_deactivate` 注销改为**进程内单向驻留**，并显式暴露为
+独立诊断维度：
+
+- `plugins/stack_limit/plugin.{h,cpp}`：新增 `provider_resident()` 与 `feature_enabled()`；
+  `plugin_install` 置 `g_provider_resident` 并注册 facade provider；`plugin_deactivate`
+  只清 `g_feature_999_enabled`，不再清 `g_sdk`/`g_game`、不再调用
+  `host_item_count_set_provider(nullptr)`。`feature_enabled()` = residency ∧ 999 有效态。
+- `host/status_json.cpp`：`/api/system/features` 的 `stack_limit` 条目追加
+  `residency`（`resident`/`not_resident`）与 `feature_enabled`；`enabled`/`state` 语义不变。
+- `tests/test_stack_limit_plugin.cpp`：install→`resident/false`、`on_enabled`→`resident/true`、
+  `on_disabled`→`resident/false`、`deactivate`→`resident/false`，并断言 deactivate 后
+  facade 仍可调用纯转换成员（`canonical` 对未知类别返回 `kQolErrUnsupported`，不再是
+  `kQolErrNotReady`）。
+
+**未改变**：不变量 ①–③、原子组门控、facade 成员签名与错误码、marker 归属。驻留只影响
+「provider 是否存在」，不改变「999 功能是否生效」。

@@ -1,10 +1,10 @@
 # 分层与组件说明（**临时过程性文件**）
 
 > ⚠️ **本文是临时过程性文件，不是权威文档，随时可能过时或被删除。**
-> - 架构权威：根目录 `ARCHITECTURE.md`（当前 v0.3.14，待外部复审签署）
+> - 架构权威：根目录 `ARCHITECTURE.md`（当前 v0.3.15，未签署）
 > - 阶段与验收状态：`docs/refactor/ledger.md`、`docs/refactor/verification.md`
 > - 结构基线：`docs/refactor/baseline.md`、`docs/refactor/map.md`（脚本生成）
-> - 生成时点：2026-09-19（**P0 事实修正版**），仓库 HEAD `6fc6098`；来源＝`module/app/src/main/cpp/` 物理文件清单 + `scripts/maintenance/` 脚本实测输出
+> - 生成时点：2026-09-19（**P0 事实修正版**），仓库 HEAD `6fc6098`；P6 目标规则局部增补 2026-09-20（插件口径 17→18、S2 residency 双态与 P6 行）；来源＝`module/app/src/main/cpp/` 物理文件清单 + `scripts/maintenance/` 脚本实测输出
 > - 口径：文件数/行数为 `wc -l`（含空行与注释）；只列**当前实际存在**的模块，设计提及但未落地的在「收口项」标注
 > - **三态标记（全篇适用）**：**当前事实**＝可由源码/脚本输出直接定位；**迁移债**＝当前存在但已有目标归属与清除阶段；**目标设计问题**＝目标边界本身过宽或缺少硬约束
 > - 用途：给人快速理解现状（含**依赖链**：插件↔插件 / 插件↔组件 / 组件↔组件）；**任何决策请回到权威文档**，本文件不得作为落地依据
@@ -25,7 +25,7 @@
 | L0 | `contracts/` | 18 / 1,564 | 跨层稳定接口：POD、能力契约、宿主 SDK / Game Host 函数表；**不含游戏逻辑** |
 | L1 | `game/` | 36 / 2,725 | 唯一承接游戏版本耦合（VMA/偏移/ABI/函数调用）；**禁止业务规则** |
 | L2 | `infra/` + `hooks/` + `patch/` | 40 / 4,203 | 运行时机制：调度/队列/事件/能力/状态/配置/存储 + 资源登记/事务/分派 + 指令改写 |
-| L3 | `plugins/` | 154 / 30,974 | 17 个内置插件（功能实现 + 能力 provider/consumer + 面板）；目录形态受「可外置插件」约束（ADR-0008，只允许 include `contracts/` 与自身目录） |
+| L3 | `plugins/` | 167 / 33,252 | 18 个内置插件（功能实现 + 能力 provider/consumer + 面板；含 `core.api` 路由内核与 `core.ui` UI 容器）；目录形态受「可外置插件」约束（ADR-0008，只允许 include `contracts/` 与自身目录） |
 | L4 | （原 `products/`，已取消） | — | 出口面职责现由 `plugins/core.api`（路由内核，待 C6）与 `plugins/core.ui`（UI 容器与通用组件）承担 |
 | L5 | `host/` | 17 / 4,229 | 宿主：装配、插件生命周期执行器、Host SDK/Game Host 实现、帧源、core 常驻补丁、状态 JSON |
 
@@ -112,10 +112,11 @@
 | `instr_patch.*` | 指令改写：站点校验、±128MB 预检、BL 与 B 尾调用（宿主近址 thunk 池）、字替换、**先还原成功后才释放占用** |
 | `ptr_slot.*` | 指针槽：槽值校验 → 占用 → 写 handler；归还不匹配则保留占用 |
 
-## 1.6 `plugins/`（17 个插件 / 154 文件）
+## 1.6 `plugins/`（18 个插件 / 167 文件）
 
 | 插件 | 功能/用途 |
 |---|---|
+| `core.api` | 出口面 HTTP 路由内核：`http.registry` 注册口、冻结路由 owner 表、信封/门控/线程纪律；Kotlin AndServer 仅承担传输 |
 | `core.ui` | 出口面 UI 容器：设置页容器与分页、面板栈（push/兜底/占用）、`QolUiComponents` 实现与发布（`ui_components`） |
 | `simple_mode` | 半血/伤害倍率（2 入口 hook；gate=`plugin.simple_mode.enabled`） |
 | `push_all` | 推怪（2 call patch：队伍过滤 + NOP） |
@@ -124,7 +125,7 @@
 | `attribute_range_display` | 属性区间显示消费者（颜色映射 + 有界文本写入） |
 | `text_layer` | 文本层：`MEMORYTEXT_GetText` 共享资源 owner + 内置文本表（声明式消费者）+ 角色面板 scope |
 | `native_choice` | 原生选择框 provider（`ui_choice`：ptr slot + 入口 hook） |
-| `stack_limit` | 数量上限 99/999（6 条 clamp；gate=`plugin.stack_limit.enabled`） |
+| `stack_limit` | 数量上限 99/999 且为 S2 唯一所有者（18 条声明式资源：6 条 clamp + 12 条 S2 布局/位读重定向；gate=`plugin.stack_limit.enabled`）；`provider residency` 常驻、`feature enabled` 随开关的双态诊断，deactivate/disable 只撤销 999 有效态 |
 | `inventory_hooks` | 库存 hook 宿主：24 条入口 hook 声明 + S2 写侧/读侧业务 + `inventory_refresh` provider |
 | `autosell` | 自动出售：规则/视图/扫描/持久化 + 背包入口与面板（零资源常驻，命令端口门禁） |
 | `save_backup` | 存档备份：导出/导入两段事务/回滚/仓库 + 三栏面板 + 删档指针槽 |
@@ -303,7 +304,7 @@
    - `in_flight_enter/leave` 未在插件 wrapper 接线（级联撤销的等待暂无真实计数来源）。
    - thunk 池在门禁关闭时不回收（约 51 次开关往返耗尽）；`g_patched_calls` 去重表容量 16 < 21 站点。
 4. **契约缺口**：`contracts/ui.h` 部分 raw 面仍由 adapter 提供；`extension_bag` JSON 面 `write_json` 为 v1.1 预留。
-5. **过渡依赖**：`stack_limit.h` 实现、`game/access/ui_*` 背后实现、`core/native/*` 多处仍在遗留位置（见 `map.md` 过渡依赖区）。
+5. **过渡依赖**：`game/access/ui_*` 背后实现、`core/native/*` 多处仍在遗留位置（见 `map.md` 过渡依赖区）；`contracts/stack_limit.h` 与 `stack_codec.h` 已于 P1-B5c 删除，S2 codec 现为 `plugins/stack_limit` 私有实现。
 
 ---
 
@@ -318,7 +319,7 @@
 | 3 | 校验器"通过"＝无新增而非合规（层方向 32 / 符号·裸地址 9 / 资源 3 落在基线内，豁免 1） | 迁移债 | `check_layers/offsets/resources` 实测输出 |
 | 4 | 单一 `gamebridge` target，无独立插件 target（无法证明插件可独立编译/不链接宿主私有符号） | 迁移债 | `CMakeLists.txt:4` + 144 条源文件 |
 | 5 | `QolGameHostExtraApi` 过宽（`host/game_host.cpp` 15 处 `extra.*` 注入；跨域业务聚合） | **目标设计问题** | `contracts/game_host.h:233,259`；`host/game_host.cpp` |
-| 6 | `contracts` 存在绕过 capability 的全局业务函数（`stack_limit.h`、`autosell.h`）；`host/core_patches` 把 S2 与 hub 混在同 owner/reason | **目标设计问题** | `contracts/stack_limit.h:5,9`、`contracts/autosell.h:44-46`、`host/core_patches.cpp:26-34` |
+| 6 | `contracts` 存在绕过 capability 的全局业务函数（`stack_limit.h`、`autosell.h`）；`host/core_patches` 把 S2 与 hub 混在同 owner/reason | **目标设计问题**（`stack_limit.h` 已于 P1-B5c 删除，其余待收口） | `contracts/stack_limit.h:5,9`（当时快照）、`contracts/autosell.h:44-46`、`host/core_patches.cpp:26-34` |
 
 **审阅裁决（本轮目标，非当前事实）**：`core.*` 保持 **2 个**（`core.api` + `core.ui`，插件总数 17→18）；S2（codec / getter / 写路径 / 99–999 策略）最终归 `stack_limit`；Hub 兼容补丁不再与 S2 同 owner；`core.game` / `core.inventory` / `core.save` / `core.diagnostics` / `core.compat` / `core.config` / `core.log` / `core.registry` **一律不创建**（正确归属见审阅 §5）。
 
@@ -334,6 +335,6 @@
 | **P3** | 插件 include 清零 + 独立构建 + 脚本硬失败 | 19 文件 legacy include 清除；per-plugin target（或等价链接矩阵）；`check_layers` 删过渡规则并硬失败 | P2 |
 | **P4** | provider 声明 + capability DAG + extra 拆分 | 7 provider 补 provides/requires；`install_all` 改 DAG 执行；拆 `QolGameHostExtraApi`；修 5 条未声明消费 | P3 |
 | **P5** | `core.api` / `core.ui` 出口收口 | 143 路由 owner 表 + `http.registry`；两 core 走普通生命周期，停用只降级出口 | P4 |
-| **P6** | S2 residency + 收口与签署门禁 | S2 claims 迁 `stack_limit`（含 boot 时序论证）；provider residency × feature enabled 双态；清过渡映射与豁免 | P5 |
+| **P6** | S2 residency + 收口与签署门禁 | S2 codec/getter/写路径/99–999 策略归 `stack_limit`，Host 只持不可变函数表与安全 dispatch slot；provider residency × feature enabled 双态分别上报；清 legacy 目录、脚本过渡映射、contracts 过渡面、宿主遗留消费者与 Kotlin 路由业务并登记清除条件 | P5 |
 
 **单写者纪律**：`contracts/**`、`arch_common.py`、`host/` 内核、`ARCHITECTURE.md` 全程单一写者；并行仅限 `plugins/<id>/`。
