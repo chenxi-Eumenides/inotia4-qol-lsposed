@@ -202,6 +202,7 @@ object NativeBridge {
     external fun nativeFeatureLifecycle(pluginId: String, action: Int): Long
     // 命令票据状态 JSON（/api/system/tickets/{id}）
     external fun nativeTicketStateJson(ticket: Long): String
+    external fun nativeHttpRoutesJson(): String
 
     // 游戏变体诊断（P1）：libgame.so 查表结果 JSON，供 /api/health 加法扩展使用
     external fun nativeGetVariantJson(): String

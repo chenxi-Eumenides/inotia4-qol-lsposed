@@ -21,10 +21,10 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 26 |
+| `contracts` | 27 |
 | `game` | 56 |
 | `hooks` | 10 |
-| `host` | 36 |
+| `host` | 38 |
 | `infra` | 46 |
 | `legacy/character` | 2 |
 | `legacy/dialog` | 4 |
@@ -40,6 +40,7 @@
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 17 |
+| `plugins/core.api` | 3 |
 | `plugins/core.ui` | 17 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
@@ -54,7 +55,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **389** |
+| **合计** | **395** |
 
 ### 1.2 迁移期映射摘要
 
@@ -132,13 +133,13 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 99 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 101 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 42 |
 | `host` | `game` | 36 |
-| `host` | `contracts` | 22 |
+| `host` | `contracts` | 23 |
 | `plugins/extension_bag` | `contracts` | 20 |
 | `plugins/autosell` | `contracts` | 16 |
 | `plugins/custom_recipe` | `contracts` | 12 |
@@ -223,8 +224,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：143 个
-- native 导出：143 个
+- Kotlin `external fun`：144 个
+- native 导出：144 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -233,20 +234,21 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（17 个）共 17 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（18 个）共 18 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（17）
+### 6.2 已迁移 `plugins/*`（18）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 17 |
+| `core.api` | `plugins/core.api` | 3 |
 | `core.ui` | `plugins/core.ui` | 17 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |

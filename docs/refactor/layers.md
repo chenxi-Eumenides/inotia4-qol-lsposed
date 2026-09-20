@@ -176,10 +176,10 @@
 | C3 | `domains/` 取消：拆 `attribute_quality`(provider) + `attribute_range_display`(消费者) | ✅ 完成 |
 | C4 | 小中插件边界化（9 个）+ U11-1 契约/adapter + U11-2 `core.ui` 组件实现 | ✅ 完成 |
 | C5 | `inventory_hooks` + `extension_bag` 边界化（含 `save_backup`/`autosell`；`stack_codec` 迁 contracts、store 容器级 ABI、SDK `intercept_blocks`） | ✅ 完成 |
-| C6 | `core.api` 路由内核与 API provider 拆分（149 路由 owner 表、U10） | ⬜ 待办 |
+| C6 | `core.api` 路由内核与 API provider 拆分（143 路由 owner 表、U10） | 🔄 进行中（registry、owner 表和诊断出口已落地） |
 | C7 | native config 早期自读、脚本切七目录、**边界违规硬失败**（`check_layers` 收紧、删过渡映射） | ⬜ 待办 |
 
-**验证状态**：C1–C5 已通过真机 smoke（启动状态 + 门禁两态 + 生命周期往返，见 VM-BOUNDARY）；各插件的**功能细则**仍按各自 VM 卡待补。C6/C7 未开工。
+**验证状态**：C1–C5 已通过真机 smoke（启动状态 + 门禁两态 + 生命周期往返，见 VM-BOUNDARY）；C6 首步已通过 host、Debug 构建和真机 `/api/system/routes` smoke，完整 provider/分派接线仍待补；各插件的**功能细则**仍按各自 VM 卡待补。C7 未开工。
 
 ---
 
@@ -296,7 +296,7 @@
 
 # 四、当前收口项与已知缺口
 
-1. **C6/C7 未完成**：`core.api` 路由内核与 API provider 未落地（149 路由仍在 Kotlin controllers）；native config 早期自读未实现；架构脚本仍是八目录过渡映射，边界约束未硬失败。
+1. **C6/C7 未完成**：`core.api` 首步已落地，但 142 条业务路由仍由 Kotlin controllers 处理，完整 provider/分派接线未完成；native config 早期自读未实现；架构脚本仍是八目录过渡映射，边界约束未硬失败。
 2. **遗留目录**：`core/`、`api/`、`data/` 共 76 文件未吸收。
 3. **引擎缺口**：
    - required consumer 在 provider 之后注册会**永久 `blocked`**（无重试）——已在真机复现一次（autosell），当前靠装配顺序规避；建议 C7 的 `check_plugins` 加静态校验或引擎补重试。
@@ -333,7 +333,7 @@
 | **P2** | Game Host / SDK ABI 面补齐 | 逐项冻结缺口面（log/config、save/quest/world、item_class、craft、EB 端口、UI 原语），配 fake 注入 host 测试 | P1 |
 | **P3** | 插件 include 清零 + 独立构建 + 脚本硬失败 | 19 文件 legacy include 清除；per-plugin target（或等价链接矩阵）；`check_layers` 删过渡规则并硬失败 | P2 |
 | **P4** | provider 声明 + capability DAG + extra 拆分 | 7 provider 补 provides/requires；`install_all` 改 DAG 执行；拆 `QolGameHostExtraApi`；修 5 条未声明消费 | P3 |
-| **P5** | `core.api` / `core.ui` 出口收口 | 149 路由 owner 表 + `http.registry`；两 core 走普通生命周期，停用只降级出口 | P4 |
+| **P5** | `core.api` / `core.ui` 出口收口 | 143 路由 owner 表 + `http.registry`；两 core 走普通生命周期，停用只降级出口 | P4 |
 | **P6** | S2 residency + 收口与签署门禁 | S2 claims 迁 `stack_limit`（含 boot 时序论证）；provider residency × feature enabled 双态；清过渡映射与豁免 | P5 |
 
 **单写者纪律**：`contracts/**`、`arch_common.py`、`host/` 内核、`ARCHITECTURE.md` 全程单一写者；并行仅限 `plugins/<id>/`。

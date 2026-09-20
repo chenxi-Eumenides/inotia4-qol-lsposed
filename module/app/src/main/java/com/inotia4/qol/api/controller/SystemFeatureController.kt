@@ -1,5 +1,6 @@
 package com.inotia4.qol.api.controller
 
+import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.util.ControllerGuard
 import com.yanzhenjie.andserver.annotation.GetMapping
@@ -22,4 +23,7 @@ class SystemFeatureController {
     @GetMapping("/api/system/tickets/{id}")
     fun ticket(@PathVariable("id") id: Long): String =
         ControllerGuard.guard { ApiServices.info.ticketStateJson(id) }
+
+    @GetMapping("/api/system/routes")
+    fun routes(): String = ControllerGuard.guard { NativeBridge.nativeHttpRoutesJson() }
 }

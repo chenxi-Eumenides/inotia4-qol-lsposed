@@ -9,6 +9,7 @@
 #include <string>
 
 #include "host/status_json.h"
+#include "host/http_registry.h"
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeFeatureStatusJson(JNIEnv* env, jclass) {
@@ -36,6 +37,16 @@ Java_com_inotia4_qol_NativeBridge_nativeSystemResourcesJson(JNIEnv* env, jclass)
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeTicketStateJson(JNIEnv* env, jclass, jlong ticket) {
     const std::string json = qol::host::host_ticket_json(static_cast<uint64_t>(ticket));
+    jstring result = env->NewStringUTF(json.c_str());
+    if (result != nullptr) {
+        return result;
+    }
+    return env->NewStringUTF("{\"ok\":false,\"error\":\"oom\"}");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeHttpRoutesJson(JNIEnv* env, jclass) {
+    const std::string json = qol::host::host_http_routes_json();
     jstring result = env->NewStringUTF(json.c_str());
     if (result != nullptr) {
         return result;

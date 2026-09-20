@@ -108,9 +108,9 @@ HTTP 解析和响应写回；`core.api` 不实现监听器。
 改写既有 URL；让 controller 代替 owner 执行业务；实现 socket/HTTP 解析；因“诊断重要”而
 绕过普通插件生命周期。
 
-当前事实是 `core.api` 尚未落地：`docs/refactor/ledger.md` §1 P5 和 `layers.md` 第 169 行
-均将 C6 标为待办，149 条路由仍在 Kotlin controllers。故本文所述 `core.api` 均为明确目标，
-不能写成当前已有插件。
+当前事实是 `core.api` 已完成首步落地：已提供 `http.registry`、143 条冻结路由 owner 表和
+`/api/system/routes` 诊断出口；142 条业务路由仍由 Kotlin controllers 处理，完整 API provider
+拆分、分派接线和 P5 其余工作仍待完成。本文未完成部分仍应按目标处理，不能宣称 P5 已整体完成。
 
 ### 4.3 `core.ui`
 **目标职责：** `core.ui` 提供设置页容器、面板栈、分页和导航，以及通用组件

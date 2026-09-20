@@ -638,6 +638,7 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/game_host.cpp
     ${CPP_DIR}/core/native/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp
@@ -667,6 +668,18 @@ target_compile_features(host_adapter_tests PRIVATE cxx_std_17)
 set_target_properties(host_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(host_adapter_tests PRIVATE Threads::Threads)
 add_test(NAME host_adapter_tests COMMAND host_adapter_tests)
+
+# P5-1：core.api HTTP 路由登记、重复拒绝、caller-owned list 与 lease 归零检查。
+add_executable(http_registry_tests
+    test_http_registry.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+)
+target_include_directories(http_registry_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(http_registry_tests PRIVATE cxx_std_17)
+set_target_properties(http_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME http_registry_tests COMMAND http_registry_tests)
 
 # U11-1：UI contract ABI + host ui-kit adapter 转发/错误语义测试。
 add_executable(ui_adapter_tests

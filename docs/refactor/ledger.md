@@ -13,7 +13,7 @@
 | P2 | 纵向样板插件（入口 hook + 配置 + 状态 + 命令端到端）：simple_mode | ✅ 完成 | 真机卡 VM-P2-01 PASS（两态翻转 + 状态一致 + 半血 A/B 135↔270 + 无崩溃）；host 23/23；基线 124→121 |
 | P3 | 资源事务（异步步进/回滚/在途归零/帧预算）+ `disable/deactivate/tombstone` 全路径 | ✅ 完成 | 真机卡 VM-P3-01/VM-P3-03 PASS（deactivate→`free`、物理归还 A/B `hp=270`、activate 重挂载 `hp=135`，U6 闭合；10 态 API + tickets `pending→done`）；故障注入 host-only（VM-P3-02，277+115 断言）；host 25/25 |
 | P4 | 批量迁移其余插件（内置静态轨） | 🔄 进行中（**阶段 A ✅**：A1–A4，证据 VM-P4-01..05） | 每插件：单测 + 验收卡；豁免清零 |
-| P5 | `plugins/` 单层收口（ADR-0004）：`core.api` 传输内核、内置 API provider、`core.ui`、动态 capability 与注册口落地；JNI 分组、脚本收紧、删除旧路径（**P4-D0 已完成 `features/`→`plugins/` 更名；P5 只做 `core.api`/`core.ui`、动态能力、JNI 与脚本收紧**） | ⬜ 未开始 | 冻结 API 路径/响应兼容；路由 owner 表无重复/遗漏；动态能力发布/撤销与 route/capability lease 验收；`check_*` 全绿、豁免清零、单轨消失；U10 剩余 ABI 冻结 |
+| P5 | `plugins/` 单层收口（ADR-0004）：`core.api` 传输内核、内置 API provider、`core.ui`、动态 capability 与注册口落地；JNI 分组、脚本收紧、删除旧路径（**P4-D0 已完成 `features/`→`plugins/` 更名；P5 只做 `core.api`/`core.ui`、动态能力、JNI 与脚本收紧**） | 🔄 进行中（首步完成：`http.registry`、143 条冻结 owner 表、`/api/system/routes`） | 冻结 API 路径/响应兼容；业务 provider/分派、动态能力发布/撤销与 route/capability lease 验收；`check_*` 全绿、豁免清零、单轨消失；U10 剩余 ABI 冻结 |
 | P6（可选） | 外部插件轨（草案）：数据扩展 + 未签名全权 native | ⬜ 未开始 | schema 拒绝、用户显式启用、native 加载/禁用、托管资源回收、启动故障恢复与更新/回滚真机通过 |
 
 ## 2. 功能域迁移台账
@@ -175,7 +175,7 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 | C3 | `domains` 拆分：`attribute_quality` provider + `attribute_range_display` 消费者 | ✅ 实现与 host-only 验证完成；真机 smoke 已过（VM-BOUNDARY） |
 | C4 | 小中型插件边界化与 Host SDK/Game Host API 迁移 | ✅ 完成（9 插件迁移 + U11-1 契约/adapter + U11-2 `core.ui` 实现 `QolUiComponents` 并收口；`core.ui` 私有 include = 0） |
 | C5 | `inventory_hooks` + `extension_bag` 边界化 | ✅ 完成（含 `save_backup`/`autosell`；`stack_codec` 迁 `contracts/`、`QolStoreApi` 容器级 ABI、SDK `hooks.intercept_blocks`、Host SDK PopupState ABI） |
-| C6 | `core.api` 路由内核与 API provider 拆分 | ⬜ 待办 |
+| C6 | `core.api` 路由内核与 API provider 拆分 | 🔄 进行中（registry、owner 表和诊断出口已落地） |
 | C7 | native config 自读、脚本切七目录与边界违规硬失败 | ⬜ 待办 |
 
 ### C8：每插件 CMake 片段与父级自动发现

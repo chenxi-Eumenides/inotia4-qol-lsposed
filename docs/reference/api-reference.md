@@ -35,7 +35,9 @@
 | debug（调试） | `/api/debug/*` | 开发期调试（含扩展背包视图/状态，见 §九） | 7 |
 | health（顶层） | `/api/health` | 服务健康检查 | 1 |
 
-> 全量端点 = 112（character 29 + world 15 + item 17 + quest 6 + ui 9 + system 16 + config 2 + op 10 + debug 7 + health 1；其中 GET 60 / POST 52）。
+> 当前冻结路由 = 143（Kotlin controller 142 + `core.api` 的 `/api/system/routes` 1）。本文的
+> method/path 集合由 controller 注解与下文补充端点共同组成；重构只迁移 owner，不改变既有
+> URL、HTTP 方法与成功响应。
 
 ---
 
@@ -261,7 +263,7 @@
 | `active` | 是否有对话/弹窗 |
 | `title` | 标题（任务对话框/出售弹窗等有标题的类型；无标题为 null） |
 | `text` | 内容文本 |
-| `options` | 可选动作列表 `{ id, label }`——供 `POST /api/ui/select_option` 选择；`id` 为动作标识（confirm/cancel/next/skip/quit/shop/revive/... 或具体选项），`label` 为按钮文案 |
+| `options` | 可选动作列表 `{ id, label }`——供 `POST /api/ui/dialog/select` 选择；`id` 为动作标识（confirm/cancel/next/skip/quit/shop/revive/... 或具体选项），`label` 为按钮文案 |
 
 各类型 options 见第六章 dialog 端点说明。
 
@@ -1291,7 +1293,7 @@
 
 `POST /api/ui/dialog/select`
 
-**用途**：从 `GET /api/ui/dialog/content` 返回的 `options` 中选择一项（**唯一选择端点**，替代确认/取消/按钮/选项选择全部逻辑）。
+**用途**：从 `GET /api/ui/dialog` 返回的 `options` 中选择一项（**唯一选择端点**，替代确认/取消/按钮/选项选择全部逻辑）。
 
 **请求格式**：`{ "action": "close" }`（`action` 取 dialog.content options 中的一项 id；`index` 可选，NPC 对话选项用 `{"index":n}`）
 
@@ -1720,6 +1722,13 @@
 - 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
 - **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）
 
+### 7.7a 路由登记诊断 routes（P5）
+
+`GET /api/system/routes`
+
+**用途**：获取 native `core.api` 登记的冻结路由、API owner、OP 门控和 route lease 标记，
+并返回登记表自检结果。该端点只读取登记数据，不执行任何 Kotlin controller 业务。
+
 ### 7.7 功能诊断 features（v0.8.0 起；P2 起追加 resources/requires/provides/degraded）
 
 `GET /api/system/features`
@@ -2044,6 +2053,39 @@
 `POST /api/debug/extension_bag/item`　body `{ "index": 0..4, "slot": 0..15, "category": N, "count": N }`
 
 **用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。
+
+---
+
+### 九点一、当前 controller 补充路由
+
+以下端点已由 Kotlin controller 提供，补入冻结集合；业务响应仍以对应 controller/service
+实现为准。
+
+`GET /api/feature/autosell/config`
+
+`POST /api/feature/autosell/config`
+
+`GET /api/world/map/distance`
+
+`GET /api/system/tables/{table}/search`
+
+`GET /api/system/tables/text`
+
+`GET /api/debug/path`
+
+`GET /api/debug/item/raw`
+
+`POST /api/debug/settings-ui/inject`
+
+`GET /api/debug/settings-ui/status`
+
+`POST /api/debug/settings-ui/restore`
+
+`POST /api/debug/settings-ui/open-option`
+
+`POST /api/debug/settings-ui/open-panel`
+
+`POST /api/debug/extension_bag/unequip`
 
 ---
 

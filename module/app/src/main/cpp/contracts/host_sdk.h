@@ -25,6 +25,7 @@
 #include <cstdint>
 
 #include "commands.h"
+#include "http.h"
 #include "in_flight.h"
 #include "panels.h"
 #include "result.h"
@@ -279,9 +280,10 @@ struct QolHostSdk {
     const QolUiAdapter* ui;
     QolDescButtonApi desc_button;
     QolInFlightApi in_flight;
+    QolHttpRegistryApi http;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 5;
+constexpr uint16_t kHostSdkMinor = 6;
 
 }  // namespace qol::contracts
