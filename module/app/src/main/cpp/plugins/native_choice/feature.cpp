@@ -61,10 +61,10 @@ void choice_init_wrapper(void* control) {
     if (original != nullptr) original(control);
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_active || !g_pending_title || g_active_spec.title == nullptr || game() == nullptr ||
-        game()->extra.choice_call.write_title == nullptr) {
+        game()->choice_action.write_title == nullptr) {
         return;
     }
-    (void)game()->extra.choice_call.write_title(g_title.data());
+    (void)game()->choice_action.write_title(g_title.data());
     g_pending_title = false;
 }
 
@@ -82,21 +82,21 @@ void choice_button_execute(void* control) {
             handle_module_choice = true;
         }
     }
-    if (!handle_module_choice || game() == nullptr || game()->extra.choice.selected_index == nullptr ||
-        game()->extra.choice.text_owns == nullptr ||
-        game()->extra.choice_call.write_focus == nullptr ||
-        game()->extra.choice_call.close_popup == nullptr) {
+    if (!handle_module_choice || game() == nullptr || game()->read_only.choice.selected_index == nullptr ||
+        game()->read_only.choice.text_owns == nullptr ||
+        game()->choice_action.write_focus == nullptr ||
+        game()->choice_action.close_popup == nullptr) {
         call_original(original, control);
         return;
     }
 
     int32_t index = -1;
     int32_t owned = 0;
-    if (!contracts::succeeded(game()->extra.choice.selected_index(&index)) ||
-        !contracts::succeeded(game()->extra.choice.text_owns(
+    if (!contracts::succeeded(game()->read_only.choice.selected_index(&index)) ||
+        !contracts::succeeded(game()->read_only.choice.text_owns(
             g_active_spec.items, static_cast<uint32_t>(g_active_spec.count), &owned)) ||
         owned == 0 || index < 0 || index >= spec.count ||
-        !contracts::succeeded(game()->extra.choice_call.write_focus(index))) {
+        !contracts::succeeded(game()->choice_action.write_focus(index))) {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_active && g_generation == generation) clear_active_locked();
         call_original(original, control);
@@ -116,10 +116,10 @@ void choice_button_execute(void* control) {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_active && g_generation == generation) clear_active_locked();
     }
-    if (game()->extra.choice_call.play_sound != nullptr) {
-        (void)game()->extra.choice_call.play_sound(2);
+    if (game()->choice_action.play_sound != nullptr) {
+        (void)game()->choice_action.play_sound(2);
     }
-    (void)game()->extra.choice_call.close_popup();
+    (void)game()->choice_action.close_popup();
     if (spec.on_select != nullptr) spec.on_select(index, spec.user);
 }
 
@@ -127,12 +127,12 @@ bool native_choice_open(const contracts::UiChoiceSpec& spec) {
     if (!native_choice_detail::valid_spec(spec)) return false;
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_installed || g_active) return false;
-    if (game() == nullptr || game()->extra.choice.state_id == nullptr ||
-        game()->extra.choice_call.write_items == nullptr ||
-        game()->extra.choice_call.write_focus == nullptr ||
-        game()->extra.choice_call.push == nullptr) return false;
+    if (game() == nullptr || game()->read_only.choice.state_id == nullptr ||
+        game()->choice_action.write_items == nullptr ||
+        game()->choice_action.write_focus == nullptr ||
+        game()->choice_action.push == nullptr) return false;
     int32_t state_id = -1;
-    if (!contracts::succeeded(game()->extra.choice.state_id(&state_id)) || state_id < 0) {
+    if (!contracts::succeeded(game()->read_only.choice.state_id(&state_id)) || state_id < 0) {
         return false;
     }
     for (int i = 0; i < spec.count; ++i) {
@@ -142,9 +142,9 @@ bool native_choice_open(const contracts::UiChoiceSpec& spec) {
     for (int i = 0; i < spec.count; ++i) {
         g_item_ptrs[static_cast<size_t>(i)] = g_item_text[i].data();
     }
-    if (!contracts::succeeded(game()->extra.choice_call.write_items(
+    if (!contracts::succeeded(game()->choice_action.write_items(
             g_item_ptrs.data(), static_cast<uint32_t>(spec.count))) ||
-        !contracts::succeeded(game()->extra.choice_call.write_focus(0))) {
+        !contracts::succeeded(game()->choice_action.write_focus(0))) {
         return false;
     }
     copy_text(g_title.data(), g_title.size(), spec.title);
@@ -154,7 +154,7 @@ bool native_choice_open(const contracts::UiChoiceSpec& spec) {
     g_active = true;
     g_pending_title = g_active_spec.title != nullptr;
     const uint64_t generation = ++g_generation;
-    if (!contracts::succeeded(game()->extra.choice_call.push())) {
+    if (!contracts::succeeded(game()->choice_action.push())) {
         if (g_active && g_generation == generation) clear_active_locked();
         return false;
     }
@@ -173,8 +173,8 @@ void native_choice_close() {
         close_popup = g_active;
         if (close_popup) clear_active_locked();
     }
-    if (close_popup && game() != nullptr && game()->extra.choice_call.close_popup != nullptr) {
-        (void)game()->extra.choice_call.close_popup();
+    if (close_popup && game() != nullptr && game()->choice_action.close_popup != nullptr) {
+        (void)game()->choice_action.close_popup();
     }
 }
 

@@ -121,21 +121,21 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
-    if (price < 0 || g_action_game->extra.world_call.add_money == nullptr ||
-        g_action_game->extra.world_call.minus_money == nullptr ||
-        g_action_game->extra.inventory_write.remove_item == nullptr) {
+    if (price < 0 || g_action_game->world_action.add_money == nullptr ||
+        g_action_game->world_action.minus_money == nullptr ||
+        g_action_game->inventory_write.remove_item == nullptr) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
     result.price = price;
     result.count = count;
-    if (!contracts::succeeded(g_action_game->extra.world_call.add_money(price))) {
+    if (!contracts::succeeded(g_action_game->world_action.add_money(price))) {
         result.status = contracts::InventorySellStatus::kCreditFailed;
         return result;
     }
     if (!contracts::succeeded(
-            g_action_game->extra.inventory_write.remove_item(item_ref.native_item))) {
-        (void)g_action_game->extra.world_call.minus_money(price);
+            g_action_game->inventory_write.remove_item(item_ref.native_item))) {
+        (void)g_action_game->world_action.minus_money(price);
         result.status = contracts::InventorySellStatus::kRemoveFailed;
         return result;
     }

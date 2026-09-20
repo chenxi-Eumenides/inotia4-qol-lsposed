@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <unordered_map>
 
 #include "game_access.h"
+#include "game/access/attr_range_ui.h"
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
 #include "api/native/game_ui.h"
@@ -28,8 +30,8 @@ using contracts::QolUiHandle;
 using contracts::UiRect;
 
 constexpr const char* kInvalidArgument = "invalid argument";
-constexpr const char* kNotReady = "ui primitive not ready";
-constexpr const char* kUnsupported = "ui primitive unsupported";
+constexpr const char* kNotReady = "ui adapter not ready";
+constexpr const char* kUnsupported = "ui adapter unsupported";
 
 struct ClickBinding {
     contracts::QolUiClickFn callback;
@@ -44,11 +46,30 @@ QolResult invalid_argument() {
 }
 
 QolResult not_ready() {
-    return contracts::error(kQolErrNotReady, kNotReady, 22);
+    return contracts::error(kQolErrNotReady, kNotReady, 20);
 }
 
 QolResult unsupported() {
-    return contracts::error(kQolErrUnsupported, kUnsupported, 24);
+    return contracts::error(kQolErrUnsupported, kUnsupported, 22);
+}
+
+QolResult insert_inline_color(void* builder, uint32_t max_text_bytes, uint8_t color_code) {
+    constexpr uint32_t kMaxTextBytes = 4096;
+    if (builder == nullptr || max_text_bytes == 0 || max_text_bytes > kMaxTextBytes ||
+        color_code == 0) {
+        return invalid_argument();
+    }
+    auto** text_slot = reinterpret_cast<char**>(builder);
+    char* text = *text_slot;
+    if (text == nullptr) return invalid_argument();
+    const size_t length = strnlen(text, static_cast<size_t>(max_text_bytes) + 1);
+    if (length > max_text_bytes) return contracts::error(kQolErrBlocked, "text exceeds bound", 18);
+    if (!qol::game::attr_insert_value_color(text, text + length,
+                                            static_cast<char>(color_code))) {
+        return not_ready();
+    }
+    *text_slot = text + length + 4;
+    return contracts::ok();
 }
 
 ::UiRect game_rect(UiRect rect) {
@@ -607,6 +628,7 @@ const QolUiAdapter g_ui_adapter{
      &draw_item_porting,
      &control_parent,
      &find_root,
+     &insert_inline_color,
 };
 
 }  // namespace

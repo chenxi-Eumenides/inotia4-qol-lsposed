@@ -31,25 +31,25 @@ void log_info(const char* format, ...) {
 
 int32_t resync_once() {
     const auto* game = game_host();
-    if (game == nullptr || game->extra.quest.active_slot_count == nullptr ||
-        game->extra.quest.active_slot_id == nullptr || game->extra.quest.state == nullptr ||
-        game->extra.quest.is_complete == nullptr || game->extra.quest_write.set_state == nullptr) {
+    if (game == nullptr || game->read_only.quest.active_slot_count == nullptr ||
+        game->read_only.quest.active_slot_id == nullptr || game->read_only.quest.quest_state == nullptr ||
+        game->read_only.quest.is_complete == nullptr || game->quest_write.set_state == nullptr) {
         return 0;
     }
 
     uint32_t fixed = 0;
     uint32_t count = 0;
-    if (game->extra.quest.active_slot_count(&count).ok != kQolOk) return 0;
+    if (game->read_only.quest.active_slot_count(&count).ok != kQolOk) return 0;
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t quest_id = 0;
-        if (game->extra.quest.active_slot_id(i, &quest_id).ok != kQolOk) continue;
+        if (game->read_only.quest.active_slot_id(i, &quest_id).ok != kQolOk) continue;
         int32_t state = 0;
-        if (game->extra.quest.state(quest_id, &state).ok != kQolOk || state != 1) continue;
+        if (game->read_only.quest.quest_state(quest_id, &state).ok != kQolOk || state != 1) continue;
         int32_t complete = 0;
-        if (game->extra.quest.is_complete(quest_id, &complete).ok != kQolOk || complete == 0) {
+        if (game->read_only.quest.is_complete(quest_id, &complete).ok != kQolOk || complete == 0) {
             continue;
         }
-        if (game->extra.quest_write.set_state(quest_id, 2).ok == kQolOk) ++fixed;
+        if (game->quest_write.set_state(quest_id, 2).ok == kQolOk) ++fixed;
     }
     log_info("quest resync: fixed=%u", fixed);
     return 0;

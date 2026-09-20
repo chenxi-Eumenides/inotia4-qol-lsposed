@@ -68,15 +68,15 @@ int64_t craft_ui_type() {
 
 int64_t craft_selected_recipe_at(int64_t type) {
     int64_t value = -1;
-    if (g_game != nullptr && g_game->extra.craft.selected_recipe != nullptr && type >= 0 && type <= 4) {
-        (void)g_game->extra.craft.selected_recipe(static_cast<int32_t>(type), &value);
+    if (g_game != nullptr && g_game->read_only.craft.selected_recipe != nullptr && type >= 0 && type <= 4) {
+        (void)g_game->read_only.craft.selected_recipe(static_cast<int32_t>(type), &value);
     }
     return value;
 }
 
 void craft_set_selected_recipe_at(int64_t type, int64_t value) {
-    if (g_game != nullptr && g_game->extra.craft_call.set_selected_recipe != nullptr && type >= 0 && type <= 4) {
-        (void)g_game->extra.craft_call.set_selected_recipe(static_cast<int32_t>(type), value);
+    if (g_game != nullptr && g_game->craft_action.set_selected_recipe != nullptr && type >= 0 && type <= 4) {
+        (void)g_game->craft_action.set_selected_recipe(static_cast<int32_t>(type), value);
     }
 }
 
@@ -90,16 +90,16 @@ int64_t craft_selected_stuff_index() {
 
 void* craft_selected_inventory_item() {
     void* item = nullptr;
-    if (g_game != nullptr && g_game->extra.craft.selected_inventory_item != nullptr) {
-        (void)g_game->extra.craft.selected_inventory_item(&item);
+    if (g_game != nullptr && g_game->read_only.craft.selected_inventory_item != nullptr) {
+        (void)g_game->read_only.craft.selected_inventory_item(&item);
     }
     return item;
 }
 
 void* craft_target_slot_item() {
     void* item = nullptr;
-    if (g_game != nullptr && g_game->extra.craft.target_slot_item != nullptr) {
-        (void)g_game->extra.craft.target_slot_item(&item);
+    if (g_game != nullptr && g_game->read_only.craft.target_slot_item != nullptr) {
+        (void)g_game->read_only.craft.target_slot_item(&item);
     }
     return item;
 }
@@ -120,8 +120,8 @@ void* craft_stuff_item(size_t index) {
 
 void* craft_stuff_slot_control(size_t index) {
     void* control = nullptr;
-    if (g_game != nullptr && g_game->extra.craft.stuff_slot_control != nullptr && index < kStuffSlotCount) {
-        (void)g_game->extra.craft.stuff_slot_control(static_cast<uint32_t>(index), &control);
+    if (g_game != nullptr && g_game->read_only.craft.stuff_slot_control != nullptr && index < kStuffSlotCount) {
+        (void)g_game->read_only.craft.stuff_slot_control(static_cast<uint32_t>(index), &control);
     }
     return control;
 }
@@ -170,56 +170,56 @@ void craft_set_stuff_item(size_t index, void* item) {
 }
 
 void craft_select_first_empty_stuff_slot() {
-    if (g_game != nullptr && g_game->extra.craft_call.select_first_empty_stuff_slot != nullptr) {
+    if (g_game != nullptr && g_game->craft_action.select_first_empty_stuff_slot != nullptr) {
         int32_t ignored = -1;
-        (void)g_game->extra.craft_call.select_first_empty_stuff_slot(&ignored);
+        (void)g_game->craft_action.select_first_empty_stuff_slot(&ignored);
     }
 }
 
 void craft_reset_stuff_item_control() {
-    if (g_game != nullptr && g_game->extra.craft_call.reset_stuff_item_control != nullptr) {
-        (void)g_game->extra.craft_call.reset_stuff_item_control();
+    if (g_game != nullptr && g_game->craft_action.reset_stuff_item_control != nullptr) {
+        (void)g_game->craft_action.reset_stuff_item_control();
     }
 }
 
 void craft_refresh_inventory_items() {
-    if (g_game != nullptr && g_game->extra.craft_call.refresh_inventory_items != nullptr) {
-        (void)g_game->extra.craft_call.refresh_inventory_items();
+    if (g_game != nullptr && g_game->craft_action.refresh_inventory_items != nullptr) {
+        (void)g_game->craft_action.refresh_inventory_items();
     }
 }
 
 void craft_init_mixing_state() {
-    if (g_game != nullptr && g_game->extra.craft_call.init_mixing_state != nullptr) {
-        (void)g_game->extra.craft_call.init_mixing_state();
+    if (g_game != nullptr && g_game->craft_action.init_mixing_state != nullptr) {
+        (void)g_game->craft_action.init_mixing_state();
     }
 }
 
 void craft_set_ui_type(int64_t type) {
-    if (g_game != nullptr && g_game->extra.craft_call.set_ui_type != nullptr) {
-        (void)g_game->extra.craft_call.set_ui_type(type);
+    if (g_game != nullptr && g_game->craft_action.set_ui_type != nullptr) {
+        (void)g_game->craft_action.set_ui_type(type);
     }
 }
 
 void craft_play_sound(int16_t sound_id) {
-    if (g_game != nullptr && g_game->extra.craft_call.play_sound != nullptr) {
-        (void)g_game->extra.craft_call.play_sound(sound_id);
+    if (g_game != nullptr && g_game->craft_action.play_sound != nullptr) {
+        (void)g_game->craft_action.play_sound(sound_id);
     }
 }
 
 void craft_show_text(uint32_t text_id) {
-    if (g_game != nullptr && g_game->extra.craft_call.show_text != nullptr) {
-        (void)g_game->extra.craft_call.show_text(text_id);
+    if (g_game != nullptr && g_game->craft_action.show_text != nullptr) {
+        (void)g_game->craft_action.show_text(text_id);
     }
 }
 
 bool craft_show_yesno(uint32_t text_id, void* ok, void* cancel) {
-    if (g_game == nullptr || g_game->extra.craft_call.show_yesno_from_text == nullptr) return false;
-    return g_game->extra.craft_call.show_yesno_from_text(text_id, ok, cancel).ok == kQolOk;
+    if (g_game == nullptr || g_game->craft_action.show_yesno_from_text == nullptr) return false;
+    return g_game->craft_action.show_yesno_from_text(text_id, ok, cancel).ok == kQolOk;
 }
 
 void craft_description_set_off() {
-    if (g_game != nullptr && g_game->extra.craft_call.description_set_off != nullptr) {
-        (void)g_game->extra.craft_call.description_set_off();
+    if (g_game != nullptr && g_game->craft_action.description_set_off != nullptr) {
+        (void)g_game->craft_action.description_set_off();
     }
 }
 

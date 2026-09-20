@@ -74,23 +74,23 @@ constexpr int k_max_summon_depth = 4;
 bool is_player_side_impl(const void* ch, int depth) {
     if (ch == nullptr) return false;
     const auto* game = game_host();
-    if (game == nullptr || game->extra.character.is_party_member == nullptr ||
-        game->extra.character.summoner == nullptr ||
+    if (game == nullptr || game->read_only.character.is_party_member == nullptr ||
+        game->read_only.character.summoner == nullptr ||
         game->read.character.is_active_player_group == nullptr) {
         note_faction_deps_missing_once(
-            game != nullptr && game->extra.character.is_party_member != nullptr,
+            game != nullptr && game->read_only.character.is_party_member != nullptr,
             game != nullptr && game->read.character.is_active_player_group != nullptr,
-            game != nullptr && game->extra.character.summoner != nullptr);
+            game != nullptr && game->read_only.character.summoner != nullptr);
         return false;
     }
     void* mutable_ch = const_cast<void*>(ch);
     int32_t party_member = 0;
     int32_t active_group = 0;
     void* summoner = nullptr;
-    const bool party_ok = game->extra.character.is_party_member(mutable_ch, &party_member).ok == kQolOk;
+    const bool party_ok = game->read_only.character.is_party_member(mutable_ch, &party_member).ok == kQolOk;
     const bool active_ok =
         game->read.character.is_active_player_group(mutable_ch, &active_group).ok == kQolOk;
-    const bool summoner_ok = game->extra.character.summoner(mutable_ch, &summoner).ok == kQolOk;
+    const bool summoner_ok = game->read_only.character.summoner(mutable_ch, &summoner).ok == kQolOk;
     if (!party_ok || !active_ok || !summoner_ok) {
         note_faction_deps_missing_once(party_ok, active_ok, summoner_ok);
         return false;
@@ -169,9 +169,9 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
 
     const auto* game = game_host();
     if (game == nullptr || game->read.character.type == nullptr ||
-        game->extra.character.pool_slot == nullptr || game->extra.character.max_hp == nullptr ||
-        game->extra.character_write.max_hp == nullptr || game->extra.character.hp == nullptr ||
-        game->extra.character_write.hp == nullptr) {
+        game->read_only.character.pool_slot == nullptr || game->read_only.character.max_hp == nullptr ||
+        game->character_write.max_hp == nullptr || game->read_only.character.hp == nullptr ||
+        game->character_write.hp == nullptr) {
         return;
     }
     int32_t type = -1;
@@ -179,7 +179,7 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     if (is_player_side_impl(ch, 0)) return;  // 玩家侧召唤物不减半
 
     int slot = 0;
-    if (game->extra.character.pool_slot(ch, &slot).ok != kQolOk || slot < 0 ||
+    if (game->read_only.character.pool_slot(ch, &slot).ok != kQolOk || slot < 0 ||
         slot >= kCharPoolSlots) {
         // 定位不到池槽就无法保证幂等（会累积减半），故不改写——fail-safe 方向是「怪物保持满血」。
         if (!g_pool_slot_unresolved_logged.exchange(true)) {
@@ -189,7 +189,7 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     }
 
     int32_t raw = 0;
-    if (game->extra.character.max_hp(ch, &raw).ok != kQolOk) return;
+    if (game->read_only.character.max_hp(ch, &raw).ok != kQolOk) return;
     HalfHpMark& mark = g_half_marks[slot];
     if (mark.ch != ch) {  // 槽被新角色占用（或首次见）→ 重置该槽账本
         mark.ch = ch;
@@ -199,13 +199,13 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
 
     const int32_t half = halved_max_hp(raw);
     if (half == raw) return;  // 已是下限 1，无意义
-    if (game->extra.character_write.max_hp(ch, half).ok != kQolOk) return;
+    if (game->character_write.max_hp(ch, half).ok != kQolOk) return;
     mark.halved = half;
 
     // 同步钳制当前 HP：否则「上限已半、当前血仍是满值」会表现为血条超上限。
     int32_t hp = 0;
-    if (game->extra.character.hp(ch, &hp).ok == kQolOk && hp > half) {
-        (void)game->extra.character_write.hp(ch, half);
+    if (game->read_only.character.hp(ch, &hp).ok == kQolOk && hp > half) {
+        (void)game->character_write.hp(ch, half);
     }
 }
 

@@ -2,8 +2,8 @@
 
 ## 状态
 
-已冻结目标面；本批仅实施 P2-A 的日志与存档事件迁移。Game Host 的具体拆表留给
-P2-B，不在本 ADR 中提前实现。
+已冻结目标面；P2-B4 已完成三类旧接口删除、使用者迁移和窄类型化写面收口。行为面仍
+以受影响 VM 卡真机证据为准。
 
 ## 背景与冻结结论
 
@@ -141,10 +141,9 @@ host 测试、Debug APK 或 VM-BOUNDARY 不得替代该证据。
 `game/access/item_class.*`：`I_ENCHANT` bits2–5、`I_SOCKET` 低/高 nibble，以及
 `ITEMCLASSBASE` 记录 +2 的 `0x1f` 判定；插件不获得 `I_ENCHANT`/`I_SOCKET`/`I_COUNT`/`g_base`。
 
-`QolGameHostExtraApi` 保留为 deprecated 兼容 shim，继续指向既有实现；P2-B2/B3 迁移
-消费者后于 P2-B4 删除。`QolCallApi::call_known` 与 `QolUiPrimitiveApi` 均标为
-P2-B4 待删，UI primitive 的替代面为已覆盖的 `UiAdapter`；本批不删除，避免消费者
-编译断裂。
+P2-B1 的 `QolGameHostExtraApi`、`QolCallApi::call_known` 和 `QolUiPrimitiveApi` 仅作为
+迁移期兼容面存在；P2-B4 已完成全部消费者迁移并删除，UI primitive 的替代面为
+`QolUiAdapter`。
 
 ## 后续 lane 切分与验收
 
@@ -403,3 +402,56 @@ trampoline、Popup/PtrHook 安装和控件树写仍登记为 G5/S1 缺口。
 受影响规则为 R-12、R-18、R-34、R-38、R-40、R-41、R-47、R-48、R-49、R-50、R-55、R-63，
 对应 VM-B01～VM-B04、VM-B05、VM-34、VM-40、VM-41。未执行真机回归，因此行为验收仍为
 `NOT_ACCEPTED`。
+
+## P2-B4：旧接口删除与窄面迁移
+
+本批删除三类旧接口，不保留兼容 shim：
+
+1. 删除 `QolGameHostExtraApi` 及其跨域聚合类型。只读成员统一进入既有
+   `QolGameHost::read_only`；副作用成员拆为 `character_write`、`inventory_write`、
+   `craft_action`、`world_action`、`quest_write`、`choice_action` 六个按域函数表，存档
+   操作使用既有顶层 `save_call`。例外是 `QolInventoryReadApi::bit_range`：该成员在删除
+   前已无任何使用者（仅声明和装配，无调用点），未带入 `read_only`，随聚合类型一并删除。
+2. 删除 `QolCallApi::call_known` 及 `QolCallApi`。没有使用者继续通过 ID、参数 blob 或
+   任意函数名调用游戏函数。
+3. 删除 `QolUiPrimitiveApi` 及 `QolGameHost::ui_primitive`。内联属性颜色写入迁移到
+   `QolHostSdk::ui` 的 `QolUiAdapter::insert_inline_color`，UI adapter minor 从 4 升为 5。
+   该成员仍由 host adapter 执行边界检查和 `game/access/attr_range_ui` 原语调用。
+   adapter 的 `not_ready`/`unsupported` 诊断文本随接口名从 `ui primitive …` 改为
+   `ui adapter …`；错误码不变，`message_len` 与字面量字节数一致（由 `ui_adapter_tests`
+   断言 `message_len == strlen(message)` 固定）。
+
+### 使用者迁移落点与等价性
+
+| 使用者 | 原接口成员 | 新面 | 语义等价与边界 |
+|---|---|---|---|
+| `plugins/custom_recipe/feature.cpp` | item/craft 读取、物品创建/保存/释放、描述关闭 | `read_only.item`、`read_only.craft`、`inventory_write`、`craft_action` | 原 `game/access` 落点和调用顺序不变；空参数、未解析、创建失败仍返回原 `invalid_argument`/`not_ready`，创建失败仍清理对象 |
+| `plugins/craft_ui/feature.cpp`、`plugin.cpp` | craft 读取/调用、item 读取 | `read_only.craft`、`craft_action`、`read_only.item` | 仍按原 slot/type 边界检查；调用失败仍被忽略或按原 guard 短路 |
+| `plugins/world_teleport/feature.cpp` | world 读取/切图/扣钱/弹窗/HUD/banner、choice state | `read_only.world`、`world_action`、`read_only.choice` | map id、金额、文本和回调参数校验保持；游戏原函数返回失败仍映射为 `not_ready`，不伪造成功 |
+| `plugins/inventory_hooks/plugin.cpp`、`native_inventory_hook.cpp` | 出售结算的加钱/扣钱/移除物品 | `world_action.add_money/minus_money`、`inventory_write.remove_item/remove_item_direct` | 原子顺序和失败补偿不变；任一原语未就绪仍停止事务并执行既有回滚 |
+| `plugins/quest/feature.cpp` | 任务 active/state/complete 读取、状态写入 | `read_only.quest`、`quest_write` | `quest_state(quest_id)` 保留按任务 id 查询；写入仍只在主线程调度中执行，失败不增加修复计数 |
+| `plugins/native_choice/feature.cpp` | choice 读取、写选项/标题/焦点、打开/关闭/音效 | `read_only.choice`、`choice_action` | 原 count/index/state 边界检查和 popup 调用顺序不变；原函数失败仍返回 `not_ready` |
+| `plugins/special_equip/feature.cpp` | character/item 读取 | `read_only.character`、`read_only.item` | 只读值和空对象/未解析错误保持，不再经过聚合表 |
+| `plugins/simple_mode/feature.cpp` | character 读取和 HP 写入 | `read_only.character`、`character_write` | 原 HP 非负校验、主线程 wrapper 和失败返回保持 |
+| `plugins/attribute_range_display/feature.cpp` | `ui_primitive.insert_inline_color` | `sdk->ui->insert_inline_color` | 同一 4096 字节上限、空参数和颜色码校验；超界仍为 `blocked`，原颜色原语失败仍为 `not_ready` |
+| `tests/test_host_adapters.cpp` | legacy extra、`call_known`、UI primitive 断言 | read-only、窄写面、唯一 UI adapter | fake/host 测试改测新函数表与错误码，不再为旧成员保留断言 |
+| `tests/test_quest_lifecycle.cpp` | fake quest extra | `read_only.quest.quest_state`、`quest_write` | fake 保持相同 quest id、状态和调用次数断言 |
+
+### 新增窄写原语
+
+以下函数表由 `host/game_host.cpp` 实现，实际游戏调用仍统一落到 `game/access/*` 的已解析
+原语；契约只暴露包装器函数指针，不暴露裸游戏函数指针、地址或 `PtrHook`：
+
+| 面 | 签名（成员） | 语义与失败返回 |
+|---|---|---|
+| `QolCharacterWriteApi` | `max_hp(void*, int32_t)`、`hp(void*, int32_t)` | 写角色最大/当前 HP；空对象或负值为 `invalid_argument`，目标原语不可用为 `not_ready` |
+| `QolInventoryWriteApi` | `remove_item_data(int32_t,int32_t)`、`remove_item(void*)`、`create_perfect_item(int32_t,void**)`、`create_item(int32_t,int32_t,int32_t,int32_t,void**)`、`save_item(void*,void*,int32_t*)`、`free_item(void*)`、`remove_item_direct(int32_t,int32_t)` | 对应原版库存删除、创建、保存、释放和按槽移除；参数越界为 `invalid_argument`，函数未解析为 `not_ready`，创建/删除原函数失败不转成功 |
+| `QolCraftActionApi` | `init_mixing_state()`、`reset_stuff_item_control()`、`refresh_inventory_items()`、`select_first_empty_stuff_slot(int32_t*)`、`set_ui_type(int64_t)`、`set_selected_recipe(int32_t,int64_t)`、`play_sound(int32_t)`、`show_text(uint32_t)`、`show_yesno_from_text(uint32_t,void*,void*)`、`description_set_off()` | 合成状态、选择、刷新、音效、文本和原生确认框动作；type/sound/text/callback 参数越界为 `invalid_argument`，落点不可用为 `not_ready` |
+| `QolWorldActionApi` | `create_yesno(const char*,uint32_t,void*,void*,void*)`、`minus_money(int64_t)`、`request_map_change(int32_t,int32_t,int32_t,int32_t)`、`close_popup()`、`restore_hud()`、`show_banner(const char*)`、`add_money(int64_t)` | 世界切图、扣/加钱、原生选择框和 HUD 动作；金额/map/text 边界保持，原函数失败为 `not_ready`，不写默认值 |
+| `QolSaveCallApi` | `free_data(void*)`、`encrypt(void*,int32_t,int32_t,const char*,int32_t*)`、`mark_stale()` | 存档数据释放、加解密和缓存失效；size/mode/key/out 参数非法为 `invalid_argument`，加解密依赖未就绪为 `not_ready` |
+| `QolQuestWriteApi` | `set_state(uint32_t,int32_t)` | 写指定任务状态；quest id 超范围为 `invalid_argument`，游戏原语拒绝为 `not_ready` |
+| `QolChoiceActionApi` | `write_items(const char* const*,uint32_t)`、`write_title(const char*)`、`write_focus(int32_t)`、`push()`、`close_popup()`、`play_sound(int32_t)` | 原生选择框内容、焦点、打开/关闭和音效；count/index/空字符串边界为 `invalid_argument`，原函数失败为 `not_ready` |
+
+所有只读成员的落点保持 `host/game_host.cpp → game/access/*`，错误时不向 out 写默认值；
+存档释放、加解密、选择框和世界动作也沿用原调用窗与主线程约束。扩展背包已有
+`extension_bag_write` 面未改动，锁纪律、事务语义和同调用窗同步写回不变。

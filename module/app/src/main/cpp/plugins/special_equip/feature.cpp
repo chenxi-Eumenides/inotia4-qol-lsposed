@@ -56,9 +56,9 @@ void log_debug_impl(const char* format, ...) {
 // 原版判定链重放依赖（不含「菜单角色」——那只在出售门禁与安装门控需要）。
 bool replay_deps_ready() {
     const auto* game = game_host();
-    return game != nullptr && game->extra.item.is_real_equip != nullptr &&
-           game->extra.item.equip_level != nullptr &&
-           game->extra.character.can_change_equip != nullptr;
+    return game != nullptr && game->read_only.item.is_real_equip != nullptr &&
+           game->read_only.item.equip_level != nullptr &&
+           game->read_only.character.can_change_equip != nullptr;
 }
 
 // 仅 debug 日志开启时记录，避免热路径噪声（穿装/卸下都是用户操作级频率，无需预算门控）。
@@ -81,28 +81,28 @@ void log_reject(int category, void* ch, void* item) {
     if (game != nullptr && game->read.character.type != nullptr) {
         (void)game->read.character.type(ch, &type);
     }
-    if (game != nullptr && game->extra.character.merc_slot != nullptr) {
-        (void)game->extra.character.merc_slot(ch, &merc_slot);
+    if (game != nullptr && game->read_only.character.merc_slot != nullptr) {
+        (void)game->read_only.character.merc_slot(ch, &merc_slot);
     }
-    if (game != nullptr && game->extra.character.level != nullptr) {
-        (void)game->extra.character.level(ch, &level);
+    if (game != nullptr && game->read_only.character.level != nullptr) {
+        (void)game->read_only.character.level(ch, &level);
     }
-    if (game != nullptr && game->extra.character.can_change_equip != nullptr) {
-        (void)game->extra.character.can_change_equip(ch, &can_change);
+    if (game != nullptr && game->read_only.character.can_change_equip != nullptr) {
+        (void)game->read_only.character.can_change_equip(ch, &can_change);
     }
-    if (game != nullptr && game->extra.item.is_real_equip != nullptr) {
-        (void)game->extra.item.is_real_equip(item, &real_equip);
+    if (game != nullptr && game->read_only.item.is_real_equip != nullptr) {
+        (void)game->read_only.item.is_real_equip(item, &real_equip);
     }
-    if (game != nullptr && game->extra.item.equip_level != nullptr) {
-        (void)game->extra.item.equip_level(item, &item_level);
+    if (game != nullptr && game->read_only.item.equip_level != nullptr) {
+        (void)game->read_only.item.equip_level(item, &item_level);
     }
     int32_t item_category = category;
     int32_t no_equip_bit = -1;
     if (game != nullptr && game->read.item.category != nullptr) {
         (void)game->read.item.category(item, &item_category);
     }
-    if (game != nullptr && game->extra.item.class_no_equip_bit != nullptr && item_category >= 0) {
-        (void)game->extra.item.class_no_equip_bit(item_category, &no_equip_bit);
+    if (game != nullptr && game->read_only.item.class_no_equip_bit != nullptr && item_category >= 0) {
+        (void)game->read_only.item.class_no_equip_bit(item_category, &no_equip_bit);
     }
     log_debug_impl("not overridden ch=%p item=%p cat=%d bit4=%d ctype=%d mercSlot=%d "
               "realEquip=%d canChange=%d chLv=%d itemLv=%d",
@@ -147,17 +147,17 @@ void log_error(const char* format, ...) {
 bool deps_ready() {
     const auto* game = game_host();
     return replay_deps_ready() && game != nullptr &&
-           game->extra.character.menu_character != nullptr;
+           game->read_only.character.menu_character != nullptr;
 }
 
 void log_deps_missing() {
     const auto* game = game_host();
     log_error("symbols unresolved (is_real_equip=%d can_change_equip=%d equip_level=%d "
               "menu_char=%d); not installed",
-              game != nullptr && game->extra.item.is_real_equip != nullptr,
-              game != nullptr && game->extra.character.can_change_equip != nullptr,
-              game != nullptr && game->extra.item.equip_level != nullptr,
-              game != nullptr && game->extra.character.menu_character != nullptr);
+              game != nullptr && game->read_only.item.is_real_equip != nullptr,
+              game != nullptr && game->read_only.character.can_change_equip != nullptr,
+              game != nullptr && game->read_only.item.equip_level != nullptr,
+              game != nullptr && game->read_only.character.menu_character != nullptr);
 }
 
 void set_gate(bool enabled) {
@@ -199,10 +199,10 @@ int can_equip_wrapper(void* ch, void* item) {
     int32_t can_change_equip = 0;
     int32_t char_level = -1;
     int32_t item_level = -1;
-    if (game == nullptr || game->extra.item.is_real_equip(item, &is_real_equip).ok != kQolOk ||
-        game->extra.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
-        game->extra.character.level(ch, &char_level).ok != kQolOk ||
-        game->extra.item.equip_level(item, &item_level).ok != kQolOk) {
+    if (game == nullptr || game->read_only.item.is_real_equip(item, &is_real_equip).ok != kQolOk ||
+        game->read_only.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
+        game->read_only.character.level(ch, &char_level).ok != kQolOk ||
+        game->read_only.item.equip_level(item, &item_level).ok != kQolOk) {
         log_reject(-1, ch, item);
         return 0;
     }
@@ -222,12 +222,12 @@ int can_unequip_wrapper(void* ch, void* item) {
     if (backup(ch, item) != 0) return 1;
     if (ch == nullptr || item == nullptr) return 0;
     const auto* game = game_host();
-    if (game == nullptr || game->extra.character.can_change_equip == nullptr) {
+    if (game == nullptr || game->read_only.character.can_change_equip == nullptr) {
         log_reject(-1, ch, item);
         return 0;
     }
     int32_t can_change_equip = 0;
-    if (game->extra.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
+    if (game->read_only.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
         !unequip_replay_allows(can_change_equip != 0)) {
         log_reject(-1, ch, item);
         return 0;
@@ -241,19 +241,19 @@ int32_t sell_gate_should_block(void* ctx) {
     (void)ctx;
     if (!gate_enabled()) return 0;  // 插件未启用：谓词常驻但空转放行
     const auto* game = game_host();
-    if (game == nullptr || game->extra.character.menu_character == nullptr ||
-        game->extra.character.can_change_equip == nullptr ||
-        game->extra.item.equip_desc_role_type == nullptr) {
+    if (game == nullptr || game->read_only.character.menu_character == nullptr ||
+        game->read_only.character.can_change_equip == nullptr ||
+        game->read_only.item.equip_desc_role_type == nullptr) {
         return 1;
     }
     void* ch = nullptr;
     int32_t can_change = 0;
-    if (game->extra.character.menu_character(&ch).ok != kQolOk || ch == nullptr ||
-        game->extra.character.can_change_equip(ch, &can_change).ok != kQolOk) {
+    if (game->read_only.character.menu_character(&ch).ok != kQolOk || ch == nullptr ||
+        game->read_only.character.can_change_equip(ch, &can_change).ok != kQolOk) {
         return 1;
     }
     int32_t desc_type = -1;
-    if (game->extra.item.equip_desc_role_type(&desc_type).ok != kQolOk) return 1;
+    if (game->read_only.item.equip_desc_role_type(&desc_type).ok != kQolOk) return 1;
     if (!sell_gate_decides_block(desc_type, true, true, can_change != 0)) return 0;
     log_info("sell rejected: menu char cannot change equip ch=%p", ch);
     return 1;

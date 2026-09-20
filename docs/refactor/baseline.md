@@ -138,7 +138,7 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 42 |
-| `host` | `game` | 32 |
+| `host` | `game` | 33 |
 | `host` | `contracts` | 22 |
 | `plugins/extension_bag` | `contracts` | 19 |
 | `plugins/autosell` | `contracts` | 17 |

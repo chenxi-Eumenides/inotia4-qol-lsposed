@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "contracts/ui.h"
 #include "game_access.h"
@@ -72,6 +73,11 @@ void ui_clear_control_proc(void*) {}
 const char* data_ui_screen() { return "test"; }
 bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
 void ui_show_text_popup(int32_t) {}
+
+namespace qol::game {
+bool g_attr_insert_value_color_ok = true;
+bool attr_insert_value_color(char*, char*, char) { return g_attr_insert_value_color_ok; }
+}
 
 void ui_set_rect(void* ctrl, UiRect rect) {
     ++g_set_rect_calls;
@@ -165,6 +171,7 @@ int main() {
     CHECK(adapter->draw_item_porting != nullptr);
     CHECK(adapter->control_parent != nullptr);
     CHECK(adapter->find_root != nullptr);
+    CHECK(adapter->insert_inline_color != nullptr);
 
     qol::contracts::QolUiComponents components{};
     components.size = sizeof(components);
@@ -195,6 +202,10 @@ int main() {
     CHECK(adapter->draw_text(nullptr, 0, 0, 0).code == kQolErrInvalidArgument);
     qol::contracts::QolUiHandle created = nullptr;
     CHECK(adapter->create_control(1, nullptr, &created).code == kQolErrInvalidArgument);
+    const QolResult unsupported = adapter->create_control(99, &control, &created);
+    CHECK(unsupported.code == kQolErrUnsupported);
+    CHECK(unsupported.message != nullptr);
+    CHECK(unsupported.message_len == std::strlen(unsupported.message));
     CHECK(adapter->set_text(&control, nullptr).code == kQolErrInvalidArgument);
     CHECK(adapter->set_text(&control, "text").ok == kQolOk);
     CHECK(g_set_text_calls == 1);
@@ -207,6 +218,27 @@ int main() {
     CHECK(g_click_user == &click_marker);
     CHECK(adapter->draw_control(&control).ok == kQolOk);
     CHECK(g_draw_control_calls == 1);
+    char bounded_text[] = "value";
+    char* bounded_builder = bounded_text;
+    const QolResult bounded = adapter->insert_inline_color(&bounded_builder, 4, 'Y');
+    CHECK(bounded.code == kQolErrBlocked);
+    CHECK(bounded.message != nullptr);
+    CHECK(bounded.message_len == std::strlen(bounded.message));
+    CHECK(bounded_builder == bounded_text);
+
+    const QolResult invalid = adapter->insert_inline_color(nullptr, 4, 'Y');
+    CHECK(invalid.code == kQolErrInvalidArgument);
+    CHECK(invalid.message != nullptr);
+    CHECK(invalid.message_len == std::strlen(invalid.message));
+
+    char ready_text[] = "value";
+    char* ready_builder = ready_text;
+    qol::game::g_attr_insert_value_color_ok = false;
+    const QolResult not_ready = adapter->insert_inline_color(&ready_builder, 4096, 'Y');
+    qol::game::g_attr_insert_value_color_ok = true;
+    CHECK(not_ready.code == kQolErrNotReady);
+    CHECK(not_ready.message != nullptr);
+    CHECK(not_ready.message_len == std::strlen(not_ready.message));
 
     std::printf("ui_adapter assertions: %d\n", assertions);
     return 0;

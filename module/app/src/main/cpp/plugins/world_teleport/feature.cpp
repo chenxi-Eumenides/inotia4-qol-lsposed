@@ -64,29 +64,29 @@ bool read_state(int* out) {
 }
 
 bool read_map_record_count(int* out) {
-    if (out == nullptr || game() == nullptr || game()->extra.world.map_record_count == nullptr) {
+    if (out == nullptr || game() == nullptr || game()->read_only.world.map_record_count == nullptr) {
         return false;
     }
     int32_t value = 0;
-    if (!qol::contracts::succeeded(game()->extra.world.map_record_count(&value))) return false;
+    if (!qol::contracts::succeeded(game()->read_only.world.map_record_count(&value))) return false;
     *out = value;
     return true;
 }
 
 bool read_current_map_id(int* out) {
-    if (out == nullptr || game() == nullptr || game()->extra.world.current_map_id == nullptr) {
+    if (out == nullptr || game() == nullptr || game()->read_only.world.current_map_id == nullptr) {
         return false;
     }
     int32_t value = 0;
-    if (!qol::contracts::succeeded(game()->extra.world.current_map_id(&value))) return false;
+    if (!qol::contracts::succeeded(game()->read_only.world.current_map_id(&value))) return false;
     *out = value;
     return true;
 }
 
 const char* read_map_name(int map_id) {
-    if (game() == nullptr || game()->extra.world.map_name == nullptr) return nullptr;
+    if (game() == nullptr || game()->read_only.world.map_name == nullptr) return nullptr;
     const char* value = nullptr;
-    if (!qol::contracts::succeeded(game()->extra.world.map_name(map_id, &value))) return nullptr;
+    if (!qol::contracts::succeeded(game()->read_only.world.map_name(map_id, &value))) return nullptr;
     return value;
 }
 
@@ -172,8 +172,8 @@ void open_choice_panel() {
         return;
     }
     int state_id = -1;
-    if (game() != nullptr && game()->extra.choice.state_id != nullptr) {
-        (void)game()->extra.choice.state_id(&state_id);
+    if (game() != nullptr && game()->read_only.choice.state_id != nullptr) {
+        (void)game()->read_only.choice.state_id(&state_id);
     }
     log_message(1, "world teleport: choice opened current=%d state=%d", current_id, state_id);
 }
@@ -185,11 +185,11 @@ int32_t delayed_open_choice(int64_t, void*) {
 
 int32_t delayed_open_confirmation(int64_t, void* param) {
     const auto* target = static_cast<const ChoiceTarget*>(param);
-    if (target == nullptr || game() == nullptr || game()->extra.world_call.create_yesno == nullptr) {
+    if (target == nullptr || game() == nullptr || game()->world_action.create_yesno == nullptr) {
         log_message(3, "world teleport: confirmation symbols not resolved");
         return 0;
     }
-    (void)game()->extra.world_call.create_yesno(
+    (void)game()->world_action.create_yesno(
         g_confirm_text.data(), static_cast<uint32_t>(std::strlen(g_confirm_text.data())),
         reinterpret_cast<void*>(&teleport_confirmed), reinterpret_cast<void*>(&teleport_cancelled),
         reinterpret_cast<void*>(static_cast<intptr_t>(target->cost)));
@@ -209,8 +209,8 @@ void request_open_choice() {
 }
 
 void show_message(const char* message) {
-    if (game() == nullptr || game()->extra.world_call.show_banner == nullptr ||
-        !qol::contracts::succeeded(game()->extra.world_call.show_banner(message))) {
+    if (game() == nullptr || game()->world_action.show_banner == nullptr ||
+        !qol::contracts::succeeded(game()->world_action.show_banner(message))) {
         log_message(3, "world teleport: instant message symbol not resolved");
         return;
     }
@@ -219,41 +219,41 @@ void show_message(const char* message) {
 
 int32_t delayed_transfer(int64_t, void* param) {
     const auto* target = static_cast<const ChoiceTarget*>(param);
-    if (target == nullptr || game() == nullptr || game()->extra.world.money == nullptr ||
-        game()->extra.world.active_player_direction == nullptr ||
-        game()->extra.world_call.minus_money == nullptr ||
-        game()->extra.world_call.request_map_change == nullptr) {
+    if (target == nullptr || game() == nullptr || game()->read_only.world.money == nullptr ||
+        game()->read_only.world.active_player_direction == nullptr ||
+        game()->world_action.minus_money == nullptr ||
+        game()->world_action.request_map_change == nullptr) {
         log_message(3, "world teleport: transfer symbols not resolved");
         return 0;
     }
     int32_t direction = -1;
     int64_t money = 0;
-    if (!qol::contracts::succeeded(game()->extra.world.active_player_direction(&direction)) ||
-        direction < 0 || !qol::contracts::succeeded(game()->extra.world.money(&money))) {
+    if (!qol::contracts::succeeded(game()->read_only.world.active_player_direction(&direction)) ||
+        direction < 0 || !qol::contracts::succeeded(game()->read_only.world.money(&money))) {
         log_message(3, "world teleport: active player unavailable");
         return 0;
     }
     if (money < target->cost || !qol::contracts::succeeded(
-            game()->extra.world_call.minus_money(static_cast<int64_t>(target->cost)))) {
+            game()->world_action.minus_money(static_cast<int64_t>(target->cost)))) {
         show_message("金币不足，无法传送");
         log_message(1, "world teleport: insufficient money target=%d cost=%d money=%lld",
                     target->map_id, target->cost, static_cast<long long>(money));
         return 0;
     }
-    (void)game()->extra.world_call.request_map_change(target->map_id, 0, 0, direction);
+    (void)game()->world_action.request_map_change(target->map_id, 0, 0, direction);
     log_message(1, "world teleport: transferred target=%d cost=%d direction=%d",
                 target->map_id, target->cost, direction);
     return 0;
 }
 
 int32_t delayed_close_choice(int64_t, void* param) {
-    if (game() == nullptr || game()->extra.world_call.close_popup == nullptr ||
-        game()->extra.world_call.restore_hud == nullptr) {
+    if (game() == nullptr || game()->world_action.close_popup == nullptr ||
+        game()->world_action.restore_hud == nullptr) {
         log_message(3, "world teleport: choice close symbols not resolved");
         return 0;
     }
-    (void)game()->extra.world_call.close_popup();
-    (void)game()->extra.world_call.restore_hud();
+    (void)game()->world_action.close_popup();
+    (void)game()->world_action.restore_hud();
     if (!schedule(delayed_transfer, param, 1)) {
         log_message(3, "world teleport: transfer registration failed");
     }
@@ -262,7 +262,7 @@ int32_t delayed_close_choice(int64_t, void* param) {
 
 void teleport_confirmed(void*) {
     const ChoiceTarget* target = &g_pending_target;
-    if (!target->valid || game() == nullptr || game()->extra.world_call.close_popup == nullptr) {
+    if (!target->valid || game() == nullptr || game()->world_action.close_popup == nullptr) {
         log_message(3, "world teleport: confirm symbols not resolved");
         return;
     }
@@ -270,9 +270,9 @@ void teleport_confirmed(void*) {
         log_message(3, "world teleport: transfer registration failed");
         return;
     }
-    (void)game()->extra.world_call.close_popup();
-    if (game()->extra.world_call.restore_hud != nullptr) {
-        (void)game()->extra.world_call.restore_hud();
+    (void)game()->world_action.close_popup();
+    if (game()->world_action.restore_hud != nullptr) {
+        (void)game()->world_action.restore_hud();
     }
 }
 
@@ -285,7 +285,7 @@ void teleport_cancelled(void*) {
 
 void teleport_on_select(int index, void*) {
     if (index < 0 || index >= static_cast<int>(kTeleportChoiceCount) ||
-        game() == nullptr || game()->extra.world_call.create_yesno == nullptr) {
+        game() == nullptr || game()->world_action.create_yesno == nullptr) {
         close_choice_panel();
         log_message(3, "world teleport: confirm symbols not resolved");
         return;
@@ -300,8 +300,8 @@ void teleport_on_select(int index, void*) {
     std::snprintf(g_confirm_text.data(), g_confirm_text.size(), "是否传送至%s？",
                   map_name(target.map_id));
     close_choice_panel();
-    if (game()->extra.world_call.restore_hud != nullptr) {
-        (void)game()->extra.world_call.restore_hud();
+    if (game()->world_action.restore_hud != nullptr) {
+        (void)game()->world_action.restore_hud();
     }
     g_pending_target = target;
     if (!schedule(delayed_open_confirmation, &g_pending_target, 1)) {

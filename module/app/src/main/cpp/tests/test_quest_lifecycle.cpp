@@ -88,11 +88,11 @@ qol::contracts::QolGameHost fake_game() {
     game.abi = {sizeof(qol::contracts::QolGameHost), qol::contracts::kGameHostMajor,
                 qol::contracts::kGameHostMinor};
     game.read.world.state = &fake_world_state;
-    game.extra.quest.active_slot_count = &fake_active_slot_count;
-    game.extra.quest.active_slot_id = &fake_active_slot_id;
-    game.extra.quest.state = &fake_quest_state;
-    game.extra.quest.is_complete = &fake_quest_complete;
-    game.extra.quest_write.set_state = &fake_set_state;
+    game.read_only.quest.active_slot_count = &fake_active_slot_count;
+    game.read_only.quest.active_slot_id = &fake_active_slot_id;
+    game.read_only.quest.quest_state = &fake_quest_state;
+    game.read_only.quest.is_complete = &fake_quest_complete;
+    game.quest_write.set_state = &fake_set_state;
     return game;
 }
 

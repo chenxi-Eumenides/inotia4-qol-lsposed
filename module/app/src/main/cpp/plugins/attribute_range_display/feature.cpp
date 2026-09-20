@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/ui.h"
 
 namespace qol::features::attribute_range_display {
 namespace {
@@ -79,8 +80,8 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
     if (!active() || builder == nullptr || t_current_item == nullptr) return;
 
     const auto api = quality_api();
-    if (g_game == nullptr || g_game->read.item.ability_level == nullptr ||
-        g_game->ui_primitive.insert_inline_color == nullptr || api == nullptr ||
+    if (g_game == nullptr || g_game->read.item.ability_level == nullptr || g_sdk == nullptr ||
+        g_sdk->ui == nullptr || g_sdk->ui->insert_inline_color == nullptr || api == nullptr ||
         api->probe_option == nullptr || api->classify == nullptr) {
         return;
     }
@@ -91,8 +92,8 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
     if (api->probe_option(t_current_item, option_index, level, 1, value, &quality).ok != kQolOk) {
         return;
     }
-    (void)g_game->ui_primitive.insert_inline_color(builder, 4096,
-                                                   static_cast<uint8_t>(tier_color(quality.tier)));
+    (void)g_sdk->ui->insert_inline_color(builder, 4096,
+                                         static_cast<uint8_t>(tier_color(quality.tier)));
 }
 
 uintptr_t uid_desc_make_item_wrapper(void* item, void* character, void* arg2) {

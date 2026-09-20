@@ -13,7 +13,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 4;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 5;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -195,6 +195,7 @@ struct QolUiAdapter {
     QolResult (*draw_item_porting)(QolUiHandle, int32_t, int32_t, int32_t, int32_t);
     QolResult (*control_parent)(QolUiHandle, QolUiHandle*);
     QolResult (*find_root)(QolUiRootKind, QolUiHandle*);
+    QolResult (*insert_inline_color)(void* builder, uint32_t max_text_bytes, uint8_t color_code);
 };
 
 }  // namespace qol::contracts

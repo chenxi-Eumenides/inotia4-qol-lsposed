@@ -112,8 +112,8 @@ uint16_t item_category(void* item) {
 // 是否可堆叠（ITEMCLASSBASE[category*stride+6] bit0；口径与 data/native/item_class.h 一致）。
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
-    if (item == nullptr || g_game == nullptr || g_game->extra.item.is_real_equip == nullptr ||
-        g_game->extra.item.is_real_equip(item, &is_real_equip).ok != kQolOk) {
+    if (item == nullptr || g_game == nullptr || g_game->read_only.item.is_real_equip == nullptr ||
+        g_game->read_only.item.is_real_equip(item, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;
@@ -339,12 +339,12 @@ qol::contracts::PlaceOutcome api_place(const qol::contracts::CraftPlaceInput* in
         }
     }
     void* slot = nullptr;
-    if (g_game != nullptr && g_game->extra.craft.stuff_slot_control != nullptr) {
-        (void)g_game->extra.craft.stuff_slot_control(static_cast<uint32_t>(in->slot_index), &slot);
+    if (g_game != nullptr && g_game->read_only.craft.stuff_slot_control != nullptr) {
+        (void)g_game->read_only.craft.stuff_slot_control(static_cast<uint32_t>(in->slot_index), &slot);
     }
     if (slot == nullptr) return PlaceOutcome::kPlaced;
-    if (g_game != nullptr && g_game->extra.craft_call.description_set_off != nullptr) {
-        (void)g_game->extra.craft_call.description_set_off();
+    if (g_game != nullptr && g_game->craft_action.description_set_off != nullptr) {
+        (void)g_game->craft_action.description_set_off();
     }
     if (g_game != nullptr && g_game->write.craft.set_stuff_item != nullptr) {
         (void)g_game->write.craft.set_stuff_item(static_cast<uint32_t>(in->slot_index), item);
@@ -429,22 +429,22 @@ qol::contracts::CraftExecuteResult api_execute(const qol::contracts::CraftExecut
         void* it = items[i];
         if (it == nullptr) continue;
         if (item_is_stackable(it)) {
-            if (g_game != nullptr && g_game->extra.inventory_write.remove_item_data != nullptr) {
-                (void)g_game->extra.inventory_write.remove_item_data(
+            if (g_game != nullptr && g_game->inventory_write.remove_item_data != nullptr) {
+                (void)g_game->inventory_write.remove_item_data(
                     static_cast<int32_t>(item_category(it)), 1);
             }
-        } else if (g_game != nullptr && g_game->extra.inventory_write.remove_item != nullptr) {
-            (void)g_game->extra.inventory_write.remove_item(it);
+        } else if (g_game != nullptr && g_game->inventory_write.remove_item != nullptr) {
+            (void)g_game->inventory_write.remove_item(it);
         }
     }
     // 产物创建走按类别分派的统一入口 ITEMSYSTEM_CreatePerfectItem；未就绪退回 CreateItem。
     void* product = nullptr;
-    if (g_game != nullptr && g_game->extra.inventory_write.create_perfect_item != nullptr) {
-        (void)g_game->extra.inventory_write.create_perfect_item(
+    if (g_game != nullptr && g_game->inventory_write.create_perfect_item != nullptr) {
+        (void)g_game->inventory_write.create_perfect_item(
             static_cast<int32_t>(product_category), &product);
-    } else if (g_game != nullptr && g_game->extra.inventory_write.create_item != nullptr) {
+    } else if (g_game != nullptr && g_game->inventory_write.create_item != nullptr) {
         log_message(2, "three slot craft fallback reason=no_perfect_item");
-        (void)g_game->extra.inventory_write.create_item(static_cast<int32_t>(product_category), 0,
+        (void)g_game->inventory_write.create_item(static_cast<int32_t>(product_category), 0,
                                                          0, 0, &product);
     }
     if (product == nullptr) return CraftExecuteResult::kNoBagSpace;
@@ -476,20 +476,20 @@ qol::contracts::CraftExecuteResult api_execute(const qol::contracts::CraftExecut
                         static_cast<uint32_t>(product_category), *p_socket, *p_enchant);
         }
     }
-    if (g_game == nullptr || g_game->extra.inventory_write.save_item == nullptr) {
+    if (g_game == nullptr || g_game->inventory_write.save_item == nullptr) {
         log_message(2, "three slot craft abort reason=no_save_item");
-        if (g_game != nullptr && g_game->extra.inventory_write.free_item != nullptr) {
-            (void)g_game->extra.inventory_write.free_item(product);
+        if (g_game != nullptr && g_game->inventory_write.free_item != nullptr) {
+            (void)g_game->inventory_write.free_item(product);
         }
         return CraftExecuteResult::kNoBagSpace;
     }
     int32_t saved = 0;
-    if (g_game->extra.inventory_write.save_item(product, nullptr, &saved).ok != kQolOk) {
+    if (g_game->inventory_write.save_item(product, nullptr, &saved).ok != kQolOk) {
         saved = 0;
     }
     if ((static_cast<uint32_t>(saved) & 0xffu) == 0) {
-        if (g_game->extra.inventory_write.free_item != nullptr) {
-            (void)g_game->extra.inventory_write.free_item(product);
+        if (g_game->inventory_write.free_item != nullptr) {
+            (void)g_game->inventory_write.free_item(product);
         }
         return CraftExecuteResult::kNoBagSpace;
     }

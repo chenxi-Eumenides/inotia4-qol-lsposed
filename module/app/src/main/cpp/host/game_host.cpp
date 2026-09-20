@@ -526,16 +526,6 @@ QolResult read_item_equip_desc_role_type(int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_inventory_bit_range(int32_t value, int32_t high_bit, int32_t low_bit,
-                                   int32_t* out) {
-    if (out == nullptr || high_bit < 0 || high_bit > 31 || low_bit < 0 || low_bit > high_bit) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (fn_get_bit == nullptr) return not_ready();
-    *out = fn_get_bit(value, high_bit, low_bit);
-    return contracts::ok();
-}
-
 QolResult write_inventory_remove_item_data(int32_t category, int32_t count) {
     if (category < 0 || count < 0) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -1012,25 +1002,6 @@ QolResult read_attr_fixed_option_percent_pair(int32_t category, int32_t option_i
     return contracts::ok();
 }
 
-QolResult ui_insert_inline_color(void* builder, uint32_t max_text_bytes, uint8_t color_code) {
-    constexpr uint32_t kMaxTextBytes = 4096;
-    if (builder == nullptr || max_text_bytes == 0 || max_text_bytes > kMaxTextBytes ||
-        color_code == 0) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    auto** text_slot = reinterpret_cast<char**>(builder);
-    char* text = *text_slot;
-    if (text == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const size_t length = strnlen(text, static_cast<size_t>(max_text_bytes) + 1);
-    if (length > max_text_bytes) return error_result(kQolErrBlocked, "text exceeds bound");
-    if (!qol::game::attr_insert_value_color(text, text + length,
-                                            static_cast<char>(color_code))) {
-        return not_ready();
-    }
-    *text_slot = text + length + 4;
-    return contracts::ok();
-}
-
 QolResult write_craft_stuff_need(uint32_t index, int32_t category, int32_t count) {
     if (category < 0 || count < 0 || count > UINT16_MAX) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -1227,10 +1198,6 @@ QolResult write_extension_description_set_off() {
     return write_extension_void_call(fn_ui_desc_set_off);
 }
 
-QolResult game_call_known(uint32_t, const void*, uint32_t, void*, uint32_t) {
-    return unsupported();
-}
-
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -1252,61 +1219,6 @@ contracts::QolGameHost make_game_host() {
                             &read_attr_fixed_option_percent_pair};
     host.write.craft = {&write_craft_stuff_need, &write_craft_stuff_item,
                         &write_craft_target_item, &write_craft_cost_zero};
-    host.call = {&game_call_known};
-    host.ui_primitive = {};
-    host.ui_primitive.insert_inline_color = &ui_insert_inline_color;
-    host.extra.character = {&read_char_party_member, &read_char_summoner, &read_char_level,
-                            &read_char_merc_slot, &read_char_can_change_equip,
-                            &read_char_menu_character, &read_char_pool_slot, &read_char_max_hp,
-                            &read_char_hp};
-    host.extra.character_write = {&write_char_max_hp, &write_char_hp};
-    host.extra.item = {&read_item_rarity, &read_item_real_equip, &read_item_equip_level,
-                       &read_item_no_sell, &read_item_dice, &read_item_cumulate_count,
-                       &read_item_class_no_equip_bit, &read_item_equip_desc_role_type};
-    host.extra.inventory = {&read_inventory_bit_range};
-    host.extra.inventory_write = {&write_inventory_remove_item_data,
-                                  &write_inventory_remove_item,
-                                  &write_inventory_create_perfect_item,
-                                  &write_inventory_create_item,
-                                  &write_inventory_save_item,
-                                  &write_inventory_free_item,
-                                  &write_inventory_remove_item_direct};
-    host.extra.craft = {&read_craft_slot_control, &read_craft_target_item,
-                        &read_craft_selected_inventory_item, &read_craft_selected_recipe,
-                        &read_craft_slot_count};
-    host.extra.craft_call = {&call_craft_init, &call_craft_reset, &call_craft_refresh,
-                             &call_craft_select_first_empty, &call_craft_set_type,
-                             &call_craft_set_selected_recipe, &call_craft_play_sound,
-                             &call_craft_show_text, &call_craft_show_yesno,
-                             &call_craft_description_set_off};
-    host.extra.world = {&read_world_map_record_count, &read_world_current_map_id,
-                        &read_world_map_name, &read_world_direction, &read_world_money};
-    host.extra.world_call = {&call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
-                             &call_world_close_popup, &call_world_restore_hud,
-                             &call_world_show_banner, &call_world_add_money};
-    host.extra.save = {&read_save_slot_exists, &read_save_slot_hero_index,
-                       [](int32_t slot, int32_t* out) {
-                           return read_save_hero_value(slot, out, true);
-                       },
-                       [](int32_t slot, int32_t* out) {
-                           return read_save_hero_value(slot, out, false);
-                       },
-                       &read_save_load_data, &read_save_hub_key};
-    host.extra.save_call = {&call_save_free_data, &call_save_encrypt, &call_save_mark_stale};
-    host.extra.quest = {&read_quest_active_slot_count, &read_quest_active_slot_id,
-                        &read_quest_total_count,
-                        [](uint32_t quest_id, int32_t* out) {
-                            return read_quest_value(quest_id, out, false);
-                        },
-                        [](uint32_t quest_id, int32_t* out) {
-                            return read_quest_value(quest_id, out, true);
-                        }};
-    host.extra.quest_write = {&write_quest_state};
-    host.extra.choice = {&read_choice_state_id, &read_choice_selected_index,
-                         &read_choice_text_owns};
-    host.extra.choice_call = {&call_choice_write_items, &call_choice_write_title,
-                              &call_choice_write_focus, &call_choice_push,
-                              &call_choice_close_popup, &call_choice_play_sound};
     host.read_only.character = {
         &read_char_type, &read_char_active, &read_char_party, &read_char_party_member,
         &read_char_summoner, &read_char_level, &read_char_merc_slot,
@@ -1376,6 +1288,26 @@ contracts::QolGameHost make_game_host() {
         &write_extension_update_character_equip,
         &write_extension_description_set_off,
     };
+    host.character_write = {&write_char_max_hp, &write_char_hp};
+    host.inventory_write = {&write_inventory_remove_item_data,
+                            &write_inventory_remove_item,
+                            &write_inventory_create_perfect_item,
+                            &write_inventory_create_item,
+                            &write_inventory_save_item,
+                            &write_inventory_free_item,
+                            &write_inventory_remove_item_direct};
+    host.craft_action = {&call_craft_init, &call_craft_reset, &call_craft_refresh,
+                         &call_craft_select_first_empty, &call_craft_set_type,
+                         &call_craft_set_selected_recipe, &call_craft_play_sound,
+                         &call_craft_show_text, &call_craft_show_yesno,
+                         &call_craft_description_set_off};
+    host.world_action = {&call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
+                         &call_world_close_popup, &call_world_restore_hud,
+                         &call_world_show_banner, &call_world_add_money};
+    host.quest_write = {&write_quest_state};
+    host.choice_action = {&call_choice_write_items, &call_choice_write_title,
+                          &call_choice_write_focus, &call_choice_push,
+                          &call_choice_close_popup, &call_choice_play_sound};
     return host;
 }
 

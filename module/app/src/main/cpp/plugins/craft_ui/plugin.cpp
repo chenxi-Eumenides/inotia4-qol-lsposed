@@ -89,8 +89,8 @@ int jewel_grade(uint16_t category) {
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
     const contracts::QolGameHost* game = game_host();
-    if (item == nullptr || game == nullptr || game->extra.item.is_real_equip == nullptr ||
-        game->extra.item.is_real_equip(item, &is_real_equip).ok != kQolOk) {
+    if (item == nullptr || game == nullptr || game->read_only.item.is_real_equip == nullptr ||
+        game->read_only.item.is_real_equip(item, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;

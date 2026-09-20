@@ -1138,12 +1138,12 @@ uint64_t ok_destroy_item_wrapper() {
 
     // kTakeover：加钱 → 删整堆 → 刷新。加钱/删堆失败不回 backup（避免按原版错误
     // 金额二次结算），失败即退款中止。
-    if (g_game->extra.world_call.add_money == nullptr ||
-        g_game->extra.world_call.minus_money == nullptr ||
-        g_game->extra.inventory_write.remove_item_direct == nullptr) {
+    if (g_game->world_action.add_money == nullptr ||
+        g_game->world_action.minus_money == nullptr ||
+        g_game->inventory_write.remove_item_direct == nullptr) {
         return call_backup();
     }
-    if (!qol::contracts::succeeded(g_game->extra.world_call.add_money(price))) {
+    if (!qol::contracts::succeeded(g_game->world_action.add_money(price))) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                             static_cast<long long>(price));
@@ -1151,15 +1151,15 @@ uint64_t ok_destroy_item_wrapper() {
     }
     // 提交前复核槽内对象未变（防并发替换/释放）。
     if (s2_physical_slot_item(bag, slot) != item) {
-        (void)g_game->extra.world_call.minus_money(price);
+        (void)g_game->world_action.minus_money(price);
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell stale before remove bag=%d slot=%d refunded=1", bag,
                             slot);
         return 0;
     }
-    (void)g_game->extra.inventory_write.remove_item_direct(bag, slot);
+    (void)g_game->inventory_write.remove_item_direct(bag, slot);
     if (s2_physical_slot_item(bag, slot) == item) {
-        (void)g_game->extra.world_call.minus_money(price);
+        (void)g_game->world_action.minus_money(price);
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "vanilla sell remove failed bag=%d slot=%d refunded=1", bag, slot);
         return 0;

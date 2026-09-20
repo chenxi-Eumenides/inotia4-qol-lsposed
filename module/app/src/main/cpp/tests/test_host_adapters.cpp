@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "contracts/panels.h"
+#include "contracts/ui.h"
 #include "core/native/game_variant.h"
 #include "game_access.h"
 #include "game/access/attr_range_ui.h"
@@ -494,11 +495,9 @@ int main() {
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==
-                      offsetof(qol::contracts::QolGameHost, extra) +
-                          sizeof(qol::contracts::QolGameHostExtraApi),
-                  "read-only face must be append-only");
-    assert(reinterpret_cast<const char*>(&game.read_only) ==
-           reinterpret_cast<const char*>(&game.extra) + sizeof(game.extra));
+                      offsetof(qol::contracts::QolGameHost, item_count) +
+                          sizeof(qol::contracts::QolItemCountApi),
+                  "read-only face must follow item-count face");
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
     assert(game.thread.frame_count() == 99);
@@ -516,40 +515,45 @@ int main() {
     void* created_item = nullptr;
     assert(game.extension_bag_write.inventory.create_item(-1, 0, 0, 0, &created_item).code ==
            kQolErrInvalidArgument);
-    assert(game.ui_primitive.insert_inline_color != nullptr);
-    char bounded_text[] = "value";
-    char* bounded_builder = bounded_text;
-    assert(game.ui_primitive.insert_inline_color(&bounded_builder, 4, 'Y').ok ==
-           kQolErrBlocked);
-    assert(bounded_builder == bounded_text);
+    assert(game.character_write.max_hp != nullptr);
+    assert(game.inventory_write.create_item != nullptr);
+    assert(game.craft_action.show_yesno_from_text != nullptr);
+    assert(game.world_action.request_map_change != nullptr);
+    assert(game.quest_write.set_state != nullptr);
+    assert(game.choice_action.write_items != nullptr);
+    assert(game.character_write.max_hp(nullptr, 1).code == kQolErrInvalidArgument);
+    assert(game.inventory_write.remove_item(nullptr).code == kQolErrInvalidArgument);
+    assert(game.craft_action.set_ui_type(-1).code == kQolErrInvalidArgument);
+    assert(game.world_action.minus_money(-1).code == kQolErrInvalidArgument);
+    assert(game.choice_action.write_title(nullptr).code == kQolErrInvalidArgument);
     int32_t character_type = -1;
     assert(game.read.character.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
     assert(character_type == 2);
     int32_t party_member = 0;
-    assert(game.extra.character.is_party_member(reinterpret_cast<void*>(0x1), &party_member).ok ==
+    assert(game.read_only.character.is_party_member(reinterpret_cast<void*>(0x1), &party_member).ok ==
            kQolOk);
     assert(party_member == 1);
     int32_t max_hp = 0;
-    assert(game.extra.character.max_hp(reinterpret_cast<void*>(0x1), &max_hp).ok == kQolOk);
+    assert(game.read_only.character.max_hp(reinterpret_cast<void*>(0x1), &max_hp).ok == kQolOk);
     assert(max_hp == 100);
     int32_t item_level = 0;
-    assert(game.extra.item.equip_level(reinterpret_cast<void*>(0x1), &item_level).ok == kQolOk);
+    assert(game.read_only.item.equip_level(reinterpret_cast<void*>(0x1), &item_level).ok == kQolOk);
     assert(item_level == 12);
     int32_t map_count = 0;
-    assert(game.extra.world.map_record_count(&map_count).ok == kQolOk);
+    assert(game.read_only.world.map_record_count(&map_count).ok == kQolOk);
     assert(map_count == 3);
     const char* map_name = nullptr;
-    assert(game.extra.world.map_name(1, &map_name).ok == kQolOk);
+    assert(game.read_only.world.map_name(1, &map_name).ok == kQolOk);
     assert(map_name != nullptr);
     int32_t hero_level = 0;
-    assert(game.extra.save.hero_level(0, &hero_level).ok == kQolOk);
+    assert(game.read_only.save.hero_level(0, &hero_level).ok == kQolOk);
     assert(hero_level == 10);
     uint32_t quest_count = 0;
-    assert(game.extra.quest.active_slot_count(&quest_count).ok == kQolOk);
+    assert(game.read_only.quest.active_slot_count(&quest_count).ok == kQolOk);
     assert(quest_count == 1);
-    assert(game.extra.quest_write.set_state(7, 2).ok == kQolOk);
+    assert(game.quest_write.set_state(7, 2).ok == kQolOk);
     int32_t choice_state = -1;
-    assert(game.extra.choice.state_id(&choice_state).ok == kQolOk);
+    assert(game.read_only.choice.state_id(&choice_state).ok == kQolOk);
     assert(choice_state == 42);
     assert(game.read_only.character.type(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 2);
@@ -712,6 +716,5 @@ int main() {
     g_world_game_state_gate = -1;
     assert(game.read_only.world.game_state_gate(&value).code == kQolErrNotReady);
     g_world_game_state_gate = 0;
-    assert(game.call.call_known(1, nullptr, 0, nullptr, 0).ok == kQolErrUnsupported);
     return 0;
 }
