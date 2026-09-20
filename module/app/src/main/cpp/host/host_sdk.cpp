@@ -21,6 +21,9 @@
 #include "infra/scheduler.h"
 #include "infra/store.h"
 #include "infra/text_scope.h"
+#include "game/access/ptr_slots.h"
+#include "game_access.h"
+#include "patch/ptr_slot.h"
 
 extern bool module_save_register_participant(const ModuleSaveParticipant&) __attribute__((weak));
 extern bool module_save_game() __attribute__((weak));
@@ -546,6 +549,107 @@ QolResult sdk_hooks_popup_restore(contracts::QolPopupStateEntry* entry) {
     return contracts::ok();
 }
 
+struct DynamicDescBinding {
+    bool active = false;
+    void* slot = nullptr;
+    void* original = nullptr;
+    void* replacement = nullptr;
+    void* button = nullptr;
+};
+
+std::mutex g_dynamic_desc_mtx;
+std::array<DynamicDescBinding, 11> g_dynamic_desc_bindings{};
+
+QolResult sdk_hooks_desc_bind(uint32_t index, void* replacement,
+                             contracts::QolDynamicDescHook* out_hook) {
+    if (replacement == nullptr || out_hook == nullptr || index >= g_dynamic_desc_bindings.size()) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    std::lock_guard<std::mutex> lock(g_dynamic_desc_mtx);
+    auto& binding = g_dynamic_desc_bindings[index];
+    if (binding.active) return result_error(kQolErrConflict, kConflict);
+    qol::game::PtrSlotSite site{};
+    if (!qol::game::extension_desc_button_slot(index, &site)) return result_error(kQolErrNotReady, kNotReady);
+    void* button = nullptr;
+    if (!qol::game::extension_desc_button_instance(index, &button)) {
+        return result_error(kQolErrNotReady, kNotReady);
+    }
+    const auto write_ptr = &qol::patch::ptr_slot_write_raw;
+    if (!write_ptr(site.slot_addr, replacement)) {
+        return result_error(kQolErrInternal, "ptr slot write rejected");
+    }
+    binding = {true, reinterpret_cast<void*>(site.slot_addr), site.expected_value,
+               replacement, button};
+    out_hook->handle = static_cast<uint64_t>(index + 1);
+    out_hook->original = site.expected_value;
+    return contracts::ok();
+}
+
+DynamicDescBinding* dynamic_desc_binding(const contracts::QolDynamicDescHook* hook) {
+    if (hook == nullptr || hook->handle == 0 || hook->handle > g_dynamic_desc_bindings.size()) {
+        return nullptr;
+    }
+    auto& binding = g_dynamic_desc_bindings[hook->handle - 1];
+    if (!binding.active || binding.original != hook->original) return nullptr;
+    return &binding;
+}
+
+QolResult sdk_hooks_desc_unbind(contracts::QolDynamicDescHook* hook) {
+    if (hook == nullptr) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    std::lock_guard<std::mutex> lock(g_dynamic_desc_mtx);
+    DynamicDescBinding* binding = dynamic_desc_binding(hook);
+    if (binding == nullptr) return result_error(kQolErrNotFound, kNotFound);
+    if (*reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(binding->slot)) != binding->replacement) {
+        return result_error(kQolErrConflict, "ptr slot value mismatch");
+    }
+    const auto restore_ptr = &qol::patch::ptr_slot_restore_raw;
+    if (!restore_ptr(reinterpret_cast<uintptr_t>(binding->slot), binding->original)) {
+        return result_error(kQolErrInternal, "ptr slot restore rejected");
+    }
+    *binding = {};
+    *hook = {};
+    return contracts::ok();
+}
+
+QolResult sdk_hooks_desc_matches_button(const contracts::QolDynamicDescHook* hook,
+                                        void* button, int32_t* out_matches) {
+    if (out_matches == nullptr || button == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    std::lock_guard<std::mutex> lock(g_dynamic_desc_mtx);
+    DynamicDescBinding* binding = dynamic_desc_binding(hook);
+    if (binding == nullptr) return result_error(kQolErrNotFound, kNotFound);
+    *out_matches = binding->button == button ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult sdk_hooks_desc_original_matches(const contracts::QolDynamicDescHook* hook,
+                                          const char* symbol, int32_t* out_matches) {
+    if (symbol == nullptr || out_matches == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    std::lock_guard<std::mutex> lock(g_dynamic_desc_mtx);
+    DynamicDescBinding* binding = dynamic_desc_binding(hook);
+    if (binding == nullptr) return result_error(kQolErrNotFound, kNotFound);
+    *out_matches = qol::game::extension_desc_button_original_matches(binding->original, symbol) ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult sdk_hooks_desc_call_original(const contracts::QolDynamicDescHook* hook, void* button) {
+    if (button == nullptr) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    void* original = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_dynamic_desc_mtx);
+        DynamicDescBinding* binding = dynamic_desc_binding(hook);
+        if (binding == nullptr) return result_error(kQolErrNotFound, kNotFound);
+        original = binding->original;
+    }
+    if (original == nullptr) return result_error(kQolErrNotReady, kNotReady);
+    using DescProc = void (*)(void*);
+    reinterpret_cast<DescProc>(original)(button);
+    return contracts::ok();
+}
+
 thread_local std::array<infra::TextScope, 16> t_scope_stack{};
 thread_local uint32_t t_scope_depth = 0;
 
@@ -606,7 +710,9 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.result = {&sdk_result_write_ok, &sdk_result_write_error};
     sdk.hooks = {&sdk_hooks_text_subscribe, &sdk_hooks_text_unsubscribe, &sdk_hooks_run_text,
                  &sdk_hooks_set_intercept, &sdk_hooks_clear_intercept, &sdk_hooks_intercept_blocks,
-                 &sdk_hooks_popup_resolve, &sdk_hooks_popup_acquire, &sdk_hooks_popup_restore};
+                 &sdk_hooks_popup_resolve, &sdk_hooks_popup_acquire, &sdk_hooks_popup_restore,
+                 &sdk_hooks_desc_bind, &sdk_hooks_desc_unbind, &sdk_hooks_desc_matches_button,
+                 &sdk_hooks_desc_original_matches, &sdk_hooks_desc_call_original};
     sdk.text_scope = {&sdk_text_scope_push, &sdk_text_scope_pop};
     sdk.ui = nullptr;
     return sdk;

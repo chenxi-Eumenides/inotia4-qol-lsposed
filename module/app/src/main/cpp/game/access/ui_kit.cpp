@@ -112,3 +112,57 @@ void ui_clear_control_proc(void* ctrl) {
     }
     set_control_proc(ctrl, 0);
 }
+
+bool ui_delete_control(void* ctrl) {
+    if (ctrl == nullptr || fn_touch_handle_delete_control == nullptr) return false;
+    fn_touch_handle_delete_control(ctrl);
+    return true;
+}
+
+bool ui_set_control_item(void* ctrl, void* item) {
+    if (ctrl == nullptr || fn_control_item_set_item == nullptr) return false;
+    fn_control_item_set_item(ctrl, item);
+    return true;
+}
+
+bool ui_set_control_proc(void* ctrl, UiControlProc proc) {
+    if (ctrl == nullptr || proc == nullptr || fn_control_object_set_control_proc == nullptr) {
+        return false;
+    }
+    fn_control_object_set_control_proc(ctrl, reinterpret_cast<void*>(proc));
+    return true;
+}
+
+bool ui_set_control_user_type(void* ctrl, int32_t type) {
+    if (ctrl == nullptr || fn_control_object_set_user_type == nullptr) return false;
+    fn_control_object_set_user_type(ctrl, static_cast<uint32_t>(type));
+    return true;
+}
+
+bool ui_set_control_data(void* ctrl, void* data) {
+    if (ctrl == nullptr || fn_ctrl_set_data == nullptr) return false;
+    fn_ctrl_set_data(ctrl, data);
+    return true;
+}
+
+void* ui_allocate_control_data(size_t size) {
+    return fn_mem_malloc == nullptr ? nullptr : fn_mem_malloc(size);
+}
+
+bool ui_set_touch_cursor(void* control, void* cursor) {
+    if (control == nullptr || fn_touch_handle_set_cursor == nullptr) return false;
+    fn_touch_handle_set_cursor(control, cursor);
+    return true;
+}
+
+bool ui_reset_touch_moving() {
+    if (fn_touch_handle_reset_moving_control == nullptr) return false;
+    fn_touch_handle_reset_moving_control();
+    return true;
+}
+
+bool ui_reset_touch_selected() {
+    if (fn_touch_handle_reset_selected_control == nullptr) return false;
+    (void)fn_touch_handle_reset_selected_control();
+    return true;
+}

@@ -44,6 +44,7 @@ int char_party_index(const void* ch);
 
 // 主角/队友判定：CHAR_GetPartyIndex(ch) != -1。
 bool char_is_party_member(void* ch);
+void* char_party_member(int32_t role);
 // 当前主控或主控召唤物判定：CHAR_IsActivePlayerGroup(ch) != 0。
 bool char_is_active_player_group(void* ch);
 // 召唤者反查；无召唤者或依赖缺失返回 nullptr。

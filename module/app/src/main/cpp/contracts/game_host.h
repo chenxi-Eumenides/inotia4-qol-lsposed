@@ -231,6 +231,8 @@ struct QolCharacterReadOnlyApi {
     QolResult (*find_equip_slot)(const void* character, const void* item, int32_t* out_slot);
     QolResult (*equipped_item)(const void* character, int32_t slot, void** out_item);
     QolResult (*has_empty_mercenary_slot)(int32_t* out_available);
+    QolResult (*can_apply_stuff)(const void* target, const void* material, int32_t* out_allowed);
+    QolResult (*party_member)(int32_t role, void** out_character);
 };
 
 struct QolItemReadOnlyApi {
@@ -257,6 +259,7 @@ struct QolItemReadOnlyApi {
     QolResult (*is_enchant_scroll)(int32_t category, int32_t* out_value);
     QolResult (*is_mercenary_seal)(int32_t category, int32_t* out_value);
     QolResult (*is_usable)(int32_t category, int32_t* out_value);
+    QolResult (*count_encoding)(int32_t category, QolItemCountEncoding* out_encoding);
 };
 
 struct QolWorldReadOnlyApi {
@@ -315,6 +318,7 @@ struct QolExtensionBagInventoryWriteApi {
     QolResult (*remove_item_direct)(int32_t bag, int32_t slot, int32_t* out_result);
     QolResult (*move_item)(void* item, int32_t count, int32_t bag, int32_t slot,
                            int32_t* out_result);
+    QolResult (*set_physical_item)(int32_t bag, int32_t slot, void* item);
 };
 
 struct QolExtensionBagEquipmentWriteApi {
@@ -335,6 +339,16 @@ struct QolExtensionBagUiWriteApi {
     QolResult (*refresh_mix_item)();
     QolResult (*update_character_equip)();
     QolResult (*description_set_off)();
+    QolResult (*play_switch_sound)();
+    QolResult (*make_item_description)(void* control);
+    QolResult (*current_bag)(int32_t* out_bag);
+    QolResult (*set_current_bag)(int32_t bag);
+    QolResult (*desc_type)(int32_t* out_type);
+    QolResult (*set_desc_type)(int32_t type);
+    QolResult (*bag_capacity_word)(int32_t bag, uint32_t* out_word);
+    QolResult (*set_bag_capacity_word)(int32_t bag, uint32_t word);
+    QolResult (*draw_original_bag)();
+    QolResult (*draw_original_items)();
 };
 
 struct QolExtensionBagWriteApi {

@@ -98,6 +98,7 @@ struct QolUiComponents {
 };
 
 using QolUiDrawFn = void (*)(void* control);
+using QolUiControlProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 struct QolUiItemIcon {
     int32_t image_unit;
     int32_t image_loc;
@@ -196,6 +197,22 @@ struct QolUiAdapter {
     QolResult (*control_parent)(QolUiHandle, QolUiHandle*);
     QolResult (*find_root)(QolUiRootKind, QolUiHandle*);
     QolResult (*insert_inline_color)(void* builder, uint32_t max_text_bytes, uint8_t color_code);
+
+    // 扩展背包运行时控件操作；宿主负责定位游戏控件函数和游戏内存分配器。
+    QolResult (*delete_control)(QolUiHandle);
+    QolResult (*set_control_item)(QolUiHandle, QolUiHandle);
+    QolResult (*set_control_proc)(QolUiHandle, QolUiControlProcFn);
+    QolResult (*set_control_user_type)(QolUiHandle, int32_t);
+    QolResult (*set_control_data)(QolUiHandle, QolUiHandle);
+    QolResult (*allocate_control_data)(uint32_t, QolUiHandle*);
+    QolResult (*set_touch_cursor)(QolUiHandle, QolUiHandle);
+    QolResult (*reset_touch_moving)();
+    QolResult (*reset_touch_selected)();
+    QolResult (*control_is_moving)(QolUiHandle, int32_t*);
+    QolResult (*clear_control_drag_flags)(QolUiHandle);
+    QolResult (*clear_touch_state)();
+    QolResult (*set_touch_release_input)(int64_t, int64_t, uint64_t);
+    QolResult (*clear_touch_drop_event)();
 };
 
 }  // namespace qol::contracts

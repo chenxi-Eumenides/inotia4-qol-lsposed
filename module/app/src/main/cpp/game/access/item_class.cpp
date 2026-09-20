@@ -87,6 +87,18 @@ bool item_is_backpack_category(int category) {
     return record != nullptr && record[2] == 0x1F;
 }
 
+contracts::QolItemCountEncoding item_count_encoding_for_category(int category) {
+    if (category < 0 || category > 0x3FF) {
+        return contracts::QolItemCountEncoding::kUnknown;
+    }
+    const auto* record = static_cast<const uint8_t*>(item_class_record(
+        static_cast<uint16_t>(category)));
+    if (record == nullptr) return contracts::QolItemCountEncoding::kUnknown;
+    return (record[6] & 1) != 0
+        ? contracts::QolItemCountEncoding::kEncoded
+        : contracts::QolItemCountEncoding::kNotEncoded;
+}
+
 int equip_desc_role_type() {
     if (g_base == 0) return -1;
     return *reinterpret_cast<const uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);

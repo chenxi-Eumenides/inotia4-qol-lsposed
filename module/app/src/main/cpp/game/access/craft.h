@@ -108,4 +108,8 @@ int craft_category_held_count(uint16_t category);
 // MATH_GetRandom(min,max) 闭区间随机；未解析返回 lo。
 int craft_math_get_random(int lo, int hi);
 
+// UIEquip_IsApplyStuff(target, material)：目标物能否套用材料。未解析返回 -1（未就绪），否则 0/1。
+// 宿主侧只经本访问器使用该游戏函数，不直接引用 legacy 全局函数指针。
+int32_t craft_is_apply_stuff(void* target, void* material);
+
 }  // namespace qol::game

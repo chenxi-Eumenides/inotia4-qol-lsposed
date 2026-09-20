@@ -70,7 +70,7 @@
 **基线未覆盖、但审阅已核验成立的债务与目标设计问题**（P0 新登记，详表见 `layers.md` §五）：
 
 1. **插件 legacy 私有 include 19 文件**（`core/native/**`、`data/native/**`、根部裸名头）——因过渡规则被 `allows()` 放行，**当前不在任何违规计数内**（P3 清除）。
-2. **`arch_common.py` 过渡规则**：`BASE_LAYERS` 含 `domains`；`allows()` 放行 `plugins→game/infra/hooks/patch/domains`；`_ROOT_OVERRIDES`/`_CORE_OVERRIDES`/`_TARGET_PREFIXES` 三张映射（P3 删除并硬失败）。
+2. **`arch_common.py` 过渡规则**：目标层仅保留七个目录；插件只允许依赖 `contracts/` 与自身目录；`_ROOT_OVERRIDES`、`_CORE_OVERRIDES`、`_TARGET_PREFIXES` 仍为 legacy `core/`、`api/`、`data/` 的迁移映射。映射清除条件：对应 legacy 目录内文件全部吸收到七个目标目录，插件 include/link 校验与基线收缩完成后删除。
 3. **单一 `gamebridge` target**：无独立插件 target，无法证明插件可独立编译/不链接宿主私有符号（P3）。
 4. **`QolGameHostExtraApi` 过宽**（15 处 `extra.*` 注入）——目标设计问题（P4 拆分）。
 5. **`contracts` 全局业务函数**（`autosell.h:44-46`）仍绕过 capability；`stack_limit.h` 的两个全局函数已在 P1-B5c 删除。**`host/core_patches` 把 S2 与 hub 混在同 owner/reason**已在 P1 收口。
@@ -320,6 +320,16 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | 新增插件操作 | ✅ 已冻结 | 仅执行“建片段 → 修越界”两步；不再编辑根 CMakeLists 的插件源条目 |
 | 配置期语义 | ✅ 已登记 | 新增/删除片段依赖 CMake 重新配置；`CONFIGURE_DEPENDS` 负责触发重新配置，非运行期动态发现 |
 | 行为验收 | NOT_ACCEPTED | 本任务不安装真机；构建与 host/静态检查只能证明编译归属，不能替代受影响 VM-P4-01 的真机日志 |
+
+### 第 3 阶段：插件跨层校验硬失败
+
+| 项 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| 目标层 | ✅ 已收紧 | `BASE_LAYERS` 仅含 `contracts/game/infra/hooks/patch/plugins/host`；不存在的目标层不再进入统计 |
+| 插件边界 | ✅ 已收紧 | `plugin_boundary` 单独统计并纳入基线棘轮；插件只允许 include `contracts/` 与自身目录 |
+| 未知层 | ✅ 已收紧 | 七个目标目录内无法归类为 `unknown_layer` 硬失败；legacy 未映射路径保留警告口径 |
+| 过渡映射 | ⚠️ 保留 | legacy `core/`、`api/`、`data/` 吸收完成、通过 include/link 校验且基线收缩后删除 |
+| 反例证据 | ⬜ 待完成 | `game/access/char.h` 与另一插件头的临时 include 必须分别使 `check_arch.py` 以 `plugin_boundary` 非零退出 |
 
 ### P2-ABI-1：autosell 按需只读面增补
 

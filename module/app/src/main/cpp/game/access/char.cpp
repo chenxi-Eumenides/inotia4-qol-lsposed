@@ -79,6 +79,10 @@ bool char_is_party_member(void* ch) {
     return fn_char_get_party_index != nullptr && fn_char_get_party_index(ch) != -1;
 }
 
+void* char_party_member(int32_t role) {
+    return fn_get_member != nullptr && role >= 0 && role < 3 ? fn_get_member(role) : nullptr;
+}
+
 bool char_is_active_player_group(void* ch) {
     return fn_char_is_active_player_group != nullptr && fn_char_is_active_player_group(ch) != 0;
 }

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "contracts/game_host.h"
+
 // 游戏层：ITEMCLASS/ITEMDATABASE 记录访问与装备判定链物品侧原语（ARCHITECTURE.md §5）。
 // GOT/VMA 与游戏函数指针只在本层出现；features 经语义函数读取，不接触 game_symbols.h。
 //
@@ -36,6 +38,7 @@ int item_sell_price(const void* item);
 // ITEMCLASSBASE 记录 +2 == 0x1f 的背包类别判定；表未就绪返回 false。
 bool item_class_table_ready();
 bool item_is_backpack_category(int category);
+contracts::QolItemCountEncoding item_count_encoding_for_category(int category);
 
 // 装备详情菜单角色类型（UIEquip desc_type）；未就绪 → -1。
 int equip_desc_role_type();

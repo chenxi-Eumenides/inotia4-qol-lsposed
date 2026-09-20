@@ -313,6 +313,10 @@ constexpr uintptr_t G_UIEQUIP_CUR_BAG_GOT_VMA = 0x2f5000 + 0x6d8; // ptr to UIEq
 constexpr uintptr_t G_UIEQUIP_DESC_TYPE_VMA = G_UIEQUIP_PANEL_VMA + 0x63;
 constexpr uintptr_t G_UIEQUIP_PANEL_CTRL_VMA = G_UIEQUIP_PANEL_VMA + 0x8;
 constexpr uintptr_t G_UIEQUIP_PANEL_BAG_CONTAINER_VMA = G_UIEQUIP_PANEL_VMA + 0x50; // 面板 +0x50 = 袋容器控件指针
+constexpr size_t UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[] = {
+    0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
+    0x98, 0xa0, 0xa8, 0xb0, 0xb8,
+};
 constexpr size_t BAG_OBJECT_CAPACITY = 0x10; // 袋对象 +0x10 容量位域（bit0..24）
 
 // ---- UIStore 商店面板（P7 store host）----

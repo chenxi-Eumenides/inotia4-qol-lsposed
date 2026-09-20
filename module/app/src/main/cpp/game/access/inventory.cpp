@@ -92,6 +92,21 @@ QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
     return *out_item == nullptr ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
 }
 
+QolResult set_physical_item(int32_t bag, int32_t slot, void* item) {
+    if (bag < 0 || bag >= 6 || slot < 0 || slot >= 16) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (g_inven == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    auto* slot_address = reinterpret_cast<void**>(
+        reinterpret_cast<uint8_t*>(g_inven) + static_cast<size_t>(bag) * 0x80 +
+        static_cast<size_t>(slot) * sizeof(void*));
+    if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'w')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *slot_address = item;
+    return contracts::ok();
+}
+
 QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control) {
     if (out_desc_type == nullptr || out_bag == nullptr || out_control == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -152,6 +167,90 @@ QolResult find_save_slot(const void* item, int32_t* out_slot) {
         return error_result(kQolErrNotFound, kNotFound);
     }
     *out_slot = slot;
+    return contracts::ok();
+}
+
+QolResult current_bag(int32_t* out_bag) {
+    if (out_bag == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    int32_t desc = 0;
+    void* control = nullptr;
+    return detail_context(&desc, out_bag, &control);
+}
+
+QolResult set_current_bag(int32_t bag) {
+    if (bag < 0 || bag >= 7 || g_base == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    auto* direct = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+    auto** got = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
+    if (!game_memory_accessible(direct, sizeof(*direct), 'w')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *direct = static_cast<uint8_t>(bag);
+    if (got != nullptr && game_memory_accessible(got, sizeof(*got), 'r') && *got != nullptr &&
+        game_memory_accessible(*got, sizeof(**got), 'w')) {
+        **got = static_cast<uint8_t>(bag);
+    }
+    return contracts::ok();
+}
+
+QolResult desc_type(int32_t* out_type) {
+    if (out_type == nullptr || g_base == 0) {
+        return error_result(out_type == nullptr ? kQolErrInvalidArgument : kQolErrNotReady,
+                            out_type == nullptr ? kInvalidArgument : kNotReady);
+    }
+    auto* value = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);
+    if (!game_memory_accessible(value, sizeof(*value), 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *out_type = *value;
+    return contracts::ok();
+}
+
+QolResult set_desc_type(int32_t type) {
+    if (type < 0 || type > UINT8_MAX || g_base == 0) {
+        return error_result(type < 0 || type > UINT8_MAX ? kQolErrInvalidArgument : kQolErrNotReady,
+                            type < 0 || type > UINT8_MAX ? kInvalidArgument : kNotReady);
+    }
+    auto* value = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);
+    if (!game_memory_accessible(value, sizeof(*value), 'w')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *value = static_cast<uint8_t>(type);
+    return contracts::ok();
+}
+
+QolResult bag_capacity_word(int32_t bag, uint32_t* out_word) {
+    if (bag < 0 || bag >= 6 || out_word == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (g_base == 0) return error_result(kQolErrNotReady, kNotReady);
+    auto*** table_slot = reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
+    if (!game_memory_accessible(table_slot, sizeof(*table_slot), 'r') || *table_slot == nullptr) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    void* bag_object = (*table_slot)[bag];
+    if (bag_object == nullptr) return error_result(kQolErrNotFound, kNotFound);
+    auto* word = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) + BAG_OBJECT_CAPACITY);
+    if (!game_memory_accessible(word, sizeof(*word), 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *out_word = *word;
+    return contracts::ok();
+}
+
+QolResult set_bag_capacity_word(int32_t bag, uint32_t word) {
+    if (bag < 0 || bag >= 6) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    uint32_t ignored = 0;
+    const QolResult ready = bag_capacity_word(bag, &ignored);
+    if (!contracts::succeeded(ready)) return ready;
+    auto*** table_slot = reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
+    void* bag_object = (*table_slot)[bag];
+    auto* target = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) + BAG_OBJECT_CAPACITY);
+    if (!game_memory_accessible(target, sizeof(*target), 'w')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *target = word;
     return contracts::ok();
 }
 

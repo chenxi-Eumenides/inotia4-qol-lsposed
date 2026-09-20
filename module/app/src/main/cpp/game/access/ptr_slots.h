@@ -17,4 +17,10 @@ struct PtrSlotSite {
 // 按登记名解析指针槽站点；未登记 / 基址未就绪 / 符号未解析 / 槽不可读 → false。
 bool ptr_slot_site(const char* name, PtrSlotSite* out);
 
+// 动态装备详情按钮执行槽；索引对应 UIEquip 面板的 11 个描述按钮槽。
+// 槽地址和安装前函数入口只在宿主内部返回，插件通过 Host SDK 的类型化绑定面使用。
+bool extension_desc_button_slot(uint32_t index, PtrSlotSite* out);
+bool extension_desc_button_instance(uint32_t index, void** out_button);
+bool extension_desc_button_original_matches(void* original, const char* symbol);
+
 }  // namespace qol::game

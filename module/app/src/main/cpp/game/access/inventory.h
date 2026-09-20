@@ -27,5 +27,12 @@ QolResult cursor_index(const void* control, int32_t* out_slot);
 QolResult bag_size(int32_t bag, int32_t* out_size);
 QolResult is_empty_bag(int32_t bag, int32_t* out_empty);
 QolResult find_save_slot(const void* item, int32_t* out_slot);
+QolResult current_bag(int32_t* out_bag);
+QolResult set_current_bag(int32_t bag);
+QolResult desc_type(int32_t* out_type);
+QolResult set_desc_type(int32_t type);
+QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);
+QolResult set_bag_capacity_word(int32_t bag, uint32_t word);
+QolResult set_physical_item(int32_t bag, int32_t slot, void* item);
 
 }  // namespace qol::game

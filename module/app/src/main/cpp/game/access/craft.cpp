@@ -233,4 +233,9 @@ int craft_math_get_random(int lo, int hi) {
     return fn_math_get_random(lo, hi);
 }
 
+int32_t craft_is_apply_stuff(void* target, void* material) {
+    if (fn_ui_equip_is_apply_stuff == nullptr) return -1;
+    return fn_ui_equip_is_apply_stuff(target, material) != 0 ? 1 : 0;
+}
+
 }  // namespace qol::game

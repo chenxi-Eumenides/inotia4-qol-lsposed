@@ -200,10 +200,24 @@ struct QolPopupStateEntry {
     int32_t state_id;
 };
 
+// 动态 UI 描述按钮槽的类型化绑定句柄。槽地址、写入和还原均由宿主执行。
+struct QolDynamicDescHook {
+    uint64_t handle;
+    void* original;
+};
+
 using QolHooksPopupResolveFn = QolResult (*)(const char* symbol, QolPopupStateEntry* out_entry);
 using QolHooksPopupAcquireFn = QolResult (*)(QolPopupStateEntry* entry,
                                               const QolPopupStateHooks* hooks);
 using QolHooksPopupRestoreFn = QolResult (*)(QolPopupStateEntry* entry);
+using QolHooksDescBindFn = QolResult (*)(uint32_t index, void* replacement,
+                                         QolDynamicDescHook* out_hook);
+using QolHooksDescUnbindFn = QolResult (*)(QolDynamicDescHook* hook);
+using QolHooksDescMatchesButtonFn = QolResult (*)(const QolDynamicDescHook* hook,
+                                                  void* button, int32_t* out_matches);
+using QolHooksDescOriginalMatchesFn = QolResult (*)(const QolDynamicDescHook* hook,
+                                                    const char* symbol, int32_t* out_matches);
+using QolHooksDescCallOriginalFn = QolResult (*)(const QolDynamicDescHook* hook, void* button);
 struct QolHooksApi {
     QolHooksTextSubscribeFn text_subscribe;
     QolHooksTextUnsubscribeFn text_unsubscribe;
@@ -214,6 +228,11 @@ struct QolHooksApi {
     QolHooksPopupResolveFn popup_resolve;
     QolHooksPopupAcquireFn popup_acquire;
     QolHooksPopupRestoreFn popup_restore;
+    QolHooksDescBindFn desc_bind;
+    QolHooksDescUnbindFn desc_unbind;
+    QolHooksDescMatchesButtonFn desc_matches_button;
+    QolHooksDescOriginalMatchesFn desc_original_matches;
+    QolHooksDescCallOriginalFn desc_call_original;
 };
 
 using QolTextScopePushFn = QolResult (*)(int32_t scope);

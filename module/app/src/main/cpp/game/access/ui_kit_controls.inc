@@ -228,3 +228,49 @@ bool ui_touch_state(void** out_moving, void** out_drop_source, int64_t* out_x, i
     *out_y = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_Y);
     return true;
 }
+
+bool ui_control_is_moving(void* ctrl, int32_t* out_moving) {
+    if (ctrl == nullptr || out_moving == nullptr) return false;
+    void* data = ui_control_data(ctrl);
+    if (data == nullptr) return false;
+    *out_moving = *reinterpret_cast<const uint8_t*>(static_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) != 0 ? 1 : 0;
+    return true;
+}
+
+bool ui_clear_control_drag_flags(void* ctrl) {
+    if (ctrl == nullptr) return false;
+    void* data = ui_control_data(ctrl);
+    if (data == nullptr) return false;
+    auto* bytes = static_cast<uint8_t*>(data);
+    bytes[ITEM_CTRL_MOVING_FLAG] = 0;
+    bytes[ITEM_CTRL_ON_FLAG] = 0;
+    return true;
+}
+
+bool ui_clear_touch_state() {
+    if (g_base == 0) return false;
+    auto* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+    std::memset(state, 0, TOUCH_STATE_PREFIX_SIZE);
+    *reinterpret_cast<void**>(state + TOUCH_STATE_ACTIVE_CTRL) = nullptr;
+    *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL) = nullptr;
+    *reinterpret_cast<void**>(state + TOUCH_STATE_MOVE_ON_CTRL) = nullptr;
+    *reinterpret_cast<void**>(state + TOUCH_STATE_RELEASE_CTRL) = nullptr;
+    *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_SRC_CTRL) = nullptr;
+    return true;
+}
+
+bool ui_set_touch_release_input(int64_t x, int64_t y, uint64_t param) {
+    if (g_base == 0) return false;
+    auto* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+    *reinterpret_cast<int64_t*>(state + TOUCH_STATE_RELEASE_INPUT_X) = x;
+    *reinterpret_cast<int64_t*>(state + TOUCH_STATE_RELEASE_INPUT_Y) = y;
+    *reinterpret_cast<uint64_t*>(state + TOUCH_STATE_RELEASE_INPUT_PARAM) = param;
+    return true;
+}
+
+bool ui_clear_touch_drop_event() {
+    if (g_base == 0) return false;
+    auto* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+    *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_EVENT) = nullptr;
+    return true;
+}

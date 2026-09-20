@@ -206,6 +206,17 @@ QolResult read_item_usable(int32_t category, int32_t* out) {
     return read_item_category_predicate(category, out, qol::game::item_is_usable(category));
 }
 
+QolResult read_item_count_encoding(int32_t category,
+                                   contracts::QolItemCountEncoding* out) {
+    if (category < 0 || category > 0x3FF || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const auto encoding = qol::game::item_count_encoding_for_category(category);
+    if (encoding == contracts::QolItemCountEncoding::kUnknown) return not_ready();
+    *out = encoding;
+    return contracts::ok();
+}
+
 QolResult read_world_position(const void*, int32_t*, int32_t*) { return unsupported(); }
 
 QolResult read_world_state(int32_t* out) {
@@ -381,6 +392,25 @@ QolResult read_char_can_equip(const void* character, const void* item, int32_t* 
     if (!qol::game::char_can_equip_resolved()) return not_ready();
     *out = qol::game::char_can_equip(character, item) ? 1 : 0;
     return contracts::ok();
+}
+
+QolResult read_char_can_apply_stuff(const void* target, const void* material, int32_t* out) {
+    if (target == nullptr || material == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const int32_t allowed =
+        qol::game::craft_is_apply_stuff(const_cast<void*>(target), const_cast<void*>(material));
+    if (allowed < 0) return not_ready();
+    *out = allowed;
+    return contracts::ok();
+}
+
+QolResult read_char_party_member(int32_t role, void** out) {
+    if (out == nullptr || role < 0 || role >= 3) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out = qol::game::char_party_member(role);
+    return *out == nullptr ? not_ready() : contracts::ok();
 }
 
 QolResult read_char_find_equip_slot(const void* character, const void* item, int32_t* out) {
@@ -1113,6 +1143,10 @@ QolResult write_extension_move_item(void* item, int32_t count, int32_t bag, int3
     return contracts::ok();
 }
 
+QolResult write_extension_set_physical_item(int32_t bag, int32_t slot, void* item) {
+    return qol::game::set_physical_item(bag, slot, item);
+}
+
 QolResult write_extension_equip_from_inventory(void* character, int32_t bag, int32_t slot,
                                                int32_t equip_slot, int32_t* out_result) {
     if (character == nullptr || bag < 0 || slot < 0 || equip_slot < 0 || out_result == nullptr) {
@@ -1197,6 +1231,52 @@ QolResult write_extension_update_character_equip() {
 QolResult write_extension_description_set_off() {
     return write_extension_void_call(fn_ui_desc_set_off);
 }
+QolResult write_extension_play_switch_sound() {
+    if (fn_sound_system_play == nullptr || g_snd_fx == nullptr) return not_ready();
+    fn_sound_system_play(0x11);
+    return contracts::ok();
+}
+QolResult write_extension_make_item_description(void* control) {
+    if (control == nullptr || fn_ui_equip_make_desc == nullptr) return not_ready();
+    fn_ui_equip_make_desc(control, nullptr);
+    return contracts::ok();
+}
+QolResult write_extension_current_bag(int32_t* out_bag) {
+    return qol::game::current_bag(out_bag);
+}
+QolResult write_extension_set_current_bag(int32_t bag) {
+    return qol::game::set_current_bag(bag);
+}
+QolResult write_extension_desc_type(int32_t* out_type) {
+    return qol::game::desc_type(out_type);
+}
+QolResult write_extension_set_desc_type(int32_t type) {
+    return qol::game::set_desc_type(type);
+}
+QolResult write_extension_bag_capacity_word(int32_t bag, uint32_t* out_word) {
+    return qol::game::bag_capacity_word(bag, out_word);
+}
+QolResult write_extension_set_bag_capacity_word(int32_t bag, uint32_t word) {
+    return qol::game::set_bag_capacity_word(bag, word);
+}
+QolResult write_extension_draw_original_bag() {
+    if (g_base == 0) return not_ready();
+    const uintptr_t offset = fn_resolve("F_UIEQUIP_DRAW_INVEN_BAG_VMA",
+                                        F_UIEQUIP_DRAW_INVEN_BAG_VMA);
+    if (offset == 0) return not_ready();
+    using DrawFn = void (*)();
+    reinterpret_cast<DrawFn>(g_base + offset)();
+    return contracts::ok();
+}
+QolResult write_extension_draw_original_items() {
+    if (g_base == 0) return not_ready();
+    const uintptr_t offset = fn_resolve("F_UIEQUIP_DRAW_INVEN_ITEM_VMA",
+                                        F_UIEQUIP_DRAW_INVEN_ITEM_VMA);
+    if (offset == 0) return not_ready();
+    using DrawFn = void (*)();
+    reinterpret_cast<DrawFn>(g_base + offset)();
+    return contracts::ok();
+}
 
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
@@ -1224,7 +1304,8 @@ contracts::QolGameHost make_game_host() {
         &read_char_summoner, &read_char_level, &read_char_merc_slot,
         &read_char_can_change_equip, &read_char_menu_character, &read_char_pool_slot,
         &read_char_max_hp, &read_char_hp, &read_char_can_equip, &read_char_find_equip_slot,
-        &read_char_equipped_item, &read_char_has_empty_mercenary_slot};
+        &read_char_equipped_item, &read_char_has_empty_mercenary_slot,
+        &read_char_can_apply_stuff, &read_char_party_member};
     host.read_only.item = {
         &read_item_category, &read_item_jewel, &read_item_ability, &read_item_rarity,
         &read_item_real_equip, &read_item_equip_level, &read_item_no_sell, &read_item_dice,
@@ -1232,7 +1313,8 @@ contracts::QolGameHost make_game_host() {
         &read_item_equip_desc_role_type, &read_item_enchant_remaining,
         &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category,
         &read_item_jewel_value, &read_item_jewel_attribute_type, &read_item_sell_price,
-        &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable};
+        &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable,
+        &read_item_count_encoding};
     host.read_only.world = {&read_world_position, &read_world_state,
                             &read_world_map_record_count, &read_world_current_map_id,
                             &read_world_map_name, &read_world_direction, &read_world_money,
@@ -1270,6 +1352,7 @@ contracts::QolGameHost make_game_host() {
         &write_extension_free_item,
         &write_extension_remove_item_direct,
         &write_extension_move_item,
+        &write_extension_set_physical_item,
     };
     host.extension_bag_write.equipment = {
         &write_extension_equip_from_inventory,
@@ -1288,6 +1371,16 @@ contracts::QolGameHost make_game_host() {
         &write_extension_update_character_equip,
         &write_extension_description_set_off,
     };
+    host.extension_bag_write.ui.play_switch_sound = &write_extension_play_switch_sound;
+    host.extension_bag_write.ui.make_item_description = &write_extension_make_item_description;
+    host.extension_bag_write.ui.current_bag = &write_extension_current_bag;
+    host.extension_bag_write.ui.set_current_bag = &write_extension_set_current_bag;
+    host.extension_bag_write.ui.desc_type = &write_extension_desc_type;
+    host.extension_bag_write.ui.set_desc_type = &write_extension_set_desc_type;
+    host.extension_bag_write.ui.bag_capacity_word = &write_extension_bag_capacity_word;
+    host.extension_bag_write.ui.set_bag_capacity_word = &write_extension_set_bag_capacity_word;
+    host.extension_bag_write.ui.draw_original_bag = &write_extension_draw_original_bag;
+    host.extension_bag_write.ui.draw_original_items = &write_extension_draw_original_items;
     host.character_write = {&write_char_max_hp, &write_char_hp};
     host.inventory_write = {&write_inventory_remove_item_data,
                             &write_inventory_remove_item,

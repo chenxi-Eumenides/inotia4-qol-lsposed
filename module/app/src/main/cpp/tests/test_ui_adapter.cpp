@@ -70,9 +70,26 @@ bool ui_bind_main_menu_more_games(UiClickProc, uint64_t*) { return false; }
 bool ui_unbind_main_menu_more_games(uint64_t) { return false; }
 bool ui_popup_stack_top_matches(void (*)()) { return false; }
 void ui_clear_control_proc(void*) {}
+bool ui_delete_control(void*) { return false; }
+bool ui_set_control_item(void*, void*) { return false; }
+bool ui_set_control_proc(void*, UiControlProc) { return false; }
+bool ui_set_control_user_type(void*, int32_t) { return false; }
+bool ui_set_control_data(void*, void*) { return false; }
+void* ui_allocate_control_data(size_t) { return nullptr; }
+bool ui_set_touch_cursor(void*, void*) { return false; }
+bool ui_reset_touch_moving() { return false; }
+bool ui_reset_touch_selected() { return false; }
 const char* data_ui_screen() { return "test"; }
 bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
 void ui_show_text_popup(int32_t) {}
+bool ui_control_is_moving(void*, int32_t* out_moving) {
+    if (out_moving != nullptr) *out_moving = 0;
+    return true;
+}
+bool ui_clear_control_drag_flags(void*) { return true; }
+bool ui_clear_touch_state() { return true; }
+bool ui_set_touch_release_input(int64_t, int64_t, uint64_t) { return true; }
+bool ui_clear_touch_drop_event() { return true; }
 
 namespace qol::game {
 bool g_attr_insert_value_color_ok = true;

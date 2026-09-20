@@ -521,6 +521,73 @@ QolResult touch_coordinates(uint64_t param, int64_t* out_x, int64_t* out_y) {
     return contracts::ok();
 }
 
+QolResult delete_control(QolUiHandle control) {
+    if (control == nullptr || !ui_delete_control(control)) return not_ready();
+    return contracts::ok();
+}
+
+QolResult set_control_item(QolUiHandle control, QolUiHandle item) {
+    if (control == nullptr || !ui_set_control_item(control, item)) return not_ready();
+    return contracts::ok();
+}
+
+QolResult set_control_proc(QolUiHandle control, contracts::QolUiControlProcFn proc) {
+    if (control == nullptr || proc == nullptr ||
+        !ui_set_control_proc(control, reinterpret_cast<UiControlProc>(proc))) {
+        return not_ready();
+    }
+    return contracts::ok();
+}
+
+QolResult set_control_user_type(QolUiHandle control, int32_t type) {
+    if (control == nullptr || !ui_set_control_user_type(control, type)) return not_ready();
+    return contracts::ok();
+}
+
+QolResult set_control_data(QolUiHandle control, QolUiHandle data) {
+    if (control == nullptr || !ui_set_control_data(control, data)) return not_ready();
+    return contracts::ok();
+}
+
+QolResult allocate_control_data(uint32_t size, QolUiHandle* out) {
+    if (out == nullptr || size == 0) return invalid_argument();
+    *out = ui_allocate_control_data(size);
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult set_touch_cursor(QolUiHandle control, QolUiHandle cursor) {
+    if (control == nullptr || !ui_set_touch_cursor(control, cursor)) return not_ready();
+    return contracts::ok();
+}
+
+QolResult reset_touch_moving() {
+    return ui_reset_touch_moving() ? contracts::ok() : not_ready();
+}
+
+QolResult reset_touch_selected() {
+    return ui_reset_touch_selected() ? contracts::ok() : not_ready();
+}
+
+QolResult control_is_moving(QolUiHandle control, int32_t* out_moving) {
+    if (control == nullptr || out_moving == nullptr) return invalid_argument();
+    return ui_control_is_moving(control, out_moving) ? contracts::ok() : not_ready();
+}
+
+QolResult clear_control_drag_flags(QolUiHandle control) {
+    if (control == nullptr || !ui_clear_control_drag_flags(control)) return not_ready();
+    return contracts::ok();
+}
+
+QolResult clear_touch_state() { return ui_clear_touch_state() ? contracts::ok() : not_ready(); }
+
+QolResult set_touch_release_input(int64_t x, int64_t y, uint64_t param) {
+    return ui_set_touch_release_input(x, y, param) ? contracts::ok() : not_ready();
+}
+
+QolResult clear_touch_drop_event() {
+    return ui_clear_touch_drop_event() ? contracts::ok() : not_ready();
+}
+
 QolResult find_main_menu_more_games(QolUiHandle* out) {
     if (out == nullptr) return invalid_argument();
     *out = ui_main_menu_more_games_button();
@@ -629,6 +696,20 @@ const QolUiAdapter g_ui_adapter{
      &control_parent,
      &find_root,
      &insert_inline_color,
+     &delete_control,
+     &set_control_item,
+     &set_control_proc,
+     &set_control_user_type,
+     &set_control_data,
+     &allocate_control_data,
+     &set_touch_cursor,
+     &reset_touch_moving,
+     &reset_touch_selected,
+     &control_is_moving,
+     &clear_control_drag_flags,
+     &clear_touch_state,
+     &set_touch_release_input,
+     &clear_touch_drop_event,
 };
 
 }  // namespace

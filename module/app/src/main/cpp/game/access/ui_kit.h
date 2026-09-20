@@ -12,6 +12,7 @@ struct UiRect {
 
 using UiClickProc = void (*)(void* ctrl);
 using UiDrawProc = void (*)(void* ctrl);
+using UiControlProc = uint64_t (*)(void*, uint64_t, void*, void*);
 
 void* ui_create_root(UiRect rect);
 void* ui_create_button(void* parent, UiRect rect, const char* text,
@@ -34,6 +35,20 @@ void* ui_control_parent(void* ctrl);
 bool ui_execute_proc_matches(void* ctrl, UiClickProc expected);
 bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y);
 bool ui_touch_state(void** out_moving, void** out_drop_source, int64_t* out_x, int64_t* out_y);
+bool ui_delete_control(void* ctrl);
+bool ui_set_control_item(void* ctrl, void* item);
+bool ui_set_control_proc(void* ctrl, UiControlProc proc);
+bool ui_set_control_user_type(void* ctrl, int32_t type);
+bool ui_set_control_data(void* ctrl, void* data);
+void* ui_allocate_control_data(size_t size);
+bool ui_set_touch_cursor(void* control, void* cursor);
+bool ui_reset_touch_moving();
+bool ui_reset_touch_selected();
+bool ui_control_is_moving(void* ctrl, int32_t* out_moving);
+bool ui_clear_control_drag_flags(void* ctrl);
+bool ui_clear_touch_state();
+bool ui_set_touch_release_input(int64_t x, int64_t y, uint64_t param);
+bool ui_clear_touch_drop_event();
 void* ui_main_menu_more_games_button();
 bool ui_bind_main_menu_more_games(UiClickProc replacement, uint64_t* out_token);
 bool ui_unbind_main_menu_more_games(uint64_t token);

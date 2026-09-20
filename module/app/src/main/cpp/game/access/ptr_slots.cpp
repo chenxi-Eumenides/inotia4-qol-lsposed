@@ -5,6 +5,7 @@
 #include "game/access/save.h"
 #include "game/access/ui_choice.h"
 #include "game/access/ui_equip.h"
+#include "data/native/game_symbols.h"
 #include "game_access.h"
 
 namespace qol::game {
@@ -58,6 +59,54 @@ bool ptr_slot_site(const char* name, PtrSlotSite* out) {
         return true;
     }
     return false;
+}
+
+bool extension_desc_button_slot(uint32_t index, PtrSlotSite* out) {
+    if (out == nullptr || index >= sizeof(UIEQUIP_DESC_BUTTON_SLOT_OFFSETS) /
+                               sizeof(UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[0]) ||
+        g_base == 0) return false;
+    auto* slot = reinterpret_cast<void**>(
+        g_base + G_UIEQUIP_PANEL_VMA + UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[index]);
+    if (!game_memory_accessible(slot, sizeof(void*), 'r') || *slot == nullptr) return false;
+    out->slot_addr = reinterpret_cast<uintptr_t>(slot);
+    out->expected_value = *slot;
+    return true;
+}
+
+bool extension_desc_button_instance(uint32_t index, void** out_button) {
+    if (out_button == nullptr || index >= sizeof(UIEQUIP_DESC_BUTTON_SLOT_OFFSETS) /
+                                      sizeof(UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[0]) ||
+        g_base == 0) {
+        return false;
+    }
+    auto* button = reinterpret_cast<void**>(
+        g_base + G_UIEQUIP_PANEL_VMA + UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[index]);
+    if (!game_memory_accessible(button, sizeof(void*), 'r')) return false;
+    *out_button = *button;
+    return *out_button != nullptr;
+}
+
+bool extension_desc_button_original_matches(void* original, const char* symbol) {
+    if (original == nullptr || symbol == nullptr || g_base == 0) return false;
+    uintptr_t vma = 0;
+    if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_USE_EXE_VMA;
+    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA;
+    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_DESTROY_EXE_VMA;
+    } else if (std::strcmp(symbol, "F_UISTORE_BUTTON_SELL_EXE_VMA") == 0) {
+        vma = F_UISTORE_BUTTON_SELL_EXE_VMA;
+    } else if (std::strcmp(symbol, "F_UIEQUIP_OK_DESTROY_ITEM_VMA") == 0) {
+        vma = F_UIEQUIP_OK_DESTROY_ITEM_VMA;
+    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_EQUIP_EXE_VMA;
+    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA;
+    } else {
+        return false;
+    }
+    return original == reinterpret_cast<void*>(g_base + fn_resolve(symbol, vma));
 }
 
 }  // namespace qol::game
