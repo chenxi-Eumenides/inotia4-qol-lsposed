@@ -270,6 +270,9 @@ void mix_restore_module_view_locked() {
 }
 
 void mix_enter_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.mix"});
     if (mix_original_enter != nullptr) mix_original_enter();
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
@@ -280,6 +283,9 @@ void mix_enter_wrapper() {
 }
 
 void mix_f3_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.mix"});
     MixSceneNoArgFn original = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -325,6 +331,9 @@ void mix_draw_tab_buttons_locked() {
 }
 
 void mix_draw_end_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_MIX_DRAW_END"});
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (mix_frame_active) {
@@ -373,6 +382,9 @@ void mix_teardown_locked() {
 // virtual_bag_draw_original_bag_wrapper 同法）。扩展页签高亮由 draw_end 的
 // mix_draw_tab_buttons_locked 在袋列绘制之后补画。
 void mix_draw_inven_bag_group_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_MIX_BAG_DRAW"});
     if (g_game == nullptr ||
         g_game->extension_bag_write.ui.draw_original_bag == nullptr ||
         g_game->extension_bag_write.ui.current_bag == nullptr ||

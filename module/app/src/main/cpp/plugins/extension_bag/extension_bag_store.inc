@@ -283,6 +283,9 @@ void store_restore_for_original_event_locked(int64_t x, int64_t y) {
 }
 
 uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.store"});
     int64_t x = 0;
     int64_t y = 0;
     if ((event == 0x17 || event == 0x18) && param != 0) {
@@ -294,6 +297,9 @@ uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     return store_original_event != nullptr ? store_original_event(event, param, param2) : 0;
 }
 void store_enter_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.store"});
     if (store_original_enter != nullptr) store_original_enter();
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
@@ -305,6 +311,9 @@ void store_enter_wrapper() {
 }
 
 void store_f3_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.store"});
     StoreSceneNoArgFn original = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -350,6 +359,9 @@ void store_draw_tab_buttons_locked() {
 }
 
 void store_draw_end_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_STORE_DRAW_END"});
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (store_frame_active && g_virtual_bag_enabled.load()) {
@@ -370,6 +382,9 @@ void store_draw_end_wrapper() {
 }
 
 void store_make_desc_gate(void* ctrl, void* arg) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_STORE_DESC"});
     // 详情打开仍走原版 MakeDesc。W1 不再在此捕获详情身份、也不再替换出售按钮回调
     // （原全局 popup OK/Cancel 槽劫持已删除）；扩展出售改为
     // UIStore_SellItem 函数入口按 cursor item 识别，原版面板/确认/取消全部保留。
@@ -425,6 +440,9 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
 // 自行读取并走 INVEN_RemoveItem/ITEMSYSTEM_Divide；模块在入口层用同一「载荷/单价」
 // 反推数量后接管结算，原版物品一律 backup。
 int64_t store_sell_item_wrapper(int64_t displayed_price) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:UIStore_SellItem"});
     if (g_backup_store_sell_item == nullptr) return 0;
     if (!g_virtual_bag_enabled.load()) return reinterpret_cast<StoreSellItemFn>(g_backup_store_sell_item)(displayed_price);
 
@@ -569,6 +587,9 @@ void store_teardown_locked() {
 // 判断），让流程继续调用 INVEN_SaveItem → save_item_wrapper 触发扩展
 // adopt 收编，购买不再误报"背包已满"。该函数不持锁调用原版指针。
 uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_STORE_BUY_GATE_1"});
     (void)out_slot;
     uint8_t result = 0;
     int32_t slot = -1;
@@ -589,6 +610,9 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
 // （与扩展页 virtual_bag_draw_original_bag_wrapper 同法）。扩展页签高亮由 draw_end
 // 的 store_draw_tab_buttons_locked 在袋列绘制之后补画。
 void store_draw_inven_bag_group_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_STORE_BAG_DRAW"});
     if (g_game == nullptr ||
         g_game->extension_bag_write.ui.draw_original_bag == nullptr ||
         g_game->extension_bag_write.ui.current_bag == nullptr ||

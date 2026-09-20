@@ -31,6 +31,7 @@ using qol::hooks::InstallOutcome;
 using qol::hooks::in_flight_count;
 using qol::hooks::in_flight_enter;
 using qol::hooks::in_flight_leave;
+using qol::hooks::InFlightGuard;
 using qol::hooks::isolated_get;
 using qol::hooks::isolated_set;
 using qol::contracts::resource_state_name;
@@ -396,26 +397,27 @@ void test_restore_waits_for_in_flight() {
     CHECK(install_tx != 0);
     CHECK(state_of("hook:A") == ResourceState::kLive);
 
-    CHECK(in_flight_enter("hook:A"));
-    CHECK(in_flight_count("hook:A") == 1);
-
     const uint64_t tx = tx_begin("plugin_a", TxKind::kRelease);
-    CHECK(tx != 0);
-    TxStep waiting{};
-    CHECK(tx_step(tx, &waiting));  // 在途未归零：只耗帧
-    CHECK(waiting.resource_id == nullptr);
-    CHECK(waiting.ok == 0);
-    CHECK(!waiting.finished);
-    CHECK(state_of("hook:A") == ResourceState::kLive);
-
     TxStatus status{};
-    CHECK(tx_query(tx, &status));
-    CHECK(status.step == 0);
-    CHECK(status.frames == 1);
-    CHECK(status.total == 1);
-    CHECK(status.kind == TxKind::kRelease);
+    {
+        InFlightGuard wrapper_guard("hook:A");
+        CHECK(wrapper_guard.entered());
+        CHECK(in_flight_count("hook:A") == 1);
 
-    CHECK(in_flight_leave("hook:A"));
+        CHECK(tx != 0);
+        TxStep waiting{};
+        CHECK(tx_step(tx, &waiting));  // 在途未归零：只耗帧
+        CHECK(waiting.resource_id == nullptr);
+        CHECK(waiting.ok == 0);
+        CHECK(!waiting.finished);
+        CHECK(state_of("hook:A") == ResourceState::kLive);
+
+        CHECK(tx_query(tx, &status));
+        CHECK(status.step == 0);
+        CHECK(status.frames == 1);
+        CHECK(status.total == 1);
+        CHECK(status.kind == TxKind::kRelease);
+    }
     CHECK(in_flight_count("hook:A") == 0);
     TxStep done{};
     CHECK(!tx_step(tx, &done));

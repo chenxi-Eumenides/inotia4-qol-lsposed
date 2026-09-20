@@ -12,6 +12,7 @@
 #include "core/native/game_ops_common.h"
 #include "contracts/module_save_port.h"
 #include "hooks/dispatch.h"
+#include "hooks/registry.h"
 #include "hooks/popup_state.h"
 #include "infra/capabilities.h"
 #include "infra/commands.h"
@@ -49,6 +50,21 @@ constexpr const char* kConflict = "conflict";
 constexpr const char* kCapacity = "capacity exhausted";
 
 QolResult store_result(infra::store::Status status);
+QolResult result_error(int32_t code, const char* message);
+
+QolResult sdk_in_flight_enter(contracts::InFlightHandle handle) {
+    if (handle.resource_id == nullptr || !hooks::in_flight_enter(handle.resource_id)) {
+        return result_error(kQolErrNotFound, kNotFound);
+    }
+    return contracts::ok();
+}
+
+QolResult sdk_in_flight_leave(contracts::InFlightHandle handle) {
+    if (handle.resource_id == nullptr || !hooks::in_flight_leave(handle.resource_id)) {
+        return result_error(kQolErrNotFound, kNotFound);
+    }
+    return contracts::ok();
+}
 
 QolResult result_error(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -799,6 +815,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.desc_button = {&sdk_desc_button_bind, &sdk_desc_button_unbind,
                        &sdk_desc_button_current_proc, &sdk_desc_button_original_matches,
                        &sdk_desc_button_call_original};
+    sdk.in_flight = {&sdk_in_flight_enter, &sdk_in_flight_leave};
     return sdk;
 }
 

@@ -143,6 +143,9 @@ void refresh_module_item_area_locked(int index) {
 }
 
 void virtual_bag_draw_original_bag_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_INVEN_BAG_DRAW"});
     if (g_game == nullptr || g_game->extension_bag_write.ui.draw_original_bag == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
@@ -171,6 +174,9 @@ void virtual_bag_draw_original_bag_wrapper() {
     draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_INVEN_ITEM_DRAW"});
     if (g_game == nullptr || g_game->extension_bag_write.ui.draw_original_items == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
@@ -324,6 +330,9 @@ void* module_item_locked(int bag, int slot) {
 // 且不受 monster 改指调用目标影响。
 typedef uint32_t (*SaveInventoryRawFn)(uint8_t* cursor);
 uint32_t save_inventory_wrapper(uint8_t* cursor) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:SAVE_SaveInventory"});
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (g_module_view_installed) {
@@ -342,6 +351,9 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
 bool item_pointer_known_locked(void* item);
 
 uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int32_t b, int32_t c) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_DRAW_GATE"});
     if (g_module_view_installed && item != nullptr) {
         // 保留原版区域绘制以维护格子/Active 状态，但扩展视图下不绘制
         // INVEN 中的原版物品；否则投影控件重绑的间隙会露出原版背包一帧。
@@ -365,6 +377,9 @@ uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int
 // 投影期间拖动投影物品松手到这里：路由到 ext→orig 事务（真实移动），借出对象
 // 不经原版 SaveItemOnEmpty 写 INVEN。非投影拖动（installed=false）直通原版。
 int32_t save_item_on_empty_gate(void* item, int32_t bag) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_DROP_GATE"});
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         int src_bag = -1, src_slot = -1;
@@ -591,6 +606,9 @@ void cancel_original_exit_locked() {
 }
 
 void virtual_bag_f3_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.inventory"});
     PopupNoArgFn original = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -616,6 +634,9 @@ void virtual_bag_f3_wrapper() {
 }
 
 void virtual_bag_inventory_enter_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.inventory"});
     PopupNoArgFn original = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -642,6 +663,9 @@ void virtual_bag_inventory_enter_wrapper() {
 }
 
 void virtual_bag_save_panel_enter_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"own:popup.save_panel"});
     QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save panel enter wrapper invoked world=%d hook=%d",
                 read_world_in_world() ? 1 : 0, g_save_panel_hook_installed ? 1 : 0);
     if (read_world_in_world()) {
@@ -653,6 +677,9 @@ void virtual_bag_save_panel_enter_wrapper() {
 }
 
 void virtual_bag_draw_end_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_INVEN_DRAW_END"});
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     const int inventory_state = virtual_bag_inventory_state_id();
     if (inventory_state >= 0 && inventory_state != 5) {

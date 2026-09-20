@@ -1237,6 +1237,9 @@ void extension_desc_item_execute_at(size_t index, void* button) {
 // BL 门禁（0xb9188）：物品 desc 打开 → 调原 MakeDesc（同步生成含装备按钮的
 // 菜单）→ 锁内重装装备按钮 hook。物品从触发控件 data[0] 取（MakeDesc 同源）。
 void make_desc_equip_gate(void* ctrl, void* arg) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_DESC_OPEN_GATE"});
     if (ctrl == nullptr || g_game == nullptr ||
         g_game->extension_bag_write.ui.make_item_description == nullptr) return;
     // UIEquip_RefreshItemArea may have restored the original inventory object

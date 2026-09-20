@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <sys/mman.h>
 #include <vector>
 
 #include "game_json.h"
@@ -99,6 +100,53 @@ static void test_call_patch_word() {
     CHECK(word == kOrig);
     CHECK(call_patch_revert_word(addr, kOrig) == true);             // 幂等：已还原
     CHECK(word == kOrig);
+}
+
+void patch_test_handler() {}
+
+static void test_call_patch_thunk_reuse_and_capacity() {
+    constexpr uint32_t kOriginal = 0x14000000u;
+    constexpr size_t kSiteCount = 24;
+    auto* words = static_cast<uint32_t*>(mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
+                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    CHECK(words != MAP_FAILED);
+    if (words == MAP_FAILED) return;
+
+    const CallPatchStats before = call_patch_stats();
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        words[0] = kOriginal;
+        CHECK(call_patch_install_branch(reinterpret_cast<uintptr_t>(&words[0]), kOriginal,
+                                        reinterpret_cast<void*>(&patch_test_handler)) != 0);
+        const CallPatchStats active = call_patch_stats();
+        CHECK(active.patched_calls == before.patched_calls + 1);
+        CHECK(call_patch_revert_branch(reinterpret_cast<uintptr_t>(&words[0]), kOriginal));
+        const CallPatchStats released = call_patch_stats();
+        CHECK(released.patched_calls == before.patched_calls);
+        CHECK(released.slots_in_use == before.slots_in_use);
+    }
+
+    const CallPatchStats after_cycles = call_patch_stats();
+    CHECK(after_cycles.page_count == before.page_count + 1);
+    CHECK(after_cycles.slots_allocated == before.slots_allocated + 1);
+    CHECK(after_cycles.free_slots == before.free_slots + 1);
+
+    for (size_t i = 0; i < kSiteCount; ++i) {
+        words[i] = kOriginal;
+        CHECK(call_patch_install_branch(reinterpret_cast<uintptr_t>(&words[i]), kOriginal,
+                                        reinterpret_cast<void*>(&patch_test_handler)) != 0);
+    }
+    const CallPatchStats simultaneous = call_patch_stats();
+    CHECK(simultaneous.patched_calls == before.patched_calls + kSiteCount);
+    for (size_t i = 0; i < kSiteCount; ++i) {
+        CHECK(call_patch_revert_branch(reinterpret_cast<uintptr_t>(&words[i]), kOriginal));
+    }
+    const CallPatchStats final = call_patch_stats();
+    CHECK(final.patched_calls == before.patched_calls);
+    CHECK(final.page_count == after_cycles.page_count);
+    CHECK(final.slots_allocated == after_cycles.slots_allocated + kSiteCount - 1);
+    CHECK(final.slots_in_use == before.slots_in_use);
+
+    CHECK(munmap(words, 4096) == 0);
 }
 
 static void test_p7_stage4_find_item_poc() {    bool recursive_guard = false;
@@ -2850,6 +2898,7 @@ static void test_p45_isolation() {
 int main() {
     virtual_bag::set_count_policy(&kHostModelCountPolicy);
     test_call_patch_word();
+    test_call_patch_thunk_reuse_and_capacity();
     test_p7_stage4_find_item_poc();
     test_world_teleport_target_map_id();
     test_json_escape();

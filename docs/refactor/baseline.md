@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 25 |
+| `contracts` | 26 |
 | `game` | 56 |
 | `hooks` | 10 |
 | `host` | 36 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **388** |
+| **合计** | **389** |
 
 ### 1.2 迁移期映射摘要
 
@@ -144,9 +144,9 @@
 | `plugins/custom_recipe` | `contracts` | 12 |
 | `plugins/inventory_hooks` | `contracts` | 12 |
 | `plugins/core.ui` | `contracts` | 11 |
+| `host` | `hooks` | 10 |
 | `host` | `patch` | 10 |
 | `infra` | `game` | 10 |
-| `host` | `hooks` | 9 |
 | `infra` | `contracts` | 8 |
 | `legacy/world` | `game` | 7 |
 | `plugins/save_backup` | `contracts` | 7 |

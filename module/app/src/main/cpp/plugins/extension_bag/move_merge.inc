@@ -35,6 +35,9 @@ uint64_t move_merge_call_original(void* control, uint64_t event, void* x2, void*
 }
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"ptrslot:MOVE_MERGE_GOT"});
     const uint64_t observation_token = virtual_bag_observe_item_proc_pre(control, event, x2, param);
     const auto finish = [observation_token, control, event, x2, param](uint64_t result) {
         virtual_bag_observe_item_proc_post(observation_token, control, event, x2, param, result);

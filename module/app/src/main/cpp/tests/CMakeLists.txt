@@ -442,6 +442,7 @@ add_executable(hooks_popup_state_tests
     test_hooks_popup_state.cpp
     ${CPP_DIR}/hooks/popup_state.cpp
     ${CPP_DIR}/game/access/popup_state.cpp
+    ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/core/native/popup_enter_alias.cpp
 )
 target_include_directories(hooks_popup_state_tests PRIVATE
@@ -650,6 +651,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/infra/panels.cpp
     ${CPP_DIR}/hooks/dispatch.cpp
     ${CPP_DIR}/hooks/popup_state.cpp
+    ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/game/access/popup_state.cpp
     ${CPP_DIR}/game/access/symbols.cpp
     ${CPP_DIR}/core/native/popup_enter_alias.cpp

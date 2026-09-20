@@ -19,6 +19,7 @@ namespace {
 
 constexpr size_t kPageSize = 4096;
 constexpr size_t kThunkSlot = 32;         // 每槽 32B 对齐（thunk 码 20B + 字面量 8B）
+constexpr size_t kSlotsPerPage = kPageSize / kThunkSlot;
 constexpr int64_t kBlRange = 0x08000000LL;  // BL 可达范围 ±128MB
 
 std::mutex g_call_patch_mtx;
@@ -26,7 +27,10 @@ std::mutex g_call_patch_mtx;
 // thunk 页登记：每页 4096B 承载 32B thunk，共享复用；页必落在调用点 ±128MB 内。
 std::array<void*, 8> g_thunk_pages{};
 size_t g_thunk_page_count = 0;
-size_t g_thunk_page_used = 0;
+std::array<size_t, 8> g_thunk_page_used{};
+std::array<void*, 8 * kSlotsPerPage> g_free_thunk_slots{};
+size_t g_free_thunk_slot_count = 0;
+size_t g_thunk_slots_allocated = 0;
 
 // 已安装调用点登记（M-1 幂等）：同一 call_addr + 同一 wrapper 重复 install 直接
 // 返回 true，避免重复分配 thunk。容量上限仅用于避免无界增长；溢出时退化为原行为。
@@ -35,8 +39,10 @@ struct PatchedCall {
     void* wrapper;
     uint32_t replacement;
     uintptr_t target;  // 实际写入的分支目标（BL：wrapper/thunk；B：thunk）
+    void* thunk_slot;
 };
-std::array<PatchedCall, 16> g_patched_calls{};
+constexpr size_t kMaxPatchedCalls = 128;
+std::array<PatchedCall, kMaxPatchedCalls> g_patched_calls{};
 size_t g_patched_call_count = 0;
 
 // out_target 可空；命中时回填上次写入的分支目标（B 幂等复用既有 thunk 用）。
@@ -50,17 +56,32 @@ bool find_patched_locked(uintptr_t call_addr, void* wrapper, uintptr_t* out_targ
     return false;
 }
 
-void remember_patched_locked(uintptr_t call_addr, void* wrapper, uint32_t replacement,
-                             uintptr_t target) {
-    if (find_patched_locked(call_addr, wrapper)) return;
-    if (g_patched_call_count < g_patched_calls.size()) {
-        g_patched_calls[g_patched_call_count++] = {call_addr, wrapper, replacement, target};
+bool remember_patched_locked(uintptr_t call_addr, void* wrapper, uint32_t replacement,
+                             uintptr_t target, void* thunk_slot) {
+    if (find_patched_locked(call_addr, wrapper)) return true;
+    if (g_patched_call_count >= g_patched_calls.size()) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "patched call table capacity exhausted limit=%zu call=%p wrapper=%p",
+                      g_patched_calls.size(), reinterpret_cast<void*>(call_addr), wrapper);
+        return false;
     }
+    g_patched_calls[g_patched_call_count++] = {call_addr, wrapper, replacement, target, thunk_slot};
+    return true;
+}
+
+void release_thunk_slot_locked(void* slot) {
+    if (slot == nullptr) return;
+    if (g_free_thunk_slot_count >= g_free_thunk_slots.size()) {
+        QOL_LOG_ERROR(QolDomain::kPlatform, "thunk free list capacity exhausted slot=%p", slot);
+        return;
+    }
+    g_free_thunk_slots[g_free_thunk_slot_count++] = slot;
 }
 
 void forget_patched_locked(uintptr_t call_addr) {
     for (size_t i = 0; i < g_patched_call_count;) {
         if (g_patched_calls[i].call_addr == call_addr) {
+            release_thunk_slot_locked(g_patched_calls[i].thunk_slot);
             g_patched_calls[i] = g_patched_calls[g_patched_call_count - 1];
             --g_patched_call_count;
         } else {
@@ -131,19 +152,32 @@ void* acquire_thunk_slot_locked(uintptr_t call_addr) {
     (void)call_addr;
     return nullptr;
 #else
-    // 1) 已有页 carving（校验对本调用点的 BL/B 可达性）。
-    if (g_thunk_page_count > 0) {
-        void* page = g_thunk_pages[g_thunk_page_count - 1];
-        void* slot = reinterpret_cast<uint8_t*>(page) + g_thunk_page_used * kThunkSlot;
+    // 1) 先复用同一近址范围内的空闲槽，关闭/重开不消耗新槽。
+    for (size_t i = g_free_thunk_slot_count; i > 0; --i) {
+        void* slot = g_free_thunk_slots[i - 1];
         const int64_t reach = static_cast<int64_t>(reinterpret_cast<uintptr_t>(slot)) -
                               static_cast<int64_t>(call_addr);
-        if ((g_thunk_page_used + 1) * kThunkSlot <= kPageSize && reach > -kBlRange &&
-            reach < kBlRange) {
-            ++g_thunk_page_used;
+        if (reach > -kBlRange && reach < kBlRange) {
+            g_free_thunk_slots[i - 1] = g_free_thunk_slots[g_free_thunk_slot_count - 1];
+            --g_free_thunk_slot_count;
             return slot;
         }
     }
-    // 2) 两级扫描新页：先 64KB 粗扫（快），失败后 4KB 细扫兜底。
+    // 2) 已有页 carving（校验对本调用点的 BL/B 可达性）。
+    for (size_t page_index = 0; page_index < g_thunk_page_count; ++page_index) {
+        if (g_thunk_page_used[page_index] >= kSlotsPerPage) continue;
+        void* page = g_thunk_pages[page_index];
+        void* slot = reinterpret_cast<uint8_t*>(page) +
+                     g_thunk_page_used[page_index] * kThunkSlot;
+        const int64_t reach = static_cast<int64_t>(reinterpret_cast<uintptr_t>(slot)) -
+                              static_cast<int64_t>(call_addr);
+        if (reach > -kBlRange && reach < kBlRange) {
+            ++g_thunk_page_used[page_index];
+            ++g_thunk_slots_allocated;
+            return slot;
+        }
+    }
+    // 3) 两级扫描新页：先 64KB 粗扫（快），失败后 4KB 细扫兜底。
     for (const int64_t coarse : {1, 0}) {
         const int64_t kStep = coarse ? 0x00010000 : 0x1000;
         const uintptr_t base = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
@@ -156,8 +190,16 @@ void* acquire_thunk_slot_locked(uintptr_t call_addr) {
                                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
                 if (region == MAP_FAILED) continue;
                 if (g_thunk_page_count < g_thunk_pages.size()) {
-                    g_thunk_pages[g_thunk_page_count++] = region;
-                    g_thunk_page_used = 1;
+                    const size_t page_index = g_thunk_page_count++;
+                    g_thunk_pages[page_index] = region;
+                    g_thunk_page_used[page_index] = 1;
+                    ++g_thunk_slots_allocated;
+                } else {
+                    munmap(region, kPageSize);
+                    QOL_LOG_ERROR(QolDomain::kPlatform,
+                                  "thunk page capacity exhausted limit=%zu call=%p",
+                                  g_thunk_pages.size(), reinterpret_cast<void*>(call_addr));
+                    return nullptr;
                 }
                 return region;
             }
@@ -199,21 +241,30 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
     if (find_patched_locked(call_addr, wrapper)) return true;
 
     const uintptr_t wrapper_addr = reinterpret_cast<uintptr_t>(wrapper);
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
+    if (current != expected_word) {
+        QOL_LOG_ERROR(QolDomain::kPlatform,
+                      "original word mismatch call=%p got=0x%08x expected=0x%08x",
+                      reinterpret_cast<void*>(call_addr), current, expected_word);
+        return false;
+    }
     const int64_t direct_delta = static_cast<int64_t>(wrapper_addr) - static_cast<int64_t>(call_addr);
     uintptr_t branch_target = wrapper_addr;
+    void* thunk_slot = nullptr;
     if ((direct_delta & 0x3) != 0 || direct_delta <= -kBlRange || direct_delta >= kBlRange) {
-        void* thunk = allocate_thunk_locked(call_addr, wrapper_addr);
-        if (thunk == nullptr) {
+        thunk_slot = allocate_thunk_locked(call_addr, wrapper_addr);
+        if (thunk_slot == nullptr) {
             QOL_LOG_ERROR(QolDomain::kPlatform,
                           "thunk allocation failed call=%p wrapper=%p",
                           reinterpret_cast<void*>(call_addr), wrapper);
             return false;
         }
-        branch_target = reinterpret_cast<uintptr_t>(thunk);
+        branch_target = reinterpret_cast<uintptr_t>(thunk_slot);
     }
 
     const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
     if ((delta & 0x3) != 0 || delta <= -kBlRange || delta >= kBlRange) {
+        release_thunk_slot_locked(thunk_slot);
         QOL_LOG_ERROR(QolDomain::kPlatform,
                       "branch target out of BL range call=%p target=%p",
                       reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
@@ -222,19 +273,15 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
     const uint32_t replacement =
         0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
 
-    const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
-    if (current == replacement) {  // 幂等：已安装
-        remember_patched_locked(call_addr, wrapper, replacement, branch_target);
-        return true;
+    if (!write_code_word(call_addr, replacement)) {
+        release_thunk_slot_locked(thunk_slot);
+        return false;
     }
-    if (current != expected_word) {
-        QOL_LOG_ERROR(QolDomain::kPlatform,
-                      "original word mismatch call=%p got=0x%08x expected=0x%08x",
-                      reinterpret_cast<void*>(call_addr), current, expected_word);
-        return false;  // fail-closed：不改写任何字节
+    if (!remember_patched_locked(call_addr, wrapper, replacement, branch_target, thunk_slot)) {
+        (void)write_code_word(call_addr, expected_word);
+        release_thunk_slot_locked(thunk_slot);
+        return false;
     }
-    if (!write_code_word(call_addr, replacement)) return false;
-    remember_patched_locked(call_addr, wrapper, replacement, branch_target);
     QOL_LOG_INFO(QolDomain::kPlatform, "patched call=%p replacement=0x%08x",
                  reinterpret_cast<void*>(call_addr), replacement);
     return true;
@@ -322,12 +369,20 @@ uintptr_t call_patch_install_branch(uintptr_t call_addr, uint32_t expected_word,
         QOL_LOG_ERROR(QolDomain::kPlatform,
                       "branch target out of BL range call=%p thunk=%p",
                       reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(thunk_addr));
+        release_thunk_slot_locked(thunk);
         return 0;
     }
     const uint32_t replacement =
         0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
-    if (!write_code_word(call_addr, replacement)) return 0;
-    remember_patched_locked(call_addr, handler, replacement, thunk_addr);
+    if (!write_code_word(call_addr, replacement)) {
+        release_thunk_slot_locked(thunk);
+        return 0;
+    }
+    if (!remember_patched_locked(call_addr, handler, replacement, thunk_addr, thunk)) {
+        (void)write_code_word(call_addr, expected_word);
+        release_thunk_slot_locked(thunk);
+        return 0;
+    }
     QOL_LOG_INFO(QolDomain::kPlatform, "patched branch call=%p thunk=%p replacement=0x%08x",
                  reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(thunk_addr),
                  replacement);
@@ -377,14 +432,25 @@ bool call_patch_install_branch_with_return(uintptr_t call_addr, uint32_t expecte
     if (thunk == nullptr) return false;
     uint32_t return_branch = 0;
     if (!encode_branch(reinterpret_cast<uintptr_t>(thunk) + 12, return_addr, &return_branch)) {
+        release_thunk_slot_locked(thunk);
         return false;
     }
     emit_branch_return_thunk(thunk, reinterpret_cast<uintptr_t>(handler), return_addr, tail_word);
     const uintptr_t thunk_addr = reinterpret_cast<uintptr_t>(thunk);
     uint32_t replacement = 0;
-    if (!encode_branch(call_addr, thunk_addr, &replacement)) return false;
-    if (!write_code_word(call_addr, replacement)) return false;
-    remember_patched_locked(call_addr, handler, replacement, thunk_addr);
+    if (!encode_branch(call_addr, thunk_addr, &replacement)) {
+        release_thunk_slot_locked(thunk);
+        return false;
+    }
+    if (!write_code_word(call_addr, replacement)) {
+        release_thunk_slot_locked(thunk);
+        return false;
+    }
+    if (!remember_patched_locked(call_addr, handler, replacement, thunk_addr, thunk)) {
+        (void)write_code_word(call_addr, current);
+        release_thunk_slot_locked(thunk);
+        return false;
+    }
     (void)return_branch;
     return true;
 }
@@ -416,4 +482,13 @@ bool branch_return_revert(uintptr_t call_addr, uint32_t expected_word,
                           uint32_t alternate_expected_word) {
     return call_patch_revert_branch_with_return(call_addr, expected_word,
                                                 alternate_expected_word);
+}
+
+CallPatchStats call_patch_stats() {
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    return CallPatchStats{static_cast<uint32_t>(g_thunk_page_count),
+                          static_cast<uint32_t>(g_thunk_slots_allocated),
+                          static_cast<uint32_t>(g_thunk_slots_allocated - g_free_thunk_slot_count),
+                          static_cast<uint32_t>(g_free_thunk_slot_count),
+                          static_cast<uint32_t>(g_patched_call_count)};
 }

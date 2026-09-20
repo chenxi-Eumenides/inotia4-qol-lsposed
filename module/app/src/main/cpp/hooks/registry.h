@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "contracts/plugin.h"
+#include "contracts/in_flight.h"
 
 namespace qol::hooks {
 
@@ -61,6 +62,29 @@ bool in_flight_leave(const char* resource_id);
 
 // 未登记 → 0。
 uint32_t in_flight_count(const char* resource_id);
+
+// 宿主内部 wrapper 的 RAII 形式；插件跨边界使用 contracts::InFlightGuard。
+class InFlightGuard {
+public:
+    explicit InFlightGuard(contracts::InFlightHandle handle)
+        : resource_id_(handle.resource_id), entered_(resource_id_ != nullptr &&
+                                                       in_flight_enter(resource_id_)) {}
+    explicit InFlightGuard(const char* resource_id)
+        : InFlightGuard(contracts::InFlightHandle{resource_id}) {}
+
+    ~InFlightGuard() {
+        if (entered_) (void)in_flight_leave(resource_id_);
+    }
+
+    InFlightGuard(const InFlightGuard&) = delete;
+    InFlightGuard& operator=(const InFlightGuard&) = delete;
+
+    bool entered() const { return entered_; }
+
+private:
+    const char* resource_id_;
+    bool entered_;
+};
 
 // 隔离标记写入/读取；未登记 → false。
 bool isolated_set(const char* resource_id, bool isolated);

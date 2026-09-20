@@ -46,3 +46,14 @@ bool branch_return_revert(uintptr_t call_addr, uint32_t expected_word,
 
 // 恢复 addr 处原始指令字 original_word；当前指令字已是 original_word 时幂等返回 true。
 bool call_patch_revert_word(uintptr_t addr, uint32_t original_word);
+
+// 运行期诊断：统计近址页和 thunk 槽复用情况，不暴露池内部存储。
+struct CallPatchStats {
+    uint32_t page_count;
+    uint32_t slots_allocated;
+    uint32_t slots_in_use;
+    uint32_t free_slots;
+    uint32_t patched_calls;
+};
+
+CallPatchStats call_patch_stats();

@@ -25,6 +25,7 @@
 #include <cstdint>
 
 #include "commands.h"
+#include "in_flight.h"
 #include "panels.h"
 #include "result.h"
 #include "version.h"
@@ -277,6 +278,7 @@ struct QolHostSdk {
     QolTextScopeApi text_scope;
     const QolUiAdapter* ui;
     QolDescButtonApi desc_button;
+    QolInFlightApi in_flight;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;

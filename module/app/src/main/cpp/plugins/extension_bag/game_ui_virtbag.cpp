@@ -2047,6 +2047,9 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 #include "plugins/extension_bag/extension_bag_api_impl.inc"
 
 bool extension_bag_save_game_handler() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_SAVE_REVIVE"});
     return g_sdk != nullptr && g_sdk->store.save_game != nullptr &&
            qol::contracts::succeeded(g_sdk->store.save_game());
 }
