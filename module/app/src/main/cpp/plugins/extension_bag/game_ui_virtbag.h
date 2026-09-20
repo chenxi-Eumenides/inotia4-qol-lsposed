@@ -1,7 +1,7 @@
 #pragma once
 
 #include "contracts/game_host.h"
-#include "core/native/extension_bag_port.h"
+#include "plugins/extension_bag/extension_bag_port.h"
 
 #include <jni.h>
 

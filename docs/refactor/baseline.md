@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 23 |
+| `contracts` | 25 |
 | `domains/character` | 2 |
 | `domains/dialog` | 4 |
 | `domains/inventory` | 9 |
@@ -32,9 +32,9 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 56 |
+| `game` | 57 |
 | `hooks` | 10 |
-| `host` | 35 |
+| `host` | 36 |
 | `infra` | 46 |
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **385** |
+| **合计** | **389** |
 
 ### 1.2 迁移期映射摘要
 
@@ -133,14 +133,14 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 106 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 105 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 42 |
 | `host` | `game` | 32 |
-| `host` | `contracts` | 20 |
-| `plugins/extension_bag` | `contracts` | 20 |
+| `host` | `contracts` | 22 |
+| `plugins/extension_bag` | `contracts` | 19 |
 | `plugins/autosell` | `contracts` | 17 |
 | `plugins/inventory_hooks` | `contracts` | 15 |
 | `plugins/custom_recipe` | `contracts` | 14 |
@@ -148,10 +148,10 @@
 | `infra` | `game` | 10 |
 | `host` | `hooks` | 9 |
 | `host` | `patch` | 9 |
+| `infra` | `contracts` | 8 |
 | `plugins/save_backup` | `contracts` | 8 |
 | `domains/world` | `game` | 7 |
 | `domains/inventory` | `game` | 6 |
-| `domains/save` | `infra` | 6 |
 
 ### 2.2 include 环
 
@@ -202,7 +202,7 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:367||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:155||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:151||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 

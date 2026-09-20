@@ -8,6 +8,10 @@
 #include "contracts/ui.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 
+// 操作响应信封由宿主实现；插件只依赖稳定的结果构造函数声明。
+std::string op_ok();
+std::string op_err(const char* msg);
+
 // 控件矩形使用契约层类型；插件内既有代码以短名 `UiRect` 引用（与其它插件一致）。
 using UiRect = qol::contracts::UiRect;
 

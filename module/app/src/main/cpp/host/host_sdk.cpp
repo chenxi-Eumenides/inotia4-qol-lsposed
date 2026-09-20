@@ -10,7 +10,7 @@
 
 #include "core/native/qol_log.h"
 #include "core/native/game_ops_common.h"
-#include "core/native/module_save_port.h"
+#include "contracts/module_save_port.h"
 #include "hooks/dispatch.h"
 #include "hooks/popup_state.h"
 #include "infra/capabilities.h"
@@ -617,3 +617,5 @@ contracts::QolHostSdk make_host_sdk() {
 extern const contracts::QolHostSdk g_host_sdk = make_host_sdk();
 
 }  // namespace qol::host
+
+#include "host/extension_bag_port.inc"

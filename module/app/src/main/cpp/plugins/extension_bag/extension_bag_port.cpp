@@ -1,7 +1,4 @@
-#include "core/native/extension_bag_port.h"
-
 #include "plugins/extension_bag/extension_bag_port.h"
-#include "game_access.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
@@ -49,39 +46,25 @@ void qol::features::extension_bag::extension_bag_bind_port_sdk(
     virtual_bag::set_count_policy(sdk == nullptr ? nullptr : &kCountPolicy);
 }
 
-// 过渡访问器：每次调用 require，不缓存
-// capability 接口；能力缺失/撤销中返回 nullptr。
-const qol::contracts::ExtensionBagApi* extension_bag_capability() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const QolResult result = g_sdk->capabilities.require(
-        qol::contracts::kExtensionBagCapabilityId,
-        QolVersionRange{static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
-                        static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
-        &iface);
-    if (result.ok != kQolOk) return nullptr;
-    return static_cast<const qol::contracts::ExtensionBagApi*>(iface);
-}
-
 namespace {
 
 thread_local unsigned int g_internal_equip_depth = 0;
 
 }
 
-void extension_bag_sync_projected_slot(int bag, int slot) {
+void provider_sync_projected_slot(int bag, int slot) {
     virtual_bag_sync_projected_slot(bag, slot);
 }
 
-void extension_bag_sync_projected_bag() {
+void provider_sync_projected_bag() {
     virtual_bag_sync_projected_bag();
 }
 
-bool extension_bag_module_view_installed() {
+bool provider_module_view_installed() {
     return virtual_bag_module_view_installed();
 }
 
-bool extension_bag_enabled() {
+bool provider_enabled() {
     return virtual_bag_enabled();
 }
 
@@ -89,84 +72,75 @@ std::string extension_bag_inventory_bags_json() {
     return virtual_bag_inventory_bags_json();
 }
 
-bool extension_bag_is_inventory_enter(uintptr_t enter) {
+bool provider_is_inventory_enter(uintptr_t enter) {
     return virtual_bag_is_inventory_enter(enter);
 }
 
-bool extension_bag_is_logical_bag(int bag) {
+bool provider_is_logical_bag(int bag) {
     return virtual_bag::valid_extension_logical_bag(bag);
 }
 
-int extension_bag_internal_index(int logical_bag) {
+int provider_internal_index(int logical_bag) {
     return virtual_bag::extension_internal_bag(logical_bag);
 }
 
-bool extension_bag_prepare_main_menu() {
+bool provider_prepare_main_menu() {
     return virtual_bag_prepare_main_menu();
 }
 
-int extension_bag_inventory_state_id() {
+int provider_inventory_state_id() {
     return virtual_bag_inventory_state_id();
 }
 
-bool extension_bag_prepare_save_slot_load() {
+bool provider_prepare_save_slot_load() {
     return virtual_bag_prepare_save_slot_load();
 }
 
-void extension_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
+void provider_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     virtual_bag_for_each_logical_item(fn, ctx);
 }
 
-void* extension_bag_item_at(int bag, int slot) {
+void* provider_item_at(int bag, int slot) {
     return virtual_bag_item_at(bag, slot);
 }
 
-void* extension_bag_view_item_at(int bag, int slot) {
+void* provider_view_item_at(int bag, int slot) {
     return virtual_bag_view_item_at(bag, slot);
 }
 
-bool extension_bag_handle_backpack_button_equip() {
+bool provider_handle_backpack_button_equip() {
     return virtual_bag_handle_backpack_button_equip();
 }
 
-bool extension_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
+bool provider_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
     return virtual_bag_handle_original_bag_unequip(out_no_space, out_not_empty);
 }
 
 void extension_bag_show_no_space_popup() {
-    // TextData 6 = "背包已满"（与扩展袋/原版卸袋同窗）。直接解析原版弹窗
-    // 函数，不依赖 extension_bag 内部（show popup 位于其匿名 namespace）。
-    if (g_base == 0) return;
-    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
-                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
-    if (popup == 0) return;
-    typedef void (*UiPopupFn)(int, int, int, int);
-    reinterpret_cast<UiPopupFn>(popup)(6, 0, 0, 0);
+    // TextData 6 = "背包已满"（与扩展袋/原版卸袋同窗）。
+    if (g_sdk == nullptr || g_sdk->ui == nullptr || g_sdk->ui->show_text_popup == nullptr) return;
+    (void)g_sdk->ui->show_text_popup(6);
 }
 
 void extension_bag_show_not_empty_popup() {
     // TextData 7 = "袋非空"（原版 b8084 同窗）。
-    if (g_base == 0) return;
-    const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
-                                                F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
-    if (popup == 0) return;
-    typedef void (*UiPopupFn)(int, int, int, int);
-    reinterpret_cast<UiPopupFn>(popup)(7, 0, 0, 0);
+    if (g_sdk == nullptr || g_sdk->ui == nullptr || g_sdk->ui->show_text_popup == nullptr) return;
+    (void)g_sdk->ui->show_text_popup(7);
 }
 
-bool extension_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {
+bool provider_identify_native_item(void* item, int* out_bag, int* out_slot) {
     return virtual_bag_identify_native_item(item, out_bag, out_slot);
 }
 
-void* extension_bag_find_native_item(int category) {
+void* provider_find_native_item(int category) {
     return virtual_bag_find_native_item(category);
 }
 
-bool extension_bag_remove_native_item(void* item) {
+bool provider_remove_native_item(void* item) {
     return virtual_bag_remove_native_item(item, virtual_bag_current_use_token());
 }
 
-int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount) {
+int64_t provider_sell_price(void* item, int count, bool apply_variant_discount) {
     const auto* game = qol::features::extension_bag::extension_bag_game_host();
     if (item == nullptr || count <= 0 || game == nullptr ||
         game->read_only.item.sell_price == nullptr) return -1;
@@ -183,56 +157,56 @@ int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_disco
     return final_price;
 }
 
-bool extension_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
-                                        int equip_slot) {
+bool provider_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
+                                    int equip_slot) {
     return virtual_bag_equip_projected_item(character, item, source_bag, source_slot, equip_slot);
 }
 
-void extension_bag_begin_internal_equip() {
+void provider_begin_internal_equip() {
     ++g_internal_equip_depth;
 }
 
-void extension_bag_end_internal_equip() {
+void provider_end_internal_equip() {
     if (g_internal_equip_depth > 0) --g_internal_equip_depth;
 }
 
-bool extension_bag_internal_equip_active() {
+bool provider_internal_equip_active() {
     return g_internal_equip_depth > 0;
 }
 
-bool extension_bag_consume_native_item(void* item) {
+bool provider_consume_native_item(void* item) {
     return virtual_bag_consume_native_item(item, virtual_bag_current_use_token());
 }
 
-int extension_bag_consume_category(int category, int count) {
-    if (category <= 0 || count <= 0 || !extension_bag_enabled()) return 0;
+int provider_consume_category(int category, int count) {
+    if (category <= 0 || count <= 0 || !provider_enabled()) return 0;
     int consumed = 0;
     while (consumed < count) {
-        void* item = extension_bag_find_native_item(category);
+        void* item = provider_find_native_item(category);
         if (item == nullptr) break;
-        if (!extension_bag_consume_native_item(item)) break;
+        if (!provider_consume_native_item(item)) break;
         ++consumed;
     }
     return consumed;
 }
 
-bool extension_bag_has_empty_slots(int needed, int include_task_bag) {
+bool provider_has_empty_slots(int needed, int include_task_bag) {
     return virtual_bag_has_empty_slots(needed, include_task_bag);
 }
 
-bool extension_bag_adopt_unequipped_item(void* character, int equip_slot) {
+bool provider_adopt_unequipped_item(void* character, int equip_slot) {
     return virtual_bag_adopt_unequipped_item(character, equip_slot);
 }
 
-bool extension_bag_adopt_native_item(void* item) {
+bool provider_adopt_native_item(void* item) {
     return virtual_bag_adopt_native_item(item);
 }
 
-bool extension_bag_merge_native_item(void* item) {
+bool provider_merge_native_item(void* item) {
     return virtual_bag_merge_native_item(item);
 }
 
-void extension_bag_store_restore_for_original_write() {
+void provider_store_restore_for_original_write() {
     virtual_bag_store_restore_for_original_write();
 }
 
@@ -303,47 +277,47 @@ bool api_capture_move_item_observation(void* item, int32_t target_bag, int32_t t
 
 const qol::contracts::ExtensionBagApi kExtensionBagApi{
     // 1 状态/索引
-    &extension_bag_enabled,
-    &extension_bag_module_view_installed,
-    &extension_bag_is_inventory_enter,
-    &extension_bag_is_logical_bag,
-    &extension_bag_internal_index,
-    &extension_bag_prepare_main_menu,
-    &extension_bag_prepare_save_slot_load,
-    &extension_bag_inventory_state_id,
-    &extension_bag_for_each_logical_item,
+    &provider_enabled,
+    &provider_module_view_installed,
+    &provider_is_inventory_enter,
+    &provider_is_logical_bag,
+    &provider_internal_index,
+    &provider_prepare_main_menu,
+    &provider_prepare_save_slot_load,
+    &provider_inventory_state_id,
+    &provider_for_each_logical_item,
     // 2 对象反查
-    &extension_bag_item_at,
-    &extension_bag_view_item_at,
-    &extension_bag_identify_native_item,
-    &extension_bag_find_native_item,
-    &extension_bag_remove_native_item,
+    &provider_item_at,
+    &provider_view_item_at,
+    &provider_identify_native_item,
+    &provider_find_native_item,
+    &provider_remove_native_item,
     // 3 投影
-    &extension_bag_sync_projected_slot,
-    &extension_bag_sync_projected_bag,
-    &extension_bag_store_restore_for_original_write,
+    &provider_sync_projected_slot,
+    &provider_sync_projected_bag,
+    &provider_store_restore_for_original_write,
     // 4 收编/消耗
-    &extension_bag_consume_native_item,
-    &extension_bag_consume_category,
-    &extension_bag_has_empty_slots,
-    &extension_bag_adopt_unequipped_item,
-    &extension_bag_adopt_native_item,
-    &extension_bag_merge_native_item,
-    &extension_bag_sell_price,
-    &extension_bag_equip_projected_item,
+    &provider_consume_native_item,
+    &provider_consume_category,
+    &provider_has_empty_slots,
+    &provider_adopt_unequipped_item,
+    &provider_adopt_native_item,
+    &provider_merge_native_item,
+    &provider_sell_price,
+    &provider_equip_projected_item,
     // 5 交互接管
     &api_handle_backpack_button_equip_result,
     &virtual_bag_handle_confirm_use_item,
     &virtual_bag_handle_use_mercenary_seal,
     &api_handle_equip_control_event,
-    &extension_bag_handle_original_bag_unequip,
+    &provider_handle_original_bag_unequip,
     &virtual_bag_put_jewel_native,
     // 6 观测/拖放
     &api_capture_move_item_observation,
     // 7 内部标记
-    &extension_bag_begin_internal_equip,
-    &extension_bag_end_internal_equip,
-    &extension_bag_internal_equip_active,
+    &provider_begin_internal_equip,
+    &provider_end_internal_equip,
+    &provider_internal_equip_active,
     &virtual_bag_native_call_active,
     &virtual_bag_refresh_item_area_with_gate,
 };

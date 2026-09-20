@@ -122,7 +122,7 @@ void plugin_on_disabled(qol::contracts::PluginContext& ctx) {
 }
 
 void plugin_fill_status(qol::contracts::PluginStatusOut& out) {
-    out.enabled = extension_bag_enabled();
+    out.enabled = qol::features::extension_bag::extension_bag_enabled();
     out.error = nullptr;
 }
 

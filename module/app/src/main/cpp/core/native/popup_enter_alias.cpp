@@ -1,4 +1,4 @@
-#include "core/native/popup_enter_alias.h"
+#include "contracts/popup_enter_alias.h"
 
 #include <atomic>
 

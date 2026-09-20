@@ -2,7 +2,7 @@
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
-#include "core/native/grid_geometry.h"
+#include "contracts/grid_geometry.h"
 #include "contracts/ui.h"
 
 namespace {
@@ -12,7 +12,7 @@ const qol::contracts::QolUiAdapter* extension_bag_ui() {
     return sdk == nullptr ? nullptr : sdk->ui;
 }
 
-constexpr GridGeometry kExtensionGrid{
+constexpr qol::contracts::GridGeometry kExtensionGrid{
     761, 160, 4, 4, 74, 74, 83, 83};
 
 }
@@ -23,15 +23,15 @@ bool extension_bag_grid_hit(int64_t x, int64_t y) {
         !virtual_bag::valid_index(state->selected)) {
         return false;
     }
-    return grid_contains(kExtensionGrid, x, y);
+    return qol::contracts::grid_contains(kExtensionGrid, x, y);
 }
 
 int extension_bag_grid_slot_index(int64_t x, int64_t y,
                                   int64_t origin_x, int64_t origin_y) {
-    const GridGeometry grid{
+    const qol::contracts::GridGeometry grid{
         origin_x, origin_y, 4, 4, kExtensionGrid.cell_width,
         kExtensionGrid.cell_height, kExtensionGrid.step_x, kExtensionGrid.step_y};
-    return grid_slot_index(grid, x, y);
+    return qol::contracts::grid_slot_index(grid, x, y);
 }
 
 void* extension_bag_valid_child(void* root, int slot) {
