@@ -142,11 +142,13 @@ bool stage4_finish_requires_abort(bool finished);
 // ---------------------------------------------------------------------------
 struct Stage4RemoveDataEntry {
     void* item;        // 快照槽内对象指针
+    uint32_t pre_raw;  // 快照时 I_COUNT 原始字段
     uint32_t pre_full; // 快照时启用态 S2 全量
 };
 
 struct Stage4RemoveDataPost {
     void* item;        // 重扫槽内对象指针（nullptr = 槽已清/被替换）
+    uint32_t post_raw; // 重扫时 I_COUNT 原始字段
     uint32_t post_view; // 重扫时启用态 S2 解码值
 };
 
@@ -157,10 +159,9 @@ struct Stage4RemoveDataPlan {
 };
 
 // 输入：pre（快照数组）、post（与 pre 等长、按同一槽序重扫）、count（原版入参）。
-// 判定：count<=0 或无缩减堆 → 不修正；缩减堆不唯一或数据矛盾（sum_vanished >
-// count、remain 越域、守恒不成立）→ fail-closed 不修正；缩减唯一且 remain !=
-// post_view → 修正。关闭态（R-47）原版 b 写天然正确，调用方不应以启用态数据
-// 调用本函数。
+// 判定：只有唯一槽位符合原版 b-only 写回形态时才允许修正；对象替换、多个候选或
+// 其它槽位原始字段变化均 fail-closed。关闭态（R-47）原版 b 写天然正确，调用方不应
+// 以启用态数据调用本函数。
 Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* pre,
                                                   const Stage4RemoveDataPost* post,
                                                   int entry_count, int32_t count);

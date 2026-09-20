@@ -585,6 +585,7 @@ struct S2RemoveDataCapture {
     void* items[kS2RemoveDataMaxEntries] = {};
     int bags[kS2RemoveDataMaxEntries] = {};
     int slots[kS2RemoveDataMaxEntries] = {};
+    uint32_t pre_raw[kS2RemoveDataMaxEntries] = {};
     uint32_t pre_full[kS2RemoveDataMaxEntries] = {};
 };
 
@@ -608,8 +609,9 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
             cap->items[cap->entry_count] = item;
             cap->bags[cap->entry_count] = bag;
             cap->slots[cap->entry_count] = slot;
-            cap->pre_full[cap->entry_count] =
-                stack_codec::effective_read_count(s2_read_count_field(item), true);
+            cap->pre_raw[cap->entry_count] = s2_read_count_field(item);
+            cap->pre_full[cap->entry_count] = stack_codec::effective_read_count(
+                cap->pre_raw[cap->entry_count], true);
             ++cap->entry_count;
         }
     }
@@ -626,13 +628,14 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
     Stage4RemoveDataEntry pre[kS2RemoveDataMaxEntries] = {};
     Stage4RemoveDataPost post[kS2RemoveDataMaxEntries] = {};
     for (int index = 0; index < cap.entry_count; ++index) {
-        pre[index] = {cap.items[index], cap.pre_full[index]};
+        pre[index] = {cap.items[index], cap.pre_raw[index], cap.pre_full[index]};
         void* cur = s2_physical_slot_item(cap.bags[index], cap.slots[index]);
         if (cur != cap.items[index]) {
-            post[index] = {nullptr, 0};
+            post[index] = {nullptr, 0, 0};
         } else {
-            post[index] = {cur,
-                           stack_codec::effective_read_count(s2_read_count_field(cur), true)};
+            const uint32_t post_raw = s2_read_count_field(cur);
+            post[index] = {cur, post_raw,
+                           stack_codec::effective_read_count(post_raw, true)};
         }
     }
     const Stage4RemoveDataPlan plan =

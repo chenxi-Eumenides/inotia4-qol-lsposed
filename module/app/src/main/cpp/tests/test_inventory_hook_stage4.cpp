@@ -351,96 +351,157 @@ static void test_get_cumulate_count_s2() {
     CHECK(stage4_get_cumulate_count(nonnull_item, 0u, CountEncoding::kUnknown, nullptr, false) == 0);
 }
 
-// H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：部分删堆 remain 修正、
-// 整删消失堆求和、count<=0 / 无缩减 / 多缩减 / 越域 / 已正确各分支 fail-closed。
+static uint32_t s2_test_raw(uint32_t count) {
+    return stack_codec::s2_write_count(0u, count);
+}
+
+static uint32_t s2_test_b_only_raw(uint32_t pre_raw, uint32_t remain) {
+    return (pre_raw & ~stack_codec::kS2MaskB) |
+           (stack_codec::s2_split_b(remain) << stack_codec::kS2ShiftB);
+}
+
+static Stage4RemoveDataEntry s2_test_pre(void* item, uint32_t full) {
+    return {item, s2_test_raw(full), full};
+}
+
+static Stage4RemoveDataPost s2_test_post(void* item, uint32_t raw) {
+    return {item, raw, stack_codec::s2_read_count(raw)};
+}
+
+// H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：按原版 b-only 写回形态识别
+// 部分删堆，覆盖三种 wrap、整删、消失堆组合、矛盾变化和 fail-closed 守卫。
 static void test_remove_item_data_plan() {
     void* a = reinterpret_cast<void*>(static_cast<uintptr_t>(0x501));
     void* b = reinterpret_cast<void*>(static_cast<uintptr_t>(0x502));
     void* c = reinterpret_cast<void*>(static_cast<uintptr_t>(0x503));
     using stack_codec::s2_write_count;
 
-    // 场景 1（启用态跨 127 借位，单一部分删堆）：堆 199 + 堆 50，删 60。
-    // 原版顺序（0x1040a8）：60 < 199 → 首堆即部分删，remain=199+0-60=139>127，
-    // b 写截断（post_view = a 残留 0 + b=11），堆 2 不动。计划应修正 entry 0 → 139。
+    // 场景 1：150 - 25 = 125，b-only 写回保留旧 a，getter 读到 253。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{a, 11u}, {b, 50u}};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 2, 60);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 139u);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 25);
+        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 125u);
     }
-    // 场景 1b（整删后跨堆部分删）：堆 199 + 堆 50，删 220：199 整删（w22=199），
-    // 220 ≥ 199 → 继续遍历；220 < 249 → 堆 2 部分删 remain=199+50-220=29，
-    // 原版 b 写 29（a=0 保留）→ 已正确，不修正。
+
+    // 场景 2：199 - 72 = 127，post_view 因旧 a 仍为 255，但 raw 是 b-only 形态。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 29u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 220).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 72);
+        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 127u);
     }
-    // 场景 2（remain ≤127 但旧 a 残留）：堆 199 部分删 190 → remain=9，
-    // 原版 b 写后 post_view = 旧 a(1)*128 + 9 = 137 ≠ 9 → 修正为 9。
+
+    // 场景 2b：199 - 190 = 9，b-only 写回保留旧 a，getter 读到 137。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}};
-        Stage4RemoveDataPost post[] = {{a, 137u}};
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 9u))};
         const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 190);
         CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 9u);
     }
-    // 场景 3（remain ≤127 且 a 原本为 0）：堆 50 删 10 → remain=40，原版已写对
-    //（post_view=40）→ 不修正。
+
+    // 场景 3：300 - 128 = 172，b 段不变但该槽仍是唯一可解释候选。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 50u}};
-        Stage4RemoveDataPost post[] = {{a, 40u}};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 10);
-        CHECK(!plan.correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 172u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 128);
+        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 172u);
     }
-    // 场景 4（全部整删，无部分删堆）：count ≥ 总量 → 无修正。
+
+    // 场景 4：300 - 200 = 100，b 段回绕增大，仍需修正。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {nullptr, 0u}};
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 100u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 200);
+        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 100u);
+    }
+
+    // 场景 5：300 - 44 = 256，原版 b-only 写回已经由旧 a 正确表达。
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 256u))};
+        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 44).correct);
+    }
+
+    // 场景 6（整堆删除）：没有部分删堆候选，不回写。
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u), s2_test_pre(b, 50u)};
+        const Stage4RemoveDataPost post[] = {{nullptr, 0u, 0u}, {nullptr, 0u, 0u}};
         CHECK(!stage4_remove_item_data_plan(pre, post, 2, 249).correct);
         CHECK(!stage4_remove_item_data_plan(pre, post, 2, 9999).correct);
+
+        const Stage4RemoveDataEntry single_pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost single_post[] = {{nullptr, 0u, 0u}};
+        CHECK(!stage4_remove_item_data_plan(single_pre, single_post, 1, 300).correct);
     }
-    // 场景 5（count<=0：语义未冻结/空操作）→ 不修正。
+
+    // 场景 7（消失堆 + wrap 部分删堆）：150 整删后 300 - 100 = 200。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}};
-        Stage4RemoveDataPost post[] = {{a, 137u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 0).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, -1).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            {nullptr, 0u, 0u},
+            s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 200u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 2, 250);
+        CHECK(plan.correct && plan.entry_index == 1 && plan.remain == 200u);
     }
-    // 场景 6（fail-closed：缩减堆不唯一）→ 不修正。
+
+    // 场景 8（fail-closed：两个候选）。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 199u}};
-        Stage4RemoveDataPost post[] = {{a, 100u}, {b, 100u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 198).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 150u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
+            s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 125u))};
+        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 25).correct);
     }
-    // 场景 7（fail-closed：未触堆数量被改/增长）→ 不修正。
+
+    // 场景 9（fail-closed：候选之外的对象 b 段发生变化）。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 70u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 60).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
+            s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 100u))};
+        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 25).correct);
     }
-    // 场景 8（fail-closed：count 小于整删累计，数据矛盾）→ 不修正。
+
+    // 场景 9b（fail-closed：唯一候选槽的 bits0..21 发生变化）。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 61u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 10).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
+            s2_test_post(b, pre[1].pre_raw ^ 1u)};
+        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 25).correct);
     }
-    // 场景 9（fail-closed：deleted_here 恰等于部分删堆全量——原版该走整删分支，
-    // remain=0 矛盾）→ 不修正。
+
+    // 场景 10（fail-closed：对象替换、count<=0、删除量越过当前堆）。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 0u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 249).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const Stage4RemoveDataPost replaced[] = {s2_test_post(c, s2_test_raw(1u))};
+        const Stage4RemoveDataPost unchanged[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 137u))};
+        CHECK(!stage4_remove_item_data_plan(pre, replaced, 1, 1).correct);
+        CHECK(!stage4_remove_item_data_plan(pre, unchanged, 1, 0).correct);
+        CHECK(!stage4_remove_item_data_plan(pre, unchanged, 1, -1).correct);
+        CHECK(!stage4_remove_item_data_plan(pre, unchanged, 1, 200).correct);
     }
-    // 场景 10（堆未被触及时原样通过）：无缩减 → 不修正。
+
+    // 场景 11（非候选槽原始字段完全不变，包含非数量位）：不回写 bits22-24。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 999u}};
-        Stage4RemoveDataPost post[] = {{a, 999u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 1).correct);
+        const uint32_t nonstack_raw = 0x00C00000u | (3u << 25);
+        const Stage4RemoveDataEntry pre[] = {{a, nonstack_raw, 50u}};
+        const Stage4RemoveDataPost post[] = {{a, nonstack_raw, 50u}};
+        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 10).correct);
     }
-    // 场景 11（S2 编码交叉验证：139 = a1 + b11、9 = a0 + b9）。
+
+    // 场景 12（S2 编码交叉验证：139 = a1 + b11、9 = a0 + b9）。
     CHECK(s2_write_count(0u, 139u) == ((1u << 22) | (11u << 25)));
     CHECK(s2_write_count(0u, 9u) == (9u << 25));
-    // 场景 12（空/退化入参）→ 不修正。
+    // 场景 13（空/退化入参）→ 不修正。
     CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, 0, 5).correct);
 }
 

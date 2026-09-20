@@ -254,42 +254,47 @@ bool stage4_install_transaction(const Stage4HookSpec* hooks, std::size_t count,
 }
 
 Stage4RemoveDataPlan stage4_remove_item_data_plan(const Stage4RemoveDataEntry* pre,
-                                                  const Stage4RemoveDataPost* post,
-                                                  int entry_count, int32_t count) {
+                                                   const Stage4RemoveDataPost* post,
+                                                   int entry_count, int32_t count) {
     Stage4RemoveDataPlan plan;
     if (pre == nullptr || post == nullptr || entry_count <= 0 || count <= 0) return plan;
-    // 顺序（与原版一致）：先整删后部分删，部分删堆唯一。先汇总整删（快照对象
-    // 已不在槽内/被替换）并定位唯一缩减堆；任何第二缩减堆或增长堆都是数据矛盾，
-    // fail-closed 放弃修正。
     uint32_t sum_vanished = 0;
-    int shrunk_index = -1;
-    uint32_t sum_kept_post = 0;
     for (int index = 0; index < entry_count; ++index) {
         if (post[index].item != pre[index].item) {
+            if (post[index].item != nullptr) return Stage4RemoveDataPlan{};
             sum_vanished += pre[index].pre_full;
-            continue;
         }
-        if (post[index].post_view < pre[index].pre_full) {
-            if (shrunk_index >= 0) return Stage4RemoveDataPlan{};
-            shrunk_index = index;
-            continue;
-        }
-        if (post[index].post_view != pre[index].pre_full) return Stage4RemoveDataPlan{};
-        sum_kept_post += post[index].post_view;
     }
-    if (shrunk_index < 0) return plan;
-    const uint32_t pre_full = pre[shrunk_index].pre_full;
     if (sum_vanished > static_cast<uint32_t>(count)) return Stage4RemoveDataPlan{};
-    // 原版部分删堆剩余 = pre_full - (count - 之前整删总量)；入参异常（count 过大、
-    // 恰好等于本堆全量——那应走整删分支）时公式越域，一律 fail-closed。
     const uint32_t deleted_here = static_cast<uint32_t>(count) - sum_vanished;
-    if (deleted_here >= pre_full) return Stage4RemoveDataPlan{};
+    if (deleted_here == 0) return plan;
+
+    int candidate_index = -1;
+    for (int index = 0; index < entry_count; ++index) {
+        if (post[index].item != pre[index].item) continue;
+        const uint32_t pre_full = pre[index].pre_full;
+        const bool range_valid = deleted_here < pre_full;
+        const uint32_t remain = range_valid ? pre_full - deleted_here : 0;
+        const bool b_only_shape =
+            (post[index].post_raw & ~stack_codec::kS2MaskB) ==
+                (pre[index].pre_raw & ~stack_codec::kS2MaskB) &&
+            ((post[index].post_raw & stack_codec::kS2MaskB) >> stack_codec::kS2ShiftB) ==
+                stack_codec::s2_split_b(remain);
+        if (range_valid && b_only_shape) {
+            if (candidate_index >= 0) return Stage4RemoveDataPlan{};
+            candidate_index = index;
+            continue;
+        }
+        if (post[index].post_raw != pre[index].pre_raw) return Stage4RemoveDataPlan{};
+    }
+    if (candidate_index < 0) return plan;
+
+    const uint32_t pre_full = pre[candidate_index].pre_full;
     const uint32_t remain = pre_full - deleted_here;
-    const uint32_t post_view = post[shrunk_index].post_view;
-    if (remain > stack_codec::kS2Max) return Stage4RemoveDataPlan{};
-    if (remain == post_view) return plan;  // 原版 b 写已完整表达 remain（含 a=0）
+    if (remain >= pre_full || remain > stack_codec::kS2Max) return Stage4RemoveDataPlan{};
+    if (remain == post[candidate_index].post_view) return plan;
     plan.correct = true;
-    plan.entry_index = shrunk_index;
+    plan.entry_index = candidate_index;
     plan.remain = remain;
     return plan;
 }

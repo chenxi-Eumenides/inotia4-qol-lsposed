@@ -411,10 +411,11 @@
 - **操作**：执行普通合成和失败注入/失败条件，核对材料、产物和对象释放。
 - **原版链(VMA)**：`MIXSYSTEM_MakeItem@0x11af58`/`UseStuff@0x11b300`，不同 caller 可能原地改装备或生成后保存；产物常经 `INVEN_SaveItem`。
 - **扩展接管点(文件:函数)**：材料扣减 `native_inventory_hook.cpp:remove_item_data_wrapper`（R-56：物理实扣不足时按 category 经 `extension_bag_port.cpp:extension_bag_consume_category` 从扩展袋补扣）；产物入库 `native_inventory_hook.cpp:save_item_wrapper`（H-13 合并/adopt）；`feature/patch/game_patch_craft.inc` 的上层旁路仅覆盖自定义批量宝石入口（当前死代码）。
+- **扣料写回连线**：物理扣料经 H-21 的 `stage4_remove_item_data_plan` 按 R-49 判定原版 b-only 部分删堆并回写 canonical remain，随后才按 R-56 计算物理短缺并从扩展袋补扣。
 - **共享状态读写**：读材料对象/category/count、产物临时对象和物理/扩展容量；写材料删除、产物 adopt、ledger 和 dirty；禁止把类别回滚当 UID 回滚。
-- **必须保持的不变式(引 R-xx)**：不做全局 MIX Hook；材料删除前后校验，产物失败释放；扩展补扣量 = `max(0, count − 物理实扣)`、绝不重复扣（R-56）；无安全逆操作不添加猜测性回滚（R-07、R-15、R-22、R-25）。
+- **必须保持的不变式(引 R-xx)**：不做全局 MIX Hook；材料删除前后校验，产物失败释放；扩展补扣量 = `max(0, count − 物理实扣)`、绝不重复扣（R-56）；H-21 部分删堆按 R-49 的原版 b-only 形态识别并回写 canonical remain；无安全逆操作不添加猜测性回滚（R-07、R-15、R-22、R-25）。
 - **失败语义**：材料不足/产物保存失败/扣款失败返回明确错误；已成功前序产物是否回滚必须按 caller 记录，不自动推导。
-- **Host 测试名(现有或「缺口」)**：`test_remove_data_extension_shortfall`（R-56 补扣量：足额/不足/全扩展/`requested<=0`/数据反向）；缺口：`test_craft_product_failure_ownership`（断言未入库产物释放、材料源校验、失败不伪造扩展提交）。
+- **Host 测试名(现有或「缺口」)**：`test_remove_data_extension_shortfall`（R-56 补扣量：足额/不足/全扩展/`requested<=0`/数据反向）；`test_remove_item_data_plan`（R-49/H-21 写回形态与候选唯一性）；缺口：`test_craft_product_failure_ownership`（断言未入库产物释放、材料源校验、失败不伪造扩展提交）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-22`：①记录材料 payload/count；②执行成功合成；③执行满包/失败合成；④检查材料、产物和日志；预期成功/失败所有权均可追溯，不能以一次成功覆盖五个 caller。
 - **证据锚类型**：真机必需；阶段 5/P6 边界未闭合。
 
@@ -544,7 +545,7 @@
 - **必须保持的不变式(引 R-xx)**：仅 count-encoded 类别可写数量位（R-46）；创建/合并/消耗后 `raw == ((count>>7&7)<<22)|((count&127)<<25)`，`127→128` 写 `a=1,b=0`、`128→127` 写 `a=0,b=127`（R-45）；宝石 bits18–23、袋容量 bits0–24、装备 marker bits25–31 逐字节不变（R-46）；袋对象 marker 写仅 bit25。
 - **失败语义**：非可堆叠/类别不可用时写点拒绝并记 `patch_payload_count ignored ... not_count_encoded`，不得按可堆叠处理；合并超上限走分堆/拒绝，不产生 >999 数量。
 - **Host 测试名(现有或「缺口」)**：`test_stack_codec_s2`（拆段写回/进位/借位/clamp）、`test_stack_codec_mode_invariance`（两态写入/解码一致）、`test_virtual_bag_payload_helpers`（非 count-encoded 与未知类别拒绝）、`test_virtual_bag_merge_count`/`test_virtual_bag_mergeable_items`（合并上限与身份门控）、`test_remove_item_data_plan`（H-21 批量删除部分删堆修正：跨 127 借位、旧 a 残留、已正确不写、全删、count≤0、多缩减/越域 fail-closed）；「S2 编码写回后位模式」断言已随 Host 用例统一 `s2_read_count` 落地（见 §3 对码表备注）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-34`：①启用态经 API 创建数量 `128` 的可堆叠物品，读 `+0x10` 预期 `a=1,b=0`；②扩展袋内合并 `100+100`，预期目标 `a=1,b=44` 且源槽清空；③使用消耗一次使 `128→127`，预期 `a=0,b=127`；④对宝石重复①，预期拒绝且宝石 bits18–23 不变；⑤袋对象装备/卸下各一次，预期容量位 bits0–24 与 marker bit25 不受数量路径影响；⑥关闭扩展重复①，预期原版只作用 b（`a` 保留，R-47）；⑦启用态让同类可堆叠双堆 `199+50`（API 创建两堆不同槽），经合成/事件扣 60（触发 `INVEN_RemoveItemData`，logcat `S2 writeback RemoveItemData`），预期部分删堆 `+0x10` 解码 `139`（`a=1,b=11`），整删堆槽清空。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-34`：①启用态经 API 创建数量 `128` 的可堆叠物品，读 `+0x10` 预期 `a=1,b=0`；②扩展袋内合并 `100+100`，预期目标 `a=1,b=44` 且源槽清空；③使用消耗一次使 `128→127`，预期 `a=0,b=127`；④对宝石重复①，预期拒绝且宝石 bits18–23 不变；⑤袋对象装备/卸下各一次，预期容量位 bits0–24 与 marker bit25 不受数量路径影响；⑥关闭扩展重复①，预期原版只作用 b（`a` 保留，R-47）；⑦验证 H-21 部分删堆回写：`150−25→125`、`199−72→127`、`199−190→9`、`300−128→172`、`300−200→100` 均回写 canonical remain，`300−44→256` 幂等不回写，`300−300` 整堆删除不回写；⑧启用态让同类可堆叠双堆 `199+50`（API 创建两堆不同槽），经合成/事件扣 60（触发 `INVEN_RemoveItemData`，logcat `S2 writeback RemoveItemData`），预期部分删堆 `+0x10` 解码 `139`（`a=1,b=11`），整删堆槽清空。
 - **证据锚类型**：真机 + Host codec/门控 + 源码；本卡未取证前 S2 写侧不得判通过，原版袋内 >127 合并的 a 进位开放点按 §2.1.1 登记归调用方级写点（S2-P3）。16 函数写点收口状态（2026-09-11 反汇编冻结）：已接管 5（含 H-21 `INVEN_RemoveItemData`@0x1040a8，调用方 MIXSYSTEM_UseStuff/QUESTSYSTEM/回滚路径）、数量回写已撤销 1（`ITEMSYSTEM_MakeItem`，R-52：arg2 非数量）、无需接管 8（证据见 `native_inventory_hook.cpp` 语义表）、待勘察 2（`NetworkStore_InitializeMenuData@0x15b7b0`、`NetworkStore_AddItem@0x15d640`——数量来自网络数据，离线不可达，冻结值域前不判通过也不判失败）。
 
 ### VM-37 出售/拆堆数量按 S2 全量（直接位读重定向）

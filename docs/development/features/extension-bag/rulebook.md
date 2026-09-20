@@ -829,6 +829,12 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 - **为什么**：原版写路径没有单一「写数量」函数，各 caller 直接改 `+0x10` 位段；
   `UTIL_SetBitValue` 是无物品指针的通用位工具，hook 点无法判定类别（可堆叠/宝石/
   袋容量/装备 marker 共用），也无法计算进位。分层事实见架构册。
+- **H-21 部分删堆判据**：快照与重扫确认对象未替换后，候选槽必须满足除 b 段外所有
+  `I_COUNT` 位不变，b 段等于理论剩余
+  `((pre_full - (count - sum_vanished)) & 0x7f)`，且 `0 < deleted_here < pre_full`；
+  候选必须唯一。计划将候选槽回写为 canonical `remain`。因此 `post < pre`、
+  `post == pre` 和 `post > pre` 三种 b 段回绕都可修正；整堆删除不回写，多候选、对象
+  替换或其它槽原始字段变化 fail-closed。
 - **16 函数写点收口状态（2026-09-11 反汇编冻结，基线 `.tmp/dualmode-full.asm`）**：
   已接管 5 个——`INVEN_MoveItem`、`INVEN_SaveItemDirect`、`ITEMSYSTEM_Divide`、
   `INVEN_ConsumeItem`、`INVEN_RemoveItemData`（H-21 快照/重扫 +
@@ -1015,6 +1021,10 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 - **典型破坏方式**：让 H-03 与 H-21 对扩展的可见性不一致（识别而不扣）；在
   `count<=0`/类别非法时补扣；持 `g_virtual_bag_mtx` 调原版（R-44）；在调原版之前就
   补扣导致物理与扩展重复扣；把补扣量算成 `count` 而非「`count` − 物理实扣」。
+- **H-21 写回边界**：部分删堆只接受原版 b-only 写回形态（除 b 段外所有位不变，b
+  段等于理论剩余 `(pre_full - (count - sum_vanished)) & 0x7f`，且候选唯一），随后将
+  canonical `remain` 写回；`post < pre`、`post == pre`、`post > pre` 均按此判据处理。
+  多候选、对象替换、其它槽变化和退化输入保持 fail-closed。
 - **验证锚**：Host `stage4_hook_tests::test_remove_data_extension_shortfall`
   （足额/不足/全扩展/`requested<=0`/数据反向 五类分支）；真机 `VM-22`：把药水材料放入
   扩展袋后执行合成，预期材料按量从扩展袋扣减、产物照常入库（待取证）。
