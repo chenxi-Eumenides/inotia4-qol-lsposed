@@ -118,11 +118,12 @@ void drain_deferred_frees_locked() {
     for (size_t offset = 0; offset < count; ++offset) {
         const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
         const DeferredItemFree entry = g_deferred_free_queue[index];
-        if (deferred_item_referenced_locked(entry.item) || fn_itempool_free == nullptr) {
+        if (deferred_item_referenced_locked(entry.item) || extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->inventory.free_item == nullptr) {
             kept[kept_count++] = entry;
             continue;
         }
-        fn_itempool_free(entry.item);
+        (void)extension_free_item(entry.item);
         ++freed_count;
     }
     g_deferred_free_queue = {};
@@ -137,11 +138,12 @@ void drain_deferred_frees_locked() {
     size_t kept_custody_count = 0;
     for (size_t index = 0; index < g_deferred_free_custody_size; ++index) {
         const DeferredItemFree entry = g_deferred_free_custody[index];
-        if (deferred_item_referenced_locked(entry.item) || fn_itempool_free == nullptr) {
+        if (deferred_item_referenced_locked(entry.item) || extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->inventory.free_item == nullptr) {
             kept_custody[kept_custody_count++] = entry;
             continue;
         }
-        fn_itempool_free(entry.item);
+        (void)extension_free_item(entry.item);
         ++freed_count;
     }
     g_deferred_free_custody = {};
@@ -193,7 +195,8 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
     }
 
     const bool touch_window = object_touch_window_active_locked();
-    if (touch_window || fn_itempool_free == nullptr) {
+    if (touch_window || extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.free_item == nullptr) {
         const uint64_t generation = module_object_generation_locked(item, handle);
         if (!enqueue_deferred_item_free_locked(item, handle, generation)) return false;
     }
@@ -202,8 +205,12 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
                     context, handle);
         return false;
     }
-    if (!touch_window && fn_itempool_free != nullptr) fn_itempool_free(item);
-    if (touch_window || fn_itempool_free == nullptr) {
+    if (!touch_window && extension_bag_write_api() != nullptr &&
+        extension_bag_write_api()->inventory.free_item != nullptr) {
+        (void)extension_free_item(item);
+    }
+    if (touch_window || extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.free_item == nullptr) {
         VIRTBAG_LOG("ownership release deferred context=%s touch_window=%d handle=%u", context,
                     touch_window ? 1 : 0, handle);
     }
@@ -468,13 +475,14 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
         if (release.control != nullptr && fn_control_item_set_item != nullptr) {
             fn_control_item_set_item(release.control, nullptr);
         }
-        if (object_touch_window_active_locked() || fn_itempool_free == nullptr) {
+        if (object_touch_window_active_locked() || extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->inventory.free_item == nullptr) {
             deferred = enqueue_deferred_item_free_locked(release.item, release.handle,
                                                          release.generation);
             if (!deferred) return false;
         }
     }
-    if (!deferred) fn_itempool_free(release.item);
+    if (!deferred) (void)extension_free_item(release.item);
     return true;
 }
 

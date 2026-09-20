@@ -514,17 +514,18 @@ bool clear_module_cache_locked() {
 bool serialize_item_payload_locked(void* item,
                                    std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out,
                                    int* out_size) {
-    return virtual_bag::save_item_payload(fn_save_save_item, item, out, out_size) ==
+    return virtual_bag::save_item_payload(extension_serialize_item_payload, item, out, out_size) ==
            virtual_bag::PayloadValidation::kOk;
 }
 
 void release_temporary_item_locked(void* item) {
-    if (item != nullptr && fn_itempool_free != nullptr) fn_itempool_free(item);
+    if (item != nullptr) (void)extension_free_item(item);
 }
 
 void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context) {
     const virtual_bag::ManagedLoadResult result = virtual_bag::load_item_payload_exact(
-        payload, payload_size, fn_save_save_item, fn_save_load_item, fn_itempool_free);
+        payload, payload_size, extension_serialize_item_payload, extension_load_item_payload,
+        extension_free_item_payload);
     if (result.item != nullptr) return result.item;
 
     VIRTBAG_LOG("payload bridge reject context=%s reason=%s validation=%s size=%d",
@@ -582,7 +583,8 @@ bool inventory_slot_locked(int bag, int slot, void** out) {
 
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
-    if (g_inven == nullptr || payload == nullptr || fn_save_save_item == nullptr ||
+    if (g_inven == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.serialize_item == nullptr ||
         payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return false;
     }
@@ -600,7 +602,8 @@ bool original_inventory_contains_payload_locked(const uint8_t* payload, int payl
 
 int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
                                            int target_bag) {
-    if (g_inven == nullptr || payload == nullptr || fn_save_save_item == nullptr ||
+    if (g_inven == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.serialize_item == nullptr ||
         payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return -1;
     }
@@ -770,7 +773,8 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
             if (!inventory_slot_locked(pending.src_bag, pending.src_slot, &src) || src == nullptr) {
                 clear_pending = true;
             } else if (pending.source_payload_size > 0 &&
-                       fn_remove_item_direct != nullptr) {
+                       extension_bag_write_api() != nullptr &&
+                       extension_bag_write_api()->inventory.remove_item_direct != nullptr) {
                 std::array<uint8_t, virtual_bag::kSerializedItemBuffer> source_payload{};
                 int source_size = 0;
                 if (!serialize_item_payload_locked(src, &source_payload, &source_size)) {
@@ -816,8 +820,9 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     pending.payload.data(), pending.payload_size,
                     "recover_pending_extension_to_original", &item_handle);
                 bool loaded = item != nullptr;
-                if (loaded && fn_inven_save_item_on_empty != nullptr) {
-                    if (!fn_inven_save_item_on_empty(item, pending.dst_bag)) {
+                if (loaded && extension_bag_write_api() != nullptr &&
+                    extension_bag_write_api()->inventory.save_item_on_empty != nullptr) {
+                    if (!extension_save_item_on_empty(item, pending.dst_bag)) {
                         release_tracked_item_locked(item_handle, item,
                                                     "recover ext2orig insert failed");
                         loaded = false;

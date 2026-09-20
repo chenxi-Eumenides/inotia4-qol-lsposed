@@ -176,11 +176,13 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (is_seal) {
             if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr ||
                 g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
-                fn_mercenary_make_mercenary == nullptr) {
+                extension_bag_write_api() == nullptr ||
+                extension_bag_write_api()->equipment.make_mercenary == nullptr) {
                 return op_err("symbol not resolved");
             }
         } else if (g_game == nullptr || g_game->read_only.item.is_usable == nullptr ||
-                   fn_char_use_item_ex == nullptr) {
+                   extension_bag_write_api() == nullptr ||
+                   extension_bag_write_api()->equipment.use_item == nullptr) {
             return op_err("symbol not resolved");
         }
         if (!is_seal && !read_item_is_usable(descriptor.category)) {
@@ -196,7 +198,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
             return op_err("extension item already in use");
         }
     }
-    if (closes_description && fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    if (closes_description) extension_description_set_off();
     if (is_seal) {
         // SAVE_IsOK/空槽检查不得持背包锁调用；失败先 abort token 再返回明确错误。
         const bool save_ok = read_save_is_ok();
@@ -208,12 +210,14 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         }
         previous_use_token = g_active_module_use_token;
         g_active_module_use_token = &use_token;
-        used = fn_mercenary_make_mercenary(item) != nullptr;
+        void* mercenary = nullptr;
+        used = extension_make_mercenary(item, &mercenary);
         g_active_module_use_token = previous_use_token;
     } else {
         previous_use_token = g_active_module_use_token;
         g_active_module_use_token = &use_token;
-        used = fn_char_use_item_ex(leader, item, 0) != 0;
+        int use_result = 0;
+        used = extension_use_item(leader, item, 0, &use_result) && use_result != 0;
         g_active_module_use_token = previous_use_token;
     }
     {

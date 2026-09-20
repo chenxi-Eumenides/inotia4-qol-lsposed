@@ -382,3 +382,24 @@ EB 的几何、控件树、命中、页签和格子绘制路径经 `extension_ba
 `ctx.sdk->ui`；插件不直接读取 `CO_*`、`TOUCH_STATE_*`、UI root VMA 或图像句柄。原有
 投影、事务、回滚、owner 写路径不在本组改变。Popup enter alias 接线、fake adapter 测试和
 真机 VM-B 证据仍未完成，因此本组状态为 `NOT_ACCEPTED`。
+
+## EB G4：副作用与所有权写面增补
+
+G4 在 `QolGameHost` 尾部追加 `extension_bag_write`，`kGameHostMinor` 从 8 递增为 9；
+既有成员顺序、偏移和签名保持不变。新增面按 EB 自身写语义分组：
+
+- `inventory`：`save_item_on_empty`、`save_item`、`serialize_item`、`load_item`、
+  `create_item`、`free_item`、`remove_item_direct`、`move_item`；
+- `equipment`：装备交换、镶嵌、物品使用、佣兵生成及金币加减；
+- `ui`：装备/背包/商店/合成刷新、装备状态更新和详情关闭。
+
+每个函数均返回 `QolResult`，原游戏布尔/整数返回值通过 `out_result` 保留；未解析、空对象、
+越界和失败路径不转换为成功。实现路径为 `host/game_host.cpp` → legacy game symbol，
+插件只读取 `QolGameHost::extension_bag_write`。EB 的装备、跨袋入库、移动合并、镶嵌、
+物品使用、佣兵生成、出售金币、序列化/重建和对象释放路径已切换到该窄面；原版刷新
+trampoline、Popup/PtrHook 安装和控件树写仍登记为 G5/S1 缺口。
+
+`test_host_adapters.cpp` 新增 ABI 成员、正常入口可用性和参数拒绝断言；host tests 通过。
+受影响规则为 R-12、R-18、R-34、R-38、R-40、R-41、R-47、R-48、R-49、R-50、R-55、R-63，
+对应 VM-B01～VM-B04、VM-B05、VM-34、VM-40、VM-41。未执行真机回归，因此行为验收仍为
+`NOT_ACCEPTED`。

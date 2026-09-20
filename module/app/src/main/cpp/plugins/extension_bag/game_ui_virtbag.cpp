@@ -193,6 +193,171 @@ bool read_item_category(const void* item, int* out_category) {
     return true;
 }
 
+const qol::contracts::QolExtensionBagWriteApi* extension_bag_write_api() {
+    return g_game == nullptr ? nullptr : &g_game->extension_bag_write;
+}
+
+bool extension_save_item_on_empty(void* item, int bag) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->inventory.save_item_on_empty == nullptr) return false;
+    int32_t result = 0;
+    return qol::contracts::succeeded(api->inventory.save_item_on_empty(item, bag, &result)) &&
+           result != 0;
+}
+
+bool extension_equip_from_inventory(void* character, int bag, int slot, int equip_slot) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->equipment.equip_from_inventory == nullptr) return false;
+    int32_t result = 0;
+    return qol::contracts::succeeded(
+               api->equipment.equip_from_inventory(character, bag, slot, equip_slot, &result)) &&
+           result != 0;
+}
+
+bool extension_apply_stuff(void* target_item, void* material) {
+    const auto* api = extension_bag_write_api();
+    return api != nullptr && api->equipment.apply_stuff != nullptr &&
+           qol::contracts::succeeded(api->equipment.apply_stuff(target_item, material));
+}
+
+bool extension_use_item(void* character, void* item, int arg, int* out_used) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->equipment.use_item == nullptr || out_used == nullptr) return false;
+    int32_t result = 0;
+    const QolResult call = api->equipment.use_item(character, item, arg, &result);
+    if (!qol::contracts::succeeded(call)) return false;
+    *out_used = result;
+    return true;
+}
+
+bool extension_make_mercenary(void* item, void** out_mercenary) {
+    const auto* api = extension_bag_write_api();
+    return api != nullptr && api->equipment.make_mercenary != nullptr &&
+           qol::contracts::succeeded(api->equipment.make_mercenary(item, out_mercenary));
+}
+
+bool extension_add_money(int64_t amount) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->equipment.add_money == nullptr) return false;
+    int32_t result = 0;
+    return qol::contracts::succeeded(api->equipment.add_money(amount, &result)) && result != 0;
+}
+
+bool extension_minus_money(int64_t amount) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->equipment.minus_money == nullptr) return false;
+    int32_t result = 0;
+    return qol::contracts::succeeded(api->equipment.minus_money(amount, &result)) && result != 0;
+}
+
+bool extension_move_item(void* item, int count, int bag, int slot, int* out_result) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->inventory.move_item == nullptr || out_result == nullptr) return false;
+    int32_t result = 0;
+    const QolResult call = api->inventory.move_item(item, count, bag, slot, &result);
+    if (!qol::contracts::succeeded(call)) return false;
+    *out_result = result;
+    return true;
+}
+
+bool extension_remove_item_direct(int bag, int slot, int* out_result) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->inventory.remove_item_direct == nullptr || out_result == nullptr) {
+        return false;
+    }
+    int32_t result = 0;
+    const QolResult call = api->inventory.remove_item_direct(bag, slot, &result);
+    if (!qol::contracts::succeeded(call)) return false;
+    *out_result = result;
+    return true;
+}
+
+bool extension_free_item(void* item) {
+    const auto* api = extension_bag_write_api();
+    return api != nullptr && api->inventory.free_item != nullptr &&
+           qol::contracts::succeeded(api->inventory.free_item(item));
+}
+
+void* extension_create_item(int category, int arg1, int arg2, int arg3) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->inventory.create_item == nullptr) return nullptr;
+    void* item = nullptr;
+    return qol::contracts::succeeded(
+               api->inventory.create_item(category, arg1, arg2, arg3, &item))
+               ? item
+               : nullptr;
+}
+
+bool extension_serialize_item(uint8_t* payload, int payload_capacity, void* item, int* out_size) {
+    const auto* api = extension_bag_write_api();
+    return api != nullptr && api->inventory.serialize_item != nullptr && out_size != nullptr &&
+           qol::contracts::succeeded(
+               api->inventory.serialize_item(payload, payload_capacity, item, out_size));
+}
+
+void* extension_load_item(const uint8_t* payload, int payload_size, int* out_consumed) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->inventory.load_item == nullptr || out_consumed == nullptr) {
+        return nullptr;
+    }
+    void* item = nullptr;
+    const QolResult result =
+        api->inventory.load_item(payload, payload_size, &item, out_consumed);
+    if (qol::contracts::succeeded(result)) return item;
+    if (item != nullptr) (void)extension_free_item(item);
+    return nullptr;
+}
+
+int extension_serialize_item_payload(uint8_t* payload, void* item) {
+    int size = 0;
+    return extension_serialize_item(payload, virtual_bag::kSerializedItemProbeBuffer, item, &size)
+               ? size
+               : 0;
+}
+
+int extension_load_item_payload(const uint8_t* payload, void** out_item, int* out_consumed) {
+    if (out_item == nullptr || out_consumed == nullptr) return 0;
+    *out_item = extension_load_item(payload, virtual_bag::kSerializedItemBuffer, out_consumed);
+    return *out_item == nullptr ? 0 : 1;
+}
+
+void extension_free_item_payload(void* item) { (void)extension_free_item(item); }
+
+void extension_refresh_item_area() {
+    const auto* api = extension_bag_write_api();
+    if (api != nullptr && api->ui.refresh_item_area != nullptr) {
+        (void)api->ui.refresh_item_area();
+    }
+}
+
+void extension_refresh_bag_area() {
+    const auto* api = extension_bag_write_api();
+    if (api != nullptr && api->ui.refresh_bag_area != nullptr) {
+        (void)api->ui.refresh_bag_area();
+    }
+}
+
+void extension_refresh_mix_item() {
+    const auto* api = extension_bag_write_api();
+    if (api != nullptr && api->ui.refresh_mix_item != nullptr) {
+        (void)api->ui.refresh_mix_item();
+    }
+}
+
+void extension_update_character_equip() {
+    const auto* api = extension_bag_write_api();
+    if (api != nullptr && api->ui.update_character_equip != nullptr) {
+        (void)api->ui.update_character_equip();
+    }
+}
+
+void extension_description_set_off() {
+    const auto* api = extension_bag_write_api();
+    if (api != nullptr && api->ui.description_set_off != nullptr) {
+        (void)api->ui.description_set_off();
+    }
+}
+
 bool read_item_cumulate_count(const void* item, int* out_count) {
     if (g_game == nullptr || g_game->read_only.item.cumulate_count == nullptr ||
         item == nullptr || out_count == nullptr) return false;
@@ -394,13 +559,16 @@ bool inventory_slot_locked(int bag, int slot, void** out);
 
 bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
                                  void* expected_item, const char* context) {
-    if (!lock.owns_lock() || fn_remove_item_direct == nullptr || expected_item == nullptr) {
+    if (!lock.owns_lock() || extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.remove_item_direct == nullptr ||
+        expected_item == nullptr) {
         return false;
     }
     lock.unlock();
     {
         NativeCallScope native_call;
-        fn_remove_item_direct(bag, slot);
+        int result = 0;
+        (void)extension_remove_item_direct(bag, slot, &result);
     }
     lock.lock();
 

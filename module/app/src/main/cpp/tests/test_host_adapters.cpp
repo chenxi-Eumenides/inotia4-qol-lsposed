@@ -46,11 +46,25 @@ decltype(fn_remove_item) fn_remove_item = nullptr;
 decltype(fn_item_create_perfect_item) fn_item_create_perfect_item = nullptr;
 decltype(fn_create_item) fn_create_item = nullptr;
 decltype(fn_inven_save_item) fn_inven_save_item = nullptr;
+decltype(fn_inven_save_item_on_empty) fn_inven_save_item_on_empty = nullptr;
+decltype(fn_save_save_item) fn_save_save_item = nullptr;
+decltype(fn_save_load_item) fn_save_load_item = nullptr;
 decltype(fn_itempool_free) fn_itempool_free = nullptr;
+decltype(fn_inven_move_item) fn_inven_move_item = nullptr;
+decltype(fn_equip_item_from_inven_to_slot) fn_equip_item_from_inven_to_slot = nullptr;
+decltype(fn_ui_equip_apply_stuff) fn_ui_equip_apply_stuff = nullptr;
+decltype(fn_char_use_item_ex) fn_char_use_item_ex = nullptr;
+decltype(fn_mercenary_make_mercenary) fn_mercenary_make_mercenary = nullptr;
+decltype(fn_minus_money) fn_minus_money = nullptr;
+decltype(fn_ui_equip_refresh_item_area) fn_ui_equip_refresh_item_area = nullptr;
+decltype(fn_ui_equip_refresh_bag_area) fn_ui_equip_refresh_bag_area = nullptr;
+decltype(fn_ui_store_refresh_inven_bag) fn_ui_store_refresh_inven_bag = nullptr;
+decltype(fn_ui_store_refresh_inven_item) fn_ui_store_refresh_inven_item = nullptr;
 decltype(fn_sound_system_play) fn_sound_system_play = nullptr;
 decltype(fn_uimix_init_mixing_state) fn_uimix_init_mixing_state = nullptr;
 decltype(fn_uimix_reset_stuff_item_control) fn_uimix_reset_stuff_item_control = nullptr;
 decltype(fn_ui_mix_refresh_inven_item) fn_ui_mix_refresh_inven_item = nullptr;
+decltype(fn_ui_equip_update_char_equip) fn_ui_equip_update_char_equip = nullptr;
 decltype(fn_uimix_set_type) fn_uimix_set_type = nullptr;
 decltype(fn_popup_create_ok_from_textdata) fn_popup_create_ok_from_textdata = nullptr;
 decltype(fn_ui_desc_set_off) fn_ui_desc_set_off = nullptr;
@@ -488,6 +502,20 @@ int main() {
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
     assert(game.thread.frame_count() == 99);
+    assert(game.extension_bag_write.inventory.save_item_on_empty != nullptr);
+    assert(game.extension_bag_write.inventory.serialize_item != nullptr);
+    assert(game.extension_bag_write.inventory.load_item != nullptr);
+    assert(game.extension_bag_write.equipment.equip_from_inventory != nullptr);
+    assert(game.extension_bag_write.equipment.add_money != nullptr);
+    assert(game.extension_bag_write.ui.refresh_item_area != nullptr);
+    int32_t write_result = 0;
+    assert(game.extension_bag_write.inventory.save_item_on_empty(nullptr, 0, &write_result).code ==
+           kQolErrInvalidArgument);
+    assert(game.extension_bag_write.equipment.add_money(-1, &write_result).code ==
+           kQolErrInvalidArgument);
+    void* created_item = nullptr;
+    assert(game.extension_bag_write.inventory.create_item(-1, 0, 0, 0, &created_item).code ==
+           kQolErrInvalidArgument);
     assert(game.ui_primitive.insert_inline_color != nullptr);
     char bounded_text[] = "value";
     char* bounded_builder = bounded_text;

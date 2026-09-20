@@ -31,7 +31,7 @@ uint8_t* store_state_entry = nullptr;
 uint64_t store_tab_item_proc(void*, uint64_t, void*, void*);
 
 void store_clear_desc_locked() {
-    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    extension_description_set_off();
 }
 
 int store_tab_index(void* ctrl) {
@@ -57,8 +57,8 @@ void store_refresh_tab_bag_items_locked() {
                 if (defer_item_free_locked(item)) item = nullptr;
             }
         }
-        if (item == nullptr && fn_create_item != nullptr) {
-            item = fn_create_item(static_cast<int32_t>(type), 0, 0, 0);
+        if (item == nullptr) {
+            item = extension_create_item(static_cast<int32_t>(type), 0, 0, 0);
             if (item != nullptr) {
                 const uint32_t flags = *reinterpret_cast<uint32_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_COUNT);
@@ -492,15 +492,16 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
 
     const int count = plan.kind == qol::store_sell::PlanKind::kWhole ? 1 : plan.count;
     const int64_t price = extension_bag_sell_price(item, count, false);
-    if (price < 0 || price != displayed_price || fn_add_money == nullptr ||
-        fn_minus_money == nullptr) {
+    if (price < 0 || price != displayed_price || extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->equipment.add_money == nullptr ||
+        extension_bag_write_api()->equipment.minus_money == nullptr) {
         VIRTBAG_LOG("store sell reject reason=price_mismatch bag=%d slot=%d count=%d price=%lld displayed=%lld",
                     bag, slot, count, static_cast<long long>(price),
                     static_cast<long long>(displayed_price));
         store_sell_popup(0xc);
         return 0;
     }
-    if (!fn_add_money(price)) {
+    if (!extension_add_money(price)) {
         VIRTBAG_LOG("store sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                     static_cast<long long>(price));
         store_sell_popup(0xc);
@@ -544,7 +545,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
         }
     }
     if (!committed) {
-        const bool refunded = fn_minus_money(price) != 0;
+        const bool refunded = extension_minus_money(price);
         VIRTBAG_LOG("store sell remove failed bag=%d slot=%d count=%d price=%lld refunded=%d",
                     bag, slot, count, static_cast<long long>(price), refunded ? 1 : 0);
         store_sell_popup(0xc);

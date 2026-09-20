@@ -10,13 +10,17 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
         return false;
     }
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
-        fn_save_save_item == nullptr || fn_get_cumulate_count == nullptr ||
-        fn_remove_item_direct == nullptr) {
+        extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.serialize_item == nullptr ||
+        fn_get_cumulate_count == nullptr ||
+        extension_bag_write_api()->inventory.remove_item_direct == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d capacity=%d symbols=%d",
                     dst_bag,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
-                    fn_save_save_item != nullptr && fn_get_cumulate_count != nullptr &&
-                    fn_remove_item_direct != nullptr ? 1 : 0);
+                    extension_bag_write_api() != nullptr &&
+                    extension_bag_write_api()->inventory.serialize_item != nullptr &&
+                    fn_get_cumulate_count != nullptr &&
+                    extension_bag_write_api()->inventory.remove_item_direct != nullptr ? 1 : 0);
         return false;
     }
     void* src_item = nullptr;
@@ -148,7 +152,9 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     if (!virtual_bag::valid_original_transaction_bag(target_bag) ||
         !virtual_bag::valid_index(src_bag) ||
         src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
-        fn_inven_save_item_on_empty == nullptr || fn_remove_item_direct == nullptr) {
+        extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->inventory.save_item_on_empty == nullptr ||
+        extension_bag_write_api()->inventory.remove_item_direct == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original src=%d/%d target_bag=%d", src_bag,
                     src_slot, target_bag);
         return false;
@@ -244,7 +250,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         virtual_bag::ext2orig_should_switch_display_bag(g_module_view_installed)) {
         set_original_bag_locked(target_bag);
     }
-    if (item == nullptr || !fn_inven_save_item_on_empty(item, target_bag)) {
+    if (item == nullptr || !extension_save_item_on_empty(item, target_bag)) {
         // P4.5：Load 失败或插入失败隔离。扩展源逻辑物品保留（payload 字节未丢），
         // 事务上下文留作只读诊断；不构造可移动替代项。
         isolate_ext2orig_failure_locked(txn,

@@ -23,8 +23,7 @@ void refresh_tab_bag_items_locked() {
             if (read_item_category(slot, &category) && category == static_cast<int>(type)) continue;
             if (defer_item_free_locked(slot)) slot = nullptr;
         }
-        if (fn_create_item == nullptr) continue;
-        slot = fn_create_item(static_cast<int32_t>(type), 0, 0, 0);
+        slot = extension_create_item(static_cast<int32_t>(type), 0, 0, 0);
         if (slot != nullptr) {
             const uint32_t count_flags =
                 *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT);

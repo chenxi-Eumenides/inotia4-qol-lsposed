@@ -1061,6 +1061,172 @@ QolResult write_craft_cost_zero() {
     return contracts::ok();
 }
 
+QolResult write_extension_save_item_on_empty(void* item, int32_t bag, int32_t* out_result) {
+    if (item == nullptr || out_result == nullptr || bag < 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_inven_save_item_on_empty == nullptr) return not_ready();
+    *out_result = fn_inven_save_item_on_empty(item, bag);
+    return contracts::ok();
+}
+
+QolResult write_extension_save_item(void* item, void* param, int32_t* out_result) {
+    if (item == nullptr || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_inven_save_item == nullptr) return not_ready();
+    *out_result = fn_inven_save_item(item, param);
+    return contracts::ok();
+}
+
+QolResult write_extension_serialize_item(uint8_t* payload, int32_t payload_capacity, void* item,
+                                         int32_t* out_size) {
+    if (payload == nullptr || payload_capacity <= 0 || item == nullptr || out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_save_save_item == nullptr) return not_ready();
+    *out_size = fn_save_save_item(payload, item);
+    if (*out_size < 0 || *out_size > payload_capacity) {
+        return error_result(kQolErrBlocked, "serialized item exceeds buffer");
+    }
+    return contracts::ok();
+}
+
+QolResult write_extension_load_item(const uint8_t* payload, int32_t payload_size, void** out_item,
+                                    int32_t* out_consumed) {
+    if (payload == nullptr || payload_size <= 0 || out_item == nullptr || out_consumed == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_item = nullptr;
+    *out_consumed = 0;
+    if (fn_save_load_item == nullptr) return not_ready();
+    const int result = fn_save_load_item(payload, out_item, out_consumed);
+    return result != 0 && *out_item != nullptr ? contracts::ok()
+                                                 : error_result(kQolErrInternal, "load item failed");
+}
+
+QolResult write_extension_create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                                      void** out_item) {
+    if (category < 0 || out_item == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_item = nullptr;
+    if (fn_create_item == nullptr) return not_ready();
+    *out_item = fn_create_item(category, arg1, arg2, arg3);
+    return *out_item == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult write_extension_free_item(void* item) {
+    if (item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    if (fn_itempool_free == nullptr) return not_ready();
+    fn_itempool_free(item);
+    return contracts::ok();
+}
+
+QolResult write_extension_remove_item_direct(int32_t bag, int32_t slot, int32_t* out_result) {
+    if (bag < 0 || bag >= 6 || slot < 0 || slot >= 16 || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_remove_item_direct == nullptr) return not_ready();
+    *out_result = fn_remove_item_direct(bag, slot);
+    return contracts::ok();
+}
+
+QolResult write_extension_move_item(void* item, int32_t count, int32_t bag, int32_t slot,
+                                    int32_t* out_result) {
+    if (item == nullptr || count < 0 || bag < 0 || slot < 0 || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_inven_move_item == nullptr) return not_ready();
+    *out_result = fn_inven_move_item(item, count, bag, slot);
+    return contracts::ok();
+}
+
+QolResult write_extension_equip_from_inventory(void* character, int32_t bag, int32_t slot,
+                                               int32_t equip_slot, int32_t* out_result) {
+    if (character == nullptr || bag < 0 || slot < 0 || equip_slot < 0 || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_equip_item_from_inven_to_slot == nullptr) return not_ready();
+    *out_result = fn_equip_item_from_inven_to_slot(character, bag, slot, equip_slot);
+    return contracts::ok();
+}
+
+QolResult write_extension_apply_stuff(void* target_item, void* material) {
+    if (target_item == nullptr || material == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_ui_equip_apply_stuff == nullptr) return not_ready();
+    fn_ui_equip_apply_stuff(target_item, material);
+    return contracts::ok();
+}
+
+QolResult write_extension_use_item(void* character, void* item, int32_t arg, int32_t* out_result) {
+    if (character == nullptr || item == nullptr || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_char_use_item_ex == nullptr) return not_ready();
+    *out_result = fn_char_use_item_ex(character, item, arg);
+    return contracts::ok();
+}
+
+QolResult write_extension_make_mercenary(void* item, void** out_mercenary) {
+    if (item == nullptr || out_mercenary == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_mercenary = nullptr;
+    if (fn_mercenary_make_mercenary == nullptr) return not_ready();
+    *out_mercenary = fn_mercenary_make_mercenary(item);
+    return *out_mercenary == nullptr ? error_result(kQolErrInternal, "make mercenary failed")
+                                      : contracts::ok();
+}
+
+QolResult write_extension_add_money(int64_t amount, int32_t* out_result) {
+    if (amount < 0 || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_add_money == nullptr) return not_ready();
+    *out_result = fn_add_money(amount);
+    return contracts::ok();
+}
+
+QolResult write_extension_minus_money(int64_t amount, int32_t* out_result) {
+    if (amount < 0 || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_minus_money == nullptr) return not_ready();
+    *out_result = fn_minus_money(amount);
+    return contracts::ok();
+}
+
+QolResult write_extension_void_call(void (*fn)()) {
+    if (fn == nullptr) return not_ready();
+    fn();
+    return contracts::ok();
+}
+
+QolResult write_extension_refresh_item_area() {
+    return write_extension_void_call(fn_ui_equip_refresh_item_area);
+}
+QolResult write_extension_refresh_bag_area() {
+    return write_extension_void_call(fn_ui_equip_refresh_bag_area);
+}
+QolResult write_extension_refresh_store_inventory() {
+    return write_extension_void_call(fn_ui_store_refresh_inven_bag);
+}
+QolResult write_extension_refresh_store_item() {
+    return write_extension_void_call(fn_ui_store_refresh_inven_item);
+}
+QolResult write_extension_refresh_mix_item() {
+    return write_extension_void_call(fn_ui_mix_refresh_inven_item);
+}
+QolResult write_extension_update_character_equip() {
+    return write_extension_void_call(fn_ui_equip_update_char_equip);
+}
+QolResult write_extension_description_set_off() {
+    return write_extension_void_call(fn_ui_desc_set_off);
+}
+
 QolResult game_call_known(uint32_t, const void*, uint32_t, void*, uint32_t) {
     return unsupported();
 }
@@ -1183,6 +1349,33 @@ contracts::QolGameHost make_game_host() {
                                 &read_inventory_physical_item_at, &read_inventory_detail_context,
                                 &read_inventory_cursor_index, &read_inventory_bag_size,
                                 &read_inventory_is_empty_bag, &read_inventory_find_save_slot};
+    host.extension_bag_write.inventory = {
+        &write_extension_save_item_on_empty,
+        &write_extension_save_item,
+        &write_extension_serialize_item,
+        &write_extension_load_item,
+        &write_extension_create_item,
+        &write_extension_free_item,
+        &write_extension_remove_item_direct,
+        &write_extension_move_item,
+    };
+    host.extension_bag_write.equipment = {
+        &write_extension_equip_from_inventory,
+        &write_extension_apply_stuff,
+        &write_extension_use_item,
+        &write_extension_make_mercenary,
+        &write_extension_add_money,
+        &write_extension_minus_money,
+    };
+    host.extension_bag_write.ui = {
+        &write_extension_refresh_item_area,
+        &write_extension_refresh_bag_area,
+        &write_extension_refresh_store_inventory,
+        &write_extension_refresh_store_item,
+        &write_extension_refresh_mix_item,
+        &write_extension_update_character_equip,
+        &write_extension_description_set_off,
+    };
     return host;
 }
 

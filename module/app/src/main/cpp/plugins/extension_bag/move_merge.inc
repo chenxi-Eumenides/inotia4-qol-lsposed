@@ -59,7 +59,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
         g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
-        g_game->read_only.item.category != nullptr && fn_inven_move_item != nullptr) {
+        g_game->read_only.item.category != nullptr && extension_bag_write_api() != nullptr &&
+        extension_bag_write_api()->inventory.move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
         void* src_data = ctrl_src != nullptr ? extension_bag_ui_data(ctrl_src) : nullptr;
@@ -90,8 +91,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 const bool has_merge_room = target_count > 0 && count > 0 &&
                                             static_cast<uint64_t>(target_count) < stack_limit;
                 if (valid_slots && has_merge_room) {
-                    const int result = fn_inven_move_item(item_a, count, bag, dst_slot);
-                    if (result) {
+                    int result = 0;
+                    const bool move_called = extension_move_item(item_a, count, bag, dst_slot, &result);
+                    if (move_called && result) {
                         if (virtual_bag_module_view_installed()) {
                             virtual_bag_sync_projected_slot(bag, src_slot);
                             virtual_bag_sync_projected_slot(bag, dst_slot);

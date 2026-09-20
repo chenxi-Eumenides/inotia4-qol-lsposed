@@ -136,7 +136,8 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
         return false;
     }
     if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr ||
-        fn_ui_equip_apply_stuff == nullptr) {
+        extension_bag_write_api() == nullptr ||
+        extension_bag_write_api()->equipment.apply_stuff == nullptr) {
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
             virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
         }
@@ -158,11 +159,11 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
     g_active_module_use_token = &use_token;
     lock.unlock();
     const bool save_ok = read_save_is_ok();
-    if (save_ok) fn_ui_equip_apply_stuff(target_item, material);
+    const bool apply_ok = save_ok && extension_apply_stuff(target_item, material);
     g_active_module_use_token = previous_use_token;
     lock.lock();
 
-    if (!save_ok) {
+    if (!apply_ok) {
         module_use_abort_locked(use_token);
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
             virtual_bag::session_finish_transaction(&g_extension_drag_session, false);

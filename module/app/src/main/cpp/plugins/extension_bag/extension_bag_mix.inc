@@ -69,8 +69,8 @@ void mix_refresh_tab_bag_items_locked() {
                 if (defer_item_free_locked(item)) item = nullptr;
             }
         }
-        if (item == nullptr && fn_create_item != nullptr) {
-            item = fn_create_item(static_cast<int32_t>(type), 0, 0, 0);
+        if (item == nullptr) {
+            item = extension_create_item(static_cast<int32_t>(type), 0, 0, 0);
             if (item != nullptr) {
                 const uint32_t flags = *reinterpret_cast<uint32_t*>(
                     reinterpret_cast<uint8_t*>(item) + I_COUNT);
@@ -239,7 +239,7 @@ void mix_install_module_view_locked(int bag) {
         mix_window_original_bag = -1;
         return;
     }
-    fn_ui_mix_refresh_inven_item();
+    extension_refresh_mix_item();
     const int capacity = g_virtual_bag_state.capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
         void* control = valid_child_locked(mix_projected_item_root, slot);
@@ -273,7 +273,7 @@ void mix_restore_module_view_locked() {
         *mix_original_size_word = (*mix_original_size_word & ~kCapacityMask) |
                                   (mix_original_bag_size & kCapacityMask);
     }
-    if (fn_ui_mix_refresh_inven_item != nullptr) fn_ui_mix_refresh_inven_item();
+    extension_refresh_mix_item();
     mix_original_size_word = nullptr;
     mix_original_bag_size = 0;
     mix_window_original_bag = -1;

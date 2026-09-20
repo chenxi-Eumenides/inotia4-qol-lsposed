@@ -201,7 +201,7 @@
 
 ### resource_unknown_symbol（2 条）
 
-- `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:367||ptr slot 无法归属符号`
 - `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:155||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败

@@ -47,9 +47,11 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
         }
     }
     if (!is_backpack_category(category)) return ExtensionBagEquipResult::kReject;
+    const auto* write_api = extension_bag_write_api();
     if (!module_source &&
-        (fn_remove_item_direct == nullptr || fn_inven_save_item_on_empty == nullptr ||
-         fn_save_save_item == nullptr || fn_save_load_item == nullptr || fn_itempool_free == nullptr)) {
+        (write_api == nullptr || write_api->inventory.remove_item_direct == nullptr ||
+         write_api->inventory.save_item_on_empty == nullptr ||
+         write_api->inventory.load_item == nullptr || write_api->inventory.free_item == nullptr)) {
         return ExtensionBagEquipResult::kFailed;
     }
 
@@ -135,7 +137,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     void* rebuilt = load_item_payload_tracked_locked(payload.data(), payload_size,
                                                      "equip_rollback", &rebuilt_handle);
     if (rebuilt != nullptr) {
-        if (fn_inven_save_item_on_empty(rebuilt, src_bag)) {
+        if (extension_save_item_on_empty(rebuilt, src_bag)) {
             handover_tracked_item_locked(rebuilt_handle, rebuilt, "equip rollback handover");
             restored = true;
         } else {
@@ -156,7 +158,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
         g_module_objects[source_bag][source_slot] != item ||
         g_game == nullptr || g_game->read_only.character.can_equip == nullptr ||
         g_game->read_only.character.find_equip_slot == nullptr ||
-        fn_equip_item_from_inven_to_slot == nullptr ||
+        extension_bag_write_api() == nullptr ||
         !g_module_view_installed || g_module_view_index != source_bag ||
         g_module_window_original_bag < 0 || g_module_window_original_bag >= 5) {
         return false;
@@ -193,8 +195,11 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     // 目标槽已有装备时把旧装备写回同一库存槽，再把新装备放入角色槽。
     // 先不调用 CHAR_EquipItem/CHAR_Unequip，后者会跳过交换协议。
     extension_bag_begin_internal_equip();
-    const int equip_result =
-        fn_equip_item_from_inven_to_slot(character, original_bag, source_slot, target);
+    int equip_result = 0;
+    const bool equip_called = extension_bag_write_api() != nullptr &&
+                              extension_equip_from_inventory(character, original_bag, source_slot,
+                                                              target);
+    equip_result = equip_called ? 1 : 0;
     extension_bag_end_internal_equip();
     if (equip_result == 0) {
         *inventory_slot = original_inventory_item;
@@ -291,7 +296,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     } else if (fn_ui_equip_refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
-    if (fn_ui_equip_update_char_equip != nullptr) fn_ui_equip_update_char_equip();
+    extension_update_character_equip();
     if (moving_control != nullptr) reset_drag_state_locked(moving_control);
     if (!switched_view) play_extension_switch_sound();
 }
@@ -397,7 +402,7 @@ void extension_sell_cancel(void*) {
         g_extension_desc_item_bag = -1;
         g_extension_desc_item_slot = -1;
     }
-    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    extension_description_set_off();
     if (original_cancel != nullptr) original_cancel(nullptr);
 }
 
@@ -446,8 +451,9 @@ void extension_sell_ok(void*) {
             return;
         }
         if (g_game == nullptr || g_game->read_only.item.sell_price == nullptr ||
-            g_game->read_only.item.is_no_sell == nullptr || fn_add_money == nullptr ||
-            fn_minus_money == nullptr) {
+            g_game->read_only.item.is_no_sell == nullptr || extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->equipment.add_money == nullptr ||
+            extension_bag_write_api()->equipment.minus_money == nullptr) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
             clear_original_desc_locked();
             return;
@@ -491,7 +497,7 @@ void extension_sell_ok(void*) {
             static_cast<unsigned long long>(g_module_object_use[bag][slot].generation));
     }
 
-    if (price < 0 || !fn_add_money(price)) {
+    if (price < 0 || !extension_add_money(price)) {
         VIRTBAG_LOG("extension sell money credit failed bag=%d slot=%d price=%lld", bag, slot,
                     static_cast<long long>(price));
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -527,7 +533,7 @@ void extension_sell_ok(void*) {
         }
     }
     if (!removed) {
-        const bool refunded = fn_minus_money(price) != 0;
+        const bool refunded = extension_minus_money(price);
         VIRTBAG_LOG("extension sell remove failed bag=%d slot=%d price=%lld refunded=%d", bag,
                     slot, static_cast<long long>(price), refunded ? 1 : 0);
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -764,9 +770,11 @@ bool extension_confirm_use_item(void* item) {
             return false;
         }
         void* character = extension_menu_character();
-        if (character == nullptr || fn_char_use_item_ex == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension confirm-use unavailable bag=%d slot=%d character=%p fn=%p",
-                        bag, slot, character, reinterpret_cast<void*>(fn_char_use_item_ex));
+        if (character == nullptr || extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->equipment.use_item == nullptr) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                        "extension confirm-use unavailable bag=%d slot=%d character=%p",
+                        bag, slot, character);
             return false;
         }
         ModuleUseToken use_token{};
@@ -779,7 +787,8 @@ bool extension_confirm_use_item(void* item) {
         ModuleUseToken* previous_use_token = g_active_module_use_token;
         g_active_module_use_token = &use_token;
         lock.unlock();
-        used = fn_char_use_item_ex(character, item, 0) != 0;
+        int use_result = 0;
+        used = extension_use_item(character, item, 0, &use_result) && use_result != 0;
         lock.lock();
         g_active_module_use_token = previous_use_token;
         bool consumed = false;
@@ -860,7 +869,8 @@ bool extension_use_mercenary_seal() {
             g_game == nullptr || g_game->read_only.item.is_mercenary_seal == nullptr ||
             g_game->read_only.save.is_ok == nullptr ||
             g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
-            fn_mercenary_make_mercenary == nullptr) {
+            extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->equipment.make_mercenary == nullptr) {
             return false;
         }
         item = g_extension_desc_item;
@@ -881,7 +891,7 @@ bool extension_use_mercenary_seal() {
     // 原版按钮顺序：UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MakeMercenary。
     // 游戏函数一律在 g_virtual_bag_mtx 外调用（MakeMercenary 内部会进入
     // INVEN_RemoveItem → H-04 再次取锁，持锁调用必死锁）。
-    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    extension_description_set_off();
     const auto show_popup = [](uint32_t text_id) {
         const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
                                                     F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
@@ -910,7 +920,8 @@ bool extension_use_mercenary_seal() {
     }
     ModuleUseToken* previous_use_token = g_active_module_use_token;
     g_active_module_use_token = &use_token;
-    void* mercenary = fn_mercenary_make_mercenary(item);
+    void* mercenary = nullptr;
+    (void)extension_make_mercenary(item, &mercenary);
     g_active_module_use_token = previous_use_token;
     used = mercenary != nullptr;
     {
@@ -1019,13 +1030,15 @@ void extension_desc_item_execute(void* button) {
             leader = current_item ? extension_menu_character() : nullptr;
             closes_description = current_item;
         }
-        if (leader == nullptr || fn_char_use_item_ex == nullptr || !current_item) {
+        if (leader == nullptr || extension_bag_write_api() == nullptr ||
+            extension_bag_write_api()->equipment.use_item == nullptr || !current_item) {
             // 扩展侧没有完整接管前置条件时，direct/confirm 都必须回退原版按钮，
             // 不能清状态或吞掉原版确认弹窗及其 OK 回调。
             hook->call_orig<void>(button);
             return;
         }
-        if (current_item && leader != nullptr && fn_char_use_item_ex != nullptr) {
+        if (current_item && leader != nullptr && extension_bag_write_api() != nullptr &&
+            extension_bag_write_api()->equipment.use_item != nullptr) {
             if (confirm_use) {
                 // IsUseAfterConfirm 类物品（如卓越灵药）：原版按钮会弹确认
                 // YesNo，其 OK 回调（UIEquip_OKConfrimUseItem）在调
@@ -1033,11 +1046,12 @@ void extension_desc_item_execute(void* button) {
                 // INVEN 会被拦截而无效果。确认使用函数入口由常驻 LSPosed
                 // Native Hook 接管，按回调传入的物品身份分流；此处只让原版
                 // 按钮创建确认弹窗。弹窗创建/关闭不持有背包锁。
-                if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+                extension_description_set_off();
                 hook->call_orig<void>(button);
                 return;
             }
-            used = fn_char_use_item_ex(leader, item, 0) != 0;
+            int use_result = 0;
+            used = extension_use_item(leader, item, 0, &use_result) && use_result != 0;
         }
         {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
@@ -1152,7 +1166,7 @@ void extension_desc_item_execute(void* button) {
                                    fn_popup_create_yesno_from_textdata != nullptr;
         if (popup_created) {
             // 原版按钮先关闭详情再创建确认弹窗；保持同样的 UI 生命周期，且不持有背包锁调用游戏函数。
-            if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+            extension_description_set_off();
             // 先沿用原版回调创建控件。CreateYesNoFromTextData 内部会把 x3
             // 暂时带入原版文本构造链，不能直接传模块函数指针；x5 是弹窗 i32Param。
             fn_popup_create_yesno_from_textdata(

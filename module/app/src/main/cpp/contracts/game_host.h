@@ -418,6 +418,49 @@ struct QolSaveCallApi {
     QolResult (*mark_stale)();
 };
 
+// 扩展背包 owner 的窄写面。成员按库存、装备/经济、UI 刷新分组；不暴露游戏符号、
+// VMA 或通用 call 逃生口。返回值需要保留原游戏布尔/整数语义时，经 out_result 返回。
+struct QolExtensionBagInventoryWriteApi {
+    QolResult (*save_item_on_empty)(void* item, int32_t bag, int32_t* out_result);
+    QolResult (*save_item)(void* item, void* param, int32_t* out_result);
+    QolResult (*serialize_item)(uint8_t* payload, int32_t payload_capacity, void* item,
+                                int32_t* out_size);
+    QolResult (*load_item)(const uint8_t* payload, int32_t payload_size, void** out_item,
+                           int32_t* out_consumed);
+    QolResult (*create_item)(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                             void** out_item);
+    QolResult (*free_item)(void* item);
+    QolResult (*remove_item_direct)(int32_t bag, int32_t slot, int32_t* out_result);
+    QolResult (*move_item)(void* item, int32_t count, int32_t bag, int32_t slot,
+                           int32_t* out_result);
+};
+
+struct QolExtensionBagEquipmentWriteApi {
+    QolResult (*equip_from_inventory)(void* character, int32_t bag, int32_t slot,
+                                      int32_t equip_slot, int32_t* out_result);
+    QolResult (*apply_stuff)(void* target_item, void* material);
+    QolResult (*use_item)(void* character, void* item, int32_t arg, int32_t* out_result);
+    QolResult (*make_mercenary)(void* item, void** out_mercenary);
+    QolResult (*add_money)(int64_t amount, int32_t* out_result);
+    QolResult (*minus_money)(int64_t amount, int32_t* out_result);
+};
+
+struct QolExtensionBagUiWriteApi {
+    QolResult (*refresh_item_area)();
+    QolResult (*refresh_bag_area)();
+    QolResult (*refresh_store_inventory)();
+    QolResult (*refresh_store_item)();
+    QolResult (*refresh_mix_item)();
+    QolResult (*update_character_equip)();
+    QolResult (*description_set_off)();
+};
+
+struct QolExtensionBagWriteApi {
+    QolExtensionBagInventoryWriteApi inventory;
+    QolExtensionBagEquipmentWriteApi equipment;
+    QolExtensionBagUiWriteApi ui;
+};
+
 struct QolQuestReadOnlyApi {
     QolResult (*state)(int32_t* out_state);
     QolResult (*active_slot_count)(uint32_t* out_count);
@@ -491,6 +534,7 @@ struct QolGameHost {
     QolGameHostExtraApi extra;
     QolReadOnlyApi read_only;
     QolSaveCallApi save_call;
+    QolExtensionBagWriteApi extension_bag_write;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -509,10 +553,14 @@ static_assert(offsetof(QolGameHost, read_only) ==
 static_assert(offsetof(QolGameHost, save_call) ==
                   offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
               "QolGameHost save_call ABI offset changed");
-static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, save_call) + sizeof(QolSaveCallApi),
+static_assert(offsetof(QolGameHost, extension_bag_write) ==
+                  offsetof(QolGameHost, save_call) + sizeof(QolSaveCallApi),
+              "QolGameHost save_call ABI tail changed");
+static_assert(sizeof(QolGameHost) ==
+                  offsetof(QolGameHost, extension_bag_write) + sizeof(QolExtensionBagWriteApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 8;
+constexpr uint16_t kGameHostMinor = 9;
 
 }  // namespace qol::contracts
