@@ -44,7 +44,7 @@ PLUGINS_DIR = ac.CPP_ROOT / "plugins"
 BEGIN_MARKER = "<!-- BEGIN GENERATED:stats -->"
 END_MARKER = "<!-- END GENERATED:stats -->"
 
-# 新架构顶层目录（ARCHITECTURE.md §0：八个顶层目录，plugins/ 单层，ADR-0004）。
+# 新架构顶层目录（ARCHITECTURE.md §0：七个顶层目录，plugins/ 单层，ADR-0004）。
 NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "plugins", "host")
 
 # --------------------------------------------------------------------------

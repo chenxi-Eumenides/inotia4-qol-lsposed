@@ -76,6 +76,11 @@ decltype(fn_control_item_get_item) fn_control_item_get_item = nullptr;
 decltype(fn_can_equip) fn_can_equip = nullptr;
 decltype(fn_find_equip_slot) fn_find_equip_slot = nullptr;
 decltype(fn_get_equip_item) fn_get_equip_item = nullptr;
+decltype(fn_set_equip_item) fn_set_equip_item = nullptr;
+decltype(fn_put_jewel) fn_put_jewel = nullptr;
+decltype(fn_ui_desc_get_data) fn_ui_desc_get_data = nullptr;
+decltype(fn_ui_equip_inven_item_control_event_proc)
+    fn_ui_equip_inven_item_control_event_proc = nullptr;
 decltype(fn_mercenary_is_empty_manager_slot) fn_mercenary_is_empty_manager_slot = nullptr;
 decltype(fn_is_enchant_scroll) fn_is_enchant_scroll = nullptr;
 decltype(fn_is_mercenary_seal) fn_is_mercenary_seal = nullptr;
@@ -84,6 +89,9 @@ decltype(fn_save_is_ok) fn_save_is_ok = nullptr;
 decltype(fn_get_bag_size) fn_get_bag_size = nullptr;
 decltype(fn_is_empty_bag) fn_is_empty_bag = nullptr;
 decltype(fn_inven_find_save_slot) fn_inven_find_save_slot = nullptr;
+
+int tutorial_state() { return 0; }
+void tutorial_cancel() {}
 
 int fake_item_rarity(void*) { return 9; }
 int fake_item_no_sell(int32_t) { return 0; }
@@ -390,6 +398,18 @@ int main() {
     assert(sdk.store.delete_slot != nullptr);
     assert(sdk.store.register_participant != nullptr);
     assert(sdk.store.save_game != nullptr);
+    assert(sdk.desc_button.bind != nullptr);
+    assert(sdk.desc_button.unbind != nullptr);
+    assert(sdk.desc_button.current_proc != nullptr);
+    assert(sdk.desc_button.original_matches != nullptr);
+    assert(sdk.desc_button.call_original != nullptr);
+    void* desc_original = nullptr;
+    assert(sdk.desc_button.bind(11, nullptr, &desc_original).code == kQolErrInvalidArgument);
+    assert(sdk.desc_button.unbind(11).code == kQolErrInvalidArgument);
+    assert(sdk.desc_button.current_proc(0, nullptr).code == kQolErrInvalidArgument);
+    assert(sdk.desc_button.original_matches(nullptr, "symbol", nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(sdk.desc_button.call_original(nullptr, nullptr).code == kQolErrInvalidArgument);
 
     static_assert(sizeof(qol::contracts::QolStoreApi) == sizeof(void*) * 9,
                   "store ABI member count changed");

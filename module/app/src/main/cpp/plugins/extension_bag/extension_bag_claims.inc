@@ -38,12 +38,6 @@ T extension_bag_backup_value(const uint8_t* backup, size_t offset) {
     std::memcpy(&value, backup + offset, sizeof(value));
     return value;
 }
-uintptr_t extension_bag_backup_uptr(const uint8_t* backup, size_t offset) {
-    uintptr_t value = 0;
-    std::memcpy(&value, backup + offset, sizeof(value));
-    return value;
-}
-
 // event 回调适配：游戏事件回调返回 uintptr_t，hooks/popup_state 契约固定 32 位返回值。
 uint32_t virtual_bag_event_32(uint64_t event, uint64_t param, uint64_t param2) {
     return static_cast<uint32_t>(virtual_bag_event(event, param, param2));
@@ -60,9 +54,6 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
     ::qol::contracts::QolPopupStateEntry entry{};
     if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
         g_sdk->hooks.popup_resolve("F_PANEL_INVENTORY_ENTER", &entry).ok != kQolOk) return 1;
-    const uintptr_t expected_event =
-        g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
-    if (extension_bag_backup_uptr(entry.backup, POPUP_ENTRY_EVENT) != expected_event) return 1;
     const ::qol::contracts::QolPopupStateHooks h{
         &virtual_bag_inventory_enter_wrapper,
         nullptr,
@@ -74,10 +65,12 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
         g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_inventory_popup_entry = entry;
     g_state_entry = entry.slot;
-    g_orig_enter = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
+    g_orig_enter = extension_bag_backup_value<PopupNoArgFn>(
+        entry.backup, kPopupStateEntryEnterOffset);
     g_inventory_enter = reinterpret_cast<uintptr_t>(g_orig_enter);
-    g_orig_f3 = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_F3);
-    g_orig_event = extension_bag_backup_value<PopupEventFn>(entry.backup, POPUP_ENTRY_EVENT);
+    g_orig_f3 = extension_bag_backup_value<PopupNoArgFn>(entry.backup, kPopupStateEntryF3Offset);
+    g_orig_event = extension_bag_backup_value<PopupEventFn>(
+        entry.backup, kPopupStateEntryEventOffset);
     return 0;
 }
 void extension_bag_inventory_popup_release(const char* id) {
@@ -108,7 +101,8 @@ int32_t extension_bag_save_popup_acquire(const char* id) {
         g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_save_popup_entry = entry;
     g_save_state_entry = entry.slot;
-    g_orig_save_enter = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
+    g_orig_save_enter = extension_bag_backup_value<PopupNoArgFn>(
+        entry.backup, kPopupStateEntryEnterOffset);
     g_save_panel_hook_installed = true;
     return 0;
 }
@@ -132,9 +126,6 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
     ::qol::contracts::QolPopupStateEntry entry{};
     if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
         g_sdk->hooks.popup_resolve("F_PANEL_SHOP_ENTER", &entry).ok != kQolOk) return 1;
-    const uintptr_t expected_event =
-        g_base + fn_resolve("F_SCENE_EVENT_STORE_VMA", F_SCENE_EVENT_STORE_VMA);
-    if (extension_bag_backup_uptr(entry.backup, POPUP_ENTRY_EVENT) != expected_event) return 1;
     const ::qol::contracts::QolPopupStateHooks h{
         &store_enter_wrapper,
         nullptr,
@@ -147,11 +138,11 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
     g_store_popup_entry = entry;
     store_state_entry = entry.slot;
     store_original_enter =
-        extension_bag_backup_value<StoreSceneNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
+        extension_bag_backup_value<StoreSceneNoArgFn>(entry.backup, kPopupStateEntryEnterOffset);
     store_original_f3 =
-        extension_bag_backup_value<StoreSceneNoArgFn>(entry.backup, POPUP_ENTRY_F3);
+        extension_bag_backup_value<StoreSceneNoArgFn>(entry.backup, kPopupStateEntryF3Offset);
     store_original_event =
-        extension_bag_backup_value<StoreSceneEventFn>(entry.backup, POPUP_ENTRY_EVENT);
+        extension_bag_backup_value<StoreSceneEventFn>(entry.backup, kPopupStateEntryEventOffset);
     return 0;
 }
 void extension_bag_store_popup_release(const char* id) {
@@ -175,18 +166,16 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
     ::qol::contracts::QolPopupStateEntry entry{};
     if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
         g_sdk->hooks.popup_resolve("F_PANEL_CRAFT_ENTER", &entry).ok != kQolOk) return 1;
-    const uintptr_t expected_event =
-        g_base + fn_resolve("F_SCENE_EVENT_MIX_VMA", F_SCENE_EVENT_MIX_VMA);
-    if (extension_bag_backup_uptr(entry.backup, POPUP_ENTRY_EVENT) != expected_event) return 1;
     const ::qol::contracts::QolPopupStateHooks h{
         &mix_enter_wrapper, nullptr, &mix_f3_wrapper, nullptr, nullptr};
     if (g_sdk->hooks.popup_acquire == nullptr ||
         g_sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_mix_popup_entry = entry;
     mix_state_entry = entry.slot;
-    mix_original_enter =
-        extension_bag_backup_value<MixSceneNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
-    mix_original_f3 = extension_bag_backup_value<MixSceneNoArgFn>(entry.backup, POPUP_ENTRY_F3);
+    mix_original_enter = extension_bag_backup_value<MixSceneNoArgFn>(
+        entry.backup, kPopupStateEntryEnterOffset);
+    mix_original_f3 = extension_bag_backup_value<MixSceneNoArgFn>(
+        entry.backup, kPopupStateEntryF3Offset);
     return 0;
 }
 void extension_bag_mix_popup_release(const char* id) {
@@ -204,8 +193,7 @@ void extension_bag_mix_popup_release(const char* id) {
 // ---- S1：desc 动态实例槽命名空间占位（per-item 安装仍是业务 raw 写入）----
 int32_t extension_bag_desc_slots_acquire(const char* id) {
     (void)id;
-    // 仅登记命名空间所有权；per-item 的 install/reset 调用点保持原样（raw PtrHook），
-    // 清除条件 = U11 动态绑定器落地。
+    // 仅登记命名空间所有权；per-item 绑定由 Host SDK 动态按钮接口管理。
     return 0;
 }
 void extension_bag_desc_slots_release(const char* id) {
@@ -236,7 +224,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
     static const ::qol::contracts::ResourceClaim kClaims[] = {
         {
             kEbM1SaveInventory,
-            "F_SAVE_SAVE_INVENTORY_VMA",
+            "extension.save_inventory",
             ::qol::contracts::ResourceMechanism::kEntryHook,
             ::qol::contracts::ResourcePolicy::kPrivate,
             ::qol::contracts::ResourceRequirement::kRequired,
@@ -250,7 +238,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
         },
         {
             kEbM2StoreSellItem,
-            "F_UISTORE_SELL_ITEM_VMA",
+            "extension.store_sell_item",
             ::qol::contracts::ResourceMechanism::kEntryHook,
             ::qol::contracts::ResourcePolicy::kPrivate,
             ::qol::contracts::ResourceRequirement::kRequired,
@@ -327,7 +315,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceFailure::kFailSoft,
             true,
             "extension_bag",
-            "11 个动态 desc 实例槽命名空间占位；per-item 安装仍是业务路径裸指针槽写入，清除条件 = U11 动态绑定器落地",
+            "11 个动态 desc 实例槽命名空间占位；per-item 安装由 Host SDK 动态绑定器管理",
             kEbGateKey,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbDescSlotsOps)),

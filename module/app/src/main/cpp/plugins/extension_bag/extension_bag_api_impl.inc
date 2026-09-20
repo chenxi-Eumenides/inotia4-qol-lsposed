@@ -190,7 +190,10 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         }
 
         item = module_item_locked(bag, slot);
-        leader = member_or_null(0);
+        leader = nullptr;
+        if (g_game != nullptr && g_game->read_only.character.party_member != nullptr) {
+            (void)g_game->read_only.character.party_member(0, &leader);
+        }
         if (item == nullptr) return op_err("extension item unavailable");
         if (!is_seal && leader == nullptr) return op_err("no leader");
         closes_description = g_extension_desc_item == item;
@@ -248,7 +251,13 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         g_extension_desc_item_bag = -1;
         g_extension_desc_item_slot = -1;
     }
-    if (used && tutorial_state() == 6) tutorial_cancel();
+    int32_t current_tutorial_state = -1;
+    if (used && g_game != nullptr && g_game->read_only.world.tutorial_state != nullptr &&
+        g_game->world_action.cancel_tutorial != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.world.tutorial_state(&current_tutorial_state)) &&
+        current_tutorial_state == 6) {
+        (void)g_game->world_action.cancel_tutorial();
+    }
     return op_ok();
 }
 
@@ -258,7 +267,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
     const int bag = extension_internal_bag(logical_bag);
     if (bag < 0) return op_err("bad extension bag (6-10)");
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
-    if (equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) return op_err("bad equip slot");
+    if (equip_slot < 0 || equip_slot >= kEquipSlotCount) return op_err("bad equip slot");
 
     void* jewel = nullptr;
     void* equip = nullptr;
@@ -272,16 +281,25 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         if (slot >= g_virtual_bag_state.capacities[bag]) return op_err("slot beyond derived capacity");
         const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
-        if (fn_put_jewel == nullptr || fn_is_jewel == nullptr) {
+        if (g_game == nullptr || g_game->read_only.item.is_jewel_category == nullptr ||
+            g_game->read_only.character.party_member == nullptr ||
+            g_game->read_only.character.equipped_item == nullptr ||
+            g_game->extension_bag_write.equipment.put_jewel == nullptr) {
             return op_err("symbol not resolved");
         }
-        if (!fn_is_jewel(descriptor.category)) return op_err("not jewel");
+        int32_t is_jewel = 0;
+        if (!qol::contracts::succeeded(
+                g_game->read_only.item.is_jewel_category(descriptor.category, &is_jewel)) ||
+            is_jewel == 0) return op_err("not jewel");
 
-        void* ch = member_or_null(role);
+        void* ch = nullptr;
+        (void)g_game->read_only.character.party_member(role, &ch);
         if (ch == nullptr) return op_err("role not found");
         jewel = module_item_locked(bag, slot);
-        equip = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(ch) +
-                                          C_EQUIP + equip_slot * sizeof(void*));
+        if (!qol::contracts::succeeded(
+                g_game->read_only.character.equipped_item(ch, equip_slot, &equip))) {
+            return op_err("equip slot unavailable");
+        }
         if (jewel == nullptr) return op_err("extension jewel unavailable");
         if (equip == nullptr) return op_err("equip slot empty");
 
@@ -294,8 +312,17 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
 
     previous_use_token = g_active_module_use_token;
     g_active_module_use_token = &use_token;
-    const int result = fn_put_jewel(equip, jewel);
+    int32_t result = -1;
+    const bool put_jewel_succeeded =
+        g_game != nullptr &&
+        qol::contracts::succeeded(
+            g_game->extension_bag_write.equipment.put_jewel(equip, jewel, &result));
     g_active_module_use_token = previous_use_token;
+    if (!put_jewel_succeeded) {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        (void)module_use_abort_locked(use_token);
+        return op_err("put jewel unavailable");
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);

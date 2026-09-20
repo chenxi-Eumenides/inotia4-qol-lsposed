@@ -16,6 +16,7 @@
 #include "game/access/ui_choice.h"
 #include "game/access/world.h"
 #include "game/clock.h"
+#include "game_state.h"
 #include "core/native/game_feature.h"
 #include "core/native/game_variant.h"
 
@@ -273,6 +274,23 @@ QolResult read_inventory_find_save_slot(const void* item, int32_t* out_slot) {
     return qol::game::find_save_slot(item, out_slot);
 }
 
+QolResult read_inventory_cursor_item(const void* control, void** out_item) {
+    if (control == nullptr || out_item == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_control_object_get_cursor == nullptr) return not_ready();
+    *out_item = fn_control_object_get_cursor(const_cast<void*>(control));
+    return *out_item == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult read_inventory_detail_item(void** out_item) {
+    if (out_item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    if (fn_ui_desc_get_data == nullptr) return not_ready();
+    *out_item = fn_ui_desc_get_data();
+    return *out_item == nullptr ? error_result(kQolErrNotFound, "detail item not found")
+                                : contracts::ok();
+}
+
 QolResult read_craft_ui_type(uint32_t* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     const int64_t value = qol::game::craft_ui_type();
@@ -482,6 +500,15 @@ QolResult write_char_hp(void* character, int32_t value) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     return qol::game::char_write_hp(character, value) ? contracts::ok() : not_ready();
+}
+
+QolResult write_char_equipped_item(void* character, int32_t slot, void* item) {
+    if (character == nullptr || slot < 0 || slot >= 10) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_set_equip_item == nullptr) return not_ready();
+    fn_set_equip_item(character, slot, item);
+    return contracts::ok();
 }
 
 QolResult read_item_rarity(const void* item, int32_t* out) {
@@ -759,6 +786,12 @@ QolResult read_world_money(int64_t* out) {
     return contracts::ok();
 }
 
+QolResult read_world_tutorial_state(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out = tutorial_state();
+    return contracts::ok();
+}
+
 QolResult call_world_create_yesno(const char* text, uint32_t text_len, void* ok, void* cancel,
                                   void* param) {
     if (text == nullptr || text_len == 0 || text_len > 4096 || ok == nullptr || cancel == nullptr) {
@@ -800,6 +833,11 @@ QolResult call_world_show_banner(const char* text) {
 QolResult call_world_add_money(int64_t amount) {
     if (amount < 0) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (fn_add_money == nullptr || fn_add_money(amount) == 0) return not_ready();
+    return contracts::ok();
+}
+
+QolResult call_world_cancel_tutorial() {
+    tutorial_cancel();
     return contracts::ok();
 }
 
@@ -1204,6 +1242,15 @@ QolResult write_extension_minus_money(int64_t amount, int32_t* out_result) {
     return contracts::ok();
 }
 
+QolResult write_extension_put_jewel(void* equip_item, void* jewel_item, int32_t* out_result) {
+    if (equip_item == nullptr || jewel_item == nullptr || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_put_jewel == nullptr) return not_ready();
+    *out_result = fn_put_jewel(equip_item, jewel_item);
+    return contracts::ok();
+}
+
 QolResult write_extension_void_call(void (*fn)()) {
     if (fn == nullptr) return not_ready();
     fn();
@@ -1278,6 +1325,76 @@ QolResult write_extension_draw_original_items() {
     return contracts::ok();
 }
 
+QolResult write_extension_create_confirmation(int32_t variant, uint32_t price, void* ok_wrapper,
+                                              void* cancel_wrapper, void** out_original_ok,
+                                              void** out_original_cancel) {
+    if ((variant != 0 && variant != 1) || ok_wrapper == nullptr || cancel_wrapper == nullptr ||
+        out_original_ok == nullptr || out_original_cancel == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_original_ok = nullptr;
+    *out_original_cancel = nullptr;
+    if (fn_popup_create_yesno_from_textdata == nullptr || g_base == 0) return not_ready();
+    const char* symbol = variant != 0 ? "F_UIEQUIP_OK_DESTROY_ITEM_VMA"
+                                      : "F_UISTORE_SELL_ITEM_VMA";
+    const uintptr_t fallback = variant != 0 ? F_UIEQUIP_OK_DESTROY_ITEM_VMA
+                                            : F_UISTORE_SELL_ITEM_VMA;
+    const uintptr_t original = g_base + fn_resolve(symbol, fallback);
+    if (original == g_base) return not_ready();
+    using PopupCallback = void (*)(void*);
+    fn_popup_create_yesno_from_textdata(
+        9, 0, 2, reinterpret_cast<void*>(original), nullptr,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(price)));
+    auto* ok_slot = reinterpret_cast<PopupCallback*>(g_base + G_POPUP_FPOK_VMA);
+    auto* cancel_slot = reinterpret_cast<PopupCallback*>(g_base + G_POPUP_FPCANCEL_VMA);
+    *out_original_ok = reinterpret_cast<void*>(*ok_slot);
+    *out_original_cancel = reinterpret_cast<void*>(*cancel_slot);
+    *ok_slot = reinterpret_cast<PopupCallback>(ok_wrapper);
+    *cancel_slot = reinterpret_cast<PopupCallback>(cancel_wrapper);
+    return contracts::ok();
+}
+
+QolResult write_extension_restore_confirmation(int32_t variant, void* ok_wrapper,
+                                               void* cancel_wrapper, void* original_ok,
+                                               void* original_cancel) {
+    if ((variant != 0 && variant != 1) || ok_wrapper == nullptr || cancel_wrapper == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (g_base == 0) return not_ready();
+    using PopupCallback = void (*)(void*);
+    auto* ok_slot = reinterpret_cast<PopupCallback*>(g_base + G_POPUP_FPOK_VMA);
+    auto* cancel_slot = reinterpret_cast<PopupCallback*>(g_base + G_POPUP_FPCANCEL_VMA);
+    if (*ok_slot == reinterpret_cast<PopupCallback>(ok_wrapper)) {
+        *ok_slot = reinterpret_cast<PopupCallback>(original_ok);
+    }
+    if (*cancel_slot == reinterpret_cast<PopupCallback>(cancel_wrapper)) {
+        *cancel_slot = reinterpret_cast<PopupCallback>(original_cancel);
+    }
+    return contracts::ok();
+}
+
+QolResult write_extension_original_bag_item(int32_t bag, void** out_item) {
+    if (bag < 0 || bag >= 6 || out_item == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (g_base == 0) return not_ready();
+    auto* table = reinterpret_cast<void**>(g_base + G_BAG_TABLE_VMA);
+    if (table == nullptr) return not_ready();
+    *out_item = table[bag];
+    return contracts::ok();
+}
+
+QolResult write_extension_set_original_bag_item(int32_t bag, void* item) {
+    if (bag < 0 || bag >= 6) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (g_base == 0) return not_ready();
+    auto* table = reinterpret_cast<void**>(g_base + G_BAG_TABLE_VMA);
+    if (table == nullptr) return not_ready();
+    table[bag] = item;
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -1318,7 +1435,7 @@ contracts::QolGameHost make_game_host() {
     host.read_only.world = {&read_world_position, &read_world_state,
                             &read_world_map_record_count, &read_world_current_map_id,
                             &read_world_map_name, &read_world_direction, &read_world_money,
-                            &read_world_game_state_gate};
+                            &read_world_game_state_gate, &read_world_tutorial_state};
     host.read_only.craft = {
         &read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
         &read_craft_selected_index, &read_craft_selected_item, &read_craft_stuff_item,
@@ -1342,7 +1459,8 @@ contracts::QolGameHost make_game_host() {
     host.read_only.inventory = {&read_inventory_item_ref_at, &read_inventory_for_each_bag_slot,
                                 &read_inventory_physical_item_at, &read_inventory_detail_context,
                                 &read_inventory_cursor_index, &read_inventory_bag_size,
-                                &read_inventory_is_empty_bag, &read_inventory_find_save_slot};
+                                &read_inventory_is_empty_bag, &read_inventory_find_save_slot,
+                                &read_inventory_cursor_item, &read_inventory_detail_item};
     host.extension_bag_write.inventory = {
         &write_extension_save_item_on_empty,
         &write_extension_save_item,
@@ -1361,6 +1479,7 @@ contracts::QolGameHost make_game_host() {
         &write_extension_make_mercenary,
         &write_extension_add_money,
         &write_extension_minus_money,
+        &write_extension_put_jewel,
     };
     host.extension_bag_write.ui = {
         &write_extension_refresh_item_area,
@@ -1381,7 +1500,11 @@ contracts::QolGameHost make_game_host() {
     host.extension_bag_write.ui.set_bag_capacity_word = &write_extension_set_bag_capacity_word;
     host.extension_bag_write.ui.draw_original_bag = &write_extension_draw_original_bag;
     host.extension_bag_write.ui.draw_original_items = &write_extension_draw_original_items;
-    host.character_write = {&write_char_max_hp, &write_char_hp};
+    host.extension_bag_write.ui.create_confirmation = &write_extension_create_confirmation;
+    host.extension_bag_write.ui.restore_confirmation = &write_extension_restore_confirmation;
+    host.extension_bag_write.ui.original_bag_item = &write_extension_original_bag_item;
+    host.extension_bag_write.ui.set_original_bag_item = &write_extension_set_original_bag_item;
+    host.character_write = {&write_char_max_hp, &write_char_hp, &write_char_equipped_item};
     host.inventory_write = {&write_inventory_remove_item_data,
                             &write_inventory_remove_item,
                             &write_inventory_create_perfect_item,
@@ -1396,7 +1519,8 @@ contracts::QolGameHost make_game_host() {
                          &call_craft_description_set_off};
     host.world_action = {&call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
                          &call_world_close_popup, &call_world_restore_hud,
-                         &call_world_show_banner, &call_world_add_money};
+                         &call_world_show_banner, &call_world_add_money,
+                         &call_world_cancel_tutorial};
     host.quest_write = {&write_quest_state};
     host.choice_action = {&call_choice_write_items, &call_choice_write_title,
                           &call_choice_write_focus, &call_choice_push,

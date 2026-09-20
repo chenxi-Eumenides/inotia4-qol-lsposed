@@ -89,24 +89,39 @@ bool extension_desc_button_instance(uint32_t index, void** out_button) {
 bool extension_desc_button_original_matches(void* original, const char* symbol) {
     if (original == nullptr || symbol == nullptr || g_base == 0) return false;
     uintptr_t vma = 0;
-    if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_EXE_VMA") == 0) {
+    const char* resolved_symbol = symbol;
+    if (std::strcmp(symbol, "desc.button.use") == 0 ||
+        std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_USE_EXE_VMA;
-    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA") == 0) {
+        resolved_symbol = "F_UIEQUIP_BUTTON_USE_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.use_after_confirm") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA;
-    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA") == 0) {
+        resolved_symbol = "F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.destroy") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_DESTROY_EXE_VMA;
-    } else if (std::strcmp(symbol, "F_UISTORE_BUTTON_SELL_EXE_VMA") == 0) {
+        resolved_symbol = "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.sell") == 0 ||
+               std::strcmp(symbol, "F_UISTORE_BUTTON_SELL_EXE_VMA") == 0) {
         vma = F_UISTORE_BUTTON_SELL_EXE_VMA;
-    } else if (std::strcmp(symbol, "F_UIEQUIP_OK_DESTROY_ITEM_VMA") == 0) {
+        resolved_symbol = "F_UISTORE_BUTTON_SELL_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.destroy_ok") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_OK_DESTROY_ITEM_VMA") == 0) {
         vma = F_UIEQUIP_OK_DESTROY_ITEM_VMA;
-    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA") == 0) {
+        resolved_symbol = "F_UIEQUIP_OK_DESTROY_ITEM_VMA";
+    } else if (std::strcmp(symbol, "desc.button.equip") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_EQUIP_EXE_VMA;
-    } else if (std::strcmp(symbol, "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA") == 0) {
+        resolved_symbol = "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.unequip") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA;
+        resolved_symbol = "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA";
     } else {
         return false;
     }
-    return original == reinterpret_cast<void*>(g_base + fn_resolve(symbol, vma));
+    return original == reinterpret_cast<void*>(g_base + fn_resolve(resolved_symbol, vma));
 }
 
 }  // namespace qol::game

@@ -5,6 +5,35 @@
 
 #define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kPlatform, __VA_ARGS__)
 
+bool move_merge_control_slot(void* control, int32_t* out_slot) {
+    return g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->control_item_slot != nullptr &&
+           out_slot != nullptr &&
+           qol::contracts::succeeded(g_sdk->ui->control_item_slot(control, out_slot));
+}
+
+bool move_merge_can_apply_stuff(void* target, void* material) {
+    int32_t allowed = 0;
+    return g_game != nullptr && g_game->read_only.character.can_apply_stuff != nullptr &&
+           qol::contracts::succeeded(
+               g_game->read_only.character.can_apply_stuff(target, material, &allowed)) &&
+           allowed != 0;
+}
+
+bool move_merge_set_cursor(void* control, void* cursor) {
+    return g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->set_touch_cursor != nullptr &&
+           qol::contracts::succeeded(g_sdk->ui->set_touch_cursor(control, cursor));
+}
+
+uint64_t move_merge_call_original(void* control, uint64_t event, void* x2, void* param) {
+    uint64_t result = 0;
+    if (g_sdk == nullptr || g_sdk->hooks.call_original_control_proc == nullptr ||
+        !qol::contracts::succeeded(g_sdk->hooks.call_original_control_proc(
+            control, event, x2, param, &result))) {
+        return 0;
+    }
+    return result;
+}
+
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
     const uint64_t observation_token = virtual_bag_observe_item_proc_pre(control, event, x2, param);
     const auto finish = [observation_token, control, event, x2, param](uint64_t result) {
@@ -34,19 +63,15 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
             virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param,
                                                  ctrl_src);
-            const uintptr_t caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-            const uint64_t caller_offset =
-                g_base != 0 && caller >= g_base ? static_cast<uint64_t>(caller - g_base) : 0;
-            if (virtual_bag_allow_original_tab_drop(control, ctrl_src, caller_offset)) {
-                const uint64_t result = fn_ui_equip_inven_item_control_event_proc(
-                    control, event, x2, param);
+            if (virtual_bag_allow_original_tab_drop(control, ctrl_src, 0)) {
+                const uint64_t result = move_merge_call_original(control, event, x2, param);
                 return finish(result);
             }
         }
         // G-9 防护：扩展标签挂物品列表 root（索引 16+），GetItemSlotIndex 对其返回
         // 越界值 16——drop 落到标签控件时直接拒绝，防越界写。
-        if (fn_ui_equip_get_item_slot_index != nullptr &&
-            fn_ui_equip_get_item_slot_index(control) >= 16) {
+        int32_t control_slot = -1;
+        if (move_merge_control_slot(control, &control_slot) && control_slot >= 16) {
             QOL_LOG_DEBUG(QolDomain::kPlatform,
                           "drop suppressed: dst is extension tab control=%p", control);
             return finish(0);
@@ -57,10 +82,11 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         return finish(0);
     }
     if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
-        fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
         g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
         g_game->read_only.item.category != nullptr && extension_bag_write_api() != nullptr &&
-        extension_bag_write_api()->inventory.move_item != nullptr) {
+        extension_bag_write_api()->inventory.move_item != nullptr &&
+        g_game->read_only.character.can_apply_stuff != nullptr &&
+        g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->control_item_slot != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
         void* src_data = ctrl_src != nullptr ? extension_bag_ui_data(ctrl_src) : nullptr;
@@ -68,16 +94,23 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         void* item_a = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
         void* item_b = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
         if (item_a != nullptr && item_b != nullptr &&
-            !fn_ui_equip_is_apply_stuff(item_b, item_a) &&
+            !move_merge_can_apply_stuff(item_b, item_a) &&
             item_count_encoding(item_a) == ::qol::contracts::QolItemCountEncoding::kEncoded &&
             item_count_encoding(item_b) == ::qol::contracts::QolItemCountEncoding::kEncoded) {
             int category_a = -1;
             int category_b = -1;
             if (read_item_category(item_a, &category_a) &&
                 read_item_category(item_b, &category_b) && category_a == category_b) {
-                const int bag = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
-                const int dst_slot = fn_ui_equip_get_item_slot_index(control);
-                const int src_slot = ctrl_src != nullptr ? fn_ui_equip_get_item_slot_index(ctrl_src) : -1;
+                int32_t bag = -1;
+                if (g_game == nullptr || g_game->extension_bag_write.ui.current_bag == nullptr ||
+                    !qol::contracts::succeeded(
+                        g_game->extension_bag_write.ui.current_bag(&bag))) {
+                    return finish(0);
+                }
+                int32_t dst_slot = -1;
+                int32_t src_slot = -1;
+                (void)move_merge_control_slot(control, &dst_slot);
+                if (ctrl_src != nullptr) (void)move_merge_control_slot(ctrl_src, &src_slot);
                 int count = 0;
                 int target_count = 0;
                 if (!read_item_cumulate_count(item_a, &count) ||
@@ -122,8 +155,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             refresh->call_original();
                         }
                         void* panel_ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
-                        if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
-                            fn_touch_handle_set_cursor(panel_ctrl, nullptr);
+                        if (panel_ctrl != nullptr) {
+                            (void)move_merge_set_cursor(panel_ctrl, nullptr);
                         }
                         QOL_LOG_DEBUG(QolDomain::kPlatform,
                                       "move_merge: merged bag=%d src=%d dst=%d count=%d", bag,
@@ -154,8 +187,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             }
         }
     }
-    if (fn_ui_equip_inven_item_control_event_proc == nullptr) return finish(0);
-    const uint64_t result = fn_ui_equip_inven_item_control_event_proc(control, event, x2, param);
+    const uint64_t result = move_merge_call_original(control, event, x2, param);
     if (virtual_bag_module_view_installed()) {
         virtual_bag_sync_projected_bag();
     }

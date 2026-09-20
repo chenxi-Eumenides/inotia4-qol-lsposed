@@ -650,6 +650,86 @@ QolResult sdk_hooks_desc_call_original(const contracts::QolDynamicDescHook* hook
     return contracts::ok();
 }
 
+QolResult sdk_hooks_call_original_control_proc(void* control, uint64_t event, void* x2,
+                                               void* param, uint64_t* out_result) {
+    if (out_result == nullptr) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    if (fn_ui_equip_inven_item_control_event_proc == nullptr) {
+        return result_error(kQolErrNotReady, kNotReady);
+    }
+    *out_result = fn_ui_equip_inven_item_control_event_proc(control, event, x2, param);
+    return contracts::ok();
+}
+
+std::mutex g_desc_button_mtx;
+std::array<contracts::QolDynamicDescHook, 11> g_desc_button_bindings{};
+std::array<contracts::QolDescButtonProc, 11> g_desc_button_procs{};
+
+QolResult sdk_desc_button_bind(uint32_t index, contracts::QolDescButtonProc proc,
+                               void** out_original) {
+    if (out_original != nullptr) *out_original = nullptr;
+    if (index >= g_desc_button_bindings.size() || proc == nullptr || out_original == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    std::lock_guard<std::mutex> lock(g_desc_button_mtx);
+    auto& binding = g_desc_button_bindings[index];
+    if (binding.handle != 0) return result_error(kQolErrConflict, kConflict);
+    const QolResult result = sdk_hooks_desc_bind(
+        index, reinterpret_cast<void*>(proc), &binding);
+    if (!contracts::succeeded(result)) return result;
+    g_desc_button_procs[index] = proc;
+    *out_original = binding.original;
+    return contracts::ok();
+}
+
+QolResult sdk_desc_button_unbind(uint32_t index) {
+    if (index >= g_desc_button_bindings.size()) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    std::lock_guard<std::mutex> lock(g_desc_button_mtx);
+    auto& binding = g_desc_button_bindings[index];
+    if (binding.handle == 0) return contracts::ok();
+    const QolResult result = sdk_hooks_desc_unbind(&binding);
+    if (contracts::succeeded(result)) g_desc_button_procs[index] = nullptr;
+    return result;
+}
+
+QolResult sdk_desc_button_current_proc(uint32_t index, void** out_proc) {
+    if (out_proc != nullptr) *out_proc = nullptr;
+    if (index >= g_desc_button_bindings.size() || out_proc == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    std::lock_guard<std::mutex> lock(g_desc_button_mtx);
+    if (g_desc_button_bindings[index].handle != 0) {
+        *out_proc = reinterpret_cast<void*>(g_desc_button_procs[index]);
+        return contracts::ok();
+    }
+    return result_error(kQolErrNotFound, kNotFound);
+}
+
+QolResult sdk_desc_button_original_matches(void* original, const char* symbol,
+                                           int32_t* out_match) {
+    if (out_match != nullptr) *out_match = 0;
+    if (original == nullptr || symbol == nullptr || out_match == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    for (const auto& binding : g_desc_button_bindings) {
+        if (binding.handle == 0 || binding.original != original) continue;
+        return sdk_hooks_desc_original_matches(&binding, symbol, out_match);
+    }
+    return result_error(kQolErrNotFound, kNotFound);
+}
+
+QolResult sdk_desc_button_call_original(void* original, void* button) {
+    if (original == nullptr || button == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    for (const auto& binding : g_desc_button_bindings) {
+        if (binding.handle == 0 || binding.original != original) continue;
+        return sdk_hooks_desc_call_original(&binding, button);
+    }
+    return result_error(kQolErrNotFound, kNotFound);
+}
+
 thread_local std::array<infra::TextScope, 16> t_scope_stack{};
 thread_local uint32_t t_scope_depth = 0;
 
@@ -712,9 +792,13 @@ contracts::QolHostSdk make_host_sdk() {
                  &sdk_hooks_set_intercept, &sdk_hooks_clear_intercept, &sdk_hooks_intercept_blocks,
                  &sdk_hooks_popup_resolve, &sdk_hooks_popup_acquire, &sdk_hooks_popup_restore,
                  &sdk_hooks_desc_bind, &sdk_hooks_desc_unbind, &sdk_hooks_desc_matches_button,
-                 &sdk_hooks_desc_original_matches, &sdk_hooks_desc_call_original};
+                 &sdk_hooks_desc_original_matches, &sdk_hooks_desc_call_original,
+                 &sdk_hooks_call_original_control_proc};
     sdk.text_scope = {&sdk_text_scope_push, &sdk_text_scope_pop};
     sdk.ui = nullptr;
+    sdk.desc_button = {&sdk_desc_button_bind, &sdk_desc_button_unbind,
+                       &sdk_desc_button_current_proc, &sdk_desc_button_original_matches,
+                       &sdk_desc_button_call_original};
     return sdk;
 }
 

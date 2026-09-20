@@ -3,8 +3,10 @@
 
 规则：
 - layer_direction：源文件所属层必须允许依赖目标文件所属层（矩阵见 arch_common.allows）；
+- plugin_boundary：插件只能 include `contracts/` 或同一插件目录；
 - include_cycle：已映射层的文件之间不得存在 include 环（SCC > 1）；
-- unknown_layer（警告，不失败）：扫描范围内无法映射到目标层的文件。
+- unknown_layer：七个目标目录下无法映射的文件硬失败；
+- unknown_legacy_path（警告，不失败）：legacy 路径无法映射时只提示迁移债。
 
 用法：
     uv run python scripts/maintenance/check_layers.py            # 棘轮校验
@@ -30,12 +32,26 @@ def main() -> int:
     for rel in sorted(graph.paths):
         src_layer = graph.layer(rel)
         if src_layer == "unknown":
-            violations.append(ac.Violation("unknown_layer", rel, "", "无法映射到目标层"))
+            root = rel.split("/", 1)[0]
+            rule = "unknown_layer" if root in ac.BASE_LAYERS else "unknown_legacy_path"
+            detail = "七个目标目录下无法映射到目标层" if rule == "unknown_layer" else "legacy 路径无法映射"
+            violations.append(ac.Violation(rule, rel, "", detail))
             continue
         for target in graph.includes_of(rel):
             dst_layer = graph.layer(target)
             if dst_layer in ("unknown", "tests"):
                 continue
+            if src_layer.startswith("plugins/") and not (
+                dst_layer == "contracts" or dst_layer == src_layer
+            ):
+                violations.append(
+                    ac.Violation(
+                        "plugin_boundary",
+                        rel,
+                        target,
+                        f"{src_layer} 只能依赖 contracts 或自身目录，实际为 {dst_layer}",
+                    )
+                )
             if ac.allows(src_layer, dst_layer):
                 continue
             violations.append(
@@ -74,7 +90,7 @@ def main() -> int:
         args,
         "层依赖方向与 include 环",
         summary,
-        rules=("layer_direction", "include_cycle", "unknown_layer"),
+        rules=("layer_direction", "plugin_boundary", "include_cycle", "unknown_layer", "unknown_legacy_path"),
     )
 
 

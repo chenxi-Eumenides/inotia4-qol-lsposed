@@ -157,6 +157,7 @@ static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 11
 struct QolCharacterWriteApi {
     QolResult (*max_hp)(void* character, int32_t value);
     QolResult (*hp)(void* character, int32_t value);
+    QolResult (*set_equipped_item)(void* character, int32_t slot, void* item);
 };
 
 struct QolInventoryWriteApi {
@@ -192,6 +193,7 @@ struct QolWorldActionApi {
     QolResult (*restore_hud)();
     QolResult (*show_banner)(const char* text);
     QolResult (*add_money)(int64_t amount);
+    QolResult (*cancel_tutorial)();
 };
 
 struct QolSaveCallApi {
@@ -272,6 +274,7 @@ struct QolWorldReadOnlyApi {
     QolResult (*money)(int64_t* out_money);
     // g_gamestate == 0 的门禁判定；原落点：plugins/autosell/scan.cpp:64-75。
     QolResult (*game_state_gate)(int32_t* out_open);
+    QolResult (*tutorial_state)(int32_t* out_state);
 };
 
 struct QolCraftReadOnlyApi {
@@ -329,6 +332,7 @@ struct QolExtensionBagEquipmentWriteApi {
     QolResult (*make_mercenary)(void* item, void** out_mercenary);
     QolResult (*add_money)(int64_t amount, int32_t* out_result);
     QolResult (*minus_money)(int64_t amount, int32_t* out_result);
+    QolResult (*put_jewel)(void* equip_item, void* jewel_item, int32_t* out_result);
 };
 
 struct QolExtensionBagUiWriteApi {
@@ -349,6 +353,13 @@ struct QolExtensionBagUiWriteApi {
     QolResult (*set_bag_capacity_word)(int32_t bag, uint32_t word);
     QolResult (*draw_original_bag)();
     QolResult (*draw_original_items)();
+    QolResult (*create_confirmation)(int32_t variant, uint32_t price, void* ok_wrapper,
+                                     void* cancel_wrapper, void** out_original_ok,
+                                     void** out_original_cancel);
+    QolResult (*restore_confirmation)(int32_t variant, void* ok_wrapper, void* cancel_wrapper,
+                                      void* original_ok, void* original_cancel);
+    QolResult (*original_bag_item)(int32_t bag, void** out_item);
+    QolResult (*set_original_bag_item)(int32_t bag, void* item);
 };
 
 struct QolExtensionBagWriteApi {
@@ -400,6 +411,8 @@ struct QolInventoryReadOnlyApi {
     QolResult (*bag_size)(int32_t bag, int32_t* out_size);
     QolResult (*is_empty_bag)(int32_t bag, int32_t* out_empty);
     QolResult (*find_save_slot)(const void* item, int32_t* out_slot);
+    QolResult (*cursor_item)(const void* control, void** out_item);
+    QolResult (*detail_item)(void** out_item);
 };
 
 struct QolReadOnlyApi {
@@ -454,6 +467,6 @@ static_assert(sizeof(QolGameHost) ==
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 10;
+constexpr uint16_t kGameHostMinor = 12;
 
 }  // namespace qol::contracts

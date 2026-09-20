@@ -22,20 +22,20 @@
 | 目标层 | 文件数 |
 | --- | --- |
 | `contracts` | 25 |
-| `domains/character` | 2 |
-| `domains/dialog` | 4 |
-| `domains/inventory` | 9 |
-| `domains/party` | 2 |
-| `domains/quest` | 2 |
-| `domains/save` | 5 |
-| `domains/shop` | 2 |
-| `domains/system` | 2 |
-| `domains/ui` | 5 |
-| `domains/world` | 9 |
 | `game` | 56 |
 | `hooks` | 10 |
 | `host` | 36 |
 | `infra` | 46 |
+| `legacy/character` | 2 |
+| `legacy/dialog` | 4 |
+| `legacy/inventory` | 9 |
+| `legacy/party` | 2 |
+| `legacy/quest` | 2 |
+| `legacy/save` | 5 |
+| `legacy/shop` | 2 |
+| `legacy/system` | 2 |
+| `legacy/ui` | 5 |
+| `legacy/world` | 9 |
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
@@ -66,7 +66,6 @@
 | 当前路径前缀 | 目标层 |
 | --- | --- |
 | `contracts/` | contracts |
-| `domains/` | domains |
 | `game/` | game |
 | `hooks/` | hooks |
 | `host/` | host |
@@ -81,15 +80,15 @@
 | `game_access.cpp` | game |
 | `game_access.h` | game |
 | `game_access_globals.inc` | game |
-| `game_dialog.cpp` | domains/dialog |
-| `game_dialog.h` | domains/dialog |
-| `game_dialog_content.inc` | domains/dialog |
-| `game_dialog_operations.inc` | domains/dialog |
+| `game_dialog.cpp` | legacy/dialog |
+| `game_dialog.h` | legacy/dialog |
+| `game_dialog_content.inc` | legacy/dialog |
+| `game_dialog_operations.inc` | legacy/dialog |
 | `game_ptr_hook.h` | patch |
 | `game_state.cpp` | game |
 | `game_state.h` | game |
-| `game_system.cpp` | domains/system |
-| `game_system.h` | domains/system |
+| `game_system.cpp` | legacy/system |
+| `game_system.h` | legacy/system |
 
 **重构期 `core/native/` 覆盖（`arch_common._CORE_OVERRIDES`）**
 
@@ -100,58 +99,58 @@
 | `extension_bag_port.h` | contracts |
 | `game_feature.cpp` | game |
 | `game_feature.h` | game |
-| `game_nav.cpp` | domains/world |
-| `game_nav.h` | domains/world |
+| `game_nav.cpp` | legacy/world |
+| `game_nav.h` | legacy/world |
 | `game_variant.cpp` | game |
 | `game_variant.h` | game |
-| `inventory_trade.cpp` | domains/inventory |
-| `inventory_trade.h` | domains/inventory |
-| `module_save.cpp` | domains/save |
-| `module_save.h` | domains/save |
+| `inventory_trade.cpp` | legacy/inventory |
+| `inventory_trade.h` | legacy/inventory |
+| `module_save.cpp` | legacy/save |
+| `module_save.h` | legacy/save |
 | `module_save_port.h` | contracts |
-| `sell_price.h` | domains/inventory |
+| `sell_price.h` | legacy/inventory |
 
-**重构期 `api/native/` 文件名前缀 → 域（`arch_common._DOMAIN_BY_STEM`）**
+**重构期 `api/native/` 文件名前缀 → 迁移期标签（`arch_common._LEGACY_API_BY_STEM`）**
 
-| 当前文件名前缀 | 目标层 |
+| 当前文件名前缀 | 迁移期标签 |
 | --- | --- |
-| `game_character*` | domains/character |
-| `game_inventory*` | domains/inventory |
-| `game_party*` | domains/party |
-| `game_quest*` | domains/quest |
-| `game_save*` | domains/save |
-| `game_save_preflight*` | domains/save |
-| `game_shop*` | domains/shop |
-| `game_ui*` | domains/ui |
-| `game_world*` | domains/world |
+| `game_character*` | legacy/character |
+| `game_inventory*` | legacy/inventory |
+| `game_party*` | legacy/party |
+| `game_quest*` | legacy/quest |
+| `game_save*` | legacy/save |
+| `game_save_preflight*` | legacy/save |
+| `game_shop*` | legacy/shop |
+| `game_ui*` | legacy/ui |
+| `game_world*` | legacy/world |
 
 > 说明：`_TARGET_PREFIXES` 为有序元组，`plugins/` 为目标插件层前缀；
 > legacy `feature/` 经重构期映射归入 `plugins/<id>`（待迁移分列）；
-> 其余无法映射的路径落入 `unknown`（由 `check_layers` 以警告上报）。
+> 七个目标目录内无法映射的路径由 `check_layers` 硬失败；其他 legacy 路径落入 `unknown` 并以警告上报。
 
 ## 2. 跨层依赖与 include 环
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 103 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 99 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `infra` | 42 |
-| `host` | `game` | 35 |
+| `host` | `game` | 36 |
 | `host` | `contracts` | 22 |
 | `plugins/extension_bag` | `contracts` | 19 |
-| `plugins/autosell` | `contracts` | 17 |
-| `plugins/inventory_hooks` | `contracts` | 15 |
-| `plugins/custom_recipe` | `contracts` | 14 |
-| `plugins/core.ui` | `contracts` | 12 |
+| `plugins/autosell` | `contracts` | 15 |
+| `plugins/custom_recipe` | `contracts` | 12 |
+| `plugins/inventory_hooks` | `contracts` | 12 |
+| `plugins/core.ui` | `contracts` | 11 |
 | `host` | `patch` | 10 |
 | `infra` | `game` | 10 |
 | `host` | `hooks` | 9 |
 | `infra` | `contracts` | 8 |
-| `plugins/save_backup` | `contracts` | 8 |
-| `domains/world` | `game` | 7 |
-| `domains/inventory` | `game` | 6 |
+| `legacy/world` | `game` | 7 |
+| `plugins/save_backup` | `contracts` | 7 |
+| `game` | `contracts` | 6 |
 
 ### 2.2 include 环
 
@@ -163,20 +162,20 @@
 
 ### layer_direction（32 条）
 
-- `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|domains/character → domains/inventory`
-- `layer_direction|api/native/game_character.cpp|api/native/game_world.h|domains/character → domains/world`
-- `layer_direction|api/native/game_party.cpp|api/native/game_character.h|domains/party → domains/character`
-- `layer_direction|api/native/game_party.cpp|api/native/game_world.h|domains/party → domains/world`
-- `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|domains/ui → domains/world`
-- `layer_direction|core/native/frame_task.cpp|game_system.h|infra → domains/system`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_character.h|infra → domains/character`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_inventory.h|infra → domains/inventory`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_party.h|infra → domains/party`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → domains/world`
+- `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|legacy/character → legacy/inventory`
+- `layer_direction|api/native/game_character.cpp|api/native/game_world.h|legacy/character → legacy/world`
+- `layer_direction|api/native/game_party.cpp|api/native/game_character.h|legacy/party → legacy/character`
+- `layer_direction|api/native/game_party.cpp|api/native/game_world.h|legacy/party → legacy/world`
+- `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|legacy/ui → legacy/world`
+- `layer_direction|core/native/frame_task.cpp|game_system.h|infra → legacy/system`
+- `layer_direction|core/native/game_cache.cpp|api/native/game_character.h|infra → legacy/character`
+- `layer_direction|core/native/game_cache.cpp|api/native/game_inventory.h|infra → legacy/inventory`
+- `layer_direction|core/native/game_cache.cpp|api/native/game_party.h|infra → legacy/party`
+- `layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → legacy/world`
 - `layer_direction|core/native/game_cache.cpp|data/native/game_symbols.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_access.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_state.h|infra → game`
-- `layer_direction|core/native/game_cache.cpp|game_system.h|infra → domains/system`
+- `layer_direction|core/native/game_cache.cpp|game_system.h|infra → legacy/system`
 - `layer_direction|core/native/game_json.cpp|data/native/game_symbols.h|infra → game`
 - `layer_direction|core/native/game_json.cpp|game_access.h|infra → game`
 - `layer_direction|core/native/game_variant.cpp|core/native/qol_log.h|game → infra`
@@ -189,8 +188,8 @@
 
 - `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/game_nav.cpp|data/native/game_symbols.h|domains/world 层引用符号头`
-- `offsets_symbols_header|core/native/inventory_trade.cpp|data/native/game_symbols.h|domains/inventory 层引用符号头`
+- `offsets_symbols_header|core/native/game_nav.cpp|data/native/game_symbols.h|legacy/world 层引用符号头`
+- `offsets_symbols_header|core/native/inventory_trade.cpp|data/native/game_symbols.h|legacy/inventory 层引用符号头`
 - `offsets_symbols_header|core/native/save_enter.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/save_exit.cpp|data/native/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
@@ -208,20 +207,19 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 9 个 / 文件 4 个 / 去重符号 4 个 / 无法归属 2 个。
+扫描合计：安装点 6 个 / 文件 2 个 / 去重符号 3 个 / 无法归属 0 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 0 | 0 | 0 |
 | call patch | 2 | 6 | 3 |
-| ptr slot | 2 | 3 | 2 |
+| ptr slot | 0 | 0 | 0 |
 
-去重符号 → 文件（前 4 条，共 4 条；`--verbose` 列全部）：
+去重符号 → 文件（前 3 条，共 3 条；`--verbose` 列全部）：
 
 - `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
 - `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
 - `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
-- `F_UIEQUIP_BUTTON_USE_EXE_VMA` → `plugins/extension_bag/extension_bag_equip.inc`
 
 ## 5. JNI 面
 

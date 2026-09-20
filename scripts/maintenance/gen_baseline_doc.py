@@ -231,15 +231,15 @@ def render_mapping() -> list[str]:
         "目标层",
     )
     lines += _bullet_map(
-        "重构期 `api/native/` 文件名前缀 → 域（`arch_common._DOMAIN_BY_STEM`）",
-        {f"{stem}*": f"domains/{domain}" for stem, domain in ac._DOMAIN_BY_STEM.items()},
+        "重构期 `api/native/` 文件名前缀 → 迁移期标签（`arch_common._LEGACY_API_BY_STEM`）",
+        {f"{stem}*": f"legacy/{domain}" for stem, domain in ac._LEGACY_API_BY_STEM.items()},
         "当前文件名前缀",
-        "目标层",
+        "迁移期标签",
     )
     lines += [
         "> 说明：`_TARGET_PREFIXES` 为有序元组，`plugins/` 为目标插件层前缀；",
         "> legacy `feature/` 经重构期映射归入 `plugins/<id>`（待迁移分列）；",
-        "> 其余无法映射的路径落入 `unknown`（由 `check_layers` 以警告上报）。",
+        "> 七个目标目录内无法映射的路径由 `check_layers` 硬失败；其他 legacy 路径落入 `unknown` 并以警告上报。",
         "",
     ]
     return lines

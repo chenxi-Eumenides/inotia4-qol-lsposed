@@ -218,6 +218,9 @@ using QolHooksDescMatchesButtonFn = QolResult (*)(const QolDynamicDescHook* hook
 using QolHooksDescOriginalMatchesFn = QolResult (*)(const QolDynamicDescHook* hook,
                                                     const char* symbol, int32_t* out_matches);
 using QolHooksDescCallOriginalFn = QolResult (*)(const QolDynamicDescHook* hook, void* button);
+using QolHooksCallOriginalControlProcFn = QolResult (*)(void* control, uint64_t event,
+                                                       void* x2, void* param,
+                                                       uint64_t* out_result);
 struct QolHooksApi {
     QolHooksTextSubscribeFn text_subscribe;
     QolHooksTextUnsubscribeFn text_unsubscribe;
@@ -233,6 +236,7 @@ struct QolHooksApi {
     QolHooksDescMatchesButtonFn desc_matches_button;
     QolHooksDescOriginalMatchesFn desc_original_matches;
     QolHooksDescCallOriginalFn desc_call_original;
+    QolHooksCallOriginalControlProcFn call_original_control_proc;
 };
 
 using QolTextScopePushFn = QolResult (*)(int32_t scope);
@@ -243,6 +247,20 @@ struct QolTextScopeApi {
 };
 
 struct QolUiAdapter;
+
+using QolDescButtonProc = void (*)(void* button);
+struct QolDescButtonApi {
+    // 在 index(0..10) 的执行槽上安装 proc，返回安装前的原函数入口；失败返回非 0 错误码。
+    QolResult (*bind)(uint32_t index, QolDescButtonProc proc, void** out_original);
+    // 卸载 index 槽；未安装时成功幂等。
+    QolResult (*unbind)(uint32_t index);
+    // 读取 index 槽当前指针（供识别"正在执行的是哪个槽"）。
+    QolResult (*current_proc)(uint32_t index, void** out_proc);
+    // original 是否等于某登记符号解析出的入口（symbol 名如 "F_UIEQUIP_BUTTON_USE_EXE_VMA"）；out_match=0/1。
+    QolResult (*original_matches)(void* original, const char* symbol, int32_t* out_match);
+    // 以 button 参数调用原函数入口。
+    QolResult (*call_original)(void* original, void* button);
+};
 
 struct QolHostSdk {
     QolAbiHeader abi;
@@ -258,9 +276,10 @@ struct QolHostSdk {
     QolHooksApi hooks;
     QolTextScopeApi text_scope;
     const QolUiAdapter* ui;
+    QolDescButtonApi desc_button;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 4;
+constexpr uint16_t kHostSdkMinor = 5;
 
 }  // namespace qol::contracts

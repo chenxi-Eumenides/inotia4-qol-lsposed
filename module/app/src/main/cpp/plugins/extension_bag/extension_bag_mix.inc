@@ -12,7 +12,7 @@ using MixSceneNoArgFn = void (*)();
 bool mix_view_installed = false;
 int mix_view_bag = -1;
 int mix_window_original_bag = -1;
-uint32_t* mix_original_size_word = nullptr;
+uint32_t mix_original_size_word = 0;
 uint32_t mix_original_bag_size = 0;
 void* mix_projected_item_root = nullptr;
 std::array<void*, virtual_bag::kBagCount> mix_tab_buttons{};
@@ -42,8 +42,9 @@ void* mix_item_root_locked() {
 // 面板状态：0=配方菜单（原版不画背包列），1=背包/合成视图。扩展页签只在 state!=0
 // 时挂载/绘制，避免在配方菜单阶段早于原版背包出现（UIMix_Draw 状态门控反汇编确认）。
 int mix_state_locked() {
-    if (g_uimix == nullptr) return 0;
-    return *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_STATE);
+    if (g_game == nullptr || g_game->read_only.craft.panel_state == nullptr) return 0;
+    int32_t state = 0;
+    return qol::contracts::succeeded(g_game->read_only.craft.panel_state(&state)) ? state : 0;
 }
 
 int mix_tab_index(void* ctrl) {
@@ -72,10 +73,14 @@ void mix_refresh_tab_bag_items_locked() {
         if (item == nullptr) {
             item = extension_create_item(static_cast<int32_t>(type), 0, 0, 0);
             if (item != nullptr) {
-                const uint32_t flags = *reinterpret_cast<uint32_t*>(
-                    reinterpret_cast<uint8_t*>(item) + I_COUNT);
-                *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-                    ::qol::features::extension_bag::write_native_bag_object_marker(flags);
+                uint32_t flags = 0;
+                const auto* count_api = item_count_api();
+                if (count_api != nullptr && count_api->read_encoded_field != nullptr &&
+                    count_api->write_encoded_field != nullptr &&
+                    qol::contracts::succeeded(count_api->read_encoded_field(item, &flags))) {
+                    (void)count_api->write_encoded_field(
+                        item, ::qol::features::extension_bag::write_native_bag_object_marker(flags));
+                }
             }
         }
     }
@@ -90,28 +95,16 @@ void mix_disable_tab_buttons_locked() {
 }
 
 void mix_delete_tab_buttons_locked() {
-    if (fn_touch_handle_delete_control != nullptr) {
-        for (void*& button : mix_tab_buttons) {
-            if (button != nullptr) fn_touch_handle_delete_control(button);
-            button = nullptr;
-        }
-    } else {
-        mix_tab_buttons.fill(nullptr);
+    for (void*& button : mix_tab_buttons) {
+        if (button != nullptr) (void)extension_bag_ui_delete_control(button);
+        button = nullptr;
     }
 }
 
 void mix_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时合成器页签不得挂载（3 个宿主之一）。
     if (!g_virtual_bag_enabled.load()) return;
-    if (g_base == 0 || g_uimix == nullptr || fn_control_object_get_child == nullptr ||
-        fn_control_item_set_item == nullptr || fn_mem_malloc == nullptr ||
-        fn_control_object_set_control_proc == nullptr ||
-        fn_control_object_set_user_type == nullptr ||
-        fn_touch_handle_unuse_control_event_move == nullptr ||
-        fn_touch_handle_delete_control == nullptr || fn_ctrl_get_count == nullptr ||
-        fn_ctrl_set_data == nullptr) {
-        return;
-    }
+    if (g_sdk == nullptr) return;
     void* bag_container = mix_bag_container_locked();
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
@@ -135,25 +128,18 @@ void mix_install_tab_buttons_locked() {
     // 沿用扩展页/商店的原版袋列右侧间距 68、下移 2；起点来自 UIMix 实时袋 0 rect。
     const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
     const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
-    const uintptr_t add_raw = g_base + fn_resolve(
-        "F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA", F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA);
-    using AddControlFn = void* (*)(void*, void*, void*, uint32_t, void*);
-    void* add_proc = reinterpret_cast<void*>(g_base + fn_resolve(
-        "F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA", F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA));
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        void* control = reinterpret_cast<AddControlFn>(add_raw)(
-            bag_container, nullptr, nullptr, 3, add_proc);
+        void* control = nullptr;
+        if (!extension_bag_ui_create_control(bag_container, &control)) continue;
         if (control == nullptr) continue;
-        fn_control_object_set_control_proc(control,
-            reinterpret_cast<void*>(&mix_tab_item_proc));
-        fn_control_object_set_user_type(control, 2);
-        fn_touch_handle_unuse_control_event_move(control);
+        if (!extension_bag_ui_set_control_proc(control, &mix_tab_item_proc) ||
+            !extension_bag_ui_set_control_user_type(control, 2) ||
+            !extension_bag_ui_unuse_control_event_move(control)) continue;
         if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) continue;
-        void* data = fn_mem_malloc(0x10);
-        if (data == nullptr) continue;
-        std::memset(data, 0, 0x10);
+        void* data = nullptr;
+        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) continue;
         *reinterpret_cast<void**>(data) = mix_tab_bag_items[index];
-        fn_ctrl_set_data(control, data);
+        if (!extension_bag_ui_set_control_data(control, data)) continue;
         mix_tab_buttons[index] = control;
     }
     mix_tab_root = bag_container;
@@ -195,7 +181,6 @@ void mix_commit_pending_tab_locked() {
 
 void mix_refresh_projection_locked() {
     if (!mix_view_installed || mix_projected_item_root == nullptr ||
-        fn_control_item_set_item == nullptr ||
         !virtual_bag::valid_index(mix_view_bag)) return;
     const int capacity = g_virtual_bag_state.capacities[mix_view_bag];
     for (int slot = 0; slot < capacity; ++slot) {
@@ -204,20 +189,19 @@ void mix_refresh_projection_locked() {
         void* expected = module_item_locked(mix_view_bag, slot);
         void* data = extension_bag_ui_data(control);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
-        if (current != expected) fn_control_item_set_item(control, expected);
+        if (current != expected) (void)extension_bag_ui_set_control_item(control, expected);
     }
 }
 
 void mix_install_module_view_locked(int bag) {
-    if (g_base == 0 || g_uimix == nullptr || !virtual_bag::valid_index(bag) ||
+    if (!virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
-        fn_control_item_set_item == nullptr || fn_control_object_get_child == nullptr ||
-        fn_ui_mix_refresh_inven_item == nullptr) return;
+        g_game == nullptr || g_game->extension_bag_write.ui.refresh_mix_item == nullptr) return;
     // UIMix 与 UIEquip 共用当前袋 GOT；落在任务袋 5/非法时回退原版袋 0。
     int host = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(host)) host = 0;
-    uint32_t* size_word = bag_size_word_locked(host);
-    if (size_word == nullptr) {
+    uint32_t size_word = 0;
+    if (!bag_size_word_locked(host, &size_word)) {
         VIRTBAG_LOG("mix view rejected host bag=%d", host);
         return;
     }
@@ -225,16 +209,18 @@ void mix_install_module_view_locked(int bag) {
 
     mix_window_original_bag = host;
     mix_original_size_word = size_word;
-    mix_original_bag_size = *size_word;
+    mix_original_bag_size = size_word;
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    *size_word = (*size_word & ~kCapacityMask) |
-                 (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask);
+    (void)set_bag_size_word_locked(
+        host, (size_word & ~kCapacityMask) |
+                   (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask));
     set_original_bag_locked(host);
 
     mix_projected_item_root = mix_item_root_locked();
     if (mix_projected_item_root == nullptr) {
-        *size_word = (*size_word & ~kCapacityMask) | (mix_original_bag_size & kCapacityMask);
-        mix_original_size_word = nullptr;
+        (void)set_bag_size_word_locked(
+            host, (mix_original_size_word & ~kCapacityMask) | (mix_original_bag_size & kCapacityMask));
+        mix_original_size_word = 0;
         mix_original_bag_size = 0;
         mix_window_original_bag = -1;
         return;
@@ -245,7 +231,7 @@ void mix_install_module_view_locked(int bag) {
         void* control = valid_child_locked(mix_projected_item_root, slot);
         if (control == nullptr) continue;
         void* item = module_item_locked(bag, slot);
-        fn_control_item_set_item(control, item);
+        (void)extension_bag_ui_set_control_item(control, item);
         if (item != nullptr) {
             ownership::borrow_for_view(&g_ownership_ledger,
                                        g_module_object_handles[bag][slot]);
@@ -258,7 +244,7 @@ void mix_install_module_view_locked(int bag) {
 }
 
 void mix_restore_module_view_locked() {
-    if (!mix_view_installed || g_base == 0) return;
+    if (!mix_view_installed) return;
     if (virtual_bag::valid_index(mix_view_bag)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const uint32_t handle = g_module_object_handles[mix_view_bag][slot];
@@ -268,13 +254,14 @@ void mix_restore_module_view_locked() {
             }
         }
     }
-    if (mix_original_size_word != nullptr) {
+    if (mix_original_size_word != 0) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-        *mix_original_size_word = (*mix_original_size_word & ~kCapacityMask) |
-                                  (mix_original_bag_size & kCapacityMask);
+        (void)set_bag_size_word_locked(
+            mix_window_original_bag,
+            (mix_original_size_word & ~kCapacityMask) | (mix_original_bag_size & kCapacityMask));
     }
     extension_refresh_mix_item();
-    mix_original_size_word = nullptr;
+    mix_original_size_word = 0;
     mix_original_bag_size = 0;
     mix_window_original_bag = -1;
     mix_projected_item_root = nullptr;
@@ -364,7 +351,9 @@ void mix_draw_end_wrapper() {
             }
         }
     }
-    if (fn_grpx_end != nullptr) fn_grpx_end();
+    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
+        (void)g_sdk->ui->end_frame();
+    }
 }
 
 void mix_teardown_locked() {
@@ -384,20 +373,19 @@ void mix_teardown_locked() {
 // virtual_bag_draw_original_bag_wrapper 同法）。扩展页签高亮由 draw_end 的
 // mix_draw_tab_buttons_locked 在袋列绘制之后补画。
 void mix_draw_inven_bag_group_wrapper() {
-    const uintptr_t raw = g_base != 0
-        ? g_base + fn_resolve("F_UIMIX_DRAW_INVEN_BAG_GROUP_VMA", F_UIMIX_DRAW_INVEN_BAG_GROUP_VMA)
-        : 0;
-    if (raw == 0) return;
+    if (g_game == nullptr ||
+        g_game->extension_bag_write.ui.draw_original_bag == nullptr ||
+        g_game->extension_bag_write.ui.current_bag == nullptr ||
+        g_game->extension_bag_write.ui.set_current_bag == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    uint8_t saved_current = 0;
+    int32_t saved_current = 0;
     bool masked = false;
-    if (mix_view_installed && current_bag != nullptr && *current_bag != nullptr &&
-        **current_bag != kNoOriginalBagSelected) {
-        saved_current = **current_bag;
-        **current_bag = kNoOriginalBagSelected;
+    if (mix_view_installed &&
+        qol::contracts::succeeded(g_game->extension_bag_write.ui.current_bag(&saved_current)) &&
+        saved_current != kNoOriginalBagSelected) {
+        (void)g_game->extension_bag_write.ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    reinterpret_cast<void (*)()>(raw)();
-    if (masked) **current_bag = saved_current;
+    (void)g_game->extension_bag_write.ui.draw_original_bag();
+    if (masked) (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
 }

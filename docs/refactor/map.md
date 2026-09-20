@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 23 | 1930 |
-| `game/` | 38 | 3636 |
+| `contracts/` | 23 | 1966 |
+| `game/` | 38 | 3653 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 164 | 32808 |
-| `host/` | 20 | 5658 |
-| **合计** | **285** | **48235** |
+| `plugins/` | 164 | 32841 |
+| `host/` | 20 | 5866 |
+| **合计** | **285** | **48529** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -41,7 +41,7 @@
 - `plugins/core.ui/`：17 文件 / 2188 行
 - `plugins/craft_ui/`：4 文件 / 997 行
 - `plugins/custom_recipe/`：10 文件 / 2110 行
-- `plugins/extension_bag/`：41 文件 / 14033 行
+- `plugins/extension_bag/`：41 文件 / 14066 行
 - `plugins/inventory_hooks/`：11 文件 / 2305 行
 - `plugins/native_choice/`：4 文件 / 402 行
 - `plugins/push_all/`：6 文件 / 308 行

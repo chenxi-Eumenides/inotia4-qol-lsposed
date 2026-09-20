@@ -254,7 +254,7 @@ bool defer_item_free_locked(void* item);
 bool item_pointer_known_locked(void* item);
 void* valid_child_locked(void* root, int slot);
 void make_desc_equip_gate(void* ctrl, void* arg);
-void extension_desc_item_execute(void* button);
+void extension_desc_item_execute_at(size_t index, void* button);
 void reset_extension_desc_item_hooks_locked();
 void install_extension_desc_item_hooks_locked(void* item);
 void restore_extension_desc_popup_callbacks_locked();
@@ -263,7 +263,7 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 const char* context, void* use_token);
 
 void reset_extension_desc_unequip_hook_locked() {
-    // 卸下按钮不再有 execute-slot PtrHook（函数级 ButtonUnequipExe hook 承担），
+    // 卸下按钮由函数级 ButtonUnequipExe hook 承担，
     // 仅清 desc 袋记录。
     g_extension_desc_unequip_bag = -1;
 }

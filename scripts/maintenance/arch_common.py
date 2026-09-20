@@ -32,9 +32,7 @@ EXEMPTIONS_PATH = ARCH_DIR / "arch_exemptions.json"
 # 层与依赖矩阵（与 ARCHITECTURE.md §2.2 表格逐行一致）
 # --------------------------------------------------------------------------
 
-BASE_LAYERS = frozenset(
-    {"contracts", "game", "infra", "hooks", "patch", "domains", "plugins", "host"}
-)
+BASE_LAYERS = frozenset({"contracts", "game", "infra", "hooks", "patch", "plugins", "host"})
 
 # 同层内部允许互相 include（plugins 除外，见 allows()）
 _SIMPLE_ALLOW = {
@@ -57,15 +55,15 @@ def allows(src_layer: str, dst_layer: str) -> bool:
         return True
     if db in _SIMPLE_ALLOW.get(sb, set()):
         return True
-    if sb == "domains":
+    if sb == "legacy":
         if db in {"contracts", "game", "infra"}:
             return True
-        if db == "domains":
-            # 同域内部允许；域间水平互调仅 system 聚合方向允许
-            return src_layer == dst_layer or src_layer == "domains/system"
+        if db == "legacy":
+            # 旧路径仅保留迁移期兼容语义；域间水平互调仅 system 聚合方向允许。
+            return src_layer == dst_layer or src_layer == "legacy/system"
         return False
     if sb == "plugins":
-        if db in {"contracts", "game", "infra", "hooks", "patch", "domains"}:
+        if db == "contracts":
             return True
         if db == "plugins":
             return src_layer == dst_layer  # 同一插件内部允许
@@ -74,13 +72,14 @@ def allows(src_layer: str, dst_layer: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# 重构期映射：现存路径 → 目标层
-# 说明：这是迁移用临时表，随 P4/P5 文件迁移而收缩；不构成架构例外。
+# 重构期映射：现存 legacy 路径 → 目标层或迁移期标签。
+# 说明：这些表不是架构例外。core/、api/、data/ 被七目录吸收后删除对应映射；
+# 清除条件是目录内文件全部迁入目标目录、include 与构建边界通过校验，并完成基线收缩。
 # --------------------------------------------------------------------------
 
 _SKIP_DIRS = {"tests", "build"}
 
-_DOMAIN_BY_STEM = {
+_LEGACY_API_BY_STEM = {
     "game_character": "character",
     "game_party": "party",
     "game_inventory": "inventory",
@@ -98,12 +97,12 @@ _ROOT_OVERRIDES = {
     "game_access_globals.inc": "game",
     "game_state.cpp": "game",
     "game_state.h": "game",
-    "game_system.cpp": "domains/system",
-    "game_system.h": "domains/system",
-    "game_dialog.cpp": "domains/dialog",
-    "game_dialog.h": "domains/dialog",
-    "game_dialog_content.inc": "domains/dialog",
-    "game_dialog_operations.inc": "domains/dialog",
+    "game_system.cpp": "legacy/system",
+    "game_system.h": "legacy/system",
+    "game_dialog.cpp": "legacy/dialog",
+    "game_dialog.h": "legacy/dialog",
+    "game_dialog_content.inc": "legacy/dialog",
+    "game_dialog_operations.inc": "legacy/dialog",
     "game_ptr_hook.h": "patch",
 }
 
@@ -114,15 +113,15 @@ _CORE_OVERRIDES = {
     "game_variant.h": "game",
     "game_feature.cpp": "game",
     "game_feature.h": "game",
-    "game_nav.cpp": "domains/world",
-    "game_nav.h": "domains/world",
-    "inventory_trade.cpp": "domains/inventory",
-    "inventory_trade.h": "domains/inventory",
-    "module_save.cpp": "domains/save",
-    "module_save.h": "domains/save",
+    "game_nav.cpp": "legacy/world",
+    "game_nav.h": "legacy/world",
+    "inventory_trade.cpp": "legacy/inventory",
+    "inventory_trade.h": "legacy/inventory",
+    "module_save.cpp": "legacy/save",
+    "module_save.h": "legacy/save",
     "module_save_port.h": "contracts",
     "extension_bag_port.h": "contracts",
-    "sell_price.h": "domains/inventory",
+    "sell_price.h": "legacy/inventory",
 }
 
 
@@ -132,7 +131,6 @@ _TARGET_PREFIXES = (
     ("infra/", "infra"),
     ("hooks/", "hooks"),
     ("patch/", "patch"),
-    ("domains/", "domains"),
     ("plugins/", "plugins"),
     ("host/", "host"),
 )
@@ -145,7 +143,7 @@ def classify(rel: str) -> str:
     """
     for prefix, layer in _TARGET_PREFIXES:
         if rel.startswith(prefix):
-            if prefix in ("domains/", "plugins/") and rel.count("/") > 1:
+            if prefix == "plugins/" and rel.count("/") > 1:
                 return layer + "/" + rel.split("/", 2)[1]
             return layer
     return _classify_transition(rel)
@@ -165,10 +163,10 @@ def _classify_transition(rel: str) -> str:
         return _CORE_OVERRIDES.get(name, "infra")
     if rel.startswith("api/native/"):
         stem = rel.rsplit("/", 1)[1].rsplit(".", 1)[0]
-        for prefix in sorted(_DOMAIN_BY_STEM, key=len, reverse=True):
+        for prefix in sorted(_LEGACY_API_BY_STEM, key=len, reverse=True):
             if stem.startswith(prefix):
-                return "domains/" + _DOMAIN_BY_STEM[prefix]
-        return "domains"
+                return "legacy/" + _LEGACY_API_BY_STEM[prefix]
+        return "legacy/api"
     if rel.startswith("feature/"):
         parts = rel.split("/")
         return "plugins/" + parts[1] if len(parts) > 2 else "plugins"
@@ -218,6 +216,13 @@ def resolve_include(
     matches = index.get(Path(raw).name)
     if not matches:
         return None
+    if src_rel.startswith("plugins/"):
+        plugin_parts = src_rel.split("/", 2)
+        if len(plugin_parts) >= 2:
+            plugin_prefix = "/".join(plugin_parts[:2]) + "/"
+            plugin_matches = [rel for rel in matches if rel.startswith(plugin_prefix)]
+            if len(plugin_matches) == 1:
+                return plugin_matches[0]
     for rel in matches:
         if rel.endswith(raw):
             return rel

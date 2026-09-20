@@ -358,20 +358,65 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
     return true;
 }
 
-// ---- Path A：装备按钮语义（已函数级 hook 化，无按钮 PtrHook）----
+// ---- Path A：装备按钮语义（函数级 hook）----
 // 详情"装备"按钮 execute proc 恒为 UIEquip_ButtonEquipExe（0xb7c18），因此
 // 其全部扩展语义由 native 第 10 hook（button_equip_exe_wrapper →
 // virtual_bag_handle_backpack_button_equip）承担：背包物品（装原版/扩展袋）
 // 与扩展槽装备物品（装角色）在原函数内联删源之前分流；其余交还原函数。
-// 历史遗留：早期曾用按钮 PtrHook（改 execute_slot 指针）接管，与函数级
-// hook 构成同点双层钩子，且受 SetDescMenu 按钮生命周期/槽位漂移困扰，
-// 已整体移除。
+// 装备/卸下按钮不再由详情实例绑定器接管，避免与函数级入口 hook 重复执行。
 
 
 
 
 void reset_extension_desc_item_hooks_locked() {
-    for (PtrHook& hook : g_extension_desc_item_hooks) hook.uninstall();
+    if (g_sdk == nullptr || g_sdk->desc_button.unbind == nullptr) return;
+    for (size_t index = 0; index < g_extension_desc_item_bound.size(); ++index) {
+        if (!g_extension_desc_item_bound[index]) continue;
+        const QolResult result = g_sdk->desc_button.unbind(static_cast<uint32_t>(index));
+        if (!qol::contracts::succeeded(result)) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension desc unbind failed index=%d code=%d",
+                         static_cast<int>(index), result.code);
+            continue;
+        }
+        g_extension_desc_item_bound[index] = false;
+        g_extension_desc_item_originals[index] = nullptr;
+    }
+}
+
+void extension_desc_item_execute_at(size_t index, void* button);
+void extension_desc_item_execute_0(void* button) { extension_desc_item_execute_at(0, button); }
+void extension_desc_item_execute_1(void* button) { extension_desc_item_execute_at(1, button); }
+void extension_desc_item_execute_2(void* button) { extension_desc_item_execute_at(2, button); }
+void extension_desc_item_execute_3(void* button) { extension_desc_item_execute_at(3, button); }
+void extension_desc_item_execute_4(void* button) { extension_desc_item_execute_at(4, button); }
+void extension_desc_item_execute_5(void* button) { extension_desc_item_execute_at(5, button); }
+void extension_desc_item_execute_6(void* button) { extension_desc_item_execute_at(6, button); }
+void extension_desc_item_execute_7(void* button) { extension_desc_item_execute_at(7, button); }
+void extension_desc_item_execute_8(void* button) { extension_desc_item_execute_at(8, button); }
+void extension_desc_item_execute_9(void* button) { extension_desc_item_execute_at(9, button); }
+void extension_desc_item_execute_10(void* button) { extension_desc_item_execute_at(10, button); }
+
+constexpr std::array<qol::contracts::QolDescButtonProc, 11> kDescButtonProcs = {
+    &extension_desc_item_execute_0, &extension_desc_item_execute_1,
+    &extension_desc_item_execute_2, &extension_desc_item_execute_3,
+    &extension_desc_item_execute_4, &extension_desc_item_execute_5,
+    &extension_desc_item_execute_6, &extension_desc_item_execute_7,
+    &extension_desc_item_execute_8, &extension_desc_item_execute_9,
+    &extension_desc_item_execute_10,
+};
+
+bool extension_desc_original_matches(void* original, const char* symbol) {
+    if (g_sdk == nullptr || g_sdk->desc_button.original_matches == nullptr ||
+        original == nullptr || symbol == nullptr) return false;
+    int32_t match = 0;
+    return qol::contracts::succeeded(
+               g_sdk->desc_button.original_matches(original, symbol, &match)) && match != 0;
+}
+
+bool extension_desc_call_original(void* original, void* button) {
+    return g_sdk != nullptr && g_sdk->desc_button.call_original != nullptr &&
+           qol::contracts::succeeded(g_sdk->desc_button.call_original(original, button));
 }
 
 void extension_destroy_ok(void*);
@@ -383,13 +428,18 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 const char* context);
 
 void restore_extension_desc_popup_callbacks_locked() {
-    if (g_base != 0) {
-        auto* ok_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPOK_VMA);
-        auto* cancel_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPCANCEL_VMA);
-        if (*ok_slot == &extension_destroy_ok) *ok_slot = g_extension_destroy_original_ok;
-        if (*ok_slot == &extension_sell_ok) *ok_slot = g_extension_sell_original_ok;
-        if (*cancel_slot == &extension_destroy_cancel) *cancel_slot = g_extension_destroy_original_cancel;
-        if (*cancel_slot == &extension_sell_cancel) *cancel_slot = g_extension_sell_original_cancel;
+    if (g_game != nullptr &&
+        g_game->extension_bag_write.ui.restore_confirmation != nullptr) {
+        (void)g_game->extension_bag_write.ui.restore_confirmation(
+            1, reinterpret_cast<void*>(&extension_destroy_ok),
+            reinterpret_cast<void*>(&extension_destroy_cancel),
+            reinterpret_cast<void*>(g_extension_destroy_original_ok),
+            reinterpret_cast<void*>(g_extension_destroy_original_cancel));
+        (void)g_game->extension_bag_write.ui.restore_confirmation(
+            0, reinterpret_cast<void*>(&extension_sell_ok),
+            reinterpret_cast<void*>(&extension_sell_cancel),
+            reinterpret_cast<void*>(g_extension_sell_original_ok),
+            reinterpret_cast<void*>(g_extension_sell_original_cancel));
     }
     g_extension_destroy_original_ok = nullptr;
     g_extension_sell_original_ok = nullptr;
@@ -687,66 +737,30 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 }
 
 void install_extension_desc_item_hooks_locked(void* item) {
-    if (item == nullptr || g_base == 0) return;
-    constexpr std::array<size_t, 11> kDescButtonOffsets = {
-        0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
-        0x98, 0xa0, 0xa8, 0xb0, 0xb8,
-    };
-    for (size_t index = 0; index < kDescButtonOffsets.size(); ++index) {
-        if (kDescButtonOffsets[index] == 0x78) continue;
-        void* button = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_VMA +
-                                                  kDescButtonOffsets[index]);
-        if (button == nullptr) continue;
-        if (!game_memory_accessible(button, CO_DATA + sizeof(void*), 'r')) {
-            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip invalid button index=%d button=%p",
-                        static_cast<int>(index), button);
+    if (item == nullptr || g_sdk == nullptr || g_sdk->desc_button.bind == nullptr) return;
+    for (size_t index = 0; index < g_extension_desc_item_bound.size(); ++index) {
+        if (index == 2) continue;
+        void* original = nullptr;
+        const QolResult result = g_sdk->desc_button.bind(
+            static_cast<uint32_t>(index), kDescButtonProcs[index], &original);
+        if (!qol::contracts::succeeded(result) || original == nullptr) {
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                          "extension desc hook bind skip index=%d code=%d",
+                          static_cast<int>(index), result.code);
             continue;
         }
-        void* data = extension_bag_ui_data(button);
-        if (data == nullptr || !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
-            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip invalid data index=%d button=%p data=%p",
-                        static_cast<int>(index), button, data);
+        g_extension_desc_item_originals[index] = original;
+        g_extension_desc_item_bound[index] = true;
+        if (extension_desc_original_matches(original, "desc.button.equip") ||
+            extension_desc_original_matches(original, "desc.button.unequip")) {
+            (void)g_sdk->desc_button.unbind(static_cast<uint32_t>(index));
+            g_extension_desc_item_originals[index] = nullptr;
+            g_extension_desc_item_bound[index] = false;
             continue;
         }
-        void** execute_slot = reinterpret_cast<void**>(
-            reinterpret_cast<uint8_t*>(data) + CB_EXECUTE_PROC);
-        if (!game_memory_accessible(execute_slot, sizeof(void*), 'w')) continue;
-        // 装备/卸下按钮由函数级 hook（ButtonEquipExe/ButtonUnequipExe）接管，
-        // 其槽位 execute proc 即这两个函数地址；观察 hook 不应对其包装
-        // （避免点击先进观察 wrapper 的详情操作同步逻辑）。
-        const uintptr_t equip_proc = g_base + fn_resolve(
-            "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA", F_UIEQUIP_BUTTON_EQUIP_EXE_VMA);
-        const uintptr_t unequip_proc = g_base + fn_resolve(
-            "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA", F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA);
-        void* proc_value = *reinterpret_cast<void**>(execute_slot);
-        if (proc_value == reinterpret_cast<void*>(equip_proc) ||
-            proc_value == reinterpret_cast<void*>(unequip_proc)) {
-            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip equip/unequip proc offset=0x%zx slot=%p",
-                        kDescButtonOffsets[index], execute_slot);
-            continue;
-        }
-        bool already_hooked = false;
-        for (size_t previous = 0; previous < index; ++previous) {
-            if (g_extension_desc_item_hooks[previous].slot == execute_slot) {
-                already_hooked = true;
-                break;
-            }
-        }
-        if (already_hooked) {
-            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip duplicate slot index=%d offset=0x%zx slot=%p",
-                        static_cast<int>(index), kDescButtonOffsets[index], execute_slot);
-            continue;
-        }
-        void* original = *execute_slot;
-        if (original == nullptr || !game_memory_accessible(original, 1, 'x')) continue;
-        if (!g_extension_desc_item_hooks[index].install_typed(
-                execute_slot, &extension_desc_item_execute)) {
-            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook install failed index=%d offset=0x%zx button=%p data=%p",
-                        static_cast<int>(index), kDescButtonOffsets[index], button, data);
-            continue;
-        }
-        QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook installed index=%d offset=0x%zx button=%p data=%p orig=%p",
-                    static_cast<int>(index), kDescButtonOffsets[index], button, data, original);
+        QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                      "extension desc hook installed index=%d original=%p",
+                      static_cast<int>(index), original);
     }
 }
 
@@ -986,49 +1000,28 @@ bool extension_use_mercenary_seal() {
     return true;
 }
 
-void extension_desc_item_execute(void* button) {
-    constexpr std::array<size_t, 11> kDescButtonOffsets = {
-        0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
-        0x98, 0xa0, 0xa8, 0xb0, 0xb8,
-    };
-    int hook_index = -1;
+void extension_desc_item_execute_at(size_t index, void* button) {
+    if (index >= g_extension_desc_item_bound.size() ||
+        !g_extension_desc_item_bound[index] || button == nullptr) return;
+    const int hook_index = static_cast<int>(index);
+    void* original = g_extension_desc_item_originals[index];
     void* item = nullptr;
     int item_bag = -1;
     int item_slot = -1;
-    PtrHook* hook = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        for (size_t index = 0; index < kDescButtonOffsets.size(); ++index) {
-            if (!g_extension_desc_item_hooks[index].installed()) continue;
-            void* current = *reinterpret_cast<void**>(
-                g_base + G_UIEQUIP_PANEL_VMA + kDescButtonOffsets[index]);
-            if (current == button) {
-                hook_index = static_cast<int>(index);
-                hook = &g_extension_desc_item_hooks[index];
-                break;
-            }
-        }
         item = g_extension_desc_item;
         item_bag = g_extension_desc_item_bag;
         item_slot = g_extension_desc_item_slot;
     }
-    if (hook_index < 0 || hook == nullptr) return;
-    // 低噪分流锚：每次详情按钮点击一行，用于核对真实 execute proc（0x 十六进制）。
-    VIRTBAG_LOG("extension desc execute index=%d offset=0x%zx orig=0x%zx bag=%d slot=%d",
-                hook_index, kDescButtonOffsets[hook_index],
-                reinterpret_cast<uintptr_t>(hook->orig), item_bag, item_slot);
+    if (original == nullptr) return;
+    VIRTBAG_LOG("extension desc execute index=%d original=%p bag=%d slot=%d",
+                hook_index, original, item_bag, item_slot);
 
-    const uintptr_t use_raw = g_base != 0
-        ? g_base + fn_resolve("F_UIEQUIP_BUTTON_USE_EXE_VMA", F_UIEQUIP_BUTTON_USE_EXE_VMA)
-        : 0;
-    const uintptr_t use_after_confirm_raw = g_base != 0
-        ? g_base + fn_resolve("F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA",
-                              F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA)
-        : 0;
-    const bool direct_use = use_raw != 0 &&
-                            reinterpret_cast<uintptr_t>(hook->orig) == use_raw;
-    const bool confirm_use = use_after_confirm_raw != 0 &&
-                             reinterpret_cast<uintptr_t>(hook->orig) == use_after_confirm_raw;
+    const bool direct_use = extension_desc_original_matches(
+        original, "desc.button.use");
+    const bool confirm_use = extension_desc_original_matches(
+        original, "desc.button.use_after_confirm");
     if (direct_use || confirm_use) {
         bool used = false;
         bool current_item = false;
@@ -1046,7 +1039,7 @@ void extension_desc_item_execute(void* button) {
             extension_bag_write_api()->equipment.use_item == nullptr || !current_item) {
             // 扩展侧没有完整接管前置条件时，direct/confirm 都必须回退原版按钮，
             // 不能清状态或吞掉原版确认弹窗及其 OK 回调。
-            hook->call_orig<void>(button);
+            (void)extension_desc_call_original(original, button);
             return;
         }
         if (current_item && leader != nullptr && extension_bag_write_api() != nullptr &&
@@ -1059,7 +1052,7 @@ void extension_desc_item_execute(void* button) {
                 // Native Hook 接管，按回调传入的物品身份分流；此处只让原版
                 // 按钮创建确认弹窗。弹窗创建/关闭不持有背包锁。
                 extension_description_set_off();
-                hook->call_orig<void>(button);
+                (void)extension_desc_call_original(original, button);
                 return;
             }
             int use_result = 0;
@@ -1080,26 +1073,16 @@ void extension_desc_item_execute(void* button) {
         return;
     }
 
-    const uintptr_t destroy_raw = g_base != 0
-        ? g_base + fn_resolve("F_UIEQUIP_BUTTON_DESTROY_EXE_VMA",
-                              F_UIEQUIP_BUTTON_DESTROY_EXE_VMA)
-        : 0;
-    const uintptr_t sell_button_raw = g_base != 0
-        ? g_base + fn_resolve("F_UISTORE_BUTTON_SELL_EXE_VMA", F_UISTORE_BUTTON_SELL_EXE_VMA)
-        : 0;
     // 装备页出售（0.7 倍率、只能全卖）走原版销毁链：真实 execute proc 可能是
     // UIEquip_ButtonDestroyExe（创建确认弹窗），也可能是其结算入口
     // UIEquip_OKDestroyItem（0xb83d0）。两者都属目标 proc，任一命中即由模块
     // 接管并走 canonical（下方 item-count facade）；其余 proc 行为不变（非目标
     // proc 直通 call_orig）。
-    const uintptr_t destroy_ok_raw = g_base != 0
-        ? g_base + fn_resolve("F_UIEQUIP_OK_DESTROY_ITEM_VMA", F_UIEQUIP_OK_DESTROY_ITEM_VMA)
-        : 0;
-    const uintptr_t orig_raw = reinterpret_cast<uintptr_t>(hook->orig);
-    const bool direct_sell = sell_button_raw != 0 && orig_raw == sell_button_raw;
+    const bool direct_sell = extension_desc_original_matches(
+        original, "desc.button.sell");
     const bool modified_destroy_sell =
-        (destroy_raw != 0 && orig_raw == destroy_raw) ||
-        (destroy_ok_raw != 0 && orig_raw == destroy_ok_raw);
+        extension_desc_original_matches(original, "desc.button.destroy") ||
+        extension_desc_original_matches(original, "desc.button.destroy_ok");
     if (direct_sell || modified_destroy_sell) {
         VIRTBAG_LOG("extension sell button matched source=%s bag=%d slot=%d item=%p",
                     modified_destroy_sell ? "destroy" : "store",
@@ -1167,31 +1150,27 @@ void extension_desc_item_execute(void* button) {
             g_extension_sell_original_ok = nullptr;
             g_extension_sell_original_cancel = nullptr;
         }
-        const uintptr_t original_ok_raw = g_base != 0
-            ? g_base + fn_resolve(
-                modified_destroy_sell ? "F_UIEQUIP_OK_DESTROY_ITEM_VMA"
-                                      : "F_UISTORE_SELL_ITEM_VMA",
-                modified_destroy_sell ? F_UIEQUIP_OK_DESTROY_ITEM_VMA
-                                      : F_UISTORE_SELL_ITEM_VMA)
-            : 0;
-        const bool popup_created = valid && price <= UINT32_MAX && original_ok_raw != 0 &&
-                                   fn_popup_create_yesno_from_textdata != nullptr;
+        const auto* ui_write = g_game == nullptr ? nullptr : &g_game->extension_bag_write.ui;
+        bool popup_created = valid && price <= UINT32_MAX && ui_write != nullptr &&
+                             ui_write->create_confirmation != nullptr;
         if (popup_created) {
             // 原版按钮先关闭详情再创建确认弹窗；保持同样的 UI 生命周期，且不持有背包锁调用游戏函数。
             extension_description_set_off();
-            // 先沿用原版回调创建控件。CreateYesNoFromTextData 内部会把 x3
-            // 暂时带入原版文本构造链，不能直接传模块函数指针；x5 是弹窗 i32Param。
-            fn_popup_create_yesno_from_textdata(
-                9, 0, 2,
-                reinterpret_cast<void*>(original_ok_raw), nullptr,
-                reinterpret_cast<void*>(static_cast<uintptr_t>(price)));
-            auto* ok_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPOK_VMA);
-            auto* cancel_slot = reinterpret_cast<ExtensionDestroyOkFn*>(g_base + G_POPUP_FPCANCEL_VMA);
-            g_extension_sell_original_ok = *ok_slot;
-            g_extension_sell_original_cancel = *cancel_slot;
-            *ok_slot = &extension_sell_ok;
-            *cancel_slot = &extension_sell_cancel;
-            VIRTBAG_LOG("extension sell confirmation created price=%lld", static_cast<long long>(price));
+            const QolResult result = ui_write->create_confirmation(
+                modified_destroy_sell ? 1 : 0, static_cast<uint32_t>(price),
+                reinterpret_cast<void*>(&extension_sell_ok),
+                reinterpret_cast<void*>(&extension_sell_cancel),
+                reinterpret_cast<void**>(&g_extension_sell_original_ok),
+                reinterpret_cast<void**>(&g_extension_sell_original_cancel));
+            if (!qol::contracts::succeeded(result)) {
+                VIRTBAG_LOG("extension sell confirmation unavailable code=%d", result.code);
+                g_extension_sell_original_ok = nullptr;
+                g_extension_sell_original_cancel = nullptr;
+                popup_created = false;
+            }
+            if (popup_created) {
+                VIRTBAG_LOG("extension sell confirmation created price=%lld", static_cast<long long>(price));
+            }
         } else {
             VIRTBAG_LOG("sell price reject reason=popup_unavailable source=equip valid=%d",
                         valid ? 1 : 0);
@@ -1204,15 +1183,12 @@ void extension_desc_item_execute(void* button) {
         }
         return;
     }
-    // 未命中任何目标 proc 时回退原版；此处打印真实 execute proc 与期望值（方案1
-    // 第一步确诊锚）：若扩展背包出售按钮落在这里，日志即可确认其实际 orig。
-    // item 为分流块锁内捕获的本地副本，此处不再读全局，遵守 R-44 锁纪律。
+    // 未命中任何目标 proc 时回退原版；item 为分流块锁内捕获的本地副本。
     if (item != nullptr) {
-        VIRTBAG_LOG(
-            "extension desc execute unmatched index=%d orig=0x%zx destroy=0x%zx destroy_ok=0x%zx store=0x%zx bag=%d slot=%d",
-            hook_index, orig_raw, destroy_raw, destroy_ok_raw, sell_button_raw, item_bag, item_slot);
+        VIRTBAG_LOG("extension desc execute unmatched index=%d original=%p bag=%d slot=%d",
+                    hook_index, original, item_bag, item_slot);
     }
-    hook->call_orig<void>(button);
+    (void)extension_desc_call_original(original, button);
 
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (item == nullptr || !virtual_bag::valid_index(item_bag) ||
@@ -1261,24 +1237,19 @@ void extension_desc_item_execute(void* button) {
 // BL 门禁（0xb9188）：物品 desc 打开 → 调原 MakeDesc（同步生成含装备按钮的
 // 菜单）→ 锁内重装装备按钮 hook。物品从触发控件 data[0] 取（MakeDesc 同源）。
 void make_desc_equip_gate(void* ctrl, void* arg) {
-    const uintptr_t raw = g_base != 0
-        ? g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA)
-        : 0;
-    if (raw == 0 || ctrl == nullptr) return;
+    if (ctrl == nullptr || g_game == nullptr ||
+        g_game->extension_bag_write.ui.make_item_description == nullptr) return;
     // UIEquip_RefreshItemArea may have restored the original inventory object
     // immediately before the original event reaches MakeDesc. Rebind only
     // projected controls so the original MakeDesc reads the extension item.
     virtual_bag_sync_projected_item_control(ctrl);
     void* item = nullptr;
     {
-        if (game_memory_accessible(ctrl, CO_DATA + sizeof(void*), 'r')) {
-            void* data = extension_bag_ui_data(ctrl);
-            if (data != nullptr && game_memory_accessible(data, sizeof(void*), 'r')) {
-                item = *reinterpret_cast<void**>(data);
-            }
-        }
+        void* data = extension_bag_ui_data(ctrl);
+        if (data != nullptr) item = *reinterpret_cast<void**>(data);
     }
-    reinterpret_cast<UiEquipMakeDescFn>(raw)(ctrl, arg);
+    (void)arg;
+    (void)g_game->extension_bag_write.ui.make_item_description(ctrl);
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         reset_extension_desc_item_hooks_locked();
@@ -1292,7 +1263,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
                 g_extension_desc_item = item;
                 g_extension_desc_item_bag = item_bag;
                 g_extension_desc_item_slot = item_slot;
-                // 装备/卸下按钮无 PtrHook：装备语义由函数级 hook
+                // 装备/卸下按钮由函数级 hook
                 // （ButtonEquipExe 第 10）承担，观察 hook 只覆盖其他详情按钮。
                 install_extension_desc_item_hooks_locked(item);
                 QOL_LOG_INFO(QolDomain::kExtensionBag, "extension desc item captured bag=%d slot=%d item=%p", item_bag,
@@ -1302,13 +1273,13 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
     }
 }
 
-// ---- Path 卸下按钮：已函数级 hook 化，无按钮 PtrHook ----
+// ---- Path 卸下按钮：函数级 hook ----
 // 卸下按钮 execute proc 恒为 UIEquip_ButtonUnequipExe（0xb7e14），扩展语义由
 // native 第 11 hook（button_unequip_exe_wrapper →
 // virtual_bag_handle_original_bag_unequip）承担：扩展视图内识别扩展袋 desc
 // 解除扩展袋；原版视图解除原版袋并在背包满时放回其他袋行/收编扩展空位。
 // g_extension_desc_unequip_bag 仍由扩展袋 desc 打开时记录（供函数 hook 识别），
-// 但不再安装按钮 execute-slot PtrHook。
+// 详情记录仅供函数级入口 hook 识别。
 
 // virtual_bag_handle_backpack_button_equip 定义在 game_ui_virtbag.cpp 的
 // 匿名 namespace 之外（本文件整体位于匿名 namespace 内，internal linkage
