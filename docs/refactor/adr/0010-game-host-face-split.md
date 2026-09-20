@@ -348,3 +348,22 @@ module/app/src/main/cpp/
 `qol_plugin_push_all`，根 `gamebridge` 保留 JNI 薄层和 patch 机制源但不再直接编译
 `plugins/push_all/*.cpp`。本试点只改变编译归属与链接方式，不改变装配顺序、描述符或
 运行时逻辑；行为面仍按既有 VM-P4-01 真机证据约束，不以构建结果替代真机验收。
+
+## EB G2：只读事实迁移增补
+
+G2 在现有 `read_only` 子表尾部追加 Character、Item、Save 和 Inventory 只读成员，
+`kGameHostMinor` 从 7 递增为 8；既有字段顺序、偏移和签名保持不变。新增成员包括：
+
+- Character：`can_equip`、`find_equip_slot`、`equipped_item`、`has_empty_mercenary_slot`；
+- Item：`sell_price`、`is_enchant_scroll`、`is_mercenary_seal`、`is_usable`；
+- Save：`current_slot`、`is_ok`；
+- Inventory：`bag_size`、`is_empty_bag`、`find_save_slot`。
+
+实现路径统一为 `host/game_host.cpp` → `game/access/*` → legacy game symbol，插件只经
+`QolGameHost::read_only` 查询。EB 已将 world gate、物品类别/数量、装备判定、佣兵徽章、
+可用物品、出售单价和当前存档槽的对应只读调用切换到该面；原有投影、事务、回滚、
+marker 与 owner 写路径不在本组改变。`PtrHook`、UI 控件身份、`g_base`/`g_inven` 裸布局
+以及副作用调用仍属于 G3/G4/S1 缺口，不以只读面包装。
+
+Host fake 覆盖新增表项的正常值、空参数和未就绪语义；本组不执行真机安装和行为回归，
+因此受影响规则 R-47、R-50、R-55、R-63 的 VM-43/VM-P4-07 证据仍为 `NOT_ACCEPTED`。

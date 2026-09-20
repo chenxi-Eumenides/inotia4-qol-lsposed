@@ -545,7 +545,7 @@ void* load_item_payload_locked(const uint8_t* payload, int payload_size, const c
 // virtual_bag_module_save_validate_locked，其他路径不做任何丢弃。
 
 void ensure_state_loaded_locked() {
-    const int slot = current_save_slot();
+    const int slot = read_current_save_slot();
     if (slot < 0 || slot > 2 || slot == g_loaded_slot) return;
     if (!module_cache_clear_preflight_locked()) {
         VIRTBAG_LOG("state load blocked by active module object slot=%d", slot);

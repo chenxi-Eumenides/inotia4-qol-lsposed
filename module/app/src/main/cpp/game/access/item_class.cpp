@@ -114,4 +114,19 @@ int item_equip_level(const void* item) {
     return fn_item_get_equip_level(const_cast<void*>(item));
 }
 
+int item_is_enchant_scroll(int category) {
+    if (category < 0 || fn_is_enchant_scroll == nullptr) return -1;
+    return fn_is_enchant_scroll(category) != 0 ? 1 : 0;
+}
+
+int item_is_mercenary_seal(int category) {
+    if (category < 0 || fn_is_mercenary_seal == nullptr) return -1;
+    return fn_is_mercenary_seal(category) != 0 ? 1 : 0;
+}
+
+int item_is_usable(int category) {
+    if (category < 0 || fn_is_use == nullptr) return -1;
+    return fn_is_use(category) != 0 ? 1 : 0;
+}
+
 }  // namespace qol::game

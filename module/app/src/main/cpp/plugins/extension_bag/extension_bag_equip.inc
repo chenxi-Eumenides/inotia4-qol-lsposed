@@ -6,15 +6,14 @@ enum class ExtensionBagEquipResult {
 };
 
 void* extension_menu_character() {
-    if (g_base == 0) return nullptr;
-    const uintptr_t raw = g_base + fn_resolve(
-        "F_GET_MENU_CHARACTER_VMA", F_GET_MENU_CHARACTER_VMA);
-    if (raw == 0 || !game_memory_accessible(reinterpret_cast<void*>(raw), 4, 'x')) {
+    if (g_game == nullptr || g_game->read_only.character.menu_character == nullptr) {
         return nullptr;
     }
-    const GetMenuCharacterFn get_menu_character =
-        reinterpret_cast<GetMenuCharacterFn>(raw);
-    return get_menu_character();
+    void* character = nullptr;
+    return qol::contracts::succeeded(
+               g_game->read_only.character.menu_character(&character))
+               ? character
+               : nullptr;
 }
 
 ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mutex>& lock,
@@ -43,10 +42,9 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     if (module_source) {
         category = g_virtual_bag_state.items[src_bag][src_slot].category;
     } else {
-        if (src_bag < 0 || fn_get_bit == nullptr) return ExtensionBagEquipResult::kReject;
-        const uint16_t flags =
-            *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        category = fn_get_bit(flags, 15, 6);
+        if (src_bag < 0 || !read_item_category(item, &category)) {
+            return ExtensionBagEquipResult::kReject;
+        }
     }
     if (!is_backpack_category(category)) return ExtensionBagEquipResult::kReject;
     if (!module_source &&
@@ -155,8 +153,10 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
                                            int source_slot) {
     if (character == nullptr || item == nullptr || !virtual_bag::valid_index(source_bag) ||
         source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
-        g_module_objects[source_bag][source_slot] != item || fn_can_equip == nullptr ||
-        fn_find_equip_slot == nullptr || fn_equip_item_from_inven_to_slot == nullptr ||
+        g_module_objects[source_bag][source_slot] != item ||
+        g_game == nullptr || g_game->read_only.character.can_equip == nullptr ||
+        g_game->read_only.character.find_equip_slot == nullptr ||
+        fn_equip_item_from_inven_to_slot == nullptr ||
         !g_module_view_installed || g_module_view_index != source_bag ||
         g_module_window_original_bag < 0 || g_module_window_original_bag >= 5) {
         return false;
@@ -165,9 +165,10 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
                                                   "character equip")) {
         return false;
     }
-    if (!fn_can_equip(character, item)) return false;
+    if (!read_char_can_equip(character, item)) return false;
 
-    const int target = fn_find_equip_slot(character, item);
+    int target = -1;
+    if (!read_char_find_equip_slot(character, item, &target)) return false;
     if (target < 0 || target >= C_EQUIP_SLOTS) return false;
     const int original_bag = g_module_window_original_bag;
     if (g_inven == nullptr) return false;
@@ -178,8 +179,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     auto* inventory_slot = reinterpret_cast<void**>(
         reinterpret_cast<uint8_t*>(g_inven) + original_bag * 0x80 + source_slot * 8);
     void* original_inventory_item = *inventory_slot;
-    void* previous_equipped_item = fn_get_equip_item != nullptr
-        ? fn_get_equip_item(character, target) : nullptr;
+    void* previous_equipped_item = read_char_equipped_item(character, target);
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> previous_equipped_payload{};
     int previous_equipped_payload_size = 0;
     if (previous_equipped_item != nullptr &&
@@ -200,8 +200,8 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
         *inventory_slot = original_inventory_item;
         return false;
     }
-    if (target >= 0 && target < C_EQUIP_SLOTS && fn_get_equip_item != nullptr &&
-        fn_get_equip_item(character, target) != item) {
+    if (target >= 0 && target < C_EQUIP_SLOTS &&
+        read_char_equipped_item(character, target) != item) {
         *inventory_slot = original_inventory_item;
         return false;
     }
@@ -228,12 +228,10 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     if (previous_equipped_item != nullptr) {
         descriptor.payload = previous_equipped_payload;
         descriptor.payload_size = previous_equipped_payload_size;
-        descriptor.category = fn_get_bit != nullptr
-            ? fn_get_bit(*reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(
-                              previous_equipped_item) + I_TYPE), 15, 6)
-            : 0;
-        descriptor.count = fn_get_cumulate_count != nullptr
-            ? canonical_item_count(previous_equipped_item) : 1;
+        (void)read_item_category(previous_equipped_item, &descriptor.category);
+        int previous_count = 1;
+        descriptor.count = read_item_cumulate_count(previous_equipped_item, &previous_count)
+            ? canonical_item_count(previous_equipped_item) : previous_count;
         // 旧装备对象被原版 UI（装备槽 desc/控件缓存）持续引用，绝不能释放：
         // 直接收编为扩展槽的物化对象，投影与详情都继续指向同一存活对象。
         if (!module_object_generation_advance_locked(
@@ -300,7 +298,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
 
 bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
                                             int index, void* moving_control) {
-    if (!g_virtual_bag_enabled.load() || !game_in_world()) return false;
+    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return false;
     if (fn_control_object_get_data == nullptr) return false;
     void* data = fn_control_object_get_data(moving_control);
     void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
@@ -357,6 +355,8 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
 // 历史遗留：早期曾用按钮 PtrHook（改 execute_slot 指针）接管，与函数级
 // hook 构成同点双层钩子，且受 SetDescMenu 按钮生命周期/槽位漂移困扰，
 // 已整体移除。
+
+
 
 void reset_extension_desc_item_hooks_locked() {
     for (PtrHook& hook : g_extension_desc_item_hooks) hook.uninstall();
@@ -445,8 +445,9 @@ void extension_sell_ok(void*) {
             clear_original_desc_locked();
             return;
         }
-        if (fn_item_get_sell_price == nullptr || fn_add_money == nullptr ||
-            fn_minus_money == nullptr || fn_item_is_no_sell == nullptr) {
+        if (g_game == nullptr || g_game->read_only.item.sell_price == nullptr ||
+            g_game->read_only.item.is_no_sell == nullptr || fn_add_money == nullptr ||
+            fn_minus_money == nullptr) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
             clear_original_desc_locked();
             return;
@@ -454,16 +455,21 @@ void extension_sell_ok(void*) {
                 // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
                 count = static_cast<int>(virtual_bag_effective_count(
                     item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
-        const uint16_t flags = *reinterpret_cast<uint16_t*>(
-            reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        const int category = fn_get_bit != nullptr ? fn_get_bit(flags, 15, 6) : -1;
-        if (category < 0 || fn_item_is_no_sell(category) != 0) {
+        int category = -1;
+        int32_t no_sell = 0;
+        if (!read_item_category(item, &category) ||
+            !qol::contracts::succeeded(g_game->read_only.item.is_no_sell(category, &no_sell)) ||
+            no_sell != 0) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected no-sell item bag=%d slot=%d category=%d",
                         bag, slot, category);
             clear_original_desc_locked();
             return;
         }
-        const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
+        int64_t unit_price = 0;
+        if (!read_item_sell_price(item, &unit_price)) {
+            clear_original_desc_locked();
+            return;
+        }
         price = extension_bag_sell_price(item, count, apply_variant_discount);
         if (price < 0) {
             QOL_LOG_WARN(QolDomain::kExtensionBag,
@@ -597,12 +603,14 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
         item == nullptr || before_count <= 0) {
         return false;
     }
-    int count = fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : before_count - 1;
+    int observed_count = before_count - 1;
+    (void)read_item_cumulate_count(item, &observed_count);
+    int count = observed_count;
     if (count == observed_before) --count;
     if (count >= before_count) count = before_count - 1;
     if (count < 0) count = 0;
-    const uint32_t old_count_flags = *reinterpret_cast<uint32_t*>(
-        reinterpret_cast<uint8_t*>(item) + I_COUNT);
+    uint32_t old_count_flags = 0;
+    if (!read_item_encoded_field(item, &old_count_flags)) return false;
     if (count == 0) {
         const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
         g_virtual_bag_state.items[bag][slot] = {};
@@ -849,8 +857,9 @@ bool extension_use_mercenary_seal() {
             return false;
         }
         if (!extension_bag_enabled() || g_extension_desc_item == nullptr ||
-            fn_is_mercenary_seal == nullptr || fn_save_is_ok == nullptr ||
-            fn_mercenary_is_empty_manager_slot == nullptr ||
+            g_game == nullptr || g_game->read_only.item.is_mercenary_seal == nullptr ||
+            g_game->read_only.save.is_ok == nullptr ||
+            g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
             fn_mercenary_make_mercenary == nullptr) {
             return false;
         }
@@ -866,12 +875,8 @@ bool extension_use_mercenary_seal() {
         // 用物品自身 flags 的类别（与原版 SetDescMenu 创建 0x98 按钮同源）判定，
         // descriptor.category 仅作回退，避免序列化差异导致误判。
         int category = descriptor.category;
-        if (fn_get_bit != nullptr) {
-            const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            category = fn_get_bit(flags, 15, 6);
-        }
-        if (!fn_is_mercenary_seal(category)) return false;
+        (void)read_item_category(item, &category);
+        if (!read_item_is_mercenary_seal(category)) return false;
     }
     // 原版按钮顺序：UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MakeMercenary。
     // 游戏函数一律在 g_virtual_bag_mtx 外调用（MakeMercenary 内部会进入
@@ -882,12 +887,12 @@ bool extension_use_mercenary_seal() {
                                                     F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
         if (popup != 0) reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(text_id, 0, 0, 0);
     };
-    if (fn_save_is_ok() == 0) {
+    if (!read_save_is_ok()) {
         VIRTBAG_LOG("extension mercenary-seal reject reason=save_busy bag=%d slot=%d", bag, slot);
         show_popup(0x25);
         return true;
     }
-    if (fn_mercenary_is_empty_manager_slot() == 0) {
+    if (!read_has_empty_mercenary_slot()) {
         VIRTBAG_LOG("extension mercenary-seal reject reason=slots_full bag=%d slot=%d", bag, slot);
         show_popup(0x17);
         return true;
@@ -1091,16 +1096,17 @@ void extension_desc_item_execute(void* button) {
             int64_t unit_price = -1;
             uint32_t payload = 0;
             uint64_t generation = 0;
-            if (current_item && fn_item_get_sell_price != nullptr &&
-                fn_item_is_no_sell != nullptr && fn_get_bit != nullptr) {
+            if (current_item && g_game != nullptr &&
+                g_game->read_only.item.sell_price != nullptr &&
+                g_game->read_only.item.is_no_sell != nullptr) {
         // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
         count = static_cast<int>(virtual_bag_effective_count(item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
-                const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                    reinterpret_cast<uint8_t*>(item) + I_TYPE);
-                category = fn_get_bit(flags, 15, 6);
-                if (fn_item_is_no_sell(category) == 0 && count > 0) {
+                int32_t no_sell = 0;
+                if (read_item_category(item, &category) &&
+                    qol::contracts::succeeded(
+                        g_game->read_only.item.is_no_sell(category, &no_sell)) &&
+                    no_sell == 0 && count > 0 && read_item_sell_price(item, &unit_price)) {
                     g_extension_sell_apply_variant_discount = modified_destroy_sell;
-                    unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
                     price = extension_bag_sell_price(item, count, modified_destroy_sell);
                     if (price >= 0) {
                         valid = true;
@@ -1201,15 +1207,12 @@ void extension_desc_item_execute(void* button) {
     const virtual_bag::Item previous_descriptor = descriptor;
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
-    if (fn_get_bit != nullptr) {
-        const uint16_t flags = *reinterpret_cast<uint16_t*>(
-            reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        descriptor.category = fn_get_bit(flags, 15, 6);
-    }
+    (void)read_item_category(item, &descriptor.category);
     // descriptor.count 恒为 canonical（R-38/R-48）：getter 在关闭态只返回 b 视图
     //（R-47 决策 b），物化/重同步必须保存完整 128a+b。
-    descriptor.count = fn_get_cumulate_count != nullptr
-        ? canonical_item_count(item) : descriptor.count;
+    if (read_item_cumulate_count(item, &descriptor.count)) {
+        descriptor.count = canonical_item_count(item);
+    }
     if (descriptor.category <= 0 || descriptor.count <= 0) {
         descriptor = {};
         if (!free_module_object_locked(item_bag, item_slot)) {

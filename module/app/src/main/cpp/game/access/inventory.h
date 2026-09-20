@@ -23,4 +23,9 @@ QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item);
 QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
 QolResult cursor_index(const void* control, int32_t* out_slot);
 
+// 原版袋容量与保存槽查询；均为只读原语。
+QolResult bag_size(int32_t bag, int32_t* out_size);
+QolResult is_empty_bag(int32_t bag, int32_t* out_empty);
+QolResult find_save_slot(const void* item, int32_t* out_slot);
+
 }  // namespace qol::game

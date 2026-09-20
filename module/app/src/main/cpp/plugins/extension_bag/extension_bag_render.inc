@@ -709,8 +709,8 @@ void virtual_bag_inventory_enter_wrapper() {
 
 void virtual_bag_save_panel_enter_wrapper() {
     QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save panel enter wrapper invoked world=%d hook=%d",
-                game_in_world() ? 1 : 0, g_save_panel_hook_installed ? 1 : 0);
-    if (game_in_world()) {
+                read_world_in_world() ? 1 : 0, g_save_panel_hook_installed ? 1 : 0);
+    if (read_world_in_world()) {
         if (g_sdk != nullptr && g_sdk->store.save_game != nullptr) {
             (void)g_sdk->store.save_game();
         }

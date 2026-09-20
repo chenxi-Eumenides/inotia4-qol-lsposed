@@ -37,6 +37,10 @@ void* save_slot_hero(void* slot_struct);
 int save_hero_level(const void* hero);
 int save_hero_class(const void* hero);
 
+// 当前进档槽与保存链可用性；未就绪返回 -1。
+int save_current_slot();
+int save_is_ok();
+
 // ---- 存档文件加解密链 ----
 
 // SAVE_LoadData 与 MEM_Free 是否都已解析。

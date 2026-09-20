@@ -59,7 +59,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
         fn_control_object_get_data != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
-                 fn_get_cumulate_count != nullptr && fn_get_bit != nullptr && fn_inven_move_item != nullptr) {
+        g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
+        g_game->read_only.item.category != nullptr && fn_inven_move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
         void* src_data = ctrl_src != nullptr ? fn_control_object_get_data(ctrl_src) : nullptr;
@@ -70,16 +71,19 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             !fn_ui_equip_is_apply_stuff(item_b, item_a) &&
             item_count_encoding(item_a) == ::qol::contracts::QolItemCountEncoding::kEncoded &&
             item_count_encoding(item_b) == ::qol::contracts::QolItemCountEncoding::kEncoded) {
-            const uint16_t flags_a =
-                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_a) + I_TYPE);
-            const uint16_t flags_b =
-                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item_b) + I_TYPE);
-            if (fn_get_bit(flags_a, 15, 6) == fn_get_bit(flags_b, 15, 6)) {
+            int category_a = -1;
+            int category_b = -1;
+            if (read_item_category(item_a, &category_a) &&
+                read_item_category(item_b, &category_b) && category_a == category_b) {
                 const int bag = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
                 const int dst_slot = fn_ui_equip_get_item_slot_index(control);
                 const int src_slot = ctrl_src != nullptr ? fn_ui_equip_get_item_slot_index(ctrl_src) : -1;
-                const int count = fn_get_cumulate_count(item_a);
-                const int target_count = fn_get_cumulate_count(item_b);
+                int count = 0;
+                int target_count = 0;
+                if (!read_item_cumulate_count(item_a, &count) ||
+                    !read_item_cumulate_count(item_b, &target_count)) {
+                    return finish(0);
+                }
                 const bool extended = virtual_bag_extended_mode(item_b);
                  const uint32_t stack_limit = virtual_bag_count_limit(extended);
                 const bool valid_slots = bag >= 0 && bag < 6 && src_slot >= 0 && src_slot < 16 &&

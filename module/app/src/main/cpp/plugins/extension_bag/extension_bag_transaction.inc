@@ -937,8 +937,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
         source_slot < virtual_bag::kSlotCount
         ? g_virtual_bag_state.items[source_bag][source_slot].category : 0;
     const bool source_is_apply_material =
-        (fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
-        (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
+        read_item_is_jewel(source_category) || read_item_is_enchant_scroll(source_category);
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
     // IsApplyStuff 判真。目标类别用 item_is_equip 判定（数据不可用按非装备
     // fail-closed），普通物品目标不得进入 apply；不设提前 return，统一落到

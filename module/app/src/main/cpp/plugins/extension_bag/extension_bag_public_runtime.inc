@@ -124,7 +124,7 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
                                              int src_bag, int src_slot, int dst_bag,
                                              int dst_slot, void* material, void* target_item) {
     const int source_category = g_virtual_bag_state.items[src_bag][src_slot].category;
-    const bool source_is_jewel = fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0;
+    const bool source_is_jewel = read_item_is_jewel(source_category);
     const char* kind = source_is_jewel ? "jewel" : "scroll";
     if (fn_ui_equip_is_apply_stuff == nullptr ||
         fn_ui_equip_is_apply_stuff(target_item, material) == 0) {
@@ -135,7 +135,8 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
                     kind, target_item, material);
         return false;
     }
-    if (fn_save_is_ok == nullptr || fn_ui_equip_apply_stuff == nullptr) {
+    if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr ||
+        fn_ui_equip_apply_stuff == nullptr) {
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
             virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
         }
@@ -156,7 +157,7 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
     ModuleUseToken* previous_use_token = g_active_module_use_token;
     g_active_module_use_token = &use_token;
     lock.unlock();
-    const bool save_ok = fn_save_is_ok() != 0;
+    const bool save_ok = read_save_is_ok();
     if (save_ok) fn_ui_equip_apply_stuff(target_item, material);
     g_active_module_use_token = previous_use_token;
     lock.lock();
@@ -222,8 +223,9 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
     target_descriptor.payload = payload;
     target_descriptor.payload_size = payload_size;
     // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
-    target_descriptor.count = fn_get_cumulate_count != nullptr
-        ? canonical_item_count(target_item) : target_descriptor.count;
+    if (read_item_cumulate_count(target_item, &target_descriptor.count)) {
+        target_descriptor.count = canonical_item_count(target_item);
+    }
     g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
     g_item_state_dirty = true;
     persist_state_locked();
@@ -311,8 +313,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     const int dst_bag = g_module_view_index;
     const int source_category = g_virtual_bag_state.items[src_bag][src_slot].category;
     const bool source_is_apply_material =
-        (fn_is_jewel != nullptr && fn_is_jewel(source_category) != 0) ||
-        (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0);
+        read_item_is_jewel(source_category) || read_item_is_enchant_scroll(source_category);
     void* dst_data = fn_control_object_get_data(dst_control);
     void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
@@ -582,7 +583,7 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
 }
 
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
-    if (fn == nullptr || !g_virtual_bag_enabled.load() || !game_in_world()) return;
+    if (fn == nullptr || !g_virtual_bag_enabled.load() || !read_world_in_world()) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     // 输出模式视图数量（R-47 决策 b）：启用态 canonical、关闭态 b。占位判定
@@ -604,7 +605,7 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
 
 std::string data_virtual_bag_ui_status_json() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (!game_in_world()) {
+    if (!read_world_in_world()) {
         return "{\"injected\":false,\"state\":{}}";
     }
     ensure_state_loaded_locked();

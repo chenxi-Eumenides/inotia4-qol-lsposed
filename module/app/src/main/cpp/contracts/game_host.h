@@ -338,6 +338,10 @@ struct QolCharacterReadOnlyApi {
     QolResult (*pool_slot)(const void* character, int32_t* out_slot);
     QolResult (*max_hp)(const void* character, int32_t* out_value);
     QolResult (*hp)(const void* character, int32_t* out_value);
+    QolResult (*can_equip)(const void* character, const void* item, int32_t* out_allowed);
+    QolResult (*find_equip_slot)(const void* character, const void* item, int32_t* out_slot);
+    QolResult (*equipped_item)(const void* character, int32_t slot, void** out_item);
+    QolResult (*has_empty_mercenary_slot)(int32_t* out_available);
 };
 
 struct QolItemReadOnlyApi {
@@ -361,6 +365,9 @@ struct QolItemReadOnlyApi {
     // 宝石 item+0x10 bits18-23；原落点：plugins/autosell/view.cpp:79。
     QolResult (*jewel_attribute_type)(const void* item, int32_t* out_type);
     QolResult (*sell_price)(const void* item, int64_t* out_price);
+    QolResult (*is_enchant_scroll)(int32_t category, int32_t* out_value);
+    QolResult (*is_mercenary_seal)(int32_t category, int32_t* out_value);
+    QolResult (*is_usable)(int32_t category, int32_t* out_value);
 };
 
 struct QolWorldReadOnlyApi {
@@ -400,6 +407,8 @@ struct QolSaveReadOnlyApi {
     QolResult (*load_data)(int32_t slot, void** out_data, int32_t* out_size);
     QolResult (*hub_key)(const char** out_key);
     QolResult (*map_id)(int32_t slot, int32_t* out_map_id);
+    QolResult (*current_slot)(int32_t* out_slot);
+    QolResult (*is_ok)(int32_t* out_ok);
 };
 
 struct QolSaveCallApi {
@@ -449,6 +458,9 @@ struct QolInventoryReadOnlyApi {
     QolResult (*physical_item_at)(int32_t bag, int32_t slot, void** out_item);
     QolResult (*detail_context)(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
     QolResult (*cursor_index)(const void* control, int32_t* out_slot);
+    QolResult (*bag_size)(int32_t bag, int32_t* out_size);
+    QolResult (*is_empty_bag)(int32_t bag, int32_t* out_empty);
+    QolResult (*find_save_slot)(const void* item, int32_t* out_slot);
 };
 
 struct QolReadOnlyApi {
@@ -501,6 +513,6 @@ static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, save_call) + sizeof(Q
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 7;
+constexpr uint16_t kGameHostMinor = 8;
 
 }  // namespace qol::contracts

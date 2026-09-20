@@ -51,10 +51,9 @@ void store_refresh_tab_bag_items_locked() {
             }
             continue;
         }
-        if (item != nullptr && fn_get_bit != nullptr) {
-            const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            if (fn_get_bit(flags, 15, 6) != static_cast<int>(type)) {
+        if (item != nullptr) {
+            int category = -1;
+            if (!read_item_category(item, &category) || category != static_cast<int>(type)) {
                 if (defer_item_free_locked(item)) item = nullptr;
             }
         }
@@ -467,7 +466,8 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (store_view_installed && g_base != 0 && fn_control_object_get_cursor != nullptr &&
-            fn_control_item_get_item != nullptr && fn_item_get_sell_price != nullptr) {
+            fn_control_item_get_item != nullptr && g_game != nullptr &&
+            g_game->read_only.item.sell_price != nullptr) {
             void* ctrl = *reinterpret_cast<void**>(g_base + G_UISTORE_ITEM_CTRL_VMA);
             void* cursor = ctrl != nullptr ? fn_control_object_get_cursor(ctrl) : nullptr;
             item = cursor != nullptr ? fn_control_item_get_item(cursor) : nullptr;
@@ -490,9 +490,13 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                         item, static_cast<uint32_t>(descriptor.count)));
                     item_encoded = item_count_encoding(item) ==
                                    ::qol::contracts::QolItemCountEncoding::kEncoded;
-                    const int64_t unit = static_cast<int64_t>(fn_item_get_sell_price(item));
-                    plan = qol::store_sell::plan(item_encoded, view, unit, displayed_price);
-                    if (plan.kind == qol::store_sell::PlanKind::kReject) reject = true;
+                    int64_t unit = 0;
+                    if (!read_item_sell_price(item, &unit)) {
+                        reject = true;
+                    } else {
+                        plan = qol::store_sell::plan(item_encoded, view, unit, displayed_price);
+                        if (plan.kind == qol::store_sell::PlanKind::kReject) reject = true;
+                    }
                 }
             }
         }

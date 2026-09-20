@@ -124,4 +124,35 @@ QolResult cursor_index(const void* control, int32_t* out_slot) {
     return *out_slot < 0 ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
 }
 
+QolResult bag_size(int32_t bag, int32_t* out_size) {
+    if (bag < 0 || bag >= 6 || out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_get_bag_size == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    *out_size = fn_get_bag_size(bag);
+    return *out_size < 0 ? error_result(kQolErrNotReady, kNotReady) : contracts::ok();
+}
+
+QolResult is_empty_bag(int32_t bag, int32_t* out_empty) {
+    if (bag < 0 || bag >= 6 || out_empty == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_is_empty_bag == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    *out_empty = fn_is_empty_bag(bag) != 0 ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult find_save_slot(const void* item, int32_t* out_slot) {
+    if (item == nullptr || out_slot == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_inven_find_save_slot == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    int8_t slot = -1;
+    if (fn_inven_find_save_slot(const_cast<void*>(item), &slot) == 0 || slot < 0) {
+        return error_result(kQolErrNotFound, kNotFound);
+    }
+    *out_slot = slot;
+    return contracts::ok();
+}
+
 }  // namespace qol::game

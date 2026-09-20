@@ -211,10 +211,130 @@ bool read_item_is_jewel(int category) {
            is_jewel != 0;
 }
 
+bool read_item_category_predicate(int category,
+                                  QolResult (*predicate)(int32_t, int32_t*),
+                                  bool* out_value) {
+    if (g_game == nullptr || predicate == nullptr || out_value == nullptr) return false;
+    int32_t value = 0;
+    if (!qol::contracts::succeeded(predicate(category, &value))) return false;
+    *out_value = value != 0;
+    return true;
+}
+
+bool read_item_is_enchant_scroll(int category) {
+    bool value = false;
+    return read_item_category_predicate(
+        category, g_game == nullptr ? nullptr : g_game->read_only.item.is_enchant_scroll, &value) &&
+        value;
+}
+
+bool read_item_is_mercenary_seal(int category) {
+    bool value = false;
+    return read_item_category_predicate(
+        category, g_game == nullptr ? nullptr : g_game->read_only.item.is_mercenary_seal, &value) &&
+        value;
+}
+
+bool read_item_is_usable(int category) {
+    bool value = false;
+    return read_item_category_predicate(
+        category, g_game == nullptr ? nullptr : g_game->read_only.item.is_usable, &value) &&
+        value;
+}
+
 bool read_world_in_world() {
     if (g_game == nullptr || g_game->read_only.world.state == nullptr) return false;
     int32_t state = -1;
     return qol::contracts::succeeded(g_game->read_only.world.state(&state)) && state == 5;
+}
+
+const qol::contracts::QolItemCountApi* item_count_api();
+
+bool read_item_sell_price(const void* item, int64_t* out_price) {
+    if (g_game == nullptr || g_game->read_only.item.sell_price == nullptr ||
+        item == nullptr || out_price == nullptr) return false;
+    return qol::contracts::succeeded(g_game->read_only.item.sell_price(item, out_price));
+}
+
+bool read_item_encoded_field(const void* item, uint32_t* out_field) {
+    const auto* api = item_count_api();
+    if (api == nullptr || api->read_encoded_field == nullptr || item == nullptr ||
+        out_field == nullptr) return false;
+    return qol::contracts::succeeded(api->read_encoded_field(item, out_field));
+}
+
+bool read_char_can_equip(const void* character, const void* item) {
+    if (g_game == nullptr || g_game->read_only.character.can_equip == nullptr) return false;
+    int32_t allowed = 0;
+    return qol::contracts::succeeded(
+               g_game->read_only.character.can_equip(character, item, &allowed)) &&
+           allowed != 0;
+}
+
+bool read_char_find_equip_slot(const void* character, const void* item, int* out_slot) {
+    if (g_game == nullptr || g_game->read_only.character.find_equip_slot == nullptr ||
+        out_slot == nullptr) return false;
+    int32_t slot = -1;
+    if (!qol::contracts::succeeded(
+            g_game->read_only.character.find_equip_slot(character, item, &slot))) return false;
+    *out_slot = slot;
+    return true;
+}
+
+void* read_char_equipped_item(const void* character, int slot) {
+    if (g_game == nullptr || g_game->read_only.character.equipped_item == nullptr) return nullptr;
+    void* item = nullptr;
+    return qol::contracts::succeeded(
+               g_game->read_only.character.equipped_item(character, slot, &item))
+               ? item
+               : nullptr;
+}
+
+bool read_save_is_ok() {
+    if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr) return false;
+    int32_t value = 0;
+    return qol::contracts::succeeded(g_game->read_only.save.is_ok(&value)) && value != 0;
+}
+
+bool read_has_empty_mercenary_slot() {
+    if (g_game == nullptr || g_game->read_only.character.has_empty_mercenary_slot == nullptr) {
+        return false;
+    }
+    int32_t value = 0;
+    return qol::contracts::succeeded(
+               g_game->read_only.character.has_empty_mercenary_slot(&value)) && value != 0;
+}
+
+bool read_inventory_bag_size(int bag, int* out_size) {
+    if (g_game == nullptr || g_game->read_only.inventory.bag_size == nullptr ||
+        out_size == nullptr) return false;
+    int32_t value = 0;
+    if (!qol::contracts::succeeded(g_game->read_only.inventory.bag_size(bag, &value))) return false;
+    *out_size = value;
+    return true;
+}
+
+bool read_inventory_is_empty_bag(int bag) {
+    if (g_game == nullptr || g_game->read_only.inventory.is_empty_bag == nullptr) return false;
+    int32_t value = 0;
+    return qol::contracts::succeeded(
+               g_game->read_only.inventory.is_empty_bag(bag, &value)) && value != 0;
+}
+
+bool read_inventory_find_save_slot(const void* item, int* out_slot) {
+    if (g_game == nullptr || g_game->read_only.inventory.find_save_slot == nullptr ||
+        item == nullptr || out_slot == nullptr) return false;
+    int32_t value = -1;
+    if (!qol::contracts::succeeded(
+            g_game->read_only.inventory.find_save_slot(item, &value))) return false;
+    *out_slot = value;
+    return true;
+}
+
+int read_current_save_slot() {
+    if (g_game == nullptr || g_game->read_only.save.current_slot == nullptr) return -1;
+    int32_t slot = -1;
+    return qol::contracts::succeeded(g_game->read_only.save.current_slot(&slot)) ? slot : -1;
 }
 
 struct NativeCallScope {
@@ -530,7 +650,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
             ? g_virtual_bag_state.items[source_bag][source_slot].category : 0;
         const bool source_is_apply_material = extension_source &&
             (read_item_is_jewel(source_category) ||
-             (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(source_category) != 0));
+             read_item_is_enchant_scroll(source_category));
         // H-15 装备槽事件适配（R-50）：目标必须是装备类（item_is_equip 判定；
         // 类别数据不可用时 item_is_equip 为假，按非装备 fail-closed 直通原版
         // backup，不得 Blocked），且落点是装备槽控件（slot index >= 16）。

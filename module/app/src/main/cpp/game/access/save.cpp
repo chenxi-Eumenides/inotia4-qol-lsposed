@@ -2,6 +2,7 @@
 
 #include "data/native/game_symbols.h"
 #include "game_access.h"
+#include "game_state.h"
 
 namespace qol::game {
 
@@ -51,6 +52,12 @@ int save_hero_level(const void* hero) {
 int save_hero_class(const void* hero) {
     if (hero == nullptr) return -1;
     return static_cast<int8_t>(reinterpret_cast<const uint8_t*>(hero)[C_CLASS]);
+}
+
+int save_current_slot() { return ::current_save_slot(); }
+
+int save_is_ok() {
+    return fn_save_is_ok == nullptr ? -1 : (fn_save_is_ok() != 0 ? 1 : 0);
 }
 
 bool save_load_deps_ready() {

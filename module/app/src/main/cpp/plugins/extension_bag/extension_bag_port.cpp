@@ -167,8 +167,11 @@ bool extension_bag_remove_native_item(void* item) {
 }
 
 int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount) {
-    if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
-    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
+    const auto* game = qol::features::extension_bag::extension_bag_game_host();
+    if (item == nullptr || count <= 0 || game == nullptr ||
+        game->read_only.item.sell_price == nullptr) return -1;
+    int64_t unit_price = 0;
+    if (!qol::contracts::succeeded(game->read_only.item.sell_price(item, &unit_price))) return -1;
     // count 为调用方传入的模式视图数量（R-47 决策 b），按模式上限收敛。
     const uint32_t legal_count = static_cast<uint32_t>(count);
     int64_t final_price = 0;

@@ -102,6 +102,40 @@ bool char_can_change_equip(const void* ch) {
            fn_char_can_change_equip(const_cast<void*>(ch)) != 0;
 }
 
+bool char_can_equip(const void* ch, const void* item) {
+    return fn_can_equip != nullptr && ch != nullptr && item != nullptr &&
+           fn_can_equip(const_cast<void*>(ch), const_cast<void*>(item)) != 0;
+}
+
+bool char_can_equip_resolved() { return fn_can_equip != nullptr; }
+
+int char_find_equip_slot(const void* ch, const void* item) {
+    if (fn_find_equip_slot == nullptr || ch == nullptr || item == nullptr) return -1;
+    return fn_find_equip_slot(const_cast<void*>(ch), const_cast<void*>(item));
+}
+
+bool char_find_equip_slot_resolved() { return fn_find_equip_slot != nullptr; }
+
+void* char_equipped_item(const void* ch, int slot) {
+    if (fn_get_equip_item == nullptr || ch == nullptr || slot < 0 ||
+        slot >= static_cast<int>(C_EQUIP_SLOTS)) {
+        return nullptr;
+    }
+    return fn_get_equip_item(const_cast<void*>(ch), slot);
+}
+
+bool char_equipped_item_resolved() { return fn_get_equip_item != nullptr; }
+
+int char_has_empty_mercenary_slot() {
+    return fn_mercenary_is_empty_manager_slot == nullptr
+               ? -1
+               : (fn_mercenary_is_empty_manager_slot() != 0 ? 1 : 0);
+}
+
+bool char_has_empty_mercenary_slot_resolved() {
+    return fn_mercenary_is_empty_manager_slot != nullptr;
+}
+
 void* char_menu_character() {
     return fn_get_menu_character != nullptr ? fn_get_menu_character() : nullptr;
 }

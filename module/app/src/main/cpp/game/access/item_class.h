@@ -50,4 +50,9 @@ bool item_equip_level_resolved();
 bool item_is_real_equip(const void* item);
 int item_equip_level(const void* item);
 
+// 类别谓词只读原语；未解析返回 -1。
+int item_is_enchant_scroll(int category);
+int item_is_mercenary_seal(int category);
+int item_is_usable(int category);
+
 }  // namespace qol::game

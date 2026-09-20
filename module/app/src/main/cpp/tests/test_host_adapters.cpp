@@ -58,11 +58,36 @@ decltype(fn_popup_create_yesno_from_textdata) fn_popup_create_yesno_from_textdat
 decltype(fn_control_object_get_cursor) fn_control_object_get_cursor = nullptr;
 decltype(fn_control_object_get_data) fn_control_object_get_data = nullptr;
 decltype(fn_control_item_get_item) fn_control_item_get_item = nullptr;
+decltype(fn_can_equip) fn_can_equip = nullptr;
+decltype(fn_find_equip_slot) fn_find_equip_slot = nullptr;
+decltype(fn_get_equip_item) fn_get_equip_item = nullptr;
+decltype(fn_mercenary_is_empty_manager_slot) fn_mercenary_is_empty_manager_slot = nullptr;
+decltype(fn_is_enchant_scroll) fn_is_enchant_scroll = nullptr;
+decltype(fn_is_mercenary_seal) fn_is_mercenary_seal = nullptr;
+decltype(fn_is_use) fn_is_use = nullptr;
+decltype(fn_save_is_ok) fn_save_is_ok = nullptr;
+decltype(fn_get_bag_size) fn_get_bag_size = nullptr;
+decltype(fn_is_empty_bag) fn_is_empty_bag = nullptr;
+decltype(fn_inven_find_save_slot) fn_inven_find_save_slot = nullptr;
 
 int fake_item_rarity(void*) { return 9; }
 int fake_item_no_sell(int32_t) { return 0; }
 int fake_item_dice(int32_t) { return 0; }
 int fake_item_cumulate_count(void*) { return 6; }
+int fake_can_equip(void*, void*) { return 1; }
+int fake_find_equip_slot(void*, void*) { return 2; }
+void* fake_get_equip_item(void*, int32_t) { return reinterpret_cast<void*>(0xA); }
+int fake_empty_mercenary_slot() { return 1; }
+int fake_is_enchant_scroll(int32_t) { return 1; }
+int fake_is_mercenary_seal(int32_t) { return 1; }
+int fake_is_use(int32_t) { return 1; }
+int fake_save_is_ok() { return 1; }
+int fake_get_bag_size(int bag) { return bag + 4; }
+int fake_is_empty_bag(int) { return 0; }
+int fake_find_save_slot(void*, int8_t* out_slot) {
+    if (out_slot != nullptr) *out_slot = 3;
+    return 1;
+}
 
 uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 
@@ -94,6 +119,14 @@ int char_level(const void*) { return 10; }
 int char_merc_slot(const void*) { return 0; }
 bool char_can_change_equip_resolved() { return true; }
 bool char_can_change_equip(const void*) { return true; }
+bool char_can_equip(const void*, const void*) { return true; }
+bool char_can_equip_resolved() { return true; }
+int char_find_equip_slot(const void*, const void*) { return 2; }
+bool char_find_equip_slot_resolved() { return true; }
+void* char_equipped_item(const void*, int) { return reinterpret_cast<void*>(0xA); }
+bool char_equipped_item_resolved() { return true; }
+int char_has_empty_mercenary_slot() { return 1; }
+bool char_has_empty_mercenary_slot_resolved() { return true; }
 bool char_menu_character_resolved() { return true; }
 void* char_menu_character() { return reinterpret_cast<void*>(0x2); }
 bool char_pool_slot(const void*, int* out) {
@@ -118,6 +151,9 @@ int item_socket_filled(const void*) { return g_item_class_table_ready ? 2 : -1; 
 int item_socket_total(const void*) { return g_item_class_table_ready ? 5 : -1; }
 int item_jewel_value(const void*) { return 321; }
 int item_jewel_attribute_type(const void*) { return 17; }
+int item_is_enchant_scroll(int) { return 1; }
+int item_is_mercenary_seal(int) { return 1; }
+int item_is_usable(int) { return 1; }
 bool item_class_table_ready() { return g_item_class_table_ready; }
 bool item_is_backpack_category(int category) {
     return g_item_class_table_ready && category == 4;
@@ -187,6 +223,8 @@ const char* save_hub_get_key() { return "test-key"; }
 bool save_encrypt_available() { return true; }
 int save_encrypt_process2(void*, int, int, const char*) { return 1; }
 void save_slots_mark_stale() {}
+int save_current_slot() { return -1; }
+int save_is_ok() { return 1; }
 int world_state() { return 7; }
 int world_game_state_gate() { return g_world_game_state_gate; }
 bool world_ready() { return true; }
@@ -256,6 +294,26 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
     return contracts::ok();
 }
 
+QolResult bag_size(int32_t bag, int32_t* out_size) {
+    if (out_size == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid argument", 17);
+    *out_size = bag + 4;
+    return contracts::ok();
+}
+
+QolResult is_empty_bag(int32_t, int32_t* out_empty) {
+    if (out_empty == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid argument", 17);
+    *out_empty = 0;
+    return contracts::ok();
+}
+
+QolResult find_save_slot(const void* item, int32_t* out_slot) {
+    if (item == nullptr || out_slot == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid argument", 17);
+    }
+    *out_slot = 3;
+    return contracts::ok();
+}
+
 }  // namespace qol::game
 
 namespace {
@@ -293,6 +351,17 @@ int main() {
     fn_item_is_no_sell = &fake_item_no_sell;
     fn_is_dice = &fake_item_dice;
     fn_get_cumulate_count = &fake_item_cumulate_count;
+    fn_can_equip = &fake_can_equip;
+    fn_find_equip_slot = &fake_find_equip_slot;
+    fn_get_equip_item = &fake_get_equip_item;
+    fn_mercenary_is_empty_manager_slot = &fake_empty_mercenary_slot;
+    fn_is_enchant_scroll = &fake_is_enchant_scroll;
+    fn_is_mercenary_seal = &fake_is_mercenary_seal;
+    fn_is_use = &fake_is_use;
+    fn_save_is_ok = &fake_save_is_ok;
+    fn_get_bag_size = &fake_get_bag_size;
+    fn_is_empty_bag = &fake_is_empty_bag;
+    fn_inven_find_save_slot = &fake_find_save_slot;
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
@@ -480,6 +549,20 @@ int main() {
     assert(value == 100);
     assert(game.read_only.character.hp(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 80);
+    assert(game.read_only.character.can_equip(reinterpret_cast<void*>(0x1),
+                                              reinterpret_cast<void*>(0x2), &value)
+               .ok == kQolOk);
+    assert(value == 1);
+    assert(game.read_only.character.find_equip_slot(reinterpret_cast<void*>(0x1),
+                                                    reinterpret_cast<void*>(0x2), &value)
+               .ok == kQolOk);
+    assert(value == 2);
+    assert(game.read_only.character.equipped_item(reinterpret_cast<void*>(0x1), 2,
+                                                  &pointer_value)
+               .ok == kQolOk);
+    assert(pointer_value == reinterpret_cast<void*>(0xA));
+    assert(game.read_only.character.has_empty_mercenary_slot(&value).ok == kQolOk);
+    assert(value == 1);
 
     assert(game.read_only.item.category(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 4);
@@ -507,6 +590,9 @@ int main() {
     assert(game.read_only.item.jewel_attribute_type(reinterpret_cast<void*>(0x1), &value).ok ==
            kQolOk);
     assert(value == 17);
+    assert(game.read_only.item.is_enchant_scroll(4, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.item.is_mercenary_seal(4, &value).ok == kQolOk && value == 1);
+    assert(game.read_only.item.is_usable(4, &value).ok == kQolOk && value == 1);
     assert(game.read_only.item.jewel_value(nullptr, &value).code == kQolErrInvalidArgument);
     assert(game.read_only.item.is_backpack_category(0x400, &value).code ==
            kQolErrInvalidArgument);
@@ -554,6 +640,8 @@ int main() {
     int32_t data_size = 0;
     assert(game.read_only.save.load_data(0, &pointer_value, &data_size).ok == kQolOk);
     assert(game.read_only.save.hub_key(&map_name).ok == kQolOk);
+    assert(game.read_only.save.is_ok(&value).ok == kQolOk && value == 1);
+    assert(game.read_only.save.current_slot(&value).code == kQolErrNotReady);
 
     assert(game.read_only.quest.state(&value).code == kQolErrUnsupported);
     assert(game.read_only.quest.active_slot_count(&u32_value).ok == kQolOk && u32_value == 1);
@@ -582,6 +670,11 @@ int main() {
     assert(inventory_callback_calls == 1);
     assert(game.read_only.inventory.for_each_bag_slot(nullptr, nullptr).code ==
            kQolErrInvalidArgument);
+    assert(game.read_only.inventory.bag_size(2, &value).ok == kQolOk && value == 6);
+    assert(game.read_only.inventory.is_empty_bag(2, &value).ok == kQolOk && value == 0);
+    assert(game.read_only.inventory.find_save_slot(reinterpret_cast<void*>(0x1), &value).ok ==
+           kQolOk);
+    assert(value == 3);
     g_inventory_mode = FakeInventoryMode::kNotReady;
     assert(game.read_only.inventory.for_each_bag_slot(&inventory_callback,
                                                       &inventory_callback_calls)

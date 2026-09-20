@@ -1,6 +1,6 @@
 std::string extension_bag_api_status_json_impl() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (!game_in_world()) {
+    if (!read_world_in_world()) {
         return "{\"enabled\":" + std::string(g_virtual_bag_enabled.load() ? "true" : "false") +
                ",\"injected\":false,\"extension_tab_button\":false," +
                "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
@@ -172,16 +172,20 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
         // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
-        is_seal = fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(descriptor.category);
+        is_seal = read_item_is_mercenary_seal(descriptor.category);
         if (is_seal) {
-            if (fn_save_is_ok == nullptr || fn_mercenary_is_empty_manager_slot == nullptr ||
+            if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr ||
+                g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
                 fn_mercenary_make_mercenary == nullptr) {
                 return op_err("symbol not resolved");
             }
-        } else if (fn_is_use == nullptr || fn_char_use_item_ex == nullptr) {
+        } else if (g_game == nullptr || g_game->read_only.item.is_usable == nullptr ||
+                   fn_char_use_item_ex == nullptr) {
             return op_err("symbol not resolved");
         }
-        if (!is_seal && !fn_is_use(descriptor.category)) return op_err("item not usable");
+        if (!is_seal && !read_item_is_usable(descriptor.category)) {
+            return op_err("item not usable");
+        }
 
         item = module_item_locked(bag, slot);
         leader = member_or_null(0);
@@ -195,8 +199,8 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     if (closes_description && fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
     if (is_seal) {
         // SAVE_IsOK/空槽检查不得持背包锁调用；失败先 abort token 再返回明确错误。
-        const bool save_ok = fn_save_is_ok() != 0;
-        const bool slot_ok = save_ok && fn_mercenary_is_empty_manager_slot() != 0;
+        const bool save_ok = read_save_is_ok();
+        const bool slot_ok = save_ok && read_has_empty_mercenary_slot();
         if (!save_ok || !slot_ok) {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
             module_use_abort_locked(use_token);
@@ -330,7 +334,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
 }
 
 std::string virtual_bag_inventory_bags_json() {
-    if (!g_virtual_bag_enabled.load() || !game_in_world()) return "";
+    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return "";
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     std::string out;

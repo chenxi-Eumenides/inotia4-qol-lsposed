@@ -65,10 +65,9 @@ void mix_refresh_tab_bag_items_locked() {
             }
             continue;
         }
-        if (item != nullptr && fn_get_bit != nullptr) {
-            const uint16_t flags = *reinterpret_cast<uint16_t*>(
-                reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            if (fn_get_bit(flags, 15, 6) != static_cast<int>(type)) {
+        if (item != nullptr) {
+            int category = -1;
+            if (!read_item_category(item, &category) || category != static_cast<int>(type)) {
                 if (defer_item_free_locked(item)) item = nullptr;
             }
         }

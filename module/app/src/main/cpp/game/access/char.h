@@ -60,6 +60,18 @@ int char_merc_slot(const void* ch);
 // 未解析或 ch 为空返回 false；调用方须先经 char_can_change_equip_resolved() 判定（fail-closed）。
 bool char_can_change_equip(const void* ch);
 
+// 装备查询链：只读判定与当前装备槽读取；未解析返回 false/nullptr。
+bool char_can_equip(const void* ch, const void* item);
+bool char_can_equip_resolved();
+int char_find_equip_slot(const void* ch, const void* item);
+bool char_find_equip_slot_resolved();
+void* char_equipped_item(const void* ch, int slot);
+bool char_equipped_item_resolved();
+
+// 佣兵管理器是否仍有空槽；未解析返回 -1。
+int char_has_empty_mercenary_slot();
+bool char_has_empty_mercenary_slot_resolved();
+
 // 当前装备/物品菜单选中角色 PARTY_GetMenuCharacter()；未解析返回 nullptr。
 void* char_menu_character();
 

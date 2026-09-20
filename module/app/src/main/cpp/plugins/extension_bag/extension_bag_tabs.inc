@@ -19,10 +19,8 @@ void refresh_tab_bag_items_locked() {
             continue;
         }
         if (slot != nullptr) {
-            if (fn_get_bit == nullptr) continue;
-            const uint16_t flags =
-                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(slot) + I_TYPE);
-            if (fn_get_bit(flags, 15, 6) == static_cast<int>(type)) continue;
+            int category = -1;
+            if (read_item_category(slot, &category) && category == static_cast<int>(type)) continue;
             if (defer_item_free_locked(slot)) slot = nullptr;
         }
         if (fn_create_item == nullptr) continue;
