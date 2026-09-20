@@ -1943,5 +1943,5 @@
 |---|---|---|
 | 数据获取 | 同进程 Hook | 同进程 Hook（LSPatch 注入） |
 | API 访问 | 监听 0.0.0.0，局域网 Wi-Fi IP | Waydroid NAT，需端口转发 |
-| minSdk | Android 11+（Zygisk-LSPosed） | 随游戏 targetSdk 29 |
+| minSdk | Android 8.1+（Zygisk-LSPosed；LSPatch/NPatch 集成受加载器自身下限约束，官方为 Android 9+） | 随游戏 targetSdk 29 |
 | 静态数据 | JSON 库随模块打包 | JSON 库随集成 APK 打包 |
