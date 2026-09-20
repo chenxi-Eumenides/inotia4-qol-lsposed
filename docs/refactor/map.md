@@ -29,9 +29,9 @@
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1589 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 167 | 33243 |
-| `host/` | 22 | 6274 |
-| **合计** | **292** | **49476** |
+| `plugins/` | 167 | 33252 |
+| `host/` | 22 | 6281 |
+| **合计** | **292** | **49492** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -50,7 +50,7 @@
 - `plugins/save_backup/`：13 文件 / 4612 行
 - `plugins/simple_mode/`：6 文件 / 529 行
 - `plugins/special_equip/`：6 文件 / 547 行
-- `plugins/stack_limit/`：3 文件 / 428 行
+- `plugins/stack_limit/`：3 文件 / 437 行
 - `plugins/text_layer/`：6 文件 / 494 行
 - `plugins/world_teleport/`：6 文件 / 540 行
 

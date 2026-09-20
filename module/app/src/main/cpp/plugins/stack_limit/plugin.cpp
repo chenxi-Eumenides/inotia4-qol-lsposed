@@ -253,11 +253,9 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
-    host::host_item_count_set_provider(nullptr);
-    g_provider_resident.store(false, std::memory_order_release);
+    // provider 代码与 item_count 解释面在进程内保持驻留；已有 S2 数据没有迁移方案，
+    // 不能在普通 deactivate 后卸载其解释器。deactivate 只撤销 999 功能组的有效态。
     g_feature_999_enabled.store(false, std::memory_order_release);
-    g_sdk = nullptr;
-    g_game = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -273,8 +271,7 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
-    out.enabled = g_provider_resident.load(std::memory_order_acquire) &&
-                  g_feature_999_enabled.load(std::memory_order_acquire);
+    out.enabled = feature_enabled();
     out.error = nullptr;
 }
 
@@ -298,6 +295,14 @@ const contracts::PluginDescriptor kDescriptor = {
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
+}
+
+bool provider_resident() {
+    return g_provider_resident.load(std::memory_order_acquire) && g_game != nullptr;
+}
+
+bool feature_enabled() {
+    return provider_resident() && g_feature_999_enabled.load(std::memory_order_acquire);
 }
 
 }  // namespace qol::features::stack_limit

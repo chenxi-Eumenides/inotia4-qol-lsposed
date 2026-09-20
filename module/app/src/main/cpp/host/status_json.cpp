@@ -9,6 +9,7 @@
 #include "host/plugin_registry.h"
 #include "infra/commands.h"
 #include "infra/status.h"
+#include "plugins/stack_limit/plugin.h"
 
 namespace qol::host {
 
@@ -154,6 +155,12 @@ std::string host_feature_status_json() {
         out += qol::infra::feature_state_name(feature.state);
         out += "\",\"enabled\":";
         out += feature.enabled ? "true" : "false";
+        if (std::strcmp(feature.id, "stack_limit") == 0) {
+            out += ",\"residency\":\"";
+            out += qol::features::stack_limit::provider_resident() ? "resident" : "not_resident";
+            out += "\",\"feature_enabled\":";
+            out += qol::features::stack_limit::feature_enabled() ? "true" : "false";
+        }
         out += ",\"error\":";
         if (feature.error == nullptr) {
             out += "null";

@@ -9,4 +9,8 @@ namespace qol::features::stack_limit {
 
 const contracts::PluginDescriptor& plugin_descriptor();
 
+// provider 驻留与 999 功能有效态是两个独立诊断维度。
+bool provider_resident();
+bool feature_enabled();
+
 }  // namespace qol::features::stack_limit

@@ -127,12 +127,16 @@ int main() {
         "stack_limit",
     };
     assert(descriptor.install(context) == 0);
+    assert(qol::features::stack_limit::provider_resident());
+    assert(!qol::features::stack_limit::feature_enabled());
     assert_pure_conversion_api();
     uint32_t resident_count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &resident_count).code ==
            kQolErrUnsupported);
     assert(resident_count == 41);
     descriptor.on_enabled(context);
+    assert(qol::features::stack_limit::provider_resident());
+    assert(qol::features::stack_limit::feature_enabled());
     qol::contracts::PluginStatusOut status{};
     descriptor.fill_status(status);
     assert(status.enabled);
@@ -150,6 +154,8 @@ int main() {
 
     descriptor.on_disabled(context);
     descriptor.on_disabled(context);
+    assert(qol::features::stack_limit::provider_resident());
+    assert(!qol::features::stack_limit::feature_enabled());
     status = {};
     descriptor.fill_status(status);
     assert(!status.enabled);
@@ -171,13 +177,15 @@ int main() {
            kQolErrNotReady);
     g_gate = false;
     descriptor.deactivate(context);
+    assert(qol::features::stack_limit::provider_resident());
+    assert(!qol::features::stack_limit::feature_enabled());
     count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
-           kQolErrNotReady);
+           kQolErrUnsupported);
     assert(count == 41);
     uint32_t field = 41;
     assert(qol::host::host_item_count_api().field_from_canonical(0, 99, 0, &field).code ==
-           kQolErrNotReady);
-    assert(field == 41);
+           0);
+    assert(field != 41);
     return 0;
 }
