@@ -312,6 +312,18 @@ void test_installed_disabled_does_not_register() {
     CHECK(g_provider_disabled_calls == 1);
 }
 
+void test_missing_optional_capability_is_degraded() {
+    reset_all();
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    CHECK(register_plugin(make_optional_consumer()));
+    CHECK(install_all(make_host_deps()) == 0);
+    FeatureStatus status{};
+    CHECK(feature_status("cap_consumer_opt", &status));
+    CHECK(status.state == FeatureState::kEnabled);
+    CHECK(status.degraded);
+    CHECK(status.error != nullptr && std::strstr(status.error, "attribute.quality") != nullptr);
+}
+
 void test_disable_revokes_and_cascades() {
     reset_all();
     qol::infra::config_set_bool("cap.provider.on", true);
@@ -412,18 +424,74 @@ void test_no_auto_recovery() {
     CHECK(g_req_disabled_calls == 2);
 }
 
-void test_required_consumer_before_provider_is_blocked() {
+void test_required_consumer_before_provider_is_topologically_unblocked() {
     reset_all();
     qol::infra::config_set_bool("cap.provider.on", true);
     qol::infra::config_set_bool("cap.consumer.on", true);
-    // install_all 不会对已 blocked 的 required 消费者做 provider 后注册重试。
+    // 注册顺序故意反转；DAG 拓扑应先安装/发布 provider，再自动解开 consumer。
     CHECK(register_plugin(make_required_consumer()));
     CHECK(register_plugin(make_provider()));
-    CHECK(install_all(make_host_deps()) == 1);
-    CHECK(feature_state_is("cap_consumer_req", FeatureState::kBlocked));
-    CHECK(g_req_install_calls == 0);
+    CHECK(install_all(make_host_deps()) == 0);
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kEnabled));
+    CHECK(g_req_install_calls == 1);
     CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
     CHECK(qol::infra::capability_count() == 1);
+}
+
+void test_missing_required_capability_is_diagnostic() {
+    reset_all();
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    CHECK(register_plugin(make_required_consumer()));
+    CHECK(install_all(make_host_deps()) == 1);
+    FeatureStatus status{};
+    CHECK(feature_status("cap_consumer_req", &status));
+    CHECK(status.state == FeatureState::kBlocked);
+    CHECK(status.error != nullptr && std::strstr(status.error, "attribute.quality") != nullptr);
+}
+
+CapabilityProvisionRef g_cycle_a_provides[] = {
+    {"cycle.a", {1, 0}, &g_provider_api},
+};
+CapabilityProvisionRef g_cycle_b_provides[] = {
+    {"cycle.b", {1, 0}, &g_provider_api},
+};
+CapabilityRequirement g_cycle_a_requires[] = {
+    {"cycle.b", {1, 0}},
+};
+CapabilityRequirement g_cycle_b_requires[] = {
+    {"cycle.a", {1, 0}},
+};
+
+PluginDescriptor make_cycle_plugin(const char* id, CapabilityRequirement* requires,
+                                   CapabilityProvisionRef* provides) {
+    PluginDescriptor d{};
+    d.id = id;
+    d.version = "0.1.0";
+    d.requires_count = 1;
+    d.requires = requires;
+    d.provides_count = 1;
+    d.provides = provides;
+    d.install = &req_install;
+    d.deactivate = &req_deactivate;
+    d.on_enabled = &req_on_enabled;
+    d.on_disabled = &req_on_disabled;
+    d.fill_status = &req_fill_status;
+    return d;
+}
+
+void test_dependency_cycle_is_diagnostic() {
+    reset_all();
+    CHECK(register_plugin(make_cycle_plugin("cycle_a", g_cycle_a_requires, g_cycle_a_provides)));
+    CHECK(register_plugin(make_cycle_plugin("cycle_b", g_cycle_b_requires, g_cycle_b_provides)));
+    CHECK(install_all(make_host_deps()) == 2);
+    FeatureStatus a{};
+    FeatureStatus b{};
+    CHECK(feature_status("cycle_a", &a));
+    CHECK(feature_status("cycle_b", &b));
+    CHECK(a.state == FeatureState::kFailed && a.error != nullptr &&
+          std::strstr(a.error, "dependency cycle") != nullptr);
+    CHECK(b.state == FeatureState::kFailed && b.error != nullptr &&
+          std::strstr(b.error, "dependency cycle") != nullptr);
 }
 
 void test_deactivate_revokes_capability() {
@@ -449,9 +517,12 @@ void test_deactivate_revokes_capability() {
 int main() {
     test_enabled_registers_capability();
     test_installed_disabled_does_not_register();
+    test_missing_optional_capability_is_degraded();
     test_disable_revokes_and_cascades();
     test_no_auto_recovery();
-    test_required_consumer_before_provider_is_blocked();
+    test_required_consumer_before_provider_is_topologically_unblocked();
+    test_missing_required_capability_is_diagnostic();
+    test_dependency_cycle_is_diagnostic();
     test_deactivate_revokes_capability();
     std::printf("capability_lifecycle: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -5,6 +5,7 @@
 
 #include "../../contracts/events.h"
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/extension_bag.h"
 #include "../../contracts/inventory_action.h"
 #include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
@@ -37,6 +38,8 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
     {contracts::kInventoryActionCapabilityId,
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor}},
+    {contracts::kExtensionBagCapabilityId,
+     {contracts::kExtensionBagVersionMajor, contracts::kExtensionBagVersionMinor}},
 };
 
 uint64_t g_config_subscription = 0;
@@ -175,7 +178,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2, kRequires,  // requires=attribute.quality + inventory.action
+    3, kRequires,  // requires=attribute.quality + inventory.action + extension_bag
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）

@@ -49,6 +49,30 @@ namespace {
 
 bool g_assembly_done = false;
 
+using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
+
+// 这里只收集描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
+// requires/provides 构建 capability DAG 并决定 install/publish 顺序。
+constexpr PluginDescriptorFn kPluginDescriptors[] = {
+    &features::attribute_quality::plugin_descriptor,
+    &features::attribute_range_display::plugin_descriptor,
+    &features::autosell::plugin_descriptor,
+    &features::core_ui::plugin_descriptor,
+    &features::craft_ui::plugin_descriptor,
+    &features::custom_recipe::plugin_descriptor,
+    &features::extension_bag::plugin_descriptor,
+    &features::inventory_hooks::plugin_descriptor,
+    &features::native_choice::plugin_descriptor,
+    &features::push_all::plugin_descriptor,
+    &features::quest::plugin_descriptor,
+    &features::save_backup::plugin_descriptor,
+    &features::simple_mode::plugin_descriptor,
+    &features::special_equip::plugin_descriptor,
+    &features::stack_limit::plugin_descriptor,
+    &features::text_layer::plugin_descriptor,
+    &features::world_teleport::plugin_descriptor,
+};
+
 using MechanismOutcome = qol::hooks::TxDeps::MechanismOutcome;
 
 // 资源门禁读取：事务引擎回调，gate 为空视为开。
@@ -194,93 +218,11 @@ bool assembly_init() {
     });
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
-    // inventory_hooks 先注册：沿用旧 nativeInit「库存 hook 早于其余插件安装」的时序。
-    if (!register_plugin(features::inventory_hooks::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: inventory_hooks registration failed");
-        return false;
-    }
-    // S2 布局与 clamp 在 bridge boot 后、此处 assembly 期作为 stack_limit 的 999 原子组
-    // 安装；boot 阶段只保留 host 的 Hive 登录兼容 patch，不再承担数量组就绪。
-    if (!register_plugin(features::stack_limit::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: stack_limit registration failed");
-        return false;
-    }
-    // capability provider 必须先于消费者注册：install_all 只做一次 check_requires，
-    // 消费者声明 required 依赖时若 provider 尚未注册会永久 blocked（VM-FIX-01 未闭合项②）。
-    // autosell 声明 required `attribute.quality`，故 attribute_quality 排在它之前。
-    if (!register_plugin(features::attribute_quality::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_quality registration failed");
-        return false;
-    }
-    // autosell：零资源常驻插件；install 注册 save-enter/exit 回调并按配置门禁同步扫描任务。
-    if (!register_plugin(features::autosell::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: autosell registration failed");
-        return false;
-    }
-    if (!register_plugin(features::simple_mode::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: simple_mode registration failed");
-        return false;
-    }
-    if (!register_plugin(features::push_all::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: push_all registration failed");
-        return false;
-    }
-    if (!register_plugin(features::quest::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: quest registration failed");
-        return false;
-    }
-    if (!register_plugin(features::attribute_range_display::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: attribute_range_display registration failed");
-        return false;
-    }
-    if (!register_plugin(features::text_layer::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: text_layer registration failed");
-        return false;
-    }
-    if (!register_plugin(features::special_equip::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: special_equip registration failed");
-        return false;
-    }
-    // core.ui：出口面 UI 容器（provides `ui_panels`）+ own:popup.settings；先于面板消费者
-    // （save_backup）注册，保证 save_backup 的 provider 注册时容器已就绪、能力随后发布。
-    if (!register_plugin(features::core_ui::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: core.ui registration failed");
-        return false;
-    }
-    // save_backup：常驻插件；删档同步 PtrHook 声明式资源 + own:popup.savebackup + provider 注册。
-    if (!register_plugin(features::save_backup::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: save_backup registration failed");
-        return false;
-    }
-    // native_choice：2 条常驻资源（UIChoice_Init 入口 hook + ExecuteProc 指针槽），
-    // provides `ui_choice`；先于 world_teleport 注册，保证消费者进入 enabled 时能力已发布。
-    if (!register_plugin(features::native_choice::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: native_choice registration failed");
-        return false;
-    }
-    // world_teleport：零资源常驻插件；install 安装入口指令 patch（legacy 过渡机制）；
-    // 选择框组件经 optional_requires=[ui_choice] 消费。
-    if (!register_plugin(features::world_teleport::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: world_teleport registration failed");
-        return false;
-    }
-    // custom_recipe 先于 craft_ui 注册：前者 provides `craft_result`，后者 optional_requires 消费；
-    // 拓扑顺序保证 craft_ui 安装/启用时能力已注册。
-    if (!register_plugin(features::custom_recipe::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: custom_recipe registration failed");
-        return false;
-    }
-    // craft_ui：12 条 UIMix 入口 hook（5 核心 + 7 装饰），配方判定经 craft_result 能力。
-    if (!register_plugin(features::craft_ui::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: craft_ui registration failed");
-        return false;
-    }
-    // extension_bag：8 条声明式资源（M1/M2 入口 hook、P1–P4 PopupState、S1 desc 槽命名空间、
-    // X1 move_merge 指针槽）。最后注册：C1–C21 raw call patch 与两条轮询线程仍保留，由插件
-    // on_enabled 驱动，须在其它插件装配完成后启动。
-    if (!register_plugin(features::extension_bag::plugin_descriptor())) {
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: extension_bag registration failed");
-        return false;
+    for (PluginDescriptorFn descriptor_fn : kPluginDescriptors) {
+        if (!register_plugin(descriptor_fn())) {
+            QOL_LOG_ERROR(QolDomain::kCore, "assembly: plugin descriptor registration failed");
+            return false;
+        }
     }
 
     // 启动期同步安装：此刻尚无帧源与在途回调，直接装完即就绪；运行期生命周期一律走事务。

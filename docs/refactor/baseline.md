@@ -139,8 +139,8 @@
 | `host` | `infra` | 42 |
 | `host` | `game` | 36 |
 | `host` | `contracts` | 22 |
-| `plugins/extension_bag` | `contracts` | 19 |
-| `plugins/autosell` | `contracts` | 15 |
+| `plugins/extension_bag` | `contracts` | 20 |
+| `plugins/autosell` | `contracts` | 16 |
 | `plugins/custom_recipe` | `contracts` | 12 |
 | `plugins/inventory_hooks` | `contracts` | 12 |
 | `plugins/core.ui` | `contracts` | 11 |

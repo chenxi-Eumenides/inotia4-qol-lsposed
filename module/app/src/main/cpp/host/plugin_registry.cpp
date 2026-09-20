@@ -36,6 +36,7 @@ contracts::PluginContext make_plugin_context(const char* plugin_id) {
 constexpr uint32_t kMaxPlugins = 32;
 constexpr uint32_t kMaxResourcesPerPlugin = 32;
 constexpr uint32_t kMaxErrorText = 96;
+constexpr uint32_t kNoPlugin = kMaxPlugins;
 
 struct PluginEntry {
     contracts::PluginDescriptor descriptor{};
@@ -55,6 +56,114 @@ char g_error_text[kMaxPlugins][kMaxErrorText];
 char g_gate_error_text[kMaxPlugins][kMaxErrorText];
 bool g_gate_degraded[kMaxPlugins];
 
+// 依赖图由描述符构建。注册顺序只决定描述符进入图的时机，不决定业务安装顺序；
+// g_install_order 是确定性的拓扑结果，provider 必须在 consumer 前完成 install/publish。
+uint32_t g_install_order[kMaxPlugins];
+uint32_t g_install_order_count = 0;
+bool g_dependency_invalid[kMaxPlugins];
+
+uint32_t provider_for_requirement(const contracts::CapabilityRequirement& req,
+                                  bool* out_id_found) {
+    if (out_id_found != nullptr) *out_id_found = false;
+    if (req.id == nullptr) return kNoPlugin;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const contracts::PluginDescriptor& candidate = g_plugins[i].descriptor;
+        for (uint32_t p = 0; p < candidate.provides_count; ++p) {
+            const contracts::CapabilityProvisionRef& provision = candidate.provides[p];
+            if (provision.id == nullptr || std::strcmp(provision.id, req.id) != 0) continue;
+            if (out_id_found != nullptr) *out_id_found = true;
+            if (contracts::satisfies(provision.version, req.range)) return i;
+        }
+    }
+    return kNoPlugin;
+}
+
+void set_dependency_error(uint32_t index, const char* prefix, const char* capability_id) {
+    std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "%s: %s", prefix,
+                  capability_id != nullptr ? capability_id : "<null>");
+}
+
+bool dependency_order_build() {
+    bool edges[kMaxPlugins][kMaxPlugins] = {};
+    uint32_t indegree[kMaxPlugins] = {};
+    g_install_order_count = 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        g_dependency_invalid[i] = false;
+    }
+
+    // 先标记缺失/版本不兼容的 required，避免它们污染环检测结果。
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            bool id_found = false;
+            const uint32_t provider = provider_for_requirement(plugin.requires[r], &id_found);
+            if (provider != kNoPlugin) continue;
+            g_dependency_invalid[i] = true;
+            set_dependency_error(i, id_found ? "incompatible required capability"
+                                             : "missing required capability",
+                                 plugin.requires[r].id);
+            break;
+        }
+    }
+
+    // required 和已注册的 optional provider 都进入 DAG。optional provider 不存在时不建边，
+    // consumer 仍可按 degraded 语义安装；存在时固定先发布 provider，避免无意义的顺序依赖。
+    for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+        if (g_dependency_invalid[consumer]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            const uint32_t provider = provider_for_requirement(plugin.requires[r], nullptr);
+            if (provider == kNoPlugin || g_dependency_invalid[provider]) continue;
+            if (!edges[provider][consumer]) {
+                edges[provider][consumer] = true;
+                ++indegree[consumer];
+            }
+        }
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            const uint32_t provider = provider_for_requirement(plugin.optional_requires[o], nullptr);
+            if (provider == kNoPlugin || g_dependency_invalid[provider] || provider == consumer) {
+                continue;
+            }
+            if (!edges[provider][consumer]) {
+                edges[provider][consumer] = true;
+                ++indegree[consumer];
+            }
+        }
+    }
+
+    bool emitted[kMaxPlugins] = {};
+    for (;;) {
+        uint32_t selected = kNoPlugin;
+        for (uint32_t i = 0; i < g_plugin_count; ++i) {
+            if (g_dependency_invalid[i] || emitted[i] || indegree[i] != 0) continue;
+            if (selected == kNoPlugin ||
+                std::strcmp(g_plugins[i].descriptor.id, g_plugins[selected].descriptor.id) < 0) {
+                selected = i;
+            }
+        }
+        if (selected == kNoPlugin) break;
+        emitted[selected] = true;
+        g_install_order[g_install_order_count++] = selected;
+        for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+            if (edges[selected][consumer] && indegree[consumer] > 0) --indegree[consumer];
+        }
+    }
+
+    bool valid = true;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) {
+            valid = false;
+            continue;
+        }
+        if (!emitted[i]) {
+            g_dependency_invalid[i] = true;
+            set_dependency_error(i, "dependency cycle", g_plugins[i].descriptor.id);
+            valid = false;
+        }
+    }
+    return valid;
+}
+
 bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.id == nullptr || plugin.id[0] == '\0') return false;
     if (plugin.version == nullptr) return false;
@@ -69,11 +178,23 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
 }
 
 // requires 缺失判定；返回 nullptr 表示全部满足，否则为静态错误文本。
-const char* check_requires(const contracts::PluginDescriptor& plugin) {
+const char* check_requires(const contracts::PluginDescriptor& plugin, uint32_t plugin_index) {
     for (uint32_t i = 0; i < plugin.requires_count; ++i) {
         const contracts::CapabilityRequirement& req = plugin.requires[i];
         if (infra::require_capability(req.id, req.range) == nullptr) {
-            return "missing required capability";
+            set_dependency_error(plugin_index, "missing required capability", req.id);
+            return g_error_text[plugin_index];
+        }
+    }
+    return nullptr;
+}
+
+const char* check_optional_requires(const contracts::PluginDescriptor& plugin, uint32_t plugin_index) {
+    for (uint32_t i = 0; i < plugin.optional_count; ++i) {
+        const contracts::CapabilityRequirement& req = plugin.optional_requires[i];
+        if (infra::require_capability(req.id, req.range) == nullptr) {
+            set_dependency_error(plugin_index, "missing optional capability", req.id);
+            return g_error_text[plugin_index];
         }
     }
     return nullptr;
@@ -763,7 +884,10 @@ void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
 // 依赖失效级联：requires 命中 → 逆拓扑停用；optional_requires 命中 → degraded 标记。
 void cascade_dependents(const char* capability_id, CascadeContext& context) {
     if (capability_id == nullptr) return;
-    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+    // 依赖图的逆拓扑序保证更深层 consumer 先于 provider 侧 consumer 进入撤销事务；
+    // 每层仍由 capability_id 精确筛选，避免 optional 依赖被 required 级联停用。
+    for (uint32_t order_pos = g_install_order_count; order_pos > 0; --order_pos) {
+        const uint32_t i = g_install_order[order_pos - 1];
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
         bool required = false;
         for (uint32_t r = 0; r < plugin.requires_count; ++r) {
@@ -834,10 +958,33 @@ int install_all(const HostDeps& deps) {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
         infra::status_register(plugin.id, plugin.version);
-        infra::status_update(plugin.id, infra::FeatureState::kResolving, false, nullptr);
+    }
 
-        // 1) requires 校验：缺必需能力 → blocked（P2 无插件声明 requires）。
-        const char* blocked_error = check_requires(plugin);
+    // 先构建完整 capability DAG，再按拓扑顺序 install/publish。这样 provider 即使晚于
+    // consumer 注册，也不会先被误判为 blocked；缺失 required 与环在这里留下可诊断状态。
+    std::memset(g_error_text, 0, sizeof(g_error_text));
+    (void)dependency_order_build();
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        infra::status_update(g_plugins[i].descriptor.id, infra::FeatureState::kResolving, false,
+                             nullptr);
+    }
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!g_dependency_invalid[i]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        const bool cycle = g_error_text[i][0] != '\0' &&
+                           std::strncmp(g_error_text[i], "dependency cycle", 16) == 0;
+        infra::status_update(plugin.id, cycle ? infra::FeatureState::kFailed
+                                             : infra::FeatureState::kBlocked,
+                             false, g_error_text[i]);
+        ++failed_plugins;
+    }
+
+    for (uint32_t order_pos = 0; order_pos < g_install_order_count; ++order_pos) {
+        const uint32_t i = g_install_order[order_pos];
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+
+        // 1) requires 校验：provider 未启用/安装失败 → blocked，并保留具体能力 id。
+        const char* blocked_error = check_requires(plugin, i);
         if (blocked_error != nullptr) {
             infra::status_update(plugin.id, infra::FeatureState::kBlocked, false, blocked_error);
             ++failed_plugins;
@@ -1019,12 +1166,25 @@ int install_all(const HostDeps& deps) {
 
         // 4) 全部成功（含 fail-soft 跳过）：带 gate 的资源全开 → enabled；否则 installed_disabled。
         //    fail-soft 失败只置 degraded 标记 + error 文案，不改生命周期态（§8）。
+        const char* optional_error = check_optional_requires(plugin, i);
+        if (optional_error != nullptr) {
+            degraded = true;
+            // check_optional_requires 已把诊断文本写入 g_error_text；避免用同一缓冲区
+            // 作为 snprintf 的 source/destination，保留 capability id。
+            if (degraded_claim_id == nullptr) degraded_error = nullptr;
+        }
         const bool enabled = all_gates_on && atomic_group_satisfied(plugin);
         const char* status_error = nullptr;
         if (degraded) {
-            std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
-                          degraded_claim_id != nullptr ? degraded_claim_id : "?",
-                          degraded_error != nullptr ? degraded_error : "failed");
+            if (degraded_claim_id != nullptr) {
+                std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
+                              degraded_claim_id, degraded_error != nullptr ? degraded_error : "failed");
+            } else {
+                if (g_error_text[i][0] == '\0') {
+                    std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "%s",
+                                  degraded_error != nullptr ? degraded_error : "degraded");
+                }
+            }
             status_error = g_error_text[i];
             infra::status_set_degraded(plugin.id, true);
             // 记录由本路径置位，供 sync_gates 在资源重试成功后清除标记。
@@ -1216,6 +1376,13 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 return false;
             }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
+            const uint32_t index = plugin_index_of(plugin->id);
+            const char* blocked_error = check_requires(*plugin, index);
+            if (blocked_error != nullptr) {
+                infra::status_update(plugin->id, infra::FeatureState::kBlocked, false,
+                                     blocked_error);
+                return false;
+            }
             // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。
             if (plugin->install != nullptr && plugin->install(ctx) != 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
@@ -1242,7 +1409,6 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
                 return false;
             }
-            const uint32_t index = plugin_index_of(plugin->id);
             for (LifecycleTx& slot : g_lifecycle_txs) {
                 if (slot.in_use) continue;
                 slot.in_use = true;

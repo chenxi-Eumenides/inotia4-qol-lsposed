@@ -209,18 +209,18 @@
 | 消费者 | capability | 类型 | 提供者 |
 |---|---|---|---|
 | `autosell` | `attribute.quality` | **required** | `attribute_quality` |
+| `extension_bag` | `inventory_refresh` | **required** | `inventory_hooks` |
+| `autosell` | `extension_bag` | **required** | `extension_bag` |
+| `save_backup` | `ui_panels` | **required** | `core.ui` |
 | `attribute_range_display` | `attribute.quality` | optional | `attribute_quality` |
 | `custom_recipe` | `attribute.quality` | optional | `attribute_quality` |
 | `craft_ui` | `craft_result` | optional | `custom_recipe` |
 | `world_teleport` | `ui_choice` | optional | `native_choice` |
 
-**运行期消费但未在 descriptor 声明**（实测；属 C6 应收口的「声明与消费不一致」）
+**运行期消费但不属于插件 descriptor 依赖**（宿主内部消费者；不参与插件 capability DAG）
 
 | 消费者 | capability | 位置 |
 |---|---|---|
-| `extension_bag` | `inventory_refresh` | `game_ui_virtbag.cpp:311`、`move_merge.inc:96` |
-| `autosell` | `extension_bag` | `scan.cpp`（经 POD 成员） |
-| `save_backup` | `ui_panels` | `ui/panel.cpp:779` |
 | `api/native/game_save.cpp` | `ui_panels` | 宿主侧 API 消费者（非插件） |
 | `core/native/inventory_trade.cpp` | `extension_bag` | legacy 宿主侧消费者（待 C6） |
 

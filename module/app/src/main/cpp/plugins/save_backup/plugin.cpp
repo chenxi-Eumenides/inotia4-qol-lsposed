@@ -21,6 +21,13 @@ constexpr const char* kPluginVersion = "0.1.0";
 // 指针槽资源登记名：与 game/access/ptr_slots 的 kSlots 条目一一对应。
 constexpr const char* kSlotDeleteResourceId = "ptrslot:SAVESLOT_DELETE_GOT";
 
+const contracts::CapabilityRequirement kRequires[] = {
+    {
+        contracts::kUiPanelsCapabilityId,
+        {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor},
+    },
+};
+
 // 游戏内备份面板 provider：由 core.ui 容器（设置页「存档备份」动作项）经 ui_panels 打开。
 const contracts::PanelProviderSpec kPanelProvider = {
     "save_backup",
@@ -137,7 +144,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires,  // requires=ui_panels
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）

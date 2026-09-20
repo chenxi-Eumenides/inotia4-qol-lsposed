@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "contracts/events.h"
+#include "contracts/inventory_refresh.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/move_merge.h"
 
@@ -61,6 +62,14 @@ const qol::contracts::CapabilityProvisionRef kProvides[] = {
         {static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
          static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
         extension_bag_api_table(),
+    },
+};
+
+const qol::contracts::CapabilityRequirement kRequires[] = {
+    {
+        qol::contracts::kInventoryRefreshCapabilityId,
+        {qol::contracts::kInventoryRefreshVersionMajor,
+         qol::contracts::kInventoryRefreshVersionMinor},
     },
 };
 
@@ -136,7 +145,7 @@ int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char*
 const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires,  // requires=inventory_refresh
     0, nullptr,   // optional_requires
     1, kProvides,  // provides（extension_bag v1.0）
     g_resource_count, g_resources,  // resources（29 条）
