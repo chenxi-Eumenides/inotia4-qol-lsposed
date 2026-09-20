@@ -399,8 +399,9 @@ void msg_label_draw(void* ctrl) {
     if (text == nullptr || text[0] == 0) return;
     int64_t pt[2];
     ctrl_abs_point(ctrl, pt);
-    const int64_t cx = pt[0] +
-        *reinterpret_cast<int64_t*>(reinterpret_cast<uint8_t*>(ctrl) + CO_RECT_W) / 2;
+    UiRect rect{};
+    if (!ui_get_rect(ctrl, &rect)) return;
+    const int64_t cx = pt[0] + rect.w / 2;
     const uint32_t color = g_msg_text.empty() ? UI_GOLD : g_msg_color;
     if (ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
         (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),

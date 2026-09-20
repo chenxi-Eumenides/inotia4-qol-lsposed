@@ -1,14 +1,14 @@
-#include "plugins/save_backup/plugin.h"
+#include "plugin.h"
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/ownership.h"
-#include "contracts/panels.h"
-#include "plugins/save_backup/feature.h"
-#include "plugins/save_backup/log.h"
-#include "plugins/save_backup/ui/panel.h"
+#include "../../contracts/ownership.h"
+#include "../../contracts/panels.h"
+#include "feature.h"
+#include "log.h"
+#include "ui/panel.h"
 
 namespace qol::features::save_backup {
 namespace {

@@ -64,6 +64,12 @@ void* ui_create_root(UiRect) { return nullptr; }
 void* ui_create_button(void*, UiRect, const char*, UiClickProc, UiDrawProc) { return nullptr; }
 void* ui_create_label(void*, UiRect, const char*, UiDrawProc) { return nullptr; }
 void* ui_find_child_in_area(void*, UiRect) { return nullptr; }
+void* ui_main_menu_more_games_button() { return nullptr; }
+bool ui_bind_main_menu_more_games(UiClickProc, uint64_t*) { return false; }
+bool ui_unbind_main_menu_more_games(uint64_t) { return false; }
+bool ui_popup_stack_top_matches(void (*)()) { return false; }
+void ui_clear_control_proc(void*) {}
+const char* data_ui_screen() { return "test"; }
 bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
 void ui_show_text_popup(int32_t) {}
 

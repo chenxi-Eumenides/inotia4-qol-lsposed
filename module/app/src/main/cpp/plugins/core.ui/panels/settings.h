@@ -1,10 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <jni.h>
 #include <string>
 
-#include "contracts/host_sdk.h"
+#include "../../../contracts/host_sdk.h"
 
 // core.ui 设置面板（原 feature/ui/game_ui_settings，D1-b2 迁移）。
 //
@@ -28,7 +27,7 @@ std::string data_settings_ui_status_json();
 std::string data_settings_ui_restore();
 std::string data_settings_ui_open_panel();
 std::string data_settings_ui_open_option();
-void settings_register_config_bridge(JNIEnv* env, jclass bridge_class);
+void settings_register_config_bridge(void* env, void* bridge_class);
 
 // 关闭设置面板（仅清本模块 panel 状态）：provider.close 复用；调用方负责游戏 pop 关闭。
 void settings_ui_close_panel();

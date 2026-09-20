@@ -1,6 +1,14 @@
 UiRect settings_root_rect() {
-    const int64_t screen_w = ROOT_W + static_cast<int64_t>(fn_calc_res_width()) * 2;
-    const int64_t screen_h = ROOT_H + static_cast<int64_t>(fn_calc_res_height()) * 2;
+    int32_t inset_w = 0;
+    int32_t inset_h = 0;
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->screen_inset_width == nullptr || ui->screen_inset_height == nullptr ||
+        !contracts::succeeded(ui->screen_inset_width(&inset_w)) ||
+        !contracts::succeeded(ui->screen_inset_height(&inset_h))) {
+        return {0, 0, ROOT_W, ROOT_H};
+    }
+    const int64_t screen_w = ROOT_W + static_cast<int64_t>(inset_w) * 2;
+    const int64_t screen_h = ROOT_H + static_cast<int64_t>(inset_h) * 2;
     if (screen_w <= 0 || screen_h <= 0) return {0, 0, ROOT_W, ROOT_H};
     const int64_t logical_w = screen_w * ROOT_H / screen_h;
     return {(logical_w - ROOT_W) / 2, 0, ROOT_W, ROOT_H};

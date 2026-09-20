@@ -28,6 +28,11 @@ bool ui_control_active(void* ctrl, int32_t* out_active);
 void* ui_control_data(void* ctrl);
 bool ui_execute_proc_matches(void* ctrl, UiClickProc expected);
 bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y);
+void* ui_main_menu_more_games_button();
+bool ui_bind_main_menu_more_games(UiClickProc replacement, uint64_t* out_token);
+bool ui_unbind_main_menu_more_games(uint64_t token);
+bool ui_popup_stack_top_matches(void (*enter)());
+void ui_clear_control_proc(void* ctrl);
 
 void ui_begin_frame();
 void ui_begin_frame(UiRect mask, UiRect panel, uint32_t panel_color);

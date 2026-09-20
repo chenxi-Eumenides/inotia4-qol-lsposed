@@ -13,11 +13,12 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 2;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 3;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
 using QolUiClickFn = void (*)(void* user);
+using QolUiPopupEnterFn = void (*)();
 using QolUiChangedFn = void (*)(void* user, int32_t value);
 using QolUiScrollFn = void (*)(void* user, int32_t offset);
 
@@ -166,6 +167,16 @@ struct QolUiAdapter {
     QolResult (*control_data)(QolUiHandle, QolUiHandle*);
     QolResult (*execute_proc_matches)(QolUiHandle, QolUiClickFn, int32_t*);
     QolResult (*control_absolute_origin)(QolUiHandle, int64_t*, int64_t*);
+    QolResult (*control_pressed)(QolUiHandle, int32_t*);
+    QolResult (*touch_coordinates)(uint64_t, int64_t*, int64_t*);
+
+    // 运行时控件实例面：宿主负责定位、校验、绑定和还原动态 ExecuteProc 槽。
+    QolResult (*find_main_menu_more_games)(QolUiHandle*);
+    QolResult (*bind_main_menu_more_games)(QolUiClickFn, uint64_t*);
+    QolResult (*unbind_main_menu_more_games)(uint64_t);
+    QolResult (*popup_stack_top_matches)(QolUiPopupEnterFn, int32_t*);
+    QolResult (*clear_control_proc)(QolUiHandle);
+    QolResult (*screen_name)(const char**);
 };
 
 }  // namespace qol::contracts

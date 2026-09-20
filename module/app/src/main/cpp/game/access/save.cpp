@@ -27,6 +27,12 @@ bool save_slot_exists(const void* slot_struct) {
     return reinterpret_cast<const uint8_t*>(slot_struct)[SAVESLOT_EXISTS] != 0;
 }
 
+int save_slot_map_id(const void* slot_struct) {
+    if (slot_struct == nullptr) return -1;
+    return *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(slot_struct) +
+                                              SAVESLOT_MAP_ID);
+}
+
 int save_slot_hero_index(const void* slot_struct) {
     if (slot_struct == nullptr) return -1;
     return static_cast<int8_t>(

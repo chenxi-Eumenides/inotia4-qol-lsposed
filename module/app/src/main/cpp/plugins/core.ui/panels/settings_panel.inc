@@ -2,10 +2,7 @@ void settings_panel_enter() {
     SETTINGS_LOG("settings panel enter");
     if (g_root != nullptr) {
         settings_sync_page_state();
-        char json[512] = {0};
-        if (jni_get_config_json(json, sizeof(json))) {
-            parse_config_into_rows(json);
-        }
+        (void)sync_config_into_rows();
         if (!g_option_images_loaded) {
             g_option_images_loaded = ui_original::load_option_images();
         }
@@ -19,15 +16,12 @@ void settings_panel_enter() {
         g_back_pressed = false;
         return;
     }
-    if (g_base == 0 || fn_calc_res_width == nullptr || fn_calc_res_height == nullptr) {
+    if (!ui_resolution_ready()) {
         SETTINGS_LOG("settings panel enter: symbols not resolved");
         return;
     }
     // 面板打开时从 Kotlin 拉取当前配置
-    char json[512] = {0};
-    if (jni_get_config_json(json, sizeof(json))) {
-        parse_config_into_rows(json);
-    }
+    (void)sync_config_into_rows();
     g_option_images_loaded = ui_original::load_option_images();
     g_title_background_images_loaded = ui_load_image_unit(TITLE_BACKGROUND_LEFT_UNIT) &&
         ui_load_image_unit(TITLE_BACKGROUND_RIGHT_UNIT);
@@ -71,11 +65,11 @@ void settings_panel_enter() {
 }
 
 void settings_panel_process() {
-    if (!g_panel_active || g_root == nullptr || g_base == 0) return;
+    if (!g_panel_active || g_root == nullptr || ui_adapter() == nullptr) return;
     if (g_close_delay_frames > 0) {
         --g_close_delay_frames;
-        if (g_close_delay_frames == 0 && fn_ui_set_popup_process_info != nullptr) {
-            fn_ui_set_popup_process_info(3, 0);
+        if (g_close_delay_frames == 0) {
+            (void)ui_set_popup_process_info(3, 0);
             return;
         }
     }
@@ -144,9 +138,7 @@ void settings_row_clicked(void* ctrl) {
             return;
         }
         if (!jni_toggle_config(kSettingsItems[i].key)) return;
-        char json[512] = {0};
-        if (jni_get_config_json(json, sizeof(json))) {
-            parse_config_into_rows(json);
+        if (sync_config_into_rows()) {
             return;
         }
         const bool target_enabled = strcmp(g_row_status[i], "关") == 0;
@@ -185,8 +177,11 @@ uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (g_root == nullptr || param == 0) return 1;
     if (g_close_delay_frames > 0) return 1;
     if (event == 0x17) {
-        int64_t tx = *reinterpret_cast<const int64_t*>(param);
-        int64_t ty = *reinterpret_cast<const int64_t*>(param + 8);
+        int64_t tx = 0;
+        int64_t ty = 0;
+        const contracts::QolUiAdapter* ui = ui_adapter();
+        if (ui == nullptr || ui->touch_coordinates == nullptr ||
+            !contracts::succeeded(ui->touch_coordinates(param, &tx, &ty))) return 1;
         for (int cell = 0; cell < SETTINGS_PAGE_CAPACITY; ++cell) {
             const int item = settings_item_index_at_cell(cell);
             if (item < 0 || g_rows[item].btn == nullptr) continue;
@@ -216,8 +211,11 @@ uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
             return 1;
         }
     } else if (event == 0x18 && g_back_pressed) {
-        int64_t tx = *reinterpret_cast<const int64_t*>(param);
-        int64_t ty = *reinterpret_cast<const int64_t*>(param + 8);
+        int64_t tx = 0;
+        int64_t ty = 0;
+        const contracts::QolUiAdapter* ui = ui_adapter();
+        if (ui == nullptr || ui->touch_coordinates == nullptr ||
+            !contracts::succeeded(ui->touch_coordinates(param, &tx, &ty))) return 1;
         const bool released_on_back = g_back_btn != nullptr &&
             ui_hit_test(g_back_btn, tx, ty, {0, 0, BACK_BTN_W, BACK_BTN_H});
         g_back_pressed = false;

@@ -1,11 +1,7 @@
-#include "plugins/save_backup/ui/panel.h"
+#include "panel.h"
 
-#include "contracts/panels.h"
-#include "contracts/ui.h"
-#include "core/native/game_ops_common.h"
-#include "game_access.h"
-#include "game_state.h"
-#include "game_ui.h"
+#include "../../../contracts/panels.h"
+#include "../../../contracts/ui.h"
 #include "plugins/save_backup/feature.h"
 #include "plugins/save_backup/log.h"
 
@@ -165,6 +161,16 @@ const contracts::QolUiAdapter* ui_adapter() {
 
 bool ui_ok(const QolResult& result) { return contracts::succeeded(result); }
 
+const char* ui_screen_name() {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    const char* name = nullptr;
+    if (ui != nullptr && ui->screen_name != nullptr && ui_ok(ui->screen_name(&name)) &&
+        name != nullptr) {
+        return name;
+    }
+    return "";
+}
+
 void* ui_create_control(uint32_t kind, void* parent, UiRect rect, const char* text,
                         UiClickProc click_proc, UiDrawProc draw_proc) {
     const contracts::QolUiAdapter* ui = ui_adapter();
@@ -293,6 +299,29 @@ bool ui_push_popup_state(uint32_t state_id) {
            ui_ok(ui->push_popup_state(state_id));
 }
 
+bool ui_popup_top_matches(contracts::QolUiPopupEnterFn enter) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    int32_t matches = 0;
+    return ui != nullptr && ui->popup_stack_top_matches != nullptr && enter != nullptr &&
+           ui_ok(ui->popup_stack_top_matches(enter, &matches)) && matches != 0;
+}
+
+void ui_clear_control_proc(void* control) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->clear_control_proc != nullptr && control != nullptr) {
+        (void)ui->clear_control_proc(control);
+    }
+}
+
+void ui_control_absolute_origin(void* control, int64_t out[2]) {
+    out[0] = 0;
+    out[1] = 0;
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->control_absolute_origin != nullptr && control != nullptr) {
+        (void)ui->control_absolute_origin(control, &out[0], &out[1]);
+    }
+}
+
 bool ui_set_font_color_rgb(int32_t red, int32_t green, int32_t blue) {
     const contracts::QolUiAdapter* ui = ui_adapter();
     return ui != nullptr && ui->set_font_color_rgb != nullptr &&
@@ -394,8 +423,7 @@ bool g_msg_is_error = false;
 int g_pending_op = 0;
 std::string g_pending_checksum;
 int g_pending_slot = -1;
-// 左栏三槽缓存：enter 后由游戏线程读 fn_save_get_save_slot / fn_saveslot_get_hero /
-// C_LEVEL / C_CLASS / SAVESLOT_MAP_ID 填充（见 read_slots_into），DrawProc 只读缓存，不读游戏内存。
+// 左栏三槽缓存：enter 后由游戏线程经 Game Host 读取槽元数据，DrawProc 只读缓存。
 struct SlotInfo {
     bool exists = false;
     int hero_level = -1;
@@ -502,19 +530,14 @@ void apply_backups_locked(std::vector<BackupEntry>& entries) {
 // 读三槽元数据到 out（无共享状态，锁外调用；必须在游戏线程执行，见 refresh_slots_on_game_thread）。
 // 口径与 save_backup.cpp:read_hero_meta / api/native/game_save.cpp:data_save_slots_json 一致：
 // 主菜单（STATE==4）下 SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局，仅此状态调用；
-// 其余状态只读现有槽结构。槽元数据经 Game Host 读取；map_id 尚未进入契约，保留旧字段读取。
+// 其余状态只读现有槽结构。槽元数据经 Game Host 读取。
 void read_slots_into(SlotInfo out[3]) {
     for (int i = 0; i < 3; ++i) out[i] = SlotInfo{};
     const auto* game = save_backup_game_host();
     if (game == nullptr || game->read_only.save.slot_exists == nullptr ||
         game->read_only.save.slot_hero_index == nullptr ||
         game->read_only.save.hero_level == nullptr ||
-        game->read_only.save.hero_class == nullptr ||
-        fn_save_get_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||
-        fn_save_create_save_slot == nullptr) return;
-    // 与 data_save_slots_json / read_hero_meta 口径一致：同一次主菜单停留内只重载一次
-    // （反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
-    save_slots_refresh_if_stale();
+        game->read_only.save.hero_class == nullptr || game->read_only.save.map_id == nullptr) return;
     for (int i = 0; i < 3; ++i) {
         int32_t exists = 0;
         if (!qol::contracts::succeeded(game->read_only.save.slot_exists(i, &exists)) ||
@@ -530,12 +553,8 @@ void read_slots_into(SlotInfo out[3]) {
         if (qol::contracts::succeeded(game->read_only.save.hero_class(i, &value))) {
             out[i].class_idx = value;
         }
-        // QolSaveReadOnlyApi 尚未暴露 map_id；仅保留该字段的旧读取路径。
-        void* slot = fn_save_get_save_slot(i);
-        if (slot != nullptr) {
-            const uint8_t* p = reinterpret_cast<const uint8_t*>(slot);
-            out[i].map_id = static_cast<int>(
-                *reinterpret_cast<const uint16_t*>(p + SAVESLOT_MAP_ID));
+        if (qol::contracts::succeeded(game->read_only.save.map_id(i, &value))) {
+            out[i].map_id = value;
         }
     }
 }
@@ -628,9 +647,9 @@ void savebackup_panel_f3();
 void savebackup_panel_f4();
 uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2);
 
-#include "plugins/save_backup/ui/panel.inc"
-#include "plugins/save_backup/ui/render.inc"
-#include "plugins/save_backup/ui/injection.inc"
+#include "ui/panel.inc"
+#include "ui/render.inc"
+#include "ui/injection.inc"
 
 }  // namespace
 
@@ -745,8 +764,8 @@ const char* savebackup_provider_block_reason() {
 // ============== 对外 API（原 data_savebackup_ui_*）==============
 
 std::string data_savebackup_ui_inject() {
-    if (savebackup_popup_acquire(nullptr) != 0) return op_err("state entry inject failed");
-    return op_ok();
+    if (savebackup_popup_acquire(nullptr) != 0) return save_backup_result_error("state entry inject failed");
+    return save_backup_result_ok();
 }
 
 std::string data_savebackup_ui_status_json() {
@@ -765,7 +784,7 @@ std::string data_savebackup_ui_status_json() {
         g_selected_slot, g_selected_backup,
         g_page_index, g_total_pages, g_backups.size(),
         g_msg_text.c_str(), g_msg_is_error ? "true" : "false",
-        data_ui_screen());
+        ui_screen_name());
     return std::string(buf);
 }
 
@@ -777,13 +796,13 @@ std::string data_savebackup_ui_restore() {
         g_back_pressed = 0;
     }
     savebackup_popup_release(nullptr);
-    return op_ok();
+    return save_backup_result_ok();
 }
 
 std::string data_savebackup_ui_open_panel() {
     const contracts::QolHostSdk* sdk = save_backup_host_sdk();
     if (sdk == nullptr || sdk->capabilities.require == nullptr) {
-        return op_err("ui_panels unavailable");
+        return save_backup_result_error("ui_panels unavailable");
     }
     const void* iface = nullptr;
     if (!ui_ok(sdk->capabilities.require(
@@ -791,11 +810,12 @@ std::string data_savebackup_ui_open_panel() {
             {static_cast<uint16_t>(contracts::kUiPanelsVersionMajor),
              static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)},
             &iface))) {
-        return op_err("ui_panels unavailable");
+        return save_backup_result_error("ui_panels unavailable");
     }
     const auto* api = static_cast<const contracts::UiPanelsApi*>(iface);
-    if (api->open == nullptr) return op_err("ui_panels unavailable");
-    return api->open("save_backup") ? op_ok() : op_err("panel open failed");
+    if (api->open == nullptr) return save_backup_result_error("ui_panels unavailable");
+    return api->open("save_backup") ? save_backup_result_ok()
+                                     : save_backup_result_error("panel open failed");
 }
 
 std::string data_savebackup_ui_self_check() {

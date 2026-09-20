@@ -16,6 +16,7 @@
 #include "game/access/ui_choice.h"
 #include "game/access/world.h"
 #include "game/clock.h"
+#include "core/native/game_feature.h"
 #include "core/native/game_variant.h"
 
 namespace qol::host {
@@ -55,6 +56,13 @@ int32_t game_symbol_available(const char* symbol_id) {
     if (symbol_id == nullptr) return 0;
     bool followed = false;
     return qol::game::resolve_hook_entry(symbol_id, &followed) != 0 ? 1 : 0;
+}
+
+QolResult game_warehouse_companion_file_state(contracts::QolTargetFeatureState* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out = static_cast<contracts::QolTargetFeatureState>(
+        static_cast<int32_t>(qol::game_feature_state(qol::GameFeature::kWarehouseCompanionFile)));
+    return contracts::ok();
 }
 
 int32_t game_is_main_thread() {
@@ -679,6 +687,16 @@ QolResult read_save_slot_exists(int32_t slot, int32_t* out) {
     return contracts::ok();
 }
 
+QolResult read_save_slot_map_id(int32_t slot, int32_t* out) {
+    if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    if (!qol::game::save_slot_meta_deps_ready()) return not_ready();
+    qol::game::save_slots_refresh_if_stale();
+    void* save = qol::game::save_slot_struct(slot);
+    if (save == nullptr) return not_ready();
+    *out = qol::game::save_slot_map_id(save);
+    return contracts::ok();
+}
+
 QolResult read_save_slot_hero_index(int32_t slot, int32_t* out) {
     if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (!qol::game::save_slot_meta_deps_ready()) return not_ready();
@@ -931,7 +949,8 @@ contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
                 contracts::kGameHostMinor};
-    host.target = {&game_query_variant, &game_has_capability, &game_symbol_available};
+    host.target = {&game_query_variant, &game_has_capability, &game_symbol_available,
+                   &game_warehouse_companion_file_state};
     host.thread = {&game_is_main_thread, &game_frame_count};
     host.read.character = {&read_char_type, &read_char_active, &read_char_party};
     host.read.item = {&read_item_category, &read_item_jewel, &read_item_ability};
@@ -1027,7 +1046,8 @@ contracts::QolGameHost make_game_host() {
         &read_save_slot_state, &read_save_slot_exists, &read_save_slot_hero_index,
         [](int32_t slot, int32_t* out) { return read_save_hero_value(slot, out, true); },
         [](int32_t slot, int32_t* out) { return read_save_hero_value(slot, out, false); },
-        &read_save_load_data, &read_save_hub_key};
+        &read_save_load_data, &read_save_hub_key, &read_save_slot_map_id};
+    host.save_call = {&call_save_free_data, &call_save_encrypt, &call_save_mark_stale};
     host.read_only.quest = {
         &read_quest_state, &read_quest_active_slot_count, &read_quest_active_slot_id,
         &read_quest_total_count,

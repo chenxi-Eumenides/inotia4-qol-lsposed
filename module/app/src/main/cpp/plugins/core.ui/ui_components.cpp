@@ -1,4 +1,4 @@
-#include "plugins/core.ui/ui_components.h"
+#include "ui_components.h"
 
 #include <algorithm>
 #include <cstring>

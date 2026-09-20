@@ -150,6 +150,14 @@ struct QolPanelsApi {
     QolPanelActiveFn active;
 };
 
+using QolResultWriteOkFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_size);
+using QolResultWriteErrorFn = QolResult (*)(const char* message, char* out, uint32_t capacity,
+                                            uint32_t* out_size);
+struct QolResultApi {
+    QolResultWriteOkFn write_ok;
+    QolResultWriteErrorFn write_error;
+};
+
 using QolTextDispatchFn = const char* (*)(uint32_t text_id, const char* current, void* ctx);
 using QolHooksTextSubscribeFn = QolResult (*)(const char* resource_id, int32_t phase,
                                               int32_t kind, QolTextDispatchFn fn, void* ctx,
@@ -213,12 +221,13 @@ struct QolHostSdk {
     QolCapabilitiesApi capabilities;
     QolStoreApi store;
     QolPanelsApi panels;
+    QolResultApi result;
     QolHooksApi hooks;
     QolTextScopeApi text_scope;
     const QolUiAdapter* ui;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 2;
+constexpr uint16_t kHostSdkMinor = 3;
 
 }  // namespace qol::contracts

@@ -12,7 +12,7 @@
 //   块1：+0 i16 map_id。
 // 全部存档域函数指针经 Game Host 语义接口收口；本层不出现裸地址。
 
-#include "plugins/save_backup/feature.h"
+#include "feature.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -28,11 +28,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "core/native/game_feature.h"
-#include "core/native/game_ops_common.h"
-#include "plugins/save_backup/bundle.h"
-#include "plugins/save_backup/log.h"
-#include "plugins/save_backup/rollback.h"
+#include "bundle.h"
+#include "log.h"
+#include "rollback.h"
 
 namespace {
 
@@ -48,6 +46,36 @@ std::string g_sb_data_dir;
 std::string g_sb_external_dir;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
+
+std::string result_ok() {
+    char buffer[64] = {};
+    uint32_t size = 0;
+    if (g_sdk != nullptr && g_sdk->result.write_ok != nullptr &&
+        qol::contracts::succeeded(g_sdk->result.write_ok(buffer, sizeof(buffer), &size))) {
+        return std::string(buffer, size);
+    }
+    return "{\"ok\":false,\"error\":\"result unavailable\"}";
+}
+
+std::string result_error(const char* message) {
+    char buffer[256] = {};
+    uint32_t size = 0;
+    if (g_sdk != nullptr && g_sdk->result.write_error != nullptr && message != nullptr &&
+        qol::contracts::succeeded(g_sdk->result.write_error(message, buffer, sizeof(buffer), &size))) {
+        return std::string(buffer, size);
+    }
+    return "{\"ok\":false,\"error\":\"result unavailable\"}";
+}
+
+const char* warehouse_state_name(qol::contracts::QolTargetFeatureState state) {
+    switch (state) {
+        case qol::contracts::QolTargetFeatureState::kUnknown: return "unknown";
+        case qol::contracts::QolTargetFeatureState::kUnsupported: return "unsupported";
+        case qol::contracts::QolTargetFeatureState::kAvailable: return "available";
+        case qol::contracts::QolTargetFeatureState::kUnavailable: return "unavailable";
+    }
+    return "unknown";
+}
 
 enum class ContainerStatus {
     kOk,
@@ -98,11 +126,11 @@ ContainerStatus store_delete_slot(int slot) {
 
 bool save_api_ready() {
     return g_game != nullptr && g_game->read_only.save.load_data != nullptr &&
-           g_game->extra.save_call.free_data != nullptr;
+           g_game->save_call.free_data != nullptr;
 }
 
 bool save_encrypt_available() {
-    return g_game != nullptr && g_game->extra.save_call.encrypt != nullptr;
+    return g_game != nullptr && g_game->save_call.encrypt != nullptr;
 }
 
 const char* save_hub_key() {
@@ -116,15 +144,15 @@ int save_encrypt_process(void* data, int len, int mode, const char* key) {
     if (!save_encrypt_available() || data == nullptr || len < 0 || key == nullptr) return 0;
     int result = 0;
     if (!qol::contracts::succeeded(
-            g_game->extra.save_call.encrypt(data, len, mode, key, &result))) {
+            g_game->save_call.encrypt(data, len, mode, key, &result))) {
         return 0;
     }
     return result;
 }
 
 void save_mark_stale() {
-    if (g_game != nullptr && g_game->extra.save_call.mark_stale != nullptr) {
-        (void)g_game->extra.save_call.mark_stale();
+    if (g_game != nullptr && g_game->save_call.mark_stale != nullptr) {
+        (void)g_game->save_call.mark_stale();
     }
 }
 
@@ -434,14 +462,14 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
     int len = 0;
     const QolResult load_result = g_game->read_only.save.load_data(slot, &buf, &len);
     if (!qol::contracts::succeeded(load_result) || buf == nullptr || len < 8) {
-        if (buf != nullptr) (void)g_game->extra.save_call.free_data(buf);
+        if (buf != nullptr) (void)g_game->save_call.free_data(buf);
         if (load_result.code == kQolErrNotReady) err = "symbol not resolved";
         else err = "load failed";
         return false;
     }
     // 明文拷出后立即归还游戏堆，后续处理与游戏内存解耦。
     plain.assign(static_cast<const uint8_t*>(buf), static_cast<const uint8_t*>(buf) + len);
-    (void)g_game->extra.save_call.free_data(buf);
+    (void)g_game->save_call.free_data(buf);
 
     const size_t block0 = 8 + rd_u16(plain.data() + 8);
     const size_t block1 = 8 + rd_u16(plain.data() + 12);
@@ -613,6 +641,10 @@ const qol::contracts::QolHostSdk* save_backup_host_sdk() { return g_sdk; }
 
 const qol::contracts::QolGameHost* save_backup_game_host() { return g_game; }
 
+std::string save_backup_result_ok() { return result_ok(); }
+
+std::string save_backup_result_error(const char* message) { return result_error(message); }
+
 void save_backup_init(const char* data_dir, const char* external_files_dir) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
     g_sb_data_dir = data_dir != nullptr ? data_dir : "";
@@ -710,7 +742,7 @@ std::string save_backup_list_json() {
 
 std::string save_backup_export_json(int slot) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
-    if (slot < 0 || slot > 2) return op_err("bad slot");
+    if (slot < 0 || slot > 2) return result_error("bad slot");
 
     std::vector<uint8_t> plain;
     int map_id = 0;
@@ -722,7 +754,7 @@ std::string save_backup_export_json(int slot) {
     std::string err;
     if (!read_original_plain(slot, plain, map_id, save_time, version, hero_level, hero_index,
                              class_idx, err)) {
-        return op_err(err.c_str());
+        return result_error(err.c_str());
     }
 
     // sidecar 缺失（如从未经 API 进档的槽）或损坏时仅导出原版明文；导入侧跳过 sidecar 步骤。
@@ -848,7 +880,7 @@ std::string save_backup_export_json(int slot) {
     const std::string checksum = save_backup::sha256_hex(plain, module_and_wh).substr(0, 12);
 
     std::string dir;
-    if (!backup_dir(dir)) return op_err("backup dir unavailable");
+    if (!backup_dir(dir)) return result_error("backup dir unavailable");
 
     // 内容去重：同 checksum 备份已存在则不写新文件，直接返回既有备份
     //（metaJson 的 checksum 为权威，文件名后缀兜底）。
@@ -880,17 +912,17 @@ std::string save_backup_export_json(int slot) {
     save_backup::build_bundle(slot, export_time_ms, plain, module, warehouse_blob, meta_json, bundle);
 
     char stamp[16] = {0};
-    if (!local_stamp(export_time_ms, stamp)) return op_err("bundle write failed");
+    if (!local_stamp(export_time_ms, stamp)) return result_error("bundle write failed");
     const std::string base = std::string(stamp) + "_s" + std::to_string(slot) + "_" + checksum;
     std::string target = dir + "/" + base + kBundleSuffix;
     int collision = 0;
     while (file_exists(target)) {
         collision += 1;
-        if (collision > 99) return op_err("backup name collision");
+        if (collision > 99) return result_error("backup name collision");
         target = dir + "/" + base + "_" + std::to_string(collision) + kBundleSuffix;
     }
     if (!write_file_bytes_atomic(target, bundle.data(), bundle.size())) {
-        return op_err("bundle write failed");
+        return result_error("bundle write failed");
     }
 
     save_backup::Entry entry;
@@ -917,25 +949,25 @@ std::string save_backup_export_json(int slot) {
 std::string save_backup_import_json(const char* checksum, int slot) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
     const std::string ck = checksum != nullptr ? checksum : "";
-    if (!save_backup::valid_checksum(ck)) return op_err("bad checksum");
-    if (slot < 0 || slot > 2) return op_err("bad slot");
+    if (!save_backup::valid_checksum(ck)) return result_error("bad checksum");
+    if (slot < 0 || slot > 2) return result_error("bad slot");
     std::string dir;
-    if (!backup_dir(dir)) return op_err("backup dir unavailable");
+    if (!backup_dir(dir)) return result_error("backup dir unavailable");
     const std::string path = find_by_checksum(dir, ck);
-    if (path.empty()) return op_err("backup not found");
+    if (path.empty()) return result_error("backup not found");
     const std::string name = file_name_of(path);
 
     std::vector<uint8_t> bytes;
     save_backup::ParsedBundle parsed;
     if (!read_file_bytes(path, bytes) ||
         !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
-        return op_err("backup unreadable or corrupt");
+        return result_error("backup unreadable or corrupt");
     }
 
     // 1) 原版明文加密到目标槽（块0 slot 字节改写目标槽并追加校验尾）。
     std::vector<uint8_t> cipher;
     if (!encrypt_plain_to_slot(slot, parsed.orig_plain, cipher) || cipher.empty()) {
-        return op_err("encrypt failed");
+        return result_error("encrypt failed");
     }
 
     // 2) 定位存档目录：优先 dataDir 下含 save*.dat 的子目录，退回 md5(密钥) 目录。
@@ -944,9 +976,9 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         case 0:
             break;
         case 2:
-            return op_err("save directory mkdir failed");
+            return result_error("save directory mkdir failed");
         default:
-            return op_err("save directory not found");
+            return result_error("save directory not found");
     }
 
     // 2a) 仓库写回预校验/预加密（必须在写任何文件之前，保证 .rollback/ 与现存文件不被触碰）：
@@ -956,13 +988,16 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     //       flags=1（明文 wh4）：补 slot + 重算 +0x38 完整性校验 + 重加密 + 往返自检。
     //     变体能力门禁 unsupported → 整步跳过（保持既有行为，不校验也不写）。
     std::vector<std::vector<uint8_t>> wh_payloads;
-    qol::FeatureState wh_state = qol::FeatureState::kUnsupported;
+    qol::contracts::QolTargetFeatureState target_state =
+        qol::contracts::QolTargetFeatureState::kUnknown;
     bool wh_write = false;
     if (parsed.has_warehouse) {
-        wh_state = qol::game_feature_state(qol::GameFeature::kWarehouseCompanionFile);
-        if (wh_state == qol::FeatureState::kUnsupported) {
+        if (g_game != nullptr && g_game->target.warehouse_companion_file_state != nullptr) {
+            (void)g_game->target.warehouse_companion_file_state(&target_state);
+        }
+        if (target_state == qol::contracts::QolTargetFeatureState::kUnsupported) {
             SB_LOG("save backup import: slot%d warehouse companion unsupported (%s), skip %zu file(s)",
-                   slot, qol::game_feature_state_name(wh_state), parsed.warehouse.size());
+                   slot, warehouse_state_name(target_state), parsed.warehouse.size());
         } else {
             wh_write = true;
             const char* wh_key = save_hub_key();
@@ -973,14 +1008,14 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                     const save_backup::WarehouseReencryptStatus status =
                         warehouse_reencrypt_on_device(wf, slot, wh_key, wh_payloads[i]);
                     if (status != save_backup::WarehouseReencryptStatus::kOk) {
-                        return op_err(("warehouse companion reencrypt failed (" +
+                        return result_error(("warehouse companion reencrypt failed (" +
                                        std::string(save_backup::warehouse_reencrypt_status_name(status)) +
                                        "): " + wf.suffix).c_str());
                     }
                 } else {
                     if (!warehouse_blob_usable_on_this_device(wf.data.data(), wf.data.size(),
                                                               wh_key)) {
-                        return op_err(("warehouse companion not decryptable on this device: " +
+                        return result_error(("warehouse companion not decryptable on this device: " +
                                        wf.suffix).c_str());
                     }
                     wh_payloads[i] = wf.data;
@@ -991,11 +1026,11 @@ std::string save_backup_import_json(const char* checksum, int slot) {
 
     // 3) 安全备份现存文件到 .rollback/（dat 落副本；sidecar 现状快照留在内存，失败时经 store 还原）。
     const std::string rollback_dir = dir + "/" + kRollbackDirName;
-    if (!ensure_dir(rollback_dir)) return op_err("rollback dir mkdir failed");
+    if (!ensure_dir(rollback_dir)) return result_error("rollback dir mkdir failed");
     const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
     const bool dat_existed = file_exists(dat_path);
     const std::string rb_dat = rollback_dir + "/save" + std::to_string(slot) + ".dat";
-    if (dat_existed && !copy_file(dat_path, rb_dat)) return op_err("rollback backup failed");
+    if (dat_existed && !copy_file(dat_path, rb_dat)) return result_error("rollback backup failed");
     std::vector<uint8_t> prev_container;
     bool prev_container_exists = false;
     {
@@ -1012,7 +1047,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         const save_backup::RollbackResult rollback = restore_from_rollback(
             slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
             sidecar_touched);
-        return op_err(rollback.complete() ? "save file write failed"
+        return result_error(rollback.complete() ? "save file write failed"
                                            : "save file write failed; rollback failed");
     }
 
@@ -1024,7 +1059,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
             const save_backup::RollbackResult rollback = restore_from_rollback(
                 slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
                 sidecar_touched);
-            return op_err(rollback.complete() ? "module container import failed"
+            return result_error(rollback.complete() ? "module container import failed"
                                                : "module container import failed; rollback failed");
         }
     }
@@ -1088,7 +1123,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                     const save_backup::RollbackResult core_rollback = restore_from_rollback(
                         slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
                         sidecar_touched);
-                    return op_err(warehouse_rollback.complete() && core_rollback.complete()
+                    return result_error(warehouse_rollback.complete() && core_rollback.complete()
                                       ? "rollback backup failed"
                                       : "rollback backup failed; rollback failed");
                 }
@@ -1099,7 +1134,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                 const save_backup::RollbackResult core_rollback = restore_from_rollback(
                     slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
                     sidecar_touched);
-                return op_err(warehouse_rollback.complete() && core_rollback.complete()
+                return result_error(warehouse_rollback.complete() && core_rollback.complete()
                                   ? "warehouse file write failed"
                                   : "warehouse file write failed; rollback failed");
             }
@@ -1109,7 +1144,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         if (wh_written > 0) {
             SB_LOG("save backup import: slot%d warehouse companion files wrote=%zu skipped=0 "
                    "reencrypted=%zu (state=%s)",
-                   slot, wh_written, wh_reencrypted, qol::game_feature_state_name(wh_state));
+                   slot, wh_written, wh_reencrypted, warehouse_state_name(target_state));
         }
     }
 
@@ -1130,14 +1165,14 @@ std::string save_backup_import_json(const char* checksum, int slot) {
 std::string save_backup_delete_json(const char* checksum) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
     const std::string ck = checksum != nullptr ? checksum : "";
-    if (!save_backup::valid_checksum(ck)) return op_err("bad checksum");
+    if (!save_backup::valid_checksum(ck)) return result_error("bad checksum");
     std::string dir;
-    if (!backup_dir(dir)) return op_err("backup not found");
+    if (!backup_dir(dir)) return result_error("backup not found");
     const std::string path = find_by_checksum(dir, ck);
-    if (path.empty()) return op_err("backup not found");
+    if (path.empty()) return result_error("backup not found");
     if (::unlink(path.c_str()) != 0) {
         SB_LOG("save backup delete failed: %s", path.c_str());
-        return op_err("delete failed");
+        return result_error("delete failed");
     }
     SB_LOG("save backup deleted: %s", path.c_str());
     return "{\"ok\":true}";
@@ -1149,15 +1184,15 @@ std::string save_backup_delete_json(const char* checksum) {
 // 全部失败路径返回结构化 op_err，不吞异常；无任何目标文件时返回 not found。
 std::string save_backup_delete_slot_json(int slot) {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
-    if (slot < 0 || slot > 2) return op_err("bad slot");
+    if (slot < 0 || slot > 2) return result_error("bad slot");
     std::string save_dir;
     switch (locate_save_directory(save_dir)) {
         case 0:
             break;
         case 2:
-            return op_err("save directory mkdir failed");
+            return result_error("save directory mkdir failed");
         default:
-            return op_err("save directory not found");
+            return result_error("save directory not found");
     }
     const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
     const bool dat_existed = file_exists(dat_path);
@@ -1167,11 +1202,11 @@ std::string save_backup_delete_slot_json(int slot) {
     const ContainerStatus probe_status = store_read_container(slot, probe);
     const bool sidecar_existed = probe_status == ContainerStatus::kOk ||
                                  probe_status == ContainerStatus::kCorrupt;
-    if (!dat_existed && !sidecar_existed) return op_err("save not found");
+    if (!dat_existed && !sidecar_existed) return result_error("save not found");
     // 逐个删除并检查返回值：任一失败立即返回结构化错误（已删除的部分不回滚，与单文件删除语义一致）。
     if (dat_existed && ::unlink(dat_path.c_str()) != 0) {
         SB_LOG("save slot delete failed: %s", dat_path.c_str());
-        return op_err("delete save failed");
+        return result_error("delete save failed");
     }
     if (sidecar_existed) {
         const ContainerStatus del = store_delete_slot(slot);
@@ -1179,7 +1214,7 @@ std::string save_backup_delete_slot_json(int slot) {
             SB_LOG("save slot delete failed: slot=%d sidecar status=%s", slot,
                    del == ContainerStatus::kNotFound ? "not_found"
                    : del == ContainerStatus::kCorrupt ? "corrupt" : "unavailable");
-            return op_err("delete sidecar failed");
+            return result_error("delete sidecar failed");
         }
     }
     SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d)", slot, dat_existed, sidecar_existed);

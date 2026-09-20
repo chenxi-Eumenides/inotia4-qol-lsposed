@@ -637,6 +637,7 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/game_host.cpp
+    ${CPP_DIR}/core/native/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/infra/commands.cpp
     ${CPP_DIR}/infra/config.cpp

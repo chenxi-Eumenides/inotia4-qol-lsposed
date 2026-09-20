@@ -3,8 +3,8 @@
 #include <cstdarg>
 #include <cstdio>
 
-#include "contracts/host_sdk.h"
-#include "plugins/save_backup/feature.h"
+#include "../../contracts/host_sdk.h"
+#include "feature.h"
 
 namespace qol::features::save_backup::private_log {
 

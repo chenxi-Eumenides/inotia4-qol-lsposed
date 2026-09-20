@@ -1,14 +1,10 @@
-#include "plugins/core.ui/panels/settings.h"
+#include "settings.h"
 
-#include "contracts/panels.h"
-#include "core/native/game_ops_common.h"
-#include "game_access.h"
-#include "game_ptr_hook.h"
-#include "game_state.h"
-#include "game_ui.h"
+#include "../../../contracts/panels.h"
+#include "../../../contracts/ui.h"
 #include "plugins/core.ui/log.h"
-#include "plugins/core.ui/panels/rules.h"
-#include "plugins/core.ui/panels/stack.h"
+#include "rules.h"
+#include "stack.h"
 #include "plugins/core.ui/ui_components.h"
 
 #include <atomic>
@@ -71,9 +67,7 @@ namespace {
 
 std::mutex g_settings_mtx;
 const contracts::QolHostSdk* g_sdk = nullptr;
-jclass g_config_bridge_class = nullptr;
 bool g_more_games_injected = false;
-PtrHook g_more_games_hook;
 // 按钮绑定状态（主线程帧任务写；fill_status/HTTP 只读）：
 // 0=waiting 1=live 2=stale 3=error。原子量避免 HTTP 线程读游戏内存。
 std::atomic<int32_t> g_more_games_bind{0};
@@ -88,6 +82,27 @@ bool g_background_unavailable_logged = false;
 bool g_page_arrow_unavailable_logged = false;
 int g_close_delay_frames = 0;
 bool g_back_pressed = false;
+uint64_t g_more_games_binding_token = 0;
+
+std::string result_ok() {
+    char buffer[64] = {};
+    uint32_t size = 0;
+    if (g_sdk != nullptr && g_sdk->result.write_ok != nullptr &&
+        contracts::succeeded(g_sdk->result.write_ok(buffer, sizeof(buffer), &size))) {
+        return std::string(buffer, size);
+    }
+    return "{\"ok\":false,\"error\":\"result unavailable\"}";
+}
+
+std::string result_error(const char* message) {
+    char buffer[256] = {};
+    uint32_t size = 0;
+    if (g_sdk != nullptr && g_sdk->result.write_error != nullptr && message != nullptr &&
+        contracts::succeeded(g_sdk->result.write_error(message, buffer, sizeof(buffer), &size))) {
+        return std::string(buffer, size);
+    }
+    return "{\"ok\":false,\"error\":\"result unavailable\"}";
+}
 
 // own:popup.settings 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
 contracts::QolPopupStateEntry g_popup_entry{};
@@ -140,11 +155,36 @@ void settings_savebackup_clicked(void* ctrl);  // v0.7.x：存档备份按钮
 void savebackup_btn_draw(void* ctrl);
 void page_btn_draw(void* ctrl);
 
-#include "plugins/core.ui/panels/settings_geometry.inc"
-#include "plugins/core.ui/panels/settings_config.inc"
-#include "plugins/core.ui/panels/settings_render.inc"
-#include "plugins/core.ui/panels/settings_panel.inc"
-#include "plugins/core.ui/panels/settings_injection.inc"
+bool ui_set_popup_process_info(int32_t process, int32_t state_id) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    return ui != nullptr && ui->set_popup_process_info != nullptr &&
+           contracts::succeeded(ui->set_popup_process_info(process, state_id));
+}
+
+const char* ui_screen_name() {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    const char* name = nullptr;
+    if (ui != nullptr && ui->screen_name != nullptr &&
+        contracts::succeeded(ui->screen_name(&name)) && name != nullptr) {
+        return name;
+    }
+    return "";
+}
+
+bool ui_resolution_ready() {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    int32_t width = 0;
+    int32_t height = 0;
+    return ui != nullptr && ui->screen_inset_width != nullptr && ui->screen_inset_height != nullptr &&
+           contracts::succeeded(ui->screen_inset_width(&width)) &&
+           contracts::succeeded(ui->screen_inset_height(&height));
+}
+
+#include "panels/settings_geometry.inc"
+#include "panels/settings_config.inc"
+#include "panels/settings_render.inc"
+#include "panels/settings_panel.inc"
+#include "panels/settings_injection.inc"
 }  // namespace
 
 void settings_bind_sdk(const contracts::QolHostSdk* sdk) { g_sdk = sdk; }
@@ -201,12 +241,11 @@ bool settings_provider_open() {
     int state_id = -1;
     {
         std::lock_guard<std::mutex> lock(g_settings_mtx);
-        if (g_base == 0 || g_state_id < 0) return false;
+        if (g_state_id < 0) return false;
         state_id = g_state_id;
     }
-    if (fn_ui_set_popup_process_info == nullptr) return false;
     // 锁外调游戏 pop 入口：push 链可能同步回调面板 enter/process。
-    fn_ui_set_popup_process_info(1, state_id);
+    if (!ui_set_popup_process_info(1, state_id)) return false;
     SETTINGS_LOG("open settings panel state id=%d", state_id);
     return true;
 }
@@ -215,7 +254,7 @@ void settings_provider_close() {
     // 幂等：未激活时不触碰游戏 UI（避免栈对陈旧栈顶调用 close 时误关当前顶层面板）。
     if (!settings_provider_active()) return;
     settings_ui_close_panel();
-    if (fn_ui_set_popup_process_info != nullptr) fn_ui_set_popup_process_info(3, 0);
+    (void)ui_set_popup_process_info(3, 0);
 }
 
 bool settings_provider_active() {
@@ -228,7 +267,7 @@ const char* settings_provider_block_reason() {
     return g_panel_active ? "ui occupied: settings panel" : nullptr;
 }
 
-// 关闭设置面板：只清本模块 panel 状态；调用方负责 fn_ui_set_popup_process_info(3, 0)
+// 关闭设置面板：只清本模块 panel 状态；调用方负责通过 UI adapter 关闭游戏 UI。
 // 让游戏主循环关闭 UI（provider.close 已合并该步）。
 void settings_ui_close_panel() {
     std::lock_guard<std::mutex> lock(g_settings_mtx);
@@ -240,21 +279,18 @@ void settings_ui_close_panel() {
 
 // ---- 对外 API（原 data_settings_ui_*）----
 
-void settings_register_config_bridge(JNIEnv* env, jclass bridge_class) {
-    if (env == nullptr || bridge_class == nullptr) return;
-    if (g_config_bridge_class != nullptr) {
-        env->DeleteGlobalRef(g_config_bridge_class);
-    }
-    g_config_bridge_class = static_cast<jclass>(env->NewGlobalRef(bridge_class));
+void settings_register_config_bridge(void* env, void* bridge_class) {
+    (void)env;
+    (void)bridge_class;
 }
 
 std::string data_settings_ui_inject() {
-    if (settings_popup_acquire(nullptr) != 0) return op_err("state entry inject failed");
+    if (settings_popup_acquire(nullptr) != 0) return result_error("state entry inject failed");
     if (!settings_try_bind_more_games()) {
         // 控件实例通常在启动期尚未创建：不视为失败，帧任务会在主菜单重试。
         SETTINGS_LOG("settings more games entry not ready; frame task will retry");
     }
-    return op_ok();
+    return result_ok();
 }
 
 std::string data_settings_ui_status_json() {
@@ -262,11 +298,15 @@ std::string data_settings_ui_status_json() {
     void* btn = more_games_btn();
     int64_t bx = -1, by = -1, bw = -1, bh = -1;
     if (btn != nullptr) {
-        uint8_t* co = reinterpret_cast<uint8_t*>(btn);
-        bx = *reinterpret_cast<int64_t*>(co + CO_RECT_X);
-        by = *reinterpret_cast<int64_t*>(co + CO_RECT_Y);
-        bw = *reinterpret_cast<int64_t*>(co + CO_RECT_W);
-        bh = *reinterpret_cast<int64_t*>(co + CO_RECT_H);
+        const contracts::QolUiAdapter* ui = ui_adapter();
+        contracts::UiRect rect{};
+        if (ui != nullptr && ui->get_rect != nullptr &&
+            contracts::succeeded(ui->get_rect(btn, &rect))) {
+            bx = rect.x;
+            by = rect.y;
+            bw = rect.w;
+            bh = rect.h;
+        }
     }
     char buf[640];
     snprintf(buf, sizeof(buf),
@@ -285,7 +325,7 @@ std::string data_settings_ui_status_json() {
         g_state_id, g_popup_acquired ? "true" : "false",
         g_panel_active ? "true" : "false", g_root,
         (g_sdk != nullptr && g_sdk->config.get_bool != nullptr && [&]() { int32_t enabled = 0; (void)g_sdk->config.get_bool("plugin.stack_limit.enabled", 0, &enabled); return enabled != 0; }()) ? "true" : "false",
-        data_ui_screen());
+        ui_screen_name());
     return std::string(buf);
 }
 
@@ -302,40 +342,36 @@ std::string data_settings_ui_restore() {
     }
     settings_release_more_games();
     settings_popup_release(nullptr);
-    return op_ok();
+    return result_ok();
 }
 
 std::string data_settings_ui_open_panel() {
-    if (ui_panels_open("settings")) return op_ok();
-    return op_err("state not injected");
+    if (ui_panels_open("settings")) return result_ok();
+    return result_error("state not injected");
 }
 
 std::string data_settings_ui_open_option() {
-    if (g_base == 0) return op_err("libgame not ready");
-    if (fn_ui_set_popup_process_info == nullptr) return op_err("symbol not resolved");
     if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr) {
-        return op_err("hooks API unavailable");
+        return result_error("hooks API unavailable");
     }
     contracts::QolPopupStateEntry entry{};
     if (!contracts::succeeded(g_sdk->hooks.popup_resolve("F_PANEL_OPTIONS_ENTER", &entry))) {
-        return op_err("option state not found");
+        return result_error("option state not found");
     }
-    fn_ui_set_popup_process_info(1, entry.state_id);
+    if (!ui_set_popup_process_info(1, entry.state_id)) return result_error("ui state unavailable");
     SETTINGS_LOG("open option state id=%d", entry.state_id);
-    return op_ok();
+    return result_ok();
 }
 
 // ---- 「更多游戏」按钮绑定（帧任务驱动；运行时控件实例槽）----
 
 void settings_release_more_games() {
-    // 仅当槽仍可访问且仍指向 wrapper 时写回原值；对象已销毁则只丢弃句柄，不解引用旧地址。
-    if (g_more_games_hook.slot != nullptr &&
-        game_memory_accessible(g_more_games_hook.slot, sizeof(void*), 'r') &&
-        *g_more_games_hook.slot == reinterpret_cast<void*>(&more_games_clicked)) {
-        *g_more_games_hook.slot = g_more_games_hook.orig;
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (g_more_games_binding_token != 0 && ui != nullptr &&
+        ui->unbind_main_menu_more_games != nullptr) {
+        (void)ui->unbind_main_menu_more_games(g_more_games_binding_token);
     }
-    g_more_games_hook.slot = nullptr;
-    g_more_games_hook.orig = nullptr;
+    g_more_games_binding_token = 0;
     g_more_games_injected = false;
     g_more_games_bind.store(0, std::memory_order_relaxed);
     g_more_games_error.store(false, std::memory_order_relaxed);
@@ -350,7 +386,7 @@ const char* settings_more_games_bind_state() {
 }
 
 void settings_more_games_tick() {
-    const char* screen = data_ui_screen();
+    const char* screen = ui_screen_name();
     const bool on_main_menu = screen != nullptr && strcmp(screen, "main_menu") == 0;
     if (!on_main_menu) {
         if (g_more_games_injected) {

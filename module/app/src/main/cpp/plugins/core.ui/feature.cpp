@@ -1,11 +1,11 @@
-#include "plugins/core.ui/feature.h"
+#include "feature.h"
 
 #include <atomic>
 #include <cstdint>
 
-#include "contracts/panels.h"
-#include "plugins/core.ui/panels/settings.h"
-#include "plugins/core.ui/panels/stack.h"
+#include "../../contracts/panels.h"
+#include "panels/settings.h"
+#include "panels/stack.h"
 
 namespace qol::features::core_ui {
 namespace {

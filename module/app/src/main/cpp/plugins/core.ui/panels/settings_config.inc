@@ -1,103 +1,24 @@
-bool jni_get_config_json(char* out, size_t out_size) {
-    if (g_base == 0) return false;
-    JavaVM* jvm = g_jvm();
-    if (jvm == nullptr) return false;
-    JNIEnv* env = nullptr;
-    if (jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
-        if (jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
-    }
-    jclass cls = g_config_bridge_class;
-    if (cls == nullptr) cls = env->FindClass("com/inotia4/qol/ModuleConfigUiBridge");
-    if (cls == nullptr) { env->ExceptionClear(); return false; }
-    jmethodID mid = env->GetStaticMethodID(cls, "getConfigJson", "()Ljava/lang/String;");
-    if (mid == nullptr) {
-        env->ExceptionClear();
-        if (g_config_bridge_class == nullptr) env->DeleteLocalRef(cls);
-        return false;
-    }
-    jstring s = static_cast<jstring>(env->CallStaticObjectMethod(cls, mid));
-    if (g_config_bridge_class == nullptr) env->DeleteLocalRef(cls);
-    if (s == nullptr) { env->ExceptionClear(); return false; }
-    const char* utf = env->GetStringUTFChars(s, nullptr);
-    if (utf == nullptr) { env->DeleteLocalRef(s); return false; }
-    snprintf(out, out_size, "%s", utf);
-    env->ReleaseStringUTFChars(s, utf);
-    env->DeleteLocalRef(s);
-    return true;
-}
-
 bool jni_toggle_config(const char* key) {
-    if (g_base == 0) return false;
-    JavaVM* jvm = g_jvm();
-    if (jvm == nullptr) return false;
-    JNIEnv* env = nullptr;
-    if (jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
-        if (jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
-    }
-    jclass cls = g_config_bridge_class;
-    if (cls == nullptr) cls = env->FindClass("com/inotia4/qol/ModuleConfigUiBridge");
-    if (cls == nullptr) { env->ExceptionClear(); return false; }
-    jmethodID mid = env->GetStaticMethodID(cls, "toggleConfig", "(Ljava/lang/String;)Ljava/lang/String;");
-    if (mid == nullptr) {
-        env->ExceptionClear();
-        if (g_config_bridge_class == nullptr) env->DeleteLocalRef(cls);
-        return false;
-    }
-    jstring jk = env->NewStringUTF(key);
-    jstring s = static_cast<jstring>(env->CallStaticObjectMethod(cls, mid, jk));
-    env->DeleteLocalRef(jk);
-    if (g_config_bridge_class == nullptr) env->DeleteLocalRef(cls);
-    bool ok = false;
-    if (s != nullptr) {
-        const char* utf = env->GetStringUTFChars(s, nullptr);
-        if (utf != nullptr) {
-            ok = (strcmp(utf, "ok") == 0);
-            SETTINGS_LOG("toggle %s -> %s", key, utf);
-            env->ReleaseStringUTFChars(s, utf);
-        }
-        env->DeleteLocalRef(s);
-    }
-    env->ExceptionClear();
-    return ok;
+    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr ||
+        g_sdk->config.set_bool == nullptr || key == nullptr) return false;
+    int32_t current = 0;
+    if (!contracts::succeeded(g_sdk->config.get_bool(key, 0, &current))) return false;
+    const QolResult result = g_sdk->config.set_bool(key, current == 0 ? 1 : 0);
+    if (contracts::succeeded(result)) SETTINGS_LOG("toggle %s -> %s", key, current == 0 ? "1" : "0");
+    return contracts::succeeded(result);
 }
 
-void parse_config_into_rows(const char* json) {
-    if (json == nullptr) return;
+bool sync_config_into_rows() {
+    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr) return false;
     for (int i = 0; i < kSettingsItemCount; ++i) {
         const char* key = kSettingsItems[i].key;
         if (key == nullptr || key[0] == 0) continue;
-        const char* p = strstr(json, key);
-        if (p == nullptr) continue;
-        p = strchr(p, ':');
-        if (p == nullptr) continue;
-        ++p;
-        while (*p == ' ' || *p == '\t') ++p;
-        snprintf(g_row_status[i], CB_TEXT_SIZE, "%s", (*p == 't' || *p == '1') ? "开" : "关");
+        int32_t value = 0;
+        if (!contracts::succeeded(g_sdk->config.get_bool(key, 0, &value))) return false;
+        snprintf(g_row_status[i], CB_TEXT_SIZE, "%s", value != 0 ? "开" : "关");
     }
-    // 顶部标题：从快照提取 moduleVersion（只读），格式化为 "QoL模块 v<version>"；
-    // 缺失/空值退化为 "QoL模块"。
-    char version_text[CB_TEXT_SIZE] = {0};
-    const char* version = strstr(json, "moduleVersion");
-    if (version != nullptr) {
-        const char* colon = strchr(version, ':');
-        if (colon != nullptr) {
-            const char* q1 = strchr(colon, '"');
-            if (q1 != nullptr) {
-                const char* q2 = strchr(q1 + 1, '"');
-                if (q2 != nullptr) {
-                    size_t len = static_cast<size_t>(q2 - q1 - 1);
-                    if (len >= CB_TEXT_SIZE) len = CB_TEXT_SIZE - 1;
-                    memcpy(version_text, q1 + 1, len);
-                    version_text[len] = 0;
-                }
-            }
-        }
-    }
-    if (version_text[0] != 0) {
-        snprintf(g_header_text, CB_TEXT_SIZE, "QoL模块 v%s", version_text);
-    } else {
-        snprintf(g_header_text, CB_TEXT_SIZE, "QoL模块");
-    }
+    snprintf(g_header_text, CB_TEXT_SIZE, "QoL模块 v0.1.0");
+    return true;
 }
 
 // ---- 面板绘制（DrawProc：色块 + 文字）----

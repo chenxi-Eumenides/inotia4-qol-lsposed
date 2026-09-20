@@ -24,21 +24,21 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 19 | 1766 |
-| `game/` | 38 | 2973 |
+| `contracts/` | 19 | 1805 |
+| `game/` | 38 | 3065 |
 | `infra/` | 24 | 2154 |
 | `hooks/` | 10 | 1565 |
 | `patch/` | 6 | 484 |
-| `plugins/` | 161 | 31999 |
-| `host/` | 19 | 4716 |
-| **合计** | **277** | **45657** |
+| `plugins/` | 161 | 31987 |
+| `host/` | 19 | 4822 |
+| **合计** | **277** | **45882** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_quality/`：6 文件 / 411 行
 - `plugins/attribute_range_display/`：4 文件 / 237 行
 - `plugins/autosell/`：17 文件 / 2418 行
-- `plugins/core.ui/`：17 文件 / 2238 行
+- `plugins/core.ui/`：17 文件 / 2188 行
 - `plugins/craft_ui/`：4 文件 / 997 行
 - `plugins/custom_recipe/`：10 文件 / 2110 行
 - `plugins/extension_bag/`：40 文件 / 13464 行
@@ -46,7 +46,7 @@
 - `plugins/native_choice/`：4 文件 / 402 行
 - `plugins/push_all/`：6 文件 / 308 行
 - `plugins/quest/`：4 文件 / 255 行
-- `plugins/save_backup/`：13 文件 / 4567 行
+- `plugins/save_backup/`：13 文件 / 4605 行
 - `plugins/simple_mode/`：6 文件 / 529 行
 - `plugins/special_equip/`：6 文件 / 547 行
 - `plugins/stack_limit/`：3 文件 / 414 行

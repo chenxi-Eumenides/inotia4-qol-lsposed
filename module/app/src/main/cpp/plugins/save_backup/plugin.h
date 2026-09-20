@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // 存档管理器备份插件清单入口（ARCHITECTURE.md §3.3）：1 条 kPtrSlot 资源（常驻）。
 // 删档回调 SaveSlot_Delete 的 GOT 槽以声明式资源登记，机制由宿主通用执行

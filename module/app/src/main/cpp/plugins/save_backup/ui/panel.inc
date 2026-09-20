@@ -10,16 +10,7 @@
 // 仅凭返回值无法区分；必须直接读栈顶 enter_func 字段与 &savebackup_panel_enter 对比。
 // 注：data_popup_top_vma 只能解析 g_base+VMA 的原版 enter，无法识别 wrapper 函数。
 bool is_savebackup_at_stack_top() {
-    if (g_popup_stack == nullptr || g_base == 0) return false;
-    uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
-    uint32_t count = *reinterpret_cast<uint32_t*>(stk + POPUP_STACK_COUNT);
-    if (count == 0 || count > 27) return false;
-    uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
-    if (data == 0) return false;
-    uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data))
-                   + (count - 1) * POPUP_ENTRY_SIZE;
-    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
-    return enter == reinterpret_cast<uintptr_t>(&savebackup_panel_enter);
+    return ui_popup_top_matches(&savebackup_panel_enter);
 }
 
 UiRect panel_root_rect() {
@@ -101,18 +92,7 @@ UiRect back_btn_rect() {
 }
 
 void ctrl_abs_point(void* ctrl, int64_t out[2]) {
-    uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
-    int64_t x = *reinterpret_cast<int64_t*>(c + CO_RECT_X);
-    int64_t y = *reinterpret_cast<int64_t*>(c + CO_RECT_Y);
-    void* p = *reinterpret_cast<void**>(c + CO_PARENT);
-    while (p != nullptr) {
-        uint8_t* pc = reinterpret_cast<uint8_t*>(p);
-        x += *reinterpret_cast<int64_t*>(pc + CO_RECT_X);
-        y += *reinterpret_cast<int64_t*>(pc + CO_RECT_Y);
-        p = *reinterpret_cast<void**>(pc + CO_PARENT);
-    }
-    out[0] = x;
-    out[1] = y;
+    ui_control_absolute_origin(ctrl, out);
 }
 
 // 计算 rect 在屏幕上的绝对原点 = root 绝对原点 + 计算 rect 的 (x,y)。
@@ -150,8 +130,8 @@ void create_panel_controls_locked() {
         SB_UI_LOG("create root failed");
         return;
     }
-    // root 的 CO_CONTROL_PROC 清零（防 GetData=null SIGSEGV）
-    *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(root) + CO_CONTROL_PROC) = 0;
+    // root 的 control proc 清零（防 GetData=null SIGSEGV）。
+    ui_clear_control_proc(root);
 
     // 返回按钮：屏幕左上 (8,8)（同设置页 {8-root.x, 8-root.y} 口径），
     // 尺寸 BACK_BTN_W×BACK_BTN_H 与设置页返回按钮一致（原版贴图量级）。
@@ -223,7 +203,7 @@ void savebackup_panel_enter() {
             // 页码/条目缓存可能在隐藏期间被 self_check/刷新改动，列表按钮 rect 重对齐。
             sync_list_btn_rects_locked();
             resumed = true;
-        } else if (g_base == 0 || !ui_resolution_ready()) {
+        } else if (!ui_resolution_ready()) {
             SB_UI_LOG("savebackup panel enter: symbols not resolved");
             return;
         } else {
@@ -246,7 +226,7 @@ void savebackup_panel_enter() {
 void savebackup_panel_process() {
     if (!g_panel_active) return;
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    if (g_root == nullptr || g_base == 0) return;
+    if (g_root == nullptr) return;
     if (g_close_delay_frames > 0) {
         --g_close_delay_frames;
         if (g_close_delay_frames == 0) {

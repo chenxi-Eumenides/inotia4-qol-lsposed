@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "contracts/ui.h"
+#include "../../contracts/ui.h"
 
 namespace qol::features::core_ui {
 

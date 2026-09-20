@@ -133,17 +133,17 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 116 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 109 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `infra` | 41 |
-| `host` | `game` | 31 |
+| `host` | `infra` | 42 |
+| `host` | `game` | 32 |
 | `host` | `contracts` | 19 |
 | `plugins/autosell` | `contracts` | 17 |
 | `plugins/extension_bag` | `contracts` | 17 |
 | `plugins/custom_recipe` | `contracts` | 14 |
-| `plugins/core.ui` | `contracts` | 11 |
+| `plugins/core.ui` | `contracts` | 12 |
 | `infra` | `game` | 10 |
 | `plugins/inventory_hooks` | `contracts` | 10 |
 | `host` | `hooks` | 9 |
@@ -208,13 +208,13 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 10 个 / 文件 5 个 / 去重符号 4 个 / 无法归属 3 个。
+扫描合计：安装点 9 个 / 文件 4 个 / 去重符号 4 个 / 无法归属 2 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 0 | 0 | 0 |
 | call patch | 2 | 6 | 3 |
-| ptr slot | 3 | 4 | 2 |
+| ptr slot | 2 | 3 | 2 |
 
 去重符号 → 文件（前 4 条，共 4 条；`--verbose` 列全部）：
 

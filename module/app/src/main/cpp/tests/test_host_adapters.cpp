@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <iterator>
+#include <string>
 #include <vector>
 
 #include "contracts/panels.h"
@@ -25,6 +26,11 @@
 #include "infra/text_scope.h"
 
 uintptr_t g_base = 0;
+
+std::string op_ok() { return "{\"ok\":true}"; }
+std::string op_err(const char* message) {
+    return std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
+}
 
 enum class FakeInventoryMode { kReady, kEmpty, kNotReady };
 FakeInventoryMode g_inventory_mode = FakeInventoryMode::kReady;
@@ -167,6 +173,7 @@ bool save_slot_meta_deps_ready() { return true; }
 void save_slots_refresh_if_stale() {}
 int save_slot_hero_index(const void*) { return 0; }
 void* save_slot_hero(void*) { return reinterpret_cast<void*>(0x5); }
+int save_slot_map_id(const void*) { return 1; }
 int save_hero_level(const void*) { return 10; }
 int save_hero_class(const void*) { return 2; }
 bool save_load_deps_ready() { return true; }

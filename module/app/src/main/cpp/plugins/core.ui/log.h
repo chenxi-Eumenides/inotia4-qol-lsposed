@@ -3,7 +3,7 @@
 #include <cstdarg>
 #include <cstdio>
 
-#include "contracts/host_sdk.h"
+#include "../../contracts/host_sdk.h"
 
 namespace qol::features::core_ui::private_log {
 

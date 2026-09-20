@@ -27,6 +27,8 @@ void save_slots_mark_stale();
 void* save_slot_struct(int32_t slot);
 // 槽结构 +0 SAVESLOT_EXISTS（u8 非 0 表示存在）。
 bool save_slot_exists(const void* slot_struct);
+// 槽结构 +0 SAVESLOT_MAP_ID（u16）。
+int save_slot_map_id(const void* slot_struct);
 // 槽结构 +SAVESLOT_HERO_INDEX（s8）。
 int save_slot_hero_index(const void* slot_struct);
 // 槽内主角对象；未解析返回 nullptr。

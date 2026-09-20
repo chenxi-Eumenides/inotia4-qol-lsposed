@@ -1,13 +1,13 @@
-#include "plugins/core.ui/plugin.h"
+#include "plugin.h"
 
 #include <cstdint>
 
-#include "contracts/ownership.h"
-#include "contracts/panels.h"
-#include "plugins/core.ui/feature.h"
-#include "plugins/core.ui/panels/settings.h"
-#include "plugins/core.ui/panels/stack.h"
-#include "plugins/core.ui/ui_components.h"
+#include "../../contracts/ownership.h"
+#include "../../contracts/panels.h"
+#include "feature.h"
+#include "panels/settings.h"
+#include "panels/stack.h"
+#include "ui_components.h"
 
 namespace qol::features::core_ui {
 namespace {

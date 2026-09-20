@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "core/native/qol_log.h"
+#include "core/native/game_ops_common.h"
 #include "hooks/dispatch.h"
 #include "hooks/popup_state.h"
 #include "infra/capabilities.h"
@@ -47,6 +49,27 @@ QolResult result_error(int32_t code, const char* message) {
 
 QolResult result_from_bool(bool ok, int32_t code, const char* message) {
     return ok ? contracts::ok() : result_error(code, message);
+}
+
+QolResult write_json_result(const std::string& json, char* out, uint32_t capacity,
+                           uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr || json.size() > capacity) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (!json.empty()) std::memcpy(out, json.data(), json.size());
+    *out_size = static_cast<uint32_t>(json.size());
+    return contracts::ok();
+}
+
+QolResult sdk_result_write_ok(char* out, uint32_t capacity, uint32_t* out_size) {
+    return write_json_result(::op_ok(), out, capacity, out_size);
+}
+
+QolResult sdk_result_write_error(const char* message, char* out, uint32_t capacity,
+                                 uint32_t* out_size) {
+    if (message == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
+    return write_json_result(::op_err(message), out, capacity, out_size);
 }
 
 bool valid_log_level(int32_t level) { return level >= 0 && level <= 3; }
@@ -559,6 +582,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.panels = {&sdk_panels_register_item, &sdk_panels_register_provider,
                   &sdk_panels_unregister_owner, &sdk_panels_find, &sdk_panels_open,
                   &sdk_panels_close, &sdk_panels_active};
+    sdk.result = {&sdk_result_write_ok, &sdk_result_write_error};
     sdk.hooks = {&sdk_hooks_text_subscribe, &sdk_hooks_text_unsubscribe, &sdk_hooks_run_text,
                  &sdk_hooks_set_intercept, &sdk_hooks_clear_intercept, &sdk_hooks_intercept_blocks,
                  &sdk_hooks_popup_resolve, &sdk_hooks_popup_acquire, &sdk_hooks_popup_restore};

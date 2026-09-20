@@ -18,10 +18,17 @@ struct QolTargetVariant {
     uint32_t id;
     uint32_t capabilities;
 };
+enum class QolTargetFeatureState : int32_t {
+    kUnknown = 0,
+    kUnsupported = 1,
+    kAvailable = 2,
+    kUnavailable = 3,
+};
 struct QolTargetApi {
     QolResult (*query_variant)(QolTargetVariant* out);
     int32_t (*has_capability)(uint64_t bit);
     int32_t (*symbol_available)(const char* symbol_id);
+    QolResult (*warehouse_companion_file_state)(QolTargetFeatureState* out);
 };
 
 struct QolThreadApi {
@@ -380,6 +387,14 @@ struct QolSaveReadOnlyApi {
     QolResult (*hero_class)(int32_t slot, int32_t* out_class);
     QolResult (*load_data)(int32_t slot, void** out_data, int32_t* out_size);
     QolResult (*hub_key)(const char** out_key);
+    QolResult (*map_id)(int32_t slot, int32_t* out_map_id);
+};
+
+struct QolSaveCallApi {
+    QolResult (*free_data)(void* data);
+    QolResult (*encrypt)(void* data, int32_t size, int32_t mode, const char* key,
+                         int32_t* out_result);
+    QolResult (*mark_stale)();
 };
 
 struct QolQuestReadOnlyApi {
@@ -448,6 +463,7 @@ struct QolGameHost {
     QolItemCountApi item_count;
     QolGameHostExtraApi extra;
     QolReadOnlyApi read_only;
+    QolSaveCallApi save_call;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -463,10 +479,13 @@ static_assert(offsetof(QolGameHost, extra) ==
 static_assert(offsetof(QolGameHost, read_only) ==
                   offsetof(QolGameHost, extra) + sizeof(QolGameHostExtraApi),
               "QolGameHost read_only ABI offset changed");
-static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
+static_assert(offsetof(QolGameHost, save_call) ==
+                  offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
+              "QolGameHost save_call ABI offset changed");
+static_assert(sizeof(QolGameHost) == offsetof(QolGameHost, save_call) + sizeof(QolSaveCallApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 4;
+constexpr uint16_t kGameHostMinor = 6;
 
 }  // namespace qol::contracts

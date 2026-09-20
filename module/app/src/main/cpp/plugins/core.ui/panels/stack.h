@@ -1,7 +1,7 @@
 #pragma once
 
-#include "contracts/host_sdk.h"
-#include "contracts/panels.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/panels.h"
 
 // core.ui 面板栈 + `ui_panels` 能力实现（ARCHITECTURE.md §7.1）。
 //

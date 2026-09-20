@@ -26,6 +26,7 @@ foreach(plugin_cmake IN LISTS QOL_PLUGIN_CMAKE_FILES)
     target_include_directories("${plugin_target}" PRIVATE
         "${QOL_PLUGIN_ROOT}/contracts"
         "${plugin_dir}"
+        "${QOL_PLUGIN_ROOT}"
     )
     target_compile_features("${plugin_target}" PRIVATE cxx_std_17)
     target_compile_options("${plugin_target}" PRIVATE -Wall -Wextra)

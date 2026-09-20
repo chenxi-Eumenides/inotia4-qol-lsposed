@@ -8,6 +8,7 @@
 #include "game_access.h"
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
+#include "api/native/game_ui.h"
 
 using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
 using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
@@ -435,6 +436,59 @@ QolResult control_absolute_origin(QolUiHandle control, int64_t* out_x, int64_t* 
     return ui_control_absolute_origin(control, out_x, out_y) ? contracts::ok() : not_ready();
 }
 
+QolResult control_pressed(QolUiHandle control, int32_t* out_pressed) {
+    if (control == nullptr || out_pressed == nullptr) return invalid_argument();
+    *out_pressed = 0;
+    void* data = ui_control_data(control);
+    if (data == nullptr) return not_ready();
+    *out_pressed = *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(data) + 0x08) == 1
+                       ? 1
+                       : 0;
+    return contracts::ok();
+}
+
+QolResult touch_coordinates(uint64_t param, int64_t* out_x, int64_t* out_y) {
+    if (param == 0 || out_x == nullptr || out_y == nullptr) return invalid_argument();
+    const auto* point = reinterpret_cast<const int64_t*>(static_cast<uintptr_t>(param));
+    *out_x = point[0];
+    *out_y = point[1];
+    return contracts::ok();
+}
+
+QolResult find_main_menu_more_games(QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = ui_main_menu_more_games_button();
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult bind_main_menu_more_games(contracts::QolUiClickFn replacement, uint64_t* out_token) {
+    if (replacement == nullptr || out_token == nullptr) return invalid_argument();
+    return ui_bind_main_menu_more_games(replacement, out_token) ? contracts::ok() : not_ready();
+}
+
+QolResult unbind_main_menu_more_games(uint64_t token) {
+    if (token == 0) return invalid_argument();
+    return ui_unbind_main_menu_more_games(token) ? contracts::ok() : not_ready();
+}
+
+QolResult popup_stack_top_matches(contracts::QolUiPopupEnterFn enter, int32_t* out_matches) {
+    if (enter == nullptr || out_matches == nullptr) return invalid_argument();
+    *out_matches = ui_popup_stack_top_matches(enter) ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult clear_control_proc(QolUiHandle control) {
+    if (control == nullptr) return invalid_argument();
+    ui_clear_control_proc(control);
+    return contracts::ok();
+}
+
+QolResult screen_name(const char** out) {
+    if (out == nullptr) return invalid_argument();
+    *out = data_ui_screen();
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
 const QolUiAdapter g_ui_adapter{
     sizeof(QolUiAdapter), contracts::kUiAdapterMajor, contracts::kUiAdapterMinor,
     &create_control,
@@ -492,6 +546,14 @@ const QolUiAdapter g_ui_adapter{
      &control_data,
      &execute_proc_matches,
      &control_absolute_origin,
+     &control_pressed,
+     &touch_coordinates,
+     &find_main_menu_more_games,
+     &bind_main_menu_more_games,
+     &unbind_main_menu_more_games,
+     &popup_stack_top_matches,
+     &clear_control_proc,
+     &screen_name,
 };
 
 }  // namespace

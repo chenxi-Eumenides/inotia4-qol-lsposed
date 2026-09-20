@@ -1,4 +1,4 @@
-#include "plugins/core.ui/panels/stack.h"
+#include "stack.h"
 
 #include <cstring>
 

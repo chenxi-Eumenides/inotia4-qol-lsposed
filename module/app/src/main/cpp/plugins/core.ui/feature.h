@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/host_sdk.h"
+#include "../../contracts/host_sdk.h"
 
 // core.ui 出口面插件（ARCHITECTURE.md §7.1）：设置页容器 + 面板注册表 + `ui_panels` 能力。
 //

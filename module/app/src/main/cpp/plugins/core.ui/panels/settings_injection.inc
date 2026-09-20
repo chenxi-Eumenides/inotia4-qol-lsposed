@@ -8,8 +8,10 @@
 // ptr-slot lease，记录 slot_addr + expected + replacement + instance_generation。
 
 void* more_games_btn() {
-    if (g_base == 0) return nullptr;
-    return *reinterpret_cast<void**>(g_base + G_MAINMENU_BASE_VMA + G_MAINMENU_MOREGAMES_SLOT);
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->find_main_menu_more_games == nullptr) return nullptr;
+    void* button = nullptr;
+    return contracts::succeeded(ui->find_main_menu_more_games(&button)) ? button : nullptr;
 }
 
 void more_games_clicked(void* ctrl) {
@@ -23,25 +25,25 @@ void more_games_clicked(void* ctrl) {
 
 // 绑定/重绑定：仅当主菜单控件实例可解析时安装；句柄记录的槽地址变化或目标被改写时先释放再装。
 bool settings_try_bind_more_games() {
-    if (g_base == 0) return false;
     void* btn = more_games_btn();
     if (btn == nullptr) return false;
-    uint8_t* data = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(btn) + CO_DATA);
-    if (data == nullptr) return false;
-    void** slot = reinterpret_cast<void**>(data + CB_EXECUTE_PROC);
-    if (g_more_games_hook.slot == slot) {
-        if (*slot == reinterpret_cast<void*>(&more_games_clicked)) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->bind_main_menu_more_games == nullptr) return false;
+    if (g_more_games_binding_token != 0) {
+        int32_t matches = 0;
+        if (ui->execute_proc_matches != nullptr &&
+            contracts::succeeded(ui->execute_proc_matches(btn, &more_games_clicked, &matches)) &&
+            matches != 0) {
             g_more_games_injected = true;
             return true;
         }
-        // 目标被游戏改写：旧绑定失效，尽力还原后重装。
-        settings_release_more_games();
-    } else if (g_more_games_hook.slot != nullptr) {
-        // 主菜单重建 → 控件实例/槽地址变化：释放旧绑定（地址可能已失效）。
         settings_release_more_games();
     }
-    if (!g_more_games_hook.install_typed(slot, &more_games_clicked)) return false;
+    uint64_t token = 0;
+    if (!contracts::succeeded(ui->bind_main_menu_more_games(&more_games_clicked, &token)) ||
+        token == 0) return false;
+    g_more_games_binding_token = token;
     g_more_games_injected = true;
-    SETTINGS_LOG("more games ExecuteProc hooked: ctrl=%p orig=%p", btn, g_more_games_hook.orig);
+    SETTINGS_LOG("more games ExecuteProc bound: ctrl=%p", btn);
     return true;
 }

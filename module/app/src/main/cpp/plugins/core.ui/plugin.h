@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/plugin.h"
+#include "../../contracts/plugin.h"
 
 // core.ui 出口面插件清单入口（ARCHITECTURE.md §7.1）：
 //   · provides `ui_panels` v1.0（面板注册/打开/占用原因）；

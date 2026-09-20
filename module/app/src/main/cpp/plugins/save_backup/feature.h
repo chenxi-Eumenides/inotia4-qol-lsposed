@@ -3,13 +3,13 @@
 #include <cstdint>
 #include <string>
 
-#include "contracts/game_host.h"
-#include "contracts/host_sdk.h"
+#include "../../contracts/game_host.h"
+#include "../../contracts/host_sdk.h"
 
 // 存档管理器备份 feature（save-backup）：
 // .qol_save bundle 的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
 // 返回值即 HTTP 响应 JSON（{"ok":true,...} / {"ok":false,"error":"..."}）。
-// 依赖方向：feature → core（op_err 信封）+ Host SDK（sidecar 容器）+ Game Host
+// 依赖方向：feature → Host SDK（结果与 sidecar 容器）+ Game Host
 // （存档域原语）；不依赖 api/native。插件清单位于 plugins/save_backup/plugin.cpp。
 
 // 幂等初始化：记录 dataDir（原版存档根目录）与 externalFilesDir（备份/sidecar 根目录）。
@@ -20,6 +20,8 @@ void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
                               const qol::contracts::QolGameHost* game);
 const qol::contracts::QolHostSdk* save_backup_host_sdk();
 const qol::contracts::QolGameHost* save_backup_game_host();
+std::string save_backup_result_ok();
+std::string save_backup_result_error(const char* message);
 
 // 启动期 Kotlin 一次性下发 MAPINFOBASE 编译产物（map_id → 中文名 JSON）。
 // 内部按需替换内存表，entry_json 输出会携带 map_name；map_name 缺省空串。

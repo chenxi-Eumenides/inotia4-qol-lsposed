@@ -161,6 +161,30 @@ P2-B4 待删，UI primitive 的替代面为已覆盖的 `UiAdapter`；本批不�
 证明转发表和错误语义，不证明真实游戏内存位域的运行时布局。按 ADR 的行为证据规则，
 本批不装真机，行为面仍为 `NOT_ACCEPTED`。
 
+## P3：core.ui / save_backup 独立 target 收口增补
+
+本批将两个插件的源码 include 面收口为 `contracts/` 与自身目录；宿主私有实现仍只在
+宿主 adapter 内消费。新增或追加成员均为 append-only，不改变既有字段顺序、偏移或原
+落点语义：
+
+| 归属 | 成员签名 | 对齐原落点 |
+|---|---|---|
+| `QolGameHost::read_only.save` | `QolResult (*map_id)(int32_t slot, int32_t* out_map_id)` | `game/access/save::save_slot_map_id`，原 save backup UI 直接读取槽结构的 map 字段 |
+| `QolGameHost` | `QolSaveCallApi save_call`，含 `free_data(void*)`、`encrypt(void*,int32_t,int32_t,const char*,int32_t*)`、`mark_stale()` | `game/access/save` 的存档内存释放、加解密和槽缓存失效原语 |
+| `QolTargetApi` | `QolResult (*warehouse_companion_file_state)(QolTargetFeatureState*)` | `game_feature_state(kWarehouseCompanionFile)`；状态枚举逐值保持 unknown/unsupported/available/unavailable，save backup 仍仅对 unsupported 跳过伴生文件写回 |
+| `QolUiAdapter` | `control_pressed(QolUiHandle,int32_t*)` | 原控件数据状态字段读取，供分页箭头保持按下态绘制 |
+| `QolUiAdapter` | `touch_coordinates(uint64_t,int64_t*,int64_t*)` | 原 PopupState 触摸事件参数解码，插件不再读取控件/游戏结构偏移 |
+
+此外，`QolHostSdk::result` 的 `write_ok(char*,uint32_t,uint32_t*)` 与
+`write_error(const char*,char*,uint32_t,uint32_t*)` 作为插件响应信封面使用；其余 UI
+运行时成员（主菜单按钮绑定、PopupState 栈顶判定、控件清理、screen name）继续使用
+既有 `QolUiAdapter` 追加面。`QolGameHost` minor 更新为 6，`QolHostSdk` minor 保持
+3，UI adapter minor 保持 3。
+
+save backup 不再依赖 `game_feature.h`：伴生文件门禁通过 target 面取得同一功能状态；
+除 `unsupported` 分支外，unknown/available/unavailable 的写回路径保持原判定。两个
+插件的 JSON 成功/错误信封均经 Host SDK result 面生成，不再 include `game_ops_common.h`。
+
 ## P2-ABI-1：按需增补 autosell 只读面
 
 本批只在既有 `read_only` 子表尾部追加成员，`QolGameHost` 的既有成员顺序不变，
