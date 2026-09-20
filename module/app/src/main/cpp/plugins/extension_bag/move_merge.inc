@@ -57,14 +57,13 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         return finish(0);
     }
     if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
-        fn_control_object_get_data != nullptr &&
         fn_ui_equip_is_apply_stuff != nullptr && fn_ui_equip_get_item_slot_index != nullptr &&
         g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
         g_game->read_only.item.category != nullptr && fn_inven_move_item != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);
-        void* src_data = ctrl_src != nullptr ? fn_control_object_get_data(ctrl_src) : nullptr;
-        void* dst_data = fn_control_object_get_data(control);
+        void* src_data = ctrl_src != nullptr ? extension_bag_ui_data(ctrl_src) : nullptr;
+        void* dst_data = extension_bag_ui_data(control);
         void* item_a = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
         void* item_b = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
         if (item_a != nullptr && item_b != nullptr &&
@@ -120,7 +119,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                         if (refresh != nullptr && refresh->call_original != nullptr) {
                             refresh->call_original();
                         }
-                        void* panel_ctrl = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+                        void* panel_ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
                         if (fn_touch_handle_set_cursor != nullptr && panel_ctrl != nullptr) {
                             fn_touch_handle_set_cursor(panel_ctrl, nullptr);
                         }

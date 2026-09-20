@@ -48,8 +48,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                     moving = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
                 }
                 if (index >= 0 && moving != nullptr) {
-                    void* data = fn_control_object_get_data != nullptr
-                        ? fn_control_object_get_data(moving) : nullptr;
+                    void* data = extension_bag_ui_data(moving);
                     void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
                     int module_bag = -1;
                     int module_slot = -1;
@@ -120,13 +119,14 @@ void install_extension_tab_buttons_locked() {
         fn_ctrl_get_count == nullptr) {
         return;
     }
-    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
+    void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (bag_container == nullptr) return;
     // 容器就位守卫：面板打开初期 0x50 槽位指向占位容器（无原版袋标签子控件，
     // rect 未定位）。此时挂载会让标签落在占位容器上（绝对 x≈296 出位）。
     // 等原版 6 袋标签就位（child count ≥ 6）后再挂载；未就位直接跳过，
     // 由 draw 每帧检测容器就位后重试。
-    if (fn_ctrl_get_count != nullptr && fn_ctrl_get_count(bag_container) < 6) return;
+    int bag_child_count = 0;
+    if (!extension_bag_ui_child_count(bag_container, &bag_child_count) || bag_child_count < 6) return;
     // 动态计算：打开面板后，原版袋 0 按钮的绝对位置 =
     // 袋容器绝对（父链累加，袋 0 相对容器为 (0,0)）。缓存至面板重建。
     // 挂载层 = 袋容器（与原版 6 袋标签同父，跟随容器动画，天然不漂移）。
@@ -167,11 +167,7 @@ void install_extension_tab_buttons_locked() {
         // rect：与原版袋标签同尺寸 57x57（loc6/loc9 底框 47x47 居中填充成背景框）。
         // 相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
         const int64_t row_y = tab_rel_y + index * 70;
-        uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
-        *reinterpret_cast<int64_t*>(c + CO_RECT_X) = tab_rel_x;
-        *reinterpret_cast<int64_t*>(c + CO_RECT_Y) = row_y;
-        *reinterpret_cast<int64_t*>(c + CO_RECT_W) = 57;
-        *reinterpret_cast<int64_t*>(c + CO_RECT_H) = 57;
+        if (!extension_bag_ui_set_rect(ctrl, {tab_rel_x, row_y, 57, 57})) continue;
         // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
         void* data = fn_mem_malloc(0x10);
         if (data == nullptr) continue;
@@ -305,9 +301,7 @@ void handle_extension_tab_click_locked(int extension_bag) {
         const int original_bag = original_bag_locked();
         if (original_bag == virtual_bag::kOriginalTaskBag) {
             constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-            void* panel_root = g_base != 0
-                ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA)
-                : nullptr;
+            void* panel_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
             const int target_capacity = g_virtual_bag_state.capacities[extension_bag];
             const bool target_ready = target_capacity > 0 &&
                                        fn_control_item_set_item != nullptr &&
@@ -920,17 +914,14 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
     // 不用旧硬编码 kCellX/kCellY（标签左移后二者偏移 36px 致命中失效）。
     void* ctrl = g_extension_tab_buttons[index];
     if (ctrl == nullptr) return false;
-    int64_t ax = 0, ay = 0;
-    extension_bag_control_abs_pos(ctrl, &ax, &ay);
-    uint8_t* c = reinterpret_cast<uint8_t*>(ctrl);
-    const int64_t w = *reinterpret_cast<int64_t*>(c + CO_RECT_W);
-    const int64_t h = *reinterpret_cast<int64_t*>(c + CO_RECT_H);
-    return x >= ax && x < ax + w && y >= ay && y < ay + h;
+    UiRect rect{};
+    return extension_bag_ui_rect(ctrl, &rect) && rect.w > 0 && rect.h > 0 &&
+           extension_bag_ui_hit_test(ctrl, x, y, rect);
 }
 
 // GetChild 结果必须过双重校验：面板重建窗口里 GetChild(slot≥count) 返回不可读的
 // 垃圾指针（tombstone_02），先 GetCount 判界消除越界源，再 GetUserType==2 验类型。
-// root 本身也可能被面板重建替换——调用方应实时读 *(G_UIEQUIP_PANEL_CTRL_VMA)，
+// root 本身也可能被面板重建替换——调用方应实时通过 UI adapter 查询，
 // 不要使用 install 时的快照。
 void* valid_child_locked(void* root, int slot) {
     return extension_bag_valid_child(root, slot);

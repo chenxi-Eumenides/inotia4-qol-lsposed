@@ -17,6 +17,12 @@ void ui_fill_rect_alpha(UiRect rect, uint32_t color, uint32_t alpha) {
                             static_cast<int>(rect.w), static_cast<int>(rect.h), color, alpha);
 }
 
+void ui_fill_rect(UiRect rect, uint32_t color) {
+    if (fn_grpx_fill_rect == nullptr) return;
+    fn_grpx_fill_rect(static_cast<int>(rect.x), static_cast<int>(rect.y),
+                      static_cast<int>(rect.w), static_cast<int>(rect.h), color);
+}
+
 void ui_begin_frame(UiRect mask, UiRect panel, uint32_t panel_color) {
     ui_begin_frame();
     ui_fill_rect_alpha(mask, 0xFF000000, 0x3c);
@@ -226,4 +232,10 @@ void ui_draw_control_alpha_overlay(void* ctrl, UiRect size, uint32_t color, uint
     }
     fn_grpx_fill_rect_alpha(static_cast<int>(x), static_cast<int>(y), static_cast<int>(size.w),
                             static_cast<int>(size.h), color, alpha);
+}
+
+bool ui_draw_item_porting(void* item, int32_t x, int32_t y, int32_t a, int32_t b) {
+    if (item == nullptr || fn_item_draw_porting == nullptr) return false;
+    fn_item_draw_porting(item, x, y, a, b);
+    return true;
 }

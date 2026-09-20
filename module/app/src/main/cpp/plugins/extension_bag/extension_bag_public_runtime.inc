@@ -245,10 +245,10 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
 VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_control,
                                                                      void* src_control) {
     std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
-    if (src_control == nullptr || fn_control_object_get_data == nullptr) {
+    if (src_control == nullptr) {
         return VirtualBagProjectionDropResult::kNotExtension;
     }
-    void* src_data = fn_control_object_get_data(src_control);
+    void* src_data = extension_bag_ui_data(src_control);
     void* item = src_data != nullptr ? *reinterpret_cast<void**>(src_data) : nullptr;
     int src_bag = -1, src_slot = -1;
     if (item == nullptr || !module_slot_of_item_locked(item, &src_bag, &src_slot)) {
@@ -261,8 +261,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
                     src_bag, src_slot, g_module_view_index, g_projected_item_root);
         return VirtualBagProjectionDropResult::kRejected;
     }
-    void* live_root = g_base != 0
-        ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA) : nullptr;
+    void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     void* projected_source = valid_child_locked(g_projected_item_root, src_slot);
     if (live_root == nullptr || live_root != g_projected_item_root ||
         projected_source != src_control) {
@@ -314,7 +313,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     const int source_category = g_virtual_bag_state.items[src_bag][src_slot].category;
     const bool source_is_apply_material =
         read_item_is_jewel(source_category) || read_item_is_enchant_scroll(source_category);
-    void* dst_data = fn_control_object_get_data(dst_control);
+    void* dst_data = extension_bag_ui_data(dst_control);
     void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
     // IsApplyStuff 判真。目标类别用 item_is_equip 判定（kNotEncoded=装备类；
@@ -381,9 +380,7 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
     if (target_slot < 0) {
         return false;
     }
-    void* source_data = fn_control_object_get_data != nullptr
-                            ? fn_control_object_get_data(source_control)
-                            : nullptr;
+    void* source_data = extension_bag_ui_data(source_control);
     void* item = source_data != nullptr ? *reinterpret_cast<void**>(source_data) : nullptr;
     int source_bag = -1;
     int source_slot = -1;
@@ -551,7 +548,7 @@ bool virtual_bag_sync_projected_item_control(void* control) {
     }
     const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
     for (int slot = 0; slot < capacity; ++slot) {
-        if (fn_control_object_get_child(g_projected_item_root, slot) == control) {
+        if (extension_bag_ui_child_at(g_projected_item_root, slot) == control) {
             fn_control_item_set_item(control, g_module_objects[g_module_view_index][slot]);
             return true;
         }

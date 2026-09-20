@@ -7,37 +7,29 @@ void draw_tab_buttons_in_frame_locked() {
         }
         return;
     }
-    const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
-                                           fn_imgsys_get_loc != nullptr;
-    void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
+    const bool can_draw_original_button = extension_bag_ui_can_draw();
     // 标签挂袋容器（与原版 6 袋标签同父）：比对基准同步为袋容器句柄。
-    void* current_bag_container =
-        g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA) : nullptr;
+    void* current_bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     // 容器就位重试：enter 时 install 可能因占位容器（child count<6）被跳过；
     // 每帧检测真容器就位且尚未挂载（root 变化）时重新 install。
-    if (current_bag_container != nullptr &&
-        fn_ctrl_get_count != nullptr && fn_ctrl_get_count(current_bag_container) >= 6 &&
-        current_bag_container != g_extension_tab_root) {
+    int child_count = 0;
+    if (current_bag_container != nullptr && extension_bag_ui_child_count(current_bag_container, &child_count) &&
+        child_count >= 6 && current_bag_container != g_extension_tab_root) {
         install_extension_tab_buttons_locked();
-        current_bag_container =
-            g_base != 0 ? *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA)
-                        : nullptr;
+        current_bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     }
     const bool tabs_are_current =
         current_bag_container != nullptr && current_bag_container == g_extension_tab_root &&
         g_extension_tab_generation == g_inventory_generation;
-    if (!tabs_are_current || !can_draw_original_button || group == nullptr) return;
+    if (!tabs_are_current || !can_draw_original_button) return;
     // 第一遍：底框 loc20（72x84），倒序 index 4→0（对齐原版 DrawInvenBackground 的 5→0）。
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
         void* button = g_extension_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t ax = 0, ay = 0;
         extension_bag_control_abs_pos(button, &ax, &ay);
-        void* bg = fn_imgsys_get_loc(0xf, 0x14);
-        if (bg != nullptr) {
-            fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
-                              static_cast<int32_t>(ay - 12), bg, 0, 1, 0);
-        }
+        (void)extension_bag_ui_draw_part(0xf, 0x14, static_cast<int32_t>(ax - 5),
+                                         static_cast<int32_t>(ay - 12), 0, 1);
     }
     // 第二遍：袋图标 loc6/loc9 + 选中高亮 loc19，正序 index 0→4（对齐原版 DrawInvenBag 的 0→5）。
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
@@ -49,36 +41,22 @@ void draw_tab_buttons_in_frame_locked() {
         int64_t ax = 0, ay = 0;
         extension_bag_control_abs_pos(button, &ax, &ay);
         if (selected) {
-            void* icon = fn_imgsys_get_loc(0xf, 0x13);
-            if (icon != nullptr) {
-                fn_grpx_draw_part(group, static_cast<int32_t>(ax - 5),
-                                  static_cast<int32_t>(ay - 12), icon, 0, 1, 0);
-            }
-            void* frame = fn_imgsys_get_loc(0xf, 6);
-            if (frame != nullptr) {
-                fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
-                                  static_cast<int32_t>(ay + 5), frame, 0, 1, 0);
-            }
+            (void)extension_bag_ui_draw_part(0xf, 0x13, static_cast<int32_t>(ax - 5),
+                                             static_cast<int32_t>(ay - 12), 0, 1);
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(ax + 5),
+                                             static_cast<int32_t>(ay + 5), 0, 1);
         } else if (equipped) {
-            void* frame = fn_imgsys_get_loc(0xf, 6);
-            if (frame != nullptr) {
-                fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
-                                  static_cast<int32_t>(ay + 5), frame, 0, 1, 0x28);
-            }
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(ax + 5),
+                                             static_cast<int32_t>(ay + 5), 0, 0x28);
         } else {
-            void* bag_icon = fn_imgsys_get_loc(0xf, 9);
-            if (bag_icon != nullptr) {
-                fn_grpx_draw_part(group, static_cast<int32_t>(ax + 5),
-                                  static_cast<int32_t>(ay + 5), bag_icon, 0, 1, 0x28);
-            }
+            (void)extension_bag_ui_draw_part(0xf, 9, static_cast<int32_t>(ax + 5),
+                                             static_cast<int32_t>(ay + 5), 0, 0x28);
         }
     }
 }
 
 void draw_cells_in_frame_locked() {
-    const bool can_draw_original_button = fn_grpx_draw_part != nullptr && fn_imgsys_get_group != nullptr &&
-                                           fn_imgsys_get_loc != nullptr;
-    void* group = can_draw_original_button ? fn_imgsys_get_group(0xf) : nullptr;
+    const bool can_draw_original_button = extension_bag_ui_can_draw();
     if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule ||
         !virtual_bag::valid_index(g_virtual_bag_state.selected) || g_module_view_installed) {
         return;
@@ -97,44 +75,36 @@ void draw_cells_in_frame_locked() {
         const bool dragging_source = g_extension_drag.active &&
                                      g_extension_drag.bag == bag &&
                                      g_extension_drag.slot == slot;
-        if (can_draw_original_button && group != nullptr) {
-            void* slot_background = fn_imgsys_get_loc(0xf, 0x29);
-            if (slot_background != nullptr) {
-                fn_grpx_draw_part(group, static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y),
-                                  slot_background, 0, 1, 0);
-            }
+        if (can_draw_original_button) {
+            (void)extension_bag_ui_draw_part(0xf, 0x29, static_cast<int32_t>(rect.x),
+                                             static_cast<int32_t>(rect.y), 0, 1);
         }
-        if (occupied && !dragging_source && fn_item_draw_porting != nullptr) {
+        if (occupied && !dragging_source) {
             void* item = module_item_locked(bag, slot);
             if (item != nullptr) {
                 // ITEM_DrawPorting applies the original +5 inset, rarity
                 // frame, icon mapping and stack count itself.
-                fn_item_draw_porting(item, static_cast<int32_t>(rect.x),
-                                     static_cast<int32_t>(rect.y), 0, 1);
+                (void)extension_bag_ui_draw_item(item, static_cast<int32_t>(rect.x),
+                                                 static_cast<int32_t>(rect.y), 0, 1);
             }
         }
-        if (g_virtual_bag_state.inspected == slot && fn_grpx_fill_rect != nullptr) {
+        if (g_virtual_bag_state.inspected == slot) {
             constexpr int32_t kInspectBorder = 3;
             constexpr uint32_t kInspectColor = 0xff75d8ff;
-            fn_grpx_fill_rect(static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y),
-                              kGridCell, kInspectBorder, kInspectColor);
-            fn_grpx_fill_rect(static_cast<int32_t>(rect.x),
-                              static_cast<int32_t>(rect.y + kGridCell - kInspectBorder),
-                              kGridCell, kInspectBorder, kInspectColor);
-            fn_grpx_fill_rect(static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y),
-                              kInspectBorder, kGridCell, kInspectColor);
-            fn_grpx_fill_rect(static_cast<int32_t>(rect.x + kGridCell - kInspectBorder),
-                              static_cast<int32_t>(rect.y), kInspectBorder, kGridCell,
-                              kInspectColor);
+            (void)extension_bag_ui_fill_rect({rect.x, rect.y, kGridCell, kInspectBorder}, kInspectColor);
+            (void)extension_bag_ui_fill_rect(
+                {rect.x, rect.y + kGridCell - kInspectBorder, kGridCell, kInspectBorder}, kInspectColor);
+            (void)extension_bag_ui_fill_rect({rect.x, rect.y, kInspectBorder, kGridCell}, kInspectColor);
+            (void)extension_bag_ui_fill_rect(
+                {rect.x + kGridCell - kInspectBorder, rect.y, kInspectBorder, kGridCell}, kInspectColor);
         }
     }
-    if (g_extension_drag.active && g_extension_drag.bag == bag &&
-        fn_item_draw_porting != nullptr) {
+    if (g_extension_drag.active && g_extension_drag.bag == bag) {
         void* item = module_item_locked(bag, g_extension_drag.slot);
         if (item != nullptr) {
             const int32_t ghost_x = static_cast<int32_t>(g_extension_drag.current_x - kGridCell / 2);
             const int32_t ghost_y = static_cast<int32_t>(g_extension_drag.current_y - kGridCell / 2);
-            fn_item_draw_porting(item, ghost_x, ghost_y, 0, 1);
+            (void)extension_bag_ui_draw_item(item, ghost_x, ghost_y, 0, 1);
         }
     }
 }
@@ -301,12 +271,10 @@ int original_bag_button_index(int64_t x, int64_t y) {
     // Original bag tabs are laid out by the game under the bag container. Read
     // their live child rects instead of assuming the 1408px reference layout;
     // this follows density, resolution, and runtime panel repositioning.
-    if (g_base == 0 || fn_control_object_get_child == nullptr || fn_ctrl_get_count == nullptr) {
-        return -1;
-    }
-    void* bag_container = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
+    void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (bag_container == nullptr) return -1;
-    const int child_count = static_cast<int>(fn_ctrl_get_count(bag_container));
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(bag_container, &child_count)) return -1;
     // 原版标签包含扩展事务袋之外的任务袋（索引 5）；不能使用
     // virtual_bag::kBagCount（5）作为原版控件扫描上限。
     const int original_tab_count = static_cast<int>(kNoOriginalBagSelected);
@@ -317,11 +285,9 @@ int original_bag_button_index(int64_t x, int64_t y) {
         int64_t absolute_x = 0;
         int64_t absolute_y = 0;
         extension_bag_control_abs_pos(control, &absolute_x, &absolute_y);
-        uint8_t* data = static_cast<uint8_t*>(control);
-        const int64_t width = *reinterpret_cast<int64_t*>(data + CO_RECT_W);
-        const int64_t height = *reinterpret_cast<int64_t*>(data + CO_RECT_H);
-        if (width > 0 && height > 0 && x >= absolute_x && x < absolute_x + width &&
-            y >= absolute_y && y < absolute_y + height) {
+        UiRect rect{};
+        if (extension_bag_ui_rect(control, &rect) && rect.w > 0 && rect.h > 0 &&
+            extension_bag_ui_hit_test(control, x, y, rect)) {
             return index;
         }
     }
@@ -514,7 +480,7 @@ bool install_module_view_locked(int bag) {
     *size_word = (*size_word & ~kCapacityMask) |
                  (static_cast<uint32_t>(capacity) & kCapacityMask);
 
-    void* root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+    void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     g_projected_item_root = root;
     if (root != nullptr && fn_ui_equip_refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
@@ -541,7 +507,7 @@ bool install_module_view_locked(int bag) {
 // 该函数不再由 draw wrapper 每帧调用；无刷新事务的调用方必须使用定点同步。
 void refresh_projection_if_overwritten_locked() {
     if (!g_module_view_installed || g_projected_item_root == nullptr ||
-        fn_control_object_get_data == nullptr || fn_control_item_set_item == nullptr ||
+        fn_control_item_set_item == nullptr ||
         !virtual_bag::valid_index(g_module_view_index)) {
         return;
     }
@@ -551,7 +517,7 @@ void refresh_projection_if_overwritten_locked() {
         void* item = g_module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
         void* ctrl = valid_child_locked(g_projected_item_root, slot);
         if (ctrl == nullptr) continue;
-        void* data = fn_control_object_get_data(ctrl);
+        void* data = extension_bag_ui_data(ctrl);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != item) {
             fn_control_item_set_item(ctrl, item);

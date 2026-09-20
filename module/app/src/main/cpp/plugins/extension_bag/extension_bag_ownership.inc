@@ -90,16 +90,17 @@ bool deferred_item_referenced_locked(void* item) {
             if (g_module_objects[bag][slot] == item) return true;
         }
     }
-    if (g_projected_item_root == nullptr || fn_ctrl_get_count == nullptr ||
-        fn_control_object_get_child == nullptr || fn_control_object_get_data == nullptr) {
+    if (g_projected_item_root == nullptr) {
         return item_pointer_known_locked(item);
     }
-    const int child_count = static_cast<int>(fn_ctrl_get_count(g_projected_item_root));
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(g_projected_item_root, &child_count)) {
+        return item_pointer_known_locked(item);
+    }
     for (int slot = 0; slot < child_count; ++slot) {
-        void* control = fn_control_object_get_child(g_projected_item_root, slot);
+        void* control = extension_bag_ui_child_at(g_projected_item_root, slot);
         if (control == nullptr) continue;
-        void* data = fn_control_object_get_data(control);
-        if (data != nullptr && *reinterpret_cast<void**>(data) == item) return true;
+        if (extension_bag_ui_item(control) == item) return true;
     }
     // 兜底覆盖原版库存和角色装备等非 projection root 的已知引用；宁可
     // 保留队列项，也不能让 handover 失败路径把仍由游戏持有的对象释放掉。
@@ -165,10 +166,16 @@ void log_ownership_audit_locked(const char* context) {
 
 bool object_touch_window_active_locked() {
     if (g_extension_touch_capture || g_extension_drag.active) return true;
-    if (g_base == 0 || !g_module_view_installed || g_projected_item_root == nullptr ||
+    if (!g_module_view_installed || g_projected_item_root == nullptr ||
         !virtual_bag::valid_index(g_module_view_index)) return false;
-    const uint8_t* touch_state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-    const void* moving = *reinterpret_cast<const void* const*>(touch_state + TOUCH_STATE_MOVING_CTRL);
+    void* moving = nullptr;
+    void* drop_source = nullptr;
+    int64_t touch_x = 0;
+    int64_t touch_y = 0;
+    if (!extension_bag_ui_touch_state(&moving, &drop_source, &touch_x, &touch_y)) return false;
+    (void)drop_source;
+    (void)touch_x;
+    (void)touch_y;
     if (moving == nullptr) return false;
     const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
     for (int slot = 0; slot < capacity; ++slot) {

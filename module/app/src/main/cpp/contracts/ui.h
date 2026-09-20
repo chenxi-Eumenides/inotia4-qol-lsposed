@@ -13,7 +13,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 3;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 4;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -21,6 +21,14 @@ using QolUiClickFn = void (*)(void* user);
 using QolUiPopupEnterFn = void (*)();
 using QolUiChangedFn = void (*)(void* user, int32_t value);
 using QolUiScrollFn = void (*)(void* user, int32_t offset);
+enum class QolUiRootKind : uint32_t {
+    kEquipBagContainer = 0,
+    kEquipItemRoot = 1,
+    kStoreBagContainer = 2,
+    kStoreItemRoot = 3,
+    kMixBagContainer = 4,
+    kMixItemRoot = 5,
+};
 
 struct UiRect {
     int64_t x, y, w, h;
@@ -177,6 +185,16 @@ struct QolUiAdapter {
     QolResult (*popup_stack_top_matches)(QolUiPopupEnterFn, int32_t*);
     QolResult (*clear_control_proc)(QolUiHandle);
     QolResult (*screen_name)(const char**);
+
+    // G3：扩展背包使用的控件事实与原版物品绘制原语。
+    QolResult (*control_user_type)(QolUiHandle, int32_t*);
+    QolResult (*control_item)(QolUiHandle, QolUiHandle*);
+    QolResult (*control_item_slot)(QolUiHandle, int32_t*);
+    QolResult (*touch_state)(QolUiHandle*, QolUiHandle*, int64_t*, int64_t*);
+    QolResult (*fill_rect)(UiRect, uint32_t);
+    QolResult (*draw_item_porting)(QolUiHandle, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*control_parent)(QolUiHandle, QolUiHandle*);
+    QolResult (*find_root)(QolUiRootKind, QolUiHandle*);
 };
 
 }  // namespace qol::contracts

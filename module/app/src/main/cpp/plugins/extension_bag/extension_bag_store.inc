@@ -100,8 +100,10 @@ void store_install_tab_buttons_locked() {
         fn_ctrl_set_data == nullptr) {
         return;
     }
-    void* bag_container = *reinterpret_cast<void**>(g_base + G_UISTORE_BAG_CTRL_VMA);
-    if (bag_container == nullptr || fn_ctrl_get_count(bag_container) < 6) return;
+    void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
+    int bag_child_count = 0;
+    if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
+        bag_child_count < 6) return;
     if (store_tab_root == bag_container && store_tab_buttons[0] != nullptr) return;
 
     if (store_tab_root != nullptr) store_delete_tab_buttons_locked();
@@ -112,9 +114,8 @@ void store_install_tab_buttons_locked() {
     void* bag0 = valid_child_locked(bag_container, 0);
     if (bag0 == nullptr) return;
     extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
-    const uint8_t* bag0_bytes = static_cast<const uint8_t*>(bag0);
-    const int64_t bag0_width = *reinterpret_cast<const int64_t*>(bag0_bytes + CO_RECT_W);
-    if (bag0_width <= 0) return;
+    UiRect bag0_rect{};
+    if (!extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) return;
 
     int64_t mount_abs_x = 0;
     int64_t mount_abs_y = 0;
@@ -135,11 +136,7 @@ void store_install_tab_buttons_locked() {
             reinterpret_cast<void*>(&store_tab_item_proc));
         fn_control_object_set_user_type(control, 2);
         fn_touch_handle_unuse_control_event_move(control);
-        uint8_t* control_bytes = static_cast<uint8_t*>(control);
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_X) = tab_rel_x;
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_Y) = tab_rel_y + index * 70;
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_W) = 57;
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_H) = 57;
+        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) continue;
         void* data = fn_mem_malloc(0x10);
         if (data == nullptr) continue;
         std::memset(data, 0, 0x10);
@@ -186,14 +183,14 @@ void store_commit_pending_tab_locked() {
 
 void store_refresh_projection_locked() {
     if (!store_view_installed || store_projected_item_root == nullptr ||
-        fn_control_object_get_data == nullptr || fn_control_item_set_item == nullptr ||
+        fn_control_item_set_item == nullptr ||
         !virtual_bag::valid_index(store_view_bag)) return;
     const int capacity = g_virtual_bag_state.capacities[store_view_bag];
     for (int slot = 0; slot < capacity; ++slot) {
         void* control = valid_child_locked(store_projected_item_root, slot);
         if (control == nullptr) continue;
         void* expected = module_item_locked(store_view_bag, slot);
-        void* data = fn_control_object_get_data(control);
+        void* data = extension_bag_ui_data(control);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != expected) fn_control_item_set_item(control, expected);
     }
@@ -221,7 +218,7 @@ void store_install_module_view_locked(int bag) {
     *size_word = (*size_word & ~kCapacityMask) |
                  (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask);
 
-    store_projected_item_root = *reinterpret_cast<void**>(g_base + G_UISTORE_ITEM_CTRL_VMA);
+    store_projected_item_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
     if (store_projected_item_root == nullptr) {
         *size_word = (*size_word & ~kCapacityMask) |
                      (store_original_bag_size & kCapacityMask);
@@ -275,22 +272,17 @@ void store_restore_module_view_locked() {
 }
 
 int store_original_bag_button_index(int64_t x, int64_t y) {
-    if (g_base == 0 || fn_ctrl_get_count == nullptr) return -1;
-    void* container = *reinterpret_cast<void**>(g_base + G_UISTORE_BAG_CTRL_VMA);
+    void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
     if (container == nullptr) return -1;
-    const int count = static_cast<int>(fn_ctrl_get_count(container));
+    int count = 0;
+    if (!extension_bag_ui_child_count(container, &count)) return -1;
     const int limit = count < 6 ? count : 6;
     for (int index = 0; index < limit; ++index) {
         void* control = valid_child_locked(container, index);
         if (control == nullptr) continue;
-        int64_t absolute_x = 0;
-        int64_t absolute_y = 0;
-        extension_bag_control_abs_pos(control, &absolute_x, &absolute_y);
-        const uint8_t* bytes = static_cast<const uint8_t*>(control);
-        const int64_t width = *reinterpret_cast<const int64_t*>(bytes + CO_RECT_W);
-        const int64_t height = *reinterpret_cast<const int64_t*>(bytes + CO_RECT_H);
-        if (width > 0 && height > 0 && x >= absolute_x && x < absolute_x + width &&
-            y >= absolute_y && y < absolute_y + height) return index;
+        UiRect rect{};
+        if (!extension_bag_ui_rect(control, &rect)) continue;
+        if (rect.w > 0 && rect.h > 0 && extension_bag_ui_hit_test(control, x, y, rect)) return index;
     }
     return -1;
 }
@@ -338,21 +330,15 @@ void store_f3_wrapper() {
 }
 
 void store_draw_tab_buttons_locked() {
-    if (fn_grpx_draw_part == nullptr || fn_imgsys_get_group == nullptr ||
-        fn_imgsys_get_loc == nullptr) return;
-    void* group = fn_imgsys_get_group(0xf);
-    if (group == nullptr) return;
+    if (!extension_bag_ui_can_draw()) return;
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
         void* button = store_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
-        void* background = fn_imgsys_get_loc(0xf, 0x14);
-        if (background != nullptr) {
-            fn_grpx_draw_part(group, static_cast<int32_t>(x - 5),
-                              static_cast<int32_t>(y - 12), background, 0, 1, 0);
-        }
+        (void)extension_bag_ui_draw_part(0xf, 0x14, static_cast<int32_t>(x - 5),
+                                         static_cast<int32_t>(y - 12), 0, 1);
     }
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* button = store_tab_buttons[index];
@@ -363,20 +349,16 @@ void store_draw_tab_buttons_locked() {
         const bool selected = store_view_installed && store_view_bag == index;
         const bool equipped = g_virtual_bag_state.capacities[index] != 0;
         if (selected) {
-            void* icon = fn_imgsys_get_loc(0xf, 0x13);
-            if (icon != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x - 5),
-                                                   static_cast<int32_t>(y - 12), icon, 0, 1, 0);
-            void* frame = fn_imgsys_get_loc(0xf, 6);
-            if (frame != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x + 5),
-                                                    static_cast<int32_t>(y + 5), frame, 0, 1, 0);
+            (void)extension_bag_ui_draw_part(0xf, 0x13, static_cast<int32_t>(x - 5),
+                                             static_cast<int32_t>(y - 12), 0, 1);
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(x + 5),
+                                             static_cast<int32_t>(y + 5), 0, 1);
         } else if (equipped) {
-            void* frame = fn_imgsys_get_loc(0xf, 6);
-            if (frame != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x + 5),
-                                                    static_cast<int32_t>(y + 5), frame, 0, 1, 0x28);
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(x + 5),
+                                             static_cast<int32_t>(y + 5), 0, 0x28);
         } else {
-            void* icon = fn_imgsys_get_loc(0xf, 9);
-            if (icon != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x + 5),
-                                                   static_cast<int32_t>(y + 5), icon, 0, 1, 0x28);
+            (void)extension_bag_ui_draw_part(0xf, 9, static_cast<int32_t>(x + 5),
+                                             static_cast<int32_t>(y + 5), 0, 0x28);
         }
     }
 }
@@ -466,11 +448,11 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (store_view_installed && g_base != 0 && fn_control_object_get_cursor != nullptr &&
-            fn_control_item_get_item != nullptr && g_game != nullptr &&
+            g_game != nullptr &&
             g_game->read_only.item.sell_price != nullptr) {
-            void* ctrl = *reinterpret_cast<void**>(g_base + G_UISTORE_ITEM_CTRL_VMA);
+            void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
             void* cursor = ctrl != nullptr ? fn_control_object_get_cursor(ctrl) : nullptr;
-            item = cursor != nullptr ? fn_control_item_get_item(cursor) : nullptr;
+            item = cursor != nullptr ? extension_bag_ui_item(cursor) : nullptr;
             if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot)) {
                 module_item = true;
                 const bool identity_ok =

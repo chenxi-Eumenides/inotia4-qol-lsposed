@@ -793,8 +793,8 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
         for (int index = 0; index < virtual_bag::kBagCount; ++index) {
             if (!extension_tab_hit(index, x, y)) continue;
             void* item = nullptr;
-            if (fn_control_object_get_data != nullptr) {
-                void* data = fn_control_object_get_data(moving_control);
+            {
+                void* data = extension_bag_ui_data(moving_control);
                 item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
             }
             const int category = original_item_category_locked(item);

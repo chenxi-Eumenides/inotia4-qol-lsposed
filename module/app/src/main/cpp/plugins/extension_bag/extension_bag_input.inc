@@ -1,10 +1,12 @@
 void* touch_moving_item_control_locked() {
-    if (g_base == 0) return nullptr;
-    uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-    void* control = *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL);
-    if (control == nullptr) control = *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_SRC_CTRL);
-    if (control == nullptr || fn_control_object_get_data == nullptr) return nullptr;
-    void* data = fn_control_object_get_data(control);
+    void* moving = nullptr;
+    void* drop_source = nullptr;
+    int64_t release_x = 0;
+    int64_t release_y = 0;
+    if (!extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y)) return nullptr;
+    void* control = moving != nullptr ? moving : drop_source;
+    if (control == nullptr) return nullptr;
+    void* data = extension_bag_ui_data(control);
     if (data == nullptr || *reinterpret_cast<void**>(data) == nullptr) return nullptr;
     if (*reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) == 0) {
         return nullptr;
@@ -22,8 +24,8 @@ void reset_drag_state_locked(void* moving_control) {
         *reinterpret_cast<void**>(state + TOUCH_STATE_RELEASE_CTRL) = nullptr;
         *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_SRC_CTRL) = nullptr;
     }
-    if (moving_control != nullptr && fn_control_object_get_data != nullptr) {
-        void* data = fn_control_object_get_data(moving_control);
+    if (moving_control != nullptr) {
+        void* data = extension_bag_ui_data(moving_control);
         if (data != nullptr) {
             *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) = 0;
             *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ON_FLAG) = 0;
@@ -32,10 +34,11 @@ void reset_drag_state_locked(void* moving_control) {
 }
 
 void clear_stale_projected_moving_locked() {
-    if (g_base == 0) return;
-    uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-    void* moving = *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL);
-    void* drop_source = *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_SRC_CTRL);
+    void* moving = nullptr;
+    void* drop_source = nullptr;
+    int64_t release_x = 0;
+    int64_t release_y = 0;
+    if (!extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y)) return;
     if (moving == nullptr && drop_source == nullptr) return;
     const auto& session = g_extension_drag_session;
     // 会话空闲且非模块触摸捕获时，MOVING_CTRL/DROP_SRC_CTRL 属于原版 TouchHandle
@@ -47,7 +50,7 @@ void clear_stale_projected_moving_locked() {
         session.phase == virtual_bag::DragPhase::kNativeMoving ||
         session.phase == virtual_bag::DragPhase::kTargetResolved ||
         session.phase == virtual_bag::DragPhase::kTransactionInFlight;
-    void* live_root = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+    void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     const bool source_slot_valid = virtual_bag::valid_index(session.source_bag) &&
                                    session.source_slot >= 0 &&
                                    session.source_slot < virtual_bag::kSlotCount;
@@ -62,10 +65,11 @@ void clear_stale_projected_moving_locked() {
         moving_matches_source;
     if (retain) return;
 
+    uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
     *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL) = nullptr;
     const auto clear_control_flags = [](void* control) {
-        if (control == nullptr || fn_control_object_get_data == nullptr) return;
-        void* data = fn_control_object_get_data(control);
+        if (control == nullptr) return;
+        void* data = extension_bag_ui_data(control);
         if (data == nullptr) return;
         *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) = 0;
         *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ON_FLAG) = 0;
@@ -121,13 +125,13 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
 }
 
 void clear_original_item_selection_locked() {
-    if (g_base == 0 || fn_ctrl_get_child == nullptr || fn_control_object_get_data == nullptr) return;
-    void* item_list = *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+    if (g_base == 0) return;
+    void* item_list = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     if (item_list == nullptr) return;
     for (uint32_t index = 0; index < virtual_bag::kSlotCount; ++index) {
-        void* control = fn_ctrl_get_child(item_list, index);
+        void* control = extension_bag_ui_child_at(item_list, static_cast<int>(index));
         if (control == nullptr) continue;
-        void* data = fn_control_object_get_data(control);
+        void* data = extension_bag_ui_data(control);
         if (data == nullptr) continue;
         *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) = 0;
         *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ON_FLAG) = 0;
@@ -148,8 +152,8 @@ int drag_source_category_locked() {
         return g_virtual_bag_state.items[session.source_bag][session.source_slot].category;
     }
     void* moving = touch_moving_item_control_locked();
-    if (moving == nullptr || fn_control_object_get_data == nullptr) return 0;
-    void* data = fn_control_object_get_data(moving);
+    if (moving == nullptr) return 0;
+    void* data = extension_bag_ui_data(moving);
     void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
     int module_bag = -1;
     int module_slot = -1;

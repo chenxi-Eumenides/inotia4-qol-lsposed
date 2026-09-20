@@ -275,8 +275,8 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     bool switched_view = false;
     refresh_tab_bag_items_locked();
     void* tab = g_extension_tab_buttons[internal_bag];
-    if (tab != nullptr && fn_control_object_get_data != nullptr) {
-        void* data = fn_control_object_get_data(tab);
+    if (tab != nullptr) {
+        void* data = extension_bag_ui_data(tab);
         if (data != nullptr) {
             *reinterpret_cast<void**>(data) = g_tab_bag_items[internal_bag];
         }
@@ -299,8 +299,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
 bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
                                             int index, void* moving_control) {
     if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return false;
-    if (fn_control_object_get_data == nullptr) return false;
-    void* data = fn_control_object_get_data(moving_control);
+    void* data = extension_bag_ui_data(moving_control);
     void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
     if (item == nullptr) return false;
     const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, index, item);
@@ -355,6 +354,7 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
 // 历史遗留：早期曾用按钮 PtrHook（改 execute_slot 指针）接管，与函数级
 // hook 构成同点双层钩子，且受 SetDescMenu 按钮生命周期/槽位漂移困扰，
 // 已整体移除。
+
 
 
 
@@ -670,7 +670,7 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 }
 
 void install_extension_desc_item_hooks_locked(void* item) {
-    if (item == nullptr || g_base == 0 || fn_control_object_get_data == nullptr) return;
+    if (item == nullptr || g_base == 0) return;
     constexpr std::array<size_t, 11> kDescButtonOffsets = {
         0x68, 0x70, 0x78, 0x80, 0x88, 0x90,
         0x98, 0xa0, 0xa8, 0xb0, 0xb8,
@@ -685,7 +685,7 @@ void install_extension_desc_item_hooks_locked(void* item) {
                         static_cast<int>(index), button);
             continue;
         }
-        void* data = fn_control_object_get_data(button);
+        void* data = extension_bag_ui_data(button);
         if (data == nullptr || !game_memory_accessible(data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension desc hook skip invalid data index=%d button=%p data=%p",
                         static_cast<int>(index), button, data);
@@ -1244,9 +1244,9 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
     // projected controls so the original MakeDesc reads the extension item.
     virtual_bag_sync_projected_item_control(ctrl);
     void* item = nullptr;
-    if (fn_control_object_get_data != nullptr) {
+    {
         if (game_memory_accessible(ctrl, CO_DATA + sizeof(void*), 'r')) {
-            void* data = fn_control_object_get_data(ctrl);
+            void* data = extension_bag_ui_data(ctrl);
             if (data != nullptr && game_memory_accessible(data, sizeof(void*), 'r')) {
                 item = *reinterpret_cast<void**>(data);
             }

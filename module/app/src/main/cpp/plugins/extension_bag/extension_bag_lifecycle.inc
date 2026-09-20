@@ -149,11 +149,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                     if (param != 0) {
                         release_x = *reinterpret_cast<const int64_t*>(param);
                         release_y = *reinterpret_cast<const int64_t*>(param + 8);
-                    } else if (g_base != 0) {
-                        const uint8_t* touch_state =
-                            reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-                        release_x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
-                        release_y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
+                    } else {
+                        void* moving = nullptr;
+                        void* drop_source = nullptr;
+                        (void)extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y);
                     }
                     cancel_projected_drag_session_locked("release-bypassed-gamestate");
                     g_extension_drag_session = {};
@@ -256,10 +255,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         if (param != 0) {
             x = *reinterpret_cast<const int64_t*>(param);
             y = *reinterpret_cast<const int64_t*>(param + 8);
-        } else if (g_base != 0) {
-            const uint8_t* touch_state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
-            y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
+        } else {
+            void* moving = nullptr;
+            void* drop_source = nullptr;
+            (void)extension_bag_ui_touch_state(&moving, &drop_source, &x, &y);
         }
         bool release_cleanup_needed = false;
         bool release_cleanup_handled = false;
@@ -340,10 +339,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         if (param != 0) {
             x = *reinterpret_cast<const int64_t*>(param);
             y = *reinterpret_cast<const int64_t*>(param + 8);
-        } else if (g_base != 0) {
-            const uint8_t* touch_state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            x = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_X);
-            y = *reinterpret_cast<const int64_t*>(touch_state + TOUCH_STATE_RELEASE_Y);
+        } else {
+            void* moving = nullptr;
+            void* drop_source = nullptr;
+            (void)extension_bag_ui_touch_state(&moving, &drop_source, &x, &y);
         }
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();

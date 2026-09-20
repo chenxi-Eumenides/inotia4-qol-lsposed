@@ -418,10 +418,55 @@ QolResult control_active(QolUiHandle control, int32_t* out) {
     return ui_control_active(control, out) ? contracts::ok() : not_ready();
 }
 
+QolResult control_user_type(QolUiHandle control, int32_t* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    return ui_control_user_type(control, out) ? contracts::ok() : not_ready();
+}
+
 QolResult control_data(QolUiHandle control, QolUiHandle* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
     *out = ui_control_data(control);
     return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult control_item(QolUiHandle control, QolUiHandle* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    *out = ui_control_item(control);
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult control_item_slot(QolUiHandle control, int32_t* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    return ui_control_item_slot(control, out) ? contracts::ok() : not_ready();
+}
+
+QolResult control_parent(QolUiHandle control, QolUiHandle* out) {
+    if (control == nullptr || out == nullptr) return invalid_argument();
+    *out = ui_control_parent(control);
+    return contracts::ok();
+}
+
+QolResult find_root(contracts::QolUiRootKind kind, QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = ui_find_root(static_cast<uint32_t>(kind));
+    return *out == nullptr ? not_ready() : contracts::ok();
+}
+
+QolResult touch_state(QolUiHandle* out_moving, QolUiHandle* out_drop_source,
+                     int64_t* out_x, int64_t* out_y) {
+    if (out_moving == nullptr || out_drop_source == nullptr || out_x == nullptr || out_y == nullptr) {
+        return invalid_argument();
+    }
+    return ui_touch_state(out_moving, out_drop_source, out_x, out_y) ? contracts::ok() : not_ready();
+}
+
+QolResult fill_rect(UiRect rect, uint32_t color) {
+    ui_fill_rect(game_rect(rect), color);
+    return contracts::ok();
+}
+
+QolResult draw_item_porting(QolUiHandle item, int32_t x, int32_t y, int32_t a, int32_t b) {
+    return ui_draw_item_porting(item, x, y, a, b) ? contracts::ok() : not_ready();
 }
 
 QolResult execute_proc_matches(QolUiHandle control, contracts::QolUiClickFn expected,
@@ -554,6 +599,14 @@ const QolUiAdapter g_ui_adapter{
      &popup_stack_top_matches,
      &clear_control_proc,
      &screen_name,
+     &control_user_type,
+     &control_item,
+     &control_item_slot,
+     &touch_state,
+     &fill_rect,
+     &draw_item_porting,
+     &control_parent,
+     &find_root,
 };
 
 }  // namespace

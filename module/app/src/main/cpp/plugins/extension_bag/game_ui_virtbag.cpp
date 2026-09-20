@@ -622,7 +622,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     void* control, uint64_t event, void* x2, void* param,
     VirtualBagEquipControlEventBackup backup, uint64_t* out_result) {
     if (out_result != nullptr) *out_result = 0;
-    if (event != 0x04 || param == nullptr || fn_control_object_get_data == nullptr) {
+    if (event != 0x04 || param == nullptr) {
         return VirtualBagEquipControlEventResult::kNotExtension;
     }
     void* source_control = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
@@ -638,8 +638,8 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         // 控件指针只作为当前投影索引；data 和 item 必须在同一锁上下文重读，
         // 防止控件在锁外被重绑后仍沿用旧身份。
         void* source_data = source_control != nullptr
-            ? fn_control_object_get_data(source_control) : nullptr;
-        void* target_data = control != nullptr ? fn_control_object_get_data(control) : nullptr;
+            ? extension_bag_ui_data(source_control) : nullptr;
+        void* target_data = control != nullptr ? extension_bag_ui_data(control) : nullptr;
         source_item = source_data != nullptr ? *reinterpret_cast<void**>(source_data) : nullptr;
         target_item = target_data != nullptr ? *reinterpret_cast<void**>(target_data) : nullptr;
         target_slot_index = control != nullptr && fn_ui_equip_get_item_slot_index != nullptr

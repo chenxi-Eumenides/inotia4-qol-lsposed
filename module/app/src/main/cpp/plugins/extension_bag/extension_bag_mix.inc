@@ -32,13 +32,11 @@ void mix_install_module_view_locked(int bag);
 void mix_restore_module_view_locked();
 
 void* mix_bag_container_locked() {
-    if (g_uimix == nullptr) return nullptr;
-    return *reinterpret_cast<void**>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_BAG_GROUP);
+    return extension_bag_ui_root(qol::contracts::QolUiRootKind::kMixBagContainer);
 }
 
 void* mix_item_root_locked() {
-    if (g_uimix == nullptr) return nullptr;
-    return *reinterpret_cast<void**>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_ITEM_GROUP);
+    return extension_bag_ui_root(qol::contracts::QolUiRootKind::kMixItemRoot);
 }
 
 // 面板状态：0=配方菜单（原版不画背包列），1=背包/合成视图。扩展页签只在 state!=0
@@ -115,7 +113,9 @@ void mix_install_tab_buttons_locked() {
         return;
     }
     void* bag_container = mix_bag_container_locked();
-    if (bag_container == nullptr || fn_ctrl_get_count(bag_container) < 6) return;
+    int bag_child_count = 0;
+    if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
+        bag_child_count < 6) return;
     if (mix_tab_root == bag_container && mix_tab_buttons[0] != nullptr) return;
 
     if (mix_tab_root != nullptr) mix_delete_tab_buttons_locked();
@@ -126,9 +126,8 @@ void mix_install_tab_buttons_locked() {
     void* bag0 = valid_child_locked(bag_container, 0);
     if (bag0 == nullptr) return;
     extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
-    const uint8_t* bag0_bytes = static_cast<const uint8_t*>(bag0);
-    const int64_t bag0_width = *reinterpret_cast<const int64_t*>(bag0_bytes + CO_RECT_W);
-    if (bag0_width <= 0) return;
+    UiRect bag0_rect{};
+    if (!extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) return;
 
     int64_t mount_abs_x = 0;
     int64_t mount_abs_y = 0;
@@ -149,11 +148,7 @@ void mix_install_tab_buttons_locked() {
             reinterpret_cast<void*>(&mix_tab_item_proc));
         fn_control_object_set_user_type(control, 2);
         fn_touch_handle_unuse_control_event_move(control);
-        uint8_t* control_bytes = static_cast<uint8_t*>(control);
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_X) = tab_rel_x;
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_Y) = tab_rel_y + index * 70;
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_W) = 57;
-        *reinterpret_cast<int64_t*>(control_bytes + CO_RECT_H) = 57;
+        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) continue;
         void* data = fn_mem_malloc(0x10);
         if (data == nullptr) continue;
         std::memset(data, 0, 0x10);
@@ -200,14 +195,14 @@ void mix_commit_pending_tab_locked() {
 
 void mix_refresh_projection_locked() {
     if (!mix_view_installed || mix_projected_item_root == nullptr ||
-        fn_control_object_get_data == nullptr || fn_control_item_set_item == nullptr ||
+        fn_control_item_set_item == nullptr ||
         !virtual_bag::valid_index(mix_view_bag)) return;
     const int capacity = g_virtual_bag_state.capacities[mix_view_bag];
     for (int slot = 0; slot < capacity; ++slot) {
         void* control = valid_child_locked(mix_projected_item_root, slot);
         if (control == nullptr) continue;
         void* expected = module_item_locked(mix_view_bag, slot);
-        void* data = fn_control_object_get_data(control);
+        void* data = extension_bag_ui_data(control);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != expected) fn_control_item_set_item(control, expected);
     }
@@ -309,21 +304,15 @@ void mix_f3_wrapper() {
 }
 
 void mix_draw_tab_buttons_locked() {
-    if (fn_grpx_draw_part == nullptr || fn_imgsys_get_group == nullptr ||
-        fn_imgsys_get_loc == nullptr) return;
-    void* group = fn_imgsys_get_group(0xf);
-    if (group == nullptr) return;
+    if (!extension_bag_ui_can_draw()) return;
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
         void* button = mix_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
-        void* background = fn_imgsys_get_loc(0xf, 0x14);
-        if (background != nullptr) {
-            fn_grpx_draw_part(group, static_cast<int32_t>(x - 5),
-                              static_cast<int32_t>(y - 12), background, 0, 1, 0);
-        }
+        (void)extension_bag_ui_draw_part(0xf, 0x14, static_cast<int32_t>(x - 5),
+                                         static_cast<int32_t>(y - 12), 0, 1);
     }
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* button = mix_tab_buttons[index];
@@ -334,20 +323,16 @@ void mix_draw_tab_buttons_locked() {
         const bool selected = mix_view_installed && mix_view_bag == index;
         const bool equipped = g_virtual_bag_state.capacities[index] != 0;
         if (selected) {
-            void* icon = fn_imgsys_get_loc(0xf, 0x13);
-            if (icon != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x - 5),
-                                                   static_cast<int32_t>(y - 12), icon, 0, 1, 0);
-            void* frame = fn_imgsys_get_loc(0xf, 6);
-            if (frame != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x + 5),
-                                                    static_cast<int32_t>(y + 5), frame, 0, 1, 0);
+            (void)extension_bag_ui_draw_part(0xf, 0x13, static_cast<int32_t>(x - 5),
+                                             static_cast<int32_t>(y - 12), 0, 1);
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(x + 5),
+                                             static_cast<int32_t>(y + 5), 0, 1);
         } else if (equipped) {
-            void* frame = fn_imgsys_get_loc(0xf, 6);
-            if (frame != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x + 5),
-                                                    static_cast<int32_t>(y + 5), frame, 0, 1, 0x28);
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(x + 5),
+                                             static_cast<int32_t>(y + 5), 0, 0x28);
         } else {
-            void* icon = fn_imgsys_get_loc(0xf, 9);
-            if (icon != nullptr) fn_grpx_draw_part(group, static_cast<int32_t>(x + 5),
-                                                   static_cast<int32_t>(y + 5), icon, 0, 1, 0x28);
+            (void)extension_bag_ui_draw_part(0xf, 9, static_cast<int32_t>(x + 5),
+                                             static_cast<int32_t>(y + 5), 0, 0x28);
         }
     }
 }

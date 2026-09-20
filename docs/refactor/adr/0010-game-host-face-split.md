@@ -367,3 +367,18 @@ marker 与 owner 写路径不在本组改变。`PtrHook`、UI 控件身份、`g_
 
 Host fake 覆盖新增表项的正常值、空参数和未就绪语义；本组不执行真机安装和行为回归，
 因此受影响规则 R-47、R-50、R-55、R-63 的 VM-43/VM-P4-07 证据仍为 `NOT_ACCEPTED`。
+
+## EB G3：UI adapter 迁移增补
+
+G3 仅在 `QolUiAdapter` 尾部追加 EB 所需 UI 原语，`kUiAdapterMinor` 从 3 递增为 4；
+既有成员顺序、偏移和语义保持不变。新增成员包括：
+
+- `control_user_type`、`control_item`、`control_item_slot`：读取 EB 控件身份、物品和槽位；
+- `touch_state`：读取 moving/drop source 与 release 坐标；
+- `fill_rect`、`draw_item_porting`：转发原版高亮和物品绘制；
+- `control_parent`、`find_root`：查询父链和装备/商店/合成器控件根。
+
+EB 的几何、控件树、命中、页签和格子绘制路径经 `extension_bag_geometry` 薄封装调用
+`ctx.sdk->ui`；插件不直接读取 `CO_*`、`TOUCH_STATE_*`、UI root VMA 或图像句柄。原有
+投影、事务、回滚、owner 写路径不在本组改变。Popup enter alias 接线、fake adapter 测试和
+真机 VM-B 证据仍未完成，因此本组状态为 `NOT_ACCEPTED`。

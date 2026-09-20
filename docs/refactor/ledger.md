@@ -336,6 +336,6 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 |---|---|---|
 | G1 日志/事件/配置/调度/存储/能力 | NOT_ACCEPTED（无真机） | 扩展背包日志改经 Host SDK 薄封装；存档参与者与保存触发追加到 `QolStoreApi`；配置事件、scheduler、能力查找沿用既有接口。Host 50/50、Debug 构建通过；行为证据按任务要求不执行真机。 |
 | G2 只读事实 | NOT_ACCEPTED（无真机） | `QolGameHost::read_only` 追加 Character/Item/Save/Inventory 只读面，`kGameHostMinor=8`；EB 已切换 world gate、物品类别/数量/装备判定、佣兵徽章、可用物品、出售单价和当前存档槽查询。Host 50/50、Debug 构建、架构/资源/基线/map 检查通过；投影、事务、回滚和 marker 写路径未改变。受影响规则 R-47/R-50/R-55/R-63，VM-43/VM-P4-07 真机证据未执行，不能宣称 PASS。 |
-| G3 UI | ⬜ 未开始 | 待 UI adapter/Host SDK 面迁移；扩展背包 UI 现状保持原样。 |
+| G3 UI | NOT_ACCEPTED（无真机） | `QolUiAdapter` minor 追加控件身份/item/slot、touch state、rect fill、原版物品绘制、parent/root 查询；EB 的控件定位、树遍历、命中、页签/格子绘制、物品数据与释放坐标读取已切换到 `ctx.sdk->ui` 薄封装。Host 编译与 Debug 构建通过；Popup enter alias、Host fake/独立 include、架构/资源/基线/map 检查及 VM-B 真机证据尚未完成。受影响规则 R-12/R-13/R-18/R-47/R-48/R-49，行为证据按要求不能以构建替代。 |
 | G4 副作用与所有权 | ⬜ 未开始 | 待 owner command/资源所有权可表达项迁移；不可表达项需登记缺口并保持原样。 |
 | G5 收口 | ⬜ 未开始 | 待插件片段、独立编译、边界负例与零遗留 grep。 |

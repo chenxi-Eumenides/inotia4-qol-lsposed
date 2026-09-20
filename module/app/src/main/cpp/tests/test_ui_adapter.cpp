@@ -99,14 +99,21 @@ bool ui_hit_test(void* ctrl, int64_t x, int64_t y, UiRect rect) {
 }
 
 void* ui_original_bag_container() { return nullptr; }
+void* ui_find_root(uint32_t) { return nullptr; }
 bool ui_control_type(void*, int32_t*) { return false; }
 bool ui_control_active(void*, int32_t*) { return false; }
+bool ui_control_user_type(void*, int32_t*) { return false; }
 void* ui_control_data(void*) { return nullptr; }
+void* ui_control_item(void*) { return nullptr; }
+bool ui_control_item_slot(void*, int32_t*) { return false; }
+void* ui_control_parent(void*) { return nullptr; }
 bool ui_execute_proc_matches(void*, UiClickProc) { return false; }
 bool ui_control_absolute_origin(void*, int64_t*, int64_t*) { return false; }
+bool ui_touch_state(void**, void**, int64_t*, int64_t*) { return false; }
 
 void ui_begin_frame() {}
 void ui_fill_rect_alpha(UiRect, uint32_t, uint32_t) { ++g_fill_rect_calls; }
+void ui_fill_rect(UiRect, uint32_t) { ++g_fill_rect_calls; }
 void ui_end_frame() {}
 void ui_draw_panel_decor(UiRect, const int64_t*, size_t, uint32_t) {}
 void ui_draw_vertical_line(int64_t, int64_t, int64_t, uint32_t, int) {}
@@ -117,6 +124,7 @@ void ui_unload_image_unit(int32_t) {}
 bool ui_draw_image_part(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t) { return true; }
 bool ui_draw_control_image_part(void*, int32_t, int32_t, int32_t, int32_t) { return true; }
 bool ui_draw_control_image_part_centered(void*, int32_t, int32_t, int32_t, int32_t) { return true; }
+bool ui_draw_item_porting(void*, int32_t, int32_t, int32_t, int32_t) { return true; }
 void ui_draw_button_background(void*, UiRect, uint32_t) {}
 void ui_draw_button_border(void*, UiRect, uint32_t, int) {}
 void ui_draw_control_alpha_overlay(void*, UiRect, uint32_t, uint32_t) {}
@@ -149,6 +157,14 @@ int main() {
     CHECK(adapter->find_child_in_area != nullptr);
     CHECK(adapter->set_popup_process_info != nullptr);
     CHECK(adapter->draw_custom_button != nullptr);
+    CHECK(adapter->control_user_type != nullptr);
+    CHECK(adapter->control_item != nullptr);
+    CHECK(adapter->control_item_slot != nullptr);
+    CHECK(adapter->touch_state != nullptr);
+    CHECK(adapter->fill_rect != nullptr);
+    CHECK(adapter->draw_item_porting != nullptr);
+    CHECK(adapter->control_parent != nullptr);
+    CHECK(adapter->find_root != nullptr);
 
     qol::contracts::QolUiComponents components{};
     components.size = sizeof(components);

@@ -89,37 +89,26 @@ P5ControlObservation p5_control_observation_locked(void* control) {
     P5ControlObservation observation;
     if (control == nullptr) return observation;
 
-    if (fn_control_object_get_user_type != nullptr) {
-        observation.user_type = static_cast<int>(fn_control_object_get_user_type(control));
-    }
-    if (fn_ui_equip_get_item_slot_index != nullptr) {
-        observation.original_slot = fn_ui_equip_get_item_slot_index(control);
-    }
+    observation.user_type = extension_bag_ui_user_type(control);
+    observation.original_slot = extension_bag_ui_item_slot(control);
     observation.tab_index = extension_tab_index(control);
 
-    if (fn_control_object_get_data != nullptr) {
-        void* data = fn_control_object_get_data(control);
-        if (data == nullptr) {
-            observation.data_domain = P5DataDomain::kNoData;
+    void* item = extension_bag_ui_item(control);
+    if (item == nullptr) {
+        observation.data_domain = P5DataDomain::kEmpty;
+    } else {
+        int module_bag = -1;
+        int module_slot = -1;
+        if (module_slot_of_item_locked(item, &module_bag, &module_slot)) {
+            observation.data_domain = P5DataDomain::kProjectedModuleItem;
+        } else if (observation.tab_index >= 0 &&
+                   g_tab_bag_items[observation.tab_index] == item) {
+            observation.data_domain = P5DataDomain::kModuleTabItem;
+        } else if (observation.original_slot >= 0 &&
+                   observation.original_slot < virtual_bag::kSlotCount) {
+            observation.data_domain = P5DataDomain::kOriginalItem;
         } else {
-            void* item = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ITEM);
-            if (item == nullptr) {
-                observation.data_domain = P5DataDomain::kEmpty;
-            } else {
-                int module_bag = -1;
-                int module_slot = -1;
-                if (module_slot_of_item_locked(item, &module_bag, &module_slot)) {
-                    observation.data_domain = P5DataDomain::kProjectedModuleItem;
-                } else if (observation.tab_index >= 0 &&
-                           g_tab_bag_items[observation.tab_index] == item) {
-                    observation.data_domain = P5DataDomain::kModuleTabItem;
-                } else if (observation.original_slot >= 0 &&
-                           observation.original_slot < virtual_bag::kSlotCount) {
-                    observation.data_domain = P5DataDomain::kOriginalItem;
-                } else {
-                    observation.data_domain = P5DataDomain::kUnknownItem;
-                }
-            }
+            observation.data_domain = P5DataDomain::kUnknownItem;
         }
     }
 
@@ -131,22 +120,20 @@ P5ControlObservation p5_control_observation_locked(void* control) {
             observation.parent_reaches_projection_root = true;
             break;
         }
-        void* parent = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(current) + CO_PARENT);
-        if (parent == current) break;
-        current = parent;
+        current = extension_bag_ui_parent(current);
         ++observation.parent_depth;
     }
 
     if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
-        g_projected_item_root == nullptr || fn_ctrl_get_count == nullptr ||
-        fn_control_object_get_child == nullptr) {
+        g_projected_item_root == nullptr) {
         return observation;
     }
-    const int child_count = static_cast<int>(fn_ctrl_get_count(g_projected_item_root));
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(g_projected_item_root, &child_count)) return observation;
     const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
     const int limit = capacity < child_count ? capacity : child_count;
     for (int slot = 0; slot < limit; ++slot) {
-        if (fn_control_object_get_child(g_projected_item_root, slot) == control) {
+        if (extension_bag_ui_child_at(g_projected_item_root, slot) == control) {
             observation.projection_bag = g_module_view_index;
             observation.projection_slot = slot;
             break;
@@ -157,12 +144,10 @@ P5ControlObservation p5_control_observation_locked(void* control) {
 
 P5TouchObservation p5_touch_observation_locked(void* target_control, void* source_control) {
     P5TouchObservation observation;
-    if (g_base == 0) return observation;
-
-    const uint8_t* state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-    const void* moving = *reinterpret_cast<const void* const*>(state + TOUCH_STATE_MOVING_CTRL);
-    const void* drop_source =
-        *reinterpret_cast<const void* const*>(state + TOUCH_STATE_DROP_SRC_CTRL);
+    void* moving = nullptr;
+    void* drop_source = nullptr;
+    if (!extension_bag_ui_touch_state(&moving, &drop_source, &observation.release_x,
+                                      &observation.release_y)) return observation;
     observation.available = true;
     observation.moving_present = moving != nullptr;
     observation.drop_source_present = drop_source != nullptr;
@@ -173,8 +158,6 @@ P5TouchObservation p5_touch_observation_locked(void* target_control, void* sourc
     observation.moving_matches_source = source_control != nullptr && moving == source_control;
     observation.drop_source_matches_source =
         source_control != nullptr && drop_source == source_control;
-    observation.release_x = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_X);
-    observation.release_y = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_Y);
     return observation;
 }
 

@@ -123,6 +123,28 @@ void* ui_original_bag_container() {
     return *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
 }
 
+void* ui_find_root(uint32_t kind) {
+    if (g_base == 0) return nullptr;
+    switch (kind) {
+        case 0:
+            return *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_BAG_CONTAINER_VMA);
+        case 1:
+            return *reinterpret_cast<void**>(g_base + G_UIEQUIP_PANEL_CTRL_VMA);
+        case 2:
+            return *reinterpret_cast<void**>(g_base + G_UISTORE_BAG_CTRL_VMA);
+        case 3:
+            return *reinterpret_cast<void**>(g_base + G_UISTORE_ITEM_CTRL_VMA);
+        case 4:
+            if (g_uimix == nullptr) return nullptr;
+            return *reinterpret_cast<void**>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_BAG_GROUP);
+        case 5:
+            if (g_uimix == nullptr) return nullptr;
+            return *reinterpret_cast<void**>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_ITEM_GROUP);
+        default:
+            return nullptr;
+    }
+}
+
 bool ui_control_type(void* ctrl, int32_t* out_type) {
     if (ctrl == nullptr || out_type == nullptr) return false;
     *out_type = static_cast<int32_t>(
@@ -137,9 +159,38 @@ bool ui_control_active(void* ctrl, int32_t* out_active) {
     return true;
 }
 
+bool ui_control_user_type(void* ctrl, int32_t* out_type) {
+    if (ctrl == nullptr || out_type == nullptr || fn_control_object_get_user_type == nullptr) {
+        return false;
+    }
+    *out_type = static_cast<int32_t>(fn_control_object_get_user_type(ctrl));
+    return true;
+}
+
 void* ui_control_data(void* ctrl) {
     if (ctrl == nullptr) return nullptr;
     return *reinterpret_cast<void**>(static_cast<uint8_t*>(ctrl) + CO_DATA);
+}
+
+void* ui_control_item(void* ctrl) {
+    if (ctrl == nullptr) return nullptr;
+    if (fn_control_item_get_item != nullptr) return fn_control_item_get_item(ctrl);
+    void* data = ui_control_data(ctrl);
+    if (data == nullptr) return nullptr;
+    return *reinterpret_cast<void**>(static_cast<uint8_t*>(data) + ITEM_CTRL_ITEM);
+}
+
+bool ui_control_item_slot(void* ctrl, int32_t* out_slot) {
+    if (ctrl == nullptr || out_slot == nullptr || fn_ui_equip_get_item_slot_index == nullptr) {
+        return false;
+    }
+    *out_slot = fn_ui_equip_get_item_slot_index(ctrl);
+    return true;
+}
+
+void* ui_control_parent(void* ctrl) {
+    if (ctrl == nullptr) return nullptr;
+    return *reinterpret_cast<void**>(static_cast<uint8_t*>(ctrl) + CO_PARENT);
 }
 
 bool ui_execute_proc_matches(void* ctrl, UiClickProc expected) {
@@ -162,5 +213,18 @@ bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y) {
     }
     *out_x = absolute_x;
     *out_y = absolute_y;
+    return true;
+}
+
+bool ui_touch_state(void** out_moving, void** out_drop_source, int64_t* out_x, int64_t* out_y) {
+    if (out_moving == nullptr || out_drop_source == nullptr || out_x == nullptr || out_y == nullptr ||
+        g_base == 0) {
+        return false;
+    }
+    const uint8_t* state = reinterpret_cast<const uint8_t*>(g_base + G_TOUCH_STATE_VMA);
+    *out_moving = *reinterpret_cast<void* const*>(state + TOUCH_STATE_MOVING_CTRL);
+    *out_drop_source = *reinterpret_cast<void* const*>(state + TOUCH_STATE_DROP_SRC_CTRL);
+    *out_x = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_X);
+    *out_y = *reinterpret_cast<const int64_t*>(state + TOUCH_STATE_RELEASE_Y);
     return true;
 }
