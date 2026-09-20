@@ -1,13 +1,13 @@
 #pragma once
 
 #include "contracts/game_host.h"
+#include "core/native/extension_bag_port.h"
 
 #include <jni.h>
 
 #include <string>
 #include <cstdint>
 
-#include "core/native/extension_bag_port.h"
 
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class);
 

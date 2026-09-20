@@ -205,6 +205,20 @@ save backup 不再依赖 `game_feature.h`：伴生文件门禁通过 target 面�
 in-world 的 `g_gamestate == 0` 门禁 → `read_only.world.game_state_gate`。出售事务
 （金额、扣减、扩展袋 owner）和 UI 控件身份面仍未覆盖，留给后续 lane。
 
+## G1：扩展背包宿主设施面增补
+
+G1 将 `kHostSdkMinor` 从 3 增至 4，并在既有 `QolStoreApi` 尾部追加存档参与者注册和存档触发成员，不改变已有成员顺序、
+偏移或签名：
+
+- `register_participant(const QolStoreParticipant*)`：把插件的 prepare/commit/abort
+  回调转发到宿主存档参与者登记表；参数和宿主未就绪均返回 `QolResult` 错误。
+- `save_game()`：把扩展背包保存入口转发到宿主模块存档编排；宿主未提供该入口时返回
+  `kQolErrNotReady`。
+
+扩展背包日志经自身薄封装调用 `QolHostSdk::log.write`，配置变更经 Host SDK 事件订阅，
+能力查询仍按每次调用取得接口，未缓存跨撤销事务的裸指针。调度、资源声明和能力发布
+沿用既有宿主管理路径；本组不改变 29 条资源声明、投影/事务/回滚或锁纪律。
+
 ## 模块侧插件原型（simple_mode）
 
 ### CMake 边界做法

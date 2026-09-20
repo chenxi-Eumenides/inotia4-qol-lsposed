@@ -885,7 +885,7 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
 
 // 原版 ButtonEquipExe 的背包身份判定（反汇编 b7c74）：ITEMCLASSBASE 记录
 // +2 == 0x1f 即背包类。category 只是 ITEMDATABASE 索引，不能承担装备语义；
-// +2 是记录字段偏移（非 VMA），表基址/步长仍来自 game_symbols.h 的
+// +2 是记录字段偏移（非 VMA），表基址/步长由宿主读取面提供。
 // G_ITEMCLASS_DATA/SIZE GOT 槽。
 bool category_is_extension_backpack(int category) {
     if (g_base == 0 || category <= 0) return false;

@@ -344,9 +344,9 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             120,
             reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
         },
-        // ---- D2a-3b-2：C1–C8 存档 callsite（行为编排 owner=core/native/module_save）----
+        // ---- D2a-3b-2：C1–C8 存档 callsite ----
         // 站点已在 a3a 登记（game/access/patches 的 P_EXT_SAVE_*）；handler 为模块存档编排
-        // module_save_game（core/native/module_save_port.h），机制 owner=extension_bag。
+        // 机制 owner=extension_bag；行为经 Host SDK 存档面执行。
         {
             "patch:P_EXT_SAVE_REVIVE", "P_EXT_SAVE_REVIVE",
             ::qol::contracts::ResourceMechanism::kCallPatch,
@@ -354,7 +354,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_QUEST_CLEAR_1", "P_EXT_SAVE_QUEST_CLEAR_1",
@@ -363,7 +363,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_QUEST_CLEAR_2", "P_EXT_SAVE_QUEST_CLEAR_2",
@@ -372,7 +372,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_QUEST_REVIEW", "P_EXT_SAVE_QUEST_REVIEW",
@@ -381,7 +381,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_PROCESS", "P_EXT_SAVE_PROCESS",
@@ -390,7 +390,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_NETWORK_ADD", "P_EXT_SAVE_NETWORK_ADD",
@@ -399,7 +399,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_NETWORK_PROCESS_1", "P_EXT_SAVE_NETWORK_PROCESS_1",
@@ -408,7 +408,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         {
             "patch:P_EXT_SAVE_NETWORK_PROCESS_2", "P_EXT_SAVE_NETWORK_PROCESS_2",
@@ -417,7 +417,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&module_save_game),
+            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
         },
         // ---- C9–C14 装配/背包绘制门禁（功能型 required；站点已在 a3a 登记）----
         {

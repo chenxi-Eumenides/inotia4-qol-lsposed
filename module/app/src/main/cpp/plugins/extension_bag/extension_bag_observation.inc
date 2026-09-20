@@ -1,7 +1,8 @@
 constexpr uint64_t kP5SampleIntervalMs = 100;
 
 bool p5_observation_enabled() {
-    return qol_log_debug_enabled();
+    const auto* sdk = qol::features::extension_bag::extension_bag_host_sdk();
+    return sdk != nullptr && sdk->log.debug_enabled != nullptr && sdk->log.debug_enabled() != 0;
 }
 
 bool p5_panel_observation_enabled() {

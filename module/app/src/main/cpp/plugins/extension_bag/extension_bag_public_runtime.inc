@@ -456,7 +456,7 @@ bool virtual_bag_prepare_main_menu() {
 }
 
 // 模块级保存 prepare 中扩展背包自己的校验部分。模块级协调在
-// core/native/module_save.cpp 的 participants prepare 阶段，各功能只负责自己数据的
+// Host SDK 存档参与者的 prepare 阶段，各功能只负责自己数据的
 // 校验与收敛；本函数即扩展背包在 prepare 中的唯一校验/清理落点。调用方必须已持有
 // g_virtual_bag_mtx。
 // 1) 归一化 types → capacities（派生容量的唯一来源）；
@@ -569,13 +569,14 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_virtual_bag_bridge_class != nullptr) env->DeleteGlobalRef(g_virtual_bag_bridge_class);
     g_virtual_bag_bridge_class = static_cast<jclass>(env->NewGlobalRef(bridge_class));
-    const ModuleSaveParticipant participant{
+    const qol::contracts::QolStoreParticipant participant{
         "extension-bag",
         virtual_bag_module_save_prepare,
         virtual_bag_module_save_commit,
         virtual_bag_module_save_abort,
     };
-    if (!module_save_register_participant(participant)) {
+    if (g_sdk == nullptr || g_sdk->store.register_participant == nullptr ||
+        !qol::contracts::succeeded(g_sdk->store.register_participant(&participant))) {
         VIRTBAG_LOG("module save participant registration failed");
     }
 }

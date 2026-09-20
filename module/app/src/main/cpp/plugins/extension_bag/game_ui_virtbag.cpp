@@ -22,6 +22,7 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/store_sell_rules.h"
 
 #include <atomic>
 #include <chrono>
@@ -347,6 +348,9 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
     g_game = game;
     return true;
 }
+
+const qol::contracts::QolGameHost* extension_bag_game_host() { return g_game; }
+const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return g_sdk; }
 
 }  // namespace qol::features::extension_bag
 
@@ -1681,6 +1685,11 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 }
 
 #include "plugins/extension_bag/extension_bag_api_impl.inc"
+
+bool extension_bag_save_game_handler() {
+    return g_sdk != nullptr && g_sdk->store.save_game != nullptr &&
+           qol::contracts::succeeded(g_sdk->store.save_game());
+}
 
 // D2c-2b-2：move_merge / source protection wrapper（X1 handler；须在 claims 之前定义）。
 #include "plugins/extension_bag/move_merge.inc"

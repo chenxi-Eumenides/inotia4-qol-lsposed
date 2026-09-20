@@ -304,8 +304,10 @@ int main() {
     assert(sdk.store.read_container != nullptr);
     assert(sdk.store.import_container != nullptr);
     assert(sdk.store.delete_slot != nullptr);
+    assert(sdk.store.register_participant != nullptr);
+    assert(sdk.store.save_game != nullptr);
 
-    static_assert(sizeof(qol::contracts::QolStoreApi) == sizeof(void*) * 7,
+    static_assert(sizeof(qol::contracts::QolStoreApi) == sizeof(void*) * 9,
                   "store ABI member count changed");
 
     uint32_t container_size = 0;
@@ -315,6 +317,8 @@ int main() {
     assert(sdk.store.read_container(0, nullptr, 0, nullptr).code == kQolErrInvalidArgument);
     assert(sdk.store.import_container(0, nullptr, 1).code == kQolErrInvalidArgument);
     assert(sdk.store.delete_slot(-1).code == kQolErrInvalidArgument);
+    assert(sdk.store.register_participant(nullptr).code == kQolErrInvalidArgument);
+    assert(sdk.store.save_game().code == kQolErrNotReady);
 
     qol::infra::store::init(".");
     assert(sdk.store.delete_slot(0).ok == kQolOk);

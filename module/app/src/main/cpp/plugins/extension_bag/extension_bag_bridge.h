@@ -31,6 +31,8 @@ bool extension_bag_enabled();
 bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
                              const qol::contracts::QolGameHost* game);
 void extension_bag_bind_port_sdk(const qol::contracts::QolHostSdk* sdk);
+const qol::contracts::QolGameHost* extension_bag_game_host();
+const qol::contracts::QolHostSdk* extension_bag_host_sdk();
 
 // 能力 v1.0 接口表（ExtensionBagApi，37 函数）：成员逐条转发既有 extension_bag_* /
 // virtual_bag_* port 实现（实现收口 plugins/extension_bag/extension_bag_port.cpp）。

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include "core/native/qol_log.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 
 namespace {

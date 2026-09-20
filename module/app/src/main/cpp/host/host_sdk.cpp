@@ -10,6 +10,7 @@
 
 #include "core/native/qol_log.h"
 #include "core/native/game_ops_common.h"
+#include "core/native/module_save_port.h"
 #include "hooks/dispatch.h"
 #include "hooks/popup_state.h"
 #include "infra/capabilities.h"
@@ -20,6 +21,9 @@
 #include "infra/scheduler.h"
 #include "infra/store.h"
 #include "infra/text_scope.h"
+
+extern bool module_save_register_participant(const ModuleSaveParticipant&) __attribute__((weak));
+extern bool module_save_game() __attribute__((weak));
 
 namespace qol::host {
 namespace {
@@ -394,6 +398,22 @@ QolResult sdk_store_delete_slot(int32_t slot) {
     return store_result(infra::store::delete_slot(slot));
 }
 
+QolResult sdk_store_register_participant(const contracts::QolStoreParticipant* participant) {
+    if (participant == nullptr || participant->name == nullptr || participant->prepare == nullptr ||
+        participant->commit == nullptr || participant->abort == nullptr) {
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (module_save_register_participant == nullptr) return result_error(kQolErrNotReady, kNotReady);
+    const ModuleSaveParticipant legacy{participant->name, participant->prepare, participant->commit,
+                                       participant->abort};
+    return result_from_bool(module_save_register_participant(legacy), kQolErrConflict, kConflict);
+}
+
+QolResult sdk_store_save_game() {
+    if (module_save_game == nullptr) return result_error(kQolErrNotReady, kNotReady);
+    return result_from_bool(module_save_game(), kQolErrBlocked, "save failed");
+}
+
 QolResult sdk_panels_register_item(const contracts::PanelItemSpec* item) {
     if (item == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
     return result_from_bool(infra::panels_register_item(*item), kQolErrConflict, kConflict);
@@ -578,7 +598,8 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.capabilities = {&sdk_capability_require, &sdk_capability_lease_enter,
                         &sdk_capability_lease_leave, &sdk_capability_set_available};
     sdk.store = {&sdk_store_read, &sdk_store_write, &sdk_store_remove, &sdk_store_replace,
-                 &sdk_store_read_container, &sdk_store_import_container, &sdk_store_delete_slot};
+                 &sdk_store_read_container, &sdk_store_import_container, &sdk_store_delete_slot,
+                 &sdk_store_register_participant, &sdk_store_save_game};
     sdk.panels = {&sdk_panels_register_item, &sdk_panels_register_provider,
                   &sdk_panels_unregister_owner, &sdk_panels_find, &sdk_panels_open,
                   &sdk_panels_close, &sdk_panels_active};

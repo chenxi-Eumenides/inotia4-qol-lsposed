@@ -329,3 +329,13 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | game/access | ✅ 已落地 | `item_class` 收口 `item+I_COUNT` 宝石位域，`world` 收口 `g_gamestate` 读面，`inventory` 转发原库存引用/聚合遍历语义；插件不获得 symbols/base/裸偏移。 |
 | host 测试 | ✅ 已补 | `test_host_adapters.cpp` 覆盖新增转发表、正常值、空参数、空槽、未就绪；库存 fake 使用 contracts 引用，不依赖真实游戏内存。 |
 | autosell 迁移 | ⬜ 后续 lane | 本批不修改 `plugins/autosell` 消费者；出售事务与 UI 控件身份面仍未覆盖。行为证据受影响卡为 VM-44、VM-AS4/5/8/12/13，按要求不装真机，不能宣称 PASS。 |
+
+### EB G1–G5 分组收口
+
+| 组 | 状态 | 当前事实 / 证据 |
+|---|---|---|
+| G1 日志/事件/配置/调度/存储/能力 | NOT_ACCEPTED（无真机） | 扩展背包日志改经 Host SDK 薄封装；存档参与者与保存触发追加到 `QolStoreApi`；配置事件、scheduler、能力查找沿用既有接口。Host 50/50、Debug 构建通过；行为证据按任务要求不执行真机。 |
+| G2 只读事实 | ⬜ 未开始 | 待 Game Host/provider 只读面迁移；保持既有投影、事务、回滚和 marker 语义。 |
+| G3 UI | ⬜ 未开始 | 待 UI adapter/Host SDK 面迁移；扩展背包 UI 现状保持原样。 |
+| G4 副作用与所有权 | ⬜ 未开始 | 待 owner command/资源所有权可表达项迁移；不可表达项需登记缺口并保持原样。 |
+| G5 收口 | ⬜ 未开始 | 待插件片段、独立编译、边界负例与零遗留 grep。 |

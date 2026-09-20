@@ -1,6 +1,5 @@
 // 商店宿主只管理 UIStore 自己的控件、投影和详情事务，不复用 UIEquip 的视图状态。
 
-#include "core/native/store_sell_rules.h"
 
 using StoreSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using StoreSceneNoArgFn = void (*)();

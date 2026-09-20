@@ -49,7 +49,7 @@ void qol::features::extension_bag::extension_bag_bind_port_sdk(
     virtual_bag::set_count_policy(sdk == nullptr ? nullptr : &kCountPolicy);
 }
 
-// D2b 过渡访问器（声明见 core/native/extension_bag_port.h）：每次调用 require，不缓存
+// 过渡访问器：每次调用 require，不缓存
 // capability 接口；能力缺失/撤销中返回 nullptr。
 const qol::contracts::ExtensionBagApi* extension_bag_capability() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;

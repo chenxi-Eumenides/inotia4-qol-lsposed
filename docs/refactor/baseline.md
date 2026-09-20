@@ -43,7 +43,7 @@
 | `plugins/core.ui` | 17 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
-| `plugins/extension_bag` | 40 |
+| `plugins/extension_bag` | 41 |
 | `plugins/inventory_hooks` | 11 |
 | `plugins/native_choice` | 4 |
 | `plugins/push_all` | 6 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **384** |
+| **合计** | **385** |
 
 ### 1.2 迁移期映射摘要
 
@@ -139,7 +139,7 @@
 | --- | --- | --- |
 | `host` | `infra` | 42 |
 | `host` | `game` | 32 |
-| `host` | `contracts` | 19 |
+| `host` | `contracts` | 20 |
 | `plugins/extension_bag` | `contracts` | 18 |
 | `plugins/autosell` | `contracts` | 17 |
 | `plugins/inventory_hooks` | `contracts` | 15 |
@@ -202,7 +202,7 @@
 ### resource_unknown_symbol（2 条）
 
 - `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:362||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:154||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:155||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 
@@ -252,7 +252,7 @@
 | `core.ui` | `plugins/core.ui` | 17 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
-| `extension_bag` | `plugins/extension_bag` | 40 |
+| `extension_bag` | `plugins/extension_bag` | 41 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
