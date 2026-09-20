@@ -75,6 +75,7 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
     g_inventory_popup_entry = entry;
     g_state_entry = entry.slot;
     g_orig_enter = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_ENTER);
+    g_inventory_enter = reinterpret_cast<uintptr_t>(g_orig_enter);
     g_orig_f3 = extension_bag_backup_value<PopupNoArgFn>(entry.backup, POPUP_ENTRY_F3);
     g_orig_event = extension_bag_backup_value<PopupEventFn>(entry.backup, POPUP_ENTRY_EVENT);
     return 0;
@@ -88,6 +89,7 @@ void extension_bag_inventory_popup_release(const char* id) {
     }
     g_state_entry = nullptr;
     g_orig_enter = nullptr;
+    g_inventory_enter = 0;
     g_orig_f3 = nullptr;
     g_orig_event = nullptr;
 }

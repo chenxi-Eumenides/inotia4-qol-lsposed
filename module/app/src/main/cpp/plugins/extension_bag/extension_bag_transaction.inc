@@ -12,14 +12,14 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
         extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
-        fn_get_cumulate_count == nullptr ||
+        g_game == nullptr || g_game->read_only.item.cumulate_count == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d capacity=%d symbols=%d",
                     dst_bag,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
                     extension_bag_write_api() != nullptr &&
                     extension_bag_write_api()->inventory.serialize_item != nullptr &&
-                    fn_get_cumulate_count != nullptr &&
+                    g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
                     extension_bag_write_api()->inventory.remove_item_direct != nullptr ? 1 : 0);
         return false;
     }
@@ -39,7 +39,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     // descriptor.count 恒为 canonical 128a+b（R-38/R-48）：orig→ext 收编保留物品
     // 全部位段，堆叠上限关闭态（R-47 决策 b）下 getter 只返回 b 视图，这里必须
     // 用 canonical 读取，否则 sidecar 读档会把 a 段对齐抹掉。
-    const int src_count = canonical_item_count(src_item);
+    const int src_count = static_cast<int>(virtual_bag_canonical_count(src_item, 1));
     const int src_category = original_item_category_locked(src_item);
     const int capacity = g_virtual_bag_state.capacities[dst_bag];
 
@@ -121,7 +121,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     // 当前视图只同步发生变化的扩展槽；非扩展视图仍走原版刷新。
     if (g_module_view_installed && g_module_view_index == dst_bag) {
         sync_projected_slot_locked(dst_bag, dst_slot);
-    } else if (fn_ui_equip_refresh_item_area != nullptr) {
+    } else if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
@@ -133,15 +133,17 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
 bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
                                        void* moving_control) {
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
-        fn_ui_equip_get_item_slot_index == nullptr) {
+        g_game == nullptr || g_game->read_only.inventory.cursor_index == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
                     dst_bag, moving_control,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
-                    fn_ui_equip_get_item_slot_index != nullptr ? 1 : 0);
+                    g_game != nullptr && g_game->read_only.inventory.cursor_index != nullptr ? 1 : 0);
         return false;
     }
     const int src_bag = original_bag_locked();
-    const int src_slot = fn_ui_equip_get_item_slot_index(moving_control);
+    int src_slot = -1;
+    if (!qol::contracts::succeeded(
+            g_game->read_only.inventory.cursor_index(moving_control, &src_slot))) return false;
     const bool moved = move_original_to_extension_slot_locked(lock, src_bag, src_slot, dst_bag);
     if (moved) reset_drag_state_locked(moving_control);
     return moved;
@@ -167,32 +169,36 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     const bool host_restore = virtual_bag::ext2orig_requires_host_capacity_restore(
         g_module_view_installed, target_bag, g_module_window_original_bag);
     constexpr uint32_t kTxnCapacityMask = (1u << 25) - 1u;
-    uint32_t* host_word = host_restore ? g_original_bag_size_word : nullptr;
+    const int host_word_bag = host_restore ? g_original_bag_size_bag : -1;
     uint32_t host_projected_word = 0;
-    if (host_word != nullptr) {
-        host_projected_word = *host_word;
-        *host_word = (*host_word & ~kTxnCapacityMask) |
-                     (g_original_bag_size & kTxnCapacityMask);
+    if (host_word_bag >= 0 && bag_size_word_locked(host_word_bag, &host_projected_word)) {
+        (void)set_bag_size_word_locked(host_word_bag,
+                     (host_projected_word & ~kTxnCapacityMask) |
+                     (g_original_bag_size & kTxnCapacityMask));
         QOL_LOG_INFO(QolDomain::kExtensionBag, "ext2orig host capacity restored target=%d window=%d projected=0x%x real=0x%x",
                     target_bag, g_module_window_original_bag, host_projected_word,
                     g_original_bag_size);
     }
     struct HostCapacityGuard {
-        uint32_t* word;
+        int bag;
         uint32_t projected;
         ~HostCapacityGuard() {
-            if (word != nullptr) *word = projected;
+            if (bag >= 0) (void)set_bag_size_word_locked(bag, projected);
         }
-    } host_capacity_guard{host_word, host_projected_word};
+    } host_capacity_guard{host_word_bag, host_projected_word};
 
-    if (fn_get_bag_size != nullptr && fn_get_bag_size(target_bag) <= 0) {
+    int target_size = 0;
+    if (g_game != nullptr && g_game->read_only.inventory.bag_size != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.inventory.bag_size(target_bag, &target_size)) &&
+        target_size <= 0) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original target bag unavailable=%d", target_bag);
         return false;
     }
     // 满包预检：INVEN_SaveItemOnEmpty 是纯首空槽扫描（0x104be0，满则返回 0 无副作用），
     // 事务入口先行拒绝，避免为注定失败的插入创建 pending/隔离记录或切换当前袋。
-    if (fn_get_bag_size != nullptr) {
-        const int bag_size = fn_get_bag_size(target_bag);
+    if (g_game != nullptr && g_game->read_only.inventory.bag_size != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.inventory.bag_size(target_bag, &target_size))) {
+        const int bag_size = target_size;
         bool has_empty = false;
         for (int slot = 0; slot < bag_size && slot < virtual_bag::kSlotCount; ++slot) {
             void* existing = nullptr;
@@ -503,14 +509,14 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         g_module_object_use[dst_bag][dst_slot] = previous_destination_use;
         g_ownership_ledger = previous_ledger;
         g_item_state_dirty = previous_dirty;
-        if (g_module_view_installed && fn_control_item_set_item != nullptr) {
+        if (g_module_view_installed) {
             if (g_module_view_index == src_bag) {
                 void* control = valid_child_locked(g_projected_item_root, src_slot);
-                if (control != nullptr) fn_control_item_set_item(control, previous_source_object);
+                if (control != nullptr) (void)extension_bag_ui_set_control_item(control, previous_source_object);
             }
             if (g_module_view_index == dst_bag) {
                 void* control = valid_child_locked(g_projected_item_root, dst_slot);
-                if (control != nullptr) fn_control_item_set_item(control, previous_destination_object);
+                if (control != nullptr) (void)extension_bag_ui_set_control_item(control, previous_destination_object);
             }
         }
     };
@@ -574,14 +580,14 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         restore(&txn, "swap view ownership update failed");
         return false;
     }
-    if (g_module_view_installed && fn_control_item_set_item != nullptr) {
+    if (g_module_view_installed) {
         if (g_module_view_index == src_bag) {
             void* control = valid_child_locked(g_projected_item_root, src_slot);
-            if (control != nullptr) fn_control_item_set_item(control, destination_object);
+            if (control != nullptr) (void)extension_bag_ui_set_control_item(control, destination_object);
         }
         if (g_module_view_index == dst_bag) {
             void* control = valid_child_locked(g_projected_item_root, dst_slot);
-            if (control != nullptr) fn_control_item_set_item(control, source_object);
+            if (control != nullptr) (void)extension_bag_ui_set_control_item(control, source_object);
         }
     }
     g_virtual_bag_state.pending = {};
@@ -948,9 +954,12 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     // IsApplyStuff 判真。目标类别用 item_is_equip 判定（数据不可用按非装备
     // fail-closed），普通物品目标不得进入 apply；不设提前 return，统一落到
     // 下方事务分支（交换/移动）并保证 session_finish_transaction 必然执行。
-    const bool apply_stuff_allowed = fn_ui_equip_is_apply_stuff != nullptr &&
-                                     material != nullptr && target_item != nullptr &&
-                                     fn_ui_equip_is_apply_stuff(target_item, material) != 0;
+    int32_t apply_stuff_value = 0;
+    const bool apply_stuff_allowed =
+        g_game != nullptr && g_game->read_only.character.can_apply_stuff != nullptr &&
+        material != nullptr && target_item != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.character.can_apply_stuff(
+            target_item, material, &apply_stuff_value)) && apply_stuff_value != 0;
     const bool apply_candidate = extension_bag_is_apply_candidate(
         source_bag == target_bag && target_slot >= 0, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);

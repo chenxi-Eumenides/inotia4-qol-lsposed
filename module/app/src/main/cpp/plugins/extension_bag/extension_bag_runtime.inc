@@ -96,13 +96,9 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
 // 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
 void delete_extension_tab_buttons_locked() {
-    if (fn_touch_handle_delete_control != nullptr) {
-        for (void*& button : g_extension_tab_buttons) {
-            if (button != nullptr) fn_touch_handle_delete_control(button);
-            button = nullptr;
-        }
-    } else {
-        g_extension_tab_buttons.fill(nullptr);
+    for (void*& button : g_extension_tab_buttons) {
+        if (button != nullptr) (void)extension_bag_ui_delete_control(button);
+        button = nullptr;
     }
 }
 
@@ -110,15 +106,6 @@ void install_extension_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时不得挂载页签（3 个宿主之一）。启用/禁用均以
     // g_virtual_bag_enabled 为准；调用方不再各自判断。
     if (!g_virtual_bag_enabled.load()) return;
-    if (g_base == 0 || fn_control_object_get_child == nullptr ||
-        fn_control_item_set_item == nullptr || fn_mem_malloc == nullptr ||
-        fn_control_object_set_control_proc == nullptr ||
-        fn_control_object_set_user_type == nullptr ||
-        fn_touch_handle_unuse_control_event_move == nullptr ||
-        fn_touch_handle_delete_control == nullptr ||
-        fn_ctrl_get_count == nullptr) {
-        return;
-    }
     void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (bag_container == nullptr) return;
     // 容器就位守卫：面板打开初期 0x50 槽位指向占位容器（无原版袋标签子控件，
@@ -149,31 +136,31 @@ void install_extension_tab_buttons_locked() {
         // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3, proc) + SetControlProc + SetUserType(2)。
         // 第 5 参 = proc，经 CreateControlInfo 写入 +0x90（CO_PROC，TouchHandle 统一事件分发）。
         // 传 nullptr 会让 +0x90 为空 → TouchHandle 命中后无法分发到 +0x98 control proc（点击失效）。
-        const uintptr_t add_fn =
-            g_base + fn_resolve("F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA",
-                                F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA);
-        typedef void* (*AddFn)(void*, void*, void*, uint32_t, void*);
-        void* ctrl = reinterpret_cast<AddFn>(add_fn)(
-            mount_parent, nullptr, nullptr, 3,
-            reinterpret_cast<void*>(g_base + F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA));
+        void* ctrl = nullptr;
+        if (!extension_bag_ui_create_control(mount_parent, &ctrl) ||
+            !extension_bag_ui_set_control_proc(ctrl, &extension_tab_item_proc) ||
+            !extension_bag_ui_set_control_user_type(ctrl, 2) ||
+            !extension_bag_ui_unuse_control_event_move(ctrl)) {
+            (void)extension_bag_ui_delete_control(ctrl);
+            ctrl = nullptr;
+        }
         if (ctrl == nullptr) {
             VIRTBAG_LOG("extension tab create failed index=%d", index);
             continue;
         }
-        fn_control_object_set_control_proc(ctrl,
-            reinterpret_cast<void*>(&extension_tab_item_proc));
-        fn_control_object_set_user_type(ctrl, 2);
-        fn_touch_handle_unuse_control_event_move(ctrl);
         // rect：与原版袋标签同尺寸 57x57（loc6/loc9 底框 47x47 居中填充成背景框）。
         // 相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
         const int64_t row_y = tab_rel_y + index * 70;
         if (!extension_bag_ui_set_rect(ctrl, {tab_rel_x, row_y, 57, 57})) continue;
         // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
-        void* data = fn_mem_malloc(0x10);
-        if (data == nullptr) continue;
+        void* data = nullptr;
+        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) continue;
         std::memset(data, 0, 0x10);
         *reinterpret_cast<void**>(data) = g_tab_bag_items[index];
-        fn_ctrl_set_data(ctrl, data);
+        if (!extension_bag_ui_set_control_data(ctrl, data)) {
+            (void)extension_bag_ui_delete_control(ctrl);
+            continue;
+        }
         g_extension_tab_buttons[index] = ctrl;
     }
     g_extension_tab_root = mount_parent;
@@ -194,18 +181,19 @@ void disable_extension_tab_buttons_locked() {
 }
 
 int raw_direct_bag_locked() {
-    if (g_base == 0) return -1;
-    return *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
+    if (g_game == nullptr || g_game->extension_bag_write.ui.current_bag == nullptr) return -1;
+    int32_t bag = -1;
+    return qol::contracts::succeeded(g_game->extension_bag_write.ui.current_bag(&bag)) ? bag : -1;
 }
 
 int raw_got_bag_locked() {
-    if (g_base == 0) return -1;
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    return current_bag != nullptr && *current_bag != nullptr ? **current_bag : -1;
+    return raw_direct_bag_locked();
 }
 
 int raw_desc_type_locked() {
-    return g_base == 0 ? -1 : *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA);
+    if (g_game == nullptr || g_game->extension_bag_write.ui.desc_type == nullptr) return -1;
+    int32_t type = -1;
+    return qol::contracts::succeeded(g_game->extension_bag_write.ui.desc_type(&type)) ? type : -1;
 }
 
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, uint64_t param2,
@@ -239,7 +227,8 @@ void clear_original_item_selection_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
 int original_bag_locked();
 void set_original_bag_locked(int bag);
-uint32_t* bag_size_word_locked(int bag);
+bool bag_size_word_locked(int bag, uint32_t* out_word);
+bool set_bag_size_word_locked(int bag, uint32_t word);
 int original_bag_button_index(int64_t x, int64_t y);
 bool install_module_view_locked(int bag);
 void restore_module_view_locked();
@@ -290,8 +279,8 @@ void install_extension_desc_unequip_hook_locked(int extension_bag) {
 
 // P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。
 void play_extension_switch_sound() {
-    if (fn_sound_system_play == nullptr || g_snd_fx == nullptr) return;
-    fn_sound_system_play(0x11);
+    if (g_game == nullptr || g_game->extension_bag_write.ui.play_switch_sound == nullptr) return;
+    (void)g_game->extension_bag_write.ui.play_switch_sound();
 }
 
 void handle_extension_tab_click_locked(int extension_bag) {
@@ -303,16 +292,14 @@ void handle_extension_tab_click_locked(int extension_bag) {
             constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
             void* panel_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
             const int target_capacity = g_virtual_bag_state.capacities[extension_bag];
-            const bool target_ready = target_capacity > 0 &&
-                                       fn_control_item_set_item != nullptr &&
-                                       fn_control_object_get_child != nullptr &&
-                                       panel_root != nullptr;
+            const bool target_ready = target_capacity > 0 && panel_root != nullptr;
             int projection_host = -1;
             if (target_ready) {
                 for (int candidate = 0;
                      candidate < virtual_bag::kOriginalTransactionBagCount; ++candidate) {
-                    uint32_t* size_word = bag_size_word_locked(candidate);
-                    if (size_word == nullptr || (*size_word & kCapacityMask) == 0) continue;
+                    uint32_t size_word = 0;
+                    if (!bag_size_word_locked(candidate, &size_word) ||
+                        (size_word & kCapacityMask) == 0) continue;
                     bool controls_ready = true;
                     for (int slot = 0; slot < target_capacity; ++slot) {
                         if (valid_child_locked(panel_root, slot) == nullptr) {
@@ -393,7 +380,10 @@ void handle_extension_tab_click_locked(int extension_bag) {
             virtual_bag::ClickResult::kInspected) {
             play_extension_switch_sound();
             void* ctrl = g_extension_tab_buttons[extension_bag];
-            if (ctrl != nullptr && fn_ui_equip_make_desc != nullptr && g_base != 0) {
+            if (ctrl != nullptr && g_game != nullptr &&
+                g_game->extension_bag_write.ui.make_item_description != nullptr &&
+                g_game->extension_bag_write.ui.set_current_bag != nullptr &&
+                g_game->extension_bag_write.ui.set_desc_type != nullptr) {
                 // 门禁掩码（P3）：UIEquip_SetDescMenu desc_type=1 分支经 GOT 槽读
                 // 当前原版袋索引，0（初始袋）/5（任务袋）短路不生成解除按钮
                 // （b8570-b8578）。扩展袋与该全局无关——进入前所在原版袋决定
@@ -402,19 +392,18 @@ void handle_extension_tab_click_locked(int extension_bag) {
                 // （成对写约定同 set_original_bag_locked；按钮在 panel+0x68，
                 // 不随恢复消失，点击回调已被模块 hook 接管）。此路径仅在游戏
                 // 线程的 commit_pending_extension_tab 内可达，无跨线程窗口。
-                uint8_t* direct_bag =
-                    reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
-                uint8_t** current_bag =
-                    reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-                const bool got_valid = current_bag != nullptr && *current_bag != nullptr;
-                const uint8_t saved_direct = *direct_bag;
-                const uint8_t saved_got = got_valid ? **current_bag : 0;
-                *direct_bag = 1;
-                if (got_valid) **current_bag = 1;
-                *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA) = 1;
-                fn_ui_equip_make_desc(ctrl, nullptr);
-                *direct_bag = saved_direct;
-                if (got_valid) **current_bag = saved_got;
+                const int saved_bag = raw_direct_bag_locked();
+                const int saved_desc_type = raw_desc_type_locked();
+                if (qol::contracts::succeeded(g_game->extension_bag_write.ui.set_current_bag(1)) &&
+                    qol::contracts::succeeded(g_game->extension_bag_write.ui.set_desc_type(1))) {
+                    (void)g_game->extension_bag_write.ui.make_item_description(ctrl);
+                }
+                if (saved_bag >= 0) {
+                    (void)g_game->extension_bag_write.ui.set_current_bag(saved_bag);
+                }
+                if (saved_desc_type >= 0) {
+                    (void)g_game->extension_bag_write.ui.set_desc_type(saved_desc_type);
+                }
                 install_extension_desc_unequip_hook_locked(extension_bag);
             }
             VIRTBAG_LOG("extension bag desc opened bag=%d", extension_bag);
@@ -498,7 +487,7 @@ bool clear_module_cache_locked() {
     // 此处只清引用不释放——对象可能已被池回收，再 ItemPool_Free 是 UAF；
     // 下次 install_extension_tab_buttons 按 types 重建新对象。
     for (void*& tab_item : g_tab_bag_items) tab_item = nullptr;
-    g_original_bag_size_word = nullptr;
+    g_original_bag_size_bag = -1;
     g_original_bag_size = 0;
     g_module_window_original_bag = -1;
     g_original_current_direct = 0;
@@ -573,24 +562,25 @@ void ensure_state_loaded_locked() {
 // 未保存的改动不写入 sidecar；pending 仅保留当前进程内的事务状态。
 
 bool inventory_slot_locked(int bag, int slot, void** out) {
-    if (g_inven == nullptr || out == nullptr || bag < 0 || bag >= 6 || slot < 0 ||
+    if (g_game == nullptr || g_game->read_only.inventory.physical_item_at == nullptr ||
+        out == nullptr || bag < 0 || bag >= 6 || slot < 0 ||
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
-    *out = static_cast<void**>(g_inven)[bag * kInventorySlotStride + slot];
-    return true;
+    return qol::contracts::succeeded(
+        g_game->read_only.inventory.physical_item_at(bag, slot, out));
 }
 
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
-    if (g_inven == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
+    if (g_game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
         payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return false;
     }
-    void** inventory = static_cast<void**>(g_inven);
     for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-        void* item = inventory[target_bag * kInventorySlotStride + slot];
+        void* item = nullptr;
+        if (!inventory_slot_locked(target_bag, slot, &item)) continue;
         if (item == nullptr) continue;
         std::array<uint8_t, virtual_bag::kSerializedItemBuffer> serialized{};
         int size = 0;
@@ -602,14 +592,14 @@ bool original_inventory_contains_payload_locked(const uint8_t* payload, int payl
 
 int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
                                            int target_bag) {
-    if (g_inven == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
+    if (g_game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
         payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return -1;
     }
-    void** inventory = static_cast<void**>(g_inven);
     for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-        void* item = inventory[target_bag * kInventorySlotStride + slot];
+        void* item = nullptr;
+        if (!inventory_slot_locked(target_bag, slot, &item)) continue;
         if (item == nullptr) continue;
         std::array<uint8_t, virtual_bag::kSerializedItemBuffer> serialized{};
         int size = 0;
@@ -788,7 +778,8 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     if (same_source) {
                         const bool source_removed = remove_item_direct_unlocked(
                             lock, pending.src_bag, pending.src_slot, src, "pending recovery");
-                        if (fn_ui_equip_refresh_item_area != nullptr) {
+                        if (g_game != nullptr &&
+                            g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
                             virtual_bag_call_original_refresh_item_area_with_guard();
                         }
                         if (source_removed) {
@@ -866,20 +857,15 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
 #include "plugins/extension_bag/extension_bag_input.inc"
 
 ::qol::contracts::QolItemCountEncoding category_is_equip(int category) {
-    if (g_base == 0 || category <= 0) {
+    if (g_game == nullptr || g_game->read_only.item.count_encoding == nullptr || category <= 0) {
         return ::qol::contracts::QolItemCountEncoding::kUnknown;
     }
-    uint8_t* class_data = *reinterpret_cast<uint8_t**>(
-        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
-    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    if (class_data == nullptr || size_ptr == nullptr) {
-        return ::qol::contracts::QolItemCountEncoding::kUnknown;
-    }
-    const uint8_t stride = *size_ptr;
-    if (stride == 0) return ::qol::contracts::QolItemCountEncoding::kUnknown;
-    return (class_data[category * stride + 6] & 1) == 0
-        ? ::qol::contracts::QolItemCountEncoding::kNotEncoded
-        : ::qol::contracts::QolItemCountEncoding::kEncoded;
+    ::qol::contracts::QolItemCountEncoding encoding =
+        ::qol::contracts::QolItemCountEncoding::kUnknown;
+    return qol::contracts::succeeded(
+               g_game->read_only.item.count_encoding(category, &encoding))
+        ? encoding
+        : ::qol::contracts::QolItemCountEncoding::kUnknown;
 }
 
 // 原版 ButtonEquipExe 的背包身份判定（反汇编 b7c74）：ITEMCLASSBASE 记录
@@ -887,14 +873,11 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
 // +2 是记录字段偏移（非 VMA），表基址/步长由宿主读取面提供。
 // G_ITEMCLASS_DATA/SIZE GOT 槽。
 bool category_is_extension_backpack(int category) {
-    if (g_base == 0 || category <= 0) return false;
-    uint8_t* class_data = *reinterpret_cast<uint8_t**>(
-        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
-    uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    if (class_data == nullptr || size_ptr == nullptr) return false;
-    const uint8_t stride = *size_ptr;
-    if (stride == 0) return false;
-    return class_data[category * stride + 2] == 0x1f;
+    if (g_game == nullptr || g_game->read_only.item.is_backpack_category == nullptr ||
+        category <= 0) return false;
+    int32_t value = 0;
+    return qol::contracts::succeeded(
+               g_game->read_only.item.is_backpack_category(category, &value)) && value != 0;
 }
 
 #include "plugins/extension_bag/extension_bag_transaction.inc"
@@ -949,17 +932,28 @@ bool item_pointer_known_locked(void* item) {
             if (g_module_objects[bag][slot] == item) return true;
         }
     }
-    if (g_inven != nullptr) {
-        void** inventory = static_cast<void**>(g_inven);
+    if (g_game != nullptr && g_game->read_only.inventory.physical_item_at != nullptr) {
         for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
-            if (inventory[idx] == item) return true;
+            void* physical = nullptr;
+            if (inventory_slot_locked(idx / virtual_bag::kSlotCount,
+                                      idx % virtual_bag::kSlotCount, &physical) && physical == item) {
+                return true;
+            }
         }
     }
     for (int role = 0; role < 3; ++role) {
-        uint8_t* character = static_cast<uint8_t*>(member_or_null(role));
+        void* character = nullptr;
+        if (g_game == nullptr || g_game->read_only.character.party_member == nullptr ||
+            !qol::contracts::succeeded(
+                g_game->read_only.character.party_member(role, &character))) continue;
         if (character == nullptr) continue;
-        for (int slot = 0; slot < C_EQUIP_SLOTS; ++slot) {
-            void* equipped = *reinterpret_cast<void**>(character + C_EQUIP + slot * sizeof(void*));
+        for (int slot = 0; slot < 10; ++slot) {
+            void* equipped = nullptr;
+            if (g_game->read_only.character.equipped_item == nullptr ||
+                !qol::contracts::succeeded(
+                    g_game->read_only.character.equipped_item(character, slot, &equipped))) {
+                continue;
+            }
             if (equipped == item) return true;
         }
     }

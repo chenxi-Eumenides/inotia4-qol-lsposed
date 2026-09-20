@@ -6,31 +6,14 @@ void* touch_moving_item_control_locked() {
     if (!extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y)) return nullptr;
     void* control = moving != nullptr ? moving : drop_source;
     if (control == nullptr) return nullptr;
-    void* data = extension_bag_ui_data(control);
-    if (data == nullptr || *reinterpret_cast<void**>(data) == nullptr) return nullptr;
-    if (*reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) == 0) {
-        return nullptr;
-    }
+    if (extension_bag_ui_data(control) == nullptr || extension_bag_ui_item(control) == nullptr ||
+        !extension_bag_ui_control_is_moving(control)) return nullptr;
     return control;
 }
 
 void reset_drag_state_locked(void* moving_control) {
-    if (g_base != 0) {
-        uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-        std::memset(state, 0, TOUCH_STATE_PREFIX_SIZE);
-        *reinterpret_cast<void**>(state + TOUCH_STATE_ACTIVE_CTRL) = nullptr;
-        *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL) = nullptr;
-        *reinterpret_cast<void**>(state + TOUCH_STATE_MOVE_ON_CTRL) = nullptr;
-        *reinterpret_cast<void**>(state + TOUCH_STATE_RELEASE_CTRL) = nullptr;
-        *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_SRC_CTRL) = nullptr;
-    }
-    if (moving_control != nullptr) {
-        void* data = extension_bag_ui_data(moving_control);
-        if (data != nullptr) {
-            *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) = 0;
-            *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ON_FLAG) = 0;
-        }
-    }
+    (void)extension_bag_ui_clear_touch_state();
+    if (moving_control != nullptr) (void)extension_bag_ui_clear_control_drag_flags(moving_control);
 }
 
 void clear_stale_projected_moving_locked() {
@@ -65,14 +48,9 @@ void clear_stale_projected_moving_locked() {
         moving_matches_source;
     if (retain) return;
 
-    uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-    *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL) = nullptr;
     const auto clear_control_flags = [](void* control) {
         if (control == nullptr) return;
-        void* data = extension_bag_ui_data(control);
-        if (data == nullptr) return;
-        *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) = 0;
-        *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ON_FLAG) = 0;
+        (void)extension_bag_ui_clear_control_drag_flags(control);
     };
     clear_control_flags(moving);
     if (drop_source != moving) clear_control_flags(drop_source);
@@ -90,58 +68,50 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
     void* captured_moving_control = moving_control;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (g_base != 0) {
-            uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            if (captured_moving_control == nullptr) {
-                captured_moving_control =
-                    *reinterpret_cast<void**>(state + TOUCH_STATE_MOVING_CTRL);
-            }
-            *reinterpret_cast<int64_t*>(state + TOUCH_STATE_RELEASE_INPUT_X) = rel_x;
-            *reinterpret_cast<int64_t*>(state + TOUCH_STATE_RELEASE_INPUT_Y) = rel_y;
-            *reinterpret_cast<uint64_t*>(state + TOUCH_STATE_RELEASE_INPUT_PARAM) = release_param2;
+        if (captured_moving_control == nullptr) {
+            void* drop_source = nullptr;
+            int64_t ignored_x = 0;
+            int64_t ignored_y = 0;
+            (void)extension_bag_ui_touch_state(&captured_moving_control, &drop_source,
+                                               &ignored_x, &ignored_y);
         }
+        (void)extension_bag_ui_set_touch_release_input(rel_x, rel_y, release_param2);
     }
 
     // TouchHandle_ResetMovingControl performs the original 0x08 dispatch and
     // relative-coordinate restoration. Both can enter arbitrary game UI code.
-    if (fn_touch_handle_reset_moving_control != nullptr) {
-        fn_touch_handle_reset_moving_control();
+    const auto* ui = g_sdk == nullptr ? nullptr : g_sdk->ui;
+    if (ui != nullptr && ui->reset_touch_moving != nullptr) {
+        (void)ui->reset_touch_moving();
     } else {
         VIRTBAG_LOG_ERROR("ERROR release_cleanup missing ResetMovingControl ctl=%p",
                     captured_moving_control);
     }
-    if (!handled && fn_touch_handle_reset_selected_control != nullptr) {
-        fn_touch_handle_reset_selected_control();
+    if (!handled && ui != nullptr && ui->reset_touch_selected != nullptr) {
+        (void)ui->reset_touch_selected();
     }
 
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (g_base != 0) {
-            uint8_t* state = reinterpret_cast<uint8_t*>(g_base + G_TOUCH_STATE_VMA);
-            *reinterpret_cast<void**>(state + TOUCH_STATE_DROP_EVENT) = nullptr;
-        }
+        (void)extension_bag_ui_clear_touch_drop_event();
         VIRTBAG_LOG("release_cleanup ctl=%p flags_cleared", captured_moving_control);
     }
 }
 
 void clear_original_item_selection_locked() {
-    if (g_base == 0) return;
     void* item_list = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     if (item_list == nullptr) return;
     for (uint32_t index = 0; index < virtual_bag::kSlotCount; ++index) {
         void* control = extension_bag_ui_child_at(item_list, static_cast<int>(index));
         if (control == nullptr) continue;
-        void* data = extension_bag_ui_data(control);
-        if (data == nullptr) continue;
-        *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_MOVING_FLAG) = 0;
-        *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(data) + ITEM_CTRL_ON_FLAG) = 0;
+        (void)extension_bag_ui_clear_control_drag_flags(control);
     }
 }
 
 int original_item_category_locked(void* item) {
     if (item == nullptr) return 0;
-    const uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-    return (flags >> 6) & 0x3FF;
+    int category = 0;
+    return read_item_category(item, &category) ? category : 0;
 }
 
 int drag_source_category_locked() {

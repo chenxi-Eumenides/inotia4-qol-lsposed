@@ -1,7 +1,5 @@
 #include "game_ui_virtbag.h"
 
-#include "../../api/native/game_inventory.h"
-#include "game/access/extension_bag_runtime.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -87,6 +85,7 @@ uint8_t* g_state_entry = nullptr;
 PopupEventFn g_orig_event = nullptr;
 PopupNoArgFn g_orig_f3 = nullptr;
 PopupNoArgFn g_orig_enter = nullptr;
+uintptr_t g_inventory_enter = 0;
 PopupNoArgFn g_orig_save_enter = nullptr;
 uint8_t* g_save_state_entry = nullptr;
 bool g_save_panel_hook_installed = false;
@@ -128,7 +127,7 @@ std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kBagCount
 std::array<void*, virtual_bag::kSlotCount> g_original_inventory{};
 uint8_t g_original_current_direct = 0;
 uint8_t g_original_current_got = 0;
-uint32_t* g_original_bag_size_word = nullptr;
+int g_original_bag_size_bag = -1;
 uint32_t g_original_bag_size = 0;
 int g_module_window_original_bag = -1;
 void* g_projected_item_root = nullptr;
@@ -382,6 +381,15 @@ bool read_item_category_predicate(int category,
     return true;
 }
 
+bool item_is_equip(const void* item) {
+    if (g_game == nullptr || g_game->read_only.item.is_real_equip == nullptr || item == nullptr) {
+        return false;
+    }
+    int32_t value = 0;
+    return qol::contracts::succeeded(g_game->read_only.item.is_real_equip(item, &value)) &&
+           value != 0;
+}
+
 bool read_item_is_enchant_scroll(int category) {
     bool value = false;
     return read_item_category_predicate(
@@ -411,6 +419,16 @@ bool read_world_in_world() {
 
 const qol::contracts::QolItemCountApi* item_count_api();
 
+bool mark_native_bag_object(void* item) {
+    const auto* api = item_count_api();
+    if (api == nullptr || api->read_encoded_field == nullptr ||
+        api->write_encoded_field == nullptr || item == nullptr) return false;
+    uint32_t field = 0;
+    if (!qol::contracts::succeeded(api->read_encoded_field(item, &field))) return false;
+    field = qol::features::extension_bag::write_native_bag_object_marker(field);
+    return qol::contracts::succeeded(api->write_encoded_field(item, field));
+}
+
 bool read_item_sell_price(const void* item, int64_t* out_price) {
     if (g_game == nullptr || g_game->read_only.item.sell_price == nullptr ||
         item == nullptr || out_price == nullptr) return false;
@@ -422,6 +440,19 @@ bool read_item_encoded_field(const void* item, uint32_t* out_field) {
     if (api == nullptr || api->read_encoded_field == nullptr || item == nullptr ||
         out_field == nullptr) return false;
     return qol::contracts::succeeded(api->read_encoded_field(item, out_field));
+}
+
+qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
+    const auto* api = item_count_api();
+    if (api == nullptr || api->is_encoded == nullptr || item == nullptr) {
+        return qol::contracts::QolItemCountEncoding::kUnknown;
+    }
+    qol::contracts::QolItemCountEncoding encoding =
+        qol::contracts::QolItemCountEncoding::kUnknown;
+    if (!qol::contracts::succeeded(api->is_encoded(item, &encoding))) {
+        return qol::contracts::QolItemCountEncoding::kUnknown;
+    }
+    return encoding;
 }
 
 bool read_char_can_equip(const void* character, const void* item) {
@@ -599,13 +630,16 @@ uint32_t original_count_view(uint32_t field) {
 bool original_count_write(void* item, uint32_t count) {
     const qol::contracts::QolItemCountApi* api = item_count_api();
     if (api == nullptr || api->field_from_canonical == nullptr || item == nullptr) return false;
-    uint32_t field = *reinterpret_cast<const uint32_t*>(
-        reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+    uint32_t field = 0;
+    if (api->read_encoded_field == nullptr ||
+        !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+        return false;
+    }
     uint32_t updated = field;
     const QolResult result = api->field_from_canonical(field, count, 0, &updated);
     if (!qol::contracts::succeeded(result)) return false;
-    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = updated;
-    return true;
+    return api->write_encoded_field != nullptr &&
+           qol::contracts::succeeded(api->write_encoded_field(item, updated));
 }
 
 }  // namespace
@@ -647,8 +681,11 @@ uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonic
         if (result.code != kQolErrNotReady) return 0;
     }
     if (item != nullptr) {
-        const uint32_t field = *reinterpret_cast<const uint32_t*>(
-            reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+        uint32_t field = 0;
+        if (api == nullptr || api->read_encoded_field == nullptr ||
+            !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+            return 0;
+        }
         return original_count_view(field);
     }
     return virtual_bag_view_from_canonical(fallback_canonical, false);
@@ -706,8 +743,11 @@ uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonic
         }
     }
     if (item != nullptr) {
-        const uint32_t field = *reinterpret_cast<const uint32_t*>(
-            reinterpret_cast<const uint8_t*>(item) + I_COUNT);
+        uint32_t field = 0;
+        if (api == nullptr || api->read_encoded_field == nullptr ||
+            !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+            return fallback_canonical;
+        }
         return virtual_bag_canonical_from_field(field, fallback_canonical);
     }
     return fallback_canonical;
@@ -806,8 +846,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         void* target_data = control != nullptr ? extension_bag_ui_data(control) : nullptr;
         source_item = source_data != nullptr ? *reinterpret_cast<void**>(source_data) : nullptr;
         target_item = target_data != nullptr ? *reinterpret_cast<void**>(target_data) : nullptr;
-        target_slot_index = control != nullptr && fn_ui_equip_get_item_slot_index != nullptr
-            ? fn_ui_equip_get_item_slot_index(control) : -1;
+        target_slot_index = control != nullptr ? extension_bag_ui_item_slot(control) : -1;
         const bool extension_source =
             source_item != nullptr && module_slot_of_item_locked(source_item, &source_bag, &source_slot);
         const int source_category = extension_source
@@ -1044,7 +1083,7 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
             g_pending_jewel_detail_slot >= 0 &&
             g_pending_jewel_detail_slot < g_virtual_bag_state.capacities[g_module_view_index] &&
             g_module_view_installed && g_projected_item_root != nullptr &&
-            fn_control_item_set_item != nullptr) {
+            g_sdk != nullptr && g_sdk->ui != nullptr) {
             detail_control = valid_child_locked(g_projected_item_root,
                                                 g_pending_jewel_detail_slot);
             detail_item = g_pending_jewel_detail_item;
@@ -1054,11 +1093,12 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
         g_pending_jewel_detail_slot = -1;
         VIRTBAG_LOG("native consume extension bag=%d slot=%d before=%d", bag, slot, before_count);
     }
-    if (detail_control != nullptr && fn_control_item_set_item != nullptr) {
-        fn_control_item_set_item(detail_control, detail_item);
+    if (detail_control != nullptr && g_sdk != nullptr && g_sdk->ui != nullptr) {
+        (void)extension_bag_ui_set_control_item(detail_control, detail_item);
     }
-    if (detail_control != nullptr && fn_ui_equip_make_desc != nullptr) {
-        make_desc_equip_gate(detail_control, nullptr);
+    if (detail_control != nullptr && g_game != nullptr &&
+        g_game->extension_bag_write.ui.make_item_description != nullptr) {
+        (void)g_game->extension_bag_write.ui.make_item_description(detail_control);
     }
     return true;
 }
@@ -1113,7 +1153,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
         // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
         int equip_count = 0;
         if (read_item_cumulate_count(equip_item, &equip_count)) {
-            equip_descriptor.count = canonical_item_count(equip_item);
+            equip_descriptor.count = static_cast<int>(virtual_bag_canonical_count(equip_item, 1));
         }
         g_module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
         g_item_state_dirty = true;
@@ -1191,13 +1231,15 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             return ExtensionBagUnequipResult::kNotEmpty;
         }
     }
-    if (fn_create_item == nullptr || fn_inven_save_item_on_empty == nullptr) {
+    if (g_game == nullptr || g_game->extension_bag_write.inventory.create_item == nullptr ||
+        g_game->extension_bag_write.inventory.save_item_on_empty == nullptr) {
         VIRTBAG_LOG("extension unequip symbols unavailable bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
-    void* item = fn_create_item(
-        static_cast<int32_t>(g_virtual_bag_state.types[internal_bag]), 0, 0, 0);
-    if (item == nullptr) {
+    void* item = nullptr;
+    if (!qol::contracts::succeeded(g_game->extension_bag_write.inventory.create_item(
+            static_cast<int32_t>(g_virtual_bag_state.types[internal_bag]), 0, 0, 0, &item)) ||
+        item == nullptr) {
         VIRTBAG_LOG("extension unequip create item failed bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
@@ -1213,10 +1255,17 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     // bit25..31，native bag object 只写 marker；禁止先做 S2 编码再叠加 marker，
     // 因为当前 marker mask 与 S2 B 段重叠。
     {
-        const uint32_t flags = *reinterpret_cast<uint32_t*>(
-            reinterpret_cast<uint8_t*>(item) + I_COUNT);
-        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) =
-            ::qol::features::extension_bag::write_native_bag_object_marker(flags);
+        uint32_t flags = 0;
+        const auto* count_api = item_count_api();
+        if (count_api == nullptr || count_api->read_encoded_field == nullptr ||
+            count_api->write_encoded_field == nullptr ||
+            !qol::contracts::succeeded(count_api->read_encoded_field(item, &flags)) ||
+            !qol::contracts::succeeded(count_api->write_encoded_field(
+                item, ::qol::features::extension_bag::write_native_bag_object_marker(flags)))) {
+            release_temporary_item_locked(item);
+            VIRTBAG_LOG("extension unequip bag marker write failed bag=%d", internal_bag);
+            return ExtensionBagUnequipResult::kFailed;
+        }
     }
 
     int preferred = original_bag_locked();
@@ -1238,7 +1287,11 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     }
     int receiving_bag = -1;
     for (int i = 0; i < order_count && receiving_bag < 0; ++i) {
-        if (fn_inven_save_item_on_empty(item, order[i])) receiving_bag = order[i];
+        int save_result = 0;
+        if (qol::contracts::succeeded(g_game->extension_bag_write.inventory.save_item_on_empty(
+                item, order[i], &save_result)) && save_result != 0) {
+            receiving_bag = order[i];
+        }
     }
     if (receiving_bag < 0) {
         // 原版袋 0..4 全满：袋对象不回原版背包，转而收编为扩展袋物品槽的
@@ -1333,8 +1386,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         return ExtensionBagUnequipResult::kOk;
     }
     bool rolled_back = false;
-    if (fn_remove_item_direct != nullptr) {
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+    for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             void* slot_item = nullptr;
             if (!inventory_slot_locked(receiving_bag, slot, &slot_item) ||
                 slot_item != item) {
@@ -1346,7 +1398,6 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             }
             break;
         }
-    }
     if (rolled_back) {
         // P4.3：回滚已确认（脱离 INVEN）→ 账本终止保管 + 真释放。
         release_tracked_item_locked(item_handle, item, "unequip rollback");
@@ -1365,21 +1416,15 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
 }
 
 void show_extension_bag_not_empty_popup() {
-    if (g_base == 0) return;
-    const uintptr_t popup =
-        g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
-                            F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
-    if (popup == 0) return;
-    reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(7, 0, 0, 0);
+    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->show_text_popup != nullptr) {
+        (void)g_sdk->ui->show_text_popup(7);
+    }
 }
 
 void show_extension_bag_no_space_popup() {
-    if (g_base == 0) return;
-    const uintptr_t popup =
-        g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
-                            F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
-    if (popup == 0) return;
-    reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(6, 0, 0, 0);
+    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->show_text_popup != nullptr) {
+        (void)g_sdk->ui->show_text_popup(6);
+    }
 }
 
 // P3 真实装备（原版两装备入口的扩展对应物；拖放路径经扩展标签 drop，
@@ -1485,7 +1530,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     descriptor.count = 1;
     int item_count = 0;
     if (read_item_cumulate_count(item, &item_count)) {
-        descriptor.count = canonical_item_count(item);
+        descriptor.count = static_cast<int>(virtual_bag_canonical_count(item, 1));
     }
     // 装备槽对象仍被原版 UI（装备槽 desc/控件缓存）引用，不能释放给对象池；
     // 直接收编为扩展槽的物化对象（与 equip_module_item_on_character_locked
@@ -1561,7 +1606,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     (void)read_item_category(req.item, &category);
     // descriptor.count 恒为 canonical（R-38/R-48）：getter 关闭态只返回 b 视图，
     // 必须按 S2 解码保存完整 128a+b，否则 sidecar 读档会把 a 段对齐抹掉。
-    int canonical_count = canonical_item_count(req.item);
+    int canonical_count = static_cast<int>(virtual_bag_canonical_count(req.item, 1));
     if (canonical_count <= 0) canonical_count = 1;
     const bool limit_enabled = virtual_bag_extended_mode(req.item);
     virtual_bag::Item source{};

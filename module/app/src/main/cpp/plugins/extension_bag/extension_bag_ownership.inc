@@ -388,7 +388,7 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
         release.handle = g_module_object_handles[bag][slot];
         release.generation = use.generation;
         if (g_module_view_installed && g_module_view_index == bag &&
-            g_projected_item_root != nullptr && fn_control_item_set_item != nullptr) {
+            g_projected_item_root != nullptr) {
             release.control = valid_child_locked(g_projected_item_root, slot);
         }
         // 事务状态、对象索引和 handle 在锁内摘除；native 控件写入及 itempool
@@ -472,9 +472,7 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
     bool deferred = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (release.control != nullptr && fn_control_item_set_item != nullptr) {
-            fn_control_item_set_item(release.control, nullptr);
-        }
+        if (release.control != nullptr) (void)extension_bag_ui_set_control_item(release.control, nullptr);
         if (object_touch_window_active_locked() || extension_bag_write_api() == nullptr ||
             extension_bag_write_api()->inventory.free_item == nullptr) {
             deferred = enqueue_deferred_item_free_locked(release.item, release.handle,
@@ -547,10 +545,9 @@ bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
     }
     if (item != nullptr) {
         if (g_module_view_installed && g_module_view_index == bag &&
-            g_projected_item_root != nullptr && fn_control_object_get_child != nullptr &&
-            fn_control_item_set_item != nullptr) {
+            g_projected_item_root != nullptr) {
             void* ctrl = valid_child_locked(g_projected_item_root, slot);
-            if (ctrl != nullptr) fn_control_item_set_item(ctrl, nullptr);
+            if (ctrl != nullptr) (void)extension_bag_ui_set_control_item(ctrl, nullptr);
         }
         const uint32_t handle = g_module_object_handles[bag][slot];
         if (ownership::live_state(g_ownership_ledger, handle,

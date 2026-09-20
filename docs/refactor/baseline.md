@@ -32,7 +32,7 @@
 | `domains/system` | 2 |
 | `domains/ui` | 5 |
 | `domains/world` | 9 |
-| `game` | 57 |
+| `game` | 56 |
 | `hooks` | 10 |
 | `host` | 36 |
 | `infra` | 46 |
@@ -54,7 +54,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **389** |
+| **合计** | **388** |
 
 ### 1.2 迁移期映射摘要
 
@@ -133,7 +133,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 105 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 103 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -201,8 +201,8 @@
 
 ### resource_unknown_symbol（2 条）
 
-- `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:367||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:151||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:374||ptr slot 无法归属符号`
+- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:150||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 

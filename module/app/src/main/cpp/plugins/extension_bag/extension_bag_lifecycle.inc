@@ -1,6 +1,5 @@
 struct PhysicalInventorySnapshot {
     std::array<void*, virtual_bag::kPhysicalInventorySnapshotSlots> slots{};
-    void* inventory = nullptr;
     uint64_t digest = 0;
     int nonnull = 0;
     bool valid = false;
@@ -8,12 +7,15 @@ struct PhysicalInventorySnapshot {
 
 PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
     PhysicalInventorySnapshot snapshot{};
-    snapshot.inventory = g_inven;
     snapshot.digest = 1469598103934665603ULL;
-    if (g_inven == nullptr) return snapshot;
-    void** inventory = static_cast<void**>(g_inven);
     for (size_t index = 0; index < snapshot.slots.size(); ++index) {
-        void* item = inventory[index];
+        void* item = nullptr;
+        if (g_game == nullptr || g_game->read_only.inventory.physical_item_at == nullptr ||
+            !qol::contracts::succeeded(g_game->read_only.inventory.physical_item_at(
+                static_cast<int32_t>(index / virtual_bag::kSlotCount),
+                static_cast<int32_t>(index % virtual_bag::kSlotCount), &item))) {
+            return snapshot;
+        }
         snapshot.slots[index] = item;
         if (item != nullptr) ++snapshot.nonnull;
         snapshot.digest ^= static_cast<uint64_t>(reinterpret_cast<uintptr_t>(item));
@@ -24,10 +26,14 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
 }
 
 bool restore_physical_inventory_snapshot_locked(const PhysicalInventorySnapshot& snapshot) {
-    if (!snapshot.valid || g_inven == nullptr || g_inven != snapshot.inventory) return false;
-    void** inventory = static_cast<void**>(g_inven);
+    if (!snapshot.valid || g_game == nullptr ||
+        g_game->extension_bag_write.inventory.set_physical_item == nullptr) return false;
     for (size_t index = 0; index < snapshot.slots.size(); ++index) {
-        inventory[index] = snapshot.slots[index];
+        if (!qol::contracts::succeeded(g_game->extension_bag_write.inventory.set_physical_item(
+                static_cast<int32_t>(index / virtual_bag::kSlotCount),
+                static_cast<int32_t>(index % virtual_bag::kSlotCount), snapshot.slots[index]))) {
+            return false;
+        }
     }
     return true;
 }
@@ -137,7 +143,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                                   nullptr, false, 0);
     }
     const bool extension_enabled = g_virtual_bag_enabled.load();
-    const uint32_t gamestate = g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
+    int32_t state_open = 0;
+    const bool state_ready = g_game != nullptr && g_game->read_only.world.game_state_gate != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.world.game_state_gate(&state_open));
+    const uint32_t gamestate = state_ready && state_open != 0 ? 0U : 1U;
     if (!extension_enabled || gamestate != 0) {
         if (extension_enabled && event == 0x18) {
             bool release_cleanup_needed = false;
@@ -168,9 +177,9 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             }
         }
         if (event == 0x17 || event == 0x18 || event == 0x19) {
-            VIRTBAG_LOG("touch bypass event=0x%llx enabled=%d gamestate=%u base=0x%llx hooked=%d",
+            VIRTBAG_LOG("touch bypass event=0x%llx enabled=%d gamestate=%u hooked=%d",
                         static_cast<unsigned long long>(event), extension_enabled ? 1 : 0,
-                        gamestate, static_cast<unsigned long long>(g_base), g_state_entry != nullptr ? 1 : 0);
+                        gamestate, g_state_entry != nullptr ? 1 : 0);
         }
         const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
         if (p5_panel_observation_enabled()) {
@@ -423,7 +432,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             const int selected_original_bag = original_bag_locked();
             restore_module_view_locked();
             set_original_bag_locked(selected_original_bag);
-            if (fn_ui_equip_refresh_item_area != nullptr) {
+            if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
                 virtual_bag_call_original_refresh_item_area_with_guard();
             }
             virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
@@ -442,8 +451,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
-    if (g_state == nullptr) return 1;
-    const int state = static_cast<int>(*reinterpret_cast<uint16_t*>(g_state));
+    const int state = virtual_bag_inventory_state_id();
+    if (state < 0) return 1;
     if (g_lifecycle_last_state == 5 && state != 5) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (!prepare_main_menu_locked()) {

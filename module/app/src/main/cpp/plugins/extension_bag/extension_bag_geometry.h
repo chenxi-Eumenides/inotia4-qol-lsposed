@@ -28,4 +28,17 @@ bool extension_bag_ui_draw_part(int32_t unit, int32_t loc, int32_t x, int32_t y,
                                 int32_t type, int32_t flip);
 bool extension_bag_ui_can_draw();
 bool extension_bag_ui_draw_item(void* item, int32_t x, int32_t y, int32_t a, int32_t b);
+bool extension_bag_ui_create_control(void* parent, void** out_control);
+bool extension_bag_ui_delete_control(void* control);
+bool extension_bag_ui_set_control_item(void* control, void* item);
+bool extension_bag_ui_set_control_proc(void* control, qol::contracts::QolUiControlProcFn proc);
+bool extension_bag_ui_set_control_user_type(void* control, int type);
+bool extension_bag_ui_set_control_data(void* control, void* data);
+bool extension_bag_ui_allocate_control_data(uint32_t size, void** out_data);
+bool extension_bag_ui_unuse_control_event_move(void* control);
+bool extension_bag_ui_control_is_moving(void* control);
+bool extension_bag_ui_clear_control_drag_flags(void* control);
+bool extension_bag_ui_clear_touch_state();
+bool extension_bag_ui_set_touch_release_input(int64_t x, int64_t y, uint64_t param);
+bool extension_bag_ui_clear_touch_drop_event();
 bool extension_bag_ui_fill_rect(qol::contracts::UiRect rect, uint32_t color);

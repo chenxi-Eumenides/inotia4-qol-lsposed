@@ -171,16 +171,19 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
 
     int target = -1;
     if (!read_char_find_equip_slot(character, item, &target)) return false;
-    if (target < 0 || target >= C_EQUIP_SLOTS) return false;
+    if (target < 0) return false;
     const int original_bag = g_module_window_original_bag;
-    if (g_inven == nullptr) return false;
+    const auto* inventory_write = extension_bag_write_api();
+    if (inventory_write == nullptr ||
+        inventory_write->inventory.set_physical_item == nullptr) return false;
 
     // Projection deliberately leaves the real inventory untouched. The original
     // exchange entry point reads INVEN[bag][slot], so expose the projected item
     // only for the duration of that call and restore the real slot afterwards.
-    auto* inventory_slot = reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(g_inven) + original_bag * 0x80 + source_slot * 8);
-    void* original_inventory_item = *inventory_slot;
+    void* original_inventory_item = nullptr;
+    if (g_game->read_only.inventory.physical_item_at == nullptr ||
+        !qol::contracts::succeeded(g_game->read_only.inventory.physical_item_at(
+            original_bag, source_slot, &original_inventory_item))) return false;
     void* previous_equipped_item = read_char_equipped_item(character, target);
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> previous_equipped_payload{};
     int previous_equipped_payload_size = 0;
@@ -189,7 +192,8 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
                                        &previous_equipped_payload_size)) {
         return false;
     }
-    *inventory_slot = item;
+    if (!qol::contracts::succeeded(inventory_write->inventory.set_physical_item(
+            original_bag, source_slot, item))) return false;
 
     // 这是原版 UI 的真实交换入口：它从 INVEN[bag][slot] 取新装备，
     // 目标槽已有装备时把旧装备写回同一库存槽，再把新装备放入角色槽。
@@ -202,16 +206,19 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     equip_result = equip_called ? 1 : 0;
     extension_bag_end_internal_equip();
     if (equip_result == 0) {
-        *inventory_slot = original_inventory_item;
+        (void)inventory_write->inventory.set_physical_item(
+            original_bag, source_slot, original_inventory_item);
         return false;
     }
-    if (target >= 0 && target < C_EQUIP_SLOTS &&
+    if (target >= 0 &&
         read_char_equipped_item(character, target) != item) {
-        *inventory_slot = original_inventory_item;
+        (void)inventory_write->inventory.set_physical_item(
+            original_bag, source_slot, original_inventory_item);
         return false;
     }
 
-    *inventory_slot = original_inventory_item;
+    (void)inventory_write->inventory.set_physical_item(
+        original_bag, source_slot, original_inventory_item);
     // CHAR_EquipItemFromInvenToSlot 已把旧装备换入临时投影槽；该槽随后仍由
     // 扩展状态表示，不能让同一个旧指针同时继续留在原版 INVEN 中。
     // 角色装备接管对象所有权，不能走 free_module_object_locked；否则下一帧
@@ -236,7 +243,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
         (void)read_item_category(previous_equipped_item, &descriptor.category);
         int previous_count = 1;
         descriptor.count = read_item_cumulate_count(previous_equipped_item, &previous_count)
-            ? canonical_item_count(previous_equipped_item) : previous_count;
+            ? static_cast<int>(virtual_bag_canonical_count(previous_equipped_item, 1)) : previous_count;
         // 旧装备对象被原版 UI（装备槽 desc/控件缓存）持续引用，绝不能释放：
         // 直接收编为扩展槽的物化对象，投影与详情都继续指向同一存活对象。
         if (!module_object_generation_advance_locked(
@@ -293,7 +300,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     }
     if (g_module_view_installed && g_module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
-    } else if (fn_ui_equip_refresh_item_area != nullptr) {
+    } else if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     extension_update_character_equip();
@@ -594,7 +601,8 @@ void extension_destroy_ok(void*) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension destroy rejected stale detail bag=%d slot=%d", bag, slot);
         }
     }
-    if (committed && fn_ui_equip_refresh_item_area != nullptr) {
+    if (committed && g_game != nullptr &&
+        g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     if (committed) {
@@ -648,7 +656,10 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = old_count_flags;
+        const auto* count_api = item_count_api();
+        if (count_api != nullptr && count_api->write_encoded_field != nullptr) {
+            (void)count_api->write_encoded_field(item, old_count_flags);
+        }
         QOL_LOG_WARN(QolDomain::kExtensionBag, "extension consume reserialize failed context=%s bag=%d slot=%d",
                     context, bag, slot);
         return false;
@@ -893,9 +904,10 @@ bool extension_use_mercenary_seal() {
     // INVEN_RemoveItem → H-04 再次取锁，持锁调用必死锁）。
     extension_description_set_off();
     const auto show_popup = [](uint32_t text_id) {
-        const uintptr_t popup = g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA",
-                                                    F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA);
-        if (popup != 0) reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(popup)(text_id, 0, 0, 0);
+        if (g_sdk != nullptr && g_sdk->ui != nullptr &&
+            g_sdk->ui->show_text_popup != nullptr) {
+            (void)g_sdk->ui->show_text_popup(static_cast<int32_t>(text_id));
+        }
     };
     if (!read_save_is_ok()) {
         VIRTBAG_LOG("extension mercenary-seal reject reason=save_busy bag=%d slot=%d", bag, slot);
@@ -1225,7 +1237,7 @@ void extension_desc_item_execute(void* button) {
     // descriptor.count 恒为 canonical（R-38/R-48）：getter 在关闭态只返回 b 视图
     //（R-47 决策 b），物化/重同步必须保存完整 128a+b。
     if (read_item_cumulate_count(item, &descriptor.count)) {
-        descriptor.count = canonical_item_count(item);
+        descriptor.count = static_cast<int>(virtual_bag_canonical_count(item, 1));
     }
     if (descriptor.category <= 0 || descriptor.count <= 0) {
         descriptor = {};

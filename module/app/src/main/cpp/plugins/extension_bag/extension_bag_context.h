@@ -8,6 +8,8 @@
 #include "contracts/ui.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 
+JavaVM* g_jvm();
+
 // 操作响应信封由宿主实现；插件只依赖稳定的结果构造函数声明。
 std::string op_ok();
 std::string op_err(const char* msg);

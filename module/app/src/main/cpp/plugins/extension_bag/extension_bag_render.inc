@@ -111,41 +111,39 @@ void draw_cells_in_frame_locked() {
 
 int original_bag_locked();
 
-uint32_t* bag_size_word_locked(int bag) {
-    if (g_base == 0) return nullptr;
-    void*** table_slot = reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
-    if (table_slot == nullptr || *table_slot == nullptr) return nullptr;
-    if (bag < 0 || bag >= 6) return nullptr;
-    void* bag_object = (*table_slot)[bag];
-    if (bag_object == nullptr) return nullptr;
-    return reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) + BAG_OBJECT_CAPACITY);
+bool bag_size_word_locked(int bag, uint32_t* out_word) {
+    return g_game != nullptr && g_game->extension_bag_write.ui.bag_capacity_word != nullptr &&
+           out_word != nullptr && bag >= 0 && bag < 6 &&
+           qol::contracts::succeeded(
+               g_game->extension_bag_write.ui.bag_capacity_word(bag, out_word));
 }
 
-uint32_t* original_bag_size_word_locked() {
-    return bag_size_word_locked(original_bag_locked());
+bool set_bag_size_word_locked(int bag, uint32_t word) {
+    return g_game != nullptr && g_game->extension_bag_write.ui.set_bag_capacity_word != nullptr &&
+           bag >= 0 && bag < 6 &&
+           qol::contracts::succeeded(
+               g_game->extension_bag_write.ui.set_bag_capacity_word(bag, word));
 }
 
 void refresh_projection_if_overwritten_locked();
 
 void refresh_module_item_area_locked(int index) {
-    if (fn_ui_equip_refresh_item_area == nullptr) return;
-    uint32_t* size_word = g_original_bag_size_word;
-    if (size_word == nullptr) {
+    if (g_game == nullptr || g_game->extension_bag_write.ui.refresh_item_area == nullptr) return;
+    if (g_original_bag_size_bag < 0) {
         virtual_bag_call_original_refresh_item_area_with_guard();
         return;
     }
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    *size_word = (g_original_bag_size & ~kCapacityMask) |
-                 (static_cast<uint32_t>(g_virtual_bag_state.capacities[index]) & kCapacityMask);
+    (void)set_bag_size_word_locked(
+        g_original_bag_size_bag,
+        (g_original_bag_size & ~kCapacityMask) |
+            (static_cast<uint32_t>(g_virtual_bag_state.capacities[index]) & kCapacityMask));
     virtual_bag_call_original_refresh_item_area_with_guard();
     refresh_projection_if_overwritten_locked();
 }
 
 void virtual_bag_draw_original_bag_wrapper() {
-    const OriginalDrawInvenBagFn original =
-        reinterpret_cast<OriginalDrawInvenBagFn>(g_base + fn_resolve("F_UIEQUIP_DRAW_INVEN_BAG_VMA",
-                                                                     F_UIEQUIP_DRAW_INVEN_BAG_VMA));
-    if (original == nullptr) return;
+    if (g_game == nullptr || g_game->extension_bag_write.ui.draw_original_bag == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     const bool module_view = g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
@@ -158,100 +156,72 @@ void virtual_bag_draw_original_bag_wrapper() {
     // 进入扩展选中态（kModule）时，原版袋标签全部取消高亮（互斥）：
     // 画原版 DrawInvenBag 前把当前袋 GOT 临时设为 kNoOriginalBagSelected(6)，
     // 画完恢复。此前只在 !installed 分支屏蔽，installed 分支漏掉了。
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    uint8_t saved_current = 0;
-    bool masked = false;
-    if (module_view && current_bag != nullptr && *current_bag != nullptr) {
-        saved_current = **current_bag;
-        **current_bag = kNoOriginalBagSelected;
-        masked = true;
+    const int saved_current = original_bag_locked();
+    if (module_view && g_game->extension_bag_write.ui.set_current_bag != nullptr) {
+        (void)g_game->extension_bag_write.ui.set_current_bag(kNoOriginalBagSelected);
     }
     if (module_view && g_module_view_installed) {
-        original();
-        if (masked) **current_bag = saved_current;
+        (void)g_game->extension_bag_write.ui.draw_original_bag();
+        if (module_view) (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
         draw_tab_buttons_in_frame_locked();
         return;
     }
-    original();
-    if (masked) **current_bag = saved_current;
+    (void)g_game->extension_bag_write.ui.draw_original_bag();
+    if (module_view) (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
     draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {
-    const OriginalDrawInvenItemFn original =
-        reinterpret_cast<OriginalDrawInvenItemFn>(g_base + fn_resolve("F_UIEQUIP_DRAW_INVEN_ITEM_VMA",
-                                                                       F_UIEQUIP_DRAW_INVEN_ITEM_VMA));
-    if (original == nullptr) return;
+    if (g_game == nullptr || g_game->extension_bag_write.ui.draw_original_items == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(g_virtual_bag_state.selected)) {
         if (g_module_view_installed) {
-            original();
+            (void)g_game->extension_bag_write.ui.draw_original_items();
             return;
         }
         // Extension items occupy the original inventory rectangle without
         // entering g_inven. Mask the original bag only for this draw call so
         // the underlying ControlItem visuals do not show through the overlay.
-        uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-        uint8_t saved_current = 0;
-        bool masked_for_draw = false;
-        if (current_bag != nullptr && *current_bag != nullptr &&
-            **current_bag != kNoOriginalBagSelected) {
-            saved_current = **current_bag;
-            **current_bag = kNoOriginalBagSelected;
-            masked_for_draw = true;
-        }
-        original();
-        if (masked_for_draw) **current_bag = saved_current;
+        const int saved_current = original_bag_locked();
+        (void)g_game->extension_bag_write.ui.set_current_bag(kNoOriginalBagSelected);
+        (void)g_game->extension_bag_write.ui.draw_original_items();
+        (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
         return;
     }
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    uint8_t saved_current = 0;
-    bool restored_for_draw = false;
+    const int saved_current = original_bag_locked();
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule &&
-        g_exit_display_bag < kNoOriginalBagSelected && current_bag != nullptr &&
-        *current_bag != nullptr && **current_bag == kNoOriginalBagSelected) {
-        saved_current = **current_bag;
-        **current_bag = g_exit_display_bag;
-        restored_for_draw = true;
+        g_exit_display_bag < kNoOriginalBagSelected) {
+        (void)g_game->extension_bag_write.ui.set_current_bag(g_exit_display_bag);
     }
-    original();
-    if (restored_for_draw) **current_bag = saved_current;
+    (void)g_game->extension_bag_write.ui.draw_original_items();
+    (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
 }
 
 int original_bag_locked() {
-    if (g_base == 0) return 0;
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    if (current_bag != nullptr && *current_bag != nullptr && **current_bag < 6) {
-        return **current_bag;
-    }
-    const uint8_t direct = *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
-    if (direct < 6) return direct;
-    return 0;
+    if (g_game == nullptr || g_game->extension_bag_write.ui.current_bag == nullptr) return 0;
+    int32_t bag = 0;
+    return qol::contracts::succeeded(g_game->extension_bag_write.ui.current_bag(&bag)) &&
+                   bag >= 0 && bag < 6 ? bag : 0;
 }
 
 void set_original_bag_locked(int bag) {
-    if (g_base == 0 || bag < 0 || bag >= 6) return;
-    *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA) = static_cast<uint8_t>(bag);
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    if (current_bag != nullptr && *current_bag != nullptr) **current_bag = static_cast<uint8_t>(bag);
+    if (g_game == nullptr || g_game->extension_bag_write.ui.set_current_bag == nullptr ||
+        bag < 0 || bag >= 6) return;
+    (void)g_game->extension_bag_write.ui.set_current_bag(bag);
     log_exit_trace_locked("write_set", 0, 0, 0);
 }
 
 bool original_got_bag_locked(int* bag) {
-    if (bag == nullptr || g_base == 0) return false;
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    if (current_bag == nullptr || *current_bag == nullptr || **current_bag >= kNoOriginalBagSelected) {
-        return false;
-    }
-    *bag = **current_bag;
+    if (bag == nullptr) return false;
+    const int current = original_bag_locked();
+    if (current < 0 || current >= kNoOriginalBagSelected) return false;
+    *bag = current;
     return true;
 }
 
 void clear_original_bag_selection_locked() {
-    if (g_base == 0) return;
-    *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA) = kNoOriginalBagSelected;
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    if (current_bag != nullptr && *current_bag != nullptr) **current_bag = kNoOriginalBagSelected;
+    if (g_game == nullptr || g_game->extension_bag_write.ui.set_current_bag == nullptr) return;
+    (void)g_game->extension_bag_write.ui.set_current_bag(kNoOriginalBagSelected);
     log_exit_trace_locked("write_clear", 0, 0, 0);
 }
 
@@ -262,9 +232,11 @@ void clear_original_desc_locked() {
     g_extension_desc_item = nullptr;
     g_extension_desc_item_bag = -1;
     g_extension_desc_item_slot = -1;
-    if (g_base == 0) return;
-    *reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_DESC_TYPE_VMA) = 0;
-    if (fn_ui_desc_set_off != nullptr) fn_ui_desc_set_off();
+    if (g_game == nullptr || g_game->extension_bag_write.ui.set_desc_type == nullptr) return;
+    (void)g_game->extension_bag_write.ui.set_desc_type(0);
+    if (g_game->extension_bag_write.ui.description_set_off != nullptr) {
+        (void)g_game->extension_bag_write.ui.description_set_off();
+    }
 }
 
 int original_bag_button_index(int64_t x, int64_t y) {
@@ -295,20 +267,16 @@ int original_bag_button_index(int64_t x, int64_t y) {
 }
 
 bool bind_original_exit_display_bag_locked(int bag) {
-    if (g_base == 0 || bag < 0 || bag >= 6 || fn_ui_equip_refresh_item_area == nullptr) return false;
-    uint8_t* direct_bag = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);
-    uint8_t** current_bag = reinterpret_cast<uint8_t**>(g_base + G_UIEQUIP_CUR_BAG_GOT_VMA);
-    if (current_bag == nullptr || *current_bag == nullptr) return false;
-    const uint8_t saved_direct = *direct_bag;
-    const uint8_t saved_got = **current_bag;
-    *direct_bag = static_cast<uint8_t>(bag);
-    **current_bag = static_cast<uint8_t>(bag);
+    if (g_game == nullptr || bag < 0 || bag >= 6 ||
+        g_game->extension_bag_write.ui.refresh_item_area == nullptr) return false;
+    const int saved_bag = original_bag_locked();
+    set_original_bag_locked(bag);
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    const uint32_t* size_word = bag_size_word_locked(bag);
-    const bool has_capacity = size_word != nullptr && (*size_word & kCapacityMask) != 0;
+    uint32_t size_word = 0;
+    const bool has_capacity = bag_size_word_locked(bag, &size_word) &&
+                              (size_word & kCapacityMask) != 0;
     if (has_capacity) virtual_bag_call_original_refresh_item_area_with_guard();
-    *direct_bag = saved_direct;
-    **current_bag = saved_got;
+    set_original_bag_locked(saved_bag);
     return has_capacity;
 }
 
@@ -374,26 +342,23 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
 bool item_pointer_known_locked(void* item);
 
 uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int32_t b, int32_t c) {
-    if (g_module_view_installed && item != nullptr && g_inven != nullptr) {
+    if (g_module_view_installed && item != nullptr) {
         // 保留原版区域绘制以维护格子/Active 状态，但扩展视图下不绘制
         // INVEN 中的原版物品；否则投影控件重绑的间隙会露出原版背包一帧。
         // 扩展对象不在 g_inven 中，仍由下面的合法性门禁正常绘制。
-        void** inventory = static_cast<void**>(g_inven);
         for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
-            if (inventory[idx] == item) return 0;
+            void* physical = nullptr;
+            if (inventory_slot_locked(idx / virtual_bag::kSlotCount,
+                                      idx % virtual_bag::kSlotCount, &physical) &&
+                physical == item) return 0;
         }
     }
     if (g_module_view_installed && !item_pointer_known_locked(item)) {
         QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw gate: suppressed unknown item=%p", item);
         return 0;
     }
-    const uintptr_t raw = g_base != 0
-                              ? g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA",
-                                                    F_ITEM_DRAW_PORTING_VMA)
-                              : 0;
-    if (raw == 0) return 0;
-    typedef uint32_t (*DrawPortingFn)(void*, int32_t, int32_t, int32_t, int32_t, int32_t);
-    return reinterpret_cast<DrawPortingFn>(raw)(item, x, y, a, b, c);
+    (void)c;
+    return extension_bag_ui_draw_item(item, x, y, a, b) ? 1u : 0u;
 }
 
 // G-6/G-7 drop 门禁 → G-8 路由：bag proc event 0x04 落袋写入（b8cc0 bl）——
@@ -433,9 +398,13 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
         }
         if (g_module_view_installed) {
             if (!module_item) {
-                return reinterpret_cast<InvenSaveItemOnEmptyFn>(
-                    g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA",
-                                        F_INVEN_SAVE_ITEM_ON_EMPTY_VMA))(item, bag);
+                if (g_game == nullptr || g_game->extension_bag_write.inventory.save_item_on_empty == nullptr) {
+                    return 0;
+                }
+                int32_t result = 0;
+                return qol::contracts::succeeded(
+                           g_game->extension_bag_write.inventory.save_item_on_empty(item, bag, &result))
+                           ? result : 0;
             }
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop gate: source/session mismatch src=%d/%d bag=%d phase=%d",
                         src_bag, src_slot, bag,
@@ -443,12 +412,13 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
             return 0;
         }
     }
-    const uintptr_t raw = g_base != 0
-                              ? g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA",
-                                                    F_INVEN_SAVE_ITEM_ON_EMPTY_VMA)
-                              : 0;
-    if (raw == 0) return 0;
-    return reinterpret_cast<InvenSaveItemOnEmptyFn>(raw)(item, bag);
+    if (g_game == nullptr || g_game->extension_bag_write.inventory.save_item_on_empty == nullptr) {
+        return 0;
+    }
+    int32_t result = 0;
+    return qol::contracts::succeeded(
+               g_game->extension_bag_write.inventory.save_item_on_empty(item, bag, &result))
+               ? result : 0;
 }
 
 // 正式窗口投影（P3 方案 C，控件级）：只写控件不写 INVEN——
@@ -457,32 +427,32 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
 //   容量内控件 ControlItem_SetItem(借出对象) 显示扩展物品；
 //   INVEN_pItem 全程真实（API/存档/捡取读数无污染），restore 仅写回容量字 + RefreshItemArea。
 bool install_module_view_locked(int bag) {
-    if (g_base == 0 || !virtual_bag::valid_index(bag)) return false;
+    if (g_game == nullptr || !virtual_bag::valid_index(bag)) return false;
     if (g_virtual_bag_state.capacities[bag] == 0) return false;
-    if (fn_control_item_set_item == nullptr || fn_control_object_get_child == nullptr) return false;
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "module view reject install: original window bag=%d (task bag reserved)",
                     original_bag);
         return false;
     }
-    uint32_t* size_word = bag_size_word_locked(original_bag);
-    if (size_word == nullptr) return false;
+    uint32_t size_word = 0;
+    if (!bag_size_word_locked(original_bag, &size_word)) return false;
 
     if (g_module_view_installed) restore_module_view_locked();
     clear_original_desc_locked();  // 原版详情面板不跨视图残留
 
-    g_original_bag_size_word = size_word;
-    g_original_bag_size = *size_word;
+    g_original_bag_size_bag = original_bag;
+    g_original_bag_size = size_word;
     g_module_window_original_bag = original_bag;
     const int capacity = g_virtual_bag_state.capacities[bag];
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    *size_word = (*size_word & ~kCapacityMask) |
-                 (static_cast<uint32_t>(capacity) & kCapacityMask);
+    (void)set_bag_size_word_locked(
+        original_bag, (size_word & ~kCapacityMask) |
+                          (static_cast<uint32_t>(capacity) & kCapacityMask));
 
     void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     g_projected_item_root = root;
-    if (root != nullptr && fn_ui_equip_refresh_item_area != nullptr) {
+    if (root != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
         for (int slot = 0; slot < capacity; ++slot) {
             void* ctrl = valid_child_locked(root, slot);
@@ -490,7 +460,7 @@ bool install_module_view_locked(int bag) {
             void* item = module_item_locked(bag, slot);
             // 空槽也必须 SetItem(nullptr)：RefreshItemArea 刚把 INVEN 原版物品刷进控件，
             // 扩展袋空位不覆盖的话会残留原版物品显示。
-            fn_control_item_set_item(ctrl, item);
+            (void)extension_bag_ui_set_control_item(ctrl, item);
             if (item != nullptr) {
                 ownership::borrow_for_view(&g_ownership_ledger,
                                            g_module_object_handles[bag][slot]);
@@ -507,7 +477,6 @@ bool install_module_view_locked(int bag) {
 // 该函数不再由 draw wrapper 每帧调用；无刷新事务的调用方必须使用定点同步。
 void refresh_projection_if_overwritten_locked() {
     if (!g_module_view_installed || g_projected_item_root == nullptr ||
-        fn_control_item_set_item == nullptr ||
         !virtual_bag::valid_index(g_module_view_index)) {
         return;
     }
@@ -520,7 +489,7 @@ void refresh_projection_if_overwritten_locked() {
         void* data = extension_bag_ui_data(ctrl);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != item) {
-            fn_control_item_set_item(ctrl, item);
+            (void)extension_bag_ui_set_control_item(ctrl, item);
             QOL_LOG_INFO(QolDomain::kExtensionBag, "projection post-refresh slot=%d current=%p item=%p",
                         slot, current, item);
         }
@@ -529,15 +498,13 @@ void refresh_projection_if_overwritten_locked() {
 
 bool sync_projected_slot_locked(int bag, int slot) {
     if (!g_module_view_installed || bag != g_module_view_index ||
-        !virtual_bag::valid_index(bag) || g_projected_item_root == nullptr ||
-        fn_control_item_set_item == nullptr || slot < 0 ||
+        !virtual_bag::valid_index(bag) || g_projected_item_root == nullptr || slot < 0 ||
         slot >= g_virtual_bag_state.capacities[bag]) {
         return false;
     }
     void* ctrl = valid_child_locked(g_projected_item_root, slot);
     if (ctrl == nullptr) return false;
-    fn_control_item_set_item(ctrl, g_module_objects[bag][slot]);
-    return true;
+    return extension_bag_ui_set_control_item(ctrl, g_module_objects[bag][slot]);
 }
 
 void refresh_projected_module_view_after_move_locked() {
@@ -560,7 +527,7 @@ struct RefreshRestoreSuppressScope {
 };
 
 void restore_module_view_locked() {
-    if (!g_module_view_installed || g_base == 0) return;
+    if (!g_module_view_installed) return;
     RefreshRestoreSuppressScope suppress_refresh;
     // P4.3：视图借出逐槽归还（安装时借出的槽位必须成对归还，窗口外借用为零）。
     if (virtual_bag::valid_index(g_module_view_index)) {
@@ -574,16 +541,17 @@ void restore_module_view_locked() {
         log_ownership_audit_locked("restore_module_view");
     }
     clear_original_desc_locked();  // 关闭原版详情面板（二次点击 MakeDesc 打开）
-    if (g_original_bag_size_word != nullptr) {
+    if (g_original_bag_size_bag >= 0) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-        *g_original_bag_size_word =
-            (*g_original_bag_size_word & ~kCapacityMask) |
-            (g_original_bag_size & kCapacityMask);
+        (void)set_bag_size_word_locked(
+            g_original_bag_size_bag,
+            (g_original_bag_size & kCapacityMask) |
+                (g_original_bag_size & ~kCapacityMask));
     }
-    if (fn_ui_equip_refresh_item_area != nullptr) {
+    if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
     }
-    g_original_bag_size_word = nullptr;
+    g_original_bag_size_bag = -1;
     g_original_bag_size = 0;
     g_module_window_original_bag = -1;
     g_projected_item_root = nullptr;
@@ -599,7 +567,7 @@ bool complete_original_exit_locked() {
         return false;
     }
     set_original_bag_locked(selected_original_bag);
-    if (fn_ui_equip_refresh_item_area != nullptr) {
+    if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);
@@ -613,7 +581,7 @@ void cancel_original_exit_locked() {
     const int original_bag = g_original_current_got < kNoOriginalBagSelected ?
                              g_original_current_got : g_original_current_direct;
     set_original_bag_locked(original_bag);
-    if (fn_ui_equip_refresh_item_area != nullptr) {
+    if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&g_virtual_bag_state, original_bag);
@@ -668,7 +636,7 @@ void virtual_bag_inventory_enter_wrapper() {
     if (!g_virtual_bag_enabled.load()) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     install_extension_tab_buttons_locked();
-    if (fn_ui_equip_refresh_item_area != nullptr) {
+    if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
 }
@@ -686,20 +654,28 @@ void virtual_bag_save_panel_enter_wrapper() {
 
 void virtual_bag_draw_end_wrapper() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) != 5) {
+    const int inventory_state = virtual_bag_inventory_state_id();
+    if (inventory_state >= 0 && inventory_state != 5) {
         if (!prepare_main_menu_locked()) {
             g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw-end main-menu cleanup failed; retry scheduled");
         } else {
             g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }
-        if (fn_grpx_end != nullptr) fn_grpx_end();
+        if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
+            (void)g_sdk->ui->end_frame();
+        }
         drain_deferred_frees_locked();
         return;
     }
-    if (g_gamestate != nullptr && *reinterpret_cast<uint32_t*>(g_gamestate) != 0) {
+    int32_t game_state_open = 1;
+    if (g_game != nullptr && g_game->read_only.world.game_state_gate != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.world.game_state_gate(&game_state_open)) &&
+        game_state_open == 0) {
         restore_module_view_locked();
-        if (fn_grpx_end != nullptr) fn_grpx_end();
+        if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
+            (void)g_sdk->ui->end_frame();
+        }
         drain_deferred_frees_locked();
         return;
     }
@@ -711,7 +687,9 @@ void virtual_bag_draw_end_wrapper() {
     }
     if (!g_virtual_bag_enabled.load()) {
         restore_module_view_locked();
-        if (fn_grpx_end != nullptr) fn_grpx_end();
+        if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
+            (void)g_sdk->ui->end_frame();
+        }
         drain_deferred_frees_locked();
         return;
     }
@@ -741,6 +719,8 @@ void virtual_bag_draw_end_wrapper() {
         last_overlay_index = g_module_view_index;
     }
     draw_cells_in_frame_locked();
-    if (fn_grpx_end != nullptr) fn_grpx_end();
+    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
+        (void)g_sdk->ui->end_frame();
+    }
     drain_deferred_frees_locked();
 }

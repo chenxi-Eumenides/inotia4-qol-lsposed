@@ -25,10 +25,10 @@ void refresh_tab_bag_items_locked() {
         }
         slot = extension_create_item(static_cast<int32_t>(type), 0, 0, 0);
         if (slot != nullptr) {
-            const uint32_t count_flags =
-                *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT);
-            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(slot) + I_COUNT) =
-                ::qol::features::extension_bag::write_native_bag_object_marker(count_flags);
+            if (!mark_native_bag_object(slot)) {
+                (void)defer_item_free_locked(slot);
+                slot = nullptr;
+            }
         }
     }
 }

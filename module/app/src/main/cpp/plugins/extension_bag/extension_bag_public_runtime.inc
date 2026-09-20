@@ -68,8 +68,7 @@ void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* contro
 
 bool virtual_bag_is_inventory_enter(uintptr_t enter) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    return g_state_entry != nullptr &&
-           enter == *reinterpret_cast<uintptr_t*>(g_state_entry + POPUP_ENTRY_ENTER);
+    return g_inventory_enter != 0 && enter == g_inventory_enter;
 }
 
 bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int target_slot,
@@ -126,8 +125,10 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
     const int source_category = g_virtual_bag_state.items[src_bag][src_slot].category;
     const bool source_is_jewel = read_item_is_jewel(source_category);
     const char* kind = source_is_jewel ? "jewel" : "scroll";
-    if (fn_ui_equip_is_apply_stuff == nullptr ||
-        fn_ui_equip_is_apply_stuff(target_item, material) == 0) {
+    int32_t apply_allowed = 0;
+    if (g_game == nullptr || g_game->read_only.character.can_apply_stuff == nullptr ||
+        !qol::contracts::succeeded(g_game->read_only.character.can_apply_stuff(
+            target_item, material, &apply_allowed)) || apply_allowed == 0) {
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
             virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
         }
@@ -225,7 +226,7 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
     target_descriptor.payload_size = payload_size;
     // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
     if (read_item_cumulate_count(target_item, &target_descriptor.count)) {
-        target_descriptor.count = canonical_item_count(target_item);
+        target_descriptor.count = static_cast<int>(virtual_bag_canonical_count(target_item, 1));
     }
     g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
     g_item_state_dirty = true;
@@ -256,7 +257,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         return VirtualBagProjectionDropResult::kNotExtension;
     }
     if (!g_module_view_installed || dst_control == nullptr ||
-        fn_ui_equip_get_item_slot_index == nullptr ||
+        g_sdk == nullptr || g_sdk->ui == nullptr ||
         g_module_view_index != src_bag || g_projected_item_root == nullptr) {
         VIRTBAG_LOG("drop rejected: extension source view mismatch src=%d/%d view=%d root=%p",
                     src_bag, src_slot, g_module_view_index, g_projected_item_root);
@@ -272,7 +273,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
                     g_projected_item_root, live_root);
         return VirtualBagProjectionDropResult::kRejected;
     }
-    const int dst_slot = fn_ui_equip_get_item_slot_index(dst_control);
+    const int dst_slot = extension_bag_ui_item_slot(dst_control);
     const bool destination_control_matches =
         dst_slot >= 0 && dst_slot < g_virtual_bag_state.capacities[g_module_view_index] &&
         valid_child_locked(g_projected_item_root, dst_slot) == dst_control;
@@ -321,9 +322,11 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     // 数据不可用返回 false，按非装备 fail-closed 回退 swap），不得按
     // 「不可堆叠」近似装备。非 apply 候选必须 fallthrough 到下方扩展事务，
     // 不得吞事件或 Blocked。
-    const bool apply_stuff_allowed = fn_ui_equip_is_apply_stuff != nullptr &&
-                                     target_item != nullptr &&
-                                     fn_ui_equip_is_apply_stuff(target_item, item) != 0;
+    int32_t apply_allowed = 0;
+    const bool apply_stuff_allowed = target_item != nullptr && g_game != nullptr &&
+        g_game->read_only.character.can_apply_stuff != nullptr &&
+        qol::contracts::succeeded(g_game->read_only.character.can_apply_stuff(
+            target_item, item, &apply_allowed)) && apply_allowed != 0;
     const bool apply_candidate = extension_bag_is_apply_candidate(
         src_bag == dst_bag, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
@@ -371,13 +374,13 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_virtual_bag_enabled.load() || !g_module_view_installed ||
         control == nullptr || source_control == nullptr ||
-        fn_ui_equip_get_item_slot_index == nullptr) {
+        g_sdk == nullptr || g_sdk->ui == nullptr) {
         return false;
     }
     if (extension_tab_index(control) >= 0) {
         return false;
     }
-    const int target_slot = fn_ui_equip_get_item_slot_index(control);
+    const int target_slot = extension_bag_ui_item_slot(control);
     if (target_slot < 0) {
         return false;
     }
@@ -525,8 +528,7 @@ bool virtual_bag_module_save_abort(int slot, const char* transaction_id) {
 bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
-        g_projected_item_root == nullptr || fn_control_object_get_child == nullptr ||
-        fn_control_item_set_item == nullptr) {
+        g_projected_item_root == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr) {
         return false;
     }
     if (!virtual_bag::valid_original_transaction_bag(display_bag) ||
@@ -543,14 +545,14 @@ bool virtual_bag_sync_projected_item_control(void* control) {
     if (control == nullptr) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
-        g_projected_item_root == nullptr || fn_control_object_get_child == nullptr ||
-        fn_control_item_set_item == nullptr) {
+        g_projected_item_root == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr) {
         return false;
     }
     const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
     for (int slot = 0; slot < capacity; ++slot) {
         if (extension_bag_ui_child_at(g_projected_item_root, slot) == control) {
-            fn_control_item_set_item(control, g_module_objects[g_module_view_index][slot]);
+            (void)extension_bag_ui_set_control_item(
+                control, g_module_objects[g_module_view_index][slot]);
             return true;
         }
     }

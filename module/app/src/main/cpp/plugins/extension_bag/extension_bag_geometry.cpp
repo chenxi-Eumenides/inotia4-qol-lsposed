@@ -178,6 +178,85 @@ bool extension_bag_ui_draw_item(void* item, int32_t x, int32_t y, int32_t a, int
            qol::contracts::succeeded(ui->draw_item_porting(item, x, y, a, b));
 }
 
+bool extension_bag_ui_create_control(void* parent, void** out_control) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->create_control != nullptr && out_control != nullptr &&
+           qol::contracts::succeeded(ui->create_control(1, parent, out_control));
+}
+
+bool extension_bag_ui_delete_control(void* control) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->delete_control != nullptr && control != nullptr &&
+           qol::contracts::succeeded(ui->delete_control(control));
+}
+
+bool extension_bag_ui_set_control_item(void* control, void* item) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->set_control_item != nullptr && control != nullptr &&
+           qol::contracts::succeeded(ui->set_control_item(control, item));
+}
+
+bool extension_bag_ui_set_control_proc(void* control, qol::contracts::QolUiControlProcFn proc) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->set_control_proc != nullptr && control != nullptr && proc != nullptr &&
+           qol::contracts::succeeded(ui->set_control_proc(control, proc));
+}
+
+bool extension_bag_ui_set_control_user_type(void* control, int type) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->set_control_user_type != nullptr && control != nullptr &&
+           qol::contracts::succeeded(ui->set_control_user_type(control, type));
+}
+
+bool extension_bag_ui_set_control_data(void* control, void* data) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->set_control_data != nullptr && control != nullptr &&
+           qol::contracts::succeeded(ui->set_control_data(control, data));
+}
+
+bool extension_bag_ui_allocate_control_data(uint32_t size, void** out_data) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->allocate_control_data != nullptr && out_data != nullptr &&
+           qol::contracts::succeeded(ui->allocate_control_data(size, out_data));
+}
+
+bool extension_bag_ui_unuse_control_event_move(void* control) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->unuse_control_event_move != nullptr && control != nullptr &&
+           qol::contracts::succeeded(ui->unuse_control_event_move(control));
+}
+
+bool extension_bag_ui_control_is_moving(void* control) {
+    const auto* ui = extension_bag_ui();
+    if (ui == nullptr || ui->control_is_moving == nullptr || control == nullptr) return false;
+    int32_t moving = 0;
+    return qol::contracts::succeeded(ui->control_is_moving(control, &moving)) && moving != 0;
+}
+
+bool extension_bag_ui_clear_control_drag_flags(void* control) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->clear_control_drag_flags != nullptr && control != nullptr &&
+           qol::contracts::succeeded(ui->clear_control_drag_flags(control));
+}
+
+bool extension_bag_ui_clear_touch_state() {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->clear_touch_state != nullptr &&
+           qol::contracts::succeeded(ui->clear_touch_state());
+}
+
+bool extension_bag_ui_set_touch_release_input(int64_t x, int64_t y, uint64_t param) {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->set_touch_release_input != nullptr &&
+           qol::contracts::succeeded(ui->set_touch_release_input(x, y, param));
+}
+
+bool extension_bag_ui_clear_touch_drop_event() {
+    const auto* ui = extension_bag_ui();
+    return ui != nullptr && ui->clear_touch_drop_event != nullptr &&
+           qol::contracts::succeeded(ui->clear_touch_drop_event());
+}
+
 bool extension_bag_ui_fill_rect(UiRect rect, uint32_t color) {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->fill_rect != nullptr &&
