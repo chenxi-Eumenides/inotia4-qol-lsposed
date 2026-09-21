@@ -29,15 +29,15 @@
 | `infra/` | 37 | 3391 |
 | `hooks/` | 10 | 1589 |
 | `patch/` | 9 | 1086 |
-| `plugins/` | 167 | 33252 |
-| `host/` | 22 | 6281 |
-| **合计** | **335** | **56145** |
+| `plugins/` | 167 | 33257 |
+| `host/` | 24 | 6451 |
+| **合计** | **337** | **56320** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_quality/`：6 文件 / 411 行
 - `plugins/attribute_range_display/`：4 文件 / 238 行
-- `plugins/autosell/`：17 文件 / 2421 行
+- `plugins/autosell/`：17 文件 / 2426 行
 - `plugins/core.api/`：3 文件 / 239 行
 - `plugins/core.ui/`：17 文件 / 2188 行
 - `plugins/craft_ui/`：4 文件 / 997 行
