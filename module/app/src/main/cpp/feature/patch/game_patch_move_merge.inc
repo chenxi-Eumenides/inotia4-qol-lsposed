@@ -157,7 +157,7 @@ bool update_move_merge_hook_locked() {
     }
     if (should_install) {
         bool ok = g_move_merge_hook.install_typed(slot, &ui_equip_inven_item_proc_wrapper);
-        if (ok) {
+        if (ok && move_merge_info_state_changed()) {
             MOVE_LOG("move_merge: wrapper installed proc_got=%p orig=%p replacement=%p merge=%d extension_protection=%d",
                      slot, g_move_merge_hook.orig,
                      reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
@@ -168,15 +168,20 @@ bool update_move_merge_hook_locked() {
     }
     if (g_move_merge_hook.orig == nullptr) return true;
     g_move_merge_hook.uninstall();
-    MOVE_LOG("move_merge: disabled");
+    if (move_merge_info_state_changed()) MOVE_LOG("move_merge: disabled");
     return true;
 }
 
 bool set_move_merge_enabled(bool enabled) {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
+    const bool previous_requested = g_move_merge_requested.load();
+    const bool previous_hook_installed = g_move_merge_hook.orig != nullptr;
     g_move_merge_requested.store(enabled);
     const bool ok = update_move_merge_hook_locked();
-    if (ok) {
+    if (move_merge_log::setter_info_should_emit(
+            previous_requested != enabled,
+            previous_hook_installed != (g_move_merge_hook.orig != nullptr), ok) &&
+        move_merge_info_state_changed()) {
         MOVE_LOG("move_merge: behavior=%d wrapper=%d extension_protection=%d",
                  enabled ? 1 : 0, g_move_merge_hook.orig != nullptr ? 1 : 0,
                  g_extension_source_protection_requested.load() ? 1 : 0);
@@ -186,9 +191,14 @@ bool set_move_merge_enabled(bool enabled) {
 
 bool set_extension_source_protection_enabled(bool enabled) {
     std::lock_guard<std::mutex> lock(g_move_merge_mtx);
+    const bool previous_requested = g_extension_source_protection_requested.load();
+    const bool previous_hook_installed = g_move_merge_hook.orig != nullptr;
     g_extension_source_protection_requested.store(enabled);
     const bool ok = update_move_merge_hook_locked();
-    if (ok) {
+    if (move_merge_log::setter_info_should_emit(
+            previous_requested != enabled,
+            previous_hook_installed != (g_move_merge_hook.orig != nullptr), ok) &&
+        move_merge_info_state_changed()) {
         MOVE_LOG("move_merge: extension_source_protection=%d wrapper=%d merge=%d",
                  enabled ? 1 : 0, g_move_merge_hook.orig != nullptr ? 1 : 0,
                  g_move_merge_requested.load() ? 1 : 0);

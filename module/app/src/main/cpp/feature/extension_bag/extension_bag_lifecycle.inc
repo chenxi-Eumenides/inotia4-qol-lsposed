@@ -20,26 +20,38 @@ bool patch_save_callsite(const SaveCallsiteSpec& spec, size_t index) {
     if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
         branch_target = reinterpret_cast<uintptr_t>(allocate_draw_thunk(call_addr, wrapper));
         if (branch_target == 0) {
-            VIRTBAG_LOG("save callsite thunk allocation failed name=%s call=%p", spec.name,
-                        reinterpret_cast<void*>(call_addr));
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kSaveCallsiteFailed,
+                                        call_addr, wrapper, static_cast<int32_t>(index)})) {
+                VIRTBAG_LOG("save callsite thunk allocation failed name=%s call=%p", spec.name,
+                            reinterpret_cast<void*>(call_addr));
+            }
             return false;
         }
     }
     const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
     if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-        VIRTBAG_LOG("save callsite branch out of range name=%s call=%p target=%p", spec.name,
-                    reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+        if (inject_retry_log_first({extension_bag_retry::FailureKind::kSaveCallsiteFailed,
+                                    call_addr, branch_target, static_cast<int32_t>(index)})) {
+            VIRTBAG_LOG("save callsite branch out of range name=%s call=%p target=%p", spec.name,
+                        reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+        }
         return false;
     }
     const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
     const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
     if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        VIRTBAG_LOG("save callsite mprotect failed name=%s errno=%d", spec.name, errno);
+        if (inject_retry_log_first({extension_bag_retry::FailureKind::kSaveCallsiteFailed,
+                                    call_addr, 0, static_cast<int32_t>(index), errno})) {
+            VIRTBAG_LOG("save callsite mprotect failed name=%s errno=%d", spec.name, errno);
+        }
         return false;
     }
     const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
     if (current != spec.original_instruction && current != replacement) {
-        VIRTBAG_LOG("save callsite mismatch name=%s got=0x%08x", spec.name, current);
+        if (inject_retry_log_first({extension_bag_retry::FailureKind::kSaveCallsiteFailed,
+                                    call_addr, 0, static_cast<int32_t>(index), 0, current})) {
+            VIRTBAG_LOG("save callsite mismatch name=%s got=0x%08x", spec.name, current);
+        }
         return false;
     }
     *reinterpret_cast<uint32_t*>(call_addr) = replacement;
@@ -511,8 +523,12 @@ bool inject_locked() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_virtual_bag_enabled.load()) return false;
     if (!set_extension_source_protection_enabled(true)) {
-        QOL_LOG_INFO(QolDomain::kExtensionBag, "extension source protection install pending base=0x%llx",
-                    static_cast<unsigned long long>(g_base));
+        if (inject_retry_log_first({extension_bag_retry::FailureKind::kSourceProtectionPending,
+                                    g_base})) {
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                         "extension source protection install pending base=0x%llx",
+                         static_cast<unsigned long long>(g_base));
+        }
         return false;
     }
     const bool install_inventory_hook = g_state_entry == nullptr;
@@ -523,7 +539,12 @@ bool inject_locked() {
         const uintptr_t expected_event =
             g_base + fn_resolve("F_SCENE_EVENT_EQUIP_VMA", F_SCENE_EVENT_EQUIP_VMA);
         if (*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT) != expected_event) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory state callbacks differ from expected symbols");
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kInventoryStateCallbacksMismatch,
+                                        reinterpret_cast<uintptr_t>(entry)})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory state callbacks differ from expected symbols entry=%p",
+                             entry);
+            }
             return false;
         }
         g_orig_event = reinterpret_cast<PopupEventFn>(*reinterpret_cast<uintptr_t*>(entry + POPUP_ENTRY_EVENT));
@@ -542,25 +563,47 @@ bool inject_locked() {
         if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
             g_item_draw_thunk = allocate_draw_thunk(item_draw_call, wrapper);
             if (g_item_draw_thunk == nullptr) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory item draw thunk allocation failed");
+                if (inject_retry_log_first({extension_bag_retry::FailureKind::kItemDrawThunkFailed,
+                                            item_draw_call, wrapper})) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "inventory item draw thunk allocation failed call=%p wrapper=%p",
+                                 reinterpret_cast<void*>(item_draw_call),
+                                 reinterpret_cast<void*>(wrapper));
+                }
                 return false;
             }
             branch_target = reinterpret_cast<uintptr_t>(g_item_draw_thunk);
         }
         const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(item_draw_call);
         if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory item draw target out of range");
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kItemDrawTargetOutOfRange,
+                                        item_draw_call, branch_target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory item draw target out of range call=%p target=%p",
+                             reinterpret_cast<void*>(item_draw_call),
+                             reinterpret_cast<void*>(branch_target));
+            }
             return false;
         }
         const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
         const uintptr_t page = item_draw_call & ~(static_cast<uintptr_t>(kPageSize) - 1);
         if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory item draw patch mprotect failed errno=%d", errno);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kItemDrawMprotectFailed,
+                                        item_draw_call, 0, 0, errno})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory item draw patch mprotect failed call=%p errno=%d",
+                             reinterpret_cast<void*>(item_draw_call), errno);
+            }
             return false;
         }
         const uint32_t current = *reinterpret_cast<uint32_t*>(item_draw_call);
         if (current != kOriginalItemDrawCall && current != replacement) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory item draw patch mismatch got=0x%08x", current);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kItemDrawPatchMismatch,
+                                        item_draw_call, 0, 0, 0, current})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory item draw patch mismatch call=%p got=0x%08x",
+                             reinterpret_cast<void*>(item_draw_call), current);
+            }
             return false;
         }
         *reinterpret_cast<uint32_t*>(item_draw_call) = replacement;
@@ -579,25 +622,47 @@ bool inject_locked() {
         if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
             g_bag_draw_thunk = allocate_draw_thunk(bag_draw_call, wrapper);
             if (g_bag_draw_thunk == nullptr) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory bag draw thunk allocation failed");
+                if (inject_retry_log_first({extension_bag_retry::FailureKind::kBagDrawThunkFailed,
+                                            bag_draw_call, wrapper})) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "inventory bag draw thunk allocation failed call=%p wrapper=%p",
+                                 reinterpret_cast<void*>(bag_draw_call),
+                                 reinterpret_cast<void*>(wrapper));
+                }
                 return false;
             }
             branch_target = reinterpret_cast<uintptr_t>(g_bag_draw_thunk);
         }
         const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(bag_draw_call);
         if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory bag draw target out of range");
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kBagDrawTargetOutOfRange,
+                                        bag_draw_call, branch_target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory bag draw target out of range call=%p target=%p",
+                             reinterpret_cast<void*>(bag_draw_call),
+                             reinterpret_cast<void*>(branch_target));
+            }
             return false;
         }
         const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
         const uintptr_t page = bag_draw_call & ~(static_cast<uintptr_t>(kPageSize) - 1);
         if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory bag draw patch mprotect failed errno=%d", errno);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kBagDrawMprotectFailed,
+                                        bag_draw_call, 0, 0, errno})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory bag draw patch mprotect failed call=%p errno=%d",
+                             reinterpret_cast<void*>(bag_draw_call), errno);
+            }
             return false;
         }
         const uint32_t current = *reinterpret_cast<uint32_t*>(bag_draw_call);
         if (current != kOriginalBagDrawCall && current != replacement) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory bag draw patch mismatch got=0x%08x", current);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kBagDrawPatchMismatch,
+                                        bag_draw_call, 0, 0, 0, current})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory bag draw patch mismatch call=%p got=0x%08x",
+                             reinterpret_cast<void*>(bag_draw_call), current);
+            }
             return false;
         }
         *reinterpret_cast<uint32_t*>(bag_draw_call) = replacement;
@@ -616,27 +681,46 @@ bool inject_locked() {
         if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
             g_draw_thunk = allocate_draw_thunk(call_addr, wrapper);
             if (g_draw_thunk == nullptr) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory draw wrapper out of BL range and thunk allocation failed call=%p wrapper=%p",
-                            reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawWrapperThunkFailed,
+                                            call_addr, wrapper})) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "inventory draw wrapper out of BL range and thunk allocation failed call=%p wrapper=%p",
+                                 reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                }
                 return false;
             }
             branch_target = reinterpret_cast<uintptr_t>(g_draw_thunk);
         }
         const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
         if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory draw branch target out of BL range call=%p target=%p",
-                        reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawBranchOutOfRange,
+                                        call_addr, branch_target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory draw branch target out of BL range call=%p target=%p",
+                             reinterpret_cast<void*>(call_addr),
+                             reinterpret_cast<void*>(branch_target));
+            }
             return false;
         }
         const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
         const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
         if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory draw patch mprotect failed errno=%d", errno);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawMprotectFailed,
+                                        call_addr, 0, 0, errno})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory draw patch mprotect failed call=%p errno=%d",
+                             reinterpret_cast<void*>(call_addr), errno);
+            }
             return false;
         }
         const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
         if (current != kOriginalEndCall && current != replacement) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "inventory draw patch mismatch got=0x%08x", current);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawPatchMismatch,
+                                        call_addr, 0, 0, 0, current})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "inventory draw patch mismatch call=%p got=0x%08x",
+                             reinterpret_cast<void*>(call_addr), current);
+            }
             return false;
         }
         *reinterpret_cast<uint32_t*>(call_addr) = replacement;
@@ -653,15 +737,24 @@ bool inject_locked() {
             g_base + fn_resolve("F_SAVE_SAVE_INVENTORY_VMA", F_SAVE_SAVE_INVENTORY_VMA);
         const NativeHookFunType hook_func = native_hook_func();
         if (hook_func == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "save gate: native hook func unavailable");
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kNativeHookUnavailable,
+                                        target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "save gate: native hook func unavailable target=%p",
+                             reinterpret_cast<void*>(target));
+            }
             return false;
         }
         void* backup = nullptr;
         const int result = hook_func(reinterpret_cast<void*>(target),
                                      reinterpret_cast<void*>(&save_inventory_wrapper), &backup);
         if (result != 0 || backup == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "save gate: hook failed target=%p result=%d backup=%p",
-                        reinterpret_cast<void*>(target), result, backup);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kSaveHookFailed,
+                                        target, reinterpret_cast<uintptr_t>(backup), result})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "save gate: hook failed target=%p result=%d backup=%p",
+                             reinterpret_cast<void*>(target), result, backup);
+            }
             return false;
         }
         g_backup_save_inventory = backup;
@@ -681,27 +774,45 @@ bool inject_locked() {
         if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
             g_drop_gate_thunk = allocate_draw_thunk(call_addr, wrapper);
             if (g_drop_gate_thunk == nullptr) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "drop gate thunk allocation failed call=%p wrapper=%p",
-                            reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                if (inject_retry_log_first({extension_bag_retry::FailureKind::kDropGateThunkFailed,
+                                            call_addr, wrapper})) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "drop gate thunk allocation failed call=%p wrapper=%p",
+                                 reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                }
                 return false;
             }
             branch_target = reinterpret_cast<uintptr_t>(g_drop_gate_thunk);
         }
         const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
         if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "drop gate branch target out of range call=%p target=%p",
-                        reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDropGateOutOfRange,
+                                        call_addr, branch_target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "drop gate branch target out of range call=%p target=%p",
+                             reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            }
             return false;
         }
         const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
         const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
         if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "drop gate patch mprotect failed errno=%d", errno);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDropGateMprotectFailed,
+                                        call_addr, 0, 0, errno})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "drop gate patch mprotect failed call=%p errno=%d",
+                             reinterpret_cast<void*>(call_addr), errno);
+            }
             return false;
         }
         const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
         if (current != kOriginalDropCall && current != replacement) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "drop gate patch mismatch got=0x%08x", current);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDropGatePatchMismatch,
+                                        call_addr, 0, 0, 0, current})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "drop gate patch mismatch call=%p got=0x%08x",
+                             reinterpret_cast<void*>(call_addr), current);
+            }
             return false;
         }
         *reinterpret_cast<uint32_t*>(call_addr) = replacement;
@@ -721,27 +832,45 @@ bool inject_locked() {
         if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
             g_draw_gate_thunk = allocate_draw_thunk(call_addr, wrapper);
             if (g_draw_gate_thunk == nullptr) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "draw gate thunk allocation failed call=%p wrapper=%p",
-                            reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawGateThunkFailed,
+                                            call_addr, wrapper})) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "draw gate thunk allocation failed call=%p wrapper=%p",
+                                 reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                }
                 return false;
             }
             branch_target = reinterpret_cast<uintptr_t>(g_draw_gate_thunk);
         }
         const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
         if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "draw gate branch target out of range call=%p target=%p",
-                        reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawGateOutOfRange,
+                                        call_addr, branch_target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "draw gate branch target out of range call=%p target=%p",
+                             reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            }
             return false;
         }
         const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
         const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
         if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "draw gate patch mprotect failed errno=%d", errno);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawGateMprotectFailed,
+                                        call_addr, 0, 0, errno})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "draw gate patch mprotect failed call=%p errno=%d",
+                             reinterpret_cast<void*>(call_addr), errno);
+            }
             return false;
         }
         const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
         if (current != kOriginalDrawCall && current != replacement) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "draw gate patch mismatch got=0x%08x", current);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDrawGatePatchMismatch,
+                                        call_addr, 0, 0, 0, current})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "draw gate patch mismatch call=%p got=0x%08x",
+                             reinterpret_cast<void*>(call_addr), current);
+            }
             return false;
         }
         *reinterpret_cast<uint32_t*>(call_addr) = replacement;
@@ -765,27 +894,45 @@ bool inject_locked() {
         if ((direct_delta & 0x3) != 0 || direct_delta <= -0x08000000LL || direct_delta >= 0x08000000LL) {
             g_desc_open_thunk = allocate_draw_thunk(call_addr, wrapper);
             if (g_desc_open_thunk == nullptr) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "desc open gate thunk allocation failed call=%p wrapper=%p",
-                            reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                if (inject_retry_log_first({extension_bag_retry::FailureKind::kDescOpenThunkFailed,
+                                            call_addr, wrapper})) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "desc open gate thunk allocation failed call=%p wrapper=%p",
+                                 reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(wrapper));
+                }
                 return false;
             }
             branch_target = reinterpret_cast<uintptr_t>(g_desc_open_thunk);
         }
         const int64_t delta = static_cast<int64_t>(branch_target) - static_cast<int64_t>(call_addr);
         if ((delta & 0x3) != 0 || delta <= -0x08000000LL || delta >= 0x08000000LL) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "desc open gate branch target out of range call=%p target=%p",
-                        reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDescOpenOutOfRange,
+                                        call_addr, branch_target})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "desc open gate branch target out of range call=%p target=%p",
+                             reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(branch_target));
+            }
             return false;
         }
         const uint32_t replacement = 0x94000000u | (static_cast<uint32_t>(delta >> 2) & 0x03ffffffu);
         const uintptr_t page = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
         if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "desc open gate patch mprotect failed errno=%d", errno);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDescOpenMprotectFailed,
+                                        call_addr, 0, 0, errno})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "desc open gate patch mprotect failed call=%p errno=%d",
+                             reinterpret_cast<void*>(call_addr), errno);
+            }
             return false;
         }
         const uint32_t current = *reinterpret_cast<uint32_t*>(call_addr);
         if (current != kOriginalDescOpenCall && current != replacement) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "desc open gate patch mismatch got=0x%08x", current);
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kDescOpenPatchMismatch,
+                                        call_addr, 0, 0, 0, current})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "desc open gate patch mismatch call=%p got=0x%08x",
+                             reinterpret_cast<void*>(call_addr), current);
+            }
             return false;
         }
         *reinterpret_cast<uint32_t*>(call_addr) = replacement;
@@ -819,19 +966,35 @@ bool inject_locked() {
                 F_PANEL_SAVE_SLOT_ENTER);
             QOL_LOG_INFO(QolDomain::kExtensionBag, "save panel enter hook installed entry=%p", save_entry);
         } else {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "save panel entry not ready; injection will retry");
+            if (inject_retry_log_first({extension_bag_retry::FailureKind::kSavePanelUnavailable,
+                                        reinterpret_cast<uintptr_t>(entry)})) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "save panel entry not ready; injection will retry entry=%p", entry);
+            }
         }
     }
     if (!install_store_hooks_locked()) return false;
     if (!install_mix_hooks_locked()) return false;
+    const extension_bag_retry::InjectionInstallState install_state{
+        g_state_entry != nullptr,
+        g_save_panel_hook_installed,
+        store_hooks_installed(),
+        mix_hooks_installed(),
+    };
+    if (!extension_bag_retry::injection_complete(install_state)) return false;
+    inject_retry_log_reset();
     return true;
 }
 
 void ensure_inject_thread() {
     if (g_inject_thread_started.exchange(true)) return;
     std::thread([]() {
-        while (g_state_entry == nullptr || !g_save_panel_hook_installed ||
-               !store_hooks_installed() || !mix_hooks_installed()) {
+        while (!extension_bag_retry::injection_complete({
+            g_state_entry != nullptr,
+            g_save_panel_hook_installed,
+            store_hooks_installed(),
+            mix_hooks_installed(),
+        })) {
             inject_locked();
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }

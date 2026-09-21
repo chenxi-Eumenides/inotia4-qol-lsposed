@@ -11,6 +11,7 @@
 #include "feature/extension_bag/game_ui_virtbag.h"
 #include "feature/patch/native_inventory_hook.h"
 #include "feature/patch/inventory_hook_stage4.h"
+#include "feature/patch/game_patch_move_merge_log.h"
 
 #include <atomic>
 #include <cerrno>
@@ -42,6 +43,17 @@ PtrHook g_move_merge_hook;
 std::mutex g_move_merge_mtx;
 std::atomic<bool> g_move_merge_requested{false};
 std::atomic<bool> g_extension_source_protection_requested{false};
+QolLogChangeGate g_move_merge_info_gate{};
+
+int64_t move_merge_info_fingerprint() {
+    return (g_move_merge_requested.load() ? 1 : 0) |
+           (g_extension_source_protection_requested.load() ? 2 : 0) |
+           (g_move_merge_hook.orig != nullptr ? 4 : 0);
+}
+
+bool move_merge_info_state_changed() {
+    return g_move_merge_info_gate.changed(move_merge_info_fingerprint());
+}
 
 uintptr_t patch_addr(const PatchEntry& e) {
     if (g_base == 0) return 0;

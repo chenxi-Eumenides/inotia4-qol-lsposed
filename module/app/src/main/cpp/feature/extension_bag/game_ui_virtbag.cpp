@@ -23,6 +23,7 @@
 #include "feature/extension_bag/extension_bag_context.h"
 #include "feature/extension_bag/extension_bag_geometry.h"
 #include "feature/extension_bag/extension_bag_logging.h"
+#include "feature/extension_bag/extension_bag_retry_log.h"
 #include "feature/ui/game_ui_kit.h"
 
 #include <atomic>
@@ -76,6 +77,8 @@ using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 
 std::mutex g_virtual_bag_mtx;
+extension_bag_retry::RetryLogState g_inject_retry_log_state{};
+QolLogChangeGate g_inject_retry_debug_gate{};
 std::atomic<bool> g_inject_thread_started{false};
 std::atomic<bool> g_lifecycle_thread_started{false};
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
@@ -107,6 +110,21 @@ void* g_bag_draw_thunk = nullptr;
 void* g_item_draw_thunk = nullptr;
 virtual_bag::State g_virtual_bag_state{};
 int g_loaded_slot = -2;
+
+bool inject_retry_log_first(const extension_bag_retry::FailureKey& key) {
+    if (g_inject_retry_log_state.observe_failure(key)) return true;
+    QOL_LOG_DEBUG_ON_CHANGE(
+        QolDomain::kExtensionBag, g_inject_retry_debug_gate,
+        extension_bag_retry::debug_fingerprint(key),
+        "injection retry failure repeated kind=%u",
+        static_cast<unsigned>(key.kind));
+    return false;
+}
+
+void inject_retry_log_reset() {
+    g_inject_retry_log_state.reset();
+    g_inject_retry_debug_gate = {};
+}
 
 uint64_t isolation_now_ms_locked();
 std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_objects{};

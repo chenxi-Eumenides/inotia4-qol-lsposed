@@ -52,6 +52,15 @@ target_include_directories(near_thunk_rules_tests PRIVATE
 target_compile_features(near_thunk_rules_tests PRIVATE cxx_std_17)
 add_test(NAME near_thunk_rules_tests COMMAND near_thunk_rules_tests)
 
+add_executable(extension_bag_retry_log_tests
+    test_extension_bag_retry_log.cpp
+)
+target_include_directories(extension_bag_retry_log_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(extension_bag_retry_log_tests PRIVATE cxx_std_17)
+add_test(NAME extension_bag_retry_log_tests COMMAND extension_bag_retry_log_tests)
+
 add_executable(stage4_hook_tests
     test_inventory_hook_stage4.cpp
     ${CPP_DIR}/feature/patch/inventory_hook_stage4.cpp
