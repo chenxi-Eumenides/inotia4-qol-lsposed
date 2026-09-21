@@ -127,6 +127,8 @@ data 层 → 仅 STL
 | `core/native/save_exit.*` | core | 退出存档回调：world→主菜单发起点 call_patch（GAMESTATE_SetState+0xb0 bl GAME_Exit）触发一次 | call_patch / game_access |
 | `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
 | `core/native/qol_log.*` | core | **统一日志单写者**：行格式化、logcat + 文件发射、debug 运行时门控、逐帧节流原语；格式与规则唯一权威见 `docs/development/logging.md` | 仅 STL（Android 时含 `<android/log.h>`） |
+| `core/native/near_code_alloc.h/.cpp` | core | 近址代码页/槽分配器：mmap hint + 严格校验返回值、失败退避、线程安全复用 | 仅供 `call_patch` / `extension_bag` / `world_teleport` 使用；core 不依赖 feature |
+| `core/native/near_thunk_rules.h` | core | 候选枚举与 BL 可达性等纯规则：细扫跳过粗扫偏移、4 字节对齐、±0x08000000 严格边界 | 仅 STL；Host 测试共用 |
 | `core/native/game_variant.*` | core | **游戏变体识别**：按挂载 `libgame.so` 的 md5 查离线表（`scripts/data/game_variant_table.py` → `data/native/game_variant_table.inc`）得系列/版本/能力位；未命中回退扫 `WH4JRN01`（§4.1） | 仅 STL + 生成的表 |
 | `core/native/game_feature.*` | core | **功能抽象层**：`game_feature_state()` 把版本能力翻译为 有无/当前是否可用（可用性由上层注入回调）（§4.1） | game_variant.h + 仅 STL |
 | `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |

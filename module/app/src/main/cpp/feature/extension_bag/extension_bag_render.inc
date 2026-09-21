@@ -777,69 +777,20 @@ void virtual_bag_draw_end_wrapper() {
     drain_deferred_frees_locked();
 }
 
-// thunk 页登记：每页 4096B 承载 28B thunk，剩余空间可复用（页必在 libgame
-// 调用点 ±128MB 内，多挂钩共享免再扫地址空间；粗扫粒度下零星单页空洞会
-// 耗尽——真机实证：第 7 个挂钩因分配失败拖垮整个注入链）。
-std::array<void*, 8> g_thunk_pages{};
-size_t g_thunk_page_count = 0;
-size_t g_thunk_page_used = 0;  // 当前页已用槽位数（每槽 32B 对齐）
-
 void* allocate_draw_thunk(uintptr_t call_addr, uintptr_t wrapper) {
-#ifndef MAP_FIXED_NOREPLACE
-    (void)call_addr;
-    (void)wrapper;
-    return nullptr;
-#else
-    constexpr size_t kPageSize = 4096;
     constexpr size_t kThunkSlot = 32;
-    const auto emit_thunk = [](void* slot, uintptr_t wrapper_addr) {
-        uint32_t code[] = {
-            0xa9bf7bf0, // stp x16, x30, [sp, #-16]!
-            0x58000090, // ldr x16, #16 (literal at thunk+20)
-            0xd63f0200, // blr x16
-            0xa8c17bf0, // ldp x16, x30, [sp], #16
-            0xd65f03c0, // ret
-        };
-        memcpy(slot, code, sizeof(code));
-        *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(slot) + 20) = wrapper_addr;
-        __builtin___clear_cache(reinterpret_cast<char*>(slot),
-                                reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + kThunkSlot));
+    void* slot = near_code_slot_alloc(call_addr, kThunkSlot);
+    if (slot == nullptr) return nullptr;
+    uint32_t code[] = {
+        0xa9bf7bf0, // stp x16, x30, [sp, #-16]!
+        0x58000090, // ldr x16, #16 (literal at thunk+20)
+        0xd63f0200, // blr x16
+        0xa8c17bf0, // ldp x16, x30, [sp], #16
+        0xd65f03c0, // ret
     };
-    // 1) 已有页 carving（校验对本调用点的 BL 可达性：页可能在别的调用点
-    // ±128MB 边缘，libgame 跨度 ~20MB 时存在不可达组合）。
-    if (g_thunk_page_count > 0) {
-        void* page = g_thunk_pages[g_thunk_page_count - 1];
-        void* slot = reinterpret_cast<uint8_t*>(page) + g_thunk_page_used * kThunkSlot;
-        const int64_t reach = static_cast<int64_t>(reinterpret_cast<uintptr_t>(slot)) -
-                              static_cast<int64_t>(call_addr);
-        if ((g_thunk_page_used + 1) * kThunkSlot <= kPageSize && reach > -0x08000000LL &&
-            reach < 0x08000000LL) {
-            ++g_thunk_page_used;
-            emit_thunk(slot, wrapper);
-            return slot;
-        }
-    }
-    // 2) 两级扫描新页：先 64KB 粗扫（快），失败后 4KB 细扫兜底。
-    for (const int64_t coarse : {1, 0}) {
-        const int64_t kStep = coarse ? 0x00010000 : 0x1000;
-        const uintptr_t base = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-        for (int64_t distance = kStep; distance < 0x08000000; distance += kStep) {
-            for (int sign : {1, -1}) {
-                const int64_t candidate_signed = static_cast<int64_t>(base) + sign * distance;
-                if (candidate_signed <= 0) continue;
-                void* region = mmap(reinterpret_cast<void*>(static_cast<uintptr_t>(candidate_signed)), kPageSize,
-                                    PROT_READ | PROT_WRITE | PROT_EXEC,
-                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-                if (region == MAP_FAILED) continue;
-                emit_thunk(region, wrapper);
-                if (g_thunk_page_count < g_thunk_pages.size()) {
-                    g_thunk_pages[g_thunk_page_count++] = region;
-                    g_thunk_page_used = 1;
-                }
-                return region;
-            }
-        }
-    }
-    return nullptr;
-#endif
+    memcpy(slot, code, sizeof(code));
+    *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(slot) + 20) = wrapper;
+    __builtin___clear_cache(reinterpret_cast<char*>(slot),
+                            reinterpret_cast<char*>(reinterpret_cast<uint8_t*>(slot) + kThunkSlot));
+    return slot;
 }

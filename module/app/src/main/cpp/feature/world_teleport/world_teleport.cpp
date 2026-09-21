@@ -1,6 +1,7 @@
 #include "feature/world_teleport/world_teleport.h"
 
 #include "core/native/frame_task.h"
+#include "core/native/near_code_alloc.h"
 #include "core/native/qol_log.h"
 #include "feature/ui/native_choice.h"
 #include "feature/world_teleport/world_teleport_rules.h"
@@ -20,7 +21,6 @@
 namespace {
 
 constexpr size_t kPageSize = 0x1000;
-constexpr int64_t kBranchRange = 0x08000000LL;
 constexpr size_t kMapNameBufferSize = 256;
 constexpr size_t kTeleportChoiceCount = 4;
 constexpr size_t kChoiceCount = 5;
@@ -80,25 +80,7 @@ bool write_code_word(uintptr_t address, uint32_t word) {
 }
 
 void* allocate_trampoline_near(uintptr_t target) {
-#ifndef MAP_FIXED_NOREPLACE
-    (void)target;
-    return nullptr;
-#else
-    const uintptr_t base = target & ~(static_cast<uintptr_t>(kPageSize) - 1);
-    for (const int64_t step : {int64_t{0x10000}, int64_t{0x1000}}) {
-        for (int64_t distance = step; distance < kBranchRange; distance += step) {
-            for (const int sign : {1, -1}) {
-                const int64_t candidate = static_cast<int64_t>(base) + sign * distance;
-                if (candidate <= 0) continue;
-                void* region = mmap(reinterpret_cast<void*>(static_cast<uintptr_t>(candidate)),
-                                    kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
-                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-                if (region != MAP_FAILED) return region;
-            }
-        }
-    }
-    return nullptr;
-#endif
+    return near_code_page_alloc(target);
 }
 
 const char* map_name(int map_id) {

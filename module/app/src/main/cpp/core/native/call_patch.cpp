@@ -1,11 +1,8 @@
 // call_patch.cpp —— 通用 BL 调用点 patch（自动出售阶段 A 基础设施）。
-//
-// thunk/mprotect 逻辑参考扩展背包 extension_bag_render.inc 的 allocate_draw_thunk
-// 已验证实现（近址页 carving + 64KB 粗扫/4KB 细扫 + MAP_FIXED_NOREPLACE），
-// 本文件为独立副本，不改动扩展背包文件。
 
 #include "call_patch.h"
 
+#include "core/native/near_code_alloc.h"
 #include "core/native/qol_log.h"
 
 #include <array>
@@ -22,11 +19,6 @@ constexpr size_t kThunkSlot = 32;         // 每槽 32B 对齐（thunk 码 20B +
 constexpr int64_t kBlRange = 0x08000000LL;  // BL 可达范围 ±128MB
 
 std::mutex g_call_patch_mtx;
-
-// thunk 页登记：每页 4096B 承载 32B thunk，共享复用；页必落在调用点 ±128MB 内。
-std::array<void*, 8> g_thunk_pages{};
-size_t g_thunk_page_count = 0;
-size_t g_thunk_page_used = 0;
 
 // 已安装调用点登记（M-1 幂等）：同一 call_addr + 同一 wrapper 重复 install 直接
 // 返回 true，避免重复分配 thunk。容量上限仅用于避免无界增长；溢出时退化为原行为。
@@ -81,47 +73,10 @@ void emit_thunk(void* slot, uintptr_t wrapper) {
 
 // 返回可使用/已写入 thunk 的槽地址；调用方持锁。
 void* allocate_thunk_locked(uintptr_t call_addr, uintptr_t wrapper) {
-#ifndef MAP_FIXED_NOREPLACE
-    (void)call_addr;
-    (void)wrapper;
-    return nullptr;
-#else
-    // 1) 已有页 carving（校验对本调用点的 BL 可达性）。
-    if (g_thunk_page_count > 0) {
-        void* page = g_thunk_pages[g_thunk_page_count - 1];
-        void* slot = reinterpret_cast<uint8_t*>(page) + g_thunk_page_used * kThunkSlot;
-        const int64_t reach = static_cast<int64_t>(reinterpret_cast<uintptr_t>(slot)) -
-                              static_cast<int64_t>(call_addr);
-        if ((g_thunk_page_used + 1) * kThunkSlot <= kPageSize && reach > -kBlRange &&
-            reach < kBlRange) {
-            ++g_thunk_page_used;
-            emit_thunk(slot, wrapper);
-            return slot;
-        }
-    }
-    // 2) 两级扫描新页：先 64KB 粗扫（快），失败后 4KB 细扫兜底。
-    for (const int64_t coarse : {1, 0}) {
-        const int64_t kStep = coarse ? 0x00010000 : 0x1000;
-        const uintptr_t base = call_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-        for (int64_t distance = kStep; distance < kBlRange; distance += kStep) {
-            for (int sign : {1, -1}) {
-                const int64_t candidate = static_cast<int64_t>(base) + sign * distance;
-                if (candidate <= 0) continue;
-                void* region = mmap(reinterpret_cast<void*>(static_cast<uintptr_t>(candidate)),
-                                    kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
-                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-                if (region == MAP_FAILED) continue;
-                emit_thunk(region, wrapper);
-                if (g_thunk_page_count < g_thunk_pages.size()) {
-                    g_thunk_pages[g_thunk_page_count++] = region;
-                    g_thunk_page_used = 1;
-                }
-                return region;
-            }
-        }
-    }
-    return nullptr;
-#endif
+    void* slot = near_code_slot_alloc(call_addr, kThunkSlot);
+    if (slot == nullptr) return nullptr;
+    emit_thunk(slot, wrapper);
+    return slot;
 }
 
 bool write_code_word(uintptr_t addr, uint32_t word) {

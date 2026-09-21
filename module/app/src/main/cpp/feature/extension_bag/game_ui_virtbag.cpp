@@ -13,6 +13,7 @@
 #include "feature/extension_bag/model/deferred_free_rules.h"
 #include "feature/extension_bag/model/ownership_ledger.h"
 #include "core/native/frame_task.h"
+#include "core/native/near_code_alloc.h"
 #include "core/native/stack_codec.h"
 #include "core/native/stack_limit_port.h"
 #include "feature/extension_bag/model/virtual_bag_state.h"

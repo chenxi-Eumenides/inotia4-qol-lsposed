@@ -23,6 +23,7 @@ add_executable(host_tests
     ${CPP_DIR}/api/native/game_save_preflight.cpp
     ${CPP_DIR}/feature/save_backup/save_backup_bundle.cpp
     ${CPP_DIR}/feature/world_teleport/world_teleport_rules.cpp
+    ${CPP_DIR}/core/native/near_code_alloc.cpp
 )
 
 target_include_directories(host_tests PRIVATE
@@ -37,6 +38,19 @@ target_include_directories(host_tests PRIVATE
 target_compile_features(host_tests PRIVATE cxx_std_17)
 
 add_test(NAME host_tests COMMAND host_tests)
+
+# 近址 thunk 候选、BL 范围、hint-only 返回校验和槽复用测试。
+add_executable(near_thunk_rules_tests
+    test_near_thunk_rules.cpp
+    ${CPP_DIR}/core/native/near_code_alloc.cpp
+    ${CPP_DIR}/core/native/qol_log.cpp
+)
+target_include_directories(near_thunk_rules_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+)
+target_compile_features(near_thunk_rules_tests PRIVATE cxx_std_17)
+add_test(NAME near_thunk_rules_tests COMMAND near_thunk_rules_tests)
 
 add_executable(stage4_hook_tests
     test_inventory_hook_stage4.cpp

@@ -65,6 +65,7 @@ target_link_libraries(gamebridge ${log-lib} dl)
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     core/native/call_patch.cpp
+    core/native/near_code_alloc.cpp
     core/native/frame_task.cpp
     core/native/frame_host.cpp
     core/native/save_enter.cpp
