@@ -11,7 +11,7 @@
 | 使用已构建模块 | `guides/game-guide.md` | `reference/api-reference.md` |
 | 从源码构建和部署 | `guides/build-and-deploy.md` | 根目录 `AGENTS.md` |
 | 修改 Kotlin/Native 代码 | 根目录 `ARCHITECTURE.md` | `AGENTS.md`、`docs/refactor/` |
-| 继续重构工作 | `ARCHITECTURE.md` | `refactor/ledger.md`、`refactor/verification.md`、`refactor/baseline.md` |
+| 继续重构工作 | `ARCHITECTURE.md`、`refactor/current-optimization-review.md` | `refactor/ledger.md`、`refactor/verification.md`、`refactor/baseline.md`、`refactor/map.md`、`refactor/api-route-map.md` |
 | 理解 API 契约 | `reference/api-reference.md` | `guides/game-guide.md` |
 | 理解原版游戏机制 | `reference/game/` | 归档的 `archive/docs/development/features/` |
 | 查静态分析产物（解码 / 反编译 / 静态表） | `apk/decoded/`、`apk/decompiled/`、`apk/static-data/` | `guides/build-and-deploy.md` §1 |
@@ -26,7 +26,9 @@
 - `baseline.md`：现状基线清单，**由脚本生成**（`uv run python scripts/maintenance/gen_baseline_doc.py`），禁止手工编辑。
 - `ledger.md`：迁移台账（阶段/插件状态、目标归属、临时豁免与清除条件）。
 - `verification.md`：验证矩阵与验收卡（PASS / NOT_ACCEPTED 定义与证据位置）。
-- `adr/`：决策记录（只记录 `ARCHITECTURE.md` 未覆盖、实施中必须作出的长期决策）。
+- `current-optimization-review.md`：当前实现相对目标架构的差距、优化顺序和改进条件的唯一权威。
+- `map.md`：目录与现状映射材料，按生成流程维护。
+- `api-route-map.md`：路由迁移核对材料，记录路由过程状态。
 
 ### `guides/`：使用指南
 
@@ -50,8 +52,9 @@
 
 - 项目总览：根目录 `README.md`
 - **目标架构（重构期唯一权威）**：根目录 `ARCHITECTURE.md`
+- **当前优化（当前唯一权威）**：`refactor/current-optimization-review.md`
 - 代理规则：根目录及各源码目录的 `AGENTS.md`
-- 重构执行状态：`refactor/`（`baseline.md` 由脚本生成）
+- 重构执行材料：`refactor/ledger.md`、`refactor/verification.md`、`refactor/baseline.md`、`refactor/map.md`、`refactor/api-route-map.md`
 - API 契约：`reference/api-reference.md`
 - 原版游戏事实：`reference/game/`
 - 历史资料（仅供参考）：`history/`、`archive/docs/development/`
