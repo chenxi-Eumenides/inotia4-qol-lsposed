@@ -21,6 +21,7 @@ using CanEquipFn = int (*)(void*, void*);
 using CanUnequipFn = int (*)(void*, void*);
 
 std::atomic<bool> g_gate{false};
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 
 std::atomic<void*> g_backup_can_equip{nullptr};
 std::atomic<void*> g_backup_can_unequip{nullptr};
@@ -56,7 +57,7 @@ void log_debug_impl(const char* format, ...) {
 // 原版判定链重放依赖（不含「菜单角色」——那只在出售门禁与安装门控需要）。
 bool replay_deps_ready() {
     const auto* game = game_host();
-    return game != nullptr && game->read_only.item.is_real_equip != nullptr &&
+    return game != nullptr && g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr &&
            game->read_only.item.equip_level != nullptr &&
            game->read_only.character.can_change_equip != nullptr;
 }
@@ -90,16 +91,16 @@ void log_reject(int category, void* ch, void* item) {
     if (game != nullptr && game->read_only.character.can_change_equip != nullptr) {
         (void)game->read_only.character.can_change_equip(ch, &can_change);
     }
-    if (game != nullptr && game->read_only.item.is_real_equip != nullptr) {
-        (void)game->read_only.item.is_real_equip(item, &real_equip);
+    if (g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr) {
+        (void)g_item_facts->is_real_equip(item, &real_equip);
     }
     if (game != nullptr && game->read_only.item.equip_level != nullptr) {
         (void)game->read_only.item.equip_level(item, &item_level);
     }
     int32_t item_category = category;
     int32_t no_equip_bit = -1;
-    if (game != nullptr && game->read.item.category != nullptr) {
-        (void)game->read.item.category(item, &item_category);
+    if (g_item_facts != nullptr && g_item_facts->category != nullptr) {
+        (void)g_item_facts->category(item, &item_category);
     }
     if (game != nullptr && game->read_only.item.class_no_equip_bit != nullptr && item_category >= 0) {
         (void)game->read_only.item.class_no_equip_bit(item_category, &no_equip_bit);
@@ -154,7 +155,7 @@ void log_deps_missing() {
     const auto* game = game_host();
     log_error("symbols unresolved (is_real_equip=%d can_change_equip=%d equip_level=%d "
               "menu_char=%d); not installed",
-              game != nullptr && game->read_only.item.is_real_equip != nullptr,
+              g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr,
               game != nullptr && game->read_only.character.can_change_equip != nullptr,
               game != nullptr && game->read_only.item.equip_level != nullptr,
               game != nullptr && game->read_only.character.menu_character != nullptr);
@@ -184,6 +185,8 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return 0;
 }
 
+void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
+
 int can_equip_wrapper(void* ch, void* item) {
     const CanEquipFn backup =
         reinterpret_cast<CanEquipFn>(g_backup_can_equip.load(std::memory_order_acquire));
@@ -199,7 +202,8 @@ int can_equip_wrapper(void* ch, void* item) {
     int32_t can_change_equip = 0;
     int32_t char_level = -1;
     int32_t item_level = -1;
-    if (game == nullptr || game->read_only.item.is_real_equip(item, &is_real_equip).ok != kQolOk ||
+    if (game == nullptr || g_item_facts == nullptr ||
+        g_item_facts->is_real_equip(item, &is_real_equip).ok != kQolOk ||
         game->read_only.character.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
         game->read_only.character.level(ch, &char_level).ok != kQolOk ||
         game->read_only.item.equip_level(item, &item_level).ok != kQolOk) {

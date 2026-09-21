@@ -4,6 +4,7 @@
 
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/plugin.h"
+#include "../../contracts/item_facts.h"
 
 // 属性质量 provider：范围探测、百分位和档位判定。颜色码与文本改写不属于本目录。
 
@@ -14,6 +15,7 @@ inline constexpr const char* kResourceIdMathGetRandom = "hook:MATH_GetRandom";
 
 // 安装期注入的 Game Host 表；provider 不直接 include 宿主 game/实现。
 void set_context(const contracts::PluginContext& ctx);
+void set_item_facts(const contracts::ItemFactsApi* facts);
 
 // 业务门禁：true = 探测生效；false = 撤销期或停用，能力查询拒绝。
 void set_active(bool active);

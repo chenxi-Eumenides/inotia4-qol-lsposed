@@ -13,6 +13,7 @@ using MathGetRandomFn = int (*)(int min, int max);
 
 std::atomic<bool> g_active{false};
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 void* g_backup_math_get_random = nullptr;
 
 thread_local bool t_capture_armed = false;
@@ -67,14 +68,14 @@ bool probe_option_range(const void* item, int32_t option, int32_t level, int32_t
             out_min, out_max)) {
         return false;
     }
-    if (g_game->read.item.category == nullptr ||
+    if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
         g_game->read.attr_range.uses_fixed_option_table == nullptr ||
         g_game->read.attr_range.fixed_option_percent_pair == nullptr) {
         return true;
     }
     int32_t category = 0;
     int32_t uses_table = 0;
-    if (g_game->read.item.category(item, &category).ok != kQolOk ||
+    if (g_item_facts->category(item, &category).ok != kQolOk ||
         g_game->read.attr_range.uses_fixed_option_table(category, &uses_table).ok != kQolOk ||
         uses_table == 0) {
         return true;
@@ -102,6 +103,8 @@ void fill_result(int value, int minimum, int maximum,
 }  // namespace
 
 void set_context(const contracts::PluginContext& ctx) { g_game = ctx.game; }
+
+void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
 
 void set_active(bool active) {
     g_active.store(active, std::memory_order_release);

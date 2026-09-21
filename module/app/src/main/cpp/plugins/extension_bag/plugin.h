@@ -2,6 +2,7 @@
 
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
+#include "contracts/item_facts.h"
 
 namespace qol::features::extension_bag {
 

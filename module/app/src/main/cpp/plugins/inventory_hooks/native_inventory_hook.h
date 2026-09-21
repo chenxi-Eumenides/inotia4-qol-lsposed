@@ -4,6 +4,7 @@
 
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/game_host.h"
+#include "../../contracts/item_facts.h"
 
 using NativeHookFunType = int (*)(void* func, void* replace, void** backup);
 using NativeUnhookFunType = int (*)(void* func);
@@ -26,6 +27,7 @@ void inventory_native_hook_on_module_loaded(const char* name, void* handle);
 bool inventory_native_hook_call_refresh_item_area_original();
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk);
 bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game);
+bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts);
 
 // 暴露框架原生 hook/unhook（native_init 时注入）；供扩展背包等功能按函数入口安装 hook。
 // 过渡导出（清除阶段 P5）：机制原语迁入 patch/ 后删除。

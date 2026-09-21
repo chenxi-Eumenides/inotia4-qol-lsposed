@@ -46,6 +46,7 @@ constexpr uint32_t kNativeApiVersion = 2;
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
+const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
 
 // D2c-2a：扩展背包经 capability 现取（不缓存跨帧指针）。能力缺失或 enabled()==false
 // 与原 extension_bag_enabled()==false 等价（EB disabled）；调用方按 disabled 降级
@@ -135,16 +136,16 @@ const qol::contracts::QolItemCountApi* item_count_api() {
 }
 
 void* physical_item_at(int bag, int slot) {
-    if (g_game == nullptr || g_game->read_only.inventory.physical_item_at == nullptr) return nullptr;
+    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr) return nullptr;
     void* item = nullptr;
-    const QolResult result = g_game->read_only.inventory.physical_item_at(bag, slot, &item);
+    const QolResult result = g_item_facts->physical_item_at(bag, slot, &item);
     return qol::contracts::succeeded(result) ? item : nullptr;
 }
 
 void* inventory_item_at(int bag, int slot) {
-    if (g_game == nullptr || g_game->read_only.inventory.item_ref_at == nullptr) return nullptr;
+    if (g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr) return nullptr;
     qol::contracts::QolInventoryItemRef ref{};
-    const QolResult result = g_game->read_only.inventory.item_ref_at(bag, slot, &ref);
+    const QolResult result = g_item_facts->item_ref_at(bag, slot, &ref);
     return qol::contracts::succeeded(result) ? ref.native_item : nullptr;
 }
 
@@ -782,9 +783,9 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
             void* item = s2_physical_slot_item(bag, slot);
             if (item == nullptr) continue;
             if (!item_count_is_encoded(item)) continue;
-            if (g_game == nullptr || g_game->read_only.item.category == nullptr) continue;
+            if (g_item_facts == nullptr || g_item_facts->category == nullptr) continue;
             int32_t item_category = -1;
-            if (!qol::contracts::succeeded(g_game->read_only.item.category(item, &item_category)) ||
+            if (!qol::contracts::succeeded(g_item_facts->category(item, &item_category)) ||
                 item_category != category) {
                 continue;
             }
@@ -1137,19 +1138,19 @@ uint64_t ok_destroy_item_wrapper() {
     if (route == VanillaSellRoute::kBackup) return call_backup();
 
     // 仅背包物品详情（desc_type==2）走结算；装备详情(0)/扩展袋(1) 回原版。
-    if (g_game == nullptr || g_game->read_only.inventory.detail_context == nullptr ||
-        g_game->read_only.inventory.cursor_index == nullptr) {
+    if (g_item_facts == nullptr || g_item_facts->detail_context == nullptr ||
+        g_item_facts->cursor_index == nullptr) {
         return call_backup();
     }
     int32_t desc_type = 0;
     int32_t bag = 0;
     void* ctrl = nullptr;
-    if (!qol::contracts::succeeded(g_game->read_only.inventory.detail_context(
+    if (!qol::contracts::succeeded(g_item_facts->detail_context(
             &desc_type, &bag, &ctrl)) || desc_type != 2 || ctrl == nullptr) {
         return call_backup();
     }
     int32_t slot = -1;
-    if (!qol::contracts::succeeded(g_game->read_only.inventory.cursor_index(ctrl, &slot))) {
+    if (!qol::contracts::succeeded(g_item_facts->cursor_index(ctrl, &slot))) {
         return call_backup();
     }
     if (slot < 0 || slot >= kInvenSlotsPerBag) return call_backup();
@@ -1163,16 +1164,15 @@ uint64_t ok_destroy_item_wrapper() {
                             bag, slot, item);
         return call_backup();
     }
-    if (g_game == nullptr || g_game->read_only.item.category == nullptr ||
-        g_game->read_only.item.is_no_sell == nullptr ||
-        g_game->read_only.item.cumulate_count == nullptr ||
-        g_game->read_only.item.sell_price == nullptr) {
+    if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
+        g_item_facts->is_no_sell == nullptr || g_item_facts->cumulate_count == nullptr ||
+        g_item_facts->sell_price == nullptr) {
         return call_backup();
     }
     int32_t category = 0;
     int32_t no_sell = 0;
-    if (!qol::contracts::succeeded(g_game->read_only.item.category(item, &category)) ||
-        !qol::contracts::succeeded(g_game->read_only.item.is_no_sell(category, &no_sell)) ||
+    if (!qol::contracts::succeeded(g_item_facts->category(item, &category)) ||
+        !qol::contracts::succeeded(g_item_facts->is_no_sell(category, &no_sell)) ||
         category <= 0 || no_sell != 0) {
         QOL_LOG_INFO(QolDomain::kInventory,
                             "vanilla sell backup reason=no_sell bag=%d slot=%d category=%d", bag,
@@ -1181,11 +1181,11 @@ uint64_t ok_destroy_item_wrapper() {
     }
     // canonical 经已 hook 的 getter：启用态返回 128a+b 全量（R-49）。
     int32_t count = 0;
-    if (!qol::contracts::succeeded(g_game->read_only.item.cumulate_count(item, &count)) ||
+    if (!qol::contracts::succeeded(g_item_facts->cumulate_count(item, &count)) ||
         count <= 0) return call_backup();
     const uint32_t canonical = static_cast<uint32_t>(count);
     int64_t unit_price = 0;
-    if (!qol::contracts::succeeded(g_game->read_only.item.sell_price(item, &unit_price))) {
+    if (!qol::contracts::succeeded(g_item_facts->sell_price(item, &unit_price))) {
         return call_backup();
     }
     int64_t price = 0;
@@ -1412,6 +1412,11 @@ bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game) {
     }
     g_game = game;
     return true;
+}
+
+bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
+    g_item_facts = facts;
+    return facts != nullptr;
 }
 
 void inventory_native_hook_on_api(const NativeAPIEntries* entries) {

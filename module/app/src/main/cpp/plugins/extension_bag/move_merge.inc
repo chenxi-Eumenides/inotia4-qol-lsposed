@@ -85,8 +85,8 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         return finish(0);
     }
     if (g_move_merge_requested.load() && event == 4 && param != nullptr &&
-        g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
-        g_game->read_only.item.category != nullptr && extension_bag_write_api() != nullptr &&
+        g_item_facts != nullptr && g_item_facts->cumulate_count != nullptr &&
+        g_item_facts->category != nullptr && extension_bag_write_api() != nullptr &&
         extension_bag_write_api()->inventory.move_item != nullptr &&
         g_game->read_only.character.can_apply_stuff != nullptr &&
         g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->control_item_slot != nullptr) {

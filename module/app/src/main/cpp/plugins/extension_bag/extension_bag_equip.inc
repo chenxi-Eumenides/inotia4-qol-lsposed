@@ -181,8 +181,8 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     // exchange entry point reads INVEN[bag][slot], so expose the projected item
     // only for the duration of that call and restore the real slot afterwards.
     void* original_inventory_item = nullptr;
-    if (g_game->read_only.inventory.physical_item_at == nullptr ||
-        !qol::contracts::succeeded(g_game->read_only.inventory.physical_item_at(
+    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
+        !qol::contracts::succeeded(g_item_facts->physical_item_at(
             original_bag, source_slot, &original_inventory_item))) return false;
     void* previous_equipped_item = read_char_equipped_item(character, target);
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> previous_equipped_payload{};
@@ -507,8 +507,8 @@ void extension_sell_ok(void*) {
             clear_original_desc_locked();
             return;
         }
-        if (g_game == nullptr || g_game->read_only.item.sell_price == nullptr ||
-            g_game->read_only.item.is_no_sell == nullptr || extension_bag_write_api() == nullptr ||
+        if (g_game == nullptr || g_item_facts == nullptr || g_item_facts->sell_price == nullptr ||
+            g_item_facts->is_no_sell == nullptr || extension_bag_write_api() == nullptr ||
             extension_bag_write_api()->equipment.add_money == nullptr ||
             extension_bag_write_api()->equipment.minus_money == nullptr) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
@@ -521,7 +521,7 @@ void extension_sell_ok(void*) {
         int category = -1;
         int32_t no_sell = 0;
         if (!read_item_category(item, &category) ||
-            !qol::contracts::succeeded(g_game->read_only.item.is_no_sell(category, &no_sell)) ||
+            !qol::contracts::succeeded(g_item_facts->is_no_sell(category, &no_sell)) ||
             no_sell != 0) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected no-sell item bag=%d slot=%d category=%d",
                         bag, slot, category);
@@ -1106,14 +1106,14 @@ void extension_desc_item_execute_at(size_t index, void* button) {
             uint32_t payload = 0;
             uint64_t generation = 0;
             if (current_item && g_game != nullptr &&
-                g_game->read_only.item.sell_price != nullptr &&
-                g_game->read_only.item.is_no_sell != nullptr) {
+                g_item_facts != nullptr && g_item_facts->sell_price != nullptr &&
+                g_item_facts->is_no_sell != nullptr) {
         // 卖出数量取模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
         count = static_cast<int>(virtual_bag_effective_count(item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count)));
                 int32_t no_sell = 0;
                 if (read_item_category(item, &category) &&
                     qol::contracts::succeeded(
-                        g_game->read_only.item.is_no_sell(category, &no_sell)) &&
+                        g_item_facts->is_no_sell(category, &no_sell)) &&
                     no_sell == 0 && count > 0 && read_item_sell_price(item, &unit_price)) {
                     g_extension_sell_apply_variant_discount = modified_destroy_sell;
                     price = extension_bag_sell_price(item, count, modified_destroy_sell);

@@ -10,8 +10,8 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
     snapshot.digest = 1469598103934665603ULL;
     for (size_t index = 0; index < snapshot.slots.size(); ++index) {
         void* item = nullptr;
-        if (g_game == nullptr || g_game->read_only.inventory.physical_item_at == nullptr ||
-            !qol::contracts::succeeded(g_game->read_only.inventory.physical_item_at(
+        if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
+            !qol::contracts::succeeded(g_item_facts->physical_item_at(
                 static_cast<int32_t>(index / virtual_bag::kSlotCount),
                 static_cast<int32_t>(index % virtual_bag::kSlotCount), &item))) {
             return snapshot;

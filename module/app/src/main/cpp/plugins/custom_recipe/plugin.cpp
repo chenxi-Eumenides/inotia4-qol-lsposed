@@ -6,6 +6,7 @@
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/craft_result.h"
 #include "../../contracts/events.h"
+#include "../../contracts/item_facts.h"
 #include "feature.h"
 #include "table.h"
 
@@ -31,7 +32,17 @@ void on_config_changed(void* /*ctx*/, const void* payload) {
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.game == nullptr) return 1;
+    if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
+        return 1;
+    }
+    const void* iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return 1;
+    }
+    set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
     register_dynamic_recipes();
@@ -59,6 +70,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         g_config_subscription = 0;
     }
     unregister_dynamic_recipes();
+    set_item_facts(nullptr);
     set_enabled(false);
     ::custom_recipe::custom_recipe_table_deactivate();
 }
@@ -92,6 +104,12 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
                      static_cast<uint16_t>(contracts::kAttributeQualityVersionMinor)}},
 };
 
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kItemFactsCapabilityId,
+     QolVersionRange{static_cast<uint16_t>(contracts::kItemFactsVersionMajor),
+                     static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
+};
+
 // provides=craft_result v1.0（结果层能力，消费者=craft_ui）。
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kCraftResultCapabilityId,
@@ -123,7 +141,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        0, nullptr,             // requires
+        1, kRequires,            // requires=item.facts
         1, kOptionalRequires,    // optional_requires=[attribute.quality]
         1, kProvides,            // provides=craft_result
         1, kClaims,              // resources=ownership

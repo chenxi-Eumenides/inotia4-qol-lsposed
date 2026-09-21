@@ -9,6 +9,7 @@
 #include "../../contracts/inventory_refresh.h"
 #include "../../contracts/sell_price.h"
 #include "../../contracts/world_facts.h"
+#include "../../contracts/item_facts.h"
 
 // D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
 // feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
@@ -34,10 +35,13 @@ constexpr const char* kPluginVersion = "0.1.0";
 const contracts::QolHostSdk* g_action_sdk = nullptr;
 const contracts::QolGameHost* g_action_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kWorldFactsCapabilityId,
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+    {contracts::kItemFactsCapabilityId,
+     {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
 };
 
 // 能力接口实例：函数地址编译期常量；宿主在 enabled 时注册、revoking 时注销。
@@ -51,7 +55,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
     contracts::InventorySellResult result{};
     const auto* facts = g_world_facts;
     if (facts == nullptr || facts->state == nullptr || g_action_game == nullptr ||
-        g_action_game->read_only.inventory.item_ref_at == nullptr) {
+        g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
         return result;
     }
@@ -66,7 +70,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         return result;
     }
     contracts::QolInventoryItemRef item_ref{};
-    if (!contracts::succeeded(g_action_game->read_only.inventory.item_ref_at(bag, slot, &item_ref))) {
+    if (!contracts::succeeded(g_item_facts->item_ref_at(bag, slot, &item_ref))) {
         result.status = contracts::InventorySellStatus::kEmptySlot;
         return result;
     }
@@ -80,15 +84,14 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
     }
     result.category = item_ref.category;
     result.count = item_ref.count;
-    if (g_action_game->read_only.item.is_no_sell == nullptr ||
-        g_action_game->read_only.item.cumulate_count == nullptr ||
-        g_action_game->read_only.item.sell_price == nullptr) {
+    if (g_item_facts == nullptr || g_item_facts->is_no_sell == nullptr ||
+        g_item_facts->cumulate_count == nullptr || g_item_facts->sell_price == nullptr) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
         return result;
     }
     int32_t no_sell = 0;
     if (!contracts::succeeded(
-            g_action_game->read_only.item.is_no_sell(result.category, &no_sell))) {
+            g_item_facts->is_no_sell(result.category, &no_sell))) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
         return result;
     }
@@ -98,14 +101,14 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
     }
     int32_t count = 0;
     if (!contracts::succeeded(
-            g_action_game->read_only.item.cumulate_count(item_ref.native_item, &count)) ||
+            g_item_facts->cumulate_count(item_ref.native_item, &count)) ||
         count <= 0) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
     int64_t unit_price = 0;
     if (!contracts::succeeded(
-            g_action_game->read_only.item.sell_price(item_ref.native_item, &unit_price))) {
+            g_item_facts->sell_price(item_ref.native_item, &unit_price))) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
@@ -175,11 +178,25 @@ int plugin_install(contracts::PluginContext& ctx) {
         ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.game == nullptr) {
         (void)inventory_native_hook_bind_sdk(nullptr);
         (void)inventory_native_hook_bind_game(nullptr);
+        (void)inventory_native_hook_bind_item_facts(nullptr);
         return 1;
     }
     if (!inventory_native_hook_bind_sdk(ctx.sdk) || !inventory_native_hook_bind_game(ctx.game)) {
         return 1;
     }
+    const void* item_facts_iface = nullptr;
+    if (ctx.sdk->capabilities.require == nullptr ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor},
+            &item_facts_iface)) ||
+        item_facts_iface == nullptr ||
+        !inventory_native_hook_bind_item_facts(
+            static_cast<const contracts::ItemFactsApi*>(item_facts_iface))) {
+        (void)inventory_native_hook_bind_item_facts(nullptr);
+        return 1;
+    }
+    g_item_facts = static_cast<const contracts::ItemFactsApi*>(item_facts_iface);
     const void* world_facts_iface = nullptr;
     if (ctx.sdk->capabilities.require == nullptr ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
@@ -202,6 +219,8 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_action_sdk = nullptr;
     g_action_game = nullptr;
     g_world_facts = nullptr;
+    g_item_facts = nullptr;
+    (void)inventory_native_hook_bind_item_facts(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -237,7 +256,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         return contracts::PluginDescriptor{
             kPluginId,
             kPluginVersion,
-            1, kRequires,  // requires=world.facts
+            2, kRequires,  // requires=world.facts + item.facts
             0, nullptr,   // optional_requires
             2, kProvides,  // provides（inventory_refresh + inventory.action v1.0）
             count, claims,

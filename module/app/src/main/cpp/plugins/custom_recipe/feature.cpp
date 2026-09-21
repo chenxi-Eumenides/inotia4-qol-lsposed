@@ -39,6 +39,7 @@ constexpr uint32_t kJewelTypeMask = 63;
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 uint64_t g_save_enter_subscription = 0;
 
 }  // namespace
@@ -60,6 +61,8 @@ void set_context(const contracts::PluginContext& ctx) {
 
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 const contracts::QolGameHost* game_host() { return g_game; }
+
+void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
 
 void log_message(int32_t level, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
@@ -102,8 +105,8 @@ const ::custom_recipe::Def* module_recipe_for_mix_type(uint32_t mix_type) {
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；空物品返回 0 = 「该槽为空」的匹配键。
 uint16_t item_category(void* item) {
     int32_t category = 0;
-    if (item == nullptr || g_game == nullptr || g_game->read.item.category == nullptr ||
-        g_game->read.item.category(item, &category).ok != kQolOk || category < 0) {
+    if (item == nullptr || g_item_facts == nullptr || g_item_facts->category == nullptr ||
+        g_item_facts->category(item, &category).ok != kQolOk || category < 0) {
         return 0;
     }
     return static_cast<uint16_t>(category);
@@ -112,8 +115,8 @@ uint16_t item_category(void* item) {
 // 是否可堆叠（ITEMCLASSBASE[category*stride+6] bit0；口径与 game/read/item_class.h 一致）。
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
-    if (item == nullptr || g_game == nullptr || g_game->read_only.item.is_real_equip == nullptr ||
-        g_game->read_only.item.is_real_equip(item, &is_real_equip).ok != kQolOk) {
+    if (item == nullptr || g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr ||
+        g_item_facts->is_real_equip(item, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;
@@ -130,11 +133,11 @@ int category_held_count(uint16_t category) {
 }
 
 bool item_is_jewel(void* item) {
-    if (item == nullptr || g_game == nullptr || g_game->read.item.is_jewel_category == nullptr) {
+    if (item == nullptr || g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr) {
         return false;
     }
     int32_t is_jewel = 0;
-    return g_game->read.item.is_jewel_category(item_category(item), &is_jewel).ok == kQolOk &&
+    return g_item_facts->is_jewel_category(item_category(item), &is_jewel).ok == kQolOk &&
            is_jewel != 0;
 }
 

@@ -14,6 +14,7 @@
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
+#include "contracts/item_facts.h"
 #include "infra/panels.h"
 
 static int g_pass = 0;
@@ -86,11 +87,17 @@ QolResult fake_panels_unregister_owner(const char* owner) {
 
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
     static const qol::contracts::WorldFactsApi api{};
-    if (id == nullptr || out_iface == nullptr ||
-        std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) != 0) {
+    static const qol::contracts::ItemFactsApi item_api{};
+    if (id == nullptr || out_iface == nullptr) {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
-    *out_iface = &api;
+    if (std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) == 0) {
+        *out_iface = &api;
+    } else if (std::strcmp(id, qol::contracts::kItemFactsCapabilityId) == 0) {
+        *out_iface = &item_api;
+    } else {
+        return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
+    }
     return qol::contracts::ok();
 }
 
@@ -111,10 +118,11 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 3 && d.optional_count == 1 && d.provides_count == 0);
+    CHECK(d.requires_count == 4 && d.optional_count == 1 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
     CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
+    CHECK(std::strcmp(d.requires[3].id, "item.facts") == 0);
     CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup

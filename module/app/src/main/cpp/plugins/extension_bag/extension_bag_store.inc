@@ -458,7 +458,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (store_view_installed && g_game != nullptr &&
             g_game->read_only.inventory.cursor_item != nullptr &&
-            g_game->read_only.item.sell_price != nullptr) {
+            g_item_facts != nullptr && g_item_facts->sell_price != nullptr) {
             void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
             void* cursor = nullptr;
             if (ctrl != nullptr) {

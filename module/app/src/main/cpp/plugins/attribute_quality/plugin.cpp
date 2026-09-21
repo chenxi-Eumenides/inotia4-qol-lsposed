@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/item_facts.h"
 #include "feature.h"
 
 namespace qol::features::attribute_quality {
@@ -41,7 +42,21 @@ const contracts::CapabilityProvisionRef kProvides[] = {
     },
 };
 
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kItemFactsCapabilityId,
+     {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) return 1;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return 1;
+    }
+    set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
     set_context(ctx);
     set_active(true);
     return 0;
@@ -49,6 +64,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    set_item_facts(nullptr);
     set_active(false);
 }
 
@@ -71,7 +87,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires, // requires
     0, nullptr,   // optional_requires
     1, kProvides, // provides（attribute.quality v1.0）
     1, kResources,

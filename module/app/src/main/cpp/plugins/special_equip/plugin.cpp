@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "feature.h"
+#include "../../contracts/item_facts.h"
 
 // D2c-2b-1：出售按钮 UIEquip_ButtonDestroyExe 已被 inventory_hooks 单点 hook（同址
 // NativeHook 二次挂载 rc=-1），本插件经 hooks/dispatch 布尔门登记谓词，不再前置声明
@@ -14,6 +15,11 @@ namespace {
 constexpr const char* kPluginId = "special_equip";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kSellGateResourceId = "hook:UIEquip_ButtonDestroyExe";
+
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kItemFactsCapabilityId,
+     {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
+};
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
@@ -62,6 +68,17 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_game = nullptr;
         return 1;
     }
+    if (g_sdk->capabilities.require == nullptr) return 1;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
+    set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
     // 常开，无配置开关：只置业务门禁并注册出售门禁谓词；资源由宿主声明式安装。
     // 依赖缺失即 fail-closed 返回非 0，宿主不安装资源并置 failed（与旧 install_if_ready
     // 的 deps_ready 门一致）。重复调用幂等（activate 重入）。
@@ -82,8 +99,10 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    (void)ctx;
     // 门禁置 false 并注销布尔门（幂等）；重复调用安全。
     set_gate(false);
+    set_item_facts(nullptr);
     if (g_sdk != nullptr && g_sdk->hooks.clear_intercept != nullptr) {
         (void)g_sdk->hooks.clear_intercept(kSellGateResourceId);
     }
@@ -108,7 +127,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires, // requires=item.facts
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,

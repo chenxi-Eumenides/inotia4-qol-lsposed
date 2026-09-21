@@ -562,13 +562,13 @@ void ensure_state_loaded_locked() {
 // 未保存的改动不写入 sidecar；pending 仅保留当前进程内的事务状态。
 
 bool inventory_slot_locked(int bag, int slot, void** out) {
-    if (g_game == nullptr || g_game->read_only.inventory.physical_item_at == nullptr ||
+    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
         out == nullptr || bag < 0 || bag >= 6 || slot < 0 ||
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
     return qol::contracts::succeeded(
-        g_game->read_only.inventory.physical_item_at(bag, slot, out));
+        g_item_facts->physical_item_at(bag, slot, out));
 }
 
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
@@ -932,7 +932,7 @@ bool item_pointer_known_locked(void* item) {
             if (g_module_objects[bag][slot] == item) return true;
         }
     }
-    if (g_game != nullptr && g_game->read_only.inventory.physical_item_at != nullptr) {
+    if (g_item_facts != nullptr && g_item_facts->physical_item_at != nullptr) {
         for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
             void* physical = nullptr;
             if (inventory_slot_locked(idx / virtual_bag::kSlotCount,

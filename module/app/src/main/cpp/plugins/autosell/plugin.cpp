@@ -10,6 +10,7 @@
 #include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/world_facts.h"
+#include "../../contracts/item_facts.h"
 #include "config.h"
 #include "log.h"
 #include "scan.h"
@@ -41,6 +42,8 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor}},
     {contracts::kWorldFactsCapabilityId,
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+    {contracts::kItemFactsCapabilityId,
+     {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
 };
 
 // extension_bag 的能力只在插件进入 enabled 时注册（其资源受配置门禁），故不能作为 required：
@@ -54,6 +57,7 @@ uint64_t g_config_subscription = 0;
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 std::atomic<bool> g_gate{false};
 
 // 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
@@ -130,6 +134,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_world_facts = nullptr;
+    g_item_facts = nullptr;
     if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr ||
         g_sdk->events.subscribe == nullptr || g_sdk->events.unsubscribe == nullptr ||
         g_sdk->panels.register_provider == nullptr ||
@@ -147,6 +152,17 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_world_facts = static_cast<const contracts::WorldFactsApi*>(iface);
+    iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_world_facts = nullptr;
+        return 1;
+    }
+    g_item_facts = static_cast<const contracts::ItemFactsApi*>(iface);
     // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
     // activate 重入安全。
     autosell_register_save_enter();
@@ -175,6 +191,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     autosell_unregister_save_callbacks();
     g_game = nullptr;
     g_world_facts = nullptr;
+    g_item_facts = nullptr;
     apply_gate(false);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
         (void)g_sdk->panels.unregister_owner(kPluginId);
@@ -200,7 +217,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    3, kRequires,  // requires=attribute.quality + inventory.action + world.facts
+    4, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts
     1, kOptionalRequires,  // optional=extension_bag（门禁提供者，缺失走降级）
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）
@@ -229,6 +246,10 @@ const contracts::QolGameHost* game_host() {
 
 const contracts::WorldFactsApi* world_facts() {
     return g_world_facts;
+}
+
+const contracts::ItemFactsApi* item_facts() {
+    return g_item_facts;
 }
 
 }  // namespace qol::features::autosell

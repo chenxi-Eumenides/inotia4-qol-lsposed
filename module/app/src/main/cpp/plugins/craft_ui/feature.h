@@ -5,6 +5,7 @@
 
 #include "../../contracts/game_host.h"
 #include "../../contracts/host_sdk.h"
+#include "../../contracts/item_facts.h"
 
 namespace qol::contracts {
 struct PluginContext;
@@ -42,6 +43,8 @@ constexpr int32_t kLogDebug = 0;
 constexpr int32_t kLogWarn = 2;
 
 void set_context(const contracts::PluginContext& ctx);
+void set_item_facts(const contracts::ItemFactsApi* facts);
+const contracts::ItemFactsApi* item_facts();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 void log_message(int32_t level, const char* format, ...);

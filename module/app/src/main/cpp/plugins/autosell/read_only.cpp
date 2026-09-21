@@ -7,26 +7,27 @@
 namespace qol::features::autosell::read_only {
 namespace {
 
+const contracts::ItemFactsApi* facts() { return item_facts(); }
 const contracts::QolGameHost* game() { return game_host(); }
 
 }  // namespace
 
 bool item_category(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.category != nullptr &&
-           contracts::succeeded(host->read_only.item.category(item, out));
+    const auto* api = facts();
+    return api != nullptr && api->category != nullptr &&
+           contracts::succeeded(api->category(item, out));
 }
 
 bool item_is_jewel(int32_t category, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.is_jewel_category != nullptr &&
-           contracts::succeeded(host->read_only.item.is_jewel_category(category, out));
+    const auto* api = facts();
+    return api != nullptr && api->is_jewel_category != nullptr &&
+           contracts::succeeded(api->is_jewel_category(category, out));
 }
 
 bool item_is_real_equip(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.is_real_equip != nullptr &&
-           contracts::succeeded(host->read_only.item.is_real_equip(item, out));
+    const auto* api = facts();
+    return api != nullptr && api->is_real_equip != nullptr &&
+           contracts::succeeded(api->is_real_equip(item, out));
 }
 
 bool item_rarity(const void* item, int32_t* out) {
@@ -66,9 +67,9 @@ bool item_is_dice(int32_t category, int32_t* out) {
 }
 
 bool item_is_no_sell(int32_t category, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.is_no_sell != nullptr &&
-           contracts::succeeded(host->read_only.item.is_no_sell(category, out));
+    const auto* api = facts();
+    return api != nullptr && api->is_no_sell != nullptr &&
+           contracts::succeeded(api->is_no_sell(category, out));
 }
 
 bool item_jewel_value(const void* item, int32_t* out) {
@@ -95,11 +96,11 @@ bool game_state_gate(int32_t* out) {
 }
 
 ::QolResult inventory_item_ref_at(int32_t bag, int32_t slot, InventoryItemRef* out) {
-    const auto* host = game();
-    if (host == nullptr || host->read_only.inventory.item_ref_at == nullptr) {
+    const auto* api = facts();
+    if (api == nullptr || api->item_ref_at == nullptr) {
         return contracts::error(kQolErrNotReady, "not ready", 9);
     }
-    return host->read_only.inventory.item_ref_at(bag, slot, out);
+    return api->item_ref_at(bag, slot, out);
 }
 
 ::QolResult for_each_bag_slot(BagSlotFn callback, void* ctx) {

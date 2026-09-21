@@ -13,7 +13,7 @@
 | P0 | 校验脚本族与基线棘轮 | ✅ 完成 | `check_arch.py` 可运行；基线只允许收缩 |
 | P1 | `contracts/`、`infra/`、`game/` 骨架与最小诊断接口 | ✅ 完成 | VM-P1-02、VM-P1-03 |
 | K1 | kernel-complete：零业务插件 Debug 启动 + Debug device probe 机制验收 | ✅ Debug/probe 真机证据已取得；release 隔离未执行 | VM-K1-01、VM-K1-02；`docs/history/kernel-complete-20260922/` |
-| K2 | provider 与功能插件并行：第一批 `world_facts`（`world.facts` v1.0）+ 5 required 消费者 + cascade_stopped activate 修复 | 🔄 进行中；world 批次真机闭环（VM-K2-01），inventory/character 批次待做 | VM-K2-01；`docs/history/provider-world-facts-20260922/` |
+| K2 | provider 与功能插件并行：`world_facts`（`world.facts` v1.0，5 消费者）与 `item_facts`（`item.facts` v1.0，7 消费者）两批 + cascade_stopped activate 修复 | 🔄 进行中；两批真机闭环（VM-K2-01/02），character 批次与单消费者读面待阶段 4 收窄时处理 | VM-K2-01、VM-K2-02；`docs/history/provider-{world,item}-facts-20260922/` |
 | P2 | `simple_mode` 纵向样板 | ✅ 完成 | VM-P2-01 |
 | P3 | 资源事务、异步步进、回滚、在途归零、生命周期状态 | ✅ 完成 | VM-P3-01、VM-P3-02、VM-P3-03 |
 | P4 | 内置静态插件批量迁移 | 🔄 进行中；阶段 A、B、C 已完成，D1 已完成待收尾 | VM-P4-01..08、VM-43..46、VM-D1、VM-D2-01..04 |

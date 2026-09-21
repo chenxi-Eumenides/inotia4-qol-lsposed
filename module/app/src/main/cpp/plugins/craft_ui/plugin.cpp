@@ -71,9 +71,9 @@ const contracts::CraftResultApi* craft_api() {
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；对用到的类别而言 == itemId。
 uint16_t item_category(void* item) {
     int32_t category = 0;
-    const contracts::QolGameHost* game = game_host();
-    if (item == nullptr || game == nullptr || game->read.item.category == nullptr ||
-        game->read.item.category(item, &category).ok != kQolOk || category < 0) {
+    const auto* facts = item_facts();
+    if (item == nullptr || facts == nullptr || facts->category == nullptr ||
+        facts->category(item, &category).ok != kQolOk || category < 0) {
         return 0;
     }
     return static_cast<uint16_t>(category);
@@ -88,9 +88,9 @@ int jewel_grade(uint16_t category) {
 
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
-    const contracts::QolGameHost* game = game_host();
-    if (item == nullptr || game == nullptr || game->read_only.item.is_real_equip == nullptr ||
-        game->read_only.item.is_real_equip(item, &is_real_equip).ok != kQolOk) {
+    const auto* facts = item_facts();
+    if (item == nullptr || facts == nullptr || facts->is_real_equip == nullptr ||
+        facts->is_real_equip(item, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;
@@ -488,15 +488,34 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
                      static_cast<uint16_t>(contracts::kCraftResultVersionMinor)}},
 };
 
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kItemFactsCapabilityId,
+     QolVersionRange{static_cast<uint16_t>(contracts::kItemFactsVersionMajor),
+                     static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.game == nullptr) return 1;
+    if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
+        return 1;
+    }
+    const void* iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return 1;
+    }
+    set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
     set_context(ctx);
     // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
     return 0;
 }
 
 // 空操作幂等：资源物理释放由宿主逆序执行，本插件无额外状态需要清理。
-void plugin_deactivate(contracts::PluginContext& ctx) { (void)ctx; }
+void plugin_deactivate(contracts::PluginContext& ctx) {
+    (void)ctx;
+    set_item_facts(nullptr);
+}
 void plugin_on_enabled(contracts::PluginContext& ctx) { (void)ctx; }
 void plugin_on_disabled(contracts::PluginContext& ctx) { (void)ctx; }
 
@@ -545,7 +564,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        0, nullptr,  // requires
+        1, kRequires,  // requires=item.facts
         1, kOptionalRequires,  // optional_requires=[craft_result]
         0, nullptr,  // provides
         kClaimCount, kClaims,

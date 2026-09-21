@@ -25,6 +25,17 @@ add_executable(host_tests
     ${CPP_DIR}/plugins/world_teleport/rules.cpp
 )
 
+add_executable(item_facts_plugin_tests
+    test_item_facts_plugin.cpp
+    ${CPP_DIR}/plugins/item_facts/plugin.cpp
+)
+target_include_directories(item_facts_plugin_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(item_facts_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(item_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME item_facts_plugin_tests COMMAND item_facts_plugin_tests)
+
 target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}

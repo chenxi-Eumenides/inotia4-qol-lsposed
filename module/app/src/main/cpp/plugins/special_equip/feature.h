@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../contracts/plugin.h"
+#include "../../contracts/item_facts.h"
 
 // 特殊装备解锁（special-equip）插件业务层。
 //
@@ -53,6 +54,7 @@ namespace qol::features::special_equip {
 
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
+void set_item_facts(const contracts::ItemFactsApi* facts);
 
 void log_debug(const char* format, ...);
 void log_info(const char* format, ...);

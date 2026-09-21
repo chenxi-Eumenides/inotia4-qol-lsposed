@@ -282,7 +282,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         if (slot >= g_virtual_bag_state.capacities[bag]) return op_err("slot beyond derived capacity");
         const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
-        if (g_game == nullptr || g_game->read_only.item.is_jewel_category == nullptr ||
+        if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr ||
             g_game->read_only.character.party_member == nullptr ||
             g_game->read_only.character.equipped_item == nullptr ||
             g_game->extension_bag_write.equipment.put_jewel == nullptr) {
@@ -290,7 +290,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         }
         int32_t is_jewel = 0;
         if (!qol::contracts::succeeded(
-                g_game->read_only.item.is_jewel_category(descriptor.category, &is_jewel)) ||
+                g_item_facts->is_jewel_category(descriptor.category, &is_jewel)) ||
             is_jewel == 0) return op_err("not jewel");
 
         void* ch = nullptr;

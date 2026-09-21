@@ -14,6 +14,7 @@ namespace {
 std::atomic<int> g_verify_log_budget{16};
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 
 // 填入格控件缓存（绘制层只做指针比较，见 feature.h 注释）。
 void* g_stuff_ctrl[kStuffSlotCount] = {nullptr, nullptr, nullptr};
@@ -27,6 +28,10 @@ void set_context(const contracts::PluginContext& ctx) {
 
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 const contracts::QolGameHost* game_host() { return g_game; }
+
+void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
+
+const contracts::ItemFactsApi* item_facts() { return g_item_facts; }
 
 bool config_enabled(const char* key) {
     int32_t value = 0;
@@ -150,8 +155,8 @@ void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
         out[i] = 0;
         void* item = craft_stuff_item(i);
         int32_t category = 0;
-        if (item != nullptr && g_game != nullptr && g_game->read.item.category != nullptr &&
-            g_game->read.item.category(item, &category).ok == kQolOk && category >= 0) {
+        if (item != nullptr && g_item_facts != nullptr && g_item_facts->category != nullptr &&
+            g_item_facts->category(item, &category).ok == kQolOk && category >= 0) {
             out[i] = static_cast<uint16_t>(category);
         }
     }

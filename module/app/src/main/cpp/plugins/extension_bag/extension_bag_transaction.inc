@@ -12,14 +12,14 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
         extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
-        g_game == nullptr || g_game->read_only.item.cumulate_count == nullptr ||
+        g_item_facts == nullptr || g_item_facts->cumulate_count == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d capacity=%d symbols=%d",
                     dst_bag,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
                     extension_bag_write_api() != nullptr &&
                     extension_bag_write_api()->inventory.serialize_item != nullptr &&
-                    g_game != nullptr && g_game->read_only.item.cumulate_count != nullptr &&
+                    g_item_facts != nullptr && g_item_facts->cumulate_count != nullptr &&
                     extension_bag_write_api()->inventory.remove_item_direct != nullptr ? 1 : 0);
         return false;
     }
@@ -133,17 +133,17 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
 bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
                                        void* moving_control) {
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
-        g_game == nullptr || g_game->read_only.inventory.cursor_index == nullptr) {
+        g_item_facts == nullptr || g_item_facts->cursor_index == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
                     dst_bag, moving_control,
                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
-                    g_game != nullptr && g_game->read_only.inventory.cursor_index != nullptr ? 1 : 0);
+                    g_item_facts != nullptr && g_item_facts->cursor_index != nullptr ? 1 : 0);
         return false;
     }
     const int src_bag = original_bag_locked();
     int src_slot = -1;
     if (!qol::contracts::succeeded(
-            g_game->read_only.inventory.cursor_index(moving_control, &src_slot))) return false;
+            g_item_facts->cursor_index(moving_control, &src_slot))) return false;
     const bool moved = move_original_to_extension_slot_locked(lock, src_bag, src_slot, dst_bag);
     if (moved) reset_drag_state_locked(moving_control);
     return moved;

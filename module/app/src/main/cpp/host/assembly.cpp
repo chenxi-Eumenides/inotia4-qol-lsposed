@@ -18,6 +18,7 @@
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
+#include "plugins/item_facts/plugin.h"
 #include "plugins/native_choice/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/quest/plugin.h"
@@ -76,6 +77,7 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::custom_recipe::plugin_descriptor,
     &features::extension_bag::plugin_descriptor,
     &features::inventory_hooks::plugin_descriptor,
+    &features::item_facts::plugin_descriptor,
     &features::native_choice::plugin_descriptor,
     &features::push_all::plugin_descriptor,
     &features::quest::plugin_descriptor,

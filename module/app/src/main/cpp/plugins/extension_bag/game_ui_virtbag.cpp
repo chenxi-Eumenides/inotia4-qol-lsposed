@@ -5,6 +5,7 @@
 #include "contracts/ui.h"
 #include "contracts/ownership.h"
 #include "contracts/inventory_refresh.h"
+#include "contracts/item_facts.h"
 #include "plugins/extension_bag/extension_bag_equip_rules.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/move_merge.h"
@@ -77,6 +78,7 @@ std::atomic<bool> g_extension_source_protection_requested{false};
 uint64_t g_lifecycle_task = 0;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
+const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
 int g_lifecycle_last_state = -1;
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
 std::atomic<bool> g_virtual_bag_enabled{false};
@@ -181,11 +183,11 @@ thread_local bool g_in_native_call = false;
 void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
 bool read_item_category(const void* item, int* out_category) {
-    if (g_game == nullptr || g_game->read_only.item.category == nullptr ||
+    if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
         item == nullptr || out_category == nullptr) return false;
     int32_t category = 0;
     if (!qol::contracts::succeeded(
-            g_game->read_only.item.category(item, &category))) return false;
+            g_item_facts->category(item, &category))) return false;
     *out_category = category;
     return true;
 }
@@ -363,20 +365,20 @@ void extension_description_set_off() {
 }
 
 bool read_item_cumulate_count(const void* item, int* out_count) {
-    if (g_game == nullptr || g_game->read_only.item.cumulate_count == nullptr ||
+    if (g_item_facts == nullptr || g_item_facts->cumulate_count == nullptr ||
         item == nullptr || out_count == nullptr) return false;
     int32_t count = 0;
     if (!qol::contracts::succeeded(
-            g_game->read_only.item.cumulate_count(item, &count))) return false;
+            g_item_facts->cumulate_count(item, &count))) return false;
     *out_count = count;
     return true;
 }
 
 bool read_item_is_jewel(int category) {
-    if (g_game == nullptr || g_game->read_only.item.is_jewel_category == nullptr) return false;
+    if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr) return false;
     int32_t is_jewel = 0;
     return qol::contracts::succeeded(
-               g_game->read_only.item.is_jewel_category(category, &is_jewel)) &&
+               g_item_facts->is_jewel_category(category, &is_jewel)) &&
            is_jewel != 0;
 }
 
@@ -391,11 +393,11 @@ bool read_item_category_predicate(int category,
 }
 
 bool item_is_equip(const void* item) {
-    if (g_game == nullptr || g_game->read_only.item.is_real_equip == nullptr || item == nullptr) {
+    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr || item == nullptr) {
         return false;
     }
     int32_t value = 0;
-    return qol::contracts::succeeded(g_game->read_only.item.is_real_equip(item, &value)) &&
+    return qol::contracts::succeeded(g_item_facts->is_real_equip(item, &value)) &&
            value != 0;
 }
 
@@ -440,9 +442,9 @@ bool mark_native_bag_object(void* item) {
 }
 
 bool read_item_sell_price(const void* item, int64_t* out_price) {
-    if (g_game == nullptr || g_game->read_only.item.sell_price == nullptr ||
+    if (g_item_facts == nullptr || g_item_facts->sell_price == nullptr ||
         item == nullptr || out_price == nullptr) return false;
-    return qol::contracts::succeeded(g_game->read_only.item.sell_price(item, out_price));
+    return qol::contracts::succeeded(g_item_facts->sell_price(item, out_price));
 }
 
 bool read_item_encoded_field(const void* item, uint32_t* out_field) {
@@ -682,6 +684,12 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
 
 const qol::contracts::QolGameHost* extension_bag_game_host() { return g_game; }
 const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return g_sdk; }
+
+void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
+    g_item_facts = facts;
+}
+
+const qol::contracts::ItemFactsApi* extension_bag_item_facts() { return g_item_facts; }
 
 }  // namespace qol::features::extension_bag
 
