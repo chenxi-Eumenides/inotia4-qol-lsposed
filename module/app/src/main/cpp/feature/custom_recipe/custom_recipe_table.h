@@ -16,6 +16,17 @@ namespace custom_recipe {
 constexpr size_t kRecipeRecordSize = 12;
 constexpr size_t kMixtureRecordSize = 3;
 
+enum class TableFailureState : uint8_t {
+    kNone,
+    kNotLoaded,
+    kInvalid,
+};
+
+constexpr bool table_failure_should_log(TableFailureState previous,
+                                        TableFailureState current) {
+    return current != TableFailureState::kNone && previous != current;
+}
+
 constexpr size_t kRbLabel = 0;          // b0-1 配方按钮文本 wordId（u16）
 constexpr size_t kRbResultId = 2;       // b2-3 结果物品 id（u16，注入记录填 0）
 constexpr size_t kRbMaterialStart = 4;  // b4-5 MIXTUREBASE 材料起始下标（u16）

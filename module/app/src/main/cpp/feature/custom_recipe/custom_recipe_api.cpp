@@ -211,9 +211,7 @@ bool set_enabled(bool enabled_value) {
         QOL_LOG_WARN(QolDomain::kCustomRecipe, "install deferred reason=bridge_or_hook_not_ready");
         return true;
     }
-    if (!custom_recipe::custom_recipe_table_ensure()) {
-        QOL_LOG_WARN(QolDomain::kCustomRecipe, "table inject deferred reason=table_not_loaded");
-    }
+    (void)custom_recipe::custom_recipe_table_ensure();
     return true;
 }
 

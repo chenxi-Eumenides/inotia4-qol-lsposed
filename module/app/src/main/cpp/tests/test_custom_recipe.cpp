@@ -675,6 +675,21 @@ static void test_recipe_book_bit_invariant() {
     }
 }
 
+static void test_table_failure_log_state() {
+    CHECK(cr::table_failure_should_log(cr::TableFailureState::kNone,
+                                       cr::TableFailureState::kNotLoaded));
+    CHECK(!cr::table_failure_should_log(cr::TableFailureState::kNotLoaded,
+                                        cr::TableFailureState::kNotLoaded));
+    CHECK(!cr::table_failure_should_log(cr::TableFailureState::kNotLoaded,
+                                        cr::TableFailureState::kNone));
+    CHECK(cr::table_failure_should_log(cr::TableFailureState::kNone,
+                                       cr::TableFailureState::kNotLoaded));
+    CHECK(cr::table_failure_should_log(cr::TableFailureState::kNotLoaded,
+                                       cr::TableFailureState::kInvalid));
+    CHECK(!cr::table_failure_should_log(cr::TableFailureState::kInvalid,
+                                        cr::TableFailureState::kInvalid));
+}
+
 int main() {
     test_interval_inverse_boundaries();
     test_random_matches_target();
@@ -688,6 +703,7 @@ int main() {
     test_dynamic_special_recipes();
     test_scaled_jewel_value();
     test_recipe_book_bit_invariant();
+    test_table_failure_log_state();
     std::printf("custom_recipe_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

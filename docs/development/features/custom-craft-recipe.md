@@ -404,8 +404,8 @@ const Def* def_for_mix_type(uint32_t mix_type); // mixType → 配方（非自�
 | b10 | **0**（必须；见 §3.2 与 §7.8） |
 | b11 | `(1 << Def::group) \| kRbRecipeBookBit(0x20)`：bit0 必须清 0（`CheckMixture` 直接返回 0、`MakeItem` 走通用路径由 hook 拦截）；**bit5 必须置 1** —— 它是书名册计数不变式的一部分（§3.13 / §7.32），由 `build_record_bytes` 统一写入，理由见 `custom_recipe_table.h` 的 `kRbRecipeBookBit` 注释 |
 
-**幂等与重入（`custom_recipe_table_ensure()`）**：以「游戏侧指针是否仍指向模块缓冲」自校验，而非缓存计数——① 已注入且 `*(RECIPEBASE 基址全局) == 模块缓冲` → 直接返回，不重复追加；② 指针已被改写（**游戏重新装载静态表**，如进入存档时）→ 用新原表重新注入，旧缓冲**刻意不释放**（游戏可能仍持有指向其内部的局部指针，泄漏一份远优于悬空访问）；③ 表尚未装载或 5 个全局非法 → 返回 false（fail-closed）并允许后续重试。
-调用点：开关启用时（`set_custom_recipe_enabled(true)`）、每次放料/合成 hook 命中时、以及**点任何类型/菜单按钮时（`UIMix_ButtonMenuListExe`，早于 `CreateRecipeList` 建按钮）**。健康路径仅一次指针比较。实测：启动期配置下发时表未装载 → 记 `QOL_LOG_ERROR` 后跳过，进程不崩溃；boot 后再次启用 → 注入成功；再次启用 → 无第二次注入（自校验生效，未重复追加）。
+**幂等与重入（`custom_recipe_table_ensure()`）**：以「游戏侧指针是否仍指向模块缓冲」自校验，而非缓存计数——① 已注入且 `*(RECIPEBASE 基址全局) == 模块缓冲` → 直接返回，不重复追加；② 指针已被改写（**游戏重新装载静态表**，如进入存档时）→ 用新原表重新注入，旧缓冲**刻意不释放**（游戏可能仍持有指向其内部的局部指针，泄漏一份远优于悬空访问）；③ 表尚未装载或 5 个全局非法 → 返回 false（fail-closed）并允许后续重试。启动期「未装载」形态记一次 `W`（`reason=table_not_loaded`），等待游戏装载后重试；非零但越界/错位的非法形态记一次 `E`，两类状态连续失败均去重，成功注入后复位。
+调用点：开关启用时（`set_custom_recipe_enabled(true)`）、每次放料/合成 hook 命中时、以及**点任何类型/菜单按钮时（`UIMix_ButtonMenuListExe`，早于 `CreateRecipeList` 建按钮）**。健康路径仅一次指针比较。实测：启动期配置下发时表未装载 → 记一次 `W` 并跳过，进程不崩溃；boot 后再次启用 → 注入成功；再次启用 → 无第二次注入（自校验生效，未重复追加）。
 
 **fail-closed 窄域校验**：`recipe_size ∈ [1,64]`、`mixture_size ∈ [1,16]`、`count ∈ [1,4096]`、两个基址非空。这 5 个全局只能走 VMA 兜底，跨版本可能错位；宁可跳过注入也不要带着垃圾指针 `memcpy`（曾因 `MIXTUREBASE` 基址与大小两个全局互换实测崩溃，见 §7.12）。
 
@@ -609,7 +609,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 **已取得的真机证据（2026-09-15，大修版，`Inotia4` 进程内，非 VM 卡）**：
 
 - `custom_recipe craft_ui_hooks.cpp:511 craft ui hooks installed core=5 desc=1 slotcount=1 label=1 title=1 tab=1 reset=1` —— 核心链 5 处 + 装饰性 6 处全部安装成功。
-- 启动期配置下发（静态表未装载）：`table globals invalid recipe_size=0 mixture_size=0 count=0` + `table inject deferred reason=table_not_loaded`，**进程未崩溃**（fail-closed 生效）。
+- 启动期配置下发（静态表未装载）：`W table globals not loaded reason=table_not_loaded ...`，同一未装载状态后续不重复输出；**进程未崩溃**（fail-closed 生效）。非零越界/错位形态使用 `E table globals invalid reason=dimensions_or_vma ...`，成功装载后状态复位。
 - boot 后经 `POST /api/config/set` 启用：`recipe table injected base=69 records=70 materials=190` —— 与 §4.2 的运行时推导预测一致（`base_record_count = 69`、`base_material_count = 189`），5 个 `.bss` 全局地址正确、注入与写回成功。
 - 再次启用：**无第二次注入日志**（指针自校验生效，未重复追加记录）。
 - 开关时序：`recipe table injected base=69 records=70 materials=190` → `recipe table deactivated records=69` → `recipe table reactivated records=70`，全程 `pid` 不变。

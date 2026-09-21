@@ -139,6 +139,7 @@ uint8_t* g_recipe_buffer = nullptr;
 uint8_t* g_mixture_buffer = nullptr;
 uint16_t g_base_record_count_cache = 0;
 std::atomic<bool> g_busy{false};
+TableFailureState g_table_failure_state = TableFailureState::kNone;
 
 // 读 .bss 全局。
 inline uintptr_t bss(uintptr_t vma) { return g_base + vma; }
@@ -162,7 +163,9 @@ bool ensure_impl() {
             QOL_LOG_INFO(QolDomain::kCustomRecipe, "recipe table reactivated records=%u", want);
         }
         if (!catalog_ready()) bind_base_record_count(g_base_record_count_cache);
-        return catalog_ready();
+        const bool ready = catalog_ready();
+        if (ready) g_table_failure_state = TableFailureState::kNone;
+        return ready;
     }
     // 2) 游戏重新装载了静态表（指针被改写回原表）→ 用新原表重新注入。
     //    刻意不释放旧缓冲：游戏可能仍持有指向模块缓冲内部的局部指针，泄漏一份远优于悬空访问。
@@ -183,12 +186,25 @@ bool ensure_impl() {
     constexpr uint8_t kMaxRecipeSize = 64;
     constexpr uint8_t kMaxMixtureSize = 16;
     constexpr uint16_t kMaxRecordCount = 4096;
-    if (recipe_data == nullptr || mixture_data == nullptr || recipe_size == 0 ||
-        recipe_size > kMaxRecipeSize || mixture_size == 0 || mixture_size > kMaxMixtureSize ||
-        cur_count == 0 || cur_count > kMaxRecordCount) {
-        QOL_LOG_ERROR(QolDomain::kCustomRecipe,
-                      "table globals invalid recipe_size=%u mixture_size=%u count=%u",
-                      recipe_size, mixture_size, cur_count);
+    const bool not_loaded = recipe_data == nullptr || mixture_data == nullptr || recipe_size == 0 ||
+                            mixture_size == 0 || cur_count == 0;
+    const bool invalid = recipe_size > kMaxRecipeSize || mixture_size > kMaxMixtureSize ||
+                         cur_count > kMaxRecordCount;
+    const TableFailureState failure_state =
+        not_loaded ? TableFailureState::kNotLoaded : TableFailureState::kInvalid;
+    if (not_loaded || invalid) {
+        if (table_failure_should_log(g_table_failure_state, failure_state)) {
+            if (failure_state == TableFailureState::kNotLoaded) {
+                QOL_LOG_WARN(QolDomain::kCustomRecipe,
+                             "table globals not loaded reason=table_not_loaded; waiting for game recipe tables and retrying recipe_size=%u mixture_size=%u count=%u",
+                             recipe_size, mixture_size, cur_count);
+            } else {
+                QOL_LOG_ERROR(QolDomain::kCustomRecipe,
+                              "table globals invalid reason=dimensions_or_vma recipe_ptr=%p mixture_ptr=%p recipe_size=%u mixture_size=%u count=%u",
+                              recipe_data, mixture_data, recipe_size, mixture_size, cur_count);
+            }
+        }
+        g_table_failure_state = failure_state;
         return false;
     }
 
@@ -246,6 +262,7 @@ bool ensure_impl() {
                  static_cast<unsigned>(base_record_count + n),
                  static_cast<unsigned>(base_material_count + material_total_count),
                  book_bytes_after);
+    g_table_failure_state = TableFailureState::kNone;
     return true;
 }
 
