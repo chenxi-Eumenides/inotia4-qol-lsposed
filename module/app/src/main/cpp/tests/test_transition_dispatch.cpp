@@ -1,7 +1,7 @@
 // host 单测：状态转换派发纯逻辑 + 逻辑帧点枚举。
 // 只包含头文件纯逻辑（transition_detail / FramePointId），不链接运行期派发器。
-#include "core/native/frame_task.h"
-#include "core/native/transition_dispatch.h"
+#include "infra/frame/frame_task.h"
+#include "infra/frame/transition_dispatch.h"
 
 #include <cstdio>
 

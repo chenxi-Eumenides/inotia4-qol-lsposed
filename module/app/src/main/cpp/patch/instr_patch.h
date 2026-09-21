@@ -6,12 +6,12 @@
 
 // 指令 patch 机制层（ARCHITECTURE.md §4.1 调用点 patch、§4.2 物理归还）。
 //
-// 机制原语（BL 改写 / 指令字替换）由宿主注入：过渡期指向 core/native/call_patch，
+// 机制原语（BL 改写 / 指令字替换）由宿主注入：过渡期指向 patch/call_patch，
 // P5 迁入本层后不再跨层取原语。本层只做站点校验、占用声明与返回错误语义。
 
 namespace qol::patch {
 
-struct Primitives {   // 由 host 注入（过渡期指向 core/native 的调用点 patch 原语；P5 迁入本层）
+struct Primitives {   // 由 host 注入调用点 patch 原语
     bool (*install_bl)(uintptr_t addr, uint32_t expected_word, void* wrapper);
     bool (*revert_bl)(uintptr_t addr, uint32_t original_word);
     bool (*install_word)(uintptr_t addr, uint32_t expected_word, uint32_t new_word);

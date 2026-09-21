@@ -8,7 +8,7 @@
 
 #include "contracts/panels.h"
 #include "contracts/ui.h"
-#include "core/native/game_variant.h"
+#include "game/variants/game_variant.h"
 #include "game_access.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/char.h"

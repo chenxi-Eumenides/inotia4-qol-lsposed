@@ -9,13 +9,13 @@
 
 #include "contracts/panels.h"
 #include "game_access.h"
-#include "game_ops_common.h"
+#include "game/ops/game_ops_common.h"
 #include "game_save_preflight.h"
 #include "game_state.h"
 #include "core/native/module_save_port.h"
-#include "core/native/extension_bag_port.h"
-#include "core/native/save_enter.h"
-#include "core/native/transition_dispatch.h"
+#include "contracts/extension_bag_port.h"
+#include "infra/save/save_enter.h"
+#include "infra/frame/transition_dispatch.h"
 #include "infra/capabilities.h"
 
 namespace {

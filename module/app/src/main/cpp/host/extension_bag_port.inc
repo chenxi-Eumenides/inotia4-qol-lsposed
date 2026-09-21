@@ -1,4 +1,4 @@
-#include "core/native/extension_bag_port.h"
+#include "contracts/extension_bag_port.h"
 
 #include "contracts/item_count.h"
 #include "host/adapters.h"

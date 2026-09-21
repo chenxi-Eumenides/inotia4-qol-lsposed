@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "core/native/popup_enter_alias.h"
+#include "infra/popup_enter_alias.h"
 #include "game/symbols/game_symbols.h"
 #include "game_access.h"
 

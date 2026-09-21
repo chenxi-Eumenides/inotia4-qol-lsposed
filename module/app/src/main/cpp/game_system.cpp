@@ -8,7 +8,7 @@
 #include "game_world.h"
 #include "api/native/game_ui.h"
 #include "game_dialog.h"
-#include "game_json.h"
+#include "game/json/game_json.h"
 
 #include <mutex>
 

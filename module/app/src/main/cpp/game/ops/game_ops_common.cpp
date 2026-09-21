@@ -1,8 +1,8 @@
 // game_ops_common.cpp —— op_ok/op_err 响应信封（自 game_state.cpp 迁入，纯搬代码，零逻辑变更）
 
-#include "game_ops_common.h"
+#include "game/ops/game_ops_common.h"
 
-#include "game_cache.h"
+#include "contracts/game_cache.h"
 
 #include <string>
 

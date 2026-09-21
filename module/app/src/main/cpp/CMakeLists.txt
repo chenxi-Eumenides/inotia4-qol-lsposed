@@ -69,11 +69,10 @@ add_library(gamebridge SHARED
     bridge/native/gamebridge_extension_bag.cpp
     game_access.cpp
     game/symbols/symbol_resolver.cpp
-    core/native/game_json.cpp
-    core/native/game_ops_common.cpp
-    core/native/grid_geometry.cpp
+    game/json/game_json.cpp
+    game/ops/game_ops_common.cpp
     game_state.cpp
-    core/native/game_nav.cpp
+    game/nav/game_nav.cpp
     core/native/game_cache.cpp
     core/native/module_save.cpp
     api/native/game_world.cpp
@@ -101,7 +100,6 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/contracts
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/extension_bag
     ${CMAKE_CURRENT_SOURCE_DIR}/api/native
-    ${CMAKE_CURRENT_SOURCE_DIR}/core/native
     ${CMAKE_CURRENT_SOURCE_DIR}/game/read
     ${CMAKE_CURRENT_SOURCE_DIR}/game/symbols
 )
@@ -111,10 +109,10 @@ target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/call_patch.cpp
-    core/native/frame_task.cpp
-    core/native/save_enter.cpp
-    core/native/save_exit.cpp
+    patch/call_patch.cpp
+    infra/frame/frame_task.cpp
+    infra/save/save_enter.cpp
+    infra/save/save_exit.cpp
     core/native/inventory_trade.cpp
     game/read/item_class.cpp
 )
@@ -138,7 +136,7 @@ target_sources(gamebridge PRIVATE
 
 # 状态转换派发（go_main_menu/enter_slot/create_slot 跨线程收敛到逻辑帧点，末尾追加）
 target_sources(gamebridge PRIVATE
-    core/native/transition_dispatch.cpp
+    infra/frame/transition_dispatch.cpp
 )
 
 # 任务完成度进档重算（quest 插件迁移：零资源常驻 + infra/scheduler 帧节拍；旧 quest_resync 删除）
@@ -154,18 +152,18 @@ target_sources(gamebridge PRIVATE
 
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/qol_log.cpp
+    infra/log/qol_log.cpp
     bridge/native/gamebridge_log.cpp
 )
 
 # libgame.so 变体对照表运行时查表（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/game_variant.cpp
+    game/variants/game_variant.cpp
 )
 
 # 功能抽象层：构建能力 → 功能可用性（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/game_feature.cpp
+    game/feature/game_feature.cpp
 )
 
 # 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider，末尾追加，不改上方既有行）
@@ -185,7 +183,7 @@ target_sources(gamebridge PRIVATE
 
 # 模块替换 PopupState enter 回调后的 UI 态反查表（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/popup_enter_alias.cpp
+    infra/popup_enter_alias.cpp
 )
 
 # 推怪（推动增强）全局开关：JNI 薄层（插件实现已迁 plugins/push_all，末尾追加，不改上方既有行）

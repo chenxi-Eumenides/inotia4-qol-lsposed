@@ -3,7 +3,7 @@ package com.inotia4.qol
 /**
  * 统一日志域 token（P1）。
  *
- * token 文本是 Kotlin ↔ native 的唯一契约，与 `core/native/qol_log.h` 的
+ * token 文本是 Kotlin ↔ native 的唯一契约，与 `infra/log/qol_log.h` 的
  * `QolDomain` 词表逐项对应（小写）。新增域必须两侧同步。
  */
 enum class LogDomain(val token: String) {

@@ -17,8 +17,8 @@
 #include "game/access/world.h"
 #include "game/clock.h"
 #include "game_state.h"
-#include "core/native/game_feature.h"
-#include "core/native/game_variant.h"
+#include "game/feature/game_feature.h"
+#include "game/variants/game_variant.h"
 
 namespace qol::host {
 namespace {

@@ -1,9 +1,9 @@
 // game_feature.cpp —— game_variant 之上的功能抽象层实现。
 //
-// 依赖方向：core 层，仅依赖 core/native/game_variant.h 与 STL；不依赖 game_access.h。
-#include "core/native/game_feature.h"
+// 依赖方向：core 层，仅依赖 game/variants/game_variant.h 与 STL；不依赖 game_access.h。
+#include "game/feature/game_feature.h"
 
-#include "core/native/game_variant.h"
+#include "game/variants/game_variant.h"
 
 #include <atomic>
 

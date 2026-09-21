@@ -12,7 +12,7 @@
 #include <thread>
 #include <vector>
 
-#include "game_json.h"
+#include "game/json/game_json.h"
 
 std::string json_escape(const char* s) {
     std::string out;

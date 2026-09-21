@@ -54,7 +54,7 @@ PF_X = 0x1
 HIDDEN_SEGMENT_VADDR_MIN = 0x700000  # 隐藏注入段起始 vaddr 下限
 WH4_MARKER = b"WH4JRN01"             # monster 隐藏段内的仓库容器 magic
 
-# 能力位（与 core/native/game_variant.h 保持一致）
+# 能力位（与 game/variants/game_variant.h 保持一致）
 CAP_HIDDEN_SEGMENT = 1 << 0   # 存在隐藏可执行 PT_LOAD 段
 CAP_WAREHOUSE = 1 << 1        # 隐藏段内包含 ASCII WH4JRN01
 CAP_WAREHOUSE_INLINE = 1 << 2 # block3 内嵌 WH96v002 仓库段（语义位）

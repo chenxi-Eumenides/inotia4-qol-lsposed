@@ -13,7 +13,7 @@
 // 线程模型：注册/删除/查询可来自任意线程（共享一把互斥锁）；回调只在游戏主线程
 // 执行。注册顺序即派发顺序；回调返回 false 或 count 耗尽自动注销。
 //
-// 与 legacy core/native/frame_task 并存：未迁移消费者仍用 legacy 管理器，
+// 与 legacy infra/frame/frame_task 并存：未迁移消费者仍用 legacy 管理器，
 // 帧锚点 wrapper 同时派发两者；本实现独立，不共享状态。
 
 namespace qol::infra {

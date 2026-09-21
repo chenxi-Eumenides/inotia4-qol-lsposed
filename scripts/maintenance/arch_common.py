@@ -106,24 +106,15 @@ _ROOT_OVERRIDES = {
     "game_ptr_hook.h": "patch",
 }
 
+# 暂留 legacy core/native：这些实现仍直接依赖未吸收的原版访问面，依赖吸收完成后再迁入目标层。
 _CORE_OVERRIDES = {
-    "call_patch.cpp": "patch",
-    "call_patch.h": "patch",
-    "game_variant.cpp": "game",
-    "game_variant.h": "game",
-    "game_feature.cpp": "game",
-    "game_feature.h": "game",
-    "game_nav.cpp": "legacy/world",
-    "game_nav.h": "legacy/world",
+    "game_cache.cpp": "infra",
+    "game_cache.h": "infra",
+    "module_save.cpp": "legacy/save",
+    "module_save_port.h": "contracts",
     "inventory_trade.cpp": "legacy/inventory",
     "inventory_trade.h": "legacy/inventory",
-    "module_save.cpp": "legacy/save",
-    "module_save.h": "legacy/save",
-    "module_save_port.h": "contracts",
-    "extension_bag_port.h": "contracts",
-    "sell_price.h": "legacy/inventory",
 }
-
 
 _TARGET_PREFIXES = (
     ("contracts/", "contracts"),

@@ -5,9 +5,9 @@
 //   3) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
 // 纯头文件逻辑，不依赖 Android/游戏内存。
 
-#include "core/native/frame_task.h"
-#include "core/native/save_enter.h"
-#include "core/native/save_exit.h"
+#include "infra/frame/frame_task.h"
+#include "infra/save/save_enter.h"
+#include "infra/save/save_exit.h"
 #include "contracts/game_host.h"
 #include "game/read/item_class.h"
 

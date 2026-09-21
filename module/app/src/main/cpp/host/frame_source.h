@@ -2,9 +2,9 @@
 
 // 帧源：两条常驻 core 资源（渲染开始前 / 逻辑帧开始前锚点）。
 //
-// 取代旧 core/native/frame_host 的专用安装器：锚点现在作为 patch 层的声明式
+// 取代旧 infra/frame/frame_host 的专用安装器：锚点现在作为 patch 层的声明式
 // kCallPatch 资源安装，wrapper 在游戏主线程派发 infra::scheduler 与 legacy
-// core/native/frame_task（未迁移消费者），再复刻原调用。
+// infra/frame/frame_task（未迁移消费者），再复刻原调用。
 
 namespace qol::host {
 

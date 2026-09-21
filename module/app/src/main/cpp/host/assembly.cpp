@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "core/native/call_patch.h"
-#include "core/native/qol_log.h"
+#include "patch/call_patch.h"
+#include "infra/log/qol_log.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
@@ -194,7 +194,7 @@ bool assembly_init() {
         unhook_fn,
     };
 
-    // 指令 patch 原语注入：过渡期指向 core/native/call_patch；P5 原语迁入 patch/ 后本处改指 patch 层。
+    // 指令 patch 原语注入：过渡期指向 patch/call_patch；P5 原语迁入 patch/ 后本处改指 patch 层。
     // 指针槽原语（write_ptr/restore_ptr）由 patch/ptr_slot 实现（mprotect + 8 字节写，fail-closed）。
     patch::set_primitives(qol::patch::Primitives{
         &call_patch_install_bl,

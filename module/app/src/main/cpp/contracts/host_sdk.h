@@ -7,7 +7,7 @@
 // 才冻结对外兼容边界。
 //
 // 各组替代关系：
-//   log          → core/native/qol_log.h
+//   log          → infra/log/qol_log.h
 //   config       → infra/config.h
 //   scheduler    → infra/scheduler.h
 //   commands     → contracts/commands.h / infra/commands.h
@@ -19,7 +19,7 @@
 //   text_scope   → infra/text_scope.h
 //
 // hooks::registry/install/transaction、patch::*、game/access/patches、game/access/ptr_slots、
-// game_symbols.h、host/* 与 core/native/call_patch 均为内核私有，不进入本表。
+// game_symbols.h、host/* 与 patch/call_patch 均为内核私有，不进入本表。
 
 #include <cstddef>
 #include <cstdint>

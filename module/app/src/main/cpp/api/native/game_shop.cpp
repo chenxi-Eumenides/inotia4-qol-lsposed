@@ -7,7 +7,7 @@
 
 #include "game_access.h"
 #include "game_state.h"
-#include "game_ops_common.h"
+#include "game/ops/game_ops_common.h"
 
 std::string data_shop_items_json() {
     if (g_base == 0 || fn_item_get_buy_price == nullptr || fn_get_bit == nullptr || fn_get_cumulate_count == nullptr) return "{\"items\":[]}";

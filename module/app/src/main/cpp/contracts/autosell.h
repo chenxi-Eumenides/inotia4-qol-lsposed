@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // 自动出售稳定端口（ARCHITECTURE.md §3.4 契约/端口风格；与 contracts/attribute_quality.h、
-// core/native/*_port.h 同类）。只放消费者（UI/JNI）需要的纯类型与函数声明，实现由
+// infra/*_port.h 同类）。只放消费者（UI/JNI）需要的纯类型与函数声明，实现由
 // plugins/autosell 提供。UI 经本头访问，避免 plugins/ui → plugins/autosell 的
 // feature→feature include（属 P4-B3 迁移的正常收口）。
 

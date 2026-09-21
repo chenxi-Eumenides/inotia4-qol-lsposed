@@ -4,8 +4,8 @@
 
 #include "game_access.h"
 #include "game/symbols/game_symbols.h"
-#include "core/native/extension_bag_port.h"
-#include "core/native/frame_task.h"
+#include "contracts/extension_bag_port.h"
+#include "infra/frame/frame_task.h"
 
 #include "contracts/extension_bag.h"
 

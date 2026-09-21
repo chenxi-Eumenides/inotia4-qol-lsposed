@@ -4,10 +4,10 @@
 // call_patch 改指 wrapper；wrapper 先派发回调（world 数据仍有效），再复刻原 GAME_Exit。
 // GAME_Exit 在 .text 内仅此一个调用点，故仅覆盖 world -> 主菜单。
 
-#include "core/native/save_exit.h"
+#include "infra/save/save_exit.h"
 
-#include "core/native/call_patch.h"
-#include "core/native/qol_log.h"
+#include "patch/call_patch.h"
+#include "infra/log/qol_log.h"
 #include "contracts/events.h"
 #include "game/symbols/game_symbols.h"
 #include "game_access.h"

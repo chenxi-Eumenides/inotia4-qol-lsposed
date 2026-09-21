@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 #include "contracts/commands.h"
 #include "contracts/ownership.h"
 #include "game/access/patches.h"

@@ -2,7 +2,7 @@
 // 覆盖：非 encoded / view<=1 整件、encoded 部分整除、越界/不整除/非正值拒绝，
 // 以及 canonical 199（a=1,b=71）与关闭态 b 视图的边界。
 
-#include "core/native/store_sell_rules.h"
+#include "contracts/store_sell_rules.h"
 
 #include <cstdint>
 #include <cstdio>

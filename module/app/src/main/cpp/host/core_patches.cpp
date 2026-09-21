@@ -6,8 +6,8 @@
 #include <cstring>
 
 #include "contracts/plugin.h"
-#include "core/native/call_patch.h"
-#include "core/native/qol_log.h"
+#include "patch/call_patch.h"
+#include "infra/log/qol_log.h"
 #include "game/access/patches.h"
 #include "game_access.h"
 #include "hooks/registry.h"

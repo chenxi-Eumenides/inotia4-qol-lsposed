@@ -4,7 +4,7 @@
 #include <cstring>
 
 #include "contracts/plugin.h"
-#include "core/native/game_json.h"
+#include "game/json/game_json.h"
 #include "hooks/registry.h"
 #include "host/plugin_registry.h"
 #include "infra/commands.h"

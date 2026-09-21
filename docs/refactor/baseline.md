@@ -21,21 +21,21 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 27 |
-| `game` | 56 |
+| `contracts` | 29 |
+| `game` | 62 |
 | `hooks` | 10 |
 | `host` | 38 |
-| `infra` | 46 |
+| `infra` | 39 |
 | `legacy/character` | 2 |
 | `legacy/dialog` | 4 |
-| `legacy/inventory` | 9 |
+| `legacy/inventory` | 8 |
 | `legacy/party` | 2 |
 | `legacy/quest` | 2 |
 | `legacy/save` | 5 |
 | `legacy/shop` | 2 |
 | `legacy/system` | 2 |
 | `legacy/ui` | 5 |
-| `legacy/world` | 9 |
+| `legacy/world` | 7 |
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
@@ -55,7 +55,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **395** |
+| **合计** | **393** |
 
 ### 1.2 迁移期映射摘要
 
@@ -91,26 +91,6 @@
 | `game_system.cpp` | legacy/system |
 | `game_system.h` | legacy/system |
 
-**重构期 `core/native/` 覆盖（`arch_common._CORE_OVERRIDES`）**
-
-| 当前文件名 | 目标层 |
-| --- | --- |
-| `call_patch.cpp` | patch |
-| `call_patch.h` | patch |
-| `extension_bag_port.h` | contracts |
-| `game_feature.cpp` | game |
-| `game_feature.h` | game |
-| `game_nav.cpp` | legacy/world |
-| `game_nav.h` | legacy/world |
-| `game_variant.cpp` | game |
-| `game_variant.h` | game |
-| `inventory_trade.cpp` | legacy/inventory |
-| `inventory_trade.h` | legacy/inventory |
-| `module_save.cpp` | legacy/save |
-| `module_save.h` | legacy/save |
-| `module_save_port.h` | contracts |
-| `sell_price.h` | legacy/inventory |
-
 **重构期 `api/native/` 文件名前缀 → 迁移期标签（`arch_common._LEGACY_API_BY_STEM`）**
 
 | 当前文件名前缀 | 迁移期标签 |
@@ -133,12 +113,12 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 101 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 96 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `infra` | 42 |
-| `host` | `game` | 36 |
+| `host` | `game` | 39 |
+| `host` | `infra` | 39 |
 | `host` | `contracts` | 23 |
 | `plugins/extension_bag` | `contracts` | 20 |
 | `plugins/autosell` | `contracts` | 16 |
@@ -147,11 +127,11 @@
 | `plugins/core.ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
 | `host` | `patch` | 10 |
-| `infra` | `game` | 10 |
 | `infra` | `contracts` | 8 |
-| `legacy/world` | `game` | 7 |
+| `infra` | `game` | 8 |
+| `game` | `contracts` | 7 |
+| `legacy/inventory` | `game` | 7 |
 | `plugins/save_backup` | `contracts` | 7 |
-| `game` | `contracts` | 6 |
 
 ### 2.2 include 环
 
@@ -168,7 +148,6 @@
 - `layer_direction|api/native/game_party.cpp|api/native/game_character.h|legacy/party → legacy/character`
 - `layer_direction|api/native/game_party.cpp|api/native/game_world.h|legacy/party → legacy/world`
 - `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|legacy/ui → legacy/world`
-- `layer_direction|core/native/frame_task.cpp|game_system.h|infra → legacy/system`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_character.h|infra → legacy/character`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_inventory.h|infra → legacy/inventory`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_party.h|infra → legacy/party`
@@ -177,22 +156,23 @@
 - `layer_direction|core/native/game_cache.cpp|game_access.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_state.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_system.h|infra → legacy/system`
-- `layer_direction|core/native/game_json.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|core/native/game_json.cpp|game_access.h|infra → game`
-- `layer_direction|core/native/game_variant.cpp|core/native/qol_log.h|game → infra`
-- `layer_direction|core/native/save_enter.cpp|core/native/call_patch.h|infra → patch`
-- `layer_direction|core/native/save_enter.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|core/native/save_enter.cpp|game_access.h|infra → game`
+- `layer_direction|game/json/game_json.cpp|game/symbols/game_symbols.h|infra → game`
+- `layer_direction|game/json/game_json.cpp|game_access.h|infra → game`
+- `layer_direction|game/read/game_tiles.cpp|infra/log/qol_log.h|game → infra`
+- `layer_direction|game/variants/game_variant.cpp|infra/log/qol_log.h|game → infra`
+- `layer_direction|game_access.cpp|game_system.h|game → legacy/system`
+- `layer_direction|game_access.cpp|infra/log/qol_log.h|game → infra`
+- `layer_direction|game_dialog.cpp|api/native/game_save.h|legacy/dialog → legacy/save`
 - …（其余 12 条省略）
 
 ### offsets_symbols_header（11 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/game_json.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/game_nav.cpp|game/symbols/game_symbols.h|legacy/world 层引用符号头`
 - `offsets_symbols_header|core/native/inventory_trade.cpp|game/symbols/game_symbols.h|legacy/inventory 层引用符号头`
-- `offsets_symbols_header|core/native/save_enter.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/save_exit.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|game/json/game_json.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|game/nav/game_nav.cpp|game/symbols/game_symbols.h|legacy/world 层引用符号头`
+- `offsets_symbols_header|infra/save/save_enter.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|infra/save/save_exit.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/feature.cpp|game/symbols/game_symbols.h|plugins/custom_recipe 层引用符号头`
 - `offsets_symbols_header|plugins/custom_recipe/table.cpp|game/symbols/game_symbols.h|plugins/custom_recipe 层引用符号头`
 - `offsets_symbols_header|plugins/extension_bag/extension_bag_geometry.cpp|game/symbols/game_symbols.h|plugins/extension_bag 层引用符号头`
@@ -218,9 +198,9 @@
 
 去重符号 → 文件（前 3 条，共 3 条；`--verbose` 列全部）：
 
-- `F_GAMESTATE_SET_STATE_VMA` → `core/native/save_exit.cpp`
-- `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `core/native/save_enter.cpp`
-- `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `core/native/save_enter.cpp`
+- `F_GAMESTATE_SET_STATE_VMA` → `infra/save/save_exit.cpp`
+- `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `infra/save/save_enter.cpp`
+- `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `infra/save/save_enter.cpp`
 
 ## 5. JNI 面
 

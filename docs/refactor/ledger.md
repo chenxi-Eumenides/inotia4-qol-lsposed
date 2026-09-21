@@ -50,6 +50,16 @@
   清除阶段 **P5/U11**：动态 UI 绑定管理器建立后改申报 `own:ui.main_menu.more_games_entry`（kOwnership）＋运行期 lease。
   锚点：`ARCHITECTURE.md` §2.2 core.ui 自我约束 + §12.3 U11。
 
+### 暂留 `core/native` 的三组实现
+
+- `game_cache.{h,cpp}`：仍依赖 `api/native/*`、`game_system.h`、`game_access.h` 与 `game_state.h`，当前映射为 `infra`。
+- `module_save.cpp` 与 `module_save_port.h`：实现仍依赖 `game_access.h` 与 `game_state.h`；稳定声明 `contracts/module_save_port.h` 保持不变，当前实现映射为 `legacy/save`。
+- `inventory_trade.{h,cpp}`：仍依赖 `game_access.h`、`game_state.h` 与 `game/symbols/game_symbols.h`，当前映射为 `legacy/inventory`。
+
+清除条件：完成 `api/native`、`game_access.h`、`game_state.h` 及相关符号访问面的吸收，补齐目标层适配接口；随后将三组文件迁入目标层、删除对应 `_CORE_OVERRIDES` 条目，并通过 `check_arch.py` 与 `check_offsets.py` 的基线棘轮校验。
+
+日志策略结论：`check_log_policy.py` 的 R3 error（Kotlin `LogDomain` 缺少 `special_equip`）在 HEAD 中已存在；本批仅更新日志头文件路径注释，未引入该问题，按既有债务登记，不在本批修复。
+
 新增豁免必须包含：`规则名`、`路径/目标`、`理由`、`批准范围`、`清除阶段`、`到期条件`、`文档锚点`；
 无文档锚点的豁免视为未登记（`check_layers` 会失败）。豁免与基线是两种机制：
 
@@ -128,7 +138,7 @@ P1 债务变化：S2 公共契约已删除，codec、策略常量和 999 有效�
 | # | lane | 规模 | 依赖 | 状态 |
 |---|---|---|---|---|
 | D1 | `ui` 主体（拆 `ui_kit` / 文本 / 面板） | 5,320 行（实测 31 文件） | B3 ✅、C2 ✅ | ✅ 完成（D1-a1/a2/b0/b1/b2/b3/b4/b4a/c0；待真机卡 VM-D1）——共享 UI 原语下沉 `game/access`，文本层归 `text_layer`，面板归 `core.ui`/`autosell`/`save_backup`/`native_choice`；D1-c0 删 `custom` 与 `exp1-5` 实验面；D1-c 清 `UiPopupState*` 死代码、基线 68→51 |
-| D2 | `extension_bag` | 12,742 行 | A1、B2、B4、D1 | 🔄 进行中（冻结设计见 `docs/refactor/adr/0007-extension-bag-contract-and-mechanisms.md`；阶段：**D2a-1** 机制前置（popup_state 部分 wrap + `kBranchRedirect`，可并行）→ **D2a-2** stack 头归位 ✅（`stack_codec`→`contracts`、`stack_limit_port`→`contracts/`）；TU 拆分延后（棘轮按文件/行号记账，机械拆分需受控基线重定位，建议与 P5 检查器口径一并处理） → **D2a-3a** 契约 + 21 站点/符号登记（纯加法）✅ → **D2a-3b-1** 8 条声明（M1/M2 入口 hook、P1–P4 PopupState、S1 desc 槽命名空间、X1 move_merge 指针槽）+ 两桥 + 卸 raw + 门禁链路 ✅（M1/M2 按晚就绪语义校正为 required×failSoft；**C1–C21 raw call patch 与两条轮询线程保留，a3b-2 收口**） → **D2a-3b-2** 21 条 C1–C21 kCallPatch 声明化（功能型 required×failSoft / 装饰型 optional×failSoft，save callsite handler=`module_save_game`，机制 owner=extension_bag）+ 删 300ms 注入线程与自制 `allocate_draw_thunk` ✅（调用点 thunk 归宿主 `core/native/call_patch`；**150ms 生命周期线程保留，a3c 迁 scheduler**） → **D2a-3c** 150ms 生命周期线程迁 `infra::scheduler` 帧任务（kLogicPre / 节流 30 帧 / count=0 常驻；`set_virtual_bag_enabled(false)`/deactivate 移除）+ provides `extension_bag` v1.0（`ExtensionBagApi` 37 函数经桥交 EB TU `extension_bag_port.cpp` 逐条转发既有 port；宿主 enabled 注册 / revoking 注销）✅ → **D2b** 消费者切换/删反向引用（D2b-1 native / D2b-2 api/native POD）✅ → **D2c-1** `feature/extension_bag/**` 整体物理迁移到 `plugins/extension_bag/**`（34 文件，纯机械；include/CMake/基线路径同步）✅ → **D2c-2a** `feature/patch` 的 inventory 业务物理迁移到 `plugins/inventory_hooks`（`native_inventory_hook.{h,cpp}` + `inventory_hook_stage4.{h,cpp}`，4 文件）+ 删跨层 claims 桥（改建 `plugins/inventory_hooks/claims.h`）+ 被迁 TU 的 EB 调用切 capability（24 项经 `extension_bag_capability()` 现取；弹窗 2 项消费者内联）✅ → **D2c-2b-1** `inventory_refresh` v1.0 capability（refresh trampoline 转能力，EB/game_patch 消费者现取）+ 出售门禁转 `hooks/dispatch` 布尔门 Intercept（special_equip 登记、inventory_hooks 查询）+ `inventory_find_item_poc` 归位 `plugins/inventory_hooks`、删两处前置声明权宜 ✅ → **D2c-2b-2** `game_patch` 残壳收口：move_merge/X1 wrapper 迁 `plugins/extension_bag`、IAP 恢复迁 `game/access/hive_iap`、3 个 stage4 EB 谓词迁 EB 本地规则头、删除 `feature/patch` ✅（**`feature/` 目录已空**）→ **D2c-2 ✅ 完成** → **D2c-2c**（残留）：`native_hook_func`/`native_unhook_func` 机制原语与 `core/native/extension_bag_port.h` 过渡 port 收口（P5 前）→ **D2d** 收尾/冻结） |
+| D2 | `extension_bag` | 12,742 行 | A1、B2、B4、D1 | 🔄 进行中（冻结设计见 `docs/refactor/adr/0007-extension-bag-contract-and-mechanisms.md`；阶段：**D2a-1** 机制前置（popup_state 部分 wrap + `kBranchRedirect`，可并行）→ **D2a-2** stack 头归位 ✅（`stack_codec`→`contracts`、`stack_limit_port`→`contracts/`）；TU 拆分延后（棘轮按文件/行号记账，机械拆分需受控基线重定位，建议与 P5 检查器口径一并处理） → **D2a-3a** 契约 + 21 站点/符号登记（纯加法）✅ → **D2a-3b-1** 8 条声明（M1/M2 入口 hook、P1–P4 PopupState、S1 desc 槽命名空间、X1 move_merge 指针槽）+ 两桥 + 卸 raw + 门禁链路 ✅（M1/M2 按晚就绪语义校正为 required×failSoft；**C1–C21 raw call patch 与两条轮询线程保留，a3b-2 收口**） → **D2a-3b-2** 21 条 C1–C21 kCallPatch 声明化（功能型 required×failSoft / 装饰型 optional×failSoft，save callsite handler=`module_save_game`，机制 owner=extension_bag）+ 删 300ms 注入线程与自制 `allocate_draw_thunk` ✅（调用点 thunk 归宿主 `patch/call_patch`；**150ms 生命周期线程保留，a3c 迁 scheduler**） → **D2a-3c** 150ms 生命周期线程迁 `infra::scheduler` 帧任务（kLogicPre / 节流 30 帧 / count=0 常驻；`set_virtual_bag_enabled(false)`/deactivate 移除）+ provides `extension_bag` v1.0（`ExtensionBagApi` 37 函数经桥交 EB TU `extension_bag_port.cpp` 逐条转发既有 port；宿主 enabled 注册 / revoking 注销）✅ → **D2b** 消费者切换/删反向引用（D2b-1 native / D2b-2 api/native POD）✅ → **D2c-1** `feature/extension_bag/**` 整体物理迁移到 `plugins/extension_bag/**`（34 文件，纯机械；include/CMake/基线路径同步）✅ → **D2c-2a** `feature/patch` 的 inventory 业务物理迁移到 `plugins/inventory_hooks`（`native_inventory_hook.{h,cpp}` + `inventory_hook_stage4.{h,cpp}`，4 文件）+ 删跨层 claims 桥（改建 `plugins/inventory_hooks/claims.h`）+ 被迁 TU 的 EB 调用切 capability（24 项经 `extension_bag_capability()` 现取；弹窗 2 项消费者内联）✅ → **D2c-2b-1** `inventory_refresh` v1.0 capability（refresh trampoline 转能力，EB/game_patch 消费者现取）+ 出售门禁转 `hooks/dispatch` 布尔门 Intercept（special_equip 登记、inventory_hooks 查询）+ `inventory_find_item_poc` 归位 `plugins/inventory_hooks`、删两处前置声明权宜 ✅ → **D2c-2b-2** `game_patch` 残壳收口：move_merge/X1 wrapper 迁 `plugins/extension_bag`、IAP 恢复迁 `game/access/hive_iap`、3 个 stage4 EB 谓词迁 EB 本地规则头、删除 `feature/patch` ✅（**`feature/` 目录已空**）→ **D2c-2 ✅ 完成** → **D2c-2c**（残留）：`native_hook_func`/`native_unhook_func` 机制原语与 `contracts/extension_bag_port.h` 过渡 port 收口（P5 前）→ **D2d** 收尾/冻结） |
 
 > **D2 VM 命名空间**（D2 冻结设计验收；防与 `verification.md` 现有 VM-43..46 撞号）：
 > - `VM-D2-01`：开关两态 + 25 资源 + 存读档。
@@ -366,7 +376,7 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 
 | # | 过渡项 | 位置 | 清除条件 | 验收方式 |
 |---|---|---|---|---|
-| 1 | legacy native 目录 | `module/app/src/main/cpp/{core,api}/` | 各文件职责分别吸收到 `game/`、`infra/`、`plugins/`、`contracts/` 后目录清空 | `check_arch.py` 无对应 legacy 边、目录删除、基线条目移除 |
+| 1 | core/native 目录 | `module/app/src/main/cpp/{core,api}/` | 各文件职责分别吸收到 `game/`、`infra/`、`plugins/`、`contracts/` 后目录清空 | `check_arch.py` 无对应 legacy 边、目录删除、基线条目移除 |
 | 2 | 脚本 legacy 过渡映射 | `scripts/maintenance/arch_common.py` 的 `_ROOT_OVERRIDES`/`_CORE_OVERRIDES`/`_TARGET_PREFIXES` 与 `domains` 放行 | legacy 目录吸收完成、插件 include/link 校验通过、基线收缩后删除映射，`unknown_layer` 收紧为硬失败 | 删除后 `check_arch.py` 全绿且边界负例非零退出 |
 | 3 | contracts 过渡入口 | 除 `contracts/item_count.h` 外仍存在的迁移期头（`module_save_port.h`、`popup_enter_alias.h`、`in_flight.h`、`inventory_action.h`、`sell_price.h` 等） | 每个入口的消费者切到 Host SDK / Game Host 函数表或 owner capability 后删除头文件 | 迁移后对应插件不再 include 该头；host 测试与 `check_arch.py` 全绿 |
 | 4 | 宿主侧遗留消费者 | `api/native/**`、`core/native/**`、`game/read/**` 中消费插件 capability 的代码 | 消费者迁入对应 owner 插件或改经 Game Host API 后删除 legacy 文件 | 迁移后对应文件删除、调用点 grep 清零 |

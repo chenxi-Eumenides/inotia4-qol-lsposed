@@ -1,5 +1,5 @@
 // host 单测：模块 wrapper enter → 原版面板 VMA 的反查注册表。
-#include "core/native/popup_enter_alias.h"
+#include "infra/popup_enter_alias.h"
 
 #include <cstdio>
 

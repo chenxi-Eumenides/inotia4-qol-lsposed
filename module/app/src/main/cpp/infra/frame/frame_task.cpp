@@ -1,6 +1,6 @@
 // frame_task.cpp —— 统一帧任务管理器（多触发点位 + 句柄 API）。
 
-#include "frame_task.h"
+#include "infra/frame/frame_task.h"
 
 #include "game_system.h"
 

@@ -8,7 +8,7 @@ namespace {
 
 Primitives g_primitives{};
 bool g_primitives_set = false;
-// BL imm26 可达范围（±128MB）；本层在安装前收口，避免落到 core/native 的 thunk 路径。
+// BL imm26 可达范围（±128MB）；本层在安装前收口，避免落到近址 thunk 路径。
 constexpr int64_t kBlRange = 0x08000000LL;
 
 Outcome failure(const char* error) {

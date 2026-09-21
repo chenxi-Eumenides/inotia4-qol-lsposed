@@ -4,11 +4,11 @@
 // 的 BL 经 call_patch 改指 wrapper；wrapper 先标记 pending 再复刻原调用。检测任务由
 // frame_task 注册在 kFramePointRenderPre（仅 world 态 DrawPlay 执行），world 就绪后触发一次。
 
-#include "core/native/save_enter.h"
+#include "infra/save/save_enter.h"
 
-#include "core/native/call_patch.h"
-#include "core/native/frame_task.h"
-#include "core/native/qol_log.h"
+#include "patch/call_patch.h"
+#include "infra/frame/frame_task.h"
+#include "infra/log/qol_log.h"
 #include "contracts/events.h"
 #include "game/symbols/game_symbols.h"
 #include "game_access.h"

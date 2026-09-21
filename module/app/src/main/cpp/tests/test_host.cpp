@@ -14,15 +14,15 @@
 #include <sys/mman.h>
 #include <vector>
 
-#include "game_json.h"
-#include "game_nav.h"
+#include "game/json/game_json.h"
+#include "game/nav/game_nav.h"
 #include "game_save_preflight.h"
 #include "game/read/game_tiles.h"
-#include "core/native/call_patch.h"
+#include "patch/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
-#include "core/native/extension_bag_port.h"
+#include "contracts/extension_bag_port.h"
 #include "plugins/extension_bag/extension_bag_port.h"
-#include "core/native/sell_price.h"
+#include "contracts/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/inventory_hooks/inventory_find_item_poc.h"
 #include "plugins/save_backup/bundle.h"
@@ -395,14 +395,14 @@ static void test_native_bag_marker() {
 
 static void test_sell_price_bounds() {
     int64_t price = 0;
-    CHECK(sell_price::calculate(100, 99, false, &price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, false, &price));
     CHECK_EQ(price, 9900);
-    CHECK(sell_price::calculate(100, 999, true, &price));
+    CHECK(qol::contracts::sell_price::calculate(100, 999, true, &price));
     CHECK_EQ(price, 69930);
-    CHECK(!sell_price::calculate(-1, 1, false, &price));
-    CHECK(!sell_price::calculate(sell_price::kMaxValue + 1, 1, false, &price));
-    CHECK(!sell_price::calculate(sell_price::kMaxValue, 2, false, &price));
-    CHECK(!sell_price::calculate(1, 0, false, &price));
+    CHECK(!qol::contracts::sell_price::calculate(-1, 1, false, &price));
+    CHECK(!qol::contracts::sell_price::calculate(qol::contracts::sell_price::kMaxValue + 1, 1, false, &price));
+    CHECK(!qol::contracts::sell_price::calculate(qol::contracts::sell_price::kMaxValue, 2, false, &price));
+    CHECK(!qol::contracts::sell_price::calculate(1, 0, false, &price));
     CHECK_EQ(virtual_bag::merge_view_counts(1000u, 0u, 99u), 99u);
     CHECK_EQ(virtual_bag::merge_view_counts(1000u, 0u, 999u), 999u);
 }

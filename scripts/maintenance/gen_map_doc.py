@@ -16,7 +16,7 @@ CTest 分类规则（显式映射，不按源文件路径推断）：
     `MIGRATED_TEST_GROUPS` 白名单以 `tests/` 下的测试源文件（去扩展名）列出新架构/已迁移
     target，分「机制/宿主」与「已迁移功能」两类；其余 target 一律归 legacy。判据是测试对象
     归属，而非 target 编译的完整源文件集合——host/plugin 类 target 会夹带 legacy 依赖
-    （如 `core/native/qol_log.cpp`），按路径启发式会被误判。
+    （如 `infra/log/qol_log.cpp`），按路径启发式会被误判。
 
 生成结果不含时间戳，列表排序，重复运行字节一致。
 
@@ -53,9 +53,9 @@ NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "plugins", "hos
 #
 # 键为 `tests/` 下测试源文件名（去 `.cpp` 后缀）。分类依据是测试对象归属，不按 target
 # 编译的完整源文件路径集合推断：host/plugin 类 target 会夹带 legacy 依赖
-# （如 `core/native/qol_log.cpp`），按路径启发式会被误判为 legacy。
+# （如 `infra/log/qol_log.cpp`），按路径启发式会被误判为 legacy。
 #
-# 反例：`test_infra_data` 的测试对象是 `core/native/frame_task` 与 `game/read/item_class`，
+# 反例：`test_infra_data` 的测试对象是 `infra/frame/frame_task` 与 `game/read/item_class`，
 # 仍属 legacy，故不进入映射。
 MECHANISM_HOST_TESTS: tuple[str, ...] = (
     "test_infra_snapshot",

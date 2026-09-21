@@ -4,7 +4,7 @@
 
 // 统一帧任务管理器（多触发点位 + 句柄 API）。
 //
-// 设计：锚点 wrapper（core/native/frame_host）在游戏主线程帧周期调用
+// 设计：锚点 wrapper（infra/frame/frame_host）在游戏主线程帧周期调用
 // frame_task_dispatch(point)；同一 (point, frame) 每帧只派发一次；回调统一在调用
 // dispatch 的线程（游戏主线程）执行并收到当前 frame 数。
 //

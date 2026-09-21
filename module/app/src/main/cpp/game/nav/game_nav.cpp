@@ -12,7 +12,7 @@
 #include <thread>
 #include <vector>
 
-#include "game_nav.h"
+#include "game/nav/game_nav.h"
 #include "game_state.h"
 #include "game/read/game_tiles.h"
 

@@ -5,11 +5,11 @@
 //  - 任意时刻至多一个转换在途，重复请求立即 busy，不排队（避免上次事故的线程堆积）；
 //  - 持锁只保护 pending/result/seq，绝不持锁调用 fn。
 
-#include "core/native/transition_dispatch.h"
+#include "infra/frame/transition_dispatch.h"
 
-#include "core/native/frame_host.h"
-#include "core/native/frame_task.h"
-#include "core/native/qol_log.h"
+#include "infra/frame/frame_host.h"
+#include "infra/frame/frame_task.h"
+#include "infra/log/qol_log.h"
 
 #include <atomic>
 #include <chrono>

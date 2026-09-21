@@ -5,9 +5,9 @@
 
 #include "game_access.h"
 #include "game_state.h"
-#include "game_ops_common.h"
+#include "game/ops/game_ops_common.h"
 #include "game_inventory.h"
-#include "game_json.h"
+#include "game/json/game_json.h"
 #include "game_world.h"
 
 #include <cstdint>

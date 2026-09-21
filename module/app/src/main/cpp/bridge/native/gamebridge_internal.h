@@ -5,7 +5,7 @@
 #include <string>
 
 #include "game_access.h"
-#include "game_cache.h"
+#include "core/native/game_cache.h"
 #include "game_character.h"
 #include "game_dialog.h"
 #include "game_inventory.h"
@@ -24,7 +24,7 @@
 #include "plugins/core.ui/panels/settings.h"
 #include "plugins/save_backup/ui/panel.h"
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 
 // 统一日志：op_result 与 bridge 层沿用 MOVE_LOG 名称，接入 kApi 域。
 #define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kApi, __VA_ARGS__)

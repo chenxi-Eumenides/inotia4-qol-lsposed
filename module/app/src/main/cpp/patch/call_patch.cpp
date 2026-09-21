@@ -4,9 +4,9 @@
 // 64KB 粗扫/4KB 细扫 + MAP_FIXED_NOREPLACE）；D2a-3b-2 后扩展背包改用本机制，
 // 本文件为唯一实现。
 
-#include "call_patch.h"
+#include "patch/call_patch.h"
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 
 #include <array>
 #include <cerrno>

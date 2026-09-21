@@ -1,9 +1,9 @@
 #include "game_access.h"
 #include "game/symbols/symbol_resolver.h"
 #include "game_system.h"
-#include "core/native/qol_log.h"
-#include "core/native/game_variant.h"
-#include "core/native/game_feature.h"
+#include "infra/log/qol_log.h"
+#include "game/variants/game_variant.h"
+#include "game/feature/game_feature.h"
 
 #include <cstdio>
 #include <atomic>

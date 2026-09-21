@@ -6,7 +6,7 @@
 
 #include <cstddef>
 
-#include "game_json.h"
+#include "game/json/game_json.h"
 
 SavePreflightVerdict save_preflight_classify(uint8_t slot_state, uint8_t slot_err) {
     switch (slot_state) {

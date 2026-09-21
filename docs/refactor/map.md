@@ -24,14 +24,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 25 | 2079 |
-| `game/` | 47 | 5903 |
-| `infra/` | 24 | 2154 |
+| `contracts/` | 28 | 2190 |
+| `game/` | 57 | 6726 |
+| `infra/` | 37 | 3391 |
 | `hooks/` | 10 | 1589 |
-| `patch/` | 6 | 484 |
+| `patch/` | 8 | 1037 |
 | `plugins/` | 167 | 33252 |
 | `host/` | 22 | 6281 |
-| **合计** | **301** | **51742** |
+| **合计** | **329** | **54466** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -121,9 +121,9 @@ legacy（19）：`core_patches_shape_tests`、`core_ui_components_tests`、`core
 
 | 位置 | 过渡内容 | 目标清除阶段 |
 | --- | --- | --- |
-| `host/assembly.cpp` | bootstrap 顺序收敛；hook/patch 原语注入仍取自 `plugins/inventory_hooks` 与 `core/native/call_patch` | P5 |
+| `host/assembly.cpp` | bootstrap 顺序收敛；hook/patch 原语注入仍取自 `plugins/inventory_hooks` 与 `patch/call_patch` | P5 |
 | `host/frame_source.cpp` | 帧源在 `assembly` 之前被调用，故自注入 patch 原语（与 `assembly` 重复） | P5 |
-| `plugins/quest/plugin.cpp` | 进档回调仍借用 legacy `core/native/save_enter` 设施 | 随存档域迁移（C/D 阶段） |
+| `plugins/quest/plugin.cpp` | 进档回调仍借用 legacy `infra/save/save_enter` 设施 | 随存档域迁移（C/D 阶段） |
 | `plugins/inventory_hooks`（B2a-1） | **禁止 deactivate**：extension_bag / 自动出售 / 合成等 legacy 消费者依赖这 24 个 wrapper（扩展袋读取、扩展补扣、出售门禁）；物理释放在插件 `deactivate` 路径会执行，消费者将在 wrapper 缺失下运行。宿主无「不可 deactivate」标志，靠流程约束 | 消费者改经 capability requires 收口后（B2c/D2）解除 |
 | `plugins/inventory_hooks/native_inventory_hook.h`（D2c-2b-1） | 过渡导出仅剩 `native_hook_func` / `native_unhook_func` 机制原语（→ P5）；`inventory_native_hook_call_refresh_item_area_original` 已经 `inventory_refresh` capability 收口，出售门禁已经 `hooks/dispatch` 布尔门收口 | 原语：P5 |
 | `host/core_patches.cpp` + `game/access/patches.cpp`（B2a-2） | 常驻指令 patch 声明式化：19 条站点登记（位段缩窄 ×2 / clamp ×6 / 重定向 arg ×5 + call ×5 / hub ×1），`kBlRedirectToSymbol` 目标经 `fn_resolve` 解析。monster 兼容是**扫描式例外**：地址按运行时特征字节定位，无法静态登记，经 `patch::install_word_at` 占用同一张点表、不入 `hooks/registry` 资源表 | 扫描式例外长期保留（特征字节定位方式不变，无清除阶段） |

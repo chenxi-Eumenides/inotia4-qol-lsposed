@@ -1,10 +1,10 @@
 #include "game_inventory.h"
 #include "game_access.h"
 #include "game_state.h"
-#include "game_ops_common.h"
-#include "core/native/extension_bag_port.h"
+#include "game/ops/game_ops_common.h"
+#include "contracts/extension_bag_port.h"
 #include "core/native/inventory_trade.h"
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 #include <cstdint>
 #include <string>
 

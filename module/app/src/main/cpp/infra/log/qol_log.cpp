@@ -4,7 +4,7 @@
 // 依赖：仅 core（STL + <android/log.h>）；不依赖 feature/bridge。
 // host 构建：跳过文件 sink 与 /proc/self/cmdline，logcat 走 stubs 空操作桩。
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 
 #include <android/log.h>
 

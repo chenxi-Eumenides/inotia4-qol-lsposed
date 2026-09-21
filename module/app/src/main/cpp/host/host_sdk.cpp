@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "core/native/qol_log.h"
-#include "core/native/game_ops_common.h"
+#include "infra/log/qol_log.h"
+#include "game/ops/game_ops_common.h"
 #include "contracts/module_save_port.h"
 #include "hooks/dispatch.h"
 #include "hooks/registry.h"

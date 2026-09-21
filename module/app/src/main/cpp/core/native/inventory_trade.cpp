@@ -8,7 +8,7 @@
 
 #include "contracts/extension_bag.h"
 #include "contracts/item_count.h"
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 #include "contracts/sell_price.h"
 #include "game_access.h"
 #include "game_state.h"

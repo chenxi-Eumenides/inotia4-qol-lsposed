@@ -3,7 +3,7 @@
 #include "game_access.h"
 #include "game/symbols/game_symbols.h"
 
-// op_ok/op_err 响应信封物理仍在 core/native/game_ops_common.cpp（过渡期归类 infra）；
+// op_ok/op_err 响应信封物理仍在 game/ops/game_ops_common.cpp（过渡期归类 infra）；
 // 依赖矩阵禁止 game → infra，故本层仅前置声明两入口、链接期解析（与项目既有
 // 前置声明桥先例一致），不引入 include 层违规。信封归位 game 层后改回正式 include。
 std::string op_ok();

@@ -4,13 +4,13 @@
 #include "game_world.h"
 
 #include "game_access.h"
-#include "game_json.h"
-#include "game_nav.h"
+#include "game/json/game_json.h"
+#include "game/nav/game_nav.h"
 #include "game_state.h"
-#include "game_ops_common.h"
-#include "core/native/frame_task.h"
-#include "core/native/qol_log.h"
-#include "core/native/transition_dispatch.h"
+#include "game/ops/game_ops_common.h"
+#include "infra/frame/frame_task.h"
+#include "infra/log/qol_log.h"
+#include "infra/frame/transition_dispatch.h"
 #include "game/read/game_tiles.h"
 
 #include <cstdint>

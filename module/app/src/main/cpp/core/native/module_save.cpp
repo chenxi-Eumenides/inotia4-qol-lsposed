@@ -1,6 +1,6 @@
 #include "contracts/module_save_port.h"
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 
 #include <atomic>
 #include <mutex>

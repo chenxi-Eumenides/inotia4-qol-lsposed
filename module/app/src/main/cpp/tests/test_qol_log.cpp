@@ -1,6 +1,6 @@
 // host 单测：统一日志系统 P0 纯格式化与限流原语。
-// 编译 core/native/qol_log.cpp，Android 专属头由 stubs/ 覆盖；不依赖设备与 I/O。
-#include "core/native/qol_log.h"
+// 编译 infra/log/qol_log.cpp，Android 专属头由 stubs/ 覆盖；不依赖设备与 I/O。
+#include "infra/log/qol_log.h"
 
 #include <cstdint>
 #include <cstdio>

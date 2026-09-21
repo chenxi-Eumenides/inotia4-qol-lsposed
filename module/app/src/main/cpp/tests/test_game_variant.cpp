@@ -2,7 +2,7 @@
 //
 // 与 test_host.cpp 同法：直接 #include 被测 .cpp，以访问匿名命名空间的 MD5 内部函数。
 // Android 专属头（<android/log.h>）由 stubs/ 覆盖，qol_log.cpp 单链接；不依赖设备与 I/O。
-#include "core/native/game_variant.cpp"
+#include "game/variants/game_variant.cpp"
 
 #include <cstdint>
 #include <cstdio>

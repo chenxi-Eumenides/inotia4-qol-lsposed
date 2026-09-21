@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "core/native/popup_enter_alias.h"
+#include "infra/popup_enter_alias.h"
 #include "game/access/popup_state.h"
 #include "game/access/symbols.h"
 #include "game_access.h"

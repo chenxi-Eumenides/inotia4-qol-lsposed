@@ -225,12 +225,6 @@ def render_mapping() -> list[str]:
         "目标层",
     )
     lines += _bullet_map(
-        "重构期 `core/native/` 覆盖（`arch_common._CORE_OVERRIDES`）",
-        ac._CORE_OVERRIDES,
-        "当前文件名",
-        "目标层",
-    )
-    lines += _bullet_map(
         "重构期 `api/native/` 文件名前缀 → 迁移期标签（`arch_common._LEGACY_API_BY_STEM`）",
         {f"{stem}*": f"legacy/{domain}" for stem, domain in ac._LEGACY_API_BY_STEM.items()},
         "当前文件名前缀",

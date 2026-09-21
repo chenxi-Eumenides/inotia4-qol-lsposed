@@ -5,7 +5,7 @@
 
 #include "game_access.h"
 #include "game_state.h"
-#include "game_ops_common.h"
+#include "game/ops/game_ops_common.h"
 
 int data_active_quest() {
     if (g_active_quest == nullptr) return -1;

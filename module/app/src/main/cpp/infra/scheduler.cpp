@@ -2,7 +2,7 @@
 
 // 帧任务调度器实现（见 infra/scheduler.h 的接口契约）。
 //
-// 语义照搬 legacy core/native/frame_task：按帧去重、interval 归一、count 递减、
+// 语义照搬 legacy infra/frame/frame_task：按帧去重、interval 归一、count 递减、
 // 回调返回 false 自动注销；注册顺序即派发顺序。实现独立（固定数组 + 互斥锁），
 // 与 legacy 管理器零共享，未迁移消费者继续使用 legacy。
 

@@ -13,7 +13,7 @@
   11 个动态 desc 实例槽的 `PtrHook` + `move_merge` GOT + 自制 RX thunk；安装、回滚、占用声明均手写，
   不可由宿主机制枚举、观测与归还。
 - 与 `feature/patch` 存在**编译期双向依赖**。
-- 反向消费者 15+：多数经 `core/native/extension_bag_port.h` 调用；该头以 `std::string` 作为接口类型，
+- 反向消费者 15+：多数经 `contracts/extension_bag_port.h` 调用；该头以 `std::string` 作为接口类型，
   违反 §3.4（能力契约须 POD/固定宽度）且把 EB 实现细节暴露给消费者。
 - 两条轮询线程：300ms 注入线程、150ms 生命周期线程；与 `infra/scheduler` 帧源模型冲突。
 - 出售链四方参与：EB store / `store_sell::plan` / `inventory_hooks`（H-23/H-24）/ `autosell`；
@@ -68,4 +68,4 @@
 - 代价与约束：
   - 热路径多一次 capability 查找；**禁止跨帧缓存裸指针**。
   - 动态槽的 raw `PtrHook` 写入仍是 tombstone 盲区，须真机占用验证。
-  - `core/native/extension_bag_port.h` 反向依赖需 D2b 全部消费者切换完成后才能删。
+  - `contracts/extension_bag_port.h` 反向依赖需 D2b 全部消费者切换完成后才能删。

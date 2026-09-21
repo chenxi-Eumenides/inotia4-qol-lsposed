@@ -3,7 +3,7 @@
 
 权威规范：`archive/docs/development/logging.md`。本脚本静态检查代码是否满足该规范：
 
-  R1 唯一出口    native 中除 `core/native/qol_log.cpp` 与 host 桩外不得出现 __android_log_print；
+  R1 唯一出口    native 中除 `infra/log/qol_log.cpp` 与 host 桩外不得出现 __android_log_print；
                  Kotlin 中除 `LogFile.kt` 外不得出现 android.util.Log
   R2 旧 tag 清零  字符串字面量中不得出现已废弃 logcat tag（含 Inotia4Export/ApiServer/
                  OpApiService/OpController）；`inotia4-export.log` 文件名允许保留
@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CPP_ROOT = ROOT / "module" / "app" / "src" / "main" / "cpp"
 JAVA_ROOT = ROOT / "module" / "app" / "src" / "main" / "java"
 
-QOL_LOG_CPP = CPP_ROOT / "core" / "native" / "qol_log.cpp"
+QOL_LOG_CPP = CPP_ROOT / "infra" / "log" / "qol_log.cpp"
 LOG_STUB = CPP_ROOT / "tests" / "stubs" / "android" / "log.h"
 
 CPP_SUFFIXES = {".cpp", ".h", ".hpp", ".cc", ".inc"}

@@ -16,10 +16,10 @@ add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
     ${CPP_DIR}/plugins/inventory_hooks/inventory_find_item_poc.cpp
-    ${CPP_DIR}/core/native/call_patch.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
-    ${CPP_DIR}/core/native/game_json.cpp
-    ${CPP_DIR}/core/native/game_nav.cpp
+    ${CPP_DIR}/patch/call_patch.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
+    ${CPP_DIR}/game/json/game_json.cpp
+    ${CPP_DIR}/game/nav/game_nav.cpp
     ${CPP_DIR}/api/native/game_save_preflight.cpp
     ${CPP_DIR}/plugins/save_backup/bundle.cpp
     ${CPP_DIR}/plugins/world_teleport/rules.cpp
@@ -29,7 +29,6 @@ target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
     ${CPP_DIR}/api/native
-    ${CPP_DIR}/core/native
     ${CPP_DIR}/game/read
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
@@ -117,7 +116,7 @@ add_test(NAME transition_dispatch_tests COMMAND transition_dispatch_tests)
 # 统一日志系统 P0 纯格式化/限流 host 测试（末尾追加）
 add_executable(qol_log_tests
     test_qol_log.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(qol_log_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -131,7 +130,7 @@ add_test(NAME qol_log_tests COMMAND qol_log_tests)
 # 故不再单独编译该 .cpp；qol_log.cpp 提供日志符号，Android 头由 stubs/ 覆盖。
 add_executable(game_variant_tests
     test_game_variant.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(game_variant_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -143,9 +142,9 @@ add_test(NAME game_variant_tests COMMAND game_variant_tests)
 # 功能抽象层纯逻辑测试（末尾追加）
 add_executable(game_feature_tests
     test_game_feature.cpp
-    ${CPP_DIR}/core/native/game_feature.cpp
-    ${CPP_DIR}/core/native/game_variant.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/game/feature/game_feature.cpp
+    ${CPP_DIR}/game/variants/game_variant.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(game_feature_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -218,7 +217,7 @@ add_test(NAME simple_mode_rules_tests COMMAND simple_mode_rules_tests)
 # 模块 wrapper enter → 原版面板 VMA 反查注册表 host 测试（末尾追加）
 add_executable(popup_enter_alias_tests
     test_popup_enter_alias.cpp
-    ${CPP_DIR}/core/native/popup_enter_alias.cpp
+    ${CPP_DIR}/infra/popup_enter_alias.cpp
 )
 target_include_directories(popup_enter_alias_tests PRIVATE
     ${CPP_DIR}
@@ -303,7 +302,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(plugin_registry_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -354,7 +353,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(plugin_lifecycle_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -389,7 +388,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(capability_lifecycle_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -449,7 +448,7 @@ add_executable(hooks_popup_state_tests
     ${CPP_DIR}/hooks/popup_state.cpp
     ${CPP_DIR}/game/access/popup_state.cpp
     ${CPP_DIR}/hooks/registry.cpp
-    ${CPP_DIR}/core/native/popup_enter_alias.cpp
+    ${CPP_DIR}/infra/popup_enter_alias.cpp
 )
 target_include_directories(hooks_popup_state_tests PRIVATE
     ${CPP_DIR}
@@ -563,7 +562,7 @@ add_executable(text_layer_plugin_tests
     ${CPP_DIR}/plugins/text_layer/feature.cpp
     ${CPP_DIR}/plugins/text_layer/charinfo_scope.cpp
     ${CPP_DIR}/hooks/dispatch.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(text_layer_plugin_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -581,7 +580,7 @@ add_executable(quest_lifecycle_tests
     ${CPP_DIR}/plugins/quest/feature.cpp
     ${CPP_DIR}/infra/scheduler.cpp
     ${CPP_DIR}/infra/runtime.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(quest_lifecycle_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -597,7 +596,7 @@ add_executable(attribute_range_display_tests
     test_attribute_range_display.cpp
     ${CPP_DIR}/plugins/attribute_range_display/feature.cpp
     ${CPP_DIR}/plugins/attribute_quality/rules.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(attribute_range_display_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -645,7 +644,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/game_host.cpp
-    ${CPP_DIR}/core/native/game_feature.cpp
+    ${CPP_DIR}/game/feature/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/infra/commands.cpp
     ${CPP_DIR}/infra/config.cpp
@@ -660,8 +659,8 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/game/access/popup_state.cpp
     ${CPP_DIR}/game/access/symbols.cpp
-    ${CPP_DIR}/core/native/popup_enter_alias.cpp
-    ${CPP_DIR}/core/native/qol_log.cpp
+    ${CPP_DIR}/infra/popup_enter_alias.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(host_adapter_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs

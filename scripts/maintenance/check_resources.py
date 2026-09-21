@@ -54,8 +54,8 @@ _MECHANISMS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # 机制原语自身的实现/声明文件：其中的命中是机制定义而非资源安装点。
 _MECHANISM_FILES = frozenset(
     {
-        "core/native/call_patch.cpp",
-        "core/native/call_patch.h",
+        "patch/call_patch.cpp",
+        "patch/call_patch.h",
         "game_ptr_hook.h",
         "patch/ptr_slot.cpp",
         "patch/ptr_slot.h",

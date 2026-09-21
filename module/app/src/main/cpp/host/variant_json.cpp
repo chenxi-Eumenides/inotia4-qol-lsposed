@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "core/native/game_json.h"
-#include "core/native/game_variant.h"
+#include "game/json/game_json.h"
+#include "game/variants/game_variant.h"
 
 namespace qol::host {
 

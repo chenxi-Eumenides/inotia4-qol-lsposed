@@ -223,7 +223,7 @@
 >
 > **v0.5.43 变更**：世界操作（移动 `move_to`/`walk_dir`/`stop_move`、战斗 `attack_target`/`cast_skill`/`stop_combat`、交互 `interact_with`、技能、物品使用、传送、`start_interact`）在 UI 占据时返回 `ui occupied: <screen>` 而非继续执行——UI 占据时游戏输入被接管，直接调 CHAR_Move 等会与 UI 竞争破坏控制态。面板内操作（装备/出售/整理/佣兵等）、对话操作（dialog/select）、菜单操作不受影响。
 >
-> **商店/合成面板识别修复**：模块把 PopupState 的 enter 回调换成自己的 wrapper（商店宿主、合成宿主、扩展背包）后，popup 栈顶保存的是模块 .so 地址，而判定层按「enter − libgame 基址」换算，得到负值被当作「无面板」——真机表现为商店/合成界面打开时 `screen` 仍为 `world`、`close_panel` 报 `top of stack is not a panel`、世界操作不被 `ui occupied` 拦截。现安装 wrapper 时同步登记 `(wrapper, 原版 enter VMA)`，判定层按栈顶 enter 反查（`core/native/popup_enter_alias`）。真机验证：商店 `panel_shop`、合成 `panel_craft`；商店态下 `move_to` 返回 `ui occupied: panel_shop`；`close_panel` 可关闭商店，关闭后 `screen=world` 且世界操作恢复。
+> **商店/合成面板识别修复**：模块把 PopupState 的 enter 回调换成自己的 wrapper（商店宿主、合成宿主、扩展背包）后，popup 栈顶保存的是模块 .so 地址，而判定层按「enter − libgame 基址」换算，得到负值被当作「无面板」——真机表现为商店/合成界面打开时 `screen` 仍为 `world`、`close_panel` 报 `top of stack is not a panel`、世界操作不被 `ui occupied` 拦截。现安装 wrapper 时同步登记 `(wrapper, 原版 enter VMA)`，判定层按栈顶 enter 反查（`infra/popup_enter_alias`）。真机验证：商店 `panel_shop`、合成 `panel_craft`；商店态下 `move_to` 返回 `ui occupied: panel_shop`；`close_panel` 可关闭商店，关闭后 `screen=world` 且世界操作恢复。
 
 ### Snapshot（快速状态快照）
 

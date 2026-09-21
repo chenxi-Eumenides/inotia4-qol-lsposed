@@ -1,11 +1,11 @@
 // gamebridge_log.cpp —— 统一日志系统 JNI 薄层。
 //
-// 仅做 JNI 参数转换；格式化与发射逻辑在 core/native/qol_log.*。
+// 仅做 JNI 参数转换；格式化与发射逻辑在 infra/log/qol_log.*。
 // Kotlin 侧方法名已冻结：nativeQolLogInit / nativeQolLogWrite / nativeQolLogSetDebugEnabled。
 
 #include <jni.h>
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
 
 namespace {
 

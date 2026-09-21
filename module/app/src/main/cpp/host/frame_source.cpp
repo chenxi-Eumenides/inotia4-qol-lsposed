@@ -13,10 +13,10 @@
 #include <cstdint>
 
 #include "contracts/plugin.h"
-#include "core/native/call_patch.h"
-#include "core/native/frame_host.h"
-#include "core/native/frame_task.h"
-#include "core/native/qol_log.h"
+#include "patch/call_patch.h"
+#include "infra/frame/frame_host.h"
+#include "infra/frame/frame_task.h"
+#include "infra/log/qol_log.h"
 #include "game/access/patches.h"
 #include "game_access.h"
 #include "hooks/registry.h"
@@ -161,7 +161,7 @@ bool frame_source_installed() {
 }  // namespace qol::host
 
 // 兼容层：transition_dispatch（未迁移消费者）查询逻辑锚点是否安装。
-// 旧实现随 core/native/frame_host.cpp 删除；安装状态现由 host/frame_source 持有。
+// 旧实现随 infra/frame/frame_host.cpp 删除；安装状态现由 host/frame_source 持有。
 bool frame_host_anchors_installed() {
     return qol::host::frame_source_installed();
 }
