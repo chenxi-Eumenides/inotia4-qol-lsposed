@@ -368,3 +368,17 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 - 项目总览：`README.md`；目录规范与代理规则：根目录 `AGENTS.md`
 - 代码结构（NDK/CMake/依赖配置说明）：`archive/docs/development/architecture.md`
 - 开发待办：`archive/docs/development/planning/backlog.md`
+
+## 附录：测试机上的模块加载形态（2026-09-21 事故记录）
+
+**现象**：单独 `adb install -r` 模块 APK 后，`/api/system/features` 等端点仍 404，而 `/api/health` 正常。
+
+**根因**：测试机上的游戏进程加载的是 **LSPatch 集成包内嵌的模块**（当次为 versionCode 193 / versionName 0.7.14），
+并非单独安装的模块包（192 / 0.7.13）。因此"安装模块 APK"对已在跑的游戏无效。
+
+**处置**：用 `scripts/patch-apk.sh` 以当前模块重新生成集成包（`output/Inotia4_v<游戏版本>_<变体>_lspatched.apk`）并安装，
+四条 `/api/system/*` 路由恢复 200。
+
+**纪律**：
+1. 验证前先确认设备上实际生效的模块版本：模块日志首行的 `versionCode/versionName/sha256` 必须与当前构建一致；不一致即说明跑的是集成包内嵌模块。
+2. 模块改动后，若测试机使用集成包形态，必须重新生成集成包再安装；只装模块 APK 不生效。
