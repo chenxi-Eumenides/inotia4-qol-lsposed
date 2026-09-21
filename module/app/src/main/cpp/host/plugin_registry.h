@@ -29,7 +29,7 @@ int install_all(const HostDeps& deps);
 
 // 门禁监督（主线程帧驱动）：比较带 gate 资源的配置值与登记状态，变化时同步
 // hooks::registry 状态、infra::status 状态，并调用 on_enabled/on_disabled。
-// 返回本轮发生状态变化的插件数。仅处理处于 kEnabled/kInstalledDisabled 的插件；幂等。
+// 返回本轮发生状态变化的插件数。处理门禁落态与可补齐的 kBlocked 插件；幂等。
 uint32_t sync_gates();
 
 // 生命周期动作（主线程唯一执行器；命令经命令端口投递后由本函数执行）。

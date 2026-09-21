@@ -145,7 +145,7 @@ MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr
 // 未迁移消费者（autosell/quest/save_enter/transition_dispatch/char_next_exp_cache 等）
 // 在各自迁移前继续由 legacy 管理器工作。
 // 顺序原因：先执行命令（可能触发 lifecycle_apply 启动事务），再推进生命周期事务，
-// 最后门禁对齐；sync_gates 只处理 kEnabled/kInstalledDisabled，不会与事务中间态冲突。
+// 最后门禁对齐；sync_gates 处理门禁落态与 kBlocked 重评估，不会与事务中间态冲突。
 // 返回 true = 保留期任务，不自动注销。
 bool drain_commands_task(int64_t frame, void* ctx) {
     (void)frame;

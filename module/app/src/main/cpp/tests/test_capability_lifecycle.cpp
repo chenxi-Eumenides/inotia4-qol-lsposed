@@ -438,6 +438,59 @@ void test_required_consumer_before_provider_is_topologically_unblocked() {
     CHECK(qol::infra::capability_count() == 1);
 }
 
+void test_blocked_consumer_recovers_after_provider_enable() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", false);
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    // provider 后注册且初始门禁关闭：consumer 必须先停在 blocked。
+    CHECK(register_plugin(make_required_consumer()));
+    CHECK(register_plugin(make_provider()));
+    CHECK(install_all(make_host_deps()) == 1);
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kBlocked));
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kFree);
+    CHECK(g_req_enabled_calls == 0);
+
+    // 同一轮先启用 provider、注册能力，再重评估 blocked consumer。
+    qol::infra::config_set_bool("cap.provider.on", true);
+    CHECK(sync_gates() >= 2);
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:cap:prov") == ResourceState::kLive);
+    CHECK(g_req_install_calls == 1);
+    CHECK(g_req_enabled_calls == 1);
+    CHECK(sync_gates() == 0);
+    CHECK(g_req_enabled_calls == 1);
+}
+
+void test_blocked_lifecycle_activate_rechecks_required() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", false);
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    CHECK(register_plugin(make_required_consumer()));
+    CHECK(register_plugin(make_provider()));
+    CHECK(install_all(make_host_deps()) == 1);
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kBlocked));
+
+    // 能力仍缺失时，blocked → resolving 的重试必须回到 blocked 并返回 false。
+    CHECK(!lifecycle_apply("cap_consumer_req", qol::contracts::kFeatureLifecycleActivate));
+    FeatureStatus status{};
+    CHECK(feature_status("cap_consumer_req", &status));
+    CHECK(status.state == FeatureState::kBlocked);
+    CHECK(status.error != nullptr && std::strstr(status.error, "attribute.quality") != nullptr);
+
+    // 能力就绪后，blocked 的显式 activate 继续既有异步安装路径。
+    CHECK(qol::infra::register_capability(
+        qol::infra::CapabilityProvision{qol::contracts::kAttributeQualityCapabilityId,
+                                        {1, 0}, &g_provider_api}));
+    CHECK(lifecycle_apply("cap_consumer_req", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kResolving));
+    drive_lifecycle();
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kLive);
+    CHECK(g_req_enabled_calls == 1);
+}
+
 void test_missing_required_capability_is_diagnostic() {
     reset_all();
     qol::infra::config_set_bool("cap.consumer.on", true);
@@ -521,6 +574,8 @@ int main() {
     test_disable_revokes_and_cascades();
     test_no_auto_recovery();
     test_required_consumer_before_provider_is_topologically_unblocked();
+    test_blocked_consumer_recovers_after_provider_enable();
+    test_blocked_lifecycle_activate_rechecks_required();
     test_missing_required_capability_is_diagnostic();
     test_dependency_cycle_is_diagnostic();
     test_deactivate_revokes_capability();

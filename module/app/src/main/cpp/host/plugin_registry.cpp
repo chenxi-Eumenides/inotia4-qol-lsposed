@@ -933,6 +933,204 @@ void begin_revoke_provider(uint32_t index) {
     unregister_provided_capabilities(index);
 }
 
+// 同步完成一个已通过 required 校验的插件安装。装配期与 blocked 重评估共用这条路径，
+// 保持资源安装、受限回调失败回滚、门禁落态和能力发布语义一致。
+bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    contracts::PluginContext ctx = make_plugin_context(plugin.id);
+
+    if (plugin.install(ctx) != 0) {
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
+        return false;
+    }
+
+    const contracts::ResourceClaim* installed_claims[kMaxResourcesPerPlugin];
+    uintptr_t installed_entries[kMaxResourcesPerPlugin];
+    uint32_t installed_count = 0;
+    bool all_gates_on = true;
+    bool resource_failed = false;
+    bool plugin_aborted = false;  // 受限回调失败已置 failed，跳过统一回滚分支
+    bool degraded = false;
+    const char* failed_claim_id = nullptr;
+    const char* resource_error = nullptr;
+    const char* degraded_claim_id = nullptr;
+    const char* degraded_error = nullptr;
+
+    // 返回 true = 该资源失败必须整体回滚（required + fail-closed）。
+    auto handle_claim_failure = [&](const contracts::ResourceClaim& claim,
+                                    const char* error) -> bool {
+        const bool fail_closed_required =
+            claim.requirement == contracts::ResourceRequirement::kRequired &&
+            claim.failure == contracts::ResourceFailure::kFailClosed;
+        if (fail_closed_required) {
+            resource_failed = true;
+            failed_claim_id = claim.id;
+            resource_error = error;
+            return true;
+        }
+        // 常驻（gate==nullptr）fail-soft/optional 失败：资源保持 free，置 retry_pending
+        // 供 sync_gates 每逻辑帧重试（带 gate 资源由门禁路径自行重试，无需标记）。
+        if (claim.gate == nullptr) {
+            hooks::retry_pending_set(claim.id, true);
+        }
+        degraded = true;
+        degraded_claim_id = claim.id;
+        degraded_error = error;
+        return false;
+    };
+
+    // 原子组先作为一个整体尝试；组内失败由专用回滚处理，避免后续普通资源路径
+    // 把已经回滚的成员再次当作本轮已装资源释放。
+    if (plugin_has_atomic_claims(plugin)) {
+        const bool atomic_failed = install_atomic_group(
+            plugin, ctx, deps, installed_claims, installed_entries, &installed_count,
+            &resource_failed, &failed_claim_id, &resource_error);
+        if (atomic_failed) {
+            const bool rollback_failed = resource_failed;
+            installed_count = 0;
+            if (!rollback_failed) {
+                degraded = true;
+                degraded_claim_id = failed_claim_id;
+                degraded_error = resource_error;
+                failed_claim_id = nullptr;
+                resource_error = nullptr;
+            }
+        }
+    }
+
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        const bool gate_on =
+            claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
+        if (claim.gate != nullptr && !gate_on) all_gates_on = false;
+
+        // 原子成员已由上面的组事务处理；组失败时不得落入逐条安装路径。
+        if (claim.atomic) continue;
+
+        // 非入口机制（call patch / ptr slot / ownership）不支持空转：门禁关闭不安装，
+        // 登记保持 free。
+        if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+            if (claim.gate != nullptr && !gate_on) continue;
+            uintptr_t target = 0;
+            void* backup = nullptr;
+            const char* error = install_non_entry_claim(claim, &target, &backup);
+            if (error != nullptr) {
+                if (handle_claim_failure(claim, error)) break;
+                continue;
+            }
+            hooks::set_state(claim.id, contracts::ResourceState::kLive);
+            installed_claims[installed_count] = &claim;
+            installed_entries[installed_count] = target;
+            ++installed_count;
+            // kPtrSlot 的原函数入口 = 槽期望值，立即交还所有者；其余机制无 backup。
+            if (backup != nullptr && plugin.on_resource_ready != nullptr &&
+                plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
+                rollback_installed(installed_claims, installed_count, deps);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "resource_ready_failed");
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                             plugin.id, claim.id);
+                plugin_aborted = true;
+                break;
+            }
+            continue;
+        }
+
+        bool followed = false;
+        const uintptr_t entry =
+            deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+        if (entry == 0) {
+            if (handle_claim_failure(claim, "symbol unresolved")) break;
+            continue;
+        }
+
+        const hooks::InstallOutcome outcome =
+            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, gate_on);
+        if (outcome.ok != 0) {
+            if (handle_claim_failure(
+                    claim, outcome.error != nullptr ? outcome.error : "install failed")) {
+                break;
+            }
+            continue;
+        }
+        hooks::runtime_set(claim.id, entry, outcome.backup);
+        // backup 交还失败按逆序同步撤回本插件全部已装资源，禁止半装对外可见。
+        if (plugin.on_resource_ready != nullptr &&
+            plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+            installed_claims[installed_count] = &claim;
+            installed_entries[installed_count] = entry;
+            ++installed_count;
+            rollback_installed(installed_claims, installed_count, deps);
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                 "resource_ready_failed");
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
+                         claim.id);
+            plugin_aborted = true;
+            break;
+        }
+        installed_claims[installed_count] = &claim;
+        installed_entries[installed_count] = entry;
+        ++installed_count;
+    }
+
+    if (plugin_aborted) return false;
+
+    if (resource_failed && failed_claim_id == nullptr && installed_count == 0) {
+        // 原子组物理回滚失败时已完成状态落盘，直接保持 failed。
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                             "atomic group rollback failed");
+        return false;
+    }
+
+    if (resource_failed) {
+        rollback_resources(installed_claims, installed_entries, installed_count, deps);
+        std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "resource %s: %s",
+                      failed_claim_id != nullptr ? failed_claim_id : "?",
+                      resource_error != nullptr ? resource_error : "failed");
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, g_error_text[index]);
+        QOL_LOG_WARN(QolDomain::kCore, "plugin %s install failed: %s", plugin.id,
+                     g_error_text[index]);
+        return false;
+    }
+
+    // 全部成功（含 fail-soft 跳过）：带 gate 的资源全开 → enabled；否则 installed_disabled。
+    const char* optional_error = check_optional_requires(plugin, index);
+    if (optional_error != nullptr) {
+        degraded = true;
+        // check_optional_requires 已把诊断文本写入 g_error_text；避免用同一缓冲区
+        // 作为 snprintf 的 source/destination，保留 capability id。
+        if (degraded_claim_id == nullptr) degraded_error = nullptr;
+    }
+    const bool enabled = all_gates_on && atomic_group_satisfied(plugin);
+    const char* status_error = nullptr;
+    if (degraded) {
+        if (degraded_claim_id != nullptr) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "resource %s: %s",
+                          degraded_claim_id, degraded_error != nullptr ? degraded_error : "failed");
+        } else if (g_error_text[index][0] == '\0') {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "%s",
+                          degraded_error != nullptr ? degraded_error : "degraded");
+        }
+        status_error = g_error_text[index];
+        infra::status_set_degraded(plugin.id, true);
+        // 记录由本路径置位，供 sync_gates 在资源重试成功后清除标记。
+        g_gate_degraded[index] = true;
+        QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
+                     degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
+    }
+    infra::status_update(plugin.id,
+                         enabled ? infra::FeatureState::kEnabled
+                                 : infra::FeatureState::kInstalledDisabled,
+                         enabled, status_error);
+    if (enabled) {
+        if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+        register_provided_capabilities(index);
+    } else if (plugin.on_disabled != nullptr) {
+        plugin.on_disabled(ctx);
+    }
+    return true;
+}
+
 }  // namespace
 
 bool register_plugin(const contracts::PluginDescriptor& plugin) {
@@ -991,217 +1189,8 @@ int install_all(const HostDeps& deps) {
             continue;
         }
 
-        // 2) 插件自身初始化。
-        contracts::PluginContext ctx = make_plugin_context(plugin.id);
-        if (plugin.install(ctx) != 0) {
-            infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
+        if (!install_plugin_sync(i, deps)) {
             ++failed_plugins;
-            continue;
-        }
-
-        // 3) 资源逐条声明式安装；失败按 §8 逐资源策略处置：
-        //    kRequired×kFailClosed → 逆序回滚 + failed；其余（kRequired×kFailSoft /
-        //    kOptional×任一）→ 记录 + degraded，跳过该资源继续安装其余。
-        const contracts::ResourceClaim* installed_claims[kMaxResourcesPerPlugin];
-        uintptr_t installed_entries[kMaxResourcesPerPlugin];
-        uint32_t installed_count = 0;
-        bool all_gates_on = true;
-        bool resource_failed = false;
-        bool plugin_aborted = false;  // 受限回调失败已置 failed，跳过统一回滚分支
-        bool degraded = false;
-        const char* failed_claim_id = nullptr;
-        const char* resource_error = nullptr;
-        const char* degraded_claim_id = nullptr;
-        const char* degraded_error = nullptr;
-
-        // 返回 true = 该资源失败必须整体回滚（required + fail-closed）。
-        auto handle_claim_failure = [&](const contracts::ResourceClaim& claim,
-                                        const char* error) -> bool {
-            const bool fail_closed_required =
-                claim.requirement == contracts::ResourceRequirement::kRequired &&
-                claim.failure == contracts::ResourceFailure::kFailClosed;
-            if (fail_closed_required) {
-                resource_failed = true;
-                failed_claim_id = claim.id;
-                resource_error = error;
-                return true;
-            }
-            // 常驻（gate==nullptr）fail-soft/optional 失败：资源保持 free，置 retry_pending
-            // 供 sync_gates 每逻辑帧定向重装（带 gate 资源由门禁路径自行重试，无需标记）。
-            if (claim.gate == nullptr) {
-                hooks::retry_pending_set(claim.id, true);
-            }
-            degraded = true;
-            degraded_claim_id = claim.id;
-            degraded_error = error;
-            return false;
-        };
-
-        // 原子组先作为一个整体尝试；组内失败由专用回滚处理，避免后续普通资源路径
-        // 把已经回滚的成员再次当作本轮已装资源释放。
-        if (plugin_has_atomic_claims(plugin)) {
-            const bool atomic_failed = install_atomic_group(
-                plugin, ctx, deps, installed_claims, installed_entries, &installed_count,
-                &resource_failed, &failed_claim_id, &resource_error);
-            if (atomic_failed) {
-                const bool rollback_failed = resource_failed;
-                installed_count = 0;
-                if (rollback_failed) {
-                    // 物理回滚失败已由 rollback_atomic_group 置 tombstone + isolated。
-                    // 该状态不得伪装为可重试的 free。
-                } else {
-                    degraded = true;
-                    degraded_claim_id = failed_claim_id;
-                    degraded_error = resource_error;
-                    failed_claim_id = nullptr;
-                    resource_error = nullptr;
-                }
-            }
-        }
-
-        for (uint32_t r = 0; r < plugin.resources_count; ++r) {
-            const contracts::ResourceClaim& claim = plugin.resources[r];
-            const bool gate_on =
-                claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
-            if (claim.gate != nullptr && !gate_on) all_gates_on = false;
-
-            // 原子成员已由上面的组事务处理；组失败时不得落入逐条安装路径。
-            if (claim.atomic) continue;
-
-            // 非入口机制（call patch / ptr slot / ownership）不支持空转（§4.2 规则 6）：门禁关不安装、登记保持 free。
-            if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
-                if (claim.gate != nullptr && !gate_on) {
-                    continue;
-                }
-                uintptr_t target = 0;
-                void* backup = nullptr;
-                const char* error = install_non_entry_claim(claim, &target, &backup);
-                if (error != nullptr) {
-                    if (handle_claim_failure(claim, error)) break;
-                    continue;
-                }
-                // 安装成功登记 live（与入口 hook 路径一致；sync_gates 路径随后会再写同值）。
-                hooks::set_state(claim.id, contracts::ResourceState::kLive);
-                installed_claims[installed_count] = &claim;
-                installed_entries[installed_count] = target;
-                ++installed_count;
-                // kPtrSlot 的原函数入口 = 槽期望值：与入口 hook 同规则立即交还所有者（§3.3）。
-                // kCallPatch/kOwnership 无 backup，跳过。
-                if (backup != nullptr && plugin.on_resource_ready != nullptr &&
-                    plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
-                    rollback_installed(installed_claims, installed_count, deps);
-                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                         "resource_ready_failed");
-                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
-                                 plugin.id, claim.id);
-                    ++failed_plugins;
-                    plugin_aborted = true;
-                    break;
-                }
-                continue;
-            }
-
-            bool followed = false;
-            const uintptr_t entry =
-                deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
-            if (entry == 0) {
-                if (handle_claim_failure(claim, "symbol unresolved")) break;
-                continue;
-            }
-
-            const hooks::InstallOutcome outcome =
-                hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, gate_on);
-            if (outcome.ok != 0) {
-                if (handle_claim_failure(
-                        claim, outcome.error != nullptr ? outcome.error : "install failed")) {
-                    break;
-                }
-                continue;
-            }
-            // 同步路径同样登记运行期入口：运行期 deactivate/撤回的物理归还要用 resolved_entry。
-            hooks::runtime_set(claim.id, entry, outcome.backup);
-            // 立即把原函数入口交还所有者（§3.3「backup 交还」）。返回非 0 = 受限回调失败：
-            // 按逆序同步撤回本插件全部已装资源（含本条），禁止半装对外可见（§3.2 语义 5）。
-            if (plugin.on_resource_ready != nullptr &&
-                plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
-                installed_claims[installed_count] = &claim;
-                installed_entries[installed_count] = entry;
-                ++installed_count;
-                rollback_installed(installed_claims, installed_count, deps);
-                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                     "resource_ready_failed");
-                QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
-                             claim.id);
-                ++failed_plugins;
-                plugin_aborted = true;
-                break;
-            }
-            installed_claims[installed_count] = &claim;
-            installed_entries[installed_count] = entry;
-            ++installed_count;
-        }
-
-        if (plugin_aborted) {
-            continue;
-        }
-
-        if (resource_failed && failed_claim_id == nullptr && installed_count == 0) {
-            // 原子组物理回滚失败时已完成状态落盘，直接保持 failed；不再重复释放。
-            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                 "atomic group rollback failed");
-            continue;
-        }
-
-        if (resource_failed) {
-            rollback_resources(installed_claims, installed_entries, installed_count, deps);
-            std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
-                          failed_claim_id != nullptr ? failed_claim_id : "?",
-                          resource_error != nullptr ? resource_error : "failed");
-            infra::status_update(plugin.id, infra::FeatureState::kFailed, false, g_error_text[i]);
-            QOL_LOG_WARN(QolDomain::kCore, "plugin %s install failed: %s", plugin.id,
-                         g_error_text[i]);
-            ++failed_plugins;
-            continue;
-        }
-
-        // 4) 全部成功（含 fail-soft 跳过）：带 gate 的资源全开 → enabled；否则 installed_disabled。
-        //    fail-soft 失败只置 degraded 标记 + error 文案，不改生命周期态（§8）。
-        const char* optional_error = check_optional_requires(plugin, i);
-        if (optional_error != nullptr) {
-            degraded = true;
-            // check_optional_requires 已把诊断文本写入 g_error_text；避免用同一缓冲区
-            // 作为 snprintf 的 source/destination，保留 capability id。
-            if (degraded_claim_id == nullptr) degraded_error = nullptr;
-        }
-        const bool enabled = all_gates_on && atomic_group_satisfied(plugin);
-        const char* status_error = nullptr;
-        if (degraded) {
-            if (degraded_claim_id != nullptr) {
-                std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "resource %s: %s",
-                              degraded_claim_id, degraded_error != nullptr ? degraded_error : "failed");
-            } else {
-                if (g_error_text[i][0] == '\0') {
-                    std::snprintf(g_error_text[i], sizeof(g_error_text[i]), "%s",
-                                  degraded_error != nullptr ? degraded_error : "degraded");
-                }
-            }
-            status_error = g_error_text[i];
-            infra::status_set_degraded(plugin.id, true);
-            // 记录由本路径置位，供 sync_gates 在资源重试成功后清除标记。
-            g_gate_degraded[i] = true;
-            QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
-                         degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
-        }
-        infra::status_update(
-            plugin.id,
-            enabled ? infra::FeatureState::kEnabled : infra::FeatureState::kInstalledDisabled,
-            enabled, status_error);
-        if (enabled) {
-            if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-            // §3.4.4：进入 enabled 时注册能力（提供者门禁已由 on_enabled 打开）。
-            register_provided_capabilities(i);
-        } else {
-            if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
         }
     }
     return failed_plugins;
@@ -1209,11 +1198,42 @@ int install_all(const HostDeps& deps) {
 
 uint32_t sync_gates() {
     uint32_t changed = 0;
-    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+    bool processed[kMaxPlugins] = {};
+    for (uint32_t order_pos = 0; order_pos < g_install_order_count + g_plugin_count;
+         ++order_pos) {
+        // 依赖拓扑优先，确保 provider 在同一轮先发布能力；拓扑无效的插件随后仍需
+        // 保留其 blocked 诊断与重评估机会。
+        const uint32_t i = order_pos < g_install_order_count
+                               ? g_install_order[order_pos]
+                               : order_pos - g_install_order_count;
+        if (processed[i]) continue;
+        processed[i] = true;
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
         infra::FeatureStatus status{};
         if (!infra::status_get(plugin.id, &status)) continue;
-        // 只监督已按门禁落态的插件；failed/blocked/invalid 等不参与（避免覆盖失败态）。
+        // blocked 是可补齐的依赖等待态：能力在本轮由 provider 发布后，立即按装配期
+        // 的同步安装路径重试。error 文本不变时不重复写状态，避免每帧制造无效更新。
+        if (status.state == infra::FeatureState::kBlocked) {
+            if (plugin_isolated(plugin) || plugin_has_active_tx(plugin.id)) continue;
+            char previous_error[kMaxErrorText] = {};
+            if (status.error != nullptr) {
+                std::snprintf(previous_error, sizeof(previous_error), "%s", status.error);
+            }
+            const char* blocked_error = check_requires(plugin, i);
+            if (blocked_error != nullptr) {
+                if (std::strcmp(previous_error, blocked_error) != 0) {
+                    infra::status_update(plugin.id, infra::FeatureState::kBlocked, false,
+                                         blocked_error);
+                    ++changed;
+                }
+                continue;
+            }
+            infra::status_update(plugin.id, infra::FeatureState::kResolving, false, nullptr);
+            (void)install_plugin_sync(i, g_install_deps);
+            ++changed;
+            continue;
+        }
+        // 只监督已按门禁落态的插件；failed/invalid 等不参与（避免覆盖失败态）。
         if (status.state != infra::FeatureState::kEnabled &&
             status.state != infra::FeatureState::kInstalledDisabled) {
             continue;
@@ -1369,9 +1389,10 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
         }
 
         case contracts::kFeatureLifecycleActivate: {
-            // §3.2：inactive → resolving 为幂等重入；failed → resolving 为显式重试
+            // §3.2：inactive → resolving 为幂等重入；blocked/failed → resolving 为重试
             // （隔离态已在函数前置拒绝中拦截，未隔离的失败可安全重装）。
             if (status.state != infra::FeatureState::kInactive &&
+                status.state != infra::FeatureState::kBlocked &&
                 status.state != infra::FeatureState::kFailed) {
                 return false;
             }
