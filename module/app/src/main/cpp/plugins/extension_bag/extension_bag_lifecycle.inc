@@ -144,8 +144,9 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     }
     const bool extension_enabled = g_virtual_bag_enabled.load();
     int32_t state_open = 0;
-    const bool state_ready = g_game != nullptr && g_game->read_only.world.game_state_gate != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.world.game_state_gate(&state_open));
+    const auto* world_facts = qol::features::extension_bag::world_facts();
+    const bool state_ready = world_facts != nullptr && world_facts->game_state_gate != nullptr &&
+        qol::contracts::succeeded(world_facts->game_state_gate(&state_open));
     const uint32_t gamestate = state_ready && state_open != 0 ? 0U : 1U;
     if (!extension_enabled || gamestate != 0) {
         if (extension_enabled && event == 0x18) {

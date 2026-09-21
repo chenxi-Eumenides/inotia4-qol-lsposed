@@ -742,6 +742,17 @@ target_compile_features(stack_limit_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(stack_limit_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME stack_limit_plugin_tests COMMAND stack_limit_plugin_tests)
 
+add_executable(world_facts_plugin_tests
+    test_world_facts_plugin.cpp
+    ${CPP_DIR}/plugins/world_facts/plugin.cpp
+)
+target_include_directories(world_facts_plugin_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(world_facts_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(world_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME world_facts_plugin_tests COMMAND world_facts_plugin_tests)
+
 # P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
 add_executable(core_patches_shape_tests test_core_patches_shape.cpp)
 target_compile_definitions(core_patches_shape_tests PRIVATE

@@ -56,37 +56,41 @@ void log_message(int32_t level, const char* format, ...) {
 }
 
 bool read_state(int* out) {
-    if (out == nullptr || game() == nullptr || game()->read.world.state == nullptr) return false;
+    const auto* facts = qol::features::world_teleport::world_facts();
+    if (out == nullptr || facts == nullptr || facts->state == nullptr) return false;
     int32_t value = -1;
-    if (!qol::contracts::succeeded(game()->read.world.state(&value))) return false;
+    if (!qol::contracts::succeeded(facts->state(&value))) return false;
     *out = value;
     return true;
 }
 
 bool read_map_record_count(int* out) {
-    if (out == nullptr || game() == nullptr || game()->read_only.world.map_record_count == nullptr) {
+    const auto* facts = qol::features::world_teleport::world_facts();
+    if (out == nullptr || facts == nullptr || facts->map_record_count == nullptr) {
         return false;
     }
     int32_t value = 0;
-    if (!qol::contracts::succeeded(game()->read_only.world.map_record_count(&value))) return false;
+    if (!qol::contracts::succeeded(facts->map_record_count(&value))) return false;
     *out = value;
     return true;
 }
 
 bool read_current_map_id(int* out) {
-    if (out == nullptr || game() == nullptr || game()->read_only.world.current_map_id == nullptr) {
+    const auto* facts = qol::features::world_teleport::world_facts();
+    if (out == nullptr || facts == nullptr || facts->current_map_id == nullptr) {
         return false;
     }
     int32_t value = 0;
-    if (!qol::contracts::succeeded(game()->read_only.world.current_map_id(&value))) return false;
+    if (!qol::contracts::succeeded(facts->current_map_id(&value))) return false;
     *out = value;
     return true;
 }
 
 const char* read_map_name(int map_id) {
-    if (game() == nullptr || game()->read_only.world.map_name == nullptr) return nullptr;
+    const auto* facts = qol::features::world_teleport::world_facts();
+    if (facts == nullptr || facts->map_name == nullptr) return nullptr;
     const char* value = nullptr;
-    if (!qol::contracts::succeeded(game()->read_only.world.map_name(map_id, &value))) return nullptr;
+    if (!qol::contracts::succeeded(facts->map_name(map_id, &value))) return nullptr;
     return value;
 }
 
@@ -219,8 +223,9 @@ void show_message(const char* message) {
 
 int32_t delayed_transfer(int64_t, void* param) {
     const auto* target = static_cast<const ChoiceTarget*>(param);
-    if (target == nullptr || game() == nullptr || game()->read_only.world.money == nullptr ||
-        game()->read_only.world.active_player_direction == nullptr ||
+    const auto* facts = qol::features::world_teleport::world_facts();
+    if (target == nullptr || facts == nullptr || facts->money == nullptr || game() == nullptr ||
+        facts->active_player_direction == nullptr ||
         game()->world_action.minus_money == nullptr ||
         game()->world_action.request_map_change == nullptr) {
         log_message(3, "world teleport: transfer symbols not resolved");
@@ -228,8 +233,8 @@ int32_t delayed_transfer(int64_t, void* param) {
     }
     int32_t direction = -1;
     int64_t money = 0;
-    if (!qol::contracts::succeeded(game()->read_only.world.active_player_direction(&direction)) ||
-        direction < 0 || !qol::contracts::succeeded(game()->read_only.world.money(&money))) {
+    if (!qol::contracts::succeeded(facts->active_player_direction(&direction)) ||
+        direction < 0 || !qol::contracts::succeeded(facts->money(&money))) {
         log_message(3, "world teleport: active player unavailable");
         return 0;
     }

@@ -11,6 +11,7 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::WorldFactsApi* g_world_facts = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
 
@@ -39,9 +40,15 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
                      static_cast<uint16_t>(contracts::kUiChoiceVersionMinor)}},
 };
 
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kWorldFactsCapabilityId,
+     {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_world_facts = nullptr;
     g_installed = false;
     g_install_error = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
@@ -51,12 +58,28 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_install_error = "install failed: world teleport dependencies not ready";
         return 1;
     }
+    const void* world_facts_iface = nullptr;
+    if (g_sdk->capabilities.require == nullptr ||
+        !contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kWorldFactsCapabilityId,
+            {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor},
+            &world_facts_iface)) ||
+        world_facts_iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_install_error = "install failed: world facts unavailable";
+        return 1;
+    }
+    g_world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     g_installed = false;
+    g_world_facts = nullptr;
+    g_game = nullptr;
+    g_sdk = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -78,8 +101,8 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0,
-    nullptr,
+    1,
+    kRequires,
     1,
     kOptionalRequires,
     0,
@@ -108,6 +131,10 @@ const contracts::QolHostSdk* host_sdk() {
 
 const contracts::QolGameHost* game_host() {
     return g_game;
+}
+
+const contracts::WorldFactsApi* world_facts() {
+    return g_world_facts;
 }
 
 }  // namespace qol::features::world_teleport

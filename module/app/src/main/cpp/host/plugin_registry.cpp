@@ -1391,9 +1391,15 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
         case contracts::kFeatureLifecycleActivate: {
             // §3.2：inactive → resolving 为幂等重入；blocked/failed → resolving 为重试
             // （隔离态已在函数前置拒绝中拦截，未隔离的失败可安全重装）。
+            // 级联停用复用 installed_disabled，但由 cascade_stopped 标记区分门禁关闭态；
+            // 显式 activate 必须重新进入同一安装事务路径。
+            const bool cascade_stopped =
+                status.state == infra::FeatureState::kInstalledDisabled &&
+                status.error != nullptr &&
+                std::strcmp(status.error, "cascade_stopped") == 0;
             if (status.state != infra::FeatureState::kInactive &&
                 status.state != infra::FeatureState::kBlocked &&
-                status.state != infra::FeatureState::kFailed) {
+                status.state != infra::FeatureState::kFailed && !cascade_stopped) {
                 return false;
             }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);

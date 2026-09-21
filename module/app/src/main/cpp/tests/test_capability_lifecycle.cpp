@@ -424,6 +424,68 @@ void test_no_auto_recovery() {
     CHECK(g_req_disabled_calls == 2);
 }
 
+void test_cascade_stopped_consumer_explicit_activate_recovers() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", true);
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    CHECK(register_plugin(make_provider()));
+    CHECK(register_plugin(make_required_consumer()));
+    CHECK(install_all(make_host_deps()) == 0);
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kEnabled));
+
+    qol::infra::config_set_bool("cap.provider.on", false);
+    CHECK(sync_gates() >= 1);
+    drive_lifecycle();
+
+    FeatureStatus stopped{};
+    CHECK(feature_status("cap_consumer_req", &stopped));
+    CHECK(stopped.state == FeatureState::kInstalledDisabled);
+    CHECK(stopped.error != nullptr && std::strcmp(stopped.error, "cascade_stopped") == 0);
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kFree);
+
+    qol::infra::config_set_bool("cap.provider.on", true);
+    CHECK(sync_gates() >= 1);
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(require_attribute_quality() == &g_provider_api);
+
+    CHECK(lifecycle_apply("cap_consumer_req", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kResolving));
+    CHECK(lifecycle_step() > 0);
+    drive_lifecycle();
+
+    FeatureStatus recovered{};
+    CHECK(feature_status("cap_consumer_req", &recovered));
+    CHECK(recovered.state == FeatureState::kEnabled);
+    CHECK(recovered.enabled);
+    CHECK(recovered.error == nullptr);
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kLive);
+    CHECK(g_req_install_calls == 2);
+    CHECK(g_req_enabled_calls == 2);
+}
+
+void test_cascade_stopped_activate_missing_dependency_is_blocked() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", true);
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    CHECK(register_plugin(make_provider()));
+    CHECK(register_plugin(make_required_consumer()));
+    CHECK(install_all(make_host_deps()) == 0);
+
+    qol::infra::config_set_bool("cap.provider.on", false);
+    CHECK(sync_gates() >= 1);
+    drive_lifecycle();
+    CHECK(feature_state_is("cap_consumer_req", FeatureState::kInstalledDisabled));
+
+    CHECK(!lifecycle_apply("cap_consumer_req", qol::contracts::kFeatureLifecycleActivate));
+    FeatureStatus status{};
+    CHECK(feature_status("cap_consumer_req", &status));
+    CHECK(status.state == FeatureState::kBlocked);
+    CHECK(status.error != nullptr && std::strstr(status.error, "attribute.quality") != nullptr);
+    CHECK(lifecycle_step() == 0);
+    CHECK(qol::hooks::state_of("hook:cap:req") == ResourceState::kFree);
+}
+
 void test_required_consumer_before_provider_is_topologically_unblocked() {
     reset_all();
     qol::infra::config_set_bool("cap.provider.on", true);
@@ -573,6 +635,8 @@ int main() {
     test_missing_optional_capability_is_degraded();
     test_disable_revokes_and_cascades();
     test_no_auto_recovery();
+    test_cascade_stopped_consumer_explicit_activate_recovers();
+    test_cascade_stopped_activate_missing_dependency_is_blocked();
     test_required_consumer_before_provider_is_topologically_unblocked();
     test_blocked_consumer_recovers_after_provider_enable();
     test_blocked_lifecycle_activate_rechecks_required();

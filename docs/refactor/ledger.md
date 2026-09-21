@@ -13,6 +13,7 @@
 | P0 | 校验脚本族与基线棘轮 | ✅ 完成 | `check_arch.py` 可运行；基线只允许收缩 |
 | P1 | `contracts/`、`infra/`、`game/` 骨架与最小诊断接口 | ✅ 完成 | VM-P1-02、VM-P1-03 |
 | K1 | kernel-complete：零业务插件 Debug 启动 + Debug device probe 机制验收 | ✅ Debug/probe 真机证据已取得；release 隔离未执行 | VM-K1-01、VM-K1-02；`docs/history/kernel-complete-20260922/` |
+| K2 | provider 与功能插件并行：第一批 `world_facts`（`world.facts` v1.0）+ 5 required 消费者 + cascade_stopped activate 修复 | 🔄 进行中；world 批次真机闭环（VM-K2-01），inventory/character 批次待做 | VM-K2-01；`docs/history/provider-world-facts-20260922/` |
 | P2 | `simple_mode` 纵向样板 | ✅ 完成 | VM-P2-01 |
 | P3 | 资源事务、异步步进、回滚、在途归零、生命周期状态 | ✅ 完成 | VM-P3-01、VM-P3-02、VM-P3-03 |
 | P4 | 内置静态插件批量迁移 | 🔄 进行中；阶段 A、B、C 已完成，D1 已完成待收尾 | VM-P4-01..08、VM-43..46、VM-D1、VM-D2-01..04 |
@@ -45,7 +46,8 @@
 | 插件私有越层与单一目标 | 仍有 legacy 私有 include；独立 target 不能覆盖全部宿主私有依赖 | 插件只 include `contracts/` 与自身目录；每个 target 独立编译并通过负例检查 |
 | `contracts` 业务入口 | `contracts/autosell.h` 仍有全局业务函数，部分消费者尚未转 capability / owner command | 改为 provider 函数表、Host SDK 或 owner capability 后删除全局入口；host 与架构检查通过 |
 | 内核装配证据不足 | K1 的零业务插件 Debug 与 device probe 真机证据已取得；release 构建及 release 隔离验收尚未执行 | 用户明确许可后执行 release 构建，确认 probe 未链接、未注册、未进入 release 清单，并补充 release 隔离证据 |
-| 引擎未闭合项 | VM-FIX-01 仍登记生产 `in_flight_enter/leave` wrapper 未接线，以及 required consumer 反序 blocked 无重试路径 | 接线并验证在途等待、补重试或明确无消费者时的可验证处理；更新受影响验收卡 |
+| 引擎未闭合项 | VM-FIX-01 仍登记生产 `in_flight_enter/leave` wrapper 未接线；required 消费者 `cascade_stopped` 后 activate 不执行的缺口已修复（`plugin_registry.cpp`，host 用例覆盖恢复与缺依赖 blocked），VM-K2-01 真机闭环 | 接线并验证在途等待；更新受影响验收卡 |
+| 生命周期票据与状态不同步 | VM-K2-01 实测：消费者 activate 时依赖方尚未 enable 则票据 `failed`，随后 `sync_gates` 重评估自动拉起 enabled，票据不追认；autosell `degraded:true` 残留（error 已 None） | 票据终态追认自动恢复路径；`sync_gates` 恢复时同步清除 `degraded` 残留；以 VM-K2-01 后续回归卡验证 |
 
 ## 4. 临时豁免与保留项
 

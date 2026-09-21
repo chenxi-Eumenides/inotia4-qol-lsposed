@@ -84,15 +84,14 @@ bool item_jewel_attribute_type(const void* item, int32_t* out) {
 }
 
 bool world_state(int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.world.state != nullptr &&
-           contracts::succeeded(host->read_only.world.state(out));
+    const auto* facts = world_facts();
+    return facts != nullptr && facts->state != nullptr && contracts::succeeded(facts->state(out));
 }
 
 bool game_state_gate(int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.world.game_state_gate != nullptr &&
-           contracts::succeeded(host->read_only.world.game_state_gate(out));
+    const auto* facts = world_facts();
+    return facts != nullptr && facts->game_state_gate != nullptr &&
+           contracts::succeeded(facts->game_state_gate(out));
 }
 
 ::QolResult inventory_item_ref_at(int32_t bag, int32_t slot, InventoryItemRef* out) {

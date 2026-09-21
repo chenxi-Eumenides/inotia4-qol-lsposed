@@ -15,6 +15,7 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/store_sell_rules.h"
 
 #include <atomic>
@@ -420,9 +421,10 @@ bool read_item_is_usable(int category) {
 }
 
 bool read_world_in_world() {
-    if (g_game == nullptr || g_game->read_only.world.state == nullptr) return false;
+    const auto* facts = qol::features::extension_bag::world_facts();
+    if (facts == nullptr || facts->state == nullptr) return false;
     int32_t state = -1;
-    return qol::contracts::succeeded(g_game->read_only.world.state(&state)) && state == 5;
+    return qol::contracts::succeeded(facts->state(&state)) && state == 5;
 }
 
 const qol::contracts::QolItemCountApi* item_count_api();

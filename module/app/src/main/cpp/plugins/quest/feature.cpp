@@ -1,4 +1,5 @@
 #include "feature.h"
+#include "plugin.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -59,10 +60,10 @@ int32_t world_transition_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
     if (!g_gate.load(std::memory_order_acquire)) return 1;
-    const auto* game = game_host();
-    if (game == nullptr || game->read.world.state == nullptr) return 1;
+    const auto* facts = world_facts();
+    if (facts == nullptr || facts->state == nullptr) return 1;
     int32_t state = 0;
-    if (game->read.world.state(&state).ok != kQolOk) return 1;
+    if (facts->state(&state).ok != kQolOk) return 1;
     const bool in_world = state == 5;
     if (!in_world) {
         g_was_in_world = false;

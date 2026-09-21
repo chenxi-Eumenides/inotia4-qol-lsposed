@@ -8,6 +8,7 @@
 #include "../../contracts/inventory_action.h"
 #include "../../contracts/inventory_refresh.h"
 #include "../../contracts/sell_price.h"
+#include "../../contracts/world_facts.h"
 
 // D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
 // feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
@@ -32,6 +33,12 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_action_sdk = nullptr;
 const contracts::QolGameHost* g_action_game = nullptr;
+const contracts::WorldFactsApi* g_world_facts = nullptr;
+
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kWorldFactsCapabilityId,
+     {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+};
 
 // 能力接口实例：函数地址编译期常量；宿主在 enabled 时注册、revoking 时注销。
 constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
@@ -42,13 +49,14 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
                                                      const void* expected_item,
                                                      const char* source) {
     contracts::InventorySellResult result{};
-    if (g_action_game == nullptr || g_action_game->read_only.world.state == nullptr ||
+    const auto* facts = g_world_facts;
+    if (facts == nullptr || facts->state == nullptr || g_action_game == nullptr ||
         g_action_game->read_only.inventory.item_ref_at == nullptr) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
         return result;
     }
     int32_t world_state = 0;
-    if (!contracts::succeeded(g_action_game->read_only.world.state(&world_state)) ||
+    if (!contracts::succeeded(facts->state(&world_state)) ||
         world_state != 5) {
         result.status = contracts::InventorySellStatus::kNotInWorld;
         return result;
@@ -172,6 +180,16 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!inventory_native_hook_bind_sdk(ctx.sdk) || !inventory_native_hook_bind_game(ctx.game)) {
         return 1;
     }
+    const void* world_facts_iface = nullptr;
+    if (ctx.sdk->capabilities.require == nullptr ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kWorldFactsCapabilityId,
+            {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor},
+            &world_facts_iface)) ||
+        world_facts_iface == nullptr) {
+        return 1;
+    }
+    g_world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
     g_action_sdk = ctx.sdk;
     g_action_game = ctx.game;
     // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体在本插件 TU。
@@ -183,6 +201,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     g_action_sdk = nullptr;
     g_action_game = nullptr;
+    g_world_facts = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -218,7 +237,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         return contracts::PluginDescriptor{
             kPluginId,
             kPluginVersion,
-            0, nullptr,   // requires
+            1, kRequires,  // requires=world.facts
             0, nullptr,   // optional_requires
             2, kProvides,  // provides（inventory_refresh + inventory.action v1.0）
             count, claims,
@@ -232,6 +251,10 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         };
     }();
     return descriptor;
+}
+
+const contracts::WorldFactsApi* world_facts() {
+    return g_world_facts;
 }
 
 }  // namespace qol::features::inventory_hooks

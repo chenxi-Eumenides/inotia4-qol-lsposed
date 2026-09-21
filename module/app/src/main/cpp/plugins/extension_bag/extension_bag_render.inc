@@ -696,8 +696,9 @@ void virtual_bag_draw_end_wrapper() {
         return;
     }
     int32_t game_state_open = 1;
-    if (g_game != nullptr && g_game->read_only.world.game_state_gate != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.world.game_state_gate(&game_state_open)) &&
+    const auto* world_facts = qol::features::extension_bag::world_facts();
+    if (world_facts != nullptr && world_facts->game_state_gate != nullptr &&
+        qol::contracts::succeeded(world_facts->game_state_gate(&game_state_open)) &&
         game_state_open == 0) {
         restore_module_view_locked();
         if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {

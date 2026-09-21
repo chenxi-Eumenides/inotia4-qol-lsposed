@@ -252,9 +252,10 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         g_extension_desc_item_slot = -1;
     }
     int32_t current_tutorial_state = -1;
-    if (used && g_game != nullptr && g_game->read_only.world.tutorial_state != nullptr &&
+    const auto* world_facts = qol::features::extension_bag::world_facts();
+    if (used && world_facts != nullptr && world_facts->tutorial_state != nullptr &&
         g_game->world_action.cancel_tutorial != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.world.tutorial_state(&current_tutorial_state)) &&
+        qol::contracts::succeeded(world_facts->tutorial_state(&current_tutorial_state)) &&
         current_tutorial_state == 6) {
         (void)g_game->world_action.cancel_tutorial();
     }

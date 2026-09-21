@@ -1,8 +1,10 @@
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
+#include "contracts/world_facts.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
 #include "plugins/quest/feature.h"
@@ -46,6 +48,17 @@ QolResult fake_world_state(int32_t* out) {
     return qol::contracts::ok();
 }
 
+QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
+    static const qol::contracts::WorldFactsApi api{&fake_world_state, nullptr, nullptr, nullptr,
+                                                    nullptr, nullptr, nullptr, nullptr};
+    if (id == nullptr || out_iface == nullptr ||
+        std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) != 0) {
+        return qol::contracts::error(kQolErrNotFound, "missing capability", 18);
+    }
+    *out_iface = &api;
+    return qol::contracts::ok();
+}
+
 QolResult fake_active_slot_count(uint32_t* out) {
     *out = 1;
     return qol::contracts::ok();
@@ -80,6 +93,7 @@ qol::contracts::QolHostSdk fake_sdk() {
     sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
                qol::contracts::kHostSdkMinor};
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
+    sdk.capabilities.require = &fake_capability_require;
     return sdk;
 }
 

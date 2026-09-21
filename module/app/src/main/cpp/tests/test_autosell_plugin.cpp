@@ -13,6 +13,7 @@
 #include "contracts/ownership.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
+#include "contracts/world_facts.h"
 #include "infra/panels.h"
 
 static int g_pass = 0;
@@ -83,6 +84,16 @@ QolResult fake_panels_unregister_owner(const char* owner) {
     return qol::contracts::ok();
 }
 
+QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
+    static const qol::contracts::WorldFactsApi api{};
+    if (id == nullptr || out_iface == nullptr ||
+        std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) != 0) {
+        return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
+    }
+    *out_iface = &api;
+    return qol::contracts::ok();
+}
+
 qol::contracts::QolHostSdk fake_sdk() {
     qol::contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
@@ -92,6 +103,7 @@ qol::contracts::QolHostSdk fake_sdk() {
     sdk.events.unsubscribe = &fake_events_unsubscribe;
     sdk.panels.register_provider = &fake_panels_register_provider;
     sdk.panels.unregister_owner = &fake_panels_unregister_owner;
+    sdk.capabilities.require = &fake_capability_require;
     return sdk;
 }
 
@@ -99,9 +111,10 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 2 && d.optional_count == 1 && d.provides_count == 0);
+    CHECK(d.requires_count == 3 && d.optional_count == 1 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
+    CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
     CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup

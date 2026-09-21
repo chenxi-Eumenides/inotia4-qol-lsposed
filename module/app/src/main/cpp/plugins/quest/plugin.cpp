@@ -12,16 +12,35 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::WorldFactsApi* g_world_facts = nullptr;
+
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kWorldFactsCapabilityId,
+     {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+};
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_world_facts = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
         return 1;
     }
+    const void* world_facts_iface = nullptr;
+    if (g_sdk->capabilities.require == nullptr ||
+        !contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kWorldFactsCapabilityId,
+            {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor},
+            &world_facts_iface)) ||
+        world_facts_iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
+    g_world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
     set_gate(true);
     start_resync_task();
     return 0;
@@ -31,6 +50,9 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
     cancel_resync_task();
+    g_world_facts = nullptr;
+    g_game = nullptr;
+    g_sdk = nullptr;
 }
 
 // 零资源、无门禁键：启停只切业务门禁，不做资源操作（§3.3）。
@@ -54,7 +76,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires,  // requires=world.facts
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     0, nullptr,   // resources（零资源）
@@ -72,6 +94,8 @@ const contracts::PluginDescriptor kDescriptor = {
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 
 const contracts::QolGameHost* game_host() { return g_game; }
+
+const contracts::WorldFactsApi* world_facts() { return g_world_facts; }
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;

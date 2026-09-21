@@ -5,6 +5,7 @@
 
 #include "contracts/events.h"
 #include "contracts/inventory_refresh.h"
+#include "contracts/world_facts.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/move_merge.h"
 
@@ -38,6 +39,7 @@ constexpr const char* kMoveMergeGateKey = "moveMergeEnabled";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::WorldFactsApi* g_world_facts = nullptr;
 
 // moveMergeEnabled 配置变更订阅句柄；deactivate 时成对注销（install 幂等重入）。
 uint64_t g_config_subscription = 0;
@@ -71,11 +73,16 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
         {qol::contracts::kInventoryRefreshVersionMajor,
          qol::contracts::kInventoryRefreshVersionMinor},
     },
+    {
+        qol::contracts::kWorldFactsCapabilityId,
+        {qol::contracts::kWorldFactsVersionMajor, qol::contracts::kWorldFactsVersionMinor},
+    },
 };
 
 int plugin_install(qol::contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_world_facts = nullptr;
     if (ctx.struct_size < sizeof(qol::contracts::PluginContext) ||
         ctx.sdk_major != qol::contracts::kHostSdkMajor ||
         ctx.sdk == nullptr || ctx.game == nullptr ||
@@ -86,6 +93,19 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         extension_bag_bind_port_sdk(nullptr);
         return 1;
     }
+    const void* world_facts_iface = nullptr;
+    if (ctx.sdk->capabilities.require == nullptr ||
+        !qol::contracts::succeeded(ctx.sdk->capabilities.require(
+            qol::contracts::kWorldFactsCapabilityId,
+            {qol::contracts::kWorldFactsVersionMajor, qol::contracts::kWorldFactsVersionMinor},
+            &world_facts_iface)) ||
+        world_facts_iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        extension_bag_bind_port_sdk(nullptr);
+        return 1;
+    }
+    g_world_facts = static_cast<const qol::contracts::WorldFactsApi*>(world_facts_iface);
     if (!extension_bag_bind_host(g_sdk, g_game)) {
         g_sdk = nullptr;
         g_game = nullptr;
@@ -117,6 +137,9 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
         g_config_subscription = 0;
     }
     extension_bag_set_enabled(false);
+    g_world_facts = nullptr;
+    g_game = nullptr;
+    g_sdk = nullptr;
 }
 
 // 启停仅切门禁，资源安装/还原由宿主完成（§3.3）。
@@ -145,7 +168,7 @@ int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char*
 const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    1, kRequires,  // requires=inventory_refresh
+    2, kRequires,  // requires=inventory_refresh + world.facts
     0, nullptr,   // optional_requires
     1, kProvides,  // provides（extension_bag v1.0）
     g_resource_count, g_resources,  // resources（29 条）
@@ -162,6 +185,10 @@ const qol::contracts::PluginDescriptor kDescriptor = {
 
 const qol::contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
+}
+
+const qol::contracts::WorldFactsApi* world_facts() {
+    return g_world_facts;
 }
 
 }  // namespace qol::features::extension_bag
