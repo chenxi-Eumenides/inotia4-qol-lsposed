@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 
 #include <chrono>
 #include <thread>

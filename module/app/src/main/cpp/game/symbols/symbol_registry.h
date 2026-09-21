@@ -1,6 +1,6 @@
 // ============================================================
 // 符号注册表（X-macro，backlog P1 VMA 治理）：宏名 ↔ 游戏符号名
-// 单一来源：game_access.cpp 用它驱动 ELF 动态解析（有符号名 → resolver 解析，
+// 单一来源：game/access/game_access.cpp 用它驱动 ELF 动态解析（有符号名 → resolver 解析，
 // 未命中回退 VMA）；check_symbols.py 同步从本表生成校验映射。
 // 用法：定义 SYM(macro_name, symbol) 后 #include 本文件，用后 #undef SYM
 // ============================================================

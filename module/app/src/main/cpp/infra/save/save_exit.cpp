@@ -10,7 +10,7 @@
 #include "infra/log/qol_log.h"
 #include "contracts/events.h"
 #include "game/symbols/game_symbols.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "infra/events.h"
 
 #include <atomic>

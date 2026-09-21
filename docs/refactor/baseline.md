@@ -78,16 +78,10 @@
 
 | 当前文件（cpp 根） | 目标层 |
 | --- | --- |
-| `game_access.cpp` | game |
-| `game_access.h` | game |
-| `game_access_globals.inc` | game |
 | `game_dialog.cpp` | legacy/dialog |
 | `game_dialog.h` | legacy/dialog |
 | `game_dialog_content.inc` | legacy/dialog |
 | `game_dialog_operations.inc` | legacy/dialog |
-| `game_ptr_hook.h` | patch |
-| `game_state.cpp` | game |
-| `game_state.h` | game |
 | `game_system.cpp` | legacy/system |
 | `game_system.h` | legacy/system |
 
@@ -152,17 +146,17 @@
 - `layer_direction|core/native/game_cache.cpp|api/native/game_inventory.h|infra → legacy/inventory`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_party.h|infra → legacy/party`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → legacy/world`
+- `layer_direction|core/native/game_cache.cpp|game/access/game_access.h|infra → game`
+- `layer_direction|core/native/game_cache.cpp|game/state/game_state.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|core/native/game_cache.cpp|game_access.h|infra → game`
-- `layer_direction|core/native/game_cache.cpp|game_state.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_system.h|infra → legacy/system`
+- `layer_direction|game/access/game_access.cpp|game_system.h|game → legacy/system`
+- `layer_direction|game/access/game_access.cpp|infra/log/qol_log.h|game → infra`
+- `layer_direction|game/json/game_json.cpp|game/access/game_access.h|infra → game`
 - `layer_direction|game/json/game_json.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|game/json/game_json.cpp|game_access.h|infra → game`
 - `layer_direction|game/read/game_tiles.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game/variants/game_variant.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game_access.cpp|game_system.h|game → legacy/system`
-- `layer_direction|game_access.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game_dialog.cpp|api/native/game_save.h|legacy/dialog → legacy/save`
+- `layer_direction|game/state/game_state.cpp|api/native/game_ui.h|game → legacy/ui`
+- `layer_direction|game/state/game_state.cpp|infra/frame/frame_task.h|game → infra`
 - …（其余 12 条省略）
 
 ### offsets_symbols_header（11 条）

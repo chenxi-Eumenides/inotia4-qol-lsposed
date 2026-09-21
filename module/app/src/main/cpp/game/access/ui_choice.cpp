@@ -4,7 +4,7 @@
 
 #include "game/symbols/game_symbols.h"
 #include "game/access/popup_state.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 
 namespace qol::game {
 

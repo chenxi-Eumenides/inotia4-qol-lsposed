@@ -5,8 +5,8 @@
 
 #include <mutex>
 
-#include "game_access.h"
-#include "game_state.h"
+#include "game/access/game_access.h"
+#include "game/state/game_state.h"
 #include "game/ops/game_ops_common.h"
 
 std::string data_shop_items_json() {

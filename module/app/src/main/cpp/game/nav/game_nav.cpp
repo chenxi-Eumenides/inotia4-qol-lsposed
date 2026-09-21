@@ -1,6 +1,6 @@
 // game_nav.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/symbols/game_symbols.h"
 
 #include <atomic>
@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "game/nav/game_nav.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "game/read/game_tiles.h"
 
 const uint8_t* nav_tiles() {

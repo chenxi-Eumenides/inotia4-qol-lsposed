@@ -400,9 +400,9 @@ struct QolInventoryItemRef {
 using QolInventoryBagSlotFn = int32_t (*)(const QolInventoryItemRef* item, void* ctx);
 
 struct QolInventoryReadOnlyApi {
-    // 库存引用按袋/槽读取；原落点：game_state.cpp:215-250、plugins/autosell/scan.cpp:155。
+    // 库存引用按袋/槽读取；原落点：game/state/game_state.cpp:215-250、plugins/autosell/scan.cpp:155。
     QolResult (*item_ref_at)(int32_t bag, int32_t slot, QolInventoryItemRef* out);
-    // 遍历原版物理袋 0..5，回调返回 1 停止；原落点：game_state.cpp:280-292、
+    // 遍历原版物理袋 0..5，回调返回 1 停止；原落点：game/state/game_state.cpp:280-292、
     // plugins/autosell/scan.cpp:119-145。
     QolResult (*for_each_bag_slot)(QolInventoryBagSlotFn callback, void* ctx);
     QolResult (*physical_item_at)(int32_t bag, int32_t slot, void** out_item);

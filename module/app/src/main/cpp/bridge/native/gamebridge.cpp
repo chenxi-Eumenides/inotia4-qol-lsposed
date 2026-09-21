@@ -28,7 +28,7 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env
     virtual_bag_ui_register_bridge(env, bridge_class);
 }
 
-// JNI 导出层：仅做参数传递与字符串转换，逻辑在 game_access / game_data。
+// JNI 导出层：仅做参数传递与字符串转换，逻辑在 game/access/game_access / game/state/game_state。
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {

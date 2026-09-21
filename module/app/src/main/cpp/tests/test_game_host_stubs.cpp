@@ -1,6 +1,6 @@
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "patch/ptr_slot.h"
 
 uint8_t* g_snd_fx = nullptr;

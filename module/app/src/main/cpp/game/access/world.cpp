@@ -1,6 +1,6 @@
 #include "game/access/world.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 
 namespace qol::game {
 

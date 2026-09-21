@@ -1,4 +1,4 @@
-// game_ops_common.cpp —— op_ok/op_err 响应信封（自 game_state.cpp 迁入，纯搬代码，零逻辑变更）
+// game_ops_common.cpp —— op_ok/op_err 响应信封（自 game/state/game_state.cpp 迁入，纯搬代码，零逻辑变更）
 
 #include "game/ops/game_ops_common.h"
 

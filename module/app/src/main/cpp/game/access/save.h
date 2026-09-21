@@ -18,7 +18,7 @@ namespace qol::game {
 // SAVE_CreateSaveSlot 四个函数指针）是否全部解析；与迁移前 read_hero_meta 守卫一致。
 bool save_slot_meta_deps_ready();
 
-// 常规读取入口：主菜单停留内尚未重载或槽文件被改动时重载三槽（策略见 game_access.h）。
+// 常规读取入口：主菜单停留内尚未重载或槽文件被改动时重载三槽（策略见 game/access/game_access.h）。
 void save_slots_refresh_if_stale();
 // 模块或游戏改动槽文件后调用，令下一次读取重新重载。
 void save_slots_mark_stale();

@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "core/native/game_cache.h"
 #include "game_character.h"
 #include "game_dialog.h"
@@ -14,7 +14,7 @@
 #include "api/native/game_save.h"
 #include "plugins/save_backup/feature.h"
 #include "game_shop.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "game_system.h"
 #include "api/native/game_ui.h"
 #include "game_world.h"

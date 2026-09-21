@@ -8,10 +8,10 @@
 #include <unistd.h>
 
 #include "contracts/panels.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/ops/game_ops_common.h"
 #include "game_save_preflight.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "core/native/module_save_port.h"
 #include "contracts/extension_bag_port.h"
 #include "infra/save/save_enter.h"
@@ -44,7 +44,7 @@ std::string data_save_slots_json() {
         fn_save_destroy_save_slot == nullptr || fn_save_create_save_slot == nullptr)
         return op_err("symbol not resolved");
     // SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局；只允许在主菜单刷新，且同一次主菜单停留内
-    // 只重载一次（反复重载会累积游戏侧对象，见 game_access.h 刷新策略注释）。
+    // 只重载一次（反复重载会累积游戏侧对象，见 game/access/game_access.h 刷新策略注释）。
     // world/启动过渡阶段查询 save_slots 必须只读现有槽结构，不能因 GET /system/info 破坏当前游戏。
     save_slots_refresh_if_stale();
     std::string s = "{\"slots\":[";
@@ -81,7 +81,7 @@ std::string data_op_save() {
 // 预检（backlog P0②）：仅主菜单（STATE==4）可取判决——非主菜单调 CreateSaveSlot 会让
 // SAVE_LoadInformation 覆盖世界态全局（版本/时长等，docs/reference/game/save.md §3），故其余
 // 状态返回 unknown/not in main menu，不刷新、只读当前槽结构字节。判决由槽区重载产生
-// （同一次主菜单停留内只重载一次，见 game_access.h 刷新策略注释），调用方不得再额外读档。
+// （同一次主菜单停留内只重载一次，见 game/access/game_access.h 刷新策略注释），调用方不得再额外读档。
 static std::string save_preflight_for_enter(int32_t slot) {
     if (g_state == nullptr) return op_err("libgame not ready");
     if (fn_save_get_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||
@@ -101,7 +101,7 @@ static std::string save_preflight_for_enter(int32_t slot) {
     // 判决来自槽区重载（内部 SAVE_CreateSaveSlot 逐槽 SAVESLOT_Initialize + SAVE_LoadSaveSlot，
     // 与游戏存档面板同源）；本次主菜单停留内已重载过则直接复用，不重复重载。
     // 此处不得再对目标槽单独调 SAVE_LoadSaveSlot：那是重复读档，会额外累积游戏侧对象，
-    // 使本次及后续读档在角色阶段失败（原因见 game_access.h 刷新策略注释）。
+    // 使本次及后续读档在角色阶段失败（原因见 game/access/game_access.h 刷新策略注释）。
     save_slots_refresh_if_stale();
     void* ss = fn_save_get_save_slot(slot);
     if (ss == nullptr) return op_err("bad slot");
@@ -168,7 +168,7 @@ static std::string enter_slot_locked(int32_t slot) {
         return op_err("symbol not resolved");
     if (slot < 0 || slot > 2) return op_err("bad slot");
     // 槽区刷新由预检内部完成（save_slots_refresh_if_stale）；此处不得再刷新，多一次重载就多
-    // 一批未释放的角色对象（见 game_access.h 刷新策略注释）。
+    // 一批未释放的角色对象（见 game/access/game_access.h 刷新策略注释）。
     std::string preflight = save_preflight_for_enter(slot);
     if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);

@@ -10,8 +10,8 @@
 #include "contracts/item_count.h"
 #include "infra/log/qol_log.h"
 #include "contracts/sell_price.h"
-#include "game_access.h"
-#include "game_state.h"
+#include "game/access/game_access.h"
+#include "game/state/game_state.h"
 #include "game/symbols/game_symbols.h"
 #include "infra/capabilities.h"
 

@@ -1,6 +1,6 @@
 // game_variant.h —— libgame.so 校验值 → 游戏变体/能力 的运行时查表接口。
 //
-// 依赖方向：core 层，仅依赖 STL + infra/log/qol_log.h；不得依赖 game_access.h / g_base 等上层。
+// 依赖方向：core 层，仅依赖 STL + infra/log/qol_log.h；不得依赖 game/access/game_access.h / g_base 等上层。
 // 数据来源：game/variants/game_variant_table.inc（由 scripts/data/game_variant_table.py 离线生成）。
 #pragma once
 

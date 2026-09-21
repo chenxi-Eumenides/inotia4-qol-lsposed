@@ -2,7 +2,7 @@
 
 #include "game/access/item_class.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 
 #include <cstddef>
 

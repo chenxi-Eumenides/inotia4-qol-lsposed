@@ -66,5 +66,5 @@ private:
     mutable int elf_ok_ = 0, slot_ok_ = 0, fallback_vma_ = 0, missed_ = 0;
 };
 
-// 全局实例（game_access.cpp 使用）
+// 全局实例（game/access/game_access.cpp 使用）
 extern SymbolResolver g_resolver;

@@ -1,6 +1,6 @@
 #include "game/access/hive_iap.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/symbols/game_symbols.h"
 
 // op_ok/op_err 响应信封物理仍在 game/ops/game_ops_common.cpp（过渡期归类 infra）；

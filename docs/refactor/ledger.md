@@ -52,11 +52,16 @@
 
 ### 暂留 `core/native` 的三组实现
 
-- `game_cache.{h,cpp}`：仍依赖 `api/native/*`、`game_system.h`、`game_access.h` 与 `game_state.h`，当前映射为 `infra`。
-- `module_save.cpp` 与 `module_save_port.h`：实现仍依赖 `game_access.h` 与 `game_state.h`；稳定声明 `contracts/module_save_port.h` 保持不变，当前实现映射为 `legacy/save`。
-- `inventory_trade.{h,cpp}`：仍依赖 `game_access.h`、`game_state.h` 与 `game/symbols/game_symbols.h`，当前映射为 `legacy/inventory`。
+- `game_cache.{h,cpp}`：仍依赖 `api/native/*`、`game_system.h`、`game/access/game_access.h` 与 `game/state/game_state.h`，当前映射为 `infra`。
+- `module_save.cpp` 与 `module_save_port.h`：实现仍依赖 `game/access/game_access.h` 与 `game/state/game_state.h`；稳定声明 `contracts/module_save_port.h` 保持不变，当前实现映射为 `legacy/save`。
+- `inventory_trade.{h,cpp}`：仍依赖 `game/access/game_access.h`、`game/state/game_state.h` 与 `game/symbols/game_symbols.h`，当前映射为 `legacy/inventory`。
 
-清除条件：完成 `api/native`、`game_access.h`、`game_state.h` 及相关符号访问面的吸收，补齐目标层适配接口；随后将三组文件迁入目标层、删除对应 `_CORE_OVERRIDES` 条目，并通过 `check_arch.py` 与 `check_offsets.py` 的基线棘轮校验。
+清除条件：完成 `api/native` 与相关符号访问面的吸收，补齐目标层适配接口；随后将三组文件迁入目标层、删除对应 `_CORE_OVERRIDES` 条目，并通过 `check_arch.py` 与 `check_offsets.py` 的基线棘轮校验。
+
+### 本轮未移动的根目录遗产
+
+- `game_system.{h,cpp}`：若移入 `game/`，`game_system.cpp` 对 `api/native/game_world.h`、`api/native/game_ui.h` 的依赖会新增 `game → legacy` 违规；保持原位。清除条件：先把系统聚合实现拆分为 `game/` 低层原语与目标层上层聚合，再移除根目录文件并通过 `check_arch.py`。
+- `game_dialog.{h,cpp}`、`game_dialog_content.inc`、`game_dialog_operations.inc`：若移入 `game/`，`game_dialog.cpp` 会新增对 `api/native/game_ui.h`、`api/native/game_world.h`、`api/native/game_save.h`、`core/native/game_cache.h` 的 `game → legacy/infra` 违规；保持原位。清除条件：完成对话读取/操作与缓存依赖的目标层适配，拆除 `api/native`、`core/native` 直引后再迁移并通过 `check_arch.py`。
 
 日志策略结论：`check_log_policy.py` 的 R3 error（Kotlin `LogDomain` 缺少 `special_equip`）在 HEAD 中已存在；本批仅更新日志头文件路径注释，未引入该问题，按既有债务登记，不在本批修复。
 
@@ -73,7 +78,7 @@
 
 | 规则 | 基线条数 | 实测现存 | 说明 |
 |---|---|---|---|
-| `layer_direction` | 32 | 32 | **全部是 legacy 目录内部越层边**：`api→api` 5、`core→api` 4、`core→data` 4、`core→game_access.h` 4、`core→core` 3、`core→game_system.h` 2、`core→game_state.h` 2、`game_dialog.cpp→api` 3，以及 `data→core`、`game_access.cpp→core`、`game_access.cpp→game_system.h`、`game_state.cpp→api`、`game_state.cpp→core` 各 1。**不含插件的 legacy include**——因 `arch_common.allows()` 目前放行 `plugins→game/infra/hooks/patch/domains` |
+| `layer_direction` | 32 | 32 | **全部是 legacy 目录内部越层边**：`api→api` 5、`core→api` 4、`core→data` 4、`core→game/access` 4、`core→core` 3、`core→game_system.h` 2、`core→game/state` 2、`game_dialog.cpp→api` 3，以及 `data→core`、`game/access/game_access.cpp→core`、`game/access/game_access.cpp→game_system.h`、`game/state/game_state.cpp→api`、`game/state/game_state.cpp→core` 各 1。**不含插件的 legacy include**——因 `arch_common.allows()` 目前放行 `plugins→game/infra/hooks/patch/domains` |
 | `offsets_symbols_header` | 11 | 9 | 6 条 `core/native/*` + 5 条插件（`extension_bag` 2、`custom_recipe` 2、`inventory_hooks` 1） |
 | `resource_unknown_symbol` | 2 | 3（豁免 1） | 均为 `extension_bag` ptr slot 间接安装点（`extension_bag_equip.inc`、`game_ui_virtbag.cpp`） |
 | **合计** | **45** | **44** | 另 1 条豁免（`plugins/core.ui/panels/settings.cpp` 运行时控件实例槽，§3）不计入基线 |

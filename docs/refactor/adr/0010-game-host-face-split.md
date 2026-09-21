@@ -37,9 +37,9 @@ capability、owner command**。
 | `plugins/save_backup/feature.cpp` | `game_feature.h`、`game_ops_common.h`、`qol_log.h` | Host SDK log + save read facade + save owner command |
 | `plugins/extension_bag/extension_bag_port.cpp` | `core/native` 端口、`sell_price.h` | extension_bag capability 与 inventory owner 面 |
 | `plugins/extension_bag/extension_bag_geometry.cpp` | `game_*`、UI 私有头 | Host SDK UI adapter |
-| `plugins/autosell/ui/panel.cpp` | `item_class.h`、`game_access.h`、`qol_log.h` | Host SDK UI/item read/log |
+| `plugins/autosell/ui/panel.cpp` | `item_class.h`、`game/access/game_access.h`、`qol_log.h` | Host SDK UI/item read/log |
 | `plugins/inventory_hooks/inventory_hook_stage4.cpp` | `sell_price.h`、`game_symbols.h` | inventory owner capability/command |
-| `plugins/autosell/view.cpp` | `item_class.h`、`game_access.h` | Host SDK item read/provider capability |
+| `plugins/autosell/view.cpp` | `item_class.h`、`game/access/game_access.h` | Host SDK item read/provider capability |
 | `plugins/extension_bag/game_ui_virtbag.h` | `game_*`、`game_symbols.h`、端口头 | contracts + extension_bag 私有头 |
 | `plugins/extension_bag/extension_bag_store.inc` | `game_*`、store legacy 面 | Host SDK store + extension_bag owner |
 | `plugins/extension_bag/extension_bag_persistence.cpp` | `qol_log.h`、sidecar legacy 面 | Host SDK log/store；module save participant 延后 |
@@ -195,8 +195,8 @@ save backup 不再依赖 `game_feature.h`：伴生文件门禁通过 target 面�
 | item | `jewel_value(const void*, int32_t*)` | 读取宝石 `item+0x10` bits0–10；原落点 `plugins/autosell/view.cpp:77`，原语 `game/access/item_class.cpp`。 |
 | item | `jewel_attribute_type(const void*, int32_t*)` | 读取宝石 `item+0x10` bits18–23；原落点 `plugins/autosell/view.cpp:79`，原语 `game/access/item_class.cpp`。 |
 | world | `game_state_gate(int32_t*)` | 读取 `g_gamestate` 并输出 `1` 当且仅当原值为 0；`g_gamestate` 空指针按原实现取 0。与原扫描门禁 `world.state == 5` 之外的独立判定逐字等价，原落点 `plugins/autosell/scan.cpp:64-75`。 |
-| inventory | `item_ref_at(int32_t, int32_t, QolInventoryItemRef*)` | 保留 `InventoryItemRef` 的 kind/bag/slot/category/count/native_item 语义；空槽为 `not_found`，物理库存未就绪为 `not_ready`。原落点 `game_state.cpp:215-250`、`plugins/autosell/scan.cpp:155`。 |
-| inventory | `for_each_bag_slot(QolInventoryBagSlotFn, void*)` | 聚合遍历物理袋 `0..5`，回调返回 1 停止；引用仅在回调期间有效。原落点 `game_state.cpp:280-292`、`plugins/autosell/scan.cpp:119-145`。 |
+| inventory | `item_ref_at(int32_t, int32_t, QolInventoryItemRef*)` | 保留 `InventoryItemRef` 的 kind/bag/slot/category/count/native_item 语义；空槽为 `not_found`，物理库存未就绪为 `not_ready`。原落点 `game/state/game_state.cpp:215-250`、`plugins/autosell/scan.cpp:155`。 |
+| inventory | `for_each_bag_slot(QolInventoryBagSlotFn, void*)` | 聚合遍历物理袋 `0..5`，回调返回 1 停止；引用仅在回调期间有效。原落点 `game/state/game_state.cpp:280-292`、`plugins/autosell/scan.cpp:119-145`。 |
 
 本批不迁移 `autosell` 消费者。缺面映射为：宝石属性值 → `read_only.item.jewel_value`；
 宝石属性类型 → `read_only.item.jewel_attribute_type`；库存槽遍历 →

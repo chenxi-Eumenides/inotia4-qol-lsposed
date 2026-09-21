@@ -472,7 +472,7 @@ constexpr uintptr_t F_GET_DAMAGE_VMA = 0x1099f0;     // int (void*) 物品攻击
 constexpr uintptr_t F_GET_DEFENSE_VMA = 0x109cc0;    // int (void*) 物品防御
 constexpr uintptr_t F_GET_STAT_VMA = 0xdf8d0;        // int (void*, int) 主属性总属性=Base+Main+Bonus+Sub (0=力量 1=敏捷 2=体力 3=智力 4=精力)
 // ⚠️ F_GET_STAT 经 CHAR_GetStatSub(0xdf888) 在动态派生脏位置位时会重算并写回，非纯读；
-// 非游戏线程请用 game_state.h 的 char_stat_total() 直读 C_STAT_* 字段。
+// 非游戏线程请用 game/state/game_state.h 的 char_stat_total() 直读 C_STAT_* 字段。
 constexpr uintptr_t F_GET_STAT_BASE_VMA = 0xdb9e4;   // int (void*, int) 基础属性 [ch+0x250+i] s8
 constexpr uintptr_t F_GET_STAT_BONUS_VMA = 0xdb9fc;  // int (void*, int) 加成属性 [ch+0x260+i] s8（存档独立保存）
 constexpr uintptr_t F_GET_STATUS_POINT_VMA = 0xd9c44; // int (void*) 剩余能力点
@@ -910,7 +910,7 @@ constexpr uint8_t kUIEquipBagDescType = 2;
 constexpr uintptr_t F_UIEQUIP_SELL_SETTLE_VMA = 0x1261c4;
 constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾跳 SetDescMenu（唯一调用，B 指令→菜单门禁）
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
-constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 sret 出参）——禁止 C++ 直调（真机 SIGSEGV，见 game_access.h 注释）；取 rect 用手工父链读
+constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 sret 出参）——禁止 C++ 直调（真机 SIGSEGV，见 game/access/game_access.h 注释）；取 rect 用手工父链读
 constexpr uintptr_t F_TOUCH_HANDLE_DELETE_CONTROL_VMA = 0xa3c04;     // void (ctrl) 删除控件（信息面板销毁）
 constexpr uintptr_t F_CONTROL_OBJECT_SET_CONTROL_PROC_VMA = 0x9dfbc;   // void (ctrl, proc) 设置控件事件 proc（ControlItem_Create 内部同款）
 constexpr uintptr_t F_CONTROL_OBJECT_SET_USER_TYPE_VMA = 0x9dbc4;      // void (ctrl, u32) 设置控件类型（2=ControlItem）

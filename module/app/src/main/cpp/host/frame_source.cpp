@@ -18,7 +18,7 @@
 #include "infra/frame/frame_task.h"
 #include "infra/log/qol_log.h"
 #include "game/access/patches.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "hooks/registry.h"
 #include "infra/scheduler.h"
 #include "patch/instr_patch.h"

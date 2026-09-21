@@ -5,7 +5,7 @@
 #include "infra/popup_enter_alias.h"
 #include "game/access/popup_state.h"
 #include "game/access/symbols.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 
 namespace qol::hooks {
 namespace {

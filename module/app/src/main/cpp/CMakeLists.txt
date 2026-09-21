@@ -67,11 +67,11 @@ add_library(gamebridge SHARED
     bridge/native/gamebridge_domain_operations.cpp
     bridge/native/gamebridge_settings.cpp
     bridge/native/gamebridge_extension_bag.cpp
-    game_access.cpp
+    game/access/game_access.cpp
     game/symbols/symbol_resolver.cpp
     game/json/game_json.cpp
     game/ops/game_ops_common.cpp
-    game_state.cpp
+    game/state/game_state.cpp
     game/nav/game_nav.cpp
     core/native/game_cache.cpp
     core/native/module_save.cpp

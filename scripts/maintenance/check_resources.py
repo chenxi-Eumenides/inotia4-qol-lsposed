@@ -56,7 +56,7 @@ _MECHANISM_FILES = frozenset(
     {
         "patch/call_patch.cpp",
         "patch/call_patch.h",
-        "game_ptr_hook.h",
+        "patch/game_ptr_hook.h",
         "patch/ptr_slot.cpp",
         "patch/ptr_slot.h",
         "game/access/ptr_slots.cpp",

@@ -1,8 +1,8 @@
-// game_state.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
+// game/state/game_state.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
 #include "api/native/game_ui.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/symbols/game_symbols.h"
 #include "contracts/extension_bag_port.h"
 #include "infra/frame/frame_task.h"
@@ -19,7 +19,7 @@
 #include <thread>
 #include <vector>
 
-#include "game_state.h"
+#include "game/state/game_state.h"
 
 bool game_in_world() {
     return g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 5;

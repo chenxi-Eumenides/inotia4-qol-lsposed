@@ -92,18 +92,12 @@ _LEGACY_API_BY_STEM = {
 }
 
 _ROOT_OVERRIDES = {
-    "game_access.cpp": "game",
-    "game_access.h": "game",
-    "game_access_globals.inc": "game",
-    "game_state.cpp": "game",
-    "game_state.h": "game",
     "game_system.cpp": "legacy/system",
     "game_system.h": "legacy/system",
     "game_dialog.cpp": "legacy/dialog",
     "game_dialog.h": "legacy/dialog",
     "game_dialog_content.inc": "legacy/dialog",
     "game_dialog_operations.inc": "legacy/dialog",
-    "game_ptr_hook.h": "patch",
 }
 
 # 暂留 legacy core/native：这些实现仍直接依赖未吸收的原版访问面，依赖吸收完成后再迁入目标层。

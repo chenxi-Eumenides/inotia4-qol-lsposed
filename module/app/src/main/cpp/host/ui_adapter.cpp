@@ -6,7 +6,7 @@
 #include <mutex>
 #include <unordered_map>
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"

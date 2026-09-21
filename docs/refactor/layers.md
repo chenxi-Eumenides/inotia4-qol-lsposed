@@ -140,7 +140,7 @@
 | 口径 | 结果 | 三态 |
 |---|---|---|
 | 带目录前缀 `(game\|infra\|hooks\|patch\|host)/` 与跨插件 include | **0** 条 | 当前事实（新架构前缀已无直引） |
-| legacy/私有路径：`core/native/**`、`game/read/**`、`game/symbols/**`、根部裸名头（`game_access.h` / `game_state.h` / `qol_log.h` / `game_ops_common.h` / `game_feature.h` / `inventory_trade.h` / `sell_price.h` / `save_enter.h` / `save_exit.h` / `game_ptr_hook.h`） | **19 个文件**（12 个去重头） | **迁移债**（宿主/私有面直引，待 P3 清除） |
+| legacy/私有路径：`core/native/**`、`game/read/**`、`game/symbols/**`、根部裸名头（`qol_log.h` / `game_ops_common.h` / `game_feature.h` / `inventory_trade.h` / `sell_price.h` / `save_enter.h` / `save_exit.h`） | **19 个文件**（根目录裸名头 7 个） | **迁移债**（宿主/私有面直引，待 P3 清除） |
 
 **当前事实（逐文件，共 19 个）**：`extension_bag/game_ui_virtbag.cpp`(10)、`inventory_hooks/native_inventory_hook.cpp`(6)、`core.ui/panels/settings.cpp`(6)、`autosell/scan.cpp`(6)、`save_backup/ui/panel.cpp`(5)、`save_backup/feature.cpp`(3)、`extension_bag/extension_bag_port.cpp`(3)、`extension_bag/extension_bag_geometry.cpp`(3)、`autosell/ui/panel.cpp`(3)、`inventory_hooks/inventory_hook_stage4.cpp`(2)、`autosell/view.cpp`(2)、`save_backup/plugin.cpp`(1)、`extension_bag/game_ui_virtbag.h`(1)、`extension_bag/extension_bag_store.inc`(1)、`extension_bag/extension_bag_persistence.cpp`(1)、`extension_bag/extension_bag_logging.h`(1)、`autosell/view.h`(1)、`autosell/store.cpp`(1)、`autosell/plugin.cpp`(1)。
 

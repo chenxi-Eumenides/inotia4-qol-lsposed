@@ -1,7 +1,7 @@
 #include "game/access/inventory.h"
 
-#include "game_state.h"
-#include "game_access.h"
+#include "game/state/game_state.h"
+#include "game/access/game_access.h"
 #include "game/access/item_class.h"
 
 #include <cstring>

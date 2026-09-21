@@ -3,10 +3,10 @@
 
 #include "game_world.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/json/game_json.h"
 #include "game/nav/game_nav.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "game/ops/game_ops_common.h"
 #include "infra/frame/frame_task.h"
 #include "infra/log/qol_log.h"

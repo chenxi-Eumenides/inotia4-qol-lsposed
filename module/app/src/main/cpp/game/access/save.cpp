@@ -1,8 +1,8 @@
 #include "game/access/save.h"
 
 #include "game/symbols/game_symbols.h"
-#include "game_access.h"
-#include "game_state.h"
+#include "game/access/game_access.h"
+#include "game/state/game_state.h"
 
 namespace qol::game {
 

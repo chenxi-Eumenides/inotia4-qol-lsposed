@@ -8,8 +8,8 @@
 #include "contracts/host_sdk.h"
 #include "game/access/save.h"
 #include "game/access/ui_choice.h"
-#include "game_access.h"
-#include "game_state.h"
+#include "game/access/game_access.h"
+#include "game/state/game_state.h"
 
 uintptr_t g_base = 0;
 

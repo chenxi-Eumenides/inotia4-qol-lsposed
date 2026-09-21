@@ -1,6 +1,6 @@
 #include "game/access/ui_kit.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/symbols/game_symbols.h"
 
 #include <cstring>

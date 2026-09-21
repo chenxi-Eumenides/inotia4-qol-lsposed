@@ -4,7 +4,7 @@
 #include <cstring>
 
 #include "contracts/ui.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
 #include "host/ui_adapter.h"

@@ -1,6 +1,6 @@
 #include "game_inventory.h"
-#include "game_access.h"
-#include "game_state.h"
+#include "game/access/game_access.h"
+#include "game/state/game_state.h"
 #include "game/ops/game_ops_common.h"
 #include "contracts/extension_bag_port.h"
 #include "core/native/inventory_trade.h"

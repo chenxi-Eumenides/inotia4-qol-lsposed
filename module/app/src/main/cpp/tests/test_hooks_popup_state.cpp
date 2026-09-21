@@ -14,7 +14,7 @@
 
 #include "infra/popup_enter_alias.h"
 #include "game/symbols/game_symbols.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 
 static int g_pass = 0;
 static int g_fail = 0;

@@ -1,7 +1,7 @@
 // game_feature.h —— 在 game_variant（构建校验值/能力位）之上的功能抽象层。
 //
 // 职责：把「当前 libgame.so 属于哪个构建」翻译成「有没有某功能 / 该功能当前是否可用」。
-// 依赖方向：core 层，依赖 game/variants/game_variant.h 与 STL；不得依赖 game_access.h 等上层。
+// 依赖方向：core 层，依赖 game/variants/game_variant.h 与 STL；不得依赖 game/access/game_access.h 等上层。
 #pragma once
 
 #include <cstdint>

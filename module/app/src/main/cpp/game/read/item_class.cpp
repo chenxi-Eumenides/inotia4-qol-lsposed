@@ -3,7 +3,7 @@
 #include "item_class.h"
 
 #include "contracts/item_count.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game_symbols.h"
 
 #include <cstdint>

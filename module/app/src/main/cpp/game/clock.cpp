@@ -11,11 +11,11 @@
 
 #if defined(__ANDROID__)
 // Android 构建走正式声明（含其他符号解析入口）。
-#include "game_access.h"
+#include "game/access/game_access.h"
 #else
-// game_access.h 拉入 <jni.h> 且其内部 "game_symbols.h" 只在 NDK 包含路径下可解析，
+// game/access/game_access.h 拉入 <jni.h> 且其内部 "game_symbols.h" 只在 NDK 包含路径下可解析，
 // host 单测（仅 -I.）无法编译，属 Android-only 头；host 分支只声明本文件用到的 g_base，
-// 类型与 game_access.h 的 extern uintptr_t g_base 一致。
+// 类型与 game/access/game_access.h 的 extern uintptr_t g_base 一致。
 extern uintptr_t g_base;
 #endif
 

@@ -6,7 +6,7 @@
 #include "game_world.h"
 #include "game_system.h"
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/symbols/game_symbols.h"
 
 #include <atomic>
@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "game_cache.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 
 struct CacheSlot {
     const char* name;             // 端点名（日志用）

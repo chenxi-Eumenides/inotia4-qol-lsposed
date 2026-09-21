@@ -269,7 +269,7 @@ native bag marker、effective 视图、写回门控和扩展背包相关判断�
 | 代表路径 | 当前事实 |
 |---|---|
 | `module/app/src/main/cpp/plugins/save_backup/feature.cpp:31-33` | include `game/feature/game_feature.h`、`game_ops_common.h`、`qol_log.h` |
-| `module/app/src/main/cpp/plugins/autosell/view.cpp:5,8` | include `game/read/item_class.h` 和根部 `game_access.h` |
+| `module/app/src/main/cpp/plugins/autosell/view.cpp:5,8` | include `game/read/item_class.h` 和 `game/access/game_access.h` |
 | `module/app/src/main/cpp/plugins/autosell/scan.cpp:12-16` | include `core/native/inventory_trade.h`、日志和 save-enter/exit |
 | `module/app/src/main/cpp/plugins/inventory_hooks/inventory_hook_stage4.cpp:3-4` | include `contracts/sell_price.h`、`game/symbols/game_symbols.h` |
 | `module/app/src/main/cpp/plugins/save_backup/ui/panel.cpp:5-6` | include `game/ops/game_ops_common.h`、`qol_log.h` |

@@ -4,7 +4,7 @@
 #include <cstring>
 #include <pthread.h>
 
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/char.h"
 #include "game/access/craft.h"
@@ -16,7 +16,7 @@
 #include "game/access/ui_choice.h"
 #include "game/access/world.h"
 #include "game/clock.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "game/feature/game_feature.h"
 #include "game/variants/game_variant.h"
 

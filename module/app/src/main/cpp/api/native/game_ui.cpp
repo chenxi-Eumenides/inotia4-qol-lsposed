@@ -1,6 +1,6 @@
 #include "game_ui.h"
 #include "game_ui_internal.h"
-#include "game_state.h"
+#include "game/state/game_state.h"
 #include "game_world.h"
 #include "game/ops/game_ops_common.h"
 #include "contracts/extension_bag_port.h"

@@ -25,7 +25,7 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-// game_access.h 的外部符号在本 target 由测试提供。
+// game/access/game_access.h 的外部符号在本 target 由测试提供。
 uintptr_t g_base = 0;
 
 uintptr_t fn_resolve(const char* /*macro_name*/, uintptr_t vma) {

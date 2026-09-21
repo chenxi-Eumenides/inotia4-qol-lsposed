@@ -1,4 +1,4 @@
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "game/symbols/symbol_resolver.h"
 #include "game_system.h"
 #include "infra/log/qol_log.h"
@@ -15,14 +15,14 @@
 #include <utility>
 #include <vector>
 
-#include "game_access_globals.inc"
+#include "game/access/game_access_globals.inc"
 
 namespace {
 
 std::mutex g_mutex;
 std::atomic<bool> g_bridge_ready{false};
 
-// 启动期常驻 patch 入口（host 在 nativeInit 早段注入；见 game_access.h 的 BridgeBootPatchFn）。
+// 启动期常驻 patch 入口（host 在 nativeInit 早段注入；见 game/access/game_access.h 的 BridgeBootPatchFn）。
 BridgeBootPatchFn g_boot_patch_hook = nullptr;
 
 bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
@@ -519,12 +519,12 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
 }
 
 // 槽区刷新状态：g_slots_state = 最近一次观察到的游戏状态（0xFFFF = 尚未观察），
-// g_slots_stale = 槽文件自上次重载后被改动/尚未重载。见 game_access.h 刷新策略注释。
+// g_slots_stale = 槽文件自上次重载后被改动/尚未重载。见 game/access/game_access.h 刷新策略注释。
 static std::atomic<bool> g_slots_stale{true};
 static std::atomic<uint16_t> g_slots_state{0xFFFF};
 
 // 存档槽区重载：先释放三槽已挂接角色对象，再重载。与游戏自身 SaveSlot_Delete 的清理惯用法一致
-// （SAVE_DestroySaveSlot → SAVE_CreateSaveSlot）；原因、副作用与调用约束见 game_access.h 注释。
+// （SAVE_DestroySaveSlot → SAVE_CreateSaveSlot）；原因、副作用与调用约束见 game/access/game_access.h 注释。
 void save_slots_reload() {
     if (fn_save_destroy_save_slot != nullptr) fn_save_destroy_save_slot();
     if (fn_save_create_save_slot != nullptr) fn_save_create_save_slot();

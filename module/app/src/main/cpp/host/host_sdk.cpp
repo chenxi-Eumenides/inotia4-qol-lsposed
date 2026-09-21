@@ -24,7 +24,7 @@
 #include "infra/store.h"
 #include "infra/text_scope.h"
 #include "game/access/ptr_slots.h"
-#include "game_access.h"
+#include "game/access/game_access.h"
 #include "patch/ptr_slot.h"
 
 extern bool module_save_register_participant(const ModuleSaveParticipant&) __attribute__((weak));
