@@ -2,7 +2,9 @@
 #include "infra/save/save_enter.h"
 #include "infra/save/save_exit.h"
 #include "infra/frame/transition_dispatch.h"
+#if !QOL_KERNEL_ONLY
 #include "plugins/autosell/config.h"
+#endif
 #include "host/assembly.h"
 #include "host/core_patches.h"
 #include "host/frame_source.h"
@@ -20,12 +22,22 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeRegisterConfigBridge(JNIEnv* env, jclass, jclass bridge_class) {
+#if !QOL_KERNEL_ONLY
     qol::features::core_ui::settings_register_config_bridge(env, bridge_class);
+#else
+    (void)env;
+    (void)bridge_class;
+#endif
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env, jclass, jclass bridge_class) {
+#if !QOL_KERNEL_ONLY
     virtual_bag_ui_register_bridge(env, bridge_class);
+#else
+    (void)env;
+    (void)bridge_class;
+#endif
 }
 
 // JNI 导出层：仅做参数传递与字符串转换，逻辑在 game/access/game_access / game/state/game_state。
@@ -44,7 +56,9 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 统一帧派发宿主（渲染开始前锚点）。自动出售扫描任务：全局开关武装 +
         // 进入存档后由 autosell 插件注册的 save-enter 回调按存档配置同步（见 plugin.cpp）。
         if (qol::host::frame_source_install()) {
+#if !QOL_KERNEL_ONLY
             autosell_set_host_installed(true);
+#endif
         }
         // 角色升级所需经验游戏线程缓存：注册常驻逻辑帧任务（CHAR_GetNextExperience 非纯读，
         // 不能在预取/HTTP 线程调用）。帧宿主未安装时任务注册成功但不派发（惰性无效）。

@@ -40,6 +40,10 @@ class HookMain : XposedModule() {
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         if (!TargetPackages.contains(param.packageName)) return
         TargetPackages.activate(param.packageName)
+        if (BuildConfig.KERNEL_ONLY) {
+            LogFile.info(LogDomain.PLATFORM, "kernel-only mode: business hooks skipped")
+            return
+        }
         ResourceNamespaceBridge.install(param) { method ->
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)

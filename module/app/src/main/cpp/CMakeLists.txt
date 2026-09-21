@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(gamebridge)
 
+option(QOL_KERNEL_ONLY "Build Loader and Game Adapter without business plugins" OFF)
+option(QOL_ENABLE_DEVICE_PROBE "Build the Debug-only device probe plugins" OFF)
+
+if(QOL_ENABLE_DEVICE_PROBE AND CMAKE_BUILD_TYPE MATCHES "^[Rr][Ee][Ll][Ee][Aa][Ss][Ee]$")
+    message(FATAL_ERROR "QOL_ENABLE_DEVICE_PROBE is prohibited in Release builds")
+endif()
+
 set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/save_backup/bundle.cpp
     plugins/save_backup/feature.cpp
@@ -94,6 +101,11 @@ add_library(gamebridge SHARED
     game/access/inventory.cpp
 )
 
+target_compile_definitions(gamebridge PRIVATE
+    QOL_KERNEL_ONLY=$<BOOL:${QOL_KERNEL_ONLY}>
+    QOL_ENABLE_DEVICE_PROBE=$<BOOL:${QOL_ENABLE_DEVICE_PROBE}>
+)
+
 find_library(log-lib log)
 target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -104,7 +116,9 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/game/symbols
 )
 add_subdirectory(plugins)
-target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
+if(NOT QOL_KERNEL_ONLY)
+    target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
+endif()
 target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）

@@ -44,6 +44,8 @@
 | `plugins/core.ui` | 17 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
+| `plugins/device_probe_consumer` | 2 |
+| `plugins/device_probe_provider` | 2 |
 | `plugins/extension_bag` | 41 |
 | `plugins/inventory_hooks` | 11 |
 | `plugins/native_choice` | 4 |
@@ -55,7 +57,7 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **393** |
+| **合计** | **397** |
 
 ### 1.2 迁移期映射摘要
 
@@ -106,7 +108,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 97 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 101 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -207,14 +209,14 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（18 个）共 18 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（20 个）共 20 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（18）
+### 6.2 已迁移 `plugins/*`（20）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -225,6 +227,8 @@
 | `core.ui` | `plugins/core.ui` | 17 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
+| `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
+| `device_probe_provider` | `plugins/device_probe_provider` | 2 |
 | `extension_bag` | `plugins/extension_bag` | 41 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
 | `native_choice` | `plugins/native_choice` | 4 |

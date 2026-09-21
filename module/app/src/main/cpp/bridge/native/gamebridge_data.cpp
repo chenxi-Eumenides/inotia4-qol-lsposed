@@ -1,5 +1,27 @@
 #include "gamebridge_internal.h"
 
+#include "host/assembly.h"
+
+namespace {
+
+std::string init_report_with_assembly() {
+    std::string report = data_init_report();
+    if (report.empty() || report.back() != '}') return report;
+
+    const qol::host::AssemblyReport assembly = qol::host::assembly_report();
+    report.pop_back();
+    report += ",\"assembly\":{";
+    report += "\"registered_plugins\":" + std::to_string(assembly.registered_plugins);
+    report += ",\"registration_failures\":" + std::to_string(assembly.registration_failures);
+    report += ",\"install_failures\":" + std::to_string(assembly.install_failures);
+    report += ",\"kernel_only\":" + std::string(assembly.kernel_only ? "true" : "false");
+    report += ",\"initialized\":" + std::string(assembly.initialized ? "true" : "false");
+    report += "}}";
+    return report;
+}
+
+}  // namespace
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetFrameCount(JNIEnv*, jclass) {
     return static_cast<jlong>(data_frame_count());
@@ -32,7 +54,7 @@ Java_com_inotia4_qol_NativeBridge_nativeCurrentSaveSlot(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetInitReport(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_init_report().c_str());
+    return env->NewStringUTF(init_report_with_assembly().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -134,4 +156,3 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeDebugItemRawJson(JNIEnv* env, jclass, jint bag, jint slot) {
     return env->NewStringUTF(data_debug_item_raw_json(static_cast<int32_t>(bag), static_cast<int32_t>(slot)).c_str());
 }
-

@@ -41,6 +41,13 @@ object ApiServer {
     fun bootstrap(context: Context, moduleApkPath: String?) {
         startContext = context
         startModuleApkPath = moduleApkPath
+        if (BuildConfig.KERNEL_ONLY) {
+            LogFile.info(LogDomain.HTTP, "kernel-only mode: bootstrap loader configuration and health server")
+            ModuleConfig.load(context)
+            ensureAssetsInjected(context, moduleApkPath)
+            start(context, moduleApkPath)
+            return
+        }
         initFeatures(context, moduleApkPath)
         if (!ModuleConfig.apiEnabled) {
             LogFile.info(LogDomain.HTTP, "ApiServer HTTP disabled by config (apiEnabled=false); features initialized")

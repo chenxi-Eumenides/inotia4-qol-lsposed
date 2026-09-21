@@ -4,6 +4,7 @@
 
 #include "gamebridge_internal.h"
 
+#if !QOL_KERNEL_ONLY
 #include "contracts/commands.h"
 #include "plugins/autosell/config.h"
 #include "plugins/autosell/scan.h"
@@ -23,11 +24,23 @@ int clamp_range(int value, int lo, int hi) {
 bool valid_persist_slot(int slot) { return slot >= 0 && slot < 3; }
 
 }  // namespace
+#endif
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     JNIEnv* env, jclass, jboolean enabled, jint rarity, jint enhance, jint socket, jint gemTier,
     jstring specialJson, jint gemRange) {
+#if QOL_KERNEL_ONLY
+    (void)env;
+    (void)enabled;
+    (void)rarity;
+    (void)enhance;
+    (void)socket;
+    (void)gemTier;
+    (void)specialJson;
+    (void)gemRange;
+    return JNI_FALSE;
+#else
     autosell::Config cfg;
     // 值即开关：0=关闭，正整数为 1-based 档位；按边界钳制不可信输入。
     cfg.enabled = enabled == JNI_TRUE;
@@ -51,10 +64,15 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
         autosell_store_persist(slot, cfg);
     }
     return JNI_TRUE;
+#endif
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboolean enabled) {
+#if QOL_KERNEL_ONLY
+    (void)enabled;
+    return JNI_FALSE;
+#else
     // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
     // 写配置；autosell 插件的 on_enabled/on_disabled 与配置事件据此同步扫描任务与 UI 门控。
     // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetSimpleModeEnabled 同构）。
@@ -66,16 +84,25 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboo
     qol::contracts::QolCommandTicket ticket = 0;
     const QolResult result = qol::infra::commands_port().post(&ticket, &command);
     return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
+#endif
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeAutoSellRunNow(JNIEnv*, jclass) {
+#if QOL_KERNEL_ONLY
+    return JNI_FALSE;
+#else
     // 保留 JNI 入口以兼容既有 external 签名；扫描已由 frame_task 周期任务（每 60 帧）负责，
     // 不再提供单次立即扫描：60 帧等待可接受。
     return JNI_TRUE;
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeAutoSellStatusJson(JNIEnv* env, jclass) {
+#if QOL_KERNEL_ONLY
+    return env->NewStringUTF("{\"ok\":false,\"error\":\"kernel-only\"}");
+#else
     return env->NewStringUTF(autosell_status_json().c_str());
+#endif
 }

@@ -71,6 +71,11 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSave(JNIEnv* env, jclass) {
 // ---- 存档管理器备份（save-backup feature：bundle 导出/导入/列表/删除收口 native）----
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSaveBackupInit(JNIEnv* env, jclass, jstring dataDir, jstring externalDir) {
+#if QOL_KERNEL_ONLY
+    (void)env;
+    (void)dataDir;
+    (void)externalDir;
+#else
     const char* d = dataDir != nullptr ? env->GetStringUTFChars(dataDir, nullptr) : nullptr;
     const char* e = externalDir != nullptr ? env->GetStringUTFChars(externalDir, nullptr) : nullptr;
     save_backup_init(d, e);
@@ -79,10 +84,15 @@ Java_com_inotia4_qol_NativeBridge_nativeSaveBackupInit(JNIEnv* env, jclass, jstr
     qol::infra::store::init(e);
     if (d != nullptr) env->ReleaseStringUTFChars(dataDir, d);
     if (e != nullptr) env->ReleaseStringUTFChars(externalDir, e);
+#endif
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSaveBackupSetMapNames(JNIEnv* env, jclass, jstring json) {
+#if QOL_KERNEL_ONLY
+    (void)env;
+    (void)json;
+#else
     if (json == nullptr) {
         save_backup_set_map_names(nullptr);
         return;
@@ -90,34 +100,55 @@ Java_com_inotia4_qol_NativeBridge_nativeSaveBackupSetMapNames(JNIEnv* env, jclas
     const char* c = env->GetStringUTFChars(json, nullptr);
     save_backup_set_map_names(c);
     env->ReleaseStringUTFChars(json, c);
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeBackupList(JNIEnv* env, jclass) {
+#if QOL_KERNEL_ONLY
+    return kernel_only_result(env);
+#else
     return op_result(env, "backup_list", (std::string("")), save_backup_list_json());
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeBackupExport(JNIEnv* env, jclass, jint slot) {
+#if QOL_KERNEL_ONLY
+    (void)slot;
+    return kernel_only_result(env);
+#else
     return op_result(env, "backup_export", ("slot=" + str_of(slot)),
                      save_backup_export_json(static_cast<int>(slot)));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeBackupImport(JNIEnv* env, jclass, jstring checksum, jint slot) {
+#if QOL_KERNEL_ONLY
+    (void)checksum;
+    (void)slot;
+    return kernel_only_result(env);
+#else
     const char* c = checksum != nullptr ? env->GetStringUTFChars(checksum, nullptr) : nullptr;
     std::string s = c != nullptr ? c : "";
     if (c != nullptr) env->ReleaseStringUTFChars(checksum, c);
     return op_result(env, "backup_import", ("checksum=" + s + " slot=" + str_of(slot)),
                      save_backup_import_json(s.c_str(), static_cast<int>(slot)));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeBackupDelete(JNIEnv* env, jclass, jstring checksum) {
+#if QOL_KERNEL_ONLY
+    (void)checksum;
+    return kernel_only_result(env);
+#else
     const char* c = checksum != nullptr ? env->GetStringUTFChars(checksum, nullptr) : nullptr;
     std::string s = c != nullptr ? c : "";
     if (c != nullptr) env->ReleaseStringUTFChars(checksum, c);
     return op_result(env, "backup_delete", ("checksum=" + s), save_backup_delete_json(s.c_str()));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -152,4 +183,3 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeRecoverAfterHiveBlock(JNIEnv* env, jclass) {
     return env->NewStringUTF(data_recover_after_hive_block().c_str());
 }
-

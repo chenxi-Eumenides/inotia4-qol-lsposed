@@ -12,6 +12,7 @@
 |---|---|---|---|
 | P0 | 校验脚本族与基线棘轮 | ✅ 完成 | `check_arch.py` 可运行；基线只允许收缩 |
 | P1 | `contracts/`、`infra/`、`game/` 骨架与最小诊断接口 | ✅ 完成 | VM-P1-02、VM-P1-03 |
+| K1 | kernel-complete：零业务插件 Debug 启动 + Debug device probe 机制验收 | ✅ Debug/probe 真机证据已取得；release 隔离未执行 | VM-K1-01、VM-K1-02；`docs/history/kernel-complete-20260922/` |
 | P2 | `simple_mode` 纵向样板 | ✅ 完成 | VM-P2-01 |
 | P3 | 资源事务、异步步进、回滚、在途归零、生命周期状态 | ✅ 完成 | VM-P3-01、VM-P3-02、VM-P3-03 |
 | P4 | 内置静态插件批量迁移 | 🔄 进行中；阶段 A、B、C 已完成，D1 已完成待收尾 | VM-P4-01..08、VM-43..46、VM-D1、VM-D2-01..04 |
@@ -43,7 +44,7 @@
 | legacy 目录和过渡映射 | `api/native`、`core/native`、根目录聚合文件及脚本 legacy 映射仍存在 | 各文件职责吸收到 `game/`、`infra/`、`plugins/` 或 `contracts/`；删除映射；边界负例确实失败；基线收缩 |
 | 插件私有越层与单一目标 | 仍有 legacy 私有 include；独立 target 不能覆盖全部宿主私有依赖 | 插件只 include `contracts/` 与自身目录；每个 target 独立编译并通过负例检查 |
 | `contracts` 业务入口 | `contracts/autosell.h` 仍有全局业务函数，部分消费者尚未转 capability / owner command | 改为 provider 函数表、Host SDK 或 owner capability 后删除全局入口；host 与架构检查通过 |
-| 内核装配证据不足 | host fixture 已存在，但 Debug/device probe 与零插件组合仍需独立验收 | 建立不进 release 的 probe；分别取得零插件、probe、release 隔离的 host 与真机证据 |
+| 内核装配证据不足 | K1 的零业务插件 Debug 与 device probe 真机证据已取得；release 构建及 release 隔离验收尚未执行 | 用户明确许可后执行 release 构建，确认 probe 未链接、未注册、未进入 release 清单，并补充 release 隔离证据 |
 | 引擎未闭合项 | VM-FIX-01 仍登记生产 `in_flight_enter/leave` wrapper 未接线，以及 required consumer 反序 blocked 无重试路径 | 接线并验证在途等待、补重试或明确无消费者时的可验证处理；更新受影响验收卡 |
 
 ## 4. 临时豁免与保留项
@@ -66,6 +67,7 @@
 ## 5. 验收指针
 
 - 已有阶段证据：VM-P1-02/03、VM-P2-01、VM-P3-01/02/03、VM-P4-01..08、VM-43..46、VM-FIX-01、VM-BOUNDARY。
+- 阶段 1 kernel-complete：VM-K1-01（零业务插件 Debug）与 VM-K1-02（Debug device probe）已取得 monster v29 真机证据；普通 Debug 已恢复。release 构建未执行，K1 不宣称 release PASS。
 - 待补行为证据：VM-P1-S2、VM-P6-01、VM-D1、VM-D2-01..04，以及 P5 出口插件卡。
 - `verification.md` 定义 PASS、NOT_ACCEPTED、BLOCKED 和证据要求；缺少真机日志时，不以 host、静态检查、Debug 构建或 API 成功替代。
 - `baseline.md`、`map.md` 为生成材料；`api-route-map.md` 为路由过程核对材料。本台账只引用其结果，不改写其生成口径。

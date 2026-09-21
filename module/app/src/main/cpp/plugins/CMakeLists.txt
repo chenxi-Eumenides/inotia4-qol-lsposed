@@ -13,6 +13,14 @@ foreach(plugin_cmake IN LISTS QOL_PLUGIN_CMAKE_FILES)
     get_filename_component(plugin_id "${plugin_dir}" NAME)
     set(plugin_target "qol_plugin_${plugin_id}")
 
+    if(plugin_id MATCHES "^device_probe_" AND NOT QOL_ENABLE_DEVICE_PROBE)
+        continue()
+    endif()
+    if(QOL_KERNEL_ONLY AND NOT plugin_id STREQUAL "device_probe_provider" AND
+       NOT plugin_id STREQUAL "device_probe_consumer")
+        continue()
+    endif()
+
     add_subdirectory("${plugin_dir}")
 
     if(NOT TARGET "${plugin_target}")

@@ -8,6 +8,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
+#if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
 #include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
@@ -26,6 +27,11 @@
 #include "plugins/stack_limit/plugin.h"
 #include "plugins/text_layer/plugin.h"
 #include "plugins/world_teleport/plugin.h"
+#endif
+#if QOL_ENABLE_DEVICE_PROBE
+#include "plugins/device_probe_consumer/plugin.h"
+#include "plugins/device_probe_provider/plugin.h"
+#endif
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
@@ -49,12 +55,16 @@ namespace qol::host {
 namespace {
 
 bool g_assembly_done = false;
+uint32_t g_registered_plugins = 0;
+uint32_t g_registration_failures = 0;
+uint32_t g_install_failures = 0;
 
 using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
 
 // 这里只收集描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
 // requires/provides 构建 capability DAG 并决定 install/publish 顺序。
 constexpr PluginDescriptorFn kPluginDescriptors[] = {
+#if !QOL_KERNEL_ONLY
     &features::attribute_quality::plugin_descriptor,
     &features::attribute_range_display::plugin_descriptor,
     &features::autosell::plugin_descriptor,
@@ -73,6 +83,12 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::stack_limit::plugin_descriptor,
     &features::text_layer::plugin_descriptor,
     &features::world_teleport::plugin_descriptor,
+#endif
+#if QOL_ENABLE_DEVICE_PROBE
+    &features::device_probe_provider::plugin_descriptor,
+    &features::device_probe_consumer::plugin_descriptor,
+#endif
+    nullptr,
 };
 
 using MechanismOutcome = qol::hooks::TxDeps::MechanismOutcome;
@@ -180,14 +196,23 @@ bool assembly_init() {
     infra::scheduler_add(infra::FramePoint::kLogicPre, &drain_commands_task, nullptr, 1, 0);
 
     // hook/unhook 原语过渡期取自 plugins/inventory_hooks；P5 迁往 patch/ 后改引 patch 层。
-    // native_hook_func/native_unhook_func 是机制原语的获取器（返回函数指针）；这里先取获取器
-    // 地址再调用：本处只是把机制原语注入宿主，不构成某个游戏符号的安装点（真实安装点在
-    // 插件描述符声明、由插件注册表执行），直接写调用式会被 check_resources 按文本
-    // `native_hook_func(` 识别成未登记资源安装，而基线棘轮只允许收缩。
-    NativeHookFunType (*hook_getter)() = native_hook_func;
-    NativeUnhookFunType (*unhook_getter)() = native_unhook_func;
-    const qol::hooks::NativeHookFn hook_fn = hook_getter();
-    const qol::hooks::NativeUnhookFn unhook_fn = unhook_getter();
+    // 本处只把机制原语注入宿主，不构成某个游戏符号的安装点。
+#if !QOL_KERNEL_ONLY
+    const auto hook_getter = native_hook_func;
+    const auto unhook_getter = native_unhook_func;
+#endif
+    const qol::hooks::NativeHookFn hook_fn =
+#if QOL_KERNEL_ONLY
+        nullptr;
+#else
+        hook_getter();
+#endif
+    const qol::hooks::NativeUnhookFn unhook_fn =
+#if QOL_KERNEL_ONLY
+        nullptr;
+#else
+        unhook_getter();
+#endif
     const HostDeps deps{
         &qol::game::resolve_hook_entry,
         hook_fn,
@@ -221,21 +246,36 @@ bool assembly_init() {
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
     for (PluginDescriptorFn descriptor_fn : kPluginDescriptors) {
+        if (descriptor_fn == nullptr) break;
         if (!register_plugin(descriptor_fn())) {
+            ++g_registration_failures;
             QOL_LOG_ERROR(QolDomain::kCore, "assembly: plugin descriptor registration failed");
             return false;
         }
+        ++g_registered_plugins;
     }
 
     // 启动期同步安装：此刻尚无帧源与在途回调，直接装完即就绪；运行期生命周期一律走事务。
     const int failed = install_all(deps);
+    g_install_failures = failed > 0 ? static_cast<uint32_t>(failed) : 0;
     if (failed != 0) {
-        QOL_LOG_WARN(QolDomain::kCore, "assembly: %d plugin(s) failed to install", failed);
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "assembly: registered=%u install_failed=%u kernel_only=%s",
+                     g_registered_plugins, g_install_failures,
+                     QOL_KERNEL_ONLY ? "true" : "false");
         return false;
     }
     g_assembly_done = true;
-    QOL_LOG_INFO(QolDomain::kCore, "assembly: all plugins ready");
+    QOL_LOG_INFO(QolDomain::kCore,
+                 "assembly: registered=%u install_failed=%u kernel_only=%s",
+                 g_registered_plugins, g_install_failures,
+                 QOL_KERNEL_ONLY ? "true" : "false");
     return true;
+}
+
+AssemblyReport assembly_report() {
+    return AssemblyReport{g_registered_plugins, g_registration_failures, g_install_failures,
+                          QOL_KERNEL_ONLY, g_assembly_done};
 }
 
 }  // namespace qol::host

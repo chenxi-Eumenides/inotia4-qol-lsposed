@@ -42,3 +42,9 @@ inline jstring op_result(JNIEnv* env, const char* op, const std::string& argstr,
     MOVE_LOG("[%s] args={%s} -> %s", op, argstr.c_str(), result.c_str());
     return env->NewStringUTF(result.c_str());
 }
+
+#if QOL_KERNEL_ONLY
+inline jstring kernel_only_result(JNIEnv* env) {
+    return env->NewStringUTF("{\"ok\":false,\"error\":\"kernel-only\"}");
+}
+#endif
