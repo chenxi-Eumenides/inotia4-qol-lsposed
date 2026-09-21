@@ -99,10 +99,10 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 3 && d.optional_count == 0 && d.provides_count == 0);
+    CHECK(d.requires_count == 2 && d.optional_count == 1 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
-    CHECK(std::strcmp(d.requires[2].id, "extension_bag") == 0);
+    CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup
 

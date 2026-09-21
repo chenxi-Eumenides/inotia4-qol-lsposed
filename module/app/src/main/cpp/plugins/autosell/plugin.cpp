@@ -38,6 +38,11 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
     {contracts::kInventoryActionCapabilityId,
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor}},
+};
+
+// extension_bag 的能力只在插件进入 enabled 时注册（其资源受配置门禁），故不能作为 required：
+// 否则配置关闭或启动早期就会把整个 autosell 判为 blocked。运行期按需查找，缺失时走降级路径。
+const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kExtensionBagCapabilityId,
      {contracts::kExtensionBagVersionMajor, contracts::kExtensionBagVersionMinor}},
 };
@@ -178,8 +183,8 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    3, kRequires,  // requires=attribute.quality + inventory.action + extension_bag
-    0, nullptr,   // optional_requires
+    2, kRequires,  // requires=attribute.quality + inventory.action
+    1, kOptionalRequires,  // optional=extension_bag（门禁提供者，缺失走降级）
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）
