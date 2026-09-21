@@ -37,7 +37,8 @@
 | **Android NDK** | 编译 native 数据访问层 | ✅ **r26d（26.3.11579264）**，**项目内 `tools/ndk/`**（瘦身至 2.0G，仅 ARM ABI） |
 | libxposed API（compileOnly） | LSPosed 现代 Xposed API（`io.github.libxposed:api:101.0.1`） | 📦 Gradle 依赖（项目内） |
 | AndServer 库 | 进程内 HTTP 服务 | 📦 Gradle 依赖（项目内） |
-| **NPatch（默认集成工具）** | 集成免 root 版 APK | ✅ `tools/lspatch/npatch-v1.0.7-741-release.jar`（v1.0.7）；LSPatch v0.6 / v1.2 保留备用，可 `--lspatch-jar` 指定 |
+| **LSPatch（默认且唯一支持的集成工具）** | 集成免 root 版 APK | ✅ `tools/lspatch/lspatch-v1.2-487-release.jar`（v1.2-487） |
+| **NPatch（已停用）** | 历史集成工具；脚本不再支持 | JAR 仍保留在 `tools/lspatch/`，仅供历史资料对照 |
 | **AOSP testkey（默认签名密钥）** | `scripts/patch-apk.sh` 默认签名证书 | ✅ `scripts/keys/aosp-testkey.bks`（AOSP 公开 testkey，CN=Android / android@android.com，SHA-256 `a40da80a…`），已入库 |
 
 ### D. 部署与验证链 ✅
@@ -87,21 +88,21 @@ scripts/build-release.sh
 scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.com2us.inotia4.qol.patched
 
 # ⑥ 按需生成集成版（本模块 APK → apk/game-apk/ 下各游戏 APK 的集成包）
-# 默认使用 NPatch（tools/lspatch/npatch-v1.0.7-741-release.jar，JAR 自带 BouncyCastle，脚本自动注册 BKS provider）。
+# 默认且唯一支持的集成工具为 LSPatch v1.2-487（tools/lspatch/lspatch-v1.2-487-release.jar）。
 # 用法：scripts/patch-apk.sh [选项] <模块 APK> [新包名]
 # 脚本遍历 apk/game-apk/ 下的每个 .apk（不含 history/ 子目录），逐个生成
-# output/<发布前缀>_npatched[_v<模块版本>].apk（LSPatch JAR 则为 _lspatched[_v<模块版本>]）；
+# output/<发布前缀>_lspatched[_v<模块版本>].apk；
 # 发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<日期>]。
 # <模块版本> 从 release 模块 APK 文件名（..._vX.Y.Z.apk）提取，debug 包不追加。
 scripts/patch-apk.sh <模块.apk>
-# 默认覆盖已有输出；生成前先清理 output/ 下旧 NPatch 产物（*npatch*.apk），保持输出目录干净。
+# 第二个位置参数保留解析但会直接报错退出：LSPatch 不支持修改输出 applicationId，始终保留游戏原包名。
+# 默认覆盖已有输出；生成前先清理 output/ 下旧 LSPatch 产物（*lspatch*.apk），保持输出目录干净。
 # 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks，已入库）签名输出：
 #   - 改版（盗版大修 / monster）本就由该 testkey 签名，集成版与其证书身份一致，可覆盖安装；
 #   - 原版由 Com2us 私钥签名（私钥不可得），集成版签名身份仍与原版不同，需先卸载原版。
-# 使用 LSPatch（v0.6 / v1.2）：
-scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar <模块.apk>
-# NPatch 支持修改输出 applicationId：第二个位置参数传新包名；模块构建时需把新包名加入 targetPackages：
-scripts/patch-apk.sh <模块.apk> com.com2us.inotia4.qol.patched
+# 如需显式指定另一份 LSPatch JAR：
+scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-487-release.jar <模块.apk>
+# 不要传入新包名；该参数会返回 exit 2，并显示「LSPatch 不支持新包名」。
 # signature bypass 按需显式设置；不要未经验证启用 level 3。
 scripts/patch-apk.sh --sigbypasslv 2 <模块.apk>
 
@@ -134,29 +135,27 @@ curl -s http://<设备IP>:8088/api/ui/screen
 
 > `targetPackages` 默认只有原版游戏包名。需要让同一个 LSPosed 模块覆盖多个包时，使用
 > `-PtargetPackages=pkg.one,pkg.two`；构建会生成多行 `META-INF/xposed/scope.list`，并让运行时只在这些包中初始化。
-> 包名必须是合法 Android applicationId。NPatch 改 applicationId（`patch-apk.sh` 的第二个位置参数）只改输出 APK 的 manifest/applicationId，原游戏 dex 中的类名和资源 ID 不变；因此新包名必须同时通过 `-PtargetPackages` 加入模块构建并重新构建，不能只修改 APK 文件名。该游戏的资源表仍保留原资源 namespace，模块已在改包名进程中兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
+> `targetPackages` 中的包名必须是合法 Android applicationId。LSPatch 集成始终保留游戏原包名；需要让同一个 LSPosed 模块覆盖多个包时，仍须通过 `-PtargetPackages` 加入模块构建并重新构建，不能靠 `patch-apk.sh` 的集成步骤改包名。该游戏的资源表仍保留原资源 namespace，模块已兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
 
 > 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
 
-> 该游戏的原 Manifest 声明了 `C2D_MESSAGE` 自定义权限。独立包名输出会在 NPatch 完成后自动移除这项冲突声明，并使用默认的 AOSP testkey 重新签名；不要手工修改 NPatch 输出 APK，否则会破坏 APK 签名。指定新包名的流程仍保留 NPatch 默认的原 APK 签名绕过阶段，只有 Manifest 后处理阶段才执行重签名。
-
 > **默认签名密钥**：`scripts/patch-apk.sh` 用 `scripts/keys/aosp-testkey.bks`（AOSP 公开 testkey）签名，
-> 证书 SHA-256 为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`。NPatch 对所有 keystore
-> 都用 `KeyStore.getInstance("BKS")`，因此该文件必须是 BKS 格式。该密钥为公开测试密钥、非机密，已入库。
+> 证书 SHA-256 为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`。LSPatch
+> CLI 接收该 BKS keystore 的路径、密码、alias 和 key password；该密钥为公开测试密钥、非机密，已入库。
 > 如需重建（例如更换上游 testkey）：
 > ```bash
 > # 1) 取得 AOSP testkey（公开）
 > curl -fsSL -o testkey.pk8   https://raw.githubusercontent.com/aosp-mirror/platform_build/main/target/product/security/testkey.pk8
 > curl -fsSL -o testkey.x509.pem https://raw.githubusercontent.com/aosp-mirror/platform_build/main/target/product/security/testkey.x509.pem
-> # 2) pk8 -> PKCS12 -> BKS（BKS 需要 JAR 内自带的 BouncyCastle）
+> # 2) pk8 -> PKCS12 -> BKS（当前 LSPatch JAR 内包含 BouncyCastle provider）
 > openssl pkcs8 -inform DER -in testkey.pk8 -nocrypt -out testkey.pem
 > openssl pkcs12 -export -inkey testkey.pem -in testkey.x509.pem -name testkey -out testkey.p12 -passout pass:123456
 > keytool -importkeystore -noprompt -srckeystore testkey.p12 -srcstoretype PKCS12 -srcstorepass 123456 -srcalias testkey -srckeypass 123456 \
 >   -destkeystore scripts/keys/aosp-testkey.bks -deststoretype BKS -deststorepass 123456 -destalias testkey -destkeypass 123456 \
->   -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath tools/lspatch/npatch-v1.0.7-741-release.jar
+>   -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath tools/lspatch/lspatch-v1.2-487-release.jar
 > # 3) 校验指纹应为 A4:0D:A8:0A:...
 > keytool -list -v -keystore scripts/keys/aosp-testkey.bks -storetype BKS -storepass 123456 -alias testkey \
->   -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath tools/lspatch/npatch-v1.0.7-741-release.jar
+>   -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath tools/lspatch/lspatch-v1.2-487-release.jar
 > ```
 
 ### 3.2 Release 流程（仅用户明确要求时执行）
@@ -170,15 +169,15 @@ curl -s http://<设备IP>:8088/api/ui/screen
    `output/inotia4_qol_lsposed_release_v<version>.apk`。脚本对 Gradle 未签名的 release 产物执行
    zipalign + apksigner 签名，密钥为 AGP 默认 debug keystore（`~/.android/debug.keystore`，
    `CN=Android Debug`），与 debug 包同证书，debug/release 可直接覆盖安装。
-3. **生成 3 个 NPatch 集成版**：把 3 个游戏 APK 放入 `apk/game-apk/`，执行
+3. **生成 3 个 LSPatch 集成版**：把 3 个游戏 APK 放入 `apk/game-apk/`，执行
    `scripts/patch-apk.sh <release 模块.apk>`（不传新包名，保留游戏原包名）；脚本遍历 `apk/game-apk/*.apk`，
    直接按发布名输出到 `output/`（`<模块版本>` 由脚本从 release 模块 APK 文件名提取，带 `v` 前缀，如 `v0.7.7`；
-   **版本号位于 `npatched` 之后**，无需再手动改名）：
-   - 原版：`Inotia4_v<游戏版本>_original_npatched_<模块版本>.apk`
-   - 大修版：`Inotia4_v<游戏版本>_overhaul_<日期>_npatched_<模块版本>.apk`
-   - monster 版：`Inotia4_v<游戏版本>_monster_<子版本>_npatched_<模块版本>.apk`
-   - 示例（模块 `v0.7.7`）：`Inotia4_v1.3.2_original_npatched_v0.7.7.apk`、
-     `Inotia4_v1.3.2_overhaul_20260810_npatched_v0.7.7.apk`、`Inotia4_v1.3.2_monster_v25_npatched_v0.7.7.apk`
+   **版本号位于 `lspatched` 之后**，无需再手动改名）：
+   - 原版：`Inotia4_v<游戏版本>_original_lspatched_<模块版本>.apk`
+   - 大修版：`Inotia4_v<游戏版本>_overhaul_<日期>_lspatched_<模块版本>.apk`
+   - monster 版：`Inotia4_v<游戏版本>_monster_<子版本>_lspatched_<模块版本>.apk`
+   - 示例（模块 `v0.7.7`）：`Inotia4_v1.3.2_original_lspatched_v0.7.7.apk`、
+     `Inotia4_v1.3.2_overhaul_20260810_lspatched_v0.7.7.apk`、`Inotia4_v1.3.2_monster_v25_lspatched_v0.7.7.apk`
 4. **生成 release 说明文本并交用户确认**：整理覆盖「上一个版本 → 当前版本」的全部改动（新增 / 优化 /
    修复 / 发布文件 / 致谢）作为 release notes，先提交给用户确认；**确认后才执行后续推送与发布**，
    未确认不得 `git push` 或创建 Release。
@@ -186,14 +185,15 @@ curl -s http://<设备IP>:8088/api/ui/screen
 6. **发布 Release**：`gh release create v<version> <4 个 APK> --title v<version> --notes-file <说明>`。
 7. **附件命名（强制）**：GitHub CLI 上传的附件名必须全 ASCII、不得含中文；4 个附件命名固定为：
    - 模块：`inotia4_qol_lsposed_release_v<模块版本>.apk`
-   - 集成：`Inotia4_v<游戏版本>_{original|overhaul|monster}[_<日期或子版本>]_npatched_v<模块版本>.apk`
-   版本号均位于 `npatched`/`release` 之后，且与 release 模块 APK 的版本一致；先核对上一次
+   - 集成：`Inotia4_v<游戏版本>_{original|overhaul|monster}[_<日期或子版本>]_lspatched_v<模块版本>.apk`
+   版本号均位于 `lspatched`/`release` 之后，且与 release 模块 APK 的版本一致；先核对上一次
    发布（`gh release view <上一个 tag> --json assets`）的命名再上传。
-> 体积说明（2026-09-04 实测）：独立包名 APK 约 92MB，比普通包名（约 52MB）大 40MB。原因是 NPatch 用 ZIP 重叠条目让内嵌的 `assets/npatch/origin.apk`（46MB 原包副本）与宿主数据共享存储，而删除冲突权限的 unzip/zip 重打包和 apksigner 重签名会把重叠条目物化成两份独立数据。92MB 是当前唯一稳定形态。
+> 历史说明：约 92MB 的独立包名 APK 体积与 NPatch 的改包名流程相关；该流程已停用，不适用于当前 LSPatch 集成输出。
 >
 > LSPatch 集成模式会把模块嵌入目标 APK，生成的 APK 不需要 LSPosed 或 LSPatch Manager 常驻；更换模块必须重新 patch。脚本输出固定写入 `output/`，并在完成后打印每个产物的 SHA-256 和成功/失败汇总。
 >
-> 上游 JingMatrix/LSPatch 当前最新稳定版为 **v1.2**（2026-08-23），发行页提供 `lspatch-v1.2-487-release.jar`。v1.0 起运行时基于 Vector 并使用 modern libxposed API 102；本项目模块按 API 101 编译，因此脚本支持通过 `--lspatch-jar` 试用新版本，但不自动覆盖项目内 v0.6。正式切换前必须验证模块加载、native 库加载和 API 服务启动。
+> 当前唯一支持的集成工具为上游 JingMatrix/LSPatch **v1.2-487**，JAR 为 `tools/lspatch/lspatch-v1.2-487-release.jar`。LSPatch
+> v1.0 起运行时基于 Vector 并使用 modern libxposed API 102；本项目模块按 API 101 编译，集成 APK 仍需验证模块加载、native 库加载和 API 服务启动。
 >
 > 下载地址：[LSPatch v1.2 Release](https://github.com/JingMatrix/LSPatch/releases/tag/v1.2)。项目当前目标游戏为 ARM-only，集成 APK 仍需在 ARM64 真机验证。
 
@@ -250,7 +250,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 |---|---|---|
 | `scripts/build-debug.sh` | Debug 构建并复制为 `output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha前12>.apk`，只保留最新 3 份；无参默认 `--offline` | 日常开发与验证；改 Kotlin/Native/构建配置后 |
 | `scripts/build-release.sh` | Release 构建：zipalign 后用默认 debug 签名（`~/.android/debug.keystore`，`CN=Android Debug`，与 debug 包同证书）签名，产物 `output/inotia4_qol_lsposed_release_v<版本>.apk`，只保留最新 2 份；签名关闭 v4（`--v4-signing-enabled false`，不产出 `.idsig`）；版本号取自 `build.gradle.kts` | 仅用户明确要求 release 时（§3.2） |
-| `scripts/patch-apk.sh` | 遍历 `apk/game-apk/*.apk` 逐个生成 NPatch/LSPatch 集成包到 `output/`（发布前缀全 ASCII，版本号附在 `_npatched` 之后） | release 流程第 3 步；更换模块后重出集成包 |
+| `scripts/patch-apk.sh` | 遍历 `apk/game-apk/*.apk` 逐个生成 LSPatch 集成包到 `output/`（发布前缀全 ASCII，版本号附在 `_lspatched` 之后） | release 流程第 3 步；更换模块后重出集成包 |
 
 #### 3.4.2 检查与验证
 
@@ -283,7 +283,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 | 脚本 | 用途（含用法） | 运行时机 |
 |---|---|---|
 | `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）与实时触摸检测（无参数） | 仅用于启动弹窗前置；其余流程一律走 HTTP API |
-| `scripts/maintenance/strip-conflicting-permission.py` | 从二进制 `AndroidManifest.xml` 移除指定自定义权限 | 由 `patch-apk.sh` 在指定新包名时自动调用，不单独运行 |
+| `scripts/maintenance/strip-conflicting-permission.py` | 从二进制 `AndroidManifest.xml` 移除指定自定义权限 | 已停用；该工具属于已删除的 NPatch 改包名后处理流程，`patch-apk.sh` 不再调用 |
 | `scripts/web/build_map_arranger.py` | 由静态地图数据生成 `web/map-arranger.html` | 地图静态数据更新后、需重新生成地图排版页时 |
 | `scripts/analysis/frida/save0-repair-patch.js` | 一次性存档修复 patch（含 opcode 校验，保存成功后必须重启进程） | 仅在处理对应存档损坏时使用；执行前须按当前 `libgame.so` 反汇编核对 opcode |
 
@@ -331,7 +331,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 | Java | ✅ OpenJDK 17.0.19（已切换默认，原 1.8 弃用） |
 | python-frida | ✅ 17.7.2（CLI 未装，可选） |
 | Android SDK | ✅ `/opt/android-sdk/`：platforms/android-34 + build-tools/37.0.0 + platform-tools |
-| LSPatch | ✅ 项目内 v0.6（`java -jar` 可运行）；上游最新稳定版 v1.2，尚未替换并入项目 |
+| LSPatch | ✅ 项目内 v1.2-487（`tools/lspatch/lspatch-v1.2-487-release.jar`，`java -jar` 可运行） |
 | APK 解码 | ✅ `apktool d` 成功，输出至 `apk/decoded/` |
 
 ## 5. 环境相关已知待办

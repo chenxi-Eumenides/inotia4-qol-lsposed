@@ -2,7 +2,7 @@
 
 《艾诺迪亚4》（Inotia 4）的 LSPosed 模块，以 Xposed 形式注入游戏本体（游戏零修改），提供多项体验优化（QOL）改动，并把游戏运行时数据与操作通过 HTTP API 导出，供外部程序或 AI 读取与操控。
 
-另提供免 root 的 NPatch 集成包。
+另提供免 root 的 LSPatch 集成包。
 
 > 请支持正版！《艾诺迪亚4》已上架 Steam。
 
@@ -70,9 +70,9 @@
    `com.com2us.inotia4.normal.freefull.google.global.android.common`。
 3. 重启游戏。
 
-### 方式二：免 root 集成包（NPatch）
+### 方式二：免 root 集成包（LSPatch）
 
-1. 从 Releases 下载与你的游戏版本对应的 `*_npatched_v*.apk`。
+1. 从 Releases 下载与你的游戏版本对应的 `*_lspatched_v*.apk`。
 2. 直接覆盖安装（改版与集成包同签名可直接覆盖；原版由 Com2us 签名，需先卸载原版，请注意备份存档）。
 3. 启动游戏即可。
 
