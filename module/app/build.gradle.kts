@@ -55,8 +55,8 @@ android {
         // 27 = LSPosed 官方最低（Android 8.1）；依赖 io.github.libxposed:api:101.0.1 自身要求 26。
         minSdk = 27
         targetSdk = 34
-    versionCode = 192
-    versionName = "0.7.13"
+    versionCode = 193
+    versionName = "0.7.14"
 
         externalNativeBuild {
             cmake {
