@@ -6,7 +6,7 @@
 // game_memory_accessible 恒真；未纳入本 target 的两个槽解析器给出保守桩。
 
 #include "contracts/extension_bag.h"
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/ui_equip.h"

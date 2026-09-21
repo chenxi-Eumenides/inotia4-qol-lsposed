@@ -3,7 +3,7 @@
 #include "api/native/game_ui.h"
 
 #include "game_access.h"
-#include "game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "core/native/extension_bag_port.h"
 #include "core/native/frame_task.h"
 

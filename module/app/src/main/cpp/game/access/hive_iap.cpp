@@ -1,7 +1,7 @@
 #include "game/access/hive_iap.h"
 
 #include "game_access.h"
-#include "game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 // op_ok/op_err 响应信封物理仍在 core/native/game_ops_common.cpp（过渡期归类 infra）；
 // 依赖矩阵禁止 game → infra，故本层仅前置声明两入口、链接期解析（与项目既有

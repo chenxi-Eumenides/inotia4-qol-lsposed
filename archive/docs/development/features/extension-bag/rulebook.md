@@ -125,7 +125,7 @@
 ### 1.2 物理槽编码
 
 1. `INVEN_FindItemSlot` 的 ABI 是 `int(void*, int8_t*)`，符号源登记在
-   `data/native/game_symbols.h:391` 和 `data/native/game_symbols.h:626`。
+   `game/symbols/game_symbols.h:391` 和 `game/symbols/game_symbols.h:626`。
 2. 原版编码为 `(bag << 5) | slot`；解码是 `bag = encoded >> 5`、`slot = encoded & 0x1f`。
 3. 该编码是原版物理槽编码，不是扩展逻辑引用；当前边界以本节和 `game_symbols.h` 为准。
 4. 输出参数是 `int8_t*`，原版路径按一字节写回；调用链存在 `uxtb`/字节截断语义，
@@ -511,7 +511,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 - **规则一句话**：详情装备、确认使用和相关角色操作必须通过 `F_GET_MENU_CHARACTER_VMA` 获取当前菜单角色，不能固定角色 0。
 - **为什么**：`extension_menu_character()` 解析并调用当前菜单角色函数（`extension_bag_equip.inc:8-18`），确认使用在 `:713-729` 使用它。
 - **典型破坏方式**：给队员 A 打开详情却把物品装备/使用到队员 B。
-- **验证锚**：无锚-待补；源码 `data/native/game_symbols.h:312-316`。
+- **验证锚**：无锚-待补；源码 `game/symbols/game_symbols.h:312-316`。
 
 ### R-25 persist 顺序必须遵守事务所有权顺序
 

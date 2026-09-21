@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 #include <jni.h>
 #include <cstdint>

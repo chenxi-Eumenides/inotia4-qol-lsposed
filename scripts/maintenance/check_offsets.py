@@ -3,7 +3,8 @@
 
 规则：
 - offsets_symbols_header（结构性阻止）：非 game 层的文件禁止 include
-  `game_symbols.h` / `symbol_registry.h` / `symbol_resolver.h`；
+  `game/symbols/game_symbols.h` / `game/symbols/symbol_registry.h` /
+  `game/symbols/symbol_resolver.h`；
 - offsets_bare_address（文本扫描）：非 game 层的源码行禁止出现明显裸地址——
   1. `g_base` / `image_base` / `base` 后跟 `+ 0x...` 的十六进制字面量；
   2. `F_/G_/C_/I_/O_/S_/M_` 前缀且名称含 `VMA`/`ADDR`/`OFFSET` 的常量被赋值为十六进制；
@@ -30,8 +31,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arch_common as ac  # noqa: E402
 
-# 规则 1：符号头的 basename（game 层内部互相引用允许）
-_SYMBOL_HEADERS = frozenset({"game_symbols.h", "symbol_registry.h", "symbol_resolver.h"})
+# 规则 1：符号头路径（game 层内部互相引用允许）
+_SYMBOL_HEADER_PATHS = frozenset(
+    {
+        "game/symbols/game_symbols.h",
+        "game/symbols/symbol_registry.h",
+        "game/symbols/symbol_resolver.h",
+    }
+)
 
 # 规则 2.1：基址加十六进制字面量
 _BASE_ADD_RE = re.compile(r"\b(?:g_base|image_base|base)\s*\+\s*0x[0-9a-fA-F]+")
@@ -73,7 +80,7 @@ def main() -> int:
         # 规则 1：非 game 层禁止 include 符号头
         if src_layer != "game":
             for target in graph.includes_of(rel):
-                if Path(target).name in _SYMBOL_HEADERS:
+                if target in _SYMBOL_HEADER_PATHS:
                     violations.append(
                         ac.Violation(
                             "offsets_symbols_header", rel, target, f"{src_layer} 层引用符号头"

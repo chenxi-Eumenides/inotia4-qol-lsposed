@@ -73,7 +73,7 @@ def allows(src_layer: str, dst_layer: str) -> bool:
 
 # --------------------------------------------------------------------------
 # 重构期映射：现存 legacy 路径 → 目标层或迁移期标签。
-# 说明：这些表不是架构例外。core/、api/、data/ 被七目录吸收后删除对应映射；
+# 说明：这些表不是架构例外。core/、api/ 被七目录吸收后删除对应映射；
 # 清除条件是目录内文件全部迁入目标目录、include 与构建边界通过校验，并完成基线收缩。
 # --------------------------------------------------------------------------
 
@@ -156,8 +156,6 @@ def _classify_transition(rel: str) -> str:
         return "unknown"
     if rel.startswith("bridge/native/"):
         return "host"
-    if rel.startswith("data/native/"):
-        return "game"
     if rel.startswith("core/native/"):
         name = rel.rsplit("/", 1)[1]
         return _CORE_OVERRIDES.get(name, "infra")

@@ -109,7 +109,7 @@ uint16_t item_category(void* item) {
     return static_cast<uint16_t>(category);
 }
 
-// 是否可堆叠（ITEMCLASSBASE[category*stride+6] bit0；口径与 data/native/item_class.h 一致）。
+// 是否可堆叠（ITEMCLASSBASE[category*stride+6] bit0；口径与 game/read/item_class.h 一致）。
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
     if (item == nullptr || g_game == nullptr || g_game->read_only.item.is_real_equip == nullptr ||

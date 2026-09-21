@@ -10,7 +10,7 @@
 #include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
 #include "contracts/events.h"
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "game_access.h"
 #include "game_state.h"
 #include "infra/events.h"

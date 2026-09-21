@@ -51,7 +51,7 @@
 
 ### 3.1 物品与选项数据结构
 
-来源：`module/app/src/main/cpp/data/native/game_symbols.h`（项目权威常量）+ 本次反汇编复核。
+来源：`module/app/src/main/cpp/game/symbols/game_symbols.h`（项目权威常量）+ 本次反汇编复核。
 
 | 常量 | 偏移 | 语义 |
 |---|---|---|
@@ -201,7 +201,7 @@ feature/attribute_range/range_provider.inc         动态范围解析（按类�
 - 代码结构规范：`../architecture.md`。
 - 游戏 UI 与注入能力：`../../reference/game/ui.md`、`../../reference/game/ui-kit.md`。
 - 物品字段契约：`../../reference/api-reference.md` Inventory 段。
-- 数据与符号：`module/app/src/main/cpp/data/native/game_symbols.h`、`symbol_registry.h`。
+- 数据与符号：`module/app/src/main/cpp/game/symbols/game_symbols.h`、`symbol_registry.h`。
 - 待办：`../planning/backlog.md`（P2「宝石随机属性优秀程度标注」）。
 
 ## 9. 可行性测试记录（2026-09-12，真机 192.168.3.54 / 大修版）

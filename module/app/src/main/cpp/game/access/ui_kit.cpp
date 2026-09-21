@@ -1,7 +1,7 @@
 #include "game/access/ui_kit.h"
 
 #include "game_access.h"
-#include "game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 #include <cstring>
 

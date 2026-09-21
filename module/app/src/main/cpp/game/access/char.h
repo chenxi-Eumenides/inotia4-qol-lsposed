@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 // 游戏层：角色对象语义化访问（ARCHITECTURE.md §5）。
 // 偏移常量与 fn_* 游戏函数指针收口在本层；上层只调用语义函数，不出现裸偏移/裸地址。

@@ -30,7 +30,8 @@ target_include_directories(host_tests PRIVATE
     ${CPP_DIR}
     ${CPP_DIR}/api/native
     ${CPP_DIR}/core/native
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 
@@ -292,7 +293,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -307,7 +308,8 @@ add_executable(plugin_registry_tests
 target_include_directories(plugin_registry_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(plugin_registry_tests PRIVATE cxx_std_17)
@@ -341,7 +343,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
@@ -357,7 +359,8 @@ add_executable(plugin_lifecycle_tests
 target_include_directories(plugin_lifecycle_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(plugin_lifecycle_tests PRIVATE cxx_std_17)
@@ -375,7 +378,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
@@ -391,7 +394,8 @@ add_executable(capability_lifecycle_tests
 target_include_directories(capability_lifecycle_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(capability_lifecycle_tests PRIVATE cxx_std_17)
@@ -407,12 +411,13 @@ add_executable(patch_layer_tests
     ${CPP_DIR}/patch/instr_patch.cpp
     ${CPP_DIR}/patch/ptr_slot.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
 )
 target_include_directories(patch_layer_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(patch_layer_tests PRIVATE cxx_std_17)
@@ -423,14 +428,15 @@ add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
 add_executable(extension_bag_contract_tests
     test_extension_bag_contract.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
 )
 target_include_directories(extension_bag_contract_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(extension_bag_contract_tests PRIVATE cxx_std_17)
@@ -447,7 +453,6 @@ add_executable(hooks_popup_state_tests
 )
 target_include_directories(hooks_popup_state_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(hooks_popup_state_tests PRIVATE cxx_std_17)
@@ -661,7 +666,8 @@ add_executable(host_adapter_tests
 target_include_directories(host_adapter_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(host_adapter_tests PRIVATE cxx_std_17)
@@ -689,7 +695,6 @@ add_executable(ui_adapter_tests
 target_include_directories(ui_adapter_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(ui_adapter_tests PRIVATE cxx_std_17)
@@ -726,11 +731,12 @@ add_executable(stack_limit_plugin_tests
     ${CPP_DIR}/plugins/stack_limit/plugin.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/data/native/item_class.cpp
+    ${CPP_DIR}/game/read/item_class.cpp
 )
 target_include_directories(stack_limit_plugin_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/data/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(stack_limit_plugin_tests PRIVATE cxx_std_17)

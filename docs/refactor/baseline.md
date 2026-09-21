@@ -173,31 +173,31 @@
 - `layer_direction|core/native/game_cache.cpp|api/native/game_inventory.h|infra → legacy/inventory`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_party.h|infra → legacy/party`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → legacy/world`
-- `layer_direction|core/native/game_cache.cpp|data/native/game_symbols.h|infra → game`
+- `layer_direction|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_access.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_state.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game_system.h|infra → legacy/system`
-- `layer_direction|core/native/game_json.cpp|data/native/game_symbols.h|infra → game`
+- `layer_direction|core/native/game_json.cpp|game/symbols/game_symbols.h|infra → game`
 - `layer_direction|core/native/game_json.cpp|game_access.h|infra → game`
 - `layer_direction|core/native/game_variant.cpp|core/native/qol_log.h|game → infra`
 - `layer_direction|core/native/save_enter.cpp|core/native/call_patch.h|infra → patch`
-- `layer_direction|core/native/save_enter.cpp|data/native/game_symbols.h|infra → game`
+- `layer_direction|core/native/save_enter.cpp|game/symbols/game_symbols.h|infra → game`
 - `layer_direction|core/native/save_enter.cpp|game_access.h|infra → game`
 - …（其余 12 条省略）
 
 ### offsets_symbols_header（11 条）
 
-- `offsets_symbols_header|core/native/game_cache.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/game_json.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/game_nav.cpp|data/native/game_symbols.h|legacy/world 层引用符号头`
-- `offsets_symbols_header|core/native/inventory_trade.cpp|data/native/game_symbols.h|legacy/inventory 层引用符号头`
-- `offsets_symbols_header|core/native/save_enter.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/save_exit.cpp|data/native/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|plugins/custom_recipe/feature.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
-- `offsets_symbols_header|plugins/custom_recipe/table.cpp|data/native/game_symbols.h|plugins/custom_recipe 层引用符号头`
-- `offsets_symbols_header|plugins/extension_bag/extension_bag_geometry.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
-- `offsets_symbols_header|plugins/extension_bag/game_ui_virtbag.cpp|data/native/game_symbols.h|plugins/extension_bag 层引用符号头`
-- `offsets_symbols_header|plugins/inventory_hooks/inventory_hook_stage4.cpp|data/native/game_symbols.h|plugins/inventory_hooks 层引用符号头`
+- `offsets_symbols_header|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|core/native/game_json.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|core/native/game_nav.cpp|game/symbols/game_symbols.h|legacy/world 层引用符号头`
+- `offsets_symbols_header|core/native/inventory_trade.cpp|game/symbols/game_symbols.h|legacy/inventory 层引用符号头`
+- `offsets_symbols_header|core/native/save_enter.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|core/native/save_exit.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+- `offsets_symbols_header|plugins/custom_recipe/feature.cpp|game/symbols/game_symbols.h|plugins/custom_recipe 层引用符号头`
+- `offsets_symbols_header|plugins/custom_recipe/table.cpp|game/symbols/game_symbols.h|plugins/custom_recipe 层引用符号头`
+- `offsets_symbols_header|plugins/extension_bag/extension_bag_geometry.cpp|game/symbols/game_symbols.h|plugins/extension_bag 层引用符号头`
+- `offsets_symbols_header|plugins/extension_bag/game_ui_virtbag.cpp|game/symbols/game_symbols.h|plugins/extension_bag 层引用符号头`
+- `offsets_symbols_header|plugins/inventory_hooks/inventory_hook_stage4.cpp|game/symbols/game_symbols.h|plugins/inventory_hooks 层引用符号头`
 
 ### resource_unknown_symbol（2 条）
 

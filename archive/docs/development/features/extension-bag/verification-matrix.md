@@ -12,7 +12,7 @@
 
 * `VM-01` 起为真机用例号；每张卡只有一个主用例号，复合操作用同一用例中的编号步骤区分阶段。
 * 原版物理袋为 `0..5`，普通交易目标为 `0..4`，任务袋 `5` 只保留原版语义；扩展逻辑袋对外为 `6..10`、内部为 `0..4`。
-* VMA 只从 `data/native/game_symbols.h` 反查；域文件不新增裸地址。卡片中的 VMA 是验收定位，不改变调用 ABI。
+* VMA 只从 `game/symbols/game_symbols.h` 反查；域文件不新增裸地址。卡片中的 VMA 是验收定位，不改变调用 ABI。
 * `Host` 表示可运行的当前测试；`真机` 表示唯一设备 `<设备序列号>` 的行为证据；源码锚不能替代真机结果。
 * API 面遵循 `docs/reference/api-reference.md`：库存读写使用 `/api/item/inventory*`，扩展袋并入 `bag=6..10`；视图控制仍是 `/api/debug/extension_bag/*` 的开发期能力。
 

@@ -11,7 +11,7 @@
 #include <cstring>
 
 #include "contracts/plugin.h"
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
 

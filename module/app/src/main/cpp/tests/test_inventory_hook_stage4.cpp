@@ -1,7 +1,7 @@
 #include "plugins/inventory_hooks/inventory_hook_stage4.h"
 #include "plugins/extension_bag/extension_bag_equip_rules.h"
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 #include <cstdint>
 #include <cstdio>

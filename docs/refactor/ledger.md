@@ -70,8 +70,8 @@
 
 **基线未覆盖、但审阅已核验成立的债务与目标设计问题**（P0 新登记，详表见 `layers.md` §五）：
 
-1. **插件 legacy 私有 include 19 文件**（`core/native/**`、`data/native/**`、根部裸名头）——因过渡规则被 `allows()` 放行，**当前不在任何违规计数内**（P3 清除）。
-2. **`arch_common.py` 过渡规则**：目标层仅保留七个目录；插件只允许依赖 `contracts/` 与自身目录；`_ROOT_OVERRIDES`、`_CORE_OVERRIDES`、`_TARGET_PREFIXES` 仍为 legacy `core/`、`api/`、`data/` 的迁移映射。映射清除条件：对应 legacy 目录内文件全部吸收到七个目标目录，插件 include/link 校验与基线收缩完成后删除。
+1. **插件 legacy 私有 include 19 文件**（`core/native/**`、`game/read/**`、`game/symbols/**`、根部裸名头）——因过渡规则被 `allows()` 放行，**当前不在任何违规计数内**（P3 清除）。
+2. **`arch_common.py` 过渡规则**：目标层仅保留七个目录；插件只允许依赖 `contracts/` 与自身目录；`_ROOT_OVERRIDES`、`_CORE_OVERRIDES` 仍为 legacy `core/`、`api/` 的迁移映射。映射清除条件：对应 legacy 目录内文件全部吸收到七个目标目录，插件 include/link 校验与基线收缩完成后删除。
 3. **单一 `gamebridge` target**：无独立插件 target，无法证明插件可独立编译/不链接宿主私有符号（P3）。
 4. **`QolGameHostExtraApi` 过宽**（15 处 `extra.*` 注入）——目标设计问题（P4 拆分）。
 5. **`contracts` 全局业务函数**（`autosell.h:44-46`）仍绕过 capability；`stack_limit.h` 的两个全局函数已在 P1-B5c 删除。**`host/core_patches` 把 S2 与 hub 混在同 owner/reason**已在 P1 收口。
@@ -188,7 +188,7 @@ U11 未覆盖项：扩展背包控件树与拖放、齿轮贴图 raw、`save_bac
 | 边界与重复编译 | ✅ 已验证 | `simple_mode` 的宿主头负例编译失败；构建目标源清单确认 3 个插件源只属于 `qol_plugin_simple_mode`，未重复进入 `gamebridge` |
 | 行为验收 | 不适用 | 本批只调整构建结构，行为零变化；不新增受影响 VM-B 卡，不安装真机 |
 
-**插件边界合规现状（P0 修正）**：口径必须分开陈述——**目录前缀口径**（`game/ infra/ hooks/ patch/ host/` 与跨插件）为 **0**；**legacy 口径**（`core/native/**`、`data/native/**`、根部裸名头）仍有 **19 个文件**未清（逐文件见 `layers.md` §1.6）。因此此前"17/17 合规"的表述**不成立**，属审阅 P3（≈C7）清除目标。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-BOUNDARY：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。C1–C5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
+**插件边界合规现状（P0 修正）**：口径必须分开陈述——**目录前缀口径**（`game/ infra/ hooks/ patch/ host/` 与跨插件）为 **0**；**私有路径口径**（`core/native/**`、`game/read/**`、`game/symbols/**`、根部裸名头）仍有 **19 个文件**未清（逐文件见 `layers.md` §1.6）。因此此前"17/17 合规"的表述**不成立**，属审阅 P3（≈C7）清除目标。本批提交：`e7bccdf`(autosell) `8bf097f`(store 容器级 ABI) `cb63edd`(save_backup) `5ac1503`(extension_bag) `6bceda5`(inventory_hooks) `ca1430c`(基线行号受控重定位) `b5bd605`(EB `UiRect` 别名 / Android 构建修复) `130a4b1`(assembly provider 顺序 / autosell blocked 回归)。**真机 smoke 通过**（VM-BOUNDARY：18 项全绿、0 异常、无 FATAL；EB/craft 门禁两态、quest 生命周期往返均正常）。C1–C5 的**完整行为面**（各插件功能细则）仍按各自 VM 卡待补；本轮只覆盖启动状态与门禁/生命周期面。
 
 **插件边界合规现状（P0 修正）**：目录前缀口径 **0**；legacy 口径 **19 文件未清**（同上）。故"plugins → game/infra/hooks 迁移债已清偿"**不成立**——基线内仍有层方向 32 条、符号/裸地址 9 条、资源 3 条。剩余债务＝legacy include 清偿（P3）+ 引擎级未闭合项（`verification.md` VM-FIX-01）+ C6/C7 范围。
 
@@ -281,7 +281,7 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | facade provider | ✅ 已落地（host-only） | provider 在 `plugin_install` 成功后驻留、`plugin_deactivate` 注销；`on_disabled` 只清 999 有效态；gate 关闭保留原始语义，gate 开且原子组未满足时 effective/写路径返回 `kQolErrNotReady`；未知类别与未就绪路径不写默认 out |
 | `core_patches` | ✅ 已收窄 | 仅保留 `P_HUB_LOGIN_SKIP` 与 monster 特征扫描；S2 由 assembly 期 `stack_limit` 安装 |
 | getter/写路径 | ⚠️ 已登记缺口 | ADR-0009 §999 清单中的 `ITEM_GetCumulateCount`、`INVEN_ConsumeItem`、`INVEN_SaveItem`、`INVEN_MoveItem`、`INVEN_SaveItemDirect`、`ITEMSYSTEM_Divide`、`INVEN_RemoveItemData` 尚未全部切到 facade/999 声明式资源；B2 与读侧同批迁移 |
-| 消费者 | ⬜ B2 | 本批按约束不修改 `api/native`、`core/native`、`data/native`、`extension_bag`、`inventory_hooks`；其写 wrapper 缺口见 B2 |
+| 消费者 | ⬜ B2 | 本批按约束不修改 `api/native`、`core/native`、`game/read`、`extension_bag`、`inventory_hooks`；其写 wrapper 缺口见 B2 |
 | 验收 | ⬜ 真机待 B4 | host 断言已补；行为面仍需 VM-B 真机证据，未因 host/build 通过而宣称接受 |
 
 ### P1-B3/B4：extension_bag model 与 host 测试去 codec
@@ -329,7 +329,7 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 | 目标层 | ✅ 已收紧 | `BASE_LAYERS` 仅含 `contracts/game/infra/hooks/patch/plugins/host`；不存在的目标层不再进入统计 |
 | 插件边界 | ✅ 已收紧 | `plugin_boundary` 单独统计并纳入基线棘轮；插件只允许 include `contracts/` 与自身目录 |
 | 未知层 | ✅ 已收紧 | 七个目标目录内无法归类为 `unknown_layer` 硬失败；legacy 未映射路径保留警告口径 |
-| 过渡映射 | ⚠️ 保留 | legacy `core/`、`api/`、`data/` 吸收完成、通过 include/link 校验且基线收缩后删除 |
+| 过渡映射 | ⚠️ 保留 | legacy `core/`、`api/` 吸收完成、通过 include/link 校验且基线收缩后删除 |
 | 反例证据 | ⬜ 待完成 | `game/access/char.h` 与另一插件头的临时 include 必须分别使 `check_arch.py` 以 `plugin_boundary` 非零退出 |
 
 ### P2-ABI-1：autosell 按需只读面增补
@@ -366,9 +366,9 @@ C4 插件源码未在 C4-0 修改；后续插件边界迁移必须只依赖本�
 
 | # | 过渡项 | 位置 | 清除条件 | 验收方式 |
 |---|---|---|---|---|
-| 1 | legacy native 目录 | `module/app/src/main/cpp/{core,api,data}/` | 各文件职责分别吸收到 `game/`、`infra/`、`plugins/`、`contracts/` 后目录清空 | `check_arch.py` 无对应 legacy 边、目录删除、基线条目移除 |
+| 1 | legacy native 目录 | `module/app/src/main/cpp/{core,api}/` | 各文件职责分别吸收到 `game/`、`infra/`、`plugins/`、`contracts/` 后目录清空 | `check_arch.py` 无对应 legacy 边、目录删除、基线条目移除 |
 | 2 | 脚本 legacy 过渡映射 | `scripts/maintenance/arch_common.py` 的 `_ROOT_OVERRIDES`/`_CORE_OVERRIDES`/`_TARGET_PREFIXES` 与 `domains` 放行 | legacy 目录吸收完成、插件 include/link 校验通过、基线收缩后删除映射，`unknown_layer` 收紧为硬失败 | 删除后 `check_arch.py` 全绿且边界负例非零退出 |
 | 3 | contracts 过渡入口 | 除 `contracts/item_count.h` 外仍存在的迁移期头（`module_save_port.h`、`popup_enter_alias.h`、`in_flight.h`、`inventory_action.h`、`sell_price.h` 等） | 每个入口的消费者切到 Host SDK / Game Host 函数表或 owner capability 后删除头文件 | 迁移后对应插件不再 include 该头；host 测试与 `check_arch.py` 全绿 |
-| 4 | 宿主侧遗留消费者 | `api/native/**`、`core/native/**`、`data/native/**` 中消费插件 capability 的代码 | 消费者迁入对应 owner 插件或改经 Game Host API 后删除 legacy 文件 | 迁移后对应文件删除、调用点 grep 清零 |
+| 4 | 宿主侧遗留消费者 | `api/native/**`、`core/native/**`、`game/read/**` 中消费插件 capability 的代码 | 消费者迁入对应 owner 插件或改经 Game Host API 后删除 legacy 文件 | 迁移后对应文件删除、调用点 grep 清零 |
 | 5 | Kotlin 路由业务 | `module/app/src/main/java/com/inotia4/qol/api/controller/**`（23 个 controller 的业务实现） | 路由语义下沉 native `core.api`，Kotlin 只保留 AndServer 传输适配；冻结路径/方法/成功响应不变 | `/api/system/routes` owner 表无重复/遗漏；既有路由回归兼容 |
 | 6 | `contracts/autosell.h` 全局函数 | `contracts/autosell.h` | 改为 provider 函数表或 Host SDK 面后删除全局函数 | `check_arch.py` 与 host 测试全绿 |

@@ -9,7 +9,7 @@
 #include "core/native/save_enter.h"
 #include "core/native/save_exit.h"
 #include "contracts/game_host.h"
-#include "data/native/item_class.h"
+#include "game/read/item_class.h"
 
 #include <cstdint>
 #include <cstdio>

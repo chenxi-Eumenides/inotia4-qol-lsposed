@@ -16,7 +16,7 @@
 | 队伍闸门 | `CHAR_Move+0x168` | `bl CHAR_GetPartyIndex(blocker)` | BL 重定向到模块 wrapper `push_all_party_filter` |
 | 站立闸门 | `CHAR_Move+0x180` | `cbz w0, <推动分支外>` | `NOP`（`ARM64_NOP_WORD`） |
 
-常量集中在 `data/native/game_symbols.h`（`F_CHAR_MOVE_VMA`、`CHAR_MOVE_PUSH_PARTY_BL_OFF/WORD`、`CHAR_MOVE_PUSH_STAND_CBZ_OFF/WORD`、`ARM64_NOP_WORD`），域文件不写裸偏移。
+常量集中在 `game/symbols/game_symbols.h`（`F_CHAR_MOVE_VMA`、`CHAR_MOVE_PUSH_PARTY_BL_OFF/WORD`、`CHAR_MOVE_PUSH_STAND_CBZ_OFF/WORD`、`ARM64_NOP_WORD`），域文件不写裸偏移。
 
 **wrapper 资格矩阵**（`push_all_party_filter`，返回 `0` = 可推，`-1` = 不可推）：
 

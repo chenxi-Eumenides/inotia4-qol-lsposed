@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "game/access/popup_state.h"
 #include "game_access.h"
 

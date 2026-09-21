@@ -11,7 +11,7 @@
 #include "core/native/frame_task.h"
 #include "core/native/qol_log.h"
 #include "core/native/transition_dispatch.h"
-#include "game_tiles.h"
+#include "game/read/game_tiles.h"
 
 #include <cstdint>
 #include <vector>

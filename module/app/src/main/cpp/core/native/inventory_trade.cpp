@@ -12,7 +12,7 @@
 #include "contracts/sell_price.h"
 #include "game_access.h"
 #include "game_state.h"
-#include "game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "infra/capabilities.h"
 
 #include <cstdint>

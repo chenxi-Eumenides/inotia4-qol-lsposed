@@ -196,4 +196,4 @@ Lv5 黏液怪普攻直击「凯恩」：
 | `feature/simple_mode/simple_mode_rules.{h,cpp}` | 纯逻辑：阵营 → 倍率、整数缩放与钳制（host 可测） |
 | `feature/simple_mode/simple_mode.h` | 域入口：开关、状态 JSON、安装 |
 | `bridge/native/gamebridge_simple_mode.cpp` | JNI 薄层 |
-| `data/native/game_symbols.h` / `symbol_registry.h` / `game_access.{h,cpp}` / `game_access_globals.inc` | 5 个新符号的登记四处 |
+| `game/symbols/game_symbols.h` / `symbol_registry.h` / `game_access.{h,cpp}` / `game_access_globals.inc` | 5 个新符号的登记四处 |

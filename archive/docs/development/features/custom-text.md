@@ -108,4 +108,4 @@ UIMix 面板里同一个 wordId（35291）被三处复用，要求各不相同�
 | `feature/ui/game_ui_charinfo_zh.{h,cpp}` | 角色面板绘制窗口 → `kCharacterPanel` 作用域（不再持有文案与 GetText hook） |
 | `feature/craft_ui/craft_ui_hooks.cpp` | 配方按钮绘制窗口 → `kUimixRecipeButton` 作用域 |
 | `tests/test_module_text.cpp` | 表完整性 / 作用域矩阵 / 跨功能 id 同步 |
-| `data/native/game_symbols.h` | `F_UIMIX_BUTTON_RECIPE_DRAW_VMA = 0xbef40`（7 个构建 VMA 一致）+ typedef |
+| `game/symbols/game_symbols.h` | `F_UIMIX_BUTTON_RECIPE_DRAW_VMA = 0xbef40`（7 个构建 VMA 一致）+ typedef |

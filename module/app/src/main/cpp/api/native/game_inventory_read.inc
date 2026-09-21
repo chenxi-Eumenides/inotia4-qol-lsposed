@@ -87,7 +87,7 @@ void append_item_attrs(std::string& s, void* item) {
     s += "]";
 }
 
-// item_count_encoding / item_is_equip 已下沉至 data/native/item_class.{h,cpp}
+// item_count_encoding / item_is_equip 已下沉至 game/read/item_class.{h,cpp}
 // （声明经 game_inventory.h 引用）。
 
 int canonical_item_count(void* item) {

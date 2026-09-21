@@ -259,7 +259,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 拦截点：隐藏段的 wh4 读取函数 `sub_3f14`（`0x743f14`）用本机密钥调 `ENCRYPT_Process2(mode=1)` 解密外部 wh4；**双 8 位校验和不匹配 → 返回 -1 → 块 3 校验器 `0x7413b4` 返回 0**。导入的 wh4 由源设备密钥加密，在本机必然失败。
 - 缺失容忍：wh4 不存在时 `sub_3f14` 走 ENOENT 分支放行（返回 0），游戏会在下次成功读档后**自行重建**本机可用的同名 wh4（实测：重建版 md5 与导入版不同，且可正常再次进档）。
 - 模块对策：导入时按本机密钥逐个校验 wh4 容器，失败者不写盘（`development/features/save-backup.md` §5 第 7 步）；已真机验证"导入同一 bundle → 跳过 2 个 wh4 → `enter_slot(1)` 正常进入世界、角色与三人队伍完整"。
-- 变体/能力识别：模块用 `libgame.so` 校验值查离线表（生成脚本 `scripts/data/game_variant_table.py` → `data/native/game_variant_table.inc`），并以 `qol::game_feature_state()` 暴露"该构建是否具备个人仓库 / 内嵌写法 / 伴生文件机制"，供存档处理分支使用。
+- 变体/能力识别：模块用 `libgame.so` 校验值查离线表（生成脚本 `scripts/data/game_variant_table.py` → `game/variants/game_variant_table.inc`），并以 `qol::game_feature_state()` 暴露"该构建是否具备个人仓库 / 内嵌写法 / 伴生文件机制"，供存档处理分支使用。
 
 ## 15. 2026-09-15 同意页返回键语义与退出收尾崩溃
 

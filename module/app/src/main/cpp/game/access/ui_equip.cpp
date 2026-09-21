@@ -1,6 +1,6 @@
 #include "game/access/ui_equip.h"
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "game_access.h"
 
 namespace qol::game {

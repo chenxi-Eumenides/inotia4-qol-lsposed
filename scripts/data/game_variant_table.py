@@ -10,7 +10,7 @@
     apk/game-apk/history/*.xapk
 
 输出：
-    module/app/src/main/cpp/data/native/game_variant_table.inc
+    module/app/src/main/cpp/game/variants/game_variant_table.inc
 
 设计要点：
   * 主键为 arm64 `lib/arm64-v8a/libgame.so` 的 md5（16 字节）。
@@ -35,7 +35,7 @@ from pathlib import Path
 # 路径解析（本文件位于 <root>/scripts/data/）
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
-OUTPUT = ROOT / "module/app/src/main/cpp/data/native/game_variant_table.inc"
+OUTPUT = ROOT / "module/app/src/main/cpp/game/variants/game_variant_table.inc"
 
 INPUT_GLOBS = [
     "apk/game-apk/*.apk",

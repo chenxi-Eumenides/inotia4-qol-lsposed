@@ -5,7 +5,7 @@
 
 #include "game/clock.h"
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 #include <cstdint>
 

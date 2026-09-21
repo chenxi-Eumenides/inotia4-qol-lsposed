@@ -9,7 +9,7 @@
 #include "core/native/call_patch.h"
 #include "core/native/qol_log.h"
 #include "contracts/events.h"
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 #include "game_access.h"
 #include "infra/events.h"
 

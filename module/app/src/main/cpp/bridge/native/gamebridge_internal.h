@@ -18,7 +18,7 @@
 #include "game_system.h"
 #include "api/native/game_ui.h"
 #include "game_world.h"
-#include "game_tiles.h"
+#include "game/read/game_tiles.h"
 #include "game/access/hive_iap.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/core.ui/panels/settings.h"

@@ -486,7 +486,7 @@ const Def* def_for_mix_type(uint32_t mix_type); // mixType → 配方（非自�
 
 对外契约（C++ 与 Kotlin 两侧同时实现）：配置 key `customRecipeEnabled`（默认 `false`）；JNI `nativeSetCustomRecipeEnabled(Boolean): Boolean`；native `set_custom_recipe_enabled(bool)` / `custom_recipe_enabled()` / `custom_recipe_ui_install_if_ready()`；日志 domain `custom_recipe`。设置项 `{"customRecipeEnabled", "自定义配方", 2}`（`feature/ui/game_ui_settings.cpp`），安装入口已接入 `nativeInit` 序列（`bridge/native/gamebridge.cpp`）。
 
-新增游戏符号：`F_CONTROL_ITEM_GET_ITEM_VMA = 0xaada8`（已登记 `symbol_registry.h`，可名称解析）；`G_RECIPEBASE_DATA_VMA = 0x3019b0`、`G_RECIPEBASE_SIZE_VMA = 0x3019b8`、`G_RECIPEBASE_COUNT_VMA = 0x3019ba`、`G_MIXTUREBASE_DATA_VMA = 0x3019a0`、`G_MIXTUREBASE_SIZE_VMA = 0x3019a8`（无名 `.bss`，VMA 兜底，见 §7.12）；位域/槽常量 `UIMIX_SLOT_TARGET_ITEM = 0x40`、`UIMIX_SLOT_STUFF_NUM = 0xf0`、`UIMIX_STUFF_ENTRY_SIZE = 16`、`UIMIX_STUFF_ENTRY_ITEM_ID = 0`、`UIMIX_STUFF_ENTRY_HELD = 4`、`UIMIX_STUFF_ENTRY_NEED = 6`、`I_JEWEL_VALUE_WORD = 0x10`、`JEWEL_VALUE_MASK = 0x7FF`、`JEWEL_TYPE_SHIFT = 18`、`JEWEL_TYPE_MASK = 0x3F`、`I_TYPE_CATEGORY_SHIFT = 6`、`I_TYPE_CATEGORY_MASK = 0x3FF`（类别取法与既有 `data/native/item_class.h:39`、`feature/attribute_range/game_ui_attr_range.cpp:93` 一致）。角色等级复用既有 `fn_get_member`（`game_access.h:47`）+ `C_LEVEL`（`game_symbols.h:18`），未新增符号。
+新增游戏符号：`F_CONTROL_ITEM_GET_ITEM_VMA = 0xaada8`（已登记 `symbol_registry.h`，可名称解析）；`G_RECIPEBASE_DATA_VMA = 0x3019b0`、`G_RECIPEBASE_SIZE_VMA = 0x3019b8`、`G_RECIPEBASE_COUNT_VMA = 0x3019ba`、`G_MIXTUREBASE_DATA_VMA = 0x3019a0`、`G_MIXTUREBASE_SIZE_VMA = 0x3019a8`（无名 `.bss`，VMA 兜底，见 §7.12）；位域/槽常量 `UIMIX_SLOT_TARGET_ITEM = 0x40`、`UIMIX_SLOT_STUFF_NUM = 0xf0`、`UIMIX_STUFF_ENTRY_SIZE = 16`、`UIMIX_STUFF_ENTRY_ITEM_ID = 0`、`UIMIX_STUFF_ENTRY_HELD = 4`、`UIMIX_STUFF_ENTRY_NEED = 6`、`I_JEWEL_VALUE_WORD = 0x10`、`JEWEL_VALUE_MASK = 0x7FF`、`JEWEL_TYPE_SHIFT = 18`、`JEWEL_TYPE_MASK = 0x3F`、`I_TYPE_CATEGORY_SHIFT = 6`、`I_TYPE_CATEGORY_MASK = 0x3FF`（类别取法与既有 `game/read/item_class.h:39`、`feature/attribute_range/game_ui_attr_range.cpp:93` 一致）。角色等级复用既有 `fn_get_member`（`game_access.h:47`）+ `C_LEVEL`（`game_symbols.h:18`），未新增符号。
 
 与 §4 的偏差（均不改变语义）：
 
@@ -546,7 +546,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 | 收尾 | 照原版 `UIMix_StartMix` 成功序列：`UIMix_InitMixingState` → `UIMix_ResetStuffItemControl` → `UIMix_RefreshInvenItem` → `SOUNDSYSTEM_Play(9)` → 弹 106 |
 | 与 gemcraft 共存 | gemcraft 的合成 gate 是「3 格填满且同档 28..31 → 改写 `[+0x48]=12+(cat−28)`；填满但混档/超界 → 弹 98 拦截」⇒ **会先拦掉本模式**。故在其 gate **最前面**加一条：`custom_recipe_three_slot_mode_active()` 为真 → 直接 `call_orig` 返回；gemcraft 其余逻辑一律不动 |
 | 数量判定 | 上限与复核都用**游戏自带的类别持有总数** `INVEN_GetItemCount(category)@0x104260`（`fn_inven_get_item_count`）；判定式抽为 `custom_recipe_rules.{h,cpp}` 的 `slot_add_allowed(placed_slots, held_count)` 与 `stack_units_available(units, held_count)`（纯逻辑 + host 断言） |
-| 可堆叠判定 | `data/native/item_class.h` 的 `item_count_encoding(item) == kEncoded`（ITEMCLASSBASE `+6` bit0） |
+| 可堆叠判定 | `game/read/item_class.h` 的 `item_count_encoding(item) == kEncoded`（ITEMCLASSBASE `+6` bit0） |
 
 **硬约束**：本模式下放料与合成**都不转调原函数**；未命中或库存不足**绝不消耗**；关闭总开关后一律回落原版行为。
 
@@ -726,7 +726,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 - 需求：`idea.md` 第 7 项。
 - 依赖事实册：`gem-craft-optimization.md`、`attribute-range-display.md`。
 - 游戏机制：`../../reference/game/game-systems.md` §6.3 / §6.4 / §6.8。
-- 符号与常量：`module/app/src/main/cpp/data/native/game_symbols.h`、`symbol_registry.h`。
+- 符号与常量：`module/app/src/main/cpp/game/symbols/game_symbols.h`、`symbol_registry.h`。
 - 待办：`../planning/backlog.md`。
 
 ## 5. 隐式配方扩展（2026-09-16）
@@ -748,7 +748,7 @@ int material_count_for(int base_count, int grade, int level);  // ceil(base×gra
 
 - 通配符 `kAnySpecialEquipSlot = 0xFFFE`：该格接受任意「特殊装备」类别，判定由调用方经
   `match_three_slot(slots, is_special_equip)` 注入谓词（谓词为 `nullptr` 时该配方不命中，fail-closed）。
-  谓词实现走 `data/native/item_class.h` 的 `category_is_no_equip()`（记录 `+7` bit4），与
+  谓词实现走 `game/read/item_class.h` 的 `category_is_no_equip()`（记录 `+7` bit4），与
   `feature/special_equip` 放行的是同一组 26 条，不产生跨 feature 的呈现依赖。
 - `same_first_last = true`：槽 0 与槽 2 必须是**同一**类别（「两件相同」）。
 

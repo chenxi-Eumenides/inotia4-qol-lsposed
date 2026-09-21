@@ -2,8 +2,8 @@
 
 #include <cstring>
 
-#include "data/native/game_symbols.h"
-#include "data/native/item_class.h"
+#include "game/symbols/game_symbols.h"
+#include "game/read/item_class.h"
 #include "game_access.h"
 
 namespace qol::game {

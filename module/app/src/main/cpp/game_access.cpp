@@ -1,5 +1,5 @@
 #include "game_access.h"
-#include "symbol_resolver.h"
+#include "game/symbols/symbol_resolver.h"
 #include "game_system.h"
 #include "core/native/qol_log.h"
 #include "core/native/game_variant.h"
@@ -55,7 +55,7 @@ const char* symbol_name_for_macro(const char* macro) {
     if (macro == nullptr || macro[0] == '\0') return nullptr;
 #define SYM(macro_name, symbol) { #macro_name, #symbol },
     static const struct { const char* macro; const char* symbol; } kSymbolTable[] = {
-#include "symbol_registry.h"
+#include "game/symbols/symbol_registry.h"
     };
 #undef SYM
     for (const auto& e : kSymbolTable) {

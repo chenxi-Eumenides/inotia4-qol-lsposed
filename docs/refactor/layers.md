@@ -74,7 +74,7 @@
 | `access/hive_iap.*` | IAP 拦截后恢复（GOT 改写 + 调原版恢复状态） |
 | `clock.*` | 帧计数（GOT 取值，供宿主注入帧时钟） |
 
-**收口项**：`game/write`、`game/ops`、`game/variant` 未独立落地；变体表、`qol_log`、`module_save`、`save_enter/exit`、`stack_limit_state` 仍在遗留 `core/native`；`data/native/game_symbols.h` 待 C7 收口。
+**收口项**：`game/write`、`game/ops`、`game/variant` 未独立落地；变体表、`qol_log`、`module_save`、`save_enter/exit`、`stack_limit_state` 仍在遗留 `core/native`；`game/symbols/game_symbols.h` 待 C7 收口。
 
 ## 1.3 `infra/`（24）
 
@@ -140,7 +140,7 @@
 | 口径 | 结果 | 三态 |
 |---|---|---|
 | 带目录前缀 `(game\|infra\|hooks\|patch\|host)/` 与跨插件 include | **0** 条 | 当前事实（新架构前缀已无直引） |
-| legacy 路径：`core/native/**`、`data/native/**`、根部裸名头（`game_access.h` / `game_state.h` / `game_symbols.h` / `qol_log.h` / `game_ops_common.h` / `game_feature.h` / `inventory_trade.h` / `sell_price.h` / `save_enter.h` / `save_exit.h` / `game_ptr_hook.h` / `item_class.h`） | **19 个文件**（12 个去重头） | **迁移债**（宿主/legacy 私有面直引，待 P3 清除） |
+| legacy/私有路径：`core/native/**`、`game/read/**`、`game/symbols/**`、根部裸名头（`game_access.h` / `game_state.h` / `qol_log.h` / `game_ops_common.h` / `game_feature.h` / `inventory_trade.h` / `sell_price.h` / `save_enter.h` / `save_exit.h` / `game_ptr_hook.h`） | **19 个文件**（12 个去重头） | **迁移债**（宿主/私有面直引，待 P3 清除） |
 
 **当前事实（逐文件，共 19 个）**：`extension_bag/game_ui_virtbag.cpp`(10)、`inventory_hooks/native_inventory_hook.cpp`(6)、`core.ui/panels/settings.cpp`(6)、`autosell/scan.cpp`(6)、`save_backup/ui/panel.cpp`(5)、`save_backup/feature.cpp`(3)、`extension_bag/extension_bag_port.cpp`(3)、`extension_bag/extension_bag_geometry.cpp`(3)、`autosell/ui/panel.cpp`(3)、`inventory_hooks/inventory_hook_stage4.cpp`(2)、`autosell/view.cpp`(2)、`save_backup/plugin.cpp`(1)、`extension_bag/game_ui_virtbag.h`(1)、`extension_bag/extension_bag_store.inc`(1)、`extension_bag/extension_bag_persistence.cpp`(1)、`extension_bag/extension_bag_logging.h`(1)、`autosell/view.h`(1)、`autosell/store.cpp`(1)、`autosell/plugin.cpp`(1)。
 
@@ -249,7 +249,7 @@
 | `text_layer` | hooks, log, text_scope | — | plugin, text_layer |
 | `world_teleport` | capabilities, log, scheduler | — | plugin, ui_choice |
 
-**读法**：插件对宿主设施的**新架构访问面**（Host SDK / Game Host / contracts）见上表；但**尚有 19 个文件保留 legacy 私有 include**（`core/native/**`、`data/native/**`、根部裸名头，逐文件见 §1.6），故"全部插件只 include `contracts/` 与自身目录"**当前不成立**，属 P3（≈C7）清除目标。
+**读法**：插件对宿主设施的**新架构访问面**（Host SDK / Game Host / contracts）见上表；但**尚有 19 个文件保留私有路径 include**（`core/native/**`、`game/read/**`、`game/symbols/**`、根部裸名头，逐文件见 §1.6），故"全部插件只 include `contracts/` 与自身目录"**当前不成立**，属 P3（≈C7）清除目标。
 
 ## 3.3 组件 ↔ 组件（编译期 include 边，实测）
 

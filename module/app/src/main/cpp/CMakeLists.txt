@@ -68,7 +68,7 @@ add_library(gamebridge SHARED
     bridge/native/gamebridge_settings.cpp
     bridge/native/gamebridge_extension_bag.cpp
     game_access.cpp
-    data/native/symbol_resolver.cpp
+    game/symbols/symbol_resolver.cpp
     core/native/game_json.cpp
     core/native/game_ops_common.cpp
     core/native/grid_geometry.cpp
@@ -84,7 +84,7 @@ add_library(gamebridge SHARED
     api/native/game_save.cpp
     api/native/game_save_preflight.cpp
     game_system.cpp
-    data/native/game_tiles.cpp
+    game/read/game_tiles.cpp
     api/native/game_character.cpp
     api/native/game_party.cpp
     api/native/game_inventory.cpp
@@ -102,7 +102,8 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/extension_bag
     ${CMAKE_CURRENT_SOURCE_DIR}/api/native
     ${CMAKE_CURRENT_SOURCE_DIR}/core/native
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/native
+    ${CMAKE_CURRENT_SOURCE_DIR}/game/read
+    ${CMAKE_CURRENT_SOURCE_DIR}/game/symbols
 )
 add_subdirectory(plugins)
 target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
@@ -115,7 +116,7 @@ target_sources(gamebridge PRIVATE
     core/native/save_enter.cpp
     core/native/save_exit.cpp
     core/native/inventory_trade.cpp
-    data/native/item_class.cpp
+    game/read/item_class.cpp
 )
 
 # 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（P4-B3 迁移至 plugins/autosell）

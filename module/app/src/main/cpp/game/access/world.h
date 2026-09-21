@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 // 游戏层：世界/地图域语义化访问（ARCHITECTURE.md §5）。
 // MAPINFOBASE 记录数/记录、当前地图 id、地图名解析、切图调用、主控朝向、金币/弹窗/横幅

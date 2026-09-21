@@ -27,7 +27,7 @@
 新增 data 层只读原语（`game_state.{h,cpp}`），写入点全部改用：
 
 - `char_max_hp` / `char_max_mp`：直读 `[ch+C_MAX_HP]` / `[ch+C_MAX_MP]`（= `[ch+0x9c]` / `[ch+0xa0]`，属性数组 attr 0x1e/0x1f 的缓存槽），不调用 `CHAR_GetAttr`；缓存值 ≤0 时回退当前 `C_HP` / `C_MP`，保证世界未就绪时输出合理。
-- 常量 `C_MAX_HP` / `C_MAX_MP` 入 `data/native/game_symbols.h`（由 `C_ATTR + ATTR_MAX_HP/MP * 4` 推得，与 `CHAR_GetAttr` 同偏移体系）。
+- 常量 `C_MAX_HP` / `C_MAX_MP` 入 `game/symbols/game_symbols.h`（由 `C_ATTR + ATTR_MAX_HP/MP * 4` 推得，与 `CHAR_GetAttr` 同偏移体系）。
 - 写入点：`member_json`（`api/native/game_character.cpp`）、`build_player_json`（`game_system.cpp`）、`data_op_set_hp` / `data_op_set_mp` 全部改用该原语。
 
 ## 5. 同类排查（同一次调查）

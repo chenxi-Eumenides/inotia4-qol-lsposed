@@ -7,7 +7,7 @@
 ## 背景（事实，2026-09-19 实测）
 
 1. `contracts/stack_codec.h`（26 个 `constexpr`/`inline` 符号）同时承载：S2 位段编解码、99/999 策略、native bag marker、effective 视图、写回门控——被判混合职责（审阅 §8.5）。
-2. 该头有 **30 个消费者文件**：`plugins/extension_bag`（15）、`plugins/inventory_hooks`（4）、`core/native/inventory_trade.cpp`、`api/native/game_inventory*`、`data/native/item_class.*`、`tests/*`。
+2. 该头有 **30 个消费者文件**：`plugins/extension_bag`（15）、`plugins/inventory_hooks`（4）、`core/native/inventory_trade.cpp`、`api/native/game_inventory*`、`game/read/item_class.*`、`tests/*`。
 3. S2 布局补丁（2 条位段缩窄 + 10 条读重定向）由 `host/core_patches.cpp:40-62` 以 `owner="core"` 持有，在 `bridge_init` 内安装、失败即整体不就绪（boot-fatal）；6 条 clamp 已在 `plugins/stack_limit`（gate=`plugin.stack_limit.enabled`）。
 4. `host/plugin_registry.cpp` 的 `sync_plugin_resources` / `all_want`（:285–:425、:852–:898）对 `kCallPatch` fail-soft 资源**允许部分安装**，且在 `all_want` 为真时即调用 `on_enabled`（:817）——**无法表达"整组原子就绪才允许启用"**。
 
@@ -56,7 +56,7 @@ provider 驻留与功能启用是两个独立可观测维度：`/api/system/feat
 
 ### 宿主侧遗留消费者访问器（B2a 补充）
 
-`api/native`、`core/native`、`data/native` 的遗留消费者按层规则不能 include
+`api/native`、`core/native`、`game/read` 的遗留消费者按层规则不能 include
 `host/**`，因此新增 `contracts/item_count.h` 的 `item_count_api()`。它只返回只读的
 `const QolItemCountApi*` 函数表指针；provider 未驻留返回 `nullptr`，驻留后由同一 TU
 中的 facade 负责转发错误码。调用方对 `nullptr`/`kQolErrNotReady` 回落原版 getter，
@@ -119,7 +119,7 @@ provider 驻留与功能启用是两个独立可观测维度：`/api/system/feat
 
 | 批次 | 文件 | 替换方式 | 关键约束 |
 |---|---|---|---|
-| 1 读侧（8） | `api/native/game_inventory.{h,cpp}`、`game_inventory_{basic,read}.inc`、`data/native/item_class.{h,cpp}`、`inventory_hooks/inventory_hook_stage4.{h,cpp}` | codec → facade；三态经公共 POD；错误向上传递 | **批次 1+2 必须同一提交/构建**（防"读 S2、写原始"混合态） |
+| 1 读侧（8） | `api/native/game_inventory.{h,cpp}`、`game_inventory_{basic,read}.inc`、`game/read/item_class.{h,cpp}`、`inventory_hooks/inventory_hook_stage4.{h,cpp}` | codec → facade；三态经公共 POD；错误向上传递 | **批次 1+2 必须同一提交/构建**（防"读 S2、写原始"混合态） |
 | 2 写侧（16） | `core/native/inventory_trade.cpp`、`plugins/core.ui/panels/settings.cpp`、`extension_bag` 非 model 的 12 文件、`inventory_hooks/native_inventory_hook.{h,cpp}` | `effective_*`/全局 bool → `write_effective`/`writeback_needed`；marker 留 `extension_bag` 私有 | 同上 |
 | 3 模型层（3） | `model/virtual_bag_state.h`、`virtual_bag_state_json.inc`、`virtual_bag_transaction_rules.inc` | sidecar 永远 canonical S2；运行时视图经 facade；marker 私有化 | 与 1/2 同批验收 |
 | 4 测试（3） | `tests/test_host.cpp`、`test_infra_data.cpp`、`test_inventory_hook_stage4.cpp` | 公共面直测 → 私有实现/facade/错误码测试 | 仅 host 可先行，行为面仍需真机 |
@@ -142,7 +142,7 @@ provider 驻留与功能启用是两个独立可观测维度：`/api/system/feat
 | 批次 | 范围 | 约束 |
 |---|---|---|
 | **B1（本批）** | `stack_limit` 私有实现头、facade provider、999 原子资源组；S2 claims 从 `host/core_patches` 迁入，`core_patches` 仅保留 Hive 登录跳过与 monster 特征扫描 | 过渡期 `stack_codec_impl.h` 继续 include `contracts/stack_codec.h` 并转发符号；所有 codec 只有这一份实现来源。S2 在 assembly 期安装，不再由 boot 入口承担 boot-fatal；provider 在 install 后驻留，gate 关闭使用原始语义，gate 开但组未就绪时 `effective`/写路径返回 `kQolErrNotReady`，由调用方回落原版；未驻留/未知类别按错误码拒绝 |
-| **B2** | 消费者读侧与写侧同批切换到 `item_count` facade | 读写不得分批提交，避免出现读 S2、写原始的混合态；`api/native`、`core/native`、`data/native`、`extension_bag`、`inventory_hooks` 的现有 `stack_codec.h` include 在 B1 保持不变 |
+| **B2** | 消费者读侧与写侧同批切换到 `item_count` facade | 读写不得分批提交，避免出现读 S2、写原始的混合态；`api/native`、`core/native`、`game/read`、`extension_bag`、`inventory_hooks` 的现有 `stack_codec.h` include 在 B1 保持不变 |
 | **B3** | `extension_bag` model 与 marker 私有化 | canonical sidecar 始终使用 S2；native bag marker 留在 `extension_bag`，不进入 facade |
 | **B4** | 完整 host/VM 验证与消费者回归 | 覆盖原子组失败回滚、重试、能力/响应可见性及开关往返；行为面以 VM-B 真机证据为准 |
 | **B5** | 删除 `contracts/stack_codec.h`，并清除 `contracts/stack_limit.h` 的全局函数 | codec、策略常量与有效态完全留在 `stack_limit` 私有实现；消费者只经 facade/能力访问 |

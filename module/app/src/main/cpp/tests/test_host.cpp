@@ -17,7 +17,7 @@
 #include "game_json.h"
 #include "game_nav.h"
 #include "game_save_preflight.h"
-#include "game_tiles.h"
+#include "game/read/game_tiles.h"
 #include "core/native/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "core/native/extension_bag_port.h"
@@ -27,7 +27,7 @@
 #include "plugins/inventory_hooks/inventory_find_item_poc.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/world_teleport/rules.h"
-#include "../data/native/game_tiles.cpp"
+#include "../game/read/game_tiles.cpp"
 
 static int g_pass = 0;
 static int g_fail = 0;

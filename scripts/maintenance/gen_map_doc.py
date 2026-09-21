@@ -55,7 +55,7 @@ NEW_ARCH_DIRS = ("contracts", "game", "infra", "hooks", "patch", "plugins", "hos
 # 编译的完整源文件路径集合推断：host/plugin 类 target 会夹带 legacy 依赖
 # （如 `core/native/qol_log.cpp`），按路径启发式会被误判为 legacy。
 #
-# 反例：`test_infra_data` 的测试对象是 `core/native/frame_task` 与 `data/native/item_class`，
+# 反例：`test_infra_data` 的测试对象是 `core/native/frame_task` 与 `game/read/item_class`，
 # 仍属 legacy，故不进入映射。
 MECHANISM_HOST_TESTS: tuple[str, ...] = (
     "test_infra_snapshot",

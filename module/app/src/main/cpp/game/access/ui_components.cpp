@@ -1,6 +1,6 @@
 #include "game/access/ui_components.h"
 
-#include "game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 namespace {
 

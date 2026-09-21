@@ -269,9 +269,9 @@ native bag marker、effective 视图、写回门控和扩展背包相关判断�
 | 代表路径 | 当前事实 |
 |---|---|
 | `module/app/src/main/cpp/plugins/save_backup/feature.cpp:31-33` | include `core/native/game_feature.h`、`game_ops_common.h`、`qol_log.h` |
-| `module/app/src/main/cpp/plugins/autosell/view.cpp:5,8` | include `data/native/item_class.h` 和根部 `game_access.h` |
+| `module/app/src/main/cpp/plugins/autosell/view.cpp:5,8` | include `game/read/item_class.h` 和根部 `game_access.h` |
 | `module/app/src/main/cpp/plugins/autosell/scan.cpp:12-16` | include `core/native/inventory_trade.h`、日志和 save-enter/exit |
-| `module/app/src/main/cpp/plugins/inventory_hooks/inventory_hook_stage4.cpp:3-4` | include `core/native/sell_price.h`、`data/native/game_symbols.h` |
+| `module/app/src/main/cpp/plugins/inventory_hooks/inventory_hook_stage4.cpp:3-4` | include `core/native/sell_price.h`、`game/symbols/game_symbols.h` |
 | `module/app/src/main/cpp/plugins/save_backup/ui/panel.cpp:5-6` | include `core/native/game_ops_common.h`、`qol_log.h` |
 | `module/app/src/main/cpp/plugins/core.ui/panels/settings.cpp:4-10` | include `core/native` 与根部 `game_*` 私有实现 |
 | `module/app/src/main/cpp/plugins/extension_bag/game_ui_virtbag.cpp:3-22` | include `game_*`、`game_symbols.h` 与多个 `core/native` 端口 |
@@ -295,7 +295,7 @@ HEAD `7e77af0`（第 7 行），与本审阅基线 HEAD 不同，不能作为当
 
 ### 9.3 构建和 ABI 边界仍未独立
 `module/app/src/main/cpp/CMakeLists.txt:2-54` 只有一个 `gamebridge` shared target，且同时
-编译 bridge、legacy `core/native`、`api/native`、`data/native`、插件和新目录。单一 target
+编译 bridge、legacy `core/native`、`api/native`、`game/`、插件和新目录。单一 target
 无法证明插件可独立编译，也不能证明插件没有链接宿主私有实现。
 
 这属于迁移债；但“插件可外置”的目标要求必须有独立 target 或等价的强链接矩阵，否则
@@ -402,7 +402,7 @@ host kernel: game adapter + infra + hooks + patch + lifecycle executor
 
 ### P2：插件边界和独立构建
 
-- 逐项清除插件对 `core/native`、`data/native`、根部 legacy header、`game/infra/hooks/patch/host`
+- 逐项清除插件对 `core/native`、`game/`、根部 legacy header、`game/infra/hooks/patch/host`
   的 include；Game Host API/Host SDK 是唯一宿主访问面。
 - `check_layers` 对插件越层 include/link 改为硬失败；删除允许 `plugins → game/domains` 的过渡规则。
 - 为插件建立独立 CMake target 或等价的可证明链接边界，不能继续只依赖单一 `gamebridge` target。

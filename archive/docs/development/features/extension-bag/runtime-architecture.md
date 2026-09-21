@@ -191,7 +191,7 @@ JVM，注册函数只把 class 交给 feature，`nativeInit` 再执行 bridge、
 
 ### 2.1 入口和 VMA 对照
 
-以下 VMA 均由 `data/native/game_symbols.h` 当前行逐条打开核对；它们只用于当前
+以下 VMA 均由 `game/symbols/game_symbols.h` 当前行逐条打开核对；它们只用于当前
 版本事实、解析 fallback 和反汇编索引，正式调用走 `game_access`。
 
 | 函数 | 当前 VMA | 证据 |

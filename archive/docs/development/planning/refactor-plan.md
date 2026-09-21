@@ -12,7 +12,7 @@
 - [x] P1 第一阶段：扩展背包运行时文件已归入 `feature/extension_bag/`，纯模型/编码/所有权头文件已归入 `feature/extension_bag/model/`。
 - [x] P2 第一阶段：UI 相关 native 文件已归入 `feature/ui/`，CMake 和跨域 include 已同步。
 - [x] API 功能边界：原版信息/操作导出已建立独立 `api/` 边界，Kotlin Controller 已归入 `api/controller/`，不与模块增强 `feature/` 混合。
-- [x] Native API 边界：纯原版域已迁入 `api/native/`，共享原语已归入 `core/native/` 与 `data/native/`；混合域已完成职责拆分。
+- [x] Native API 边界：纯原版域已迁入 `api/native/`，共享原语已归入 `core/native/` 与 `game/`；混合域已完成职责拆分。
 - [x] P1：扩展背包运行时实现已按状态、持久化、事务、投影、绘制、输入、生命周期、装备和 API 拆分。
 - [x] P2：世界域和 JNI 边界按职责拆分（UI 设置页、世界域、JNI bridge 及剩余 Native 混合域已完成）。
 - [x] P3：API 内部 Kotlin Controller/Service 已按当前稳定职责组织；模块增强功能保持独立，不作为 API 业务实现。Kotlin 当前结构冻结，不再继续细拆。
@@ -52,7 +52,7 @@
 | `module/app/src/main/cpp/api/native/game_world.cpp` | 25 行 | 世界域职责已拆到 `.inc` 实现片段 |
 | `module/app/src/main/cpp/bridge/native/gamebridge.cpp` | 40 行 | JNI 导出已按职责拆分，主文件仅保留生命周期入口 |
 | `module/app/src/main/cpp/feature/ui/game_ui_settings.cpp` | 99 行 | UI 设置职责已拆到 `.inc` 实现片段 |
-| `module/app/src/main/cpp/data/native/game_symbols.h` | 714 行 | 游戏版本常量集中，按设计暂不拆散，保持单一来源 |
+| `module/app/src/main/cpp/game/symbols/game_symbols.h` | 714 行 | 游戏版本常量集中，按设计暂不拆散，保持单一来源 |
 | `module/app/src/main/java/com/inotia4/qol/service/info/InfoApiServiceCore.kt` | 500 行 | party/inventory/quest/ui/game 查询和公共快照组装仍集中，已拆出地图/佣兵/系统/商店查询 |
 | `module/app/src/main/java/com/inotia4/qol/service/action/ActionApiServiceCore.kt` | 110 行 | 接口适配；操作实现已按域迁入同目录，公共 attach/保存后处理位于 `ActionSupport.kt` |
 
