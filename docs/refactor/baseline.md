@@ -24,14 +24,14 @@
 | `contracts` | 29 |
 | `game` | 62 |
 | `hooks` | 10 |
-| `host` | 38 |
+| `host` | 40 |
 | `infra` | 39 |
 | `legacy/character` | 2 |
 | `legacy/dialog` | 4 |
 | `legacy/inventory` | 8 |
 | `legacy/party` | 2 |
 | `legacy/quest` | 2 |
-| `legacy/save` | 5 |
+| `legacy/save` | 3 |
 | `legacy/shop` | 2 |
 | `legacy/system` | 2 |
 | `legacy/ui` | 5 |
@@ -94,7 +94,6 @@
 | `game_party*` | legacy/party |
 | `game_quest*` | legacy/quest |
 | `game_save*` | legacy/save |
-| `game_save_preflight*` | legacy/save |
 | `game_shop*` | legacy/shop |
 | `game_ui*` | legacy/ui |
 | `game_world*` | legacy/world |
@@ -107,11 +106,11 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 96 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 97 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 39 |
+| `host` | `game` | 40 |
 | `host` | `infra` | 39 |
 | `host` | `contracts` | 23 |
 | `plugins/extension_bag` | `contracts` | 20 |

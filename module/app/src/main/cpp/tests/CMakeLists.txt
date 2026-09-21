@@ -20,7 +20,7 @@ add_executable(host_tests
     ${CPP_DIR}/infra/log/qol_log.cpp
     ${CPP_DIR}/game/json/game_json.cpp
     ${CPP_DIR}/game/nav/game_nav.cpp
-    ${CPP_DIR}/api/native/game_save_preflight.cpp
+    ${CPP_DIR}/host/save_preflight.cpp
     ${CPP_DIR}/plugins/save_backup/bundle.cpp
     ${CPP_DIR}/plugins/world_teleport/rules.cpp
 )

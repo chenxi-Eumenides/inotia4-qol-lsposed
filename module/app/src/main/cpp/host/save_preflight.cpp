@@ -1,8 +1,8 @@
-// game_save_preflight.cpp —— 存档预检纯逻辑（parse 域）。
+// save_preflight.cpp —— 存档预检纯逻辑（宿主层）。
 // 判决来源：原版 SAVE_LoadSaveSlot 写入的槽结构（docs/system/save.md §4），
 // 本文件只做字节 → 判决/JSON 的映射，不读存档文件、不调游戏函数。
 
-#include "game_save_preflight.h"
+#include "host/save_preflight.h"
 
 #include <cstddef>
 

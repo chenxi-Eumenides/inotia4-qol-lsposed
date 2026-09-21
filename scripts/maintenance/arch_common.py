@@ -58,6 +58,10 @@ def allows(src_layer: str, dst_layer: str) -> bool:
     if sb == "legacy":
         if db in {"contracts", "game", "infra"}:
             return True
+        if db == "host":
+            # game_save_preflight 是宿主层的纯逻辑判定；存档 API 仍在迁移期，
+            # 允许 legacy/save 通过这一稳定、零游戏依赖的宿主工具完成预检。
+            return src_layer == "legacy/save"
         if db == "legacy":
             # 旧路径仅保留迁移期兼容语义；域间水平互调仅 system 聚合方向允许。
             return src_layer == dst_layer or src_layer == "legacy/system"
@@ -88,7 +92,6 @@ _LEGACY_API_BY_STEM = {
     "game_ui": "ui",
     "game_shop": "shop",
     "game_save": "save",
-    "game_save_preflight": "save",
 }
 
 _ROOT_OVERRIDES = {

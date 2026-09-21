@@ -1,0 +1,170 @@
+# HTTP 路由三源映射表
+
+> 这是人工可读的分析产物，不是生成器输出。每行对应
+> `module/app/src/main/cpp/plugins/core.api/routes.inc` 的一条路由，共 143 条。
+> owner、`op_gated`、`lease` 以 native 路由表为准；Controller、Service 与
+> `NativeBridge` 以当前 Kotlin 源码为准；native 实现文件按 JNI 后的实际逻辑入口填写。
+> `—` 表示该层没有对应调用（例如纯 Kotlin 静态数据或占位路由）。加工列只记录响应
+> 经过的 `StaticData`、`NameInjector`、`UiActivityTracker` 或状态拼装；参数校验、日志和
+> `ControllerGuard` 不单独计为响应加工。
+
+## 映射表
+
+| method | path | owner | op_gated | lease | Kotlin Controller | Kotlin Service 方法 | NativeBridge 方法 | native 实现文件 | 响应是否含加工（StaticData/NameInjector/UiActivityTracker/state 拼装） |
+|---|---|---|---:|---:|---|---|---|---|---|
+| GET | `/api/feature/autosell/config` | autosell | 0 | 1 | AutoSellFeatureController.getConfig | — | `nativeAutoSellStatusJson` | `plugins/autosell/*` | — |
+| POST | `/api/feature/autosell/config` | autosell | 0 | 1 | AutoSellFeatureController.setConfig | — | `nativeSetAutoSellConfig`, `nativeAutoSellStatusJson` | `bridge/native/gamebridge_autosell.cpp`; `plugins/autosell/*` | — |
+| POST | `/api/character/grow/add_skill` | api.character | 0 | 1 | CharacterController.skill | `ActionApiServiceCore.learnSkill` → `CharacterActions.learnSkill` | `nativeOpLearnAction`, `nativeGetSkillsJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=skills` |
+| POST | `/api/character/grow/{role}/add_stat` | api.character | 0 | 1 | CharacterController.stat | `ActionApiServiceCore.addStat` → `CharacterActions.addStat` | `nativeOpAddStat` | `api/native/game_character.cpp` | — |
+| POST | `/api/character/grow/reset_stat` | api.character | 0 | 1 | CharacterController.statReset | `ActionApiServiceCore.statReset` → `CharacterActions.statReset` | `nativeOpStatReset`, `nativeGetPlayerJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/character/grow/reset_skill` | api.character | 0 | 1 | CharacterController.skillReset | `ActionApiServiceCore.skillReset` → `CharacterActions.skillReset` | `nativeOpSkillReset`, `nativeGetPlayerJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/character/combat/{role}/set_auto_attack` | api.character | 0 | 1 | CombatController.autoAttack | `ActionApiServiceCore.autoAttack` → `CharacterActions.autoAttack` | `nativeOpSetAutoAttack`, `nativeGetPartyJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| POST | `/api/character/combat/{role}/set_skill_usage` | api.character | 0 | 1 | CombatController.skillUsage | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/character/combat/switch_player` | api.character | 0 | 1 | CombatController.switchPlayer | `ActionApiServiceCore.switchPlayer` → `CharacterActions.switchPlayer` | `nativeOpSwitchPlayer`, `nativeGetPlayerJson` | `api/native/game_party.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/character/combat/{role}/cast_skill` | api.character | 0 | 1 | CombatController.cast | `ActionApiServiceCore.cast` → `CharacterActions.cast` | `nativeOpCast`, `nativeGetPartyJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| POST | `/api/character/combat/{role}/attack_target` | api.character | 0 | 1 | CombatController.attack | `ActionApiServiceCore.attack` → `CharacterActions.attack` | `nativeOpAttack`, `nativeGetPartyJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| POST | `/api/character/combat/{role}/stop_combat` | api.character | 0 | 1 | CombatController.stop | `ActionApiServiceCore.stopCombat` → `CharacterActions.stopCombat` | `nativeOpStopCombat`, `nativeGetPlayerJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| GET | `/api/config/list` | api.config | 0 | 1 | ConfigController.list | — | — | — | `ModuleConfig.toJson()`（纯 Kotlin） |
+| POST | `/api/config/set` | api.config | 0 | 1 | ConfigController.set | `ConfigApiService.applyOnChange` | `nativeSetStackLimitEnabled`, `nativeSetMoveMergeEnabled`, `nativeSetExtensionBagEnabled`, `nativeSetCustomRecipeEnabled`, `nativeSetAutoSellEnabled`, `nativeSetApiEnabled`, `nativeSetSimpleModeEnabled`, `nativeSetPushAllEnabled`, `nativeQolLogSetDebugEnabled` | `bridge/native/gamebridge_domain_operations.cpp`; `bridge/native/gamebridge_autosell.cpp`; `bridge/native/gamebridge.cpp` | `ModuleConfig` JSON + 配置变更结果 |
+| GET | `/api/world/map/id` | api.world | 0 | 1 | CurrentMapController.id | `InfoApiServiceCore.currentMapId` → `InfoMapQueries.id` | `nativeGetMapJson` | `core/native/game_cache.cpp` | `StaticData` 地图名 |
+| GET | `/api/world/map/exits` | api.world | 0 | 1 | CurrentMapController.exits | `InfoApiServiceCore.currentMapExits` → `InfoMapQueries.exits` | `nativeGetMapJson` | `core/native/game_cache.cpp` | `StaticData.mapExits` |
+| GET | `/api/world/map/units` | api.world | 0 | 1 | CurrentMapController.units | `InfoApiServiceCore.currentMapUnits` → `InfoMapQueries.units` | `nativeGetUnitsJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/world/map/enemies` | api.world | 0 | 1 | CurrentMapController.enemies | `InfoApiServiceCore.currentMapEnemies` → `InfoMapQueries.enemies` | `nativeGetEnemiesJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/world/map/interactives` | api.world | 0 | 1 | CurrentMapController.interactives | `InfoApiServiceCore.currentMapInteractives` → `InfoMapQueries.interactives` | `nativeGetInteractivesJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/world/map/drops` | api.world | 0 | 1 | CurrentMapController.drops | `InfoApiServiceCore.currentMapDrops` → `InfoMapQueries.drops` | `nativeGetDropsJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/world/map/distance` | api.world | 0 | 1 | CurrentMapController.distance | `InfoApiServiceCore.currentMapDistance` → `InfoMapQueries.distance` | `nativeDistanceJson` | `api/native/game_world.cpp` | — |
+| GET | `/api/world/maps/list` | api.world | 0 | 1 | DataController.mapList | — | — | — | `StaticData` MAPINFOBASE |
+| GET | `/api/world/maps/{map_id}` | api.world | 0 | 1 | DataController.mapDetail | — | — | — | `StaticData` MAPINFOBASE |
+| GET | `/api/world/maps/{map_id}/tiles` | api.world | 0 | 1 | DataController.mapTiles | — | — | — | `StaticData` maps/tiles.json |
+| GET | `/api/world/maps/{map_id}/exits` | api.world | 0 | 1 | DataController.mapExits | — | — | — | `StaticData.mapExits` |
+| GET | `/api/system/tables` | api.system | 0 | 1 | DataController.list | — | — | — | `StaticData` manifest.json |
+| GET | `/api/system/tables/{table}` | api.system | 0 | 1 | DataController.table | — | — | — | `StaticData` 表文件 |
+| GET | `/api/system/tables/{table}/search` | api.system | 0 | 1 | DataController.search | — | — | — | `StaticData` 表文件 + Kotlin 搜索 |
+| GET | `/api/system/tables/{table}/download` | api.system | 0 | 1 | DataController.download | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/system/tables/story-events` | api.system | 0 | 1 | DataController.events | — | — | — | `StaticData` reverse/events.json |
+| GET | `/api/system/tables/text` | api.system | 0 | 1 | DataController.text | — | — | — | `StaticData` text/{lang}.json |
+| GET | `/api/system/help` | api.system | 0 | 1 | DataController.help | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/system/download` | api.system | 0 | 1 | DataController.downloadAll | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/debug/ui` | api.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `api/native/game_ui.cpp` | — |
+| GET | `/api/debug/path` | api.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `api/native/game_world.cpp` | — |
+| GET | `/api/debug/item/raw` | api.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `api/native/game_inventory.cpp` | — |
+| POST | `/api/debug/settings-ui/inject` | core.ui | 0 | 1 | DebugController.settingsUiInject | `InfoApiServiceCore.settingsUiInject` → `InfoSystemQueries.settingsUiInject` | `nativeSettingsUiInject` | `plugins/core.ui/panels/settings.cpp` | — |
+| GET | `/api/debug/settings-ui/status` | core.ui | 0 | 1 | DebugController.settingsUiStatus | `InfoApiServiceCore.settingsUiStatus` → `InfoSystemQueries.settingsUiStatus` | `nativeSettingsUiStatus` | `plugins/core.ui/panels/settings.cpp` | — |
+| POST | `/api/debug/settings-ui/restore` | core.ui | 0 | 1 | DebugController.settingsUiRestore | `InfoApiServiceCore.settingsUiRestore` → `InfoSystemQueries.settingsUiRestore` | `nativeSettingsUiRestore` | `plugins/core.ui/panels/settings.cpp` | — |
+| POST | `/api/debug/settings-ui/open-option` | core.ui | 0 | 1 | DebugController.settingsUiOpenOption | `InfoApiServiceCore.settingsUiOpenOption` → `InfoSystemQueries.settingsUiOpenOption` | `nativeSettingsUiOpenOption` | `plugins/core.ui/panels/settings.cpp` | — |
+| POST | `/api/debug/settings-ui/open-panel` | core.ui | 0 | 1 | DebugController.settingsUiOpenPanel | `InfoApiServiceCore.settingsUiOpenPanel` → `InfoSystemQueries.settingsUiOpenPanel` | `nativeSettingsUiOpenPanel` | `plugins/core.ui/panels/settings.cpp` | — |
+| GET | `/api/debug/extension_bag/status` | extension_bag | 0 | 1 | DebugController.extensionBagStatus | `InfoApiServiceCore.extensionBagStatusJson` → `InfoSystemQueries.extensionBagStatusJson` | `nativeExtensionBagStatusJson` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/enter_view` | extension_bag | 0 | 1 | DebugController.extensionBagEnterView | `ActionApiServiceCore.extensionBagEnterView` → `ExtensionBagActions.extensionBagEnterView` | `nativeOpExtensionBagEnterView` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/exit_view` | extension_bag | 0 | 1 | DebugController.extensionBagExitView | `ActionApiServiceCore.extensionBagExitView` → `ExtensionBagActions.extensionBagExitView` | `nativeOpExtensionBagExitView` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/unequip` | extension_bag | 0 | 1 | DebugController.extensionBagUnequip | `ActionApiServiceCore.extensionBagUnequip` → `ExtensionBagActions.extensionBagUnequip` | `nativeOpExtensionBagUnequip` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/select_bag` | extension_bag | 0 | 1 | DebugController.extensionBagSelectBag | `ActionApiServiceCore.extensionBagSelectBag` → `ExtensionBagActions.extensionBagSelectBag` | `nativeOpExtensionBagSelectBag` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/click_item` | extension_bag | 0 | 1 | DebugController.extensionBagClickItem | `ActionApiServiceCore.extensionBagClickItem` → `ExtensionBagActions.extensionBagClickItem` | `nativeOpExtensionBagClickItem` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/equip` | extension_bag | 0 | 1 | DebugController.extensionBagEquip | `InfoApiServiceCore.extensionBagTestEquip` → `InfoSystemQueries.extensionBagTestEquip` | `nativeExtensionBagTestEquip` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/item` | extension_bag | 0 | 1 | DebugController.extensionBagItem | `InfoApiServiceCore.extensionBagTestItem` → `InfoSystemQueries.extensionBagTestItem` | `nativeExtensionBagTestItem` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| GET | `/api/system/events` | api.system | 0 | 1 | EventsController.events | `InfoApiServiceCore.events` | `nativeGetEventsJson` | `game_system.cpp` | — |
+| GET | `/api/system/game` | api.system | 0 | 1 | GameController.composite | `InfoApiServiceCore.game` | `nativeGetSnapshotJson`, `nativeGetPlayerJson`, `nativeSaveSlotsJson`, `nativeCurrentSaveSlot`, `nativeGetBaseAddr` | `game_system.cpp`; `core/native/game_cache.cpp`; `api/native/game_save.cpp` | `state=snapshot+info 拼装` |
+| GET | `/api/system/snapshot` | api.system | 0 | 1 | GameController.snapshot | `InfoApiServiceCore.gameSnapshot` | `nativeGetSnapshotJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `NameInjector.withItemNames` |
+| GET | `/api/system/info` | api.system | 0 | 1 | GameController.info | `InfoApiServiceCore.gameInfo` | `nativeSaveSlotsJson`, `nativeCurrentSaveSlot`, `nativeGetBaseAddr` | `api/native/game_save.cpp`; `bridge/native/gamebridge.cpp` | `state=save_slots/current_slot/config version 拼装` |
+| GET | `/api/system/game_frame` | api.system | 0 | 1 | GameController.frame | `InfoApiServiceCore.gameFrame` | `nativeGetFrameCount` | `game_system.cpp` | — |
+| GET | `/api/health` | core.api | 0 | 0 | HealthController.health | `InfoApiServiceCore.health` → `InfoSystemQueries.health` | `nativeGetVariantJson` | `bridge/native/gamebridge_variant.cpp`; `game/variants/game_variant.cpp` | `state=health envelope + variant 拼装` |
+| POST | `/api/item/inventory/use_item` | api.item | 0 | 1 | InventoryActionController.useItem | `ActionApiServiceCore.useItem` → `InventoryActions.useItem` | `nativeOpUseItem`, `nativeGetInventoryJson` | `api/native/game_inventory.cpp`; `core/native/game_cache.cpp` | `state=inventory` |
+| POST | `/api/item/inventory/accept_dice` | api.item | 0 | 1 | InventoryActionController.diceAccept | `ActionApiServiceCore.diceAccept` → `InventoryActions.diceAccept` | `nativeOpDiceAccept`, `nativeGetPlayerJson` | `api/native/game_inventory.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/item/inventory/reject_dice` | api.item | 0 | 1 | InventoryActionController.diceReject | `ActionApiServiceCore.diceReject` → `InventoryActions.diceReject` | `nativeOpDiceReject` | `api/native/game_inventory.cpp` | — |
+| POST | `/api/item/inventory/discard_item` | api.item | 0 | 1 | InventoryActionController.discard | `ActionApiServiceCore.discardItem` → `InventoryActions.discardItem` | `nativeOpDiscardItem`, `nativeGetInventoryJson` | `api/native/game_inventory.cpp`; `core/native/inventory_trade.cpp` | `state=inventory` |
+| POST | `/api/item/inventory/sell_item` | api.item | 0 | 1 | InventoryActionController.sell | `ActionApiServiceCore.sellItem` → `InventoryActions.sellItem` | `nativeOpSellItem`, `nativeGetInventoryJson` | `api/native/game_inventory.cpp`; `core/native/inventory_trade.cpp` | `state=inventory` |
+| POST | `/api/item/inventory/move_item` | api.item | 0 | 1 | InventoryActionController.move | `ActionApiServiceCore.moveItem` → `InventoryActions.moveItem` | `nativeOpMoveItem`, `nativeOpExtensionBagMoveItem`, `nativeGetInventoryJson` | `api/native/game_inventory.cpp`; `plugins/extension_bag/extension_bag_api.cpp` | 原版路径 `state=inventory`；扩展路径原样返回 |
+| POST | `/api/item/inventory/{role}/put_jewel` | api.item | 0 | 1 | InventoryActionController.jewel | `ActionApiServiceCore.jewel` → `InventoryActions.jewel` | `nativeOpJewel`, `nativeGetPartyJson` | `api/native/game_inventory.cpp` | `state=party` |
+| POST | `/api/item/inventory/{role}/enchant` | api.item | 0 | 1 | InventoryActionController.enchant | `ActionApiServiceCore.enchant` → `InventoryActions.enchant` | `nativeOpEnchant`, `nativeGetPartyJson` | `api/native/game_inventory.cpp` | `state=party` |
+| POST | `/api/item/inventory/{role}/equip_item` | api.item | 0 | 1 | InventoryActionController.equip | `ActionApiServiceCore.equip/equipByCategory` → `InventoryActions.equip/equipByCategory` | `nativeOpEquip`, `nativeGetPartyJson`, `nativeGetInventoryJson` | `api/native/game_inventory.cpp` | `state=party`；category 路径先 Kotlin 查槽 |
+| POST | `/api/item/inventory/{role}/unequip_item` | api.item | 0 | 1 | InventoryActionController.unequip | `ActionApiServiceCore.unequip` → `InventoryActions.unequip` | `nativeOpUnequip`, `nativeGetPartyJson` | `api/native/game_inventory.cpp` | `state=party` |
+| GET | `/api/item/inventory` | api.item | 0 | 1 | InventoryController.composite | `InfoApiServiceCore.inventory` | `nativeGetInventoryJson` | `core/native/game_cache.cpp` | `NameInjector.withItemNames` |
+| GET | `/api/item/inventory/money` | api.item | 0 | 1 | InventoryController.money | `InfoApiServiceCore.inventoryMoney` | `nativeGetPlayerJson` | `core/native/game_cache.cpp` | `state=player` 取 money |
+| GET | `/api/item/inventory/items` | api.item | 0 | 1 | InventoryController.items | `InfoApiServiceCore.inventoryItems` | `nativeGetInventoryJson` | `core/native/game_cache.cpp` | `NameInjector` + bag 字段拼装 |
+| GET | `/api/item/inventory/bag/{bag}/info` | api.item | 0 | 1 | InventoryController.bagInfo | `InfoApiServiceCore.bagInfo` | `nativeGetInventoryJson` | `core/native/game_cache.cpp` | bag 字段筛选/拼装 |
+| GET | `/api/item/inventory/bag/{bag}/{slot}` | api.item | 0 | 1 | InventoryController.bagSlot | `InfoApiServiceCore.bagSlot` | `nativeGetInventoryJson` | `core/native/game_cache.cpp` | `NameInjector` + slot 筛选 |
+| GET | `/api/character/mercenary` | api.character | 0 | 1 | MercenaryController.composite | `InfoApiServiceCore.mercenary` → `InfoMercenaryQueries.all` | `nativeGetMercenariesJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/character/mercenary/list` | api.character | 0 | 1 | MercenaryController.list | `InfoApiServiceCore.mercenaryList` → `InfoMercenaryQueries.slots` | `nativeGetMercenariesJson` | `core/native/game_cache.cpp` | `slots` 数组拼装 |
+| GET | `/api/character/mercenary/{slot}` | api.character | 0 | 1 | MercenaryController.slot | `InfoApiServiceCore.mercenarySlot` → `InfoMercenaryQueries.slot` | `nativeGetMercenariesJson` | `core/native/game_cache.cpp` | slot 筛选 |
+| POST | `/api/world/movement/move_to` | api.world | 0 | 1 | MovementController.move | `ActionApiServiceCore.move` → `MovementActions.move` | `nativeOpMove`, `nativeGetPlayerJson` | `api/native/game_world.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/world/movement/walk_dir` | api.world | 0 | 1 | MovementController.walk | `ActionApiServiceCore.walk` → `MovementActions.walk` | `nativeOpWalk`, `nativeGetPlayerJson` | `api/native/game_world.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/world/movement/stop_move` | api.world | 0 | 1 | MovementController.stop | `ActionApiServiceCore.walkStop` → `MovementActions.walkStop` | `nativeOpWalkStop` | `api/native/game_world.cpp` | — |
+| POST | `/api/world/movement/interact_with` | api.world | 0 | 1 | MovementController.interact | `ActionApiServiceCore.interact` → `MovementActions.interact` | `nativeOpInteract`, `nativeGetPlayerJson` | `api/native/game_world.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/op/quest/accept` | api.quest | 1 | 1 | OpController.questAccept | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/quest/complete` | api.quest | 1 | 1 | OpController.questComplete | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/character/{role}/status-point` | api.character | 1 | 1 | OpController.statusPoint | `OpApiServiceImpl.setStatusPoint` | `nativeOpSetStatusPoint` | `api/native/game_character.cpp` | — |
+| POST | `/api/op/character/{role}/skill-point` | api.character | 1 | 1 | OpController.skillPoint | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/character/{role}/skill-level` | api.character | 1 | 1 | OpController.skillLevel | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/party/swap` | api.character | 1 | 1 | OpController.partySwap | `OpApiServiceImpl.partySwap` | `nativeOpPartySwap` | `api/native/game_party.cpp` | — |
+| POST | `/api/op/inventory/set-slot` | api.item | 1 | 1 | OpController.setSlot | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/inventory/set-equip` | api.item | 1 | 1 | OpController.setEquip | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/inventory/money` | api.item | 1 | 1 | OpController.money | `OpApiServiceImpl.setMoney` | `nativeOpSetMoney` | `api/native/game_inventory.cpp` | — |
+| POST | `/api/op/craft/mix-direct` | custom_recipe | 1 | 1 | OpController.mixDirect | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/combat/{role}/heal` | api.character | 1 | 1 | OpController.heal | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/combat/{role}/rest` | api.character | 1 | 1 | OpController.rest | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/combat/{role}/revive` | api.character | 1 | 1 | OpController.revive | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/combat/{role}/hate` | api.character | 1 | 1 | OpController.hate | — | — | — | 占位，纯 Kotlin `not implemented` |
+| POST | `/api/op/movement/teleport` | api.world | 1 | 1 | OpController.teleport | `OpApiServiceImpl.teleport` | `nativeOpTeleportEx` | `api/native/game_world.cpp` | — |
+| POST | `/api/op/features/lifecycle` | core.api | 1 | 1 | OpController.featureLifecycle | `OpApiServiceImpl.featureLifecycle` | `nativeFeatureLifecycle` | `bridge/native/gamebridge_lifecycle.cpp`; `host/plugin_registry.cpp` | ticket JSON 拼装 |
+| POST | `/api/op/character/{role}/hp` | api.character | 1 | 1 | OpController.opSetHp | `OpApiServiceImpl.setHp` | `nativeOpSetHp` | `api/native/game_character.cpp` | — |
+| POST | `/api/op/character/{role}/mp` | api.character | 1 | 1 | OpController.opSetMp | `OpApiServiceImpl.setMp` | `nativeOpSetMp` | `api/native/game_character.cpp` | — |
+| POST | `/api/op/character/{role}/experience` | api.character | 1 | 1 | OpController.opSetExp | `OpApiServiceImpl.setExperience` | `nativeOpSetExperience` | `api/native/game_character.cpp` | — |
+| POST | `/api/op/character/{role}/level` | api.character | 1 | 1 | OpController.opSetLevel | `OpApiServiceImpl.setLevel` | `nativeOpSetLevel` | `api/native/game_character.cpp` | — |
+| POST | `/api/op/character/{role}/set_attr` | api.character | 1 | 1 | OpController.opSetAttr | `OpApiServiceImpl.setAttr` | `nativeOpSetAttr` | `api/native/game_character.cpp` | — |
+| POST | `/api/op/inventory/add` | api.item | 1 | 1 | OpController.opAddItem | `OpApiServiceImpl.addItem` | `nativeOpAddItem` | `api/native/game_inventory.cpp` | — |
+| POST | `/api/character/party/include` | api.character | 0 | 1 | PartyActionController.include | `ActionApiServiceCore.includeParty` → `PartyActions.includeParty` | `nativeOpIncludeParty`, `nativeGetPartyJson` | `api/native/game_party.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| POST | `/api/character/party/exclude` | api.character | 0 | 1 | PartyActionController.exclude | `ActionApiServiceCore.excludeParty` → `PartyActions.excludeParty` | `nativeOpExcludeParty`, `nativeGetPartyJson` | `api/native/game_party.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| POST | `/api/character/party/discharge` | api.character | 0 | 1 | PartyActionController.discharge | `ActionApiServiceCore.discharge` → `PartyActions.discharge` | `nativeOpDischarge`, `nativeGetPartyJson` | `api/native/game_party.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| POST | `/api/character/party/withdraw` | api.character | 0 | 1 | PartyActionController.withdraw | `ActionApiServiceCore.withdraw` → `PartyActions.withdraw` | `nativeOpWithdraw`, `nativeGetPartyJson` | `api/native/game_party.cpp`; `core/native/game_cache.cpp` | `state=party` |
+| GET | `/api/character/party` | api.character | 0 | 1 | PartyController.composite | `InfoApiServiceCore.party` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | `NameInjector.withItemNames` |
+| GET | `/api/character/party/count` | api.character | 0 | 1 | PartyController.count | `InfoApiServiceCore.partyCount` | `nativeGetPlayerJson` | `core/native/game_cache.cpp` | `state=player` 取 party_count |
+| GET | `/api/character/leader` | api.character | 0 | 1 | PartyController.leader | `InfoApiServiceCore.partyLeader` | `nativeGetPlayerJson`, `nativeGetPartyJson` | `core/native/game_cache.cpp` | `NameInjector` + leader 选择 |
+| GET | `/api/character/party/{slot}` | api.character | 0 | 1 | PartyController.member | `InfoApiServiceCore.partyMember` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | `NameInjector.withItemNames` |
+| GET | `/api/character/party/{slot}/id` | api.character | 0 | 1 | PartyController.memberId | `InfoApiServiceCore.partyMemberId` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | `StaticData.className` |
+| GET | `/api/character/party/{slot}/name` | api.character | 0 | 1 | PartyController.memberName | `InfoApiServiceCore.partyMemberName` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/character/party/{slot}/level` | api.character | 0 | 1 | PartyController.memberLevel | `InfoApiServiceCore.partyMemberLevel` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | — |
+| GET | `/api/character/party/{slot}/status` | api.character | 0 | 1 | PartyController.memberStatus | `InfoApiServiceCore.partyMemberStatus` | `nativeGetPartyJson`, `nativeGetSkillsJson` | `core/native/game_cache.cpp` | `state=status 拼装` |
+| GET | `/api/character/party/{slot}/stats` | api.character | 0 | 1 | PartyController.memberStats | `InfoApiServiceCore.partyMemberStats` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | stats 对象筛选/拼装 |
+| GET | `/api/character/party/{slot}/equipment` | api.character | 0 | 1 | PartyController.memberEquipment | `InfoApiServiceCore.partyMemberEquipment` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | `NameInjector.injectItemName` |
+| GET | `/api/character/party/{slot}/equipment/{equip_slot}` | api.character | 0 | 1 | PartyController.memberEquip | `InfoApiServiceCore.partyMemberEquip` | `nativeGetPartyJson` | `core/native/game_cache.cpp` | `NameInjector.injectItemName` |
+| GET | `/api/character/party/{slot}/skills` | api.character | 0 | 1 | PartyController.memberSkills | `InfoApiServiceCore.partyMemberSkills` | `nativeGetSkillsJson` | `core/native/game_cache.cpp` | `NameInjector.injectSkillNames` |
+| POST | `/api/quest/quit_quest` | api.quest | 0 | 1 | QuestActionController.quit | `ActionApiServiceCore.questQuit` → `QuestActions.questQuit` | `nativeOpQuestQuit`, `nativeGetPlayerJson` | `api/native/game_quest.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| GET | `/api/quest` | api.quest | 0 | 1 | QuestController.composite | `InfoApiServiceCore.quest` | `nativeQuestActive`, `nativeQuestList`, `nativeQuestCompleted` | `api/native/game_quest.cpp` | `StaticData.questData` + `NameInjector` |
+| GET | `/api/quest/active` | api.quest | 0 | 1 | QuestController.active | `InfoApiServiceCore.questActive` | `nativeQuestActive` | `api/native/game_quest.cpp` | `StaticData` 隐藏过滤/字段名称 |
+| GET | `/api/quest/details` | api.quest | 0 | 1 | QuestController.details | `InfoApiServiceCore.questDetails` | `nativeQuestList` | `api/native/game_quest.cpp` | `StaticData` + `NameInjector` + rewards |
+| GET | `/api/quest/{id}` | api.quest | 0 | 1 | QuestController.questId | `InfoApiServiceCore.questListId` | — | — | 占位，纯 Kotlin `not found` |
+| GET | `/api/quest/completed` | api.quest | 0 | 1 | QuestController.completed | `InfoApiServiceCore.questCompleted` | `nativeQuestCompleted` | `api/native/game_quest.cpp` | `StaticData` + `NameInjector` |
+| POST | `/api/system/save` | api.save | 0 | 1 | SaveController.save | `ActionApiServiceCore.save` → `SaveActions.save` | `nativeOpSave`, `nativeGetPlayerJson`, `nativeCurrentSaveSlot` | `api/native/game_save.cpp`; `core/native/game_cache.cpp` | `state=player` + sidecar slot ensure |
+| POST | `/api/system/enter_slot` | api.save | 0 | 1 | SaveController.enterSlot | `ActionApiServiceCore.enterSlot` → `SaveActions.enterSlot` | `nativeOpEnterSlot`, `nativeGetPlayerJson` | `api/native/game_save.cpp` | `UiActivityTracker` + `state=player` |
+| POST | `/api/system/create_slot` | api.save | 0 | 1 | SaveController.create | `ActionApiServiceCore.createSlot` → `SaveActions.createSlot` | `nativeOpCreateSlot`, `nativeGetPlayerJson` | `api/native/game_save.cpp` | `UiActivityTracker` + `state=player` |
+| POST | `/api/system/backup/export` | api.save | 0 | 1 | SaveController.backupExport | `ActionApiServiceCore.backupExport` → `SaveBackupActions.backupExport` | `nativeBackupExport` | `plugins/save_backup/bundle.cpp` | — |
+| GET | `/api/system/backup/list` | api.save | 0 | 1 | SaveController.backupList | `ActionApiServiceCore.backupList` → `SaveBackupActions.backupList` | `nativeBackupList` | `plugins/save_backup/bundle.cpp` | — |
+| POST | `/api/system/backup/import` | api.save | 0 | 1 | SaveController.backupImport | `ActionApiServiceCore.backupImport` → `SaveBackupActions.backupImport` | `nativeBackupImport` | `plugins/save_backup/bundle.cpp` | — |
+| POST | `/api/system/backup/delete` | api.save | 0 | 1 | SaveController.backupDelete | `ActionApiServiceCore.backupDelete` → `SaveBackupActions.backupDelete` | `nativeBackupDelete` | `plugins/save_backup/bundle.cpp` | — |
+| GET | `/api/item/shop/items` | api.item | 0 | 1 | ShopController.items | `InfoApiServiceCore.shopItems` → `InfoShopQueries.items` | `nativeShopItems` | `api/native/game_shop.cpp` | `StaticData.itemName` |
+| POST | `/api/item/shop/buy_item` | api.item | 0 | 1 | ShopController.buy | `ActionApiServiceCore.shopBuy` → `InventoryActions.shopBuy` | `nativeOpShopBuy`, `nativeGetInventoryJson` | `api/native/game_shop.cpp`; `core/native/game_cache.cpp` | `state=inventory` |
+| GET | `/api/system/features` | core.api | 0 | 1 | SystemFeatureController.features | `InfoApiServiceCore.featureStatusJson` | `nativeFeatureStatusJson` | `host/status_json.cpp` | — |
+| GET | `/api/system/resources` | core.api | 0 | 1 | SystemFeatureController.resources | `InfoApiServiceCore.systemResourcesJson` | `nativeSystemResourcesJson` | `host/status_json.cpp` | — |
+| GET | `/api/system/tickets/{id}` | core.api | 0 | 1 | SystemFeatureController.ticket | `InfoApiServiceCore.ticketStateJson` | `nativeTicketStateJson` | `host/status_json.cpp` | — |
+| GET | `/api/system/routes` | core.api | 0 | 0 | SystemFeatureController.routes | — | `nativeHttpRoutesJson` | `host/status_json.cpp`; `host/http_registry.cpp` | — |
+| POST | `/api/ui/go_main_menu` | api.ui | 0 | 1 | UiActionController.mainMenu | `ActionApiServiceCore.mainMenu` → `SaveActions.mainMenu` | `nativeOpMainMenu`, `nativeGetPlayerJson` | `api/native/game_ui.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/ui/close_panel` | api.ui | 0 | 1 | UiActionController.panelClose | `ActionApiServiceCore.panelClose` → `UiActions.panelClose` | `nativeOpPanelClose`, `nativeGetGamestateJson` | `api/native/game_ui.cpp`; `core/native/game_cache.cpp` | `state=ui` |
+| POST | `/api/ui/open_panel` | api.ui | 0 | 1 | UiActionController.panelOpen | `ActionApiServiceCore.panelOpen` → `UiActions.panelOpen` | `nativeOpPanelOpen`, `nativeGetGamestateJson` | `api/native/game_ui.cpp`; `core/native/game_cache.cpp` | `state=ui` |
+| POST | `/api/ui/start_interact` | api.ui | 0 | 1 | UiActionController.interact | `ActionApiServiceCore.npcInteract` → `UiActions.npcInteract` | `nativeOpNpcInteract` | `api/native/game_ui.cpp` | — |
+| POST | `/api/ui/dialog/select` | api.ui | 0 | 1 | UiActionController.select | `ActionApiServiceCore.dialogSelect` → `UiActions.dialogSelect` | `nativeOpDialogSelect` | `api/native/game_ui.cpp` | `UiActivityTracker` agreement 分支 |
+| GET | `/api/ui` | api.ui | 0 | 1 | UiController.composite | `InfoApiServiceCore.ui` | `nativeGetGamestateJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `UiActivityTracker` 注入 agreement + state |
+| GET | `/api/ui/screen` | api.ui | 0 | 1 | UiController.screen | `InfoApiServiceCore.uiScreen` | `nativeGetGamestateJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `UiActivityTracker` 参与 screen 读取 |
+| GET | `/api/ui/panel` | api.ui | 0 | 1 | UiController.panel | `InfoApiServiceCore.uiPanel` | `nativeGetGamestateJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `UiActivityTracker` 参与 state 读取 |
+| GET | `/api/ui/dialog` | api.ui | 0 | 1 | UiController.dialog | `InfoApiServiceCore.uiDialog` | `nativeGetGamestateJson`, `nativeDialogContent` | `core/native/game_cache.cpp`; `game_system.cpp`; `api/native/game_ui.cpp` | `UiActivityTracker` agreement + dialog state 拼装 |
+
+## 汇总
+
+- 路由总数：**143**。
+- owner 计数：`api.character` **42**、`api.item` **21**、`api.world` **16**、`api.system` **13**、`api.ui` **9**、`extension_bag` **8**、`api.quest` **8**、`api.save` **7**、`core.api` **6**、`core.ui` **5**、`api.debug` **3**、`autosell` **2**、`api.config` **2**、`custom_recipe` **1**。
+- 含加工响应：**75**（列中明确标注 `StaticData`、`NameInjector`、`UiActivityTracker` 或 `state`/配置 envelope 拼装）。
+- 无 native 实现（纯 Kotlin）：**26**（配置读取、静态数据读取、占位端点与未实现 quest id；`/api/config/set` 不计入此项，因为它会经 `ConfigApiService` 下发 native 配置）。
+
+## 三源口径说明
+
+1. Native 路由表只提供冻结的 method/path、owner、`op_gated` 和 route lease；它不推导 Kotlin 调用链。
+2. Kotlin 端从 `api/controller/*.kt` 的 mapping 与方法体、`service/info/**`、`service/action/**`、`service/OpApiService.kt`、`service/ConfigApiService.kt` 追到 `NativeBridge` 调用；`ActionSupport` 的 `state` attach、`InfoApiServiceCore` 的复合组装和 enrichment 均计入加工。
+3. HTTP 契约 `docs/reference/api-reference.md` 用于校验路径语义、静态数据/名称注入和响应约定；本表不复制完整响应 schema。HTTP 契约中列出的 143 条路径以 native 路由表和 Kotlin controller 交集为最终行集合。
