@@ -33,7 +33,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_BASE = "http://127.0.0.1:8088"
-DEFAULT_OUT = Path(__file__).parent / "smoke_baseline_v0.7.13.json"
+DEFAULT_OUT = Path(__file__).resolve().parents[2] / ".tmp" / "smoke" / "latest.json"
 ROUTE_REGISTRY = Path(__file__).resolve().parents[2] / "module/app/src/main/cpp/plugins/core.api/routes.inc"
 
 # 路径变量默认值（语义见各 controller @PathVariable）

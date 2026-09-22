@@ -1,4 +1,5 @@
 #include "host/adapters.h"
+#include "host/http_dispatch.h"
 #include "host/http_registry.h"
 
 #include <algorithm>
@@ -818,6 +819,7 @@ contracts::QolHostSdk make_host_sdk() {
                        &sdk_desc_button_call_original};
     sdk.in_flight = {&sdk_in_flight_enter, &sdk_in_flight_leave};
     sdk.http = http_registry_api();
+    sdk.http_dispatch = http_dispatch_api();
     return sdk;
 }
 

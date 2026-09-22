@@ -281,9 +281,11 @@ struct QolHostSdk {
     QolDescButtonApi desc_button;
     QolInFlightApi in_flight;
     QolHttpRegistryApi http;
+    // Tail extension; older plugins use abi.size to consume the prefix they know.
+    QolHttpDispatchApi http_dispatch;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 6;
+constexpr uint16_t kHostSdkMinor = 7;
 
 }  // namespace qol::contracts

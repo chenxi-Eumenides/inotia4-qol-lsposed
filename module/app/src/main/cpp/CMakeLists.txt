@@ -239,6 +239,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
     host/http_registry.cpp
+    host/http_dispatch.cpp
     host/game_host.cpp
     host/item_count_facade.cpp
     host/ui_adapter.cpp
@@ -248,6 +249,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/status_json.cpp
     bridge/native/gamebridge_status.cpp
+    bridge/native/gamebridge_dispatch.cpp
 )
 
 # P1 诊断：游戏变体 JSON（末尾追加，不改上方既有行）

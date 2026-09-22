@@ -699,6 +699,7 @@ add_executable(host_adapter_tests
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/host/game_host.cpp
     ${CPP_DIR}/game/adapter_ports/quest_port.cpp
     ${CPP_DIR}/game/adapter_ports/world_port.cpp
@@ -755,6 +756,20 @@ target_include_directories(http_registry_tests PRIVATE
 target_compile_features(http_registry_tests PRIVATE cxx_std_17)
 set_target_properties(http_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME http_registry_tests COMMAND http_registry_tests)
+
+# P5-4-0：HTTP 模板 dispatch、query handler、owner 注销等待与 inactive 错误语义。
+add_executable(http_dispatch_tests
+    test_http_dispatch.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(http_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(http_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(http_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(http_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME http_dispatch_tests COMMAND http_dispatch_tests)
 
 # U11-1：UI contract ABI + host ui-kit adapter 转发/错误语义测试。
 add_executable(ui_adapter_tests

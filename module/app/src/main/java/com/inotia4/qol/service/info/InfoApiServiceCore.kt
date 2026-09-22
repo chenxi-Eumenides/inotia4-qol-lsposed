@@ -350,7 +350,14 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun gameSnapshot(): String = NameInjector.withItemNames(snapshotJson())
 
-    override fun gameFrame(): String = JsonUtil.wrap("frame", NativeBridge.nativeGetFrameCount())
+    override fun gameFrame(): String {
+        val envelope = JsonUtil.parseObj(
+            NativeBridge.nativeHttpDispatch(0, "/api/system/game_frame", null, null)
+        ) ?: return JsonUtil.NOT_READY
+        val status = envelope.optInt("status", 0)
+        val body = envelope.optString("body", JsonUtil.NOT_READY)
+        return if (status == 0) JsonUtil.NOT_READY else body
+    }
 
     override fun gameInfo(): String {
         val slots: Any? = JsonUtil.parseObj(NativeBridge.nativeSaveSlotsJson())?.opt("slots")

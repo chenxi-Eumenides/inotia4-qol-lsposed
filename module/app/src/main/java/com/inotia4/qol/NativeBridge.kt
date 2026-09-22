@@ -41,6 +41,7 @@ object NativeBridge {
     external fun nativeGetInitReport(): String
     external fun nativeGetBaseAddr(): Long
     external fun nativeGetFrameCount(): Long
+    external fun nativeHttpDispatch(method: Int, path: String, query: String?, body: String?): String
     external fun nativeGetActiveQuest(): Int
     external fun nativeQuestList(): String
     external fun nativeQuestCompleted(): String

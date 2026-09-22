@@ -1,6 +1,8 @@
 #include "host/http_registry.h"
 
 #include <cstring>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 
 namespace qol::host {
@@ -11,6 +13,7 @@ constexpr uint32_t kMaxLeases = 256;
 
 struct RouteSlot {
     bool used = false;
+    bool unregister_pending = false;
     contracts::HttpRoute route{};
 };
 
@@ -27,6 +30,8 @@ uint32_t g_lease_count = 0;
 bool g_accepting = true;
 bool g_unregister_all_pending = false;
 uint32_t g_duplicate_attempts = 0;
+std::mutex g_registry_mutex;
+std::condition_variable g_registry_cv;
 
 QolResult http_error(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -36,7 +41,7 @@ bool valid_method(contracts::HttpMethod method) {
     return method == contracts::HttpMethod::kGet || method == contracts::HttpMethod::kPost;
 }
 
-uint32_t find_index(contracts::HttpMethod method, const char* path) {
+uint32_t find_index_locked(contracts::HttpMethod method, const char* path) {
     if (path == nullptr) return kMaxRoutes;
     for (uint32_t i = 0; i < kMaxRoutes; ++i) {
         if (!g_routes[i].used) continue;
@@ -47,13 +52,13 @@ uint32_t find_index(contracts::HttpMethod method, const char* path) {
     return kMaxRoutes;
 }
 
-void clear_routes() {
+void clear_routes_locked() {
     for (RouteSlot& slot : g_routes) slot = RouteSlot{};
 }
 
-void finish_pending_unregister() {
+void finish_pending_unregister_locked() {
     if (!g_unregister_all_pending || g_lease_count != 0) return;
-    clear_routes();
+    clear_routes_locked();
     g_unregister_all_pending = false;
     g_accepting = false;
 }
@@ -64,7 +69,8 @@ QolResult sdk_register_route(const contracts::HttpRoute* route) {
         route->op_gated > 1 || route->lease_required > 1) {
         return http_error(kQolErrInvalidArgument, "invalid route");
     }
-    if (find_index(route->method, route->path) != kMaxRoutes) {
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
+    if (find_index_locked(route->method, route->path) != kMaxRoutes) {
         ++g_duplicate_attempts;
         return http_error(kQolErrConflict, "duplicate route");
     }
@@ -84,11 +90,12 @@ QolResult sdk_unregister_owner(const char* owner) {
     if (owner != nullptr && owner[0] == '\0') {
         return http_error(kQolErrInvalidArgument, "invalid owner");
     }
+    std::unique_lock<std::mutex> lock(g_registry_mutex);
     if (owner == nullptr) {
         // core.api 停用使用 nullptr：先拒绝新请求，等所有 route lease 退出后再清表。
         g_accepting = false;
         g_unregister_all_pending = true;
-        finish_pending_unregister();
+        finish_pending_unregister_locked();
         return g_lease_count == 0 ? contracts::ok()
                                    : http_error(kQolErrTimeout, "route leases still active");
     }
@@ -96,8 +103,25 @@ QolResult sdk_unregister_owner(const char* owner) {
     bool found = false;
     for (RouteSlot& slot : g_routes) {
         if (slot.used && std::strcmp(slot.route.owner, owner) == 0) {
-            slot = RouteSlot{};
+            slot.unregister_pending = true;
             found = true;
+        }
+    }
+    if (found) {
+        bool leases_active = false;
+        do {
+            leases_active = false;
+            for (const LeaseSlot& lease : g_leases) {
+                if (lease.used && lease.route_index < kMaxRoutes && g_routes[lease.route_index].used &&
+                    std::strcmp(g_routes[lease.route_index].route.owner, owner) == 0) {
+                    leases_active = true;
+                    break;
+                }
+            }
+            if (leases_active) g_registry_cv.wait(lock);
+        } while (leases_active);
+        for (RouteSlot& slot : g_routes) {
+            if (slot.used && std::strcmp(slot.route.owner, owner) == 0) slot = RouteSlot{};
         }
     }
     return found ? contracts::ok() : http_error(kQolErrNotFound, "owner not found");
@@ -109,9 +133,12 @@ QolResult sdk_find_route(contracts::HttpMethod method, const char* path,
     if (out_route == nullptr || path == nullptr || !valid_method(method)) {
         return http_error(kQolErrInvalidArgument, "invalid route query");
     }
-    const uint32_t index = find_index(method, path);
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
+    const uint32_t index = find_index_locked(method, path);
     if (index == kMaxRoutes) return http_error(kQolErrNotFound, "route not found");
-    *out_route = &g_routes[index].route;
+    static thread_local contracts::HttpRoute route_copy;
+    route_copy = g_routes[index].route;
+    *out_route = &route_copy;
     return contracts::ok();
 }
 
@@ -121,6 +148,7 @@ QolResult sdk_list_routes(contracts::HttpRoute* out_routes, uint32_t capacity,
     if (out_count == nullptr || (capacity > 0 && out_routes == nullptr)) {
         return http_error(kQolErrInvalidArgument, "invalid route buffer");
     }
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
     uint32_t count = 0;
     for (const RouteSlot& slot : g_routes) {
         if (!slot.used) continue;
@@ -139,9 +167,13 @@ QolResult sdk_lease_enter(contracts::HttpMethod method, const char* path, uint64
     if (out_lease == nullptr || path == nullptr || !valid_method(method)) {
         return http_error(kQolErrInvalidArgument, "invalid route lease");
     }
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
     if (!g_accepting) return http_error(kQolErrNotReady, "http registry inactive");
-    const uint32_t route_index = find_index(method, path);
+    const uint32_t route_index = find_index_locked(method, path);
     if (route_index == kMaxRoutes) return http_error(kQolErrNotFound, "route not found");
+    if (g_routes[route_index].unregister_pending) {
+        return http_error(kQolErrNotReady, "route owner inactive");
+    }
     for (LeaseSlot& lease : g_leases) {
         if (!lease.used) {
             lease.used = true;
@@ -158,11 +190,13 @@ QolResult sdk_lease_enter(contracts::HttpMethod method, const char* path, uint64
 
 QolResult sdk_lease_leave(uint64_t token) {
     if (token == 0) return http_error(kQolErrInvalidArgument, "invalid route lease");
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
     for (LeaseSlot& lease : g_leases) {
         if (lease.used && lease.token == token) {
             lease = LeaseSlot{};
             --g_lease_count;
-            finish_pending_unregister();
+            finish_pending_unregister_locked();
+            g_registry_cv.notify_all();
             return contracts::ok();
         }
     }
@@ -214,6 +248,7 @@ contracts::QolHttpRegistryApi http_registry_api() {
 }
 
 std::string host_http_routes_json() {
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
     if (!g_accepting) return "{\"ok\":false,\"error\":\"http registry inactive\"}";
 
     std::string out = "{\"ok\":true,\"routes\":[";
@@ -250,13 +285,19 @@ std::string host_http_routes_json() {
 }
 
 void http_registry_reset_for_test() {
-    clear_routes();
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
+    clear_routes_locked();
     for (LeaseSlot& lease : g_leases) lease = LeaseSlot{};
     g_next_lease = 1;
     g_lease_count = 0;
     g_accepting = true;
     g_unregister_all_pending = false;
     g_duplicate_attempts = 0;
+}
+
+bool host_http_registry_accepting() {
+    std::lock_guard<std::mutex> lock(g_registry_mutex);
+    return g_accepting;
 }
 
 }  // namespace qol::host
