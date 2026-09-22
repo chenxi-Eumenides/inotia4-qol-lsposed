@@ -98,7 +98,7 @@ ROUTES = [
     {"m": "GET", "p": "/api/system/tables/text", "query": {"lang": "zh-Hans"}},
     {"m": "GET", "p": "/api/system/help", "note": "占位:not implemented"},
     {"m": "GET", "p": "/api/system/download", "note": "占位:not implemented"},
-    # ---- DebugController (2) ----
+    # ---- DebugController legacy queries (3) ----
     {"m": "GET", "p": "/api/debug/ui"},
     {"m": "GET", "p": "/api/debug/path", "query": {"tx": 0, "ty": 0}},
     {"m": "GET", "p": "/api/debug/item/raw", "query": {"bag": 0, "slot": 0}},
@@ -398,7 +398,7 @@ def main() -> int:
     report = {
         "meta": {
             "project": "inotia4-qol-lsposed",
-            "phase": "P5-B1-diagnostic-baseline",
+            "phase": "P5-B3-debug-owner-baseline",
             "version": "v0.7.13",
             "base_url": base,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),

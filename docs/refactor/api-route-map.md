@@ -45,9 +45,9 @@
 | GET | `/api/system/tables/text` | static.data | 0 | 1 | DataController.text | — | — | — | `StaticData` text/{lang}.json |
 | GET | `/api/system/help` | static.data | 0 | 1 | DataController.help | — | — | — | 占位，纯 Kotlin `not implemented` |
 | GET | `/api/system/download` | static.data | 0 | 1 | DataController.downloadAll | — | — | — | 占位，纯 Kotlin `not implemented` |
-| GET | `/api/debug/ui` | api.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `api/native/game_ui.cpp` | — |
-| GET | `/api/debug/path` | api.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `api/native/game_world.cpp` | — |
-| GET | `/api/debug/item/raw` | api.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `api/native/game_inventory.cpp` | — |
+| GET | `/api/debug/ui` | legacy.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `api/native/game_ui_read.inc` | — |
+| GET | `/api/debug/path` | legacy.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `api/native/game_world_navigation.inc` | — |
+| GET | `/api/debug/item/raw` | legacy.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `api/native/game_inventory_read.inc` | — |
 | POST | `/api/debug/settings-ui/inject` | core.ui | 0 | 1 | DebugController.settingsUiInject | `InfoApiServiceCore.settingsUiInject` → `InfoSystemQueries.settingsUiInject` | `nativeSettingsUiInject` | `plugins/core.ui/panels/settings.cpp` | — |
 | GET | `/api/debug/settings-ui/status` | core.ui | 0 | 1 | DebugController.settingsUiStatus | `InfoApiServiceCore.settingsUiStatus` → `InfoSystemQueries.settingsUiStatus` | `nativeSettingsUiStatus` | `plugins/core.ui/panels/settings.cpp` | — |
 | POST | `/api/debug/settings-ui/restore` | core.ui | 0 | 1 | DebugController.settingsUiRestore | `InfoApiServiceCore.settingsUiRestore` → `InfoSystemQueries.settingsUiRestore` | `nativeSettingsUiRestore` | `plugins/core.ui/panels/settings.cpp` | — |
@@ -59,8 +59,8 @@
 | POST | `/api/debug/extension_bag/unequip` | extension_bag | 0 | 1 | DebugController.extensionBagUnequip | `ActionApiServiceCore.extensionBagUnequip` → `ExtensionBagActions.extensionBagUnequip` | `nativeOpExtensionBagUnequip` | `plugins/extension_bag/extension_bag_api.cpp` | — |
 | POST | `/api/debug/extension_bag/select_bag` | extension_bag | 0 | 1 | DebugController.extensionBagSelectBag | `ActionApiServiceCore.extensionBagSelectBag` → `ExtensionBagActions.extensionBagSelectBag` | `nativeOpExtensionBagSelectBag` | `plugins/extension_bag/extension_bag_api.cpp` | — |
 | POST | `/api/debug/extension_bag/click_item` | extension_bag | 0 | 1 | DebugController.extensionBagClickItem | `ActionApiServiceCore.extensionBagClickItem` → `ExtensionBagActions.extensionBagClickItem` | `nativeOpExtensionBagClickItem` | `plugins/extension_bag/extension_bag_api.cpp` | — |
-| POST | `/api/debug/extension_bag/equip` | extension_bag | 0 | 1 | DebugController.extensionBagEquip | `InfoApiServiceCore.extensionBagTestEquip` → `InfoSystemQueries.extensionBagTestEquip` | `nativeExtensionBagTestEquip` | `plugins/extension_bag/extension_bag_api.cpp` | — |
-| POST | `/api/debug/extension_bag/item` | extension_bag | 0 | 1 | DebugController.extensionBagItem | `InfoApiServiceCore.extensionBagTestItem` → `InfoSystemQueries.extensionBagTestItem` | `nativeExtensionBagTestItem` | `plugins/extension_bag/extension_bag_api.cpp` | — |
+| POST | `/api/debug/extension_bag/equip` | extension_bag | 0 | 1 | DebugController.extensionBagEquip | `InfoApiServiceCore.extensionBagTestEquip` → `InfoSystemQueries.extensionBagTestEquip` | `nativeExtensionBagTestEquip` | `plugins/extension_bag/extension_bag_public_runtime.inc` | — |
+| POST | `/api/debug/extension_bag/item` | extension_bag | 0 | 1 | DebugController.extensionBagItem | `InfoApiServiceCore.extensionBagTestItem` → `InfoSystemQueries.extensionBagTestItem` | `nativeExtensionBagTestItem` | `plugins/extension_bag/extension_bag_public_runtime.inc` | — |
 | GET | `/api/system/events` | api.system | 0 | 1 | EventsController.events | `InfoApiServiceCore.events` | `nativeGetEventsJson` | `game_system.cpp` | — |
 | GET | `/api/system/game` | api.system | 0 | 1 | GameController.composite | `InfoApiServiceCore.game` | `nativeGetSnapshotJson`, `nativeGetPlayerJson`, `nativeSaveSlotsJson`, `nativeCurrentSaveSlot`, `nativeGetBaseAddr` | `game_system.cpp`; `core/native/game_cache.cpp`; `api/native/game_save.cpp` | `state=snapshot+info 拼装` |
 | GET | `/api/system/snapshot` | api.system | 0 | 1 | GameController.snapshot | `InfoApiServiceCore.gameSnapshot` | `nativeGetSnapshotJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `NameInjector.withItemNames` |
@@ -159,7 +159,7 @@
 ## 汇总
 
 - 路由总数：**143**。
-- owner 计数：`api.character` **42**、`api.item` **21**、`api.world` **12**、`api.system` **5**、`api.ui` **9**、`extension_bag` **8**、`api.quest` **8**、`api.save` **7**、`core.api` **6**、`core.ui` **5**、`api.debug` **3**、`autosell` **2**、`custom_recipe` **1**、`static.data` **12**（Kotlin service）、`module.config` **2**（Kotlin service）。native plugin owner：`core.api`、`core.ui`、`extension_bag`、`autosell`、`custom_recipe`；其余 `api.*` 为待后续批次真实化的 legacy API label。
+- owner 计数：`api.character` **42**、`api.item` **21**、`api.world` **12**、`api.system` **5**、`api.ui` **9**、`extension_bag` **8**、`api.quest` **8**、`api.save` **7**、`core.api` **6**、`core.ui` **5**、`legacy.debug` **3**、`autosell` **2**、`custom_recipe` **1**、`static.data` **12**（Kotlin service）、`module.config` **2**（Kotlin service）。native plugin owner：`core.api`、`core.ui`、`extension_bag`、`autosell`、`custom_recipe`；`legacy.debug` 明确标记仍由 `api/native` 实现的 legacy 调试查询。
 - 含加工响应：**75**（列中明确标注 `StaticData`、`NameInjector`、`UiActivityTracker` 或 `state`/配置 envelope 拼装）。
 - 无 native 实现（纯 Kotlin）：**26**（配置读取、静态数据读取、占位端点与未实现 quest id；`/api/config/set` 不计入此项，因为它会经 `ConfigApiService` 下发 native 配置）。
 
