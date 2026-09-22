@@ -1,0 +1,51 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/world/map/id",
+    "status": 200,
+    "result": "equal",
+    "baseline_prefix_match": true
+  },
+  {
+    "method": "GET",
+    "path": "/api/world/map/exits",
+    "status": 200,
+    "result": "baseline-truncated; status/verdict and available prefix observed",
+    "baseline_prefix_match": true
+  },
+  {
+    "method": "GET",
+    "path": "/api/world/map/units",
+    "status": 200,
+    "result": "baseline-truncated; status/verdict and available prefix observed",
+    "baseline_prefix_match": true
+  },
+  {
+    "method": "GET",
+    "path": "/api/world/map/enemies",
+    "status": 200,
+    "result": "equal",
+    "baseline_prefix_match": true
+  },
+  {
+    "method": "GET",
+    "path": "/api/world/map/interactives",
+    "status": 200,
+    "result": "equal",
+    "baseline_prefix_match": true
+  },
+  {
+    "method": "GET",
+    "path": "/api/world/map/drops",
+    "status": 200,
+    "result": "equal",
+    "baseline_prefix_match": true
+  },
+  {
+    "method": "GET",
+    "path": "/api/world/map/distance",
+    "status": 200,
+    "result": "equal",
+    "baseline_prefix_match": true
+  }
+]

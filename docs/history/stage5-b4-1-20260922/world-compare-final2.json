@@ -1,0 +1,117 @@
+{
+  "routes": {
+    "id": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"map_id\":20,\"id_name\":\"黑暗教团礼堂\"}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"map_id\":20,\"id_name\":\"黑暗教团礼堂\"}"
+      }
+    },
+    "exits": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"exits\":[{\"x\":12,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":13,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":14,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":15,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":7,\"y\":6,\"targetMapId\":22,\"targetX\":12,\"targetY\":22},{\"x\":7,\"y\":7,\"targetMapId\":22,\"targetX\":12,\"targetY\":22},{\"x\":28,\"y\":9,\"targetMapId\":34,\"targetX\":2,\"targetY\":20},{\"x\":28,\"y\":10,\"targetMapId\":34,\"targetX\":2,\"targetY\":20},{\"x\":8,\"y\":15,\"targetMapId\":21,\"targetX\":13,\"targetY\":11},{\"x\":9,\"y\":15,\"targetMapId\":21,\"targetX\":13,\"targetY\":11},{\"x\":8,\"y\":16,\"targetMapId\":21,\"targetX\":13,\"targetY\":11},{\"x\":0,\"y\":26,\"targetMapId\":24,\"targetX\":33,\"targetY\":4},{\"x\":0,\"y\":27,\"targetMapId\":24,\"targetX\":33,\"targetY\":4},{\"x\":1,\"y\":27,\"targetMapId\":24,\"targetX\":33,\"targetY\":4},{\"x\":2,\"y\":27,\"targetMapId\":24,\"targetX\":33,\"targetY\":4}]}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"exits\":[{\"x\":12,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":13,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":14,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":15,\"y\":0,\"targetMapId\":37,\"targetX\":3,\"targetY\":9},{\"x\":7,\"y\":6,\"targetMapId\":22,\"targetX\":12,\"targetY\":22},{\"x\":7,\"y\":7,\"targetMapId\":22,\"targetX\":12,\"targetY\":22},{\"x\":28,\"y\":9,\"targetMapId\":34,\"targetX\":2,\"targetY\":20},{\"x\":28,\"y\":10,\"targetMapId\":34,\"targetX\":2,\"targetY\":20},{\"x\":8,\"y\":15,\"targetMapId\":21,\"targetX\":13,\"targetY\":11},{\"x\":9,\"y\":15,\"targetMapId\":21,\"targetX\":13,\"targetY\":11},{\"x\":8,\"y\":16,\"targetMapId\":21,\"targetX\":13,\"targetY\":11},{\"x\":0,\"y\":26,\"targetMapId\":24,\"targetX\":33,\"targetY\":4},{\"x\":0,\"y\":27,\"targetMapId\":24,\"targetX\":33,\"targetY\":4},{\"x\":1,\"y\":27,\"targetMapId\":24,\"targetX\":33,\"targetY\":4},{\"x\":2,\"y\":27,\"targetMapId\":24,\"targetX\":33,\"targetY\":4}]}"
+      }
+    },
+    "units": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"units\":[{\"slot\":0,\"x\":20,\"y\":8,\"type\":0,\"status\":0,\"level\":5,\"hp\":8280,\"mp\":222,\"name\":\"凯恩\",\"distance\":1},{\"slot\":1,\"x\":20,\"y\":10,\"type\":2,\"status\":0,\"level\":5,\"hp\":7480,\"mp\":251,\"name\":\"奥罗贝\",\"func_display\":559,\"interactable\":false,\"distance\":1},{\"slot\":2,\"x\":21,\"y\":10,\"type\":2,\"status\":0,\"level\":3,\"hp\":6296,\"mp\":249,\"name\":\"马雷斯\",\"func_display\":551,\"interactable\":false,\"distance\":2},{\"slot\":3,\"x\":8,\"y\":4,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"火把\",\"func_display\":128,\"interactable\":false,\"distance\":-1,\"nearest_distance\":13},{\"slot\":4,\"x\":27,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"火把\",\"func_display\":128,\"interactable\":false,\"distance\":-1,\"nearest_distance\":15},{\"slot\":5,\"x\":12,\"y\":2,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":13},{\"slot\":6,\"x\":15,\"y\":2,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":10},{\"slot\":7,\"x\":8,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":12},{\"slot\":8,\"x\":20,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"融合器\",\"func_display\":576,\"interactable\":true,\"distance\":0},{\"slot\":9,\"x\":6,\"y\":8,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":13},{\"slot\":10,\"x\":25,\"y\":10,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"黑暗教团仓库守卫\",\"func_display\":124,\"interactable\":false,\"distance\":6},{\"slot\":11,\"x\":27,\"y\":10,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":12},{\"slot\":12,\"x\":29,\"y\":11,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":13},{\"slot\":13,\"x\":10,\"y\":16,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":25},{\"slot\":14,\"x\":8,\"y\":17,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":26},{\"slot\":15,\"x\":5,\"y\":19,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"黑魔法师 卡茵\",\"func_display\":76,\"interactable\":false,\"distance\":-1,\"nearest_distance\":30},{\"slot\":16,\"x\":24,\"y\":20,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"杂货商人\",\"func_display\":2,\"interactable\":true,\"distance\":21},{\"slot\":17,\"x\":0,\"y\":26,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":43},{\"slot\":18,\"x\":3,\"y\":28,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":42}],\"char_loc\":[{\"f0\":2,\"x\":2,\"y\":0},{\"f0\":1,\"x\":3,\"y\":1},{\"f0\":1,\"x\":3,\"y\":1},{\"f0\":1,\"x\":3,\"y\":1},{\"f0\":2,\"x\":3,\"y\":1}]}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"units\":[{\"slot\":0,\"x\":20,\"y\":8,\"type\":0,\"status\":0,\"level\":5,\"hp\":8280,\"mp\":222,\"name\":\"凯恩\",\"distance\":1},{\"slot\":1,\"x\":20,\"y\":10,\"type\":2,\"status\":0,\"level\":5,\"hp\":7480,\"mp\":251,\"name\":\"奥罗贝\",\"func_display\":559,\"interactable\":false,\"distance\":1},{\"slot\":2,\"x\":21,\"y\":10,\"type\":2,\"status\":0,\"level\":3,\"hp\":6296,\"mp\":249,\"name\":\"马雷斯\",\"func_display\":551,\"interactable\":false,\"distance\":2},{\"slot\":3,\"x\":8,\"y\":4,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"火把\",\"func_display\":128,\"interactable\":false,\"distance\":-1,\"nearest_distance\":13},{\"slot\":4,\"x\":27,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"火把\",\"func_display\":128,\"interactable\":false,\"distance\":-1,\"nearest_distance\":15},{\"slot\":5,\"x\":12,\"y\":2,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":13},{\"slot\":6,\"x\":15,\"y\":2,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":10},{\"slot\":7,\"x\":8,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":12},{\"slot\":8,\"x\":20,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"融合器\",\"func_display\":576,\"interactable\":true,\"distance\":0},{\"slot\":9,\"x\":6,\"y\":8,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":13},{\"slot\":10,\"x\":25,\"y\":10,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"黑暗教团仓库守卫\",\"func_display\":124,\"interactable\":false,\"distance\":6},{\"slot\":11,\"x\":27,\"y\":10,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":12},{\"slot\":12,\"x\":29,\"y\":11,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":13},{\"slot\":13,\"x\":10,\"y\":16,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":25},{\"slot\":14,\"x\":8,\"y\":17,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":26},{\"slot\":15,\"x\":5,\"y\":19,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"黑魔法师 卡茵\",\"func_display\":76,\"interactable\":false,\"distance\":-1,\"nearest_distance\":30},{\"slot\":16,\"x\":24,\"y\":20,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"杂货商人\",\"func_display\":2,\"interactable\":true,\"distance\":21},{\"slot\":17,\"x\":0,\"y\":26,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":43},{\"slot\":18,\"x\":3,\"y\":28,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"地图出口\",\"func_display\":371,\"interactable\":false,\"distance\":42}],\"char_loc\":[{\"f0\":2,\"x\":2,\"y\":0},{\"f0\":1,\"x\":3,\"y\":1},{\"f0\":1,\"x\":3,\"y\":1},{\"f0\":1,\"x\":3,\"y\":1},{\"f0\":2,\"x\":3,\"y\":1}]}"
+      }
+    },
+    "enemies": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"units\":[]}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"units\":[]}"
+      }
+    },
+    "interactives": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"units\":[{\"slot\":8,\"x\":20,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"融合器\",\"func_display\":576,\"interactable\":true,\"distance\":0},{\"slot\":16,\"x\":24,\"y\":20,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"杂货商人\",\"func_display\":2,\"interactable\":true,\"distance\":21}]}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"units\":[{\"slot\":8,\"x\":20,\"y\":7,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"融合器\",\"func_display\":576,\"interactable\":true,\"distance\":0},{\"slot\":16,\"x\":24,\"y\":20,\"type\":2,\"status\":2,\"level\":1,\"hp\":792,\"mp\":200,\"name\":\"杂货商人\",\"func_display\":2,\"interactable\":true,\"distance\":21}]}"
+      }
+    },
+    "drops": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"drops\":[]}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"drops\":[]}"
+      }
+    },
+    "distance": {
+      "enabled": {
+        "http": 200,
+        "body": "{\"target\":{\"x\":0,\"y\":0},\"start\":{\"x\":328,\"y\":136},\"found\":false,\"distance\":16,\"nearest\":{\"x\":200,\"y\":8,\"distance\":16}}"
+      },
+      "disabled": {
+        "http": 200,
+        "body": "{\"ok\":false,\"error\":\"http owner inactive\"}"
+      },
+      "recovered": {
+        "http": 200,
+        "body": "{\"target\":{\"x\":0,\"y\":0},\"start\":{\"x\":328,\"y\":136},\"found\":false,\"distance\":16,\"nearest\":{\"x\":200,\"y\":8,\"distance\":16}}"
+      }
+    }
+  },
+  "lifecycle": {
+    "deactivate_ticket": {
+      "ok": true,
+      "ticket": 7
+    },
+    "deactivate_ticket_state": {
+      "ok": true,
+      "ticket": 7,
+      "state": "done"
+    },
+    "activate_ticket": {
+      "ok": true,
+      "ticket": 8
+    }
+  }
+}

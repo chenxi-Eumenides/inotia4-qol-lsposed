@@ -87,6 +87,8 @@ object NativeBridge {
     // ---- 存档管理器备份（save-backup feature：bundle 导出/导入/列表/删除收口 native）----
     external fun nativeSaveBackupInit(dataDir: String, externalFilesDir: String)
     external fun nativeSaveBackupSetMapNames(json: String)
+
+    external fun nativeSetWorldMapExits(json: String)
     external fun nativeBackupList(): String
     external fun nativeBackupExport(slot: Int): String
     external fun nativeBackupImport(checksum: String, slot: Int): String

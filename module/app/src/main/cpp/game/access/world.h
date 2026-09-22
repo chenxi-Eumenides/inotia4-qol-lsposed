@@ -1,8 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include "game/symbols/game_symbols.h"
+
+// 主线程世界事实 JSON 构造器；由 world_facts 的帧快照调用，HTTP/预取线程不得直接调用。
+// 实现仍在 legacy 的 api/native/game_world_readers.inc（收口前先声明，避免 game 层 include legacy 头）。
+std::string build_units_json();
+std::string build_enemies_json();
+std::string build_interactives_json();
+std::string build_drops_json();
 
 // 游戏层：世界/地图域语义化访问（ARCHITECTURE.md §5）。
 // MAPINFOBASE 记录数/记录、当前地图 id、地图名解析、切图调用、主控朝向、金币/弹窗/横幅

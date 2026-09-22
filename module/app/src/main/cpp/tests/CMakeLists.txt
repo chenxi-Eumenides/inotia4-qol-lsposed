@@ -332,6 +332,8 @@ add_executable(plugin_registry_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/hooks/registry.cpp
@@ -385,6 +387,8 @@ add_executable(plugin_lifecycle_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
@@ -422,6 +426,8 @@ add_executable(capability_lifecycle_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
@@ -839,6 +845,21 @@ target_include_directories(world_facts_plugin_tests PRIVATE
 target_compile_features(world_facts_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(world_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME world_facts_plugin_tests COMMAND world_facts_plugin_tests)
+
+# P5-4-1：world_facts 7 条 /api/world/map/* query handler 的注册/快照/注销接缝。
+add_executable(world_facts_dispatch_tests
+    test_world_facts_dispatch.cpp
+    ${CPP_DIR}/plugins/world_facts/plugin.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(world_facts_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(world_facts_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(world_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(world_facts_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME world_facts_dispatch_tests COMMAND world_facts_dispatch_tests)
 
 add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp

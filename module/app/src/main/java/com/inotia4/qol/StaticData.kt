@@ -372,6 +372,9 @@ object StaticData {
         return sb.toString()
     }
 
+    /** 把静态地图出口表下发 native，供 world_facts 的主线程快照按 mapId 取用。 */
+    fun buildMapExitsJson(): String = exitsRootOrNull()?.toString() ?: "{}"
+
     private fun buildMapNames(): Map<Int, String> {
         val json = read("tables/MAPINFOBASE.json") ?: return emptyMap()
         return try {
@@ -411,8 +414,12 @@ object StaticData {
     private var mapExitsRoot: JSONObject? = null
 
     /** 地图出口（静态数据 maps/exits.json）：按 mapId 取 exits 数组，每项 {x, y 瓦片坐标, targetMapId, targetX, targetY} */
-    fun mapExits(mapId: Int): JSONArray? {
-        val root = mapExitsRoot ?: synchronized(this) {
+    fun mapExits(mapId: Int): JSONArray? =
+        exitsRootOrNull()?.optJSONObject("m$mapId")?.optJSONArray("exits")
+
+    private fun exitsRootOrNull(): JSONObject? {
+        mapExitsRoot?.let { return it }
+        return synchronized(this) {
             if (mapExitsRoot == null) {
                 mapExitsRoot = try {
                     val s = read("maps/exits.json")
@@ -423,6 +430,5 @@ object StaticData {
             }
             mapExitsRoot
         }
-        return root?.optJSONObject("m$mapId")?.optJSONArray("exits")
     }
 }

@@ -61,6 +61,13 @@ using HttpLeaseLeaveFn = QolResult (*)(uint64_t lease);
 
 using HttpQueryHandlerFn = QolResult (*)(const HttpReq* request, HttpRes* response, void* ctx);
 using HttpCommandHandlerFn = QolResult (*)(const HttpReq* request, HttpRes* response, void* ctx);
+struct HttpQueryHandlerDescriptor {
+    HttpMethod method;
+    const char* path;
+    const char* owner;
+    HttpQueryHandlerFn handler;
+    void* ctx;
+};
 using HttpRegisterQueryHandlerFn = QolResult (*)(HttpMethod method, const char* path,
                                                  const char* owner, HttpQueryHandlerFn handler,
                                                  void* ctx);

@@ -81,6 +81,11 @@ object ApiServer {
         } catch (t: Throwable) {
             LogFile.error(LogDomain.HTTP, "savebackup set map names failed", t)
         }
+        try {
+            NativeBridge.nativeSetWorldMapExits(StaticData.buildMapExitsJson())
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.HTTP, "world facts set map exits failed", t)
+        }
         // 存档面板启动期初始化：native 侧幂等占用 PopupState 死条目（INAP_GOODS）并读目录自检。
         // D1-b2 起面板占用主路径为 own:popup.savebackup 声明式资源，原懒注入线程已删除。
         try {

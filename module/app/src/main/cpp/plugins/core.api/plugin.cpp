@@ -12,6 +12,7 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kHttpRegistryCapabilityId, contracts::kHttpRegistryVersion, nullptr},
+    {contracts::kHttpDispatchCapabilityId, contracts::kHttpDispatchVersion, nullptr},
 };
 
 #define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
@@ -26,6 +27,7 @@ const contracts::QolHttpRegistryApi* g_registry = nullptr;
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.sdk->http.register_route == nullptr) return 1;
     kProvides[0].iface = &ctx.sdk->http;
+    kProvides[1].iface = &ctx.sdk->http_dispatch;
     g_registry = &ctx.sdk->http;
     for (const contracts::HttpRoute& route : kRoutes) {
         const QolResult result = g_registry->register_route(&route);
@@ -60,7 +62,7 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     0,
     nullptr,
-    1,
+    2,
     kProvides,
     0,
     nullptr,

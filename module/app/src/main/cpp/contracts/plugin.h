@@ -160,6 +160,9 @@ struct PluginDescriptor {
     // 端口需求追加在描述符尾部，旧宿主只读取此前字段。
     const QolPortRequirement* ports = nullptr;
     uint32_t port_count = 0;
+    // HTTP query handler 声明追加在端口字段之后；宿主按插件生命周期注册/撤销。
+    const HttpQueryHandlerDescriptor* http_queries = nullptr;
+    uint32_t http_query_count = 0;
 };
 
 }  // namespace qol::contracts

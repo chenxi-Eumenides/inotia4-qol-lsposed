@@ -1,5 +1,6 @@
 #include "gamebridge_internal.h"
 
+#include "game/adapter_ports/world_port.h"
 #include "infra/store.h"
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -100,6 +101,22 @@ Java_com_inotia4_qol_NativeBridge_nativeSaveBackupSetMapNames(JNIEnv* env, jclas
     const char* c = env->GetStringUTFChars(json, nullptr);
     save_backup_set_map_names(c);
     env->ReleaseStringUTFChars(json, c);
+#endif
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSetWorldMapExits(JNIEnv* env, jclass, jstring json) {
+#if QOL_KERNEL_ONLY
+    (void)env;
+    (void)json;
+#else
+    if (json == nullptr) {
+        qol::game::world_port_set_map_exits_json(nullptr);
+        return;
+    }
+    const char* value = env->GetStringUTFChars(json, nullptr);
+    qol::game::world_port_set_map_exits_json(value);
+    env->ReleaseStringUTFChars(json, value);
 #endif
 }
 

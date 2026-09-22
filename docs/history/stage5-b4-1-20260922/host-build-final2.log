@@ -1,0 +1,4 @@
+[1/4] Building CXX object CMakeFiles/world_facts_dispatch_tests.dir/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/module/app/src/main/cpp/plugins/world_facts/plugin.cpp.o
+[2/4] Building CXX object CMakeFiles/world_facts_plugin_tests.dir/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/module/app/src/main/cpp/plugins/world_facts/plugin.cpp.o
+[3/4] Linking CXX executable world_facts_dispatch_tests
+[4/4] Linking CXX executable world_facts_plugin_tests

@@ -26,7 +26,7 @@ enum class QolPortId : uint32_t {
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 0};
-constexpr QolVersion kQolPortWorldVersion{1, 0};
+constexpr QolVersion kQolPortWorldVersion{1, 1};
 constexpr QolVersion kQolPortItemVersion{1, 0};
 constexpr QolVersion kQolPortCharacterVersion{1, 0};
 constexpr QolVersion kQolPortExtensionBagWriteVersion{1, 0};

@@ -163,8 +163,12 @@ QolResult register_query(contracts::HttpMethod method, const char* path, const c
     }
 
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
-    for (const HandlerSlot& slot : g_handlers) {
+    for (HandlerSlot& slot : g_handlers) {
         if (slot.used && slot.method == method && slot.path == path) {
+            if (slot.unregister_pending && slot.owner == owner) {
+                slot = HandlerSlot{};
+                break;
+            }
             return http_error(kQolErrConflict, "duplicate http handler");
         }
     }
@@ -207,7 +211,6 @@ QolResult unregister_owner(const char* owner) {
         if (!found) return http_error(kQolErrNotFound, "handler owner not found");
     }
 
-    const QolResult route_result = http_registry_api().unregister_owner(owner);
     std::unique_lock<std::mutex> lock(g_dispatch_mutex);
     g_dispatch_cv.wait(lock, [owner] {
         for (const HandlerSlot& slot : g_handlers) {
@@ -216,9 +219,15 @@ QolResult unregister_owner(const char* owner) {
         return true;
     });
     for (HandlerSlot& slot : g_handlers) {
-        if (slot.used && slot.owner == owner) slot = HandlerSlot{};
+        if (slot.used && slot.owner == owner) {
+            // 保留 owner 路由墓碑，使停用态请求得到明确 503，而不是静默落到空响应。
+            slot.query = nullptr;
+            slot.ctx = nullptr;
+            slot.unregister_pending = true;
+        }
     }
-    return route_result;
+    // 路由元数据属于 core.api，owner 停用只撤销 handler；保留路由才能在 owner 恢复时重新绑定。
+    return contracts::ok();
 }
 
 QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* response) {
@@ -298,6 +307,21 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
 
 contracts::QolHttpDispatchApi http_dispatch_api() {
     return {&register_query, &register_command, &unregister_owner, &dispatch};
+}
+
+QolResult http_dispatch_register_queries(const contracts::HttpQueryHandlerDescriptor* handlers,
+                                         uint32_t count) {
+    if (count > 0 && handlers == nullptr) return http_error(kQolErrInvalidArgument, "invalid handlers");
+    for (uint32_t i = 0; i < count; ++i) {
+        const contracts::HttpQueryHandlerDescriptor& handler = handlers[i];
+        const QolResult result = register_query(handler.method, handler.path, handler.owner,
+                                                 handler.handler, handler.ctx);
+        if (!contracts::succeeded(result)) {
+            if (handler.owner != nullptr) (void)unregister_owner(handler.owner);
+            return result;
+        }
+    }
+    return contracts::ok();
 }
 
 QolResult http_dispatch_register_builtin_query(contracts::HttpMethod method, const char* path,

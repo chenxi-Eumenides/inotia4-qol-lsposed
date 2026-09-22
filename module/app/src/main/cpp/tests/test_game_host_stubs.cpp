@@ -1,7 +1,10 @@
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
 #include "game/access/game_access.h"
+#include "game/nav/game_nav.h"
 #include "patch/ptr_slot.h"
+
+#include <string>
 
 uint8_t* g_snd_fx = nullptr;
 UiEquipMakeDescFn fn_ui_equip_make_desc = nullptr;
@@ -82,6 +85,20 @@ QolResult set_physical_item(int32_t, int32_t, void*) {
 int32_t craft_is_apply_stuff(void*, void*) { return -1; }
 
 }  // namespace qol::game
+
+bool game_in_world() { return false; }
+void* lead_member() { return nullptr; }
+const uint8_t* nav_tiles() { return nullptr; }
+bool nav_blocked(const uint8_t*, int, int) { return true; }
+void nav_unit_blocks(bool* blocks) {
+    if (blocks == nullptr) return;
+    for (int i = 0; i < NAV_W * NAV_H; ++i) blocks[i] = false;
+}
+
+std::string build_units_json() { return "{\"units\":[]}"; }
+std::string build_enemies_json() { return "{\"enemies\":[]}"; }
+std::string build_interactives_json() { return "{\"interactives\":[]}"; }
+std::string build_drops_json() { return "{\"drops\":[]}"; }
 
 namespace qol::patch {
 

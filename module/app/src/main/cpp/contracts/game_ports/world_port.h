@@ -7,6 +7,21 @@
 
 namespace qol::contracts {
 
+constexpr uint32_t kWorldNavWidth = 64;
+constexpr uint32_t kWorldNavHeight = 64;
+constexpr uint32_t kWorldNavTileCount = kWorldNavWidth * kWorldNavHeight;
+
+struct QolWorldNavigation {
+    int32_t player_x;
+    int32_t player_y;
+    uint8_t valid;
+    uint8_t blocked[kWorldNavTileCount];
+    uint8_t unit_blocks[kWorldNavTileCount];
+};
+
+using QolWorldJsonFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_size);
+using QolWorldNavigationFn = QolResult (*)(QolWorldNavigation* out_navigation);
+
 struct QolWorldPortReadApi {
     QolResult (*state)(int32_t* out_state);
     QolResult (*game_state_gate)(int32_t* out_open);
@@ -16,6 +31,14 @@ struct QolWorldPortReadApi {
     QolResult (*active_player_direction)(int32_t* out_direction);
     QolResult (*money)(int64_t* out_money);
     QolResult (*tutorial_state)(int32_t* out_state);
+    QolWorldJsonFn exits_json;
+    QolWorldJsonFn units_json;
+    QolWorldJsonFn enemies_json;
+    QolWorldJsonFn interactives_json;
+    QolWorldJsonFn drops_json;
+    QolWorldNavigationFn navigation;
+    // 是否处于 world 态（非 world 时快照发布 not in game 错误体，与迁移前口径一致）。
+    QolResult (*in_world)(int32_t* out_in_world);
 };
 
 struct QolWorldPort {
