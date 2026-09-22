@@ -15,6 +15,7 @@
 #include "plugins/core.ui/plugin.h"
 #include "plugins/core.api/plugin.h"
 #include "plugins/craft_ui/plugin.h"
+#include "plugins/craft_facts/plugin.h"
 #include "plugins/character_facts/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/extension_bag/plugin.h"
@@ -70,6 +71,7 @@ using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
 constexpr PluginDescriptorFn kPluginDescriptors[] = {
 #if !QOL_KERNEL_ONLY
     &features::world_facts::plugin_descriptor,
+    &features::craft_facts::plugin_descriptor,
     &features::save_facts::plugin_descriptor,
     &features::character_facts::plugin_descriptor,
     &features::attribute_quality::plugin_descriptor,

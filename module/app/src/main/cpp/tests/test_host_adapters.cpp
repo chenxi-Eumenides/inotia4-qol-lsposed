@@ -18,6 +18,7 @@
 #include "game/access/symbols.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
@@ -81,6 +82,7 @@ decltype(fn_popup_create_yesno_from_textdata) fn_popup_create_yesno_from_textdat
 decltype(fn_control_object_get_cursor) fn_control_object_get_cursor = nullptr;
 decltype(fn_control_object_get_data) fn_control_object_get_data = nullptr;
 decltype(fn_control_item_get_item) fn_control_item_get_item = nullptr;
+decltype(fn_control_item_set_item) fn_control_item_set_item = nullptr;
 decltype(fn_can_equip) fn_can_equip = nullptr;
 decltype(fn_find_equip_slot) fn_find_equip_slot = nullptr;
 decltype(fn_get_equip_item) fn_get_equip_item = nullptr;
@@ -209,11 +211,13 @@ void* item_class_record(uint16_t) { return reinterpret_cast<void*>(0x8); }
 bool item_class_no_equip_bit(const void*) { return false; }
 int equip_desc_role_type() { return 0; }
 int64_t craft_ui_type() { return 1; }
+int64_t craft_get_ui_type() { return 1; }
 uint8_t craft_panel_state() { return 2; }
 uint32_t craft_mix_type() { return 3; }
 int64_t craft_selected_stuff_index() { return 0; }
 void* craft_stuff_item(size_t) { return reinterpret_cast<void*>(0x1); }
 void* craft_stuff_slot_control(size_t) { return reinterpret_cast<void*>(0x3); }
+void* craft_target_slot_control() { return reinterpret_cast<void*>(0x4); }
 void* craft_target_slot_item() { return reinterpret_cast<void*>(0x4); }
 void* craft_selected_inven_item() { return reinterpret_cast<void*>(0x7); }
 int64_t craft_selected_recipe_at(int64_t) { return 0; }
@@ -518,6 +522,7 @@ int main() {
     const auto& world_port_api = qol::game::world_port();
     const auto& save_port_api = qol::game::save_port();
     const auto& save_call_port_api = qol::game::save_call_port();
+    const auto& craft_port_api = qol::game::craft_port();
     assert(game.abi.size == sizeof(qol::contracts::QolGameHost));
     assert(game.target.query_variant != nullptr);
     qol::contracts::QolTargetVariant variant{};
@@ -551,11 +556,9 @@ int main() {
            kQolErrInvalidArgument);
     assert(game.character_write.max_hp != nullptr);
     assert(game.inventory_write.create_item != nullptr);
-    assert(game.craft_action.show_yesno_from_text != nullptr);
     assert(game.world_action.request_map_change != nullptr);
     assert(game.character_write.max_hp(nullptr, 1).code == kQolErrInvalidArgument);
     assert(game.inventory_write.remove_item(nullptr).code == kQolErrInvalidArgument);
-    assert(game.craft_action.set_ui_type(-1).code == kQolErrInvalidArgument);
     assert(game.world_action.minus_money(-1).code == kQolErrInvalidArgument);
     int32_t character_type = -1;
     assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
@@ -692,19 +695,20 @@ int main() {
 
     uint32_t u32_value = 0;
     int64_t i64_value = 0;
-    assert(game.read_only.craft.ui_type(&u32_value).ok == kQolOk && u32_value == 1);
-    assert(game.read_only.craft.panel_state(&value).ok == kQolOk && value == 2);
-    assert(game.read_only.craft.mix_type(&u32_value).ok == kQolOk && u32_value == 3);
-    assert(game.read_only.craft.selected_stuff_index(&i64_value).ok == kQolOk && i64_value == 0);
-    assert(game.read_only.craft.selected_stuff_item(&pointer_value).ok == kQolOk);
-    assert(game.read_only.craft.stuff_item(0, &pointer_value).ok == kQolOk);
-    assert(game.read_only.craft.category_held_count(4, &value).ok == kQolOk && value == 5);
-    assert(game.read_only.craft.character_level(&value).ok == kQolOk && value == 10);
-    assert(game.read_only.craft.stuff_slot_control(0, &pointer_value).ok == kQolOk);
-    assert(game.read_only.craft.target_slot_item(&pointer_value).ok == kQolOk);
-    assert(game.read_only.craft.selected_inventory_item(&pointer_value).ok == kQolOk);
-    assert(game.read_only.craft.selected_recipe(0, &i64_value).ok == kQolOk);
-    assert(game.read_only.craft.stuff_slot_count(&u32_value).ok == kQolOk && u32_value == 3);
+    assert(craft_port_api.read.ui_type(&u32_value).ok == kQolOk && u32_value == 1);
+    assert(craft_port_api.read.panel_state(&value).ok == kQolOk && value == 2);
+    assert(craft_port_api.read.mix_type(&u32_value).ok == kQolOk && u32_value == 3);
+    assert(craft_port_api.read.selected_stuff_index(&i64_value).ok == kQolOk && i64_value == 0);
+    assert(craft_port_api.read.selected_stuff_item(&pointer_value).ok == kQolOk);
+    assert(craft_port_api.read.stuff_item(0, &pointer_value).ok == kQolOk);
+    assert(craft_port_api.read.category_held_count(4, &value).ok == kQolOk && value == 5);
+    assert(craft_port_api.read.character_level(&value).ok == kQolOk && value == 10);
+    assert(craft_port_api.read_only.get_ui_type(&u32_value).ok == kQolOk && u32_value == 1);
+    assert(craft_port_api.read_only.stuff_slot_control(0, &pointer_value).ok == kQolOk);
+    assert(craft_port_api.read_only.target_slot_item(&pointer_value).ok == kQolOk);
+    assert(craft_port_api.read_only.selected_inventory_item(&pointer_value).ok == kQolOk);
+    assert(craft_port_api.read_only.selected_recipe(0, &i64_value).ok == kQolOk);
+    assert(craft_port_api.read_only.stuff_slot_count(&u32_value).ok == kQolOk && u32_value == 3);
 
     assert(save_port_api.read.slot_state(0, &value).ok == kQolOk && value == 1);
     assert(save_port_api.read.slot_exists(0, &value).ok == kQolOk && value == 1);

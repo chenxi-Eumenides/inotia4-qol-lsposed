@@ -13,8 +13,9 @@ namespace {
 
 std::atomic<int> g_verify_log_budget{16};
 const contracts::QolHostSdk* g_sdk = nullptr;
-const contracts::QolGameHost* g_game = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::CraftFactsApi* g_craft_facts = nullptr;
+const contracts::QolCraftUiWritePort* g_write_port = nullptr;
 
 // 填入格控件缓存（绘制层只做指针比较，见 feature.h 注释）。
 void* g_stuff_ctrl[kStuffSlotCount] = {nullptr, nullptr, nullptr};
@@ -23,13 +24,15 @@ void* g_stuff_ctrl[kStuffSlotCount] = {nullptr, nullptr, nullptr};
 
 void set_context(const contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
-    g_game = ctx.game;
 }
 
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
-const contracts::QolGameHost* game_host() { return g_game; }
 
 void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
+
+void set_craft_facts(const contracts::CraftFactsApi* facts) { g_craft_facts = facts; }
+
+void set_write_port(const contracts::QolCraftUiWritePort* port) { g_write_port = port; }
 
 const contracts::ItemFactsApi* item_facts() { return g_item_facts; }
 
@@ -56,16 +59,16 @@ void log_message(int32_t level, const char* format, ...) {
 
 uint32_t craft_mix_type() {
     uint32_t value = 0;
-    if (g_game != nullptr && g_game->read.craft.mix_type != nullptr) {
-        (void)g_game->read.craft.mix_type(&value);
+    if (g_craft_facts != nullptr && g_craft_facts->read.mix_type != nullptr) {
+        (void)g_craft_facts->read.mix_type(&value);
     }
     return value;
 }
 
 int64_t craft_ui_type() {
     uint32_t value = 0;
-    if (g_game == nullptr || g_game->read.craft.ui_type == nullptr ||
-        g_game->read.craft.ui_type(&value).ok != kQolOk) {
+    if (g_craft_facts == nullptr || g_craft_facts->read.ui_type == nullptr ||
+        g_craft_facts->read.ui_type(&value).ok != kQolOk) {
         return -1;
     }
     return static_cast<int64_t>(value);
@@ -73,68 +76,78 @@ int64_t craft_ui_type() {
 
 int64_t craft_selected_recipe_at(int64_t type) {
     int64_t value = -1;
-    if (g_game != nullptr && g_game->read_only.craft.selected_recipe != nullptr && type >= 0 && type <= 4) {
-        (void)g_game->read_only.craft.selected_recipe(static_cast<int32_t>(type), &value);
+    if (g_craft_facts != nullptr && g_craft_facts->read_only.selected_recipe != nullptr &&
+        type >= 0 && type <= 4) {
+        (void)g_craft_facts->read_only.selected_recipe(static_cast<int32_t>(type), &value);
     }
     return value;
 }
 
 void craft_set_selected_recipe_at(int64_t type, int64_t value) {
-    if (g_game != nullptr && g_game->craft_action.set_selected_recipe != nullptr && type >= 0 && type <= 4) {
-        (void)g_game->craft_action.set_selected_recipe(static_cast<int32_t>(type), value);
+    if (g_write_port != nullptr && g_write_port->set_selected_recipe != nullptr && type >= 0 &&
+        type <= 4) {
+        (void)g_write_port->set_selected_recipe(static_cast<int32_t>(type), value);
     }
 }
 
 int64_t craft_selected_stuff_index() {
     int64_t value = -1;
-    if (g_game != nullptr && g_game->read.craft.selected_stuff_index != nullptr) {
-        (void)g_game->read.craft.selected_stuff_index(&value);
+    if (g_craft_facts != nullptr && g_craft_facts->read.selected_stuff_index != nullptr) {
+        (void)g_craft_facts->read.selected_stuff_index(&value);
     }
     return value;
 }
 
 void* craft_selected_inventory_item() {
     void* item = nullptr;
-    if (g_game != nullptr && g_game->read_only.craft.selected_inventory_item != nullptr) {
-        (void)g_game->read_only.craft.selected_inventory_item(&item);
+    if (g_craft_facts != nullptr && g_craft_facts->read_only.selected_inventory_item != nullptr) {
+        (void)g_craft_facts->read_only.selected_inventory_item(&item);
     }
     return item;
 }
 
 void* craft_target_slot_item() {
     void* item = nullptr;
-    if (g_game != nullptr && g_game->read_only.craft.target_slot_item != nullptr) {
-        (void)g_game->read_only.craft.target_slot_item(&item);
+    if (g_craft_facts != nullptr && g_craft_facts->read_only.target_slot_item != nullptr) {
+        (void)g_craft_facts->read_only.target_slot_item(&item);
     }
     return item;
 }
 
 void craft_set_target_slot_item(void* item) {
-    if (g_game != nullptr && g_game->write.craft.set_target_slot_item != nullptr) {
-        (void)g_game->write.craft.set_target_slot_item(item);
+    if (g_write_port != nullptr && g_write_port->set_target_slot_item != nullptr) {
+        (void)g_write_port->set_target_slot_item(item);
+    }
+}
+
+void craft_set_cost_zero() {
+    if (g_write_port != nullptr && g_write_port->set_cost_zero != nullptr) {
+        (void)g_write_port->set_cost_zero();
     }
 }
 
 void* craft_stuff_item(size_t index) {
     void* item = nullptr;
-    if (g_game != nullptr && g_game->read.craft.stuff_item != nullptr && index < kStuffSlotCount) {
-        (void)g_game->read.craft.stuff_item(static_cast<uint32_t>(index), &item);
+    if (g_craft_facts != nullptr && g_craft_facts->read.stuff_item != nullptr &&
+        index < kStuffSlotCount) {
+        (void)g_craft_facts->read.stuff_item(static_cast<uint32_t>(index), &item);
     }
     return item;
 }
 
 void* craft_stuff_slot_control(size_t index) {
     void* control = nullptr;
-    if (g_game != nullptr && g_game->read_only.craft.stuff_slot_control != nullptr && index < kStuffSlotCount) {
-        (void)g_game->read_only.craft.stuff_slot_control(static_cast<uint32_t>(index), &control);
+    if (g_craft_facts != nullptr && g_craft_facts->read_only.stuff_slot_control != nullptr &&
+        index < kStuffSlotCount) {
+        (void)g_craft_facts->read_only.stuff_slot_control(static_cast<uint32_t>(index), &control);
     }
     return control;
 }
 
 int craft_category_held_count(uint16_t category) {
     int32_t value = 0;
-    if (g_game != nullptr && g_game->read.craft.category_held_count != nullptr &&
-        g_game->read.craft.category_held_count(category, &value).ok == kQolOk) {
+    if (g_craft_facts != nullptr && g_craft_facts->read.category_held_count != nullptr &&
+        g_craft_facts->read.category_held_count(category, &value).ok == kQolOk) {
         return value;
     }
     return 0;
@@ -142,8 +155,8 @@ int craft_category_held_count(uint16_t category) {
 
 int craft_character_level() {
     int32_t value = 0;
-    if (g_game != nullptr && g_game->read.craft.character_level != nullptr &&
-        g_game->read.craft.character_level(&value).ok == kQolOk) {
+    if (g_craft_facts != nullptr && g_craft_facts->read.character_level != nullptr &&
+        g_craft_facts->read.character_level(&value).ok == kQolOk) {
         return value;
     }
     return 0;
@@ -163,81 +176,76 @@ void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
 }
 
 void craft_write_stuff_need(size_t index, uint16_t category, uint16_t count) {
-    if (g_game != nullptr && g_game->write.craft.write_stuff_need != nullptr) {
-        (void)g_game->write.craft.write_stuff_need(static_cast<uint32_t>(index), category, count);
-    }
+    if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) return;
+    contracts::CraftWriteStuffNeedPayload payload{
+        static_cast<uint32_t>(index), static_cast<int32_t>(category), static_cast<int32_t>(count)};
+    contracts::QolCommandTicket ticket = 0;
+    (void)g_sdk->commands.post_typed(contracts::kCraftWriteStuffNeedHandlerId, &payload,
+                                     sizeof(payload), &ticket);
 }
 
 void craft_set_stuff_item(size_t index, void* item) {
-    if (g_game != nullptr && g_game->write.craft.set_stuff_item != nullptr) {
-        (void)g_game->write.craft.set_stuff_item(static_cast<uint32_t>(index), item);
-    }
+    if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) return;
+    contracts::CraftSetStuffItemPayload payload{static_cast<uint32_t>(index), item};
+    contracts::QolCommandTicket ticket = 0;
+    (void)g_sdk->commands.post_typed(contracts::kCraftSetStuffItemHandlerId, &payload,
+                                     sizeof(payload), &ticket);
 }
 
 void craft_select_first_empty_stuff_slot() {
-    if (g_game != nullptr && g_game->craft_action.select_first_empty_stuff_slot != nullptr) {
+    if (g_write_port != nullptr && g_write_port->select_first_empty_stuff_slot != nullptr) {
         int32_t ignored = -1;
-        (void)g_game->craft_action.select_first_empty_stuff_slot(&ignored);
+        (void)g_write_port->select_first_empty_stuff_slot(&ignored);
     }
 }
 
 void craft_reset_stuff_item_control() {
-    if (g_game != nullptr && g_game->craft_action.reset_stuff_item_control != nullptr) {
-        (void)g_game->craft_action.reset_stuff_item_control();
+    if (g_write_port != nullptr && g_write_port->reset_stuff_item_control != nullptr) {
+        (void)g_write_port->reset_stuff_item_control();
     }
 }
 
 void craft_refresh_inventory_items() {
-    if (g_game != nullptr && g_game->craft_action.refresh_inventory_items != nullptr) {
-        (void)g_game->craft_action.refresh_inventory_items();
+    if (g_write_port != nullptr && g_write_port->refresh_inventory_items != nullptr) {
+        (void)g_write_port->refresh_inventory_items();
     }
 }
 
 void craft_init_mixing_state() {
-    if (g_game != nullptr && g_game->craft_action.init_mixing_state != nullptr) {
-        (void)g_game->craft_action.init_mixing_state();
+    if (g_write_port != nullptr && g_write_port->init_mixing_state != nullptr) {
+        (void)g_write_port->init_mixing_state();
     }
 }
 
 void craft_set_ui_type(int64_t type) {
-    if (g_game != nullptr && g_game->craft_action.set_ui_type != nullptr) {
-        (void)g_game->craft_action.set_ui_type(type);
+    if (g_write_port != nullptr && g_write_port->set_ui_type != nullptr) {
+        (void)g_write_port->set_ui_type(type);
     }
 }
 
 void craft_play_sound(int16_t sound_id) {
-    if (g_game != nullptr && g_game->craft_action.play_sound != nullptr) {
-        (void)g_game->craft_action.play_sound(sound_id);
+    if (g_write_port != nullptr && g_write_port->play_sound != nullptr) {
+        (void)g_write_port->play_sound(sound_id);
     }
 }
 
 void craft_show_text(uint32_t text_id) {
-    if (g_game != nullptr && g_game->craft_action.show_text != nullptr) {
-        (void)g_game->craft_action.show_text(text_id);
+    if (g_write_port != nullptr && g_write_port->show_text != nullptr) {
+        (void)g_write_port->show_text(text_id);
     }
 }
 
 bool craft_show_yesno(uint32_t text_id, void* ok, void* cancel) {
-    if (g_game == nullptr || g_game->craft_action.show_yesno_from_text == nullptr) return false;
-    return g_game->craft_action.show_yesno_from_text(text_id, ok, cancel).ok == kQolOk;
-}
-
-void craft_description_set_off() {
-    if (g_game != nullptr && g_game->craft_action.description_set_off != nullptr) {
-        (void)g_game->craft_action.description_set_off();
-    }
+    if (g_write_port == nullptr || g_write_port->show_yesno_from_text == nullptr) return false;
+    return g_write_port->show_yesno_from_text(text_id, ok, cancel).ok == kQolOk;
 }
 
 int craft_panel_state() {
     int32_t value = 0;
-    if (g_game != nullptr && g_game->read.craft.panel_state != nullptr) {
-        (void)g_game->read.craft.panel_state(&value);
+    if (g_craft_facts != nullptr && g_craft_facts->read.panel_state != nullptr) {
+        (void)g_craft_facts->read.panel_state(&value);
     }
     return value;
-}
-
-void craft_select_stuff_slot(int64_t index) {
-    (void)index;
 }
 
 TextScopeGuard::TextScopeGuard(int32_t scope) : sdk_(g_sdk), pushed_(false) {

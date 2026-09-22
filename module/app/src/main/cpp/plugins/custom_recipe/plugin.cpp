@@ -4,7 +4,10 @@
 #include <cstdint>
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/craft_commands.h"
+#include "../../contracts/craft_facts.h"
 #include "../../contracts/craft_result.h"
+#include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/events.h"
 #include "../../contracts/item_facts.h"
 #include "feature.h"
@@ -31,6 +34,9 @@ void on_config_changed(void* /*ctx*/, const void* payload) {
     set_enabled(event->int_value != 0);
 }
 
+bool write_stuff_need_handler(void*, const uint8_t* payload, uint32_t size);
+bool set_stuff_item_handler(void*, const uint8_t* payload, uint32_t size);
+
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
         return 1;
@@ -43,6 +49,42 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kCraftFactsCapabilityId,
+            {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}, &iface)) ||
+        iface == nullptr) {
+        set_item_facts(nullptr);
+        return 1;
+    }
+    set_craft_facts(static_cast<const contracts::CraftFactsApi*>(iface));
+    if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
+        set_item_facts(nullptr);
+        set_craft_facts(nullptr);
+        return 1;
+    }
+    const auto* write_port = static_cast<const contracts::QolCustomRecipeWritePort*>(ctx.ports[0]);
+    if (!contracts::satisfies(write_port->abi_version,
+                              {contracts::kQolPortCustomRecipeWriteVersion.major,
+                               contracts::kQolPortCustomRecipeWriteVersion.minor}) ||
+        write_port->write_stuff_need == nullptr || write_port->set_stuff_item == nullptr ||
+        write_port->description_set_off == nullptr ||
+        ctx.sdk->commands.register_typed_handler == nullptr ||
+        ctx.sdk->commands.unregister_typed_handler == nullptr ||
+        ctx.sdk->commands.register_typed_handler(contracts::kCraftWriteStuffNeedHandlerId,
+                                                  &write_stuff_need_handler, nullptr).ok != kQolOk) {
+        set_item_facts(nullptr);
+        set_craft_facts(nullptr);
+        return 1;
+    }
+    if (ctx.sdk->commands.register_typed_handler(contracts::kCraftSetStuffItemHandlerId,
+                                                  &set_stuff_item_handler, nullptr).ok != kQolOk) {
+        (void)ctx.sdk->commands.unregister_typed_handler(contracts::kCraftWriteStuffNeedHandlerId);
+        set_item_facts(nullptr);
+        set_craft_facts(nullptr);
+        return 1;
+    }
+    set_write_port(write_port);
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
     register_dynamic_recipes();
@@ -69,8 +111,14 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         }
         g_config_subscription = 0;
     }
+    if (host_sdk() != nullptr && host_sdk()->commands.unregister_typed_handler != nullptr) {
+        (void)host_sdk()->commands.unregister_typed_handler(contracts::kCraftWriteStuffNeedHandlerId);
+        (void)host_sdk()->commands.unregister_typed_handler(contracts::kCraftSetStuffItemHandlerId);
+    }
     unregister_dynamic_recipes();
     set_item_facts(nullptr);
+    set_craft_facts(nullptr);
+    set_write_port(nullptr);
     set_enabled(false);
     ::custom_recipe::custom_recipe_table_deactivate();
 }
@@ -107,8 +155,24 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kItemFactsCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kItemFactsVersionMajor),
-                     static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
+                      static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
+    {contracts::kCraftFactsCapabilityId,
+     {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}},
 };
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE,
+     {contracts::kQolPortCustomRecipeWriteVersion.major,
+      contracts::kQolPortCustomRecipeWriteVersion.minor}},
+};
+
+bool write_stuff_need_handler(void*, const uint8_t* payload, uint32_t size) {
+    return handle_write_stuff_need_command(payload, size);
+}
+
+bool set_stuff_item_handler(void*, const uint8_t* payload, uint32_t size) {
+    return handle_set_stuff_item_command(payload, size);
+}
 
 // provides=craft_result v1.0（结果层能力，消费者=craft_ui）。
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -141,7 +205,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        1, kRequires,            // requires=item.facts
+        2, kRequires,            // requires=item.facts + craft.facts
         1, kOptionalRequires,    // optional_requires=[attribute.quality]
         1, kProvides,            // provides=craft_result
         1, kClaims,              // resources=ownership
@@ -152,6 +216,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         &plugin_on_disabled,
         &plugin_fill_status,
         nullptr,                 // on_resource_ready（ownership 无 backup）
+        kPorts, 1,
     };
     return descriptor;
 }

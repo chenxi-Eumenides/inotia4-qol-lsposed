@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "contracts/events.h"
+#include "contracts/craft_facts.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
@@ -45,6 +46,7 @@ const contracts::QolExtensionBagWritePort* g_write_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::SaveFactsApi* g_save_facts = nullptr;
+const contracts::CraftFactsApi* g_craft_facts = nullptr;
 
 // moveMergeEnabled 配置变更订阅句柄；deactivate 时成对注销（install 幂等重入）。
 uint64_t g_config_subscription = 0;
@@ -90,6 +92,10 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
         qol::contracts::kSaveFactsCapabilityId,
         {qol::contracts::kSaveFactsVersionMajor, qol::contracts::kSaveFactsVersionMinor},
     },
+    {
+        qol::contracts::kCraftFactsCapabilityId,
+        {qol::contracts::kCraftFactsVersionMajor, qol::contracts::kCraftFactsVersionMinor},
+    },
 };
 
 const qol::contracts::QolPortRequirement kPorts[] = {
@@ -105,6 +111,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     g_save_facts = nullptr;
+    g_craft_facts = nullptr;
     if (ctx.struct_size < sizeof(qol::contracts::PluginContext) ||
         ctx.sdk_major != qol::contracts::kHostSdkMajor ||
         ctx.sdk == nullptr || ctx.game == nullptr ||
@@ -115,6 +122,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
     if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) {
@@ -123,6 +131,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
     g_write_port = static_cast<const qol::contracts::QolExtensionBagWritePort*>(ctx.ports[0]);
@@ -138,6 +147,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
     g_world_facts = static_cast<const qol::contracts::WorldFactsApi*>(world_facts_iface);
@@ -153,6 +163,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_world_facts = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
     g_item_facts = static_cast<const qol::contracts::ItemFactsApi*>(item_facts_iface);
@@ -170,16 +181,38 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_save_facts = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
     g_save_facts = static_cast<const qol::contracts::SaveFactsApi*>(save_facts_iface);
+    const void* craft_facts_iface = nullptr;
+    if (!qol::contracts::succeeded(ctx.sdk->capabilities.require(
+            qol::contracts::kCraftFactsCapabilityId,
+            {qol::contracts::kCraftFactsVersionMajor, qol::contracts::kCraftFactsVersionMinor},
+            &craft_facts_iface)) ||
+        craft_facts_iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_write_port = nullptr;
+        g_world_facts = nullptr;
+        g_item_facts = nullptr;
+        g_save_facts = nullptr;
+        g_craft_facts = nullptr;
+        extension_bag_bind_port_sdk(nullptr);
+        extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
+        return 1;
+    }
+    g_craft_facts = static_cast<const qol::contracts::CraftFactsApi*>(craft_facts_iface);
     extension_bag_bind_item_facts(g_item_facts);
+    extension_bag_bind_craft_facts(g_craft_facts);
     if (!extension_bag_bind_host(g_sdk, g_game, g_write_port)) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
     extension_bag_bind_port_sdk(g_sdk);
@@ -210,7 +243,9 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     g_save_facts = nullptr;
+    g_craft_facts = nullptr;
     extension_bag_bind_item_facts(nullptr);
+    extension_bag_bind_craft_facts(nullptr);
     g_game = nullptr;
     g_write_port = nullptr;
     g_sdk = nullptr;

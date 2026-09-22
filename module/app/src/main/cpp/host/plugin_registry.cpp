@@ -6,6 +6,9 @@
 
 #include "infra/log/qol_log.h"
 #include "contracts/commands.h"
+#include "contracts/game_ports/craft_ui_write_port.h"
+#include "contracts/game_ports/custom_recipe_write_port.h"
+#include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/choice_port.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
@@ -26,6 +29,9 @@
 #include "patch/ptr_slot.h"
 #if !QOL_KERNEL_ONLY
 #include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/craft_port.h"
+#include "game/adapter_ports/craft_ui_write_port.h"
+#include "game/adapter_ports/custom_recipe_write_port.h"
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
@@ -132,6 +138,21 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_CRAFT) {
+        const auto& port = qol::game::craft_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE) {
+        const auto& port = qol::game::craft_ui_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE) {
+        const auto& port = qol::game::custom_recipe_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
 #else
     (void)id;
     (void)out;
@@ -160,6 +181,24 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_CALL &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "save_backup") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CRAFT &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "craft_facts") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "craft_ui") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "custom_recipe") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

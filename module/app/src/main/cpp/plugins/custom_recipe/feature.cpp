@@ -40,6 +40,8 @@ constexpr uint32_t kJewelTypeMask = 63;
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::CraftFactsApi* g_craft_facts = nullptr;
+const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
 uint64_t g_save_enter_subscription = 0;
 
 }  // namespace
@@ -63,6 +65,10 @@ const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 const contracts::QolGameHost* game_host() { return g_game; }
 
 void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
+
+void set_craft_facts(const contracts::CraftFactsApi* facts) { g_craft_facts = facts; }
+
+void set_write_port(const contracts::QolCustomRecipeWritePort* port) { g_write_port = port; }
 
 void log_message(int32_t level, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
@@ -125,8 +131,8 @@ bool item_is_stackable(void* item) {
 // 某类别当前持有总数（INVEN_GetItemCount）；读不到返回 0（fail-closed）。
 int category_held_count(uint16_t category) {
     int32_t count = 0;
-    if (g_game == nullptr || g_game->read.craft.category_held_count == nullptr ||
-        g_game->read.craft.category_held_count(category, &count).ok != kQolOk) {
+    if (g_craft_facts == nullptr || g_craft_facts->read.category_held_count == nullptr ||
+        g_craft_facts->read.category_held_count(category, &count).ok != kQolOk) {
         return 0;
     }
     return count;
@@ -203,17 +209,16 @@ void apply_material_count(const ::custom_recipe::Def* def, void* jewel) {
     const int grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(item_category(jewel)));
     if (grade < 1) return;
     int32_t level = 0;
-    if (g_game == nullptr || g_game->read.craft.character_level == nullptr ||
-        g_game->read.craft.character_level(&level).ok != kQolOk) {
+    if (g_craft_facts == nullptr || g_craft_facts->read.character_level == nullptr ||
+        g_craft_facts->read.character_level(&level).ok != kQolOk) {
         return;
     }
     for (uint8_t i = 0; i < def->material_count; ++i) {
         const int want =
             ::custom_recipe::material_count_for(def->materials[i].count, grade, level);
-        if (g_game != nullptr && g_game->write.craft.write_stuff_need != nullptr) {
-            (void)g_game->write.craft.write_stuff_need(
-                static_cast<uint32_t>(i), def->materials[i].item_id,
-                static_cast<uint16_t>(want));
+        if (g_write_port != nullptr && g_write_port->write_stuff_need != nullptr) {
+            (void)g_write_port->write_stuff_need(
+                static_cast<uint32_t>(i), def->materials[i].item_id, want);
         }
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
@@ -342,15 +347,16 @@ qol::contracts::PlaceOutcome api_place(const qol::contracts::CraftPlaceInput* in
         }
     }
     void* slot = nullptr;
-    if (g_game != nullptr && g_game->read_only.craft.stuff_slot_control != nullptr) {
-        (void)g_game->read_only.craft.stuff_slot_control(static_cast<uint32_t>(in->slot_index), &slot);
+    if (g_craft_facts != nullptr && g_craft_facts->read_only.stuff_slot_control != nullptr) {
+        (void)g_craft_facts->read_only.stuff_slot_control(static_cast<uint32_t>(in->slot_index),
+                                                          &slot);
     }
     if (slot == nullptr) return PlaceOutcome::kPlaced;
-    if (g_game != nullptr && g_game->craft_action.description_set_off != nullptr) {
-        (void)g_game->craft_action.description_set_off();
+    if (g_write_port != nullptr && g_write_port->description_set_off != nullptr) {
+        (void)g_write_port->description_set_off();
     }
-    if (g_game != nullptr && g_game->write.craft.set_stuff_item != nullptr) {
-        (void)g_game->write.craft.set_stuff_item(static_cast<uint32_t>(in->slot_index), item);
+    if (g_write_port != nullptr && g_write_port->set_stuff_item != nullptr) {
+        (void)g_write_port->set_stuff_item(static_cast<uint32_t>(in->slot_index), item);
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot place idx=%lld category=%u",
@@ -641,5 +647,26 @@ void unregister_dynamic_recipes() {
 const qol::contracts::CraftResultApi& craft_result_api() { return kCraftResultApi; }
 
 const qol::contracts::OwnershipOps& ownership_ops() { return kOwnershipOps; }
+
+bool handle_write_stuff_need_command(const uint8_t* payload, uint32_t size) {
+    if (payload == nullptr || size != sizeof(contracts::CraftWriteStuffNeedPayload) ||
+        g_write_port == nullptr || g_write_port->write_stuff_need == nullptr) {
+        return false;
+    }
+    contracts::CraftWriteStuffNeedPayload command{};
+    std::memcpy(&command, payload, sizeof(command));
+    return g_write_port->write_stuff_need(command.index, command.category, command.count).ok ==
+           kQolOk;
+}
+
+bool handle_set_stuff_item_command(const uint8_t* payload, uint32_t size) {
+    if (payload == nullptr || size != sizeof(contracts::CraftSetStuffItemPayload) ||
+        g_write_port == nullptr || g_write_port->set_stuff_item == nullptr) {
+        return false;
+    }
+    contracts::CraftSetStuffItemPayload command{};
+    std::memcpy(&command, payload, sizeof(command));
+    return g_write_port->set_stuff_item(command.index, command.item).ok == kQolOk;
+}
 
 }  // namespace qol::features::custom_recipe

@@ -48,6 +48,7 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/text_layer/plugin.cpp
     plugins/craft_ui/feature.cpp
     plugins/craft_ui/plugin.cpp
+    plugins/craft_facts/plugin.cpp
     plugins/push_all/rules.cpp
     plugins/push_all/feature.cpp
     plugins/push_all/plugin.cpp
@@ -218,6 +219,7 @@ target_sources(gamebridge PRIVATE
 if(NOT QOL_KERNEL_ONLY)
     target_sources(gamebridge PRIVATE
         game/adapter_ports/character_port.cpp
+        game/adapter_ports/craft_port.cpp
         game/adapter_ports/choice_port.cpp
         game/adapter_ports/item_port.cpp
         game/adapter_ports/quest_port.cpp

@@ -1,7 +1,10 @@
 #pragma once
 
 #include "../../contracts/craft_result.h"
+#include "../../contracts/craft_commands.h"
+#include "../../contracts/craft_facts.h"
 #include "../../contracts/game_host.h"
+#include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/ownership.h"
 #include "../../contracts/item_facts.h"
@@ -22,6 +25,8 @@ namespace qol::features::custom_recipe {
 
 void set_context(const contracts::PluginContext& ctx);
 void set_item_facts(const contracts::ItemFactsApi* facts);
+void set_craft_facts(const contracts::CraftFactsApi* facts);
+void set_write_port(const contracts::QolCustomRecipeWritePort* port);
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 void log_message(int32_t level, const char* format, ...);
@@ -39,5 +44,8 @@ bool set_enabled(bool enabled);
 // 注册「进档重建动态特殊装备配方」回调（幂等）。
 void register_dynamic_recipes();
 void unregister_dynamic_recipes();
+
+bool handle_write_stuff_need_command(const uint8_t* payload, uint32_t size);
+bool handle_set_stuff_item_command(const uint8_t* payload, uint32_t size);
 
 }  // namespace qol::features::custom_recipe

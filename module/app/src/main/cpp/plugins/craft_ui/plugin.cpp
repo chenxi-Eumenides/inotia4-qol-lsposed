@@ -6,6 +6,8 @@
 #include <cstring>
 
 #include "../../contracts/craft_result.h"
+#include "../../contracts/craft_facts.h"
+#include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "feature.h"
 
 // ===========================================================================
@@ -223,9 +225,7 @@ void place_execute(void* ctrl) {
                                item_category(craft_stuff_item(static_cast<size_t>(i))),
                                static_cast<uint16_t>(no.needs[i]));
     }
-    if (game_host() != nullptr && game_host()->write.craft.set_cost_zero != nullptr) {
-        (void)game_host()->write.craft.set_cost_zero();
-    }
+    craft_set_cost_zero();
     if (log_budget_take()) {
         log_message(kLogDebug, "place accepted jewel mixType=%u cost=0", mix_type);
     }
@@ -491,11 +491,20 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kItemFactsCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kItemFactsVersionMajor),
-                     static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
+                      static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
+    {contracts::kCraftFactsCapabilityId,
+     QolVersionRange{contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}},
+};
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE,
+     {contracts::kQolPortCraftUiWriteVersion.major,
+      contracts::kQolPortCraftUiWriteVersion.minor}},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr || ctx.ports == nullptr ||
+        ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         return 1;
     }
     const void* iface = nullptr;
@@ -506,6 +515,24 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kCraftFactsCapabilityId,
+            {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}, &iface)) ||
+        iface == nullptr) {
+        set_item_facts(nullptr);
+        return 1;
+    }
+    set_craft_facts(static_cast<const contracts::CraftFactsApi*>(iface));
+    const auto* write_port = static_cast<const contracts::QolCraftUiWritePort*>(ctx.ports[0]);
+    if (!contracts::satisfies(write_port->abi_version,
+                              {contracts::kQolPortCraftUiWriteVersion.major,
+                               contracts::kQolPortCraftUiWriteVersion.minor})) {
+        set_item_facts(nullptr);
+        set_craft_facts(nullptr);
+        return 1;
+    }
+    set_write_port(write_port);
     set_context(ctx);
     // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
     return 0;
@@ -515,6 +542,8 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     set_item_facts(nullptr);
+    set_craft_facts(nullptr);
+    set_write_port(nullptr);
 }
 void plugin_on_enabled(contracts::PluginContext& ctx) { (void)ctx; }
 void plugin_on_disabled(contracts::PluginContext& ctx) { (void)ctx; }
@@ -525,7 +554,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 }
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
-    if (ctx.sdk == nullptr || ctx.game == nullptr) return 1;
+    if (ctx.sdk == nullptr) return 1;
     set_context(ctx);
     if (resource_id == nullptr) return 1;
     if (std::strcmp(resource_id, "hook:UIMix_ButtonInvenItemSelectExe") == 0) {
@@ -564,7 +593,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        1, kRequires,  // requires=item.facts
+        2, kRequires,  // requires=item.facts + craft.facts
         1, kOptionalRequires,  // optional_requires=[craft_result]
         0, nullptr,  // provides
         kClaimCount, kClaims,
@@ -575,6 +604,8 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         &plugin_on_disabled,
         &plugin_fill_status,
         &on_resource_ready,
+        kPorts,
+        1,
     };
     return descriptor;
 }

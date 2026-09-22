@@ -6,6 +6,9 @@
 #include "contracts/game_ports/extension_bag_write_port.h"
 #include "contracts/game_ports/save_call_port.h"
 #include "contracts/game_ports/save_port.h"
+#include "contracts/game_ports/craft_port.h"
+#include "contracts/game_ports/craft_ui_write_port.h"
+#include "contracts/game_ports/custom_recipe_write_port.h"
 
 namespace qol::game {
 namespace {
@@ -18,6 +21,12 @@ const contracts::QolChoicePort kChoicePort{{1, 0}, {}, {}};
 const contracts::QolExtensionBagWritePort kExtensionBagWritePort{};
 const contracts::QolSavePort kSavePort{{1, 0}, {}};
 const contracts::QolSaveCallPort kSaveCallPort{{1, 0}, {}};
+const contracts::QolCraftPort kCraftPort{{1, 0}, {}, {}};
+const contracts::QolCraftUiWritePort kCraftUiWritePort{{1, 0}, nullptr, nullptr, nullptr,
+                                                       nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                       nullptr, nullptr, nullptr};
+const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{{1, 0}, nullptr, nullptr,
+                                                                  nullptr};
 
 }  // namespace
 
@@ -31,5 +40,10 @@ const contracts::QolExtensionBagWritePort& extension_bag_write_port() {
 }
 const contracts::QolSavePort& save_port() { return kSavePort; }
 const contracts::QolSaveCallPort& save_call_port() { return kSaveCallPort; }
+const contracts::QolCraftPort& craft_port() { return kCraftPort; }
+const contracts::QolCraftUiWritePort& craft_ui_write_port() { return kCraftUiWritePort; }
+const contracts::QolCustomRecipeWritePort& custom_recipe_write_port() {
+    return kCustomRecipeWritePort;
+}
 
 }  // namespace qol::game

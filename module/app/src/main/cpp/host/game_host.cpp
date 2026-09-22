@@ -213,59 +213,6 @@ QolResult read_inventory_detail_item(void** out_item) {
                                 : contracts::ok();
 }
 
-QolResult read_craft_ui_type(uint32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int64_t value = qol::game::craft_ui_type();
-    if (value < 0) return not_ready();
-    *out = static_cast<uint32_t>(value);
-    return contracts::ok();
-}
-
-QolResult read_craft_panel_state(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = static_cast<int32_t>(qol::game::craft_panel_state());
-    return contracts::ok();
-}
-
-QolResult read_craft_mix_type(uint32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_mix_type();
-    return contracts::ok();
-}
-
-QolResult read_craft_selected_index(int64_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_selected_stuff_index();
-    return contracts::ok();
-}
-
-QolResult read_craft_selected_item(void** out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int64_t index = qol::game::craft_selected_stuff_index();
-    *out = index >= 0 && index < static_cast<int64_t>(qol::game::kCraftStuffSlotCount)
-               ? qol::game::craft_stuff_item(static_cast<uint32_t>(index))
-               : nullptr;
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult read_craft_stuff_item(uint32_t index, void** out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_stuff_item(index);
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult read_craft_category_count(int32_t category, int32_t* out) {
-    if (category < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_category_held_count(static_cast<uint16_t>(category));
-    return contracts::ok();
-}
-
-QolResult read_craft_character_level(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_character_level();
-    return contracts::ok();
-}
-
 QolResult read_char_party_member(const void* character, int32_t* out) {
     if (character == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -526,110 +473,6 @@ QolResult write_inventory_remove_item_direct(int32_t bag, int32_t slot) {
     return contracts::ok();
 }
 
-QolResult read_craft_slot_control(uint32_t index, void** out) {
-    if (out == nullptr || index >= qol::game::kCraftStuffSlotCount) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out = qol::game::craft_stuff_slot_control(index);
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult read_craft_target_item(void** out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_target_slot_item();
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult read_craft_selected_inventory_item(void** out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_selected_inven_item();
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult read_craft_selected_recipe(int32_t type, int64_t* out) {
-    if (type < 0 || type > 4 || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out = qol::game::craft_selected_recipe_at(type);
-    return contracts::ok();
-}
-
-QolResult read_craft_slot_count(uint32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_stuff_slot_count();
-    return contracts::ok();
-}
-
-QolResult call_craft_init() {
-    if (fn_uimix_init_mixing_state == nullptr) return not_ready();
-    qol::game::craft_init_mixing_state();
-    return contracts::ok();
-}
-
-QolResult call_craft_reset() {
-    if (fn_uimix_reset_stuff_item_control == nullptr) return not_ready();
-    qol::game::craft_reset_stuff_item_control();
-    return contracts::ok();
-}
-
-QolResult call_craft_refresh() {
-    if (fn_ui_mix_refresh_inven_item == nullptr) return not_ready();
-    qol::game::craft_refresh_inven_items();
-    return contracts::ok();
-}
-
-QolResult call_craft_select_first_empty(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::craft_select_first_empty_stuff_slot();
-    return contracts::ok();
-}
-
-QolResult call_craft_set_type(int64_t type) {
-    if (type < 0 || type > 4) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (fn_uimix_set_type == nullptr) return not_ready();
-    qol::game::craft_set_ui_type(type);
-    return contracts::ok();
-}
-
-QolResult call_craft_set_selected_recipe(int32_t type, int64_t recipe) {
-    if (type < 0 || type > 4 || recipe < -1) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (qol::game::craft_ui_type() < 0) return not_ready();
-    qol::game::craft_set_selected_recipe_at(type, recipe);
-    return contracts::ok();
-}
-
-QolResult call_craft_play_sound(int32_t sound_id) {
-    if (sound_id < INT16_MIN || sound_id > INT16_MAX) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (fn_sound_system_play == nullptr) return not_ready();
-    qol::game::craft_play_sound(static_cast<int16_t>(sound_id));
-    return contracts::ok();
-}
-
-QolResult call_craft_show_text(uint32_t text_id) {
-    if (fn_popup_create_ok_from_textdata == nullptr) return not_ready();
-    qol::game::craft_show_text(text_id);
-    return contracts::ok();
-}
-
-QolResult call_craft_show_yesno(uint32_t text_id, void* ok, void* cancel) {
-    if (ok == nullptr || cancel == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    return qol::game::craft_show_yesno_from_textdata(text_id, ok, cancel)
-               ? contracts::ok()
-               : not_ready();
-}
-
-QolResult call_craft_description_set_off() {
-    if (fn_ui_desc_set_off == nullptr) return not_ready();
-    qol::game::craft_desc_set_off();
-    return contracts::ok();
-}
-
 QolResult call_world_create_yesno(const char* text, uint32_t text_len, void* ok, void* cancel,
                                   void* param) {
     if (text == nullptr || text_len == 0 || text_len > 4096 || ok == nullptr || cancel == nullptr) {
@@ -728,36 +571,6 @@ QolResult read_attr_fixed_option_percent_pair(int32_t category, int32_t option_i
     return contracts::ok();
 }
 
-QolResult write_craft_stuff_need(uint32_t index, int32_t category, int32_t count) {
-    if (category < 0 || count < 0 || count > UINT16_MAX) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    void* item = qol::game::craft_stuff_item(index);
-    if (item != nullptr && qol::game::attr_item_category(item) != category) {
-        return error_result(kQolErrConflict, "category mismatch");
-    }
-    qol::game::craft_write_stuff_need(index, static_cast<uint16_t>(count));
-    return contracts::ok();
-}
-
-QolResult write_craft_stuff_item(uint32_t index, void* item) {
-    if (index >= qol::game::kCraftStuffSlotCount) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    qol::game::craft_set_stuff_item(index, item);
-    return contracts::ok();
-}
-
-QolResult write_craft_target_item(void* item) {
-    qol::game::craft_set_target_slot_item(item);
-    return contracts::ok();
-}
-
-QolResult write_craft_cost_zero() {
-    qol::game::craft_set_cost_zero();
-    return contracts::ok();
-}
-
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -767,15 +580,9 @@ contracts::QolGameHost make_game_host() {
     host.thread = {&game_is_main_thread, &game_frame_count};
     host.read.character = {&read_char_party};
     host.read.item = {&read_item_ability};
-    host.read.craft = {&read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
-                       &read_craft_selected_index, &read_craft_selected_item,
-                       &read_craft_stuff_item, &read_craft_category_count,
-                       &read_craft_character_level};
     host.read.attr_range = {&read_attr_option_value, &read_attr_jewel_value,
                             &read_attr_uses_fixed_option_table,
                             &read_attr_fixed_option_percent_pair};
-    host.write.craft = {&write_craft_stuff_need, &write_craft_stuff_item,
-                        &write_craft_target_item, &write_craft_cost_zero};
     host.read_only.character = {
         &read_char_party, &read_char_party_member,
         &read_char_summoner, &read_char_level, &read_char_merc_slot,
@@ -792,12 +599,6 @@ contracts::QolGameHost make_game_host() {
         &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable,
         &read_item_count_encoding};
     host.read_only.world = {&read_world_position};
-    host.read_only.craft = {
-        &read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
-        &read_craft_selected_index, &read_craft_selected_item, &read_craft_stuff_item,
-        &read_craft_category_count, &read_craft_character_level, &read_craft_slot_control,
-        &read_craft_target_item, &read_craft_selected_inventory_item,
-        &read_craft_selected_recipe, &read_craft_slot_count};
     host.read_only.choice = {&read_choice_state_id};
     host.read_only.inventory = {&read_inventory_for_each_bag_slot,
                                 &read_inventory_bag_size,
@@ -811,11 +612,6 @@ contracts::QolGameHost make_game_host() {
                             &write_inventory_save_item,
                             &write_inventory_free_item,
                             &write_inventory_remove_item_direct};
-    host.craft_action = {&call_craft_init, &call_craft_reset, &call_craft_refresh,
-                         &call_craft_select_first_empty, &call_craft_set_type,
-                         &call_craft_set_selected_recipe, &call_craft_play_sound,
-                         &call_craft_show_text, &call_craft_show_yesno,
-                         &call_craft_description_set_off};
     host.world_action = {&call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
                          &call_world_close_popup, &call_world_restore_hud,
                          &call_world_show_banner, &call_world_add_money,

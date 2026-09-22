@@ -80,6 +80,7 @@ const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::QolExtensionBagWritePort* g_write_port = nullptr;
 const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
+const qol::contracts::CraftFactsApi* g_craft_facts = nullptr;
 int g_lifecycle_last_state = -1;
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
 std::atomic<bool> g_virtual_bag_enabled{false};
@@ -697,6 +698,12 @@ void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
 }
 
 const qol::contracts::ItemFactsApi* extension_bag_item_facts() { return g_item_facts; }
+
+void extension_bag_bind_craft_facts(const qol::contracts::CraftFactsApi* facts) {
+    g_craft_facts = facts;
+}
+
+const qol::contracts::CraftFactsApi* extension_bag_craft_facts() { return g_craft_facts; }
 
 }  // namespace qol::features::extension_bag
 

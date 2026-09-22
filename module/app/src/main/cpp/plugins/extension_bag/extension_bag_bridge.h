@@ -12,6 +12,7 @@
 #include "contracts/extension_bag.h"
 #include "contracts/plugin.h"
 #include "contracts/item_facts.h"
+#include "contracts/craft_facts.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
 
 namespace qol::features::extension_bag {
@@ -37,6 +38,8 @@ void extension_bag_bind_port_sdk(const qol::contracts::QolHostSdk* sdk);
 const qol::contracts::QolGameHost* extension_bag_game_host();
 void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts);
 const qol::contracts::ItemFactsApi* extension_bag_item_facts();
+void extension_bag_bind_craft_facts(const qol::contracts::CraftFactsApi* facts);
+const qol::contracts::CraftFactsApi* extension_bag_craft_facts();
 const qol::contracts::QolHostSdk* extension_bag_host_sdk();
 
 // 能力 v1.0 接口表（ExtensionBagApi，37 函数）：成员逐条转发既有 extension_bag_* /

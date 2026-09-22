@@ -43,16 +43,6 @@ struct QolCharReadApi {
 struct QolItemReadApi {
     QolResult (*ability_level)(const void* item, int32_t* out_level);
 };
-struct QolCraftReadApi {
-    QolResult (*ui_type)(uint32_t* out_type);
-    QolResult (*panel_state)(int32_t* out_state);
-    QolResult (*mix_type)(uint32_t* out_type);
-    QolResult (*selected_stuff_index)(int64_t* out_index);
-    QolResult (*selected_stuff_item)(void** out_item);
-    QolResult (*stuff_item)(uint32_t index, void** out_item);
-    QolResult (*category_held_count)(int32_t category, int32_t* out_count);
-    QolResult (*character_level)(int32_t* out_level);
-};
 struct QolAttrRangeReadApi {
     QolResult (*option_value)(int32_t option_index, int32_t level, int32_t flag,
                               const void* item, int32_t* out_value);
@@ -64,20 +54,8 @@ struct QolAttrRangeReadApi {
 struct QolReadApi {
     QolCharReadApi character;
     QolItemReadApi item;
-    QolCraftReadApi craft;
     QolAttrRangeReadApi attr_range;
 };
-
-struct QolCraftWriteApi {
-    QolResult (*write_stuff_need)(uint32_t index, int32_t category, int32_t count);
-    QolResult (*set_stuff_item)(uint32_t index, void* item);
-    QolResult (*set_target_slot_item)(void* item);
-    QolResult (*set_cost_zero)();
-};
-struct QolWriteApi {
-    QolCraftWriteApi craft;
-};
-
 enum class QolItemCountEncoding : uint8_t {
     kUnknown = 0,
     kNotEncoded = 1,
@@ -155,19 +133,6 @@ struct QolInventoryWriteApi {
     QolResult (*remove_item_direct)(int32_t bag, int32_t slot);
 };
 
-struct QolCraftActionApi {
-    QolResult (*init_mixing_state)();
-    QolResult (*reset_stuff_item_control)();
-    QolResult (*refresh_inventory_items)();
-    QolResult (*select_first_empty_stuff_slot)(int32_t* out_index);
-    QolResult (*set_ui_type)(int64_t type);
-    QolResult (*set_selected_recipe)(int32_t type, int64_t recipe);
-    QolResult (*play_sound)(int32_t sound_id);
-    QolResult (*show_text)(uint32_t text_id);
-    QolResult (*show_yesno_from_text)(uint32_t text_id, void* ok, void* cancel);
-    QolResult (*description_set_off)();
-};
-
 struct QolWorldActionApi {
     QolResult (*create_yesno)(const char* text, uint32_t text_len, void* ok, void* cancel,
                               void* param);
@@ -225,22 +190,6 @@ struct QolWorldReadOnlyApi {
     QolResult (*position)(const void* world, int32_t* out_x, int32_t* out_y);
 };
 
-struct QolCraftReadOnlyApi {
-    QolResult (*ui_type)(uint32_t* out_type);
-    QolResult (*panel_state)(int32_t* out_state);
-    QolResult (*mix_type)(uint32_t* out_type);
-    QolResult (*selected_stuff_index)(int64_t* out_index);
-    QolResult (*selected_stuff_item)(void** out_item);
-    QolResult (*stuff_item)(uint32_t index, void** out_item);
-    QolResult (*category_held_count)(int32_t category, int32_t* out_count);
-    QolResult (*character_level)(int32_t* out_level);
-    QolResult (*stuff_slot_control)(uint32_t index, void** out_control);
-    QolResult (*target_slot_item)(void** out_item);
-    QolResult (*selected_inventory_item)(void** out_item);
-    QolResult (*selected_recipe)(int32_t type, int64_t* out_recipe);
-    QolResult (*stuff_slot_count)(uint32_t* out_count);
-};
-
 struct QolChoiceReadOnlyApi {
     QolResult (*state_id)(int32_t* out_state_id);
 };
@@ -260,7 +209,6 @@ struct QolReadOnlyApi {
     QolCharacterReadOnlyApi character;
     QolItemReadOnlyApi item;
     QolWorldReadOnlyApi world;
-    QolCraftReadOnlyApi craft;
     QolChoiceReadOnlyApi choice;
     QolInventoryReadOnlyApi inventory;
 };
@@ -275,12 +223,10 @@ struct QolGameHost {
     QolTargetApi target;
     QolThreadApi thread;
     QolReadApi read;
-    QolWriteApi write;
     QolItemCountApi item_count;
     QolReadOnlyApi read_only;
     QolCharacterWriteApi character_write;
     QolInventoryWriteApi inventory_write;
-    QolCraftActionApi craft_action;
     QolWorldActionApi world_action;
 };
 

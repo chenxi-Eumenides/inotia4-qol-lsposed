@@ -42,9 +42,9 @@ void* mix_item_root_locked() {
 // 面板状态：0=配方菜单（原版不画背包列），1=背包/合成视图。扩展页签只在 state!=0
 // 时挂载/绘制，避免在配方菜单阶段早于原版背包出现（UIMix_Draw 状态门控反汇编确认）。
 int mix_state_locked() {
-    if (g_game == nullptr || g_game->read_only.craft.panel_state == nullptr) return 0;
+    if (g_craft_facts == nullptr || g_craft_facts->read_only.panel_state == nullptr) return 0;
     int32_t state = 0;
-    return qol::contracts::succeeded(g_game->read_only.craft.panel_state(&state)) ? state : 0;
+    return qol::contracts::succeeded(g_craft_facts->read_only.panel_state(&state)) ? state : 0;
 }
 
 int mix_tab_index(void* ctrl) {

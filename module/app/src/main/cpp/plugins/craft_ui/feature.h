@@ -3,7 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "../../contracts/game_host.h"
+#include "../../contracts/craft_commands.h"
+#include "../../contracts/craft_facts.h"
+#include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/item_facts.h"
 
@@ -44,9 +46,10 @@ constexpr int32_t kLogWarn = 2;
 
 void set_context(const contracts::PluginContext& ctx);
 void set_item_facts(const contracts::ItemFactsApi* facts);
+void set_craft_facts(const contracts::CraftFactsApi* facts);
+void set_write_port(const contracts::QolCraftUiWritePort* port);
 const contracts::ItemFactsApi* item_facts();
 const contracts::QolHostSdk* host_sdk();
-const contracts::QolGameHost* game_host();
 void log_message(int32_t level, const char* format, ...);
 bool config_enabled(const char* key);
 
@@ -58,6 +61,7 @@ int64_t craft_selected_stuff_index();
 void* craft_selected_inventory_item();
 void* craft_target_slot_item();
 void craft_set_target_slot_item(void* item);
+void craft_set_cost_zero();
 void* craft_stuff_item(size_t index);
 void* craft_stuff_slot_control(size_t index);
 int craft_category_held_count(uint16_t category);
@@ -73,9 +77,7 @@ void craft_set_ui_type(int64_t type);
 void craft_play_sound(int16_t sound_id);
 void craft_show_text(uint32_t text_id);
 bool craft_show_yesno(uint32_t text_id, void* ok, void* cancel);
-void craft_description_set_off();
 int craft_panel_state();
-void craft_select_stuff_slot(int64_t index);
 
 // 配置仍开启但结果能力缺失时，hook 仍处于模块上下文，必须拒绝原版回落；配置关闭时
 // 旧面板撤销窗口仍允许透传原版路径。

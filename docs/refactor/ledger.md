@@ -14,7 +14,7 @@
 | P1 | `contracts/`、`infra/`、`game/` 骨架与最小诊断接口 | ✅ 完成 | VM-P1-02、VM-P1-03 |
 | K1 | kernel-complete：零业务插件 Debug 启动 + Debug device probe 机制验收 | ✅ Debug/probe 真机证据已取得；release 隔离未执行 | VM-K1-01、VM-K1-02；`docs/history/kernel-complete-20260922/` |
 | K2 | provider 与功能插件并行：`world_facts`（`world.facts`，5 消费者）、`item_facts`（`item.facts`，7 消费者）、`character_facts`（`character.facts`，3 消费者）三批 + cascade_stopped activate 修复 | ✅ 三批真机闭环（VM-K2-01/02/03）；剩余复用语义（craft/save/quest/choice）多为单消费者，随阶段 4/5 处理 | VM-K2-01、VM-K2-02、VM-K2-03；`docs/history/provider-{world,item,character}-facts-20260922/` |
-| K4 | GameHost 收窄（Z2：插件域语义 + 受限 Adapter Port）：批 1 Port 注入 + typed command + quest 试点；批 2 三 provider 脱离 + typed handler 幂等修复；批 3 EB 写面 36 函数内化；批 4a choice 内化；批 4b save 收口（save_facts provider + save_backup 写 port） | 🔄 进行中；批 1/2/3/4a/4b 真机闭环（VM-K4-01/02/03/04a/04b）；批 4c craft、批 5 ABI major=2 + 负例 + 深度行为卡统一重跑待做 | VM-K4-01、VM-K4-02、VM-K4-03、VM-K4-04a、VM-K4-04b；`docs/history/gamehost-narrow-b{1,2,3,4a,4b}-20260922/` |
+| K4 | GameHost 收窄（Z2：插件域语义 + 受限 Adapter Port）：批 1 Port 注入 + typed command + quest 试点；批 2 三 provider 脱离 + typed handler 幂等修复；批 3 EB 写面 36 函数内化；批 4a choice 内化；批 4b save 收口；批 4c craft 读面 provider + owner 写面 | 🔄 进行中；批 1/2/3/4a/4b/4c 真机闭环（VM-K4-01/02/03/04a/04b/04c，4c 为调用通道+门禁口径）；批 5 ABI major=2 + 负例 + 深度行为卡（VM-43/46/P4-07/D2）统一重跑待做 | VM-K4-01、VM-K4-02、VM-K4-03、VM-K4-04a、VM-K4-04b、VM-K4-04c；`docs/history/gamehost-narrow-b{1,2,3,4a,4b,4c}-20260922/` |
 | P2 | `simple_mode` 纵向样板 | ✅ 完成 | VM-P2-01 |
 | P3 | 资源事务、异步步进、回滚、在途归零、生命周期状态 | ✅ 完成 | VM-P3-01、VM-P3-02、VM-P3-03 |
 | P4 | 内置静态插件批量迁移 | 🔄 进行中；阶段 A、B、C 已完成，D1 已完成待收尾 | VM-P4-01..08、VM-43..46、VM-D1、VM-D2-01..04 |
@@ -40,7 +40,7 @@
 |---|---|---|
 | Loader / bootstrap 仍执行业务 | Loader 入口和 bootstrap 仍无条件触发部分 IAP、协议页、存档、UI、扩展背包等行为 | 业务行为改由插件注册和生命周期管理；零业务插件组合可启动、ready、无业务状态和副作用 |
 | 宿主兼容补丁混合业务 | `host/core_patches` 仍同时包含 Hive 登录跳过与 monster 数量兼容逻辑 | 将业务补丁归对应 owner；宿主只保留通用机制和版本适配；受影响卡通过 |
-| Game Host 过宽 | `QolGameHost` 仍聚合角色、物品、库存、世界、合成、存档、任务和扩展背包写面 | 按 provider / 功能 owner 拆分高层语义；保留低层受控适配；ABI、线程和错误语义回归通过 |
+| Game Host 过宽 | `QolGameHost` 仍聚合角色、物品、库存、世界和扩展背包读面 | 按 provider / 功能 owner 拆分高层语义；保留低层受控适配；ABI、线程和错误语义回归通过 |
 | 官方 provider 不完整 | 角色、世界、库存等稳定复用语义仍有部分调用依赖宽 Game Host 或 legacy 面 | 每个 provider 有真实消费者、窄 capability / snapshot / owner command 与对应回归卡 |
 | Kotlin HTTP 仍承载业务 | Controller、Service 和 `NativeBridge` 调用链仍包含业务参数处理、状态拼装和复合查询 | 路由逐条绑定 owner；Kotlin 只做 AndServer 传输适配；冻结路径、方法和成功响应保持不变 |
 | legacy 目录和过渡映射 | `api/native`、`core/native`、根目录聚合文件及脚本 legacy 映射仍存在 | 各文件职责吸收到 `game/`、`infra/`、`plugins/` 或 `contracts/`；删除映射；边界负例确实失败；基线收缩 |

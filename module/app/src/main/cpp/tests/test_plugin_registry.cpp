@@ -580,6 +580,44 @@ void test_save_port_version_and_private_gate() {
     CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
 }
 
+void test_craft_port_version_and_private_gate() {
+    reset_all();
+    qol::contracts::QolPortRequirement requirement{
+        qol::contracts::QolPortId::QOL_PORT_CRAFT,
+        {qol::contracts::kQolPortCraftVersion.major, qol::contracts::kQolPortCraftVersion.minor},
+    };
+    PluginDescriptor valid = make_descriptor("craft_facts", nullptr, 0, nullptr, 0);
+    valid.ports = &requirement;
+    valid.port_count = 1;
+    CHECK(register_plugin(valid));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("craft_facts", FeatureState::kEnabled));
+
+    reset_all();
+    requirement.range.min_minor = static_cast<uint16_t>(
+        qol::contracts::kQolPortCraftVersion.minor + 1);
+    PluginDescriptor incompatible = make_descriptor("craft_facts", nullptr, 0, nullptr, 0);
+    incompatible.ports = &requirement;
+    incompatible.port_count = 1;
+    CHECK(register_plugin(incompatible));
+    CHECK(install_all(make_deps()) == 1);
+    const char* error = nullptr;
+    CHECK(feature_state_is("craft_facts", FeatureState::kBlocked));
+    CHECK(feature_of("craft_facts", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+
+    reset_all();
+    requirement.range.min_minor = qol::contracts::kQolPortCraftVersion.minor;
+    PluginDescriptor private_port = make_descriptor("test_craft", nullptr, 0, nullptr, 0);
+    private_port.ports = &requirement;
+    private_port.port_count = 1;
+    CHECK(register_plugin(private_port));
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(feature_state_is("test_craft", FeatureState::kBlocked));
+    CHECK(feature_of("test_craft", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
+}
+
 void test_gate_off_installed_disabled() {
     reset_all();
     const PluginDescriptor d =
@@ -1231,6 +1269,7 @@ int main() {
     test_success_path();
     test_choice_port_version_gate();
     test_save_port_version_and_private_gate();
+    test_craft_port_version_and_private_gate();
     test_gate_off_installed_disabled();
     test_gate_on_and_config_hot_switch();
     test_second_resource_failure_rolls_back();

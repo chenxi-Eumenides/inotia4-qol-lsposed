@@ -1,0 +1,30 @@
+09-22 14:23:17.644 D/VectorLifecycle(  626): dispatchPackageReady 喵喵猫喵猫喵喵@44345e4
+09-22 14:23:17.971 D/VectorLifecycle(  626): dispatchPackageReady 猫喵喵貓喵喵@80b64d2
+09-22 14:23:18.935 I/Inotia4Qol(  626): 2026-09-22 14:23:18.935 f=0 I config ModuleConfig.kt:165 config loaded: listenAddress=0.0.0.0 listenPort=8088 stackLimitIncrease=true moveMergeEnabled=true opEnabled=true customRecipeEnabled=true simpleModeEnabled=false pushAllEnabled=true autoSellEnabled=true apiEnabled=true debugLogEnabled=true
+09-22 14:23:19.170 I/Inotia4Qol(  626): 2026-09-22 14:23:19.170 f=0 I config ConfigApiService.kt:50 customRecipeEnabled=true applied=true
+09-22 14:23:20.971 W/Inotia4Qol(  626): 2026-09-22 14:23:20.971 f=1 W custom_recipe plugins/custom_recipe/table recipe table not ready recipe_size=0 mixture_size=0 count=0
+09-22 14:23:20.971 W/Inotia4Qol(  626): 2026-09-22 14:23:20.971 f=1 W core plugin_registry.cpp:1435 plugin custom_recipe gate install deferred on own:RECIPEBASE_MIXTUREBASE: resource own:RECIPEBASE_MIXTUREBASE: ownership acquire rejected
+09-22 14:23:24.423 I/Inotia4Qol(  626): 2026-09-22 14:23:24.423 f=62 I custom_recipe plugins/custom_recipe/table recipe table injected base=69 records=71 materials=191 book_bytes=7
+09-22 14:23:41.888 I/Inotia4Qol(  626): 2026-09-22 14:23:41.888 f=119 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=save_facts,action=deactivate} result={ok:true} dur=0ms
+09-22 14:23:44.354 I/Inotia4Qol(  626): 2026-09-22 14:23:44.354 f=122 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=save_facts,action=activate} result={ok:true} dur=0ms
+09-22 14:23:44.374 I/Inotia4Qol(  626): 2026-09-22 14:23:44.373 f=123 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=save_backup,action=activate} result={ok:true} dur=0ms
+09-22 14:23:44.393 I/Inotia4Qol(  626): 2026-09-22 14:23:44.393 f=123 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=extension_bag,action=activate} result={ok:true} dur=0ms
+09-22 14:23:44.536 I/Inotia4Qol(  626): 2026-09-22 14:23:44.536 f=123 I custom_recipe plugins/custom_recipe dynamic special recipes rebuilt count=26 equip=26 materialPool=14
+09-22 14:24:09.742 I/Inotia4Qol(  626): 2026-09-22 14:24:09.742 f=684 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=extension_bag,action=activate} result={ok:true} dur=0ms
+09-22 16:12:02.569 D/VectorLifecycle( 2411): dispatchPackageReady org.matrix.vector.impl.PackageReadyParamImplP@51095fe
+09-22 16:12:02.741 D/VectorLifecycle( 2411): dispatchPackageReady org.matrix.vector.impl.PackageReadyParamImplP@ca4cdda
+09-22 16:12:03.232 I/Inotia4Qol( 2411): 2026-09-22 16:12:03.232 f=0 I config ModuleConfig.kt:165 config loaded: listenAddress=0.0.0.0 listenPort=8088 stackLimitIncrease=true moveMergeEnabled=true opEnabled=true customRecipeEnabled=true simpleModeEnabled=false pushAllEnabled=true autoSellEnabled=true apiEnabled=true debugLogEnabled=true
+09-22 16:12:03.425 I/Inotia4Qol( 2411): 2026-09-22 16:12:03.425 f=0 I config ConfigApiService.kt:50 customRecipeEnabled=true applied=true
+09-22 16:12:05.355 W/Inotia4Qol( 2411): 2026-09-22 16:12:05.354 f=1 W custom_recipe plugins/custom_recipe/table recipe table not ready recipe_size=0 mixture_size=0 count=0
+09-22 16:12:05.355 W/Inotia4Qol( 2411): 2026-09-22 16:12:05.355 f=1 W core plugin_registry.cpp:1474 plugin custom_recipe gate install deferred on own:RECIPEBASE_MIXTUREBASE: resource own:RECIPEBASE_MIXTUREBASE: ownership acquire rejected
+09-22 16:12:08.730 I/Inotia4Qol( 2411): 2026-09-22 16:12:08.729 f=62 I custom_recipe plugins/custom_recipe/table recipe table injected base=69 records=71 materials=191 book_bytes=7
+09-22 16:12:36.813 I/Inotia4Qol( 2411): 2026-09-22 16:12:36.813 f=254 I custom_recipe plugins/custom_recipe dynamic special recipes rebuilt count=26 equip=26 materialPool=14
+09-22 16:12:47.963 I/Inotia4Qol( 2411): 2026-09-22 16:12:47.963 f=504 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=craft_facts,action=deactivate} result={ok:true} dur=0ms
+09-22 16:12:47.966 I/Inotia4Qol( 2411): 2026-09-22 16:12:47.966 f=504 I custom_recipe plugins/custom_recipe/table recipe table deactivated records=69
+09-22 16:12:47.966 I/Inotia4Qol( 2411): 2026-09-22 16:12:47.966 f=504 I custom_recipe plugins/custom_recipe/table recipe table deactivated records=69
+09-22 16:12:54.715 I/Inotia4Qol( 2411): 2026-09-22 16:12:54.715 f=656 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=craft_facts,action=activate} result={ok:true} dur=0ms
+09-22 16:13:03.202 I/Inotia4Qol( 2411): 2026-09-22 16:13:03.202 f=846 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=craft_ui,action=activate} result={ok:true} dur=0ms
+09-22 16:13:04.225 I/Inotia4Qol( 2411): 2026-09-22 16:13:04.225 f=870 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=custom_recipe,action=activate} result={ok:true} dur=0ms
+09-22 16:13:04.261 I/Inotia4Qol( 2411): 2026-09-22 16:13:04.261 f=871 I custom_recipe plugins/custom_recipe/table recipe table reactivated records=71
+09-22 16:17:17.506 I/Inotia4Qol( 2411): 2026-09-22 16:17:17.506 f=3176 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=craft_ui,action=deactivate} result={ok:true} dur=0ms
+09-22 16:17:18.604 I/Inotia4Qol( 2411): 2026-09-22 16:17:18.604 f=3176 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=craft_ui,action=activate} result={ok:true} dur=0ms

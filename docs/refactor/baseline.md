@@ -21,8 +21,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 42 |
-| `game` | 78 |
+| `contracts` | 47 |
+| `game` | 82 |
 | `hooks` | 10 |
 | `host` | 40 |
 | `infra` | 39 |
@@ -43,6 +43,7 @@
 | `plugins/character_facts` | 2 |
 | `plugins/core.api` | 3 |
 | `plugins/core.ui` | 17 |
+| `plugins/craft_facts` | 2 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
 | `plugins/device_probe_consumer` | 2 |
@@ -61,7 +62,7 @@
 | `plugins/text_layer` | 6 |
 | `plugins/world_facts` | 2 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **434** |
+| **合计** | **445** |
 
 ### 1.2 迁移期映射摘要
 
@@ -112,25 +113,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 111 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 113 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 46 |
+| `host` | `game` | 49 |
 | `host` | `infra` | 39 |
-| `host` | `contracts` | 31 |
-| `plugins/extension_bag` | `contracts` | 29 |
-| `game` | `contracts` | 20 |
+| `host` | `contracts` | 34 |
+| `plugins/extension_bag` | `contracts` | 31 |
+| `game` | `contracts` | 23 |
 | `plugins/autosell` | `contracts` | 20 |
+| `plugins/custom_recipe` | `contracts` | 20 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
-| `plugins/custom_recipe` | `contracts` | 14 |
 | `plugins/core.ui` | `contracts` | 11 |
 | `plugins/save_backup` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
 | `host` | `patch` | 10 |
 | `infra` | `contracts` | 8 |
 | `infra` | `game` | 8 |
-| `legacy/inventory` | `game` | 7 |
+| `plugins/craft_ui` | `contracts` | 8 |
 
 ### 2.2 include 环
 
@@ -213,14 +214,14 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（24 个）共 24 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（25 个）共 25 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（24）
+### 6.2 已迁移 `plugins/*`（25）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -230,6 +231,7 @@
 | `character_facts` | `plugins/character_facts` | 2 |
 | `core.api` | `plugins/core.api` | 3 |
 | `core.ui` | `plugins/core.ui` | 17 |
+| `craft_facts` | `plugins/craft_facts` | 2 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
