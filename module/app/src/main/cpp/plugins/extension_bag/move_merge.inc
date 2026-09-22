@@ -13,9 +13,9 @@ bool move_merge_control_slot(void* control, int32_t* out_slot) {
 
 bool move_merge_can_apply_stuff(void* target, void* material) {
     int32_t allowed = 0;
-    return g_game != nullptr && g_game->read_only.character.can_apply_stuff != nullptr &&
+    return g_game != nullptr && g_character_extras->read.can_apply_stuff != nullptr &&
            qol::contracts::succeeded(
-               g_game->read_only.character.can_apply_stuff(target, material, &allowed)) &&
+               g_character_extras->read.can_apply_stuff(target, material, &allowed)) &&
            allowed != 0;
 }
 
@@ -88,7 +88,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         g_item_facts != nullptr && g_item_facts->cumulate_count != nullptr &&
         g_item_facts->category != nullptr && extension_bag_write_api() != nullptr &&
         extension_bag_write_api()->inventory.move_item != nullptr &&
-        g_game->read_only.character.can_apply_stuff != nullptr &&
+        g_character_extras->read.can_apply_stuff != nullptr &&
         g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->control_item_slot != nullptr) {
         void* ctrl_src = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
         virtual_bag_observe_item_proc_source(observation_token, control, event, x2, param, ctrl_src);

@@ -16,6 +16,7 @@ using MakeItemFn = uintptr_t (*)(void* item, void* character, void* arg2);
 std::atomic<bool> g_active{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolItemExtrasPort* g_item_extras = nullptr;
 void* g_backup_add_option = nullptr;
 void* g_backup_make_item = nullptr;
 
@@ -55,6 +56,9 @@ char tier_color(contracts::AttributeQualityTier tier) {
 void set_context(const contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_item_extras = ctx.ports != nullptr && ctx.port_count == 1 && ctx.ports[0] != nullptr
+                        ? static_cast<const contracts::QolItemExtrasPort*>(ctx.ports[0])
+                        : nullptr;
 }
 
 void set_active(bool active_value) {
@@ -80,7 +84,8 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
     if (!active() || builder == nullptr || t_current_item == nullptr) return;
 
     const auto api = quality_api();
-    if (g_game == nullptr || g_game->read.item.ability_level == nullptr || g_sdk == nullptr ||
+    if (g_game == nullptr || g_item_extras == nullptr ||
+        g_item_extras->read.ability_level == nullptr || g_sdk == nullptr ||
         g_sdk->ui == nullptr || g_sdk->ui->insert_inline_color == nullptr || api == nullptr ||
         api->probe_option == nullptr || api->classify == nullptr) {
         return;
@@ -88,7 +93,7 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
 
     contracts::AttributeQualityResult quality{};
     int32_t level = 0;
-    if (g_game->read.item.ability_level(t_current_item, &level).ok != kQolOk) return;
+    if (g_item_extras->read.ability_level(t_current_item, &level).ok != kQolOk) return;
     if (api->probe_option(t_current_item, option_index, level, 1, value, &quality).ok != kQolOk) {
         return;
     }

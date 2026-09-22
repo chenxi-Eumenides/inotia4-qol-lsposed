@@ -79,6 +79,8 @@ uint64_t g_lifecycle_task = 0;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::QolExtensionBagWritePort* g_write_port = nullptr;
+const qol::contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
+const qol::contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
 const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
 const qol::contracts::CraftFactsApi* g_craft_facts = nullptr;
 int g_lifecycle_last_state = -1;
@@ -468,28 +470,28 @@ qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
 }
 
 bool read_char_can_equip(const void* character, const void* item) {
-    if (g_game == nullptr || g_game->read_only.character.can_equip == nullptr) return false;
+    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.can_equip == nullptr) return false;
     int32_t allowed = 0;
     return qol::contracts::succeeded(
-               g_game->read_only.character.can_equip(character, item, &allowed)) &&
+               g_character_extras->read.can_equip(character, item, &allowed)) &&
            allowed != 0;
 }
 
 bool read_char_find_equip_slot(const void* character, const void* item, int* out_slot) {
-    if (g_game == nullptr || g_game->read_only.character.find_equip_slot == nullptr ||
+    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.find_equip_slot == nullptr ||
         out_slot == nullptr) return false;
     int32_t slot = -1;
     if (!qol::contracts::succeeded(
-            g_game->read_only.character.find_equip_slot(character, item, &slot))) return false;
+            g_character_extras->read.find_equip_slot(character, item, &slot))) return false;
     *out_slot = slot;
     return true;
 }
 
 void* read_char_equipped_item(const void* character, int slot) {
-    if (g_game == nullptr || g_game->read_only.character.equipped_item == nullptr) return nullptr;
+    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.equipped_item == nullptr) return nullptr;
     void* item = nullptr;
     return qol::contracts::succeeded(
-               g_game->read_only.character.equipped_item(character, slot, &item))
+               g_character_extras->read.equipped_item(character, slot, &item))
                ? item
                : nullptr;
 }
@@ -502,36 +504,36 @@ bool read_save_is_ok() {
 }
 
 bool read_has_empty_mercenary_slot() {
-    if (g_game == nullptr || g_game->read_only.character.has_empty_mercenary_slot == nullptr) {
+    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.has_empty_mercenary_slot == nullptr) {
         return false;
     }
     int32_t value = 0;
     return qol::contracts::succeeded(
-               g_game->read_only.character.has_empty_mercenary_slot(&value)) && value != 0;
+               g_character_extras->read.has_empty_mercenary_slot(&value)) && value != 0;
 }
 
 bool read_inventory_bag_size(int bag, int* out_size) {
-    if (g_game == nullptr || g_game->read_only.inventory.bag_size == nullptr ||
+    if (g_game == nullptr || g_inventory_extras == nullptr || g_inventory_extras->read.bag_size == nullptr ||
         out_size == nullptr) return false;
     int32_t value = 0;
-    if (!qol::contracts::succeeded(g_game->read_only.inventory.bag_size(bag, &value))) return false;
+    if (!qol::contracts::succeeded(g_inventory_extras->read.bag_size(bag, &value))) return false;
     *out_size = value;
     return true;
 }
 
 bool read_inventory_is_empty_bag(int bag) {
-    if (g_game == nullptr || g_game->read_only.inventory.is_empty_bag == nullptr) return false;
+    if (g_game == nullptr || g_inventory_extras == nullptr || g_inventory_extras->read.is_empty_bag == nullptr) return false;
     int32_t value = 0;
     return qol::contracts::succeeded(
-               g_game->read_only.inventory.is_empty_bag(bag, &value)) && value != 0;
+               g_inventory_extras->read.is_empty_bag(bag, &value)) && value != 0;
 }
 
 bool read_inventory_find_save_slot(const void* item, int* out_slot) {
-    if (g_game == nullptr || g_game->read_only.inventory.find_save_slot == nullptr ||
+    if (g_game == nullptr || g_inventory_extras == nullptr || g_inventory_extras->read.find_save_slot == nullptr ||
         item == nullptr || out_slot == nullptr) return false;
     int32_t value = -1;
     if (!qol::contracts::succeeded(
-            g_game->read_only.inventory.find_save_slot(item, &value))) return false;
+            g_inventory_extras->read.find_save_slot(item, &value))) return false;
     *out_slot = value;
     return true;
 }
@@ -682,12 +684,24 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
         g_sdk = nullptr;
         g_game = nullptr;
         g_write_port = nullptr;
+        g_character_extras = nullptr;
+        g_inventory_extras = nullptr;
         return false;
     }
     g_sdk = sdk;
     g_game = game;
     g_write_port = write_port;
     return true;
+}
+
+void extension_bag_bind_character_extras(
+    const qol::contracts::QolCharacterExtrasPort* port) {
+    g_character_extras = port;
+}
+
+void extension_bag_bind_inventory_extras(
+    const qol::contracts::QolInventoryExtrasPort* port) {
+    g_inventory_extras = port;
 }
 
 const qol::contracts::QolGameHost* extension_bag_game_host() { return g_game; }
@@ -1502,10 +1516,10 @@ bool virtual_bag_equip_projected_item(void* character, void* item, int source_ba
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
     if (!g_module_view_installed || g_module_view_index != source_bag) return false;
-    if (g_game == nullptr || g_game->read_only.character.find_equip_slot == nullptr) return false;
+    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.find_equip_slot == nullptr) return false;
     int found = -1;
     if (!qol::contracts::succeeded(
-            g_game->read_only.character.find_equip_slot(character, item, &found))) {
+            g_character_extras->read.find_equip_slot(character, item, &found))) {
         return false;
     }
     if (found < 0 || found >= kEquipSlotCount) return false;
@@ -1537,10 +1551,10 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     if (character == nullptr || equip_slot < 0 || equip_slot >= kEquipSlotCount) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
-    if (g_game == nullptr || g_game->read_only.character.equipped_item == nullptr) return false;
+    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.equipped_item == nullptr) return false;
     void* item = nullptr;
     if (!qol::contracts::succeeded(
-            g_game->read_only.character.equipped_item(character, equip_slot, &item))) {
+            g_character_extras->read.equipped_item(character, equip_slot, &item))) {
         return false;
     }
     if (item == nullptr) return false;
@@ -1779,9 +1793,9 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     // g_extension_desc_item 只在扩展物品详情被捕获；原版背包物品详情点装备
     // 时（原版 ButtonEquipExe 函数级 hook 覆盖所有详情），用原版 UIDesc_GetData
     // 读取当前 desc 物品（原版 ButtonEquipExe b7c2c 同源）。
-    if (item == nullptr && g_game != nullptr &&
-        g_game->read_only.inventory.detail_item != nullptr) {
-        (void)g_game->read_only.inventory.detail_item(&item);
+    if (item == nullptr && g_game != nullptr && g_inventory_extras != nullptr &&
+        g_inventory_extras->read.detail_item != nullptr) {
+        (void)g_inventory_extras->read.detail_item(&item);
     }
     if (item == nullptr) return VirtualBagEquipButtonResult::kNotExtension;
     int src_bag = -1;
@@ -1824,8 +1838,9 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     int found = -1;
     for (int bag = 1; bag <= 4; ++bag) {
         int32_t bag_size = -1;
-        if (g_game != nullptr && g_game->read_only.inventory.bag_size != nullptr &&
-            qol::contracts::succeeded(g_game->read_only.inventory.bag_size(bag, &bag_size)) &&
+        if (g_game != nullptr && g_inventory_extras != nullptr &&
+            g_inventory_extras->read.bag_size != nullptr &&
+            qol::contracts::succeeded(g_inventory_extras->read.bag_size(bag, &bag_size)) &&
             bag_size == 0) {
             found = bag;
             break;
@@ -1975,9 +1990,9 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
             g_write_port->ui.original_bag_item(bag_index, &item))) return false;
     if (item == nullptr) return false;  // 该袋位无袋对象（空位详情等）→ 交原版
     int32_t empty_bag = 0;
-    if (g_game->read_only.inventory.is_empty_bag == nullptr ||
+    if (g_inventory_extras == nullptr || g_inventory_extras->read.is_empty_bag == nullptr ||
         !qol::contracts::succeeded(
-            g_game->read_only.inventory.is_empty_bag(bag_index, &empty_bag)) ||
+            g_inventory_extras->read.is_empty_bag(bag_index, &empty_bag)) ||
         empty_bag == 0) {
         // 袋非空：模块接管弹"袋非空"（袋保持安全），不交原版。
         if (out_not_empty != nullptr) *out_not_empty = true;

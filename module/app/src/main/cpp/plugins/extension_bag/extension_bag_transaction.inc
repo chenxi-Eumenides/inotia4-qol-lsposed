@@ -188,16 +188,16 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     } host_capacity_guard{host_word_bag, host_projected_word};
 
     int target_size = 0;
-    if (g_game != nullptr && g_game->read_only.inventory.bag_size != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.inventory.bag_size(target_bag, &target_size)) &&
+    if (g_game != nullptr && g_inventory_extras->read.bag_size != nullptr &&
+        qol::contracts::succeeded(g_inventory_extras->read.bag_size(target_bag, &target_size)) &&
         target_size <= 0) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original target bag unavailable=%d", target_bag);
         return false;
     }
     // 满包预检：INVEN_SaveItemOnEmpty 是纯首空槽扫描（0x104be0，满则返回 0 无副作用），
     // 事务入口先行拒绝，避免为注定失败的插入创建 pending/隔离记录或切换当前袋。
-    if (g_game != nullptr && g_game->read_only.inventory.bag_size != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.inventory.bag_size(target_bag, &target_size))) {
+    if (g_game != nullptr && g_inventory_extras->read.bag_size != nullptr &&
+        qol::contracts::succeeded(g_inventory_extras->read.bag_size(target_bag, &target_size))) {
         const int bag_size = target_size;
         bool has_empty = false;
         for (int slot = 0; slot < bag_size && slot < virtual_bag::kSlotCount; ++slot) {
@@ -956,9 +956,9 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     // 下方事务分支（交换/移动）并保证 session_finish_transaction 必然执行。
     int32_t apply_stuff_value = 0;
     const bool apply_stuff_allowed =
-        g_game != nullptr && g_game->read_only.character.can_apply_stuff != nullptr &&
+        g_game != nullptr && g_character_extras->read.can_apply_stuff != nullptr &&
         material != nullptr && target_item != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.character.can_apply_stuff(
+        qol::contracts::succeeded(g_character_extras->read.can_apply_stuff(
             target_item, material, &apply_stuff_value)) && apply_stuff_value != 0;
     const bool apply_candidate = extension_bag_is_apply_candidate(
         source_bag == target_bag && target_slot >= 0, source_is_apply_material,

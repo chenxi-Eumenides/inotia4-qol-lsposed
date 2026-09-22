@@ -5,6 +5,7 @@
 #include "feature.h"
 #include "../../contracts/character_facts.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/game_ports/character_extras_port.h"
 
 // D2c-2b-1：出售按钮 UIEquip_ButtonDestroyExe 已被 inventory_hooks 单点 hook（同址
 // NativeHook 二次挂载 rc=-1），本插件经 hooks/dispatch 布尔门登记谓词，不再前置声明
@@ -26,6 +27,13 @@ const contracts::CapabilityRequirement kRequires[] = {
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS,
+     {contracts::kQolPortCharacterExtrasVersion.major,
+      contracts::kQolPortCharacterExtrasVersion.minor}},
+};
 
 // 资源声明（ARCHITECTURE.md §4.3 字段顺序）：两个入口 hook 均为私有、必需、fail-closed。
 // gate=nullptr = 常驻，无配置开关；理由见 feature.h §「常开，无配置开关」——关闭只会把
@@ -65,14 +73,18 @@ const contracts::ResourceClaim kResources[] = {
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_character_extras = nullptr;
     set_item_facts(nullptr);
     set_character_facts(nullptr);
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
-        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
+        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr ||
+        ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_character_extras = nullptr;
         return 1;
     }
+    g_character_extras = static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[0]);
     if (g_sdk->capabilities.require == nullptr) return 1;
     const void* iface = nullptr;
     if (!contracts::succeeded(g_sdk->capabilities.require(
@@ -81,6 +93,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         iface == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_character_extras = nullptr;
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
@@ -92,6 +105,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         iface == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_character_extras = nullptr;
         set_item_facts(nullptr);
         return 1;
     }
@@ -121,6 +135,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     set_gate(false);
     set_item_facts(nullptr);
     set_character_facts(nullptr);
+    g_character_extras = nullptr;
     if (g_sdk != nullptr && g_sdk->hooks.clear_intercept != nullptr) {
         (void)g_sdk->hooks.clear_intercept(kSellGateResourceId);
     }
@@ -156,6 +171,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &on_resource_ready,
+    kPorts,
+    1,
 };
 
 }  // namespace
@@ -163,6 +180,8 @@ const contracts::PluginDescriptor kDescriptor = {
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 
 const contracts::QolGameHost* game_host() { return g_game; }
+
+const contracts::QolCharacterExtrasPort* character_extras() { return g_character_extras; }
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;

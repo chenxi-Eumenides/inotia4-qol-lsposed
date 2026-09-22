@@ -104,11 +104,11 @@ bool game_state_gate(int32_t* out) {
 }
 
 ::QolResult for_each_bag_slot(BagSlotFn callback, void* ctx) {
-    const auto* host = game();
-    if (host == nullptr || host->read_only.inventory.for_each_bag_slot == nullptr) {
+    const auto* port = inventory_extras();
+    if (port == nullptr || port->read.for_each_bag_slot == nullptr) {
         return contracts::error(kQolErrNotReady, "not ready", 9);
     }
-    return host->read_only.inventory.for_each_bag_slot(callback, ctx);
+    return port->read.for_each_bag_slot(callback, ctx);
 }
 
 void refresh_item_count(InventoryItemRef* ref) {

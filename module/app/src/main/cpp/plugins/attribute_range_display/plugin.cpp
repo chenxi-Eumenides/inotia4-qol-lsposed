@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/game_ports/item_extras_port.h"
 #include "feature.h"
 
 namespace qol::features::attribute_range_display {
@@ -12,6 +13,11 @@ constexpr const char* kPluginVersion = "0.1.0";
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
      {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
+};
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_ITEM_EXTRAS,
+     {contracts::kQolPortItemExtrasVersion.major, contracts::kQolPortItemExtrasVersion.minor}},
 };
 
 const contracts::ResourceClaim kResources[] = {
@@ -90,6 +96,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &on_resource_ready,
+    kPorts,
+    1,
 };
 
 }  // namespace

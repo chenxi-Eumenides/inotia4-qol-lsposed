@@ -176,7 +176,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (is_seal) {
             const auto* save_facts = qol::features::extension_bag::save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||
-                g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
+                g_character_extras->read.has_empty_mercenary_slot == nullptr ||
                 extension_bag_write_api() == nullptr ||
                 extension_bag_write_api()->equipment.make_mercenary == nullptr) {
                 return op_err("symbol not resolved");
@@ -192,8 +192,8 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
 
         item = module_item_locked(bag, slot);
         leader = nullptr;
-        if (g_game != nullptr && g_game->read_only.character.party_member != nullptr) {
-            (void)g_game->read_only.character.party_member(0, &leader);
+        if (g_game != nullptr && g_character_extras->read.party_member != nullptr) {
+            (void)g_character_extras->read.party_member(0, &leader);
         }
         if (item == nullptr) return op_err("extension item unavailable");
         if (!is_seal && leader == nullptr) return op_err("no leader");
@@ -284,8 +284,8 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
         if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr ||
-            g_game->read_only.character.party_member == nullptr ||
-            g_game->read_only.character.equipped_item == nullptr ||
+            g_character_extras->read.party_member == nullptr ||
+            g_character_extras->read.equipped_item == nullptr ||
             g_write_port->equipment.put_jewel == nullptr) {
             return op_err("symbol not resolved");
         }
@@ -295,11 +295,11 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
             is_jewel == 0) return op_err("not jewel");
 
         void* ch = nullptr;
-        (void)g_game->read_only.character.party_member(role, &ch);
+        (void)g_character_extras->read.party_member(role, &ch);
         if (ch == nullptr) return op_err("role not found");
         jewel = module_item_locked(bag, slot);
         if (!qol::contracts::succeeded(
-                g_game->read_only.character.equipped_item(ch, equip_slot, &equip))) {
+                g_character_extras->read.equipped_item(ch, equip_slot, &equip))) {
             return op_err("equip slot unavailable");
         }
         if (jewel == nullptr) return op_err("extension jewel unavailable");

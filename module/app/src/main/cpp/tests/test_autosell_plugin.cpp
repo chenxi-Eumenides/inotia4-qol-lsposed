@@ -15,6 +15,7 @@
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
+#include "contracts/game_ports/inventory_extras_port.h"
 #include "infra/panels.h"
 
 static int g_pass = 0;
@@ -126,6 +127,8 @@ void test_manifest() {
     CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup
+    CHECK(d.port_count == 1 &&
+          d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS);
 
     const qol::contracts::ResourceClaim& patch = d.resources[0];
     CHECK(std::strcmp(patch.id, "patch:SCENE_DRAW_EQUIP+0x1cc") == 0);
@@ -154,6 +157,8 @@ void test_manifest() {
 void test_provider_registration() {
     qol::infra::panels_reset_for_test();
     const qol::contracts::QolHostSdk sdk = fake_sdk();
+    static const qol::contracts::QolInventoryExtrasPort inventory_port{{1, 0}, {}};
+    const void* ports[] = {&inventory_port};
     qol::contracts::PluginContext ctx{
         sizeof(qol::contracts::PluginContext),
         qol::contracts::kHostSdkMajor,
@@ -161,6 +166,8 @@ void test_provider_registration() {
         &sdk,
         nullptr,
         "autosell",
+        ports,
+        1,
     };
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();

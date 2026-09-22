@@ -6,6 +6,17 @@ project(host_tests CXX)
 
 enable_testing()
 
+add_test(NAME game_host_legacy_surface_negative
+    COMMAND ${CMAKE_CXX_COMPILER} -std=c++17 -I${CMAKE_CURRENT_SOURCE_DIR}/..
+            -fsyntax-only ${CMAKE_CURRENT_SOURCE_DIR}/negative/game_host_legacy_surface.cpp)
+set_tests_properties(game_host_legacy_surface_negative PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME game_adapter_link_negative
+    COMMAND ${CMAKE_CXX_COMPILER} -std=c++17 -I${CMAKE_CURRENT_SOURCE_DIR}/..
+            ${CMAKE_CURRENT_SOURCE_DIR}/negative/game_adapter_link.cpp -o
+            ${CMAKE_CURRENT_BINARY_DIR}/game_adapter_link_negative)
+set_tests_properties(game_adapter_link_negative PROPERTIES WILL_FAIL TRUE)
+
 find_package(JNI REQUIRED)
 
 set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -322,6 +333,7 @@ add_executable(plugin_registry_tests
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
@@ -379,6 +391,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -415,6 +428,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
     ${CPP_DIR}/patch/claims.cpp
@@ -448,6 +462,7 @@ add_executable(patch_layer_tests
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
 )
 target_include_directories(patch_layer_tests PRIVATE
     ${CPP_DIR}
@@ -465,6 +480,7 @@ add_executable(extension_bag_contract_tests
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/game/access/ptr_slots.cpp
     ${CPP_DIR}/game/access/ui_equip.cpp
 )
@@ -690,6 +706,11 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/character_port.cpp
     ${CPP_DIR}/game/adapter_ports/choice_port.cpp
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
+    ${CPP_DIR}/game/adapter_ports/game_host_port.cpp
+    ${CPP_DIR}/game/adapter_ports/character_extras_port.cpp
+    ${CPP_DIR}/game/adapter_ports/inventory_extras_port.cpp
+    ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/game/adapter_ports/save_port.cpp
     ${CPP_DIR}/game/adapter_ports/save_call_port.cpp
     ${CPP_DIR}/game/adapter_ports/craft_port.cpp
@@ -765,6 +786,7 @@ add_test(NAME core_ui_components_tests COMMAND core_ui_components_tests)
 add_executable(item_count_facade_tests
     test_item_count_facade.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
 )
 target_include_directories(item_count_facade_tests PRIVATE
     ${CPP_DIR}
@@ -778,6 +800,7 @@ add_executable(stack_limit_plugin_tests
     test_stack_limit_plugin.cpp
     ${CPP_DIR}/plugins/stack_limit/plugin.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/read/item_class.cpp
 )

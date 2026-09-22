@@ -11,8 +11,11 @@
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/choice_port.h"
+#include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
+#include "contracts/game_ports/inventory_extras_port.h"
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/item_extras_port.h"
 #include "contracts/game_ports/quest_port.h"
 #include "contracts/game_ports/save_call_port.h"
 #include "contracts/game_ports/save_port.h"
@@ -29,12 +32,15 @@
 #include "patch/ptr_slot.h"
 #if !QOL_KERNEL_ONLY
 #include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/character_extras_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
+#include "game/adapter_ports/item_extras_port.h"
+#include "game/adapter_ports/inventory_extras_port.h"
 #include "game/adapter_ports/quest_port.h"
 #include "game/adapter_ports/save_call_port.h"
 #include "game/adapter_ports/save_port.h"
@@ -113,6 +119,21 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS) {
+        const auto& port = qol::game::character_extras_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS) {
+        const auto& port = qol::game::inventory_extras_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM_EXTRAS) {
+        const auto& port = qol::game::item_extras_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_CHARACTER) {
         const auto& port = qol::game::character_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -174,7 +195,9 @@ bool resolve_plugin_ports(uint32_t index) {
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "native_choice") != 0)) {
+            (plugin.id == nullptr ||
+             (std::strcmp(plugin.id, "native_choice") != 0 &&
+              std::strcmp(plugin.id, "world_teleport") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

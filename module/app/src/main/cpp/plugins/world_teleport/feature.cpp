@@ -176,8 +176,9 @@ void open_choice_panel() {
         return;
     }
     int state_id = -1;
-    if (game() != nullptr && game()->read_only.choice.state_id != nullptr) {
-        (void)game()->read_only.choice.state_id(&state_id);
+    if (qol::features::world_teleport::choice_port() != nullptr &&
+        qol::features::world_teleport::choice_port()->read.state_id != nullptr) {
+        (void)qol::features::world_teleport::choice_port()->read.state_id(&state_id);
     }
     log_message(1, "world teleport: choice opened current=%d state=%d", current_id, state_id);
 }

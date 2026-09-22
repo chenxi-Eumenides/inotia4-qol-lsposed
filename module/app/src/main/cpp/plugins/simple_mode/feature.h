@@ -4,6 +4,7 @@
 
 #include "../../contracts/plugin.h"
 #include "../../contracts/character_facts.h"
+#include "../../contracts/game_ports/character_extras_port.h"
 
 // 简单模式插件业务层（ARCHITECTURE.md §3.3）。
 //
@@ -30,6 +31,7 @@ namespace qol::features::simple_mode {
 
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
+const contracts::QolCharacterExtrasPort* character_extras();
 void set_character_facts(const contracts::CharacterFactsApi* facts);
 
 

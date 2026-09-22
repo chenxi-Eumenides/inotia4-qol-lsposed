@@ -943,15 +943,15 @@ bool item_pointer_known_locked(void* item) {
     }
     for (int role = 0; role < 3; ++role) {
         void* character = nullptr;
-        if (g_game == nullptr || g_game->read_only.character.party_member == nullptr ||
+        if (g_game == nullptr || g_character_extras->read.party_member == nullptr ||
             !qol::contracts::succeeded(
-                g_game->read_only.character.party_member(role, &character))) continue;
+                g_character_extras->read.party_member(role, &character))) continue;
         if (character == nullptr) continue;
         for (int slot = 0; slot < 10; ++slot) {
             void* equipped = nullptr;
-            if (g_game->read_only.character.equipped_item == nullptr ||
+            if (g_character_extras->read.equipped_item == nullptr ||
                 !qol::contracts::succeeded(
-                    g_game->read_only.character.equipped_item(character, slot, &equipped))) {
+                    g_character_extras->read.equipped_item(character, slot, &equipped))) {
                 continue;
             }
             if (equipped == item) return true;

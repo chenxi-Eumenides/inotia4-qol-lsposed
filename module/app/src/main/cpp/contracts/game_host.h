@@ -11,7 +11,6 @@
 #include <type_traits>
 
 #include "host_sdk.h"
-#include "game_ports/item_port.h"
 
 namespace qol::contracts {
 
@@ -37,12 +36,6 @@ struct QolThreadApi {
     int64_t (*frame_count)();
 };
 
-struct QolCharReadApi {
-    QolResult (*party_index)(const void* character, int32_t* out_index);
-};
-struct QolItemReadApi {
-    QolResult (*ability_level)(const void* item, int32_t* out_level);
-};
 struct QolAttrRangeReadApi {
     QolResult (*option_value)(int32_t option_index, int32_t level, int32_t flag,
                               const void* item, int32_t* out_value);
@@ -52,8 +45,6 @@ struct QolAttrRangeReadApi {
                                            int32_t* out_p1, int32_t* out_p2);
 };
 struct QolReadApi {
-    QolCharReadApi character;
-    QolItemReadApi item;
     QolAttrRangeReadApi attr_range;
 };
 enum class QolItemCountEncoding : uint8_t {
@@ -146,27 +137,7 @@ struct QolWorldActionApi {
 };
 
 // 按域只读面只提供事实查询；副作用不通过该面表达。
-struct QolCharacterReadOnlyApi {
-    QolResult (*party_index)(const void* character, int32_t* out_index);
-    QolResult (*is_party_member)(const void* character, int32_t* out_member);
-    QolResult (*summoner)(const void* character, void** out_summoner);
-    QolResult (*level)(const void* character, int32_t* out_level);
-    QolResult (*merc_slot)(const void* character, int32_t* out_slot);
-    QolResult (*can_change_equip)(const void* character, int32_t* out_allowed);
-    QolResult (*menu_character)(void** out_character);
-    QolResult (*pool_slot)(const void* character, int32_t* out_slot);
-    QolResult (*max_hp)(const void* character, int32_t* out_value);
-    QolResult (*hp)(const void* character, int32_t* out_value);
-    QolResult (*can_equip)(const void* character, const void* item, int32_t* out_allowed);
-    QolResult (*find_equip_slot)(const void* character, const void* item, int32_t* out_slot);
-    QolResult (*equipped_item)(const void* character, int32_t slot, void** out_item);
-    QolResult (*has_empty_mercenary_slot)(int32_t* out_available);
-    QolResult (*can_apply_stuff)(const void* target, const void* material, int32_t* out_allowed);
-    QolResult (*party_member)(int32_t role, void** out_character);
-};
-
 struct QolItemReadOnlyApi {
-    QolResult (*ability_level)(const void* item, int32_t* out_level);
     QolResult (*rarity)(const void* item, int32_t* out_rarity);
     QolResult (*equip_level)(const void* item, int32_t* out_level);
     QolResult (*is_dice)(int32_t category, int32_t* out_value);
@@ -186,31 +157,8 @@ struct QolItemReadOnlyApi {
     QolResult (*count_encoding)(int32_t category, QolItemCountEncoding* out_encoding);
 };
 
-struct QolWorldReadOnlyApi {
-    QolResult (*position)(const void* world, int32_t* out_x, int32_t* out_y);
-};
-
-struct QolChoiceReadOnlyApi {
-    QolResult (*state_id)(int32_t* out_state_id);
-};
-
-struct QolInventoryReadOnlyApi {
-    // 遍历原版物理袋 0..5，回调返回 1 停止；原落点：game/state/game_state.cpp:280-292、
-    // plugins/autosell/scan.cpp:119-145。
-    QolResult (*for_each_bag_slot)(QolInventoryBagSlotFn callback, void* ctx);
-    QolResult (*bag_size)(int32_t bag, int32_t* out_size);
-    QolResult (*is_empty_bag)(int32_t bag, int32_t* out_empty);
-    QolResult (*find_save_slot)(const void* item, int32_t* out_slot);
-    QolResult (*cursor_item)(const void* control, void** out_item);
-    QolResult (*detail_item)(void** out_item);
-};
-
 struct QolReadOnlyApi {
-    QolCharacterReadOnlyApi character;
     QolItemReadOnlyApi item;
-    QolWorldReadOnlyApi world;
-    QolChoiceReadOnlyApi choice;
-    QolInventoryReadOnlyApi inventory;
 };
 
 static_assert(std::is_standard_layout<QolReadOnlyApi>::value,
@@ -241,7 +189,7 @@ static_assert(sizeof(QolGameHost) ==
                   offsetof(QolGameHost, world_action) + sizeof(QolWorldActionApi),
               "QolGameHost ABI size changed");
 
-constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 13;
+constexpr uint16_t kGameHostMajor = 2;
+constexpr uint16_t kGameHostMinor = 0;
 
 }  // namespace qol::contracts

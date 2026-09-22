@@ -5,6 +5,7 @@
 
 #include "../../contracts/events.h"
 #include "../../contracts/character_facts.h"
+#include "../../contracts/game_ports/character_extras_port.h"
 #include "feature.h"
 
 namespace qol::features::push_all {
@@ -17,11 +18,18 @@ constexpr const char* kGateKey = "plugin.push_all.enabled";
 // 配置变更订阅句柄；deactivate 时成对注销。
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
 uint64_t g_config_subscription = 0;
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kCharacterFactsCapabilityId,
      {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor}},
+};
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS,
+     {contracts::kQolPortCharacterExtrasVersion.major,
+      contracts::kQolPortCharacterExtrasVersion.minor}},
 };
 
 void on_config_changed(void* ctx, const void* payload) {
@@ -77,12 +85,16 @@ const contracts::JniBinding kJni[] = {
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_character_extras = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
-        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
+        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr ||
+        ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_character_extras = nullptr;
         return 1;
     }
+    g_character_extras = static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[0]);
     if (g_sdk->capabilities.require == nullptr) return 1;
     const void* iface = nullptr;
     if (!contracts::succeeded(g_sdk->capabilities.require(
@@ -92,6 +104,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         iface == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_character_extras = nullptr;
         return 1;
     }
     set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
@@ -116,6 +129,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     set_gate(false);
     set_character_facts(nullptr);
+    g_character_extras = nullptr;
 }
 
 // 启停仅切门禁，不做资源操作（§3.3）。
@@ -148,6 +162,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &on_resource_ready,
+    kPorts,
+    1,
 };
 
 }  // namespace
@@ -155,6 +171,8 @@ const contracts::PluginDescriptor kDescriptor = {
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 
 const contracts::QolGameHost* game_host() { return g_game; }
+
+const contracts::QolCharacterExtrasPort* character_extras() { return g_character_extras; }
 
 const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;

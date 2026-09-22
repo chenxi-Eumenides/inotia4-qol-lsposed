@@ -4,6 +4,7 @@
 
 #include "../../contracts/plugin.h"
 #include "../../contracts/character_facts.h"
+#include "../../contracts/game_ports/character_extras_port.h"
 
 // 推怪（推动增强）业务层（ARCHITECTURE.md §3.3）。
 //
@@ -20,6 +21,7 @@ namespace qol::features::push_all {
 
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
+const contracts::QolCharacterExtrasPort* character_extras();
 void set_character_facts(const contracts::CharacterFactsApi* facts);
 
 // 资源 id：plugin.cpp 的 ResourceClaim 与宿主诊断共用同一常量。

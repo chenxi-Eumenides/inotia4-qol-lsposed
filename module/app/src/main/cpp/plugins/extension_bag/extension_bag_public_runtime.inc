@@ -126,8 +126,8 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
     const bool source_is_jewel = read_item_is_jewel(source_category);
     const char* kind = source_is_jewel ? "jewel" : "scroll";
     int32_t apply_allowed = 0;
-    if (g_game == nullptr || g_game->read_only.character.can_apply_stuff == nullptr ||
-        !qol::contracts::succeeded(g_game->read_only.character.can_apply_stuff(
+    if (g_game == nullptr || g_character_extras->read.can_apply_stuff == nullptr ||
+        !qol::contracts::succeeded(g_character_extras->read.can_apply_stuff(
             target_item, material, &apply_allowed)) || apply_allowed == 0) {
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
             virtual_bag::session_finish_transaction(&g_extension_drag_session, false);
@@ -325,8 +325,8 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     // 不得吞事件或 Blocked。
     int32_t apply_allowed = 0;
     const bool apply_stuff_allowed = target_item != nullptr && g_game != nullptr &&
-        g_game->read_only.character.can_apply_stuff != nullptr &&
-        qol::contracts::succeeded(g_game->read_only.character.can_apply_stuff(
+        g_character_extras->read.can_apply_stuff != nullptr &&
+        qol::contracts::succeeded(g_character_extras->read.can_apply_stuff(
             target_item, item, &apply_allowed)) && apply_allowed != 0;
     const bool apply_candidate = extension_bag_is_apply_candidate(
         src_bag == dst_bag, source_is_apply_material,

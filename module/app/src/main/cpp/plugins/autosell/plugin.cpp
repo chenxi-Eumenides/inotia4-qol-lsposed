@@ -11,6 +11,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/game_ports/inventory_extras_port.h"
 #include "config.h"
 #include "log.h"
 #include "scan.h"
@@ -53,11 +54,18 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
      {contracts::kExtensionBagVersionMajor, contracts::kExtensionBagVersionMinor}},
 };
 
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS,
+     {contracts::kQolPortInventoryExtrasVersion.major,
+      contracts::kQolPortInventoryExtrasVersion.minor}},
+};
+
 uint64_t g_config_subscription = 0;
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
 std::atomic<bool> g_gate{false};
 
 // 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
@@ -133,8 +141,11 @@ bool config_enabled() {
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_inventory_extras = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
+    if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) return 1;
+    g_inventory_extras = static_cast<const contracts::QolInventoryExtrasPort*>(ctx.ports[0]);
     if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr ||
         g_sdk->events.subscribe == nullptr || g_sdk->events.unsubscribe == nullptr ||
         g_sdk->panels.register_provider == nullptr ||
@@ -190,6 +201,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     autosell_unregister_save_callbacks();
     g_game = nullptr;
+    g_inventory_extras = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     apply_gate(false);
@@ -228,6 +240,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     nullptr,      // on_resource_ready（kCallPatch/kOwnership 无 backup）
+    kPorts,
+    1,
 };
 
 }  // namespace
@@ -250,6 +264,10 @@ const contracts::WorldFactsApi* world_facts() {
 
 const contracts::ItemFactsApi* item_facts() {
     return g_item_facts;
+}
+
+const contracts::QolInventoryExtrasPort* inventory_extras() {
+    return g_inventory_extras;
 }
 
 }  // namespace qol::features::autosell

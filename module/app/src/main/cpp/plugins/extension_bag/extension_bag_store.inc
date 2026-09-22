@@ -457,12 +457,12 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (store_view_installed && g_game != nullptr &&
-            g_game->read_only.inventory.cursor_item != nullptr &&
+            g_inventory_extras->read.cursor_item != nullptr &&
             g_item_facts != nullptr && g_item_facts->sell_price != nullptr) {
             void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
             void* cursor = nullptr;
             if (ctrl != nullptr) {
-                (void)g_game->read_only.inventory.cursor_item(ctrl, &cursor);
+                (void)g_inventory_extras->read.cursor_item(ctrl, &cursor);
             }
             item = cursor != nullptr ? extension_bag_ui_item(cursor) : nullptr;
             if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot)) {
@@ -593,9 +593,9 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     (void)out_slot;
     uint8_t result = 0;
     int32_t slot = -1;
-    if (g_game != nullptr && g_game->read_only.inventory.find_save_slot != nullptr &&
+    if (g_game != nullptr && g_inventory_extras->read.find_save_slot != nullptr &&
         item != nullptr && qol::contracts::succeeded(
-            g_game->read_only.inventory.find_save_slot(item, &slot))) {
+            g_inventory_extras->read.find_save_slot(item, &slot))) {
         result = static_cast<uint8_t>(slot);
     }
     if (result != 0) return result;

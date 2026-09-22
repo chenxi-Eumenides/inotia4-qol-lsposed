@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../contracts/game_host.h"
+#include "../../contracts/game_ports/item_port.h"
 
 namespace qol::features::autosell::read_only {
 

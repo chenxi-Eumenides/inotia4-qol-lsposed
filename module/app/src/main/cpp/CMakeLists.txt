@@ -216,19 +216,24 @@ target_sources(gamebridge PRIVATE
     game/clock.cpp
 )
 
-if(NOT QOL_KERNEL_ONLY)
-    target_sources(gamebridge PRIVATE
-        game/adapter_ports/character_port.cpp
-        game/adapter_ports/craft_port.cpp
-        game/adapter_ports/choice_port.cpp
-        game/adapter_ports/item_port.cpp
-        game/adapter_ports/quest_port.cpp
-        game/adapter_ports/save_port.cpp
-        game/adapter_ports/save_call_port.cpp
-        game/adapter_ports/world_port.cpp
-        game/adapter_ports/extension_bag_write_port.cpp
-    )
-endif()
+# Adapter ports are part of the kernel and remain available in kernel-only builds;
+# host ABI tables reference them even when all business plugins are omitted.
+target_sources(gamebridge PRIVATE
+    game/adapter_ports/character_port.cpp
+    game/adapter_ports/craft_port.cpp
+    game/adapter_ports/choice_port.cpp
+    game/adapter_ports/item_port.cpp
+    game/adapter_ports/quest_port.cpp
+    game/adapter_ports/save_port.cpp
+    game/adapter_ports/save_call_port.cpp
+    game/adapter_ports/world_port.cpp
+    game/adapter_ports/extension_bag_write_port.cpp
+    game/adapter_ports/game_host_port.cpp
+    game/adapter_ports/character_extras_port.cpp
+    game/adapter_ports/inventory_extras_port.cpp
+    game/adapter_ports/item_extras_port.cpp
+    game/adapter_ports/item_count_facade.cpp
+)
 
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
 target_sources(gamebridge PRIVATE

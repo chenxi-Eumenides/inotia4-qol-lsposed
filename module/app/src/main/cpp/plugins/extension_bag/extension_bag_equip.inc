@@ -6,12 +6,12 @@ enum class ExtensionBagEquipResult {
 };
 
 void* extension_menu_character() {
-    if (g_game == nullptr || g_game->read_only.character.menu_character == nullptr) {
+    if (g_game == nullptr || g_character_extras->read.menu_character == nullptr) {
         return nullptr;
     }
     void* character = nullptr;
     return qol::contracts::succeeded(
-               g_game->read_only.character.menu_character(&character))
+               g_character_extras->read.menu_character(&character))
                ? character
                : nullptr;
 }
@@ -156,8 +156,8 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     if (character == nullptr || item == nullptr || !virtual_bag::valid_index(source_bag) ||
         source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
         g_module_objects[source_bag][source_slot] != item ||
-        g_game == nullptr || g_game->read_only.character.can_equip == nullptr ||
-        g_game->read_only.character.find_equip_slot == nullptr ||
+        g_game == nullptr || g_character_extras->read.can_equip == nullptr ||
+        g_character_extras->read.find_equip_slot == nullptr ||
         extension_bag_write_api() == nullptr ||
         !g_module_view_installed || g_module_view_index != source_bag ||
         g_module_window_original_bag < 0 || g_module_window_original_bag >= 5) {
@@ -894,7 +894,7 @@ bool extension_use_mercenary_seal() {
         if (!extension_bag_enabled() || g_extension_desc_item == nullptr ||
             g_game == nullptr || g_game->read_only.item.is_mercenary_seal == nullptr ||
             save_facts == nullptr || save_facts->is_ok == nullptr ||
-            g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
+            g_character_extras->read.has_empty_mercenary_slot == nullptr ||
             extension_bag_write_api() == nullptr ||
             extension_bag_write_api()->equipment.make_mercenary == nullptr) {
             return false;

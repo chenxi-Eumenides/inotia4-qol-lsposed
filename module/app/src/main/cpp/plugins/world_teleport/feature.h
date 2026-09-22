@@ -2,7 +2,11 @@
 
 #include <cstdint>
 
+#include "../../contracts/game_ports/choice_port.h"
+
 namespace qol::features::world_teleport {
+
+const contracts::QolChoicePort* choice_port();
 
 enum class InstallDisposition : uint8_t {
     kInstalled = 0,

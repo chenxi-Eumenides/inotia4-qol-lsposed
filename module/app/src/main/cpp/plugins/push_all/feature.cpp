@@ -51,7 +51,7 @@ int push_all_party_filter(void* ch) {
     const auto* game = game_host();
     if (game == nullptr || g_character_facts == nullptr || g_character_facts->type == nullptr ||
         g_character_facts->is_active_player_group == nullptr ||
-        game->read.character.party_index == nullptr) {
+        character_extras() == nullptr || character_extras()->read.party_index == nullptr) {
         return -1;
     }
     int32_t type = -1;
@@ -59,7 +59,7 @@ int push_all_party_filter(void* ch) {
     int32_t party_index = -1;
     if (g_character_facts->type(ch, &type).ok != kQolOk ||
         g_character_facts->is_active_player_group(ch, &active_group).ok != kQolOk ||
-        game->read.character.party_index(ch, &party_index).ok != kQolOk) {
+        character_extras()->read.party_index(ch, &party_index).ok != kQolOk) {
         return -1;
     }
     // 门禁关闭时按原版语义透传（资源应已还原，此为竞态窗口内的 fail-safe）。

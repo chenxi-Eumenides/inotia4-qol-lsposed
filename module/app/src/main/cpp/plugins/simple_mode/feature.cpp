@@ -77,22 +77,22 @@ bool is_player_side_impl(const void* ch, int depth) {
     const auto* game = game_host();
     if (game == nullptr || g_character_facts == nullptr ||
         g_character_facts->is_active_player_group == nullptr ||
-        game->read_only.character.is_party_member == nullptr ||
-        game->read_only.character.summoner == nullptr) {
+        character_extras()->read.is_party_member == nullptr ||
+        character_extras()->read.summoner == nullptr) {
         note_faction_deps_missing_once(
-            game != nullptr && game->read_only.character.is_party_member != nullptr,
+            game != nullptr && character_extras()->read.is_party_member != nullptr,
             g_character_facts != nullptr && g_character_facts->is_active_player_group != nullptr,
-            game != nullptr && game->read_only.character.summoner != nullptr);
+            game != nullptr && character_extras()->read.summoner != nullptr);
         return false;
     }
     void* mutable_ch = const_cast<void*>(ch);
     int32_t party_member = 0;
     int32_t active_group = 0;
     void* summoner = nullptr;
-    const bool party_ok = game->read_only.character.is_party_member(mutable_ch, &party_member).ok == kQolOk;
+    const bool party_ok = character_extras()->read.is_party_member(mutable_ch, &party_member).ok == kQolOk;
     const bool active_ok =
         g_character_facts->is_active_player_group(mutable_ch, &active_group).ok == kQolOk;
-    const bool summoner_ok = game->read_only.character.summoner(mutable_ch, &summoner).ok == kQolOk;
+    const bool summoner_ok = character_extras()->read.summoner(mutable_ch, &summoner).ok == kQolOk;
     if (!party_ok || !active_ok || !summoner_ok) {
         note_faction_deps_missing_once(party_ok, active_ok, summoner_ok);
         return false;
@@ -171,8 +171,8 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
 
     const auto* game = game_host();
     if (game == nullptr || g_character_facts == nullptr || g_character_facts->type == nullptr ||
-        game->read_only.character.pool_slot == nullptr || game->read_only.character.max_hp == nullptr ||
-        game->character_write.max_hp == nullptr || game->read_only.character.hp == nullptr ||
+        character_extras()->read.pool_slot == nullptr || character_extras()->read.max_hp == nullptr ||
+        game->character_write.max_hp == nullptr || character_extras()->read.hp == nullptr ||
         game->character_write.hp == nullptr) {
         return;
     }
@@ -181,7 +181,7 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     if (is_player_side_impl(ch, 0)) return;  // 玩家侧召唤物不减半
 
     int slot = 0;
-    if (game->read_only.character.pool_slot(ch, &slot).ok != kQolOk || slot < 0 ||
+    if (character_extras()->read.pool_slot(ch, &slot).ok != kQolOk || slot < 0 ||
         slot >= kCharPoolSlots) {
         // 定位不到池槽就无法保证幂等（会累积减半），故不改写——fail-safe 方向是「怪物保持满血」。
         if (!g_pool_slot_unresolved_logged.exchange(true)) {
@@ -191,7 +191,7 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     }
 
     int32_t raw = 0;
-    if (game->read_only.character.max_hp(ch, &raw).ok != kQolOk) return;
+    if (character_extras()->read.max_hp(ch, &raw).ok != kQolOk) return;
     HalfHpMark& mark = g_half_marks[slot];
     if (mark.ch != ch) {  // 槽被新角色占用（或首次见）→ 重置该槽账本
         mark.ch = ch;
@@ -206,7 +206,7 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
 
     // 同步钳制当前 HP：否则「上限已半、当前血仍是满值」会表现为血条超上限。
     int32_t hp = 0;
-    if (game->read_only.character.hp(ch, &hp).ok == kQolOk && hp > half) {
+    if (character_extras()->read.hp(ch, &hp).ok == kQolOk && hp > half) {
         (void)game->character_write.hp(ch, half);
     }
 }

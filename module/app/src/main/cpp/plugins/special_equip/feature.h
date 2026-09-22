@@ -5,6 +5,7 @@
 #include "../../contracts/plugin.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/character_facts.h"
+#include "../../contracts/game_ports/character_extras_port.h"
 
 // 特殊装备解锁（special-equip）插件业务层。
 //
@@ -55,6 +56,7 @@ namespace qol::features::special_equip {
 
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
+const contracts::QolCharacterExtrasPort* character_extras();
 void set_item_facts(const contracts::ItemFactsApi* facts);
 void set_character_facts(const contracts::CharacterFactsApi* facts);
 

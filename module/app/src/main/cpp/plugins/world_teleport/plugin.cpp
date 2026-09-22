@@ -1,6 +1,8 @@
 #include "plugin.h"
 
 #include "../../contracts/ui_choice.h"
+#include "../../contracts/game_ports/choice_port.h"
+#include "../../contracts/game_ports/ports.h"
 #include "feature.h"
 
 namespace qol::features::world_teleport {
@@ -11,6 +13,7 @@ constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolChoicePort* g_choice_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
@@ -45,19 +48,28 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
 };
 
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CHOICE,
+     {contracts::kQolPortChoiceVersion.major, contracts::kQolPortChoiceVersion.minor}},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_choice_port = nullptr;
     g_world_facts = nullptr;
     g_installed = false;
     g_install_error = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
-        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
+        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr ||
+        ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_choice_port = nullptr;
         g_install_error = "install failed: world teleport dependencies not ready";
         return 1;
     }
+    g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
     const void* world_facts_iface = nullptr;
     if (g_sdk->capabilities.require == nullptr ||
         !contracts::succeeded(g_sdk->capabilities.require(
@@ -67,6 +79,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         world_facts_iface == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_choice_port = nullptr;
         g_install_error = "install failed: world facts unavailable";
         return 1;
     }
@@ -79,6 +92,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_installed = false;
     g_world_facts = nullptr;
     g_game = nullptr;
+    g_choice_port = nullptr;
     g_sdk = nullptr;
 }
 
@@ -117,6 +131,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     nullptr,
+    kPorts,
+    1,
 };
 
 }  // namespace
@@ -131,6 +147,10 @@ const contracts::QolHostSdk* host_sdk() {
 
 const contracts::QolGameHost* game_host() {
     return g_game;
+}
+
+const contracts::QolChoicePort* choice_port() {
+    return g_choice_port;
 }
 
 const contracts::WorldFactsApi* world_facts() {
