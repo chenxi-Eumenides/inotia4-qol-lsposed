@@ -8,6 +8,14 @@
 
 namespace qol::contracts {
 
+// 启动期由 Kotlin 下发的静态 enrichment 片段端点。
+constexpr int32_t kQuestFragmentActive = 0;
+constexpr int32_t kQuestFragmentDetails = 1;
+constexpr int32_t kQuestFragmentCompleted = 2;
+// 返回指定端点下某 quest 的 JSON 对象正文（不含外层花括号）；未收录返回 kQolErrNotFound。
+using QolQuestFragmentFn = QolResult (*)(int32_t endpoint, uint32_t quest_id,
+                                         const char** out_fragment);
+
 struct QolQuestReadOnlyApi {
     QolResult (*state)(int32_t* out_state);
     QolResult (*active_slot_count)(uint32_t* out_count);
@@ -15,6 +23,10 @@ struct QolQuestReadOnlyApi {
     QolResult (*total_count)(uint32_t* out_count);
     QolResult (*quest_state)(uint32_t quest_id, int32_t* out_state);
     QolResult (*is_complete)(uint32_t quest_id, int32_t* out_complete);
+    // 静态片段表只在启动期写入；运行期只读，供主线程快照构造时拼接。
+    QolQuestFragmentFn fragment;
+    // 静态片段表是否已由启动期下发（owner 快照据此推迟发布）。
+    QolResult (*static_ready)(int32_t* out_ready);
 };
 
 struct QolQuestWriteApi {

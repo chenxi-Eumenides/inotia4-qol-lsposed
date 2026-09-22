@@ -24,7 +24,7 @@
 | `contracts` | 50 |
 | `game` | 92 |
 | `hooks` | 10 |
-| `host` | 43 |
+| `host` | 44 |
 | `infra` | 39 |
 | `legacy/character` | 2 |
 | `legacy/dialog` | 4 |
@@ -50,19 +50,19 @@
 | `plugins/device_probe_provider` | 2 |
 | `plugins/extension_bag` | 41 |
 | `plugins/inventory_hooks` | 11 |
-| `plugins/item_facts` | 2 |
+| `plugins/item_facts` | 7 |
 | `plugins/native_choice` | 4 |
 | `plugins/push_all` | 6 |
-| `plugins/quest` | 4 |
+| `plugins/quest` | 5 |
 | `plugins/save_backup` | 13 |
 | `plugins/save_facts` | 2 |
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
-| `plugins/world_facts` | 2 |
+| `plugins/world_facts` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **461** |
+| **合计** | **469** |
 
 ### 1.2 迁移期映射摘要
 
@@ -117,7 +117,7 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 41 |
+| `host` | `game` | 44 |
 | `host` | `infra` | 39 |
 | `host` | `contracts` | 38 |
 | `plugins/extension_bag` | `contracts` | 33 |
@@ -204,8 +204,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：145 个
-- native 导出：145 个
+- Kotlin `external fun`：148 个
+- native 导出：148 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -238,17 +238,17 @@
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
 | `extension_bag` | `plugins/extension_bag` | 41 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
-| `item_facts` | `plugins/item_facts` | 2 |
+| `item_facts` | `plugins/item_facts` | 7 |
 | `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
-| `quest` | `plugins/quest` | 4 |
+| `quest` | `plugins/quest` | 5 |
 | `save_backup` | `plugins/save_backup` | 13 |
 | `save_facts` | `plugins/save_facts` | 2 |
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
 | `stack_limit` | `plugins/stack_limit` | 3 |
 | `text_layer` | `plugins/text_layer` | 6 |
-| `world_facts` | `plugins/world_facts` | 2 |
+| `world_facts` | `plugins/world_facts` | 3 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 
 ## 校验入口

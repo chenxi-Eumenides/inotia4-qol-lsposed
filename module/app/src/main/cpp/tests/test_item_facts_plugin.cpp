@@ -17,7 +17,11 @@ int main() {
     const auto& descriptor = qol::features::item_facts::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "item_facts") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 0);
+    CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
+    CHECK(descriptor.optional_count == 0);
+    CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
+    CHECK(descriptor.http_query_count == 6 && descriptor.http_queries != nullptr);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);

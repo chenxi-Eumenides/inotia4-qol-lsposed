@@ -39,6 +39,8 @@ add_executable(host_tests
 add_executable(item_facts_plugin_tests
     test_item_facts_plugin.cpp
     ${CPP_DIR}/plugins/item_facts/plugin.cpp
+    ${CPP_DIR}/plugins/item_facts/json_lite.cpp
+    ${CPP_DIR}/plugins/item_facts/response.cpp
 )
 target_include_directories(item_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -871,6 +873,39 @@ target_include_directories(character_facts_plugin_tests PRIVATE
 target_compile_features(character_facts_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(character_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME character_facts_plugin_tests COMMAND character_facts_plugin_tests)
+
+# P5-4-2：item_facts 6 条 /api/item/* GET query handler 的注册/快照/富化/注销接缝。
+add_executable(item_facts_dispatch_tests
+    test_item_facts_dispatch.cpp
+    ${CPP_DIR}/plugins/item_facts/plugin.cpp
+    ${CPP_DIR}/plugins/item_facts/json_lite.cpp
+    ${CPP_DIR}/plugins/item_facts/response.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(item_facts_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(item_facts_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(item_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(item_facts_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME item_facts_dispatch_tests COMMAND item_facts_dispatch_tests)
+
+# P5-4-2：quest 4 条 /api/quest* GET query handler 的注册/快照/片段拼接/注销接缝。
+add_executable(quest_dispatch_tests
+    test_quest_dispatch.cpp
+    ${CPP_DIR}/plugins/quest/plugin.cpp
+    ${CPP_DIR}/plugins/quest/feature.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(quest_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(quest_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(quest_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(quest_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME quest_dispatch_tests COMMAND quest_dispatch_tests)
 
 # P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
 add_executable(core_patches_shape_tests test_core_patches_shape.cpp)

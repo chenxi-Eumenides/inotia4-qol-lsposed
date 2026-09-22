@@ -1,8 +1,8 @@
 #include "gamebridge_internal.h"
 
-#include <array>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "host/http_dispatch.h"
 
@@ -62,7 +62,9 @@ Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint m
     const std::string path_value = read_string(env, path, true, &input_ok);
     const std::string query_value = read_string(env, query, false, &input_ok);
     const std::string body_value = read_string(env, body, false, &input_ok);
-    std::array<uint8_t, 65536> output{};
+    // owner handler 可能输出较大的聚合 JSON（如任务完成列表），缓冲区按线程常驻，避免每次
+    // 调用在栈上零初始化 256KB。
+    static thread_local std::vector<uint8_t> output(262144);
     qol::contracts::HttpRes response{output.data(), static_cast<uint32_t>(output.size()), 0, 0};
     if (!input_ok) {
         response.status = 400;

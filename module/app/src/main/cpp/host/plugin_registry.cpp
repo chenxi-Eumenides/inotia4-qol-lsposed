@@ -1589,6 +1589,9 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 if (plugin->resources_count == 0) {
                     const uint32_t index = plugin_index_of(plugin->id);
                     begin_revoke_provider(index);
+                    // 无 provides 的 owner 走不到 begin_revoke_provider 的摘除分支；
+                    // deactivate 必须置路由墓碑，保证停用态错误语义唯一（http owner inactive）。
+                    unregister_http_queries(*plugin);
                     if (plugin->deactivate != nullptr) plugin->deactivate(ctx);
                     infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
                     return true;
@@ -1782,6 +1785,8 @@ uint32_t lifecycle_step() {
                                      "cascade_stopped");
             } else {
                 // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
+                // kRelease 事务路径与零资源快速路径一致：先置路由墓碑再清理，停用态错误语义唯一。
+                unregister_http_queries(plugin);
                 if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, infra::FeatureState::kInactive, false, nullptr);
             }

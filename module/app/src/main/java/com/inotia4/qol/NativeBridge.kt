@@ -89,6 +89,10 @@ object NativeBridge {
     external fun nativeSaveBackupSetMapNames(json: String)
 
     external fun nativeSetWorldMapExits(json: String)
+
+    // ---- HTTP owner 静态 enrichment 下发（启动期一次；owner handler 运行期只读）----
+    external fun nativeSetItemStaticData(payload: String)
+    external fun nativeSetQuestStaticData(payload: String)
     external fun nativeBackupList(): String
     external fun nativeBackupExport(slot: Int): String
     external fun nativeBackupImport(checksum: String, slot: Int): String

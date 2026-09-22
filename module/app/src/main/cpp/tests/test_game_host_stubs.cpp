@@ -99,6 +99,8 @@ std::string build_units_json() { return "{\"units\":[]}"; }
 std::string build_enemies_json() { return "{\"enemies\":[]}"; }
 std::string build_interactives_json() { return "{\"interactives\":[]}"; }
 std::string build_drops_json() { return "{\"drops\":[]}"; }
+std::string build_inventory_json() { return "{\"bags\":[]}"; }
+std::string data_shop_items_json() { return "{\"items\":[]}"; }
 
 namespace qol::patch {
 

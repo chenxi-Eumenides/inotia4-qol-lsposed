@@ -142,166 +142,27 @@ class InfoApiServiceCore : InfoApiService {
     override fun mercenaryList(): String = InfoMercenaryQueries.slots()
     override fun mercenarySlot(slot: Int): String = InfoMercenaryQueries.slot(slot)
 
-    override fun inventory(): String {
-        val ij = inventoryJson()
-        if (isNativeError(ij)) return ij
-        return NameInjector.withItemNames(ij)
-    }
+    // item/quest 查询已迁 owner（item_facts/quest）：Kotlin 只做 nativeHttpDispatch 透传，
+    // 成功响应与冻结语义由 owner 快照与启动期静态 enrichment 生成（见 NativeHttpQuery）。
+    override fun inventory(): String = InfoItemQueries.inventory()
 
-    override fun inventoryMoney(): String {
-        val pj = playerJson()
-        if (isNativeError(pj)) return pj
-        return JsonUtil.wrap("money", JsonUtil.parseObj(pj)?.optLong("money", -1) ?: -1L)
-    }
+    override fun inventoryMoney(): String = InfoItemQueries.money()
 
-    override fun inventoryItems(): String {
-        val ij = inventoryJson()
-        if (isNativeError(ij)) return ij
-        val bags = JsonUtil.parseObj(ij)?.optJSONArray("bags") ?: return JsonUtil.wrap("items", JSONArray())
-        val items = JSONArray()
-        for (b in 0 until bags.length()) {
-            val bag = bags.optJSONObject(b) ?: continue
-            val bagItems = bag.optJSONArray("items") ?: continue
-            for (i in 0 until bagItems.length()) {
-                val it = bagItems.optJSONObject(i) ?: continue
-                it.put("bag", bag.optInt("bag", -1))
-                NameInjector.injectItemName(it)
-                items.put(it)
-            }
-        }
-        return JsonUtil.wrap("items", items)
-    }
+    override fun inventoryItems(): String = InfoItemQueries.items()
 
-    override fun bagInfo(bag: Int): String {
-        val ij = inventoryJson()
-        if (isNativeError(ij)) return ij
-        val bags = JsonUtil.parseObj(ij)?.optJSONArray("bags") ?: notFound()
-        for (b in 0 until bags.length()) {
-            val o = bags.optJSONObject(b) ?: continue
-            if (o.optInt("bag", -1) == bag) {
-                return JsonUtil.wrap("bag" to o.optInt("bag", -1),
-                    "capacity" to o.optInt("capacity", -1),
-                    "slot_count" to o.optInt("slot_count", -1))
-            }
-        }
-        return notFound()
-    }
+    override fun bagInfo(bag: Int): String = InfoItemQueries.bagInfo(bag)
 
-    override fun bagSlot(bag: Int, slot: Int): String {
-        val ij = inventoryJson()
-        if (isNativeError(ij)) return ij
-        val bags = JsonUtil.parseObj(ij)?.optJSONArray("bags") ?: notFound()
-        for (b in 0 until bags.length()) {
-            val o = bags.optJSONObject(b) ?: continue
-            if (o.optInt("bag", -1) != bag) continue
-            val items = o.optJSONArray("items") ?: notFound()
-            for (i in 0 until items.length()) {
-                val it = items.optJSONObject(i) ?: continue
-                if (it.optInt("slot", -1) == slot) {
-                    NameInjector.injectItemName(it)
-                    return it.toString()
-                }
-            }
-            return "null"
-        }
-        return notFound()
-    }
+    override fun bagSlot(bag: Int, slot: Int): String = InfoItemQueries.bagSlot(bag, slot)
 
-    override fun quest(): String {
-        // v0.5.13：与细分端点保持一致——active/details/completed 分别取 questActive/questDetails/questCompleted 的 quests 数组
-        // 非 world 状态下 native 返回 {"error":...}——复合端点诚实转发首个错误，不伪造空数组
-        val a = questActive()
-        if (isNativeError(a)) return a
-        val l = questDetails()
-        if (isNativeError(l)) return l
-        val c = questCompleted()
-        if (isNativeError(c)) return c
-        val active = JsonUtil.parseObj(a)?.optJSONArray("quests")
-        val list = JsonUtil.parseObj(l)?.optJSONArray("quests")
-        val completed = JsonUtil.parseObj(c)?.optJSONArray("quests")
-        return JsonUtil.wrap(
-            "active" to (active ?: JSONArray()),
-            "details" to (list ?: JSONArray()),
-            "completed" to (completed ?: JSONArray())
-        )
-    }
+    override fun quest(): String = InfoQuestQueries.quest()
 
-    override fun questActive(): String {
-        val json = NativeBridge.nativeQuestActive()
-        if (isNativeError(json)) return json
-        return try {
-            val root = JSONObject(json)
-            val arr = root.optJSONArray("quests") ?: return json
-            // 排除游戏面板不显示的任务（QUESTS.json hidden=true，战斗/教学类，v0.5.38）
-            val visible = JSONArray()
-            for (i in 0 until arr.length()) {
-                val q = arr.optJSONObject(i) ?: continue
-                val qid = q.optInt("quest_id", -1)
-                if (qid < 0) continue
-                val data = StaticData.questData(qid) ?: continue
-                if (data.optBoolean("hidden", false)) continue
-                val name = data.optString("name").takeIf { it.isNotEmpty() }
-                if (name != null) q.put("id_name", name)
-                NameInjector.injectQuestFields(q, data, listOf("group_id", "name", "detail", "is_side", "is_mainline"))
-                visible.put(q)
-            }
-            root.put("quests", visible)
-            root.toString()
-        } catch (e: Exception) {
-            json
-        }
-    }
+    override fun questActive(): String = InfoQuestQueries.active()
 
-    override fun questDetails(): String {
-        val json = NativeBridge.nativeQuestList()
-        if (isNativeError(json)) return json
-        return try {
-            val root = JSONObject(json)
-            val arr = root.optJSONArray("quests") ?: return json
-            for (i in 0 until arr.length()) {
-                val q = arr.optJSONObject(i) ?: continue
-                val qid = q.optInt("quest_id", -1)
-                if (qid < 0) continue
-                val data = StaticData.questData(qid) ?: continue
-                NameInjector.injectQuestFields(
-                    q, data,
-                    listOf(
-                        "group_id", "group_name", "name", "detail", "accepted_dialog",
-                        "delivered_dialog", "class_req", "reward_hint",
-                        "is_side", "is_mainline", "hidden"
-                    )
-                )
-                val rewards = data.optJSONArray("rewards")
-                if (rewards != null) q.put("rewards", rewards)
-            }
-            root.toString()
-        } catch (e: Exception) {
-            json
-        }
-    }
+    override fun questDetails(): String = InfoQuestQueries.details()
 
     override fun questListId(id: Int): String = notFound()
 
-    override fun questCompleted(): String {
-        val json = NativeBridge.nativeQuestCompleted()
-        if (isNativeError(json)) return json
-        return try {
-            val root = JSONObject(json)
-            val arr = root.optJSONArray("quests") ?: return json
-            for (i in 0 until arr.length()) {
-                val q = arr.optJSONObject(i) ?: continue
-                val qid = q.optInt("quest_id", -1)
-                if (qid < 0) continue
-                val data = StaticData.questData(qid) ?: continue
-                val name = data.optString("name").takeIf { it.isNotEmpty() }
-                if (name != null) q.put("name", name)
-                NameInjector.injectQuestFields(q, data, listOf("group_id", "detail", "is_side", "is_mainline"))
-            }
-            root.toString()
-        } catch (e: Exception) {
-            json
-        }
-    }
+    override fun questCompleted(): String = InfoQuestQueries.completed()
 
     override fun ui(): String = gamestateJson()
 
@@ -392,7 +253,7 @@ class InfoApiServiceCore : InfoApiService {
     override fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String =
         InfoSystemQueries.extensionBagTestItem(index, slot, category, count)
 
-    override fun shopItems(): String = InfoShopQueries.items()
+    override fun shopItems(): String = InfoItemQueries.shopItems()
 
     override fun health(): String = InfoSystemQueries.health()
 
@@ -422,7 +283,6 @@ class InfoApiServiceCore : InfoApiService {
 
     private fun partyArr(): JSONArray? = JsonUtil.parseArr(partyJson())
 
-    private fun inventoryJson(): String = NativeBridge.nativeGetInventoryJson()
 
     private fun mapJson(): String = NativeBridge.nativeGetMapJson()
 

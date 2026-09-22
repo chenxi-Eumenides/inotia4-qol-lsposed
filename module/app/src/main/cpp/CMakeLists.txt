@@ -250,6 +250,7 @@ target_sources(gamebridge PRIVATE
     host/status_json.cpp
     bridge/native/gamebridge_status.cpp
     bridge/native/gamebridge_dispatch.cpp
+    bridge/native/gamebridge_static_data.cpp
 )
 
 # P1 诊断：游戏变体 JSON（末尾追加，不改上方既有行）

@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "contracts/game_host.h"
 #include "contracts/game_ports/quest_port.h"
@@ -17,24 +18,36 @@ namespace {
 int64_t g_frame = 1;
 bool g_in_world = false;
 int g_set_state_calls = 0;
-qol::contracts::QolFrameHandler g_scheduler_handler = nullptr;
+
+// quest 插件现有两个常驻逻辑帧任务（进档重算 + owner 快照）；fake scheduler 必须按任务分别
+// 保留 handler，不能用单一全局指针，否则第二个任务的注册会覆盖第一个。
+struct TaskBox {
+    qol::contracts::QolFrameHandler handler = nullptr;
+};
+std::vector<TaskBox*> g_tasks;
 
 int64_t fake_frame_count() {
     return g_frame;
 }
 
 bool scheduler_bridge(int64_t frame, void* ctx) {
-    return g_scheduler_handler != nullptr && g_scheduler_handler(frame, ctx) != 0;
+    auto* box = static_cast<TaskBox*>(ctx);
+    return box != nullptr && box->handler != nullptr && box->handler(frame, nullptr) != 0;
 }
 
 QolResult fake_scheduler_add(int32_t point,
                                              qol::contracts::QolFrameHandler handler,
                                              void* ctx, int32_t interval, int32_t count,
                                              uint64_t* out_id) {
-    g_scheduler_handler = handler;
+    (void)ctx;
+    auto* box = new TaskBox{handler};
     const auto id = qol::infra::scheduler_add(
-        static_cast<qol::infra::FramePoint>(point), &scheduler_bridge, ctx, interval, count);
-    if (out_id == nullptr || id == 0) return qol::contracts::error(1, "scheduler failed", 16);
+        static_cast<qol::infra::FramePoint>(point), &scheduler_bridge, box, interval, count);
+    if (out_id == nullptr || id == 0) {
+        delete box;
+        return qol::contracts::error(1, "scheduler failed", 16);
+    }
+    g_tasks.push_back(box);
     *out_id = id;
     return qol::contracts::ok();
 }
@@ -90,6 +103,17 @@ QolResult fake_set_state(uint32_t quest_id, int32_t state) {
     return qol::contracts::ok();
 }
 
+QolResult fake_fragment(int32_t, uint32_t quest_id, const char** out) {
+    if (out == nullptr || quest_id != 7) return qol::contracts::error(kQolErrNotFound, "x", 1);
+    *out = "\"name\":\"Q7\"";
+    return qol::contracts::ok();
+}
+
+QolResult fake_static_ready(int32_t* out) {
+    *out = 1;
+    return qol::contracts::ok();
+}
+
 qol::contracts::QolHostSdk fake_sdk() {
     qol::contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
@@ -103,7 +127,7 @@ qol::contracts::QolHostSdk fake_sdk() {
 const qol::contracts::QolQuestPort kQuestPort{
     {1, 0},
     {&fake_world_state, &fake_active_slot_count, &fake_active_slot_id, nullptr, &fake_quest_state,
-     &fake_quest_complete},
+     &fake_quest_complete, &fake_fragment, &fake_static_ready},
     {&fake_set_state},
 };
 
@@ -129,7 +153,8 @@ int main() {
     const auto& descriptor = qol::features::quest::plugin_descriptor();
 
     assert(descriptor.install(ctx) == 0);
-    assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 1);
+    // 逻辑帧点两个常驻任务：进档重算（一次性语义）+ owner 快照节拍。
+    assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 2);
 
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
     qol::infra::commands_drain();
@@ -154,7 +179,7 @@ int main() {
     assert(!qol::features::quest::gate_enabled());
     assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 0);
     descriptor.on_enabled(ctx);
-    assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 1);
+    assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 2);
     descriptor.deactivate(ctx);
     assert(!qol::features::quest::gate_enabled());
     assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 0);

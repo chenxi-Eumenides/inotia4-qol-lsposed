@@ -375,6 +375,112 @@ object StaticData {
     /** 把静态地图出口表下发 native，供 world_facts 的主线程快照按 mapId 取用。 */
     fun buildMapExitsJson(): String = exitsRootOrNull()?.toString() ?: "{}"
 
+    /**
+     * 物品域静态名称表（启动期下发 item_facts owner）：
+     * 行式 `N|T|O|E\t<id>\t<已转义文本>`；文本用 [JSONObject.quote] 转义（与 native 侧迁移前的
+     * JSONObject 序列化同一实现），native 直接拼接即可保持成功响应逐字节不变。
+     */
+    fun buildItemStaticData(): String {
+        val sb = StringBuilder(131072)
+        val db = read("tables/ITEMDATABASE.json")
+        if (db != null) {
+            val records = try {
+                JSONObject(db).getJSONArray("records")
+            } catch (e: Exception) {
+                null
+            }
+            if (records != null) {
+                for (i in 0 until records.length()) {
+                    val record = records.optJSONObject(i) ?: continue
+                    // 空名称也下发：迁移前 itemName 对空 text_0 返回 ""（非 null），name 仍为
+                    // 前缀+""；native 必须能查到空值才能保持同一判定分支。
+                    appendStaticEntry(sb, 'N', i, record.optString("text_0", ""))
+                    appendStaticEntry(sb, 'T', i, itemType(i))
+                }
+            }
+        }
+        for (i in 0 until 64) {
+            val option = optionName(i) ?: continue
+            if (option.isNotEmpty()) appendStaticEntry(sb, 'O', i, option)
+        }
+        for (i in 1 until 64) {
+            val effect = enchantName(i) ?: continue
+            if (effect.isNotEmpty()) appendStaticEntry(sb, 'E', i, effect)
+        }
+        return sb.toString()
+    }
+
+    /**
+     * 任务域静态 enrichment 片段（启动期下发 quest owner）：行式
+     * `A|D|C\t<quest_id>\t<JSON 对象正文>`。片段由 [JSONObject] 按迁移前注入顺序构造后取其
+     * 正文，字段顺序与转义与迁移前的成功响应完全一致；未收录的任务在 native 侧即被跳过。
+     */
+    fun buildQuestStaticData(): String {
+        val json = read("tables/QUESTS.json") ?: return ""
+        val records = try {
+            JSONObject(json).getJSONArray("records")
+        } catch (e: Exception) {
+            return ""
+        }
+        val sb = StringBuilder(262144)
+        for (i in 0 until records.length()) {
+            val data = records.optJSONObject(i) ?: continue
+            val questId = data.optInt("quest_id", -1)
+            if (questId < 0) continue
+
+            val details = JSONObject()
+            for (key in QUEST_DETAILS_KEYS) {
+                if (data.has(key)) details.put(key, data.get(key))
+            }
+            val rewards = data.optJSONArray("rewards")
+            if (rewards != null) details.put("rewards", rewards)
+            appendQuestFragment(sb, 'D', questId, details)
+
+            // 面板不显示的任务（hidden）不进入 active 列表；data 缺失则由片段缺席自然跳过。
+            if (!data.optBoolean("hidden", false)) {
+                val active = JSONObject()
+                val name = data.optString("name", "")
+                if (name.isNotEmpty()) active.put("id_name", name)
+                for (key in QUEST_ACTIVE_KEYS) {
+                    if (data.has(key)) active.put(key, data.get(key))
+                }
+                appendQuestFragment(sb, 'A', questId, active)
+            }
+
+            val completed = JSONObject()
+            val completedName = data.optString("name", "")
+            if (completedName.isNotEmpty()) completed.put("name", completedName)
+            for (key in QUEST_COMPLETED_KEYS) {
+                if (data.has(key)) completed.put(key, data.get(key))
+            }
+            appendQuestFragment(sb, 'C', questId, completed)
+        }
+        return sb.toString()
+    }
+
+    private fun appendStaticEntry(sb: StringBuilder, kind: Char, id: Int, value: String) {
+        sb.append(kind).append('\t').append(id).append('\t').append(jsonEscaped(value)).append('\n')
+    }
+
+    private fun appendQuestFragment(sb: StringBuilder, endpoint: Char, questId: Int, fragment: JSONObject) {
+        val text = fragment.toString()
+        val body = if (text.length >= 2) text.substring(1, text.length - 1) else ""
+        sb.append(endpoint).append('\t').append(questId).append('\t').append(body).append('\n')
+    }
+
+    /** 与 JSONObject 序列化同一实现的转义，去掉外层引号（native 侧自行补引号）。 */
+    private fun jsonEscaped(value: String): String {
+        val quoted = JSONObject.quote(value)
+        return if (quoted.length >= 2) quoted.substring(1, quoted.length - 1) else ""
+    }
+
+    private val QUEST_DETAILS_KEYS = listOf(
+        "group_id", "group_name", "name", "detail", "accepted_dialog", "delivered_dialog",
+        "class_req", "reward_hint", "is_side", "is_mainline", "hidden"
+    )
+    private val QUEST_ACTIVE_KEYS = listOf("group_id", "name", "detail", "is_side", "is_mainline")
+    private val QUEST_COMPLETED_KEYS = listOf("group_id", "detail", "is_side", "is_mainline")
+
     private fun buildMapNames(): Map<Int, String> {
         val json = read("tables/MAPINFOBASE.json") ?: return emptyMap()
         return try {
