@@ -12,7 +12,7 @@ constexpr const char* kPluginId = "native_choice";
 constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
-const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolChoicePort* g_choice_port = nullptr;
 
 // 能力接口实例：函数地址为编译期常量，无跨 TU 静态初始化顺序问题；宿主进入 enabled 时注册。
 constexpr contracts::UiChoiceApi kUiChoiceApi{
@@ -62,10 +62,20 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CHOICE,
+     {contracts::kQolPortChoiceVersion.major, contracts::kQolPortChoiceVersion.minor}},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
-    g_game = ctx.game;
-    if (g_sdk == nullptr || g_game == nullptr) return 1;
+    g_choice_port = nullptr;
+    if (g_sdk == nullptr || ctx.ports == nullptr || ctx.port_count < 1 ||
+        ctx.ports[0] == nullptr) {
+        g_sdk = nullptr;
+        return 1;
+    }
+    g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
     // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
     return 0;
 }
@@ -73,6 +83,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
+    g_choice_port = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -104,6 +115,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &on_resource_ready,
+    kPorts,
+    1,
 };
 
 }  // namespace
@@ -114,6 +127,6 @@ const contracts::PluginDescriptor& plugin_descriptor() {
 
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 
-const contracts::QolGameHost* game_host() { return g_game; }
+const contracts::QolChoicePort* choice_port() { return g_choice_port; }
 
 }  // namespace qol::features::native_choice

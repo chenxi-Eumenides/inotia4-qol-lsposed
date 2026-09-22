@@ -793,48 +793,6 @@ QolResult read_choice_state_id(int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_choice_selected_index(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    return qol::game::ui_choice_selected_index(out) ? contracts::ok() : not_ready();
-}
-
-QolResult read_choice_text_owns(const char* const* items, uint32_t count, int32_t* out) {
-    if (items == nullptr || out == nullptr || count == 0 || count > 6) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out = qol::game::ui_choice_text_owns(items, count) ? 1 : 0;
-    return contracts::ok();
-}
-
-QolResult call_choice_write_items(const char* const* items, uint32_t count) {
-    if (items == nullptr || count == 0 || count > 6) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    return qol::game::ui_choice_write_items(items, count) ? contracts::ok() : not_ready();
-}
-
-QolResult call_choice_write_title(const char* title) {
-    if (title == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    return qol::game::ui_choice_write_title(title) ? contracts::ok() : not_ready();
-}
-
-QolResult call_choice_write_focus(int32_t index) {
-    if (index < 0 || index > 255) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    return qol::game::ui_choice_write_focus(index) ? contracts::ok() : not_ready();
-}
-
-QolResult call_choice_push() {
-    return qol::game::ui_choice_push() ? contracts::ok() : not_ready();
-}
-
-QolResult call_choice_close_popup() {
-    return qol::game::ui_choice_close_popup() ? contracts::ok() : not_ready();
-}
-
-QolResult call_choice_play_sound(int32_t sound_id) {
-    return qol::game::ui_choice_play_sound(sound_id) ? contracts::ok() : not_ready();
-}
-
 QolResult read_attr_option_value(int32_t option_index, int32_t level, int32_t flag,
                                  const void* item, int32_t* out_value) {
     if (item == nullptr || out_value == nullptr || option_index < 0 || level < 0 || flag < 0) {
@@ -954,8 +912,7 @@ contracts::QolGameHost make_game_host() {
         &read_save_load_data, &read_save_hub_key, &read_save_slot_map_id,
         &read_save_current_slot, &read_save_is_ok};
     host.save_call = {&call_save_free_data, &call_save_encrypt, &call_save_mark_stale};
-    host.read_only.choice = {&read_choice_state_id, &read_choice_selected_index,
-                             &read_choice_text_owns};
+    host.read_only.choice = {&read_choice_state_id};
     host.read_only.inventory = {&read_inventory_for_each_bag_slot,
                                 &read_inventory_bag_size,
                                 &read_inventory_is_empty_bag, &read_inventory_find_save_slot,
@@ -977,9 +934,6 @@ contracts::QolGameHost make_game_host() {
                          &call_world_close_popup, &call_world_restore_hud,
                          &call_world_show_banner, &call_world_add_money,
                          &call_world_cancel_tutorial};
-    host.choice_action = {&call_choice_write_items, &call_choice_write_title,
-                          &call_choice_write_focus, &call_choice_push,
-                          &call_choice_close_popup, &call_choice_play_sound};
     return host;
 }
 

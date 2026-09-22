@@ -7,6 +7,7 @@
 #include "infra/log/qol_log.h"
 #include "contracts/commands.h"
 #include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/choice_port.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/quest_port.h"
@@ -23,6 +24,7 @@
 #include "patch/ptr_slot.h"
 #if !QOL_KERNEL_ONLY
 #include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/quest_port.h"
@@ -111,6 +113,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_CHOICE) {
+        const auto& port = qol::game::choice_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
 #else
     (void)id;
     (void)out;
@@ -127,6 +134,12 @@ bool resolve_plugin_ports(uint32_t index) {
         const contracts::QolPortRequirement& requirement = plugin.ports[i];
         if (requirement.id == contracts::QolPortId::QOL_PORT_EXTENSION_BAG_WRITE &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "extension_bag") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "native_choice") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

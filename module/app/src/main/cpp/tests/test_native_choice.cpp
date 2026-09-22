@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include "contracts/ui_choice.h"
+#include "contracts/game_ports/choice_port.h"
 
 namespace {
 
@@ -82,6 +83,10 @@ void test_plugin_manifest() {
     CHECK(d.provides[0].version.major == qol::contracts::kUiChoiceVersionMajor);
     CHECK(d.provides[0].version.minor == qol::contracts::kUiChoiceVersionMinor);
     CHECK(d.provides[0].iface != nullptr);
+    CHECK(d.port_count == 1 && d.ports != nullptr);
+    CHECK(d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
+    CHECK(d.ports[0].range.major == qol::contracts::kQolPortChoiceVersion.major);
+    CHECK(d.ports[0].range.min_minor == qol::contracts::kQolPortChoiceVersion.minor);
     const auto* api = static_cast<const UiChoiceApi*>(d.provides[0].iface);
     CHECK(api->open != nullptr && api->active != nullptr && api->close != nullptr);
     CHECK(!api->active());

@@ -666,6 +666,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/world_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_port.cpp
     ${CPP_DIR}/game/adapter_ports/character_port.cpp
+    ${CPP_DIR}/game/adapter_ports/choice_port.cpp
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
     ${CPP_DIR}/game/feature/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp

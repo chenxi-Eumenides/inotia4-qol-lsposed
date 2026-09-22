@@ -191,14 +191,6 @@ struct QolSaveCallApi {
     QolResult (*mark_stale)();
 };
 
-struct QolChoiceActionApi {
-    QolResult (*write_items)(const char* const* items, uint32_t count);
-    QolResult (*write_title)(const char* title);
-    QolResult (*write_focus)(int32_t index);
-    QolResult (*push)();
-    QolResult (*close_popup)();
-    QolResult (*play_sound)(int32_t sound_id);
-};
 // 按域只读面只提供事实查询；副作用不通过该面表达。
 struct QolCharacterReadOnlyApi {
     QolResult (*party_index)(const void* character, int32_t* out_index);
@@ -275,8 +267,6 @@ struct QolSaveReadOnlyApi {
 
 struct QolChoiceReadOnlyApi {
     QolResult (*state_id)(int32_t* out_state_id);
-    QolResult (*selected_index)(int32_t* out_index);
-    QolResult (*text_owns)(const char* const* items, uint32_t count, int32_t* out_owned);
 };
 
 struct QolInventoryReadOnlyApi {
@@ -318,7 +308,6 @@ struct QolGameHost {
     QolInventoryWriteApi inventory_write;
     QolCraftActionApi craft_action;
     QolWorldActionApi world_action;
-    QolChoiceActionApi choice_action;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -332,7 +321,7 @@ static_assert(offsetof(QolGameHost, save_call) ==
                   offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
               "QolGameHost save_call ABI offset changed");
 static_assert(sizeof(QolGameHost) ==
-                  offsetof(QolGameHost, choice_action) + sizeof(QolChoiceActionApi),
+                  offsetof(QolGameHost, world_action) + sizeof(QolWorldActionApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;

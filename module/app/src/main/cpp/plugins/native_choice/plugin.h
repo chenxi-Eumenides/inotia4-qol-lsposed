@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../contracts/plugin.h"
+#include "../../contracts/game_ports/choice_port.h"
 
 // 原生选择框插件清单入口（ARCHITECTURE.md §3.3）：2 条 kRequired/kFailClosed 常驻资源，
 // 并向消费者提供 `ui_choice` 能力（v1.0）。
@@ -14,6 +15,6 @@ namespace qol::features::native_choice {
 
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
-const contracts::QolGameHost* game_host();
+const contracts::QolChoicePort* choice_port();
 
 }  // namespace qol::features::native_choice

@@ -18,6 +18,7 @@
 #include "game/access/symbols.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/quest_port.h"
@@ -548,12 +549,10 @@ int main() {
     assert(game.inventory_write.create_item != nullptr);
     assert(game.craft_action.show_yesno_from_text != nullptr);
     assert(game.world_action.request_map_change != nullptr);
-    assert(game.choice_action.write_items != nullptr);
     assert(game.character_write.max_hp(nullptr, 1).code == kQolErrInvalidArgument);
     assert(game.inventory_write.remove_item(nullptr).code == kQolErrInvalidArgument);
     assert(game.craft_action.set_ui_type(-1).code == kQolErrInvalidArgument);
     assert(game.world_action.minus_money(-1).code == kQolErrInvalidArgument);
-    assert(game.choice_action.write_title(nullptr).code == kQolErrInvalidArgument);
     int32_t character_type = -1;
     assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
     assert(character_type == 2);
@@ -584,6 +583,16 @@ int main() {
     int32_t choice_state = -1;
     assert(game.read_only.choice.state_id(&choice_state).ok == kQolOk);
     assert(choice_state == 42);
+    const auto& choice = qol::game::choice_port();
+    assert(choice.read.state_id != nullptr);
+    assert(choice.read.selected_index != nullptr);
+    assert(choice.read.text_owns != nullptr);
+    assert(choice.write.write_items != nullptr);
+    assert(choice.write.write_title != nullptr);
+    assert(choice.write.write_focus != nullptr);
+    assert(choice.write.push != nullptr);
+    assert(choice.write.close_popup != nullptr);
+    assert(choice.write.play_sound != nullptr);
     assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 2);
     assert(character_port_api.read.is_active_player_group(reinterpret_cast<void*>(0x1), &value).ok ==
@@ -710,11 +719,14 @@ int main() {
     assert(quest.read.total_count(&u32_value).ok == kQolOk && u32_value == 10);
     assert(quest.read.quest_state(7, &value).ok == kQolOk && value == 1);
     assert(quest.read.is_complete(7, &value).ok == kQolOk && value == 1);
+    assert(choice.read.state_id(&value).ok == kQolOk && value == 42);
+    assert(choice.read.selected_index(&value).ok == kQolOk && value == 0);
     const char* choice_items[] = {"a"};
-    assert(game.read_only.choice.state_id(&value).ok == kQolOk && value == 42);
-    assert(game.read_only.choice.selected_index(&value).ok == kQolOk && value == 0);
-    assert(game.read_only.choice.text_owns(choice_items, 1, &value).ok == kQolOk && value == 1);
-    assert(game.read_only.choice.selected_index(nullptr).code == kQolErrInvalidArgument);
+    assert(choice.read.text_owns(choice_items, 1, &value).ok == kQolOk && value == 1);
+    assert(choice.read.selected_index(nullptr).code == kQolErrInvalidArgument);
+    assert(choice.write.write_items(nullptr, 1).code == kQolErrInvalidArgument);
+    assert(choice.write.write_title(nullptr).code == kQolErrInvalidArgument);
+    assert(choice.write.write_focus(-1).code == kQolErrInvalidArgument);
     qol::contracts::QolInventoryItemRef inventory_ref{};
     assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).ok == kQolOk);
     assert(inventory_ref.bag == 1 && inventory_ref.slot == 2 && inventory_ref.native_item != nullptr);

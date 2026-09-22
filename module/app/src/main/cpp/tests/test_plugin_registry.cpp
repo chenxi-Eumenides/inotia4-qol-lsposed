@@ -513,6 +513,34 @@ void test_success_path() {
     CHECK(error == nullptr);
 }
 
+void test_choice_port_version_gate() {
+    reset_all();
+    qol::contracts::QolPortRequirement requirement{
+        qol::contracts::QolPortId::QOL_PORT_CHOICE,
+        {qol::contracts::kQolPortChoiceVersion.major,
+         qol::contracts::kQolPortChoiceVersion.minor},
+    };
+    PluginDescriptor valid = make_descriptor("native_choice", nullptr, 0, nullptr, 0);
+    valid.ports = &requirement;
+    valid.port_count = 1;
+    CHECK(register_plugin(valid));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("native_choice", FeatureState::kEnabled));
+
+    reset_all();
+    requirement.range.min_minor = static_cast<uint16_t>(
+        qol::contracts::kQolPortChoiceVersion.minor + 1);
+    PluginDescriptor incompatible = make_descriptor("native_choice", nullptr, 0, nullptr, 0);
+    incompatible.ports = &requirement;
+    incompatible.port_count = 1;
+    CHECK(register_plugin(incompatible));
+    CHECK(install_all(make_deps()) == 1);
+    const char* error = nullptr;
+    CHECK(feature_state_is("native_choice", FeatureState::kBlocked));
+    CHECK(feature_of("native_choice", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+}
+
 void test_gate_off_installed_disabled() {
     reset_all();
     const PluginDescriptor d =
@@ -1162,6 +1190,7 @@ void test_atomic_gate_closed_does_not_call_on_enabled() {
 
 int main() {
     test_success_path();
+    test_choice_port_version_gate();
     test_gate_off_installed_disabled();
     test_gate_on_and_config_hot_switch();
     test_second_resource_failure_rolls_back();
