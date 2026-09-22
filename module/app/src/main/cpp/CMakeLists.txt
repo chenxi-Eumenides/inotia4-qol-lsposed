@@ -215,6 +215,12 @@ target_sources(gamebridge PRIVATE
     game/clock.cpp
 )
 
+if(NOT QOL_KERNEL_ONLY)
+    target_sources(gamebridge PRIVATE
+        game/adapter_ports/quest_port.cpp
+    )
+endif()
+
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp

@@ -10,7 +10,6 @@
 #include "game/access/craft.h"
 #include "game/access/item_class.h"
 #include "game/access/inventory.h"
-#include "game/access/quest.h"
 #include "game/access/save.h"
 #include "game/access/symbols.h"
 #include "game/access/ui_choice.h"
@@ -350,11 +349,6 @@ QolResult read_save_slot_state(int32_t slot, int32_t* out) {
     if (save == nullptr) return not_ready();
     *out = qol::game::save_slot_exists(save) ? 1 : 0;
     return contracts::ok();
-}
-
-QolResult read_quest_state(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    return unsupported();
 }
 
 QolResult read_char_party_member(const void* character, int32_t* out) {
@@ -938,47 +932,6 @@ QolResult call_save_mark_stale() {
     return contracts::ok();
 }
 
-QolResult read_quest_active_slot_count(uint32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::quest_active_slot_count();
-    return contracts::ok();
-}
-
-QolResult read_quest_active_slot_id(uint32_t index, uint32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    uint16_t id = 0;
-    if (!qol::game::quest_active_slot_id(index, &id)) return not_ready();
-    *out = id;
-    return contracts::ok();
-}
-
-QolResult read_quest_total_count(uint32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::quest_total_count();
-    return contracts::ok();
-}
-
-QolResult read_quest_value(uint32_t quest_id, int32_t* out, bool complete) {
-    if (out == nullptr || quest_id > UINT16_MAX) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (complete) {
-        *out = qol::game::quest_is_complete(static_cast<uint16_t>(quest_id)) ? 1 : 0;
-        return contracts::ok();
-    }
-    const int32_t value = qol::game::quest_state(static_cast<uint16_t>(quest_id));
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult write_quest_state(uint32_t quest_id, int32_t state) {
-    if (quest_id > UINT16_MAX) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    return qol::game::quest_set_state(static_cast<uint16_t>(quest_id), state)
-               ? contracts::ok()
-               : not_ready();
-}
-
 QolResult read_choice_state_id(int32_t* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     const int value = qol::game::ui_choice_state_id();
@@ -1410,7 +1363,6 @@ contracts::QolGameHost make_game_host() {
                        &read_craft_stuff_item, &read_craft_category_count,
                        &read_craft_character_level};
     host.read.save = {&read_save_slot_state};
-    host.read.quest = {&read_quest_state};
     host.read.attr_range = {&read_attr_option_value, &read_attr_jewel_value,
                             &read_attr_uses_fixed_option_table,
                             &read_attr_fixed_option_percent_pair};
@@ -1449,11 +1401,6 @@ contracts::QolGameHost make_game_host() {
         &read_save_load_data, &read_save_hub_key, &read_save_slot_map_id,
         &read_save_current_slot, &read_save_is_ok};
     host.save_call = {&call_save_free_data, &call_save_encrypt, &call_save_mark_stale};
-    host.read_only.quest = {
-        &read_quest_state, &read_quest_active_slot_count, &read_quest_active_slot_id,
-        &read_quest_total_count,
-        [](uint32_t quest_id, int32_t* out) { return read_quest_value(quest_id, out, false); },
-        [](uint32_t quest_id, int32_t* out) { return read_quest_value(quest_id, out, true); }};
     host.read_only.choice = {&read_choice_state_id, &read_choice_selected_index,
                              &read_choice_text_owns};
     host.read_only.inventory = {&read_inventory_item_ref_at, &read_inventory_for_each_bag_slot,
@@ -1521,7 +1468,6 @@ contracts::QolGameHost make_game_host() {
                          &call_world_close_popup, &call_world_restore_hud,
                          &call_world_show_banner, &call_world_add_money,
                          &call_world_cancel_tutorial};
-    host.quest_write = {&write_quest_state};
     host.choice_action = {&call_choice_write_items, &call_choice_write_title,
                           &call_choice_write_focus, &call_choice_push,
                           &call_choice_close_popup, &call_choice_play_sound};

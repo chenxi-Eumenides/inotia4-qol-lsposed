@@ -21,6 +21,12 @@ uint32_t commands_drain();
 // 未注入时该 kind 的票据置 kFailed（infra 不依赖 host，执行体由宿主提供）。
 void commands_set_lifecycle_handler(bool (*handler)(const char* plugin_id, int32_t action));
 
+QolResult commands_register_typed_handler(uint32_t handler_id,
+                                          contracts::QolTypedCommandHandler handler, void* ctx);
+QolResult commands_unregister_typed_handler(uint32_t handler_id);
+QolResult commands_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                              contracts::QolCommandTicket* out);
+
 // 测试用：清空槽位表。
 void commands_reset_for_test();
 

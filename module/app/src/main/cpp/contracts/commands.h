@@ -10,6 +10,7 @@
 namespace qol::contracts {
 
 using QolCommandTicket = uint64_t; // 0 = 无效票据
+constexpr uint32_t kTypedCommandPayloadCapacity = 128;
 
 enum : uint32_t {
     kCommandSetConfigBool = 1,
@@ -30,10 +31,22 @@ struct QolCommand {
     int32_t int_value;
 };
 
+struct QolTypedCommandHeader {
+    uint32_t handler_id;
+    uint32_t payload_bytes;
+};
+
+using QolTypedCommandHandler = bool (*)(void* ctx, const uint8_t* payload, uint32_t size);
+
 struct QolCommands {
     QolResult (*post)(QolCommandTicket* out, const QolCommand* cmd); // 主线程执行
     int32_t (*state)(QolCommandTicket ticket);                       // pending/done/failed/cancelled
     QolResult (*cancel)(QolCommandTicket ticket);
+    QolResult (*register_typed_handler)(uint32_t handler_id,
+                                        QolTypedCommandHandler handler, void* ctx);
+    QolResult (*unregister_typed_handler)(uint32_t handler_id);
+    QolResult (*post_typed)(uint32_t handler_id, const void* payload, uint32_t size,
+                            QolCommandTicket* out);
 };
 
 }  // namespace qol::contracts

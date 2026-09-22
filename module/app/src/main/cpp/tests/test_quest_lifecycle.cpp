@@ -3,9 +3,11 @@
 #include <cstring>
 
 #include "contracts/game_host.h"
+#include "contracts/game_ports/quest_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/world_facts.h"
 #include "infra/runtime.h"
+#include "infra/commands.h"
 #include "infra/scheduler.h"
 #include "plugins/quest/feature.h"
 #include "plugins/quest/plugin.h"
@@ -94,19 +96,22 @@ qol::contracts::QolHostSdk fake_sdk() {
                qol::contracts::kHostSdkMinor};
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.capabilities.require = &fake_capability_require;
+    sdk.commands = qol::infra::commands_port();
     return sdk;
 }
+
+const qol::contracts::QolQuestPort kQuestPort{
+    {1, 0},
+    {&fake_world_state, &fake_active_slot_count, &fake_active_slot_id, nullptr, &fake_quest_state,
+     &fake_quest_complete},
+    {&fake_set_state},
+};
 
 qol::contracts::QolGameHost fake_game() {
     qol::contracts::QolGameHost game{};
     game.abi = {sizeof(qol::contracts::QolGameHost), qol::contracts::kGameHostMajor,
                 qol::contracts::kGameHostMinor};
     game.read.world.state = &fake_world_state;
-    game.read_only.quest.active_slot_count = &fake_active_slot_count;
-    game.read_only.quest.active_slot_id = &fake_active_slot_id;
-    game.read_only.quest.quest_state = &fake_quest_state;
-    game.read_only.quest.is_complete = &fake_quest_complete;
-    game.quest_write.set_state = &fake_set_state;
     return game;
 }
 
@@ -115,29 +120,35 @@ qol::contracts::QolGameHost fake_game() {
 int main() {
     qol::infra::runtime_init({&fake_frame_count});
     qol::infra::scheduler_reset_for_test();
+    qol::infra::commands_reset_for_test();
     auto sdk = fake_sdk();
     auto game = fake_game();
+    const void* ports[] = {&kQuestPort};
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
                                       qol::contracts::kHostSdkMajor,
-                                      qol::contracts::kHostSdkMinor, &sdk, &game, "quest"};
+                                      qol::contracts::kHostSdkMinor, &sdk, &game, "quest", ports, 1};
     const auto& descriptor = qol::features::quest::plugin_descriptor();
 
     assert(descriptor.install(ctx) == 0);
     assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 1);
 
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
+    qol::infra::commands_drain();
     assert(g_set_state_calls == 0);
     g_in_world = true;
     g_frame = 2;
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
+    qol::infra::commands_drain();
     assert(g_set_state_calls == 1);
     g_frame = 3;
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
+    qol::infra::commands_drain();
     assert(g_set_state_calls == 1);
 
     qol::features::quest::on_save_enter(nullptr);
     g_frame = 4;
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
+    qol::infra::commands_drain();
     assert(g_set_state_calls == 2);
 
     descriptor.on_disabled(ctx);

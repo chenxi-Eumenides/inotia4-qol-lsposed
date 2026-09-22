@@ -44,6 +44,8 @@ namespace {
 int g_event_count = 0;
 const char* g_last_key = nullptr;
 int32_t g_last_value = 0;
+uint32_t g_typed_calls = 0;
+uint32_t g_typed_value = 0;
 
 void on_config_changed(void* ctx, const void* payload) {
     (void)ctx;
@@ -61,6 +63,8 @@ void reset_all() {
     g_event_count = 0;
     g_last_key = nullptr;
     g_last_value = 0;
+    g_typed_calls = 0;
+    g_typed_value = 0;
 }
 
 void subscribe_config_changed() {
@@ -235,6 +239,35 @@ void test_commands_invalid() {
     CHECK(port.state(0) == static_cast<int32_t>(CommandState::kFailed)); // 未知票据
 }
 
+bool typed_handler(void*, const uint8_t* payload, uint32_t size) {
+    if (payload == nullptr || size != sizeof(uint32_t)) return false;
+    std::memcpy(&g_typed_value, payload, sizeof(g_typed_value));
+    ++g_typed_calls;
+    return true;
+}
+
+void test_typed_commands() {
+    reset_all();
+    const qol::contracts::QolCommands& port = commands_port();
+    constexpr uint32_t kHandlerId = 7;
+    CHECK(port.register_typed_handler(kHandlerId, &typed_handler, nullptr).ok == 0);
+
+    uint32_t payload = 0x12345678;
+    QolCommandTicket ticket = 0;
+    CHECK(port.post_typed(kHandlerId, &payload, sizeof(payload), &ticket).ok == 0);
+    payload = 0;
+    CHECK(g_typed_calls == 0);
+    CHECK(commands_drain() == 1);
+    CHECK(port.state(ticket) == static_cast<int32_t>(CommandState::kDone));
+    CHECK(g_typed_calls == 1);
+    CHECK(g_typed_value == 0x12345678);
+
+    uint8_t oversized[qol::contracts::kTypedCommandPayloadCapacity + 1] = {};
+    CHECK(port.post_typed(kHandlerId, oversized, sizeof(oversized), &ticket).ok != 0);
+    CHECK(port.unregister_typed_handler(kHandlerId).ok == 0);
+    CHECK(port.post_typed(kHandlerId, &payload, sizeof(payload), &ticket).ok != 0);
+}
+
 // command_state_name：4 态稳定英文名 + 越界 unknown。
 void test_command_state_name() {
     CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kPending)),
@@ -263,6 +296,7 @@ int main() {
     test_commands_slot_capacity_and_reclaim();
     test_command_state_name();
     test_commands_invalid();
+    test_typed_commands();
     std::printf("infra_config_commands: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

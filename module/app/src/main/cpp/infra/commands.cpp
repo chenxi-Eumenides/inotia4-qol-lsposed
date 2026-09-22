@@ -24,10 +24,14 @@ namespace {
 
 constexpr uint32_t kCommandSlots = 64;
 constexpr uint32_t kMaxKeyLength = 63; // 槽位内联键缓冲 64（含 NUL）
+constexpr uint32_t kTypedHandlerSlots = 32;
 
 struct Slot {
     bool in_use = false;
+    bool typed = false;
     contracts::QolCommand command{};
+    contracts::QolTypedCommandHeader typed_header{};
+    uint8_t typed_payload[contracts::kTypedCommandPayloadCapacity] = {};
     // 槽位自有键缓冲：命令体是外部字符串（如 JNI 侧栈缓冲），post 返回后源缓冲可能失效，
     // 而命令要到下次 drain 才执行；因此入队时按值拷贝键，command.key 指向本缓冲。
     char key[kMaxKeyLength + 1] = {};
@@ -37,6 +41,14 @@ struct Slot {
 std::mutex g_slots_mtx;
 Slot g_slots[kCommandSlots];
 
+struct TypedHandlerSlot {
+    uint32_t handler_id = 0;
+    contracts::QolTypedCommandHandler handler = nullptr;
+    void* ctx = nullptr;
+};
+
+TypedHandlerSlot g_typed_handlers[kTypedHandlerSlots];
+
 // 生命周期执行入口（宿主装配期注入）。
 bool (*g_lifecycle_handler)(const char* plugin_id, int32_t action) = nullptr;
 
@@ -44,6 +56,22 @@ bool (*g_lifecycle_handler)(const char* plugin_id, int32_t action) = nullptr;
 // ctx 指向的槽位在票据进入终态前不会被回收（回收只在 commands_drain 内、run 之后）。
 bool command_run(void* ctx) {
     const Slot* slot = static_cast<const Slot*>(ctx);
+    if (slot->typed) {
+        contracts::QolTypedCommandHandler handler = nullptr;
+        void* handler_ctx = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_slots_mtx);
+            for (const TypedHandlerSlot& candidate : g_typed_handlers) {
+                if (candidate.handler_id == slot->typed_header.handler_id) {
+                    handler = candidate.handler;
+                    handler_ctx = candidate.ctx;
+                    break;
+                }
+            }
+        }
+        return handler != nullptr &&
+               handler(handler_ctx, slot->typed_payload, slot->typed_header.payload_bytes);
+    }
     switch (slot->command.kind) {
         case contracts::kCommandSetConfigBool:
             return config_set_bool(slot->command.key, slot->command.int_value != 0);
@@ -71,6 +99,7 @@ void reap_terminal_slots_locked() {
         if (state == CommandState::kDone || state == CommandState::kFailed ||
             state == CommandState::kCancelled) {
             slot.in_use = false;
+            slot.typed = false;
             slot.ticket = 0;
         }
     }
@@ -128,13 +157,106 @@ QolResult commands_cancel(contracts::QolCommandTicket ticket) {
     return error_result(kQolErrConflict, "ticket not cancellable");
 }
 
+QolResult register_typed_handler_impl(uint32_t handler_id,
+                                      contracts::QolTypedCommandHandler handler, void* ctx) {
+    if (handler_id == 0 || handler == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid typed handler");
+    }
+    std::lock_guard<std::mutex> lock(g_slots_mtx);
+    for (const TypedHandlerSlot& candidate : g_typed_handlers) {
+        if (candidate.handler_id == handler_id) {
+            return error_result(kQolErrConflict, "typed handler already registered");
+        }
+    }
+    for (TypedHandlerSlot& candidate : g_typed_handlers) {
+        if (candidate.handler_id == 0) {
+            candidate = TypedHandlerSlot{handler_id, handler, ctx};
+            return contracts::ok();
+        }
+    }
+    return error_result(kQolErrBlocked, "typed handler slots full");
+}
+
+QolResult unregister_typed_handler_impl(uint32_t handler_id) {
+    if (handler_id == 0) return error_result(kQolErrInvalidArgument, "invalid typed handler");
+    std::lock_guard<std::mutex> lock(g_slots_mtx);
+    for (TypedHandlerSlot& candidate : g_typed_handlers) {
+        if (candidate.handler_id == handler_id) {
+            candidate = TypedHandlerSlot{};
+            return contracts::ok();
+        }
+    }
+    return error_result(kQolErrNotFound, "typed handler not found");
+}
+
+QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t size,
+                          contracts::QolCommandTicket* out) {
+    if (out != nullptr) *out = 0;
+    if (out == nullptr || handler_id == 0 || (payload == nullptr && size != 0)) {
+        return error_result(kQolErrInvalidArgument, "invalid typed command");
+    }
+    if (size > contracts::kTypedCommandPayloadCapacity) {
+        return error_result(kQolErrInvalidArgument, "typed payload too large");
+    }
+
+    std::lock_guard<std::mutex> lock(g_slots_mtx);
+    bool registered = false;
+    for (const TypedHandlerSlot& candidate : g_typed_handlers) {
+        if (candidate.handler_id == handler_id) {
+            registered = true;
+            break;
+        }
+    }
+    if (!registered) return error_result(kQolErrNotFound, "typed handler not found");
+
+    Slot* slot = nullptr;
+    for (uint32_t i = 0; i < kCommandSlots; ++i) {
+        if (!g_slots[i].in_use) {
+            slot = &g_slots[i];
+            break;
+        }
+    }
+    if (slot == nullptr) return error_result(kQolErrBlocked, "command slots full");
+
+    slot->typed = true;
+    slot->typed_header = {handler_id, size};
+    if (size != 0) std::memcpy(slot->typed_payload, payload, size);
+    const Command queued{"qol.typed_command", command_run, slot, true};
+    const CommandTicket ticket = post(queued);
+    if (ticket == 0) {
+        slot->typed = false;
+        return error_result(kQolErrBlocked, "command queue full");
+    }
+    slot->in_use = true;
+    slot->ticket = ticket;
+    *out = ticket;
+    return contracts::ok();
+}
+
 }  // namespace
+
+QolResult commands_register_typed_handler(uint32_t handler_id,
+                                          contracts::QolTypedCommandHandler handler, void* ctx) {
+    return register_typed_handler_impl(handler_id, handler, ctx);
+}
+
+QolResult commands_unregister_typed_handler(uint32_t handler_id) {
+    return unregister_typed_handler_impl(handler_id);
+}
+
+QolResult commands_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                              contracts::QolCommandTicket* out) {
+    return post_typed_impl(handler_id, payload, size, out);
+}
 
 const contracts::QolCommands& commands_port() {
     static const contracts::QolCommands kPort{
         &commands_post,
         &commands_state,
         &commands_cancel,
+        &commands_register_typed_handler,
+        &commands_unregister_typed_handler,
+        &commands_post_typed,
     };
     return kPort;
 }
@@ -155,8 +277,10 @@ void commands_reset_for_test() {
     std::lock_guard<std::mutex> lock(g_slots_mtx);
     for (uint32_t i = 0; i < kCommandSlots; ++i) {
         g_slots[i].in_use = false;
+        g_slots[i].typed = false;
         g_slots[i].ticket = 0;
     }
+    for (TypedHandlerSlot& handler : g_typed_handlers) handler = TypedHandlerSlot{};
 }
 
 const char* command_state_name(int32_t state) {

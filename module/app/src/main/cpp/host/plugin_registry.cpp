@@ -6,6 +6,7 @@
 
 #include "infra/log/qol_log.h"
 #include "contracts/commands.h"
+#include "contracts/game_ports/quest_port.h"
 #include "contracts/ownership.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
@@ -16,6 +17,9 @@
 #include "infra/status.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
+#if !QOL_KERNEL_ONLY
+#include "game/adapter_ports/quest_port.h"
+#endif
 
 namespace qol::host {
 
@@ -24,17 +28,8 @@ extern const contracts::QolGameHost g_game_host;
 
 namespace {
 
-contracts::PluginContext make_plugin_context(const char* plugin_id) {
-    return contracts::PluginContext{sizeof(contracts::PluginContext),
-                                    g_host_sdk.abi.major,
-                                    g_host_sdk.abi.minor,
-                                    &g_host_sdk,
-                                    &g_game_host,
-                                    plugin_id};
-}
-
 constexpr uint32_t kMaxPlugins = 32;
-constexpr uint32_t kMaxResourcesPerPlugin = 32;
+constexpr uint32_t kMaxPortsPerPlugin = 8;
 constexpr uint32_t kMaxErrorText = 96;
 constexpr uint32_t kNoPlugin = kMaxPlugins;
 
@@ -44,10 +39,80 @@ struct PluginEntry {
 
 PluginEntry g_plugins[kMaxPlugins];
 uint32_t g_plugin_count = 0;
+const void* g_plugin_ports[kMaxPlugins][kMaxPortsPerPlugin] = {};
+uint32_t g_plugin_port_count[kMaxPlugins] = {};
+bool g_port_invalid[kMaxPlugins] = {};
 
+contracts::PluginContext make_plugin_context(const char* plugin_id) {
+    uint32_t index = kMaxPlugins;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (plugin_id != nullptr &&
+            std::strcmp(g_plugins[i].descriptor.id, plugin_id) == 0) {
+            index = i;
+            break;
+        }
+    }
+    const void* const* ports = index == kMaxPlugins ? nullptr : g_plugin_ports[index];
+    const uint32_t port_count = index == kMaxPlugins ? 0 : g_plugin_port_count[index];
+    return contracts::PluginContext{sizeof(contracts::PluginContext),
+                                    g_host_sdk.abi.major,
+                                    g_host_sdk.abi.minor,
+                                    &g_host_sdk,
+                                    &g_game_host,
+                                    plugin_id,
+                                    ports,
+                                    port_count};
+}
+
+constexpr uint32_t kMaxResourcesPerPlugin = 32;
 // 装配依赖：install_all 时存入本 TU 静态，供运行期 lifecycle_step 的受限回调失败撤回
 // （以及 release 复用同一 hook/unhook 原语）；assembly.cpp 已在装配期传入。
 HostDeps g_install_deps{};
+extern char g_error_text[kMaxPlugins][kMaxErrorText];
+
+struct AvailablePort {
+    contracts::QolPortId id;
+    QolVersion version;
+    const void* iface;
+};
+
+bool available_port(contracts::QolPortId id, AvailablePort* out) {
+#if !QOL_KERNEL_ONLY
+    if (id == contracts::QolPortId::QOL_PORT_QUEST) {
+        const auto& port = qol::game::quest_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+#else
+    (void)id;
+    (void)out;
+#endif
+    return false;
+}
+
+bool resolve_plugin_ports(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    g_plugin_port_count[index] = 0;
+    if (plugin.port_count == 0) return true;
+    if (plugin.ports == nullptr || plugin.port_count > kMaxPortsPerPlugin) return false;
+    for (uint32_t i = 0; i < plugin.port_count; ++i) {
+        const contracts::QolPortRequirement& requirement = plugin.ports[i];
+        AvailablePort port{};
+        if (!available_port(requirement.id, &port) || port.iface == nullptr) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "unsupported port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (!contracts::satisfies(port.version, requirement.range)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "unsupported port version: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        g_plugin_ports[index][i] = port.iface;
+        ++g_plugin_port_count[index];
+    }
+    return true;
+}
 
 // 失败文本静态存储：infra/status 只保存指针，生命周期须 ≥ 进程。
 char g_error_text[kMaxPlugins][kMaxErrorText];
@@ -88,11 +153,12 @@ bool dependency_order_build() {
     uint32_t indegree[kMaxPlugins] = {};
     g_install_order_count = 0;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        g_dependency_invalid[i] = false;
+        g_dependency_invalid[i] = g_port_invalid[i];
     }
 
     // 先标记缺失/版本不兼容的 required，避免它们污染环检测结果。
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) continue;
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
         for (uint32_t r = 0; r < plugin.requires_count; ++r) {
             bool id_found = false;
@@ -174,6 +240,8 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.optional_count > 0 && plugin.optional_requires == nullptr) return false;
     if (plugin.provides_count > 0 && plugin.provides == nullptr) return false;
     if (plugin.jni_count > 0 && plugin.jni == nullptr) return false;
+    if (plugin.port_count > kMaxPortsPerPlugin) return false;
+    if (plugin.port_count > 0 && plugin.ports == nullptr) return false;
     return true;
 }
 
@@ -1161,6 +1229,10 @@ int install_all(const HostDeps& deps) {
     // 先构建完整 capability DAG，再按拓扑顺序 install/publish。这样 provider 即使晚于
     // consumer 注册，也不会先被误判为 blocked；缺失 required 与环在这里留下可诊断状态。
     std::memset(g_error_text, 0, sizeof(g_error_text));
+    std::memset(g_port_invalid, 0, sizeof(g_port_invalid));
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!resolve_plugin_ports(i)) g_port_invalid[i] = true;
+    }
     (void)dependency_order_build();
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         infra::status_update(g_plugins[i].descriptor.id, infra::FeatureState::kResolving, false,

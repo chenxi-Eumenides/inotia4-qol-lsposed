@@ -63,9 +63,6 @@ struct QolCraftReadApi {
 struct QolSaveReadApi {
     QolResult (*slot_state)(int32_t slot, int32_t* out_state);
 };
-struct QolQuestReadApi {
-    QolResult (*state)(int32_t* out_state);
-};
 struct QolAttrRangeReadApi {
     QolResult (*option_value)(int32_t option_index, int32_t level, int32_t flag,
                               const void* item, int32_t* out_value);
@@ -80,7 +77,6 @@ struct QolReadApi {
     QolWorldReadApi world;
     QolCraftReadApi craft;
     QolSaveReadApi save;
-    QolQuestReadApi quest;
     QolAttrRangeReadApi attr_range;
 };
 
@@ -201,10 +197,6 @@ struct QolSaveCallApi {
     QolResult (*encrypt)(void* data, int32_t size, int32_t mode, const char* key,
                          int32_t* out_result);
     QolResult (*mark_stale)();
-};
-
-struct QolQuestWriteApi {
-    QolResult (*set_state)(uint32_t quest_id, int32_t state);
 };
 
 struct QolChoiceActionApi {
@@ -368,15 +360,6 @@ struct QolExtensionBagWriteApi {
     QolExtensionBagUiWriteApi ui;
 };
 
-struct QolQuestReadOnlyApi {
-    QolResult (*state)(int32_t* out_state);
-    QolResult (*active_slot_count)(uint32_t* out_count);
-    QolResult (*active_slot_id)(uint32_t index, uint32_t* out_id);
-    QolResult (*total_count)(uint32_t* out_count);
-    QolResult (*quest_state)(uint32_t quest_id, int32_t* out_state);
-    QolResult (*is_complete)(uint32_t quest_id, int32_t* out_complete);
-};
-
 struct QolChoiceReadOnlyApi {
     QolResult (*state_id)(int32_t* out_state_id);
     QolResult (*selected_index)(int32_t* out_index);
@@ -421,7 +404,6 @@ struct QolReadOnlyApi {
     QolWorldReadOnlyApi world;
     QolCraftReadOnlyApi craft;
     QolSaveReadOnlyApi save;
-    QolQuestReadOnlyApi quest;
     QolChoiceReadOnlyApi choice;
     QolInventoryReadOnlyApi inventory;
 };
@@ -445,7 +427,6 @@ struct QolGameHost {
     QolInventoryWriteApi inventory_write;
     QolCraftActionApi craft_action;
     QolWorldActionApi world_action;
-    QolQuestWriteApi quest_write;
     QolChoiceActionApi choice_action;
 };
 
@@ -467,6 +448,6 @@ static_assert(sizeof(QolGameHost) ==
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 1;
-constexpr uint16_t kGameHostMinor = 12;
+constexpr uint16_t kGameHostMinor = 13;
 
 }  // namespace qol::contracts

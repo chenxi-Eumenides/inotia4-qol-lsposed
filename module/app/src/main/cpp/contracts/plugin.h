@@ -10,8 +10,10 @@
 // 数值，由宿主映射为 infra 状态类型；运行期能力注册仍走 infra/capabilities.h。
 
 #include <cstdint>
+#include <cstddef>
 
 #include "game_host.h"
+#include "game_ports/ports.h"
 #include "host_sdk.h"
 #include "version.h"
 
@@ -124,7 +126,13 @@ struct PluginContext {
     const QolHostSdk* sdk;
     const QolGameHost* game;
     const char* plugin_id;
+    const void* const* ports;
+    uint32_t port_count;
 };
+
+constexpr size_t PLUGIN_CONTEXT_STRUCT_SIZE = sizeof(PluginContext);
+constexpr size_t PLUGIN_CONTEXT_PORTS_STRUCT_SIZE =
+    offsetof(PluginContext, ports) + sizeof(const void* const*) + sizeof(uint32_t);
 
 // 插件清单（§3.3 逐字段）。数量字段显式，不使用哨兵终止。
 struct PluginDescriptor {
@@ -149,6 +157,9 @@ struct PluginDescriptor {
     // 只允许缓存 backup/更新门禁等常数时间操作，禁止资源操作、游戏内存读写与跨线程等待。
     // 返回非 0 → 宿主把该资源按还原释放撤回，并把插件置 failed（reason=resource_ready_failed）。
     int32_t (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup);
+    // 端口需求追加在描述符尾部，旧宿主只读取此前字段。
+    const QolPortRequirement* ports = nullptr;
+    uint32_t port_count = 0;
 };
 
 }  // namespace qol::contracts

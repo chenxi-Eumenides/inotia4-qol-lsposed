@@ -17,6 +17,7 @@
 #include "game/access/save.h"
 #include "game/access/symbols.h"
 #include "game/access/world.h"
+#include "game/adapter_ports/quest_port.h"
 #include "game/clock.h"
 #include "host/adapters.h"
 #include "infra/capabilities.h"
@@ -539,7 +540,6 @@ int main() {
     assert(game.inventory_write.create_item != nullptr);
     assert(game.craft_action.show_yesno_from_text != nullptr);
     assert(game.world_action.request_map_change != nullptr);
-    assert(game.quest_write.set_state != nullptr);
     assert(game.choice_action.write_items != nullptr);
     assert(game.character_write.max_hp(nullptr, 1).code == kQolErrInvalidArgument);
     assert(game.inventory_write.remove_item(nullptr).code == kQolErrInvalidArgument);
@@ -568,10 +568,11 @@ int main() {
     int32_t hero_level = 0;
     assert(game.read_only.save.hero_level(0, &hero_level).ok == kQolOk);
     assert(hero_level == 10);
+    const auto& quest = qol::game::quest_port();
     uint32_t quest_count = 0;
-    assert(game.read_only.quest.active_slot_count(&quest_count).ok == kQolOk);
+    assert(quest.read.active_slot_count(&quest_count).ok == kQolOk);
     assert(quest_count == 1);
-    assert(game.quest_write.set_state(7, 2).ok == kQolOk);
+    assert(quest.write.set_state(7, 2).ok == kQolOk);
     int32_t choice_state = -1;
     assert(game.read_only.choice.state_id(&choice_state).ok == kQolOk);
     assert(choice_state == 42);
@@ -695,12 +696,12 @@ int main() {
     assert(game.read_only.save.is_ok(&value).ok == kQolOk && value == 1);
     assert(game.read_only.save.current_slot(&value).code == kQolErrNotReady);
 
-    assert(game.read_only.quest.state(&value).code == kQolErrUnsupported);
-    assert(game.read_only.quest.active_slot_count(&u32_value).ok == kQolOk && u32_value == 1);
-    assert(game.read_only.quest.active_slot_id(0, &u32_value).ok == kQolOk && u32_value == 7);
-    assert(game.read_only.quest.total_count(&u32_value).ok == kQolOk && u32_value == 10);
-    assert(game.read_only.quest.quest_state(7, &value).ok == kQolOk && value == 1);
-    assert(game.read_only.quest.is_complete(7, &value).ok == kQolOk && value == 1);
+    assert(quest.read.state(&value).code == kQolErrUnsupported);
+    assert(quest.read.active_slot_count(&u32_value).ok == kQolOk && u32_value == 1);
+    assert(quest.read.active_slot_id(0, &u32_value).ok == kQolOk && u32_value == 7);
+    assert(quest.read.total_count(&u32_value).ok == kQolOk && u32_value == 10);
+    assert(quest.read.quest_state(7, &value).ok == kQolOk && value == 1);
+    assert(quest.read.is_complete(7, &value).ok == kQolOk && value == 1);
     const char* choice_items[] = {"a"};
     assert(game.read_only.choice.state_id(&value).ok == kQolOk && value == 42);
     assert(game.read_only.choice.selected_index(&value).ok == kQolOk && value == 0);

@@ -297,6 +297,7 @@ add_test(NAME infra_config_commands_tests COMMAND infra_config_commands_tests)
 add_executable(plugin_registry_tests
     test_plugin_registry.cpp
     test_stubs.cpp
+    test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/hooks/registry.cpp
@@ -348,6 +349,7 @@ add_test(NAME hooks_transaction_tests COMMAND hooks_transaction_tests)
 add_executable(plugin_lifecycle_tests
     test_plugin_lifecycle.cpp
     test_stubs.cpp
+    test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
@@ -383,6 +385,7 @@ add_test(NAME plugin_lifecycle_tests COMMAND plugin_lifecycle_tests)
 add_executable(capability_lifecycle_tests
     test_capability_lifecycle.cpp
     test_stubs.cpp
+    test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
@@ -591,6 +594,10 @@ add_executable(quest_lifecycle_tests
     ${CPP_DIR}/plugins/quest/feature.cpp
     ${CPP_DIR}/infra/scheduler.cpp
     ${CPP_DIR}/infra/runtime.cpp
+    ${CPP_DIR}/infra/command_queue.cpp
+    ${CPP_DIR}/infra/commands.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(quest_lifecycle_tests PRIVATE
@@ -655,6 +662,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/game_host.cpp
+    ${CPP_DIR}/game/adapter_ports/quest_port.cpp
     ${CPP_DIR}/game/feature/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/infra/commands.cpp
