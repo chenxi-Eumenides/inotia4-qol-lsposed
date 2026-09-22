@@ -13,6 +13,7 @@ namespace qol::features::simple_mode {
 namespace {
 
 std::atomic<bool> g_gate{false};
+const contracts::CharacterFactsApi* g_character_facts = nullptr;
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
@@ -74,12 +75,13 @@ constexpr int k_max_summon_depth = 4;
 bool is_player_side_impl(const void* ch, int depth) {
     if (ch == nullptr) return false;
     const auto* game = game_host();
-    if (game == nullptr || game->read_only.character.is_party_member == nullptr ||
-        game->read_only.character.summoner == nullptr ||
-        game->read.character.is_active_player_group == nullptr) {
+    if (game == nullptr || g_character_facts == nullptr ||
+        g_character_facts->is_active_player_group == nullptr ||
+        game->read_only.character.is_party_member == nullptr ||
+        game->read_only.character.summoner == nullptr) {
         note_faction_deps_missing_once(
             game != nullptr && game->read_only.character.is_party_member != nullptr,
-            game != nullptr && game->read.character.is_active_player_group != nullptr,
+            g_character_facts != nullptr && g_character_facts->is_active_player_group != nullptr,
             game != nullptr && game->read_only.character.summoner != nullptr);
         return false;
     }
@@ -89,7 +91,7 @@ bool is_player_side_impl(const void* ch, int depth) {
     void* summoner = nullptr;
     const bool party_ok = game->read_only.character.is_party_member(mutable_ch, &party_member).ok == kQolOk;
     const bool active_ok =
-        game->read.character.is_active_player_group(mutable_ch, &active_group).ok == kQolOk;
+        g_character_facts->is_active_player_group(mutable_ch, &active_group).ok == kQolOk;
     const bool summoner_ok = game->read_only.character.summoner(mutable_ch, &summoner).ok == kQolOk;
     if (!party_ok || !active_ok || !summoner_ok) {
         note_faction_deps_missing_once(party_ok, active_ok, summoner_ok);
@@ -109,8 +111,8 @@ Side classify(const void* ch) {
     if (is_player_side_impl(ch, 0)) return Side::kPlayer;
     int32_t type = -1;
     const auto* game = game_host();
-    if (game == nullptr || game->read.character.type == nullptr ||
-        game->read.character.type(ch, &type).ok != kQolOk) {
+    if (game == nullptr || g_character_facts == nullptr || g_character_facts->type == nullptr ||
+        g_character_facts->type(ch, &type).ok != kQolOk) {
         return Side::kNeutral;
     }
     return type == 1 ? Side::kMonster : Side::kNeutral;
@@ -168,14 +170,14 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     if (ch == nullptr || attr != kMaxHpAttribute) return;
 
     const auto* game = game_host();
-    if (game == nullptr || game->read.character.type == nullptr ||
+    if (game == nullptr || g_character_facts == nullptr || g_character_facts->type == nullptr ||
         game->read_only.character.pool_slot == nullptr || game->read_only.character.max_hp == nullptr ||
         game->character_write.max_hp == nullptr || game->read_only.character.hp == nullptr ||
         game->character_write.hp == nullptr) {
         return;
     }
     int32_t type = -1;
-    if (game->read.character.type(ch, &type).ok != kQolOk || type != 1) return;
+    if (g_character_facts->type(ch, &type).ok != kQolOk || type != 1) return;
     if (is_player_side_impl(ch, 0)) return;  // 玩家侧召唤物不减半
 
     int slot = 0;
@@ -212,6 +214,10 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
 void set_gate(bool enabled) {
     g_gate.store(enabled, std::memory_order_release);
     log_info("enabled=%d", enabled);
+}
+
+void set_character_facts(const contracts::CharacterFactsApi* facts) {
+    g_character_facts = facts;
 }
 
 bool gate_enabled() {

@@ -11,6 +11,7 @@ namespace qol::features::push_all {
 namespace {
 
 std::atomic<bool> g_gate{false};
+const contracts::CharacterFactsApi* g_character_facts = nullptr;
 // 首次进入 wrapper 只记一条 info：作为真机「重定向确实路由到模块」的证据。
 std::atomic<bool> g_filter_seen{false};
 
@@ -48,16 +49,16 @@ int push_all_party_filter(void* ch) {
         log_info("push_all party filter active");
     }
     const auto* game = game_host();
-    if (game == nullptr || game->read.character.type == nullptr ||
-        game->read.character.is_active_player_group == nullptr ||
+    if (game == nullptr || g_character_facts == nullptr || g_character_facts->type == nullptr ||
+        g_character_facts->is_active_player_group == nullptr ||
         game->read.character.party_index == nullptr) {
         return -1;
     }
     int32_t type = -1;
     int32_t active_group = 0;
     int32_t party_index = -1;
-    if (game->read.character.type(ch, &type).ok != kQolOk ||
-        game->read.character.is_active_player_group(ch, &active_group).ok != kQolOk ||
+    if (g_character_facts->type(ch, &type).ok != kQolOk ||
+        g_character_facts->is_active_player_group(ch, &active_group).ok != kQolOk ||
         game->read.character.party_index(ch, &party_index).ok != kQolOk) {
         return -1;
     }
@@ -66,6 +67,10 @@ int push_all_party_filter(void* ch) {
         return party_index;
     }
     return party_decision(static_cast<uint8_t>(type), active_group != 0, party_index);
+}
+
+void set_character_facts(const contracts::CharacterFactsApi* facts) {
+    g_character_facts = facts;
 }
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {

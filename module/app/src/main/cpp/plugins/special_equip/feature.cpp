@@ -22,6 +22,7 @@ using CanUnequipFn = int (*)(void*, void*);
 
 std::atomic<bool> g_gate{false};
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::CharacterFactsApi* g_character_facts = nullptr;
 
 std::atomic<void*> g_backup_can_equip{nullptr};
 std::atomic<void*> g_backup_can_unequip{nullptr};
@@ -79,8 +80,8 @@ void log_reject(int category, void* ch, void* item) {
     int32_t can_change = 0;
     int32_t real_equip = 0;
     int32_t item_level = -1;
-    if (game != nullptr && game->read.character.type != nullptr) {
-        (void)game->read.character.type(ch, &type);
+    if (g_character_facts != nullptr && g_character_facts->type != nullptr) {
+        (void)g_character_facts->type(ch, &type);
     }
     if (game != nullptr && game->read_only.character.merc_slot != nullptr) {
         (void)game->read_only.character.merc_slot(ch, &merc_slot);
@@ -186,6 +187,8 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 }
 
 void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
+
+void set_character_facts(const contracts::CharacterFactsApi* facts) { g_character_facts = facts; }
 
 int can_equip_wrapper(void* ch, void* item) {
     const CanEquipFn backup =

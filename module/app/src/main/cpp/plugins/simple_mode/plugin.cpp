@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "events.h"
+#include "../../contracts/character_facts.h"
 #include "feature.h"
 
 namespace qol::features::simple_mode {
@@ -17,6 +18,11 @@ constexpr const char* kGateKey = "plugin.simple_mode.enabled";
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 uint64_t g_config_subscription = 0;
+
+const contracts::CapabilityRequirement kRequires[] = {
+    {contracts::kCharacterFactsCapabilityId,
+     {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor}},
+};
 
 void on_config_changed(void* ctx, const void* payload) {
     (void)ctx;
@@ -76,6 +82,18 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_game = nullptr;
         return 1;
     }
+    if (g_sdk->capabilities.require == nullptr) return 1;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kCharacterFactsCapabilityId,
+            {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor},
+            &iface)) ||
+        iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
+    set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
     // inactive → resolving 是幂等重入（§3.2）：门禁读取可重复执行，订阅已有则不重复订阅
     // （重复订阅会在 deactivate 退订后留下孤儿订阅）。
     int32_t enabled = 0;
@@ -97,6 +115,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         g_config_subscription = 0;
     }
     set_gate(false);
+    set_character_facts(nullptr);
 }
 
 // 启停仅切门禁，不做资源操作（§3.3）。
@@ -118,7 +137,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    0, nullptr,   // requires
+    1, kRequires, // requires=character.facts
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,

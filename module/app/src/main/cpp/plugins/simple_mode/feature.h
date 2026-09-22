@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../contracts/plugin.h"
+#include "../../contracts/character_facts.h"
 
 // 简单模式插件业务层（ARCHITECTURE.md §3.3）。
 //
@@ -29,6 +30,7 @@ namespace qol::features::simple_mode {
 
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
+void set_character_facts(const contracts::CharacterFactsApi* facts);
 
 
 // 资源 id：plugin.cpp 的 ResourceClaim 与本层 on_resource_ready 分派共用同一常量。
