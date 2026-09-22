@@ -46,6 +46,8 @@ std::string g_sb_data_dir;
 std::string g_sb_external_dir;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
+const qol::contracts::SaveFactsApi* g_save_facts = nullptr;
+const qol::contracts::QolSaveCallPort* g_save_call = nullptr;
 
 std::string result_ok() {
     char buffer[64] = {};
@@ -125,18 +127,18 @@ ContainerStatus store_delete_slot(int slot) {
 }
 
 bool save_api_ready() {
-    return g_game != nullptr && g_game->read_only.save.load_data != nullptr &&
-           g_game->save_call.free_data != nullptr;
+    return g_save_facts != nullptr && g_save_facts->load_data != nullptr &&
+           g_save_call != nullptr && g_save_call->write.free_data != nullptr;
 }
 
 bool save_encrypt_available() {
-    return g_game != nullptr && g_game->save_call.encrypt != nullptr;
+    return g_save_call != nullptr && g_save_call->write.encrypt != nullptr;
 }
 
 const char* save_hub_key() {
-    if (g_game == nullptr || g_game->read_only.save.hub_key == nullptr) return nullptr;
+    if (g_save_facts == nullptr || g_save_facts->hub_key == nullptr) return nullptr;
     const char* key = nullptr;
-    if (!qol::contracts::succeeded(g_game->read_only.save.hub_key(&key))) return nullptr;
+    if (!qol::contracts::succeeded(g_save_facts->hub_key(&key))) return nullptr;
     return key;
 }
 
@@ -144,15 +146,15 @@ int save_encrypt_process(void* data, int len, int mode, const char* key) {
     if (!save_encrypt_available() || data == nullptr || len < 0 || key == nullptr) return 0;
     int result = 0;
     if (!qol::contracts::succeeded(
-            g_game->save_call.encrypt(data, len, mode, key, &result))) {
+            g_save_call->write.encrypt(data, len, mode, key, &result))) {
         return 0;
     }
     return result;
 }
 
 void save_mark_stale() {
-    if (g_game != nullptr && g_game->save_call.mark_stale != nullptr) {
-        (void)g_game->save_call.mark_stale();
+    if (g_save_call != nullptr && g_save_call->write.mark_stale != nullptr) {
+        (void)g_save_call->write.mark_stale();
     }
 }
 
@@ -426,25 +428,24 @@ void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_i
     hero_level = -1;
     hero_index = -1;
     class_idx = -1;
-    if (g_game == nullptr || g_game->read_only.save.slot_exists == nullptr ||
-        g_game->read_only.save.slot_hero_index == nullptr ||
-        g_game->read_only.save.hero_level == nullptr ||
-        g_game->read_only.save.hero_class == nullptr) {
+    if (g_save_facts == nullptr || g_save_facts->slot_exists == nullptr ||
+        g_save_facts->slot_hero_index == nullptr || g_save_facts->hero_level == nullptr ||
+        g_save_facts->hero_class == nullptr) {
         return;
     }
     int32_t exists = 0;
-    if (!qol::contracts::succeeded(g_game->read_only.save.slot_exists(slot, &exists)) || exists == 0) {
+    if (!qol::contracts::succeeded(g_save_facts->slot_exists(slot, &exists)) || exists == 0) {
         return;
     }
     int32_t value = 0;
-    if (qol::contracts::succeeded(g_game->read_only.save.slot_hero_index(slot, &value))) {
+    if (qol::contracts::succeeded(g_save_facts->slot_hero_index(slot, &value))) {
         hero_index = value;
     }
-    if (qol::contracts::succeeded(g_game->read_only.save.hero_level(slot, &value))) {
+    if (qol::contracts::succeeded(g_save_facts->hero_level(slot, &value))) {
         hero_level = value;
     }
     // 职业索引（0-5）；type==2 装饰物该字段非职业，但本路径取的是主角 hero 结构。
-    if (qol::contracts::succeeded(g_game->read_only.save.hero_class(slot, &value))) {
+    if (qol::contracts::succeeded(g_save_facts->hero_class(slot, &value))) {
         class_idx = value;
     }
 }
@@ -460,16 +461,16 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
     }
     void* buf = nullptr;
     int len = 0;
-    const QolResult load_result = g_game->read_only.save.load_data(slot, &buf, &len);
+    const QolResult load_result = g_save_facts->load_data(slot, &buf, &len);
     if (!qol::contracts::succeeded(load_result) || buf == nullptr || len < 8) {
-        if (buf != nullptr) (void)g_game->save_call.free_data(buf);
+        if (buf != nullptr) (void)g_save_call->write.free_data(buf);
         if (load_result.code == kQolErrNotReady) err = "symbol not resolved";
         else err = "load failed";
         return false;
     }
     // 明文拷出后立即归还游戏堆，后续处理与游戏内存解耦。
     plain.assign(static_cast<const uint8_t*>(buf), static_cast<const uint8_t*>(buf) + len);
-    (void)g_game->save_call.free_data(buf);
+    (void)g_save_call->write.free_data(buf);
 
     const size_t block0 = 8 + rd_u16(plain.data() + 8);
     const size_t block1 = 8 + rd_u16(plain.data() + 12);
@@ -632,14 +633,22 @@ save_backup::RollbackResult restore_from_rollback(
 }  // namespace
 
 void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
+                              const qol::contracts::SaveFactsApi* save_facts,
+                              const qol::contracts::QolSaveCallPort* save_call,
                               const qol::contracts::QolGameHost* game) {
     g_sdk = sdk;
     g_game = game;
+    g_save_facts = save_facts;
+    g_save_call = save_call;
 }
 
 const qol::contracts::QolHostSdk* save_backup_host_sdk() { return g_sdk; }
 
 const qol::contracts::QolGameHost* save_backup_game_host() { return g_game; }
+
+const qol::contracts::SaveFactsApi* save_backup_save_facts() { return g_save_facts; }
+
+const qol::contracts::QolSaveCallPort* save_backup_save_call() { return g_save_call; }
 
 std::string save_backup_result_ok() { return result_ok(); }
 

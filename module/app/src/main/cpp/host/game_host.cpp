@@ -10,7 +10,6 @@
 #include "game/access/craft.h"
 #include "game/access/item_class.h"
 #include "game/access/inventory.h"
-#include "game/access/save.h"
 #include "game/access/symbols.h"
 #include "game/access/ui_choice.h"
 #include "game/access/world.h"
@@ -264,14 +263,6 @@ QolResult read_craft_category_count(int32_t category, int32_t* out) {
 QolResult read_craft_character_level(int32_t* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     *out = qol::game::craft_character_level();
-    return contracts::ok();
-}
-
-QolResult read_save_slot_state(int32_t slot, int32_t* out) {
-    if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    void* save = qol::game::save_slot_struct(slot);
-    if (save == nullptr) return not_ready();
-    *out = qol::game::save_slot_exists(save) ? 1 : 0;
     return contracts::ok();
 }
 
@@ -688,103 +679,6 @@ QolResult call_world_cancel_tutorial() {
     return contracts::ok();
 }
 
-QolResult read_save_slot_exists(int32_t slot, int32_t* out) {
-    if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::save_slot_meta_deps_ready()) return not_ready();
-    qol::game::save_slots_refresh_if_stale();
-    void* save = qol::game::save_slot_struct(slot);
-    if (save == nullptr) return not_ready();
-    *out = qol::game::save_slot_exists(save) ? 1 : 0;
-    return contracts::ok();
-}
-
-QolResult read_save_slot_map_id(int32_t slot, int32_t* out) {
-    if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::save_slot_meta_deps_ready()) return not_ready();
-    qol::game::save_slots_refresh_if_stale();
-    void* save = qol::game::save_slot_struct(slot);
-    if (save == nullptr) return not_ready();
-    *out = qol::game::save_slot_map_id(save);
-    return contracts::ok();
-}
-
-QolResult read_save_current_slot(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::save_current_slot();
-    return *out < 0 ? not_ready() : contracts::ok();
-}
-
-QolResult read_save_is_ok(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::save_is_ok();
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult read_save_slot_hero_index(int32_t slot, int32_t* out) {
-    if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::save_slot_meta_deps_ready()) return not_ready();
-    qol::game::save_slots_refresh_if_stale();
-    void* save = qol::game::save_slot_struct(slot);
-    if (save == nullptr) return not_ready();
-    *out = qol::game::save_slot_hero_index(save);
-    return contracts::ok();
-}
-
-QolResult read_save_hero_value(int32_t slot, int32_t* out, bool level) {
-    if (slot < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::save_slot_meta_deps_ready()) return not_ready();
-    qol::game::save_slots_refresh_if_stale();
-    void* save = qol::game::save_slot_struct(slot);
-    if (save == nullptr) return not_ready();
-    void* hero = qol::game::save_slot_hero(save);
-    if (hero == nullptr) return not_ready();
-    *out = level ? qol::game::save_hero_level(hero) : qol::game::save_hero_class(hero);
-    return contracts::ok();
-}
-
-QolResult read_save_load_data(int32_t slot, void** out_data, int32_t* out_size) {
-    if (slot < 0 || out_data == nullptr || out_size == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out_data = nullptr;
-    *out_size = 0;
-    if (!qol::game::save_load_deps_ready()) return not_ready();
-    if (qol::game::save_load_data(slot, out_data, out_size) != 1 || *out_data == nullptr) {
-        return error_result(kQolErrInternal, "save load failed");
-    }
-    return contracts::ok();
-}
-
-QolResult read_save_hub_key(const char** out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::save_hub_get_key();
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult call_save_free_data(void* data) {
-    if (data == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    qol::game::save_mem_free(data);
-    return contracts::ok();
-}
-
-QolResult call_save_encrypt(void* data, int32_t size, int32_t mode, const char* key,
-                            int32_t* out_result) {
-    if (data == nullptr || size < 0 || (mode != 0 && mode != 1) || key == nullptr ||
-        out_result == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (!qol::game::save_encrypt_available()) return not_ready();
-    *out_result = qol::game::save_encrypt_process2(data, size, mode, key);
-    return contracts::ok();
-}
-
-QolResult call_save_mark_stale() {
-    qol::game::save_slots_mark_stale();
-    return contracts::ok();
-}
-
 QolResult read_choice_state_id(int32_t* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     const int value = qol::game::ui_choice_state_id();
@@ -877,7 +771,6 @@ contracts::QolGameHost make_game_host() {
                        &read_craft_selected_index, &read_craft_selected_item,
                        &read_craft_stuff_item, &read_craft_category_count,
                        &read_craft_character_level};
-    host.read.save = {&read_save_slot_state};
     host.read.attr_range = {&read_attr_option_value, &read_attr_jewel_value,
                             &read_attr_uses_fixed_option_table,
                             &read_attr_fixed_option_percent_pair};
@@ -905,13 +798,6 @@ contracts::QolGameHost make_game_host() {
         &read_craft_category_count, &read_craft_character_level, &read_craft_slot_control,
         &read_craft_target_item, &read_craft_selected_inventory_item,
         &read_craft_selected_recipe, &read_craft_slot_count};
-    host.read_only.save = {
-        &read_save_slot_state, &read_save_slot_exists, &read_save_slot_hero_index,
-        [](int32_t slot, int32_t* out) { return read_save_hero_value(slot, out, true); },
-        [](int32_t slot, int32_t* out) { return read_save_hero_value(slot, out, false); },
-        &read_save_load_data, &read_save_hub_key, &read_save_slot_map_id,
-        &read_save_current_slot, &read_save_is_ok};
-    host.save_call = {&call_save_free_data, &call_save_encrypt, &call_save_mark_stale};
     host.read_only.choice = {&read_choice_state_id};
     host.read_only.inventory = {&read_inventory_for_each_bag_slot,
                                 &read_inventory_bag_size,

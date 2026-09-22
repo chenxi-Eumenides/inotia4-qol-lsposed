@@ -533,27 +533,25 @@ void apply_backups_locked(std::vector<BackupEntry>& entries) {
 // 其余状态只读现有槽结构。槽元数据经 Game Host 读取。
 void read_slots_into(SlotInfo out[3]) {
     for (int i = 0; i < 3; ++i) out[i] = SlotInfo{};
-    const auto* game = save_backup_game_host();
-    if (game == nullptr || game->read_only.save.slot_exists == nullptr ||
-        game->read_only.save.slot_hero_index == nullptr ||
-        game->read_only.save.hero_level == nullptr ||
-        game->read_only.save.hero_class == nullptr || game->read_only.save.map_id == nullptr) return;
+    const auto* facts = save_backup_save_facts();
+    if (facts == nullptr || facts->slot_exists == nullptr || facts->slot_hero_index == nullptr ||
+        facts->hero_level == nullptr || facts->hero_class == nullptr || facts->map_id == nullptr) return;
     for (int i = 0; i < 3; ++i) {
         int32_t exists = 0;
-        if (!qol::contracts::succeeded(game->read_only.save.slot_exists(i, &exists)) ||
+        if (!qol::contracts::succeeded(facts->slot_exists(i, &exists)) ||
             exists == 0) continue;
         out[i].exists = true;
         int32_t value = 0;
-        if (qol::contracts::succeeded(game->read_only.save.slot_hero_index(i, &value))) {
+        if (qol::contracts::succeeded(facts->slot_hero_index(i, &value))) {
             out[i].hero_index = value;
         }
-        if (qol::contracts::succeeded(game->read_only.save.hero_level(i, &value))) {
+        if (qol::contracts::succeeded(facts->hero_level(i, &value))) {
             out[i].hero_level = value;
         }
-        if (qol::contracts::succeeded(game->read_only.save.hero_class(i, &value))) {
+        if (qol::contracts::succeeded(facts->hero_class(i, &value))) {
             out[i].class_idx = value;
         }
-        if (qol::contracts::succeeded(game->read_only.save.map_id(i, &value))) {
+        if (qol::contracts::succeeded(facts->map_id(i, &value))) {
             out[i].map_id = value;
         }
     }

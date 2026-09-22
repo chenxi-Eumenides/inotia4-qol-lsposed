@@ -541,6 +541,45 @@ void test_choice_port_version_gate() {
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 }
 
+void test_save_port_version_and_private_gate() {
+    reset_all();
+    qol::contracts::QolPortRequirement requirement{
+        qol::contracts::QolPortId::QOL_PORT_SAVE,
+        {qol::contracts::kQolPortSaveVersion.major, qol::contracts::kQolPortSaveVersion.minor},
+    };
+    PluginDescriptor valid = make_descriptor("save_facts", nullptr, 0, nullptr, 0);
+    valid.ports = &requirement;
+    valid.port_count = 1;
+    CHECK(register_plugin(valid));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("save_facts", FeatureState::kEnabled));
+
+    reset_all();
+    requirement.range.min_minor = static_cast<uint16_t>(
+        qol::contracts::kQolPortSaveVersion.minor + 1);
+    PluginDescriptor incompatible = make_descriptor("save_facts", nullptr, 0, nullptr, 0);
+    incompatible.ports = &requirement;
+    incompatible.port_count = 1;
+    CHECK(register_plugin(incompatible));
+    CHECK(install_all(make_deps()) == 1);
+    const char* error = nullptr;
+    CHECK(feature_state_is("save_facts", FeatureState::kBlocked));
+    CHECK(feature_of("save_facts", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+
+    reset_all();
+    requirement.id = qol::contracts::QolPortId::QOL_PORT_SAVE_CALL;
+    requirement.range.min_minor = qol::contracts::kQolPortSaveCallVersion.minor;
+    PluginDescriptor private_port = make_descriptor("test_save", nullptr, 0, nullptr, 0);
+    private_port.ports = &requirement;
+    private_port.port_count = 1;
+    CHECK(register_plugin(private_port));
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(feature_state_is("test_save", FeatureState::kBlocked));
+    CHECK(feature_of("test_save", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
+}
+
 void test_gate_off_installed_disabled() {
     reset_all();
     const PluginDescriptor d =
@@ -1191,6 +1230,7 @@ void test_atomic_gate_closed_does_not_call_on_enabled() {
 int main() {
     test_success_path();
     test_choice_port_version_gate();
+    test_save_port_version_and_private_gate();
     test_gate_off_installed_disabled();
     test_gate_on_and_config_hot_switch();
     test_second_resource_failure_rolls_back();

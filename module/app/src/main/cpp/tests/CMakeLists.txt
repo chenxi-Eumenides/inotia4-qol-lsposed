@@ -36,6 +36,17 @@ target_compile_features(item_facts_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(item_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_facts_plugin_tests COMMAND item_facts_plugin_tests)
 
+add_executable(save_facts_plugin_tests
+    test_save_facts_plugin.cpp
+    ${CPP_DIR}/plugins/save_facts/plugin.cpp
+)
+target_include_directories(save_facts_plugin_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(save_facts_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(save_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME save_facts_plugin_tests COMMAND save_facts_plugin_tests)
+
 target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
@@ -668,6 +679,8 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/character_port.cpp
     ${CPP_DIR}/game/adapter_ports/choice_port.cpp
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
+    ${CPP_DIR}/game/adapter_ports/save_port.cpp
+    ${CPP_DIR}/game/adapter_ports/save_call_port.cpp
     ${CPP_DIR}/game/feature/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/infra/commands.cpp

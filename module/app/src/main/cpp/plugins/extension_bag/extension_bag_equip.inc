@@ -890,9 +890,10 @@ bool extension_use_mercenary_seal() {
             QOL_LOG_INFO(QolDomain::kExtensionBag, "extension mercenary-seal lock busy");
             return false;
         }
+        const auto* save_facts = qol::features::extension_bag::save_facts();
         if (!extension_bag_enabled() || g_extension_desc_item == nullptr ||
             g_game == nullptr || g_game->read_only.item.is_mercenary_seal == nullptr ||
-            g_game->read_only.save.is_ok == nullptr ||
+            save_facts == nullptr || save_facts->is_ok == nullptr ||
             g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
             extension_bag_write_api() == nullptr ||
             extension_bag_write_api()->equipment.make_mercenary == nullptr) {

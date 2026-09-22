@@ -136,7 +136,8 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
                     kind, target_item, material);
         return false;
     }
-    if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr ||
+    const auto* save_facts = qol::features::extension_bag::save_facts();
+    if (save_facts == nullptr || save_facts->is_ok == nullptr ||
         extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->equipment.apply_stuff == nullptr) {
         if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {

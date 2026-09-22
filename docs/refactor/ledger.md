@@ -14,7 +14,7 @@
 | P1 | `contracts/`、`infra/`、`game/` 骨架与最小诊断接口 | ✅ 完成 | VM-P1-02、VM-P1-03 |
 | K1 | kernel-complete：零业务插件 Debug 启动 + Debug device probe 机制验收 | ✅ Debug/probe 真机证据已取得；release 隔离未执行 | VM-K1-01、VM-K1-02；`docs/history/kernel-complete-20260922/` |
 | K2 | provider 与功能插件并行：`world_facts`（`world.facts`，5 消费者）、`item_facts`（`item.facts`，7 消费者）、`character_facts`（`character.facts`，3 消费者）三批 + cascade_stopped activate 修复 | ✅ 三批真机闭环（VM-K2-01/02/03）；剩余复用语义（craft/save/quest/choice）多为单消费者，随阶段 4/5 处理 | VM-K2-01、VM-K2-02、VM-K2-03；`docs/history/provider-{world,item,character}-facts-20260922/` |
-| K4 | GameHost 收窄（Z2：插件域语义 + 受限 Adapter Port）：批 1 Port 注入 + typed command + quest 试点；批 2 三 provider 脱离 + typed handler 幂等修复；批 3 EB 写面 36 函数内化；批 4a choice 内化 | 🔄 进行中；批 1/2/3/4a 真机闭环（VM-K4-01/02/03/04a）；批 4b save、批 4c craft、批 5 ABI major=2 + 负例 + 深度行为卡统一重跑待做 | VM-K4-01、VM-K4-02、VM-K4-03、VM-K4-04a；`docs/history/gamehost-narrow-b{1,2,3,4a}-20260922/` |
+| K4 | GameHost 收窄（Z2：插件域语义 + 受限 Adapter Port）：批 1 Port 注入 + typed command + quest 试点；批 2 三 provider 脱离 + typed handler 幂等修复；批 3 EB 写面 36 函数内化；批 4a choice 内化；批 4b save 收口（save_facts provider + save_backup 写 port） | 🔄 进行中；批 1/2/3/4a/4b 真机闭环（VM-K4-01/02/03/04a/04b）；批 4c craft、批 5 ABI major=2 + 负例 + 深度行为卡统一重跑待做 | VM-K4-01、VM-K4-02、VM-K4-03、VM-K4-04a、VM-K4-04b；`docs/history/gamehost-narrow-b{1,2,3,4a,4b}-20260922/` |
 | P2 | `simple_mode` 纵向样板 | ✅ 完成 | VM-P2-01 |
 | P3 | 资源事务、异步步进、回滚、在途归零、生命周期状态 | ✅ 完成 | VM-P3-01、VM-P3-02、VM-P3-03 |
 | P4 | 内置静态插件批量迁移 | 🔄 进行中；阶段 A、B、C 已完成，D1 已完成待收尾 | VM-P4-01..08、VM-43..46、VM-D1、VM-D2-01..04 |

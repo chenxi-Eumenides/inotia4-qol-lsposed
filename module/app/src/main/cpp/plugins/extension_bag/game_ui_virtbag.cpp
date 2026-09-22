@@ -494,9 +494,10 @@ void* read_char_equipped_item(const void* character, int slot) {
 }
 
 bool read_save_is_ok() {
-    if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr) return false;
+    const auto* facts = qol::features::extension_bag::save_facts();
+    if (facts == nullptr || facts->is_ok == nullptr) return false;
     int32_t value = 0;
-    return qol::contracts::succeeded(g_game->read_only.save.is_ok(&value)) && value != 0;
+    return qol::contracts::succeeded(facts->is_ok(&value)) && value != 0;
 }
 
 bool read_has_empty_mercenary_slot() {
@@ -535,9 +536,10 @@ bool read_inventory_find_save_slot(const void* item, int* out_slot) {
 }
 
 int read_current_save_slot() {
-    if (g_game == nullptr || g_game->read_only.save.current_slot == nullptr) return -1;
+    const auto* facts = qol::features::extension_bag::save_facts();
+    if (facts == nullptr || facts->current_slot == nullptr) return -1;
     int32_t slot = -1;
-    return qol::contracts::succeeded(g_game->read_only.save.current_slot(&slot)) ? slot : -1;
+    return qol::contracts::succeeded(facts->current_slot(&slot)) ? slot : -1;
 }
 
 struct NativeCallScope {

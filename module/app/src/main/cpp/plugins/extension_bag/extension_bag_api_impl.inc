@@ -174,7 +174,8 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
         is_seal = read_item_is_mercenary_seal(descriptor.category);
         if (is_seal) {
-            if (g_game == nullptr || g_game->read_only.save.is_ok == nullptr ||
+            const auto* save_facts = qol::features::extension_bag::save_facts();
+            if (save_facts == nullptr || save_facts->is_ok == nullptr ||
                 g_game->read_only.character.has_empty_mercenary_slot == nullptr ||
                 extension_bag_write_api() == nullptr ||
                 extension_bag_write_api()->equipment.make_mercenary == nullptr) {

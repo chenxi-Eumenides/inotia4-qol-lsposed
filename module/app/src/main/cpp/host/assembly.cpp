@@ -30,6 +30,7 @@
 #include "plugins/text_layer/plugin.h"
 #include "plugins/world_teleport/plugin.h"
 #include "plugins/world_facts/plugin.h"
+#include "plugins/save_facts/plugin.h"
 #endif
 #if QOL_ENABLE_DEVICE_PROBE
 #include "plugins/device_probe_consumer/plugin.h"
@@ -69,6 +70,7 @@ using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
 constexpr PluginDescriptorFn kPluginDescriptors[] = {
 #if !QOL_KERNEL_ONLY
     &features::world_facts::plugin_descriptor,
+    &features::save_facts::plugin_descriptor,
     &features::character_facts::plugin_descriptor,
     &features::attribute_quality::plugin_descriptor,
     &features::attribute_range_display::plugin_descriptor,

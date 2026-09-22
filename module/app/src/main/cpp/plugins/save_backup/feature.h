@@ -5,21 +5,27 @@
 
 #include "../../contracts/game_host.h"
 #include "../../contracts/host_sdk.h"
+#include "../../contracts/save_facts.h"
+#include "../../contracts/game_ports/save_call_port.h"
 
 // 存档管理器备份 feature（save-backup）：
 // .qol_save bundle 的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
 // 返回值即 HTTP 响应 JSON（{"ok":true,...} / {"ok":false,"error":"..."}）。
-// 依赖方向：feature → Host SDK（结果与 sidecar 容器）+ Game Host
-// （存档域原语）；不依赖 api/native。插件清单位于 plugins/save_backup/plugin.cpp。
+// 依赖方向：feature → Host SDK（结果与 sidecar 容器）+ save.facts + save_call port；
+// Game Host 仅保留 warehouse companion 文件状态查询，不承载存档域语义。
 
 // 幂等初始化：记录 dataDir（原版存档根目录）与 externalFilesDir（备份/sidecar 根目录）。
 void save_backup_init(const char* data_dir, const char* external_files_dir);
 
 // 插件装配期注入 Host SDK / Game Host；业务回调通过该上下文访问宿主适配面。
 void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
+                              const qol::contracts::SaveFactsApi* save_facts,
+                              const qol::contracts::QolSaveCallPort* save_call,
                               const qol::contracts::QolGameHost* game);
 const qol::contracts::QolHostSdk* save_backup_host_sdk();
 const qol::contracts::QolGameHost* save_backup_game_host();
+const qol::contracts::SaveFactsApi* save_backup_save_facts();
+const qol::contracts::QolSaveCallPort* save_backup_save_call();
 std::string save_backup_result_ok();
 std::string save_backup_result_error(const char* message);
 

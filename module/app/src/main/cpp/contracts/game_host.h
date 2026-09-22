@@ -53,9 +53,6 @@ struct QolCraftReadApi {
     QolResult (*category_held_count)(int32_t category, int32_t* out_count);
     QolResult (*character_level)(int32_t* out_level);
 };
-struct QolSaveReadApi {
-    QolResult (*slot_state)(int32_t slot, int32_t* out_state);
-};
 struct QolAttrRangeReadApi {
     QolResult (*option_value)(int32_t option_index, int32_t level, int32_t flag,
                               const void* item, int32_t* out_value);
@@ -68,7 +65,6 @@ struct QolReadApi {
     QolCharReadApi character;
     QolItemReadApi item;
     QolCraftReadApi craft;
-    QolSaveReadApi save;
     QolAttrRangeReadApi attr_range;
 };
 
@@ -184,13 +180,6 @@ struct QolWorldActionApi {
     QolResult (*cancel_tutorial)();
 };
 
-struct QolSaveCallApi {
-    QolResult (*free_data)(void* data);
-    QolResult (*encrypt)(void* data, int32_t size, int32_t mode, const char* key,
-                         int32_t* out_result);
-    QolResult (*mark_stale)();
-};
-
 // 按域只读面只提供事实查询；副作用不通过该面表达。
 struct QolCharacterReadOnlyApi {
     QolResult (*party_index)(const void* character, int32_t* out_index);
@@ -252,19 +241,6 @@ struct QolCraftReadOnlyApi {
     QolResult (*stuff_slot_count)(uint32_t* out_count);
 };
 
-struct QolSaveReadOnlyApi {
-    QolResult (*slot_state)(int32_t slot, int32_t* out_state);
-    QolResult (*slot_exists)(int32_t slot, int32_t* out_exists);
-    QolResult (*slot_hero_index)(int32_t slot, int32_t* out_index);
-    QolResult (*hero_level)(int32_t slot, int32_t* out_level);
-    QolResult (*hero_class)(int32_t slot, int32_t* out_class);
-    QolResult (*load_data)(int32_t slot, void** out_data, int32_t* out_size);
-    QolResult (*hub_key)(const char** out_key);
-    QolResult (*map_id)(int32_t slot, int32_t* out_map_id);
-    QolResult (*current_slot)(int32_t* out_slot);
-    QolResult (*is_ok)(int32_t* out_ok);
-};
-
 struct QolChoiceReadOnlyApi {
     QolResult (*state_id)(int32_t* out_state_id);
 };
@@ -285,7 +261,6 @@ struct QolReadOnlyApi {
     QolItemReadOnlyApi item;
     QolWorldReadOnlyApi world;
     QolCraftReadOnlyApi craft;
-    QolSaveReadOnlyApi save;
     QolChoiceReadOnlyApi choice;
     QolInventoryReadOnlyApi inventory;
 };
@@ -303,7 +278,6 @@ struct QolGameHost {
     QolWriteApi write;
     QolItemCountApi item_count;
     QolReadOnlyApi read_only;
-    QolSaveCallApi save_call;
     QolCharacterWriteApi character_write;
     QolInventoryWriteApi inventory_write;
     QolCraftActionApi craft_action;
@@ -317,9 +291,6 @@ static_assert(std::is_trivially_copyable<QolGameHost>::value,
 static_assert(offsetof(QolGameHost, read_only) ==
                   offsetof(QolGameHost, item_count) + sizeof(QolItemCountApi),
               "QolGameHost read_only ABI offset changed");
-static_assert(offsetof(QolGameHost, save_call) ==
-                  offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
-              "QolGameHost save_call ABI offset changed");
 static_assert(sizeof(QolGameHost) ==
                   offsetof(QolGameHost, world_action) + sizeof(QolWorldActionApi),
               "QolGameHost ABI size changed");

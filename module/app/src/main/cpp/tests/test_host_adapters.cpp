@@ -22,6 +22,8 @@
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/quest_port.h"
+#include "game/adapter_ports/save_call_port.h"
+#include "game/adapter_ports/save_port.h"
 #include "game/adapter_ports/world_port.h"
 #include "game/clock.h"
 #include "host/adapters.h"
@@ -514,6 +516,8 @@ int main() {
     const auto& character_port_api = qol::game::character_port();
     const auto& item_port_api = qol::game::item_port();
     const auto& world_port_api = qol::game::world_port();
+    const auto& save_port_api = qol::game::save_port();
+    const auto& save_call_port_api = qol::game::save_call_port();
     assert(game.abi.size == sizeof(qol::contracts::QolGameHost));
     assert(game.target.query_variant != nullptr);
     qol::contracts::QolTargetVariant variant{};
@@ -573,7 +577,7 @@ int main() {
     assert(world_port_api.read.map_name(1, &map_name).ok == kQolOk);
     assert(map_name != nullptr);
     int32_t hero_level = 0;
-    assert(game.read_only.save.hero_level(0, &hero_level).ok == kQolOk);
+    assert(save_port_api.read.hero_level(0, &hero_level).ok == kQolOk);
     assert(hero_level == 10);
     const auto& quest = qol::game::quest_port();
     uint32_t quest_count = 0;
@@ -702,16 +706,21 @@ int main() {
     assert(game.read_only.craft.selected_recipe(0, &i64_value).ok == kQolOk);
     assert(game.read_only.craft.stuff_slot_count(&u32_value).ok == kQolOk && u32_value == 3);
 
-    assert(game.read_only.save.slot_state(0, &value).ok == kQolOk && value == 1);
-    assert(game.read_only.save.slot_exists(0, &value).ok == kQolOk && value == 1);
-    assert(game.read_only.save.slot_hero_index(0, &value).ok == kQolOk && value == 0);
-    assert(game.read_only.save.hero_level(0, &value).ok == kQolOk && value == 10);
-    assert(game.read_only.save.hero_class(0, &value).ok == kQolOk && value == 2);
+    assert(save_port_api.read.slot_state(0, &value).ok == kQolOk && value == 1);
+    assert(save_port_api.read.slot_exists(0, &value).ok == kQolOk && value == 1);
+    assert(save_port_api.read.slot_hero_index(0, &value).ok == kQolOk && value == 0);
+    assert(save_port_api.read.hero_level(0, &value).ok == kQolOk && value == 10);
+    assert(save_port_api.read.hero_class(0, &value).ok == kQolOk && value == 2);
     int32_t data_size = 0;
-    assert(game.read_only.save.load_data(0, &pointer_value, &data_size).ok == kQolOk);
-    assert(game.read_only.save.hub_key(&map_name).ok == kQolOk);
-    assert(game.read_only.save.is_ok(&value).ok == kQolOk && value == 1);
-    assert(game.read_only.save.current_slot(&value).code == kQolErrNotReady);
+    assert(save_port_api.read.load_data(0, &pointer_value, &data_size).ok == kQolOk);
+    assert(save_port_api.read.hub_key(&map_name).ok == kQolOk);
+    assert(save_port_api.read.is_ok(&value).ok == kQolOk && value == 1);
+    assert(save_port_api.read.current_slot(&value).code == kQolErrNotReady);
+    assert(save_port_api.read.map_id(0, &value).ok == kQolOk && value == 1);
+    assert(save_call_port_api.write.free_data(nullptr).code == kQolErrInvalidArgument);
+    assert(save_call_port_api.write.encrypt(nullptr, 1, 0, "key", &value).code ==
+           kQolErrInvalidArgument);
+    assert(save_call_port_api.write.mark_stale().ok == kQolOk);
 
     assert(quest.read.state(&value).code == kQolErrUnsupported);
     assert(quest.read.active_slot_count(&u32_value).ok == kQolOk && u32_value == 1);

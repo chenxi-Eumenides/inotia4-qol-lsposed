@@ -6,6 +6,8 @@
 
 #include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
+#include "../../contracts/save_facts.h"
+#include "../../contracts/game_ports/save_call_port.h"
 #include "feature.h"
 #include "log.h"
 #include "ui/panel.h"
@@ -26,6 +28,15 @@ const contracts::CapabilityRequirement kRequires[] = {
         contracts::kUiPanelsCapabilityId,
         {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor},
     },
+    {
+        contracts::kSaveFactsCapabilityId,
+        {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
+    },
+};
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_SAVE_CALL,
+     {contracts::kQolPortSaveCallVersion.major, contracts::kQolPortSaveCallVersion.minor}},
 };
 
 // 游戏内备份面板 provider：由 core.ui 容器（设置页「存档备份」动作项）经 ui_panels 打开。
@@ -97,7 +108,29 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    save_backup_bind_context(ctx.sdk, ctx.game);
+    const void* save_facts_iface = nullptr;
+    if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kSaveFactsCapabilityId,
+            {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
+            &save_facts_iface)) ||
+        save_facts_iface == nullptr || ctx.ports == nullptr || ctx.port_count != 1 ||
+        ctx.ports[0] == nullptr) {
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
+        return 1;
+    }
+    const auto* save_call = static_cast<const contracts::QolSaveCallPort*>(ctx.ports[0]);
+    const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(save_facts_iface);
+    if (!contracts::satisfies(save_call->abi_version,
+                              {contracts::kQolPortSaveCallVersion.major,
+                               contracts::kQolPortSaveCallVersion.minor}) ||
+        save_call->write.free_data == nullptr || save_call->write.encrypt == nullptr ||
+        save_call->write.mark_stale == nullptr || save_facts->load_data == nullptr ||
+        save_facts->slot_exists == nullptr || save_facts->hub_key == nullptr) {
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
+        return 1;
+    }
+    save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game);
     g_active.store(true, std::memory_order_release);
     // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
     if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
@@ -113,6 +146,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     }
+    save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -144,7 +178,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    1, kRequires,  // requires=ui_panels
+    2, kRequires,  // requires=ui_panels + save.facts
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）
@@ -155,6 +189,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &plugin_on_resource_ready,
+    kPorts,
+    1,
 };
 
 }  // namespace
