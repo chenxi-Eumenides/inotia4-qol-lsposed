@@ -12,6 +12,7 @@
 #include "contracts/extension_bag.h"
 #include "contracts/plugin.h"
 #include "contracts/item_facts.h"
+#include "contracts/game_ports/extension_bag_write_port.h"
 
 namespace qol::features::extension_bag {
 
@@ -30,7 +31,8 @@ bool extension_bag_enabled();
 // 插件安装期注入 Host SDK/Game Host。game_ui_virtbag.cpp 是 unity TU，其 inc
 // 直接读取这里缓存的句柄；独立 TU 由各自的 bridge setter 缓存所需表。
 bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
-                             const qol::contracts::QolGameHost* game);
+                             const qol::contracts::QolGameHost* game,
+                             const qol::contracts::QolExtensionBagWritePort* write_port);
 void extension_bag_bind_port_sdk(const qol::contracts::QolHostSdk* sdk);
 const qol::contracts::QolGameHost* extension_bag_game_host();
 void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts);

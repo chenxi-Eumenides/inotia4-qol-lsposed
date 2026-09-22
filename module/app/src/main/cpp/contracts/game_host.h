@@ -273,68 +273,6 @@ struct QolSaveReadOnlyApi {
     QolResult (*is_ok)(int32_t* out_ok);
 };
 
-// 扩展背包 owner 的窄写面。成员按库存、装备/经济、UI 刷新分组；不暴露游戏符号、
-// VMA 或通用 call 逃生口。返回值需要保留原游戏布尔/整数语义时，经 out_result 返回。
-struct QolExtensionBagInventoryWriteApi {
-    QolResult (*save_item_on_empty)(void* item, int32_t bag, int32_t* out_result);
-    QolResult (*save_item)(void* item, void* param, int32_t* out_result);
-    QolResult (*serialize_item)(uint8_t* payload, int32_t payload_capacity, void* item,
-                                int32_t* out_size);
-    QolResult (*load_item)(const uint8_t* payload, int32_t payload_size, void** out_item,
-                           int32_t* out_consumed);
-    QolResult (*create_item)(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
-                             void** out_item);
-    QolResult (*free_item)(void* item);
-    QolResult (*remove_item_direct)(int32_t bag, int32_t slot, int32_t* out_result);
-    QolResult (*move_item)(void* item, int32_t count, int32_t bag, int32_t slot,
-                           int32_t* out_result);
-    QolResult (*set_physical_item)(int32_t bag, int32_t slot, void* item);
-};
-
-struct QolExtensionBagEquipmentWriteApi {
-    QolResult (*equip_from_inventory)(void* character, int32_t bag, int32_t slot,
-                                      int32_t equip_slot, int32_t* out_result);
-    QolResult (*apply_stuff)(void* target_item, void* material);
-    QolResult (*use_item)(void* character, void* item, int32_t arg, int32_t* out_result);
-    QolResult (*make_mercenary)(void* item, void** out_mercenary);
-    QolResult (*add_money)(int64_t amount, int32_t* out_result);
-    QolResult (*minus_money)(int64_t amount, int32_t* out_result);
-    QolResult (*put_jewel)(void* equip_item, void* jewel_item, int32_t* out_result);
-};
-
-struct QolExtensionBagUiWriteApi {
-    QolResult (*refresh_item_area)();
-    QolResult (*refresh_bag_area)();
-    QolResult (*refresh_store_inventory)();
-    QolResult (*refresh_store_item)();
-    QolResult (*refresh_mix_item)();
-    QolResult (*update_character_equip)();
-    QolResult (*description_set_off)();
-    QolResult (*play_switch_sound)();
-    QolResult (*make_item_description)(void* control);
-    QolResult (*current_bag)(int32_t* out_bag);
-    QolResult (*set_current_bag)(int32_t bag);
-    QolResult (*desc_type)(int32_t* out_type);
-    QolResult (*set_desc_type)(int32_t type);
-    QolResult (*bag_capacity_word)(int32_t bag, uint32_t* out_word);
-    QolResult (*set_bag_capacity_word)(int32_t bag, uint32_t word);
-    QolResult (*draw_original_bag)();
-    QolResult (*draw_original_items)();
-    QolResult (*create_confirmation)(int32_t variant, uint32_t price, void* ok_wrapper,
-                                     void* cancel_wrapper, void** out_original_ok,
-                                     void** out_original_cancel);
-    QolResult (*restore_confirmation)(int32_t variant, void* ok_wrapper, void* cancel_wrapper,
-                                      void* original_ok, void* original_cancel);
-    QolResult (*original_bag_item)(int32_t bag, void** out_item);
-    QolResult (*set_original_bag_item)(int32_t bag, void* item);
-};
-
-struct QolExtensionBagWriteApi {
-    QolExtensionBagInventoryWriteApi inventory;
-    QolExtensionBagEquipmentWriteApi equipment;
-    QolExtensionBagUiWriteApi ui;
-};
-
 struct QolChoiceReadOnlyApi {
     QolResult (*state_id)(int32_t* out_state_id);
     QolResult (*selected_index)(int32_t* out_index);
@@ -376,7 +314,6 @@ struct QolGameHost {
     QolItemCountApi item_count;
     QolReadOnlyApi read_only;
     QolSaveCallApi save_call;
-    QolExtensionBagWriteApi extension_bag_write;
     QolCharacterWriteApi character_write;
     QolInventoryWriteApi inventory_write;
     QolCraftActionApi craft_action;
@@ -394,9 +331,6 @@ static_assert(offsetof(QolGameHost, read_only) ==
 static_assert(offsetof(QolGameHost, save_call) ==
                   offsetof(QolGameHost, read_only) + sizeof(QolReadOnlyApi),
               "QolGameHost save_call ABI offset changed");
-static_assert(offsetof(QolGameHost, extension_bag_write) ==
-                  offsetof(QolGameHost, save_call) + sizeof(QolSaveCallApi),
-              "QolGameHost extension_bag_write ABI offset changed");
 static_assert(sizeof(QolGameHost) ==
                   offsetof(QolGameHost, choice_action) + sizeof(QolChoiceActionApi),
               "QolGameHost ABI size changed");

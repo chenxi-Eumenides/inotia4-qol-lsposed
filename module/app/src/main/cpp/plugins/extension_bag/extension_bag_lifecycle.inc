@@ -27,9 +27,9 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
 
 bool restore_physical_inventory_snapshot_locked(const PhysicalInventorySnapshot& snapshot) {
     if (!snapshot.valid || g_game == nullptr ||
-        g_game->extension_bag_write.inventory.set_physical_item == nullptr) return false;
+        g_write_port->inventory.set_physical_item == nullptr) return false;
     for (size_t index = 0; index < snapshot.slots.size(); ++index) {
-        if (!qol::contracts::succeeded(g_game->extension_bag_write.inventory.set_physical_item(
+        if (!qol::contracts::succeeded(g_write_port->inventory.set_physical_item(
                 static_cast<int32_t>(index / virtual_bag::kSlotCount),
                 static_cast<int32_t>(index % virtual_bag::kSlotCount), snapshot.slots[index]))) {
             return false;
@@ -433,7 +433,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             const int selected_original_bag = original_bag_locked();
             restore_module_view_locked();
             set_original_bag_locked(selected_original_bag);
-            if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
+            if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
                 virtual_bag_call_original_refresh_item_area_with_guard();
             }
             virtual_bag::enter_original(&g_virtual_bag_state, selected_original_bag);

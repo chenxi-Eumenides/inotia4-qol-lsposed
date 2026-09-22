@@ -105,9 +105,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
             if (read_item_category(item_a, &category_a) &&
                 read_item_category(item_b, &category_b) && category_a == category_b) {
                 int32_t bag = -1;
-                if (g_game == nullptr || g_game->extension_bag_write.ui.current_bag == nullptr ||
+                if (g_game == nullptr || g_write_port->ui.current_bag == nullptr ||
                     !qol::contracts::succeeded(
-                        g_game->extension_bag_write.ui.current_bag(&bag))) {
+                        g_write_port->ui.current_bag(&bag))) {
                     return finish(0);
                 }
                 int32_t dst_slot = -1;

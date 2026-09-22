@@ -78,6 +78,7 @@ std::atomic<bool> g_extension_source_protection_requested{false};
 uint64_t g_lifecycle_task = 0;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
+const qol::contracts::QolExtensionBagWritePort* g_write_port = nullptr;
 const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
 int g_lifecycle_last_state = -1;
 std::atomic<bool> g_main_menu_cleanup_dirty{false};
@@ -192,9 +193,7 @@ bool read_item_category(const void* item, int* out_category) {
     return true;
 }
 
-const qol::contracts::QolExtensionBagWriteApi* extension_bag_write_api() {
-    return g_game == nullptr ? nullptr : &g_game->extension_bag_write;
-}
+const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() { return g_write_port; }
 
 bool extension_save_item_on_empty(void* item, int bag) {
     const auto* api = extension_bag_write_api();
@@ -659,8 +658,12 @@ bool original_count_write(void* item, uint32_t count) {
 namespace qol::features::extension_bag {
 
 bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
-                             const qol::contracts::QolGameHost* game) {
+                             const qol::contracts::QolGameHost* game,
+                             const qol::contracts::QolExtensionBagWritePort* write_port) {
     if (sdk == nullptr || game == nullptr || sdk->ui == nullptr ||
+        write_port == nullptr ||
+        write_port->abi_version.major != qol::contracts::kQolPortExtensionBagWriteVersion.major ||
+        write_port->abi_version.minor != qol::contracts::kQolPortExtensionBagWriteVersion.minor ||
         sdk->abi.size < sizeof(qol::contracts::QolHostSdk) ||
         sdk->abi.major != qol::contracts::kHostSdkMajor ||
         game->abi.size < sizeof(qol::contracts::QolGameHost) ||
@@ -675,10 +678,12 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
         sdk->scheduler.remove == nullptr || sdk->capabilities.require == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_write_port = nullptr;
         return false;
     }
     g_sdk = sdk;
     g_game = game;
+    g_write_port = write_port;
     return true;
 }
 
@@ -1118,8 +1123,8 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
         (void)extension_bag_ui_set_control_item(detail_control, detail_item);
     }
     if (detail_control != nullptr && g_game != nullptr &&
-        g_game->extension_bag_write.ui.make_item_description != nullptr) {
-        (void)g_game->extension_bag_write.ui.make_item_description(detail_control);
+        g_write_port->ui.make_item_description != nullptr) {
+        (void)g_write_port->ui.make_item_description(detail_control);
     }
     return true;
 }
@@ -1252,13 +1257,13 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             return ExtensionBagUnequipResult::kNotEmpty;
         }
     }
-    if (g_game == nullptr || g_game->extension_bag_write.inventory.create_item == nullptr ||
-        g_game->extension_bag_write.inventory.save_item_on_empty == nullptr) {
+    if (g_game == nullptr || g_write_port->inventory.create_item == nullptr ||
+        g_write_port->inventory.save_item_on_empty == nullptr) {
         VIRTBAG_LOG("extension unequip symbols unavailable bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
     void* item = nullptr;
-    if (!qol::contracts::succeeded(g_game->extension_bag_write.inventory.create_item(
+    if (!qol::contracts::succeeded(g_write_port->inventory.create_item(
             static_cast<int32_t>(g_virtual_bag_state.types[internal_bag]), 0, 0, 0, &item)) ||
         item == nullptr) {
         VIRTBAG_LOG("extension unequip create item failed bag=%d", internal_bag);
@@ -1309,7 +1314,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     int receiving_bag = -1;
     for (int i = 0; i < order_count && receiving_bag < 0; ++i) {
         int save_result = 0;
-        if (qol::contracts::succeeded(g_game->extension_bag_write.inventory.save_item_on_empty(
+        if (qol::contracts::succeeded(g_write_port->inventory.save_item_on_empty(
                 item, order[i], &save_result)) && save_result != 0) {
             receiving_bag = order[i];
         }
@@ -1675,8 +1680,8 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
         }
         // 收编对象未进库、无其他持有者（调用方前置门控），并入后释放回池。
         if (!defer_item_free_locked(req.item)) {
-            if (g_game != nullptr && g_game->extension_bag_write.inventory.free_item != nullptr) {
-                (void)g_game->extension_bag_write.inventory.free_item(req.item);
+            if (g_game != nullptr && g_write_port->inventory.free_item != nullptr) {
+                (void)g_write_port->inventory.free_item(req.item);
             }
         }
         VIRTBAG_LOG("native save place merge bag=%d slot=%d category=%d count=%d->%d item=%p",
@@ -1828,7 +1833,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
             return VirtualBagEquipButtonResult::kBlocked;
         }
         if (g_game == nullptr ||
-            g_game->extension_bag_write.ui.set_original_bag_item == nullptr) {
+            g_write_port->ui.set_original_bag_item == nullptr) {
             VIRTBAG_LOG("extension backpack fn-equip bag table missing");
             return VirtualBagEquipButtonResult::kBlocked;
         }
@@ -1838,7 +1843,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
                         src_bag, src_slot);
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        (void)g_game->extension_bag_write.ui.set_original_bag_item(found, item);
+        (void)g_write_port->ui.set_original_bag_item(found, item);
         virtual_bag::Item& descriptor = g_virtual_bag_state.items[src_bag][src_slot];
         descriptor = virtual_bag::Item{};
         g_module_objects[src_bag][src_slot] = nullptr;
@@ -1910,8 +1915,8 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     // 仅 desc_type=1（袋详情）卸下走接管；卸装备（desc_type=0）交原版（其
     // 收编由 CHAR_UnequipItemToInven 第 9 hook 覆盖）。
     int32_t desc_type = 0;
-    if (g_game == nullptr || g_game->extension_bag_write.ui.desc_type == nullptr ||
-        !qol::contracts::succeeded(g_game->extension_bag_write.ui.desc_type(&desc_type)) ||
+    if (g_game == nullptr || g_write_port->ui.desc_type == nullptr ||
+        !qol::contracts::succeeded(g_write_port->ui.desc_type(&desc_type)) ||
         desc_type != 1) return false;
     // 扩展视图激活：desc 必为扩展袋（原版袋 desc 只能在原版视图触发，二次
     // 点击扩展标签打开）。识别 g_extension_desc_unequip_bag 走扩展解除。
@@ -1947,18 +1952,18 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         bag_index = original_bag_locked();
     } else {
         int32_t current_bag = -1;
-        if (g_game->extension_bag_write.ui.current_bag != nullptr &&
+        if (g_write_port->ui.current_bag != nullptr &&
             qol::contracts::succeeded(
-                g_game->extension_bag_write.ui.current_bag(&current_bag)) &&
+                g_write_port->ui.current_bag(&current_bag)) &&
             current_bag < kNoOriginalBagSelected) {
             bag_index = current_bag;
         }
     }
     if (bag_index < 0 || bag_index >= 6) return false;  // 无有效袋位 → 交原版
     void* item = nullptr;
-    if (g_game->extension_bag_write.ui.original_bag_item == nullptr ||
+    if (g_write_port->ui.original_bag_item == nullptr ||
         !qol::contracts::succeeded(
-            g_game->extension_bag_write.ui.original_bag_item(bag_index, &item))) return false;
+            g_write_port->ui.original_bag_item(bag_index, &item))) return false;
     if (item == nullptr) return false;  // 该袋位无袋对象（空位详情等）→ 交原版
     int32_t empty_bag = 0;
     if (g_game->read_only.inventory.is_empty_bag == nullptr ||
@@ -1979,7 +1984,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         }
     }
     if (receiving_bag >= 0) {
-        (void)g_game->extension_bag_write.ui.set_original_bag_item(bag_index, nullptr);
+        (void)g_write_port->ui.set_original_bag_item(bag_index, nullptr);
         g_item_state_dirty = true;
         persist_state_locked();
         extension_description_set_off();
@@ -2038,7 +2043,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     g_module_objects[adopt_bag][adopt_slot] = item;
     g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
     g_module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
-    (void)g_game->extension_bag_write.ui.set_original_bag_item(bag_index, nullptr);
+    (void)g_write_port->ui.set_original_bag_item(bag_index, nullptr);
     g_item_state_dirty = true;
     persist_state_locked();
     extension_description_set_off();

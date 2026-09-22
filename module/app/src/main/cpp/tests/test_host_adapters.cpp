@@ -18,6 +18,7 @@
 #include "game/access/symbols.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/quest_port.h"
 #include "game/adapter_ports/world_port.h"
@@ -528,19 +529,20 @@ int main() {
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
     assert(game.thread.frame_count() == 99);
-    assert(game.extension_bag_write.inventory.save_item_on_empty != nullptr);
-    assert(game.extension_bag_write.inventory.serialize_item != nullptr);
-    assert(game.extension_bag_write.inventory.load_item != nullptr);
-    assert(game.extension_bag_write.equipment.equip_from_inventory != nullptr);
-    assert(game.extension_bag_write.equipment.add_money != nullptr);
-    assert(game.extension_bag_write.ui.refresh_item_area != nullptr);
+    const auto& extension_bag_write = qol::game::extension_bag_write_port();
+    assert(extension_bag_write.inventory.save_item_on_empty != nullptr);
+    assert(extension_bag_write.inventory.serialize_item != nullptr);
+    assert(extension_bag_write.inventory.load_item != nullptr);
+    assert(extension_bag_write.equipment.equip_from_inventory != nullptr);
+    assert(extension_bag_write.equipment.add_money != nullptr);
+    assert(extension_bag_write.ui.refresh_item_area != nullptr);
     int32_t write_result = 0;
-    assert(game.extension_bag_write.inventory.save_item_on_empty(nullptr, 0, &write_result).code ==
+    assert(extension_bag_write.inventory.save_item_on_empty(nullptr, 0, &write_result).code ==
            kQolErrInvalidArgument);
-    assert(game.extension_bag_write.equipment.add_money(-1, &write_result).code ==
+    assert(extension_bag_write.equipment.add_money(-1, &write_result).code ==
            kQolErrInvalidArgument);
     void* created_item = nullptr;
-    assert(game.extension_bag_write.inventory.create_item(-1, 0, 0, 0, &created_item).code ==
+    assert(extension_bag_write.inventory.create_item(-1, 0, 0, 0, &created_item).code ==
            kQolErrInvalidArgument);
     assert(game.character_write.max_hp != nullptr);
     assert(game.inventory_write.create_item != nullptr);

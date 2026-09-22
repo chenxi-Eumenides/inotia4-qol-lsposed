@@ -183,7 +183,7 @@ void store_refresh_projection_locked() {
 void store_install_module_view_locked(int bag) {
     if (!virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
-        g_game == nullptr || g_game->extension_bag_write.ui.refresh_store_item == nullptr) return;
+        g_game == nullptr || g_write_port->ui.refresh_store_item == nullptr) return;
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
         VIRTBAG_LOG("store view rejected original bag=%d", original_bag);
@@ -389,9 +389,9 @@ void store_make_desc_gate(void* ctrl, void* arg) {
     // （原全局 popup OK/Cancel 槽劫持已删除）；扩展出售改为
     // UIStore_SellItem 函数入口按 cursor item 识别，原版面板/确认/取消全部保留。
     if (ctrl == nullptr || g_game == nullptr ||
-        g_game->extension_bag_write.ui.make_item_description == nullptr) return;
+        g_write_port->ui.make_item_description == nullptr) return;
     (void)arg;
-    (void)g_game->extension_bag_write.ui.make_item_description(ctrl);
+    (void)g_write_port->ui.make_item_description(ctrl);
 }
 
 void store_sell_popup(uint32_t text_id) {
@@ -614,18 +614,18 @@ void store_draw_inven_bag_group_wrapper() {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"patch:P_EXT_STORE_BAG_DRAW"});
     if (g_game == nullptr ||
-        g_game->extension_bag_write.ui.draw_original_bag == nullptr ||
-        g_game->extension_bag_write.ui.current_bag == nullptr ||
-        g_game->extension_bag_write.ui.set_current_bag == nullptr) return;
+        g_write_port->ui.draw_original_bag == nullptr ||
+        g_write_port->ui.current_bag == nullptr ||
+        g_write_port->ui.set_current_bag == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     int32_t saved_current = 0;
     bool masked = false;
     if (store_view_installed &&
-        qol::contracts::succeeded(g_game->extension_bag_write.ui.current_bag(&saved_current)) &&
+        qol::contracts::succeeded(g_write_port->ui.current_bag(&saved_current)) &&
         saved_current != kNoOriginalBagSelected) {
-        (void)g_game->extension_bag_write.ui.set_current_bag(kNoOriginalBagSelected);
+        (void)g_write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    (void)g_game->extension_bag_write.ui.draw_original_bag();
-    if (masked) (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
+    (void)g_write_port->ui.draw_original_bag();
+    if (masked) (void)g_write_port->ui.set_current_bag(saved_current);
 }

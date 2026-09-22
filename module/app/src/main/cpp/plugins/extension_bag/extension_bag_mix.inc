@@ -196,7 +196,7 @@ void mix_refresh_projection_locked() {
 void mix_install_module_view_locked(int bag) {
     if (!virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
-        g_game == nullptr || g_game->extension_bag_write.ui.refresh_mix_item == nullptr) return;
+        g_game == nullptr || g_write_port->ui.refresh_mix_item == nullptr) return;
     // UIMix 与 UIEquip 共用当前袋 GOT；落在任务袋 5/非法时回退原版袋 0。
     int host = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(host)) host = 0;
@@ -386,18 +386,18 @@ void mix_draw_inven_bag_group_wrapper() {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"patch:P_EXT_MIX_BAG_DRAW"});
     if (g_game == nullptr ||
-        g_game->extension_bag_write.ui.draw_original_bag == nullptr ||
-        g_game->extension_bag_write.ui.current_bag == nullptr ||
-        g_game->extension_bag_write.ui.set_current_bag == nullptr) return;
+        g_write_port->ui.draw_original_bag == nullptr ||
+        g_write_port->ui.current_bag == nullptr ||
+        g_write_port->ui.set_current_bag == nullptr) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     int32_t saved_current = 0;
     bool masked = false;
     if (mix_view_installed &&
-        qol::contracts::succeeded(g_game->extension_bag_write.ui.current_bag(&saved_current)) &&
+        qol::contracts::succeeded(g_write_port->ui.current_bag(&saved_current)) &&
         saved_current != kNoOriginalBagSelected) {
-        (void)g_game->extension_bag_write.ui.set_current_bag(kNoOriginalBagSelected);
+        (void)g_write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    (void)g_game->extension_bag_write.ui.draw_original_bag();
-    if (masked) (void)g_game->extension_bag_write.ui.set_current_bag(saved_current);
+    (void)g_write_port->ui.draw_original_bag();
+    if (masked) (void)g_write_port->ui.set_current_bag(saved_current);
 }

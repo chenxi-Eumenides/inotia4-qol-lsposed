@@ -181,9 +181,9 @@ void disable_extension_tab_buttons_locked() {
 }
 
 int raw_direct_bag_locked() {
-    if (g_game == nullptr || g_game->extension_bag_write.ui.current_bag == nullptr) return -1;
+    if (g_game == nullptr || g_write_port->ui.current_bag == nullptr) return -1;
     int32_t bag = -1;
-    return qol::contracts::succeeded(g_game->extension_bag_write.ui.current_bag(&bag)) ? bag : -1;
+    return qol::contracts::succeeded(g_write_port->ui.current_bag(&bag)) ? bag : -1;
 }
 
 int raw_got_bag_locked() {
@@ -191,9 +191,9 @@ int raw_got_bag_locked() {
 }
 
 int raw_desc_type_locked() {
-    if (g_game == nullptr || g_game->extension_bag_write.ui.desc_type == nullptr) return -1;
+    if (g_game == nullptr || g_write_port->ui.desc_type == nullptr) return -1;
     int32_t type = -1;
-    return qol::contracts::succeeded(g_game->extension_bag_write.ui.desc_type(&type)) ? type : -1;
+    return qol::contracts::succeeded(g_write_port->ui.desc_type(&type)) ? type : -1;
 }
 
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, uint64_t param2,
@@ -279,8 +279,8 @@ void install_extension_desc_unequip_hook_locked(int extension_bag) {
 
 // P3：扩展袋切换音效，与原版袋按钮同款（UIEquip_InvenBagControlEventProc b8c34：Play(0x11)）。
 void play_extension_switch_sound() {
-    if (g_game == nullptr || g_game->extension_bag_write.ui.play_switch_sound == nullptr) return;
-    (void)g_game->extension_bag_write.ui.play_switch_sound();
+    if (g_game == nullptr || g_write_port->ui.play_switch_sound == nullptr) return;
+    (void)g_write_port->ui.play_switch_sound();
 }
 
 void handle_extension_tab_click_locked(int extension_bag) {
@@ -381,9 +381,9 @@ void handle_extension_tab_click_locked(int extension_bag) {
             play_extension_switch_sound();
             void* ctrl = g_extension_tab_buttons[extension_bag];
             if (ctrl != nullptr && g_game != nullptr &&
-                g_game->extension_bag_write.ui.make_item_description != nullptr &&
-                g_game->extension_bag_write.ui.set_current_bag != nullptr &&
-                g_game->extension_bag_write.ui.set_desc_type != nullptr) {
+                g_write_port->ui.make_item_description != nullptr &&
+                g_write_port->ui.set_current_bag != nullptr &&
+                g_write_port->ui.set_desc_type != nullptr) {
                 // 门禁掩码（P3）：UIEquip_SetDescMenu desc_type=1 分支经 GOT 槽读
                 // 当前原版袋索引，0（初始袋）/5（任务袋）短路不生成解除按钮
                 // （b8570-b8578）。扩展袋与该全局无关——进入前所在原版袋决定
@@ -394,15 +394,15 @@ void handle_extension_tab_click_locked(int extension_bag) {
                 // 线程的 commit_pending_extension_tab 内可达，无跨线程窗口。
                 const int saved_bag = raw_direct_bag_locked();
                 const int saved_desc_type = raw_desc_type_locked();
-                if (qol::contracts::succeeded(g_game->extension_bag_write.ui.set_current_bag(1)) &&
-                    qol::contracts::succeeded(g_game->extension_bag_write.ui.set_desc_type(1))) {
-                    (void)g_game->extension_bag_write.ui.make_item_description(ctrl);
+                if (qol::contracts::succeeded(g_write_port->ui.set_current_bag(1)) &&
+                    qol::contracts::succeeded(g_write_port->ui.set_desc_type(1))) {
+                    (void)g_write_port->ui.make_item_description(ctrl);
                 }
                 if (saved_bag >= 0) {
-                    (void)g_game->extension_bag_write.ui.set_current_bag(saved_bag);
+                    (void)g_write_port->ui.set_current_bag(saved_bag);
                 }
                 if (saved_desc_type >= 0) {
-                    (void)g_game->extension_bag_write.ui.set_desc_type(saved_desc_type);
+                    (void)g_write_port->ui.set_desc_type(saved_desc_type);
                 }
                 install_extension_desc_unequip_hook_locked(extension_bag);
             }
@@ -779,7 +779,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                         const bool source_removed = remove_item_direct_unlocked(
                             lock, pending.src_bag, pending.src_slot, src, "pending recovery");
                         if (g_game != nullptr &&
-                            g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
+                            g_write_port->ui.refresh_item_area != nullptr) {
                             virtual_bag_call_original_refresh_item_area_with_guard();
                         }
                         if (source_removed) {

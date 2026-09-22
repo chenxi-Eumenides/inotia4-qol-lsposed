@@ -221,6 +221,7 @@ if(NOT QOL_KERNEL_ONLY)
         game/adapter_ports/item_port.cpp
         game/adapter_ports/quest_port.cpp
         game/adapter_ports/world_port.cpp
+        game/adapter_ports/extension_bag_write_port.cpp
     )
 endif()
 

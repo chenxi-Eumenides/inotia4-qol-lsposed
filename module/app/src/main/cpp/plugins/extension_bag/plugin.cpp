@@ -40,6 +40,7 @@ constexpr const char* kMoveMergeGateKey = "moveMergeEnabled";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolExtensionBagWritePort* g_write_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 
@@ -85,9 +86,16 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
     },
 };
 
+const qol::contracts::QolPortRequirement kPorts[] = {
+    {qol::contracts::QolPortId::QOL_PORT_EXTENSION_BAG_WRITE,
+     {qol::contracts::kQolPortExtensionBagWriteVersion.major,
+      qol::contracts::kQolPortExtensionBagWriteVersion.minor}},
+};
+
 int plugin_install(qol::contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    g_write_port = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     if (ctx.struct_size < sizeof(qol::contracts::PluginContext) ||
@@ -97,10 +105,20 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         ctx.sdk->events.unsubscribe == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         return 1;
     }
+    if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_write_port = nullptr;
+        extension_bag_bind_port_sdk(nullptr);
+        extension_bag_bind_item_facts(nullptr);
+        return 1;
+    }
+    g_write_port = static_cast<const qol::contracts::QolExtensionBagWritePort*>(ctx.ports[0]);
     const void* world_facts_iface = nullptr;
     if (ctx.sdk->capabilities.require == nullptr ||
         !qol::contracts::succeeded(ctx.sdk->capabilities.require(
@@ -110,6 +128,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         world_facts_iface == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         return 1;
@@ -123,6 +142,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         item_facts_iface == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_write_port = nullptr;
         g_world_facts = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
@@ -130,9 +150,10 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     }
     g_item_facts = static_cast<const qol::contracts::ItemFactsApi*>(item_facts_iface);
     extension_bag_bind_item_facts(g_item_facts);
-    if (!extension_bag_bind_host(g_sdk, g_game)) {
+    if (!extension_bag_bind_host(g_sdk, g_game, g_write_port)) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_write_port = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         return 1;
@@ -166,6 +187,7 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     g_item_facts = nullptr;
     extension_bag_bind_item_facts(nullptr);
     g_game = nullptr;
+    g_write_port = nullptr;
     g_sdk = nullptr;
 }
 
@@ -206,6 +228,8 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &plugin_on_resource_ready,
+    kPorts,
+    1,
 };
 
 }  // namespace

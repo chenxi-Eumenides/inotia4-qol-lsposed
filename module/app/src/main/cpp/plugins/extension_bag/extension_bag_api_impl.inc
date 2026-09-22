@@ -285,7 +285,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
         if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr ||
             g_game->read_only.character.party_member == nullptr ||
             g_game->read_only.character.equipped_item == nullptr ||
-            g_game->extension_bag_write.equipment.put_jewel == nullptr) {
+            g_write_port->equipment.put_jewel == nullptr) {
             return op_err("symbol not resolved");
         }
         int32_t is_jewel = 0;
@@ -317,7 +317,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
     const bool put_jewel_succeeded =
         g_game != nullptr &&
         qol::contracts::succeeded(
-            g_game->extension_bag_write.equipment.put_jewel(equip, jewel, &result));
+            g_write_port->equipment.put_jewel(equip, jewel, &result));
     g_active_module_use_token = previous_use_token;
     if (!put_jewel_succeeded) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);

@@ -121,7 +121,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     // 当前视图只同步发生变化的扩展槽；非扩展视图仍走原版刷新。
     if (g_module_view_installed && g_module_view_index == dst_bag) {
         sync_projected_slot_locked(dst_bag, dst_slot);
-    } else if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
+    } else if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",

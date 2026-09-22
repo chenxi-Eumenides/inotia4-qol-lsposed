@@ -300,7 +300,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     }
     if (g_module_view_installed && g_module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
-    } else if (g_game != nullptr && g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
+    } else if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     extension_update_character_equip();
@@ -429,13 +429,13 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 
 void restore_extension_desc_popup_callbacks_locked() {
     if (g_game != nullptr &&
-        g_game->extension_bag_write.ui.restore_confirmation != nullptr) {
-        (void)g_game->extension_bag_write.ui.restore_confirmation(
+        g_write_port->ui.restore_confirmation != nullptr) {
+        (void)g_write_port->ui.restore_confirmation(
             1, reinterpret_cast<void*>(&extension_destroy_ok),
             reinterpret_cast<void*>(&extension_destroy_cancel),
             reinterpret_cast<void*>(g_extension_destroy_original_ok),
             reinterpret_cast<void*>(g_extension_destroy_original_cancel));
-        (void)g_game->extension_bag_write.ui.restore_confirmation(
+        (void)g_write_port->ui.restore_confirmation(
             0, reinterpret_cast<void*>(&extension_sell_ok),
             reinterpret_cast<void*>(&extension_sell_cancel),
             reinterpret_cast<void*>(g_extension_sell_original_ok),
@@ -652,7 +652,7 @@ void extension_destroy_ok(void*) {
         }
     }
     if (committed && g_game != nullptr &&
-        g_game->extension_bag_write.ui.refresh_item_area != nullptr) {
+        g_write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     if (committed) {
@@ -1150,7 +1150,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
             g_extension_sell_original_ok = nullptr;
             g_extension_sell_original_cancel = nullptr;
         }
-        const auto* ui_write = g_game == nullptr ? nullptr : &g_game->extension_bag_write.ui;
+        const auto* ui_write = g_game == nullptr ? nullptr : &g_write_port->ui;
         bool popup_created = valid && price <= UINT32_MAX && ui_write != nullptr &&
                              ui_write->create_confirmation != nullptr;
         if (popup_created) {
@@ -1241,7 +1241,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"patch:P_EXT_DESC_OPEN_GATE"});
     if (ctrl == nullptr || g_game == nullptr ||
-        g_game->extension_bag_write.ui.make_item_description == nullptr) return;
+        g_write_port->ui.make_item_description == nullptr) return;
     // UIEquip_RefreshItemArea may have restored the original inventory object
     // immediately before the original event reaches MakeDesc. Rebind only
     // projected controls so the original MakeDesc reads the extension item.
@@ -1252,7 +1252,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
         if (data != nullptr) item = *reinterpret_cast<void**>(data);
     }
     (void)arg;
-    (void)g_game->extension_bag_write.ui.make_item_description(ctrl);
+    (void)g_write_port->ui.make_item_description(ctrl);
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         reset_extension_desc_item_hooks_locked();
