@@ -1,12 +1,21 @@
 #include "contracts/game_ports/quest_port.h"
+#include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/world_port.h"
 
 namespace qol::game {
 namespace {
 
 const contracts::QolQuestPort kQuestPort{{1, 0}, {}, {}};
+const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
+const contracts::QolItemPort kItemPort{{1, 0}, {}};
+const contracts::QolCharacterPort kCharacterPort{{1, 0}, {}};
 
 }  // namespace
 
 const contracts::QolQuestPort& quest_port() { return kQuestPort; }
+const contracts::QolWorldPort& world_port() { return kWorldPort; }
+const contracts::QolItemPort& item_port() { return kItemPort; }
+const contracts::QolCharacterPort& character_port() { return kCharacterPort; }
 
 }  // namespace qol::game

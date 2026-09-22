@@ -1,4 +1,5 @@
 #include "contracts/character_facts.h"
+#include "contracts/game_ports/character_port.h"
 #include "plugins/character_facts/plugin.h"
 
 #include <cstdio>
@@ -40,6 +41,8 @@ int main() {
                       qol::contracts::kCharacterFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
+    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER);
 
     const auto* api = static_cast<const qol::contracts::CharacterFactsApi*>(
         descriptor.provides[0].iface);
@@ -47,16 +50,17 @@ int main() {
     CHECK(api->is_active_player_group != nullptr);
 
     qol::contracts::QolHostSdk sdk{};
-    qol::contracts::QolGameHost game{};
-    game.read.character.type = &fake_type;
-    game.read.character.is_active_player_group = &fake_active;
+    const qol::contracts::QolCharacterPort port{{1, 0}, {&fake_type, &fake_active}};
+    const void* ports[] = {&port};
     qol::contracts::PluginContext ctx{
-        sizeof(qol::contracts::PluginContext),
+        qol::contracts::PLUGIN_CONTEXT_STRUCT_SIZE,
         qol::contracts::kHostSdkMajor,
         qol::contracts::kHostSdkMinor,
         &sdk,
-        &game,
+        nullptr,
         "character_facts",
+        ports,
+        1,
     };
 
     CHECK(descriptor.install(ctx) == 0);

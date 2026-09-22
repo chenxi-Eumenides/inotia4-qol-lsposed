@@ -163,8 +163,15 @@ QolResult register_typed_handler_impl(uint32_t handler_id,
         return error_result(kQolErrInvalidArgument, "invalid typed handler");
     }
     std::lock_guard<std::mutex> lock(g_slots_mtx);
-    for (const TypedHandlerSlot& candidate : g_typed_handlers) {
+    for (TypedHandlerSlot& candidate : g_typed_handlers) {
         if (candidate.handler_id == handler_id) {
+            // 幂等重注册：owner 的重 install 路径（如级联停用后的显式 activate）只重走
+            // install 不先走 deactivate 注销，同 id 同 handler 的重复注册是合法重入；
+            // 仅当 handler 指针不同（另一实现抢占同一 id）才视为冲突。
+            if (candidate.handler == handler) {
+                candidate.ctx = ctx;
+                return contracts::ok();
+            }
             return error_result(kQolErrConflict, "typed handler already registered");
         }
     }

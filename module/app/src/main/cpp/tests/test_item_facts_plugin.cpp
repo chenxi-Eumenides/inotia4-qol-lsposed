@@ -1,4 +1,5 @@
 #include "contracts/item_facts.h"
+#include "contracts/game_ports/ports.h"
 #include "plugins/item_facts/plugin.h"
 
 #include <cstdio>
@@ -21,6 +22,8 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
+    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
 
     const auto* api = static_cast<const qol::contracts::ItemFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->category != nullptr);

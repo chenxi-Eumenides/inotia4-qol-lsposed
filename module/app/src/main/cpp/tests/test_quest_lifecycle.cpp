@@ -111,7 +111,6 @@ qol::contracts::QolGameHost fake_game() {
     qol::contracts::QolGameHost game{};
     game.abi = {sizeof(qol::contracts::QolGameHost), qol::contracts::kGameHostMajor,
                 qol::contracts::kGameHostMinor};
-    game.read.world.state = &fake_world_state;
     return game;
 }
 

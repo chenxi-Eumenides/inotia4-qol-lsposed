@@ -240,11 +240,14 @@ void test_commands_invalid() {
 }
 
 bool typed_handler(void*, const uint8_t* payload, uint32_t size) {
-    if (payload == nullptr || size != sizeof(uint32_t)) return false;
+    if (size != sizeof(g_typed_value)) return false;
     std::memcpy(&g_typed_value, payload, sizeof(g_typed_value));
     ++g_typed_calls;
     return true;
 }
+
+// 同 id 不同 handler 的冲突用例所用指针；不参与执行断言。
+bool typed_handler_other(void*, const uint8_t*, uint32_t) { return true; }
 
 void test_typed_commands() {
     reset_all();
@@ -264,6 +267,10 @@ void test_typed_commands() {
 
     uint8_t oversized[qol::contracts::kTypedCommandPayloadCapacity + 1] = {};
     CHECK(port.post_typed(kHandlerId, oversized, sizeof(oversized), &ticket).ok != 0);
+    // 幂等重注册：owner 重 install（级联停用后显式 activate）不先注销，同 id 同 handler
+    // 的重复注册是合法重入；同 id 不同 handler 视为抢占冲突。
+    CHECK(port.register_typed_handler(kHandlerId, &typed_handler, nullptr).ok == 0);
+    CHECK(port.register_typed_handler(kHandlerId, &typed_handler_other, nullptr).ok != 0);
     CHECK(port.unregister_typed_handler(kHandlerId).ok == 0);
     CHECK(port.post_typed(kHandlerId, &payload, sizeof(payload), &ticket).ok != 0);
 }

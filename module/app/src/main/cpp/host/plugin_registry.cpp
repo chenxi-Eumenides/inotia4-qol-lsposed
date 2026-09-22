@@ -6,7 +6,10 @@
 
 #include "infra/log/qol_log.h"
 #include "contracts/commands.h"
+#include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/quest_port.h"
+#include "contracts/game_ports/world_port.h"
 #include "contracts/ownership.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
@@ -18,7 +21,10 @@
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
 #if !QOL_KERNEL_ONLY
+#include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/quest_port.h"
+#include "game/adapter_ports/world_port.h"
 #endif
 
 namespace qol::host {
@@ -80,6 +86,21 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
 #if !QOL_KERNEL_ONLY
     if (id == contracts::QolPortId::QOL_PORT_QUEST) {
         const auto& port = qol::game::quest_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_WORLD) {
+        const auto& port = qol::game::world_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM) {
+        const auto& port = qol::game::item_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER) {
+        const auto& port = qol::game::character_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }

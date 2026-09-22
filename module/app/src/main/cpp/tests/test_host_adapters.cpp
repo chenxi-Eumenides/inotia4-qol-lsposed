@@ -17,7 +17,10 @@
 #include "game/access/save.h"
 #include "game/access/symbols.h"
 #include "game/access/world.h"
+#include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/quest_port.h"
+#include "game/adapter_ports/world_port.h"
 #include "game/clock.h"
 #include "host/adapters.h"
 #include "infra/capabilities.h"
@@ -506,6 +509,9 @@ int main() {
     assert(sdk.panels.unregister_owner("adapter.test").ok == kQolOk);
 
     const qol::contracts::QolGameHost& game = qol::host::g_game_host;
+    const auto& character_port_api = qol::game::character_port();
+    const auto& item_port_api = qol::game::item_port();
+    const auto& world_port_api = qol::game::world_port();
     assert(game.abi.size == sizeof(qol::contracts::QolGameHost));
     assert(game.target.query_variant != nullptr);
     qol::contracts::QolTargetVariant variant{};
@@ -547,7 +553,7 @@ int main() {
     assert(game.world_action.minus_money(-1).code == kQolErrInvalidArgument);
     assert(game.choice_action.write_title(nullptr).code == kQolErrInvalidArgument);
     int32_t character_type = -1;
-    assert(game.read.character.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
+    assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
     assert(character_type == 2);
     int32_t party_member = 0;
     assert(game.read_only.character.is_party_member(reinterpret_cast<void*>(0x1), &party_member).ok ==
@@ -560,10 +566,10 @@ int main() {
     assert(game.read_only.item.equip_level(reinterpret_cast<void*>(0x1), &item_level).ok == kQolOk);
     assert(item_level == 12);
     int32_t map_count = 0;
-    assert(game.read_only.world.map_record_count(&map_count).ok == kQolOk);
+    assert(world_port_api.read.map_record_count(&map_count).ok == kQolOk);
     assert(map_count == 3);
     const char* map_name = nullptr;
-    assert(game.read_only.world.map_name(1, &map_name).ok == kQolOk);
+    assert(world_port_api.read.map_name(1, &map_name).ok == kQolOk);
     assert(map_name != nullptr);
     int32_t hero_level = 0;
     assert(game.read_only.save.hero_level(0, &hero_level).ok == kQolOk);
@@ -576,9 +582,9 @@ int main() {
     int32_t choice_state = -1;
     assert(game.read_only.choice.state_id(&choice_state).ok == kQolOk);
     assert(choice_state == 42);
-    assert(game.read_only.character.type(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 2);
-    assert(game.read_only.character.is_active_player_group(reinterpret_cast<void*>(0x1), &value).ok ==
+    assert(character_port_api.read.is_active_player_group(reinterpret_cast<void*>(0x1), &value).ok ==
            kQolOk);
     assert(value == 1);
     assert(game.read_only.character.party_index(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
@@ -617,18 +623,18 @@ int main() {
     assert(game.read_only.character.has_empty_mercenary_slot(&value).ok == kQolOk);
     assert(value == 1);
 
-    assert(game.read_only.item.category(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.category(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 4);
-    assert(game.read_only.item.is_jewel_category(4, &value).ok == kQolOk && value == 1);
+    assert(item_port_api.read.is_jewel_category(4, &value).ok == kQolOk && value == 1);
     assert(game.read_only.item.ability_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 3);
     assert(game.read_only.item.rarity(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
-    assert(game.read_only.item.is_real_equip(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.is_real_equip(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(game.read_only.item.equip_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 12);
-    assert(game.read_only.item.is_no_sell(4, &value).ok == kQolOk);
+    assert(item_port_api.read.is_no_sell(4, &value).ok == kQolOk);
     assert(game.read_only.item.is_dice(4, &value).ok == kQolOk);
-    assert(game.read_only.item.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(game.read_only.item.class_no_equip_bit(4, &value).ok == kQolOk);
     assert(game.read_only.item.equip_desc_role_type(&value).ok == kQolOk);
     assert(game.read_only.item.enchant_remaining(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
@@ -660,14 +666,14 @@ int main() {
     int32_t y = 0;
     assert(game.read_only.world.position(reinterpret_cast<void*>(0x1), &x, &y).code ==
            kQolErrUnsupported);
-    assert(game.read_only.world.state(&value).ok == kQolOk && value == 7);
-    assert(game.read_only.world.map_record_count(&value).ok == kQolOk && value == 3);
-    assert(game.read_only.world.current_map_id(&value).ok == kQolOk && value == 1);
-    assert(game.read_only.world.map_name(1, &map_name).ok == kQolOk);
-    assert(game.read_only.world.active_player_direction(&value).ok == kQolOk && value == 2);
+    assert(world_port_api.read.state(&value).ok == kQolOk && value == 7);
+    assert(world_port_api.read.map_record_count(&value).ok == kQolOk && value == 3);
+    assert(world_port_api.read.current_map_id(&value).ok == kQolOk && value == 1);
+    assert(world_port_api.read.map_name(1, &map_name).ok == kQolOk);
+    assert(world_port_api.read.active_player_direction(&value).ok == kQolOk && value == 2);
     int64_t money = 0;
-    assert(game.read_only.world.money(&money).ok == kQolOk && money == 1000);
-    assert(game.read_only.world.game_state_gate(&value).ok == kQolOk && value == 1);
+    assert(world_port_api.read.money(&money).ok == kQolOk && money == 1000);
+    assert(world_port_api.read.game_state_gate(&value).ok == kQolOk && value == 1);
 
     uint32_t u32_value = 0;
     int64_t i64_value = 0;
@@ -708,13 +714,13 @@ int main() {
     assert(game.read_only.choice.text_owns(choice_items, 1, &value).ok == kQolOk && value == 1);
     assert(game.read_only.choice.selected_index(nullptr).code == kQolErrInvalidArgument);
     qol::contracts::QolInventoryItemRef inventory_ref{};
-    assert(game.read_only.inventory.item_ref_at(1, 2, &inventory_ref).ok == kQolOk);
+    assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).ok == kQolOk);
     assert(inventory_ref.bag == 1 && inventory_ref.slot == 2 && inventory_ref.native_item != nullptr);
-    assert(game.read_only.inventory.item_ref_at(1, 2, nullptr).code == kQolErrInvalidArgument);
+    assert(item_port_api.read.item_ref_at(1, 2, nullptr).code == kQolErrInvalidArgument);
     g_inventory_mode = FakeInventoryMode::kEmpty;
-    assert(game.read_only.inventory.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotFound);
+    assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotFound);
     g_inventory_mode = FakeInventoryMode::kNotReady;
-    assert(game.read_only.inventory.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotReady);
+    assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotReady);
     int inventory_callback_calls = 0;
     g_inventory_mode = FakeInventoryMode::kReady;
     assert(game.read_only.inventory.for_each_bag_slot(&inventory_callback,
@@ -733,9 +739,9 @@ int main() {
                                                       &inventory_callback_calls)
                .code == kQolErrNotReady);
     g_inventory_mode = FakeInventoryMode::kReady;
-    assert(game.read_only.world.game_state_gate(nullptr).code == kQolErrInvalidArgument);
+    assert(world_port_api.read.game_state_gate(nullptr).code == kQolErrInvalidArgument);
     g_world_game_state_gate = -1;
-    assert(game.read_only.world.game_state_gate(&value).code == kQolErrNotReady);
+    assert(world_port_api.read.game_state_gate(&value).code == kQolErrNotReady);
     g_world_game_state_gate = 0;
     return 0;
 }

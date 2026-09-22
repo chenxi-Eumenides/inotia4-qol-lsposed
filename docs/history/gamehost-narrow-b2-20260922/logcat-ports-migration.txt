@@ -1,0 +1,281 @@
+09-22 11:44:10.020 I/Inotia4Qol(28051): 2026-09-22 11:44:10.019 f=-1 I platform HookMain.kt:29 log early init: native pending, file=/sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/inotia4-export.log
+09-22 11:44:10.021 I/Inotia4Qol(28051): 2026-09-22 11:44:10.021 f=-1 I platform HookMain.kt:30 module loaded in process: com.com2us.inotia4.normal.freefull.google.global.android.common
+09-22 11:44:10.024 I/Inotia4Qol(28051): 2026-09-22 11:44:10.023 f=-1 I platform HookMain.kt:127 context not ready, retrying in 500ms
+09-22 11:44:10.158 I/Inotia4Qol(28051): 2026-09-22 11:44:10.158 f=-1 I platform ImmersiveMode.kt:29 ImmersiveMode hook installed on MainActivity.onWindowFocusChanged
+09-22 11:44:10.163 I/Inotia4Qol(28051): 2026-09-22 11:44:10.162 f=-1 I platform WatermarkOverlay.kt:95 WatermarkOverlay hook installed on MainActivity.onWindowFocusChanged
+09-22 11:44:10.779 I/Inotia4Qol(28051): 2026-09-22 11:44:10.779 f=0 I platform game_variant.cpp:346 game_variant: series=monster version=v29 caps=0x3 md5=4c332e9b508b35fe1e97f1f26e56f04d known=1
+09-22 11:44:10.779 I/Inotia4Qol(28051): 2026-09-22 11:44:10.779 f=0 I platform call_patch.cpp:326 patched word addr=0x727d38b03c new=0x34000360
+09-22 11:44:10.816 I/Inotia4Qol(28051): 2026-09-22 11:44:10.816 f=0 I core core_patches.cpp:97 core_patches monster compat: 0x727d979818 cmp w8,#0x62 -> #0x7F
+09-22 11:44:10.857 I/Inotia4Qol(28051): 2026-09-22 11:44:10.857 f=0 I platform call_patch.cpp:286 patched call=0x727d2d56ec replacement=0x96a5cb06
+09-22 11:44:10.857 I/Inotia4Qol(28051): 2026-09-22 11:44:10.857 f=0 I platform call_patch.cpp:286 patched call=0x727d30c9c4 replacement=0x96a4ee67
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I core frame_source.cpp:153 frame_source installed (render + logic anchors)
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I platform transition_dispatch.cpp:71 logic-pre consumer registered
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I platform call_patch.cpp:286 patched call=0x727d384d90 replacement=0x96a1d009
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I platform call_patch.cpp:286 patched call=0x727d385ef0 replacement=0x96a1cbc6
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I save save_enter.cpp:151 installed load=0x727d384d90 new=0x727d385ef0
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I platform call_patch.cpp:286 patched call=0x727d389640 replacement=0x96a1caf4
+09-22 11:44:10.858 I/Inotia4Qol(28051): 2026-09-22 11:44:10.858 f=0 I save save_exit.cpp:105 installed call=0x727d389640
+09-22 11:44:10.859 I/Inotia4Qol(28051): 2026-09-22 11:44:10.859 f=0 I core character_facts [character_facts] provider install
+09-22 11:44:10.859 I/Inotia4Qol(28051): 2026-09-22 11:44:10.859 f=0 I core character_facts [character_facts] provider enabled: capability published
+09-22 11:44:10.888 I/Inotia4Qol(28051): 2026-09-22 11:44:10.887 f=0 I ui settings.cpp:222 popup.settings acquired: state id=21
+09-22 11:44:10.888 I/Inotia4Qol(28051): 2026-09-22 11:44:10.888 f=0 I core item_facts [item_facts] provider install
+09-22 11:44:10.888 I/Inotia4Qol(28051): 2026-09-22 11:44:10.888 f=0 I core item_facts [item_facts] provider enabled: capability published
+09-22 11:44:10.981 W/Inotia4Qol(28051): 2026-09-22 11:44:10.981 f=0 W core plugin_registry.cpp:1208 plugin craft_ui degraded on ?: missing optional capability: craft_result
+09-22 11:44:10.986 I/Inotia4Qol(28051): 2026-09-22 11:44:10.986 f=0 I platform plugins/push_all/feature.cpp push_all enabled=0
+09-22 11:44:10.986 I/Inotia4Qol(28051): 2026-09-22 11:44:10.986 f=0 I platform plugins/push_all/feature.cpp push_all enabled=0
+09-22 11:44:10.989 I/Inotia4Qol(28051): 2026-09-22 11:44:10.989 f=0 I save_backup plugin.cpp:134 slot delete hook: backup handover orig=0x727d3844e8
+09-22 11:44:10.998 I/Inotia4Qol(28051): 2026-09-22 11:44:10.998 f=0 I save_backup panel.cpp:684 popup.savebackup acquired: state id=22
+09-22 11:44:10.999 I/Inotia4Qol(28051): 2026-09-22 11:44:10.999 f=0 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+09-22 11:44:11.008 I/Inotia4Qol(28051): 2026-09-22 11:44:11.008 f=0 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+09-22 11:44:11.008 I/Inotia4Qol(28051): 2026-09-22 11:44:11.008 f=0 I special_equip plugins/special_equip/feature.cpp enabled=1
+09-22 11:44:11.017 I/Inotia4Qol(28051): 2026-09-22 11:44:11.017 f=0 I special_equip plugins/special_equip/feature.cpp enabled=1
+09-22 11:44:11.025 I/Inotia4Qol(28051): 2026-09-22 11:44:11.025 f=0 I core world_facts [world_facts] provider install
+09-22 11:44:11.025 I/Inotia4Qol(28051): 2026-09-22 11:44:11.025 f=0 I core world_facts [world_facts] provider enabled: capability published
+09-22 11:44:11.127 I/Inotia4Qol(28051): 2026-09-22 11:44:11.127 f=0 I extension_bag extension_bag move_merge: behavior=0 extension_protection=0 (wrapper resident)
+09-22 11:44:11.140 I/Inotia4Qol(28051): 2026-09-22 11:44:11.140 f=0 I extension_bag extension_bag move_merge: extension_source_protection=0 merge=0 (wrapper resident)
+09-22 11:44:11.140 I/Inotia4Qol(28051): 2026-09-22 11:44:11.140 f=0 I autosell scan.cpp:223 global enabled=0 save_active=0
+09-22 11:44:11.140 I/Inotia4Qol(28051): 2026-09-22 11:44:11.140 f=0 I platform call_patch.cpp:286 patched call=0x727d382b88 replacement=0x96a37e94
+09-22 11:44:11.149 I/Inotia4Qol(28051): 2026-09-22 11:44:11.149 f=0 I autosell panel.cpp:927 popup.autosell acquired: state id=20
+09-22 11:44:11.149 W/Inotia4Qol(28051): 2026-09-22 11:44:11.149 f=0 W core plugin_registry.cpp:1208 plugin autosell degraded on ?: missing optional capability: extension_bag
+09-22 11:44:11.150 I/Inotia4Qol(28051): 2026-09-22 11:44:11.150 f=0 I autosell scan.cpp:223 global enabled=0 save_active=0
+09-22 11:44:11.150 I/Inotia4Qol(28051): 2026-09-22 11:44:11.150 f=0 I core assembly.cpp:278 assembly: registered=21 install_failed=0 kernel_only=false
+09-22 11:44:11.153 I/Inotia4Qol(28051): 2026-09-22 11:44:11.153 f=0 I platform HookMain.kt:30 module loaded in process: com.com2us.inotia4.normal.freefull.google.global.android.common
+09-22 11:44:11.153 I/Inotia4Qol(28051): 2026-09-22 11:44:11.153 f=0 I platform HookMain.kt:127 context not ready, retrying in 500ms
+09-22 11:44:11.153 I/Inotia4Qol(28051): 2026-09-22 11:44:11.153 f=0 I platform ImmersiveMode.kt:29 ImmersiveMode hook installed on MainActivity.onWindowFocusChanged
+09-22 11:44:11.153 I/Inotia4Qol(28051): 2026-09-22 11:44:11.153 f=0 I platform WatermarkOverlay.kt:95 WatermarkOverlay hook installed on MainActivity.onWindowFocusChanged
+09-22 11:44:11.155 I/Inotia4Qol(28051): 2026-09-22 11:44:11.154 f=0 I platform HookMain.kt:137 NativeBridge init OK: {"G_MONEY_VMA":true,"G_MAP_ID_VMA":true,"G_PARTY_VMA":true,"G_ACTIVE_QUEST_VMA":true,"G_INVEN_VMA":true,"G_MAIN_MERC_SLOT_VMA":true,"G_PREV_STATE_VMA":true,"G_STATE_VMA":true,"G_GAMESTATE_VMA":true,"G_INITSTATE_VMA":true,"G_POPUP_ON_VMA":true,"G_MAINMENU_DRAW_VMA":true,"G_POPUP_STACK_VMA":true,"G_PLAYER_ACTIVE_VMA":true,"G_PLAYER_ACTIVE_GOT_VMA":true,"G_MAPINFOBASE_PDATA_GOT_VMA":true,"G_MAPINFOBASE_RECORD_SIZE_VMA":true,"G_MAPINFOBASE_RECORD_COUNT_VMA":true,"G_UICHOICE_ITEMTEXT_VMA":true,"G_UICHOICE_COUNT_VMA":true,"G_UICHOICE_FOCUS_VMA":true,"G_UICHOICE_MAIN_TEXT_VMA":true,"G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA":true,"G_UICHOICE_CONTROL_GOT_VMA":true,"G_UIMIX_VMA":true,"F_GET_MONEY_VMA":true,"F_GET_MEMBER_VMA":true,"F_GET_PARTY_SIZE_VMA":true,"F_GET_ATTR_VMA":true,"F_GET_EQUIP_VMA":true,"F_GET_EXP_VMA":true,"F_GET_NEXT_EXP_VMA":true,"F_GET_RARITY_VMA":true,"F_GET_BAG_SIZE_VMA":true,"F_INVEN_GET_EMPTY_BAG_SLOT_VMA":true,"F_INVEN_IS_EM
+09-22 11:44:11.198 I/Inotia4Qol(28051): 2026-09-22 11:44:11.198 f=0 I platform HookMain.kt:139 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/code_cache/mods/com.inotia4.qol/3913222668.apk sha256=4a2a33e64cbe67a61729cf60682c6742e9fc4433570dc9d8ba74f897e8fde9e1
+09-22 11:44:11.362 I/Inotia4Qol(28051): 2026-09-22 11:44:11.362 f=0 I http ApiServer.kt:115 module assets added: /data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/code_cache/mods/com.inotia4.qol/3913222668.apk
+09-22 11:44:11.375 I/Inotia4Qol(28051): 2026-09-22 11:44:11.375 f=0 I config ModuleConfig.kt:165 config loaded: listenAddress=0.0.0.0 listenPort=8088 stackLimitIncrease=true moveMergeEnabled=true opEnabled=true customRecipeEnabled=true simpleModeEnabled=false pushAllEnabled=true autoSellEnabled=true apiEnabled=true debugLogEnabled=true
+09-22 11:44:11.403 I/Inotia4Qol(28051): 2026-09-22 11:44:11.403 f=0 I save_backup feature.cpp:221 save backup map_names loaded: 416 entries (json bytes=10761)
+09-22 11:44:11.404 I/Inotia4Qol(28051): 2026-09-22 11:44:11.404 f=0 I http ApiServer.kt:88 savebackup ui inject: {"ok":true}
+09-22 11:44:11.521 I/Inotia4Qol(28051): 2026-09-22 11:44:11.521 f=0 I save_backup panel.cpp:526 apply_backups: 0 -> 20 backups, total_pages=4, page_index=0
+09-22 11:44:11.521 I/Inotia4Qol(28051): 2026-09-22 11:44:11.521 f=0 I save_backup panel.cpp:836 self_check: list+parse 116.7 ms, apply 0.277 ms, 20 backups
+09-22 11:44:11.521 I/Inotia4Qol(28051): 2026-09-22 11:44:11.521 f=0 I http ApiServer.kt:90 savebackup self check: {"ok":true,"backup_count":20,"total_pages":4,"page_index":0}
+09-22 11:44:11.541 I/Inotia4Qol(28051): 2026-09-22 11:44:11.541 f=0 I config ConfigApiService.kt:44 stackLimitIncrease=true applied=true
+09-22 11:44:11.541 I/Inotia4Qol(28051): 2026-09-22 11:44:11.541 f=0 I config ConfigApiService.kt:46 moveMergeEnabled=true applied=true
+09-22 11:44:11.542 I/Inotia4Qol(28051): 2026-09-22 11:44:11.542 f=0 I config ConfigApiService.kt:48 extensionBagEnabled=true applied=true
+09-22 11:44:11.558 I/Inotia4Qol(28051): 2026-09-22 11:44:11.558 f=0 I config ConfigApiService.kt:50 customRecipeEnabled=true applied=true
+09-22 11:44:11.558 I/Inotia4Qol(28051): 2026-09-22 11:44:11.558 f=0 I config ConfigApiService.kt:52 simpleModeEnabled=false applied=true
+09-22 11:44:11.559 I/Inotia4Qol(28051): 2026-09-22 11:44:11.559 f=0 I config ConfigApiService.kt:54 pushAllEnabled=true applied=true
+09-22 11:44:11.560 I/Inotia4Qol(28051): 2026-09-22 11:44:11.560 f=0 I config ConfigApiService.kt:56 autoSellEnabled=true applied=true
+09-22 11:44:11.561 I/Inotia4Qol(28051): 2026-09-22 11:44:11.561 f=0 I config ConfigApiService.kt:58 apiEnabled=true applied=true
+09-22 11:44:11.561 I/Inotia4Qol(28051): 2026-09-22 11:44:11.561 f=0 I config ConfigApiService.kt:60 debugLogEnabled=true applied ok
+09-22 11:44:11.587 I/Inotia4Qol(28051): 2026-09-22 11:44:11.587 f=0 I platform WatermarkOverlay.kt:144 watermark overlay attached color=26ffffff rule=默认
+09-22 11:44:11.906 I/Inotia4Qol(28051): 2026-09-22 11:44:11.906 f=0 I catalog game_tiles.cpp:103 static tiles loaded: 416 maps, ready=1
+09-22 11:44:11.913 I/Inotia4Qol(28051): 2026-09-22 11:44:11.913 f=0 I config ConfigApiService.kt:115 static tiles loaded: true
+09-22 11:44:12.106 I/Inotia4Qol(28051): 2026-09-22 11:44:12.106 f=0 I http ApiServer.kt:152 AndServer started on 0.0.0.0:8088
+09-22 11:44:13.433 I/Inotia4Qol(28051): 2026-09-22 11:44:13.433 f=1 I extension_bag extension_bag move_merge: behavior=1 extension_protection=0 (wrapper resident)
+09-22 11:44:13.434 I/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+09-22 11:44:13.434 I/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 I platform plugins/push_all/feature.cpp push_all enabled=1
+09-22 11:44:13.434 I/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 I autosell scan.cpp:223 global enabled=1 save_active=0
+09-22 11:44:13.434 W/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 W custom_recipe plugins/custom_recipe/table recipe table not ready recipe_size=0 mixture_size=0 count=0
+09-22 11:44:13.434 W/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 W core plugin_registry.cpp:1389 plugin custom_recipe gate install deferred on own:RECIPEBASE_MIXTUREBASE: resource own:RECIPEBASE_MIXTUREBASE: ownership acquire rejected
+09-22 11:44:13.434 I/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 I platform call_patch.cpp:286 patched call=0x727d321970 replacement=0x96a6a70a
+09-22 11:44:13.434 I/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 I platform call_patch.cpp:326 patched word addr=0x727d321988 new=0xd503201f
+09-22 11:44:13.434 I/Inotia4Qol(28051): 2026-09-22 11:44:13.434 f=1 I platform plugins/push_all/feature.cpp push_all enabled=1
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d33ca84 new=0x710f9c1f
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d33ca8c new=0x52807cf7
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d33bccc new=0x710f9c7f
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d33bce0 new=0x710f9e9f
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d33c690 new=0x710f9a9f
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d33bb98 new=0x710f9c1f
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d35fe04 new=0x528002a1
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d35ff4c new=0x528002a1
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:326 patched word addr=0x727d3098d0 new=0xaa1303e0
+09-22 11:44:13.435 I/Inotia4Qol(28051): 2026-09-22 11:44:13.435 f=1 I platform call_patch.cpp:286 patched call=0x727d3098dc replacement=0x9400d1ee
+09-22 11:44:13.436 I/Inotia4Qol(28051): 2026-09-22 11:44:13.436 f=1 I platform call_patch.cpp:326 patched word addr=0x727d3098e8 new=0xaa1303e0
+09-22 11:44:13.436 I/Inotia4Qol(28051): 2026-09-22 11:44:13.436 f=1 I platform call_patch.cpp:286 patched call=0x727d3098f4 replacement=0x9400d1e8
+09-22 11:44:13.436 I/Inotia4Qol(28051): 2026-09-22 11:44:13.436 f=1 I platform call_patch.cpp:326 patched word addr=0x727d30a6b8 new=0xaa1303e0
+09-22 11:44:13.436 I/Inotia4Qol(28051): 2026-09-22 11:44:13.436 f=1 I platform call_patch.cpp:286 patched call=0x727d30a6c4 replacement=0x9400ce74
+09-22 11:44:13.436 I/Inotia4Qol(28051): 2026-09-22 11:44:13.436 f=1 I platform call_patch.cpp:326 patched word addr=0x727d340458 new=0xaa1303e0
+09-22 11:44:13.437 I/Inotia4Qol(28051): 2026-09-22 11:44:13.437 f=1 I platform call_patch.cpp:286 patched call=0x727d340464 replacement=0x97fff70c
+09-22 11:44:13.437 I/Inotia4Qol(28051): 2026-09-22 11:44:13.437 f=1 I platform call_patch.cpp:326 patched word addr=0x727d34048c new=0xaa1303e0
+09-22 11:44:13.438 I/Inotia4Qol(28051): 2026-09-22 11:44:13.438 f=1 I platform call_patch.cpp:286 patched call=0x727d340490 replacement=0x97fff701
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d2fc488 replacement=0x96a67cef
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d303ea0 replacement=0x96a65e69
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d303f4c replacement=0x96a65e3e
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d35dc88 replacement=0x96a4f6ef
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d361850 replacement=0x96a4e7fd
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d395708 replacement=0x96a4184f
+09-22 11:44:13.498 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d395a84 replacement=0x96a41770
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.498 f=1 I platform call_patch.cpp:286 patched call=0x727d395cf0 replacement=0x96a416d5
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d2ef6e0 replacement=0x96a6c6dc
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d2ef6e4 replacement=0x96a6c788
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d382bcc replacement=0x96a47b0c
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d2f0cc0 replacement=0x96a6c446
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d2e2f28 replacement=0x96a6fcc7
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d2f1188 replacement=0x96a6c4bf
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d30a87c replacement=0x96a65f9e
+09-22 11:44:13.499 I/Inotia4Qol(28051): 2026-09-22 11:44:13.499 f=1 I platform call_patch.cpp:286 patched call=0x727d38763c replacement=0x96a46c7e
+09-22 11:44:13.500 I/Inotia4Qol(28051): 2026-09-22 11:44:13.500 f=1 I platform call_patch.cpp:388 patched branch call=0x727d30b0e4 thunk=0x727dbfe020 replacement=0x1423cbcf
+09-22 11:44:13.500 I/Inotia4Qol(28051): 2026-09-22 11:44:13.500 f=1 I platform call_patch.cpp:286 patched call=0x727d30a4a0 replacement=0x96a661f5
+09-22 11:44:13.500 I/Inotia4Qol(28051): 2026-09-22 11:44:13.500 f=1 I platform call_patch.cpp:286 patched call=0x727d30a540 replacement=0x96a661cd
+09-22 11:44:13.500 I/Inotia4Qol(28051): 2026-09-22 11:44:13.500 f=1 I platform call_patch.cpp:286 patched call=0x727d383474 replacement=0x96a47e85
+09-22 11:44:13.500 I/Inotia4Qol(28051): 2026-09-22 11:44:13.500 f=1 I platform call_patch.cpp:286 patched call=0x727d2f9a74 replacement=0x96a6a5a4
+09-22 11:44:13.500 I/Inotia4Qol(28051): 2026-09-22 11:44:13.500 f=1 I extension_bag extension_bag move_merge: extension_source_protection=1 merge=1 (wrapper resident)
+09-22 11:44:14.066 I/Inotia4Qol(28051): 2026-09-22 11:44:14.066 f=13 I config ModuleConfig.kt:306 config persisted: /storage/emulated/0/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/config.json
+09-22 11:44:14.104 I/Inotia4Qol(28051): 2026-09-22 11:44:14.104 f=13 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=world_facts,action=deactivate} result={ok:true} dur=0ms
+09-22 11:44:14.122 I/Inotia4Qol(28051): 2026-09-22 11:44:14.122 f=13 I core world_facts [world_facts] provider disabled: capability withdrawn
+09-22 11:44:14.122 I/Inotia4Qol(28051): 2026-09-22 11:44:14.122 f=13 I autosell scan.cpp:223 global enabled=0 save_active=0
+09-22 11:44:14.122 I/Inotia4Qol(28051): 2026-09-22 11:44:14.122 f=13 I extension_bag extension_bag move_merge: extension_source_protection=0 merge=1 (wrapper resident)
+09-22 11:44:14.123 I/Inotia4Qol(28051): 2026-09-22 11:44:14.123 f=13 I core world_facts [world_facts] provider deactivate
+09-22 11:44:14.123 I/Inotia4Qol(28051): 2026-09-22 11:44:14.123 f=13 I autosell panel.cpp:940 popup.autosell released
+09-22 11:44:14.123 I/Inotia4Qol(28051): 2026-09-22 11:44:14.123 f=13 I platform call_patch.cpp:308 reverted call=0x727d2f9a74 original=0x97fffe5e
+09-22 11:44:14.143 I/Inotia4Qol(28051): 2026-09-22 11:44:14.143 f=14 I api gamebridge_internal.h:42 [op_dialog_select] args={s=ok index=-1} -> {"ok":false,"error":"not in game"}
+09-22 11:44:14.159 I/Inotia4Qol(28051): 2026-09-22 11:44:14.158 f=14 I api UiActions.kt:24 endpoint=POST /api/ui/dialog/select params={action=ok,index=-1} result={ok:false,error=not in game} dur=32ms
+09-22 11:44:14.173 I/Inotia4Qol(28051): 2026-09-22 11:44:14.173 f=14 I platform call_patch.cpp:308 reverted call=0x727d382b88 original=0x97fdaadb
+09-22 11:44:14.173 I/Inotia4Qol(28051): 2026-09-22 11:44:14.173 f=14 I platform call_patch.cpp:308 reverted call=0x727d383474 original=0x97fd0fa8
+09-22 11:44:14.234 I/Inotia4Qol(28051): 2026-09-22 11:44:14.234 f=15 I platform call_patch.cpp:308 reverted call=0x727d30a540 original=0x9400c508
+09-22 11:44:14.286 I/Inotia4Qol(28051): 2026-09-22 11:44:14.285 f=16 I platform call_patch.cpp:308 reverted call=0x727d30a4a0 original=0x9400c530
+09-22 11:44:14.347 I/Inotia4Qol(28051): 2026-09-22 11:44:14.347 f=17 I platform call_patch.cpp:410 reverted branch call=0x727d30b0e4 original=0x17ffff1e
+09-22 11:44:14.408 I/Inotia4Qol(28051): 2026-09-22 11:44:14.408 f=18 I platform call_patch.cpp:308 reverted call=0x727d38763c original=0x97fcff36
+09-22 11:44:14.459 I/Inotia4Qol(28051): 2026-09-22 11:44:14.459 f=19 I platform call_patch.cpp:308 reverted call=0x727d30a87c original=0x97ffffc9
+09-22 11:44:14.521 I/Inotia4Qol(28051): 2026-09-22 11:44:14.520 f=20 I platform call_patch.cpp:308 reverted call=0x727d2f1188 original=0x97fffdfe
+09-22 11:44:14.572 I/Inotia4Qol(28051): 2026-09-22 11:44:14.571 f=21 I platform call_patch.cpp:308 reverted call=0x727d2e2f28 original=0x94016d49
+09-22 11:44:14.633 I/Inotia4Qol(28051): 2026-09-22 11:44:14.633 f=22 I platform call_patch.cpp:308 reverted call=0x727d2f0cc0 original=0x94012fc8
+09-22 11:44:14.684 I/Inotia4Qol(28051): 2026-09-22 11:44:14.684 f=23 I platform call_patch.cpp:308 reverted call=0x727d382bcc original=0x97fd11d2
+09-22 11:44:14.745 I/Inotia4Qol(28051): 2026-09-22 11:44:14.745 f=24 I platform call_patch.cpp:308 reverted call=0x727d2ef6e4 original=0x97fffee8
+09-22 11:44:14.806 I/Inotia4Qol(28051): 2026-09-22 11:44:14.806 f=25 I platform call_patch.cpp:308 reverted call=0x727d2ef6e0 original=0x97fffe33
+09-22 11:44:14.857 I/Inotia4Qol(28051): 2026-09-22 11:44:14.857 f=26 I platform call_patch.cpp:308 reverted call=0x727d395cf0 original=0x97ff2e44
+09-22 11:44:14.918 I/Inotia4Qol(28051): 2026-09-22 11:44:14.918 f=27 I platform call_patch.cpp:308 reverted call=0x727d395a84 original=0x97ff2edf
+09-22 11:44:14.970 I/Inotia4Qol(28051): 2026-09-22 11:44:14.969 f=28 I platform call_patch.cpp:308 reverted call=0x727d395708 original=0x97ff2fbe
+09-22 11:44:15.031 I/Inotia4Qol(28051): 2026-09-22 11:44:15.031 f=29 I platform call_patch.cpp:308 reverted call=0x727d361850 original=0x97ffff6c
+09-22 11:44:15.083 I/Inotia4Qol(28051): 2026-09-22 11:44:15.082 f=30 I platform call_patch.cpp:308 reverted call=0x727d35dc88 original=0x94000e5e
+09-22 11:44:15.144 I/Inotia4Qol(28051): 2026-09-22 11:44:15.144 f=31 I platform call_patch.cpp:308 reverted call=0x727d303f4c original=0x940175ad
+09-22 11:44:15.195 I/Inotia4Qol(28051): 2026-09-22 11:44:15.195 f=32 I platform call_patch.cpp:308 reverted call=0x727d303ea0 original=0x940175d8
+09-22 11:44:15.256 I/Inotia4Qol(28051): 2026-09-22 11:44:15.256 f=33 I platform call_patch.cpp:308 reverted call=0x727d2fc488 original=0x9401945e
+09-22 11:44:16.202 I/Inotia4Qol(28051): 2026-09-22 11:44:16.202 f=50 I api gamebridge_internal.h:42 [op_enter_slot] args={slot=0} -> {"ok":false,"error":"not in main menu (state=2)"}
+09-22 11:44:16.203 I/Inotia4Qol(28051): 2026-09-22 11:44:16.203 f=50 I save SaveActions.kt:23 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:false,error=not in main menu (state=2)} dur=14ms
+09-22 11:44:16.866 I/Inotia4Qol(28051): 2026-09-22 11:44:16.866 f=62 I custom_recipe plugins/custom_recipe/table recipe table injected base=69 records=71 materials=191 book_bytes=7
+09-22 11:44:23.109 I/Inotia4Qol(28051): 2026-09-22 11:44:23.109 f=114 I platform HookMain.kt:90 blocked ActivityIndicatorOpen (Connecting.. progress dialog)
+09-22 11:44:23.482 I/Inotia4Qol(28051): 2026-09-22 11:44:23.481 f=118 I platform HookMain.kt:76 blocked AgreementUIActivity launch (outside main menu or world load in progress)
+09-22 11:44:23.644 I/Inotia4Qol(28051): 2026-09-22 11:44:23.644 f=121 I ui settings_injection.inc:47 more games ExecuteProc bound: ctrl=0x725cd71410
+09-22 11:44:27.693 I/Inotia4Qol(28051): 2026-09-22 11:44:27.693 f=194 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=world_facts,action=activate} result={ok:true} dur=0ms
+09-22 11:44:27.717 I/Inotia4Qol(28051): 2026-09-22 11:44:27.717 f=194 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=inventory_hooks,action=activate} result={ok:true} dur=0ms
+09-22 11:44:27.725 I/Inotia4Qol(28051): 2026-09-22 11:44:27.725 f=194 I core world_facts [world_facts] provider install
+09-22 11:44:27.725 I/Inotia4Qol(28051): 2026-09-22 11:44:27.725 f=194 I core world_facts [world_facts] provider enabled: capability published
+09-22 11:44:27.736 I/Inotia4Qol(28051): 2026-09-22 11:44:27.736 f=194 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=extension_bag,action=activate} result={ok:true} dur=0ms
+09-22 11:44:27.758 I/Inotia4Qol(28051): 2026-09-22 11:44:27.758 f=195 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=autosell,action=activate} result={ok:true} dur=0ms
+09-22 11:44:27.780 I/Inotia4Qol(28051): 2026-09-22 11:44:27.780 f=195 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=quest,action=activate} result={ok:true} dur=0ms
+09-22 11:44:27.801 I/Inotia4Qol(28051): 2026-09-22 11:44:27.801 f=196 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=world_teleport,action=activate} result={ok:true} dur=0ms
+09-22 11:44:28.792 I/Inotia4Qol(28051): 2026-09-22 11:44:28.792 f=217 I extension_bag extension_bag move_merge: behavior=1 extension_protection=0 (wrapper resident)
+09-22 11:44:28.896 I/Inotia4Qol(28051): 2026-09-22 11:44:28.896 f=217 I platform call_patch.cpp:286 patched call=0x727d2fc488 replacement=0x96a67cef
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d303ea0 replacement=0x96a65e69
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d303f4c replacement=0x96a65e3e
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d35dc88 replacement=0x96a4f6ef
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d361850 replacement=0x96a4e7fd
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d395708 replacement=0x96a4184f
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d395a84 replacement=0x96a41770
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d395cf0 replacement=0x96a416d5
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d2ef6e0 replacement=0x96a6c6dc
+09-22 11:44:28.897 I/Inotia4Qol(28051): 2026-09-22 11:44:28.897 f=217 I platform call_patch.cpp:286 patched call=0x727d2ef6e4 replacement=0x96a6c788
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d382bcc replacement=0x96a47b0c
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d2f0cc0 replacement=0x96a6c446
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d2e2f28 replacement=0x96a6fcc7
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d2f1188 replacement=0x96a6c4bf
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d30a87c replacement=0x96a65f9e
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d38763c replacement=0x96a46c7e
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:388 patched branch call=0x727d30b0e4 thunk=0x727dbfe000 replacement=0x1423cbc7
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d30a4a0 replacement=0x96a661f5
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d30a540 replacement=0x96a661cd
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d383474 replacement=0x96a47e85
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I platform call_patch.cpp:286 patched call=0x727d2f9a74 replacement=0x96a6a5a4
+09-22 11:44:28.898 I/Inotia4Qol(28051): 2026-09-22 11:44:28.898 f=217 I extension_bag extension_bag move_merge: extension_source_protection=1 merge=1 (wrapper resident)
+09-22 11:44:28.899 I/Inotia4Qol(28051): 2026-09-22 11:44:28.899 f=217 I autosell scan.cpp:223 global enabled=1 save_active=0
+09-22 11:44:28.899 I/Inotia4Qol(28051): 2026-09-22 11:44:28.899 f=217 I platform call_patch.cpp:286 patched call=0x727d382b88 replacement=0x96a37e94
+09-22 11:44:28.916 I/Inotia4Qol(28051): 2026-09-22 11:44:28.916 f=217 I autosell panel.cpp:927 popup.autosell acquired: state id=20
+09-22 11:44:28.916 I/Inotia4Qol(28051): 2026-09-22 11:44:28.916 f=217 I autosell scan.cpp:223 global enabled=1 save_active=0
+09-22 11:44:58.376 I/Inotia4Qol(28051): 2026-09-22 11:44:58.375 f=750 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=item_facts,action=deactivate} result={ok:true} dur=0ms
+09-22 11:44:58.410 I/Inotia4Qol(28051): 2026-09-22 11:44:58.410 f=750 I core item_facts [item_facts] provider disabled: capability withdrawn
+09-22 11:44:58.410 I/Inotia4Qol(28051): 2026-09-22 11:44:58.410 f=750 I autosell scan.cpp:223 global enabled=0 save_active=0
+09-22 11:44:58.410 I/Inotia4Qol(28051): 2026-09-22 11:44:58.410 f=750 I extension_bag extension_bag move_merge: extension_source_protection=0 merge=1 (wrapper resident)
+09-22 11:44:58.410 I/Inotia4Qol(28051): 2026-09-22 11:44:58.410 f=750 I special_equip plugins/special_equip/feature.cpp enabled=0
+09-22 11:44:58.410 I/Inotia4Qol(28051): 2026-09-22 11:44:58.410 f=750 I custom_recipe plugins/custom_recipe/table recipe table deactivated records=69
+09-22 11:44:58.410 I/Inotia4Qol(28051): 2026-09-22 11:44:58.410 f=750 I core item_facts [item_facts] provider deactivate
+09-22 11:44:58.411 I/Inotia4Qol(28051): 2026-09-22 11:44:58.411 f=750 I autosell panel.cpp:940 popup.autosell released
+09-22 11:44:58.411 I/Inotia4Qol(28051): 2026-09-22 11:44:58.411 f=750 I platform call_patch.cpp:308 reverted call=0x727d2f9a74 original=0x97fffe5e
+09-22 11:44:58.411 I/Inotia4Qol(28051): 2026-09-22 11:44:58.411 f=750 I custom_recipe plugins/custom_recipe/table recipe table deactivated records=69
+09-22 11:44:58.461 I/Inotia4Qol(28051): 2026-09-22 11:44:58.461 f=751 I platform call_patch.cpp:308 reverted call=0x727d382b88 original=0x97fdaadb
+09-22 11:44:58.461 I/Inotia4Qol(28051): 2026-09-22 11:44:58.461 f=751 I platform call_patch.cpp:308 reverted call=0x727d383474 original=0x97fd0fa8
+09-22 11:44:58.512 I/Inotia4Qol(28051): 2026-09-22 11:44:58.512 f=752 I platform call_patch.cpp:308 reverted call=0x727d30a540 original=0x9400c508
+09-22 11:44:58.573 I/Inotia4Qol(28051): 2026-09-22 11:44:58.573 f=753 I platform call_patch.cpp:308 reverted call=0x727d30a4a0 original=0x9400c530
+09-22 11:44:58.624 I/Inotia4Qol(28051): 2026-09-22 11:44:58.624 f=754 I platform call_patch.cpp:410 reverted branch call=0x727d30b0e4 original=0x17ffff1e
+09-22 11:44:58.686 I/Inotia4Qol(28051): 2026-09-22 11:44:58.686 f=755 I platform call_patch.cpp:308 reverted call=0x727d38763c original=0x97fcff36
+09-22 11:44:58.737 I/Inotia4Qol(28051): 2026-09-22 11:44:58.737 f=756 I platform call_patch.cpp:308 reverted call=0x727d30a87c original=0x97ffffc9
+09-22 11:44:58.798 I/Inotia4Qol(28051): 2026-09-22 11:44:58.798 f=757 I platform call_patch.cpp:308 reverted call=0x727d2f1188 original=0x97fffdfe
+09-22 11:44:58.849 I/Inotia4Qol(28051): 2026-09-22 11:44:58.849 f=758 I platform call_patch.cpp:308 reverted call=0x727d2e2f28 original=0x94016d49
+09-22 11:44:58.910 I/Inotia4Qol(28051): 2026-09-22 11:44:58.910 f=759 I platform call_patch.cpp:308 reverted call=0x727d2f0cc0 original=0x94012fc8
+09-22 11:44:58.961 I/Inotia4Qol(28051): 2026-09-22 11:44:58.961 f=760 I platform call_patch.cpp:308 reverted call=0x727d382bcc original=0x97fd11d2
+09-22 11:44:59.013 I/Inotia4Qol(28051): 2026-09-22 11:44:59.013 f=761 I platform call_patch.cpp:308 reverted call=0x727d2ef6e4 original=0x97fffee8
+09-22 11:44:59.074 I/Inotia4Qol(28051): 2026-09-22 11:44:59.074 f=762 I platform call_patch.cpp:308 reverted call=0x727d2ef6e0 original=0x97fffe33
+09-22 11:44:59.125 I/Inotia4Qol(28051): 2026-09-22 11:44:59.125 f=763 I platform call_patch.cpp:308 reverted call=0x727d395cf0 original=0x97ff2e44
+09-22 11:44:59.186 I/Inotia4Qol(28051): 2026-09-22 11:44:59.186 f=764 I platform call_patch.cpp:308 reverted call=0x727d395a84 original=0x97ff2edf
+09-22 11:44:59.237 I/Inotia4Qol(28051): 2026-09-22 11:44:59.237 f=765 I platform call_patch.cpp:308 reverted call=0x727d395708 original=0x97ff2fbe
+09-22 11:44:59.299 I/Inotia4Qol(28051): 2026-09-22 11:44:59.299 f=766 I platform call_patch.cpp:308 reverted call=0x727d361850 original=0x97ffff6c
+09-22 11:44:59.340 I/Inotia4Qol(28051): 2026-09-22 11:44:59.340 f=767 I platform call_patch.cpp:308 reverted call=0x727d35dc88 original=0x94000e5e
+09-22 11:44:59.401 I/Inotia4Qol(28051): 2026-09-22 11:44:59.401 f=768 I platform call_patch.cpp:308 reverted call=0x727d303f4c original=0x940175ad
+09-22 11:44:59.452 I/Inotia4Qol(28051): 2026-09-22 11:44:59.452 f=769 I platform call_patch.cpp:308 reverted call=0x727d303ea0 original=0x940175d8
+09-22 11:44:59.503 I/Inotia4Qol(28051): 2026-09-22 11:44:59.503 f=770 I platform call_patch.cpp:308 reverted call=0x727d2fc488 original=0x9401945e
+09-22 11:45:01.451 I/Inotia4Qol(28051): 2026-09-22 11:45:01.451 f=806 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=item_facts,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.471 I/Inotia4Qol(28051): 2026-09-22 11:45:01.471 f=806 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=attribute_quality,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.493 I/Inotia4Qol(28051): 2026-09-22 11:45:01.493 f=806 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=inventory_hooks,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.496 I/Inotia4Qol(28051): 2026-09-22 11:45:01.496 f=806 I core item_facts [item_facts] provider install
+09-22 11:45:01.496 I/Inotia4Qol(28051): 2026-09-22 11:45:01.496 f=806 I core item_facts [item_facts] provider enabled: capability published
+09-22 11:45:01.515 I/Inotia4Qol(28051): 2026-09-22 11:45:01.515 f=806 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=extension_bag,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.537 I/Inotia4Qol(28051): 2026-09-22 11:45:01.537 f=807 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=autosell,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.558 I/Inotia4Qol(28051): 2026-09-22 11:45:01.558 f=808 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=custom_recipe,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.568 I/Inotia4Qol(28051): 2026-09-22 11:45:01.568 f=808 I custom_recipe plugins/custom_recipe/table recipe table reactivated records=71
+09-22 11:45:01.585 I/Inotia4Qol(28051): 2026-09-22 11:45:01.585 f=808 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=craft_ui,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.611 I/Inotia4Qol(28051): 2026-09-22 11:45:01.611 f=809 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=special_equip,action=activate} result={ok:true} dur=0ms
+09-22 11:45:01.650 I/Inotia4Qol(28051): 2026-09-22 11:45:01.650 f=810 I special_equip plugins/special_equip/feature.cpp enabled=1
+09-22 11:45:01.715 I/Inotia4Qol(28051): 2026-09-22 11:45:01.715 f=811 I special_equip plugins/special_equip/feature.cpp enabled=1
+09-22 11:45:02.420 I/Inotia4Qol(28051): 2026-09-22 11:45:02.420 f=829 I extension_bag extension_bag move_merge: behavior=1 extension_protection=0 (wrapper resident)
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d2fc488 replacement=0x96a67cef
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d303ea0 replacement=0x96a65e69
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d303f4c replacement=0x96a65e3e
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d35dc88 replacement=0x96a4f6ef
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d361850 replacement=0x96a4e7fd
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d395708 replacement=0x96a4184f
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d395a84 replacement=0x96a41770
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d395cf0 replacement=0x96a416d5
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d2ef6e0 replacement=0x96a6c6dc
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d2ef6e4 replacement=0x96a6c788
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d382bcc replacement=0x96a47b0c
+09-22 11:45:02.518 I/Inotia4Qol(28051): 2026-09-22 11:45:02.518 f=829 I platform call_patch.cpp:286 patched call=0x727d2f0cc0 replacement=0x96a6c446
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d2e2f28 replacement=0x96a6fcc7
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d2f1188 replacement=0x96a6c4bf
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d30a87c replacement=0x96a65f9e
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d38763c replacement=0x96a46c7e
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:388 patched branch call=0x727d30b0e4 thunk=0x727dbfe000 replacement=0x1423cbc7
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d30a4a0 replacement=0x96a661f5
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d30a540 replacement=0x96a661cd
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d383474 replacement=0x96a47e85
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d2f9a74 replacement=0x96a6a5a4
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I extension_bag extension_bag move_merge: extension_source_protection=1 merge=1 (wrapper resident)
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I autosell scan.cpp:223 global enabled=1 save_active=0
+09-22 11:45:02.519 I/Inotia4Qol(28051): 2026-09-22 11:45:02.519 f=829 I platform call_patch.cpp:286 patched call=0x727d382b88 replacement=0x96a37e94
+09-22 11:45:02.534 I/Inotia4Qol(28051): 2026-09-22 11:45:02.534 f=829 I autosell panel.cpp:927 popup.autosell acquired: state id=20
+09-22 11:45:02.534 I/Inotia4Qol(28051): 2026-09-22 11:45:02.534 f=829 I autosell scan.cpp:223 global enabled=1 save_active=0
+09-22 11:45:11.661 I/Inotia4Qol(28051): 2026-09-22 11:45:11.661 f=996 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=character_facts,action=deactivate} result={ok:true} dur=0ms
+09-22 11:45:11.710 I/Inotia4Qol(28051): 2026-09-22 11:45:11.710 f=996 I core character_facts [character_facts] provider disabled: capability withdrawn
+09-22 11:45:11.710 I/Inotia4Qol(28051): 2026-09-22 11:45:11.710 f=996 I special_equip plugins/special_equip/feature.cpp enabled=0
+09-22 11:45:11.710 I/Inotia4Qol(28051): 2026-09-22 11:45:11.710 f=996 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+09-22 11:45:11.710 I/Inotia4Qol(28051): 2026-09-22 11:45:11.710 f=996 I platform plugins/push_all/feature.cpp push_all enabled=0
+09-22 11:45:11.710 I/Inotia4Qol(28051): 2026-09-22 11:45:11.710 f=996 I core character_facts [character_facts] provider deactivate
+09-22 11:45:11.711 I/Inotia4Qol(28051): 2026-09-22 11:45:11.711 f=996 I platform call_patch.cpp:338 reverted word addr=0x727d321988 original=0x34fffde0
+09-22 11:45:11.761 I/Inotia4Qol(28051): 2026-09-22 11:45:11.761 f=997 I platform call_patch.cpp:308 reverted call=0x727d321970 original=0x97ffcc28
+09-22 11:45:19.712 I/Inotia4Qol(28051): 2026-09-22 11:45:19.712 f=1141 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=character_facts,action=activate} result={ok:true} dur=0ms
+09-22 11:45:19.729 I/Inotia4Qol(28051): 2026-09-22 11:45:19.729 f=1141 I core character_facts [character_facts] provider install
+09-22 11:45:19.729 I/Inotia4Qol(28051): 2026-09-22 11:45:19.729 f=1141 I core character_facts [character_facts] provider enabled: capability published
+09-22 11:45:19.739 I/Inotia4Qol(28051): 2026-09-22 11:45:19.739 f=1141 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=push_all,action=activate} result={ok:true} dur=0ms
+09-22 11:45:19.764 I/Inotia4Qol(28051): 2026-09-22 11:45:19.764 f=1142 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=simple_mode,action=activate} result={ok:true} dur=0ms
+09-22 11:45:19.770 I/Inotia4Qol(28051): 2026-09-22 11:45:19.770 f=1142 I platform plugins/push_all/feature.cpp push_all enabled=1
+09-22 11:45:19.770 I/Inotia4Qol(28051): 2026-09-22 11:45:19.770 f=1142 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+09-22 11:45:19.770 I/Inotia4Qol(28051): 2026-09-22 11:45:19.770 f=1142 I platform call_patch.cpp:286 patched call=0x727d321970 replacement=0x96a6a70a
+09-22 11:45:19.785 I/Inotia4Qol(28051): 2026-09-22 11:45:19.785 f=1142 I op OpApiService.kt:141 endpoint=POST /api/op/features/lifecycle params={id=special_equip,action=activate} result={ok:true} dur=0ms
+09-22 11:45:19.821 I/Inotia4Qol(28051): 2026-09-22 11:45:19.821 f=1143 I special_equip plugins/special_equip/feature.cpp enabled=1
+09-22 11:45:19.821 I/Inotia4Qol(28051): 2026-09-22 11:45:19.821 f=1143 I platform call_patch.cpp:326 patched word addr=0x727d321988 new=0xd503201f
+09-22 11:45:19.821 I/Inotia4Qol(28051): 2026-09-22 11:45:19.821 f=1143 I platform plugins/push_all/feature.cpp push_all enabled=1
+09-22 11:45:19.834 I/Inotia4Qol(28051): 2026-09-22 11:45:19.834 f=1143 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+09-22 11:45:19.863 I/Inotia4Qol(28051): 2026-09-22 11:45:19.863 f=1144 I special_equip plugins/special_equip/feature.cpp enabled=1

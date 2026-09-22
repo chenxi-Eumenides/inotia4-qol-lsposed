@@ -217,7 +217,10 @@ target_sources(gamebridge PRIVATE
 
 if(NOT QOL_KERNEL_ONLY)
     target_sources(gamebridge PRIVATE
+        game/adapter_ports/character_port.cpp
+        game/adapter_ports/item_port.cpp
         game/adapter_ports/quest_port.cpp
+        game/adapter_ports/world_port.cpp
     )
 endif()
 

@@ -72,41 +72,12 @@ int32_t game_is_main_thread() {
 
 int64_t game_frame_count() { return qol::game::frame_count(); }
 
-QolResult read_char_type(const void* character, int32_t* out) {
-    if (character == nullptr || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::char_type(character);
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult read_char_active(const void* character, int32_t* out) {
-    if (character == nullptr || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::char_active_group_resolved()) return not_ready();
-    *out = qol::game::char_is_active_player_group(const_cast<void*>(character)) ? 1 : 0;
-    return contracts::ok();
-}
-
 QolResult read_char_party(const void* character, int32_t* out) {
     if (character == nullptr || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (!qol::game::char_party_index_resolved()) return not_ready();
     const int value = qol::game::char_party_index(character);
     if (value < 0) return not_ready();
     *out = value;
-    return contracts::ok();
-}
-
-QolResult read_item_category(const void* item, int32_t* out) {
-    if (item == nullptr || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::attr_item_category(item);
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult read_item_jewel(int32_t category, int32_t* out) {
-    if (category < 0 || out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = qol::game::attr_is_jewel_category(category) ? 1 : 0;
     return contracts::ok();
 }
 
@@ -175,16 +146,6 @@ QolResult read_item_jewel_attribute_type(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_item_sell_price(const void* item, int64_t* out) {
-    if (item == nullptr || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    const int value = qol::game::item_sell_price(item);
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
 QolResult read_item_category_predicate(int32_t category, int32_t* out, int value) {
     if (category < 0 || out == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -219,46 +180,9 @@ QolResult read_item_count_encoding(int32_t category,
 
 QolResult read_world_position(const void*, int32_t*, int32_t*) { return unsupported(); }
 
-QolResult read_world_state(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::world_state();
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult read_world_game_state_gate(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::world_game_state_gate();
-    if (value < 0) return not_ready();
-    *out = value == 0 ? 1 : 0;
-    return contracts::ok();
-}
-
-QolResult read_inventory_item_ref_at(int32_t bag, int32_t slot,
-                                     contracts::QolInventoryItemRef* out) {
-    if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    return qol::game::inventory_item_ref_at(bag, slot, out);
-}
-
 QolResult read_inventory_for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx) {
     if (callback == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     return qol::game::for_each_bag_slot(callback, ctx);
-}
-
-QolResult read_inventory_physical_item_at(int32_t bag, int32_t slot, void** out) {
-    return qol::game::physical_item_at(bag, slot, out);
-}
-
-QolResult read_inventory_detail_context(int32_t* out_desc_type, int32_t* out_bag,
-                                        void** out_control) {
-    return qol::game::detail_context(out_desc_type, out_bag, out_control);
-}
-
-QolResult read_inventory_cursor_index(const void* control, int32_t* out_slot) {
-    return qol::game::cursor_index(control, out_slot);
 }
 
 QolResult read_inventory_bag_size(int32_t bag, int32_t* out_size) {
@@ -514,15 +438,6 @@ QolResult read_item_rarity(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_item_real_equip(const void* item, int32_t* out) {
-    if (item == nullptr || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (!qol::game::item_equip_primitives_ready()) return not_ready();
-    *out = qol::game::item_is_real_equip(item) ? 1 : 0;
-    return contracts::ok();
-}
-
 QolResult read_item_equip_level(const void* item, int32_t* out) {
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -532,30 +447,12 @@ QolResult read_item_equip_level(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_item_no_sell(int32_t category, int32_t* out) {
-    if (category < 0 || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (fn_item_is_no_sell == nullptr) return not_ready();
-    *out = fn_item_is_no_sell(category) != 0 ? 1 : 0;
-    return contracts::ok();
-}
-
 QolResult read_item_dice(int32_t category, int32_t* out) {
     if (category < 0 || out == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     if (fn_is_dice == nullptr) return not_ready();
     *out = fn_is_dice(category) != 0 ? 1 : 0;
-    return contracts::ok();
-}
-
-QolResult read_item_cumulate_count(const void* item, int32_t* out) {
-    if (item == nullptr || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    if (fn_get_cumulate_count == nullptr) return not_ready();
-    *out = fn_get_cumulate_count(const_cast<void*>(item));
     return contracts::ok();
 }
 
@@ -739,50 +636,6 @@ QolResult call_craft_show_yesno(uint32_t text_id, void* ok, void* cancel) {
 QolResult call_craft_description_set_off() {
     if (fn_ui_desc_set_off == nullptr) return not_ready();
     qol::game::craft_desc_set_off();
-    return contracts::ok();
-}
-
-QolResult read_world_map_record_count(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::world_map_record_count();
-    if (value <= 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult read_world_current_map_id(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::world_ready()) return not_ready();
-    *out = qol::game::world_current_map_id();
-    return contracts::ok();
-}
-
-QolResult read_world_map_name(int32_t map_id, const char** out) {
-    if (map_id < 0 || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out = qol::game::world_map_name(map_id);
-    return *out == nullptr ? not_ready() : contracts::ok();
-}
-
-QolResult read_world_direction(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const int value = qol::game::world_active_player_direction();
-    if (value < 0) return not_ready();
-    *out = value;
-    return contracts::ok();
-}
-
-QolResult read_world_money(int64_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    if (!qol::game::world_money_ready()) return not_ready();
-    *out = qol::game::world_money();
-    return contracts::ok();
-}
-
-QolResult read_world_tutorial_state(int32_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    *out = tutorial_state();
     return contracts::ok();
 }
 
@@ -1355,9 +1208,8 @@ contracts::QolGameHost make_game_host() {
     host.target = {&game_query_variant, &game_has_capability, &game_symbol_available,
                    &game_warehouse_companion_file_state};
     host.thread = {&game_is_main_thread, &game_frame_count};
-    host.read.character = {&read_char_type, &read_char_active, &read_char_party};
-    host.read.item = {&read_item_category, &read_item_jewel, &read_item_ability};
-    host.read.world = {&read_world_position, &read_world_state};
+    host.read.character = {&read_char_party};
+    host.read.item = {&read_item_ability};
     host.read.craft = {&read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
                        &read_craft_selected_index, &read_craft_selected_item,
                        &read_craft_stuff_item, &read_craft_category_count,
@@ -1369,25 +1221,21 @@ contracts::QolGameHost make_game_host() {
     host.write.craft = {&write_craft_stuff_need, &write_craft_stuff_item,
                         &write_craft_target_item, &write_craft_cost_zero};
     host.read_only.character = {
-        &read_char_type, &read_char_active, &read_char_party, &read_char_party_member,
+        &read_char_party, &read_char_party_member,
         &read_char_summoner, &read_char_level, &read_char_merc_slot,
         &read_char_can_change_equip, &read_char_menu_character, &read_char_pool_slot,
         &read_char_max_hp, &read_char_hp, &read_char_can_equip, &read_char_find_equip_slot,
         &read_char_equipped_item, &read_char_has_empty_mercenary_slot,
         &read_char_can_apply_stuff, &read_char_party_member};
     host.read_only.item = {
-        &read_item_category, &read_item_jewel, &read_item_ability, &read_item_rarity,
-        &read_item_real_equip, &read_item_equip_level, &read_item_no_sell, &read_item_dice,
-        &read_item_cumulate_count, &read_item_class_no_equip_bit,
+        &read_item_ability, &read_item_rarity, &read_item_equip_level, &read_item_dice,
+        &read_item_class_no_equip_bit,
         &read_item_equip_desc_role_type, &read_item_enchant_remaining,
         &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category,
-        &read_item_jewel_value, &read_item_jewel_attribute_type, &read_item_sell_price,
+        &read_item_jewel_value, &read_item_jewel_attribute_type,
         &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable,
         &read_item_count_encoding};
-    host.read_only.world = {&read_world_position, &read_world_state,
-                            &read_world_map_record_count, &read_world_current_map_id,
-                            &read_world_map_name, &read_world_direction, &read_world_money,
-                            &read_world_game_state_gate, &read_world_tutorial_state};
+    host.read_only.world = {&read_world_position};
     host.read_only.craft = {
         &read_craft_ui_type, &read_craft_panel_state, &read_craft_mix_type,
         &read_craft_selected_index, &read_craft_selected_item, &read_craft_stuff_item,
@@ -1403,9 +1251,8 @@ contracts::QolGameHost make_game_host() {
     host.save_call = {&call_save_free_data, &call_save_encrypt, &call_save_mark_stale};
     host.read_only.choice = {&read_choice_state_id, &read_choice_selected_index,
                              &read_choice_text_owns};
-    host.read_only.inventory = {&read_inventory_item_ref_at, &read_inventory_for_each_bag_slot,
-                                &read_inventory_physical_item_at, &read_inventory_detail_context,
-                                &read_inventory_cursor_index, &read_inventory_bag_size,
+    host.read_only.inventory = {&read_inventory_for_each_bag_slot,
+                                &read_inventory_bag_size,
                                 &read_inventory_is_empty_bag, &read_inventory_find_save_slot,
                                 &read_inventory_cursor_item, &read_inventory_detail_item};
     host.extension_bag_write.inventory = {

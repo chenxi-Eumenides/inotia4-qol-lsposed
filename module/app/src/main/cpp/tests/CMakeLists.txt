@@ -663,6 +663,9 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/game_host.cpp
     ${CPP_DIR}/game/adapter_ports/quest_port.cpp
+    ${CPP_DIR}/game/adapter_ports/world_port.cpp
+    ${CPP_DIR}/game/adapter_ports/item_port.cpp
+    ${CPP_DIR}/game/adapter_ports/character_port.cpp
     ${CPP_DIR}/game/feature/game_feature.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/infra/commands.cpp

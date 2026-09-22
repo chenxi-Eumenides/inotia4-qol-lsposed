@@ -1,4 +1,5 @@
 #include "contracts/world_facts.h"
+#include "contracts/game_ports/ports.h"
 #include "plugins/world_facts/plugin.h"
 
 #include <cstdio>
@@ -21,6 +22,8 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kWorldFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
+    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD);
 
     const auto* api = static_cast<const qol::contracts::WorldFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->state != nullptr);
