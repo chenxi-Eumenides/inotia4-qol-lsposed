@@ -24,8 +24,8 @@
 | POST | `/api/character/combat/{role}/cast_skill` | api.character | 0 | 1 | CombatController.cast | `ActionApiServiceCore.cast` → `CharacterActions.cast` | `nativeOpCast`, `nativeGetPartyJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=party` |
 | POST | `/api/character/combat/{role}/attack_target` | api.character | 0 | 1 | CombatController.attack | `ActionApiServiceCore.attack` → `CharacterActions.attack` | `nativeOpAttack`, `nativeGetPartyJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=party` |
 | POST | `/api/character/combat/{role}/stop_combat` | api.character | 0 | 1 | CombatController.stop | `ActionApiServiceCore.stopCombat` → `CharacterActions.stopCombat` | `nativeOpStopCombat`, `nativeGetPlayerJson` | `api/native/game_character.cpp`; `core/native/game_cache.cpp` | `state=player` |
-| GET | `/api/config/list` | api.config | 0 | 1 | ConfigController.list | — | — | — | `ModuleConfig.toJson()`（纯 Kotlin） |
-| POST | `/api/config/set` | api.config | 0 | 1 | ConfigController.set | `ConfigApiService.applyOnChange` | `nativeSetStackLimitEnabled`, `nativeSetMoveMergeEnabled`, `nativeSetExtensionBagEnabled`, `nativeSetCustomRecipeEnabled`, `nativeSetAutoSellEnabled`, `nativeSetApiEnabled`, `nativeSetSimpleModeEnabled`, `nativeSetPushAllEnabled`, `nativeQolLogSetDebugEnabled` | `bridge/native/gamebridge_domain_operations.cpp`; `bridge/native/gamebridge_autosell.cpp`; `bridge/native/gamebridge.cpp` | `ModuleConfig` JSON + 配置变更结果 |
+| GET | `/api/config/list` | module.config | 0 | 1 | ConfigController.list | — | — | — | `ModuleConfig.toJson()`（纯 Kotlin） |
+| POST | `/api/config/set` | module.config | 0 | 1 | ConfigController.set | `ConfigApiService.applyOnChange` | `nativeSetStackLimitEnabled`, `nativeSetMoveMergeEnabled`, `nativeSetExtensionBagEnabled`, `nativeSetCustomRecipeEnabled`, `nativeSetAutoSellEnabled`, `nativeSetApiEnabled`, `nativeSetSimpleModeEnabled`, `nativeSetPushAllEnabled`, `nativeQolLogSetDebugEnabled` | `bridge/native/gamebridge_domain_operations.cpp`; `bridge/native/gamebridge_autosell.cpp`; `bridge/native/gamebridge.cpp` | `ModuleConfig` JSON + 配置变更结果 |
 | GET | `/api/world/map/id` | api.world | 0 | 1 | CurrentMapController.id | `InfoApiServiceCore.currentMapId` → `InfoMapQueries.id` | `nativeGetMapJson` | `core/native/game_cache.cpp` | `StaticData` 地图名 |
 | GET | `/api/world/map/exits` | api.world | 0 | 1 | CurrentMapController.exits | `InfoApiServiceCore.currentMapExits` → `InfoMapQueries.exits` | `nativeGetMapJson` | `core/native/game_cache.cpp` | `StaticData.mapExits` |
 | GET | `/api/world/map/units` | api.world | 0 | 1 | CurrentMapController.units | `InfoApiServiceCore.currentMapUnits` → `InfoMapQueries.units` | `nativeGetUnitsJson` | `core/native/game_cache.cpp` | — |
@@ -33,18 +33,18 @@
 | GET | `/api/world/map/interactives` | api.world | 0 | 1 | CurrentMapController.interactives | `InfoApiServiceCore.currentMapInteractives` → `InfoMapQueries.interactives` | `nativeGetInteractivesJson` | `core/native/game_cache.cpp` | — |
 | GET | `/api/world/map/drops` | api.world | 0 | 1 | CurrentMapController.drops | `InfoApiServiceCore.currentMapDrops` → `InfoMapQueries.drops` | `nativeGetDropsJson` | `core/native/game_cache.cpp` | — |
 | GET | `/api/world/map/distance` | api.world | 0 | 1 | CurrentMapController.distance | `InfoApiServiceCore.currentMapDistance` → `InfoMapQueries.distance` | `nativeDistanceJson` | `api/native/game_world.cpp` | — |
-| GET | `/api/world/maps/list` | api.world | 0 | 1 | DataController.mapList | — | — | — | `StaticData` MAPINFOBASE |
-| GET | `/api/world/maps/{map_id}` | api.world | 0 | 1 | DataController.mapDetail | — | — | — | `StaticData` MAPINFOBASE |
-| GET | `/api/world/maps/{map_id}/tiles` | api.world | 0 | 1 | DataController.mapTiles | — | — | — | `StaticData` maps/tiles.json |
-| GET | `/api/world/maps/{map_id}/exits` | api.world | 0 | 1 | DataController.mapExits | — | — | — | `StaticData.mapExits` |
-| GET | `/api/system/tables` | api.system | 0 | 1 | DataController.list | — | — | — | `StaticData` manifest.json |
-| GET | `/api/system/tables/{table}` | api.system | 0 | 1 | DataController.table | — | — | — | `StaticData` 表文件 |
-| GET | `/api/system/tables/{table}/search` | api.system | 0 | 1 | DataController.search | — | — | — | `StaticData` 表文件 + Kotlin 搜索 |
-| GET | `/api/system/tables/{table}/download` | api.system | 0 | 1 | DataController.download | — | — | — | 占位，纯 Kotlin `not implemented` |
-| GET | `/api/system/tables/story-events` | api.system | 0 | 1 | DataController.events | — | — | — | `StaticData` reverse/events.json |
-| GET | `/api/system/tables/text` | api.system | 0 | 1 | DataController.text | — | — | — | `StaticData` text/{lang}.json |
-| GET | `/api/system/help` | api.system | 0 | 1 | DataController.help | — | — | — | 占位，纯 Kotlin `not implemented` |
-| GET | `/api/system/download` | api.system | 0 | 1 | DataController.downloadAll | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/world/maps/list` | static.data | 0 | 1 | DataController.mapList | — | — | — | `StaticData` MAPINFOBASE |
+| GET | `/api/world/maps/{map_id}` | static.data | 0 | 1 | DataController.mapDetail | — | — | — | `StaticData` MAPINFOBASE |
+| GET | `/api/world/maps/{map_id}/tiles` | static.data | 0 | 1 | DataController.mapTiles | — | — | — | `StaticData` maps/tiles.json |
+| GET | `/api/world/maps/{map_id}/exits` | static.data | 0 | 1 | DataController.mapExits | — | — | — | `StaticData.mapExits` |
+| GET | `/api/system/tables` | static.data | 0 | 1 | DataController.list | — | — | — | `StaticData` manifest.json |
+| GET | `/api/system/tables/{table}` | static.data | 0 | 1 | DataController.table | — | — | — | `StaticData` 表文件 |
+| GET | `/api/system/tables/{table}/search` | static.data | 0 | 1 | DataController.search | — | — | — | `StaticData` 表文件 + Kotlin 搜索 |
+| GET | `/api/system/tables/{table}/download` | static.data | 0 | 1 | DataController.download | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/system/tables/story-events` | static.data | 0 | 1 | DataController.events | — | — | — | `StaticData` reverse/events.json |
+| GET | `/api/system/tables/text` | static.data | 0 | 1 | DataController.text | — | — | — | `StaticData` text/{lang}.json |
+| GET | `/api/system/help` | static.data | 0 | 1 | DataController.help | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/system/download` | static.data | 0 | 1 | DataController.downloadAll | — | — | — | 占位，纯 Kotlin `not implemented` |
 | GET | `/api/debug/ui` | api.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `api/native/game_ui.cpp` | — |
 | GET | `/api/debug/path` | api.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `api/native/game_world.cpp` | — |
 | GET | `/api/debug/item/raw` | api.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `api/native/game_inventory.cpp` | — |
@@ -159,7 +159,7 @@
 ## 汇总
 
 - 路由总数：**143**。
-- owner 计数：`api.character` **42**、`api.item` **21**、`api.world` **16**、`api.system` **13**、`api.ui` **9**、`extension_bag` **8**、`api.quest` **8**、`api.save` **7**、`core.api` **6**、`core.ui` **5**、`api.debug` **3**、`autosell` **2**、`api.config` **2**、`custom_recipe` **1**。
+- owner 计数：`api.character` **42**、`api.item` **21**、`api.world` **12**、`api.system` **5**、`api.ui` **9**、`extension_bag` **8**、`api.quest` **8**、`api.save` **7**、`core.api` **6**、`core.ui` **5**、`api.debug` **3**、`autosell` **2**、`custom_recipe` **1**、`static.data` **12**（Kotlin service）、`module.config` **2**（Kotlin service）。native plugin owner：`core.api`、`core.ui`、`extension_bag`、`autosell`、`custom_recipe`；其余 `api.*` 为待后续批次真实化的 legacy API label。
 - 含加工响应：**75**（列中明确标注 `StaticData`、`NameInjector`、`UiActivityTracker` 或 `state`/配置 envelope 拼装）。
 - 无 native 实现（纯 Kotlin）：**26**（配置读取、静态数据读取、占位端点与未实现 quest id；`/api/config/set` 不计入此项，因为它会经 `ConfigApiService` 下发 native 配置）。
 

@@ -377,6 +377,7 @@ def main() -> int:
         pass_n += verdict == "pass"
         warn_n += verdict == "warn"
         fail_n += verdict == "fail"
+        summary_limit = 20000 if route["p"] == "/api/system/routes" else 400
         rec = {
             "path": route["p"],
             "method": route["m"],
@@ -385,7 +386,7 @@ def main() -> int:
             "ok": resp["status"] == 200,
             "verdict": verdict,
             "reason": checks["reason"] or route.get("note", ""),
-            "body": body_summary(resp["body"]),
+            "body": body_summary(resp["body"], summary_limit),
             "error": resp["error"],
         }
         results.append(rec)
