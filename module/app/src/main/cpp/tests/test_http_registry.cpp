@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "contracts/http.h"
 
@@ -70,6 +71,9 @@ void test_lease_and_deactivation() {
     CHECK(api.lease_leave(lease).ok == 0);
     const HttpRoute* found = nullptr;
     CHECK(api.find(HttpMethod::kGet, "/api/a", &found).ok != 0);
+    const std::string inactive_routes = qol::host::host_http_routes_json();
+    CHECK(inactive_routes.find("\"ok\":false") != std::string::npos);
+    CHECK(inactive_routes.find("http registry inactive") != std::string::npos);
     CHECK(api.lease_leave(lease).ok != 0);
 
     const HttpRoute route_b = route(HttpMethod::kPost, "/api/b", "owner_b", 0, 1);

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""P0 验收基建：118 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
+"""阶段 5 验收基建：143 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
 
 用法：
 python3 scripts/verification/smoke_all.py [base_url] [output_json]
 python3 scripts/verification/smoke_all.py                      # 默认 http://127.0.0.1:8088
 python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 smoke_local.json
 
-路由清单从 module/app/src/main/java/com/inotia4/qol/controller/*.kt 的
-@GetMapping/@PostMapping 注解提取（118 条），路径模板参数 {role} {id} {slot} 等
-按各 controller 参数语义写死合理默认值。
+路由探测清单与 native routes.inc 的 143 条冻结路由保持一致；路径模板参数
+{role} {id} {slot} 等按各 controller 参数语义写死合理默认值。
 
 断言（每条路由）：
   ① 可达：无连接类异常（URLError/超时/socket 错误）
@@ -24,6 +23,7 @@ python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 smoke_local.json
 from __future__ import annotations
 
 import json
+import re
 import socket
 import sys
 import time
@@ -33,7 +33,8 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_BASE = "http://127.0.0.1:8088"
-DEFAULT_OUT = Path(__file__).parent / "smoke_baseline_v0.5.43.json"
+DEFAULT_OUT = Path(__file__).parent / "smoke_baseline_v0.7.13.json"
+ROUTE_REGISTRY = Path(__file__).resolve().parents[2] / "module/app/src/main/cpp/plugins/core.api/routes.inc"
 
 # 路径变量默认值（语义见各 controller @PathVariable）
 PATH_VARS = {
@@ -48,9 +49,13 @@ PATH_VARS = {
 
 # 缺参 body：让 controller 走参数校验拒绝路径（{"ok":false,"error":"... required"}）
 MISSING = "{}"  # 对象字面量，用于危险写端点
+BAD_JSON = "{bad"  # 让带 body 的调试/备份端点停在参数解析，避免产生副作用
 
-# 118 条路由清单：method / path 模板 / query / body / 备注
+# 143 条路由清单：method / path 模板 / query / body / 备注
 ROUTES = [
+    # ---- AutoSellFeatureController (2) ----
+    {"m": "GET", "p": "/api/feature/autosell/config", "note": "读自动出售配置"},
+    {"m": "POST", "p": "/api/feature/autosell/config", "body": BAD_JSON, "note": "参数校验:避免修改配置"},
     # ---- CharacterController (10) ----
     {"m": "POST", "p": "/api/character/grow/add_skill", "body": MISSING, "note": "危险:消耗技能点,缺 action_id"},
     {"m": "POST", "p": "/api/character/grow/{role}/add_stat", "body": MISSING, "note": "危险:永久加点,缺 attrs"},
@@ -63,11 +68,11 @@ ROUTES = [
     {"m": "POST", "p": "/api/op/character/{role}/set_attr", "body": MISSING, "note": "危险:改属性,缺 stats"},
     {"m": "POST", "p": "/api/op/inventory/add", "body": MISSING, "note": "危险:加道具,缺 category"},
     # ---- CombatController (6) ----
-    {"m": "POST", "p": "/api/character/combat/{role}/set_auto_attack", "body": '{"on":true}', "note": "运行时:开自动攻击"},
-    {"m": "POST", "p": "/api/character/combat/{role}/set_skill_usage", "body": "{}", "note": "占位:not implemented"},
-    {"m": "POST", "p": "/api/character/combat/switch_player", "body": '{"slot":0}', "note": "运行时:切换战斗角色"},
-    {"m": "POST", "p": "/api/character/combat/{role}/cast_skill", "body": '{"action_id":1}', "note": "运行时:释放技能"},
-    {"m": "POST", "p": "/api/character/combat/{role}/attack_target", "body": '{"target_slot":0}', "note": "运行时:攻击目标"},
+    {"m": "POST", "p": "/api/character/combat/{role}/set_auto_attack", "body": BAD_JSON, "note": "参数校验:避免改变战斗状态"},
+    {"m": "POST", "p": "/api/character/combat/{role}/set_skill_usage", "body": BAD_JSON, "note": "占位:not implemented"},
+    {"m": "POST", "p": "/api/character/combat/switch_player", "body": BAD_JSON, "note": "参数校验:避免切换战斗角色"},
+    {"m": "POST", "p": "/api/character/combat/{role}/cast_skill", "body": BAD_JSON, "note": "参数校验:避免释放技能"},
+    {"m": "POST", "p": "/api/character/combat/{role}/attack_target", "body": BAD_JSON, "note": "参数校验:避免攻击目标"},
     {"m": "POST", "p": "/api/character/combat/{role}/stop_combat", "body": None, "note": "运行时:停止战斗"},
     # ---- ConfigController (2) ----
     {"m": "GET", "p": "/api/config/list", "note": "读配置"},
@@ -84,6 +89,7 @@ ROUTES = [
     {"m": "GET", "p": "/api/world/maps/list"},
     {"m": "GET", "p": "/api/world/maps/{map_id}"},
     {"m": "GET", "p": "/api/world/maps/{map_id}/tiles"},
+    {"m": "GET", "p": "/api/world/maps/{map_id}/exits"},
     {"m": "GET", "p": "/api/system/tables"},
     {"m": "GET", "p": "/api/system/tables/{table}"},
     {"m": "GET", "p": "/api/system/tables/{table}/search", "query": {"q": "test"}},
@@ -95,6 +101,15 @@ ROUTES = [
     # ---- DebugController (2) ----
     {"m": "GET", "p": "/api/debug/ui"},
     {"m": "GET", "p": "/api/debug/path", "query": {"tx": 0, "ty": 0}},
+    {"m": "GET", "p": "/api/debug/item/raw", "query": {"bag": 0, "slot": 0}},
+    {"m": "GET", "p": "/api/debug/extension_bag/status", "note": "扩展背包调试状态"},
+    {"m": "POST", "p": "/api/debug/extension_bag/enter_view", "body": BAD_JSON, "note": "参数校验:避免改变视图"},
+    {"m": "POST", "p": "/api/debug/extension_bag/exit_view", "note": "扩展背包退出视图"},
+    {"m": "POST", "p": "/api/debug/extension_bag/unequip", "body": BAD_JSON, "note": "参数校验:避免卸下装备"},
+    {"m": "POST", "p": "/api/debug/extension_bag/select_bag", "body": BAD_JSON, "note": "参数校验:避免切换袋"},
+    {"m": "POST", "p": "/api/debug/extension_bag/click_item", "body": BAD_JSON, "note": "参数校验:避免点击物品"},
+    {"m": "POST", "p": "/api/debug/extension_bag/equip", "body": BAD_JSON, "note": "参数校验:避免装备物品"},
+    {"m": "POST", "p": "/api/debug/extension_bag/item", "body": BAD_JSON, "note": "参数校验:避免构造物品"},
     # ---- EventsController (1) ----
     {"m": "GET", "p": "/api/system/events", "note": "大响应(~11MB),since 可选不带"},
     # ---- GameController (4) ----
@@ -104,17 +119,22 @@ ROUTES = [
     {"m": "GET", "p": "/api/system/game_frame"},
     # ---- HealthController (1) ----
     {"m": "GET", "p": "/api/health"},
+    # ---- SystemFeatureController (4) + core.api route diagnostics (1) ----
+    {"m": "GET", "p": "/api/system/features"},
+    {"m": "GET", "p": "/api/system/resources"},
+    {"m": "GET", "p": "/api/system/tickets/{id}"},
+    {"m": "GET", "p": "/api/system/routes"},
     # ---- InventoryActionController (10) ----
-    {"m": "POST", "p": "/api/item/inventory/use_item", "body": '{"bag":0,"slot":0}', "note": "运行时:使用物品"},
+    {"m": "POST", "p": "/api/item/inventory/use_item", "body": BAD_JSON, "note": "参数校验:避免使用物品"},
     {"m": "POST", "p": "/api/item/inventory/accept_dice", "note": "运行时:接受骰子"},
     {"m": "POST", "p": "/api/item/inventory/reject_dice", "note": "运行时:拒绝骰子"},
-    {"m": "POST", "p": "/api/item/inventory/discard_item", "body": '{"bag":0,"slot":0}', "note": "危险:丢弃物品"},
-    {"m": "POST", "p": "/api/item/inventory/sell_item", "body": '{"bag":0,"slot":0}', "note": "危险:出售物品"},
-    {"m": "POST", "p": "/api/item/inventory/move_item", "body": '{"bag":0,"slot":0,"count":1,"to_bag":0,"to_slot":1}', "note": "危险:移动物品"},
-    {"m": "POST", "p": "/api/item/inventory/{role}/put_jewel", "body": '{"bag":0,"slot":0,"equip_slot":0}', "note": "危险:嵌宝石"},
-    {"m": "POST", "p": "/api/item/inventory/{role}/enchant", "body": '{"bag":0,"slot":0,"equip_slot":0}', "note": "危险:附魔"},
-    {"m": "POST", "p": "/api/item/inventory/{role}/equip_item", "body": '{"bag":0,"slot":0}', "note": "危险:装备"},
-    {"m": "POST", "p": "/api/item/inventory/{role}/unequip_item", "body": '{"slot":0}', "note": "危险:卸下装备"},
+    {"m": "POST", "p": "/api/item/inventory/discard_item", "body": BAD_JSON, "note": "参数校验:避免丢弃物品"},
+    {"m": "POST", "p": "/api/item/inventory/sell_item", "body": BAD_JSON, "note": "参数校验:避免出售物品"},
+    {"m": "POST", "p": "/api/item/inventory/move_item", "body": BAD_JSON, "note": "参数校验:避免移动物品"},
+    {"m": "POST", "p": "/api/item/inventory/{role}/put_jewel", "body": BAD_JSON, "note": "参数校验:避免嵌宝石"},
+    {"m": "POST", "p": "/api/item/inventory/{role}/enchant", "body": BAD_JSON, "note": "参数校验:避免附魔"},
+    {"m": "POST", "p": "/api/item/inventory/{role}/equip_item", "body": BAD_JSON, "note": "参数校验:避免装备"},
+    {"m": "POST", "p": "/api/item/inventory/{role}/unequip_item", "body": BAD_JSON, "note": "参数校验:避免卸下装备"},
     # ---- InventoryController (5) ----
     {"m": "GET", "p": "/api/item/inventory"},
     {"m": "GET", "p": "/api/item/inventory/money"},
@@ -126,8 +146,8 @@ ROUTES = [
     {"m": "GET", "p": "/api/character/mercenary/list"},
     {"m": "GET", "p": "/api/character/mercenary/{slot}"},
     # ---- MovementController (4) ----
-    {"m": "POST", "p": "/api/world/movement/move_to", "body": '{"x":0,"y":0}', "note": "运行时:移动角色"},
-    {"m": "POST", "p": "/api/world/movement/walk_dir", "body": '{"direction":0}', "note": "运行时:走一步"},
+    {"m": "POST", "p": "/api/world/movement/move_to", "body": BAD_JSON, "note": "参数校验:避免移动角色"},
+    {"m": "POST", "p": "/api/world/movement/walk_dir", "body": BAD_JSON, "note": "参数校验:避免走一步"},
     {"m": "POST", "p": "/api/world/movement/stop_move", "note": "运行时:停止移动"},
     {"m": "POST", "p": "/api/world/movement/interact_with", "note": "运行时:交互键"},
     # ---- NpcController (2) ----
@@ -149,11 +169,12 @@ ROUTES = [
     {"m": "POST", "p": "/api/op/combat/{role}/revive", "note": "占位"},
     {"m": "POST", "p": "/api/op/combat/{role}/hate", "note": "占位"},
     {"m": "POST", "p": "/api/op/movement/teleport", "note": "占位"},
+    {"m": "POST", "p": "/api/op/features/lifecycle", "body": MISSING, "note": "危险:功能生命周期,缺 id/action"},
     # ---- PartyActionController (4) ----
-    {"m": "POST", "p": "/api/character/party/include", "body": '{"mercenary_slot":0}', "note": "危险:入队佣兵"},
-    {"m": "POST", "p": "/api/character/party/exclude", "body": '{"mercenary_slot":0}', "note": "危险:离队佣兵"},
-    {"m": "POST", "p": "/api/character/party/discharge", "body": '{"mercenary_slot":0}', "note": "危险:解散佣兵"},
-    {"m": "POST", "p": "/api/character/party/withdraw", "body": '{"mercenary_slot":0,"equip_slot":0}', "note": "危险:取回装备"},
+    {"m": "POST", "p": "/api/character/party/include", "body": BAD_JSON, "note": "参数校验:避免入队佣兵"},
+    {"m": "POST", "p": "/api/character/party/exclude", "body": BAD_JSON, "note": "参数校验:避免离队佣兵"},
+    {"m": "POST", "p": "/api/character/party/discharge", "body": BAD_JSON, "note": "参数校验:避免解散佣兵"},
+    {"m": "POST", "p": "/api/character/party/withdraw", "body": BAD_JSON, "note": "参数校验:避免取回装备"},
     # ---- PartyController (12) ----
     {"m": "GET", "p": "/api/character/party"},
     {"m": "GET", "p": "/api/character/party/count"},
@@ -179,19 +200,47 @@ ROUTES = [
     {"m": "POST", "p": "/api/system/save", "note": "写盘保存(有益)"},
     {"m": "POST", "p": "/api/system/enter_slot", "body": MISSING, "note": "危险:切存档槽,缺 slot"},
     {"m": "POST", "p": "/api/system/create_slot", "body": MISSING, "note": "危险:建存档,缺 slot/class_idx"},
+    {"m": "POST", "p": "/api/system/backup/export", "body": BAD_JSON, "note": "参数校验:避免导出存档"},
+    {"m": "GET", "p": "/api/system/backup/list", "note": "读取备份列表"},
+    {"m": "POST", "p": "/api/system/backup/import", "body": BAD_JSON, "note": "参数校验:避免导入存档"},
+    {"m": "POST", "p": "/api/system/backup/delete", "body": BAD_JSON, "note": "参数校验:避免删除备份"},
     # ---- ShopController (2) ----
     {"m": "GET", "p": "/api/item/shop/items"},
-    {"m": "POST", "p": "/api/item/shop/buy_item", "body": '{"slot":0}', "note": "危险:购买物品"},
+    {"m": "POST", "p": "/api/item/shop/buy_item", "body": BAD_JSON, "note": "参数校验:避免购买物品"},
     # ---- UiActionController (3) ----
     {"m": "POST", "p": "/api/ui/go_main_menu", "note": "运行时:回主菜单"},
     {"m": "POST", "p": "/api/ui/close_panel", "note": "运行时:关面板"},
-    {"m": "POST", "p": "/api/ui/open_panel", "body": '{"panel":"inventory"}', "note": "运行时:开背包面板"},
+    {"m": "POST", "p": "/api/ui/open_panel", "body": BAD_JSON, "note": "参数校验:避免打开面板"},
     # ---- UiController (4) ----
     {"m": "GET", "p": "/api/ui"},
     {"m": "GET", "p": "/api/ui/screen"},
     {"m": "GET", "p": "/api/ui/panel"},
     {"m": "GET", "p": "/api/ui/dialog"},
+    # ---- core.ui settings debug routes (must remain last: may change the game UI state) ----
+    {"m": "POST", "p": "/api/debug/settings-ui/inject", "note": "调试 UI 注入"},
+    {"m": "GET", "p": "/api/debug/settings-ui/status", "note": "调试 UI 状态"},
+    {"m": "POST", "p": "/api/debug/settings-ui/open-option", "probe": False, "note": "跳过:该调试端点会改变原版选项 popup 生命周期"},
+    {"m": "POST", "p": "/api/debug/settings-ui/open-panel", "probe": False, "note": "跳过:该调试端点会改变原版设置面板生命周期"},
+    {"m": "POST", "p": "/api/debug/settings-ui/restore", "note": "调试 UI 还原"},
 ]
+
+ROUTE_PATTERN = re.compile(
+    r'QOL_HTTP_ROUTE\((kGet|kPost),\s*"([^"]+)",\s*"[^"]+",\s*[01],\s*[01]\)'
+)
+
+
+def validate_route_coverage() -> None:
+    """拒绝探测清单与 native 冻结路由表发生静默漂移。"""
+    registry_text = ROUTE_REGISTRY.read_text(encoding="utf-8")
+    registry_routes = {
+        ("GET" if method == "kGet" else "POST", path)
+        for method, path in ROUTE_PATTERN.findall(registry_text)
+    }
+    smoke_routes = {(route["m"], route["p"]) for route in ROUTES}
+    if registry_routes != smoke_routes:
+        missing = sorted(registry_routes - smoke_routes)
+        extra = sorted(smoke_routes - registry_routes)
+        raise RuntimeError(f"smoke 路由清单与 routes.inc 不一致: missing={missing}, extra={extra}")
 
 # 异常串泄漏检测（断言②）
 LEAK_MARKERS = ("java.", "NumberFormatException", "ClassCastException", "Exception")
@@ -299,12 +348,31 @@ def main() -> int:
     base = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE
     out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_OUT
 
+    try:
+        validate_route_coverage()
+    except (OSError, RuntimeError) as error:
+        print(f"路由清单校验失败: {error}", file=sys.stderr)
+        return 2
+
     print(f"smoke 全量探测开始: {base}（{len(ROUTES)} 条路由）")
     results = []
     pass_n = warn_n = fail_n = 0
     for i, route in enumerate(ROUTES, 1):
-        resp = fetch(base, route)
-        checks = check_assertions(resp["status"], resp["body"])
+        if route.get("probe") is False:
+            resp = {
+                "url": build_url(base, route),
+                "status": None,
+                "body": "",
+                "elapsed": 0.0,
+                "error": "not probed: stateful debug endpoint",
+            }
+            checks = {
+                "verdict": "warn",
+                "reason": route.get("note", "not probed"),
+            }
+        else:
+            resp = fetch(base, route)
+            checks = check_assertions(resp["status"], resp["body"])
         verdict = checks["verdict"]
         pass_n += verdict == "pass"
         warn_n += verdict == "warn"
@@ -329,8 +397,8 @@ def main() -> int:
     report = {
         "meta": {
             "project": "inotia4-qol-lsposed",
-            "phase": "P0-baseline",
-            "version": "v0.5.43",
+            "phase": "P5-B1-diagnostic-baseline",
+            "version": "v0.7.13",
             "base_url": base,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_routes": len(ROUTES),

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "contracts/game_host.h"
+#include "contracts/game_ports/item_port.h"
 
 // 游戏层：库存只读遍历与引用适配（ARCHITECTURE.md §5）。
 // 物理袋/扩展袋的底层布局和扩展背包端口均留在 game/ 与既有宿主实现内；插件只接收

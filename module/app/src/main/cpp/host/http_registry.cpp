@@ -214,6 +214,8 @@ contracts::QolHttpRegistryApi http_registry_api() {
 }
 
 std::string host_http_routes_json() {
+    if (!g_accepting) return "{\"ok\":false,\"error\":\"http registry inactive\"}";
+
     std::string out = "{\"ok\":true,\"routes\":[";
     bool first = true;
     uint32_t route_count = 0;
