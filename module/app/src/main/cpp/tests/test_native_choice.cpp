@@ -72,21 +72,24 @@ void test_address_ownership_range() {
     CHECK(!address_in_range(begin, begin, 0));
 }
 
-// 插件清单：provides `ui_choice` v1.0；2 条资源各自机制/handler/门禁正确。
+// 插件清单：provides `ui_choice` v1.0；2 条资源各自机制/handler/门禁正确；读写各一端口。
 void test_plugin_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::core_choice::plugin_descriptor();
     CHECK(std::strcmp(d.id, "core.choice") == 0);
-    CHECK(d.requires_count == 0 && d.optional_count == 0);
+    CHECK(d.requires_count == 2 && d.optional_count == 0);  // http.registry + http.dispatch
     CHECK(d.provides_count == 1);
     CHECK(std::strcmp(d.provides[0].id, qol::contracts::kUiChoiceCapabilityId) == 0);
     CHECK(d.provides[0].version.major == qol::contracts::kUiChoiceVersionMajor);
     CHECK(d.provides[0].version.minor == qol::contracts::kUiChoiceVersionMinor);
     CHECK(d.provides[0].iface != nullptr);
-    CHECK(d.port_count == 1 && d.ports != nullptr);
+    CHECK(d.port_count == 2 && d.ports != nullptr);
     CHECK(d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
     CHECK(d.ports[0].range.major == qol::contracts::kQolPortChoiceVersion.major);
     CHECK(d.ports[0].range.min_minor == qol::contracts::kQolPortChoiceVersion.minor);
+    CHECK(d.ports[1].id == qol::contracts::QolPortId::QOL_PORT_CHOICE_WRITE);
+    CHECK(d.ports[1].range.major == qol::contracts::kQolPortChoiceWriteVersion.major);
+    CHECK(d.ports[1].range.min_minor == qol::contracts::kQolPortChoiceWriteVersion.minor);
     const auto* api = static_cast<const UiChoiceApi*>(d.provides[0].iface);
     CHECK(api->open != nullptr && api->active != nullptr && api->close != nullptr);
     CHECK(!api->active());

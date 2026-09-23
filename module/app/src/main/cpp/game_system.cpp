@@ -6,6 +6,7 @@
 #include "game/access/game_access.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/state/character_http.h"
+#include "game/state/choice_http.h"
 #include "game/state/game_state.h"
 #include "game/state/quest_http.h"
 #include "game/state/save_http.h"
@@ -20,6 +21,7 @@
 #include "game_dialog.h"
 #include "game/json/game_json.h"
 #include "contracts/game_ports/save_write_port.h"
+#include "contracts/game_ports/choice_write_port.h"
 #include "contracts/game_ports/world_write_port.h"
 #include "infra/store.h"
 
@@ -856,6 +858,30 @@ int32_t build_world_write_result_json(int32_t kind, int32_t a, int32_t b, int32_
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
     return ok ? kWorldWriteOk : kWorldWriteFailed;
+}
+
+// core.choice owner 的对话写结果拼装：dialog/select 与 start_interact 迁移前均原样透传 op JSON
+// （Kotlin 平台门禁分支留在传输层，不下沉）。
+int32_t build_choice_write_result_json(int32_t kind, const char* action, int32_t index, char* out,
+                                       uint32_t capacity, uint32_t* out_size) {
+    std::string body;
+    switch (kind) {
+        case contracts::kQolChoiceWriteDialogSelect:
+            body = data_op_dialog_select(action != nullptr ? std::string(action) : std::string(),
+                                         index);
+            break;
+        case contracts::kQolChoiceWriteNpcInteract:
+            body = data_op_npc_interact();
+            break;
+        default:
+            return kChoiceWriteFailed;
+    }
+    const bool ok = body.find("\"ok\":false") == std::string::npos;
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr || body.size() > capacity) return kChoiceWriteFailed;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return ok ? kChoiceWriteOk : kChoiceWriteFailed;
 }
 
 }  // namespace qol::game

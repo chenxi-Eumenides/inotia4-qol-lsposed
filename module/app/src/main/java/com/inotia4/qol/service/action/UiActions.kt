@@ -12,14 +12,14 @@ import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
 import org.json.JSONObject
 import com.inotia4.qol.service.contract.ActionApiService
+import com.inotia4.qol.service.info.NativeHttpCommand
 
 internal object UiActions {
     fun panelClose(): String =
         LogFile.op(LogDomain.API, "POST /api/ui/close_panel", emptyMap<String, String>()) { ActionSupport.attachUi(NativeBridge.nativeOpPanelClose()) }
     fun panelOpen(panel: String): String =
         LogFile.op(LogDomain.API, "POST /api/ui/open_panel", mapOf("panel" to "$panel")) { ActionSupport.attachUi(NativeBridge.nativeOpPanelOpen(panel)) }
-    fun npcInteract(): String =
-        LogFile.op(LogDomain.API, "POST /api/ui/start_interact", emptyMap<String, String>()) { NativeBridge.nativeOpNpcInteract() }
+    fun npcInteract(): String = NativeHttpCommand.post("/api/ui/start_interact", "{}")
     fun dialogSelect(action: String, index: Int): String =
         LogFile.op(LogDomain.API, "POST /api/ui/dialog/select", mapOf("action" to "$action", "index" to "$index")) {
             val activityCheck = UiActivityTracker.check()
@@ -37,7 +37,10 @@ internal object UiActions {
                     JsonUtil.err("no such option in agreement")
                 }
             } else {
-                NativeBridge.nativeOpDialogSelect(action, index)
+                NativeHttpCommand.post(
+                    "/api/ui/dialog/select",
+                    JsonUtil.wrap("action" to action, "index" to index),
+                )
             }
         }
 }

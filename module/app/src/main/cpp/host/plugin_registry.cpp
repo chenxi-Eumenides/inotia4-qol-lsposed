@@ -37,6 +37,7 @@
 #include "game/adapter_ports/character_http_port.h"
 #include "game/adapter_ports/save_write_port.h"
 #include "game/adapter_ports/world_write_port.h"
+#include "game/adapter_ports/choice_write_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
@@ -210,6 +211,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_CHOICE_WRITE) {
+        const auto& port = qol::game::choice_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
 #else
     (void)id;
     (void)out;
@@ -272,6 +278,13 @@ bool resolve_plugin_ports(uint32_t index) {
         // 世界写端口为 core.world owner 私有：其他插件不得注入，避免绕过 owner 直接写世界态。
         if (requirement.id == contracts::QolPortId::QOL_PORT_WORLD_WRITE &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "core.world") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 对话写端口为 core.choice owner 私有：避免绕过 owner 直接写对话态。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.choice") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
