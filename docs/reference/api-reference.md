@@ -1824,6 +1824,18 @@
 - `POST /api/system/save`、`POST /api/system/enter_slot`、`POST /api/system/create_slot`（阶段 5 批 5-4 迁票据契约，批 5-6d 按裁决 A 并入同域 owner `core.save`）。`enter_slot`/`create_slot` 为转场类写：转换在逻辑帧内联执行（与同步入口共用单飞门），结果在**游戏世界态提交后**结算——结算前票据保持 `pending`（最长约 2s，超限以 `result:{"ok":false,"error":"settlement timeout"}` 失败，不提前报告 done）；`save` 不涉转场，当帧结算。参数校验不变（`slot` ∉ [0,2] → 400 `slot required (0-2)`；非法/空 body → 400 `bad request`）。原响应经票据 `result` 回取（`enter_slot` 成功示例：`{"ok":true,"state":{"money":0,"map_id":4294967295,"x":-1,"y":-1,"active_quest":0,"leader_slot":0,"party_count":0}}`，即进档完成但存档数据尚未载入时的 Player 态，与迁移前一致）；模块 sidecar 槽位生命周期与游戏操作在同一步结算，失败写入 `{"ok":false,"error":"sidecar: <status>"}`。
 - `POST /api/quest/quit_quest`（阶段 5 批 5-3；owner `quest`）。缺/负 `quest_id` → 400 `questId required`（投递前校验，与迁移前一致）；成功 `{"ok":true,"ticket":N}`，`result` 为 `{"ok":true,"state":<Player>}`；无任务 → 票据 `state=failed` 且 `result={"ok":false,"error":"quest not found"}`。
 
+**未实现占位路由**（阶段 5 批 5-6e 将 owner 归位到领域插件；业务仍未实现，调用方不应依赖）：
+- `POST /api/op/quest/accept`、`POST /api/op/quest/complete`（owner `core.quest`）→ 501 `not implemented`
+- `POST /api/op/character/{role}/skill-point`、`POST /api/op/character/{role}/skill-level`（owner `core.character`）→ 501
+- `POST /api/op/combat/{role}/heal`、`POST /api/op/combat/{role}/rest`、`POST /api/op/combat/{role}/revive`、`POST /api/op/combat/{role}/hate`（owner `core.character`）→ 501
+- `POST /api/op/inventory/set-slot`、`POST /api/op/inventory/set-equip`（owner `core.item`）→ 501
+- `POST /api/op/craft/mix-direct`（owner `core.craft`）→ 501
+- `GET /api/quest/{id}`（owner `core.quest`）→ 404 `not found`
+
+**处理器仍在 Kotlin 的路由**（owner 已归位、仅表示领域归属；实现仍为 Kotlin 传输适配，未迁 native owner）：
+- `GET /api/system/events`（owner `core.system`）：请求驱动有状态 diff（nativeGetEventsJson）。
+- `GET /api/ui`、`GET /api/ui/screen`、`GET /api/ui/panel`、`GET /api/ui/dialog`（owner `core.ui`）：依赖 Android `ActivityThread` 检测同意页，JVM-only。
+
 **调用方迁移指引**：把原先直接读取的响应体改为轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后读取 `result`（即原响应体）；`result_retained=false` 时按业务重试或接受不可得。
 ---
 
