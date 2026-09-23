@@ -1819,7 +1819,7 @@
 
 **受影响端点**：逐条迁移时在本节登记（迁移前保持原同步响应；迁移后列出，附参数校验错误码不变说明）。已迁移：
 - `POST /api/op/features/lifecycle`（P3 起即为票据语义）。
-- `POST /api/debug/extension_bag/{enter_view,exit_view,unequip,select_bag,click_item,equip,item}`（阶段 5 批 5-2 回补为主线程 owner command）。参数校验不变且仍在投递前执行（`bag` ∉ [6,10] → 400 `bag required (6-10)`；`click_item` 的 `slot` ∉ [0,15] → 400 `slot required (0-15)`；非法 body → 400 `bad request`）。原业务响应经票据 `result` 回取；业务失败（原响应含 `"ok":false`）时票据 `state=failed` 且 `result` 携带原错误体。
+- `/api/debug/extension_bag/` 下 7 条 POST 调试端点（`enter_view`、`exit_view`、`unequip`、`select_bag`、`click_item`、`equip`、`item`；阶段 5 批 5-2 回补为主线程 owner command）。参数校验不变且仍在投递前执行（`bag` ∉ [6,10] → 400 `bag required (6-10)`；`click_item` 的 `slot` ∉ [0,15] → 400 `slot required (0-15)`；非法 body → 400 `bad request`）。原业务响应经票据 `result` 回取；业务失败（原响应含 `"ok":false`）时票据 `state=failed` 且 `result` 携带原错误体。
 
 **调用方迁移指引**：把原先直接读取的响应体改为轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后读取 `result`（即原响应体）；`result_retained=false` 时按业务重试或接受不可得。
 ---
