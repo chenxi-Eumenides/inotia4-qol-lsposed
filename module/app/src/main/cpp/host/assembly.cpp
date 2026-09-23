@@ -15,24 +15,24 @@
 #include "plugins/core.ui/plugin.h"
 #include "plugins/core.api/plugin.h"
 #include "plugins/craft_ui/plugin.h"
-#include "plugins/craft_facts/plugin.h"
-#include "plugins/character_facts/plugin.h"
+#include "plugins/core.craft/plugin.h"
+#include "plugins/core.character/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
-#include "plugins/item_facts/plugin.h"
-#include "plugins/native_choice/plugin.h"
+#include "plugins/core.item/plugin.h"
+#include "plugins/core.choice/plugin.h"
 #include "plugins/push_all/plugin.h"
-#include "plugins/quest/plugin.h"
+#include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
 #include "plugins/simple_mode/plugin.h"
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
-#include "plugins/system_facts/plugin.h"
+#include "plugins/core.system/plugin.h"
 #include "plugins/text_layer/plugin.h"
 #include "plugins/world_teleport/plugin.h"
 #include "plugins/core.world/plugin.h"
-#include "plugins/save_facts/plugin.h"
+#include "plugins/core.save/plugin.h"
 #endif
 #if QOL_ENABLE_DEVICE_PROBE
 #include "plugins/device_probe_consumer/plugin.h"
@@ -72,9 +72,9 @@ using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
 constexpr PluginDescriptorFn kPluginDescriptors[] = {
 #if !QOL_KERNEL_ONLY
     &features::core_world::plugin_descriptor,
-    &features::craft_facts::plugin_descriptor,
-    &features::save_facts::plugin_descriptor,
-    &features::character_facts::plugin_descriptor,
+    &features::core_craft::plugin_descriptor,
+    &features::core_save::plugin_descriptor,
+    &features::core_character::plugin_descriptor,
     &features::attribute_quality::plugin_descriptor,
     &features::attribute_range_display::plugin_descriptor,
     &features::autosell::plugin_descriptor,
@@ -84,15 +84,15 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::custom_recipe::plugin_descriptor,
     &features::extension_bag::plugin_descriptor,
     &features::inventory_hooks::plugin_descriptor,
-    &features::item_facts::plugin_descriptor,
-    &features::native_choice::plugin_descriptor,
+    &features::core_item::plugin_descriptor,
+    &features::core_choice::plugin_descriptor,
     &features::push_all::plugin_descriptor,
-    &features::quest::plugin_descriptor,
+    &features::core_quest::plugin_descriptor,
     &features::save_backup::plugin_descriptor,
     &features::simple_mode::plugin_descriptor,
     &features::special_equip::plugin_descriptor,
     &features::stack_limit::plugin_descriptor,
-    &features::system_facts::plugin_descriptor,
+    &features::core_system::plugin_descriptor,
     &features::text_layer::plugin_descriptor,
     &features::world_teleport::plugin_descriptor,
 #endif

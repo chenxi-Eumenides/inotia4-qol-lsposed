@@ -1,6 +1,6 @@
 #include "contracts/item_facts.h"
 #include "contracts/game_ports/ports.h"
-#include "plugins/item_facts/plugin.h"
+#include "plugins/core.item/plugin.h"
 
 #include <cstdio>
 #include <cstring>
@@ -14,8 +14,8 @@ static int g_fail = 0;
 } while (0)
 
 int main() {
-    const auto& descriptor = qol::features::item_facts::plugin_descriptor();
-    CHECK(std::strcmp(descriptor.id, "item_facts") == 0);
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
+    CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
     CHECK(descriptor.optional_count == 0);

@@ -38,9 +38,9 @@ add_executable(host_tests
 
 add_executable(item_facts_plugin_tests
     test_item_facts_plugin.cpp
-    ${CPP_DIR}/plugins/item_facts/plugin.cpp
-    ${CPP_DIR}/plugins/item_facts/json_lite.cpp
-    ${CPP_DIR}/plugins/item_facts/response.cpp
+    ${CPP_DIR}/plugins/core.item/plugin.cpp
+    ${CPP_DIR}/plugins/core.item/json_lite.cpp
+    ${CPP_DIR}/plugins/core.item/response.cpp
 )
 target_include_directories(item_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -51,7 +51,7 @@ add_test(NAME item_facts_plugin_tests COMMAND item_facts_plugin_tests)
 
 add_executable(save_facts_plugin_tests
     test_save_facts_plugin.cpp
-    ${CPP_DIR}/plugins/save_facts/plugin.cpp
+    ${CPP_DIR}/plugins/core.save/plugin.cpp
 )
 target_include_directories(save_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -62,7 +62,7 @@ add_test(NAME save_facts_plugin_tests COMMAND save_facts_plugin_tests)
 
 add_executable(craft_facts_plugin_tests
     test_craft_facts_plugin.cpp
-    ${CPP_DIR}/plugins/craft_facts/plugin.cpp
+    ${CPP_DIR}/plugins/core.craft/plugin.cpp
 )
 target_include_directories(craft_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -214,7 +214,7 @@ add_test(NAME save_warehouse_validate_tests COMMAND save_warehouse_validate_test
 # 插件清单（ui_choice 提供 + 2 条声明式资源）。feature.cpp 运行时实现以桩替代。
 add_executable(native_choice_tests
     test_native_choice.cpp
-    ${CPP_DIR}/plugins/native_choice/plugin.cpp
+    ${CPP_DIR}/plugins/core.choice/plugin.cpp
 )
 target_include_directories(native_choice_tests PRIVATE
     ${CPP_DIR}
@@ -636,8 +636,8 @@ add_test(NAME text_layer_plugin_tests COMMAND text_layer_plugin_tests)
 # Quest scheduler 生命周期与撤销门禁 host 测试。
 add_executable(quest_lifecycle_tests
     test_quest_lifecycle.cpp
-    ${CPP_DIR}/plugins/quest/plugin.cpp
-    ${CPP_DIR}/plugins/quest/feature.cpp
+    ${CPP_DIR}/plugins/core.quest/plugin.cpp
+    ${CPP_DIR}/plugins/core.quest/feature.cpp
     ${CPP_DIR}/infra/scheduler.cpp
     ${CPP_DIR}/infra/runtime.cpp
     ${CPP_DIR}/infra/command_queue.cpp
@@ -878,8 +878,8 @@ add_test(NAME world_facts_dispatch_tests COMMAND world_facts_dispatch_tests)
 
 add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp
-    ${CPP_DIR}/plugins/character_facts/plugin.cpp
-    ${CPP_DIR}/plugins/character_facts/json_slice.cpp
+    ${CPP_DIR}/plugins/core.character/plugin.cpp
+    ${CPP_DIR}/plugins/core.character/json_slice.cpp
 )
 target_include_directories(character_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -891,9 +891,9 @@ add_test(NAME character_facts_plugin_tests COMMAND character_facts_plugin_tests)
 # P5-4-2：item_facts 6 条 /api/item/* GET query handler 的注册/快照/富化/注销接缝。
 add_executable(item_facts_dispatch_tests
     test_item_facts_dispatch.cpp
-    ${CPP_DIR}/plugins/item_facts/plugin.cpp
-    ${CPP_DIR}/plugins/item_facts/json_lite.cpp
-    ${CPP_DIR}/plugins/item_facts/response.cpp
+    ${CPP_DIR}/plugins/core.item/plugin.cpp
+    ${CPP_DIR}/plugins/core.item/json_lite.cpp
+    ${CPP_DIR}/plugins/core.item/response.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )
@@ -908,8 +908,8 @@ add_test(NAME item_facts_dispatch_tests COMMAND item_facts_dispatch_tests)
 # P5-4-2：quest 4 条 /api/quest* GET query handler 的注册/快照/片段拼接/注销接缝。
 add_executable(quest_dispatch_tests
     test_quest_dispatch.cpp
-    ${CPP_DIR}/plugins/quest/plugin.cpp
-    ${CPP_DIR}/plugins/quest/feature.cpp
+    ${CPP_DIR}/plugins/core.quest/plugin.cpp
+    ${CPP_DIR}/plugins/core.quest/feature.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )
@@ -925,8 +925,8 @@ add_test(NAME quest_dispatch_tests COMMAND quest_dispatch_tests)
 # 非 world 降级/注销接缝。
 add_executable(character_facts_dispatch_tests
     test_character_facts_dispatch.cpp
-    ${CPP_DIR}/plugins/character_facts/plugin.cpp
-    ${CPP_DIR}/plugins/character_facts/json_slice.cpp
+    ${CPP_DIR}/plugins/core.character/plugin.cpp
+    ${CPP_DIR}/plugins/core.character/json_slice.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )
@@ -942,7 +942,7 @@ add_test(NAME character_facts_dispatch_tests COMMAND character_facts_dispatch_te
 # 注册/快照/身份降级/注销接缝。
 add_executable(system_facts_dispatch_tests
     test_system_facts_dispatch.cpp
-    ${CPP_DIR}/plugins/system_facts/plugin.cpp
+    ${CPP_DIR}/plugins/core.system/plugin.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )

@@ -5,7 +5,7 @@ import com.inotia4.qol.util.JsonUtil
 
 /** Thin system/debug query endpoints kept out of the aggregate information service. */
 internal object InfoSystemQueries {
-    // system 快照查询已迁 owner（system_facts）：Kotlin 只做 nativeHttpDispatch 透传，
+    // system 快照查询已迁 owner（core.system）：Kotlin 只做 nativeHttpDispatch 透传，
     // 成功响应（含快照重排/名称注入/info 拼装）完全由 native owner 生成。
     fun snapshot(): String = NativeHttpQuery.get("/api/system/snapshot")
     fun game(): String = NativeHttpQuery.get("/api/system/game")

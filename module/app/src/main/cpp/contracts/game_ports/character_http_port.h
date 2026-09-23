@@ -7,7 +7,7 @@
 
 namespace qol::contracts {
 
-// character_facts owner 读取的响应体类别。body_json 由游戏主线程的帧任务调用，
+// core.character owner 读取的响应体类别。body_json 由游戏主线程的帧任务调用，
 // 结果发布为插件私有快照后 HTTP handler 只读；HTTP 线程不直接调用。
 enum class QolCharacterHttpJsonKind : int32_t {
     kPlayer = 0,        // 原生 player JSON（party/count 与 leader_slot 用）

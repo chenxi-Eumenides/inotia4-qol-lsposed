@@ -383,7 +383,7 @@ std::string build_quest_quit_result_json(int32_t quest_id) {
     return "{\"ok\":true,\"state\":" + build_player_json() + "}";
 }
 
-// ---- character_facts owner 响应体拼装（批 4-4）----
+// ---- core.character owner 响应体拼装（批 4-4）----
 //
 // 复刻迁移前 Kotlin NameInjectorCore 对 character 域原生 JSON 的加工：
 // - party 成员：injectTypeName/injectClassName/injectEquipmentNames + restructureRole

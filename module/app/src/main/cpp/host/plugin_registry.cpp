@@ -232,7 +232,7 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE &&
             (plugin.id == nullptr ||
-             (std::strcmp(plugin.id, "native_choice") != 0 &&
+             (std::strcmp(plugin.id, "core.choice") != 0 &&
               std::strcmp(plugin.id, "world_teleport") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
@@ -245,7 +245,7 @@ bool resolve_plugin_ports(uint32_t index) {
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CRAFT &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "craft_facts") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.craft") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

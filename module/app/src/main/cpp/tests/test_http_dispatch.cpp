@@ -276,8 +276,8 @@ void test_op_gate() {
     CHECK(output.status == 200);
 
     // 非 gated 路由不受 op 状态影响。
-    setup_post_route("/api/quest/quit_quest", "quest", 0);
-    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/quest/quit_quest", "quest",
+    setup_post_route("/api/quest/quit_quest", "core.quest", 0);
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/quest/quit_quest", "core.quest",
                                     &command_handler, nullptr).ok == 0);
     qol::host::http_dispatch_set_op_enabled(false);
     output = response(storage, sizeof(storage));

@@ -7,7 +7,7 @@
 
 namespace qol::contracts {
 
-// system_facts owner 读取的响应体类别。body_json 由游戏主线程的帧任务调用，
+// core.system owner 读取的响应体类别。body_json 由游戏主线程的帧任务调用，
 // 结果发布为插件私有快照后 HTTP handler 只读；HTTP 线程不直接调用。
 enum class QolSystemJsonKind : int32_t {
     kSnapshot = 0,  // GET /api/system/snapshot（原生快照 + 迁移前 Kotlin 重排/名称注入）

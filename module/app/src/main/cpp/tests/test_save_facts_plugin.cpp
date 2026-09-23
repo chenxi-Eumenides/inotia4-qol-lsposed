@@ -1,6 +1,6 @@
 #include "contracts/save_facts.h"
 #include "contracts/game_ports/ports.h"
-#include "plugins/save_facts/plugin.h"
+#include "plugins/core.save/plugin.h"
 
 #include <cstdio>
 #include <cstring>
@@ -14,8 +14,8 @@ static int g_fail = 0;
 } while (0)
 
 int main() {
-    const auto& descriptor = qol::features::save_facts::plugin_descriptor();
-    CHECK(std::strcmp(descriptor.id, "save_facts") == 0);
+    const auto& descriptor = qol::features::core_save::plugin_descriptor();
+    CHECK(std::strcmp(descriptor.id, "core.save") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 0);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);

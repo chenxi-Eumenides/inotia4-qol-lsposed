@@ -12,7 +12,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
-#include "plugins/item_facts/plugin.h"
+#include "plugins/core.item/plugin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -169,12 +169,12 @@ qol::contracts::QolHostSdk make_sdk() {
 }
 
 const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory", "item_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/money", "item_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/items", "item_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/info", "item_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/{slot}", "item_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/shop/items", "item_facts", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/item/inventory", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/money", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/items", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/info", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/{slot}", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/item/shop/items", "core.item", 0, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -184,7 +184,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.sdk_minor = qol::contracts::kHostSdkMinor;
     ctx.sdk = sdk;
     ctx.game = nullptr;
-    ctx.plugin_id = "item_facts";
+    ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
     ctx.port_count = 1;
     return ctx;
@@ -250,7 +250,7 @@ void test_lifecycle_and_responses() {
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
-    const auto& descriptor = qol::features::item_facts::plugin_descriptor();
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
@@ -306,7 +306,7 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/item/inventory/money") == "{\"money\":72503}");
 
     // owner 停用：handler 墓碑，请求返回明确停用错误。
-    CHECK(qol::host::http_dispatch_api().unregister_owner("item_facts").ok == kQolOk);
+    CHECK(qol::host::http_dispatch_api().unregister_owner("core.item").ok == kQolOk);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     (void)dispatch_get("/api/item/inventory", &status);
@@ -325,7 +325,7 @@ void test_static_not_ready_holds_snapshot() {
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
-    const auto& descriptor = qol::features::item_facts::plugin_descriptor();
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,

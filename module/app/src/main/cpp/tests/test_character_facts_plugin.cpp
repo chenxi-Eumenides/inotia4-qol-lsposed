@@ -1,7 +1,7 @@
 #include "contracts/character_facts.h"
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_port.h"
-#include "plugins/character_facts/plugin.h"
+#include "plugins/core.character/plugin.h"
 
 #include <cstdio>
 #include <cstring>
@@ -38,8 +38,8 @@ QolResult fake_body_json(int32_t, char*, uint32_t, uint32_t*) {
 }
 
 int main() {
-    const auto& descriptor = qol::features::character_facts::plugin_descriptor();
-    CHECK(std::strcmp(descriptor.id, "character_facts") == 0);
+    const auto& descriptor = qol::features::core_character::plugin_descriptor();
+    CHECK(std::strcmp(descriptor.id, "core.character") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 2 && descriptor.optional_count == 0);
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
@@ -68,7 +68,7 @@ int main() {
         qol::contracts::kHostSdkMinor,
         &sdk,
         nullptr,
-        "character_facts",
+        "core.character",
         ports,
         2,
     };

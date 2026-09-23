@@ -33,8 +33,8 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/autosell/plugin.cpp
     plugins/autosell/store.cpp
     plugins/autosell/ui/panel.cpp
-    plugins/quest/feature.cpp
-    plugins/quest/plugin.cpp
+    plugins/core.quest/feature.cpp
+    plugins/core.quest/plugin.cpp
     plugins/special_equip/rules.cpp
     plugins/special_equip/feature.cpp
     plugins/special_equip/plugin.cpp
@@ -48,7 +48,7 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/text_layer/plugin.cpp
     plugins/craft_ui/feature.cpp
     plugins/craft_ui/plugin.cpp
-    plugins/craft_facts/plugin.cpp
+    plugins/core.craft/plugin.cpp
     plugins/push_all/rules.cpp
     plugins/push_all/feature.cpp
     plugins/push_all/plugin.cpp
@@ -56,8 +56,8 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/stack_limit/plugin.cpp
     plugins/save_backup/plugin.cpp
     plugins/world_teleport/plugin.cpp
-    plugins/native_choice/feature.cpp
-    plugins/native_choice/plugin.cpp
+    plugins/core.choice/feature.cpp
+    plugins/core.choice/plugin.cpp
     plugins/core.ui/plugin.cpp
     plugins/core.ui/feature.cpp
     plugins/core.ui/ui_components.cpp

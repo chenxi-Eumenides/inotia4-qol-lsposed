@@ -10,8 +10,8 @@
 #include "infra/runtime.h"
 #include "infra/commands.h"
 #include "infra/scheduler.h"
-#include "plugins/quest/feature.h"
-#include "plugins/quest/plugin.h"
+#include "plugins/core.quest/feature.h"
+#include "plugins/core.quest/plugin.h"
 
 namespace {
 
@@ -165,8 +165,8 @@ int main() {
     const void* ports[] = {&kQuestPort};
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
                                       qol::contracts::kHostSdkMajor,
-                                      qol::contracts::kHostSdkMinor, &sdk, &game, "quest", ports, 1};
-    const auto& descriptor = qol::features::quest::plugin_descriptor();
+                                      qol::contracts::kHostSdkMinor, &sdk, &game, "core.quest", ports, 1};
+    const auto& descriptor = qol::features::core_quest::plugin_descriptor();
 
     assert(descriptor.install(ctx) == 0);
     // 逻辑帧点两个常驻任务：进档重算（一次性语义）+ owner 快照节拍。
@@ -185,19 +185,19 @@ int main() {
     qol::infra::commands_drain();
     assert(g_set_state_calls == 1);
 
-    qol::features::quest::on_save_enter(nullptr);
+    qol::features::core_quest::on_save_enter(nullptr);
     g_frame = 4;
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
     qol::infra::commands_drain();
     assert(g_set_state_calls == 2);
 
     descriptor.on_disabled(ctx);
-    assert(!qol::features::quest::gate_enabled());
+    assert(!qol::features::core_quest::gate_enabled());
     assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 0);
     descriptor.on_enabled(ctx);
     assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 2);
     descriptor.deactivate(ctx);
-    assert(!qol::features::quest::gate_enabled());
+    assert(!qol::features::core_quest::gate_enabled());
     assert(qol::infra::scheduler_task_count(qol::infra::FramePoint::kLogicPre) == 0);
     return 0;
 }

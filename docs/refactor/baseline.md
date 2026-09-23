@@ -40,27 +40,27 @@
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 17 |
-| `plugins/character_facts` | 5 |
 | `plugins/core.api` | 5 |
+| `plugins/core.character` | 5 |
+| `plugins/core.choice` | 4 |
+| `plugins/core.craft` | 2 |
+| `plugins/core.item` | 7 |
+| `plugins/core.save` | 2 |
+| `plugins/core.system` | 3 |
 | `plugins/core.ui` | 17 |
 | `plugins/core.world` | 3 |
-| `plugins/craft_facts` | 2 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
 | `plugins/device_probe_consumer` | 2 |
 | `plugins/device_probe_provider` | 2 |
 | `plugins/extension_bag` | 41 |
 | `plugins/inventory_hooks` | 11 |
-| `plugins/item_facts` | 7 |
-| `plugins/native_choice` | 4 |
 | `plugins/push_all` | 6 |
 | `plugins/quest` | 5 |
 | `plugins/save_backup` | 13 |
-| `plugins/save_facts` | 2 |
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
-| `plugins/system_facts` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
 | **合计** | **494** |
@@ -229,27 +229,27 @@
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 17 |
-| `character_facts` | `plugins/character_facts` | 5 |
 | `core.api` | `plugins/core.api` | 5 |
+| `core.character` | `plugins/core.character` | 5 |
+| `core.choice` | `plugins/core.choice` | 4 |
+| `core.craft` | `plugins/core.craft` | 2 |
+| `core.item` | `plugins/core.item` | 7 |
+| `core.save` | `plugins/core.save` | 2 |
+| `core.system` | `plugins/core.system` | 3 |
 | `core.ui` | `plugins/core.ui` | 17 |
 | `core.world` | `plugins/core.world` | 3 |
-| `craft_facts` | `plugins/craft_facts` | 2 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
 | `extension_bag` | `plugins/extension_bag` | 41 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
-| `item_facts` | `plugins/item_facts` | 7 |
-| `native_choice` | `plugins/native_choice` | 4 |
 | `push_all` | `plugins/push_all` | 6 |
 | `quest` | `plugins/quest` | 5 |
 | `save_backup` | `plugins/save_backup` | 13 |
-| `save_facts` | `plugins/save_facts` | 2 |
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
 | `stack_limit` | `plugins/stack_limit` | 3 |
-| `system_facts` | `plugins/system_facts` | 3 |
 | `text_layer` | `plugins/text_layer` | 6 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 

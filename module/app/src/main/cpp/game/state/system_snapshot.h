@@ -4,7 +4,7 @@
 
 namespace qol::game {
 
-// system_facts owner 的响应体拼装接缝（实现在 legacy/system 的 game_system.cpp，
+// core.system owner 的响应体拼装接缝（实现在 legacy/system 的 game_system.cpp，
 // 该文件可访问 infra/legacy 数据源；game 层适配端口只依赖本声明）。
 //
 // 这些函数必须在游戏主线程调用，由 system_facts 帧任务发布为快照；HTTP handler 不直接调用。

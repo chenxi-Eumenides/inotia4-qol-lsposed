@@ -15,7 +15,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
-#include "plugins/character_facts/plugin.h"
+#include "plugins/core.character/plugin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -142,23 +142,23 @@ qol::contracts::QolHostSdk make_sdk() {
 }
 
 const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary/list", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary/{slot}", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/count", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/leader", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/id", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/name", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/level", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/status", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/stats", "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment", "character_facts", 0,
+    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary/list", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary/{slot}", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/count", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/leader", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/id", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/name", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/level", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/status", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/stats", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment", "core.character", 0,
      1},
     {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment/{equip_slot}",
-     "character_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", "character_facts", 0,
+     "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", "core.character", 0,
      1},
 };
 
@@ -169,7 +169,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.sdk_minor = qol::contracts::kHostSdkMinor;
     ctx.sdk = sdk;
     ctx.game = nullptr;
-    ctx.plugin_id = "character_facts";
+    ctx.plugin_id = "core.character";
     ctx.ports = kPortArray;
     ctx.port_count = 2;
     return ctx;
@@ -210,7 +210,7 @@ void test_lifecycle_and_responses() {
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
-    const auto& descriptor = qol::features::character_facts::plugin_descriptor();
+    const auto& descriptor = qol::features::core_character::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
@@ -270,7 +270,7 @@ void test_lifecycle_and_responses() {
     CHECK(status == 200);
 
     // 注销 owner：handler 进入墓碑态，调度器任务撤销，请求返回明确停用错误。
-    CHECK(qol::host::http_dispatch_api().unregister_owner("character_facts").ok == kQolOk);
+    CHECK(qol::host::http_dispatch_api().unregister_owner("core.character").ok == kQolOk);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     (void)dispatch_get("/api/character/party", &status);
@@ -298,7 +298,7 @@ void test_missing_route_rejected() {
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
-    const auto& descriptor = qol::features::character_facts::plugin_descriptor();
+    const auto& descriptor = qol::features::core_character::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,

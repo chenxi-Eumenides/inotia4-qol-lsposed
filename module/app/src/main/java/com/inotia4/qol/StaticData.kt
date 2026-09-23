@@ -376,7 +376,7 @@ object StaticData {
     fun buildMapExitsJson(): String = exitsRootOrNull()?.toString() ?: "{}"
 
     /**
-     * 物品域静态名称表（启动期下发 item_facts owner）：
+     * 物品域静态名称表（启动期下发 core.item owner）：
      * 行式 `N|T|O|E\t<id>\t<已转义文本>`；文本用 [JSONObject.quote] 转义（与 native 侧迁移前的
      * JSONObject 序列化同一实现），native 直接拼接即可保持成功响应逐字节不变。
      */

@@ -29,7 +29,7 @@ class InfoApiServiceCore : InfoApiService {
     override fun currentMapDrops(): String = InfoMapQueries.drops()
     override fun currentMapDistance(tx: Int, ty: Int): String = InfoMapQueries.distance(tx, ty)
 
-    // character 域 GET（party 12 + mercenary 3）已迁 owner（character_facts）：Kotlin 只做
+    // character 域 GET（party 12 + mercenary 3）已迁 owner（core.character）：Kotlin 只做
     // nativeHttpDispatch 透传，成功响应与 404/非 world 语义由 owner 快照与原生拼装生成
     // （见 InfoCharacterQueries）。
     override fun party(): String = InfoCharacterQueries.party()
@@ -127,7 +127,7 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun game(): String = InfoSystemQueries.game()
 
-    // system 快照/info/game_frame 已迁 owner（system_facts）：Kotlin 只做 nativeHttpDispatch
+    // system 快照/info/game_frame 已迁 owner（core.system）：Kotlin 只做 nativeHttpDispatch
     // 透传，成功响应与冻结语义由 owner 主线程快照生成（见 InfoSystemQueries）。
     override fun gameSnapshot(): String = InfoSystemQueries.snapshot()
 

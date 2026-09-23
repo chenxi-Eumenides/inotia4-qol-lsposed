@@ -23,7 +23,7 @@ std::string data_events_json();
 std::string build_gamestate_json();
 std::string build_snapshot_json();
 
-// system_facts owner 用的富化快照：与迁移前 Kotlin NameInjector.withItemNames 对
+// core.system owner 用的富化快照：与迁移前 Kotlin NameInjector.withItemNames 对
 // build_snapshot_json 输出的加工逐字节一致（party 成员注入 type_name/class_name 并按
 // restructureRole 重排）。原始 build_snapshot_json 保留给 /api/system/game。
 std::string build_snapshot_enriched_json();

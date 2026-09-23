@@ -14,7 +14,7 @@
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "infra/commands.h"
-#include "plugins/quest/plugin.h"
+#include "plugins/core.quest/plugin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -200,11 +200,11 @@ qol::contracts::QolGameHost fake_game() {
 }
 
 const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/quest", "quest", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/quest/active", "quest", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/quest/details", "quest", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/quest/completed", "quest", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/quest/quit_quest", "quest", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/quest", "core.quest", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/quest/active", "core.quest", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/quest/details", "core.quest", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/quest/completed", "core.quest", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/quest/quit_quest", "core.quest", 0, 1},
 };
 
 void register_frozen_routes() {
@@ -250,9 +250,9 @@ void test_lifecycle_and_responses() {
     qol::contracts::QolGameHost game = fake_game();
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
                                       qol::contracts::kHostSdkMajor,
-                                      qol::contracts::kHostSdkMinor, &sdk, &game, "quest",
+                                      qol::contracts::kHostSdkMinor, &sdk, &game, "core.quest",
                                       kPortArray, 1};
-    const auto& descriptor = qol::features::quest::plugin_descriptor();
+    const auto& descriptor = qol::features::core_quest::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
     CHECK(g_scheduler.handler != nullptr);
@@ -293,7 +293,7 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/quest/active").find("\"quest_id\":5") != std::string::npos);
 
     // owner 停用：handler 墓碑，请求返回明确停用错误。
-    CHECK(qol::host::http_dispatch_api().unregister_owner("quest").ok == kQolOk);
+    CHECK(qol::host::http_dispatch_api().unregister_owner("core.quest").ok == kQolOk);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     (void)dispatch_get("/api/quest/active", &status);
@@ -314,9 +314,9 @@ void test_static_not_ready_holds_snapshot() {
     qol::contracts::QolGameHost game = fake_game();
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
                                       qol::contracts::kHostSdkMajor,
-                                      qol::contracts::kHostSdkMinor, &sdk, &game, "quest",
+                                      qol::contracts::kHostSdkMinor, &sdk, &game, "core.quest",
                                       kPortArray, 1};
-    const auto& descriptor = qol::features::quest::plugin_descriptor();
+    const auto& descriptor = qol::features::core_quest::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,

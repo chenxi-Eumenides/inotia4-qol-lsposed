@@ -520,24 +520,24 @@ void test_choice_port_version_gate() {
         {qol::contracts::kQolPortChoiceVersion.major,
          qol::contracts::kQolPortChoiceVersion.minor},
     };
-    PluginDescriptor valid = make_descriptor("native_choice", nullptr, 0, nullptr, 0);
+    PluginDescriptor valid = make_descriptor("core.choice", nullptr, 0, nullptr, 0);
     valid.ports = &requirement;
     valid.port_count = 1;
     CHECK(register_plugin(valid));
     CHECK(install_all(make_deps()) == 0);
-    CHECK(feature_state_is("native_choice", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.choice", FeatureState::kEnabled));
 
     reset_all();
     requirement.range.min_minor = static_cast<uint16_t>(
         qol::contracts::kQolPortChoiceVersion.minor + 1);
-    PluginDescriptor incompatible = make_descriptor("native_choice", nullptr, 0, nullptr, 0);
+    PluginDescriptor incompatible = make_descriptor("core.choice", nullptr, 0, nullptr, 0);
     incompatible.ports = &requirement;
     incompatible.port_count = 1;
     CHECK(register_plugin(incompatible));
     CHECK(install_all(make_deps()) == 1);
     const char* error = nullptr;
-    CHECK(feature_state_is("native_choice", FeatureState::kBlocked));
-    CHECK(feature_of("native_choice", nullptr, nullptr, &error));
+    CHECK(feature_state_is("core.choice", FeatureState::kBlocked));
+    CHECK(feature_of("core.choice", nullptr, nullptr, &error));
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 }
 
@@ -547,24 +547,24 @@ void test_save_port_version_and_private_gate() {
         qol::contracts::QolPortId::QOL_PORT_SAVE,
         {qol::contracts::kQolPortSaveVersion.major, qol::contracts::kQolPortSaveVersion.minor},
     };
-    PluginDescriptor valid = make_descriptor("save_facts", nullptr, 0, nullptr, 0);
+    PluginDescriptor valid = make_descriptor("core.save", nullptr, 0, nullptr, 0);
     valid.ports = &requirement;
     valid.port_count = 1;
     CHECK(register_plugin(valid));
     CHECK(install_all(make_deps()) == 0);
-    CHECK(feature_state_is("save_facts", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.save", FeatureState::kEnabled));
 
     reset_all();
     requirement.range.min_minor = static_cast<uint16_t>(
         qol::contracts::kQolPortSaveVersion.minor + 1);
-    PluginDescriptor incompatible = make_descriptor("save_facts", nullptr, 0, nullptr, 0);
+    PluginDescriptor incompatible = make_descriptor("core.save", nullptr, 0, nullptr, 0);
     incompatible.ports = &requirement;
     incompatible.port_count = 1;
     CHECK(register_plugin(incompatible));
     CHECK(install_all(make_deps()) == 1);
     const char* error = nullptr;
-    CHECK(feature_state_is("save_facts", FeatureState::kBlocked));
-    CHECK(feature_of("save_facts", nullptr, nullptr, &error));
+    CHECK(feature_state_is("core.save", FeatureState::kBlocked));
+    CHECK(feature_of("core.save", nullptr, nullptr, &error));
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 
     reset_all();
@@ -586,24 +586,24 @@ void test_craft_port_version_and_private_gate() {
         qol::contracts::QolPortId::QOL_PORT_CRAFT,
         {qol::contracts::kQolPortCraftVersion.major, qol::contracts::kQolPortCraftVersion.minor},
     };
-    PluginDescriptor valid = make_descriptor("craft_facts", nullptr, 0, nullptr, 0);
+    PluginDescriptor valid = make_descriptor("core.craft", nullptr, 0, nullptr, 0);
     valid.ports = &requirement;
     valid.port_count = 1;
     CHECK(register_plugin(valid));
     CHECK(install_all(make_deps()) == 0);
-    CHECK(feature_state_is("craft_facts", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.craft", FeatureState::kEnabled));
 
     reset_all();
     requirement.range.min_minor = static_cast<uint16_t>(
         qol::contracts::kQolPortCraftVersion.minor + 1);
-    PluginDescriptor incompatible = make_descriptor("craft_facts", nullptr, 0, nullptr, 0);
+    PluginDescriptor incompatible = make_descriptor("core.craft", nullptr, 0, nullptr, 0);
     incompatible.ports = &requirement;
     incompatible.port_count = 1;
     CHECK(register_plugin(incompatible));
     CHECK(install_all(make_deps()) == 1);
     const char* error = nullptr;
-    CHECK(feature_state_is("craft_facts", FeatureState::kBlocked));
-    CHECK(feature_of("craft_facts", nullptr, nullptr, &error));
+    CHECK(feature_state_is("core.craft", FeatureState::kBlocked));
+    CHECK(feature_of("core.craft", nullptr, nullptr, &error));
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 
     reset_all();
