@@ -73,7 +73,6 @@ Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint m
         response.body_size = static_cast<uint32_t>(message.size());
         return env->NewStringUTF(dispatch_result_json(response).c_str());
     }
-    (void)bridge_register_game_frame_handler();
     const qol::contracts::HttpReq request{
         static_cast<qol::contracts::HttpMethod>(method),
         path_value.c_str(),

@@ -1,10 +1,8 @@
 #include "gamebridge_internal.h"
 
 #include "host/assembly.h"
-#include "host/http_dispatch.h"
 
 #include <cstring>
-#include <mutex>
 
 namespace {
 
@@ -25,33 +23,6 @@ std::string init_report_with_assembly() {
 }
 
 }  // namespace
-
-QolResult bridge_http_game_frame_query(const qol::contracts::HttpReq*,
-                                       qol::contracts::HttpRes* response, void*) {
-    if (response == nullptr || response->body == nullptr) {
-        return qol::contracts::error(kQolErrInvalidArgument, "invalid http response", 22);
-    }
-    const std::string body = "{\"frame\":" + std::to_string(data_frame_count()) + "}";
-    if (response->body_capacity < body.size()) {
-        return qol::contracts::error(kQolErrBlocked, "http response buffer too small", 31);
-    }
-    std::memcpy(response->body, body.data(), body.size());
-    response->body_size = static_cast<uint32_t>(body.size());
-    response->status = 200;
-    return qol::contracts::ok();
-}
-
-QolResult bridge_register_game_frame_handler() {
-    static std::mutex mutex;
-    static bool registered = false;
-    std::lock_guard<std::mutex> lock(mutex);
-    if (registered) return qol::contracts::ok();
-    const QolResult result = qol::host::http_dispatch_register_builtin_query(
-        qol::contracts::HttpMethod::kGet, "/api/system/game_frame", "api.system",
-        &bridge_http_game_frame_query, nullptr);
-    if (qol::contracts::succeeded(result) || result.code == kQolErrConflict) registered = true;
-    return result;
-}
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetFrameCount(JNIEnv*, jclass) {

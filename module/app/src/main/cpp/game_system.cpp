@@ -5,8 +5,11 @@
 
 #include "game/access/game_access.h"
 #include "game/state/game_state.h"
+#include "game/state/system_snapshot.h"
 #include "game_world.h"
 #include "api/native/game_ui.h"
+#include "api/native/game_save.h"
+#include "core/native/game_cache.h"
 #include "game_dialog.h"
 #include "game/json/game_json.h"
 
@@ -224,3 +227,142 @@ std::string build_snapshot_json() {
     s += "}";
     return s;
 }
+
+namespace {
+
+// 与 StaticData.className（CHARCLASSBASE 记录 0-5）同源；save_backup 的
+// save_backup_class_name 另有同表副本（core 不得依赖插件）。仅用于 /api/system/snapshot
+// 的 class_name，迁移前由 Kotlin NameInjector.injectClassName 注入。
+const char* const kSnapshotClassNames[6] = {"黑暗骑士", "忍者", "黑魔导", "祭司",
+                                            "暗影猎手", "狂战士"};
+const char* const kSnapshotStatNames[5] = {"力量", "敏捷", "体力", "智力", "精力"};
+
+void append_main_stats(std::string& out, void* ch) {
+    out += "[";
+    for (int i = 0; i < 5; ++i) {
+        if (i > 0) out += ",";
+        const int total = char_stat_total(ch, i);
+        const int base = fn_get_stat_base != nullptr ? fn_get_stat_base(ch, i) : 0;
+        out += "{\"stat_name\":\"";
+        out += kSnapshotStatNames[i];
+        out += "\",\"base_stat\":";
+        out += std::to_string(base);
+        out += ",\"additional_stat\":";
+        out += std::to_string(total - base);
+        out += "}";
+    }
+    out += "]";
+}
+
+// restructureRole 后的成员字段顺序：name/type_name/class_name/level/hp/max_hp/mp/max_mp/
+// type/class_idx/main_stats（快照无 exp_next，main_stats 追加到末尾）。
+void append_party_member_enriched(std::string& out, void* ch) {
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);    const int type = static_cast<int>(reinterpret_cast<const int8_t*>(ch)[C_TYPE]);
+    const int class_idx = static_cast<int>(reinterpret_cast<const int8_t*>(ch)[C_CLASS]);
+    const int level = static_cast<int>(b[C_LEVEL]);
+    out += "{";
+    bool first = true;
+    auto append = [&out, &first](const std::string& field) {
+        if (!first) out += ",";
+        out += field;
+        first = false;
+    };
+    if (fn_get_name != nullptr) {
+        char* nm = fn_get_name(ch);
+        append("\"name\":\"" + json_escape(nm) + "\"");
+    }
+    if (type == 0) append("\"type_name\":\"主角\"");
+    else if (type == 1) append("\"type_name\":\"佣兵\"");
+    if (class_idx >= 0 && class_idx <= 5) {
+        append(std::string("\"class_name\":\"") + kSnapshotClassNames[class_idx] + "\"");
+    }
+    append("\"level\":" + std::to_string(level));
+    append("\"hp\":" + std::to_string(*reinterpret_cast<const int32_t*>(b + C_HP)));
+    append("\"max_hp\":" + std::to_string(char_max_hp(ch)));
+    append("\"mp\":" + std::to_string(*reinterpret_cast<const int32_t*>(b + C_MP)));
+    append("\"max_mp\":" + std::to_string(char_max_mp(ch)));
+    append("\"type\":" + std::to_string(type));
+    append("\"class_idx\":" + std::to_string(class_idx));
+    std::string stats;
+    append_main_stats(stats, ch);
+    append("\"main_stats\":" + stats);
+    out += "}";
+}
+
+}  // namespace
+
+std::string build_snapshot_enriched_json() {
+    // 帧计数口径与 build_snapshot_json 一致（g_base 未就绪时为 0，不用 data_frame_count 的 -1）。
+    uint64_t frame = 0;
+    if (g_base != 0) {
+        uintptr_t* slot = reinterpret_cast<uintptr_t*>(g_base + G_FRAME_COUNT_VMA);
+        uint64_t* cnt = reinterpret_cast<uint64_t*>(*slot);
+        if (cnt != nullptr) frame = *cnt;
+    }
+    std::string s = "{\"frame\":" + std::to_string(frame);
+    s += ",\"screen\":";
+    s += "\"" + std::string(data_ui_screen()) + "\"";
+    s += ",\"money\":" + std::to_string(fn_get_money != nullptr ? fn_get_money() : -1);
+    s += ",\"map_id\":" + std::to_string(current_map_id());
+    void* hero = lead_member();
+    if (hero != nullptr) {
+        s += ",\"x\":" + std::to_string(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_X) >> 4);
+        s += ",\"y\":" + std::to_string(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(hero) + C_POS_Y) >> 4);
+    } else {
+        s += ",\"x\":-1,\"y\":-1";
+    }
+    s += ",\"leader_slot\":" + std::to_string(g_main_merc_slot != nullptr ? *reinterpret_cast<uint8_t*>(g_main_merc_slot) : -1);
+
+    s += ",\"party\":[";
+    for (int i = 0; i < 3; ++i) {
+        void* ch = (fn_get_member != nullptr) ? fn_get_member(i) : nullptr;
+        if (i > 0) s += ",";
+        if (ch == nullptr) {
+            s += "null";
+            continue;
+        }
+        append_party_member_enriched(s, ch);
+    }
+    s += "]";
+
+    s += "}";
+    return s;
+}
+
+namespace {
+
+// data_save_slots_json() 固定输出 {"slots":[...]}；info 只嵌入 slots 数组，与迁移前
+// Kotlin JsonUtil.parseObj(...).opt("slots") 同值。
+std::string system_save_slots_array() {
+    const std::string json = data_save_slots_json();
+    const size_t begin = json.find('[');
+    const size_t end = json.rfind(']');
+    if (begin == std::string::npos || end == std::string::npos || end < begin) return "[]";
+    return json.substr(begin, end - begin + 1);
+}
+
+}  // namespace
+
+namespace qol::game {
+
+std::string build_system_snapshot_json() { return build_snapshot_enriched_json(); }
+
+std::string build_system_game_json(const std::string& info_json) {
+    return "{\"snapshot\":" + data_snapshot_json() + ",\"info\":" + info_json + "}";
+}
+
+std::string build_system_info_json(const std::string& version, const std::string& package) {
+    std::string s = "{\"version\":\"" + json_escape(version.c_str()) + "\"";
+    s += ",\"save_slots\":" + system_save_slots_array();
+    s += ",\"current_save_slot\":" + std::to_string(current_save_slot());
+    s += ",\"package_name\":\"" + json_escape(package.c_str()) + "\"";
+    s += ",\"base\":" + std::to_string(g_base);
+    s += "}";
+    return s;
+}
+
+std::string build_system_frame_json() {
+    return "{\"frame\":" + std::to_string(data_frame_count()) + "}";
+}
+
+}  // namespace qol::game

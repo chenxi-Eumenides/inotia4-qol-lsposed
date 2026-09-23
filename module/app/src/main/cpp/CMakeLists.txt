@@ -232,6 +232,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/character_extras_port.cpp
     game/adapter_ports/inventory_extras_port.cpp
     game/adapter_ports/item_extras_port.cpp
+    game/adapter_ports/system_port.cpp
     game/adapter_ports/item_count_facade.cpp
 )
 

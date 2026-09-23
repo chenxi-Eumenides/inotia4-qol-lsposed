@@ -45,6 +45,7 @@
 #include "game/adapter_ports/quest_port.h"
 #include "game/adapter_ports/save_call_port.h"
 #include "game/adapter_ports/save_port.h"
+#include "game/adapter_ports/system_port.h"
 #include "game/adapter_ports/world_port.h"
 #endif
 
@@ -183,6 +184,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
     }
     if (id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE) {
         const auto& port = qol::game::custom_recipe_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_SYSTEM) {
+        const auto& port = qol::game::system_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }

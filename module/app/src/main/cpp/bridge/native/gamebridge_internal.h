@@ -49,7 +49,3 @@ inline jstring kernel_only_result(JNIEnv* env) {
     return env->NewStringUTF("{\"ok\":false,\"error\":\"kernel-only\"}");
 }
 #endif
-
-QolResult bridge_register_game_frame_handler();
-QolResult bridge_http_game_frame_query(const qol::contracts::HttpReq* request,
-                                       qol::contracts::HttpRes* response, void* ctx);

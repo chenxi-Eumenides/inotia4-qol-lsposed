@@ -907,6 +907,22 @@ set_target_properties(quest_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDA
 target_link_libraries(quest_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME quest_dispatch_tests COMMAND quest_dispatch_tests)
 
+# P5-4-3：system_facts 4 条 /api/system/{snapshot,game,info,game_frame} query handler 的
+# 注册/快照/身份降级/注销接缝。
+add_executable(system_facts_dispatch_tests
+    test_system_facts_dispatch.cpp
+    ${CPP_DIR}/plugins/system_facts/plugin.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(system_facts_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(system_facts_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(system_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(system_facts_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME system_facts_dispatch_tests COMMAND system_facts_dispatch_tests)
+
 # P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
 add_executable(core_patches_shape_tests test_core_patches_shape.cpp)
 target_compile_definitions(core_patches_shape_tests PRIVATE

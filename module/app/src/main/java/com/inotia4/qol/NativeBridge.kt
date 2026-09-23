@@ -93,6 +93,8 @@ object NativeBridge {
     // ---- HTTP owner 静态 enrichment 下发（启动期一次；owner handler 运行期只读）----
     external fun nativeSetItemStaticData(payload: String)
     external fun nativeSetQuestStaticData(payload: String)
+    // system_facts 的 info/game 需要模块身份（版本/包名），非游戏静态表，单独下发。
+    external fun nativeSetSystemIdentity(version: String, packageName: String)
     external fun nativeBackupList(): String
     external fun nativeBackupExport(slot: Int): String
     external fun nativeBackupImport(checksum: String, slot: Int): String

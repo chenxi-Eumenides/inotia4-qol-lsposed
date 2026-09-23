@@ -28,6 +28,7 @@
 #include "plugins/simple_mode/plugin.h"
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
+#include "plugins/system_facts/plugin.h"
 #include "plugins/text_layer/plugin.h"
 #include "plugins/world_teleport/plugin.h"
 #include "plugins/world_facts/plugin.h"
@@ -91,6 +92,7 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::simple_mode::plugin_descriptor,
     &features::special_equip::plugin_descriptor,
     &features::stack_limit::plugin_descriptor,
+    &features::system_facts::plugin_descriptor,
     &features::text_layer::plugin_descriptor,
     &features::world_teleport::plugin_descriptor,
 #endif

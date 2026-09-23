@@ -1,11 +1,9 @@
 package com.inotia4.qol.service.info
 
-import com.inotia4.qol.BuildConfig
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.StaticData
-import com.inotia4.qol.TargetPackages
 import com.inotia4.qol.UiActivityTracker
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
@@ -205,32 +203,15 @@ class InfoApiServiceCore : InfoApiService {
         }
     }
 
-    override fun game(): String {
-        return JsonUtil.wrap("snapshot" to JsonUtil.parseObj(snapshotJson()), "info" to JsonUtil.parseObj(gameInfo()))
-    }
+    override fun game(): String = InfoSystemQueries.game()
 
-    override fun gameSnapshot(): String = NameInjector.withItemNames(snapshotJson())
+    // system 快照/info/game_frame 已迁 owner（system_facts）：Kotlin 只做 nativeHttpDispatch
+    // 透传，成功响应与冻结语义由 owner 主线程快照生成（见 InfoSystemQueries）。
+    override fun gameSnapshot(): String = InfoSystemQueries.snapshot()
 
-    override fun gameFrame(): String {
-        val envelope = JsonUtil.parseObj(
-            NativeBridge.nativeHttpDispatch(0, "/api/system/game_frame", null, null)
-        ) ?: return JsonUtil.NOT_READY
-        val status = envelope.optInt("status", 0)
-        val body = envelope.optString("body", JsonUtil.NOT_READY)
-        return if (status == 0) JsonUtil.NOT_READY else body
-    }
+    override fun gameFrame(): String = InfoSystemQueries.gameFrame()
 
-    override fun gameInfo(): String {
-        val slots: Any? = JsonUtil.parseObj(NativeBridge.nativeSaveSlotsJson())?.opt("slots")
-        val currentSlot = JsonUtil.parseObj(NativeBridge.nativeCurrentSaveSlot())?.optInt("current_save_slot", -1) ?: -1
-        return JsonUtil.wrap(
-            "version" to BuildConfig.VERSION_NAME,
-            "save_slots" to slots,
-            "current_save_slot" to currentSlot,
-            "package_name" to TargetPackages.current(),
-            "base" to NativeBridge.nativeGetBaseAddr()
-        )
-    }
+    override fun gameInfo(): String = InfoSystemQueries.gameInfo()
 
     override fun events(since: Long?): String = NativeBridge.nativeGetEventsJson()
 

@@ -21,8 +21,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 50 |
-| `game` | 92 |
+| `contracts` | 51 |
+| `game` | 95 |
 | `hooks` | 10 |
 | `host` | 44 |
 | `infra` | 39 |
@@ -59,10 +59,11 @@
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
+| `plugins/system_facts` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_facts` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **469** |
+| **合计** | **476** |
 
 ### 1.2 迁移期映射摘要
 
@@ -113,15 +114,15 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 113 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 117 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 44 |
+| `host` | `game` | 46 |
 | `host` | `infra` | 39 |
 | `host` | `contracts` | 38 |
+| `game` | `contracts` | 34 |
 | `plugins/extension_bag` | `contracts` | 33 |
-| `game` | `contracts` | 32 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 20 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
@@ -204,8 +205,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：148 个
-- native 导出：148 个
+- Kotlin `external fun`：149 个
+- native 导出：149 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -214,14 +215,14 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（25 个）共 25 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（26 个）共 26 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（25）
+### 6.2 已迁移 `plugins/*`（26）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -247,6 +248,7 @@
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
 | `stack_limit` | `plugins/stack_limit` | 3 |
+| `system_facts` | `plugins/system_facts` | 3 |
 | `text_layer` | `plugins/text_layer` | 6 |
 | `world_facts` | `plugins/world_facts` | 3 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
