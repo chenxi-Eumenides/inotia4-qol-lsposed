@@ -22,8 +22,11 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kSaveFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
-    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_SAVE);
+    CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_SAVE_WRITE);
+    // 写面（阶段 5 票据契约）由同域 owner 声明式提供 3 条 POST。
+    CHECK(descriptor.http_query_count == 3 && descriptor.http_queries != nullptr);
 
     const auto* api = static_cast<const qol::contracts::SaveFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->slot_state != nullptr);

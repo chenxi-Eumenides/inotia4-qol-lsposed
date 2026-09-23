@@ -50,8 +50,6 @@ const contracts::CapabilityRequirement kRequires[] = {
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_SAVE_CALL,
      {contracts::kQolPortSaveCallVersion.major, contracts::kQolPortSaveCallVersion.minor}},
-    {contracts::QolPortId::QOL_PORT_SAVE_WRITE,
-     {contracts::kQolPortSaveWriteVersion.major, contracts::kQolPortSaveWriteVersion.minor}},
 };
 
 // 游戏内备份面板 provider：由 core.ui 容器（设置页「存档备份」动作项）经 ui_panels 打开。
@@ -125,49 +123,7 @@ const contracts::ResourceClaim kResources[] = {
 // ---- HTTP 面：备份四端点（owner=save_backup）----
 // 声明式注册：descriptor 的 http 列表由宿主在插件 enabled 时注册、停用时置路由墓碑摘除，
 // 复用 dispatch 的 query（GET）/command（POST）双槽语义；插件不自注册，故无需显式注销。
-enum class SbHttpRoute : uint8_t { kList, kExport, kImport, kDelete, kSave, kEnterSlot, kCreateSlot };
-
-// 存档写命令化（阶段 5 套路）：HTTP 线程只校验并投递票据，游戏写在主线程结果处理器执行，
-// 结果经票据回取。typed handler id 为全局空间，save_backup 前缀 0x53420001。
-constexpr uint32_t kSaveWriteHandlerId = 0x53420001;
-
-struct SaveWritePayload {
-    int32_t kind = 0;  // contracts::kQolSaveWrite*
-    int32_t slot = -1;
-    int32_t class_idx = -1;
-};
-
-const contracts::QolSaveWritePort* g_save_write = nullptr;
-const contracts::QolHostSdk* g_sdk = nullptr;
-
-// 主线程命令体：执行存档写（含模块 sidecar 生命周期），把迁移前结果 JSON 写入票据缓冲。
-bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, char* out,
-                              uint32_t capacity, uint32_t* out_size) {
-    if (out_size != nullptr) *out_size = 0;
-    if (payload == nullptr || size != sizeof(SaveWritePayload) || out == nullptr ||
-        out_size == nullptr || g_save_write == nullptr || g_save_write->read.write == nullptr) {
-        return false;
-    }
-    SaveWritePayload p{};
-    std::memcpy(&p, payload, size);
-    // 命令执行次数（首次 0，延迟重试递增）：端口据此区分「首次发起转换」与「等待世界态就绪」。
-    const uint32_t attempt =
-        (g_sdk != nullptr && g_sdk->ticket_result.current_attempt != nullptr)
-            ? g_sdk->ticket_result.current_attempt()
-            : 0;
-    const QolResult result =
-        g_save_write->read.write(p.kind, p.slot, p.class_idx, attempt, out, capacity, out_size);
-    if (result.code == kQolErrNotReady) {
-        // 转场后世界态未提交：保持票据 pending，下一帧重试（不提前报告 done）。
-        if (g_sdk != nullptr && g_sdk->ticket_result.defer_current_result != nullptr) {
-            (void)g_sdk->ticket_result.defer_current_result();
-            return true;
-        }
-        return false;
-    }
-    // 业务失败时端口返回错误，但 out 已携带原错误体（与迁移前响应一致），票据置 failed。
-    return contracts::succeeded(result) && *out_size != 0;
-}
+enum class SbHttpRoute : uint8_t { kList, kExport, kImport, kDelete };
 
 bool sb_extract_int(const char* body, const char* key, int* out) {
     const std::string pattern = std::string("\"") + key + "\":";
@@ -218,38 +174,6 @@ QolResult sb_http_body(contracts::HttpRes* response, const std::string& body) {
     return contracts::ok();
 }
 
-// 入参校验与迁移前 Kotlin 一致：export/import 的 slot ∈ [0,2]；import/delete 的 checksum 为
-// ^[0-9a-f]{12}$。失败信封 {"ok":false,"error":...} 与 Kotlin ApiException 的 400 逐字节一致。
-// 存档写命令投递：校验与迁移前 Kotlin 一致（slot ∈ [0,2] 否则 400 slot required (0-2)；
-// create_slot 另需 class_idx ∈ [0,5]），通过后投递票据并立即返回 {"ok":true,"ticket":N}。
-QolResult sb_write_command(contracts::HttpRes* response, SbHttpRoute kind, int32_t slot,
-                           int32_t class_idx) {
-    if (kind == SbHttpRoute::kEnterSlot || kind == SbHttpRoute::kCreateSlot) {
-        if (slot < 0 || slot > 2) return sb_http_error(response, 400, "slot required (0-2)");
-    }
-    // 与迁移前 Kotlin 一致：class_idx 仅拒绝负值（消息文本沿用 (0-5)）。
-    if (kind == SbHttpRoute::kCreateSlot && class_idx < 0) {
-        return sb_http_error(response, 400, "class_idx required (0-5)");
-    }
-    if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) {
-        return sb_http_error(response, 503, "command port unavailable");
-    }
-    SaveWritePayload payload{};
-    payload.kind = kind == SbHttpRoute::kSave ? contracts::kQolSaveWriteSave
-                   : kind == SbHttpRoute::kEnterSlot ? contracts::kQolSaveWriteEnterSlot
-                                                     : contracts::kQolSaveWriteCreateSlot;
-    payload.slot = slot;
-    payload.class_idx = class_idx;
-    contracts::QolCommandTicket ticket = 0;
-    if (!contracts::succeeded(g_sdk->commands.post_typed(kSaveWriteHandlerId, &payload,
-                                                        sizeof(payload), &ticket)) ||
-        ticket == 0) {
-        return sb_http_error(response, 503, "command queue unavailable");
-    }
-    return sb_http_body(response, std::string("{\"ok\":true,\"ticket\":") +
-                                        std::to_string(ticket) + "}");
-}
-
 QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
                           void* ctx) {
     if (request == nullptr || response == nullptr || ctx == nullptr) {
@@ -289,24 +213,15 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
             }
             return sb_http_body(response, save_backup_delete_json(checksum.c_str()));
         }
-        case SbHttpRoute::kSave:
-            return sb_write_command(response, kind, -1, -1);
-        case SbHttpRoute::kEnterSlot:
-            if (!sb_extract_int(body, "slot", &slot)) slot = -1;
-            return sb_write_command(response, kind, slot, -1);
-        case SbHttpRoute::kCreateSlot: {
-            int class_idx = -1;
-            if (!sb_extract_int(body, "slot", &slot)) slot = -1;
-            (void)sb_extract_int(body, "class_idx", &class_idx);
-            return sb_write_command(response, kind, slot, class_idx);
-        }
     }
     return sb_http_error(response, 400, "bad request");
 }
 
 const SbHttpRoute kSbHttpRouteKinds[] = {
-    SbHttpRoute::kList,  SbHttpRoute::kExport, SbHttpRoute::kImport, SbHttpRoute::kDelete,
-    SbHttpRoute::kSave,  SbHttpRoute::kEnterSlot, SbHttpRoute::kCreateSlot,
+    SbHttpRoute::kList,
+    SbHttpRoute::kExport,
+    SbHttpRoute::kImport,
+    SbHttpRoute::kDelete,
 };
 
 const contracts::HttpQueryHandlerDescriptor kSbHttpRoutes[] = {
@@ -318,12 +233,6 @@ const contracts::HttpQueryHandlerDescriptor kSbHttpRoutes[] = {
      const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[2])},
     {contracts::HttpMethod::kPost, "/api/system/backup/delete", kPluginId, &sb_http_handler,
      const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[3])},
-    {contracts::HttpMethod::kPost, "/api/system/save", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[4])},
-    {contracts::HttpMethod::kPost, "/api/system/enter_slot", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[5])},
-    {contracts::HttpMethod::kPost, "/api/system/create_slot", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[6])},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -333,8 +242,8 @@ int plugin_install(contracts::PluginContext& ctx) {
             contracts::kSaveFactsCapabilityId,
             {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
             &save_facts_iface)) ||
-        save_facts_iface == nullptr || ctx.ports == nullptr || ctx.port_count != 2 ||
-        ctx.ports[0] == nullptr || ctx.ports[1] == nullptr) {
+        save_facts_iface == nullptr || ctx.ports == nullptr || ctx.port_count != 1 ||
+        ctx.ports[0] == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
         return 1;
     }
@@ -349,31 +258,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
         return 1;
     }
-    const auto* save_write = static_cast<const contracts::QolSaveWritePort*>(ctx.ports[1]);
-    // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
-    const char* write_fail = nullptr;
-    if (!contracts::satisfies(save_write->abi_version,
-                              {contracts::kQolPortSaveWriteVersion.major,
-                               contracts::kQolPortSaveWriteVersion.minor})) {
-        write_fail = "save_write ver";
-    } else if (save_write->read.write == nullptr) {
-        write_fail = "save_write fn";
-    } else if (ctx.sdk->abi.size < sizeof(contracts::QolHostSdk)) {
-        write_fail = "abi.size";
-    } else if (ctx.sdk->abi.minor < 8) {
-        write_fail = "abi.minor";
-    } else if (ctx.sdk->ticket_result.register_typed_result_handler == nullptr) {
-        write_fail = "tail null";
-    } else if (!contracts::succeeded(ctx.sdk->ticket_result.register_typed_result_handler(
-                   kSaveWriteHandlerId, &save_write_result_handler, nullptr))) {
-        write_fail = "register";
-    }
-    if (write_fail != nullptr) {
-        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
-        return 1;
-    }
-    g_sdk = ctx.sdk;
-    g_save_write = save_write;
     save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game);
     g_active.store(true, std::memory_order_release);
     // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
@@ -390,12 +274,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     }
-    // 自注册的结果处理器不在 descriptor：宿主 unregister 会早退，必须显式注销。
-    if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
-        (void)g_sdk->ticket_result.unregister_typed_result_handler(kSaveWriteHandlerId);
-    }
-    g_sdk = nullptr;
-    g_save_write = nullptr;
     save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
 }
 
@@ -440,7 +318,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     &plugin_on_resource_ready,
     kPorts,
-    2,
+    1,
     kSbHttpRoutes,
     static_cast<uint32_t>(sizeof(kSbHttpRoutes) / sizeof(kSbHttpRoutes[0])),
 };

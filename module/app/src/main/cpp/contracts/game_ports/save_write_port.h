@@ -8,7 +8,7 @@
 
 namespace qol::contracts {
 
-// save_backup owner 的存档写端点类别。
+// core.save owner 的存档写端点类别。
 constexpr int32_t kQolSaveWriteSave = 0;       // POST /api/system/save
 constexpr int32_t kQolSaveWriteEnterSlot = 1;  // POST /api/system/enter_slot
 constexpr int32_t kQolSaveWriteCreateSlot = 2; // POST /api/system/create_slot

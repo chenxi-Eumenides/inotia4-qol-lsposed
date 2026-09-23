@@ -262,9 +262,9 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
-        // 存档写端口为 save_backup owner 私有：其他插件不得注入，避免绕过 owner 直接写档。
+        // 存档写端口为 core.save owner 私有：其他插件不得注入，避免绕过 owner 直接写档。
         if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_WRITE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "save_backup") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.save") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
