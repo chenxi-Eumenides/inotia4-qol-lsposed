@@ -1,6 +1,8 @@
 package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpCommand
+import com.inotia4.qol.service.info.NativeHttpQuery
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
@@ -38,13 +40,17 @@ class SaveController {
 
     @PostMapping("/api/system/backup/export")
     fun backupExport(@RequestBody body: String): String {
-        val slot = JsonUtil.parseBody(body)?.optInt("slot", -1) ?: -1
+        val o = JsonUtil.parseBody(body)
+        val slot = o?.optInt("slot", -1) ?: -1
         if (slot !in 0..2) throw ApiException(StatusCode.SC_BAD_REQUEST, "bad slot")
-        return ControllerGuard.guard { ApiServices.action.backupExport(slot) }
+        return ControllerGuard.guard {
+            NativeHttpCommand.post("/api/system/backup/export", o?.toString() ?: "{}")
+        }
     }
 
     @GetMapping("/api/system/backup/list")
-    fun backupList(): String = ControllerGuard.guard { ApiServices.action.backupList() }
+    fun backupList(): String =
+        ControllerGuard.guard { NativeHttpQuery.get("/api/system/backup/list") }
 
     @PostMapping("/api/system/backup/import")
     fun backupImport(@RequestBody body: String): String {
@@ -53,14 +59,19 @@ class SaveController {
         val checksum = o.optString("checksum")
         if (slot !in 0..2) throw ApiException(StatusCode.SC_BAD_REQUEST, "bad slot")
         if (!CHECKSUM_PATTERN.matches(checksum)) throw ApiException(StatusCode.SC_BAD_REQUEST, "bad checksum")
-        return ControllerGuard.guard { ApiServices.action.backupImport(checksum, slot) }
+        return ControllerGuard.guard {
+            NativeHttpCommand.post("/api/system/backup/import", o.toString())
+        }
     }
 
     @PostMapping("/api/system/backup/delete")
     fun backupDelete(@RequestBody body: String): String {
-        val checksum = JsonUtil.parseBody(body)?.optString("checksum").orEmpty()
+        val o = JsonUtil.parseBody(body)
+        val checksum = o?.optString("checksum").orEmpty()
         if (!CHECKSUM_PATTERN.matches(checksum)) throw ApiException(StatusCode.SC_BAD_REQUEST, "bad checksum")
-        return ControllerGuard.guard { ApiServices.action.backupDelete(checksum) }
+        return ControllerGuard.guard {
+            NativeHttpCommand.post("/api/system/backup/delete", o?.toString() ?: "{}")
+        }
     }
 
     companion object {

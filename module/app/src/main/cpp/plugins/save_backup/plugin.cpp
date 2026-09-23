@@ -2,12 +2,15 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
+#include "../../contracts/http.h"
 #include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/save_facts.h"
 #include "../../contracts/game_ports/save_call_port.h"
+#include "bundle.h"
 #include "feature.h"
 #include "log.h"
 #include "ui/panel.h"
@@ -31,6 +34,14 @@ const contracts::CapabilityRequirement kRequires[] = {
     {
         contracts::kSaveFactsCapabilityId,
         {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
+    },
+    {
+        contracts::kHttpRegistryCapabilityId,
+        {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor},
+    },
+    {
+        contracts::kHttpDispatchCapabilityId,
+        {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor},
     },
 };
 
@@ -107,6 +118,120 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
+// ---- HTTP 面：备份四端点（owner=save_backup）----
+// 声明式注册：descriptor 的 http 列表由宿主在插件 enabled 时注册、停用时置路由墓碑摘除，
+// 复用 dispatch 的 query（GET）/command（POST）双槽语义；插件不自注册，故无需显式注销。
+enum class SbHttpRoute : uint8_t { kList, kExport, kImport, kDelete };
+
+bool sb_extract_int(const char* body, const char* key, int* out) {
+    const std::string pattern = std::string("\"") + key + "\":";
+    const char* p = std::strstr(body, pattern.c_str());
+    if (p == nullptr) return false;
+    p += pattern.size();
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') ++p;
+    char* end = nullptr;
+    const long value = std::strtol(p, &end, 10);
+    if (end == p) return false;
+    *out = static_cast<int>(value);
+    return true;
+}
+
+// checksum 恒为 ^[0-9a-f]{12}$（无转义字符），取到下一个双引号即可。
+bool sb_extract_string(const char* body, const char* key, std::string* out) {
+    const std::string pattern = std::string("\"") + key + "\":\"";
+    const char* p = std::strstr(body, pattern.c_str());
+    if (p == nullptr) return false;
+    p += pattern.size();
+    const char* end = std::strchr(p, '"');
+    if (end == nullptr) return false;
+    out->assign(p, static_cast<size_t>(end - p));
+    return true;
+}
+
+QolResult sb_http_error(contracts::HttpRes* response, uint16_t status, const char* message) {
+    const std::string body = std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
+    if (response == nullptr || response->body == nullptr ||
+        response->body_capacity < body.size()) {
+        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = status;
+    return contracts::error(status == 400 ? kQolErrInvalidArgument : kQolErrInternal, message,
+                            static_cast<uint32_t>(std::strlen(message)));
+}
+
+QolResult sb_http_body(contracts::HttpRes* response, const std::string& body) {
+    if (response == nullptr || response->body == nullptr ||
+        response->body_capacity < body.size()) {
+        return sb_http_error(response, 500, "http response buffer too small");
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = 200;
+    return contracts::ok();
+}
+
+// 入参校验与迁移前 Kotlin 一致：export/import 的 slot ∈ [0,2]；import/delete 的 checksum 为
+// ^[0-9a-f]{12}$。失败信封 {"ok":false,"error":...} 与 Kotlin ApiException 的 400 逐字节一致。
+QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
+                          void* ctx) {
+    if (request == nullptr || response == nullptr || ctx == nullptr) {
+        return sb_http_error(response, 400, "bad request");
+    }
+    const SbHttpRoute kind = *static_cast<const SbHttpRoute*>(ctx);
+    // HttpReq.body 无 null 结尾契约：拷贝到 std::string（自带结尾）再做字段提取。
+    const std::string body_text(
+        request->body != nullptr ? reinterpret_cast<const char*>(request->body) : "",
+        request->body_len);
+    const char* body = body_text.c_str();
+    int slot = -1;
+    switch (kind) {
+        case SbHttpRoute::kList:
+            return sb_http_body(response, save_backup_list_json());
+        case SbHttpRoute::kExport:
+            if (!sb_extract_int(body, "slot", &slot) || slot < 0 || slot > 2) {
+                return sb_http_error(response, 400, "bad slot");
+            }
+            return sb_http_body(response, save_backup_export_json(slot));
+        case SbHttpRoute::kImport: {
+            std::string checksum;
+            if (!sb_extract_string(body, "checksum", &checksum) ||
+                !::save_backup::valid_checksum(checksum)) {
+                return sb_http_error(response, 400, "bad checksum");
+            }
+            if (!sb_extract_int(body, "slot", &slot) || slot < 0 || slot > 2) {
+                return sb_http_error(response, 400, "bad slot");
+            }
+            return sb_http_body(response, save_backup_import_json(checksum.c_str(), slot));
+        }
+        case SbHttpRoute::kDelete: {
+            std::string checksum;
+            if (!sb_extract_string(body, "checksum", &checksum) ||
+                !::save_backup::valid_checksum(checksum)) {
+                return sb_http_error(response, 400, "bad checksum");
+            }
+            return sb_http_body(response, save_backup_delete_json(checksum.c_str()));
+        }
+    }
+    return sb_http_error(response, 400, "bad request");
+}
+
+const SbHttpRoute kSbHttpRouteKinds[] = {
+    SbHttpRoute::kList, SbHttpRoute::kExport, SbHttpRoute::kImport, SbHttpRoute::kDelete,
+};
+
+const contracts::HttpQueryHandlerDescriptor kSbHttpRoutes[] = {
+    {contracts::HttpMethod::kGet, "/api/system/backup/list", kPluginId, &sb_http_handler,
+     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[0])},
+    {contracts::HttpMethod::kPost, "/api/system/backup/export", kPluginId, &sb_http_handler,
+     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[1])},
+    {contracts::HttpMethod::kPost, "/api/system/backup/import", kPluginId, &sb_http_handler,
+     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[2])},
+    {contracts::HttpMethod::kPost, "/api/system/backup/delete", kPluginId, &sb_http_handler,
+     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[3])},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
     const void* save_facts_iface = nullptr;
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
@@ -178,7 +303,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2, kRequires,  // requires=ui_panels + save.facts
+    4, kRequires,  // requires=ui_panels + save.facts + http.registry + http.dispatch
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）
@@ -191,6 +316,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_resource_ready,
     kPorts,
     1,
+    kSbHttpRoutes,
+    static_cast<uint32_t>(sizeof(kSbHttpRoutes) / sizeof(kSbHttpRoutes[0])),
 };
 
 }  // namespace
