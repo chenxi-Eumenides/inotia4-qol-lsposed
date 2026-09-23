@@ -866,6 +866,7 @@ add_test(NAME world_facts_dispatch_tests COMMAND world_facts_dispatch_tests)
 add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp
     ${CPP_DIR}/plugins/character_facts/plugin.cpp
+    ${CPP_DIR}/plugins/character_facts/json_slice.cpp
 )
 target_include_directories(character_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -906,6 +907,23 @@ target_compile_features(quest_dispatch_tests PRIVATE cxx_std_17)
 set_target_properties(quest_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(quest_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME quest_dispatch_tests COMMAND quest_dispatch_tests)
+
+# P5-4-4：character_facts 15 条 /api/character/* GET query handler 的注册/快照/组合/404/
+# 非 world 降级/注销接缝。
+add_executable(character_facts_dispatch_tests
+    test_character_facts_dispatch.cpp
+    ${CPP_DIR}/plugins/character_facts/plugin.cpp
+    ${CPP_DIR}/plugins/character_facts/json_slice.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(character_facts_dispatch_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(character_facts_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(character_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(character_facts_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME character_facts_dispatch_tests COMMAND character_facts_dispatch_tests)
 
 # P5-4-3：system_facts 4 条 /api/system/{snapshot,game,info,game_frame} query handler 的
 # 注册/快照/身份降级/注销接缝。

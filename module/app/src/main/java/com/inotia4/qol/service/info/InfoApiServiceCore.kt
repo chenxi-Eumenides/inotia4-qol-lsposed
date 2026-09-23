@@ -10,7 +10,6 @@ import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
 import org.json.JSONArray
 import org.json.JSONObject
-import com.inotia4.qol.service.enrichment.NameInjector
 import com.inotia4.qol.service.contract.InfoApiService
 
 /**
@@ -30,115 +29,38 @@ class InfoApiServiceCore : InfoApiService {
     override fun currentMapDrops(): String = InfoMapQueries.drops()
     override fun currentMapDistance(tx: Int, ty: Int): String = InfoMapQueries.distance(tx, ty)
 
-    override fun party(): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        return NameInjector.withItemNames(pj)
-    }
+    // character 域 GET（party 12 + mercenary 3）已迁 owner（character_facts）：Kotlin 只做
+    // nativeHttpDispatch 透传，成功响应与 404/非 world 语义由 owner 快照与原生拼装生成
+    // （见 InfoCharacterQueries）。
+    override fun party(): String = InfoCharacterQueries.party()
 
-    override fun partyCount(): String {
-        val pj = playerJson()
-        if (isNativeError(pj)) return pj
-        return JsonUtil.wrap("count", JsonUtil.parseObj(pj)?.optInt("party_count", -1) ?: -1)
-    }
+    override fun partyCount(): String = InfoCharacterQueries.partyCount()
 
-    override fun partyLeader(): String {
-        val pj = playerJson()
-        if (isNativeError(pj)) return pj
-        val pj2 = partyJson()
-        if (isNativeError(pj2)) return pj2
-        val p = partyArr() ?: notFound()
-        val leaderSlot = JsonUtil.parseObj(pj)?.optInt("leader_slot", 0) ?: 0
-        val m = if (leaderSlot in 0 until p.length()) p.optJSONObject(leaderSlot) else null
-        return m?.let { NameInjector.withItemNames(it.toString()) } ?: notFound()
-    }
+    override fun partyLeader(): String = InfoCharacterQueries.partyLeader()
 
-    override fun partyMember(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        val p = partyArr() ?: notFound()
-        val m = p.optJSONObject(slot) ?: notFound()
-        return NameInjector.withItemNames(m.toString())
-    }
+    override fun partyMember(slot: Int): String = InfoCharacterQueries.partyMember(slot)
 
-    override fun partyMemberId(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        val m = memberObj(slot) ?: notFound()
-        val classIdx = m.optInt("class_idx", -1)
-        if (classIdx < 0) return notFound()
-        val out = JSONObject().put("id", classIdx)
-        StaticData.className(classIdx)?.let { out.put("id_name", it) }
-        return out.toString()
-    }
+    override fun partyMemberId(slot: Int): String = InfoCharacterQueries.partyMemberId(slot)
 
-    override fun partyMemberName(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        return memberString(slot, "name")
-    }
+    override fun partyMemberName(slot: Int): String = InfoCharacterQueries.partyMemberName(slot)
 
-    override fun partyMemberLevel(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        return memberInt(slot, "level")
-    }
+    override fun partyMemberLevel(slot: Int): String = InfoCharacterQueries.partyMemberLevel(slot)
 
-    // v0.5.13：状态聚合端点（api-reference §2.1 party/{slot}/status），数据源 member json + skills json
-    override fun partyMemberStatus(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        val m = memberObj(slot) ?: notFound()
-        val out = JSONObject()
-        m.optInt("hp", -1).takeIf { it >= 0 }?.let { out.put("hp", it) }
-        m.optInt("max_hp", -1).takeIf { it >= 0 }?.let { out.put("max_hp", it) }
-        m.optInt("mp", -1).takeIf { it >= 0 }?.let { out.put("mp", it) }
-        m.optInt("max_mp", -1).takeIf { it >= 0 }?.let { out.put("max_mp", it) }
-        m.optInt("exp", -1).takeIf { it >= 0 }?.let { out.put("exp", it) }
-        m.optInt("exp_next", -1).takeIf { it >= 0 }?.let { out.put("exp_next", it) }
-        m.optInt("status_point", -1).takeIf { it >= 0 }?.let { out.put("attribute_points", it) }
-        skillsArr()?.optJSONObject(slot)?.optInt("skill_points", -1)?.takeIf { it >= 0 }?.let { out.put("skill_points", it) }
-        return JsonUtil.wrap("status", out)
-    }
+    override fun partyMemberStatus(slot: Int): String = InfoCharacterQueries.partyMemberStatus(slot)
 
-    override fun partyMemberStats(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        return JsonUtil.wrap("stats", memberObj(slot)?.optJSONObject("stats"))
-    }
+    override fun partyMemberStats(slot: Int): String = InfoCharacterQueries.partyMemberStats(slot)
 
-    override fun partyMemberEquipment(slot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        val eq = memberObj(slot)?.optJSONArray("equipment") ?: notFound()
-        val arr = JSONArray()
-        for (i in 0 until eq.length()) {
-            eq.optJSONObject(i)?.let { NameInjector.injectItemName(it, true); arr.put(it) }
-        }
-        return JsonUtil.wrap("equipment", arr)
-    }
+    override fun partyMemberEquipment(slot: Int): String =
+        InfoCharacterQueries.partyMemberEquipment(slot)
 
-    override fun partyMemberEquip(slot: Int, equipSlot: Int): String {
-        val pj = partyJson()
-        if (isNativeError(pj)) return pj
-        val eq = memberObj(slot)?.optJSONArray("equipment") ?: notFound()
-        val it = eq.optJSONObject(equipSlot) ?: notFound()
-        NameInjector.injectItemName(it, true)
-        return it.toString()
-    }
+    override fun partyMemberEquip(slot: Int, equipSlot: Int): String =
+        InfoCharacterQueries.partyMemberEquip(slot, equipSlot)
 
-    override fun partyMemberSkills(slot: Int): String {
-        val sj = skillsJson()
-        if (isNativeError(sj)) return sj
-        val s = JsonUtil.parseArr(sj) ?: notFound()
-        val obj = s.optJSONObject(slot) ?: notFound()
-        NameInjector.injectSkillNames(obj)
-        return obj.toString()
-    }
+    override fun partyMemberSkills(slot: Int): String = InfoCharacterQueries.partyMemberSkills(slot)
 
-    override fun mercenary(): String = InfoMercenaryQueries.all()
-    override fun mercenaryList(): String = InfoMercenaryQueries.slots()
-    override fun mercenarySlot(slot: Int): String = InfoMercenaryQueries.slot(slot)
+    override fun mercenary(): String = InfoCharacterQueries.mercenary()
+    override fun mercenaryList(): String = InfoCharacterQueries.mercenaryList()
+    override fun mercenarySlot(slot: Int): String = InfoCharacterQueries.mercenarySlot(slot)
 
     // item/quest 查询已迁 owner（item_facts/quest）：Kotlin 只做 nativeHttpDispatch 透传，
     // 成功响应与冻结语义由 owner 快照与启动期静态 enrichment 生成（见 NativeHttpQuery）。
@@ -258,13 +180,6 @@ class InfoApiServiceCore : InfoApiService {
      */
     private fun isNativeError(json: String): Boolean = JsonUtil.parseObj(json)?.has("error") == true
 
-    private fun playerJson(): String = NativeBridge.nativeGetPlayerJson()
-
-    private fun partyJson(): String = NativeBridge.nativeGetPartyJson()
-
-    private fun partyArr(): JSONArray? = JsonUtil.parseArr(partyJson())
-
-
     private fun mapJson(): String = NativeBridge.nativeGetMapJson()
 
     private fun unitsJson(): String = NativeBridge.nativeGetUnitsJson()
@@ -301,26 +216,6 @@ class InfoApiServiceCore : InfoApiService {
     }
 
     private fun snapshotJson(): String = NativeBridge.nativeGetSnapshotJson()
-
-    private fun skillsJson(): String = NativeBridge.nativeGetSkillsJson()
-
-    private fun skillsArr(): JSONArray? = JsonUtil.parseArr(skillsJson())
-
-    private fun mercenariesJson(): String = NativeBridge.nativeGetMercenariesJson()
-
-    private fun memberObj(slot: Int): JSONObject? = partyArr()?.optJSONObject(slot)
-
-    private fun memberInt(slot: Int, key: String): String {
-        val m = memberObj(slot) ?: notFound()
-        if (!m.has(key)) return notFound()
-        return JsonUtil.wrap(key, m.optInt(key, -1))
-    }
-
-    private fun memberString(slot: Int, key: String): String {
-        val m = memberObj(slot) ?: notFound()
-        if (!m.has(key)) return notFound()
-        return JsonUtil.wrap(key, m.optString(key, ""))
-    }
 
     private fun attachMapStatic(mapId: Int): JSONObject? {
         if (mapId < 0) return null

@@ -30,6 +30,9 @@ enum class QolItemStaticTextKind : int32_t {
     kItemType = 1,
     kOptionName = 2,
     kEnchantEffect = 3,
+    // 技能名（action_id → 名称）：与物品名同为启动期静态文本；character_facts 的
+    // party/{slot}/skills 富化需要它，复用同一行式下发通道以避免为单条查询新增 JNI。
+    kSkillName = 4,
 };
 // 返回的是 JSON 已转义、不含外层引号的文本指针；存储只在启动期写入，运行期只读。
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);

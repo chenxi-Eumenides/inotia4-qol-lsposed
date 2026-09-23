@@ -407,6 +407,24 @@ object StaticData {
             val effect = enchantName(i) ?: continue
             if (effect.isNotEmpty()) appendStaticEntry(sb, 'E', i, effect)
         }
+        // 技能名（StaticData.skillName 口径：text[1220+action_id]，空名称不下发）；
+        // character_facts 的 party/{slot}/skills 富化复用同一行式表。
+        val textJson = read("text/zh-Hans.json")
+        if (textJson != null) {
+            val textArr = try {
+                JSONArray(textJson)
+            } catch (e: Exception) {
+                null
+            }
+            if (textArr != null) {
+                var action = 0
+                while (action < 2048 && 1220 + action < textArr.length()) {
+                    val name = textArr.optString(1220 + action, "")
+                    if (name.isNotEmpty()) appendStaticEntry(sb, 'S', action, name)
+                    action++
+                }
+            }
+        }
         return sb.toString()
     }
 

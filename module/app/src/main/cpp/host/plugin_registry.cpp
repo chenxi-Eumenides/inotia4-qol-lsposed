@@ -34,6 +34,7 @@
 #if !QOL_KERNEL_ONLY
 #include "game/adapter_ports/character_port.h"
 #include "game/adapter_ports/character_extras_port.h"
+#include "game/adapter_ports/character_http_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
@@ -189,6 +190,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
     }
     if (id == contracts::QolPortId::QOL_PORT_SYSTEM) {
         const auto& port = qol::game::system_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_HTTP) {
+        const auto& port = qol::game::character_http_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }

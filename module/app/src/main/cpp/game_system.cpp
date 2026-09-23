@@ -4,6 +4,8 @@
 #include "game_system.h"
 
 #include "game/access/game_access.h"
+#include "game/adapter_ports/item_port.h"
+#include "game/state/character_http.h"
 #include "game/state/game_state.h"
 #include "game/state/system_snapshot.h"
 #include "game_world.h"
@@ -364,5 +366,372 @@ std::string build_system_info_json(const std::string& version, const std::string
 std::string build_system_frame_json() {
     return "{\"frame\":" + std::to_string(data_frame_count()) + "}";
 }
+
+// ---- character_facts owner 响应体拼装（批 4-4）----
+//
+// 复刻迁移前 Kotlin NameInjectorCore 对 character 域原生 JSON 的加工：
+// - party 成员：injectTypeName/injectClassName/injectEquipmentNames + restructureRole
+// - 装备：injectItemName(item, true) 内的 restructureItem 字段重排
+// - skills：injectSkillNames
+// 直接读游戏内存按目标字段序输出，避免在 legacy 侧引入 JSON 解析器（插件不得依赖 infra）。
+
+namespace {
+
+const char* const kCharacterClassNames[6] = {"黑暗骑士", "忍者", "黑魔导", "祭司",
+                                             "暗影猎手", "狂战士"};
+const char* const kCharacterStatNames[5] = {"力量", "敏捷", "体力", "智力", "精力"};
+
+// 启动期由 Kotlin 下发的静态文本表（与 item_facts 同源）；无记录返回 nullptr。
+const char* character_static_text(contracts::QolItemStaticTextKind kind, int32_t id) {
+    const contracts::QolItemPort& port = item_port();
+    if (port.read.static_text == nullptr) return nullptr;
+    const char* text = nullptr;
+    if (!contracts::succeeded(port.read.static_text(static_cast<int32_t>(kind), id, &text))) {
+        return nullptr;
+    }
+    return text;
+}
+
+// 迁移前 StaticData.rarityPrefix（raw_rarity → 品质前缀）。
+const char* character_rarity_prefix(long long raw_rarity) {
+    switch (raw_rarity) {
+        case 0: return "生锈的 ";
+        case 1: return "陈旧的 ";
+        case 3: return "太古的 ";
+        case 4: return "锐利的 ";
+        case 5: return "打磨的 ";
+        case 6: return "工匠的 ";
+        case 7: return "钢铁 ";
+        case 8: return "钛金 ";
+        case 9: return "秘银 ";
+        default: return "";
+    }
+}
+
+// 迁移前 StaticData.rarityTierName（GetRarity 0-4 → 白/绿/蓝/黄/紫）。
+const char* character_rarity_tier(long long rarity) {
+    switch (rarity) {
+        case 0: return "白";
+        case 1: return "绿";
+        case 2: return "蓝";
+        case 3: return "黄";
+        case 4: return "紫";
+        default: return "";
+    }
+}
+
+// magic_rate 显示 = 原始值/100（110 → 1.1）；org.json 对整数倍输出 "0"。
+std::string character_magic_rate_text(long long value) {
+    const long long integer = value / 100;
+    const long long remainder = value % 100;
+    if (remainder == 0) return std::to_string(integer);
+    if (remainder % 10 == 0) {
+        return std::to_string(integer) + "." + static_cast<char>('0' + remainder / 10);
+    }
+    std::string fraction = std::to_string(remainder);
+    if (fraction.size() == 1) fraction = "0" + fraction;
+    return std::to_string(integer) + "." + fraction;
+}
+
+// 迁移前 NameInjectorCore.buildOptionList：词缀链表按 type（0=词缀 1=宝石）过滤。
+std::string character_option_list(void* item, int type) {
+    std::string out = "[";
+    bool first = true;
+    uint8_t* node = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(item) + I_OPTION_LIST);
+    int count = 0;
+    while (node != nullptr && count < 32) {
+        const uint16_t raw = *reinterpret_cast<uint16_t*>(node + O_INDEX);
+        const int node_type = (raw >> 13) & 0x7;
+        const int id = raw & 0x7F;
+        const int value = *reinterpret_cast<int16_t*>(node + O_VALUE);
+        node = *reinterpret_cast<uint8_t**>(node + O_NEXT);
+        ++count;
+        if (node_type != type) continue;
+        const char* name =
+            character_static_text(contracts::QolItemStaticTextKind::kOptionName, id);
+        if (!first) out += ",";
+        first = false;
+        out += "{\"id\":" + std::to_string(id) + ",\"name\":\"";
+        out += name != nullptr ? name : "";
+        out += "\",\"value\":" + std::to_string(value) + "}";
+    }
+    out += "]";
+    return out;
+}
+
+// 迁移前 NameInjectorCore.restructureItem 的字段顺序与取值（入参为原生装备物品指针）。
+void append_character_equipment_item(std::string& out, void* item, int slot) {
+    const uint8_t* it = reinterpret_cast<const uint8_t*>(item);
+    const uint16_t flags = *reinterpret_cast<const uint16_t*>(it + I_TYPE);
+    const long long raw_rarity = (flags >> 2) & 0x0F;
+    const bool has_category = fn_get_bit != nullptr;
+    const long long category = has_category ? fn_get_bit(flags, 15, 6) : -1;
+    const bool has_count = fn_get_cumulate_count != nullptr;
+    const long long count = has_count ? fn_get_cumulate_count(item) : 0;
+    const bool has_rarity = fn_get_rarity != nullptr;
+    const long long rarity = has_rarity ? fn_get_rarity(item) : 0;
+    const bool has_damage = fn_get_damage != nullptr;
+    const long long damage = has_damage ? fn_get_damage(item) : 0;
+    const bool has_defense = fn_get_defense != nullptr;
+    const long long defense = has_defense ? fn_get_defense(item) : 0;
+    const long long magic_rate = it[I_MAGIC_RATE];
+    const long long need_level = fn_item_get_ability_level != nullptr
+                                     ? fn_item_get_ability_level(item)
+                                     : 0;
+    const long long socket_total = (it[I_SOCKET] >> 4) & 0x0F;
+    const uint16_t enchant = *reinterpret_cast<const uint16_t*>(it + I_ENCHANT);
+    const bool chaos = (enchant & 1) != 0;
+    const long long enchant_id = (enchant >> 11) & 0x1F;
+    const long long enchant_level = (enchant >> 6) & 0x1F;
+    const uint32_t count_bits = *reinterpret_cast<const uint32_t*>(it + I_COUNT);
+    const long long chaos_level = (count_bits >> 0) & 0xFF;
+    const long long chaos_rate = (count_bits >> 8) & 0xFF;
+
+    const char* base_name =
+        category >= 0 ? character_static_text(contracts::QolItemStaticTextKind::kItemName,
+                                              static_cast<int32_t>(category))
+                      : nullptr;
+
+    out += "{";
+    bool first = true;
+    auto field = [&out, &first](const char* name) {
+        if (!first) out += ",";
+        first = false;
+        out += "\"";
+        out += name;
+        out += "\":";
+    };
+    field("slot");
+    out += std::to_string(slot);
+    field("name");
+    if (base_name != nullptr) {
+        out += "\"" + std::string(character_rarity_prefix(raw_rarity)) + base_name + "\"";
+    } else {
+        out += "null";
+    }
+    field("category");
+    if (has_category) out += std::to_string(category); else out += "null";
+    field("count");
+    if (has_count) out += std::to_string(count); else out += "null";
+    field("item_type");
+    {
+        const char* type_text =
+            category >= 0 ? character_static_text(contracts::QolItemStaticTextKind::kItemType,
+                                                  static_cast<int32_t>(category))
+                          : nullptr;
+        out += "\"";
+        out += type_text != nullptr ? type_text : "consumable";
+        out += "\"";
+    }
+    field("need_level");
+    out += std::to_string(need_level < 0 ? 0 : need_level);
+    field("rarity");
+    if (has_rarity) out += std::to_string(rarity); else out += "null";
+    field("rarity_tier");
+    if (has_rarity) {
+        const char* tier = character_rarity_tier(rarity);
+        if (tier[0] != '\0') {
+            out += "\"";
+            out += tier;
+            out += "\"";
+        } else {
+            out += "null";
+        }
+    } else {
+        out += "null";
+    }
+    field("base");
+    out += "{\"damage\":";
+    if (has_damage) out += std::to_string(damage); else out += "null";
+    out += ",\"defense\":";
+    if (has_defense) out += std::to_string(defense); else out += "null";
+    out += ",\"magic_rate\":" + character_magic_rate_text(magic_rate) + "}";
+    field("bonus");
+    out += character_option_list(item, 0);
+    field("gem");
+    out += "{\"total_slots\":" + std::to_string(socket_total) +
+           ",\"slots\":" + character_option_list(item, 1) + "}";
+    field("chaos");
+    out += "{\"is_chaos\":" + std::string(chaos ? "true" : "false");
+    out += ",\"level\":" + std::to_string(chaos_level);
+    out += ",\"rate\":" + std::to_string(chaos_rate) + "}";
+    field("enchant");
+    out += "{\"id\":" + std::to_string(enchant_id);
+    out += ",\"level\":" + std::to_string(enchant_level);
+    out += ",\"effect\":";
+    if (enchant_id > 0) {
+        const char* effect = character_static_text(contracts::QolItemStaticTextKind::kEnchantEffect,
+                                                   static_cast<int32_t>(enchant_id));
+        if (effect != nullptr) {
+            out += "\"";
+            out += effect;
+            out += "\"";
+        } else {
+            out += "null";
+        }
+    } else {
+        out += "null";
+    }
+    out += "}";
+    out += "}";
+}
+
+// 迁移前 NameInjectorCore.restructureRole 的字段顺序（含类型/职业名与 main_stats 拆分）。
+void append_character_role_enriched(std::string& out, void* ch) {
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const int type = static_cast<int>(reinterpret_cast<const int8_t*>(ch)[C_TYPE]);
+    const int class_idx = static_cast<int>(reinterpret_cast<const int8_t*>(ch)[C_CLASS]);
+    out += "{";
+    bool first = true;
+    auto field = [&out, &first](const char* name) {
+        if (!first) out += ",";
+        first = false;
+        out += "\"";
+        out += name;
+        out += "\":";
+    };
+    if (fn_get_name != nullptr) {
+        field("name");
+        out += "\"" + json_escape(fn_get_name(ch)) + "\"";
+    }
+    if (type == 0) {
+        field("type_name");
+        out += "\"主角\"";
+    } else if (type == 1) {
+        field("type_name");
+        out += "\"佣兵\"";
+    }
+    if (class_idx >= 0 && class_idx <= 5) {
+        field("class_name");
+        out += "\"" + std::string(kCharacterClassNames[class_idx]) + "\"";
+    }
+    field("level");
+    out += std::to_string(static_cast<int>(b[C_LEVEL]));
+    field("hp");
+    out += std::to_string(*reinterpret_cast<const int32_t*>(b + C_HP));
+    field("max_hp");
+    out += std::to_string(char_max_hp(ch));
+    field("mp");
+    out += std::to_string(*reinterpret_cast<const int32_t*>(b + C_MP));
+    field("max_mp");
+    out += std::to_string(char_max_mp(ch));
+    field("exp");
+    out += std::to_string(*reinterpret_cast<const int32_t*>(b + C_EXP));
+    field("exp_next");
+    out += std::to_string(char_next_exp_cached(ch));
+    // main_stats 紧跟 exp_next（restructureRole 语义），total=char_stat_total、base=fn_get_stat_base。
+    field("main_stats");
+    out += "[";
+    for (int i = 0; i < 5; ++i) {
+        if (i > 0) out += ",";
+        const int total = char_stat_total(ch, i);
+        const int base = fn_get_stat_base != nullptr ? fn_get_stat_base(ch, i) : 0;
+        out += "{\"stat_name\":\"";
+        out += kCharacterStatNames[i];
+        out += "\",\"base_stat\":" + std::to_string(base);
+        out += ",\"additional_stat\":" + std::to_string(total - base) + "}";
+    }
+    out += "]";
+    if (fn_get_status_point != nullptr) {
+        field("status_point");
+        out += std::to_string(fn_get_status_point(ch));
+    }
+    field("equipment");
+    out += "[";
+    for (int slot = 0; slot < static_cast<int>(C_EQUIP_SLOTS); ++slot) {
+        if (slot > 0) out += ",";
+        void* item = fn_get_equip != nullptr ? fn_get_equip(ch, slot) : nullptr;
+        if (item == nullptr) {
+            out += "null";
+        } else {
+            append_character_equipment_item(out, item, slot);
+        }
+    }
+    out += "]";
+    field("type");
+    out += std::to_string(type);
+    field("class_idx");
+    out += std::to_string(class_idx);
+    field("name_id");
+    out += std::to_string(*reinterpret_cast<const uint16_t*>(b + C_NAME_ID));
+    field("stats");
+    out += "{";
+    for (int a = 0; a < 32; ++a) {
+        if (a > 0) out += ",";
+        out += "\"" + std::to_string(a) + "\":";
+        out += std::to_string(*reinterpret_cast<const int32_t*>(b + C_ATTR + a * 4));
+    }
+    out += "}";
+    out += "}";
+}
+
+}  // namespace
+
+std::string build_character_party_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "[";
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) s += ",";
+        void* ch = fn_get_member != nullptr ? fn_get_member(i) : nullptr;
+        if (ch == nullptr) {
+            s += "null";
+            continue;
+        }
+        append_character_role_enriched(s, ch);
+    }
+    s += "]";
+    return s;
+}
+
+std::string build_character_skills_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "[";
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) s += ",";
+        void* ch = fn_get_member != nullptr ? fn_get_member(i) : nullptr;
+        if (ch == nullptr) {
+            s += "null";
+            continue;
+        }
+        uint8_t* base_ch = reinterpret_cast<uint8_t*>(ch);
+        s += "{\"role\":" + std::to_string(i);
+        s += ",\"skills\":[";
+        uint8_t* node = *reinterpret_cast<uint8_t**>(base_ch + C_SKILL_LIST);
+        bool first = true;
+        int count = 0;
+        while (node != nullptr && count < 64) {
+            const uint16_t action_id = *reinterpret_cast<uint16_t*>(node + S_ACTION_ID);
+            if (!first) s += ",";
+            first = false;
+            s += "{\"action_id\":" + std::to_string(action_id);
+            s += ",\"level\":" + std::to_string(node[S_LEVEL]);
+            if (fn_get_act_max_level != nullptr) {
+                s += ",\"max_level\":" + std::to_string(fn_get_act_max_level(ch, action_id));
+            }
+            const char* skill_name =
+                character_static_text(contracts::QolItemStaticTextKind::kSkillName, action_id);
+            if (skill_name != nullptr) {
+                s += ",\"skill_name\":\"" + std::string(skill_name) + "\"";
+            }
+            s += "}";
+            node = *reinterpret_cast<uint8_t**>(node + S_NEXT);
+            ++count;
+        }
+        s += "]";
+        s += ",\"unlock_bitmap\":" +
+             std::to_string(*reinterpret_cast<uint16_t*>(base_ch + C_SKILL_BMP));
+        uint8_t* active = *reinterpret_cast<uint8_t**>(base_ch + C_ACTIVE_SKILL);
+        s += ",\"active_skill_id\":" +
+             std::to_string(active != nullptr ? *reinterpret_cast<uint16_t*>(active + S_ACTION_ID)
+                                              : -1);
+        s += ",\"skill_points\":" +
+             std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_SKILL_POINTS]));
+        s += "}";
+    }
+    s += "]";
+    return s;
+}
+
+std::string build_character_mercenaries_json() { return data_mercenaries_json(); }
 
 }  // namespace qol::game

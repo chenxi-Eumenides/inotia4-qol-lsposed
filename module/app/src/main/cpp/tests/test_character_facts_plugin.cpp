@@ -1,4 +1,5 @@
 #include "contracts/character_facts.h"
+#include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "plugins/character_facts/plugin.h"
 
@@ -31,18 +32,26 @@ QolResult fake_active(const void*, int32_t* out_active) {
     return qol::contracts::ok();
 }
 
+// install 只校验函数指针非空，不在此测试中调用。
+QolResult fake_body_json(int32_t, char*, uint32_t, uint32_t*) {
+    return qol::contracts::ok();
+}
+
 int main() {
     const auto& descriptor = qol::features::character_facts::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "character_facts") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 0);
+    CHECK(descriptor.requires_count == 2 && descriptor.optional_count == 0);
+    CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id,
                       qol::contracts::kCharacterFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
-    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER);
+    CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_HTTP);
 
     const auto* api = static_cast<const qol::contracts::CharacterFactsApi*>(
         descriptor.provides[0].iface);
@@ -51,7 +60,8 @@ int main() {
 
     qol::contracts::QolHostSdk sdk{};
     const qol::contracts::QolCharacterPort port{{1, 0}, {&fake_type, &fake_active}};
-    const void* ports[] = {&port};
+    const qol::contracts::QolCharacterHttpPort http_port{{1, 0}, {&fake_body_json}};
+    const void* ports[] = {&port, &http_port};
     qol::contracts::PluginContext ctx{
         qol::contracts::PLUGIN_CONTEXT_STRUCT_SIZE,
         qol::contracts::kHostSdkMajor,
@@ -60,7 +70,7 @@ int main() {
         nullptr,
         "character_facts",
         ports,
-        1,
+        2,
     };
 
     CHECK(descriptor.install(ctx) == 0);

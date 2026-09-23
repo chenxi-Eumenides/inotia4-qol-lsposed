@@ -21,8 +21,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 51 |
-| `game` | 95 |
+| `contracts` | 52 |
+| `game` | 98 |
 | `hooks` | 10 |
 | `host` | 44 |
 | `infra` | 39 |
@@ -40,7 +40,7 @@
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 17 |
-| `plugins/character_facts` | 2 |
+| `plugins/character_facts` | 5 |
 | `plugins/core.api` | 3 |
 | `plugins/core.ui` | 17 |
 | `plugins/craft_facts` | 2 |
@@ -63,7 +63,7 @@
 | `plugins/text_layer` | 6 |
 | `plugins/world_facts` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **476** |
+| **合计** | **483** |
 
 ### 1.2 迁移期映射摘要
 
@@ -118,10 +118,10 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 46 |
+| `host` | `game` | 47 |
 | `host` | `infra` | 39 |
 | `host` | `contracts` | 38 |
-| `game` | `contracts` | 34 |
+| `game` | `contracts` | 36 |
 | `plugins/extension_bag` | `contracts` | 33 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 20 |
@@ -229,7 +229,7 @@
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 17 |
-| `character_facts` | `plugins/character_facts` | 2 |
+| `character_facts` | `plugins/character_facts` | 5 |
 | `core.api` | `plugins/core.api` | 3 |
 | `core.ui` | `plugins/core.ui` | 17 |
 | `craft_facts` | `plugins/craft_facts` | 2 |
