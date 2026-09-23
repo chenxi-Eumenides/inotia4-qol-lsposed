@@ -269,9 +269,9 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
-        // 世界写端口为 world_teleport owner 私有：其他插件不得注入，避免绕过 owner 直接写世界态。
+        // 世界写端口为 core.world owner 私有：其他插件不得注入，避免绕过 owner 直接写世界态。
         if (requirement.id == contracts::QolPortId::QOL_PORT_WORLD_WRITE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "world_teleport") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.world") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

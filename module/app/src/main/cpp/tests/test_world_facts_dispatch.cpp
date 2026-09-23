@@ -7,6 +7,7 @@
 
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/world_port.h"
+#include "contracts/game_ports/world_write_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "contracts/result.h"
@@ -100,8 +101,21 @@ const QolWorldPortReadApi kFakeRead{
 
 const QolWorldPort kFakePort{qol::contracts::kQolPortWorldVersion, kFakeRead};
 
-// 插件描述符声明 1 个端口；这里提供与宿主装配同形的静态端口数组。
-const void* const kPortArray[] = {&kFakePort};
+// 世界写端口假实现：仅满足插件 install 的端口校验；本测试不驱动写路径。
+QolResult fake_world_write(int32_t, int32_t, int32_t, int32_t, int32_t, char*, uint32_t,
+                           uint32_t*) {
+    return qol::contracts::ok();
+}
+QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler, void*) {
+    return qol::contracts::ok();
+}
+QolResult fake_unregister_result(uint32_t) { return qol::contracts::ok(); }
+const qol::contracts::QolWorldWritePortReadApi kFakeWriteRead{&fake_world_write};
+const qol::contracts::QolWorldWritePort kFakeWritePort{
+    qol::contracts::kQolPortWorldWriteVersion, kFakeWriteRead};
+
+// 插件描述符声明 2 个端口（世界读 + 世界写）；这里提供与宿主装配同形的静态端口数组。
+const void* const kPortArray[] = {&kFakePort, &kFakeWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -138,6 +152,8 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
+    sdk.ticket_result = qol::contracts::QolTicketResultApi{
+        &fake_register_result, &fake_unregister_result, nullptr, nullptr};
     return sdk;
 }
 
@@ -149,6 +165,11 @@ const qol::contracts::HttpRoute kRoutes[] = {
     {qol::contracts::HttpMethod::kGet, "/api/world/map/interactives", "core.world", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/world/map/drops", "core.world", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/world/map/distance", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/world/movement/move_to", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/world/movement/walk_dir", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/world/movement/stop_move", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/world/movement/interact_with", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/movement/teleport", "core.world", 0, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -160,7 +181,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.world";
     ctx.ports = kPortArray;
-    ctx.port_count = 1;
+    ctx.port_count = 2;
     return ctx;
 }
 

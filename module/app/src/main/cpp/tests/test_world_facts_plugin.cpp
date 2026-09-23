@@ -27,10 +27,10 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kWorldFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
-    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD);
     CHECK(descriptor.ports[0].range.major == 1 && descriptor.ports[0].range.min_minor == 1);
-    CHECK(descriptor.http_query_count == 7 && descriptor.http_queries != nullptr);
+    CHECK(descriptor.http_query_count == 12 && descriptor.http_queries != nullptr);
 
     const auto* api = static_cast<const qol::contracts::WorldFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->state != nullptr);

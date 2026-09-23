@@ -8,7 +8,7 @@
 
 namespace qol::contracts {
 
-// world_teleport owner 的世界写端点类别（参数经通用 a/b/c/d 传递）。
+// core.world owner 的世界写端点类别（参数经通用 a/b/c/d 传递）。
 constexpr int32_t kQolWorldWriteMoveTo = 0;    // POST /api/world/movement/move_to（a=x, b=y）
 constexpr int32_t kQolWorldWriteWalkDir = 1;   // POST /api/world/movement/walk_dir（a=direction）
 constexpr int32_t kQolWorldWriteStopMove = 2;  // POST /api/world/movement/stop_move
