@@ -1363,8 +1363,8 @@
       "elapsed": 0.058,
       "ok": true,
       "verdict": "pass",
-      "reason": "写盘保存(有益)",
-      "body": "{\"ok\":true,\"state\":{\"money\":28550,\"map_id\":20,\"x\":328,\"y\":136,\"active_quest\":0,\"leader_slot\":0,\"party_count\":3}}",
+      "reason": "写盘保存(有益):已迁 save_backup owner，返回票据，结果经 tickets/{id} 回取",
+      "body": "{\"ok\":true,\"ticket\":<id>}",
       "error": null
     },
     {

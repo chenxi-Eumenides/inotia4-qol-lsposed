@@ -197,7 +197,7 @@ ROUTES = [
     {"m": "GET", "p": "/api/quest/{id}"},
     {"m": "GET", "p": "/api/quest/completed"},
     # ---- SaveController (3) ----
-    {"m": "POST", "p": "/api/system/save", "note": "写盘保存(有益)"},
+    {"m": "POST", "p": "/api/system/save", "note": "写盘保存(有益):已迁 save_backup owner，返回票据，结果经 tickets/{id} 回取"},
     {"m": "POST", "p": "/api/system/enter_slot", "body": MISSING, "note": "危险:切存档槽,缺 slot"},
     {"m": "POST", "p": "/api/system/create_slot", "body": MISSING, "note": "危险:建存档,缺 slot/class_idx"},
     {"m": "POST", "p": "/api/system/backup/export", "body": BAD_JSON, "note": "参数校验:避免导出存档"},

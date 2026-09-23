@@ -35,6 +35,7 @@
 #include "game/adapter_ports/character_port.h"
 #include "game/adapter_ports/character_extras_port.h"
 #include "game/adapter_ports/character_http_port.h"
+#include "game/adapter_ports/save_write_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
@@ -198,6 +199,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_SAVE_WRITE) {
+        const auto& port = qol::game::save_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
 #else
     (void)id;
     (void)out;
@@ -246,6 +252,13 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "custom_recipe") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 存档写端口为 save_backup owner 私有：其他插件不得注入，避免绕过 owner 直接写档。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "save_backup") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

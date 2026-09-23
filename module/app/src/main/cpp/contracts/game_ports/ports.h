@@ -25,6 +25,7 @@ enum class QolPortId : uint32_t {
     QOL_PORT_ITEM_EXTRAS = 14,
     QOL_PORT_SYSTEM = 15,
     QOL_PORT_CHARACTER_HTTP = 16,
+    QOL_PORT_SAVE_WRITE = 17,
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 1};
@@ -43,6 +44,7 @@ constexpr QolVersion kQolPortInventoryExtrasVersion{1, 0};
 constexpr QolVersion kQolPortItemExtrasVersion{1, 0};
 constexpr QolVersion kQolPortSystemVersion{1, 0};
 constexpr QolVersion kQolPortCharacterHttpVersion{1, 0};
+constexpr QolVersion kQolPortSaveWriteVersion{1, 0};
 
 struct QolPortRequirement {
     QolPortId id;
@@ -83,6 +85,8 @@ constexpr const char* port_id_name(QolPortId id) {
             return "QOL_PORT_SYSTEM";
         case QolPortId::QOL_PORT_CHARACTER_HTTP:
             return "QOL_PORT_CHARACTER_HTTP";
+        case QolPortId::QOL_PORT_SAVE_WRITE:
+            return "QOL_PORT_SAVE_WRITE";
     }
     return "QOL_PORT_UNKNOWN";
 }

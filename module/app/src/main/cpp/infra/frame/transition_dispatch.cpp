@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -35,9 +36,13 @@ uint64_t g_done_seq = 0;                 // 仅持锁访问
 std::string g_result;                    // 仅持锁访问
 std::atomic<bool> g_in_flight{false};
 std::atomic<bool> g_tick_registered{false};
+// 逻辑相位所在线程（transition_tick 每帧记录）：transition_run_inline 据此校验调用位置，
+// 防止在非游戏主线程直接执行游戏状态机。
+std::atomic<std::thread::id> g_logic_thread{};
 
 // 逻辑相位消费：游戏主线程取走 pending、锁外执行、回写结果并唤醒 HTTP 线程。
 bool transition_tick(int64_t /*frame*/, void* /*ctx*/) {
+    g_logic_thread.store(std::this_thread::get_id(), std::memory_order_release);
     std::shared_ptr<PendingTask> task;
     {
         std::lock_guard<std::mutex> lock(g_mtx);
@@ -117,6 +122,34 @@ bool transition_run(std::function<void(std::string*)> fn, int timeout_ms, std::s
     }
 
     if (result != nullptr) *result = g_result;
+    g_in_flight.store(false, std::memory_order_release);
+    return true;
+}
+
+bool transition_run_inline(std::function<void(std::string*)> fn, std::string* result) {
+    if (result != nullptr) result->clear();
+    if (!fn) {
+        if (result != nullptr) *result = "transition function required";
+        return false;
+    }
+    if (!frame_host_anchors_installed()) {
+        if (result != nullptr) *result = "logic anchor not installed";
+        return false;
+    }
+    // 只允许逻辑相位（命令排空所在的同一线程/相位）执行：否则游戏状态机跑在错误线程。
+    if (g_logic_thread.load(std::memory_order_acquire) != std::this_thread::get_id()) {
+        if (result != nullptr) *result = "not in logic phase";
+        return false;
+    }
+    // 与 transition_run 共用单飞门：不排队，抢不到立即 busy。
+    const bool was_in_flight = g_in_flight.exchange(true, std::memory_order_acq_rel);
+    if (transition_detail::submit_decision(was_in_flight) ==
+        transition_detail::SubmitDecision::kBusy) {
+        if (result != nullptr) *result = "transition in progress";
+        return false;
+    }
+    // 已在逻辑相位：直接执行，无跨帧派发、无阻塞等待。
+    fn(result);
     g_in_flight.store(false, std::memory_order_release);
     return true;
 }

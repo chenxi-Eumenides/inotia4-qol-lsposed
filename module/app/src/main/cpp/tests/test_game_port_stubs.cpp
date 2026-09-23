@@ -14,6 +14,7 @@
 #include "contracts/game_ports/inventory_extras_port.h"
 #include "contracts/game_ports/item_extras_port.h"
 #include "contracts/game_ports/system_port.h"
+#include "contracts/game_ports/save_write_port.h"
 
 namespace qol::game {
 namespace {
@@ -38,6 +39,7 @@ const contracts::QolCharacterExtrasPort kCharacterExtrasPort{{1, 0}, {}};
 const contracts::QolInventoryExtrasPort kInventoryExtrasPort{{1, 0}, {}};
 const contracts::QolItemExtrasPort kItemExtrasPort{{1, 0}, {}};
 const contracts::QolSystemPort kSystemPort{{1, 0}, {}};
+const contracts::QolSaveWritePort kSaveWritePort{{1, 0}, {}};
 
 }  // namespace
 
@@ -65,5 +67,6 @@ const contracts::QolInventoryExtrasPort& inventory_extras_port() {
 }
 const contracts::QolItemExtrasPort& item_extras_port() { return kItemExtrasPort; }
 const contracts::QolSystemPort& system_port() { return kSystemPort; }
+const contracts::QolSaveWritePort& save_write_port() { return kSaveWritePort; }
 
 }  // namespace qol::game

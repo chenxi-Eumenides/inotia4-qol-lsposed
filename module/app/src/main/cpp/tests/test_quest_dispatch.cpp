@@ -13,6 +13,7 @@
 #include "contracts/world_facts.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "infra/commands.h"
 #include "plugins/quest/plugin.h"
 
 #include <cstdint>
@@ -98,11 +99,22 @@ QolResult fake_static_ready(int32_t* out) {
 
 QolResult fake_set_state(uint32_t, int32_t) { return qol::contracts::ok(); }
 
+QolResult fake_quit_result(int32_t, char* out, uint32_t capacity, uint32_t* out_size) {
+    static const char kJson[] = "{\"ok\":true,\"state\":{\"money\":0}}";
+    const uint32_t len = sizeof(kJson) - 1;
+    if (out == nullptr || out_size == nullptr || capacity < len) {
+        return qol::contracts::error(1, "small", 5);
+    }
+    std::memcpy(out, kJson, len);
+    *out_size = len;
+    return qol::contracts::ok();
+}
+
 const QolQuestPort kFakePort{
     qol::contracts::kQolPortQuestVersion,
     {&fake_state, &fake_active_slot_count, &fake_active_slot_id, &fake_total_count,
      &fake_quest_state, &fake_is_complete, &fake_fragment, &fake_static_ready},
-    {&fake_set_state},
+    {&fake_set_state, &fake_quit_result},
 };
 
 const void* const kPortArray[] = {&kFakePort};
@@ -124,6 +136,17 @@ QolResult fake_register_typed_handler(uint32_t, qol::contracts::QolTypedCommandH
     return qol::contracts::ok();
 }
 QolResult fake_unregister_typed_handler(uint32_t) { return qol::contracts::ok(); }
+
+// 票据结果面：本测试不校验结果通道（由 infra_config_commands_tests 覆盖），只保证 install 守卫通过。
+QolResult fake_register_typed_result_handler(uint32_t,
+                                             qol::contracts::QolTypedResultCommandHandler, void*) {
+    return qol::contracts::ok();
+}
+QolResult fake_unregister_typed_result_handler(uint32_t) { return qol::contracts::ok(); }
+QolResult fake_read_result(qol::contracts::QolCommandTicket, char*, uint32_t, uint32_t*) {
+    return qol::contracts::error(kQolErrNotFound, "no result", 9);
+}
+int32_t fake_ticket_state(qol::contracts::QolCommandTicket) { return 0; }
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -163,6 +186,9 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.commands.unregister_typed_handler = &fake_unregister_typed_handler;
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
+    sdk.ticket_result = {&fake_register_typed_result_handler,
+                         &fake_unregister_typed_result_handler, &fake_read_result,
+                         &fake_ticket_state};
     return sdk;
 }
 
@@ -178,6 +204,7 @@ const qol::contracts::HttpRoute kRoutes[] = {
     {qol::contracts::HttpMethod::kGet, "/api/quest/active", "quest", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/quest/details", "quest", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/quest/completed", "quest", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/quest/quit_quest", "quest", 0, 1},
 };
 
 void register_frozen_routes() {

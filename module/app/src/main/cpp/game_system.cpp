@@ -8,6 +8,7 @@
 #include "game/state/character_http.h"
 #include "game/state/game_state.h"
 #include "game/state/quest_http.h"
+#include "game/state/save_http.h"
 #include "game/state/system_snapshot.h"
 #include "game_world.h"
 #include "api/native/game_character.h"
@@ -17,6 +18,8 @@
 #include "core/native/game_cache.h"
 #include "game_dialog.h"
 #include "game/json/game_json.h"
+#include "contracts/game_ports/save_write_port.h"
+#include "infra/store.h"
 
 #include <mutex>
 
@@ -744,5 +747,71 @@ std::string build_character_skills_json() {
 }
 
 std::string build_character_mercenaries_json() { return data_mercenaries_json(); }
+
+// 存档写（save/enter_slot/create_slot）：执行游戏写；成功时同步完成模块 sidecar 槽位生命周期
+// 操作（原 Kotlin ModuleSaveStore.ensureSlot/resetSlot 随之在主线程下沉，保留"成功后"语义），
+// 并附玩家状态构成迁移前响应（{"ok":true,"state":<player>}）。失败时输出原 op 错误体。
+int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_idx, uint32_t attempt,
+                                     char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr) return kSaveWriteFailed;
+    *out_size = 0;
+    // 结果写出：未就绪不写内容（由调用方请求延迟重试）。
+    const auto finish = [&](const std::string& body, int32_t outcome) {
+        if (body.size() > capacity) return kSaveWriteFailed;
+        std::memcpy(out, body.data(), body.size());
+        *out_size = static_cast<uint32_t>(body.size());
+        return outcome;
+    };
+    // sidecar（模块容器）：kUnavailable = 模块容器未启用（非游戏操作失败，按不适用处理）；
+    // 其余非 kOk 视为失败并写入结果（迁移前被忽略的返回值现已核对）。
+    const auto sidecar_failed = [](infra::store::Status s) {
+        return s != infra::store::Status::kOk && s != infra::store::Status::kUnavailable;
+    };
+    const auto sidecar_error = [](infra::store::Status s) {
+        return std::string("{\"ok\":false,\"error\":\"sidecar: ") + infra::store::status_name(s) +
+               "\"}";
+    };
+    // 首次执行：发起游戏侧操作（enter/create 为转场内联执行，与同步入口共用单飞门）。
+    if (attempt == 0) {
+        std::string op_body;
+        switch (kind) {
+            case contracts::kQolSaveWriteSave:
+                op_body = data_op_save();
+                break;
+            case contracts::kQolSaveWriteEnterSlot:
+                op_body = data_op_enter_slot_direct(slot);
+                break;
+            case contracts::kQolSaveWriteCreateSlot:
+                op_body = data_op_create_slot_direct(slot, class_idx);
+                break;
+            default:
+                return kSaveWriteFailed;
+        }
+        if (op_body.find("\"ok\":false") != std::string::npos) {
+            return finish(op_body, kSaveWriteFailed);
+        }
+    }
+    // 转场后就绪等待：世界态提交完成前保持 pending，不提前报告 done（迁移前该等待由阻塞式
+    // sidecar 文件 I/O 偶然提供，此处改为确定性条件）。
+    if (kind != contracts::kQolSaveWriteSave && !game_in_world()) {
+        return kSaveWriteNotReady;
+    }
+    // sidecar 槽位生命周期与游戏操作在同一步结算。
+    if (kind == contracts::kQolSaveWriteSave) {
+        const int current = current_save_slot();
+        if (current >= 0 && current <= 2) {
+            const infra::store::Status s = infra::store::ensure_slot(current);
+            if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
+        }
+    } else if (kind == contracts::kQolSaveWriteEnterSlot) {
+        const infra::store::Status s = infra::store::ensure_slot(slot);
+        if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
+    } else {
+        const infra::store::Status s = infra::store::reset_slot(slot);
+        if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
+    }
+    // 与迁移前 ActionSupport.attachPlayer 同构：仅成功时附 state（键序 ok→state）。
+    return finish("{\"ok\":true,\"state\":" + build_player_json() + "}", kSaveWriteOk);
+}
 
 }  // namespace qol::game

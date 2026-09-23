@@ -288,6 +288,6 @@ struct QolHostSdk {
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 8;
+constexpr uint16_t kHostSdkMinor = 9;
 
 }  // namespace qol::contracts

@@ -31,7 +31,22 @@ struct Command {
     // 结果 JSON 写入票据持有的有界缓冲（capacity 由队列提供，超限由命令体自行报失败）。
     // nullptr 表示该命令无结果（read_result 恒返回 false）。
     bool (*run_with_result)(void* ctx, char* out, uint32_t capacity, uint32_t* out_size) = nullptr;
+    // 延迟结算上限（帧）。命令体可在执行期间调用 request_defer_current_command() 请求
+    // 「保持 pending、下一帧重试」；超过上限仍未结算则票据置 failed 并写入超时错误体。
+    // 0 表示不允许延迟（请求被忽略，按当帧结果结算）。
+    uint32_t defer_limit_frames = 0;
 };
+
+// 当前正在执行的命令请求延迟结算：该票据保持 pending，drain 于后续帧重新执行本命令，
+// 直到命令体自行结算或达到 defer_limit_frames。仅在命令执行期间（drain 内）有效。
+void request_defer_current_command();
+
+// 当前命令的执行次数（首次执行返回 0；每次延迟重试递增）。仅在命令执行期间有效，
+// 供命令体区分「首次执行（需真正发起转换）」与「后续帧（仅等待就绪）」。
+uint32_t current_command_attempt();
+
+// 延迟结算默认上限（帧）≈2s@60fps：进档/建档等转场后的就绪等待。
+constexpr uint32_t kDefaultDeferFrames = 120;
 
 // 结果保留（明确尽力语义，见 ARCHITECTURE.md §8.1）：单结果上限与总字节预算有界；
 // 超出总预算按最旧优先淘汰结果（保留状态）；被淘汰者 read_result 返回 false。

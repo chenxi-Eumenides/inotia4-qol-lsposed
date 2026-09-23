@@ -826,6 +826,8 @@ contracts::QolHostSdk make_host_sdk() {
         &infra::commands_unregister_typed_result_handler,
         &infra::commands_read_result,
         &infra::commands_ticket_state,
+        &infra::commands_defer_current_result,
+        &infra::commands_current_attempt,
     };
     return sdk;
 }

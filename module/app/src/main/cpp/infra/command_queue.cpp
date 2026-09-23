@@ -31,9 +31,14 @@ struct ActiveEntry {
     Command command;
     bool cancellable = false;
     bool started = false;  // drain 已开始执行；已开始的命令不再可取消
+    uint32_t attempts = 0; // 延迟结算重试次数（见 Command.defer_limit_frames）
 };
 
 std::mutex g_mtx;
+
+// 当前执行中的命令的延迟结算请求（仅主线程 drain 期间有意义）。
+thread_local bool g_defer_requested = false;
+thread_local uint32_t g_current_attempt = 0;
 // 活跃票据（pending + 执行中）与其 FIFO 顺序。pending_count 只数 FIFO 中尚未开始者。
 std::unordered_map<CommandTicket, ActiveEntry> g_active;
 std::deque<CommandTicket> g_fifo;
@@ -144,9 +149,16 @@ uint32_t drain() {
 
     // 锁外逐条执行：命令体是外部代码，持锁回调会阻塞 post 并可能造成死锁。
     static thread_local std::vector<char> result_buffer(kMaxResultBytes);
+    uint32_t executed = 0;
     for (auto& item : batch) {
         const CommandTicket ticket = item.first;
         const Command& command = item.second;
+        g_defer_requested = false;
+        {
+            std::lock_guard<std::mutex> lock(g_mtx);
+            const auto it = g_active.find(ticket);
+            g_current_attempt = it != g_active.end() ? it->second.attempts : 0;
+        }
         bool ok = false;
         uint32_t result_size = 0;
         if (command.run_with_result != nullptr) {
@@ -155,12 +167,42 @@ uint32_t drain() {
         } else if (command.run != nullptr) {
             ok = command.run(command.ctx);
         }
+        const bool defer = g_defer_requested;
+        g_defer_requested = false;
         std::lock_guard<std::mutex> lock(g_mtx);
-        g_active.erase(ticket);
+        const auto it = g_active.find(ticket);
+        if (it == g_active.end()) continue;  // 已取消（started=true 后 cancel 恒失败，理论不可达）
+        ++it->second.attempts;
+        if (defer && command.defer_limit_frames > 0) {
+            if (it->second.attempts < command.defer_limit_frames) {
+                // 保持 pending，下一帧重试；重试窗口内回到可取消态。
+                it->second.started = false;
+                g_fifo.push_back(ticket);
+                ++executed;
+                continue;
+            }
+            // 达到延迟上限仍未结算：显式失败，不静默成功。
+            g_active.erase(it);
+            static const char kTimeout[] = "{\"ok\":false,\"error\":\"settlement timeout\"}";
+            record_terminal_locked(ticket, CommandState::kFailed, kTimeout,
+                                   static_cast<uint32_t>(sizeof(kTimeout) - 1));
+            ++executed;
+            continue;
+        }
+        g_active.erase(it);
         record_terminal_locked(ticket, ok ? CommandState::kDone : CommandState::kFailed,
                                result_size != 0 ? result_buffer.data() : nullptr, result_size);
+        ++executed;
     }
-    return static_cast<uint32_t>(batch.size());
+    return executed;
+}
+
+void request_defer_current_command() {
+    g_defer_requested = true;
+}
+
+uint32_t current_command_attempt() {
+    return g_current_attempt;
 }
 
 uint32_t pending_count() {

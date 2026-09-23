@@ -84,6 +84,9 @@ QolResult set_physical_item(int32_t, int32_t, void*) {
 
 int32_t craft_is_apply_stuff(void*, void*) { return -1; }
 
+// legacy 聚合 TU 的写路由拼装接缝（真实实现位于 game_system.cpp，测试目标不编译它）。
+std::string build_quest_quit_result_json(int32_t) { return "{\"ok\":false,\"error\":\"stub\"}"; }
+
 }  // namespace qol::game
 
 bool game_in_world() { return false; }

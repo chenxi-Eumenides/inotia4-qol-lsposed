@@ -41,6 +41,11 @@ QolResult commands_read_result(contracts::QolCommandTicket ticket, char* out, ui
 // 票据状态（含 unknown/expired），返回 contracts 状态码。
 int32_t commands_ticket_state(contracts::QolCommandTicket ticket);
 
+// 延迟结算：结果处理器判定尚未就绪时请求「保持 pending，下一帧重试」（仅在命令执行期间有效，
+// 受 Command.defer_limit_frames 约束）；返回当前命令的执行次数（首次 0，逐次递增）。
+QolResult commands_defer_current_result();
+uint32_t commands_current_attempt();
+
 // 测试用：清空槽位表。
 void commands_reset_for_test();
 

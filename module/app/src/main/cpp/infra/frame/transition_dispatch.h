@@ -20,6 +20,15 @@
 //    false 表示 busy/超时（result 为纯文本错误，调用方自行包 op_err）。
 bool transition_run(std::function<void(std::string*)> fn, int timeout_ms, std::string* result);
 
+// 逻辑相位内联执行：供**已在逻辑帧相位**运行的调用方使用（owner 命令的排空在
+// kFramePointLogicPre，与 transition_run 的 fn 相位相同），直接执行转换体，
+// 不再跨帧派发、不阻塞等待——避免主线程在命令排空中等待自己。
+//
+// 与 transition_run **共用同一单飞门**：任一时刻至多一个转换在途（两条路径互斥），
+// 抢不到立即返回 false（result 为 busy 文本）。调用位置由记录的逻辑线程校验，
+// 非逻辑相位调用直接失败，避免在错误线程执行游戏状态机。
+bool transition_run_inline(std::function<void(std::string*)> fn, std::string* result);
+
 // 注册逻辑相位消费帧任务（幂等）。供 nativeInit 调用；返回是否注册成功。
 bool transition_dispatch_init();
 

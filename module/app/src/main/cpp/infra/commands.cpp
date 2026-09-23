@@ -268,7 +268,17 @@ QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t siz
     slot->typed = true;
     slot->typed_header = {handler_id, size};
     if (size != 0) std::memcpy(slot->typed_payload, payload, size);
-    const Command queued{"qol.typed_command", nullptr, slot, true, &command_run_with_result};
+    // 可写结果的处理器允许延迟结算（受 kDefaultDeferFrames 约束）：转场类写在世界态就绪前
+    // 保持 pending 重试；纯执行处理器不启用（请求被忽略）。
+    bool has_result_handler = false;
+    for (const TypedHandlerSlot& candidate : g_typed_handlers) {
+        if (candidate.handler_id == handler_id) {
+            has_result_handler = candidate.result_handler != nullptr;
+            break;
+        }
+    }
+    Command queued{"qol.typed_command", nullptr, slot, true, &command_run_with_result};
+    queued.defer_limit_frames = has_result_handler ? kDefaultDeferFrames : 0;
     const CommandTicket ticket = post(queued);
     if (ticket == 0) {
         slot->typed = false;
@@ -316,6 +326,15 @@ QolResult commands_read_result(contracts::QolCommandTicket ticket, char* out, ui
 
 int32_t commands_ticket_state(contracts::QolCommandTicket ticket) {
     return static_cast<int32_t>(ticket_state(ticket));
+}
+
+QolResult commands_defer_current_result() {
+    request_defer_current_command();
+    return contracts::ok();
+}
+
+uint32_t commands_current_attempt() {
+    return current_command_attempt();
 }
 
 const contracts::QolCommands& commands_port() {

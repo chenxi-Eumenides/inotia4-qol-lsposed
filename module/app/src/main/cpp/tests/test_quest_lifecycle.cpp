@@ -103,6 +103,18 @@ QolResult fake_set_state(uint32_t quest_id, int32_t state) {
     return qol::contracts::ok();
 }
 
+QolResult fake_quit_result(int32_t quest_id, char* out, uint32_t capacity, uint32_t* out_size) {
+    (void)quest_id;
+    static const char kJson[] = "{\"ok\":true,\"state\":{\"money\":0}}";
+    const uint32_t len = sizeof(kJson) - 1;
+    if (out == nullptr || out_size == nullptr || capacity < len) {
+        return qol::contracts::error(1, "small", 5);
+    }
+    std::memcpy(out, kJson, len);
+    *out_size = len;
+    return qol::contracts::ok();
+}
+
 QolResult fake_fragment(int32_t, uint32_t quest_id, const char** out) {
     if (out == nullptr || quest_id != 7) return qol::contracts::error(kQolErrNotFound, "x", 1);
     *out = "\"name\":\"Q7\"";
@@ -121,14 +133,18 @@ qol::contracts::QolHostSdk fake_sdk() {
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.capabilities.require = &fake_capability_require;
     sdk.commands = qol::infra::commands_port();
+    sdk.ticket_result = {&qol::infra::commands_register_typed_result_handler,
+                         &qol::infra::commands_unregister_typed_result_handler,
+                         &qol::infra::commands_read_result,
+                         &qol::infra::commands_ticket_state};
     return sdk;
 }
 
 const qol::contracts::QolQuestPort kQuestPort{
-    {1, 0},
+    {1, 1},
     {&fake_world_state, &fake_active_slot_count, &fake_active_slot_id, nullptr, &fake_quest_state,
      &fake_quest_complete, &fake_fragment, &fake_static_ready},
-    {&fake_set_state},
+    {&fake_set_state, &fake_quit_result},
 };
 
 qol::contracts::QolGameHost fake_game() {

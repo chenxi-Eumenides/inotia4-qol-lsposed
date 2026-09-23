@@ -266,3 +266,23 @@ std::string data_op_create_slot(int32_t slot, int32_t class_idx) {
     }
     return result;
 }
+
+std::string data_op_enter_slot_direct(int32_t slot) {
+    // owner 命令已在 kFramePointLogicPre：同转换体内联执行，共用单飞门，不阻塞自己。
+    std::string result;
+    if (!transition_run_inline([slot](std::string* out) { *out = enter_slot_locked(slot); },
+                               &result)) {
+        return op_err(result.c_str());
+    }
+    return result;
+}
+
+std::string data_op_create_slot_direct(int32_t slot, int32_t class_idx) {
+    std::string result;
+    if (!transition_run_inline(
+            [slot, class_idx](std::string* out) { *out = create_slot_locked(slot, class_idx); },
+            &result)) {
+        return op_err(result.c_str());
+    }
+    return result;
+}

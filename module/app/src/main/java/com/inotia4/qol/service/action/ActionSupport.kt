@@ -1,11 +1,8 @@
 package com.inotia4.qol.service.action
 
-import com.inotia4.qol.AgreementPopup
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.UiActivityTracker
-import com.inotia4.qol.patch.AgreementGate
-import com.inotia4.qol.store.ModuleSaveStore
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
@@ -27,27 +24,6 @@ fun attachPlayer(op: String): String =
 
     fun attachUi(op: String): String =
         attach(op) { NativeBridge.nativeGetGamestateJson() }
-
-    fun currentSaveSlot(): Int = try {
-        JSONObject(NativeBridge.nativeCurrentSaveSlot()).optInt("current_save_slot", -1)
-    } catch (e: Exception) {
-        -1
-    }
-
-    fun afterSave(op: String): String = afterNativeSuccess(op) {
-        val current = currentSaveSlot()
-        if (current in 0..2) ModuleSaveStore.ensureSlot(current)
-    }
-
-    fun afterNativeSuccess(op: String, action: () -> Unit): String {
-        val succeeded = try {
-            JSONObject(op).optBoolean("ok", false)
-        } catch (e: Exception) {
-            false
-        }
-        if (succeeded) action()
-        return op
-    }
 
     fun findItemSlot(category: Int): Pair<Int, Int>? {
         val inv = try {

@@ -77,6 +77,11 @@ struct QolTicketResultApi {
                              uint32_t* out_size);
     // 细化票据状态（含 unknown/expired）；返回值即状态码。
     int32_t (*ticket_state)(QolCommandTicket ticket);
+    // 延迟结算（阶段 5 save 写面）：结果处理器判定尚未就绪时请求「保持 pending、下一帧重试」；
+    // 仅在命令执行期间有效，受宿主延迟上限约束（超限以结算超时失败，不静默成功）。
+    QolResult (*defer_current_result)(void);
+    // 当前命令执行次数（首次 0，延迟重试逐次递增）：供处理器区分「首次执行」与「等待就绪」。
+    uint32_t (*current_attempt)(void);
 };
 
 }  // namespace qol::contracts
