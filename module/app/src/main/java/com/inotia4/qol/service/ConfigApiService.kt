@@ -56,6 +56,10 @@ class ConfigApiServiceImpl : ConfigApiService {
         LogFile.info(LogDomain.CONFIG, "autoSellEnabled=${ModuleConfig.autoSellEnabled} applied=$autoSellApplied")
         val apiApplied = NativeBridge.nativeSetApiEnabled(ModuleConfig.apiEnabled)
         LogFile.info(LogDomain.CONFIG, "apiEnabled=${ModuleConfig.apiEnabled} applied=$apiApplied")
+        // opEnabled 镜像到 native：/api/op/* 的 op_gated 路由由 dispatch 层门禁读取，
+        // 必须在 HTTP 服务启动（本函数先于 ApiServer.start）前下发。
+        NativeBridge.nativeSetOpEnabled(ModuleConfig.opEnabled)
+        LogFile.info(LogDomain.CONFIG, "opEnabled=${ModuleConfig.opEnabled} applied to native")
         NativeBridge.nativeQolLogSetDebugEnabled(ModuleConfig.debugLogEnabled)
         LogFile.info(LogDomain.CONFIG, "debugLogEnabled=${ModuleConfig.debugLogEnabled} applied ok")
         applyTiles()
@@ -105,6 +109,9 @@ class ConfigApiServiceImpl : ConfigApiService {
         if (ModuleConfig.debugLogEnabled != oldDebugLog) {
             NativeBridge.nativeQolLogSetDebugEnabled(ModuleConfig.debugLogEnabled)
         }
+        // opEnabled 无 old 参数（不改 applyOnChange 既有签名）：幂等下发当前值；
+        // host 侧仅覆盖一个 bool，代价为一次函数调用。
+        NativeBridge.nativeSetOpEnabled(ModuleConfig.opEnabled)
     }
 
     override fun applyTiles() {

@@ -25,7 +25,6 @@ interface OpApiService {
     fun setStatusPoint(role: Int, points: Int): String
     fun partySwap(a: Int, b: Int): String
     fun teleport(mapId: Int, x: Int, y: Int, force: Boolean): String
-    fun featureLifecycle(id: String, action: String): String
 }
 
 /**
@@ -124,24 +123,6 @@ class OpApiServiceImpl : OpApiService {
         checkOpEnabled()
         return LogFile.op(LogDomain.OP, "POST /api/op/movement/teleport", mapOf("mapId" to "$mapId", "x" to "$x", "y" to "$y", "force" to "$force")) {
             NativeBridge.nativeOpTeleportEx(mapId, x, y, force)
-        }
-    }
-
-    // ---- P3 生命周期控制（/api/op/features/lifecycle）----
-    // 仅接受 deactivate(3)/activate(4)：开关语义归配置门禁（/api/config/set），本端点不做
-    // enable/disable（避免生命周期端点与门禁双写者）。未知/其余动作按错误响应返回。
-    // 命令经命令端口投递、主线程帧步进执行，返回票据；状态查询走 /api/system/features。
-    override fun featureLifecycle(id: String, action: String): String {
-        checkOpEnabled()
-        val actionCode = when (action) {
-            "deactivate" -> 3
-            "activate" -> 4
-            else -> return JsonUtil.err("unknown action")
-        }
-        return LogFile.op(LogDomain.OP, "POST /api/op/features/lifecycle", mapOf("id" to id, "action" to action)) {
-            val ticket = NativeBridge.nativeFeatureLifecycle(id, actionCode)
-            if (ticket > 0) JsonUtil.wrap("ok" to true, "ticket" to ticket)
-            else JsonUtil.err("lifecycle rejected")
         }
     }
 }

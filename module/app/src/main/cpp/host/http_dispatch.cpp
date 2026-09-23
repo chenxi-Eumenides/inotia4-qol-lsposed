@@ -27,7 +27,10 @@ struct HandlerSlot {
     std::string owner;
     std::array<std::string, kMaxPathParams> param_names{};
     uint32_t param_count = 0;
+    // 注册时从路由表快照；dispatch 据此在进入 handler 前做 OP 门禁，运行期不再查路由表。
+    uint8_t op_gated = 0;
     contracts::HttpQueryHandlerFn query = nullptr;
+    contracts::HttpCommandHandlerFn command = nullptr;
     void* ctx = nullptr;
     uint32_t inflight = 0;
 };
@@ -35,6 +38,9 @@ struct HandlerSlot {
 HandlerSlot g_handlers[kMaxHandlers];
 std::mutex g_dispatch_mutex;
 std::condition_variable g_dispatch_cv;
+// OP 门禁状态：默认关闭（安全基线，与 Kotlin ModuleConfig.DEFAULT_OP_ENABLED 一致），
+// 由 JNI nativeSetOpEnabled 在配置加载/变更时同步；只在 g_dispatch_mutex 下读写。
+bool g_op_enabled = false;
 
 bool valid_method(contracts::HttpMethod method) {
     return method == contracts::HttpMethod::kGet || method == contracts::HttpMethod::kPost;
@@ -141,11 +147,16 @@ void write_error(contracts::HttpRes* response, uint16_t status, const char* mess
     response->body_size = static_cast<uint32_t>(body.size());
 }
 
-QolResult register_query(contracts::HttpMethod method, const char* path, const char* owner,
-                         contracts::HttpQueryHandlerFn handler, void* ctx) {
-    if (method != contracts::HttpMethod::kGet || path == nullptr || owner == nullptr ||
-        owner[0] == '\0' || handler == nullptr) {
-        return http_error(kQolErrInvalidArgument, "invalid query handler");
+// query（GET）与 command（POST）注册共用。两者 handler 的函数指针类型相同（都是
+// QolResult(*)(const HttpReq*, HttpRes*, void*)），不能用类型区分，故显式传入 command_slot
+// 决定写入哪个槽，避免把命令注册进只读 query 槽。
+QolResult register_handler(contracts::HttpMethod required_method, bool command_slot,
+                           const char* invalid_message, contracts::HttpMethod method,
+                           const char* path, const char* owner,
+                           contracts::HttpQueryHandlerFn handler, void* ctx) {
+    if (method != required_method || path == nullptr || owner == nullptr || owner[0] == '\0' ||
+        handler == nullptr) {
+        return http_error(kQolErrInvalidArgument, invalid_message);
     }
 
     std::array<std::string, kMaxPathParams> names{};
@@ -181,7 +192,14 @@ QolResult register_query(contracts::HttpMethod method, const char* path, const c
             slot.owner = owner;
             slot.param_names = names;
             slot.param_count = param_count;
-            slot.query = handler;
+            slot.op_gated = route->op_gated;
+            if (command_slot) {
+                slot.query = nullptr;
+                slot.command = handler;
+            } else {
+                slot.query = handler;
+                slot.command = nullptr;
+            }
             slot.ctx = ctx;
             slot.inflight = 0;
             return contracts::ok();
@@ -190,9 +208,16 @@ QolResult register_query(contracts::HttpMethod method, const char* path, const c
     return http_error(kQolErrBlocked, "http handler capacity exhausted");
 }
 
-QolResult register_command(contracts::HttpMethod, const char*, const char*,
-                           contracts::HttpCommandHandlerFn, void*) {
-    return http_error(kQolErrUnsupported, "command dispatch reserved");
+QolResult register_query(contracts::HttpMethod method, const char* path, const char* owner,
+                         contracts::HttpQueryHandlerFn handler, void* ctx) {
+    return register_handler(contracts::HttpMethod::kGet, false, "invalid query handler", method,
+                            path, owner, handler, ctx);
+}
+
+QolResult register_command(contracts::HttpMethod method, const char* path, const char* owner,
+                           contracts::HttpCommandHandlerFn handler, void* ctx) {
+    return register_handler(contracts::HttpMethod::kPost, true, "invalid command handler", method,
+                            path, owner, handler, ctx);
 }
 
 QolResult unregister_owner(const char* owner) {
@@ -222,6 +247,7 @@ QolResult unregister_owner(const char* owner) {
         if (slot.used && slot.owner == owner) {
             // 保留 owner 路由墓碑，使停用态请求得到明确 503，而不是静默落到空响应。
             slot.query = nullptr;
+            slot.command = nullptr;
             slot.ctx = nullptr;
             slot.unregister_pending = true;
         }
@@ -244,9 +270,11 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     }
 
     HandlerSlot* selected = nullptr;
+    bool op_enabled = false;
     std::array<contracts::HttpPathParam, kMaxPathParams> params{};
     {
         std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+        op_enabled = g_op_enabled;
         for (HandlerSlot& slot : g_handlers) {
             if (slot.used && slot.method == request->method &&
                 match_template(slot, *request, &params)) {
@@ -263,6 +291,18 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     if (selected == nullptr) {
         write_error(response, 404, "http handler not found");
         return http_error(kQolErrNotFound, "http handler not found");
+    }
+
+    // OP 门禁：op_gated 路由在 handler（含 body 解析）之前统一拒绝，与 Kotlin
+    // OpApiService.checkOpEnabled 的 403 信封逐字节一致（{"ok":false,"error":"op disabled"}）。
+    if (selected->op_gated != 0 && !op_enabled) {
+        {
+            std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+            --selected->inflight;
+            g_dispatch_cv.notify_all();
+        }
+        write_error(response, 403, "op disabled");
+        return http_error(kQolErrBlocked, "op disabled");
     }
 
     uint64_t lease = 0;
@@ -285,7 +325,11 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     contracts::HttpReq request_copy = *request;
     request_copy.path_params = params.data();
     request_copy.path_param_count = selected->param_count;
-    const QolResult handler_result = selected->query(&request_copy, response, selected->ctx);
+    // GET 走只读 query 槽，POST 走 command 槽；两槽由是否墓碑分别置空，选中即非空。
+    const QolResult handler_result =
+        selected->method == contracts::HttpMethod::kPost
+            ? selected->command(&request_copy, response, selected->ctx)
+            : selected->query(&request_copy, response, selected->ctx);
     (void)http_registry_api().lease_leave(lease);
     {
         std::lock_guard<std::mutex> lock(g_dispatch_mutex);
@@ -330,9 +374,15 @@ QolResult http_dispatch_register_builtin_query(contracts::HttpMethod method, con
     return register_query(method, path, owner, handler, ctx);
 }
 
+void http_dispatch_set_op_enabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    g_op_enabled = enabled;
+}
+
 void http_dispatch_reset_for_test() {
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (HandlerSlot& slot : g_handlers) slot = HandlerSlot{};
+    g_op_enabled = false;
 }
 
 }  // namespace qol::host

@@ -53,6 +53,12 @@ struct BlockingContext {
     bool release = false;
 };
 
+QolResult command_handler(const HttpReq* request, HttpRes* response, void*) {
+    // 只回显 body 长度，便于断言 POST body 经信封完整送达。
+    write_body(response, "{\"cmd\":true,\"len\":" + std::to_string(request->body_len) + "}");
+    return qol::contracts::ok();
+}
+
 QolResult blocking_handler(const HttpReq*, HttpRes* response, void* raw_ctx) {
     auto* context = static_cast<BlockingContext*>(raw_ctx);
     {
@@ -78,6 +84,18 @@ HttpReq request(const char* path, const char* query = nullptr) {
                    0};
 }
 
+HttpReq post_request(const char* path, const char* body) {
+    return HttpReq{HttpMethod::kPost,
+                   path,
+                   static_cast<uint32_t>(std::strlen(path)),
+                   reinterpret_cast<const uint8_t*>(body),
+                   body == nullptr ? 0U : static_cast<uint32_t>(std::strlen(body)),
+                   nullptr,
+                   0,
+                   nullptr,
+                   0};
+}
+
 HttpRes response(uint8_t* body, uint32_t capacity) {
     return HttpRes{body, capacity, 0, 0};
 }
@@ -85,6 +103,12 @@ HttpRes response(uint8_t* body, uint32_t capacity) {
 void setup_route(const char* path, const char* owner = "owner") {
     const auto registry = qol::host::http_registry_api();
     const HttpRoute route{HttpMethod::kGet, path, owner, 0, 1};
+    CHECK(registry.register_route(&route).ok == 0);
+}
+
+void setup_post_route(const char* path, const char* owner = "owner", uint8_t op_gated = 0) {
+    const auto registry = qol::host::http_registry_api();
+    const HttpRoute route{HttpMethod::kPost, path, owner, op_gated, 1};
     CHECK(registry.register_route(&route).ok == 0);
 }
 
@@ -101,8 +125,9 @@ void test_template_and_query() {
                                   &query_handler, nullptr).ok == 0);
     CHECK(dispatch.register_query(HttpMethod::kGet, "/api/party/{slot}", "owner",
                                   &query_handler, nullptr).code == kQolErrConflict);
+    // command 注册要求非空 handler 与 kPost 路由：空 handler 是参数错误（不再是 unsupported）。
     CHECK(dispatch.register_command(HttpMethod::kPost, "/api/party/{slot}", "owner", nullptr,
-                                    nullptr).code == kQolErrUnsupported);
+                                    nullptr).code == kQolErrInvalidArgument);
 
     uint8_t storage[128]{};
     HttpRes output = response(storage, sizeof(storage));
@@ -177,12 +202,99 @@ void test_inactive_and_missing_handler() {
     CHECK(output.status == 503);
 }
 
+void test_command_registration_and_dispatch() {
+    reset();
+    setup_post_route("/api/op/features/lifecycle");
+    const auto dispatch = qol::host::http_dispatch_api();
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/op/features/lifecycle", "owner",
+                                    &command_handler, nullptr).ok == 0);
+    // 重复注册同 method+path 冲突；GET 注册命令不合法。
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/op/features/lifecycle", "owner",
+                                    &command_handler, nullptr).code == kQolErrConflict);
+    CHECK(dispatch.register_command(HttpMethod::kGet, "/api/op/features/lifecycle", "owner",
+                                    &command_handler, nullptr).code == kQolErrInvalidArgument);
+
+    uint8_t storage[128]{};
+    HttpRes output = response(storage, sizeof(storage));
+    HttpReq input = post_request("/api/op/features/lifecycle", "{\"id\":\"simple_mode\"}");
+    CHECK(dispatch.dispatch(&input, &output).ok == 0);
+    CHECK(output.status == 200);
+    CHECK(std::string(reinterpret_cast<char*>(storage), output.body_size) ==
+          "{\"cmd\":true,\"len\":20}");
+
+    // command 槽不响应 GET。
+    output = response(storage, sizeof(storage));
+    input = request("/api/op/features/lifecycle");
+    CHECK(dispatch.dispatch(&input, &output).code == kQolErrNotFound);
+    CHECK(output.status == 404);
+}
+
+void test_command_tombstone_and_restore() {
+    reset();
+    setup_post_route("/api/op/features/lifecycle");
+    const auto dispatch = qol::host::http_dispatch_api();
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/op/features/lifecycle", "owner",
+                                    &command_handler, nullptr).ok == 0);
+
+    uint8_t storage[128]{};
+    HttpRes output = response(storage, sizeof(storage));
+    HttpReq input = post_request("/api/op/features/lifecycle", "{}");
+    CHECK(dispatch.unregister_owner("owner").ok == 0);
+    CHECK(dispatch.dispatch(&input, &output).code == kQolErrNotReady);
+    CHECK(output.status == 503);
+    CHECK(std::string(reinterpret_cast<char*>(storage), output.body_size) ==
+          "{\"ok\":false,\"error\":\"http owner inactive\"}");
+
+    // 墓碑可被同 owner 重新注册（恢复）。
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/op/features/lifecycle", "owner",
+                                    &command_handler, nullptr).ok == 0);
+    output = response(storage, sizeof(storage));
+    input = post_request("/api/op/features/lifecycle", "{}");
+    CHECK(dispatch.dispatch(&input, &output).ok == 0);
+    CHECK(output.status == 200);
+}
+
+void test_op_gate() {
+    reset();
+    setup_post_route("/api/op/features/lifecycle", "owner", 1);
+    const auto dispatch = qol::host::http_dispatch_api();
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/op/features/lifecycle", "owner",
+                                    &command_handler, nullptr).ok == 0);
+
+    uint8_t storage[128]{};
+    HttpRes output = response(storage, sizeof(storage));
+    HttpReq input = post_request("/api/op/features/lifecycle", "{\"id\":\"simple_mode\"}");
+    // 默认关闭：op_gated 路由在 handler 前拒绝，信封与 Kotlin 403 一致。
+    CHECK(dispatch.dispatch(&input, &output).code == kQolErrBlocked);
+    CHECK(output.status == 403);
+    CHECK(std::string(reinterpret_cast<char*>(storage), output.body_size) ==
+          "{\"ok\":false,\"error\":\"op disabled\"}");
+
+    qol::host::http_dispatch_set_op_enabled(true);
+    output = response(storage, sizeof(storage));
+    CHECK(dispatch.dispatch(&input, &output).ok == 0);
+    CHECK(output.status == 200);
+
+    // 非 gated 路由不受 op 状态影响。
+    setup_post_route("/api/quest/quit_quest", "quest", 0);
+    CHECK(dispatch.register_command(HttpMethod::kPost, "/api/quest/quit_quest", "quest",
+                                    &command_handler, nullptr).ok == 0);
+    qol::host::http_dispatch_set_op_enabled(false);
+    output = response(storage, sizeof(storage));
+    input = post_request("/api/quest/quit_quest", "{}");
+    CHECK(dispatch.dispatch(&input, &output).ok == 0);
+    CHECK(output.status == 200);
+}
+
 }  // namespace
 
 int main() {
     test_template_and_query();
     test_owner_unregister_waits();
     test_inactive_and_missing_handler();
+    test_command_registration_and_dispatch();
+    test_command_tombstone_and_restore();
+    test_op_gate();
     std::printf("http_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

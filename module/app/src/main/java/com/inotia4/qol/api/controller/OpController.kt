@@ -3,6 +3,7 @@ package com.inotia4.qol.api.controller
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
@@ -101,15 +102,10 @@ class OpController {
     }
 
     // ---- P3 生命周期控制（/api/op/features/lifecycle）----
-    // body {id, action}；action 名称在 service 层映射为 native kFeatureLifecycle* 数值。
+    // body {id, action} 由 owner（core.api）解析并投递命令；op 门禁与 ticket 响应下沉 native dispatch。
     @PostMapping("/api/op/features/lifecycle")
-    fun featureLifecycle(@RequestBody body: String): String {
-        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        val id = o.optString("id", "")
-        val action = o.optString("action", "")
-        if (id.isEmpty() || action.isEmpty()) throw ApiException(StatusCode.SC_BAD_REQUEST, "id and action required")
-        return ControllerGuard.guard { ApiServices.op.featureLifecycle(id, action) }
-    }
+    fun featureLifecycle(@RequestBody body: String): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/op/features/lifecycle", body) }
 
     // ---- 已实现 OP 端点（v0.5.46 迁移自 CharacterController，路由全路径注解逐字保留） ----
 

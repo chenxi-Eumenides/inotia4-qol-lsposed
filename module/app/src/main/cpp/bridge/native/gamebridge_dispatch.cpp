@@ -55,6 +55,14 @@ std::string dispatch_result_json(const qol::contracts::HttpRes& response) {
 
 }  // namespace
 
+// OP 门禁状态同步：Kotlin 配置加载/变更时下发。host dispatch 的 op_gated 路由据此放行，
+// 默认关闭与 ModuleConfig.DEFAULT_OP_ENABLED=false 的安全基线一致。
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSetOpEnabled(JNIEnv*, jclass, jboolean enabled) {
+    qol::host::http_dispatch_set_op_enabled(enabled == JNI_TRUE);
+    return JNI_TRUE;
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint method,
                                                      jstring path, jstring query, jstring body) {

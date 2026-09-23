@@ -104,7 +104,7 @@
 | POST | `/api/op/combat/{role}/revive` | api.character | 1 | 1 | OpController.revive | — | — | — | 占位，纯 Kotlin `not implemented` |
 | POST | `/api/op/combat/{role}/hate` | api.character | 1 | 1 | OpController.hate | — | — | — | 占位，纯 Kotlin `not implemented` |
 | POST | `/api/op/movement/teleport` | api.world | 1 | 1 | OpController.teleport | `OpApiServiceImpl.teleport` | `nativeOpTeleportEx` | `api/native/game_world.cpp` | — |
-| POST | `/api/op/features/lifecycle` | core.api | 1 | 1 | OpController.featureLifecycle | `OpApiServiceImpl.featureLifecycle` | `nativeFeatureLifecycle` | `bridge/native/gamebridge_lifecycle.cpp`; `host/plugin_registry.cpp` | ticket JSON 拼装 |
+| POST | `/api/op/features/lifecycle` | core.api | 1 | 1 | OpController.featureLifecycle（`NativeHttpCommand.post` 透传） | — | `core_api::lifecycle_command`（经 `sdk.commands.post` 投递 kCommandFeatureLifecycle） | `plugins/core.api/plugin.cpp`; `plugins/core.api/json_field.cpp`; `host/http_dispatch.cpp`（op 门禁） | 已迁 owner：native dispatch op 门禁 + owner 拼装 ticket JSON；`nativeFeatureLifecycle` JNI 保留但不再由本路由调用 |
 | POST | `/api/op/character/{role}/hp` | api.character | 1 | 1 | OpController.opSetHp | `OpApiServiceImpl.setHp` | `nativeOpSetHp` | `api/native/game_character.cpp` | — |
 | POST | `/api/op/character/{role}/mp` | api.character | 1 | 1 | OpController.opSetMp | `OpApiServiceImpl.setMp` | `nativeOpSetMp` | `api/native/game_character.cpp` | — |
 | POST | `/api/op/character/{role}/experience` | api.character | 1 | 1 | OpController.opSetExp | `OpApiServiceImpl.setExperience` | `nativeOpSetExperience` | `api/native/game_character.cpp` | — |

@@ -16,6 +16,10 @@ QolResult http_dispatch_register_builtin_query(contracts::HttpMethod method, con
                                                const char* owner,
                                                contracts::HttpQueryHandlerFn handler, void* ctx);
 
+// OP 门禁状态（/api/op/* 的 op_gated 路由）：由 JNI nativeSetOpEnabled 在配置加载/变更时
+// 同步。默认关闭（安全基线，与 Kotlin ModuleConfig.DEFAULT_OP_ENABLED=false 一致）。
+void http_dispatch_set_op_enabled(bool enabled);
+
 // host-only 测试使用；生产生命周期不绕过 dispatch API 调用此函数。
 void http_dispatch_reset_for_test();
 

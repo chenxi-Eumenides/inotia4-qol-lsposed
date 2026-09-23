@@ -41,7 +41,7 @@
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 17 |
 | `plugins/character_facts` | 5 |
-| `plugins/core.api` | 3 |
+| `plugins/core.api` | 5 |
 | `plugins/core.ui` | 17 |
 | `plugins/craft_facts` | 2 |
 | `plugins/craft_ui` | 4 |
@@ -63,7 +63,7 @@
 | `plugins/text_layer` | 6 |
 | `plugins/world_facts` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **483** |
+| **合计** | **485** |
 
 ### 1.2 迁移期映射摘要
 
@@ -205,8 +205,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：149 个
-- native 导出：149 个
+- Kotlin `external fun`：150 个
+- native 导出：150 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -230,7 +230,7 @@
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 17 |
 | `character_facts` | `plugins/character_facts` | 5 |
-| `core.api` | `plugins/core.api` | 3 |
+| `core.api` | `plugins/core.api` | 5 |
 | `core.ui` | `plugins/core.ui` | 17 |
 | `craft_facts` | `plugins/craft_facts` | 2 |
 | `craft_ui` | `plugins/craft_ui` | 4 |

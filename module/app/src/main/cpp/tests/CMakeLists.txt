@@ -779,6 +779,19 @@ set_target_properties(http_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDAR
 target_link_libraries(http_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME http_dispatch_tests COMMAND http_dispatch_tests)
 
+# 批 5-0：/api/op/features/lifecycle owner command handler 响应形状（成功/失败/未知动作/投递失败）。
+add_executable(core_api_lifecycle_tests
+    test_core_api_lifecycle.cpp
+    ${CPP_DIR}/plugins/core.api/plugin.cpp
+    ${CPP_DIR}/plugins/core.api/json_field.cpp
+)
+target_include_directories(core_api_lifecycle_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(core_api_lifecycle_tests PRIVATE cxx_std_17)
+set_target_properties(core_api_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_api_lifecycle_tests COMMAND core_api_lifecycle_tests)
+
 # U11-1：UI contract ABI + host ui-kit adapter 转发/错误语义测试。
 add_executable(ui_adapter_tests
     test_ui_adapter.cpp
