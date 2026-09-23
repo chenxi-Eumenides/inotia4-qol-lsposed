@@ -31,6 +31,9 @@ struct QolQuestReadOnlyApi {
 
 struct QolQuestWriteApi {
     QolResult (*set_state)(uint32_t quest_id, int32_t state);
+    // 执行退出任务（原版 Find + RemoveSlot）并把迁移前的结果 JSON
+    // （{"ok":true,"state":<player>} 或原错误体）写入 out。主线程 owner 命令调用。
+    QolResult (*quit_result)(int32_t quest_id, char* out, uint32_t capacity, uint32_t* out_size);
 };
 
 struct QolQuestPort {

@@ -27,7 +27,7 @@ enum class QolPortId : uint32_t {
     QOL_PORT_CHARACTER_HTTP = 16,
 };
 
-constexpr QolVersion kQolPortQuestVersion{1, 0};
+constexpr QolVersion kQolPortQuestVersion{1, 1};
 constexpr QolVersion kQolPortWorldVersion{1, 1};
 constexpr QolVersion kQolPortItemVersion{1, 0};
 constexpr QolVersion kQolPortCharacterVersion{1, 0};

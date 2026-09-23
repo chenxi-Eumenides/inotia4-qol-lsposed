@@ -7,8 +7,11 @@
 #include "game/adapter_ports/item_port.h"
 #include "game/state/character_http.h"
 #include "game/state/game_state.h"
+#include "game/state/quest_http.h"
 #include "game/state/system_snapshot.h"
 #include "game_world.h"
+#include "api/native/game_character.h"
+#include "api/native/game_quest.h"
 #include "api/native/game_ui.h"
 #include "api/native/game_save.h"
 #include "core/native/game_cache.h"
@@ -365,6 +368,14 @@ std::string build_system_info_json(const std::string& version, const std::string
 
 std::string build_system_frame_json() {
     return "{\"frame\":" + std::to_string(data_frame_count()) + "}";
+}
+
+// 退出任务的结果拼装：成功时附上 player 状态对象（复刻迁移前 Kotlin
+// ActionSupport.attachPlayer(NativeBridge.nativeOpQuestQuit(id)) 的响应）；失败体原样返回。
+std::string build_quest_quit_result_json(int32_t quest_id) {
+    const std::string op = data_op_quest_quit(quest_id);
+    if (op.find("\"ok\":true") == std::string::npos) return op;
+    return "{\"ok\":true,\"state\":" + build_player_json() + "}";
 }
 
 // ---- character_facts owner 响应体拼装（批 4-4）----

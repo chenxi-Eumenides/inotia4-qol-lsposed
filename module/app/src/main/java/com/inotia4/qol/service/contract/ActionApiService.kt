@@ -19,7 +19,6 @@ interface ActionApiService {
     fun statReset(role: Int): String
     fun skillReset(role: Int): String
     fun cast(role: Int, actionId: Int): String
-    fun questQuit(questId: Int): String
     fun save(): String
     fun mainMenu(): String
     fun enterSlot(slot: Int): String

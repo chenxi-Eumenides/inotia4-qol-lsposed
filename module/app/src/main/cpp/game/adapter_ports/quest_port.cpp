@@ -8,6 +8,7 @@
 
 #include "contracts/game_ports/ports.h"
 #include "game/access/quest.h"
+#include "game/state/quest_http.h"
 
 namespace qol::game {
 namespace {
@@ -75,6 +76,20 @@ QolResult write_quest_state(uint32_t quest_id, int32_t state) {
                : not_ready();
 }
 
+// 退出任务并把迁移前的结果 JSON 写入 out（实现在 legacy 聚合 TU，见 game/state/quest_http.h）。
+QolResult write_quest_quit_result(int32_t quest_id, char* out, uint32_t capacity,
+                                  uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid argument");
+    }
+    *out_size = 0;
+    const std::string body = build_quest_quit_result_json(quest_id);
+    if (body.size() > capacity) return error_result(kQolErrBlocked, "result buffer too small");
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return contracts::ok();
+}
+
 // 启动期下发的静态 enrichment 片段：只在启动期写入，运行期只读。片段是 JSON 对象正文，
 // 由 Kotlin 用与迁移前相同的 JSONObject 序列化产生，保证字段顺序与转义逐字节一致。
 constexpr int32_t kFragmentEndpointCount = 3;
@@ -105,7 +120,7 @@ const contracts::QolQuestPort kQuestPort{
     contracts::kQolPortQuestVersion,
     {&read_state, &read_active_slot_count, &read_active_slot_id, &read_total_count,
      &read_quest_value, &read_quest_complete, &read_fragment, &read_static_ready},
-    {&write_quest_state},
+    {&write_quest_state, &write_quest_quit_result},
 };
 
 }  // namespace

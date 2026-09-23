@@ -1293,12 +1293,12 @@
     {
       "path": "/api/quest/quit_quest",
       "method": "POST",
-      "status": 405,
-      "elapsed": 0.015,
+      "status": 400,
+      "elapsed": 0.012,
       "ok": false,
-      "verdict": "warn",
-      "reason": "状态码 405（guard 未就绪/占位/服务器错误）",
-      "body": "{\"ok\":false,\"error\":\"The request method [POST] is not supported.\"}",
+      "verdict": "pass",
+      "reason": "参数校验:缺 quest_id（阶段 5 批 5-3：路由从被 {id} 通配遮蔽的 405 修复为可达，校验 400）",
+      "body": "{\"ok\":false,\"error\":\"questId required\"}",
       "error": null
     },
     {

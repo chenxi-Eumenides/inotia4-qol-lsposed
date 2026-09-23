@@ -117,7 +117,7 @@ QOL_HTTP_ROUTE(kGet, "/api/character/party/{slot}/stats", "character_facts", 0, 
 QOL_HTTP_ROUTE(kGet, "/api/character/party/{slot}/equipment", "character_facts", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/character/party/{slot}/equipment/{equip_slot}", "character_facts", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/character/party/{slot}/skills", "character_facts", 0, 1)
-QOL_HTTP_ROUTE(kPost, "/api/quest/quit_quest", "api.quest", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/quest/quit_quest", "quest", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/quest", "quest", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/quest/active", "quest", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/quest/details", "quest", 0, 1)

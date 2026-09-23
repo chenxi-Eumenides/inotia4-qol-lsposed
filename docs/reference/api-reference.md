@@ -1221,13 +1221,13 @@
 
 `POST /api/quest/quit_quest`
 
-**用途**：放弃指定任务（QUESTSYSTEM_Find + RemoveSlot）。
+**用途**：放弃指定任务（QUESTSYSTEM_Find + RemoveSlot）。阶段 5 批 5-3 起为 owner（`quest`）命令，游戏写在主线程执行。
 
 **请求格式**：`{ "quest_id": 381 }`
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 回取：成功时 `result` 为 `{"ok":true,"state":<Player 模型>}`，失败时 `result` 为 `{"ok":false,"error":...}` 且票据 `state=failed`。
 
-**注意**：无任务→`quest not found`。
+**注意**：缺/负 `quest_id` → 400 `questId required`（校验在投递前）；无任务→ `quest not found`（在票据 `result` 中）。该路由此前被 `/api/quest/{id}` 通配遮蔽而恒返回 405，本批一并修复（校验通过即投递）。
 ---
 
 ## 六、ui（界面与对话）— GET/POST /api/ui/*
@@ -1820,6 +1820,7 @@
 **受影响端点**：逐条迁移时在本节登记（迁移前保持原同步响应；迁移后列出，附参数校验错误码不变说明）。已迁移：
 - `POST /api/op/features/lifecycle`（P3 起即为票据语义）。
 - `/api/debug/extension_bag/` 下 7 条 POST 调试端点（`enter_view`、`exit_view`、`unequip`、`select_bag`、`click_item`、`equip`、`item`；阶段 5 批 5-2 回补为主线程 owner command）。参数校验不变且仍在投递前执行（`bag` ∉ [6,10] → 400 `bag required (6-10)`；`click_item` 的 `slot` ∉ [0,15] → 400 `slot required (0-15)`；非法 body → 400 `bad request`）。原业务响应经票据 `result` 回取；业务失败（原响应含 `"ok":false`）时票据 `state=failed` 且 `result` 携带原错误体。
+- `POST /api/quest/quit_quest`（阶段 5 批 5-3；owner `quest`）。缺/负 `quest_id` → 400 `questId required`（投递前校验，与迁移前一致）；成功 `{"ok":true,"ticket":N}`，`result` 为 `{"ok":true,"state":<Player>}`；无任务 → 票据 `state=failed` 且 `result={"ok":false,"error":"quest not found"}`。
 
 **调用方迁移指引**：把原先直接读取的响应体改为轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后读取 `result`（即原响应体）；`result_retained=false` 时按业务重试或接受不可得。
 ---

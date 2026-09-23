@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -37,7 +38,12 @@ constexpr contracts::HttpRoute kRoutes[] = {
     {contracts::HttpMethod::kGet, "/api/quest/active", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/quest/details", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/quest/completed", kPluginId, 0, 1},
+    // 写路由（阶段 5 批 5-3）：POST 走 http.dispatch command 槽；游戏写在主线程 owner 命令执行。
+    {contracts::HttpMethod::kPost, "/api/quest/quit_quest", kPluginId, 0, 1},
 };
+constexpr uint32_t kQuitRouteIndex = 4;
+// 结果处理器 id（全局 typed handler id 空间，quest 前缀，见 kSetStateHandlerId）。
+constexpr uint32_t kQuitResultHandlerId = 0x51535402;
 
 constexpr Query kQueries[] = {Query::kComposite, Query::kActive, Query::kDetails,
                               Query::kCompleted};
@@ -70,7 +76,7 @@ const contracts::CapabilityRequirement kRequires[] = {
 };
 
 const contracts::QolPortRequirement kPorts[] = {
-    {contracts::QolPortId::QOL_PORT_QUEST, {1, 0}},
+    {contracts::QolPortId::QOL_PORT_QUEST, {1, 1}},
 };
 
 bool set_state_handler(void*, const uint8_t* payload, uint32_t size) {
@@ -267,11 +273,76 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
     return response_body(response, body);
 }
 
+// body 整数字段提取（迁移前 Controller 为 JsonUtil.parseBody + optInt("quest_id", -1)）。
+bool quest_int_field(const char* body, const char* key, int* out) {
+    if (body == nullptr || key == nullptr || out == nullptr) return false;
+    const std::string pattern = std::string("\"") + key + "\"";
+    const char* pos = std::strstr(body, pattern.c_str());
+    if (pos == nullptr) return false;
+    pos += pattern.size();
+    while (*pos == ' ' || *pos == '\t') ++pos;
+    if (*pos != ':') return false;
+    ++pos;
+    while (*pos == ' ' || *pos == '\t') ++pos;
+    if (*pos == '-' || (*pos >= '0' && *pos <= '9')) {
+        *out = std::atoi(pos);
+        return true;
+    }
+    return false;
+}
+
+// HTTP 线程：仅校验并投递票据（游戏写在主线程 owner 命令执行，ARCHITECTURE.md §7.1）。
+QolResult quit_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
+                               void*) {
+    if (request == nullptr || response == nullptr) {
+        return response_error(response, 400, "bad request");
+    }
+    const std::string body_text(request->body != nullptr
+                                    ? reinterpret_cast<const char*>(request->body)
+                                    : "",
+                                request->body_len);
+    int quest_id = -1;
+    if (!quest_int_field(body_text.c_str(), "quest_id", &quest_id)) quest_id = -1;
+    if (quest_id < 0) return response_error(response, 400, "questId required");
+    if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) {
+        return response_error(response, 503, "command port unavailable");
+    }
+    const int32_t payload = static_cast<int32_t>(quest_id);
+    contracts::QolCommandTicket ticket = 0;
+    if (!contracts::succeeded(g_sdk->commands.post_typed(kQuitResultHandlerId, &payload,
+                                                        sizeof(payload), &ticket)) ||
+        ticket == 0) {
+        return response_error(response, 503, "command queue unavailable");
+    }
+    const std::string body = std::string("{\"ok\":true,\"ticket\":") +
+                             std::to_string(ticket) + "}";
+    return response_body(response, body);
+}
+
+// 主线程命令体：执行退出任务并把迁移前结果 JSON 写入票据缓冲。
+bool quit_result_handler(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                         uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (payload == nullptr || size != sizeof(int32_t) || out == nullptr || out_size == nullptr) {
+        return false;
+    }
+    int32_t quest_id = 0;
+    std::memcpy(&quest_id, payload, size);
+    if (g_quest_port == nullptr || g_quest_port->write.quit_result == nullptr) return false;
+    if (!contracts::succeeded(g_quest_port->write.quit_result(quest_id, out, capacity, out_size))) {
+        return false;
+    }
+    // 业务失败（原错误体含 "ok":false）→ 票据置 failed，结果仍携带原错误体。
+    return std::string(out, *out_size).find("\"ok\":false") == std::string::npos;
+}
+
 const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
     {kRoutes[0].method, kRoutes[0].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[0])},
     {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[1])},
     {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[2])},
     {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[3])},
+    {kRoutes[kQuitRouteIndex].method, kRoutes[kQuitRouteIndex].path, kPluginId, &quit_command_handler,
+     nullptr},
 };
 
 void stop_snapshot_task(const contracts::QolHostSdk* sdk) {
@@ -336,6 +407,17 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
+    // 结果处理器：票据结果回取面在 QolHostSdk 尾部，按 abi 协商后注册。
+    if (g_sdk->ticket_result.register_typed_result_handler == nullptr ||
+        g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 8 ||
+        !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
+            kQuitResultHandlerId, &quit_result_handler, nullptr))) {
+        (void)g_sdk->commands.unregister_typed_handler(kSetStateHandlerId);
+        g_quest_port = nullptr;
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
     set_gate(true);
     start_resync_task();
     start_snapshot_task();
@@ -347,6 +429,9 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     if (g_sdk != nullptr && g_sdk->commands.unregister_typed_handler != nullptr) {
         (void)g_sdk->commands.unregister_typed_handler(kSetStateHandlerId);
+    }
+    if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
+        (void)g_sdk->ticket_result.unregister_typed_result_handler(kQuitResultHandlerId);
     }
     set_gate(false);
     cancel_resync_task();

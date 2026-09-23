@@ -78,8 +78,6 @@ class ActionApiServiceCore : ActionApiService {
 
     override fun withdraw(mercenarySlot: Int, equipSlot: Int): String = PartyActions.withdraw(mercenarySlot, equipSlot)
 
-    override fun questQuit(questId: Int): String = QuestActions.questQuit(questId)
-
     override fun save(): String = SaveActions.save()
 
     override fun mainMenu(): String = SaveActions.mainMenu()
