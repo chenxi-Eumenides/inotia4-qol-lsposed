@@ -146,15 +146,8 @@ class InfoApiServiceCore : InfoApiService {
     override fun debugUi(): String = InfoSystemQueries.debugUi()
     override fun debugPath(tx: Int, ty: Int): String = InfoSystemQueries.debugPath(tx, ty)
     override fun debugItemRaw(bag: Int, slot: Int): String = InfoSystemQueries.debugItemRaw(bag, slot)
-    override fun settingsUiInject(): String = InfoSystemQueries.settingsUiInject()
     override fun settingsUiStatus(): String = InfoSystemQueries.settingsUiStatus()
-    override fun settingsUiRestore(): String = InfoSystemQueries.settingsUiRestore()
-    override fun settingsUiOpenOption(): String = InfoSystemQueries.settingsUiOpenOption()
-    override fun settingsUiOpenPanel(): String = InfoSystemQueries.settingsUiOpenPanel()
     override fun extensionBagStatusJson(): String = InfoSystemQueries.extensionBagStatusJson()
-    override fun extensionBagTestEquip(index: Int, bagType: Int): String = InfoSystemQueries.extensionBagTestEquip(index, bagType)
-    override fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String =
-        InfoSystemQueries.extensionBagTestItem(index, slot, category, count)
 
     override fun shopItems(): String = InfoItemQueries.shopItems()
 

@@ -52,12 +52,6 @@ interface InfoApiService {
     fun debugUi(): String
     fun debugPath(tx: Int, ty: Int): String
     fun debugItemRaw(bag: Int, slot: Int): String
-    fun settingsUiInject(): String
     fun settingsUiStatus(): String
-    fun settingsUiRestore(): String
-    fun settingsUiOpenOption(): String
-    fun settingsUiOpenPanel(): String
     fun extensionBagStatusJson(): String
-    fun extensionBagTestEquip(index: Int, bagType: Int): String
-    fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
 }

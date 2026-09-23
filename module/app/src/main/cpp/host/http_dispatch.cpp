@@ -358,8 +358,13 @@ QolResult http_dispatch_register_queries(const contracts::HttpQueryHandlerDescri
     if (count > 0 && handlers == nullptr) return http_error(kQolErrInvalidArgument, "invalid handlers");
     for (uint32_t i = 0; i < count; ++i) {
         const contracts::HttpQueryHandlerDescriptor& handler = handlers[i];
-        const QolResult result = register_query(handler.method, handler.path, handler.owner,
-                                                 handler.handler, handler.ctx);
+        // descriptor 数组同型承载 GET/POST 两类条目：按 method 分流到 query/command 槽。
+        const QolResult result =
+            handler.method == contracts::HttpMethod::kPost
+                ? register_command(handler.method, handler.path, handler.owner, handler.handler,
+                                   handler.ctx)
+                : register_query(handler.method, handler.path, handler.owner, handler.handler,
+                                 handler.ctx);
         if (!contracts::succeeded(result)) {
             if (handler.owner != nullptr) (void)unregister_owner(handler.owner);
             return result;

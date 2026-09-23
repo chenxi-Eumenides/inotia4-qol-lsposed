@@ -1,9 +1,10 @@
 package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
-import com.inotia4.qol.util.JsonUtil
 import com.inotia4.qol.util.ControllerGuard
+import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
@@ -14,7 +15,8 @@ import com.yanzhenjie.andserver.http.StatusCode
 /**
  * 调试端点：/api/debug/ui、/api/debug/path（architecture §9.1 登记）。
  * 路由统一全路径写法（无类级 RequestMapping，见 architecture §3）。
- * v0.5.46 收边：不再裸调 NativeBridge，经 InfoApiService（ControllerGuard 兜底 not ready/500）。
+ * settings-ui / extension_bag 的写端点已迁 owner（core.ui / extension_bag）：
+ * Kotlin 只做传输适配（NativeHttpCommand.post），body 原样透传、参数校验与响应由 owner 承载。
  */
 @RestController
 class DebugController {
@@ -35,85 +37,59 @@ class DebugController {
     }
 
     @PostMapping("/api/debug/settings-ui/inject")
-    fun settingsUiInject(): String = ControllerGuard.guard { ApiServices.info.settingsUiInject() }
+    fun settingsUiInject(): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/inject", null) }
 
     @GetMapping("/api/debug/settings-ui/status")
     fun settingsUiStatus(): String = ControllerGuard.guard { ApiServices.info.settingsUiStatus() }
 
     @PostMapping("/api/debug/settings-ui/restore")
-    fun settingsUiRestore(): String = ControllerGuard.guard { ApiServices.info.settingsUiRestore() }
+    fun settingsUiRestore(): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/restore", null) }
 
     @PostMapping("/api/debug/settings-ui/open-option")
-    fun settingsUiOpenOption(): String = ControllerGuard.guard { ApiServices.info.settingsUiOpenOption() }
+    fun settingsUiOpenOption(): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/open-option", null) }
 
     @PostMapping("/api/debug/settings-ui/open-panel")
-    fun settingsUiOpenPanel(): String = ControllerGuard.guard { ApiServices.info.settingsUiOpenPanel() }
+    fun settingsUiOpenPanel(): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/open-panel", null) }
 
     @GetMapping("/api/debug/extension_bag/status")
     fun extensionBagStatus(): String = ControllerGuard.guard { ApiServices.info.extensionBagStatusJson() }
 
     @PostMapping("/api/debug/extension_bag/enter_view")
-    fun extensionBagEnterView(@RequestBody body: String): String {
-        val json = JsonUtil.parseBody(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        val bag = json.optInt("bag", -1)
-        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
-        return ControllerGuard.guard { ApiServices.action.extensionBagEnterView(bag) }
-    }
+    fun extensionBagEnterView(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/debug/extension_bag/enter_view", body) }
 
     @PostMapping("/api/debug/extension_bag/exit_view")
-    fun extensionBagExitView(): String = ControllerGuard.guard { ApiServices.action.extensionBagExitView() }
+    fun extensionBagExitView(): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/extension_bag/exit_view", null) }
 
     @PostMapping("/api/debug/extension_bag/unequip")
-    fun extensionBagUnequip(@RequestBody body: String): String {
-        val json = JsonUtil.parseBody(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        val bag = json.optInt("bag", -1)
-        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
-        return ControllerGuard.guard { ApiServices.action.extensionBagUnequip(bag) }
-    }
+    fun extensionBagUnequip(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/debug/extension_bag/unequip", body) }
 
     @PostMapping("/api/debug/extension_bag/select_bag")
-    fun extensionBagSelectBag(@RequestBody body: String): String {
-        val json = JsonUtil.parseBody(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        val bag = json.optInt("bag", -1)
-        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
-        return ControllerGuard.guard { ApiServices.action.extensionBagSelectBag(bag) }
-    }
+    fun extensionBagSelectBag(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/debug/extension_bag/select_bag", body) }
 
     @PostMapping("/api/debug/extension_bag/click_item")
-    fun extensionBagClickItem(@RequestBody body: String): String {
-        val json = JsonUtil.parseBody(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        val bag = json.optInt("bag", -1)
-        val slot = json.optInt("slot", -1)
-        if (bag < 6 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (6-10)")
-        if (slot < 0 || slot > 15) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot required (0-15)")
-        return ControllerGuard.guard { ApiServices.action.extensionBagClickItem(bag, slot) }
-    }
+    fun extensionBagClickItem(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/debug/extension_bag/click_item", body) }
 
     @PostMapping("/api/debug/extension_bag/equip")
-    fun extensionBagEquip(@RequestBody body: String): String {
-        val json = JsonUtil.parseBody(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        return ControllerGuard.guard {
-            ApiServices.info.extensionBagTestEquip(json.optInt("index", -1), json.optInt("bagType", -1))
-        }
-    }
+    fun extensionBagEquip(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/debug/extension_bag/equip", body) }
 
     @PostMapping("/api/debug/extension_bag/item")
-    fun extensionBagItem(@RequestBody body: String): String {
+    fun extensionBagItem(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/debug/extension_bag/item", body) }
+
+    /** 迁移前 Kotlin parseBody 的 400 语义保留在传输层：非法 body 拒绝，合法 body 归一化透传。 */
+    private fun postEb(path: String, body: String): String {
         val json = JsonUtil.parseBody(body)
             ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        return ControllerGuard.guard {
-            ApiServices.info.extensionBagTestItem(
-                json.optInt("index", -1),
-                json.optInt("slot", -1),
-                json.optInt("category", -1),
-                json.optInt("count", -1),
-            )
-        }
+        return NativeHttpCommand.post(path, json.toString())
     }
-
 }

@@ -5,12 +5,17 @@
 
 #include "contracts/events.h"
 #include "contracts/craft_facts.h"
+#include "contracts/http.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/move_merge.h"
+
+#include <cstdlib>
+#include <string>
 
 // ===========================================================================
 // 扩展背包插件：29 条声明式资源的 owner + extension_bag v1.0 provider + move_merge 门禁
@@ -109,6 +114,163 @@ const qol::contracts::QolPortRequirement kPorts[] = {
      {qol::contracts::kQolPortInventoryExtrasVersion.major,
       qol::contracts::kQolPortInventoryExtrasVersion.minor}},
 };
+
+// ---- HTTP command handlers（/api/debug/extension_bag/* POST，owner=extension_bag）----
+// 自注册模式（core.api lifecycle 先例）：plugin_install 成功尾部逐条 register_command，
+// 停用由宿主 unregister_http_queries 摘除置墓碑（503 http owner inactive）。
+// body 校验逐字对齐迁移前 Kotlin DebugController 的 ApiException 文本与状态码。
+
+enum class EbCommand : uint8_t {
+    kEnterView,
+    kExitView,
+    kUnequip,
+    kSelectBag,
+    kClickItem,
+    kEquip,
+    kItem,
+};
+
+struct EbCommandRoute {
+    const char* path;
+    EbCommand kind;
+};
+
+constexpr EbCommandRoute kEbCommandRoutes[] = {
+    {"/api/debug/extension_bag/enter_view", EbCommand::kEnterView},
+    {"/api/debug/extension_bag/exit_view", EbCommand::kExitView},
+    {"/api/debug/extension_bag/unequip", EbCommand::kUnequip},
+    {"/api/debug/extension_bag/select_bag", EbCommand::kSelectBag},
+    {"/api/debug/extension_bag/click_item", EbCommand::kClickItem},
+    {"/api/debug/extension_bag/equip", EbCommand::kEquip},
+    {"/api/debug/extension_bag/item", EbCommand::kItem},
+};
+
+// 从 JSON 对象文本提取整数字段。客户端 body 可能带空白：冒号后跳过空白再读
+// 可选负号与数字；键不存在或值非整数标量返回 false（调用方按 Kotlin optInt 缺省 -1 处理）。
+// debug 端点 body 只含数字字段，不做字符串值内键样子串的误匹配防护（与 core.api
+// json_field 同级取舍）。
+bool extract_int_field(const char* body, const char* key, int* out) {
+    const std::string pattern = std::string("\"") + key + "\":";
+    const char* p = std::strstr(body, pattern.c_str());
+    if (p == nullptr) return false;
+    p += pattern.size();
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') ++p;
+    char* end = nullptr;
+    const long value = std::strtol(p, &end, 10);
+    if (end == p) return false;
+    *out = static_cast<int>(value);
+    return true;
+}
+
+QolResult eb_command_error(contracts::HttpRes* response, uint16_t status, const char* message) {
+    const std::string body =
+        std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
+    if (response == nullptr || response->body == nullptr ||
+        response->body_capacity < body.size()) {
+        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = status;
+    return contracts::error(status == 400 ? kQolErrInvalidArgument : kQolErrInternal, message,
+                            static_cast<uint32_t>(std::strlen(message)));
+}
+
+QolResult eb_command_body(contracts::HttpRes* response, const std::string& body) {
+    if (response == nullptr || response->body == nullptr ||
+        response->body_capacity < body.size()) {
+        return eb_command_error(response, 500, "http response buffer too small");
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = 200;
+    return contracts::ok();
+}
+
+// bag 合法域 [6,10] 与迁移前 Kotlin DebugController 一致；未提供同样拒绝。
+bool eb_bag_valid(const char* body, int* out_bag, contracts::HttpRes* response) {
+    int bag = -1;
+    if (!extract_int_field(body, "bag", &bag)) bag = -1;
+    if (bag < 6 || bag > 10) {
+        eb_command_error(response, 400, "bag required (6-10)");
+        return false;
+    }
+    *out_bag = bag;
+    return true;
+}
+
+QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
+                             void* ctx) {
+    if (request == nullptr || response == nullptr || ctx == nullptr) {
+        return eb_command_error(response, 400, "bad request");
+    }
+    const EbCommand kind = *static_cast<const EbCommand*>(ctx);
+    // HttpReq.body 无 null 结尾契约：拷贝到 std::string（自带结尾）再做字段提取。
+    const std::string body_text(request->body != nullptr
+                                    ? reinterpret_cast<const char*>(request->body)
+                                    : "",
+                                request->body_len);
+    const char* body = body_text.c_str();
+    int bag = -1;
+    int slot = -1;
+    switch (kind) {
+        case EbCommand::kEnterView:
+            if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
+            return eb_command_body(response, data_op_extension_bag_enter_view(bag));
+        case EbCommand::kExitView:
+            return eb_command_body(response, data_op_extension_bag_exit_view());
+        case EbCommand::kUnequip:
+            if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
+            return eb_command_body(response, data_op_extension_bag_unequip(bag));
+        case EbCommand::kSelectBag:
+            if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
+            return eb_command_body(response, data_op_extension_bag_select_bag(bag));
+        case EbCommand::kClickItem: {
+            if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
+            if (!extract_int_field(body, "slot", &slot)) slot = -1;
+            if (slot < 0 || slot > 15) {
+                return eb_command_error(response, 400, "slot required (0-15)");
+            }
+            return eb_command_body(response, data_op_extension_bag_click_item(bag, slot));
+        }
+        case EbCommand::kEquip: {
+            int index = -1;
+            int bag_type = -1;
+            (void)extract_int_field(body, "index", &index);
+            (void)extract_int_field(body, "bagType", &bag_type);
+            return eb_command_body(response, data_virtual_bag_test_equip(index, bag_type));
+        }
+        case EbCommand::kItem: {
+            int index = -1;
+            int item_slot = -1;
+            int category = -1;
+            int count = -1;
+            (void)extract_int_field(body, "index", &index);
+            (void)extract_int_field(body, "slot", &item_slot);
+            (void)extract_int_field(body, "category", &category);
+            (void)extract_int_field(body, "count", &count);
+            return eb_command_body(
+                response, data_virtual_bag_test_item(index, item_slot, category, count));
+        }
+    }
+    return eb_command_error(response, 500, "unknown extension bag command");
+}
+
+bool register_extension_bag_commands(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr || sdk->http_dispatch.register_command == nullptr) return false;
+    for (const EbCommandRoute& route : kEbCommandRoutes) {
+        const QolResult result = sdk->http_dispatch.register_command(
+            contracts::HttpMethod::kPost, route.path, kPluginId, &eb_command_handler,
+            const_cast<EbCommand*>(&route.kind));
+        if (!contracts::succeeded(result)) {
+            if (sdk->http_dispatch.unregister_owner != nullptr) {
+                (void)sdk->http_dispatch.unregister_owner(kPluginId);
+            }
+            return false;
+        }
+    }
+    return true;
+}
 
 int plugin_install(qol::contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
@@ -269,10 +431,28 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         (void)g_sdk->events.subscribe(qol::contracts::kEventConfigChanged, &on_config_changed,
                                       nullptr, &g_config_subscription);
     }
+    // HTTP command 注册在全部绑定就绪后执行；失败即 install 失败（宿主不启用、资源不装）。
+    if (!register_extension_bag_commands(g_sdk)) {
+        extension_bag_bind_port_sdk(nullptr);
+        extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
+        extension_bag_bind_character_extras(nullptr);
+        extension_bag_bind_inventory_extras(nullptr);
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_write_port = nullptr;
+        return 1;
+    }
     return 0;
 }
 
 void plugin_deactivate(qol::contracts::PluginContext& ctx) {
+    // 自注册的 command handler 不在 descriptor（http_query_count=0），宿主的
+    // unregister_http_queries 会早退；deactivate 必须显式摘除，否则 activate 的
+    // 重注册走 duplicate 回滚会把整组槽置墓碑。幂等：宿主摘除后再调返回 not found。
+    if (g_sdk != nullptr && g_sdk->http_dispatch.unregister_owner != nullptr) {
+        (void)g_sdk->http_dispatch.unregister_owner(kPluginId);
+    }
     (void)ctx;
     // 幂等：退订后置 0，便于再次 install 重新订阅；move_merge 请求标志保持（与旧
     // 独立 JNI 开关语义一致，deactivate 不重置），资源归还包括 PopupState 回写与

@@ -104,15 +104,5 @@ class ActionApiServiceCore : ActionApiService {
 
     override fun dialogSelect(action: String, index: Int): String = UiActions.dialogSelect(action, index)
 
-    override fun extensionBagEnterView(bag: Int): String = ExtensionBagActions.extensionBagEnterView(bag)
-
-    override fun extensionBagExitView(): String = ExtensionBagActions.extensionBagExitView()
-
-    override fun extensionBagUnequip(bag: Int): String = ExtensionBagActions.extensionBagUnequip(bag)
-
-    override fun extensionBagSelectBag(bag: Int): String = ExtensionBagActions.extensionBagSelectBag(bag)
-
-    override fun extensionBagClickItem(bag: Int, slot: Int): String = ExtensionBagActions.extensionBagClickItem(bag, slot)
-
     override fun extensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String = ExtensionBagActions.extensionBagMoveItem(fromBag, fromSlot, toBag, toSlot)
 }

@@ -43,10 +43,5 @@ interface ActionApiService {
     fun withdraw(mercenarySlot: Int, equipSlot: Int): String
     fun attack(role: Int, targetSlot: Int): String
     fun stopCombat(role: Int): String
-    fun extensionBagEnterView(bag: Int): String
-    fun extensionBagExitView(): String
-    fun extensionBagUnequip(bag: Int): String
-    fun extensionBagSelectBag(bag: Int): String
-    fun extensionBagClickItem(bag: Int, slot: Int): String
     fun extensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
 }
