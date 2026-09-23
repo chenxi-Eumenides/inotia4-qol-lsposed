@@ -199,6 +199,60 @@ bool eb_bag_valid(const char* body, int* out_bag, contracts::HttpRes* response) 
     return true;
 }
 
+// 游戏写路由的命令化：HTTP 线程只校验并投递票据，DB 写在主线程结果处理器中执行
+// （ARCHITECTURE.md §7.1/§8.1）。结果处理器把迁移前的原响应 JSON 写入票据缓冲。
+constexpr uint32_t kEbResultHandlerId = 0x45420001;  // 全局 typed handler id 空间，EB 前缀
+
+struct EbCommandPayload {
+    int32_t kind = 0;
+    int32_t a = -1;
+    int32_t b = -1;
+    int32_t c = -1;
+    int32_t d = -1;
+};
+
+bool eb_result_handler(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (payload == nullptr || size != sizeof(EbCommandPayload) || out == nullptr ||
+        out_size == nullptr) {
+        return false;
+    }
+    EbCommandPayload p{};
+    std::memcpy(&p, payload, size);
+    std::string body;
+    switch (static_cast<EbCommand>(p.kind)) {
+        case EbCommand::kEnterView:
+            body = data_op_extension_bag_enter_view(p.a);
+            break;
+        case EbCommand::kExitView:
+            body = data_op_extension_bag_exit_view();
+            break;
+        case EbCommand::kUnequip:
+            body = data_op_extension_bag_unequip(p.a);
+            break;
+        case EbCommand::kSelectBag:
+            body = data_op_extension_bag_select_bag(p.a);
+            break;
+        case EbCommand::kClickItem:
+            body = data_op_extension_bag_click_item(p.a, p.b);
+            break;
+        case EbCommand::kEquip:
+            body = data_virtual_bag_test_equip(p.a, p.b);
+            break;
+        case EbCommand::kItem:
+            body = data_virtual_bag_test_item(p.a, p.b, p.c, p.d);
+            break;
+        default:
+            return false;
+    }
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    // 业务失败（原响应体含 "ok":false）→ 票据置 failed，结果仍携带原错误体。
+    return body.find("\"ok\":false") == std::string::npos;
+}
+
 QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
                              void* ctx) {
     if (request == nullptr || response == nullptr || ctx == nullptr) {
@@ -211,34 +265,43 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
                                     : "",
                                 request->body_len);
     const char* body = body_text.c_str();
+    EbCommandPayload payload{};
+    payload.kind = static_cast<int32_t>(kind);
     int bag = -1;
     int slot = -1;
     switch (kind) {
         case EbCommand::kEnterView:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
-            return eb_command_body(response, data_op_extension_bag_enter_view(bag));
+            payload.a = bag;
+            break;
         case EbCommand::kExitView:
-            return eb_command_body(response, data_op_extension_bag_exit_view());
+            break;
         case EbCommand::kUnequip:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
-            return eb_command_body(response, data_op_extension_bag_unequip(bag));
+            payload.a = bag;
+            break;
         case EbCommand::kSelectBag:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
-            return eb_command_body(response, data_op_extension_bag_select_bag(bag));
+            payload.a = bag;
+            break;
         case EbCommand::kClickItem: {
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
             if (!extract_int_field(body, "slot", &slot)) slot = -1;
             if (slot < 0 || slot > 15) {
                 return eb_command_error(response, 400, "slot required (0-15)");
             }
-            return eb_command_body(response, data_op_extension_bag_click_item(bag, slot));
+            payload.a = bag;
+            payload.b = slot;
+            break;
         }
         case EbCommand::kEquip: {
             int index = -1;
             int bag_type = -1;
             (void)extract_int_field(body, "index", &index);
             (void)extract_int_field(body, "bagType", &bag_type);
-            return eb_command_body(response, data_virtual_bag_test_equip(index, bag_type));
+            payload.a = index;
+            payload.b = bag_type;
+            break;
         }
         case EbCommand::kItem: {
             int index = -1;
@@ -249,20 +312,48 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             (void)extract_int_field(body, "slot", &item_slot);
             (void)extract_int_field(body, "category", &category);
             (void)extract_int_field(body, "count", &count);
-            return eb_command_body(
-                response, data_virtual_bag_test_item(index, item_slot, category, count));
+            payload.a = index;
+            payload.b = item_slot;
+            payload.c = category;
+            payload.d = count;
+            break;
         }
+        default:
+            return eb_command_error(response, 500, "unknown extension bag command");
     }
-    return eb_command_error(response, 500, "unknown extension bag command");
+    // 游戏写只能在主线程 owner command 执行（ARCHITECTURE.md §7.1）：HTTP 线程只投递票据。
+    if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) {
+        return eb_command_error(response, 503, "command port unavailable");
+    }
+    contracts::QolCommandTicket ticket = 0;
+    if (!contracts::succeeded(g_sdk->commands.post_typed(kEbResultHandlerId, &payload,
+                                                        sizeof(payload), &ticket)) ||
+        ticket == 0) {
+        return eb_command_error(response, 503, "command queue unavailable");
+    }
+    return eb_command_body(response, std::string("{\"ok\":true,\"ticket\":") +
+                                        std::to_string(ticket) + "}");
 }
 
 bool register_extension_bag_commands(const qol::contracts::QolHostSdk* sdk) {
     if (sdk == nullptr || sdk->http_dispatch.register_command == nullptr) return false;
+    // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
+    if (sdk->abi.size < sizeof(qol::contracts::QolHostSdk) || sdk->abi.minor < 8 ||
+        sdk->ticket_result.register_typed_result_handler == nullptr) {
+        return false;
+    }
+    if (!contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            kEbResultHandlerId, &eb_result_handler, nullptr))) {
+        return false;
+    }
     for (const EbCommandRoute& route : kEbCommandRoutes) {
         const QolResult result = sdk->http_dispatch.register_command(
             contracts::HttpMethod::kPost, route.path, kPluginId, &eb_command_handler,
             const_cast<EbCommand*>(&route.kind));
         if (!contracts::succeeded(result)) {
+            if (sdk->ticket_result.unregister_typed_result_handler != nullptr) {
+                (void)sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId);
+            }
             if (sdk->http_dispatch.unregister_owner != nullptr) {
                 (void)sdk->http_dispatch.unregister_owner(kPluginId);
             }
@@ -452,6 +543,10 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     // 重注册走 duplicate 回滚会把整组槽置墓碑。幂等：宿主摘除后再调返回 not found。
     if (g_sdk != nullptr && g_sdk->http_dispatch.unregister_owner != nullptr) {
         (void)g_sdk->http_dispatch.unregister_owner(kPluginId);
+    }
+    // 结果处理器同样需要显式注销（同一自注册理由）。
+    if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
+        (void)g_sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId);
     }
     (void)ctx;
     // 幂等：退订后置 0，便于再次 install 重新订阅；move_merge 请求标志保持（与旧
