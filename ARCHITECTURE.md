@@ -33,11 +33,11 @@ Loader（机制运行时）
   ├─ Game Adapter / Game Host（版本与低层受控适配）
   ├─ core.api（HTTP 共享出口）
   ├─ core.ui（通用 UI 共享出口）
-  ├─ 官方核心依赖 provider 插件（按领域拆分）
+  ├─ core.<domain>（领域 owner：读写一体，如 core.world / core.character / core.item / core.save / core.quest / core.choice）
   └─ 功能插件 / 依赖插件（特殊修改与组合）
 ```
 
-这是一种 loader + core API/官方核心依赖模组 + 依赖模组 + 功能模组的生态。`core.*` 是共享出口命名，不是高权限层，也不是全部业务的别名。官方 provider 可以按领域增加，不受 `core.api`、`core.ui` 两个名称或固定插件总数限制。
+这是一种 loader + core 插件（共享出口 + 领域 owner）+ 依赖模组 + 功能模组的生态。`core.*` 是**官方核心插件的命名空间**：共享出口（`core.api`、`core.ui`）与领域 owner（`core.<domain>`，一个领域一个 owner、读写一体、内部再分读面/写面）。它不是高权限层——core 插件与其它插件走同一套契约、依赖、启停和错误规则；也不得用单个 `core.game` 之类的聚合插件承载全部领域语义，领域必须按真实消费者拆分，不受名称或固定插件总数限制。
 
 ### 1.3 零插件组合
 
@@ -197,7 +197,7 @@ Game Host → Game Adapter → 游戏
 
 ### 5.2 官方核心依赖 provider
 
-官方 provider 是 `plugins/` 中可启停、可依赖、可测试的普通插件。它们按领域分类，而不是由一个 `core.game` 或 `core.api` 聚合全部语义。可存在的领域包括但不限于：
+官方核心插件是 `plugins/` 中可启停、可依赖、可测试的普通插件，命名为 `core.<domain>`，与共享出口 `core.api`、`core.ui` 同族。它们**按领域分类，一个领域一个 owner、读写一体**（内部再分读面/写面），而不是由一个 `core.game` 或 `core.api` 聚合全部语义。可存在的领域包括但不限于：
 
 - 当前地图、世界状态和地图事实；
 - 角色、队伍、装备和角色状态；
@@ -289,7 +289,7 @@ HTTP 传输边界固定为：
 - native owner 提供按领域定义的 typed snapshot、typed result 和 typed command；Kotlin bridge 调用对应的既有或新增窄入口，再保持既有 JSON 响应兼容；
 - query 只读取快照、不可变配置和登记数据；command 只解析为 owner 命令并立即返回票据（`{"ok":true,"ticket":N}`），操作在主线程执行、结果写回票据；HTTP 线程不等待主线程。
 
-既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与未迁移写路由的成功响应保持冻结；已迁移的带游戏写入的写路由遵循上条票据契约，其成功响应变更必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 可以迁移。诊断端点也不能借机加入游戏语义聚合。
+既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与未迁移写路由的成功响应保持冻结；已迁移的带游戏写入的写路由遵循上条票据契约，其成功响应变更必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 可以迁移。诊断端点也不能借机加入游戏语义聚合。**调试端点例外**：`/api/debug/*` 属开发调试用途，不构成对外调用方契约，其响应可随内部机制调整（如票据化），但须在 api-reference 中标注为调试端点；release 隔离与 smoke 可按既有口径对其单独处理。
 
 ### 7.2 `core.ui`
 

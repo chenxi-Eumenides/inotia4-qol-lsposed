@@ -2,8 +2,8 @@
 
 #include "contracts/plugin.h"
 
-namespace qol::features::world_facts {
+namespace qol::features::core_world {
 
 const contracts::PluginDescriptor& plugin_descriptor();
 
-}  // namespace qol::features::world_facts
+}  // namespace qol::features::core_world

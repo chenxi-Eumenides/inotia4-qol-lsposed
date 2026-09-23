@@ -1,7 +1,7 @@
 #include "contracts/world_facts.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/http.h"
-#include "plugins/world_facts/plugin.h"
+#include "plugins/core.world/plugin.h"
 
 #include <cstdio>
 #include <cstring>
@@ -15,8 +15,8 @@ static int g_fail = 0;
 } while (0)
 
 int main() {
-    const auto& descriptor = qol::features::world_facts::plugin_descriptor();
-    CHECK(std::strcmp(descriptor.id, "world_facts") == 0);
+    const auto& descriptor = qol::features::core_world::plugin_descriptor();
+    CHECK(std::strcmp(descriptor.id, "core.world") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.optional_count == 0);
     CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);

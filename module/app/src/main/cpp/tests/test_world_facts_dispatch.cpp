@@ -12,7 +12,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
-#include "plugins/world_facts/plugin.h"
+#include "plugins/core.world/plugin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -142,13 +142,13 @@ qol::contracts::QolHostSdk make_sdk() {
 }
 
 const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/id", "world_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/exits", "world_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/units", "world_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/enemies", "world_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/interactives", "world_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/drops", "world_facts", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/distance", "world_facts", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/id", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/exits", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/units", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/enemies", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/interactives", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/drops", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/world/map/distance", "core.world", 0, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -158,7 +158,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.sdk_minor = qol::contracts::kHostSdkMinor;
     ctx.sdk = sdk;
     ctx.game = nullptr;
-    ctx.plugin_id = "world_facts";
+    ctx.plugin_id = "core.world";
     ctx.ports = kPortArray;
     ctx.port_count = 1;
     return ctx;
@@ -200,7 +200,7 @@ void test_lifecycle_and_responses() {
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
-    const auto& descriptor = qol::features::world_facts::plugin_descriptor();
+    const auto& descriptor = qol::features::core_world::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
@@ -245,7 +245,7 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/world/map/id") == "{\"map_id\":7,\"id_name\":\"TestMap\"}");
 
     // 注销 owner：handler 进入墓碑态，调度器任务撤销，请求返回明确停用错误。
-    CHECK(qol::host::http_dispatch_api().unregister_owner("world_facts").ok == kQolOk);
+    CHECK(qol::host::http_dispatch_api().unregister_owner("core.world").ok == kQolOk);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     (void)dispatch_get("/api/world/map/units", nullptr, &status);
@@ -273,7 +273,7 @@ void test_missing_route_rejected() {
     // 冻结路由表缺失：宿主声明注册失败，不得留下 handler。
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
-    const auto& descriptor = qol::features::world_facts::plugin_descriptor();
+    const auto& descriptor = qol::features::core_world::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,

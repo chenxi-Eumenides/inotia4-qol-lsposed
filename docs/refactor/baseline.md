@@ -43,6 +43,7 @@
 | `plugins/character_facts` | 5 |
 | `plugins/core.api` | 5 |
 | `plugins/core.ui` | 17 |
+| `plugins/core.world` | 3 |
 | `plugins/craft_facts` | 2 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
@@ -61,7 +62,6 @@
 | `plugins/stack_limit` | 3 |
 | `plugins/system_facts` | 3 |
 | `plugins/text_layer` | 6 |
-| `plugins/world_facts` | 3 |
 | `plugins/world_teleport` | 6 |
 | **合计** | **494** |
 
@@ -232,6 +232,7 @@
 | `character_facts` | `plugins/character_facts` | 5 |
 | `core.api` | `plugins/core.api` | 5 |
 | `core.ui` | `plugins/core.ui` | 17 |
+| `core.world` | `plugins/core.world` | 3 |
 | `craft_facts` | `plugins/craft_facts` | 2 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
@@ -250,7 +251,6 @@
 | `stack_limit` | `plugins/stack_limit` | 3 |
 | `system_facts` | `plugins/system_facts` | 3 |
 | `text_layer` | `plugins/text_layer` | 6 |
-| `world_facts` | `plugins/world_facts` | 3 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 
 ## 校验入口

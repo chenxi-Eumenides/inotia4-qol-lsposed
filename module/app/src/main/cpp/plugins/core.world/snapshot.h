@@ -4,14 +4,14 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace qol::features::world_facts {
+namespace qol::features::core_world {
 
-// world_facts 的领域快照只允许由主线程发布，HTTP worker 线程读取；插件不能依赖
+// core.world 的领域快照只允许由主线程发布，HTTP worker 线程读取；插件不能依赖
 // infra 私有实现，因此在自身目录保留相同的 seqlock 语义。
 template <typename T>
 class Snapshot {
     static_assert(std::is_trivially_copyable<T>::value,
-                  "world_facts Snapshot<T> requires a trivially copyable type");
+                  "core.world Snapshot<T> requires a trivially copyable type");
 
 public:
     Snapshot() = default;
@@ -43,4 +43,4 @@ private:
     std::atomic<uint32_t> sequence_{0};
 };
 
-}  // namespace qol::features::world_facts
+}  // namespace qol::features::core_world

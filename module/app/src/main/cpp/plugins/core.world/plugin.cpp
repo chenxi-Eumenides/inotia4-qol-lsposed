@@ -12,10 +12,10 @@
 #include "contracts/world_facts.h"
 #include "snapshot.h"
 
-namespace qol::features::world_facts {
+namespace qol::features::core_world {
 namespace {
 
-constexpr const char* kPluginId = "world_facts";
+constexpr const char* kPluginId = "core.world";
 constexpr const char* kPluginVersion = "0.1.0";
 // 单个 slot 的 JSON 上限；观测值（31 单位 + 掉落）远小于此值，超出即放弃本轮发布。
 constexpr uint32_t kJsonCapacity = 32768;
@@ -501,13 +501,13 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
-    log_message(g_sdk, "[world_facts] provider install");
+    log_message(g_sdk, "[core.world] provider install");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
-    log_message(ctx.sdk, "[world_facts] provider deactivate");
+    log_message(ctx.sdk, "[core.world] provider deactivate");
     g_port = nullptr;
     g_sdk = nullptr;
 }
@@ -521,17 +521,17 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
                 1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
             g_frame_task = task;
         } else {
-            log_message(ctx.sdk, "[world_facts] snapshot scheduler unavailable");
+            log_message(ctx.sdk, "[core.world] snapshot scheduler unavailable");
         }
     }
-    log_message(ctx.sdk, "[world_facts] provider enabled: capability published");
+    log_message(ctx.sdk, "[core.world] provider enabled: capability published");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     WorldSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
-    log_message(ctx.sdk, "[world_facts] provider disabled: capability withdrawn");
+    log_message(ctx.sdk, "[core.world] provider disabled: capability withdrawn");
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -570,4 +570,4 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
 }
 
-}  // namespace qol::features::world_facts
+}  // namespace qol::features::core_world

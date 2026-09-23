@@ -31,7 +31,7 @@
 #include "plugins/system_facts/plugin.h"
 #include "plugins/text_layer/plugin.h"
 #include "plugins/world_teleport/plugin.h"
-#include "plugins/world_facts/plugin.h"
+#include "plugins/core.world/plugin.h"
 #include "plugins/save_facts/plugin.h"
 #endif
 #if QOL_ENABLE_DEVICE_PROBE
@@ -71,7 +71,7 @@ using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
 // requires/provides 构建 capability DAG 并决定 install/publish 顺序。
 constexpr PluginDescriptorFn kPluginDescriptors[] = {
 #if !QOL_KERNEL_ONLY
-    &features::world_facts::plugin_descriptor,
+    &features::core_world::plugin_descriptor,
     &features::craft_facts::plugin_descriptor,
     &features::save_facts::plugin_descriptor,
     &features::character_facts::plugin_descriptor,

@@ -852,7 +852,7 @@ add_test(NAME stack_limit_plugin_tests COMMAND stack_limit_plugin_tests)
 
 add_executable(world_facts_plugin_tests
     test_world_facts_plugin.cpp
-    ${CPP_DIR}/plugins/world_facts/plugin.cpp
+    ${CPP_DIR}/plugins/core.world/plugin.cpp
 )
 target_include_directories(world_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -864,7 +864,7 @@ add_test(NAME world_facts_plugin_tests COMMAND world_facts_plugin_tests)
 # P5-4-1：world_facts 7 条 /api/world/map/* query handler 的注册/快照/注销接缝。
 add_executable(world_facts_dispatch_tests
     test_world_facts_dispatch.cpp
-    ${CPP_DIR}/plugins/world_facts/plugin.cpp
+    ${CPP_DIR}/plugins/core.world/plugin.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )
