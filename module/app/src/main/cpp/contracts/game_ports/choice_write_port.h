@@ -8,7 +8,7 @@
 
 namespace qol::contracts {
 
-// core.choice owner 的对话框/交互写端点类别。
+// core.ui_state owner 的对话框/交互写端点类别。
 constexpr int32_t kQolChoiceWriteDialogSelect = 0;  // POST /api/ui/dialog/select（action, index）
 constexpr int32_t kQolChoiceWriteNpcInteract = 1;   // POST /api/ui/start_interact
 

@@ -5,8 +5,8 @@
 // 本 target 只链接 plugin.cpp，feature.cpp 的运行时实现以桩替代（真机验证）；
 // 纯逻辑走 feature.h 的 header-inline，不触碰游戏内存。
 
-#include "plugins/core.choice/feature.h"
-#include "plugins/core.choice/plugin.h"
+#include "plugins/core.ui_state/feature.h"
+#include "plugins/core.ui_state/plugin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -22,10 +22,10 @@ using qol::contracts::ResourceMechanism;
 using qol::contracts::ResourceRequirement;
 using qol::contracts::UiChoiceApi;
 using qol::contracts::UiChoiceSpec;
-using qol::features::core_choice::native_choice_detail::address_in_range;
-using qol::features::core_choice::native_choice_detail::can_open;
-using qol::features::core_choice::native_choice_detail::is_close_index;
-using qol::features::core_choice::native_choice_detail::valid_spec;
+using qol::features::core_ui_state::native_choice_detail::address_in_range;
+using qol::features::core_ui_state::native_choice_detail::can_open;
+using qol::features::core_ui_state::native_choice_detail::is_close_index;
+using qol::features::core_ui_state::native_choice_detail::valid_spec;
 
 int g_pass = 0;
 int g_fail = 0;
@@ -75,15 +75,15 @@ void test_address_ownership_range() {
 // 插件清单：provides `ui_choice` v1.0；2 条资源各自机制/handler/门禁正确；读写各一端口。
 void test_plugin_manifest() {
     const qol::contracts::PluginDescriptor& d =
-        qol::features::core_choice::plugin_descriptor();
-    CHECK(std::strcmp(d.id, "core.choice") == 0);
+        qol::features::core_ui_state::plugin_descriptor();
+    CHECK(std::strcmp(d.id, "core.ui_state") == 0);
     CHECK(d.requires_count == 2 && d.optional_count == 0);  // http.registry + http.dispatch
     CHECK(d.provides_count == 1);
     CHECK(std::strcmp(d.provides[0].id, qol::contracts::kUiChoiceCapabilityId) == 0);
     CHECK(d.provides[0].version.major == qol::contracts::kUiChoiceVersionMajor);
     CHECK(d.provides[0].version.minor == qol::contracts::kUiChoiceVersionMinor);
     CHECK(d.provides[0].iface != nullptr);
-    CHECK(d.port_count == 2 && d.ports != nullptr);
+    CHECK(d.port_count == 3 && d.ports != nullptr);
     CHECK(d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
     CHECK(d.ports[0].range.major == qol::contracts::kQolPortChoiceVersion.major);
     CHECK(d.ports[0].range.min_minor == qol::contracts::kQolPortChoiceVersion.minor);
@@ -121,7 +121,7 @@ void test_plugin_manifest() {
 }  // namespace
 
 // feature.cpp 运行时实现的桩：本 target 只验证清单与纯逻辑，真机验证安装/选择行为。
-namespace qol::features::core_choice {
+namespace qol::features::core_ui_state {
 
 bool native_choice_open(const contracts::UiChoiceSpec&) { return false; }
 bool native_choice_active() { return false; }
@@ -131,7 +131,7 @@ void choice_button_execute(void*) {}
 int32_t on_resource_ready(contracts::PluginContext&, const char*, void*) { return 0; }
 void native_choice_set_installed(bool) {}
 
-}  // namespace qol::features::core_choice
+}  // namespace qol::features::core_ui_state
 
 int main() {
     test_spec_bounds();

@@ -56,8 +56,8 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/stack_limit/plugin.cpp
     plugins/save_backup/plugin.cpp
     plugins/world_teleport/plugin.cpp
-    plugins/core.choice/feature.cpp
-    plugins/core.choice/plugin.cpp
+    plugins/core.ui_state/feature.cpp
+    plugins/core.ui_state/plugin.cpp
     plugins/core.ui/plugin.cpp
     plugins/core.ui/feature.cpp
     plugins/core.ui/ui_components.cpp
@@ -237,6 +237,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/save_write_port.cpp
     game/adapter_ports/world_write_port.cpp
     game/adapter_ports/choice_write_port.cpp
+    game/adapter_ports/ui_write_port.cpp
     game/adapter_ports/item_count_facade.cpp
 )
 

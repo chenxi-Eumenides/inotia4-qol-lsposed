@@ -11,6 +11,7 @@
 #include "game/state/quest_http.h"
 #include "game/state/save_http.h"
 #include "game/state/system_snapshot.h"
+#include "game/state/ui_http.h"
 #include "game/state/world_http.h"
 #include "game_world.h"
 #include "api/native/game_character.h"
@@ -22,6 +23,7 @@
 #include "game/json/game_json.h"
 #include "contracts/game_ports/save_write_port.h"
 #include "contracts/game_ports/choice_write_port.h"
+#include "contracts/game_ports/ui_write_port.h"
 #include "contracts/game_ports/world_write_port.h"
 #include "infra/store.h"
 
@@ -860,7 +862,7 @@ int32_t build_world_write_result_json(int32_t kind, int32_t a, int32_t b, int32_
     return ok ? kWorldWriteOk : kWorldWriteFailed;
 }
 
-// core.choice owner 的对话写结果拼装：dialog/select 与 start_interact 迁移前均原样透传 op JSON
+// core.ui_state owner 的对话写结果拼装：dialog/select 与 start_interact 迁移前均原样透传 op JSON
 // （Kotlin 平台门禁分支留在传输层，不下沉）。
 int32_t build_choice_write_result_json(int32_t kind, const char* action, int32_t index, char* out,
                                        uint32_t capacity, uint32_t* out_size) {
@@ -882,6 +884,36 @@ int32_t build_choice_write_result_json(int32_t kind, const char* action, int32_t
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
     return ok ? kChoiceWriteOk : kChoiceWriteFailed;
+}
+
+// core.ui owner 的面板写结果拼装：与迁移前 Kotlin ActionSupport.attachUi 同构——op 成功时把
+// op JSON 末尾 "}" 替换为 ,"state":<gamestate JSON>}；失败原样透传错误体。
+// gamestate 的平台 activity 覆盖仍留在 Kotlin 传输层（JVM-only），面板写要求已进 world，
+// 该覆盖在此不生效。
+int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, uint32_t capacity,
+                                  uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr) return kUiWriteFailed;
+    std::string op;
+    switch (kind) {
+        case contracts::kQolUiWritePanelOpen:
+            op = data_op_panel_open(panel != nullptr ? std::string(panel) : std::string());
+            break;
+        case contracts::kQolUiWritePanelClose:
+            op = data_op_panel_close();
+            break;
+        default:
+            return kUiWriteFailed;
+    }
+    const bool ok = op.find("\"ok\":false") == std::string::npos;
+    std::string body = op;
+    if (ok && !op.empty() && op.back() == '}') {
+        body = op.substr(0, op.size() - 1) + ",\"state\":" + data_gamestate_json() + "}";
+    }
+    if (body.size() > capacity) return kUiWriteFailed;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return ok ? kUiWriteOk : kUiWriteFailed;
 }
 
 }  // namespace qol::game

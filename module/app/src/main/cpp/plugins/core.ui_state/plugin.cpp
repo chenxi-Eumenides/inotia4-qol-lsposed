@@ -9,13 +9,14 @@
 #include "../../contracts/ui_choice.h"
 #include "contracts/commands.h"
 #include "contracts/game_ports/choice_write_port.h"
+#include "contracts/game_ports/ui_write_port.h"
 #include "contracts/http.h"
 #include "feature.h"
 
-namespace qol::features::core_choice {
+namespace qol::features::core_ui_state {
 namespace {
 
-constexpr const char* kPluginId = "core.choice";
+constexpr const char* kPluginId = "core.ui_state";
 constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -85,9 +86,11 @@ const contracts::QolPortRequirement kPorts[] = {
      {contracts::kQolPortChoiceVersion.major, contracts::kQolPortChoiceVersion.minor}},
     {contracts::QolPortId::QOL_PORT_CHOICE_WRITE,
      {contracts::kQolPortChoiceWriteVersion.major, contracts::kQolPortChoiceWriteVersion.minor}},
+    {contracts::QolPortId::QOL_PORT_UI_WRITE,
+     {contracts::kQolPortUiWriteVersion.major, contracts::kQolPortUiWriteVersion.minor}},
 };
 
-// 对话写（HTTP 写路由）的票据结果处理器 id（全局 typed handler id 空间；core.choice 前缀）。
+// 对话写（HTTP 写路由）的票据结果处理器 id（全局 typed handler id 空间；core.ui_state 前缀）。
 constexpr uint32_t kChoiceWriteHandlerId = 0x4E430001;
 
 struct ChoiceWritePayload {
@@ -200,28 +203,97 @@ bool choice_write_result(void*, const uint8_t* payload, uint32_t size, char* out
     return contracts::succeeded(result);
 }
 
-const contracts::HttpQueryHandlerDescriptor kChoiceWriteRoutes[] = {
+// 面板写（HTTP 写路由）使用独立的结果处理器 id：面板 kind 与对话 kind 各自从 0 起，
+// 共用一个 payload/处理器会产生取值域歧义。
+constexpr uint32_t kUiWriteHandlerId = 0x55490001;
+
+struct UiWritePayload {
+    int32_t kind = 0;
+    char panel[64] = {};
+};
+
+constexpr int32_t kPanelOpenKind = contracts::kQolUiWritePanelOpen;
+constexpr int32_t kPanelCloseKind = contracts::kQolUiWritePanelClose;
+
+const contracts::QolUiWritePort* g_ui_write = nullptr;
+
+// HTTP command handler（HTTP 线程）：只校验并投递票据，不直接改游戏面板栈。
+QolResult ui_write_command(const contracts::HttpReq* request, contracts::HttpRes* response,
+                           void* ctx) {
+    if (request == nullptr || response == nullptr || ctx == nullptr) {
+        return choice_http_error(response, 400, "bad request");
+    }
+    const int32_t kind = *static_cast<const int32_t*>(ctx);
+    const std::string body_text(request->body != nullptr
+                                    ? reinterpret_cast<const char*>(request->body)
+                                    : "",
+                                request->body_len);
+    UiWritePayload payload{};
+    payload.kind = kind;
+    if (kind == contracts::kQolUiWritePanelOpen) {
+        choice_string_field(body_text.c_str(), "panel", payload.panel,
+                            static_cast<uint32_t>(sizeof(payload.panel)));
+        if (payload.panel[0] == '\0') {
+            return choice_http_error(response, 400, "panel required");
+        }
+    }
+    if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) {
+        return choice_http_error(response, 503, "command port unavailable");
+    }
+    contracts::QolCommandTicket ticket = 0;
+    if (!contracts::succeeded(g_sdk->commands.post_typed(kUiWriteHandlerId, &payload,
+                                                        sizeof(payload), &ticket)) ||
+        ticket == 0) {
+        return choice_http_error(response, 503, "command queue unavailable");
+    }
+    return choice_http_body(response, std::string("{\"ok\":true,\"ticket\":") +
+                                          std::to_string(ticket) + "}");
+}
+
+// 结果处理器（主线程）：执行面板写并写出迁移前的原响应 JSON（附 state=<gamestate>）。
+bool ui_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                     uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (payload == nullptr || size != sizeof(UiWritePayload) || out == nullptr ||
+        out_size == nullptr || g_ui_write == nullptr || g_ui_write->read.write == nullptr) {
+        return false;
+    }
+    UiWritePayload p{};
+    std::memcpy(&p, payload, size);
+    const QolResult result = g_ui_write->read.write(p.kind, p.panel, out, capacity, out_size);
+    return contracts::succeeded(result);
+}
+
+// 声明式写路由：对话写 + 面板写共用一个数组（descriptor 只有一组 http_queries）。
+const contracts::HttpQueryHandlerDescriptor kWriteRoutes[] = {
     {contracts::HttpMethod::kPost, "/api/ui/dialog/select", kPluginId, &choice_write_command,
      const_cast<int32_t*>(&kDialogSelectKind)},
     {contracts::HttpMethod::kPost, "/api/ui/start_interact", kPluginId, &choice_write_command,
      const_cast<int32_t*>(&kNpcInteractKind)},
+    {contracts::HttpMethod::kPost, "/api/ui/open_panel", kPluginId, &ui_write_command,
+     const_cast<int32_t*>(&kPanelOpenKind)},
+    {contracts::HttpMethod::kPost, "/api/ui/close_panel", kPluginId, &ui_write_command,
+     const_cast<int32_t*>(&kPanelCloseKind)},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_choice_port = nullptr;
     g_choice_write = nullptr;
-    if (g_sdk == nullptr || ctx.ports == nullptr || ctx.port_count < 2 ||
-        ctx.ports[0] == nullptr || ctx.ports[1] == nullptr) {
+    g_ui_write = nullptr;
+    if (g_sdk == nullptr || ctx.ports == nullptr || ctx.port_count < 3 ||
+        ctx.ports[0] == nullptr || ctx.ports[1] == nullptr || ctx.ports[2] == nullptr) {
         g_sdk = nullptr;
         return 1;
     }
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
     g_choice_write = static_cast<const contracts::QolChoiceWritePort*>(ctx.ports[1]);
-    if (g_choice_write->read.write == nullptr) {
+    g_ui_write = static_cast<const contracts::QolUiWritePort*>(ctx.ports[2]);
+    if (g_choice_write->read.write == nullptr || g_ui_write->read.write == nullptr) {
         g_sdk = nullptr;
         g_choice_port = nullptr;
         g_choice_write = nullptr;
+        g_ui_write = nullptr;
         return 1;
     }
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
@@ -232,6 +304,16 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_choice_port = nullptr;
         g_choice_write = nullptr;
+        g_ui_write = nullptr;
+        return 1;
+    }
+    if (!contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
+            kUiWriteHandlerId, &ui_write_result, nullptr))) {
+        (void)g_sdk->ticket_result.unregister_typed_result_handler(kChoiceWriteHandlerId);
+        g_sdk = nullptr;
+        g_choice_port = nullptr;
+        g_choice_write = nullptr;
+        g_ui_write = nullptr;
         return 1;
     }
     // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
@@ -242,10 +324,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kChoiceWriteHandlerId);
+        (void)g_sdk->ticket_result.unregister_typed_result_handler(kUiWriteHandlerId);
     }
     native_choice_set_installed(false);
     g_choice_port = nullptr;
     g_choice_write = nullptr;
+    g_ui_write = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -278,9 +362,9 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     &on_resource_ready,
     kPorts,
-    2,
-    kChoiceWriteRoutes,
-    static_cast<uint32_t>(sizeof(kChoiceWriteRoutes) / sizeof(kChoiceWriteRoutes[0])),
+    3,
+    kWriteRoutes,
+    static_cast<uint32_t>(sizeof(kWriteRoutes) / sizeof(kWriteRoutes[0])),
 };
 
 }  // namespace
@@ -293,4 +377,4 @@ const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 
 const contracts::QolChoicePort* choice_port() { return g_choice_port; }
 
-}  // namespace qol::features::core_choice
+}  // namespace qol::features::core_ui_state

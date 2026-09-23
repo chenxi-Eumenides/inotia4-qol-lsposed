@@ -520,24 +520,24 @@ void test_choice_port_version_gate() {
         {qol::contracts::kQolPortChoiceVersion.major,
          qol::contracts::kQolPortChoiceVersion.minor},
     };
-    PluginDescriptor valid = make_descriptor("core.choice", nullptr, 0, nullptr, 0);
+    PluginDescriptor valid = make_descriptor("core.ui_state", nullptr, 0, nullptr, 0);
     valid.ports = &requirement;
     valid.port_count = 1;
     CHECK(register_plugin(valid));
     CHECK(install_all(make_deps()) == 0);
-    CHECK(feature_state_is("core.choice", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.ui_state", FeatureState::kEnabled));
 
     reset_all();
     requirement.range.min_minor = static_cast<uint16_t>(
         qol::contracts::kQolPortChoiceVersion.minor + 1);
-    PluginDescriptor incompatible = make_descriptor("core.choice", nullptr, 0, nullptr, 0);
+    PluginDescriptor incompatible = make_descriptor("core.ui_state", nullptr, 0, nullptr, 0);
     incompatible.ports = &requirement;
     incompatible.port_count = 1;
     CHECK(register_plugin(incompatible));
     CHECK(install_all(make_deps()) == 1);
     const char* error = nullptr;
-    CHECK(feature_state_is("core.choice", FeatureState::kBlocked));
-    CHECK(feature_of("core.choice", nullptr, nullptr, &error));
+    CHECK(feature_state_is("core.ui_state", FeatureState::kBlocked));
+    CHECK(feature_of("core.ui_state", nullptr, nullptr, &error));
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 }
 

@@ -21,8 +21,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 54 |
-| `game` | 105 |
+| `contracts` | 56 |
+| `game` | 111 |
 | `hooks` | 10 |
 | `host` | 44 |
 | `infra` | 39 |
@@ -42,12 +42,13 @@
 | `plugins/autosell` | 17 |
 | `plugins/core.api` | 5 |
 | `plugins/core.character` | 5 |
-| `plugins/core.choice` | 4 |
 | `plugins/core.craft` | 2 |
 | `plugins/core.item` | 7 |
+| `plugins/core.quest` | 5 |
 | `plugins/core.save` | 2 |
 | `plugins/core.system` | 3 |
 | `plugins/core.ui` | 17 |
+| `plugins/core.ui_state` | 4 |
 | `plugins/core.world` | 3 |
 | `plugins/craft_ui` | 4 |
 | `plugins/custom_recipe` | 10 |
@@ -56,14 +57,13 @@
 | `plugins/extension_bag` | 41 |
 | `plugins/inventory_hooks` | 11 |
 | `plugins/push_all` | 6 |
-| `plugins/quest` | 5 |
 | `plugins/save_backup` | 13 |
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **494** |
+| **合计** | **502** |
 
 ### 1.2 迁移期映射摘要
 
@@ -118,8 +118,8 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 49 |
-| `game` | `contracts` | 40 |
+| `host` | `game` | 51 |
+| `game` | `contracts` | 44 |
 | `host` | `infra` | 40 |
 | `host` | `contracts` | 38 |
 | `plugins/extension_bag` | `contracts` | 34 |
@@ -128,9 +128,9 @@
 | `plugins/inventory_hooks` | `contracts` | 16 |
 | `plugins/save_backup` | `contracts` | 14 |
 | `plugins/core.ui` | `contracts` | 12 |
+| `legacy/system` | `game` | 11 |
 | `host` | `hooks` | 10 |
 | `host` | `patch` | 10 |
-| `legacy/system` | `game` | 9 |
 | `infra` | `contracts` | 8 |
 | `infra` | `game` | 8 |
 
@@ -231,12 +231,13 @@
 | `autosell` | `plugins/autosell` | 17 |
 | `core.api` | `plugins/core.api` | 5 |
 | `core.character` | `plugins/core.character` | 5 |
-| `core.choice` | `plugins/core.choice` | 4 |
 | `core.craft` | `plugins/core.craft` | 2 |
 | `core.item` | `plugins/core.item` | 7 |
+| `core.quest` | `plugins/core.quest` | 5 |
 | `core.save` | `plugins/core.save` | 2 |
 | `core.system` | `plugins/core.system` | 3 |
 | `core.ui` | `plugins/core.ui` | 17 |
+| `core.ui_state` | `plugins/core.ui_state` | 4 |
 | `core.world` | `plugins/core.world` | 3 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
 | `custom_recipe` | `plugins/custom_recipe` | 10 |
@@ -245,7 +246,6 @@
 | `extension_bag` | `plugins/extension_bag` | 41 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
 | `push_all` | `plugins/push_all` | 6 |
-| `quest` | `plugins/quest` | 5 |
 | `save_backup` | `plugins/save_backup` | 13 |
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |

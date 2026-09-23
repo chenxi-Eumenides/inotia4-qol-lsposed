@@ -38,6 +38,7 @@
 #include "game/adapter_ports/save_write_port.h"
 #include "game/adapter_ports/world_write_port.h"
 #include "game/adapter_ports/choice_write_port.h"
+#include "game/adapter_ports/ui_write_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
@@ -216,6 +217,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_UI_WRITE) {
+        const auto& port = qol::game::ui_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
 #else
     (void)id;
     (void)out;
@@ -238,7 +244,7 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE &&
             (plugin.id == nullptr ||
-             (std::strcmp(plugin.id, "core.choice") != 0 &&
+             (std::strcmp(plugin.id, "core.ui_state") != 0 &&
               std::strcmp(plugin.id, "world_teleport") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
@@ -282,9 +288,16 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
-        // 对话写端口为 core.choice owner 私有：避免绕过 owner 直接写对话态。
+        // 对话写端口为 core.ui_state owner 私有：避免绕过 owner 直接写对话态。
         if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE_WRITE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "core.choice") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 面板写端口为 core.ui_state owner 私有：避免绕过 owner 直接改游戏面板栈。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_UI_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

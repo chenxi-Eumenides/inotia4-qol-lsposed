@@ -3,22 +3,21 @@ package com.inotia4.qol.service.action
 import com.inotia4.qol.AgreementPopup
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
-import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.UiActivityTracker
-import com.inotia4.qol.patch.AgreementGate
-import com.inotia4.qol.store.ModuleSaveStore
-import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
-import com.yanzhenjie.andserver.http.StatusCode
 import org.json.JSONObject
 import com.inotia4.qol.service.contract.ActionApiService
 import com.inotia4.qol.service.info.NativeHttpCommand
 
 internal object UiActions {
     fun panelClose(): String =
-        LogFile.op(LogDomain.API, "POST /api/ui/close_panel", emptyMap<String, String>()) { ActionSupport.attachUi(NativeBridge.nativeOpPanelClose()) }
+        LogFile.op(LogDomain.API, "POST /api/ui/close_panel", emptyMap<String, String>()) {
+            NativeHttpCommand.post("/api/ui/close_panel", "{}")
+        }
     fun panelOpen(panel: String): String =
-        LogFile.op(LogDomain.API, "POST /api/ui/open_panel", mapOf("panel" to "$panel")) { ActionSupport.attachUi(NativeBridge.nativeOpPanelOpen(panel)) }
+        LogFile.op(LogDomain.API, "POST /api/ui/open_panel", mapOf("panel" to "$panel")) {
+            NativeHttpCommand.post("/api/ui/open_panel", JsonUtil.wrap("panel" to panel))
+        }
     fun npcInteract(): String = NativeHttpCommand.post("/api/ui/start_interact", "{}")
     fun dialogSelect(action: String, index: Int): String =
         LogFile.op(LogDomain.API, "POST /api/ui/dialog/select", mapOf("action" to "$action", "index" to "$index")) {

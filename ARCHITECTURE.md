@@ -32,12 +32,13 @@
 Loader（机制运行时）
   ├─ Game Adapter / Game Host（版本与低层受控适配）
   ├─ core.api（HTTP 共享出口）
-  ├─ core.ui（通用 UI 共享出口）
-  ├─ core.<domain>（领域 owner：读写一体，如 core.world / core.character / core.item / core.save / core.quest / core.choice）
+  ├─ core.custom_ui（UI 共享工具：组件、面板框架、游戏原生控件、文本机制）
+  ├─ core.settings（成品页面：模块设置页；后续成品页同族）
+  ├─ core.<domain>（领域 owner：读写一体，如 core.world / core.character / core.item / core.save / core.quest / core.craft / core.system / core.ui_state）
   └─ 功能插件 / 依赖插件（特殊修改与组合）
 ```
 
-这是一种 loader + core 插件（共享出口 + 领域 owner）+ 依赖模组 + 功能模组的生态。`core.*` 是**官方核心插件的命名空间**：共享出口（`core.api`、`core.ui`）与领域 owner（`core.<domain>`，一个领域一个 owner、读写一体、内部再分读面/写面）。它不是高权限层——core 插件与其它插件走同一套契约、依赖、启停和错误规则；也不得用单个 `core.game` 之类的聚合插件承载全部领域语义，领域必须按真实消费者拆分，不受名称或固定插件总数限制。
+这是一种 loader + core 插件（共享出口/工具/成品页 + 领域 owner）+ 依赖模组 + 功能模组的生态。`core.*` 是**官方核心插件的命名空间**，分三类：共享出口（`core.api`）、共享 UI/文本工具与成品页面（`core.custom_ui`、`core.settings`）、领域 owner（`core.<domain>`，一个领域一个 owner、读写一体、内部再分读面/写面）。它不是高权限层——core 插件与其它插件走同一套契约、依赖、启停和错误规则；也不得用单个 `core.game` 之类的聚合插件承载全部领域语义，领域必须按真实消费者拆分，不受名称或固定插件总数限制。
 
 ### 1.3 零插件组合
 
@@ -197,13 +198,15 @@ Game Host → Game Adapter → 游戏
 
 ### 5.2 官方核心依赖 provider
 
-官方核心插件是 `plugins/` 中可启停、可依赖、可测试的普通插件，命名为 `core.<domain>`，与共享出口 `core.api`、`core.ui` 同族。它们**按领域分类，一个领域一个 owner、读写一体**（内部再分读面/写面），而不是由一个 `core.game` 或 `core.api` 聚合全部语义。可存在的领域包括但不限于：
+官方核心插件是 `plugins/` 中可启停、可依赖、可测试的普通插件，命名为 `core.<domain>`，与共享出口 `core.api`、UI 工具 `core.custom_ui`、成品页 `core.settings` 同族。它们**按领域分类，一个领域一个 owner、读写一体**（内部再分读面/写面），而不是由一个 `core.game` 或 `core.api` 聚合全部语义。可存在的领域包括但不限于：
 
 - 当前地图、世界状态和地图事实；
 - 角色、队伍、装备和角色状态；
 - 物品、库存、数量、原版/扩展背包视图；
 - 存档槽、存档读写参与和任务事实；
-- 合成结果、原生选择框、文本或其他确有多个消费者的稳定语义。
+- 合成结果，或其他确有多个消费者的稳定语义。
+
+界面与文本不另立“万能 UI 域”：**界面状态**（当前画面、游戏自身面板、对话选择框）是 `core.ui_state` 这一个领域的读写一体 owner；**可复用的 UI 组件、面板框架、游戏原生控件与文本机制**是共享工具 `core.custom_ui`；**开箱即用的整页**（模块设置页为首个）是 `core.settings`。功能插件拥有自己的页面与文案，只消费上述工具。
 
 每个 provider 只发布自己拥有的窄 capability、typed snapshot 和 owner command：
 
@@ -228,17 +231,18 @@ provider 的数量和命名随领域边界演进，不受固定插件数量或�
 
 功能插件之间用 capability、事件和命令端口协作；能力 id、版本、接口类型和发布模式必须静态声明。高频上下文（进档、面板、商店打开、当前角色变化）用 `availability/probe`、快照或领域事件表示，不用反复注册/注销 capability。
 
-### 5.4 共享出口插件
+### 5.4 共享出口、共享工具与成品页插件
 
-`core.*` 只表示共享出口插件，并不授予额外权限。未来是否存在更多共享出口由实际消费者和稳定契约决定，不用总数约束。
+`core.*` 只表示官方核心插件，并不授予额外权限。未来是否存在更多共享出口/工具/成品页由实际消费者和稳定契约决定，不用总数约束。
 
 | 插件类别 | 允许职责 | 明确禁止 |
 |---|---|---|
 | `core.api` | HTTP 共享出口、路由/能力登记协作、通用门控和状态出口 | 游戏语义、领域 live 读取、业务规则、万能 native HTTP router |
-| `core.ui` | 设置页容器、面板注册、导航和通用 `Panel/Button/Label/Toggle/Select/ScrollView` 等组件 | 自动出售/背包/存档等功能面板、游戏语义、底层资源细节 |
-| 其他官方 provider | 一个窄领域的共享事实或 owner 行为 | 聚合全部游戏对象、替代 Loader/Game Host、承担所有 API/UI |
+| `core.custom_ui` | 可复用 UI 组件、面板注册/导航框架、**游戏原生控件**（如原生选择框）与**文本机制**（独占文本钩子 + 注册接口） | 具体功能页面、游戏业务语义、替其他插件承载文案内容、底层资源细节 |
+| `core.settings` | 模块设置页这一**成品页**的内容/行为/资源与选项管理 | 通用组件框架、通用文本机制、游戏语义 |
+| 领域 owner `core.<domain>` | 一个窄领域的事实与 owner 行为（读写一体） | 聚合全部游戏对象、替代 Loader/Game Host、承担所有 API/UI |
 
-`core.api` 和 `core.ui` 都是普通插件：默认可启用但可停用，停用只使 HTTP 或通用 UI 出口降级，不使 Loader 日志、配置、生命周期、Game Adapter 或其他业务插件失效。`core` 前缀不得成为迁移垃圾桶。
+`core.api`、`core.custom_ui`、`core.settings` 都是普通插件：默认可启用但可停用，停用只使对应出口/工具/页面降级，不使 Loader 日志、配置、生命周期、Game Adapter 或其他业务插件失效。`core` 前缀不得成为迁移垃圾桶。**机制与内容分离**：可复用的机制（组件、控件、文本钩子与注册接口）归 `core.custom_ui`；具体内容（页面、文案、数据）归各自功能或领域插件。
 
 ## 6. 资源、生命周期与线程
 
@@ -291,9 +295,13 @@ HTTP 传输边界固定为：
 
 既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与未迁移写路由的成功响应保持冻结；已迁移的带游戏写入的写路由遵循上条票据契约，其成功响应变更必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 可以迁移。诊断端点也不能借机加入游戏语义聚合。**调试端点例外**：`/api/debug/*` 属开发调试用途，不构成对外调用方契约，其响应可随内部机制调整（如票据化），但须在 api-reference 中标注为调试端点；release 隔离与 smoke 可按既有口径对其单独处理。
 
-### 7.2 `core.ui`
+### 7.2 `core.custom_ui`、`core.ui_state` 与 `core.settings`
 
-底层游戏资源、贴图、绘制调用、原版控件和命中检测由 Game Adapter 的 UI 适配面负责；`core.ui` 通过稳定组件契约提供通用组件、容器、面板注册和导航。普通插件的 `ui/` 组合这些组件实现自己的功能面板和状态；功能面板不归 `core.ui`。
+底层游戏资源、贴图、绘制调用、原版控件和命中检测由 Game Adapter 的 UI 适配面负责。
+
+- **`core.custom_ui`（共享工具）**：通过稳定契约提供通用组件、容器、面板注册与导航，以及**游戏原生控件**（如原生选择框：弹框、等待选择、取回结果）与**文本机制**（独占文本钩子 + 文本注册/添加接口）。普通插件的 `ui/` 组合这些组件实现自己的页面；功能页面不归 `core.custom_ui`。文本**内容**也不归它——各插件经注册接口贡献自己的文案。
+- **`core.ui_state`（UI 领域 owner）**：拥有游戏界面状态的读写——当前画面、游戏自身面板、对话与选择框状态，以及对应操作（打开/关闭游戏面板、选择对话项、开始交互）。它不提供可复用组件，也不承载功能插件的页面。
+- **`core.settings`（成品页）**：模块设置页独立成插件，内容/行为/资源自持，消费 `core.custom_ui` 的组件与文本注册接口；配置的存储与门禁仍在内核（见 §8.2），本插件只是呈现者与选项管理者。
 
 组件只在确有多个真实消费者且契约稳定时提升为通用组件；不要预先构造覆盖全部业务的 UI 框架。
 
@@ -372,7 +380,9 @@ release 验收必须证明测试插件未被链接、未被注册、未被打入
 | 数量读写、扩展背包、新物品、新合成、自动出售、传送 | 功能插件或其依赖插件 |
 | HTTP 传输、解析、兼容 JSON | Kotlin host 与 `core.api` 出口协作 |
 | typed snapshot/result/command | 对应 provider/功能插件 owner |
-| 通用 UI 组件和面板壳 | `core.ui` |
+| 通用 UI 组件、面板框架与文本机制 | `core.custom_ui` |
+| 游戏界面状态与操作 | `core.ui_state` |
+| 模块设置页（成品页） | `core.settings` |
 | 功能面板和业务呈现 | 对应功能插件 |
 
 任何新职责都必须能在本表和前文找到唯一归属；若只能放入“万能 Loader”“万能 Game Host”或“万能 core provider”，说明边界仍未完成。

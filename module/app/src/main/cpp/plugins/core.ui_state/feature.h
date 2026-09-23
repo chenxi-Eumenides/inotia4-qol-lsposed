@@ -15,7 +15,7 @@
 //
 // 纯逻辑规则（native_choice_detail）同时供实现与 host 测试使用，不触碰游戏内存。
 
-namespace qol::features::core_choice {
+namespace qol::features::core_ui_state {
 
 namespace native_choice_detail {
 
@@ -59,4 +59,4 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 // 启用/停用标记同步（宿主 lifecycle 回调调用）：open 的门禁。
 void native_choice_set_installed(bool installed);
 
-}  // namespace qol::features::core_choice
+}  // namespace qol::features::core_ui_state

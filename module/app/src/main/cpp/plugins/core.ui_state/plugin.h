@@ -11,10 +11,10 @@
 //   · ptrslot:g_uichoice_button_list_exe_got ← 旧 install_button_hook_locked（PtrHook 槽）
 // 旧「按钮槽失败则手动 unhook init」由宿主事务逆序回滚承担。
 
-namespace qol::features::core_choice {
+namespace qol::features::core_ui_state {
 
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolChoicePort* choice_port();
 
-}  // namespace qol::features::core_choice
+}  // namespace qol::features::core_ui_state

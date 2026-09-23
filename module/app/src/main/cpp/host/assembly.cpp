@@ -21,7 +21,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
 #include "plugins/core.item/plugin.h"
-#include "plugins/core.choice/plugin.h"
+#include "plugins/core.ui_state/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
@@ -85,7 +85,7 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::extension_bag::plugin_descriptor,
     &features::inventory_hooks::plugin_descriptor,
     &features::core_item::plugin_descriptor,
-    &features::core_choice::plugin_descriptor,
+    &features::core_ui_state::plugin_descriptor,
     &features::push_all::plugin_descriptor,
     &features::core_quest::plugin_descriptor,
     &features::save_backup::plugin_descriptor,
