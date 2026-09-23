@@ -20,14 +20,6 @@ import com.inotia4.qol.service.contract.ActionApiService
 class ActionApiServiceCore : ActionApiService {
 
 
-    override fun move(x: Int, y: Int): String = MovementActions.move(x, y)
-
-    override fun walk(direction: Int): String = MovementActions.walk(direction)
-
-    override fun walkStop(): String = MovementActions.walkStop()
-
-    override fun interact(): String = MovementActions.interact()
-
     override fun useItem(bag: Int, slot: Int): String = InventoryActions.useItem(bag, slot)
 
     override fun diceAccept(): String = InventoryActions.diceAccept()

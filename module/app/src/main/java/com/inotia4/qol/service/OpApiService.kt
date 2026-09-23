@@ -24,7 +24,6 @@ interface OpApiService {
     fun setMoney(money: Long): String
     fun setStatusPoint(role: Int, points: Int): String
     fun partySwap(a: Int, b: Int): String
-    fun teleport(mapId: Int, x: Int, y: Int, force: Boolean): String
 }
 
 /**
@@ -116,13 +115,6 @@ class OpApiServiceImpl : OpApiService {
         checkOpEnabled()
         return LogFile.op(LogDomain.OP, "POST /api/op/party/swap", mapOf("a" to "$a", "b" to "$b")) {
             NativeBridge.nativeOpPartySwap(a, b)
-        }
-    }
-
-    override fun teleport(mapId: Int, x: Int, y: Int, force: Boolean): String {
-        checkOpEnabled()
-        return LogFile.op(LogDomain.OP, "POST /api/op/movement/teleport", mapOf("mapId" to "$mapId", "x" to "$x", "y" to "$y", "force" to "$force")) {
-            NativeBridge.nativeOpTeleportEx(mapId, x, y, force)
         }
     }
 }

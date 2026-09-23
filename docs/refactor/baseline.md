@@ -21,8 +21,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 52 |
-| `game` | 98 |
+| `contracts` | 54 |
+| `game` | 105 |
 | `hooks` | 10 |
 | `host` | 44 |
 | `infra` | 39 |
@@ -63,7 +63,7 @@
 | `plugins/text_layer` | 6 |
 | `plugins/world_facts` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **485** |
+| **合计** | **494** |
 
 ### 1.2 迁移期映射摘要
 
@@ -114,25 +114,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 117 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 120 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 47 |
-| `host` | `infra` | 39 |
+| `host` | `game` | 49 |
+| `game` | `contracts` | 40 |
+| `host` | `infra` | 40 |
 | `host` | `contracts` | 38 |
-| `game` | `contracts` | 36 |
-| `plugins/extension_bag` | `contracts` | 33 |
+| `plugins/extension_bag` | `contracts` | 34 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 20 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
-| `plugins/core.ui` | `contracts` | 11 |
-| `plugins/save_backup` | `contracts` | 11 |
+| `plugins/save_backup` | `contracts` | 14 |
+| `plugins/core.ui` | `contracts` | 12 |
 | `host` | `hooks` | 10 |
 | `host` | `patch` | 10 |
+| `legacy/system` | `game` | 9 |
 | `infra` | `contracts` | 8 |
 | `infra` | `game` | 8 |
-| `plugins/craft_ui` | `contracts` | 8 |
 
 ### 2.2 include 环
 

@@ -67,6 +67,62 @@ std::string data_op_teleport(int32_t map_id, int32_t x, int32_t y, bool force) {
     }
     return result;
 }
+// owner 命令内联入口：命令排空本身就在 kFramePointLogicPre 相位，不能再经 transition_run
+// 跨帧派发并阻塞等待自己。校验与转换体与 data_op_teleport 保持一致（同校验语义、同发起链）；
+// 传送结果是原始 op JSON（不读转场后的世界态），故无需延迟结算。
+std::string data_op_teleport_direct(int32_t map_id, int32_t x, int32_t y, bool force) {
+    if (!game_in_world()) return op_err("not in game");
+    if (const char* ui = ui_blocked()) {
+        std::string err = "ui occupied: ";
+        err += ui;
+        return op_err(err.c_str());
+    }
+    if (member_or_null(0) == nullptr) return op_err("world not ready");
+    if (fn_mapchange_set == nullptr || fn_gamestate_set_state == nullptr)
+        return op_err("symbol not resolved");
+    const bool same_map = map_id <= 0;
+    const int target = same_map ? static_cast<int>(current_map_id()) : map_id;
+    const int tx = x;
+    const int ty = y;
+    if (!force) {
+        const int tw = static_tiles_width(target);
+        const int th = static_tiles_height(target);
+        if (tw > 0 && th > 0 && (tx < 0 || tx >= tw || ty < 0 || ty >= th)) {
+            const std::string msg = "tile (" + std::to_string(tx) + "," + std::to_string(ty) +
+                                    ") out of map bounds " + std::to_string(tw) + "x" +
+                                    std::to_string(th) + " (force to override)";
+            return op_err(msg.c_str());
+        }
+        if (tx >= 0 && tx < NAV_W && ty >= 0 && ty < NAV_H) {
+            const uint8_t* tiles = static_tiles_for(target);
+            if (tiles != nullptr && (tiles[ty * NAV_W + tx] & TILE_BLOCK_BIT) != 0) {
+                const std::string msg = "tile (" + std::to_string(tx) + "," + std::to_string(ty) +
+                                        ") not walkable (force to override)";
+                return op_err(msg.c_str());
+            }
+        }
+    }
+    std::string result;
+    if (!transition_run_inline([target, tx, ty](std::string* out) {
+            if (gamestate_state() != 0) {
+                *out = op_err("map transition in progress");
+                return;
+            }
+            void* ch = member_or_null(0);
+            if (ch == nullptr) {
+                *out = op_err("world not ready");
+                return;
+            }
+            const int direction =
+                *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(ch) + C_DIRECTION);
+            fn_mapchange_set(target, tx, ty, direction);
+            fn_gamestate_set_state(GAMESTATE_MAP_CHANGE);
+            *out = op_ok();
+        }, &result)) {
+        return op_err(result.empty() ? "transition failed" : result.c_str());
+    }
+    return result;
+}
 std::string data_op_move(int32_t x, int32_t y) {
     if (!game_in_world()) return op_err("not in game");
     // v0.4.56：药水教学暂停自动取消（视为完成）后放行；早期 v0.4.41 在此拒绝

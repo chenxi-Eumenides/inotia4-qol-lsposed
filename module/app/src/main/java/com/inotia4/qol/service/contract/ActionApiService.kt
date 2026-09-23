@@ -1,10 +1,6 @@
 package com.inotia4.qol.service.contract
 
 interface ActionApiService {
-    fun move(x: Int, y: Int): String
-    fun walk(direction: Int): String
-    fun walkStop(): String
-    fun interact(): String
     fun useItem(bag: Int, slot: Int): String
     fun diceAccept(): String
     fun diceReject(): String

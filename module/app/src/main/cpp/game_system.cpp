@@ -10,6 +10,7 @@
 #include "game/state/quest_http.h"
 #include "game/state/save_http.h"
 #include "game/state/system_snapshot.h"
+#include "game/state/world_http.h"
 #include "game_world.h"
 #include "api/native/game_character.h"
 #include "api/native/game_quest.h"
@@ -19,6 +20,7 @@
 #include "game_dialog.h"
 #include "game/json/game_json.h"
 #include "contracts/game_ports/save_write_port.h"
+#include "contracts/game_ports/world_write_port.h"
 #include "infra/store.h"
 
 #include <mutex>
@@ -812,6 +814,48 @@ int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_i
     }
     // 与迁移前 ActionSupport.attachPlayer 同构：仅成功时附 state（键序 ok→state）。
     return finish("{\"ok\":true,\"state\":" + build_player_json() + "}", kSaveWriteOk);
+}
+
+// world_teleport owner 的世界写结果拼装：move_to/walk_dir/interact_with 迁移前经
+// ActionSupport.attachPlayer 追加 state（仅成功时）；stop_move 与 teleport 输出原始 op JSON。
+int32_t build_world_write_result_json(int32_t kind, int32_t a, int32_t b, int32_t c, int32_t d,
+                                      char* out, uint32_t capacity, uint32_t* out_size) {
+    std::string body;
+    bool attach_state = false;
+    switch (kind) {
+        case contracts::kQolWorldWriteMoveTo:
+            body = data_op_move(a, b);
+            attach_state = true;
+            break;
+        case contracts::kQolWorldWriteWalkDir:
+            body = data_op_walk(a);
+            attach_state = true;
+            break;
+        case contracts::kQolWorldWriteStopMove:
+            body = data_op_walk_stop();
+            break;
+        case contracts::kQolWorldWriteInteract:
+            body = data_op_interact();
+            attach_state = true;
+            break;
+        case contracts::kQolWorldWriteTeleport:
+            body = data_op_teleport_direct(a, b, c, d != 0);
+            break;
+        default:
+            return kWorldWriteFailed;
+    }
+    const bool ok = body.find("\"ok\":false") == std::string::npos;
+    if (attach_state && ok && !body.empty() && body.back() == '}') {
+        body.pop_back();
+        body += ",\"state\":";
+        body += build_player_json();
+        body += "}";
+    }
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr || body.size() > capacity) return kWorldWriteFailed;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return ok ? kWorldWriteOk : kWorldWriteFailed;
 }
 
 }  // namespace qol::game

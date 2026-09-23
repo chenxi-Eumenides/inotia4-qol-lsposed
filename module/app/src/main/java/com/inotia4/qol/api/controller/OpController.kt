@@ -86,19 +86,12 @@ class OpController {
     fun hate(@PathVariable("role") role: Int): String =
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/hate", mapOf("role" to "$role")) { notImpl() }
 
+    // owner：world_teleport（票据契约）；op 门禁由 dispatch 层按 op_gated 统一处理（403 信封同旧）。
+    // Kotlin 只做 body 语法校验与透传，map_id/x/y/force 的字段范围校验在 owner。
     @PostMapping("/api/op/movement/teleport")
     fun teleport(@RequestBody body: String): String {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        if (!o.has("map_id") || !o.has("x") || !o.has("y")) {
-            throw ApiException(StatusCode.SC_BAD_REQUEST, "map_id/x/y required")
-        }
-        val mapId = o.optInt("map_id", -1)
-        val x = o.optInt("x", -1)
-        val y = o.optInt("y", -1)
-        if (mapId < 0 || x < 0 || y < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "map_id/x/y required")
-        // force=true 跳过落点瓦片阻挡校验（默认校验静态瓦片矩阵覆盖范围内的阻挡位）
-        val force = o.optBoolean("force", false)
-        return ControllerGuard.guard { ApiServices.op.teleport(mapId, x, y, force) }
+        return NativeHttpCommand.post("/api/op/movement/teleport", o.toString())
     }
 
     // ---- P3 生命周期控制（/api/op/features/lifecycle）----
