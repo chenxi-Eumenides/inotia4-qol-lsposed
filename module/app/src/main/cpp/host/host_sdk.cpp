@@ -820,6 +820,13 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.in_flight = {&sdk_in_flight_enter, &sdk_in_flight_leave};
     sdk.http = http_registry_api();
     sdk.http_dispatch = http_dispatch_api();
+    // 票据结果回取面（尾部追加）：注册/注销结果处理器、读结果、细化状态。
+    sdk.ticket_result = contracts::QolTicketResultApi{
+        &infra::commands_register_typed_result_handler,
+        &infra::commands_unregister_typed_result_handler,
+        &infra::commands_read_result,
+        &infra::commands_ticket_state,
+    };
     return sdk;
 }
 

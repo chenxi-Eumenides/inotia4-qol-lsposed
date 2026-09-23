@@ -86,13 +86,13 @@ void test_basic_post_drain() {
     CHECK(drain() == 0);  // 空队列返回 0
 }
 
-// 2. 未知票据 → kFailed；非法命令（nullptr）→ 票据 0。
+// 2. 未知票据 → kUnknown（与执行失败 kFailed 区分）；非法命令（nullptr）→ 票据 0。
 void test_unknown_and_illegal() {
     reset_for_test();
     g_order.clear();
 
-    CHECK(ticket_state(0) == CommandState::kFailed);
-    CHECK(ticket_state(123456) == CommandState::kFailed);
+    CHECK(ticket_state(0) == CommandState::kUnknown);
+    CHECK(ticket_state(123456) == CommandState::kUnknown);
     CHECK(!cancel(0));
     CHECK(!cancel(123456));
 
@@ -177,7 +177,7 @@ void test_capacity_and_eviction() {
     CHECK(tx != 0);
     CHECK(drain() == 1);
     CHECK(ticket_state(tx) == CommandState::kDone);
-    CHECK(ticket_state(first) == CommandState::kFailed);  // 已淘汰
+    CHECK(ticket_state(first) == CommandState::kExpired);  // 已淘汰（非执行失败）
 }
 
 // 5. 多线程 post：2 线程 × 各 200 条，一次 drain 执行 400 条且票据无重复。
@@ -238,7 +238,7 @@ void test_reset_for_test() {
 
     reset_for_test();
     CHECK(pending_count() == 0);
-    CHECK(ticket_state(t) == CommandState::kFailed);  // 终态与活跃表都清空
+    CHECK(ticket_state(t) == CommandState::kUnknown);  // 终态与活跃表都清空
 
     // 计数重置后新票据重新从 1 开始。
     const CommandTicket t2 = post(c);

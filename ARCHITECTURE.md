@@ -77,7 +77,7 @@ Loader（机制运行时）
 
 ### 2.2 不可破坏的项目红线
 
-- 既有 API 路径、HTTP 方法、成功响应和兼容语义保持不变；迁移只改变内部 owner 或调用路径。
+- 既有 API 路径、HTTP 方法保持不变；query 路由的成功响应保持冻结。带游戏内存写入的写路由按 §7.1 的票据契约迁移：POST 立即返回 `{"ok":true,"ticket":N}`，原操作结果在票据终态尽力保留、可回取；受影响路由以 `docs/reference/api-reference.md` 的显式枚举为准，属刻意的调用方契约变更，不得静默替换。
 - 既有 `NativeBridge` external 方法名与签名保持冻结；新增接口必须另行设计兼容面，不借迁移删除或改写既有签名。
 - `game_symbols.h` 是游戏版本常量、VMA、偏移和 ABI 签名的唯一来源；域插件不得持有裸地址或 include 该头。
 - 游戏写入和有副作用调用只能在游戏主线程的 owner 命令处理器中执行；HTTP、初始化和后台线程不直接调用游戏函数，也不阻塞等待游戏结果。
@@ -287,9 +287,9 @@ HTTP 传输边界固定为：
 - Kotlin `host/` 保留 AndServer/socket 监听、HTTP 解析、请求生命周期、响应写回和兼容 JSON 处理；
 - native 不建立通用 HTTP router，不接管 socket，不把任意 JSON 请求当作万能调用入口；
 - native owner 提供按领域定义的 typed snapshot、typed result 和 typed command；Kotlin bridge 调用对应的既有或新增窄入口，再保持既有 JSON 响应兼容；
-- query 只读取快照、不可变配置和登记数据；command 只解析为 owner 命令并返回既有同步结果或票据语义；HTTP 线程不等待主线程。
+- query 只读取快照、不可变配置和登记数据；command 只解析为 owner 命令并立即返回票据（`{"ok":true,"ticket":N}`），操作在主线程执行、结果写回票据；HTTP 线程不等待主线程。
 
-既有 URL、HTTP 方法、成功响应和 `NativeBridge` external 方法/签名冻结。路由 owner 可以迁移，但必须保持 `docs/reference/api-reference.md` 的调用方契约。诊断端点也不能借机加入游戏语义聚合。
+既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与未迁移写路由的成功响应保持冻结；已迁移的带游戏写入的写路由遵循上条票据契约，其成功响应变更必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 可以迁移。诊断端点也不能借机加入游戏语义聚合。
 
 ### 7.2 `core.ui`
 
@@ -315,6 +315,8 @@ HTTP 传输边界固定为：
 provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`optional_requires`；版本按 major 相等、minor 满足进行协商。能力撤销先拒绝新 lease，再通知可选消费者摘除、按必需依赖级联、等待在途归零，最后注销。
 
 只读 capability 不能直接修改游戏；副作用统一进入 owner command。命令使用固定宽度 POD payload、票据和明确错误；空指针表示不可用，不能用默认值伪装未就绪。
+
+票据除执行状态外，在终态可回取 owner 命令产生的操作结果（即该 API 迁移前的成功/失败结果 JSON）。结果保留是**明确尽力语义**：单结果上限与总字节预算有界、超出按最旧优先淘汰（保留状态、淘汰结果），超限以显式字段标记省略；票据状态区分 `unknown`（不存在）、`expired`（已淘汰）与 `failed`（命令执行失败）。具体窗口、上限与回取端点（`GET /api/system/tickets/{id}`）在 `docs/reference/api-reference.md` 公布。
 
 ### 8.2 Loader 自举
 

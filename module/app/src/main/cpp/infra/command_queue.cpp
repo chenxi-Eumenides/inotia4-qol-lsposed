@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -35,25 +37,51 @@ std::mutex g_mtx;
 // 活跃票据（pending + 执行中）与其 FIFO 顺序。pending_count 只数 FIFO 中尚未开始者。
 std::unordered_map<CommandTicket, ActiveEntry> g_active;
 std::deque<CommandTicket> g_fifo;
-// 终态票据（有界，见 kMaxTerminalStates）。
-std::unordered_map<CommandTicket, CommandState> g_terminal;
+// 终态票据（有界，见 kMaxTerminalStates）与其结果（另受 kMaxRetainedResultBytes 预算约束）。
+struct TerminalEntry {
+    CommandState state = CommandState::kDone;
+    std::string result;  // 空 = 无结果或结果已被预算淘汰
+};
+std::unordered_map<CommandTicket, TerminalEntry> g_terminal;
 std::deque<CommandTicket> g_terminal_order;
+std::size_t g_retained_result_bytes = 0;
 CommandTicket g_next_ticket = 1;  // 票据从 1 起单调递增
 
-void record_terminal_locked(CommandTicket ticket, CommandState state) {
-    g_terminal[ticket] = state;
+void record_terminal_locked(CommandTicket ticket, CommandState state, const char* result,
+                            uint32_t result_size) {
+    TerminalEntry entry;
+    entry.state = state;
+    if (result != nullptr && result_size != 0 && result_size <= kMaxResultBytes) {
+        entry.result.assign(result, result_size);
+    }
+    g_retained_result_bytes += entry.result.size();
+    g_terminal[ticket] = std::move(entry);
     g_terminal_order.push_back(ticket);
     if (g_terminal_order.size() > kMaxTerminalStates) {
         const CommandTicket oldest = g_terminal_order.front();
         g_terminal_order.pop_front();
-        g_terminal.erase(oldest);
+        const auto it = g_terminal.find(oldest);
+        if (it != g_terminal.end()) {
+            g_retained_result_bytes -= it->second.result.size();
+            g_terminal.erase(it);
+        }
+    }
+    // 结果预算：超预算时从最旧开始丢弃结果文本（保留状态），保证明确尽力语义有界。
+    for (const CommandTicket t : g_terminal_order) {
+        if (g_retained_result_bytes <= kMaxRetainedResultBytes) break;
+        const auto it = g_terminal.find(t);
+        if (it != g_terminal.end() && !it->second.result.empty()) {
+            g_retained_result_bytes -= it->second.result.size();
+            it->second.result.clear();
+        }
     }
 }
 
 }  // namespace
 
 CommandTicket post(const Command& command) {
-    if (command.run == nullptr || command.name == nullptr) return 0;
+    if (command.name == nullptr) return 0;
+    if (command.run == nullptr && command.run_with_result == nullptr) return 0;
     std::lock_guard<std::mutex> lock(g_mtx);
     if (g_fifo.size() >= kMaxPending) return 0;
     const CommandTicket ticket = g_next_ticket;
@@ -65,11 +93,26 @@ CommandTicket post(const Command& command) {
 
 CommandState ticket_state(CommandTicket ticket) {
     std::lock_guard<std::mutex> lock(g_mtx);
+    if (ticket == 0) return CommandState::kUnknown;
     const auto it = g_active.find(ticket);
     if (it != g_active.end()) return CommandState::kPending;  // started 与否都仍是 kPending
     const auto term = g_terminal.find(ticket);
-    if (term != g_terminal.end()) return term->second;
-    return CommandState::kFailed;  // 未知票据，或已被有界窗口淘汰
+    if (term != g_terminal.end()) return term->second.state;
+    // 未命中：id 小于已分配上界说明曾分配但状态已被窗口淘汰（kExpired）；否则从未分配（kUnknown）。
+    return ticket < g_next_ticket ? CommandState::kExpired : CommandState::kUnknown;
+}
+
+bool read_result(CommandTicket ticket, char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_mtx);
+    const auto it = g_terminal.find(ticket);
+    if (it == g_terminal.end()) return false;
+    const std::string& result = it->second.result;
+    if (result.empty() || result.size() > capacity) return false;
+    std::memcpy(out, result.data(), result.size());
+    *out_size = static_cast<uint32_t>(result.size());
+    return true;
 }
 
 bool cancel(CommandTicket ticket) {
@@ -80,7 +123,7 @@ bool cancel(CommandTicket ticket) {
     g_active.erase(it);
     const auto fifo_it = std::find(g_fifo.begin(), g_fifo.end(), ticket);
     if (fifo_it != g_fifo.end()) g_fifo.erase(fifo_it);
-    record_terminal_locked(ticket, CommandState::kCancelled);
+    record_terminal_locked(ticket, CommandState::kCancelled, nullptr, 0);
     return true;
 }
 
@@ -100,13 +143,22 @@ uint32_t drain() {
     }
 
     // 锁外逐条执行：命令体是外部代码，持锁回调会阻塞 post 并可能造成死锁。
+    static thread_local std::vector<char> result_buffer(kMaxResultBytes);
     for (auto& item : batch) {
         const CommandTicket ticket = item.first;
         const Command& command = item.second;
-        const bool ok = command.run(command.ctx);
+        bool ok = false;
+        uint32_t result_size = 0;
+        if (command.run_with_result != nullptr) {
+            ok = command.run_with_result(command.ctx, result_buffer.data(),
+                                         static_cast<uint32_t>(result_buffer.size()), &result_size);
+        } else if (command.run != nullptr) {
+            ok = command.run(command.ctx);
+        }
         std::lock_guard<std::mutex> lock(g_mtx);
         g_active.erase(ticket);
-        record_terminal_locked(ticket, ok ? CommandState::kDone : CommandState::kFailed);
+        record_terminal_locked(ticket, ok ? CommandState::kDone : CommandState::kFailed,
+                               result_size != 0 ? result_buffer.data() : nullptr, result_size);
     }
     return static_cast<uint32_t>(batch.size());
 }
@@ -122,6 +174,7 @@ void command_queue_reset_for_test() {
     g_fifo.clear();
     g_terminal.clear();
     g_terminal_order.clear();
+    g_retained_result_bytes = 0;
     g_next_ticket = 1;
 }
 

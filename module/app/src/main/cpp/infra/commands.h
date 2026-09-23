@@ -27,6 +27,20 @@ QolResult commands_unregister_typed_handler(uint32_t handler_id);
 QolResult commands_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
                               contracts::QolCommandTicket* out);
 
+// 可写结果的 typed 处理器：同 id 空间，与 commands_register_typed_handler 互斥；执行时把该 API
+// 迁移前的结果 JSON 写入票据缓冲，供 commands_read_result 在终态回取（明确尽力语义）。
+QolResult commands_register_typed_result_handler(uint32_t handler_id,
+                                                 contracts::QolTypedResultCommandHandler handler,
+                                                 void* ctx);
+QolResult commands_unregister_typed_result_handler(uint32_t handler_id);
+
+// 回取票据终态结果：成功（out_size=实际长度）；否则 kQolErrNotFound（无结果/未知/过期/容量不足）。
+QolResult commands_read_result(contracts::QolCommandTicket ticket, char* out, uint32_t capacity,
+                               uint32_t* out_size);
+
+// 票据状态（含 unknown/expired），返回 contracts 状态码。
+int32_t commands_ticket_state(contracts::QolCommandTicket ticket);
+
 // 测试用：清空槽位表。
 void commands_reset_for_test();
 

@@ -283,9 +283,11 @@ struct QolHostSdk {
     QolHttpRegistryApi http;
     // Tail extension; older plugins use abi.size to consume the prefix they know.
     QolHttpDispatchApi http_dispatch;
+    // 票据结果回取面（阶段 5 追加；调用方须以 abi.size/abi.minor 协商后再消费）。
+    QolTicketResultApi ticket_result;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 7;
+constexpr uint16_t kHostSdkMinor = 8;
 
 }  // namespace qol::contracts

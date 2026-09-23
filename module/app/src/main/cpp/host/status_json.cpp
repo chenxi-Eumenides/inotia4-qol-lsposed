@@ -2,11 +2,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "contracts/plugin.h"
 #include "game/json/game_json.h"
 #include "hooks/registry.h"
 #include "host/plugin_registry.h"
+#include "infra/command_queue.h"
 #include "infra/commands.h"
 #include "infra/status.h"
 #if !QOL_KERNEL_ONLY
@@ -239,7 +242,21 @@ std::string host_ticket_json(uint64_t ticket) {
     out += std::to_string(ticket);
     out += ",\"state\":\"";
     out += qol::infra::command_state_name(state);
-    out += "\"}";
+    out += "\"";
+    // 终态结果（明确尽力语义，见 ARCHITECTURE.md §8.1）：已保留则原样内嵌为 JSON 对象，
+    // 未保留（无结果/已淘汰）显式标记 result_retained=false，不静默省略。
+    static thread_local std::vector<char> result_buffer(qol::infra::kMaxResultBytes);
+    uint32_t result_size = 0;
+    if (qol::infra::read_result(ticket, result_buffer.data(),
+                                static_cast<uint32_t>(result_buffer.size()), &result_size) &&
+        result_size != 0 && (result_buffer[0] == '{' || result_buffer[0] == '[')) {
+        out += ",\"result\":";
+        out.append(result_buffer.data(), result_size);
+        out += ",\"result_retained\":true";
+    } else {
+        out += ",\"result_retained\":false";
+    }
+    out += "}";
     return out;
 }
 

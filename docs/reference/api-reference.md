@@ -1787,22 +1787,41 @@
 **注意**：响应体由 native `nativeSystemResourcesJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 ---
 
-### 7.9 命令票据 tickets（v0.8.0 起，P3 落地）
+### 7.9 命令票据 tickets（v0.8.0 P3 起；阶段 5 扩展为结果回取端点）
 
 `GET /api/system/tickets/{id}`
 
-**用途**：查询命令票据状态（与首个返回票据的端点 `POST /api/op/features/lifecycle` 同时交付），供客户端轮询异步命令结果（ARCHITECTURE.md §9.1 P3）。
+**用途**：查询命令票据状态，并回取该命令的**操作结果**。所有返回票据的写端点（见 §7.10）由客户端轮询本端点取得原同步响应数据（ARCHITECTURE.md §8.1）。
 
 **返回格式**：
 ```json
-{ "ok": true, "ticket": 7, "state": "pending" }
+{ "ok": true, "ticket": 7, "state": "done", "result": {"ok":true,"state":{"money":28550}}, "result_retained": true }
 ```
 
 **字段说明**：
 - `ticket`：路径参数回显（`id` 为十进制票据号）。
-- `state`：`pending`（排队/执行中）/`done`（成功）/`failed`（执行失败或未知票据）/`cancelled`（已取消）。
+- `state`：`pending`（排队/执行中）/ `done`（成功）/ `failed`（命令执行失败）/ `cancelled`（已取消）/ `unknown`（票据不存在）/ `expired`（状态记录已被有界窗口淘汰，结果不可判定）。**`unknown`/`expired` 与 `failed` 语义不同，调用方必须区分**。
+- `result`：仅当结果被保留时出现，内容为该写端点迁移前的**原响应 JSON**（成功或失败体）。
+- `result_retained`：`false` 表示本票据无结果或结果已被淘汰（此时不出现 `result` 字段）。
 
-**注意**：`id` 为 0 → `{"ok":false,"error":"invalid ticket"}`；未知票据在 native 侧同样返回 `failed`（与命令队列「未知票据」语义一致）。响应体由 native `nativeTicketStateJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+**结果保留为明确尽力语义**（不承诺必然可取回）：单结果上限 16 KB；结果总预算 512 KB；终态状态窗口最近 1024 条。超出预算时从最旧开始淘汰结果（保留状态）；超单结果上限或已淘汰时 `result_retained=false`。客户端应在命令终态后及时轮询。
+
+**注意**：`id` 为 0 → `{"ok":false,"error":"invalid ticket"}`。响应体由 native `nativeTicketStateJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+
+### 7.10 写端点的票据契约（阶段 5）
+
+带游戏内存写入的写端点按 ARCHITECTURE.md §7.1 迁移为 owner 命令：请求立即返回票据，操作在主线程执行，结果经 §7.9 回取。
+
+**响应**：
+```json
+{ "ok": true, "ticket": 12 }
+```
+
+**受影响端点**：逐条迁移时在本节登记（迁移前保持原同步响应；迁移后列出，附参数校验错误码不变说明）。已迁移：
+- `POST /api/op/features/lifecycle`（P3 起即为票据语义）。
+- （阶段 5 各批迁移中，逐批追加。）
+
+**调用方迁移指引**：把原先直接读取的响应体改为轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后读取 `result`（即原响应体）；`result_retained=false` 时按业务重试或接受不可得。
 ---
 
 ## 八、op（越权操作）— POST /api/op/*

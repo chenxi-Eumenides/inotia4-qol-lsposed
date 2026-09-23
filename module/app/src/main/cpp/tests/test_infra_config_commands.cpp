@@ -236,7 +236,7 @@ void test_commands_invalid() {
     CHECK(port.post(&ticket, &bad).ok != 0);
     CHECK(ticket == 0);
 
-    CHECK(port.state(0) == static_cast<int32_t>(CommandState::kFailed)); // 未知票据
+    CHECK(port.state(0) == static_cast<int32_t>(CommandState::kUnknown)); // 未知票据（非 failed）
 }
 
 bool typed_handler(void*, const uint8_t* payload, uint32_t size) {
@@ -275,7 +275,7 @@ void test_typed_commands() {
     CHECK(port.post_typed(kHandlerId, &payload, sizeof(payload), &ticket).ok != 0);
 }
 
-// command_state_name：4 态稳定英文名 + 越界 unknown。
+// command_state_name：6 态稳定英文名 + 越界 unknown。
 void test_command_state_name() {
     CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kPending)),
                       "pending") == 0);
@@ -284,9 +284,69 @@ void test_command_state_name() {
                       "failed") == 0);
     CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kCancelled)),
                       "cancelled") == 0);
+    CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kUnknown)),
+                      "unknown") == 0);
+    CHECK(std::strcmp(command_state_name(static_cast<int32_t>(CommandState::kExpired)),
+                      "expired") == 0);
     CHECK(std::strcmp(command_state_name(-1), "unknown") == 0);
-    CHECK(std::strcmp(command_state_name(4), "unknown") == 0);
     CHECK(std::strcmp(command_state_name(999), "unknown") == 0);
+}
+
+// 结果通道：可写结果的 typed handler 注册、执行、终态回取；无结果命令回取失败。
+uint32_t g_result_calls = 0;
+bool typed_result_handler(void*, const uint8_t*, uint32_t, char* out, uint32_t capacity,
+                          uint32_t* out_size) {
+    ++g_result_calls;
+    static const char kJson[] = "{\"ok\":true,\"state\":{\"money\":1}}";
+    const uint32_t len = sizeof(kJson) - 1;
+    if (capacity < len) {
+        *out_size = 0;
+        return false;
+    }
+    std::memcpy(out, kJson, len);
+    *out_size = len;
+    return true;
+}
+
+void test_typed_result_commands() {
+    reset_all();
+    g_result_calls = 0;
+    constexpr uint32_t kResultId = 9;
+    CHECK(qol::infra::commands_register_typed_result_handler(kResultId, &typed_result_handler,
+                                                             nullptr)
+              .ok == 0);
+    const qol::contracts::QolCommands& port = commands_port();
+    const uint8_t payload[4] = {1, 2, 3, 4};
+    QolCommandTicket ticket = 0;
+    CHECK(port.post_typed(kResultId, payload, sizeof(payload), &ticket).ok == 0);
+    CHECK(ticket != 0);
+    CHECK(port.state(ticket) == static_cast<int32_t>(CommandState::kPending));
+    commands_drain();
+    CHECK(g_result_calls == 1);
+    CHECK(port.state(ticket) == static_cast<int32_t>(CommandState::kDone));
+    char out[128] = {};
+    uint32_t size = 0;
+    CHECK(qol::infra::commands_read_result(ticket, out, sizeof(out), &size).ok == 0);
+    CHECK(std::strcmp(out, "{\"ok\":true,\"state\":{\"money\":1}}") == 0);
+    // 无结果的普通命令：回取失败（明确尽力语义下与“已淘汰”同为不可得）。
+    QolCommand cmd{kCommandSetConfigBool, "k", 1};
+    QolCommandTicket plain = 0;
+    CHECK(port.post(&plain, &cmd).ok == 0);
+    commands_drain();
+    uint32_t plain_size = 0;
+    CHECK(qol::infra::commands_read_result(plain, out, sizeof(out), &plain_size).ok != 0);
+    // 未知票据与已淘汰票据区分：窗口（1024）淘汰后状态为 expired，而非 failed。
+    QolCommandTicket oldest = 0;
+    CHECK(port.post(&oldest, &cmd).ok == 0);
+    commands_drain();
+    for (int i = 0; i < 1030; ++i) {
+        QolCommandTicket t = 0;
+        (void)port.post(&t, &cmd);
+        commands_drain();
+    }
+    CHECK(port.state(oldest) == static_cast<int32_t>(CommandState::kExpired));
+    CHECK(port.state(oldest + 100000) == static_cast<int32_t>(CommandState::kUnknown));
+    CHECK(qol::infra::commands_unregister_typed_result_handler(kResultId).ok == 0);
 }
 
 }  // namespace
@@ -304,6 +364,7 @@ int main() {
     test_command_state_name();
     test_commands_invalid();
     test_typed_commands();
+    test_typed_result_commands();
     std::printf("infra_config_commands: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

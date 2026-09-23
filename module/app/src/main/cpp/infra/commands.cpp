@@ -44,6 +44,8 @@ Slot g_slots[kCommandSlots];
 struct TypedHandlerSlot {
     uint32_t handler_id = 0;
     contracts::QolTypedCommandHandler handler = nullptr;
+    // 可写结果的变体：与 handler 互斥，非空表示该 id 由 result handler 提供。
+    contracts::QolTypedResultCommandHandler result_handler = nullptr;
     void* ctx = nullptr;
 };
 
@@ -84,10 +86,32 @@ bool command_run(void* ctx) {
     }
 }
 
+// 可写结果的命令体：typed 槽若注册了 result handler，则执行并写入结果 JSON；否则退回 command_run
+// （结果为空）。out/capacity 由 command_queue 提供，超限由 handler 自行返回失败或省略。
+bool command_run_with_result(void* ctx, char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    const Slot* slot = static_cast<const Slot*>(ctx);
+    if (!slot->typed) return command_run(ctx);
+    contracts::QolTypedResultCommandHandler result_handler = nullptr;
+    void* handler_ctx = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_slots_mtx);
+        for (const TypedHandlerSlot& candidate : g_typed_handlers) {
+            if (candidate.handler_id == slot->typed_header.handler_id) {
+                result_handler = candidate.result_handler;
+                handler_ctx = candidate.ctx;
+                break;
+            }
+        }
+    }
+    if (result_handler == nullptr) return command_run(ctx);
+    return result_handler(handler_ctx, slot->typed_payload, slot->typed_header.payload_bytes, out,
+                          capacity, out_size);
+}
+
 QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
-
 // 调用方需持有 g_slots_mtx。票据进终态（done/failed/cancelled）后槽位可复用。
 void reap_terminal_slots_locked() {
     for (uint32_t i = 0; i < kCommandSlots; ++i) {
@@ -97,7 +121,8 @@ void reap_terminal_slots_locked() {
         }
         const CommandState state = ticket_state(slot.ticket);
         if (state == CommandState::kDone || state == CommandState::kFailed ||
-            state == CommandState::kCancelled) {
+            state == CommandState::kCancelled || state == CommandState::kUnknown ||
+            state == CommandState::kExpired) {
             slot.in_use = false;
             slot.typed = false;
             slot.ticket = 0;
@@ -157,18 +182,19 @@ QolResult commands_cancel(contracts::QolCommandTicket ticket) {
     return error_result(kQolErrConflict, "ticket not cancellable");
 }
 
-QolResult register_typed_handler_impl(uint32_t handler_id,
-                                      contracts::QolTypedCommandHandler handler, void* ctx) {
-    if (handler_id == 0 || handler == nullptr) {
+QolResult register_typed_handler_common(uint32_t handler_id,
+                                        contracts::QolTypedCommandHandler handler,
+                                        contracts::QolTypedResultCommandHandler result_handler,
+                                        void* ctx) {
+    if (handler_id == 0 || (handler == nullptr && result_handler == nullptr)) {
         return error_result(kQolErrInvalidArgument, "invalid typed handler");
     }
     std::lock_guard<std::mutex> lock(g_slots_mtx);
     for (TypedHandlerSlot& candidate : g_typed_handlers) {
         if (candidate.handler_id == handler_id) {
-            // 幂等重注册：owner 的重 install 路径（如级联停用后的显式 activate）只重走
-            // install 不先走 deactivate 注销，同 id 同 handler 的重复注册是合法重入；
-            // 仅当 handler 指针不同（另一实现抢占同一 id）才视为冲突。
-            if (candidate.handler == handler) {
+            // 幂等重注册：owner 的重 install 路径只重走 install 不先 deactivate，同 id 同实现
+            //（含结果变体）的重复注册是合法重入；仅当实现不同（另一实现抢占同 id）才视为冲突。
+            if (candidate.handler == handler && candidate.result_handler == result_handler) {
                 candidate.ctx = ctx;
                 return contracts::ok();
             }
@@ -177,11 +203,25 @@ QolResult register_typed_handler_impl(uint32_t handler_id,
     }
     for (TypedHandlerSlot& candidate : g_typed_handlers) {
         if (candidate.handler_id == 0) {
-            candidate = TypedHandlerSlot{handler_id, handler, ctx};
+            candidate.handler_id = handler_id;
+            candidate.handler = handler;
+            candidate.result_handler = result_handler;
+            candidate.ctx = ctx;
             return contracts::ok();
         }
     }
     return error_result(kQolErrBlocked, "typed handler slots full");
+}
+
+QolResult register_typed_handler_impl(uint32_t handler_id,
+                                      contracts::QolTypedCommandHandler handler, void* ctx) {
+    return register_typed_handler_common(handler_id, handler, nullptr, ctx);
+}
+
+QolResult register_typed_result_handler_impl(uint32_t handler_id,
+                                             contracts::QolTypedResultCommandHandler handler,
+                                             void* ctx) {
+    return register_typed_handler_common(handler_id, nullptr, handler, ctx);
 }
 
 QolResult unregister_typed_handler_impl(uint32_t handler_id) {
@@ -228,7 +268,7 @@ QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t siz
     slot->typed = true;
     slot->typed_header = {handler_id, size};
     if (size != 0) std::memcpy(slot->typed_payload, payload, size);
-    const Command queued{"qol.typed_command", command_run, slot, true};
+    const Command queued{"qol.typed_command", nullptr, slot, true, &command_run_with_result};
     const CommandTicket ticket = post(queued);
     if (ticket == 0) {
         slot->typed = false;
@@ -254,6 +294,28 @@ QolResult commands_unregister_typed_handler(uint32_t handler_id) {
 QolResult commands_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
                               contracts::QolCommandTicket* out) {
     return post_typed_impl(handler_id, payload, size, out);
+}
+
+QolResult commands_register_typed_result_handler(uint32_t handler_id,
+                                                 contracts::QolTypedResultCommandHandler handler,
+                                                 void* ctx) {
+    return register_typed_result_handler_impl(handler_id, handler, ctx);
+}
+
+QolResult commands_unregister_typed_result_handler(uint32_t handler_id) {
+    return unregister_typed_handler_impl(handler_id);
+}
+
+QolResult commands_read_result(contracts::QolCommandTicket ticket, char* out, uint32_t capacity,
+                               uint32_t* out_size) {
+    if (!read_result(ticket, out, capacity, out_size)) {
+        return error_result(kQolErrNotFound, "no retained result");
+    }
+    return contracts::ok();
+}
+
+int32_t commands_ticket_state(contracts::QolCommandTicket ticket) {
+    return static_cast<int32_t>(ticket_state(ticket));
 }
 
 const contracts::QolCommands& commands_port() {
@@ -300,6 +362,10 @@ const char* command_state_name(int32_t state) {
             return "failed";
         case CommandState::kCancelled:
             return "cancelled";
+        case CommandState::kUnknown:
+            return "unknown";
+        case CommandState::kExpired:
+            return "expired";
     }
     return "unknown";
 }
