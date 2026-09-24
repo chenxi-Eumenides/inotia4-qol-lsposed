@@ -9,7 +9,7 @@
 namespace qol::features::core_ui {
 namespace {
 
-constexpr const char* kPluginId = "core.ui";
+constexpr const char* kPluginId = "core.custom_ui";
 constexpr const char* kPluginVersion = "0.1.0";
 
 // 能力接口实例：函数地址为编译期常量；宿主进入 enabled 时发布。

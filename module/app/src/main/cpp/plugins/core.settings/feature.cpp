@@ -30,7 +30,7 @@ int32_t frame_tick(int64_t frame, void* ctx) {
 // 设置页容器 provider（panel_id="settings"）。
 const contracts::PanelProviderSpec kSettingsProvider = {
     "settings",
-    "core.ui",
+    "core.settings",
     &settings_provider_open,
     &settings_provider_close,
     &settings_provider_active,
@@ -41,7 +41,7 @@ const contracts::PanelProviderSpec kSettingsProvider = {
 // 当前设置页仍用静态 11 项表渲染；本项为面板注册表的前向兼容登记（数据化留 D1-b4）。
 const contracts::PanelItemSpec kSaveBackupItem = {
     "core.ui.item.save_backup",
-    "core.ui",
+    "core.settings",
     "存档备份",
     contracts::PanelItemKind::kAction,
     nullptr,        // config_key（动作项）
@@ -118,7 +118,7 @@ void panels_unregister() {
     settings_ui_unbind();
     g_enabled.store(false, std::memory_order_release);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
-        (void)g_sdk->panels.unregister_owner("core.ui");
+        (void)g_sdk->panels.unregister_owner("core.settings");
     }
 }
 

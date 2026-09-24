@@ -14,7 +14,7 @@
 #include "contracts/panels.h"
 #include "contracts/host_sdk.h"
 #include "plugins/core.settings/panels/rules.h"
-#include "plugins/core.ui/panels/stack.h"
+#include "plugins/core.custom_ui/panels/stack.h"
 
 using qol::contracts::PanelItemKind;
 using qol::contracts::PanelProviderSpec;

@@ -3,7 +3,7 @@
 #include <cstdio>
 
 #include "contracts/ui.h"
-#include "plugins/core.ui/ui_components.h"
+#include "plugins/core.custom_ui/ui_components.h"
 
 namespace {
 

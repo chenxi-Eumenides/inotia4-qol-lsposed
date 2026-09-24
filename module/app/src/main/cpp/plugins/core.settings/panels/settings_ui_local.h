@@ -7,7 +7,7 @@
 
 // 设置页自持的绘图/几何 helper（ADR 0001 D6：页面自持薄 helper）。
 //
-// 这些函数原先混在 plugins/core.ui/ui_components.cpp 中（与组件能力实现同文件），
+// 这些函数原先混在 plugins/core.custom_ui/ui_components.cpp 中（与组件能力实现同文件），
 // 但它们只服务设置页，且自身不碰游戏符号——只转发到宿主适配表 sdk->ui 与本插件的
 // 组件能力。按 ADR 0001 的次序，先把它们从框架文件搬到设置页侧，令设置页不再依赖
 // 框架的私有头；抽出 core.settings 时这组实现随页面一起走。

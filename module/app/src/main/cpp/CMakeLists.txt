@@ -58,11 +58,11 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/world_teleport/plugin.cpp
     plugins/core.ui_state/feature.cpp
     plugins/core.ui_state/plugin.cpp
-    plugins/core.ui/plugin.cpp
-    plugins/core.ui/feature.cpp
-    plugins/core.ui/ui_components.cpp
-    plugins/core.ui/panels/settings.cpp
-    plugins/core.ui/panels/stack.cpp
+    plugins/core.custom_ui/plugin.cpp
+    plugins/core.custom_ui/feature.cpp
+    plugins/core.custom_ui/ui_components.cpp
+    plugins/core.custom_ui/panels/settings.cpp
+    plugins/core.custom_ui/panels/stack.cpp
     plugins/save_backup/ui/panel.cpp
     plugins/extension_bag/plugin.cpp
 )

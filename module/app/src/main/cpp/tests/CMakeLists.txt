@@ -612,7 +612,7 @@ add_test(NAME infra_panels_tests COMMAND infra_panels_tests)
 # D1-b2：core.ui 面板栈 + 分页规则 host 测试（fake provider；末尾追加）
 add_executable(core_ui_panels_tests
     test_core_ui_panels.cpp
-    ${CPP_DIR}/plugins/core.ui/panels/stack.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
 )
 target_include_directories(core_ui_panels_tests PRIVATE
     ${CPP_DIR}
@@ -830,7 +830,7 @@ add_test(NAME ui_adapter_tests COMMAND ui_adapter_tests)
 # U11-2：core.ui 标准组件创建/更新/命中/销毁与错误语义 host 测试。
 add_executable(core_ui_components_tests
     test_core_ui_components.cpp
-    ${CPP_DIR}/plugins/core.ui/ui_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
 )
 target_include_directories(core_ui_components_tests PRIVATE
     ${CPP_DIR}

@@ -13,7 +13,7 @@
 #include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
 #include "plugins/core.settings/plugin.h"
-#include "plugins/core.ui/plugin.h"
+#include "plugins/core.custom_ui/plugin.h"
 #include "plugins/core.api/plugin.h"
 #include "plugins/craft_ui/plugin.h"
 #include "plugins/core.craft/plugin.h"
