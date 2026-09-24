@@ -12,6 +12,7 @@
 | v0.3 | 收敛插件边界、Host SDK、Game Host、能力契约、快照、命令和 Kotlin HTTP 传输边界。 |
 | v0.4.0 | 明确 Loader 零业务副作用；Game Adapter/Game Host 只做低层受控适配；领域语义由可分类的官方 provider 插件提供；功能插件可直接声明 hook/patch；取消固定 core 插件数量和插件总数约束。 |
 | v0.4.1 | 明确 provider/功能插件可并行开发、Loader 机制按真实消费者需求窄化补充；定义“内核能力完整”边界和两级测试插件 fixture，测试插件不进入产品与 release。 |
+| v0.4.2 | 澄清 EntryHook 可声明 ELF 导出符号目标及其解析、安装前预检和失败归属；不扩展其他资源目标或外部插件轨契约。 |
 
 ## 1. 目标与生态模型
 
@@ -80,7 +81,7 @@ Loader（机制运行时）
 
 - 既有 API 路径、HTTP 方法保持不变；query 路由的成功响应保持冻结。带游戏内存写入的写路由按 §7.1 的票据契约迁移：POST 立即返回 `{"ok":true,"ticket":N}`，原操作结果在票据终态尽力保留、可回取；受影响路由以 `docs/reference/api-reference.md` 的显式枚举为准，属刻意的调用方契约变更，不得静默替换。
 - 既有 `NativeBridge` external 方法名与签名保持冻结；新增接口必须另行设计兼容面，不借迁移删除或改写既有签名。
-- `game_symbols.h` 是游戏版本常量、VMA、偏移和 ABI 签名的唯一来源；域插件不得持有裸地址或 include 该头。
+- `game_symbols.h` 是内置适配所用游戏版本常量、VMA、偏移和 ABI 签名的唯一来源；域插件不得持有裸地址或 include 该头。插件可为 `EntryHook` 声明纯导出符号名（`ResourceClaim.symbol = "elf-export:<ELF导出名>"`）作为目标身份；它不是版本耦合裸地址，也不取代 `game_symbols.h` 对内置 VMA/ABI 常量的权威性。
 - 游戏写入和有副作用调用只能在游戏主线程的 owner 命令处理器中执行；HTTP、初始化和后台线程不直接调用游戏函数，也不阻塞等待游戏结果。
 - 同进程 native 代码无法获得崩溃隔离。受控 API 只提供目标校验、线程纪律和错误返回，不构成安全沙箱。
 - 任何资源必须有目标校验、占用仲裁、失败回滚、开关和状态上报；未登记的 raw hook/patch 不获得 Loader 的回收保证。
@@ -344,9 +345,11 @@ provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`op
 
 ### 10.1 Game Adapter 适配规则
 
-- 只有 `game/` 保存 `game_symbols.h`、VMA、偏移和 ABI 签名；其他目录禁止 include 符号头和写裸地址。
-- 变体识别、符号解析、原字校验和目标能力在资源安装前完成；必需条件不满足的插件进入 `unsupported`，不进入半安装。
+- 只有 `game/` 保存 `game_symbols.h`、内置 VMA、偏移和 ABI 签名；其他目录禁止 include 符号头和写裸地址。插件自声明的纯 ELF 导出名仅是 `EntryHook` 的目标身份，不是裸地址或 ABI 声明；Game Adapter 负责将其严格解析为当前 `libgame.so` 中已定义的函数导出，并验证可执行范围与 hook 对齐要求，不得回退到 VMA。既有内部目标 ID 保持原样。
+- 变体识别、符号解析、原字校验和目标能力在资源安装前完成；所有 required 且 fail-closed 的入口 hook 必须在插件 `install()`/hook 写入前完成目标预检，目标不匹配的插件进入 `unsupported`，不得半安装。Loader 负责预检校验、资源仲裁及失败回滚，且在机制运行时重新预检；机制运行失败进入 `failed`。预检仅证明目标存在且满足低层地址约束，不证明 ABI 或行为兼容。
 - Game Adapter 只返回低层受控结果；业务层把它转换为自己的 provider snapshot/result/command，不把游戏结构指针传播到 HTTP 或跨线程。
+
+该符号声明只定义内置插件资源目标边界，不冻结第三方外部轨；外部轨的容器、信任、ABI 与加载契约仍按 §9 留待另行设计。此澄清不改变 §10.2–§10.3 的测试与验收条件，也不新增当前重构阶段的职责或完成条件。
 
 ### 10.2 测试插件与 fixture
 

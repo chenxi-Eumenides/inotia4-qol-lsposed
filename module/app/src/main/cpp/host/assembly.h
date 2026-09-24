@@ -7,7 +7,7 @@
 namespace qol::host {
 
 // 注入帧时钟、注册命令排空帧任务、注册并安装内置静态插件。
-// 返回 true = 全部插件按要求就绪。
+// 返回 true = 宿主装配完成；插件级安装失败保留在 AssemblyReport 中，不阻止独立插件启动。
 bool assembly_init();
 
 struct AssemblyReport {
@@ -15,7 +15,7 @@ struct AssemblyReport {
     uint32_t registration_failures;
     uint32_t install_failures;
     bool kernel_only;
-    bool initialized;
+    bool initialized;  // 宿主装配流程完成；不表示所有插件均成功。
 };
 
 AssemblyReport assembly_report();

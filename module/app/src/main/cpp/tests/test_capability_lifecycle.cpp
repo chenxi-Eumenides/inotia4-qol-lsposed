@@ -55,6 +55,10 @@ using qol::hooks::in_flight_leave;
 
 namespace {
 
+constexpr const char* kProviderEntrySymbol = "F_TEST_VMA_CAP_PROVIDER";
+constexpr const char* kRequiredEntrySymbol = "F_TEST_VMA_CAP_REQUIRED";
+constexpr const char* kOptionalEntrySymbol = "F_TEST_VMA_CAP_OPTIONAL";
+
 // ---------------------------------------------------------------------------
 // fake 后端
 // ---------------------------------------------------------------------------
@@ -63,9 +67,12 @@ int g_hook_calls = 0;
 int g_unhook_calls = 0;
 
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
-    (void)symbol;
     if (out_followed != nullptr) *out_followed = false;
-    return 0x1000;
+    if (symbol == nullptr) return 0;
+    if (std::strcmp(symbol, kProviderEntrySymbol) == 0) return 0x1100;
+    if (std::strcmp(symbol, kRequiredEntrySymbol) == 0) return 0x1200;
+    if (std::strcmp(symbol, kOptionalEntrySymbol) == 0) return 0x1300;
+    return 0x1400;
 }
 
 int fake_hook(void* target, void* replacement, void** backup) {
@@ -143,7 +150,9 @@ void opt_fill_status(PluginStatusOut& out) { out.enabled = false; out.error = nu
 ResourceClaim make_claim(const char* id, const char* owner, const char* gate) {
     ResourceClaim c{};
     c.id = id;
-    c.symbol = "F_TEST_VMA";
+    c.symbol = std::strcmp(id, "hook:cap:prov") == 0 ? kProviderEntrySymbol
+               : std::strcmp(id, "hook:cap:req") == 0 ? kRequiredEntrySymbol
+                                                       : kOptionalEntrySymbol;
     c.mechanism = ResourceMechanism::kEntryHook;
     c.policy = ResourcePolicy::kPrivate;
     c.requirement = ResourceRequirement::kRequired;

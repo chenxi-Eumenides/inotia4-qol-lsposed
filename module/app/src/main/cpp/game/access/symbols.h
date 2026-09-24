@@ -8,6 +8,19 @@
 
 namespace qol::game {
 
+constexpr const char* kElfExportPrefix = "elf-export:";
+
+// Returns nullptr for the legacy symbol-ID namespace; returns the suffix for a
+// valid explicit ELF export claim, including an empty suffix for invalid input.
+inline const char* elf_export_name(const char* symbol_name) {
+    constexpr uint32_t kPrefixLength = 11;
+    if (symbol_name == nullptr) return nullptr;
+    for (uint32_t i = 0; i < kPrefixLength; ++i) {
+        if (symbol_name[i] == '\0' || symbol_name[i] != kElfExportPrefix[i]) return nullptr;
+    }
+    return symbol_name + kPrefixLength;
+}
+
 // 按声明的符号名解析可安装入口；未登记返回 0。
 // monster 变体把入口改写成无条件 b 跳板时主动跟随一次（理由见 .cpp 注释）。
 // out_followed 非空时写出「是否跟随了跳板」。

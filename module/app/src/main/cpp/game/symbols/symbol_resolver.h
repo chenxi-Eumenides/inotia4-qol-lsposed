@@ -34,6 +34,9 @@ public:
     // 未 attach 或未命中返回 0。
     uintptr_t resolveByName(const char* name) const;
 
+    // 只接受已定义的 STT_FUNC，且目标位于 PT_LOAD 范围内；不回退到 VMA。
+    uintptr_t resolveFunctionByName(const char* name) const;
+
     // 无符号名 GOT 槽反查：.rela.dyn 中 R_AARCH64_RELATIVE 条目 r_offset==slot_vma 时返回
     // 其 r_addend（目标数据地址相对偏移）；未命中返回 0。
     uintptr_t resolveSlot(uintptr_t slot_vma) const;
@@ -49,6 +52,14 @@ public:
     int missed() const { return missed_; }
 
 private:
+    struct LoadSegment {
+        uintptr_t begin = 0;
+        uintptr_t end = 0;
+        uint32_t flags = 0;
+    };
+
+    bool contains(uintptr_t address, size_t size, uint32_t flags) const;
+
     uintptr_t base_ = 0;
     const uint8_t* symtab_ = nullptr;   // DT_SYMTAB（load_bias + d_ptr）
     const char* strtab_ = nullptr;      // DT_STRTAB
@@ -56,11 +67,14 @@ private:
     const uint32_t* hash_chain_ = nullptr;
     uint32_t hash_nbucket_ = 0;
     uint32_t hash_nchain_ = 0;
-    uint32_t sym_entsize_ = 24;         // DT_SYMENT（Elf64=24）
+    uint32_t sym_entsize_ = 0;          // DT_SYMENT（Elf64=24）
+    size_t strtab_size_ = 0;
     const void* rela_ = nullptr;    // DT_RELA（RELATIVE 反查表，cpp 中转 Elf64_Rela*）
     uint64_t rela_count_ = 0;       // DT_RELASZ / DT_RELAENT（条目数）
     uintptr_t load_bias_ = 0;
     uintptr_t lo_ = 0, hi_ = 0;         // PT_LOAD 并集可读范围
+    LoadSegment load_segments_[16]{};
+    uint32_t load_segment_count_ = 0;
     bool attached_ = false;
 
     mutable int elf_ok_ = 0, slot_ok_ = 0, fallback_vma_ = 0, missed_ = 0;

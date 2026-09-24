@@ -53,7 +53,11 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 const contracts::ResourceClaim kResources[] = {
     {
         "hook:UIChoice_Init",   // id
+#if defined(QOL_ENABLE_DEVICE_PROBE) && QOL_ENABLE_DEVICE_PROBE
+        "elf-export:UIChoice_Init", // device probe 使用严格导出解析。
+#else
         "F_UI_CHOICE_INIT_VMA", // symbol（入口解析，game/access/symbols 登记）
+#endif
         contracts::ResourceMechanism::kEntryHook,
         contracts::ResourcePolicy::kPrivate,
         contracts::ResourceRequirement::kRequired,

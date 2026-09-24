@@ -441,6 +441,13 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.install == nullptr) return false;
     if (plugin.resources_count > kMaxResourcesPerPlugin) return false;
     if (plugin.resources_count > 0 && plugin.resources == nullptr) return false;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.symbol != nullptr &&
+            std::strncmp(claim.symbol, "elf-export:", 11) == 0 &&
+            (claim.mechanism != contracts::ResourceMechanism::kEntryHook ||
+             claim.symbol[11] == '\0')) return false;
+    }
     if (plugin.http_query_count > 0 && plugin.http_queries == nullptr) return false;
     if (plugin.requires_count > 0 && plugin.requires == nullptr) return false;
     if (plugin.optional_count > 0 && plugin.optional_requires == nullptr) return false;
@@ -449,6 +456,46 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.port_count > kMaxPortsPerPlugin) return false;
     if (plugin.port_count > 0 && plugin.ports == nullptr) return false;
     return true;
+}
+
+// 检查 required + fail-closed 资源的目标是否可解析，且不调用 install 或修改资源。
+const char* preflight_plugin_resources(const contracts::PluginDescriptor& plugin,
+                                       const HostDeps& deps) {
+    uintptr_t preflight_entries[kMaxResourcesPerPlugin] = {};
+    const char* preflight_ids[kMaxResourcesPerPlugin] = {};
+    uint32_t preflight_count = 0;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.requirement != contracts::ResourceRequirement::kRequired ||
+            claim.failure != contracts::ResourceFailure::kFailClosed) continue;
+        if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+            bool followed = false;
+            const uintptr_t entry =
+                deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+            if (entry == 0)
+                return "required entry unresolved";
+            if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
+            for (uint32_t prior = 0; prior < preflight_count; ++prior) {
+                if (entry == preflight_entries[prior] &&
+                    std::strcmp(claim.id, preflight_ids[prior]) != 0) {
+                    return "duplicate entry target";
+                }
+            }
+            preflight_entries[preflight_count] = entry;
+            preflight_ids[preflight_count] = claim.id;
+            ++preflight_count;
+        } else if (claim.mechanism == contracts::ResourceMechanism::kCallPatch) {
+            qol::game::PatchSite site{};
+            if (!qol::game::patch_site(claim.symbol, &site)) return "required patch unresolved";
+        } else if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+            qol::game::PtrSlotSite site{};
+            if (!qol::game::ptr_slot_site(claim.symbol, &site)) return "required slot unresolved";
+        } else if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+            const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
+            if (ops == nullptr || ops->acquire == nullptr) return "ownership ops missing";
+        }
+    }
+    return nullptr;
 }
 
 // requires 缺失判定；返回 nullptr 表示全部满足，否则为静态错误文本。
@@ -720,6 +767,12 @@ bool install_atomic_group(const contracts::PluginDescriptor& plugin,
                 error = "symbol unresolved";
                 break;
             }
+            if (hooks::entry_target_conflicts(entry, claim.id)) {
+                failed = true;
+                failed_id = claim.id;
+                error = "entry target already occupied";
+                break;
+            }
             const hooks::InstallOutcome outcome = hooks::install_claim_entry_hook(
                 claim, entry, deps.hook_fn, false);
             if (outcome.ok != 0) {
@@ -800,6 +853,7 @@ const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
         const uintptr_t entry =
             deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
         if (entry == 0) return "symbol unresolved";
+        if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
         const hooks::InstallOutcome outcome =
             hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, true);
         if (outcome.ok != 0) {
@@ -925,6 +979,10 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
                     degraded = true;
                     error_claim = claim.id;
                     error_reason = "symbol unresolved";
+                } else if (hooks::entry_target_conflicts(entry, claim.id)) {
+                    degraded = true;
+                    error_claim = claim.id;
+                    error_reason = "entry target already occupied";
                 } else {
                     const hooks::InstallOutcome outcome =
                         hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, true);
@@ -1215,6 +1273,13 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     contracts::PluginContext ctx = make_plugin_context(plugin.id);
 
+    const char* preflight_error = preflight_plugin_resources(plugin, deps);
+    if (preflight_error != nullptr) {
+        infra::status_update(plugin.id, infra::FeatureState::kUnsupported, false,
+                             preflight_error);
+        return false;
+    }
+
     if (plugin.install(ctx) != 0) {
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
         return false;
@@ -1317,6 +1382,10 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
             deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
         if (entry == 0) {
             if (handle_claim_failure(claim, "symbol unresolved")) break;
+            continue;
+        }
+        if (hooks::entry_target_conflicts(entry, claim.id)) {
+            if (handle_claim_failure(claim, "entry target already occupied")) break;
             continue;
         }
 
@@ -1701,6 +1770,12 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             if (blocked_error != nullptr) {
                 infra::status_update(plugin->id, infra::FeatureState::kBlocked, false,
                                      blocked_error);
+                return false;
+            }
+            const char* preflight_error = preflight_plugin_resources(*plugin, g_install_deps);
+            if (preflight_error != nullptr) {
+                infra::status_update(plugin->id, infra::FeatureState::kUnsupported, false,
+                                     preflight_error);
                 return false;
             }
             // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。

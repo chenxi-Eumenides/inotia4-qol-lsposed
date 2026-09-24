@@ -38,6 +38,9 @@
 #include "plugins/device_probe_consumer/plugin.h"
 #include "plugins/device_probe_provider/plugin.h"
 #endif
+#if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
+#include "plugins/device_probe_export_failure/plugin.h"
+#endif
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
@@ -52,6 +55,7 @@
 #include "infra/config.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
+#include "infra/status.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
 #include "host/adapters.h"
@@ -99,6 +103,9 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
 #if QOL_ENABLE_DEVICE_PROBE
     &features::device_probe_provider::plugin_descriptor,
     &features::device_probe_consumer::plugin_descriptor,
+#endif
+#if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
+    &features::device_probe_export_failure::plugin_descriptor,
 #endif
     nullptr,
 };
@@ -167,6 +174,32 @@ MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr
     const qol::patch::Outcome outcome = qol::patch::release_claim(claim, site.addr);
     return MechanismOutcome{outcome.ok, outcome.error};
 }
+
+#if QOL_ENABLE_DEVICE_PROBE
+void probe_entry_export_resolution() {
+    bool found_followed = false;
+    const uintptr_t found =
+        qol::game::resolve_hook_entry("elf-export:GRPX_Start", &found_followed);
+    bool missing_followed = false;
+    const uintptr_t missing = qol::game::resolve_hook_entry(
+        "elf-export:QOL_Preflight_Missing_Export", &missing_followed);
+
+    QOL_LOG_INFO(QolDomain::kCore,
+                 "device_probe: domain=elf_export symbol=GRPX_Start result=%s expected=hit followed=%s",
+                 found != 0 ? "hit" : "missing", found_followed ? "true" : "false");
+    if (found == 0) {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "device_probe: domain=elf_export symbol=GRPX_Start diagnostic=unexpected_missing");
+    }
+    QOL_LOG_INFO(QolDomain::kCore,
+                 "device_probe: domain=elf_export symbol=QOL_Preflight_Missing_Export result=%s expected=missing followed=%s",
+                 missing != 0 ? "hit" : "missing", missing_followed ? "true" : "false");
+    if (missing != 0) {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "device_probe: domain=elf_export symbol=QOL_Preflight_Missing_Export diagnostic=unexpected_hit");
+    }
+}
+#endif
 
 // 逻辑帧任务：命令排空 → 生命周期推进 → 门禁对齐（主线程）。
 // 经 infra::scheduler 逻辑帧点派发；帧源 wrapper 同时派发 legacy frame_task，
@@ -267,6 +300,11 @@ bool assembly_init() {
         ++g_registered_plugins;
     }
 
+#if QOL_ENABLE_DEVICE_PROBE
+    // bridge_init attaches the ELF resolver before nativeInit enters assembly_init.
+    probe_entry_export_resolution();
+#endif
+
     // 启动期同步安装：此刻尚无帧源与在途回调，直接装完即就绪；运行期生命周期一律走事务。
     const int failed = install_all(deps);
     g_install_failures = failed > 0 ? static_cast<uint32_t>(failed) : 0;
@@ -275,11 +313,20 @@ bool assembly_init() {
                      "assembly: registered=%u install_failed=%u kernel_only=%s",
                      g_registered_plugins, g_install_failures,
                      QOL_KERNEL_ONLY ? "true" : "false");
-        return false;
     }
+#if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
+    infra::FeatureStatus export_probe_status{};
+    if (infra::status_get("device_probe_export_failure", &export_probe_status)) {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "device_probe: plugin=%s state=%s error=%s",
+                     export_probe_status.id,
+                     infra::feature_state_name(export_probe_status.state),
+                     export_probe_status.error != nullptr ? export_probe_status.error : "none");
+    }
+#endif
     g_assembly_done = true;
     QOL_LOG_INFO(QolDomain::kCore,
-                 "assembly: registered=%u install_failed=%u kernel_only=%s",
+                 "assembly: initialized=true registered=%u install_failed=%u kernel_only=%s",
                  g_registered_plugins, g_install_failures,
                  QOL_KERNEL_ONLY ? "true" : "false");
     return true;

@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "game/symbols/game_symbols.h"
+#include "game/symbols/symbol_resolver.h"
 #include "game/access/game_access.h"
 
 namespace qol::game {
@@ -129,6 +130,17 @@ uintptr_t resolve_hook_entry(const char* symbol_name, bool* out_followed) {
     if (symbol_name == nullptr || g_base == 0) {
         *followed = false;
         return 0;
+    }
+    const char* export_name = elf_export_name(symbol_name);
+    if (export_name != nullptr) {
+        *followed = false;
+        if (export_name[0] == '\0') return 0;
+        const uintptr_t offset = g_resolver.resolveFunctionByName(export_name);
+        if (offset == 0) return 0;
+        const uintptr_t address = g_base + offset;
+        if ((address & 0x3u) != 0 ||
+            !game_memory_accessible(reinterpret_cast<void*>(address), 4, 'x')) return 0;
+        return hookable_entry(address, followed);
     }
     for (const HookEntrySymbol& entry : kHookEntrySymbols) {
         if (std::strcmp(entry.name, symbol_name) != 0) continue;

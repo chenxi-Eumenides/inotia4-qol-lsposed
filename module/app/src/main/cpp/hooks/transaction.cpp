@@ -22,6 +22,7 @@ struct TxEntry {
     const contracts::ResourceClaim* claim = nullptr;
     bool installed = false;      // 本事务内安装成功（安装回滚用）
     uint32_t waited_frames = 0;  // 还原等待该资源已消耗帧数
+    uintptr_t preflight_entry = 0;
 };
 
 struct Tx {
@@ -36,6 +37,8 @@ struct Tx {
     uint32_t budget = kDefaultBudget;
     const char* failed_resource_id = nullptr;
     const char* error = nullptr;
+    const char* preflight_failed_resource_id = nullptr;
+    const char* preflight_error = nullptr;
     TxEntry entries[kMaxResources];
 };
 
@@ -283,6 +286,9 @@ bool install_step(Tx& tx, TxStep* out) {
     if (entry == 0) {
         return fail_install(tx, claim.id, "symbol not resolved", out);
     }
+    if (entry_target_conflicts(entry, claim.id)) {
+        return fail_install(tx, claim.id, "entry target already occupied", out);
+    }
 
     // gate 为 nullptr 视为开；gate_on 未注入时一切 gate 视为开。
     bool want = true;
@@ -449,6 +455,8 @@ uint64_t tx_begin(const char* plugin_id, TxKind kind) {
     tx.budget = kDefaultBudget;
     tx.failed_resource_id = nullptr;
     tx.error = nullptr;
+    tx.preflight_failed_resource_id = nullptr;
+    tx.preflight_error = nullptr;
 
     uint32_t index = 0;
     for (uint32_t i = 0; i < claims; ++i) {
@@ -462,7 +470,43 @@ uint64_t tx_begin(const char* plugin_id, TxKind kind) {
         tx.entries[index].claim = claim;
         tx.entries[index].installed = false;
         tx.entries[index].waited_frames = 0;
+        tx.entries[index].preflight_entry = 0;
         ++index;
+    }
+    if (kind == TxKind::kInstall) {
+        for (uint32_t i = 0; i < total; ++i) {
+            const contracts::ResourceClaim& claim = *tx.entries[i].claim;
+            if (claim.requirement != contracts::ResourceRequirement::kRequired ||
+                claim.failure != contracts::ResourceFailure::kFailClosed ||
+                claim.mechanism != contracts::ResourceMechanism::kEntryHook) continue;
+            bool followed = false;
+            const uintptr_t resolved = g_deps.resolve_entry(claim.symbol, &followed);
+            if (resolved == 0) {
+                tx.preflight_failed_resource_id = claim.id;
+                tx.preflight_error = "symbol not resolved";
+                break;
+            }
+            if (entry_target_conflicts(resolved, claim.id)) {
+                tx.preflight_failed_resource_id = claim.id;
+                tx.preflight_error = "entry target already occupied";
+                break;
+            }
+            bool duplicate = false;
+            for (uint32_t prior = 0; prior < i; ++prior) {
+                const contracts::ResourceClaim& earlier = *tx.entries[prior].claim;
+                if (tx.entries[prior].preflight_entry == resolved &&
+                    std::strcmp(earlier.id, claim.id) != 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                tx.preflight_failed_resource_id = claim.id;
+                tx.preflight_error = "duplicate entry target";
+                break;
+            }
+            tx.entries[i].preflight_entry = resolved;
+        }
     }
     tx.budget = budget_of(*tx.entries[0].claim);
     tx.in_use = true;
@@ -486,6 +530,10 @@ bool tx_step(uint64_t tx_id, TxStep* out) {
     ++tx->frames;
 
     if (tx->kind == TxKind::kInstall) {
+        if (tx->step == 0 && tx->preflight_failed_resource_id != nullptr) {
+            return fail_install(*tx, tx->preflight_failed_resource_id,
+                                tx->preflight_error, out);
+        }
         return install_step(*tx, out);
     }
     return restore_step(*tx, out);

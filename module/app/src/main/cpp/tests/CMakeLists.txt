@@ -382,6 +382,26 @@ target_compile_features(hooks_transaction_tests PRIVATE cxx_std_17)
 set_target_properties(hooks_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME hooks_transaction_tests COMMAND hooks_transaction_tests)
 
+# ELF export resolution fixture uses a real .dynsym and SysV hash table.
+add_library(plugin_export_fixture SHARED test_plugin_export_fixture.cpp)
+set_target_properties(plugin_export_fixture PROPERTIES
+    OUTPUT_NAME game
+    CXX_VISIBILITY_PRESET hidden
+)
+target_link_options(plugin_export_fixture PRIVATE -Wl,--hash-style=sysv)
+add_executable(symbol_resolver_tests
+    test_symbol_resolver.cpp
+    ${CPP_DIR}/game/symbols/symbol_resolver.cpp
+)
+target_include_directories(symbol_resolver_tests PRIVATE ${CPP_DIR})
+target_compile_features(symbol_resolver_tests PRIVATE cxx_std_17)
+set_target_properties(symbol_resolver_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_definitions(symbol_resolver_tests PRIVATE
+    QOL_PLUGIN_EXPORT_FIXTURE="$<TARGET_FILE:plugin_export_fixture>")
+target_link_libraries(symbol_resolver_tests PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(symbol_resolver_tests plugin_export_fixture)
+add_test(NAME symbol_resolver_tests COMMAND symbol_resolver_tests)
+
 # P3 Lane B：生命周期全路径 host 测试（真实 registry/tx/status/config + 假 tx 依赖，末尾追加）
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
 add_executable(plugin_lifecycle_tests
@@ -738,6 +758,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/game/access/popup_state.cpp
     ${CPP_DIR}/game/access/symbols.cpp
+    ${CPP_DIR}/game/symbols/symbol_resolver.cpp
     ${CPP_DIR}/infra/popup_enter_alias.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )

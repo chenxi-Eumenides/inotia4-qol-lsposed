@@ -4,7 +4,7 @@
 // 插件在装配期只声明资源；登记表是代码事实，由 check_resources.py 汇总比对。
 //
 // 容量固定 128 条，静态数组实现；键为资源 id 字符串（strcmp 比较）。
-// 线程纪律：登记与状态迁移只发生在装配期/主线程，本模块不引入锁。
+// 线程纪律：登记、资源安装与状态迁移由装配期/主线程串行执行；本模块不引入锁。
 
 #include <cstdint>
 
@@ -53,6 +53,11 @@ bool runtime_clear(const char* resource_id);
 
 // 未登记或未写运行期（resolved_entry==0）→ false。
 bool runtime_of(const char* resource_id, ResourceRuntime* out);
+
+// 目标地址已由其他 EntryHook resource id 占用，或保留在 tombstone 中时返回 true。
+// 同 resource id 幂等通过；非 EntryHook 与无运行期目标的资源不参与比较。装配与生命周期
+// 安装由单一主线程执行器串行调用，检查和机制调用之间不需要并发安装预留。
+bool entry_target_conflicts(uintptr_t resolved_entry, const char* resource_id);
 
 // 在途计数原子 +1；未登记 → false。
 bool in_flight_enter(const char* resource_id);

@@ -31,8 +31,11 @@ using qol::hooks::install_claim_entry_hook;
 using qol::hooks::InstallOutcome;
 using qol::hooks::register_claim;
 using qol::hooks::registry_reset_for_test;
+using qol::hooks::runtime_clear;
+using qol::hooks::runtime_set;
 using qol::hooks::set_state;
 using qol::hooks::state_of;
+using qol::hooks::entry_target_conflicts;
 
 namespace {
 
@@ -150,6 +153,29 @@ void test_state_transitions_and_count() {
     CHECK(state_of("hook:B") == ResourceState::kTombstone);
     CHECK(count_by_state(ResourceState::kTombstone) == 1);
     CHECK(count_by_state(ResourceState::kLive) == 1);
+}
+
+void test_entry_target_conflict_tracks_occupied_runtime_targets() {
+    registry_reset_for_test();
+    ResourceClaim first = make_claim("hook:entry:first", "plugin_a");
+    ResourceClaim alias = make_claim("hook:entry:alias", "plugin_b");
+    ResourceClaim patch = make_claim("patch:unrelated", "plugin_c", ResourceMechanism::kCallPatch);
+    CHECK(register_claim(first));
+    CHECK(register_claim(alias));
+    CHECK(register_claim(patch));
+    CHECK(!entry_target_conflicts(0x1000, "hook:entry:first"));
+    CHECK(runtime_set(first.id, 0x1000, reinterpret_cast<void*>(0x2000)));
+    CHECK(set_state(first.id, ResourceState::kLive));
+    CHECK(entry_target_conflicts(0x1000, alias.id));
+    CHECK(!entry_target_conflicts(0x1000, first.id));
+    CHECK(!entry_target_conflicts(0x1000, patch.id));
+    CHECK(set_state(first.id, ResourceState::kDisabled));
+    CHECK(entry_target_conflicts(0x1000, alias.id));
+    CHECK(set_state(first.id, ResourceState::kTombstone));
+    CHECK(qol::hooks::isolated_set(first.id, true));
+    CHECK(entry_target_conflicts(0x1000, alias.id));
+    CHECK(runtime_clear(first.id));
+    CHECK(!entry_target_conflicts(0x1000, alias.id));
 }
 
 void test_capacity() {
@@ -273,6 +299,7 @@ int main() {
     test_idempotent_and_conflict();
     test_invalid_declarations();
     test_state_transitions_and_count();
+    test_entry_target_conflict_tracks_occupied_runtime_targets();
     test_capacity();
     test_reset();
     test_install_success();

@@ -67,6 +67,13 @@ struct FakeBackend {
     int unhook_rc = 0;
     int fail_hook_call = 0;  // 第 N 次 hook 调用（1 起）返回失败；0 = 不失败
     uintptr_t resolve_rc = 0x1000;
+    const char* unresolved_symbol = nullptr;
+    const char* alias_symbol_a = nullptr;
+    const char* alias_symbol_b = nullptr;
+    uintptr_t alias_target = 0;
+    const char* last_symbol = nullptr;
+    const char* resolved_symbols[128] = {};
+    uint32_t resolved_symbol_count = 0;
     void* last_target = nullptr;
     void* last_replacement = nullptr;
 };
@@ -74,9 +81,27 @@ struct FakeBackend {
 FakeBackend g_backend;
 
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
-    (void)symbol;
+    g_backend.last_symbol = symbol;
     if (out_followed != nullptr) *out_followed = false;
-    return g_backend.resolve_rc;
+    if (symbol != nullptr && g_backend.unresolved_symbol != nullptr &&
+        std::strcmp(symbol, g_backend.unresolved_symbol) == 0) return 0;
+    if (symbol != nullptr && g_backend.alias_target != 0 &&
+        ((g_backend.alias_symbol_a != nullptr &&
+          std::strcmp(symbol, g_backend.alias_symbol_a) == 0) ||
+         (g_backend.alias_symbol_b != nullptr &&
+          std::strcmp(symbol, g_backend.alias_symbol_b) == 0))) {
+        return g_backend.alias_target;
+    }
+    if (g_backend.resolve_rc == 0 || symbol == nullptr) return 0;
+    for (uint32_t i = 0; i < g_backend.resolved_symbol_count; ++i) {
+        if (std::strcmp(symbol, g_backend.resolved_symbols[i]) == 0) {
+            return g_backend.resolve_rc + static_cast<uintptr_t>(i) * 0x100;
+        }
+    }
+    if (g_backend.resolved_symbol_count >= 128) return 0;
+    const uint32_t slot = g_backend.resolved_symbol_count++;
+    g_backend.resolved_symbols[slot] = symbol;
+    return g_backend.resolve_rc + static_cast<uintptr_t>(slot) * 0x100;
 }
 
 int fake_hook(void* target, void* replacement, void** backup) {
@@ -210,7 +235,7 @@ const qol::contracts::OwnershipOps g_ownership_ops = {&ownership_acquire_probe,
 ResourceClaim claim(const char* id, const char* owner, const char* gate) {
     ResourceClaim c{};
     c.id = id;
-    c.symbol = "F_TEST_VMA";
+    c.symbol = id;
     c.mechanism = ResourceMechanism::kEntryHook;
     c.policy = ResourcePolicy::kPrivate;
     c.requirement = ResourceRequirement::kRequired;
@@ -300,6 +325,21 @@ ResourceClaim g_gate2_resources[] = {
 
 CapabilityRequirement g_missing_requires[] = {
     {"cap:missing", QolVersionRange{1, 0}},
+};
+
+ResourceClaim g_preflight_bad_resources[] = {
+    claim("hook:preflight:bad:a", "preflight_bad", nullptr),
+    claim("hook:preflight:bad:b", "preflight_bad", nullptr),
+};
+ResourceClaim g_preflight_good_resources[] = {
+    claim("hook:preflight:good", "preflight_good", nullptr),
+};
+int g_preflight_capability_iface = 0;
+const qol::contracts::CapabilityProvisionRef g_preflight_provides[] = {
+    {"cap:test.preflight", QolVersion{1, 0}, &g_preflight_capability_iface},
+};
+const CapabilityRequirement g_preflight_requires[] = {
+    {"cap:test.preflight", QolVersionRange{1, 0}},
 };
 
 // optional/fail-soft：第 2 条为 optional+fail-soft，注入 hook 失败时其余仍装、插件 degraded。
@@ -1263,6 +1303,119 @@ void test_atomic_gate_closed_does_not_call_on_enabled() {
     CHECK(qol::hooks::state_of("hook:test:atomic:gate:b") == ResourceState::kLive);
 }
 
+void test_required_entries_preflight_before_plugin_install() {
+    reset_all();
+    ResourceClaim resources[] = {claim("hook:preflight:a", "preflight", nullptr),
+                                 claim("hook:preflight:b", "preflight", nullptr)};
+    resources[0].symbol = "elf-export:Fixture_Export_A";
+    resources[1].symbol = "elf-export:Fixture_Export_B";
+    PluginDescriptor d = make_descriptor("preflight", resources, 2, nullptr, 0);
+    CHECK(register_plugin(d));
+    g_backend.unresolved_symbol = "elf-export:Fixture_Export_B";
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(g_probe.install_calls == 0);
+    CHECK(g_backend.hook_calls == 0);
+    CHECK(std::strcmp(g_backend.last_symbol, "elf-export:Fixture_Export_B") == 0);
+    CHECK(feature_state_is("preflight", FeatureState::kUnsupported));
+    CHECK(qol::hooks::state_of("hook:preflight:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:preflight:b") == ResourceState::kFree);
+}
+
+void test_preflight_failure_isolated_from_independent_plugins() {
+    reset_all();
+    g_preflight_bad_resources[0].symbol = "elf-export:Fixture_Export_A";
+    g_preflight_bad_resources[1].symbol = "elf-export:Fixture_Export_B";
+    g_backend.unresolved_symbol = "elf-export:Fixture_Export_B";
+
+    PluginDescriptor bad = make_descriptor("preflight_bad", g_preflight_bad_resources, 2,
+                                            nullptr, 0);
+    bad.provides_count = 1;
+    bad.provides = g_preflight_provides;
+    const PluginDescriptor good = make_descriptor("preflight_good", g_preflight_good_resources, 1,
+                                                  nullptr, 0);
+    const PluginDescriptor consumer = make_descriptor("preflight_consumer", nullptr, 0,
+                                                      g_preflight_requires, 1);
+    CHECK(register_plugin(bad));
+    CHECK(register_plugin(good));
+    CHECK(register_plugin(consumer));
+
+    CHECK(install_all(make_deps()) == 2);  // bad unsupported + its consumer blocked
+    CHECK(feature_state_is("preflight_bad", FeatureState::kUnsupported));
+    CHECK(feature_state_is("preflight_good", FeatureState::kEnabled));
+    CHECK(feature_state_is("preflight_consumer", FeatureState::kBlocked));
+    CHECK(g_probe.install_calls == 1);  // 独立 good 插件仍安装
+    CHECK(g_backend.hook_calls == 1);
+    CHECK(qol::hooks::state_of("hook:preflight:bad:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:preflight:bad:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:preflight:good") == ResourceState::kLive);
+}
+
+void test_same_plugin_entry_aliases_fail_before_install_or_hook() {
+    reset_all();
+    g_backend.alias_symbol_a = "elf-export:EntryAliasA";
+    g_backend.alias_symbol_b = "elf-export:EntryAliasB";
+    g_backend.alias_target = 0x7000;
+    ResourceClaim resources[] = {claim("hook:alias:first", "alias_plugin", nullptr),
+                                 claim("hook:alias:second", "alias_plugin", nullptr)};
+    resources[0].symbol = g_backend.alias_symbol_a;
+    resources[1].symbol = g_backend.alias_symbol_b;
+    const PluginDescriptor d = make_descriptor("alias_plugin", resources, 2, nullptr, 0);
+    CHECK(register_plugin(d));
+
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(feature_state_is("alias_plugin", FeatureState::kUnsupported));
+    CHECK(g_probe.install_calls == 0);
+    CHECK(g_backend.hook_calls == 0);
+    CHECK(qol::hooks::state_of(resources[0].id) == ResourceState::kFree);
+    CHECK(qol::hooks::state_of(resources[1].id) == ResourceState::kFree);
+}
+
+void test_cross_plugin_entry_alias_rejected_but_first_owner_stays_live() {
+    reset_all();
+    g_backend.alias_symbol_a = "elf-export:CrossAliasA";
+    g_backend.alias_symbol_b = "elf-export:CrossAliasB";
+    g_backend.alias_target = 0x7100;
+    ResourceClaim first_resource = claim("hook:cross:first", "cross_first", nullptr);
+    ResourceClaim second_resource = claim("hook:cross:second", "cross_second", nullptr);
+    first_resource.symbol = g_backend.alias_symbol_a;
+    second_resource.symbol = g_backend.alias_symbol_b;
+    const PluginDescriptor first =
+        make_descriptor("cross_first", &first_resource, 1, nullptr, 0);
+    const PluginDescriptor second =
+        make_descriptor("cross_second", &second_resource, 1, nullptr, 0);
+    CHECK(register_plugin(first));
+    CHECK(register_plugin(second));
+
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(feature_state_is("cross_first", FeatureState::kEnabled));
+    CHECK(feature_state_is("cross_second", FeatureState::kUnsupported));
+    CHECK(g_probe.install_calls == 1);
+    CHECK(g_backend.hook_calls == 1);
+    CHECK(g_backend.last_target == reinterpret_cast<void*>(g_backend.alias_target));
+    CHECK(qol::hooks::state_of(first_resource.id) == ResourceState::kLive);
+    CHECK(qol::hooks::state_of(second_resource.id) == ResourceState::kFree);
+}
+
+void test_legacy_entry_symbol_id_installs() {
+    reset_all();
+    ResourceClaim resource = claim("hook:legacy-symbol", "legacy_symbol", nullptr);
+    resource.symbol = "F_TEST_VMA";
+    const PluginDescriptor d = make_descriptor("legacy_symbol", &resource, 1, nullptr, 0);
+    CHECK(register_plugin(d));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("legacy_symbol", FeatureState::kEnabled));
+    CHECK(g_backend.hook_calls == 1);
+}
+
+void test_elf_export_prefix_rejected_for_other_mechanisms() {
+    reset_all();
+    ResourceClaim resource = ownership_claim("ownership:bad-export", "bad_export");
+    resource.symbol = "elf-export:Fixture_Export_A";
+    PluginDescriptor d = make_descriptor("bad_export", &resource, 1, nullptr, 0);
+    CHECK(!register_plugin(d));
+    CHECK(plugin_count() == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1299,6 +1452,12 @@ int main() {
     test_atomic_retry_success_is_enabled_once_and_clears_degraded();
     test_atomic_partial_install_publishes_no_capability_or_facade_provider();
     test_atomic_gate_closed_does_not_call_on_enabled();
+    test_required_entries_preflight_before_plugin_install();
+    test_preflight_failure_isolated_from_independent_plugins();
+    test_same_plugin_entry_aliases_fail_before_install_or_hook();
+    test_cross_plugin_entry_alias_rejected_but_first_owner_stays_live();
+    test_legacy_entry_symbol_id_installs();
+    test_elf_export_prefix_rejected_for_other_mechanisms();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

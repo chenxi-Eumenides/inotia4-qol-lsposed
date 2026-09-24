@@ -45,6 +45,10 @@ using qol::infra::FeatureState;
 
 namespace {
 
+constexpr const char* kEntrySymbolA = "F_TEST_VMA_LC_A";
+constexpr const char* kEntrySymbolB = "F_TEST_VMA_LC_B";
+constexpr const char* kEntrySymbolSoft = "F_TEST_VMA_LC_SOFT";
+
 // ---------------------------------------------------------------------------
 // fake tx 后端
 // ---------------------------------------------------------------------------
@@ -60,9 +64,12 @@ struct FakeBackend {
 FakeBackend g_backend;
 
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
-    (void)symbol;
     if (out_followed != nullptr) *out_followed = false;
-    return g_backend.resolve_rc;
+    if (g_backend.resolve_rc == 0 || symbol == nullptr) return 0;
+    if (std::strcmp(symbol, kEntrySymbolA) == 0) return g_backend.resolve_rc + 0x100;
+    if (std::strcmp(symbol, kEntrySymbolB) == 0) return g_backend.resolve_rc + 0x200;
+    if (std::strcmp(symbol, kEntrySymbolSoft) == 0) return g_backend.resolve_rc + 0x300;
+    return g_backend.resolve_rc + 0x400;
 }
 
 int fake_hook(void* target, void* replacement, void** backup) {
@@ -140,7 +147,9 @@ void probe_fill_status(PluginStatusOut& out) {
 ResourceClaim claim(const char* id, const char* owner, const char* gate) {
     ResourceClaim c{};
     c.id = id;
-    c.symbol = "F_TEST_VMA";
+    c.symbol = std::strcmp(id, "hook:lc:a") == 0 ? kEntrySymbolA
+               : std::strcmp(id, "hook:lc:b") == 0 ? kEntrySymbolB
+                                                    : kEntrySymbolSoft;
     c.mechanism = ResourceMechanism::kEntryHook;
     c.policy = ResourcePolicy::kPrivate;
     c.requirement = ResourceRequirement::kRequired;
@@ -235,6 +244,7 @@ void reset_all() {
     g_backend = FakeBackend{};
     g_probe = PluginProbe{};
     set_deps();
+    CHECK(install_all(make_host_deps()) == 0);
 }
 
 bool feature_state_is(const char* id, FeatureState expected) {
@@ -323,6 +333,20 @@ void test_activate_gate_on_reentry_is_idempotent() {
     drive_lifecycle();
     CHECK(feature_state_is("test_lc", FeatureState::kEnabled));
     CHECK(g_probe.enabled_calls == 3);
+}
+
+void test_activate_preflights_before_plugin_install() {
+    reset_all();
+    CHECK(boot_then_deactivate(false));
+    CHECK(g_probe.install_calls == 1);
+    const int hooks_before = g_backend.hook_calls;
+    g_backend.resolve_rc = 0;
+    CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
+    CHECK(g_probe.install_calls == 1);
+    CHECK(g_backend.hook_calls == hooks_before);
+    CHECK(feature_state_is("test_lc", FeatureState::kUnsupported));
+    CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kFree);
 }
 
 void test_zero_resource_lifecycle_is_explicit_noop() {
@@ -537,6 +561,7 @@ void test_gated_entry_failsoft_retries_on_sync_gates() {
 int main() {
     test_activate_calls_install_and_hands_backup();
     test_activate_gate_on_reentry_is_idempotent();
+    test_activate_preflights_before_plugin_install();
     test_zero_resource_lifecycle_is_explicit_noop();
     test_install_failure_marks_failed_without_transaction();
     test_resource_ready_failure_rolls_back_installed();

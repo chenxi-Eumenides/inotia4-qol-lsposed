@@ -63,6 +63,11 @@ int g_handler_b = 0;
 // 假机制原语全局状态。
 uintptr_t g_resolve_value = 0x1000;
 int g_resolve_calls = 0;
+const char* g_alias_symbol_a = nullptr;
+const char* g_alias_symbol_b = nullptr;
+uintptr_t g_alias_target = 0;
+const char* g_resolved_symbols[128] = {};
+uint32_t g_resolved_symbol_count = 0;
 int g_hook_calls = 0;
 int g_hook_fail_at = -1;  // 1-based；-1 = 永不失败
 void* g_hook_targets[16] = {};
@@ -73,12 +78,25 @@ void* g_last_unhook_arg = nullptr;
 int g_gate_calls = 0;
 
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
-    (void)symbol;
     ++g_resolve_calls;
     if (out_followed != nullptr) {
         *out_followed = false;
     }
-    return g_resolve_value;
+    if (g_resolve_value == 0 || symbol == nullptr) return 0;
+    if (g_alias_target != 0 &&
+        ((g_alias_symbol_a != nullptr && std::strcmp(symbol, g_alias_symbol_a) == 0) ||
+         (g_alias_symbol_b != nullptr && std::strcmp(symbol, g_alias_symbol_b) == 0))) {
+        return g_alias_target;
+    }
+    for (uint32_t i = 0; i < g_resolved_symbol_count; ++i) {
+        if (std::strcmp(symbol, g_resolved_symbols[i]) == 0) {
+            return g_resolve_value + static_cast<uintptr_t>(i) * 0x100;
+        }
+    }
+    if (g_resolved_symbol_count >= 128) return 0;
+    const uint32_t slot = g_resolved_symbol_count++;
+    g_resolved_symbols[slot] = symbol;
+    return g_resolve_value + static_cast<uintptr_t>(slot) * 0x100;
 }
 
 int fake_hook(void* target, void* replacement, void** backup) {
@@ -185,6 +203,11 @@ void reset_all() {
     tx_reset_for_test();
     g_resolve_value = 0x1000;
     g_resolve_calls = 0;
+    g_alias_symbol_a = nullptr;
+    g_alias_symbol_b = nullptr;
+    g_alias_target = 0;
+    std::memset(g_resolved_symbols, 0, sizeof(g_resolved_symbols));
+    g_resolved_symbol_count = 0;
     g_hook_calls = 0;
     g_hook_fail_at = -1;
     g_unhook_calls = 0;
@@ -221,7 +244,7 @@ ResourceClaim make_claim(const char* id, const char* owner, const char* gate = "
                          void* handler = &g_handler_a) {
     ResourceClaim claim{};
     claim.id = id;
-    claim.symbol = "F_CHAR_ADD_DAMAGE_VMA";
+    claim.symbol = id;
     claim.mechanism = ResourceMechanism::kEntryHook;
     claim.policy = ResourcePolicy::kPrivate;
     claim.requirement = ResourceRequirement::kRequired;
@@ -775,6 +798,105 @@ void test_ownership_mechanism_transaction() {
     CHECK(state_of("own:C") == ResourceState::kFree);
 }
 
+void test_required_alias_group_preflight_prevents_first_hook_write() {
+    reset_all();
+    set_deps();
+    g_alias_symbol_a = "elf-export:GroupAliasA";
+    g_alias_symbol_b = "elf-export:GroupAliasB";
+    g_alias_target = 0x7400;
+    ResourceClaim first = make_claim("hook:alias:group:a", "alias_group");
+    ResourceClaim second = make_claim("hook:alias:group:b", "alias_group");
+    first.symbol = g_alias_symbol_a;
+    second.symbol = g_alias_symbol_b;
+    CHECK(register_claim(first));
+    CHECK(register_claim(second));
+
+    const uint64_t tx = tx_begin("alias_group", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished && step.ok != 0);
+    CHECK(g_hook_calls == 0);
+    CHECK(state_of(first.id) == ResourceState::kFree);
+    CHECK(state_of(second.id) == ResourceState::kFree);
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    CHECK(status.failed_resource_id != nullptr &&
+          std::strcmp(status.failed_resource_id, second.id) == 0);
+    CHECK(status.error != nullptr && std::strcmp(status.error, "duplicate entry target") == 0);
+}
+
+void test_alias_can_be_reused_after_successful_physical_release() {
+    reset_all();
+    set_deps();
+    g_alias_symbol_a = "elf-export:ReusableAliasA";
+    g_alias_symbol_b = "elf-export:ReusableAliasB";
+    g_alias_target = 0x7500;
+    ResourceClaim first = make_claim("hook:alias:reusable:a", "alias_first");
+    ResourceClaim second = make_claim("hook:alias:reusable:b", "alias_second");
+    first.symbol = g_alias_symbol_a;
+    second.symbol = g_alias_symbol_b;
+    CHECK(register_claim(first));
+    CHECK(register_claim(second));
+
+    const uint64_t first_install = install_one("alias_first");
+    CHECK(first_install != 0);
+    CHECK(g_hook_calls == 1);
+    const uint64_t blocked_install = tx_begin("alias_second", TxKind::kInstall);
+    CHECK(blocked_install != 0);
+    TxStep step{};
+    CHECK(!tx_step(blocked_install, &step));
+    CHECK(g_hook_calls == 1);
+    CHECK(state_of(first.id) == ResourceState::kLive);
+    CHECK(state_of(second.id) == ResourceState::kFree);
+
+    const uint64_t release = tx_begin("alias_first", TxKind::kRelease);
+    CHECK(release != 0);
+    CHECK(!tx_step(release, &step));
+    CHECK(step.finished && step.ok == 0);
+    CHECK(state_of(first.id) == ResourceState::kFree);
+    ResourceRuntime runtime{};
+    CHECK(!runtime_of(first.id, &runtime));
+
+    const uint64_t second_install = tx_begin("alias_second", TxKind::kInstall);
+    CHECK(second_install != 0);
+    CHECK(!tx_step(second_install, &step));
+    CHECK(step.finished && step.ok == 0);
+    CHECK(g_hook_calls == 2);
+    CHECK(state_of(second.id) == ResourceState::kLive);
+}
+
+void test_isolated_tombstone_keeps_alias_target_reserved() {
+    reset_all();
+    set_deps();
+    g_alias_symbol_a = "elf-export:TombstoneAliasA";
+    g_alias_symbol_b = "elf-export:TombstoneAliasB";
+    g_alias_target = 0x7600;
+    ResourceClaim first = make_claim("hook:alias:tombstone:a", "alias_tombstone");
+    ResourceClaim second = make_claim("hook:alias:tombstone:b", "alias_after_tombstone");
+    first.symbol = g_alias_symbol_a;
+    second.symbol = g_alias_symbol_b;
+    CHECK(register_claim(first));
+    CHECK(register_claim(second));
+    CHECK(install_one("alias_tombstone") != 0);
+
+    g_unhook_fail_at = 1;
+    const uint64_t release = tx_begin("alias_tombstone", TxKind::kRelease);
+    CHECK(release != 0);
+    TxStep step{};
+    CHECK(!tx_step(release, &step));
+    CHECK(step.finished && step.ok != 0);
+    CHECK(state_of(first.id) == ResourceState::kTombstone);
+    CHECK(isolated_get(first.id));
+    const uint64_t retry = tx_begin("alias_after_tombstone", TxKind::kInstall);
+    CHECK(retry != 0);
+    CHECK(!tx_step(retry, &step));
+    CHECK(step.finished && step.ok != 0);
+    CHECK(g_hook_calls == 1);
+    CHECK(state_of(second.id) == ResourceState::kFree);
+}
+
 }  // namespace
 
 int main() {
@@ -793,6 +915,9 @@ int main() {
     test_call_patch_mechanism_transaction();
     test_ownership_mechanism_transaction();
     test_terminal_retention_evicts_oldest();
+    test_required_alias_group_preflight_prevents_first_hook_write();
+    test_alias_can_be_reused_after_successful_physical_release();
+    test_isolated_tombstone_keeps_alias_target_reserved();
     std::printf("hooks_transaction: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

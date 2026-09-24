@@ -149,6 +149,23 @@ bool runtime_of(const char* resource_id, ResourceRuntime* out) {
     return true;
 }
 
+bool entry_target_conflicts(uintptr_t resolved_entry, const char* resource_id) {
+    if (resolved_entry == 0 || resource_id == nullptr) return false;
+    const Entry* requested = find_entry(resource_id);
+    if (requested == nullptr ||
+        requested->claim.mechanism != contracts::ResourceMechanism::kEntryHook) return false;
+    for (uint32_t i = 0; i < g_count; ++i) {
+        const Entry& entry = g_entries[i];
+        if (entry.claim.mechanism != contracts::ResourceMechanism::kEntryHook ||
+            std::strcmp(entry.claim.id, resource_id) == 0) continue;
+        const bool occupied = entry.state == contracts::ResourceState::kLive ||
+                              entry.state == contracts::ResourceState::kDisabled ||
+                              entry.state == contracts::ResourceState::kTombstone;
+        if (occupied && entry.resolved_entry == resolved_entry) return true;
+    }
+    return false;
+}
+
 bool in_flight_enter(const char* resource_id) {
     Entry* entry = find_entry(resource_id);
     if (entry == nullptr) {
