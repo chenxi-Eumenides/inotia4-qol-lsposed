@@ -8,6 +8,8 @@
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_write_port.h"
+#include "contracts/item_count.h"
+#include "contracts/item_facts.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "contracts/result.h"
@@ -72,7 +74,10 @@ QolResult stub_is_real_equip(const void*, int32_t*) { return unsupported(); }
 QolResult stub_is_jewel(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_no_sell(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_sell_price(const void*, int64_t*) { return unsupported(); }
-QolResult stub_cumulate(const void*, int32_t*) { return unsupported(); }
+QolResult stub_cumulate(const void*, int32_t* out_count) {
+    *out_count = 7;
+    return qol::contracts::ok();
+}
 QolResult stub_item_ref(int32_t, int32_t, qol::contracts::QolInventoryItemRef*) {
     return unsupported();
 }
@@ -171,6 +176,33 @@ QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
     return qol::contracts::ok();
 }
 
+bool g_override_available = false;
+bool g_override_enabled = false;
+
+QolResult override_canonical(const void*, uint32_t* out_count) {
+    *out_count = 23;
+    return qol::contracts::ok();
+}
+
+int32_t override_enabled() { return g_override_enabled ? 1 : 0; }
+
+const qol::contracts::QolItemCountApi kOverrideItemCountApi{
+    &override_canonical, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr,
+};
+const qol::contracts::StackLimitItemCountCapability kOverrideCapability{
+    &kOverrideItemCountApi, &override_enabled};
+
+QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
+    if (id == nullptr || out_iface == nullptr ||
+        std::strcmp(id, qol::contracts::kStackLimitItemCountCapabilityId) != 0 ||
+        !g_override_available) {
+        return qol::contracts::error(kQolErrNotFound, "missing", 7);
+    }
+    *out_iface = &kOverrideCapability;
+    return qol::contracts::ok();
+}
+
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
     g_result_handler = handler;
@@ -214,6 +246,7 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
                qol::contracts::kHostSdkMinor};
     sdk.log = {&fake_log_write, nullptr};
+    sdk.capabilities.require = &fake_capability_require;
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
@@ -459,6 +492,20 @@ void test_lifecycle_and_responses() {
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
+    const auto* item_facts = static_cast<const qol::contracts::ItemFactsApi*>(
+        descriptor.provides[0].iface);
+    int32_t count = 0;
+    CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
+    CHECK(count == 7);
+    g_override_available = true;
+    g_override_enabled = false;
+    CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
+    CHECK(count == 7);
+    g_override_enabled = true;
+    CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
+    CHECK(count == 23);
+    g_override_available = false;
+    g_override_enabled = false;
     descriptor.on_enabled(ctx);
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
                                                      descriptor.http_query_count).ok == kQolOk);

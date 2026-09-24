@@ -12,6 +12,7 @@
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/http.h"
 #include "contracts/item_facts.h"
+#include "contracts/item_count.h"
 #include "json_lite.h"
 #include "response.h"
 #include "snapshot.h"
@@ -103,6 +104,26 @@ QolResult sell_price(const void* item, int64_t* out_price) {
 
 QolResult cumulate_count(const void* item, int32_t* out_count) {
     if (g_port == nullptr || g_port->read.cumulate_count == nullptr) return not_ready();
+    if (g_sdk != nullptr && g_sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        const QolResult capability_result = g_sdk->capabilities.require(
+            contracts::kStackLimitItemCountCapabilityId,
+            QolVersionRange{contracts::kStackLimitItemCountVersion.major,
+                            contracts::kStackLimitItemCountVersion.minor},
+            &iface);
+        if (contracts::succeeded(capability_result) && iface != nullptr) {
+            const auto* override_api =
+                static_cast<const contracts::StackLimitItemCountCapability*>(iface);
+            if (override_api->enabled != nullptr && override_api->enabled() != 0 &&
+                override_api->api != nullptr && override_api->api->canonical != nullptr) {
+                uint32_t canonical = 0;
+                const QolResult result = override_api->api->canonical(item, &canonical);
+                if (!contracts::succeeded(result)) return result;
+                *out_count = static_cast<int32_t>(canonical);
+                return contracts::ok();
+            }
+        }
+    }
     return g_port->read.cumulate_count(item, out_count);
 }
 
@@ -160,6 +181,12 @@ const contracts::CapabilityRequirement kRequires[] = {
                                              contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
                                              contracts::kHttpDispatchVersion.minor}},
+};
+
+const contracts::CapabilityRequirement kOptionalRequires[] = {
+    {contracts::kStackLimitItemCountCapabilityId,
+     {contracts::kStackLimitItemCountVersion.major,
+      contracts::kStackLimitItemCountVersion.minor}},
 };
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
@@ -812,8 +839,8 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     2,
     kRequires,
-    0,
-    nullptr,
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires,
     1,
     kProvides,
     0,

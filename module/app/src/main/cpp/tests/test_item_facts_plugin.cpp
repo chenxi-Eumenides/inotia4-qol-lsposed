@@ -1,4 +1,5 @@
 #include "contracts/item_facts.h"
+#include "contracts/item_count.h"
 #include "contracts/game_ports/ports.h"
 #include "plugins/core.item/plugin.h"
 
@@ -18,7 +19,9 @@ int main() {
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
-    CHECK(descriptor.optional_count == 0);
+    CHECK(descriptor.optional_count == 1 && descriptor.optional_requires != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kStackLimitItemCountCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
@@ -41,6 +44,8 @@ int main() {
     CHECK(api->physical_item_at != nullptr);
     CHECK(api->detail_context != nullptr);
     CHECK(api->cursor_index != nullptr);
+    CHECK(descriptor.optional_requires[0].range.major ==
+          qol::contracts::kStackLimitItemCountVersion.major);
     CHECK(g_fail == 0);
     std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
