@@ -168,7 +168,7 @@ shopt -u nullglob
 
 # 发布前缀：游戏 APK 文件名 -> 全 ASCII 前缀（发布附件名不得含中文）。
 #   艾诺迪亚4_v1.3.2_原版.apk              -> Inotia4_v1.3.2_original
-#   艾诺迪亚4_v1.3.2_盗版大修_20260810.apk -> Inotia4_v1.3.2_overhaul_20260810
+#   艾诺迪亚4_v1.3.2_盗版大修_0810.apk -> Inotia4_v1.3.2_overhaul_0810
 #   Inotia4_v1.3.2_monster_v25.apk        -> Inotia4_v1.3.2_monster_v25
 release_stem() {
     local stem=$1 game_version= date=
