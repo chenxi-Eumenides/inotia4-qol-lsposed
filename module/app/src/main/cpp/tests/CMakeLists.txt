@@ -214,7 +214,10 @@ add_test(NAME save_warehouse_validate_tests COMMAND save_warehouse_validate_test
 # 插件清单（ui_choice 提供 + 2 条声明式资源）。feature.cpp 运行时实现以桩替代。
 add_executable(native_choice_tests
     test_native_choice.cpp
-    ${CPP_DIR}/plugins/core.ui_state/plugin.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/feature.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/plugin.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
 )
 target_include_directories(native_choice_tests PRIVATE
     ${CPP_DIR}

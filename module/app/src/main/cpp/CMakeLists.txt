@@ -56,7 +56,7 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/stack_limit/plugin.cpp
     plugins/save_backup/plugin.cpp
     plugins/world_teleport/plugin.cpp
-    plugins/core.ui_state/feature.cpp
+    plugins/core.custom_ui/feature.cpp
     plugins/core.ui_state/plugin.cpp
     plugins/core.custom_ui/plugin.cpp
     plugins/core.custom_ui/feature.cpp

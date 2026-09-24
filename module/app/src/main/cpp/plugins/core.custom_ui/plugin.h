@@ -1,14 +1,18 @@
 #pragma once
 
+#include "../../contracts/game_ports/choice_port.h"
 #include "../../contracts/plugin.h"
 
-// core.ui 出口面插件清单入口（ARCHITECTURE.md §7.1）：
+// core.custom_ui 工具/框架插件清单入口（ARCHITECTURE.md §7.1；ADR 0001 D1 的 A 档）：
+//   · provides `ui_components` v1.0（可复用界面组件能力）；
 //   · provides `ui_panels` v1.0（面板注册/打开/占用原因）；
-//   · 1 条 `own:popup.settings`（kOwnership/kRequired/kFailClosed/resumable/gate=nullptr）：
-//     整段占用 F_PANEL_UNK1_ENTER 的 PopupState 5 回调，acquire/release 走 hooks/popup_state。
+//   · provides `ui_choice` v1.0（原生选择控件；随控件迁入，能力 ID/版本不变）；
+//   · 原生选择控件的 2 条私有资源（hook:UIChoice_Init、ptrslot:...button_list_exe_got）。
 
 namespace qol::features::core_ui {
 
 const contracts::PluginDescriptor& plugin_descriptor();
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolChoicePort* choice_port();
 
 }  // namespace qol::features::core_ui

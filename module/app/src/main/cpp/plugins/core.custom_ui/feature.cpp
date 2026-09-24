@@ -10,7 +10,7 @@
 
 #include "plugin.h"
 
-namespace qol::features::core_ui_state {
+namespace qol::features::core_ui {
 namespace {
 
 constexpr size_t kTextBufferSize = 256;
@@ -195,4 +195,4 @@ void native_choice_set_installed(bool installed) {
     if (!installed) g_active = false;
 }
 
-}  // namespace qol::features::core_ui_state
+}  // namespace qol::features::core_ui

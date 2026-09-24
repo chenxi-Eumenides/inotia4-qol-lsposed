@@ -244,7 +244,7 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE &&
             (plugin.id == nullptr ||
-             (std::strcmp(plugin.id, "core.ui_state") != 0 &&
+             (std::strcmp(plugin.id, "core.custom_ui") != 0 &&
               std::strcmp(plugin.id, "world_teleport") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
