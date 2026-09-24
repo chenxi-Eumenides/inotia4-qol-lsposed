@@ -1,11 +1,14 @@
 #include "plugin.h"
 
 #include <cstdint>
+#include <cstring>
 
 #include "../../contracts/panels.h"
+#include "../../contracts/text_layer.h"
 #include "../../contracts/ui_choice.h"
 #include "feature.h"
 #include "panels/stack.h"
+#include "text_mechanism.h"
 #include "ui_components.h"
 
 namespace qol::features::core_ui {
@@ -31,6 +34,8 @@ constexpr contracts::UiChoiceApi kUiChoiceApi{
     &native_choice_close,
 };
 
+constexpr contracts::TextLayerApi kTextLayerApi{&text_api_subscribe, &text_api_unsubscribe};
+
 const contracts::CapabilityProvisionRef kProvides[] = {
     {
         contracts::kUiComponentsCapabilityId,
@@ -46,6 +51,12 @@ const contracts::CapabilityProvisionRef kProvides[] = {
         contracts::kUiChoiceCapabilityId,
         {contracts::kUiChoiceVersionMajor, contracts::kUiChoiceVersionMinor},
         &kUiChoiceApi,
+    },
+    {
+        // 文本机制（ADR 0001 D3）：唯一 GetText 钩子 + 注册/分派；内容由各内容插件注册。
+        contracts::kTextLayerCapabilityId,
+        {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor},
+        &kTextLayerApi,
     },
 };
 
@@ -85,6 +96,21 @@ const contracts::ResourceClaim kResources[] = {
         120,
         reinterpret_cast<void*>(&choice_button_execute),  // handler
     },
+    {
+        // 文本机制：共享资源（§4.3/§4.5），多消费者经能力 subscribe，owner 独占同址 hook。
+        kResourceIdGetText,        // id
+        "F_MEMORYTEXT_GET_TEXT_VMA",  // symbol
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kShared,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,                      // resumable
+        kPluginId,                 // owner
+        "全游戏唯一文本热点（232 调用点）；LSPosed 同址二次挂载失败，只能单一 owner + dispatch 分派",
+        nullptr,                   // gate（常驻）
+        120,                       // step_budget
+        reinterpret_cast<void*>(&memorytext_get_text_wrapper),  // handler
+    },
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -99,6 +125,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_choice_port = nullptr;
     if (ctx.sdk == nullptr || !ui_components_bind(ctx.sdk->ui)) return 1;
     ui_panels_bind_sdk(ctx.sdk);
+    text_mechanism_bind(ctx.sdk);
     // 选择控件需要游戏侧原语端口；缺失即 install 失败（宿主不启用、资源不装）。
     if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) return 1;
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
@@ -108,6 +135,8 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
+    text_set_active(false);
+    text_mechanism_bind(nullptr);
     g_choice_port = nullptr;
     ui_panels_bind_sdk(nullptr);
     ui_components_unbind();
@@ -117,11 +146,24 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(true);
+    text_set_active(true);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
+    text_set_active(false);
+}
+
+// 资源安装成功回调：按资源 id 分派给选择控件与文本机制各自的 backup 处理。
+int32_t custom_ui_resource_ready(contracts::PluginContext& ctx, const char* resource_id,
+                                 void* backup) {
+    if (resource_id == nullptr) return 0;
+    if (std::strcmp(resource_id, kResourceIdGetText) == 0) {
+        text_on_get_text_ready(backup);
+        return 0;
+    }
+    return on_resource_ready(ctx, resource_id, backup);
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -134,15 +176,15 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     0, nullptr,      // requires
     0, nullptr,      // optional_requires
-    3, kProvides,    // provides（ui_components / ui_panels / ui_choice v1.0）
-    2, kResources,   // resources（原生选择控件的进入 hook 与按钮指针槽）
+    4, kProvides,    // provides（ui_components / ui_panels / ui_choice / text_layer v1.0）
+    3, kResources,   // resources（选择控件 2 条 + 文本 GetText 共享资源）
     0, nullptr,      // jni
     &plugin_install,
     &plugin_deactivate,
     &plugin_on_enabled,
     &plugin_on_disabled,
     &plugin_fill_status,
-    &on_resource_ready,
+    &custom_ui_resource_ready,
     kPorts,
     1,
     nullptr,         // http_queries（本插件不注册路由）

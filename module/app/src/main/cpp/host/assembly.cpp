@@ -30,7 +30,7 @@
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
 #include "plugins/core.system/plugin.h"
-#include "plugins/text_layer/plugin.h"
+#include "plugins/character_panel_i18n/plugin.h"
 #include "plugins/world_teleport/plugin.h"
 #include "plugins/core.world/plugin.h"
 #include "plugins/core.save/plugin.h"
@@ -99,7 +99,7 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::special_equip::plugin_descriptor,
     &features::stack_limit::plugin_descriptor,
     &features::core_system::plugin_descriptor,
-    &features::text_layer::plugin_descriptor,
+    &features::character_panel_i18n::plugin_descriptor,
     &features::world_teleport::plugin_descriptor,
 #endif
 #if QOL_ENABLE_DEVICE_PROBE

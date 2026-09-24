@@ -40,18 +40,20 @@
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 17 |
+| `plugins/character_panel_i18n` | 6 |
 | `plugins/core.api` | 5 |
 | `plugins/core.character` | 5 |
 | `plugins/core.craft` | 2 |
+| `plugins/core.custom_ui` | 10 |
 | `plugins/core.item` | 7 |
 | `plugins/core.quest` | 5 |
 | `plugins/core.save` | 2 |
+| `plugins/core.settings` | 15 |
 | `plugins/core.system` | 3 |
-| `plugins/core.ui` | 17 |
-| `plugins/core.ui_state` | 4 |
+| `plugins/core.ui_state` | 2 |
 | `plugins/core.world` | 3 |
 | `plugins/craft_ui` | 4 |
-| `plugins/custom_recipe` | 10 |
+| `plugins/custom_recipe` | 11 |
 | `plugins/device_probe_consumer` | 2 |
 | `plugins/device_probe_export_failure` | 2 |
 | `plugins/device_probe_provider` | 2 |
@@ -62,9 +64,8 @@
 | `plugins/simple_mode` | 6 |
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
-| `plugins/text_layer` | 6 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **504** |
+| **合计** | **511** |
 
 ### 1.2 迁移期映射摘要
 
@@ -115,7 +116,7 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 122 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 124 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
@@ -125,15 +126,15 @@
 | `host` | `contracts` | 38 |
 | `plugins/extension_bag` | `contracts` | 34 |
 | `plugins/autosell` | `contracts` | 23 |
-| `plugins/custom_recipe` | `contracts` | 20 |
+| `plugins/custom_recipe` | `contracts` | 21 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
 | `plugins/save_backup` | `contracts` | 14 |
-| `plugins/core.ui` | `contracts` | 12 |
+| `plugins/core.settings` | `contracts` | 13 |
 | `legacy/system` | `game` | 11 |
+| `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
 | `host` | `patch` | 10 |
 | `infra` | `contracts` | 8 |
-| `infra` | `game` | 8 |
 
 ### 2.2 include 环
 
@@ -216,32 +217,34 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（27 个）共 27 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（28 个）共 28 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（27）
+### 6.2 已迁移 `plugins/*`（28）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 17 |
+| `character_panel_i18n` | `plugins/character_panel_i18n` | 6 |
 | `core.api` | `plugins/core.api` | 5 |
 | `core.character` | `plugins/core.character` | 5 |
 | `core.craft` | `plugins/core.craft` | 2 |
+| `core.custom_ui` | `plugins/core.custom_ui` | 10 |
 | `core.item` | `plugins/core.item` | 7 |
 | `core.quest` | `plugins/core.quest` | 5 |
 | `core.save` | `plugins/core.save` | 2 |
+| `core.settings` | `plugins/core.settings` | 15 |
 | `core.system` | `plugins/core.system` | 3 |
-| `core.ui` | `plugins/core.ui` | 17 |
-| `core.ui_state` | `plugins/core.ui_state` | 4 |
+| `core.ui_state` | `plugins/core.ui_state` | 2 |
 | `core.world` | `plugins/core.world` | 3 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
-| `custom_recipe` | `plugins/custom_recipe` | 10 |
+| `custom_recipe` | `plugins/custom_recipe` | 11 |
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
 | `device_probe_export_failure` | `plugins/device_probe_export_failure` | 2 |
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
@@ -252,7 +255,6 @@
 | `simple_mode` | `plugins/simple_mode` | 6 |
 | `special_equip` | `plugins/special_equip` | 6 |
 | `stack_limit` | `plugins/stack_limit` | 3 |
-| `text_layer` | `plugins/text_layer` | 6 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 
 ## 校验入口

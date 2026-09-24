@@ -1,5 +1,6 @@
 add_library(qol_plugin_core.custom_ui STATIC
     plugin.cpp
+    text_mechanism.cpp
     feature.cpp
     ui_components.cpp
     panels/stack.cpp

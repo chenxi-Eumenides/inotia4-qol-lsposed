@@ -216,6 +216,7 @@ add_executable(native_choice_tests
     test_native_choice.cpp
     ${CPP_DIR}/plugins/core.custom_ui/feature.cpp
     ${CPP_DIR}/plugins/core.custom_ui/plugin.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/text_mechanism.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
 )
@@ -235,7 +236,7 @@ target_include_directories(module_text_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(module_text_tests PRIVATE cxx_std_17)
-# 显式锚定 C++17：plugins/text_layer/feature.h 经 contracts/plugin.h 使用字段名 requires。
+# 显式锚定 C++17：plugins/character_panel_i18n/feature.h 经 contracts/plugin.h 使用字段名 requires。
 set_target_properties(module_text_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME module_text_tests COMMAND module_text_tests)
 
@@ -637,24 +638,25 @@ target_compile_features(autosell_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(autosell_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME autosell_plugin_tests COMMAND autosell_plugin_tests)
 
-# D1-b4：text_layer 插件清单/资源 host 测试（2 条入口 hook claim + backup 交付；末尾追加）
+# ADR 0001 D3/D4：character_panel_i18n 插件清单/资源 host 测试（角色面板作用域 hook claim +
+# 标签表连续性与占位 + backup 交付）。文本机制归 core.custom_ui（其清单见 native_choice_tests）。
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
-add_executable(text_layer_plugin_tests
-    test_text_layer_plugin.cpp
-    ${CPP_DIR}/plugins/text_layer/plugin.cpp
-    ${CPP_DIR}/plugins/text_layer/feature.cpp
-    ${CPP_DIR}/plugins/text_layer/charinfo_scope.cpp
+add_executable(character_panel_i18n_tests
+    test_character_panel_i18n.cpp
+    ${CPP_DIR}/plugins/character_panel_i18n/plugin.cpp
+    ${CPP_DIR}/plugins/character_panel_i18n/feature.cpp
+    ${CPP_DIR}/plugins/character_panel_i18n/charinfo_scope.cpp
     ${CPP_DIR}/hooks/dispatch.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
-target_include_directories(text_layer_plugin_tests PRIVATE
+target_include_directories(character_panel_i18n_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
 )
-target_compile_features(text_layer_plugin_tests PRIVATE cxx_std_17)
-set_target_properties(text_layer_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(text_layer_plugin_tests PRIVATE Threads::Threads)
-add_test(NAME text_layer_plugin_tests COMMAND text_layer_plugin_tests)
+target_compile_features(character_panel_i18n_tests PRIVATE cxx_std_17)
+set_target_properties(character_panel_i18n_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(character_panel_i18n_tests PRIVATE Threads::Threads)
+add_test(NAME character_panel_i18n_tests COMMAND character_panel_i18n_tests)
 
 # Quest scheduler 生命周期与撤销门禁 host 测试。
 add_executable(quest_lifecycle_tests

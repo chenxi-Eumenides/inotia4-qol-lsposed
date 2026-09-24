@@ -78,7 +78,7 @@ void test_plugin_manifest() {
         qol::features::core_ui::plugin_descriptor();
     CHECK(std::strcmp(d.id, "core.custom_ui") == 0);
     CHECK(d.requires_count == 0 && d.optional_count == 0);  // 工具插件无 requires
-    CHECK(d.provides_count == 3);  // ui_components + ui_panels + ui_choice
+    CHECK(d.provides_count == 4);  // ui_components + ui_panels + ui_choice + text_layer
     CHECK(std::strcmp(d.provides[2].id, qol::contracts::kUiChoiceCapabilityId) == 0);
     CHECK(d.provides[2].version.major == qol::contracts::kUiChoiceVersionMajor);
     CHECK(d.provides[2].version.minor == qol::contracts::kUiChoiceVersionMinor);
@@ -91,7 +91,7 @@ void test_plugin_manifest() {
     CHECK(api->open != nullptr && api->active != nullptr && api->close != nullptr);
     CHECK(!api->active());
 
-    CHECK(d.resources_count == 2);
+    CHECK(d.resources_count == 3);  // 选择控件 2 条 + 文本 GetText 共享资源
     const qol::contracts::ResourceClaim& init = d.resources[0];
     CHECK(std::strcmp(init.id, "hook:UIChoice_Init") == 0);
     CHECK(std::strcmp(init.symbol, "F_UI_CHOICE_INIT_VMA") == 0);

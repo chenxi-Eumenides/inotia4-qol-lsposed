@@ -13,7 +13,7 @@
 
 #include <cstdint>
 
-namespace qol::features::text_layer {
+namespace qol::features::character_panel_i18n {
 
 // 资源 handler：角色面板每帧绘制入口 wrapper（kEntryHook，owner=text_layer）。
 void scene_draw_charinfo_wrapper();
@@ -22,4 +22,4 @@ void scene_draw_charinfo_wrapper();
 // 无条件接受（与 memorytext_get_text 的 backup 交付同规则）；wrapper 侧自行判空。
 int32_t charinfo_scope_on_resource_ready(void* backup);
 
-}  // namespace qol::features::text_layer
+}  // namespace qol::features::character_panel_i18n

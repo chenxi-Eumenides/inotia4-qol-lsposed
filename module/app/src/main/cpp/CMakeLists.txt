@@ -43,9 +43,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/custom_recipe/table.cpp
     plugins/custom_recipe/feature.cpp
     plugins/custom_recipe/plugin.cpp
-    plugins/text_layer/charinfo_scope.cpp
-    plugins/text_layer/feature.cpp
-    plugins/text_layer/plugin.cpp
     plugins/craft_ui/feature.cpp
     plugins/craft_ui/plugin.cpp
     plugins/core.craft/plugin.cpp
@@ -61,7 +58,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/core.custom_ui/plugin.cpp
     plugins/core.custom_ui/feature.cpp
     plugins/core.custom_ui/ui_components.cpp
-    plugins/core.custom_ui/panels/settings.cpp
     plugins/core.custom_ui/panels/stack.cpp
     plugins/save_backup/ui/panel.cpp
     plugins/extension_bag/plugin.cpp
@@ -185,7 +181,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
 )
 
-# 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 text_layer 插件）
+# 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 character_panel_i18n 插件）
 target_sources(gamebridge PRIVATE
     hooks/dispatch.cpp
 )

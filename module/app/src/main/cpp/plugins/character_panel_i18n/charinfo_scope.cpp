@@ -3,7 +3,7 @@
 #include "feature.h"
 #include "plugin.h"
 
-namespace qol::features::text_layer {
+namespace qol::features::character_panel_i18n {
 namespace {
 
 // 原函数 ABI（Scene_Draw_POPUP_SC_CHARACTER_INFO；与 feature.cpp 同规则，不引入符号头）。
@@ -34,4 +34,4 @@ int32_t charinfo_scope_on_resource_ready(void* backup) {
     return 0;
 }
 
-}  // namespace qol::features::text_layer
+}  // namespace qol::features::character_panel_i18n

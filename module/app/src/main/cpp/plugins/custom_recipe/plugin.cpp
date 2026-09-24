@@ -10,8 +10,10 @@
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/events.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/text_layer.h"
 #include "feature.h"
 #include "table.h"
+#include "text_table.h"
 
 // 自定义合成配方插件：结果层能力提供者 + 表注入行为所有权（C2 Step 4）。
 //
@@ -27,6 +29,22 @@ constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kGateKey = "customRecipeEnabled";
 uint64_t g_config_subscription = 0;
 
+// ---- 「宝石强化」呈现文案（ADR 0001 D3：合成域的配方呈现文案归本插件）----
+//
+// 表与查表纯逻辑在 text_table.h（host 可测）；此处只保留分派消费者回调与能力句柄。
+constexpr int32_t kTextPhaseAfter = 1;
+constexpr int32_t kTextKindModify = 1;
+
+const contracts::TextLayerApi* g_text_api = nullptr;
+uint64_t g_text_consumer = 0;
+
+// after 阶段消费者：仅当当前线程处于对应作用域且 id 命中时返回模块文案。
+const char* recipe_text_modify(uint32_t text_id, const char* current, void* ctx) {
+    (void)current;
+    (void)ctx;
+    return recipe_owner_lookup(text_id);
+}
+
 void on_config_changed(void* /*ctx*/, const void* payload) {
     if (payload == nullptr) return;
     const auto* event = static_cast<const contracts::ConfigChangedEvent*>(payload);
@@ -41,6 +59,20 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
         return 1;
     }
+    // 文本层能力（配方呈现文案）：先取能力并订阅；失败即 install 失败，此时尚无副作用。
+    const void* text_iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kTextLayerCapabilityId,
+            {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor}, &text_iface)) ||
+        text_iface == nullptr) {
+        return 1;
+    }
+    const auto* text_api = static_cast<const contracts::TextLayerApi*>(text_iface);
+    if (text_api->subscribe == nullptr) return 1;
+    g_text_consumer = text_api->subscribe(kTextPhaseAfter, kTextKindModify, &recipe_text_modify,
+                                          nullptr);
+    if (g_text_consumer == 0) return 1;
+    g_text_api = text_api;
     const void* iface = nullptr;
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
@@ -105,6 +137,11 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    if (g_text_api != nullptr && g_text_api->unsubscribe != nullptr && g_text_consumer != 0) {
+        g_text_api->unsubscribe(g_text_consumer);
+    }
+    g_text_consumer = 0;
+    g_text_api = nullptr;
     if (g_config_subscription != 0) {
         if (host_sdk()->events.unsubscribe != nullptr) {
             (void)host_sdk()->events.unsubscribe(g_config_subscription);
@@ -158,6 +195,10 @@ const contracts::CapabilityRequirement kRequires[] = {
                       static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
     {contracts::kCraftFactsCapabilityId,
      {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}},
+    // 配方呈现文案经文本层能力登记（ADR 0001 D3）。
+    {contracts::kTextLayerCapabilityId,
+     {static_cast<uint16_t>(contracts::kTextLayerVersionMajor),
+      static_cast<uint16_t>(contracts::kTextLayerVersionMinor)}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -205,7 +246,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        2, kRequires,            // requires=item.facts + craft.facts
+        3, kRequires,            // requires=item.facts + craft.facts + text_layer
         1, kOptionalRequires,    // optional_requires=[attribute.quality]
         1, kProvides,            // provides=craft_result
         1, kClaims,              // resources=ownership
