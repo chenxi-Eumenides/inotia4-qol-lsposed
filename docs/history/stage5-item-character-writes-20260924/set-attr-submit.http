@@ -1,0 +1,12 @@
+REQUEST POST /api/op/character/0/set_attr body={"stats":{"strength":82,"agility":64}}
+HTTP/1.1 200 OK
+Content-Length: 23
+Access-Control-Allow-Origin: *
+Connection: keep-alive
+Content-Type: text/plain;charset=UTF-8
+Date: Thu, 24 Sep 2026 10:51:33 GMT
+Keep-Alive: timeout=4
+Proxy-Connection: keep-alive
+Server: AndServer/2.1.12
+
+{"ok":true,"ticket":12}

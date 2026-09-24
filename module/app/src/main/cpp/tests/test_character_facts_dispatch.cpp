@@ -9,6 +9,7 @@
 
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/character_write_port.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 
 static int g_pass = 0;
@@ -67,12 +69,31 @@ constexpr char kMember0[] =
 constexpr char kNotInGame[] = "{\"error\":\"not in game\"}";
 
 bool g_not_in_game = false;
+const char* g_player_json = kPlayer;
+qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
+uint32_t g_post_handler_id = 0;
+uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
+uint32_t g_post_payload_size = 0;
+qol::contracts::QolCharacterWriteArgs g_write_args[16]{};
+int g_write_calls = 0;
+int g_write_fail_at = 0;
+
+struct CharWritePayloadMirror {
+    int32_t kind;
+    int32_t i0;
+    int32_t i1;
+    int32_t i2;
+    int64_t i64;
+    int32_t point_count;
+    int32_t point_idx[8];
+    int32_t point_amt[8];
+};
 
 QolResult fake_character_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
     if (g_not_in_game) return write_json(kNotInGame, out, capacity, out_size);
     switch (static_cast<QolCharacterHttpJsonKind>(kind)) {
         case QolCharacterHttpJsonKind::kPlayer:
-            return write_json(kPlayer, out, capacity, out_size);
+            return write_json(g_player_json, out, capacity, out_size);
         case QolCharacterHttpJsonKind::kParty:
             return write_json(kParty, out, capacity, out_size);
         case QolCharacterHttpJsonKind::kSkills:
@@ -100,8 +121,30 @@ const QolCharacterHttpPort kFakeHttpPort{qol::contracts::kQolPortCharacterHttpVe
                                          kFakeHttpRead};
 const qol::contracts::QolCharacterPort kFakeCharacterPort{
     qol::contracts::kQolPortCharacterVersion, {&fake_type, &fake_active}};
+QolResult fake_character_write(const qol::contracts::QolCharacterWriteArgs* args, char* out,
+                               uint32_t capacity,
+                               uint32_t* out_size) {
+    if (args == nullptr || out == nullptr || out_size == nullptr || capacity < 40) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad write", 9);
+    }
+    if (g_write_calls < static_cast<int>(sizeof(g_write_args) / sizeof(g_write_args[0]))) {
+        g_write_args[g_write_calls] = *args;
+    }
+    ++g_write_calls;
+    constexpr char kOk[] = "{\"ok\":true}";
+    constexpr char kFailure[] = "{\"ok\":false,\"error\":\"port failed\"}";
+    const bool failed = g_write_fail_at == g_write_calls;
+    const char* result = failed ? kFailure : kOk;
+    const uint32_t size = static_cast<uint32_t>(std::strlen(result));
+    std::memcpy(out, result, size);
+    *out_size = size;
+    if (failed) return qol::contracts::error(kQolErrInternal, "port failed", 11);
+    return qol::contracts::ok();
+}
+const qol::contracts::QolCharacterWritePort kFakeWritePort{
+    qol::contracts::kQolPortCharacterWriteVersion, {&fake_character_write}};
 
-const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort};
+const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort, &kFakeWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -112,6 +155,29 @@ struct FakeScheduler {
 FakeScheduler g_scheduler;
 
 QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
+    return qol::contracts::ok();
+}
+
+QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
+                               void*) {
+    g_result_handler = handler;
+    return qol::contracts::ok();
+}
+
+QolResult fake_unregister_result(uint32_t) {
+    g_result_handler = nullptr;
+    return qol::contracts::ok();
+}
+
+QolResult fake_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                          qol::contracts::QolCommandTicket* ticket) {
+    if (ticket == nullptr || payload == nullptr || size > sizeof(g_post_payload)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    }
+    g_post_handler_id = handler_id;
+    g_post_payload_size = size;
+    std::memcpy(g_post_payload, payload, size);
+    *ticket = 11;
     return qol::contracts::ok();
 }
 
@@ -138,6 +204,9 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
+    sdk.commands.post_typed = &fake_post_typed;
+    sdk.ticket_result.register_typed_result_handler = &fake_register_result;
+    sdk.ticket_result.unregister_typed_result_handler = &fake_unregister_result;
     return sdk;
 }
 
@@ -160,6 +229,26 @@ const qol::contracts::HttpRoute kRoutes[] = {
      "core.character", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", "core.character", 0,
      1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/experience", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/hp", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/level", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/mp", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/set_attr", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/status-point", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/party/swap", "core.character", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/attack_target", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/cast_skill", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/set_auto_attack", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/stop_combat", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/combat/switch_player", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/grow/add_skill", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/grow/reset_skill", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/grow/reset_stat", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/grow/{role}/add_stat", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/party/include", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/party/exclude", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/party/discharge", "core.character", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/character/party/withdraw", "core.character", 0, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -171,7 +260,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.character";
     ctx.ports = kPortArray;
-    ctx.port_count = 2;
+    ctx.port_count = 3;
     return ctx;
 }
 
@@ -201,9 +290,221 @@ std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
     return std::string(storage, response.body_size);
 }
 
+std::string dispatch_post(const char* path, const char* body,
+                          const qol::contracts::HttpPathParam* params, uint32_t param_count,
+                          uint16_t* status = nullptr) {
+    const std::string path_value(path);
+    const uint32_t body_size = body == nullptr ? 0 : static_cast<uint32_t>(std::strlen(body));
+    char storage[8192]{};
+    qol::contracts::HttpReq request{
+        qol::contracts::HttpMethod::kPost, path_value.c_str(),
+        static_cast<uint32_t>(path_value.size()),
+        reinterpret_cast<const uint8_t*>(body), body_size, nullptr, 0, params, param_count,
+    };
+    qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(storage), sizeof(storage), 0, 0};
+    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
+    if (status != nullptr) *status = response.status;
+    return std::string(storage, response.body_size);
+}
+
+std::string run_post_result(bool* succeeded = nullptr) {
+    char storage[1024]{};
+    uint32_t size = 0;
+    const bool result = g_result_handler != nullptr &&
+                        g_result_handler(nullptr, g_post_payload, g_post_payload_size, storage,
+                                         sizeof(storage), &size);
+    if (succeeded != nullptr) *succeeded = result;
+    return std::string(storage, size);
+}
+
+void test_write_value_semantics() {
+    uint16_t status = 0;
+    g_player_json = "{\"party_count\":2,\"party_count\":\"3\",\"leader_slot\":0}";
+    CHECK(g_scheduler.handler(105, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/character/party/count", &status) == "{\"count\":3}");
+    CHECK(status == 200);
+    g_player_json = kPlayer;
+    CHECK(g_scheduler.handler(110, g_scheduler.ctx) != 0);
+
+    CHECK(dispatch_post("/api/op/party/swap", "{\"a\":0,\"a\":\"2\",\"b\":\"1\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror payload{};
+    std::memcpy(&payload, g_post_payload, sizeof(payload));
+    CHECK(payload.kind == static_cast<int32_t>(qol::contracts::QolCharacterWriteKind::kPartySwap));
+    CHECK(payload.i0 == 2 && payload.i1 == 1);
+    bool success = false;
+    g_write_calls = 0;
+    g_write_fail_at = 0;
+    CHECK(run_post_result(&success) == "{\"ok\":true}" && success);
+}
+
+void test_add_stat_result_semantics() {
+    const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
+    uint16_t status = 0;
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3.7}}",
+                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror payload{};
+    std::memcpy(&payload, g_post_payload, sizeof(payload));
+    CHECK(payload.point_count == 1 && payload.point_idx[0] == 0 && payload.point_amt[0] == 3);
+    g_write_calls = 0;
+    g_write_fail_at = 0;
+    bool success = false;
+    CHECK(run_post_result(&success) ==
+              "{\"ok\":true,\"applied\":[{\"attr\":0},{\"attr\":0},{\"attr\":0}]}" &&
+          success);
+    CHECK(g_write_calls == 3);
+    CHECK(g_write_args[0].i1 == 0 && g_write_args[0].i2 == 1 &&
+          g_write_args[1].i1 == 0 && g_write_args[1].i2 == 1 &&
+          g_write_args[2].i1 == 0 && g_write_args[2].i2 == 1);
+
+    g_write_calls = 0;
+    g_write_fail_at = 1;
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3.7}}",
+                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"port failed\"}" && !success);
+    CHECK(g_write_calls == 1);
+    g_write_fail_at = 0;
+}
+
+void test_set_attr_result_semantics() {
+    const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
+    uint16_t status = 0;
+    CHECK(dispatch_post("/api/op/character/0/set_attr",
+                        "{\"stats\":{\"strength\":5,\"agility\":6,\"strength\":\"7\"}}",
+                        &role, 1,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    g_write_calls = 0;
+    g_write_fail_at = 0;
+    bool success = false;
+    CHECK(run_post_result(&success) ==
+              "{\"ok\":true,\"set\":[{\"attr\":0,\"value\":7},{\"attr\":1,\"value\":6}]}" &&
+          success);
+    CHECK(g_write_calls == 2 && g_write_args[0].i1 == 0 && g_write_args[0].i2 == 7 &&
+          g_write_args[1].i1 == 1 && g_write_args[1].i2 == 6);
+
+    g_write_calls = 0;
+    g_write_fail_at = 2;
+    CHECK(dispatch_post("/api/op/character/0/set_attr",
+                        "{\"stats\":{\"strength\":7,\"agility\":8}}", &role, 1,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"set attr 1 failed\"}" &&
+          !success);
+    CHECK(g_write_calls == 2 && g_write_args[0].i1 == 0 && g_write_args[0].i2 == 7 &&
+          g_write_args[1].i1 == 1 && g_write_args[1].i2 == 8);
+    g_write_fail_at = 0;
+}
+
+void test_no_body_and_boolean_semantics() {
+    uint16_t status = 0;
+    bool success = false;
+    const char* reset_paths[] = {"/api/character/grow/reset_stat",
+                                 "/api/character/grow/reset_skill"};
+    const qol::contracts::QolCharacterWriteKind expected_kinds[] = {
+        qol::contracts::QolCharacterWriteKind::kStatReset,
+        qol::contracts::QolCharacterWriteKind::kSkillReset,
+    };
+    for (size_t i = 0; i < 2; ++i) {
+        CHECK(dispatch_post(reset_paths[i], nullptr, nullptr, 0, &status) ==
+              "{\"ok\":true,\"ticket\":11}");
+        CharWritePayloadMirror payload{};
+        std::memcpy(&payload, g_post_payload, sizeof(payload));
+        CHECK(payload.kind == static_cast<int32_t>(expected_kinds[i]) && payload.i0 == 0);
+        g_write_calls = 0;
+        CHECK(run_post_result(&success) == "{\"ok\":true}" && success);
+    }
+
+    CHECK(dispatch_post("/api/character/combat/switch_player",
+                        "{\"slot\":0,\"slot\":\"1\"}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror switch_payload{};
+    std::memcpy(&switch_payload, g_post_payload, sizeof(switch_payload));
+    CHECK(switch_payload.kind == static_cast<int32_t>(
+                                     qol::contracts::QolCharacterWriteKind::kSwitchPlayer));
+    CHECK(switch_payload.i0 == 1);
+
+    const qol::contracts::HttpPathParam role{"role", 4, "1", 1};
+    const char* values[] = {"TRUE", "FaLsE", "anything"};
+    const int expected[] = {1, 0, 0};
+    for (size_t i = 0; i < 3; ++i) {
+        const std::string body = std::string("{\"on\":\"") + values[i] + "\"}";
+        CHECK(dispatch_post("/api/character/combat/1/set_auto_attack", body.c_str(), &role, 1,
+                            &status) == "{\"ok\":true,\"ticket\":11}");
+        CharWritePayloadMirror payload{};
+        std::memcpy(&payload, g_post_payload, sizeof(payload));
+        CHECK(payload.kind == static_cast<int32_t>(
+                                  qol::contracts::QolCharacterWriteKind::kSetAutoAttack));
+        CHECK(payload.i0 == 1 && payload.i1 == expected[i]);
+    }
+}
+
+void test_android_number_semantics() {
+    uint16_t status = 0;
+    const char* slot_values[] = {"1.7", "1e0", " 2 ", "+2"};
+    const int expected_slots[] = {1, 1, 2, 2};
+    for (size_t i = 0; i < 4; ++i) {
+        const std::string body = std::string("{\"slot\":\"") + slot_values[i] + "\"}";
+        CHECK(dispatch_post("/api/character/combat/switch_player", body.c_str(), nullptr, 0,
+                            &status) == "{\"ok\":true,\"ticket\":11}");
+        CharWritePayloadMirror payload{};
+        std::memcpy(&payload, g_post_payload, sizeof(payload));
+        CHECK(payload.i0 == expected_slots[i]);
+    }
+
+    CHECK(dispatch_post("/api/character/combat/switch_player", "{\"slot\":2.7}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror float_payload{};
+    std::memcpy(&float_payload, g_post_payload, sizeof(float_payload));
+    CHECK(float_payload.i0 == 2);
+
+    const char* invalid_values[] = {"abc", "3.7.9", "1e", ""};
+    for (const char* invalid : invalid_values) {
+        const std::string body = std::string("{\"slot\":\"") + invalid + "\"}";
+        CHECK(dispatch_post("/api/character/combat/switch_player", body.c_str(), nullptr, 0,
+                            &status) == "{\"ok\":false,\"error\":\"slot required (0-2)\"}");
+        CHECK(status == 400);
+    }
+
+    CHECK(dispatch_post("/api/character/grow/add_skill",
+                        "{\"action_id\":\"Infinity\"}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror infinity_payload{};
+    std::memcpy(&infinity_payload, g_post_payload, sizeof(infinity_payload));
+    CHECK(infinity_payload.i1 == std::numeric_limits<int32_t>::max());
+    CHECK(dispatch_post("/api/character/grow/add_skill", "{\"action_id\":\"NaN\"}", nullptr,
+                        0, &status) == "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror nan_payload{};
+    std::memcpy(&nan_payload, g_post_payload, sizeof(nan_payload));
+    CHECK(nan_payload.i1 == 0);
+    CHECK(dispatch_post("/api/character/grow/add_skill",
+                        "{\"action_id\":\"1e100\"}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    std::memcpy(&infinity_payload, g_post_payload, sizeof(infinity_payload));
+    CHECK(infinity_payload.i1 == std::numeric_limits<int32_t>::max());
+
+    const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
+    CHECK(dispatch_post("/api/op/character/0/experience",
+                        "{\"exp\":\"Infinity\"}", &role, 1, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror long_payload{};
+    std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
+    CHECK(long_payload.i64 == std::numeric_limits<int64_t>::max());
+    CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":\"1e100\"}", &role,
+                        1, &status) == "{\"ok\":true,\"ticket\":11}");
+    std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
+    CHECK(long_payload.i64 == std::numeric_limits<int64_t>::max());
+    CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":\"1e2\"}", &role, 1,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
+    CHECK(long_payload.i64 == 100);
+    CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":\"-Infinity\"}", &role,
+                        1, &status) == "{\"ok\":false,\"error\":\"exp required\"}");
+    CHECK(status == 400);
+}
+
 void test_lifecycle_and_responses() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
+    qol::host::http_dispatch_set_op_enabled(true);
     g_scheduler = FakeScheduler{};
     g_not_in_game = false;
     register_frozen_routes();
@@ -258,6 +559,12 @@ void test_lifecycle_and_responses() {
     CHECK(status == 404);
     (void)dispatch_get("/api/character/mercenary/5", &status);
     CHECK(status == 404);
+
+    test_write_value_semantics();
+    test_add_stat_result_semantics();
+    test_set_attr_result_semantics();
+    test_no_body_and_boolean_semantics();
+    test_android_number_semantics();
 
     // 非 world 态：15 条统一 200 + {"error":"not in game"}。
     g_not_in_game = true;

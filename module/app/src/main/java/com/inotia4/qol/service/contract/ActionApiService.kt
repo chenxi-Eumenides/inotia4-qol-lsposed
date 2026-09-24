@@ -1,20 +1,6 @@
 package com.inotia4.qol.service.contract
 
 interface ActionApiService {
-    fun useItem(bag: Int, slot: Int): String
-    fun diceAccept(): String
-    fun diceReject(): String
-    fun sellItem(bag: Int, slot: Int): String
-    fun moveItem(bag: Int, slot: Int, count: Int, toBag: Int, toSlot: Int): String
-    fun equip(role: Int, bag: Int, slot: Int): String
-    fun equipByCategory(role: Int, category: Int): String
-    fun unequip(role: Int, slot: Int): String
-    fun autoAttack(role: Int, on: Boolean): String
-    fun learnSkill(role: Int, actionId: Int, level: Int): String
-    fun addStat(role: Int, attrs: List<Pair<Int, Int>>): String
-    fun statReset(role: Int): String
-    fun skillReset(role: Int): String
-    fun cast(role: Int, actionId: Int): String
     fun save(): String
     fun mainMenu(): String
     fun enterSlot(slot: Int): String
@@ -23,16 +9,4 @@ interface ActionApiService {
     fun panelOpen(panel: String): String
     fun npcInteract(): String
     fun dialogSelect(action: String, index: Int): String
-    fun shopBuy(slot: Int): String
-    fun jewel(role: Int, bag: Int, slot: Int, equipSlot: Int): String
-    fun enchant(role: Int, bag: Int, slot: Int, equipSlot: Int): String
-    fun switchPlayer(slot: Int): String
-    fun discardItem(bag: Int, slot: Int): String
-    fun includeParty(mercenarySlot: Int): String
-    fun excludeParty(mercenarySlot: Int): String
-    fun discharge(mercenarySlot: Int): String
-    fun withdraw(mercenarySlot: Int, equipSlot: Int): String
-    fun attack(role: Int, targetSlot: Int): String
-    fun stopCombat(role: Int): String
-    fun extensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
 }

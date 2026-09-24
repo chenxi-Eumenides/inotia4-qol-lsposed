@@ -23,7 +23,7 @@ import java.io.File
  * - moveMergeEnabled：是否启用背包内拖拽同类物品合并。
  *   默认 false；启动期和配置变更时均下发 native GOT hook。
  * - opEnabled：OP 能力全局开关（/api/op 门禁，architecture §9.1-2）。
- *   默认 false（安全基线：OP 默认关闭）；开启后 OpApiService 各方法才放行。
+ *   默认 false（安全基线：OP 默认关闭）；开启后 native HTTP dispatch 才放行 OP 写路由。
  * - extensionBagEnabled：是否启用扩展背包，默认 true。
  * - customRecipeEnabled：新合成系统（界面 + 配方），默认 false；禁用不回滚已注入的表（custom-craft-recipe §4.8）。
  * - simpleModeEnabled：简单模式，默认 false。开启后怪物最大生命减半、玩家侧打敌人伤害 ×1.5、
@@ -82,7 +82,7 @@ object ModuleConfig {
     var moveMergeEnabled: Boolean = DEFAULT_MOVE_MERGE_ENABLED
         private set
 
-    /** OP 能力全局开关（默认 false，安全基线）；OpApiService 门禁读取 */
+    /** OP 能力全局开关（默认 false，安全基线）；native HTTP dispatch 门禁读取 */
     @Volatile
     var opEnabled: Boolean = DEFAULT_OP_ENABLED
         private set

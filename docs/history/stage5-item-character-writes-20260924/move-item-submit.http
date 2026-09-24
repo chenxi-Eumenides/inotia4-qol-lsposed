@@ -1,0 +1,12 @@
+REQUEST POST /api/item/inventory/move_item body={"bag":0,"slot":0,"count":1,"to_bag":0,"to_slot":3}
+HTTP/1.1 200 OK
+Content-Length: 22
+Access-Control-Allow-Origin: *
+Connection: keep-alive
+Content-Type: text/plain;charset=UTF-8
+Date: Thu, 24 Sep 2026 10:50:23 GMT
+Keep-Alive: timeout=4
+Proxy-Connection: keep-alive
+Server: AndServer/2.1.12
+
+{"ok":true,"ticket":8}

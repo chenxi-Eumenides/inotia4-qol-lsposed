@@ -29,6 +29,8 @@ enum class QolPortId : uint32_t {
     QOL_PORT_WORLD_WRITE = 18,
     QOL_PORT_UI_WRITE = 19,
     QOL_PORT_CHOICE_WRITE = 20,
+    QOL_PORT_ITEM_WRITE = 21,
+    QOL_PORT_CHARACTER_WRITE = 22,
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 1};
@@ -51,6 +53,8 @@ constexpr QolVersion kQolPortSaveWriteVersion{1, 0};
 constexpr QolVersion kQolPortWorldWriteVersion{1, 0};
 constexpr QolVersion kQolPortUiWriteVersion{1, 0};
 constexpr QolVersion kQolPortChoiceWriteVersion{1, 0};
+constexpr QolVersion kQolPortItemWriteVersion{1, 0};
+constexpr QolVersion kQolPortCharacterWriteVersion{1, 0};
 
 struct QolPortRequirement {
     QolPortId id;
@@ -99,6 +103,10 @@ constexpr const char* port_id_name(QolPortId id) {
             return "QOL_PORT_UI_WRITE";
         case QolPortId::QOL_PORT_CHOICE_WRITE:
             return "QOL_PORT_CHOICE_WRITE";
+        case QolPortId::QOL_PORT_ITEM_WRITE:
+            return "QOL_PORT_ITEM_WRITE";
+        case QolPortId::QOL_PORT_CHARACTER_WRITE:
+            return "QOL_PORT_CHARACTER_WRITE";
     }
     return "QOL_PORT_UNKNOWN";
 }

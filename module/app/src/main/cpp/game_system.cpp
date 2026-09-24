@@ -6,6 +6,9 @@
 #include "game/access/game_access.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/state/character_http.h"
+#include "game/state/character_write_http.h"
+#include "game/state/item_http.h"
+#include "contracts/extension_bag_port.h"
 #include "game/state/choice_http.h"
 #include "game/state/game_state.h"
 #include "game/state/quest_http.h"
@@ -15,7 +18,10 @@
 #include "game/state/world_http.h"
 #include "game_world.h"
 #include "api/native/game_character.h"
+#include "api/native/game_inventory.h"
+#include "api/native/game_party.h"
 #include "api/native/game_quest.h"
+#include "api/native/game_shop.h"
 #include "api/native/game_ui.h"
 #include "api/native/game_save.h"
 #include "core/native/game_cache.h"
@@ -921,6 +927,186 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
     return ok ? kUiWriteOk : kUiWriteFailed;
+}
+
+// ---- 物品/背包写面（core.item，私有端口 QOL_PORT_ITEM_WRITE）----
+// 响应形状与迁移前 Kotlin 等价：op 体 + 可选 state（attach* 包装为在 JSONObject 上
+// 追加 "state" 键，故这里在末尾 '}' 前插入同名字段）。
+int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, char* out,
+                                     uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr) return kItemWriteFailed;
+    std::string op;
+    std::string state;
+    switch (static_cast<contracts::QolItemWriteKind>(args.kind)) {
+        case contracts::QolItemWriteKind::kUseItem:
+            op = data_op_use_item(args.i0, args.i1);
+            state = build_inventory_json();
+            break;
+        case contracts::QolItemWriteKind::kSellItem:
+            op = data_op_sell_item(args.i0, args.i1);
+            state = build_inventory_json();
+            break;
+        case contracts::QolItemWriteKind::kMoveItem:
+            // extension_bag_move_item 定义在插件层源集（CMake 在非 kernel-only 才编入），
+            // kernel-only 构建无该符号；kernel-only 下逻辑袋视为不存在，统一走原版移动。
+#if !QOL_KERNEL_ONLY
+            if ((args.i0 >= 6 && args.i0 <= 10) || (args.i3 >= 6 && args.i3 <= 10)) {
+                op = extension_bag_move_item(args.i0, args.i1, args.i3, args.i4);
+            } else {
+                op = data_op_move_item(args.i0, args.i1, args.i2, args.i3, args.i4);
+                state = build_inventory_json();
+            }
+#else
+            op = data_op_move_item(args.i0, args.i1, args.i2, args.i3, args.i4);
+            state = build_inventory_json();
+#endif
+            break;
+        case contracts::QolItemWriteKind::kDiscardItem:
+            op = data_op_discard_item(args.i0, args.i1);
+            state = build_inventory_json();
+            break;
+        case contracts::QolItemWriteKind::kAcceptDice:
+            op = data_op_dice_accept();
+            state = build_player_json();
+            break;
+        case contracts::QolItemWriteKind::kRejectDice:
+            op = data_op_dice_reject();  // 迁移前无 attach，原样返回
+            break;
+        case contracts::QolItemWriteKind::kEquipItem:
+            op = data_op_equip(args.i0, args.i1, args.i2);
+            state = build_party_json();
+            break;
+        case contracts::QolItemWriteKind::kUnequipItem:
+            op = data_op_unequip(args.i0, args.i1);
+            state = build_party_json();
+            break;
+        case contracts::QolItemWriteKind::kPutJewel:
+            op = data_op_jewel(args.i0, args.i1, args.i2, args.i3);
+            state = build_party_json();
+            break;
+        case contracts::QolItemWriteKind::kEnchant:
+            op = data_op_enchant(args.i0, args.i1, args.i2, args.i3);
+            state = build_party_json();
+            break;
+        case contracts::QolItemWriteKind::kShopBuy:
+            op = data_op_shop_buy(args.i0);
+            state = build_inventory_json();
+            break;
+        case contracts::QolItemWriteKind::kAddItem:
+            op = data_op_add_item(args.i0, args.i1, args.i2, args.i3, args.i4);
+            break;
+        case contracts::QolItemWriteKind::kSetMoney:
+            op = data_op_set_money(args.i64);
+            break;
+        default:
+            return kItemWriteFailed;
+    }
+    const bool ok = op.find("\"ok\":false") == std::string::npos;
+    std::string body = op;
+    if (ok && !state.empty() && !op.empty() && op.back() == '}') {
+        body = op.substr(0, op.size() - 1) + ",\"state\":" + state + "}";
+    }
+    if (body.size() > capacity) return kItemWriteFailed;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return ok ? kItemWriteOk : kItemWriteFailed;
+}
+
+// ---- 角色/战斗/成长/队伍写面（core.character，私有端口 QOL_PORT_CHARACTER_WRITE）----
+// kSetAttr/kAddStat 为单点调用：迁移前的批量循环与 add_stat 的 {"ok":true,"applied":[...]}
+// 组装由调用方（core.character 结果处理器）负责。
+int32_t build_character_write_result_json(const contracts::QolCharacterWriteArgs& args, char* out,
+                                          uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr) return kCharacterWriteFailed;
+    std::string op;
+    std::string state;
+    switch (static_cast<contracts::QolCharacterWriteKind>(args.kind)) {
+        case contracts::QolCharacterWriteKind::kSetHp:
+            op = data_op_set_hp(args.i0, args.i1);
+            break;
+        case contracts::QolCharacterWriteKind::kSetMp:
+            op = data_op_set_mp(args.i0, args.i1);
+            break;
+        case contracts::QolCharacterWriteKind::kSetLevel:
+            op = data_op_set_level(args.i0, args.i1, args.i2 != 0);
+            break;
+        case contracts::QolCharacterWriteKind::kSetExperience:
+            op = data_op_set_experience(args.i0, args.i64);
+            break;
+        case contracts::QolCharacterWriteKind::kSetAttr:
+            op = data_op_set_attr(args.i0, args.i1, args.i2);
+            break;
+        case contracts::QolCharacterWriteKind::kSetStatusPoint:
+            op = data_op_set_status_point(args.i0, args.i1);
+            break;
+        case contracts::QolCharacterWriteKind::kPartySwap:
+            op = data_op_party_swap(args.i0, args.i1);
+            break;
+        case contracts::QolCharacterWriteKind::kSetAutoAttack:
+            op = data_op_set_auto_attack(args.i0, args.i1);
+            state = build_party_json();
+            break;
+        case contracts::QolCharacterWriteKind::kCastSkill:
+            op = data_op_cast(args.i0, args.i1);
+            state = build_party_json();
+            break;
+        case contracts::QolCharacterWriteKind::kAttackTarget:
+            op = data_op_attack(args.i0, args.i1);
+            state = build_party_json();
+            break;
+        case contracts::QolCharacterWriteKind::kSwitchPlayer:
+            op = data_op_switch_player(args.i0);
+            state = build_player_json();
+            break;
+        case contracts::QolCharacterWriteKind::kStopCombat:
+            op = data_op_stop_combat(args.i0);
+            state = build_player_json();
+            break;
+        case contracts::QolCharacterWriteKind::kLearnAction:
+            op = data_op_learn_action(args.i0, args.i1, args.i2);
+            state = build_skills_json();
+            break;
+        case contracts::QolCharacterWriteKind::kAddStat:
+            op = data_op_add_stat(args.i0, args.i1);
+            break;
+        case contracts::QolCharacterWriteKind::kStatReset:
+            op = data_op_stat_reset(args.i0);
+            state = build_player_json();
+            break;
+        case contracts::QolCharacterWriteKind::kSkillReset:
+            op = data_op_skill_reset(args.i0);
+            state = build_player_json();
+            break;
+        case contracts::QolCharacterWriteKind::kPartyInclude:
+            op = data_op_include_party(args.i0);
+            state = build_party_json();
+            break;
+        case contracts::QolCharacterWriteKind::kPartyExclude:
+            op = data_op_exclude_party(args.i0);
+            state = build_party_json();
+            break;
+        case contracts::QolCharacterWriteKind::kPartyDischarge:
+            op = data_op_discharge(args.i0);
+            state = build_party_json();
+            break;
+        case contracts::QolCharacterWriteKind::kPartyWithdraw:
+            op = data_op_withdraw(args.i0, args.i1);
+            state = build_party_json();
+            break;
+        default:
+            return kCharacterWriteFailed;
+    }
+    const bool ok = op.find("\"ok\":false") == std::string::npos;
+    std::string body = op;
+    if (ok && !state.empty() && !op.empty() && op.back() == '}') {
+        body = op.substr(0, op.size() - 1) + ",\"state\":" + state + "}";
+    }
+    if (body.size() > capacity) return kCharacterWriteFailed;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return ok ? kCharacterWriteOk : kCharacterWriteFailed;
 }
 
 }  // namespace qol::game

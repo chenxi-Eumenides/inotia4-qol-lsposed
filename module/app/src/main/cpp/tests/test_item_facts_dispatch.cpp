@@ -7,6 +7,7 @@
 
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/item_write_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "contracts/result.h"
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <unordered_map>
 
@@ -32,6 +34,8 @@ namespace {
 
 using qol::contracts::QolItemPort;
 using qol::contracts::QolItemPortReadApi;
+using qol::contracts::QolItemWriteArgs;
+using qol::contracts::QolItemWritePort;
 using qol::contracts::QolItemStaticTextKind;
 
 constexpr char kInventoryJson[] =
@@ -55,6 +59,12 @@ constexpr char kExpectedItem[] =
 
 bool g_in_world = true;
 int32_t g_static_ready = 1;
+qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
+uint32_t g_post_handler_id = 0;
+uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
+uint32_t g_post_payload_size = 0;
+QolItemWriteArgs g_last_write{};
+int g_write_calls = 0;
 
 QolResult unsupported() { return qol::contracts::error(kQolErrUnsupported, "stub", 4); }
 QolResult stub_category(const void*, int32_t*) { return unsupported(); }
@@ -128,7 +138,26 @@ const QolItemPortReadApi kFakeRead{
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
 
-const void* const kPortArray[] = {&kFakePort};
+QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capacity,
+                          uint32_t* out_size) {
+    if (args == nullptr || out == nullptr || out_size == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad write", 9);
+    }
+    g_last_write = *args;
+    ++g_write_calls;
+    constexpr char kResult[] = "{\"ok\":true}";
+    if (capacity < sizeof(kResult) - 1) {
+        return qol::contracts::error(kQolErrBlocked, "small", 5);
+    }
+    std::memcpy(out, kResult, sizeof(kResult) - 1);
+    *out_size = sizeof(kResult) - 1;
+    return qol::contracts::ok();
+}
+
+const QolItemWritePort kFakeWritePort{qol::contracts::kQolPortItemWriteVersion,
+                                      {&fake_item_write}};
+
+const void* const kPortArray[] = {&kFakePort, &kFakeWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -139,6 +168,29 @@ struct FakeScheduler {
 FakeScheduler g_scheduler;
 
 QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
+    return qol::contracts::ok();
+}
+
+QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
+                               void*) {
+    g_result_handler = handler;
+    return qol::contracts::ok();
+}
+
+QolResult fake_unregister_result(uint32_t) {
+    g_result_handler = nullptr;
+    return qol::contracts::ok();
+}
+
+QolResult fake_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                          qol::contracts::QolCommandTicket* ticket) {
+    if (payload == nullptr || size > sizeof(g_post_payload) || ticket == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad command", 11);
+    }
+    g_post_handler_id = handler_id;
+    g_post_payload_size = size;
+    std::memcpy(g_post_payload, payload, size);
+    *ticket = 72;
     return qol::contracts::ok();
 }
 
@@ -165,6 +217,9 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
+    sdk.commands.post_typed = &fake_post_typed;
+    sdk.ticket_result.register_typed_result_handler = &fake_register_result;
+    sdk.ticket_result.unregister_typed_result_handler = &fake_unregister_result;
     return sdk;
 }
 
@@ -175,6 +230,19 @@ const qol::contracts::HttpRoute kRoutes[] = {
     {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/info", "core.item", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/{slot}", "core.item", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/item/shop/items", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/use_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/sell_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/move_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/discard_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/accept_dice", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/reject_dice", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/equip_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/unequip_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/put_jewel", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/enchant", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/item/shop/buy_item", "core.item", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/inventory/add", "core.item", 1, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/inventory/money", "core.item", 1, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -186,8 +254,146 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 1;
+    ctx.port_count = 2;
     return ctx;
+}
+
+std::string dispatch_post(const char* path, const char* body,
+                          const qol::contracts::HttpPathParam* params, uint32_t param_count,
+                          uint16_t* status) {
+    const std::string path_value(path);
+    const uint32_t body_size = body == nullptr ? 0 : static_cast<uint32_t>(std::strlen(body));
+    char storage[8192]{};
+    qol::contracts::HttpReq request{
+        qol::contracts::HttpMethod::kPost, path_value.c_str(),
+        static_cast<uint32_t>(path_value.size()),
+        reinterpret_cast<const uint8_t*>(body), body_size,
+        nullptr, 0, params, param_count,
+    };
+    qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(storage), sizeof(storage), 0, 0};
+    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
+    if (status != nullptr) *status = response.status;
+    return std::string(storage, response.body_size);
+}
+
+void test_write_routes() {
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
+    qol::host::http_dispatch_set_op_enabled(true);
+    uint16_t status = 0;
+    CHECK(dispatch_post("/api/item/inventory/use_item",
+                        "{\"bag\":8,\"bag\":\"0\",\"slot\":0,\"slot\":\"1\"}", nullptr,
+                        0, &status) == "{\"ok\":true,\"ticket\":72}");
+    CHECK(status == 200 && g_post_payload_size > 0 && g_result_handler != nullptr);
+    CHECK(descriptor.http_query_count == 19);
+    char result[256]{};
+    uint32_t result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) == "{\"ok\":true}");
+    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUseItem));
+    CHECK(g_last_write.i0 == 0 && g_last_write.i1 == 1);
+
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"4\","
+                        "\"to_bag\":\"7\",\"to_slot\":\"-1\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kMoveItem));
+    CHECK(g_last_write.i0 == 6 && g_last_write.i1 == 2 && g_last_write.i2 == 4 &&
+          g_last_write.i3 == 7 && g_last_write.i4 == -1);
+
+    const qol::contracts::HttpPathParam role{"role", 4, "1", 1};
+    CHECK(dispatch_post("/api/item/inventory/1/equip_item", "{\"category\":10}", &role, 1,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEquipItem));
+    CHECK(g_last_write.i0 == 1 && g_last_write.i1 == 0 && g_last_write.i2 == 0);
+
+    CHECK(dispatch_post("/api/op/inventory/add",
+                        "{\"category\":\" 12 \",\"count\":\"1e2\",\"socket\":\"3.7\","
+                        "\"enhanceRemaining\":\"+3\",\"rarity\":\"NaN\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kAddItem));
+    CHECK(g_last_write.i0 == 12 && g_last_write.i1 == 100 && g_last_write.i2 == 3 &&
+          g_last_write.i3 == 3 && g_last_write.i4 == 0);
+
+    CHECK(dispatch_post("/api/op/inventory/add",
+                        "{\"category\":\"Infinity\",\"count\":\"-Infinity\","
+                        "\"socket\":\"NaN\",\"enhanceRemaining\":\"-3.7\","
+                        "\"rarity\":\"1e2\"}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(g_last_write.i0 == std::numeric_limits<int32_t>::max() &&
+          g_last_write.i1 == std::numeric_limits<int32_t>::min() && g_last_write.i2 == 0 &&
+          g_last_write.i3 == -3 && g_last_write.i4 == 100);
+
+    CHECK(dispatch_post("/api/op/inventory/add",
+                        "{\"category\":\"1e100\",\"count\":\"-1e100\"}", nullptr,
+                        0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(g_last_write.i0 == std::numeric_limits<int32_t>::max() &&
+          g_last_write.i1 == std::numeric_limits<int32_t>::min());
+
+    CHECK(dispatch_post("/api/op/inventory/add",
+                        "{\"category\":3.7,\"count\":3.7,\"socket\":1.7,"
+                        "\"enhanceRemaining\":2.7,\"rarity\":4.7}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(g_last_write.i0 == 3 && g_last_write.i1 == 3 && g_last_write.i2 == 1 &&
+          g_last_write.i3 == 2 && g_last_write.i4 == 4);
+
+    const char* invalid_numbers[] = {"abc", "3.7.9", "1e", ""};
+    for (const char* invalid : invalid_numbers) {
+        const std::string invalid_body = std::string("{\"category\":\"") + invalid + "\"}";
+        CHECK(dispatch_post("/api/op/inventory/add", invalid_body.c_str(), nullptr, 0, &status) ==
+              "{\"ok\":false,\"error\":\"category required\"}");
+        CHECK(status == 400);
+    }
+
+    CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"4294967296\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(status == 200 && g_last_write.i64 == 4294967296LL && g_write_calls == 8);
+
+    CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"Infinity\"}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    CHECK(g_post_payload_size == sizeof(QolItemWriteArgs));
+    QolItemWriteArgs money_args{};
+    std::memcpy(&money_args, g_post_payload, sizeof(money_args));
+    CHECK(money_args.i64 == std::numeric_limits<int64_t>::max());
+    CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"1e100\"}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    std::memcpy(&money_args, g_post_payload, sizeof(money_args));
+    CHECK(money_args.i64 == std::numeric_limits<int64_t>::max());
+    CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"NaN\"}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    std::memcpy(&money_args, g_post_payload, sizeof(money_args));
+    CHECK(money_args.i64 == 0);
+    CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"-Infinity\"}", nullptr,
+                        0, &status) == "{\"ok\":false,\"error\":\"money required\"}");
+    CHECK(status == 400);
+
+    const int write_calls_before_invalid = g_write_calls;
+    CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":\"not-a-number\"}",
+                        nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"category required\"}");
+    CHECK(status == 400 && g_write_calls == write_calls_before_invalid);
+    qol::host::http_dispatch_set_op_enabled(false);
 }
 
 void register_frozen_routes() {
@@ -258,6 +464,7 @@ void test_lifecycle_and_responses() {
                                                      descriptor.http_query_count).ok == kQolOk);
     CHECK(g_scheduler.handler != nullptr);
     CHECK(g_scheduler.interval > 1);
+    test_write_routes();
 
     uint16_t status = 0;
     (void)dispatch_get("/api/item/inventory", &status);

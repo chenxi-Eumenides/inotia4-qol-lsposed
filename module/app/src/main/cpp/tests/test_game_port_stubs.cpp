@@ -18,6 +18,8 @@
 #include "contracts/game_ports/world_write_port.h"
 #include "contracts/game_ports/choice_write_port.h"
 #include "contracts/game_ports/ui_write_port.h"
+#include "contracts/game_ports/item_write_port.h"
+#include "contracts/game_ports/character_write_port.h"
 
 namespace qol::game {
 namespace {
@@ -46,6 +48,8 @@ const contracts::QolSaveWritePort kSaveWritePort{{1, 0}, {}};
 const contracts::QolWorldWritePort kWorldWritePort{{1, 0}, {}};
 const contracts::QolChoiceWritePort kChoiceWritePort{{1, 0}, {}};
 const contracts::QolUiWritePort kUiWritePort{{1, 0}, {}};
+const contracts::QolItemWritePort kItemWritePort{{1, 0}, {nullptr}};
+const contracts::QolCharacterWritePort kCharacterWritePort{{1, 0}, {nullptr}};
 
 }  // namespace
 
@@ -77,5 +81,7 @@ const contracts::QolSaveWritePort& save_write_port() { return kSaveWritePort; }
 const contracts::QolWorldWritePort& world_write_port() { return kWorldWritePort; }
 const contracts::QolChoiceWritePort& choice_write_port() { return kChoiceWritePort; }
 const contracts::QolUiWritePort& ui_write_port() { return kUiWritePort; }
+const contracts::QolItemWritePort& item_write_port() { return kItemWritePort; }
+const contracts::QolCharacterWritePort& character_write_port() { return kCharacterWritePort; }
 
 }  // namespace qol::game

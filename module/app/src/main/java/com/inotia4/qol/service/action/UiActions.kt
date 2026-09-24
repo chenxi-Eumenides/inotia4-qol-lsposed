@@ -6,7 +6,6 @@ import com.inotia4.qol.LogFile
 import com.inotia4.qol.UiActivityTracker
 import com.inotia4.qol.util.JsonUtil
 import org.json.JSONObject
-import com.inotia4.qol.service.contract.ActionApiService
 import com.inotia4.qol.service.info.NativeHttpCommand
 
 internal object UiActions {

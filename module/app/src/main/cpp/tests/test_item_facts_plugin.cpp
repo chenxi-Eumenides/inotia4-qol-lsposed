@@ -21,13 +21,14 @@ int main() {
     CHECK(descriptor.optional_count == 0);
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
-    CHECK(descriptor.http_query_count == 6 && descriptor.http_queries != nullptr);
+    CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
-    CHECK(descriptor.port_count == 1 && descriptor.ports != nullptr);
+    CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
+    CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_WRITE);
 
     const auto* api = static_cast<const qol::contracts::ItemFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->category != nullptr);

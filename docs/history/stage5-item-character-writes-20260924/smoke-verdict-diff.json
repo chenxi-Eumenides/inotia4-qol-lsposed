@@ -1,0 +1,34 @@
+[
+  {
+    "path": "/api/character/party/include",
+    "method": "POST",
+    "old_status": 405,
+    "new_status": 400,
+    "old_verdict": "warn",
+    "new_verdict": "pass"
+  },
+  {
+    "path": "/api/character/party/exclude",
+    "method": "POST",
+    "old_status": 405,
+    "new_status": 400,
+    "old_verdict": "warn",
+    "new_verdict": "pass"
+  },
+  {
+    "path": "/api/character/party/discharge",
+    "method": "POST",
+    "old_status": 405,
+    "new_status": 400,
+    "old_verdict": "warn",
+    "new_verdict": "pass"
+  },
+  {
+    "path": "/api/character/party/withdraw",
+    "method": "POST",
+    "old_status": 405,
+    "new_status": 400,
+    "old_verdict": "warn",
+    "new_verdict": "pass"
+  }
+]

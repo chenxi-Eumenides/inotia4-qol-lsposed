@@ -1,0 +1,4 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1790246797.360340 1769499 adb_install.cpp:153] pm command: 'package install -r -S 57239055'
+Performing Streamed Install
+Success

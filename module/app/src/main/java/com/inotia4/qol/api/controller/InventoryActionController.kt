@@ -1,17 +1,15 @@
 package com.inotia4.qol.api.controller
 
-import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
-import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.annotation.PathVariable
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RestController
 import com.yanzhenjie.andserver.http.StatusCode
-import org.json.JSONObject
 
-// controller: 路由层，业务走 ApiServices。路径首段必须静态（AndServer 处理器约束，architecture §3）
+// 写请求先保留兼容校验，再由 NativeHttpCommand 透传给领域 owner。
 @RestController
 class InventoryActionController {
 
@@ -21,14 +19,14 @@ class InventoryActionController {
         val bag = o.optInt("bag", -1)
         val slot = o.optInt("slot", -1)
         if (bag < 0 || slot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot required")
-        return ControllerGuard.guard { ApiServices.action.useItem(bag, slot) }
+        return NativeHttpCommand.post("/api/item/inventory/use_item", body)
     }
 
     @PostMapping("/api/item/inventory/accept_dice")
-    fun diceAccept(): String = ControllerGuard.guard { ApiServices.action.diceAccept() }
+    fun diceAccept(): String = NativeHttpCommand.post("/api/item/inventory/accept_dice", "{}")
 
     @PostMapping("/api/item/inventory/reject_dice")
-    fun diceReject(): String = ControllerGuard.guard { ApiServices.action.diceReject() }
+    fun diceReject(): String = NativeHttpCommand.post("/api/item/inventory/reject_dice", "{}")
 
     @PostMapping("/api/item/inventory/discard_item")
     fun discard(@RequestBody body: String): String {
@@ -36,7 +34,7 @@ class InventoryActionController {
         val bag = o.optInt("bag", -1)
         val slot = o.optInt("slot", -1)
         if (bag < 0 || slot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot required")
-        return ControllerGuard.guard { ApiServices.action.discardItem(bag, slot) }
+        return NativeHttpCommand.post("/api/item/inventory/discard_item", body)
     }
 
     @PostMapping("/api/item/inventory/sell_item")
@@ -45,7 +43,7 @@ class InventoryActionController {
         val bag = o.optInt("bag", -1)
         val slot = o.optInt("slot", -1)
         if (bag < 0 || slot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot required")
-        return ControllerGuard.guard { ApiServices.action.sellItem(bag, slot) }
+        return NativeHttpCommand.post("/api/item/inventory/sell_item", body)
     }
 
     @PostMapping("/api/item/inventory/move_item")
@@ -58,7 +56,7 @@ class InventoryActionController {
         val toSlot = o.optInt("to_slot", -1)
         if (bag < 0 || bag > 10 || slot < 0 || count <= 0 || toBag < 0 || toBag > 10 || toSlot < -1)
             throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)")
-        return ControllerGuard.guard { ApiServices.action.moveItem(bag, slot, count, toBag, toSlot) }
+        return NativeHttpCommand.post("/api/item/inventory/move_item", body)
     }
 
     @PostMapping("/api/item/inventory/{role}/put_jewel")
@@ -69,7 +67,7 @@ class InventoryActionController {
         val equipSlot = o.optInt("equip_slot", -1)
         if (bag < 0 || slot < 0 || equipSlot < 0)
             throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot/equip_slot required")
-        return ControllerGuard.guard { ApiServices.action.jewel(role, bag, slot, equipSlot) }
+        return NativeHttpCommand.post("/api/item/inventory/$role/put_jewel", body)
     }
 
     @PostMapping("/api/item/inventory/{role}/enchant")
@@ -80,7 +78,7 @@ class InventoryActionController {
         val equipSlot = o.optInt("equip_slot", -1)
         if (bag < 0 || slot < 0 || equipSlot < 0)
             throw ApiException(StatusCode.SC_BAD_REQUEST, "bag/slot/equip_slot required")
-        return ControllerGuard.guard { ApiServices.action.enchant(role, bag, slot, equipSlot) }
+        return NativeHttpCommand.post("/api/item/inventory/$role/enchant", body)
     }
 
     @PostMapping("/api/item/inventory/{role}/equip_item")
@@ -90,9 +88,9 @@ class InventoryActionController {
         val slot = o.optInt("slot", -1)
         val category = o.optInt("category", -1)
         return if (category >= 0) {
-            ControllerGuard.guard { ApiServices.action.equipByCategory(role, category) }
+            NativeHttpCommand.post("/api/item/inventory/$role/equip_item", body)
         } else if (bag >= 0 && slot >= 0) {
-            ControllerGuard.guard { ApiServices.action.equip(role, bag, slot) }
+            NativeHttpCommand.post("/api/item/inventory/$role/equip_item", body)
         } else {
             throw ApiException(StatusCode.SC_BAD_REQUEST, "bag+slot or category required")
         }
@@ -103,6 +101,6 @@ class InventoryActionController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val slot = o.optInt("slot", -1)
         if (slot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot required")
-        return ControllerGuard.guard { ApiServices.action.unequip(role, slot) }
+        return NativeHttpCommand.post("/api/item/inventory/$role/unequip_item", body)
     }
 }

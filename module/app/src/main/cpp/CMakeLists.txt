@@ -234,6 +234,8 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/world_write_port.cpp
     game/adapter_ports/choice_write_port.cpp
     game/adapter_ports/ui_write_port.cpp
+    game/adapter_ports/item_write_port.cpp
+    game/adapter_ports/character_write_port.cpp
     game/adapter_ports/item_count_facade.cpp
 )
 

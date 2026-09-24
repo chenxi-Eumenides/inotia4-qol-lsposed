@@ -1,7 +1,10 @@
 #include "json_slice.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <string>
 
 namespace qol::features::core_character {
 namespace {
@@ -116,6 +119,8 @@ bool json_member(const char* json, uint32_t size, const char* key, JsonSlice* ou
     skip_ws(json, size, &cursor);
     if (cursor < size && json[cursor] == '}') return false;
     const uint32_t key_length = static_cast<uint32_t>(std::strlen(key));
+    JsonSlice last_value{};
+    bool found = false;
     while (cursor < size) {
         if (json[cursor] != '"') return false;
         const uint32_t key_start = cursor + 1;
@@ -129,9 +134,9 @@ bool json_member(const char* json, uint32_t size, const char* key, JsonSlice* ou
         if (!skip_value(json, size, &cursor)) return false;
         if (key_end - key_start == key_length &&
             std::strncmp(json + key_start, key, key_length) == 0) {
-            out->data = json + value_start;
-            out->size = cursor - value_start;
-            return true;
+            last_value.data = json + value_start;
+            last_value.size = cursor - value_start;
+            found = true;
         }
         skip_ws(json, size, &cursor);
         if (cursor < size && json[cursor] == ',') {
@@ -141,7 +146,8 @@ bool json_member(const char* json, uint32_t size, const char* key, JsonSlice* ou
         }
         break;
     }
-    return false;
+    if (found) *out = last_value;
+    return found;
 }
 
 bool json_element(const char* json, uint32_t size, int32_t index, JsonSlice* out) {
@@ -205,16 +211,33 @@ bool json_array_size(const char* json, uint32_t size, int32_t* out) {
 
 bool json_int_member(const char* json, uint32_t size, const char* key, long long* out) {
     JsonSlice value{};
-    if (!json_member(json, size, key, &value) || value.size == 0 || value.size >= 32) {
-        return false;
+    if (!json_member(json, size, key, &value) || value.size == 0) return false;
+    std::string number(value.data, value.size);
+    if (value.data[0] == '"') {
+        if (value.size < 2 || value.data[value.size - 1] != '"') return false;
+        number = std::string(value.data + 1, value.size - 2);
     }
-    char buffer[32];
-    std::memcpy(buffer, value.data, value.size);
-    buffer[value.size] = '\0';
+    size_t begin = 0;
+    size_t end_index = number.size();
+    while (begin < end_index && static_cast<unsigned char>(number[begin]) <= 0x20) ++begin;
+    while (end_index > begin && static_cast<unsigned char>(number[end_index - 1]) <= 0x20) {
+        --end_index;
+    }
+    if (begin == end_index) return false;
+    const std::string trimmed = number.substr(begin, end_index - begin);
     char* end = nullptr;
-    const long long parsed = std::strtoll(buffer, &end, 10);
-    if (end == buffer) return false;
-    *out = parsed;
+    const double parsed = std::strtod(trimmed.c_str(), &end);
+    if (end == trimmed.c_str() || *end != '\0') return false;
+    int32_t narrowed = 0;
+    if (std::isnan(parsed)) narrowed = 0;
+    else if (parsed <= static_cast<double>(std::numeric_limits<int32_t>::min())) {
+        narrowed = std::numeric_limits<int32_t>::min();
+    } else if (parsed >= static_cast<double>(std::numeric_limits<int32_t>::max())) {
+        narrowed = std::numeric_limits<int32_t>::max();
+    } else {
+        narrowed = static_cast<int32_t>(parsed);
+    }
+    *out = narrowed;
     return true;
 }
 

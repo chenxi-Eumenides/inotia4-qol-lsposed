@@ -1,0 +1,12 @@
+REQUEST POST /api/item/inventory/move_item restore footwear body={"bag":0,"slot":3,"count":1,"to_bag":0,"to_slot":4}
+HTTP/1.1 200 OK
+Content-Length: 23
+Access-Control-Allow-Origin: *
+Connection: keep-alive
+Content-Type: text/plain;charset=UTF-8
+Date: Thu, 24 Sep 2026 11:05:38 GMT
+Keep-Alive: timeout=4
+Proxy-Connection: keep-alive
+Server: AndServer/2.1.12
+
+{"ok":true,"ticket":54}

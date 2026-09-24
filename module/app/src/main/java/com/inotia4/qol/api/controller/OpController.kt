@@ -2,7 +2,6 @@ package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
-import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
@@ -32,7 +31,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val points = o.optInt("points", -1)
         if (points < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "points required")
-        return ControllerGuard.guard { ApiServices.op.setStatusPoint(role, points) }
+        return NativeHttpCommand.post("/api/op/character/$role/status-point", body)
     }
 
     @PostMapping("/api/op/character/{role}/skill-point")
@@ -50,7 +49,7 @@ class OpController {
         val a = o.optInt("a", -1)
         val b = o.optInt("b", -1)
         if (a < 0 || b < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "a and b required")
-        return ControllerGuard.guard { ApiServices.op.partySwap(a, b) }
+        return NativeHttpCommand.post("/api/op/party/swap", body)
     }
 
     @PostMapping("/api/op/inventory/set-slot")
@@ -64,7 +63,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val m = o.optLong("money", -1)
         if (m < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "money required")
-        return ControllerGuard.guard { ApiServices.op.setMoney(m) }
+        return NativeHttpCommand.post("/api/op/inventory/money", body)
     }
 
     @PostMapping("/api/op/craft/mix-direct")
@@ -107,7 +106,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val hp = o.optInt("hp", -1)
         if (hp < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "hp required")
-        return ControllerGuard.guard { ApiServices.op.setHp(role, hp) }
+        return NativeHttpCommand.post("/api/op/character/$role/hp", body)
     }
 
     @PostMapping("/api/op/character/{role}/mp")
@@ -115,7 +114,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val mp = o.optInt("mp", -1)
         if (mp < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "mp required")
-        return ControllerGuard.guard { ApiServices.op.setMp(role, mp) }
+        return NativeHttpCommand.post("/api/op/character/$role/mp", body)
     }
 
     @PostMapping("/api/op/character/{role}/experience")
@@ -123,7 +122,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val exp = o.optLong("exp", -1)
         if (exp < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "exp required")
-        return ControllerGuard.guard { ApiServices.op.setExperience(role, exp) }
+        return NativeHttpCommand.post("/api/op/character/$role/experience", body)
     }
 
     @PostMapping("/api/op/character/{role}/level")
@@ -133,7 +132,7 @@ class OpController {
         val level = o.optInt("level", 0)
         val force = o.optBoolean("force", false)
         if (!force && (level < 1 || level > 105)) throw ApiException(StatusCode.SC_BAD_REQUEST, "level 1-105 (game max); force=true 跳过限制")
-        return ControllerGuard.guard { ApiServices.op.setLevel(role, level, force) }
+        return NativeHttpCommand.post("/api/op/character/$role/level", body)
     }
 
     @PostMapping("/api/op/character/{role}/set_attr")
@@ -156,7 +155,7 @@ class OpController {
             pairs.add(idx to v)
         }
         if (pairs.isEmpty()) throw ApiException(StatusCode.SC_BAD_REQUEST, "stats empty")
-        return ControllerGuard.guard { ApiServices.op.setAttr(role, pairs) }
+        return NativeHttpCommand.post("/api/op/character/$role/set_attr", body)
     }
 
     @PostMapping("/api/op/inventory/add")
@@ -171,6 +170,6 @@ class OpController {
         val enhanceRemaining = o.optInt("enhanceRemaining", 0)
         // rarity 可选（缺省 -1 保留随机）：品质档位 0..4 白绿蓝黄紫，钳制在 native 侧
         val rarity = o.optInt("rarity", -1)
-        return ControllerGuard.guard { ApiServices.op.addItem(category, count, socket, enhanceRemaining, rarity) }
+        return NativeHttpCommand.post("/api/op/inventory/add", body)
     }
 }
