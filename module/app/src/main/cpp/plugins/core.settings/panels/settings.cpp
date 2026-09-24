@@ -2,10 +2,9 @@
 
 #include "../../../contracts/panels.h"
 #include "../../../contracts/ui.h"
-#include "plugins/core.ui/log.h"
+#include "log.h"
 #include "rules.h"
 #include "settings_ui_local.h"
-#include "stack.h"
 
 #include <atomic>
 #include <cstdint>
@@ -346,7 +345,7 @@ std::string data_settings_ui_restore() {
 }
 
 std::string data_settings_ui_open_panel() {
-    if (ui_panels_open("settings")) return result_ok();
+    if (settings_panels_open("settings")) return result_ok();
     return result_error("state not injected");
 }
 

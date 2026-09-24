@@ -13,7 +13,7 @@
 
 #include "contracts/panels.h"
 #include "contracts/host_sdk.h"
-#include "plugins/core.ui/panels/rules.h"
+#include "plugins/core.settings/panels/rules.h"
 #include "plugins/core.ui/panels/stack.h"
 
 using qol::contracts::PanelItemKind;

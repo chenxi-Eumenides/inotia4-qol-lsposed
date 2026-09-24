@@ -232,7 +232,7 @@ void settings_savebackup_clicked(void* ctrl) {
     SETTINGS_LOG("settings savebackup button clicked");
     // 嵌套 push：保持设置页在栈中第 N 位；备份面板成为新栈顶；关闭备份面板后回到设置页。
     // 栈的「关栈顶再开」兜底由 core.ui 面板栈统一承担（原 settings_ui_close_panel 直调已删除）。
-    if (!ui_panels_open("save_backup")) {
+    if (!settings_panels_open("save_backup")) {
         SETTINGS_LOG("savebackup open failed");
     }
 }

@@ -21,6 +21,10 @@ namespace qol::features::core_ui {
 
 void settings_bind_sdk(const contracts::QolHostSdk* sdk);
 
+// 打开面板的本地薄入口：经必需能力 `ui_panels` 调用（ADR 0001 D2：能力 ID/版本不变，
+// 只迁提供者），设置页因此不直接依赖框架实现。实现见 feature.cpp。
+bool settings_panels_open(const char* panel_id);
+
 // ---- JNI / 调试端点（原 data_settings_ui_*，名与签名保持）----
 std::string data_settings_ui_inject();
 std::string data_settings_ui_status_json();

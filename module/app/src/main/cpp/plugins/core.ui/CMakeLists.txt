@@ -1,9 +1,6 @@
 add_library(qol_plugin_core.ui STATIC
-    feature.cpp
     plugin.cpp
     ui_components.cpp
-    panels/settings.cpp
-    panels/settings_ui_local.cpp
     panels/stack.cpp
 )
 

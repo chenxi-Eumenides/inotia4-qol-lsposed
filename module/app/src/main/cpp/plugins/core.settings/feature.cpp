@@ -4,10 +4,9 @@
 #include <cstdint>
 
 #include "../../contracts/panels.h"
+#include "../../contracts/ui.h"
 #include "panels/settings.h"
 #include "panels/settings_ui_local.h"
-#include "panels/stack.h"
-#include "ui_components.h"
 
 namespace qol::features::core_ui {
 namespace {
@@ -15,6 +14,8 @@ namespace {
 std::atomic<bool> g_enabled{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
 uint64_t g_frame_task = 0;
+const contracts::UiPanelsApi* g_panels_api = nullptr;
+const contracts::QolUiComponents* g_components_api = nullptr;
 
 // 主线程帧任务：替代原后台轮询线程，推进「更多游戏」按钮绑定/重绑定。
 int32_t frame_tick(int64_t frame, void* ctx) {
@@ -53,10 +54,30 @@ const contracts::PanelItemSpec kSaveBackupItem = {
 void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
     g_sdk = sdk;
     settings_bind_sdk(sdk);
-    // 设置页自持 helper 的依赖注入：宿主 UI 适配表 + 本插件的组件能力实现
-    //（抽出 core.settings 后改为组件能力经 require 取得，调用点不变）。
-    settings_ui_bind(sdk != nullptr ? sdk->ui : nullptr, ui_components_api());
-    ui_panels_bind_sdk(sdk);
+    // 依赖一律经能力取得（ADR 0001 D2）：能力 ID 与版本保持原样，改的只是提供者。
+    g_panels_api = nullptr;
+    g_components_api = nullptr;
+    if (sdk != nullptr && sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        if (contracts::succeeded(sdk->capabilities.require(
+                contracts::kUiPanelsCapabilityId,
+                {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface))) {
+            g_panels_api = static_cast<const contracts::UiPanelsApi*>(iface);
+        }
+        iface = nullptr;
+        if (contracts::succeeded(sdk->capabilities.require(
+                contracts::kUiComponentsCapabilityId,
+                {contracts::kUiContractMajor, contracts::kUiContractMinor}, &iface))) {
+            g_components_api = static_cast<const contracts::QolUiComponents*>(iface);
+        }
+    }
+    // 设置页自持 helper 的依赖注入：宿主 UI 适配表 + 组件能力（不再引用框架实现）。
+    settings_ui_bind(sdk != nullptr ? sdk->ui : nullptr, g_components_api);
+}
+
+bool settings_panels_open(const char* panel_id) {
+    if (g_panels_api == nullptr || g_panels_api->open == nullptr) return false;
+    return g_panels_api->open(panel_id);
 }
 
 bool plugin_enabled() {

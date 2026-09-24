@@ -18,7 +18,7 @@ void more_games_clicked(void* ctrl) {
     (void)ctrl;
     SETTINGS_LOG("more games clicked -> open settings panel");
     // 经面板栈统一打开：记录栈位并复用「关栈顶再开」兜底。
-    if (!ui_panels_open("settings")) {
+    if (!settings_panels_open("settings")) {
         SETTINGS_LOG("settings panel open failed from more games button");
     }
 }

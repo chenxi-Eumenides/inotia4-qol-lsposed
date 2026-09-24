@@ -12,6 +12,7 @@
 #include "plugins/attribute_quality/plugin.h"
 #include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
+#include "plugins/core.settings/plugin.h"
 #include "plugins/core.ui/plugin.h"
 #include "plugins/core.api/plugin.h"
 #include "plugins/craft_ui/plugin.h"
@@ -83,6 +84,7 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::attribute_range_display::plugin_descriptor,
     &features::autosell::plugin_descriptor,
     &features::core_api::plugin_descriptor,
+    &features::core_settings::plugin_descriptor,
     &features::core_ui::plugin_descriptor,
     &features::craft_ui::plugin_descriptor,
     &features::custom_recipe::plugin_descriptor,
