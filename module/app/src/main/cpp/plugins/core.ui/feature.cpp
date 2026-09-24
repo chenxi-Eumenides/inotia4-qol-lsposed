@@ -5,7 +5,9 @@
 
 #include "../../contracts/panels.h"
 #include "panels/settings.h"
+#include "panels/settings_ui_local.h"
 #include "panels/stack.h"
+#include "ui_components.h"
 
 namespace qol::features::core_ui {
 namespace {
@@ -51,6 +53,9 @@ const contracts::PanelItemSpec kSaveBackupItem = {
 void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
     g_sdk = sdk;
     settings_bind_sdk(sdk);
+    // 设置页自持 helper 的依赖注入：宿主 UI 适配表 + 本插件的组件能力实现
+    //（抽出 core.settings 后改为组件能力经 require 取得，调用点不变）。
+    settings_ui_bind(sdk != nullptr ? sdk->ui : nullptr, ui_components_api());
     ui_panels_bind_sdk(sdk);
 }
 
@@ -89,6 +94,7 @@ void panels_unregister() {
         g_frame_task = 0;
     }
     settings_release_more_games();
+    settings_ui_unbind();
     g_enabled.store(false, std::memory_order_release);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
         (void)g_sdk->panels.unregister_owner("core.ui");

@@ -4,8 +4,8 @@
 #include "../../../contracts/ui.h"
 #include "plugins/core.ui/log.h"
 #include "rules.h"
+#include "settings_ui_local.h"
 #include "stack.h"
-#include "plugins/core.ui/ui_components.h"
 
 #include <atomic>
 #include <cstdint>
