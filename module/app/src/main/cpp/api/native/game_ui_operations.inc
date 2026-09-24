@@ -53,6 +53,38 @@ std::string data_op_main_menu() {
     }
     return result;
 }
+
+// go_main_menu 的 owner 命令路径（ADR 0001 第 4 批）：面板守卫、扩展背包清理与状态机切换
+// 与 data_op_main_menu 完全一致，唯一差别是把跨帧同步的 transition_run 换成逻辑帧内联执行
+// —— owner 命令本身就在逻辑帧排空，再调会阻塞等待的 transition_run 会自阻塞超时。
+std::string data_op_main_menu_direct() {
+    if (!game_in_world()) return op_err("not in game");
+    if (fn_gamestate_set_state == nullptr || fn_ui_set_popup_process_info == nullptr) {
+        return op_err("symbol not resolved");
+    }
+    if (g_base == 0 || g_popup_stack == nullptr) return op_err("libgame not ready");
+    const uintptr_t top_vma = data_popup_top_vma();
+    if (top_vma != 0) {
+        if (!popup_vma_is_panel(top_vma)) return op_err("ui occupied: close current dialog first");
+        fn_ui_set_popup_process_info(3, 0);
+        uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+        if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+        if (!wait_for_popup_stack_empty()) return op_err("panel close pending");
+    }
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->prepare_main_menu != nullptr && !eb->prepare_main_menu()) {
+        return op_err("extension bag cleanup failed; main menu transition blocked");
+    }
+    std::string result;
+    if (!transition_run_inline([](std::string* out) {
+            fn_gamestate_set_state(4);
+            *out = op_ok();
+        }, &result)) {
+        return op_err(result.c_str());
+    }
+    return result;
+}
+
 std::string data_op_panel_close() {
     if (!game_in_world()) return op_err("not in game");
     if (fn_ui_set_popup_process_info == nullptr) return op_err("symbol not resolved");

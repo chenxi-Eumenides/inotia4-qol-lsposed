@@ -1462,9 +1462,10 @@
       "elapsed": 0.124,
       "ok": true,
       "verdict": "pass",
-      "reason": "运行时:回主菜单",
-      "body": "{\"ok\":true,\"state\":{\"error\":\"not in game\"}}",
-      "error": null
+      "reason": "运行时:回主菜单（票据契约；原结果经 /api/system/tickets/{id} 回取）",
+      "body": "{\"ok\":true,\"ticket\":<id>}",
+      "error": null,
+      "note": "ADR 0001 第 4 批：owner 迁 core.ui_state，路径/方法不变；响应改为票据，verdict 仍按状态码判定"
     },
     {
       "path": "/api/ui/close_panel",

@@ -895,6 +895,7 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
     if (out_size != nullptr) *out_size = 0;
     if (out == nullptr || out_size == nullptr) return kUiWriteFailed;
     std::string op;
+    bool state_is_player = false;
     switch (kind) {
         case contracts::kQolUiWritePanelOpen:
             op = data_op_panel_open(panel != nullptr ? std::string(panel) : std::string());
@@ -902,13 +903,19 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
         case contracts::kQolUiWritePanelClose:
             op = data_op_panel_close();
             break;
+        case contracts::kQolUiWriteMainMenu:
+            // owner 命令路径：同守卫与清理，状态机切换走逻辑帧内联（不跨帧同步等待）。
+            op = data_op_main_menu_direct();
+            state_is_player = true;
+            break;
         default:
             return kUiWriteFailed;
     }
     const bool ok = op.find("\"ok\":false") == std::string::npos;
     std::string body = op;
     if (ok && !op.empty() && op.back() == '}') {
-        body = op.substr(0, op.size() - 1) + ",\"state\":" + data_gamestate_json() + "}";
+        body = op.substr(0, op.size() - 1) + ",\"state\":" +
+               (state_is_player ? build_player_json() : data_gamestate_json()) + "}";
     }
     if (body.size() > capacity) return kUiWriteFailed;
     std::memcpy(out, body.data(), body.size());

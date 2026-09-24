@@ -1335,9 +1335,11 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：`{"ok":true,"ticket":N}`（owner 命令 + 票据契约，ADR 0001 第 4 批；owner 为 `core.ui_state`，路径与 POST 方法不变）
 
-**注意**：非 world→`not in game`。**UI 守卫（2026-09-14）**：栈顶是面板时模块先走官方 Pop 关闭并等栈清空再切换；栈顶是非面板弹窗（对话/剧情/数量输入等脚本态）→ `ui occupied: close current dialog first`（fail-closed，不由模块代关）；面板关闭未完成→`panel close pending`。带面板直接切换会触发游戏 `ControlItem_Draw(NULL)` 崩溃，故必须走守卫。
+**结果回取**：经 `GET /api/system/tickets/{id}` 的 `result` 取原响应 `{"ok":true,"state":<Player 模型>}`（失败时为原错误体，如 `not in game`）。
+
+**注意**：非 world→票据结果 `not in game`。**UI 守卫（2026-09-14）**：栈顶是面板时模块先走官方 Pop 关闭并等栈清空再切换；栈顶是非面板弹窗（对话/剧情/数量输入等脚本态）→ `ui occupied: close current dialog first`（fail-closed，不由模块代关）；面板关闭未完成→`panel close pending`。带面板直接切换会触发游戏 `ControlItem_Draw(NULL)` 崩溃，故必须走守卫。命令在主线程逻辑帧内联执行切换（不得改用会跨帧同步等待的 `transition_run`，否则自阻塞超时）。
 
 #### 打开面板
 
@@ -1347,7 +1349,7 @@
 
 **请求格式**：`{ "panel": "inventory" }`（v0.5.42 起兼容裸名与 `panel_` 前缀，如 `"panel_inventory"`，与 screen 输出对称）
 
-**返回格式**：`{"ok":true,"state":<GameState 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<GameState 模型>}`，失败为原 op 错误体。
 
 **注意**：面板白名单（character_info/choice/inventory/mercenary/quests/settings/skills/wipeout/world_map）真机验证；需游戏内上下文的面板→`panel requires in-game context`。
 
@@ -1359,7 +1361,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<GameState 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<GameState 模型>}`，失败为原 op 错误体。
 ---
 
 ## 七、system（系统与会话）— GET/POST /api/system/*
@@ -1825,6 +1827,7 @@
 - `POST /api/quest/quit_quest`（阶段 5 批 5-3；owner `quest`）。缺/负 `quest_id` → 400 `questId required`（投递前校验，与迁移前一致）；成功 `{"ok":true,"ticket":N}`，`result` 为 `{"ok":true,"state":<Player>}`；无任务 → 票据 `state=failed` 且 `result={"ok":false,"error":"quest not found"}`。
 - 对话写 2 条（阶段 5 批 5-7a 迁移；批 5-8a 起 owner 为 `core.ui_state`）：`/api/ui/dialog/select`、`/api/ui/start_interact`。`dialog/select` 缺 `action` 且 `index<0` → 400 `action or index required`（投递前校验，与迁移前一致）；非法 body → 400 `bad request`。原响应为**原始 op JSON**（如成功 `{"ok":true,"result":"dialog_shown"}`、无对话 `{"ok":false,"error":"no dialog"}`），经票据 `result` 回取。**同意页（Java 窗口）分支仍留在 Kotlin 传输层**（`UiActivityTracker` 平台检测，JVM-only）：该分支不经票据，直接返回 `{"ok":true,"result":"close_dispatched"}` 或 `agreement window unavailable` / `no such option in agreement`。
 - 面板写 2 条（阶段 5 批 5-8a 并入 `core.ui_state`）：`/api/ui/open_panel`、`/api/ui/close_panel`。`open_panel` 缺 `panel` → 400 `panel required`（投递前校验，与迁移前一致）。原响应为 `{"ok":true,"state":<gamestate JSON>}`（同迁移前 `attachUi` 键序），经票据 `result` 回取；失败为原 op 错误体。**注意**：以 API 打开游戏面板会使游戏帧计数暂停，同进程后续命令（含 `close_panel`）要等面板关闭或帧恢复后才能执行。
+- 回主菜单 1 条（阶段 5 ADR 0001 第 4 批迁入 `core.ui_state`；路径与 POST 方法不变）：`/api/ui/go_main_menu`。无 body；原响应为 `{"ok":true,"state":<Player 模型>}`（失败为原错误体，如 `not in game`），经票据 `result` 回取。命令在主线程**逻辑帧内联**执行状态机切换（同 `data_op_main_menu` 的面板守卫与扩展背包清理），以保证不阻塞命令排空。`core.save` 继续负责进档/建档。
 
 **未实现占位路由**（阶段 5 批 5-6e 将 owner 归位到领域插件；业务仍未实现，调用方不应依赖）：
 - `POST /api/op/quest/accept`、`POST /api/op/quest/complete`（owner `core.quest`）→ 501 `not implemented`

@@ -163,6 +163,7 @@ struct UiWritePayload {
 
 constexpr int32_t kPanelOpenKind = contracts::kQolUiWritePanelOpen;
 constexpr int32_t kPanelCloseKind = contracts::kQolUiWritePanelClose;
+constexpr int32_t kMainMenuKind = contracts::kQolUiWriteMainMenu;
 
 const contracts::QolUiWritePort* g_ui_write = nullptr;
 
@@ -223,6 +224,8 @@ const contracts::HttpQueryHandlerDescriptor kWriteRoutes[] = {
      const_cast<int32_t*>(&kPanelOpenKind)},
     {contracts::HttpMethod::kPost, "/api/ui/close_panel", kPluginId, &ui_write_command,
      const_cast<int32_t*>(&kPanelCloseKind)},
+    {contracts::HttpMethod::kPost, "/api/ui/go_main_menu", kPluginId, &ui_write_command,
+     const_cast<int32_t*>(&kMainMenuKind)},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {

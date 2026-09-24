@@ -21,10 +21,10 @@ internal object SaveActions {
             NativeHttpCommand.post("/api/system/save", "{}")
         }
 
-    // 归 ui 域（/api/ui/go_main_menu），待 ui 批次一并迁移；本批保持原行为。
+    // 归 ui 域（/api/ui/go_main_menu）：owner core.ui_state 经票据契约执行（ADR 0001 第 4 批）。
     fun mainMenu(): String =
         LogFile.op(LogDomain.SAVE, "POST /api/ui/go_main_menu", emptyMap<String, String>()) {
-            ActionSupport.attachPlayer(NativeBridge.nativeOpMainMenu())
+            NativeHttpCommand.post("/api/ui/go_main_menu", "{}")
         }
 
     fun enterSlot(slot: Int): String =

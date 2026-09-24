@@ -12,5 +12,7 @@ const char* data_ui_screen();
 
 // UI 操作：主菜单/面板开关。
 std::string data_op_main_menu();
+// owner 命令路径（ADR 0001 第 4 批）：同守卫与清理，状态机切换走逻辑帧内联（不跨帧同步等待）。
+std::string data_op_main_menu_direct();
 std::string data_op_panel_close();
 std::string data_op_panel_open(const std::string& panel);
