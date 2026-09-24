@@ -24,7 +24,7 @@
 | POST | `/api/character/combat/{role}/cast_skill` | core.character | 0 | 1 | CombatController.cast | `NativeHttpCommand.post`（保留 Kotlin 校验） | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kCastSkill`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Party>}` |
 | POST | `/api/character/combat/{role}/attack_target` | core.character | 0 | 1 | CombatController.attack | `NativeHttpCommand.post`（保留 Kotlin 校验） | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kAttackTarget`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Party>}` |
 | POST | `/api/character/combat/{role}/stop_combat` | core.character | 0 | 1 | CombatController.stop | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kStopCombat`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Player>}` |
-| GET | `/api/config/list` | module.config | 0 | 1 | ConfigController.list | — | — | — | `ModuleConfig.toJson()`（纯 Kotlin） |
+| GET | `/api/config/list` | core.settings | 0 | 1 | ConfigController.list | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.settings/plugin.cpp` | —（native infra/config 配置快照，原样透传） |
 | POST | `/api/config/set` | module.config | 0 | 1 | ConfigController.set | `ConfigApiService.applyOnChange` | `nativeSetStackLimitEnabled`, `nativeSetMoveMergeEnabled`, `nativeSetExtensionBagEnabled`, `nativeSetCustomRecipeEnabled`, `nativeSetAutoSellEnabled`, `nativeSetApiEnabled`, `nativeSetSimpleModeEnabled`, `nativeSetPushAllEnabled`, `nativeQolLogSetDebugEnabled` | `bridge/native/gamebridge_domain_operations.cpp`; `bridge/native/gamebridge_autosell.cpp`; `bridge/native/gamebridge.cpp` | `ModuleConfig` JSON + 配置变更结果 |
 | GET | `/api/world/map/id` | api.world | 0 | 1 | CurrentMapController.id | `InfoApiServiceCore.currentMapId` → `InfoMapQueries.id` | `nativeGetMapJson` | `core/native/game_cache.cpp` | `StaticData` 地图名 |
 | GET | `/api/world/map/exits` | api.world | 0 | 1 | CurrentMapController.exits | `InfoApiServiceCore.currentMapExits` → `InfoMapQueries.exits` | `nativeGetMapJson` | `core/native/game_cache.cpp` | `StaticData.mapExits` |
@@ -159,9 +159,9 @@
 ## 汇总
 
 - 路由总数：**143**。
-- owner 计数以 `routes.inc` 为准：`api.item=0`、`api.character=0`、`core.item=21`、`core.character=42`、`core.api=6`、`core.world=12`、`core.quest=8`、`core.save=3`、`save_backup=4`、`core.system=5`、`core.settings=5`、`core.ui_state=9`、`core.craft=1`、`extension_bag=8`、`autosell=2`、`legacy.debug=3`、`static.data=12`、`module.config=2`；`core.custom_ui` 与 `api.ui` 当前均为 0。`core.item` 的 21 条含本批 13 条写路由；`core.character` 的 42 条含本批 21 条写路由及既有角色读面/写面。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
+- owner 计数以 `routes.inc` 为准：`api.item=0`、`api.character=0`、`core.item=21`、`core.character=42`、`core.api=6`、`core.world=12`、`core.quest=8`、`core.save=3`、`save_backup=4`、`core.system=5`、`core.settings=6`、`core.ui_state=9`、`core.craft=1`、`extension_bag=8`、`autosell=2`、`legacy.debug=3`、`static.data=12`、`module.config=1`；`core.custom_ui` 与 `api.ui` 当前均为 0。`core.item` 的 21 条含本批 13 条写路由；`core.character` 的 42 条含本批 21 条写路由及既有角色读面/写面。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
 - 含加工响应：**87**（列中标注 `StaticData`/名称注入/字段重排、`UiActivityTracker` 或 `state`/配置 envelope 拼装的路由）。
-- 无 native 实现（纯 Kotlin）：**26**（配置读取、静态数据读取、占位端点与未实现 quest id；`/api/config/set` 不计入此项，因为它会经 `ConfigApiService` 下发 native 配置）。
+- 无 native 实现（纯 Kotlin）：**25**（静态数据读取、占位端点与未实现 quest id；`/api/config/set` 仍由 Kotlin 处理并经 `ConfigApiService` 下发 native 配置）。
 
 ## 三源口径说明
 

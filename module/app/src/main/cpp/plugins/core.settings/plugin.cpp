@@ -16,6 +16,9 @@ namespace {
 
 constexpr const char* kPluginId = "core.settings";
 constexpr const char* kPluginVersion = "0.1.0";
+constexpr uint32_t kConfigResponseCapacity = 8192;
+constexpr uint32_t kConfigStringCapacity = 4096;
+const contracts::QolHostSdk* g_sdk = nullptr;
 
 // 设置页只消费工具能力，不提供能力（ADR 0001 D2：能力 ID/版本保持原样，改的只是提供者）。
 const contracts::CapabilityRequirement kRequires[] = {
@@ -33,6 +36,122 @@ const contracts::CapabilityRequirement kRequires[] = {
 const contracts::OwnershipOps kSettingsOwnershipOps{
     &core_ui::settings_popup_acquire,
     &core_ui::settings_popup_release,
+};
+
+void append_json_string(std::string& out, const char* value) {
+    out.push_back('"');
+    for (const unsigned char ch : std::string(value == nullptr ? "" : value)) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    static constexpr char kHex[] = "0123456789abcdef";
+                    out += "\\u00";
+                    out += kHex[ch >> 4];
+                    out += kHex[ch & 0x0f];
+                } else {
+                    out.push_back(static_cast<char>(ch));
+                }
+                break;
+        }
+    }
+    out.push_back('"');
+}
+
+QolResult config_list_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
+    if (response == nullptr || response->body == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid response", 16);
+    }
+    // get_string 自 Host SDK minor 10 起提供；消费前按 abi.minor 协商。
+    if (g_sdk == nullptr || g_sdk->abi.minor < 10 || g_sdk->config.get_string == nullptr ||
+        g_sdk->config.get_i32 == nullptr || g_sdk->config.get_bool == nullptr) {
+        return contracts::error(kQolErrNotReady, "configuration unavailable", 26);
+    }
+    char address[kConfigStringCapacity]{};
+    uint32_t address_size = 0;
+    int32_t port = 8088;
+    if (!contracts::succeeded(g_sdk->config.get_string("listenAddress", "0.0.0.0", address,
+                                                        sizeof(address), &address_size)) ||
+        address_size >= sizeof(address) ||
+        !contracts::succeeded(g_sdk->config.get_i32("listenPort", 8088, &port))) {
+        return contracts::error(kQolErrNotReady, "configuration unavailable", 26);
+    }
+    auto get_bool = [](const char* key, bool fallback, bool* out) {
+        if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr || out == nullptr) return false;
+        int32_t value = fallback ? 1 : 0;
+        if (!contracts::succeeded(g_sdk->config.get_bool(key, value, &value))) return false;
+        *out = value != 0;
+        return true;
+    };
+    bool stack_limit = false;
+    bool move_merge = false;
+    bool op_enabled = false;
+    bool extension_bag = true;
+    bool custom_recipe = false;
+    bool simple_mode = false;
+    bool push_all = false;
+    bool auto_sell = false;
+    bool api_enabled = true;
+    bool debug_log = false;
+    if (!get_bool("stackLimitIncrease", false, &stack_limit) ||
+        !get_bool("moveMergeEnabled", false, &move_merge) ||
+        !get_bool("opEnabled", false, &op_enabled) ||
+        !get_bool("extensionBagEnabled", true, &extension_bag) ||
+        !get_bool("customRecipeEnabled", false, &custom_recipe) ||
+        !get_bool("simpleModeEnabled", false, &simple_mode) ||
+        !get_bool("pushAllEnabled", false, &push_all) ||
+        !get_bool("autoSellEnabled", false, &auto_sell) ||
+        !get_bool("apiEnabled", true, &api_enabled) ||
+        !get_bool("debugLogEnabled", false, &debug_log)) {
+        return contracts::error(kQolErrNotReady, "configuration unavailable", 26);
+    }
+    std::string body = "{\"listenAddress\":";
+    append_json_string(body, address);
+    body += ",\"listenPort\":" + std::to_string(port);
+    body += ",\"stackLimitIncrease\":";
+    body += stack_limit ? "true" : "false";
+    body += ",\"moveMergeEnabled\":";
+    body += move_merge ? "true" : "false";
+    body += ",\"opEnabled\":";
+    body += op_enabled ? "true" : "false";
+    body += ",\"extensionBagEnabled\":";
+    body += extension_bag ? "true" : "false";
+    body += ",\"customRecipeEnabled\":";
+    body += custom_recipe ? "true" : "false";
+    body += ",\"simpleModeEnabled\":";
+    body += simple_mode ? "true" : "false";
+    body += ",\"pushAllEnabled\":";
+    body += push_all ? "true" : "false";
+    body += ",\"autoSellEnabled\":";
+    body += auto_sell ? "true" : "false";
+    body += ",\"apiEnabled\":";
+    body += api_enabled ? "true" : "false";
+    body += ",\"debugLogEnabled\":";
+    body += debug_log ? "true" : "false";
+    body.push_back('}');
+    if (response->body_capacity < body.size() || body.size() > kConfigResponseCapacity) {
+        static constexpr char kError[] = "{\"ok\":false,\"error\":\"http response buffer too small\"}";
+        if (response->body_capacity >= sizeof(kError) - 1) {
+            std::memcpy(response->body, kError, sizeof(kError) - 1);
+            response->body_size = sizeof(kError) - 1;
+            response->status = 500;
+        }
+        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = 200;
+    return contracts::ok();
+}
+
+const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
+    {contracts::HttpMethod::kGet, "/api/config/list", kPluginId, &config_list_query, nullptr},
 };
 
 const contracts::ResourceClaim kResources[] = {
@@ -124,6 +243,7 @@ bool register_settings_ui_commands(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr) return 1;
+    g_sdk = ctx.sdk;
     core_ui::panels_bind_sdk(ctx.sdk);
     // install 只做自身初始化：注册设置页 provider + 存档备份动作项 + 按钮绑定帧任务。
     if (!core_ui::panels_register()) return 1;
@@ -138,6 +258,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         (void)ctx.sdk->http_dispatch.unregister_owner(kPluginId);
     }
     core_ui::panels_unregister();
+    g_sdk = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -171,6 +292,10 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     nullptr,         // on_resource_ready（kOwnership 无 backup）
+    nullptr,         // ports
+    0,               // port_count
+    kHttpQueries,
+    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
 };
 
 }  // namespace

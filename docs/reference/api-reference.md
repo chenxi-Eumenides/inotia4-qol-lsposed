@@ -1646,8 +1646,8 @@
 
 ### 7.6 模块配置 config（v0.5.22）
 
-> 模块级配置的读取与修改。配置为纯 Kotlin 层能力，**不走 ControllerGuard**——
-> native 未就绪时配置端点同样可用（如修改监听端口解决端口冲突）。
+> 模块级配置的读取与修改。`GET /api/config/list` 由 `core.settings` native owner 返回，配置修改仍由 Kotlin 处理；配置路由**不走 ControllerGuard**——
+> native 未就绪时 POST 配置处理仍可用（如修改监听端口解决端口冲突）。
 > **外部存储 `getExternalFilesDir(null)/config.json` 为唯一配置来源**（v0.5.21 起，
 > 与日志同目录，`/sdcard/Android/data/<游戏包>/files/config.json`，用户可见可编辑）：
 > - 外部文件存在 → 读取生效
@@ -1677,13 +1677,18 @@
   "stackLimitIncrease": false,
   "moveMergeEnabled": false,
   "opEnabled": false,
-  "autoSellEnabled": false,
+  "extensionBagEnabled": true,
+  "customRecipeEnabled": false,
   "simpleModeEnabled": false,
   "pushAllEnabled": false,
+  "autoSellEnabled": false,
   "apiEnabled": true,
   "debugLogEnabled": false
 }
 ```
+
+字段顺序固定如示例；`listenAddress` 为字符串、`listenPort` 为整数，其余字段为布尔值。
+配置值由 Kotlin 启动期及变更期同步到 native 配置存储后读取。
 
 #### 设置配置
 

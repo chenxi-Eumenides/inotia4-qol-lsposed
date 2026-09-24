@@ -14,7 +14,7 @@ QOL_HTTP_ROUTE(kPost, "/api/character/combat/switch_player", "core.character", 0
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/cast_skill", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/attack_target", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/stop_combat", "core.character", 0, 1)
-QOL_HTTP_ROUTE(kGet, "/api/config/list", "module.config", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/config/list", "core.settings", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/config/set", "module.config", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/world/map/id", "core.world", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/world/map/exits", "core.world", 0, 1)

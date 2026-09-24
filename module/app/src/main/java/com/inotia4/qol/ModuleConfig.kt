@@ -248,7 +248,7 @@ object ModuleConfig {
         return null
     }
 
-    /** 当前生效配置序列化（配置端点 GET 返回用） */
+    /** 当前生效配置序列化（配置变更响应与持久化回退用） */
     fun toJson(): JSONObject = JSONObject().apply {
         put("listenAddress", listenAddress)
         put("listenPort", listenPort)

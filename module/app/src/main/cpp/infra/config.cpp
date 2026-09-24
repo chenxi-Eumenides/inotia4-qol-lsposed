@@ -13,10 +13,13 @@ namespace {
 
 constexpr uint32_t kMaxConfigEntries = 64;
 constexpr uint32_t kMaxKeyLength = 63; // 含 NUL 的缓冲为 64
+constexpr uint32_t kMaxStringLength = 4095;
 
 struct Entry {
     char key[kMaxKeyLength + 1];
     int32_t value;
+    bool is_string;
+    char string_value[kMaxStringLength + 1];
 };
 
 Entry g_entries[kMaxConfigEntries];
@@ -45,6 +48,7 @@ bool config_set_int(const char* key, int32_t value) {
         return false;
     }
     Entry* entry = find_entry(key);
+    if (entry != nullptr && entry->is_string) return false;
     if (entry == nullptr) {
         if (g_count >= kMaxConfigEntries) {
             return false;
@@ -53,6 +57,7 @@ bool config_set_int(const char* key, int32_t value) {
         std::strcpy(entry->key, key);
         ++g_count;
         entry->value = value;
+        entry->is_string = false;
     } else if (entry->value == value) {
         return true; // 同值不重复广播
     } else {
@@ -64,12 +69,37 @@ bool config_set_int(const char* key, int32_t value) {
     return true;
 }
 
+bool config_set_string(const char* key, const char* value) {
+    if (!valid_key(key) || value == nullptr || std::strlen(value) > kMaxStringLength) return false;
+    Entry* entry = find_entry(key);
+    if (entry != nullptr && !entry->is_string) return false;
+    if (entry == nullptr) {
+        if (g_count >= kMaxConfigEntries) return false;
+        entry = &g_entries[g_count++];
+        std::strcpy(entry->key, key);
+        entry->is_string = true;
+        entry->value = 0;
+        entry->string_value[0] = '\0';
+    } else if (std::strcmp(entry->string_value, value) == 0) {
+        return true;
+    }
+    std::strcpy(entry->string_value, value);
+    // ConfigChangedEvent carries only int32; publishing it for strings would misrepresent the value.
+    return true;
+}
+
+const char* config_get_string(const char* key, const char* default_value) {
+    if (key == nullptr) return default_value;
+    Entry* entry = find_entry(key);
+    return entry == nullptr || !entry->is_string ? default_value : entry->string_value;
+}
+
 int32_t config_get_int(const char* key, int32_t default_value) {
     if (key == nullptr) {
         return default_value;
     }
     Entry* entry = find_entry(key);
-    return entry == nullptr ? default_value : entry->value;
+    return entry == nullptr || entry->is_string ? default_value : entry->value;
 }
 
 bool config_set_bool(const char* key, bool value) {

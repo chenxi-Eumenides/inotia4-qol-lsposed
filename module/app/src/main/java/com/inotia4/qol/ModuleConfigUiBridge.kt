@@ -31,6 +31,8 @@ object ModuleConfigUiBridge {
     @JvmStatic
     fun toggleConfig(key: String): String {
         if (key !in BOOL_KEYS) return "error:not_boolean"
+        val oldAddress = ModuleConfig.listenAddress
+        val oldPort = ModuleConfig.listenPort
         val oldStack = ModuleConfig.stackLimitIncrease
         val oldMoveMerge = ModuleConfig.moveMergeEnabled
         val oldExtensionBag = ModuleConfig.extensionBagEnabled
@@ -63,8 +65,8 @@ object ModuleConfigUiBridge {
         val err = ModuleConfig.apply(json)
         if (err != null) return "error:$err"
         ApiServices.config.applyOnChange(
-            oldStack, oldMoveMerge, oldExtensionBag, oldCustomRecipe, oldAutoSell, oldApiEnabled,
-            oldDebugLog, oldSimpleMode, oldPushAll
+            oldAddress, oldPort, oldStack, oldMoveMerge, oldExtensionBag, oldCustomRecipe,
+            oldAutoSell, oldApiEnabled, oldDebugLog, oldSimpleMode, oldPushAll
         )
         // apiEnabled 变更时启停 HTTP 服务；本方法经 JNI 在游戏主线程调用，
         // 启动路径较重（静态数据/服务构建），放后台线程避免卡顿。

@@ -18,6 +18,8 @@ interface ConfigApiService {
 
     /** 配置变更增量应用：仅当对应值变化时通知 native（POST /api/config/set 用） */
     fun applyOnChange(
+        oldAddress: String,
+        oldPort: Int,
         oldStack: Boolean,
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
@@ -40,6 +42,8 @@ class ConfigApiServiceImpl : ConfigApiService {
 
     override fun applyToNative() {
         if (!NativeBridge.ready) return
+        NativeBridge.nativeConfigSetString("listenAddress", ModuleConfig.listenAddress)
+        NativeBridge.nativeConfigSetInt("listenPort", ModuleConfig.listenPort)
         val applied = NativeBridge.nativeSetStackLimitEnabled(ModuleConfig.stackLimitIncrease)
         LogFile.info(LogDomain.CONFIG, "stackLimitIncrease=${ModuleConfig.stackLimitIncrease} applied=$applied")
         val moveMergeApplied = NativeBridge.nativeSetMoveMergeEnabled(ModuleConfig.moveMergeEnabled)
@@ -66,6 +70,8 @@ class ConfigApiServiceImpl : ConfigApiService {
     }
 
     override fun applyOnChange(
+        oldAddress: String,
+        oldPort: Int,
         oldStack: Boolean,
         oldMoveMerge: Boolean,
         oldExtensionBag: Boolean,
@@ -82,6 +88,12 @@ class ConfigApiServiceImpl : ConfigApiService {
             WatermarkOverlay.refreshColor()
         }
         if (!NativeBridge.ready) return
+        if (ModuleConfig.listenAddress != oldAddress) {
+            NativeBridge.nativeConfigSetString("listenAddress", ModuleConfig.listenAddress)
+        }
+        if (ModuleConfig.listenPort != oldPort) {
+            NativeBridge.nativeConfigSetInt("listenPort", ModuleConfig.listenPort)
+        }
         if (ModuleConfig.stackLimitIncrease != oldStack) {
             NativeBridge.nativeSetStackLimitEnabled(ModuleConfig.stackLimitIncrease)
         }

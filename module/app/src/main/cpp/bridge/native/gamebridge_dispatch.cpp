@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "host/http_dispatch.h"
+#include "infra/config.h"
 
 namespace {
 
@@ -61,6 +62,24 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetOpEnabled(JNIEnv*, jclass, jboolean enabled) {
     qol::host::http_dispatch_set_op_enabled(enabled == JNI_TRUE);
     return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeConfigSetString(JNIEnv* env, jclass, jstring key,
+                                                       jstring value) {
+    bool input_ok = true;
+    const std::string key_value = read_string(env, key, true, &input_ok);
+    const std::string string_value = read_string(env, value, true, &input_ok);
+    return input_ok && qol::infra::config_set_string(key_value.c_str(), string_value.c_str())
+               ? JNI_TRUE
+               : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeConfigSetInt(JNIEnv* env, jclass, jstring key, jint value) {
+    bool input_ok = true;
+    const std::string key_value = read_string(env, key, true, &input_ok);
+    return input_ok && qol::infra::config_set_int(key_value.c_str(), value) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jstring JNICALL

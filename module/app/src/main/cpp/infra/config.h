@@ -13,6 +13,10 @@ namespace qol::infra {
 // 值有变化才广播；key 为空、过长或容量满返回 false。
 bool config_set_int(const char* key, int32_t value);
 
+// String values use fixed inline storage because the config registry does not retain caller pointers.
+bool config_set_string(const char* key, const char* value);
+const char* config_get_string(const char* key, const char* default_value);
+
 // 未登记返回 default_value。
 int32_t config_get_int(const char* key, int32_t default_value);
 

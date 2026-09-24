@@ -989,6 +989,18 @@ set_target_properties(system_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX
 target_link_libraries(system_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME system_facts_dispatch_tests COMMAND system_facts_dispatch_tests)
 
+# T4': core.settings config/list 序列化字段顺序、类型与 JSON 字符串转义。
+add_executable(core_settings_config_tests
+    test_core_settings_config.cpp
+    ${CPP_DIR}/plugins/core.settings/plugin.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
+)
+target_include_directories(core_settings_config_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_settings_config_tests PRIVATE cxx_std_17)
+set_target_properties(core_settings_config_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_settings_config_tests COMMAND core_settings_config_tests)
+
 # P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
 add_executable(core_patches_shape_tests test_core_patches_shape.cpp)
 target_compile_definitions(core_patches_shape_tests PRIVATE

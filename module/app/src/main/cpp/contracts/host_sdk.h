@@ -53,11 +53,15 @@ using QolConfigGetI32Fn = QolResult (*)(const char* key, int32_t default_value,
                                         int32_t* out_value);
 using QolConfigSetBoolFn = QolResult (*)(const char* key, int32_t value);
 using QolConfigSetI32Fn = QolResult (*)(const char* key, int32_t value);
+using QolConfigGetStringFn = QolResult (*)(const char* key, const char* default_value,
+                                           char* out_value, uint32_t capacity,
+                                           uint32_t* out_size);
 struct QolConfigApi {
     QolConfigGetBoolFn get_bool;
     QolConfigGetI32Fn get_i32;
     QolConfigSetBoolFn set_bool;
     QolConfigSetI32Fn set_i32;
+    QolConfigGetStringFn get_string;
 };
 
 using QolFrameHandler = int32_t (*)(int64_t frame, void* ctx);
@@ -288,6 +292,7 @@ struct QolHostSdk {
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-constexpr uint16_t kHostSdkMinor = 9;
+// minor 10：QolConfigApi 追加 get_string（配置字符串面，config/list 迁入 core.settings 起）。
+constexpr uint16_t kHostSdkMinor = 10;
 
 }  // namespace qol::contracts

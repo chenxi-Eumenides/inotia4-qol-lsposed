@@ -143,6 +143,20 @@ QolResult sdk_config_get_i32(const char* key, int32_t default_value, int32_t* ou
     return contracts::ok();
 }
 
+QolResult sdk_config_get_string(const char* key, const char* default_value, char* out_value,
+                                uint32_t capacity, uint32_t* out_size) {
+    if (key == nullptr || out_value == nullptr || capacity == 0 || out_size == nullptr) {
+        return result_error(kQolErrInvalidArgument, kNullArgument);
+    }
+    const char* value = infra::config_get_string(key, default_value);
+    const std::size_t length = std::strlen(value);
+    if (length >= capacity) return result_error(kQolErrBlocked, "config string buffer too small");
+    std::memcpy(out_value, value, length);
+    out_value[length] = '\0';
+    *out_size = static_cast<uint32_t>(length);
+    return contracts::ok();
+}
+
 QolResult sdk_config_set_bool(const char* key, int32_t value) {
     if (key == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
     return result_from_bool(infra::config_set_bool(key, value != 0), kQolErrBlocked, kCapacity);
@@ -793,7 +807,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.abi = {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor};
     sdk.log = {&sdk_log_write, &sdk_log_debug_enabled};
     sdk.config = {&sdk_config_get_bool, &sdk_config_get_i32, &sdk_config_set_bool,
-                  &sdk_config_set_i32};
+                  &sdk_config_set_i32, &sdk_config_get_string};
     sdk.scheduler = {&sdk_scheduler_add, &sdk_scheduler_remove};
     sdk.commands = infra::commands_port();
     sdk.events = {&sdk_events_subscribe, &sdk_events_unsubscribe};
