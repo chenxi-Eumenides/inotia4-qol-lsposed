@@ -18,14 +18,14 @@
 #include <string>
 
 // ===========================================================================
-// 扩展背包插件：29 条声明式资源的 owner + extension_bag v1.0 provider + move_merge 门禁
+// 扩展背包插件：29 条声明式资源的 owner + extension_bag v2.0 provider + move_merge 门禁
 // ===========================================================================
 //
 // 资源面（a3b-1/a3b-2）：入口 hook / PopupState 占用 / desc 槽命名空间 / move_merge 指针槽
 // 与 C1–C21 call patch 全部声明式化；wrapper 业务体逐字留在 plugins/extension_bag
 // （D2c-2b-2 后 feature/patch 已删除），本文件只做声明与门禁接线。
 //
-// 能力面（a3c）：provides `extension_bag` v1.0（contracts/extension_bag.h 的 ExtensionBagApi），
+// 能力面（a3c）：provides `extension_bag` v2.0（contracts/extension_bag.h 的 ExtensionBagApi），
 // iface 由 extension_bag_api_table() 提供（EB TU 逐条转发既有 port）。宿主在 enabled 时注册、
 // revoking 时注销（§3.4.4 既有路径）；本文件不新增 JNI / 资源。
 //
@@ -68,7 +68,7 @@ void on_config_changed(void* ctx, const void* payload) {
 uint32_t g_resource_count = 0;
 const qol::contracts::ResourceClaim* g_resources = extension_bag_claims(&g_resource_count);
 
-// 能力提供声明：extension_bag v1.0，iface = EB TU 的 ExtensionBagApi 静态表。
+// 能力提供声明：extension_bag v2.0，iface = EB TU 的 ExtensionBagApi 静态表。
 // 注册失败（iface 空/容量满/重复）由宿主只记录不阻断（plugin_registry 既有口径）。
 const qol::contracts::CapabilityProvisionRef kProvides[] = {
     {
@@ -599,7 +599,7 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     4, kRequires,  // requires=inventory_refresh + world.facts + item.facts + save.facts
     0, nullptr,   // optional_requires
-    1, kProvides,  // provides（extension_bag v1.0）
+    1, kProvides,  // provides（extension_bag v2.0）
     g_resource_count, g_resources,  // resources（29 条）
     0, nullptr,   // jni（JNI 入口由 bridge/native 保留，名/签名冻结）
     &plugin_install,

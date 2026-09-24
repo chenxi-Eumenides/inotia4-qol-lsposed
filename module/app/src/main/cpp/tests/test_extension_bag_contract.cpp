@@ -47,7 +47,7 @@ bool ui_choice_button_slot_target(void** /*out_slot*/, uintptr_t* /*out_expected
 }  // namespace qol::game
 
 // ---- 契约头：可编译 + POD + sizeof + 枚举值 ----
-static_assert(qol::contracts::kExtensionBagVersionMajor == 1, "major");
+static_assert(qol::contracts::kExtensionBagVersionMajor == 2, "major");
 static_assert(qol::contracts::kExtensionBagVersionMinor == 0, "minor");
 static_assert(std::strcmp(qol::contracts::kExtensionBagCapabilityId, "extension_bag") == 0,
               "capability id 必须为 extension_bag");
@@ -74,8 +74,8 @@ static_assert(std::is_standard_layout<qol::contracts::ExtensionBagMoveObservatio
               "MoveObservation POD");
 static_assert(std::is_trivially_copyable<qol::contracts::ExtensionBagMoveObservation>::value,
               "MoveObservation trivially copyable");
-// 37 个函数指针成员（分组计数见报告）。
-static_assert(sizeof(qol::contracts::ExtensionBagApi) == 37 * sizeof(void*), "Api 成员数/尺寸");
+// 38 个函数指针成员（分组计数见报告）。
+static_assert(sizeof(qol::contracts::ExtensionBagApi) == 38 * sizeof(void*), "Api 成员数/尺寸");
 static_assert(sizeof(qol::contracts::ExtensionBagMoveObservation) == 72, "MoveObservation 尺寸");
 
 namespace {
@@ -138,8 +138,8 @@ constexpr SiteExpect kSites[] = {
 };
 
 void test_contract_field_counts() {
-    // 7 组函数指针计数：9+5+3+8+6+1+5 = 37（编译期已断言 sizeof）。
-    CHECK(sizeof(ExtensionBagApi) == 37 * sizeof(void*));
+    // 8 组函数指针计数：9+5+3+8+6+1+5+1 = 38（编译期已断言 sizeof）。
+    CHECK(sizeof(ExtensionBagApi) == 38 * sizeof(void*));
     CHECK(static_cast<uint8_t>(ExtensionBagDropResult::kRejected) == 2);
     CHECK(static_cast<uint8_t>(ExtensionBagEquipButtonResult::kBlocked) == 2);
     CHECK(static_cast<uint8_t>(ExtensionBagEquipEventResult::kBlocked) == 2);

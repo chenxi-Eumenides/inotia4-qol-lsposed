@@ -6,6 +6,9 @@
 #include "contracts/sell_price.h"
 #include "contracts/host_sdk.h"
 
+#include <cstring>
+#include <string>
+
 namespace {
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
@@ -209,6 +212,19 @@ void provider_store_restore_for_original_write() {
     virtual_bag_store_restore_for_original_write();
 }
 
+int32_t provider_move_item(int32_t from_bag, int32_t from_slot, int32_t to_bag,
+                           int32_t to_slot, char* out, uint32_t capacity,
+                           uint32_t* out_len) {
+    if (out_len != nullptr) *out_len = 0;
+    if (out == nullptr || out_len == nullptr) return 0;
+    const std::string body = extension_bag_api_move_item_impl(
+        from_bag, from_slot, to_bag, to_slot);
+    if (body.size() > capacity) return 0;
+    std::memcpy(out, body.data(), body.size());
+    *out_len = static_cast<uint32_t>(body.size());
+    return 1;
+}
+
 std::string extension_bag_use_item(int bag, int slot) {
     return extension_bag_api_use_item_impl(bag, slot);
 }
@@ -222,7 +238,7 @@ std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot)
 }
 
 // ===========================================================================
-// D2a-3c：capability provider —— ExtensionBagApi v1.0 接口表
+// D2a-3c：capability provider —— ExtensionBagApi v2.0 接口表
 // ===========================================================================
 //
 // 契约限制（contracts/extension_bag.h）：POD + 固定宽度 C 类型 + 函数指针；
@@ -319,6 +335,8 @@ const qol::contracts::ExtensionBagApi kExtensionBagApi{
     &provider_internal_equip_active,
     &virtual_bag_native_call_active,
     &virtual_bag_refresh_item_area_with_gate,
+    // 8 移动写面
+    &provider_move_item,
 };
 
 }  // namespace

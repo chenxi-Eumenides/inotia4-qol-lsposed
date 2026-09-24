@@ -1,6 +1,6 @@
 #pragma once
 
-// 扩展背包能力契约 v1.0（ADR-0007 §1，ARCHITECTURE.md §3.4 / §4）。
+// 扩展背包能力契约 v2.0（ADR-0007 §1，ARCHITECTURE.md §3.4 / §4）。
 //
 // 契约限制：POD + 固定宽度 C 类型 + 函数指针；禁止 STL、异常、虚函数、std::string。
 // 字符串不跨契约边界（状态 JSON 的 `write_json(char*, uint32_t)` 为 v1.0 预留注释，
@@ -19,8 +19,14 @@
 namespace qol::contracts {
 
 constexpr const char* kExtensionBagCapabilityId = "extension_bag";
-constexpr int32_t kExtensionBagVersionMajor = 1;
+constexpr int32_t kExtensionBagVersionMajor = 2;
 constexpr int32_t kExtensionBagVersionMinor = 0;
+
+// 返回 1 表示 out 中包含完整 JSON（不附加 NUL）；返回 0 表示参数无效或缓冲区不足。
+// 操作失败仍由 JSON "ok":false 表示。此固定宽度写面避免 std::string 跨契约边界。
+using ExtensionBagMoveFn = int32_t (*)(int32_t from_bag, int32_t from_slot,
+                                       int32_t to_bag, int32_t to_slot, char* out,
+                                       uint32_t capacity, uint32_t* out_len);
 
 using ExtensionBagItemFn = bool (*)(int32_t logical_bag, int32_t slot, int32_t category,
                                     int32_t count, void* ctx);
@@ -120,6 +126,9 @@ struct ExtensionBagApi {
     bool (*internal_equip_active)();
     bool (*native_call_active)();
     void (*refresh_item_area_with_gate)();
+
+    // v2.0 移动写面；调用方必须每次从 capability registry 获取接口，不得缓存。
+    ExtensionBagMoveFn move_item;
 
     // v1.0 预留：状态 JSON 导出
     // int32_t (*write_json)(char* out, uint32_t capacity);
