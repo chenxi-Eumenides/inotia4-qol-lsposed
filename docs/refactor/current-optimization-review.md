@@ -105,7 +105,7 @@ HTTP client
 
 | 阶段 | 唯一顺序 | 必须完成的工作 | 可检查的完成条件 |
 |---|---|---|---|
-| 1 | **定义并验收 kernel-complete（零插件内核）** | 明确零业务插件时的启动路径、装配面、状态上报和兜底；只冻结内核启动/装配/上报所需的最小接缝，不要求冻结完整 SDK。 | 零插件 Debug/Release 均可启动，`/api/health` ready，无业务插件注册，无 FATAL；内核启动/装配/失败路径有 host 证据与真机日志；没有把业务语义塞回 Loader/Game Adapter。 |
+| 1 | **定义并验收 kernel-complete（零插件内核）** | 明确零业务插件时的启动路径、装配面、状态上报和兜底；只冻结内核启动/装配/上报所需的最小接缝，不要求冻结完整 SDK。 | 零业务插件 Debug 可启动，`/api/health` ready，无业务插件注册，无 FATAL；内核启动/装配/失败路径有 host 证据与真机日志；没有把业务语义塞回 Loader/Game Adapter。不构建、不发布零业务插件的 Release 包；kernel-only 组合仅在 Debug 通道验证（见 `verification.md` VM-K1-01/02）。 |
 | 2 | **provider 与功能插件并行**（作为接口需求与回归载体） | provider 与功能插件同时推进；provider 以“真实消费者需要什么”为需求来源，功能插件作为接口需求方与回归载体，不等待完整 SDK 冻结。 | 每个 provider 都有真实消费者与回归用例；插件只经 SDK/provider/Game Adapter 取事实；并行期出现的新依赖能回流为内核/接口需求；受影响 VM-B 补齐。 |
 | 3 | **Loader 机制按真实需求补齐** | 随 provider/插件暴露的真实缺口补 Loader 机制（发现、依赖解析、资源声明、状态、故障恢复等），按需补齐，不做提前设计。 | 每个新增机制都有真实使用方与验收；无使用方的机制不进入内核；机制收紧后，原先只能靠业务插件验证的装配面可由 probe 插件复现（见 §9）。 |
 | 4 | **GameHost 收窄** | 把 `QolGameHost` 的高层领域聚合和 `extension_bag_write` 迁到 provider/owner 面；保留目标、变体、线程纪律、低层适配及既定稳定 facade。 | `contracts/game_host.h` 不再作为 character/world/inventory/save/quest/craft 总表；扩展背包写入只经 owner 命令；插件不需要 include `game/`；ABI/错误/线程规则有 host 负例与受影响 VM-B 证据。 |
@@ -145,3 +145,11 @@ HTTP client
 ## 10. 当前结论的更新规则
 
 本文只随当前源码、脚本输出和可复现验收证据更新。任何新目标、职责归属、ABI 约束或架构冲突必须先回写 `ARCHITECTURE.md`；本文随后只记录该目标下的差距、阶段位置和证据，不保留旧结论或历史时间线。
+
+### 10.1 待定项
+
+以下归属当前待定，等待后续决策；在归属明确前按现状维持，不作为已完成迁移项：
+
+- 4 条 UI GET（`/api/ui`、screen、panel、dialog）的处理器是否继续留在 Kotlin。
+- 87 条路由的响应加工（`StaticData` / `NameInjector` 注入）由 Kotlin 还是 owner 承担。
+- 11 条返回 501 的 op 占位端点由各领域后续按票据契约补齐业务的具体范围与批次。
