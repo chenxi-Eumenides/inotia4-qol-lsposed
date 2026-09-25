@@ -241,4 +241,57 @@ QolResult shop_buy(int32_t slot, contracts::QolItemInventoryStateWriteResult* ou
     return contracts::ok();
 }
 
+QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
+                    int32_t to_slot,
+                    contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
+    }
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (bag == 5 || to_bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
+
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    const bool extension_bag_requested =
+        eb != nullptr && eb->is_logical_bag != nullptr &&
+        (eb->is_logical_bag(bag) || eb->is_logical_bag(to_bag));
+    if (extension_bag_requested) {
+        if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
+        if (to_slot < 0 || to_slot >= 16) return item_error(out, kQolErrInvalidArgument, "bad target");
+        if (eb->enabled == nullptr || eb->enabled() == 0) {
+            return item_error(out, kQolErrNotReady, "extension bag disabled");
+        }
+        return item_error(out, kQolErrUnsupported, "extension bag move capability unavailable");
+    }
+    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
+        return item_error(out, kQolErrBlocked, "extension view open; movement disabled (P2)");
+    }
+    if (fn_inven_move_item == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) {
+        return item_error(out, kQolErrNotFound, "slot empty");
+    }
+    if (item_ref.kind == InventoryItemKind::kExtension) {
+        return item_error(out, kQolErrUnsupported,
+                          "extension item move not supported by original API");
+    }
+    if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
+    if (to_bag < 0 || to_bag >= 5 || to_slot < 0 || to_slot >= 16) {
+        return item_error(out, kQolErrInvalidArgument, "bad target");
+    }
+    if (bag == to_bag && slot == to_slot) {
+        return item_error(out, kQolErrInvalidArgument, "same slot");
+    }
+    if (fn_inven_move_item(item_ref.native_item, count, to_bag, to_slot) == 0) {
+        return item_error(out, kQolErrInternal, "move failed");
+    }
+    if (eb != nullptr && eb->sync_projected_slot != nullptr) {
+        eb->sync_projected_slot(bag, slot);
+        eb->sync_projected_slot(to_bag, to_slot);
+    }
+    return contracts::ok();
+}
+
 }  // namespace qol::game::ops

@@ -10,7 +10,6 @@
 
 #include "contracts/commands.h"
 #include "contracts/extension_bag.h"
-#include "contracts/extension_bag.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
@@ -262,6 +261,23 @@ const contracts::StackLimitItemCountCapability* stack_limit_item_count_capabilit
         &iface);
     if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
     return static_cast<const contracts::StackLimitItemCountCapability*>(iface);
+}
+
+const contracts::ExtensionBagApi* extension_bag_capability() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        contracts::kExtensionBagCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+                        static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
+        &iface);
+    if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
+    return static_cast<const contracts::ExtensionBagApi*>(iface);
+}
+
+bool extension_bag_move_capability_ready(const contracts::ExtensionBagApi* api) {
+    return api != nullptr && api->enabled != nullptr && api->enabled() &&
+           api->move_item != nullptr;
 }
 
 bool effective_item_count(const void* item, bool original_count_supported, uint32_t* out_count,
@@ -999,6 +1015,10 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
         case contracts::QolItemWriteKind::kShopBuy:
             operation = g_item_state_write->shop_buy(args.i0, &operation_data);
             break;
+        case contracts::QolItemWriteKind::kMoveItem:
+            operation = g_item_state_write->move_item(args.i0, args.i1, args.i2, args.i3,
+                                                       args.i4, &operation_data);
+            break;
         default:
             return false;
     }
@@ -1064,6 +1084,34 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
     return true;
 }
 
+bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
+                            uint32_t capacity, uint32_t* out_size) {
+    const bool extension_requested =
+        (args.i0 >= 6 && args.i0 <= 10) || (args.i3 >= 6 && args.i3 <= 10);
+    if (extension_requested) {
+        const contracts::ExtensionBagApi* api = extension_bag_capability();
+        if (extension_bag_move_capability_ready(api)) {
+            char move_result[4096]{};
+            uint32_t move_result_size = 0;
+            if (api->move_item(args.i0, args.i1, args.i3, args.i4, move_result,
+                               static_cast<uint32_t>(sizeof(move_result)),
+                               &move_result_size) != 0 &&
+                move_result_size <= sizeof(move_result)) {
+                if (move_result_size > capacity) return false;
+                std::memcpy(out, move_result, move_result_size);
+                *out_size = move_result_size;
+                return std::string(move_result, move_result_size).find("\"ok\":false") ==
+                       std::string::npos;
+            }
+            constexpr char kMoveFailed[] =
+                "{\"ok\":false,\"error\":\"extension bag move failed\"}";
+            (void)copy_buffer(out, capacity, out_size, kMoveFailed, sizeof(kMoveFailed) - 1);
+            return false;
+        }
+    }
+    return write_item_inventory_state_result(args, out, capacity, out_size);
+}
+
 bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
@@ -1074,6 +1122,9 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     contracts::QolItemWriteArgs args{};
     std::memcpy(&args, payload, size);
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    if (kind == contracts::QolItemWriteKind::kMoveItem) {
+        return write_item_move_result(args, out, capacity, out_size);
+    }
     if (kind == contracts::QolItemWriteKind::kUseItem ||
         kind == contracts::QolItemWriteKind::kSellItem ||
         kind == contracts::QolItemWriteKind::kDiscardItem ||
@@ -1250,7 +1301,8 @@ int plugin_install(contracts::PluginContext& ctx) {
                               {contracts::kQolPortItemInventoryStateWriteVersion.major,
                                contracts::kQolPortItemInventoryStateWriteVersion.minor}) ||
         g_item_state_write->use_item == nullptr || g_item_state_write->sell_item == nullptr ||
-        g_item_state_write->discard_item == nullptr || g_item_state_write->shop_buy == nullptr) {
+        g_item_state_write->discard_item == nullptr || g_item_state_write->shop_buy == nullptr ||
+        g_item_state_write->move_item == nullptr) {
         g_port = nullptr;
         g_item_write = nullptr;
         g_item_money_write = nullptr;

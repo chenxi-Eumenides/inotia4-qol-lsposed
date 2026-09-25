@@ -120,12 +120,19 @@ QolResult shop_buy(int32_t slot, contracts::QolItemInventoryStateWriteResult* ou
     return qol::game::ops::shop_buy(slot, out);
 }
 
+QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
+                    int32_t to_slot,
+                    contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::move_item(bag, slot, count, to_bag, to_slot, out);
+}
+
 const contracts::QolItemInventoryStateWritePort kPort{
     contracts::kQolPortItemInventoryStateWriteVersion,
     &use_item,
     &sell_item,
     &discard_item,
     &shop_buy,
+    &move_item,
 };
 
 }  // namespace

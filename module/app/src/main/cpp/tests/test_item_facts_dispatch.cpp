@@ -11,6 +11,7 @@
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
+#include "contracts/extension_bag.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
 #include "contracts/host_sdk.h"
@@ -122,6 +123,9 @@ int g_state_write_kind = -1;
 int32_t g_state_write_arg0 = -1;
 int32_t g_state_write_arg1 = -1;
 int32_t g_state_write_count = 2;
+int32_t g_state_move_count = -1;
+int32_t g_state_move_to_bag = -1;
+int32_t g_state_move_to_slot = -1;
 
 QolResult unsupported() { return qol::contracts::error(kQolErrUnsupported, "stub", 4); }
 QolResult stub_category(const void*, int32_t*) { return unsupported(); }
@@ -298,12 +302,23 @@ QolResult fake_state_shop_buy(int32_t slot,
                             slot, -1, out);
 }
 
+QolResult fake_state_move(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
+                          int32_t to_slot,
+                          qol::contracts::QolItemInventoryStateWriteResult* out) {
+    g_state_move_count = count;
+    g_state_move_to_bag = to_bag;
+    g_state_move_to_slot = to_slot;
+    return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kMoveItem),
+                            bag, slot, out);
+}
+
 const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     qol::contracts::kQolPortItemInventoryStateWriteVersion,
     &fake_state_use,
     &fake_state_sell,
     &fake_state_discard,
     &fake_state_shop_buy,
+    &fake_state_move,
 };
 
 const void* const kPortArray[] = {
@@ -356,9 +371,45 @@ const qol::contracts::QolItemCountApi kOverrideItemCountApi{
 const qol::contracts::StackLimitItemCountCapability kOverrideCapability{
     &kOverrideItemCountApi, &override_enabled};
 
+bool g_extension_bag_available = false;
+bool g_extension_bag_enabled = true;
+int g_extension_move_calls = 0;
+std::string g_extension_move_body = "{\"ok\":true,\"state\":{}}";
+
+bool fake_extension_enabled() { return g_extension_bag_enabled; }
+bool fake_is_logical_bag(int32_t bag) { return bag >= 6 && bag <= 10; }
+int32_t fake_extension_move(int32_t, int32_t, int32_t, int32_t, char* out, uint32_t capacity,
+                            uint32_t* out_len) {
+    ++g_extension_move_calls;
+    if (out == nullptr || out_len == nullptr) return 0;
+    if (g_extension_move_body.size() > capacity) return 0;
+    std::memcpy(out, g_extension_move_body.data(), g_extension_move_body.size());
+    *out_len = static_cast<uint32_t>(g_extension_move_body.size());
+    return 1;
+}
+
+qol::contracts::ExtensionBagApi make_fake_extension_bag_api() {
+    qol::contracts::ExtensionBagApi api{};
+    api.enabled = &fake_extension_enabled;
+    api.is_logical_bag = &fake_is_logical_bag;
+    api.move_item = &fake_extension_move;
+    return api;
+}
+
+const qol::contracts::ExtensionBagApi kFakeExtensionBagApi = make_fake_extension_bag_api();
+
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
-    if (id == nullptr || out_iface == nullptr ||
-        std::strcmp(id, qol::contracts::kStackLimitItemCountCapabilityId) != 0 ||
+    if (id == nullptr || out_iface == nullptr) {
+        return qol::contracts::error(kQolErrNotFound, "missing", 7);
+    }
+    if (std::strcmp(id, qol::contracts::kExtensionBagCapabilityId) == 0) {
+        if (!g_extension_bag_available) {
+            return qol::contracts::error(kQolErrNotFound, "missing", 7);
+        }
+        *out_iface = &kFakeExtensionBagApi;
+        return qol::contracts::ok();
+    }
+    if (std::strcmp(id, qol::contracts::kStackLimitItemCountCapabilityId) != 0 ||
         !g_override_available) {
         return qol::contracts::error(kQolErrNotFound, "missing", 7);
     }
@@ -608,6 +659,29 @@ void test_write_routes() {
     qol::infra::command_queue_reset_for_test();
     g_dice_reject_result = qol::contracts::ok();
 
+    // 普通袋移动：typed 低层 + #10 owner serializer 即时写后 state。
+    g_state_write_result = qol::contracts::ok();
+    g_state_write_count = 7;
+    g_state_write_data = {};
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":\"0\",\"slot\":\"2\",\"count\":\"4\","
+                        "\"to_bag\":\"1\",\"to_slot\":\"3\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(7) + "}");
+    CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kMoveItem));
+    CHECK(g_state_write_arg0 == 0 && g_state_write_arg1 == 2);
+    CHECK(g_state_move_count == 4 && g_state_move_to_bag == 1 && g_state_move_to_slot == 3);
+
+    // 扩展袋移动：owner 经 capability 取 v2 move_item，纯 JSON 输出、不附 state。
+    g_extension_bag_available = true;
+    g_extension_bag_enabled = true;
+    g_extension_move_calls = 0;
+    g_extension_move_body = "{\"ok\":true,\"state\":{\"extension\":true}}";
+    g_state_write_count = 1;
     CHECK(dispatch_post("/api/item/inventory/move_item",
                         "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"4\","
                         "\"to_bag\":\"7\",\"to_slot\":\"-1\"}",
@@ -615,9 +689,58 @@ void test_write_routes() {
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kMoveItem));
-    CHECK(g_last_write.i0 == 6 && g_last_write.i1 == 2 && g_last_write.i2 == 4 &&
-          g_last_write.i3 == 7 && g_last_write.i4 == -1);
+    CHECK(std::string(result, result_size) == "{\"ok\":true,\"state\":{\"extension\":true}}");
+    CHECK(g_extension_move_calls == 1);
+    const int state_calls_before_missing = g_state_write_calls;
+    g_extension_move_body = "{\"ok\":false,\"error\":\"move failed\"}";
+    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                            &result_size));
+    CHECK(std::string(result, result_size) == "{\"ok\":false,\"error\":\"move failed\"}");
+    CHECK(g_extension_move_calls == 2);
+    CHECK(g_state_write_calls == state_calls_before_missing);
+    g_extension_move_body = "{\"ok\":true,\"state\":{}}";
+
+    // 能力缺失回退：扩展请求回落 typed 普通移动分支（旧 data_op_move_item + state 等价）。
+    g_extension_bag_available = false;
+    g_state_write_result = qol::contracts::ok();
+    g_state_write_count = 2;
+    g_state_write_data = {};
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"4\","
+                        "\"to_bag\":\"7\",\"to_slot\":\"-1\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(2) + "}");
+    CHECK(g_state_write_calls == state_calls_before_missing + 1);
+    CHECK(g_state_move_count == 4 && g_state_move_to_bag == 7 && g_state_move_to_slot == -1);
+
+    // 失败票据：owner 返回 false 并把原错误体写入结果缓冲，可经票据回取。
+    g_state_write_result = qol::contracts::error(kQolErrBlocked, "move failed", 11);
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":\"0\",\"slot\":\"2\",\"count\":\"4\","
+                        "\"to_bag\":\"1\",\"to_slot\":\"3\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext move_context{};
+    move_context.handler = g_result_handler;
+    move_context.payload_size = g_post_payload_size;
+    std::memcpy(move_context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command move_command{
+        "core.item kMoveItem", nullptr, &move_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket move_ticket = qol::infra::post(move_command);
+    CHECK(move_ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(move_ticket) == qol::infra::CommandState::kFailed);
+    char move_error[128]{};
+    uint32_t move_error_size = 0;
+    CHECK(qol::infra::read_result(move_ticket, move_error, sizeof(move_error), &move_error_size));
+    CHECK(std::string(move_error, move_error_size) == "{\"ok\":false,\"error\":\"move failed\"}");
+    qol::infra::command_queue_reset_for_test();
+    g_state_write_result = qol::contracts::ok();
+    g_extension_bag_available = false;
+    g_original_count = 3;
 
     const qol::contracts::HttpPathParam role{"role", 4, "1", 1};
     CHECK(dispatch_post("/api/item/inventory/1/equip_item", "{\"category\":10}", &role, 1,
@@ -685,7 +808,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
-    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 6);
+    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 5);
 
     g_money_write_result = qol::contracts::error(kQolErrUnsupported, "symbol not resolved", 19);
     result_size = 0;

@@ -8,8 +8,6 @@
 #include "game/state/character_http.h"
 #include "game/state/character_write_http.h"
 #include "game/state/item_http.h"
-#include "game/state/item_move_capability.h"
-#include "contracts/extension_bag.h"
 #include "game/state/choice_http.h"
 #include "game/state/game_state.h"
 #include "game/state/quest_http.h"
@@ -36,8 +34,6 @@
 
 #include <mutex>
 #include <utility>
-
-const qol::contracts::ExtensionBagApi* extension_bag_capability();
 
 // 事件流基线（审计 H4 修复：diff 全程锁保护）
 std::mutex g_events_mtx;
@@ -943,33 +939,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
     std::string op;
     std::string state;
     switch (static_cast<contracts::QolItemWriteKind>(args.kind)) {
-        case contracts::QolItemWriteKind::kMoveItem:
-            if ((args.i0 >= 6 && args.i0 <= 10) || (args.i3 >= 6 && args.i3 <= 10)) {
-                const contracts::ExtensionBagApi* eb = extension_bag_capability();
-                if (qol::game::extension_bag_move_capability_ready(eb)) {
-                    std::string move_result(4096, '\0');
-                    uint32_t move_result_size = 0;
-                    if (eb->move_item(args.i0, args.i1, args.i3, args.i4,
-                                      move_result.data(),
-                                      static_cast<uint32_t>(move_result.size()),
-                                      &move_result_size) != 0 &&
-                        move_result_size <= move_result.size()) {
-                        move_result.resize(move_result_size);
-                        op = std::move(move_result);
-                    } else {
-                        op = "{\"ok\":false,\"error\":\"extension bag move failed\"}";
-                    }
-                } else {
-                    // Optional capability 缺失/未启用时回到普通 item 写路径；扩展槽无法
-                    // 由原版移动识别时由 data_op_move_item 明确拒绝，不做半执行。
-                    op = data_op_move_item(args.i0, args.i1, args.i2, args.i3, args.i4);
-                    state = build_inventory_json();
-                }
-            } else {
-                op = data_op_move_item(args.i0, args.i1, args.i2, args.i3, args.i4);
-                state = build_inventory_json();
-            }
-            break;
         case contracts::QolItemWriteKind::kAcceptDice:
             op = data_op_dice_accept();
             state = build_player_json();

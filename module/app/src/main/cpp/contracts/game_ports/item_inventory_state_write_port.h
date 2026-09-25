@@ -31,6 +31,9 @@ using QolItemInventoryStateWriteFn = QolResult (*)(
     int32_t bag_or_slot, int32_t slot, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateShopBuyFn = QolResult (*)(
     int32_t shop_slot, QolItemInventoryStateWriteResult* out);
+using QolItemInventoryStateMoveFn = QolResult (*)(
+    int32_t bag, int32_t slot, int32_t count, int32_t to_bag, int32_t to_slot,
+    QolItemInventoryStateWriteResult* out);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -38,6 +41,7 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateWriteFn sell_item;
     QolItemInventoryStateWriteFn discard_item;
     QolItemInventoryStateShopBuyFn shop_buy;
+    QolItemInventoryStateMoveFn move_item;
 };
 
 constexpr QolVersion kQolPortItemInventoryStateWriteVersion{1, 0};
