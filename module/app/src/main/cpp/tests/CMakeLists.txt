@@ -926,6 +926,7 @@ add_test(NAME character_facts_plugin_tests COMMAND character_facts_plugin_tests)
 # P5-4-2：item_facts 6 条 /api/item/* GET query handler 的注册/快照/富化/注销接缝。
 add_executable(item_facts_dispatch_tests
     test_item_facts_dispatch.cpp
+    ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/plugins/core.item/plugin.cpp
     ${CPP_DIR}/plugins/core.item/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/response.cpp

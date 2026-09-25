@@ -1,0 +1,11 @@
+#pragma once
+
+#include <cstdint>
+
+#include "contracts/result.h"
+
+namespace qol::game::ops {
+
+QolResult set_money(int64_t money);
+
+}  // namespace qol::game::ops

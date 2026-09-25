@@ -7,6 +7,7 @@
 
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
@@ -15,6 +16,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "infra/command_queue.h"
 #include "plugins/core.item/plugin.h"
 
 #include <cstdint>
@@ -61,6 +63,8 @@ constexpr char kExpectedItem[] =
 
 bool g_in_world = true;
 int32_t g_static_ready = 1;
+QolResult g_money_write_result = qol::contracts::ok();
+int64_t g_money_write_value = 0;
 qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
 uint32_t g_post_handler_id = 0;
 uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
@@ -134,6 +138,11 @@ QolResult fake_money(int64_t* out) {
     return qol::contracts::ok();
 }
 
+QolResult fake_set_money(int64_t money) {
+    g_money_write_value = money;
+    return g_money_write_result;
+}
+
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
@@ -142,6 +151,8 @@ const QolItemPortReadApi kFakeRead{
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
+const qol::contracts::QolItemMoneyWritePort kFakeMoneyWritePort{
+    qol::contracts::kQolPortItemMoneyWriteVersion, &fake_set_money};
 
 QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capacity,
                           uint32_t* out_size) {
@@ -162,7 +173,7 @@ QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capa
 const QolItemWritePort kFakeWritePort{qol::contracts::kQolPortItemWriteVersion,
                                       {&fake_item_write}};
 
-const void* const kPortArray[] = {&kFakePort, &kFakeWritePort};
+const void* const kPortArray[] = {&kFakePort, &kFakeMoneyWritePort, &kFakeWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -287,7 +298,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 2;
+    ctx.port_count = 3;
     return ctx;
 }
 
@@ -307,6 +318,19 @@ std::string dispatch_post(const char* path, const char* body,
     (void)qol::host::http_dispatch_api().dispatch(&request, &response);
     if (status != nullptr) *status = response.status;
     return std::string(storage, response.body_size);
+}
+
+struct ItemWriteResultContext {
+    qol::contracts::QolTypedResultCommandHandler handler = nullptr;
+    uint8_t payload[qol::contracts::kTypedCommandPayloadCapacity]{};
+    uint32_t payload_size = 0;
+};
+
+bool run_item_write_result(void* opaque, char* out, uint32_t capacity, uint32_t* out_size) {
+    auto* context = static_cast<ItemWriteResultContext*>(opaque);
+    if (context == nullptr || context->handler == nullptr) return false;
+    return context->handler(nullptr, context->payload, context->payload_size, out, capacity,
+                             out_size);
 }
 
 void test_write_routes() {
@@ -399,9 +423,40 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"4294967296\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
+    g_money_write_result = qol::contracts::ok();
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(status == 200 && g_last_write.i64 == 4294967296LL && g_write_calls == 8);
+    CHECK(std::string(result, result_size) == "{\"ok\":true}");
+    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 7);
+
+    g_money_write_result = qol::contracts::error(kQolErrUnsupported, "symbol not resolved", 19);
+    result_size = 0;
+    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                            &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+
+    // The production command queue retains a failed owner's exact result for ticket readback.
+    g_money_write_result = qol::contracts::error(kQolErrNotReady, "not in game", 11);
+    ItemWriteResultContext command_context{};
+    command_context.handler = g_result_handler;
+    command_context.payload_size = g_post_payload_size;
+    std::memcpy(command_context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command command{
+        "core.item kSetMoney", nullptr, &command_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket failed_ticket = qol::infra::post(command);
+    CHECK(failed_ticket != 0);
+    CHECK(qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(failed_ticket) == qol::infra::CommandState::kFailed);
+    char failed_result[128]{};
+    uint32_t failed_result_size = 0;
+    CHECK(qol::infra::read_result(failed_ticket, failed_result, sizeof(failed_result),
+                                  &failed_result_size));
+    CHECK(std::string(failed_result, failed_result_size) ==
+          "{\"ok\":false,\"error\":\"not in game\"}");
+    qol::infra::command_queue_reset_for_test();
+    g_money_write_result = qol::contracts::ok();
 
     CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"Infinity\"}", nullptr, 0,
                         &status) == "{\"ok\":true,\"ticket\":72}");

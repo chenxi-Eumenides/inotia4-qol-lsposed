@@ -9,6 +9,7 @@
 
 #include "contracts/commands.h"
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/http.h"
 #include "contracts/item_facts.h"
@@ -27,6 +28,10 @@ constexpr uint32_t kShopCapacity = 32768;
 // 主线程快照节拍：库存/商店 JSON 构造不宜逐帧执行；15 帧（≈4Hz）对只读查询足够。
 constexpr int32_t kSnapshotIntervalFrames = 15;
 constexpr char kNotInGameBody[] = "{\"error\":\"not in game\"}";
+constexpr char kSetMoneySuccess[] = "{\"ok\":true}";
+constexpr char kSetMoneyNotInGame[] = "{\"ok\":false,\"error\":\"not in game\"}";
+constexpr char kSetMoneySymbolMissing[] = "{\"ok\":false,\"error\":\"symbol not resolved\"}";
+constexpr char kSetMoneyFailed[] = "{\"ok\":false,\"error\":\"set money failed\"}";
 
 enum class Query : uint8_t {
     kInventory,
@@ -66,6 +71,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolItemPort* g_port = nullptr;
 // 写面私有端口（仅 core.item 可注入；ADR/阶段 5 写面迁移）。
 const contracts::QolItemWritePort* g_item_write = nullptr;
+const contracts::QolItemMoneyWritePort* g_item_money_write = nullptr;
 // 写命令的票据结果处理器 id（全局 typed handler id 空间；core.item 前缀）。
 constexpr uint32_t kItemWriteHandlerId = 0x49540001;
 uint64_t g_frame_task = 0;
@@ -172,6 +178,9 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_ITEM, {1, 0}},
+    {contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE,
+     {contracts::kQolPortItemMoneyWriteVersion.major,
+      contracts::kQolPortItemMoneyWriteVersion.minor}},
     {contracts::QolPortId::QOL_PORT_ITEM_WRITE,
      {contracts::kQolPortItemWriteVersion.major, contracts::kQolPortItemWriteVersion.minor}},
 };
@@ -690,11 +699,33 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
     if (payload == nullptr || size != sizeof(contracts::QolItemWriteArgs) || out == nullptr ||
-        out_size == nullptr || g_item_write == nullptr || g_item_write->read.write == nullptr) {
+        out_size == nullptr || g_item_write == nullptr || g_item_write->read.write == nullptr ||
+        g_item_money_write == nullptr || g_item_money_write->set_money == nullptr) {
         return false;
     }
     contracts::QolItemWriteArgs args{};
     std::memcpy(&args, payload, size);
+    if (args.kind == static_cast<int32_t>(contracts::QolItemWriteKind::kSetMoney)) {
+        const QolResult operation = g_item_money_write->set_money(args.i64);
+        const char* body = kSetMoneySuccess;
+        uint32_t body_size = sizeof(kSetMoneySuccess) - 1;
+        if (!contracts::succeeded(operation)) {
+            if (operation.code == kQolErrNotReady) {
+                body = kSetMoneyNotInGame;
+                body_size = sizeof(kSetMoneyNotInGame) - 1;
+            } else if (operation.code == kQolErrUnsupported) {
+                body = kSetMoneySymbolMissing;
+                body_size = sizeof(kSetMoneySymbolMissing) - 1;
+            } else {
+                body = kSetMoneyFailed;
+                body_size = sizeof(kSetMoneyFailed) - 1;
+            }
+        }
+        if (body_size > capacity) return false;
+        std::memcpy(out, body, body_size);
+        *out_size = body_size;
+        return contracts::succeeded(operation);
+    }
     if (args.kind == static_cast<int32_t>(contracts::QolItemWriteKind::kEquipItem) &&
         args.i5 >= 0) {
         if (!find_item_slot(args.i5, &args.i1, &args.i2)) {
@@ -755,12 +786,14 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_port = nullptr;
     g_item_write = nullptr;
+    g_item_money_write = nullptr;
     g_frame_task = 0;
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
-        ctx.port_count != 2 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr) {
+        ctx.port_count != 3 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
+        ctx.ports[2] == nullptr) {
         g_sdk = nullptr;
         return 1;
     }
@@ -774,11 +807,22 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
-    g_item_write = static_cast<const contracts::QolItemWritePort*>(ctx.ports[1]);
+    g_item_money_write = static_cast<const contracts::QolItemMoneyWritePort*>(ctx.ports[1]);
+    if (!contracts::satisfies(g_item_money_write->abi_version,
+                              {contracts::kQolPortItemMoneyWriteVersion.major,
+                               contracts::kQolPortItemMoneyWriteVersion.minor}) ||
+        g_item_money_write->set_money == nullptr) {
+        g_port = nullptr;
+        g_item_money_write = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    g_item_write = static_cast<const contracts::QolItemWritePort*>(ctx.ports[2]);
     if (!contracts::satisfies(g_item_write->abi_version, {1, 0}) ||
         g_item_write->read.write == nullptr) {
         g_port = nullptr;
         g_item_write = nullptr;
+        g_item_money_write = nullptr;
         g_sdk = nullptr;
         return 1;
     }
@@ -789,6 +833,7 @@ int plugin_install(contracts::PluginContext& ctx) {
             kItemWriteHandlerId, &item_write_result, nullptr))) {
         g_port = nullptr;
         g_item_write = nullptr;
+        g_item_money_write = nullptr;
         g_sdk = nullptr;
         return 1;
     }
@@ -804,6 +849,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     g_port = nullptr;
     g_item_write = nullptr;
+    g_item_money_write = nullptr;
     g_sdk = nullptr;
 }
 
@@ -854,7 +900,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,
     kPorts,
-    2,
+    3,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
 };

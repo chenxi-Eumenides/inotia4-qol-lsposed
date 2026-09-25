@@ -75,6 +75,7 @@ add_library(gamebridge SHARED
     game/symbols/symbol_resolver.cpp
     game/json/game_json.cpp
     game/ops/game_ops_common.cpp
+    game/ops/item_money.cpp
     game/state/game_state.cpp
     game/nav/game_nav.cpp
     core/native/game_cache.cpp
@@ -116,6 +117,7 @@ add_subdirectory(plugins)
 if(NOT QOL_KERNEL_ONLY)
     target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
     target_sources(gamebridge PRIVATE bridge/native/gamebridge_core_data.cpp)
+    target_sources(gamebridge PRIVATE game/adapter_ports/item_write_port.cpp)
 endif()
 target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 
@@ -235,9 +237,9 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/world_write_port.cpp
     game/adapter_ports/choice_write_port.cpp
     game/adapter_ports/ui_write_port.cpp
-    game/adapter_ports/item_write_port.cpp
     game/adapter_ports/character_write_port.cpp
     game/adapter_ports/item_count_facade.cpp
+    game/adapter_ports/item_money_write_port.cpp
 )
 
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
