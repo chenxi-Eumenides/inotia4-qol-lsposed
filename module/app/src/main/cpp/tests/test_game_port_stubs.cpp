@@ -21,6 +21,7 @@
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
+#include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/game_ports/character_write_port.h"
 
 namespace qol::game {
@@ -91,3 +92,17 @@ const contracts::QolItemDiceWritePort& item_dice_write_port() { return kItemDice
 const contracts::QolCharacterWritePort& character_write_port() { return kCharacterWritePort; }
 
 }  // namespace qol::game
+
+namespace qol::host {
+namespace {
+
+const qol::contracts::QolItemInventoryStateWritePort kItemInventoryStateWritePort{
+    qol::contracts::kQolPortItemInventoryStateWriteVersion, nullptr, nullptr, nullptr, nullptr};
+
+}  // namespace
+
+const qol::contracts::QolItemInventoryStateWritePort& item_inventory_state_write_port() {
+    return kItemInventoryStateWritePort;
+}
+
+}  // namespace qol::host

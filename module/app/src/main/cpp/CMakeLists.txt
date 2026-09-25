@@ -77,6 +77,7 @@ add_library(gamebridge SHARED
     game/ops/game_ops_common.cpp
     game/ops/item_dice.cpp
     game/ops/item_money.cpp
+    game/ops/item_inventory_state_write.cpp
     game/state/game_state.cpp
     game/nav/game_nav.cpp
     core/native/game_cache.cpp
@@ -119,6 +120,7 @@ if(NOT QOL_KERNEL_ONLY)
     target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
     target_sources(gamebridge PRIVATE bridge/native/gamebridge_core_data.cpp)
     target_sources(gamebridge PRIVATE game/adapter_ports/item_write_port.cpp)
+    target_sources(gamebridge PRIVATE host/item_inventory_state_write_port.cpp)
 endif()
 target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 

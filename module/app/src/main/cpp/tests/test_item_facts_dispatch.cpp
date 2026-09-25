@@ -10,6 +10,7 @@
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
+#include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
 #include "contracts/host_sdk.h"
@@ -88,6 +89,16 @@ std::string expected_inventory_with_count(uint32_t count) {
     return inventory;
 }
 
+std::string expected_raw_inventory_with_count(uint32_t count) {
+    std::string inventory(kInventoryJson);
+    const std::string old_count = "\"count\":3,";
+    const size_t position = inventory.find(old_count);
+    if (position != std::string::npos) {
+        inventory.replace(position, old_count.size(), "\"count\":" + std::to_string(count) + ",");
+    }
+    return inventory;
+}
+
 bool g_in_world = true;
 int32_t g_static_ready = 1;
 uint32_t g_canonical_count = 3;
@@ -104,6 +115,13 @@ uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
 uint32_t g_post_payload_size = 0;
 QolItemWriteArgs g_last_write{};
 int g_write_calls = 0;
+qol::contracts::QolItemInventoryStateWriteResult g_state_write_data{};
+QolResult g_state_write_result = qol::contracts::ok();
+int g_state_write_calls = 0;
+int g_state_write_kind = -1;
+int32_t g_state_write_arg0 = -1;
+int32_t g_state_write_arg1 = -1;
+int32_t g_state_write_count = 2;
 
 QolResult unsupported() { return qol::contracts::error(kQolErrUnsupported, "stub", 4); }
 QolResult stub_category(const void*, int32_t*) { return unsupported(); }
@@ -243,8 +261,54 @@ QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capa
 const QolItemWritePort kFakeWritePort{qol::contracts::kQolPortItemWriteVersion,
                                       {&fake_item_write}};
 
+QolResult fake_state_write(int32_t kind, int32_t arg0, int32_t arg1,
+                           qol::contracts::QolItemInventoryStateWriteResult* out) {
+    ++g_state_write_calls;
+    g_state_write_kind = kind;
+    g_state_write_arg0 = arg0;
+    g_state_write_arg1 = arg1;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = g_state_write_data;
+    if (!qol::contracts::succeeded(g_state_write_result)) return g_state_write_result;
+    g_original_count = static_cast<uint32_t>(g_state_write_count);
+    return qol::contracts::ok();
+}
+
+QolResult fake_state_use(int32_t bag, int32_t slot,
+                         qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUseItem),
+                            bag, slot, out);
+}
+
+QolResult fake_state_sell(int32_t bag, int32_t slot,
+                          qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kSellItem),
+                            bag, slot, out);
+}
+
+QolResult fake_state_discard(int32_t bag, int32_t slot,
+                             qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kDiscardItem),
+                            bag, slot, out);
+}
+
+QolResult fake_state_shop_buy(int32_t slot,
+                              qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kShopBuy),
+                            slot, -1, out);
+}
+
+const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
+    qol::contracts::kQolPortItemInventoryStateWriteVersion,
+    &fake_state_use,
+    &fake_state_sell,
+    &fake_state_discard,
+    &fake_state_shop_buy,
+};
+
 const void* const kPortArray[] = {
-    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeWritePort};
+    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeWritePort,
+    &kFakeItemStateWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -386,7 +450,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 4;
+    ctx.port_count = 5;
     return ctx;
 }
 
@@ -430,14 +494,89 @@ void test_write_routes() {
                         0, &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(status == 200 && g_post_payload_size > 0 && g_result_handler != nullptr);
     CHECK(descriptor.http_query_count == 19);
-    char result[256]{};
+    char result[8192]{};
     uint32_t result_size = 0;
 
+    g_state_write_result = qol::contracts::ok();
+    g_state_write_count = 2;
+    g_state_write_data = {};
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(std::string(result, result_size) == "{\"ok\":true}");
-    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUseItem));
-    CHECK(g_last_write.i0 == 0 && g_last_write.i1 == 1);
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(2) + "}");
+    CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUseItem));
+    CHECK(g_state_write_arg0 == 0 && g_state_write_arg1 == 1);
+    CHECK(g_write_calls == 0);
+
+    g_state_write_count = 4;
+    g_state_write_data.value = 27;
+    CHECK(dispatch_post("/api/item/inventory/sell_item", "{\"bag\":0,\"slot\":0}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"price\":27,\"state\":" + expected_raw_inventory_with_count(4) + "}");
+    CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kSellItem));
+
+    g_state_write_count = 5;
+    CHECK(dispatch_post("/api/item/inventory/discard_item", "{\"bag\":0,\"slot\":0}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(5) + "}");
+    CHECK(g_state_write_kind ==
+          static_cast<int32_t>(qol::contracts::QolItemWriteKind::kDiscardItem));
+
+    g_state_write_count = 6;
+    g_state_write_data.value = 31;
+    CHECK(dispatch_post("/api/item/shop/buy_item", "{\"slot\":2}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"price\":31,\"state\":" + expected_raw_inventory_with_count(6) + "}");
+    CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kShopBuy));
+
+    g_state_write_count = 3;
+    g_state_write_data = {};
+    g_state_write_data.flags = qol::contracts::kQolItemInventoryStateHasGained;
+    g_state_write_data.gained_count = 1;
+    g_state_write_data.gained[0] = {4, 2, 75, 3};
+    CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"gained\":[{\"bag\":4,\"slot\":2,\"category\":75,\"count\":3}],\"state\":" +
+              expected_raw_inventory_with_count(3) + "}");
+
+    g_state_write_data = {};
+    g_state_write_result = qol::contracts::error(kQolErrBlocked, "on cooldown", 11);
+    CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext state_context{};
+    state_context.handler = g_result_handler;
+    state_context.payload_size = g_post_payload_size;
+    std::memcpy(state_context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command state_command{
+        "core.item kUseItem", nullptr, &state_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket state_ticket = qol::infra::post(state_command);
+    CHECK(state_ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(state_ticket) == qol::infra::CommandState::kFailed);
+    char state_error[128]{};
+    uint32_t state_error_size = 0;
+    CHECK(qol::infra::read_result(state_ticket, state_error, sizeof(state_error), &state_error_size));
+    CHECK(std::string(state_error, state_error_size) ==
+          "{\"ok\":false,\"error\":\"on cooldown\"}");
+    qol::infra::command_queue_reset_for_test();
+    g_state_write_result = qol::contracts::ok();
+
 
     CHECK(dispatch_post("/api/item/inventory/reject_dice", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
@@ -546,7 +685,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
-    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 7);
+    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 6);
 
     g_money_write_result = qol::contracts::error(kQolErrUnsupported, "symbol not resolved", 19);
     result_size = 0;

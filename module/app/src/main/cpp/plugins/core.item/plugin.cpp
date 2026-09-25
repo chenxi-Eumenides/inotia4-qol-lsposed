@@ -15,6 +15,7 @@
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
+#include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/http.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_count.h"
@@ -82,6 +83,7 @@ const contracts::QolItemPort* g_port = nullptr;
 const contracts::QolItemWritePort* g_item_write = nullptr;
 const contracts::QolItemMoneyWritePort* g_item_money_write = nullptr;
 const contracts::QolItemDiceWritePort* g_item_dice_write = nullptr;
+const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
 // 写命令的票据结果处理器 id（全局 typed handler id 空间；core.item 前缀）。
 constexpr uint32_t kItemWriteHandlerId = 0x49540001;
 uint64_t g_frame_task = 0;
@@ -201,6 +203,9 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortItemDiceWriteVersion.minor}},
     {contracts::QolPortId::QOL_PORT_ITEM_WRITE,
      {contracts::kQolPortItemWriteVersion.major, contracts::kQolPortItemWriteVersion.minor}},
+    {contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE,
+     {contracts::kQolPortItemInventoryStateWriteVersion.major,
+      contracts::kQolPortItemInventoryStateWriteVersion.minor}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -974,17 +979,112 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
     return response_body(response, ack.data(), static_cast<uint32_t>(ack.size()));
 }
 
+bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, char* out,
+                                       uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr || g_item_state_write == nullptr) return false;
+    *out_size = 0;
+    contracts::QolItemInventoryStateWriteResult operation_data{};
+    QolResult operation = contracts::error(kQolErrUnsupported, "item operation unavailable", 26);
+    const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    switch (kind) {
+        case contracts::QolItemWriteKind::kUseItem:
+            operation = g_item_state_write->use_item(args.i0, args.i1, &operation_data);
+            break;
+        case contracts::QolItemWriteKind::kSellItem:
+            operation = g_item_state_write->sell_item(args.i0, args.i1, &operation_data);
+            break;
+        case contracts::QolItemWriteKind::kDiscardItem:
+            operation = g_item_state_write->discard_item(args.i0, args.i1, &operation_data);
+            break;
+        case contracts::QolItemWriteKind::kShopBuy:
+            operation = g_item_state_write->shop_buy(args.i0, &operation_data);
+            break;
+        default:
+            return false;
+    }
+
+    if (!contracts::succeeded(operation)) {
+        const char* message = operation.message != nullptr ? operation.message : "item operation failed";
+        const uint32_t message_size = operation.message != nullptr
+                                          ? operation.message_len
+                                          : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+
+    char inventory[kInventoryCapacity]{};
+    uint32_t inventory_size = 0;
+    const QolResult inventory_result =
+        serialize_inventory_json(inventory, kInventoryCapacity, &inventory_size);
+    if (!contracts::succeeded(inventory_result)) {
+        const char* message = inventory_result.message != nullptr ? inventory_result.message
+                                                                    : "inventory state unavailable";
+        const uint32_t message_size = inventory_result.message != nullptr
+                                          ? inventory_result.message_len
+                                          : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+
+    std::string body = "{\"ok\":true";
+    if (kind == contracts::QolItemWriteKind::kUseItem &&
+        (operation_data.flags & contracts::kQolItemInventoryStateHasGained) != 0) {
+        if (operation_data.gained_count > contracts::kQolItemInventoryStateGainedCapacity) {
+            constexpr char kBadGained[] = "{\"ok\":false,\"error\":\"invalid gained item count\"}";
+            (void)copy_buffer(out, capacity, out_size, kBadGained, sizeof(kBadGained) - 1);
+            return false;
+        }
+        body += ",\"gained\":[";
+        for (uint32_t i = 0; i < operation_data.gained_count; ++i) {
+            if (i != 0) body.push_back(',');
+            const auto& item = operation_data.gained[i];
+            body += "{\"bag\":" + std::to_string(item.bag) +
+                    ",\"slot\":" + std::to_string(item.slot) +
+                    ",\"category\":" + std::to_string(item.category) +
+                    ",\"count\":" + std::to_string(item.count) + "}";
+        }
+        body.push_back(']');
+    }
+    if (kind == contracts::QolItemWriteKind::kSellItem ||
+        kind == contracts::QolItemWriteKind::kShopBuy) {
+        body += ",\"price\":" + std::to_string(operation_data.value);
+    }
+    body += ",\"state\":";
+    body.append(inventory, inventory_size);
+    body.push_back('}');
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return true;
+}
+
 bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
     if (payload == nullptr || size != sizeof(contracts::QolItemWriteArgs) || out == nullptr ||
-        out_size == nullptr || g_item_write == nullptr || g_item_write->read.write == nullptr ||
-        g_item_money_write == nullptr || g_item_money_write->set_money == nullptr ||
-        g_item_dice_write == nullptr || g_item_dice_write->reject == nullptr) {
+        out_size == nullptr) {
         return false;
     }
     contracts::QolItemWriteArgs args{};
     std::memcpy(&args, payload, size);
+    const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    if (kind == contracts::QolItemWriteKind::kUseItem ||
+        kind == contracts::QolItemWriteKind::kSellItem ||
+        kind == contracts::QolItemWriteKind::kDiscardItem ||
+        kind == contracts::QolItemWriteKind::kShopBuy) {
+        return write_item_inventory_state_result(args, out, capacity, out_size);
+    }
+    if (g_item_write == nullptr || g_item_write->read.write == nullptr ||
+        g_item_money_write == nullptr || g_item_money_write->set_money == nullptr ||
+        g_item_dice_write == nullptr || g_item_dice_write->reject == nullptr) {
+        return false;
+    }
     if (args.kind == static_cast<int32_t>(contracts::QolItemWriteKind::kRejectDice)) {
         const QolResult operation = g_item_dice_write->reject();
         const char* body = kDiceRejectSuccess;
@@ -1089,13 +1189,14 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_item_write = nullptr;
     g_item_money_write = nullptr;
     g_item_dice_write = nullptr;
+    g_item_state_write = nullptr;
     g_frame_task = 0;
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
-        ctx.port_count != 4 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
-        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr) {
+        ctx.port_count != 5 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
+        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr || ctx.ports[4] == nullptr) {
         g_sdk = nullptr;
         return 1;
     }
@@ -1143,6 +1244,21 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
+    g_item_state_write =
+        static_cast<const contracts::QolItemInventoryStateWritePort*>(ctx.ports[4]);
+    if (!contracts::satisfies(g_item_state_write->abi_version,
+                              {contracts::kQolPortItemInventoryStateWriteVersion.major,
+                               contracts::kQolPortItemInventoryStateWriteVersion.minor}) ||
+        g_item_state_write->use_item == nullptr || g_item_state_write->sell_item == nullptr ||
+        g_item_state_write->discard_item == nullptr || g_item_state_write->shop_buy == nullptr) {
+        g_port = nullptr;
+        g_item_write = nullptr;
+        g_item_money_write = nullptr;
+        g_item_dice_write = nullptr;
+        g_item_state_write = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
     if (g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 9 ||
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
@@ -1152,6 +1268,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_item_write = nullptr;
         g_item_money_write = nullptr;
         g_item_dice_write = nullptr;
+        g_item_state_write = nullptr;
         g_sdk = nullptr;
         return 1;
     }
@@ -1169,6 +1286,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_item_write = nullptr;
     g_item_money_write = nullptr;
     g_item_dice_write = nullptr;
+    g_item_state_write = nullptr;
     g_sdk = nullptr;
 }
 
@@ -1219,7 +1337,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,
     kPorts,
-    4,
+    5,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
 };

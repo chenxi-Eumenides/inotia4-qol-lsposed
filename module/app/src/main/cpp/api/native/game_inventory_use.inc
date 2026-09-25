@@ -1,142 +1,18 @@
 std::string data_op_use_item(int bag, int slot) {
     if (!game_in_world()) return op_err("not in game");
-    // D2b：投影同步经能力接口现取；能力缺失 = EB disabled（无模块视图），跳过同步等价。
-    // 扩展物品使用本身走 port（use_item 为 std::string 面，契约 v1.0 不含，D2d 收口）。
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
     if (bag == 5) return op_err("task bag excluded");
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return op_err("slot empty");
-    if (item_ref.kind == InventoryItemKind::kExtension) {
-        return extension_bag_use_item(bag, slot);
+    if (item_ref.kind == InventoryItemKind::kExtension) return extension_bag_use_item(bag, slot);
+    qol::contracts::QolItemInventoryStateWriteResult result{};
+    const QolResult operation = qol::game::ops::use_item(bag, slot, &result);
+    if (!qol::contracts::succeeded(operation)) {
+        return op_err(operation.message != nullptr ? operation.message : "item use failed");
     }
-    if (const char* ui = ui_blocked()) {
-        std::string err = "ui occupied: ";
-        err += ui;
-        return op_err(err.c_str());
+    if ((result.flags & qol::contracts::kQolItemInventoryStateHasGained) == 0) {
+        return "{\"ok\":true}";
     }
-    if (fn_get_bit == nullptr) return op_err("symbol not resolved");
-    void* item = item_ref.native_item;
-    const int category = item_ref.category;
-    // 弹窗链检查（API 直连确认回调核心，不调用确认弹窗）：原版使用按钮两类——
-    //   ① 普通物品 UIEquip_ButtonUseExe(0xb80b8) 直接调 CHAR_UseItemEx（无弹窗）；
-    //   ② IsUseAfterConfirm 类物品 UIEquip_ButtonUseAfterConfirmExe(0xb95f8) 先关详情
-    //      面板再弹 YesNo 确认（UIEquip_ConfirmUseItem 0xb943c），其 OK 回调
-    //      UIEquip_OKConfrimUseItem(0xb8478) = INVEN_FindItemSlot 重新定位物品后调
-    //      CHAR_UseItemEx（game_symbols.h 反汇编结论）。
-    //   即两类按钮的实质执行体都是 CHAR_UseItemEx，弹窗前步骤全部是 UI 收尾（关面板、
-    //   弹框），无业务副作用；CHAR_UseItemEx(0xeb670) 函数体内无任何 UIPopupMsg_Create*
-    //   调用（objdump 核实）。API 已持有 item 指针，直调 CHAR_UseItemEx 即确认回调的
-    //   核心逻辑，跳过弹窗与 UI 收尾是安全的。
-    // 解封/开箱/骰子类物品 fn_is_use 返回 0（IsUseAfterConfirm 判定集不含这些类别），
-    // 但它们有自己的独立使用路径，不受 fn_is_use 限制
-    bool sealed_or_box = (fn_is_sealed != nullptr && fn_is_sealed(category)) ||
-                         (fn_is_item_box != nullptr && fn_is_item_box(category)) ||
-                         (fn_is_dice != nullptr && fn_is_dice(category));
-    // 佣兵徽章（R-63）：ITEMDATA_IsUse 只认 +2∈{0x16,0x17}，徽章 +2=0x1d 返回 0，
-    // 但其效果在独立的原版佣兵徽章按钮链，不受 fn_is_use 限制。
-    const bool mercenary_seal =
-        fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(category);
-    if (!sealed_or_box && !mercenary_seal && fn_is_use != nullptr && !fn_is_use(category))
-        return op_err("item not usable");
-
-    void* leader = member_or_null(0);
-
-    // 按 UIEquip_SetDescMenu 按钮判定链分派（权威：反汇编 UI 按钮显隐逻辑）
-    // 骰子（0x34-0x38）— 两段式：掷骰只生成 pending 返回变化量（不应用），接受/拒绝由 dice-accept/dice-reject 端点处理
-    if (fn_is_dice != nullptr && fn_is_dice(category)) {
-        if (fn_status_dice_roll == nullptr || fn_get_stat_base == nullptr)
-            return op_err("symbol not resolved");
-        if (leader == nullptr) return op_err("no leader");
-        // 有未确认结果时拒绝再掷（flag bit0，ButtonRollExe 置位/Create+Apply 复位）
-        uint8_t* flag = *reinterpret_cast<uint8_t**>(g_base + G_STATUSDICE_FLAG_GOT_VMA);
-        if (flag != nullptr && (*flag & 1u)) return op_err("dice result pending, accept or reject first");
-        int8_t char_idx = *reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(leader) + C_CLASS);
-        int type = category - 0x34;
-        if (char_idx < 0 || char_idx > 5) return op_err("bad char");
-        if (type < 0 || type > 4) return op_err("bad dice type");
-        int base[5];
-        for (int i = 0; i < 5; ++i) base[i] = fn_get_stat_base(leader, i);
-        if (!fn_status_dice_roll(char_idx, type)) return op_err("dice roll failed");
-        int8_t* pending = *reinterpret_cast<int8_t**>(g_base + G_STATUSDICE_PENDING_GOT_VMA);
-        if (pending == nullptr) return op_err("dice result missing");
-        // 无 pending 时掷骰即消耗（原版 ButtonRollExe 语义），置 flag 待确认
-        if (fn_consume_item != nullptr) fn_consume_item(item);
-        if (flag != nullptr) *flag |= 1u;
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
-        std::string s = "{\"ok\":true,\"base\":[";
-        for (int i = 0; i < 5; ++i) {
-            if (i > 0) s += ",";
-            s += std::to_string(base[i]);
-        }
-        s += "],\"pending\":[";
-        for (int i = 0; i < 5; ++i) {
-            if (i > 0) s += ",";
-            s += std::to_string(pending[i]);
-        }
-        s += "],\"delta\":[";
-        for (int i = 0; i < 5; ++i) {
-            if (i > 0) s += ",";
-            s += std::to_string(pending[i] - base[i]);
-        }
-        s += "]}";
-        return s;
-    }
-    // 解封（0x3a6-0x3ab）— ITEMSYSTEM_ReleaseSealed 独立路径，成功后手动消耗
-    if (fn_is_sealed != nullptr && fn_is_sealed(category) && fn_release_sealed != nullptr) {
-        void* before[96] = {nullptr};
-        for_each_bag_slot([](void* item, int b, int j, void* c) -> bool {
-            static_cast<void**>(c)[b * 16 + j] = item;
-            return false;
-        }, before);
-        int ok = fn_release_sealed(category);
-        if (ok) {
-            if (fn_consume_item != nullptr) fn_consume_item(item);
-            if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
-            return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
-        }
-        return op_err("release sealed failed");
-    }
-    // 开箱（0x3ef-0x3f1）— ITEMSYSTEM_OpenItemBox 独立路径，成功后手动消耗
-    if (fn_is_item_box != nullptr && fn_is_item_box(category) && fn_open_item_box != nullptr) {
-        void* before[96] = {nullptr};
-        for_each_bag_slot([](void* item, int b, int j, void* c) -> bool {
-            static_cast<void**>(c)[b * 16 + j] = item;
-            return false;
-        }, before);
-        int ok = fn_open_item_box(category);
-        if (ok) {
-            if (fn_consume_item != nullptr) fn_consume_item(item);
-            if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
-            return "{\"ok\":true,\"gained\":[" + inventory_gained_json(before) + "]}";
-        }
-        return op_err("open box failed");
-    }
-
-    // 佣兵徽章（R-63，category 42..50 / 928..933）：效果只在原版
-    // UIEquip_ButtonUseMercenarySealExe→MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx
-    // 不实现；按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗由
-    // MakeMercenary 内部 INVEN_RemoveItem（H-04，扩展物品走扩展删除）承接。
-    // API 无 UI 上下文：失败返回明确错误，成功不弹原版 UI 弹窗。
-    if (mercenary_seal) {
-        if (fn_save_is_ok == nullptr || fn_mercenary_is_empty_manager_slot == nullptr ||
-            fn_mercenary_make_mercenary == nullptr)
-            return op_err("symbol not resolved");
-        if (fn_save_is_ok() == 0) return op_err("save busy");
-        if (fn_mercenary_is_empty_manager_slot() == 0) return op_err("mercenary slots full");
-        if (fn_mercenary_make_mercenary(item) == nullptr) return op_err("make mercenary failed");
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
-        return op_ok();
-    }
-
-    // 其余类型：CHAR_UseItemEx — 药水/卷轴/技能书/配方书/佣兵卡/增益/超药水/打包物
-    //   内部成功时已调 INVEN_ConsumeItem；失败（CD/状态不符）不消耗
-    if (leader == nullptr) return op_err("no leader");
-    if (fn_char_use_item_ex == nullptr) return op_err("symbol not resolved");
-    int ok = fn_char_use_item_ex(leader, item, 0);
-    // 用药成功且药水教学激活（obj170==6）→ 复现官方 0xec340 教学完成链（CHAR_ProcessShortcut 用药后检查）
-    if (ok && tutorial_state() == 6) tutorial_cancel();
-    if (ok && eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
-    return ok ? op_ok() : op_err("on cooldown");
+    return "{\"ok\":true,\"gained\":[" + inventory_gained_json(result) + "]}";
 }
 std::string data_op_dice_accept() {
     if (!game_in_world()) return op_err("not in game");

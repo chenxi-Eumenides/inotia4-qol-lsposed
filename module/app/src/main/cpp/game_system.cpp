@@ -943,14 +943,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
     std::string op;
     std::string state;
     switch (static_cast<contracts::QolItemWriteKind>(args.kind)) {
-        case contracts::QolItemWriteKind::kUseItem:
-            op = data_op_use_item(args.i0, args.i1);
-            state = build_inventory_json();
-            break;
-        case contracts::QolItemWriteKind::kSellItem:
-            op = data_op_sell_item(args.i0, args.i1);
-            state = build_inventory_json();
-            break;
         case contracts::QolItemWriteKind::kMoveItem:
             if ((args.i0 >= 6 && args.i0 <= 10) || (args.i3 >= 6 && args.i3 <= 10)) {
                 const contracts::ExtensionBagApi* eb = extension_bag_capability();
@@ -978,10 +970,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
                 state = build_inventory_json();
             }
             break;
-        case contracts::QolItemWriteKind::kDiscardItem:
-            op = data_op_discard_item(args.i0, args.i1);
-            state = build_inventory_json();
-            break;
         case contracts::QolItemWriteKind::kAcceptDice:
             op = data_op_dice_accept();
             state = build_player_json();
@@ -1001,10 +989,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
         case contracts::QolItemWriteKind::kEnchant:
             op = data_op_enchant(args.i0, args.i1, args.i2, args.i3);
             state = build_party_json();
-            break;
-        case contracts::QolItemWriteKind::kShopBuy:
-            op = data_op_shop_buy(args.i0);
-            state = build_inventory_json();
             break;
         case contracts::QolItemWriteKind::kAddItem:
             op = data_op_add_item(args.i0, args.i1, args.i2, args.i3, args.i4);

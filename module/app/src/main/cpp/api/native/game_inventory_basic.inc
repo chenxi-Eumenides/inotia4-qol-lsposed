@@ -1,32 +1,15 @@
 // ---- 辅助定义（背包共用）----
-std::string inventory_gained_json(void* const* before) {
-    if (fn_get_bit == nullptr || fn_get_cumulate_count == nullptr) {
-        QOL_LOG_WARN(QolDomain::kInventory, "inventory_gained_json: fn_get_bit/fn_get_cumulate_count not resolved");
-        return std::string();
-    }
+std::string inventory_gained_json(
+    const qol::contracts::QolItemInventoryStateWriteResult& result) {
     std::string s;
-    int n = 0;
-    struct Ctx { void* const* before; std::string* s; int* n; } ctx{before, &s, &n};
-    for_each_bag_slot([](void* item, int b, int j, void* c) -> bool {
-        Ctx* p = static_cast<Ctx*>(c);
-        // ITEM_GetCumulateCount 自动适配 patch：可堆叠返回数量、装备/不可堆叠返回 1（已归一化）
-        int count = fn_get_cumulate_count(item);
-        void* old = p->before[b * 16 + j];
-        if (old == item) {
-            count -= fn_get_cumulate_count(old);
-            if (count <= 0) return false;
-        } else if (old != nullptr) {
-            return false;  // 同槽不同指针：旧物品被消耗/替换，非新增
-        }
-        if (*p->n > 0) *p->s += ",";
-        uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        *p->s += "{\"bag\":" + std::to_string(b);
-        *p->s += ",\"slot\":" + std::to_string(j);
-        *p->s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
-        *p->s += ",\"count\":" + std::to_string(count) + "}";
-        ++*p->n;
-        return false;
-    }, &ctx);
+    for (uint32_t i = 0; i < result.gained_count; ++i) {
+        if (i != 0) s.push_back(',');
+        const auto& item = result.gained[i];
+        s += "{\"bag\":" + std::to_string(item.bag) +
+             ",\"slot\":" + std::to_string(item.slot) +
+             ",\"category\":" + std::to_string(item.category) +
+             ",\"count\":" + std::to_string(item.count) + "}";
+    }
     return s;
 }
 
