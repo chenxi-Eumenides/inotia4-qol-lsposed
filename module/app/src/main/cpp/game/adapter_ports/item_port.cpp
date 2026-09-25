@@ -11,11 +11,12 @@
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/access/world.h"
+#include "game/read/item_class.h"
 #include "game/state/game_state.h"
 
-// 库存/商店 JSON 构造器实现仍在 legacy 的 api/native（收口前先声明，避免 game 层 include
-// legacy 头）。只允许游戏主线程调用；经 item_facts 的主线程快照发布，HTTP 线程不直接调用。
+// JSON 构造器仍供未迁移的 game-system write/cache 路径使用；core.item owner 不用此入口。
 std::string build_inventory_json();
 std::string data_shop_items_json();
 
@@ -118,6 +119,61 @@ QolResult read_inventory_json(char* out, uint32_t capacity, uint32_t* out_size) 
     return copy_json(build_inventory_json(), out, capacity, out_size);
 }
 
+QolResult read_inventory_item_view(const void* item, contracts::QolItemInventoryView* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid item view args");
+    }
+    *out = {};
+    const auto* bytes = static_cast<const uint8_t*>(item);
+    const uint16_t type_flags = *reinterpret_cast<const uint16_t*>(bytes + I_TYPE);
+    out->type_flags = type_flags;
+    out->raw_rarity = (type_flags >> 2) & 0x0F;
+    if (fn_get_bit != nullptr) {
+        out->fields |= contracts::kQolItemInventoryHasCategory;
+        out->category = static_cast<int32_t>(fn_get_bit(type_flags, 15, 6));
+    }
+    out->count_supported = fn_get_cumulate_count != nullptr ||
+                           item_count_api_if_resident() != nullptr;
+    out->equip = item_is_equip(const_cast<void*>(item)) ? 1 : 0;
+    if (fn_get_rarity != nullptr) {
+        out->fields |= contracts::kQolItemInventoryHasRarity;
+        out->rarity = fn_get_rarity(const_cast<void*>(item));
+    }
+    if (fn_get_damage != nullptr) {
+        out->fields |= contracts::kQolItemInventoryHasDamage;
+        out->damage = fn_get_damage(const_cast<void*>(item));
+    }
+    if (fn_get_defense != nullptr) {
+        out->fields |= contracts::kQolItemInventoryHasDefense;
+        out->defense = fn_get_defense(const_cast<void*>(item));
+    }
+    out->magic_rate = bytes[I_MAGIC_RATE];
+    if (fn_item_get_ability_level != nullptr) {
+        out->fields |= contracts::kQolItemInventoryHasNeedLevel;
+        out->need_level = fn_item_get_ability_level(const_cast<void*>(item));
+    }
+    out->socket = bytes[I_SOCKET];
+    out->socket_filled = out->socket & 0x0F;
+    out->socket_total = (out->socket >> 4) & 0x0F;
+    const uint16_t enchant = *reinterpret_cast<const uint16_t*>(bytes + I_ENCHANT);
+    out->enchant = enchant;
+    out->chaos = (enchant & 1u) != 0 ? 1 : 0;
+    out->enchant_id = (enchant >> 11) & 0x1F;
+    out->enchant_level = (enchant >> 6) & 0x1F;
+    const uint32_t count_field = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
+    out->chaos_level = count_field & 0xFF;
+    out->chaos_rate = (count_field >> 8) & 0xFF;
+    const auto* option = *reinterpret_cast<const uint8_t* const*>(bytes + I_OPTION_LIST);
+    while (option != nullptr && out->option_count < contracts::kQolItemInventoryOptionCapacity) {
+        const uint16_t index = *reinterpret_cast<const uint16_t*>(option + O_INDEX);
+        out->options[out->option_count++] = contracts::QolItemInventoryOptionView{
+            *reinterpret_cast<const int16_t*>(option + O_VALUE), index & 0x7F,
+            (index >> 13) & 0x7};
+        option = *reinterpret_cast<const uint8_t* const*>(option + O_NEXT);
+    }
+    return contracts::ok();
+}
+
 QolResult read_money(int64_t* out) {
     if (out == nullptr || !world_money_ready()) return not_ready();
     *out = world_money();
@@ -164,8 +220,8 @@ const contracts::QolItemPort kItemPort{
     contracts::kQolPortItemVersion,
     {&read_category, &read_real_equip, &read_jewel_category, &read_no_sell, &read_sell_price,
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_context,
-     &read_cursor_index, &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
-     &read_static_text, &read_static_ready},
+      &read_cursor_index, &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
+      &read_static_text, &read_static_ready, &read_inventory_item_view},
 };
 
 }  // namespace

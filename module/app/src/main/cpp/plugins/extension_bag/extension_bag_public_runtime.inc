@@ -604,6 +604,19 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     }
 }
 
+bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
+    if (out_capacity == nullptr || !virtual_bag::valid_extension_logical_bag(logical_bag) ||
+        !g_virtual_bag_enabled.load() || !read_world_in_world()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    ensure_state_loaded_locked();
+    const int internal_bag = virtual_bag::extension_internal_bag(logical_bag);
+    if (!virtual_bag::valid_index(internal_bag)) return false;
+    *out_capacity = g_virtual_bag_state.capacities[internal_bag];
+    return true;
+}
+
 std::string data_virtual_bag_ui_status_json() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!read_world_in_world()) {

@@ -11,6 +11,7 @@
 #include "infra/log/qol_log.h"
 #include "contracts/sell_price.h"
 #include "game/access/game_access.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/state/game_state.h"
 #include "game/symbols/game_symbols.h"
 #include "infra/capabilities.h"
@@ -42,7 +43,7 @@ int64_t sell_price_with_fallback(const qol::contracts::ExtensionBagApi* api, voi
     if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
     uint32_t legal_count = static_cast<uint32_t>(count);
-    const qol::contracts::QolItemCountApi* item_count = qol::contracts::item_count_api();
+    const qol::contracts::QolItemCountApi* item_count = qol::game::item_count_api_if_resident();
     if (item_count != nullptr && item_count->effective != nullptr) {
         uint32_t effective = 0;
         const QolResult result = item_count->effective(item, &effective);
@@ -124,7 +125,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         return result;
     }
     uint32_t log_count = static_cast<uint32_t>(count > 0 ? count : 0);
-    const qol::contracts::QolItemCountApi* log_item_count = qol::contracts::item_count_api();
+    const qol::contracts::QolItemCountApi* log_item_count = qol::game::item_count_api_if_resident();
     if (log_item_count != nullptr && log_item_count->effective != nullptr) {
         uint32_t effective = 0;
         const QolResult effective_result = log_item_count->effective(item, &effective);

@@ -21,6 +21,7 @@
 #include "plugins/core.item/plugin.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -49,7 +50,11 @@ constexpr char kInventoryJson[] =
     "\"magic_rate\":0,\"need_level\":0,\"socket\":0,\"socket_filled\":0,\"socket_total\":0,"
     "\"enchant\":0,\"chaos\":false,\"enchant_id\":0,\"enchant_level\":0,\"chaos_level\":0,"
     "\"chaos_rate\":100,\"options\":[],\"option_ids\":[],\"option_types\":[]}],"
-    "\"capacity\":16,\"slot_count\":1}]}";
+    "\"capacity\":16,\"slot_count\":1},{\"bag\":1,\"items\":[],\"capacity\":16,\"slot_count\":0},"
+    "{\"bag\":2,\"items\":[],\"capacity\":16,\"slot_count\":0},"
+    "{\"bag\":3,\"items\":[],\"capacity\":16,\"slot_count\":0},"
+    "{\"bag\":4,\"items\":[],\"capacity\":16,\"slot_count\":0},"
+    "{\"bag\":5,\"items\":[],\"capacity\":16,\"slot_count\":0}]}";
 
 constexpr char kShopJson[] =
     "{\"items\":[{\"slot\":0,\"category\":10,\"count\":5,\"price\":15}]}";
@@ -62,8 +67,33 @@ constexpr char kExpectedItem[] =
     "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
     "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}";
 
+std::string expected_item_with_count(uint32_t count) {
+    std::string item(kExpectedItem);
+    const std::string old_count = "\"count\":3,";
+    const size_t position = item.find(old_count);
+    if (position != std::string::npos) {
+        item.replace(position, old_count.size(), "\"count\":" + std::to_string(count) + ",");
+    }
+    return item;
+}
+
+std::string expected_inventory_with_count(uint32_t count) {
+    std::string inventory = std::string("{\"bags\":[{\"bag\":0,\"items\":[") +
+        expected_item_with_count(count) + "],\"capacity\":16,\"slot_count\":1}";
+    for (int32_t bag = 1; bag < 6; ++bag) {
+        inventory += ",{\"bag\":" + std::to_string(bag) +
+                     ",\"items\":[],\"capacity\":16,\"slot_count\":0}";
+    }
+    inventory += "]}";
+    return inventory;
+}
+
 bool g_in_world = true;
 int32_t g_static_ready = 1;
+uint32_t g_canonical_count = 3;
+uint32_t g_original_count = 3;
+bool g_count_encoded = true;
+bool g_effective_fail = false;
 QolResult g_money_write_result = qol::contracts::ok();
 int64_t g_money_write_value = 0;
 QolResult g_dice_reject_result = qol::contracts::ok();
@@ -82,11 +112,40 @@ QolResult stub_is_jewel(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_no_sell(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_sell_price(const void*, int64_t*) { return unsupported(); }
 QolResult stub_cumulate(const void*, int32_t* out_count) {
-    *out_count = 7;
+    *out_count = static_cast<int32_t>(g_original_count);
     return qol::contracts::ok();
 }
-QolResult stub_item_ref(int32_t, int32_t, qol::contracts::QolInventoryItemRef*) {
-    return unsupported();
+QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryItemRef* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (bag != 0 || slot != 0) return qol::contracts::error(kQolErrNotFound, "empty", 5);
+    *out = qol::contracts::QolInventoryItemRef{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal), 0, 0, 10,
+        static_cast<int32_t>(g_canonical_count), reinterpret_cast<void*>(1)};
+    return qol::contracts::ok();
+}
+QolResult fake_inventory_item_view(const void* item,
+                                   qol::contracts::QolItemInventoryView* out) {
+    if (item == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad item view", 13);
+    }
+    *out = {};
+    out->fields = qol::contracts::kQolItemInventoryHasCategory |
+                  qol::contracts::kQolItemInventoryHasRarity |
+                  qol::contracts::kQolItemInventoryHasDamage |
+                  qol::contracts::kQolItemInventoryHasDefense |
+                  qol::contracts::kQolItemInventoryHasNeedLevel;
+    out->type_flags = 40;
+    out->raw_rarity = 0;
+    out->category = 10;
+    out->count_supported = 1;
+    out->equip = 0;
+    out->rarity = 0;
+    out->damage = 0;
+    out->defense = 0;
+    out->magic_rate = 0;
+    out->need_level = 0;
+    out->chaos_rate = 100;
+    return qol::contracts::ok();
 }
 QolResult stub_physical(int32_t, int32_t, void**) { return unsupported(); }
 QolResult stub_detail(int32_t*, int32_t*, void**) { return unsupported(); }
@@ -156,6 +215,7 @@ const QolItemPortReadApi kFakeRead{
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
     &stub_detail,     &stub_cursor,        &fake_inventory,  &fake_money,
     &fake_shop,       &fake_in_world,      &fake_static_text, &fake_static_ready,
+    &fake_inventory_item_view,
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
@@ -202,14 +262,31 @@ bool g_override_available = false;
 bool g_override_enabled = false;
 
 QolResult override_canonical(const void*, uint32_t* out_count) {
-    *out_count = 23;
+    *out_count = g_canonical_count;
+    return qol::contracts::ok();
+}
+
+QolResult override_effective(const void*, uint32_t* out_count) {
+    if (g_effective_fail) {
+        return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+    }
+    if (out_count == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    }
+    if (!g_count_encoded) {
+        *out_count = 1;
+    } else if (g_override_enabled) {
+        *out_count = std::min(g_canonical_count, 999u);
+    } else {
+        *out_count = g_canonical_count % 128u;
+    }
     return qol::contracts::ok();
 }
 
 int32_t override_enabled() { return g_override_enabled ? 1 : 0; }
 
 const qol::contracts::QolItemCountApi kOverrideItemCountApi{
-    &override_canonical, nullptr, nullptr, nullptr, nullptr, nullptr,
+    &override_canonical, &override_effective, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr,
 };
 const qol::contracts::StackLimitItemCountCapability kOverrideCapability{
@@ -593,16 +670,18 @@ void test_lifecycle_and_responses() {
         descriptor.provides[0].iface);
     int32_t count = 0;
     CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
-    CHECK(count == 7);
+    CHECK(count == 3);
     g_override_available = true;
     g_override_enabled = false;
     CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
-    CHECK(count == 7);
+    CHECK(count == 3);
+    g_canonical_count = 23;
     g_override_enabled = true;
     CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
     CHECK(count == 23);
     g_override_available = false;
     g_override_enabled = false;
+    g_canonical_count = 3;
     descriptor.on_enabled(ctx);
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
                                                      descriptor.http_query_count).ok == kQolOk);
@@ -616,11 +695,61 @@ void test_lifecycle_and_responses() {
 
     CHECK(g_scheduler.handler(100, g_scheduler.ctx) != 0);
 
-    const std::string expected_inventory =
-        std::string("{\"bags\":[{\"bag\":0,\"items\":[") + kExpectedItem +
-        "],\"capacity\":16,\"slot_count\":1}]}";
+    const std::string expected_inventory = expected_inventory_with_count(3);
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
     CHECK(status == 200);
+
+    const struct CountViewCase {
+        uint32_t canonical;
+        uint32_t disabled_view;
+        uint32_t enabled_view;
+    } count_cases[] = {{99, 99, 99}, {100, 100, 100}, {999, 103, 999}, {1023, 127, 999}};
+    g_override_available = true;
+    g_count_encoded = true;
+    for (const CountViewCase& test_case : count_cases) {
+        g_canonical_count = test_case.canonical;
+        g_override_enabled = false;
+        CHECK(g_scheduler.handler(200 + test_case.canonical, g_scheduler.ctx) != 0);
+        CHECK(dispatch_get("/api/item/inventory", &status) ==
+              expected_inventory_with_count(test_case.disabled_view));
+        CHECK(status == 200);
+        g_override_enabled = true;
+        CHECK(g_scheduler.handler(1200 + test_case.canonical, g_scheduler.ctx) != 0);
+        CHECK(dispatch_get("/api/item/inventory", &status) ==
+              expected_inventory_with_count(test_case.enabled_view));
+        CHECK(status == 200);
+        if (test_case.canonical == 1023) {
+            int32_t canonical = 0;
+            CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &canonical).ok == kQolOk);
+            CHECK(canonical == 1023);
+        }
+    }
+    g_count_encoded = false;
+    g_override_enabled = true;
+    CHECK(g_scheduler.handler(2300, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(1));
+    CHECK(status == 200);
+
+    // Capability loss and effective-count failure both fall back to the original getter.
+    g_count_encoded = true;
+    g_override_available = false;
+    g_canonical_count = 900;
+    g_original_count = 71;
+    CHECK(g_scheduler.handler(2400, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(71));
+    CHECK(status == 200);
+    g_override_available = true;
+    g_effective_fail = true;
+    g_original_count = 100;
+    CHECK(g_scheduler.handler(2500, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(100));
+    CHECK(status == 200);
+    g_effective_fail = false;
+    g_override_available = false;
+    g_override_enabled = false;
+    g_canonical_count = 3;
+    g_original_count = 3;
+    CHECK(g_scheduler.handler(2600, g_scheduler.ctx) != 0);
     CHECK(dispatch_get("/api/item/inventory/money", &status) == "{\"money\":72503}");
     CHECK(status == 200);
     CHECK(dispatch_get("/api/item/inventory/items", &status) ==
@@ -644,8 +773,9 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_template("/api/item/inventory/bag/0/5", bag_slot_empty, 2, &status) == "null");
     CHECK(status == 200);
     const qol::contracts::HttpPathParam missing_bag{"bag", 3, "5", 1};
-    (void)dispatch_template("/api/item/inventory/bag/5/info", &missing_bag, 1, &status);
-    CHECK(status == 404);
+    CHECK(dispatch_template("/api/item/inventory/bag/5/info", &missing_bag, 1, &status) ==
+          "{\"bag\":5,\"capacity\":16,\"slot_count\":0}");
+    CHECK(status == 200);
 
     // 非 world：发布与迁移前一致的 not in game 错误体（HTTP 200）。
     g_in_world = false;

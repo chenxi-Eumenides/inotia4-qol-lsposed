@@ -17,9 +17,3 @@ const contracts::QolItemCountApi* host_item_count_api_if_resident() {
 }
 
 }  // namespace qol::host
-
-namespace qol::contracts {
-
-const QolItemCountApi* item_count_api() { return qol::game::item_count_api_if_resident(); }
-
-}  // namespace qol::contracts

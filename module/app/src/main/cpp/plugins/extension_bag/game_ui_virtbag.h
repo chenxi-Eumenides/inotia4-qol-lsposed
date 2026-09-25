@@ -53,6 +53,7 @@ std::string data_op_extension_bag_click_item(int logical_bag, int slot);
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 std::string virtual_bag_inventory_bags_json();
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
+bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity);
 void* virtual_bag_item_at(int bag, int slot);
 // 按 ITEMCLASSBASE +6 bit0 统一判定 payload 数量字段是否为 S2 数量语义。
 ::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category);

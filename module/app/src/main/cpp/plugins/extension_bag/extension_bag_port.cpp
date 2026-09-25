@@ -103,6 +103,10 @@ void provider_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     virtual_bag_for_each_logical_item(fn, ctx);
 }
 
+bool provider_logical_bag_capacity(int32_t logical_bag, int32_t* out_capacity) {
+    return virtual_bag_logical_capacity(logical_bag, out_capacity);
+}
+
 void* provider_item_at(int bag, int slot) {
     return virtual_bag_item_at(bag, slot);
 }
@@ -337,6 +341,8 @@ const qol::contracts::ExtensionBagApi kExtensionBagApi{
     &virtual_bag_refresh_item_area_with_gate,
     // 8 移动写面
     &provider_move_item,
+    // 9 typed inventory view support
+    &provider_logical_bag_capacity,
 };
 
 }  // namespace

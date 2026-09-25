@@ -37,7 +37,6 @@ void append_item_attrs(std::string& s, void* item);
 // `+0x10` 数量位 128a+b（R-45），供 descriptor 物化/持久化等必须保存完整值的
 // 路径使用；运行时展示/查询视图应改走 H-17 getter（关闭态按 R-47 决策 b 只返回
 // b）。非可堆叠/类别不可用回退 getter 原版语义（装备返回 1）。
-int canonical_item_count(void* item);
 std::string build_inventory_json();
 // 仅测试/调试（GET /api/debug/item/raw）：读槽位物品原始字节并位分解输出，纯读取不写内存。
 std::string data_debug_item_raw_json(int32_t bag, int32_t slot);

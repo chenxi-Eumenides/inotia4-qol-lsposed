@@ -3,6 +3,7 @@
 #include "item_class.h"
 
 #include "contracts/item_count.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/access/game_access.h"
 #include "game_symbols.h"
 
@@ -10,7 +11,7 @@
 
 qol::contracts::QolItemCountEncoding item_count_encoding(void* item) {
     if (item == nullptr) return qol::contracts::QolItemCountEncoding::kUnknown;
-    const qol::contracts::QolItemCountApi* api = qol::contracts::item_count_api();
+    const qol::contracts::QolItemCountApi* api = qol::game::item_count_api_if_resident();
     if (api == nullptr || api->is_encoded == nullptr) {
         return qol::contracts::QolItemCountEncoding::kUnknown;
     }

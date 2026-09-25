@@ -28,7 +28,7 @@ namespace {
 
 const contracts::QolQuestPort kQuestPort{{1, 0}, {}, {}};
 const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
-const contracts::QolItemPort kItemPort{{1, 0}, {}};
+const contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion, {}};
 const contracts::QolCharacterPort kCharacterPort{{1, 0}, {}};
 const contracts::QolCharacterHttpPort kCharacterHttpPort{{1, 0}, {}};
 const contracts::QolChoicePort kChoicePort{{1, 0}, {}, {}};

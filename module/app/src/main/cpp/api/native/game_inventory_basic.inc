@@ -95,7 +95,7 @@ std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_tot
     if (count > 1) {
         // 数量按当前视图由 facade clamp 并写回；provider 未就绪或类别未知时显式失败，
         // 不以默认 0 或静默跳过代替原版写入结果。
-        const qol::contracts::QolItemCountApi* api = qol::contracts::item_count_api();
+        const qol::contracts::QolItemCountApi* api = qol::game::item_count_api_if_resident();
         if (api == nullptr || api->write_effective == nullptr) {
             fn_itempool_free(item);
             return op_err("item count provider unavailable");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 #include "../result.h"
 #include "../version.h"
@@ -23,6 +24,52 @@ struct QolInventoryItemRef {
 
 using QolInventoryBagSlotFn = int32_t (*)(const QolInventoryItemRef* item, void* ctx);
 using QolItemJsonFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_size);
+
+constexpr uint32_t kQolItemInventoryOptionCapacity = 32;
+
+enum QolItemInventoryViewField : uint32_t {
+    kQolItemInventoryHasCategory = 1u << 0,
+    kQolItemInventoryHasRarity = 1u << 1,
+    kQolItemInventoryHasDamage = 1u << 2,
+    kQolItemInventoryHasDefense = 1u << 3,
+    kQolItemInventoryHasNeedLevel = 1u << 4,
+};
+
+struct QolItemInventoryOptionView {
+    int32_t value;
+    int32_t id;
+    int32_t type;
+};
+
+struct QolItemInventoryView {
+    uint32_t fields;
+    int32_t type_flags;
+    int32_t raw_rarity;
+    int32_t category;
+    int32_t count_supported;
+    int32_t equip;
+    int32_t rarity;
+    int32_t damage;
+    int32_t defense;
+    int32_t magic_rate;
+    int32_t need_level;
+    int32_t socket;
+    int32_t socket_filled;
+    int32_t socket_total;
+    int32_t enchant;
+    int32_t chaos;
+    int32_t enchant_id;
+    int32_t enchant_level;
+    int32_t chaos_level;
+    int32_t chaos_rate;
+    uint32_t option_count;
+    QolItemInventoryOptionView options[kQolItemInventoryOptionCapacity];
+};
+
+static_assert(std::is_standard_layout<QolItemInventoryView>::value,
+              "QolItemInventoryView must remain standard layout");
+static_assert(std::is_trivially_copyable<QolItemInventoryView>::value,
+              "QolItemInventoryView must remain trivially copyable");
 
 // 启动期由 Kotlin 下发的静态名称表类别（见 StaticData → JNI → adapter port）。
 enum class QolItemStaticTextKind : int32_t {
@@ -48,7 +95,7 @@ struct QolItemPortReadApi {
     QolResult (*physical_item_at)(int32_t bag, int32_t slot, void** out_item);
     QolResult (*detail_context)(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
     QolResult (*cursor_index)(const void* control, int32_t* out_slot);
-    // 只在游戏主线程调用，由 item_facts 发布为快照；HTTP handler 不直接调用这些函数。
+    // Legacy JSON adapter retained for unmigrated game-system write/cache consumers.
     QolItemJsonFn inventory_json;
     QolResult (*money)(int64_t* out_money);
     QolItemJsonFn shop_items_json;
@@ -56,6 +103,8 @@ struct QolItemPortReadApi {
     QolItemStaticTextFn static_text;
     // 静态名称表是否已由启动期下发（owner 快照据此推迟发布，避免输出空名称）。
     QolResult (*static_ready)(int32_t* out_ready);
+    // Synchronous main-thread typed view; item pointers remain inside the adapter call path.
+    QolResult (*inventory_item_view)(const void* item, QolItemInventoryView* out_view);
 };
 
 struct QolItemPort {

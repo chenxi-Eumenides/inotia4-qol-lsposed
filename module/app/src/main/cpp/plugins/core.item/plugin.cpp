@@ -4,10 +4,13 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <array>
 #include <limits>
 #include <string>
 
 #include "contracts/commands.h"
+#include "contracts/extension_bag.h"
+#include "contracts/extension_bag.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
@@ -86,6 +89,10 @@ Snapshot<ItemSnapshot> g_snapshot;
 
 QolResult not_ready() {
     return contracts::error(kQolErrNotReady, "item facts not ready", 20);
+}
+
+QolResult error_result(int32_t code, const char* message) {
+    return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
 
 QolResult category(const void* item, int32_t* out_category) {
@@ -184,7 +191,8 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 const contracts::QolPortRequirement kPorts[] = {
-    {contracts::QolPortId::QOL_PORT_ITEM, {1, 0}},
+    {contracts::QolPortId::QOL_PORT_ITEM,
+     {contracts::kQolPortItemVersion.major, contracts::kQolPortItemVersion.minor}},
     {contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE,
      {contracts::kQolPortItemMoneyWriteVersion.major,
       contracts::kQolPortItemMoneyWriteVersion.minor}},
@@ -206,6 +214,9 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kStackLimitItemCountCapabilityId,
      {contracts::kStackLimitItemCountVersion.major,
       contracts::kStackLimitItemCountVersion.minor}},
+    {contracts::kExtensionBagCapabilityId,
+     {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+      static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)}},
 };
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
@@ -236,8 +247,283 @@ void publish_not_in_game(ItemSnapshot& snapshot) {
     g_snapshot.publish(snapshot);
 }
 
+const contracts::StackLimitItemCountCapability* stack_limit_item_count_capability() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        contracts::kStackLimitItemCountCapabilityId,
+        QolVersionRange{contracts::kStackLimitItemCountVersion.major,
+                        contracts::kStackLimitItemCountVersion.minor},
+        &iface);
+    if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
+    return static_cast<const contracts::StackLimitItemCountCapability*>(iface);
+}
+
+bool effective_item_count(const void* item, bool original_count_supported, uint32_t* out_count,
+                          bool* out_present) {
+    if (item == nullptr || out_count == nullptr || out_present == nullptr) return false;
+    *out_present = false;
+    const auto* capability = stack_limit_item_count_capability();
+    if (capability != nullptr && capability->api != nullptr &&
+        capability->api->effective != nullptr) {
+        uint32_t effective = 0;
+        const QolResult result = capability->api->effective(item, &effective);
+        if (contracts::succeeded(result)) {
+            *out_count = effective;
+            *out_present = true;
+            return true;
+        }
+    }
+
+    if (g_port != nullptr && g_port->read.cumulate_count != nullptr) {
+        int32_t original_count = 0;
+        const QolResult result = g_port->read.cumulate_count(item, &original_count);
+        if (contracts::succeeded(result)) {
+            *out_count = static_cast<uint32_t>(original_count);
+            *out_present = true;
+            return true;
+        }
+        if (original_count_supported) return false;
+    } else if (original_count_supported) {
+        return false;
+    }
+    return true;
+}
+
+void append_inventory_item(std::string* out, int32_t slot,
+                           const contracts::QolItemInventoryView& item, bool count_present,
+                           uint32_t count) {
+    out->append("{\"slot\":");
+    *out += std::to_string(slot);
+    out->append(",\"type_flags\":");
+    *out += std::to_string(item.type_flags);
+    out->append(",\"raw_rarity\":");
+    *out += std::to_string(item.raw_rarity);
+    if ((item.fields & contracts::kQolItemInventoryHasCategory) != 0) {
+        out->append(",\"category\":");
+        *out += std::to_string(item.category);
+    }
+    if (count_present) {
+        out->append(",\"count\":");
+        *out += std::to_string(count);
+    }
+    out->append(item.equip != 0 ? ",\"equip\":true" : ",\"equip\":false");
+    if ((item.fields & contracts::kQolItemInventoryHasRarity) != 0) {
+        out->append(",\"rarity\":");
+        *out += std::to_string(item.rarity);
+    }
+    if ((item.fields & contracts::kQolItemInventoryHasDamage) != 0) {
+        out->append(",\"damage\":");
+        *out += std::to_string(item.damage);
+    }
+    if ((item.fields & contracts::kQolItemInventoryHasDefense) != 0) {
+        out->append(",\"defense\":");
+        *out += std::to_string(item.defense);
+    }
+    out->append(",\"magic_rate\":");
+    *out += std::to_string(item.magic_rate);
+    if ((item.fields & contracts::kQolItemInventoryHasNeedLevel) != 0) {
+        out->append(",\"need_level\":");
+        *out += std::to_string(item.need_level);
+    }
+    out->append(",\"socket\":");
+    *out += std::to_string(item.socket);
+    out->append(",\"socket_filled\":");
+    *out += std::to_string(item.socket_filled);
+    out->append(",\"socket_total\":");
+    *out += std::to_string(item.socket_total);
+    out->append(",\"enchant\":");
+    *out += std::to_string(item.enchant);
+    out->append(item.chaos != 0 ? ",\"chaos\":true" : ",\"chaos\":false");
+    out->append(",\"enchant_id\":");
+    *out += std::to_string(item.enchant_id);
+    out->append(",\"enchant_level\":");
+    *out += std::to_string(item.enchant_level);
+    out->append(",\"chaos_level\":");
+    *out += std::to_string(item.chaos_level);
+    out->append(",\"chaos_rate\":");
+    *out += std::to_string(item.chaos_rate);
+
+    out->append(",\"options\":[");
+    for (uint32_t index = 0; index < item.option_count; ++index) {
+        if (index != 0) out->push_back(',');
+        *out += std::to_string(item.options[index].value);
+    }
+    out->append("],\"option_ids\":[");
+    for (uint32_t index = 0; index < item.option_count; ++index) {
+        if (index != 0) out->push_back(',');
+        *out += std::to_string(item.options[index].id);
+    }
+    out->append("],\"option_types\":[");
+    for (uint32_t index = 0; index < item.option_count; ++index) {
+        if (index != 0) out->push_back(',');
+        *out += std::to_string(item.options[index].type);
+    }
+    out->append("]}");
+}
+
+struct ExtensionInventorySlot {
+    bool occupied = false;
+    int32_t category = 0;
+    int32_t count = 0;
+};
+
+struct ExtensionInventoryItems {
+    ExtensionInventorySlot slots[5][16]{};
+    bool invalid = false;
+};
+
+bool collect_extension_inventory_item(int32_t bag, int32_t slot, int32_t category,
+                                      int32_t count, void* raw_context) {
+    auto* context = static_cast<ExtensionInventoryItems*>(raw_context);
+    if (context == nullptr || bag < 6 || bag > 10 || slot < 0 || slot >= 16 ||
+        category <= 0 || count <= 0) {
+        if (context != nullptr) context->invalid = true;
+        return true;
+    }
+    auto& target = context->slots[bag - 6][slot];
+    target = ExtensionInventorySlot{true, category, count};
+    return false;
+}
+
+QolResult append_extension_inventory_bags(std::string* out) {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr || g_port == nullptr) {
+        return contracts::ok();
+    }
+    const void* iface = nullptr;
+    const QolResult required = g_sdk->capabilities.require(
+        contracts::kExtensionBagCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+                        static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
+        &iface);
+    if (!contracts::succeeded(required) || iface == nullptr) return contracts::ok();
+    const auto* extension_bag = static_cast<const contracts::ExtensionBagApi*>(iface);
+    int32_t in_world = 0;
+    if (g_port->read.in_world == nullptr ||
+        !contracts::succeeded(g_port->read.in_world(&in_world)) || in_world == 0 ||
+        extension_bag->enabled == nullptr || !extension_bag->enabled()) {
+        return contracts::ok();
+    }
+    if (extension_bag->for_each_logical_item == nullptr ||
+        extension_bag->logical_bag_capacity == nullptr ||
+        extension_bag->internal_index == nullptr || extension_bag->item_at == nullptr) {
+        return error_result(kQolErrNotReady, "extension bag inventory unavailable");
+    }
+
+    ExtensionInventoryItems items{};
+    extension_bag->for_each_logical_item(&collect_extension_inventory_item, &items);
+    if (items.invalid) return error_result(kQolErrInvalidArgument, "invalid extension inventory");
+
+    for (int32_t bag = 6; bag <= 10; ++bag) {
+        int32_t capacity = 0;
+        if (!extension_bag->logical_bag_capacity(bag, &capacity) || capacity < 0 || capacity > 16) {
+            return error_result(kQolErrNotReady, "extension bag capacity unavailable");
+        }
+        std::string encoded_items;
+        int32_t filled = 0;
+        for (int32_t slot = 0; slot < capacity; ++slot) {
+            const ExtensionInventorySlot& item = items.slots[bag - 6][slot];
+            if (!item.occupied) continue;
+            uint32_t count = static_cast<uint32_t>(item.count);
+            const int32_t internal_bag = extension_bag->internal_index(bag);
+            if (internal_bag >= 0) {
+                void* native_item = extension_bag->item_at(internal_bag, slot);
+                if (native_item != nullptr) {
+                    uint32_t effective = 0;
+                    bool count_present = false;
+                    if (effective_item_count(native_item, true, &effective, &count_present) &&
+                        count_present) {
+                        count = effective;
+                    } else if (g_port->read.cumulate_count != nullptr) {
+                        int32_t fallback = 0;
+                        if (contracts::succeeded(g_port->read.cumulate_count(native_item, &fallback))) {
+                            count = static_cast<uint32_t>(fallback);
+                        }
+                    }
+                }
+            }
+            if (filled != 0) encoded_items.push_back(',');
+            encoded_items += "{\"slot\":" + std::to_string(slot) +
+                             ",\"category\":" + std::to_string(item.category) +
+                             ",\"count\":" + std::to_string(count) + "}";
+            ++filled;
+        }
+        *out += ",{\"bag\":" + std::to_string(bag) +
+                ",\"items\":[" + encoded_items +
+                "],\"capacity\":" + std::to_string(capacity) +
+                ",\"slot_count\":" + std::to_string(filled) + "}";
+    }
+    return contracts::ok();
+}
+
+QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr || g_port == nullptr ||
+        g_port->read.in_world == nullptr || g_port->read.item_ref_at == nullptr ||
+        g_port->read.inventory_item_view == nullptr) {
+        return error_result(kQolErrInvalidArgument, "inventory serializer unavailable");
+    }
+    *out_size = 0;
+    int32_t in_world = 0;
+    if (!contracts::succeeded(g_port->read.in_world(&in_world))) return not_ready();
+    if (in_world == 0) {
+        constexpr char kNotInWorld[] = "{\"error\":\"not in game\"}";
+        if (sizeof(kNotInWorld) - 1 > capacity) {
+            return error_result(kQolErrInvalidArgument, "inventory buffer too small");
+        }
+        std::memcpy(out, kNotInWorld, sizeof(kNotInWorld) - 1);
+        *out_size = sizeof(kNotInWorld) - 1;
+        return contracts::ok();
+    }
+
+    std::string json = "{\"bags\":[";
+    for (int32_t bag = 0; bag < 6; ++bag) {
+        if (bag != 0) json.push_back(',');
+        json += "{\"bag\":" + std::to_string(bag) + ",\"items\":[";
+        int32_t filled = 0;
+        for (int32_t slot = 0; slot < 16; ++slot) {
+            contracts::QolInventoryItemRef item_ref{};
+            const QolResult ref_result = g_port->read.item_ref_at(bag, slot, &item_ref);
+            if (!contracts::succeeded(ref_result)) {
+                if (ref_result.code == kQolErrNotFound || ref_result.code == kQolErrNotReady) continue;
+                return ref_result;
+            }
+            if (item_ref.kind != static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal) ||
+                item_ref.native_item == nullptr) {
+                continue;
+            }
+            contracts::QolItemInventoryView view{};
+            const QolResult view_result = g_port->read.inventory_item_view(item_ref.native_item,
+                                                                            &view);
+            if (!contracts::succeeded(view_result)) return view_result;
+            if (view.option_count > contracts::kQolItemInventoryOptionCapacity) {
+                return error_result(kQolErrInvalidArgument, "invalid item option count");
+            }
+            uint32_t count = 0;
+            bool count_present = false;
+            if (!effective_item_count(item_ref.native_item, view.count_supported != 0, &count,
+                                      &count_present)) {
+                return error_result(kQolErrNotReady, "item count unavailable");
+            }
+            if (filled != 0) json.push_back(',');
+            append_inventory_item(&json, slot, view, count_present, count);
+            ++filled;
+        }
+        json += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
+    }
+    const QolResult extension_result = append_extension_inventory_bags(&json);
+    if (!contracts::succeeded(extension_result)) return extension_result;
+    json += "]}";
+    if (json.size() > capacity) {
+        return error_result(kQolErrInvalidArgument, "inventory buffer too small");
+    }
+    std::memcpy(out, json.data(), json.size());
+    *out_size = static_cast<uint32_t>(json.size());
+    return contracts::ok();
+}
+
 void update_snapshot() {
-    if (g_port == nullptr || g_port->read.inventory_json == nullptr ||
+    if (g_port == nullptr || g_port->read.inventory_item_view == nullptr ||
+        g_port->read.item_ref_at == nullptr ||
         g_port->read.shop_items_json == nullptr || g_port->read.money == nullptr ||
         g_port->read.in_world == nullptr) {
         return;
@@ -258,8 +544,8 @@ void update_snapshot() {
 
     char inventory[kInventoryCapacity]{};
     uint32_t inventory_size = 0;
-    if (!contracts::succeeded(g_port->read.inventory_json(inventory, kInventoryCapacity,
-                                                          &inventory_size))) {
+    if (!contracts::succeeded(serialize_inventory_json(inventory, kInventoryCapacity,
+                                                       &inventory_size))) {
         return;
     }
     if (std::strncmp(inventory, "{\"error\":", 9) == 0) {
@@ -514,29 +800,15 @@ bool parse_write_body(const std::string& body, JsonValue* object) {
 }
 
 bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
-    if (g_port == nullptr || g_port->read.inventory_json == nullptr || bag_out == nullptr ||
-        slot_out == nullptr) {
-        return false;
-    }
-    constexpr uint32_t kInventoryJsonCapacity = 65536;
-    char inventory[kInventoryJsonCapacity]{};
-    uint32_t inventory_size = 0;
-    if (!contracts::succeeded(g_port->read.inventory_json(
-            inventory, kInventoryJsonCapacity, &inventory_size))) {
-        return false;
-    }
-    JsonValue root{};
-    if (!json_parse(inventory, inventory_size, &root)) return false;
-    const JsonValue* bags = root.find("bags");
-    if (bags == nullptr || bags->type != JsonValue::Type::kArray) return false;
-    for (size_t b = 0; b < bags->items.size(); ++b) {
-        const JsonValue& bag = bags->items[b];
-        const JsonValue* items = bag.find("items");
-        if (items == nullptr || items->type != JsonValue::Type::kArray) continue;
-        for (const JsonValue& item : items->items) {
-            if (write_opt_int(item, "category", -1) != category) continue;
-            *bag_out = static_cast<int32_t>(b);
-            *slot_out = write_opt_int(item, "slot", -1);
+    if (g_port == nullptr || g_port->read.item_ref_at == nullptr || bag_out == nullptr ||
+        slot_out == nullptr) return false;
+    for (int32_t bag = 0; bag <= 10; ++bag) {
+        for (int32_t slot = 0; slot < 16; ++slot) {
+            contracts::QolInventoryItemRef item{};
+            const QolResult result = g_port->read.item_ref_at(bag, slot, &item);
+            if (!contracts::succeeded(result) || item.category != category) continue;
+            *bag_out = item.bag;
+            *slot_out = item.slot;
             return true;
         }
     }
@@ -594,9 +866,6 @@ constexpr ItemWriteRoute kItemWriteRoutes[] = {
     {"/api/op/inventory/add", contracts::QolItemWriteKind::kAddItem},
     {"/api/op/inventory/money", contracts::QolItemWriteKind::kSetMoney},
 };
-
-constexpr uint32_t kItemWriteRouteCount =
-    static_cast<uint32_t>(sizeof(kItemWriteRoutes) / sizeof(kItemWriteRoutes[0]));
 
 QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpRes* response,
                              void* ctx) {
@@ -831,9 +1100,12 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_port = static_cast<const contracts::QolItemPort*>(ctx.ports[0]);
-    if (!contracts::satisfies(g_port->abi_version, {1, 0}) ||
-        g_port->read.category == nullptr || g_port->read.item_ref_at == nullptr ||
-        g_port->read.inventory_json == nullptr || g_port->read.shop_items_json == nullptr ||
+    if (!contracts::satisfies(g_port->abi_version,
+                              {contracts::kQolPortItemVersion.major,
+                               contracts::kQolPortItemVersion.minor}) ||
+        g_port->read.category == nullptr || g_port->read.cumulate_count == nullptr ||
+        g_port->read.item_ref_at == nullptr ||
+        g_port->read.inventory_item_view == nullptr || g_port->read.shop_items_json == nullptr ||
         g_port->read.in_world == nullptr || g_port->read.money == nullptr ||
         g_port->read.static_text == nullptr || g_port->read.static_ready == nullptr) {
         g_port = nullptr;

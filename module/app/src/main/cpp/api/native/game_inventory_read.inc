@@ -2,24 +2,6 @@
 
 namespace {
 
-int original_item_count(void* item) {
-    return fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 0;
-}
-
-int facade_item_count(void* item, bool canonical) {
-    if (item == nullptr) return 0;
-    const qol::contracts::QolItemCountApi* api = qol::contracts::item_count_api();
-    if (api != nullptr) {
-        uint32_t count = 0;
-        const QolResult result = canonical
-            ? api->canonical(item, &count)
-            : api->effective(item, &count);
-        assert(result.code != kQolErrInvalidArgument);
-        if (qol::contracts::succeeded(result)) return static_cast<int>(count);
-    }
-    return original_item_count(item);
-}
-
 }  // namespace
 
 void append_item_attrs(std::string& s, void* item) {
@@ -90,11 +72,6 @@ void append_item_attrs(std::string& s, void* item) {
 // item_count_encoding / item_is_equip 已下沉至 game/read/item_class.{h,cpp}
 // （声明经 game_inventory.h 引用）。
 
-int canonical_item_count(void* item) {
-    // canonical facade 失败时回落原版 getter；读侧不得把未就绪误报成 0。
-    return facade_item_count(item, true);
-}
-
 std::string build_inventory_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
     // INVEN_pItem(G_INVEN_VMA)：背包槽数组，6 袋 × 0x80 步长，每槽 8B 物品指针。
@@ -121,12 +98,25 @@ std::string build_inventory_json() {
                 if (fn_get_bit != nullptr) {
                     s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
                 }
-                if (fn_get_cumulate_count != nullptr || qol::contracts::item_count_api() != nullptr) {
+                const qol::contracts::QolItemCountApi* count_api =
+                    qol::game::item_count_api_if_resident();
+                if (fn_get_cumulate_count != nullptr || count_api != nullptr) {
                     // count 语义：ITEM_GetCumulateCount 按类型与模式区分——可堆叠
                     // 类返回模式视图数量（启用态 S2 全量 count=128a+b、关闭态低 7
                     // 位 b，getter hook 统一解码，见规则册 R-49/R-47），不可堆叠
                     // 类（装备）返回 1（旧实现裸读位域导致装备 count=100）
-                    s += ",\"count\":" + std::to_string(facade_item_count(item, false));
+                    int32_t effective = fn_get_cumulate_count != nullptr
+                        ? fn_get_cumulate_count(item)
+                        : 0;
+                    if (count_api != nullptr && count_api->effective != nullptr) {
+                        uint32_t view = 0;
+                        const QolResult result = count_api->effective(item, &view);
+                        assert(result.code != kQolErrInvalidArgument);
+                        if (qol::contracts::succeeded(result)) {
+                            effective = static_cast<int32_t>(view);
+                        }
+                    }
+                    s += ",\"count\":" + std::to_string(effective);
                 }
                 s += std::string(",\"equip\":") + (item_is_equip(item) ? "true" : "false");
                 if (fn_get_rarity != nullptr) {

@@ -4,6 +4,7 @@
 #include "game/ops/game_ops_common.h"
 #include "game/ops/item_dice.h"
 #include "game/ops/item_money.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "contracts/extension_bag_port.h"
 #include "core/native/inventory_trade.h"
 #include "infra/log/qol_log.h"
@@ -89,7 +90,6 @@ void append_item_attrs(std::string& s, void* item) {
     (void)s;
     (void)item;
 }
-int canonical_item_count(void* item) { (void)item; return 0; }
 std::string build_inventory_json() { return "{\"bags\":[]}"; }
 std::string data_debug_item_raw_json(int32_t bag, int32_t slot) {
     (void)bag;

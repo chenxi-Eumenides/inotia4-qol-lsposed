@@ -50,6 +50,9 @@ FakeInventoryMode g_inventory_mode = FakeInventoryMode::kReady;
 int g_world_game_state_gate = 0;
 
 decltype(fn_get_rarity) fn_get_rarity = nullptr;
+decltype(fn_get_damage) fn_get_damage = nullptr;
+decltype(fn_get_defense) fn_get_defense = nullptr;
+decltype(fn_item_get_ability_level) fn_item_get_ability_level = nullptr;
 decltype(fn_item_is_no_sell) fn_item_is_no_sell = nullptr;
 decltype(fn_is_dice) fn_is_dice = nullptr;
 decltype(fn_get_cumulate_count) fn_get_cumulate_count = nullptr;

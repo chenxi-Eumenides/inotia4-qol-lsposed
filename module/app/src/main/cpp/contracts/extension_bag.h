@@ -20,13 +20,14 @@ namespace qol::contracts {
 
 constexpr const char* kExtensionBagCapabilityId = "extension_bag";
 constexpr int32_t kExtensionBagVersionMajor = 2;
-constexpr int32_t kExtensionBagVersionMinor = 0;
+constexpr int32_t kExtensionBagVersionMinor = 1;
 
 // 返回 1 表示 out 中包含完整 JSON（不附加 NUL）；返回 0 表示参数无效或缓冲区不足。
 // 操作失败仍由 JSON "ok":false 表示。此固定宽度写面避免 std::string 跨契约边界。
 using ExtensionBagMoveFn = int32_t (*)(int32_t from_bag, int32_t from_slot,
                                        int32_t to_bag, int32_t to_slot, char* out,
                                        uint32_t capacity, uint32_t* out_len);
+using ExtensionBagCapacityFn = bool (*)(int32_t logical_bag, int32_t* out_capacity);
 
 using ExtensionBagItemFn = bool (*)(int32_t logical_bag, int32_t slot, int32_t category,
                                     int32_t count, void* ctx);
@@ -129,6 +130,9 @@ struct ExtensionBagApi {
 
     // v2.0 移动写面；调用方必须每次从 capability registry 获取接口，不得缓存。
     ExtensionBagMoveFn move_item;
+
+    // v2.1 typed inventory snapshot support; capacity is the active logical-bag slot limit.
+    ExtensionBagCapacityFn logical_bag_capacity;
 
     // v1.0 预留：状态 JSON 导出
     // int32_t (*write_json)(char* out, uint32_t capacity);

@@ -5,6 +5,7 @@
 
 #include "contracts/result.h"
 #include "contracts/item_count.h"
+#include "game/adapter_ports/item_count_facade.h"
 
 namespace {
 
@@ -70,7 +71,7 @@ void assert_writeback_boundary_forwarding() {
 
 void assert_not_ready_without_provider() {
     qol::host::host_item_count_set_provider(nullptr);
-    assert(qol::contracts::item_count_api() == nullptr);
+    assert(qol::game::item_count_api_if_resident() == nullptr);
     uint32_t count = 77;
     auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
     int32_t needed = 77;
@@ -168,7 +169,7 @@ void assert_not_encoded_state_is_preserved() {
         nullptr, nullptr, &not_encoded, nullptr, nullptr};
     qol::host::host_item_count_set_provider(&provider);
     auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
-    assert(qol::contracts::item_count_api()->is_encoded(reinterpret_cast<void*>(1), &encoding).ok ==
+    assert(qol::game::item_count_api_if_resident()->is_encoded(reinterpret_cast<void*>(1), &encoding).ok ==
            0);
     assert(encoding == qol::contracts::QolItemCountEncoding::kNotEncoded);
     qol::host::host_item_count_set_provider(nullptr);
@@ -177,7 +178,7 @@ void assert_not_encoded_state_is_preserved() {
 void assert_provider_forwarding_and_null_arguments() {
     g_calls = 0;
     qol::host::host_item_count_set_provider(&kProvider);
-    assert(qol::contracts::item_count_api() != nullptr);
+    assert(qol::game::item_count_api_if_resident() != nullptr);
     uint32_t count = 0;
     auto encoding = qol::contracts::QolItemCountEncoding::kUnknown;
     int32_t needed = 0;
@@ -208,7 +209,7 @@ void assert_provider_forwarding_and_null_arguments() {
     assert(count == 77);
 
     qol::host::host_item_count_set_provider(nullptr);
-    assert(qol::contracts::item_count_api() == nullptr);
+    assert(qol::game::item_count_api_if_resident() == nullptr);
 }
 
 }  // namespace
