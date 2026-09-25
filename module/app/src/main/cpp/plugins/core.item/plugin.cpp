@@ -1019,6 +1019,14 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             operation = g_item_state_write->move_item(args.i0, args.i1, args.i2, args.i3,
                                                        args.i4, &operation_data);
             break;
+        case contracts::QolItemWriteKind::kAddItem: {
+            const contracts::StackLimitItemCountCapability* capability =
+                args.i1 > 1 ? stack_limit_item_count_capability() : nullptr;
+            operation = g_item_state_write->add_item(
+                args.i0, args.i1, args.i2, args.i3, args.i4,
+                capability != nullptr ? capability->api : nullptr, &operation_data);
+            break;
+        }
         default:
             return false;
     }
@@ -1033,6 +1041,12 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
         (void)copy_buffer(out, capacity, out_size, body.data(),
                           static_cast<uint32_t>(body.size()));
         return false;
+    }
+
+    if (kind == contracts::QolItemWriteKind::kAddItem) {
+        constexpr char kAddItemSuccess[] = "{\"ok\":true}";
+        return copy_buffer(out, capacity, out_size, kAddItemSuccess,
+                           sizeof(kAddItemSuccess) - 1);
     }
 
     char inventory[kInventoryCapacity]{};
@@ -1124,6 +1138,9 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
     if (kind == contracts::QolItemWriteKind::kMoveItem) {
         return write_item_move_result(args, out, capacity, out_size);
+    }
+    if (kind == contracts::QolItemWriteKind::kAddItem) {
+        return write_item_inventory_state_result(args, out, capacity, out_size);
     }
     if (kind == contracts::QolItemWriteKind::kUseItem ||
         kind == contracts::QolItemWriteKind::kSellItem ||
@@ -1302,7 +1319,7 @@ int plugin_install(contracts::PluginContext& ctx) {
                                contracts::kQolPortItemInventoryStateWriteVersion.minor}) ||
         g_item_state_write->use_item == nullptr || g_item_state_write->sell_item == nullptr ||
         g_item_state_write->discard_item == nullptr || g_item_state_write->shop_buy == nullptr ||
-        g_item_state_write->move_item == nullptr) {
+        g_item_state_write->move_item == nullptr || g_item_state_write->add_item == nullptr) {
         g_port = nullptr;
         g_item_write = nullptr;
         g_item_money_write = nullptr;

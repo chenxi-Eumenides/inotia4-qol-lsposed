@@ -126,6 +126,14 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     return qol::game::ops::move_item(bag, slot, count, to_bag, to_slot, out);
 }
 
+QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
+                   int32_t enhance_remaining, int32_t rarity_group,
+                   const contracts::QolItemCountApi* item_count,
+                   contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::add_item(category, count, socket_total, enhance_remaining,
+                                    rarity_group, item_count, out);
+}
+
 const contracts::QolItemInventoryStateWritePort kPort{
     contracts::kQolPortItemInventoryStateWriteVersion,
     &use_item,
@@ -133,6 +141,7 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &discard_item,
     &shop_buy,
     &move_item,
+    &add_item,
 };
 
 }  // namespace

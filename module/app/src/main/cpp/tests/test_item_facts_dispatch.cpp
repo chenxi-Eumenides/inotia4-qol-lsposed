@@ -126,6 +126,12 @@ int32_t g_state_write_count = 2;
 int32_t g_state_move_count = -1;
 int32_t g_state_move_to_bag = -1;
 int32_t g_state_move_to_slot = -1;
+int32_t g_state_add_category = -1;
+int32_t g_state_add_count = -1;
+int32_t g_state_add_socket = -1;
+int32_t g_state_add_enhance = -1;
+int32_t g_state_add_rarity = -1;
+const qol::contracts::QolItemCountApi* g_state_add_count_api = nullptr;
 
 QolResult unsupported() { return qol::contracts::error(kQolErrUnsupported, "stub", 4); }
 QolResult stub_category(const void*, int32_t*) { return unsupported(); }
@@ -312,6 +318,20 @@ QolResult fake_state_move(int32_t bag, int32_t slot, int32_t count, int32_t to_b
                             bag, slot, out);
 }
 
+QolResult fake_state_add(int32_t category, int32_t count, int32_t socket_total,
+                         int32_t enhance_remaining, int32_t rarity_group,
+                         const qol::contracts::QolItemCountApi* item_count,
+                         qol::contracts::QolItemInventoryStateWriteResult* out) {
+    g_state_add_category = category;
+    g_state_add_count = count;
+    g_state_add_socket = socket_total;
+    g_state_add_enhance = enhance_remaining;
+    g_state_add_rarity = rarity_group;
+    g_state_add_count_api = item_count;
+    return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kAddItem),
+                            category, count, out);
+}
+
 const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     qol::contracts::kQolPortItemInventoryStateWriteVersion,
     &fake_state_use,
@@ -319,6 +339,7 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     &fake_state_discard,
     &fake_state_shop_buy,
     &fake_state_move,
+    &fake_state_add,
 };
 
 const void* const kPortArray[] = {
@@ -755,12 +776,14 @@ void test_write_routes() {
                         "{\"category\":\" 12 \",\"count\":\"1e2\",\"socket\":\"3.7\","
                         "\"enhanceRemaining\":\"+3\",\"rarity\":\"NaN\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    g_override_available = true;
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kAddItem));
-    CHECK(g_last_write.i0 == 12 && g_last_write.i1 == 100 && g_last_write.i2 == 3 &&
-          g_last_write.i3 == 3 && g_last_write.i4 == 0);
+    CHECK(std::string(result, result_size) == "{\"ok\":true}");
+    CHECK(g_state_add_category == 12 && g_state_add_count == 100 && g_state_add_socket == 3 &&
+          g_state_add_enhance == 3 && g_state_add_rarity == 0);
+    CHECK(g_state_add_count_api == &kOverrideItemCountApi);
 
     CHECK(dispatch_post("/api/op/inventory/add",
                         "{\"category\":\"Infinity\",\"count\":\"-Infinity\","
@@ -770,9 +793,9 @@ void test_write_routes() {
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(g_last_write.i0 == std::numeric_limits<int32_t>::max() &&
-          g_last_write.i1 == std::numeric_limits<int32_t>::min() && g_last_write.i2 == 0 &&
-          g_last_write.i3 == -3 && g_last_write.i4 == 100);
+    CHECK(g_state_add_category == std::numeric_limits<int32_t>::max() &&
+          g_state_add_count == std::numeric_limits<int32_t>::min() && g_state_add_socket == 0 &&
+          g_state_add_enhance == -3 && g_state_add_rarity == 100);
 
     CHECK(dispatch_post("/api/op/inventory/add",
                         "{\"category\":\"1e100\",\"count\":\"-1e100\"}", nullptr,
@@ -780,8 +803,8 @@ void test_write_routes() {
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(g_last_write.i0 == std::numeric_limits<int32_t>::max() &&
-          g_last_write.i1 == std::numeric_limits<int32_t>::min());
+    CHECK(g_state_add_category == std::numeric_limits<int32_t>::max() &&
+          g_state_add_count == std::numeric_limits<int32_t>::min());
 
     CHECK(dispatch_post("/api/op/inventory/add",
                         "{\"category\":3.7,\"count\":3.7,\"socket\":1.7,"
@@ -790,8 +813,38 @@ void test_write_routes() {
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(g_last_write.i0 == 3 && g_last_write.i1 == 3 && g_last_write.i2 == 1 &&
-          g_last_write.i3 == 2 && g_last_write.i4 == 4);
+    CHECK(g_state_add_category == 3 && g_state_add_count == 3 && g_state_add_socket == 1 &&
+          g_state_add_enhance == 2 && g_state_add_rarity == 4);
+
+    CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":5}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) == "{\"ok\":true}");
+    CHECK(g_state_add_category == 5 && g_state_add_count == 1 && g_state_add_socket == 0 &&
+          g_state_add_enhance == 0 && g_state_add_rarity == -1);
+
+    g_state_write_result = qol::contracts::error(kQolErrBlocked, "inventory full", 14);
+    CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":5}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext add_context{};
+    add_context.handler = g_result_handler;
+    add_context.payload_size = g_post_payload_size;
+    std::memcpy(add_context.payload, g_post_payload, sizeof(QolItemWriteArgs));
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command add_command{
+        "core.item kAddItem", nullptr, &add_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket add_ticket = qol::infra::post(add_command);
+    CHECK(add_ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(add_ticket) == qol::infra::CommandState::kFailed);
+    char add_error[128]{};
+    uint32_t add_error_size = 0;
+    CHECK(qol::infra::read_result(add_ticket, add_error, sizeof(add_error), &add_error_size));
+    CHECK(std::string(add_error, add_error_size) ==
+          "{\"ok\":false,\"error\":\"inventory full\"}");
+    qol::infra::command_queue_reset_for_test();
+    g_state_write_result = qol::contracts::ok();
 
     const char* invalid_numbers[] = {"abc", "3.7.9", "1e", ""};
     for (const char* invalid : invalid_numbers) {
@@ -808,7 +861,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
-    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 5);
+    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 1);
 
     g_money_write_result = qol::contracts::error(kQolErrUnsupported, "symbol not resolved", 19);
     result_size = 0;

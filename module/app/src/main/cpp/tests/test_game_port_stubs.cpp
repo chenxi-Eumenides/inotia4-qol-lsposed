@@ -98,7 +98,7 @@ namespace {
 
 const qol::contracts::QolItemInventoryStateWritePort kItemInventoryStateWritePort{
     qol::contracts::kQolPortItemInventoryStateWriteVersion, nullptr, nullptr, nullptr, nullptr,
-    nullptr};
+    nullptr, nullptr};
 
 }  // namespace
 

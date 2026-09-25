@@ -27,95 +27,11 @@ std::string data_op_add_money(int64_t delta) {
 
 std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
                              int32_t rarity_group) {
-    if (!game_in_world()) return op_err("not in game");
-    if (count <= 0) return op_err("bad count");
-    if (fn_create_item == nullptr || fn_inven_save_item == nullptr || fn_inven_find_save_slot == nullptr ||
-        fn_itempool_free == nullptr)
-        return op_err("symbol not resolved");
-    // ITEMSYSTEM_CreateItem 创建物品对象（MakeItem 带 search_tbl 校验会失败，CreateItem 无此限制）
-    void* item = fn_create_item(category, 0, 0, 0);
-    if (item == nullptr) return op_err("create item failed");
-    // 孔位/强化构造（仅测试用，验证自动出售筛选 + 位级 A/B 实测；
-    // 只设「总孔位」与「剩余强化次数」两段）。CreateItem 产物 I_SOCKET/I_ENCHANT 恒为 0，
-    // 缺省 0 时写入等价于不写。读改写、保留其余位：
-    // I_SOCKET bits4-7=总孔数 socket_total（钳 0..15），bits0-3=已镶嵌数保持 0 不写；
-    // I_ENCHANT bits2-5=剩余强化次数 enhance_remaining（钳 0..15，写 0 → 游戏内强化时
-    // 提示耐久不足），bits6-10=已强化次数与 bits11-15=强化 ID 保持 0 不写，bit0/bit1 不动。
-    // 已镶嵌数/已强化次数/强化 ID 由游戏自行维护（首次强化时游戏写强化 ID、镶嵌时游戏写
-    // 已镶数），人工写入会造成游戏内不可能状态——实测：已强化=2 且强化 ID=0 时
-    // ITEMSYSTEM_EnchantItem 返回 2、弹「与一般的强化卷轴不同」。
-    // 消费方（自动出售筛选、图标、战斗）均为即时位域直读，无派生缓存需同步。
-    // 负值按 0，超上限钳到上限（均 15）。
-    if (socket_total < 0) socket_total = 0;
-    if (socket_total > 15) socket_total = 15;
-    if (enhance_remaining < 0) enhance_remaining = 0;
-    if (enhance_remaining > 15) enhance_remaining = 15;
-    uint8_t* p_socket = reinterpret_cast<uint8_t*>(item) + I_SOCKET;
-    *p_socket = static_cast<uint8_t>((*p_socket & 0x0F) | ((socket_total & 0x0F) << 4));
-    uint16_t* p_enchant = reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_ENCHANT);
-    *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x0F << 2)) | ((enhance_remaining & 0x0F) << 2));
-    // 品质构造（仅测试用，验证自动出售品质筛选）：CreateItem 的 ApplyGrade 会随机掷
-    // I_TYPE bits2-5 raw grade；rarity_group=-1（缺省）保留随机，0..4 指定档位
-    // （白/绿/蓝/黄/紫）。其余值钳到 [-1,4]：所有负值视同 -1，>4 视同 4。
-    // 读改写只动 bits2-5，保留 bits0-1 与 bits6-15（后者是 category，写坏会变成别的物品）。
-    static constexpr uint8_t kRarityRawForGroup[5] = {0, 4, 7, 10, 11};  // 档位→raw_grade，映射待真机核实（ITEMGRADEBASE[raw].+4 rarity_group）
-    if (rarity_group < -1) rarity_group = -1;
-    if (rarity_group > 4) rarity_group = 4;
-    if (rarity_group >= 0) {
-        const uint8_t raw = kRarityRawForGroup[rarity_group];
-        uint16_t* p_type = reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-        *p_type = static_cast<uint16_t>((*p_type & ~(0x0F << 2)) | ((raw & 0x0F) << 2));
-    }
-    // 可堆叠判定：ITEMCLASSBASE 记录 +6 bit0（与 ITEM_GetCumulateCount 同源）。
-    // 类别表不可用时拒绝多数量写入，不能把未知类别当作可堆叠物品。
-    const qol::contracts::QolItemCountEncoding count_encoding = item_count_encoding(item);
-    if (count > 1 && count_encoding != qol::contracts::QolItemCountEncoding::kEncoded) {
-        fn_itempool_free(item);
-        return op_err(count_encoding == qol::contracts::QolItemCountEncoding::kUnknown
-                          ? "item category unavailable"
-                          : "item not stackable");
-    }
-    if (count > 1) {
-        // 数量按当前视图由 facade clamp 并写回；provider 未就绪或类别未知时显式失败，
-        // 不以默认 0 或静默跳过代替原版写入结果。
-        const qol::contracts::QolItemCountApi* api = qol::game::item_count_api_if_resident();
-        if (api == nullptr || api->write_effective == nullptr) {
-            fn_itempool_free(item);
-            return op_err("item count provider unavailable");
-        }
-        const QolResult write_result = api->write_effective(item, static_cast<uint32_t>(count));
-        if (!qol::contracts::succeeded(write_result)) {
-            if (write_result.code != kQolErrNotReady && write_result.code != kQolErrUnsupported) {
-                fn_itempool_free(item);
-                return op_err("item count write failed");
-            }
-            // 999 组未就绪时回落原版低位写法；字段转换仍由 facade 完成，
-            // 不在此处复制 S2 位段布局。
-            if (api->field_from_canonical == nullptr) {
-                fn_itempool_free(item);
-                return op_err("item count provider not ready");
-            }
-            uint32_t field = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT);
-            uint32_t fallback_field = 0;
-            const QolResult fallback_result = api->field_from_canonical(
-                field, static_cast<uint32_t>(count), 0, &fallback_field);
-            if (!qol::contracts::succeeded(fallback_result)) {
-                fn_itempool_free(item);
-                return op_err("item count fallback failed");
-            }
-            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = fallback_field;
-        }
-    }
-    int8_t save_slot = -1;
-    if (!fn_inven_find_save_slot(item, &save_slot)) {
-        fn_itempool_free(item);
-        return op_err("inventory full");
-    }
-    if (!fn_inven_save_item(item, nullptr)) {
-        fn_itempool_free(item);
-        return op_err("save item failed");
-    }
-    return op_ok();
+    qol::contracts::QolItemInventoryStateWriteResult operation_data{};
+    const QolResult result = qol::game::ops::add_item(
+        category, count, socket_total, enhance_remaining, rarity_group,
+        qol::game::item_count_api_if_resident(), &operation_data);
+    return qol::contracts::succeeded(result) ? "{\"ok\":true}" : op_err(result.message);
 }
 
 std::string data_op_minus_money(int64_t delta) {

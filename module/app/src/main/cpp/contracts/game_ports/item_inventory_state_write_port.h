@@ -5,6 +5,7 @@
 
 #include "../result.h"
 #include "../version.h"
+#include "../game_host.h"
 
 namespace qol::contracts {
 
@@ -31,6 +32,9 @@ using QolItemInventoryStateWriteFn = QolResult (*)(
     int32_t bag_or_slot, int32_t slot, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateShopBuyFn = QolResult (*)(
     int32_t shop_slot, QolItemInventoryStateWriteResult* out);
+using QolItemInventoryStateAddItemFn = QolResult (*)(
+    int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
+    int32_t rarity_group, const QolItemCountApi* item_count, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateMoveFn = QolResult (*)(
     int32_t bag, int32_t slot, int32_t count, int32_t to_bag, int32_t to_slot,
     QolItemInventoryStateWriteResult* out);
@@ -42,6 +46,7 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateWriteFn discard_item;
     QolItemInventoryStateShopBuyFn shop_buy;
     QolItemInventoryStateMoveFn move_item;
+    QolItemInventoryStateAddItemFn add_item;
 };
 
 constexpr QolVersion kQolPortItemInventoryStateWriteVersion{1, 0};

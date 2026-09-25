@@ -959,9 +959,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
             op = data_op_enchant(args.i0, args.i1, args.i2, args.i3);
             state = build_party_json();
             break;
-        case contracts::QolItemWriteKind::kAddItem:
-            op = data_op_add_item(args.i0, args.i1, args.i2, args.i3, args.i4);
-            break;
         default:
             return kItemWriteFailed;
     }

@@ -10,5 +10,9 @@ QolResult shop_buy(int32_t slot, contracts::QolItemInventoryStateWriteResult* ou
 QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
                     int32_t to_slot,
                     contracts::QolItemInventoryStateWriteResult* out);
+QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
+                   int32_t enhance_remaining, int32_t rarity_group,
+                   const contracts::QolItemCountApi* item_count,
+                   contracts::QolItemInventoryStateWriteResult* out);
 
 }  // namespace qol::game::ops

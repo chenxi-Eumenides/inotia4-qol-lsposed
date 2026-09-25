@@ -6,6 +6,7 @@
 #include "contracts/game_cache.h"
 #include "contracts/extension_bag_port.h"
 #include "game/access/game_access.h"
+#include "game/read/item_class.h"
 #include "game/state/game_state.h"
 
 namespace qol::game::ops {
@@ -291,6 +292,97 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
         eb->sync_projected_slot(bag, slot);
         eb->sync_projected_slot(to_bag, to_slot);
     }
+    return contracts::ok();
+}
+
+QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
+                   int32_t enhance_remaining, int32_t rarity_group,
+                   const contracts::QolItemCountApi* item_count,
+                   contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
+    }
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
+    if (fn_create_item == nullptr || fn_inven_save_item == nullptr ||
+        fn_inven_find_save_slot == nullptr || fn_itempool_free == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+
+    // CreateItem does not apply MakeItem's search-table validation.
+    void* item = fn_create_item(category, 0, 0, 0);
+    if (item == nullptr) return item_error(out, kQolErrInternal, "create item failed");
+
+    socket_total = socket_total < 0 ? 0 : (socket_total > 15 ? 15 : socket_total);
+    enhance_remaining = enhance_remaining < 0 ? 0 : (enhance_remaining > 15 ? 15 : enhance_remaining);
+    // Preserve filled sockets and all enchant fields other than remaining durability.
+    uint8_t* socket = reinterpret_cast<uint8_t*>(item) + I_SOCKET;
+    *socket = static_cast<uint8_t>((*socket & 0x0F) | ((socket_total & 0x0F) << 4));
+    uint16_t* enchant = reinterpret_cast<uint16_t*>(
+        reinterpret_cast<uint8_t*>(item) + I_ENCHANT);
+    *enchant = static_cast<uint16_t>((*enchant & ~(0x0F << 2)) |
+                                     ((enhance_remaining & 0x0F) << 2));
+
+    // Preserve the category and unrelated type flags while setting the requested raw grade.
+    static constexpr uint8_t kRarityRawForGroup[5] = {0, 4, 7, 10, 11};
+    rarity_group = rarity_group < -1 ? -1 : (rarity_group > 4 ? 4 : rarity_group);
+    if (rarity_group >= 0) {
+        const uint8_t raw = kRarityRawForGroup[rarity_group];
+        uint16_t* type = reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(item) + I_TYPE);
+        *type = static_cast<uint16_t>((*type & ~(0x0F << 2)) | ((raw & 0x0F) << 2));
+    }
+
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    if (count > 1 && encoding != contracts::QolItemCountEncoding::kEncoded) {
+        fn_itempool_free(item);
+        return item_error(out, encoding == contracts::QolItemCountEncoding::kUnknown
+                                   ? kQolErrNotReady
+                                   : kQolErrUnsupported,
+                          encoding == contracts::QolItemCountEncoding::kUnknown
+                              ? "item category unavailable"
+                              : "item not stackable");
+    }
+    if (count > 1) {
+        if (item_count == nullptr || item_count->write_effective == nullptr) {
+            fn_itempool_free(item);
+            return item_error(out, kQolErrNotReady, "item count provider unavailable");
+        }
+        const QolResult write_result = item_count->write_effective(item, static_cast<uint32_t>(count));
+        if (!contracts::succeeded(write_result)) {
+            if (write_result.code != kQolErrNotReady && write_result.code != kQolErrUnsupported) {
+                fn_itempool_free(item);
+                return item_error(out, kQolErrInternal, "item count write failed");
+            }
+            if (item_count->field_from_canonical == nullptr) {
+                fn_itempool_free(item);
+                return item_error(out, kQolErrNotReady, "item count provider not ready");
+            }
+            const uint32_t field = *reinterpret_cast<uint32_t*>(
+                reinterpret_cast<uint8_t*>(item) + I_COUNT);
+            uint32_t fallback_field = 0;
+            // The provider owns count-field encoding, including the non-expanded fallback.
+            const QolResult fallback_result = item_count->field_from_canonical(
+                field, static_cast<uint32_t>(count), 0, &fallback_field);
+            if (!contracts::succeeded(fallback_result)) {
+                fn_itempool_free(item);
+                return item_error(out, kQolErrInternal, "item count fallback failed");
+            }
+            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(item) + I_COUNT) = fallback_field;
+        }
+    }
+
+    int8_t save_slot = -1;
+    if (!fn_inven_find_save_slot(item, &save_slot)) {
+        fn_itempool_free(item);
+        return item_error(out, kQolErrBlocked, "inventory full");
+    }
+    if (!fn_inven_save_item(item, nullptr)) {
+        fn_itempool_free(item);
+        return item_error(out, kQolErrInternal, "save item failed");
+    }
+    frame_cache_force_refresh();
     return contracts::ok();
 }
 
