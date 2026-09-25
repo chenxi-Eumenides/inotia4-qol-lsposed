@@ -1176,7 +1176,7 @@ const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
      const_cast<Query*>(&kQueries[13])},
     {kRoutes[14].method, kRoutes[14].path, kPluginId, &query_handler,
      const_cast<Query*>(&kQueries[14])},
-    // 写面 20 条（声明式 POST；owner 命令 + 票据）。set_skill_usage 保持 501 占位，不注册。
+    // 写面 20 条（声明式 POST；owner 命令 + 票据）。
     {contracts::HttpMethod::kPost, kCharWriteRoutes[0].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[0].kind)},
     {contracts::HttpMethod::kPost, kCharWriteRoutes[1].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[1].kind)},
     {contracts::HttpMethod::kPost, kCharWriteRoutes[2].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[2].kind)},

@@ -123,6 +123,8 @@
 > **VM-D1 状态**：D1 收尾真机卡，本轮未执行设备操作，结论待填 `PASS`/`NOT_ACCEPTED`；
 > 按 §1 交付定义，D1 行为面在真机证据归档前不视为可交付（当前状态：待真机执行）。
 
+| VM-P5-CORE-FEATURE-01 | W-a：开发迁移期临时插件 `core.feature` 接管唯一已证实未实现端点 `POST /api/character/combat/{role}/set_skill_usage`；保持 143 路由、`op_gated=0`、`lease=1` 与逐字节一致的 501 错误体；无游戏副作用 | Host：`cmake -S module/app/src/main/cpp/tests -B .tmp/wa-host`、`cmake --build .tmp/wa-host`、`ctest --test-dir .tmp/wa-host --output-on-failure`；检查 `check_http_routes.py`/`check_arch.py`；真机按批次延后，对 owner、501 状态/body、停用时 503/启用恢复与非 OP 门控行为进行核验 | **NOT_ACCEPTED（真机按批次延后）**：Host 口径为 descriptor id/requires、handler 注册、HTTP 501 `{"ok":false,"error":"not implemented"}`、deactivate 注销后 dispatch 返回 503；Host 通过不替代真机证据。真机确认 `core.feature=1`、`core.character` 比迁移前少 1、总数 143，关闭 op gate 不影响该路由。 |
+
 ## 5. 待建立
 
 | 阶段 | 卡片 | 说明 |

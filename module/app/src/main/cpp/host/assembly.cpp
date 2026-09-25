@@ -18,6 +18,7 @@
 #include "plugins/craft_ui/plugin.h"
 #include "plugins/core.craft/plugin.h"
 #include "plugins/core.character/plugin.h"
+#include "plugins/core.feature/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/inventory_hooks/plugin.h"
@@ -80,6 +81,7 @@ constexpr PluginDescriptorFn kPluginDescriptors[] = {
     &features::core_craft::plugin_descriptor,
     &features::core_save::plugin_descriptor,
     &features::core_character::plugin_descriptor,
+    &features::core_feature::plugin_descriptor,
     &features::attribute_quality::plugin_descriptor,
     &features::attribute_range_display::plugin_descriptor,
     &features::autosell::plugin_descriptor,

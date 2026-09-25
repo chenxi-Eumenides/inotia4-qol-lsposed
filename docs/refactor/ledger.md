@@ -18,7 +18,7 @@
 | P2 | `simple_mode` 纵向样板 | ✅ 完成 | VM-P2-01 |
 | P3 | 资源事务、异步步进、回滚、在途归零、生命周期状态 | ✅ 完成 | VM-P3-01、VM-P3-02、VM-P3-03 |
 | P4 | 内置静态插件批量迁移 | 🔄 进行中；阶段 A、B、C 已完成，D1 已完成待收尾 | VM-P4-01..08、VM-43..46、VM-D1、VM-D2-01..04 |
-| P5 | `core.api` 出口、领域 HTTP owner、动态 capability、JNI 与边界脚本收口 | 🔄 进行中；item/character 写面收口已完成：13 条 POST 归 `core.item`、21 条 POST 归 `core.character`；Kotlin 400 校验保持、成功投递返回票据并经 §7.9 回取原结果，party 4 条 POST 与通配映射同 controller 且前置声明；`set_skill_usage` 保持 Kotlin 501 占位。路由/契约/VM-K5-08h 真机证据已归档；P5 汇总收尾仍按出口插件卡执行 | VM-K5-01..08h；`docs/history/stage5-item-character-writes-20260924/README.md`；`docs/refactor/api-route-map.md`；`docs/reference/api-reference.md` |
+| P5 | `core.api` 出口、领域 HTTP owner、动态 capability、JNI 与边界脚本收口 | 🔄 进行中；item 写面 13 条归 `core.item`，character 已实现写面 20 条归 `core.character`；Kotlin 400 校验保持、成功投递返回票据并经 §7.9 回取原结果，party 4 条 POST 与通配映射同 controller 且前置声明；唯一已证实未实现的 `set_skill_usage` 由临时 `core.feature` 保持 501。路由/契约/VM-K5-08h 真机证据已归档；本批真机卡按批次延后，P5 汇总收尾仍按出口插件卡执行 | VM-K5-01..08h；VM-P5-CORE-FEATURE-01；`docs/history/stage5-item-character-writes-20260924/README.md`；`docs/refactor/api-route-map.md`；`docs/reference/api-reference.md` |
 | P6 | S2 `stack_limit` 归属、provider 常驻与功能启用双态、收口门禁 | 🔄 进行中 | host 已通过；VM-P6-01 真机证据待补 |
 | P7（可选） | 外部插件加载与分发 | ⬜ 未开始 | 仅在前六阶段完成后进入 |
 
@@ -30,7 +30,7 @@
 | `extension_bag` | D2a–D2c 已完成主要契约、资源声明、消费者切换和物理迁移。D2d 代码已接入 `contracts/extension_bag.h` v2.0 固定宽度 move capability：`game_system.cpp` 经 registry 取用，能力缺失时回退 `data_op_move_item`；`contracts/extension_bag_port.h` 的 legacy 全局声明及 api/native 直调仍待阶段 6 删除批清退 | D2d 代码已收口；legacy 面清退并入阶段 6。完成余下 hook/ptr/UI/生命周期收口、独立 target 与边界检查 | VM-D2D-01/02；VM-K5-08h；受影响 VM-43、VM-P4-07 |
 | UI | D1 的基础原语、文本层和共享组件已归位；面板已分配到对应插件 | U11-3：迁移 `settings`、`autosell`、`save_backup` 面板消费者；动态 UI 绑定器清除临时豁免 | VM-D1 |
 | S2 / `stack_limit` | codec、策略和 999 有效态由 `plugins/stack_limit` 持有；provider residency 与 `feature_enabled` 已分离 | 完成 getter/写路径全量切换、持久数据解释保证、过渡入口清除 | VM-P1-S2、VM-P6-01 |
-| HTTP | 143 条路径均登记在 route registry；item/character 写面 34 条分别归 `core.item`、`core.character`，票据结果经系统 tickets 端点回取；owner 计数与证据见 VM-K5-08h | 保持 `core.api` 的传输、注册、门控、lease 和诊断职责；`GET /api/system/events` 与 4 条 `GET /api/ui*` 的 Kotlin 处理器按现状保留；扩展袋 move 的 string 面见 D2d | VM-K5-08h；`api-route-map.md` |
+| HTTP | 143 条路径均登记在 route registry；item/character 写面归 `core.item`、`core.character`；`set_skill_usage` owner 为 `core.feature` | `core.feature` 是开发迁移期临时插件，仅暂存已证实未实现端点；实现后迁入对应领域，清空后移除，不属于最终发布插件。保持 `core.api` 的传输、注册、门控、lease 和诊断职责；`GET /api/system/events` 与 4 条 `GET /api/ui*` 的 Kotlin 处理器按现状保留；扩展袋 move 的 string 面见 D2d | VM-K5-08h；VM-P5-CORE-FEATURE-01；`api-route-map.md` |
 
 ## 3. 仍有效的债务与清除条件
 

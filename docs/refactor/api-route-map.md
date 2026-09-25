@@ -19,7 +19,7 @@
 | POST | `/api/character/grow/reset_stat` | core.character | 0 | 1 | CharacterController.statReset | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kStatReset`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Player>}` |
 | POST | `/api/character/grow/reset_skill` | core.character | 0 | 1 | CharacterController.skillReset | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kSkillReset`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Player>}` |
 | POST | `/api/character/combat/{role}/set_auto_attack` | core.character | 0 | 1 | CombatController.autoAttack | `NativeHttpCommand.post`（保留 Kotlin 校验） | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kSetAutoAttack`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Party>}` |
-| POST | `/api/character/combat/{role}/set_skill_usage` | core.character | 0 | 1 | CombatController.skillUsage | — | — | — | 501 `not implemented`；仅文档标注，不投递命令、不实现 |
+| POST | `/api/character/combat/{role}/set_skill_usage` | core.feature | 0 | 1 | CombatController.skillUsage | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.feature/plugin.cpp` | owner 固定返回 HTTP 501 `{"ok":false,"error":"not implemented"}`；不解析请求体、不产生游戏副作用 |
 | POST | `/api/character/combat/switch_player` | core.character | 0 | 1 | CombatController.switchPlayer | `NativeHttpCommand.post`（保留 Kotlin 校验） | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kSwitchPlayer`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Player>}` |
 | POST | `/api/character/combat/{role}/cast_skill` | core.character | 0 | 1 | CombatController.cast | `NativeHttpCommand.post`（保留 Kotlin 校验） | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kCastSkill`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Party>}` |
 | POST | `/api/character/combat/{role}/attack_target` | core.character | 0 | 1 | CombatController.attack | `NativeHttpCommand.post`（保留 Kotlin 校验） | `nativeHttpDispatch` | `plugins/core.character/plugin.cpp` (`kAttackTarget`); `game_system.cpp`; `game/adapter_ports/character_write_port.cpp` | ticket `result`=`{"ok":true,"state":<Party>}` |
@@ -159,12 +159,12 @@
 ## 汇总
 
 - 路由总数：**143**。
-- owner 计数以 `routes.inc` 为准：`api.item=0`、`api.character=0`、`core.item=21`、`core.character=42`、`core.api=6`、`core.world=12`、`core.quest=8`、`core.save=3`、`save_backup=4`、`core.system=5`、`core.settings=6`、`core.ui_state=9`、`core.craft=1`、`extension_bag=8`、`autosell=2`、`legacy.debug=3`、`static.data=12`、`module.config=1`；`core.custom_ui` 与 `api.ui` 当前均为 0。`core.item` 的 21 条含本批 13 条写路由；`core.character` 的 42 条含本批 21 条写路由及既有角色读面/写面。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
+- owner 计数以 `routes.inc` 为准：`api.item=0`、`api.character=0`、`core.item=21`、`core.character=41`、`core.feature=1`、`core.api=6`、`core.world=12`、`core.quest=8`、`core.save=3`、`save_backup=4`、`core.system=5`、`core.settings=6`、`core.ui_state=9`、`core.craft=1`、`extension_bag=8`、`autosell=2`、`legacy.debug=3`、`static.data=12`、`module.config=1`；`core.custom_ui` 与 `api.ui` 当前均为 0。`core.item` 的 21 条含本批 13 条写路由；`core.character` 的 41 条含本批 20 条写路由及既有角色读面/写面。`core.feature` 是开发迁移期临时 owner，不属于最终发布插件；端点实现后归入对应领域并移除空插件。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
 - 含加工响应：**87**（列中标注 `StaticData`/名称注入/字段重排、`UiActivityTracker` 或 `state`/配置 envelope 拼装的路由）。
-- 无 native 实现（纯 Kotlin）：**25**（静态数据读取、占位端点与未实现 quest id；`/api/config/set` 仍由 Kotlin 处理并经 `ConfigApiService` 下发 native 配置）。
+- 无 native 实现（纯 Kotlin）：**24**（静态数据读取、其余占位端点与未实现 quest id；`/api/config/set` 仍由 Kotlin 处理并经 `ConfigApiService` 下发 native 配置）。
 
 ## 三源口径说明
 
 1. Native 路由表只提供冻结的 method/path、owner、`op_gated` 和 route lease；它不推导 Kotlin 调用链。
 2. Kotlin 端从 `api/controller/*.kt` 的 mapping 与方法体、`service/info/**`、`service/action/**`、`service/ConfigApiService.kt` 追到 `NativeBridge` 或 `NativeHttpCommand`；Action service 的 `state` attach、`InfoApiServiceCore` 的复合组装和 enrichment 均计入加工。
-3. HTTP 契约 `docs/reference/api-reference.md` 用于校验路径语义、静态数据/名称注入和响应约定；本表不复制完整响应 schema。HTTP 契约中列出的 143 条路径以 native 路由表和 Kotlin controller 交集为最终行集合。带游戏写入的 33 条 item/character 写路由由对应 `core.item`/`core.character` owner 返回票据；`set_skill_usage` 保持 Kotlin 501 占位。party 的 4 条 POST 与 `PartyController` 的 `/api/character/party/{slot}` 通配映射处于同一 controller，且声明在通配映射之前。
+3. HTTP 契约 `docs/reference/api-reference.md` 用于校验路径语义、静态数据/名称注入和响应约定；本表不复制完整响应 schema。HTTP 契约中列出的 143 条路径以 native 路由表和 Kotlin controller 交集为最终行集合。`set_skill_usage` 由 `core.feature` 的临时 handler 透传固定 501 占位响应，不投递命令。party 的 4 条 POST 与 `PartyController` 的 `/api/character/party/{slot}` 通配映射处于同一 controller，且声明在通配映射之前。

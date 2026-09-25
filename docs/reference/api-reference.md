@@ -590,7 +590,7 @@
 
 `POST /api/character/combat/{role}/set_skill_usage`
 
-**实现状态**：仅文档标注，不实现。当前路由保持 Kotlin 501 占位，不解析请求体、不投递票据。
+**实现状态**：端点尚未实现，由开发迁移期临时插件 `core.feature` 持有占位 handler；插件不属于最终发布插件，端点实现后迁入对应领域。Kotlin 仅透传请求，不解析请求体、不投递票据。
 
 **请求格式**：`{ "action_id": 3, "mode": "normal" }`
 
@@ -598,7 +598,7 @@
 
 **请求格式仅作规划文档**：`action_id` / `mode` 目前不解析；规划中的 `mode` 值为 `off` / `normal` / `high`。
 
-**注意**：无论请求内容如何，当前固定返回 501 `not implemented`。
+**注意**：无论请求内容如何，当前固定返回 HTTP 501 `{"ok":false,"error":"not implemented"}`。
 
 #### 释放技能
 
@@ -1875,7 +1875,7 @@
 - `POST /api/op/character/{role}/skill-point`、`POST /api/op/character/{role}/skill-level`（owner `core.character`）→ 501
 - `POST /api/op/combat/{role}/heal`、`POST /api/op/combat/{role}/rest`、`POST /api/op/combat/{role}/revive`、`POST /api/op/combat/{role}/hate`（owner `core.character`）→ 501
 - `POST /api/op/inventory/set-slot`、`POST /api/op/inventory/set-equip`（owner `core.item`）→ 501
-- `POST /api/character/combat/{role}/set_skill_usage`（owner `core.character`）→ HTTP 501 `not implemented`；仅文档标注，不投递命令。
+- `POST /api/character/combat/{role}/set_skill_usage`（临时 owner `core.feature`）→ HTTP 501 `not implemented`；不解析请求体、不投递命令。`core.feature` 仅用于开发迁移期，端点实现并迁入领域 owner 后移除。
 - `POST /api/op/craft/mix-direct`（owner `core.craft`）→ 501
 - `GET /api/quest/{id}`（owner `core.quest`）→ 404 `not found`
 

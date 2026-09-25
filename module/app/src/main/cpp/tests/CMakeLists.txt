@@ -973,6 +973,19 @@ set_target_properties(character_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 
 target_link_libraries(character_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME character_facts_dispatch_tests COMMAND character_facts_dispatch_tests)
 
+# 临时 core.feature 对唯一已证实未实现路由的 501 owner handler。
+add_executable(core_feature_plugin_tests
+    test_core_feature_plugin.cpp
+    ${CPP_DIR}/plugins/core.feature/plugin.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp
+)
+target_include_directories(core_feature_plugin_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_feature_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(core_feature_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_feature_plugin_tests PRIVATE Threads::Threads)
+add_test(NAME core_feature_plugin_tests COMMAND core_feature_plugin_tests)
+
 # P5-4-3：system_facts 4 条 /api/system/{snapshot,game,info,game_frame} query handler 的
 # 注册/快照/身份降级/注销接缝。
 add_executable(system_facts_dispatch_tests

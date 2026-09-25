@@ -1,7 +1,5 @@
 package com.inotia4.qol.api.controller
 
-import com.inotia4.qol.LogDomain
-import com.inotia4.qol.LogFile
 import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
@@ -22,13 +20,10 @@ class CombatController {
         return NativeHttpCommand.post("/api/character/combat/$role/set_auto_attack", body)
     }
 
-    // ⏳ 占位：文档请求 {action_id, mode:off/normal/high}（单技能 AI 档位），native 仅支持全局布尔开关，
-    // 单技能档位编码（技能链表节点 +0x07）缺失前置探索，暂返回 not implemented
+    // 单技能档位尚未实现；由临时 core.feature owner 返回兼容的 501 占位响应。
     @PostMapping("/api/character/combat/{role}/set_skill_usage")
     fun skillUsage(@PathVariable("role") role: Int, @RequestBody body: String): String =
-        LogFile.op(LogDomain.API, "POST /api/character/combat/{role}/set_skill_usage", mapOf("role" to "$role")) {
-            throw ApiException(StatusCode.SC_NOT_IMPLEMENTED, "not implemented")
-        }
+        NativeHttpCommand.post("/api/character/combat/$role/set_skill_usage", body)
 
     @PostMapping("/api/character/combat/switch_player")
     fun switchPlayer(@RequestBody body: String): String {

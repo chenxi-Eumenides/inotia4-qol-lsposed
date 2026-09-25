@@ -9,7 +9,7 @@ QOL_HTTP_ROUTE(kPost, "/api/character/grow/{role}/add_stat", "core.character", 0
 QOL_HTTP_ROUTE(kPost, "/api/character/grow/reset_stat", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/grow/reset_skill", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/set_auto_attack", "core.character", 0, 1)
-QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/set_skill_usage", "core.character", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/set_skill_usage", "core.feature", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/switch_player", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/cast_skill", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/attack_target", "core.character", 0, 1)
