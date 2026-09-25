@@ -66,6 +66,11 @@ object ApiServer {
         bootstrapped = true
         StaticData.attach(context)
         ensureAssetsInjected(context, moduleApkPath)
+        try {
+            CoreDataAssets.load(context)
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.HTTP, "core.data static asset ingress failed", t)
+        }
         // 模块配置组件：外部 config.json 为唯一来源（v0.5.21 起不再读 assets；缺失用默认值并写入外部存储）
         ModuleConfig.load(context)
         ModuleSaveStore.initialize(context)

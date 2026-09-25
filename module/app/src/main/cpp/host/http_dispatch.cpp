@@ -1,9 +1,11 @@
 #include "host/http_dispatch.h"
 
 #include <array>
+#include <algorithm>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
 #include <string_view>
 
@@ -351,6 +353,79 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
 
 contracts::QolHttpDispatchApi http_dispatch_api() {
     return {&register_query, &register_command, &unregister_owner, &dispatch};
+}
+
+QolResult http_dispatch_dynamic(const contracts::HttpReq* request,
+                                std::vector<uint8_t>* response_body, uint32_t max_capacity,
+                                uint16_t* out_status, uint32_t* out_body_size) {
+    if (request == nullptr || response_body == nullptr || out_status == nullptr ||
+        out_body_size == nullptr || max_capacity < 128) {
+        return contracts::error(kQolErrInvalidArgument, "invalid dynamic http response", 30);
+    }
+    constexpr uint32_t kInitialCapacity = 262144;
+    constexpr uint32_t kGrowthSlack = 4096;
+    try {
+        response_body->assign(std::min(kInitialCapacity, max_capacity), 0);
+    } catch (const std::bad_alloc&) {
+        *out_status = 500;
+        *out_body_size = 0;
+        return contracts::error(kQolErrInternal, "http response allocation failed", 31);
+    }
+    contracts::HttpRes response{response_body->data(), static_cast<uint32_t>(response_body->size()),
+                                0, 0};
+    const auto dispatch_safely = [request](contracts::HttpRes* out) {
+        try {
+            return dispatch(request, out);
+        } catch (const std::bad_alloc&) {
+            constexpr char kAllocationFailed[] = "{\"ok\":false,\"error\":\"oom\"}";
+            out->status = 500;
+            out->body_size = sizeof(kAllocationFailed) - 1;
+            if (out->body != nullptr && out->body_capacity >= out->body_size)
+                std::memcpy(out->body, kAllocationFailed, out->body_size);
+            return contracts::error(kQolErrInternal, "http handler allocation failed", 30);
+        }
+    };
+    QolResult result = dispatch_safely(&response);
+    while (request->method == contracts::HttpMethod::kGet &&
+           response.body_size > response.body_capacity) {
+        const uint32_t required = response.body_size;
+        if (required > max_capacity) {
+            constexpr char kTooLarge[] = "{\"ok\":false,\"error\":\"response too large\"}";
+            response_body->assign(kTooLarge, kTooLarge + sizeof(kTooLarge) - 1);
+            response.status = 500;
+            response.body_size = sizeof(kTooLarge) - 1;
+            result = contracts::ok();
+            break;
+        } else {
+            const uint32_t slack = std::min(kGrowthSlack, max_capacity);
+            const uint32_t target = required > max_capacity - slack ? max_capacity : required + slack;
+            try {
+                response_body->resize(target);
+            } catch (const std::bad_alloc&) {
+                constexpr char kAllocationFailed[] = "{\"ok\":false,\"error\":\"oom\"}";
+                std::memcpy(response_body->data(), kAllocationFailed,
+                            sizeof(kAllocationFailed) - 1);
+                response.status = 500;
+                response.body_size = sizeof(kAllocationFailed) - 1;
+                *out_status = response.status;
+                *out_body_size = response.body_size;
+                return contracts::ok();
+            }
+            response = {response_body->data(), static_cast<uint32_t>(response_body->size()), 0, 0};
+            result = dispatch_safely(&response);
+            if (response.body_size > response.body_capacity) {
+                constexpr char kTooLarge[] = "{\"ok\":false,\"error\":\"response too large\"}";
+                response_body->assign(kTooLarge, kTooLarge + sizeof(kTooLarge) - 1);
+                response.status = 500;
+                response.body_size = sizeof(kTooLarge) - 1;
+                result = contracts::ok();
+                break;
+            }
+        }
+    }
+    *out_status = response.status;
+    *out_body_size = response.body_size;
+    return result;
 }
 
 QolResult http_dispatch_register_queries(const contracts::HttpQueryHandlerDescriptor* handlers,

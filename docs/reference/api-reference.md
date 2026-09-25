@@ -871,6 +871,8 @@
 ### 3.3 静态地图 maps
 
 > 静态数据查询域：地图信息与静态瓦片矩阵（assets maps/tiles.json，416 图）。**瓦片数据只从静态数据获取，不再从运行时内存读取**；原运行时端点 `/api/world/map/tile`（单格瓦片）与 `/api/world/map/tiles`（矩阵）已移除。
+>
+> 本节四条静态地图路由 owner 为 `core.data`。启动时 Kotlin 从模块 assets 按文件分批传入原始字节；解析、缓存、查表及响应由 native owner 完成。路径、方法和响应保持不变。
 
 #### 地图列表
 
@@ -1565,6 +1567,8 @@
 ### 7.4 静态数据表 tables
 
 > 静态知识库：游戏静态表 + 多语言文本（text）+ 剧情事件（story-events）统一作为 table 查询。
+>
+> 本节六条路由 owner 为 `core.data`。启动时 Kotlin 只读取并分批传输 `manifest.json`、`tables/*.json`、`reverse/events.json`、`text/*.json`、`maps/*.json` 原始资产字节；每文件上限 16 MiB、总量上限 32 MiB。native 插件负责解析、缓存、查询和 JSON 组装，资产尚未装载时返回 503 `not ready`，所需资产缺失或需要解析的 JSON 无效时返回 404 `not found`。成功响应体保持迁移前不变。
 
 #### 静态表列表
 
@@ -1623,6 +1627,8 @@
 **返回格式**：`<events.json 内容>`（608 事件 + 28598 命令）
 
 ### 7.5 帮助文档 help
+
+> 两条占位路由 owner 为 `core.data`；当前仍逐字节保持 HTTP 501 `{"ok":false,"error":"not implemented"}`。`NativeBridge` 的既有 external 方法与签名不变，仅新增有界静态资产导入入口。
 
 #### 帮助文档
 

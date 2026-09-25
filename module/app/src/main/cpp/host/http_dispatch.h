@@ -1,11 +1,17 @@
 #pragma once
 
+#include <cstdint>
+#include <vector>
+
 #include "contracts/http.h"
 
 namespace qol::host {
 
 // Host SDK 注入插件的 HTTP handler 接缝。
 contracts::QolHttpDispatchApi http_dispatch_api();
+QolResult http_dispatch_dynamic(const contracts::HttpReq* request,
+                                std::vector<uint8_t>* response_body, uint32_t max_capacity,
+                                uint16_t* out_status, uint32_t* out_body_size);
 
 // 插件描述符尾部的 query handler 声明由宿主生命周期调用。
 QolResult http_dispatch_register_queries(const contracts::HttpQueryHandlerDescriptor* handlers,

@@ -115,6 +115,7 @@ target_include_directories(gamebridge PRIVATE
 add_subdirectory(plugins)
 if(NOT QOL_KERNEL_ONLY)
     target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
+    target_sources(gamebridge PRIVATE bridge/native/gamebridge_core_data.cpp)
 endif()
 target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 

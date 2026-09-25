@@ -21,10 +21,10 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 58 |
-| `game` | 117 |
+| `contracts` | 59 |
+| `game` | 118 |
 | `hooks` | 10 |
-| `host` | 44 |
+| `host` | 45 |
 | `infra` | 39 |
 | `legacy/character` | 2 |
 | `legacy/dialog` | 4 |
@@ -45,6 +45,8 @@
 | `plugins/core.character` | 5 |
 | `plugins/core.craft` | 2 |
 | `plugins/core.custom_ui` | 10 |
+| `plugins/core.data` | 4 |
+| `plugins/core.feature` | 2 |
 | `plugins/core.item` | 7 |
 | `plugins/core.quest` | 5 |
 | `plugins/core.save` | 2 |
@@ -65,7 +67,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **519** |
+| **合计** | **528** |
 
 ### 1.2 迁移期映射摘要
 
@@ -116,20 +118,20 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 127 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 131 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `game` | 53 |
-| `game` | `contracts` | 50 |
-| `host` | `infra` | 41 |
+| `game` | `contracts` | 51 |
+| `host` | `infra` | 42 |
 | `host` | `contracts` | 38 |
 | `plugins/extension_bag` | `contracts` | 34 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
+| `legacy/system` | `game` | 14 |
 | `plugins/save_backup` | `contracts` | 14 |
-| `legacy/system` | `game` | 13 |
 | `plugins/core.settings` | `contracts` | 13 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
@@ -207,8 +209,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：150 个
-- native 导出：150 个
+- Kotlin `external fun`：156 个
+- native 导出：156 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -217,14 +219,14 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（28 个）共 28 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（30 个）共 30 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（28）
+### 6.2 已迁移 `plugins/*`（30）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -236,6 +238,8 @@
 | `core.character` | `plugins/core.character` | 5 |
 | `core.craft` | `plugins/core.craft` | 2 |
 | `core.custom_ui` | `plugins/core.custom_ui` | 10 |
+| `core.data` | `plugins/core.data` | 4 |
+| `core.feature` | `plugins/core.feature` | 2 |
 | `core.item` | `plugins/core.item` | 7 |
 | `core.quest` | `plugins/core.quest` | 5 |
 | `core.save` | `plugins/core.save` | 2 |

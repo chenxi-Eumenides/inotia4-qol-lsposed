@@ -33,18 +33,18 @@
 | GET | `/api/world/map/interactives` | api.world | 0 | 1 | CurrentMapController.interactives | `InfoApiServiceCore.currentMapInteractives` → `InfoMapQueries.interactives` | `nativeGetInteractivesJson` | `core/native/game_cache.cpp` | — |
 | GET | `/api/world/map/drops` | api.world | 0 | 1 | CurrentMapController.drops | `InfoApiServiceCore.currentMapDrops` → `InfoMapQueries.drops` | `nativeGetDropsJson` | `core/native/game_cache.cpp` | — |
 | GET | `/api/world/map/distance` | api.world | 0 | 1 | CurrentMapController.distance | `InfoApiServiceCore.currentMapDistance` → `InfoMapQueries.distance` | `nativeDistanceJson` | `api/native/game_world.cpp` | — |
-| GET | `/api/world/maps/list` | static.data | 0 | 1 | DataController.mapList | — | — | — | `StaticData` MAPINFOBASE |
-| GET | `/api/world/maps/{map_id}` | static.data | 0 | 1 | DataController.mapDetail | — | — | — | `StaticData` MAPINFOBASE |
-| GET | `/api/world/maps/{map_id}/tiles` | static.data | 0 | 1 | DataController.mapTiles | — | — | — | `StaticData` maps/tiles.json |
-| GET | `/api/world/maps/{map_id}/exits` | static.data | 0 | 1 | DataController.mapExits | — | — | — | `StaticData.mapExits` |
-| GET | `/api/system/tables` | static.data | 0 | 1 | DataController.list | — | — | — | `StaticData` manifest.json |
-| GET | `/api/system/tables/{table}` | static.data | 0 | 1 | DataController.table | — | — | — | `StaticData` 表文件 |
-| GET | `/api/system/tables/{table}/search` | static.data | 0 | 1 | DataController.search | — | — | — | `StaticData` 表文件 + Kotlin 搜索 |
-| GET | `/api/system/tables/{table}/download` | static.data | 0 | 1 | DataController.download | — | — | — | 占位，纯 Kotlin `not implemented` |
-| GET | `/api/system/tables/story-events` | static.data | 0 | 1 | DataController.events | — | — | — | `StaticData` reverse/events.json |
-| GET | `/api/system/tables/text` | static.data | 0 | 1 | DataController.text | — | — | — | `StaticData` text/{lang}.json |
-| GET | `/api/system/help` | static.data | 0 | 1 | DataController.help | — | — | — | 占位，纯 Kotlin `not implemented` |
-| GET | `/api/system/download` | static.data | 0 | 1 | DataController.downloadAll | — | — | — | 占位，纯 Kotlin `not implemented` |
+| GET | `/api/world/maps/list` | core.data | 0 | 1 | DataController.mapList | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（MAPINFOBASE 投影） | — |
+| GET | `/api/world/maps/{map_id}` | core.data | 0 | 1 | DataController.mapDetail | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（MAPINFOBASE 查询） | — |
+| GET | `/api/world/maps/{map_id}/tiles` | core.data | 0 | 1 | DataController.mapTiles | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（tiles 解码与投影） | — |
+| GET | `/api/world/maps/{map_id}/exits` | core.data | 0 | 1 | DataController.mapExits | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（exits 投影） | — |
+| GET | `/api/system/tables` | core.data | 0 | 1 | DataController.list | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（manifest 查询） | — |
+| GET | `/api/system/tables/{table}` | core.data | 0 | 1 | DataController.table | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（静态表原文） | — |
+| GET | `/api/system/tables/{table}/search` | core.data | 0 | 1 | DataController.search | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（静态表搜索） | — |
+| GET | `/api/system/tables/{table}/download` | core.data | 0 | 1 | DataController.download | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（501 占位） | — |
+| GET | `/api/system/tables/story-events` | core.data | 0 | 1 | DataController.events | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（原始 events JSON） | — |
+| GET | `/api/system/tables/text` | core.data | 0 | 1 | DataController.text | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（原始 text JSON） | — |
+| GET | `/api/system/help` | core.data | 0 | 1 | DataController.help | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（501 占位） | — |
+| GET | `/api/system/download` | core.data | 0 | 1 | DataController.downloadAll | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（501 占位） | — |
 | GET | `/api/debug/ui` | legacy.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `api/native/game_ui_read.inc` | — |
 | GET | `/api/debug/path` | legacy.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `api/native/game_world_navigation.inc` | — |
 | GET | `/api/debug/item/raw` | legacy.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `api/native/game_inventory_read.inc` | — |
@@ -159,9 +159,9 @@
 ## 汇总
 
 - 路由总数：**143**。
-- owner 计数以 `routes.inc` 为准：`api.item=0`、`api.character=0`、`core.item=21`、`core.character=41`、`core.feature=1`、`core.api=6`、`core.world=12`、`core.quest=8`、`core.save=3`、`save_backup=4`、`core.system=5`、`core.settings=6`、`core.ui_state=9`、`core.craft=1`、`extension_bag=8`、`autosell=2`、`legacy.debug=3`、`static.data=12`、`module.config=1`；`core.custom_ui` 与 `api.ui` 当前均为 0。`core.item` 的 21 条含本批 13 条写路由；`core.character` 的 41 条含本批 20 条写路由及既有角色读面/写面。`core.feature` 是开发迁移期临时 owner，不属于最终发布插件；端点实现后归入对应领域并移除空插件。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
+- owner 计数以 `routes.inc` 为准：`api.item=0`、`api.character=0`、`core.item=21`、`core.character=41`、`core.feature=1`、`core.data=12`、`core.api=6`、`core.world=12`、`core.quest=8`、`core.save=3`、`save_backup=4`、`core.system=5`、`core.settings=6`、`core.ui_state=9`、`core.craft=1`、`extension_bag=8`、`autosell=2`、`legacy.debug=3`、`static.data=0`、`module.config=1`；`core.custom_ui` 与 `api.ui` 当前均为 0。`core.item` 的 21 条含本批 13 条写路由；`core.character` 的 41 条含本批 20 条写路由及既有角色读面/写面。`core.data` 承担 12 条静态数据路由；入口由 Kotlin 分批传入资产字节，查询和响应由插件处理。`core.feature` 是开发迁移期临时 owner，不属于最终发布插件；端点实现后归入对应领域并移除空插件。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
 - 含加工响应：**87**（列中标注 `StaticData`/名称注入/字段重排、`UiActivityTracker` 或 `state`/配置 envelope 拼装的路由）。
-- 无 native 实现（纯 Kotlin）：**24**（静态数据读取、其余占位端点与未实现 quest id；`/api/config/set` 仍由 Kotlin 处理并经 `ConfigApiService` 下发 native 配置）。
+- 无 native 实现（纯 Kotlin）：**12**（其余占位端点与未实现 quest id；`/api/config/set` 仍由 Kotlin 处理并经 `ConfigApiService` 下发 native 配置）。
 
 ## 三源口径说明
 

@@ -30,7 +30,7 @@
 | `extension_bag` | D2a–D2c 已完成主要契约、资源声明、消费者切换和物理迁移。D2d 代码已接入 `contracts/extension_bag.h` v2.0 固定宽度 move capability：`game_system.cpp` 经 registry 取用，能力缺失时回退 `data_op_move_item`；`contracts/extension_bag_port.h` 的 legacy 全局声明及 api/native 直调仍待阶段 6 删除批清退 | D2d 代码已收口；legacy 面清退并入阶段 6。完成余下 hook/ptr/UI/生命周期收口、独立 target 与边界检查 | VM-D2D-01/02；VM-K5-08h；受影响 VM-43、VM-P4-07 |
 | UI | D1 的基础原语、文本层和共享组件已归位；面板已分配到对应插件 | U11-3：迁移 `settings`、`autosell`、`save_backup` 面板消费者；动态 UI 绑定器清除临时豁免 | VM-D1 |
 | S2 / `stack_limit` | codec、策略和 999 有效态由 `plugins/stack_limit` 持有；provider residency 与 `feature_enabled` 已分离 | 完成 getter/写路径全量切换、持久数据解释保证、过渡入口清除 | VM-P1-S2、VM-P6-01 |
-| HTTP | 143 条路径均登记在 route registry；item/character 写面归 `core.item`、`core.character`；`set_skill_usage` owner 为 `core.feature` | `core.feature` 是开发迁移期临时插件，仅暂存已证实未实现端点；实现后迁入对应领域，清空后移除，不属于最终发布插件。保持 `core.api` 的传输、注册、门控、lease 和诊断职责；`GET /api/system/events` 与 4 条 `GET /api/ui*` 的 Kotlin 处理器按现状保留；扩展袋 move 的 string 面见 D2d | VM-K5-08h；VM-P5-CORE-FEATURE-01；`api-route-map.md` |
+| HTTP | 143 条路径均登记在 route registry；静态数据 12 条 owner=`core.data`（`static.data=0`），item/character 写面归 `core.item`、`core.character`；`set_skill_usage` owner 为 `core.feature` | `core.data` 批1已接管静态数据路由与分批资产 ingress；enrichment/非 HTTP 消费者留批2。`core.feature` 是开发迁移期临时插件，仅暂存已证实未实现端点；实现后迁入对应领域，清空后移除，不属于最终发布插件。保持 `core.api` 的传输、注册、门控、lease 和诊断职责；`GET /api/system/events` 与 4 条 `GET /api/ui*` 的 Kotlin 处理器按现状保留；扩展袋 move 的 string 面见 D2d | VM-K5-08h；VM-P5-CORE-FEATURE-01；VM-P5-CORE-DATA-01/02；`api-route-map.md` |
 
 ## 3. 仍有效的债务与清除条件
 

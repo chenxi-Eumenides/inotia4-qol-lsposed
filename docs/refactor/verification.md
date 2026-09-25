@@ -124,6 +124,8 @@
 > 按 §1 交付定义，D1 行为面在真机证据归档前不视为可交付（当前状态：待真机执行）。
 
 | VM-P5-CORE-FEATURE-01 | W-a：开发迁移期临时插件 `core.feature` 接管唯一已证实未实现端点 `POST /api/character/combat/{role}/set_skill_usage`；保持 143 路由、`op_gated=0`、`lease=1` 与逐字节一致的 501 错误体；无游戏副作用 | Host：`cmake -S module/app/src/main/cpp/tests -B .tmp/wa-host`、`cmake --build .tmp/wa-host`、`ctest --test-dir .tmp/wa-host --output-on-failure`；检查 `check_http_routes.py`/`check_arch.py`；真机按批次延后，对 owner、501 状态/body、停用时 503/启用恢复与非 OP 门控行为进行核验 | **NOT_ACCEPTED（真机按批次延后）**：Host 口径为 descriptor id/requires、handler 注册、HTTP 501 `{"ok":false,"error":"not implemented"}`、deactivate 注销后 dispatch 返回 503；Host 通过不替代真机证据。真机确认 `core.feature=1`、`core.character` 比迁移前少 1、总数 143，关闭 op gate 不影响该路由。 |
+| VM-P5-CORE-DATA-01 | W-b 批1：12 条静态数据 GET owner 从 `static.data` 改为 `core.data`；method/path/gate/lease/响应冻结；覆盖小表、约 640 KiB text、约 11 MiB story-events 响应 | Host：`.tmp/wb-host` 全量 CTest；`core_data_plugin_tests` 断言 12 条响应、缺 key/空表/转义边界、501 占位和三种响应规模；路由检查确认 143/143、`core.data=12`、`static.data=0`；真机按批次延后比较原响应体与 501/404 语义 | **NOT_ACCEPTED（真机按批次延后）**：Host 通过仅证明插件 handler 与测试构造基线一致；真机需用现有 assets 抽验 map/table/search/text/events 和 501 占位，确认大响应完整无截断。 |
+| VM-P5-CORE-DATA-02 | W-b 批1：Kotlin 按需传输模块静态 JSON 资产；单文件 ≤16 MiB、总量 ≤32 MiB；检查启动前未就绪、缺资产/坏 JSON 错误和完整导入后可用 | Host：全量 CTest 覆盖 typed ingress 大小/路径限制、导入后查询、未就绪 503 与缺失/坏数据 404；`check_arch.py` 检查新增 NativeBridge external 三向一致；真机按批次延后验证 native init 后、HTTP 启动前资产导入完成且 endpoints 就绪 | **NOT_ACCEPTED（真机按批次延后）**：无真机启动序列与导入日志；Debug 构建、Host 和架构检查不替代该证据。 |
 
 ## 5. 待建立
 

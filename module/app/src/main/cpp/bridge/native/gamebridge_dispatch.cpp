@@ -1,6 +1,7 @@
 #include "gamebridge_internal.h"
 
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -24,8 +25,9 @@ std::string read_string(JNIEnv* env, jstring value, bool required, bool* ok) {
     return result;
 }
 
-void append_json_string(std::string& out, const std::string& value) {
-    for (const unsigned char ch : value) {
+void append_json_string(std::string& out, const char* data, uint32_t size) {
+    for (uint32_t i = 0; i < size; ++i) {
+        const unsigned char ch = static_cast<unsigned char>(data[i]);
         switch (ch) {
             case '\\': out += "\\\\"; break;
             case '"': out += "\\\""; break;
@@ -47,9 +49,11 @@ void append_json_string(std::string& out, const std::string& value) {
 }
 
 std::string dispatch_result_json(const qol::contracts::HttpRes& response) {
-    const std::string body(reinterpret_cast<const char*>(response.body), response.body_size);
     std::string result = "{\"status\":" + std::to_string(response.status) + ",\"body\":\"";
-    append_json_string(result, body);
+    if (response.body_size > 0 && response.body != nullptr) {
+        result.reserve(result.size() + response.body_size + 64);
+        append_json_string(result, reinterpret_cast<const char*>(response.body), response.body_size);
+    }
     result += "\"}";
     return result;
 }
@@ -89,11 +93,10 @@ Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint m
     const std::string path_value = read_string(env, path, true, &input_ok);
     const std::string query_value = read_string(env, query, false, &input_ok);
     const std::string body_value = read_string(env, body, false, &input_ok);
-    // owner handler 可能输出较大的聚合 JSON（如任务完成列表），缓冲区按线程常驻，避免每次
-    // 调用在栈上零初始化 256KB。
-    static thread_local std::vector<uint8_t> output(262144);
-    qol::contracts::HttpRes response{output.data(), static_cast<uint32_t>(output.size()), 0, 0};
+    constexpr uint32_t kMaxResponseCapacity = 32 * 1024 * 1024;
     if (!input_ok) {
+        std::vector<uint8_t> output(128);
+        qol::contracts::HttpRes response{output.data(), static_cast<uint32_t>(output.size()), 0, 0};
         response.status = 400;
         const std::string message = "{\"ok\":false,\"error\":\"invalid input\"}";
         std::memcpy(output.data(), message.data(), message.size());
@@ -111,9 +114,23 @@ Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint m
         nullptr,
         0,
     };
-    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
-    const std::string result = dispatch_result_json(response);
-    jstring output_string = env->NewStringUTF(result.c_str());
-    if (output_string != nullptr) return output_string;
+    std::vector<uint8_t> output;
+    uint16_t response_status = 0;
+    uint32_t response_size = 0;
+    const auto dispatched = qol::host::http_dispatch_dynamic(
+        &request, &output, kMaxResponseCapacity, &response_status, &response_size);
+    if (!qol::contracts::succeeded(dispatched) && response_size == 0) {
+        return env->NewStringUTF("{\"status\":500,\"body\":\"{\\\"ok\\\":false,\\\"error\\\":\\\"oom\\\"}\"}");
+    }
+    qol::contracts::HttpRes response{output.data(), static_cast<uint32_t>(output.size()),
+                                     response_size, response_status};
+    (void)dispatched;
+    try {
+        const std::string result = dispatch_result_json(response);
+        jstring output_string = env->NewStringUTF(result.c_str());
+        if (output_string != nullptr) return output_string;
+    } catch (const std::bad_alloc&) {
+        return env->NewStringUTF("{\"status\":500,\"body\":\"{\\\"ok\\\":false,\\\"error\\\":\\\"oom\\\"}\"}");
+    }
     return env->NewStringUTF("{\"status\":500,\"body\":\"{\\\"ok\\\":false,\\\"error\\\":\\\"oom\\\"}\"}");
 }

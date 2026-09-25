@@ -42,6 +42,10 @@ object NativeBridge {
     external fun nativeGetBaseAddr(): Long
     external fun nativeGetFrameCount(): Long
     external fun nativeHttpDispatch(method: Int, path: String, query: String?, body: String?): String
+    external fun nativeCoreDataBegin(fileCount: Int, totalBytes: Int): Boolean
+    external fun nativeCoreDataAsset(path: String, bytes: ByteArray): Boolean
+    external fun nativeCoreDataFinish(): Boolean
+    external fun nativeCoreDataCancel()
     external fun nativeSetOpEnabled(enabled: Boolean): Boolean
     external fun nativeConfigSetString(key: String, value: String): Boolean
     external fun nativeConfigSetInt(key: String, value: Int): Boolean
