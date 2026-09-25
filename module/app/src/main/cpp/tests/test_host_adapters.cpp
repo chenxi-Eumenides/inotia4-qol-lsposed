@@ -39,6 +39,7 @@
 #include "infra/text_scope.h"
 
 uintptr_t g_base = 0;
+void* g_active_quest = nullptr;
 
 std::string op_ok() { return "{\"ok\":true}"; }
 std::string op_err(const char* message) {
@@ -597,6 +598,14 @@ int main() {
     uint32_t quest_count = 0;
     assert(quest.read.active_slot_count(&quest_count).ok == kQolOk);
     assert(quest_count == 1);
+    uint16_t active_quest_storage = 0x1234;
+    g_active_quest = &active_quest_storage;
+    int32_t active_quest_id = -1;
+    assert(quest.read.active_quest_id(&active_quest_id).ok == kQolOk);
+    assert(active_quest_id == 0x1234);
+    g_active_quest = nullptr;
+    assert(quest.read.active_quest_id(&active_quest_id).ok == kQolOk);
+    assert(active_quest_id == -1);
     assert(quest.write.set_state(7, 2).ok == kQolOk);
     int32_t choice_state = -1;
     assert(choice.read.state_id(&choice_state).ok == kQolOk);

@@ -142,8 +142,8 @@ qol::contracts::QolHostSdk fake_sdk() {
 
 const qol::contracts::QolQuestPort kQuestPort{
     {1, 1},
-    {&fake_world_state, &fake_active_slot_count, &fake_active_slot_id, nullptr, &fake_quest_state,
-     &fake_quest_complete, &fake_fragment, &fake_static_ready},
+    {&fake_world_state, &fake_active_slot_count, &fake_active_slot_id, nullptr, nullptr,
+     &fake_quest_state, &fake_quest_complete, &fake_fragment, &fake_static_ready},
     {&fake_set_state, &fake_quit_result},
 };
 

@@ -64,6 +64,12 @@ QolResult fake_active_slot_id(uint32_t index, uint32_t* out) {
     return qol::contracts::ok();
 }
 
+QolResult fake_active_quest_id(int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = 0x1234;
+    return qol::contracts::ok();
+}
+
 QolResult fake_total_count(uint32_t* out) {
     *out = kTotal;
     return qol::contracts::ok();
@@ -112,8 +118,9 @@ QolResult fake_quit_result(int32_t, char* out, uint32_t capacity, uint32_t* out_
 
 const QolQuestPort kFakePort{
     qol::contracts::kQolPortQuestVersion,
-    {&fake_state, &fake_active_slot_count, &fake_active_slot_id, &fake_total_count,
-     &fake_quest_state, &fake_is_complete, &fake_fragment, &fake_static_ready},
+    {&fake_state, &fake_active_slot_count, &fake_active_slot_id, &fake_active_quest_id,
+     &fake_total_count, &fake_quest_state, &fake_is_complete, &fake_fragment,
+     &fake_static_ready},
     {&fake_set_state, &fake_quit_result},
 };
 

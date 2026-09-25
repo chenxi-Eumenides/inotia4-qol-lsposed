@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "contracts/game_ports/ports.h"
+#include "game/access/game_access.h"
 #include "game/access/quest.h"
 #include "game/state/quest_http.h"
 
@@ -38,6 +39,14 @@ QolResult read_active_slot_id(uint32_t index, uint32_t* out) {
     uint16_t id = 0;
     if (!quest_active_slot_id(index, &id)) return not_ready();
     *out = id;
+    return contracts::ok();
+}
+
+QolResult read_active_quest_id(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    *out = g_active_quest == nullptr
+               ? -1
+               : static_cast<int32_t>(*reinterpret_cast<const uint16_t*>(g_active_quest));
     return contracts::ok();
 }
 
@@ -118,8 +127,9 @@ QolResult read_fragment(int32_t endpoint, uint32_t quest_id, const char** out_fr
 
 const contracts::QolQuestPort kQuestPort{
     contracts::kQolPortQuestVersion,
-    {&read_state, &read_active_slot_count, &read_active_slot_id, &read_total_count,
-     &read_quest_value, &read_quest_complete, &read_fragment, &read_static_ready},
+    {&read_state, &read_active_slot_count, &read_active_slot_id, &read_active_quest_id,
+     &read_total_count, &read_quest_value, &read_quest_complete, &read_fragment,
+     &read_static_ready},
     {&write_quest_state, &write_quest_quit_result},
 };
 

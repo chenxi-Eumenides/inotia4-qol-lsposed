@@ -7,11 +7,6 @@
 #include "game/state/game_state.h"
 #include "game/ops/game_ops_common.h"
 
-int data_active_quest() {
-    if (g_active_quest == nullptr) return -1;
-    return *reinterpret_cast<uint16_t*>(g_active_quest);
-}
-
 std::string data_quest_list_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
     std::string s = "{\"quests\":[";

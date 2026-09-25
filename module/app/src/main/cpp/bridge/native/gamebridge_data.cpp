@@ -1,6 +1,7 @@
 #include "gamebridge_internal.h"
 
 #include "host/assembly.h"
+#include "game/adapter_ports/quest_port.h"
 
 #include <cstring>
 
@@ -31,7 +32,12 @@ Java_com_inotia4_qol_NativeBridge_nativeGetFrameCount(JNIEnv*, jclass) {
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetActiveQuest(JNIEnv*, jclass) {
-    return data_active_quest();
+    int32_t active_quest_id = -1;
+    const auto& quest = qol::game::quest_port();
+    if (quest.read.active_quest_id != nullptr) {
+        (void)quest.read.active_quest_id(&active_quest_id);
+    }
+    return active_quest_id;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
