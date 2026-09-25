@@ -32,6 +32,7 @@ enum class QolPortId : uint32_t {
     QOL_PORT_ITEM_WRITE = 21,
     QOL_PORT_CHARACTER_WRITE = 22,
     QOL_PORT_ITEM_MONEY_WRITE = 23,
+    QOL_PORT_ITEM_DICE_WRITE = 24,
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 1};
@@ -110,6 +111,8 @@ constexpr const char* port_id_name(QolPortId id) {
             return "QOL_PORT_CHARACTER_WRITE";
         case QolPortId::QOL_PORT_ITEM_MONEY_WRITE:
             return "QOL_PORT_ITEM_MONEY_WRITE";
+        case QolPortId::QOL_PORT_ITEM_DICE_WRITE:
+            return "QOL_PORT_ITEM_DICE_WRITE";
     }
     return "QOL_PORT_UNKNOWN";
 }

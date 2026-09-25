@@ -75,6 +75,7 @@ add_library(gamebridge SHARED
     game/symbols/symbol_resolver.cpp
     game/json/game_json.cpp
     game/ops/game_ops_common.cpp
+    game/ops/item_dice.cpp
     game/ops/item_money.cpp
     game/state/game_state.cpp
     game/nav/game_nav.cpp
@@ -239,6 +240,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/ui_write_port.cpp
     game/adapter_ports/character_write_port.cpp
     game/adapter_ports/item_count_facade.cpp
+    game/adapter_ports/item_dice_write_port.cpp
     game/adapter_ports/item_money_write_port.cpp
 )
 

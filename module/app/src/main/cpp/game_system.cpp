@@ -986,9 +986,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
             op = data_op_dice_accept();
             state = build_player_json();
             break;
-        case contracts::QolItemWriteKind::kRejectDice:
-            op = data_op_dice_reject();  // 迁移前无 attach，原样返回
-            break;
         case contracts::QolItemWriteKind::kEquipItem:
             op = data_op_equip(args.i0, args.i1, args.i2);
             state = build_party_json();

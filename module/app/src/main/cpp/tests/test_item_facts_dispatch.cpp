@@ -7,6 +7,7 @@
 
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/item_count.h"
@@ -65,6 +66,8 @@ bool g_in_world = true;
 int32_t g_static_ready = 1;
 QolResult g_money_write_result = qol::contracts::ok();
 int64_t g_money_write_value = 0;
+QolResult g_dice_reject_result = qol::contracts::ok();
+int g_dice_reject_calls = 0;
 qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
 uint32_t g_post_handler_id = 0;
 uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
@@ -143,6 +146,11 @@ QolResult fake_set_money(int64_t money) {
     return g_money_write_result;
 }
 
+QolResult fake_reject_dice() {
+    ++g_dice_reject_calls;
+    return g_dice_reject_result;
+}
+
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
@@ -153,6 +161,8 @@ const QolItemPortReadApi kFakeRead{
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
 const qol::contracts::QolItemMoneyWritePort kFakeMoneyWritePort{
     qol::contracts::kQolPortItemMoneyWriteVersion, &fake_set_money};
+const qol::contracts::QolItemDiceWritePort kFakeDiceWritePort{
+    qol::contracts::kQolPortItemDiceWriteVersion, &fake_reject_dice};
 
 QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capacity,
                           uint32_t* out_size) {
@@ -173,7 +183,8 @@ QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capa
 const QolItemWritePort kFakeWritePort{qol::contracts::kQolPortItemWriteVersion,
                                       {&fake_item_write}};
 
-const void* const kPortArray[] = {&kFakePort, &kFakeMoneyWritePort, &kFakeWritePort};
+const void* const kPortArray[] = {
+    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -298,7 +309,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 3;
+    ctx.port_count = 4;
     return ctx;
 }
 
@@ -344,11 +355,42 @@ void test_write_routes() {
     CHECK(descriptor.http_query_count == 19);
     char result[256]{};
     uint32_t result_size = 0;
+
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
     CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUseItem));
     CHECK(g_last_write.i0 == 0 && g_last_write.i1 == 1);
+
+    CHECK(dispatch_post("/api/item/inventory/reject_dice", nullptr, nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) == "{\"ok\":true}");
+    CHECK(g_dice_reject_calls == 1);
+
+    g_dice_reject_result =
+        qol::contracts::error(kQolErrNotFound, "no dice result pending", 22);
+    CHECK(dispatch_post("/api/item/inventory/reject_dice", nullptr, nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext dice_context{};
+    dice_context.handler = g_result_handler;
+    dice_context.payload_size = g_post_payload_size;
+    std::memcpy(dice_context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command dice_command{
+        "core.item kRejectDice", nullptr, &dice_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket dice_ticket = qol::infra::post(dice_command);
+    CHECK(dice_ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(dice_ticket) == qol::infra::CommandState::kFailed);
+    char dice_error[128]{};
+    uint32_t dice_error_size = 0;
+    CHECK(qol::infra::read_result(dice_ticket, dice_error, sizeof(dice_error), &dice_error_size));
+    CHECK(std::string(dice_error, dice_error_size) ==
+          "{\"ok\":false,\"error\":\"no dice result pending\"}");
+    qol::infra::command_queue_reset_for_test();
+    g_dice_reject_result = qol::contracts::ok();
 
     CHECK(dispatch_post("/api/item/inventory/move_item",
                         "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"4\","

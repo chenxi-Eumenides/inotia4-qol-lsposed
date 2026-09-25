@@ -20,6 +20,7 @@
 #include "contracts/game_ports/ui_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
+#include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/character_write_port.h"
 
 namespace qol::game {
@@ -51,6 +52,7 @@ const contracts::QolChoiceWritePort kChoiceWritePort{{1, 0}, {}};
 const contracts::QolUiWritePort kUiWritePort{{1, 0}, {}};
 const contracts::QolItemWritePort kItemWritePort{{1, 0}, {nullptr}};
 const contracts::QolItemMoneyWritePort kItemMoneyWritePort{{1, 0}, nullptr};
+const contracts::QolItemDiceWritePort kItemDiceWritePort{{1, 0}, nullptr};
 const contracts::QolCharacterWritePort kCharacterWritePort{{1, 0}, {nullptr}};
 
 }  // namespace
@@ -85,6 +87,7 @@ const contracts::QolChoiceWritePort& choice_write_port() { return kChoiceWritePo
 const contracts::QolUiWritePort& ui_write_port() { return kUiWritePort; }
 const contracts::QolItemWritePort& item_write_port() { return kItemWritePort; }
 const contracts::QolItemMoneyWritePort& item_money_write_port() { return kItemMoneyWritePort; }
+const contracts::QolItemDiceWritePort& item_dice_write_port() { return kItemDiceWritePort; }
 const contracts::QolCharacterWritePort& character_write_port() { return kCharacterWritePort; }
 
 }  // namespace qol::game

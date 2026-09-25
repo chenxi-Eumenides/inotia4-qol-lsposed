@@ -29,10 +29,11 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
-    CHECK(descriptor.port_count == 3 && descriptor.ports != nullptr);
+    CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
-    CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_WRITE);
+    CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
+    CHECK(descriptor.ports[3].id == qol::contracts::QolPortId::QOL_PORT_ITEM_WRITE);
 
     const auto* api = static_cast<const qol::contracts::ItemFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->category != nullptr);

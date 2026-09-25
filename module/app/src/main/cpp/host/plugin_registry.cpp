@@ -41,6 +41,7 @@
 #include "game/adapter_ports/ui_write_port.h"
 #include "game/adapter_ports/item_write_port.h"
 #include "game/adapter_ports/item_money_write_port.h"
+#include "game/adapter_ports/item_dice_write_port.h"
 #include "game/adapter_ports/character_write_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
@@ -235,6 +236,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE) {
+        const auto& port = qol::game::item_dice_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_CHARACTER_WRITE) {
         const auto& port = qol::game::character_write_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -275,6 +281,12 @@ bool resolve_plugin_ports(uint32_t index) {
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));

@@ -172,11 +172,8 @@ std::string data_op_dice_accept() {
     return s;
 }
 std::string data_op_dice_reject() {
-    if (!game_in_world()) return op_err("not in game");
-    uint8_t* flag = *reinterpret_cast<uint8_t**>(g_base + G_STATUSDICE_FLAG_GOT_VMA);
-    if (flag == nullptr || !(*flag & 1u)) return op_err("no dice result pending");
-    *flag &= ~1u;
-    return op_ok();
+    const QolResult result = qol::game::ops::reject_dice();
+    return qol::contracts::succeeded(result) ? "{\"ok\":true}" : op_err(result.message);
 }
 // 处置原语已下沉至 core/native/inventory_trade.*（阶段 A）；此处仅做状态→JSON 映射，
 // 错误文案/顺序与下沉前一致，source 固定 "api"。
