@@ -213,7 +213,7 @@ Game Host → Game Adapter → 游戏
 
 - 只读事实通过 capability 或快照提供，接口不暴露游戏内存指针；
 - 有副作用的动作由 provider/实际 owner 通过命令端口在主线程执行；
-- provider 不把呈现决策、HTTP JSON 形状或全部领域聚合塞进语义接口；
+- provider 不把呈现决策、HTTP JSON 形状或全部领域聚合塞进语义接口；唯一例外：owner 自组装、固定 kind、版本化 buffer 的只读状态 JSON 投影属所有者契约面，跨域消费者仅可筛选与重组、不得按他域字段重拼装（ADR 0002 裁决）；
 - provider 停用只级联真实依赖者，不能让整个模块因一个领域失效。
 
 provider 的数量和命名随领域边界演进，不受固定插件数量或固定 `core.*` 数量约束。
