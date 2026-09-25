@@ -47,7 +47,7 @@
 | `contracts` 业务入口 | `contracts/autosell.h` 仍有全局业务函数，部分消费者尚未转 capability / owner command | 改为 provider 函数表、Host SDK 或 owner capability 后删除全局入口；host 与架构检查通过 |
 | 引擎未闭合项 | 生产 `in_flight_enter/leave` wrapper 已接线：Host SDK 导出、registry 实现及 inventory_hooks/extension_bag 生产调用均已具备。VM-K2-01 仍观察到自动恢复路径的票据终态未追认、`degraded` 未同步清除 | 后续真机回归恢复路径，验证票据终态与 degraded 同步；证据沿用 VM-K2-01 |
 | 生命周期票据与状态不同步 | VM-K2-01 实测：消费者 activate 时依赖方尚未 enable 则票据 `failed`，随后 `sync_gates` 重评估自动拉起 enabled，票据不追认；autosell `degraded:true` 残留（error 已 None） | 票据终态追认自动恢复路径；`sync_gates` 恢复时同步清除 `degraded` 残留；以 VM-K2-01 后续回归卡验证 |
-| `item_count_api` legacy 访问器（#10） | `contracts::item_count_api()` 旧全局访问器仍被 api/native 两个 `.inc` 与 `core/native/inventory_trade.cpp` 的三个调用方使用；当前分层已就位：`core.item` 提供原版读取，stack_limit 通过 optional capability 覆盖（2f7e51f8） | 上述旧访问器、api/native 两个 `.inc` 及三个调用方的清退并入阶段 6 api/native 删除批 |
+| `item_count_api` legacy 访问器（#10） | 已收口（d90918c2）：`contracts::item_count_api()` 旧全局访问器删除；state builder、add-item 编码写入、`inventory_trade` 售价数量、`game/read/item_class.cpp` 编码判定四组消费者改走 typed API 表/owner serializer；`QolItemCountApi` typed 表与 `QolGameHost.item_count` 注入面保留（inventory_hooks/autosell 消费者合法使用） | api/native `data_op_set_money` 等薄转发与 `build_inventory_json` 残余消费者的清退并入阶段 6 删除批；扩展袋 >99 真机数量视图卡待插件独立测试批补 |
 
 ## 4. 临时豁免与保留项
 
