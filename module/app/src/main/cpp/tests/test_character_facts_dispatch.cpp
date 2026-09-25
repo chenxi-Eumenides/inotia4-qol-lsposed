@@ -9,6 +9,7 @@
 
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/character_write_port.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/host_sdk.h"
@@ -144,7 +145,27 @@ QolResult fake_character_write(const qol::contracts::QolCharacterWriteArgs* args
 const qol::contracts::QolCharacterWritePort kFakeWritePort{
     qol::contracts::kQolPortCharacterWriteVersion, {&fake_character_write}};
 
-const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort, &kFakeWritePort};
+QolResult fake_state_party(qol::contracts::QolCharacterStateParty* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = {};
+    return qol::contracts::ok();
+}
+QolResult fake_state_player(qol::contracts::QolCharacterStatePlayer* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = {};
+    return qol::contracts::ok();
+}
+QolResult fake_state_skills(qol::contracts::QolCharacterStateSkills* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = {};
+    return qol::contracts::ok();
+}
+const qol::contracts::QolCharacterStatePort kFakeStatePort{
+    qol::contracts::kQolPortCharacterStateVersion,
+    {&fake_state_party, &fake_state_player, &fake_state_skills}};
+
+const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort, &kFakeWritePort,
+                                  &kFakeStatePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -260,7 +281,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.character";
     ctx.ports = kPortArray;
-    ctx.port_count = 3;
+    ctx.port_count = 4;
     return ctx;
 }
 

@@ -10,6 +10,7 @@
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/choice_port.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
@@ -42,6 +43,7 @@
 #include "game/adapter_ports/ui_write_port.h"
 #include "game/adapter_ports/item_write_port.h"
 #include "host/item_inventory_state_write_port.h"
+#include "host/character_state_port.h"
 #include "game/adapter_ports/item_money_write_port.h"
 #include "game/adapter_ports/item_dice_write_port.h"
 #include "game/adapter_ports/character_write_port.h"
@@ -253,6 +255,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_STATE) {
+        const auto& port = character_state_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
 #else
     (void)id;
     (void)out;
@@ -306,6 +313,12 @@ bool resolve_plugin_ports(uint32_t index) {
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CHARACTER_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.character") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHARACTER_STATE &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "core.character") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));

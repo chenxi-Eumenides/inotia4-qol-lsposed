@@ -907,11 +907,20 @@ add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.character/plugin.cpp
     ${CPP_DIR}/plugins/core.character/json_slice.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
+    ${CPP_DIR}/api/native/game_character.cpp
+    ${CPP_DIR}/api/native/game_party.cpp
 )
 target_include_directories(character_facts_plugin_tests PRIVATE
     ${CPP_DIR}
+    ${CPP_DIR}/api/native
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(character_facts_plugin_tests PRIVATE cxx_std_17)
+target_compile_options(character_facts_plugin_tests PRIVATE -ffunction-sections -fdata-sections)
+target_link_options(character_facts_plugin_tests PRIVATE -Wl,--gc-sections)
 set_target_properties(character_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME character_facts_plugin_tests COMMAND character_facts_plugin_tests)
 

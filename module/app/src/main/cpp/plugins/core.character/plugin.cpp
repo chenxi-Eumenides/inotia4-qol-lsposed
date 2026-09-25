@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -10,7 +11,9 @@
 #include <vector>
 
 #include "contracts/character_facts.h"
+#include "contracts/character_state.h"
 #include "contracts/game_ports/character_http_port.h"
+#include "contracts/game_ports/character_state_port.h"
 #include "contracts/commands.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_write_port.h"
@@ -97,6 +100,7 @@ const contracts::QolCharacterPort* g_port = nullptr;
 const contracts::QolCharacterHttpPort* g_http_port = nullptr;
 // 写面私有端口（仅 core.character 可注入）。
 const contracts::QolCharacterWritePort* g_character_write = nullptr;
+const contracts::QolCharacterStatePort* g_character_state_port = nullptr;
 uint64_t g_frame_task = 0;
 Snapshot<CharacterSnapshot> g_snapshot;
 
@@ -104,6 +108,9 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHARACTER, {1, 0}},
     {contracts::QolPortId::QOL_PORT_CHARACTER_HTTP, {1, 0}},
     {contracts::QolPortId::QOL_PORT_CHARACTER_WRITE, {1, 0}},
+    {contracts::QolPortId::QOL_PORT_CHARACTER_STATE,
+     {contracts::kQolPortCharacterStateVersion.major,
+      contracts::kQolPortCharacterStateVersion.minor}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -134,9 +141,241 @@ constexpr contracts::CharacterFactsApi kCharacterFactsApi{
     &is_active_player_group,
 };
 
+QolResult write_character_state_json(contracts::QolCharacterStateKind kind, char* out,
+                                     uint32_t capacity, uint32_t* out_size);
+const contracts::CharacterStateApi kCharacterStateApi{&write_character_state_json};
+
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kCharacterFactsCapabilityId, contracts::kCharacterFactsVersion, &kCharacterFactsApi},
+    {contracts::kCharacterStateCapabilityId, contracts::kCharacterStateVersion, &kCharacterStateApi},
 };
+
+void append_json_string(std::string& out, const char* value, uint32_t size) {
+    for (uint32_t i = 0; i < size; ++i) {
+        const unsigned char ch = static_cast<unsigned char>(value[i]);
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    char escaped[7]{};
+                    std::snprintf(escaped, sizeof(escaped), "\\u%04x", ch);
+                    out += escaped;
+                } else {
+                    out += static_cast<char>(ch);
+                }
+                break;
+        }
+    }
+}
+
+void append_character_state_item(std::string& out, uint32_t slot,
+                                 const contracts::QolCharacterStateItem& item) {
+    out += "{\"slot\":" + std::to_string(slot);
+    out += ",\"type_flags\":" + std::to_string(item.type_flags);
+    out += ",\"raw_rarity\":" + std::to_string(item.raw_rarity);
+    if ((item.fields & contracts::kQolCharacterStateItemHasCategory) != 0) {
+        out += ",\"category\":" + std::to_string(item.category);
+    }
+    if ((item.fields & contracts::kQolCharacterStateItemHasCount) != 0) {
+        out += ",\"count\":" + std::to_string(item.count);
+    }
+    out += item.equip != 0 ? ",\"equip\":true" : ",\"equip\":false";
+    if ((item.fields & contracts::kQolCharacterStateItemHasRarity) != 0) {
+        out += ",\"rarity\":" + std::to_string(item.rarity);
+    }
+    if ((item.fields & contracts::kQolCharacterStateItemHasDamage) != 0) {
+        out += ",\"damage\":" + std::to_string(item.damage);
+    }
+    if ((item.fields & contracts::kQolCharacterStateItemHasDefense) != 0) {
+        out += ",\"defense\":" + std::to_string(item.defense);
+    }
+    out += ",\"magic_rate\":" + std::to_string(item.magic_rate);
+    if ((item.fields & contracts::kQolCharacterStateItemHasNeedLevel) != 0) {
+        out += ",\"need_level\":" + std::to_string(item.need_level);
+    }
+    out += ",\"socket\":" + std::to_string(item.socket);
+    out += ",\"socket_filled\":" + std::to_string(item.socket_filled);
+    out += ",\"socket_total\":" + std::to_string(item.socket_total);
+    out += ",\"enchant\":" + std::to_string(item.enchant);
+    out += item.chaos != 0 ? ",\"chaos\":true" : ",\"chaos\":false";
+    out += ",\"enchant_id\":" + std::to_string(item.enchant_id);
+    out += ",\"enchant_level\":" + std::to_string(item.enchant_level);
+    out += ",\"chaos_level\":" + std::to_string(item.chaos_level);
+    out += ",\"chaos_rate\":" + std::to_string(item.chaos_rate);
+    out += ",\"options\":[";
+    for (uint32_t i = 0; i < item.option_count; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string(item.options[i].value);
+    }
+    out += "],\"option_ids\":[";
+    for (uint32_t i = 0; i < item.option_count; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string(item.options[i].id);
+    }
+    out += "],\"option_types\":[";
+    for (uint32_t i = 0; i < item.option_count; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string(item.options[i].type);
+    }
+    out += "]}";
+}
+
+void append_character_state_member(std::string& out,
+                                   const contracts::QolCharacterStateMember& member) {
+    out += "{\"type\":" + std::to_string(member.type);
+    out += ",\"class_idx\":" + std::to_string(member.class_idx);
+    out += ",\"name_id\":" + std::to_string(member.name_id);
+    out += ",\"level\":" + std::to_string(member.level);
+    out += ",\"hp\":" + std::to_string(member.hp);
+    out += ",\"mp\":" + std::to_string(member.mp);
+    out += ",\"max_hp\":" + std::to_string(member.max_hp);
+    out += ",\"max_mp\":" + std::to_string(member.max_mp);
+    out += ",\"exp\":" + std::to_string(member.exp);
+    out += ",\"exp_next\":" + std::to_string(member.exp_next);
+    out += ",\"stats\":{";
+    for (uint32_t i = 0; i < contracts::kQolCharacterStateStatCount; ++i) {
+        if (i != 0) out.push_back(',');
+        out += "\"" + std::to_string(i) + "\":" + std::to_string(member.stats[i]);
+    }
+    out += "},\"main_stats\":[";
+    for (uint32_t i = 0; i < contracts::kQolCharacterStateMainStatCount; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string(member.main_stats[i]);
+    }
+    out.push_back(']');
+    if ((member.fields & contracts::kQolCharacterStateHasBaseStats) != 0) {
+        out += ",\"base_stats\":[";
+        for (uint32_t i = 0; i < contracts::kQolCharacterStateMainStatCount; ++i) {
+            if (i != 0) out.push_back(',');
+            out += std::to_string(member.base_stats[i]);
+        }
+        out.push_back(']');
+    }
+    if ((member.fields & contracts::kQolCharacterStateHasStatusPoint) != 0) {
+        out += ",\"status_point\":" + std::to_string(member.status_point);
+    }
+    out += ",\"equipment\":[";
+    for (uint32_t slot = 0; slot < contracts::kQolCharacterStateEquipSlots; ++slot) {
+        if (slot != 0) out.push_back(',');
+        if (member.equipment_present[slot] == 0) {
+            out += "null";
+        } else {
+            append_character_state_item(out, slot, member.equipment[slot]);
+        }
+    }
+    out.push_back(']');
+    if ((member.fields & contracts::kQolCharacterStateHasName) != 0) {
+        out += ",\"name\":\"";
+        append_json_string(out, member.name, member.name_size);
+        out.push_back('"');
+    }
+    out.push_back('}');
+}
+
+std::string serialize_character_state_party(const contracts::QolCharacterStateParty& party) {
+    std::string out = "[";
+    for (uint32_t i = 0; i < contracts::kQolCharacterStatePartySize; ++i) {
+        if (i != 0) out.push_back(',');
+        if (party.member_present[i] == 0) {
+            out += "null";
+        } else {
+            append_character_state_member(out, party.members[i]);
+        }
+    }
+    out.push_back(']');
+    return out;
+}
+
+std::string serialize_character_state_player(const contracts::QolCharacterStatePlayer& player) {
+    return "{\"money\":" + std::to_string(player.money) +
+           ",\"map_id\":" + std::to_string(player.map_id) +
+           ",\"x\":" + std::to_string(player.x) +
+           ",\"y\":" + std::to_string(player.y) +
+           ",\"active_quest\":" + std::to_string(player.active_quest) +
+           ",\"leader_slot\":" + std::to_string(player.leader_slot) +
+           ",\"party_count\":" + std::to_string(player.party_count) + "}";
+}
+
+std::string serialize_character_state_skills(const contracts::QolCharacterStateSkills& skills) {
+    std::string out = "[";
+    for (uint32_t role = 0; role < contracts::kQolCharacterStatePartySize; ++role) {
+        if (role != 0) out.push_back(',');
+        if (skills.member_present[role] == 0) {
+            out += "null";
+            continue;
+        }
+        const auto& member = skills.members[role];
+        out += "{\"role\":" + std::to_string(role) + ",\"skills\":[";
+        for (uint32_t i = 0; i < member.skill_count; ++i) {
+            if (i != 0) out.push_back(',');
+            const auto& skill = member.skills[i];
+            out += "{\"action_id\":" + std::to_string(skill.action_id) +
+                   ",\"level\":" + std::to_string(skill.level);
+            if (skill.has_max_level != 0) {
+                out += ",\"max_level\":" + std::to_string(skill.max_level);
+            }
+            out.push_back('}');
+        }
+        out += "],\"unlock_bitmap\":" + std::to_string(member.unlock_bitmap) +
+               ",\"active_skill_id\":" + std::to_string(member.active_skill_id) +
+               ",\"skill_points\":" + std::to_string(member.skill_points) + "}";
+    }
+    out.push_back(']');
+    return out;
+}
+
+QolResult write_character_state_json(contracts::QolCharacterStateKind kind, char* out,
+                                     uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr || g_character_state_port == nullptr) {
+        return contracts::error(kQolErrNotReady, "character state unavailable", 27);
+    }
+    std::string body;
+    QolResult read_result = contracts::ok();
+    switch (kind) {
+        case contracts::QolCharacterStateKind::kParty: {
+            contracts::QolCharacterStateParty state{};
+            if (g_character_state_port->read.party == nullptr) return not_ready();
+            read_result = g_character_state_port->read.party(&state);
+            if (contracts::succeeded(read_result)) body = serialize_character_state_party(state);
+            break;
+        }
+        case contracts::QolCharacterStateKind::kPlayer: {
+            contracts::QolCharacterStatePlayer state{};
+            if (g_character_state_port->read.player == nullptr) return not_ready();
+            read_result = g_character_state_port->read.player(&state);
+            if (contracts::succeeded(read_result)) body = serialize_character_state_player(state);
+            break;
+        }
+        case contracts::QolCharacterStateKind::kSkills: {
+            contracts::QolCharacterStateSkills state{};
+            if (g_character_state_port->read.skills == nullptr) return not_ready();
+            read_result = g_character_state_port->read.skills(&state);
+            if (contracts::succeeded(read_result)) body = serialize_character_state_skills(state);
+            break;
+        }
+        default:
+            return contracts::error(kQolErrInvalidArgument, "invalid character state kind", 28);
+    }
+    if (!contracts::succeeded(read_result)) {
+        if (read_result.message != nullptr && read_result.message_len == 11 &&
+            std::memcmp(read_result.message, "not in game", 11) == 0) {
+            body = "{\"error\":\"not in game\"}";
+        } else {
+            return read_result;
+        }
+    }
+    if (body.size() > capacity) {
+        return contracts::error(kQolErrBlocked, "character state buffer too small", 32);
+    }
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return contracts::ok();
+}
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
@@ -1211,28 +1450,38 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_port = nullptr;
     g_http_port = nullptr;
     g_character_write = nullptr;
+    g_character_state_port = nullptr;
     g_frame_task = 0;
     CharacterSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
-        ctx.port_count != 3 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
-        ctx.ports[2] == nullptr) {
+        ctx.port_count != 4 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
+        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr) {
         g_sdk = nullptr;
         return 1;
     }
     g_port = static_cast<const contracts::QolCharacterPort*>(ctx.ports[0]);
     g_http_port = static_cast<const contracts::QolCharacterHttpPort*>(ctx.ports[1]);
     g_character_write = static_cast<const contracts::QolCharacterWritePort*>(ctx.ports[2]);
+    g_character_state_port =
+        static_cast<const contracts::QolCharacterStatePort*>(ctx.ports[3]);
     if (!contracts::satisfies(g_port->abi_version, {1, 0}) || g_port->read.type == nullptr ||
         g_port->read.is_active_player_group == nullptr ||
         !contracts::satisfies(g_http_port->abi_version, {1, 0}) ||
         g_http_port->read.body_json == nullptr ||
         !contracts::satisfies(g_character_write->abi_version, {1, 0}) ||
-        g_character_write->read.write == nullptr) {
+        g_character_write->read.write == nullptr ||
+        !contracts::satisfies(g_character_state_port->abi_version,
+                              {contracts::kQolPortCharacterStateVersion.major,
+                               contracts::kQolPortCharacterStateVersion.minor}) ||
+        g_character_state_port->read.party == nullptr ||
+        g_character_state_port->read.player == nullptr ||
+        g_character_state_port->read.skills == nullptr) {
         g_port = nullptr;
         g_http_port = nullptr;
         g_character_write = nullptr;
+        g_character_state_port = nullptr;
         g_sdk = nullptr;
         return 1;
     }
@@ -1244,6 +1493,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_port = nullptr;
         g_http_port = nullptr;
         g_character_write = nullptr;
+        g_character_state_port = nullptr;
         g_sdk = nullptr;
         return 1;
     }
@@ -1260,6 +1510,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_port = nullptr;
     g_http_port = nullptr;
     g_character_write = nullptr;
+    g_character_state_port = nullptr;
     g_sdk = nullptr;
 }
 
@@ -1297,7 +1548,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kRequires,
     0,
     nullptr,
-    1,
+    2,
     kProvides,
     0,
     nullptr,
@@ -1310,7 +1561,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,
     kPorts,
-    3,
+    4,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
 };
