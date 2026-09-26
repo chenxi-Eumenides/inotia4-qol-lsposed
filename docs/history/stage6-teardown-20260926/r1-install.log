@@ -1,0 +1,3 @@
+I0000 00:00:1790419065.194942 2266818 adb_install.cpp:153] pm command: 'package install -r -S 57374223'
+Performing Streamed Install
+Success

@@ -1,0 +1,7 @@
+item/use_item {}           {"ok":false,"error":"bag/slot required"} |400|0.012244s
+character/add_skill {}     {"ok":false,"error":"action_id required"} |400|0.008871s
+world/move_to {}           {"ok":false,"error":"x/y required"} |400|0.044368s
+quest/quit_quest {}        {"ok":false,"error":"questId required"} |400|0.010058s
+character/add_stat {}      {"ok":false,"error":"attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)"} |400|0.008661s
+world/move_to {bad         {"ok":false,"error":"bad request"} |400|0.012454s
+character/op/hp {}         {"ok":false,"error":"hp required"} |400|0.011548s

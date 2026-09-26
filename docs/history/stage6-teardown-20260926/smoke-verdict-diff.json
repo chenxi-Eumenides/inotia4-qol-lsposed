@@ -1,0 +1,213 @@
+{
+  "baseline_summary": {
+    "pass": 120,
+    "warn": 23,
+    "fail": 0,
+    "total": 143
+  },
+  "current_summary": {
+    "pass": 116,
+    "warn": 27,
+    "fail": 0,
+    "total": 143
+  },
+  "route_count": 143,
+  "diff_count": 13,
+  "diffs": [
+    {
+      "method": "POST",
+      "path": "/api/debug/extension_bag/exit_view",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": "扩展背包退出视图"
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/item/inventory/accept_dice",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": "运行时:接受骰子"
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/item/inventory/reject_dice",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": "运行时:拒绝骰子"
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/item/inventory",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": ""
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/item/inventory/money",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": ""
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/item/inventory/items",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": ""
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/item/inventory/bag/{bag}/info",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": ""
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/item/inventory/bag/{bag}/{slot}",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": ""
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/character/party/include",
+      "baseline": {
+        "status": 405,
+        "verdict": "warn",
+        "reason": "状态码 405（guard 未就绪/占位/服务器错误）"
+      },
+      "current": {
+        "status": 400,
+        "verdict": "pass",
+        "reason": "参数校验:避免入队佣兵"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"bad request\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/character/party/exclude",
+      "baseline": {
+        "status": 405,
+        "verdict": "warn",
+        "reason": "状态码 405（guard 未就绪/占位/服务器错误）"
+      },
+      "current": {
+        "status": 400,
+        "verdict": "pass",
+        "reason": "参数校验:避免离队佣兵"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"bad request\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/character/party/discharge",
+      "baseline": {
+        "status": 405,
+        "verdict": "warn",
+        "reason": "状态码 405（guard 未就绪/占位/服务器错误）"
+      },
+      "current": {
+        "status": 400,
+        "verdict": "pass",
+        "reason": "参数校验:避免解散佣兵"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"bad request\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/character/party/withdraw",
+      "baseline": {
+        "status": 405,
+        "verdict": "warn",
+        "reason": "状态码 405（guard 未就绪/占位/服务器错误）"
+      },
+      "current": {
+        "status": 400,
+        "verdict": "pass",
+        "reason": "参数校验:避免取回装备"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"bad request\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/item/shop/items",
+      "baseline": {
+        "status": 200,
+        "verdict": "pass",
+        "reason": ""
+      },
+      "current": {
+        "status": 404,
+        "verdict": "warn",
+        "reason": "状态码 404（guard 未就绪/占位/服务器错误）"
+      },
+      "current_body": "{\"ok\":false,\"error\":\"http handler not found\"}"
+    }
+  ]
+}
