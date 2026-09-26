@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """新架构实现地图的生成统计区维护脚本。
 
-只重写 `docs/refactor/map.md` 的 markers 区间：
+只重写 `docs/history/refactor-closure/map.md`（已归档，生成器保留可再生统计区）的 markers 区间：
 
     <!-- BEGIN GENERATED:stats --> … <!-- END GENERATED:stats -->
 
@@ -37,7 +37,7 @@ if str(HERE) not in sys.path:
 import arch_common as ac  # noqa: E402
 
 SCRIPT_NAME = Path(__file__).name
-DEFAULT_OUTPUT = ac.ROOT / "docs" / "refactor" / "map.md"
+DEFAULT_OUTPUT = ac.ROOT / "docs" / "history" / "refactor-closure" / "map.md"
 TESTS_CMAKE = ac.CPP_ROOT / "tests" / "CMakeLists.txt"
 PLUGINS_DIR = ac.CPP_ROOT / "plugins"
 

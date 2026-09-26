@@ -1,6 +1,6 @@
 # 验证矩阵与验收卡
 
-> 定位：定义「什么算通过」与「证据放哪里」。架构规则见根目录 `ARCHITECTURE.md`；执行状态见 `ledger.md`。
+> 定位：定义「什么算通过」与「证据放哪里」。架构规则见根目录 `ARCHITECTURE.md`；活跃债务与待补证据见本文件 §5；重构期过程材料（含原 `ledger.md`）已归档 `docs/history/refactor-closure/`。
 
 ## 1. 交付定义
 
@@ -118,7 +118,7 @@
 | VM-EXPORT-01 | 内置 Debug device probe：ELF 导出目标、required fail-closed 与资源仲裁（仅 monster v29 机制验收） | 从当前源码运行 `./scripts/build-debug.sh --offline -PqolDeviceProbe=true`；将脚本打印的本次 APK 路径设为 `MODULE_APK`，执行 `unzip -p "$MODULE_APK" lib/arm64-v8a/libgamebridge.so | strings | rg 'elf-export:UIChoice_Init'`、`./scripts/patch-apk.sh "$MODULE_APK"`、`apksigner verify "$MODULE_APK"`；安装本次生成的 `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，force-stop + monkey、关闭协议页进 world；再对 `core.ui_state` deactivate/activate 并按每个 POST 返回的 ticket 轮询（历史 ticket 8/9 仅为该次编号）。完整命令和输出见 `docs/history/plugin-export-preflight-20260924/README.md` | **PASS（严格限定机制验收）**：monster v29 md5=`4c332e9b508b35fe1e97f1f26e56f04d`。修复后 probe APK `output/inotia4_qol_lsposed_debug_2609241038_b91004de3378.apk` SHA-256=`b91004de337818dac5923f593b5ee9eb058687374b4cdd7c61b299a607e4a10d`；二进制 strings 命中 `elf-export:UIChoice_Init`，该源码字面量仅位于 `core.ui_state/plugin.cpp` 的 Debug 条件分支，target 级 PRIVATE 定义已配置。10:43 日志 `GRPX_Start`=`hit`、缺失导出=`missing`，assembly `registered=27 install_failed=1`，失败插件 `unsupported`；`core.ui_state` enabled、`hook:UIChoice_Init`/ptrslot live。world 内 deactivate ticket 8 done→inactive/free/free，activate ticket 9 done→enabled/live/live。09:17 的同样 live/free/live 观测因当时 target 缺少宏而无效，不作为通过依据。负向仅 Debug。Host CTest 66/66；fake backend 覆盖同插件别名零 hook、跨插件第二 owner 拒绝并保留首 owner live、release 后复用、tombstone 拒绝；冲突未在真机触发或验证。普通 Debug恢复 APK SHA-256=`97099e7219985712e453b5a3bf60dc962fb61f7d89b7eb8990a2ef0565d40fc6`，集成 3/3、health ready、25 features 且无 probe ids、routes self_check 143/143、world；这不扩大 probe 验收范围。仅覆盖已知导出目标、required fail-closed 与该变体的机制生命周期；原生选择框视觉行为、其他游戏版本、ARM32、Release 均未验收。 |
 > VM-P1-03 执行时发现并修复线上缺陷：变体表停在 monster v26，设备 v27 查表失败
 > （`known=0`、能力位 0，靠 `WH4JRN01` 回退分类）；重新生成后补入 v27/v29，设备命中
-> `known=1, version=v27, caps=0x3`。该修复需同步到主线（见 `ledger.md` §5）。
+> `known=1, version=v27, caps=0x3`。该修复需同步到主线（活跃债务登记见本文件 §5）。
 
 > **VM-D1 状态**：D1 收尾真机卡，本轮未执行设备操作，结论待填 `PASS`/`NOT_ACCEPTED`；
 > 按 §1 交付定义，D1 行为面在真机证据归档前不视为可交付（当前状态：待真机执行）。
@@ -135,7 +135,48 @@
 | VM-T2N-01 | 机制批 T2n 全列（T2n-1 `88f3e96a` / T2n-2 `0dc3eee5` / T2n-3 `118d1044` / T2n-4 `fd8cbadc`）：cache 机制 4 边消除 + 非序列 6 边（日志缝/runtime hooks/帧号）+ save_enter/exit 物理迁 `patch/`（D 案）+ 棘轮终局 freeze；`api/native` 拆除主线静态基线清零 | 各批 `.tmp/t2n*-host` 全量 CTest；`check_http_routes.py`；`check_arch.py -v`；`check_jni.py`；`scripts/build-debug.sh`（普通 + `-PqolKernelOnly=true`）+ kernel `.so` 抽查；`gen_baseline_doc.py`（T2n-4）| **Host/静态通过（真机延后 `NOT_ACCEPTED`）**：逐边消除 = TU 物理删除/include 改线（`check_arch -v` 列「已消除」，无映射冒充）；终值 layers **17→0**、offsets **4→0**、resources **6 unknown→0**、JNI 156/156、文件 528、ctest **72/72**、routes 143/143；T2n-3 落点 `patch/`（D 案，V2 修订：hooks 矩阵不含 patch、`check_resources` ±25 行归属窗口），符号常量收口 `game/access/save` 且安装点保留 `fn_resolve("F_*VMA")`；W43 新旧实现 diff 逐字（原字/全成或全退/wrapper/日志）、W44 双写一致性表、W46 资源归属 0 unknown、W47 patch 落点合规、W48 零脚本改动；计划外修正 2 处（`tests/test_infra_data.cpp` include 同步、V2-2.1 代码片 `+call_off` 等价结构）；T2n-4 freeze 后基线 0 且 `baseline.md` 重生成。**真机延后**：save 进出/派发与安装字节、日志域/级别/内容、cache 与 world/读面字节、kernel save hook 行为均未采证 |
 | VM-T2O-01 | 阶段 6 真机独立测试批 + R1–R5 回归修复链（真机：首批 `09b8e816`→`95424f9a`；R1 `1a5c292d`/证据 `95424f9a`、R2 `22f1b404`/`e8e48fb0`、R3 `bfbda2d5`/`c204fd91`、R4 `72241f4b`/`ad5285be`、R5 `8a94d146`/`48951571`）：首批抓到装配环（9 特性 `dependency cycle`）；R1 两阶段软边 + optional 两段；R2 数据面三根因（EB count 回退、invalid 三级、段 2 时机）；R3 分支首修未生效；R4 effective-成功-0 路径 + 逐帧 pending；R5 core.item 覆盖端收口（真值表 R-47b 全路径） | `docs/history/stage6-teardown-20260926/README.md`「R1 rerun」～「R5 rerun」五节 + `r1-*`～`r5-*` 证据文件；host：`.tmp/t2o-fix-host`/`.tmp/t2p-host`/`t2r4-host`/`t2r5-host` 全量 CTest、`check_http_routes.py`、`check_arch.py`、`check_jni.py`、`scripts/build-debug.sh`（普通 + kernel-only）| **PASS（Debug 真机，monster v29；R5 覆盖矩阵七面全 PASS）**：装配门禁 R1–R5 PASS（9/9 enabled）；item 数据面 R2–R5 PASS（六读真实、move 票据 `done`）；EB 面 PASS（enabled/29 live/容量 16/16/12/12/12/移动往返）；R-48 EB >99 两态视图 PASS（OFF=95/ON=223/OFF2=95）；optional 首轮 WARN R4–R5 **0 次**（`optional edge downgraded`=5 预期）；EB canonical 投影槽 bag9 slot4 R5 **count=640**（vs R4 全结构仅此 1 处差异）；票据语义 PASS（原版袋 move5↔6 往返 raw IDENTICAL）；smoke 125/18/0（vs 基线 diff=4 仅 party 405→400，vs R4 diff=0）；logcat 崩溃 0、`invalid extension inventory` 0；三处构建身份（模块/嵌入/运行态 sha256）逐轮互证、集成包 3/3。**Host 终值**：ctest 72/72（`plugin_registry` 492/0、`item_facts_dispatch` 398/0、`item_facts_plugin` 34/0、`character_facts_plugin` 413/0、`character_facts_dispatch` 214/0）、routes 143/143、arch 0/0/0/0、JNI 156/156。**仍 NOT_ACCEPTED（未抽检/不可构造）**：原版物理袋 ON>99/OFF≤99（存档无 >99 载体）、999 clamp/原子组失败注入、读面逐字节 frozen 对比（world/quest/inventory） |
 
-## 5. 待建立
+## 5. 活跃债务与待补证据（自 ledger 迁入）
+
+> 来源：重构期台账 `docs/history/refactor-closure/ledger.md`（已归档）中**当前仍有效**的债务与待补项；已闭项（bridge 直调清零、R1–R5 回归修复、B2 门槛、`api/native` 目录删除、T2n 静态基线清零等）留归档件，不迁入。本节是活跃债务的唯一登记处；逐插件审计以本文件 + 根目录 `ARCHITECTURE.md` 为准。
+
+### 5.1 真机未抽检三项（保持未决）
+
+| 债务 | 当前事实 | 清除条件 |
+|---|---|---|
+| 真机未抽检三项（R2/R5 终清单，**保持未决**） | ① 原版物理袋 ON>99/OFF≤99（当前存档无 >99 载体，构造入口缺）；② 999 clamp 实机行为、原子组失败注入；③ 读面逐字节 frozen 对比（world/quest/inventory）。三者均属未抽检/不可构造范围，非已知缺陷 | 专门真机批或游戏内构造入口具备后复验；在此之前维持 `NOT_ACCEPTED`（`docs/history/stage6-teardown-20260926/`「R5 rerun」§R5-4） |
+
+### 5.2 票据终态与 degraded 同步（VM-K2-01 口径）
+
+| 债务 | 当前事实 | 清除条件 |
+|---|---|---|
+| 引擎未闭合项 | 生产 `in_flight_enter/leave` wrapper 已接线：Host SDK 导出、registry 实现及 inventory_hooks/extension_bag 生产调用均已具备。VM-K2-01 仍观察到自动恢复路径的票据终态未追认、`degraded` 未同步清除 | 后续真机回归恢复路径，验证票据终态与 degraded 同步；证据沿用 VM-K2-01 |
+| 生命周期票据与状态不同步 | VM-K2-01 实测：消费者 activate 时依赖方尚未 enable 则票据 `failed`，随后 `sync_gates` 重评估自动拉起 enabled，票据不追认；autosell `degraded:true` 残留（error 已 None） | 票据终态追认自动恢复路径；`sync_gates` 恢复时同步清除 `degraded` 残留；以 VM-K2-01 后续回归卡验证 |
+
+### 5.3 EB 全局豁免 2 面（`use_item` / `capability()`）
+
+| 债务 | 当前事实 | 清除条件 |
+|---|---|---|
+| EB 全局豁免面（`use_item` / `capability()`） | 仅剩两个 EB 全局/访问器面：① `extension_bag_use_item`（声明 `contracts/extension_bag_port.h:63`、定义 `plugins/extension_bag/extension_bag_port.cpp:232`），消费者 2 处——`bridge/native/gamebridge_domain_operations.cpp:217`（EB use 分支）、`host/item_inventory_state_write_port.cpp:70`；capability 无对应成员（`handle_confirm_use_item` 为原版确认键接管，语义不同）。② `extension_bag_capability()`（声明 `contracts/extension_bag_port.h:69`、定义 `host/extension_bag_port.inc:23`），消费者 game 层 `game/ops/item_inventory_state_write.cpp`（8 处）与 `game/state/game_state.cpp`（2 处）、`game/access/save.cpp`/`ui_state.cpp`（原 api/native 7 处随 T2l 序列迁入）、bridge（5 处）；`plugins/core.item/plugin.cpp:282` 为 TU-local 同名 SDK-require 包装，非本访问器消费者。`extension_bag_move_item`/`extension_bag_put_jewel` 已随 T2j-1/T2j-2 删除 | use 归宿 = 域化（逻辑迁 owner/域）或 v2.3 独立立项（含 string→POD 等值门禁）；accessor 退役 = contracts 注入面或 D2d 域化。再评估触发任一达成即重评：① use/accessor 出现新消费者；② 整目录批要求 bridge 零 api/插件字符串面；③ EB 域化批立项。阶段 6 静态清零不含该 2 过渡访问器（T2n-4 `fd8cbadc` 基线 0 后仍在登记中），再评估触发不变 |
+
+### 5.4 待补行为证据
+
+- 待补行为证据：VM-P6-01、VM-D1、VM-D2-01..04，以及 P5 出口插件卡；VM-P1-S2 的 **EB 逻辑袋 >99 两态视图（R-48）已真机 PASS**（R2/R5），物理袋 >99 载体、999 clamp、原子组失败注入仍待补（见 §3 行）。
+
+### 5.5 资源豁免
+
+`plugins/core.ui/panels/settings.cpp` 的主菜单「更多游戏」运行时控件实例槽属于 `resource_unknown_symbol`。当前由主线程帧任务管理，不能按稳定 GOT 槽静态归属。
+
+清除条件：P5/U11 动态 UI 绑定管理器建立后，登记 `own:ui.main_menu.more_games_entry` 与运行期 lease，并通过资源检查。
+
+### 5.6 legacy 实现保留（当前豁免）
+
+- `core/native/game_cache.{h,cpp}`：保留在 `core/native`，目标映射为 `infra`；当前 `game_cache.cpp` 仅依赖 `infra/runtime.h`（原 4 条 infra→game 边与 `game_system.h`/`game_access.h`/`game_state.h`/`game_symbols.h` 死 include 已清零，T2n-1 `88f3e96a`），帧号取 `infra::frame_count()`、world 判定经注入缝 `frame_cache_set_world_gate`。player/party/inventory/skills/mercenaries 五槽 legacy builder 经 host 装配期注入（`frame_cache_set_json_builder`，A1 host↔infra 内部面）；T2i-2 删除 `api/native/game_character.*`/`game_party.*` 后，player/party/skills/mercenaries 四槽与其 owner fallback 由 `host/legacy_json_builders.h` 承担，inventory(6) 槽现指 `game/access/inventory_legacy_read.cpp`（T2l-inv）；world 槽 2/3/9/10/11 亦由该头 host 注入（T2l-w-read/w-read2）；system 槽先随 T2n-1 收口、后经 T2n-4 基线终局归零。
+- `core/native/module_save.cpp` 与 `module_save_port.h`：实现仍依赖旧游戏访问面；稳定声明暂留 `contracts`，实现映射为 legacy/save。
+- `core/native/inventory_trade.{h,cpp}`：仍依赖游戏访问面与状态面，映射为 legacy/inventory；T2n-3（`118d1044`）删除死符号 include（复核零符号使用、无裸地址）。
+- `game_system.{h,cpp}`：直接迁入目标层会引入 legacy 依赖，须先拆出低层原语与上层聚合。（原同列的 `game_dialog*` 4 文件已随 T2l-d `1976ba4b` 删除。）
+
+清除条件：完成对应访问面吸收和目标层适配，迁入目标目录，删除过渡映射，并通过 `check_arch.py`、`check_offsets.py` 及相关 host 测试。
+## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |
 |---|---|---|
@@ -144,7 +185,7 @@
 | P6 | S2 residency 真机卡（VM-P6-01） | `stack_limit` 条目 `residency` 恒 `resident`、`feature_enabled` 随开关/deactivate 翻转；provider 常驻期间存读档与既有 S2 数据可解释；过渡项逐条清除 |
 | P7 | 外部插件轨卡 | 数据 schema 拒绝；未签名 native 显式启用/加载/禁用；托管资源回收；启动故障恢复；更新/回滚 |
 
-## 6. 失败判据（任一命中即 NOT_ACCEPTED）
+## 7. 失败判据（任一命中即 NOT_ACCEPTED）
 
 1. 安装/停用结果与状态上报不一致（静默失败）；
 2. 开关关闭后仍有业务副作用（非空转透传）；

@@ -1,5 +1,6 @@
 # 新架构实现地图
 
+> **已归档（2026-09-26）**：本文件是重构期历史材料，**不得作为落地依据**。其中仍有效的活跃内容已迁入 `docs/refactor/verification.md`「活跃债务与待补证据（自 ledger 迁入）」节；文内相对链接按 `docs/refactor/` 语境解读。后续逐插件审计与插件级工作以根目录 `ARCHITECTURE.md` + `docs/refactor/verification.md` 为准。
 > 定位：**定位入口**。不是架构权威，不是执行台账。
 >
 > - 架构权威（结构与规则）：根目录 `ARCHITECTURE.md`

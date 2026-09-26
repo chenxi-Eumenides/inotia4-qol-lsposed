@@ -1,5 +1,6 @@
 # 重构迁移台账
 
+> **已归档（2026-09-26）**：本文件是重构期历史材料，**不得作为落地依据**。其中仍有效的活跃内容已迁入 `docs/refactor/verification.md`「活跃债务与待补证据（自 ledger 迁入）」节；文内相对链接按 `docs/refactor/` 语境解读。后续逐插件审计与插件级工作以根目录 `ARCHITECTURE.md` + `docs/refactor/verification.md` 为准。
 > 本文件是紧凑的迁移状态记录，不定义最终架构。
 >
 > - **最终目标唯一权威**：根目录 `ARCHITECTURE.md`。

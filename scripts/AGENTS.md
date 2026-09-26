@@ -8,7 +8,7 @@
 - `keys/`：`patch-apk.sh` 默认签名密钥（AOSP 公开 testkey，BKS，非机密）；生成与校验步骤见 `docs/guides/build-and-deploy.md` §3.1。
 - 一次性实验脚本放入项目根目录 `archive/experiments/`，不得混入正式入口。
 - 脚本输出只能写入 `apk/`、`output/`、`archive/` 或 `.tmp/`。
-- 例外：**生成型文档**由对应脚本直接写入受版本控制的文档目录（当前白名单：`scripts/maintenance/gen_baseline_doc.py` → `docs/refactor/baseline.md`、`scripts/maintenance/gen_map_doc.py` → `docs/refactor/map.md`），属生成物而非「工具输出」。
+- 例外：**生成型文档**由对应脚本直接写入受版本控制的文档目录（当前白名单：`scripts/maintenance/gen_baseline_doc.py` → `docs/refactor/baseline.md`、`scripts/maintenance/gen_map_doc.py` → `docs/history/refactor-closure/map.md`），属生成物而非「工具输出」。
 - `.tmp/` 输出必须放入任务专属子目录，任务结束后清理；脚本不得把日志、截图或中间文件写入脚本目录根部。
 - Android 构建脚本是唯一构建入口：使用 `scripts/build-debug.sh` 或 `scripts/build-release.sh`，不要在其他脚本或文档中调用 `gradle`/`./gradlew`。
 - 脚本必须使用项目 `.venv/`，通过 `uv run` 执行 Python 依赖。

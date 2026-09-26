@@ -2,7 +2,7 @@
 
 > **目标架构唯一权威：本文。版本：v0.4.1。**
 >
-> 本文规定最终职责、依赖方向、边界和不可破坏的兼容红线；不把当前代码状态写成目标许可。当前差距与改进措施唯一记录在 `docs/refactor/current-optimization-review.md`。`docs/refactor/ledger.md`、`verification.md`、`baseline.md`、`map.md`、`api-route-map.md` 只记录迁移台账、验证证据、生成基线、现状映射或路由核对结果，不得定义目标架构。
+> 本文规定最终职责、依赖方向、边界和不可破坏的兼容红线；不把当前代码状态写成目标许可。重构序列已收口，插件级工作以本文 + `docs/refactor/verification.md` 为准。重构期过程材料（原 `current-optimization-review.md`、`ledger.md`、`map.md`）已归档 `docs/history/refactor-closure/`，**仅供参考，不得作为落地依据**；`docs/refactor/verification.md`、`baseline.md`、`api-route-map.md` 只记录验证证据、生成基线与路由核对结果，不得定义目标架构。
 
 ## 版本记录
 
@@ -69,13 +69,13 @@ Loader（机制运行时）
 | 内容 | 唯一依据 |
 |---|---|
 | 最终目标架构、职责和依赖方向 | 根目录 `ARCHITECTURE.md`（本文） |
-| 当前差距、改进顺序和现状判断 | `docs/refactor/current-optimization-review.md` |
+| 当前差距、改进顺序和现状判断（重构期记录，已归档） | `docs/history/refactor-closure/current-optimization-review.md` |
 | HTTP 路径、方法、参数、成功响应和状态码 | `docs/reference/api-reference.md` |
-| 迁移台账 | `docs/refactor/ledger.md` |
-| 验证矩阵、验收卡和证据状态 | `docs/refactor/verification.md` |
-| 生成的基线、目录映射、路由映射 | `docs/refactor/baseline.md`、`map.md`、`api-route-map.md` |
+| 迁移台账（重构期记录，已归档） | `docs/history/refactor-closure/ledger.md` |
+| 验证矩阵、验收卡和活跃债务 | `docs/refactor/verification.md` |
+| 生成的基线、路由映射（目录映射已归档） | `docs/refactor/baseline.md`、`docs/refactor/api-route-map.md`、`docs/history/refactor-closure/map.md` |
 
-后四类材料不能反向放宽本文目标；脚本通过只表示当前检查结果，不表示目标边界已经满足。普通历史和归档材料不参与目标解释。
+上述材料不能反向放宽本文目标；脚本通过只表示当前检查结果，不表示目标边界已经满足。普通历史和归档材料不参与目标解释。
 
 ### 2.2 不可破坏的项目红线
 
