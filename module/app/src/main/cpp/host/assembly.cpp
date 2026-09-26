@@ -10,9 +10,8 @@
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
 #include "core/native/game_cache.h"
-#include "game_character.h"
-#include "game_party.h"
 #include "game_inventory.h"
+#include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
 #if !QOL_KERNEL_ONLY
@@ -74,12 +73,15 @@ namespace qol::host {
 
 // T2h-B'：向 infra game_cache 注入 legacy builder（K1，行为/线程逐字不变）。
 // slot 编号与 core/native/game_cache.cpp 的 CacheSlot 表一致。
+// T2i-1：player/party/skills/mercenaries 四槽改指 host 内联副本（host/legacy_json_builders.h，
+// 与 api/native 原实现逐字一致），两 TU 退役后仍可作插件停用 fallback；inventory(6) 的
+// legacy builder 归整目录批，暂仍指 api/native。
 void install_legacy_cache_builders() {
-    frame_cache_set_json_builder(0, &build_player_json);
-    frame_cache_set_json_builder(1, &build_party_json);
+    frame_cache_set_json_builder(0, &legacy_build_player_json);
+    frame_cache_set_json_builder(1, &legacy_build_party_json);
     frame_cache_set_json_builder(6, &build_inventory_json);
-    frame_cache_set_json_builder(7, &build_skills_json);
-    frame_cache_set_json_builder(8, &build_mercenaries_json);
+    frame_cache_set_json_builder(7, &legacy_build_skills_json);
+    frame_cache_set_json_builder(8, &legacy_build_mercenaries_json);
 }
 
 // T2h-B1（v3 A-simple）：player(0)/party(1)/skills(7) 三槽改注入 owner 适配器
@@ -105,21 +107,21 @@ std::string host_build_player_json() {
     return build_character_state_json_via_owner(
         require_character_state(),
         static_cast<int32_t>(contracts::QolCharacterStateKind::kPlayer), kHostStatePlayerCapacity,
-        &build_player_json);
+        &legacy_build_player_json);
 }
 
 std::string host_build_party_json() {
     return build_character_state_json_via_owner(
         require_character_state(),
         static_cast<int32_t>(contracts::QolCharacterStateKind::kParty), kHostStatePartyCapacity,
-        &build_party_json);
+        &legacy_build_party_json);
 }
 
 std::string host_build_skills_json() {
     return build_character_state_json_via_owner(
         require_character_state(),
         static_cast<int32_t>(contracts::QolCharacterStateKind::kSkills), kHostStateSkillsCapacity,
-        &build_skills_json);
+        &legacy_build_skills_json);
 }
 
 // T2h-B2：inventory(6) 槽 owner 适配器（item.state，现取不缓存，失败逐字 fallback legacy）。

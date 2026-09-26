@@ -14,6 +14,7 @@
 #include "game_character.h"
 #include "game_party.h"
 #include "game_world.h"
+#include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
 #include "infra/capabilities.h"
 #include "plugins/core.character/plugin.h"
@@ -512,6 +513,49 @@ std::string frozen_skills_json() {
         s += ",\"active_skill_id\":" + std::to_string(active != nullptr ? *reinterpret_cast<uint16_t*>(active + S_ACTION_ID) : -1);
         s += ",\"skill_points\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_SKILL_POINTS]));
         s += "}";
+    }
+    s += "]";
+    return s;
+}
+
+// T2i-1（W12 独立 oracle）：api/native build_mercenaries_json 的逐字节复刻（T2h-0 手法）。
+std::string frozen_mercenaries_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    // 佣兵槽：*(*(G_MERC_SLOTLIST_GOT_VMA)) 槽数组（20B/槽），flags bit0=占用 bit1=在队伍。
+    // 关联角色：角色池 +0x352==slot；名称 CHAR_GetName、等级 +0x0E、坐标 +0x02/+0x04。
+    std::string s = "[";
+    if (g_base != 0) {
+        uintptr_t got = *reinterpret_cast<uintptr_t*>(g_base + G_MERC_SLOTLIST_GOT_VMA);
+        uint8_t* slots = got != 0 ? *reinterpret_cast<uint8_t**>(got) : nullptr;
+        uintptr_t max_got = *reinterpret_cast<uintptr_t*>(g_base + G_MERC_MAX_GOT_VMA);
+        int8_t max_slots = max_got != 0 ? *reinterpret_cast<int8_t*>(max_got) : 0;
+        if (slots != nullptr && max_slots > 0) {
+            int emitted = 0;
+            for (int i = 0; i < max_slots && i < 128; ++i) {
+                uint8_t* slot = slots + i * M_SLOT_SIZE;
+                uint8_t flags = slot[M_FLAGS];
+                if ((flags & 0x01) == 0) continue;
+                if (slot[M_TYPE] > 2) continue;
+                if (emitted > 0) s += ",";
+                s += "{\"slot\":" + std::to_string(i);
+                s += ",\"type\":" + std::to_string(slot[M_TYPE]);
+                s += ",\"flags\":" + std::to_string(flags);
+                s += ",\"in_party\":" + std::string((flags & 0x02) ? "true" : "false");
+                void* ch = find_char_by_merc_slot(i);
+                if (ch != nullptr) {
+                    if (fn_get_name != nullptr) {
+                        char* nm = fn_get_name(ch);
+                        s += ",\"name\":\"" + json_escape(nm) + "\"";
+                    }
+                    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_LEVEL]));
+                    append_position(s, ch);
+                } else {
+                    s += ",\"name\":null";
+                }
+                s += "}";
+                ++emitted;
+            }
+        }
     }
     s += "]";
     return s;
@@ -1696,6 +1740,73 @@ void test_read_face_frozen_equivalence() {
     g_state_reads_from_legacy = false;
 }
 
+// T2i-1（W12）：host 内联 legacy 读面（host/legacy_json_builders.h）与 api/native 原实现、
+// 与 T2h-0 frozen 复刻三向逐字节等值。覆盖 default / 非 world / 边界（g_base==0 空佣兵、
+// 佣兵槽含空槽与 type>2 槽、成员缺失的 null 分支）。
+void test_legacy_builders_byte_equivalence() {
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    sync_legacy_fixture();
+
+    // default fixture：player/party/skills/member_json 三向等值。
+    CHECK(qol::host::legacy_member_json(legacy_member(0)) == member_json(legacy_member(0)));
+    CHECK(qol::host::legacy_member_json(legacy_member(0)) == frozen_member_json(legacy_member(0)));
+    CHECK(qol::host::legacy_build_player_json() == build_player_json());
+    CHECK(qol::host::legacy_build_party_json() == build_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == build_skills_json());
+    CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+
+    // 非 world：player/party/mercenaries 走错误短体；skills 无 world 短路（仍走成员路径）。
+    g_state_not_in_game = true;
+    CHECK(qol::host::legacy_build_player_json() == build_player_json());
+    CHECK(qol::host::legacy_build_party_json() == build_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == build_skills_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == build_mercenaries_json());
+    CHECK(qol::host::legacy_build_player_json() == "{\"error\":\"not in game\"}");
+    CHECK(qol::host::legacy_build_mercenaries_json() == "{\"error\":\"not in game\"}");
+    g_state_not_in_game = false;
+
+    // 边界：g_base==0 → 佣兵空数组；无佣兵槽列表时新旧逐字同体。
+    CHECK(qol::host::legacy_build_mercenaries_json() == build_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == "[]");
+
+    // 边界：构造合成佣兵槽（slot0 占用但无角色对象 → name:null；slot7 type=1 → 角色分支）。
+    // G_MERC_MAX_GOT_VMA / G_MERC_SLOTLIST_GOT_VMA 两 GOT 共用一个基址区，取两偏移跨度分配。
+    constexpr uintptr_t kMercLo = G_MERC_MAX_GOT_VMA;
+    constexpr uintptr_t kMercHi = G_MERC_SLOTLIST_GOT_VMA;
+    static uint8_t merc_region[kMercHi - kMercLo + 8]{};
+    static uint8_t merc_slots[8 * M_SLOT_SIZE]{};
+    static uint8_t* merc_slots_ptr = merc_slots;
+    static int8_t merc_max = 8;
+    *reinterpret_cast<uint8_t**>(merc_region) = reinterpret_cast<uint8_t*>(&merc_max);
+    // 槽列表为双层解引用：GOT 槽持有「指向槽数组指针」的地址。
+    *reinterpret_cast<uintptr_t*>(merc_region + (kMercHi - kMercLo)) =
+        reinterpret_cast<uintptr_t>(&merc_slots_ptr);
+    merc_slots[0 * M_SLOT_SIZE + M_FLAGS] = 0x01;  // 占用、无角色对象
+    merc_slots[0 * M_SLOT_SIZE + M_TYPE] = 0;
+    merc_slots[7 * M_SLOT_SIZE + M_FLAGS] = 0x03;  // 占用 + 在队伍
+    merc_slots[7 * M_SLOT_SIZE + M_TYPE] = 1;      // find_char_by_merc_slot(7) → 角色对象
+    const uintptr_t saved_base = g_base;
+    g_base = reinterpret_cast<uintptr_t>(merc_region) - kMercLo;
+    CHECK(qol::host::legacy_build_mercenaries_json() == build_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json().find("\"slot\":7") != std::string::npos);
+    CHECK(qol::host::legacy_build_mercenaries_json().find("\"name\":null") != std::string::npos);
+    g_base = saved_base;
+
+    // 边界：成员缺失（member_present 全 0）→ party/skills 的 null 分支等值。
+    std::memset(g_legacy_member_present, 0, sizeof(g_legacy_member_present));
+    CHECK(qol::host::legacy_build_party_json() == build_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == build_skills_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+
+    g_state_reads_from_legacy = false;
+}
+
 // T2h-B1（v3）：W2 —— owner 适配器四情形 fallback 逐字节断言（host 可测钩子）。
 static std::string fake_legacy_cache_body() { return "{\"legacy\":true}"; }
 static QolResult fake_owner_ok(qol::contracts::QolCharacterStateKind, char* out, uint32_t capacity,
@@ -2011,6 +2122,7 @@ int main() {
     test_write_skills_family(state_api);
     test_bridge_write_envelope();
     test_read_face_frozen_equivalence();
+    test_legacy_builders_byte_equivalence();
     test_owner_cache_builder_v3(state_api);
 
     char tiny_output[4] = {'!', '!', '!', '!'};
