@@ -5,6 +5,7 @@
 
 #include "game/access/game_access.h"
 #include "game/access/quest.h"
+#include "game/access/world.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/ops/game_ops_common.h"
 #include "game/state/character_http.h"
@@ -836,22 +837,22 @@ int32_t build_world_write_result_json(int32_t kind, int32_t a, int32_t b, int32_
     bool attach_state = false;
     switch (kind) {
         case contracts::kQolWorldWriteMoveTo:
-            body = data_op_move(a, b);
+            body = qol::game::world_move(a, b).str();
             attach_state = true;
             break;
         case contracts::kQolWorldWriteWalkDir:
-            body = data_op_walk(a);
+            body = qol::game::world_walk(a).str();
             attach_state = true;
             break;
         case contracts::kQolWorldWriteStopMove:
-            body = data_op_walk_stop();
+            body = qol::game::world_walk_stop().str();
             break;
         case contracts::kQolWorldWriteInteract:
-            body = data_op_interact();
+            body = qol::game::world_interact().str();
             attach_state = true;
             break;
         case contracts::kQolWorldWriteTeleport:
-            body = data_op_teleport_direct(a, b, c, d != 0);
+            body = qol::game::world_teleport_direct(a, b, c, d != 0).str();
             break;
         default:
             return kWorldWriteFailed;

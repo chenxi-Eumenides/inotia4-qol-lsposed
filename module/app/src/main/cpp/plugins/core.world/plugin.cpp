@@ -555,7 +555,7 @@ QolResult world_write_command(const contracts::HttpReq* request, contracts::Http
             if (!world_int_field(body, "x", &x)) x = -1;
             if (!world_int_field(body, "y", &y)) y = -1;
             if (x < 0 || y < 0) return world_write_error(response, 400, "x/y required");
-            // API 坐标统一瓦片：native data_op_move 收像素（tile*16+8），与迁移前 Kotlin 同口径。
+            // API 坐标统一瓦片：native 世界移动收像素（tile*16+8），与迁移前 Kotlin 同口径。
             payload.kind = contracts::kQolWorldWriteMoveTo;
             payload.a = x * 16 + 8;
             payload.b = y * 16 + 8;

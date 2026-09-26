@@ -6,6 +6,7 @@
 #include "contracts/extension_bag_port.h"
 #include "core/native/inventory_trade.h"
 #include "game/adapter_ports/item_count_facade.h"
+#include "game/access/world.h"
 #include "game/ops/character_write.h"
 #include "game/ops/item_dice.h"
 #include "game/ops/item_inventory_state_write.h"
@@ -120,12 +121,12 @@ Java_com_inotia4_qol_NativeBridge_nativeOpPartySwap(JNIEnv* env, jclass, jint a,
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpTeleport(JNIEnv* env, jclass, jint mapId, jint x, jint y) {
     // 旧三参导出保留（JNI 面冻结），固定 force=false；新调用方走 nativeOpTeleportEx
-    return op_result(env, "op_teleport", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y)), data_op_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y), false));
+    return op_result(env, "op_teleport", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y)), qol::game::world_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y), false).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpTeleportEx(JNIEnv* env, jclass, jint mapId, jint x, jint y, jboolean force) {
-    return op_result(env, "op_teleport_ex", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y) + " force=" + str_of(static_cast<int>(force))), data_op_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y), force == JNI_TRUE));
+    return op_result(env, "op_teleport_ex", ("mapId=" + str_of(mapId) + " " + "x=" + str_of(x) + " " + "y=" + str_of(y) + " force=" + str_of(static_cast<int>(force))), qol::game::world_teleport(static_cast<int32_t>(mapId), static_cast<int32_t>(x), static_cast<int32_t>(y), force == JNI_TRUE).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -159,22 +160,22 @@ Java_com_inotia4_qol_NativeBridge_nativeGetEventsJson(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpMove(JNIEnv* env, jclass, jint x, jint y) {
-    return op_result(env, "op_move", ("x=" + str_of(x) + " " + "y=" + str_of(y)), data_op_move(static_cast<int32_t>(x), static_cast<int32_t>(y)));
+    return op_result(env, "op_move", ("x=" + str_of(x) + " " + "y=" + str_of(y)), qol::game::world_move(static_cast<int32_t>(x), static_cast<int32_t>(y)).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpWalk(JNIEnv* env, jclass, jint direction) {
-    return op_result(env, "op_walk", ("direction=" + str_of(direction)), data_op_walk(static_cast<int32_t>(direction)));
+    return op_result(env, "op_walk", ("direction=" + str_of(direction)), qol::game::world_walk(static_cast<int32_t>(direction)).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpWalkStop(JNIEnv* env, jclass) {
-    return op_result(env, "op_walk_stop", (std::string("")), data_op_walk_stop());
+    return op_result(env, "op_walk_stop", (std::string("")), qol::game::world_walk_stop().str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpInteract(JNIEnv* env, jclass) {
-    return op_result(env, "op_interact", (std::string("")), data_op_interact());
+    return op_result(env, "op_interact", (std::string("")), qol::game::world_interact().str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

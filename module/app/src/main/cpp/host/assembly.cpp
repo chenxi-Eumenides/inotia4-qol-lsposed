@@ -51,6 +51,7 @@
 #include "plugins/device_probe_export_failure/plugin.h"
 #endif
 #include "game/access/patches.h"
+#include "game/access/qol_log_seam.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
@@ -319,6 +320,8 @@ bool assembly_init() {
     game_host_mark_main_thread();
     // g_host_sdk 是 ABI 生命周期对象；adapter 在宿主装配期注入，随后由所有插件共享。
     const_cast<contracts::QolHostSdk&>(g_host_sdk).ui = ui_adapter();
+    // T2l-w-write：向 game 层日志缝注入 SDK（game/access/qol_log_seam.h）；装配早于任何写调用。
+    qol::game::qol_seam_bind_host_sdk(&g_host_sdk);
     // item_count facade 是宿主稳定表；P1-B 注册 provider 前保持 not_ready。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     // 仅在完整成功后置位：失败可重试，成功则幂等。

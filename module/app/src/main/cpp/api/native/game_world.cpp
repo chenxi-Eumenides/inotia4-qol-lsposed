@@ -8,9 +8,6 @@
 #include "game/nav/game_nav.h"
 #include "game/state/game_state.h"
 #include "game/ops/game_ops_common.h"
-#include "infra/frame/frame_task.h"
-#include "infra/log/qol_log.h"
-#include "infra/frame/transition_dispatch.h"
 #include "game/read/game_tiles.h"
 
 #include <cstdint>
@@ -18,6 +15,4 @@
 
 #include "game_world_story.inc"
 #include "game_world_navigation.inc"
-#include "game_world_movement.inc"
-#include "game_world_operations.inc"
 #include "game_world_readers.inc"

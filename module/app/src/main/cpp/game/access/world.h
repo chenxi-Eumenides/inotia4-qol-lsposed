@@ -93,6 +93,29 @@ bool world_show_banner(const char* text);
 // 未就绪/未命中返回 -1。仅用于日志与诊断。
 int world_choice_state_id();
 
+// ---- 世界写原语（T2l-w-write）----
+//
+// 迁移自 api/native 的世界写实现（teleport/teleport_direct/move/walk/walk_stop/interact）：
+// 内部经 contracts/runtime_hooks.h 的过渡注入面使用 infra 帧任务/转场机制（game 层不 include
+// infra/host）。返回完整 op JSON 信封（成功 `{"ok":true}` / 失败 `{"ok":false,"error":...}`），
+// 与迁移前逐字一致；定长 POD（签名无 STL），由调用方（bridge wrapper/game_system）透传。
+struct WorldWriteResult {
+    uint32_t size = 0;
+    char text[512] = {};
+
+    const char* data() const { return text; }
+    std::string str() const { return std::string(text, size); }
+};
+
+// 传送：blocking（transition_run 跨帧）与 direct（transition_run_inline，owner 逻辑相位内联）。
+WorldWriteResult world_teleport(int32_t map_id, int32_t x, int32_t y, bool force);
+WorldWriteResult world_teleport_direct(int32_t map_id, int32_t x, int32_t y, bool force);
+// 寻路移动 / 方向走 60 帧 / 停走 / 交互事件检查（成功 refresh 恰一次，经 op_ok）。
+WorldWriteResult world_move(int32_t x, int32_t y);
+WorldWriteResult world_walk(int32_t direction);
+WorldWriteResult world_walk_stop();
+WorldWriteResult world_interact();
+
 // ---- 世界传送入口 patch 元信息（UIPlay_CallMapName 尾部指令点）----
 
 // patch_addr：待改写指令地址；return_addr：trampoline 跳回地址（epilogue）；

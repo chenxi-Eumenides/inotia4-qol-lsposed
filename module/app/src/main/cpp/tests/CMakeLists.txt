@@ -929,6 +929,17 @@ target_compile_features(runtime_hooks_contract_tests PRIVATE cxx_std_17)
 set_target_properties(runtime_hooks_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME runtime_hooks_contract_tests COMMAND runtime_hooks_contract_tests)
 
+# T2l-w-write：game 层日志缝（qol_log_seam.h）——静默降级、输出序数/正文、帧节流路径。
+add_executable(qol_log_seam_tests
+    test_qol_log_seam.cpp
+)
+target_include_directories(qol_log_seam_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(qol_log_seam_tests PRIVATE cxx_std_17)
+set_target_properties(qol_log_seam_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME qol_log_seam_tests COMMAND qol_log_seam_tests)
+
 add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.character/plugin.cpp
