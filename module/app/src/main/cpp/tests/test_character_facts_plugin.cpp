@@ -55,6 +55,10 @@ static int g_exclude_result = 1;
 static bool g_leader_is_merc = false;
 static bool g_merc_in_party = false;
 static bool g_is_special_npc = false;
+// 玩家族（T2c-4d）可控 fake 面：switch_player 的原版调用开关与 UI 占用桩。
+static int g_set_active_player_calls = 0;
+static int g_set_active_player_result = 1;
+static const char* g_ui_blocked_message = nullptr;
 static qol::contracts::QolCharacterStateParty g_live_party{};
 static qol::contracts::QolCharacterStatePlayer g_live_player{};
 static qol::contracts::QolCharacterStateSkills g_live_skills{};
@@ -208,12 +212,18 @@ int legacy_get_stat_main(void*, int32_t) { return 0; }
 void legacy_set_stat_main(void*, int32_t, int32_t) { ++g_add_stat_main_calls; }
 void legacy_set_auto_attack(void* ch, int32_t) { apply_write_effect(ch); }
 void* legacy_learn_action(void*, int32_t, int32_t) { return nullptr; }
-void legacy_char_initialize_status(void*) {}
-void legacy_char_initialize_skill(void*) {}
+// 玩家族写后即时：fake 原版链模拟对主角 live 数据的改动（移动坐标），供随后读 kPlayer。
+void apply_player_effect(void* ch) {
+    if (g_write_effect_level == 0 || ch == nullptr) return;
+    *reinterpret_cast<int16_t*>(static_cast<uint8_t*>(ch) + C_POS_X) =
+        static_cast<int16_t>(g_write_effect_level);
+}
+void legacy_char_initialize_status(void* ch) { apply_player_effect(ch); }
+void legacy_char_initialize_skill(void* ch) { apply_player_effect(ch); }
 void* legacy_char_get_enemy_target(void*, int32_t, int32_t) { return legacy_member(0); }
 void legacy_char_set_action_id(void* ch, int32_t, void*) { apply_write_effect(ch); }
 void legacy_char_set_target(void* ch, void*) { apply_write_effect(ch); }
-void legacy_char_stop_combat(void*) {}
+void legacy_char_stop_combat(void* ch) { apply_player_effect(ch); }
 void legacy_party_swap(int32_t, int32_t) {}
 // 队伍族写后即时：fake 原版链模拟对 live 队伍成员（slot 0）的改动，供同一结果处理器随后读 kParty。
 void apply_party_effect() {
@@ -229,7 +239,10 @@ void legacy_mercenary_release(int32_t) { ++g_mercenary_release_calls; apply_part
 int legacy_unequip(void*, int32_t) { ++g_unequip_calls; apply_party_effect(); return g_unequip_result; }
 int legacy_can_unequip(void*, void*) { ++g_can_unequip_calls; return g_can_unequip_result; }
 int legacy_is_special_npc(void*) { return g_is_special_npc ? 1 : 0; }
-int legacy_set_active_player(int32_t) { return 1; }
+int legacy_set_active_player(int32_t) {
+    ++g_set_active_player_calls;
+    return g_set_active_player_result;
+}
 
 SetExpFn fn_set_exp = &legacy_set_exp;
 SetLevelFn fn_set_level = &legacy_set_level;
@@ -259,7 +272,7 @@ void* member_or_null(int role) { return legacy_member(role); }
 void* find_char_by_merc_slot(int slot) {
     return slot == 7 ? g_merc_object : nullptr;
 }
-const char* ui_blocked() { return nullptr; }
+const char* ui_blocked() { return g_ui_blocked_message; }
 void frame_cache_force_refresh() {}
 bool pool_obj_valid(const uint8_t* obj) { return obj != nullptr; }
 
@@ -1211,6 +1224,162 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
     g_state_reads_from_legacy = false;
 }
 
+// T2c-4d：player-state 族（kSwitchPlayer/kStopCombat/kStatReset/kSkillReset）typed 单路径 +
+// owner 自组装 kPlayer 投影覆盖。switch_player 必须保留 fn_set_active_player 成功后的
+// g_main_merc_slot 同步（game_party.cpp:86-89）；失败/越界时先返回、不得写槽，以桩状态与计数锁定。
+void test_write_player_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    g_set_active_player_calls = 0;
+    g_set_active_player_result = 1;
+    g_ui_blocked_message = nullptr;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    const auto embedded_player = [](const std::string& owner, bool* found) {
+        const std::string marker = ",\"state\":";
+        const size_t at = owner.find(marker);
+        if (at == std::string::npos) {
+            *found = false;
+            return std::string();
+        }
+        *found = true;
+        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
+    };
+    // owner 侧调用计数与 leader 槽在 legacy 基线（也会调原版函数）之前捕获。
+    const auto run_golden = [&](const Case& test, int* owner_calls, uint8_t* owner_leader) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        g_set_active_player_calls = 0;
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        if (owner_calls != nullptr) *owner_calls = g_set_active_player_calls;
+        if (owner_leader != nullptr) *owner_leader = g_legacy_leader_slot;
+        bool found = false;
+        const std::string embedded = embedded_player(owner, &found);
+        char capability[8192]{};
+        uint32_t capability_size = 0;
+        const bool capability_ok =
+            state_api != nullptr &&
+            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer, capability,
+                                        sizeof(capability), &capability_size).ok == kQolOk;
+        CHECK(found && capability_ok && embedded == std::string(capability, capability_size));
+        sync_legacy_fixture();
+        const std::string legacy = legacy_character_write_result_json(payload);
+        CHECK(ok && owner == legacy && owner.find("\"state\":{") != std::string::npos);
+    };
+    const auto run_failure = [&](const Case& test, const char* expected) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == legacy_character_write_result_json(payload) && owner == expected);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    };
+
+    const Case success[] = {
+        {QolCharacterWriteKind::kSwitchPlayer, 2, 0, 0, 0},
+        {QolCharacterWriteKind::kStopCombat, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kStatReset, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kSkillReset, 0, 0, 0, 0},
+    };
+
+    // 成功体：逐字节对照 legacy；内嵌 kPlayer 子树与 capability 同源；switch 同步 leader_slot。
+    for (const auto& test : success) {
+        int owner_calls = 0;
+        uint8_t owner_leader = 0;
+        run_golden(test, &owner_calls, &owner_leader);
+        if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
+            // fn_set_active_player 恰一次；成功后 g_main_merc_slot 同步为 slot。
+            CHECK(owner_calls == 1 && owner_leader == 2);
+        } else {
+            CHECK(owner_calls == 0);
+        }
+    }
+
+    // 写后即时：同一结果处理器读到 live 改动。switch 的改动即 g_main_merc_slot 同步；
+    // 其余经主角坐标桩（C_POS_X）改动后被 kPlayer 投影读到。
+    g_write_effect_level = 42;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
+            CHECK(owner.find("\"leader_slot\":2") != std::string::npos);
+            CHECK(owner.find("\"x\":3") != std::string::npos);
+        } else {
+            CHECK(owner.find("\"x\":42") != std::string::npos);
+            CHECK(owner.find("\"x\":3") == std::string::npos);
+        }
+    }
+    g_write_effect_level = 0;
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    for (const auto& test : success) {
+        run_failure(test, "{\"ok\":false,\"error\":\"not in game\"}");
+    }
+    g_state_not_in_game = false;
+
+    // switch_player slot 越界：bad slot，且不调原版函数、不动 leader 槽。
+    sync_legacy_fixture();
+    g_set_active_player_calls = 0;
+    run_failure({QolCharacterWriteKind::kSwitchPlayer, 3, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"bad slot\"}");
+    run_failure({QolCharacterWriteKind::kSwitchPlayer, -1, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"bad slot\"}");
+    CHECK(g_set_active_player_calls == 0 && g_legacy_leader_slot == 0);
+
+    // switch_player 原版切换失败：switch failed，且先于同步返回、不写 g_main_merc_slot。
+    g_set_active_player_result = 0;
+    g_set_active_player_calls = 0;
+    run_failure({QolCharacterWriteKind::kSwitchPlayer, 1, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"switch failed\"}");
+    CHECK(g_set_active_player_calls == 2 && g_legacy_leader_slot == 0);
+    g_set_active_player_result = 1;
+
+    // role 边界：stop_combat/stat_reset/skill_reset 的 role=9 -> role not found。
+    for (const auto kind : {QolCharacterWriteKind::kStopCombat, QolCharacterWriteKind::kStatReset,
+                            QolCharacterWriteKind::kSkillReset}) {
+        run_failure({kind, 9, 0, 0, 0}, "{\"ok\":false,\"error\":\"role not found\"}");
+    }
+
+    // 停攻前置 UI 占用：透传 "ui occupied: <screen>"，且先于角色解析。
+    g_ui_blocked_message = "popup";
+    run_failure({QolCharacterWriteKind::kStopCombat, 0, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"ui occupied: popup\"}");
+    g_ui_blocked_message = nullptr;
+
+    // 符号未解析：stat_reset/skill_reset 在初始化函数缺失时 unsupported（先于 member 解析）。
+    auto saved_status_init = fn_char_initialize_status;
+    fn_char_initialize_status = nullptr;
+    run_failure({QolCharacterWriteKind::kStatReset, 0, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    fn_char_initialize_status = saved_status_init;
+    auto saved_skill_init = fn_char_initialize_skill;
+    fn_char_initialize_skill = nullptr;
+    run_failure({QolCharacterWriteKind::kSkillReset, 0, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    fn_char_initialize_skill = saved_skill_init;
+
+    g_state_reads_from_legacy = false;
+}
+
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
     g_result_handler = handler;
@@ -1442,6 +1611,7 @@ int main() {
     test_write_no_state_family();
     test_write_party_state_family(state_api);
     test_write_party_member_family(state_api);
+    test_write_player_family(state_api);
 
     char tiny_output[4] = {'!', '!', '!', '!'};
     uint32_t tiny_size = 99;
