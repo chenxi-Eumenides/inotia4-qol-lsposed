@@ -21,14 +21,14 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 59 |
-| `game` | 118 |
+| `contracts` | 64 |
+| `game` | 127 |
 | `hooks` | 10 |
-| `host` | 45 |
+| `host` | 51 |
 | `infra` | 39 |
 | `legacy/character` | 2 |
 | `legacy/dialog` | 4 |
-| `legacy/inventory` | 8 |
+| `legacy/inventory` | 5 |
 | `legacy/party` | 2 |
 | `legacy/quest` | 2 |
 | `legacy/save` | 3 |
@@ -67,7 +67,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **528** |
+| **合计** | **545** |
 
 ### 1.2 迁移期映射摘要
 
@@ -118,25 +118,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 131 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 128 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 53 |
-| `game` | `contracts` | 51 |
-| `host` | `infra` | 42 |
-| `host` | `contracts` | 38 |
-| `plugins/extension_bag` | `contracts` | 34 |
+| `host` | `game` | 65 |
+| `game` | `contracts` | 59 |
+| `host` | `contracts` | 51 |
+| `host` | `infra` | 43 |
+| `plugins/extension_bag` | `contracts` | 35 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
-| `legacy/system` | `game` | 14 |
 | `plugins/save_backup` | `contracts` | 14 |
+| `plugins/core.item` | `contracts` | 13 |
 | `plugins/core.settings` | `contracts` | 13 |
+| `legacy/inventory` | `game` | 12 |
+| `legacy/system` | `game` | 11 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
-| `host` | `patch` | 10 |
-| `infra` | `contracts` | 8 |
 
 ### 2.2 include 环
 
@@ -144,18 +144,15 @@
 
 ## 3. 基线债务
 
-基线共 3 组、45 条。
+基线共 2 组、31 条。
 
-### layer_direction（32 条）
+### layer_direction（27 条）
 
 - `layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|legacy/character → legacy/inventory`
 - `layer_direction|api/native/game_character.cpp|api/native/game_world.h|legacy/character → legacy/world`
 - `layer_direction|api/native/game_party.cpp|api/native/game_character.h|legacy/party → legacy/character`
 - `layer_direction|api/native/game_party.cpp|api/native/game_world.h|legacy/party → legacy/world`
 - `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|legacy/ui → legacy/world`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_character.h|infra → legacy/character`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_inventory.h|infra → legacy/inventory`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_party.h|infra → legacy/party`
 - `layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → legacy/world`
 - `layer_direction|core/native/game_cache.cpp|game/access/game_access.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game/state/game_state.h|infra → game`
@@ -163,31 +160,22 @@
 - `layer_direction|core/native/game_cache.cpp|game_system.h|infra → legacy/system`
 - `layer_direction|game/access/game_access.cpp|game_system.h|game → legacy/system`
 - `layer_direction|game/access/game_access.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game/json/game_json.cpp|game/access/game_access.h|infra → game`
-- `layer_direction|game/json/game_json.cpp|game/symbols/game_symbols.h|infra → game`
 - `layer_direction|game/read/game_tiles.cpp|infra/log/qol_log.h|game → infra`
 - `layer_direction|game/state/game_state.cpp|api/native/game_ui.h|game → legacy/ui`
 - `layer_direction|game/state/game_state.cpp|infra/frame/frame_task.h|game → infra`
-- …（其余 12 条省略）
+- `layer_direction|game/variants/game_variant.cpp|infra/log/qol_log.h|game → infra`
+- `layer_direction|game_dialog.cpp|api/native/game_save.h|legacy/dialog → legacy/save`
+- `layer_direction|game_dialog.cpp|api/native/game_ui.h|legacy/dialog → legacy/ui`
+- `layer_direction|game_dialog.cpp|api/native/game_world.h|legacy/dialog → legacy/world`
+- `layer_direction|infra/frame/frame_task.cpp|game_system.h|infra → legacy/system`
+- …（其余 7 条省略）
 
-### offsets_symbols_header（11 条）
+### offsets_symbols_header（4 条）
 
 - `offsets_symbols_header|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|core/native/inventory_trade.cpp|game/symbols/game_symbols.h|legacy/inventory 层引用符号头`
-- `offsets_symbols_header|game/json/game_json.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|game/nav/game_nav.cpp|game/symbols/game_symbols.h|legacy/world 层引用符号头`
 - `offsets_symbols_header|infra/save/save_enter.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
 - `offsets_symbols_header|infra/save/save_exit.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|plugins/custom_recipe/feature.cpp|game/symbols/game_symbols.h|plugins/custom_recipe 层引用符号头`
-- `offsets_symbols_header|plugins/custom_recipe/table.cpp|game/symbols/game_symbols.h|plugins/custom_recipe 层引用符号头`
-- `offsets_symbols_header|plugins/extension_bag/extension_bag_geometry.cpp|game/symbols/game_symbols.h|plugins/extension_bag 层引用符号头`
-- `offsets_symbols_header|plugins/extension_bag/game_ui_virtbag.cpp|game/symbols/game_symbols.h|plugins/extension_bag 层引用符号头`
-- `offsets_symbols_header|plugins/inventory_hooks/inventory_hook_stage4.cpp|game/symbols/game_symbols.h|plugins/inventory_hooks 层引用符号头`
-
-### resource_unknown_symbol（2 条）
-
-- `resource_unknown_symbol|plugins/extension_bag/extension_bag_equip.inc:374||ptr slot 无法归属符号`
-- `resource_unknown_symbol|plugins/extension_bag/game_ui_virtbag.cpp:150||ptr slot 无法归属符号`
 
 基线只允许收缩，新增违规即失败
 
