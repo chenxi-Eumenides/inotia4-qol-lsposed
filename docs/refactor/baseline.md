@@ -21,19 +21,16 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 65 |
-| `game` | 127 |
+| `contracts` | 66 |
+| `game` | 132 |
 | `hooks` | 10 |
-| `host` | 53 |
+| `host` | 51 |
 | `infra` | 39 |
-| `legacy/dialog` | 4 |
 | `legacy/inventory` | 5 |
-| `legacy/quest` | 2 |
 | `legacy/save` | 3 |
 | `legacy/shop` | 2 |
 | `legacy/system` | 2 |
-| `legacy/ui` | 5 |
-| `legacy/world` | 7 |
+| `legacy/world` | 5 |
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
@@ -65,7 +62,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **544** |
+| **合计** | **535** |
 
 ### 1.2 迁移期映射摘要
 
@@ -116,23 +113,23 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 118 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 98 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 70 |
-| `game` | `contracts` | 59 |
-| `host` | `contracts` | 55 |
-| `host` | `infra` | 44 |
+| `host` | `game` | 80 |
+| `game` | `contracts` | 69 |
+| `host` | `contracts` | 56 |
+| `host` | `infra` | 47 |
 | `plugins/extension_bag` | `contracts` | 35 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
+| `legacy/system` | `game` | 17 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
 | `plugins/core.item` | `contracts` | 14 |
 | `plugins/save_backup` | `contracts` | 14 |
 | `plugins/core.settings` | `contracts` | 13 |
 | `legacy/inventory` | `game` | 12 |
-| `legacy/system` | `game` | 11 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
 
@@ -142,12 +139,10 @@
 
 ## 3. 基线债务
 
-基线共 2 组、27 条。
+基线共 2 组、21 条。
 
-### layer_direction（23 条）
+### layer_direction（17 条）
 
-- `layer_direction|api/native/game_ui.cpp|api/native/game_world.h|legacy/ui → legacy/world`
-- `layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → legacy/world`
 - `layer_direction|core/native/game_cache.cpp|game/access/game_access.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game/state/game_state.h|infra → game`
 - `layer_direction|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra → game`
@@ -155,18 +150,16 @@
 - `layer_direction|game/access/game_access.cpp|game_system.h|game → legacy/system`
 - `layer_direction|game/access/game_access.cpp|infra/log/qol_log.h|game → infra`
 - `layer_direction|game/read/game_tiles.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game/state/game_state.cpp|api/native/game_ui.h|game → legacy/ui`
 - `layer_direction|game/state/game_state.cpp|infra/frame/frame_task.h|game → infra`
 - `layer_direction|game/variants/game_variant.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game_dialog.cpp|api/native/game_save.h|legacy/dialog → legacy/save`
-- `layer_direction|game_dialog.cpp|api/native/game_ui.h|legacy/dialog → legacy/ui`
-- `layer_direction|game_dialog.cpp|api/native/game_world.h|legacy/dialog → legacy/world`
 - `layer_direction|infra/frame/frame_task.cpp|game_system.h|infra → legacy/system`
 - `layer_direction|infra/save/save_enter.cpp|game/access/game_access.h|infra → game`
 - `layer_direction|infra/save/save_enter.cpp|game/state/game_state.h|infra → game`
 - `layer_direction|infra/save/save_enter.cpp|game/symbols/game_symbols.h|infra → game`
 - `layer_direction|infra/save/save_enter.cpp|patch/call_patch.h|infra → patch`
-- …（其余 3 条省略）
+- `layer_direction|infra/save/save_exit.cpp|game/access/game_access.h|infra → game`
+- `layer_direction|infra/save/save_exit.cpp|game/symbols/game_symbols.h|infra → game`
+- `layer_direction|infra/save/save_exit.cpp|patch/call_patch.h|infra → patch`
 
 ### offsets_symbols_header（4 条）
 
