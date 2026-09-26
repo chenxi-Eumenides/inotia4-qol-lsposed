@@ -1624,6 +1624,15 @@ void test_optional_degrade_timing_after_enable() {
     CHECK(feature_state_is("consumer", FeatureState::kEnabled));
     CHECK(!feature_degraded("consumer"));
 
+    // R3-②：首个 sync_gates 轮 provider 仍门禁关（enable/注册未落地）→ 顺延，不补报 WARN/降级。
+    CHECK(qol::host::sync_gates() == 0);
+    CHECK(feature_state_is("provider", FeatureState::kInstalledDisabled));
+    CHECK(feature_state_is("consumer", FeatureState::kEnabled));
+    CHECK(!feature_degraded("consumer"));
+    const char* consumer_error = nullptr;
+    CHECK(feature_of("consumer", nullptr, nullptr, &consumer_error));
+    CHECK(consumer_error == nullptr);
+
     // enable 轮：门禁打开 → provider 注册 capability → consumer 复查通过，仍不 degraded。
     qol::infra::config_set_bool("test.prov.gate", true);
     (void)sync_gates();

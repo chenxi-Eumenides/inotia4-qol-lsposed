@@ -647,24 +647,55 @@ const char* check_optional_requires(const contracts::PluginDescriptor& plugin, u
 // 并置 g_gate_degraded 供恢复后清除。
 void verify_optional_after_install() {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        if (g_optional_pending[i] == 0) continue;
-        g_optional_pending[i] = 0;
-        if (g_dependency_invalid[i]) continue;
+        // 状态：0 无暂缓；1 首轮待复查；2 已顺延一轮。
+        uint8_t& pending = g_optional_pending[i];
+        if (pending == 0) continue;
+        if (g_dependency_invalid[i]) {
+            pending = 0;
+            continue;
+        }
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        const contracts::CapabilityRequirement* missing = nullptr;
         for (uint32_t o = 0; o < plugin.optional_count; ++o) {
             const contracts::CapabilityRequirement& req = plugin.optional_requires[o];
-            if (infra::require_capability(req.id, req.range) != nullptr) continue;
-            set_dependency_error(i, "missing optional capability", req.id);
-            infra::FeatureStatus status{};
-            if (infra::status_get(plugin.id, &status)) {
-                infra::status_update(plugin.id, status.state, status.enabled, g_error_text[i]);
+            if (infra::require_capability(req.id, req.range) == nullptr) {
+                missing = &req;
+                break;
             }
-            infra::status_set_degraded(plugin.id, true);
-            g_gate_degraded[i] = true;
-            QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
-                         "optional", g_error_text[i]);
-            break;
         }
+        if (missing == nullptr) {
+            pending = 0;  // provider 已注册，复查通过
+            continue;
+        }
+        // provider 仍在图中且未到终态 → 首轮只顺延（enable 注册可能尚未落地），
+        // 避免启动首轮误报；已顺延一轮或 provider 终态（缺失/装失败/不受支持）
+        // 才补报 degraded。
+        bool provider_terminal = false;
+        const uint32_t provider = provider_for_requirement(*missing, nullptr);
+        if (provider == kNoPlugin || g_dependency_invalid[provider]) {
+            provider_terminal = true;
+        } else {
+            infra::FeatureStatus provider_status{};
+            if (infra::status_get(g_plugins[provider].descriptor.id, &provider_status) &&
+                (provider_status.state == infra::FeatureState::kFailed ||
+                 provider_status.state == infra::FeatureState::kUnsupported)) {
+                provider_terminal = true;
+            }
+        }
+        if (!provider_terminal && pending == 1) {
+            pending = 2;
+            continue;
+        }
+        pending = 0;
+        set_dependency_error(i, "missing optional capability", missing->id);
+        infra::FeatureStatus status{};
+        if (infra::status_get(plugin.id, &status)) {
+            infra::status_update(plugin.id, status.state, status.enabled, g_error_text[i]);
+        }
+        infra::status_set_degraded(plugin.id, true);
+        g_gate_degraded[i] = true;
+        QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id, "optional",
+                     g_error_text[i]);
     }
 }
 

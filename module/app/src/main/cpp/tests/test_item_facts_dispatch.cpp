@@ -1618,10 +1618,15 @@ static void* golden_eb_item_at(int32_t internal, int32_t slot) {
     return (internal == 6 && slot == 0) ? g_golden_item_b : nullptr;
 }
 int32_t g_golden_bad_slot = 0;
+int32_t g_golden_projected_canonical = 0;
 static void golden_eb_for_each(qol::contracts::ExtensionBagItemFn fn, void* ctx) {
     if (fn == nullptr) return;
     // R2：可选注入一个 count=0 的非法槽，验证 L1 单槽跳过而非整快照失败。
     if (g_golden_bad_slot != 0) (void)fn(6, 1, 10, 0, ctx);
+    // R3-①：可选注入 canonical>0 但 b 段为 0 的投影槽（R2-1 修复后 EB 应输出 canonical 视图）。
+    if (g_golden_projected_canonical != 0) {
+        (void)fn(9, 4, 35, g_golden_projected_canonical, ctx);
+    }
     (void)fn(6, 0, 10, 199, ctx);
 }
 static int32_t golden_eb_move(int32_t, int32_t, int32_t, int32_t, char*, uint32_t, uint32_t*) {
@@ -1943,6 +1948,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     g_golden_world = 1;
     g_in_world = true;
     g_golden_bad_slot = 0;
+    g_golden_projected_canonical = 0;
     g_last_log_level = -1;
     g_last_log_message[0] = '\0';
     qol::host::http_dispatch_reset_for_test();
@@ -2015,6 +2021,21 @@ void test_extension_degrade_bad_slot_skipped() {
     CHECK(g_last_log_level == 2);                                // WARN 级别
     CHECK(std::strstr(g_last_log_message, "extension inventory slot skipped") != nullptr);
     g_golden_bad_slot = 0;
+    g_golden_require_active = false;
+}
+
+// R3-①：canonical 视图投影槽（canonical&0x7F==0，活体对象缺失）不得被 L1 跳过。
+void test_extension_degrade_projected_canonical_kept() {
+    CHECK(install_core_item_golden(nullptr));
+    g_golden_eb_enabled = 1;
+    g_golden_projected_canonical = 640;
+    const std::string json = owner_raw_inventory();
+    CHECK(json != "<install failed>" && json != "<serialize failed>");
+    CHECK(json.find("{\"slot\":4,\"category\":35,\"count\":640}") != std::string::npos);
+    CHECK(json.find("\"bag\":9") != std::string::npos);
+    CHECK(json.find("{\"slot\":0,\"category\":10") != std::string::npos);
+    CHECK(g_last_log_level != 2);  // 未被 L1 跳过 → 无 slot skipped WARN
+    g_golden_projected_canonical = 0;
     g_golden_require_active = false;
 }
 
@@ -2157,6 +2178,7 @@ int main() {
     test_bridge_item_write_result_helper();
     test_inventory_owner_vs_legacy_golden();
     test_extension_degrade_bad_slot_skipped();
+    test_extension_degrade_projected_canonical_kept();
     test_extension_degrade_omits_section();
     test_extension_degrade_write_ticket_done();
     test_debug_item_raw_golden();

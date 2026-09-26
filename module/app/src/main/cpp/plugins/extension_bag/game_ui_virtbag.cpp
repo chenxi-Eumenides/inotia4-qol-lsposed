@@ -735,10 +735,16 @@ uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonic
         uint32_t field = 0;
         if (api != nullptr && api->read_encoded_field != nullptr &&
             qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
-            return original_count_view(field);
+            const uint32_t view = original_count_view(field);
+            // 活体对象缺失/不可解时 field 可读但 b 段为 0（如 canonical 的低 7 位为 0）。
+            // descriptor canonical 已证明该槽有物，回 0 会被下游当非法 count 丢弃。
+            if (view != 0) return view;
         }
     }
-    return virtual_bag_view_from_canonical(fallback_canonical, false);
+    // 启用态输出 canonical 视图（R-47 决策 b：启用态 canonical、关闭态 b）；本函数仅在
+    // EB 启用时经 for_each_logical_item 调用，故兜底取 canonical 视图而非 b 视图，
+    // 避免 canonical&0x7F==0 的投影槽被当作非法 count 跳过。
+    return virtual_bag_view_from_canonical(fallback_canonical, /*extended=*/true);
 }
 
 uint32_t virtual_bag_canonical_from_field(uint32_t field, uint32_t fallback_canonical) {
