@@ -8,6 +8,11 @@
 // 只接收轻量函数指针，不反向依赖 host（infra 不 include host）。
 void frame_cache_set_json_builder(int32_t slot, std::string (*fn)());
 
+// host↔infra 内部注入面（A1 形态）：world 判定由 host 装配期注入（game 层事实）。
+// 未注入时按「非 world」处理：world_only 槽返回 `{"error":"not in game"}` 降级体，
+// gamestate/snapshot（world_only=false）不受影响——与 g_base 未就绪时的现状分支一致。
+void frame_cache_set_world_gate(bool (*fn)());
+
 void frame_cache_start();
 void frame_cache_stop();
 void frame_cache_force_refresh();

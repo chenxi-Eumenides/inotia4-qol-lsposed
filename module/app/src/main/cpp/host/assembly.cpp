@@ -52,6 +52,7 @@
 #endif
 #include "game/access/patches.h"
 #include "game/access/qol_log_seam.h"
+#include "game/state/game_state.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
 #include "game/clock.h"
@@ -80,6 +81,8 @@ namespace qol::host {
 // T2l-w-read：world 五槽（2 map / 3 units / 9 drops / 10 enemies / 11 interactives）同法改指
 // host 内联（同头逐字副本），game_cache.cpp 不再 include game_world.h。
 void install_legacy_cache_builders() {
+    // T2n-1：向 infra 注入 world 判定 gate（game 层事实；未注入时按非 world 降级，与现状同体）。
+    frame_cache_set_world_gate(&game_in_world);
     frame_cache_set_json_builder(0, &legacy_build_player_json);
     frame_cache_set_json_builder(1, &legacy_build_party_json);
     frame_cache_set_json_builder(2, &legacy_build_map_json);

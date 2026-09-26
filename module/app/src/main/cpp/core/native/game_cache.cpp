@@ -1,9 +1,6 @@
 // game_cache.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
-#include "game_system.h"
-
-#include "game/access/game_access.h"
-#include "game/symbols/game_symbols.h"
+#include "infra/runtime.h"
 
 #include <atomic>
 #include <chrono>
@@ -15,7 +12,11 @@
 #include <vector>
 
 #include "game_cache.h"
-#include "game/state/game_state.h"
+
+// system 槽（gamestate/snapshot）builder 仍由 game_system 提供（T2l-integ 口径，system 槽留 game_system）；
+// 此处仅前向声明，避免 infra include legacy/system 头（include 边消除，链接语义不变）。
+std::string build_gamestate_json();
+std::string build_snapshot_json();
 
 struct CacheSlot {
     const char* name;             // 端点名（日志用）
@@ -52,6 +53,16 @@ std::string run_slot_builder(const CacheSlot& slot) {
     return slot.build != nullptr ? slot.build() : std::string("{\"error\":\"not in game\"}");
 }
 
+std::atomic<bool (*)()> g_world_gate{nullptr};
+
+void frame_cache_set_world_gate(bool (*fn)()) { g_world_gate.store(fn); }
+
+// 现取 gate：未注入=false（未 world）→ 与现状 g_base 未就绪分支同体。
+bool cache_in_world() {
+    bool (*fn)() = g_world_gate.load();
+    return fn != nullptr && fn();
+}
+
 std::mutex g_cache_mtx;                    // 保护缓存读写
 std::atomic<bool> g_cache_ready{false};    // 已成功构造过至少一个槽
 std::thread g_cache_thread;                // v0.4.59：预取线程（仅驱动 interval>0 槽）
@@ -66,17 +77,17 @@ void frame_cache_set_json_builder(int32_t slot, std::string (*fn)()) {
 // 等待帧边界：帧号变化（= 本帧 Draw 完成，数据稳定）即返回；超时兜底（游戏暂停/主菜单）
 uint64_t wait_frame_boundary(uint64_t since) {
     for (int i = 0; i < 100; ++i) {
-        int64_t f = data_frame_count();
+        int64_t f = qol::infra::frame_count();
         if (f > 0 && static_cast<uint64_t>(f) != since) return static_cast<uint64_t>(f);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    int64_t f = data_frame_count();
+    int64_t f = qol::infra::frame_count();
     return f > 0 ? static_cast<uint64_t>(f) : since;
 }
 
 // 构造单槽（调用方持锁）并更新帧号；非 world 清空缓存
 void rebuild_slot_locked(CacheSlot& s, uint64_t frame) {
-    if (game_in_world()) {
+    if (cache_in_world()) {
         s.json = run_slot_builder(s);
         s.last_frame = frame;
         g_cache_ready.store(true);
@@ -89,7 +100,7 @@ void rebuild_slot_locked(CacheSlot& s, uint64_t frame) {
 // 构造期间并发请求返回旧缓存（不等帧，避免请求率>帧率时全部排队等帧）
 std::string data_slot_lazy(int idx) {
     CacheSlot& s = g_cache_slots[idx];
-    uint64_t f = data_frame_count();
+    uint64_t f = qol::infra::frame_count();
     if (s.last_frame != 0 && f == s.last_frame) {
         std::lock_guard<std::mutex> lock(g_cache_mtx);
         return s.json.empty() ? run_slot_builder(s) : s.json;
@@ -112,7 +123,7 @@ std::string data_slot_json(int idx) {
     // v0.5.16：非 world 态下 world 专属槽应诚实报错而非返回陈旧缓存
     //（预取线程在退出 world 后停止构造但不清缓存，此前会返回上一帧的 world 数据）。
     // gamestate/snapshot（world_only=false）全状态可用，直接现构。
-    if (!game_in_world()) {
+    if (!cache_in_world()) {
         CacheSlot& s = g_cache_slots[idx];
         if (s.world_only) {
             std::lock_guard<std::mutex> lock(g_cache_mtx);
@@ -132,10 +143,10 @@ std::string data_slot_json(int idx) {
 void cache_prefetch_thread_fn() {
     uint64_t last_frame = 0;
     while (!g_cache_stop.load()) {
-        int64_t f = data_frame_count();
+        int64_t f = qol::infra::frame_count();
         if (f > 0 && static_cast<uint64_t>(f) != last_frame) {
             last_frame = f;
-            if (!game_in_world()) continue;
+            if (!cache_in_world()) continue;
             for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
                 CacheSlot& s = g_cache_slots[i];
                 if (s.interval <= 0) continue;
@@ -172,9 +183,9 @@ void frame_cache_stop() {
 }
 
 void frame_cache_force_refresh() {
-    if (!game_in_world()) return;
+    if (!cache_in_world()) return;
     std::lock_guard<std::mutex> lock(g_cache_mtx);
-    uint64_t f = static_cast<uint64_t>(data_frame_count());
+    uint64_t f = static_cast<uint64_t>(qol::infra::frame_count());
     for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
         CacheSlot& s = g_cache_slots[i];
         s.json = run_slot_builder(s);
