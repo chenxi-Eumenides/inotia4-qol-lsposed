@@ -9,7 +9,7 @@
 namespace qol::game::ops {
 namespace {
 
-// 池槽对象解析（与 api/native/game_character.cpp 的 pool_slot_obj 同口径）。
+// 池槽对象解析：g_base + G_CHAR_POOL_VMA 取角色池首，按 C_OBJ_SIZE 步进并校验对象有效。
 void* pool_slot_obj(int slot) {
     if (g_base == 0 || slot < 0 || slot >= C_CHARSYSTEM_POOL_SLOTS) return nullptr;
     uint8_t* pool = *reinterpret_cast<uint8_t**>(g_base + G_CHAR_POOL_VMA);

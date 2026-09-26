@@ -44,12 +44,19 @@ Java_com_inotia4_qol_NativeBridge_nativeOpUnequip(JNIEnv* env, jclass, jint role
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSwitchPlayer(JNIEnv* env, jclass, jint slot) {
-    return op_result(env, "op_switch_player", ("slot=" + str_of(slot)), data_op_switch_player(static_cast<int32_t>(slot)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::switch_player(static_cast<int32_t>(slot), &op);
+    return op_result(env, "op_switch_player", ("slot=" + str_of(slot)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpPartySwap(JNIEnv* env, jclass, jint a, jint b) {
-    return op_result(env, "op_party_swap", ("a=" + str_of(a) + " " + "b=" + str_of(b)), data_op_party_swap(static_cast<int32_t>(a), static_cast<int32_t>(b)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::party_swap(static_cast<int32_t>(a),
+                                                        static_cast<int32_t>(b), &op);
+    return op_result(env, "op_party_swap", ("a=" + str_of(a) + " " + "b=" + str_of(b)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -153,22 +160,35 @@ Java_com_inotia4_qol_NativeBridge_nativeOpMoveItem(JNIEnv* env, jclass, jint bag
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpIncludeParty(JNIEnv* env, jclass, jint mercSlot) {
-    return op_result(env, "op_include_party", ("mercSlot=" + str_of(mercSlot)), data_op_include_party(static_cast<int>(mercSlot)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::party_include(static_cast<int>(mercSlot), &op);
+    return op_result(env, "op_include_party", ("mercSlot=" + str_of(mercSlot)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpExcludeParty(JNIEnv* env, jclass, jint mercSlot) {
-    return op_result(env, "op_exclude_party", ("mercSlot=" + str_of(mercSlot)), data_op_exclude_party(static_cast<int>(mercSlot)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::party_exclude(static_cast<int>(mercSlot), &op);
+    return op_result(env, "op_exclude_party", ("mercSlot=" + str_of(mercSlot)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpDischarge(JNIEnv* env, jclass, jint mercSlot) {
-    return op_result(env, "op_discharge", ("mercSlot=" + str_of(mercSlot)), data_op_discharge(static_cast<int>(mercSlot)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::party_discharge(static_cast<int>(mercSlot), &op);
+    return op_result(env, "op_discharge", ("mercSlot=" + str_of(mercSlot)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpWithdraw(JNIEnv* env, jclass, jint mercSlot, jint equipSlot) {
-    return op_result(env, "op_withdraw", ("mercSlot=" + str_of(mercSlot) + " " + "equipSlot=" + str_of(equipSlot)), data_op_withdraw(static_cast<int>(mercSlot), static_cast<int32_t>(equipSlot)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::party_withdraw(
+        static_cast<int>(mercSlot), static_cast<int32_t>(equipSlot), &op);
+    return op_result(env, "op_withdraw", ("mercSlot=" + str_of(mercSlot) + " " + "equipSlot=" + str_of(equipSlot)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
