@@ -2,10 +2,6 @@
   "说明": "架构校验基线快照（棘轮）：只允许收缩。新增违规即失败；消除后重新冻结。",
   "生成命令": "uv run python scripts/maintenance/check_arch.py --freeze",
   "violations": [
-    "layer_direction|api/native/game_character.cpp|api/native/game_inventory.h|legacy/character → legacy/inventory",
-    "layer_direction|api/native/game_character.cpp|api/native/game_world.h|legacy/character → legacy/world",
-    "layer_direction|api/native/game_party.cpp|api/native/game_character.h|legacy/party → legacy/character",
-    "layer_direction|api/native/game_party.cpp|api/native/game_world.h|legacy/party → legacy/world",
     "layer_direction|api/native/game_ui.cpp|api/native/game_world.h|legacy/ui → legacy/world",
     "layer_direction|core/native/game_cache.cpp|api/native/game_world.h|infra → legacy/world",
     "layer_direction|core/native/game_cache.cpp|game/access/game_access.h|infra → game",
