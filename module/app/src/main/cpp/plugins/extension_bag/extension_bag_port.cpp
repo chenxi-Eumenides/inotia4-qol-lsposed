@@ -233,10 +233,6 @@ std::string extension_bag_use_item(int bag, int slot) {
     return extension_bag_api_use_item_impl(bag, slot);
 }
 
-std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot) {
-    return extension_bag_api_put_jewel_impl(role, bag, slot, equip_slot);
-}
-
 // ===========================================================================
 // D2a-3c：capability provider —— ExtensionBagApi v2.2 接口表
 // ===========================================================================

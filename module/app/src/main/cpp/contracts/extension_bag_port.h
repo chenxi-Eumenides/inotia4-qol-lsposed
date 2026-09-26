@@ -61,7 +61,6 @@ bool extension_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not
 void extension_bag_show_no_space_popup();
 void extension_bag_show_not_empty_popup();
 std::string extension_bag_use_item(int bag, int slot);
-std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot);
 
 // D2b 过渡访问器：game 层不能直接 include infra（依赖矩阵禁止 game → infra），
 // 经本函数按需取 extension_bag 能力接口（能力缺失/撤销中返回 nullptr）。
