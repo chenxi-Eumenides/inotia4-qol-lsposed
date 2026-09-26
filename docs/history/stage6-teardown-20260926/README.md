@@ -451,3 +451,62 @@ R4 vs 基线 diff=4（party 改善保留）；R4 vs R3 diff=0。
 - **output/**：R4 集成包 3 个（`r4-apk-sha256.txt`）；R3 集成包已备份 `.tmp/t2o-regression/output-backup/prev-r3-build/`；v0.7.14、R1、R2 备份保留。
 - **存档**：原版袋 slot5↔slot6、EB bag6 slot0↔slot12 各移动一次并复原（复读逐字一致，零净变更）；`stackLimitIncrease` 全程维持进入值 **false**（未切换）；`enter_slot` 仅进档读取；smoke 内置步骤 123 的 1 次写盘与既往同口径。
 - 游戏 force-stop 回桌面；`git diff --check` clean；未改源码（仅本目录证据与 README）；未 commit。
+
+---
+
+# R5 rerun（R4 唯一残项单点复验，四项）
+
+日期：2026-09-26（约 20:47–21:0x）｜ HEAD：`8a94d146`（fix(item): keep EB callback count when effective view is zero）｜ 设备/变体同前（monster v29）。**未改源码，未 commit。** 证据前缀 `r5-*`。
+
+## R5-0. 新构建身份（必须 ≠ `68e0c234`）
+
+| 项 | 值 |
+|---|---|
+| 模块 Debug APK | `output/inotia4_qol_lsposed_debug_2609262047_51cddf9a4069.apk` |
+| 模块 APK SHA-256 | `51cddf9a40695eab2f38b3feb20178bb283c407e2007a24a1b56347f74349429`（构建 20:47） |
+| 集成包嵌入模块 SHA-256 | monster/original/overhaul 均 = `51cddf9a…` |
+| 运行态身份日志 | `r5-inotia4-export.log`：`module identity … sha256=51cddf9a…` |
+
+三处一致且 ≠ R4 `68e0c234`。集成包（`r5-apk-sha256.txt`）：monster `45bc9767…`、original `1b58bfa0…`、overhaul `06680152…`。
+
+## R5-1. 四项断言结果（全部 PASS）
+
+| # | 断言 | 结果 | 原文摘录 |
+|---|---|---|---|
+| 1 | EB 段 `bag9 slot4 cat35 count=640`；EB raw 对照一致；slot skipped=0 | **PASS** | `inventory bag9 = [(0,33,99),(1,57,2),(2,36,1),(3,41,65),(4,35,640)]`；EB raw `[3][4]=(cat35,count640)`、capacities `[16,16,12,12,12]`；`slot skipped: bag=9 slot=4` 模块日志/logcat 均 **0** |
+| 2 | 其余字段与 R4 逐字一致 | **PASS** | 全量 50 键比对：**仅 1 处差异** = `(9,4)` R4 `count0`→R5 `count640`（即本批修复目标）；主袋 0..5、EB bag6-10 其余槽、`bagmeta`（capacity/slot_count）全部逐字相同 |
+| 3 | 无回归（smoke/party/往返/日志/item 读） | **PASS** | smoke **125/18/0**，vs 基线 diff=4（仅 party 405→400），vs R4 diff=0；原版袋 move5→6 ticket8 `done`、反向 ticket9 `done`，raw **IDENTICAL**；EB slot0↔12 ticket10/11 `done`，payload IDENTICAL；`missing optional capability` 模块/logcat 均 **0**；`optional edge downgraded`=**5**；`invalid extension inventory`=**0**；logcat 12,378 行崩溃 **0**；item 六读真实（money `28550`） |
+| 4 | `stackLimitIncrease` 保持进入值 false | **PASS** | 终值 `/api/config/list = false`（全程未切换） |
+
+## R5-2. 与 R4 的 diff
+
+- inventory 全结构：唯一差异 `bag9 slot4` count `0 → 640`（category/name 均不变）。
+- smoke：路由级 diff=0（125/18/0 不变）。
+- 日志：R4 的 bag9 slot4 count 残留本批收口；`missing optional capability` 保持 0。
+
+## R5-3. R1→R5 真机覆盖终态矩阵
+
+| 面 | R1 | R2 | R3 | R4 | R5 |
+|---|---|---|---|---|---|
+| 装配门禁（依赖环 9 特性） | PASS | PASS | PASS | PASS | **PASS** |
+| item 数据面（六读真实/票据 done） | FAIL | PASS | PASS | PASS | **PASS** |
+| EB 面（enabled/29 live/容量/移动往返） | FAIL | PASS | PASS | PASS | **PASS** |
+| EB 逻辑袋 >99 两态视图（R-48） | — | PASS | PASS | PASS | **PASS** |
+| optional 首轮 WARN 归零 | — | — | FAIL | PASS | **PASS** |
+| EB canonical 投影槽 bag9 slot4 | — | FAIL（缺失） | FAIL（缺失） | PARTIAL（count=0） | **PASS（count=640）** |
+| 票据语义（原版袋 move done） | FAIL | PASS | PASS | PASS | **PASS** |
+
+## R5-4. 仍 NOT_ACCEPTED（终清单）
+
+1. 原版物理袋 ON>99/OFF≤99：当前存档无 >99 载体，构造入口缺（R2 已记，未变）。
+2. 999 clamp 实机行为、原子组失败注入。
+3. 读面逐字节 frozen 对比（world/quest/inventory 冻结字节）。
+
+> 装配门禁、item 数据面、EB 面、R-48 >99 视图、optional 首轮 WARN、EB canonical 投影槽、票据语义均已真机 PASS；R1→R5 主链残项清零。上述三项属未抽检/不可构造范围，维持 `NOT_ACCEPTED`。
+
+## R5-5. 恢复合规声明（R5）
+
+- **smoke 基线**：以 `r5-smoke_current.json` 为输出，`smoke_baseline_v0.7.13.json` 未覆写（sha256 `8d386bba…` 未变，`git status` 无漂移）。
+- **output/**：R5 集成包 3 个（`r5-apk-sha256.txt`）；R4 集成包已备份 `.tmp/t2o-regression/output-backup/prev-r4-build/`；v0.7.14、R1、R2、R3 备份保留。
+- **存档**：原版袋 slot5↔slot6、EB slot0↔slot12 各移动一次并复原（复读逐字一致，零净变更）；`stackLimitIncrease` 全程 false；`enter_slot` 仅进档读取；smoke 内置步骤 123 的 1 次写盘与既往同口径。
+- 游戏 force-stop 回桌面；`git diff --check` clean；未改源码（仅本目录证据与 README）；未 commit。
