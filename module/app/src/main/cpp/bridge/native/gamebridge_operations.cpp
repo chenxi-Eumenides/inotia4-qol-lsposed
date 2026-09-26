@@ -80,7 +80,11 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSkillReset(JNIEnv* env, jclass, jint r
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpCast(JNIEnv* env, jclass, jint role, jint actionId) {
-    return op_result(env, "op_cast", ("role=" + str_of(role) + " " + "actionId=" + str_of(actionId)), data_op_cast(static_cast<int>(role), static_cast<int32_t>(actionId)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::cast_skill(static_cast<int>(role),
+                                                        static_cast<int32_t>(actionId), &op);
+    return op_result(env, "op_cast", ("role=" + str_of(role) + " " + "actionId=" + str_of(actionId)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

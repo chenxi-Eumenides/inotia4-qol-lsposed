@@ -105,12 +105,19 @@ Java_com_inotia4_qol_NativeBridge_nativeOpInteract(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpAttack(JNIEnv* env, jclass, jint role, jint target_slot) {
-    return op_result(env, "op_attack", ("role=" + str_of(role) + " " + "target_slot=" + str_of(target_slot)), data_op_attack(static_cast<int32_t>(role), static_cast<int32_t>(target_slot)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::attack_target(static_cast<int32_t>(role),
+                                                           static_cast<int32_t>(target_slot), &op);
+    return op_result(env, "op_attack", ("role=" + str_of(role) + " " + "target_slot=" + str_of(target_slot)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpStopCombat(JNIEnv* env, jclass, jint role) {
-    return op_result(env, "op_stop_combat", ("role=" + str_of(role)), data_op_stop_combat(static_cast<int32_t>(role)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::stop_combat(static_cast<int32_t>(role), &op);
+    return op_result(env, "op_stop_combat", ("role=" + str_of(role)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

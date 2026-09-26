@@ -5,10 +5,6 @@
 
 // 角色/战斗域（parse 域）：战斗操作 + 角色数值写操作。
 
-std::string data_op_cast(int role, int32_t action_id);
-std::string data_op_attack(int role, int target_slot);
-std::string data_op_stop_combat(int role);
-
 std::string data_op_add_experience(int role, int64_t delta);
 std::string data_op_set_skill_usage(int role, int32_t onoff);
 
