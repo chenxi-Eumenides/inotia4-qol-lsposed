@@ -68,7 +68,7 @@ void on_config_changed(void* ctx, const void* payload) {
 uint32_t g_resource_count = 0;
 const qol::contracts::ResourceClaim* g_resources = extension_bag_claims(&g_resource_count);
 
-// 能力提供声明：extension_bag v2.0，iface = EB TU 的 ExtensionBagApi 静态表。
+// 能力提供声明：extension_bag v2.2，iface = EB TU 的 ExtensionBagApi 静态表。
 // 注册失败（iface 空/容量满/重复）由宿主只记录不阻断（plugin_registry 既有口径）。
 const qol::contracts::CapabilityProvisionRef kProvides[] = {
     {

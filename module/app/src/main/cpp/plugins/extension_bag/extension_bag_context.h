@@ -6,6 +6,7 @@
 #include <string>
 
 #include "contracts/ui.h"
+#include "contracts/result.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 
 JavaVM* g_jvm();
@@ -34,6 +35,8 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot,
 std::string extension_bag_api_use_item_impl(int logical_bag, int slot);
 std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot,
                                              int equip_slot);
+QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
+                                            int equip_slot);
 
 bool extension_bag_load_state_from_store(int slot);
 bool extension_bag_save_state_to_store(int slot);

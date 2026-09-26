@@ -242,7 +242,7 @@ std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot)
 }
 
 // ===========================================================================
-// D2a-3c：capability provider —— ExtensionBagApi v2.0 接口表
+// D2a-3c：capability provider —— ExtensionBagApi v2.2 接口表
 // ===========================================================================
 //
 // 契约限制（contracts/extension_bag.h）：POD + 固定宽度 C 类型 + 函数指针；
@@ -294,6 +294,10 @@ bool api_capture_move_item_observation(void* item, int32_t target_bag, int32_t t
     return true;
 }
 
+QolResult api_put_jewel(int32_t role, int32_t logical_bag, int32_t slot, int32_t equip_slot) {
+    return extension_bag_api_put_jewel_typed(role, logical_bag, slot, equip_slot);
+}
+
 const qol::contracts::ExtensionBagApi kExtensionBagApi{
     // 1 状态/索引
     &provider_enabled,
@@ -343,6 +347,8 @@ const qol::contracts::ExtensionBagApi kExtensionBagApi{
     &provider_move_item,
     // 9 typed inventory view support
     &provider_logical_bag_capacity,
+    // 10 typed jewel transaction
+    &api_put_jewel,
 };
 
 }  // namespace

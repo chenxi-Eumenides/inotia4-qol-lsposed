@@ -48,7 +48,7 @@ void extension_bag_bind_craft_facts(const qol::contracts::CraftFactsApi* facts);
 const qol::contracts::CraftFactsApi* extension_bag_craft_facts();
 const qol::contracts::QolHostSdk* extension_bag_host_sdk();
 
-// 能力 v2.0 接口表（ExtensionBagApi，38 函数）：成员逐条转发既有 extension_bag_* /
+// 能力 v2.2 接口表（ExtensionBagApi，40 函数）：成员逐条转发既有 extension_bag_* /
 // virtual_bag_* port 实现（实现收口 plugins/extension_bag/extension_bag_port.cpp）。
 // 静态存储、生命周期 ≥ 进程；provides 于插件 enabled 时注册、revoking 时注销。
 const qol::contracts::ExtensionBagApi* extension_bag_api_table();

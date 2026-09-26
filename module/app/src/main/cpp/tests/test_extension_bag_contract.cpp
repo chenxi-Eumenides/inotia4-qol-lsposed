@@ -6,6 +6,7 @@
 // game_memory_accessible 恒真；未纳入本 target 的两个槽解析器给出保守桩。
 
 #include "contracts/extension_bag.h"
+#include "contracts/version.h"
 #include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
@@ -48,7 +49,7 @@ bool ui_choice_button_slot_target(void** /*out_slot*/, uintptr_t* /*out_expected
 
 // ---- 契约头：可编译 + POD + sizeof + 枚举值 ----
 static_assert(qol::contracts::kExtensionBagVersionMajor == 2, "major");
-static_assert(qol::contracts::kExtensionBagVersionMinor == 1, "minor");
+static_assert(qol::contracts::kExtensionBagVersionMinor == 2, "minor");
 static_assert(std::strcmp(qol::contracts::kExtensionBagCapabilityId, "extension_bag") == 0,
               "capability id 必须为 extension_bag");
 
@@ -74,8 +75,10 @@ static_assert(std::is_standard_layout<qol::contracts::ExtensionBagMoveObservatio
               "MoveObservation POD");
 static_assert(std::is_trivially_copyable<qol::contracts::ExtensionBagMoveObservation>::value,
               "MoveObservation trivially copyable");
-// 39 个函数指针成员。
-static_assert(sizeof(qol::contracts::ExtensionBagApi) == 39 * sizeof(void*), "Api 成员数/尺寸");
+// 40 个函数指针成员。
+static_assert(sizeof(qol::contracts::ExtensionBagApi) == 40 * sizeof(void*), "Api 成员数/尺寸");
+static_assert(offsetof(qol::contracts::ExtensionBagApi, put_jewel) == 39 * sizeof(void*),
+              "v2.2 jewel callback must append without moving prior members");
 static_assert(sizeof(qol::contracts::ExtensionBagMoveObservation) == 72, "MoveObservation 尺寸");
 
 namespace {
@@ -138,8 +141,10 @@ constexpr SiteExpect kSites[] = {
 };
 
 void test_contract_field_counts() {
-    // 9 组函数指针计数：包含 v2.1 typed logical bag capacity。
-    CHECK(sizeof(ExtensionBagApi) == 39 * sizeof(void*));
+    // 10 组函数指针计数：包含 v2.2 typed jewel operation。
+    CHECK(sizeof(ExtensionBagApi) == 40 * sizeof(void*));
+    CHECK(qol::contracts::satisfies({2, 2}, {2, 1}));
+    CHECK(!qol::contracts::satisfies({2, 1}, {2, 2}));
     CHECK(static_cast<uint8_t>(ExtensionBagDropResult::kRejected) == 2);
     CHECK(static_cast<uint8_t>(ExtensionBagEquipButtonResult::kBlocked) == 2);
     CHECK(static_cast<uint8_t>(ExtensionBagEquipEventResult::kBlocked) == 2);

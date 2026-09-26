@@ -134,6 +134,30 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
                                     rarity_group, item_count, out);
 }
 
+QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
+                     const contracts::ExtensionBagApi* extension_bag,
+                     contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::equip_item(role, bag, slot, extension_bag, out);
+}
+
+QolResult unequip_item(int32_t role, int32_t equip_slot,
+                       const contracts::ExtensionBagApi* extension_bag,
+                       contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::unequip_item(role, equip_slot, extension_bag, out);
+}
+
+QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
+                    const contracts::ExtensionBagApi* extension_bag,
+                    contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::put_jewel(role, bag, slot, equip_slot, extension_bag, out);
+}
+
+QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
+                  const contracts::ExtensionBagApi* extension_bag,
+                  contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::enchant(role, bag, slot, equip_slot, extension_bag, out);
+}
+
 const contracts::QolItemInventoryStateWritePort kPort{
     contracts::kQolPortItemInventoryStateWriteVersion,
     &use_item,
@@ -142,6 +166,10 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &shop_buy,
     &move_item,
     &add_item,
+    &equip_item,
+    &unequip_item,
+    &put_jewel,
+    &enchant,
 };
 
 }  // namespace

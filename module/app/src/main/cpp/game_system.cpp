@@ -943,22 +943,6 @@ int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, ch
             op = data_op_dice_accept();
             state = build_player_json();
             break;
-        case contracts::QolItemWriteKind::kEquipItem:
-            op = data_op_equip(args.i0, args.i1, args.i2);
-            state = build_party_json();
-            break;
-        case contracts::QolItemWriteKind::kUnequipItem:
-            op = data_op_unequip(args.i0, args.i1);
-            state = build_party_json();
-            break;
-        case contracts::QolItemWriteKind::kPutJewel:
-            op = data_op_jewel(args.i0, args.i1, args.i2, args.i3);
-            state = build_party_json();
-            break;
-        case contracts::QolItemWriteKind::kEnchant:
-            op = data_op_enchant(args.i0, args.i1, args.i2, args.i3);
-            state = build_party_json();
-            break;
         default:
             return kItemWriteFailed;
     }

@@ -9,6 +9,7 @@
 #include <string>
 
 #include "contracts/commands.h"
+#include "contracts/character_state.h"
 #include "contracts/extension_bag.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
@@ -261,6 +262,18 @@ const contracts::StackLimitItemCountCapability* stack_limit_item_count_capabilit
         &iface);
     if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
     return static_cast<const contracts::StackLimitItemCountCapability*>(iface);
+}
+
+const contracts::CharacterStateApi* character_state_capability() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        contracts::kCharacterStateCapabilityId,
+        QolVersionRange{contracts::kCharacterStateVersion.major,
+                        contracts::kCharacterStateVersion.minor},
+        &iface);
+    if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
+    return static_cast<const contracts::CharacterStateApi*>(iface);
 }
 
 const contracts::ExtensionBagApi* extension_bag_capability() {
@@ -1098,6 +1111,97 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
     return true;
 }
 
+bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char* out,
+                                   uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr) return false;
+    *out_size = 0;
+    const contracts::CharacterStateApi* state = character_state_capability();
+    if (state == nullptr || state->write_state_json == nullptr) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
+        return false;
+    }
+    if (g_item_state_write == nullptr) {
+        constexpr char kOperationUnavailable[] =
+            "{\"ok\":false,\"error\":\"item operation unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kOperationUnavailable,
+                          sizeof(kOperationUnavailable) - 1);
+        return false;
+    }
+
+    // The SDK lookup is deliberately per operation; the ExtensionBagApi pointer is never retained.
+    const contracts::ExtensionBagApi* extension_bag = extension_bag_capability();
+    contracts::QolItemInventoryStateWriteResult operation_data{};
+    QolResult operation = contracts::error(kQolErrUnsupported, "item operation unavailable", 26);
+    const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    switch (kind) {
+        case contracts::QolItemWriteKind::kEquipItem: {
+            int32_t bag = args.i1;
+            int32_t slot = args.i2;
+            if (args.i5 >= 0 && !find_item_slot(args.i5, &bag, &slot)) {
+                constexpr char kNotFound[] = "{\"ok\":false,\"error\":\"item not found\"}";
+                (void)copy_buffer(out, capacity, out_size, kNotFound, sizeof(kNotFound) - 1);
+                return false;
+            }
+            operation = g_item_state_write->equip_item(args.i0, bag, slot, extension_bag,
+                                                        &operation_data);
+            break;
+        }
+        case contracts::QolItemWriteKind::kUnequipItem:
+            operation = g_item_state_write->unequip_item(args.i0, args.i1, extension_bag,
+                                                          &operation_data);
+            break;
+        case contracts::QolItemWriteKind::kPutJewel:
+            operation = g_item_state_write->put_jewel(args.i0, args.i1, args.i2, args.i3,
+                                                       extension_bag, &operation_data);
+            break;
+        case contracts::QolItemWriteKind::kEnchant:
+            operation = g_item_state_write->enchant(args.i0, args.i1, args.i2, args.i3,
+                                                     extension_bag, &operation_data);
+            break;
+        default:
+            return false;
+    }
+    if (!contracts::succeeded(operation)) {
+        const char* message = operation.message != nullptr ? operation.message
+                                                           : "item operation failed";
+        const uint32_t message_size = operation.message != nullptr
+                                          ? operation.message_len
+                                          : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+
+    char party[65536]{};
+    uint32_t party_size = 0;
+    const QolResult state_result = state->write_state_json(
+        contracts::QolCharacterStateKind::kParty, party, sizeof(party), &party_size);
+    if (!contracts::succeeded(state_result)) {
+        const char* message = state_result.message != nullptr ? state_result.message
+                                                              : "character state unavailable";
+        const uint32_t message_size = state_result.message != nullptr
+                                          ? state_result.message_len
+                                          : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+    std::string body = "{\"ok\":true,\"state\":";
+    body.append(party, party_size);
+    body.push_back('}');
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return true;
+}
+
 bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
                             uint32_t capacity, uint32_t* out_size) {
     const bool extension_requested =
@@ -1136,6 +1240,12 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     contracts::QolItemWriteArgs args{};
     std::memcpy(&args, payload, size);
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    if (kind == contracts::QolItemWriteKind::kEquipItem ||
+        kind == contracts::QolItemWriteKind::kUnequipItem ||
+        kind == contracts::QolItemWriteKind::kPutJewel ||
+        kind == contracts::QolItemWriteKind::kEnchant) {
+        return write_item_party_state_result(args, out, capacity, out_size);
+    }
     if (kind == contracts::QolItemWriteKind::kMoveItem) {
         return write_item_move_result(args, out, capacity, out_size);
     }
@@ -1194,16 +1304,6 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         std::memcpy(out, body, body_size);
         *out_size = body_size;
         return contracts::succeeded(operation);
-    }
-    if (args.kind == static_cast<int32_t>(contracts::QolItemWriteKind::kEquipItem) &&
-        args.i5 >= 0) {
-        if (!find_item_slot(args.i5, &args.i1, &args.i2)) {
-            constexpr char kNotFound[] = "{\"ok\":false,\"error\":\"item not found\"}";
-            if (sizeof(kNotFound) - 1 > capacity) return false;
-            std::memcpy(out, kNotFound, sizeof(kNotFound) - 1);
-            *out_size = static_cast<uint32_t>(sizeof(kNotFound) - 1);
-            return false;
-        }
     }
     const QolResult result = g_item_write->read.write(&args, out, capacity, out_size);
     return contracts::succeeded(result);
@@ -1319,7 +1419,9 @@ int plugin_install(contracts::PluginContext& ctx) {
                                contracts::kQolPortItemInventoryStateWriteVersion.minor}) ||
         g_item_state_write->use_item == nullptr || g_item_state_write->sell_item == nullptr ||
         g_item_state_write->discard_item == nullptr || g_item_state_write->shop_buy == nullptr ||
-        g_item_state_write->move_item == nullptr || g_item_state_write->add_item == nullptr) {
+        g_item_state_write->move_item == nullptr || g_item_state_write->add_item == nullptr ||
+        g_item_state_write->equip_item == nullptr || g_item_state_write->unequip_item == nullptr ||
+        g_item_state_write->put_jewel == nullptr || g_item_state_write->enchant == nullptr) {
         g_port = nullptr;
         g_item_write = nullptr;
         g_item_money_write = nullptr;

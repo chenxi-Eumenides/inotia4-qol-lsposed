@@ -12,6 +12,7 @@
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/extension_bag.h"
+#include "contracts/character_state.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
 #include "contracts/host_sdk.h"
@@ -132,6 +133,19 @@ int32_t g_state_add_socket = -1;
 int32_t g_state_add_enhance = -1;
 int32_t g_state_add_rarity = -1;
 const qol::contracts::QolItemCountApi* g_state_add_count_api = nullptr;
+bool g_character_state_available = true;
+int g_character_state_require_calls = 0;
+int g_character_state_write_calls = 0;
+QolResult g_character_state_result = qol::contracts::ok();
+int g_party_sequence = 0;
+int g_party_write_order = 0;
+int g_character_state_write_order = 0;
+int g_extension_bag_require_calls = 0;
+uint16_t g_extension_bag_required_minor = 0;
+int g_party_write_calls = 0;
+int32_t g_party_write_kind = -1;
+int32_t g_party_write_args[4] = {-1, -1, -1, -1};
+QolResult g_party_write_result = qol::contracts::ok();
 
 QolResult unsupported() { return qol::contracts::error(kQolErrUnsupported, "stub", 4); }
 QolResult stub_category(const void*, int32_t*) { return unsupported(); }
@@ -332,6 +346,48 @@ QolResult fake_state_add(int32_t category, int32_t count, int32_t socket_total,
                             category, count, out);
 }
 
+QolResult fake_party_write(int32_t kind, int32_t role, int32_t arg1, int32_t arg2,
+                           int32_t arg3, qol::contracts::QolItemInventoryStateWriteResult* out) {
+    ++g_party_write_calls;
+    g_party_write_order = ++g_party_sequence;
+    g_party_write_kind = kind;
+    g_party_write_args[0] = role;
+    g_party_write_args[1] = arg1;
+    g_party_write_args[2] = arg2;
+    g_party_write_args[3] = arg3;
+    if (out != nullptr) *out = {};
+    return g_party_write_result;
+}
+
+QolResult fake_state_equip(int32_t role, int32_t bag, int32_t slot,
+                           const qol::contracts::ExtensionBagApi*,
+                           qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_party_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEquipItem),
+                            role, bag, slot, -1, out);
+}
+
+QolResult fake_state_unequip(int32_t role, int32_t slot,
+                             const qol::contracts::ExtensionBagApi*,
+                             qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_party_write(
+        static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUnequipItem), role, slot, -1, -1,
+        out);
+}
+
+QolResult fake_state_put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
+                               const qol::contracts::ExtensionBagApi*,
+                               qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_party_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kPutJewel),
+                            role, bag, slot, equip_slot, out);
+}
+
+QolResult fake_state_enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
+                             const qol::contracts::ExtensionBagApi*,
+                             qol::contracts::QolItemInventoryStateWriteResult* out) {
+    return fake_party_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEnchant),
+                            role, bag, slot, equip_slot, out);
+}
+
 const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     qol::contracts::kQolPortItemInventoryStateWriteVersion,
     &fake_state_use,
@@ -340,6 +396,10 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     &fake_state_shop_buy,
     &fake_state_move,
     &fake_state_add,
+    &fake_state_equip,
+    &fake_state_unequip,
+    &fake_state_put_jewel,
+    &fake_state_enchant,
 };
 
 const void* const kPortArray[] = {
@@ -419,11 +479,42 @@ qol::contracts::ExtensionBagApi make_fake_extension_bag_api() {
 
 const qol::contracts::ExtensionBagApi kFakeExtensionBagApi = make_fake_extension_bag_api();
 
-QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
+constexpr char kPartyStateJson[] = "{\"roles\":[{\"slot\":1}]}";
+
+QolResult fake_character_state_json(qol::contracts::QolCharacterStateKind kind, char* out,
+                                    uint32_t capacity, uint32_t* out_size) {
+    ++g_character_state_write_calls;
+    g_character_state_write_order = ++g_party_sequence;
+    if (!qol::contracts::succeeded(g_character_state_result)) return g_character_state_result;
+    if (kind != qol::contracts::QolCharacterStateKind::kParty || out == nullptr || out_size == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad state request", 18);
+    }
+    if (sizeof(kPartyStateJson) - 1 > capacity) {
+        return qol::contracts::error(kQolErrBlocked, "state buffer too small", 22);
+    }
+    std::memcpy(out, kPartyStateJson, sizeof(kPartyStateJson) - 1);
+    *out_size = static_cast<uint32_t>(sizeof(kPartyStateJson) - 1);
+    return qol::contracts::ok();
+}
+
+const qol::contracts::CharacterStateApi kFakeCharacterStateApi{&fake_character_state_json};
+
+QolResult fake_capability_require(const char* id, QolVersionRange required,
+                                  const void** out_iface) {
     if (id == nullptr || out_iface == nullptr) {
         return qol::contracts::error(kQolErrNotFound, "missing", 7);
     }
+    if (std::strcmp(id, qol::contracts::kCharacterStateCapabilityId) == 0) {
+        ++g_character_state_require_calls;
+        if (!g_character_state_available || required.major != 1 || required.min_minor != 0) {
+            return qol::contracts::error(kQolErrNotFound, "missing", 7);
+        }
+        *out_iface = &kFakeCharacterStateApi;
+        return qol::contracts::ok();
+    }
     if (std::strcmp(id, qol::contracts::kExtensionBagCapabilityId) == 0) {
+        ++g_extension_bag_require_calls;
+        g_extension_bag_required_minor = required.min_minor;
         if (!g_extension_bag_available) {
             return qol::contracts::error(kQolErrNotFound, "missing", 7);
         }
@@ -764,13 +855,97 @@ void test_write_routes() {
     g_original_count = 3;
 
     const qol::contracts::HttpPathParam role{"role", 4, "1", 1};
+    g_extension_bag_available = true;
+    g_extension_bag_require_calls = 0;
+    g_character_state_require_calls = 0;
+    g_character_state_write_calls = 0;
+    g_party_write_calls = 0;
+    g_party_sequence = 0;
     CHECK(dispatch_post("/api/item/inventory/1/equip_item", "{\"category\":10}", &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(g_last_write.kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEquipItem));
-    CHECK(g_last_write.i0 == 1 && g_last_write.i1 == 0 && g_last_write.i2 == 0);
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"state\":{\"roles\":[{\"slot\":1}]}}");
+    CHECK(g_party_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEquipItem));
+    CHECK(g_party_write_args[0] == 1 && g_party_write_args[1] == 0 &&
+          g_party_write_args[2] == 0 && g_party_write_args[3] == -1);
+    CHECK(g_party_write_order < g_character_state_write_order);
+    CHECK(g_character_state_require_calls == 1 && g_character_state_write_calls == 1);
+    CHECK(g_extension_bag_require_calls == 1 && g_extension_bag_required_minor == 2);
+
+    const struct {
+        const char* path;
+        const char* body;
+        qol::contracts::QolItemWriteKind kind;
+        int32_t arg1;
+        int32_t arg2;
+        int32_t arg3;
+    } party_write_cases[] = {
+        {"/api/item/inventory/1/unequip_item", "{\"slot\":2}",
+         qol::contracts::QolItemWriteKind::kUnequipItem, 2, -1, -1},
+        {"/api/item/inventory/1/put_jewel", "{\"bag\":0,\"slot\":1,\"equip_slot\":2}",
+         qol::contracts::QolItemWriteKind::kPutJewel, 0, 1, 2},
+        {"/api/item/inventory/1/enchant", "{\"bag\":0,\"slot\":1,\"equip_slot\":2}",
+         qol::contracts::QolItemWriteKind::kEnchant, 0, 1, 2},
+    };
+    for (const auto& test_case : party_write_cases) {
+        const int operation_calls_before = g_party_write_calls;
+        const int state_calls_before = g_character_state_write_calls;
+        const int state_requires_before = g_character_state_require_calls;
+        const int extension_requires_before = g_extension_bag_require_calls;
+        CHECK(dispatch_post(test_case.path, test_case.body, &role, 1, &status) ==
+              "{\"ok\":true,\"ticket\":72}");
+        result_size = 0;
+        CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result,
+                               sizeof(result), &result_size));
+        CHECK(std::string(result, result_size) ==
+              "{\"ok\":true,\"state\":{\"roles\":[{\"slot\":1}]}}");
+        CHECK(g_party_write_calls == operation_calls_before + 1);
+        CHECK(g_party_write_kind == static_cast<int32_t>(test_case.kind));
+        CHECK(g_party_write_args[0] == 1 && g_party_write_args[1] == test_case.arg1 &&
+              g_party_write_args[2] == test_case.arg2 && g_party_write_args[3] == test_case.arg3);
+        CHECK(g_character_state_write_calls == state_calls_before + 1);
+        CHECK(g_character_state_require_calls == state_requires_before + 1);
+        CHECK(g_extension_bag_require_calls == extension_requires_before + 1);
+        CHECK(g_party_write_order < g_character_state_write_order);
+    }
+
+    g_character_state_available = false;
+    const int party_writes_before_missing_state = g_party_write_calls;
+    CHECK(dispatch_post("/api/item/inventory/1/unequip_item", "{\"slot\":2}", &role, 1,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                            &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":false,\"error\":\"character state unavailable\"}");
+    CHECK(g_party_write_calls == party_writes_before_missing_state);
+    g_character_state_available = true;
+
+    g_party_write_result = qol::contracts::error(kQolErrBlocked, "cannot unequip", 14);
+    CHECK(dispatch_post("/api/item/inventory/1/unequip_item", "{\"slot\":2}", &role, 1,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext party_failure_context{};
+    party_failure_context.handler = g_result_handler;
+    party_failure_context.payload_size = g_post_payload_size;
+    std::memcpy(party_failure_context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command party_failure_command{
+        "core.item kUnequipItem", nullptr, &party_failure_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket party_failure_ticket = qol::infra::post(party_failure_command);
+    CHECK(party_failure_ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(party_failure_ticket) == qol::infra::CommandState::kFailed);
+    char party_error[128]{};
+    uint32_t party_error_size = 0;
+    CHECK(qol::infra::read_result(party_failure_ticket, party_error, sizeof(party_error),
+                                  &party_error_size));
+    CHECK(std::string(party_error, party_error_size) ==
+          "{\"ok\":false,\"error\":\"cannot unequip\"}");
+    qol::infra::command_queue_reset_for_test();
+    g_party_write_result = qol::contracts::ok();
+    g_extension_bag_available = false;
 
     CHECK(dispatch_post("/api/op/inventory/add",
                         "{\"category\":\" 12 \",\"count\":\"1e2\",\"socket\":\"3.7\","
@@ -861,7 +1036,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
-    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 1);
+    CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 0);
 
     g_money_write_result = qol::contracts::error(kQolErrUnsupported, "symbol not resolved", 19);
     result_size = 0;

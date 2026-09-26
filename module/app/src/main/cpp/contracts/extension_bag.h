@@ -1,6 +1,6 @@
 #pragma once
 
-// 扩展背包能力契约 v2.0（ADR-0007 §1，ARCHITECTURE.md §3.4 / §4）。
+// 扩展背包能力契约 v2.x（ADR-0007 §1，ARCHITECTURE.md §3.4 / §4）。
 //
 // 契约限制：POD + 固定宽度 C 类型 + 函数指针；禁止 STL、异常、虚函数、std::string。
 // 字符串不跨契约边界（状态 JSON 的 `write_json(char*, uint32_t)` 为 v1.0 预留注释，
@@ -16,11 +16,13 @@
 
 #include <cstdint>
 
+#include "result.h"
+
 namespace qol::contracts {
 
 constexpr const char* kExtensionBagCapabilityId = "extension_bag";
 constexpr int32_t kExtensionBagVersionMajor = 2;
-constexpr int32_t kExtensionBagVersionMinor = 1;
+constexpr int32_t kExtensionBagVersionMinor = 2;
 
 // 返回 1 表示 out 中包含完整 JSON（不附加 NUL）；返回 0 表示参数无效或缓冲区不足。
 // 操作失败仍由 JSON "ok":false 表示。此固定宽度写面避免 std::string 跨契约边界。
@@ -31,6 +33,8 @@ using ExtensionBagCapacityFn = bool (*)(int32_t logical_bag, int32_t* out_capaci
 
 using ExtensionBagItemFn = bool (*)(int32_t logical_bag, int32_t slot, int32_t category,
                                     int32_t count, void* ctx);
+using ExtensionBagPutJewelFn = QolResult (*)(int32_t role, int32_t logical_bag, int32_t slot,
+                                             int32_t equip_slot);
 
 enum class ExtensionBagDropResult : uint8_t {
     kNotExtension = 0,
@@ -133,6 +137,9 @@ struct ExtensionBagApi {
 
     // v2.1 typed inventory snapshot support; capacity is the active logical-bag slot limit.
     ExtensionBagCapacityFn logical_bag_capacity;
+
+    // v2.2 complete logical-bag jewel transaction; token ownership and consumption stay private.
+    ExtensionBagPutJewelFn put_jewel;
 
     // v1.0 预留：状态 JSON 导出
     // int32_t (*write_json)(char* out, uint32_t capacity);
