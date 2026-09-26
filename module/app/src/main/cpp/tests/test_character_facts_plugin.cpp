@@ -40,6 +40,21 @@ static int g_set_stat_base_calls = 0;
 static int g_add_stat_main_calls = 0;
 // 战斗族写后即时时序：非 0 时，fake 游戏写函数把该值写入角色 C_LEVEL，模拟原语对 live 数据的改动。
 static int g_write_effect_level = 0;
+// 队伍族（T2c-4c）可控 fake 面：佣兵槽 7 解析到的对象、装备槽 0 的 item，以及各原版链调用开关。
+static uint8_t g_merc_object[0x400]{};
+static uint8_t g_merc_item[0x40]{};
+static int g_can_unequip_calls = 0;
+static int g_can_unequip_result = 1;
+static int g_unequip_calls = 0;
+static int g_unequip_result = 1;
+static int g_mercenary_release_calls = 0;
+static int g_include_calls = 0;
+static int g_include_result = 1;
+static int g_exclude_calls = 0;
+static int g_exclude_result = 1;
+static bool g_leader_is_merc = false;
+static bool g_merc_in_party = false;
+static bool g_is_special_npc = false;
 static qol::contracts::QolCharacterStateParty g_live_party{};
 static qol::contracts::QolCharacterStatePlayer g_live_player{};
 static qol::contracts::QolCharacterStateSkills g_live_skills{};
@@ -68,6 +83,9 @@ int legacy_party_size() { return g_live_player.party_count; }
 int64_t legacy_money() { return g_live_player.money; }
 uint32_t legacy_map_id() { return static_cast<uint32_t>(g_live_player.map_id); }
 void* legacy_member(int role) {
+    // 队伍族可控 fake：让佣兵对象顶替队长或已在队成员，覆盖 leader / already-in-party 分支。
+    if (g_leader_is_merc && role == 0) return g_merc_object;
+    if (g_merc_in_party && role == 1) return g_merc_object;
     return role >= 0 && role < 3 && g_legacy_member_present[role]
                ? g_legacy_members[role]
                : nullptr;
@@ -197,12 +215,20 @@ void legacy_char_set_action_id(void* ch, int32_t, void*) { apply_write_effect(ch
 void legacy_char_set_target(void* ch, void*) { apply_write_effect(ch); }
 void legacy_char_stop_combat(void*) {}
 void legacy_party_swap(int32_t, int32_t) {}
-int legacy_include_party(void*) { return 1; }
-int legacy_exclude_party(void*) { return 1; }
-void legacy_mercenary_release(int32_t) {}
-int legacy_unequip(void*, int32_t) { return 1; }
-int legacy_can_unequip(void*, void*) { return 1; }
-int legacy_is_special_npc(void*) { return 0; }
+// 队伍族写后即时：fake 原版链模拟对 live 队伍成员（slot 0）的改动，供同一结果处理器随后读 kParty。
+void apply_party_effect() {
+    if (g_write_effect_level == 0) return;
+    void* member = legacy_member(0);
+    if (member != nullptr) {
+        reinterpret_cast<int8_t*>(member)[C_LEVEL] = static_cast<int8_t>(g_write_effect_level);
+    }
+}
+int legacy_include_party(void*) { ++g_include_calls; apply_party_effect(); return g_include_result; }
+int legacy_exclude_party(void*) { ++g_exclude_calls; apply_party_effect(); return g_exclude_result; }
+void legacy_mercenary_release(int32_t) { ++g_mercenary_release_calls; apply_party_effect(); }
+int legacy_unequip(void*, int32_t) { ++g_unequip_calls; apply_party_effect(); return g_unequip_result; }
+int legacy_can_unequip(void*, void*) { ++g_can_unequip_calls; return g_can_unequip_result; }
+int legacy_is_special_npc(void*) { return g_is_special_npc ? 1 : 0; }
 int legacy_set_active_player(int32_t) { return 1; }
 
 SetExpFn fn_set_exp = &legacy_set_exp;
@@ -231,8 +257,7 @@ SetActivePlayerFn fn_set_active_player = &legacy_set_active_player;
 void* member_or_null(int role) { return legacy_member(role); }
 // 佣兵槽 7 解析到一个不在队伍中的独立对象，用于 include/exclude/discharge/withdraw 成功路径。
 void* find_char_by_merc_slot(int slot) {
-    static uint8_t object[0x400]{};
-    return slot == 7 ? object : nullptr;
+    return slot == 7 ? g_merc_object : nullptr;
 }
 const char* ui_blocked() { return nullptr; }
 void frame_cache_force_refresh() {}
@@ -982,6 +1007,210 @@ void test_write_party_state_family(const qol::contracts::CharacterStateApi* stat
     g_state_reads_from_legacy = false;
 }
 
+// T2c-4c：队伍 party-state 族（kPartyInclude/kPartyExclude/kPartyDischarge/kPartyWithdraw）
+// typed 单路径 + owner 自组装 kParty 投影覆盖。withdraw 必须走 fn_can_unequip 前检再 fn_unequip
+// （game_party.cpp:73-77），discharge 保留 fn_mercenary_release 原版副作用（game_party.cpp:62），
+// 两者以调用计数锁定；失败体逐字对照 legacy 基线，失败时不触发原版副作用。
+void test_write_party_member_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    std::memset(g_merc_object, 0, sizeof(g_merc_object));
+    // 装备槽 0 预置非空 item：withdraw 必须经 fn_can_unequip 前检。
+    *reinterpret_cast<void**>(g_merc_object + C_EQUIP) = g_merc_item;
+    g_can_unequip_calls = 0;
+    g_can_unequip_result = 1;
+    g_unequip_calls = 0;
+    g_unequip_result = 1;
+    g_mercenary_release_calls = 0;
+    g_include_calls = 0;
+    g_include_result = 1;
+    g_exclude_calls = 0;
+    g_exclude_result = 1;
+    g_leader_is_merc = false;
+    g_merc_in_party = false;
+    g_is_special_npc = false;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    const auto embedded_party = [](const std::string& owner, bool* found) {
+        const std::string marker = ",\"state\":";
+        const size_t at = owner.find(marker);
+        if (at == std::string::npos) {
+            *found = false;
+            return std::string();
+        }
+        *found = true;
+        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
+    };
+    // 成功体：owner 侧计数在 legacy 基线运行前捕获，避免对照源自身的原版链调用污染次数。
+    const auto run_golden = [&](const Case& test, int* owner_can_unequip, int* owner_unequip,
+                                int* owner_release) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        g_can_unequip_calls = 0;
+        g_unequip_calls = 0;
+        g_mercenary_release_calls = 0;
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        if (owner_can_unequip != nullptr) *owner_can_unequip = g_can_unequip_calls;
+        if (owner_unequip != nullptr) *owner_unequip = g_unequip_calls;
+        if (owner_release != nullptr) *owner_release = g_mercenary_release_calls;
+        bool found = false;
+        const std::string embedded = embedded_party(owner, &found);
+        char capability[8192]{};
+        uint32_t capability_size = 0;
+        const bool capability_ok =
+            state_api != nullptr &&
+            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty, capability,
+                                        sizeof(capability), &capability_size).ok == kQolOk;
+        CHECK(found && capability_ok && embedded == std::string(capability, capability_size));
+        sync_legacy_fixture();
+        const std::string legacy = legacy_character_write_result_json(payload);
+        CHECK(ok && owner == legacy && owner.find("\"state\":[") != std::string::npos);
+    };
+    const auto run_failure = [&](const Case& test, const char* expected) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == legacy_character_write_result_json(payload) &&
+              owner == expected);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    };
+
+    const Case success[] = {
+        {QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0},
+    };
+
+    // 成功体：typed 单路径输出与 legacy 基线逐字节一致；内嵌 kParty 子树与 capability 同源。
+    for (const auto& test : success) {
+        int owner_can = 0;
+        int owner_unequip = 0;
+        int owner_release = 0;
+        run_golden(test, &owner_can, &owner_unequip, &owner_release);
+        if (test.kind == QolCharacterWriteKind::kPartyWithdraw) {
+            // item 非空 → can_unequip 前检恰一次，通过后 fn_unequip 恰一次。
+            CHECK(owner_can == 1 && owner_unequip == 1);
+        }
+        if (test.kind == QolCharacterWriteKind::kPartyDischarge) {
+            // 原版遣散副作用 MERCENARYSYSTEM_Release 恰一次。
+            CHECK(owner_release == 1);
+        }
+    }
+
+    // 写后即时：原版链改 fake live 队伍成员（level 10→42）后，同一结果处理器响应读到新值。
+    g_write_effect_level = 42;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        CHECK(owner.find("\"level\":42") != std::string::npos);
+        CHECK(owner.find("\"level\":10") == std::string::npos);
+    }
+    g_write_effect_level = 0;
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    for (const auto& test : success) {
+        run_failure(test, "{\"ok\":false,\"error\":\"not in game\"}");
+    }
+    g_state_not_in_game = false;
+
+    // 佣兵槽无效（非 7）：mercenary not found。
+    for (const auto& test : success) {
+        Case missing = test;
+        missing.i0 = 5;
+        run_failure(missing, "{\"ok\":false,\"error\":\"mercenary not found\"}");
+    }
+
+    // withdraw 装备槽越界：bad slot（先于任何 can_unequip 调用）。
+    g_can_unequip_calls = 0;
+    run_failure({QolCharacterWriteKind::kPartyWithdraw, 7, C_EQUIP_SLOTS, 0, 0},
+                "{\"ok\":false,\"error\":\"bad slot\"}");
+    CHECK(g_can_unequip_calls == 0);
+
+    // withdraw 前检拒绝：can_unequip 恰一次且不调 fn_unequip（game_party.cpp:75）。
+    g_can_unequip_result = 0;
+    g_can_unequip_calls = 0;
+    g_unequip_calls = 0;
+    {
+        const CharWritePayloadMirror payload =
+            make_payload({QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0});
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == "{\"ok\":false,\"error\":\"cannot unequip\"}");
+        CHECK(g_can_unequip_calls == 1 && g_unequip_calls == 0);
+        sync_legacy_fixture();
+        CHECK(owner == legacy_character_write_result_json(payload));
+    }
+    g_can_unequip_result = 1;
+
+    // withdraw 底层失败：fn_unequip 返回 0 → withdraw failed。
+    g_unequip_result = 0;
+    run_failure({QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"withdraw failed\"}");
+    g_unequip_result = 1;
+
+    // 队伍闸门：队长不可离队/遣散（先于原版副作用），任务 NPC 同理。
+    g_leader_is_merc = true;
+    g_mercenary_release_calls = 0;
+    run_failure({QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot exclude leader\"}");
+    run_failure({QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot discharge leader\"}");
+    CHECK(g_mercenary_release_calls == 0);
+    g_leader_is_merc = false;
+
+    g_is_special_npc = true;
+    run_failure({QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot exclude quest npc\"}");
+    run_failure({QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot discharge quest npc\"}");
+    g_is_special_npc = false;
+
+    // include 闸门：已在队 / 队伍已满。
+    g_merc_in_party = true;
+    run_failure({QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"already in party\"}");
+    g_merc_in_party = false;
+    const int32_t saved_party_count = g_live_player.party_count;
+    g_live_player.party_count = 3;
+    run_failure({QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"party full\"}");
+    g_live_player.party_count = saved_party_count;
+
+    // 原版调用失败：include/exclude 返回 0 时透传原错误体。
+    g_include_result = 0;
+    run_failure({QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"party full or include failed\"}");
+    g_include_result = 1;
+    g_exclude_result = 0;
+    run_failure({QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"exclude failed\"}");
+    g_exclude_result = 1;
+
+    g_state_reads_from_legacy = false;
+}
+
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
     g_result_handler = handler;
@@ -1212,6 +1441,7 @@ int main() {
     test_write_golden();
     test_write_no_state_family();
     test_write_party_state_family(state_api);
+    test_write_party_member_family(state_api);
 
     char tiny_output[4] = {'!', '!', '!', '!'};
     uint32_t tiny_size = 99;
