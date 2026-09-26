@@ -1,0 +1,147 @@
+smoke 全量探测开始: http://192.168.3.54:8088（143 条路由）
+[001/143] PASS GET  /api/feature/autosell/config -> 200 0.022s
+[002/143] PASS POST /api/feature/autosell/config -> 400 0.016s
+[003/143] PASS POST /api/character/grow/add_skill -> 400 0.015s
+[004/143] PASS POST /api/character/grow/{role}/add_stat -> 400 0.014s
+[005/143] PASS POST /api/character/grow/reset_stat -> 200 0.055s
+[006/143] PASS POST /api/character/grow/reset_skill -> 200 0.051s
+[007/143] PASS POST /api/op/character/{role}/hp -> 400 0.012s
+[008/143] PASS POST /api/op/character/{role}/mp -> 400 0.013s
+[009/143] PASS POST /api/op/character/{role}/experience -> 400 0.014s
+[010/143] PASS POST /api/op/character/{role}/level -> 400 0.016s
+[011/143] PASS POST /api/op/character/{role}/set_attr -> 400 0.013s
+[012/143] PASS POST /api/op/inventory/add -> 400 0.013s
+[013/143] PASS POST /api/character/combat/{role}/set_auto_attack -> 400 0.016s
+[014/143] warn POST /api/character/combat/{role}/set_skill_usage -> 501 0.056s 状态码 501（guard 未就绪/占位/服务器错误）
+[015/143] PASS POST /api/character/combat/switch_player -> 400 0.011s
+[016/143] PASS POST /api/character/combat/{role}/cast_skill -> 400 0.012s
+[017/143] PASS POST /api/character/combat/{role}/attack_target -> 400 0.014s
+[018/143] PASS POST /api/character/combat/{role}/stop_combat -> 200 0.061s
+[019/143] PASS GET  /api/config/list -> 200 0.048s
+[020/143] PASS POST /api/config/set -> 200 0.019s
+[021/143] PASS GET  /api/world/map/id -> 200 0.054s
+[022/143] PASS GET  /api/world/map/exits -> 200 0.051s
+[023/143] PASS GET  /api/world/map/units -> 200 0.051s
+[024/143] PASS GET  /api/world/map/enemies -> 200 0.043s
+[025/143] PASS GET  /api/world/map/interactives -> 200 0.045s
+[026/143] PASS GET  /api/world/map/drops -> 200 0.043s
+[027/143] PASS GET  /api/world/map/distance -> 200 0.037s
+[028/143] PASS GET  /api/world/maps/list -> 200 0.087s
+[029/143] PASS GET  /api/world/maps/{map_id} -> 200 0.069s
+[030/143] PASS GET  /api/world/maps/{map_id}/tiles -> 200 0.402s
+[031/143] PASS GET  /api/world/maps/{map_id}/exits -> 200 0.251s
+[032/143] PASS GET  /api/system/tables -> 200 0.037s
+[033/143] PASS GET  /api/system/tables/{table} -> 200 0.045s
+[034/143] PASS GET  /api/system/tables/{table}/search -> 200 0.072s
+[035/143] warn GET  /api/system/tables/{table}/download -> 501 0.033s 状态码 501（guard 未就绪/占位/服务器错误）
+[036/143] PASS GET  /api/system/tables/story-events -> 200 3.898s
+[037/143] PASS GET  /api/system/tables/text -> 200 0.284s
+[038/143] warn GET  /api/system/help -> 501 0.04s 状态码 501（guard 未就绪/占位/服务器错误）
+[039/143] warn GET  /api/system/download -> 501 0.038s 状态码 501（guard 未就绪/占位/服务器错误）
+[040/143] PASS GET  /api/debug/ui -> 200 0.013s
+[041/143] PASS GET  /api/debug/path -> 200 0.017s
+[042/143] PASS GET  /api/debug/item/raw -> 200 0.017s
+[043/143] PASS GET  /api/debug/extension_bag/status -> 200 0.015s
+[044/143] PASS POST /api/debug/extension_bag/enter_view -> 400 0.016s
+[045/143] PASS POST /api/debug/extension_bag/exit_view -> 200 0.062s
+[046/143] PASS POST /api/debug/extension_bag/unequip -> 400 0.016s
+[047/143] PASS POST /api/debug/extension_bag/select_bag -> 400 0.013s
+[048/143] PASS POST /api/debug/extension_bag/click_item -> 400 0.013s
+[049/143] PASS POST /api/debug/extension_bag/equip -> 400 0.013s
+[050/143] PASS POST /api/debug/extension_bag/item -> 400 0.013s
+[051/143] PASS GET  /api/system/events -> 200 0.012s
+[052/143] PASS GET  /api/system/game -> 200 0.064s
+[053/143] PASS GET  /api/system/snapshot -> 200 0.043s
+[054/143] PASS GET  /api/system/info -> 200 0.041s
+[055/143] PASS GET  /api/system/game_frame -> 200 0.046s
+[056/143] PASS GET  /api/health -> 200 0.01s
+[057/143] PASS GET  /api/system/features -> 200 0.014s
+[058/143] PASS GET  /api/system/resources -> 200 0.017s
+[059/143] PASS GET  /api/system/tickets/{id} -> 200 0.015s
+[060/143] PASS GET  /api/system/routes -> 200 0.017s
+[061/143] PASS POST /api/item/inventory/use_item -> 400 0.014s
+[062/143] PASS POST /api/item/inventory/accept_dice -> 200 0.061s
+[063/143] PASS POST /api/item/inventory/reject_dice -> 200 0.051s
+[064/143] PASS POST /api/item/inventory/discard_item -> 400 0.013s
+[065/143] PASS POST /api/item/inventory/sell_item -> 400 0.013s
+[066/143] PASS POST /api/item/inventory/move_item -> 400 0.015s
+[067/143] PASS POST /api/item/inventory/{role}/put_jewel -> 400 0.013s
+[068/143] PASS POST /api/item/inventory/{role}/enchant -> 400 0.013s
+[069/143] PASS POST /api/item/inventory/{role}/equip_item -> 400 0.014s
+[070/143] PASS POST /api/item/inventory/{role}/unequip_item -> 400 0.014s
+[071/143] PASS GET  /api/item/inventory -> 200 0.069s
+[072/143] PASS GET  /api/item/inventory/money -> 200 0.047s
+[073/143] PASS GET  /api/item/inventory/items -> 200 0.057s
+[074/143] PASS GET  /api/item/inventory/bag/{bag}/info -> 200 0.044s
+[075/143] PASS GET  /api/item/inventory/bag/{bag}/{slot} -> 200 0.044s
+[076/143] PASS GET  /api/character/mercenary -> 200 0.041s
+[077/143] PASS GET  /api/character/mercenary/list -> 200 0.042s
+[078/143] PASS GET  /api/character/mercenary/{slot} -> 200 0.045s
+[079/143] PASS POST /api/world/movement/move_to -> 400 0.013s
+[080/143] PASS POST /api/world/movement/walk_dir -> 400 0.014s
+[081/143] PASS POST /api/world/movement/stop_move -> 200 0.062s
+[082/143] PASS POST /api/world/movement/interact_with -> 200 0.052s
+[083/143] PASS POST /api/ui/start_interact -> 200 0.038s
+[084/143] PASS POST /api/ui/dialog/select -> 200 0.039s
+[085/143] warn POST /api/op/quest/accept -> 501 0.039s 状态码 501（guard 未就绪/占位/服务器错误）
+[086/143] warn POST /api/op/quest/complete -> 501 0.017s 状态码 501（guard 未就绪/占位/服务器错误）
+[087/143] PASS POST /api/op/character/{role}/status-point -> 400 0.015s
+[088/143] warn POST /api/op/character/{role}/skill-point -> 501 0.015s 状态码 501（guard 未就绪/占位/服务器错误）
+[089/143] warn POST /api/op/character/{role}/skill-level -> 501 0.015s 状态码 501（guard 未就绪/占位/服务器错误）
+[090/143] PASS POST /api/op/party/swap -> 400 0.013s
+[091/143] warn POST /api/op/inventory/set-slot -> 501 0.015s 状态码 501（guard 未就绪/占位/服务器错误）
+[092/143] warn POST /api/op/inventory/set-equip -> 501 0.015s 状态码 501（guard 未就绪/占位/服务器错误）
+[093/143] PASS POST /api/op/inventory/money -> 400 0.012s
+[094/143] warn POST /api/op/craft/mix-direct -> 501 0.017s 状态码 501（guard 未就绪/占位/服务器错误）
+[095/143] warn POST /api/op/combat/{role}/heal -> 501 0.015s 状态码 501（guard 未就绪/占位/服务器错误）
+[096/143] warn POST /api/op/combat/{role}/rest -> 501 0.015s 状态码 501（guard 未就绪/占位/服务器错误）
+[097/143] warn POST /api/op/combat/{role}/revive -> 501 0.016s 状态码 501（guard 未就绪/占位/服务器错误）
+[098/143] warn POST /api/op/combat/{role}/hate -> 501 0.016s 状态码 501（guard 未就绪/占位/服务器错误）
+[099/143] PASS POST /api/op/movement/teleport -> 400 0.012s
+[100/143] PASS POST /api/op/features/lifecycle -> 400 0.059s
+[101/143] PASS POST /api/character/party/include -> 400 0.012s
+[102/143] PASS POST /api/character/party/exclude -> 400 0.012s
+[103/143] PASS POST /api/character/party/discharge -> 400 0.012s
+[104/143] PASS POST /api/character/party/withdraw -> 400 0.012s
+[105/143] PASS GET  /api/character/party -> 200 0.063s
+[106/143] PASS GET  /api/character/party/count -> 200 0.049s
+[107/143] PASS GET  /api/character/leader -> 200 0.046s
+[108/143] PASS GET  /api/character/party/{slot} -> 200 0.045s
+[109/143] PASS GET  /api/character/party/{slot}/id -> 200 0.044s
+[110/143] PASS GET  /api/character/party/{slot}/name -> 200 0.046s
+[111/143] PASS GET  /api/character/party/{slot}/level -> 200 0.044s
+[112/143] PASS GET  /api/character/party/{slot}/status -> 200 0.033s
+[113/143] PASS GET  /api/character/party/{slot}/stats -> 200 0.046s
+[114/143] PASS GET  /api/character/party/{slot}/equipment -> 200 0.045s
+[115/143] PASS GET  /api/character/party/{slot}/equipment/{equip_slot} -> 200 0.045s
+[116/143] PASS GET  /api/character/party/{slot}/skills -> 200 0.044s
+[117/143] PASS POST /api/quest/quit_quest -> 400 0.011s
+[118/143] PASS GET  /api/quest -> 200 0.048s
+[119/143] PASS GET  /api/quest/active -> 200 0.048s
+[120/143] PASS GET  /api/quest/details -> 200 0.046s
+[121/143] warn GET  /api/quest/{id} -> 404 0.012s 状态码 404（guard 未就绪/占位/服务器错误）
+[122/143] PASS GET  /api/quest/completed -> 200 0.05s
+[123/143] PASS POST /api/system/save -> 200 0.051s
+[124/143] PASS POST /api/system/enter_slot -> 400 0.012s
+[125/143] PASS POST /api/system/create_slot -> 400 0.012s
+[126/143] PASS POST /api/system/backup/export -> 400 0.014s
+[127/143] PASS GET  /api/system/backup/list -> 200 0.151s
+[128/143] PASS POST /api/system/backup/import -> 400 0.011s
+[129/143] PASS POST /api/system/backup/delete -> 400 0.013s
+[130/143] PASS GET  /api/item/shop/items -> 200 0.04s
+[131/143] PASS POST /api/item/shop/buy_item -> 400 0.012s
+[132/143] PASS POST /api/ui/go_main_menu -> 200 0.049s
+[133/143] PASS POST /api/ui/close_panel -> 200 0.049s
+[134/143] PASS POST /api/ui/open_panel -> 400 0.013s
+[135/143] PASS GET  /api/ui -> 200 0.013s
+[136/143] PASS GET  /api/ui/screen -> 200 0.013s
+[137/143] PASS GET  /api/ui/panel -> 200 0.014s
+[138/143] PASS GET  /api/ui/dialog -> 200 0.015s
+[139/143] PASS POST /api/debug/settings-ui/inject -> 200 0.109s
+[140/143] PASS GET  /api/debug/settings-ui/status -> 200 0.016s
+[141/143] warn POST /api/debug/settings-ui/open-option -> None 0.0s 跳过:该调试端点会改变原版选项 popup 生命周期
+[142/143] warn POST /api/debug/settings-ui/open-panel -> None 0.0s 跳过:该调试端点会改变原版设置面板生命周期
+[143/143] PASS POST /api/debug/settings-ui/restore -> 200 0.051s
+
+基线报告已写入: .tmp/t2o-regression/r2-smoke_current.json
+摘要: total=143 pass=125 warn=18 fail=0

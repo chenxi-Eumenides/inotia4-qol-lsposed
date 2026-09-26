@@ -1,0 +1,184 @@
+=== Inotia4Qol log start 2026-09-26 18:57:08.084 ===
+2026-09-26 18:57:08.259 f=0 I platform call_patch.cpp:326 patched word addr=0x727ed6703c new=0x34000360
+2026-09-26 18:57:08.291 f=0 I platform call_patch.cpp:326 patched word addr=0x727f355818 new=0x7101fd1f
+2026-09-26 18:57:08.291 f=0 I core core_patches.cpp:97 core_patches monster compat: 0x727f355818 cmp w8,#0x62 -> #0x7F
+2026-09-26 18:57:08.307 f=0 I platform call_patch.cpp:286 patched call=0x727ecb16ec replacement=0x942d3e45
+2026-09-26 18:57:08.307 f=0 I platform call_patch.cpp:286 patched call=0x727ece89c4 replacement=0x942c6197
+2026-09-26 18:57:08.307 f=0 I core frame_source.cpp:164 frame_source installed (render + logic anchors)
+2026-09-26 18:57:08.307 f=0 I platform transition_dispatch.cpp:76 logic-pre consumer registered
+2026-09-26 18:57:08.307 f=0 I platform call_patch.cpp:286 patched call=0x727ed60d90 replacement=0x942a80ac
+2026-09-26 18:57:08.307 f=0 I platform call_patch.cpp:286 patched call=0x727ed61ef0 replacement=0x942a7c5c
+2026-09-26 18:57:08.307 f=0 I save save_enter.cpp:153 installed load=0x727ed60d90 new=0x727ed61ef0
+2026-09-26 18:57:08.307 f=0 I platform call_patch.cpp:286 patched call=0x727ed65640 replacement=0x942a6e90
+2026-09-26 18:57:08.307 f=0 I save save_exit.cpp:105 installed call=0x727ed65640
+2026-09-26 18:57:08.308 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=attribute_range_display capability=attribute.quality
+2026-09-26 18:57:08.308 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag
+2026-09-26 18:57:08.308 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=custom_recipe consumer=craft_ui capability=craft_result
+2026-09-26 18:57:08.308 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality
+2026-09-26 18:57:08.308 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=core.item capability=extension_bag
+2026-09-26 18:57:08.315 f=0 I core core.character [core.character] provider install
+2026-09-26 18:57:08.316 f=0 I core core.character [core.character] provider enabled: capability + http queries
+2026-09-26 18:57:08.317 f=0 I core core.craft [core.craft] provider install
+2026-09-26 18:57:08.317 f=0 I core core.craft [core.craft] provider enabled: capability published
+2026-09-26 18:57:08.334 f=0 I core core.item [core.item] provider install
+2026-09-26 18:57:08.334 f=0 I core core.item [core.item] provider enabled: capability + http queries
+2026-09-26 18:57:08.340 f=0 I core core.save [core.save] provider install: facts + save writes
+2026-09-26 18:57:08.340 f=0 I core core.save [core.save] provider enabled: capability published
+2026-09-26 18:57:08.346 f=0 I ui settings.cpp:221 popup.settings acquired: state id=21
+2026-09-26 18:57:08.347 f=0 I core core.system [core.system] provider install
+2026-09-26 18:57:08.347 f=0 I core core.system [core.system] provider enabled: http queries
+2026-09-26 18:57:08.349 f=0 I core core.world [core.world] provider install
+2026-09-26 18:57:08.350 f=0 I core core.world [core.world] provider enabled: capability published
+2026-09-26 18:57:08.350 f=0 I core core.quest [core.quest] owner installed: http queries registered
+2026-09-26 18:57:08.598 f=0 I autosell scan.cpp:223 global enabled=0 save_active=0
+2026-09-26 18:57:08.599 f=0 I platform call_patch.cpp:286 patched call=0x727ed5eb88 replacement=0x942a8946
+2026-09-26 18:57:08.609 f=0 I autosell panel.cpp:927 popup.autosell acquired: state id=20
+2026-09-26 18:57:08.610 f=0 I autosell scan.cpp:223 global enabled=0 save_active=0
+2026-09-26 18:57:08.610 f=0 I extension_bag extension_bag move_merge: behavior=0 extension_protection=0 (wrapper resident)
+2026-09-26 18:57:08.623 f=0 I extension_bag extension_bag move_merge: extension_source_protection=0 merge=0 (wrapper resident)
+2026-09-26 18:57:08.623 f=0 I platform plugins/push_all/feature.cpp push_all enabled=0
+2026-09-26 18:57:08.623 f=0 I platform plugins/push_all/feature.cpp push_all enabled=0
+2026-09-26 18:57:08.632 f=0 I save_backup plugin.cpp:296 slot delete hook: backup handover orig=0x727ed604e8
+2026-09-26 18:57:08.642 f=0 I save_backup panel.cpp:682 popup.savebackup acquired: state id=22
+2026-09-26 18:57:08.712 f=0 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+2026-09-26 18:57:08.740 f=0 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+2026-09-26 18:57:08.756 f=0 I special_equip plugins/special_equip/feature.cpp enabled=1
+2026-09-26 18:57:08.766 f=0 I special_equip plugins/special_equip/feature.cpp enabled=1
+2026-09-26 18:57:08.767 f=0 I core assembly.cpp:433 assembly: initialized=true registered=27 install_failed=0 kernel_only=false
+2026-09-26 18:57:08.770 f=0 I platform HookMain.kt:30 module loaded in process: com.com2us.inotia4.normal.freefull.google.global.android.common
+2026-09-26 18:57:08.770 f=0 I platform HookMain.kt:127 context not ready, retrying in 500ms
+2026-09-26 18:57:08.770 f=0 I platform ImmersiveMode.kt:29 ImmersiveMode hook installed on MainActivity.onWindowFocusChanged
+2026-09-26 18:57:08.770 f=0 I platform WatermarkOverlay.kt:95 WatermarkOverlay hook installed on MainActivity.onWindowFocusChanged
+2026-09-26 18:57:08.771 f=0 I platform HookMain.kt:137 NativeBridge init OK: {"G_MONEY_VMA":true,"G_MAP_ID_VMA":true,"G_PARTY_VMA":true,"G_ACTIVE_QUEST_VMA":true,"G_INVEN_VMA":true,"G_MAIN_MERC_SLOT_VMA":true,"G_PREV_STATE_VMA":true,"G_STATE_VMA":true,"G_GAMESTATE_VMA":true,"G_INITSTATE_VMA":true,"G_POPUP_ON_VMA":true,"G_MAINMENU_DRAW_VMA":true,"G_POPUP_STACK_VMA":true,"G_PLAYER_ACTIVE_VMA":true,"G_PLAYER_ACTIVE_GOT_VMA":true,"G_MAPINFOBASE_PDATA_GOT_VMA":true,"G_MAPINFOBASE_RECORD_SIZE_VMA":true,"G_MAPINFOBASE_RECORD_COUNT_VMA":true,"G_UICHOICE_ITEMTEXT_VMA":true,"G_UICHOICE_COUNT_VMA":true,"G_UICHOICE_FOCUS_VMA":true,"G_UICHOICE_MAIN_TEXT_VMA":true,"G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA":true,"G_UICHOICE_CONTROL_GOT_VMA":true,"G_UIMIX_VMA":true,"F_GET_MONEY_VMA":true,"F_GET_MEMBER_VMA":true,"F_GET_PARTY_SIZE_VMA":true,"F_GET_ATTR_VMA":true,"F_GET_EQUIP_VMA":true,"F_GET_EXP_VMA":true,"F_GET_NEXT_EXP_VMA":true,"F_GET_RARITY_VMA":true,"F_GET_BAG_SIZE_VMA":true,"F_INVEN_GET_EMPTY_BAG_SLOT_VMA":true,"F_INVEN_IS_EMPTY_BAG_VMA":true,"F_INVEN_IS_HAVING_EMPTY_SLOT_VMA":true,"F_GET_BIT_VMA":true,"F_GET_CUMULATE_COUNT_VMA":true,"F_GET_DAMAGE_VMA":true,"F_GET_DEFENSE_VMA":true,"F_GET_STATUS_POINT_VMA":true,"F_GET_STAT_MAIN_VMA":true,"F_SET_STAT_MAIN_VMA":true,"F_SET_STAT_BASE_VMA":true,"F_STATUSDICE_ROLL_VMA":true,"F_PUT_JEWEL_VMA":true,"F_IS_JEWEL_VMA":true,"F_ENCHANT_ITEM_VMA":true,"F_IS_ENCHANT_SCROLL_VMA":true,"F_CHAR_INITIALIZE_STATUS_VMA":true,"F_CHAR_INITIALIZE_SKILL_VMA":true,"F_CHAR_SET_ACTION_ID_VMA":true,"F_CHAR_GET_ENEMY_TARGET_VMA":true,"F_QUESTSYSTEM_FIND_VMA":true,"F_QUESTSYSTEM_REMOVE_SLOT_VMA":true,"F_QUESTSYSTEM_IS_COMPLETE_VMA":true,"F_QUESTSYSTEM_CHANGE_QUEST_STATE_VMA":true,"F_SAVE_VMA":true,"F_SAVE_GET_SAVE_SLOT_VMA":true,"F_SAVE_LOAD_SAVE_SLOT_VMA":true,"F_UI_SET_POPUP_PROCESS_INFO_VMA":true,"F_GAME_START_RESUME_GAME_VMA":true,"F_SAVE_CREATE_SAVE_SLOT_VMA":true,"F_SAVE_DESTROY_SAVE_SLOT_VMA":true,"F_SAVESLOT_GET_HERO_VMA":true,"F_STATE_SET_VMA":true,"F_STATE_NEXT_START_PROCESS_VMA":true,"F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA":true,"F_SELECT_CHARACTER_START_GAME_VMA":true,"F_TUTORIAL_START_VMA":true,"F_SAVE_GET_SAVE_FILE_NAME_VMA":true,"F_CS_FS_REMOVE_VMA":true,"F_HUBSAVE_GET_KEY_VMA":true,"F_SAVE_LOAD_DATA_VMA":true,"F_MEM_FREE_VMA":true,"F_ENCRYPT_PROCESS2_VMA":true,"F_GAMESTATE_SET_STATE_VMA":true,"F_GAME_EXIT_VMA":true,"F_UINPC_INIT_VMA":true,"F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA":true,"F_UINPC_EXE_CURRENT_TASK_VMA":true,"F_UINPC_QUEST_BUTTON_OK_EXE_VMA":true,"F_NPCTASKLIST_MAKE_DLG_VMA":true,"F_PLAYER_DO_CHECK_NEAR_NPC_VMA":true,"F_CHAR_GET_SKILL_USAGE_VMA":true,"F_CHAR_SET_SKILL_USAGE_VMA":true,"F_GET_NAME_VMA":true,"F_GET_ACT_MAX_LEVEL_VMA":true,"F_FIND_MERC_SLOT_VMA":true,"F_SEARCH_PATH_VMA":true,"F_EVT_SET_STATE_VMA":true,"F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA":true,"F_KEY_SET_CODE_VMA":true,"F_WIPEOUT_BUTTON_GAMEOVER_VMA":true,"F_EVENT_BUTTON_OK_EXE_VMA":true,"F_EVENT_BUTTON_SKIP_EXE_VMA":true,"F_EVTSYSTEM_DO_CHECK_ALL_EVENT_VMA":true,"F_TUTORIAL_GETSTATE_VMA":true,"F_SET_MONEY_VMA":true,"F_ADD_MONEY_VMA":true,"F_MINUS_MONEY_VMA":true,"F_FIND_ITEM_VMA":true,"F_INVEN_HAVE_ITEM_VMA":true,"F_INVEN_GET_ITEM_COUNT_VMA":true,"F_INVEN_FIND_ITEM_SLOT_VMA":true,"F_INVEN_CALCULATE_EMPTY_SLOT_COUNT_FOR_SAVE_VMA":true,"F_INVEN_GET_EMPTY_SAVE_SLOT_EX_VMA":true,"F_INVEN_GET_NEEDED_SAVE_SLOT_EX_VMA":true,"F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA":true,"F_REMOVE_ITEM_VMA":true,"F_INVEN_REMOVE_ITEM_DATA_VMA":true,"F_INVEN_GET_ITEM_COUNT_VMA":true,"F_ITEM_GET_PRICE_VMA":true,"F_ITEM_GET_SELL_PRICE_VMA":true,"F_ITEMDATABASE_IS_NO_SELL_VMA":true,"F_ITEM_GET_ABILITY_LEVEL_VMA":true,"F_ITEM_GET_BUY_PRICE_VMA":true,"F_ITEMSYSTEM_GET_OPTION_VALUE_VMA":true,"F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA":true,"F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA":true,"F_MATH_GET_RANDOM_VMA":true,"F_INVEN_FIND_SAVE_SLOT_VMA":true,"F_INVEN_SAVE_ITEM_VMA":true,"F_INVEN_SAVE_ITEM_DIRECT_VMA":true,"F_INVEN_SAVE_ITEM_ON_EMPTY_VMA":true,"F_DEALSYSTEM_FIND_SALE_BY_ID_VMA":true,"F_DEALSYSTEM_CLEAR_ITEM_VMA":true,"F_INVEN_MOVE_ITEM_VMA":true,"F_ITEMSYSTEM_DIVIDE_VMA":true,"F_SET_EXP_VMA":true,"F_SET_LEVEL_VMA":true,"F_ADD_EXP_VMA":true,"F_SET_STATUS_POINT_VMA":true,"F_SET_AUTO_ATTACK_VMA":true,"F_EQUIP_ITEM_VMA":true,"F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA":true,"F_UNEQUIP_VMA":true,"F_CAN_EQUIP_VMA":true,"F_CAN_UNEQUIP_VMA":true,"F_CAN_CHANGE_EQUIP_VMA":true,"F_GET_MENU_CHARACTER_VMA":true,"F_FIND_EQUIP_SLOT_VMA":true,"F_GET_EQUIP_ITEM_VMA":true,"F_SET_EQUIP_ITEM_VMA":true,"F_IS_SPECIAL_NPC_VMA":true,"F_LEARN_ACTION_VMA":true,"F_SET_ACTIVE_PLAYER_VMA":true,"F_PARTY_SWAP_VMA":true,"F_SET_POSITION_VMA":true,"F_CHANGE_MAP_VMA":true,"F_UICHOICE_BUTTON_LIST_EXE_VMA":true,"F_UICHOICE_CREATE_CONTROL_VMA":true,"F_UICHOICE_PROCESS_VMA":true,"F_UI_CHOICE_INIT_VMA":true,"F_SCENE_EVENT_POPUP_SC_CHOICE_VMA":true,"F_MAPCHANGE_SET_VMA":true,"F_MEMORYTEXT_GET_TEXT_VMA":true,"F_MOVE_AS_PATH_VMA":true,"F_CHAR_MOVE_VMA":true,"F_CHAR_PICK_ITEM_ALL_VMA":true,"F_CHAR_GET_AREA_RECT_VMA":true,"F_MEM_MALLOC_VMA":true,"F_NOTIFIER_ADD_VMA":true,"F_CHAR_SET_DIRECTION_VMA":true,"F_CHAR_REMOVE_PATH_
+2026-09-26 18:57:08.807 f=0 I platform WatermarkOverlay.kt:144 watermark overlay attached color=26ffffff rule=默认
+2026-09-26 18:57:08.809 f=0 I platform HookMain.kt:139 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/2901405782.apk sha256=dd558f792ff867d40ddcff49e6a64d391880bf592c50831836aa712a81ad2667
+2026-09-26 18:57:08.836 f=0 I http ApiServer.kt:143 module assets added: /data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/2901405782.apk
+2026-09-26 18:57:09.350 f=0 I config ModuleConfig.kt:165 config loaded: listenAddress=0.0.0.0 listenPort=8088 stackLimitIncrease=false moveMergeEnabled=true opEnabled=true customRecipeEnabled=true simpleModeEnabled=false pushAllEnabled=true autoSellEnabled=true apiEnabled=true debugLogEnabled=true
+2026-09-26 18:57:09.379 f=0 I save_backup feature.cpp:223 save backup map_names loaded: 416 entries (json bytes=10761)
+2026-09-26 18:57:09.851 f=0 I http ApiServer.kt:116 savebackup ui inject: {"ok":true}
+2026-09-26 18:57:09.939 f=0 I save_backup panel.cpp:526 apply_backups: 0 -> 21 backups, total_pages=5, page_index=0
+2026-09-26 18:57:09.939 f=0 I save_backup panel.cpp:834 self_check: list+parse 87.0 ms, apply 0.239 ms, 21 backups
+2026-09-26 18:57:09.940 f=0 I http ApiServer.kt:118 savebackup self check: {"ok":true,"backup_count":21,"total_pages":5,"page_index":0}
+2026-09-26 18:57:09.953 f=0 I config ConfigApiService.kt:48 stackLimitIncrease=false applied=true
+2026-09-26 18:57:09.954 f=0 I config ConfigApiService.kt:50 moveMergeEnabled=true applied=true
+2026-09-26 18:57:09.954 f=0 I config ConfigApiService.kt:52 extensionBagEnabled=true applied=true
+2026-09-26 18:57:09.955 f=0 I config ConfigApiService.kt:54 customRecipeEnabled=true applied=true
+2026-09-26 18:57:09.955 f=0 I config ConfigApiService.kt:56 simpleModeEnabled=false applied=true
+2026-09-26 18:57:09.956 f=0 I config ConfigApiService.kt:58 pushAllEnabled=true applied=true
+2026-09-26 18:57:09.956 f=0 I config ConfigApiService.kt:60 autoSellEnabled=true applied=true
+2026-09-26 18:57:09.957 f=0 I config ConfigApiService.kt:62 apiEnabled=true applied=true
+2026-09-26 18:57:09.957 f=0 I config ConfigApiService.kt:66 opEnabled=true applied to native
+2026-09-26 18:57:09.958 f=0 I config ConfigApiService.kt:68 debugLogEnabled=true applied ok
+2026-09-26 18:57:10.206 f=0 I catalog /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/module/app/src/main/cpp/g static tiles loaded: 416 maps, ready=1
+2026-09-26 18:57:10.208 f=0 I config ConfigApiService.kt:134 static tiles loaded: true
+2026-09-26 18:57:10.429 f=0 I http ApiServer.kt:180 AndServer started on 0.0.0.0:8088
+2026-09-26 18:57:10.603 f=1 I extension_bag extension_bag move_merge: behavior=1 extension_protection=0 (wrapper resident)
+2026-09-26 18:57:10.603 f=1 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+2026-09-26 18:57:10.603 f=1 I platform plugins/push_all/feature.cpp push_all enabled=1
+2026-09-26 18:57:10.603 f=1 I autosell scan.cpp:223 global enabled=1 save_active=0
+2026-09-26 18:57:10.603 f=1 W custom_recipe plugins/custom_recipe/table recipe table not ready recipe_size=0 mixture_size=0 count=0
+2026-09-26 18:57:10.603 f=1 W core plugin_registry.cpp:1799 plugin custom_recipe gate install deferred on own:RECIPEBASE_MIXTUREBASE: resource own:RECIPEBASE_MIXTUREBASE: ownership acquire rejected
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ecd8488 replacement=0x942ca316
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ecdfea0 replacement=0x942c8498
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ecdff4c replacement=0x942c8475
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ed39c88 replacement=0x942b1d2e
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ed3d850 replacement=0x942b0e44
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ed71708 replacement=0x942a3e9e
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ed71a84 replacement=0x942a3dc7
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727ed71cf0 replacement=0x942a3d34
+2026-09-26 18:57:10.648 f=1 I platform call_patch.cpp:286 patched call=0x727eccb6e0 replacement=0x942cd6c0
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727eccb6e4 replacement=0x942cd6c7
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ed5ebcc replacement=0x942a8995
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727eccccc0 replacement=0x942cd160
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ecbef28 replacement=0x942d08ce
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727eccd188 replacement=0x942cd03e
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ece687c replacement=0x942c6a89
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ed6363c replacement=0x942a7721
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:388 patched branch call=0x727ece70e4 thunk=0x727f8012e0 replacement=0x142c687f
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ece64a0 replacement=0x942c6b98
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ece6540 replacement=0x942c6b78
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ed5f474 replacement=0x942a87b3
+2026-09-26 18:57:10.649 f=1 I platform call_patch.cpp:286 patched call=0x727ecd5a74 replacement=0x942cae3b
+2026-09-26 18:57:10.650 f=1 I extension_bag extension_bag move_merge: extension_source_protection=1 merge=1 (wrapper resident)
+2026-09-26 18:57:10.650 f=1 I platform call_patch.cpp:286 patched call=0x727ecfd970 replacement=0x942c0e84
+2026-09-26 18:57:10.650 f=1 I platform call_patch.cpp:326 patched word addr=0x727ecfd988 new=0xd503201f
+2026-09-26 18:57:10.650 f=1 I platform plugins/push_all/feature.cpp push_all enabled=1
+2026-09-26 18:57:10.650 f=1 W core plugin_registry.cpp:665 plugin core.item degraded on optional: missing optional capability: stack_limit.item_count
+2026-09-26 18:57:14.018 f=62 I custom_recipe plugins/custom_recipe/table recipe table injected base=69 records=71 materials=191 book_bytes=7
+2026-09-26 18:57:20.270 f=114 I platform HookMain.kt:90 blocked ActivityIndicatorOpen (Connecting.. progress dialog)
+2026-09-26 18:57:21.495 f=119 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=0} result={ok:true} dur=8ms
+2026-09-26 18:57:22.373 f=119 I platform AgreementPopup.kt:68 agreement close dispatched, parent kept
+2026-09-26 18:57:24.794 f=121 I ui settings_injection.inc:47 more games ExecuteProc bound: ctrl=0x728db03410
+2026-09-26 18:57:27.725 f=175 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:true} dur=29ms
+2026-09-26 18:57:27.932 f=176 I platform plugins/core.quest/feature.cpp quest resync: fixed=0
+2026-09-26 18:57:28.061 f=179 I extension_bag extension_bag sidecar load slot=0 parsed=1 items=0/0=14x13,0/1=15x4,0/2=56x7,0/3=936x1,0/4=924x1,0/5=933x1,0/6=62x1,0/7=706x1,0/8=354x1,0/9=2x1,0/10=28x1,0/11=24x2,0/14=5x223,1/0=241x1,1/1=471x1,1/2=480x1,2/0=25x12,2/1=947x10,2/3=27x5,2/4=20x7,2/5=946x2,2/6=19x5,2/7=26x3,2/8=1010x2,2/9=1011x7,3/0=33x228,3/1=57x770,3/2=36x129,3/3=41x321,3/4=35x640,4/0=937x1,4/1=935x1,4/2=938x1
+2026-09-26 18:57:28.101 f=179 I custom_recipe plugins/custom_recipe dynamic special recipes rebuilt count=26 equip=26 materialPool=14
+2026-09-26 18:57:28.103 f=179 I autosell store.cpp:103 sidecar config load slot=0 parsed=1
+2026-09-26 18:57:28.103 f=179 I autosell scan.cpp:198 save enter slot=0; sync task
+2026-09-26 18:57:28.103 f=179 I save save_enter.cpp:69 save enter fired callbacks=0
+2026-09-26 18:57:28.277 f=181 W core core.item extension inventory slot skipped: bag=9 slot=4 category=35 count=0
+2026-09-26 18:57:28.524 f=186 I platform HookMain.kt:64 blocked Hive SelectTarget.iapSelectTarget (payment dialog)
+2026-09-26 18:57:28.551 f=186 I platform IapBlocker.kt:35 hive recovery: {"ok":true}
+2026-09-26 18:58:06.588 f=899 I extension_bag extension_bag txn stage=pending-recorded durable=false id=p4-1 direction=2 src=0/0 dst=0/12
+2026-09-26 18:58:06.588 f=899 I extension_bag extension_bag ownership audit context=free_module_object balanced=1 allocated=33 released=1 handed_over=0 live=32 objects=32 borrows=0 inventory_owned=0
+2026-09-26 18:58:06.588 f=899 I extension_bag extension_bag txn committed id=p4-1 extension->extension 0/0 -> 0/12 cat=14 count=13
+2026-09-26 18:58:12.123 f=1004 I extension_bag extension_bag txn stage=pending-recorded durable=false id=p4-2 direction=2 src=0/12 dst=0/0
+2026-09-26 18:58:12.124 f=1004 I extension_bag extension_bag ownership audit context=free_module_object balanced=1 allocated=34 released=2 handed_over=0 live=32 objects=32 borrows=0 inventory_owned=0
+2026-09-26 18:58:12.124 f=1004 I extension_bag extension_bag txn committed id=p4-2 extension->extension 0/12 -> 0/0 cat=14 count=13
+2026-09-26 18:58:16.876 f=1094 I config ModuleConfig.kt:306 config persisted: /storage/emulated/0/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/config.json
+2026-09-26 18:58:27.219 f=1283 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=-1} result={ok:true} dur=25ms
+2026-09-26 18:58:27.309 f=1285 E op OpController.kt:24 endpoint=POST /api/op/quest/accept params={} result={ok:false,error=exception:ApiException} dur=25ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$questAccept$1.invoke(OpController.kt:24)<-OpController$questAccept$1.invoke(OpController.kt:24)<-LogFile.op(LogFile.kt:117)<-OpController.questAccept(OpController.kt:24)<-OpControllerQuestAcceptHandler.onHandle(OpControllerQuestAcceptHandler.java:58)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.374 f=1286 E op OpController.kt:27 endpoint=POST /api/op/quest/complete params={} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$questComplete$1.invoke(OpController.kt:27)<-OpController$questComplete$1.invoke(OpController.kt:27)<-LogFile.op(LogFile.kt:117)<-OpController.questComplete(OpController.kt:27)<-OpControllerQuestCompleteHandler.onHandle(OpControllerQuestCompleteHandler.java:58)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.507 f=1288 E op OpController.kt:39 endpoint=POST /api/op/character/{role}/skill-point params={role=0} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$skillPoint$1.invoke(OpController.kt:39)<-OpController$skillPoint$1.invoke(OpController.kt:39)<-LogFile.op(LogFile.kt:117)<-OpController.skillPoint(OpController.kt:39)<-OpControllerSkillPointHandler.onHandle(OpControllerSkillPointHandler.java:73)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.572 f=1289 E op OpController.kt:43 endpoint=POST /api/op/character/{role}/skill-level params={role=0} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$skillLevel$1.invoke(OpController.kt:43)<-OpController$skillLevel$1.invoke(OpController.kt:43)<-LogFile.op(LogFile.kt:117)<-OpController.skillLevel(OpController.kt:43)<-OpControllerSkillLevelHandler.onHandle(OpControllerSkillLevelHandler.java:73)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.701 f=1291 E op OpController.kt:56 endpoint=POST /api/op/inventory/set-slot params={} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$setSlot$1.invoke(OpController.kt:56)<-OpController$setSlot$1.invoke(OpController.kt:56)<-LogFile.op(LogFile.kt:117)<-OpController.setSlot(OpController.kt:56)<-OpControllerSetSlotHandler.onHandle(OpControllerSetSlotHandler.java:58)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.766 f=1291 E op OpController.kt:59 endpoint=POST /api/op/inventory/set-equip params={} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$setEquip$1.invoke(OpController.kt:59)<-OpController$setEquip$1.invoke(OpController.kt:59)<-LogFile.op(LogFile.kt:117)<-OpController.setEquip(OpController.kt:59)<-OpControllerSetEquipHandler.onHandle(OpControllerSetEquipHandler.java:58)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.896 f=1293 E op OpController.kt:70 endpoint=POST /api/op/craft/mix-direct params={} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$mixDirect$1.invoke(OpController.kt:70)<-OpController$mixDirect$1.invoke(OpController.kt:70)<-LogFile.op(LogFile.kt:117)<-OpController.mixDirect(OpController.kt:70)<-OpControllerMixDirectHandler.onHandle(OpControllerMixDirectHandler.java:58)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:27.961 f=1294 E op OpController.kt:74 endpoint=POST /api/op/combat/{role}/heal params={role=0} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$heal$1.invoke(OpController.kt:74)<-OpController$heal$1.invoke(OpController.kt:74)<-LogFile.op(LogFile.kt:117)<-OpController.heal(OpController.kt:74)<-OpControllerHealHandler.onHandle(OpControllerHealHandler.java:73)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:28.027 f=1295 E op OpController.kt:78 endpoint=POST /api/op/combat/{role}/rest params={role=0} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$rest$1.invoke(OpController.kt:78)<-OpController$rest$1.invoke(OpController.kt:78)<-LogFile.op(LogFile.kt:117)<-OpController.rest(OpController.kt:78)<-OpControllerRestHandler.onHandle(OpControllerRestHandler.java:73)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:28.093 f=1296 E op OpController.kt:82 endpoint=POST /api/op/combat/{role}/revive params={role=0} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$revive$1.invoke(OpController.kt:82)<-OpController$revive$1.invoke(OpController.kt:82)<-LogFile.op(LogFile.kt:117)<-OpController.revive(OpController.kt:82)<-OpControllerReviveHandler.onHandle(OpControllerReviveHandler.java:73)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:28.160 f=1298 E op OpController.kt:86 endpoint=POST /api/op/combat/{role}/hate params={role=0} result={ok:false,error=exception:ApiException} dur=0ms stack=com.inotia4.qol.util.ApiException: not implemented @ OpController.notImpl(OpController.kt:21)<-OpController.access$notImpl(OpController.kt:18)<-OpController$hate$1.invoke(OpController.kt:86)<-OpController$hate$1.invoke(OpController.kt:86)<-LogFile.op(LogFile.kt:117)<-OpController.hate(OpController.kt:86)<-OpControllerHateHandler.onHandle(OpControllerHateHandler.java:73)<-MappingHandler.handle(MappingHandler.java:174)
+2026-09-26 18:58:30.355 f=1334 I save SaveActions.kt:20 endpoint=POST /api/system/save params={} result={ok:true} dur=36ms
+2026-09-26 18:58:30.410 f=1334 I save module_save.cpp:109 save complete slot=0 tx=save-1 participants=0
+2026-09-26 18:58:31.122 f=1346 I save SaveActions.kt:26 endpoint=POST /api/ui/go_main_menu params={} result={ok:true} dur=36ms
+2026-09-26 18:58:31.222 f=1346 I api UiActions.kt:13 endpoint=POST /api/ui/close_panel params={} result={ok:true} dur=36ms
+2026-09-26 18:58:31.655 f=1346 I ui settings.cpp:290 settings more games entry not ready; frame task will retry
+2026-09-26 18:58:31.947 f=1346 I ui settings.cpp:234 popup.settings released
+2026-09-26 18:58:45.317 f=1595 I config ModuleConfig.kt:306 config persisted: /storage/emulated/0/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/config.json
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed18a84 new=0x710f9c1f
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed18a8c new=0x52807cf7
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed17ccc new=0x710f9c7f
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed17ce0 new=0x710f9e9f
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed18690 new=0x710f9a9f
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed17b98 new=0x710f9c1f
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed3be04 new=0x528002a1
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed3bf4c new=0x528002a1
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ece58d0 new=0xaa1303e0
+2026-09-26 18:58:45.329 f=1595 I platform call_patch.cpp:286 patched call=0x727ece58dc replacement=0x9400d1ee
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ece58e8 new=0xaa1303e0
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:286 patched call=0x727ece58f4 replacement=0x9400d1e8
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ece66b8 new=0xaa1303e0
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:286 patched call=0x727ece66c4 replacement=0x9400ce74
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed1c458 new=0xaa1303e0
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:286 patched call=0x727ed1c464 replacement=0x97fff70c
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:326 patched word addr=0x727ed1c48c new=0xaa1303e0
+2026-09-26 18:58:45.330 f=1595 I platform call_patch.cpp:286 patched call=0x727ed1c490 replacement=0x97fff701
+2026-09-26 18:58:46.494 f=1619 I config ModuleConfig.kt:306 config persisted: /storage/emulated/0/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/config.json
+2026-09-26 18:58:46.523 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed18a84 original=0x71018c1f
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed18a8c original=0x52800c77
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed17ccc original=0x71018c7f
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed17ce0 original=0x71018e9f
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed18690 original=0x71018a9f
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed17b98 original=0x71018c1f
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed3be04 original=0x52800301
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed3bf4c original=0x52800301
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ece58d0 original=0xb9401260
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:308 reverted call=0x727ece58dc original=0x9401bb13
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ece58e8 original=0xb9401260
+2026-09-26 18:58:46.524 f=1619 I platform call_patch.cpp:308 reverted call=0x727ece58f4 original=0x9401bb0d
+2026-09-26 18:58:46.525 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ece66b8 original=0xb9401260
+2026-09-26 18:58:46.525 f=1619 I platform call_patch.cpp:308 reverted call=0x727ece66c4 original=0x9401b799
+2026-09-26 18:58:46.525 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed1c458 original=0xb9401260
+2026-09-26 18:58:46.525 f=1619 I platform call_patch.cpp:308 reverted call=0x727ed1c464 original=0x9400e031
+2026-09-26 18:58:46.525 f=1619 I platform call_patch.cpp:338 reverted word addr=0x727ed1c48c original=0x2a1603e0
+2026-09-26 18:58:46.525 f=1619 I platform call_patch.cpp:308 reverted call=0x727ed1c490 original=0x9400e026

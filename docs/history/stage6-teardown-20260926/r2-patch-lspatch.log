@@ -1,0 +1,207 @@
+正在将密钥库 /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/scripts/keys/aosp-testkey.bks 导入到 /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/patch-apk-signing.fWn7Wf/aosp-testkey.p12...
+
+Warning:
+<testkey> 使用的 SHA1WITHRSA 签名算法存在安全风险。
+模块 APK：/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/inotia4_qol_lsposed_debug_2609261856_dd558f792ff8.apk
+LSPatch：/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/tools/lspatch/lspatch-v1.2-487-release.jar
+游戏 APK 数量：3
+
+===== 处理：艾诺迪亚4_v1.3.2_盗版大修_0810.apk
+应用名称：艾4QoL(overhaul)
+Processing /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/apk/game-apk/艾诺迪亚4_v1.3.2_盗版大修_0810.apk -> /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/lspatch-apk.ImzBbY/艾诺迪亚4_v1.3.2_盗版大修_0810-487-lspatched.apk
+Parsing original apk...
+Register apk signer with custom keystore...
+Patching apk...
+Override label: 艾4QoL(overhaul)
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = uses-library
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity-alias
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = meta_data_flag name = meta-data
+Adding config...
+Adding metaloader dex...
+Adding loader dex...
+Adding native lib...
+Embedding modules...
+  - com.inotia4.qol
+Writing apk...
+Done. Output APK: /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/lspatch-apk.ImzBbY/艾诺迪亚4_v1.3.2_盗版大修_0810-487-lspatched.apk
+生成集成 APK：/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_overhaul_lspatched.apk
+28d05ab742a97af0287cdff14dd3d051c0b3108da01caa392d37e0b7c80c09cb  /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_overhaul_lspatched.apk
+
+===== 处理：艾诺迪亚4_v1.3.2_原版.apk
+应用名称：艾4QoL(original)
+Processing /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/apk/game-apk/艾诺迪亚4_v1.3.2_原版.apk -> /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/lspatch-apk.8CHjX5/艾诺迪亚4_v1.3.2_原版-487-lspatched.apk
+Parsing original apk...
+Register apk signer with custom keystore...
+Patching apk...
+Override label: 艾4QoL(original)
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = uses-library
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity-alias
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = meta_data_flag name = meta-data
+Adding config...
+Adding metaloader dex...
+Adding loader dex...
+Adding native lib...
+Embedding modules...
+  - com.inotia4.qol
+Writing apk...
+Done. Output APK: /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/lspatch-apk.8CHjX5/艾诺迪亚4_v1.3.2_原版-487-lspatched.apk
+生成集成 APK：/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_original_lspatched.apk
+1f3420065bd2544ca09b285bdb4b94ee77258174221c8a696b523e4dc4d7230e  /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_original_lspatched.apk
+
+===== 处理：Inotia4_v1.3.2_monster_v29.apk
+应用名称：艾4QoL(monster)
+Processing /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/apk/game-apk/Inotia4_v1.3.2_monster_v29.apk -> /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/lspatch-apk.cHQ1Rw/Inotia4_v1.3.2_monster_v29-487-lspatched.apk
+Parsing original apk...
+Register apk signer with custom keystore...
+Patching apk...
+Override label: 艾4QoL(monster)
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = uses-library
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity-alias
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = service
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = meta-data
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = activity
+ ManifestTagVisitor child  --> ns = null name = provider
+ ManifestTagVisitor child  --> ns = null name = receiver
+ ManifestTagVisitor child  --> ns = meta_data_flag name = meta-data
+Adding config...
+Adding metaloader dex...
+Adding loader dex...
+Adding native lib...
+Embedding modules...
+  - com.inotia4.qol
+Writing apk...
+Done. Output APK: /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/.tmp/lspatch-apk.cHQ1Rw/Inotia4_v1.3.2_monster_v29-487-lspatched.apk
+生成集成 APK：/home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_monster_v29_lspatched.apk
+7253a65a37685b960a132ab6ef6417cff1624e3601f29252bcfe53846982a829  /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_monster_v29_lspatched.apk
+
+===== 汇总：成功 3 / 失败 0
+  /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_overhaul_lspatched.apk
+  /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_original_lspatched.apk
+  /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/output/Inotia4_v1.3.2_monster_v29_lspatched.apk

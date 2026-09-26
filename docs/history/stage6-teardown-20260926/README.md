@@ -246,3 +246,67 @@
 - **output/**：本批集成包 3 个（`r1-apk-sha256.txt`）；上批（依赖环构建）集成包已在 patch 前备份至 `.tmp/t2o-regression/output-backup/prev-cycle-build/`；v0.7.14 备份保留。
 - **存档**：等值写（set_hp=当前值）；原版袋道具 slot5↔slot6 各移动一次并已复原（复读 raw 一致）；EB slot0↔slot12 各移动一次并已复原（payload 一致）；`stackLimitIncrease` 往返并回落 false；save/enter 为往返步骤固有动作；测试结束游戏 `force-stop` 回干净态。
 - `git diff --check` clean；未改源码/文档正文（仅本目录证据与 README）；未 commit。
+
+---
+
+# R2 rerun（数据面降级修复复验，八项）
+
+日期：2026-09-26（约 18:56–19:0x）｜ HEAD：`22f1b404`（fix(item,extension_bag,host): restore item data plane under missing EB count）｜ 设备/变体同前（monster v29）。**未改源码，未 commit。** 证据前缀 `r2-*`。
+
+## R2-0. 新构建身份（必须 ≠ `372bd83f`）
+
+| 项 | 值 |
+|---|---|
+| 模块 Debug APK | `output/inotia4_qol_lsposed_debug_2609261856_dd558f792ff8.apk` |
+| 模块 APK SHA-256 | `dd558f792ff867d40ddcff49e6a64d391880bf592c50831836aa712a81ad2667`（构建 18:56:52） |
+| 集成包嵌入模块 SHA-256 | monster/original/overhaul 均 = `dd558f79…` |
+| 运行态身份日志 | `r2-inotia4-export.log`：`module identity … sha256=dd558f79…` |
+
+三处一致且 ≠ 上批 `372bd83f` → 确认新构建。集成包（`r2-apk-sha256.txt`）：monster `7253a65a…`、original `1f342006…`、overhaul `28d05ab7…`。
+
+## R2-1. 八项断言结果表
+
+| # | 断言 | 结果 | 原文摘录 |
+|---|---|---|---|
+| 1 | item 六读 200 且非 `not in game` | **PASS** | `r2-read-*`：inventory `{"bags":[{"bag":0,…slot0 再生药水(小) count3…}`；money `{"money":28550}`；items 列表正常；bag/0/info `{"bag":0,"capacity":16,"slot_count":5}`；shop/items `{"items":[]}`。inventory bags 为 0..5 + EB 6(16,13)/7(16,3)/8(12,9)/9(12,4)/10(12,3)（`stackLimitIncrease=false` 下 EB 段仍存在，如实记录） |
+| 2 | 原版袋 move 5→6 票据 done + 反向复原 | **PASS** | 前进 ticket 8 `state:"done" result.ok=true keys[ok,state]`，无 `invalid extension inventory`；after：slot5 empty / slot6 cat65；反向 ticket 9 `done`；restored 后 slot5 raw 与 before **逐字 IDENTICAL**，slot6 empty |
+| 3 | EB enabled/29 live/容量 16/16/12/12/12 + 移动往返 | **PASS** | `r2-eb-status-before`：`enabled=true,injected=true`；features `extension_bag resources = live×29`；`capacities [16,16,12,12,12]`；EB bag6 slot0(cat14×13)→slot12 ticket 10 `done`，反向 ticket 11 `done`，payload 逐字 IDENTICAL |
+| 4 | features core.item 无 degraded；日志无 `missing optional capability` | **PARTIAL** | features：`core.item state=enabled enabled=true degraded=False error=None`，`failed:[]`（**PASS**）；但启动日志仍有 1 行 `W core plugin_registry.cpp:665 plugin core.item degraded on optional: missing optional capability: stack_limit.item_count`（f=1，**日志条款 FAIL**；最终 degraded 态已恢复 False）。实际降级 WARN 如实记录：`optional edge downgraded`×5（预期诊断） |
+| 5 | smoke 143 ≥125 pass / ≤18 warn / 0 fail，party 改善保留 | **PASS** | `r2-smoke_current.json`：**125/18/0**；vs 基线 diff=4（仅 party include/exclude/discharge/withdraw 405/warn→400/pass）；vs R1 diff=0（路由级一致；R2 修复的是 body 数据面） |
+| 6 | VM-P1-S2 原版物理袋两态（ON>99/OFF≤99/再 ON 恢复） | **PARTIAL（无载体）** | 进入值 `stackLimitIncrease=false`；false→true→false 往返完成，终值恢复 false；物理袋（bag0-5）6 个物品三态计数**完全一致**（`OFF==ON==OFF2`，无 >99 载体）→ ON>99/OFF≤99 条款**构造入口仍缺，不造假** |
+| 7 | EB 逻辑袋 >99 视图（R-48）重跑 | **PASS（含 1 处残留）** | `r2-s2-*.json` EB 段：bag6 slot14 cat5 **OFF=95 / ON=223 / OFF2=95**；ON 态 bag9 出现 228/770/129/321 等 >99，OFF 态无 >99 → 两态视图成立。**残留**：bag9 slot4 cat35（canonical 640）在 OFF/ON 均被跳过（模块日志 `extension inventory slot skipped: bag=9 slot=4 category=35 count=0`），未出现在 inventory EB 段 |
+| 8 | logcat 崩溃 0 + `invalid extension inventory` 0 | **PASS** | `r2-logcat.txt` 12,784 行，崩溃关键字 **0**；`invalid extension inventory` 在 logcat 与模块日志均 **0**；用例 1（EB 三态回退）真机证据 = 断言 7 的 OFF=95/ON=223 与 slot-skip |
+
+## R2-2. smoke 三方对比
+
+| 批次 | pass | warn | fail | vs 基线 diff |
+|---|---|---|---|---|
+| 基线 `smoke_baseline_v0.7.13.json` | 120（routes 实际 121） | 23（routes 实际 22） | 0 | — |
+| R1 `r1-smoke_current.json` | 125 | 18 | 0 | 4（party） |
+| **R2 `r2-smoke_current.json`** | **125** | **18** | **0** | **4（party）** |
+
+R2 vs R1 路由级 diff=0；差异仅在 item 读 body（R1 恒 `{"error":"not in game"}` → R2 真实数据，见 R2-1 #1）。
+
+## R2-3. degraded / 日志结论
+
+- **features 终态 PASS**：`core.item`/`extension_bag` 均 `enabled`、`degraded=False`、`error=None`；全局 `failed=[]`。
+- **启动日志残留 FAIL**：1 行 `missing optional capability: stack_limit.item_count`（`plugin_registry.cpp:665`，f=1）。R2 把段 2 复查移到 enable 轮后，但首个 sync_gates 轮内 stack_limit 能力尚未就绪，仍补报一次；随后恢复（features 反映 False）。**如需彻底消除需再排除该首轮时序**。
+- 预期诊断 WARN：`optional edge downgraded`×5；`extension inventory slot skipped`×1（bag9 slot4）。
+- 无 `extension inventory omitted`。
+
+## R2-4. 覆盖卡更新（R1+R2 真机终态）
+
+| 卡 | 状态 |
+|---|---|
+| VM-T2H-03 / VM-T2L-01 / VM-T2N-01（item 读写/读面） | **R2 真机 PASS（样本）**：item 六读真实数据、原版袋写票据 done、save 往返 PASS |
+| VM-D2D-01/02、VM-T2J-01（EB 面） | **R2 真机 PASS（功能级）**：EB enabled、29 live、容量 16/16/12/12/12、移动往返复原 |
+| VM-P1-S2（stack_limit 两态） | **PARTIAL**：EB 逻辑袋 >99 两态视图 PASS（R-48）；原版物理袋 ON>99 无载体，条款不可观测 |
+| 装配门禁（原 §3 依赖环） | **R1 PASS**（9 特性 enabled、无 dependency cycle） |
+| 仍 **NOT_ACCEPTED** | ① 原版物理袋 ON>99/OFF≤99 需 >99 载体（构造入口缺）；② EB bag9 slot4 等 canonical&0x7F==0 且活体对象缺失的槽位投影（slot skipped 残留）；③ 999 clamp、原子组失败注入；④ ≥105 等级/大额数值等未抽检路径；⑤ 读面逐字节 frozen 对比 |
+
+## R2-5. 恢复合规声明（R2）
+
+- **smoke 基线**：以 `r2-smoke_current.json` 为输出，`smoke_baseline_v0.7.13.json` 未覆写（前 sha256 `8d386bba…`，`git status` 无漂移）。
+- **output/**：R2 集成包 3 个（`r2-apk-sha256.txt`）；R1 构建集成包已备份 `.tmp/t2o-regression/output-backup/prev-r1-build/`；v0.7.14 备份保留。
+- **存档**：原版袋 slot5↔slot6、EB bag6 slot0↔slot12 各移动一次并复原（复读逐字一致，零净变更）；`stackLimitIncrease` false→true→false 往返，终值 = 进入值 false；本批未主动调 `/api/system/save`（沿用 smoke 内置步骤 123 的 1 次 200 写盘，与既往各批同口径）；结束 force-stop 回干净态。
+- `git diff --check` clean；未改源码（仅本目录证据与 README）；未 commit。
