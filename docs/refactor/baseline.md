@@ -90,19 +90,6 @@
 | `game_system.cpp` | legacy/system |
 | `game_system.h` | legacy/system |
 
-**重构期 `api/native/` 文件名前缀 → 迁移期标签（`arch_common._LEGACY_API_BY_STEM`）**
-
-| 当前文件名前缀 | 迁移期标签 |
-| --- | --- |
-| `game_character*` | legacy/character |
-| `game_inventory*` | legacy/inventory |
-| `game_party*` | legacy/party |
-| `game_quest*` | legacy/quest |
-| `game_save*` | legacy/save |
-| `game_shop*` | legacy/shop |
-| `game_ui*` | legacy/ui |
-| `game_world*` | legacy/world |
-
 > 说明：`_TARGET_PREFIXES` 为有序元组，`plugins/` 为目标插件层前缀；
 > legacy `feature/` 经重构期映射归入 `plugins/<id>`（待迁移分列）；
 > 七个目标目录内无法映射的路径由 `check_layers` 硬失败；其他 legacy 路径落入 `unknown` 并以警告上报。

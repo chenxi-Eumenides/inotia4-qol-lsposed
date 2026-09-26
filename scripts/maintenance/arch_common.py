@@ -83,17 +83,6 @@ def allows(src_layer: str, dst_layer: str) -> bool:
 
 _SKIP_DIRS = {"tests", "build"}
 
-_LEGACY_API_BY_STEM = {
-    "game_character": "character",
-    "game_party": "party",
-    "game_inventory": "inventory",
-    "game_world": "world",
-    "game_quest": "quest",
-    "game_ui": "ui",
-    "game_shop": "shop",
-    "game_save": "save",
-}
-
 _ROOT_OVERRIDES = {
     "game_system.cpp": "legacy/system",
     "game_system.h": "legacy/system",
@@ -147,12 +136,6 @@ def _classify_transition(rel: str) -> str:
     if rel.startswith("core/native/"):
         name = rel.rsplit("/", 1)[1]
         return _CORE_OVERRIDES.get(name, "infra")
-    if rel.startswith("api/native/"):
-        stem = rel.rsplit("/", 1)[1].rsplit(".", 1)[0]
-        for prefix in sorted(_LEGACY_API_BY_STEM, key=len, reverse=True):
-            if stem.startswith(prefix):
-                return "legacy/" + _LEGACY_API_BY_STEM[prefix]
-        return "legacy/api"
     if rel.startswith("feature/"):
         parts = rel.split("/")
         return "plugins/" + parts[1] if len(parts) > 2 else "plugins"

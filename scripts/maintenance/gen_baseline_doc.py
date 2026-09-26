@@ -224,12 +224,6 @@ def render_mapping() -> list[str]:
         "当前文件（cpp 根）",
         "目标层",
     )
-    lines += _bullet_map(
-        "重构期 `api/native/` 文件名前缀 → 迁移期标签（`arch_common._LEGACY_API_BY_STEM`）",
-        {f"{stem}*": f"legacy/{domain}" for stem, domain in ac._LEGACY_API_BY_STEM.items()},
-        "当前文件名前缀",
-        "迁移期标签",
-    )
     lines += [
         "> 说明：`_TARGET_PREFIXES` 为有序元组，`plugins/` 为目标插件层前缀；",
         "> legacy `feature/` 经重构期映射归入 `plugins/<id>`（待迁移分列）；",
