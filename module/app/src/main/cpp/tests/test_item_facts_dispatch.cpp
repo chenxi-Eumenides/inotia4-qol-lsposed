@@ -18,6 +18,8 @@
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "contracts/result.h"
+#include "bridge/native/item_write_result.h"
+#include "core/native/inventory_trade.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "infra/command_queue.h"
@@ -1387,11 +1389,124 @@ void test_static_not_ready_holds_snapshot() {
     descriptor.deactivate(ctx);
 }
 
+// T2e-0：bridge item 写信封 helper 的逐字节断言（对照 api/native 现状组装，冻结组装契约）。
+void test_bridge_item_write_result_helper() {
+    using qol::contracts::QolItemDiceAcceptResult;
+    using qol::contracts::QolItemInventoryStateWriteResult;
+
+    // 纯信封：成功 / 失败 / message 为空回退。
+    CHECK(qol::bridge::item_write_result_json(qol::contracts::ok(), "item write failed") ==
+          "{\"ok\":true}");
+    CHECK(qol::bridge::item_write_result_json(
+              qol::contracts::error(kQolErrBlocked, "inventory full", 14),
+              "item write failed") == "{\"ok\":false,\"error\":\"inventory full\"}");
+    CHECK(qol::bridge::item_write_result_json(
+              qol::contracts::error(kQolErrBlocked, nullptr, 0), "item write failed") ==
+          "{\"ok\":false,\"error\":\"item write failed\"}");
+    CHECK(qol::bridge::item_error_json("not in game") ==
+          "{\"ok\":false,\"error\":\"not in game\"}");
+
+    // use_item：成功无 gained / 1 项 / 多项（字段序 bag,slot,category,count）。
+    QolItemInventoryStateWriteResult use_out{};
+    CHECK(qol::bridge::item_use_result_json(qol::contracts::ok(), use_out) == "{\"ok\":true}");
+    use_out.flags = qol::contracts::kQolItemInventoryStateHasGained;
+    use_out.gained_count = 1;
+    use_out.gained[0] = {0, 3, 10, 2};
+    CHECK(qol::bridge::item_use_result_json(qol::contracts::ok(), use_out) ==
+          "{\"ok\":true,\"gained\":[{\"bag\":0,\"slot\":3,\"category\":10,\"count\":2}]}");
+    use_out.gained_count = 2;
+    use_out.gained[1] = {1, 4, 20, 5};
+    CHECK(qol::bridge::item_use_result_json(qol::contracts::ok(), use_out) ==
+          "{\"ok\":true,\"gained\":[{\"bag\":0,\"slot\":3,\"category\":10,\"count\":2},"
+          "{\"bag\":1,\"slot\":4,\"category\":20,\"count\":5}]}");
+    CHECK(qol::bridge::item_use_result_json(
+              qol::contracts::error(kQolErrBlocked, "bag full", 8), QolItemInventoryStateWriteResult{}) ==
+          "{\"ok\":false,\"error\":\"bag full\"}");
+    CHECK(qol::bridge::item_use_result_json(
+              qol::contracts::error(kQolErrBlocked, nullptr, 0), QolItemInventoryStateWriteResult{}) ==
+          "{\"ok\":false,\"error\":\"item use failed\"}");
+
+    // dice_accept：全 5 项 base/applied/delta（含负数 delta）。
+    QolItemDiceAcceptResult dice{};
+    dice.base[0] = 1; dice.base[1] = 2; dice.base[2] = 3; dice.base[3] = 4; dice.base[4] = 5;
+    dice.applied[0] = 6; dice.applied[1] = 7; dice.applied[2] = 8; dice.applied[3] = 9;
+    dice.applied[4] = 10;
+    dice.delta[0] = 5; dice.delta[1] = 5; dice.delta[2] = 5; dice.delta[3] = 5; dice.delta[4] = -1;
+    CHECK(qol::bridge::item_dice_accept_result_json(qol::contracts::ok(), dice) ==
+          "{\"ok\":true,\"base\":[1,2,3,4,5],\"applied\":[6,7,8,9,10],\"delta\":[5,5,5,5,-1]}");
+    CHECK(qol::bridge::item_dice_accept_result_json(
+              qol::contracts::error(kQolErrBlocked, nullptr, 0), QolItemDiceAcceptResult{}) ==
+          "{\"ok\":false,\"error\":\"dice accept failed\"}");
+    CHECK(qol::bridge::item_dice_accept_result_json(
+              qol::contracts::error(kQolErrBlocked, "no dice result pending", 21),
+              QolItemDiceAcceptResult{}) ==
+          "{\"ok\":false,\"error\":\"no dice result pending\"}");
+
+    // shop_buy：value=12 → price 12；失败/空文案。
+    QolItemInventoryStateWriteResult shop{};
+    shop.value = 12;
+    CHECK(qol::bridge::item_shop_buy_result_json(qol::contracts::ok(), shop) ==
+          "{\"ok\":true,\"price\":12}");
+    CHECK(qol::bridge::item_shop_buy_result_json(
+              qol::contracts::error(kQolErrBlocked, nullptr, 0), shop) ==
+          "{\"ok\":false,\"error\":\"shop buy failed\"}");
+
+    // discard：kOk 与每个 Status 分支（含 kStale→slot empty、default→discard failed）。
+    using inventory_trade::Status;
+    CHECK(qol::bridge::item_discard_result_json(Status::kOk) == "{\"ok\":true}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kNotInWorld) ==
+          "{\"ok\":false,\"error\":\"not in game\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kTaskBagExcluded) ==
+          "{\"ok\":false,\"error\":\"task bag excluded\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kEmptySlot) ==
+          "{\"ok\":false,\"error\":\"slot empty\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kStale) ==
+          "{\"ok\":false,\"error\":\"slot empty\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kNoNativeItem) ==
+          "{\"ok\":false,\"error\":\"extension item unavailable\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kSymbolsUnresolved) ==
+          "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kRemoveFailed) ==
+          "{\"ok\":false,\"error\":\"discard failed\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kNoSell) ==
+          "{\"ok\":false,\"error\":\"discard failed\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kPriceInvalid) ==
+          "{\"ok\":false,\"error\":\"discard failed\"}");
+    CHECK(qol::bridge::item_discard_result_json(Status::kCreditFailed) ==
+          "{\"ok\":false,\"error\":\"discard failed\"}");
+    CHECK(qol::bridge::item_discard_result_json(static_cast<Status>(999)) ==
+          "{\"ok\":false,\"error\":\"discard failed\"}");
+
+    // sell：kOk price 与每个 Status 分支（含 default→sell failed）。
+    auto sell = [](Status status, int64_t price) {
+        inventory_trade::Result r{};
+        r.status = status;
+        r.price = price;
+        return qol::bridge::item_sell_result_json(r);
+    };
+    CHECK(sell(Status::kOk, 7) == "{\"ok\":true,\"price\":7}");
+    CHECK(sell(Status::kNotInWorld, 0) == "{\"ok\":false,\"error\":\"not in game\"}");
+    CHECK(sell(Status::kTaskBagExcluded, 0) == "{\"ok\":false,\"error\":\"task bag excluded\"}");
+    CHECK(sell(Status::kEmptySlot, 0) == "{\"ok\":false,\"error\":\"slot empty\"}");
+    CHECK(sell(Status::kNoNativeItem, 0) ==
+          "{\"ok\":false,\"error\":\"extension item unavailable\"}");
+    CHECK(sell(Status::kStale, 0) == "{\"ok\":false,\"error\":\"slot empty\"}");
+    CHECK(sell(Status::kSymbolsUnresolved, 0) ==
+          "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    CHECK(sell(Status::kNoSell, 0) == "{\"ok\":false,\"error\":\"item cannot be sold\"}");
+    CHECK(sell(Status::kPriceInvalid, 0) == "{\"ok\":false,\"error\":\"invalid sell price\"}");
+    CHECK(sell(Status::kCreditFailed, 0) ==
+          "{\"ok\":false,\"error\":\"sell money update failed\"}");
+    CHECK(sell(Status::kRemoveFailed, 0) == "{\"ok\":false,\"error\":\"sell failed\"}");
+    CHECK(sell(static_cast<Status>(999), 0) == "{\"ok\":false,\"error\":\"sell failed\"}");
+}
+
 }  // namespace
 
 int main() {
     test_lifecycle_and_responses();
     test_static_not_ready_holds_snapshot();
+    test_bridge_item_write_result_helper();
     std::printf("item_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
