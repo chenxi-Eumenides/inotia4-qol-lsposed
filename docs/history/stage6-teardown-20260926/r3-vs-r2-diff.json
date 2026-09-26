@@ -1,0 +1,17 @@
+{
+  "baseline_summary": {
+    "pass": 125,
+    "warn": 18,
+    "fail": 0,
+    "total": 143
+  },
+  "current_summary": {
+    "pass": 125,
+    "warn": 18,
+    "fail": 0,
+    "total": 143
+  },
+  "route_count": 143,
+  "diff_count": 0,
+  "diffs": []
+}

@@ -1,0 +1,121 @@
+=== Inotia4Qol log start 2026-09-26 19:05:27.393 ===
+2026-09-26 19:05:27.565 f=0 I platform call_patch.cpp:326 patched word addr=0x727c56003c new=0x34000360
+2026-09-26 19:05:27.597 f=0 I platform call_patch.cpp:326 patched word addr=0x727cb4e818 new=0x7101fd1f
+2026-09-26 19:05:27.598 f=0 I core core_patches.cpp:97 core_patches monster compat: 0x727cb4e818 cmp w8,#0x62 -> #0x7F
+2026-09-26 19:05:27.614 f=0 I platform call_patch.cpp:286 patched call=0x727c4aa6ec replacement=0x96ead922
+2026-09-26 19:05:27.614 f=0 I platform call_patch.cpp:286 patched call=0x727c4e19c4 replacement=0x96e9fc83
+2026-09-26 19:05:27.614 f=0 I core frame_source.cpp:164 frame_source installed (render + logic anchors)
+2026-09-26 19:05:27.614 f=0 I platform transition_dispatch.cpp:76 logic-pre consumer registered
+2026-09-26 19:05:27.614 f=0 I platform call_patch.cpp:286 patched call=0x727c559d90 replacement=0x96e6782d
+2026-09-26 19:05:27.614 f=0 I platform call_patch.cpp:286 patched call=0x727c55aef0 replacement=0x96e673ea
+2026-09-26 19:05:27.614 f=0 I save save_enter.cpp:153 installed load=0x727c559d90 new=0x727c55aef0
+2026-09-26 19:05:27.614 f=0 I platform call_patch.cpp:286 patched call=0x727c55e640 replacement=0x96e6731b
+2026-09-26 19:05:27.615 f=0 I save save_exit.cpp:105 installed call=0x727c55e640
+2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=attribute_range_display capability=attribute.quality
+2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag
+2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=custom_recipe consumer=craft_ui capability=craft_result
+2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality
+2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=core.item capability=extension_bag
+2026-09-26 19:05:27.623 f=0 I core core.character [core.character] provider install
+2026-09-26 19:05:27.623 f=0 I core core.character [core.character] provider enabled: capability + http queries
+2026-09-26 19:05:27.624 f=0 I core core.craft [core.craft] provider install
+2026-09-26 19:05:27.624 f=0 I core core.craft [core.craft] provider enabled: capability published
+2026-09-26 19:05:27.641 f=0 I core core.item [core.item] provider install
+2026-09-26 19:05:27.642 f=0 I core core.item [core.item] provider enabled: capability + http queries
+2026-09-26 19:05:27.648 f=0 I core core.save [core.save] provider install: facts + save writes
+2026-09-26 19:05:27.648 f=0 I core core.save [core.save] provider enabled: capability published
+2026-09-26 19:05:27.654 f=0 I ui settings.cpp:221 popup.settings acquired: state id=21
+2026-09-26 19:05:27.654 f=0 I core core.system [core.system] provider install
+2026-09-26 19:05:27.655 f=0 I core core.system [core.system] provider enabled: http queries
+2026-09-26 19:05:27.656 f=0 I core core.world [core.world] provider install
+2026-09-26 19:05:27.657 f=0 I core core.world [core.world] provider enabled: capability published
+2026-09-26 19:05:27.658 f=0 I core core.quest [core.quest] owner installed: http queries registered
+2026-09-26 19:05:27.916 f=0 I autosell scan.cpp:223 global enabled=0 save_active=0
+2026-09-26 19:05:27.916 f=0 I platform call_patch.cpp:286 patched call=0x727c557b88 replacement=0x96e8d7f2
+2026-09-26 19:05:27.925 f=0 I autosell panel.cpp:927 popup.autosell acquired: state id=20
+2026-09-26 19:05:27.925 f=0 I autosell scan.cpp:223 global enabled=0 save_active=0
+2026-09-26 19:05:27.925 f=0 I extension_bag extension_bag move_merge: behavior=0 extension_protection=0 (wrapper resident)
+2026-09-26 19:05:27.941 f=0 I extension_bag extension_bag move_merge: extension_source_protection=0 merge=0 (wrapper resident)
+2026-09-26 19:05:27.941 f=0 I platform plugins/push_all/feature.cpp push_all enabled=0
+2026-09-26 19:05:27.941 f=0 I platform plugins/push_all/feature.cpp push_all enabled=0
+2026-09-26 19:05:27.955 f=0 I save_backup plugin.cpp:296 slot delete hook: backup handover orig=0x727c5594e8
+2026-09-26 19:05:27.969 f=0 I save_backup panel.cpp:682 popup.savebackup acquired: state id=22
+2026-09-26 19:05:27.982 f=0 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+2026-09-26 19:05:27.992 f=0 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+2026-09-26 19:05:28.004 f=0 I special_equip plugins/special_equip/feature.cpp enabled=1
+2026-09-26 19:05:28.020 f=0 I special_equip plugins/special_equip/feature.cpp enabled=1
+2026-09-26 19:05:28.021 f=0 I core assembly.cpp:433 assembly: initialized=true registered=27 install_failed=0 kernel_only=false
+2026-09-26 19:05:28.026 f=0 I platform HookMain.kt:30 module loaded in process: com.com2us.inotia4.normal.freefull.google.global.android.common
+2026-09-26 19:05:28.027 f=0 I platform HookMain.kt:127 context not ready, retrying in 500ms
+2026-09-26 19:05:28.027 f=0 I platform ImmersiveMode.kt:29 ImmersiveMode hook installed on MainActivity.onWindowFocusChanged
+2026-09-26 19:05:28.027 f=0 I platform WatermarkOverlay.kt:95 WatermarkOverlay hook installed on MainActivity.onWindowFocusChanged
+2026-09-26 19:05:28.028 f=0 I platform HookMain.kt:137 NativeBridge init OK: {"G_MONEY_VMA":true,"G_MAP_ID_VMA":true,"G_PARTY_VMA":true,"G_ACTIVE_QUEST_VMA":true,"G_INVEN_VMA":true,"G_MAIN_MERC_SLOT_VMA":true,"G_PREV_STATE_VMA":true,"G_STATE_VMA":true,"G_GAMESTATE_VMA":true,"G_INITSTATE_VMA":true,"G_POPUP_ON_VMA":true,"G_MAINMENU_DRAW_VMA":true,"G_POPUP_STACK_VMA":true,"G_PLAYER_ACTIVE_VMA":true,"G_PLAYER_ACTIVE_GOT_VMA":true,"G_MAPINFOBASE_PDATA_GOT_VMA":true,"G_MAPINFOBASE_RECORD_SIZE_VMA":true,"G_MAPINFOBASE_RECORD_COUNT_VMA":true,"G_UICHOICE_ITEMTEXT_VMA":true,"G_UICHOICE_COUNT_VMA":true,"G_UICHOICE_FOCUS_VMA":true,"G_UICHOICE_MAIN_TEXT_VMA":true,"G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA":true,"G_UICHOICE_CONTROL_GOT_VMA":true,"G_UIMIX_VMA":true,"F_GET_MONEY_VMA":true,"F_GET_MEMBER_VMA":true,"F_GET_PARTY_SIZE_VMA":true,"F_GET_ATTR_VMA":true,"F_GET_EQUIP_VMA":true,"F_GET_EXP_VMA":true,"F_GET_NEXT_EXP_VMA":true,"F_GET_RARITY_VMA":true,"F_GET_BAG_SIZE_VMA":true,"F_INVEN_GET_EMPTY_BAG_SLOT_VMA":true,"F_INVEN_IS_EMPTY_BAG_VMA":true,"F_INVEN_IS_HAVING_EMPTY_SLOT_VMA":true,"F_GET_BIT_VMA":true,"F_GET_CUMULATE_COUNT_VMA":true,"F_GET_DAMAGE_VMA":true,"F_GET_DEFENSE_VMA":true,"F_GET_STATUS_POINT_VMA":true,"F_GET_STAT_MAIN_VMA":true,"F_SET_STAT_MAIN_VMA":true,"F_SET_STAT_BASE_VMA":true,"F_STATUSDICE_ROLL_VMA":true,"F_PUT_JEWEL_VMA":true,"F_IS_JEWEL_VMA":true,"F_ENCHANT_ITEM_VMA":true,"F_IS_ENCHANT_SCROLL_VMA":true,"F_CHAR_INITIALIZE_STATUS_VMA":true,"F_CHAR_INITIALIZE_SKILL_VMA":true,"F_CHAR_SET_ACTION_ID_VMA":true,"F_CHAR_GET_ENEMY_TARGET_VMA":true,"F_QUESTSYSTEM_FIND_VMA":true,"F_QUESTSYSTEM_REMOVE_SLOT_VMA":true,"F_QUESTSYSTEM_IS_COMPLETE_VMA":true,"F_QUESTSYSTEM_CHANGE_QUEST_STATE_VMA":true,"F_SAVE_VMA":true,"F_SAVE_GET_SAVE_SLOT_VMA":true,"F_SAVE_LOAD_SAVE_SLOT_VMA":true,"F_UI_SET_POPUP_PROCESS_INFO_VMA":true,"F_GAME_START_RESUME_GAME_VMA":true,"F_SAVE_CREATE_SAVE_SLOT_VMA":true,"F_SAVE_DESTROY_SAVE_SLOT_VMA":true,"F_SAVESLOT_GET_HERO_VMA":true,"F_STATE_SET_VMA":true,"F_STATE_NEXT_START_PROCESS_VMA":true,"F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA":true,"F_SELECT_CHARACTER_START_GAME_VMA":true,"F_TUTORIAL_START_VMA":true,"F_SAVE_GET_SAVE_FILE_NAME_VMA":true,"F_CS_FS_REMOVE_VMA":true,"F_HUBSAVE_GET_KEY_VMA":true,"F_SAVE_LOAD_DATA_VMA":true,"F_MEM_FREE_VMA":true,"F_ENCRYPT_PROCESS2_VMA":true,"F_GAMESTATE_SET_STATE_VMA":true,"F_GAME_EXIT_VMA":true,"F_UINPC_INIT_VMA":true,"F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA":true,"F_UINPC_EXE_CURRENT_TASK_VMA":true,"F_UINPC_QUEST_BUTTON_OK_EXE_VMA":true,"F_NPCTASKLIST_MAKE_DLG_VMA":true,"F_PLAYER_DO_CHECK_NEAR_NPC_VMA":true,"F_CHAR_GET_SKILL_USAGE_VMA":true,"F_CHAR_SET_SKILL_USAGE_VMA":true,"F_GET_NAME_VMA":true,"F_GET_ACT_MAX_LEVEL_VMA":true,"F_FIND_MERC_SLOT_VMA":true,"F_SEARCH_PATH_VMA":true,"F_EVT_SET_STATE_VMA":true,"F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA":true,"F_KEY_SET_CODE_VMA":true,"F_WIPEOUT_BUTTON_GAMEOVER_VMA":true,"F_EVENT_BUTTON_OK_EXE_VMA":true,"F_EVENT_BUTTON_SKIP_EXE_VMA":true,"F_EVTSYSTEM_DO_CHECK_ALL_EVENT_VMA":true,"F_TUTORIAL_GETSTATE_VMA":true,"F_SET_MONEY_VMA":true,"F_ADD_MONEY_VMA":true,"F_MINUS_MONEY_VMA":true,"F_FIND_ITEM_VMA":true,"F_INVEN_HAVE_ITEM_VMA":true,"F_INVEN_GET_ITEM_COUNT_VMA":true,"F_INVEN_FIND_ITEM_SLOT_VMA":true,"F_INVEN_CALCULATE_EMPTY_SLOT_COUNT_FOR_SAVE_VMA":true,"F_INVEN_GET_EMPTY_SAVE_SLOT_EX_VMA":true,"F_INVEN_GET_NEEDED_SAVE_SLOT_EX_VMA":true,"F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA":true,"F_REMOVE_ITEM_VMA":true,"F_INVEN_REMOVE_ITEM_DATA_VMA":true,"F_INVEN_GET_ITEM_COUNT_VMA":true,"F_ITEM_GET_PRICE_VMA":true,"F_ITEM_GET_SELL_PRICE_VMA":true,"F_ITEMDATABASE_IS_NO_SELL_VMA":true,"F_ITEM_GET_ABILITY_LEVEL_VMA":true,"F_ITEM_GET_BUY_PRICE_VMA":true,"F_ITEMSYSTEM_GET_OPTION_VALUE_VMA":true,"F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA":true,"F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA":true,"F_MATH_GET_RANDOM_VMA":true,"F_INVEN_FIND_SAVE_SLOT_VMA":true,"F_INVEN_SAVE_ITEM_VMA":true,"F_INVEN_SAVE_ITEM_DIRECT_VMA":true,"F_INVEN_SAVE_ITEM_ON_EMPTY_VMA":true,"F_DEALSYSTEM_FIND_SALE_BY_ID_VMA":true,"F_DEALSYSTEM_CLEAR_ITEM_VMA":true,"F_INVEN_MOVE_ITEM_VMA":true,"F_ITEMSYSTEM_DIVIDE_VMA":true,"F_SET_EXP_VMA":true,"F_SET_LEVEL_VMA":true,"F_ADD_EXP_VMA":true,"F_SET_STATUS_POINT_VMA":true,"F_SET_AUTO_ATTACK_VMA":true,"F_EQUIP_ITEM_VMA":true,"F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA":true,"F_UNEQUIP_VMA":true,"F_CAN_EQUIP_VMA":true,"F_CAN_UNEQUIP_VMA":true,"F_CAN_CHANGE_EQUIP_VMA":true,"F_GET_MENU_CHARACTER_VMA":true,"F_FIND_EQUIP_SLOT_VMA":true,"F_GET_EQUIP_ITEM_VMA":true,"F_SET_EQUIP_ITEM_VMA":true,"F_IS_SPECIAL_NPC_VMA":true,"F_LEARN_ACTION_VMA":true,"F_SET_ACTIVE_PLAYER_VMA":true,"F_PARTY_SWAP_VMA":true,"F_SET_POSITION_VMA":true,"F_CHANGE_MAP_VMA":true,"F_UICHOICE_BUTTON_LIST_EXE_VMA":true,"F_UICHOICE_CREATE_CONTROL_VMA":true,"F_UICHOICE_PROCESS_VMA":true,"F_UI_CHOICE_INIT_VMA":true,"F_SCENE_EVENT_POPUP_SC_CHOICE_VMA":true,"F_MAPCHANGE_SET_VMA":true,"F_MEMORYTEXT_GET_TEXT_VMA":true,"F_MOVE_AS_PATH_VMA":true,"F_CHAR_MOVE_VMA":true,"F_CHAR_PICK_ITEM_ALL_VMA":true,"F_CHAR_GET_AREA_RECT_VMA":true,"F_MEM_MALLOC_VMA":true,"F_NOTIFIER_ADD_VMA":true,"F_CHAR_SET_DIRECTION_VMA":true,"F_CHAR_REMOVE_PATH_
+2026-09-26 19:05:28.072 f=0 I platform HookMain.kt:139 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/3920587455.apk sha256=ea90eed85c4a51b7e3dc22e4521e142b4132f7f99e4f437ca51f98380804de77
+2026-09-26 19:05:28.089 f=0 I http ApiServer.kt:143 module assets added: /data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/3920587455.apk
+2026-09-26 19:05:28.120 f=0 I platform WatermarkOverlay.kt:144 watermark overlay attached color=26ffffff rule=默认
+2026-09-26 19:05:28.601 f=0 I config ModuleConfig.kt:165 config loaded: listenAddress=0.0.0.0 listenPort=8088 stackLimitIncrease=false moveMergeEnabled=true opEnabled=true customRecipeEnabled=true simpleModeEnabled=false pushAllEnabled=true autoSellEnabled=true apiEnabled=true debugLogEnabled=true
+2026-09-26 19:05:28.628 f=0 I save_backup feature.cpp:223 save backup map_names loaded: 416 entries (json bytes=10761)
+2026-09-26 19:05:29.127 f=0 I http ApiServer.kt:116 savebackup ui inject: {"ok":true}
+2026-09-26 19:05:29.212 f=0 I save_backup panel.cpp:526 apply_backups: 0 -> 21 backups, total_pages=5, page_index=0
+2026-09-26 19:05:29.212 f=0 I save_backup panel.cpp:834 self_check: list+parse 84.2 ms, apply 0.270 ms, 21 backups
+2026-09-26 19:05:29.212 f=0 I http ApiServer.kt:118 savebackup self check: {"ok":true,"backup_count":21,"total_pages":5,"page_index":0}
+2026-09-26 19:05:29.225 f=0 I config ConfigApiService.kt:48 stackLimitIncrease=false applied=true
+2026-09-26 19:05:29.225 f=0 I config ConfigApiService.kt:50 moveMergeEnabled=true applied=true
+2026-09-26 19:05:29.225 f=0 I config ConfigApiService.kt:52 extensionBagEnabled=true applied=true
+2026-09-26 19:05:29.226 f=0 I config ConfigApiService.kt:54 customRecipeEnabled=true applied=true
+2026-09-26 19:05:29.226 f=0 I config ConfigApiService.kt:56 simpleModeEnabled=false applied=true
+2026-09-26 19:05:29.226 f=0 I config ConfigApiService.kt:58 pushAllEnabled=true applied=true
+2026-09-26 19:05:29.226 f=0 I config ConfigApiService.kt:60 autoSellEnabled=true applied=true
+2026-09-26 19:05:29.227 f=0 I config ConfigApiService.kt:62 apiEnabled=true applied=true
+2026-09-26 19:05:29.227 f=0 I config ConfigApiService.kt:66 opEnabled=true applied to native
+2026-09-26 19:05:29.228 f=0 I config ConfigApiService.kt:68 debugLogEnabled=true applied ok
+2026-09-26 19:05:29.473 f=0 I catalog /home/chenxi-zqs/Code/opencode-workspace/projects/inotia4-qol-lsposed/module/app/src/main/cpp/g static tiles loaded: 416 maps, ready=1
+2026-09-26 19:05:29.475 f=0 I config ConfigApiService.kt:134 static tiles loaded: true
+2026-09-26 19:05:29.660 f=0 I http ApiServer.kt:180 AndServer started on 0.0.0.0:8088
+2026-09-26 19:05:29.849 f=1 I extension_bag extension_bag move_merge: behavior=1 extension_protection=0 (wrapper resident)
+2026-09-26 19:05:29.850 f=1 I simple_mode plugins/simple_mode/feature.cpp enabled=0
+2026-09-26 19:05:29.850 f=1 I platform plugins/push_all/feature.cpp push_all enabled=1
+2026-09-26 19:05:29.850 f=1 I autosell scan.cpp:223 global enabled=1 save_active=0
+2026-09-26 19:05:29.850 f=1 W custom_recipe plugins/custom_recipe/table recipe table not ready recipe_size=0 mixture_size=0 count=0
+2026-09-26 19:05:29.850 f=1 W core plugin_registry.cpp:1830 plugin custom_recipe gate install deferred on own:RECIPEBASE_MIXTUREBASE: resource own:RECIPEBASE_MIXTUREBASE: ownership acquire rejected
+2026-09-26 19:05:29.889 f=1 I platform call_patch.cpp:286 patched call=0x727c4d1488 replacement=0x96ecc7e5
+2026-09-26 19:05:29.889 f=1 I platform call_patch.cpp:286 patched call=0x727c4d8ea0 replacement=0x96eca95f
+2026-09-26 19:05:29.889 f=1 I platform call_patch.cpp:286 patched call=0x727c4d8f4c replacement=0x96eca934
+2026-09-26 19:05:29.889 f=1 I platform call_patch.cpp:286 patched call=0x727c532c88 replacement=0x96eb41e5
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c536850 replacement=0x96eb32f3
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c56a708 replacement=0x96ea6345
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c56aa84 replacement=0x96ea6266
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c56acf0 replacement=0x96ea61cb
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4c46e0 replacement=0x96ed11d2
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4c46e4 replacement=0x96ed127e
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c557bcc replacement=0x96eac602
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4c5cc0 replacement=0x96ed0f3c
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4b7f28 replacement=0x96ed47bd
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4c6188 replacement=0x96ed0fb5
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4df87c replacement=0x96ecaa94
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c55c63c replacement=0x96eab774
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:388 patched branch call=0x727c4e00e4 thunk=0x727cdd3020 replacement=0x1423cbcf
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4df4a0 replacement=0x96ecaceb
+2026-09-26 19:05:29.890 f=1 I platform call_patch.cpp:286 patched call=0x727c4df540 replacement=0x96ecacc3
+2026-09-26 19:05:29.891 f=1 I platform call_patch.cpp:286 patched call=0x727c558474 replacement=0x96eac97b
+2026-09-26 19:05:29.891 f=1 I platform call_patch.cpp:286 patched call=0x727c4cea74 replacement=0x96ecf09a
+2026-09-26 19:05:29.891 f=1 I extension_bag extension_bag move_merge: extension_source_protection=1 merge=1 (wrapper resident)
+2026-09-26 19:05:29.891 f=1 I platform call_patch.cpp:286 patched call=0x727c4f6970 replacement=0x96ecefee
+2026-09-26 19:05:29.891 f=1 I platform call_patch.cpp:326 patched word addr=0x727c4f6988 new=0xd503201f
+2026-09-26 19:05:29.891 f=1 I platform plugins/push_all/feature.cpp push_all enabled=1
+2026-09-26 19:05:29.900 f=2 W core plugin_registry.cpp:698 plugin core.item degraded on optional: missing optional capability: stack_limit.item_count
+2026-09-26 19:05:33.232 f=62 I custom_recipe plugins/custom_recipe/table recipe table injected base=69 records=71 materials=191 book_bytes=7
+2026-09-26 19:05:39.523 f=114 I platform HookMain.kt:90 blocked ActivityIndicatorOpen (Connecting.. progress dialog)
+2026-09-26 19:05:42.225 f=118 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=0} result={ok:true} dur=3ms
+2026-09-26 19:05:42.229 f=118 I platform AgreementPopup.kt:68 agreement close dispatched, parent kept
+2026-09-26 19:05:44.709 f=121 I ui settings_injection.inc:47 more games ExecuteProc bound: ctrl=0x728e96c410
+2026-09-26 19:05:48.363 f=188 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:true} dur=30ms
+2026-09-26 19:05:48.424 f=189 I platform plugins/core.quest/feature.cpp quest resync: fixed=0
+2026-09-26 19:05:48.607 f=192 I extension_bag extension_bag sidecar load slot=0 parsed=1 items=0/0=14x13,0/1=15x4,0/2=56x7,0/3=936x1,0/4=924x1,0/5=933x1,0/6=62x1,0/7=706x1,0/8=354x1,0/9=2x1,0/10=28x1,0/11=24x2,0/14=5x223,1/0=241x1,1/1=471x1,1/2=480x1,2/0=25x12,2/1=947x10,2/3=27x5,2/4=20x7,2/5=946x2,2/6=19x5,2/7=26x3,2/8=1010x2,2/9=1011x7,3/0=33x228,3/1=57x770,3/2=36x129,3/3=41x321,3/4=35x640,4/0=937x1,4/1=935x1,4/2=938x1
+2026-09-26 19:05:48.646 f=192 I custom_recipe plugins/custom_recipe dynamic special recipes rebuilt count=26 equip=26 materialPool=14
+2026-09-26 19:05:48.648 f=192 I autosell store.cpp:103 sidecar config load slot=0 parsed=1
+2026-09-26 19:05:48.648 f=192 I autosell scan.cpp:198 save enter slot=0; sync task
+2026-09-26 19:05:48.649 f=192 I save save_enter.cpp:69 save enter fired callbacks=0
+2026-09-26 19:05:49.057 f=199 I platform HookMain.kt:64 blocked Hive SelectTarget.iapSelectTarget (payment dialog)
+2026-09-26 19:05:49.084 f=199 W core core.item extension inventory slot skipped: bag=9 slot=4 category=35 count=0
+2026-09-26 19:05:49.088 f=199 I platform IapBlocker.kt:35 hive recovery: {"ok":true}

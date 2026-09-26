@@ -1,0 +1,3 @@
+77ae716e8cb6a0c124136f1c970bf12ffbf40779a81d46e0cd4ca0b2c4599f92  output/Inotia4_v1.3.2_monster_v29_lspatched.apk
+ba927a6cf276c480f0ff3c429c5d64918865a45e3648fa273cef486e58d618c7  output/Inotia4_v1.3.2_original_lspatched.apk
+ab031a498cba88a1442a8751777218c45158863e9e7e7ca554b2cc6215e97dd9  output/Inotia4_v1.3.2_overhaul_lspatched.apk
