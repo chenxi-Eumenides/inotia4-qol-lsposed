@@ -4,6 +4,7 @@
 #include <string>
 
 #include "game/access/game_access.h"
+#include "game/access/ui_state.h"
 #include "game/json/game_json.h"
 #include "game/nav/game_nav.h"
 #include "game/read/item_class.h"
@@ -628,6 +629,99 @@ inline std::string legacy_data_quest_active_json() {
         }
     }
     s += "]}";
+    return s;
+}
+
+inline std::string legacy_data_debug_ui_json() {
+    char buf[4096];
+    uint16_t state = g_state ? *reinterpret_cast<uint16_t*>(g_state) : 0xFFFF;
+    uint16_t prev = g_prev_state ? *reinterpret_cast<uint16_t*>(g_prev_state) : 0xFFFF;
+    uint32_t gs = g_gamestate ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0xFFFFFFFF;
+    uint8_t init = g_initstate ? *reinterpret_cast<uint8_t*>(g_initstate) : 0xFF;
+    uint8_t popup_on = g_popup_on ? *reinterpret_cast<uint8_t*>(g_popup_on) : 0xFF;
+    uint8_t menu_draw = g_mainmenu_draw ? *reinterpret_cast<uint8_t*>(g_mainmenu_draw) : 0xFF;
+
+    snprintf(buf, sizeof(buf),
+        "{"
+        "\"state\":%u,\"prev_state\":%u,\"gamestate\":%u,\"initstate\":%u,"
+        "\"popup_on\":%u,\"menu_draw\":%u,"
+        "\"popup_stack\":[",
+        state, prev, gs, init, popup_on, menu_draw);
+
+    std::string s = buf;
+    if (g_popup_stack) {
+        uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
+        for (int i = 0; i < 32; i += 4) {
+            if (i > 0) s += ",";
+            s += std::to_string(*reinterpret_cast<uint32_t*>(stk + i));
+        }
+    } else {
+        s += "null";
+    }
+    s += "],\"popup_stack_hex\":\"";
+    if (g_popup_stack) {
+        uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
+        for (int i = 0; i < 32; ++i) {
+            snprintf(buf, sizeof(buf), "%02x", stk[i]);
+            s += buf;
+        }
+    }
+    s += "\"";
+
+    if (g_base != 0) {
+        int32_t i32type = *reinterpret_cast<int32_t*>(g_base + G_POPUP_TYPE_VMA);
+        int32_t i32disp  = *reinterpret_cast<int32_t*>(g_base + G_POPUP_DISPTYPE_VMA);
+        s += ",\"popup_type\":" + std::to_string(i32type);
+        s += ",\"popup_disp_type\":" + std::to_string(i32disp);
+
+        auto r8 = [&](uintptr_t vma, const char* name) {
+            s += ",\"" + std::string(name) + "\":" +
+                 std::to_string(static_cast<int>(*reinterpret_cast<int8_t*>(g_base + vma)));
+        };
+        auto ru8 = [&](uintptr_t vma, const char* name) {
+            s += ",\"" + std::string(name) + "\":" +
+                 std::to_string(static_cast<int>(*reinterpret_cast<uint8_t*>(g_base + vma)));
+        };
+        auto ru16 = [&](uintptr_t vma, const char* name) {
+            s += ",\"" + std::string(name) + "\":" +
+                 std::to_string(*reinterpret_cast<uint16_t*>(g_base + vma));
+        };
+        auto ru32 = [&](uintptr_t vma, const char* name) {
+            s += ",\"" + std::string(name) + "\":" +
+                 std::to_string(*reinterpret_cast<uint32_t*>(g_base + vma));
+        };
+
+        r8(G_UI_PARTY_MENU_INDEX_VMA, "partyMenuIndex");
+        ru8(G_UI_QUEST_MENU_STATE_VMA, "questMenuState");
+        ru8(G_UI_STORE_BUY_TYPE_VMA, "storeBuyType");
+        ru8(G_UI_STORE_SEL_CLASS_VMA, "storeSelectedClass");
+        ru8(G_UI_HELP_STATE_VMA, "helpState");
+        ru8(G_UI_MMENU_SEL_CLASS_VMA, "mainmenuSelectedClass");
+        ru8(G_UI_MMENU_SAVE_SLOT_VMA, "mainmenuSaveSlotType");
+        ru8(G_UICHOICE_FOCUS_VMA, "choiceFocusIndex");
+        ru8(G_UI_SHORTCUT_PAGE_VMA, "shortcutPage");
+        ru16(G_UI_QUEST_MENU_MAIN_SIZE_VMA, "questMenuMainListSize");
+        ru16(G_UI_QUEST_MENU_SUB_SIZE_VMA, "questMenuSubListSize");
+        ru32(G_POPUP_FPCANCEL_VMA, "popupFpCancelLo");
+    }
+    // popup 栈顶原始字段（诊断用）：popup_top_vma 只返回「减去 g_base 后的 VMA」，
+    // 当 enter 字段本身不是绝对地址时该换算会得到 0，无法区分「栈空」与「enter 非绝对地址」。
+    if (g_popup_stack != nullptr) {
+        uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
+        uint32_t count = *reinterpret_cast<uint32_t*>(stk + POPUP_STACK_COUNT);
+        uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
+        s += ",\"popup_count\":" + std::to_string(count);
+        s += ",\"popup_data\":" + std::to_string(data);
+        s += ",\"g_base\":" + std::to_string(g_base);
+        if (data != 0 && count > 0 && count <= 27) {
+            uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
+            s += ",\"popup_top_enter\":" +
+                 std::to_string(*reinterpret_cast<uint64_t*>(top + POPUP_ENTRY_ENTER));
+            s += ",\"popup_top_enter_vma\":" + std::to_string(qol::game::popup_top_vma());
+        }
+    }
+
+    s += "}";
     return s;
 }
 

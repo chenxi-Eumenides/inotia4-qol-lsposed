@@ -124,7 +124,7 @@ Java_com_inotia4_qol_NativeBridge_nativeGetGamestateJson(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetDebugUiJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_debug_ui_json().c_str());
+    return env->NewStringUTF(qol::host::legacy_data_debug_ui_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

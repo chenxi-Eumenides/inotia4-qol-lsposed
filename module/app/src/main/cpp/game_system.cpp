@@ -5,6 +5,7 @@
 
 #include "game/access/game_access.h"
 #include "game/access/quest.h"
+#include "game/access/ui_state.h"
 #include "game/access/save.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/item_port.h"
@@ -20,7 +21,6 @@
 #include "game_world.h"
 #include "api/native/game_inventory.h"
 #include "api/native/game_shop.h"
-#include "api/native/game_ui.h"
 #include "api/native/game_save.h"
 #include "core/native/game_cache.h"
 #include "game_dialog.h"
@@ -142,9 +142,9 @@ std::string data_events_json() {
 std::string build_gamestate_json() {
     bool story_active = data_story_active();
 
-    // v0.5.42：screen 统一判定（data_ui_screen：主菜单细分/教学/弹窗/剧情/对话框/面板），
+    // v0.5.42：screen 统一判定（ui_screen：主菜单细分/教学/弹窗/剧情/对话框/面板），
     // 完全基于 popup 栈顶 + 状态机，替代旧内联判定与 dialog_active 布尔（数据残留误报修复）。
-    const char* screen = data_ui_screen();
+    const char* screen = ui_screen();
 
     // 帧计数：FPS 系统每帧 +1（0x3075f0 u64，FPS_getTotalFrameCount 官方读取；G_FRAME_COUNT_VMA 为实测启用源）
     uint64_t frame = 0;
@@ -181,10 +181,10 @@ std::string build_snapshot_json() {
     }
     s += "\"frame\":" + std::to_string(frame);
 
-    // v0.5.42：snapshot 的 screen 与 /api/ui 统一（data_ui_screen 完整枚举），
+    // v0.5.42：snapshot 的 screen 与 /api/ui 统一（ui_screen 完整枚举），
     // 替代旧简化三态（main_menu/world/loading）——AI 可精确判断当前界面
     s += ",\"screen\":";
-    s += "\"" + std::string(data_ui_screen()) + "\"";
+    s += "\"" + std::string(ui_screen()) + "\"";
 
     s += ",\"money\":" + std::to_string(fn_get_money != nullptr ? fn_get_money() : -1);
     s += ",\"map_id\":" + std::to_string(current_map_id());
@@ -320,7 +320,7 @@ std::string build_snapshot_enriched_json() {
     }
     std::string s = "{\"frame\":" + std::to_string(frame);
     s += ",\"screen\":";
-    s += "\"" + std::string(data_ui_screen()) + "\"";
+    s += "\"" + std::string(ui_screen()) + "\"";
     s += ",\"money\":" + std::to_string(fn_get_money != nullptr ? fn_get_money() : -1);
     s += ",\"map_id\":" + std::to_string(current_map_id());
     void* hero = lead_member();
@@ -909,14 +909,14 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
     bool state_is_player = false;
     switch (kind) {
         case contracts::kQolUiWritePanelOpen:
-            op = data_op_panel_open(panel != nullptr ? std::string(panel) : std::string());
+            op = qol::game::ui_panel_open(panel != nullptr ? std::string(panel) : std::string()).str();
             break;
         case contracts::kQolUiWritePanelClose:
-            op = data_op_panel_close();
+            op = qol::game::ui_panel_close().str();
             break;
         case contracts::kQolUiWriteMainMenu:
             // owner 命令路径：同守卫与清理，状态机切换走逻辑帧内联（不跨帧同步等待）。
-            op = data_op_main_menu_direct();
+            op = qol::game::ui_main_menu(true).str();
             state_is_player = true;
             break;
         default:

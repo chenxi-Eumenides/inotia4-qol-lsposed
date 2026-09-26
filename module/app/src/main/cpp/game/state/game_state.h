@@ -7,6 +7,9 @@
 bool game_in_world();
 int current_save_slot();
 const char* ui_blocked();
+// 统一 UI 状态判定（T2l-u 迁自 game_ui_read.inc）：主菜单细分/教学/弹窗/剧情/对话框/面板/world。
+// 与 /api/ui/screen 同源；只在游戏主线程调用（依赖 g_state/g_popup_stack）。
+const char* ui_screen();
 int tutorial_state();
 void tutorial_cancel();
 const char* tutorial_block_error();

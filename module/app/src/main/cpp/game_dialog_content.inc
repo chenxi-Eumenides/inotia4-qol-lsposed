@@ -53,7 +53,7 @@ std::string data_dialog_content_json() {
     uint8_t choice_count = *reinterpret_cast<uint8_t*>(g_base + G_UICHOICE_COUNT_VMA);
     uint8_t task_count = *reinterpret_cast<uint8_t*>(g_base + G_NPCTASKLIST_COUNT_VMA);
     // wipeout 死亡面板（v0.4.35）：栈顶 enter == F_PANEL_WIPEOUT_ENTER 时优先于 NPC 对话报告
-    uintptr_t top_vma = data_popup_top_vma();
+    uintptr_t top_vma = qol::game::popup_top_vma();
     if (top_vma == F_PANEL_WIPEOUT_ENTER) {
         // 仅暴露「游戏结束」（game_over）一项：revive/special_revive 走网络链
         // （CS_netGetActiveNetwork），离线/无网络时无作用，故不再作为可选项提供。
@@ -88,7 +88,7 @@ std::string data_dialog_content_json() {
         // displayed：区分「UI 对话框已显示」（popup 栈顶 npc 面板）vs「数据已建立但未渲染」
         // （如 start_interact 前的数据态、路过不可交互装饰物残留的 NEAR_NPC 数据）。
         out += ",\"displayed\":" +
-               std::string(data_popup_top_vma() == F_PANEL_NPC_ENTER ? "true" : "false");
+               std::string(qol::game::popup_top_vma() == F_PANEL_NPC_ENTER ? "true" : "false");
         void* near_npc = *reinterpret_cast<void**>(g_base + G_PLAYER_NEAR_NPC_VMA);
         if (near_npc != nullptr && fn_get_name != nullptr) {
             char* nm = fn_get_name(near_npc);
@@ -129,7 +129,7 @@ std::string data_dialog_content_json() {
     }
     // 面板态（v0.5.6 U1）：无弹窗/剧情/死亡/NPC 对话时，若栈顶是面板则报面板类型 + 动作。
     // save_slot 额外暴露 save（存档落盘，data_op_save 官方链）；其余面板仅 close（panel/close 官方流程3）。
-    const char* pname = data_top_panel_name();
+    const char* pname = qol::game::top_panel_name();
     if (pname != nullptr) {
         std::string out = "{\"type\":\"" + std::string(pname) + "\",\"options\":[";
         if (strcmp(pname, "save_slot") == 0)

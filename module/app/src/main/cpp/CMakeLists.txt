@@ -85,7 +85,6 @@ add_library(gamebridge SHARED
     core/native/game_cache.cpp
     core/native/module_save.cpp
     api/native/game_world.cpp
-    api/native/game_ui.cpp
     game_dialog.cpp
     api/native/game_shop.cpp
     api/native/game_save.cpp
@@ -340,6 +339,7 @@ target_sources(gamebridge PRIVATE
 # B4-5：save_backup 本体迁移为插件（零资源常驻 + 存档域原语收口 game/access/save）
 target_sources(gamebridge PRIVATE
     game/access/save.cpp
+    game/access/ui_state.cpp
 )
 
 # C1：world_teleport 迁移为插件（零资源常驻 + 世界/地图访问收口 game/access/world）

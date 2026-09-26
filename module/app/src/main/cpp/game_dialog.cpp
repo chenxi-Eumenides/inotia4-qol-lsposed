@@ -2,7 +2,7 @@
 #include "game/access/game_access.h"
 #include "game/json/game_json.h"
 #include "game/state/game_state.h"
-#include "api/native/game_ui.h"
+#include "game/access/ui_state.h"
 #include "game_world.h"
 #include "api/native/game_save.h"
 #include "game/ops/game_ops_common.h"

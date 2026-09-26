@@ -8,7 +8,7 @@
 // 用于嵌套 push 后校验栈顶是否真的切换：fn_popupstate_push 内部 ArrayStack_Push 失败时
 // GetTop 会返回当前栈顶指针（settings entry），与"push 成功"返回的指针一样非 0，
 // 仅凭返回值无法区分；必须直接读栈顶 enter_func 字段与 &savebackup_panel_enter 对比。
-// 注：data_popup_top_vma 只能解析 g_base+VMA 的原版 enter，无法识别 wrapper 函数。
+// 注：popup_top_vma 只能解析 g_base+VMA 的原版 enter，无法识别 wrapper 函数。
 bool is_savebackup_at_stack_top() {
     return ui_popup_top_matches(&savebackup_panel_enter);
 }

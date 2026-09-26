@@ -92,21 +92,21 @@ std::string data_op_dialog_select(const std::string& action, int index) {
         if (action != "ok" && action != "cancel") return op_err("no such option in popup");
     } else if (data_story_active()) {
         if (action != "next" && action != "skip") return op_err("no such option in story");
-    } else if (data_popup_top_vma() == F_PANEL_WIPEOUT_ENTER) {
+    } else if (qol::game::popup_top_vma() == F_PANEL_WIPEOUT_ENTER) {
         // 仅提供 game_over：revive/special_revive 走网络链，离线无作用，不再暴露。
         if (action != "game_over") return op_err("no such option in wipeout");
-    } else if (data_popup_top_vma() == F_PANEL_NPC_QUEST_ENTER) {
+    } else if (qol::game::popup_top_vma() == F_PANEL_NPC_QUEST_ENTER) {
         // npc_quest 面板：仅接受 complete（完成任务）/ close（关闭面板）
         if (action != "complete" && action != "close") return op_err("no such option in npc_quest");
     } else if (g_base != 0 &&
                (*reinterpret_cast<uint8_t*>(g_base + G_UICHOICE_COUNT_VMA) > 0 ||
                 *reinterpret_cast<uint8_t*>(g_base + G_NPCTASKLIST_COUNT_VMA) > 0)) {
         if (action != "next" && action != "close" && index < 0) return op_err("no such option in npc");
-    } else if (data_top_panel_name() != nullptr) {
+    } else if (qol::game::top_panel_name() != nullptr) {
         // 面板态（v0.5.6 U1）：save_slot 接受 save/close，其余面板仅 close（panel/close 官方流程3）
-        if (action != "close" && !(action == "save" && strcmp(data_top_panel_name(), "save_slot") == 0)) {
+        if (action != "close" && !(action == "save" && strcmp(qol::game::top_panel_name(), "save_slot") == 0)) {
             std::string err = "no such option in ";
-            err += data_top_panel_name();
+            err += qol::game::top_panel_name();
             return op_err(err.c_str());
         }
     } else {
@@ -131,27 +131,27 @@ std::string data_op_dialog_select(const std::string& action, int index) {
     // npc_quest 面板动作（v0.4.55）：complete=完成任务（UINpcQuest_ButtonOKExe 官方链：
     // questIdx→stateTbl 判定→完成态走 UI_SetPopupProcessInfo(3,0)+ChangeQuestState+DoCheckAllEvent），
     // close=复用面板关闭（panel/close 官方流程3）。
-    if (data_popup_top_vma() == F_PANEL_NPC_QUEST_ENTER) {
+    if (qol::game::popup_top_vma() == F_PANEL_NPC_QUEST_ENTER) {
         if (action == "complete") {
             if (fn_uinpc_quest_button_ok_exe == nullptr) return op_err("symbol not resolved");
             fn_uinpc_quest_button_ok_exe();
             return op_ok();
         }
-        if (action == "close") return data_op_panel_close();
+        if (action == "close") return qol::game::ui_panel_close().str();
     }
     // wipeout 死亡面板动作：仅接受 game_over（revive/special_revive 走网络链，离线无作用，已移除）。
     if (action == "game_over") {
-        if (data_popup_top_vma() != F_PANEL_WIPEOUT_ENTER) return op_err("not in wipeout");
+        if (qol::game::popup_top_vma() != F_PANEL_WIPEOUT_ENTER) return op_err("not in wipeout");
         if (fn_wipeout_button_gameover == nullptr) return op_err("symbol not resolved");
         fn_wipeout_button_gameover();
         return op_ok();
     }
-    if (action == "close") return data_op_panel_close();
+    if (action == "close") return qol::game::ui_panel_close().str();
     if (index >= 0) return data_op_npc_dialog_select(index);
     // 面板态动作（v0.5.6 U1）：save=存档落盘、close=关闭面板（panel/close 官方流程3）
-    if (data_top_panel_name() != nullptr) {
+    if (qol::game::top_panel_name() != nullptr) {
         if (action == "save") return data_op_save();
-        if (action == "close") return data_op_panel_close();
+        if (action == "close") return qol::game::ui_panel_close().str();
     }
     return op_err("bad action");
 }

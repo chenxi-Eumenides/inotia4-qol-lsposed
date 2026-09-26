@@ -79,7 +79,7 @@ void* ui_allocate_control_data(size_t) { return nullptr; }
 bool ui_set_touch_cursor(void*, void*) { return false; }
 bool ui_reset_touch_moving() { return false; }
 bool ui_reset_touch_selected() { return false; }
-const char* data_ui_screen() { return "test"; }
+const char* ui_screen() { return "test"; }
 bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
 void ui_show_text_popup(int32_t) {}
 bool ui_control_is_moving(void*, int32_t* out_moving) {

@@ -1,8 +1,7 @@
 // game/state/game_state.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
-#include "api/native/game_ui.h"
-
 #include "game/access/game_access.h"
+#include "game/access/ui_state.h"
 #include "game/symbols/game_symbols.h"
 #include "contracts/extension_bag_port.h"
 #include "infra/frame/frame_task.h"
@@ -112,13 +111,75 @@ int current_save_slot() {
     return slot != nullptr ? static_cast<int>(*slot) : -1;
 }
 
+// GAMESTATE==1 表示剧情态（原 data_story_active 的等价直读，供 ui_screen 使用）。
+bool story_state_active() {
+    return g_gamestate != nullptr && *reinterpret_cast<uint32_t*>(g_gamestate) == 1;
+}
+
+// 统一 UI 状态判定（T2l-u 迁自 api/native/game_ui_read.inc；判定链逐字保持）。调用方只在
+// 游戏主线程使用（依赖 g_state/g_popup_stack）。
+const char* ui_screen() {
+    uint16_t state = g_state != nullptr ? *reinterpret_cast<uint16_t*>(g_state) : 0xFFFF;
+    // UIPopupMsg 不一定进入 popup 栈（启动确认弹窗即是此类），必须先于主菜单分支识别。
+    if (g_base != 0 && g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on))
+        return "dialog_popup";
+    if (state == 4) {
+        // 主菜单：按 popup 栈顶细分（v0.4.18 修复：标题屏/存档选择/职业选择）
+        switch (qol::game::popup_top_vma()) {
+            case F_PANEL_SAVE_SLOT_ENTER: return "main_menu_save_slot";
+            case F_PANEL_CHAR_SELECT_ENTER: return "main_menu_character_select";
+            case F_PANEL_DAILY_REWARD_ENTER: return "main_menu_daily_reward";
+            case F_PANEL_OPTIONS_ENTER: return "main_menu_options";
+            case F_PANEL_SETTINGS_ENTER: return "main_menu_settings";
+            default: return "main_menu";
+        }
+    }
+    if (state != 5) return "loading";
+    // 药水教学残血：自动完成不暂停（阻断教学暂停，避免卡住 API 操控；tutorial_pause 枚举保留不再返回）
+    if (tutorial_state() == 6) tutorial_cancel();
+    if (story_state_active()) return "dialog_story";
+    // popup 栈顶分派：对话框类（dialog_*）优先于面板类（panel_*）
+    uintptr_t top_vma = qol::game::popup_top_vma();
+    if (top_vma == 0) return "world";  // 无任何面板/对话框（含数据残留场景）
+    switch (top_vma) {
+        case F_PANEL_WIPEOUT_ENTER: return "dialog_wipeout";        // 死亡面板
+        case F_PANEL_NPC_QUEST_ENTER: return "dialog_quest";        // 任务完成面板
+        case F_PANEL_NPC_ENTER: return "dialog_npc";                // NPC 对话
+        case F_PANEL_CHOICE_ENTER: return "dialog_choice";          // 选择框（事件驱动）
+        case F_PANEL_INPUT_COUNT_ENTER: return "dialog_input_count"; // 数量输入
+        case F_PANEL_CHARACTER_INFO_ENTER: return "panel_character_info";
+        case F_PANEL_INVENTORY_ENTER: return "panel_inventory";
+        case F_PANEL_MERCENARY_ENTER: return "panel_mercenary";
+        case F_PANEL_CRAFT_ENTER: return "panel_craft";
+        case F_PANEL_NPC_REST_ENTER: return "panel_npc_rest";
+        case F_PANEL_NPC_REVIVE_ENTER: return "panel_npc_revive";
+        case F_PANEL_OPTIONS_ENTER: return "panel_options";
+        case F_PANEL_QUESTS_ENTER: return "panel_quests";
+        case F_PANEL_SAVE_SLOT_ENTER: return "panel_save_slot";
+        case F_PANEL_CHAR_SELECT_ENTER: return "panel_character_select";
+        case F_PANEL_SHORTCUT_ENTER: return "panel_shortcut";
+        case F_PANEL_SKILLS_ENTER: return "panel_skills";
+        case F_PANEL_SHOP_ENTER: return "panel_shop";
+        case F_PANEL_SETTINGS_ENTER: return "panel_settings";
+        case F_PANEL_WORLD_MAP_ENTER: return "panel_world_map";
+        case F_PANEL_IN_APP_ENTER:
+        case F_PANEL_UNK1_ENTER:
+        case F_PANEL_UNK2_ENTER:
+        case F_PANEL_UNK3_ENTER:
+        case F_PANEL_UNK4_ENTER:
+        case F_PANEL_UNK5_ENTER: return "panel_in_app";
+        case F_PANEL_DAILY_REWARD_ENTER: return "panel_daily_reward";
+        default: return "panel_ui_panel";  // 未知栈顶兜底
+    }
+}
+
 // UI 占据检查（v0.5.43）：world 态下 screen 非 "world" 即 UI 占据（对话框 dialog_*/面板 panel_*/教学）。
-// 复用 data_ui_screen() 统一判定（与 /api/ui/screen 同源）；返回占据的 screen 名，nullptr=无占据。
+// 复用 ui_screen() 统一判定（与 /api/ui/screen 同源）；返回占据的 screen 名，nullptr=无占据。
 // 用于世界操作（移动/战斗/交互/技能/物品）前置阻塞——UI 占据时游戏输入被接管，直接调 CHAR_Move
 // 等会与 UI 竞争破坏控制态（真机实测：dialog 打开时 move 仍执行）。
 const char* ui_blocked() {
     if (!game_in_world()) return nullptr;  // 非 world 态由各操作自身 game_in_world() 前置处理
-    const char* sc = data_ui_screen();
+    const char* sc = ui_screen();
     if (sc != nullptr && strcmp(sc, "world") != 0) return sc;
     return nullptr;
 }

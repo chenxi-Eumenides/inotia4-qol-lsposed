@@ -10,7 +10,8 @@
 #include "game/access/attr_range_ui.h"
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
-#include "api/native/game_ui.h"
+#include "game/access/popup_state.h"
+#include "game/state/game_state.h"
 
 using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
 using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
@@ -618,7 +619,7 @@ QolResult clear_control_proc(QolUiHandle control) {
 
 QolResult screen_name(const char** out) {
     if (out == nullptr) return invalid_argument();
-    *out = data_ui_screen();
+    *out = ui_screen();
     return *out == nullptr ? not_ready() : contracts::ok();
 }
 

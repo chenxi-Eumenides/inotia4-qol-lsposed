@@ -3,6 +3,7 @@
 #include "bridge/native/character_write_result.h"
 #include "bridge/native/item_write_result.h"
 #include "game/access/quest.h"
+#include "game/access/ui_state.h"
 #include "game/access/save.h"
 #include "game/adapter_ports/world_port.h"
 #include "game/ops/character_write.h"
@@ -235,7 +236,7 @@ Java_com_inotia4_qol_NativeBridge_nativeBackupDelete(JNIEnv* env, jclass, jstrin
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpMainMenu(JNIEnv* env, jclass) {
-    return op_result(env, "op_main_menu", (std::string("")), data_op_main_menu());
+    return op_result(env, "op_main_menu", (std::string("")), qol::game::ui_main_menu(false).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -250,7 +251,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpCreateSlot(JNIEnv* env, jclass, jint s
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpPanelClose(JNIEnv* env, jclass) {
-    return op_result(env, "op_panel_close", (std::string("")), data_op_panel_close());
+    return op_result(env, "op_panel_close", (std::string("")), qol::game::ui_panel_close().str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -258,7 +259,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpPanelOpen(JNIEnv* env, jclass, jstring
     const char* p = panel != nullptr ? env->GetStringUTFChars(panel, nullptr) : nullptr;
     std::string s = p != nullptr ? p : "";
     if (p != nullptr) env->ReleaseStringUTFChars(panel, p);
-    return op_result(env, "op_panel_open", ("s=" + str_of(s)), data_op_panel_open(s));
+    return op_result(env, "op_panel_open", ("s=" + str_of(s)), qol::game::ui_panel_open(s).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
