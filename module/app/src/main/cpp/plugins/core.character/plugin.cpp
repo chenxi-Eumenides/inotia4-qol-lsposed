@@ -17,7 +17,6 @@
 #include "contracts/commands.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_write_ops_port.h"
-#include "contracts/game_ports/character_write_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "json_slice.h"
@@ -1342,8 +1341,8 @@ bool append_character_state(std::string& body, contracts::QolCharacterStateKind 
     return body.size() <= capacity;
 }
 
-// 主线程结果处理器：owner 侧按 kind 分派 typed 低层原语，并按迁移前 build_character_write_result_json
-// 的规则拼装响应（成功 {"ok":true[,"state":...]}；失败透旧错误体）。
+// 主线程结果处理器：owner 侧按 kind 分派 typed 低层原语并组装响应
+// （成功 {"ok":true[,"state":...]}；失败透错误体）。
 bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;

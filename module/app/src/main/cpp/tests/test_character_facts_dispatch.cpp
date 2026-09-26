@@ -11,7 +11,6 @@
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/character_write_ops_port.h"
-#include "contracts/game_ports/character_write_port.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"

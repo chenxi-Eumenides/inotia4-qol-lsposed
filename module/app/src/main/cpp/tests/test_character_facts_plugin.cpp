@@ -4,7 +4,6 @@
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/character_write_ops_port.h"
-#include "contracts/game_ports/character_write_port.h"
 #include "contracts/http.h"
 #include "contracts/host_sdk.h"
 #include "game/access/game_access.h"
@@ -455,9 +454,9 @@ struct CharWritePayloadMirror {
     int32_t point_amt[8];
 };
 
-// 与 game_system.cpp 的 build_character_write_result_json 同构的 golden 基线：调用同一批
-// data_op_* 与 build_*_json，按迁移前规则拼装。game_system.cpp 属 legacy 聚合 TU，不并入 host
-// 测试；此处逐行复刻其信封逻辑，与 owner 输出比对。
+// 迁移前 legacy 写面信封的 golden 基线：调用同一批 data_op_* 与 build_*_json，按迁移前规则
+// 拼装。game_system.cpp 属 legacy 聚合 TU，不并入 host 测试；此处逐行复刻其信封逻辑，与
+// owner 输出比对（旧 builder 删除后仍作为对照源保留）。
 std::string legacy_character_write_result_json(const CharWritePayloadMirror& p) {
     using qol::contracts::QolCharacterWriteKind;
     std::string op;
