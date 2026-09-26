@@ -387,6 +387,8 @@ char g_error_text[kMaxPlugins][kMaxErrorText];
 // optional_requires 级联设置的 degraded；error 文本同为静态存储。
 char g_gate_error_text[kMaxPlugins][kMaxErrorText];
 bool g_gate_degraded[kMaxPlugins];
+// optional 依赖暂缓标记：段 1 时图中存在有效 provider 但尚未注册 → 暂缓到 install 循环后复查。
+uint8_t g_optional_pending[kMaxPlugins] = {};
 
 // 依赖图由描述符构建。注册顺序只决定描述符进入图的时机，不决定业务安装顺序；
 // g_install_order 是确定性的拓扑结果，provider 必须在 consumer 前完成 install/publish。
@@ -415,29 +417,12 @@ void set_dependency_error(uint32_t index, const char* prefix, const char* capabi
                   capability_id != nullptr ? capability_id : "<null>");
 }
 
-bool dependency_order_build() {
+// 构建确定性拓扑顺序（字典序最小 id）。include_optional=false 时只按 required 建边，
+// 供全图成环时回退；out_emitted 非空则回填本遍发射标记。
+bool topo_build(bool include_optional, bool* out_emitted) {
     bool edges[kMaxPlugins][kMaxPlugins] = {};
     uint32_t indegree[kMaxPlugins] = {};
     g_install_order_count = 0;
-    for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        g_dependency_invalid[i] = g_port_invalid[i];
-    }
-
-    // 先标记缺失/版本不兼容的 required，避免它们污染环检测结果。
-    for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        if (g_dependency_invalid[i]) continue;
-        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
-        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
-            bool id_found = false;
-            const uint32_t provider = provider_for_requirement(plugin.requires[r], &id_found);
-            if (provider != kNoPlugin) continue;
-            g_dependency_invalid[i] = true;
-            set_dependency_error(i, id_found ? "incompatible required capability"
-                                             : "missing required capability",
-                                 plugin.requires[r].id);
-            break;
-        }
-    }
 
     // required 和已注册的 optional provider 都进入 DAG。optional provider 不存在时不建边，
     // consumer 仍可按 degraded 语义安装；存在时固定先发布 provider，避免无意义的顺序依赖。
@@ -452,6 +437,7 @@ bool dependency_order_build() {
                 ++indegree[consumer];
             }
         }
+        if (!include_optional) continue;
         for (uint32_t o = 0; o < plugin.optional_count; ++o) {
             const uint32_t provider = provider_for_requirement(plugin.optional_requires[o], nullptr);
             if (provider == kNoPlugin || g_dependency_invalid[provider] || provider == consumer) {
@@ -482,6 +468,73 @@ bool dependency_order_build() {
         }
     }
 
+    bool all_emitted = true;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!g_dependency_invalid[i] && !emitted[i]) all_emitted = false;
+        if (out_emitted != nullptr) out_emitted[i] = emitted[i];
+    }
+    return all_emitted;
+}
+
+// optional 边因全图成环被降级时的诊断：仅当边两端都在全图未发射集内（即该边参与环）。
+// 只写 WARN 日志，不改 g_error_text / features 状态。
+void log_downgraded_optional_edges(const bool* full_emitted) {
+    for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+        if (g_dependency_invalid[consumer] || full_emitted[consumer]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            const contracts::CapabilityRequirement& req = plugin.optional_requires[o];
+            const uint32_t provider = provider_for_requirement(req, nullptr);
+            if (provider == kNoPlugin || g_dependency_invalid[provider] || provider == consumer) {
+                continue;
+            }
+            if (full_emitted[provider]) continue;
+            QOL_LOG_WARN(QolDomain::kCore,
+                         "optional edge downgraded to avoid cycle: provider=%s consumer=%s "
+                         "capability=%s",
+                         g_plugins[provider].descriptor.id, plugin.id,
+                         req.id != nullptr ? req.id : "<null>");
+        }
+    }
+}
+
+bool dependency_order_build() {
+    g_install_order_count = 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        g_dependency_invalid[i] = g_port_invalid[i];
+    }
+
+    // 先标记缺失/版本不兼容的 required，避免它们污染环检测结果。
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            bool id_found = false;
+            const uint32_t provider = provider_for_requirement(plugin.requires[r], &id_found);
+            if (provider != kNoPlugin) continue;
+            g_dependency_invalid[i] = true;
+            set_dependency_error(i, id_found ? "incompatible required capability"
+                                             : "missing required capability",
+                                 plugin.requires[r].id);
+            break;
+        }
+    }
+
+    // 阶段 1：required + optional 全图。无环时顺序/结果与单遍实现逐字一致。
+    bool full_emitted[kMaxPlugins] = {};
+    if (topo_build(/*include_optional=*/true, full_emitted)) return true;
+
+    // 阶段 2：optional 软边不参与环判定，只按 required 重建（optional 语义为运行时现取）。
+    if (topo_build(/*include_optional=*/false, nullptr)) {
+        log_downgraded_optional_edges(full_emitted);
+        return true;
+    }
+
+    // 阶段 3：required-only 仍成环 → 硬失败（文案与 kFailed 状态不变）。
+    bool emitted[kMaxPlugins] = {};
+    for (uint32_t i = 0; i < g_install_order_count; ++i) {
+        emitted[g_install_order[i]] = true;
+    }
     bool valid = true;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         if (g_dependency_invalid[i]) {
@@ -572,15 +625,46 @@ const char* check_requires(const contracts::PluginDescriptor& plugin, uint32_t p
     return nullptr;
 }
 
+// optional 依赖段 1（install 时）：仍可取用则通过；图中存在有效 provider（尚未安装）则暂缓，
+// 避免软边回退后 provider 后装时被误判 degraded；确无有效 provider 才 degraded。
 const char* check_optional_requires(const contracts::PluginDescriptor& plugin, uint32_t plugin_index) {
     for (uint32_t i = 0; i < plugin.optional_count; ++i) {
         const contracts::CapabilityRequirement& req = plugin.optional_requires[i];
-        if (infra::require_capability(req.id, req.range) == nullptr) {
-            set_dependency_error(plugin_index, "missing optional capability", req.id);
-            return g_error_text[plugin_index];
+        if (infra::require_capability(req.id, req.range) != nullptr) continue;
+        const uint32_t provider = provider_for_requirement(req, nullptr);
+        if (provider != kNoPlugin && !g_dependency_invalid[provider]) {
+            g_optional_pending[plugin_index] = 1;
+            continue;
         }
+        set_dependency_error(plugin_index, "missing optional capability", req.id);
+        return g_error_text[plugin_index];
     }
     return nullptr;
+}
+
+// optional 依赖段 2（install 循环结束后）：复查暂缓项。provider 最终未发布（装失败/被阻断）
+// 时补记 degraded；防段 1 暂缓造成的漏报。与段 1 同文案，并置 g_gate_degraded 供恢复后清除。
+void verify_optional_after_install() {
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_optional_pending[i] == 0) continue;
+        g_optional_pending[i] = 0;
+        if (g_dependency_invalid[i]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            const contracts::CapabilityRequirement& req = plugin.optional_requires[o];
+            if (infra::require_capability(req.id, req.range) != nullptr) continue;
+            set_dependency_error(i, "missing optional capability", req.id);
+            infra::FeatureStatus status{};
+            if (infra::status_get(plugin.id, &status)) {
+                infra::status_update(plugin.id, status.state, status.enabled, g_error_text[i]);
+            }
+            infra::status_set_degraded(plugin.id, true);
+            g_gate_degraded[i] = true;
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
+                         "optional", g_error_text[i]);
+            break;
+        }
+    }
 }
 
 // 非入口机制的同步安装（kCallPatch / kPtrSlot / kOwnership）；成功后登记运行期地址。
@@ -1575,6 +1659,7 @@ int install_all(const HostDeps& deps) {
     // consumer 注册，也不会先被误判为 blocked；缺失 required 与环在这里留下可诊断状态。
     std::memset(g_error_text, 0, sizeof(g_error_text));
     std::memset(g_port_invalid, 0, sizeof(g_port_invalid));
+    std::memset(g_optional_pending, 0, sizeof(g_optional_pending));
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         if (!resolve_plugin_ports(i)) g_port_invalid[i] = true;
     }
@@ -1610,6 +1695,7 @@ int install_all(const HostDeps& deps) {
             ++failed_plugins;
         }
     }
+    verify_optional_after_install();
     return failed_plugins;
 }
 
@@ -2057,6 +2143,7 @@ void plugin_registry_reset_for_test() {
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
         g_gate_degraded[i] = false;
+        g_optional_pending[i] = 0;
     }
 }
 

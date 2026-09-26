@@ -446,6 +446,54 @@ ResourceClaim g_ptr_slot_release_resources[] = {
     claim("hook:test:ptr:rb", "test_ptrslot_rb", nullptr),
 };
 
+// R1：optional 软边拓扑夹具（测试本地声明 provides/optional，不改插件 descriptor）。
+const qol::contracts::CapabilityProvisionRef g_item_facts_provides[] = {
+    {"item.facts", QolVersion{1, 0}, &g_dummy_handler},
+};
+const qol::contracts::CapabilityProvisionRef g_eb_api_provides[] = {
+    {"eb.api", QolVersion{1, 0}, &g_dummy_handler},
+};
+const qol::contracts::CapabilityProvisionRef g_b_api_provides[] = {
+    {"b.api", QolVersion{1, 0}, &g_dummy_handler},
+};
+const qol::contracts::CapabilityProvisionRef g_x_api_provides[] = {
+    {"x.api", QolVersion{1, 0}, &g_dummy_handler},
+};
+const qol::contracts::CapabilityProvisionRef g_y_api_provides[] = {
+    {"y.api", QolVersion{1, 0}, &g_dummy_handler},
+};
+const CapabilityRequirement g_item_facts_requires[] = {
+    {"item.facts", QolVersionRange{1, 0}},
+};
+const CapabilityRequirement g_x_api_requires[] = {
+    {"x.api", QolVersionRange{1, 0}},
+};
+const CapabilityRequirement g_y_api_requires[] = {
+    {"y.api", QolVersionRange{1, 0}},
+};
+const CapabilityRequirement g_eb_api_optional[] = {
+    {"eb.api", QolVersionRange{1, 0}},
+};
+const CapabilityRequirement g_b_api_optional[] = {
+    {"b.api", QolVersionRange{1, 0}},
+};
+
+char g_dep_order[64] = {};
+int dep_install_a(PluginContext&) {
+    ++g_probe.install_calls;
+    std::strcat(g_dep_order, "A");
+    return 0;
+}
+int dep_install_b(PluginContext&) {
+    ++g_probe.install_calls;
+    std::strcat(g_dep_order, "B");
+    return 0;
+}
+int dep_install_fail(PluginContext&) {
+    ++g_probe.install_calls;
+    return 1;
+}
+
 PluginDescriptor make_descriptor(const char* id, const ResourceClaim* resources,
                                  uint32_t resource_count, const CapabilityRequirement* requires,
                                  uint32_t requires_count) {
@@ -471,6 +519,22 @@ PluginDescriptor make_descriptor(const char* id, const ResourceClaim* resources,
     return d;
 }
 
+// R1：带 capability 依赖的 descriptor（install 由用例指定，便于断言拓扑顺序）。
+PluginDescriptor make_dep_descriptor(const char* id, const CapabilityRequirement* requires,
+                                     uint32_t requires_count,
+                                     const CapabilityRequirement* optional, uint32_t optional_count,
+                                     const qol::contracts::CapabilityProvisionRef* provides,
+                                     uint32_t provides_count,
+                                     int (*install_fn)(PluginContext&)) {
+    PluginDescriptor d = make_descriptor(id, nullptr, 0, requires, requires_count);
+    d.optional_count = optional_count;
+    d.optional_requires = optional;
+    d.provides_count = provides_count;
+    d.provides = provides;
+    d.install = install_fn;
+    return d;
+}
+
 void reset_all() {
     plugin_registry_reset_for_test();
     qol::hooks::registry_reset_for_test();
@@ -480,6 +544,7 @@ void reset_all() {
     qol::infra::events_reset_for_test();
     g_backend = FakeBackend{};
     g_probe = PluginProbe{};
+    g_dep_order[0] = '\0';
     g_ownership = OwnershipProbe{};
     g_ptr_slot_storage = nullptr;
     qol::game::g_ptr_slot_test_addr = nullptr;
@@ -1416,6 +1481,126 @@ void test_elf_export_prefix_rejected_for_other_mechanisms() {
     CHECK(plugin_count() == 0);
 }
 
+// ---------------------------------------------------------------------------
+// R1：optional 软边两阶段拓扑 + optional 两段检查
+// ---------------------------------------------------------------------------
+
+bool feature_error_is(const char* id, const char* expected) {
+    const char* error = nullptr;
+    if (!feature_of(id, nullptr, nullptr, &error)) return false;
+    return error != nullptr && std::strcmp(error, expected) == 0;
+}
+
+bool feature_error_lacks(const char* id, const char* needle) {
+    const char* error = nullptr;
+    if (!feature_of(id, nullptr, nullptr, &error)) return false;
+    return error == nullptr || std::strstr(error, needle) == nullptr;
+}
+
+// ① 环最小复现：A optional eb.api + B required item.facts → 阶段 2 回退，全 enabled、A 先 B 后。
+void test_optional_cycle_soft_edge() {
+    reset_all();
+    const PluginDescriptor a = make_dep_descriptor("alpha", nullptr, 0, g_eb_api_optional, 1,
+                                                   g_item_facts_provides, 1, &dep_install_a);
+    const PluginDescriptor b = make_dep_descriptor("beta", g_item_facts_requires, 1, nullptr, 0,
+                                                   g_eb_api_provides, 1, &dep_install_b);
+    CHECK(register_plugin(a));
+    CHECK(register_plugin(b));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("alpha", FeatureState::kEnabled));
+    CHECK(feature_state_is("beta", FeatureState::kEnabled));
+    CHECK(!feature_degraded("alpha"));
+    CHECK(!feature_degraded("beta"));
+    CHECK(std::strcmp(g_dep_order, "AB") == 0);
+    CHECK(feature_error_lacks("alpha", "dependency cycle"));
+    CHECK(feature_error_lacks("beta", "dependency cycle"));
+}
+
+// ② 现实拓扑混合环：core.item(optional extension_bag) ↔ extension_bag(required item.facts)。
+void test_optional_required_mixed_cycle_real_topology() {
+    reset_all();
+    const PluginDescriptor item = make_dep_descriptor("core.item", nullptr, 0, g_eb_api_optional, 1,
+                                                      g_item_facts_provides, 1, &dep_install_a);
+    const PluginDescriptor eb =
+        make_dep_descriptor("extension_bag", g_item_facts_requires, 1, nullptr, 0,
+                            g_eb_api_provides, 1, &dep_install_b);
+    CHECK(register_plugin(item));
+    CHECK(register_plugin(eb));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    CHECK(feature_state_is("extension_bag", FeatureState::kEnabled));
+    CHECK(!feature_degraded("core.item"));
+    CHECK(!feature_degraded("extension_bag"));
+    CHECK(std::strcmp(g_dep_order, "AB") == 0);
+    CHECK(feature_error_lacks("core.item", "dependency cycle"));
+}
+
+// ③ required 环负例：仍硬失败（kFailed + dependency cycle），不安装。
+void test_required_cycle_still_fails() {
+    reset_all();
+    const PluginDescriptor x = make_dep_descriptor("cycle_x", g_y_api_requires, 1, nullptr, 0,
+                                                   g_x_api_provides, 1, &dep_install_a);
+    const PluginDescriptor y = make_dep_descriptor("cycle_y", g_x_api_requires, 1, nullptr, 0,
+                                                   g_y_api_provides, 1, &dep_install_b);
+    CHECK(register_plugin(x));
+    CHECK(register_plugin(y));
+
+    CHECK(install_all(make_deps()) == 2);
+    CHECK(feature_error_is("cycle_x", "dependency cycle: cycle_x"));
+    CHECK(feature_error_is("cycle_y", "dependency cycle: cycle_y"));
+    CHECK(g_probe.install_calls == 0);
+    CHECK(std::strcmp(g_dep_order, "") == 0);
+}
+
+// ④ optional provider 真缺失：无 provider → 段 1 立即 degraded（文案不变）。
+void test_optional_missing_provider_degrades() {
+    reset_all();
+    const PluginDescriptor a = make_dep_descriptor("solo", nullptr, 0, g_eb_api_optional, 1,
+                                                   nullptr, 0, &dep_install_a);
+    CHECK(register_plugin(a));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("solo", FeatureState::kEnabled));
+    CHECK(feature_degraded("solo"));
+    CHECK(feature_error_is("solo", "missing optional capability: eb.api"));
+}
+
+// ⑤ provider 装失败漏报防护：段 1 暂缓 → 段 2 复查失败 → degraded。
+void test_optional_pending_degrade_after_provider_failure() {
+    reset_all();
+    const PluginDescriptor a = make_dep_descriptor("need_b", nullptr, 0, g_b_api_optional, 1,
+                                                   nullptr, 0, &dep_install_a);
+    const PluginDescriptor b = make_dep_descriptor("provide_b", nullptr, 0, nullptr, 0,
+                                                   g_b_api_provides, 1, &dep_install_fail);
+    CHECK(register_plugin(a));
+    CHECK(register_plugin(b));
+
+    CHECK(install_all(make_deps()) == 1);  // provider 装失败
+    CHECK(feature_error_is("provide_b", "install failed"));
+    CHECK(feature_state_is("need_b", FeatureState::kEnabled));
+    CHECK(feature_degraded("need_b"));
+    CHECK(feature_error_is("need_b", "missing optional capability: b.api"));
+}
+
+// ⑥ 无环 optional 顺序保持：阶段 1 成功，provider 先于 consumer 安装。
+void test_optional_acyclic_order_preserved() {
+    reset_all();
+    const PluginDescriptor consumer = make_dep_descriptor("consumer", nullptr, 0, g_b_api_optional,
+                                                          1, nullptr, 0, &dep_install_a);
+    const PluginDescriptor provider = make_dep_descriptor("provider", nullptr, 0, nullptr, 0,
+                                                          g_b_api_provides, 1, &dep_install_b);
+    CHECK(register_plugin(consumer));
+    CHECK(register_plugin(provider));
+
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("consumer", FeatureState::kEnabled));
+    CHECK(feature_state_is("provider", FeatureState::kEnabled));
+    CHECK(!feature_degraded("consumer"));
+    CHECK(std::strcmp(g_dep_order, "BA") == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1458,6 +1643,12 @@ int main() {
     test_cross_plugin_entry_alias_rejected_but_first_owner_stays_live();
     test_legacy_entry_symbol_id_installs();
     test_elf_export_prefix_rejected_for_other_mechanisms();
+    test_optional_cycle_soft_edge();
+    test_optional_required_mixed_cycle_real_topology();
+    test_required_cycle_still_fails();
+    test_optional_missing_provider_degrades();
+    test_optional_pending_degrade_after_provider_failure();
+    test_optional_acyclic_order_preserved();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
