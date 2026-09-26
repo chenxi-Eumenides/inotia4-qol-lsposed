@@ -7,7 +7,6 @@
 #include "game/adapter_ports/item_port.h"
 #include "game/state/character_http.h"
 #include "game/state/character_write_http.h"
-#include "game/state/item_http.h"
 #include "game/state/choice_http.h"
 #include "game/state/game_state.h"
 #include "game/state/quest_http.h"
@@ -927,34 +926,6 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
     return ok ? kUiWriteOk : kUiWriteFailed;
-}
-
-// ---- 物品/背包写面（core.item，私有端口 QOL_PORT_ITEM_WRITE）----
-// 响应形状与迁移前 Kotlin 等价：op 体 + 可选 state（attach* 包装为在 JSONObject 上
-// 追加 "state" 键，故这里在末尾 '}' 前插入同名字段）。
-int32_t build_item_write_result_json(const contracts::QolItemWriteArgs& args, char* out,
-                                     uint32_t capacity, uint32_t* out_size) {
-    if (out_size != nullptr) *out_size = 0;
-    if (out == nullptr || out_size == nullptr) return kItemWriteFailed;
-    std::string op;
-    std::string state;
-    switch (static_cast<contracts::QolItemWriteKind>(args.kind)) {
-        case contracts::QolItemWriteKind::kAcceptDice:
-            op = data_op_dice_accept();
-            state = build_player_json();
-            break;
-        default:
-            return kItemWriteFailed;
-    }
-    const bool ok = op.find("\"ok\":false") == std::string::npos;
-    std::string body = op;
-    if (ok && !state.empty() && !op.empty() && op.back() == '}') {
-        body = op.substr(0, op.size() - 1) + ",\"state\":" + state + "}";
-    }
-    if (body.size() > capacity) return kItemWriteFailed;
-    std::memcpy(out, body.data(), body.size());
-    *out_size = static_cast<uint32_t>(body.size());
-    return ok ? kItemWriteOk : kItemWriteFailed;
 }
 
 // ---- 角色/战斗/成长/队伍写面（core.character，私有端口 QOL_PORT_CHARACTER_WRITE）----

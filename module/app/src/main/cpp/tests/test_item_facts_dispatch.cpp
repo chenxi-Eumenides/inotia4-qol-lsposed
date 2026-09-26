@@ -44,7 +44,6 @@ namespace {
 using qol::contracts::QolItemPort;
 using qol::contracts::QolItemPortReadApi;
 using qol::contracts::QolItemWriteArgs;
-using qol::contracts::QolItemWritePort;
 using qol::contracts::QolItemStaticTextKind;
 
 constexpr char kInventoryJson[] =
@@ -111,11 +110,14 @@ QolResult g_money_write_result = qol::contracts::ok();
 int64_t g_money_write_value = 0;
 QolResult g_dice_reject_result = qol::contracts::ok();
 int g_dice_reject_calls = 0;
+QolResult g_dice_accept_result = qol::contracts::ok();
+int g_dice_accept_calls = 0;
+int g_dice_accept_order = 0;
+qol::contracts::QolItemDiceAcceptResult g_dice_accept_data{};
 qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
 uint32_t g_post_handler_id = 0;
 uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
 uint32_t g_post_payload_size = 0;
-QolItemWriteArgs g_last_write{};
 int g_write_calls = 0;
 qol::contracts::QolItemInventoryStateWriteResult g_state_write_data{};
 QolResult g_state_write_result = qol::contracts::ok();
@@ -135,6 +137,7 @@ int32_t g_state_add_rarity = -1;
 const qol::contracts::QolItemCountApi* g_state_add_count_api = nullptr;
 bool g_character_state_available = true;
 int g_character_state_require_calls = 0;
+int g_character_state_require_order = 0;
 int g_character_state_write_calls = 0;
 QolResult g_character_state_result = qol::contracts::ok();
 int g_party_sequence = 0;
@@ -252,6 +255,14 @@ QolResult fake_reject_dice() {
     return g_dice_reject_result;
 }
 
+QolResult fake_accept_dice(qol::contracts::QolItemDiceAcceptResult* out) {
+    ++g_dice_accept_calls;
+    g_dice_accept_order = ++g_party_sequence;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = g_dice_accept_data;
+    return g_dice_accept_result;
+}
+
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
@@ -264,26 +275,7 @@ const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
 const qol::contracts::QolItemMoneyWritePort kFakeMoneyWritePort{
     qol::contracts::kQolPortItemMoneyWriteVersion, &fake_set_money};
 const qol::contracts::QolItemDiceWritePort kFakeDiceWritePort{
-    qol::contracts::kQolPortItemDiceWriteVersion, &fake_reject_dice};
-
-QolResult fake_item_write(const QolItemWriteArgs* args, char* out, uint32_t capacity,
-                          uint32_t* out_size) {
-    if (args == nullptr || out == nullptr || out_size == nullptr) {
-        return qol::contracts::error(kQolErrInvalidArgument, "bad write", 9);
-    }
-    g_last_write = *args;
-    ++g_write_calls;
-    constexpr char kResult[] = "{\"ok\":true}";
-    if (capacity < sizeof(kResult) - 1) {
-        return qol::contracts::error(kQolErrBlocked, "small", 5);
-    }
-    std::memcpy(out, kResult, sizeof(kResult) - 1);
-    *out_size = sizeof(kResult) - 1;
-    return qol::contracts::ok();
-}
-
-const QolItemWritePort kFakeWritePort{qol::contracts::kQolPortItemWriteVersion,
-                                      {&fake_item_write}};
+    qol::contracts::kQolPortItemDiceWriteVersion, &fake_reject_dice, &fake_accept_dice};
 
 QolResult fake_state_write(int32_t kind, int32_t arg0, int32_t arg1,
                            qol::contracts::QolItemInventoryStateWriteResult* out) {
@@ -403,8 +395,7 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
 };
 
 const void* const kPortArray[] = {
-    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeWritePort,
-    &kFakeItemStateWritePort};
+    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -480,20 +471,32 @@ qol::contracts::ExtensionBagApi make_fake_extension_bag_api() {
 const qol::contracts::ExtensionBagApi kFakeExtensionBagApi = make_fake_extension_bag_api();
 
 constexpr char kPartyStateJson[] = "{\"roles\":[{\"slot\":1}]}";
+constexpr char kPlayerStateJson[] = "{\"money\":72503,\"leader_slot\":0}";
 
 QolResult fake_character_state_json(qol::contracts::QolCharacterStateKind kind, char* out,
                                     uint32_t capacity, uint32_t* out_size) {
     ++g_character_state_write_calls;
     g_character_state_write_order = ++g_party_sequence;
     if (!qol::contracts::succeeded(g_character_state_result)) return g_character_state_result;
-    if (kind != qol::contracts::QolCharacterStateKind::kParty || out == nullptr || out_size == nullptr) {
+    const char* body = nullptr;
+    uint32_t body_size = 0;
+    if (kind == qol::contracts::QolCharacterStateKind::kParty) {
+        body = kPartyStateJson;
+        body_size = sizeof(kPartyStateJson) - 1;
+    } else if (kind == qol::contracts::QolCharacterStateKind::kPlayer) {
+        body = kPlayerStateJson;
+        body_size = sizeof(kPlayerStateJson) - 1;
+    } else {
         return qol::contracts::error(kQolErrInvalidArgument, "bad state request", 18);
     }
-    if (sizeof(kPartyStateJson) - 1 > capacity) {
+    if (out == nullptr || out_size == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad state request", 18);
+    }
+    if (body_size > capacity) {
         return qol::contracts::error(kQolErrBlocked, "state buffer too small", 22);
     }
-    std::memcpy(out, kPartyStateJson, sizeof(kPartyStateJson) - 1);
-    *out_size = static_cast<uint32_t>(sizeof(kPartyStateJson) - 1);
+    std::memcpy(out, body, body_size);
+    *out_size = body_size;
     return qol::contracts::ok();
 }
 
@@ -506,6 +509,7 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
     }
     if (std::strcmp(id, qol::contracts::kCharacterStateCapabilityId) == 0) {
         ++g_character_state_require_calls;
+        g_character_state_require_order = ++g_party_sequence;
         if (!g_character_state_available || required.major != 1 || required.min_minor != 0) {
             return qol::contracts::error(kQolErrNotFound, "missing", 7);
         }
@@ -613,7 +617,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 5;
+    ctx.port_count = 4;
     return ctx;
 }
 
@@ -770,6 +774,76 @@ void test_write_routes() {
           "{\"ok\":false,\"error\":\"no dice result pending\"}");
     qol::infra::command_queue_reset_for_test();
     g_dice_reject_result = qol::contracts::ok();
+
+    // accept_dice：owner 先现取 character.state（写前），再执行 typed accept，成功后附 kPlayer 投影。
+    g_character_state_available = true;
+    g_character_state_require_calls = 0;
+    g_character_state_write_calls = 0;
+    g_dice_accept_calls = 0;
+    g_party_sequence = 0;
+    g_dice_accept_data = {};
+    g_dice_accept_data.base[0] = 10;    g_dice_accept_data.applied[0] = 12;
+    g_dice_accept_data.delta[0] = 2;
+    g_dice_accept_data.base[1] = 11;    g_dice_accept_data.applied[1] = 11;
+    g_dice_accept_data.delta[1] = 0;
+    g_dice_accept_data.base[2] = 13;    g_dice_accept_data.applied[2] = 15;
+    g_dice_accept_data.delta[2] = 2;
+    g_dice_accept_data.base[3] = 14;    g_dice_accept_data.applied[3] = 14;
+    g_dice_accept_data.delta[3] = 0;
+    g_dice_accept_data.base[4] = 15;    g_dice_accept_data.applied[4] = 17;
+    g_dice_accept_data.delta[4] = 2;
+    CHECK(dispatch_post("/api/item/inventory/accept_dice", nullptr, nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"base\":[10,11,13,14,15],\"applied\":[12,11,15,14,17],"
+          "\"delta\":[2,0,2,0,2],\"state\":" + std::string(kPlayerStateJson) + "}");
+    CHECK(g_dice_accept_calls == 1);
+    CHECK(g_character_state_require_calls == 1 && g_character_state_write_calls == 1);
+    // 时序：require < accept 游戏操作 < 写后 state 投影。
+    CHECK(g_character_state_require_order < g_dice_accept_order);
+    CHECK(g_dice_accept_order < g_character_state_write_order);
+
+    // 状态能力缺失：accept 不执行（写未发生）。
+    g_character_state_available = false;
+    const int accept_calls_before_missing = g_dice_accept_calls;
+    CHECK(dispatch_post("/api/item/inventory/accept_dice", nullptr, nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                            &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":false,\"error\":\"character state unavailable\"}");
+    CHECK(g_dice_accept_calls == accept_calls_before_missing);
+    g_character_state_available = true;
+
+    // accept 业务失败：透旧错误体 + ticket failed 可回取；不追加 state。
+    g_dice_accept_result =
+        qol::contracts::error(kQolErrNotFound, "no dice result pending", 22);
+    const int accept_state_writes_before_failure = g_character_state_write_calls;
+    CHECK(dispatch_post("/api/item/inventory/accept_dice", nullptr, nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext accept_context{};
+    accept_context.handler = g_result_handler;
+    accept_context.payload_size = g_post_payload_size;
+    std::memcpy(accept_context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command accept_command{
+        "core.item kAcceptDice", nullptr, &accept_context, false, &run_item_write_result, 0};
+    const qol::infra::CommandTicket accept_ticket = qol::infra::post(accept_command);
+    CHECK(accept_ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(accept_ticket) == qol::infra::CommandState::kFailed);
+    char accept_error[128]{};
+    uint32_t accept_error_size = 0;
+    CHECK(qol::infra::read_result(accept_ticket, accept_error, sizeof(accept_error),
+                                  &accept_error_size));
+    CHECK(std::string(accept_error, accept_error_size) ==
+          "{\"ok\":false,\"error\":\"no dice result pending\"}");
+    CHECK(g_character_state_write_calls == accept_state_writes_before_failure);
+    qol::infra::command_queue_reset_for_test();
+    g_dice_accept_result = qol::contracts::ok();
 
     // 普通袋移动：typed 低层 + #10 owner serializer 即时写后 state。
     g_state_write_result = qol::contracts::ok();

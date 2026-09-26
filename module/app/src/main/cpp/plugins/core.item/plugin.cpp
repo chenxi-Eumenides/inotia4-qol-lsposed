@@ -80,7 +80,6 @@ struct ItemSnapshot {
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolItemPort* g_port = nullptr;
 // 写面私有端口（仅 core.item 可注入；ADR/阶段 5 写面迁移）。
-const contracts::QolItemWritePort* g_item_write = nullptr;
 const contracts::QolItemMoneyWritePort* g_item_money_write = nullptr;
 const contracts::QolItemDiceWritePort* g_item_dice_write = nullptr;
 const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
@@ -201,8 +200,6 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE,
      {contracts::kQolPortItemDiceWriteVersion.major,
       contracts::kQolPortItemDiceWriteVersion.minor}},
-    {contracts::QolPortId::QOL_PORT_ITEM_WRITE,
-     {contracts::kQolPortItemWriteVersion.major, contracts::kQolPortItemWriteVersion.minor}},
     {contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE,
      {contracts::kQolPortItemInventoryStateWriteVersion.major,
       contracts::kQolPortItemInventoryStateWriteVersion.minor}},
@@ -1202,6 +1199,81 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
     return true;
 }
 
+bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char* out,
+                                   uint32_t capacity, uint32_t* out_size) {
+    (void)args;
+    if (out == nullptr || out_size == nullptr) return false;
+    *out_size = 0;
+    // 状态写在游戏操作之前解析：能力缺失即 fail-closed，accept 不执行（写未发生）。
+    const contracts::CharacterStateApi* state = character_state_capability();
+    if (state == nullptr || state->write_state_json == nullptr) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
+        return false;
+    }
+    if (g_item_dice_write == nullptr || g_item_dice_write->accept == nullptr) {
+        constexpr char kOperationUnavailable[] =
+            "{\"ok\":false,\"error\":\"item operation unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kOperationUnavailable,
+                          sizeof(kOperationUnavailable) - 1);
+        return false;
+    }
+    contracts::QolItemDiceAcceptResult accept{};
+    const QolResult operation = g_item_dice_write->accept(&accept);
+    if (!contracts::succeeded(operation)) {
+        const char* message = operation.message != nullptr ? operation.message
+                                                           : "dice accept failed";
+        const uint32_t message_size = operation.message != nullptr
+                                          ? operation.message_len
+                                          : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+    char player[4096]{};
+    uint32_t player_size = 0;
+    const QolResult state_result = state->write_state_json(
+        contracts::QolCharacterStateKind::kPlayer, player, sizeof(player), &player_size);
+    if (!contracts::succeeded(state_result)) {
+        const char* message = state_result.message != nullptr ? state_result.message
+                                                              : "character state unavailable";
+        const uint32_t message_size = state_result.message != nullptr
+                                          ? state_result.message_len
+                                          : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+    std::string body = "{\"ok\":true,\"base\":[";
+    for (uint32_t i = 0; i < contracts::kQolItemDiceStatCount; ++i) {
+        if (i != 0) body.push_back(',');
+        body += std::to_string(accept.base[i]);
+    }
+    body += "],\"applied\":[";
+    for (uint32_t i = 0; i < contracts::kQolItemDiceStatCount; ++i) {
+        if (i != 0) body.push_back(',');
+        body += std::to_string(accept.applied[i]);
+    }
+    body += "],\"delta\":[";
+    for (uint32_t i = 0; i < contracts::kQolItemDiceStatCount; ++i) {
+        if (i != 0) body.push_back(',');
+        body += std::to_string(accept.delta[i]);
+    }
+    body += "],\"state\":";
+    body.append(player, player_size);
+    body.push_back('}');
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return true;
+}
+
 bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
                             uint32_t capacity, uint32_t* out_size) {
     const bool extension_requested =
@@ -1246,6 +1318,9 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         kind == contracts::QolItemWriteKind::kEnchant) {
         return write_item_party_state_result(args, out, capacity, out_size);
     }
+    if (kind == contracts::QolItemWriteKind::kAcceptDice) {
+        return write_item_dice_accept_result(args, out, capacity, out_size);
+    }
     if (kind == contracts::QolItemWriteKind::kMoveItem) {
         return write_item_move_result(args, out, capacity, out_size);
     }
@@ -1258,8 +1333,7 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         kind == contracts::QolItemWriteKind::kShopBuy) {
         return write_item_inventory_state_result(args, out, capacity, out_size);
     }
-    if (g_item_write == nullptr || g_item_write->read.write == nullptr ||
-        g_item_money_write == nullptr || g_item_money_write->set_money == nullptr ||
+    if (g_item_money_write == nullptr || g_item_money_write->set_money == nullptr ||
         g_item_dice_write == nullptr || g_item_dice_write->reject == nullptr) {
         return false;
     }
@@ -1305,8 +1379,7 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         *out_size = body_size;
         return contracts::succeeded(operation);
     }
-    const QolResult result = g_item_write->read.write(&args, out, capacity, out_size);
-    return contracts::succeeded(result);
+    return false;
 }
 
 const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
@@ -1354,7 +1427,6 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_port = nullptr;
-    g_item_write = nullptr;
     g_item_money_write = nullptr;
     g_item_dice_write = nullptr;
     g_item_state_write = nullptr;
@@ -1363,8 +1435,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
-        ctx.port_count != 5 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
-        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr || ctx.ports[4] == nullptr) {
+        ctx.port_count != 4 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
+        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr) {
         g_sdk = nullptr;
         return 1;
     }
@@ -1395,25 +1467,15 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!contracts::satisfies(g_item_dice_write->abi_version,
                               {contracts::kQolPortItemDiceWriteVersion.major,
                                contracts::kQolPortItemDiceWriteVersion.minor}) ||
-        g_item_dice_write->reject == nullptr) {
+        g_item_dice_write->reject == nullptr || g_item_dice_write->accept == nullptr) {
         g_port = nullptr;
-        g_item_money_write = nullptr;
-        g_item_dice_write = nullptr;
-        g_sdk = nullptr;
-        return 1;
-    }
-    g_item_write = static_cast<const contracts::QolItemWritePort*>(ctx.ports[3]);
-    if (!contracts::satisfies(g_item_write->abi_version, {1, 0}) ||
-        g_item_write->read.write == nullptr) {
-        g_port = nullptr;
-        g_item_write = nullptr;
         g_item_money_write = nullptr;
         g_item_dice_write = nullptr;
         g_sdk = nullptr;
         return 1;
     }
     g_item_state_write =
-        static_cast<const contracts::QolItemInventoryStateWritePort*>(ctx.ports[4]);
+        static_cast<const contracts::QolItemInventoryStateWritePort*>(ctx.ports[3]);
     if (!contracts::satisfies(g_item_state_write->abi_version,
                               {contracts::kQolPortItemInventoryStateWriteVersion.major,
                                contracts::kQolPortItemInventoryStateWriteVersion.minor}) ||
@@ -1423,7 +1485,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_item_state_write->equip_item == nullptr || g_item_state_write->unequip_item == nullptr ||
         g_item_state_write->put_jewel == nullptr || g_item_state_write->enchant == nullptr) {
         g_port = nullptr;
-        g_item_write = nullptr;
         g_item_money_write = nullptr;
         g_item_dice_write = nullptr;
         g_item_state_write = nullptr;
@@ -1436,7 +1497,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kItemWriteHandlerId, &item_write_result, nullptr))) {
         g_port = nullptr;
-        g_item_write = nullptr;
         g_item_money_write = nullptr;
         g_item_dice_write = nullptr;
         g_item_state_write = nullptr;
@@ -1454,7 +1514,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
     }
     g_port = nullptr;
-    g_item_write = nullptr;
     g_item_money_write = nullptr;
     g_item_dice_write = nullptr;
     g_item_state_write = nullptr;
@@ -1508,7 +1567,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,
     kPorts,
-    5,
+    4,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
 };

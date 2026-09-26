@@ -8,6 +8,7 @@ namespace {
 const contracts::QolItemDiceWritePort kPort{
     contracts::kQolPortItemDiceWriteVersion,
     &ops::reject_dice,
+    &ops::accept_dice,
 };
 
 }  // namespace

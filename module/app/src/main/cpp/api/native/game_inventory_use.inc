@@ -15,34 +15,25 @@ std::string data_op_use_item(int bag, int slot) {
     return "{\"ok\":true,\"gained\":[" + inventory_gained_json(result) + "]}";
 }
 std::string data_op_dice_accept() {
-    if (!game_in_world()) return op_err("not in game");
-    if (fn_set_stat_base == nullptr || fn_get_stat_base == nullptr)
-        return op_err("symbol not resolved");
-    uint8_t* flag = *reinterpret_cast<uint8_t**>(g_base + G_STATUSDICE_FLAG_GOT_VMA);
-    if (flag == nullptr || !(*flag & 1u)) return op_err("no dice result pending");
-    void* leader = member_or_null(0);
-    if (leader == nullptr) return op_err("no leader");
-    int8_t* pending = *reinterpret_cast<int8_t**>(g_base + G_STATUSDICE_PENDING_GOT_VMA);
-    if (pending == nullptr) return op_err("dice result missing");
-    // 骰子已在掷骰时消耗，accept 只应用结果不重复消耗
-    int base[5];
-    for (int i = 0; i < 5; ++i) base[i] = fn_get_stat_base(leader, i);
-    for (int i = 0; i < 5; ++i) fn_set_stat_base(leader, i, pending[i]);
-    if (flag != nullptr) *flag &= ~1u;
+    qol::contracts::QolItemDiceAcceptResult result{};
+    const QolResult operation = qol::game::ops::accept_dice(&result);
+    if (!qol::contracts::succeeded(operation)) {
+        return op_err(operation.message != nullptr ? operation.message : "dice accept failed");
+    }
     std::string s = "{\"ok\":true,\"base\":[";
-    for (int i = 0; i < 5; ++i) {
+    for (uint32_t i = 0; i < qol::contracts::kQolItemDiceStatCount; ++i) {
         if (i > 0) s += ",";
-        s += std::to_string(base[i]);
+        s += std::to_string(result.base[i]);
     }
     s += "],\"applied\":[";
-    for (int i = 0; i < 5; ++i) {
+    for (uint32_t i = 0; i < qol::contracts::kQolItemDiceStatCount; ++i) {
         if (i > 0) s += ",";
-        s += std::to_string(pending[i]);
+        s += std::to_string(result.applied[i]);
     }
     s += "],\"delta\":[";
-    for (int i = 0; i < 5; ++i) {
+    for (uint32_t i = 0; i < qol::contracts::kQolItemDiceStatCount; ++i) {
         if (i > 0) s += ",";
-        s += std::to_string(pending[i] - base[i]);
+        s += std::to_string(result.delta[i]);
     }
     s += "]}";
     return s;
