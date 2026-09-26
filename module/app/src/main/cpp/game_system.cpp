@@ -388,7 +388,9 @@ std::string build_system_frame_json() {
 std::string build_quest_quit_result_json(int32_t quest_id) {
     const std::string op = data_op_quest_quit(quest_id);
     if (op.find("\"ok\":true") == std::string::npos) return op;
-    return "{\"ok\":true,\"state\":" + build_player_json() + "}";
+    // 写成功路径 op_ok() 已同步力刷 player 槽，此处读 cache 即写后即时字节
+    //（cache[player] 的 owner 适配器与 legacy 现构逐字节同源）。
+    return "{\"ok\":true,\"state\":" + data_player_json() + "}";
 }
 
 // ---- core.character owner 响应体拼装（批 4-4）----
@@ -821,7 +823,9 @@ int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_i
         if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
     }
     // 与迁移前 ActionSupport.attachPlayer 同构：仅成功时附 state（键序 ok→state）。
-    return finish("{\"ok\":true,\"state\":" + build_player_json() + "}", kSaveWriteOk);
+    // 首个 attempt 的写路径 op_ok() 已同步力刷 player 槽；重试 attempt 仅等世界就绪，
+    // 期间预取按帧维持 cache 新鲜，故读 cache 仍是写后即时字节。
+    return finish("{\"ok\":true,\"state\":" + data_player_json() + "}", kSaveWriteOk);
 }
 
 // world_teleport owner 的世界写结果拼装：move_to/walk_dir/interact_with 迁移前经
@@ -856,7 +860,8 @@ int32_t build_world_write_result_json(int32_t kind, int32_t a, int32_t b, int32_
     if (attach_state && ok && !body.empty() && body.back() == '}') {
         body.pop_back();
         body += ",\"state\":";
-        body += build_player_json();
+        // 写路径 op_ok() 已同步力刷 player 槽，读 cache 即写后即时字节。
+        body += data_player_json();
         body += "}";
     }
     if (out_size != nullptr) *out_size = 0;
@@ -918,8 +923,9 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
     const bool ok = op.find("\"ok\":false") == std::string::npos;
     std::string body = op;
     if (ok && !op.empty() && op.back() == '}') {
+        // 写路径 op_ok() 已同步力刷 player 槽，读 cache 即写后即时字节。
         body = op.substr(0, op.size() - 1) + ",\"state\":" +
-               (state_is_player ? build_player_json() : data_gamestate_json()) + "}";
+               (state_is_player ? data_player_json() : data_gamestate_json()) + "}";
     }
     if (body.size() > capacity) return kUiWriteFailed;
     std::memcpy(out, body.data(), body.size());

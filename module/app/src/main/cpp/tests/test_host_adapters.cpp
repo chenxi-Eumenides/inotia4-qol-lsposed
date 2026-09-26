@@ -18,6 +18,7 @@
 #include "game/access/symbols.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/character_port.h"
+#include "game/state/game_state.h"
 #include "game/adapter_ports/character_extras_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/choice_port.h"
@@ -357,6 +358,11 @@ QolResult find_save_slot(const void* item, int32_t* out_slot) {
 }
 
 }  // namespace qol::game
+
+// T2h-B3#2：本 target 链接 game/read/item_class.cpp，其 debug raw 原语引用全局
+// inventory_item_ref_at（与 qol::game 下的 port 版同名不同签名）；本测试不触发该路径，
+// stub 仅满足链接。
+bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }
 
 namespace {
 

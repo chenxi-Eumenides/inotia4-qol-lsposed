@@ -26,9 +26,4 @@ void append_item_attrs(std::string& s, void* item) {
     (void)item;
 }
 std::string build_inventory_json() { return "{\"bags\":[]}"; }
-std::string data_debug_item_raw_json(int32_t bag, int32_t slot) {
-    (void)bag;
-    (void)slot;
-    return kernel_only_error();
-}
 #endif

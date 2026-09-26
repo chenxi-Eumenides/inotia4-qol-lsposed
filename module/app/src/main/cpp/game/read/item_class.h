@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "contracts/game_host.h"
 
@@ -61,3 +62,7 @@ inline qol::contracts::QolItemCountEncoding item_count_encoding_from_flags(
         ? qol::contracts::QolItemCountEncoding::kNotEncoded
         : qol::contracts::QolItemCountEncoding::kEncoded;
 }
+
+// 仅测试/调试（GET /api/debug/item/raw）：读槽位物品原始字节并位分解输出，纯读取不写内存。
+// 自 api/native/game_inventory_read.inc 整函数下沉（语义与字节零变更），bridge 直接消费其 JSON。
+std::string debug_item_raw_json(int32_t bag, int32_t slot);

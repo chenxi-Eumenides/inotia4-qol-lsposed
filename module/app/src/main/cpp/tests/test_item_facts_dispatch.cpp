@@ -25,6 +25,7 @@
 #include "game/access/game_access.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/ops/game_ops_common.h"
+#include "game/read/item_class.h"
 #include "game/state/game_state.h"
 #include "game_inventory.h"
 #include "host/http_dispatch.h"
@@ -1547,9 +1548,34 @@ GetRarityFn fn_get_rarity = &golden_rarity;
 GetItemStatFn fn_get_damage = &golden_damage;
 GetItemStatFn fn_get_defense = &golden_defense;
 ItemGetAbilityLevelFn fn_item_get_ability_level = &golden_need_level;
-bool item_is_equip(void*) { return false; }
+// T2h-B3#2：item_class.cpp 参与链接后由它提供 item_is_equip/item_count_encoding/
+// item_is_backpack/category_is_no_equip/debug_item_raw_json，本测试不再各自 fake。
+uintptr_t g_base = 0;
 void frame_cache_force_refresh() {}
-bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }
+// T2h-B3#2 golden fixture：默认 not-found（与既有断言一致）；置 mode 后返回合成 ref
+//（default 槽 / 扩展袋槽），供 debug raw 逐字节对照。native_item 指向同一字节缓冲。
+static uint8_t g_debug_raw_bytes[0x40]{};
+static int g_debug_raw_mode = 0;  // 0=not found, 1=default, 2=extension
+bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
+    if (out == nullptr || g_debug_raw_mode == 0) return false;
+    if (g_debug_raw_mode == 1) {
+        if (bag != 2 || slot != 5) return false;
+        out->kind = InventoryItemKind::kOriginal;
+        out->bag = 2;
+        out->slot = 5;
+        out->category = 12;
+        out->count = 3;
+    } else {
+        if (bag != 6 || slot != 0) return false;
+        out->kind = InventoryItemKind::kExtension;
+        out->bag = 6;
+        out->slot = 0;
+        out->category = 10;
+        out->count = 199;
+    }
+    out->native_item = g_debug_raw_bytes;
+    return true;
+}
 
 namespace qol::game {
 const qol::contracts::QolItemCountApi* item_count_api_if_resident() {
@@ -1886,11 +1912,91 @@ void test_inventory_owner_vs_legacy_golden() {
     g_golden_require_active = false;
 }
 
+// T2h-B3#2：debug raw 整函数从 api/native/game_inventory_read.inc 搬至
+// game/read/item_class.cpp。以下为搬迁前实现的逐字节复刻（before oracle），
+// 与 game/read 新落点 debug_item_raw_json() 在 fake 环境对照。
+namespace {
+
+std::string frozen_dbg_hex(unsigned long value, int digits) {
+    static const char kHexDigits[] = "0123456789abcdef";
+    std::string s = "0x";
+    for (int i = digits - 1; i >= 0; --i) {
+        s += kHexDigits[(value >> (i * 4)) & 0xFu];
+    }
+    return s;
+}
+
+std::string frozen_debug_item_raw_json(int32_t bag, int32_t slot) {
+    if (!game_in_world()) return op_err("not in world");
+    InventoryItemRef ref{};
+    if (!inventory_item_ref_at(bag, slot, &ref) || ref.native_item == nullptr) {
+        return op_err("item not found");
+    }
+    uint8_t* it = reinterpret_cast<uint8_t*>(ref.native_item);
+    const uint16_t type_raw = *reinterpret_cast<uint16_t*>(it + I_TYPE);
+    const uint32_t count_raw = *reinterpret_cast<uint32_t*>(it + I_COUNT);
+    const uint8_t socket_raw = it[I_SOCKET];
+    const uint16_t enchant_raw = *reinterpret_cast<uint16_t*>(it + I_ENCHANT);
+    std::string s = "{\"ok\":true";
+    s += ",\"bag\":" + std::to_string(ref.bag);
+    s += ",\"slot\":" + std::to_string(ref.slot);
+    s += ",\"kind\":" +
+         std::string(ref.kind == InventoryItemKind::kExtension ? "\"extension\"" : "\"original\"");
+    s += ",\"category\":" + std::to_string(ref.category);
+    s += ",\"count\":" + std::to_string(ref.count);
+    s += ",\"type_raw\":\"" + frozen_dbg_hex(type_raw, 4) + "\"";
+    s += ",\"raw_grade\":" + std::to_string((type_raw >> 2) & 0x0F);
+    s += ",\"count_raw\":\"" + frozen_dbg_hex(count_raw, 8) + "\"";
+    s += ",\"socket_raw\":\"" + frozen_dbg_hex(socket_raw, 2) + "\"";
+    s += ",\"socket_total\":" + std::to_string((socket_raw >> 4) & 0x0F);
+    s += ",\"socket_filled\":" + std::to_string(socket_raw & 0x0F);
+    s += ",\"enchant_raw\":\"" + frozen_dbg_hex(enchant_raw, 4) + "\"";
+    s += ",\"enchant_count\":" + std::to_string((enchant_raw >> 6) & 0x1F);
+    s += ",\"enhance_low4\":" + std::to_string((enchant_raw >> 2) & 0x0F);
+    s += ",\"enchant_id\":" + std::to_string((enchant_raw >> 11) & 0x1F);
+    s += ",\"chaos\":" + std::to_string(enchant_raw & 1u);
+    s += ",\"note\":\"raw fields for bit-level verification\"}";
+    return s;
+}
+
+}  // namespace
+
+void test_debug_item_raw_golden() {
+    g_golden_world = 1;
+    // fixture 1：default 槽（kind=original，投影 bag/slot/category/count）。
+    g_debug_raw_mode = 1;
+    std::memset(g_debug_raw_bytes, 0, sizeof(g_debug_raw_bytes));
+    golden_fill_item(g_debug_raw_bytes, static_cast<uint16_t>((12 << 6) | (2 << 2)), 0x12345678u,
+                     0x11, 0x21, 0x7C4u);
+    const std::string def_after = debug_item_raw_json(2, 5);
+    CHECK(def_after == frozen_debug_item_raw_json(2, 5));
+    CHECK(def_after.find("\"kind\":\"original\"") != std::string::npos);
+    // fixture 2：扩展袋槽（kind=extension）。
+    g_debug_raw_mode = 2;
+    std::memset(g_debug_raw_bytes, 0, sizeof(g_debug_raw_bytes));
+    golden_fill_item(g_debug_raw_bytes, static_cast<uint16_t>((10 << 6) | (3 << 2)), 0x000000C7u,
+                     0x22, 0x40, 0x0C1u);
+    const std::string ext_after = debug_item_raw_json(6, 0);
+    CHECK(ext_after == frozen_debug_item_raw_json(6, 0));
+    CHECK(ext_after.find("\"kind\":\"extension\"") != std::string::npos);
+    // 错误路径：item not found（world 内但 ref 不可用）。
+    g_debug_raw_mode = 0;
+    CHECK(debug_item_raw_json(2, 5) == frozen_debug_item_raw_json(2, 5));
+    CHECK(debug_item_raw_json(2, 5) == "{\"ok\":false,\"error\":\"item not found\"}");
+    // 错误路径：not in world。
+    g_golden_world = 0;
+    CHECK(debug_item_raw_json(2, 5) == frozen_debug_item_raw_json(2, 5));
+    CHECK(debug_item_raw_json(2, 5) == "{\"ok\":false,\"error\":\"not in world\"}");
+    g_golden_world = 1;
+    g_debug_raw_mode = 0;
+}
+
 int main() {
     test_lifecycle_and_responses();
     test_static_not_ready_holds_snapshot();
     test_bridge_item_write_result_helper();
     test_inventory_owner_vs_legacy_golden();
+    test_debug_item_raw_golden();
     std::printf("item_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

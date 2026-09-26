@@ -14,6 +14,10 @@
 #include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
+#include "game/ops/game_ops_common.h"
+#include "game/state/game_state.h"
+
+#include <string>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -25,6 +29,14 @@ static int g_fail = 0;
 
 // patches.cpp 依赖的游戏基址；测试可控（game/access/patches.cpp 取 g_base + VMA + 偏移）。
 uintptr_t g_base = 0;
+
+// T2h-B3#2：本 target 链接 game/read/item_class.cpp，其 debug raw 原语引用以下符号；
+// 该原语在本测试不参与断言，stub 仅满足链接（失败即按未找到/非 world 处理）。
+bool game_in_world() { return false; }
+std::string op_err(const char* msg) {
+    return std::string("{\"ok\":false,\"error\":\"") + msg + "\"}";
+}
+bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }
 
 // kBlRedirectToSymbol 站点由 patches.cpp 经 fn_resolve 解析目标函数；本测试提供确定性
 // stub：默认恒等返回 vma（目标地址 = g_base + vma）。bias/misalign 用于覆盖目标越界

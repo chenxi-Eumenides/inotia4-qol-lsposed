@@ -2,6 +2,7 @@
 
 #include "host/assembly.h"
 #include "game/adapter_ports/quest_port.h"
+#include "game/read/item_class.h"
 
 #include <cstring>
 
@@ -162,5 +163,9 @@ Java_com_inotia4_qol_NativeBridge_nativeDebugPathJson(JNIEnv* env, jclass, jint 
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeDebugItemRawJson(JNIEnv* env, jclass, jint bag, jint slot) {
-    return env->NewStringUTF(data_debug_item_raw_json(static_cast<int32_t>(bag), static_cast<int32_t>(slot)).c_str());
+#if QOL_KERNEL_ONLY
+    return kernel_only_result(env);
+#else
+    return env->NewStringUTF(debug_item_raw_json(static_cast<int32_t>(bag), static_cast<int32_t>(slot)).c_str());
+#endif
 }

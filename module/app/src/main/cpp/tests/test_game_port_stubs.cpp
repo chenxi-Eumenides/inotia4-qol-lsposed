@@ -23,6 +23,10 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/game_ports/character_write_ops_port.h"
 #include "contracts/game_ports/character_state_port.h"
+#include "game/ops/game_ops_common.h"
+#include "game/state/game_state.h"
+
+#include <string>
 #include "host/character_state_port.h"
 
 namespace qol::game {
@@ -123,3 +127,11 @@ const qol::contracts::QolItemInventoryStateWritePort& item_inventory_state_write
 }
 
 }  // namespace qol::host
+
+// T2h-B3#2：下列 target 链接 game/read/item_class.cpp，其 debug raw 原语引用全局
+// game_in_world/op_err/inventory_item_ref_at；这些用例不触发该路径，stub 仅满足链接。
+bool game_in_world() { return false; }
+std::string op_err(const char* msg) {
+    return std::string("{\"ok\":false,\"error\":\"") + msg + "\"}";
+}
+bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }

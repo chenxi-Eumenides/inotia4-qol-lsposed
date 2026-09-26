@@ -7,9 +7,21 @@
 
 #include "contracts/result.h"
 #include "contracts/item_count.h"
+#include "game/ops/game_ops_common.h"
+#include "game/state/game_state.h"
 #include "host/item_count_facade.h"
 
+#include <string>
+
 uintptr_t g_base = 0;
+
+// T2h-B3#2：本 target 链接 game/read/item_class.cpp，其 debug raw 原语引用以下符号；
+// 该原语在本测试不参与断言，stub 仅满足链接。
+bool game_in_world() { return false; }
+std::string op_err(const char* msg) {
+    return std::string("{\"ok\":false,\"error\":\"") + msg + "\"}";
+}
+bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }
 
 uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 

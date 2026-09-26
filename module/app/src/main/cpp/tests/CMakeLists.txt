@@ -941,10 +941,13 @@ add_executable(item_facts_dispatch_tests
     # T2h-B0：legacy 读实现入 host golden（fake 环境）
     ${CPP_DIR}/api/native/game_inventory.cpp
     ${CPP_DIR}/game/ops/game_ops_common.cpp
+    # T2h-B3#2：debug raw 整函数搬迁后的新落点
+    ${CPP_DIR}/game/read/item_class.cpp
 )
 target_include_directories(item_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
     ${CPP_DIR}/api/native
+    ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(item_facts_dispatch_tests PRIVATE cxx_std_17)
