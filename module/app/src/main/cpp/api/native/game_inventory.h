@@ -8,7 +8,6 @@
 
 // 背包域（parse 域）：背包/装备/金钱操作。
 
-std::string data_op_set_money(int64_t money);
 std::string data_op_add_money(int64_t delta);
 std::string data_op_minus_money(int64_t delta);
 // socket_total：I_SOCKET bits4-7 总孔数（0..15）；enhance_remaining：I_ENCHANT bits2-5
@@ -19,13 +18,8 @@ std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_tot
                              int32_t rarity_group);
 std::string data_op_remove_item(int32_t category);
 
-std::string data_op_jewel(int role, int bag, int slot, int equip_slot);
-std::string data_op_enchant(int role, int bag, int slot, int equip_slot);
-std::string data_op_equip(int role, int bag, int slot);
-std::string data_op_unequip(int role, int32_t equip_slot);
 std::string data_op_use_item(int bag, int slot);
 std::string data_op_dice_accept();
-std::string data_op_dice_reject();
 std::string data_op_discard_item(int bag, int slot);
 std::string data_op_sell_item(int bag, int slot);
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot);

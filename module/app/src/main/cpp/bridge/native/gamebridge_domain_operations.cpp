@@ -1,21 +1,51 @@
 #include "gamebridge_internal.h"
 
 #include "bridge/native/character_write_result.h"
+#include "bridge/native/item_write_result.h"
 #include "contracts/commands.h"
+#include "contracts/extension_bag_port.h"
 #include "game/ops/character_write.h"
+#include "game/ops/item_dice.h"
+#include "game/ops/item_inventory_state_write.h"
 #include "infra/commands.h"
 #include "infra/config.h"
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, jint bag, jint slot, jint equipSlot) {
-    return op_result(env, "op_jewel", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)), data_op_jewel(static_cast<int>(role), static_cast<int>(bag),
-        static_cast<int>(slot), static_cast<int>(equipSlot)));
+#if QOL_KERNEL_ONLY
+    (void)role;
+    (void)bag;
+    (void)slot;
+    (void)equipSlot;
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemInventoryStateWriteResult op{};
+    const QolResult result =
+        qol::game::ops::put_jewel(static_cast<int>(role), static_cast<int>(bag),
+                                  static_cast<int>(slot), static_cast<int>(equipSlot),
+                                  extension_bag_capability(), &op);
+    return op_result(env, "op_jewel", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpEnchant(JNIEnv* env, jclass, jint role, jint bag, jint slot, jint equipSlot) {
-    return op_result(env, "op_enchant", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)), data_op_enchant(static_cast<int>(role), static_cast<int>(bag),
-        static_cast<int>(slot), static_cast<int>(equipSlot)));
+#if QOL_KERNEL_ONLY
+    (void)role;
+    (void)bag;
+    (void)slot;
+    (void)equipSlot;
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemInventoryStateWriteResult op{};
+    const QolResult result =
+        qol::game::ops::enchant(static_cast<int>(role), static_cast<int>(bag),
+                                static_cast<int>(slot), static_cast<int>(equipSlot),
+                                extension_bag_capability(), &op);
+    return op_result(env, "op_enchant", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -34,12 +64,34 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSetSkillUsage(JNIEnv* env, jclass, jin
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpEquip(JNIEnv* env, jclass, jint role, jint bag, jint slot) {
-    return op_result(env, "op_equip", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot)), data_op_equip(static_cast<int>(role), static_cast<int>(bag), static_cast<int>(slot)));
+#if QOL_KERNEL_ONLY
+    (void)role;
+    (void)bag;
+    (void)slot;
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemInventoryStateWriteResult op{};
+    const QolResult result = qol::game::ops::equip_item(
+        static_cast<int>(role), static_cast<int>(bag), static_cast<int>(slot),
+        extension_bag_capability(), &op);
+    return op_result(env, "op_equip", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpUnequip(JNIEnv* env, jclass, jint role, jint slot) {
-    return op_result(env, "op_unequip", ("role=" + str_of(role) + " " + "slot=" + str_of(slot)), data_op_unequip(static_cast<int>(role), static_cast<int32_t>(slot)));
+#if QOL_KERNEL_ONLY
+    (void)role;
+    (void)slot;
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemInventoryStateWriteResult op{};
+    const QolResult result = qol::game::ops::unequip_item(
+        static_cast<int>(role), static_cast<int32_t>(slot), extension_bag_capability(), &op);
+    return op_result(env, "op_unequip", ("role=" + str_of(role) + " " + "slot=" + str_of(slot)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -139,7 +191,13 @@ Java_com_inotia4_qol_NativeBridge_nativeOpDiceAccept(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpDiceReject(JNIEnv* env, jclass) {
-    return op_result(env, "op_dice_reject", (std::string("")), data_op_dice_reject());
+#if QOL_KERNEL_ONLY
+    return kernel_only_result(env);
+#else
+    const QolResult result = qol::game::ops::reject_dice();
+    return op_result(env, "op_dice_reject", (std::string("")),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL

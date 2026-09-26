@@ -14,7 +14,6 @@
 
 #if !QOL_KERNEL_ONLY
 #include "game_inventory_basic.inc"
-#include "game_inventory_equipment.inc"
 #include "game_inventory_use.inc"
 #include "game_inventory_read.inc"
 #else
@@ -24,7 +23,6 @@ std::string kernel_only_error() {
 }
 }
 
-std::string data_op_set_money(int64_t money) { (void)money; return kernel_only_error(); }
 std::string data_op_add_money(int64_t delta) { (void)delta; return kernel_only_error(); }
 std::string data_op_minus_money(int64_t delta) { (void)delta; return kernel_only_error(); }
 std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total,
@@ -37,38 +35,12 @@ std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_tot
     return kernel_only_error();
 }
 std::string data_op_remove_item(int32_t category) { (void)category; return kernel_only_error(); }
-std::string data_op_jewel(int role, int bag, int slot, int equip_slot) {
-    (void)role;
-    (void)bag;
-    (void)slot;
-    (void)equip_slot;
-    return kernel_only_error();
-}
-std::string data_op_enchant(int role, int bag, int slot, int equip_slot) {
-    (void)role;
-    (void)bag;
-    (void)slot;
-    (void)equip_slot;
-    return kernel_only_error();
-}
-std::string data_op_equip(int role, int bag, int slot) {
-    (void)role;
-    (void)bag;
-    (void)slot;
-    return kernel_only_error();
-}
-std::string data_op_unequip(int role, int32_t equip_slot) {
-    (void)role;
-    (void)equip_slot;
-    return kernel_only_error();
-}
 std::string data_op_use_item(int bag, int slot) {
     (void)bag;
     (void)slot;
     return kernel_only_error();
 }
 std::string data_op_dice_accept() { return kernel_only_error(); }
-std::string data_op_dice_reject() { return kernel_only_error(); }
 std::string data_op_discard_item(int bag, int slot) {
     (void)bag;
     (void)slot;

@@ -13,11 +13,6 @@ std::string inventory_gained_json(
     return s;
 }
 
-std::string data_op_set_money(int64_t money) {
-    const QolResult result = qol::game::ops::set_money(money);
-    return qol::contracts::succeeded(result) ? "{\"ok\":true}" : op_err(result.message);
-}
-
 std::string data_op_add_money(int64_t delta) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_add_money == nullptr) return op_err("symbol not resolved");

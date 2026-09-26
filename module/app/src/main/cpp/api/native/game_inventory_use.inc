@@ -38,10 +38,6 @@ std::string data_op_dice_accept() {
     s += "]}";
     return s;
 }
-std::string data_op_dice_reject() {
-    const QolResult result = qol::game::ops::reject_dice();
-    return qol::contracts::succeeded(result) ? "{\"ok\":true}" : op_err(result.message);
-}
 // 处置原语已下沉至 core/native/inventory_trade.*（阶段 A）；此处仅做状态→JSON 映射，
 // 错误文案/顺序与下沉前一致，source 固定 "api"。
 std::string data_op_discard_item(int bag, int slot) {

@@ -1,13 +1,22 @@
 #include "gamebridge_internal.h"
 
 #include "bridge/native/character_write_result.h"
+#include "bridge/native/item_write_result.h"
 #include "game/adapter_ports/world_port.h"
 #include "game/ops/character_write.h"
+#include "game/ops/item_money.h"
 #include "infra/store.h"
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetMoney(JNIEnv* env, jclass, jlong money) {
-    return op_result(env, "op_set_money", ("money=" + str_of(money)), data_op_set_money(static_cast<int64_t>(money)));
+#if QOL_KERNEL_ONLY
+    (void)money;
+    return kernel_only_result(env);
+#else
+    const QolResult result = qol::game::ops::set_money(static_cast<int64_t>(money));
+    return op_result(env, "op_set_money", ("money=" + str_of(money)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
