@@ -15,6 +15,7 @@
 #include "game/nav/game_nav.h"
 #include "game/state/game_state.h"
 #include "game/read/game_tiles.h"
+#include "contracts/nav_bfs.h"
 
 const uint8_t* nav_tiles() {
     // P0#瓦片矩阵：优先静态数据（assets maps/tiles.json，Kotlin 经 JNI 传入），
@@ -76,79 +77,33 @@ bool nav_bfs(int sx, int sy, int tx, int ty, NavPath& out, bool use_units, int m
              int block_tx, int block_ty) {
     const uint8_t* tiles = nav_tiles();
     if (tiles == nullptr) return false;
-    if (sx < 0 || sx >= NAV_W || sy < 0 || sy >= NAV_H) return false;
-    if (nav_blocked(tiles, sx, sy)) {
-        for (int d = 0; d < 4; ++d) {
-            int nx = sx + NAV_DX[d], ny = sy + NAV_DY[d];
-            if (!nav_blocked(tiles, nx, ny)) { sx = nx; sy = ny; break; }
-        }
+    uint8_t blocked[NAV_W * NAV_H];
+    for (int i = 0; i < NAV_W * NAV_H; ++i) {
+        blocked[i] = (tiles[i] & TILE_BLOCK_BIT) != 0 ? 1 : 0;
     }
-    bool unit_blocks[NAV_W * NAV_H];
-    if (use_units) nav_unit_blocks(unit_blocks);
-    std::vector<int> prev(NAV_W * NAV_H);
-    std::vector<int> depth(NAV_W * NAV_H);
-    std::vector<int> queue(NAV_W * NAV_H);
-    for (int i = 0; i < NAV_W * NAV_H; ++i) prev[i] = -1;
-    auto tidx = [](int x, int y) { return y * NAV_W + x; };
-    int head = 0, tail = 0;
-    int start = tidx(sx, sy);
-    prev[start] = start;
-    depth[start] = 0;
-    queue[tail++] = start;
-    bool target_in = (tx >= 0 && tx < NAV_W && ty >= 0 && ty < NAV_H);
-    int target = tidx(tx, ty);
-    int best_manhattan = INT32_MAX, best_tile = -1, best_depth = -1;
-    int found_target = -1;
-    while (head < tail) {
-        int cur = queue[head++];
-        int cx = cur % NAV_W, cy = cur / NAV_W;
-        int dcur = depth[cur];
-        if (max_steps > 0 && dcur >= max_steps) continue;
-        if (target_in) {
-            int manh = (cx > tx ? cx - tx : tx - cx) + (cy > ty ? cy - ty : ty - cy);
-            if (manh < best_manhattan) { best_manhattan = manh; best_tile = cur; best_depth = dcur; }
-        }
-        if (cur == target) { found_target = cur; break; }
-        for (int d = 0; d < 4; ++d) {
-            int nx = cx + NAV_DX[d], ny = cy + NAV_DY[d];
-            if (nx < 0 || nx >= NAV_W || ny < 0 || ny >= NAV_H) continue;
-            int ni = tidx(nx, ny);
-            if (prev[ni] != -1 || nav_blocked(tiles, nx, ny)) continue;
-            if (use_units && unit_blocks[ni]) continue;
-            if (block_tx == nx && block_ty == ny) continue;   // 撞墙格临时阻挡（引擎碰撞 vs 模块建模差异）
-            prev[ni] = cur;
-            depth[ni] = dcur + 1;
-            queue[tail++] = ni;
-        }
+    uint8_t unit_blocks[NAV_W * NAV_H];
+    const uint8_t* unit_blocks_ptr = nullptr;
+    if (use_units) {
+        bool unit_tiles[NAV_W * NAV_H];
+        nav_unit_blocks(unit_tiles);
+        for (int i = 0; i < NAV_W * NAV_H; ++i) unit_blocks[i] = unit_tiles[i] ? 1 : 0;
+        unit_blocks_ptr = unit_blocks;
     }
-    int end_tile = -1;
-    if (found_target != -1) end_tile = found_target;
-    else if (best_tile != -1) end_tile = best_tile;
-    if (end_tile == -1) return false;
-    out.found = (found_target != -1);
-    out.distance = depth[end_tile];
-    out.nearest_x = best_tile == -1 ? -1 : best_tile % NAV_W;
-    out.nearest_y = best_tile == -1 ? -1 : best_tile / NAV_W;
-    out.nearest_dist = best_depth;
-    {
-        int rev[NAV_MAX_DIRS];
-        int rev_count = 0;
-        int cur = end_tile;
-        while (cur != start && rev_count < NAV_MAX_DIRS) {
-            int p = prev[cur];
-            int dx = (cur % NAV_W) - (p % NAV_W);
-            int dy = (cur / NAV_W) - (p / NAV_W);
-            int d = -1;
-            for (int k = 0; k < 4; ++k) {
-                if (NAV_DX[k] == dx && NAV_DY[k] == dy) { d = k; break; }
-            }
-            if (d < 0) break;
-            rev[rev_count++] = d;
-            cur = p;
-        }
-        for (int i = 0; i < rev_count; ++i) out.dirs[rev_count - 1 - i] = rev[i];
-        out.dir_count = rev_count;
+    int8_t dirs[NAV_MAX_DIRS];
+    int dir_count = 0;
+    qol::contracts::NavBfsResult result{};
+    if (!qol::contracts::nav_bfs(NAV_W, NAV_H, blocked, unit_blocks_ptr, sx, sy, tx, ty,
+                                 max_steps, block_tx, block_ty, &result, dirs, NAV_MAX_DIRS,
+                                 &dir_count)) {
+        return false;
     }
+    out.found = result.found;
+    out.distance = result.distance;
+    out.nearest_x = result.nearest_x;
+    out.nearest_y = result.nearest_y;
+    out.nearest_dist = result.nearest_distance;
+    out.dir_count = dir_count;
+    for (int i = 0; i < dir_count; ++i) out.dirs[i] = dirs[i];
     return true;
 }
 

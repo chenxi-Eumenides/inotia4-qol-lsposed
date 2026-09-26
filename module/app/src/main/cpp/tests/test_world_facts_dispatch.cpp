@@ -35,6 +35,7 @@ using qol::contracts::QolWorldPort;
 using qol::contracts::QolWorldPortReadApi;
 
 constexpr int32_t kMapId = 7;
+QolWorldNavigation g_navigation;
 
 QolResult write_json(const char* text, char* out, uint32_t capacity, uint32_t* out_size) {
     const uint32_t size = static_cast<uint32_t>(std::strlen(text));
@@ -78,10 +79,7 @@ QolResult fake_drops(char* out, uint32_t capacity, uint32_t* out_size) {
 
 QolResult fake_navigation(QolWorldNavigation* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "null", 4);
-    std::memset(out, 0, sizeof(*out));
-    out->player_x = 16;  // tile (1,1)
-    out->player_y = 16;
-    out->valid = 1;
+    *out = g_navigation;
     return qol::contracts::ok();
 }
 
@@ -106,10 +104,6 @@ QolResult fake_world_write(int32_t, int32_t, int32_t, int32_t, int32_t, char*, u
                            uint32_t*) {
     return qol::contracts::ok();
 }
-QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler, void*) {
-    return qol::contracts::ok();
-}
-QolResult fake_unregister_result(uint32_t) { return qol::contracts::ok(); }
 const qol::contracts::QolWorldWritePortReadApi kFakeWriteRead{&fake_world_write};
 const qol::contracts::QolWorldWritePort kFakeWritePort{
     qol::contracts::kQolPortWorldWriteVersion, kFakeWriteRead};
@@ -124,6 +118,40 @@ struct FakeScheduler {
 };
 
 FakeScheduler g_scheduler;
+
+struct CapturedWorldPayload {
+    int32_t kind = -1;
+    int32_t a = -1;
+    int32_t b = -1;
+    int32_t c = -1;
+    int32_t d = -1;
+};
+
+CapturedWorldPayload g_last_payload;
+int g_post_count = 0;
+qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
+
+QolResult fake_post_typed(uint32_t, const void* payload, uint32_t size,
+                          qol::contracts::QolCommandTicket* out_ticket) {
+    if (payload == nullptr || size != sizeof(g_last_payload) || out_ticket == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad payload", 11);
+    }
+    std::memcpy(&g_last_payload, payload, size);
+    ++g_post_count;
+    *out_ticket = static_cast<qol::contracts::QolCommandTicket>(100 + g_post_count);
+    return qol::contracts::ok();
+}
+
+QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
+                               void*) {
+    g_result_handler = handler;
+    return qol::contracts::ok();
+}
+
+QolResult fake_unregister_result(uint32_t) {
+    g_result_handler = nullptr;
+    return qol::contracts::ok();
+}
 
 QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
     return qol::contracts::ok();
@@ -150,6 +178,7 @@ qol::contracts::QolHostSdk make_sdk() {
                qol::contracts::kHostSdkMinor};
     sdk.log = {&fake_log_write, nullptr};
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
+    sdk.commands.post_typed = &fake_post_typed;
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.ticket_result = qol::contracts::QolTicketResultApi{
@@ -169,7 +198,7 @@ const qol::contracts::HttpRoute kRoutes[] = {
     {qol::contracts::HttpMethod::kPost, "/api/world/movement/walk_dir", "core.world", 0, 1},
     {qol::contracts::HttpMethod::kPost, "/api/world/movement/stop_move", "core.world", 0, 1},
     {qol::contracts::HttpMethod::kPost, "/api/world/movement/interact_with", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/movement/teleport", "core.world", 0, 1},
+    {qol::contracts::HttpMethod::kPost, "/api/op/movement/teleport", "core.world", 1, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -212,11 +241,38 @@ std::string dispatch_get(const char* path, const char* query = nullptr, uint16_t
     return std::string(storage, response.body_size);
 }
 
+std::string dispatch_post(const char* path, const char* body, uint16_t* status = nullptr) {
+    std::string path_value(path);
+    std::string body_value(body == nullptr ? "" : body);
+    char storage[4096]{};
+    qol::contracts::HttpReq request{
+        qol::contracts::HttpMethod::kPost,
+        path_value.c_str(),
+        static_cast<uint32_t>(path_value.size()),
+        reinterpret_cast<const uint8_t*>(body_value.data()),
+        static_cast<uint32_t>(body_value.size()),
+        nullptr,
+        0,
+        nullptr,
+        0,
+    };
+    qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(storage), sizeof(storage), 0, 0};
+    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
+    if (status != nullptr) *status = response.status;
+    return std::string(storage, response.body_size);
+}
+
 void test_lifecycle_and_responses() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
     g_scheduler = FakeScheduler{};
+    g_post_count = 0;
+    g_result_handler = nullptr;
     g_in_world = true;
+    std::memset(&g_navigation, 0, sizeof(g_navigation));
+    g_navigation.player_x = 16;
+    g_navigation.player_y = 16;
+    g_navigation.valid = 1;
     register_frozen_routes();
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
@@ -241,11 +297,67 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/world/map/id", nullptr, &status) ==
           "{\"map_id\":7,\"id_name\":\"TestMap\"}");
     CHECK(status == 200);
+
+    // 距离接口按冻结键序输出，阻挡目标提供 nearest 瓦片中心像素坐标。
+    g_navigation.blocked[2 * qol::contracts::kWorldNavWidth + 2] = 1;
+    CHECK(g_scheduler.handler(101, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/world/map/distance", "tx=32&ty=32", &status) ==
+          "{\"target\":{\"x\":32,\"y\":32},\"start\":{\"x\":16,\"y\":16},\"found\":false,"
+          "\"distance\":1,\"nearest\":{\"x\":24,\"y\":40,\"distance\":1}}");
+    CHECK(status == 200);
+
+    // 写路由只投递定型 payload，HTTP 成功体保持票据 JSON。
+    qol::host::http_dispatch_set_op_enabled(true);
+    CHECK(dispatch_post("/api/world/movement/move_to", "{\"x\":10,\"y\":20}", &status) ==
+          "{\"ok\":true,\"ticket\":101}");
+    CHECK(status == 200 && g_last_payload.kind == qol::contracts::kQolWorldWriteMoveTo &&
+          g_last_payload.a == 168 && g_last_payload.b == 328);
+    const int posts_before_invalid = g_post_count;
+    CHECK(dispatch_post("/api/world/movement/move_to", "{\"x\":4294967296,\"y\":1}",
+                        &status) == "{\"ok\":false,\"error\":\"x/y required\"}");
+    CHECK(status == 400 && g_post_count == posts_before_invalid);
+    CHECK(dispatch_post("/api/world/movement/move_to", "{\"x\":-1,\"y\":1}", &status) ==
+          "{\"ok\":false,\"error\":\"x/y required\"}");
+    CHECK(status == 400 && g_post_count == posts_before_invalid);
+    CHECK(dispatch_post("/api/world/movement/move_to", "{\"x\":134217728,\"y\":1}",
+                        &status) == "{\"ok\":false,\"error\":\"x/y required\"}");
+    CHECK(status == 400 && g_post_count == posts_before_invalid);
+    CHECK(dispatch_post("/api/world/movement/walk_dir", "{\"direction\":4}", &status) ==
+          "{\"ok\":false,\"error\":\"direction 0-3 required\"}");
+    CHECK(status == 400 && g_post_count == posts_before_invalid);
+    CHECK(dispatch_post("/api/world/movement/stop_move", "{}", &status) ==
+          "{\"ok\":true,\"ticket\":102}");
+    CHECK(g_last_payload.kind == qol::contracts::kQolWorldWriteStopMove);
+    CHECK(dispatch_post("/api/world/movement/interact_with", "{}", &status) ==
+          "{\"ok\":true,\"ticket\":103}");
+    CHECK(g_last_payload.kind == qol::contracts::kQolWorldWriteInteract);
+    CHECK(dispatch_post("/api/op/movement/teleport",
+                        "{\"map_id\":7,\"x\":12,\"y\":13,\"force\":true}", &status) ==
+          "{\"ok\":true,\"ticket\":104}");
+    CHECK(status == 200 && g_last_payload.kind == qol::contracts::kQolWorldWriteTeleport &&
+          g_last_payload.a == 7 && g_last_payload.b == 12 && g_last_payload.c == 13 &&
+          g_last_payload.d == 1);
+    const int posts_before_teleport_invalid = g_post_count;
+    CHECK(dispatch_post("/api/op/movement/teleport", "{\"map_id\":-1,\"x\":1,\"y\":2}",
+                        &status) == "{\"ok\":false,\"error\":\"map_id/x/y required\"}");
+    CHECK(status == 400 && g_post_count == posts_before_teleport_invalid);
+    CHECK(g_result_handler != nullptr);
+    uint8_t malformed_payload[sizeof(CapturedWorldPayload) - 1]{};
+    char result_body[32]{};
+    uint32_t result_size = 0;
+    CHECK(!g_result_handler(nullptr, malformed_payload, sizeof(malformed_payload), result_body,
+                             sizeof(result_body), &result_size));
+    CHECK(dispatch_get("/api/world/map/distance", "tx=1024&ty=0", &status) ==
+          "{\"target\":{\"x\":1024,\"y\":0},\"start\":{\"x\":16,\"y\":16},"
+          "\"found\":false,\"distance\":-1,\"nearest\":null}");
+    CHECK(status == 200);
     CHECK(dispatch_get("/api/world/map/exits") == "{\"exits\":[{\"x\":3,\"y\":4}]}");
     CHECK(dispatch_get("/api/world/map/units") == "{\"units\":[{\"slot\":1,\"type\":0}]}");
     CHECK(dispatch_get("/api/world/map/enemies") == "{\"units\":[{\"slot\":5,\"type\":1}]}");
     CHECK(dispatch_get("/api/world/map/interactives") == "{\"units\":[{\"slot\":6,\"type\":2}]}");
     CHECK(dispatch_get("/api/world/map/drops") == "{\"drops\":[{\"item\":9}]}");
+    g_navigation.blocked[2 * qol::contracts::kWorldNavWidth + 2] = 0;
+    CHECK(g_scheduler.handler(102, g_scheduler.ctx) != 0);
     CHECK(dispatch_get("/api/world/map/distance", "tx=32&ty=32", &status) ==
           "{\"target\":{\"x\":32,\"y\":32},\"start\":{\"x\":16,\"y\":16},\"found\":true,"
           "\"distance\":2,\"nearest\":{\"x\":40,\"y\":40,\"distance\":2}}");
@@ -271,6 +383,10 @@ void test_lifecycle_and_responses() {
     CHECK(g_scheduler.handler == nullptr);
     (void)dispatch_get("/api/world/map/units", nullptr, &status);
     CHECK(status == 503);
+    const int posts_before_inactive = g_post_count;
+    CHECK(dispatch_post("/api/world/movement/stop_move", "{}", &status) ==
+          "{\"ok\":false,\"error\":\"http owner inactive\"}");
+    CHECK(status == 503 && g_post_count == posts_before_inactive);
 
     // core.api 的路由元数据保留：owner 恢复后 handler 可以重新绑定，首轮快照仍 not ready。
     descriptor.on_enabled(ctx);

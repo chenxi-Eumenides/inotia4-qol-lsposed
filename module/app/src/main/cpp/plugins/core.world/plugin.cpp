@@ -1,6 +1,5 @@
 #include "plugin.h"
 
-#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -10,6 +9,7 @@
 #include "contracts/game_ports/world_port.h"
 #include "contracts/game_ports/world_write_port.h"
 #include "contracts/http.h"
+#include "contracts/nav_bfs.h"
 #include "contracts/world_facts.h"
 #include "snapshot.h"
 
@@ -70,6 +70,7 @@ const contracts::QolWorldPort* g_port = nullptr;
 const contracts::QolWorldWritePort* g_world_write_port = nullptr;
 uint64_t g_frame_task = 0;
 Snapshot<WorldSnapshot> g_snapshot;
+uint32_t g_snapshot_failures = 0;
 
 QolResult not_ready() {
     return contracts::error(kQolErrNotReady, "world facts not ready", 21);
@@ -150,6 +151,13 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     (void)sdk->log.write(1, 1, kPluginId, message, length);
 }
 
+void log_warning(const contracts::QolHostSdk* sdk, const char* message) {
+    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)sdk->log.write(2, 1, kPluginId, message, length);
+}
+
 bool copy_buffer(char* destination, uint32_t capacity, uint32_t* destination_size,
                  const char* source, uint32_t source_size) {
     if (destination == nullptr || destination_size == nullptr || source == nullptr ||
@@ -176,18 +184,31 @@ void publish_not_in_game(WorldSnapshot& snapshot, const char* error, uint32_t er
     g_snapshot.publish(snapshot);
 }
 
+void snapshot_read_failed() {
+    // Keeping the previous snapshot unpublished on incomplete reads prevents mixed-frame data;
+    // periodic warnings make the skipped publications observable without logging every frame.
+    if (++g_snapshot_failures % 64 == 0) {
+        log_warning(g_sdk, "[core.world] snapshot read failed; previous snapshot retained");
+    }
+}
+
 void update_snapshot() {
     WorldSnapshot next{};
-    if (g_port == nullptr || g_port->read.units_json == nullptr ||
+    if (g_port == nullptr || g_port->read.current_map_id == nullptr ||
+        g_port->read.map_name == nullptr || g_port->read.units_json == nullptr ||
         g_port->read.exits_json == nullptr || g_port->read.enemies_json == nullptr ||
         g_port->read.interactives_json == nullptr || g_port->read.drops_json == nullptr ||
         g_port->read.navigation == nullptr || g_port->read.in_world == nullptr) {
+        snapshot_read_failed();
         return;
     }
 
-    // 非 world 态各 world 读取器口径不变（迁移前即 `{"error":"not in game"}`）。
+    // 非 world 态发布固定错误体，避免继续读取本帧地图数据。
     int32_t in_world = 0;
-    if (!contracts::succeeded(g_port->read.in_world(&in_world))) return;
+    if (!contracts::succeeded(g_port->read.in_world(&in_world))) {
+        snapshot_read_failed();
+        return;
+    }
     if (in_world == 0) {
         publish_not_in_game(next, kNotInGameBody,
                             static_cast<uint32_t>(sizeof(kNotInGameBody) - 1));
@@ -196,19 +217,29 @@ void update_snapshot() {
 
     char units[kJsonCapacity]{};
     uint32_t units_size = 0;
-    if (!contracts::succeeded(g_port->read.units_json(units, kJsonCapacity, &units_size))) return;
+    if (!contracts::succeeded(g_port->read.units_json(units, kJsonCapacity, &units_size))) {
+        snapshot_read_failed();
+        return;
+    }
     if (json_has_error(units)) {
         publish_not_in_game(next, units, units_size);
         return;
     }
-    if (!copy_buffer(next.units, kJsonCapacity, &next.units_size, units, units_size)) return;
+    if (!copy_buffer(next.units, kJsonCapacity, &next.units_size, units, units_size)) {
+        snapshot_read_failed();
+        return;
+    }
 
-    if (!contracts::succeeded(g_port->read.current_map_id(&next.map_id))) return;
+    if (!contracts::succeeded(g_port->read.current_map_id(&next.map_id))) {
+        snapshot_read_failed();
+        return;
+    }
     const char* name = nullptr;
     if (g_port->read.map_name != nullptr &&
         contracts::succeeded(g_port->read.map_name(next.map_id, &name)) && name != nullptr) {
         const uint32_t name_size = static_cast<uint32_t>(std::strlen(name));
         if (!copy_buffer(next.map_name, kNameCapacity, &next.map_name_size, name, name_size)) {
+            snapshot_read_failed();
             return;
         }
     }
@@ -223,9 +254,15 @@ void update_snapshot() {
         g_port->read.drops_json,
     };
     for (uint32_t i = 0; i < 4; ++i) {
-        if (!contracts::succeeded(readers[i](json_targets[i], kJsonCapacity, json_sizes[i]))) return;
+        if (!contracts::succeeded(readers[i](json_targets[i], kJsonCapacity, json_sizes[i]))) {
+            snapshot_read_failed();
+            return;
+        }
     }
-    if (!contracts::succeeded(g_port->read.navigation(&next.navigation))) return;
+    if (!contracts::succeeded(g_port->read.navigation(&next.navigation))) {
+        snapshot_read_failed();
+        return;
+    }
     next.state = SnapshotState::kReady;
     g_snapshot.publish(next);
 }
@@ -238,7 +275,7 @@ int32_t frame_tick(int64_t, void*) {
 QolResult response_error(contracts::HttpRes* response, uint16_t status, const char* message) {
     const std::string body = std::string("{\"error\":\"") + message + "\"}";
     if (response == nullptr || response->body == nullptr || response->body_capacity < body.size()) {
-        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+        return contracts::error(kQolErrInternal, "http response buffer too small", 30);
     }
     std::memcpy(response->body, body.data(), body.size());
     response->body_size = static_cast<uint32_t>(body.size());
@@ -306,90 +343,6 @@ bool parse_query_int(const contracts::HttpReq& request, const char* name, int32_
     return false;
 }
 
-bool navigation_bfs(const contracts::QolWorldNavigation& navigation, int tx, int ty,
-                    int* out_distance, bool* out_found, int* out_nearest_x,
-                    int* out_nearest_y, int* out_nearest_distance) {
-    constexpr int kWidth = static_cast<int>(contracts::kWorldNavWidth);
-    constexpr int kHeight = static_cast<int>(contracts::kWorldNavHeight);
-    constexpr int kCount = static_cast<int>(contracts::kWorldNavTileCount);
-    if (!navigation.valid) return false;
-    int sx = navigation.player_x >> 4;
-    int sy = navigation.player_y >> 4;
-    if (sx < 0 || sx >= kWidth || sy < 0 || sy >= kHeight) return false;
-    auto index = [](int x, int y) { return y * static_cast<int>(contracts::kWorldNavWidth) + x; };
-    if (navigation.blocked[index(sx, sy)] != 0) {
-        for (int i = 0; i < 4; ++i) {
-            constexpr int dx[] = {0, -1, 0, 1};
-            constexpr int dy[] = {1, 0, -1, 0};
-            const int nx = sx + dx[i];
-            const int ny = sy + dy[i];
-            if (nx >= 0 && nx < kWidth && ny >= 0 && ny < kHeight &&
-                navigation.blocked[index(nx, ny)] == 0) {
-                sx = nx;
-                sy = ny;
-                break;
-            }
-        }
-    }
-
-    std::array<int, kCount> previous{};
-    std::array<int, kCount> depth{};
-    std::array<int, kCount> queue{};
-    previous.fill(-1);
-    const int start = index(sx, sy);
-    previous[start] = start;
-    int head = 0;
-    int tail = 0;
-    queue[tail++] = start;
-    const bool target_in = tx >= 0 && tx < kWidth && ty >= 0 && ty < kHeight;
-    const int target = target_in ? index(tx, ty) : -1;
-    int best_manhattan = INT32_MAX;
-    int best_tile = -1;
-    int best_depth = -1;
-    int found_tile = -1;
-    constexpr int dx[] = {0, -1, 0, 1};
-    constexpr int dy[] = {1, 0, -1, 0};
-    while (head < tail) {
-        const int current = queue[head++];
-        const int cx = current % kWidth;
-        const int cy = current / kWidth;
-        const int current_depth = depth[current];
-        if (target_in) {
-            const int manhattan = std::abs(cx - tx) + std::abs(cy - ty);
-            if (manhattan < best_manhattan) {
-                best_manhattan = manhattan;
-                best_tile = current;
-                best_depth = current_depth;
-            }
-        }
-        if (current == target) {
-            found_tile = current;
-            break;
-        }
-        for (int i = 0; i < 4; ++i) {
-            const int nx = cx + dx[i];
-            const int ny = cy + dy[i];
-            if (nx < 0 || nx >= kWidth || ny < 0 || ny >= kHeight) continue;
-            const int next = index(nx, ny);
-            if (previous[next] != -1 || navigation.blocked[next] != 0 ||
-                navigation.unit_blocks[next] != 0) {
-                continue;
-            }
-            previous[next] = current;
-            depth[next] = current_depth + 1;
-            queue[tail++] = next;
-        }
-    }
-    const int end_tile = found_tile != -1 ? found_tile : best_tile;
-    if (end_tile == -1) return false;
-    *out_found = found_tile != -1;
-    *out_distance = depth[end_tile];
-    *out_nearest_x = best_tile == -1 ? -1 : best_tile % kWidth;
-    *out_nearest_y = best_tile == -1 ? -1 : best_tile / kWidth;
-    *out_nearest_distance = best_depth;
-    return true;
-}
-
 QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* response, void* ctx) {
     if (request == nullptr || response == nullptr || ctx == nullptr) {
         return response_error(response, 400, "bad request");
@@ -429,14 +382,22 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
             if (!parse_query_int(*request, "tx", &tx) || !parse_query_int(*request, "ty", &ty)) {
                 return response_error(response, 400, "invalid distance query");
             }
-            int distance = -1;
-            bool found = false;
-            int nearest_x = -1;
-            int nearest_y = -1;
-            int nearest_distance = -1;
-            const bool navigable = navigation_bfs(snapshot.navigation, tx >> 4, ty >> 4,
-                                                  &distance, &found, &nearest_x, &nearest_y,
-                                                  &nearest_distance);
+            contracts::NavBfsResult navigation_result{};
+            const int target_x = tx >> 4;
+            const int target_y = ty >> 4;
+            const bool navigation_available = snapshot.navigation.valid != 0 &&
+                contracts::nav_bfs(static_cast<int>(contracts::kWorldNavWidth),
+                                   static_cast<int>(contracts::kWorldNavHeight),
+                                   snapshot.navigation.blocked, snapshot.navigation.unit_blocks,
+                                   snapshot.navigation.player_x >> 4,
+                                   snapshot.navigation.player_y >> 4, target_x, target_y, 0, -1, -1,
+                                   &navigation_result);
+            const bool target_in_map = target_x >= 0 &&
+                target_x < static_cast<int>(contracts::kWorldNavWidth) && target_y >= 0 &&
+                target_y < static_cast<int>(contracts::kWorldNavHeight);
+            // Distance-query targets outside the map retain the null-nearest response; movement
+            // callers use the shared search's nearest reachable tile for recovery instead.
+            const bool navigable = navigation_available && target_in_map;
             std::string body = "{\"target\":{\"x\":" + std::to_string(tx) +
                                ",\"y\":" + std::to_string(ty) + "},\"start\":{\"x\":" +
                                std::to_string(snapshot.navigation.player_x) +
@@ -444,12 +405,13 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
             if (!navigable) {
                 body += ",\"found\":false,\"distance\":-1,\"nearest\":null}";
             } else {
-                body += ",\"found\":" + std::string(found ? "true" : "false") +
-                        ",\"distance\":" + std::to_string(distance);
-                if (nearest_x >= 0) {
-                    body += ",\"nearest\":{\"x\":" + std::to_string(nearest_x * 16 + 8) +
-                            ",\"y\":" + std::to_string(nearest_y * 16 + 8) +
-                            ",\"distance\":" + std::to_string(nearest_distance) + "}";
+                body += ",\"found\":" + std::string(navigation_result.found ? "true" : "false") +
+                        ",\"distance\":" + std::to_string(navigation_result.distance);
+                if (navigation_result.nearest_x >= 0) {
+                    body += ",\"nearest\":{\"x\":" +
+                            std::to_string(navigation_result.nearest_x * 16 + 8) +
+                            ",\"y\":" + std::to_string(navigation_result.nearest_y * 16 + 8) +
+                            ",\"distance\":" + std::to_string(navigation_result.nearest_distance) + "}";
                 } else {
                     body += ",\"nearest\":null";
                 }
@@ -489,8 +451,9 @@ bool world_int_field(const char* body, const char* key, int* out) {
     p += needle.size();
     while (*p == ' ') ++p;
     char* end = nullptr;
+    errno = 0;
     const long value = std::strtol(p, &end, 10);
-    if (end == p) return false;
+    if (end == p || errno == ERANGE || value < 0 || value > INT32_MAX) return false;
     *out = static_cast<int>(value);
     return true;
 }
@@ -515,7 +478,7 @@ bool world_bool_field(const char* body, const char* key, bool* out) {
 QolResult world_write_error(contracts::HttpRes* response, uint16_t status, const char* message) {
     const std::string body = std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
     if (response == nullptr || response->body == nullptr || response->body_capacity < body.size()) {
-        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+        return contracts::error(kQolErrInternal, "http response buffer too small", 30);
     }
     std::memcpy(response->body, body.data(), body.size());
     response->body_size = static_cast<uint32_t>(body.size());
@@ -555,10 +518,13 @@ QolResult world_write_command(const contracts::HttpReq* request, contracts::Http
             if (!world_int_field(body, "x", &x)) x = -1;
             if (!world_int_field(body, "y", &y)) y = -1;
             if (x < 0 || y < 0) return world_write_error(response, 400, "x/y required");
-            // API 坐标统一瓦片：native 世界移动收像素（tile*16+8），与迁移前 Kotlin 同口径。
+            if (x > (INT32_MAX - 8) / 16 || y > (INT32_MAX - 8) / 16) {
+                return world_write_error(response, 400, "x/y required");
+            }
+            // API 坐标是瓦片，native 世界移动接收瓦片中心像素坐标。
             payload.kind = contracts::kQolWorldWriteMoveTo;
-            payload.a = x * 16 + 8;
-            payload.b = y * 16 + 8;
+            payload.a = static_cast<int32_t>(static_cast<int64_t>(x) * 16 + 8);
+            payload.b = static_cast<int32_t>(static_cast<int64_t>(y) * 16 + 8);
             break;
         }
         case kRouteWalkDir:
@@ -672,8 +638,11 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_port = static_cast<const contracts::QolWorldPort*>(ctx.ports[0]);
+    // Install rejects missing required reads; frame publication repeats the checks to avoid
+    // publishing a partial snapshot if an incomplete port reaches the runtime boundary.
     if (!contracts::satisfies(g_port->abi_version, {1, 1}) || g_port->read.state == nullptr ||
-        g_port->read.game_state_gate == nullptr || g_port->read.units_json == nullptr ||
+        g_port->read.game_state_gate == nullptr || g_port->read.current_map_id == nullptr ||
+        g_port->read.units_json == nullptr ||
         g_port->read.navigation == nullptr || g_port->read.in_world == nullptr) {
         g_port = nullptr;
         g_sdk = nullptr;
@@ -724,7 +693,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
                 1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
             g_frame_task = task;
         } else {
-            log_message(ctx.sdk, "[core.world] snapshot scheduler unavailable");
+            log_warning(ctx.sdk, "[core.world] snapshot scheduler unavailable");
         }
     }
     log_message(ctx.sdk, "[core.world] provider enabled: capability published");

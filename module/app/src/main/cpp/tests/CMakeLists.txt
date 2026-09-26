@@ -903,6 +903,13 @@ set_target_properties(world_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_
 target_link_libraries(world_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME world_facts_dispatch_tests COMMAND world_facts_dispatch_tests)
 
+# contracts 层共享的无状态 BFS 纯函数 host 覆盖。
+add_executable(nav_bfs_tests test_nav_bfs.cpp)
+target_include_directories(nav_bfs_tests PRIVATE ${CPP_DIR})
+target_compile_features(nav_bfs_tests PRIVATE cxx_std_17)
+set_target_properties(nav_bfs_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME nav_bfs_tests COMMAND nav_bfs_tests)
+
 # T2l-w-read：world 读 8 函数 host 内联（host/legacy_json_builders.h）与 api/native 原文
 # frozen 复刻逐字节双跑（fake 环境：hero/瓦片/pool/charloc/drops/nav）。
 add_executable(world_legacy_readers_tests
