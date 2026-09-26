@@ -4,7 +4,9 @@
 #include "game_system.h"
 
 #include "game/access/game_access.h"
+#include "game/access/quest.h"
 #include "game/adapter_ports/item_port.h"
+#include "game/ops/game_ops_common.h"
 #include "game/state/character_http.h"
 #include "game/state/choice_http.h"
 #include "game/state/game_state.h"
@@ -15,7 +17,6 @@
 #include "game/state/world_http.h"
 #include "game_world.h"
 #include "api/native/game_inventory.h"
-#include "api/native/game_quest.h"
 #include "api/native/game_shop.h"
 #include "api/native/game_ui.h"
 #include "api/native/game_save.h"
@@ -384,10 +385,11 @@ std::string build_system_frame_json() {
 // 退出任务的结果拼装：成功时附上 player 状态对象（复刻迁移前 Kotlin
 // ActionSupport.attachPlayer(NativeBridge.nativeOpQuestQuit(id)) 的响应）；失败体原样返回。
 std::string build_quest_quit_result_json(int32_t quest_id) {
-    const std::string op = data_op_quest_quit(quest_id);
-    if (op.find("\"ok\":true") == std::string::npos) return op;
-    // 写成功路径 op_ok() 已同步力刷 player 槽，此处读 cache 即写后即时字节
-    //（cache[player] 的 owner 适配器与 legacy 现构逐字节同源）。
+    const qol::game::QuestQuitResult quit = qol::game::quest_quit(quest_id);
+    if (!quit.ok) return ::op_err(quit.error);
+    // 成功路径 op_ok() 已同步力刷 player 槽（与迁移前 quest quit 全局的副作用一致），
+    // 此处读 cache 即写后即时字节（cache[player] 的 owner 适配器与 legacy 现构逐字节同源）。
+    (void)::op_ok();
     return "{\"ok\":true,\"state\":" + data_player_json() + "}";
 }
 

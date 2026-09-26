@@ -1,6 +1,7 @@
 #include "gamebridge_internal.h"
 
 #include "host/assembly.h"
+#include "host/legacy_json_builders.h"
 #include "game/adapter_ports/quest_port.h"
 #include "game/read/item_class.h"
 
@@ -43,17 +44,17 @@ Java_com_inotia4_qol_NativeBridge_nativeGetActiveQuest(JNIEnv*, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeQuestList(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_quest_list_json().c_str());
+    return env->NewStringUTF(qol::host::legacy_data_quest_list_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeQuestCompleted(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_quest_completed_json().c_str());
+    return env->NewStringUTF(qol::host::legacy_data_quest_completed_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeQuestActive(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_quest_active_json().c_str());
+    return env->NewStringUTF(qol::host::legacy_data_quest_active_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

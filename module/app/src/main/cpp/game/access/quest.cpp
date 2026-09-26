@@ -2,6 +2,7 @@
 
 #include "game/symbols/game_symbols.h"
 #include "game/access/game_access.h"
+#include "game/state/game_state.h"
 
 namespace qol::game {
 namespace {
@@ -83,6 +84,21 @@ bool quest_set_state(uint16_t quest_id, int32_t state) {
 bool quest_is_complete(uint16_t quest_id) {
     if (fn_questsystem_is_complete == nullptr) return false;
     return fn_questsystem_is_complete(static_cast<int32_t>(quest_id)) != 0;
+}
+
+QuestQuitResult quest_quit(int32_t quest_id) {
+    if (!game_in_world()) return {false, "not in game"};
+    if (fn_questsystem_find == nullptr || fn_questsystem_remove_slot == nullptr) {
+        return {false, "symbol not resolved"};
+    }
+    // 放弃任务复刻原版任务面板放弃链的底层两步：QUESTSYSTEM_Find 定位槽 →
+    // QUESTSYSTEM_RemoveSlot 从任务槽数组摘除（槽数组收缩，quest_list 遍历随之消失）。
+    // 状态表 G_NPC_QUEST_STATE[qid] 的进行态残留由原版 RemoveSlot 语义决定（原版放弃
+    // 后重接同一任务依赖 NPC 对话链重置状态，与 API 无关），不在此额外改写。
+    int slot = fn_questsystem_find(quest_id);
+    if (slot < 0) return {false, "quest not found"};
+    int r = fn_questsystem_remove_slot(slot);
+    return r ? QuestQuitResult{true, nullptr} : QuestQuitResult{false, "quest quit failed"};
 }
 
 }  // namespace qol::game

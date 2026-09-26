@@ -432,6 +432,88 @@ std::string frozen_data_debug_path_json(int32_t tx, int32_t ty) {
 }
 
 
+static std::string frozen_data_quest_list_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "{\"quests\":[";
+    if (g_base != 0) {
+        uint8_t* cnt_ptr = *reinterpret_cast<uint8_t**>(g_base + G_QUEST_SLOT_COUNT_VMA);
+        uint8_t* slots_ptr = *reinterpret_cast<uint8_t**>(g_base + G_QUEST_SLOTS_GOT_VMA);
+        uint8_t*** st_got = reinterpret_cast<uint8_t***>(g_base + G_NPC_QUEST_STATE_GOT_VMA);
+        uint8_t* states = (st_got != nullptr && *st_got != nullptr) ? **st_got : nullptr;
+        if (cnt_ptr != nullptr && slots_ptr != nullptr) {
+            uint8_t cnt = *cnt_ptr;
+            uint8_t* slots = *reinterpret_cast<uint8_t**>(slots_ptr);
+            if (slots != nullptr && cnt > 0 && cnt <= 20) {
+                bool first = true;
+                for (int i = 0; i < cnt; ++i) {
+                    uint16_t qid = *reinterpret_cast<uint16_t*>(slots + i * 0xC);
+                    if (!first) s += ",";
+                    first = false;
+                    int state = (states != nullptr) ? static_cast<int>(states[qid]) : -1;
+                    bool deliv = (state == 2);
+                    s += "{\"slot\":" + std::to_string(i) + ",\"quest_id\":" + std::to_string(qid) +
+                         ",\"deliverable\":" + (deliv ? "true" : "false") + "}";
+                }
+            }
+        }
+    }
+    s += "]}";
+    return s;
+}
+
+static std::string frozen_data_quest_completed_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "{\"quests\":[";
+    if (g_base != 0) {
+        uint16_t* qcnt_var = *reinterpret_cast<uint16_t**>(g_base + G_QUEST_COUNT_GOT_VMA);
+        uint8_t*** st_got = reinterpret_cast<uint8_t***>(g_base + G_NPC_QUEST_STATE_GOT_VMA);
+        if (qcnt_var != nullptr && st_got != nullptr && *st_got != nullptr && **st_got != nullptr) {
+            uint16_t qcnt = *qcnt_var;
+            uint8_t* states = **st_got;
+            bool first = true;
+            if (qcnt > 0 && qcnt <= 512) {
+                for (uint16_t qid = 0; qid < qcnt; ++qid) {
+                    if (states[qid] != 3) continue;
+                    if (!first) s += ",";
+                    first = false;
+                    s += "{\"quest_id\":" + std::to_string(qid) + "}";
+                }
+            }
+        }
+    }
+    s += "]}";
+    return s;
+}
+
+static std::string frozen_data_quest_active_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "{\"quests\":[";
+    if (g_base != 0) {
+        uint8_t* cnt_ptr = *reinterpret_cast<uint8_t**>(g_base + G_QUEST_SLOT_COUNT_VMA);
+        uint8_t* slots_ptr = *reinterpret_cast<uint8_t**>(g_base + G_QUEST_SLOTS_GOT_VMA);
+        uint8_t*** st_got = reinterpret_cast<uint8_t***>(g_base + G_NPC_QUEST_STATE_GOT_VMA);
+        uint8_t* states = (st_got != nullptr && *st_got != nullptr) ? **st_got : nullptr;
+        if (cnt_ptr != nullptr && slots_ptr != nullptr && cnt_ptr != slots_ptr) {
+            uint8_t cnt = *cnt_ptr;
+            uint8_t* slots = *reinterpret_cast<uint8_t**>(slots_ptr);
+            if (slots != nullptr && cnt > 0 && cnt <= 20) {
+                bool first = true;
+                for (int i = 0; i < cnt; ++i) {
+                    uint16_t qid = *reinterpret_cast<uint16_t*>(slots + i * 0xC);
+                    if (!first) s += ",";
+                    first = false;
+                    int state = (states != nullptr) ? static_cast<int>(states[qid]) : -1;
+                    bool deliv = (state == 2);
+                    s += "{\"slot\":" + std::to_string(i) + ",\"quest_id\":" + std::to_string(qid) +
+                         ",\"deliverable\":" + (deliv ? "true" : "false") + "}";
+                }
+            }
+        }
+    }
+    s += "]}";
+    return s;
+}
+
 }  // namespace
 // ---- fixtures ----
 
@@ -467,6 +549,73 @@ static void check_all_equal(const char* tag) {
     CHECK(qol::host::legacy_data_path_json(19, 8) == frozen_data_path_json(19, 8));
     CHECK(qol::host::legacy_data_distance_json(19, 8) == frozen_data_distance_json(19, 8));
     CHECK(qol::host::legacy_data_debug_path_json(19, 8) == frozen_data_debug_path_json(19, 8));
+}
+
+static uint8_t g_quest_count = 0;
+static uint8_t g_quest_slots[2 * 0xC]{};
+static uint8_t* g_quest_slots_pp = g_quest_slots;
+static uint8_t g_quest_state_tbl[16]{};
+static uint8_t* g_quest_states = g_quest_state_tbl;
+static uint8_t* g_quest_states_pp = g_quest_state_tbl;
+static uint16_t g_quest_total = 0;
+
+static void quest_bind_got() {
+    g_base = reinterpret_cast<uintptr_t>(g_region) - G_QUEST_SLOT_COUNT_VMA;
+    *reinterpret_cast<uint8_t**>(g_base + G_QUEST_SLOT_COUNT_VMA) = &g_quest_count;
+    *reinterpret_cast<uint8_t**>(g_base + G_QUEST_SLOTS_GOT_VMA) =
+        reinterpret_cast<uint8_t*>(&g_quest_slots_pp);
+    *reinterpret_cast<uint8_t**>(g_base + G_NPC_QUEST_STATE_GOT_VMA) =
+        reinterpret_cast<uint8_t*>(&g_quest_states_pp);
+    *reinterpret_cast<uint8_t**>(g_base + G_QUEST_COUNT_GOT_VMA) =
+        reinterpret_cast<uint8_t*>(&g_quest_total);
+}
+
+static void check_quest_equal(const char* tag) {
+    (void)tag;
+    CHECK(qol::host::legacy_data_quest_list_json() == frozen_data_quest_list_json());
+    CHECK(qol::host::legacy_data_quest_completed_json() == frozen_data_quest_completed_json());
+    CHECK(qol::host::legacy_data_quest_active_json() == frozen_data_quest_active_json());
+}
+
+static void test_quest_reads() {
+    // F4：有任务内容（2 槽；state[7]=2 可交付、state[9]=1；完成表 state[3]=3）。
+    reset_env();
+    g_quest_count = 2;
+    *reinterpret_cast<uint16_t*>(g_quest_slots + 0) = 7;
+    *reinterpret_cast<uint16_t*>(g_quest_slots + 0xC) = 9;
+    std::memset(g_quest_state_tbl, 0, sizeof(g_quest_state_tbl));
+    g_quest_state_tbl[7] = 2;
+    g_quest_state_tbl[9] = 1;
+    g_quest_state_tbl[3] = 3;
+    g_quest_states = g_quest_state_tbl;
+    g_quest_states_pp = g_quest_state_tbl;
+    g_quest_total = 10;
+    quest_bind_got();
+    check_quest_equal("F4");
+    CHECK(qol::host::legacy_data_quest_list_json().find("\"quest_id\":7,\"deliverable\":true") !=
+          std::string::npos);
+    CHECK(qol::host::legacy_data_quest_active_json().find("\"slot\":1,\"quest_id\":9") !=
+          std::string::npos);
+    CHECK(qol::host::legacy_data_quest_completed_json() == "{\"quests\":[{\"quest_id\":3}]}");
+
+    // F4b：状态表缺失 → deliverable 恒 false（list/active 的 states==nullptr 分支）。
+    g_quest_states_pp = nullptr;
+    check_quest_equal("F4b");
+    CHECK(qol::host::legacy_data_quest_list_json().find("\"deliverable\":false") !=
+          std::string::npos);
+
+    // F5：g_base==0 → 三读空数组。
+    reset_env();
+    check_quest_equal("F5");
+    CHECK(qol::host::legacy_data_quest_list_json() == "{\"quests\":[]}");
+    CHECK(qol::host::legacy_data_quest_completed_json() == "{\"quests\":[]}");
+    CHECK(qol::host::legacy_data_quest_active_json() == "{\"quests\":[]}");
+
+    // F6：非 world → 错误短体。
+    reset_env();
+    g_in_world = false;
+    check_quest_equal("F6");
+    CHECK(qol::host::legacy_data_quest_active_json() == "{\"error\":\"not in game\"}");
 }
 
 int main() {
@@ -557,6 +706,8 @@ int main() {
           std::string::npos);
     CHECK(qol::host::legacy_data_debug_path_json(19, 8).find("\"static_block_count\":") !=
           std::string::npos);
+
+    test_quest_reads();
 
     std::printf("world_legacy_readers: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

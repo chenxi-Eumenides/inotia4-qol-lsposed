@@ -8,7 +8,6 @@
 #include "core/native/game_cache.h"
 #include "game_dialog.h"
 #include "game_inventory.h"
-#include "game_quest.h"
 #include "api/native/game_save.h"
 #include "plugins/save_backup/feature.h"
 #include "game_shop.h"

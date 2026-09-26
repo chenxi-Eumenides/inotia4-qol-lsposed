@@ -2,8 +2,10 @@
 
 #include "bridge/native/character_write_result.h"
 #include "bridge/native/item_write_result.h"
+#include "game/access/quest.h"
 #include "game/adapter_ports/world_port.h"
 #include "game/ops/character_write.h"
+#include "game/ops/game_ops_common.h"
 #include "game/ops/item_money.h"
 #include "infra/store.h"
 
@@ -116,7 +118,14 @@ Java_com_inotia4_qol_NativeBridge_nativeOpCast(JNIEnv* env, jclass, jint role, j
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpQuestQuit(JNIEnv* env, jclass, jint questId) {
-    return op_result(env, "op_quest_quit", ("questId=" + str_of(questId)), data_op_quest_quit(static_cast<int32_t>(questId)));
+    const qol::game::QuestQuitResult quit = qol::game::quest_quit(static_cast<int32_t>(questId));
+    if (!quit.ok) {
+        return op_result(env, "op_quest_quit", ("questId=" + str_of(questId)),
+                         ::op_err(quit.error));
+    }
+    // 成功：op_ok() 同步力刷缓存并返回 {"ok":true}（与迁移前 quest quit 全局逐字一致）。
+    return op_result(env, "op_quest_quit", ("questId=" + str_of(questId)),
+                     ::op_ok());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

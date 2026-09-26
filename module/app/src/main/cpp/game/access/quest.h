@@ -29,4 +29,15 @@ bool quest_set_state(uint16_t quest_id, int32_t state);
 // QUESTSYSTEM_IsComplete 判定；函数指针未解析返回 false。
 bool quest_is_complete(uint16_t quest_id);
 
+// 放弃任务结果（固定宽度 POD，无 JSON/std::string）：ok=false 时 error 指向静态文案
+//（"not in game"/"symbol not resolved"/"quest not found"/"quest quit failed"），调用方不释放。
+struct QuestQuitResult {
+    bool ok = false;
+    const char* error = nullptr;
+};
+
+// 放弃任务：QUESTSYSTEM_Find 定位槽 → QUESTSYSTEM_RemoveSlot 摘除（复刻原版任务面板放弃链两步）。
+// 不刷帧缓存——成功路径的 refresh 由调用方（bridge wrapper / game_system 拼装）执行恰一次。
+QuestQuitResult quest_quit(int32_t quest_id);
+
 }  // namespace qol::game
