@@ -925,6 +925,8 @@ target_compile_features(character_facts_plugin_tests PRIVATE cxx_std_17)
 target_compile_options(character_facts_plugin_tests PRIVATE -ffunction-sections -fdata-sections)
 target_link_options(character_facts_plugin_tests PRIVATE -Wl,--gc-sections)
 set_target_properties(character_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+# T2h-B1：W1 非主线程 smoke 需要 std::thread。
+target_link_libraries(character_facts_plugin_tests PRIVATE Threads::Threads)
 add_test(NAME character_facts_plugin_tests COMMAND character_facts_plugin_tests)
 
 # P5-4-2：item_facts 6 条 /api/item/* GET query handler 的注册/快照/富化/注销接缝。

@@ -14,6 +14,11 @@ bool assembly_init();
 // （K1：与现状同一实现，行为/线程逐字不变；api/native TU 不删）。须在 frame_cache_start 前调用。
 void install_legacy_cache_builders();
 
+// T2h-B1（v3 A-simple）：把 player/party/skills 三槽 builder 覆盖为 owner 适配器
+// （character.state 现取、失败逐字 fallback legacy）。须在 install_legacy_cache_builders()
+// 之后、frame_cache_start() 之前调用；inventory/mercenaries 槽不在本批范围。
+void install_owner_cache_builders();
+
 struct AssemblyReport {
     uint32_t registered_plugins;
     uint32_t registration_failures;

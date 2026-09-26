@@ -4,6 +4,8 @@
 
 #include "patch/call_patch.h"
 #include "infra/log/qol_log.h"
+#include "infra/capabilities.h"
+#include "contracts/character_state.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
@@ -11,6 +13,7 @@
 #include "game_character.h"
 #include "game_party.h"
 #include "game_inventory.h"
+#include "host/owner_cache_builder.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
@@ -77,6 +80,54 @@ void install_legacy_cache_builders() {
     frame_cache_set_json_builder(6, &build_inventory_json);
     frame_cache_set_json_builder(7, &build_skills_json);
     frame_cache_set_json_builder(8, &build_mercenaries_json);
+}
+
+// T2h-B1（v3 A-simple）：player(0)/party(1)/skills(7) 三槽改注入 owner 适配器
+// （character.state 现取；失败逐字 fallback 同槽 legacy builder）。inventory(6)/
+// mercenaries(8) 保持 legacy（归 B2/批⑥）。必须在 install_legacy_cache_builders() 之后调用。
+namespace {
+
+// 与 core.character 插件私有常量对齐（plugin.cpp: party 65536 / skills 16384 / player 512）。
+constexpr uint32_t kHostStatePartyCapacity = 65536;
+constexpr uint32_t kHostStateSkillsCapacity = 16384;
+constexpr uint32_t kHostStatePlayerCapacity = 512;
+
+const contracts::CharacterStateApi* require_character_state() {
+    const void* iface = infra::require_capability(
+        contracts::kCharacterStateCapabilityId,
+        QolVersionRange{contracts::kCharacterStateVersion.major,
+                        contracts::kCharacterStateVersion.minor});
+    // 现取不缓存：插件撤销后 require 返回 nullptr，下一步即逐字 fallback legacy。
+    return iface == nullptr ? nullptr : static_cast<const contracts::CharacterStateApi*>(iface);
+}
+
+std::string host_build_player_json() {
+    return build_character_state_json_via_owner(
+        require_character_state(),
+        static_cast<int32_t>(contracts::QolCharacterStateKind::kPlayer), kHostStatePlayerCapacity,
+        &build_player_json);
+}
+
+std::string host_build_party_json() {
+    return build_character_state_json_via_owner(
+        require_character_state(),
+        static_cast<int32_t>(contracts::QolCharacterStateKind::kParty), kHostStatePartyCapacity,
+        &build_party_json);
+}
+
+std::string host_build_skills_json() {
+    return build_character_state_json_via_owner(
+        require_character_state(),
+        static_cast<int32_t>(contracts::QolCharacterStateKind::kSkills), kHostStateSkillsCapacity,
+        &build_skills_json);
+}
+
+}  // namespace
+
+void install_owner_cache_builders() {
+    frame_cache_set_json_builder(0, &host_build_player_json);
+    frame_cache_set_json_builder(1, &host_build_party_json);
+    frame_cache_set_json_builder(7, &host_build_skills_json);
 }
 
 namespace {

@@ -14,12 +14,14 @@
 #include "game_character.h"
 #include "game_party.h"
 #include "game_world.h"
+#include "host/owner_cache_builder.h"
 #include "infra/capabilities.h"
 #include "plugins/core.character/plugin.h"
 
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -1694,6 +1696,86 @@ void test_read_face_frozen_equivalence() {
     g_state_reads_from_legacy = false;
 }
 
+// T2h-B1（v3）：W2 —— owner 适配器四情形 fallback 逐字节断言（host 可测钩子）。
+static std::string fake_legacy_cache_body() { return "{\"legacy\":true}"; }
+static QolResult fake_owner_ok(qol::contracts::QolCharacterStateKind, char* out, uint32_t capacity,
+                               uint32_t* out_size) {
+    constexpr char kBody[] = "{\"owner\":true}";
+    const uint32_t size = sizeof(kBody) - 1;
+    if (out == nullptr || out_size == nullptr || size > capacity) {
+        return qol::contracts::error(kQolErrBlocked, "small", 5);
+    }
+    std::memcpy(out, kBody, size);
+    *out_size = size;
+    return qol::contracts::ok();
+}
+static QolResult fake_owner_fail(qol::contracts::QolCharacterStateKind, char*, uint32_t,
+                                 uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    return qol::contracts::error(kQolErrNotReady, "not in game", 11);
+}
+static QolResult fake_owner_oversize(qol::contracts::QolCharacterStateKind, char*, uint32_t,
+                                     uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 9999;
+    return qol::contracts::ok();
+}
+
+void test_owner_cache_builder_v3(const qol::contracts::CharacterStateApi* state_api) {
+    // W2 情形 1：capability 未注册/未取到 → legacy。
+    CHECK(qol::host::build_character_state_json_via_owner(nullptr, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // W2 情形 2：api 无 write_state_json → legacy。
+    const qol::contracts::CharacterStateApi null_api{nullptr};
+    CHECK(qol::host::build_character_state_json_via_owner(&null_api, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // W2 情形 3：write_state_json 失败 → legacy。
+    const qol::contracts::CharacterStateApi fail_api{&fake_owner_fail};
+    CHECK(qol::host::build_character_state_json_via_owner(&fail_api, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // W2 情形 4：size > buffer（owner 自报超限）→ legacy。
+    const qol::contracts::CharacterStateApi oversize_api{&fake_owner_oversize};
+    CHECK(qol::host::build_character_state_json_via_owner(&oversize_api, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // 成功路径：owner 字节原样返回（不 fallback、不改写）。
+    const qol::contracts::CharacterStateApi ok_api{&fake_owner_ok};
+    CHECK(qol::host::build_character_state_json_via_owner(&ok_api, 0, 64,
+                                                          &fake_legacy_cache_body) ==
+          "{\"owner\":true}");
+
+    // W1：非主线程调用真实 owner serializer，输出与主线程逐字节一致（纯内存读前提）。
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    sync_legacy_fixture();
+    char main_buf[8192]{};
+    uint32_t main_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty, main_buf,
+                                      sizeof(main_buf), &main_size).ok == kQolOk);
+    char worker_buf[8192]{};
+    uint32_t worker_size = 0;
+    int32_t worker_code = kQolErrInternal;
+    std::thread worker([&] {
+        worker_code = state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty,
+                                                  worker_buf, sizeof(worker_buf), &worker_size)
+                          .code;
+    });
+    worker.join();
+    CHECK(worker_code == kQolOk);
+    CHECK(std::string(main_buf, main_size) == std::string(worker_buf, worker_size));
+    // W2 交叉：真实 owner serializer 的 not-in-world 输出 == legacy（已由 T2c/T2h-0 锁定）。
+    g_state_not_in_game = true;
+    char nw[512]{};
+    uint32_t nw_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer, nw, sizeof(nw),
+                                      &nw_size).ok == kQolOk);
+    CHECK(std::string(nw, nw_size) == frozen_player_json());
+    g_state_not_in_game = false;
+    g_state_reads_from_legacy = false;
+}
+
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
     g_result_handler = handler;
@@ -1929,6 +2011,7 @@ int main() {
     test_write_skills_family(state_api);
     test_bridge_write_envelope();
     test_read_face_frozen_equivalence();
+    test_owner_cache_builder_v3(state_api);
 
     char tiny_output[4] = {'!', '!', '!', '!'};
     uint32_t tiny_size = 99;
