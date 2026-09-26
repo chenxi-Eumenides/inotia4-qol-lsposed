@@ -4,6 +4,7 @@
 #include "bridge/native/item_write_result.h"
 #include "contracts/commands.h"
 #include "contracts/extension_bag_port.h"
+#include "core/native/inventory_trade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/ops/character_write.h"
 #include "game/ops/item_dice.h"
@@ -233,12 +234,36 @@ Java_com_inotia4_qol_NativeBridge_nativeOpDiceReject(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpDiscardItem(JNIEnv* env, jclass, jint bag, jint slot) {
-    return op_result(env, "op_discard_item", ("bag=" + str_of(bag) + " " + "slot=" + str_of(slot)), data_op_discard_item(static_cast<int>(bag), static_cast<int>(slot)));
+#if QOL_KERNEL_ONLY
+    (void)bag;
+    (void)slot;
+    return kernel_only_result(env);
+#else
+    const std::string args = "bag=" + str_of(bag) + " " + "slot=" + str_of(slot);
+    InventoryItemRef expected_ref;
+    const bool found = inventory_item_ref_at(bag, slot, &expected_ref);
+    const inventory_trade::Status status =
+        inventory_trade::discard(bag, slot, found ? expected_ref.native_item : nullptr);
+    // 现状 api/native 成功走 op_ok() → 缓存刷新恰一次（sell 不刷新，保持差异）。
+    if (status == inventory_trade::Status::kOk) frame_cache_force_refresh();
+    return op_result(env, "op_discard_item", args, qol::bridge::item_discard_result_json(status));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSellItem(JNIEnv* env, jclass, jint bag, jint slot) {
-    return op_result(env, "op_sell_item", ("bag=" + str_of(bag) + " " + "slot=" + str_of(slot)), data_op_sell_item(static_cast<int>(bag), static_cast<int>(slot)));
+#if QOL_KERNEL_ONLY
+    (void)bag;
+    (void)slot;
+    return kernel_only_result(env);
+#else
+    const std::string args = "bag=" + str_of(bag) + " " + "slot=" + str_of(slot);
+    InventoryItemRef expected_ref;
+    const bool found = inventory_item_ref_at(bag, slot, &expected_ref);
+    const inventory_trade::Result result =
+        inventory_trade::sell(bag, slot, found ? expected_ref.native_item : nullptr, "api");
+    return op_result(env, "op_sell_item", args, qol::bridge::item_sell_result_json(result));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL

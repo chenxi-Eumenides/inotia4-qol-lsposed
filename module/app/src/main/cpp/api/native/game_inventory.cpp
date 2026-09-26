@@ -26,16 +26,6 @@ std::string kernel_only_error() {
 std::string data_op_add_money(int64_t delta) { (void)delta; return kernel_only_error(); }
 std::string data_op_minus_money(int64_t delta) { (void)delta; return kernel_only_error(); }
 std::string data_op_remove_item(int32_t category) { (void)category; return kernel_only_error(); }
-std::string data_op_discard_item(int bag, int slot) {
-    (void)bag;
-    (void)slot;
-    return kernel_only_error();
-}
-std::string data_op_sell_item(int bag, int slot) {
-    (void)bag;
-    (void)slot;
-    return kernel_only_error();
-}
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
     (void)bag;
     (void)slot;

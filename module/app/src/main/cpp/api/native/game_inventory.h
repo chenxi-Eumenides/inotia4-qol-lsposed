@@ -12,8 +12,6 @@ std::string data_op_add_money(int64_t delta);
 std::string data_op_minus_money(int64_t delta);
 std::string data_op_remove_item(int32_t category);
 
-std::string data_op_discard_item(int bag, int slot);
-std::string data_op_sell_item(int bag, int slot);
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot);
 
 // 数据读取（read 域拆分）：物品属性/装备判定/背包 JSON 构造。
