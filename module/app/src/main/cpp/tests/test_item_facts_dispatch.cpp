@@ -417,7 +417,12 @@ struct FakeScheduler {
 
 FakeScheduler g_scheduler;
 
-QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
+int32_t g_last_log_level = -1;
+char g_last_log_message[256] = {};
+QolResult fake_log_write(int32_t level, int32_t, const char*, const char* message, uint32_t) {
+    g_last_log_level = level;
+    std::snprintf(g_last_log_message, sizeof(g_last_log_message), "%s",
+                  message != nullptr ? message : "");
     return qol::contracts::ok();
 }
 
@@ -1612,8 +1617,12 @@ static bool golden_eb_capacity(int32_t bag, int32_t* out) {
 static void* golden_eb_item_at(int32_t internal, int32_t slot) {
     return (internal == 6 && slot == 0) ? g_golden_item_b : nullptr;
 }
+int32_t g_golden_bad_slot = 0;
 static void golden_eb_for_each(qol::contracts::ExtensionBagItemFn fn, void* ctx) {
-    if (fn != nullptr) (void)fn(6, 0, 10, 199, ctx);
+    if (fn == nullptr) return;
+    // R2：可选注入一个 count=0 的非法槽，验证 L1 单槽跳过而非整快照失败。
+    if (g_golden_bad_slot != 0) (void)fn(6, 1, 10, 0, ctx);
+    (void)fn(6, 0, 10, 199, ctx);
 }
 static int32_t golden_eb_move(int32_t, int32_t, int32_t, int32_t, char*, uint32_t, uint32_t*) {
     return 0;
@@ -1912,6 +1921,157 @@ void test_inventory_owner_vs_legacy_golden() {
     g_golden_require_active = false;
 }
 
+// ---------------------------------------------------------------------------
+// R2：数据面降级（单槽跳过 / EB 段省略 / 写票据不牵连 / 文案防回归）
+// ---------------------------------------------------------------------------
+
+struct GoldenHarness {
+    const qol::contracts::ItemStateApi* item_state = nullptr;
+    qol::contracts::PluginContext ctx{};
+};
+
+// 复用 T2h-B0 golden 夹具安装 core.item 并暴露 item.state 面（新用例共用）。
+bool install_core_item_golden(GoldenHarness* out) {
+    std::memset(g_golden_bag_storage, 0, sizeof(g_golden_bag_storage));
+    std::memset(g_golden_item_a, 0, sizeof(g_golden_item_a));
+    std::memset(g_golden_item_b, 0, sizeof(g_golden_item_b));
+    golden_fill_item(g_golden_item_a, static_cast<uint16_t>(10 << 6), 71, 6, 0x21, 0);
+    golden_fill_item(g_golden_item_b, static_cast<uint16_t>(12 << 6), 1, 0, 0, 1);
+    *reinterpret_cast<void**>(g_golden_bag_storage + 0 * 0x80 + 0 * 8) = g_golden_item_a;
+    *reinterpret_cast<void**>(g_golden_bag_storage + 1 * 0x80 + 2 * 8) = g_golden_item_b;
+    g_inven = g_golden_bag_storage;
+    g_golden_world = 1;
+    g_in_world = true;
+    g_golden_bad_slot = 0;
+    g_last_log_level = -1;
+    g_last_log_message[0] = '\0';
+    qol::host::http_dispatch_reset_for_test();
+    qol::host::http_dispatch_set_op_enabled(true);
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
+    // 静态存储：插件持有 ctx.sdk 指针，须在 helper 返回后仍有效。
+    static qol::contracts::QolHostSdk sdk;
+    sdk = make_sdk();
+    qol::contracts::PluginContext ctx{};
+    ctx.struct_size = sizeof(qol::contracts::PluginContext);
+    ctx.sdk_major = qol::contracts::kHostSdkMajor;
+    ctx.sdk_minor = qol::contracts::kHostSdkMinor;
+    ctx.sdk = &sdk;
+    ctx.plugin_id = "core.item";
+    ctx.ports = kGoldenPortArray;
+    ctx.port_count = 4;
+    if (descriptor.install(ctx) != 0) return false;
+    descriptor.on_enabled(ctx);
+    if (qol::host::http_dispatch_register_queries(descriptor.http_queries,
+                                                  descriptor.http_query_count).ok != kQolOk) {
+        return false;
+    }
+    g_golden_require_active = true;
+    if (out != nullptr) {
+        out->item_state = nullptr;
+        out->ctx = ctx;
+        for (uint32_t i = 0; i < descriptor.provides_count; ++i) {
+            if (std::strcmp(descriptor.provides[i].id,
+                            qol::contracts::kItemStateCapabilityId) == 0) {
+                out->item_state =
+                    static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[i].iface);
+            }
+        }
+        return out->item_state != nullptr && out->item_state->write_state_json != nullptr;
+    }
+    return true;
+}
+
+std::string owner_raw_inventory() {
+    std::vector<char> buffer(qol::contracts::kQolItemStateRawInventoryCapacity);
+    uint32_t size = 0;
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
+    const qol::contracts::ItemStateApi* api = nullptr;
+    for (uint32_t i = 0; i < descriptor.provides_count; ++i) {
+        if (std::strcmp(descriptor.provides[i].id, qol::contracts::kItemStateCapabilityId) == 0) {
+            api = static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[i].iface);
+        }
+    }
+    if (api == nullptr ||
+        api->write_state_json(static_cast<int32_t>(qol::contracts::QolItemStateKind::kRawInventory),
+                              buffer.data(), static_cast<uint32_t>(buffer.size()), &size)
+                .ok != kQolOk) {
+        return "<serialize failed>";
+    }
+    return std::string(buffer.data(), size);
+}
+
+// R2-2 用例 2：L1 单槽非法 → 跳过该槽、主快照成功、WARN 记录、无 invalid 文案。
+void test_extension_degrade_bad_slot_skipped() {
+    CHECK(install_core_item_golden(nullptr));
+    g_golden_eb_enabled = 1;
+    g_golden_bad_slot = 1;
+    const std::string json = owner_raw_inventory();
+    CHECK(json != "<install failed>" && json != "<serialize failed>");
+    CHECK(json.find("\"bag\":0") != std::string::npos);          // 主袋照常
+    CHECK(json.find("\"bag\":6") != std::string::npos);   // EB 段保留好槽
+    CHECK(json.find("\"slot\":0") != std::string::npos);
+    CHECK(json.find("\"count\":0") == std::string::npos);        // 坏槽被跳过
+    CHECK(json.find("invalid extension inventory") == std::string::npos);
+    CHECK(g_last_log_level == 2);                                // WARN 级别
+    CHECK(std::strstr(g_last_log_message, "extension inventory slot skipped") != nullptr);
+    g_golden_bad_slot = 0;
+    g_golden_require_active = false;
+}
+
+// R2-2 用例 4：L2 EB capability 不可取 → 省略 EB 段、主快照成功、WARN、无 error。
+void test_extension_degrade_omits_section() {
+    CHECK(install_core_item_golden(nullptr));
+    g_golden_require_active = false;
+    g_extension_bag_available = false;
+    const std::string json = owner_raw_inventory();
+    CHECK(json != "<install failed>" && json != "<serialize failed>");
+    CHECK(json.find("\"bag\":0") != std::string::npos);
+    CHECK(json.find("\"bag\":6") == std::string::npos);          // EB 段整体省略
+    CHECK(json.find("\"error\"") == std::string::npos);
+    CHECK(json.find("invalid extension inventory") == std::string::npos);
+    CHECK(g_last_log_level == 2);
+    CHECK(std::strstr(g_last_log_message, "extension inventory omitted") != nullptr);
+    g_extension_bag_available = false;
+    g_golden_require_active = false;
+}
+
+// R2-2 用例 3：原版袋写票据不因 EB 段降级而 failed（写后 state 主字段完整）。
+void test_extension_degrade_write_ticket_done() {
+    CHECK(install_core_item_golden(nullptr));
+    g_golden_eb_enabled = 1;
+    g_golden_bad_slot = 1;
+    g_state_write_result = qol::contracts::ok();
+    g_state_write_count = 4;
+    g_state_write_data = {};
+    uint16_t status = 0;
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":\"0\",\"slot\":\"0\",\"count\":\"2\","
+                        "\"to_bag\":\"1\",\"to_slot\":\"0\"}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    ItemWriteResultContext context{};
+    context.handler = g_result_handler;
+    context.payload_size = g_post_payload_size;
+    std::memcpy(context.payload, g_post_payload, g_post_payload_size);
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::Command command{"core.item kMoveItem", nullptr, &context, false,
+                                      &run_item_write_result, 0};
+    const qol::infra::CommandTicket ticket = qol::infra::post(command);
+    CHECK(ticket != 0 && qol::infra::drain() == 1);
+    CHECK(qol::infra::ticket_state(ticket) == qol::infra::CommandState::kDone);
+    char result[8192]{};
+    uint32_t result_size = 0;
+    CHECK(qol::infra::read_result(ticket, result, sizeof(result), &result_size));
+    const std::string body(result, result_size);
+    CHECK(body.find("\"ok\":true") != std::string::npos);
+    CHECK(body.find("\"state\":{\"bags\":") != std::string::npos);
+    CHECK(body.find("\"bags\":[") != std::string::npos);         // 主字段完整
+    CHECK(body.find("\"bag\":0") != std::string::npos);
+    CHECK(body.find("invalid extension inventory") == std::string::npos);
+    g_golden_bad_slot = 0;
+    qol::infra::command_queue_reset_for_test();
+    g_golden_require_active = false;
+}
+
 // T2h-B3#2：debug raw 整函数从 api/native/game_inventory_read.inc 搬至
 // game/read/item_class.cpp。以下为搬迁前实现的逐字节复刻（before oracle），
 // 与 game/read 新落点 debug_item_raw_json() 在 fake 环境对照。
@@ -1996,6 +2156,9 @@ int main() {
     test_static_not_ready_holds_snapshot();
     test_bridge_item_write_result_helper();
     test_inventory_owner_vs_legacy_golden();
+    test_extension_degrade_bad_slot_skipped();
+    test_extension_degrade_omits_section();
+    test_extension_degrade_write_ticket_done();
     test_debug_item_raw_golden();
     std::printf("item_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

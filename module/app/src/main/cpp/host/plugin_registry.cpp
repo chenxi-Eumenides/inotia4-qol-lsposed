@@ -642,8 +642,9 @@ const char* check_optional_requires(const contracts::PluginDescriptor& plugin, u
     return nullptr;
 }
 
-// optional 依赖段 2（install 循环结束后）：复查暂缓项。provider 最终未发布（装失败/被阻断）
-// 时补记 degraded；防段 1 暂缓造成的漏报。与段 1 同文案，并置 g_gate_degraded 供恢复后清除。
+// optional 依赖段 2（sync_gates 的 enable 轮之后调用）：复查暂缓项。provider 最终未发布
+// （装失败/被阻断/未能 enable）时补记 degraded；防段 1 暂缓造成的漏报。与段 1 同文案，
+// 并置 g_gate_degraded 供恢复后清除。
 void verify_optional_after_install() {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         if (g_optional_pending[i] == 0) continue;
@@ -1695,7 +1696,6 @@ int install_all(const HostDeps& deps) {
             ++failed_plugins;
         }
     }
-    verify_optional_after_install();
     return failed_plugins;
 }
 
@@ -1838,6 +1838,9 @@ uint32_t sync_gates() {
         }
         ++changed;
     }
+    // optional 段 2 复查放在 enable 轮之后：capability 在 enable 时注册，install 循环后立即
+    // 复查会把「尚未 enable 的 provider」误判为缺失（core.item 误 degraded）。
+    verify_optional_after_install();
     return changed;
 }
 

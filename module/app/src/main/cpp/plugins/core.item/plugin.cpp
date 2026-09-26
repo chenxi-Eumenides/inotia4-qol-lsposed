@@ -234,6 +234,21 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     (void)sdk->log.write(1, 1, kPluginId, message, length);
 }
 
+// 数据面降级 WARN（级别 2）。限速：仅当消息与上一条不同才输出，重复的逐帧同级降级
+// 只记一次，避免刷屏（插件层无帧号，按内容变化限速等价可达诊断目的）。
+// 上一条缓存按 install 复位，使同一种降级在重装/重进档后仍能各记一次。
+char g_degrade_log_last[192] = {};
+
+void log_degrade_warn(const char* message) {
+    if (message == nullptr) return;
+    if (std::strcmp(g_degrade_log_last, message) == 0) return;
+    std::snprintf(g_degrade_log_last, sizeof(g_degrade_log_last), "%s", message);
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)g_sdk->log.write(2, 1, kPluginId, message, length);
+}
+
 bool copy_buffer(char* destination, uint32_t capacity, uint32_t* destination_size,
                  const char* source, uint32_t source_size) {
     if (destination == nullptr || destination_size == nullptr || source == nullptr ||
@@ -407,16 +422,20 @@ struct ExtensionInventorySlot {
 
 struct ExtensionInventoryItems {
     ExtensionInventorySlot slots[5][16]{};
-    bool invalid = false;
 };
 
 bool collect_extension_inventory_item(int32_t bag, int32_t slot, int32_t category,
                                       int32_t count, void* raw_context) {
     auto* context = static_cast<ExtensionInventoryItems*>(raw_context);
-    if (context == nullptr || bag < 6 || bag > 10 || slot < 0 || slot >= 16 ||
-        category <= 0 || count <= 0) {
-        if (context != nullptr) context->invalid = true;
-        return true;
+    if (context == nullptr) return false;
+    if (bag < 6 || bag > 10 || slot < 0 || slot >= 16 || category <= 0 || count <= 0) {
+        // L1：单槽非法只跳过该槽；整快照与写票据不得因此失败（限速 WARN 保留可诊断性）。
+        char message[192]{};
+        std::snprintf(message, sizeof(message),
+                      "extension inventory slot skipped: bag=%d slot=%d category=%d count=%d", bag,
+                      slot, category, count);
+        log_degrade_warn(message);
+        return false;
     }
     auto& target = context->slots[bag - 6][slot];
     target = ExtensionInventorySlot{true, category, count};
@@ -433,28 +452,40 @@ QolResult append_extension_inventory_bags(std::string* out) {
         QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
                         static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
         &iface);
-    if (!contracts::succeeded(required) || iface == nullptr) return contracts::ok();
+    if (!contracts::succeeded(required) || iface == nullptr) {
+        // L2：EB capability 不可取（停用/未注册）→ 省略 EB 段，主快照/写票据照常。
+        log_degrade_warn("extension inventory omitted: extension bag capability unavailable");
+        return contracts::ok();
+    }
     const auto* extension_bag = static_cast<const contracts::ExtensionBagApi*>(iface);
     int32_t in_world = 0;
     if (g_port->read.in_world == nullptr ||
-        !contracts::succeeded(g_port->read.in_world(&in_world)) || in_world == 0 ||
-        extension_bag->enabled == nullptr || !extension_bag->enabled()) {
+        !contracts::succeeded(g_port->read.in_world(&in_world)) || in_world == 0) {
+        return contracts::ok();
+    }
+    if (extension_bag->enabled == nullptr || !extension_bag->enabled()) {
+        // L2：EB 门禁关闭 → 省略 EB 段。
+        log_degrade_warn("extension inventory omitted: extension bag disabled");
         return contracts::ok();
     }
     if (extension_bag->for_each_logical_item == nullptr ||
         extension_bag->logical_bag_capacity == nullptr ||
         extension_bag->internal_index == nullptr || extension_bag->item_at == nullptr) {
-        return error_result(kQolErrNotReady, "extension bag inventory unavailable");
+        // L2：EB 面不可用（成员缺失）→ 省略 EB 段，主快照/写票据照常；限速 WARN。
+        log_degrade_warn("extension inventory omitted: extension bag api incomplete");
+        return contracts::ok();
     }
 
     ExtensionInventoryItems items{};
     extension_bag->for_each_logical_item(&collect_extension_inventory_item, &items);
-    if (items.invalid) return error_result(kQolErrInvalidArgument, "invalid extension inventory");
 
+    // 先构造到本地缓冲：任一 bag 容量不可得时整体丢弃 EB 段（L2），不产生半截输出。
+    std::string extension_json;
     for (int32_t bag = 6; bag <= 10; ++bag) {
         int32_t capacity = 0;
         if (!extension_bag->logical_bag_capacity(bag, &capacity) || capacity < 0 || capacity > 16) {
-            return error_result(kQolErrNotReady, "extension bag capacity unavailable");
+            log_degrade_warn("extension inventory omitted: extension bag capacity unavailable");
+            return contracts::ok();
         }
         std::string encoded_items;
         int32_t filled = 0;
@@ -485,11 +516,12 @@ QolResult append_extension_inventory_bags(std::string* out) {
                              ",\"count\":" + std::to_string(count) + "}";
             ++filled;
         }
-        *out += ",{\"bag\":" + std::to_string(bag) +
+        extension_json += ",{\"bag\":" + std::to_string(bag) +
                 ",\"items\":[" + encoded_items +
                 "],\"capacity\":" + std::to_string(capacity) +
                 ",\"slot_count\":" + std::to_string(filled) + "}";
     }
+    out->append(extension_json);
     return contracts::ok();
 }
 
@@ -1441,6 +1473,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
+    g_degrade_log_last[0] = '\0';
     g_port = nullptr;
     g_item_money_write = nullptr;
     g_item_dice_write = nullptr;

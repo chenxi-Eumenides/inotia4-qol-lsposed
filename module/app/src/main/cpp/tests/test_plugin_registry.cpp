@@ -525,8 +525,10 @@ PluginDescriptor make_dep_descriptor(const char* id, const CapabilityRequirement
                                      const CapabilityRequirement* optional, uint32_t optional_count,
                                      const qol::contracts::CapabilityProvisionRef* provides,
                                      uint32_t provides_count,
-                                     int (*install_fn)(PluginContext&)) {
-    PluginDescriptor d = make_descriptor(id, nullptr, 0, requires, requires_count);
+                                     int (*install_fn)(PluginContext&),
+                                     const ResourceClaim* resources = nullptr,
+                                     uint32_t resource_count = 0) {
+    PluginDescriptor d = make_descriptor(id, resources, resource_count, requires, requires_count);
     d.optional_count = optional_count;
     d.optional_requires = optional;
     d.provides_count = provides_count;
@@ -1580,6 +1582,9 @@ void test_optional_pending_degrade_after_provider_failure() {
     CHECK(install_all(make_deps()) == 1);  // provider 装失败
     CHECK(feature_error_is("provide_b", "install failed"));
     CHECK(feature_state_is("need_b", FeatureState::kEnabled));
+    // R2-3：段 2 复查在 capability enable 轮（sync_gates）之后，故 install_all 后尚未补报。
+    CHECK(!feature_degraded("need_b"));
+    (void)sync_gates();
     CHECK(feature_degraded("need_b"));
     CHECK(feature_error_is("need_b", "missing optional capability: b.api"));
 }
@@ -1599,6 +1604,32 @@ void test_optional_acyclic_order_preserved() {
     CHECK(feature_state_is("provider", FeatureState::kEnabled));
     CHECK(!feature_degraded("consumer"));
     CHECK(std::strcmp(g_dep_order, "BA") == 0);
+}
+
+// R2-3：段 2 复查时机——provider 在 enable 轮注册 capability 后，consumer 不得误 degraded。
+void test_optional_degrade_timing_after_enable() {
+    reset_all();
+    ResourceClaim provider_gate[] = {claim("hook:test:prov:gate", "prov_provider", "test.prov.gate")};
+    const PluginDescriptor consumer = make_dep_descriptor("consumer", nullptr, 0, g_b_api_optional,
+                                                          1, nullptr, 0, &dep_install_a);
+    const PluginDescriptor provider =
+        make_dep_descriptor("provider", nullptr, 0, nullptr, 0, g_b_api_provides, 1,
+                            &dep_install_b, provider_gate, 1);
+    CHECK(register_plugin(consumer));
+    CHECK(register_plugin(provider));
+
+    CHECK(install_all(make_deps()) == 0);
+    // provider 门禁关 → installed_disabled、capability 尚未注册；consumer 暂缓但不 degraded。
+    CHECK(feature_state_is("provider", FeatureState::kInstalledDisabled));
+    CHECK(feature_state_is("consumer", FeatureState::kEnabled));
+    CHECK(!feature_degraded("consumer"));
+
+    // enable 轮：门禁打开 → provider 注册 capability → consumer 复查通过，仍不 degraded。
+    qol::infra::config_set_bool("test.prov.gate", true);
+    (void)sync_gates();
+    CHECK(feature_state_is("provider", FeatureState::kEnabled));
+    CHECK(feature_state_is("consumer", FeatureState::kEnabled));
+    CHECK(!feature_degraded("consumer"));
 }
 
 }  // namespace
@@ -1649,6 +1680,7 @@ int main() {
     test_optional_missing_provider_degrades();
     test_optional_pending_degrade_after_provider_failure();
     test_optional_acyclic_order_preserved();
+    test_optional_degrade_timing_after_enable();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

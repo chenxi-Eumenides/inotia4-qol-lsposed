@@ -723,19 +723,20 @@ const qol::contracts::CraftFactsApi* extension_bag_craft_facts() { return g_craf
 
 uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical) {
     const qol::contracts::QolItemCountApi* api = item_count_api();
-    if (api != nullptr && api->effective != nullptr && item != nullptr) {
-        uint32_t count = 0;
-        const QolResult result = api->effective(item, &count);
-        if (qol::contracts::succeeded(result)) return count;
-        if (result.code != kQolErrNotReady) return 0;
-    }
     if (item != nullptr) {
-        uint32_t field = 0;
-        if (api == nullptr || api->read_encoded_field == nullptr ||
-            !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
-            return 0;
+        if (api != nullptr && api->effective != nullptr) {
+            uint32_t count = 0;
+            const QolResult result = api->effective(item, &count);
+            if (qol::contracts::succeeded(result)) return count;
+            // 任何失败（含 unsupported，如 ITEMCLASS 表不可解）都不回 0：回 0 会被下游
+            // 当作非法 count 而使整段 EB 快照失效。改为回退原版视图（G-item-#10 口径：
+            // 能力缺失或不可用时回退原版 getter）。
         }
-        return original_count_view(field);
+        uint32_t field = 0;
+        if (api != nullptr && api->read_encoded_field != nullptr &&
+            qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+            return original_count_view(field);
+        }
     }
     return virtual_bag_view_from_canonical(fallback_canonical, false);
 }
