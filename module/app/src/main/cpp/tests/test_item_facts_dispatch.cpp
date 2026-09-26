@@ -12,6 +12,7 @@
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/extension_bag.h"
+#include "contracts/extension_bag_port.h"
 #include "contracts/character_state.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
@@ -20,6 +21,11 @@
 #include "contracts/result.h"
 #include "bridge/native/item_write_result.h"
 #include "core/native/inventory_trade.h"
+#include "game/access/game_access.h"
+#include "game/adapter_ports/item_count_facade.h"
+#include "game/ops/game_ops_common.h"
+#include "game/state/game_state.h"
+#include "game_inventory.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "infra/command_queue.h"
@@ -413,6 +419,9 @@ QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
 
 bool g_override_available = false;
 bool g_override_enabled = false;
+// T2h-B0：golden fixture 期间让 EB capability 返回带 inventory 成员的金装 API。
+bool g_golden_require_active = false;
+const qol::contracts::ExtensionBagApi* golden_extension_bag_api();
 
 QolResult override_canonical(const void*, uint32_t* out_count) {
     *out_count = g_canonical_count;
@@ -521,6 +530,10 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
     if (std::strcmp(id, qol::contracts::kExtensionBagCapabilityId) == 0) {
         ++g_extension_bag_require_calls;
         g_extension_bag_required_minor = required.min_minor;
+        if (g_golden_require_active) {
+            *out_iface = golden_extension_bag_api();
+            return qol::contracts::ok();
+        }
         if (!g_extension_bag_available) {
             return qol::contracts::error(kQolErrNotFound, "missing", 7);
         }
@@ -1503,10 +1516,348 @@ void test_bridge_item_write_result_helper() {
 
 }  // namespace
 
+// ============================================================================
+// T2h-B0：owner `serialize_inventory_json` vs legacy `build_inventory_json`
+// 逐字节 golden（fake 环境；纯 tests）。两侧读同一份 fake 袋槽/物品字节。
+// 见 .tmp/item-char-writes/plans/T2h-read-side-plan.md §4.1。
+// ============================================================================
+uint8_t g_golden_bag_storage[6 * 0x80]{};
+uint8_t g_golden_item_a[0x40]{};
+uint8_t g_golden_item_b[0x40]{};
+int32_t g_golden_world = 1;
+int32_t g_golden_raw = 71;
+int32_t g_golden_eb_enabled = 0;
+int32_t g_golden_eb_caps[5] = {16, 16, 12, 12, 12};
+
+static int golden_bit(int v, int hi, int lo) { return (v >> lo) & ((1 << (hi - lo + 1)) - 1); }
+static int golden_cumulate(void*) { return g_golden_raw; }
+static int golden_rarity(void*) { return 3; }
+static int golden_damage(void*) { return 4; }
+static int golden_defense(void*) { return 5; }
+static int golden_need_level(void*) { return 7; }
+
+bool game_in_world() { return g_golden_world != 0; }
+void* g_inven = nullptr;
+GetBitFn fn_get_bit = &golden_bit;
+GetCumulateCountFn fn_get_cumulate_count = &golden_cumulate;
+GetRarityFn fn_get_rarity = &golden_rarity;
+GetItemStatFn fn_get_damage = &golden_damage;
+GetItemStatFn fn_get_defense = &golden_defense;
+ItemGetAbilityLevelFn fn_item_get_ability_level = &golden_need_level;
+bool item_is_equip(void*) { return false; }
+void frame_cache_force_refresh() {}
+bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }
+
+namespace qol::game {
+const qol::contracts::QolItemCountApi* item_count_api_if_resident() {
+    return g_override_available ? &kOverrideItemCountApi : nullptr;
+}
+}  // namespace qol::game
+
+static void* golden_bag_item(int bag, int slot) {
+    if (bag < 0 || bag >= 6 || slot < 0 || slot >= 16) return nullptr;
+    return *reinterpret_cast<void**>(g_golden_bag_storage + bag * 0x80 + slot * 8);
+}
+
+static std::string golden_legacy_eb_json() {
+    if (g_golden_eb_enabled == 0) return "";
+    std::string out =
+        ",{\"bag\":6,\"items\":[{\"slot\":0,\"category\":10,\"count\":199}],\"capacity\":16,"
+        "\"slot_count\":1}";
+    for (int bag = 7; bag <= 10; ++bag) {
+        out += ",{\"bag\":" + std::to_string(bag) + ",\"items\":[],\"capacity\":" +
+               std::to_string(g_golden_eb_caps[bag - 6]) + ",\"slot_count\":0}";
+    }
+    return out;
+}
+std::string extension_bag_inventory_bags_json() { return golden_legacy_eb_json(); }
+
+static bool golden_eb_enabled() { return g_golden_eb_enabled != 0; }
+static bool golden_eb_is_logical(int32_t bag) { return bag >= 6 && bag <= 10; }
+static int32_t golden_eb_internal(int32_t) { return 6; }
+static bool golden_eb_capacity(int32_t bag, int32_t* out) {
+    if (bag < 6 || bag > 10 || out == nullptr) return false;
+    *out = g_golden_eb_caps[bag - 6];
+    return true;
+}
+static void* golden_eb_item_at(int32_t internal, int32_t slot) {
+    return (internal == 6 && slot == 0) ? g_golden_item_b : nullptr;
+}
+static void golden_eb_for_each(qol::contracts::ExtensionBagItemFn fn, void* ctx) {
+    if (fn != nullptr) (void)fn(6, 0, 10, 199, ctx);
+}
+static int32_t golden_eb_move(int32_t, int32_t, int32_t, int32_t, char*, uint32_t, uint32_t*) {
+    return 0;
+}
+static qol::contracts::ExtensionBagApi make_golden_eb_api() {
+    qol::contracts::ExtensionBagApi api{};
+    api.enabled = &golden_eb_enabled;
+    api.is_logical_bag = &golden_eb_is_logical;
+    api.internal_index = &golden_eb_internal;
+    api.for_each_logical_item = &golden_eb_for_each;
+    api.item_at = &golden_eb_item_at;
+    api.logical_bag_capacity = &golden_eb_capacity;
+    api.move_item = &golden_eb_move;
+    return api;
+}
+const qol::contracts::ExtensionBagApi kGoldenExtensionBagApi = make_golden_eb_api();
+namespace {
+const qol::contracts::ExtensionBagApi* golden_extension_bag_api() {
+    return &kGoldenExtensionBagApi;
+}
+}  // namespace
+
+static QolResult golden_unsupported() {
+    return qol::contracts::error(kQolErrUnsupported, "stub", 4);
+}
+static QolResult golden_unsupported2(const void*, int32_t*) { return golden_unsupported(); }
+static QolResult golden_unsupported1(int32_t, int32_t*) { return golden_unsupported(); }
+static QolResult golden_unsupported_price(const void*, int64_t*) { return golden_unsupported(); }
+static QolResult golden_unsupported_phys(int32_t, int32_t, void**) { return golden_unsupported(); }
+static QolResult golden_unsupported_detail(int32_t*, int32_t*, void**) {
+    return golden_unsupported();
+}
+static QolResult golden_unsupported_cursor(const void*, int32_t*) { return golden_unsupported(); }
+
+static QolResult golden_category(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    }
+    *out = golden_bit(
+        *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(item) + I_TYPE), 15, 6);
+    return qol::contracts::ok();
+}
+static QolResult golden_cumulate_count(const void*, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = g_golden_raw;
+    return qol::contracts::ok();
+}
+static QolResult golden_item_ref_at(int32_t bag, int32_t slot,
+                                    qol::contracts::QolInventoryItemRef* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    void* item = golden_bag_item(bag, slot);
+    if (item == nullptr) return qol::contracts::error(kQolErrNotFound, "empty", 5);
+    *out = qol::contracts::QolInventoryItemRef{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal), bag, slot, 0, 0,
+        item};
+    return qol::contracts::ok();
+}
+static QolResult golden_inventory_json(char*, uint32_t, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    return qol::contracts::ok();
+}
+static QolResult golden_money(int64_t* out) {
+    if (out != nullptr) *out = 0;
+    return qol::contracts::ok();
+}
+static QolResult golden_shop(char* out, uint32_t capacity, uint32_t* out_size) {
+    constexpr char kShop[] = "{\"items\":[]}";
+    const uint32_t size = sizeof(kShop) - 1;
+    if (out == nullptr || out_size == nullptr || capacity <= size) {
+        return qol::contracts::error(kQolErrBlocked, "small", 5);
+    }
+    std::memcpy(out, kShop, size);
+    out[size] = '\0';
+    *out_size = size;
+    return qol::contracts::ok();
+}
+static QolResult golden_in_world(int32_t* out) {
+    if (out != nullptr) *out = g_golden_world;
+    return qol::contracts::ok();
+}
+static QolResult golden_static_text(int32_t, int32_t, const char**) {
+    return qol::contracts::error(kQolErrNotFound, "x", 1);
+}
+static QolResult golden_static_ready(int32_t* out) {
+    if (out != nullptr) *out = 1;
+    return qol::contracts::ok();
+}
+static QolResult golden_view(const void* item, qol::contracts::QolItemInventoryView* out) {
+    if (item == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    }
+    const auto* bytes = static_cast<const uint8_t*>(item);
+    *out = {};
+    const uint16_t flags = *reinterpret_cast<const uint16_t*>(bytes + I_TYPE);
+    out->fields = qol::contracts::kQolItemInventoryHasCategory |
+                  qol::contracts::kQolItemInventoryHasRarity |
+                  qol::contracts::kQolItemInventoryHasDamage |
+                  qol::contracts::kQolItemInventoryHasDefense |
+                  qol::contracts::kQolItemInventoryHasNeedLevel;
+    out->type_flags = flags;
+    out->raw_rarity = (flags >> 2) & 0x0F;
+    out->category = golden_bit(flags, 15, 6);
+    out->count_supported = 1;
+    out->equip = item_is_equip(const_cast<void*>(item)) ? 1 : 0;
+    out->rarity = golden_rarity(nullptr);
+    out->damage = golden_damage(nullptr);
+    out->defense = golden_defense(nullptr);
+    out->magic_rate = bytes[I_MAGIC_RATE];
+    out->need_level = golden_need_level(nullptr);
+    out->socket = bytes[I_SOCKET];
+    out->socket_filled = out->socket & 0x0F;
+    out->socket_total = (out->socket >> 4) & 0x0F;
+    out->enchant = *reinterpret_cast<const uint16_t*>(bytes + I_ENCHANT);
+    out->chaos = (out->enchant & 1) != 0 ? 1 : 0;
+    out->enchant_id = (out->enchant >> 11) & 0x1F;
+    out->enchant_level = (out->enchant >> 6) & 0x1F;
+    const uint32_t count = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
+    out->chaos_level = static_cast<int32_t>(count & 0xFF);
+    out->chaos_rate = static_cast<int32_t>((count >> 8) & 0xFF);
+    out->option_count = 0;
+    return qol::contracts::ok();
+}
+
+const qol::contracts::QolItemPortReadApi kGoldenRead{
+    &golden_category,          &golden_unsupported2,      &golden_unsupported1,
+    &golden_unsupported1,      &golden_unsupported_price, &golden_cumulate_count,
+    &golden_item_ref_at,       &golden_unsupported_phys,  &golden_unsupported_detail,
+    &golden_unsupported_cursor, &golden_inventory_json,  &golden_money,
+    &golden_shop,              &golden_in_world,          &golden_static_text,
+    &golden_static_ready,      &golden_view,
+};
+const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion, kGoldenRead};
+const void* const kGoldenPortArray[] = {
+    &kGoldenPort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort};
+
+static void golden_fill_item(uint8_t* bytes, uint16_t flags, uint32_t raw_count, uint8_t magic,
+                             uint8_t socket, uint16_t enchant) {
+    *reinterpret_cast<uint16_t*>(bytes + I_TYPE) = flags;
+    *reinterpret_cast<uint32_t*>(bytes + I_COUNT) = raw_count;
+    bytes[I_MAGIC_RATE] = magic;
+    bytes[I_SOCKET] = socket;
+    *reinterpret_cast<uint16_t*>(bytes + I_ENCHANT) = enchant;
+    *reinterpret_cast<uint8_t**>(bytes + I_OPTION_LIST) = nullptr;
+}
+
+// legacy `build_inventory_json` 的逐字节复刻（T2h-0 手法）。api/native 读面退役后作为
+// inventory 的独立 state 对照源；同时用于 T2h-B0 的 frozen==legacy 等值断言。
+std::string frozen_inventory_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    constexpr int BAG_COUNT = 6;
+    constexpr size_t BAG_STRIDE = 0x80;
+    constexpr int SLOTS_PER_BAG = 16;
+    std::string s = "{\"bags\":[";
+    for (int b = 0; b < BAG_COUNT; ++b) {
+        if (b > 0) s += ",";
+        s += "{\"bag\":" + std::to_string(b) + ",\"items\":[";
+        int filled = 0;
+        if (g_inven != nullptr) {
+            uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + b * BAG_STRIDE;
+            for (int j = 0; j < SLOTS_PER_BAG; ++j) {
+                void* item = *reinterpret_cast<void**>(bag_slots + j * 8);
+                if (item == nullptr) continue;
+                uint16_t flags =
+                    *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+                if (filled > 0) s += ",";
+                s += "{\"slot\":" + std::to_string(j);
+                s += ",\"type_flags\":" + std::to_string(flags);
+                s += ",\"raw_rarity\":" + std::to_string((flags >> 2) & 0x0F);
+                if (fn_get_bit != nullptr) {
+                    s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
+                }
+                const qol::contracts::QolItemCountApi* count_api =
+                    qol::game::item_count_api_if_resident();
+                if (fn_get_cumulate_count != nullptr || count_api != nullptr) {
+                    int32_t effective =
+                        fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 0;
+                    if (count_api != nullptr && count_api->effective != nullptr) {
+                        uint32_t view = 0;
+                        const QolResult result = count_api->effective(item, &view);
+                        if (qol::contracts::succeeded(result)) {
+                            effective = static_cast<int32_t>(view);
+                        }
+                    }
+                    s += ",\"count\":" + std::to_string(effective);
+                }
+                s += std::string(",\"equip\":") + (item_is_equip(item) ? "true" : "false");
+                if (fn_get_rarity != nullptr) {
+                    s += ",\"rarity\":" + std::to_string(fn_get_rarity(item));
+                }
+                append_item_attrs(s, item);
+                s += "}";
+                ++filled;
+            }
+        }
+        s += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
+    }
+    s += extension_bag_inventory_bags_json();
+    s += "]}";
+    return s;
+}
+
+void test_inventory_owner_vs_legacy_golden() {
+    std::memset(g_golden_bag_storage, 0, sizeof(g_golden_bag_storage));
+    std::memset(g_golden_item_a, 0, sizeof(g_golden_item_a));
+    std::memset(g_golden_item_b, 0, sizeof(g_golden_item_b));
+    golden_fill_item(g_golden_item_a, static_cast<uint16_t>(10 << 6), 71, 6, 0x21, 0);
+    golden_fill_item(g_golden_item_b, static_cast<uint16_t>(12 << 6), 1, 0, 0, 1);
+    *reinterpret_cast<void**>(g_golden_bag_storage + 0 * 0x80 + 0 * 8) = g_golden_item_a;
+    *reinterpret_cast<void**>(g_golden_bag_storage + 1 * 0x80 + 2 * 8) = g_golden_item_b;
+    g_inven = g_golden_bag_storage;
+    g_golden_world = 1;
+    g_in_world = true;
+
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
+    qol::host::http_dispatch_reset_for_test();
+    qol::host::http_dispatch_set_op_enabled(true);
+    qol::contracts::QolHostSdk sdk = make_sdk();
+    qol::contracts::PluginContext ctx{};
+    ctx.struct_size = sizeof(qol::contracts::PluginContext);
+    ctx.sdk_major = qol::contracts::kHostSdkMajor;
+    ctx.sdk_minor = qol::contracts::kHostSdkMinor;
+    ctx.sdk = &sdk;
+    ctx.plugin_id = "core.item";
+    ctx.ports = kGoldenPortArray;
+    ctx.port_count = 4;
+    CHECK(descriptor.install(ctx) == 0);
+    descriptor.on_enabled(ctx);
+    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
+                                                    descriptor.http_query_count).ok == kQolOk);
+    CHECK(g_scheduler.handler != nullptr);
+    g_golden_require_active = true;
+
+    struct Fixture {
+        const char* name;
+        int32_t raw;
+        bool override_on;
+        uint32_t canonical;
+        bool eb;
+    };
+    const Fixture fixtures[] = {
+        {"default", 3, false, 3, false},
+        {"stack_on", 71, true, 199, false},
+        {"stack_off", 71, false, 71, false},
+        {"extension_bag", 71, true, 199, true},
+    };
+    for (const auto& fixture : fixtures) {
+        g_golden_raw = fixture.raw;
+        g_override_available = fixture.override_on;
+        g_override_enabled = fixture.override_on;
+        g_canonical_count = fixture.canonical;
+        g_golden_eb_enabled = fixture.eb ? 1 : 0;
+        const std::string legacy = build_inventory_json();
+        const std::string frozen = frozen_inventory_json();
+        // T2h-B0 golden（可证部分）：frozen 复刻 == legacy 实现，逐字节。
+        CHECK(frozen == legacy);
+        CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
+        uint16_t status = 0;
+        const std::string owner_http = dispatch_get("/api/item/inventory", &status);
+        // 探针（非断言）：owner 公开面（core.item HTTP）输出为**富化** schema，与 legacy
+        // raw builder 天然不同；raw owner serializer（plugin.cpp:490）未经任何公开接口暴露，
+        // 故 B0 的 owner-raw==legacy 不可达 → B2 前置不通过。差异清单见执行记录。
+        if (owner_http == legacy) {
+            std::printf("T2h-B0 NOTE [%s] owner HTTP == legacy（意外）\n", fixture.name);
+        }
+    }
+    g_golden_require_active = false;
+}
+
 int main() {
     test_lifecycle_and_responses();
     test_static_not_ready_holds_snapshot();
     test_bridge_item_write_result_helper();
+    test_inventory_owner_vs_legacy_golden();
     std::printf("item_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

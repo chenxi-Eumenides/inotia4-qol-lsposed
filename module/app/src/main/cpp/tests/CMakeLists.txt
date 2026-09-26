@@ -936,9 +936,14 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/plugins/core.item/response.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
+    # T2h-B0：legacy 读实现入 host golden（fake 环境）
+    ${CPP_DIR}/api/native/game_inventory.cpp
+    ${CPP_DIR}/game/ops/game_ops_common.cpp
 )
 target_include_directories(item_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
+    ${CPP_DIR}/api/native
+    ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(item_facts_dispatch_tests PRIVATE cxx_std_17)
 set_target_properties(item_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
