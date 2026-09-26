@@ -13,24 +13,6 @@
 #include <cstdint>
 #include <string>
 
-std::string data_op_add_experience(int role, int64_t delta) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_add_exp == nullptr) return op_err("symbol not resolved");
-    int r = fn_add_exp(ch, static_cast<int32_t>(delta), 1);
-    return r ? op_ok() : op_err("add exp failed");
-}
-
-std::string data_op_set_skill_usage(int role, int32_t onoff) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_set_skill_usage == nullptr) return op_err("symbol not resolved");
-    fn_set_skill_usage(ch, onoff ? 1 : 0);
-    return op_ok();
-}
-
 std::string member_json(void* ch) {
     std::string s = "{";
     s += "\"type\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_TYPE]));

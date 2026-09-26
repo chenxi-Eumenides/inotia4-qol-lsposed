@@ -64,7 +64,11 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSetLevel(JNIEnv* env, jclass, jint rol
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpAddExperience(JNIEnv* env, jclass, jint role, jlong delta) {
-    return op_result(env, "op_add_experience", ("role=" + str_of(role) + " " + "delta=" + str_of(delta)), data_op_add_experience(static_cast<int>(role), static_cast<int64_t>(delta)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::add_experience(static_cast<int>(role),
+                                                            static_cast<int64_t>(delta), &op);
+    return op_result(env, "op_add_experience", ("role=" + str_of(role) + " " + "delta=" + str_of(delta)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

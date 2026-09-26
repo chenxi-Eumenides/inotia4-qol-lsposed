@@ -61,7 +61,11 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSetAutoAttack(JNIEnv* env, jclass, jin
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetSkillUsage(JNIEnv* env, jclass, jint role, jint onoff) {
-    return op_result(env, "op_set_skill_usage", ("role=" + str_of(role) + " " + "onoff=" + str_of(onoff)), data_op_set_skill_usage(static_cast<int>(role), static_cast<int32_t>(onoff)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::set_skill_usage(static_cast<int>(role),
+                                                             static_cast<int32_t>(onoff), &op);
+    return op_result(env, "op_set_skill_usage", ("role=" + str_of(role) + " " + "onoff=" + str_of(onoff)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

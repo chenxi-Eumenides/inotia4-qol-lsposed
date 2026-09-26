@@ -4,9 +4,10 @@
 
 namespace qol::game::ops {
 
-// 20 个 character 写 kind 的 typed 低层原语：逐条等价迁移 api/native/game_character.cpp 与
-// api/native/game_party.cpp 的 data_op_*（成功时 frame_cache_force_refresh 恰一次，失败时回传
-// 原 op_err 文案）。不含 JSON、不接收 kind、不使用 std::string；owner 负责信封与 state 附加。
+// 20 个 character 写 kind 的 typed 低层原语 + 2 个 JNI-only 写原语：逐条等价迁移
+// api/native/game_character.cpp 与 api/native/game_party.cpp 的 data_op_*（成功时
+// frame_cache_force_refresh 恰一次，失败时回传原 op_err 文案）。不含 JSON、不接收 kind、
+// 不使用 std::string；owner 负责信封与 state 附加。
 QolResult set_hp(int32_t role, int32_t hp, contracts::QolCharacterWriteOpResult* out);
 QolResult set_mp(int32_t role, int32_t mp, contracts::QolCharacterWriteOpResult* out);
 QolResult set_level(int32_t role, int32_t level, int32_t force,
@@ -34,5 +35,10 @@ QolResult party_exclude(int32_t mercenary_slot, contracts::QolCharacterWriteOpRe
 QolResult party_discharge(int32_t mercenary_slot, contracts::QolCharacterWriteOpResult* out);
 QolResult party_withdraw(int32_t mercenary_slot, int32_t equip_slot,
                          contracts::QolCharacterWriteOpResult* out);
+
+// JNI-only（无 HTTP kind）：add_experience 用 fn_add_exp（≠ set_experience 的 fn_set_exp）；
+// set_skill_usage 保持真实原版调用语义（HTTP 501 占位在 core.feature，不在此处）。
+QolResult add_experience(int32_t role, int64_t delta, contracts::QolCharacterWriteOpResult* out);
+QolResult set_skill_usage(int32_t role, int32_t onoff, contracts::QolCharacterWriteOpResult* out);
 
 }  // namespace qol::game::ops

@@ -419,4 +419,32 @@ QolResult party_withdraw(int32_t mercenary_slot, int32_t equip_slot,
     return r ? op_ok() : op_fail(out, kQolErrInternal, "withdraw failed");
 }
 
+QolResult add_experience(int32_t role, int64_t delta, contracts::QolCharacterWriteOpResult* out) {
+    if (out == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid character write result", 30);
+    }
+    *out = {};
+    if (!game_in_world()) return op_fail(out, kQolErrNotReady, "not in game");
+    void* ch = member_or_null(role);
+    if (ch == nullptr) return op_fail(out, kQolErrNotFound, "role not found");
+    if (fn_add_exp == nullptr) return op_fail(out, kQolErrUnsupported, "symbol not resolved");
+    const int r = fn_add_exp(ch, static_cast<int32_t>(delta), 1);
+    return r ? op_ok() : op_fail(out, kQolErrInternal, "add exp failed");
+}
+
+QolResult set_skill_usage(int32_t role, int32_t onoff, contracts::QolCharacterWriteOpResult* out) {
+    if (out == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid character write result", 30);
+    }
+    *out = {};
+    if (!game_in_world()) return op_fail(out, kQolErrNotReady, "not in game");
+    void* ch = member_or_null(role);
+    if (ch == nullptr) return op_fail(out, kQolErrNotFound, "role not found");
+    if (fn_set_skill_usage == nullptr) {
+        return op_fail(out, kQolErrUnsupported, "symbol not resolved");
+    }
+    fn_set_skill_usage(ch, onoff ? 1 : 0);
+    return op_ok();
+}
+
 }  // namespace qol::game::ops
