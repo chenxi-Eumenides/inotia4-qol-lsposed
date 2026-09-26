@@ -32,12 +32,3 @@ std::string data_shop_items_json() {
     s += "]}";
     return s;
 }
-
-std::string data_op_shop_buy(int32_t slot) {
-    qol::contracts::QolItemInventoryStateWriteResult result{};
-    const QolResult operation = qol::game::ops::shop_buy(slot, &result);
-    if (!qol::contracts::succeeded(operation)) {
-        return op_err(operation.message != nullptr ? operation.message : "shop buy failed");
-    }
-    return "{\"ok\":true,\"price\":" + std::to_string(result.value) + "}";
-}

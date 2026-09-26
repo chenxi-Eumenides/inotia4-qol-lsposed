@@ -4,6 +4,7 @@
 #include "bridge/native/item_write_result.h"
 #include "contracts/commands.h"
 #include "contracts/extension_bag_port.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/ops/character_write.h"
 #include "game/ops/item_dice.h"
 #include "game/ops/item_inventory_state_write.h"
@@ -181,12 +182,42 @@ Java_com_inotia4_qol_NativeBridge_nativeOpStopCombat(JNIEnv* env, jclass, jint r
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpUseItem(JNIEnv* env, jclass, jint bag, jint slot) {
-    return op_result(env, "op_use_item", ("bag=" + str_of(bag) + " " + "slot=" + str_of(slot)), data_op_use_item(static_cast<int>(bag), static_cast<int>(slot)));
+#if QOL_KERNEL_ONLY
+    (void)bag;
+    (void)slot;
+    return kernel_only_result(env);
+#else
+    const std::string args = "bag=" + str_of(bag) + " " + "slot=" + str_of(slot);
+    if (!game_in_world()) {
+        return op_result(env, "op_use_item", args, qol::bridge::item_error_json("not in game"));
+    }
+    if (bag == 5) {
+        return op_result(env, "op_use_item", args, qol::bridge::item_error_json("task bag excluded"));
+    }
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) {
+        return op_result(env, "op_use_item", args, qol::bridge::item_error_json("slot empty"));
+    }
+    // 扩展逻辑袋：沿用原版直调并透传插件字符串（不套信封），内核无该定义、由上层 #if 隔离。
+    if (item_ref.kind == InventoryItemKind::kExtension) {
+        return op_result(env, "op_use_item", args, extension_bag_use_item(bag, slot));
+    }
+    qol::contracts::QolItemInventoryStateWriteResult out{};
+    const QolResult result = qol::game::ops::use_item(bag, slot, &out);
+    return op_result(env, "op_use_item", args, qol::bridge::item_use_result_json(result, out));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpDiceAccept(JNIEnv* env, jclass) {
-    return op_result(env, "op_dice_accept", (std::string("")), data_op_dice_accept());
+#if QOL_KERNEL_ONLY
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemDiceAcceptResult out{};
+    const QolResult result = qol::game::ops::accept_dice(&out);
+    return op_result(env, "op_dice_accept", (std::string("")),
+                     qol::bridge::item_dice_accept_result_json(result, out));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -280,7 +311,22 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSetAttr(JNIEnv* env, jclass, jint role
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpAddItem(JNIEnv* env, jclass, jint category, jint count, jint socket,
                                                    jint enhance_remaining, jint rarity) {
-    return op_result(env, "op_add_item", ("category=" + str_of(category) + " " + "count=" + str_of(count) + " " + "socket=" + str_of(socket) + " " + "enhanceRemaining=" + str_of(enhance_remaining) + " " + "rarity=" + str_of(rarity)), data_op_add_item(static_cast<int32_t>(category), static_cast<int32_t>(count), static_cast<int32_t>(socket), static_cast<int32_t>(enhance_remaining), static_cast<int32_t>(rarity)));
+#if QOL_KERNEL_ONLY
+    (void)category;
+    (void)count;
+    (void)socket;
+    (void)enhance_remaining;
+    (void)rarity;
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemInventoryStateWriteResult out{};
+    const QolResult result = qol::game::ops::add_item(
+        static_cast<int32_t>(category), static_cast<int32_t>(count), static_cast<int32_t>(socket),
+        static_cast<int32_t>(enhance_remaining), static_cast<int32_t>(rarity),
+        qol::game::item_count_api_if_resident(), &out);
+    return op_result(env, "op_add_item", ("category=" + str_of(category) + " " + "count=" + str_of(count) + " " + "socket=" + str_of(socket) + " " + "enhanceRemaining=" + str_of(enhance_remaining) + " " + "rarity=" + str_of(rarity)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

@@ -10,16 +10,8 @@
 
 std::string data_op_add_money(int64_t delta);
 std::string data_op_minus_money(int64_t delta);
-// socket_total：I_SOCKET bits4-7 总孔数（0..15）；enhance_remaining：I_ENCHANT bits2-5
-// 剩余强化次数（0..15）。仅供测试构造；已镶嵌数/已强化次数/强化 ID 由游戏维护，本接口不写。
-// 缺省由调用方传 0（CreateItem 产物该两处恒 0，写 0 等价不写）。
-// rarity_group：I_TYPE bits2-5 品质档位（0..4 白绿蓝黄紫），-1 保留 CreateItem 随机掷级；缺省由调用方传 -1。
-std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
-                             int32_t rarity_group);
 std::string data_op_remove_item(int32_t category);
 
-std::string data_op_use_item(int bag, int slot);
-std::string data_op_dice_accept();
 std::string data_op_discard_item(int bag, int slot);
 std::string data_op_sell_item(int bag, int slot);
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot);

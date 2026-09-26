@@ -25,22 +25,7 @@ std::string kernel_only_error() {
 
 std::string data_op_add_money(int64_t delta) { (void)delta; return kernel_only_error(); }
 std::string data_op_minus_money(int64_t delta) { (void)delta; return kernel_only_error(); }
-std::string data_op_add_item(int32_t category, int32_t count, int32_t socket_total,
-                             int32_t enhance_remaining, int32_t rarity_group) {
-    (void)category;
-    (void)count;
-    (void)socket_total;
-    (void)enhance_remaining;
-    (void)rarity_group;
-    return kernel_only_error();
-}
 std::string data_op_remove_item(int32_t category) { (void)category; return kernel_only_error(); }
-std::string data_op_use_item(int bag, int slot) {
-    (void)bag;
-    (void)slot;
-    return kernel_only_error();
-}
-std::string data_op_dice_accept() { return kernel_only_error(); }
 std::string data_op_discard_item(int bag, int slot) {
     (void)bag;
     (void)slot;
