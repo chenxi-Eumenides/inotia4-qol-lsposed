@@ -277,8 +277,49 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSellItem(JNIEnv* env, jclass, jint bag
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpMoveItem(JNIEnv* env, jclass, jint bag, jint slot, jint count, jint toBag, jint toSlot) {
-    return op_result(env, "op_move_item", ("bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "count=" + str_of(count) + " " + "toBag=" + str_of(toBag) + " " + "toSlot=" + str_of(toSlot)), data_op_move_item(static_cast<int>(bag), static_cast<int>(slot),
-        static_cast<int>(count), static_cast<int>(toBag), static_cast<int>(toSlot)));
+#if QOL_KERNEL_ONLY
+    (void)bag;
+    (void)slot;
+    (void)count;
+    (void)toBag;
+    (void)toSlot;
+    return kernel_only_result(env);
+#else
+    const std::string args = "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "count=" + str_of(count) + " " + "toBag=" + str_of(toBag) + " " + "toSlot=" + str_of(toSlot);
+    if (!game_in_world()) {
+        return op_result(env, "op_move_item", args, qol::bridge::item_error_json("not in game"));
+    }
+    if (bag == 5 || toBag == 5) {
+        return op_result(env, "op_move_item", args,
+                         qol::bridge::item_error_json("task bag excluded"));
+    }
+    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
+    if (eb != nullptr && eb->is_logical_bag != nullptr &&
+        (eb->is_logical_bag(bag) || eb->is_logical_bag(toBag))) {
+        if (count <= 0) {
+            return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad count"));
+        }
+        if (toSlot < 0 || toSlot >= 16) {
+            return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad target"));
+        }
+        // 扩展逻辑袋：沿用旧 api/native 的 legacy 全局直调（插件字符串原样透传，不刷）；
+        // 物理退役（改走 capability）留 X 批。
+        return op_result(env, "op_move_item", args,
+                         extension_bag_move_item(bag, slot, toBag, toSlot));
+    }
+    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
+        return op_result(env, "op_move_item", args,
+                         qol::bridge::item_error_json("extension view open; movement disabled (P2)"));
+    }
+    // 原版袋：与 owner 回落同一 typed 实现；成功补刷恰一次复刻旧 op_ok()（EB 分支不刷）。
+    qol::contracts::QolItemInventoryStateWriteResult out{};
+    const QolResult result = qol::game::ops::move_item(
+        static_cast<int32_t>(bag), static_cast<int32_t>(slot), static_cast<int32_t>(count),
+        static_cast<int32_t>(toBag), static_cast<int32_t>(toSlot), &out);
+    if (qol::contracts::succeeded(result)) frame_cache_force_refresh();
+    return op_result(env, "op_move_item", args,
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL

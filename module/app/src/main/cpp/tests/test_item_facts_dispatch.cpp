@@ -888,7 +888,7 @@ void test_write_routes() {
     CHECK(g_state_write_calls == state_calls_before_missing);
     g_extension_move_body = "{\"ok\":true,\"state\":{}}";
 
-    // 能力缺失回退：扩展请求回落 typed 普通移动分支（旧 data_op_move_item + state 等价）。
+    // 能力缺失回退：扩展请求回落 typed 普通移动分支（普通袋移动同语义，成功附 state）。
     g_extension_bag_available = false;
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 2;

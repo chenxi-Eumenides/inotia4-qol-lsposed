@@ -8,8 +8,6 @@
 
 // 背包域（parse 域）：背包/装备/金钱操作。
 
-std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot);
-
 // 数据读取（read 域拆分）：物品属性/装备判定/背包 JSON 构造。
 void append_item_attrs(std::string& s, void* item);
 // item_count_encoding / item_is_equip 见 game/read/item_class.h（经 item_count facade）。

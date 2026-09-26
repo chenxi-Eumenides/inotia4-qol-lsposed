@@ -13,7 +13,6 @@
 #include <string>
 
 #if !QOL_KERNEL_ONLY
-#include "game_inventory_use.inc"
 #include "game_inventory_read.inc"
 #else
 namespace {
@@ -22,14 +21,6 @@ std::string kernel_only_error() {
 }
 }
 
-std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
-    (void)bag;
-    (void)slot;
-    (void)count;
-    (void)to_bag;
-    (void)to_slot;
-    return kernel_only_error();
-}
 void append_item_attrs(std::string& s, void* item) {
     (void)s;
     (void)item;
