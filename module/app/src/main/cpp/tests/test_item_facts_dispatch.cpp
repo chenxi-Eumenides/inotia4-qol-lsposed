@@ -27,7 +27,7 @@
 #include "game/ops/game_ops_common.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
-#include "game_inventory.h"
+#include "game/access/inventory_legacy_read.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "host/owner_cache_builder.h"

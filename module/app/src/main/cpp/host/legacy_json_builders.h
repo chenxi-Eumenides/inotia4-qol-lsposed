@@ -9,13 +9,13 @@
 #include "game/nav/game_nav.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
-#include "game_inventory.h"
+#include "game/access/inventory_legacy_read.h"
 #include "game_world.h"
 
 // K2（T2i-1）：legacy 读面（原 api/native 角色/队伍 TU，T2i-2 已删除）的 host 内联副本。
 // 两 TU 退役后 cache 槽的 legacy builder（插件停用 fallback）不能引用已删除符号，故把函数体
 // 从 api/native 逐字搬到此处（fallback 在 B1/B2 架构下不可避免）。函数体与源逐字一致，
-// 字节/线程语义零变化；`append_item_attrs`/`append_position` 仍调用 api/native 现有版本
+// 字节/线程语义零变化；`append_item_attrs` 调 game/access 现版、`append_position` 调 api/native 现版
 // （对应 TU 归整目录批），本文件不复制其主体。
 namespace qol::host {
 

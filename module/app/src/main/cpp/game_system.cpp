@@ -20,7 +20,6 @@
 #include "game/state/ui_http.h"
 #include "game/state/world_http.h"
 #include "game_world.h"
-#include "api/native/game_inventory.h"
 #include "core/native/game_cache.h"
 #include "game/json/game_json.h"
 #include "contracts/game_ports/save_write_port.h"

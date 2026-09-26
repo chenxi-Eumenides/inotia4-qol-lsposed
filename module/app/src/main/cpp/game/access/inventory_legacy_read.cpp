@@ -1,8 +1,17 @@
+// inventory_legacy_read.cpp —— 背包读面（T2l-inv 迁自 api/native/game_inventory.cpp + game_inventory_read.inc，逐字）。
+
+#include "game/access/inventory_legacy_read.h"
+
 #include <cassert>
 
-namespace {
+#include "contracts/extension_bag_port.h"
+#include "contracts/item_count.h"
+#include "game/access/game_access.h"
+#include "game/adapter_ports/item_count_facade.h"
+#include "game/read/item_class.h"
+#include "game/state/game_state.h"
 
-}  // namespace
+#if !QOL_KERNEL_ONLY
 
 void append_item_attrs(std::string& s, void* item) {
     uint8_t* it = reinterpret_cast<uint8_t*>(item);
@@ -70,7 +79,7 @@ void append_item_attrs(std::string& s, void* item) {
 }
 
 // item_count_encoding / item_is_equip 已下沉至 game/read/item_class.{h,cpp}
-// （声明经 game_inventory.h 引用）。
+// （item_count_encoding / item_is_equip 已下沉至 game/read/item_class.{h,cpp}）。
 
 std::string build_inventory_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
@@ -134,3 +143,15 @@ std::string build_inventory_json() {
     s += "]}";
     return s;
 }
+
+#else
+
+// kernel：与迁移前 api/native/game_inventory.cpp 的 kernel 分支逐字一致
+// （EB 插件不编入 kernel，build_inventory_json 为占位空袋）。
+void append_item_attrs(std::string& s, void* item) {
+    (void)s;
+    (void)item;
+}
+std::string build_inventory_json() { return "{\"bags\":[]}"; }
+
+#endif

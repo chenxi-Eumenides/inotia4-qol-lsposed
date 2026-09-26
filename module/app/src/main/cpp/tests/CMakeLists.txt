@@ -975,7 +975,7 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     # T2h-B0：legacy 读实现入 host golden（fake 环境）
-    ${CPP_DIR}/api/native/game_inventory.cpp
+    ${CPP_DIR}/game/access/inventory_legacy_read.cpp
     ${CPP_DIR}/game/ops/game_ops_common.cpp
     # T2h-B3#2：debug raw 整函数搬迁后的新落点
     ${CPP_DIR}/game/read/item_class.cpp

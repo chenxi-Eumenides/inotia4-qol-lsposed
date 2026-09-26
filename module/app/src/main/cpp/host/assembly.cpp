@@ -10,7 +10,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
 #include "core/native/game_cache.h"
-#include "game_inventory.h"
+#include "game/access/inventory_legacy_read.h"
 #include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"

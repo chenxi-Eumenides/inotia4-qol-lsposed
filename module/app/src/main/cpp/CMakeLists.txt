@@ -88,12 +88,12 @@ add_library(gamebridge SHARED
     game/access/save_preflight.cpp
     game_system.cpp
     game/read/game_tiles.cpp
-    api/native/game_inventory.cpp
+    game/access/inventory.cpp
+    game/access/inventory_legacy_read.cpp
     game/access/hive_iap.cpp
     game/access/ui_kit.cpp
     game/access/ui_components.cpp
     game/access/attr_range_ui.cpp
-    game/access/inventory.cpp
 )
 
 target_compile_definitions(gamebridge PRIVATE
