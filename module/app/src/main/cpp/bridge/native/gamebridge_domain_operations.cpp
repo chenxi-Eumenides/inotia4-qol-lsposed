@@ -306,10 +306,17 @@ Java_com_inotia4_qol_NativeBridge_nativeOpMoveItem(JNIEnv* env, jclass, jint bag
         if (toSlot < 0 || toSlot >= 16) {
             return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad target"));
         }
-        // 扩展逻辑袋：沿用旧 api/native 的 legacy 全局直调（插件字符串原样透传，不刷）；
-        // 物理退役（改走 capability）留 X 批。
+        // 扩展逻辑袋：走 capability v2.0 `move_item`（与 legacy 全局同一 impl，字节同源透传，不刷）；
+        // 缓冲不足视为不可达边界，fallback 与 owner 兜底同款（见 T2j 方案 §3）。
+        char move_buf[4096]{};
+        uint32_t move_len = 0;
+        if (eb->move_item != nullptr &&
+            eb->move_item(bag, slot, toBag, toSlot, move_buf, sizeof(move_buf), &move_len) != 0 &&
+            move_len <= sizeof(move_buf)) {
+            return op_result(env, "op_move_item", args, std::string(move_buf, move_len));
+        }
         return op_result(env, "op_move_item", args,
-                         extension_bag_move_item(bag, slot, toBag, toSlot));
+                         qol::bridge::item_error_json("extension bag move failed"));
     }
     if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
         return op_result(env, "op_move_item", args,

@@ -233,10 +233,6 @@ std::string extension_bag_use_item(int bag, int slot) {
     return extension_bag_api_use_item_impl(bag, slot);
 }
 
-std::string extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
-    return extension_bag_api_move_item_impl(from_bag, from_slot, to_bag, to_slot);
-}
-
 std::string extension_bag_put_jewel(int role, int bag, int slot, int equip_slot) {
     return extension_bag_api_put_jewel_impl(role, bag, slot, equip_slot);
 }
