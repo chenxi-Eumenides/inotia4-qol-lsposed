@@ -11,8 +11,19 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "contracts/plugin.h"
+#include "contracts/runtime_hooks.h"
+#include "infra/capabilities.h"
+#include "infra/frame/transition_dispatch.h"
+#include "infra/save/save_enter.h"
 #include "patch/call_patch.h"
 #include "infra/frame/frame_host.h"
 #include "infra/frame/frame_task.h"
@@ -165,3 +176,126 @@ bool frame_source_installed() {
 bool frame_host_anchors_installed() {
     return qol::host::frame_source_installed();
 }
+
+// ---------------------------------------------------------------------------
+// T2l-rh：过渡注入面（contracts/runtime_hooks.h）的 host 定义。
+// 语义与 infra 原语逐字等价：POD body/ctx 与 infra 的 std::function/std::string 只在本文件
+// 包装内部转换；host→infra 允许。表为静态常量（装配前即可用，无「未注入」窗口）。
+// ---------------------------------------------------------------------------
+namespace qol::contracts {
+namespace {
+
+constexpr uint32_t kHostRuntimeBodyCapacity = 4096;
+
+// POD 转换体 → infra std::function 包装：body 写定长缓冲，再转 std::string。
+std::string run_transition_body(QolRuntimeTransitionBodyFn fn, void* ctx) {
+    char buf[kHostRuntimeBodyCapacity]{};
+    uint32_t n = 0;
+    fn(ctx, buf, static_cast<uint32_t>(sizeof(buf)), &n);
+    const uint32_t size = n <= sizeof(buf) ? n : static_cast<uint32_t>(sizeof(buf));
+    return std::string(buf, size);
+}
+
+// 输出拷贝：out/out_len 校验 → 容量不足 blocked；返回是否成功拷贝。
+QolResult copy_transition_out(const std::string& result, char* out, uint32_t capacity,
+                              uint32_t* out_len) {
+    if (out == nullptr || out_len == nullptr) {
+        return error(kQolErrInvalidArgument, "out and out_len required", 24);
+    }
+    *out_len = 0;
+    if (result.size() > capacity) {
+        return error(kQolErrBlocked, "transition output exceeds capacity", 33);
+    }
+    if (!result.empty()) std::memcpy(out, result.data(), result.size());
+    *out_len = static_cast<uint32_t>(result.size());
+    return ok();
+}
+
+QolResult host_transition_run(QolRuntimeTransitionBodyFn fn, void* ctx, int32_t timeout_ms,
+                              char* out, uint32_t capacity, uint32_t* out_len) {
+    if (fn == nullptr) return error(kQolErrInvalidArgument, "fn required", 11);
+    std::string result;
+    const bool executed = transition_run(
+        [fn, ctx](std::string* r) { *r = run_transition_body(fn, ctx); }, timeout_ms, &result);
+    const QolResult copied = copy_transition_out(result, out, capacity, out_len);
+    if (!succeeded(copied)) return copied;
+    // false = busy/超时（result 为纯文本）；由调用方决定文案（与迁移前调用点语义一致）。
+    return executed ? ok() : error(kQolErrTimeout, out, *out_len);
+}
+
+QolResult host_transition_run_inline(QolRuntimeTransitionBodyFn fn, void* ctx, char* out,
+                                     uint32_t capacity, uint32_t* out_len) {
+    if (fn == nullptr) return error(kQolErrInvalidArgument, "fn required", 11);
+    std::string result;
+    const bool executed = transition_run_inline(
+        [fn, ctx](std::string* r) { *r = run_transition_body(fn, ctx); }, &result);
+    const QolResult copied = copy_transition_out(result, out, capacity, out_len);
+    if (!succeeded(copied)) return copied;
+    return executed ? ok() : error(kQolErrBlocked, out, *out_len);
+}
+
+// 帧任务桥：infra 回调只带一个 ctx，用 trampoline + id→ctx 表承载用户 fn/ctx。
+// 注销后上下文保留在 retired 列表（不释放），避免「remove 后仍有在途回调」的 UAF；
+// 过渡期帧任务数量极小，内存可忽略。
+struct HostFrameTaskCtx {
+    QolRuntimeFrameTaskFn fn = nullptr;
+    void* ctx = nullptr;
+};
+
+std::mutex g_host_frame_task_mtx;
+std::unordered_map<uint64_t, std::shared_ptr<HostFrameTaskCtx>> g_host_frame_tasks;
+std::vector<std::shared_ptr<HostFrameTaskCtx>> g_host_frame_tasks_retired;
+
+bool host_frame_task_trampoline(int64_t frame, void* ctx) {
+    auto* slot = static_cast<HostFrameTaskCtx*>(ctx);
+    return slot->fn(frame, slot->ctx) != 0;
+}
+
+uint64_t host_frame_task_add(int32_t point, QolRuntimeFrameTaskFn fn, void* ctx, int32_t interval,
+                             int32_t count) {
+    if (fn == nullptr || point < 0 || point >= kFramePointCount) return 0;
+    auto slot = std::make_shared<HostFrameTaskCtx>();
+    slot->fn = fn;
+    slot->ctx = ctx;
+    const uint64_t id = frame_task_add(point, &host_frame_task_trampoline, slot.get(), interval,
+                                       count);
+    if (id == 0) return 0;
+    std::lock_guard<std::mutex> lock(g_host_frame_task_mtx);
+    g_host_frame_tasks.emplace(id, std::move(slot));
+    return id;
+}
+
+bool host_frame_task_remove(uint64_t id) {
+    const bool removed = frame_task_remove(id);
+    std::lock_guard<std::mutex> lock(g_host_frame_task_mtx);
+    const auto it = g_host_frame_tasks.find(id);
+    if (it != g_host_frame_tasks.end()) {
+        g_host_frame_tasks_retired.push_back(std::move(it->second));
+        g_host_frame_tasks.erase(it);
+    }
+    return removed;
+}
+
+const void* host_capability_require(const char* id, uint16_t major, uint16_t min_minor) {
+    if (id == nullptr) return nullptr;
+    return qol::infra::require_capability(id, QolVersionRange{major, min_minor});
+}
+
+// W31：contracts 帧点位常量必须与 infra 同值（0=渲染前、1=逻辑前）。
+static_assert(kQolRuntimeFramePointRenderPre == kFramePointRenderPre, "frame point drift");
+static_assert(kQolRuntimeFramePointLogicPre == kFramePointLogicPre, "frame point drift");
+
+const QolRuntimeHooksApi kQolRuntimeHooksApi{
+    kQolRuntimeHooksVersion,    &host_transition_run,
+    &host_transition_run_inline,
+    &host_frame_task_add,
+    &host_frame_task_remove,
+    &save_enter_mark_pending,
+    &host_capability_require,
+};
+
+}  // namespace
+
+const QolRuntimeHooksApi& qol_runtime_hooks() { return kQolRuntimeHooksApi; }
+
+}  // namespace qol::contracts

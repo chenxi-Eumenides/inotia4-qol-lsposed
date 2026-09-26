@@ -918,6 +918,17 @@ target_compile_features(world_legacy_readers_tests PRIVATE cxx_std_17)
 set_target_properties(world_legacy_readers_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME world_legacy_readers_tests COMMAND world_legacy_readers_tests)
 
+# T2l-rh：contracts/runtime_hooks.h 契约面（POD/版本/字段签名/帧点位常量）。
+add_executable(runtime_hooks_contract_tests
+    test_runtime_hooks_contract.cpp
+)
+target_include_directories(runtime_hooks_contract_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(runtime_hooks_contract_tests PRIVATE cxx_std_17)
+set_target_properties(runtime_hooks_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME runtime_hooks_contract_tests COMMAND runtime_hooks_contract_tests)
+
 add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.character/plugin.cpp
