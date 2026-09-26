@@ -22,15 +22,13 @@
 | 目标层 | 文件数 |
 | --- | --- |
 | `contracts` | 66 |
-| `game` | 132 |
+| `game` | 137 |
 | `hooks` | 10 |
 | `host` | 51 |
 | `infra` | 39 |
-| `legacy/inventory` | 5 |
-| `legacy/save` | 3 |
-| `legacy/shop` | 2 |
+| `legacy/inventory` | 2 |
+| `legacy/save` | 1 |
 | `legacy/system` | 2 |
-| `legacy/world` | 5 |
 | `patch` | 9 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
@@ -62,7 +60,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **535** |
+| **合计** | **528** |
 
 ### 1.2 迁移期映射摘要
 
@@ -113,12 +111,12 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 98 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 89 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 80 |
-| `game` | `contracts` | 69 |
+| `host` | `game` | 89 |
+| `game` | `contracts` | 71 |
 | `host` | `contracts` | 56 |
 | `host` | `infra` | 47 |
 | `plugins/extension_bag` | `contracts` | 35 |
@@ -129,9 +127,9 @@
 | `plugins/core.item` | `contracts` | 14 |
 | `plugins/save_backup` | `contracts` | 14 |
 | `plugins/core.settings` | `contracts` | 13 |
-| `legacy/inventory` | `game` | 12 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
+| `host` | `patch` | 10 |
 
 ### 2.2 include 环
 

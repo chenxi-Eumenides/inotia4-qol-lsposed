@@ -106,7 +106,6 @@ target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/contracts
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/extension_bag
-    ${CMAKE_CURRENT_SOURCE_DIR}/api/native
     ${CMAKE_CURRENT_SOURCE_DIR}/game/read
     ${CMAKE_CURRENT_SOURCE_DIR}/game/symbols
 )

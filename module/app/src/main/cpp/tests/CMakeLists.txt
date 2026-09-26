@@ -74,7 +74,6 @@ add_test(NAME craft_facts_plugin_tests COMMAND craft_facts_plugin_tests)
 target_include_directories(host_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
-    ${CPP_DIR}/api/native
     ${CPP_DIR}/game/read
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
@@ -912,7 +911,6 @@ add_executable(world_legacy_readers_tests
 )
 target_include_directories(world_legacy_readers_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/api/native
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
@@ -953,7 +951,6 @@ add_executable(character_facts_plugin_tests
 )
 target_include_directories(character_facts_plugin_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/api/native
     ${CPP_DIR}/game/read
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
@@ -983,7 +980,6 @@ add_executable(item_facts_dispatch_tests
 )
 target_include_directories(item_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/api/native
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
