@@ -25,11 +25,11 @@
 | `game` | 137 |
 | `hooks` | 10 |
 | `host` | 51 |
-| `infra` | 39 |
+| `infra` | 35 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
 | `legacy/system` | 2 |
-| `patch` | 9 |
+| `patch` | 13 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 17 |
@@ -98,14 +98,14 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 89 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 84 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 89 |
-| `game` | `contracts` | 71 |
+| `host` | `game` | 91 |
+| `game` | `contracts` | 72 |
 | `host` | `contracts` | 56 |
-| `host` | `infra` | 47 |
+| `host` | `infra` | 45 |
 | `plugins/extension_bag` | `contracts` | 35 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
@@ -113,10 +113,10 @@
 | `plugins/inventory_hooks` | `contracts` | 16 |
 | `plugins/core.item` | `contracts` | 14 |
 | `plugins/save_backup` | `contracts` | 14 |
+| `host` | `patch` | 13 |
 | `plugins/core.settings` | `contracts` | 13 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
-| `host` | `patch` | 10 |
 
 ### 2.2 include 环
 
@@ -124,34 +124,9 @@
 
 ## 3. 基线债务
 
-基线共 2 组、21 条。
+基线共 0 组、0 条。
 
-### layer_direction（17 条）
-
-- `layer_direction|core/native/game_cache.cpp|game/access/game_access.h|infra → game`
-- `layer_direction|core/native/game_cache.cpp|game/state/game_state.h|infra → game`
-- `layer_direction|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|core/native/game_cache.cpp|game_system.h|infra → legacy/system`
-- `layer_direction|game/access/game_access.cpp|game_system.h|game → legacy/system`
-- `layer_direction|game/access/game_access.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game/read/game_tiles.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|game/state/game_state.cpp|infra/frame/frame_task.h|game → infra`
-- `layer_direction|game/variants/game_variant.cpp|infra/log/qol_log.h|game → infra`
-- `layer_direction|infra/frame/frame_task.cpp|game_system.h|infra → legacy/system`
-- `layer_direction|infra/save/save_enter.cpp|game/access/game_access.h|infra → game`
-- `layer_direction|infra/save/save_enter.cpp|game/state/game_state.h|infra → game`
-- `layer_direction|infra/save/save_enter.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|infra/save/save_enter.cpp|patch/call_patch.h|infra → patch`
-- `layer_direction|infra/save/save_exit.cpp|game/access/game_access.h|infra → game`
-- `layer_direction|infra/save/save_exit.cpp|game/symbols/game_symbols.h|infra → game`
-- `layer_direction|infra/save/save_exit.cpp|patch/call_patch.h|infra → patch`
-
-### offsets_symbols_header（4 条）
-
-- `offsets_symbols_header|core/native/game_cache.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|core/native/inventory_trade.cpp|game/symbols/game_symbols.h|legacy/inventory 层引用符号头`
-- `offsets_symbols_header|infra/save/save_enter.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
-- `offsets_symbols_header|infra/save/save_exit.cpp|game/symbols/game_symbols.h|infra 层引用符号头`
+（基线为空）
 
 基线只允许收缩，新增违规即失败
 
@@ -167,9 +142,9 @@
 
 去重符号 → 文件（前 3 条，共 3 条；`--verbose` 列全部）：
 
-- `F_GAMESTATE_SET_STATE_VMA` → `infra/save/save_exit.cpp`
-- `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `infra/save/save_enter.cpp`
-- `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `infra/save/save_enter.cpp`
+- `F_GAMESTATE_SET_STATE_VMA` → `patch/save_exit.cpp`
+- `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `patch/save_enter.cpp`
+- `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `patch/save_enter.cpp`
 
 ## 5. JNI 面
 
