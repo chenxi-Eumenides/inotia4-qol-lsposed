@@ -27,7 +27,7 @@
 | 迁移面 | 当前状态 | 未闭合项 / 清除条件 | 真机验收指针 |
 |---|---|---|---|
 | 插件目录 | 大部分功能已进入 `plugins/<id>/`；`feature/` 已清空，`feature/patch` 已拆除 | 清除插件私有 legacy include、独立构建与边界负例；通过架构检查并收缩基线 | VM-BOUNDARY；各插件行为卡 |
-| `extension_bag` | D2a–D2c 已完成主要契约、资源声明、消费者切换和物理迁移。D2d 代码已接入 `contracts/extension_bag.h` v2.0 固定宽度 move capability：`game_system.cpp` 经 registry 取用，能力缺失时回退 `data_op_move_item`；`contracts/extension_bag_port.h` 的 legacy 全局声明及 api/native 直调仍待阶段 6 删除批清退 | D2d 代码已收口；legacy 面清退并入阶段 6。完成余下 hook/ptr/UI/生命周期收口、独立 target 与边界检查 | VM-D2D-01/02；VM-K5-08h；受影响 VM-43、VM-P4-07 |
+| `extension_bag` | D2a–D2c 已完成主要契约、资源声明、消费者切换和物理迁移。D2d 代码已接入 `contracts/extension_bag.h` v2.0 固定宽度 move capability：`game_system.cpp` 经 registry 取用，能力缺失时回退 `data_op_move_item`；`contracts/extension_bag_port.h` 的 legacy 全局声明（`use_item`/`capability()` 两面，见 §3 豁免行）维持登记；原 api/native 直调消费者已随 T2l 域批迁 game 层 | D2d 代码已收口；legacy 面清退并入阶段 6。完成余下 hook/ptr/UI/生命周期收口、独立 target 与边界检查 | VM-D2D-01/02；VM-K5-08h；受影响 VM-43、VM-P4-07 |
 | UI | D1 的基础原语、文本层和共享组件已归位；面板已分配到对应插件 | U11-3：迁移 `settings`、`autosell`、`save_backup` 面板消费者；动态 UI 绑定器清除临时豁免 | VM-D1 |
 | S2 / `stack_limit` | codec、策略和 999 有效态由 `plugins/stack_limit` 持有；provider residency 与 `feature_enabled` 已分离 | 完成 getter/写路径全量切换、持久数据解释保证、过渡入口清除 | VM-P1-S2、VM-P6-01 |
 | HTTP | 143 条路径均登记在 route registry；静态数据 12 条 owner=`core.data`（`static.data=0`），item/character 写面归 `core.item`、`core.character`；`set_skill_usage` owner 为 `core.feature` | `core.data` 批1已接管静态数据路由与分批资产 ingress；enrichment/非 HTTP 消费者留批2。`core.feature` 是开发迁移期临时插件，仅暂存已证实未实现端点；实现后迁入对应领域，清空后移除，不属于最终发布插件。保持 `core.api` 的传输、注册、门控、lease 和诊断职责；`GET /api/system/events` 与 4 条 `GET /api/ui*` 的 Kotlin 处理器按现状保留；扩展袋 move 的 string 面见 D2d | VM-K5-08h；VM-P5-CORE-FEATURE-01；VM-P5-CORE-DATA-01/02；`api-route-map.md` |
@@ -42,16 +42,16 @@
 | 宿主兼容补丁混合业务 | `host/core_patches` 仍同时包含 Hive 登录跳过与 monster 数量兼容逻辑 | 将业务补丁归对应 owner；宿主只保留通用机制和版本适配；受影响卡通过 |
 | Game Host 过宽 | `QolGameHost` 仍聚合角色、物品、库存、世界和扩展背包读面 | 按 provider / 功能 owner 拆分高层语义；保留低层受控适配；ABI、线程和错误语义回归通过 |
 | Kotlin HTTP 仍承载业务 | Controller、Service 和 `NativeBridge` 调用链仍包含业务参数处理、状态拼装和复合查询 | 路由逐条绑定 owner；Kotlin 只做 AndServer 传输适配；冻结路径、方法和成功响应保持不变 |
-| legacy 目录和过渡映射 | `api/native`、`core/native`、根目录聚合文件及脚本 legacy 映射仍存在 | 各文件职责吸收到 `game/`、`infra/`、`plugins/` 或 `contracts/`；删除映射；边界负例确实失败；基线收缩 |
+| legacy 目录和过渡映射 | `api/native/` 目录已删除（T2l-dir `c4da2a6e`）；余 `core/native`、根目录聚合文件及脚本 legacy 映射（含 `arch_common.py` 的 api/native 死映射） | 各文件职责吸收到 `game/`、`infra/`、`plugins/` 或 `contracts/`；删除映射；边界负例确实失败；基线收缩 |
 | 插件私有越层与单一目标 | 仍有 legacy 私有 include；独立 target 不能覆盖全部宿主私有依赖 | 插件只 include `contracts/` 与自身目录；每个 target 独立编译并通过负例检查 |
 | `contracts` 业务入口 | `contracts/autosell.h` 仍有全局业务函数，部分消费者尚未转 capability / owner command | 改为 provider 函数表、Host SDK 或 owner capability 后删除全局入口；host 与架构检查通过 |
 | 引擎未闭合项 | 生产 `in_flight_enter/leave` wrapper 已接线：Host SDK 导出、registry 实现及 inventory_hooks/extension_bag 生产调用均已具备。VM-K2-01 仍观察到自动恢复路径的票据终态未追认、`degraded` 未同步清除 | 后续真机回归恢复路径，验证票据终态与 degraded 同步；证据沿用 VM-K2-01 |
 | 生命周期票据与状态不同步 | VM-K2-01 实测：消费者 activate 时依赖方尚未 enable 则票据 `failed`，随后 `sync_gates` 重评估自动拉起 enabled，票据不追认；autosell `degraded:true` 残留（error 已 None） | 票据终态追认自动恢复路径；`sync_gates` 恢复时同步清除 `degraded` 残留；以 VM-K2-01 后续回归卡验证 |
-| `item_count_api` legacy 访问器（#10） | 已收口（d90918c2）：`contracts::item_count_api()` 旧全局访问器删除；state builder、add-item 编码写入、`inventory_trade` 售价数量、`game/read/item_class.cpp` 编码判定四组消费者改走 typed API 表/owner serializer；`QolItemCountApi` typed 表与 `QolGameHost.item_count` 注入面保留（inventory_hooks/autosell 消费者合法使用） | api/native `data_op_set_money` 等薄转发与 `build_inventory_json` 残余消费者的清退并入阶段 6 删除批；扩展袋 >99 真机数量视图卡待插件独立测试批补 |
-| bridge 直调 api/native（T2i 终态：14 符号 + X 类） | 剩余直调 14 符号：world 写 5（`teleport`/`move`/`walk`/`walk_stop`/`interact`）、save 写 3（`save`/`enter_slot`/`create_slot`）、ui 写 5（`npc_interact`/`dialog_select`/`main_menu`/`panel_open`/`panel_close`）、quest 写 1（`quest_quit`）；X 收尾面另计：`extension_bag_*` 7 插件 API + EB 全局豁免 2（`use_item` / `capability()`，见下行；`move_item`/`put_jewel` 已随 T2j-1/T2j-2 删除） | 14 符号按 G 域批（world/save/ui/quest/dialog 各域先立 owner/typed 化，`game_system.cpp`/dialog 消费者同接）后由 bridge 转接；X 面随 X 收尾批（capability 扩展 + 全局声明清除）退役；cache 槽与 item_port 读面收口随整目录批 |
-| EB 全局豁免面（`use_item` / `capability()`） | 仅剩两个 EB 全局/访问器面：① `extension_bag_use_item`（声明 `contracts/extension_bag_port.h:63`、定义 `plugins/extension_bag/extension_bag_port.cpp:232`），消费者 2 处——`bridge/native/gamebridge_domain_operations.cpp:217`（EB use 分支）、`host/item_inventory_state_write_port.cpp:70`；capability 无对应成员（`handle_confirm_use_item` 为原版确认键接管，语义不同）。② `extension_bag_capability()`（声明 `contracts/extension_bag_port.h:69`、定义 `host/extension_bag_port.inc:23`），消费者 game 层 `game/ops/item_inventory_state_write.cpp`（8 处）与 `game/state/game_state.cpp`（2 处）、legacy `api/native`（7 处）、bridge（5 处）；`plugins/core.item/plugin.cpp:282` 为 TU-local 同名 SDK-require 包装，非本访问器消费者。`extension_bag_move_item`/`extension_bag_put_jewel` 已随 T2j-1/T2j-2 删除 | use 归宿 = 域化（逻辑迁 owner/域）或 v2.3 独立立项（含 string→POD 等值门禁）；accessor 退役 = contracts 注入面或 D2d 域化。再评估触发任一达成即重评：① use/accessor 出现新消费者；② 整目录批要求 bridge 零 api/插件字符串面；③ EB 域化批立项 |
+| `item_count_api` legacy 访问器（#10） | 已收口（d90918c2）：`contracts::item_count_api()` 旧全局访问器删除；state builder、add-item 编码写入、`inventory_trade` 售价数量、`game/read/item_class.cpp` 编码判定四组消费者改走 typed API 表/owner serializer；`QolItemCountApi` typed 表与 `QolGameHost.item_count` 注入面保留（inventory_hooks/autosell 消费者合法使用） | `build_inventory_json` 已随 T2l-inv 迁 `game/access/inventory_legacy_read.cpp`（cache 槽 6/owner fallback/item_port 共用），api/native 薄转发面已删除（T2l-dir）；扩展袋 >99 真机数量视图卡待插件独立测试批补 |
+| bridge 直调 api/native（**已清零**，T2l 序列闭合） | 14 符号（world 写 5/save 写 3/ui 写 5/quest 写 1）经 T2l-w-write/s-write/u/q/d 各域 typed 化；`api/native/` 目录已删除（T2l-dir `c4da2a6e`）；bridge 不再 include/call api/native | 已完成；仅 EB 豁免 2 面（见下行）维持登记，其退役条件不变 |
+| EB 全局豁免面（`use_item` / `capability()`） | 仅剩两个 EB 全局/访问器面：① `extension_bag_use_item`（声明 `contracts/extension_bag_port.h:63`、定义 `plugins/extension_bag/extension_bag_port.cpp:232`），消费者 2 处——`bridge/native/gamebridge_domain_operations.cpp:217`（EB use 分支）、`host/item_inventory_state_write_port.cpp:70`；capability 无对应成员（`handle_confirm_use_item` 为原版确认键接管，语义不同）。② `extension_bag_capability()`（声明 `contracts/extension_bag_port.h:69`、定义 `host/extension_bag_port.inc:23`），消费者 game 层 `game/ops/item_inventory_state_write.cpp`（8 处）与 `game/state/game_state.cpp`（2 处）、`game/access/save.cpp`/`ui_state.cpp`（原 api/native 7 处随 T2l 序列迁入）、bridge（5 处）；`plugins/core.item/plugin.cpp:282` 为 TU-local 同名 SDK-require 包装，非本访问器消费者。`extension_bag_move_item`/`extension_bag_put_jewel` 已随 T2j-1/T2j-2 删除 | use 归宿 = 域化（逻辑迁 owner/域）或 v2.3 独立立项（含 string→POD 等值门禁）；accessor 退役 = contracts 注入面或 D2d 域化。再评估触发任一达成即重评：① use/accessor 出现新消费者；② 整目录批要求 bridge 零 api/插件字符串面；③ EB 域化批立项 |
 | B2 门槛（已闭环，T2h-B2 `d091afa3`） | `core.item` 新增 `item.state` capability（raw inventory 投影，复用 `serialize_inventory_json`），host `frame_cache` inventory(6) 槽切 owner 适配器；W7 在 B0 fake 环境以 4 fixture 断言 `owner raw == frozen == legacy` 逐字节，`frozen_inventory_json` 保留为独立 golden | 清除条件已满足：owner-raw golden 建立且 inventory 槽切换完成；未改 JNI/HTTP 字节。后续仅余真机字节复测（随读面批次） |
-| api/native 残余 TU 与 kernel stub | 剩余 TU：`game_inventory.{cpp,h}`(+`game_inventory_read.inc`)、`game_quest.{cpp,h}`、`game_save.{cpp,h}`、`game_shop.{cpp,h}`、`game_ui.{cpp,h}`/`game_ui_internal.h`(+`game_ui_operations/read.inc`)、`game_world.{cpp,h}`(+`game_world_movement/navigation/readers/story.inc`)；kernel 分支仅 `game_inventory.cpp` 的 2 个 stub（`append_item_attrs`/`build_inventory_json`）；`game_character`/`game_party` 两 TU 已删除，legacy 读 builder 由 `host/legacy_json_builders.h` 承担 | bridge 不再直调 api/native（G 域写批 + dialog 批完成）后，各 TU 随读面 owner 化物理删除；`build_inventory_json`（cache 槽 6 fallback + item_port 读面）与 kernel stub 随整目录批处理；K1 下 kernel 保留 stub |
+| api/native 面（**终态：目录已删除**） | `api/native/` 目录与全部 TU/inc 已随 T2i-2/T2j/T2l 序列删除（`c4da2a6e`）；原面职责落点：读 builder → `host/legacy_json_builders.h`/`game/access/*`（`world_read`/`inventory_legacy_read`/`save`/`shop`/`ui_state`/`quest`/`save_preflight`），写原语 → `game/access|ops/*`；kernel 占位分支迁入 `game/access/inventory_legacy_read.cpp`（`{"bags":[]}` 逐字） | 已完成；剩余未决 = cache 机制 4 边（`game_cache→{game_system,game_access,game_symbols,game_state}`）、非序列 13 条存量边（`game_access→{game_system,qol_log}`、`game_tiles→qol_log`、`game_state→frame_task`、`game_variant→qol_log`、`frame_task→game_system`、save_enter/exit 组等）、world/nav/tiles 读面真机回归 |
 
 ## 4. 临时豁免与保留项
 
@@ -63,7 +63,7 @@
 
 ### 4.2 legacy 实现保留
 
-- `core/native/game_cache.{h,cpp}`：仍横跨 `game/access`/`game/state`/`game/symbols` 与 `game_world.h`/`game_system.h`，目标映射为 `infra`。player/party/inventory/skills/mercenaries 五槽 legacy builder 经 host 装配期注入（`frame_cache_set_json_builder`，A1 host↔infra 内部面）；T2i-2 删除 `api/native/game_character.*`/`game_party.*` 后，player/party/skills/mercenaries 四槽与其 owner fallback 由 `host/legacy_json_builders.h` 承担，inventory(6) 槽仍指 `api/native/game_inventory.cpp`；world/system 槽与 cache 机制的 5 条 infra→game/legacy 边留批⑥。
+- `core/native/game_cache.{h,cpp}`：仍横跨 `game/access`/`game/state`/`game/symbols` 与 `game_world.h`/`game_system.h`，目标映射为 `infra`。player/party/inventory/skills/mercenaries 五槽 legacy builder 经 host 装配期注入（`frame_cache_set_json_builder`，A1 host↔infra 内部面）；T2i-2 删除 `api/native/game_character.*`/`game_party.*` 后，player/party/skills/mercenaries 四槽与其 owner fallback 由 `host/legacy_json_builders.h` 承担，inventory(6) 槽现指 `game/access/inventory_legacy_read.cpp`（T2l-inv）；world 槽 2/3/9/10/11 亦由该头 host 注入（T2l-w-read/w-read2）；system 槽与 cache 机制的 4 条 infra→game 边留机制批。
 - `core/native/module_save.cpp` 与 `module_save_port.h`：实现仍依赖旧游戏访问面；稳定声明暂留 `contracts`，实现映射为 legacy/save。
 - `core/native/inventory_trade.{h,cpp}`：仍依赖游戏访问面、状态面和符号头，映射为 legacy/inventory。
 - `game_system.{h,cpp}`、`game_dialog*`：直接迁入目标层会引入 legacy 依赖，须先拆出低层原语与上层聚合。
@@ -84,7 +84,7 @@
 
 ## 7. 写面/读面迁移批次记录（G-item 与 T2c–T2h）
 
-统一证据口径：Host `ctest` 终值 **69/69**（`item_facts_dispatch` 363、`character_facts_plugin` 413、`character_facts_dispatch` 214）、`check_http_routes` 143/143、`check_jni` 156/156、普通 + `-PqolKernelOnly=true` 双构建成功。**真机行为面一律按批次延后，结论 `NOT_ACCEPTED`，Host/静态检查不替代真机证据。**
+统一证据口径：Host `ctest` 终值 **72/72**（`item_facts_dispatch` 363、`item_facts_plugin` 34、`character_facts_plugin` 413、`character_facts_dispatch` 214、`world_legacy_readers` 62）、`check_http_routes` 143/143、`check_jni` 156/156、普通 + `-PqolKernelOnly=true` 双构建成功 + kernel `.so` 抽查。**真机行为面一律按批次延后，结论 `NOT_ACCEPTED`，Host/静态检查不替代真机证据。**
 
 | 批次 | 提交 | 内容 | 状态/证据 |
 |---|---|---|---|
@@ -112,5 +112,22 @@
 | T2i-1 | `b9ccfa82` | 新增 `host/legacy_json_builders.h`（`legacy_member_json` + 4 个 builder 逐字内联）；assembly 槽 0/1/7/8 与 3 处 fallback 改源；零删除 | 完成；`character_facts_plugin` 413；layers 27 持平、文件 547→548；真机读面字节延后 `NOT_ACCEPTED` |
 | T2i-2 | `af6e9abe` | 删除 `api/native/game_character.{cpp,h}`、`game_party.{cpp,h}` 四文件 + 主/测试 CMake 源清单、bridge/game_system include 清理；grep 词界归零 | 完成；**layers 27→23（-4）**、文件 548→544，`legacy/character` 与 `legacy/party` 层组消失；`character_facts_plugin` 413；真机延后 `NOT_ACCEPTED` |
 | 棘轮收缩 | `f73d4ef9` | 基线 31→27，逐边 = T2i-2 TU 物理删除证据；`gen_baseline_doc.py` 同步 | 完成；`check_arch` 违规 23/基线 27、offsets 4 |
+| T2j-1 | `624c142a` | bridge EB move 分支改 capability v2 `move_item`（同 impl 逐字）；删全局 `extension_bag_move_item` 声明+定义 | 完成；grep 词界 0、kernel `.so` 0、undefined 表 0；真机 EB 字节延后 `NOT_ACCEPTED` |
+| T2j-2 | `b543c2d2` | 直删 0 消费者 `extension_bag_put_jewel`（声明+定义）；capability `put_jewel`/`put_jewel_native` 保留 | 完成；`.so`/undefined 0、保留面在位 |
+| T2j-3 | `025542c2` | EB 全局豁免登记（`use_item` / `capability()` 边界、再评估触发）写入 ledger §3 | 完成；文档面（W20/W21） |
+| T2l-w-read | `a257ad71` | world 读 map/units/enemies/interactives/drops host 内联 + cache world 5 槽切注入；`game_cache.cpp→game_world.h` include 删除 | 完成；layers 23→22（-1）、文件 544（tests 不计入 layer 图）；cache world 5 槽改 host 注入 |
+| T2l-rh | `4c1d9100` | 新增 `contracts/runtime_hooks.h` POD 注入表 + `host/frame_source.cpp` 定义（零消费者零行为） | 完成；`runtime_hooks_contract` 10/0；kernel 同供给 |
+| T2l-w-write | `fac32102` | world 写 5（teleport/×2/move/walk/walk_stop/interact）typed 迁 `game/access/world.cpp` 经表；`qol_log_seam.h`（motion 7 调用点宏重定义）；删两 inc | 完成；28 条字面量逐字、双构建；layers 22 持平、文件 543→542 |
+| T2l-q | `e7e7d1d7` | `quest_quit` typed 迁 `game/access/quest.cpp` + 3 读 host/game 内联；删 `api/native/game_quest.*` | 完成；refresh 1/0 保持；`item_facts_dispatch` 363 |
+| T2l-s-write | `44416ca7` | save 写 3 + `_direct` 迁 typed；preflight 迁 `game/access/save_preflight.{h,cpp}`（host 源行删除）；删 `api/native/game_save.*` | 完成；`host_tests` 2480/0；layers 持平 |
+| T2l-u | `41526b9f` | ui 写 3 + 读 4 + X5（popup/top_panel）迁 game（`ui_state.cpp`）；删 `api/native/game_ui.*` 5 文件；`game_state.cpp→game_ui.h` include 删 | 完成；layers 22→**19（-3）**、文件 542→539 |
+| T2l-d | `1976ba4b` | dialog 写 2+内部分发 + 读 2（story 原语迁 game）；删 `game_dialog.*` 4 文件；`data_op_save` 薄转发收口 | 完成；layers 19→**17（-2）**、文件 539→535 |
+| T2l-integ | `9a173be9` | 棘轮收缩 27→21（T2l 序列真实降边）；`gen_baseline_doc.py` 同步 | 完成；check_arch 17/基线 21 |
+| T2l-s-read | `5cc07691` | save 槽读（current/slots）迁 `game/access/save`；删 `api/native/game_save.*` 残件 | 完成；0 边、文件 533 |
+| T2l-sho | `8047873c` | shop 读迁 `game/access/shop.{h,cpp}`；删 `api/native/game_shop.*` | 完成；0 边、`legacy/shop` 层组消失 |
+| T2l-inv | `c6140166` | inventory legacy 读迁 `game/access/inventory_legacy_read.{h,cpp}`（kernel 分支逐字 stub）；删 `api/native/game_inventory.*` | 完成；B0 4-fixture frozen 363/363；0 边 |
+| T2l-w-del | （停线，零提交） | world TU 整删前置核验不通过（nav/tiles/world_port/append_position 活消费者） | 停线登记；方案 A（T2l-w-read2）获准 |
+| T2l-w-read2 | `7a8f9a7e` | world 活读面迁 `game/access/world_read.cpp` 单一实现；host 薄转发 + `append_position` 内联；删 `api/native/game_world.*` 5 文件 | 完成；frozen 62/0、双构建；`legacy/world` 层组消失、文件 528 |
+| T2l-dir | `c4da2a6e` | 删主/tests CMake `api/native` include 路径（1+4）与空目录 `api/`；`baseline.md` 重生成 | 完成；**`api/native` 目录删除**；ctest 72/72 |
 
-- 序列后存量事实：bridge 直调 api/native 维持 **14 符号** + X 类（清单见 §3「bridge 直调」行）；api/native 剩余读 TU 与 2 个 kernel stub 见 §3「api/native 残余」行；T2h 全序列（B0/B'/B1/B2/B3）与 T2i-1/2 已闭合，批⑥（world/save/ui/quest/dialog 读面 + X 类）与整目录批未执行。
+- 序列后存量事实：**bridge 直调 api/native 已清零**，`api/native/` 目录已删除（T2l-dir `c4da2a6e`）；仅剩 T2j 豁免 2 面（`use_item` / `capability()`，见 §3）。T2h/T2i/T2j/T2l 全序列闭合；剩余未决 = cache 机制 4 边、非序列存量 13 条、world/nav/tiles 等读面真机回归（见 §3）。

@@ -32,7 +32,7 @@
 | GET | `/api/world/map/enemies` | api.world | 0 | 1 | CurrentMapController.enemies | `InfoApiServiceCore.currentMapEnemies` → `InfoMapQueries.enemies` | `nativeGetEnemiesJson` | `core/native/game_cache.cpp` | — |
 | GET | `/api/world/map/interactives` | api.world | 0 | 1 | CurrentMapController.interactives | `InfoApiServiceCore.currentMapInteractives` → `InfoMapQueries.interactives` | `nativeGetInteractivesJson` | `core/native/game_cache.cpp` | — |
 | GET | `/api/world/map/drops` | api.world | 0 | 1 | CurrentMapController.drops | `InfoApiServiceCore.currentMapDrops` → `InfoMapQueries.drops` | `nativeGetDropsJson` | `core/native/game_cache.cpp` | — |
-| GET | `/api/world/map/distance` | api.world | 0 | 1 | CurrentMapController.distance | `InfoApiServiceCore.currentMapDistance` → `InfoMapQueries.distance` | `nativeDistanceJson` | `api/native/game_world.cpp` | — |
+| GET | `/api/world/map/distance` | api.world | 0 | 1 | CurrentMapController.distance | `InfoApiServiceCore.currentMapDistance` → `InfoMapQueries.distance` | `nativeDistanceJson` | `game/access/world_read.cpp` | — |
 | GET | `/api/world/maps/list` | core.data | 0 | 1 | DataController.mapList | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（MAPINFOBASE 投影） | — |
 | GET | `/api/world/maps/{map_id}` | core.data | 0 | 1 | DataController.mapDetail | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（MAPINFOBASE 查询） | — |
 | GET | `/api/world/maps/{map_id}/tiles` | core.data | 0 | 1 | DataController.mapTiles | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（tiles 解码与投影） | — |
@@ -45,9 +45,9 @@
 | GET | `/api/system/tables/text` | core.data | 0 | 1 | DataController.text | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（原始 text JSON） | — |
 | GET | `/api/system/help` | core.data | 0 | 1 | DataController.help | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（501 占位） | — |
 | GET | `/api/system/download` | core.data | 0 | 1 | DataController.downloadAll | `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.data/plugin.cpp`（501 占位） | — |
-| GET | `/api/debug/ui` | legacy.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `api/native/game_ui_read.inc` | — |
-| GET | `/api/debug/path` | legacy.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `api/native/game_world_navigation.inc` | — |
-| GET | `/api/debug/item/raw` | legacy.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `api/native/game_inventory_read.inc` | — |
+| GET | `/api/debug/ui` | legacy.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `host/legacy_json_builders.h`（host 内联） | — |
+| GET | `/api/debug/path` | legacy.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `game/access/world_read.cpp` | — |
+| GET | `/api/debug/item/raw` | legacy.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `game/read/item_class.cpp`（bridge kernel 门） | — |
 | POST | `/api/debug/settings-ui/inject` | core.settings | 0 | 1 | DebugController.settingsUiInject | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
 | GET | `/api/debug/settings-ui/status` | core.settings | 0 | 1 | DebugController.settingsUiStatus | `InfoApiServiceCore.settingsUiStatus` → `InfoSystemQueries.settingsUiStatus` | `nativeSettingsUiStatus` | Kotlin/JNI settings-ui status handler | — |
 | POST | `/api/debug/settings-ui/restore` | core.settings | 0 | 1 | DebugController.settingsUiRestore | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
@@ -127,7 +127,7 @@
 | GET | `/api/character/party/{slot}/equipment` | core.character | 0 | 1 | PartyController.memberEquipment | `InfoApiServiceCore.partyMemberEquipment` → `InfoCharacterQueries.partyMemberEquipment` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.character/*`（主线程快照 + `QOL_PORT_CHARACTER_HTTP`） | `NameInjector.injectItemName`（native owner） |
 | GET | `/api/character/party/{slot}/equipment/{equip_slot}` | core.character | 0 | 1 | PartyController.memberEquip | `InfoApiServiceCore.partyMemberEquip` → `InfoCharacterQueries.partyMemberEquip` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.character/*`（主线程快照 + `QOL_PORT_CHARACTER_HTTP`） | `NameInjector.injectItemName`（native owner） |
 | GET | `/api/character/party/{slot}/skills` | core.character | 0 | 1 | PartyController.memberSkills | `InfoApiServiceCore.partyMemberSkills` → `InfoCharacterQueries.partyMemberSkills` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.character/*`（主线程快照 + `QOL_PORT_CHARACTER_HTTP`） | `NameInjector.injectSkillNames`（native owner） |
-| POST | `/api/quest/quit_quest` | api.quest | 0 | 1 | QuestActionController.quit | `ActionApiServiceCore.questQuit` → `QuestActions.questQuit` | `nativeOpQuestQuit`, `nativeGetPlayerJson` | `api/native/game_quest.cpp`; `core/native/game_cache.cpp` | `state=player` |
+| POST | `/api/quest/quit_quest` | api.quest | 0 | 1 | QuestActionController.quit | `ActionApiServiceCore.questQuit` → `QuestActions.questQuit` | `nativeOpQuestQuit`, `nativeGetPlayerJson` | `game/access/quest.cpp`; `core/native/game_cache.cpp` | `state=player` |
 | GET | `/api/quest` | quest | 0 | 1 | QuestController.composite | `InfoApiServiceCore.quest` → `InfoQuestQueries.quest` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.quest/*`（主线程快照 + 启动期片段表） | 三段目标数组拼装（native owner） |
 | GET | `/api/quest/active` | quest | 0 | 1 | QuestController.active | `InfoApiServiceCore.questActive` → `InfoQuestQueries.active` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.quest/*` | 隐藏过滤 + 静态片段注入（native owner） |
 | GET | `/api/quest/details` | quest | 0 | 1 | QuestController.details | `InfoApiServiceCore.questDetails` → `InfoQuestQueries.details` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.quest/*` | 静态片段注入 + rewards（native owner） |
@@ -154,7 +154,7 @@
 | GET | `/api/ui` | core.ui_state | 0 | 1 | UiController.composite | `InfoApiServiceCore.ui`（处理器仍 Kotlin） | `nativeGetGamestateJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `UiActivityTracker` 注入 agreement + state |
 | GET | `/api/ui/screen` | core.ui_state | 0 | 1 | UiController.screen | `InfoApiServiceCore.uiScreen`（处理器仍 Kotlin） | `nativeGetGamestateJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `UiActivityTracker` 参与 screen 读取 |
 | GET | `/api/ui/panel` | core.ui_state | 0 | 1 | UiController.panel | `InfoApiServiceCore.uiPanel`（处理器仍 Kotlin） | `nativeGetGamestateJson` | `core/native/game_cache.cpp`; `game_system.cpp` | `UiActivityTracker` 参与 state 读取 |
-| GET | `/api/ui/dialog` | core.ui_state | 0 | 1 | UiController.dialog | `InfoApiServiceCore.uiDialog`（处理器仍 Kotlin） | `nativeGetGamestateJson`, `nativeDialogContent` | `core/native/game_cache.cpp`; `game_system.cpp`; `api/native/game_ui.cpp` | `UiActivityTracker` agreement + dialog state 拼装 |
+| GET | `/api/ui/dialog` | core.ui_state | 0 | 1 | UiController.dialog | `InfoApiServiceCore.uiDialog`（处理器仍 Kotlin） | `nativeGetGamestateJson`, `nativeDialogContent` | `core/native/game_cache.cpp`; `game_system.cpp`; `game/access/ui_state.cpp` | `UiActivityTracker` agreement + dialog state 拼装 |
 
 ## 汇总
 
