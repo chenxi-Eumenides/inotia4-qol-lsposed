@@ -16,6 +16,7 @@
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/commands.h"
 #include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/character_write_ops_port.h"
 #include "contracts/game_ports/character_write_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
@@ -98,8 +99,8 @@ struct CharacterSnapshot {
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolCharacterPort* g_port = nullptr;
 const contracts::QolCharacterHttpPort* g_http_port = nullptr;
-// 写面私有端口（仅 core.character 可注入）。
-const contracts::QolCharacterWritePort* g_character_write = nullptr;
+// 写面 typed 低层原语端口（仅 core.character 可注入）：owner 侧按 kind 分派后调用。
+const contracts::QolCharacterWriteOpsPort* g_character_write_ops = nullptr;
 const contracts::QolCharacterStatePort* g_character_state_port = nullptr;
 uint64_t g_frame_task = 0;
 Snapshot<CharacterSnapshot> g_snapshot;
@@ -107,7 +108,9 @@ Snapshot<CharacterSnapshot> g_snapshot;
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHARACTER, {1, 0}},
     {contracts::QolPortId::QOL_PORT_CHARACTER_HTTP, {1, 0}},
-    {contracts::QolPortId::QOL_PORT_CHARACTER_WRITE, {1, 0}},
+    {contracts::QolPortId::QOL_PORT_CHARACTER_WRITE_OPS,
+     {contracts::kQolPortCharacterWriteOpsVersion.major,
+      contracts::kQolPortCharacterWriteOpsVersion.minor}},
     {contracts::QolPortId::QOL_PORT_CHARACTER_STATE,
      {contracts::kQolPortCharacterStateVersion.major,
       contracts::kQolPortCharacterStateVersion.minor}},
@@ -1315,73 +1318,176 @@ QolResult char_write_command(const contracts::HttpReq* request, contracts::HttpR
     return response_body(response, out.c_str(), static_cast<uint32_t>(out.size()));
 }
 
-// 主线程结果处理器：批量 kind 逐点下发（任一点失败即中断）；其余单点直调端口。
+// 失败体与迁移前 op_err 同构：{"ok":false,"error":"<原 op_err 文案>"}（不转义）。
+bool write_op_error(char* out, uint32_t capacity, uint32_t* out_size, const char* message) {
+    const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                             (message != nullptr ? message : "character write failed") + "\"}";
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return false;
+}
+
+// 写后 state：owner 经 character.state 读端口当场同步读取并序列化，与迁移前 build_*_json 逐字节一致。
+bool append_character_state(std::string& body, contracts::QolCharacterStateKind kind,
+                            uint32_t capacity) {
+    std::vector<char> buffer(kPartyCapacity);
+    uint32_t state_size = 0;
+    const QolResult result = write_character_state_json(
+        kind, buffer.data(), static_cast<uint32_t>(buffer.size()), &state_size);
+    if (!contracts::succeeded(result)) return false;
+    body = "{\"ok\":true,\"state\":";
+    body.append(buffer.data(), state_size);
+    body += "}";
+    return body.size() <= capacity;
+}
+
+// 主线程结果处理器：owner 侧按 kind 分派 typed 低层原语，并按迁移前 build_character_write_result_json
+// 的规则拼装响应（成功 {"ok":true[,"state":...]}；失败透旧错误体）。
 bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
-    if (payload == nullptr || size != sizeof(CharWritePayload) || g_character_write == nullptr ||
-        g_character_write->read.write == nullptr || out == nullptr || out_size == nullptr) {
+    if (payload == nullptr || size != sizeof(CharWritePayload) ||
+        g_character_write_ops == nullptr || out == nullptr || out_size == nullptr) {
         return false;
     }
     CharWritePayload p{};
     std::memcpy(&p, payload, size);
     const auto kind = static_cast<contracts::QolCharacterWriteKind>(p.kind);
-    auto call_point = [&](int32_t idx, int32_t amount, uint32_t* written) {
-        contracts::QolCharacterWriteArgs args{};
-        args.kind = p.kind;
-        args.i0 = p.i0;
-        args.i1 = idx;
-        args.i2 = (kind == contracts::QolCharacterWriteKind::kAddStat) ? 1 : amount;
-        *written = 0;
-        const QolResult result = g_character_write->read.write(&args, out, capacity, written);
-        return contracts::succeeded(result);
-    };
-    if (kind == contracts::QolCharacterWriteKind::kAddStat ||
-        kind == contracts::QolCharacterWriteKind::kSetAttr) {
+    contracts::QolCharacterWriteOpResult op{};
+    const auto* ops = g_character_write_ops;
+
+    // 批量 kind：逐点下发（set_attr 单点一次，add_stat 按数量重复），组装保持在本 owner 内。
+    if (kind == contracts::QolCharacterWriteKind::kSetAttr ||
+        kind == contracts::QolCharacterWriteKind::kAddStat) {
         const bool set_attr = kind == contracts::QolCharacterWriteKind::kSetAttr;
-        std::string applied = set_attr ? "{\"ok\":true,\"set\":[" : "{\"ok\":true,\"applied\":[";
+        std::string body = set_attr ? "{\"ok\":true,\"set\":[" : "{\"ok\":true,\"applied\":[";
         bool first = true;
         for (int32_t i = 0; i < p.point_count; ++i) {
             const int32_t repetitions = set_attr ? 1 : p.point_amt[i];
             for (int32_t point = 0; point < repetitions; ++point) {
-                uint32_t written = 0;
-                const bool call_ok = call_point(p.point_idx[i], p.point_amt[i], &written);
-                if (written >= capacity) return false;
-                const bool body_failed = written > 0 &&
-                    std::string(out, written).find("\"ok\":false") != std::string::npos;
-                if (!call_ok || written == 0 || body_failed) {
+                const QolResult result =
+                    set_attr ? ops->set_attr(p.i0, p.point_idx[i], p.point_amt[i], &op)
+                             : ops->add_stat(p.i0, p.point_idx[i], &op);
+                if (!contracts::succeeded(result)) {
                     if (set_attr) {
-                        const std::string error = std::string("{\"ok\":false,\"error\":\"set attr ") +
-                                                  std::to_string(p.point_idx[i]) + " failed\"}";
+                        const std::string error =
+                            std::string("{\"ok\":false,\"error\":\"set attr ") +
+                            std::to_string(p.point_idx[i]) + " failed\"}";
                         if (error.size() > capacity) return false;
                         std::memcpy(out, error.data(), error.size());
                         *out_size = static_cast<uint32_t>(error.size());
-                    } else {
-                        *out_size = written;
+                        return false;
                     }
-                    return false;
+                    return write_op_error(out, capacity, out_size,
+                                          op.error_message_len != 0 ? op.error_message : nullptr);
                 }
-                if (!first) applied += ",";
+                if (!first) body += ",";
                 first = false;
-                applied += std::string("{\"attr\":") + std::to_string(p.point_idx[i]);
-                if (set_attr) applied += std::string(",\"value\":") + std::to_string(p.point_amt[i]);
-                applied += "}";
+                body += std::string("{\"attr\":") + std::to_string(p.point_idx[i]);
+                if (set_attr) {
+                    body += std::string(",\"value\":") + std::to_string(p.point_amt[i]);
+                }
+                body += "}";
+                if (body.size() > capacity) return false;
             }
         }
-        applied += "]}";
-        if (applied.size() > capacity) return false;
-        std::memcpy(out, applied.data(), applied.size());
-        *out_size = static_cast<uint32_t>(applied.size());
+        body += "]}";
+        if (body.size() > capacity) return false;
+        std::memcpy(out, body.data(), body.size());
+        *out_size = static_cast<uint32_t>(body.size());
         return true;
     }
-    contracts::QolCharacterWriteArgs args{};
-    args.kind = p.kind;
-    args.i0 = p.i0;
-    args.i1 = p.i1;
-    args.i2 = p.i2;
-    args.i64 = p.i64;
-    return contracts::succeeded(g_character_write->read.write(&args, out, capacity, out_size)) &&
-           *out_size != 0;
+
+    contracts::QolCharacterStateKind state_kind = contracts::QolCharacterStateKind::kParty;
+    bool has_state = true;
+    QolResult result = contracts::ok();
+    switch (kind) {
+        case contracts::QolCharacterWriteKind::kSetHp:
+            result = ops->set_hp(p.i0, p.i1, &op);
+            has_state = false;
+            break;
+        case contracts::QolCharacterWriteKind::kSetMp:
+            result = ops->set_mp(p.i0, p.i1, &op);
+            has_state = false;
+            break;
+        case contracts::QolCharacterWriteKind::kSetLevel:
+            result = ops->set_level(p.i0, p.i1, p.i2, &op);
+            has_state = false;
+            break;
+        case contracts::QolCharacterWriteKind::kSetExperience:
+            result = ops->set_experience(p.i0, p.i64, &op);
+            has_state = false;
+            break;
+        case contracts::QolCharacterWriteKind::kSetStatusPoint:
+            result = ops->set_status_point(p.i0, p.i1, &op);
+            has_state = false;
+            break;
+        case contracts::QolCharacterWriteKind::kPartySwap:
+            result = ops->party_swap(p.i0, p.i1, &op);
+            has_state = false;
+            break;
+        case contracts::QolCharacterWriteKind::kSetAutoAttack:
+            result = ops->set_auto_attack(p.i0, p.i1, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        case contracts::QolCharacterWriteKind::kCastSkill:
+            result = ops->cast_skill(p.i0, p.i1, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        case contracts::QolCharacterWriteKind::kAttackTarget:
+            result = ops->attack_target(p.i0, p.i1, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        case contracts::QolCharacterWriteKind::kSwitchPlayer:
+            result = ops->switch_player(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kPlayer;
+            break;
+        case contracts::QolCharacterWriteKind::kStopCombat:
+            result = ops->stop_combat(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kPlayer;
+            break;
+        case contracts::QolCharacterWriteKind::kLearnAction:
+            result = ops->learn_action(p.i0, p.i1, p.i2, &op);
+            state_kind = contracts::QolCharacterStateKind::kSkills;
+            break;
+        case contracts::QolCharacterWriteKind::kStatReset:
+            result = ops->stat_reset(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kPlayer;
+            break;
+        case contracts::QolCharacterWriteKind::kSkillReset:
+            result = ops->skill_reset(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kPlayer;
+            break;
+        case contracts::QolCharacterWriteKind::kPartyInclude:
+            result = ops->party_include(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        case contracts::QolCharacterWriteKind::kPartyExclude:
+            result = ops->party_exclude(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        case contracts::QolCharacterWriteKind::kPartyDischarge:
+            result = ops->party_discharge(p.i0, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        case contracts::QolCharacterWriteKind::kPartyWithdraw:
+            result = ops->party_withdraw(p.i0, p.i1, &op);
+            state_kind = contracts::QolCharacterStateKind::kParty;
+            break;
+        default:
+            return false;
+    }
+    if (!contracts::succeeded(result)) {
+        return write_op_error(out, capacity, out_size,
+                              op.error_message_len != 0 ? op.error_message : nullptr);
+    }
+    std::string body = "{\"ok\":true}";
+    if (has_state && !append_character_state(body, state_kind, capacity)) return false;
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return true;
 }
 
 const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
@@ -1449,7 +1555,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_port = nullptr;
     g_http_port = nullptr;
-    g_character_write = nullptr;
+    g_character_write_ops = nullptr;
     g_character_state_port = nullptr;
     g_frame_task = 0;
     CharacterSnapshot empty_snapshot{};
@@ -1463,15 +1569,34 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     g_port = static_cast<const contracts::QolCharacterPort*>(ctx.ports[0]);
     g_http_port = static_cast<const contracts::QolCharacterHttpPort*>(ctx.ports[1]);
-    g_character_write = static_cast<const contracts::QolCharacterWritePort*>(ctx.ports[2]);
+    g_character_write_ops =
+        static_cast<const contracts::QolCharacterWriteOpsPort*>(ctx.ports[2]);
     g_character_state_port =
         static_cast<const contracts::QolCharacterStatePort*>(ctx.ports[3]);
+    const bool ops_ready =
+        g_character_write_ops != nullptr && g_character_write_ops->set_hp != nullptr &&
+        g_character_write_ops->set_mp != nullptr && g_character_write_ops->set_level != nullptr &&
+        g_character_write_ops->set_experience != nullptr &&
+        g_character_write_ops->set_attr != nullptr &&
+        g_character_write_ops->set_status_point != nullptr &&
+        g_character_write_ops->party_swap != nullptr &&
+        g_character_write_ops->set_auto_attack != nullptr &&
+        g_character_write_ops->cast_skill != nullptr &&
+        g_character_write_ops->attack_target != nullptr &&
+        g_character_write_ops->switch_player != nullptr &&
+        g_character_write_ops->stop_combat != nullptr && g_character_write_ops->learn_action != nullptr &&
+        g_character_write_ops->add_stat != nullptr && g_character_write_ops->stat_reset != nullptr &&
+        g_character_write_ops->skill_reset != nullptr && g_character_write_ops->party_include != nullptr &&
+        g_character_write_ops->party_exclude != nullptr && g_character_write_ops->party_discharge != nullptr &&
+        g_character_write_ops->party_withdraw != nullptr;
     if (!contracts::satisfies(g_port->abi_version, {1, 0}) || g_port->read.type == nullptr ||
         g_port->read.is_active_player_group == nullptr ||
         !contracts::satisfies(g_http_port->abi_version, {1, 0}) ||
         g_http_port->read.body_json == nullptr ||
-        !contracts::satisfies(g_character_write->abi_version, {1, 0}) ||
-        g_character_write->read.write == nullptr ||
+        !contracts::satisfies(g_character_write_ops->abi_version,
+                              {contracts::kQolPortCharacterWriteOpsVersion.major,
+                               contracts::kQolPortCharacterWriteOpsVersion.minor}) ||
+        !ops_ready ||
         !contracts::satisfies(g_character_state_port->abi_version,
                               {contracts::kQolPortCharacterStateVersion.major,
                                contracts::kQolPortCharacterStateVersion.minor}) ||
@@ -1480,7 +1605,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_character_state_port->read.skills == nullptr) {
         g_port = nullptr;
         g_http_port = nullptr;
-        g_character_write = nullptr;
+        g_character_write_ops = nullptr;
         g_character_state_port = nullptr;
         g_sdk = nullptr;
         return 1;
@@ -1492,7 +1617,7 @@ int plugin_install(contracts::PluginContext& ctx) {
             kCharWriteHandlerId, &char_write_result, nullptr))) {
         g_port = nullptr;
         g_http_port = nullptr;
-        g_character_write = nullptr;
+        g_character_write_ops = nullptr;
         g_character_state_port = nullptr;
         g_sdk = nullptr;
         return 1;
@@ -1509,7 +1634,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     g_port = nullptr;
     g_http_port = nullptr;
-    g_character_write = nullptr;
+    g_character_write_ops = nullptr;
     g_character_state_port = nullptr;
     g_sdk = nullptr;
 }

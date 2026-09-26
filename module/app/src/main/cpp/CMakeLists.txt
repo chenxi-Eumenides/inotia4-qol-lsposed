@@ -79,6 +79,7 @@ add_library(gamebridge SHARED
     game/ops/item_money.cpp
     game/ops/item_inventory_state_write.cpp
     game/ops/character_state_read.cpp
+    game/ops/character_write.cpp
     game/state/game_state.cpp
     game/nav/game_nav.cpp
     core/native/game_cache.cpp

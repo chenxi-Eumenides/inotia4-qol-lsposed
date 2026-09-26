@@ -910,6 +910,9 @@ add_executable(character_facts_plugin_tests
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/api/native/game_character.cpp
     ${CPP_DIR}/api/native/game_party.cpp
+    ${CPP_DIR}/game/ops/character_write.cpp
+    ${CPP_DIR}/game/ops/character_state_read.cpp
+    ${CPP_DIR}/game/ops/game_ops_common.cpp
 )
 target_include_directories(character_facts_plugin_tests PRIVATE
     ${CPP_DIR}

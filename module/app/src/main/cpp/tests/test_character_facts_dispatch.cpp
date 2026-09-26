@@ -10,6 +10,7 @@
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
+#include "contracts/game_ports/character_write_ops_port.h"
 #include "contracts/game_ports/character_write_port.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/host_sdk.h"
@@ -75,9 +76,6 @@ qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
 uint32_t g_post_handler_id = 0;
 uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
 uint32_t g_post_payload_size = 0;
-qol::contracts::QolCharacterWriteArgs g_write_args[16]{};
-int g_write_calls = 0;
-int g_write_fail_at = 0;
 
 struct CharWritePayloadMirror {
     int32_t kind;
@@ -88,6 +86,121 @@ struct CharWritePayloadMirror {
     int32_t point_count;
     int32_t point_idx[8];
     int32_t point_amt[8];
+};
+
+// typed 原语 fake：记录 owner 分派到哪个原语与入参，并按 g_op_fail_at 返回失败。
+enum class FakeOp : int32_t {
+    kNone,
+    kSetHp,
+    kSetMp,
+    kSetLevel,
+    kSetExperience,
+    kSetAttr,
+    kSetStatusPoint,
+    kPartySwap,
+    kSetAutoAttack,
+    kCastSkill,
+    kAttackTarget,
+    kSwitchPlayer,
+    kStopCombat,
+    kLearnAction,
+    kAddStat,
+    kStatReset,
+    kSkillReset,
+    kPartyInclude,
+    kPartyExclude,
+    kPartyDischarge,
+    kPartyWithdraw,
+};
+
+FakeOp g_last_op = FakeOp::kNone;
+int32_t g_op_a = 0;
+int32_t g_op_b = 0;
+int32_t g_op_c = 0;
+int64_t g_op_i64 = 0;
+int g_op_calls = 0;
+int g_op_fail_at = 0;
+const char* g_op_error = "port failed";
+
+QolResult fake_op_result(qol::contracts::QolCharacterWriteOpResult* out) {
+    ++g_op_calls;
+    if (g_op_fail_at != g_op_calls) return qol::contracts::ok();
+    const uint32_t length = static_cast<uint32_t>(std::strlen(g_op_error));
+    if (out != nullptr && length < sizeof(out->error_message)) {
+        std::memcpy(out->error_message, g_op_error, length + 1);
+        out->error_message_len = length;
+    }
+    return qol::contracts::error(kQolErrInternal, g_op_error, length);
+}
+
+#define FAKE_OP1(name, id)                                                        \
+    QolResult name(int32_t a, qol::contracts::QolCharacterWriteOpResult* out) {   \
+        g_last_op = FakeOp::id; g_op_a = a; return fake_op_result(out);           \
+    }
+#define FAKE_OP2(name, id)                                                        \
+    QolResult name(int32_t a, int32_t b,                                          \
+                   qol::contracts::QolCharacterWriteOpResult* out) {              \
+        g_last_op = FakeOp::id; g_op_a = a; g_op_b = b; return fake_op_result(out);\
+    }
+#define FAKE_OP3(name, id)                                                        \
+    QolResult name(int32_t a, int32_t b, int32_t c,                               \
+                   qol::contracts::QolCharacterWriteOpResult* out) {              \
+        g_last_op = FakeOp::id; g_op_a = a; g_op_b = b; g_op_c = c;               \
+        return fake_op_result(out);                                               \
+    }
+
+QolResult fake_set_exp(int32_t a, int64_t exp, qol::contracts::QolCharacterWriteOpResult* out) {
+    g_last_op = FakeOp::kSetExperience;
+    g_op_a = a;
+    g_op_i64 = exp;
+    return fake_op_result(out);
+}
+FAKE_OP2(fake_set_hp, kSetHp)
+FAKE_OP2(fake_set_mp, kSetMp)
+FAKE_OP3(fake_set_level, kSetLevel)
+FAKE_OP3(fake_set_attr, kSetAttr)
+FAKE_OP2(fake_set_status_point, kSetStatusPoint)
+FAKE_OP2(fake_party_swap, kPartySwap)
+FAKE_OP2(fake_set_auto_attack, kSetAutoAttack)
+FAKE_OP2(fake_cast_skill, kCastSkill)
+FAKE_OP2(fake_attack_target, kAttackTarget)
+FAKE_OP1(fake_switch_player, kSwitchPlayer)
+FAKE_OP1(fake_stop_combat, kStopCombat)
+FAKE_OP3(fake_learn_action, kLearnAction)
+FAKE_OP2(fake_add_stat, kAddStat)
+FAKE_OP1(fake_stat_reset, kStatReset)
+FAKE_OP1(fake_skill_reset, kSkillReset)
+FAKE_OP1(fake_party_include, kPartyInclude)
+FAKE_OP1(fake_party_exclude, kPartyExclude)
+FAKE_OP1(fake_party_discharge, kPartyDischarge)
+FAKE_OP2(fake_party_withdraw, kPartyWithdraw)
+
+#undef FAKE_OP1
+#undef FAKE_OP2
+#undef FAKE_OP3
+
+const qol::contracts::QolCharacterWriteOpsPort kFakeWriteOpsPort{
+    qol::contracts::kQolPortCharacterWriteOpsVersion,
+    &fake_set_hp,
+    &fake_set_mp,
+    &fake_set_level,
+    &fake_set_exp,
+    &fake_set_attr,
+    &fake_set_status_point,
+    &fake_party_swap,
+    &fake_set_auto_attack,
+    &fake_cast_skill,
+    &fake_attack_target,
+    &fake_switch_player,
+    &fake_stop_combat,
+    &fake_learn_action,
+    &fake_add_stat,
+    &fake_stat_reset,
+    &fake_skill_reset,
+    &fake_party_include,
+    &fake_party_exclude,
+    &fake_party_discharge,
+    &fake_party_withdraw,
 };
 
 QolResult fake_character_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
@@ -122,28 +235,6 @@ const QolCharacterHttpPort kFakeHttpPort{qol::contracts::kQolPortCharacterHttpVe
                                          kFakeHttpRead};
 const qol::contracts::QolCharacterPort kFakeCharacterPort{
     qol::contracts::kQolPortCharacterVersion, {&fake_type, &fake_active}};
-QolResult fake_character_write(const qol::contracts::QolCharacterWriteArgs* args, char* out,
-                               uint32_t capacity,
-                               uint32_t* out_size) {
-    if (args == nullptr || out == nullptr || out_size == nullptr || capacity < 40) {
-        return qol::contracts::error(kQolErrInvalidArgument, "bad write", 9);
-    }
-    if (g_write_calls < static_cast<int>(sizeof(g_write_args) / sizeof(g_write_args[0]))) {
-        g_write_args[g_write_calls] = *args;
-    }
-    ++g_write_calls;
-    constexpr char kOk[] = "{\"ok\":true}";
-    constexpr char kFailure[] = "{\"ok\":false,\"error\":\"port failed\"}";
-    const bool failed = g_write_fail_at == g_write_calls;
-    const char* result = failed ? kFailure : kOk;
-    const uint32_t size = static_cast<uint32_t>(std::strlen(result));
-    std::memcpy(out, result, size);
-    *out_size = size;
-    if (failed) return qol::contracts::error(kQolErrInternal, "port failed", 11);
-    return qol::contracts::ok();
-}
-const qol::contracts::QolCharacterWritePort kFakeWritePort{
-    qol::contracts::kQolPortCharacterWriteVersion, {&fake_character_write}};
 
 QolResult fake_state_party(qol::contracts::QolCharacterStateParty* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
@@ -164,7 +255,7 @@ const qol::contracts::QolCharacterStatePort kFakeStatePort{
     qol::contracts::kQolPortCharacterStateVersion,
     {&fake_state_party, &fake_state_player, &fake_state_skills}};
 
-const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort, &kFakeWritePort,
+const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort, &kFakeWriteOpsPort,
                                   &kFakeStatePort};
 
 struct FakeScheduler {
@@ -354,9 +445,11 @@ void test_write_value_semantics() {
     CHECK(payload.kind == static_cast<int32_t>(qol::contracts::QolCharacterWriteKind::kPartySwap));
     CHECK(payload.i0 == 2 && payload.i1 == 1);
     bool success = false;
-    g_write_calls = 0;
-    g_write_fail_at = 0;
+    g_op_calls = 0;
+    g_op_fail_at = 0;
+    g_last_op = FakeOp::kNone;
     CHECK(run_post_result(&success) == "{\"ok\":true}" && success);
+    CHECK(g_last_op == FakeOp::kPartySwap && g_op_a == 2 && g_op_b == 1);
 }
 
 void test_add_stat_result_semantics() {
@@ -367,24 +460,23 @@ void test_add_stat_result_semantics() {
     CharWritePayloadMirror payload{};
     std::memcpy(&payload, g_post_payload, sizeof(payload));
     CHECK(payload.point_count == 1 && payload.point_idx[0] == 0 && payload.point_amt[0] == 3);
-    g_write_calls = 0;
-    g_write_fail_at = 0;
+    g_op_calls = 0;
+    g_op_fail_at = 0;
+    g_last_op = FakeOp::kNone;
     bool success = false;
     CHECK(run_post_result(&success) ==
               "{\"ok\":true,\"applied\":[{\"attr\":0},{\"attr\":0},{\"attr\":0}]}" &&
           success);
-    CHECK(g_write_calls == 3);
-    CHECK(g_write_args[0].i1 == 0 && g_write_args[0].i2 == 1 &&
-          g_write_args[1].i1 == 0 && g_write_args[1].i2 == 1 &&
-          g_write_args[2].i1 == 0 && g_write_args[2].i2 == 1);
+    CHECK(g_op_calls == 3);
+    CHECK(g_last_op == FakeOp::kAddStat && g_op_a == 0 && g_op_b == 0);
 
-    g_write_calls = 0;
-    g_write_fail_at = 1;
+    g_op_calls = 0;
+    g_op_fail_at = 1;
     CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3.7}}",
                         &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
     CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"port failed\"}" && !success);
-    CHECK(g_write_calls == 1);
-    g_write_fail_at = 0;
+    CHECK(g_op_calls == 1);
+    g_op_fail_at = 0;
 }
 
 void test_set_attr_result_semantics() {
@@ -394,44 +486,52 @@ void test_set_attr_result_semantics() {
                         "{\"stats\":{\"strength\":5,\"agility\":6,\"strength\":\"7\"}}",
                         &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":11}");
-    g_write_calls = 0;
-    g_write_fail_at = 0;
+    g_op_calls = 0;
+    g_op_fail_at = 0;
+    g_last_op = FakeOp::kNone;
     bool success = false;
     CHECK(run_post_result(&success) ==
               "{\"ok\":true,\"set\":[{\"attr\":0,\"value\":7},{\"attr\":1,\"value\":6}]}" &&
           success);
-    CHECK(g_write_calls == 2 && g_write_args[0].i1 == 0 && g_write_args[0].i2 == 7 &&
-          g_write_args[1].i1 == 1 && g_write_args[1].i2 == 6);
+    CHECK(g_op_calls == 2 && g_last_op == FakeOp::kSetAttr && g_op_a == 0 && g_op_b == 1 &&
+          g_op_c == 6);
 
-    g_write_calls = 0;
-    g_write_fail_at = 2;
+    g_op_calls = 0;
+    g_op_fail_at = 2;
     CHECK(dispatch_post("/api/op/character/0/set_attr",
                         "{\"stats\":{\"strength\":7,\"agility\":8}}", &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":11}");
     CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"set attr 1 failed\"}" &&
           !success);
-    CHECK(g_write_calls == 2 && g_write_args[0].i1 == 0 && g_write_args[0].i2 == 7 &&
-          g_write_args[1].i1 == 1 && g_write_args[1].i2 == 8);
-    g_write_fail_at = 0;
+    CHECK(g_op_calls == 2 && g_op_a == 0 && g_op_b == 1 && g_op_c == 8);
+    g_op_fail_at = 0;
 }
 
 void test_no_body_and_boolean_semantics() {
     uint16_t status = 0;
     bool success = false;
+    constexpr char kPlayerState[] =
+        "{\"money\":0,\"map_id\":0,\"x\":0,\"y\":0,\"active_quest\":0,\"leader_slot\":0,"
+        "\"party_count\":0}";
     const char* reset_paths[] = {"/api/character/grow/reset_stat",
                                  "/api/character/grow/reset_skill"};
     const qol::contracts::QolCharacterWriteKind expected_kinds[] = {
         qol::contracts::QolCharacterWriteKind::kStatReset,
         qol::contracts::QolCharacterWriteKind::kSkillReset,
     };
+    const FakeOp expected_ops[] = {FakeOp::kStatReset, FakeOp::kSkillReset};
     for (size_t i = 0; i < 2; ++i) {
         CHECK(dispatch_post(reset_paths[i], nullptr, nullptr, 0, &status) ==
               "{\"ok\":true,\"ticket\":11}");
         CharWritePayloadMirror payload{};
         std::memcpy(&payload, g_post_payload, sizeof(payload));
         CHECK(payload.kind == static_cast<int32_t>(expected_kinds[i]) && payload.i0 == 0);
-        g_write_calls = 0;
-        CHECK(run_post_result(&success) == "{\"ok\":true}" && success);
+        g_op_calls = 0;
+        g_last_op = FakeOp::kNone;
+        CHECK(run_post_result(&success) ==
+                  std::string("{\"ok\":true,\"state\":") + kPlayerState + "}" &&
+              success);
+        CHECK(g_last_op == expected_ops[i]);
     }
 
     CHECK(dispatch_post("/api/character/combat/switch_player",
@@ -522,6 +622,67 @@ void test_android_number_semantics() {
     CHECK(status == 400);
 }
 
+void test_write_kind_primitive_mapping() {
+    struct MappingCase {
+        qol::contracts::QolCharacterWriteKind kind;
+        FakeOp op;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+        int32_t point_count;
+        int32_t point_idx;
+        int32_t point_amt;
+        int expected_calls;
+    };
+    const MappingCase cases[] = {
+        {qol::contracts::QolCharacterWriteKind::kSetHp, FakeOp::kSetHp, 1, 50, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSetMp, FakeOp::kSetMp, 1, 10, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSetLevel, FakeOp::kSetLevel, 1, 12, 1, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSetExperience, FakeOp::kSetExperience, 1, 0, 0, 100, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSetAttr, FakeOp::kSetAttr, 1, 0, 0, 0, 1, 2, 9, 1},
+        {qol::contracts::QolCharacterWriteKind::kSetStatusPoint, FakeOp::kSetStatusPoint, 1, 5, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kPartySwap, FakeOp::kPartySwap, 0, 1, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSetAutoAttack, FakeOp::kSetAutoAttack, 1, 1, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kCastSkill, FakeOp::kCastSkill, 1, 7, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kAttackTarget, FakeOp::kAttackTarget, 1, 3, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSwitchPlayer, FakeOp::kSwitchPlayer, 2, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kStopCombat, FakeOp::kStopCombat, 1, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kLearnAction, FakeOp::kLearnAction, 0, 7, 2, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kAddStat, FakeOp::kAddStat, 1, 0, 0, 0, 1, 2, 3, 3},
+        {qol::contracts::QolCharacterWriteKind::kStatReset, FakeOp::kStatReset, 1, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kSkillReset, FakeOp::kSkillReset, 1, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kPartyInclude, FakeOp::kPartyInclude, 4, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kPartyExclude, FakeOp::kPartyExclude, 4, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kPartyDischarge, FakeOp::kPartyDischarge, 4, 0, 0, 0, 0, 0, 0, 1},
+        {qol::contracts::QolCharacterWriteKind::kPartyWithdraw, FakeOp::kPartyWithdraw, 4, 2, 0, 0, 0, 0, 0, 1},
+    };
+    for (const auto& test : cases) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        payload.point_count = test.point_count;
+        if (test.point_count > 0) {
+            payload.point_idx[0] = test.point_idx;
+            payload.point_amt[0] = test.point_amt;
+        }
+        g_op_calls = 0;
+        g_op_fail_at = 0;
+        g_last_op = FakeOp::kNone;
+        char storage[1024]{};
+        uint32_t size = 0;
+        const bool ok = g_result_handler != nullptr &&
+                        g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&payload),
+                                         sizeof(payload), storage, sizeof(storage), &size);
+        CHECK(ok);
+        CHECK(g_last_op == test.op);
+        CHECK(g_op_calls == test.expected_calls);
+    }
+}
+
 void test_lifecycle_and_responses() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
@@ -586,6 +747,7 @@ void test_lifecycle_and_responses() {
     test_set_attr_result_semantics();
     test_no_body_and_boolean_semantics();
     test_android_number_semantics();
+    test_write_kind_primitive_mapping();
 
     // 非 world 态：15 条统一 200 + {"error":"not in game"}。
     g_not_in_game = true;

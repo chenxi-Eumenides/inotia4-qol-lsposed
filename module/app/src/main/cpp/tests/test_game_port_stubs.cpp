@@ -22,6 +22,7 @@
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/game_ports/character_write_port.h"
+#include "contracts/game_ports/character_write_ops_port.h"
 #include "contracts/game_ports/character_state_port.h"
 #include "host/character_state_port.h"
 
@@ -55,6 +56,10 @@ const contracts::QolUiWritePort kUiWritePort{{1, 0}, {}};
 const contracts::QolItemMoneyWritePort kItemMoneyWritePort{{1, 0}, nullptr};
 const contracts::QolItemDiceWritePort kItemDiceWritePort{{1, 1}, nullptr, nullptr};
 const contracts::QolCharacterWritePort kCharacterWritePort{{1, 0}, {nullptr}};
+const contracts::QolCharacterWriteOpsPort kCharacterWriteOpsPort{
+    contracts::kQolPortCharacterWriteOpsVersion, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr};
 
 }  // namespace
 
@@ -89,6 +94,9 @@ const contracts::QolUiWritePort& ui_write_port() { return kUiWritePort; }
 const contracts::QolItemMoneyWritePort& item_money_write_port() { return kItemMoneyWritePort; }
 const contracts::QolItemDiceWritePort& item_dice_write_port() { return kItemDiceWritePort; }
 const contracts::QolCharacterWritePort& character_write_port() { return kCharacterWritePort; }
+const contracts::QolCharacterWriteOpsPort& character_write_ops_port() {
+    return kCharacterWriteOpsPort;
+}
 
 }  // namespace qol::game
 
