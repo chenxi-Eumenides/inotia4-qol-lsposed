@@ -211,12 +211,22 @@ void legacy_set_stat_base(void*, int32_t, int32_t) { ++g_set_stat_base_calls; }
 int legacy_get_stat_main(void*, int32_t) { return 0; }
 void legacy_set_stat_main(void*, int32_t, int32_t) { ++g_add_stat_main_calls; }
 void legacy_set_auto_attack(void* ch, int32_t) { apply_write_effect(ch); }
-void* legacy_learn_action(void*, int32_t, int32_t) { return nullptr; }
 // 玩家族写后即时：fake 原版链模拟对主角 live 数据的改动（移动坐标），供随后读 kPlayer。
 void apply_player_effect(void* ch) {
     if (g_write_effect_level == 0 || ch == nullptr) return;
     *reinterpret_cast<int16_t*>(static_cast<uint8_t*>(ch) + C_POS_X) =
         static_cast<int16_t>(g_write_effect_level);
+}
+// 技能族写后即时：fake 原版学习链模拟 live 技能数据改动（技能点/解锁位图），供随后读 kSkills。
+void apply_skill_effect(void* ch) {
+    if (g_write_effect_level == 0 || ch == nullptr) return;
+    auto* bytes = static_cast<uint8_t*>(ch);
+    reinterpret_cast<int8_t*>(bytes)[C_SKILL_POINTS] = 1;
+    *reinterpret_cast<uint16_t*>(bytes + C_SKILL_BMP) = 0x1F;
+}
+void* legacy_learn_action(void* ch, int32_t, int32_t) {
+    apply_skill_effect(ch);
+    return nullptr;
 }
 void legacy_char_initialize_status(void* ch) { apply_player_effect(ch); }
 void legacy_char_initialize_skill(void* ch) { apply_player_effect(ch); }
@@ -1380,6 +1390,115 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
     g_state_reads_from_legacy = false;
 }
 
+// T2c-4e：skills-state 族（kLearnAction）typed 单路径 + owner 自组装 kSkills 投影覆盖。
+// O3：写后 state 必须是 raw 形状（build_skills_json，无技能名注入），与 capability kSkills 同源；
+// 写面不得引用 enriched build_character_skills_json（后者仅 GET 读面使用）。
+void test_write_skills_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    g_write_effect_level = 0;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    const auto embedded_state = [](const std::string& owner, bool* found) {
+        const std::string marker = ",\"state\":";
+        const size_t at = owner.find(marker);
+        if (at == std::string::npos) {
+            *found = false;
+            return std::string();
+        }
+        *found = true;
+        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
+    };
+    const auto run_failure = [&](const Case& test, const char* expected) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == legacy_character_write_result_json(payload) && owner == expected);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    };
+
+    // 成功体：逐字节对照 legacy；内嵌 kSkills 子树与 capability 同源；O3 raw 形状断言。
+    const Case success{QolCharacterWriteKind::kLearnAction, 0, 7, 2, 0};
+    {
+        const CharWritePayloadMirror payload = make_payload(success);
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        bool found = false;
+        const std::string embedded = embedded_state(owner, &found);
+        char capability[8192]{};
+        uint32_t capability_size = 0;
+        const bool capability_ok =
+            state_api != nullptr &&
+            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kSkills, capability,
+                                        sizeof(capability), &capability_size).ok == kQolOk;
+        // 同源：owner 内嵌 kSkills == capability kSkills。
+        CHECK(found && capability_ok && embedded == std::string(capability, capability_size));
+        // O3：raw 形状（无 skill_name），且等于 legacy raw builder 字节。
+        CHECK(embedded == build_skills_json());
+        CHECK(embedded.find("\"skill_name\"") == std::string::npos);
+        CHECK(embedded.find("\"action_id\":7") != std::string::npos);
+        sync_legacy_fixture();
+        CHECK(ok && owner == legacy_character_write_result_json(payload) &&
+              owner.find("\"state\":[") != std::string::npos);
+    }
+
+    // 写后即时：原版学习链改 live 技能数据（skill_points 3→1、unlock_bitmap 9→31）后读到新值。
+    g_write_effect_level = 1;
+    {
+        const CharWritePayloadMirror payload = make_payload(success);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        CHECK(owner.find("\"skill_points\":1") != std::string::npos);
+        CHECK(owner.find("\"unlock_bitmap\":31") != std::string::npos);
+        CHECK(owner.find("\"skill_points\":3") == std::string::npos);
+    }
+    g_write_effect_level = 0;
+
+    // action_id 传递：legacy 不做 action 合法性校验（不在 owner 层新增 400），任意值透传且结果一致。
+    {
+        const Case passthrough{QolCharacterWriteKind::kLearnAction, 0, 9999, 3, 0};
+        const CharWritePayloadMirror payload = make_payload(passthrough);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        sync_legacy_fixture();
+        CHECK(owner == legacy_character_write_result_json(payload));
+    }
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    run_failure(success, "{\"ok\":false,\"error\":\"not in game\"}");
+    g_state_not_in_game = false;
+
+    // role 边界与符号未解析（结果处理器不新增 400）。
+    run_failure({QolCharacterWriteKind::kLearnAction, 9, 7, 2, 0},
+                "{\"ok\":false,\"error\":\"role not found\"}");
+    auto saved_learn = fn_learn_action;
+    fn_learn_action = nullptr;
+    run_failure(success, "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    fn_learn_action = saved_learn;
+
+    g_state_reads_from_legacy = false;
+}
+
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
     g_result_handler = handler;
@@ -1612,6 +1731,7 @@ int main() {
     test_write_party_state_family(state_api);
     test_write_party_member_family(state_api);
     test_write_player_family(state_api);
+    test_write_skills_family(state_api);
 
     char tiny_output[4] = {'!', '!', '!', '!'};
     uint32_t tiny_size = 99;
