@@ -8,8 +8,6 @@
 
 // 背包域（parse 域）：背包/装备/金钱操作。
 
-std::string data_op_add_money(int64_t delta);
-std::string data_op_minus_money(int64_t delta);
 std::string data_op_remove_item(int32_t category);
 
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot);

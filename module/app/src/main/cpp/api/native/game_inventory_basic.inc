@@ -1,17 +1,3 @@
-std::string data_op_add_money(int64_t delta) {
-    if (!game_in_world()) return op_err("not in game");
-    if (fn_add_money == nullptr) return op_err("symbol not resolved");
-    int r = fn_add_money(delta);
-    return r ? op_ok() : op_err("add money failed");
-}
-
-std::string data_op_minus_money(int64_t delta) {
-    if (!game_in_world()) return op_err("not in game");
-    if (fn_minus_money == nullptr) return op_err("symbol not resolved");
-    int r = fn_minus_money(delta);
-    return r ? op_ok() : op_err("insufficient money");
-}
-
 std::string data_op_remove_item(int32_t category) {
     if (!game_in_world()) return op_err("not in game");
     if (fn_remove_item == nullptr || fn_get_bit == nullptr) return op_err("symbol not resolved");

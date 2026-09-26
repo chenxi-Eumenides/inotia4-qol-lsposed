@@ -21,12 +21,26 @@ Java_com_inotia4_qol_NativeBridge_nativeOpSetMoney(JNIEnv* env, jclass, jlong mo
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpAddMoney(JNIEnv* env, jclass, jlong delta) {
-    return op_result(env, "op_add_money", ("delta=" + str_of(delta)), data_op_add_money(static_cast<int64_t>(delta)));
+#if QOL_KERNEL_ONLY
+    (void)delta;
+    return kernel_only_result(env);
+#else
+    const QolResult result = qol::game::ops::add_money(static_cast<int64_t>(delta));
+    return op_result(env, "op_add_money", ("delta=" + str_of(delta)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpMinusMoney(JNIEnv* env, jclass, jlong delta) {
-    return op_result(env, "op_minus_money", ("delta=" + str_of(delta)), data_op_minus_money(static_cast<int64_t>(delta)));
+#if QOL_KERNEL_ONLY
+    (void)delta;
+    return kernel_only_result(env);
+#else
+    const QolResult result = qol::game::ops::minus_money(static_cast<int64_t>(delta));
+    return op_result(env, "op_minus_money", ("delta=" + str_of(delta)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL
