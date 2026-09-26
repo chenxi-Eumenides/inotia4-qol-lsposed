@@ -4,7 +4,9 @@
 #include <cstddef>
 #include <string>
 
-// 存档预检（宿主纯逻辑）：槽结构状态字节 → 完整性判决。
+namespace qol::game {
+
+// 存档预检（game 层纯逻辑，W33 迁自 host/save_preflight）：槽结构状态字节 → 完整性判决。
 // 判决依据：docs/system/save.md §4/§7（原版 SAVE_LoadSaveSlot 加载判决 b2/b3，
 // 与 UI「存档损坏」严格一致）。本文件零游戏依赖（不 include game_access/game_symbols），
 // 可直接编入 host 单测（tests/CMakeLists.txt）。
@@ -31,3 +33,5 @@ std::string save_preflight_error_json(int32_t slot, uint8_t slot_state, uint8_t 
 
 std::string save_preflight_semantic_error_json(int32_t slot, const char* stage,
                                                uint8_t error_code, const char* detail = nullptr);
+
+}  // namespace qol::game

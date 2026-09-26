@@ -89,7 +89,7 @@ add_library(gamebridge SHARED
     game_dialog.cpp
     api/native/game_shop.cpp
     api/native/game_save.cpp
-    host/save_preflight.cpp
+    game/access/save_preflight.cpp
     game_system.cpp
     game/read/game_tiles.cpp
     api/native/game_inventory.cpp

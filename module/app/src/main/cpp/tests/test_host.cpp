@@ -16,7 +16,7 @@
 
 #include "game/json/game_json.h"
 #include "game/nav/game_nav.h"
-#include "host/save_preflight.h"
+#include "game/access/save_preflight.h"
 #include "game/read/game_tiles.h"
 #include "patch/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
@@ -28,6 +28,9 @@
 #include "plugins/save_backup/bundle.h"
 #include "plugins/world_teleport/rules.h"
 #include "../game/read/game_tiles.cpp"
+
+// W33：save_preflight 实现迁 game 层（game/access/save_preflight.h），测试沿用原名。
+using namespace qol::game;
 
 static int g_pass = 0;
 static int g_fail = 0;

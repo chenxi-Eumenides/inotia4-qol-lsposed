@@ -3,6 +3,7 @@
 #include "bridge/native/character_write_result.h"
 #include "bridge/native/item_write_result.h"
 #include "game/access/quest.h"
+#include "game/access/save.h"
 #include "game/adapter_ports/world_port.h"
 #include "game/ops/character_write.h"
 #include "game/ops/game_ops_common.h"
@@ -130,7 +131,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpQuestQuit(JNIEnv* env, jclass, jint qu
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSave(JNIEnv* env, jclass) {
-    return op_result(env, "op_save", (std::string("")), data_op_save());
+    return op_result(env, "op_save", (std::string("")), qol::game::save_game().str());
 }
 
 // ---- 存档管理器备份（save-backup feature：bundle 导出/导入/列表/删除收口 native）----
@@ -239,12 +240,12 @@ Java_com_inotia4_qol_NativeBridge_nativeOpMainMenu(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpEnterSlot(JNIEnv* env, jclass, jint slot) {
-    return op_result(env, "op_enter_slot", ("slot=" + str_of(slot)), data_op_enter_slot(static_cast<int32_t>(slot)));
+    return op_result(env, "op_enter_slot", ("slot=" + str_of(slot)), qol::game::enter_slot(static_cast<int32_t>(slot)).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpCreateSlot(JNIEnv* env, jclass, jint slot, jint classIdx) {
-    return op_result(env, "op_create_slot", ("slot=" + str_of(slot) + " " + "classIdx=" + str_of(classIdx)), data_op_create_slot(static_cast<int32_t>(slot), static_cast<int32_t>(classIdx)));
+    return op_result(env, "op_create_slot", ("slot=" + str_of(slot) + " " + "classIdx=" + str_of(classIdx)), qol::game::create_slot(static_cast<int32_t>(slot), static_cast<int32_t>(classIdx)).str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

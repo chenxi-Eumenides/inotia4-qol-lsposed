@@ -5,6 +5,7 @@
 
 #include "game/access/game_access.h"
 #include "game/access/quest.h"
+#include "game/access/save.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/ops/game_ops_common.h"
@@ -789,13 +790,13 @@ int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_i
         std::string op_body;
         switch (kind) {
             case contracts::kQolSaveWriteSave:
-                op_body = data_op_save();
+                op_body = qol::game::save_game().str();
                 break;
             case contracts::kQolSaveWriteEnterSlot:
-                op_body = data_op_enter_slot_direct(slot);
+                op_body = qol::game::enter_slot_direct(slot).str();
                 break;
             case contracts::kQolSaveWriteCreateSlot:
-                op_body = data_op_create_slot_direct(slot, class_idx);
+                op_body = qol::game::create_slot_direct(slot, class_idx).str();
                 break;
             default:
                 return kSaveWriteFailed;

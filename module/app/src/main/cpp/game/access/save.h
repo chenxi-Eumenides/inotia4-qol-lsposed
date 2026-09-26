@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 // 游戏层：存档域语义化访问（ARCHITECTURE.md §5）。
 // 存档槽结构偏移（SAVESLOT_*）、加解密链函数指针与删档回调 GOT 槽地址收口在本层；
@@ -61,5 +62,27 @@ int save_encrypt_process2(void* buf, int len, int mode, const char* key);
 // out_slot 为 GOT 槽地址，out_expected 为安装前应存的 SaveSlot_Delete 入口地址。
 // 基址未就绪或符号未解析返回 false。
 bool save_slot_delete_hook_target(void** out_slot, uintptr_t* out_expected);
+
+// ---- 存档写原语（T2l-s-write）----
+//
+// 迁移自 api/native 的存档写实现（save/enter_slot(_direct)/create_slot(_direct)）：转场经
+// contracts/runtime_hooks.h 过渡注入面（game 层零 infra include）；返回完整 op JSON 信封
+// （成功 `{"ok":true}`；失败含预检结构化体 `{"ok":false,...}`），与迁移前逐字一致。
+struct SaveWriteResult {
+    uint32_t size = 0;
+    char text[1024] = {};
+
+    const char* data() const { return text; }
+    std::string str() const { return std::string(text, size); }
+};
+
+// 保存当前进度（世界就绪校验 + UI 占用守卫 + module_save_game；成功 refresh 1）。
+SaveWriteResult save_game();
+// 进档/新档：blocking（transition_run 跨帧）与 direct（transition_run_inline，owner 逻辑相位）。
+// enter 走预检（仅主菜单/无 UI 占用/槽判决 valid 才继续）；create 复刻官方新档链。
+SaveWriteResult enter_slot(int32_t slot);
+SaveWriteResult enter_slot_direct(int32_t slot);
+SaveWriteResult create_slot(int32_t slot, int32_t class_idx);
+SaveWriteResult create_slot_direct(int32_t slot, int32_t class_idx);
 
 }  // namespace qol::game
