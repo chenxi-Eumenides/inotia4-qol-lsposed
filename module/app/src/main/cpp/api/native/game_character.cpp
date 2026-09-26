@@ -22,22 +22,6 @@ void* pool_slot_obj(int slot) {
     return obj;
 }
 
-std::string data_op_stat_reset(int role) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_char_initialize_status == nullptr) return op_err("symbol not resolved");
-    fn_char_initialize_status(ch);
-    return op_ok();
-}
-std::string data_op_skill_reset(int role) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_char_initialize_skill == nullptr) return op_err("symbol not resolved");
-    fn_char_initialize_skill(ch);
-    return op_ok();
-}
 std::string data_op_cast(int role, int32_t action_id) {
     if (!game_in_world()) return op_err("not in game");
     if (const char* ui = ui_blocked()) {
@@ -103,27 +87,6 @@ std::string data_op_stop_combat(int role) {
     return op_ok();
 }
 
-std::string data_op_set_experience(int role, int64_t exp) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_set_exp == nullptr) return op_err("symbol not resolved");
-    fn_set_exp(ch, static_cast<int32_t>(exp));
-    return op_ok();
-}
-
-std::string data_op_set_level(int role, int32_t level, bool force) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_set_level == nullptr) return op_err("symbol not resolved");
-    // 默认限制游戏实际上限 105（EXP 表 105 级）；force=true 跳过校验（level 超出 s8 存储 127 会溢出为负，调用方自担）
-    if (!force && (level < 1 || level > 105)) return op_err("level 1-105 (game max)");
-    // CHAR_SetLevel 完整结算：写 [ch+0xe] + 重算 nextExp + InitializeFromLevel + 升级加能力点/技能点 + 回满血蓝
-    int ok = fn_set_level(ch, level);
-    return ok ? op_ok() : op_err("level down not allowed");
-}
-
 std::string data_op_add_experience(int role, int64_t delta) {
     if (!game_in_world()) return op_err("not in game");
     void* ch = member_or_null(role);
@@ -133,101 +96,12 @@ std::string data_op_add_experience(int role, int64_t delta) {
     return r ? op_ok() : op_err("add exp failed");
 }
 
-std::string data_op_set_status_point(int role, int32_t points) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_set_status_point == nullptr) return op_err("symbol not resolved");
-    fn_set_status_point(ch, points);
-    return op_ok();
-}
-
-std::string data_op_add_stat(int role, int32_t attr) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_get_status_point == nullptr || fn_get_stat_main == nullptr || fn_set_stat_main == nullptr ||
-        fn_set_status_point == nullptr)
-        return op_err("symbol not resolved");
-    if (attr < 0 || attr > 4) return op_err("bad attr");
-    // 模拟原版属性分配流程：游戏内没有「分配 1 点属性」的原子函数（原版分配逻辑内联在
-    // UIStatus 面板分配按钮链中：读剩余能力点→判 >0→属性 +1→能力点 -1），无法直接调用，
-    // 故按原版按钮链的三步效果逐项复刻。三步间的一致性由本函数同步执行保证（单请求内
-    // 无并发窗口）；与原版的已知差异是原版按钮链在 UI 层会刷新面板显示，API 无 UI 不复刻。
-    int32_t points = fn_get_status_point(ch);
-    if (points <= 0) return op_err("no status point");
-    int32_t cur = fn_get_stat_main(ch, attr);
-    fn_set_stat_main(ch, attr, cur + 1);
-    fn_set_status_point(ch, points - 1);
-    return op_ok();
-}
-
-std::string data_op_set_auto_attack(int role, int32_t onoff) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_set_auto_attack == nullptr) return op_err("symbol not resolved");
-    fn_set_auto_attack(ch, onoff ? 1 : 0);
-    return op_ok();
-}
-
 std::string data_op_set_skill_usage(int role, int32_t onoff) {
     if (!game_in_world()) return op_err("not in game");
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_err("role not found");
     if (fn_set_skill_usage == nullptr) return op_err("symbol not resolved");
     fn_set_skill_usage(ch, onoff ? 1 : 0);
-    return op_ok();
-}
-
-std::string data_op_learn_action(int role, int32_t action_id, int32_t level) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (fn_learn_action == nullptr) return op_err("symbol not resolved");
-    // 调用原版 CHAR_LearnAction(0xe2390)（已学→CHAR_InitializeFromSkill 设级，未学→
-    // CHAR_LearnActionDirect 学习）。与原版流程的已知差异：原版技能学习/升级走 UI 技能
-    // 面板按钮链，会在调 CHAR_LearnAction 前按 SKILLTRAINPOINTBASE 表校验并扣减技能点；
-    // 底层函数本身不扣点（真机实测 skillPoints 不变），故本端点为「不消耗技能点的学习」
-    // 越权语义。需要扣点语义时可配合 /api/op/character/{role}/skill-point 手动扣减；
-    // 消耗表公式（SKILLTRAINPOINTBASE）未逆向，暂无法在 API 内复刻原版扣点链。
-    fn_learn_action(ch, action_id, level);
-    return op_ok();
-}
-
-std::string data_op_set_hp(int role, int32_t hp) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (hp < 0) hp = 0;
-    const int32_t max_hp = char_max_hp(ch);   // 直接读属性缓存，避免 CHAR_GetAttr(0x1e) 写回副作用
-    if (hp > max_hp) hp = max_hp;
-    *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_HP) = hp;
-    return op_ok();
-}
-
-std::string data_op_set_mp(int role, int32_t mp) {
-    if (!game_in_world()) return op_err("not in game");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (mp < 0) mp = 0;
-    const int32_t max_mp = char_max_mp(ch);   // 直接读属性缓存，避免 CHAR_GetAttr(0x1f) 调用
-    if (mp > max_mp) mp = max_mp;
-    *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_MP) = mp;
-    return op_ok();
-}
-
-std::string data_op_set_attr(int role, int attr_index, int32_t value) {
-    if (!game_in_world()) return op_err("not in game");
-    if (attr_index < 0 || attr_index > 4) return op_err("bad attr");
-    if (fn_set_stat_base == nullptr) return op_err("symbol not resolved");
-    void* ch = member_or_null(role);
-    if (ch == nullptr) return op_err("role not found");
-    if (value < 0) value = 0;
-    if (value > 255) value = 255;
-    // CHAR_SetStatBase 直接写"基础属性"（[ch+0x250+i] s8），装备/分配/动态加成不受影响
-    // 总属性 = 基础 + 分配(main) + 加成(bonus) + 动态(equip/skill/buff)
-    fn_set_stat_base(ch, attr_index, value);
     return op_ok();
 }
 

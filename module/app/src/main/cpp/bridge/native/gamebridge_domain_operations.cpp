@@ -1,6 +1,8 @@
 #include "gamebridge_internal.h"
 
+#include "bridge/native/character_write_result.h"
 #include "contracts/commands.h"
+#include "game/ops/character_write.h"
 #include "infra/commands.h"
 #include "infra/config.h"
 
@@ -18,7 +20,11 @@ Java_com_inotia4_qol_NativeBridge_nativeOpEnchant(JNIEnv* env, jclass, jint role
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetAutoAttack(JNIEnv* env, jclass, jint role, jint onoff) {
-    return op_result(env, "op_set_auto_attack", ("role=" + str_of(role) + " " + "onoff=" + str_of(onoff)), data_op_set_auto_attack(static_cast<int>(role), static_cast<int32_t>(onoff)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result =
+        qol::game::ops::set_auto_attack(static_cast<int>(role), static_cast<int32_t>(onoff), &op);
+    return op_result(env, "op_set_auto_attack", ("role=" + str_of(role) + " " + "onoff=" + str_of(onoff)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -64,7 +70,12 @@ Java_com_inotia4_qol_NativeBridge_nativeOpRemoveItem(JNIEnv* env, jclass, jint c
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpLearnAction(JNIEnv* env, jclass, jint role, jint actionId, jint level) {
-    return op_result(env, "op_learn_action", ("role=" + str_of(role) + " " + "actionId=" + str_of(actionId) + " " + "level=" + str_of(level)), data_op_learn_action(static_cast<int>(role), static_cast<int32_t>(actionId), static_cast<int32_t>(level)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::learn_action(static_cast<int>(role),
+                                                          static_cast<int32_t>(actionId),
+                                                          static_cast<int32_t>(level), &op);
+    return op_result(env, "op_learn_action", ("role=" + str_of(role) + " " + "actionId=" + str_of(actionId) + " " + "level=" + str_of(level)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -155,17 +166,30 @@ Java_com_inotia4_qol_NativeBridge_nativeOpWithdraw(JNIEnv* env, jclass, jint mer
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetHp(JNIEnv* env, jclass, jint role, jint hp) {
-    return op_result(env, "op_set_hp", ("role=" + str_of(role) + " " + "hp=" + str_of(hp)), data_op_set_hp(static_cast<int>(role), static_cast<int32_t>(hp)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result =
+        qol::game::ops::set_hp(static_cast<int>(role), static_cast<int32_t>(hp), &op);
+    return op_result(env, "op_set_hp", ("role=" + str_of(role) + " " + "hp=" + str_of(hp)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetMp(JNIEnv* env, jclass, jint role, jint mp) {
-    return op_result(env, "op_set_mp", ("role=" + str_of(role) + " " + "mp=" + str_of(mp)), data_op_set_mp(static_cast<int>(role), static_cast<int32_t>(mp)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result =
+        qol::game::ops::set_mp(static_cast<int>(role), static_cast<int32_t>(mp), &op);
+    return op_result(env, "op_set_mp", ("role=" + str_of(role) + " " + "mp=" + str_of(mp)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpSetAttr(JNIEnv* env, jclass, jint role, jint attrIndex, jint value) {
-    return op_result(env, "op_set_attr", ("role=" + str_of(role) + " " + "attrIndex=" + str_of(attrIndex) + " " + "value=" + str_of(value)), data_op_set_attr(static_cast<int>(role), static_cast<int32_t>(attrIndex), static_cast<int32_t>(value)));
+    qol::contracts::QolCharacterWriteOpResult op{};
+    const QolResult result = qol::game::ops::set_attr(static_cast<int>(role),
+                                                      static_cast<int32_t>(attrIndex),
+                                                      static_cast<int32_t>(value), &op);
+    return op_result(env, "op_set_attr", ("role=" + str_of(role) + " " + "attrIndex=" + str_of(attrIndex) + " " + "value=" + str_of(value)),
+                     qol::bridge::character_write_result_json(result, op));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
