@@ -129,5 +129,6 @@
 | T2l-w-del | （停线，零提交） | world TU 整删前置核验不通过（nav/tiles/world_port/append_position 活消费者） | 停线登记；方案 A（T2l-w-read2）获准 |
 | T2l-w-read2 | `7a8f9a7e` | world 活读面迁 `game/access/world_read.cpp` 单一实现；host 薄转发 + `append_position` 内联；删 `api/native/game_world.*` 5 文件 | 完成；frozen 62/0、双构建；`legacy/world` 层组消失、文件 528 |
 | T2l-dir | `c4da2a6e` | 删主/tests CMake `api/native` include 路径（1+4）与空目录 `api/`；`baseline.md` 重生成 | 完成；**`api/native` 目录删除**；ctest 72/72 |
+| T2m | `2911afb5` | 维护脚本死映射清理：删 `arch_common.py` 的 `_LEGACY_API_BY_STEM` + `api/native/` 分类分支、`gen_baseline_doc.py` 映射 `_bullet_map`；`baseline.md` 重生成 | 完成；清理前后 `check_arch`/`check_jni`/`routes` 输出**逐字节一致**；脚本目录 `api/native` 0 命中；`gen_baseline_doc --check` 一致 |
 
-- 序列后存量事实：**bridge 直调 api/native 已清零**，`api/native/` 目录已删除（T2l-dir `c4da2a6e`）；仅剩 T2j 豁免 2 面（`use_item` / `capability()`，见 §3）。T2h/T2i/T2j/T2l 全序列闭合；剩余未决 = cache 机制 4 边、非序列存量 13 条、world/nav/tiles 等读面真机回归（见 §3）。
+- 序列后存量事实：**bridge 直调 api/native 已清零**，`api/native/` 目录已删除（T2l-dir `c4da2a6e`），脚本死映射已清理（T2m `2911afb5`，`scripts/` 目录零 `api/native` 命中）；仅剩 T2j 豁免 2 面（`use_item` / `capability()`，见 §3）。文件 **528**、layers **17/基线 21**、ctest **72/72**（`world_legacy_readers` 62/0）、routes 143/143、JNI 156/156（双构建 + kernel `.so` 抽查通过）；T2h/T2i/T2j/T2l/T2m 全序列闭合；剩余未决 = cache 机制 4 边、非序列存量 13 条、world/nav/tiles 等读面真机回归（见 §3）。
