@@ -11,8 +11,6 @@
 #include "game/ops/character_state_read.h"
 #include "game/ops/character_write.h"
 #include "game/state/game_state.h"
-#include "game_character.h"
-#include "game_party.h"
 #include "game_world.h"
 #include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
@@ -374,8 +372,8 @@ std::string json_escape(const char* value) {
     return out;
 }
 
-// T2h-0 读面 frozen 复刻：逐字节搬入 api/native 的 build_player_json/build_party_json/
-// build_skills_json（含 member_json），作为 api/native 读面退役后的独立 state 对照源。
+// T2h-0 读面 frozen 复刻：逐字节搬入角色/队伍 legacy 读实现（含成员 JSON 主体），作为
+// legacy 读面退役后（T2i-2 已删 api/native 原 TU）的独立 state 对照源。
 // 证据链：T2c golden（owner == build_*，已提交）∧ frozen == build_*（本批复刻 + 等值断言）
 // ⇒ owner == frozen；此后 TU 删除不改变对照源语义。
 std::string frozen_member_json(void* ch) {
@@ -518,7 +516,7 @@ std::string frozen_skills_json() {
     return s;
 }
 
-// T2i-1（W12 独立 oracle）：api/native build_mercenaries_json 的逐字节复刻（T2h-0 手法）。
+// T2i-1（W12 独立 oracle）：佣兵 legacy 读实现的逐字节复刻（T2h-0 手法）。
 std::string frozen_mercenaries_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
     // 佣兵槽：*(*(G_MERC_SLOTLIST_GOT_VMA)) 槽数组（20B/槽），flags bit0=占用 bit1=在队伍。
@@ -1240,7 +1238,7 @@ void test_write_party_state_family(const qol::contracts::CharacterStateApi* stat
 
 // T2c-4c：队伍 party-state 族（kPartyInclude/kPartyExclude/kPartyDischarge/kPartyWithdraw）
 // typed 单路径 + owner 自组装 kParty 投影覆盖。withdraw 必须走 fn_can_unequip 前检再 fn_unequip
-// （game_party.cpp:73-77），discharge 保留 fn_mercenary_release 原版副作用（game_party.cpp:62），
+// （原队伍写实现的成功条件），discharge 保留 fn_mercenary_release 原版副作用，
 // 两者以调用计数锁定；失败体逐字对照 legacy 基线，失败时不触发原版副作用。
 void test_write_party_member_family(const qol::contracts::CharacterStateApi* state_api) {
     using qol::contracts::QolCharacterWriteKind;
@@ -1378,7 +1376,7 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
                 "{\"ok\":false,\"error\":\"bad slot\"}");
     CHECK(g_can_unequip_calls == 0);
 
-    // withdraw 前检拒绝：can_unequip 恰一次且不调 fn_unequip（game_party.cpp:75）。
+    // withdraw 前检拒绝：can_unequip 恰一次且不调 fn_unequip（原队伍写实现口径）。
     g_can_unequip_result = 0;
     g_can_unequip_calls = 0;
     g_unequip_calls = 0;
@@ -1444,7 +1442,7 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
 
 // T2c-4d：player-state 族（kSwitchPlayer/kStopCombat/kStatReset/kSkillReset）typed 单路径 +
 // owner 自组装 kPlayer 投影覆盖。switch_player 必须保留 fn_set_active_player 成功后的
-// g_main_merc_slot 同步（game_party.cpp:86-89）；失败/越界时先返回、不得写槽，以桩状态与计数锁定。
+// g_main_merc_slot 同步（原队伍写实现口径）；失败/越界时先返回、不得写槽，以桩状态与计数锁定。
 void test_write_player_family(const qol::contracts::CharacterStateApi* state_api) {
     using qol::contracts::QolCharacterWriteKind;
     g_state_reads_from_legacy = true;
@@ -1723,55 +1721,57 @@ void test_bridge_write_envelope() {
           "{\"ok\":false,\"error\":\"character write failed\"}");
 }
 
-// T2h-0：frozen 复刻与 api/native 原实现的逐字节等值证明（T2h-1 删 api/native 后本段移除）。
+// T2h-0：frozen 复刻与产品读面实现的逐字节等值证明（T2i-2 后产品读面 = host 内联 legacy）。
 void test_read_face_frozen_equivalence() {
     g_state_reads_from_legacy = true;
     setup_write_fixture();
     sync_legacy_fixture();
-    CHECK(frozen_party_json() == build_party_json());
-    CHECK(frozen_player_json() == build_player_json());
-    CHECK(frozen_skills_json() == build_skills_json());
+    CHECK(frozen_party_json() == qol::host::legacy_build_party_json());
+    CHECK(frozen_player_json() == qol::host::legacy_build_player_json());
+    CHECK(frozen_skills_json() == qol::host::legacy_build_skills_json());
     // 非 world 分支：party/player 走 `{"error":"not in game"}`，skills 无 world 短路，均须等值。
     g_state_not_in_game = true;
-    CHECK(frozen_party_json() == build_party_json());
-    CHECK(frozen_player_json() == build_player_json());
-    CHECK(frozen_skills_json() == build_skills_json());
+    CHECK(frozen_party_json() == qol::host::legacy_build_party_json());
+    CHECK(frozen_player_json() == qol::host::legacy_build_player_json());
+    CHECK(frozen_skills_json() == qol::host::legacy_build_skills_json());
     g_state_not_in_game = false;
     g_state_reads_from_legacy = false;
 }
 
-// T2i-1（W12）：host 内联 legacy 读面（host/legacy_json_builders.h）与 api/native 原实现、
-// 与 T2h-0 frozen 复刻三向逐字节等值。覆盖 default / 非 world / 边界（g_base==0 空佣兵、
+// T2i-1（W12）：host 内联 legacy 读面（host/legacy_json_builders.h）与 T2h-0 frozen 复刻
+// 逐字节等值。覆盖 default / 非 world / 边界（g_base==0 空佣兵、
 // 佣兵槽含空槽与 type>2 槽、成员缺失的 null 分支）。
 void test_legacy_builders_byte_equivalence() {
     g_state_reads_from_legacy = true;
     setup_write_fixture();
     sync_legacy_fixture();
 
-    // default fixture：player/party/skills/member_json 三向等值。
-    CHECK(qol::host::legacy_member_json(legacy_member(0)) == member_json(legacy_member(0)));
+    // default fixture：player/party/skills/成员 JSON 与 frozen 复刻逐字节等值。
     CHECK(qol::host::legacy_member_json(legacy_member(0)) == frozen_member_json(legacy_member(0)));
-    CHECK(qol::host::legacy_build_player_json() == build_player_json());
-    CHECK(qol::host::legacy_build_party_json() == build_party_json());
-    CHECK(qol::host::legacy_build_skills_json() == build_skills_json());
     CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
     CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
     CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    // T2i-2：api/native 原实现删除后，原 4 条「与 api/native 对照」改由 frozen 独立复刻
+    // 一对一承接（保留删除前的对照语义与断言条数）。
+    CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
 
     // 非 world：player/party/mercenaries 走错误短体；skills 无 world 短路（仍走成员路径）。
     g_state_not_in_game = true;
-    CHECK(qol::host::legacy_build_player_json() == build_player_json());
-    CHECK(qol::host::legacy_build_party_json() == build_party_json());
-    CHECK(qol::host::legacy_build_skills_json() == build_skills_json());
-    CHECK(qol::host::legacy_build_mercenaries_json() == build_mercenaries_json());
+    CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
     CHECK(qol::host::legacy_build_player_json() == "{\"error\":\"not in game\"}");
     CHECK(qol::host::legacy_build_mercenaries_json() == "{\"error\":\"not in game\"}");
     g_state_not_in_game = false;
 
-    // 边界：g_base==0 → 佣兵空数组；无佣兵槽列表时新旧逐字同体。
-    CHECK(qol::host::legacy_build_mercenaries_json() == build_mercenaries_json());
+    // 边界：g_base==0 → 佣兵空数组。
     CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
     CHECK(qol::host::legacy_build_mercenaries_json() == "[]");
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
 
     // 边界：构造合成佣兵槽（slot0 占用但无角色对象 → name:null；slot7 type=1 → 角色分支）。
     // G_MERC_MAX_GOT_VMA / G_MERC_SLOTLIST_GOT_VMA 两 GOT 共用一个基址区，取两偏移跨度分配。
@@ -1791,7 +1791,8 @@ void test_legacy_builders_byte_equivalence() {
     merc_slots[7 * M_SLOT_SIZE + M_TYPE] = 1;      // find_char_by_merc_slot(7) → 角色对象
     const uintptr_t saved_base = g_base;
     g_base = reinterpret_cast<uintptr_t>(merc_region) - kMercLo;
-    CHECK(qol::host::legacy_build_mercenaries_json() == build_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    // T2i-2：原「与 api/native 对照」由 frozen 独立复刻承接。
     CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
     CHECK(qol::host::legacy_build_mercenaries_json().find("\"slot\":7") != std::string::npos);
     CHECK(qol::host::legacy_build_mercenaries_json().find("\"name\":null") != std::string::npos);
@@ -1799,8 +1800,9 @@ void test_legacy_builders_byte_equivalence() {
 
     // 边界：成员缺失（member_present 全 0）→ party/skills 的 null 分支等值。
     std::memset(g_legacy_member_present, 0, sizeof(g_legacy_member_present));
-    CHECK(qol::host::legacy_build_party_json() == build_party_json());
-    CHECK(qol::host::legacy_build_skills_json() == build_skills_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    // T2i-2：原「与 api/native 对照」两条由 frozen 独立复刻承接。
     CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
     CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
 

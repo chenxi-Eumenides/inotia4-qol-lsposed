@@ -93,8 +93,6 @@ add_library(gamebridge SHARED
     host/save_preflight.cpp
     game_system.cpp
     game/read/game_tiles.cpp
-    api/native/game_character.cpp
-    api/native/game_party.cpp
     api/native/game_inventory.cpp
     game/access/hive_iap.cpp
     game/access/ui_kit.cpp

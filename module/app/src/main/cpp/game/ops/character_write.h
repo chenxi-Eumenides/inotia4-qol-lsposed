@@ -5,7 +5,7 @@
 namespace qol::game::ops {
 
 // 20 个 character 写 kind 的 typed 低层原语 + 2 个 JNI-only 写原语：逐条等价迁移
-// api/native/game_character.cpp 与 api/native/game_party.cpp 的 data_op_*（成功时
+// 原 api/native 角色/队伍写操作的 data_op_*（成功时
 // frame_cache_force_refresh 恰一次，失败时回传原 op_err 文案）。不含 JSON、不接收 kind、
 // 不使用 std::string；owner 负责信封与 state 附加。
 QolResult set_hp(int32_t role, int32_t hp, contracts::QolCharacterWriteOpResult* out);
