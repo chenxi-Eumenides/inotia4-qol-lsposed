@@ -13,7 +13,6 @@
 #include <string>
 
 #if !QOL_KERNEL_ONLY
-#include "game_inventory_basic.inc"
 #include "game_inventory_use.inc"
 #include "game_inventory_read.inc"
 #else
@@ -23,7 +22,6 @@ std::string kernel_only_error() {
 }
 }
 
-std::string data_op_remove_item(int32_t category) { (void)category; return kernel_only_error(); }
 std::string data_op_move_item(int bag, int slot, int count, int to_bag, int to_slot) {
     (void)bag;
     (void)slot;

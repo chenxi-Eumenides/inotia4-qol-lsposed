@@ -26,5 +26,7 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
 QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
                   const contracts::ExtensionBagApi* extension_bag,
                   contracts::QolItemInventoryStateWriteResult* out);
+// 按 category 删除单件（原版袋经 fn_remove_item 指针路径；扩展袋经 EB capability）。
+QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteResult* out);
 
 }  // namespace qol::game::ops

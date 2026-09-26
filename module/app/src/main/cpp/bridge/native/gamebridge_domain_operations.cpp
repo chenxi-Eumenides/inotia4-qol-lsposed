@@ -126,7 +126,16 @@ Java_com_inotia4_qol_NativeBridge_nativeOpTeleportEx(JNIEnv* env, jclass, jint m
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpRemoveItem(JNIEnv* env, jclass, jint category) {
-    return op_result(env, "op_remove_item", ("category=" + str_of(category)), data_op_remove_item(static_cast<int32_t>(category)));
+#if QOL_KERNEL_ONLY
+    (void)category;
+    return kernel_only_result(env);
+#else
+    qol::contracts::QolItemInventoryStateWriteResult out{};
+    const QolResult result =
+        qol::game::ops::remove_item(static_cast<int32_t>(category), &out);
+    return op_result(env, "op_remove_item", ("category=" + str_of(category)),
+                     qol::bridge::item_write_result_json(result, "item write failed"));
+#endif
 }
 
 extern "C" JNIEXPORT jstring JNICALL

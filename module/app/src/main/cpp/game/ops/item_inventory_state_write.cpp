@@ -566,4 +566,44 @@ QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     return contracts::ok();
 }
 
+QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
+    }
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (fn_remove_item == nullptr || fn_get_bit == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+    InventoryItemRef ref;
+    if (!find_inventory_item_ref(category, &ref)) {
+        return item_error(out, kQolErrNotFound, "item not found");
+    }
+    if (ref.native_item == nullptr) {
+        return item_error(out, kQolErrNotFound, "extension item unavailable");
+    }
+    if (ref.kind == InventoryItemKind::kExtension) {
+        // D2b：扩展物品删除经能力接口现取；能力缺失 = EB disabled，删除失败降级。
+        const contracts::ExtensionBagApi* eb = extension_bag_capability();
+        if (eb == nullptr || eb->remove_native_item == nullptr ||
+            !eb->remove_native_item(ref.native_item)) {
+            return item_error(out, kQolErrInternal, "extension item removal failed");
+        }
+        if (eb->sync_projected_slot != nullptr) eb->sync_projected_slot(ref.bag, ref.slot);
+        frame_cache_force_refresh();
+        return contracts::ok();
+    }
+    if (ref.bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
+    const int result = fn_remove_item(ref.native_item);
+    if (result) {
+        const contracts::ExtensionBagApi* eb = extension_bag_capability();
+        if (eb != nullptr && eb->sync_projected_slot != nullptr) {
+            eb->sync_projected_slot(ref.bag, ref.slot);
+        }
+    }
+    if (!result) return item_error(out, kQolErrNotFound, "item not found");
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
 }  // namespace qol::game::ops
