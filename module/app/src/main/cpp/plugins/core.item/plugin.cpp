@@ -19,6 +19,7 @@
 #include "contracts/http.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_count.h"
+#include "contracts/item_state.h"
 #include "json_lite.h"
 #include "response.h"
 #include "snapshot.h"
@@ -187,8 +188,13 @@ constexpr contracts::ItemFactsApi kItemFactsApi{
     &cursor_index,
 };
 
+// T2h-B2：item.state 发布面——唯一实现复用既有 serialize_inventory_json（禁止第二实现）。
+QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size);
+constexpr contracts::ItemStateApi kItemStateApi{&write_item_state_json};
+
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kItemFactsCapabilityId, contracts::kItemFactsVersion, &kItemFactsApi},
+    {contracts::kItemStateCapabilityId, contracts::kItemStateVersion, &kItemStateApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -550,6 +556,15 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
     std::memcpy(out, json.data(), json.size());
     *out_size = static_cast<uint32_t>(json.size());
     return contracts::ok();
+}
+
+QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
+    switch (static_cast<contracts::QolItemStateKind>(kind)) {
+        case contracts::QolItemStateKind::kRawInventory:
+            return serialize_inventory_json(out, capacity, out_size);
+        default:
+            return error_result(kQolErrInvalidArgument, "invalid item state kind");
+    }
 }
 
 void update_snapshot() {
@@ -1554,7 +1569,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kRequires,
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,
-    1,
+    2,
     kProvides,
     0,
     nullptr,

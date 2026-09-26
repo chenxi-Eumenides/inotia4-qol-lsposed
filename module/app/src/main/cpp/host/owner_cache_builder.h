@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "contracts/character_state.h"
+#include "contracts/item_state.h"
 #include "contracts/result.h"
 
 namespace qol::host {
@@ -25,6 +26,24 @@ inline std::string build_character_state_json_via_owner(
     if (!qol::contracts::succeeded(api->write_state_json(
             static_cast<qol::contracts::QolCharacterStateKind>(kind), buffer.data(),
             static_cast<uint32_t>(buffer.size()), &size)) ||
+        size > buffer.size()) {
+        return legacy();
+    }
+    return std::string(buffer.data(), size);
+}
+
+// T2h-B2：item.state 适配器（同形态）；kind 当前仅 kRawInventory。
+inline std::string build_item_state_json_via_owner(const qol::contracts::ItemStateApi* api,
+                                                   int32_t kind, uint32_t capacity,
+                                                   std::string (*legacy)()) {
+    if (api == nullptr || api->write_state_json == nullptr || legacy == nullptr) {
+        return legacy != nullptr ? legacy() : std::string();
+    }
+    thread_local std::vector<char> buffer;
+    if (buffer.size() < capacity) buffer.resize(capacity);
+    uint32_t size = 0;
+    if (!qol::contracts::succeeded(
+            api->write_state_json(kind, buffer.data(), static_cast<uint32_t>(buffer.size()), &size)) ||
         size > buffer.size()) {
         return legacy();
     }

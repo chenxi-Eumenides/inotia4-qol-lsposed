@@ -1,5 +1,6 @@
 #include "contracts/item_facts.h"
 #include "contracts/item_count.h"
+#include "contracts/item_state.h"
 #include "contracts/extension_bag.h"
 #include "contracts/game_ports/ports.h"
 #include "plugins/core.item/plugin.h"
@@ -28,10 +29,16 @@ int main() {
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
-    CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
+    // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
+    CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
+    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
+    CHECK(descriptor.provides[1].iface != nullptr);
+    CHECK(static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[1].iface)
+              ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);

@@ -16,6 +16,7 @@
 #include "contracts/character_state.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
+#include "contracts/item_state.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "contracts/result.h"
@@ -28,6 +29,7 @@
 #include "game_inventory.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "host/owner_cache_builder.h"
 #include "infra/command_queue.h"
 #include "plugins/core.item/plugin.h"
 
@@ -38,6 +40,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -1817,6 +1820,16 @@ void test_inventory_owner_vs_legacy_golden() {
     CHECK(g_scheduler.handler != nullptr);
     g_golden_require_active = true;
 
+    // T2h-B2 B2c（W7）：经 item.state capability 取 owner raw 投影（唯一实现 = serialize_inventory_json）。
+    const qol::contracts::ItemStateApi* item_state_api = nullptr;
+    for (uint32_t i = 0; i < descriptor.provides_count; ++i) {
+        if (std::strcmp(descriptor.provides[i].id, qol::contracts::kItemStateCapabilityId) == 0) {
+            item_state_api =
+                static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[i].iface);
+        }
+    }
+    CHECK(item_state_api != nullptr && item_state_api->write_state_json != nullptr);
+
     struct Fixture {
         const char* name;
         int32_t raw;
@@ -1830,6 +1843,7 @@ void test_inventory_owner_vs_legacy_golden() {
         {"stack_off", 71, false, 71, false},
         {"extension_bag", 71, true, 199, true},
     };
+    std::vector<char> owner_raw(qol::contracts::kQolItemStateRawInventoryCapacity);
     for (const auto& fixture : fixtures) {
         g_golden_raw = fixture.raw;
         g_override_available = fixture.override_on;
@@ -1840,6 +1854,13 @@ void test_inventory_owner_vs_legacy_golden() {
         const std::string frozen = frozen_inventory_json();
         // T2h-B0 golden（可证部分）：frozen 复刻 == legacy 实现，逐字节。
         CHECK(frozen == legacy);
+        // T2h-B2 W7：owner raw（经 item.state）== frozen == legacy，逐字节（4 fixture）。
+        uint32_t raw_size = 0;
+        CHECK(item_state_api->write_state_json(
+                  static_cast<int32_t>(qol::contracts::QolItemStateKind::kRawInventory),
+                  owner_raw.data(), static_cast<uint32_t>(owner_raw.size()), &raw_size).ok ==
+              kQolOk);
+        CHECK(std::string(owner_raw.data(), raw_size) == frozen);
         CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
         uint16_t status = 0;
         const std::string owner_http = dispatch_get("/api/item/inventory", &status);
@@ -1850,6 +1871,18 @@ void test_inventory_owner_vs_legacy_golden() {
             std::printf("T2h-B0 NOTE [%s] owner HTTP == legacy（意外）\n", fixture.name);
         }
     }
+    // T2h-B2：not-in-world owner raw == legacy；capability 缺席（停用/未注册形态）→ fallback legacy。
+    g_golden_world = 0;
+    g_in_world = false;
+    uint32_t nw_size = 0;
+    CHECK(item_state_api->write_state_json(
+              static_cast<int32_t>(qol::contracts::QolItemStateKind::kRawInventory),
+              owner_raw.data(), static_cast<uint32_t>(owner_raw.size()), &nw_size).ok == kQolOk);
+    CHECK(std::string(owner_raw.data(), nw_size) == frozen_inventory_json());
+    CHECK(qol::host::build_item_state_json_via_owner(nullptr, 0, 4096, &build_inventory_json) ==
+          build_inventory_json());
+    g_golden_world = 1;
+    g_in_world = true;
     g_golden_require_active = false;
 }
 

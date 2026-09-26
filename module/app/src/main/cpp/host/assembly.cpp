@@ -122,11 +122,27 @@ std::string host_build_skills_json() {
         &build_skills_json);
 }
 
+// T2h-B2：inventory(6) 槽 owner 适配器（item.state，现取不缓存，失败逐字 fallback legacy）。
+const contracts::ItemStateApi* require_item_state() {
+    const void* iface = infra::require_capability(
+        contracts::kItemStateCapabilityId,
+        QolVersionRange{contracts::kItemStateVersion.major, contracts::kItemStateVersion.minor});
+    return iface == nullptr ? nullptr : static_cast<const contracts::ItemStateApi*>(iface);
+}
+
+std::string host_build_inventory_json() {
+    return build_item_state_json_via_owner(
+        require_item_state(),
+        static_cast<int32_t>(contracts::QolItemStateKind::kRawInventory),
+        contracts::kQolItemStateRawInventoryCapacity, &build_inventory_json);
+}
+
 }  // namespace
 
 void install_owner_cache_builders() {
     frame_cache_set_json_builder(0, &host_build_player_json);
     frame_cache_set_json_builder(1, &host_build_party_json);
+    frame_cache_set_json_builder(6, &host_build_inventory_json);
     frame_cache_set_json_builder(7, &host_build_skills_json);
 }
 
