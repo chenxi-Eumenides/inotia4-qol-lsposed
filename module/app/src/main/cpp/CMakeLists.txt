@@ -84,7 +84,7 @@ add_library(gamebridge SHARED
     game/nav/game_nav.cpp
     core/native/game_cache.cpp
     core/native/module_save.cpp
-    api/native/game_world.cpp
+    game/access/world_read.cpp
     game/access/save_preflight.cpp
     game_system.cpp
     game/read/game_tiles.cpp

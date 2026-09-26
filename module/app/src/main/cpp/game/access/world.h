@@ -5,13 +5,6 @@
 
 #include "game/symbols/game_symbols.h"
 
-// 主线程世界事实 JSON 构造器；由 world_facts 的帧快照调用，HTTP/预取线程不得直接调用。
-// 实现仍在 legacy 的 api/native/game_world_readers.inc（收口前先声明，避免 game 层 include legacy 头）。
-std::string build_units_json();
-std::string build_enemies_json();
-std::string build_interactives_json();
-std::string build_drops_json();
-
 // 游戏层：世界/地图域语义化访问（ARCHITECTURE.md §5）。
 // MAPINFOBASE 记录数/记录、当前地图 id、地图名解析、切图调用、主控朝向、金币/弹窗/横幅
 // 等游戏原语收口在本层；上层只调用语义函数，不出现裸地址/裸偏移、不直接 include 符号头。
@@ -21,6 +14,21 @@ std::string build_drops_json();
 // 明确失败值，不解引用空指针）。
 
 namespace qol::game {
+
+// 主线程世界事实 JSON 构造器（T2l-w-read2 收编：实现迁 game/access/world_read.cpp，逐字）；
+// 由 world_facts 的帧快照/商品读面调用，HTTP/预取线程不得直接调用。
+void append_position(std::string& s, void* member);
+std::string build_map_json();
+std::string build_tiles_json();
+std::string build_units_json();
+std::string build_enemies_json();
+std::string build_interactives_json();
+std::string build_drops_json();
+// nav 三读（path/distance/debug_path）：自研 BFS 路径/距离/诊断。
+std::string data_path_json(int tx, int ty);
+std::string data_distance_json(int32_t tx, int32_t ty);
+std::string data_debug_path_json(int32_t tx, int32_t ty);
+
 
 // 静态地图 ID 上限（原版/改版共同；MAPINFOBASE_STATIC_MAX_MAP_ID 的 game 层别名）。
 // 纯逻辑规则（plugins/world_teleport/rules.h）经本常量取上限，避免直接 include 符号头。

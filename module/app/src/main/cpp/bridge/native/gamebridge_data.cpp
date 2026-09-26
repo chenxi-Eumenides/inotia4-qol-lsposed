@@ -1,5 +1,6 @@
 #include "gamebridge_internal.h"
 
+#include "game/access/world.h"
 #include "host/assembly.h"
 #include "host/legacy_json_builders.h"
 #include "game/adapter_ports/quest_port.h"
@@ -90,7 +91,7 @@ Java_com_inotia4_qol_NativeBridge_nativeGetMapJson(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetTilesJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(build_tiles_json().c_str());
+    return env->NewStringUTF(qol::game::build_tiles_json().c_str());
 }
 
 // P0#瓦片矩阵：Kotlin 读取 assets maps/tiles.json 后传入，native 解析缓存
@@ -150,17 +151,17 @@ Java_com_inotia4_qol_NativeBridge_nativeGetDropsJson(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetPathJson(JNIEnv* env, jclass, jint tx, jint ty) {
-    return env->NewStringUTF(data_path_json(static_cast<int>(tx), static_cast<int>(ty)).c_str());
+    return env->NewStringUTF(qol::game::data_path_json(static_cast<int>(tx), static_cast<int>(ty)).c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeDistanceJson(JNIEnv* env, jclass, jint tx, jint ty) {
-    return env->NewStringUTF(data_distance_json(static_cast<int32_t>(tx), static_cast<int32_t>(ty)).c_str());
+    return env->NewStringUTF(qol::game::data_distance_json(static_cast<int32_t>(tx), static_cast<int32_t>(ty)).c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeDebugPathJson(JNIEnv* env, jclass, jint tx, jint ty) {
-    return env->NewStringUTF(data_debug_path_json(static_cast<int32_t>(tx), static_cast<int32_t>(ty)).c_str());
+    return env->NewStringUTF(qol::game::data_debug_path_json(static_cast<int32_t>(tx), static_cast<int32_t>(ty)).c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

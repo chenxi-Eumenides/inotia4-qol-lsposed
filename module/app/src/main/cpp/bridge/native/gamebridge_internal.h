@@ -10,7 +10,6 @@
 #include "plugins/save_backup/feature.h"
 #include "game/state/game_state.h"
 #include "game_system.h"
-#include "game_world.h"
 #include "game/read/game_tiles.h"
 #include "game/access/hive_iap.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"

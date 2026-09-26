@@ -9,7 +9,7 @@
 #include "game/nav/game_nav.h"
 #include "game/state/game_state.h"
 #include "game/symbols/game_symbols.h"
-#include "game_world.h"
+#include "game/access/world.h"
 #include "host/legacy_json_builders.h"
 
 #include <cstdint>
@@ -62,6 +62,8 @@ static int8_t g_drop_count = 0;
 static uint8_t g_drop_arr[GROUND_ITEM_SIZE * 2]{};
 static uint8_t* g_drop_arr_ptr = g_drop_arr;
 static uintptr_t g_region[1 << 14]{};  // 覆盖 CHARLOC/CHAR_POOL/DROP GOT 偏移跨度
+
+bool static_tiles_ready() { return false; }
 
 bool pool_obj_valid(const uint8_t* obj) {
     return obj == g_pool || obj == g_pool + 2 * C_OBJ_SIZE;

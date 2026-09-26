@@ -1,6 +1,7 @@
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
 #include "game/access/game_access.h"
+#include "game/access/world.h"
 #include "game/nav/game_nav.h"
 #include "game/symbols/game_symbols.h"
 #include "patch/ptr_slot.h"
@@ -99,10 +100,7 @@ void nav_unit_blocks(bool* blocks) {
     for (int i = 0; i < NAV_W * NAV_H; ++i) blocks[i] = false;
 }
 
-std::string build_units_json() { return "{\"units\":[]}"; }
-std::string build_enemies_json() { return "{\"enemies\":[]}"; }
-std::string build_interactives_json() { return "{\"interactives\":[]}"; }
-std::string build_drops_json() { return "{\"drops\":[]}"; }
+
 std::string build_inventory_json() { return "{\"bags\":[]}"; }
 
 namespace qol::patch {
@@ -118,3 +116,11 @@ RemoveItemDirectFn fn_remove_item_direct = nullptr;
 // T2l-sho：game/access/shop.cpp 读原语经 game_access 函数指针；nullptr = 空货架（{"items":[]}）。
 // fn_get_bit/fn_get_cumulate_count 由 test_host_adapters.cpp 提供（本文件不重复定义）。
 ItemGetBuyPriceFn fn_item_get_buy_price = nullptr;
+
+// T2l-w-read2：world_port 读面在 host_adapter_tests 用桩（product 链 game/access/world_read.cpp）。
+namespace qol::game {
+std::string build_units_json() { return "{\"units\":[]}"; }
+std::string build_enemies_json() { return "{\"enemies\":[]}"; }
+std::string build_interactives_json() { return "{\"interactives\":[]}"; }
+std::string build_drops_json() { return "{\"drops\":[]}"; }
+}  // namespace qol::game

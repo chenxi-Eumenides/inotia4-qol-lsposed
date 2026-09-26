@@ -179,19 +179,19 @@ QolResult read_in_world(int32_t* out) {
 }
 
 QolResult read_units_json(char* out, uint32_t capacity, uint32_t* out_size) {
-    return read_json(&build_units_json, out, capacity, out_size);
+    return read_json(&qol::game::build_units_json, out, capacity, out_size);
 }
 
 QolResult read_enemies_json(char* out, uint32_t capacity, uint32_t* out_size) {
-    return read_json(&build_enemies_json, out, capacity, out_size);
+    return read_json(&qol::game::build_enemies_json, out, capacity, out_size);
 }
 
 QolResult read_interactives_json(char* out, uint32_t capacity, uint32_t* out_size) {
-    return read_json(&build_interactives_json, out, capacity, out_size);
+    return read_json(&qol::game::build_interactives_json, out, capacity, out_size);
 }
 
 QolResult read_drops_json(char* out, uint32_t capacity, uint32_t* out_size) {
-    return read_json(&build_drops_json, out, capacity, out_size);
+    return read_json(&qol::game::build_drops_json, out, capacity, out_size);
 }
 
 const contracts::QolWorldPort kWorldPort{

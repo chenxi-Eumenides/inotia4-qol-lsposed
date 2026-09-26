@@ -11,7 +11,7 @@
 #include "game/ops/character_state_read.h"
 #include "game/ops/character_write.h"
 #include "game/state/game_state.h"
-#include "game_world.h"
+#include "game/access/world.h"
 #include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
 #include "infra/capabilities.h"

@@ -908,6 +908,7 @@ add_test(NAME world_facts_dispatch_tests COMMAND world_facts_dispatch_tests)
 # frozen 复刻逐字节双跑（fake 环境：hero/瓦片/pool/charloc/drops/nav）。
 add_executable(world_legacy_readers_tests
     test_world_legacy_readers.cpp
+    ${CPP_DIR}/game/access/world_read.cpp
 )
 target_include_directories(world_legacy_readers_tests PRIVATE
     ${CPP_DIR}
