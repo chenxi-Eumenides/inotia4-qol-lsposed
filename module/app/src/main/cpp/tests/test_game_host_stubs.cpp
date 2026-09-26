@@ -2,6 +2,7 @@
 #include "game/access/item_class.h"
 #include "game/access/game_access.h"
 #include "game/nav/game_nav.h"
+#include "game/symbols/game_symbols.h"
 #include "patch/ptr_slot.h"
 
 #include <string>
@@ -103,7 +104,6 @@ std::string build_enemies_json() { return "{\"enemies\":[]}"; }
 std::string build_interactives_json() { return "{\"interactives\":[]}"; }
 std::string build_drops_json() { return "{\"drops\":[]}"; }
 std::string build_inventory_json() { return "{\"bags\":[]}"; }
-std::string data_shop_items_json() { return "{\"items\":[]}"; }
 
 namespace qol::patch {
 
@@ -114,3 +114,7 @@ bool ptr_slot_restore_raw(uintptr_t, void*) { return false; }
 
 AddMoneyFn fn_add_money = nullptr;
 RemoveItemDirectFn fn_remove_item_direct = nullptr;
+
+// T2l-sho：game/access/shop.cpp 读原语经 game_access 函数指针；nullptr = 空货架（{"items":[]}）。
+// fn_get_bit/fn_get_cumulate_count 由 test_host_adapters.cpp 提供（本文件不重复定义）。
+ItemGetBuyPriceFn fn_item_get_buy_price = nullptr;

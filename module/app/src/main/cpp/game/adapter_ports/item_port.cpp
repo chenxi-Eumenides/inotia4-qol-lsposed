@@ -12,13 +12,13 @@
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
 #include "game/adapter_ports/item_count_facade.h"
+#include "game/access/shop.h"
 #include "game/access/world.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
 
 // JSON 构造器仍供未迁移的 game-system write/cache 路径使用；core.item owner 不用此入口。
 std::string build_inventory_json();
-std::string data_shop_items_json();
 
 namespace qol::game {
 namespace {
@@ -181,7 +181,7 @@ QolResult read_money(int64_t* out) {
 }
 
 QolResult read_shop_items_json(char* out, uint32_t capacity, uint32_t* out_size) {
-    return copy_json(data_shop_items_json(), out, capacity, out_size);
+    return copy_json(qol::game::shop_items_json(), out, capacity, out_size);
 }
 
 QolResult read_in_world(int32_t* out) {

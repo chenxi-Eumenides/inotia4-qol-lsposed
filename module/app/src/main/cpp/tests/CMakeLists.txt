@@ -737,6 +737,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/quest_port.cpp
     ${CPP_DIR}/game/adapter_ports/world_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_port.cpp
+    ${CPP_DIR}/game/access/shop.cpp
     ${CPP_DIR}/game/read/item_class.cpp
     ${CPP_DIR}/game/adapter_ports/character_port.cpp
     ${CPP_DIR}/game/adapter_ports/choice_port.cpp
