@@ -14,6 +14,16 @@
 
 namespace qol::game {
 
+// 域序数（与 infra/log/qol_log.h 的 QolDomain 对齐；game 层不 include infra 枚举）。
+constexpr int32_t kQolLogDomainPlatform = 0;
+constexpr int32_t kQolLogDomainApi = 3;
+constexpr int32_t kQolLogDomainCatalog = 14;
+
+// 级别序数（与 QolLogLevel 对齐）：0=Debug、1=Info、2=Warn。
+constexpr int32_t kQolLogLevelDebug = 0;
+constexpr int32_t kQolLogLevelInfo = 1;
+constexpr int32_t kQolLogLevelWarn = 2;
+
 inline const contracts::QolHostSdk*& qol_seam_sdk_slot() {
     static const contracts::QolHostSdk* sdk = nullptr;
     return sdk;
@@ -52,7 +62,8 @@ inline bool qol_seam_due(int64_t* last_frame, int64_t every_frames) {
 
 // 预格式化（printf 语义）后经 SDK 输出；level/domain 序数对齐 infra 枚举
 // （kDebug=0、kApi=3），game 层不得 include infra 枚举。
-inline void qol_seam_write(int32_t level, const char* file, int line, const char* fmt, ...) {
+inline void qol_seam_write(int32_t level, int32_t domain, const char* file, int line,
+                              const char* fmt, ...) {
     const auto* sdk = qol_seam_sdk_slot();
     if (sdk == nullptr || sdk->log.write == nullptr || file == nullptr || fmt == nullptr) return;
     char message[contracts::kMessageCap + 1]{};
@@ -66,7 +77,13 @@ inline void qol_seam_write(int32_t level, const char* file, int line, const char
                                 : static_cast<uint32_t>(written);
     char source[96]{};
     std::snprintf(source, sizeof(source), "%s:%d", file, line);
-    (void)sdk->log.write(level, 3 /* QolDomain::kApi */, source, message, length);
+    (void)sdk->log.write(level, domain, source, message, length);
 }
+
+// 便捷宏：调用点只写域与内容（printf 语义），file/line 由宏注入。
+#define QOL_LOG_SEAM_INFO(dom, ...) \
+    qol::game::qol_seam_write(qol::game::kQolLogLevelInfo, (dom), __FILE__, __LINE__, __VA_ARGS__)
+#define QOL_LOG_SEAM_WARN(dom, ...) \
+    qol::game::qol_seam_write(qol::game::kQolLogLevelWarn, (dom), __FILE__, __LINE__, __VA_ARGS__)
 
 }  // namespace qol::game

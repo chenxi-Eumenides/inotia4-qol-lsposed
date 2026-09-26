@@ -1,4 +1,6 @@
 #include "gamebridge_internal.h"
+#include "game/clock.h"
+#include "infra/log/qol_log.h"
 #include "infra/save/save_enter.h"
 #include "infra/save/save_exit.h"
 #include "infra/frame/transition_dispatch.h"
@@ -44,6 +46,10 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
+    // T2n-2：日志 sink/帧 provider 初始化搬至宿主装配（原 game/access 的 bridge_init 内，
+    // 时序逐字保持：先初始化，再 bridge_init 内变体识别等日志）。帧号经 game/clock 同源。
+    qol_log_set_frame_provider(&qol::game::frame_count);
+    qol_log_init();
     // 启动期常驻 patch 入口注入：必须在 bridge_init() 之前（bridge_init 内调用）。
     bridge_set_boot_patch_hook(&qol::host::core_patches_install);
     bool ok = bridge_init();

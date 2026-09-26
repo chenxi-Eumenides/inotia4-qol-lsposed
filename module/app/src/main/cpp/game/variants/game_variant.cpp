@@ -4,7 +4,7 @@
 // 流程：/proc/self/maps 定位 libgame.so → 算 md5 → 查离线表 → 未命中回退扫描 WH4JRN01。
 #include "game/variants/game_variant.h"
 
-#include "infra/log/qol_log.h"
+#include "game/access/qol_log_seam.h"
 
 #include <cstdio>
 #include <cstring>
@@ -314,14 +314,14 @@ bool game_variant_init() {
     char path[512] = {0};
     const bool have_path = find_libgame_path(path, sizeof(path));
     if (!have_path) {
-        QOL_LOG_WARN(QolDomain::kPlatform, "game_variant: libgame.so mapping not found");
+        QOL_LOG_SEAM_WARN(qol::game::kQolLogDomainPlatform, "game_variant: libgame.so mapping not found");
     } else if (std::strchr(path, '!') != nullptr) {
-        QOL_LOG_WARN(QolDomain::kPlatform,
-                     "game_variant: libgame.so mapped from archive (path contains '!'), fallback scan");
+        QOL_LOG_SEAM_WARN(qol::game::kQolLogDomainPlatform,
+                          "game_variant: libgame.so mapped from archive (path contains '!'), fallback scan");
     } else {
         have_md5 = md5_of_file(path, md5);
         if (!have_md5) {
-            QOL_LOG_WARN(QolDomain::kPlatform, "game_variant: cannot read %s, fallback scan", path);
+            QOL_LOG_SEAM_WARN(qol::game::kQolLogDomainPlatform, "game_variant: cannot read %s, fallback scan", path);
         }
     }
 
@@ -341,7 +341,7 @@ bool game_variant_init() {
 
     char md5_text[33];
     md5_hex(result.md5, md5_text);
-    QOL_LOG_INFO(QolDomain::kPlatform, "game_variant: series=%s version=%s caps=0x%x md5=%s known=%d",
+    QOL_LOG_SEAM_INFO(qol::game::kQolLogDomainPlatform, "game_variant: series=%s version=%s caps=0x%x md5=%s known=%d",
                  game_series_name(result.series), result.version_label, result.capabilities,
                  md5_text, result.known ? 1 : 0);
 

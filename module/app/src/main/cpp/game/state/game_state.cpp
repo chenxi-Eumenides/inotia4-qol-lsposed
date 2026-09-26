@@ -5,7 +5,7 @@
 #include "game/access/world.h"
 #include "game/symbols/game_symbols.h"
 #include "contracts/extension_bag_port.h"
-#include "infra/frame/frame_task.h"
+#include "contracts/runtime_hooks.h"
 
 #include "contracts/extension_bag.h"
 
@@ -70,10 +70,17 @@ struct CharNextExpSlot {
 };
 
 CharNextExpSlot g_char_next_exp[kPartyRoles];
-FrameTaskId g_char_next_exp_task = 0;  // 仅 nativeInit 线程写入
+uint64_t g_char_next_exp_task = 0;  // 仅 nativeInit 线程写入
 
 // 游戏主线程回调：对 3 名队员各调用一次 CHAR_GetNextExperience（首次/升级失效后现算并写回），
 // 结果写入 atomic 快照。返回 true 保持常驻。
+bool char_next_exp_tick(int64_t frame, void* ctx);
+
+// runtime_hooks 表帧回调为 int32(非 0=继续)；本 tick 语义 bool 逐字保留。
+int32_t char_next_exp_tick_adapter(int64_t frame, void* ctx) {
+    return char_next_exp_tick(frame, ctx) ? 1 : 0;
+}
+
 bool char_next_exp_tick(int64_t /*frame*/, void* /*ctx*/) {
     if (g_base == 0 || !game_in_world()) {
         for (int i = 0; i < kPartyRoles; ++i) g_char_next_exp[i].valid.store(false);
@@ -93,7 +100,8 @@ bool char_next_exp_tick(int64_t /*frame*/, void* /*ctx*/) {
 
 void char_next_exp_cache_start() {
     if (g_char_next_exp_task != 0) return;
-    g_char_next_exp_task = frame_task_add(kFramePointLogicPre, &char_next_exp_tick, nullptr, 1, 0);
+    g_char_next_exp_task = qol::contracts::qol_runtime_hooks().frame_task_add(
+        qol::contracts::kQolRuntimeFramePointLogicPre, &char_next_exp_tick_adapter, nullptr, 1, 0);
 }
 
 int64_t char_next_exp_cached(const void* ch) {

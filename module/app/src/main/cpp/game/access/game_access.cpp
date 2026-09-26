@@ -1,7 +1,5 @@
 #include "game/access/game_access.h"
 #include "game/symbols/symbol_resolver.h"
-#include "game_system.h"
-#include "infra/log/qol_log.h"
 #include "game/variants/game_variant.h"
 #include "game/feature/game_feature.h"
 
@@ -486,9 +484,6 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ctrl_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
     fn_ctrl_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
     fn_ctrl_btn_draw = reinterpret_cast<ControlButtonDrawFn>(g_base + fn_resolve("F_CONTROL_BUTTON_DRAW_VMA", F_CONTROL_BUTTON_DRAW_VMA));
-    // 统一日志：注入帧 provider（data_frame_count）并打开文件 sink（截断 + 横幅）。
-    qol_log_set_frame_provider(&data_frame_count);
-    qol_log_init();
     // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
     // 日志 sink 未初始化时发出的日志会被丢弃。
     // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。

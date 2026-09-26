@@ -53,7 +53,7 @@ int main() {
     // W37：未注入 → 静默降级（不输出、不崩溃）。
     g_test_frame = -1;
     CHECK(!qol_seam_debug_enabled());
-    qol_seam_write(0, __FILE__, __LINE__, "noop %d", 1);
+    qol_seam_write(0, 3, __FILE__, __LINE__, "noop %d", 1);
     CHECK(capture_level == -1);
     // 帧未就绪：不节流（不可达防御路径）。
     int64_t last = INT64_MIN;
@@ -65,7 +65,7 @@ int main() {
     g_fake_sdk.log.debug_enabled = &fake_debug_enabled;
     qol_seam_bind_host_sdk(&g_fake_sdk);
     CHECK(qol_seam_debug_enabled());
-    qol_seam_write(0, "/gamesrc/world.cpp", 42, "replan: wait-retry ok dirs=%d", 3);
+    qol_seam_write(0, 3, "/gamesrc/world.cpp", 42, "replan: wait-retry ok dirs=%d", 3);
     CHECK(capture_level == 0);    // QolLogLevel::kDebug
     CHECK(capture_domain == 3);   // QolDomain::kApi
     CHECK(capture_source == "/gamesrc/world.cpp:42");

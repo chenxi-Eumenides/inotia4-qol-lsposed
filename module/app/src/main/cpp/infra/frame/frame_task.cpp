@@ -2,7 +2,7 @@
 
 #include "infra/frame/frame_task.h"
 
-#include "game_system.h"
+#include "infra/runtime.h"
 
 #include <array>
 #include <atomic>
@@ -88,7 +88,7 @@ bool frame_task_query(FrameTaskId id, FrameTaskStatus* out) {
     out->active = true;
     out->remaining_runs = (task.count == 0) ? -1 : task.remaining;
     if (task.armed) {
-        const int64_t current_frame = data_frame_count();
+        const int64_t current_frame = qol::infra::frame_count();
         const int64_t delta = task.next_frame - current_frame;
         out->frames_to_next = delta > 0 ? static_cast<int>(delta) : 0;
     } else {
@@ -101,7 +101,7 @@ void frame_task_dispatch(FramePointId point) {
     if (point < 0 || point >= kFramePointCount) return;
     if (g_dispatch_depth > 0) return;  // 防同步再入
 
-    const int64_t frame = data_frame_count();
+    const int64_t frame = qol::infra::frame_count();
 
     std::vector<PendingCall> calls;
     {

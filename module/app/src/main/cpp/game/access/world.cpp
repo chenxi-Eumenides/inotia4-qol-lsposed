@@ -186,7 +186,8 @@ constexpr int32_t kWorldTransitionTimeoutMs = 5000;
         static int64_t _seam_last_frame = INT64_MIN;                   \
         if (qol::game::qol_seam_debug_enabled() &&                     \
             qol::game::qol_seam_due(&_seam_last_frame, (every_frames))) \
-            qol::game::qol_seam_write(0, __FILE__, __LINE__, __VA_ARGS__); \
+            qol::game::qol_seam_write(qol::game::kQolLogLevelDebug, qol::game::kQolLogDomainApi,\
+                                 __FILE__, __LINE__, __VA_ARGS__); \
     } while (0)
 
 uint32_t gamestate_state() {

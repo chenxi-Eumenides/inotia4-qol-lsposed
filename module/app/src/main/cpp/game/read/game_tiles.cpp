@@ -5,14 +5,10 @@
 #include <mutex>
 #include <unordered_map>
 
-// 统一日志：设备侧走 qol_log（kCatalog）；host 单测由 test_host.cpp 直接 #include 本文件，
-// 无 qol_log 链接目标，故 host 侧退化为空操作（与既有 android/log.h 桩行为一致）。
-#if defined(__ANDROID__)
-#include "infra/log/qol_log.h"
-#define TILES_LOG(...) QOL_LOG_INFO(QolDomain::kCatalog, __VA_ARGS__)
-#else
-#define TILES_LOG(...) do {} while (0)
-#endif
+// 统一日志：经 game 层日志缝（seam）输出 kCatalog 域；host 单测未注入 SDK 时静默
+// （与既有 android/log.h 桩行为一致），故无需条件编译分支。
+#include "game/access/qol_log_seam.h"
+#define TILES_LOG(...) QOL_LOG_SEAM_INFO(qol::game::kQolLogDomainCatalog, __VA_ARGS__)
 
 namespace {
 
