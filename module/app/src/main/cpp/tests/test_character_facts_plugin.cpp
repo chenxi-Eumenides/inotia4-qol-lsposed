@@ -38,6 +38,8 @@ static bool g_state_reads_from_legacy = false;
 // 真实 typed 原语的调用计数（批量族逐点次数断言）。
 static int g_set_stat_base_calls = 0;
 static int g_add_stat_main_calls = 0;
+// 战斗族写后即时时序：非 0 时，fake 游戏写函数把该值写入角色 C_LEVEL，模拟原语对 live 数据的改动。
+static int g_write_effect_level = 0;
 static qol::contracts::QolCharacterStateParty g_live_party{};
 static qol::contracts::QolCharacterStatePlayer g_live_player{};
 static qol::contracts::QolCharacterStateSkills g_live_skills{};
@@ -172,6 +174,13 @@ GetStatusPointFn fn_get_status_point = &legacy_status_point;
 GetAttrFn2 fn_get_stat_base = nullptr;
 GetActMaxLevelFn fn_get_act_max_level = nullptr;
 
+// 战斗族写后即时时序：fake 游戏写函数模拟对 live 角色内存的改动（同一结果处理器随后读 kParty）。
+void apply_write_effect(void* ch) {
+    if (g_write_effect_level != 0 && ch != nullptr) {
+        reinterpret_cast<int8_t*>(ch)[C_LEVEL] = static_cast<int8_t>(g_write_effect_level);
+    }
+}
+
 // 真实 typed 写原语依赖的其余 game 函数指针（fake 实现只满足成功/失败判定）。
 void legacy_set_exp(void*, int32_t) {}
 int legacy_set_level(void*, int32_t) { return 1; }
@@ -179,13 +188,13 @@ void legacy_set_status_point(void*, int32_t) {}
 void legacy_set_stat_base(void*, int32_t, int32_t) { ++g_set_stat_base_calls; }
 int legacy_get_stat_main(void*, int32_t) { return 0; }
 void legacy_set_stat_main(void*, int32_t, int32_t) { ++g_add_stat_main_calls; }
-void legacy_set_auto_attack(void*, int32_t) {}
+void legacy_set_auto_attack(void* ch, int32_t) { apply_write_effect(ch); }
 void* legacy_learn_action(void*, int32_t, int32_t) { return nullptr; }
 void legacy_char_initialize_status(void*) {}
 void legacy_char_initialize_skill(void*) {}
 void* legacy_char_get_enemy_target(void*, int32_t, int32_t) { return legacy_member(0); }
-void legacy_char_set_action_id(void*, int32_t, void*) {}
-void legacy_char_set_target(void*, void*) {}
+void legacy_char_set_action_id(void* ch, int32_t, void*) { apply_write_effect(ch); }
+void legacy_char_set_target(void* ch, void*) { apply_write_effect(ch); }
 void legacy_char_stop_combat(void*) {}
 void legacy_party_swap(int32_t, int32_t) {}
 int legacy_include_party(void*) { return 1; }
@@ -828,6 +837,151 @@ void test_write_no_state_family() {
     g_state_reads_from_legacy = false;
 }
 
+// T2c-4b：战斗 party-state 族（kSetAutoAttack/kCastSkill/kAttackTarget）typed 单路径 +
+// owner 自组装 kParty 投影（与 character.state capability 同一实现）覆盖。
+// kAttackTarget 成功路径需 g_base 非 0 且池槽有效；用小型 fake 池避免依赖真实 VMA 布局。
+void test_write_party_state_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    alignas(8) static uint8_t pool_base_slot[8]{};
+    alignas(8) static uint8_t pool_object[64]{};
+    *reinterpret_cast<uint8_t**>(pool_base_slot) = pool_object;
+    const uintptr_t pool_g_base =
+        reinterpret_cast<uintptr_t>(pool_base_slot) - G_CHAR_POOL_VMA;
+    g_base = pool_g_base;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const Case success[] = {
+        {QolCharacterWriteKind::kSetAutoAttack, 0, 1, 0, 0},
+        {QolCharacterWriteKind::kCastSkill, 0, 7, 0, 0},
+        {QolCharacterWriteKind::kAttackTarget, 0, 0, 0, 0},
+    };
+
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    const auto embedded_party = [](const std::string& owner, bool* found) {
+        const std::string marker = ",\"state\":";
+        const size_t at = owner.find(marker);
+        if (at == std::string::npos) {
+            *found = false;
+            return std::string();
+        }
+        *found = true;
+        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
+    };
+
+    // 成功体：typed 单路径输出与 legacy 基线逐字节一致；内嵌 kParty 子树与 capability 逐字一致。
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        bool found = false;
+        const std::string embedded = embedded_party(owner, &found);
+        char capability[8192]{};
+        uint32_t capability_size = 0;
+        const bool capability_ok =
+            state_api != nullptr &&
+            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty, capability,
+                                        sizeof(capability), &capability_size).ok == kQolOk;
+        CHECK(found && capability_ok &&
+              embedded == std::string(capability, capability_size));
+        sync_legacy_fixture();
+        const std::string legacy = legacy_character_write_result_json(payload);
+        CHECK(ok && owner == legacy);
+        CHECK(owner.find("\"state\":[") != std::string::npos);
+    }
+
+    // 写后即时：原语改 fake live 角色内存（level 10→42）后，同一结果处理器响应读到新值。
+    g_write_effect_level = 42;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        CHECK(owner.find("\"level\":42") != std::string::npos);
+        CHECK(owner.find("\"level\":10") == std::string::npos);
+    }
+    g_write_effect_level = 0;
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        const std::string legacy = legacy_character_write_result_json(payload);
+        CHECK(!ok && owner == legacy && owner == "{\"ok\":false,\"error\":\"not in game\"}");
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+    g_state_not_in_game = false;
+
+    // role 边界：结果处理器返回 role not found（HTTP 解析层不新增 400），逐字对照。
+    const Case role_boundary[] = {
+        {QolCharacterWriteKind::kSetAutoAttack, 9, 1, 0, 0},
+        {QolCharacterWriteKind::kCastSkill, 9, 7, 0, 0},
+        {QolCharacterWriteKind::kAttackTarget, 9, 0, 0, 0},
+    };
+    for (const auto& test : role_boundary) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        const std::string legacy = legacy_character_write_result_json(payload);
+        CHECK(!ok && owner == legacy && owner == "{\"ok\":false,\"error\":\"role not found\"}");
+    }
+
+    // 参数边界：cast 未学技能、attack 目标槽无效，均透传原错误体。
+    CharWritePayloadMirror cast_unknown{};
+    cast_unknown.kind = static_cast<int32_t>(QolCharacterWriteKind::kCastSkill);
+    cast_unknown.i0 = 0;
+    cast_unknown.i1 = 99;
+    std::string cast_unknown_body;
+    CHECK(!run_owner_write(cast_unknown, &cast_unknown_body));
+    CHECK(cast_unknown_body == legacy_character_write_result_json(cast_unknown) &&
+          cast_unknown_body == "{\"ok\":false,\"error\":\"skill not learned\"}");
+    CharWritePayloadMirror attack_bad_target{};
+    attack_bad_target.kind = static_cast<int32_t>(QolCharacterWriteKind::kAttackTarget);
+    attack_bad_target.i0 = 0;
+    attack_bad_target.i1 = C_CHARSYSTEM_POOL_SLOTS + 1;
+    std::string attack_bad_target_body;
+    CHECK(!run_owner_write(attack_bad_target, &attack_bad_target_body));
+    CHECK(attack_bad_target_body == legacy_character_write_result_json(attack_bad_target) &&
+          attack_bad_target_body == "{\"ok\":false,\"error\":\"target not found\"}");
+
+    // 缺口补证：g_base==0 时 kAttackTarget 固定失败（旧 host 无法覆盖成功路径）；装池后同一
+    // payload 走成功路径并附加 kParty，证明成功路径已被可控 fake 覆盖。
+    g_base = 0;
+    CharWritePayloadMirror attack_success{};
+    attack_success.kind = static_cast<int32_t>(QolCharacterWriteKind::kAttackTarget);
+    attack_success.i0 = 0;
+    attack_success.i1 = 0;
+    std::string no_pool_body;
+    CHECK(!run_owner_write(attack_success, &no_pool_body) &&
+          no_pool_body == "{\"ok\":false,\"error\":\"target not found\"}");
+    g_base = pool_g_base;
+    sync_legacy_fixture();
+    std::string with_pool_body;
+    CHECK(run_owner_write(attack_success, &with_pool_body) &&
+          with_pool_body.find("\"state\":[") != std::string::npos);
+
+    g_base = 0;
+    g_state_reads_from_legacy = false;
+}
+
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
     g_result_handler = handler;
@@ -1057,6 +1211,7 @@ int main() {
     // owner 写结果处理器：18 单点 kind 与 legacy builder 逐字节对照；批量与写后即时另断言。
     test_write_golden();
     test_write_no_state_family();
+    test_write_party_state_family(state_api);
 
     char tiny_output[4] = {'!', '!', '!', '!'};
     uint32_t tiny_size = 99;
