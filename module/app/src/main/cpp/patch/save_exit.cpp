@@ -4,13 +4,13 @@
 // call_patch 改指 wrapper；wrapper 先派发回调（world 数据仍有效），再复刻原 GAME_Exit。
 // GAME_Exit 在 .text 内仅此一个调用点，故仅覆盖 world -> 主菜单。
 
-#include "infra/save/save_exit.h"
+#include "patch/save_exit.h"
 
 #include "patch/call_patch.h"
 #include "infra/log/qol_log.h"
 #include "contracts/events.h"
-#include "game/symbols/game_symbols.h"
 #include "game/access/game_access.h"
+#include "game/access/save.h"
 #include "infra/events.h"
 
 #include <atomic>
@@ -87,9 +87,9 @@ bool save_exit_host_install_if_ready() {
         return false;  // 未就绪：不改写字节，允许后续重试
     }
 
-    const uintptr_t call_addr = g_base +
-        fn_resolve("F_GAMESTATE_SET_STATE_VMA", F_GAMESTATE_SET_STATE_VMA) +
-        F_GAMESTATE_SET_STATE_GAME_EXIT_CALL_OFF;
+    const qol::game::SaveSiteRef exit_site = qol::game::save_exit_site();
+    const uintptr_t call_addr =
+        g_base + fn_resolve("F_GAMESTATE_SET_STATE_VMA", exit_site.vma) + exit_site.call_off;
     if (!call_patch_install_bl(call_addr, kGameExitBlWord,
                                reinterpret_cast<void*>(&save_exit_wrapper))) {
         QOL_LOG_ERROR(QolDomain::kSave,

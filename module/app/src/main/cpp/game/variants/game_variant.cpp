@@ -1,6 +1,6 @@
 // game_variant.cpp —— libgame.so 校验值 → 游戏变体/能力 的运行时查表实现。
 //
-// 依赖方向：core 层，仅依赖 STL 与 infra/log/qol_log.h。
+// 依赖方向：game 层，仅依赖 STL 与 game/access/qol_log_seam.h（过渡日志缝）。
 // 流程：/proc/self/maps 定位 libgame.so → 算 md5 → 查离线表 → 未命中回退扫描 WH4JRN01。
 #include "game/variants/game_variant.h"
 

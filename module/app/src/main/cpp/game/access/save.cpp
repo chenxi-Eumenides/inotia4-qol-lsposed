@@ -424,3 +424,23 @@ std::string save_slots_json() {
 }
 
 }  // namespace qol::game
+
+// ---------------------------------------------------------------------------
+// T2n-3：save 发起点原语（符号 VMA 常量与调用偏移收口在 game 层）。
+// ---------------------------------------------------------------------------
+namespace qol::game {
+
+SaveSiteRef save_enter_load_site() {
+    return {F_SAVESLOT_SLOT_BUTTON_EXE_VMA, F_SAVESLOT_SLOT_BUTTON_EXE_RESUME_CALL_OFF};
+}
+
+SaveSiteRef save_enter_new_site() {
+    return {F_SELECTCHAR_BUTTON_START_EXE_VMA,
+            F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF};
+}
+
+SaveSiteRef save_exit_site() {
+    return {F_GAMESTATE_SET_STATE_VMA, F_GAMESTATE_SET_STATE_GAME_EXIT_CALL_OFF};
+}
+
+}  // namespace qol::game

@@ -13,7 +13,6 @@
 #include "game/access/game_access.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/state/game_state.h"
-#include "game/symbols/game_symbols.h"
 #include "infra/capabilities.h"
 
 #include <cstdint>

@@ -4,14 +4,14 @@
 // 的 BL 经 call_patch 改指 wrapper；wrapper 先标记 pending 再复刻原调用。检测任务由
 // frame_task 注册在 kFramePointRenderPre（仅 world 态 DrawPlay 执行），world 就绪后触发一次。
 
-#include "infra/save/save_enter.h"
+#include "patch/save_enter.h"
 
 #include "patch/call_patch.h"
 #include "infra/frame/frame_task.h"
 #include "infra/log/qol_log.h"
 #include "contracts/events.h"
-#include "game/symbols/game_symbols.h"
 #include "game/access/game_access.h"
+#include "game/access/save.h"
 #include "game/state/game_state.h"
 #include "infra/events.h"
 
@@ -120,9 +120,10 @@ bool save_enter_host_install_if_ready() {
         return false;  // 未就绪：不改写字节，允许后续重试
     }
 
-    const uintptr_t load_addr = g_base +
-        fn_resolve("F_SAVESLOT_SLOT_BUTTON_EXE_VMA", F_SAVESLOT_SLOT_BUTTON_EXE_VMA) +
-        F_SAVESLOT_SLOT_BUTTON_EXE_RESUME_CALL_OFF;
+    const qol::game::SaveSiteRef load_site = qol::game::save_enter_load_site();
+    const uintptr_t load_addr =
+        g_base + fn_resolve("F_SAVESLOT_SLOT_BUTTON_EXE_VMA", load_site.vma) +
+        load_site.call_off;
     if (!call_patch_install_bl(load_addr, kResumeBlWord,
                                reinterpret_cast<void*>(&save_load_wrapper))) {
         QOL_LOG_ERROR(QolDomain::kSave,
@@ -132,9 +133,10 @@ bool save_enter_host_install_if_ready() {
         return false;  // fail-closed：call_patch 已保证未改写任何字节
     }
 
-    const uintptr_t new_addr = g_base +
-        fn_resolve("F_SELECTCHAR_BUTTON_START_EXE_VMA", F_SELECTCHAR_BUTTON_START_EXE_VMA) +
-        F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF;
+    const qol::game::SaveSiteRef new_site = qol::game::save_enter_new_site();
+    const uintptr_t new_addr =
+        g_base + fn_resolve("F_SELECTCHAR_BUTTON_START_EXE_VMA", new_site.vma) +
+        new_site.call_off;
     if (!call_patch_install_bl(new_addr, kStartGameBlWord,
                                reinterpret_cast<void*>(&save_new_wrapper))) {
         QOL_LOG_ERROR(QolDomain::kSave,

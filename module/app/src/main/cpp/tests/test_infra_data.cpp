@@ -6,8 +6,8 @@
 // 纯头文件逻辑，不依赖 Android/游戏内存。
 
 #include "infra/frame/frame_task.h"
-#include "infra/save/save_enter.h"
-#include "infra/save/save_exit.h"
+#include "patch/save_enter.h"
+#include "patch/save_exit.h"
 #include "contracts/game_host.h"
 #include "game/read/item_class.h"
 

@@ -1,8 +1,8 @@
 #include "gamebridge_internal.h"
 #include "game/clock.h"
 #include "infra/log/qol_log.h"
-#include "infra/save/save_enter.h"
-#include "infra/save/save_exit.h"
+#include "patch/save_enter.h"
+#include "patch/save_exit.h"
 #include "infra/frame/transition_dispatch.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/autosell/config.h"

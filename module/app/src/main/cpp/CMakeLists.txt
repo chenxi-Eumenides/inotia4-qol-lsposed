@@ -122,8 +122,8 @@ target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 target_sources(gamebridge PRIVATE
     patch/call_patch.cpp
     infra/frame/frame_task.cpp
-    infra/save/save_enter.cpp
-    infra/save/save_exit.cpp
+    patch/save_enter.cpp
+    patch/save_exit.cpp
     core/native/inventory_trade.cpp
     game/read/item_class.cpp
 )

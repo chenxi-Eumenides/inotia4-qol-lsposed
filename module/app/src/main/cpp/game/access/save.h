@@ -63,6 +63,17 @@ int save_encrypt_process2(void* buf, int len, int mode, const char* key);
 // 基址未就绪或符号未解析返回 false。
 bool save_slot_delete_hook_target(void** out_slot, uintptr_t* out_expected);
 
+// ---- save 发起点原语（T2n-3：patch/save_{enter,exit} 的符号头引用收口在本层）----
+// 仅返回符号 VMA 常量与内联调用偏移；`g_base +` 与 `fn_resolve` 留在 patch 侧调用点
+// （资源归属依赖调用点窗口内的符号字符串，见 check_resources.py 归属规则）。
+struct SaveSiteRef {
+    uintptr_t vma;      // 发起点函数 VMA 常量
+    size_t call_off;    // 该函数内待改写的 BL 调用偏移
+};
+SaveSiteRef save_enter_load_site();  // F_SAVESLOT_SLOT_BUTTON_EXE_VMA + _RESUME_CALL_OFF
+SaveSiteRef save_enter_new_site();   // F_SELECTCHAR_BUTTON_START_EXE_VMA + _STARTGAME_CALL_OFF
+SaveSiteRef save_exit_site();        // F_GAMESTATE_SET_STATE_VMA + _GAME_EXIT_CALL_OFF
+
 // ---- 存档写原语（T2l-s-write）----
 //
 // 迁移自 api/native 的存档写实现（save/enter_slot(_direct)/create_slot(_direct)）：转场经
