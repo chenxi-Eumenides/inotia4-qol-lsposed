@@ -76,12 +76,19 @@ namespace qol::host {
 // T2i-1：player/party/skills/mercenaries 四槽改指 host 内联副本（host/legacy_json_builders.h，
 // 与 api/native 原实现逐字一致），两 TU 退役后仍可作插件停用 fallback；inventory(6) 的
 // legacy builder 归整目录批，暂仍指 api/native。
+// T2l-w-read：world 五槽（2 map / 3 units / 9 drops / 10 enemies / 11 interactives）同法改指
+// host 内联（同头逐字副本），game_cache.cpp 不再 include game_world.h。
 void install_legacy_cache_builders() {
     frame_cache_set_json_builder(0, &legacy_build_player_json);
     frame_cache_set_json_builder(1, &legacy_build_party_json);
+    frame_cache_set_json_builder(2, &legacy_build_map_json);
+    frame_cache_set_json_builder(3, &legacy_build_units_json);
     frame_cache_set_json_builder(6, &build_inventory_json);
     frame_cache_set_json_builder(7, &legacy_build_skills_json);
     frame_cache_set_json_builder(8, &legacy_build_mercenaries_json);
+    frame_cache_set_json_builder(9, &legacy_build_drops_json);
+    frame_cache_set_json_builder(10, &legacy_build_enemies_json);
+    frame_cache_set_json_builder(11, &legacy_build_interactives_json);
 }
 
 // T2h-B1（v3 A-simple）：player(0)/party(1)/skills(7) 三槽改注入 owner 适配器

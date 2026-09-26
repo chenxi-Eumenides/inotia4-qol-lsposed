@@ -1,6 +1,5 @@
 // game_cache.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
-#include "game_world.h"
 #include "game_system.h"
 
 #include "game/access/game_access.h"
@@ -29,25 +28,26 @@ struct CacheSlot {
 };
 
 CacheSlot g_cache_slots[] = {
-    // player/party/inventory/skills/mercenaries 的 legacy builder 由 host 装配期注入
-    // （frame_cache_set_json_builder）；未注入前保持 nullptr，读侧降级为 not in game。
+    // player/party/inventory/skills/mercenaries 与 world 五槽（map/units/drops/enemies/interactives）
+    // 的 legacy builder 由 host 装配期注入（frame_cache_set_json_builder）；未注入前保持 nullptr，
+    // 读侧降级为 not in game。
     {"player",      1, 0, "", nullptr,                  true},
     {"party",       1, 0, "", nullptr,                  true},
-    {"map",         0, 0, "", build_map_json,         true},  // v0.4.61：瓦片矩阵静态数据（同图不变），惰性获取（切图才变，请求驱动）
-    {"units",       1, 0, "", build_units_json,       true},
+    {"map",         0, 0, "", nullptr,                  true},  // v0.4.61：瓦片矩阵静态数据（同图不变），惰性获取（切图才变，请求驱动）
+    {"units",       1, 0, "", nullptr,                  true},
     {"gamestate",   1, 0, "", build_gamestate_json,   false},
     {"snapshot",    1, 0, "", build_snapshot_json,    false},
     {"inventory",   0, 0, "", nullptr,                  true},  // 惰性：偶发查看，请求驱动
     {"skills",      0, 0, "", nullptr,                  true},  // 惰性
     {"mercenaries", 0, 0, "", nullptr,                  true},  // 惰性
-    {"drops",       1, 0, "", build_drops_json,       true},
-    {"enemies",     0, 0, "", build_enemies_json,     true},  // 惰性：units 子集（type==1），请求驱动
-    {"interactives",0, 0, "", build_interactives_json,true},  // 惰性：units 子集（type==2 且可交互），请求驱动
+    {"drops",       1, 0, "", nullptr,                  true},
+    {"enemies",     0, 0, "", nullptr,                  true},  // 惰性：units 子集（type==1），请求驱动
+    {"interactives",0, 0, "", nullptr,                  true},  // 惰性：units 子集（type==2 且可交互），请求驱动
 };
 constexpr int CACHE_SLOT_COUNT = sizeof(g_cache_slots) / sizeof(g_cache_slots[0]);
 
-// 未注入 builder 的槽（仅 player/party/inventory/skills/mercenaries）降级体：与现状非 world
-// 输出一致，不引入新文案；生产由 host 装配期注入，此分支仅防御。
+// 未注入 builder 的槽降级体：与现状非 world 输出一致，不引入新文案；生产由 host 装配期注入，
+// 此分支仅防御。
 std::string run_slot_builder(const CacheSlot& slot) {
     return slot.build != nullptr ? slot.build() : std::string("{\"error\":\"not in game\"}");
 }

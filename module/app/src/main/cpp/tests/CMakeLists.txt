@@ -903,6 +903,21 @@ set_target_properties(world_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_
 target_link_libraries(world_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME world_facts_dispatch_tests COMMAND world_facts_dispatch_tests)
 
+# T2l-w-read：world 读 8 函数 host 内联（host/legacy_json_builders.h）与 api/native 原文
+# frozen 复刻逐字节双跑（fake 环境：hero/瓦片/pool/charloc/drops/nav）。
+add_executable(world_legacy_readers_tests
+    test_world_legacy_readers.cpp
+)
+target_include_directories(world_legacy_readers_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/api/native
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(world_legacy_readers_tests PRIVATE cxx_std_17)
+set_target_properties(world_legacy_readers_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME world_legacy_readers_tests COMMAND world_legacy_readers_tests)
+
 add_executable(character_facts_plugin_tests
     test_character_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.character/plugin.cpp
