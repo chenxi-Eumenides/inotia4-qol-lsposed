@@ -116,6 +116,11 @@ WorldWriteResult world_walk(int32_t direction);
 WorldWriteResult world_walk_stop();
 WorldWriteResult world_interact();
 
+// ---- 剧情读原语（T2l-d 迁自 game_world_story.inc）----
+// GAMESTATE==1 = 剧情态；story JSON 含 speaker/text/index/count（判定链与迁移前逐字一致）。
+bool story_active();
+std::string story_json();
+
 // ---- 世界传送入口 patch 元信息（UIPlay_CallMapName 尾部指令点）----
 
 // patch_addr：待改写指令地址；return_addr：trampoline 跳回地址（epilogue）；

@@ -2,6 +2,7 @@
 
 #include "game/access/game_access.h"
 #include "game/access/ui_state.h"
+#include "game/access/world.h"
 #include "game/symbols/game_symbols.h"
 #include "contracts/extension_bag_port.h"
 #include "infra/frame/frame_task.h"
@@ -111,11 +112,6 @@ int current_save_slot() {
     return slot != nullptr ? static_cast<int>(*slot) : -1;
 }
 
-// GAMESTATE==1 表示剧情态（原 data_story_active 的等价直读，供 ui_screen 使用）。
-bool story_state_active() {
-    return g_gamestate != nullptr && *reinterpret_cast<uint32_t*>(g_gamestate) == 1;
-}
-
 // 统一 UI 状态判定（T2l-u 迁自 api/native/game_ui_read.inc；判定链逐字保持）。调用方只在
 // 游戏主线程使用（依赖 g_state/g_popup_stack）。
 const char* ui_screen() {
@@ -137,7 +133,7 @@ const char* ui_screen() {
     if (state != 5) return "loading";
     // 药水教学残血：自动完成不暂停（阻断教学暂停，避免卡住 API 操控；tutorial_pause 枚举保留不再返回）
     if (tutorial_state() == 6) tutorial_cancel();
-    if (story_state_active()) return "dialog_story";
+    if (qol::game::story_active()) return "dialog_story";
     // popup 栈顶分派：对话框类（dialog_*）优先于面板类（panel_*）
     uintptr_t top_vma = qol::game::popup_top_vma();
     if (top_vma == 0) return "world";  // 无任何面板/对话框（含数据残留场景）

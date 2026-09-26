@@ -1,6 +1,5 @@
 // game_save.cpp —— 存档域：当前存档槽 + 存档槽列表（parse 域）。
-// save 写面已迁 game/access/save.{h,cpp}（T2l-s-write）；本 TU 仅保留读面与
-// dialog 面仍在消费的 data_op_save 薄转发（登记保留面，随 T2l-d 收口）。
+// save 写面已迁 game/access/save.{h,cpp}（T2l-s-write/T2l-d）；本 TU 仅保留读面（T2l-s-read 面）。
 
 #include "game_save.h"
 
@@ -39,9 +38,4 @@ std::string data_save_slots_json() {
     }
     s += "]}";
     return s;
-}
-
-// dialog 面（game_dialog_operations.inc:153）仍消费；薄转发到 game 层 typed 原语（T2l-d 收口）。
-std::string data_op_save() {
-    return qol::game::save_game().str();
 }

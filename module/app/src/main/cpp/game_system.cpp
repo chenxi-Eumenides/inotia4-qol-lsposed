@@ -7,6 +7,7 @@
 #include "game/access/quest.h"
 #include "game/access/ui_state.h"
 #include "game/access/save.h"
+#include "game/access/ui_state.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/ops/game_ops_common.h"
@@ -23,7 +24,6 @@
 #include "api/native/game_shop.h"
 #include "api/native/game_save.h"
 #include "core/native/game_cache.h"
-#include "game_dialog.h"
 #include "game/json/game_json.h"
 #include "contracts/game_ports/save_write_port.h"
 #include "contracts/game_ports/choice_write_port.h"
@@ -140,7 +140,7 @@ std::string data_events_json() {
 }
 
 std::string build_gamestate_json() {
-    bool story_active = data_story_active();
+    const bool story_on = qol::game::story_active();
 
     // v0.5.42：screen 统一判定（ui_screen：主菜单细分/教学/弹窗/剧情/对话框/面板），
     // 完全基于 popup 栈顶 + 状态机，替代旧内联判定与 dialog_active 布尔（数据残留误报修复）。
@@ -156,14 +156,14 @@ std::string build_gamestate_json() {
 
     std::string result = "{\"screen\":\"" + std::string(screen) + "\",\"frame\":" + std::to_string(frame);
     // v0.5.42：dialog_active 移除——screen 已精确表达 UI 占据（dialog_*/panel_* 前缀）
-    // dialog 字段 = data_dialog_content_json 完整输出（popup/story/npc/wipeout/npc_quest/面板态 全类型，
+    // dialog 字段 = qol::game::dialog_content_json() 完整输出（popup/story/npc/wipeout/npc_quest/面板态 全类型，
     // 与 /api/ui/dialog 端点一致）
-    std::string dcontent = data_dialog_content_json();
+    std::string dcontent = qol::game::dialog_content_json();
     if (dcontent.size() > 1 && dcontent[0] == '{') {
         result += ",\"dialog\":" + dcontent;
     }
-    if (story_active) {
-        result += ",\"story\":" + data_story_json();
+    if (story_on) {
+        result += ",\"story\":" + qol::game::story_json();
     }
     result += "}";
     return result;
@@ -880,11 +880,11 @@ int32_t build_choice_write_result_json(int32_t kind, const char* action, int32_t
     std::string body;
     switch (kind) {
         case contracts::kQolChoiceWriteDialogSelect:
-            body = data_op_dialog_select(action != nullptr ? std::string(action) : std::string(),
-                                         index);
+            body = qol::game::dialog_select(action != nullptr ? std::string(action) : std::string(),
+                                            index).str();
             break;
         case contracts::kQolChoiceWriteNpcInteract:
-            body = data_op_npc_interact();
+            body = qol::game::npc_interact().str();
             break;
         default:
             return kChoiceWriteFailed;
