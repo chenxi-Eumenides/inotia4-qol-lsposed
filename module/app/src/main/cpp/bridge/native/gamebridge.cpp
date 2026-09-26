@@ -48,6 +48,9 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     bridge_set_boot_patch_hook(&qol::host::core_patches_install);
     bool ok = bridge_init();
     if (ok) {
+        // T2h-B'：向 infra game_cache 注入 legacy JSON builder（K1），必须在任何
+        // data_*_json 读取/frame_cache_start 之前，行为/线程与现状逐字一致。
+        qol::host::install_legacy_cache_builders();
         // 库存行为 hook 已迁移为 inventory_hooks 插件（assembly 注册，宿主声明式安装 24 条入口）。
         // 属性范围已拆为 attribute_quality provider 与 attribute_range_display 消费者。
         // 模块自定义文本层已迁移为 text_layer 插件（共享资源 + 能力 + 角色面板作用域标记，

@@ -1,8 +1,5 @@
 // game_cache.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
-#include "game_character.h"
-#include "game_party.h"
-#include "game_inventory.h"
 #include "game_world.h"
 #include "game_system.h"
 
@@ -32,25 +29,39 @@ struct CacheSlot {
 };
 
 CacheSlot g_cache_slots[] = {
-    {"player",      1, 0, "", build_player_json,      true},
-    {"party",       1, 0, "", build_party_json,       true},
+    // player/party/inventory/skills/mercenaries 的 legacy builder 由 host 装配期注入
+    // （frame_cache_set_json_builder）；未注入前保持 nullptr，读侧降级为 not in game。
+    {"player",      1, 0, "", nullptr,                  true},
+    {"party",       1, 0, "", nullptr,                  true},
     {"map",         0, 0, "", build_map_json,         true},  // v0.4.61：瓦片矩阵静态数据（同图不变），惰性获取（切图才变，请求驱动）
     {"units",       1, 0, "", build_units_json,       true},
     {"gamestate",   1, 0, "", build_gamestate_json,   false},
     {"snapshot",    1, 0, "", build_snapshot_json,    false},
-    {"inventory",   0, 0, "", build_inventory_json,   true},  // 惰性：偶发查看，请求驱动
-    {"skills",      0, 0, "", build_skills_json,      true},  // 惰性
-    {"mercenaries", 0, 0, "", build_mercenaries_json, true},  // 惰性
+    {"inventory",   0, 0, "", nullptr,                  true},  // 惰性：偶发查看，请求驱动
+    {"skills",      0, 0, "", nullptr,                  true},  // 惰性
+    {"mercenaries", 0, 0, "", nullptr,                  true},  // 惰性
     {"drops",       1, 0, "", build_drops_json,       true},
     {"enemies",     0, 0, "", build_enemies_json,     true},  // 惰性：units 子集（type==1），请求驱动
     {"interactives",0, 0, "", build_interactives_json,true},  // 惰性：units 子集（type==2 且可交互），请求驱动
 };
 constexpr int CACHE_SLOT_COUNT = sizeof(g_cache_slots) / sizeof(g_cache_slots[0]);
 
+// 未注入 builder 的槽（仅 player/party/inventory/skills/mercenaries）降级体：与现状非 world
+// 输出一致，不引入新文案；生产由 host 装配期注入，此分支仅防御。
+std::string run_slot_builder(const CacheSlot& slot) {
+    return slot.build != nullptr ? slot.build() : std::string("{\"error\":\"not in game\"}");
+}
+
 std::mutex g_cache_mtx;                    // 保护缓存读写
 std::atomic<bool> g_cache_ready{false};    // 已成功构造过至少一个槽
 std::thread g_cache_thread;                // v0.4.59：预取线程（仅驱动 interval>0 槽）
 std::atomic<bool> g_cache_stop{false};
+
+void frame_cache_set_json_builder(int32_t slot, std::string (*fn)()) {
+    if (slot < 0 || slot >= CACHE_SLOT_COUNT) return;
+    std::lock_guard<std::mutex> lock(g_cache_mtx);
+    g_cache_slots[slot].build = fn;
+}
 
 // 等待帧边界：帧号变化（= 本帧 Draw 完成，数据稳定）即返回；超时兜底（游戏暂停/主菜单）
 uint64_t wait_frame_boundary(uint64_t since) {
@@ -66,7 +77,7 @@ uint64_t wait_frame_boundary(uint64_t since) {
 // 构造单槽（调用方持锁）并更新帧号；非 world 清空缓存
 void rebuild_slot_locked(CacheSlot& s, uint64_t frame) {
     if (game_in_world()) {
-        s.json = s.build();
+        s.json = run_slot_builder(s);
         s.last_frame = frame;
         g_cache_ready.store(true);
     } else {
@@ -81,11 +92,11 @@ std::string data_slot_lazy(int idx) {
     uint64_t f = data_frame_count();
     if (s.last_frame != 0 && f == s.last_frame) {
         std::lock_guard<std::mutex> lock(g_cache_mtx);
-        return s.json.empty() ? s.build() : s.json;
+        return s.json.empty() ? run_slot_builder(s) : s.json;
     }
     if (s.refreshing.exchange(true)) {
         std::lock_guard<std::mutex> lock(g_cache_mtx);
-        return s.json.empty() ? s.build() : s.json;
+        return s.json.empty() ? run_slot_builder(s) : s.json;
     }
     uint64_t boundary = wait_frame_boundary(f);
     std::lock_guard<std::mutex> lock(g_cache_mtx);
@@ -93,7 +104,7 @@ std::string data_slot_lazy(int idx) {
         rebuild_slot_locked(s, boundary);
     }
     s.refreshing.store(false);
-    return s.json.empty() ? s.build() : s.json;
+    return s.json.empty() ? run_slot_builder(s) : s.json;
 }
 
 // 统一入口：interval>0 → 预取槽直接读缓存（预取线程保证新鲜）；interval=0 → 惰性
@@ -108,7 +119,7 @@ std::string data_slot_json(int idx) {
             s.json.clear();   // 清陈旧缓存，回 world 后首帧重取，避免短暂脏数据
             return "{\"error\":\"not in game\"}";
         }
-        return s.build();
+        return run_slot_builder(s);
     }
     if (g_cache_slots[idx].interval > 0) {
         std::lock_guard<std::mutex> lock(g_cache_mtx);
@@ -130,7 +141,7 @@ void cache_prefetch_thread_fn() {
                 if (s.interval <= 0) continue;
                 if (f >= s.last_frame &&
                     f - s.last_frame < static_cast<uint64_t>(s.interval)) continue;
-                std::string j = s.build();   // 锁外构造（units BFS 等耗时操作不持锁）
+                std::string j = run_slot_builder(s);   // 锁外构造（units BFS 等耗时操作不持锁）
                 std::lock_guard<std::mutex> lock(g_cache_mtx);
                 s.json = std::move(j);       // 锁内仅 move 交换（µs 级），不阻塞请求读
                 s.last_frame = f;
@@ -166,7 +177,7 @@ void frame_cache_force_refresh() {
     uint64_t f = static_cast<uint64_t>(data_frame_count());
     for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
         CacheSlot& s = g_cache_slots[i];
-        s.json = s.build();
+        s.json = run_slot_builder(s);
         s.last_frame = f;
     }
     g_cache_ready.store(true);

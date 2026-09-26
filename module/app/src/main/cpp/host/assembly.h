@@ -10,6 +10,10 @@ namespace qol::host {
 // 返回 true = 宿主装配完成；插件级安装失败保留在 AssemblyReport 中，不阻止独立插件启动。
 bool assembly_init();
 
+// T2h-B'：host↔infra 内部注入面（A1）。装配早期向 game_cache 注入 legacy JSON builder
+// （K1：与现状同一实现，行为/线程逐字不变；api/native TU 不删）。须在 frame_cache_start 前调用。
+void install_legacy_cache_builders();
+
 struct AssemblyReport {
     uint32_t registered_plugins;
     uint32_t registration_failures;

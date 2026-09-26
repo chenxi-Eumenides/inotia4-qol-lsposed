@@ -7,6 +7,10 @@
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ownership.h"
+#include "core/native/game_cache.h"
+#include "game_character.h"
+#include "game_party.h"
+#include "game_inventory.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
@@ -64,6 +68,16 @@
 #include "host/adapters.h"
 
 namespace qol::host {
+
+// T2h-B'：向 infra game_cache 注入 legacy builder（K1，行为/线程逐字不变）。
+// slot 编号与 core/native/game_cache.cpp 的 CacheSlot 表一致。
+void install_legacy_cache_builders() {
+    frame_cache_set_json_builder(0, &build_player_json);
+    frame_cache_set_json_builder(1, &build_party_json);
+    frame_cache_set_json_builder(6, &build_inventory_json);
+    frame_cache_set_json_builder(7, &build_skills_json);
+    frame_cache_set_json_builder(8, &build_mercenaries_json);
+}
 
 namespace {
 

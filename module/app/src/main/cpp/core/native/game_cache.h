@@ -4,6 +4,10 @@
 
 // 缓存层：惰性/预取混合缓存（v0.4.59 表驱动）。对外 data_*_json 接口。
 
+// host↔infra 内部注入面（A1 形态）：文档化的 slot 与 CacheSlot 表一致；仅 host 装配期调用。
+// 只接收轻量函数指针，不反向依赖 host（infra 不 include host）。
+void frame_cache_set_json_builder(int32_t slot, std::string (*fn)());
+
 void frame_cache_start();
 void frame_cache_stop();
 void frame_cache_force_refresh();
