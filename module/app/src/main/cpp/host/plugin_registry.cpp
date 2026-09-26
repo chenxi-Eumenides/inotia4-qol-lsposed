@@ -647,7 +647,6 @@ const char* check_optional_requires(const contracts::PluginDescriptor& plugin, u
 // 并置 g_gate_degraded 供恢复后清除。
 void verify_optional_after_install() {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        // 状态：0 无暂缓；1 首轮待复查；2 已顺延一轮。
         uint8_t& pending = g_optional_pending[i];
         if (pending == 0) continue;
         if (g_dependency_invalid[i]) {
@@ -664,12 +663,11 @@ void verify_optional_after_install() {
             }
         }
         if (missing == nullptr) {
-            pending = 0;  // provider 已注册，复查通过
+            pending = 0;  // provider 已注册：静默解除（不写 error/degraded/WARN）
             continue;
         }
-        // provider 仍在图中且未到终态 → 首轮只顺延（enable 注册可能尚未落地），
-        // 避免启动首轮误报；已顺延一轮或 provider 终态（缺失/装失败/不受支持）
-        // 才补报 degraded。
+        // provider 在图且未到终态 → 保持暂缓，逐帧复查直至其能力注册落地；不设固定顺延
+        // 帧数（enable/注册可能晚于任意帧）。provider 终态（缺失/装失败/不受支持）才补报。
         bool provider_terminal = false;
         const uint32_t provider = provider_for_requirement(*missing, nullptr);
         if (provider == kNoPlugin || g_dependency_invalid[provider]) {
@@ -682,10 +680,7 @@ void verify_optional_after_install() {
                 provider_terminal = true;
             }
         }
-        if (!provider_terminal && pending == 1) {
-            pending = 2;
-            continue;
-        }
+        if (!provider_terminal) continue;
         pending = 0;
         set_dependency_error(i, "missing optional capability", missing->id);
         infra::FeatureStatus status{};

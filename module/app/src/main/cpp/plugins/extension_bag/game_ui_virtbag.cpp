@@ -727,7 +727,14 @@ uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonic
         if (api != nullptr && api->effective != nullptr) {
             uint32_t count = 0;
             const QolResult result = api->effective(item, &count);
-            if (qol::contracts::succeeded(result)) return count;
+            if (qol::contracts::succeeded(result)) {
+                // 关闭态 effective 视图可能为 0（canonical&0x7F==0），而 descriptor canonical
+                // 已证明该槽有物；回 0 会被下游当非法 count 丢弃。此时取 canonical 视图
+                // （R-47 决策 b：启用态 canonical、关闭态 b）。真值：canonical=0→0；
+                // effective>0→effective；effective==0 且 canonical>0→canonical 视图。
+                if (count != 0 || fallback_canonical == 0) return count;
+                return virtual_bag_view_from_canonical(fallback_canonical, /*extended=*/true);
+            }
             // 任何失败（含 unsupported，如 ITEMCLASS 表不可解）都不回 0：回 0 会被下游
             // 当作非法 count 而使整段 EB 快照失效。改为回退原版视图（G-item-#10 口径：
             // 能力缺失或不可用时回退原版 getter）。

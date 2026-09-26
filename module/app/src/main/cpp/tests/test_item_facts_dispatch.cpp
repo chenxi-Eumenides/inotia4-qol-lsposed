@@ -2035,6 +2035,11 @@ void test_extension_degrade_projected_canonical_kept() {
     CHECK(json.find("\"bag\":9") != std::string::npos);
     CHECK(json.find("{\"slot\":0,\"category\":10") != std::string::npos);
     CHECK(g_last_log_level != 2);  // 未被 L1 跳过 → 无 slot skipped WARN
+    // 真值表行 effective>0：canonical 95（b 视图=95）逐字保留。
+    g_golden_projected_canonical = 95;
+    const std::string json95 = owner_raw_inventory();
+    CHECK(json95.find("{\"slot\":4,\"category\":35,\"count\":95}") != std::string::npos);
+    CHECK(json95.find("\"bag\":9") != std::string::npos);
     g_golden_projected_canonical = 0;
     g_golden_require_active = false;
 }
