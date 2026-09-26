@@ -501,7 +501,10 @@ QolResult append_extension_inventory_bags(std::string* out) {
                     bool count_present = false;
                     if (effective_item_count(native_item, true, &effective, &count_present) &&
                         count_present) {
-                        count = effective;
+                        // stack_limit 关闭态 effective 视图可能为 0（canonical&0x7F==0）；此时
+                        // EB 回调已按 R-47b 真值表给出 canonical 视图正数，保留之，避免二次
+                        // 覆盖为 0（真值：effective>0→effective；effective==0 且回调>0→回调）。
+                        if (effective != 0 || count == 0) count = effective;
                     } else if (g_port->read.cumulate_count != nullptr) {
                         int32_t fallback = 0;
                         if (contracts::succeeded(g_port->read.cumulate_count(native_item, &fallback))) {

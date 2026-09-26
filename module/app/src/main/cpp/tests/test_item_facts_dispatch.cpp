@@ -1533,6 +1533,7 @@ void test_bridge_item_write_result_helper() {
 uint8_t g_golden_bag_storage[6 * 0x80]{};
 uint8_t g_golden_item_a[0x40]{};
 uint8_t g_golden_item_b[0x40]{};
+uint8_t g_golden_item_projected[0x40]{};
 int32_t g_golden_world = 1;
 int32_t g_golden_raw = 71;
 int32_t g_golden_eb_enabled = 0;
@@ -1615,7 +1616,10 @@ static bool golden_eb_capacity(int32_t bag, int32_t* out) {
     return true;
 }
 static void* golden_eb_item_at(int32_t internal, int32_t slot) {
-    return (internal == 6 && slot == 0) ? g_golden_item_b : nullptr;
+    if (internal != 6) return nullptr;
+    if (slot == 0) return g_golden_item_b;
+    if (slot == 4) return g_golden_item_projected;  // R5：投影槽活体对象（覆盖路径）
+    return nullptr;
 }
 int32_t g_golden_bad_slot = 0;
 int32_t g_golden_projected_canonical = 0;
@@ -1833,6 +1837,11 @@ void test_inventory_owner_vs_legacy_golden() {
     std::memset(g_golden_bag_storage, 0, sizeof(g_golden_bag_storage));
     std::memset(g_golden_item_a, 0, sizeof(g_golden_item_a));
     std::memset(g_golden_item_b, 0, sizeof(g_golden_item_b));
+    std::memset(g_golden_item_projected, 0, sizeof(g_golden_item_projected));
+    g_override_available = false;
+    g_override_enabled = false;
+    g_count_encoded = true;
+    g_canonical_count = 0;
     golden_fill_item(g_golden_item_a, static_cast<uint16_t>(10 << 6), 71, 6, 0x21, 0);
     golden_fill_item(g_golden_item_b, static_cast<uint16_t>(12 << 6), 1, 0, 0, 1);
     *reinterpret_cast<void**>(g_golden_bag_storage + 0 * 0x80 + 0 * 8) = g_golden_item_a;
@@ -2029,18 +2038,30 @@ void test_extension_degrade_projected_canonical_kept() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_eb_enabled = 1;
     g_golden_projected_canonical = 640;
+    // R5：活体对象存在 + provider usable=false（effective 返回 0）→ core.item 覆盖路径
+    // 必须保留 EB 回调的 canonical 视图，不得二次覆盖为 0。
+    golden_fill_item(g_golden_item_projected, static_cast<uint16_t>(35 << 6), 640, 0, 0, 0);
+    g_override_available = true;
+    g_override_enabled = false;
+    g_count_encoded = true;
+    g_canonical_count = 640;
     const std::string json = owner_raw_inventory();
     CHECK(json != "<install failed>" && json != "<serialize failed>");
     CHECK(json.find("{\"slot\":4,\"category\":35,\"count\":640}") != std::string::npos);
     CHECK(json.find("\"bag\":9") != std::string::npos);
     CHECK(json.find("{\"slot\":0,\"category\":10") != std::string::npos);
     CHECK(g_last_log_level != 2);  // 未被 L1 跳过 → 无 slot skipped WARN
-    // 真值表行 effective>0：canonical 95（b 视图=95）逐字保留。
+    // 真值表行 effective>0：canonical 95（b 视图=95，覆盖亦为 95）逐字保留。
     g_golden_projected_canonical = 95;
+    g_canonical_count = 95;
+    golden_fill_item(g_golden_item_projected, static_cast<uint16_t>(35 << 6), 95, 0, 0, 0);
     const std::string json95 = owner_raw_inventory();
     CHECK(json95.find("{\"slot\":4,\"category\":35,\"count\":95}") != std::string::npos);
     CHECK(json95.find("\"bag\":9") != std::string::npos);
     g_golden_projected_canonical = 0;
+    g_override_available = false;
+    g_override_enabled = false;
+    g_canonical_count = 0;
     g_golden_require_active = false;
 }
 
