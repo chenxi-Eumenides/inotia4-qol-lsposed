@@ -528,7 +528,7 @@ void apply_backups_locked(std::vector<BackupEntry>& entries) {
 }
 
 // 读三槽元数据到 out（无共享状态，锁外调用；必须在游戏线程执行，见 refresh_slots_on_game_thread）。
-// 口径与 save_backup.cpp:read_hero_meta / api/native/game_save.cpp:data_save_slots_json 一致：
+// 口径与 save_backup.cpp:read_hero_meta / game/access/save.cpp 的 save_slots_json 一致：
 // 主菜单（STATE==4）下 SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局，仅此状态调用；
 // 其余状态只读现有槽结构。槽元数据经 Game Host 读取。
 void read_slots_into(SlotInfo out[3]) {

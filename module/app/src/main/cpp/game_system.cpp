@@ -22,7 +22,6 @@
 #include "game_world.h"
 #include "api/native/game_inventory.h"
 #include "api/native/game_shop.h"
-#include "api/native/game_save.h"
 #include "core/native/game_cache.h"
 #include "game/json/game_json.h"
 #include "contracts/game_ports/save_write_port.h"
@@ -350,10 +349,10 @@ std::string build_snapshot_enriched_json() {
 
 namespace {
 
-// data_save_slots_json() 固定输出 {"slots":[...]}；info 只嵌入 slots 数组，与迁移前
+// qol::game::save_slots_json() 固定输出 {"slots":[...]}；info 只嵌入 slots 数组，与迁移前
 // Kotlin JsonUtil.parseObj(...).opt("slots") 同值。
 std::string system_save_slots_array() {
-    const std::string json = data_save_slots_json();
+    const std::string json = qol::game::save_slots_json();
     const size_t begin = json.find('[');
     const size_t end = json.rfind(']');
     if (begin == std::string::npos || end == std::string::npos || end < begin) return "[]";

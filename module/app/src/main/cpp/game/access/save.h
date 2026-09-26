@@ -85,4 +85,13 @@ SaveWriteResult enter_slot_direct(int32_t slot);
 SaveWriteResult create_slot(int32_t slot, int32_t class_idx);
 SaveWriteResult create_slot_direct(int32_t slot, int32_t class_idx);
 
+
+
+// ---- 存档槽读面（T2l-s-read 迁自 api/native/game_save.cpp）----
+
+// 当前加载存档槽 JSON（S5）：{"current_save_slot":N}。
+std::string current_save_slot_json();
+// 三槽列表 JSON：{"slots":[{slot,exists[,hero_level,hero_index]}...]}；符号未解析返回 op_err 体。
+std::string save_slots_json();
+
 }  // namespace qol::game

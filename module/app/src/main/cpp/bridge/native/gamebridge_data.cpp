@@ -3,6 +3,7 @@
 #include "host/assembly.h"
 #include "host/legacy_json_builders.h"
 #include "game/adapter_ports/quest_port.h"
+#include "game/access/save.h"
 #include "game/read/item_class.h"
 
 #include <cstring>
@@ -59,7 +60,7 @@ Java_com_inotia4_qol_NativeBridge_nativeQuestActive(JNIEnv* env, jclass) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeCurrentSaveSlot(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_current_save_slot_json().c_str());
+    return env->NewStringUTF(qol::game::current_save_slot_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

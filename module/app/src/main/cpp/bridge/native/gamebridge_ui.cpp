@@ -1,13 +1,14 @@
 #include "gamebridge_internal.h"
 
 #include "bridge/native/item_write_result.h"
+#include "game/access/save.h"
 #include "game/access/ui_state.h"
 #include "game/ops/item_inventory_state_write.h"
 
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSaveSlotsJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_save_slots_json().c_str());
+    return env->NewStringUTF(qol::game::save_slots_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
