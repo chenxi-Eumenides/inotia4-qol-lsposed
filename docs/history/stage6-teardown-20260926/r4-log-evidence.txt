@@ -1,0 +1,5 @@
+14:2026-09-26 19:12:08.697 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=attribute_range_display capability=attribute.quality
+15:2026-09-26 19:12:08.697 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag
+16:2026-09-26 19:12:08.697 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=custom_recipe consumer=craft_ui capability=craft_result
+17:2026-09-26 19:12:08.697 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality
+18:2026-09-26 19:12:08.697 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=core.item capability=extension_bag
