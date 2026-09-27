@@ -710,8 +710,6 @@ int main() {
     assert(world_port_api.read.current_map_id(&value).ok == kQolOk && value == 1);
     assert(world_port_api.read.map_name(1, &map_name).ok == kQolOk);
     assert(world_port_api.read.active_player_direction(&value).ok == kQolOk && value == 2);
-    int64_t money = 0;
-    assert(world_port_api.read.money(&money).ok == kQolOk && money == 1000);
     assert(world_port_api.read.game_state_gate(&value).ok == kQolOk && value == 1);
 
     uint32_t u32_value = 0;

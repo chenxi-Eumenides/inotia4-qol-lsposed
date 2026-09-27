@@ -31,7 +31,7 @@ int main() {
     CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -57,6 +57,7 @@ int main() {
     CHECK(api->physical_item_at != nullptr);
     CHECK(api->detail_context != nullptr);
     CHECK(api->cursor_index != nullptr);
+    CHECK(api->money != nullptr);
     CHECK(descriptor.optional_requires[0].range.major ==
           qol::contracts::kStackLimitItemCountVersion.major);
     CHECK(g_fail == 0);

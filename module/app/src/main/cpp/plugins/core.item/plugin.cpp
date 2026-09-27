@@ -175,6 +175,11 @@ QolResult cursor_index(const void* control, int32_t* out_slot) {
     return g_port->read.cursor_index(control, out_slot);
 }
 
+QolResult money(int64_t* out_money) {
+    if (g_port == nullptr || g_port->read.money == nullptr) return not_ready();
+    return g_port->read.money(out_money);
+}
+
 constexpr contracts::ItemFactsApi kItemFactsApi{
     &category,
     &is_real_equip,
@@ -186,6 +191,7 @@ constexpr contracts::ItemFactsApi kItemFactsApi{
     &physical_item_at,
     &detail_context,
     &cursor_index,
+    &money,
 };
 
 // T2h-B2：item.state 发布面——唯一实现复用既有 serialize_inventory_json（禁止第二实现）。

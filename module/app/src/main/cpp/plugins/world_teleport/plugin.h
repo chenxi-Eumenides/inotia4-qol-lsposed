@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../contracts/plugin.h"
+#include "../../contracts/item_facts.h"
 #include "../../contracts/world_facts.h"
 
 // 世界传送插件清单入口（ARCHITECTURE.md §3.3）。入口 patch 由声明式 kCallPatch 资源交给
@@ -12,5 +13,6 @@ const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 const contracts::WorldFactsApi* world_facts();
+const contracts::ItemFactsApi* item_facts();
 
 }  // namespace qol::features::world_teleport

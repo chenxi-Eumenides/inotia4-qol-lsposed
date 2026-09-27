@@ -65,7 +65,7 @@ QolResult fake_world_state(int32_t* out) {
 
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
     static const qol::contracts::WorldFactsApi api{&fake_world_state, nullptr, nullptr, nullptr,
-                                                    nullptr, nullptr, nullptr, nullptr};
+                                                    nullptr, nullptr, nullptr};
     if (id == nullptr || out_iface == nullptr ||
         std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) != 0) {
         return qol::contracts::error(kQolErrNotFound, "missing capability", 18);

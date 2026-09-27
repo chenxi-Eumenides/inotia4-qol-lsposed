@@ -1256,6 +1256,9 @@ void test_lifecycle_and_responses() {
     CHECK(descriptor.install(ctx) == 0);
     const auto* item_facts = static_cast<const qol::contracts::ItemFactsApi*>(
         descriptor.provides[0].iface);
+    int64_t money = 0;
+    CHECK(item_facts->money(&money).ok == kQolOk);
+    CHECK(money == 72503);
     int32_t count = 0;
     CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
     CHECK(count == 3);

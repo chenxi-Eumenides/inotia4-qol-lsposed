@@ -20,6 +20,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolChoicePort* g_choice_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
+const contracts::ItemFactsApi* g_item_facts = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
 
@@ -51,6 +52,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kWorldFactsCapabilityId,
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+    {contracts::kItemFactsCapabilityId,
+     {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -63,6 +66,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_game = ctx.game;
     g_choice_port = nullptr;
     g_world_facts = nullptr;
+    g_item_facts = nullptr;
     g_installed = false;
     g_install_error = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
@@ -89,6 +93,21 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
+    const void* item_facts_iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor},
+            &item_facts_iface)) ||
+        item_facts_iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_choice_port = nullptr;
+        g_world_facts = nullptr;
+        g_item_facts = nullptr;
+        g_install_error = "install failed: item facts unavailable";
+        return 1;
+    }
+    g_item_facts = static_cast<const contracts::ItemFactsApi*>(item_facts_iface);
     return 0;
 }
 
@@ -96,6 +115,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     g_installed = false;
     g_world_facts = nullptr;
+    g_item_facts = nullptr;
     g_game = nullptr;
     g_choice_port = nullptr;
     g_sdk = nullptr;
@@ -120,7 +140,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    1,
+    2,
     kRequires,
     1,
     kOptionalRequires,
@@ -162,6 +182,10 @@ const contracts::QolChoicePort* choice_port() {
 
 const contracts::WorldFactsApi* world_facts() {
     return g_world_facts;
+}
+
+const contracts::ItemFactsApi* item_facts() {
+    return g_item_facts;
 }
 
 }  // namespace qol::features::world_teleport

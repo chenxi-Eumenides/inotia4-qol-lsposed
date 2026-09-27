@@ -127,7 +127,7 @@ const QolQuestPort kFakePort{
 const void* const kPortArray[] = {&kFakePort};
 
 const qol::contracts::WorldFactsApi kWorldFactsApi{
-    &fake_state, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    &fake_state, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 };
 
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {

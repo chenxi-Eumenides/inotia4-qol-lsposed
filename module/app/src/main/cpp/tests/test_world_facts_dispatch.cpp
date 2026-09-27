@@ -58,7 +58,6 @@ QolResult fake_map_name(int32_t map_id, const char** out) {
                            : qol::contracts::ok();
 }
 QolResult fake_direction(int32_t* out) { *out = 2; return qol::contracts::ok(); }
-QolResult fake_money(int64_t* out) { *out = 1000; return qol::contracts::ok(); }
 QolResult fake_tutorial(int32_t* out) { *out = 0; return qol::contracts::ok(); }
 
 QolResult fake_exits(char* out, uint32_t capacity, uint32_t* out_size) {
@@ -92,7 +91,7 @@ QolResult fake_in_world(int32_t* out) {
 
 const QolWorldPortReadApi kFakeRead{
     &fake_state,          &fake_gate,        &fake_record_count,  &fake_map_id,
-    &fake_map_name,       &fake_direction,   &fake_money,         &fake_tutorial,
+    &fake_map_name,       &fake_direction,   &fake_tutorial,
     &fake_exits,          &fake_units,       &fake_enemies,       &fake_interactives,
     &fake_drops,          &fake_navigation,  &fake_in_world,
 };

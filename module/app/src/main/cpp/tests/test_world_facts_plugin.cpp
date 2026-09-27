@@ -25,11 +25,11 @@ int main() {
     CHECK(descriptor.requires[0].range.major == 1 && descriptor.requires[0].range.min_minor == 0);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kWorldFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].version.major == 2 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
     CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD);
-    CHECK(descriptor.ports[0].range.major == 1 && descriptor.ports[0].range.min_minor == 1);
+    CHECK(descriptor.ports[0].range.major == 2 && descriptor.ports[0].range.min_minor == 0);
     CHECK(descriptor.http_query_count == 12 && descriptor.http_queries != nullptr);
 
     const auto* api = static_cast<const qol::contracts::WorldFactsApi*>(descriptor.provides[0].iface);
@@ -39,7 +39,6 @@ int main() {
     CHECK(api->current_map_id != nullptr);
     CHECK(api->map_name != nullptr);
     CHECK(api->active_player_direction != nullptr);
-    CHECK(api->money != nullptr);
     CHECK(api->tutorial_state != nullptr);
     CHECK(g_fail == 0);
     std::printf("world_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);

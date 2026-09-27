@@ -29,7 +29,6 @@ struct QolWorldPortReadApi {
     QolResult (*current_map_id)(int32_t* out_map_id);
     QolResult (*map_name)(int32_t map_id, const char** out_name);
     QolResult (*active_player_direction)(int32_t* out_direction);
-    QolResult (*money)(int64_t* out_money);
     QolResult (*tutorial_state)(int32_t* out_state);
     QolWorldJsonFn exits_json;
     QolWorldJsonFn units_json;

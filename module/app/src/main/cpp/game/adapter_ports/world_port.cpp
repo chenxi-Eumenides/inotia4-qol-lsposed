@@ -159,13 +159,6 @@ QolResult read_active_player_direction(int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_money(int64_t* out) {
-    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
-    if (!world_money_ready()) return not_ready();
-    *out = world_money();
-    return contracts::ok();
-}
-
 QolResult read_tutorial_state(int32_t* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
     *out = tutorial_state();
@@ -197,7 +190,7 @@ QolResult read_drops_json(char* out, uint32_t capacity, uint32_t* out_size) {
 const contracts::QolWorldPort kWorldPort{
     contracts::kQolPortWorldVersion,
     {&read_state, &read_game_state_gate, &read_map_record_count, &read_current_map_id,
-     &read_map_name, &read_active_player_direction, &read_money, &read_tutorial_state,
+     &read_map_name, &read_active_player_direction, &read_tutorial_state,
      &read_exits_json, &read_units_json, &read_enemies_json, &read_interactives_json,
      &read_drops_json, &read_navigation, &read_in_world},
 };

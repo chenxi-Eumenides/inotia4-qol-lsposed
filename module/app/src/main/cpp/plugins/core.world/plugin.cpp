@@ -106,11 +106,6 @@ QolResult active_player_direction(int32_t* out_direction) {
     return g_port->read.active_player_direction(out_direction);
 }
 
-QolResult money(int64_t* out_money) {
-    if (g_port == nullptr || g_port->read.money == nullptr) return not_ready();
-    return g_port->read.money(out_money);
-}
-
 QolResult tutorial_state(int32_t* out_state) {
     if (g_port == nullptr || g_port->read.tutorial_state == nullptr) return not_ready();
     return g_port->read.tutorial_state(out_state);
@@ -123,7 +118,6 @@ constexpr contracts::WorldFactsApi kWorldFactsApi{
     &current_map_id,
     &map_name,
     &active_player_direction,
-    &money,
     &tutorial_state,
 };
 
@@ -132,7 +126,8 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 const contracts::QolPortRequirement kPorts[] = {
-    {contracts::QolPortId::QOL_PORT_WORLD, {1, 1}},
+    {contracts::QolPortId::QOL_PORT_WORLD,
+     {contracts::kQolPortWorldVersion.major, contracts::kQolPortWorldVersion.minor}},
     {contracts::QolPortId::QOL_PORT_WORLD_WRITE,
      {contracts::kQolPortWorldWriteVersion.major, contracts::kQolPortWorldWriteVersion.minor}},
 };
@@ -640,7 +635,10 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_port = static_cast<const contracts::QolWorldPort*>(ctx.ports[0]);
     // Install rejects missing required reads; frame publication repeats the checks to avoid
     // publishing a partial snapshot if an incomplete port reaches the runtime boundary.
-    if (!contracts::satisfies(g_port->abi_version, {1, 1}) || g_port->read.state == nullptr ||
+    if (!contracts::satisfies(g_port->abi_version,
+                              {contracts::kQolPortWorldVersion.major,
+                               contracts::kQolPortWorldVersion.minor}) ||
+        g_port->read.state == nullptr ||
         g_port->read.game_state_gate == nullptr || g_port->read.current_map_id == nullptr ||
         g_port->read.units_json == nullptr ||
         g_port->read.navigation == nullptr || g_port->read.in_world == nullptr) {

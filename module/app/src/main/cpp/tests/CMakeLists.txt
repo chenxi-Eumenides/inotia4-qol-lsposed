@@ -705,6 +705,15 @@ target_include_directories(world_teleport_status_tests PRIVATE
 target_compile_features(world_teleport_status_tests PRIVATE cxx_std_17)
 add_test(NAME world_teleport_status_tests COMMAND world_teleport_status_tests)
 
+add_executable(world_teleport_install_tests
+    test_world_teleport_install.cpp
+    ${CPP_DIR}/plugins/world_teleport/plugin.cpp
+)
+target_include_directories(world_teleport_install_tests PRIVATE ${CPP_DIR})
+target_compile_features(world_teleport_install_tests PRIVATE cxx_std_17)
+set_target_properties(world_teleport_install_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME world_teleport_install_tests COMMAND world_teleport_install_tests)
+
 # save_backup 回滚结构化结果 host 测试。
 add_executable(save_backup_rollback_tests
     test_save_backup_rollback.cpp

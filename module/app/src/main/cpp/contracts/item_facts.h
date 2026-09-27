@@ -9,7 +9,7 @@
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{1, 0};
+constexpr QolVersion kItemFactsVersion{1, 1};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 
@@ -26,6 +26,7 @@ using ItemFactsPhysicalItemAtFn = QolResult (*)(int32_t bag, int32_t slot, void*
 using ItemFactsDetailContextFn = QolResult (*)(int32_t* out_desc_type, int32_t* out_bag,
                                                void** out_control);
 using ItemFactsCursorIndexFn = QolResult (*)(const void* control, int32_t* out_slot);
+using ItemFactsMoneyFn = QolResult (*)(int64_t* out_money);
 
 struct ItemFactsApi {
     ItemFactsCategoryFn category;
@@ -38,6 +39,7 @@ struct ItemFactsApi {
     ItemFactsPhysicalItemAtFn physical_item_at;
     ItemFactsDetailContextFn detail_context;
     ItemFactsCursorIndexFn cursor_index;
+    ItemFactsMoneyFn money;
 };
 
 }  // namespace qol::contracts

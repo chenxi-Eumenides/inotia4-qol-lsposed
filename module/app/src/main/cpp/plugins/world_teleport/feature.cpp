@@ -225,7 +225,9 @@ void show_message(const char* message) {
 int32_t delayed_transfer(int64_t, void* param) {
     const auto* target = static_cast<const ChoiceTarget*>(param);
     const auto* facts = qol::features::world_teleport::world_facts();
-    if (target == nullptr || facts == nullptr || facts->money == nullptr || game() == nullptr ||
+    const auto* item_facts = qol::features::world_teleport::item_facts();
+    if (target == nullptr || facts == nullptr || item_facts == nullptr ||
+        item_facts->money == nullptr || game() == nullptr ||
         facts->active_player_direction == nullptr ||
         game()->world_action.minus_money == nullptr ||
         game()->world_action.request_map_change == nullptr) {
@@ -235,7 +237,7 @@ int32_t delayed_transfer(int64_t, void* param) {
     int32_t direction = -1;
     int64_t money = 0;
     if (!qol::contracts::succeeded(facts->active_player_direction(&direction)) ||
-        direction < 0 || !qol::contracts::succeeded(facts->money(&money))) {
+        direction < 0 || !qol::contracts::succeeded(item_facts->money(&money))) {
         log_message(3, "world teleport: active player unavailable");
         return 0;
     }
