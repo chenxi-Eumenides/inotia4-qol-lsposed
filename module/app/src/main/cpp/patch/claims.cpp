@@ -10,6 +10,8 @@ constexpr uint32_t kMaxClaims = 64;
 struct PointClaim {
     uintptr_t addr;
     const char* claim_id;
+    uint32_t saved_word;
+    bool has_saved_word;
 };
 
 PointClaim g_claims[kMaxClaims];
@@ -41,6 +43,8 @@ bool claim_point(uintptr_t addr, const char* claim_id) {
     }
     g_claims[g_count].addr = addr;
     g_claims[g_count].claim_id = claim_id;
+    g_claims[g_count].saved_word = 0;
+    g_claims[g_count].has_saved_word = false;
     ++g_count;
     return true;
 }
@@ -53,6 +57,21 @@ bool release_point(uintptr_t addr) {
     // 用末位覆盖，保持紧凑；释放顺序与声明顺序无关。
     g_claims[index] = g_claims[g_count - 1];
     --g_count;
+    return true;
+}
+
+bool set_saved_word(uintptr_t addr, uint32_t word) {
+    const int index = find_index(addr);
+    if (index < 0) return false;
+    g_claims[index].saved_word = word;
+    g_claims[index].has_saved_word = true;
+    return true;
+}
+
+bool get_saved_word(uintptr_t addr, uint32_t* out_word) {
+    const int index = find_index(addr);
+    if (index < 0 || out_word == nullptr || !g_claims[index].has_saved_word) return false;
+    *out_word = g_claims[index].saved_word;
     return true;
 }
 

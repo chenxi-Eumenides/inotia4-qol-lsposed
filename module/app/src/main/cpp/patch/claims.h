@@ -16,6 +16,10 @@ bool claim_point(uintptr_t addr, const char* claim_id);
 // 释放占用：未占用 → false。
 bool release_point(uintptr_t addr);
 
+// 保存声明式 call patch 安装前观测到的指令字；仅已占用地址可设置或读取。
+bool set_saved_word(uintptr_t addr, uint32_t word);
+bool get_saved_word(uintptr_t addr, uint32_t* out_word);
+
 // 未占用 → nullptr。
 const char* point_owner(uintptr_t addr);
 

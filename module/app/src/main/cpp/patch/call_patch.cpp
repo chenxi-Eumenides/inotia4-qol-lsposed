@@ -37,6 +37,7 @@ size_t g_thunk_slots_allocated = 0;
 struct PatchedCall {
     uintptr_t call_addr;
     void* wrapper;
+    uint32_t saved_word;
     uint32_t replacement;
     uintptr_t target;  // 实际写入的分支目标（BL：wrapper/thunk；B：thunk）
     void* thunk_slot;
@@ -57,7 +58,7 @@ bool find_patched_locked(uintptr_t call_addr, void* wrapper, uintptr_t* out_targ
 }
 
 bool remember_patched_locked(uintptr_t call_addr, void* wrapper, uint32_t replacement,
-                             uintptr_t target, void* thunk_slot) {
+                             uint32_t saved_word, uintptr_t target, void* thunk_slot) {
     if (find_patched_locked(call_addr, wrapper)) return true;
     if (g_patched_call_count >= g_patched_calls.size()) {
         QOL_LOG_ERROR(QolDomain::kPlatform,
@@ -65,8 +66,19 @@ bool remember_patched_locked(uintptr_t call_addr, void* wrapper, uint32_t replac
                       g_patched_calls.size(), reinterpret_cast<void*>(call_addr), wrapper);
         return false;
     }
-    g_patched_calls[g_patched_call_count++] = {call_addr, wrapper, replacement, target, thunk_slot};
+    g_patched_calls[g_patched_call_count++] =
+        {call_addr, wrapper, saved_word, replacement, target, thunk_slot};
     return true;
+}
+
+bool saved_word_locked(uintptr_t call_addr, uint32_t* out_word) {
+    for (size_t i = 0; i < g_patched_call_count; ++i) {
+        if (g_patched_calls[i].call_addr == call_addr) {
+            if (out_word != nullptr) *out_word = g_patched_calls[i].saved_word;
+            return true;
+        }
+    }
+    return false;
 }
 
 void release_thunk_slot_locked(void* slot) {
@@ -277,7 +289,7 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
         release_thunk_slot_locked(thunk_slot);
         return false;
     }
-    if (!remember_patched_locked(call_addr, wrapper, replacement, branch_target, thunk_slot)) {
+    if (!remember_patched_locked(call_addr, wrapper, replacement, current, branch_target, thunk_slot)) {
         (void)write_code_word(call_addr, expected_word);
         release_thunk_slot_locked(thunk_slot);
         return false;
@@ -289,10 +301,18 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
 
 bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word) {
     if (call_addr == 0) return false;
+    (void)original_word;
     std::lock_guard<std::mutex> lock(g_call_patch_mtx);
 
+    uint32_t saved_word = 0;
+    if (!saved_word_locked(call_addr, &saved_word)) {
+        QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word missing call=%p",
+                     reinterpret_cast<void*>(call_addr));
+        return false;
+    }
+
     const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
-    if (current == original_word) {  // 幂等：已还原
+    if (current == saved_word) {  // 幂等：已还原
         forget_patched_locked(call_addr);
         return true;
     }
@@ -302,10 +322,10 @@ bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word) {
                       reinterpret_cast<void*>(call_addr), current);
         return false;  // fail-closed：不覆盖非 BL 指令
     }
-    if (!write_code_word(call_addr, original_word)) return false;
+    if (!write_code_word(call_addr, saved_word)) return false;
     forget_patched_locked(call_addr);
     QOL_LOG_INFO(QolDomain::kPlatform, "reverted call=%p original=0x%08x",
-                 reinterpret_cast<void*>(call_addr), original_word);
+                 reinterpret_cast<void*>(call_addr), saved_word);
     return true;
 }
 
@@ -378,7 +398,7 @@ uintptr_t call_patch_install_branch(uintptr_t call_addr, uint32_t expected_word,
         release_thunk_slot_locked(thunk);
         return 0;
     }
-    if (!remember_patched_locked(call_addr, handler, replacement, thunk_addr, thunk)) {
+    if (!remember_patched_locked(call_addr, handler, replacement, current, thunk_addr, thunk)) {
         (void)write_code_word(call_addr, expected_word);
         release_thunk_slot_locked(thunk);
         return 0;
@@ -391,10 +411,18 @@ uintptr_t call_patch_install_branch(uintptr_t call_addr, uint32_t expected_word,
 
 bool call_patch_revert_branch(uintptr_t call_addr, uint32_t original_word) {
     if (call_addr == 0) return false;
+    (void)original_word;
     std::lock_guard<std::mutex> lock(g_call_patch_mtx);
 
+    uint32_t saved_word = 0;
+    if (!saved_word_locked(call_addr, &saved_word)) {
+        QOL_LOG_WARN(QolDomain::kPlatform, "branch patch saved word missing call=%p",
+                     reinterpret_cast<void*>(call_addr));
+        return false;
+    }
+
     const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
-    if (current == original_word) {  // 幂等：已还原
+    if (current == saved_word) {  // 幂等：已还原
         forget_patched_locked(call_addr);
         return true;
     }
@@ -404,10 +432,10 @@ bool call_patch_revert_branch(uintptr_t call_addr, uint32_t original_word) {
                       reinterpret_cast<void*>(call_addr), current);
         return false;  // fail-closed：不覆盖非 B 指令
     }
-    if (!write_code_word(call_addr, original_word)) return false;
+    if (!write_code_word(call_addr, saved_word)) return false;
     forget_patched_locked(call_addr);
     QOL_LOG_INFO(QolDomain::kPlatform, "reverted branch call=%p original=0x%08x",
-                 reinterpret_cast<void*>(call_addr), original_word);
+                 reinterpret_cast<void*>(call_addr), saved_word);
     return true;
 }
 
@@ -446,7 +474,7 @@ bool call_patch_install_branch_with_return(uintptr_t call_addr, uint32_t expecte
         release_thunk_slot_locked(thunk);
         return false;
     }
-    if (!remember_patched_locked(call_addr, handler, replacement, thunk_addr, thunk)) {
+    if (!remember_patched_locked(call_addr, handler, replacement, current, thunk_addr, thunk)) {
         (void)write_code_word(call_addr, current);
         release_thunk_slot_locked(thunk);
         return false;
@@ -458,15 +486,22 @@ bool call_patch_install_branch_with_return(uintptr_t call_addr, uint32_t expecte
 bool call_patch_revert_branch_with_return(uintptr_t call_addr, uint32_t expected_word,
                                           uint32_t alternate_expected_word) {
     if (call_addr == 0) return false;
+    (void)expected_word;
+    (void)alternate_expected_word;
     std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    uint32_t saved_word = 0;
+    if (!saved_word_locked(call_addr, &saved_word)) {
+        QOL_LOG_WARN(QolDomain::kPlatform, "branch-return saved word missing call=%p",
+                     reinterpret_cast<void*>(call_addr));
+        return false;
+    }
     const uint32_t current = *reinterpret_cast<const uint32_t*>(call_addr);
-    if (current == expected_word ||
-        (alternate_expected_word != 0 && current == alternate_expected_word)) {
+    if (current == saved_word) {
         forget_patched_locked(call_addr);
         return true;
     }
     if ((current & 0xFC000000u) != 0x14000000u) return false;
-    if (!write_code_word(call_addr, expected_word)) return false;
+    if (!write_code_word(call_addr, saved_word)) return false;
     forget_patched_locked(call_addr);
     return true;
 }

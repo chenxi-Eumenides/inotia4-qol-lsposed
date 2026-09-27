@@ -1,6 +1,7 @@
 #include "patch/instr_patch.h"
 
 #include "game/access/patches.h"
+#include "infra/log/qol_log.h"
 #include "patch/claims.h"
 
 namespace qol::patch {
@@ -81,6 +82,10 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     if (!claim_point(site.addr, claim.id)) {
         return failure("point already claimed");
     }
+    const uint32_t observed_word =
+        site.kind == qol::game::PatchKind::kBranchRedirectWithReturn
+            ? *reinterpret_cast<const uint32_t*>(site.addr)
+            : site.expected_word;
 
     if (site.kind == qol::game::PatchKind::kBranchRedirect) {
         // B 尾调用：宿主在近址池分配 thunk 并把站点 B 改指 thunk，返回 thunk 运行期地址；
@@ -101,6 +106,13 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
             release_point(site.addr);
             return failure("branch target out of BL range");
         }
+        if (!set_saved_word(site.addr, observed_word)) {
+            QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word unavailable addr=%p",
+                         reinterpret_cast<void*>(site.addr));
+            (void)g_primitives.revert_branch(site.addr, observed_word);
+            release_point(site.addr);
+            return failure("saved word unavailable");
+        }
         return Outcome{0, nullptr};
     }
 
@@ -112,6 +124,14 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
         if (!applied) {
             release_point(site.addr);
             return failure("primitive rejected");
+        }
+        if (!set_saved_word(site.addr, observed_word)) {
+            QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word unavailable addr=%p",
+                         reinterpret_cast<void*>(site.addr));
+            (void)g_primitives.revert_branch_with_return(
+                site.addr, site.expected_word, site.alternate_expected_word);
+            release_point(site.addr);
+            return failure("saved word unavailable");
         }
         return Outcome{0, nullptr};
     }
@@ -132,6 +152,12 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
         // 未生效即撤销占用：否则失败安装会把地址锁死给新所有者。
         release_point(site.addr);
         return failure("primitive rejected");
+    }
+    if (!set_saved_word(site.addr, observed_word)) {
+        QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word unavailable addr=%p",
+                     reinterpret_cast<void*>(site.addr));
+        release_point(site.addr);
+        return failure("saved word unavailable");
     }
     return Outcome{0, nullptr};
 }
@@ -164,19 +190,25 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     // §4.2 物理归还：先还原原字，成功后才释放占用。还原失败时保留占用——否则点可被
     // 重新声明，而旧指令字可能仍在（tombstone 语义丢失），由引擎按 tombstone + 隔离处理。
     bool applied = false;
+    uint32_t saved_word = 0;
+    if (!get_saved_word(site.addr, &saved_word)) {
+        QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word missing addr=%p",
+                     reinterpret_cast<void*>(site.addr));
+        return failure("saved word missing");
+    }
     if (site.kind == qol::game::PatchKind::kWordReplace) {
         applied = g_primitives.revert_word != nullptr &&
-                  g_primitives.revert_word(site.addr, site.expected_word);
+                  g_primitives.revert_word(site.addr, saved_word);
     } else if (site.kind == qol::game::PatchKind::kBranchRedirect) {
         applied = g_primitives.revert_branch != nullptr &&
-                  g_primitives.revert_branch(site.addr, site.expected_word);
+                  g_primitives.revert_branch(site.addr, saved_word);
     } else if (site.kind == qol::game::PatchKind::kBranchRedirectWithReturn) {
         applied = g_primitives.revert_branch_with_return != nullptr &&
                   g_primitives.revert_branch_with_return(
-                      site.addr, site.expected_word, site.alternate_expected_word);
+                      site.addr, saved_word, 0);
     } else {
         applied = g_primitives.revert_bl != nullptr &&
-                  g_primitives.revert_bl(site.addr, site.expected_word);
+                  g_primitives.revert_bl(site.addr, saved_word);
     }
     if (!applied) {
         return failure("primitive rejected");

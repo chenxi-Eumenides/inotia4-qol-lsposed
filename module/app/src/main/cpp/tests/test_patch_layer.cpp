@@ -16,11 +16,17 @@
 #include "game/access/ptr_slots.h"
 #include "game/ops/game_ops_common.h"
 #include "game/state/game_state.h"
+#include "infra/log/qol_log.h"
 
 #include <string>
 
 static int g_pass = 0;
 static int g_fail = 0;
+static QolLogLevel g_last_log_level = QolLogLevel::kInfo;
+
+void qol_log_write(QolLogLevel level, QolDomain, const char*, int, const char*, ...) {
+    g_last_log_level = level;
+}
 
 #define CHECK(cond) do { \
     if (cond) ++g_pass; \
@@ -87,6 +93,8 @@ struct FakePrims {
     bool revert_word_ok = true;
     bool install_branch_ok = true;
     bool revert_branch_ok = true;
+    bool install_branch_return_ok = true;
+    bool revert_branch_return_ok = true;
     // 假 thunk 相对站点偏移：默认 +0x100（可达）；可设为超 ±128MB 覆盖越界分支。
     int64_t install_branch_thunk_delta = 0x100;
     uintptr_t last_addr = 0;
@@ -94,6 +102,7 @@ struct FakePrims {
     uint32_t last_new_word = 0;
     void* last_wrapper = nullptr;
     uintptr_t last_branch_thunk = 0;
+    uint32_t last_alternate = 0;
 };
 
 FakePrims g_prims;
@@ -148,6 +157,32 @@ bool fake_revert_branch(uintptr_t addr, uint32_t original_word) {
     return g_prims.revert_branch_ok;
 }
 
+uint32_t g_branch_return_storage = 0;
+constexpr uint32_t kBranchReturnReplacement = 0x14000020u;
+
+bool fake_install_branch_return(uintptr_t addr, uint32_t expected_word,
+                                uint32_t alternate_expected_word, void*, uintptr_t,
+                                uint32_t) {
+    ++g_prims.install_branch_calls;
+    g_prims.last_addr = addr;
+    g_prims.last_expected = expected_word;
+    g_prims.last_alternate = alternate_expected_word;
+    const uint32_t current = *reinterpret_cast<const uint32_t*>(addr);
+    if (!g_prims.install_branch_return_ok ||
+        (current != expected_word && current != alternate_expected_word)) return false;
+    *reinterpret_cast<uint32_t*>(addr) = kBranchReturnReplacement;
+    return true;
+}
+
+bool fake_revert_branch_return(uintptr_t addr, uint32_t saved_word, uint32_t) {
+    ++g_prims.revert_branch_calls;
+    g_prims.last_addr = addr;
+    g_prims.last_expected = saved_word;
+    if (!g_prims.revert_branch_return_ok) return false;
+    *reinterpret_cast<uint32_t*>(addr) = saved_word;
+    return true;
+}
+
 // 指针槽原语：真实写入测试可控的槽存储，便于断言「写生效/未生效」与 tombstone 保留占用。
 struct FakePtrPrims {
     int write_calls = 0;
@@ -182,7 +217,8 @@ bool fake_restore_ptr(uintptr_t slot_addr, void* value) {
 void use_fake_primitives() {
     set_primitives(Primitives{&fake_install_bl, &fake_revert_bl, &fake_install_word,
                               &fake_revert_word, &fake_write_ptr, &fake_restore_ptr,
-                              &fake_install_branch, &fake_revert_branch});
+                              &fake_install_branch, &fake_revert_branch,
+                              &fake_install_branch_return, &fake_revert_branch_return});
 }
 
 void reset_all() {
@@ -191,10 +227,26 @@ void reset_all() {
     g_prims = FakePrims{};
     g_ptr_prims = FakePtrPrims{};
     g_ptr_slot_storage = nullptr;
+    g_branch_return_storage = 0;
+    g_last_log_level = QolLogLevel::kInfo;
     g_base = kBase;
     g_fn_resolve_bias = 0;
     g_fn_resolve_misalign = 0;
     use_fake_primitives();
+}
+
+constexpr uint32_t kBranchReturnExpected = 0xd2800020u;
+constexpr uint32_t kBranchReturnAlternate = 0x14001234u;
+
+bool arm_branch_return_site() {
+    PatchSite site{};
+    site.addr = reinterpret_cast<uintptr_t>(&g_branch_return_storage);
+    site.expected_word = kBranchReturnExpected;
+    site.alternate_expected_word = kBranchReturnAlternate;
+    site.return_addr = site.addr + 0x100;
+    site.tail_word = kBranchReturnExpected;
+    site.kind = qol::game::PatchKind::kBranchRedirectWithReturn;
+    return qol::game::patch_site_override_for_test("P_TEST_BRANCH_RETURN", site);
 }
 
 uintptr_t party_addr() {
@@ -232,6 +284,46 @@ ResourceClaim make_patch_claim(const char* id, const char* symbol, void* handler
     claim.step_budget = 120;
     claim.handler = handler;
     return claim;
+}
+
+ResourceClaim make_branch_return_claim() {
+    return make_patch_claim("patch:branch-return", "P_TEST_BRANCH_RETURN", &g_dummy_handler);
+}
+
+void test_branch_return_restores_observed_word() {
+    const ResourceClaim claim = make_branch_return_claim();
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(&g_branch_return_storage);
+
+    reset_all();
+    CHECK(arm_branch_return_site());
+    g_branch_return_storage = kBranchReturnExpected;
+    CHECK(install_claim(claim, addr).ok == 0);
+    CHECK(g_branch_return_storage == kBranchReturnReplacement);
+    CHECK(release_claim(claim, addr).ok == 0);
+    CHECK(g_branch_return_storage == kBranchReturnExpected);
+
+    reset_all();
+    CHECK(arm_branch_return_site());
+    g_branch_return_storage = kBranchReturnAlternate;
+    CHECK(install_claim(claim, addr).ok == 0);
+    CHECK(g_branch_return_storage == kBranchReturnReplacement);
+    CHECK(release_claim(claim, addr).ok == 0);
+    CHECK(g_branch_return_storage == kBranchReturnAlternate);
+}
+
+void test_branch_return_missing_saved_word_fails_closed() {
+    reset_all();
+    CHECK(arm_branch_return_site());
+    const ResourceClaim claim = make_branch_return_claim();
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(&g_branch_return_storage);
+    g_branch_return_storage = kBranchReturnAlternate;
+    CHECK(install_claim(claim, addr).ok == 0);
+    claims_reset_for_test();
+    const Outcome released = release_claim(claim, addr);
+    CHECK(released.ok != 0 && released.error != nullptr &&
+          std::strcmp(released.error, "saved word missing") == 0);
+    CHECK(g_branch_return_storage == kBranchReturnReplacement);
+    CHECK(g_last_log_level == QolLogLevel::kWarn);
 }
 
 ResourceClaim make_ptr_slot_claim(const char* id, void* handler) {
@@ -767,6 +859,8 @@ int main() {
     test_install_word_at();
     test_kind_mismatch();
     test_install_branch_success();
+    test_branch_return_restores_observed_word();
+    test_branch_return_missing_saved_word_fails_closed();
     test_install_branch_out_of_range();
     test_install_branch_primitive_failure();
     test_release_branch_writes_back_and_releases();
