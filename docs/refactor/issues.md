@@ -2,19 +2,10 @@
 
 > 本文件**只记录缺陷问题**：插件审计与真机事件调查中确认的问题条目。每条记录归属（所属插件/模块组件）、证据与状态。
 > 分工：验收证据欠账（待补真机日志的 VM 卡）唯一登记处是 `verification.md` §5，本文件不重复；本文件登记的是**缺陷本身**。
-> 维护纪律：新问题按所属组件追加条目，编号不复用、不重排；修复后更新状态并填 commit 号，条目保留用于溯源。
+> 维护纪律：新问题按所属组件追加条目，编号不复用、不重排；修复后更新状态并把条目移入文末「已修复」附录（正文只留确实存在的问题）。
+> 排序：正文 §1–§9 全部为开放/挂账问题；已修复条目在文末附录存证。
 > 严重度：P1 行为错误或契约破坏；P2 风险/缺陷；P3 质量/演进项。
 > 范围记录：插件逐个审计（core.world → core.item → core.character → …）与真机验证中产生的问题均入此账。
-
-## 0. 本会话已修复（存证）
-
-| ID | 归属 | 问题 | 修复与复验 |
-|---|---|---|---|
-| FIX-01 | core.custom_ui（触发面 world_teleport 及一切 ui_choice 消费者） | `native_choice_open()` 持 `g_mutex` 调用游戏 `POPUPSTATE_Push`，游戏同线程同步回调 `choice_init_wrapper` 再取同一锁 → GLThread 自锁（点世界地图入口必死锁） | 两阶段 open（锁内准备、锁外 push、generation 回滚）：`d89d272c`；host `native_choice_tests` 含同步重入用例；真机点图弹窗/取消/选择三步 PASS |
-| FIX-02 | patch/（call_patch、instr_patch、claims；元数据 game/access/patches；载体资源 world_teleport `patch:UIPlay_CallMapName`） | branch-return 型 call patch 的 revert 回写编译期常量（原版 `mov x0,#1`）而非安装时实际观测指令；monster v29 停用后大修原生 `B` 指令被覆盖 → 点图呈原版行为且大修指令丢失（需进程重启恢复） | install 保存 saved_word、revert 写回保存值、缺失 fail-closed：`c1e136bc`；真机停用→monster 原生行为、启用→弹窗恢复三步 PASS |
-| FIX-03 | core.ui_state（`game/access/ui_state.cpp` dialog 路径） | `dialog_select` 中 `G_POPUP_ON` 通用分支先于 wipeout 判定：阵亡后对 wipeout 子弹窗发 `ok` → 调通用 `F_BUTTON_OK_EXE` → wipeout 场景控制对象失效 → 下一帧 `ControlScroll_Process` 空指针 SIGSEGV（fault 0x58，libgame.so；同签名崩溃 tombstone_25/26/27，受控实验定位触发步） | wipeout 判定前移 + `dialog_ok/cancel` 防御纵深 fail-closed：`8cf061ef`；真机复验 `ok`→`no such option in wipeout` 且无新 tombstone；人工点击弹窗游戏正常 |
-| FIX-04 | core.world + game/nav + contracts | BFS 双实现（插件私有 `navigation_bfs` 与 `game/nav/nav_bfs` 重复约 80 行，修复需双改）；写面输入无 INT32/溢出守卫、快照端口检查缺口、message_len 31/30 不一致 | 统一为无状态纯函数 `contracts/nav_bfs.h`（game 与插件共用）+ 守卫/限速告警：`39b90e4e`；新增 `nav_bfs_tests` 与写路径 host 用例；行为差异点（越界目标不再索引别名伪 found→走最近可达）已真机目视 PASS |
-| FIX-05 | contracts/world_facts + core.world + core.item + world_teleport | money 经 `world.facts` 重复暴露（与 `core.item` 金钱 owner 冲突，违背领域归口） | 迁移：world.facts 2.0 移除 money、item.facts 1.1 追加、world_teleport 查钱改 item.facts（fail-closed）：`9e2c2384`；真机传送扣费/余额不足路径 PASS。备注：`tutorial_state` 经用户裁决保留于 world.facts（暂停世界的游戏状态） |
 
 ## 1. core.world（开放）
 
@@ -61,7 +52,7 @@
 
 | ID | 级 | 问题 | 证据 | 状态 |
 |---|---|---|---|---|
-| UIS-01 | P2 | wipeout `game_over` 后的次级确认弹窗无法经 API 推进：通用 OK 被 FIX-03 的 fail-closed 挡住（正确行为待查——该弹窗自有 button handler，游戏原生点击正常通过） | 真机受控实验（人工点按正常继续 + 崩溃链分析） | 开放（识别该弹窗 VMA 并路由其自身 handler；修复前恢复流程需人工一次点按） |
+| UIS-01 | P2 | wipeout `game_over` 后的 YesNo 确认弹窗（TextData 0x14）缺正确的「Yes」推进 handler：`game_over`（`F_WIPEOUT_BUTTON_GAMEOVER_VMA`，game_symbols.h:926）弹出该确认。弹窗**可识别可读**——screen 返回 `dialog_popup`（与面板态 `dialog_wipeout` 可区分）；popup 栈顶仍为 wipeout 入口（FIX-03 的 fail-closed 判定正基于此，`ok` 被拒已实测）；但通用 `F_BUTTON_OK_EXE` 不适用该弹窗（误用即 FIX-03 崩溃根因），游戏原生点按正常 → 其自身 button 链存在、待定位并接入 | `game_symbols.h:924-926`（revive/special_revive 为离线网络链弹窗 TextData 0x4e，模块不暴露）；真机受控实验 | 开放（RE YesNo 按钮 handler 后新增 action，如 confirm_yes；修复前死亡恢复流程需人工一次点按。确认文本可先经 `GET /api/ui/dialog` 真机核对——预期命中 popup 优先分支，未实测） |
 | CUI-01 | P3 | `native_choice_open` 在 push 进入外部调用后的并发交错（close/disable 与 push 同时发生）仅有 generation 门禁，真机长时观察未覆盖 | FIX-01 修复报告风险项 | 挂账（真机统一批观察） |
 
 ## 5. core.settings / 配置链路（开放）
@@ -116,3 +107,13 @@
 | DOC-02 | api-reference × core.item | `/items` 每项「附 bag 字段」实际无；EB 容量「16/8/4/0/0」实际按袋派生 [16,16,12,12,12] |
 | DOC-03 | api-reference + game_symbols.h × core.character | §2 章首「设计草案（代码待实现）」过时；装备「position」字段实际为 `slot`；`max_level` 标注「待实现」实际已输出；`set_skill_usage` 规划语义与底层能力冲突（关联 CHR-02）；`game_symbols.h` bit0-2 注释实际 bit0-3 |
 | DOC-04 | build-and-deploy × 全局 | 真机流程补充：阵亡恢复链（wipeout→game_over→**人工一次点按**→enter_slot，API 无法推进 UIS-01）；smoke 写副作用警示（TL-02）；config 三键的门禁语义警示（SET-01） |
+
+## 附录：已修复问题（存证）
+
+| ID | 归属 | 问题 | 修复与复验 |
+|---|---|---|---|
+| FIX-01 | core.custom_ui（触发面 world_teleport 及一切 ui_choice 消费者） | `native_choice_open()` 持 `g_mutex` 调用游戏 `POPUPSTATE_Push`，游戏同线程同步回调 `choice_init_wrapper` 再取同一锁 → GLThread 自锁（点世界地图入口必死锁） | 两阶段 open（锁内准备、锁外 push、generation 回滚）：`d89d272c`；host `native_choice_tests` 含同步重入用例；真机点图弹窗/取消/选择三步 PASS |
+| FIX-02 | patch/（call_patch、instr_patch、claims；元数据 game/access/patches；载体资源 world_teleport `patch:UIPlay_CallMapName`） | branch-return 型 call patch 的 revert 回写编译期常量（原版 `mov x0,#1`）而非安装时实际观测指令；monster v29 停用后大修原生 `B` 指令被覆盖 → 点图呈原版行为且大修指令丢失（需进程重启恢复） | install 保存 saved_word、revert 写回保存值、缺失 fail-closed：`c1e136bc`；真机停用→monster 原生行为、启用→弹窗恢复三步 PASS |
+| FIX-03 | core.ui_state（`game/access/ui_state.cpp` dialog 路径） | `dialog_select` 中 `G_POPUP_ON` 通用分支先于 wipeout 判定：阵亡后对 wipeout 子弹窗发 `ok` → 调通用 `F_BUTTON_OK_EXE` → wipeout 场景控制对象失效 → 下一帧 `ControlScroll_Process` 空指针 SIGSEGV（fault 0x58，libgame.so；同签名崩溃 tombstone_25/26/27，受控实验定位触发步） | wipeout 判定前移 + `dialog_ok/cancel` 防御纵深 fail-closed：`8cf061ef`；真机复验 `ok`→`no such option in wipeout` 且无新 tombstone；人工点击弹窗游戏正常（引出 UIS-01） |
+| FIX-04 | core.world + game/nav + contracts | BFS 双实现（插件私有 `navigation_bfs` 与 `game/nav/nav_bfs` 重复约 80 行，修复需双改）；写面输入无 INT32/溢出守卫、快照端口检查缺口、message_len 31/30 不一致 | 统一为无状态纯函数 `contracts/nav_bfs.h`（game 与插件共用）+ 守卫/限速告警：`39b90e4e`；新增 `nav_bfs_tests` 与写路径 host 用例；行为差异点（越界目标不再索引别名伪 found→走最近可达）已真机目视 PASS |
+| FIX-05 | contracts/world_facts + core.world + core.item + world_teleport | money 经 `world.facts` 重复暴露（与 `core.item` 金钱 owner 冲突，违背领域归口） | 迁移：world.facts 2.0 移除 money、item.facts 1.1 追加、world_teleport 查钱改 item.facts（fail-closed）：`9e2c2384`；真机传送扣费/余额不足路径 PASS。备注：`tutorial_state` 经用户裁决保留于 world.facts（暂停世界的游戏状态） |
