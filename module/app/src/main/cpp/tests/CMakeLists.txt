@@ -1100,3 +1100,21 @@ target_compile_definitions(core_patches_shape_tests PRIVATE
 target_compile_features(core_patches_shape_tests PRIVATE cxx_std_17)
 set_target_properties(core_patches_shape_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_patches_shape_tests COMMAND core_patches_shape_tests)
+
+# core.ui_state wipeout 对话动作必须绕过通用 popup 按钮处理。
+add_executable(ui_state_dialog_tests
+    test_ui_state_dialog.cpp
+    ${CPP_DIR}/game/access/ui_state.cpp
+)
+target_include_directories(ui_state_dialog_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(ui_state_dialog_tests PRIVATE cxx_std_17)
+set_target_properties(ui_state_dialog_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_options(ui_state_dialog_tests PRIVATE -ffunction-sections -fdata-sections)
+target_link_options(ui_state_dialog_tests PRIVATE -Wl,--gc-sections)
+add_test(NAME ui_state_dialog_tests COMMAND ui_state_dialog_tests)

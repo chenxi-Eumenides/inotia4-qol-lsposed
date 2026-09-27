@@ -13,6 +13,7 @@
 #include "game/state/game_state.h"
 
 #include <chrono>
+#include <cstring>
 #include <string>
 #include <thread>
 
@@ -397,13 +398,13 @@ DialogWriteResult npc_dialog_select(int index) {
 DialogWriteResult dialog_select(const std::string& action, int index) {
     if (!game_in_world()) return pack_dialog(op_err("not in game"));
     // 先按当前态确定合法 action 集合（与 dialog content 判定一致：popup 最优先）
-    if (g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on)) {
+    if (popup_top_vma() == F_PANEL_WIPEOUT_ENTER) {
+        // wipeout 的专用场景处理不兼容通用 popup 按钮执行函数。
+        if (action != "game_over") return pack_dialog(op_err("no such option in wipeout"));
+    } else if (g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on)) {
         if (action != "ok" && action != "cancel") return pack_dialog(op_err("no such option in popup"));
     } else if (story_active()) {
         if (action != "next" && action != "skip") return pack_dialog(op_err("no such option in story"));
-    } else if (popup_top_vma() == F_PANEL_WIPEOUT_ENTER) {
-        // 仅提供 game_over：revive/special_revive 走网络链，离线无作用，不再暴露。
-        if (action != "game_over") return pack_dialog(op_err("no such option in wipeout"));
     } else if (popup_top_vma() == F_PANEL_NPC_QUEST_ENTER) {
         // npc_quest 面板：仅接受 complete（完成任务）/ close（关闭面板）
         if (action != "complete" && action != "close") return pack_dialog(op_err("no such option in npc_quest"));
@@ -467,6 +468,8 @@ DialogWriteResult dialog_select(const std::string& action, int index) {
 
 DialogWriteResult dialog_ok() {
     if (g_base == 0) return pack_dialog(op_err("libgame not loaded"));
+    if (popup_top_vma() == F_PANEL_WIPEOUT_ENTER)
+        return pack_dialog(op_err("no such option in wipeout"));
     if (*reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) == 0) return pack_dialog(op_err("no dialog"));
     reinterpret_cast<void (*)()>(g_base + F_BUTTON_OK_EXE_VMA)();
     return pack_dialog(op_ok());
@@ -474,6 +477,8 @@ DialogWriteResult dialog_ok() {
 
 DialogWriteResult dialog_cancel() {
     if (g_base == 0) return pack_dialog(op_err("libgame not loaded"));
+    if (popup_top_vma() == F_PANEL_WIPEOUT_ENTER)
+        return pack_dialog(op_err("no such option in wipeout"));
     if (*reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) == 0) return pack_dialog(op_err("no dialog"));
     reinterpret_cast<void (*)()>(g_base + F_BUTTON_CANCEL_EXE_VMA)();
     return pack_dialog(op_ok());
