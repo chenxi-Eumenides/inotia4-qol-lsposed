@@ -52,7 +52,7 @@
 
 | ID | 级 | 问题 | 证据 | 状态 |
 |---|---|---|---|---|
-| UIS-01 | P2 | wipeout `game_over` 后的 YesNo 确认弹窗（TextData 0x14）缺正确的「Yes」推进 handler：`game_over`（`F_WIPEOUT_BUTTON_GAMEOVER_VMA`，game_symbols.h:926）弹出该确认。弹窗**可识别可读**——screen 返回 `dialog_popup`（与面板态 `dialog_wipeout` 可区分）；popup 栈顶仍为 wipeout 入口（FIX-03 的 fail-closed 判定正基于此，`ok` 被拒已实测）；但通用 `F_BUTTON_OK_EXE` 不适用该弹窗（误用即 FIX-03 崩溃根因），游戏原生点按正常 → 其自身 button 链存在、待定位并接入 | `game_symbols.h:924-926`（revive/special_revive 为离线网络链弹窗 TextData 0x4e，模块不暴露）；真机受控实验 | 开放（RE YesNo 按钮 handler 后新增 action，如 confirm_yes；修复前死亡恢复流程需人工一次点按。确认文本可先经 `GET /api/ui/dialog` 真机核对——预期命中 popup 优先分支，未实测） |
+| UIS-01 | P2 | wipeout `game_over` 后的 YesNo 确认弹窗（TextData 0x14）缺正确的「Yes」推进 handler：`game_over`（`F_WIPEOUT_BUTTON_GAMEOVER_VMA`，game_symbols.h:926）弹出该确认。**并非无法识别**：screen 实测由 `dialog_wipeout` 变为 `dialog_popup`；popup 栈顶仍为 wipeout 入口（FIX-03 的 fail-closed 判定与 `ok` 被拒均已实测）。`GET /api/ui/dialog` 的弹窗分支可输出 `type:popup`、文本、`G_POPUP_FPOK/FPCANCEL` 对应的选项，但该确认弹窗的具体响应尚未真机取证；问题是通用 `F_BUTTON_OK_EXE` 不适用该弹窗（误用即 FIX-03 崩溃根因），游戏原生点按正常 → 其自身 button 链存在、待定位并接入 | `game_symbols.h:924-926`、`game/access/ui_state.cpp:522-540`；真机受控实验 | 开放（先捕获此弹窗的 `GET /api/ui/dialog` 内容，再定位 YesNo 按钮 handler 并新增 action；修复前死亡恢复流程需人工一次点按） |
 | CUI-01 | P3 | `native_choice_open` 在 push 进入外部调用后的并发交错（close/disable 与 push 同时发生）仅有 generation 门禁，真机长时观察未覆盖 | FIX-01 修复报告风险项 | 挂账（真机统一批观察） |
 
 ## 5. core.settings / 配置链路（开放）
