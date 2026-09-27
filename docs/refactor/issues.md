@@ -108,6 +108,12 @@
 | DOC-03 | api-reference + game_symbols.h × core.character | §2 章首「设计草案（代码待实现）」过时；装备「position」字段实际为 `slot`；`max_level` 标注「待实现」实际已输出；`set_skill_usage` 规划语义与底层能力冲突（关联 CHR-02）；`game_symbols.h` bit0-2 注释实际 bit0-3 |
 | DOC-04 | build-and-deploy × 全局 | 真机流程补充：阵亡恢复链（wipeout→game_over→**人工一次点按**→enter_slot，API 无法推进 UIS-01）；smoke 写副作用警示（TL-02）；config 三键的门禁语义警示（SET-01） |
 
+## 10. 无法验证项（用户确认后登记，不再主动验收）
+
+| ID | 归属 | 项 | 原因 |
+|---|---|---|---|
+| UNVER-01 | core.world（写执行链 game/access/world.cpp 的 `tutorial_block_error` 分支） | 教学态拦截：药水教学激活时 world 写面被拒绝、读面暂态语义 | 无教学存档可进入教学态（用户 2026-09-28 确认）；不再主动验收，代码保持现状 |
+
 ## 附录：已修复问题（存证）
 
 | ID | 归属 | 问题 | 修复与复验 |
