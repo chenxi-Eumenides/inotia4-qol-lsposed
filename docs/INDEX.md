@@ -11,7 +11,7 @@
 | 使用已构建模块 | `guides/game-guide.md` | `reference/api-reference.md` |
 | 从源码构建和部署 | `guides/build-and-deploy.md` | 根目录 `AGENTS.md` |
 | 修改 Kotlin/Native 代码 | 根目录 `ARCHITECTURE.md` | `AGENTS.md`、`docs/refactor/` |
-| 继续重构工作 | `ARCHITECTURE.md`、`refactor/verification.md` | `refactor/baseline.md`、`refactor/api-route-map.md`、归档 `history/refactor-closure/` |
+| 继续重构工作 | `ARCHITECTURE.md`、`refactor/verification.md` | `refactor/baseline.md`、`refactor/api-route-map.md`、`refactor/plugin-audit-playbook.md`、`refactor/issues.md`、归档 `history/refactor-closure/` |
 | 理解 API 契约 | `reference/api-reference.md` | `guides/game-guide.md` |
 | 理解原版游戏机制 | `reference/game/` | 归档的 `archive/docs/development/features/` |
 | 查静态分析产物（解码 / 反编译 / 静态表） | `apk/decoded/`、`apk/decompiled/`、`apk/static-data/` | `guides/build-and-deploy.md` §1 |
@@ -27,6 +27,7 @@
 - `verification.md`：验证矩阵与验收卡（PASS / NOT_ACCEPTED 定义与证据位置）；§5「活跃债务与待补证据」为活跃债务唯一登记处。
 - `api-route-map.md`：路由迁移核对材料，记录路由过程状态。
 - `issues.md`：问题台账（插件审计与真机事件调查确认的缺陷问题，含归属/证据/状态）；只记录问题，证据欠账仍以 `verification.md` §5 为唯一登记处。
+- `plugin-audit-playbook.md`：插件审计-修复-测试闭环手册（阶段分工、裁决类别、事故分支流程、多插件并行约束）。
 - 以下三份**已归档**（2026-09-26，`docs/history/refactor-closure/`，**仅供参考，不得作为落地依据**）；活跃内容已迁 `verification.md` §5：
   - 原 `ledger.md`（迁移台账）
   - 原 `current-optimization-review.md`（当前优化记录）
