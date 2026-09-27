@@ -23,6 +23,7 @@ UiChoiceInitFn g_init_original = nullptr;
 ChoiceButtonExecuteFn g_button_original = nullptr;
 bool g_installed = false;
 bool g_active = false;
+bool g_open_inflight = false;
 uint64_t g_generation = 0;
 contracts::UiChoiceSpec g_active_spec{};
 std::array<std::array<char, kTextBufferSize>, native_choice_detail::kMaxItems> g_item_text{};
@@ -57,13 +58,22 @@ void choice_init_wrapper(void* control) {
         original = g_init_original;
     }
     if (original != nullptr) original(control);
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_active || !g_pending_title || g_active_spec.title == nullptr || choice() == nullptr ||
-        choice()->write.write_title == nullptr) {
-        return;
+    const char* title = nullptr;
+    uint64_t generation = 0;
+    const contracts::QolChoicePort* port = choice();
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_active || !g_pending_title || g_active_spec.title == nullptr || port == nullptr ||
+            port->write.write_title == nullptr) {
+            return;
+        }
+        // 游戏保存标题指针；地址必须在选择框存活期间保持有效。
+        title = g_title.data();
+        generation = g_generation;
     }
-    (void)choice()->write.write_title(g_title.data());
-    g_pending_title = false;
+    (void)port->write.write_title(title);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_active && g_generation == generation) g_pending_title = false;
 }
 
 void choice_button_execute(void* control) {
@@ -91,11 +101,13 @@ void choice_button_execute(void* control) {
     int32_t owned = 0;
     if (!contracts::succeeded(choice()->read.selected_index(&index)) ||
         !contracts::succeeded(choice()->read.text_owns(
-            g_active_spec.items, static_cast<uint32_t>(g_active_spec.count), &owned)) ||
+            spec.items, static_cast<uint32_t>(spec.count), &owned)) ||
         owned == 0 || index < 0 || index >= spec.count ||
         !contracts::succeeded(choice()->write.write_focus(index))) {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (g_active && g_generation == generation) clear_active_locked();
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (g_active && g_generation == generation) clear_active_locked();
+        }
         call_original(original, control);
         return;
     }
@@ -122,39 +134,59 @@ void choice_button_execute(void* control) {
 
 bool native_choice_open(const contracts::UiChoiceSpec& spec) {
     if (!native_choice_detail::valid_spec(spec)) return false;
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_installed || g_active) return false;
-    if (choice() == nullptr || choice()->read.state_id == nullptr ||
-        choice()->write.write_items == nullptr || choice()->write.write_focus == nullptr ||
-        choice()->write.push == nullptr) return false;
+    const contracts::QolChoicePort* port = choice();
+    uint64_t generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_installed || g_active || g_open_inflight || port == nullptr ||
+            port->read.state_id == nullptr ||
+            port->write.write_items == nullptr || port->write.write_focus == nullptr ||
+            port->write.push == nullptr) return false;
+        for (int i = 0; i < spec.count; ++i) {
+            copy_text(g_item_text[static_cast<size_t>(i)].data(), kTextBufferSize, spec.items[i]);
+        }
+        g_item_ptrs.fill(nullptr);
+        for (int i = 0; i < spec.count; ++i) {
+            g_item_ptrs[static_cast<size_t>(i)] = g_item_text[i].data();
+        }
+        copy_text(g_title.data(), g_title.size(), spec.title);
+        g_active_spec = spec;
+        g_active_spec.items = g_item_ptrs.data();
+        g_active_spec.title = spec.title == nullptr || spec.title[0] == '\0' ? nullptr : g_title.data();
+        g_active = true;
+        g_open_inflight = true;
+        g_pending_title = g_active_spec.title != nullptr;
+        generation = ++g_generation;
+    }
+
     int32_t state_id = -1;
-    if (!contracts::succeeded(choice()->read.state_id(&state_id)) || state_id < 0) {
-        return false;
-    }
-    for (int i = 0; i < spec.count; ++i) {
-        copy_text(g_item_text[static_cast<size_t>(i)].data(), kTextBufferSize, spec.items[i]);
-    }
-    g_item_ptrs.fill(nullptr);
-    for (int i = 0; i < spec.count; ++i) {
-        g_item_ptrs[static_cast<size_t>(i)] = g_item_text[i].data();
-    }
-    if (!contracts::succeeded(choice()->write.write_items(
+    if (!contracts::succeeded(port->read.state_id(&state_id)) || state_id < 0 ||
+        !contracts::succeeded(port->write.write_items(
             g_item_ptrs.data(), static_cast<uint32_t>(spec.count))) ||
-        !contracts::succeeded(choice()->write.write_focus(0))) {
-        return false;
-    }
-    copy_text(g_title.data(), g_title.size(), spec.title);
-    g_active_spec = spec;
-    g_active_spec.items = g_item_ptrs.data();
-    g_active_spec.title = spec.title == nullptr || spec.title[0] == '\0' ? nullptr : g_title.data();
-    g_active = true;
-    g_pending_title = g_active_spec.title != nullptr;
-    const uint64_t generation = ++g_generation;
-    if (!contracts::succeeded(choice()->write.push())) {
+        !contracts::succeeded(port->write.write_focus(0))) {
+        std::lock_guard<std::mutex> lock(g_mutex);
         if (g_active && g_generation == generation) clear_active_locked();
+        g_open_inflight = false;
         return false;
     }
-    return true;
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_installed || !g_active || g_generation != generation) {
+            g_open_inflight = false;
+            return false;
+        }
+    }
+    if (!contracts::succeeded(port->write.push())) {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_active && g_generation == generation) clear_active_locked();
+        g_open_inflight = false;
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const bool opened = g_active && g_generation == generation;
+    g_open_inflight = false;
+    return opened;
 }
 
 bool native_choice_active() {
@@ -192,7 +224,7 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 void native_choice_set_installed(bool installed) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_installed = installed;
-    if (!installed) g_active = false;
+    if (!installed && g_active) clear_active_locked();
 }
 
 }  // namespace qol::features::core_ui

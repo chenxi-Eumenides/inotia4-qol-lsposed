@@ -209,8 +209,7 @@ target_include_directories(save_warehouse_validate_tests PRIVATE
 target_compile_features(save_warehouse_validate_tests PRIVATE cxx_std_17)
 add_test(NAME save_warehouse_validate_tests COMMAND save_warehouse_validate_tests)
 
-# 原生选择框插件 host 测试：纯逻辑（spec 校验/串行化/关闭项/文本归属地址区间）+
-# 插件清单（ui_choice 提供 + 2 条声明式资源）。feature.cpp 运行时实现以桩替代。
+# 原生选择框插件 host 测试：真实 feature.cpp、同步 push→init hook 回调、失败回滚与生命周期门禁。
 add_executable(native_choice_tests
     test_native_choice.cpp
     ${CPP_DIR}/plugins/core.custom_ui/feature.cpp
@@ -226,6 +225,7 @@ target_compile_features(native_choice_tests PRIVATE cxx_std_17)
 # contracts/plugin.h 字段名 requires 在 C++20 是关键字：显式锚定 C++17（与 Android 构建一致）。
 set_target_properties(native_choice_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME native_choice_tests COMMAND native_choice_tests)
+set_tests_properties(native_choice_tests PROPERTIES TIMEOUT 10)
 
 # 角色属性面板标签中文化白名单 host 测试（纯表逻辑，header-inline，末尾追加）
 add_executable(module_text_tests
