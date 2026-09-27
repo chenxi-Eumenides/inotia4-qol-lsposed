@@ -26,6 +26,7 @@
 - `baseline.md`：现状基线清单，**由脚本生成**（`uv run python scripts/maintenance/gen_baseline_doc.py`），禁止手工编辑。
 - `verification.md`：验证矩阵与验收卡（PASS / NOT_ACCEPTED 定义与证据位置）；§5「活跃债务与待补证据」为活跃债务唯一登记处。
 - `api-route-map.md`：路由迁移核对材料，记录路由过程状态。
+- `issues.md`：问题台账（插件审计与真机事件调查确认的缺陷问题，含归属/证据/状态）；只记录问题，证据欠账仍以 `verification.md` §5 为唯一登记处。
 - 以下三份**已归档**（2026-09-26，`docs/history/refactor-closure/`，**仅供参考，不得作为落地依据**）；活跃内容已迁 `verification.md` §5：
   - 原 `ledger.md`（迁移台账）
   - 原 `current-optimization-review.md`（当前优化记录）
@@ -55,7 +56,7 @@
 - **目标架构（重构期唯一权威）**：根目录 `ARCHITECTURE.md`
 - **重构期差距与优化记录（已归档，仅供参考）**：`history/refactor-closure/current-optimization-review.md`
 - 代理规则：根目录及各源码目录的 `AGENTS.md`
-- 重构执行材料：`refactor/verification.md`、`refactor/baseline.md`、`refactor/api-route-map.md`；重构期过程材料已归档 `history/refactor-closure/`（`ledger.md`、`current-optimization-review.md`、`map.md`）
+- 重构执行材料：`refactor/verification.md`、`refactor/baseline.md`、`refactor/api-route-map.md`、`refactor/issues.md`（问题台账）；重构期过程材料已归档 `history/refactor-closure/`（`ledger.md`、`current-optimization-review.md`、`map.md`）
 - API 契约：`reference/api-reference.md`
 - 原版游戏事实：`reference/game/`
 - 历史资料（仅供参考）：`history/`、`archive/docs/development/`
