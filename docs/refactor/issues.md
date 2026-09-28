@@ -31,6 +31,7 @@
 | ITM-09 | P2 | `update_snapshot` 各失败路径静默 return（无 warn），快照停更不可观测 | `plugin.cpp:605-651`；审计 F-12 | 开放（与 WLD-01 同类，统一 warn 模式） |
 | ITM-10 | P3 | `enrich_shop_items` 白名单重放（slot/category/count/price），上游新增字段被静默丢弃 | `response.cpp:396-407`；审计 F-15 | 开放（schema 锁定注释+测试） |
 | ITM-11 | P3 | `fill_status` 在 installed_disabled 仍报 enabled=true 且无消费者（与 core.world I-01 及全局同型） | `plugin.cpp:1596-1599`；审计 F-11 | 并入 ENG-04 统一处置 |
+| ITM-12 | P2 | core→feature 依赖方向倒置：`core.item` optional_requires `stack_limit.item_count`（enabled 门控+canonical 解码双需求），而 **optional 边参与安装拓扑**（registry `topo_build(include_optional)`），使 feature 插件 stack_limit 必然先于 core owner 安装；check_layers 只校验 include 面，capability 边的方向违例静态不可见。行为当前正确，问题在架构方向与次序。候选 A：解码走既有 host facade、enabled 改由宿主状态面查询，能力边删除；候选 B：堆叠编码语义下沉 game 层归口物品域，stack_limit 仅保留 clamp 资源与开关 | `plugins/core.item/plugin.cpp:129-144,280-285`、`plugins/stack_limit/plugin.cpp:263`（facade set-once 常驻）、`contracts/item_count.h`、`host/plugin_registry.cpp:420-465` | 待裁决（阶段 2，与 ITM-02 一并定声明策略） |
 
 ## 3. core.character（开放）
 
