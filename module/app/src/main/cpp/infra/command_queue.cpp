@@ -46,6 +46,7 @@ std::deque<CommandTicket> g_fifo;
 struct TerminalEntry {
     CommandState state = CommandState::kDone;
     std::string result;  // 空 = 无结果或结果已被预算淘汰
+    bool overflowed = false;
 };
 std::unordered_map<CommandTicket, TerminalEntry> g_terminal;
 std::deque<CommandTicket> g_terminal_order;
@@ -53,11 +54,12 @@ std::size_t g_retained_result_bytes = 0;
 CommandTicket g_next_ticket = 1;  // 票据从 1 起单调递增
 
 void record_terminal_locked(CommandTicket ticket, CommandState state, const char* result,
-                            uint32_t result_size) {
+                            uint32_t result_size, bool overflowed = false) {
     TerminalEntry entry;
     entry.state = state;
-    if (result != nullptr && result_size != 0 && result_size <= kMaxResultBytes) {
-        entry.result.assign(result, result_size);
+    entry.overflowed = overflowed || result_size > kMaxResultBytes;
+    if (result != nullptr && result_size != 0) {
+        entry.result.assign(result, std::min(result_size, kMaxResultBytes));
     }
     g_retained_result_bytes += entry.result.size();
     g_terminal[ticket] = std::move(entry);
@@ -120,6 +122,12 @@ bool read_result(CommandTicket ticket, char* out, uint32_t capacity, uint32_t* o
     return true;
 }
 
+bool ticket_result_overflowed(CommandTicket ticket) {
+    std::lock_guard<std::mutex> lock(g_mtx);
+    const auto it = g_terminal.find(ticket);
+    return it != g_terminal.end() && it->second.overflowed;
+}
+
 bool cancel(CommandTicket ticket) {
     std::lock_guard<std::mutex> lock(g_mtx);
     const auto it = g_active.find(ticket);
@@ -167,6 +175,11 @@ uint32_t drain() {
         } else if (command.run != nullptr) {
             ok = command.run(command.ctx);
         }
+        const bool overflowed = result_size > result_buffer.size();
+        if (overflowed) {
+            result_size = static_cast<uint32_t>(result_buffer.size());
+            ok = true;
+        }
         const bool defer = g_defer_requested;
         g_defer_requested = false;
         std::lock_guard<std::mutex> lock(g_mtx);
@@ -191,7 +204,8 @@ uint32_t drain() {
         }
         g_active.erase(it);
         record_terminal_locked(ticket, ok ? CommandState::kDone : CommandState::kFailed,
-                               result_size != 0 ? result_buffer.data() : nullptr, result_size);
+                               result_size != 0 ? result_buffer.data() : nullptr, result_size,
+                               overflowed);
         ++executed;
     }
     return executed;

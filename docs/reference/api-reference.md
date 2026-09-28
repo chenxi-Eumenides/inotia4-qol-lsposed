@@ -1815,9 +1815,9 @@
 - `ticket`：路径参数回显（`id` 为十进制票据号）。
 - `state`：`pending`（排队/执行中）/ `done`（成功）/ `failed`（命令执行失败）/ `cancelled`（已取消）/ `unknown`（票据不存在）/ `expired`（状态记录已被有界窗口淘汰，结果不可判定）。**`unknown`/`expired` 与 `failed` 语义不同，调用方必须区分**。
 - `result`：仅当结果被保留时出现，内容为该写端点迁移前的**原响应 JSON**（成功或失败体）。
-- `result_retained`：`false` 表示本票据无结果或结果已被淘汰（此时不出现 `result` 字段）。
+- `result_retained`：`false` 表示完整结果不可回取（无结果、超单结果上限而截断，或已被淘汰）；超限结果不会作为不完整 JSON 写入 `result`。
 
-**结果保留为明确尽力语义**（不承诺必然可取回）：单结果上限 16 KB；结果总预算 512 KB；终态状态窗口最近 1024 条。超出预算时从最旧开始淘汰结果（保留状态）；超单结果上限或已淘汰时 `result_retained=false`。客户端应在命令终态后及时轮询。
+**结果保留为明确尽力语义**（不承诺必然可取回）：单结果上限 16 KB；结果总预算 512 KB；终态状态窗口最近 1024 条。命令体输出超过结果缓冲上限时，infra 截断保留前 16 KB 并标记超限；票据仍按操作执行结果结算，`result_retained=false` 且不返回不完整 JSON。超出总预算时从最旧开始淘汰结果（保留状态）；已淘汰时同样 `result_retained=false`。客户端应在命令终态后及时轮询。
 
 **注意**：`id` 为 0 → `{"ok":false,"error":"invalid ticket"}`。响应体由 native `nativeTicketStateJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 

@@ -235,8 +235,12 @@ const QolCharacterHttpPort kFakeHttpPort{qol::contracts::kQolPortCharacterHttpVe
 const qol::contracts::QolCharacterPort kFakeCharacterPort{
     qol::contracts::kQolPortCharacterVersion, {&fake_type, &fake_active}};
 
+bool g_state_party_fails = false;
 QolResult fake_state_party(qol::contracts::QolCharacterStateParty* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (g_state_party_fails) {
+        return qol::contracts::error(kQolErrNotReady, "state unavailable", 17);
+    }
     *out = {};
     return qol::contracts::ok();
 }
@@ -555,6 +559,12 @@ void test_no_body_and_boolean_semantics() {
                                   qol::contracts::QolCharacterWriteKind::kSetAutoAttack));
         CHECK(payload.i0 == 1 && payload.i1 == expected[i]);
     }
+    bool result_ok = false;
+    g_state_party_fails = true;
+    CHECK(dispatch_post("/api/character/combat/1/set_auto_attack", "{\"on\":true}", &role,
+                        1, &status) == "{\"ok\":true,\"ticket\":11}");
+    CHECK(run_post_result(&result_ok) == "{\"ok\":true}" && result_ok);
+    g_state_party_fails = false;
 }
 
 void test_android_number_semantics() {

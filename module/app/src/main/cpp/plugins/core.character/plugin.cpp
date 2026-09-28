@@ -1,5 +1,6 @@
 #include "plugin.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
@@ -1327,6 +1328,15 @@ bool write_op_error(char* out, uint32_t capacity, uint32_t* out_size, const char
     return false;
 }
 
+bool write_truncated_result(char* out, uint32_t capacity, uint32_t* out_size,
+                            const std::string& body) {
+    if (out == nullptr || out_size == nullptr) return false;
+    const uint32_t copied = static_cast<uint32_t>(std::min<std::size_t>(body.size(), capacity));
+    if (copied != 0) std::memcpy(out, body.data(), copied);
+    *out_size = static_cast<uint32_t>(body.size());
+    return true;
+}
+
 // 写后 state：owner 经 character.state 读端口当场同步读取并序列化，与迁移前 build_*_json 逐字节一致。
 bool append_character_state(std::string& body, contracts::QolCharacterStateKind kind,
                             uint32_t capacity) {
@@ -1388,14 +1398,10 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                     body += std::string(",\"value\":") + std::to_string(p.point_amt[i]);
                 }
                 body += "}";
-                if (body.size() > capacity) return false;
             }
         }
         body += "]}";
-        if (body.size() > capacity) return false;
-        std::memcpy(out, body.data(), body.size());
-        *out_size = static_cast<uint32_t>(body.size());
-        return true;
+        return write_truncated_result(out, capacity, out_size, body);
     }
 
     contracts::QolCharacterStateKind state_kind = contracts::QolCharacterStateKind::kParty;
@@ -1482,11 +1488,8 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                               op.error_message_len != 0 ? op.error_message : nullptr);
     }
     std::string body = "{\"ok\":true}";
-    if (has_state && !append_character_state(body, state_kind, capacity)) return false;
-    if (body.size() > capacity) return false;
-    std::memcpy(out, body.data(), body.size());
-    *out_size = static_cast<uint32_t>(body.size());
-    return true;
+    if (has_state) (void)append_character_state(body, state_kind, capacity);
+    return write_truncated_result(out, capacity, out_size, body);
 }
 
 const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {

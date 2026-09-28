@@ -259,6 +259,7 @@ int inventory_quantity(int category) {
 }
 
 void* inventory_item_at(int bag, int slot) {
+    if (bag == 5) return nullptr;
     InventoryItemRef ref{};
     if (!inventory_item_ref_at(bag, slot, &ref)) return nullptr;
     return ref.native_item;
@@ -280,8 +281,8 @@ bool find_inventory_item_ref(int category, InventoryItemRef* out) {
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
     *out = {};
-    // D2b：扩展逻辑袋读取经能力接口现取（不缓存跨帧指针）。能力缺失 = EB disabled：
-    // 逻辑袋 6..10 视为不存在，直接落回下方物理袋路径（bag >= 5 返回 false）。
+    // D2b：扩展逻辑袋读取经能力接口现取（不缓存跨帧指针）。能力缺失时逻辑袋 6..10
+    // 视为不存在；物理任务袋 5 仍可只读访问。
     const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
     if (eb != nullptr && eb->is_logical_bag != nullptr && eb->is_logical_bag(bag)) {
         struct Ctx { int bag; int slot; InventoryItemRef* out; } ctx{bag, slot, out};
@@ -303,7 +304,7 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
         }
         return out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot;
     }
-    if (bag >= 5 || g_inven == nullptr || fn_get_bit == nullptr) {
+    if (bag > 5 || g_inven == nullptr || fn_get_bit == nullptr) {
         return false;
     }
     uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + bag * 0x80;

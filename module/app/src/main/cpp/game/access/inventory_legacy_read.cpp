@@ -83,8 +83,7 @@ void append_item_attrs(std::string& s, void* item) {
 
 std::string build_inventory_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
-    // INVEN_pItem(G_INVEN_VMA)：背包槽数组，6 袋 × 0x80 步长，每槽 8B 物品指针。
-    // 每袋 16 槽（6×16=96，与真机实测 slotCount 总和一致）。
+    // INVEN_pItem(G_INVEN_VMA)：6 袋 × 0x80 步长，每槽 8B 物品指针；袋 5 仍只读遍历。
     // 空槽=0 指针；物品 +0x08 类型位域(u16)、+0x10 数量位域(u32)。
     constexpr int BAG_COUNT = 6;
     constexpr size_t BAG_STRIDE = 0x80;

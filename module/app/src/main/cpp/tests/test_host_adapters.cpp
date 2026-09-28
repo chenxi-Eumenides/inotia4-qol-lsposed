@@ -34,6 +34,7 @@
 #include "game/clock.h"
 #include "host/adapters.h"
 #include "infra/capabilities.h"
+#include "infra/command_queue.h"
 #include "infra/events.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
@@ -120,6 +121,10 @@ bool g_item_count_probe = false;
 uint32_t g_adapter_canonical_count = 0;
 int32_t g_adapter_canonical_error = kQolOk;
 bool adapter_item_count_probe() { return g_item_count_probe; }
+bool overflow_result(void*, char*, uint32_t capacity, uint32_t* out_size) {
+    *out_size = capacity + 1;
+    return false;
+}
 QolResult adapter_item_count_canonical(const void*, uint32_t* out_count) {
     if (g_adapter_canonical_error != kQolOk) {
         return qol::contracts::error(g_adapter_canonical_error, "provider error", 14);
@@ -426,6 +431,14 @@ int main() {
     fn_get_bag_size = &fake_get_bag_size;
     fn_is_empty_bag = &fake_is_empty_bag;
     fn_inven_find_save_slot = &fake_find_save_slot;
+    qol::infra::command_queue_reset_for_test();
+    const qol::infra::CommandTicket overflow_ticket = qol::infra::post(
+        qol::infra::Command{"host_adapter_overflow", nullptr, nullptr, false,
+                            &overflow_result});
+    assert(overflow_ticket != 0 && qol::infra::drain() == 1);
+    assert(qol::infra::ticket_state(overflow_ticket) == qol::infra::CommandState::kDone);
+    assert(qol::infra::ticket_result_overflowed(overflow_ticket));
+    qol::infra::command_queue_reset_for_test();
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);

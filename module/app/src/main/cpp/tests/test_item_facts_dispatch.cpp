@@ -40,6 +40,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -68,7 +69,7 @@ constexpr char kInventoryJson[] =
     "{\"bag\":2,\"items\":[],\"capacity\":16,\"slot_count\":0},"
     "{\"bag\":3,\"items\":[],\"capacity\":16,\"slot_count\":0},"
     "{\"bag\":4,\"items\":[],\"capacity\":16,\"slot_count\":0},"
-    "{\"bag\":5,\"items\":[],\"capacity\":16,\"slot_count\":0}]}";
+     "{\"bag\":5,\"items\":[],\"capacity\":16,\"slot_count\":0}]}";
 
 constexpr char kShopJson[] =
     "{\"items\":[{\"slot\":0,\"category\":10,\"count\":5,\"price\":15}]}";
@@ -354,6 +355,9 @@ QolResult fake_state_shop_buy(int32_t slot,
 QolResult fake_state_move(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
                           int32_t to_slot,
                           qol::contracts::QolItemInventoryStateWriteResult* out) {
+    if (bag == 5 || to_bag == 5) {
+        return qol::contracts::error(kQolErrBlocked, "task bag excluded", 17);
+    }
     g_state_move_count = count;
     g_state_move_to_bag = to_bag;
     g_state_move_to_slot = to_slot;
@@ -498,8 +502,9 @@ int32_t fake_extension_move(int32_t, int32_t, int32_t, int32_t, char* out, uint3
                             uint32_t* out_len) {
     ++g_extension_move_calls;
     if (out == nullptr || out_len == nullptr) return 0;
-    if (g_extension_move_body.size() > capacity) return 0;
-    std::memcpy(out, g_extension_move_body.data(), g_extension_move_body.size());
+    const uint32_t copied = static_cast<uint32_t>(
+        std::min<std::size_t>(g_extension_move_body.size(), capacity));
+    if (copied != 0) std::memcpy(out, g_extension_move_body.data(), copied);
     *out_len = static_cast<uint32_t>(g_extension_move_body.size());
     return 1;
 }
@@ -1557,6 +1562,7 @@ uint8_t g_golden_bag_storage[6 * 0x80]{};
 uint8_t g_golden_item_a[0x40]{};
 uint8_t g_golden_item_b[0x40]{};
 uint8_t g_golden_item_projected[0x40]{};
+uint8_t g_golden_item_task[0x40]{};
 int32_t g_golden_world = 1;
 int32_t g_golden_raw = 71;
 int32_t g_golden_eb_enabled = 0;
@@ -1656,8 +1662,14 @@ static void golden_eb_for_each(qol::contracts::ExtensionBagItemFn fn, void* ctx)
     }
     (void)fn(6, 0, 10, 199, ctx);
 }
-static int32_t golden_eb_move(int32_t, int32_t, int32_t, int32_t, char*, uint32_t, uint32_t*) {
-    return 0;
+static int32_t golden_eb_move(int32_t, int32_t, int32_t, int32_t, char* out,
+                              uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr) return 0;
+    const uint32_t copied = static_cast<uint32_t>(
+        std::min<std::size_t>(g_extension_move_body.size(), capacity));
+    if (copied != 0) std::memcpy(out, g_extension_move_body.data(), copied);
+    *out_size = static_cast<uint32_t>(g_extension_move_body.size());
+    return 1;
 }
 static qol::contracts::ExtensionBagApi make_golden_eb_api() {
     qol::contracts::ExtensionBagApi api{};
@@ -1704,7 +1716,9 @@ static QolResult golden_cumulate_count(const void*, int32_t* out) {
 }
 static QolResult golden_item_ref_at(int32_t bag, int32_t slot,
                                     qol::contracts::QolInventoryItemRef* out) {
-    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    if (out == nullptr || bag < 0 || bag > 5 || slot < 0 || slot >= 16) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    }
     void* item = golden_bag_item(bag, slot);
     if (item == nullptr) return qol::contracts::error(kQolErrNotFound, "empty", 5);
     *out = qol::contracts::QolInventoryItemRef{
@@ -1806,7 +1820,6 @@ std::string frozen_inventory_json() {
     if (!game_in_world()) return "{\"error\":\"not in game\"}";
     constexpr int BAG_COUNT = 6;
     constexpr size_t BAG_STRIDE = 0x80;
-    constexpr int SLOTS_PER_BAG = 16;
     std::string s = "{\"bags\":[";
     for (int b = 0; b < BAG_COUNT; ++b) {
         if (b > 0) s += ",";
@@ -1814,7 +1827,7 @@ std::string frozen_inventory_json() {
         int filled = 0;
         if (g_inven != nullptr) {
             uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + b * BAG_STRIDE;
-            for (int j = 0; j < SLOTS_PER_BAG; ++j) {
+            for (int j = 0; j < 16; ++j) {
                 void* item = *reinterpret_cast<void**>(bag_slots + j * 8);
                 if (item == nullptr) continue;
                 uint16_t flags =
@@ -1861,14 +1874,17 @@ void test_inventory_owner_vs_legacy_golden() {
     std::memset(g_golden_item_a, 0, sizeof(g_golden_item_a));
     std::memset(g_golden_item_b, 0, sizeof(g_golden_item_b));
     std::memset(g_golden_item_projected, 0, sizeof(g_golden_item_projected));
+    std::memset(g_golden_item_task, 0, sizeof(g_golden_item_task));
     g_override_available = false;
     g_override_enabled = false;
     g_count_encoded = true;
     g_canonical_count = 0;
     golden_fill_item(g_golden_item_a, static_cast<uint16_t>(10 << 6), 71, 6, 0x21, 0);
     golden_fill_item(g_golden_item_b, static_cast<uint16_t>(12 << 6), 1, 0, 0, 1);
+    golden_fill_item(g_golden_item_task, static_cast<uint16_t>(10 << 6), 2, 0, 0, 0);
     *reinterpret_cast<void**>(g_golden_bag_storage + 0 * 0x80 + 0 * 8) = g_golden_item_a;
     *reinterpret_cast<void**>(g_golden_bag_storage + 1 * 0x80 + 2 * 8) = g_golden_item_b;
+    *reinterpret_cast<void**>(g_golden_bag_storage + 5 * 0x80 + 15 * 8) = g_golden_item_task;
     g_inven = g_golden_bag_storage;
     g_golden_world = 1;
     g_in_world = true;
@@ -1933,6 +1949,8 @@ void test_inventory_owner_vs_legacy_golden() {
                   owner_raw.data(), static_cast<uint32_t>(owner_raw.size()), &raw_size).ok ==
               kQolOk);
         CHECK(std::string(owner_raw.data(), raw_size) == frozen);
+        CHECK(std::string(owner_raw.data(), raw_size).find(
+                  "\"bag\":5,\"items\":[{\"slot\":15") != std::string::npos);
         CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
         uint16_t status = 0;
         const std::string owner_http = dispatch_get("/api/item/inventory", &status);
@@ -1942,6 +1960,38 @@ void test_inventory_owner_vs_legacy_golden() {
         if (owner_http == legacy) {
             std::printf("T2h-B0 NOTE [%s] owner HTTP == legacy（意外）\n", fixture.name);
         }
+    }
+    {
+        uint16_t status = 0;
+        const std::string items = dispatch_get("/api/item/inventory/items", &status);
+        CHECK(status == 200);
+        CHECK(items.find("\"slot\":15") != std::string::npos);
+        const qol::contracts::HttpPathParam task_bag{"bag", 3, "5", 1};
+        CHECK(dispatch_template("/api/item/inventory/bag/5/info", &task_bag, 1, &status) ==
+              "{\"bag\":5,\"capacity\":16,\"slot_count\":1}");
+        const qol::contracts::HttpPathParam task_slot[] = {{"bag", 3, "5", 1},
+                                                            {"slot", 4, "15", 2}};
+        const std::string task_item =
+            dispatch_template("/api/item/inventory/bag/5/15", task_slot, 2, &status);
+        CHECK(status == 200 && task_item.find("\"slot\":15") != std::string::npos);
+        const qol::contracts::HttpPathParam task_slot_out_of_range[] = {
+            {"bag", 3, "5", 1}, {"slot", 4, "16", 2}};
+        (void)dispatch_template("/api/item/inventory/bag/5/16", task_slot_out_of_range, 2,
+                                &status);
+        CHECK(status == 400 || status == 404);
+        CHECK(dispatch_post("/api/item/inventory/move_item",
+                            "{\"bag\":\"5\",\"slot\":\"15\",\"count\":\"1\","
+                            "\"to_bag\":\"0\",\"to_slot\":\"0\"}",
+                            nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+        ItemWriteResultContext context{};
+        context.handler = g_result_handler;
+        context.payload_size = g_post_payload_size;
+        std::memcpy(context.payload, g_post_payload, g_post_payload_size);
+        char result[128]{};
+        uint32_t result_size = 0;
+        CHECK(!run_item_write_result(&context, result, sizeof(result), &result_size));
+        CHECK(std::string(result, result_size) ==
+              "{\"ok\":false,\"error\":\"task bag excluded\"}");
     }
     // T2h-B2：not-in-world owner raw == legacy；capability 缺席（停用/未注册形态）→ fallback legacy。
     g_golden_world = 0;
@@ -1972,10 +2022,13 @@ bool install_core_item_golden(GoldenHarness* out) {
     std::memset(g_golden_bag_storage, 0, sizeof(g_golden_bag_storage));
     std::memset(g_golden_item_a, 0, sizeof(g_golden_item_a));
     std::memset(g_golden_item_b, 0, sizeof(g_golden_item_b));
+    std::memset(g_golden_item_task, 0, sizeof(g_golden_item_task));
     golden_fill_item(g_golden_item_a, static_cast<uint16_t>(10 << 6), 71, 6, 0x21, 0);
     golden_fill_item(g_golden_item_b, static_cast<uint16_t>(12 << 6), 1, 0, 0, 1);
+    golden_fill_item(g_golden_item_task, static_cast<uint16_t>(10 << 6), 2, 0, 0, 0);
     *reinterpret_cast<void**>(g_golden_bag_storage + 0 * 0x80 + 0 * 8) = g_golden_item_a;
     *reinterpret_cast<void**>(g_golden_bag_storage + 1 * 0x80 + 2 * 8) = g_golden_item_b;
+    *reinterpret_cast<void**>(g_golden_bag_storage + 5 * 0x80 + 19 * 8) = g_golden_item_task;
     g_inven = g_golden_bag_storage;
     g_golden_world = 1;
     g_in_world = true;
@@ -2142,6 +2195,49 @@ void test_extension_degrade_write_ticket_done() {
     g_golden_require_active = false;
 }
 
+void test_extension_move_result_capacity_and_overflow() {
+    CHECK(install_core_item_golden(nullptr));
+    g_golden_eb_enabled = 1;
+    const auto run_case = [](std::size_t body_size, bool overflow_expected) {
+        const std::string prefix = "{\"ok\":true,\"message\":\"";
+        const std::string embedded = "\\\"ok\\\":false";
+        const std::string suffix = "\"}";
+        g_extension_move_body = prefix;
+        g_extension_move_body += embedded;
+        g_extension_move_body.append(body_size - prefix.size() - embedded.size() - suffix.size(), 'a');
+        g_extension_move_body += suffix;
+        uint16_t status = 0;
+        CHECK(dispatch_post("/api/item/inventory/move_item",
+                            "{\"bag\":\"6\",\"slot\":\"0\",\"count\":\"1\","
+                            "\"to_bag\":\"6\",\"to_slot\":\"1\"}",
+                            nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+        ItemWriteResultContext context{};
+        context.handler = g_result_handler;
+        context.payload_size = g_post_payload_size;
+        std::memcpy(context.payload, g_post_payload, g_post_payload_size);
+        qol::infra::command_queue_reset_for_test();
+        const qol::infra::Command command{"core.item EB move overflow", nullptr, &context, false,
+                                          &run_item_write_result, 0};
+        const qol::infra::CommandTicket ticket = qol::infra::post(command);
+        CHECK(ticket != 0 && qol::infra::drain() == 1);
+        CHECK(qol::infra::ticket_state(ticket) == qol::infra::CommandState::kDone);
+        CHECK(qol::infra::ticket_result_overflowed(ticket) == overflow_expected);
+        std::vector<char> result(qol::infra::kMaxResultBytes);
+        uint32_t size = 0;
+        CHECK(qol::infra::read_result(ticket, result.data(), result.size(), &size));
+        CHECK(size == (overflow_expected ? qol::infra::kMaxResultBytes : body_size));
+        CHECK(std::string_view(result.data(), size).compare(0, 10, "{\"ok\":true") == 0);
+        CHECK(std::string_view(result.data(), size).find("\\\"ok\\\":false") !=
+              std::string_view::npos);
+        qol::infra::command_queue_reset_for_test();
+    };
+    run_case(5000, false);
+    run_case(20000, true);
+    g_extension_bag_available = false;
+    g_golden_eb_enabled = 0;
+    g_golden_require_active = false;
+}
+
 // T2h-B3#2：debug raw 整函数从 api/native/game_inventory_read.inc 搬至
 // game/read/item_class.cpp。以下为搬迁前实现的逐字节复刻（before oracle），
 // 与 game/read 新落点 debug_item_raw_json() 在 fake 环境对照。
@@ -2230,6 +2326,7 @@ int main() {
     test_extension_degrade_projected_canonical_kept();
     test_extension_degrade_omits_section();
     test_extension_degrade_write_ticket_done();
+    test_extension_move_result_capacity_and_overflow();
     test_debug_item_raw_golden();
     std::printf("item_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

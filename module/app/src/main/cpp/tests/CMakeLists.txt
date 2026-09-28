@@ -285,6 +285,15 @@ set(INFRA_TEST_SOURCES
     ${CPP_DIR}/infra/test_reset.cpp
 )
 find_package(Threads REQUIRED)
+add_executable(command_queue_overflow_tests
+    test_command_queue_overflow.cpp
+    ${CPP_DIR}/infra/command_queue.cpp
+)
+target_include_directories(command_queue_overflow_tests PRIVATE ${CPP_DIR})
+target_compile_features(command_queue_overflow_tests PRIVATE cxx_std_17)
+target_link_libraries(command_queue_overflow_tests PRIVATE Threads::Threads)
+add_test(NAME command_queue_overflow_tests COMMAND command_queue_overflow_tests)
+
 foreach(infra_case snapshot command_queue events capabilities_status)
     add_executable(infra_${infra_case}_tests
         test_infra_${infra_case}.cpp

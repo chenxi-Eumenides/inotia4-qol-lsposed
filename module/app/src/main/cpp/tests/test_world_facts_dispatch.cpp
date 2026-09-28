@@ -36,6 +36,8 @@ using qol::contracts::QolWorldPortReadApi;
 
 constexpr int32_t kMapId = 7;
 QolWorldNavigation g_navigation;
+bool g_fail_world_reads = false;
+int g_warning_logs = 0;
 
 QolResult write_json(const char* text, char* out, uint32_t capacity, uint32_t* out_size) {
     const uint32_t size = static_cast<uint32_t>(std::strlen(text));
@@ -51,7 +53,13 @@ QolResult write_json(const char* text, char* out, uint32_t capacity, uint32_t* o
 QolResult fake_state(int32_t* out) { *out = 1; return qol::contracts::ok(); }
 QolResult fake_gate(int32_t* out) { *out = 1; return qol::contracts::ok(); }
 QolResult fake_record_count(int32_t* out) { *out = 32; return qol::contracts::ok(); }
-QolResult fake_map_id(int32_t* out) { *out = kMapId; return qol::contracts::ok(); }
+QolResult fake_map_id(int32_t* out) {
+    if (g_fail_world_reads) {
+        return qol::contracts::error(kQolErrNotReady, "read failed", 11);
+    }
+    *out = kMapId;
+    return qol::contracts::ok();
+}
 QolResult fake_map_name(int32_t map_id, const char** out) {
     *out = map_id == kMapId ? "TestMap" : nullptr;
     return *out == nullptr ? qol::contracts::error(kQolErrNotFound, "no name", 7)
@@ -152,7 +160,8 @@ QolResult fake_unregister_result(uint32_t) {
     return qol::contracts::ok();
 }
 
-QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
+QolResult fake_log_write(int32_t level, int32_t, const char*, const char*, uint32_t) {
+    if (level == 2) ++g_warning_logs;
     return qol::contracts::ok();
 }
 
@@ -396,6 +405,13 @@ void test_lifecycle_and_responses() {
     CHECK(status == 503);
     CHECK(g_scheduler.handler(145, g_scheduler.ctx) != 0);
     CHECK(dispatch_get("/api/world/map/id") == "{\"map_id\":7,\"id_name\":\"TestMap\"}");
+
+    g_warning_logs = 0;
+    g_fail_world_reads = true;
+    for (int i = 0; i < 128; ++i) CHECK(g_scheduler.handler(150 + i, g_scheduler.ctx) != 0);
+    CHECK(g_warning_logs == 2);  // 1/64 periodic warning remains rate-limited, not one-shot.
+    g_fail_world_reads = false;
+    CHECK(g_scheduler.handler(300, g_scheduler.ctx) != 0);
 
     descriptor.deactivate(ctx);
 }

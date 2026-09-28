@@ -1,12 +1,16 @@
 #include "plugin.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <array>
 #include <limits>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "contracts/commands.h"
 #include "contracts/character_state.h"
@@ -28,9 +32,9 @@ namespace {
 
 constexpr const char* kPluginId = "core.item";
 constexpr const char* kPluginVersion = "0.1.0";
-constexpr uint32_t kInventoryCapacity = 65536;
+constexpr uint32_t kInventoryCapacity = contracts::kQolItemStateRawInventoryCapacity;
 constexpr uint32_t kShopCapacity = 32768;
-// 主线程快照节拍：库存/商店 JSON 构造不宜逐帧执行；15 帧（≈4Hz）对只读查询足够。
+// Raw inventory buffer matches the owner projection contract's 256 KiB ceiling.
 constexpr int32_t kSnapshotIntervalFrames = 15;
 constexpr char kNotInGameBody[] = "{\"error\":\"not in game\"}";
 constexpr char kSetMoneySuccess[] = "{\"ok\":true}";
@@ -216,15 +220,22 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     (void)sdk->log.write(1, 1, kPluginId, message, length);
 }
 
-// 数据面降级 WARN（级别 2）。限速：仅当消息与上一条不同才输出，重复的逐帧同级降级
-// 只记一次，避免刷屏（插件层无帧号，按内容变化限速等价可达诊断目的）。
-// 上一条缓存按 install 复位，使同一种降级在重装/重进档后仍能各记一次。
-char g_degrade_log_last[192] = {};
+bool g_snapshot_serialize_warned = false;
+
+void log_snapshot_serialize_failure() {
+    if (g_snapshot_serialize_warned) return;
+    g_snapshot_serialize_warned = true;
+    constexpr char kMessage[] = "[core.item] snapshot serialize failed";
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
+    (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+                           static_cast<uint32_t>(sizeof(kMessage) - 1));
+}
+
+uint32_t g_degrade_warn_ticks = 0;
 
 void log_degrade_warn(const char* message) {
     if (message == nullptr) return;
-    if (std::strcmp(g_degrade_log_last, message) == 0) return;
-    std::snprintf(g_degrade_log_last, sizeof(g_degrade_log_last), "%s", message);
+    if (++g_degrade_warn_ticks % 300u != 1u) return;
     if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
@@ -240,6 +251,15 @@ bool copy_buffer(char* destination, uint32_t capacity, uint32_t* destination_siz
     std::memcpy(destination, source, source_size);
     destination[source_size] = '\0';
     *destination_size = source_size;
+    return true;
+}
+
+bool copy_result_truncated(char* out, uint32_t capacity, uint32_t* out_size,
+                           const std::string& body) {
+    if (out == nullptr || out_size == nullptr) return false;
+    const uint32_t copied = static_cast<uint32_t>(std::min<std::size_t>(body.size(), capacity));
+    if (copied != 0) std::memcpy(out, body.data(), copied);
+    *out_size = static_cast<uint32_t>(body.size());
     return true;
 }
 
@@ -575,45 +595,63 @@ void update_snapshot() {
         g_port->read.item_ref_at == nullptr ||
         g_port->read.shop_items_json == nullptr || g_port->read.money == nullptr ||
         g_port->read.in_world == nullptr) {
+        log_snapshot_serialize_failure();
         return;
     }
     // 静态名称表未下发时不发布，避免输出空名称；HTTP 侧表现为 not ready。
     if (g_port->read.static_ready != nullptr) {
         int32_t ready = 0;
-        if (!contracts::succeeded(g_port->read.static_ready(&ready)) || ready == 0) return;
+        if (!contracts::succeeded(g_port->read.static_ready(&ready))) {
+            log_snapshot_serialize_failure();
+            return;
+        }
+        if (ready == 0) return;
     }
 
     ItemSnapshot next{};
     int32_t in_world = 0;
-    if (!contracts::succeeded(g_port->read.in_world(&in_world))) return;
+    if (!contracts::succeeded(g_port->read.in_world(&in_world))) {
+        log_snapshot_serialize_failure();
+        return;
+    }
     if (in_world == 0) {
         publish_not_in_game(next);
         return;
     }
 
-    char inventory[kInventoryCapacity]{};
+    thread_local std::vector<char> inventory(kInventoryCapacity);
+    std::fill(inventory.begin(), inventory.end(), '\0');
     uint32_t inventory_size = 0;
-    if (!contracts::succeeded(serialize_inventory_json(inventory, kInventoryCapacity,
+    if (!contracts::succeeded(serialize_inventory_json(inventory.data(), kInventoryCapacity,
                                                        &inventory_size))) {
+        log_snapshot_serialize_failure();
         return;
     }
-    if (std::strncmp(inventory, "{\"error\":", 9) == 0) {
+    if (std::strncmp(inventory.data(), "{\"error\":", 9) == 0) {
         publish_not_in_game(next);
         return;
     }
-    if (!copy_buffer(next.inventory, kInventoryCapacity, &next.inventory_size, inventory,
+    if (!copy_buffer(next.inventory, kInventoryCapacity, &next.inventory_size, inventory.data(),
                      inventory_size)) {
+        log_snapshot_serialize_failure();
         return;
     }
 
     char shop[kShopCapacity]{};
     uint32_t shop_size = 0;
     if (!contracts::succeeded(g_port->read.shop_items_json(shop, kShopCapacity, &shop_size))) {
+        log_snapshot_serialize_failure();
         return;
     }
-    if (!copy_buffer(next.shop, kShopCapacity, &next.shop_size, shop, shop_size)) return;
+    if (!copy_buffer(next.shop, kShopCapacity, &next.shop_size, shop, shop_size)) {
+        log_snapshot_serialize_failure();
+        return;
+    }
 
-    if (!contracts::succeeded(g_port->read.money(&next.money))) return;
+    if (!contracts::succeeded(g_port->read.money(&next.money))) {
+        log_snapshot_serialize_failure();
+        return;
+    }
     next.state = SnapshotState::kReady;
     g_snapshot.publish(next);
 }
@@ -720,6 +758,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
                 !parse_path_int(*request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
+            if (slot < 0 || slot >= 16) return response_error(response, 404, "not found");
             std::string body;
             bool bag_found = false;
             if (!enrich_bag_slot(snapshot.inventory, snapshot.inventory_size, bag, slot, g_port,
@@ -1118,10 +1157,7 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
     body += ",\"state\":";
     body.append(inventory, inventory_size);
     body.push_back('}');
-    if (body.size() > capacity) return false;
-    std::memcpy(out, body.data(), body.size());
-    *out_size = static_cast<uint32_t>(body.size());
-    return true;
+    return copy_result_truncated(out, capacity, out_size, body);
 }
 
 bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char* out,
@@ -1209,10 +1245,7 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
     std::string body = "{\"ok\":true,\"state\":";
     body.append(party, party_size);
     body.push_back('}');
-    if (body.size() > capacity) return false;
-    std::memcpy(out, body.data(), body.size());
-    *out_size = static_cast<uint32_t>(body.size());
-    return true;
+    return copy_result_truncated(out, capacity, out_size, body);
 }
 
 bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char* out,
@@ -1284,10 +1317,7 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
     body += "],\"state\":";
     body.append(player, player_size);
     body.push_back('}');
-    if (body.size() > capacity) return false;
-    std::memcpy(out, body.data(), body.size());
-    *out_size = static_cast<uint32_t>(body.size());
-    return true;
+    return copy_result_truncated(out, capacity, out_size, body);
 }
 
 bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
@@ -1297,17 +1327,25 @@ bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
     if (extension_requested) {
         const contracts::ExtensionBagApi* api = extension_bag_capability();
         if (extension_bag_move_capability_ready(api)) {
-            char move_result[4096]{};
+            std::vector<char> move_result;
+            try {
+                move_result.resize(262144);
+            } catch (const std::bad_alloc&) {
+                constexpr char kMoveFailed[] =
+                    "{\"ok\":false,\"error\":\"extension bag move failed\"}";
+                (void)copy_buffer(out, capacity, out_size, kMoveFailed, sizeof(kMoveFailed) - 1);
+                return false;
+            }
             uint32_t move_result_size = 0;
-            if (api->move_item(args.i0, args.i1, args.i3, args.i4, move_result,
-                               static_cast<uint32_t>(sizeof(move_result)),
+            if (api->move_item(args.i0, args.i1, args.i3, args.i4, move_result.data(),
+                               static_cast<uint32_t>(move_result.size()),
                                &move_result_size) != 0 &&
-                move_result_size <= sizeof(move_result)) {
-                if (move_result_size > capacity) return false;
-                std::memcpy(out, move_result, move_result_size);
+                move_result_size <= move_result.size()) {
+                const uint32_t copied = std::min(move_result_size, capacity);
+                if (copied != 0) std::memcpy(out, move_result.data(), copied);
                 *out_size = move_result_size;
-                return std::string(move_result, move_result_size).find("\"ok\":false") ==
-                       std::string::npos;
+                return std::string_view(move_result.data(), move_result_size)
+                           .compare(0, 11, "{\"ok\":false") != 0;
             }
             constexpr char kMoveFailed[] =
                 "{\"ok\":false,\"error\":\"extension bag move failed\"}";
@@ -1369,8 +1407,8 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                 body_size = sizeof(kDiceRejectFailed) - 1;
             }
         }
-        if (body_size > capacity) return false;
-        std::memcpy(out, body, body_size);
+        const uint32_t copied = std::min(body_size, capacity);
+        if (copied != 0) std::memcpy(out, body, copied);
         *out_size = body_size;
         return contracts::succeeded(operation);
     }
@@ -1390,8 +1428,8 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                 body_size = sizeof(kSetMoneyFailed) - 1;
             }
         }
-        if (body_size > capacity) return false;
-        std::memcpy(out, body, body_size);
+        const uint32_t copied = std::min(body_size, capacity);
+        if (copied != 0) std::memcpy(out, body, copied);
         *out_size = body_size;
         return contracts::succeeded(operation);
     }
@@ -1442,7 +1480,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
-    g_degrade_log_last[0] = '\0';
+    g_degrade_warn_ticks = 0;
     g_port = nullptr;
     g_item_money_write = nullptr;
     g_item_dice_write = nullptr;

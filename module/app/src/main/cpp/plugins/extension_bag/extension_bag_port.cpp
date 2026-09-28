@@ -6,6 +6,7 @@
 #include "contracts/sell_price.h"
 #include "contracts/host_sdk.h"
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -223,8 +224,8 @@ int32_t provider_move_item(int32_t from_bag, int32_t from_slot, int32_t to_bag,
     if (out == nullptr || out_len == nullptr) return 0;
     const std::string body = extension_bag_api_move_item_impl(
         from_bag, from_slot, to_bag, to_slot);
-    if (body.size() > capacity) return 0;
-    std::memcpy(out, body.data(), body.size());
+    const uint32_t copied = static_cast<uint32_t>(std::min<std::size_t>(body.size(), capacity));
+    if (copied != 0) std::memcpy(out, body.data(), copied);
     *out_len = static_cast<uint32_t>(body.size());
     return 1;
 }

@@ -247,9 +247,14 @@ std::string host_ticket_json(uint64_t ticket) {
     // 未保留（无结果/已淘汰）显式标记 result_retained=false，不静默省略。
     static thread_local std::vector<char> result_buffer(qol::infra::kMaxResultBytes);
     uint32_t result_size = 0;
-    if (qol::infra::read_result(ticket, result_buffer.data(),
-                                static_cast<uint32_t>(result_buffer.size()), &result_size) &&
-        result_size != 0 && (result_buffer[0] == '{' || result_buffer[0] == '[')) {
+    const bool retained = qol::infra::read_result(ticket, result_buffer.data(),
+                                                  static_cast<uint32_t>(result_buffer.size()),
+                                                  &result_size) &&
+                          result_size != 0 &&
+                          (result_buffer[0] == '{' || result_buffer[0] == '[');
+    const bool overflowed = state == static_cast<int32_t>(qol::infra::CommandState::kDone) &&
+                            qol::infra::ticket_result_overflowed(ticket);
+    if (retained && !overflowed) {
         out += ",\"result\":";
         out.append(result_buffer.data(), result_size);
         out += ",\"result_retained\":true";
