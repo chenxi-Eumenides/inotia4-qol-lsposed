@@ -1,5 +1,4 @@
 #include "contracts/item_facts.h"
-#include "contracts/item_count.h"
 #include "contracts/item_state.h"
 #include "contracts/extension_bag.h"
 #include "contracts/game_ports/ports.h"
@@ -21,10 +20,8 @@ int main() {
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
-    CHECK(descriptor.optional_count == 2 && descriptor.optional_requires != nullptr);
+    CHECK(descriptor.optional_count == 1 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
-                      qol::contracts::kStackLimitItemCountCapabilityId) == 0);
-    CHECK(std::strcmp(descriptor.optional_requires[1].id,
                       qol::contracts::kExtensionBagCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
@@ -41,6 +38,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
+    CHECK(descriptor.ports[0].range.major == 1 && descriptor.ports[0].range.min_minor == 2);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
@@ -58,8 +56,6 @@ int main() {
     CHECK(api->detail_context != nullptr);
     CHECK(api->cursor_index != nullptr);
     CHECK(api->money != nullptr);
-    CHECK(descriptor.optional_requires[0].range.major ==
-          qol::contracts::kStackLimitItemCountVersion.major);
     CHECK(g_fail == 0);
     std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

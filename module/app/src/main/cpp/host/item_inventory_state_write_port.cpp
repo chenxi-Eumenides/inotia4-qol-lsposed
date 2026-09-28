@@ -1,5 +1,6 @@
 #include "host/item_inventory_state_write_port.h"
 
+#include "game/adapter_ports/item_count_facade.h"
 #include <cstring>
 
 #include "contracts/extension_bag_port.h"
@@ -130,8 +131,10 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
                    int32_t enhance_remaining, int32_t rarity_group,
                    const contracts::QolItemCountApi* item_count,
                    contracts::QolItemInventoryStateWriteResult* out) {
+    const contracts::QolItemCountApi* provider =
+        item_count != nullptr ? item_count : qol::game::item_count_api_if_resident();
     return qol::game::ops::add_item(category, count, socket_total, enhance_remaining,
-                                    rarity_group, item_count, out);
+                                    rarity_group, provider, out);
 }
 
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,

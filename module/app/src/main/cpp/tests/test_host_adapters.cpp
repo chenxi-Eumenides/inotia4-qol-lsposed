@@ -24,6 +24,7 @@
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/adapter_ports/item_extras_port.h"
 #include "game/adapter_ports/inventory_extras_port.h"
 #include "game/adapter_ports/quest_port.h"
@@ -115,6 +116,21 @@ int fake_item_rarity(void*) { return 9; }
 int fake_item_no_sell(int32_t) { return 0; }
 int fake_item_dice(int32_t) { return 0; }
 int fake_item_cumulate_count(void*) { return 6; }
+bool g_item_count_probe = false;
+uint32_t g_adapter_canonical_count = 0;
+int32_t g_adapter_canonical_error = kQolOk;
+bool adapter_item_count_probe() { return g_item_count_probe; }
+QolResult adapter_item_count_canonical(const void*, uint32_t* out_count) {
+    if (g_adapter_canonical_error != kQolOk) {
+        return qol::contracts::error(g_adapter_canonical_error, "provider error", 14);
+    }
+    *out_count = g_adapter_canonical_count;
+    return qol::contracts::ok();
+}
+QolResult adapter_item_count_effective(const void*, uint32_t* out_count) {
+    *out_count = 88;
+    return qol::contracts::ok();
+}
 int fake_can_equip(void*, void*) { return 1; }
 int fake_find_equip_slot(void*, void*) { return 2; }
 void* fake_get_equip_item(void*, int32_t) { return reinterpret_cast<void*>(0xA); }
@@ -678,6 +694,29 @@ int main() {
     assert(item_port_api.read.is_no_sell(4, &value).ok == kQolOk);
     assert(game.read_only.item.is_dice(4, &value).ok == kQolOk);
     assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    static const qol::contracts::QolItemCountApi item_count_provider{
+        &adapter_item_count_canonical, &adapter_item_count_effective};
+    qol::game::item_count_set_provider(&item_count_provider);
+    qol::game::item_count_set_active_probe(&adapter_item_count_probe);
+    g_item_count_probe = false;
+    value = -1;
+    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 6);
+    g_item_count_probe = true;
+    g_adapter_canonical_count = 1023;
+    value = -1;
+    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == 1023);
+    g_adapter_canonical_error = kQolErrUnsupported;
+    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).code ==
+           kQolErrUnsupported);
+    g_adapter_canonical_error = kQolOk;
+    value = -1;
+    assert(item_port_api.read.effective_cumulate_count(reinterpret_cast<void*>(0x1), &value).ok ==
+           kQolOk);
+    assert(value == 88);
+    qol::game::item_count_set_provider(nullptr);
+    g_item_count_probe = false;
     assert(game.read_only.item.class_no_equip_bit(4, &value).ok == kQolOk);
     assert(game.read_only.item.equip_desc_role_type(&value).ok == kQolOk);
     assert(game.read_only.item.enchant_remaining(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);

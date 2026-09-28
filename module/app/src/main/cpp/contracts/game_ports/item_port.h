@@ -105,6 +105,7 @@ struct QolItemPortReadApi {
     QolResult (*static_ready)(int32_t* out_ready);
     // Synchronous main-thread typed view; item pointers remain inside the adapter call path.
     QolResult (*inventory_item_view)(const void* item, QolItemInventoryView* out_view);
+    QolResult (*effective_cumulate_count)(const void* item, int32_t* out_count);
 };
 
 struct QolItemPort {

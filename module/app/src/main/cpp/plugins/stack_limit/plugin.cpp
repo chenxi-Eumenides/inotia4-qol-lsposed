@@ -239,18 +239,6 @@ const contracts::QolItemCountApi kItemCountApi = {
     &provider_write_encoded_field,
 };
 
-int32_t item_count_override_enabled() { return feature_999_usable() ? 1 : 0; }
-
-const contracts::StackLimitItemCountCapability kItemCountCapability{
-    &kItemCountApi,
-    &item_count_override_enabled,
-};
-
-const contracts::CapabilityProvisionRef kProvides[] = {
-    {contracts::kStackLimitItemCountCapabilityId, contracts::kStackLimitItemCountVersion,
-     &kItemCountCapability},
-};
-
 // 自身初始化：只缓存 Host ABI，资源仍由宿主按原子组安装。
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < sizeof(contracts::PluginContext) || ctx.sdk == nullptr ||
@@ -261,6 +249,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_game = ctx.game;
     g_provider_resident.store(true, std::memory_order_release);
     host::host_item_count_set_provider(&kItemCountApi);
+    host::host_item_count_set_active_probe(&feature_999_usable);
     return 0;
 }
 
@@ -293,7 +282,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     0, nullptr,   // requires
     0, nullptr,   // optional_requires
-    1, kProvides, // provides
+    0, nullptr, // provides
     static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0])), kResources,
     0, nullptr,   // jni（开关经命令端口下发）
     &plugin_install,

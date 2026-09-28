@@ -163,13 +163,38 @@ int32_t g_party_write_args[4] = {-1, -1, -1, -1};
 QolResult g_party_write_result = qol::contracts::ok();
 
 QolResult unsupported() { return qol::contracts::error(kQolErrUnsupported, "stub", 4); }
+bool g_override_available = false;
+bool g_override_enabled = false;
+QolResult override_canonical(const void*, uint32_t* out_count);
+QolResult override_effective(const void*, uint32_t* out_count);
+const qol::contracts::QolItemCountApi* override_item_count_api();
 QolResult stub_category(const void*, int32_t*) { return unsupported(); }
 QolResult stub_is_real_equip(const void*, int32_t*) { return unsupported(); }
 QolResult stub_is_jewel(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_no_sell(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_sell_price(const void*, int64_t*) { return unsupported(); }
 QolResult stub_cumulate(const void*, int32_t* out_count) {
+    if (g_override_available && g_override_enabled) {
+        uint32_t canonical = 0;
+        const QolResult result = override_canonical(nullptr, &canonical);
+        if (!qol::contracts::succeeded(result)) return result;
+        *out_count = static_cast<int32_t>(canonical);
+        return qol::contracts::ok();
+    }
     *out_count = static_cast<int32_t>(g_original_count);
+    return qol::contracts::ok();
+}
+QolResult stub_effective_cumulate(const void* item, int32_t* out_count) {
+    if (out_count == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    }
+    if (!g_override_available) {
+        return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+    }
+    uint32_t effective = 0;
+    const QolResult result = override_effective(item, &effective);
+    if (!qol::contracts::succeeded(result)) return result;
+    *out_count = static_cast<int32_t>(effective);
     return qol::contracts::ok();
 }
 QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryItemRef* out) {
@@ -280,7 +305,7 @@ const QolItemPortReadApi kFakeRead{
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
     &stub_detail,     &stub_cursor,        &fake_inventory,  &fake_money,
     &fake_shop,       &fake_in_world,      &fake_static_text, &fake_static_ready,
-    &fake_inventory_item_view,
+     &fake_inventory_item_view, &stub_effective_cumulate,
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
@@ -345,7 +370,7 @@ QolResult fake_state_add(int32_t category, int32_t count, int32_t socket_total,
     g_state_add_socket = socket_total;
     g_state_add_enhance = enhance_remaining;
     g_state_add_rarity = rarity_group;
-    g_state_add_count_api = item_count;
+    g_state_add_count_api = item_count != nullptr ? item_count : override_item_count_api();
     return fake_state_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kAddItem),
                             category, count, out);
 }
@@ -426,8 +451,6 @@ QolResult fake_log_write(int32_t level, int32_t, const char*, const char* messag
     return qol::contracts::ok();
 }
 
-bool g_override_available = false;
-bool g_override_enabled = false;
 // T2h-B0：golden fixture 期间让 EB capability 返回带 inventory 成员的金装 API。
 bool g_golden_require_active = false;
 const qol::contracts::ExtensionBagApi* golden_extension_bag_api();
@@ -460,8 +483,9 @@ const qol::contracts::QolItemCountApi kOverrideItemCountApi{
     &override_canonical, &override_effective, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr,
 };
-const qol::contracts::StackLimitItemCountCapability kOverrideCapability{
-    &kOverrideItemCountApi, &override_enabled};
+const qol::contracts::QolItemCountApi* override_item_count_api() {
+    return g_override_available ? &kOverrideItemCountApi : nullptr;
+}
 
 bool g_extension_bag_available = false;
 bool g_extension_bag_enabled = true;
@@ -549,12 +573,7 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
         *out_iface = &kFakeExtensionBagApi;
         return qol::contracts::ok();
     }
-    if (std::strcmp(id, qol::contracts::kStackLimitItemCountCapabilityId) != 0 ||
-        !g_override_available) {
-        return qol::contracts::error(kQolErrNotFound, "missing", 7);
-    }
-    *out_iface = &kOverrideCapability;
-    return qol::contracts::ok();
+    return qol::contracts::error(kQolErrNotFound, "missing", 7);
 }
 
 QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
@@ -1330,6 +1349,7 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(71));
     CHECK(status == 200);
     g_override_available = true;
+    g_override_enabled = false;
     g_effective_fail = true;
     g_original_count = 100;
     CHECK(g_scheduler.handler(2500, g_scheduler.ctx) != 0);
@@ -1588,7 +1608,7 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
 
 namespace qol::game {
 const qol::contracts::QolItemCountApi* item_count_api_if_resident() {
-    return g_override_available ? &kOverrideItemCountApi : nullptr;
+    return override_item_count_api();
 }
 }  // namespace qol::game
 
@@ -1764,7 +1784,7 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_item_ref_at,       &golden_unsupported_phys,  &golden_unsupported_detail,
     &golden_unsupported_cursor, &golden_inventory_json,  &golden_money,
     &golden_shop,              &golden_in_world,          &golden_static_text,
-    &golden_static_ready,      &golden_view,
+    &golden_static_ready,      &golden_view, &stub_effective_cumulate,
 };
 const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion, kGoldenRead};
 const void* const kGoldenPortArray[] = {

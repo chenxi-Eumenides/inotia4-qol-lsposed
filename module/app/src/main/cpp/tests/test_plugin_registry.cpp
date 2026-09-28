@@ -5,6 +5,10 @@
 #include "host/plugin_registry.h"
 #include "host/item_count_facade.h"
 
+namespace qol::game {
+void test_set_item_port_version(::QolVersion version);
+}
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -646,6 +650,23 @@ void test_choice_port_version_gate() {
     CHECK(feature_state_is("core.custom_ui", FeatureState::kBlocked));
     CHECK(feature_of("core.custom_ui", nullptr, nullptr, &error));
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+}
+
+void test_item_port_v12_rejects_legacy_v11_adapter() {
+    reset_all();
+    qol::contracts::QolPortRequirement requirement{
+        qol::contracts::QolPortId::QOL_PORT_ITEM, {1, 2}};
+    PluginDescriptor descriptor = make_descriptor("core.item", nullptr, 0, nullptr, 0);
+    descriptor.ports = &requirement;
+    descriptor.port_count = 1;
+    qol::game::test_set_item_port_version({1, 1});
+    CHECK(register_plugin(descriptor));
+    CHECK(install_all(make_deps()) == 1);
+    const char* error = nullptr;
+    CHECK(feature_state_is("core.item", FeatureState::kBlocked));
+    CHECK(feature_of("core.item", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+    qol::game::test_set_item_port_version(qol::contracts::kQolPortItemVersion);
 }
 
 void test_save_port_version_and_private_gate() {
@@ -1648,6 +1669,7 @@ void test_optional_degrade_timing_after_enable() {
 int main() {
     test_success_path();
     test_choice_port_version_gate();
+    test_item_port_v12_rejects_legacy_v11_adapter();
     test_save_port_version_and_private_gate();
     test_craft_port_version_and_private_gate();
     test_gate_off_installed_disabled();

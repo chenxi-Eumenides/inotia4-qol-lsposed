@@ -8,6 +8,7 @@
 #include "contracts/result.h"
 #include "contracts/item_count.h"
 #include "game/ops/game_ops_common.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/state/game_state.h"
 #include "host/item_count_facade.h"
 
@@ -98,13 +99,7 @@ int main() {
         qol::features::stack_limit::plugin_descriptor();
     assert(std::strcmp(descriptor.id, "stack_limit") == 0);
     assert(descriptor.resources_count == 18);
-    assert(descriptor.provides_count == 1 && descriptor.provides != nullptr);
-    assert(std::strcmp(descriptor.provides[0].id,
-                       qol::contracts::kStackLimitItemCountCapabilityId) == 0);
-    const auto* count_capability = static_cast<const qol::contracts::StackLimitItemCountCapability*>(
-        descriptor.provides[0].iface);
-    assert(count_capability != nullptr && count_capability->api != nullptr &&
-           count_capability->enabled != nullptr);
+    assert(descriptor.provides_count == 0 && descriptor.provides == nullptr);
 
     static const char* kIds[] = {
         "P_INVEN_MOVE_ITEM_CLAMP_150",
@@ -149,17 +144,18 @@ int main() {
     assert(descriptor.install(context) == 0);
     assert(qol::features::stack_limit::provider_resident());
     assert(!qol::features::stack_limit::feature_enabled());
-    assert(count_capability->enabled() == 0);
+    assert(!qol::game::item_count_active());
+    g_gate = true;
+    assert(!qol::game::item_count_active());
     assert_pure_conversion_api();
     uint32_t resident_count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &resident_count).code ==
            kQolErrUnsupported);
     assert(resident_count == 41);
-    g_gate = true;
     descriptor.on_enabled(context);
     assert(qol::features::stack_limit::provider_resident());
     assert(qol::features::stack_limit::feature_enabled());
-    assert(count_capability->enabled() == 1);
+    assert(qol::game::item_count_active());
     qol::contracts::PluginStatusOut status{};
     descriptor.fill_status(status);
     assert(status.enabled);
@@ -179,7 +175,7 @@ int main() {
     descriptor.on_disabled(context);
     assert(qol::features::stack_limit::provider_resident());
     assert(!qol::features::stack_limit::feature_enabled());
-    assert(count_capability->enabled() == 0);
+    assert(!qol::game::item_count_active());
     status = {};
     descriptor.fill_status(status);
     assert(!status.enabled);
@@ -203,6 +199,7 @@ int main() {
     descriptor.deactivate(context);
     assert(qol::features::stack_limit::provider_resident());
     assert(!qol::features::stack_limit::feature_enabled());
+    assert(!qol::game::item_count_active());
     count = 41;
     assert(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
            kQolErrUnsupported);

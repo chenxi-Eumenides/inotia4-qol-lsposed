@@ -81,8 +81,30 @@ QolResult read_cumulate_count(const void* item, int32_t* out) {
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
+    if (item_count_active()) {
+        const contracts::QolItemCountApi* api = item_count_api_if_resident();
+        if (api == nullptr || api->canonical == nullptr) return not_ready();
+        uint32_t canonical = 0;
+        const QolResult result = api->canonical(item, &canonical);
+        if (!contracts::succeeded(result)) return result;
+        *out = static_cast<int32_t>(canonical);
+        return contracts::ok();
+    }
     if (fn_get_cumulate_count == nullptr) return not_ready();
     *out = fn_get_cumulate_count(const_cast<void*>(item));
+    return contracts::ok();
+}
+
+QolResult read_effective_cumulate_count(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid argument");
+    }
+    const contracts::QolItemCountApi* api = item_count_api_if_resident();
+    if (api == nullptr || api->effective == nullptr) return not_ready();
+    uint32_t effective = 0;
+    const QolResult result = api->effective(item, &effective);
+    if (!contracts::succeeded(result)) return result;
+    *out = static_cast<int32_t>(effective);
     return contracts::ok();
 }
 
@@ -221,7 +243,8 @@ const contracts::QolItemPort kItemPort{
     {&read_category, &read_real_equip, &read_jewel_category, &read_no_sell, &read_sell_price,
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_context,
       &read_cursor_index, &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
-      &read_static_text, &read_static_ready, &read_inventory_item_view},
+       &read_static_text, &read_static_ready, &read_inventory_item_view,
+       &read_effective_cumulate_count},
 };
 
 }  // namespace

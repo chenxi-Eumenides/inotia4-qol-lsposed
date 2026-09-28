@@ -18,7 +18,6 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/http.h"
 #include "contracts/item_facts.h"
-#include "contracts/item_count.h"
 #include "contracts/item_state.h"
 #include "json_lite.h"
 #include "response.h"
@@ -126,26 +125,6 @@ QolResult sell_price(const void* item, int64_t* out_price) {
 
 QolResult cumulate_count(const void* item, int32_t* out_count) {
     if (g_port == nullptr || g_port->read.cumulate_count == nullptr) return not_ready();
-    if (g_sdk != nullptr && g_sdk->capabilities.require != nullptr) {
-        const void* iface = nullptr;
-        const QolResult capability_result = g_sdk->capabilities.require(
-            contracts::kStackLimitItemCountCapabilityId,
-            QolVersionRange{contracts::kStackLimitItemCountVersion.major,
-                            contracts::kStackLimitItemCountVersion.minor},
-            &iface);
-        if (contracts::succeeded(capability_result) && iface != nullptr) {
-            const auto* override_api =
-                static_cast<const contracts::StackLimitItemCountCapability*>(iface);
-            if (override_api->enabled != nullptr && override_api->enabled() != 0 &&
-                override_api->api != nullptr && override_api->api->canonical != nullptr) {
-                uint32_t canonical = 0;
-                const QolResult result = override_api->api->canonical(item, &canonical);
-                if (!contracts::succeeded(result)) return result;
-                *out_count = static_cast<int32_t>(canonical);
-                return contracts::ok();
-            }
-        }
-    }
     return g_port->read.cumulate_count(item, out_count);
 }
 
@@ -225,9 +204,6 @@ const contracts::CapabilityRequirement kRequires[] = {
 };
 
 const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kStackLimitItemCountCapabilityId,
-     {contracts::kStackLimitItemCountVersion.major,
-      contracts::kStackLimitItemCountVersion.minor}},
     {contracts::kExtensionBagCapabilityId,
      {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
       static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)}},
@@ -276,18 +252,6 @@ void publish_not_in_game(ItemSnapshot& snapshot) {
     g_snapshot.publish(snapshot);
 }
 
-const contracts::StackLimitItemCountCapability* stack_limit_item_count_capability() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const QolResult result = g_sdk->capabilities.require(
-        contracts::kStackLimitItemCountCapabilityId,
-        QolVersionRange{contracts::kStackLimitItemCountVersion.major,
-                        contracts::kStackLimitItemCountVersion.minor},
-        &iface);
-    if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
-    return static_cast<const contracts::StackLimitItemCountCapability*>(iface);
-}
-
 const contracts::CharacterStateApi* character_state_capability() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
     const void* iface = nullptr;
@@ -321,13 +285,11 @@ bool effective_item_count(const void* item, bool original_count_supported, uint3
                           bool* out_present) {
     if (item == nullptr || out_count == nullptr || out_present == nullptr) return false;
     *out_present = false;
-    const auto* capability = stack_limit_item_count_capability();
-    if (capability != nullptr && capability->api != nullptr &&
-        capability->api->effective != nullptr) {
-        uint32_t effective = 0;
-        const QolResult result = capability->api->effective(item, &effective);
+    if (g_port != nullptr && g_port->read.effective_cumulate_count != nullptr) {
+        int32_t effective = 0;
+        const QolResult result = g_port->read.effective_cumulate_count(item, &effective);
         if (contracts::succeeded(result)) {
-            *out_count = effective;
+            *out_count = static_cast<uint32_t>(effective);
             *out_present = true;
             return true;
         }
@@ -507,7 +469,7 @@ QolResult append_extension_inventory_bags(std::string* out) {
                     bool count_present = false;
                     if (effective_item_count(native_item, true, &effective, &count_present) &&
                         count_present) {
-                        // stack_limit 关闭态 effective 视图可能为 0（canonical&0x7F==0）；此时
+                        // 数量接管方处于关闭态时 effective 视图可能为 0（canonical&0x7F==0）；此时
                         // EB 回调已按 R-47b 真值表给出 canonical 视图正数，保留之，避免二次
                         // 覆盖为 0（真值：effective>0→effective；effective==0 且回调>0→回调）。
                         if (effective != 0 || count == 0) count = effective;
@@ -1086,11 +1048,9 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
                                                        args.i4, &operation_data);
             break;
         case contracts::QolItemWriteKind::kAddItem: {
-            const contracts::StackLimitItemCountCapability* capability =
-                args.i1 > 1 ? stack_limit_item_count_capability() : nullptr;
             operation = g_item_state_write->add_item(
                 args.i0, args.i1, args.i2, args.i3, args.i4,
-                capability != nullptr ? capability->api : nullptr, &operation_data);
+                nullptr, &operation_data);
             break;
         }
         default:

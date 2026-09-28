@@ -34,7 +34,7 @@ namespace {
 
 const contracts::QolQuestPort kQuestPort{{1, 0}, {}, {}};
 const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
-const contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion, {}};
+contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion, {}};
 const contracts::QolCharacterPort kCharacterPort{{1, 0}, {}};
 const contracts::QolCharacterHttpPort kCharacterHttpPort{{1, 0}, {}};
 const contracts::QolChoicePort kChoicePort{{1, 0}, {}, {}};
@@ -68,6 +68,7 @@ const contracts::QolCharacterWriteOpsPort kCharacterWriteOpsPort{
 const contracts::QolQuestPort& quest_port() { return kQuestPort; }
 const contracts::QolWorldPort& world_port() { return kWorldPort; }
 const contracts::QolItemPort& item_port() { return kItemPort; }
+void test_set_item_port_version(::QolVersion version) { kItemPort.abi_version = version; }
 const contracts::QolCharacterPort& character_port() { return kCharacterPort; }
 const contracts::QolCharacterHttpPort& character_http_port() { return kCharacterHttpPort; }
 const contracts::QolChoicePort& choice_port() { return kChoicePort; }

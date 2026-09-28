@@ -10,6 +10,9 @@
 namespace {
 
 int g_calls = 0;
+int g_probe_value = 0;
+bool active_probe() { return g_probe_value != 0; }
+bool replacement_probe() { return true; }
 
 QolResult canonical(const void*, uint32_t* out) {
     ++g_calls;
@@ -216,9 +219,26 @@ void assert_provider_forwarding_and_null_arguments() {
 
 int main() {
     assert_not_ready_without_provider();
+    assert(!qol::game::item_count_active());
+    qol::host::host_item_count_set_active_probe(&active_probe);
+    qol::host::host_item_count_set_active_probe(&replacement_probe);
+    assert(!qol::game::item_count_active());
+    qol::host::host_item_count_set_provider(&kProvider);
+    assert(!qol::game::item_count_active());
+    g_probe_value = 1;
+    assert(qol::game::item_count_active());
+    g_probe_value = 0;
+    assert(!qol::game::item_count_active());
+    g_probe_value = 1;
     assert_unknown_is_not_guessed();
     assert_not_encoded_state_is_preserved();
     assert_provider_forwarding_and_null_arguments();
     assert_writeback_boundary_forwarding();
+    assert(qol::game::item_count_api_if_resident() == nullptr);
+    assert(!qol::game::item_count_active());
+    qol::host::host_item_count_set_provider(&kProvider);
+    assert(qol::game::item_count_active());
+    qol::host::host_item_count_set_provider(nullptr);
+    assert(!qol::game::item_count_active());
     return 0;
 }

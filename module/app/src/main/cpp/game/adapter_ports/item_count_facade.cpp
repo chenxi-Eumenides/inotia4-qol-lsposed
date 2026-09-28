@@ -8,6 +8,7 @@ namespace qol::game {
 namespace {
 
 const contracts::QolItemCountApi* g_provider = nullptr;
+ItemCountActiveProbe g_active_probe = nullptr;
 
 QolResult not_ready() {
     static constexpr char kMessage[] = "not ready";
@@ -118,6 +119,14 @@ const contracts::QolItemCountApi kFacade = {
 }  // namespace
 
 void item_count_set_provider(const contracts::QolItemCountApi* api) { g_provider = api; }
+
+void item_count_set_active_probe(ItemCountActiveProbe probe) {
+    if (g_active_probe == nullptr && probe != nullptr) g_active_probe = probe;
+}
+
+bool item_count_active() {
+    return g_provider != nullptr && g_active_probe != nullptr && g_active_probe() != 0;
+}
 
 const contracts::QolItemCountApi& item_count_api() { return kFacade; }
 

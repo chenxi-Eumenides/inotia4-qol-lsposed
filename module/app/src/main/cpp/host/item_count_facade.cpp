@@ -8,6 +8,10 @@ void host_item_count_set_provider(const contracts::QolItemCountApi* api) {
     qol::game::item_count_set_provider(api);
 }
 
+void host_item_count_set_active_probe(bool (*probe)()) {
+    qol::game::item_count_set_active_probe(probe);
+}
+
 const contracts::QolItemCountApi& host_item_count_api() {
     return qol::game::item_count_api();
 }

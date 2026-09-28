@@ -109,5 +109,6 @@ bool write_item_count_field(void* item, uint32_t value);
 namespace qol::host {
 
 void host_item_count_set_provider(const contracts::QolItemCountApi* api);
+void host_item_count_set_active_probe(bool (*probe)());
 
 }  // namespace qol::host
