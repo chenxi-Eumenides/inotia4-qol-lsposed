@@ -60,41 +60,6 @@ Java_com_inotia4_qol_NativeBridge_nativeSettingsUiOpenPanel(JNIEnv* env, jclass)
 #endif
 }
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeExtensionBagUiStatus(JNIEnv* env, jclass) {
-#if QOL_KERNEL_ONLY
-    return kernel_only_result(env);
-#else
-    return env->NewStringUTF(data_virtual_bag_ui_status_json().c_str());
-#endif
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeExtensionBagTestEquip(JNIEnv* env, jclass, jint index, jint capacity) {
-#if QOL_KERNEL_ONLY
-    (void)index;
-    (void)capacity;
-    return kernel_only_result(env);
-#else
-    return env->NewStringUTF(data_virtual_bag_test_equip(static_cast<int>(index), static_cast<int>(capacity)).c_str());
-#endif
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeExtensionBagTestItem(JNIEnv* env, jclass, jint index, jint slot,
-                                                                jint category, jint count) {
-#if QOL_KERNEL_ONLY
-    (void)index;
-    (void)slot;
-    (void)category;
-    (void)count;
-    return kernel_only_result(env);
-#else
-    return env->NewStringUTF(data_virtual_bag_test_item(static_cast<int>(index), static_cast<int>(slot),
-                                                        static_cast<int>(category), static_cast<int>(count)).c_str());
-#endif
-}
-
 // ---- 存档管理器游戏内面板（ui-savebackup v0.7.x）----
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiInject(JNIEnv* env, jclass) {

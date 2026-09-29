@@ -21,10 +21,10 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 66 |
-| `game` | 137 |
+| `contracts` | 68 |
+| `game` | 141 |
 | `hooks` | 10 |
-| `host` | 51 |
+| `host` | 54 |
 | `infra` | 35 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
@@ -60,7 +60,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **528** |
+| **合计** | **537** |
 
 ### 1.2 迁移期映射摘要
 
@@ -102,18 +102,18 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 91 |
-| `game` | `contracts` | 72 |
-| `host` | `contracts` | 56 |
+| `host` | `game` | 96 |
+| `game` | `contracts` | 69 |
+| `host` | `contracts` | 54 |
 | `host` | `infra` | 45 |
-| `plugins/extension_bag` | `contracts` | 35 |
+| `plugins/extension_bag` | `contracts` | 37 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
 | `legacy/system` | `game` | 17 |
 | `plugins/inventory_hooks` | `contracts` | 16 |
-| `plugins/core.item` | `contracts` | 14 |
 | `plugins/save_backup` | `contracts` | 14 |
 | `host` | `patch` | 13 |
+| `plugins/core.item` | `contracts` | 13 |
 | `plugins/core.settings` | `contracts` | 13 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
 | `host` | `hooks` | 10 |
@@ -148,8 +148,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：156 个
-- native 导出：156 个
+- Kotlin `external fun`：147 个
+- native 导出：147 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：

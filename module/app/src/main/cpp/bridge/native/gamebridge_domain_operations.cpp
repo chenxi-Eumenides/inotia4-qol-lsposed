@@ -494,4 +494,3 @@ Java_com_inotia4_qol_NativeBridge_nativeSetCustomRecipeEnabled(JNIEnv*, jclass, 
     return qol::infra::config_set_bool("customRecipeEnabled", enabled == JNI_TRUE) ? JNI_TRUE
                                                                                    : JNI_FALSE;
 }
-

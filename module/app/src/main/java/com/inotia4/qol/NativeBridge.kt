@@ -165,16 +165,7 @@ object NativeBridge {
     external fun nativeSettingsUiRestore(): String
     external fun nativeSettingsUiOpenOption(): String
     external fun nativeSettingsUiOpenPanel(): String
-    external fun nativeExtensionBagUiStatus(): String
-    external fun nativeExtensionBagTestEquip(index: Int, bagType: Int): String
-    external fun nativeExtensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
     external fun nativeExtensionBagStatusJson(): String
-    external fun nativeOpExtensionBagEnterView(bag: Int): String
-    external fun nativeOpExtensionBagUnequip(bag: Int): String
-    external fun nativeOpExtensionBagExitView(): String
-    external fun nativeOpExtensionBagSelectBag(bag: Int): String
-    external fun nativeOpExtensionBagClickItem(bag: Int, slot: Int): String
-    external fun nativeOpExtensionBagMoveItem(fromBag: Int, fromSlot: Int, toBag: Int, toSlot: Int): String
     // ---- 自动出售（auto-sell 阶段 B）----
     // 值即开关：0=关闭，正整数为 1-based 档位（rarity 1..5 / enhance 1..32 /
     // socket 1..16 / gemTier 1..5 / gemRange 1..5）。

@@ -33,7 +33,6 @@ void virtual_bag_observe_item_proc_source(uint64_t observation_token, void* cont
 void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* control, uint64_t event,
                                         void* x2, void* param, uint64_t result);
 
-std::string data_virtual_bag_ui_status_json();
 std::string data_virtual_bag_test_equip(int index, int bag_type);
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count);
 

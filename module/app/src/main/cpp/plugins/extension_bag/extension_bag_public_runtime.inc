@@ -617,18 +617,6 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
     return true;
 }
 
-std::string data_virtual_bag_ui_status_json() {
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (!read_world_in_world()) {
-        return "{\"injected\":false,\"state\":{}}";
-    }
-    ensure_state_loaded_locked();
-    return "{\"injected\":" + std::string(g_state_entry != nullptr ? "true" : "false") +
-           ",\"extension_tab_button\":" +
-           std::string(g_extension_tab_buttons[0] != nullptr ? "true" : "false") +
-           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state, true) + "}";
-}
-
 std::string data_virtual_bag_test_equip(int index, int bag_type) {
     bool updated = false;
     {
