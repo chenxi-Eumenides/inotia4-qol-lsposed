@@ -14,6 +14,7 @@ void test_set_item_port_version(::QolVersion version);
 #include <cstring>
 
 #include "contracts/plugin.h"
+#include "contracts/character_state.h"
 #include "contracts/ownership.h"
 #include "hooks/registry.h"
 #include "infra/capabilities.h"
@@ -477,6 +478,15 @@ const CapabilityRequirement g_y_api_requires[] = {
 };
 const CapabilityRequirement g_eb_api_optional[] = {
     {"eb.api", QolVersionRange{1, 0}},
+};
+const qol::contracts::CapabilityProvisionRef g_character_state_provides[] = {
+    {qol::contracts::kCharacterStateCapabilityId, qol::contracts::kCharacterStateVersion,
+     &g_dummy_handler},
+};
+const CapabilityRequirement g_character_state_optional[] = {
+    {qol::contracts::kCharacterStateCapabilityId,
+     {qol::contracts::kCharacterStateVersion.major,
+      qol::contracts::kCharacterStateVersion.minor}},
 };
 const CapabilityRequirement g_b_api_optional[] = {
     {"b.api", QolVersionRange{1, 0}},
@@ -1560,6 +1570,30 @@ void test_optional_required_mixed_cycle_real_topology() {
     CHECK(feature_error_lacks("core.item", "dependency cycle"));
 }
 
+void test_core_item_optional_character_state_degradation() {
+    reset_all();
+    PluginDescriptor item_missing = make_dep_descriptor(
+        "core.item", nullptr, 0, g_character_state_optional, 1, nullptr, 0, &dep_install_a);
+    CHECK(register_plugin(item_missing));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    CHECK(feature_degraded("core.item"));
+
+    reset_all();
+    PluginDescriptor item_present = make_dep_descriptor(
+        "core.item", nullptr, 0, g_character_state_optional, 1, nullptr, 0, &dep_install_a);
+    PluginDescriptor character = make_dep_descriptor(
+        "core.character", nullptr, 0, nullptr, 0, g_character_state_provides, 1,
+        &dep_install_b);
+    CHECK(register_plugin(item_present));
+    CHECK(register_plugin(character));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.character", FeatureState::kEnabled));
+    CHECK(!feature_degraded("core.item"));
+    CHECK(std::strcmp(g_dep_order, "BA") == 0);
+}
+
 // ③ required 环负例：仍硬失败（kFailed + dependency cycle），不安装。
 void test_required_cycle_still_fails() {
     reset_all();
@@ -1709,6 +1743,7 @@ int main() {
     test_elf_export_prefix_rejected_for_other_mechanisms();
     test_optional_cycle_soft_edge();
     test_optional_required_mixed_cycle_real_topology();
+    test_core_item_optional_character_state_degradation();
     test_required_cycle_still_fails();
     test_optional_missing_provider_degrades();
     test_optional_pending_degrade_after_provider_failure();

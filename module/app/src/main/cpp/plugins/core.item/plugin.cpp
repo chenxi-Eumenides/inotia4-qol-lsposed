@@ -211,6 +211,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kExtensionBagCapabilityId,
      {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
       static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)}},
+    {contracts::kCharacterStateCapabilityId,
+     {contracts::kCharacterStateVersion.major, contracts::kCharacterStateVersion.minor}},
 };
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
