@@ -1,7 +1,7 @@
 #include "json_lite.h"
 
-#include <cstdlib>
 #include <cstring>
+#include <limits>
 
 namespace qol::features::core_item {
 namespace {
@@ -76,25 +76,48 @@ struct Parser {
 
     bool parse_number(JsonValue* out) {
         const uint32_t start = pos;
-        if (pos < size && (text[pos] == '-' || text[pos] == '+')) ++pos;
-        bool digits = false;
-        bool fractional = false;
-        while (pos < size) {
-            const char ch = text[pos];
-            if (ch >= '0' && ch <= '9') {
-                digits = true;
-                ++pos;
-            } else if (ch == '.' || ch == 'e' || ch == 'E' || ch == '-' || ch == '+') {
-                fractional = fractional || ch == '.' || ch == 'e' || ch == 'E';
-                ++pos;
-            } else {
-                break;
-            }
+        const bool negative = pos < size && text[pos] == '-';
+        if (negative) ++pos;
+        if (pos >= size) return false;
+
+        if (text[pos] == '0') {
+            ++pos;
+            if (pos < size && text[pos] >= '0' && text[pos] <= '9') return false;
+        } else {
+            if (text[pos] < '1' || text[pos] > '9') return false;
+            while (pos < size && text[pos] >= '0' && text[pos] <= '9') ++pos;
         }
-        if (!digits) return false;
+
+        bool integer_only = true;
+        if (pos < size && text[pos] == '.') {
+            integer_only = false;
+            ++pos;
+            const uint32_t fraction_start = pos;
+            while (pos < size && text[pos] >= '0' && text[pos] <= '9') ++pos;
+            if (pos == fraction_start) return false;
+        }
+        if (pos < size && (text[pos] == 'e' || text[pos] == 'E')) {
+            integer_only = false;
+            ++pos;
+            if (pos < size && (text[pos] == '+' || text[pos] == '-')) ++pos;
+            const uint32_t exponent_start = pos;
+            while (pos < size && text[pos] >= '0' && text[pos] <= '9') ++pos;
+            if (pos == exponent_start) return false;
+        }
+        if (!integer_only) return false;
+
+        const uint64_t limit = negative
+                                   ? static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1
+                                   : static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+        uint64_t magnitude = 0;
+        for (uint32_t i = start + (negative ? 1U : 0U); i < pos; ++i) {
+            const uint32_t digit = static_cast<uint32_t>(text[i] - '0');
+            if (magnitude > (limit - digit) / 10) return false;
+            magnitude = magnitude * 10 + digit;
+        }
         out->type = JsonValue::Type::kNumber;
-        out->integer = std::strtoll(text + start, nullptr, 10);
-        (void)fractional;  // 原始库存/商店 JSON 无小数；出现小数时按整数截断语义等价
+        out->integer = negative ? -static_cast<long long>(magnitude)
+                                : static_cast<long long>(magnitude);
         return true;
     }
 

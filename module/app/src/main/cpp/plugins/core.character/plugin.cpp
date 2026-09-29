@@ -467,11 +467,16 @@ bool parse_path_int(const contracts::HttpReq& request, const char* name, int32_t
             continue;
         }
         if (param.value == nullptr || param.value_len == 0) return false;
-        const std::string value(param.value, param.value_len);
-        char* end = nullptr;
-        const long parsed = std::strtol(value.c_str(), &end, 10);
-        if (end == nullptr || *end != '\0') return false;
-        *out = static_cast<int32_t>(parsed);
+        if (param.value_len > 10) return false;
+        int32_t parsed = 0;
+        for (uint32_t k = 0; k < param.value_len; ++k) {
+            const char c = param.value[k];
+            if (c < '0' || c > '9') return false;
+            const int32_t digit = c - '0';
+            if (parsed > (std::numeric_limits<int32_t>::max() - digit) / 10) return false;
+            parsed = parsed * 10 + digit;
+        }
+        *out = parsed;
         return true;
     }
     return false;
@@ -1032,13 +1037,16 @@ bool char_path_int(const contracts::HttpReq* request, const char* name, int32_t*
         if (param.name == nullptr || param.name_len != name_len) continue;
         if (std::strncmp(param.name, name, name_len) != 0) continue;
         if (param.value == nullptr || param.value_len == 0) return false;
-        int64_t value = 0;
+        if (param.value_len > 10) return false;
+        int32_t value = 0;
         for (uint32_t k = 0; k < param.value_len; ++k) {
             const char c = param.value[k];
             if (c < '0' || c > '9') return false;
-            value = value * 10 + (c - '0');
+            const int32_t digit = c - '0';
+            if (value > (std::numeric_limits<int32_t>::max() - digit) / 10) return false;
+            value = value * 10 + digit;
         }
-        *out = static_cast<int32_t>(value);
+        *out = value;
         return true;
     }
     return false;

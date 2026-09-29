@@ -405,6 +405,20 @@ std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
     return std::string(storage, response.body_size);
 }
 
+std::string dispatch_get_template(const char* path, const qol::contracts::HttpPathParam* params,
+                                 uint32_t param_count, uint16_t* status) {
+    const std::string path_value(path);
+    char storage[8192]{};
+    qol::contracts::HttpReq request{
+        qol::contracts::HttpMethod::kGet, path_value.c_str(),
+        static_cast<uint32_t>(path_value.size()), nullptr, 0, nullptr, 0, params, param_count,
+    };
+    qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(storage), sizeof(storage), 0, 0};
+    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
+    if (status != nullptr) *status = response.status;
+    return std::string(storage, response.body_size);
+}
+
 std::string dispatch_post(const char* path, const char* body,
                           const qol::contracts::HttpPathParam* params, uint32_t param_count,
                           uint16_t* status = nullptr) {
@@ -472,6 +486,30 @@ void test_add_stat_result_semantics() {
           success);
     CHECK(g_op_calls == 3);
     CHECK(g_last_op == FakeOp::kAddStat && g_op_a == 0 && g_op_b == 0);
+
+    const qol::contracts::HttpPathParam overflow_role{"role", 4, "99999999999999999999", 20};
+    const qol::contracts::HttpPathParam negative_role{"role", 4, "-1", 2};
+    const uint32_t old_post_size = g_post_payload_size;
+    const uint32_t old_post_handler = g_post_handler_id;
+    CHECK(dispatch_post("/api/op/character/{role}/experience", "{\"exp\":1}",
+                        &overflow_role, 1, &status) ==
+          "{\"ok\":false,\"error\":\"role required\"}");
+    CHECK(status == 400 && g_post_payload_size == old_post_size &&
+          g_post_handler_id == old_post_handler);
+    CHECK(dispatch_post("/api/op/character/{role}/experience", "{\"exp\":1}",
+                        &negative_role, 1, &status) ==
+          "{\"ok\":false,\"error\":\"role required\"}");
+    CHECK(status == 400 && g_post_payload_size == old_post_size &&
+          g_post_handler_id == old_post_handler);
+
+    const qol::contracts::HttpPathParam overflow_slot{"slot", 4, "99999999999999999999", 20};
+    CHECK(dispatch_get_template("/api/character/mercenary/{slot}", &overflow_slot, 1,
+                                &status) == "{\"ok\":false,\"error\":\"bad request\"}");
+    CHECK(status == 400);
+    const qol::contracts::HttpPathParam negative_slot{"slot", 4, "-1", 2};
+    CHECK(dispatch_get_template("/api/character/mercenary/{slot}", &negative_slot, 1,
+                                &status) == "{\"ok\":false,\"error\":\"bad request\"}");
+    CHECK(status == 400);
 
     g_op_calls = 0;
     g_op_fail_at = 1;

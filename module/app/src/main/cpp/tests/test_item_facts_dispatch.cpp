@@ -1183,15 +1183,19 @@ void test_write_routes() {
     CHECK(g_state_add_category == std::numeric_limits<int32_t>::max() &&
           g_state_add_count == std::numeric_limits<int32_t>::min());
 
-    CHECK(dispatch_post("/api/op/inventory/add",
-                        "{\"category\":3.7,\"count\":3.7,\"socket\":1.7,"
-                        "\"enhanceRemaining\":2.7,\"rarity\":4.7}",
-                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
-    result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
-                           &result_size));
-    CHECK(g_state_add_category == 3 && g_state_add_count == 3 && g_state_add_socket == 1 &&
-          g_state_add_enhance == 2 && g_state_add_rarity == 4);
+    const char* invalid_integer_tokens[] = {
+        "{\"category\":1e2}", "{\"category\":1.5}", "{\"category\":+1}",
+        "{\"category\":1.0}", "{\"category\":2147483648}",
+        "{\"category\":-2147483649}",
+    };
+    for (const char* invalid_body : invalid_integer_tokens) {
+        CHECK(dispatch_post("/api/op/inventory/add", invalid_body, nullptr, 0, &status) ==
+              "{\"ok\":false,\"error\":\"bad request\"}");
+        CHECK(status == 400);
+    }
+    CHECK(dispatch_post("/api/op/inventory/add", "{\"category\": 1}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":72}");
+    CHECK(status == 200);
 
     CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":5}", nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
@@ -1285,6 +1289,16 @@ void test_write_routes() {
     CHECK(money_args.i64 == 0);
     CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"-Infinity\"}", nullptr,
                         0, &status) == "{\"ok\":false,\"error\":\"money required\"}");
+    CHECK(status == 400);
+
+    CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":-1}", nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"money required\"}");
+    CHECK(status == 400);
+
+    const qol::contracts::HttpPathParam invalid_role{"role", 4, "99999999999999999999", 20};
+    CHECK(dispatch_post("/api/item/inventory/{role}/equip_item", "{\"category\":10}",
+                        &invalid_role, 1, &status) ==
+          "{\"ok\":false,\"error\":\"bad request\"}");
     CHECK(status == 400);
 
     const int write_calls_before_invalid = g_write_calls;
@@ -1472,6 +1486,19 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_template("/api/item/inventory/bag/5/info", &missing_bag, 1, &status) ==
           "{\"bag\":5,\"capacity\":16,\"slot_count\":0}");
     CHECK(status == 200);
+    const qol::contracts::HttpPathParam oversized_bag{"bag", 3, "99999999999999999999", 20};
+    CHECK(dispatch_template("/api/item/inventory/bag/{bag}/info", &oversized_bag, 1,
+                            &status) == "{\"ok\":false,\"error\":\"bad request\"}");
+    CHECK(status == 400);
+    const qol::contracts::HttpPathParam negative_bag{"bag", 3, "-1", 2};
+    CHECK(dispatch_template("/api/item/inventory/bag/{bag}/info", &negative_bag, 1,
+                            &status) == "{\"ok\":false,\"error\":\"bad request\"}");
+    CHECK(status == 400);
+    const qol::contracts::HttpPathParam oversized_bag_slot[] = {
+        {"bag", 3, "0", 1}, {"slot", 4, "99999999999999999999", 20}};
+    CHECK(dispatch_template("/api/item/inventory/bag/{bag}/{slot}", oversized_bag_slot, 2,
+                            &status) == "{\"ok\":false,\"error\":\"bad request\"}");
+    CHECK(status == 400);
 
     // 非 world：发布与迁移前一致的 not in game 错误体（HTTP 200）。
     g_in_world = false;
