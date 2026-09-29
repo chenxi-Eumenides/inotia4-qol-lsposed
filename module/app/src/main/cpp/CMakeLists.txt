@@ -236,6 +236,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/ui_write_port.cpp
     game/adapter_ports/character_write_ops_port.cpp
     game/adapter_ports/item_count_facade.cpp
+    game/adapter_ports/inventory_extension_facade.cpp
     game/adapter_ports/item_dice_write_port.cpp
     game/adapter_ports/item_money_write_port.cpp
 )
@@ -247,6 +248,7 @@ target_sources(gamebridge PRIVATE
     host/http_dispatch.cpp
     host/game_host.cpp
     host/item_count_facade.cpp
+    host/inventory_extension_facade.cpp
     host/ui_adapter.cpp
 )
 

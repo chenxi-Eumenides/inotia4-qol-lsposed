@@ -6,7 +6,7 @@
 #include "../result.h"
 #include "../version.h"
 #include "../game_host.h"
-#include "../extension_bag.h"
+#include "../inventory_extension.h"
 
 namespace qol::contracts {
 
@@ -37,14 +37,14 @@ using QolItemInventoryStateAddItemFn = QolResult (*)(
     int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
     int32_t rarity_group, const QolItemCountApi* item_count, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateEquipFn = QolResult (*)(
-    int32_t role, int32_t bag, int32_t slot, const ExtensionBagApi* extension_bag,
+    int32_t role, int32_t bag, int32_t slot, const QolInventoryExtensionProvider* provider,
     QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateUnequipFn = QolResult (*)(
-    int32_t role, int32_t equip_slot, const ExtensionBagApi* extension_bag,
+    int32_t role, int32_t equip_slot, const QolInventoryExtensionProvider* provider,
     QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateApplyFn = QolResult (*)(
     int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-    const ExtensionBagApi* extension_bag, QolItemInventoryStateWriteResult* out);
+    const QolInventoryExtensionProvider* provider, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateMoveFn = QolResult (*)(
     int32_t bag, int32_t slot, int32_t count, int32_t to_bag, int32_t to_slot,
     QolItemInventoryStateWriteResult* out);
@@ -63,7 +63,8 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateApplyFn enchant;
 };
 
-constexpr QolVersion kQolPortItemInventoryStateWriteVersion{1, 0};
+// 1.1：成员参数由 extension_bag 能力类型改为中立 provider 类型（尾随语义不变，minor++）。
+constexpr QolVersion kQolPortItemInventoryStateWriteVersion{1, 1};
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,
               "QolItemInventoryStateGainedItem must remain standard layout");

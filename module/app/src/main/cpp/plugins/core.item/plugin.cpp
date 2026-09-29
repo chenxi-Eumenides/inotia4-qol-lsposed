@@ -14,13 +14,13 @@
 
 #include "contracts/commands.h"
 #include "contracts/character_state.h"
-#include "contracts/extension_bag.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/http.h"
+#include "contracts/inventory_extension.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_state.h"
 #include "json_lite.h"
@@ -208,9 +208,6 @@ const contracts::CapabilityRequirement kRequires[] = {
 };
 
 const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kExtensionBagCapabilityId,
-     {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
-      static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)}},
     {contracts::kCharacterStateCapabilityId,
      {contracts::kCharacterStateVersion.major, contracts::kCharacterStateVersion.minor}},
 };
@@ -286,21 +283,26 @@ const contracts::CharacterStateApi* character_state_capability() {
     return static_cast<const contracts::CharacterStateApi*>(iface);
 }
 
-const contracts::ExtensionBagApi* extension_bag_capability() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const QolResult result = g_sdk->capabilities.require(
-        contracts::kExtensionBagCapabilityId,
-        QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
-                        static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
-        &iface);
-    if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
-    return static_cast<const contracts::ExtensionBagApi*>(iface);
+// 中立扩展 provider 访问：core.item 只经 Item Port 暴露的中立通道读取 provider，
+// 不感知扩展袋能力、逻辑袋号或 provider 实现。每次现取，不缓存跨帧指针。
+struct InventoryExtensionAccessResult {
+    const contracts::QolInventoryExtensionProvider* provider = nullptr;
+    bool available = false;
+};
+
+InventoryExtensionAccessResult inventory_extension() {
+    InventoryExtensionAccessResult result;
+    if (g_port == nullptr || g_port->read.inventory_extension_access == nullptr) return result;
+    contracts::QolInventoryExtensionAccess access{};
+    if (!contracts::succeeded(g_port->read.inventory_extension_access(&access))) return result;
+    result.provider = access.provider;
+    result.available = access.available != 0;
+    return result;
 }
 
-bool extension_bag_move_capability_ready(const contracts::ExtensionBagApi* api) {
-    return api != nullptr && api->enabled != nullptr && api->enabled() &&
-           api->move_item != nullptr;
+bool provider_owns_bag(const InventoryExtensionAccessResult& access, int32_t bag) {
+    return access.provider != nullptr && access.provider->owns_bag != nullptr &&
+           access.provider->owns_bag(bag) != 0;
 }
 
 bool effective_item_count(const void* item, bool original_count_supported, uint32_t* out_count,
@@ -404,117 +406,32 @@ void append_inventory_item(std::string* out, int32_t slot,
     out->append("]}");
 }
 
-struct ExtensionInventorySlot {
-    bool occupied = false;
-    int32_t category = 0;
-    int32_t count = 0;
-};
-
-struct ExtensionInventoryItems {
-    ExtensionInventorySlot slots[5][16]{};
-};
-
-bool collect_extension_inventory_item(int32_t bag, int32_t slot, int32_t category,
-                                      int32_t count, void* raw_context) {
-    auto* context = static_cast<ExtensionInventoryItems*>(raw_context);
-    if (context == nullptr) return false;
-    if (bag < 6 || bag > 10 || slot < 0 || slot >= 16 || category <= 0 || count <= 0) {
-        // L1：单槽非法只跳过该槽；整快照与写票据不得因此失败（限速 WARN 保留可诊断性）。
-        char message[192]{};
-        std::snprintf(message, sizeof(message),
-                      "extension inventory slot skipped: bag=%d slot=%d category=%d count=%d", bag,
-                      slot, category, count);
-        log_degrade_warn(message);
-        return false;
-    }
-    auto& target = context->slots[bag - 6][slot];
-    target = ExtensionInventorySlot{true, category, count};
-    return false;
-}
-
+// 扩展段由 provider 贡献完整 JSON fragment（含前导逗号）；core.item 只追加，不重拼字段、
+// 不感知袋号与数量视图（R-47b 真值表唯一实现点在 provider）。
 QolResult append_extension_inventory_bags(std::string* out) {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr || g_port == nullptr) {
+    if (out == nullptr || g_port == nullptr) return contracts::ok();
+    const InventoryExtensionAccessResult access = inventory_extension();
+    if (!access.available || access.provider == nullptr ||
+        access.provider->inventory_json_fragment == nullptr) {
+        // provider 未注册/停用 → 省略扩展段（限速 WARN 保留可诊断性）；主快照照常。
+        log_degrade_warn("extension inventory omitted: provider unavailable");
         return contracts::ok();
     }
-    const void* iface = nullptr;
-    const QolResult required = g_sdk->capabilities.require(
-        contracts::kExtensionBagCapabilityId,
-        QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
-                        static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
-        &iface);
-    if (!contracts::succeeded(required) || iface == nullptr) {
-        // L2：EB capability 不可取（停用/未注册）→ 省略 EB 段，主快照/写票据照常。
-        log_degrade_warn("extension inventory omitted: extension bag capability unavailable");
-        return contracts::ok();
-    }
-    const auto* extension_bag = static_cast<const contracts::ExtensionBagApi*>(iface);
     int32_t in_world = 0;
     if (g_port->read.in_world == nullptr ||
         !contracts::succeeded(g_port->read.in_world(&in_world)) || in_world == 0) {
         return contracts::ok();
     }
-    if (extension_bag->enabled == nullptr || !extension_bag->enabled()) {
-        // L2：EB 门禁关闭 → 省略 EB 段。
-        log_degrade_warn("extension inventory omitted: extension bag disabled");
+    thread_local std::vector<char> fragment(kInventoryCapacity);
+    uint32_t fragment_size = 0;
+    const QolResult result = access.provider->inventory_json_fragment(
+        fragment.data(), static_cast<uint32_t>(fragment.size()), &fragment_size);
+    if (!contracts::succeeded(result) || fragment_size == 0) {
+        // provider 门禁关闭或不可用时贡献空片段：省略扩展段，主快照/写票据照常。
+        log_degrade_warn("extension inventory omitted: fragment unavailable");
         return contracts::ok();
     }
-    if (extension_bag->for_each_logical_item == nullptr ||
-        extension_bag->logical_bag_capacity == nullptr ||
-        extension_bag->internal_index == nullptr || extension_bag->item_at == nullptr) {
-        // L2：EB 面不可用（成员缺失）→ 省略 EB 段，主快照/写票据照常；限速 WARN。
-        log_degrade_warn("extension inventory omitted: extension bag api incomplete");
-        return contracts::ok();
-    }
-
-    ExtensionInventoryItems items{};
-    extension_bag->for_each_logical_item(&collect_extension_inventory_item, &items);
-
-    // 先构造到本地缓冲：任一 bag 容量不可得时整体丢弃 EB 段（L2），不产生半截输出。
-    std::string extension_json;
-    for (int32_t bag = 6; bag <= 10; ++bag) {
-        int32_t capacity = 0;
-        if (!extension_bag->logical_bag_capacity(bag, &capacity) || capacity < 0 || capacity > 16) {
-            log_degrade_warn("extension inventory omitted: extension bag capacity unavailable");
-            return contracts::ok();
-        }
-        std::string encoded_items;
-        int32_t filled = 0;
-        for (int32_t slot = 0; slot < capacity; ++slot) {
-            const ExtensionInventorySlot& item = items.slots[bag - 6][slot];
-            if (!item.occupied) continue;
-            uint32_t count = static_cast<uint32_t>(item.count);
-            const int32_t internal_bag = extension_bag->internal_index(bag);
-            if (internal_bag >= 0) {
-                void* native_item = extension_bag->item_at(internal_bag, slot);
-                if (native_item != nullptr) {
-                    uint32_t effective = 0;
-                    bool count_present = false;
-                    if (effective_item_count(native_item, true, &effective, &count_present) &&
-                        count_present) {
-                        // 数量接管方处于关闭态时 effective 视图可能为 0（canonical&0x7F==0）；此时
-                        // EB 回调已按 R-47b 真值表给出 canonical 视图正数，保留之，避免二次
-                        // 覆盖为 0（真值：effective>0→effective；effective==0 且回调>0→回调）。
-                        if (effective != 0 || count == 0) count = effective;
-                    } else if (g_port->read.cumulate_count != nullptr) {
-                        int32_t fallback = 0;
-                        if (contracts::succeeded(g_port->read.cumulate_count(native_item, &fallback))) {
-                            count = static_cast<uint32_t>(fallback);
-                        }
-                    }
-                }
-            }
-            if (filled != 0) encoded_items.push_back(',');
-            encoded_items += "{\"slot\":" + std::to_string(slot) +
-                             ",\"category\":" + std::to_string(item.category) +
-                             ",\"count\":" + std::to_string(count) + "}";
-            ++filled;
-        }
-        extension_json += ",{\"bag\":" + std::to_string(bag) +
-                ",\"items\":[" + encoded_items +
-                "],\"capacity\":" + std::to_string(capacity) +
-                ",\"slot_count\":" + std::to_string(filled) + "}";
-    }
-    out->append(extension_json);
+    out->append(fragment.data(), fragment_size);
     return contracts::ok();
 }
 
@@ -889,10 +806,13 @@ bool parse_write_body(const std::string& body, JsonValue* object) {
            object->type == JsonValue::Type::kObject;
 }
 
+// 原版物理袋数量（0..5，含任务袋 5）；其余袋号由中立 provider 认领，本函数不感知其编号。
+constexpr int32_t kOriginalInventoryBagCount = 6;
+
 bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
     if (g_port == nullptr || g_port->read.item_ref_at == nullptr || bag_out == nullptr ||
         slot_out == nullptr) return false;
-    for (int32_t bag = 0; bag <= 10; ++bag) {
+    for (int32_t bag = 0; bag < kOriginalInventoryBagCount; ++bag) {
         for (int32_t slot = 0; slot < 16; ++slot) {
             contracts::QolInventoryItemRef item{};
             const QolResult result = g_port->read.item_ref_at(bag, slot, &item);
@@ -902,7 +822,28 @@ bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
             return true;
         }
     }
-    return false;
+    const InventoryExtensionAccessResult access = inventory_extension();
+    if (!access.available || access.provider == nullptr ||
+        access.provider->for_each_item == nullptr) {
+        return false;
+    }
+    struct Ctx {
+        int32_t category;
+        int32_t* bag;
+        int32_t* slot;
+        bool found;
+    } ctx{category, bag_out, slot_out, false};
+    (void)access.provider->for_each_item(
+        [](const contracts::QolInventoryItemRef* ref, void* raw) -> int32_t {
+            auto* p = static_cast<Ctx*>(raw);
+            if (ref->category != p->category) return 0;
+            *p->bag = ref->bag;
+            *p->slot = ref->slot;
+            p->found = true;
+            return 1;
+        },
+        &ctx);
+    return ctx.found;
 }
 
 bool write_path_int(const contracts::HttpReq* request, const char* name, int32_t* out) {
@@ -1182,8 +1123,7 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
         return false;
     }
 
-    // The SDK lookup is deliberately per operation; the ExtensionBagApi pointer is never retained.
-    const contracts::ExtensionBagApi* extension_bag = extension_bag_capability();
+    // 扩展 provider 由 host 写端口按中立 facade 解析并转发；core.item 不持有其指针。
     contracts::QolItemInventoryStateWriteResult operation_data{};
     QolResult operation = contracts::error(kQolErrUnsupported, "item operation unavailable", 26);
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
@@ -1196,21 +1136,21 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
                 (void)copy_buffer(out, capacity, out_size, kNotFound, sizeof(kNotFound) - 1);
                 return false;
             }
-            operation = g_item_state_write->equip_item(args.i0, bag, slot, extension_bag,
+            operation = g_item_state_write->equip_item(args.i0, bag, slot, nullptr,
                                                         &operation_data);
             break;
         }
         case contracts::QolItemWriteKind::kUnequipItem:
-            operation = g_item_state_write->unequip_item(args.i0, args.i1, extension_bag,
+            operation = g_item_state_write->unequip_item(args.i0, args.i1, nullptr,
                                                           &operation_data);
             break;
         case contracts::QolItemWriteKind::kPutJewel:
             operation = g_item_state_write->put_jewel(args.i0, args.i1, args.i2, args.i3,
-                                                       extension_bag, &operation_data);
+                                                       nullptr, &operation_data);
             break;
         case contracts::QolItemWriteKind::kEnchant:
             operation = g_item_state_write->enchant(args.i0, args.i1, args.i2, args.i3,
-                                                     extension_bag, &operation_data);
+                                                     nullptr, &operation_data);
             break;
         default:
             return false;
@@ -1324,36 +1264,36 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
 
 bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
                             uint32_t capacity, uint32_t* out_size) {
-    const bool extension_requested =
-        (args.i0 >= 6 && args.i0 <= 10) || (args.i3 >= 6 && args.i3 <= 10);
-    if (extension_requested) {
-        const contracts::ExtensionBagApi* api = extension_bag_capability();
-        if (extension_bag_move_capability_ready(api)) {
-            std::vector<char> move_result;
-            try {
-                move_result.resize(262144);
-            } catch (const std::bad_alloc&) {
-                constexpr char kMoveFailed[] =
-                    "{\"ok\":false,\"error\":\"extension bag move failed\"}";
-                (void)copy_buffer(out, capacity, out_size, kMoveFailed, sizeof(kMoveFailed) - 1);
-                return false;
-            }
-            uint32_t move_result_size = 0;
-            if (api->move_item(args.i0, args.i1, args.i3, args.i4, move_result.data(),
-                               static_cast<uint32_t>(move_result.size()),
-                               &move_result_size) != 0 &&
-                move_result_size <= move_result.size()) {
-                const uint32_t copied = std::min(move_result_size, capacity);
-                if (copied != 0) std::memcpy(out, move_result.data(), copied);
-                *out_size = move_result_size;
-                return std::string_view(move_result.data(), move_result_size)
-                           .compare(0, 11, "{\"ok\":false") != 0;
-            }
+    const InventoryExtensionAccessResult access = inventory_extension();
+    const bool provider_requested =
+        access.available &&
+        (provider_owns_bag(access, args.i0) || provider_owns_bag(access, args.i3));
+    if (provider_requested && access.provider != nullptr &&
+        access.provider->move_item != nullptr) {
+        std::vector<char> move_result;
+        try {
+            move_result.resize(262144);
+        } catch (const std::bad_alloc&) {
             constexpr char kMoveFailed[] =
                 "{\"ok\":false,\"error\":\"extension bag move failed\"}";
             (void)copy_buffer(out, capacity, out_size, kMoveFailed, sizeof(kMoveFailed) - 1);
             return false;
         }
+        uint32_t move_result_size = 0;
+        if (access.provider->move_item(args.i0, args.i1, args.i3, args.i4, move_result.data(),
+                                       static_cast<uint32_t>(move_result.size()),
+                                       &move_result_size) != 0 &&
+            move_result_size <= move_result.size()) {
+            const uint32_t copied = std::min(move_result_size, capacity);
+            if (copied != 0) std::memcpy(out, move_result.data(), copied);
+            *out_size = move_result_size;
+            return std::string_view(move_result.data(), move_result_size)
+                       .compare(0, 11, "{\"ok\":false") != 0;
+        }
+        constexpr char kMoveFailed[] =
+            "{\"ok\":false,\"error\":\"extension bag move failed\"}";
+        (void)copy_buffer(out, capacity, out_size, kMoveFailed, sizeof(kMoveFailed) - 1);
+        return false;
     }
     return write_item_inventory_state_result(args, out, capacity, out_size);
 }

@@ -76,7 +76,7 @@ std::string debug_item_raw_json(int32_t bag, int32_t slot) {
     std::string s = "{\"ok\":true";
     s += ",\"bag\":" + std::to_string(ref.bag);
     s += ",\"slot\":" + std::to_string(ref.slot);
-    s += ",\"kind\":" + std::string(ref.kind == InventoryItemKind::kExtension ? "\"extension\"" : "\"original\"");
+    s += ",\"kind\":" + std::string(ref.kind == InventoryItemKind::kProvider ? "\"extension\"" : "\"original\"");
     s += ",\"category\":" + std::to_string(ref.category);
     s += ",\"count\":" + std::to_string(ref.count);
     // I_TYPE(0x08,u16)：bits2-5=raw grade（品质，档位映射待真机核实），bits6-15=category

@@ -764,6 +764,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/inventory_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
     ${CPP_DIR}/game/adapter_ports/save_port.cpp
     ${CPP_DIR}/game/adapter_ports/save_call_port.cpp
     ${CPP_DIR}/game/adapter_ports/craft_port.cpp
@@ -864,6 +865,17 @@ set_target_properties(core_ui_components_tests PROPERTIES CXX_STANDARD 17 CXX_ST
 add_test(NAME core_ui_components_tests COMMAND core_ui_components_tests)
 
 # P1-A：item_count facade provider 槽、未驻留错误与空参数契约。
+# ITM-13：中立物品域扩展 provider facade（set-once / resident-available 分离 / 缺成员拒绝）。
+add_executable(inventory_extension_facade_tests
+    test_inventory_extension_facade.cpp
+    ${CPP_DIR}/host/inventory_extension_facade.cpp
+    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
+)
+target_include_directories(inventory_extension_facade_tests PRIVATE ${CPP_DIR})
+target_compile_features(inventory_extension_facade_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_extension_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME inventory_extension_facade_tests COMMAND inventory_extension_facade_tests)
+
 add_executable(item_count_facade_tests
     test_item_count_facade.cpp
     ${CPP_DIR}/host/item_count_facade.cpp

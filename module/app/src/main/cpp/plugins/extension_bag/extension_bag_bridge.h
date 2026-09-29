@@ -10,12 +10,20 @@
 #include <cstdint>
 
 #include "contracts/extension_bag.h"
+#include "contracts/inventory_extension.h"
 #include "contracts/plugin.h"
 #include "contracts/item_facts.h"
 #include "contracts/craft_facts.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/inventory_extras_port.h"
+
+// 中立物品域扩展 provider 的宿主注册入口（定义在 host/inventory_extension_facade.cpp）。
+// 插件只声明符号，不 include host 私有实现。
+namespace qol::host {
+bool host_inventory_extension_set_provider(
+    const qol::contracts::QolInventoryExtensionProvider* provider, bool (*available_probe)());
+}  // namespace qol::host
 
 namespace qol::features::extension_bag {
 
@@ -52,5 +60,12 @@ const qol::contracts::QolHostSdk* extension_bag_host_sdk();
 // virtual_bag_* port 实现（实现收口 plugins/extension_bag/extension_bag_port.cpp）。
 // 静态存储、生命周期 ≥ 进程；provides 于插件 enabled 时注册、revoking 时注销。
 const qol::contracts::ExtensionBagApi* extension_bag_api_table();
+
+// 中立物品域扩展 provider 表（ExtensionBag 名称与逻辑袋号不外泄）。静态驻留、生命周期 ≥
+// 进程；install 时经 host 注册为唯一 provider，普通 disable 不注销，deactivate 只撤销 active。
+const qol::contracts::QolInventoryExtensionProvider* inventory_extension_provider_table();
+
+// provider active 探针：install 后为 true、deactivate 后为 false（普通 enable/disable 不影响）。
+bool inventory_extension_provider_active();
 
 }  // namespace qol::features::extension_bag

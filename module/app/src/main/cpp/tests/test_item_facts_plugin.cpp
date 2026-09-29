@@ -21,13 +21,12 @@ int main() {
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
-    CHECK(descriptor.optional_count == 2 && descriptor.optional_requires != nullptr);
+    // ITM-13：core.item 不再声明扩展袋可选依赖（中立 provider 经 Item Port 提供）。
+    CHECK(descriptor.optional_count == 1 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
-                      qol::contracts::kExtensionBagCapabilityId) == 0);
-    CHECK(std::strcmp(descriptor.optional_requires[1].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
-    CHECK(descriptor.optional_requires[1].range.major == qol::contracts::kCharacterStateVersion.major);
-    CHECK(descriptor.optional_requires[1].range.min_minor ==
+    CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
+    CHECK(descriptor.optional_requires[0].range.min_minor ==
           qol::contracts::kCharacterStateVersion.minor);
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
@@ -44,7 +43,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 1 && descriptor.ports[0].range.min_minor == 2);
+    CHECK(descriptor.ports[0].range.major == 1 && descriptor.ports[0].range.min_minor == 3);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==

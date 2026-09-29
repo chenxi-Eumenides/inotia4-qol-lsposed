@@ -8,9 +8,11 @@
 
 namespace qol::contracts {
 
+struct QolInventoryExtensionAccess;
+
 enum class QolInventoryItemKind : int32_t {
     kOriginal = 0,
-    kExtension = 1,
+    kProvider = 1,
 };
 
 struct QolInventoryItemRef {
@@ -106,6 +108,7 @@ struct QolItemPortReadApi {
     // Synchronous main-thread typed view; item pointers remain inside the adapter call path.
     QolResult (*inventory_item_view)(const void* item, QolItemInventoryView* out_view);
     QolResult (*effective_cumulate_count)(const void* item, int32_t* out_count);
+    QolResult (*inventory_extension_access)(QolInventoryExtensionAccess* out_access);
 };
 
 struct QolItemPort {

@@ -1,5 +1,6 @@
 #include "host/item_inventory_state_write_port.h"
 
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include <cstring>
 
@@ -67,7 +68,7 @@ QolResult use_item(int32_t bag, int32_t slot,
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return trade_error(out, "slot empty");
     }
-    if (item_ref.kind == InventoryItemKind::kExtension) {
+    if (item_ref.kind == InventoryItemKind::kProvider) {
         const std::string result = extension_bag_use_item(bag, slot);
         constexpr char kOk[] = "{\"ok\":true}";
         if (result == kOk) return contracts::ok();
@@ -137,28 +138,40 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
                                     rarity_group, provider, out);
 }
 
+// host 只转发：provider 由 facade 解析（调用方已显式传入时以其为准），不在 host 缓存。
+const contracts::QolInventoryExtensionProvider* resolve_extension_provider(
+    const contracts::QolInventoryExtensionProvider* provided) {
+    if (provided != nullptr) return provided;
+    return qol::game::inventory_extension_available()
+               ? qol::game::inventory_extension_provider_if_resident()
+               : nullptr;
+}
+
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
-                     const contracts::ExtensionBagApi* extension_bag,
+                     const contracts::QolInventoryExtensionProvider* provider,
                      contracts::QolItemInventoryStateWriteResult* out) {
-    return qol::game::ops::equip_item(role, bag, slot, extension_bag, out);
+    return qol::game::ops::equip_item(role, bag, slot, resolve_extension_provider(provider), out);
 }
 
 QolResult unequip_item(int32_t role, int32_t equip_slot,
-                       const contracts::ExtensionBagApi* extension_bag,
+                       const contracts::QolInventoryExtensionProvider* provider,
                        contracts::QolItemInventoryStateWriteResult* out) {
-    return qol::game::ops::unequip_item(role, equip_slot, extension_bag, out);
+    return qol::game::ops::unequip_item(role, equip_slot, resolve_extension_provider(provider),
+                                        out);
 }
 
 QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                    const contracts::ExtensionBagApi* extension_bag,
+                    const contracts::QolInventoryExtensionProvider* provider,
                     contracts::QolItemInventoryStateWriteResult* out) {
-    return qol::game::ops::put_jewel(role, bag, slot, equip_slot, extension_bag, out);
+    return qol::game::ops::put_jewel(role, bag, slot, equip_slot,
+                                     resolve_extension_provider(provider), out);
 }
 
 QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                  const contracts::ExtensionBagApi* extension_bag,
+                  const contracts::QolInventoryExtensionProvider* provider,
                   contracts::QolItemInventoryStateWriteResult* out) {
-    return qol::game::ops::enchant(role, bag, slot, equip_slot, extension_bag, out);
+    return qol::game::ops::enchant(role, bag, slot, equip_slot,
+                                   resolve_extension_provider(provider), out);
 }
 
 const contracts::QolItemInventoryStateWritePort kPort{

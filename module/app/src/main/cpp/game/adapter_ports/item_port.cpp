@@ -11,6 +11,7 @@
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/shop.h"
 #include "game/access/world.h"
@@ -109,10 +110,15 @@ QolResult read_effective_cumulate_count(const void* item, int32_t* out) {
 }
 
 QolResult read_item_ref_at(int32_t bag, int32_t slot, contracts::QolInventoryItemRef* out) {
-    if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16) {
+    // 中立 provider 契约：只校验负 bag/slot 与固定槽界；逻辑袋号认领交由 provider。
+    if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
     return inventory_item_ref_at(bag, slot, out);
+}
+
+QolResult read_inventory_extension_access(contracts::QolInventoryExtensionAccess* out_access) {
+    return inventory_extension_get_access(out_access);
 }
 
 QolResult read_physical_item_at(int32_t bag, int32_t slot, void** out) {
@@ -244,7 +250,7 @@ const contracts::QolItemPort kItemPort{
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_context,
       &read_cursor_index, &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
        &read_static_text, &read_static_ready, &read_inventory_item_view,
-       &read_effective_cumulate_count},
+       &read_effective_cumulate_count, &read_inventory_extension_access},
 };
 
 }  // namespace

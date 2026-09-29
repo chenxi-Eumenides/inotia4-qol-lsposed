@@ -662,20 +662,26 @@ void test_choice_port_version_gate() {
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 }
 
-void test_item_port_v12_rejects_legacy_v11_adapter() {
+// ITM-13：Item Port 1.3 尾追加中立扩展查询成员；旧 1.1/1.2 适配器必须 fail-closed 拒绝。
+void test_item_port_v13_rejects_legacy_adapters() {
     reset_all();
     qol::contracts::QolPortRequirement requirement{
-        qol::contracts::QolPortId::QOL_PORT_ITEM, {1, 2}};
-    PluginDescriptor descriptor = make_descriptor("core.item", nullptr, 0, nullptr, 0);
-    descriptor.ports = &requirement;
-    descriptor.port_count = 1;
-    qol::game::test_set_item_port_version({1, 1});
-    CHECK(register_plugin(descriptor));
-    CHECK(install_all(make_deps()) == 1);
-    const char* error = nullptr;
-    CHECK(feature_state_is("core.item", FeatureState::kBlocked));
-    CHECK(feature_of("core.item", nullptr, nullptr, &error));
-    CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+        qol::contracts::QolPortId::QOL_PORT_ITEM,
+        {qol::contracts::kQolPortItemVersion.major, qol::contracts::kQolPortItemVersion.minor}};
+    const ::QolVersion legacy_versions[] = {{1, 1}, {1, 2}};
+    for (const auto legacy : legacy_versions) {
+        reset_all();
+        PluginDescriptor descriptor = make_descriptor("core.item", nullptr, 0, nullptr, 0);
+        descriptor.ports = &requirement;
+        descriptor.port_count = 1;
+        qol::game::test_set_item_port_version(legacy);
+        CHECK(register_plugin(descriptor));
+        CHECK(install_all(make_deps()) == 1);
+        const char* error = nullptr;
+        CHECK(feature_state_is("core.item", FeatureState::kBlocked));
+        CHECK(feature_of("core.item", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
+    }
     qol::game::test_set_item_port_version(qol::contracts::kQolPortItemVersion);
 }
 
@@ -1703,7 +1709,7 @@ void test_optional_degrade_timing_after_enable() {
 int main() {
     test_success_path();
     test_choice_port_version_gate();
-    test_item_port_v12_rejects_legacy_v11_adapter();
+    test_item_port_v13_rejects_legacy_adapters();
     test_save_port_version_and_private_gate();
     test_craft_port_version_and_private_gate();
     test_gate_off_installed_disabled();

@@ -1,5 +1,6 @@
 #include "plugins/extension_bag/plugin.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 
@@ -52,6 +53,10 @@ const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::SaveFactsApi* g_save_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
+
+// 中立 provider active 探针状态：install 后置位、deactivate 后清除；普通 enable/disable 不改变。
+// provider 表本身静态驻留（set-once），active 只表达 provider 是否参与路由。
+std::atomic<bool> g_provider_active{false};
 
 // moveMergeEnabled 配置变更订阅句柄；deactivate 时成对注销（install 幂等重入）。
 uint64_t g_config_subscription = 0;
@@ -534,6 +539,21 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
         return 1;
     }
+    // ITM-13：向宿主注册中立物品域 provider（set-once 静态驻留）。注册失败即 install 失败，
+    // 回滚已建立的绑定，避免半注册状态。
+    if (!qol::host::host_inventory_extension_set_provider(inventory_extension_provider_table(),
+                                                          &inventory_extension_provider_active)) {
+        extension_bag_bind_port_sdk(nullptr);
+        extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
+        extension_bag_bind_character_extras(nullptr);
+        extension_bag_bind_inventory_extras(nullptr);
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_write_port = nullptr;
+        return 1;
+    }
+    g_provider_active.store(true, std::memory_order_release);
     return 0;
 }
 
@@ -557,6 +577,8 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
         (void)g_sdk->events.unsubscribe(g_config_subscription);
         g_config_subscription = 0;
     }
+    // 中立 provider 表静态驻留（不指向可释放内存）；deactivate 只撤销 active，使路由等同无 provider。
+    g_provider_active.store(false, std::memory_order_release);
     extension_bag_set_enabled(false);
     g_world_facts = nullptr;
     g_item_facts = nullptr;
@@ -623,5 +645,9 @@ const qol::contracts::WorldFactsApi* world_facts() {
 }
 
 const qol::contracts::SaveFactsApi* save_facts() { return g_save_facts; }
+
+bool inventory_extension_provider_active() {
+    return g_provider_active.load(std::memory_order_acquire);
+}
 
 }  // namespace qol::features::extension_bag

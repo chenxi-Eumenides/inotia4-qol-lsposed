@@ -3,11 +3,9 @@
 #include "game/access/game_access.h"
 #include "game/access/ui_state.h"
 #include "game/access/world.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/symbols/game_symbols.h"
-#include "contracts/extension_bag_port.h"
 #include "contracts/runtime_hooks.h"
-
-#include "contracts/extension_bag.h"
 
 #include <atomic>
 #include <chrono>
@@ -281,28 +279,17 @@ bool find_inventory_item_ref(int category, InventoryItemRef* out) {
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
     *out = {};
-    // D2b：扩展逻辑袋读取经能力接口现取（不缓存跨帧指针）。能力缺失时逻辑袋 6..10
-    // 视为不存在；物理任务袋 5 仍可只读访问。
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->is_logical_bag != nullptr && eb->is_logical_bag(bag)) {
-        struct Ctx { int bag; int slot; InventoryItemRef* out; } ctx{bag, slot, out};
-        if (eb->for_each_logical_item == nullptr || eb->internal_index == nullptr ||
-            eb->item_at == nullptr) {
-            return false;
-        }
-        eb->for_each_logical_item([](int32_t item_bag, int32_t item_slot, int32_t category,
-                                     int32_t count, void* c) -> bool {
-            Ctx* p = static_cast<Ctx*>(c);
-            if (item_bag != p->bag || item_slot != p->slot) return false;
-            *p->out = {InventoryItemKind::kExtension, item_bag, item_slot, category, count, nullptr};
-            return true;
-        }, &ctx);
-        if (out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot) {
-            const int internal_bag = eb->internal_index(bag);
-            if (internal_bag < 0) return false;
-            out->native_item = eb->item_at(internal_bag, slot);
-        }
-        return out->kind == InventoryItemKind::kExtension && out->bag == bag && out->slot == slot;
+    // 中立 provider 通道：provider 认领的袋号全部走 provider，game 层不感知具体扩展袋
+    // 编号；provider 缺失时视为不存在，物理任务袋 5 仍可只读访问。每次现取，不缓存跨帧指针。
+    const qol::contracts::QolInventoryExtensionProvider* provider =
+        qol::game::inventory_extension_provider_if_resident();
+    if (provider != nullptr && provider->owns_bag != nullptr && provider->owns_bag(bag) != 0) {
+        if (provider->item_ref_at == nullptr) return false;
+        qol::contracts::QolInventoryItemRef ref{};
+        if (!qol::contracts::succeeded(provider->item_ref_at(bag, slot, &ref))) return false;
+        *out = {InventoryItemKind::kProvider, ref.bag, ref.slot, ref.category, ref.count,
+                ref.native_item};
+        return true;
     }
     if (bag > 5 || g_inven == nullptr || fn_get_bit == nullptr) {
         return false;
@@ -331,15 +318,17 @@ void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
         }, &state);
     }
     if (state.stopped) return;
-    // D2b：逻辑袋遍历经能力接口现取；能力缺失 = EB disabled，不并扩展袋（与原 disabled 路径一致）。
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb == nullptr || eb->for_each_logical_item == nullptr) return;
-    eb->for_each_logical_item([](int32_t bag, int32_t slot, int32_t category, int32_t count,
-                                 void* c) -> bool {
+    // 中立 provider 通道：provider 缺失时（未注册/不可用）不并扩展物品；provider 内部
+    // 仍按门禁两态决定是否输出。每次现取，不缓存跨帧指针。
+    const qol::contracts::QolInventoryExtensionProvider* provider =
+        qol::game::inventory_extension_provider_if_resident();
+    if (provider == nullptr || provider->for_each_item == nullptr) return;
+    provider->for_each_item([](const qol::contracts::QolInventoryItemRef* ref, void* c) -> int32_t {
         Ctx* p = static_cast<Ctx*>(c);
-        const InventoryItemRef ref{InventoryItemKind::kExtension, bag, slot, category, count, nullptr};
-        p->stopped = p->fn(ref, p->ctx);
-        return p->stopped;
+        const InventoryItemRef item{InventoryItemKind::kProvider, ref->bag, ref->slot, ref->category,
+                                    ref->count, ref->native_item};
+        p->stopped = p->fn(item, p->ctx);
+        return p->stopped ? 1 : 0;
     }, &state);
 }
 

@@ -13,6 +13,7 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/extension_bag.h"
 #include "contracts/extension_bag_port.h"
+#include "contracts/inventory_extension.h"
 #include "contracts/character_state.h"
 #include "contracts/item_count.h"
 #include "contracts/item_facts.h"
@@ -301,12 +302,15 @@ QolResult fake_accept_dice(qol::contracts::QolItemDiceAcceptResult* out) {
     return g_dice_accept_result;
 }
 
+QolResult fake_inventory_extension_access(qol::contracts::QolInventoryExtensionAccess* out);
+
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
     &stub_detail,     &stub_cursor,        &fake_inventory,  &fake_money,
     &fake_shop,       &fake_in_world,      &fake_static_text, &fake_static_ready,
      &fake_inventory_item_view, &stub_effective_cumulate,
+     &fake_inventory_extension_access,
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
@@ -393,14 +397,14 @@ QolResult fake_party_write(int32_t kind, int32_t role, int32_t arg1, int32_t arg
 }
 
 QolResult fake_state_equip(int32_t role, int32_t bag, int32_t slot,
-                           const qol::contracts::ExtensionBagApi*,
+                           const qol::contracts::QolInventoryExtensionProvider*,
                            qol::contracts::QolItemInventoryStateWriteResult* out) {
     return fake_party_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEquipItem),
                             role, bag, slot, -1, out);
 }
 
 QolResult fake_state_unequip(int32_t role, int32_t slot,
-                             const qol::contracts::ExtensionBagApi*,
+                             const qol::contracts::QolInventoryExtensionProvider*,
                              qol::contracts::QolItemInventoryStateWriteResult* out) {
     return fake_party_write(
         static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUnequipItem), role, slot, -1, -1,
@@ -408,14 +412,14 @@ QolResult fake_state_unequip(int32_t role, int32_t slot,
 }
 
 QolResult fake_state_put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                               const qol::contracts::ExtensionBagApi*,
+                               const qol::contracts::QolInventoryExtensionProvider*,
                                qol::contracts::QolItemInventoryStateWriteResult* out) {
     return fake_party_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kPutJewel),
                             role, bag, slot, equip_slot, out);
 }
 
 QolResult fake_state_enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                             const qol::contracts::ExtensionBagApi*,
+                             const qol::contracts::QolInventoryExtensionProvider*,
                              qol::contracts::QolItemInventoryStateWriteResult* out) {
     return fake_party_write(static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEnchant),
                             role, bag, slot, equip_slot, out);
@@ -491,7 +495,6 @@ const qol::contracts::QolItemCountApi* override_item_count_api() {
     return g_override_available ? &kOverrideItemCountApi : nullptr;
 }
 
-bool g_extension_bag_available = false;
 bool g_extension_bag_enabled = true;
 int g_extension_move_calls = 0;
 std::string g_extension_move_body = "{\"ok\":true,\"state\":{}}";
@@ -518,6 +521,77 @@ qol::contracts::ExtensionBagApi make_fake_extension_bag_api() {
 }
 
 const qol::contracts::ExtensionBagApi kFakeExtensionBagApi = make_fake_extension_bag_api();
+
+// ---------------------------------------------------------------------------
+// ITM-13：中立物品域 provider 测试替身。
+// core.item 只经 Item Port 的 inventory_extension_access 读取 provider；本替身把既有 EB
+// fake（owns_bag/move）与 legacy EB 段 JSON 桥接为中立语义，供三态 golden 复用。
+// ---------------------------------------------------------------------------
+bool g_provider_resident = false;
+bool g_provider_available = false;
+std::string g_provider_fragment;
+
+int32_t fake_provider_owns_bag(int32_t bag) { return fake_is_logical_bag(bag) ? 1 : 0; }
+QolResult fake_provider_item_ref_at(int32_t, int32_t,
+                                    qol::contracts::QolInventoryItemRef* out) {
+    if (out != nullptr) *out = {};
+    return qol::contracts::error(kQolErrNotFound, "not found", 9);
+}
+QolResult fake_provider_for_each(qol::contracts::QolInventoryBagSlotFn, void*) {
+    return qol::contracts::ok();
+}
+QolResult fake_provider_bag_capacity(int32_t, int32_t* out_capacity) {
+    if (out_capacity != nullptr) *out_capacity = 0;
+    return qol::contracts::error(kQolErrNotFound, "not found", 9);
+}
+QolResult fake_provider_fragment(char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    }
+    *out_size = 0;
+    if (g_provider_fragment.empty()) return qol::contracts::ok();
+    if (g_provider_fragment.size() >= capacity) {
+        return qol::contracts::error(kQolErrBlocked, "small", 5);
+    }
+    std::memcpy(out, g_provider_fragment.data(), g_provider_fragment.size());
+    out[g_provider_fragment.size()] = '\0';
+    *out_size = static_cast<uint32_t>(g_provider_fragment.size());
+    return qol::contracts::ok();
+}
+int32_t fake_provider_move(int32_t from_bag, int32_t from_slot, int32_t to_bag, int32_t to_slot,
+                           char* out, uint32_t capacity, uint32_t* out_size) {
+    return fake_extension_move(from_bag, from_slot, to_bag, to_slot, out, capacity, out_size);
+}
+QolResult fake_provider_sell_price(const void*, int32_t, int32_t, int64_t* out_price) {
+    if (out_price != nullptr) *out_price = 0;
+    return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+}
+QolResult fake_provider_sync_slot(int32_t, int32_t) { return qol::contracts::ok(); }
+QolResult fake_provider_sync_bag() { return qol::contracts::ok(); }
+int32_t fake_provider_module_view() { return 0; }
+int32_t fake_provider_identify(void*, int32_t*, int32_t*) { return 0; }
+int32_t fake_provider_remove(void*) { return 0; }
+QolResult fake_provider_put_jewel(int32_t, int32_t, int32_t, int32_t) {
+    return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+}
+
+const qol::contracts::QolInventoryExtensionProvider kFakeProvider{
+    &fake_provider_owns_bag,   &fake_provider_item_ref_at, &fake_provider_for_each,
+    &fake_provider_bag_capacity, &fake_provider_fragment,  &fake_provider_move,
+    &fake_provider_sell_price, &fake_provider_sync_slot,   &fake_provider_sync_bag,
+    &fake_provider_module_view, &fake_provider_identify,   &fake_provider_remove,
+    &fake_provider_put_jewel,
+};
+
+QolResult fake_inventory_extension_access(qol::contracts::QolInventoryExtensionAccess* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = {};
+    if (!g_provider_resident) return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+    out->provider = &kFakeProvider;
+    out->resident = 1;
+    out->available = g_provider_available ? 1 : 0;
+    return qol::contracts::ok();
+}
 
 constexpr char kPartyStateJson[] = "{\"roles\":[{\"slot\":1}]}";
 constexpr char kPlayerStateJson[] = "{\"money\":72503,\"leader_slot\":0}";
@@ -572,9 +646,7 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
             *out_iface = golden_extension_bag_api();
             return qol::contracts::ok();
         }
-        if (!g_extension_bag_available) {
-            return qol::contracts::error(kQolErrNotFound, "missing", 7);
-        }
+        // ITM-13：core.item 不再经 capability 取扩展袋；该分支仅为兼容其它潜在消费者保留。
         *out_iface = &kFakeExtensionBagApi;
         return qol::contracts::ok();
     }
@@ -911,7 +983,8 @@ void test_write_routes() {
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 1 && g_state_move_to_slot == 3);
 
     // 扩展袋移动：owner 经 capability 取 v2 move_item，纯 JSON 输出、不附 state。
-    g_extension_bag_available = true;
+    g_provider_resident = true;
+    g_provider_available = true;
     g_extension_bag_enabled = true;
     g_extension_move_calls = 0;
     g_extension_move_body = "{\"ok\":true,\"state\":{\"extension\":true}}";
@@ -935,7 +1008,8 @@ void test_write_routes() {
     g_extension_move_body = "{\"ok\":true,\"state\":{}}";
 
     // 能力缺失回退：扩展请求回落 typed 普通移动分支（普通袋移动同语义，成功附 state）。
-    g_extension_bag_available = false;
+    g_provider_resident = false;
+    g_provider_available = false;
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 2;
     g_state_write_data = {};
@@ -973,11 +1047,13 @@ void test_write_routes() {
     CHECK(std::string(move_error, move_error_size) == "{\"ok\":false,\"error\":\"move failed\"}");
     qol::infra::command_queue_reset_for_test();
     g_state_write_result = qol::contracts::ok();
-    g_extension_bag_available = false;
+    g_provider_resident = false;
+    g_provider_available = false;
     g_original_count = 3;
 
     const qol::contracts::HttpPathParam role{"role", 4, "1", 1};
-    g_extension_bag_available = true;
+    g_provider_resident = true;
+    g_provider_available = true;
     g_extension_bag_require_calls = 0;
     g_character_state_require_calls = 0;
     g_character_state_write_calls = 0;
@@ -995,7 +1071,8 @@ void test_write_routes() {
           g_party_write_args[2] == 0 && g_party_write_args[3] == -1);
     CHECK(g_party_write_order < g_character_state_write_order);
     CHECK(g_character_state_require_calls == 1 && g_character_state_write_calls == 1);
-    CHECK(g_extension_bag_require_calls == 1 && g_extension_bag_required_minor == 2);
+    // ITM-13：core.item 不再 require 扩展袋能力（provider 经 Item Port 中立通道提供）。
+    CHECK(g_extension_bag_require_calls == 0);
 
     const struct {
         const char* path;
@@ -1017,6 +1094,7 @@ void test_write_routes() {
         const int state_calls_before = g_character_state_write_calls;
         const int state_requires_before = g_character_state_require_calls;
         const int extension_requires_before = g_extension_bag_require_calls;
+        (void)extension_requires_before;
         CHECK(dispatch_post(test_case.path, test_case.body, &role, 1, &status) ==
               "{\"ok\":true,\"ticket\":72}");
         result_size = 0;
@@ -1030,7 +1108,8 @@ void test_write_routes() {
               g_party_write_args[2] == test_case.arg2 && g_party_write_args[3] == test_case.arg3);
         CHECK(g_character_state_write_calls == state_calls_before + 1);
         CHECK(g_character_state_require_calls == state_requires_before + 1);
-        CHECK(g_extension_bag_require_calls == extension_requires_before + 1);
+        // ITM-13：写路径不再 require 扩展袋能力。
+        CHECK(g_extension_bag_require_calls == extension_requires_before);
         CHECK(g_party_write_order < g_character_state_write_order);
     }
 
@@ -1067,7 +1146,8 @@ void test_write_routes() {
           "{\"ok\":false,\"error\":\"cannot unequip\"}");
     qol::infra::command_queue_reset_for_test();
     g_party_write_result = qol::contracts::ok();
-    g_extension_bag_available = false;
+    g_provider_resident = false;
+    g_provider_available = false;
 
     CHECK(dispatch_post("/api/op/inventory/add",
                         "{\"category\":\" 12 \",\"count\":\"1e2\",\"socket\":\"3.7\","
@@ -1602,7 +1682,7 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
         out->count = 3;
     } else {
         if (bag != 6 || slot != 0) return false;
-        out->kind = InventoryItemKind::kExtension;
+        out->kind = InventoryItemKind::kProvider;
         out->bag = 6;
         out->slot = 0;
         out->category = 10;
@@ -1799,6 +1879,7 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_unsupported_cursor, &golden_inventory_json,  &golden_money,
     &golden_shop,              &golden_in_world,          &golden_static_text,
     &golden_static_ready,      &golden_view, &stub_effective_cumulate,
+    &fake_inventory_extension_access,
 };
 const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion, kGoldenRead};
 const void* const kGoldenPortArray[] = {
@@ -1938,6 +2019,9 @@ void test_inventory_owner_vs_legacy_golden() {
         g_override_enabled = fixture.override_on;
         g_canonical_count = fixture.canonical;
         g_golden_eb_enabled = fixture.eb ? 1 : 0;
+        g_provider_resident = true;
+        g_provider_available = true;
+        g_provider_fragment = extension_bag_inventory_bags_json();
         const std::string legacy = build_inventory_json();
         const std::string frozen = frozen_inventory_json();
         // T2h-B0 golden（可证部分）：frozen 复刻 == legacy 实现，逐字节。
@@ -2057,6 +2141,10 @@ bool install_core_item_golden(GoldenHarness* out) {
         return false;
     }
     g_golden_require_active = true;
+    // ITM-13：默认注入可用的中立 provider；具体 fragment 由各用例设置。
+    g_provider_resident = true;
+    g_provider_available = true;
+    g_provider_fragment.clear();
     if (out != nullptr) {
         out->item_state = nullptr;
         out->ctx = ctx;
@@ -2091,53 +2179,43 @@ std::string owner_raw_inventory() {
     return std::string(buffer.data(), size);
 }
 
-// R2-2 用例 2：L1 单槽非法 → 跳过该槽、主快照成功、WARN 记录、无 invalid 文案。
+// ITM-13：扩展段由 provider 唯一实现（含槽位跳过与 R-47b 计数视图）；core.item 只逐字节
+// 追加 provider fragment，不重拼字段、不二次覆盖 count、不丢弃或新增槽位。
 void test_extension_degrade_bad_slot_skipped() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_eb_enabled = 1;
-    g_golden_bad_slot = 1;
+    g_provider_fragment = extension_bag_inventory_bags_json();
     const std::string json = owner_raw_inventory();
     CHECK(json != "<install failed>" && json != "<serialize failed>");
-    CHECK(json.find("\"bag\":0") != std::string::npos);          // 主袋照常
-    CHECK(json.find("\"bag\":6") != std::string::npos);   // EB 段保留好槽
-    CHECK(json.find("\"slot\":0") != std::string::npos);
-    CHECK(json.find("\"count\":0") == std::string::npos);        // 坏槽被跳过
+    CHECK(json.find("\"bag\":0") != std::string::npos);              // 主袋照常
+    CHECK(json.find("\"bag\":6") != std::string::npos);              // provider 段原样追加
+    CHECK(json.find(g_provider_fragment) != std::string::npos);      // 逐字节追加
     CHECK(json.find("invalid extension inventory") == std::string::npos);
-    CHECK(g_last_log_level == 2);                                // WARN 级别
-    CHECK(std::strstr(g_last_log_message, "extension inventory slot skipped") != nullptr);
-    g_golden_bad_slot = 0;
+    g_provider_fragment.clear();
     g_golden_require_active = false;
 }
 
-// R3-①：canonical 视图投影槽（canonical&0x7F==0，活体对象缺失）不得被 L1 跳过。
+// ITM-13：provider fragment 内的计数视图（canonical/关闭态 b）由 provider 决定；
+// core.item 不得二次覆盖为 0 或重算。
 void test_extension_degrade_projected_canonical_kept() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_eb_enabled = 1;
-    g_golden_projected_canonical = 640;
-    // R5：活体对象存在 + provider usable=false（effective 返回 0）→ core.item 覆盖路径
-    // 必须保留 EB 回调的 canonical 视图，不得二次覆盖为 0。
-    golden_fill_item(g_golden_item_projected, static_cast<uint16_t>(35 << 6), 640, 0, 0, 0);
-    g_override_available = true;
-    g_override_enabled = false;
-    g_count_encoded = true;
-    g_canonical_count = 640;
+    // provider 提供含非零 canonical 视图的投影槽；core.item 必须逐字节保留。
+    g_provider_fragment =
+        ",{\"bag\":9,\"items\":[{\"slot\":4,\"category\":35,\"count\":640}],"
+        "\"capacity\":16,\"slot_count\":1}";
     const std::string json = owner_raw_inventory();
     CHECK(json != "<install failed>" && json != "<serialize failed>");
     CHECK(json.find("{\"slot\":4,\"category\":35,\"count\":640}") != std::string::npos);
     CHECK(json.find("\"bag\":9") != std::string::npos);
-    CHECK(json.find("{\"slot\":0,\"category\":10") != std::string::npos);
-    CHECK(g_last_log_level != 2);  // 未被 L1 跳过 → 无 slot skipped WARN
-    // 真值表行 effective>0：canonical 95（b 视图=95，覆盖亦为 95）逐字保留。
-    g_golden_projected_canonical = 95;
-    g_canonical_count = 95;
-    golden_fill_item(g_golden_item_projected, static_cast<uint16_t>(35 << 6), 95, 0, 0, 0);
+    CHECK(json.find(g_provider_fragment) != std::string::npos);
+    g_provider_fragment =
+        ",{\"bag\":9,\"items\":[{\"slot\":4,\"category\":35,\"count\":95}],"
+        "\"capacity\":16,\"slot_count\":1}";
     const std::string json95 = owner_raw_inventory();
     CHECK(json95.find("{\"slot\":4,\"category\":35,\"count\":95}") != std::string::npos);
     CHECK(json95.find("\"bag\":9") != std::string::npos);
-    g_golden_projected_canonical = 0;
-    g_override_available = false;
-    g_override_enabled = false;
-    g_canonical_count = 0;
+    g_provider_fragment.clear();
     g_golden_require_active = false;
 }
 
@@ -2145,7 +2223,8 @@ void test_extension_degrade_projected_canonical_kept() {
 void test_extension_degrade_omits_section() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_require_active = false;
-    g_extension_bag_available = false;
+    g_provider_resident = false;
+    g_provider_available = false;
     const std::string json = owner_raw_inventory();
     CHECK(json != "<install failed>" && json != "<serialize failed>");
     CHECK(json.find("\"bag\":0") != std::string::npos);
@@ -2154,7 +2233,8 @@ void test_extension_degrade_omits_section() {
     CHECK(json.find("invalid extension inventory") == std::string::npos);
     CHECK(g_last_log_level == 2);
     CHECK(std::strstr(g_last_log_message, "extension inventory omitted") != nullptr);
-    g_extension_bag_available = false;
+    g_provider_resident = false;
+    g_provider_available = false;
     g_golden_require_active = false;
 }
 
@@ -2163,6 +2243,7 @@ void test_extension_degrade_write_ticket_done() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_eb_enabled = 1;
     g_golden_bad_slot = 1;
+    g_provider_fragment = extension_bag_inventory_bags_json();
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 4;
     g_state_write_data = {};
@@ -2198,6 +2279,8 @@ void test_extension_degrade_write_ticket_done() {
 void test_extension_move_result_capacity_and_overflow() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_eb_enabled = 1;
+    g_provider_resident = true;
+    g_provider_available = true;
     const auto run_case = [](std::size_t body_size, bool overflow_expected) {
         const std::string prefix = "{\"ok\":true,\"message\":\"";
         const std::string embedded = "\\\"ok\\\":false";
@@ -2233,7 +2316,8 @@ void test_extension_move_result_capacity_and_overflow() {
     };
     run_case(5000, false);
     run_case(20000, true);
-    g_extension_bag_available = false;
+    g_provider_resident = false;
+    g_provider_available = false;
     g_golden_eb_enabled = 0;
     g_golden_require_active = false;
 }
@@ -2267,7 +2351,7 @@ std::string frozen_debug_item_raw_json(int32_t bag, int32_t slot) {
     s += ",\"bag\":" + std::to_string(ref.bag);
     s += ",\"slot\":" + std::to_string(ref.slot);
     s += ",\"kind\":" +
-         std::string(ref.kind == InventoryItemKind::kExtension ? "\"extension\"" : "\"original\"");
+         std::string(ref.kind == InventoryItemKind::kProvider ? "\"extension\"" : "\"original\"");
     s += ",\"category\":" + std::to_string(ref.category);
     s += ",\"count\":" + std::to_string(ref.count);
     s += ",\"type_raw\":\"" + frozen_dbg_hex(type_raw, 4) + "\"";

@@ -4,8 +4,8 @@
 #include <mutex>
 
 #include "contracts/game_cache.h"
-#include "contracts/extension_bag_port.h"
 #include "game/access/game_access.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
 
@@ -25,12 +25,18 @@ QolResult item_error(contracts::QolItemInventoryStateWriteResult* out, int32_t c
     return contracts::error(code, out->error_message, out->error_message_len);
 }
 
+// 原版物理袋数量（0..5，含任务袋）；provider 认领的袋号由 provider 自管，本快照只覆盖物理袋。
+constexpr int kOriginalInventoryBagCount = 6;
+
 struct BeforeInventory {
     void* items[96]{};
 };
 
 void capture_before_item(void* item, int bag, int slot, void* raw) {
-    if (item == nullptr || bag < 0 || bag >= 6 || slot < 0 || slot >= 16) return;
+    if (item == nullptr || bag < 0 || bag >= kOriginalInventoryBagCount || slot < 0 ||
+        slot >= 16) {
+        return;
+    }
     static_cast<BeforeInventory*>(raw)->items[bag * 16 + slot] = item;
 }
 
@@ -41,7 +47,8 @@ struct GainedContext {
 
 bool capture_gained_item(void* item, int bag, int slot, void* raw) {
     auto* context = static_cast<GainedContext*>(raw);
-    if (item == nullptr || bag < 0 || bag >= 6 || slot < 0 || slot >= 16 ||
+    if (item == nullptr || bag < 0 || bag >= kOriginalInventoryBagCount || slot < 0 ||
+        slot >= 16 ||
         context->out->gained_count >= contracts::kQolItemInventoryStateGainedCapacity ||
         fn_get_bit == nullptr || fn_get_cumulate_count == nullptr) {
         return false;
@@ -63,6 +70,28 @@ bool capture_gained_item(void* item, int bag, int slot, void* raw) {
 
 std::mutex g_shop_buy_mtx;
 
+// 中立扩展 provider：每次现取，不缓存跨帧指针。provider 仅在其可用（已注册且未停用）时参与
+// 路由；停用后路由等同无 provider，保留原 typed 路径。provider 内部再按自身门禁两态处理。
+const contracts::QolInventoryExtensionProvider* extension_provider() {
+    return qol::game::inventory_extension_available()
+               ? qol::game::inventory_extension_provider_if_resident()
+               : nullptr;
+}
+
+void sync_projected_slot_if_available(int bag, int slot) {
+    const auto* provider = extension_provider();
+    if (provider != nullptr && provider->sync_projected_slot != nullptr) {
+        provider->sync_projected_slot(bag, slot);
+    }
+}
+
+void sync_projected_bag_if_available() {
+    const auto* provider = extension_provider();
+    if (provider != nullptr && provider->sync_projected_bag != nullptr) {
+        provider->sync_projected_bag();
+    }
+}
+
 }  // namespace
 
 QolResult use_item(int32_t bag, int32_t slot,
@@ -78,7 +107,7 @@ QolResult use_item(int32_t bag, int32_t slot,
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return item_error(out, kQolErrNotFound, "slot empty");
     }
-    if (item_ref.kind == InventoryItemKind::kExtension) {
+    if (item_ref.kind == InventoryItemKind::kProvider) {
         return item_error(out, kQolErrUnsupported, "extension item use requires provider");
     }
     if (const char* screen = ui_blocked()) {
@@ -129,8 +158,7 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (pending == nullptr) return item_error(out, kQolErrInternal, "dice result missing");
         if (fn_consume_item != nullptr) fn_consume_item(item);
         if (flag != nullptr) *flag |= 1u;
-        const auto* eb = extension_bag_capability();
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
+        sync_projected_slot_if_available(bag, slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
@@ -147,8 +175,7 @@ QolResult use_item(int32_t bag, int32_t slot,
             return item_error(out, kQolErrInternal, "release sealed failed");
         }
         if (fn_consume_item != nullptr) fn_consume_item(item);
-        const auto* eb = extension_bag_capability();
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
+        sync_projected_slot_if_available(bag, slot);
         out->flags |= contracts::kQolItemInventoryStateHasGained;
         GainedContext context{&before, out};
         for_each_bag_slot(&capture_gained_item, &context);
@@ -167,8 +194,7 @@ QolResult use_item(int32_t bag, int32_t slot,
             return item_error(out, kQolErrInternal, "open box failed");
         }
         if (fn_consume_item != nullptr) fn_consume_item(item);
-        const auto* eb = extension_bag_capability();
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
+        sync_projected_slot_if_available(bag, slot);
         out->flags |= contracts::kQolItemInventoryStateHasGained;
         GainedContext context{&before, out};
         for_each_bag_slot(&capture_gained_item, &context);
@@ -187,8 +213,7 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (fn_mercenary_make_mercenary(item) == nullptr) {
             return item_error(out, kQolErrInternal, "make mercenary failed");
         }
-        const auto* eb = extension_bag_capability();
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
+        sync_projected_slot_if_available(bag, slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
@@ -200,8 +225,7 @@ QolResult use_item(int32_t bag, int32_t slot,
     const int used = fn_char_use_item_ex(leader, item, 0);
     if (used != 0 && tutorial_state() == 6) tutorial_cancel();
     if (used != 0) {
-        const auto* eb = extension_bag_capability();
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
+        sync_projected_slot_if_available(bag, slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
@@ -252,19 +276,19 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
     if (bag == 5 || to_bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
 
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
-    const bool extension_bag_requested =
-        eb != nullptr && eb->is_logical_bag != nullptr &&
-        (eb->is_logical_bag(bag) || eb->is_logical_bag(to_bag));
-    if (extension_bag_requested) {
+    const auto* provider = extension_provider();
+    const bool provider_requested =
+        provider != nullptr && provider->owns_bag != nullptr &&
+        (provider->owns_bag(bag) != 0 || provider->owns_bag(to_bag) != 0);
+    if (provider_requested) {
         if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
         if (to_slot < 0 || to_slot >= 16) return item_error(out, kQolErrInvalidArgument, "bad target");
-        if (eb->enabled == nullptr || eb->enabled() == 0) {
-            return item_error(out, kQolErrNotReady, "extension bag disabled");
-        }
-        return item_error(out, kQolErrUnsupported, "extension bag move capability unavailable");
+        // provider 认领的袋号在 core.item 路由经 provider->move_item 处理；本分支仅覆盖
+        // provider 已注册但 move 不可用的直接调用，报文不含扩展袋实现细节。
+        return item_error(out, kQolErrUnsupported, "provider move unavailable");
     }
-    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
+    if (provider != nullptr && provider->module_view_installed != nullptr &&
+        provider->module_view_installed() != 0) {
         return item_error(out, kQolErrBlocked, "extension view open; movement disabled (P2)");
     }
     if (fn_inven_move_item == nullptr) {
@@ -274,7 +298,7 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return item_error(out, kQolErrNotFound, "slot empty");
     }
-    if (item_ref.kind == InventoryItemKind::kExtension) {
+    if (item_ref.kind == InventoryItemKind::kProvider) {
         return item_error(out, kQolErrUnsupported,
                           "extension item move not supported by original API");
     }
@@ -288,10 +312,8 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     if (fn_inven_move_item(item_ref.native_item, count, to_bag, to_slot) == 0) {
         return item_error(out, kQolErrInternal, "move failed");
     }
-    if (eb != nullptr && eb->sync_projected_slot != nullptr) {
-        eb->sync_projected_slot(bag, slot);
-        eb->sync_projected_slot(to_bag, to_slot);
-    }
+    sync_projected_slot_if_available(bag, slot);
+    sync_projected_slot_if_available(to_bag, to_slot);
     return contracts::ok();
 }
 
@@ -387,7 +409,7 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
 }
 
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
-                     const contracts::ExtensionBagApi* extension_bag,
+                     const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                      contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
@@ -418,15 +440,15 @@ QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
     // This entry remains hooked by Stage4; it owns the original exchange and special_equip chain.
     const int result = fn_equip_item_from_inven_to_slot(character, bag, slot, target);
     if (result == 0) return item_error(out, kQolErrInternal, "equip failed");
-    if (extension_bag != nullptr && extension_bag->sync_projected_bag != nullptr) {
-        extension_bag->sync_projected_bag();
+    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_bag != nullptr) {
+        extension_provider_arg->sync_projected_bag();
     }
     frame_cache_force_refresh();
     return contracts::ok();
 }
 
 QolResult unequip_item(int32_t role, int32_t equip_slot,
-                       const contracts::ExtensionBagApi* extension_bag,
+                       const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                        contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
@@ -447,27 +469,28 @@ QolResult unequip_item(int32_t role, int32_t equip_slot,
     }
     const int result = fn_unequip(character, equip_slot);
     if (result == 0) return item_error(out, kQolErrInternal, "unequip failed");
-    if (extension_bag != nullptr && extension_bag->sync_projected_bag != nullptr) {
-        extension_bag->sync_projected_bag();
+    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_bag != nullptr) {
+        extension_provider_arg->sync_projected_bag();
     }
     frame_cache_force_refresh();
     return contracts::ok();
 }
 
 QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                    const contracts::ExtensionBagApi* extension_bag,
+                    const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                     contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
     }
     *out = {};
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
-    if (extension_bag != nullptr && extension_bag->is_logical_bag != nullptr &&
-        extension_bag->is_logical_bag(bag)) {
-        if (extension_bag->put_jewel == nullptr) {
+    if (extension_provider_arg != nullptr && extension_provider_arg->owns_bag != nullptr &&
+        extension_provider_arg->owns_bag(bag) != 0) {
+        if (extension_provider_arg->put_jewel == nullptr) {
             return item_error(out, kQolErrUnsupported, "extension jewel unavailable");
         }
-        const QolResult result = extension_bag->put_jewel(role, bag, slot, equip_slot);
+        const QolResult result =
+            extension_provider_arg->put_jewel(role, bag, slot, equip_slot);
         if (!contracts::succeeded(result)) {
             return item_error(out, result.code, result.message != nullptr
                                                     ? result.message
@@ -489,16 +512,16 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     }
     void* jewel = inventory_item_at(bag, slot);
     if (jewel == nullptr) return item_error(out, kQolErrNotFound, "jewel not found");
-    int32_t extension_internal_bag = -1;
-    int32_t extension_slot = -1;
-    if (extension_bag != nullptr && extension_bag->identify_native_item != nullptr &&
-        extension_bag->identify_native_item(jewel, &extension_internal_bag, &extension_slot)) {
-        const int32_t logical_bag = extension_internal_bag + 6;
-        if (extension_bag->put_jewel == nullptr) {
+    // provider 命中（物品属于 provider）时按其自带逻辑袋号下发；调用方不推导袋号偏移。
+    int32_t provider_bag = -1;
+    int32_t provider_slot = -1;
+    if (extension_provider_arg != nullptr && extension_provider_arg->identify_native_item != nullptr &&
+        extension_provider_arg->identify_native_item(jewel, &provider_bag, &provider_slot) != 0) {
+        if (extension_provider_arg->put_jewel == nullptr) {
             return item_error(out, kQolErrUnsupported, "extension jewel unavailable");
         }
-        const QolResult result = extension_bag->put_jewel(
-            role, logical_bag, extension_slot, equip_slot);
+        const QolResult result =
+            extension_provider_arg->put_jewel(role, provider_bag, provider_slot, equip_slot);
         if (!contracts::succeeded(result)) {
             return item_error(out, result.code, result.message != nullptr
                                                     ? result.message
@@ -516,15 +539,15 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     }
     // ConsumeItem is the original ApplyStuff consumption primitive and decrements one item.
     fn_consume_item(jewel);
-    if (extension_bag != nullptr && extension_bag->sync_projected_slot != nullptr) {
-        extension_bag->sync_projected_slot(bag, slot);
+    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_slot != nullptr) {
+        extension_provider_arg->sync_projected_slot(bag, slot);
     }
     frame_cache_force_refresh();
     return contracts::ok();
 }
 
 QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                  const contracts::ExtensionBagApi* extension_bag,
+                  const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                   contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
@@ -559,8 +582,8 @@ QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
         return item_error(out, kQolErrInternal, result == 7 ? "not enchantable" : "enchant failed");
     }
     fn_consume_item(scroll);
-    if (extension_bag != nullptr && extension_bag->sync_projected_slot != nullptr) {
-        extension_bag->sync_projected_slot(bag, slot);
+    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_slot != nullptr) {
+        extension_provider_arg->sync_projected_slot(bag, slot);
     }
     frame_cache_force_refresh();
     return contracts::ok();
@@ -582,25 +605,20 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
     if (ref.native_item == nullptr) {
         return item_error(out, kQolErrNotFound, "extension item unavailable");
     }
-    if (ref.kind == InventoryItemKind::kExtension) {
-        // D2b：扩展物品删除经能力接口现取；能力缺失 = EB disabled，删除失败降级。
-        const contracts::ExtensionBagApi* eb = extension_bag_capability();
-        if (eb == nullptr || eb->remove_native_item == nullptr ||
-            !eb->remove_native_item(ref.native_item)) {
+    if (ref.kind == InventoryItemKind::kProvider) {
+        // 中立 provider：provider 缺失（未注册/停用）时按删除失败处理，不落入原版删除链。
+        const auto* provider = extension_provider();
+        if (provider == nullptr || provider->remove_native_item == nullptr ||
+            provider->remove_native_item(ref.native_item) == 0) {
             return item_error(out, kQolErrInternal, "extension item removal failed");
         }
-        if (eb->sync_projected_slot != nullptr) eb->sync_projected_slot(ref.bag, ref.slot);
+        sync_projected_slot_if_available(ref.bag, ref.slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
     if (ref.bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
     const int result = fn_remove_item(ref.native_item);
-    if (result) {
-        const contracts::ExtensionBagApi* eb = extension_bag_capability();
-        if (eb != nullptr && eb->sync_projected_slot != nullptr) {
-            eb->sync_projected_slot(ref.bag, ref.slot);
-        }
-    }
+    if (result) sync_projected_slot_if_available(ref.bag, ref.slot);
     if (!result) return item_error(out, kQolErrNotFound, "item not found");
     frame_cache_force_refresh();
     return contracts::ok();

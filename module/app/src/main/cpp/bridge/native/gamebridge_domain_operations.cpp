@@ -5,6 +5,7 @@
 #include "contracts/commands.h"
 #include "contracts/extension_bag_port.h"
 #include "core/native/inventory_trade.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/world.h"
 #include "game/ops/character_write.h"
@@ -12,6 +13,17 @@
 #include "game/ops/item_inventory_state_write.h"
 #include "infra/commands.h"
 #include "infra/config.h"
+
+namespace {
+
+// ITM-13：bridge 写入口向 game::ops 传中立 provider；不可用时传 nullptr（game::ops 保留原版路径）。
+const qol::contracts::QolInventoryExtensionProvider* neutral_extension_provider() {
+    return qol::game::inventory_extension_available()
+               ? qol::game::inventory_extension_provider_if_resident()
+               : nullptr;
+}
+
+}  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, jint bag, jint slot, jint equipSlot) {
@@ -26,7 +38,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, 
     const QolResult result =
         qol::game::ops::put_jewel(static_cast<int>(role), static_cast<int>(bag),
                                   static_cast<int>(slot), static_cast<int>(equipSlot),
-                                  extension_bag_capability(), &op);
+                                  neutral_extension_provider(), &op);
     return op_result(env, "op_jewel", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -45,7 +57,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpEnchant(JNIEnv* env, jclass, jint role
     const QolResult result =
         qol::game::ops::enchant(static_cast<int>(role), static_cast<int>(bag),
                                 static_cast<int>(slot), static_cast<int>(equipSlot),
-                                extension_bag_capability(), &op);
+                                neutral_extension_provider(), &op);
     return op_result(env, "op_enchant", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -80,7 +92,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpEquip(JNIEnv* env, jclass, jint role, 
     qol::contracts::QolItemInventoryStateWriteResult op{};
     const QolResult result = qol::game::ops::equip_item(
         static_cast<int>(role), static_cast<int>(bag), static_cast<int>(slot),
-        extension_bag_capability(), &op);
+        neutral_extension_provider(), &op);
     return op_result(env, "op_equip", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -95,7 +107,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpUnequip(JNIEnv* env, jclass, jint role
 #else
     qol::contracts::QolItemInventoryStateWriteResult op{};
     const QolResult result = qol::game::ops::unequip_item(
-        static_cast<int>(role), static_cast<int32_t>(slot), extension_bag_capability(), &op);
+        static_cast<int>(role), static_cast<int32_t>(slot), neutral_extension_provider(), &op);
     return op_result(env, "op_unequip", ("role=" + str_of(role) + " " + "slot=" + str_of(slot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -214,7 +226,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpUseItem(JNIEnv* env, jclass, jint bag,
         return op_result(env, "op_use_item", args, qol::bridge::item_error_json("slot empty"));
     }
     // 扩展逻辑袋：沿用原版直调并透传插件字符串（不套信封），内核无该定义、由上层 #if 隔离。
-    if (item_ref.kind == InventoryItemKind::kExtension) {
+    if (item_ref.kind == InventoryItemKind::kProvider) {
         return op_result(env, "op_use_item", args, extension_bag_use_item(bag, slot));
     }
     qol::contracts::QolItemInventoryStateWriteResult out{};

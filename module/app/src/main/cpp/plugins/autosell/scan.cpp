@@ -134,7 +134,7 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
                 const QolResult result =
                     qol::features::autosell::read_only::inventory_item_ref_at(bag, slot, &ref);
                 if (result.ok != kQolOk ||
-                    ref.kind != static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kExtension) ||
+                    ref.kind != static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider) ||
                     ref.native_item == nullptr || ref.category <= 0) {
                     continue;
                 }
