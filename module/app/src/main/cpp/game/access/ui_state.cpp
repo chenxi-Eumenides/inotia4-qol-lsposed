@@ -3,9 +3,9 @@
 
 #include "game/access/game_access.h"
 
-#include "contracts/extension_bag_port.h"
 #include "contracts/popup_enter_alias.h"
 #include "contracts/runtime_hooks.h"
+#include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "game/access/save.h"
 #include "game/json/game_json.h"
 #include "contracts/game_cache.h"
@@ -86,9 +86,8 @@ uintptr_t popup_top_vma() {
     if (data == 0) return 0;
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
-    // D2b：扩展袋 inventory enter 识别经能力接口现取；能力缺失 = EB disabled，视为非扩展 enter。
-    const contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->is_inventory_enter != nullptr && eb->is_inventory_enter(enter)) {
+    // 生命周期参与者识别扩展 inventory enter；无可用参与者视为非扩展 enter。
+    if (lifecycle_participant_is_inventory_enter(enter)) {
         return F_PANEL_INVENTORY_ENTER;
     }
     // 模块替换过 enter 回调的面板（商店/合成/存档槽等）在栈里存的是模块 wrapper 地址，
@@ -150,9 +149,8 @@ UiWriteResult ui_main_menu(bool direct) {
         if (!wait_for_popup_stack_empty()) return pack_result(op_err("panel close pending"));
     }
     // 扩展背包清理保持原调用时机（切换前）；游戏状态机切换走逻辑帧点。
-    // D2b：经能力接口现取；能力缺失 = EB disabled，无扩展态需清理，放行。
-    const contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->prepare_main_menu != nullptr && !eb->prepare_main_menu()) {
+    // 无可用参与者等同旧“能力缺失”，跳过清理放行。
+    if (!lifecycle_participant_prepare_main_menu()) {
         return pack_result(op_err("extension bag cleanup failed; main menu transition blocked"));
     }
     // 游戏状态机切换（GAMESTATE_SetState -> GAME_Exit）必须在游戏主线程的逻辑帧点执行；
@@ -182,9 +180,8 @@ UiWriteResult ui_panel_close() {
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
     uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     uintptr_t vma = enter > g_base ? enter - g_base : 0;
-    // D2b：扩展袋 inventory enter 识别经能力接口现取；能力缺失 = EB disabled，视为非扩展 enter。
-    const contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->is_inventory_enter != nullptr && eb->is_inventory_enter(enter)) {
+    // 生命周期参与者识别扩展 inventory enter；无可用参与者视为非扩展 enter。
+    if (lifecycle_participant_is_inventory_enter(enter)) {
         vma = F_PANEL_INVENTORY_ENTER;
     }
     // 模块 wrapper 的 enter 不是 libgame 地址，上面的换算会归 0；经反查表还原原版 VMA。
@@ -248,9 +245,8 @@ UiWriteResult ui_panel_open(const std::string& panel) {
     if (list == nullptr) return pack_result(op_err("state list not ready"));
     int state_id = -1;
     if (p == "inventory") {
-        // D2b：扩展袋 inventory state id 经能力接口现取；能力缺失 = EB disabled，返回 -1。
-        const contracts::ExtensionBagApi* eb = extension_bag_capability();
-        if (eb != nullptr && eb->inventory_state_id != nullptr) state_id = eb->inventory_state_id();
+        // 无可用参与者返回 -1，继续原有 27 项扫描。
+        state_id = lifecycle_participant_inventory_state_id();
     }
     for (int i = 0; state_id < 0 && i < 27; ++i) {
         uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);

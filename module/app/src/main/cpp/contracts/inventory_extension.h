@@ -9,7 +9,7 @@
 
 namespace qol::contracts {
 
-constexpr QolVersion kQolInventoryExtensionVersion{1, 0};
+constexpr QolVersion kQolInventoryExtensionVersion{1, 1};
 
 struct QolInventoryExtensionProvider {
     int32_t (*owns_bag)(int32_t bag);
@@ -29,6 +29,10 @@ struct QolInventoryExtensionProvider {
     int32_t (*identify_native_item)(void* item, int32_t* out_bag, int32_t* out_slot);
     int32_t (*remove_native_item)(void* item);
     QolResult (*put_jewel)(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot);
+    // 使用扩展逻辑袋物品：把原插件语义结果字符串（含信封）写入 out，返回 1 表示已回填。
+    // 调用方按“无扩展可用”分支回退 typed 路径；本成员内部沿用插件启用门控。
+    int32_t (*use_item)(int32_t bag, int32_t slot, char* out, uint32_t capacity,
+                        uint32_t* out_size);
 };
 
 struct QolInventoryExtensionAccess {

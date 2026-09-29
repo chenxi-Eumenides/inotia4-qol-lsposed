@@ -20,7 +20,6 @@
 #include "game/read/game_tiles.h"
 #include "patch/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
-#include "contracts/extension_bag_port.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "contracts/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"

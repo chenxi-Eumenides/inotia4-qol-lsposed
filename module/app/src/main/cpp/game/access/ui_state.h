@@ -4,8 +4,8 @@
 #include <string>
 
 // 游戏层：UI 读/写原语（T2l-u，迁自 api/native/game_ui_read.inc / game_ui_operations.inc）。
-// 栈顶面板判定、screen 细分与面板开关游戏语义收口在本层；转场/别名反查/EB 清理分别经
-// contracts/runtime_hooks.h、contracts/popup_enter_alias.h、contracts/extension_bag_port.h。
+// 栈顶面板判定、screen 细分与面板开关游戏语义收口在本层；转场/别名反查/扩展清理分别经
+// contracts/runtime_hooks.h、contracts/popup_enter_alias.h 与 game/adapter_ports 生命周期 facade。
 // 线程纪律：读写均依赖 popup 栈/UI 全局，只在游戏主线程调用。
 
 namespace qol::game {

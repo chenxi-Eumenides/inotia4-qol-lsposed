@@ -237,6 +237,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/character_write_ops_port.cpp
     game/adapter_ports/item_count_facade.cpp
     game/adapter_ports/inventory_extension_facade.cpp
+    game/adapter_ports/lifecycle_participant_facade.cpp
     game/adapter_ports/item_dice_write_port.cpp
     game/adapter_ports/item_money_write_port.cpp
 )
@@ -244,6 +245,7 @@ target_sources(gamebridge PRIVATE
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
+    host/lifecycle_participants.cpp
     host/http_registry.cpp
     host/http_dispatch.cpp
     host/game_host.cpp

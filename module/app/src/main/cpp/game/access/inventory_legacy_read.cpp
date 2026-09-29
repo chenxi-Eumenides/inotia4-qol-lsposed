@@ -4,9 +4,9 @@
 
 #include <cassert>
 
-#include "contracts/extension_bag_port.h"
 #include "contracts/item_count.h"
 #include "game/access/game_access.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
@@ -137,8 +137,24 @@ std::string build_inventory_json() {
         }
         s += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
     }
-    // 扩展逻辑袋 6..10（extensionBagEnabled 且 world 时并入；schema 与原版袋一致）
-    s += extension_bag_inventory_bags_json();
+    // 扩展逻辑袋 6..10（provider 贡献完整 fragment；schema 与原版袋一致，字节与 core.item 同源）。
+    // 无可用 provider（扩展停用/未注册）时不追加任何内容，等同旧“能力缺失省略扩展段”。
+    const qol::contracts::QolInventoryExtensionProvider* provider =
+        qol::game::inventory_extension_available()
+            ? qol::game::inventory_extension_provider_if_resident()
+            : nullptr;
+    if (provider != nullptr && provider->inventory_json_fragment != nullptr) {
+        std::string fragment;
+        fragment.resize(65536);
+        uint32_t fragment_size = 0;
+        const QolResult result =
+            provider->inventory_json_fragment(fragment.data(),
+                                              static_cast<uint32_t>(fragment.size()),
+                                              &fragment_size);
+        if (qol::contracts::succeeded(result) && fragment_size <= fragment.size()) {
+            s.append(fragment.data(), fragment_size);
+        }
+    }
     s += "]}";
     return s;
 }

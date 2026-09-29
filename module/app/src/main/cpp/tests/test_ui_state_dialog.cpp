@@ -3,8 +3,10 @@
 #include "game/access/save.h"
 #include "game/ops/game_ops_common.h"
 #include "game/symbols/game_symbols.h"
-#include "contracts/extension_bag_port.h"
 #include "contracts/popup_enter_alias.h"
+#include "contracts/lifecycle_participant.h"
+#include "contracts/runtime_hooks.h"
+#include "game/adapter_ports/lifecycle_participant_facade.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -20,6 +22,7 @@ IntVoidFn fn_event_button_skip_exe = nullptr;
 UinpcQuestButtonOkExeFn fn_uinpc_quest_button_ok_exe = nullptr;
 UiSetPopupProcessInfoFn fn_ui_set_popup_process_info = nullptr;
 UinpcExeTaskFn fn_uinpc_exe_current_task = nullptr;
+GamestateSetStateFn fn_gamestate_set_state = nullptr;
 
 namespace {
 int g_pass = 0;
@@ -34,6 +37,15 @@ int g_story = 0;
 } while (0)
 
 int game_over() { ++g_game_over_calls; return 0; }
+
+int g_enter_match = 0;
+int g_prepare_mm_ok = 1;
+void dummy_set_state(int32_t) {}
+int dummy_popup_info(int32_t, int32_t) { return 0; }
+int32_t dispatch_prepare_save() { return 1; }
+int32_t dispatch_is_enter(uintptr_t enter) { return enter == 0x1234 && g_enter_match ? 1 : 0; }
+int32_t dispatch_prepare_mm() { return g_prepare_mm_ok; }
+int32_t dispatch_state_id() { return 7; }
 }
 
 bool game_in_world() { return g_in_world != 0; }
@@ -47,8 +59,14 @@ std::string op_err(const char* msg) { return std::string("{\"ok\":false,\"error\
 std::string op_ok() { return "{\"ok\":true}"; }
 std::string json_escape(const char* text) { return text == nullptr ? "" : text; }
 
-const qol::contracts::ExtensionBagApi* extension_bag_capability() { return nullptr; }
 uintptr_t popup_enter_alias_resolve(uintptr_t) { return kPopupEnterAliasNone; }
+
+namespace qol::contracts {
+const QolRuntimeHooksApi& qol_runtime_hooks() {
+    static const QolRuntimeHooksApi kHooks{};
+    return kHooks;
+}
+}  // namespace qol::contracts
 
 int main() {
     using namespace qol::game;
@@ -90,6 +108,25 @@ int main() {
 
     entry.enter = g_base + F_PANEL_CHOICE_ENTER;
     CHECK(dialog_select("ok", -1).str() == "{\"ok\":true}");
+
+    // ITM-13 批 2：生命周期参与者迁移后的 ui_state 三态（enter 识别 + main-menu 错误体）。
+    const qol::contracts::QolLifecycleDispatch dispatch{
+        &dispatch_prepare_save, &dispatch_is_enter, &dispatch_prepare_mm, &dispatch_state_id};
+    CHECK(lifecycle_participant_bind_host(&dispatch));
+    g_enter_match = 1;
+    entry.enter = 0x1234;
+    stack.count = 1;
+    CHECK(popup_top_vma() == F_PANEL_INVENTORY_ENTER);
+    g_enter_match = 0;
+    CHECK(popup_top_vma() == 0);
+    // main-menu 参与者失败：完整外层 JSON 逐字锁定，且切换未执行。
+    stack.count = 0;
+    g_prepare_mm_ok = 0;
+    fn_gamestate_set_state = &dummy_set_state;
+    fn_ui_set_popup_process_info = &dummy_popup_info;
+    CHECK(ui_main_menu(true).str() ==
+          "{\"ok\":false,\"error\":\"extension bag cleanup failed; main menu transition blocked\"}");
+    g_prepare_mm_ok = 1;
 
     munmap(base, 0x400000);
     std::printf("ui_state_dialog: pass=%d fail=%d\n", g_pass, g_fail);

@@ -27,6 +27,7 @@
 #include "commands.h"
 #include "http.h"
 #include "in_flight.h"
+#include "lifecycle_participant.h"
 #include "panels.h"
 #include "result.h"
 #include "version.h"
@@ -289,10 +290,12 @@ struct QolHostSdk {
     QolHttpDispatchApi http_dispatch;
     // 票据结果回取面（阶段 5 追加；调用方须以 abi.size/abi.minor 协商后再消费）。
     QolTicketResultApi ticket_result;
+    // 通用同步存档/UI 生命周期参与者注册（尾追加）。
+    QolLifecycleParticipantRegisterFn lifecycle_participant_register;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 10：QolConfigApi 追加 get_string（配置字符串面，config/list 迁入 core.settings 起）。
-constexpr uint16_t kHostSdkMinor = 10;
+// minor 11：追加通用存档/UI 生命周期参与者注册入口。
+constexpr uint16_t kHostSdkMinor = 11;
 
 }  // namespace qol::contracts

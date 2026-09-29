@@ -231,9 +231,19 @@ int32_t provider_move_item(int32_t from_bag, int32_t from_slot, int32_t to_bag,
     return 1;
 }
 
-std::string extension_bag_use_item(int bag, int slot) {
-    return extension_bag_api_use_item_impl(bag, slot);
+// 扩展插件内部使用的稳定入口（不再经宿主 capability 包装）。
+bool extension_bag_enabled() { return virtual_bag_enabled(); }
+
+int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount) {
+    return provider_sell_price(item, count, apply_variant_discount);
 }
+
+bool extension_bag_has_empty_slots(int needed, int include_task_bag) {
+    return provider_has_empty_slots(needed, include_task_bag);
+}
+
+void extension_bag_begin_internal_equip() { provider_begin_internal_equip(); }
+void extension_bag_end_internal_equip() { provider_end_internal_equip(); }
 
 // ===========================================================================
 // D2a-3c：capability provider —— ExtensionBagApi v2.2 接口表
@@ -444,6 +454,17 @@ int32_t neutral_move_item(int32_t from_bag, int32_t from_slot, int32_t to_bag, i
     return provider_move_item(from_bag, from_slot, to_bag, to_slot, out, capacity, out_size);
 }
 
+int32_t neutral_use_item(int32_t bag, int32_t slot, char* out, uint32_t capacity,
+                         uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr) return 0;
+    const std::string body = extension_bag_api_use_item_impl(bag, slot);
+    const uint32_t copied = static_cast<uint32_t>(std::min<std::size_t>(body.size(), capacity));
+    if (copied != 0) std::memcpy(out, body.data(), copied);
+    *out_size = static_cast<uint32_t>(body.size());
+    return 1;
+}
+
 QolResult neutral_sell_price(const void* item, int32_t count, int32_t apply_discount,
                              int64_t* out_price) {
     if (out_price == nullptr) return neutral_error(kQolErrInvalidArgument, "invalid argument");
@@ -503,6 +524,7 @@ const qol::contracts::QolInventoryExtensionProvider kInventoryExtensionProvider{
     &neutral_identify_native_item,
     &neutral_remove_native_item,
     &neutral_put_jewel,
+    &neutral_use_item,
 };
 
 }  // namespace

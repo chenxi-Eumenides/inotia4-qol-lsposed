@@ -3,7 +3,6 @@
 #include "bridge/native/character_write_result.h"
 #include "bridge/native/item_write_result.h"
 #include "contracts/commands.h"
-#include "contracts/extension_bag_port.h"
 #include "core/native/inventory_trade.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
@@ -225,9 +224,19 @@ Java_com_inotia4_qol_NativeBridge_nativeOpUseItem(JNIEnv* env, jclass, jint bag,
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return op_result(env, "op_use_item", args, qol::bridge::item_error_json("slot empty"));
     }
-    // 扩展逻辑袋：沿用原版直调并透传插件字符串（不套信封），内核无该定义、由上层 #if 隔离。
+    // 扩展逻辑袋：经中立 provider 透传插件字符串（不套信封）。
     if (item_ref.kind == InventoryItemKind::kProvider) {
-        return op_result(env, "op_use_item", args, extension_bag_use_item(bag, slot));
+        const qol::contracts::QolInventoryExtensionProvider* provider =
+            neutral_extension_provider();
+        char buffer[4096]{};
+        uint32_t length = 0;
+        if (provider == nullptr || provider->use_item == nullptr ||
+            provider->use_item(bag, slot, buffer, sizeof(buffer), &length) == 0 ||
+            length > sizeof(buffer)) {
+            return op_result(env, "op_use_item", args,
+                             qol::bridge::item_error_json("extension item use failed"));
+        }
+        return op_result(env, "op_use_item", args, std::string(buffer, length));
     }
     qol::contracts::QolItemInventoryStateWriteResult out{};
     const QolResult result = qol::game::ops::use_item(bag, slot, &out);
@@ -310,28 +319,31 @@ Java_com_inotia4_qol_NativeBridge_nativeOpMoveItem(JNIEnv* env, jclass, jint bag
         return op_result(env, "op_move_item", args,
                          qol::bridge::item_error_json("task bag excluded"));
     }
-    const qol::contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->is_logical_bag != nullptr &&
-        (eb->is_logical_bag(bag) || eb->is_logical_bag(toBag))) {
+    const qol::contracts::QolInventoryExtensionProvider* provider =
+        neutral_extension_provider();
+    if (provider != nullptr && provider->owns_bag != nullptr &&
+        (provider->owns_bag(bag) != 0 || provider->owns_bag(toBag) != 0)) {
         if (count <= 0) {
             return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad count"));
         }
         if (toSlot < 0 || toSlot >= 16) {
             return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad target"));
         }
-        // 扩展逻辑袋：走 capability v2.0 `move_item`（与 legacy 全局同一 impl，字节同源透传，不刷）；
+        // 扩展逻辑袋：走中立 provider `move_item`（唯一实现点，字节同源透传，不刷）；
         // 缓冲不足视为不可达边界，fallback 与 owner 兜底同款（见 T2j 方案 §3）。
         char move_buf[4096]{};
         uint32_t move_len = 0;
-        if (eb->move_item != nullptr &&
-            eb->move_item(bag, slot, toBag, toSlot, move_buf, sizeof(move_buf), &move_len) != 0 &&
+        if (provider->move_item != nullptr &&
+            provider->move_item(bag, slot, toBag, toSlot, move_buf, sizeof(move_buf),
+                                &move_len) != 0 &&
             move_len <= sizeof(move_buf)) {
             return op_result(env, "op_move_item", args, std::string(move_buf, move_len));
         }
         return op_result(env, "op_move_item", args,
                          qol::bridge::item_error_json("extension bag move failed"));
     }
-    if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
+    if (provider != nullptr && provider->module_view_installed != nullptr &&
+        provider->module_view_installed() != 0) {
         return op_result(env, "op_move_item", args,
                          qol::bridge::item_error_json("extension view open; movement disabled (P2)"));
     }

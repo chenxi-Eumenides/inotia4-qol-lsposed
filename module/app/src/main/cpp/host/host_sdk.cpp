@@ -1,6 +1,7 @@
 #include "host/adapters.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "host/lifecycle_participants.h"
 
 #include <algorithm>
 #include <array>
@@ -449,6 +450,11 @@ QolResult sdk_store_save_game() {
     return result_from_bool(module_save_game(), kQolErrBlocked, "save failed");
 }
 
+int32_t sdk_lifecycle_participant_register(
+    const contracts::QolLifecycleParticipant* participant) {
+    return host_lifecycle_participant_register(participant);
+}
+
 QolResult sdk_panels_register_item(const contracts::PanelItemSpec* item) {
     if (item == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
     return result_from_bool(infra::panels_register_item(*item), kQolErrConflict, kConflict);
@@ -843,6 +849,7 @@ contracts::QolHostSdk make_host_sdk() {
         &infra::commands_defer_current_result,
         &infra::commands_current_attempt,
     };
+    sdk.lifecycle_participant_register = &sdk_lifecycle_participant_register;
     return sdk;
 }
 
@@ -851,5 +858,3 @@ contracts::QolHostSdk make_host_sdk() {
 extern const contracts::QolHostSdk g_host_sdk = make_host_sdk();
 
 }  // namespace qol::host
-
-#include "host/extension_bag_port.inc"

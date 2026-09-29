@@ -11,6 +11,7 @@
 #include "contracts/ownership.h"
 #include "core/native/game_cache.h"
 #include "game/access/inventory_legacy_read.h"
+#include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
@@ -61,6 +62,7 @@
 #include "host/frame_source.h"
 #include "host/item_count_facade.h"
 #include "host/inventory_extension_facade.h"
+#include "host/lifecycle_participants.h"
 #include "host/plugin_registry.h"
 #include "host/ui_adapter.h"
 #include "infra/commands.h"
@@ -329,6 +331,7 @@ bool assembly_init() {
     // item_count facade 是宿主稳定表；P1-B 注册 provider 前保持 not_ready。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     host_inventory_extension_bind();
+    qol::game::lifecycle_participant_bind_host(host_lifecycle_dispatch());
     // 仅在完整成功后置位：失败可重试，成功则幂等。
     if (g_assembly_done) return true;
 

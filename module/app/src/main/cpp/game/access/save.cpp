@@ -101,10 +101,10 @@ bool save_slot_delete_hook_target(void** out_slot, uintptr_t* out_expected) {
 // T2l-s-write：存档写原语（迁移自 api/native 存档写实现 save/enter_slot(_direct)/
 // create_slot(_direct)）。转场/能力现取经 contracts/runtime_hooks.h 过渡注入面。
 // ---------------------------------------------------------------------------
-#include "contracts/extension_bag_port.h"
 #include "contracts/module_save_port.h"
 #include "contracts/panels.h"
 #include "contracts/runtime_hooks.h"
+#include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "game/access/save_preflight.h"
 #include "game/ops/game_ops_common.h"
 
@@ -239,10 +239,8 @@ std::string enter_slot_locked(int32_t slot) {
     if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);
     if (slot_struct == nullptr || fn_saveslot_get_hero(slot_struct) == nullptr) return op_err("slot corrupt");
-    // D2b：扩展袋清理经能力接口现取；能力缺失 = EB disabled，无扩展态需清理，
-    // 放行（与 port 在 disabled 下返回 true 的放行行为一致）。
-    const contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->prepare_save_slot_load != nullptr && !eb->prepare_save_slot_load()) {
+    // 存档/UI 生命周期参与者分派：无可用参与者等同旧“能力缺失”，跳过准备放行。
+    if (!qol::game::lifecycle_participant_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; enter slot blocked");
     }
     fn_ui_set_popup_process_info(4, 0);
@@ -274,9 +272,8 @@ std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     if (slot < 0 || slot > 2) return op_err("bad slot");
     if (class_idx < 0 || class_idx > 5) return op_err("bad class");
     if (g_base == 0) return op_err("libgame not ready");
-    // D2b：同 enter_slot_locked；能力缺失 = EB disabled，放行。
-    const contracts::ExtensionBagApi* eb = extension_bag_capability();
-    if (eb != nullptr && eb->prepare_save_slot_load != nullptr && !eb->prepare_save_slot_load()) {
+    // 同 enter_slot_locked：无可用参与者等同旧“能力缺失”，跳过准备放行。
+    if (!qol::game::lifecycle_participant_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; create slot blocked");
     }
     if (fn_save_create_save_slot == nullptr || fn_save_destroy_save_slot == nullptr ||

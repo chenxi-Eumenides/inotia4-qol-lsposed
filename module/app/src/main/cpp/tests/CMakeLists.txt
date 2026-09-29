@@ -748,6 +748,7 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/lifecycle_participants.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/host/game_host.cpp
@@ -888,6 +889,18 @@ target_compile_features(item_count_facade_tests PRIVATE cxx_std_17)
 set_target_properties(item_count_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_count_facade_tests COMMAND item_count_facade_tests)
 
+# ITM-13：同步存档/UI 生命周期参与者注册与有序分派。
+add_executable(lifecycle_participant_tests
+    test_lifecycle_participants.cpp
+    ${CPP_DIR}/host/lifecycle_participants.cpp
+    ${CPP_DIR}/game/adapter_ports/lifecycle_participant_facade.cpp
+)
+target_include_directories(lifecycle_participant_tests PRIVATE ${CPP_DIR})
+target_compile_features(lifecycle_participant_tests PRIVATE cxx_std_17)
+set_target_properties(lifecycle_participant_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(lifecycle_participant_tests PRIVATE Threads::Threads)
+add_test(NAME lifecycle_participant_tests COMMAND lifecycle_participant_tests)
+
 # P1-B1：stack_limit 999 原子组 claim 清单、provider 驻留/注销与未知类别 fail-closed。
 add_executable(stack_limit_plugin_tests
     test_stack_limit_plugin.cpp
@@ -1011,6 +1024,7 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/host/http_dispatch.cpp
     # T2h-B0：legacy 读实现入 host golden（fake 环境）
     ${CPP_DIR}/game/access/inventory_legacy_read.cpp
+    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
     ${CPP_DIR}/game/ops/game_ops_common.cpp
     # T2h-B3#2：debug raw 整函数搬迁后的新落点
     ${CPP_DIR}/game/read/item_class.cpp
@@ -1126,6 +1140,7 @@ add_test(NAME core_patches_shape_tests COMMAND core_patches_shape_tests)
 add_executable(ui_state_dialog_tests
     test_ui_state_dialog.cpp
     ${CPP_DIR}/game/access/ui_state.cpp
+    ${CPP_DIR}/game/adapter_ports/lifecycle_participant_facade.cpp
 )
 target_include_directories(ui_state_dialog_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs

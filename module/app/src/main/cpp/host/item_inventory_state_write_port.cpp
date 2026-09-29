@@ -3,8 +3,8 @@
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include <cstring>
+#include <string>
 
-#include "contracts/extension_bag_port.h"
 #include "contracts/game_cache.h"
 #include "core/native/inventory_trade.h"
 #include "game/ops/item_inventory_state_write.h"
@@ -69,7 +69,19 @@ QolResult use_item(int32_t bag, int32_t slot,
         return trade_error(out, "slot empty");
     }
     if (item_ref.kind == InventoryItemKind::kProvider) {
-        const std::string result = extension_bag_use_item(bag, slot);
+        // 中立 provider use：结果字符串字节与旧 extension_bag_use_item 同源（同一实现点）。
+        const contracts::QolInventoryExtensionProvider* provider =
+            qol::game::inventory_extension_available()
+                ? qol::game::inventory_extension_provider_if_resident()
+                : nullptr;
+        char buffer[4096]{};
+        uint32_t length = 0;
+        if (provider == nullptr || provider->use_item == nullptr ||
+            provider->use_item(bag, slot, buffer, sizeof(buffer), &length) == 0 ||
+            length > sizeof(buffer)) {
+            return contracts::error(kQolErrInternal, "extension item use failed", 25);
+        }
+        const std::string result(buffer, length);
         constexpr char kOk[] = "{\"ok\":true}";
         if (result == kOk) return contracts::ok();
         constexpr char kErrorPrefix[] = "{\"ok\":false,\"error\":\"";
@@ -77,11 +89,11 @@ QolResult use_item(int32_t bag, int32_t slot,
             result.compare(0, sizeof(kErrorPrefix) - 1, kErrorPrefix) == 0 &&
             result.compare(result.size() - 2, 2, "\"}") == 0) {
             const size_t begin = sizeof(kErrorPrefix) - 1;
-            const size_t length = result.size() - begin - 2;
-            if (length < sizeof(out->error_message)) {
-                std::memcpy(out->error_message, result.data() + begin, length);
-                out->error_message[length] = '\0';
-                out->error_message_len = static_cast<uint32_t>(length);
+            const size_t inner = result.size() - begin - 2;
+            if (inner < sizeof(out->error_message)) {
+                std::memcpy(out->error_message, result.data() + begin, inner);
+                out->error_message[inner] = '\0';
+                out->error_message_len = static_cast<uint32_t>(inner);
                 return contracts::error(kQolErrInternal, out->error_message,
                                         out->error_message_len);
             }

@@ -54,9 +54,34 @@ const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::SaveFactsApi* g_save_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 
-// 中立 provider active 探针状态：install 后置位、deactivate 后清除；普通 enable/disable 不改变。
-// provider 表本身静态驻留（set-once），active 只表达 provider 是否参与路由。
+// 中立 provider / 生命周期参与者的可用探针：进入 enabled 时置位，installed_disabled 与
+// deactivate 后清除（复刻旧“能力仅在 enabled 时注册”的可用语义）。表本身静态驻留（set-once），
+// active 只表达是否参与路由/分派，不表示登记与否。
 std::atomic<bool> g_provider_active{false};
+
+// 存档/UI 生命周期参与者回调：可用性由 provider active 承载，动作回调直连扩展实现。
+// 调用方（宿主分派器）已按 available 门控，本表回调只在可用时执行。
+int32_t lifecycle_available() { return g_provider_active.load(std::memory_order_acquire) ? 1 : 0; }
+int32_t lifecycle_prepare_save_slot_load() {
+    return virtual_bag_prepare_save_slot_load() ? 1 : 0;
+}
+int32_t lifecycle_is_inventory_enter(uintptr_t enter) {
+    return virtual_bag_is_inventory_enter(enter) ? 1 : 0;
+}
+int32_t lifecycle_prepare_main_menu() {
+    return virtual_bag_prepare_main_menu() ? 1 : 0;
+}
+int32_t lifecycle_inventory_state_id() { return virtual_bag_inventory_state_id(); }
+
+const qol::contracts::QolLifecycleParticipant kLifecycleParticipant{
+    sizeof(qol::contracts::QolLifecycleParticipant),
+    qol::contracts::kLifecycleParticipantAbiVersion,
+    &lifecycle_available,
+    &lifecycle_prepare_save_slot_load,
+    &lifecycle_is_inventory_enter,
+    &lifecycle_prepare_main_menu,
+    &lifecycle_inventory_state_id,
+};
 
 // moveMergeEnabled 配置变更订阅句柄；deactivate 时成对注销（install 幂等重入）。
 uint64_t g_config_subscription = 0;
@@ -553,7 +578,18 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
         return 1;
     }
-    g_provider_active.store(true, std::memory_order_release);
+    // 生命周期参与者最末注册（与 provider 是两次独立注册）。注册表 set-once，provider 已
+    // 无法撤销；此处失败时保持不可用（active=false）并登记部分注册状态，install 返回失败。
+    if (g_sdk == nullptr || g_sdk->lifecycle_participant_register == nullptr ||
+        g_sdk->lifecycle_participant_register(&kLifecycleParticipant) == 0) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char kMessage[] =
+                "extension bag lifecycle participant registration failed; provider resident but unavailable";
+            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+                                   static_cast<uint32_t>(sizeof(kMessage) - 1));
+        }
+        return 1;
+    }
     return 0;
 }
 
@@ -596,11 +632,13 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
 // 启停仅切门禁，资源安装/还原由宿主完成（§3.3）。
 void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
     (void)ctx;
+    g_provider_active.store(true, std::memory_order_release);
     extension_bag_set_enabled(true);
 }
 
 void plugin_on_disabled(qol::contracts::PluginContext& ctx) {
     (void)ctx;
+    g_provider_active.store(false, std::memory_order_release);
     extension_bag_set_enabled(false);
 }
 

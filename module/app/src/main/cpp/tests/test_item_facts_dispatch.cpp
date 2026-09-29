@@ -12,7 +12,6 @@
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/extension_bag.h"
-#include "contracts/extension_bag_port.h"
 #include "contracts/inventory_extension.h"
 #include "contracts/character_state.h"
 #include "contracts/item_count.h"
@@ -24,6 +23,7 @@
 #include "bridge/native/item_write_result.h"
 #include "core/native/inventory_trade.h"
 #include "game/access/game_access.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/ops/game_ops_common.h"
 #include "game/read/item_class.h"
@@ -580,8 +580,10 @@ const qol::contracts::QolInventoryExtensionProvider kFakeProvider{
     &fake_provider_bag_capacity, &fake_provider_fragment,  &fake_provider_move,
     &fake_provider_sell_price, &fake_provider_sync_slot,   &fake_provider_sync_bag,
     &fake_provider_module_view, &fake_provider_identify,   &fake_provider_remove,
-    &fake_provider_put_jewel,
+    &fake_provider_put_jewel,  nullptr,
 };
+
+bool fake_provider_available_probe() { return g_provider_available; }
 
 QolResult fake_inventory_extension_access(qol::contracts::QolInventoryExtensionAccess* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
@@ -2429,6 +2431,13 @@ void test_debug_item_raw_golden() {
 }
 
 int main() {
+    // legacy 读路径经 game 中立 facade 取 provider fragment；与 item port 替身共用同一 fake 表。
+    qol::game::inventory_extension_bind_host();
+    if (!qol::game::inventory_extension_set_provider(&kFakeProvider,
+                                                    &fake_provider_available_probe)) {
+        std::printf("FAIL %s:%d: fake provider registration\n", __FILE__, __LINE__);
+        return 1;
+    }
     test_lifecycle_and_responses();
     test_static_not_ready_holds_snapshot();
     test_bridge_item_write_result_helper();
