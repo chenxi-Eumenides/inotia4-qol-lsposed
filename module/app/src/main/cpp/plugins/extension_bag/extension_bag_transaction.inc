@@ -1,5 +1,6 @@
 bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
-                                            int src_slot, int dst_bag) {
+                                             int src_slot, int dst_bag,
+                                             qol::contracts::QolItemHandle expected_item) {
     if (!virtual_bag::valid_original_transaction_bag(src_bag)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
@@ -13,6 +14,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
         extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
         g_item_facts == nullptr || g_item_facts->cumulate_count == nullptr ||
+        g_item_facts->item_ref_at == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d capacity=%d symbols=%d",
                     dst_bag,
@@ -27,6 +29,28 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     if (!inventory_slot_locked(src_bag, src_slot, &src_item) || src_item == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension source empty bag=%d slot=%d",
                     src_bag, src_slot);
+        return false;
+    }
+    qol::contracts::QolInventoryItemRef source_ref{};
+    if (!qol::contracts::succeeded(
+            g_item_facts->item_ref_at(src_bag, src_slot, &source_ref)) ||
+        source_ref.bag != src_bag || source_ref.slot != src_slot ||
+        source_ref.item.slot == 0 || source_ref.item.generation == 0 ||
+        (expected_item.slot != 0 &&
+         (source_ref.item.slot != expected_item.slot ||
+          source_ref.item.generation != expected_item.generation))) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "cross move reject original->extension stale source identity bag=%d slot=%d",
+                     src_bag, src_slot);
+        return false;
+    }
+    qol::contracts::QolItemHandle source_handle{};
+    if (!extension_bag_item_handle_for_pointer(src_item, &source_handle) ||
+        source_handle.slot != source_ref.item.slot ||
+        source_handle.generation != source_ref.item.generation) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "cross move reject original->extension replaced source bag=%d slot=%d",
+                     src_bag, src_slot);
         return false;
     }
 
@@ -106,6 +130,15 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     }
 
     // original-state-updated：删除原版源并以原版实态复核（不只信删除函数返回值）。
+    qol::contracts::QolInventoryItemRef before_remove_ref{};
+    if (!qol::contracts::succeeded(
+            g_item_facts->item_ref_at(src_bag, src_slot, &before_remove_ref)) ||
+        before_remove_ref.item.slot != source_handle.slot ||
+        before_remove_ref.item.generation != source_handle.generation) {
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "original source identity changed before removal");
+        return false;
+    }
     if (!remove_item_direct_unlocked(lock, src_bag, src_slot, src_item,
                                      "original-to-extension")) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
@@ -133,18 +166,24 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
 bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
                                        void* moving_control) {
     if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
-        g_item_facts == nullptr || g_item_facts->cursor_index == nullptr) {
+        g_item_facts == nullptr || g_item_facts->detail_item_context == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
-                    dst_bag, moving_control,
-                    virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
-                    g_item_facts != nullptr && g_item_facts->cursor_index != nullptr ? 1 : 0);
+                     dst_bag, moving_control,
+                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
+                     g_item_facts != nullptr && g_item_facts->detail_item_context != nullptr ? 1 : 0);
         return false;
     }
-    const int src_bag = original_bag_locked();
-    int src_slot = -1;
-    if (!qol::contracts::succeeded(
-            g_item_facts->cursor_index(moving_control, &src_slot))) return false;
-    const bool moved = move_original_to_extension_slot_locked(lock, src_bag, src_slot, dst_bag);
+    qol::contracts::QolItemDetailContext source{};
+    if (!qol::contracts::succeeded(g_item_facts->detail_item_context(&source)) ||
+        source.desc_type != 2 || source.bag != original_bag_locked() ||
+        source.slot < 0 || source.slot >= virtual_bag::kSlotCount ||
+        source.item.slot == 0 || source.item.generation == 0) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "cross move reject original->extension detail context stale");
+        return false;
+    }
+    const bool moved = move_original_to_extension_slot_locked(
+        lock, source.bag, source.slot, dst_bag, source.item);
     if (moved) reset_drag_state_locked(moving_control);
     return moved;
 }
@@ -376,6 +415,12 @@ bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& l
         !virtual_bag::drag_session_generation_current(session, g_extension_tab_generation) ||
         !virtual_bag::valid_index(session.source_bag) ||
         session.source_slot < 0 || session.source_slot >= virtual_bag::kSlotCount) {
+        return false;
+    }
+    if (!virtual_bag::drag_session_source_identity_matches(
+            session, session.source_bag, session.source_slot,
+            g_module_object_handles[session.source_bag][session.source_slot])) {
+        cancel_projected_drag_session_locked("source-identity-replaced");
         return false;
     }
     if (session.phase == virtual_bag::DragPhase::kPressed) {
@@ -881,6 +926,16 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
         !virtual_bag::valid_index(g_virtual_bag_state.selected)) {
         return false;
     }
+    const auto& source_session = g_extension_drag_session;
+    if (!virtual_bag::valid_index(source_session.source_bag) ||
+        source_session.source_slot < 0 || source_session.source_slot >= virtual_bag::kSlotCount ||
+        !virtual_bag::drag_session_source_identity_matches(
+            source_session, source_session.source_bag, source_session.source_slot,
+            g_module_object_handles[source_session.source_bag][source_session.source_slot]) ||
+        g_module_objects[source_session.source_bag][source_session.source_slot] == nullptr) {
+        cancel_projected_drag_session_locked("source-identity-replaced");
+        return false;
+    }
     // Tab rects and grid rows overlap in the current UI coordinate space; a tab hit is
     // therefore the explicit switch-bag intent and must take precedence over a slot hit.
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
@@ -1024,6 +1079,12 @@ bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, i
     if (!virtual_bag::valid_index(session.source_bag) || session.source_slot < 0 ||
         session.source_slot >= virtual_bag::kSlotCount) {
         return reject("source_session_invalid");
+    }
+    if (!virtual_bag::drag_session_source_identity_matches(
+            session, session.source_bag, session.source_slot,
+            g_module_object_handles[session.source_bag][session.source_slot]) ||
+        g_module_objects[session.source_bag][session.source_slot] == nullptr) {
+        return reject("source_identity_replaced");
     }
     if (session.phase == virtual_bag::DragPhase::kPressed) {
         advance_projected_drag_session_locked();

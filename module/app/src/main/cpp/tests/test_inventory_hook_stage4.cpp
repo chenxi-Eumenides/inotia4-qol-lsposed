@@ -517,6 +517,21 @@ static void test_vanilla_sell_takeover() {
     CHECK(vanilla_sell_route(true, true) == VanillaSellRoute::kPreview);
     CHECK(vanilla_sell_route(true, false) == VanillaSellRoute::kTakeover);
 
+    qol::contracts::QolItemDetailContext preview{2, 1, 4, {17, 3}};
+    auto confirmation = preview;
+    CHECK(vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation.bag = 2;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation = preview;
+    confirmation.slot = 5;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation = preview;
+    confirmation.item.generation = 4;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation = preview;
+    confirmation.item.slot = 0;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+
     // 金额：unit × canonical × 7 / 10。
     int64_t price = -1;
     CHECK(vanilla_sell_money(10, 1u, &price, &kStage4ConversionApi) && price == 7);

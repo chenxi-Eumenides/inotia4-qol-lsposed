@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "../../contracts/game_host.h"
+#include "../../contracts/game_ports/item_port.h"
 
 using Stage4HaveBackup = int (*)(int32_t);
 using Stage4CountBackup = int (*)(int32_t);
@@ -54,8 +55,12 @@ uint32_t native_equip_sell_count(uint32_t field,
 // 金额（kPreview），弹窗 OK 才真实接管（kTakeover）。不用返回地址判定——经 Dobby
 // 桥后 LR 不可信（既有 MoveItem caller 日志即为桥地址）。
 enum class VanillaSellRoute : uint8_t { kBackup, kPreview, kTakeover };
+constexpr int32_t kVanillaBagDetailType = 2;
 
 VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run);
+bool vanilla_sell_detail_context_matches(
+    const qol::contracts::QolItemDetailContext& preview,
+    const qol::contracts::QolItemDetailContext& confirmation);
 // 0.7 结算金额（canonical 模式视图）：unit_price × min(canonical,999) × 7 / 10，
 // 沿用 sell_price 边界与溢出校验；canonical==0 / unit_price 越界 / 结果越界 → false。
 bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price,

@@ -244,7 +244,9 @@ bool module_object_replacement_allowed_locked(int bag, int slot, const char* con
 bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
                                        void* moving_control);
 bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
-                                            int src_slot, int dst_bag);
+                                             int src_slot, int dst_bag,
+                                             qol::contracts::QolItemHandle expected_item =
+                                                 qol::contracts::kInvalidItemHandle);
 bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
                                        int src_slot, int target_bag);
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,

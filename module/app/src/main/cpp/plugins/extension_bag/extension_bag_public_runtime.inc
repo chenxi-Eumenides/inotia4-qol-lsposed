@@ -287,7 +287,10 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     if (g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
         if (g_extension_drag_session.source_bag != src_bag ||
             g_extension_drag_session.source_slot != src_slot ||
-            g_extension_drag_session.view_generation != g_extension_tab_generation) {
+            g_extension_drag_session.view_generation != g_extension_tab_generation ||
+            !virtual_bag::drag_session_source_identity_matches(
+                g_extension_drag_session, src_bag, src_slot,
+                g_module_object_handles[src_bag][src_slot])) {
             VIRTBAG_LOG("drop rejected: extension source session mismatch src=%d/%d phase=%d",
                         src_bag, src_slot, static_cast<int>(g_extension_drag_session.phase));
             return VirtualBagProjectionDropResult::kRejected;

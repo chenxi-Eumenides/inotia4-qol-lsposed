@@ -171,12 +171,8 @@ QolResult read_physical_item_at(int32_t bag, int32_t slot, contracts::QolItemHan
     return contracts::ok();
 }
 
-QolResult read_detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control) {
-    return detail_context(out_desc_type, out_bag, out_control);
-}
-
-QolResult read_cursor_index(const void* control, int32_t* out_slot) {
-    return cursor_index(control, out_slot);
+QolResult read_detail_item_context(contracts::QolItemDetailContext* out_context) {
+    return qol::game::detail_item_context(out_context);
 }
 
 QolResult copy_json(const std::string& json, char* out, uint32_t capacity, uint32_t* out_size) {
@@ -314,8 +310,8 @@ const contracts::QolItemPort kItemPort{
     contracts::kQolPortItemVersion,
     sizeof(contracts::QolItemPort),
     {&read_category, &read_real_equip, &read_jewel_category, &read_no_sell, &read_sell_price,
-     &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_context,
-      &read_cursor_index, &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
+     &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_item_context,
+      &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
        &read_static_text, &read_static_ready, &read_inventory_item_view,
        &read_effective_cumulate_count, &read_inventory_extension_access},
 };

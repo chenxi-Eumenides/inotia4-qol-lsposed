@@ -25,6 +25,14 @@ struct QolInventoryItemRef {
     QolItemHandle item;
 };
 
+// Atomic snapshot of the selected inventory detail slot. The control object stays in Game Adapter.
+struct QolItemDetailContext {
+    int32_t desc_type;
+    int32_t bag;
+    int32_t slot;
+    QolItemHandle item;
+};
+
 using QolInventoryBagSlotFn = int32_t (*)(const QolInventoryItemRef* item, void* ctx);
 using QolItemJsonFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_size);
 
@@ -107,8 +115,7 @@ struct QolItemPortReadApi {
     QolResult (*cumulate_count)(QolItemHandle item, int32_t* out_count);
     QolResult (*item_ref_at)(int32_t bag, int32_t slot, QolInventoryItemRef* out);
     QolResult (*physical_item_at)(int32_t bag, int32_t slot, QolItemHandle* out_item);
-    QolResult (*detail_context)(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
-    QolResult (*cursor_index)(const void* control, int32_t* out_slot);
+    QolResult (*detail_item_context)(QolItemDetailContext* out_context);
     // Legacy JSON adapter retained for unmigrated game-system write/cache consumers.
     QolItemJsonFn inventory_json;
     QolResult (*money)(int64_t* out_money);

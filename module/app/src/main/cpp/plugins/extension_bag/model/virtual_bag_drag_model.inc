@@ -41,6 +41,7 @@ struct ExtensionDragSession {
     uint64_t view_generation = 0;
     int source_bag = -1;
     int source_slot = -1;
+    uint32_t source_identity = 0;
     DragTargetKind target_kind = DragTargetKind::kInvalid;
     int target_bag = -1;
     int target_slot = -1;
@@ -66,6 +67,8 @@ static_assert(!std::is_pointer<decltype(ExtensionDragSession::source_bag)>::valu
               "drag session must not contain pointers");
 static_assert(!std::is_pointer<decltype(ExtensionDragSession::source_slot)>::value,
               "drag session must not contain pointers");
+static_assert(!std::is_pointer<decltype(ExtensionDragSession::source_identity)>::value,
+              "drag session identity must not contain pointers");
 static_assert(!std::is_pointer<decltype(ExtensionDragSession::target_kind)>::value,
               "drag session must not contain pointers");
 static_assert(!std::is_pointer<decltype(ExtensionDragSession::target_bag)>::value,
@@ -76,6 +79,14 @@ static_assert(!std::is_pointer<decltype(ExtensionDragSession::target_slot)>::val
 inline bool drag_session_generation_current(const ExtensionDragSession& session,
                                             uint64_t view_generation) {
     return session.view_generation == view_generation;
+}
+
+inline bool drag_session_source_identity_matches(const ExtensionDragSession& session,
+                                                 int source_bag, int source_slot,
+                                                 uint32_t source_identity) {
+    return session.phase != DragPhase::kIdle && session.source_bag == source_bag &&
+           session.source_slot == source_slot && session.source_identity != 0 &&
+           session.source_identity == source_identity;
 }
 
 inline DragTransition session_begin(ExtensionDragSession* session, uint64_t token,

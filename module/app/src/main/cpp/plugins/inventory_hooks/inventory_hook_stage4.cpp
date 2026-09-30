@@ -68,6 +68,16 @@ VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run) {
     return button_dry_run ? VanillaSellRoute::kPreview : VanillaSellRoute::kTakeover;
 }
 
+bool vanilla_sell_detail_context_matches(
+    const qol::contracts::QolItemDetailContext& preview,
+    const qol::contracts::QolItemDetailContext& confirmation) {
+    return preview.desc_type == 2 && confirmation.desc_type == 2 &&
+           preview.bag == confirmation.bag && preview.slot == confirmation.slot &&
+           preview.item.slot != 0 && preview.item.generation != 0 &&
+           preview.item.slot == confirmation.item.slot &&
+           preview.item.generation == confirmation.item.generation;
+}
+
 bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price,
                         const qol::contracts::QolItemCountApi* item_count) {
     if (out_price == nullptr || canonical_count == 0) return false;

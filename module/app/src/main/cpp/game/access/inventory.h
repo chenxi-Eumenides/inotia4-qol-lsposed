@@ -19,8 +19,9 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
 
 // 读取物理袋对象；包含任务袋 5，返回的不透明对象只在当前游戏线程调用窗内使用。
 QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item);
+QolResult detail_item_context(contracts::QolItemDetailContext* out_context);
 
-// 读取原版装备详情的当前描述类型、袋号和控件句柄。
+// Game-private UI accessors. Native control pointers never cross adapter-port boundaries.
 QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
 QolResult cursor_index(const void* control, int32_t* out_slot);
 

@@ -153,18 +153,9 @@ QolResult effective_count(contracts::QolItemHandle item, int32_t* out_count) {
     return g_port->read.effective_cumulate_count(item, out_count);
 }
 
-QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control) {
-    if (g_port == nullptr || g_port->read.detail_context == nullptr) {
-        return not_ready();
-    }
-    return g_port->read.detail_context(out_desc_type, out_bag, out_control);
-}
-
-QolResult cursor_index(const void* control, int32_t* out_slot) {
-    if (g_port == nullptr || g_port->read.cursor_index == nullptr) {
-        return not_ready();
-    }
-    return g_port->read.cursor_index(control, out_slot);
+QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
+    if (g_port == nullptr || g_port->read.detail_item_context == nullptr) return not_ready();
+    return g_port->read.detail_item_context(out_context);
 }
 
 QolResult money(int64_t* out_money) {
@@ -182,8 +173,7 @@ constexpr contracts::ItemFactsApi kItemFactsApi{
     &cumulate_count,
     &item_ref_at,
     &physical_item_at,
-    &detail_context,
-    &cursor_index,
+    &detail_item_context,
     &money,
     &item_view,
     &effective_count,

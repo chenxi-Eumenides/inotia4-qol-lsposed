@@ -287,8 +287,9 @@ QolResult fake_inventory_item_view(qol::contracts::QolItemHandle item,
     return qol::contracts::ok();
 }
 QolResult stub_physical(int32_t, int32_t, qol::contracts::QolItemHandle*) { return unsupported(); }
-QolResult stub_detail(int32_t*, int32_t*, void**) { return unsupported(); }
-QolResult stub_cursor(const void*, int32_t*) { return unsupported(); }
+QolResult stub_detail_item_context(qol::contracts::QolItemDetailContext*) {
+    return unsupported();
+}
 
 QolResult fake_in_world(int32_t* out) {
     *out = g_in_world ? 1 : 0;
@@ -364,7 +365,7 @@ QolResult fake_inventory_extension_access(qol::contracts::QolInventoryExtensionA
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
-    &stub_detail,     &stub_cursor,        &fake_inventory,  &fake_money,
+     &stub_detail_item_context,              &fake_inventory,  &fake_money,
     &fake_shop,       &fake_in_world,      &fake_static_text, &fake_static_ready,
      &fake_inventory_item_view, &stub_effective_cumulate,
      &fake_inventory_extension_access,
@@ -2054,10 +2055,9 @@ static QolResult golden_unsupported_price(qol::contracts::QolItemHandle, int64_t
 static QolResult golden_unsupported_phys(int32_t, int32_t, qol::contracts::QolItemHandle*) {
     return golden_unsupported();
 }
-static QolResult golden_unsupported_detail(int32_t*, int32_t*, void**) {
+static QolResult golden_unsupported_detail_context(qol::contracts::QolItemDetailContext*) {
     return golden_unsupported();
 }
-static QolResult golden_unsupported_cursor(const void*, int32_t*) { return golden_unsupported(); }
 
 struct GoldenHandleEntry {
     uint32_t slot = 0;
@@ -2188,8 +2188,8 @@ static QolResult golden_view(qol::contracts::QolItemHandle handle,
 const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_category,          &golden_unsupported2,      &golden_unsupported1,
     &golden_unsupported1,      &golden_unsupported_price, &golden_cumulate_count,
-    &golden_item_ref_at,       &golden_unsupported_phys,  &golden_unsupported_detail,
-    &golden_unsupported_cursor, &golden_inventory_json,  &golden_money,
+    &golden_item_ref_at,       &golden_unsupported_phys,  &golden_unsupported_detail_context,
+    &golden_inventory_json,    &golden_money,
     &golden_shop,              &golden_in_world,          &golden_static_text,
     &golden_static_ready,      &golden_view, &stub_effective_cumulate,
     &fake_inventory_extension_access,

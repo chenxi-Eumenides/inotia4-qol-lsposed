@@ -106,6 +106,13 @@ QolResult physical_item_at(int32_t, int32_t, void** out_item) {
     return contracts::error(kQolErrNotReady, "test stub", 9);
 }
 
+QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
+    if (out_context != nullptr) {
+        *out_context = {0, -1, -1, contracts::kInvalidItemHandle};
+    }
+    return contracts::error(kQolErrNotReady, "test stub", 9);
+}
+
 QolResult current_bag(int32_t* out_bag) {
     if (out_bag != nullptr) *out_bag = -1;
     return contracts::error(kQolErrNotReady, "test stub", 9);

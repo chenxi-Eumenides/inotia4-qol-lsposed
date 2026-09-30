@@ -232,6 +232,8 @@ thread_local bool g_in_unequip_item_to_inven = false;
 thread_local bool g_in_remove_item = false;
 // R-55：UIEquip_ButtonDestroyExe 动态范围内（含其同步调用的 OKDestroyItem 预演）。
 thread_local bool g_in_equip_destroy_button = false;
+thread_local bool g_has_vanilla_sell_preview_context = false;
+thread_local qol::contracts::QolItemDetailContext g_vanilla_sell_preview_context{};
 thread_local int g_refresh_depth = 0;
 
 uint32_t read_count_field(const void* item);
@@ -1226,28 +1228,45 @@ uint64_t ok_destroy_item_wrapper() {
     };
     const VanillaSellRoute route =
         vanilla_sell_route(stack_limit_gate_enabled(), g_in_equip_destroy_button);
-    if (route == VanillaSellRoute::kBackup) return call_backup();
+    if (route == VanillaSellRoute::kBackup) {
+        g_has_vanilla_sell_preview_context = false;
+        return call_backup();
+    }
 
-    // 仅背包物品详情（desc_type==2）走结算；装备详情(0)/扩展袋(1) 回原版。
-    if (g_item_facts == nullptr || g_item_facts->detail_context == nullptr ||
-        g_item_facts->cursor_index == nullptr) {
+    // The detail slot, item identity and display mode are sampled together; the UI control stays
+    // private to Game Adapter.
+    if (g_item_facts == nullptr || g_item_facts->detail_item_context == nullptr) {
+        g_has_vanilla_sell_preview_context = false;
         return call_backup();
     }
-    int32_t desc_type = 0;
-    int32_t bag = 0;
-    void* ctrl = nullptr;
-    if (!qol::contracts::succeeded(g_item_facts->detail_context(
-            &desc_type, &bag, &ctrl)) || desc_type != 2 || ctrl == nullptr) {
+    qol::contracts::QolItemDetailContext detail{};
+    if (!qol::contracts::succeeded(g_item_facts->detail_item_context(&detail)) ||
+        detail.desc_type != kVanillaBagDetailType) {
+        g_has_vanilla_sell_preview_context = false;
         return call_backup();
     }
-    int32_t slot = -1;
-    if (!qol::contracts::succeeded(g_item_facts->cursor_index(ctrl, &slot))) {
+    if (route == VanillaSellRoute::kTakeover &&
+        (!g_has_vanilla_sell_preview_context ||
+         !vanilla_sell_detail_context_matches(g_vanilla_sell_preview_context, detail))) {
+        g_has_vanilla_sell_preview_context = false;
         return call_backup();
     }
-    if (slot < 0 || slot >= kInvenSlotsPerBag) return call_backup();
+    if (route == VanillaSellRoute::kTakeover) g_has_vanilla_sell_preview_context = false;
+    const int32_t bag = detail.bag;
+    const int32_t slot = detail.slot;
+    if (bag < 0 || bag >= kInvenPhysicalBagCount || slot < 0 ||
+        slot >= kInvenSlotsPerBag || detail.item.slot == 0 || detail.item.generation == 0) {
+        return call_backup();
+    }
 
     void* item = s2_physical_slot_item(bag, slot);
     if (item == nullptr) return call_backup();
+    qol::contracts::QolItemHandle observed_handle{};
+    if (!item_handle_for_hook_item(item, &observed_handle) ||
+        observed_handle.slot != detail.item.slot ||
+        observed_handle.generation != detail.item.generation) {
+        return call_backup();
+    }
     // 类别门控（R-46 fail-closed）：非 count-encoded（装备/宝石/袋对象）不接管。
     if (!item_count_is_encoded(item)) {
         QOL_LOG_INFO(QolDomain::kInventory,
@@ -1262,9 +1281,8 @@ uint64_t ok_destroy_item_wrapper() {
     }
     int32_t category = 0;
     int32_t no_sell = 0;
-    qol::contracts::QolItemHandle item_handle{};
-    if (!item_handle_for_hook_item(item, &item_handle) ||
-        !qol::contracts::succeeded(g_item_facts->category(item_handle, &category)) ||
+    const qol::contracts::QolItemHandle item_handle = detail.item;
+    if (!qol::contracts::succeeded(g_item_facts->category(item_handle, &category)) ||
         !qol::contracts::succeeded(g_item_facts->is_no_sell(category, &no_sell)) ||
         category <= 0 || no_sell != 0) {
         QOL_LOG_INFO(QolDomain::kInventory,
@@ -1291,6 +1309,8 @@ uint64_t ok_destroy_item_wrapper() {
 
     if (route == VanillaSellRoute::kPreview) {
         // 按钮预演：只回填弹窗展示金额，不结算。
+        g_vanilla_sell_preview_context = detail;
+        g_has_vanilla_sell_preview_context = true;
         QOL_LOG_INFO(QolDomain::kInventory,
             "vanilla sell preview bag=%d slot=%d category=%d canonical=%u unit=%lld price=%lld",
             bag, slot, category, canonical, static_cast<long long>(unit_price),

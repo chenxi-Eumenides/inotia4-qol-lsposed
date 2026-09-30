@@ -34,7 +34,13 @@ static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::inventor
 static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::physical_item_at),
                            QolResult (*)(int32_t, int32_t,
                                          qol::contracts::QolItemHandle*)>::value,
-              "Item Port physical lookup must not return an object pointer");
+               "Item Port physical lookup must not return an object pointer");
+static_assert(std::is_same<qol::contracts::ItemFactsDetailItemContextFn,
+                           QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
+              "item.facts detail context must be an atomic handle snapshot");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::detail_item_context),
+                           QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
+              "Item Port detail context must be an atomic handle snapshot");
 static_assert(std::is_same<qol::contracts::InventorySellFn,
                            qol::contracts::InventorySellResult (*)(
                                int32_t, int32_t, qol::contracts::QolItemHandle,
@@ -66,8 +72,14 @@ int main() {
     CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {1, 1}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 3}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {2, 0}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {2, 0}));
+    CHECK(!qol::contracts::satisfies({2, 0}, {3, 0}));
+    CHECK(!qol::contracts::satisfies(
+        {2, 0}, {qol::contracts::kQolPortItemVersion.major,
+                 qol::contracts::kQolPortItemVersion.minor}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {3, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {3, 0}));
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
@@ -84,7 +96,7 @@ int main() {
     CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 2 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -96,7 +108,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 2 && descriptor.ports[0].range.min_minor == 0);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 0);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
@@ -111,8 +123,7 @@ int main() {
     CHECK(api->cumulate_count != nullptr);
     CHECK(api->item_ref_at != nullptr);
     CHECK(api->physical_item_at != nullptr);
-    CHECK(api->detail_context != nullptr);
-    CHECK(api->cursor_index != nullptr);
+    CHECK(api->detail_item_context != nullptr);
     CHECK(api->money != nullptr);
     CHECK(api->view != nullptr);
     CHECK(api->effective_count != nullptr);

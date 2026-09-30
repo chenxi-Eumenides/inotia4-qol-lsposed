@@ -9,7 +9,7 @@
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{2, 0};
+constexpr QolVersion kItemFactsVersion{3, 0};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 
@@ -26,9 +26,7 @@ using ItemFactsItemRefAtFn = QolResult (*)(int32_t bag, int32_t slot,
                                            QolInventoryItemRef* out);
 using ItemFactsPhysicalItemAtFn = QolResult (*)(int32_t bag, int32_t slot,
                                                 QolItemHandle* out_item);
-using ItemFactsDetailContextFn = QolResult (*)(int32_t* out_desc_type, int32_t* out_bag,
-                                               void** out_control);
-using ItemFactsCursorIndexFn = QolResult (*)(const void* control, int32_t* out_slot);
+using ItemFactsDetailItemContextFn = QolResult (*)(QolItemDetailContext* out_context);
 using ItemFactsMoneyFn = QolResult (*)(int64_t* out_money);
 
 struct ItemFactsApi {
@@ -41,8 +39,7 @@ struct ItemFactsApi {
     ItemFactsCumulateCountFn cumulate_count;
     ItemFactsItemRefAtFn item_ref_at;
     ItemFactsPhysicalItemAtFn physical_item_at;
-    ItemFactsDetailContextFn detail_context;
-    ItemFactsCursorIndexFn cursor_index;
+    ItemFactsDetailItemContextFn detail_item_context;
     ItemFactsMoneyFn money;
     ItemFactsViewFn view;
     ItemFactsEffectiveCountFn effective_count;

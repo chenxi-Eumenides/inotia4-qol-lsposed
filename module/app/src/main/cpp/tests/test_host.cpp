@@ -2635,6 +2635,10 @@ static void test_p52_drag_session() {
 
     ExtensionDragSession session{};
     CHECK_EQ(session_begin(&session, 17, 42, 2, 3), DragTransition::kAdvanced);
+    session.source_identity = 71;
+    CHECK(drag_session_source_identity_matches(session, 2, 3, 71));
+    CHECK(!drag_session_source_identity_matches(session, 2, 3, 72));
+    CHECK(!drag_session_source_identity_matches(session, 2, 4, 71));
     CHECK_EQ(session.phase, DragPhase::kPressed);
     CHECK_EQ(session_on_native_moving(&session, 42), DragTransition::kAdvanced);
     CHECK_EQ(session.phase, DragPhase::kNativeMoving);

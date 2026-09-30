@@ -131,6 +131,7 @@ std::array<std::array<ModuleUseState, virtual_bag::kSlotCount>, virtual_bag::kBa
 thread_local ModuleUseToken* g_active_module_use_token = nullptr;
 std::array<std::array<int, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_categories{};
 std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_hashes{};
+extern uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount];
 std::array<void*, virtual_bag::kSlotCount> g_original_inventory{};
 uint8_t g_original_current_direct = 0;
 uint8_t g_original_current_got = 0;
@@ -961,6 +962,9 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
             valid_child_locked(g_projected_item_root, source_slot) == source_control &&
             session.phase != virtual_bag::DragPhase::kIdle &&
             session.source_bag == source_bag && session.source_slot == source_slot &&
+            virtual_bag::drag_session_source_identity_matches(
+                session, source_bag, source_slot,
+                g_module_object_handles[source_bag][source_slot]) &&
             virtual_bag::drag_session_generation_current(session, g_extension_tab_generation);
         if (!descriptor_valid || !session_valid || backup == nullptr ||
             !module_use_begin_locked(source_bag, source_slot, source_item, &use_token)) {

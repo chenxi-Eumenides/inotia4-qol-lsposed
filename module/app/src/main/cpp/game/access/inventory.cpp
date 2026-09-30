@@ -256,6 +256,31 @@ QolResult cursor_index(const void* control, int32_t* out_slot) {
     return *out_slot < 0 ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
 }
 
+QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
+    if (out_context == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out_context = {0, -1, -1, contracts::kInvalidItemHandle};
+    int32_t desc_type = 0;
+    int32_t bag = -1;
+    void* control = nullptr;
+    QolResult result = detail_context(&desc_type, &bag, &control);
+    if (!contracts::succeeded(result)) return result;
+    int32_t slot = -1;
+    result = cursor_index(control, &slot);
+    if (!contracts::succeeded(result)) return result;
+    contracts::QolInventoryItemRef item_ref{};
+    result = inventory_item_ref_at(bag, slot, &item_ref);
+    if (!contracts::succeeded(result)) return result;
+    if (item_ref.bag != bag || item_ref.slot != slot || item_ref.item.slot == 0 ||
+        item_ref.item.generation == 0) {
+        return error_result(kQolErrNotFound, "detail item identity unavailable");
+    }
+    out_context->desc_type = desc_type;
+    out_context->bag = bag;
+    out_context->slot = slot;
+    out_context->item = item_ref.item;
+    return contracts::ok();
+}
+
 QolResult bag_size(int32_t bag, int32_t* out_size) {
     if (bag < 0 || bag >= 6 || out_size == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);

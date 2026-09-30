@@ -4,6 +4,11 @@ void begin_projected_drag_session_locked(int source_slot) {
     if (virtual_bag::session_begin(&g_extension_drag_session, token,
                                    g_extension_tab_generation, g_module_view_index,
                                    source_slot) == virtual_bag::DragTransition::kAdvanced) {
+        if (virtual_bag::valid_index(g_module_view_index) && source_slot >= 0 &&
+            source_slot < virtual_bag::kSlotCount) {
+            g_extension_drag_session.source_identity =
+                g_module_object_handles[g_module_view_index][source_slot];
+        }
         VIRTBAG_LOG("p5 session begin token=%llu source=%d/%d generation=%llu",
                     static_cast<unsigned long long>(token), g_module_view_index, source_slot,
                     static_cast<unsigned long long>(g_extension_tab_generation));
