@@ -694,7 +694,7 @@
 
 **请求格式**：无 body
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 的 `skills` 是主角完整技能状态（含 role、skills、unlock_bitmap、active_skill_id、skill_points）；读面不可用时退化为 `{"ok":true}`。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"skill_points":N}`（重置后仅返回剩余技能点——其余技能字段重置后均为默认值，不回传）；读面不可用时退化为 `{"ok":true}`。
 
 **注意**：⚠️ 只能对主角使用，无 role 路径段。
 
@@ -1864,7 +1864,7 @@
 - `POST /api/character/grow/add_skill`（`core.character`，`kLearnAction`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"skills":[{"action_id":A,"level":N}],"skill_points":N}`；未能读回时退化为 `{"ok":true}`。
 - `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。成功 result 保留 `applied:[{"attr":idx},…]`，且角色状态前后快照可读时附 `role:{role,main_stats:[{"attr":idx,"value":N},…],status_point:N}`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
 - `POST /api/character/grow/reset_stat`（`core.character`，`kStatReset`）：无 body 字段校验；成功且状态可读时 result 为 `{"ok":true,"role":{"role":0,"main_stats":[N,N,N,N,N],"status_point":N}}`；读面不可用时为 `{"ok":true}`。
-- `POST /api/character/grow/reset_skill`（`core.character`，`kSkillReset`）：无 body 字段校验；成功且技能读面可用时 result 为 `{"ok":true,"skills":{"role":0,"skills":[…],"unlock_bitmap":N,"active_skill_id":N,"skill_points":N}}`；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/grow/reset_skill`（`core.character`，`kSkillReset`）：无 body 字段校验；成功且技能读面可用时 result 为 `{"ok":true,"skill_points":N}`（仅剩余技能点，重置后其余字段为默认不回传）；读面不可用时为 `{"ok":true}`。
 - `POST /api/character/combat/{role}/set_auto_attack`（`core.character`，`kSetAutoAttack`）：缺少 `on` → 400 `on required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"role":{"role":R,"auto_attack":B}}`，`B` 是请求值，不是读回状态。
 - `POST /api/character/combat/switch_player`（`core.character`，`kSwitchPlayer`）：`slot` 不在 0..2 → 400 `slot required (0-2)`；非法 JSON → 400 `bad request`。主控状态可读时 result 为 `{"ok":true,"player":{"leader_slot":R}}`；读面不可用时退化为 `{"ok":true}`。
 - `POST /api/character/combat/{role}/cast_skill`（`core.character`，`kCastSkill`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"role":{"role":R,"active_skill_id":N}}`；读面不可用时为 `{"ok":true}`。

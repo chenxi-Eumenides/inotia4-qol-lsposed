@@ -699,10 +699,7 @@ void test_operation_specific_result_goldens() {
     CHECK(dispatch_post("/api/character/grow/reset_skill", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":11}");
     g_op_calls = 0;
-    CHECK(run() ==
-          "{\"ok\":true,\"skills\":{\"role\":0,\"skills\":[{\"action_id\":7,"
-          "\"level\":3,\"max_level\":10,\"skill_name\":\"火球\"}],"
-          "\"unlock_bitmap\":9,\"active_skill_id\":-1,\"skill_points\":2}}" && succeeded);
+    CHECK(run() == "{\"ok\":true,\"skill_points\":2}" && succeeded);
 
     g_skills_json =
         "[null,{\"role\":1,\"skills\":[{\"action_id\":7,\"level\":3}],"
@@ -867,8 +864,7 @@ void test_no_body_and_boolean_semantics() {
         const std::string expected = i == 0
             ? "{\"ok\":true,\"role\":{\"role\":0,\"main_stats\":[1,2,3,4,5],"
               "\"status_point\":18}}"
-            : "{\"ok\":true,\"skills\":{\"role\":0,\"skills\":[],"
-              "\"unlock_bitmap\":0,\"active_skill_id\":-1,\"skill_points\":11}}";
+            : "{\"ok\":true,\"skill_points\":11}";
         CHECK(run_post_result(&success) == expected && success);
         CHECK(g_last_op == expected_ops[i]);
     }

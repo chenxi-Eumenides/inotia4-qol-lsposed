@@ -9,6 +9,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/character_facts.h"
@@ -1871,12 +1872,27 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
             break;
         }
         case contracts::QolCharacterWriteKind::kSkillReset: {
+            // 裁决：重置后仅返回剩余技能点；角色其余技能字段重置后均为默认值，
+            // 不再回传整块 role 切片。
             std::string skills_json;
             JsonSlice role_skills{};
             if (read_http_role_slice(contracts::QolCharacterHttpJsonKind::kSkills, p.i0,
                                      &skills_json, &role_skills)) {
-                body = "{\"ok\":true,\"skills\":" +
-                       std::string(role_skills.data, role_skills.size) + "}";
+                const std::string_view slice(role_skills.data, role_skills.size);
+                constexpr std::string_view kKey = "\"skill_points\":";
+                const std::size_t key_at = slice.find(kKey);
+                if (key_at != std::string_view::npos) {
+                    const std::size_t digits_at = key_at + kKey.size();
+                    std::size_t digits_end = digits_at;
+                    while (digits_end < slice.size() &&
+                           (slice[digits_end] >= '0' && slice[digits_end] <= '9')) {
+                        ++digits_end;
+                    }
+                    if (digits_end > digits_at) {
+                        body = "{\"ok\":true,\"skill_points\":" +
+                               std::string(slice.substr(digits_at, digits_end - digits_at)) + "}";
+                    }
+                }
             }
             break;
         }
