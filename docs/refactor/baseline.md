@@ -52,7 +52,7 @@
 | `plugins/device_probe_consumer` | 2 |
 | `plugins/device_probe_export_failure` | 2 |
 | `plugins/device_probe_provider` | 2 |
-| `plugins/extension_bag` | 41 |
+| `plugins/extension_bag` | 43 |
 | `plugins/inventory_hooks` | 11 |
 | `plugins/push_all` | 6 |
 | `plugins/save_backup` | 13 |
@@ -60,7 +60,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **537** |
+| **合计** | **539** |
 
 ### 1.2 迁移期映射摘要
 
@@ -106,7 +106,7 @@
 | `game` | `contracts` | 69 |
 | `host` | `contracts` | 54 |
 | `host` | `infra` | 45 |
-| `plugins/extension_bag` | `contracts` | 37 |
+| `plugins/extension_bag` | `contracts` | 38 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
 | `legacy/system` | `game` | 17 |
@@ -148,8 +148,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：147 个
-- native 导出：147 个
+- Kotlin `external fun`：146 个
+- native 导出：146 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -191,7 +191,7 @@
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
 | `device_probe_export_failure` | `plugins/device_probe_export_failure` | 2 |
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
-| `extension_bag` | `plugins/extension_bag` | 41 |
+| `extension_bag` | `plugins/extension_bag` | 43 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
 | `push_all` | `plugins/push_all` | 6 |
 | `save_backup` | `plugins/save_backup` | 13 |

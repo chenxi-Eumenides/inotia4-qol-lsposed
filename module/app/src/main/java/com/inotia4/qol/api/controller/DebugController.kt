@@ -2,6 +2,7 @@ package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.service.info.NativeHttpCommand
+import com.inotia4.qol.service.info.NativeHttpQuery
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
@@ -56,7 +57,8 @@ class DebugController {
         ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/open-panel", null) }
 
     @GetMapping("/api/debug/extension_bag/status")
-    fun extensionBagStatus(): String = ControllerGuard.guard { ApiServices.info.extensionBagStatusJson() }
+    fun extensionBagStatus(): String =
+        ControllerGuard.guard { NativeHttpQuery.get("/api/debug/extension_bag/status") }
 
     @PostMapping("/api/debug/extension_bag/enter_view")
     fun extensionBagEnterView(@RequestBody body: String): String =

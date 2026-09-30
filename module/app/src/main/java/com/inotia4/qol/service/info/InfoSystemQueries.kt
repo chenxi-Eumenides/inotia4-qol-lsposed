@@ -16,7 +16,6 @@ internal object InfoSystemQueries {
     fun debugPath(tx: Int, ty: Int): String = NativeBridge.nativeDebugPathJson(tx, ty)
     fun debugItemRaw(bag: Int, slot: Int): String = NativeBridge.nativeDebugItemRawJson(bag, slot)
     fun settingsUiStatus(): String = NativeBridge.nativeSettingsUiStatus()
-    fun extensionBagStatusJson(): String = NativeBridge.nativeExtensionBagStatusJson()
     fun health(): String = JsonUtil.wrap(
         "ok" to true,
         "ready" to NativeBridge.ready,

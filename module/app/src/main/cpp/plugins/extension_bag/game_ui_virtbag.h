@@ -36,7 +36,6 @@ void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* contro
 std::string data_virtual_bag_test_equip(int index, int bag_type);
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count);
 
-std::string data_op_extension_bag_status_json();
 std::string data_op_extension_bag_enter_view(int logical_bag);
 std::string data_op_extension_bag_unequip(int logical_bag);
 enum class VirtualBagProjectionDropResult : uint8_t {

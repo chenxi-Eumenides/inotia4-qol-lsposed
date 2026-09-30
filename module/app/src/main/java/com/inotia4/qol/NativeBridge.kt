@@ -165,7 +165,6 @@ object NativeBridge {
     external fun nativeSettingsUiRestore(): String
     external fun nativeSettingsUiOpenOption(): String
     external fun nativeSettingsUiOpenPanel(): String
-    external fun nativeExtensionBagStatusJson(): String
     // ---- 自动出售（auto-sell 阶段 B）----
     // 值即开关：0=关闭，正整数为 1-based 档位（rarity 1..5 / enhance 1..32 /
     // socket 1..16 / gemTier 1..5 / gemRange 1..5）。

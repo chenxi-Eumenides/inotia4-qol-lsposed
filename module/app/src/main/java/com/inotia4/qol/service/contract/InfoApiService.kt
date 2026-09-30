@@ -53,5 +53,4 @@ interface InfoApiService {
     fun debugPath(tx: Int, ty: Int): String
     fun debugItemRaw(bag: Int, slot: Int): String
     fun settingsUiStatus(): String
-    fun extensionBagStatusJson(): String
 }

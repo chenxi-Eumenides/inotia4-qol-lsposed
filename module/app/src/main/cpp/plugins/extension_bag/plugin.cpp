@@ -13,6 +13,7 @@
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/http_query.h"
 #include "plugins/extension_bag/move_merge.h"
 
 #include <cstdlib>
@@ -173,6 +174,11 @@ constexpr EbCommandRoute kEbCommandRoutes[] = {
     {"/api/debug/extension_bag/click_item", EbCommand::kClickItem},
     {"/api/debug/extension_bag/equip", EbCommand::kEquip},
     {"/api/debug/extension_bag/item", EbCommand::kItem},
+};
+
+const qol::contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
+    {qol::contracts::HttpMethod::kGet, "/api/debug/extension_bag/status", kPluginId,
+     &status_query_handler, nullptr},
 };
 
 // 从 JSON 对象文本提取整数字段。客户端 body 可能带空白：冒号后跳过空白再读
@@ -670,6 +676,8 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     &plugin_on_resource_ready,
     kPorts,
     3,
+    kHttpQueries,
+    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
 };
 
 }  // namespace

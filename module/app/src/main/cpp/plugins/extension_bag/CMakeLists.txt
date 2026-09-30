@@ -4,6 +4,7 @@ add_library(qol_plugin_extension_bag STATIC
     extension_bag_persistence.cpp
     extension_bag_geometry.cpp
     extension_bag_api.cpp
+    http_query.cpp
     plugin.cpp
 )
 
