@@ -142,7 +142,7 @@ bool cs_extract_int(const char* body, const char* key, int* out) {
     return true;
 }
 
-// 主线程命令体：执行存档写（含模块 sidecar 生命周期），把迁移前结果 JSON 写入票据缓冲。
+// 主线程命令体：执行存档写（含模块 sidecar 生命周期），再生成路由专属成功结果。
 bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, char* out,
                                uint32_t capacity, uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
@@ -168,7 +168,36 @@ bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, cha
         return false;
     }
     // 业务失败时端口返回错误，但 out 已携带原错误体（与迁移前响应一致），票据置 failed。
-    return contracts::succeeded(result) && *out_size != 0;
+    if (!contracts::succeeded(result) || *out_size == 0) return false;
+
+    int32_t slot = p.slot;
+    if (p.kind == contracts::kQolSaveWriteSave) {
+        if (g_port == nullptr || g_port->read.current_slot == nullptr ||
+            !contracts::succeeded(g_port->read.current_slot(&slot))) {
+            return false;
+        }
+    }
+    std::string body;
+    switch (p.kind) {
+        case contracts::kQolSaveWriteSave:
+            body = "{\"ok\":true,\"slot\":" + std::to_string(slot) +
+                   ",\"sidecar\":\"ensured\"}";
+            break;
+        case contracts::kQolSaveWriteEnterSlot:
+            body = "{\"ok\":true,\"slot\":" + std::to_string(slot) +
+                   ",\"entered\":true}";
+            break;
+        case contracts::kQolSaveWriteCreateSlot:
+            body = "{\"ok\":true,\"slot\":" + std::to_string(slot) +
+                   ",\"created\":true}";
+            break;
+        default:
+            return false;
+    }
+    if (body.size() > capacity) return false;
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    return true;
 }
 
 // 写命令投递：校验与迁移前 Kotlin 一致（slot ∈ [0,2] 否则 400 slot required (0-2)；

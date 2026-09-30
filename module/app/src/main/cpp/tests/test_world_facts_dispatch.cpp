@@ -37,6 +37,7 @@ using qol::contracts::QolWorldPortReadApi;
 constexpr int32_t kMapId = 7;
 QolWorldNavigation g_navigation;
 bool g_fail_world_reads = false;
+bool g_fail_world_write = false;
 int g_warning_logs = 0;
 
 QolResult write_json(const char* text, char* out, uint32_t capacity, uint32_t* out_size) {
@@ -106,10 +107,24 @@ const QolWorldPortReadApi kFakeRead{
 
 const QolWorldPort kFakePort{qol::contracts::kQolPortWorldVersion, kFakeRead};
 
-// 世界写端口假实现：仅满足插件 install 的端口校验；本测试不驱动写路径。
-QolResult fake_world_write(int32_t, int32_t, int32_t, int32_t, int32_t, char*, uint32_t,
-                           uint32_t*) {
-    return qol::contracts::ok();
+// 世界写端口假实现：回传迁移前 Player 结果，供 owner handler 的票据 result 测试使用。
+QolResult fake_world_write(int32_t kind, int32_t, int32_t, int32_t, int32_t, char* out,
+                           uint32_t capacity, uint32_t* out_size) {
+    const char* body = g_fail_world_write
+                           ? "{\"ok\":false,\"error\":\"world operation failed\"}"
+                       : kind == qol::contracts::kQolWorldWriteStopMove ||
+                               kind == qol::contracts::kQolWorldWriteTeleport
+                           ? "{\"ok\":true,\"op\":\"preserved\"}"
+                           : "{\"ok\":true,\"state\":{\"map_id\":7,\"x\":168,\"y\":328}}";
+    const uint32_t size = static_cast<uint32_t>(std::strlen(body));
+    if (capacity < size || out == nullptr || out_size == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "tiny buffer", 11);
+    }
+    std::memcpy(out, body, size);
+    *out_size = size;
+    return g_fail_world_write
+               ? qol::contracts::error(kQolErrInternal, "world operation failed", 22)
+               : qol::contracts::ok();
 }
 const qol::contracts::QolWorldWritePortReadApi kFakeWriteRead{&fake_world_write};
 const qol::contracts::QolWorldWritePort kFakeWritePort{
@@ -277,6 +292,7 @@ void test_lifecycle_and_responses() {
     g_post_count = 0;
     g_result_handler = nullptr;
     g_in_world = true;
+    g_fail_world_write = false;
     std::memset(&g_navigation, 0, sizeof(g_navigation));
     g_navigation.player_x = 16;
     g_navigation.player_y = 16;
@@ -320,6 +336,28 @@ void test_lifecycle_and_responses() {
           "{\"ok\":true,\"ticket\":101}");
     CHECK(status == 200 && g_last_payload.kind == qol::contracts::kQolWorldWriteMoveTo &&
           g_last_payload.a == 168 && g_last_payload.b == 328);
+    char result_body[4096]{};
+    uint32_t result_size = 0;
+    const auto run_result = [&](int32_t kind, bool expected_success = true) {
+        const CapturedWorldPayload payload{kind, 0, 0, 0, 0};
+        CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&payload), sizeof(payload),
+                               result_body, sizeof(result_body), &result_size) == expected_success);
+        return std::string(result_body, result_size);
+    };
+    CHECK(run_result(qol::contracts::kQolWorldWriteMoveTo) ==
+          "{\"ok\":true,\"player\":{\"map_id\":7,\"x\":10,\"y\":20}}");
+    CHECK(run_result(qol::contracts::kQolWorldWriteWalkDir) ==
+          "{\"ok\":true,\"player\":{\"map_id\":7,\"x\":10,\"y\":20}}");
+    CHECK(run_result(qol::contracts::kQolWorldWriteInteract) ==
+          "{\"ok\":true,\"player\":{\"map_id\":7,\"x\":10,\"y\":20}}");
+    CHECK(run_result(qol::contracts::kQolWorldWriteStopMove) ==
+          "{\"ok\":true,\"op\":\"preserved\"}");
+    CHECK(run_result(qol::contracts::kQolWorldWriteTeleport) ==
+          "{\"ok\":true,\"op\":\"preserved\"}");
+    g_fail_world_write = true;
+    CHECK(run_result(qol::contracts::kQolWorldWriteMoveTo, false) ==
+          "{\"ok\":false,\"error\":\"world operation failed\"}");
+    g_fail_world_write = false;
     const int posts_before_invalid = g_post_count;
     CHECK(dispatch_post("/api/world/movement/move_to", "{\"x\":4294967296,\"y\":1}",
                         &status) == "{\"ok\":false,\"error\":\"x/y required\"}");
@@ -351,10 +389,11 @@ void test_lifecycle_and_responses() {
     CHECK(status == 400 && g_post_count == posts_before_teleport_invalid);
     CHECK(g_result_handler != nullptr);
     uint8_t malformed_payload[sizeof(CapturedWorldPayload) - 1]{};
-    char result_body[32]{};
-    uint32_t result_size = 0;
-    CHECK(!g_result_handler(nullptr, malformed_payload, sizeof(malformed_payload), result_body,
-                             sizeof(result_body), &result_size));
+    char malformed_result_body[32]{};
+    uint32_t malformed_result_size = 0;
+    CHECK(!g_result_handler(nullptr, malformed_payload, sizeof(malformed_payload),
+                             malformed_result_body, sizeof(malformed_result_body),
+                             &malformed_result_size));
     CHECK(dispatch_get("/api/world/map/distance", "tx=1024&ty=0", &status) ==
           "{\"target\":{\"x\":1024,\"y\":0},\"start\":{\"x\":16,\"y\":16},"
           "\"found\":false,\"distance\":-1,\"nearest\":null}");

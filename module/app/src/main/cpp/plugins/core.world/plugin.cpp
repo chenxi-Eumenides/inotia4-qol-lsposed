@@ -581,8 +581,33 @@ bool world_write_result(void*, const uint8_t* payload, uint32_t size, char* out,
     }
     WorldWritePayload p{};
     std::memcpy(&p, payload, size);
-    return contracts::succeeded(g_world_write_port->read.write(p.kind, p.a, p.b, p.c, p.d, out,
-                                                              capacity, out_size));
+    const QolResult result = g_world_write_port->read.write(
+        p.kind, p.a, p.b, p.c, p.d, out, capacity, out_size);
+    if (!contracts::succeeded(result) || *out_size > capacity) return false;
+    if (p.kind != contracts::kQolWorldWriteMoveTo &&
+        p.kind != contracts::kQolWorldWriteWalkDir &&
+        p.kind != contracts::kQolWorldWriteInteract) {
+        return true;
+    }
+    const std::string legacy_result(out, *out_size);
+    if (legacy_result.find("\"ok\":false") != std::string::npos) return true;
+    int map_id = -1;
+    int pixel_x = -1;
+    int pixel_y = -1;
+    if (!world_int_field(legacy_result.c_str(), "map_id", &map_id) ||
+        !world_int_field(legacy_result.c_str(), "x", &pixel_x) ||
+        !world_int_field(legacy_result.c_str(), "y", &pixel_y)) {
+        return false;
+    }
+    // The command result reports the current position, not arrival at a requested destination.
+    const std::string slim_result =
+        "{\"ok\":true,\"player\":{\"map_id\":" + std::to_string(map_id) +
+        ",\"x\":" + std::to_string(pixel_x >> 4) + ",\"y\":" +
+        std::to_string(pixel_y >> 4) + "}}";
+    if (slim_result.size() > capacity) return false;
+    std::memcpy(out, slim_result.data(), slim_result.size());
+    *out_size = static_cast<uint32_t>(slim_result.size());
+    return true;
 }
 
 const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
