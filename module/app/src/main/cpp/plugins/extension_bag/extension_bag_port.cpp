@@ -228,7 +228,8 @@ int32_t provider_move_item(int32_t from_bag, int32_t from_slot, int32_t to_bag,
     const uint32_t copied = static_cast<uint32_t>(std::min<std::size_t>(body.size(), capacity));
     if (copied != 0) std::memcpy(out, body.data(), copied);
     *out_len = static_cast<uint32_t>(body.size());
-    return 1;
+    // core.item ignores successful payloads but retains the original error JSON on failure.
+    return body.compare(0, 11, "{\"ok\":false") == 0 ? 0 : 1;
 }
 
 // 扩展插件内部使用的稳定入口（不再经宿主 capability 包装）。

@@ -93,6 +93,28 @@ std::string expected_item_with_count(uint32_t count) {
     return item;
 }
 
+std::string expected_item_at_slot(uint32_t slot, uint32_t count, bool equip = false) {
+    std::string item = expected_item_with_count(count);
+    const std::string old_slot = "\"slot\":0,";
+    const size_t position = item.find(old_slot);
+    if (position != std::string::npos) {
+        item.replace(position, old_slot.size(), "\"slot\":" + std::to_string(slot) + ",");
+    }
+    if (equip) {
+        const std::string old_name = "\"name\":\"再生药水（小）\"";
+        const size_t name_position = item.find(old_name);
+        if (name_position != std::string::npos) {
+            item.replace(name_position, old_name.size(), "\"name\":\"生锈的 再生药水（小）\"");
+        }
+    }
+    return item;
+}
+
+std::string expected_slot_record(int32_t bag, int32_t slot, const std::string& item) {
+    return "{\"bag\":" + std::to_string(bag) + ",\"slot\":" +
+           std::to_string(slot) + ",\"item\":" + item + "}";
+}
+
 std::string expected_inventory_with_count(uint32_t count) {
     std::string inventory = std::string("{\"bags\":[{\"bag\":0,\"items\":[") +
         expected_item_with_count(count) + "],\"capacity\":16,\"slot_count\":1}";
@@ -148,6 +170,14 @@ int32_t g_state_add_count = -1;
 int32_t g_state_add_socket = -1;
 int32_t g_state_add_enhance = -1;
 int32_t g_state_add_rarity = -1;
+bool g_inventory_slot_present[11][16] = {{true}};
+uint32_t g_inventory_slot_count[11][16]{};
+int32_t g_party_hp = 100;
+int32_t g_party_mp = 50;
+int32_t g_party_main_stats[5] = {10, 11, 13, 14, 15};
+int32_t g_party_status_point = 7;
+int32_t g_party_equipment_slot = -1;
+bool g_use_changes_health = false;
 const qol::contracts::QolItemCountApi* g_state_add_count_api = nullptr;
 bool g_character_state_available = true;
 int g_character_state_require_calls = 0;
@@ -175,7 +205,10 @@ QolResult stub_is_real_equip(const void*, int32_t*) { return unsupported(); }
 QolResult stub_is_jewel(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_no_sell(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_sell_price(const void*, int64_t*) { return unsupported(); }
-QolResult stub_cumulate(const void*, int32_t* out_count) {
+std::size_t fake_slot_index(const void* item) {
+    return static_cast<std::size_t>(reinterpret_cast<uintptr_t>(item) - 1u);
+}
+QolResult stub_cumulate(const void* item, int32_t* out_count) {
     if (g_override_available && g_override_enabled) {
         uint32_t canonical = 0;
         const QolResult result = override_canonical(nullptr, &canonical);
@@ -183,7 +216,11 @@ QolResult stub_cumulate(const void*, int32_t* out_count) {
         *out_count = static_cast<int32_t>(canonical);
         return qol::contracts::ok();
     }
-    *out_count = static_cast<int32_t>(g_original_count);
+    const std::size_t index = fake_slot_index(item);
+    *out_count = static_cast<int32_t>(index < 176 &&
+                                             g_inventory_slot_count[index / 16][index % 16] != 0
+                                         ? g_inventory_slot_count[index / 16][index % 16]
+                                         : g_original_count);
     return qol::contracts::ok();
 }
 QolResult stub_effective_cumulate(const void* item, int32_t* out_count) {
@@ -191,6 +228,11 @@ QolResult stub_effective_cumulate(const void* item, int32_t* out_count) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
     }
     if (!g_override_available) {
+        const std::size_t index = fake_slot_index(item);
+        if (index < 176 && g_inventory_slot_count[index / 16][index % 16] != 0) {
+            *out_count = static_cast<int32_t>(g_inventory_slot_count[index / 16][index % 16]);
+            return qol::contracts::ok();
+        }
         return qol::contracts::error(kQolErrNotReady, "not ready", 9);
     }
     uint32_t effective = 0;
@@ -201,10 +243,16 @@ QolResult stub_effective_cumulate(const void* item, int32_t* out_count) {
 }
 QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryItemRef* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
-    if (bag != 0 || slot != 0) return qol::contracts::error(kQolErrNotFound, "empty", 5);
+    if (bag < 0 || bag >= 11 || slot < 0 || slot >= 16 ||
+        !g_inventory_slot_present[bag][slot]) {
+        return qol::contracts::error(kQolErrNotFound, "empty", 5);
+    }
     *out = qol::contracts::QolInventoryItemRef{
-        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal), 0, 0, 10,
-        static_cast<int32_t>(g_canonical_count), reinterpret_cast<void*>(1)};
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal), bag, slot, 10,
+        static_cast<int32_t>(g_inventory_slot_count[bag][slot] != 0
+                                 ? g_inventory_slot_count[bag][slot]
+                                 : g_original_count),
+        reinterpret_cast<void*>(static_cast<uintptr_t>(bag * 16 + slot + 1))};
     return qol::contracts::ok();
 }
 QolResult fake_inventory_item_view(const void* item,
@@ -299,6 +347,8 @@ QolResult fake_accept_dice(qol::contracts::QolItemDiceAcceptResult* out) {
     g_dice_accept_order = ++g_party_sequence;
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
     *out = g_dice_accept_data;
+    if (!qol::contracts::succeeded(g_dice_accept_result)) return g_dice_accept_result;
+    for (std::size_t i = 0; i < 5; ++i) g_party_main_stats[i] = out->applied[i];
     return g_dice_accept_result;
 }
 
@@ -329,6 +379,39 @@ QolResult fake_state_write(int32_t kind, int32_t arg0, int32_t arg1,
     *out = g_state_write_data;
     if (!qol::contracts::succeeded(g_state_write_result)) return g_state_write_result;
     g_original_count = static_cast<uint32_t>(g_state_write_count);
+    const auto op_kind = static_cast<qol::contracts::QolItemWriteKind>(kind);
+    if (op_kind == qol::contracts::QolItemWriteKind::kAddItem) {
+        // The OP add-item result remains the fixed compact success body.
+    } else if (op_kind == qol::contracts::QolItemWriteKind::kSellItem ||
+        op_kind == qol::contracts::QolItemWriteKind::kDiscardItem) {
+        g_inventory_slot_present[arg0][arg1] = false;
+    } else if (op_kind == qol::contracts::QolItemWriteKind::kShopBuy) {
+        g_inventory_slot_present[0][3] = true;
+        g_inventory_slot_count[0][3] = g_state_write_count;
+    } else if (op_kind == qol::contracts::QolItemWriteKind::kMoveItem) {
+        g_inventory_slot_present[arg0][arg1] = false;
+        const int32_t target_slot = g_state_move_to_slot >= 0 ? g_state_move_to_slot : 2;
+        if (g_state_move_to_bag >= 0 && g_state_move_to_bag < 11) {
+            g_inventory_slot_present[g_state_move_to_bag][target_slot] = true;
+            g_inventory_slot_count[g_state_move_to_bag][target_slot] = g_state_write_count;
+        }
+    } else {
+        g_inventory_slot_present[arg0][arg1] = true;
+        g_inventory_slot_count[arg0][arg1] = g_state_write_count;
+    }
+    if (op_kind == qol::contracts::QolItemWriteKind::kUseItem &&
+        (g_state_write_data.flags & qol::contracts::kQolItemInventoryStateHasGained) != 0) {
+        for (uint32_t i = 0; i < g_state_write_data.gained_count; ++i) {
+            const auto& gained = g_state_write_data.gained[i];
+            if (gained.bag >= 0 && gained.bag < 11 && gained.slot >= 0 && gained.slot < 16) {
+                g_inventory_slot_present[gained.bag][gained.slot] = true;
+                g_inventory_slot_count[gained.bag][gained.slot] = gained.count;
+            }
+        }
+    }
+    if (op_kind == qol::contracts::QolItemWriteKind::kUseItem && g_use_changes_health) {
+        ++g_party_hp;
+    }
     return qol::contracts::ok();
 }
 
@@ -392,6 +475,29 @@ QolResult fake_party_write(int32_t kind, int32_t role, int32_t arg1, int32_t arg
     g_party_write_args[1] = arg1;
     g_party_write_args[2] = arg2;
     g_party_write_args[3] = arg3;
+    const auto write_kind = static_cast<qol::contracts::QolItemWriteKind>(kind);
+    if (qol::contracts::succeeded(g_party_write_result)) {
+        if (write_kind == qol::contracts::QolItemWriteKind::kEquipItem) {
+            g_party_equipment_slot = 0;
+        } else if (write_kind == qol::contracts::QolItemWriteKind::kUnequipItem) {
+            g_party_equipment_slot = -1;
+        } else if (write_kind == qol::contracts::QolItemWriteKind::kPutJewel ||
+                   write_kind == qol::contracts::QolItemWriteKind::kEnchant) {
+            g_party_equipment_slot = arg3;
+        }
+        if (write_kind == qol::contracts::QolItemWriteKind::kEquipItem && arg1 >= 0 &&
+            arg1 < 11 && arg2 >= 0 && arg2 < 16) {
+            g_inventory_slot_present[arg1][arg2] = false;
+        } else if (write_kind == qol::contracts::QolItemWriteKind::kUnequipItem) {
+            g_inventory_slot_present[0][4] = true;
+            g_inventory_slot_count[0][4] = 3;
+            g_inventory_slot_present[0][5] = true;
+            g_inventory_slot_count[0][5] = 1;
+        } else if (write_kind == qol::contracts::QolItemWriteKind::kPutJewel && arg1 >= 0 &&
+                   arg1 < 11 && arg2 >= 0 && arg2 < 16) {
+            g_inventory_slot_present[arg1][arg2] = false;
+        }
+    }
     if (out != nullptr) *out = {};
     return g_party_write_result;
 }
@@ -532,9 +638,19 @@ bool g_provider_available = false;
 std::string g_provider_fragment;
 
 int32_t fake_provider_owns_bag(int32_t bag) { return fake_is_logical_bag(bag) ? 1 : 0; }
-QolResult fake_provider_item_ref_at(int32_t, int32_t,
+QolResult fake_provider_item_ref_at(int32_t bag, int32_t slot,
                                     qol::contracts::QolInventoryItemRef* out) {
     if (out != nullptr) *out = {};
+    if (out != nullptr && bag >= 6 && bag < 11 && slot >= 0 && slot < 16 &&
+        g_inventory_slot_present[bag][slot]) {
+        *out = qol::contracts::QolInventoryItemRef{
+            static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), bag, slot, 10,
+            static_cast<int32_t>(g_inventory_slot_count[bag][slot] != 0
+                                    ? g_inventory_slot_count[bag][slot]
+                                    : g_original_count),
+            reinterpret_cast<void*>(static_cast<uintptr_t>(bag * 16 + slot + 1))};
+        return qol::contracts::ok();
+    }
     return qol::contracts::error(kQolErrNotFound, "not found", 9);
 }
 QolResult fake_provider_for_each(qol::contracts::QolInventoryBagSlotFn, void*) {
@@ -560,7 +676,14 @@ QolResult fake_provider_fragment(char* out, uint32_t capacity, uint32_t* out_siz
 }
 int32_t fake_provider_move(int32_t from_bag, int32_t from_slot, int32_t to_bag, int32_t to_slot,
                            char* out, uint32_t capacity, uint32_t* out_size) {
-    return fake_extension_move(from_bag, from_slot, to_bag, to_slot, out, capacity, out_size);
+    const int32_t result = fake_extension_move(from_bag, from_slot, to_bag, to_slot, out,
+                                                capacity, out_size);
+    if (result == 0 || g_extension_move_body.compare(0, 11, "{\"ok\":false") == 0) return 0;
+    g_inventory_slot_present[from_bag][from_slot] = false;
+    const int32_t target_slot = to_slot >= 0 ? to_slot : 0;
+    g_inventory_slot_present[to_bag][target_slot] = true;
+    g_inventory_slot_count[to_bag][target_slot] = 3;
+    return 1;
 }
 QolResult fake_provider_sell_price(const void*, int32_t, int32_t, int64_t* out_price) {
     if (out_price != nullptr) *out_price = 0;
@@ -595,7 +718,38 @@ QolResult fake_inventory_extension_access(qol::contracts::QolInventoryExtensionA
     return qol::contracts::ok();
 }
 
-constexpr char kPartyStateJson[] = "{\"roles\":[{\"slot\":1}]}";
+std::string fake_party_state_json() {
+    std::string json = "[";
+    for (int32_t role = 0; role < 3; ++role) {
+        if (role != 0) json.push_back(',');
+        json += "{\"hp\":" + std::to_string(g_party_hp) + ",\"mp\":" +
+                std::to_string(g_party_mp) + ",\"main_stats\":[";
+        for (std::size_t stat = 0; stat < 5; ++stat) {
+            if (stat != 0) json.push_back(',');
+            json += std::to_string(g_party_main_stats[stat]);
+        }
+        json += "],\"status_point\":" + std::to_string(g_party_status_point) +
+                ",\"equipment\":[";
+        for (int32_t slot = 0; slot < 10; ++slot) {
+            if (slot != 0) json.push_back(',');
+            if (role != 1 || slot != g_party_equipment_slot) {
+                json += "null";
+            } else {
+                json += "{\"slot\":" + std::to_string(slot) +
+                        ",\"type_flags\":40,\"raw_rarity\":0,\"category\":10,"
+                        "\"count\":3,\"equip\":true,\"rarity\":0,\"damage\":0,"
+                        "\"defense\":0,\"magic_rate\":0,\"need_level\":0,"
+                        "\"socket\":0,\"socket_filled\":0,\"socket_total\":0,"
+                        "\"enchant\":0,\"chaos\":false,\"enchant_id\":0,"
+                        "\"enchant_level\":0,\"chaos_level\":0,\"chaos_rate\":100,"
+                        "\"options\":[],\"option_ids\":[],\"option_types\":[]}";
+            }
+        }
+        json += "]}";
+    }
+    json.push_back(']');
+    return json;
+}
 constexpr char kPlayerStateJson[] = "{\"money\":72503,\"leader_slot\":0}";
 
 QolResult fake_character_state_json(qol::contracts::QolCharacterStateKind kind, char* out,
@@ -603,11 +757,13 @@ QolResult fake_character_state_json(qol::contracts::QolCharacterStateKind kind, 
     ++g_character_state_write_calls;
     g_character_state_write_order = ++g_party_sequence;
     if (!qol::contracts::succeeded(g_character_state_result)) return g_character_state_result;
+    std::string dynamic_body;
     const char* body = nullptr;
     uint32_t body_size = 0;
     if (kind == qol::contracts::QolCharacterStateKind::kParty) {
-        body = kPartyStateJson;
-        body_size = sizeof(kPartyStateJson) - 1;
+        dynamic_body = fake_party_state_json();
+        body = dynamic_body.data();
+        body_size = static_cast<uint32_t>(dynamic_body.size());
     } else if (kind == qol::contracts::QolCharacterStateKind::kPlayer) {
         body = kPlayerStateJson;
         body_size = sizeof(kPlayerStateJson) - 1;
@@ -775,6 +931,23 @@ bool run_item_write_result(void* opaque, char* out, uint32_t capacity, uint32_t*
 }
 
 void test_write_routes() {
+    std::memset(g_inventory_slot_present, 0, sizeof(g_inventory_slot_present));
+    std::memset(g_inventory_slot_count, 0, sizeof(g_inventory_slot_count));
+    g_inventory_slot_present[0][0] = true;
+    g_original_count = 3;
+    g_inventory_slot_count[0][0] = 3;
+    g_party_hp = 100;
+    g_party_mp = 50;
+    g_party_main_stats[0] = 10;
+    g_party_main_stats[1] = 11;
+    g_party_main_stats[2] = 13;
+    g_party_main_stats[3] = 14;
+    g_party_main_stats[4] = 15;
+    g_party_status_point = 7;
+    g_party_equipment_slot = -1;
+    g_use_changes_health = false;
+    g_override_available = false;
+    g_override_enabled = false;
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     qol::host::http_dispatch_set_op_enabled(true);
     uint16_t status = 0;
@@ -792,7 +965,8 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(2) + "}");
+          "{\"ok\":true,\"slots\":[" +
+              expected_slot_record(0, 1, expected_item_at_slot(1, 2)) + "]}");
     CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kUseItem));
     CHECK(g_state_write_arg0 == 0 && g_state_write_arg1 == 1);
     CHECK(g_write_calls == 0);
@@ -805,7 +979,8 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"price\":27,\"state\":" + expected_raw_inventory_with_count(4) + "}");
+          "{\"ok\":true,\"price\":27,\"slots\":[" +
+              expected_slot_record(0, 0, "null") + "],\"money\":72503}");
     CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kSellItem));
 
     g_state_write_count = 5;
@@ -815,7 +990,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(5) + "}");
+          "{\"ok\":true,\"slots\":[" + expected_slot_record(0, 0, "null") + "]}");
     CHECK(g_state_write_kind ==
           static_cast<int32_t>(qol::contracts::QolItemWriteKind::kDiscardItem));
 
@@ -827,22 +1002,46 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"price\":31,\"state\":" + expected_raw_inventory_with_count(6) + "}");
+          "{\"ok\":true,\"price\":31,\"slots\":[" +
+              expected_slot_record(0, 3, expected_item_at_slot(3, 6)) + "],\"money\":72503}");
     CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kShopBuy));
 
     g_state_write_count = 3;
     g_state_write_data = {};
     g_state_write_data.flags = qol::contracts::kQolItemInventoryStateHasGained;
     g_state_write_data.gained_count = 1;
-    g_state_write_data.gained[0] = {4, 2, 75, 3};
+    g_state_write_data.gained[0] = {4, 2, 10, 3};
     CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"gained\":[{\"bag\":4,\"slot\":2,\"category\":75,\"count\":3}],\"state\":" +
-              expected_raw_inventory_with_count(3) + "}");
+          "{\"ok\":true,\"gained\":[{\"bag\":4,\"slot\":2,\"category\":10,\"count\":3}],"
+          "\"slots\":[" + expected_slot_record(0, 0, expected_item_at_slot(0, 3)) + "," +
+              expected_slot_record(4, 2, expected_item_at_slot(2, 3)) + "]}");
+
+    g_state_write_data = {};
+    g_use_changes_health = true;
+    CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"slots\":[" +
+              expected_slot_record(0, 0, expected_item_at_slot(0, 3)) +
+              "],\"player\":{\"hp\":101}}");
+
+    g_use_changes_health = false;
+    CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"slots\":[" +
+              expected_slot_record(0, 0, expected_item_at_slot(0, 3)) + "]}");
 
     g_state_write_data = {};
     g_state_write_result = qol::contracts::error(kQolErrBlocked, "on cooldown", 11);
@@ -897,7 +1096,7 @@ void test_write_routes() {
     qol::infra::command_queue_reset_for_test();
     g_dice_reject_result = qol::contracts::ok();
 
-    // accept_dice：owner 先现取 character.state（写前），再执行 typed accept，成功后附 kPlayer 投影。
+    // accept_dice：保留业务数组，仅投影写前后变化的主属性与写后剩余点。
     g_character_state_available = true;
     g_character_state_require_calls = 0;
     g_character_state_write_calls = 0;
@@ -921,11 +1120,12 @@ void test_write_routes() {
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"base\":[10,11,13,14,15],\"applied\":[12,11,15,14,17],"
-          "\"delta\":[2,0,2,0,2],\"state\":" + std::string(kPlayerStateJson) + "}");
+          "\"delta\":[2,0,2,0,2],\"player\":{\"main_stats\":["
+          "{\"attr\":0,\"value\":12},{\"attr\":2,\"value\":15},"
+          "{\"attr\":4,\"value\":17}],\"status_point\":7}}");
     CHECK(g_dice_accept_calls == 1);
-    CHECK(g_character_state_require_calls == 1 && g_character_state_write_calls == 1);
-    // 时序：require < accept 游戏操作 < 写后 state 投影。
-    CHECK(g_character_state_require_order < g_dice_accept_order);
+    CHECK(g_character_state_require_calls >= 2 && g_character_state_write_calls >= 2);
+    // 时序：状态投影读取覆盖 accept 操作前后。
     CHECK(g_dice_accept_order < g_character_state_write_order);
 
     // 状态能力缺失：accept 不执行（写未发生）。
@@ -963,28 +1163,29 @@ void test_write_routes() {
                                   &accept_error_size));
     CHECK(std::string(accept_error, accept_error_size) ==
           "{\"ok\":false,\"error\":\"no dice result pending\"}");
-    CHECK(g_character_state_write_calls == accept_state_writes_before_failure);
+    CHECK(g_character_state_write_calls == accept_state_writes_before_failure + 2);
     qol::infra::command_queue_reset_for_test();
     g_dice_accept_result = qol::contracts::ok();
 
-    // 普通袋移动：typed 低层 + #10 owner serializer 即时写后 state。
+    // 普通袋移动：typed 低层写入后只回传源槽与目标槽终态。
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 7;
     g_state_write_data = {};
     CHECK(dispatch_post("/api/item/inventory/move_item",
-                        "{\"bag\":\"0\",\"slot\":\"2\",\"count\":\"4\","
-                        "\"to_bag\":\"1\",\"to_slot\":\"3\"}",
+                        "{\"bag\":\"1\",\"slot\":\"2\",\"count\":\"4\","
+                        "\"to_bag\":\"0\",\"to_slot\":\"3\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(7) + "}");
+          "{\"ok\":true,\"slots\":[" + expected_slot_record(1, 2, "null") + "," +
+              expected_slot_record(0, 3, expected_item_at_slot(3, 7)) + "]}");
     CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kMoveItem));
-    CHECK(g_state_write_arg0 == 0 && g_state_write_arg1 == 2);
-    CHECK(g_state_move_count == 4 && g_state_move_to_bag == 1 && g_state_move_to_slot == 3);
+    CHECK(g_state_write_arg0 == 1 && g_state_write_arg1 == 2);
+    CHECK(g_state_move_count == 4 && g_state_move_to_bag == 0 && g_state_move_to_slot == 3);
 
-    // 扩展袋移动：owner 经 capability 取 v2 move_item，纯 JSON 输出、不附 state。
+    // 扩展袋移动：owner 判定 provider 执行结果，再用中立库存读面组装两个槽位。
     g_provider_resident = true;
     g_provider_available = true;
     g_extension_bag_enabled = true;
@@ -998,7 +1199,9 @@ void test_write_routes() {
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(std::string(result, result_size) == "{\"ok\":true,\"state\":{\"extension\":true}}");
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"slots\":[" + expected_slot_record(6, 2, "null") + "," +
+              expected_slot_record(7, 0, expected_item_at_slot(0, 3)) + "]}");
     CHECK(g_extension_move_calls == 1);
     const int state_calls_before_missing = g_state_write_calls;
     g_extension_move_body = "{\"ok\":false,\"error\":\"move failed\"}";
@@ -1009,7 +1212,7 @@ void test_write_routes() {
     CHECK(g_state_write_calls == state_calls_before_missing);
     g_extension_move_body = "{\"ok\":true,\"state\":{}}";
 
-    // 能力缺失回退：扩展请求回落 typed 普通移动分支（普通袋移动同语义，成功附 state）。
+    // 能力缺失回退：扩展请求回落 typed 移动分支，票据仍只保留源/目标槽终态。
     g_provider_resident = false;
     g_provider_available = false;
     g_state_write_result = qol::contracts::ok();
@@ -1023,7 +1226,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"state\":" + expected_raw_inventory_with_count(2) + "}");
+          "{\"ok\":true,\"slots\":[" + expected_slot_record(6, 2, "null") + "]}");
     CHECK(g_state_write_calls == state_calls_before_missing + 1);
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 7 && g_state_move_to_slot == -1);
 
@@ -1067,12 +1270,14 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"state\":{\"roles\":[{\"slot\":1}]}}");
+          "{\"ok\":true,\"equipment\":{\"role\":1,\"slot\":0,\"item\":" +
+              expected_item_at_slot(0, 3, true) + "},\"inventory\":[" +
+              expected_slot_record(0, 0, "null") + "]}");
     CHECK(g_party_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kEquipItem));
     CHECK(g_party_write_args[0] == 1 && g_party_write_args[1] == 0 &&
           g_party_write_args[2] == 0 && g_party_write_args[3] == -1);
     CHECK(g_party_write_order < g_character_state_write_order);
-    CHECK(g_character_state_require_calls == 1 && g_character_state_write_calls == 1);
+    CHECK(g_character_state_require_calls >= 3 && g_character_state_write_calls >= 3);
     // ITM-13：core.item 不再 require 扩展袋能力（provider 经 Item Port 中立通道提供）。
     CHECK(g_extension_bag_require_calls == 0);
 
@@ -1091,6 +1296,7 @@ void test_write_routes() {
         {"/api/item/inventory/1/enchant", "{\"bag\":0,\"slot\":1,\"equip_slot\":2}",
          qol::contracts::QolItemWriteKind::kEnchant, 0, 1, 2},
     };
+    g_party_equipment_slot = 2;
     for (const auto& test_case : party_write_cases) {
         const int operation_calls_before = g_party_write_calls;
         const int state_calls_before = g_character_state_write_calls;
@@ -1102,17 +1308,33 @@ void test_write_routes() {
         result_size = 0;
         CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result,
                                sizeof(result), &result_size));
-        CHECK(std::string(result, result_size) ==
-              "{\"ok\":true,\"state\":{\"roles\":[{\"slot\":1}]}}");
+        if (test_case.kind == qol::contracts::QolItemWriteKind::kUnequipItem) {
+            CHECK(std::string(result, result_size) ==
+                  "{\"ok\":true,\"equipment\":{\"role\":1,\"slot\":2,\"item\":null},"
+                  "\"inventory\":[" +
+                      expected_slot_record(0, 4, expected_item_at_slot(4, 3)) + "," +
+                      expected_slot_record(0, 5, expected_item_at_slot(5, 1)) + "]}");
+        } else if (test_case.kind == qol::contracts::QolItemWriteKind::kPutJewel) {
+            CHECK(std::string(result, result_size) ==
+                  "{\"ok\":true,\"equipment\":{\"role\":1,\"slot\":2,\"item\":" +
+                      expected_item_at_slot(2, 3, true) + "},\"inventory\":[" +
+                      expected_slot_record(0, 1, "null") + "]}");
+        } else {
+            CHECK(std::string(result, result_size) ==
+                  "{\"ok\":true,\"equipment\":{\"role\":1,\"slot\":2,\"item\":" +
+                      expected_item_at_slot(2, 3, true) + "}}");
+        }
         CHECK(g_party_write_calls == operation_calls_before + 1);
         CHECK(g_party_write_kind == static_cast<int32_t>(test_case.kind));
         CHECK(g_party_write_args[0] == 1 && g_party_write_args[1] == test_case.arg1 &&
               g_party_write_args[2] == test_case.arg2 && g_party_write_args[3] == test_case.arg3);
-        CHECK(g_character_state_write_calls == state_calls_before + 1);
-        CHECK(g_character_state_require_calls == state_requires_before + 1);
+        const bool reads_equipment =
+            test_case.kind != qol::contracts::QolItemWriteKind::kUnequipItem;
+        CHECK(g_character_state_write_calls == state_calls_before + (reads_equipment ? 1 : 0));
+        CHECK(g_character_state_require_calls == state_requires_before + (reads_equipment ? 2 : 1));
         // ITM-13：写路径不再 require 扩展袋能力。
         CHECK(g_extension_bag_require_calls == extension_requires_before);
-        CHECK(g_party_write_order < g_character_state_write_order);
+        if (reads_equipment) CHECK(g_party_write_order < g_character_state_write_order);
     }
 
     g_character_state_available = false;
@@ -1308,6 +1530,11 @@ void test_write_routes() {
                         nullptr, 0, &status) ==
           "{\"ok\":false,\"error\":\"category required\"}");
     CHECK(status == 400 && g_write_calls == write_calls_before_invalid);
+    std::memset(g_inventory_slot_present, 0, sizeof(g_inventory_slot_present));
+    std::memset(g_inventory_slot_count, 0, sizeof(g_inventory_slot_count));
+    g_inventory_slot_present[0][0] = true;
+    g_original_count = 3;
+    g_party_equipment_slot = -1;
     qol::host::http_dispatch_set_op_enabled(false);
 }
 
@@ -1869,6 +2096,9 @@ static QolResult golden_view(const void* item, qol::contracts::QolItemInventoryV
     if (item == nullptr || out == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
     }
+    if (reinterpret_cast<uintptr_t>(item) < 177u) {
+        return fake_inventory_item_view(item, out);
+    }
     const auto* bytes = static_cast<const uint8_t*>(item);
     *out = {};
     const uint16_t flags = *reinterpret_cast<const uint16_t*>(bytes + I_TYPE);
@@ -2267,7 +2497,7 @@ void test_extension_degrade_omits_section() {
     g_golden_require_active = false;
 }
 
-// R2-2 用例 3：原版袋写票据不因 EB 段降级而 failed（写后 state 主字段完整）。
+// R2-2 用例 3：原版袋写票据不因 EB 段降级而 failed，结果只包含移动槽位。
 void test_extension_degrade_write_ticket_done() {
     CHECK(install_core_item_golden(nullptr));
     g_golden_eb_enabled = 1;
@@ -2295,10 +2525,11 @@ void test_extension_degrade_write_ticket_done() {
     uint32_t result_size = 0;
     CHECK(qol::infra::read_result(ticket, result, sizeof(result), &result_size));
     const std::string body(result, result_size);
-    CHECK(body.find("\"ok\":true") != std::string::npos);
-    CHECK(body.find("\"state\":{\"bags\":") != std::string::npos);
-    CHECK(body.find("\"bags\":[") != std::string::npos);         // 主字段完整
-    CHECK(body.find("\"bag\":0") != std::string::npos);
+    CHECK(body.find("{\"ok\":true,\"slots\":[") == 0);
+    CHECK(body.find("\"state\"") == std::string::npos);
+    CHECK(body.find("\"bags\"") == std::string::npos);
+    CHECK(body.find("\"bag\":0,\"slot\":0") != std::string::npos);
+    CHECK(body.find("\"bag\":1,\"slot\":0") != std::string::npos);
     CHECK(body.find("invalid extension inventory") == std::string::npos);
     g_golden_bad_slot = 0;
     qol::infra::command_queue_reset_for_test();
@@ -2310,7 +2541,7 @@ void test_extension_move_result_capacity_and_overflow() {
     g_golden_eb_enabled = 1;
     g_provider_resident = true;
     g_provider_available = true;
-    const auto run_case = [](std::size_t body_size, bool overflow_expected) {
+    const auto run_case = [](std::size_t body_size) {
         const std::string prefix = "{\"ok\":true,\"message\":\"";
         const std::string embedded = "\\\"ok\\\":false";
         const std::string suffix = "\"}";
@@ -2333,25 +2564,27 @@ void test_extension_move_result_capacity_and_overflow() {
         const qol::infra::CommandTicket ticket = qol::infra::post(command);
         CHECK(ticket != 0 && qol::infra::drain() == 1);
         CHECK(qol::infra::ticket_state(ticket) == qol::infra::CommandState::kDone);
-        CHECK(qol::infra::ticket_result_overflowed(ticket) == overflow_expected);
+        CHECK(!qol::infra::ticket_result_overflowed(ticket));
         std::vector<char> result(qol::infra::kMaxResultBytes);
         uint32_t size = 0;
         CHECK(qol::infra::read_result(ticket, result.data(), result.size(), &size));
-        if (overflow_expected) {
-            constexpr std::string_view summary =
-                "{\"ok\":true,\"truncated\":true,\"reason\":\"result_limit_exceeded\"}";
-            CHECK(size == summary.size());
-            CHECK(std::string_view(result.data(), size) == summary);
-        } else {
-            CHECK(size == body_size);
-            CHECK(std::string_view(result.data(), size).compare(0, 10, "{\"ok\":true") == 0);
-            CHECK(std::string_view(result.data(), size).find("\\\"ok\\\":false") !=
-                  std::string_view::npos);
-        }
+        constexpr std::string_view expected =
+            "{\"ok\":true,\"slots\":[{\"bag\":6,\"slot\":0,\"item\":null},"
+            "{\"bag\":6,\"slot\":1,\"item\":{\"slot\":1,\"name\":null,"
+            "\"category\":10,\"count\":199,\"item_type\":\"consumable\","
+            "\"need_level\":0,\"rarity\":0,\"rarity_tier\":\"白\","
+            "\"base\":{\"damage\":0,\"defense\":0,\"magic_rate\":0},"
+            "\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
+            "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
+            "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}}]}";
+        CHECK(size == expected.size());
+        CHECK(std::string_view(result.data(), size) == expected);
+        CHECK(std::string_view(result.data(), size).find("state") == std::string_view::npos);
+        CHECK(size < body_size);
         qol::infra::command_queue_reset_for_test();
     };
-    run_case(5000, false);
-    run_case(20000, true);
+    run_case(5000);
+    run_case(20000);
     g_provider_resident = false;
     g_provider_available = false;
     g_golden_eb_enabled = 0;

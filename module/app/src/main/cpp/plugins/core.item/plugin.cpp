@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <new>
 #include <array>
 #include <limits>
 #include <string>
@@ -851,6 +850,281 @@ bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
     return ctx.found;
 }
 
+constexpr int32_t kResultBagCount = 11;
+constexpr int32_t kResultSlotsPerBag = 16;
+using InventoryResultSnapshot =
+    std::array<std::string, kResultBagCount * kResultSlotsPerBag>;
+
+std::size_t inventory_result_index(int32_t bag, int32_t slot) {
+    return static_cast<std::size_t>(bag * kResultSlotsPerBag + slot);
+}
+
+bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
+                        const InventoryExtensionAccessResult& extension_access) {
+    if (out == nullptr || g_port == nullptr || g_port->read.item_ref_at == nullptr ||
+        g_port->read.inventory_item_view == nullptr) {
+        return false;
+    }
+    contracts::QolInventoryItemRef item_ref{};
+    QolResult ref_result = contracts::error(kQolErrNotFound, "empty slot", 10);
+    if (bag < kOriginalInventoryBagCount) {
+        ref_result = g_port->read.item_ref_at(bag, slot, &item_ref);
+    } else {
+        if (extension_access.available && extension_access.provider != nullptr &&
+            extension_access.provider->item_ref_at != nullptr) {
+            ref_result = extension_access.provider->item_ref_at(bag, slot, &item_ref);
+        }
+    }
+    if (!contracts::succeeded(ref_result)) {
+        if (ref_result.code == kQolErrNotFound || ref_result.code == kQolErrNotReady ||
+            ref_result.code == kQolErrUnsupported) {
+            *out = "null";
+            return true;
+        }
+        return false;
+    }
+    if (item_ref.native_item == nullptr) {
+        *out = "null";
+        return true;
+    }
+    contracts::QolItemInventoryView view{};
+    if (!contracts::succeeded(g_port->read.inventory_item_view(item_ref.native_item, &view)) ||
+        view.option_count > contracts::kQolItemInventoryOptionCapacity) {
+        return false;
+    }
+    uint32_t count = 0;
+    bool count_present = false;
+    if (!effective_item_count(item_ref.native_item, view.count_supported != 0, &count,
+                              &count_present)) {
+        return false;
+    }
+    std::string raw;
+    append_inventory_item(&raw, slot, view, count_present, count);
+    JsonValue item{};
+    if (!json_parse(raw.data(), static_cast<uint32_t>(raw.size()), &item) ||
+        !enrich_item_value(item, g_port, out)) {
+        return false;
+    }
+    return true;
+}
+
+bool capture_inventory_result(InventoryResultSnapshot* out) {
+    if (out == nullptr) return false;
+    const InventoryExtensionAccessResult extension_access = inventory_extension();
+    for (int32_t bag = 0; bag < kResultBagCount; ++bag) {
+        for (int32_t slot = 0; slot < kResultSlotsPerBag; ++slot) {
+            if (!read_enriched_item(bag, slot, &(*out)[inventory_result_index(bag, slot)],
+                                    extension_access)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void append_result_slot(std::string& body, int32_t bag, int32_t slot,
+                        const InventoryResultSnapshot& snapshot, bool* first) {
+    if (!*first) body.push_back(',');
+    *first = false;
+    body += "{\"bag\":" + std::to_string(bag) + ",\"slot\":" +
+            std::to_string(slot) + ",\"item\":" +
+            snapshot[inventory_result_index(bag, slot)] + "}";
+}
+
+void append_inventory_changes(std::string& body, const InventoryResultSnapshot& before,
+                              const InventoryResultSnapshot& after,
+                              const std::array<bool, kResultBagCount * kResultSlotsPerBag>& forced,
+                              bool* first) {
+    for (int32_t bag = 0; bag < kResultBagCount; ++bag) {
+        for (int32_t slot = 0; slot < kResultSlotsPerBag; ++slot) {
+            const std::size_t index = inventory_result_index(bag, slot);
+            if (!forced[index] && before[index] == after[index]) continue;
+            append_result_slot(body, bag, slot, after, first);
+        }
+    }
+}
+
+void append_unforced_inventory_changes(
+    std::string& body, const InventoryResultSnapshot& before,
+    const InventoryResultSnapshot& after,
+    const std::array<bool, kResultBagCount * kResultSlotsPerBag>& forced, bool* first) {
+    for (int32_t bag = 0; bag < kResultBagCount; ++bag) {
+        for (int32_t slot = 0; slot < kResultSlotsPerBag; ++slot) {
+            const std::size_t index = inventory_result_index(bag, slot);
+            if (forced[index] || before[index] == after[index]) continue;
+            append_result_slot(body, bag, slot, after, first);
+        }
+    }
+}
+
+bool write_move_slots_result(const contracts::QolItemWriteArgs& args,
+                             const InventoryResultSnapshot& before,
+                             char* out, uint32_t capacity, uint32_t* out_size) {
+    InventoryResultSnapshot after{};
+    if (!capture_inventory_result(&after)) return false;
+    std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
+    std::string body = "{\"ok\":true,\"slots\":[";
+    bool first = true;
+    if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
+        args.i1 < kResultSlotsPerBag) {
+        forced[inventory_result_index(args.i0, args.i1)] = true;
+        append_result_slot(body, args.i0, args.i1, after, &first);
+    }
+    if (args.i3 >= 0 && args.i3 < kResultBagCount && args.i4 >= 0 &&
+        args.i4 < kResultSlotsPerBag &&
+        (args.i0 != args.i3 || args.i1 != args.i4)) {
+        forced[inventory_result_index(args.i3, args.i4)] = true;
+        append_result_slot(body, args.i3, args.i4, after, &first);
+    }
+    append_unforced_inventory_changes(body, before, after, forced, &first);
+    body += "]}";
+    return copy_result_truncated(out, capacity, out_size, body);
+}
+
+bool read_character_state(contracts::QolCharacterStateKind kind, std::string* out) {
+    if (out == nullptr) return false;
+    const contracts::CharacterStateApi* state = character_state_capability();
+    if (state == nullptr || state->write_state_json == nullptr) return false;
+    std::vector<char> buffer(kind == contracts::QolCharacterStateKind::kParty ? 65536 : 4096);
+    uint32_t size = 0;
+    if (!contracts::succeeded(state->write_state_json(kind, buffer.data(),
+                                                      static_cast<uint32_t>(buffer.size()),
+                                                      &size)) ||
+        size > buffer.size()) {
+        return false;
+    }
+    out->assign(buffer.data(), size);
+    return true;
+}
+
+const JsonValue* party_member(const JsonValue& party, int32_t role) {
+    if (party.type == JsonValue::Type::kArray) {
+        return role >= 0 && static_cast<std::size_t>(role) < party.items.size()
+                   ? &party.items[static_cast<std::size_t>(role)]
+                   : nullptr;
+    }
+    const JsonValue* roles = party.find("roles");
+    if (roles == nullptr || roles->type != JsonValue::Type::kArray) return nullptr;
+    for (const JsonValue& member : roles->items) {
+        long long slot = -1;
+        const JsonValue* slot_value = member.find("slot");
+        if (slot_value != nullptr && slot_value->as_int(&slot) && slot == role) return &member;
+    }
+    return nullptr;
+}
+
+bool json_int(const JsonValue* object, const char* key, int32_t* out) {
+    if (object == nullptr || out == nullptr) return false;
+    const JsonValue* value = object->find(key);
+    long long parsed = 0;
+    if (value == nullptr || !value->as_int(&parsed) || parsed < INT32_MIN || parsed > INT32_MAX) {
+        return false;
+    }
+    *out = static_cast<int32_t>(parsed);
+    return true;
+}
+
+bool active_role(int32_t* out_role) {
+    std::string player_json;
+    JsonValue player{};
+    if (!read_character_state(contracts::QolCharacterStateKind::kPlayer, &player_json) ||
+        !json_parse(player_json.data(), static_cast<uint32_t>(player_json.size()), &player)) {
+        return false;
+    }
+    return json_int(&player, "leader_slot", out_role);
+}
+
+bool read_active_health(int32_t* out_hp, int32_t* out_mp) {
+    int32_t role = -1;
+    std::string party_json;
+    JsonValue party{};
+    if (!active_role(&role) ||
+        !read_character_state(contracts::QolCharacterStateKind::kParty, &party_json) ||
+        !json_parse(party_json.data(), static_cast<uint32_t>(party_json.size()), &party)) {
+        return false;
+    }
+    const JsonValue* member = party_member(party, role);
+    return json_int(member, "hp", out_hp) && json_int(member, "mp", out_mp);
+}
+
+bool read_equipment_item(int32_t role, int32_t equip_slot, std::string* out) {
+    if (out == nullptr || role < 0 || equip_slot < 0) return false;
+    std::string party_json;
+    JsonValue party{};
+    if (!read_character_state(contracts::QolCharacterStateKind::kParty, &party_json) ||
+        !json_parse(party_json.data(), static_cast<uint32_t>(party_json.size()), &party)) {
+        return false;
+    }
+    const JsonValue* member = party_member(party, role);
+    const JsonValue* equipment = member != nullptr ? member->find("equipment") : nullptr;
+    if (equipment == nullptr || equipment->type != JsonValue::Type::kArray ||
+        static_cast<std::size_t>(equip_slot) >= equipment->items.size()) {
+        return false;
+    }
+    const JsonValue& item = equipment->items[static_cast<std::size_t>(equip_slot)];
+    if (item.type == JsonValue::Type::kNull) {
+        *out = "null";
+        return true;
+    }
+    return enrich_item_value(item, g_port, out);
+}
+
+bool json_value_equal(const JsonValue& left, const JsonValue& right) {
+    if (left.type != right.type) return false;
+    switch (left.type) {
+        case JsonValue::Type::kNull: return true;
+        case JsonValue::Type::kBool: return left.boolean == right.boolean;
+        case JsonValue::Type::kNumber: return left.integer == right.integer;
+        case JsonValue::Type::kString: return left.string == right.string;
+        case JsonValue::Type::kArray:
+            if (left.items.size() != right.items.size()) return false;
+            for (std::size_t i = 0; i < left.items.size(); ++i) {
+                if (!json_value_equal(left.items[i], right.items[i])) return false;
+            }
+            return true;
+        case JsonValue::Type::kObject:
+            if (left.member_keys != right.member_keys ||
+                left.member_values.size() != right.member_values.size()) {
+                return false;
+            }
+            for (std::size_t i = 0; i < left.member_values.size(); ++i) {
+                if (!json_value_equal(left.member_values[i], right.member_values[i])) return false;
+            }
+            return true;
+    }
+    return false;
+}
+
+int32_t changed_equipment_slot(int32_t role, const std::string& before_json,
+                               const std::string& after_json) {
+    JsonValue before{};
+    JsonValue after{};
+    if (!json_parse(before_json.data(), static_cast<uint32_t>(before_json.size()), &before) ||
+        !json_parse(after_json.data(), static_cast<uint32_t>(after_json.size()), &after)) {
+        return -1;
+    }
+    const JsonValue* before_member = party_member(before, role);
+    const JsonValue* after_member = party_member(after, role);
+    const JsonValue* before_equipment = before_member != nullptr
+                                            ? before_member->find("equipment")
+                                            : nullptr;
+    const JsonValue* after_equipment = after_member != nullptr
+                                           ? after_member->find("equipment")
+                                           : nullptr;
+    if (before_equipment == nullptr || after_equipment == nullptr ||
+        before_equipment->type != JsonValue::Type::kArray ||
+        after_equipment->type != JsonValue::Type::kArray) {
+        return -1;
+    }
+    const std::size_t count = std::min(before_equipment->items.size(), after_equipment->items.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!json_value_equal(before_equipment->items[i], after_equipment->items[i])) {
+            return static_cast<int32_t>(i);
+        }
+    }
+    return -1;
+}
+
 bool write_path_int(const contracts::HttpReq* request, const char* name, int32_t* out) {
     if (request == nullptr || request->path_params == nullptr || name == nullptr || out == nullptr) {
         return false;
@@ -1013,6 +1287,19 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
     contracts::QolItemInventoryStateWriteResult operation_data{};
     QolResult operation = contracts::error(kQolErrUnsupported, "item operation unavailable", 26);
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    InventoryResultSnapshot inventory_before{};
+    const bool tracks_inventory =
+        kind == contracts::QolItemWriteKind::kUseItem ||
+        kind == contracts::QolItemWriteKind::kSellItem ||
+        kind == contracts::QolItemWriteKind::kDiscardItem ||
+        kind == contracts::QolItemWriteKind::kShopBuy ||
+        kind == contracts::QolItemWriteKind::kMoveItem;
+    if (tracks_inventory) (void)capture_inventory_result(&inventory_before);
+    int32_t hp_before = 0;
+    int32_t mp_before = 0;
+    const bool health_before_available =
+        kind == contracts::QolItemWriteKind::kUseItem &&
+        read_active_health(&hp_before, &mp_before);
     switch (kind) {
         case contracts::QolItemWriteKind::kUseItem:
             operation = g_item_state_write->use_item(args.i0, args.i1, &operation_data);
@@ -1058,23 +1345,6 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
                            sizeof(kAddItemSuccess) - 1);
     }
 
-    char inventory[kInventoryCapacity]{};
-    uint32_t inventory_size = 0;
-    const QolResult inventory_result =
-        serialize_inventory_json(inventory, kInventoryCapacity, &inventory_size);
-    if (!contracts::succeeded(inventory_result)) {
-        const char* message = inventory_result.message != nullptr ? inventory_result.message
-                                                                    : "inventory state unavailable";
-        const uint32_t message_size = inventory_result.message != nullptr
-                                          ? inventory_result.message_len
-                                          : static_cast<uint32_t>(std::strlen(message));
-        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
-                                 std::string(message, message_size) + "\"}";
-        (void)copy_buffer(out, capacity, out_size, body.data(),
-                          static_cast<uint32_t>(body.size()));
-        return false;
-    }
-
     std::string body = "{\"ok\":true";
     if (kind == contracts::QolItemWriteKind::kUseItem &&
         (operation_data.flags & contracts::kQolItemInventoryStateHasGained) != 0) {
@@ -1094,12 +1364,100 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
         }
         body.push_back(']');
     }
-    if (kind == contracts::QolItemWriteKind::kSellItem ||
-        kind == contracts::QolItemWriteKind::kShopBuy) {
+    if (kind == contracts::QolItemWriteKind::kSellItem) {
         body += ",\"price\":" + std::to_string(operation_data.value);
     }
-    body += ",\"state\":";
-    body.append(inventory, inventory_size);
+
+    InventoryResultSnapshot inventory_after{};
+    if (tracks_inventory && !capture_inventory_result(&inventory_after)) {
+        constexpr char kInventoryUnavailable[] =
+            "{\"ok\":false,\"error\":\"inventory state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kInventoryUnavailable,
+                          sizeof(kInventoryUnavailable) - 1);
+        return false;
+    }
+    if (tracks_inventory) {
+        body += ",\"slots\":[";
+        std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
+        if (kind == contracts::QolItemWriteKind::kUseItem ||
+            kind == contracts::QolItemWriteKind::kSellItem ||
+            kind == contracts::QolItemWriteKind::kDiscardItem) {
+            if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
+                args.i1 < kResultSlotsPerBag) {
+                forced[inventory_result_index(args.i0, args.i1)] = true;
+            }
+        } else if (kind == contracts::QolItemWriteKind::kMoveItem) {
+            if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
+                args.i1 < kResultSlotsPerBag) {
+                forced[inventory_result_index(args.i0, args.i1)] = true;
+            }
+            if (args.i3 >= 0 && args.i3 < kResultBagCount && args.i4 >= 0 &&
+                args.i4 < kResultSlotsPerBag) {
+                forced[inventory_result_index(args.i3, args.i4)] = true;
+            }
+        }
+        if (kind == contracts::QolItemWriteKind::kUseItem &&
+            (operation_data.flags & contracts::kQolItemInventoryStateHasGained) != 0) {
+            for (uint32_t i = 0; i < operation_data.gained_count; ++i) {
+                const auto& gained = operation_data.gained[i];
+                if (gained.bag >= 0 && gained.bag < kResultBagCount && gained.slot >= 0 &&
+                    gained.slot < kResultSlotsPerBag) {
+                    forced[inventory_result_index(gained.bag, gained.slot)] = true;
+                }
+            }
+        }
+        bool first_slot = true;
+        if (kind == contracts::QolItemWriteKind::kMoveItem) {
+            if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
+                args.i1 < kResultSlotsPerBag) {
+                append_result_slot(body, args.i0, args.i1, inventory_after, &first_slot);
+            }
+            if (args.i3 >= 0 && args.i3 < kResultBagCount && args.i4 >= 0 &&
+                args.i4 < kResultSlotsPerBag && (args.i0 != args.i3 || args.i1 != args.i4)) {
+                append_result_slot(body, args.i3, args.i4, inventory_after, &first_slot);
+            }
+            append_unforced_inventory_changes(body, inventory_before, inventory_after, forced,
+                                              &first_slot);
+        } else {
+            append_inventory_changes(body, inventory_before, inventory_after, forced, &first_slot);
+        }
+        body.push_back(']');
+    }
+    if (kind == contracts::QolItemWriteKind::kSellItem ||
+        kind == contracts::QolItemWriteKind::kShopBuy) {
+        int64_t money_after = 0;
+        if (!contracts::succeeded(money(&money_after))) {
+            constexpr char kMoneyUnavailable[] =
+                "{\"ok\":false,\"error\":\"money unavailable\"}";
+            (void)copy_buffer(out, capacity, out_size, kMoneyUnavailable,
+                              sizeof(kMoneyUnavailable) - 1);
+            return false;
+        }
+        if (kind == contracts::QolItemWriteKind::kShopBuy) {
+            std::string price = ",\"price\":" + std::to_string(operation_data.value);
+            const std::size_t slots_key = body.find(",\"slots\":");
+            body.insert(slots_key, price);
+        }
+        body += ",\"money\":" + std::to_string(money_after);
+    }
+    if (kind == contracts::QolItemWriteKind::kUseItem && health_before_available) {
+        int32_t hp_after = 0;
+        int32_t mp_after = 0;
+        if (read_active_health(&hp_after, &mp_after) &&
+            (hp_before != hp_after || mp_before != mp_after)) {
+            body += ",\"player\":{";
+            bool first_health = true;
+            if (hp_before != hp_after) {
+                body += "\"hp\":" + std::to_string(hp_after);
+                first_health = false;
+            }
+            if (mp_before != mp_after) {
+                if (!first_health) body.push_back(',');
+                body += "\"mp\":" + std::to_string(mp_after);
+            }
+            body.push_back('}');
+        }
+    }
     body.push_back('}');
     return copy_result_truncated(out, capacity, out_size, body);
 }
@@ -1128,6 +1486,18 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
     contracts::QolItemInventoryStateWriteResult operation_data{};
     QolResult operation = contracts::error(kQolErrUnsupported, "item operation unavailable", 26);
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    InventoryResultSnapshot inventory_before{};
+    const bool tracks_inventory = kind != contracts::QolItemWriteKind::kEnchant;
+    if (tracks_inventory) (void)capture_inventory_result(&inventory_before);
+    std::string party_before_json;
+    if (kind == contracts::QolItemWriteKind::kEquipItem &&
+        !read_character_state(contracts::QolCharacterStateKind::kParty, &party_before_json)) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
+        return false;
+    }
     switch (kind) {
         case contracts::QolItemWriteKind::kEquipItem: {
             int32_t bag = args.i1;
@@ -1169,24 +1539,46 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
         return false;
     }
 
-    char party[65536]{};
-    uint32_t party_size = 0;
-    const QolResult state_result = state->write_state_json(
-        contracts::QolCharacterStateKind::kParty, party, sizeof(party), &party_size);
-    if (!contracts::succeeded(state_result)) {
-        const char* message = state_result.message != nullptr ? state_result.message
-                                                              : "character state unavailable";
-        const uint32_t message_size = state_result.message != nullptr
-                                          ? state_result.message_len
-                                          : static_cast<uint32_t>(std::strlen(message));
-        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
-                                 std::string(message, message_size) + "\"}";
-        (void)copy_buffer(out, capacity, out_size, body.data(),
-                          static_cast<uint32_t>(body.size()));
+    std::string party_after_json;
+    int32_t equip_slot = kind == contracts::QolItemWriteKind::kUnequipItem ? args.i1 : args.i3;
+    if (kind == contracts::QolItemWriteKind::kEquipItem) {
+        if (!read_character_state(contracts::QolCharacterStateKind::kParty, &party_after_json)) {
+            constexpr char kStateUnavailable[] =
+                "{\"ok\":false,\"error\":\"character state unavailable\"}";
+            (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                              sizeof(kStateUnavailable) - 1);
+            return false;
+        }
+        equip_slot = changed_equipment_slot(args.i0, party_before_json, party_after_json);
+    }
+    std::string equipment_item = "null";
+    if (kind == contracts::QolItemWriteKind::kUnequipItem) {
+        equipment_item = "null";
+    } else if (equip_slot < 0 || !read_equipment_item(args.i0, equip_slot, &equipment_item)) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
         return false;
     }
-    std::string body = "{\"ok\":true,\"state\":";
-    body.append(party, party_size);
+    std::string body = "{\"ok\":true,\"equipment\":{\"role\":" +
+                       std::to_string(args.i0) + ",\"slot\":" +
+                       std::to_string(equip_slot) + ",\"item\":" + equipment_item + "}";
+    InventoryResultSnapshot inventory_after{};
+    if (tracks_inventory) {
+        if (!capture_inventory_result(&inventory_after)) {
+            constexpr char kInventoryUnavailable[] =
+                "{\"ok\":false,\"error\":\"inventory state unavailable\"}";
+            (void)copy_buffer(out, capacity, out_size, kInventoryUnavailable,
+                              sizeof(kInventoryUnavailable) - 1);
+            return false;
+        }
+        body += ",\"inventory\":[";
+        std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
+        bool first_slot = true;
+        append_inventory_changes(body, inventory_before, inventory_after, forced, &first_slot);
+        body.push_back(']');
+    }
     body.push_back('}');
     return copy_result_truncated(out, capacity, out_size, body);
 }
@@ -1196,7 +1588,7 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
     (void)args;
     if (out == nullptr || out_size == nullptr) return false;
     *out_size = 0;
-    // 状态写在游戏操作之前解析：能力缺失即 fail-closed，accept 不执行（写未发生）。
+    // 状态能力缺失即 fail-closed，accept 不执行（写未发生）。
     const contracts::CharacterStateApi* state = character_state_capability();
     if (state == nullptr || state->write_state_json == nullptr) {
         constexpr char kStateUnavailable[] =
@@ -1210,6 +1602,19 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
             "{\"ok\":false,\"error\":\"item operation unavailable\"}";
         (void)copy_buffer(out, capacity, out_size, kOperationUnavailable,
                           sizeof(kOperationUnavailable) - 1);
+        return false;
+    }
+    int32_t role = -1;
+    std::string party_before_json;
+    JsonValue party_before{};
+    if (!active_role(&role) ||
+        !read_character_state(contracts::QolCharacterStateKind::kParty, &party_before_json) ||
+        !json_parse(party_before_json.data(), static_cast<uint32_t>(party_before_json.size()),
+                    &party_before)) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
         return false;
     }
     contracts::QolItemDiceAcceptResult accept{};
@@ -1226,20 +1631,32 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
                           static_cast<uint32_t>(body.size()));
         return false;
     }
-    char player[4096]{};
-    uint32_t player_size = 0;
-    const QolResult state_result = state->write_state_json(
-        contracts::QolCharacterStateKind::kPlayer, player, sizeof(player), &player_size);
-    if (!contracts::succeeded(state_result)) {
-        const char* message = state_result.message != nullptr ? state_result.message
-                                                              : "character state unavailable";
-        const uint32_t message_size = state_result.message != nullptr
-                                          ? state_result.message_len
-                                          : static_cast<uint32_t>(std::strlen(message));
-        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
-                                 std::string(message, message_size) + "\"}";
-        (void)copy_buffer(out, capacity, out_size, body.data(),
-                          static_cast<uint32_t>(body.size()));
+    std::string party_after_json;
+    JsonValue party_after{};
+    if (!read_character_state(contracts::QolCharacterStateKind::kParty, &party_after_json) ||
+        !json_parse(party_after_json.data(), static_cast<uint32_t>(party_after_json.size()),
+                    &party_after)) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
+        return false;
+    }
+    const JsonValue* before_member = party_member(party_before, role);
+    const JsonValue* after_member = party_member(party_after, role);
+    const JsonValue* before_stats = before_member != nullptr ? before_member->find("main_stats")
+                                                             : nullptr;
+    const JsonValue* after_stats = after_member != nullptr ? after_member->find("main_stats")
+                                                           : nullptr;
+    int32_t status_point = 0;
+    if (before_stats == nullptr || after_stats == nullptr ||
+        before_stats->type != JsonValue::Type::kArray ||
+        after_stats->type != JsonValue::Type::kArray ||
+        !json_int(after_member, "status_point", &status_point)) {
+        constexpr char kStateUnavailable[] =
+            "{\"ok\":false,\"error\":\"character state unavailable\"}";
+        (void)copy_buffer(out, capacity, out_size, kStateUnavailable,
+                          sizeof(kStateUnavailable) - 1);
         return false;
     }
     std::string body = "{\"ok\":true,\"base\":[";
@@ -1257,39 +1674,49 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
         if (i != 0) body.push_back(',');
         body += std::to_string(accept.delta[i]);
     }
-    body += "],\"state\":";
-    body.append(player, player_size);
+    body += "],\"player\":{\"main_stats\":[";
+    bool first_stat = true;
+    const std::size_t stat_count = std::min(before_stats->items.size(), after_stats->items.size());
+    for (std::size_t i = 0; i < stat_count; ++i) {
+        long long before_value = 0;
+        long long after_value = 0;
+        if (!before_stats->items[i].as_int(&before_value) ||
+            !after_stats->items[i].as_int(&after_value) || before_value == after_value) {
+            continue;
+        }
+        if (!first_stat) body.push_back(',');
+        first_stat = false;
+        body += "{\"attr\":" + std::to_string(i) + ",\"value\":" +
+                std::to_string(after_value) + "}";
+    }
+    body += "],\"status_point\":" + std::to_string(status_point) + "}";
     body.push_back('}');
     return copy_result_truncated(out, capacity, out_size, body);
 }
 
 bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
                             uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
     const InventoryExtensionAccessResult access = inventory_extension();
     const bool provider_requested =
         access.available &&
         (provider_owns_bag(access, args.i0) || provider_owns_bag(access, args.i3));
     if (provider_requested && access.provider != nullptr &&
         access.provider->move_item != nullptr) {
-        std::vector<char> move_result;
-        try {
-            move_result.resize(262144);
-        } catch (const std::bad_alloc&) {
-            constexpr char kMoveFailed[] =
-                "{\"ok\":false,\"error\":\"extension bag move failed\"}";
-            (void)copy_buffer(out, capacity, out_size, kMoveFailed, sizeof(kMoveFailed) - 1);
-            return false;
-        }
+        InventoryResultSnapshot inventory_before{};
+        (void)capture_inventory_result(&inventory_before);
+        char error_body[4096]{};
         uint32_t move_result_size = 0;
-        if (access.provider->move_item(args.i0, args.i1, args.i3, args.i4, move_result.data(),
-                                       static_cast<uint32_t>(move_result.size()),
-                                       &move_result_size) != 0 &&
-            move_result_size <= move_result.size()) {
-            const uint32_t copied = std::min(move_result_size, capacity);
-            if (copied != 0) std::memcpy(out, move_result.data(), copied);
-            *out_size = move_result_size;
-            return std::string_view(move_result.data(), move_result_size)
-                       .compare(0, 11, "{\"ok\":false") != 0;
+        const int32_t move_status = access.provider->move_item(
+            args.i0, args.i1, args.i3, args.i4, error_body, sizeof(error_body), &move_result_size);
+        if (move_status != 0) {
+            return write_move_slots_result(args, inventory_before, out, capacity, out_size);
+        }
+        if (move_result_size <= sizeof(error_body) &&
+            move_result_size >= 11 &&
+            std::string_view(error_body, move_result_size).compare(0, 11, "{\"ok\":false") == 0) {
+            (void)copy_buffer(out, capacity, out_size, error_body, move_result_size);
+            return false;
         }
         constexpr char kMoveFailed[] =
             "{\"ok\":false,\"error\":\"extension bag move failed\"}";

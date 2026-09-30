@@ -270,6 +270,13 @@ const JsonValue* items_of(const JsonValue& bag) {
 
 }  // namespace
 
+bool enrich_item_value(const JsonValue& item, const contracts::QolItemPort* port,
+                       std::string* out) {
+    if (out == nullptr || item.type != JsonValue::Type::kObject) return false;
+    *out = enrich_item(item, port);
+    return true;
+}
+
 bool enrich_inventory(const char* json, uint32_t size, const contracts::QolItemPort* port,
                       std::string* out) {
     if (out == nullptr) return false;
