@@ -11,7 +11,7 @@
 > - `role` = 出战槽位 0..2；`bag` = 背包袋 0..5 + 扩展逻辑袋 6..10（`extensionBagEnabled=true` 时并入读取与移动，见 §4.1/§4.2）；`slot` = 袋内槽位 0..15
 > - 未迁移的同步写操作成功返回 `{"ok":true,...}`；票据化写操作立即返回 `{"ok":true,"ticket":N}`，操作成功/失败结果由 §7.9 的 `result` 回取。错误信封格式 A（v0.5.45 统一）。
 > - **错误信封与 HTTP 状态码（v0.5.45 统一）**：所有错误响应统一 `{"ok":false,"error":"<原因>"}` + 语义状态码——**400** 参数错误（路由参数解析异常/body 解析失败/参数校验不过）、**403** 权限不足（OP 门禁未开启 `op disabled`）、**404** 未找到、**500** 内部错误、**501** 未实现（OP 占位端点）、**503** 未就绪（native 初始化中）。实现机制：controller 抛 `ApiException(code,msg)` → `GlobalExceptionResolver`（@Resolver）统一转响应
-> - 票据 `result` 保留该端点迁移前的操作结果 JSON；仅原结果带 `state` 的端点在 `result` 中包含状态快照。
+> - 票据 `result` 由 §7.10 按写操作定义；结果瘦身路由返回操作相关字段/槽位差量，不保证包含完整 `state` 快照。整数 path/body 输入的收紧规则见 §7.10。
 
 ---
 
@@ -67,6 +67,8 @@
 | `active_quest` | 当前激活任务 ID |
 | `leader_slot` | 当前主控角色对应出战槽 |
 | `party_count` | 出战人数 |
+
+> 写操作票据可仅返回 `player` 的部分字段（例如 `leader_slot` 或实际变化的 `hp`/`mp`），也可能不返回 `player`；不要将其当作完整 Player 模型。精确 result 形状见 §7.10。
 
 ### Role（出战角色）
 
@@ -159,6 +161,8 @@
 | `enchant` | 附魔对象：`{id 附魔ID, level 附魔等级, effect 附魔名(ITEMENCHANTBASE 联查)}` |
 
 > 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`slot_count` 占用数。
+
+> 写操作 result 中的 `slots[].item`、`equipment.item`、`inventory[].item` 复用上述完整 Item 结构或 `null`；外层只包含本次写入涉及或实测发生变化的槽，不是完整 Inventory/Party 快照。
 
 ### Skills（角色技能）
 
@@ -479,7 +483,7 @@
 
 **请求格式**：`{ "mercenary_slot": 1 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回实际变化的 party 槽差量，读面不可用时退化为 `{"ok":true}`。
 
 **注意**：已在队→`already in party`；满员→`party full`。⚠️ 参数索引见 2.2「两套索引」说明。
 
@@ -491,7 +495,7 @@
 
 **请求格式**：`{ "mercenary_slot": 1 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回实际变化的 party 槽差量，读面不可用时退化为 `{"ok":true}`。
 
 **注意**：主控→`cannot exclude leader`；任务 NPC→`cannot exclude quest npc`。
 
@@ -503,7 +507,7 @@
 
 **请求格式**：`{ "mercenary_slot": 27 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回实际变化的 party 槽差量，读面不可用时退化为 `{"ok":true}`。
 
 **注意**：无该槽角色→`mercenary not found`；主控/任务 NPC→不可遣散。
 
@@ -515,7 +519,7 @@
 
 **请求格式**：`{ "mercenary_slot": 0, "equip_slot": 3 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 返回目标佣兵装备槽清空摘要，并在 item.state 前后快照可读时附 `inventory` 槽差量（背包读面不可用时省略该字段）。
 
 **注意**：无佣兵→`mercenary not found`；装备槽越界→`bad slot`。
 
@@ -570,7 +574,7 @@
 
 **请求格式**：`{ "slot": 1 }`（目标出战槽 0/1/2）
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回 `{"ok":true,"player":{"leader_slot":N}}`，玩家状态读面不可用时退化为 `{"ok":true}`。
 
 **注意**：目标槽越界/不可切换→`switch failed`；主控切换后 `/api/character/leader` 返回相应角色。
 
@@ -582,7 +586,7 @@
 
 **请求格式**：`{ "on": true }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Party 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"role":{"role":R,"auto_attack":B}}`，其中 `B` 为请求的 `on` 值。
 
 **注意**：⚠️ 此开关只控制「**被怪物攻击后的自动反击**」——角色受击后自动还击；**不是**自动攻击附近怪物的挂机行为，角色不会主动索敌。开启后仍需先通过 `attack_target` 进入战斗。
 
@@ -608,7 +612,7 @@
 
 **请求格式**：`{ "action_id": 5 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 尽力返回 `{"ok":true,"role":{"role":R,"active_skill_id":N}}`；技能读面不可用时退化为 `{"ok":true}`。
 
 **注意**：当前校验 = 技能链表成员资格（未学→`skill not learned`）。⚠️ 0-7 基础动作（普攻）也在技能链表中，`cast 5` = 普攻（2026-08-09 真机实测 -403 伤害）；「真技能 vs 基础动作」白名单与 MP 校验待实现（见 backlog 攻击/cast 校验条目）。无目标→`no target`。
 
@@ -620,7 +624,7 @@
 
 **请求格式**：`{ "target_slot": 5 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；仅读面确认目标和战斗状态时 result 含 `role.target_slot`/`role.combat:true`；当前读面不提供这两项，实际 result 退化为 `{"ok":true}`，表示操作已受理，不声称已确认目标终态。
 
 **注意**：目标无效→`target not found`；缺参→`target_slot required`。此操作使角色进入战斗姿态，随后持续普攻该目标直至目标死亡/离开/`stop_combat`。
 
@@ -632,7 +636,7 @@
 
 **请求格式**：无 body
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"role":{"role":R,"combat":false}}`。
 
 **注意**：非战斗态调用安全（清标志幂等）。
 
@@ -648,7 +652,7 @@
 
 **请求格式**：`{ "action_id": 3, "level": 1 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 返回目标技能 `{action_id,level}` 与 `skill_points`；技能读面不可用或目标技能未能读回时退化为 `{"ok":true}`。
 
 **注意**：主角专用，无 role 路径段。
 
@@ -666,7 +670,7 @@
 
 `attrs` 为字典：字段名=主属性英文名（`strength`/`agility`/`vitality`/`intelligence`/`spirit`，对应索引 0=力量/1=敏捷/2=体力/3=智力/4=精力，**可只传部分**），值为分配数量。
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原批量加点结果经 §7.9 回取，`result` 为 `applied` 数组。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 保留 `applied` 数组，并在角色状态读写前后均可读时追加本次变化的 `role.main_stats` 与 `role.status_point`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
 
 **注意**：⚠️ 分配数量只能为正整数；各属性分配数量**总和不能超过剩余能力点**，否则报错（`no status point`）；属性名非法→`bad attr`。
 
@@ -678,7 +682,7 @@
 
 **请求格式**：无 body
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 返回主角 `role.main_stats` 五项与 `status_point`；读面不可用时退化为 `{"ok":true}`。
 
 **注意**：⚠️ 只能对主角使用，无 role 路径段。
 
@@ -690,7 +694,7 @@
 
 **请求格式**：无 body
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 的 `skills` 是主角完整技能状态（含 role、skills、unlock_bitmap、active_skill_id、skill_points）；读面不可用时退化为 `{"ok":true}`。
 
 **注意**：⚠️ 只能对主角使用，无 role 路径段。
 
@@ -827,7 +831,7 @@
 { "x": 600, "y": 400 }
 ```
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`，坐标是当时实际位置，不承诺已到达请求目的地。失败仍回原错误体。
 
 **注意**：
 - 目标不可达时走到最近可达点并转身面向目标（face-target）
@@ -842,7 +846,7 @@
 
 **请求格式**：`{ "direction": 1 }`（0=下 1=左 2=上 3=右）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`，坐标是当时实际位置，不承诺已到达请求目的地。失败仍回原错误体。
 
 **注意**：撞墙即停；direction 越界返回 `direction 0-3 required`；持续移动到达出口区域自动切图。
 
@@ -854,7 +858,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；成功 result 为原始 op JSON `{"ok":true}`，失败仍回原错误体。
 
 #### 场景交互
 
@@ -864,7 +868,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`，坐标是交互完成时实际位置。失败仍回原错误体。
 
 **注意**：与 `start_interact` 等价（内部同链）。
 
@@ -995,7 +999,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Inventory 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 含实际变化槽的 `slots`，有获得物品时另含 `gained`，且只有当前主控 HP/MP 发生变化时才附对应 `player` 字段。
 
 **注意**：骰子→掷骰预览返回 `base/pending/delta`（不应用，由 `accept_dice`/`reject_dice` 处理）；非消耗品→`item not usable`；常规物品冷却中/状态不符→`on cooldown`（不消耗）。
 
@@ -1007,7 +1011,7 @@
 
 **请求格式**：无 body
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Player 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 保留 `base`、`applied`、`delta`，并以 `player.main_stats` 返回实际变化属性 `{attr,value}` 列表及更新后的 `status_point`。
 
 **注意**：无未确认结果→`no dice result pending`。
 
@@ -1031,7 +1035,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 5 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Inventory 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":null},…]}`，列出源槽与其他实际变化槽。
 
 **注意**：按槽位清空判定成功。
 
@@ -1043,7 +1047,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3, "count": 1, "to_bag": 0, "to_slot": 4 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`。原版移动的 `result` 含 Inventory 状态；扩展袋分支透传 `extension_bag_move_item` 原结果，不附 `state`。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":<Item|null>},…]}`，列出请求源/目标槽及其他实际变化槽（重复槽去重）。扩展袋成功同样由 `core.item` 生成该差量结果，不返回完整扩展背包状态；失败体保持扩展操作原错误 JSON。
 
 **注意**：
 - 源空槽→`slot empty`；count≤0→参数错；同槽→`same slot`；目标越界→`bad target`。
@@ -1058,7 +1062,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 5 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 为原操作 JSON 并附 Inventory 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"price":N,"slots":[…],"money":N}`，包含变化槽差量和更新后的金币，不含完整 Inventory。
 
 **注意**：空槽→`slot empty`；价格由静态表决定（防刷钱）。
 
@@ -1077,7 +1081,7 @@
 { "category": 512 }
 ```
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 `result` 含 Party 状态；category 未找到时 ticket 为 `failed`，`result={"ok":false,"error":"item not found"}`。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[…]}`；category 未找到时 ticket 为 `failed`，result 为 `{"ok":false,"error":"item not found"}`。
 
 **注意**：目标槽占用自动替换（先卸后穿）；不可装备（等级/职业/类型不符）按 CHAR_CanEquipItem 校验失败。
 
@@ -1089,7 +1093,7 @@
 
 **请求格式**：`{ "slot": 2 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Party 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":null},"inventory":[…]}`，背包数组只列实际变化槽。
 
 **注意**：空槽返回 `unequip failed`。
 
@@ -1101,7 +1105,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3, "equip_slot": 3 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Party 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 含目标 `equipment` 对象及背包 `inventory` 槽差量，不附完整 Party。
 
 **注意**：无孔→`no socket`；非宝石→`not jewel`；空装备槽→`equip slot empty`；**镶嵌后自动消耗背包宝石（防刷）**。
 
@@ -1113,7 +1117,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3, "equip_slot": 5 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Party 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 只含目标 `equipment` 对象，不附完整 Party 或 Inventory。
 
 **注意**：装备槽空→`equip slot empty`；背包物品非强化卷轴→`not enchant scroll`（IsEnchantScroll 0x10b2f0：武器卷轴 16-20/946、防具卷轴 21-25/947）；不可强化装备→`cannot enchant`（ITEMCLASSBASE bit1/bit2）；失败→`enchant failed`；成功写回 +0x1A bit6-10 新等级且消耗卷轴 1 张（防刷）。
 
@@ -1137,7 +1141,7 @@
 
 **请求格式**：`{ "slot": 0 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步响应经 §7.9 回取，成功 `result` 含 Inventory 状态。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 形状为 `{"ok":true,"price":N,"money":N,"slots":[…]}`，不附完整 Inventory。
 
 **注意**：金币不足→`not enough money`；无商品→`item not found`。
 ---
@@ -1470,7 +1474,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"slot":S,"sidecar":"ensured"}`。
 
 **注意**：非 world→`not in game`。
 
@@ -1482,7 +1486,7 @@
 
 **请求格式**：`{ "slot": 0 }`（0/1/2）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；进入及世界态提交完成后 result 为 `{"ok":true,"slot":S,"entered":true}`。延迟结算期间票据仍为 pending。
 
 **注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，Android 同意页（screen=`agreement`）存在时返回 `ui occupied: agreement`，需先 `dialog/select {"action":"ok"}` 关闭同意页或处理弹窗；进档流程期间（调用后 15s 宽限）同意页启动会被模块拦截，不会打断读档；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
@@ -1494,7 +1498,7 @@
 
 **请求格式**：`{ "slot": 1, "class_idx": 2 }`（slot 0/1/2；class_idx 0-5）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；新档创建及世界态提交完成后 result 为 `{"ok":true,"slot":S,"created":true}`。延迟结算期间票据仍为 pending。
 
 **注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false；与 enter_slot 相同的同意页/弹窗门禁（`ui occupied: agreement` / `ui occupied: dialog_popup` / `ui state unavailable`）及 15s 进档宽限拦截；损坏槽可直接 create_slot 重建覆盖（2026-08-28 save1 实测）。
 
@@ -1804,26 +1808,26 @@
 
 `GET /api/system/tickets/{id}`
 
-**用途**：查询命令票据状态，并回取该命令的**操作结果**。所有返回票据的写端点（见 §7.10）由客户端轮询本端点取得原同步响应数据（ARCHITECTURE.md §8.1）。
+**用途**：查询命令票据状态，并回取该命令的**操作结果**。所有返回票据的写端点（见 §7.10）由客户端轮询本端点取得该端点定义的 result；部分 owner 已改为操作差量，不一定与迁移前完整 state 响应相同（ARCHITECTURE.md §8.1）。
 
 **返回格式**：
 ```json
-{ "ok": true, "ticket": 7, "state": "done", "result": {"ok":true,"state":{"money":28550}}, "result_retained": true }
+{ "ok": true, "ticket": 7, "state": "done", "result": {"ok":true,"player":{"leader_slot":1}}, "result_retained": true }
 ```
 
 **字段说明**：
 - `ticket`：路径参数回显（`id` 为十进制票据号）。
 - `state`：`pending`（排队/执行中）/ `done`（成功）/ `failed`（命令执行失败）/ `cancelled`（已取消）/ `unknown`（票据不存在）/ `expired`（状态记录已被有界窗口淘汰，结果不可判定）。**`unknown`/`expired` 与 `failed` 语义不同，调用方必须区分**。
-- `result`：仅当结果被保留时出现，内容为该写端点迁移前的**原响应 JSON**（成功或失败体）。
-- `result_retained`：`false` 表示完整结果不可回取（无结果、超单结果上限而截断，或已被淘汰）；超限结果不会作为不完整 JSON 写入 `result`。
+- `result`：正常保留时为该写操作定义的完整结果 JSON；单结果超过上限时，返回合成摘要 `{"ok":true,"truncated":true,"reason":"result_limit_exceeded"}`（操作成功）或 `{"ok":false,"truncated":true,"reason":"result_limit_exceeded"}`（操作失败）。不返回被截断的原始前缀。若无结果或结果已被预算淘汰，则不出现该字段。
+- `result_retained`：`true` 表示 owner handler 生成的完整 result JSON 被票据保留；`false` 表示无结果、原 result 超单结果上限（此时摘要仍可能作为 `result` 返回）或原 result 已被总预算淘汰。若超限摘要本身随后被总预算淘汰，`result` 也不出现。
 
-**结果保留为明确尽力语义**（不承诺必然可取回）：单结果上限 16 KB；结果总预算 512 KB；终态状态窗口最近 1024 条。命令体输出超过结果缓冲上限时，infra 截断保留前 16 KB 并标记超限；票据仍按操作执行结果结算，`result_retained=false` 且不返回不完整 JSON。超出总预算时从最旧开始淘汰结果（保留状态）；已淘汰时同样 `result_retained=false`。客户端应在命令终态后及时轮询。
+**结果保留为明确尽力语义**（不承诺必然可取回）：单结果上限 **16 KiB（16,384 字节）**；保留结果总预算 **512 KiB（524,288 字节）**；终态票据状态窗口最近 1024 条。单结果超限时，票据仍按操作执行结果结算（成功 `done`、失败 `failed`），原始结果被丢弃并以对应 `ok` 值的完整合成摘要替代；不会返回截断前缀。总预算超限时从最旧开始淘汰结果文本但保留票据状态。**单结果上限待逐路由真机量测后另批定值**。客户端应在命令终态后及时轮询。
 
 **注意**：`id` 为 0 → `{"ok":false,"error":"invalid ticket"}`。响应体由 native `nativeTicketStateJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
 
 ### 7.10 写端点的票据契约（阶段 5）
 
-带游戏内存写入的写端点按 ARCHITECTURE.md §7.1 迁移为 owner 命令：请求立即返回票据，操作在主线程执行，结果经 §7.9 回取。
+带游戏内存写入的写端点按 ARCHITECTURE.md §7.1 迁移为 owner 命令：请求立即返回票据，操作在主线程执行，当前 result schema 经 §7.9 回取；是否返回完整 state 以本节实际形状为准。
 
 **响应**：
 ```json
@@ -1833,48 +1837,50 @@
 **受影响端点**：逐条迁移时在本节登记（迁移前保持原同步响应；迁移后列出，附参数校验错误码不变说明）。已迁移：
 - `POST /api/op/features/lifecycle`（P3 起即为票据语义）。
 - `/api/debug/extension_bag/` 下 7 条 POST 调试端点（`enter_view`、`exit_view`、`unequip`、`select_bag`、`click_item`、`equip`、`item`；阶段 5 批 5-2 回补为主线程 owner command）。
-- 世界写 5 条（阶段 5 批 5-5 迁 `world_teleport` owner）：`/api/world/movement/` 下 `move_to`、`walk_dir`、`stop_move`、`interact_with` 四个 POST，以及 `/api/op/movement/teleport`（op 门控，403 信封同旧）。字段范围校验仍在投递前执行且文本不变（`x/y required`、`direction 0-3 required`、`map_id/x/y required`；非法 body → 400 `bad request`）。`move_to`/`walk_dir`/`interact_with` 的原响应 `{"ok":true,"state":<player>}` 与 `stop_move`/`teleport` 的原始 op JSON 经票据 `result` 回取；`teleport` 为真实切图（owner 命令在逻辑相位内联执行）。
-- `POST /api/system/save`、`POST /api/system/enter_slot`、`POST /api/system/create_slot`（阶段 5 批 5-4 迁票据契约，批 5-6d 按裁决 A 并入同域 owner `core.save`）。`enter_slot`/`create_slot` 为转场类写：转换在逻辑帧内联执行（与同步入口共用单飞门），结果在**游戏世界态提交后**结算——结算前票据保持 `pending`（最长约 2s，超限以 `result:{"ok":false,"error":"settlement timeout"}` 失败，不提前报告 done）；`save` 不涉转场，当帧结算。参数校验不变（`slot` ∉ [0,2] → 400 `slot required (0-2)`；非法/空 body → 400 `bad request`）。原响应经票据 `result` 回取（`enter_slot` 成功示例：`{"ok":true,"state":{"money":0,"map_id":4294967295,"x":-1,"y":-1,"active_quest":0,"leader_slot":0,"party_count":0}}`，即进档完成但存档数据尚未载入时的 Player 态，与迁移前一致）；模块 sidecar 槽位生命周期与游戏操作在同一步结算，失败写入 `{"ok":false,"error":"sidecar: <status>"}`。
+- 世界写 5 条（`routes.inc` 中 owner `core.world`）：`/api/world/movement/` 下 `move_to`、`walk_dir`、`stop_move`、`interact_with` 四个 POST，以及 `/api/op/movement/teleport`（op 门控，403 信封同旧）。字段范围校验仍在投递前执行且文本不变（`x/y required`、`direction 0-3 required`、`map_id/x/y required`；非法 body → 400 `bad request`）。`move_to`/`walk_dir`/`interact_with` 成功 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`；这是命令结束时读取的当前位置（像素坐标右移 4 位转 tile），不承诺已到达目标。失败保留原错误体；`stop_move` 成功 result 为 `{"ok":true}`，teleport 保留原始 op JSON。`teleport` 为真实切图（owner 命令在逻辑相位内联执行）。
+- `POST /api/system/save`、`POST /api/system/enter_slot`、`POST /api/system/create_slot`（owner `core.save`）。`enter_slot`/`create_slot` 为转场类写：结果在**游戏世界态提交后**结算；结算前票据保持 `pending`（最长约 2s，超限以 `result:{"ok":false,"error":"settlement timeout"}` 失败，不提前报告 done）；`save` 不涉转场，当帧结算。参数校验不变（`slot` ∉ [0,2] → 400 `slot required (0-2)`；非法/空 body → 400 `bad request`）。成功 result 分别为 `{"ok":true,"slot":S,"sidecar":"ensured"}`、`{"ok":true,"slot":S,"entered":true}`、`{"ok":true,"slot":S,"created":true}`；不返回 Player 快照。失败仍为原错误体，包括 sidecar 错误。
 - `POST /api/quest/quit_quest`（阶段 5 批 5-3；owner `quest`）。缺/负 `quest_id` → 400 `questId required`（投递前校验，与迁移前一致）；成功 `{"ok":true,"ticket":N}`，`result` 为 `{"ok":true,"state":<Player>}`；无任务 → 票据 `state=failed` 且 `result={"ok":false,"error":"quest not found"}`。
 - 对话写 2 条（阶段 5 批 5-7a 迁移；批 5-8a 起 owner 为 `core.ui_state`）：`/api/ui/dialog/select`、`/api/ui/start_interact`。`dialog/select` 缺 `action` 且 `index<0` → 400 `action or index required`（投递前校验，与迁移前一致）；非法 body → 400 `bad request`。原响应为**原始 op JSON**（如成功 `{"ok":true,"result":"dialog_shown"}`、无对话 `{"ok":false,"error":"no dialog"}`），经票据 `result` 回取。**同意页（Java 窗口）分支仍留在 Kotlin 传输层**（`UiActivityTracker` 平台检测，JVM-only）：该分支不经票据，直接返回 `{"ok":true,"result":"close_dispatched"}` 或 `agreement window unavailable` / `no such option in agreement`。
 - 面板写 2 条（阶段 5 批 5-8a 并入 `core.ui_state`）：`/api/ui/open_panel`、`/api/ui/close_panel`。`open_panel` 缺 `panel` → 400 `panel required`（投递前校验，与迁移前一致）。原响应为 `{"ok":true,"state":<gamestate JSON>}`（同迁移前 `attachUi` 键序），经票据 `result` 回取；失败为原 op 错误体。**注意**：以 API 打开游戏面板会使游戏帧计数暂停，同进程后续命令（含 `close_panel`）要等面板关闭或帧恢复后才能执行。
 - 回主菜单 1 条（阶段 5 ADR 0001 第 4 批迁入 `core.ui_state`；路径与 POST 方法不变）：`/api/ui/go_main_menu`。无 body；原响应为 `{"ok":true,"state":<Player 模型>}`（失败为原错误体，如 `not in game`），经票据 `result` 回取。命令在主线程**逻辑帧内联**执行状态机切换（同 `data_op_main_menu` 的面板守卫与扩展背包清理），以保证不阻塞命令排空。`core.save` 继续负责进档/建档。
 
-**物品与角色写端点（阶段 5 P4b；33 条票据化路由 + 1 条保留 501 占位）**：每条请求先由 Kotlin 执行原有 body/path 参数校验，校验失败仍立即返回原 400 且不产生票据；校验通过后 POST 返回 §7.10 票据 ACK，终态结果按下列各项通过 §7.9 回取。owner 按 `routes.inc` 登记为 `core.item` / `core.character`；OP 路由仍受 `op_gated` 403 门禁。
+**物品与角色写端点（阶段 5 P4b；33 条票据化路由 + 1 条保留 501 占位）**：`routes.inc` 中 item 13 条、character 20 条，33 是 ticketed endpoint 数，并非结果 schema 改动数量。请求校验仍在投递前执行，错误码/错误体与原路由保持一致；校验通过后 POST 返回 §7.10 票据 ACK，终态通过 §7.9 回取。owner 为 `core.item` / `core.character`；OP 路由仍受 `op_gated` 403 门禁。core.item 的 JSON 数值 token 使用整数文法：小数/指数形式或超出 int32 的数字使整个 body 解析失败（400 `bad request`）；部分数值字段仍兼容数字字符串并沿用既有窄化。core.character 的数值 body 字段保留 Android `JSONObject` 转换语义，合法小数/指数及可转换数字字符串可经 Double 向零窄化；不要把 core.item 的词法限制套用到 character。两 owner 的数字 path 参数只接受最多 10 位 ASCII 十进制数字且不得超过 INT32_MAX；字段业务范围另行校验。
 
-- `POST /api/item/inventory/use_item`（`core.item`，`kUseItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 `result` 为原同步 `{"ok":true,"state":<Inventory>}`；失败原 op 错体。
-- `POST /api/item/inventory/accept_dice`（`core.item`，`kAcceptDice`）：无 body 字段校验。`result` 为原同步结果（成功附 `state=<Player>`）；失败原 op 错体。
-- `POST /api/item/inventory/reject_dice`（`core.item`，`kRejectDice`）：无 body 字段校验。`result` 为原始 op JSON，不附 `state`。
-- `POST /api/item/inventory/discard_item`（`core.item`，`kDiscardItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Inventory>`。
-- `POST /api/item/inventory/sell_item`（`core.item`，`kSellItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 `result` 为原同步 op 结果并附 `state=<Inventory>`；失败原 op 错体。
-- `POST /api/item/inventory/move_item`（`core.item`，`kMoveItem`）：字段为 `bag`、`slot`、`count`、`to_bag`、`to_slot`；范围校验失败 → 400 `bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)`；非法 JSON → 400 `bad request`。原版移动的 `result` 附 `state=<Inventory>`；扩展袋分支 `result` 原样透传 `extension_bag_move_item` 的响应，不附 `state`。
-- `POST /api/item/inventory/{role}/put_jewel`（`core.item`，`kPutJewel`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`。
-- `POST /api/item/inventory/{role}/enchant`（`core.item`，`kEnchant`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`。
-- `POST /api/item/inventory/{role}/equip_item`（`core.item`，`kEquipItem`）：`category>=0` 优先；否则须有非负 `bag` 与 `slot`，校验失败 → 400 `bag+slot or category required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`；category 找不到对应物品时票据为 `failed`，`result={"ok":false,"error":"item not found"}`。
-- `POST /api/item/inventory/{role}/unequip_item`（`core.item`，`kUnequipItem`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`。
-- `POST /api/item/shop/buy_item`（`core.item`，`kShopBuy`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Inventory>`。
-- `POST /api/op/inventory/add`（`core.item`，`kAddItem`）：`category` 必须非负，否则 400 `category required`；非法 JSON → 400 `bad request`。请求字段为 `category`、`count`（默认 1）、`socket`（默认 0）、`enhanceRemaining`（默认 0）、`rarity`（默认 -1）；其余可选值由 native 钳制。`result` 为原同步 `{"ok":true}`，不附 state。
-- `POST /api/op/inventory/money`（`core.item`，`kSetMoney`）：负/缺失 `money` → 400 `money required`；非法 JSON → 400 `bad request`。`result` 为原同步 `{"ok":true}`，不附 state。
-- `POST /api/character/grow/add_skill`（`core.character`，`kLearnAction`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Skills>`。
-- `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。成功 `result={"ok":true,"applied":[{"attr":idx},…]}`，不附 state；逐点首次失败即停止，ticket `failed` 且 `result` 保留首次原错误体，已执行点不回滚。
-- `POST /api/character/grow/reset_stat`（`core.character`，`kStatReset`）：无 body 字段校验；成功 `result` 附 `state=<Player>`。
-- `POST /api/character/grow/reset_skill`（`core.character`，`kSkillReset`）：无 body 字段校验；成功 `result` 附 `state=<Player>`。
-- `POST /api/character/combat/{role}/set_auto_attack`（`core.character`，`kSetAutoAttack`）：缺少 `on` → 400 `on required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`。
-- `POST /api/character/combat/switch_player`（`core.character`，`kSwitchPlayer`）：`slot` 不在 0..2 → 400 `slot required (0-2)`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Player>`。
-- `POST /api/character/combat/{role}/cast_skill`（`core.character`，`kCastSkill`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`。
-- `POST /api/character/combat/{role}/attack_target`（`core.character`，`kAttackTarget`）：负/缺失 `target_slot` → 400 `target_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`。
-- `POST /api/character/combat/{role}/stop_combat`（`core.character`，`kStopCombat`）：无 body 字段校验；成功 `result` 附 `state=<Player>`。
-- `POST /api/op/character/{role}/status-point`（`core.character`，`kSetStatusPoint`）：负/缺失 `points` → 400 `points required`；非法 JSON → 400 `bad request`。成功 `result={"ok":true}`，不附 state。
-- `POST /api/op/character/{role}/hp`（`core.character`，`kSetHp`）：负/缺失 `hp` → 400 `hp required`；非法 JSON → 400 `bad request`。成功 `result={"ok":true}`，不附 state。
-- `POST /api/op/character/{role}/mp`（`core.character`，`kSetMp`）：负/缺失 `mp` → 400 `mp required`；非法 JSON → 400 `bad request`。成功 `result={"ok":true}`，不附 state。
-- `POST /api/op/character/{role}/experience`（`core.character`，`kSetExperience`）：负/缺失 `exp` → 400 `exp required`；非法 JSON → 400 `bad request`。成功 `result={"ok":true}`，不附 state。
-- `POST /api/op/character/{role}/level`（`core.character`，`kSetLevel`）：缺 `level` → 400 `level required`；`force=false` 且等级不在 1..105 → 400 `level 1-105 (game max); force=true 跳过限制`；非法 JSON → 400 `bad request`。成功 `result={"ok":true}`，不附 state。
-- `POST /api/op/character/{role}/set_attr`（`core.character`，`kSetAttr`）：`stats` 非 object/缺失 → 400 `stats required (object: 属性名/索引 → 值)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；value 不在 0..255 → 400 `bad value for $k (0-255)`；空对象 → 400 `stats empty`；非法 JSON → 400 `bad request`。成功 `result={"ok":true,"set":[{"attr":idx,"value":value},…]}`；首项失败即停止，ticket `failed` 且 `result` 包装为 `{"ok":false,"error":"set attr <idx> failed"}`，已执行项不回滚。
-- `POST /api/op/party/swap`（`core.character`，`kPartySwap`）：缺 `a` / `b` 或任一为负数 → 400 `a and b required`；非法 JSON → 400 `bad request`。成功 `result={"ok":true}`，不附 state。
-- `POST /api/character/party/include`（`core.character`，`kPartyInclude`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`；失败原 op 错体。
-- `POST /api/character/party/exclude`（`core.character`，`kPartyExclude`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`；失败原 op 错体。
-- `POST /api/character/party/discharge`（`core.character`，`kPartyDischarge`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`；失败原 op 错体。
-- `POST /api/character/party/withdraw`（`core.character`，`kPartyWithdraw`）：负/缺失 `mercenary_slot` 或 `equip_slot` → 400 `mercenarySlot/equip_slot required`；非法 JSON → 400 `bad request`。成功 `result` 附 `state=<Party>`；失败原 op 错体。
+> `core.item` 的 `slots`/`inventory` 差量来自操作前后快照。当前实现忽略操作前快照读取失败，仍会继续操作；若事后快照成功，此时差量比较以空快照为基线，数组可能包含更多已占用槽，而不仅是实际变化槽。操作后快照不可读时，result 返回 `inventory state unavailable` 错误。
+
+- `POST /api/item/inventory/use_item`（`core.item`，`kUseItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 顺序为 `ok`、可选 `gained:[{bag,slot,category,count}]`、`slots:[{bag,slot,item:<Item|null>},…]`、可选 `player:{hp?,mp?}`。`slots` 强制包括源槽和获得物品槽，并补充实际变化槽；`player` 只在主控血量/魔力确实变化时出现。
+- `POST /api/item/inventory/accept_dice`（`core.item`，`kAcceptDice`）：无 body 字段校验。成功 result 顺序为 `base`、`applied`、`delta`、`player:{main_stats:[{attr,value},…],status_point}`；主属性只列本次变化项，status_point 为操作后值；失败为原 op 错体。
+- `POST /api/item/inventory/reject_dice`（`core.item`，`kRejectDice`）：无 body 字段校验；result 保持原 op JSON（成功 `{"ok":true}`），不附状态。
+- `POST /api/item/inventory/discard_item`（`core.item`，`kDiscardItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":null},…]}`，包括源槽与其他实际变化槽。
+- `POST /api/item/inventory/sell_item`（`core.item`，`kSellItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 顺序为 `ok`、`price`、`slots:[{bag,slot,item:<Item|null>},…]`、`money`；失败为原 op 错体。
+- `POST /api/item/inventory/move_item`（`core.item`，`kMoveItem`）：字段为 `bag`、`slot`、`count`、`to_bag`、`to_slot`；范围校验失败 → 400 `bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)`；非法 JSON → 400 `bad request`。原版与扩展袋成功均由 core.item 返回 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":<Item|null>},…]}`，包含请求源/有效目标槽及其他实际变化槽，重复槽去重；不附完整 Inventory/扩展状态。扩展袋失败仍透传原错误 JSON。
+- `POST /api/item/inventory/{role}/put_jewel`（`core.item`，`kPutJewel`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[{bag,slot,item:<Item|null>},…]}`。
+- `POST /api/item/inventory/{role}/enchant`（`core.item`，`kEnchant`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 仅含 `equipment:{role,slot,item:<Item|null>}`，不附完整 Party 或背包。
+- `POST /api/item/inventory/{role}/equip_item`（`core.item`，`kEquipItem`）：`category>=0` 优先；否则须有非负 `bag` 与 `slot`，校验失败 → 400 `bag+slot or category required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[{bag,slot,item:<Item|null>},…]}`；装备槽由操作前后状态比较确定。category 找不到对应物品时票据为 `failed`，result=`{"ok":false,"error":"item not found"}`。
+- `POST /api/item/inventory/{role}/unequip_item`（`core.item`，`kUnequipItem`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":null},"inventory":[{bag,slot,item:<Item|null>},…]}`。
+- `POST /api/item/shop/buy_item`（`core.item`，`kShopBuy`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 result 形状/键序为 `{"ok":true,"price":N,"money":N,"slots":[{bag,slot,item:<Item|null>},…]}`。
+- `POST /api/op/inventory/add`（`core.item`，`kAddItem`）：`category` 必须非负，否则 400 `category required`；非法 JSON → 400 `bad request`。请求字段为 `category`、`count`（默认 1）、`socket`（默认 0）、`enhanceRemaining`（默认 0）、`rarity`（默认 -1）；其余可选值由 native 钳制。result 保持 `{"ok":true}`。
+- `POST /api/op/inventory/money`（`core.item`，`kSetMoney`）：负/缺失 `money` → 400 `money required`；非法 JSON → 400 `bad request`。result 保持 `{"ok":true}`。
+- `POST /api/character/grow/add_skill`（`core.character`，`kLearnAction`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"skills":[{"action_id":A,"level":N}],"skill_points":N}`；未能读回时退化为 `{"ok":true}`。
+- `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。成功 result 保留 `applied:[{"attr":idx},…]`，且角色状态前后快照可读时附 `role:{role,main_stats:[{"attr":idx,"value":N},…],status_point:N}`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
+- `POST /api/character/grow/reset_stat`（`core.character`，`kStatReset`）：无 body 字段校验；成功且状态可读时 result 为 `{"ok":true,"role":{"role":0,"main_stats":[N,N,N,N,N],"status_point":N}}`；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/grow/reset_skill`（`core.character`，`kSkillReset`）：无 body 字段校验；成功且技能读面可用时 result 为 `{"ok":true,"skills":{"role":0,"skills":[…],"unlock_bitmap":N,"active_skill_id":N,"skill_points":N}}`；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/combat/{role}/set_auto_attack`（`core.character`，`kSetAutoAttack`）：缺少 `on` → 400 `on required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"role":{"role":R,"auto_attack":B}}`，`B` 是请求值，不是读回状态。
+- `POST /api/character/combat/switch_player`（`core.character`，`kSwitchPlayer`）：`slot` 不在 0..2 → 400 `slot required (0-2)`；非法 JSON → 400 `bad request`。主控状态可读时 result 为 `{"ok":true,"player":{"leader_slot":R}}`；读面不可用时退化为 `{"ok":true}`。
+- `POST /api/character/combat/{role}/cast_skill`（`core.character`，`kCastSkill`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"role":{"role":R,"active_skill_id":N}}`；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/combat/{role}/attack_target`（`core.character`，`kAttackTarget`）：负/缺失 `target_slot` → 400 `target_slot required`；非法 JSON → 400 `bad request`。仅读面确实能确认目标与战斗状态时 result 附 `role:{role,target_slot,combat:true}`；当前读面不提供这两项，实际 fallback 为 `{"ok":true}`，只表示操作已受理。
+- `POST /api/character/combat/{role}/stop_combat`（`core.character`，`kStopCombat`）：无 body 字段校验；成功 result 为 `{"ok":true,"role":{"role":R,"combat":false}}`。
+- `POST /api/op/character/{role}/status-point`（`core.character`，`kSetStatusPoint`）：负/缺失 `points` → 400 `points required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/hp`（`core.character`，`kSetHp`）：负/缺失 `hp` → 400 `hp required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/mp`（`core.character`，`kSetMp`）：负/缺失 `mp` → 400 `mp required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/experience`（`core.character`，`kSetExperience`）：负/缺失 `exp` → 400 `exp required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/level`（`core.character`，`kSetLevel`）：缺 `level` → 400 `level required`；`force=false` 且等级不在 1..105 → 400 `level 1-105 (game max); force=true 跳过限制`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/set_attr`（`core.character`，`kSetAttr`）：`stats` 非 object/缺失 → 400 `stats required (object: 属性名/索引 → 值)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；value 不在 0..255 → 400 `bad value for $k (0-255)`；空对象 → 400 `stats empty`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true,"set":[{"attr":idx,"value":value},…]}`；首项失败即停止，ticket `failed` 且 result 包装为 `{"ok":false,"error":"set attr <idx> failed"}`，已执行项不回滚。
+- `POST /api/op/party/swap`（`core.character`，`kPartySwap`）：缺 `a` / `b` 或任一为负数 → 400 `a and b required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/character/party/include`（`core.character`，`kPartyInclude`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功时 result 尽力为 `{"ok":true,"party":[{"slot":S,"member":<Role|null>},…]}`，只列变化槽；快照不可用时退化为 `{"ok":true}`。失败原 op 错体。
+- `POST /api/character/party/exclude`（`core.character`，`kPartyExclude`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功时 result 尽力返回实际变化的 party 槽差量；快照不可用时退化为 `{"ok":true}`。失败原 op 错体。
+- `POST /api/character/party/discharge`（`core.character`，`kPartyDischarge`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功时 result 尽力返回实际变化的 party 槽差量；快照不可用时退化为 `{"ok":true}`。失败原 op 错体。
+- `POST /api/character/party/withdraw`（`core.character`，`kPartyWithdraw`）：负/缺失 `mercenary_slot` 或 `equip_slot` → 400 `mercenarySlot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 总含目标佣兵装备槽清空摘要；item.state 前后快照可读时另含 `inventory` 槽差量，否则省略 `inventory`。失败原 op 错体。
 
 **未实现占位路由**（阶段 5 批 5-6e 将 owner 归位到领域插件；业务仍未实现，调用方不应依赖）：
 - `POST /api/op/quest/accept`、`POST /api/op/quest/complete`（owner `core.quest`）→ 501 `not implemented`
@@ -1889,7 +1895,7 @@
 - `GET /api/system/events`（owner `core.system`）：请求驱动有状态 diff（nativeGetEventsJson）。
 - `GET /api/ui`、`GET /api/ui/screen`、`GET /api/ui/panel`、`GET /api/ui/dialog`（owner `core.ui`）：依赖 Android `ActivityThread` 检测同意页，JVM-only。
 
-**调用方迁移指引**：把原先直接读取的响应体改为轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后读取 `result`（即原响应体）；`result_retained=false` 时按业务重试或接受不可得。
+**调用方迁移指引**：轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后按 §7.10 解析对应操作的 `result`。若 `result_retained=false` 且 `result.truncated=true`，这是单结果超限摘要，`state` 仍反映操作成功/失败；若 `result` 字段缺失，则没有可回取结果（无结果命令或结果文本已被总预算淘汰），不可把两者混为一类。
 ---
 
 ## 八、op（越权操作）— POST /api/op/*

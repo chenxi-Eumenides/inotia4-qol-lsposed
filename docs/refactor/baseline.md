@@ -21,8 +21,8 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 68 |
-| `game` | 141 |
+| `contracts` | 69 |
+| `game` | 143 |
 | `hooks` | 10 |
 | `host` | 54 |
 | `infra` | 35 |
@@ -52,7 +52,7 @@
 | `plugins/device_probe_consumer` | 2 |
 | `plugins/device_probe_export_failure` | 2 |
 | `plugins/device_probe_provider` | 2 |
-| `plugins/extension_bag` | 43 |
+| `plugins/extension_bag` | 44 |
 | `plugins/inventory_hooks` | 11 |
 | `plugins/push_all` | 6 |
 | `plugins/save_backup` | 13 |
@@ -60,7 +60,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 3 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **539** |
+| **合计** | **543** |
 
 ### 1.2 迁移期映射摘要
 
@@ -102,21 +102,21 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 96 |
-| `game` | `contracts` | 69 |
+| `host` | `game` | 97 |
+| `game` | `contracts` | 71 |
 | `host` | `contracts` | 54 |
 | `host` | `infra` | 45 |
-| `plugins/extension_bag` | `contracts` | 38 |
+| `plugins/extension_bag` | `contracts` | 40 |
 | `plugins/autosell` | `contracts` | 23 |
 | `plugins/custom_recipe` | `contracts` | 21 |
 | `legacy/system` | `game` | 17 |
-| `plugins/inventory_hooks` | `contracts` | 16 |
+| `plugins/inventory_hooks` | `contracts` | 17 |
 | `plugins/save_backup` | `contracts` | 14 |
 | `host` | `patch` | 13 |
 | `plugins/core.item` | `contracts` | 13 |
 | `plugins/core.settings` | `contracts` | 13 |
+| `plugins/core.character` | `contracts` | 11 |
 | `plugins/core.custom_ui` | `contracts` | 11 |
-| `host` | `hooks` | 10 |
 
 ### 2.2 include 环
 
@@ -191,7 +191,7 @@
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
 | `device_probe_export_failure` | `plugins/device_probe_export_failure` | 2 |
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
-| `extension_bag` | `plugins/extension_bag` | 43 |
+| `extension_bag` | `plugins/extension_bag` | 44 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
 | `push_all` | `plugins/push_all` | 6 |
 | `save_backup` | `plugins/save_backup` | 13 |
