@@ -30,6 +30,7 @@
 #include "infra/log/qol_log.h"
 #include "game/access/patches.h"
 #include "game/access/game_access.h"
+#include "game/adapter_ports/game_host_port.h"
 #include "hooks/registry.h"
 #include "infra/scheduler.h"
 #include "patch/instr_patch.h"
@@ -54,6 +55,8 @@ void frame_render_pre_wrapper() {
 // 替换原 BL STATE_NextStartProcess：先派发调度器与 legacy 帧任务，再复刻原调用。
 // 消费点位于帧计数自增与 Draw 之前。
 void frame_logic_pre_wrapper() {
+    // The logic hook runs on the game's logic thread; bootstrap may run on Android's app thread.
+    qol::game::game_host_mark_main_thread();
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
     frame_task_dispatch(kFramePointLogicPre);
     if (fn_state_next_start_process != nullptr) fn_state_next_start_process();

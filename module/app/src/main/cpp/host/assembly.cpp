@@ -323,7 +323,6 @@ bool drain_commands_task(int64_t frame, void* ctx) {
 }  // namespace
 
 bool assembly_init() {
-    game_host_mark_main_thread();
     // g_host_sdk 是 ABI 生命周期对象；adapter 在宿主装配期注入，随后由所有插件共享。
     const_cast<contracts::QolHostSdk&>(g_host_sdk).ui = ui_adapter();
     // T2l-w-write：向 game 层日志缝注入 SDK（game/access/qol_log_seam.h）；装配早于任何写调用。

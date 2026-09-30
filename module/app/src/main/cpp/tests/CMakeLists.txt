@@ -781,6 +781,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
     ${CPP_DIR}/game/adapter_ports/game_host_port.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
+    ${CPP_DIR}/game/access/inventory.cpp
     ${CPP_DIR}/game/adapter_ports/character_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/inventory_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
@@ -816,6 +817,7 @@ target_include_directories(host_adapter_tests PRIVATE
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(host_adapter_tests PRIVATE cxx_std_17)
+target_compile_definitions(host_adapter_tests PRIVATE QOL_HOST_ADAPTER_REAL_INVENTORY=1)
 set_target_properties(host_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(host_adapter_tests PRIVATE Threads::Threads)
 add_test(NAME host_adapter_tests COMMAND host_adapter_tests)

@@ -18,7 +18,9 @@ extern qol::contracts::QolItemHandle g_inventory_item_handle;
 namespace qol::game {
 
 int item_sell_price(const void*) { return -1; }
+int item_class_category(const void*) { return 28; }
 
+#ifndef QOL_HOST_ADAPTER_REAL_INVENTORY
 namespace {
 contracts::QolFindItemAbiFn g_test_find_item_backup = nullptr;
 thread_local uint32_t g_test_original_only_depth = 0;
@@ -151,6 +153,7 @@ QolResult cursor_index(const void*, int32_t* out_slot) {
     if (out_slot != nullptr) *out_slot = -1;
     return contracts::error(kQolErrNotReady, "test stub", 9);
 }
+#endif
 
 contracts::QolItemCountEncoding item_count_encoding_for_category(int) {
     return contracts::QolItemCountEncoding::kUnknown;
@@ -173,9 +176,11 @@ bool extension_desc_button_original_matches(void*, const char*) { return false; 
 // P2/G5 语义面在 host 测试中的桩（真实实现位于 game/access/*.cpp，测试目标不编译它们）。
 void* char_party_member(int32_t) { return nullptr; }
 
+#ifndef QOL_HOST_ADAPTER_REAL_INVENTORY
 QolResult set_physical_item(int32_t, int32_t, void*) {
     return contracts::error(kQolErrNotReady, "test stub", 9);
 }
+#endif
 
 int32_t craft_is_apply_stuff(void*, void*) { return -1; }
 

@@ -2,8 +2,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "contracts/panels.h"
@@ -46,6 +48,10 @@
 uintptr_t g_base = 0;
 void* g_active_quest = nullptr;
 qol::contracts::QolItemHandle g_inventory_item_handle{};
+void* g_inven = reinterpret_cast<void*>(1);
+std::array<uint8_t, 0x200> g_inventory_physical_item{};
+std::array<uint8_t, 0x200> g_inventory_new_item{};
+void* g_raw_inventory_item = reinterpret_cast<void*>(0x9);
 
 std::string op_ok() { return "{\"ok\":true}"; }
 std::string op_err(const char* message) {
@@ -64,6 +70,7 @@ decltype(fn_item_is_no_sell) fn_item_is_no_sell = nullptr;
 decltype(fn_is_dice) fn_is_dice = nullptr;
 decltype(fn_get_cumulate_count) fn_get_cumulate_count = nullptr;
 decltype(fn_get_bit) fn_get_bit = nullptr;
+decltype(fn_control_object_get_cursor_index) fn_control_object_get_cursor_index = nullptr;
 decltype(fn_inven_remove_item_data) fn_inven_remove_item_data = nullptr;
 decltype(fn_remove_item) fn_remove_item = nullptr;
 decltype(fn_item_create_perfect_item) fn_item_create_perfect_item = nullptr;
@@ -332,6 +339,7 @@ bool ui_choice_selected_index(int32_t* out) {
 bool ui_choice_text_owns(const char* const*, uint32_t) { return true; }
 int64_t frame_count() { return 99; }
 
+#ifndef QOL_HOST_ADAPTER_REAL_INVENTORY
 QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
                                 contracts::QolInventoryItemRef* out) {
     if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16) {
@@ -380,6 +388,7 @@ QolResult find_save_slot(const void* item, int32_t* out_slot) {
     *out_slot = 3;
     return contracts::ok();
 }
+#endif
 
 }  // namespace qol::game
 
@@ -389,8 +398,14 @@ QolResult find_save_slot(const void* item, int32_t* out_slot) {
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16 ||
         g_inventory_mode != FakeInventoryMode::kReady) return false;
-    *out = {InventoryItemKind::kOriginal, bag, slot, 28, 4, reinterpret_cast<void*>(0x9)};
+    *out = {InventoryItemKind::kOriginal, bag, slot, 28, 4, g_raw_inventory_item};
     return true;
+}
+
+void for_each_bag_slot(BagSlotFn callback, void* ctx) {
+    if (callback == nullptr || g_inven == nullptr ||
+        g_inventory_mode != FakeInventoryMode::kReady) return;
+    (void)callback(g_raw_inventory_item, 1, 2, ctx);
 }
 
 namespace {
@@ -411,7 +426,7 @@ int32_t scheduler_handler(int64_t frame, void* ctx) {
 int32_t inventory_callback(const qol::contracts::QolInventoryItemRef* ref, void* ctx) {
     assert(ref != nullptr);
     assert(ref->kind == static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal));
-    assert(ref->category == 28 && ref->count == 4);
+    assert(ref->category == 28 && ref->count == 6);
     ++*static_cast<int*>(ctx);
     return 0;
 }
@@ -661,13 +676,13 @@ int main() {
                                                   &found_slot).ok == kQolOk);
     assert(found_bag == 2 && found_slot == 7);
     qol::contracts::QolItemHandle slot_identity{};
-    g_inventory_item_handle = g_find_item_handle;
+    g_raw_inventory_item = g_inventory_physical_item.data();
     assert(game.item_abi.item_identity_at(1, 2, &slot_identity).ok == kQolOk);
-    assert(slot_identity.slot == g_find_item_handle.slot &&
-           slot_identity.generation == g_find_item_handle.generation);
+    assert(slot_identity.slot != 0 && slot_identity.generation != 0);
     void* native_item = nullptr;
-    assert(game.item_abi.native_item_for_handle(g_find_item_handle, &native_item).ok == kQolOk);
-    assert(native_item == &g_find_item_item);
+    assert(game.item_abi.native_item_for_handle(slot_identity, &native_item).ok == kQolOk);
+    assert(native_item == g_inventory_physical_item.data());
+    g_raw_inventory_item = reinterpret_cast<void*>(0x9);
     fn_inven_find_item_slot = nullptr;
     int handle_item = 0;
     qol::contracts::QolItemHandle injected_handle{};
@@ -928,11 +943,32 @@ int main() {
     assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).ok == kQolOk);
     assert(inventory_ref.bag == 1 && inventory_ref.slot == 2 &&
            inventory_ref.item.slot != 0 && inventory_ref.item.generation != 0);
+    const qol::contracts::QolItemHandle saved_inventory_handle = g_inventory_item_handle;
+    g_inventory_item_handle = qol::contracts::kInvalidItemHandle;
+    g_raw_inventory_item = g_inventory_new_item.data();
+    qol::contracts::QolInventoryItemRef newly_registered_ref{};
+    assert(item_port_api.read.item_ref_at(4, 7, &newly_registered_ref).ok == kQolOk);
+    assert(newly_registered_ref.item.slot != 0 && newly_registered_ref.item.generation != 0);
+    qol::contracts::QolItemInventoryView physical_view{};
+    assert(item_port_api.read.inventory_item_view(newly_registered_ref.item, &physical_view).ok ==
+           kQolOk);
+    g_raw_inventory_item = g_inventory_physical_item.data();
+    QolResult off_thread_ref_result{};
+    std::thread off_thread_reader([&]() {
+        qol::contracts::QolInventoryItemRef off_thread_ref{};
+        off_thread_ref_result = item_port_api.read.item_ref_at(4, 8, &off_thread_ref);
+    });
+    off_thread_reader.join();
+    assert(off_thread_ref_result.code == kQolErrBlocked);
+    g_raw_inventory_item = reinterpret_cast<void*>(0x9);
+    g_inventory_item_handle = saved_inventory_handle;
     assert(item_port_api.read.item_ref_at(1, 2, nullptr).code == kQolErrInvalidArgument);
     g_inventory_mode = FakeInventoryMode::kEmpty;
     assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotFound);
     g_inventory_mode = FakeInventoryMode::kNotReady;
+    g_inven = nullptr;
     assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotReady);
+    g_inven = reinterpret_cast<void*>(1);
     int inventory_callback_calls = 0;
     g_inventory_mode = FakeInventoryMode::kReady;
     assert(inventory_extras_api.read.for_each_bag_slot(&inventory_callback,
@@ -947,10 +983,12 @@ int main() {
            kQolOk);
     assert(value == 3);
     g_inventory_mode = FakeInventoryMode::kNotReady;
+    g_inven = nullptr;
     assert(inventory_extras_api.read.for_each_bag_slot(&inventory_callback,
                                                       &inventory_callback_calls)
-               .code == kQolErrNotReady);
+                .code == kQolErrNotReady);
     g_inventory_mode = FakeInventoryMode::kReady;
+    g_inven = reinterpret_cast<void*>(1);
     assert(world_port_api.read.game_state_gate(nullptr).code == kQolErrInvalidArgument);
     g_world_game_state_gate = -1;
     assert(world_port_api.read.game_state_gate(&value).code == kQolErrNotReady);

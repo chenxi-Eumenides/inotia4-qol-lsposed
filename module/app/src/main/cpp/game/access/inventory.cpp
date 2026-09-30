@@ -22,23 +22,44 @@ QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
 
-bool handle_for_item(void* item, contracts::QolItemHandle* out_handle) {
-    if (item == nullptr || out_handle == nullptr) return false;
+ItemHandleError handle_for_item(void* item, contracts::QolItemHandle* out_handle) {
+    if (item == nullptr || out_handle == nullptr) return ItemHandleError::kInvalidArgument;
     *out_handle = lookup_item(item);
-    if (out_handle->slot == 0) {
-        *out_handle = register_item(item, contracts::kQolItemHandleOwnerGame);
-    }
-    return out_handle->slot != 0 && out_handle->generation != 0;
+    if (out_handle->slot != 0 && out_handle->generation != 0) return ItemHandleError::kNone;
+    ItemHandleError error = ItemHandleError::kNone;
+    *out_handle = register_item(item, contracts::kQolItemHandleOwnerGame, &error);
+    return out_handle->slot != 0 && out_handle->generation != 0 ? ItemHandleError::kNone : error;
 }
 
-bool copy_ref(const InventoryItemRef& source, contracts::QolInventoryItemRef* target) {
-    if (!handle_for_item(source.native_item, &target->item)) return false;
+ItemHandleError copy_ref(const InventoryItemRef& source,
+                         contracts::QolInventoryItemRef* target) {
+    const ItemHandleError error = handle_for_item(source.native_item, &target->item);
+    if (error != ItemHandleError::kNone) return error;
     target->kind = static_cast<int32_t>(source.kind);
     target->bag = source.bag;
     target->slot = source.slot;
     target->category = source.category;
     target->count = source.count;
-    return true;
+    return ItemHandleError::kNone;
+}
+
+QolResult item_handle_error(ItemHandleError error) {
+    switch (error) {
+        case ItemHandleError::kNone: return contracts::ok();
+        case ItemHandleError::kInvalidArgument:
+            return error_result(kQolErrInvalidArgument, kInvalidArgument);
+        case ItemHandleError::kWrongThread:
+            return error_result(kQolErrBlocked, "wrong thread");
+        case ItemHandleError::kFull:
+            return error_result(kQolErrNotReady, "item handle registry full");
+        case ItemHandleError::kType:
+            return error_result(kQolErrConflict, "item handle owner conflict");
+        case ItemHandleError::kTransition:
+            return error_result(kQolErrBlocked, "item handle transition");
+        case ItemHandleError::kStale:
+            return error_result(kQolErrNotFound, kNotFound);
+    }
+    return error_result(kQolErrInternal, "item handle registration failed");
 }
 
 struct BagSlotContext {
@@ -56,7 +77,7 @@ bool bridge_bag_slot(void* item, int bag, int slot, void* context) {
         fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1,
         {},
     };
-    if (!handle_for_item(item, &ref.item)) return false;
+    if (handle_for_item(item, &ref.item) != ItemHandleError::kNone) return false;
     return state->callback(&ref, state->callback_context) != 0;
 }
 
@@ -175,7 +196,8 @@ QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
         }
         return error_result(kQolErrNotFound, kNotFound);
     }
-    if (!copy_ref(source, out)) return error_result(kQolErrNotReady, "item handle unavailable");
+    const ItemHandleError handle_error = copy_ref(source, out);
+    if (handle_error != ItemHandleError::kNone) return item_handle_error(handle_error);
     return contracts::ok();
 }
 

@@ -138,6 +138,7 @@ std::string expected_raw_inventory_with_count(uint32_t count) {
 
 bool g_in_world = true;
 int32_t g_static_ready = 1;
+int32_t g_item_ref_result = kQolOk;
 uint32_t g_canonical_count = 3;
 uint32_t g_original_count = 3;
 bool g_count_encoded = true;
@@ -244,6 +245,9 @@ QolResult stub_effective_cumulate(qol::contracts::QolItemHandle item, int32_t* o
 }
 QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryItemRef* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (g_item_ref_result != kQolOk) {
+        return qol::contracts::error(g_item_ref_result, "item reference unavailable", 26);
+    }
     if (bag < 0 || bag >= 11 || slot < 0 || slot >= 16 ||
         !g_inventory_slot_present[bag][slot]) {
         return qol::contracts::error(kQolErrNotFound, "empty", 5);
@@ -1645,6 +1649,14 @@ void test_lifecycle_and_responses() {
     const std::string expected_inventory = expected_inventory_with_count(3);
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
     CHECK(status == 200);
+
+    // A physical ref/handle lookup failure must not publish a partial inventory with the slot
+    // silently omitted. Retain the last complete snapshot until a full serialization succeeds.
+    g_item_ref_result = kQolErrNotReady;
+    CHECK(g_scheduler.handler(101, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
+    CHECK(status == 200);
+    g_item_ref_result = kQolOk;
 
     const struct CountViewCase {
         uint32_t canonical;

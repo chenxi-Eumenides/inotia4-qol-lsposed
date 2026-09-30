@@ -468,7 +468,7 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
             contracts::QolInventoryItemRef item_ref{};
             const QolResult ref_result = g_port->read.item_ref_at(bag, slot, &item_ref);
             if (!contracts::succeeded(ref_result)) {
-                if (ref_result.code == kQolErrNotFound || ref_result.code == kQolErrNotReady) continue;
+                if (ref_result.code == kQolErrNotFound) continue;
                 return ref_result;
             }
             if (item_ref.kind != static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal) ||
