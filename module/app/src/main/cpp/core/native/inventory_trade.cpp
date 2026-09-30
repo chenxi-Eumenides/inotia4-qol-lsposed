@@ -10,6 +10,7 @@
 #include "infra/log/qol_log.h"
 #include "contracts/sell_price.h"
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/state/game_state.h"
@@ -156,11 +157,17 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     }
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
     // 删除失败回退金币，保持扩展物品原有退款路径语义。
-    if (fn_remove_item(item) == 0) {
+    qol::contracts::QolItemHandle checkpoint{};
+    const bool suspended = qol::game::begin_item_invalidation(
+        item, qol::contracts::kQolItemHandleProviderAny, &checkpoint);
+    const int removed = fn_remove_item(item);
+    if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
+    if (removed == 0) {
         fn_minus_money(price);
         result.status = Status::kRemoveFailed;
         return result;
     }
+    if (!suspended) qol::game::invalidate_item(item);
     sync_projected_slot_if_available(provider, bag, slot);
     result.status = Status::kOk;
     return result;
@@ -178,7 +185,13 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
         return Status::kStale;
     }
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
-    if (fn_remove_item(item_ref.native_item) == 0) return Status::kRemoveFailed;
+    qol::contracts::QolItemHandle checkpoint{};
+    const bool suspended = qol::game::begin_item_invalidation(
+        item_ref.native_item, qol::contracts::kQolItemHandleProviderAny, &checkpoint);
+    const int removed = fn_remove_item(item_ref.native_item);
+    if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
+    if (removed == 0) return Status::kRemoveFailed;
+    if (!suspended) qol::game::invalidate_item(item_ref.native_item);
     sync_projected_slot_if_available(extension_provider(), bag, slot);
     return Status::kOk;
 }

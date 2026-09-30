@@ -10,6 +10,7 @@
 #include "contracts/ui.h"
 #include "game/variants/game_variant.h"
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/char.h"
 #include "game/access/craft.h"
@@ -452,6 +453,11 @@ int main() {
     assert(sdk.store.delete_slot != nullptr);
     assert(sdk.store.register_participant != nullptr);
     assert(sdk.store.save_game != nullptr);
+    assert(sdk.item_handle.register_item != nullptr);
+    assert(sdk.item_handle.invalidate_item != nullptr);
+    assert(sdk.item_handle.rebind_item != nullptr);
+    assert(sdk.item_handle.begin_invalidation != nullptr);
+    assert(sdk.item_handle.finish_invalidation != nullptr);
     assert(sdk.desc_button.bind != nullptr);
     assert(sdk.desc_button.unbind != nullptr);
     assert(sdk.desc_button.current_proc != nullptr);
@@ -585,6 +591,40 @@ int main() {
                   "read-only face must follow item-count face");
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
+    int handle_item = 0;
+    qol::contracts::QolItemHandle injected_handle{};
+    assert(sdk.item_handle.register_item(
+               &handle_item, qol::contracts::kQolItemHandleProviderNative,
+               &injected_handle) == qol::contracts::kQolItemHandleStatusOk);
+    auto resolved_item = qol::game::resolve_item(
+        injected_handle, qol::contracts::kQolItemHandleProviderNative);
+    assert(resolved_item.item == &handle_item);
+    assert(qol::game::resolve_item(
+               injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag).error ==
+           qol::game::ItemHandleError::kType);
+    assert(sdk.item_handle.rebind_item(
+               &handle_item, qol::contracts::kQolItemHandleProviderExtensionBag) ==
+           qol::contracts::kQolItemHandleStatusOk);
+    resolved_item = qol::game::resolve_item(
+        injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag);
+    assert(resolved_item.item == &handle_item);
+    qol::contracts::QolItemHandle removal_checkpoint{};
+    assert(sdk.item_handle.begin_invalidation(
+               &handle_item, qol::contracts::kQolItemHandleProviderAny,
+               &removal_checkpoint) == qol::contracts::kQolItemHandleStatusOk);
+    assert(sdk.item_handle.finish_invalidation(
+               removal_checkpoint, 0) == qol::contracts::kQolItemHandleStatusOk);
+    resolved_item = qol::game::resolve_item(
+        injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag);
+    assert(resolved_item.item == &handle_item);
+    assert(sdk.item_handle.begin_invalidation(
+               &handle_item, qol::contracts::kQolItemHandleProviderAny,
+               &removal_checkpoint) == qol::contracts::kQolItemHandleStatusOk);
+    assert(sdk.item_handle.finish_invalidation(
+               removal_checkpoint, 1) == qol::contracts::kQolItemHandleStatusOk);
+    assert(qol::game::resolve_item(
+               injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag).error ==
+           qol::game::ItemHandleError::kStale);
     assert(game.thread.frame_count() == 99);
     const auto& extension_bag_write = qol::game::extension_bag_write_port();
     assert(extension_bag_write.inventory.save_item_on_empty != nullptr);

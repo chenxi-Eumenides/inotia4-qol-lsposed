@@ -205,6 +205,7 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
                     context, handle);
         return false;
     }
+    extension_bag_invalidate_item_handle(item);
     if (!touch_window && extension_bag_write_api() != nullptr &&
         extension_bag_write_api()->inventory.free_item != nullptr) {
         (void)extension_free_item(item);

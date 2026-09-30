@@ -770,6 +770,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/choice_port.cpp
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
     ${CPP_DIR}/game/adapter_ports/game_host_port.cpp
+    ${CPP_DIR}/game/access/item_handle_registry.cpp
     ${CPP_DIR}/game/adapter_ports/character_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/inventory_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
@@ -987,6 +988,17 @@ target_include_directories(runtime_hooks_contract_tests PRIVATE
 target_compile_features(runtime_hooks_contract_tests PRIVATE cxx_std_17)
 set_target_properties(runtime_hooks_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME runtime_hooks_contract_tests COMMAND runtime_hooks_contract_tests)
+
+# ITM-08：typed item handle 槽表 ABA/容量/线程约束。
+add_executable(item_handle_registry_tests
+    test_item_handle_registry.cpp
+    ${CPP_DIR}/game/access/item_handle_registry.cpp
+)
+target_include_directories(item_handle_registry_tests PRIVATE ${CPP_DIR})
+target_compile_features(item_handle_registry_tests PRIVATE cxx_std_17)
+set_target_properties(item_handle_registry_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_definitions(item_handle_registry_tests PRIVATE QOL_ITEM_HANDLE_TESTING)
+add_test(NAME item_handle_registry_tests COMMAND item_handle_registry_tests)
 
 # T2l-w-write：game 层日志缝（qol_log_seam.h）——静默降级、输出序数/正文、帧节流路径。
 add_executable(qol_log_seam_tests

@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/access/inventory.h"
 #include "game/access/symbols.h"
 
@@ -77,6 +78,7 @@ QolResult write_extension_create_item(int32_t category, int32_t arg1, int32_t ar
 QolResult write_extension_free_item(void* item) {
     if (item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (fn_itempool_free == nullptr) return not_ready();
+    invalidate_item(item);
     fn_itempool_free(item);
     return contracts::ok();
 }

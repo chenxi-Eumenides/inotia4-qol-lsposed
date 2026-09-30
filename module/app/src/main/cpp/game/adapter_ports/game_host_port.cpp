@@ -5,6 +5,7 @@
 #include <pthread.h>
 
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/char.h"
 #include "game/access/craft.h"
@@ -460,6 +461,7 @@ QolResult write_inventory_save_item(void* item, void* param, int32_t* out_saved)
 QolResult write_inventory_free_item(void* item) {
     if (item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (fn_itempool_free == nullptr) return not_ready();
+    invalidate_item(item);
     fn_itempool_free(item);
     return contracts::ok();
 }
@@ -611,6 +613,8 @@ void game_host_mark_main_thread() {
     g_main_thread = pthread_self();
     g_main_thread_set.store(true, std::memory_order_release);
 }
+
+bool game_host_is_main_thread() { return game_is_main_thread() != 0; }
 
 const contracts::QolGameHost& game_host_adapter() {
     static const contracts::QolGameHost host = make_game_host();

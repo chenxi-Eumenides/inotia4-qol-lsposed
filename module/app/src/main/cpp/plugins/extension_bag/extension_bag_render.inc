@@ -301,6 +301,13 @@ void* module_item_locked(int bag, int slot) {
         }
         item = materialize_module_item_locked(descriptor);
         if (item == nullptr) return nullptr;
+        if (!extension_bag_register_item_handle(item)) {
+            (void)extension_free_item(item);
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "module materialize rejected item handle registration bag=%d slot=%d",
+                          bag, slot);
+            return nullptr;
+        }
         uint32_t handle = 0;
         if (ownership::allocate(&g_ownership_ledger, &handle) != ownership::Outcome::kOk) {
             release_temporary_item_locked(item);

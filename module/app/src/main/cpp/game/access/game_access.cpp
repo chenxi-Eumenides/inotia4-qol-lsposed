@@ -1,4 +1,5 @@
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/symbols/symbol_resolver.h"
 #include "game/variants/game_variant.h"
 #include "game/feature/game_feature.h"
@@ -521,7 +522,11 @@ static std::atomic<uint16_t> g_slots_state{0xFFFF};
 // 存档槽区重载：先释放三槽已挂接角色对象，再重载。与游戏自身 SaveSlot_Delete 的清理惯用法一致
 // （SAVE_DestroySaveSlot → SAVE_CreateSaveSlot）；原因、副作用与调用约束见 game/access/game_access.h 注释。
 void save_slots_reload() {
-    if (fn_save_destroy_save_slot != nullptr) fn_save_destroy_save_slot();
+    if (fn_save_destroy_save_slot != nullptr) {
+        qol::game::invalidate_item_handles_for_provider(
+            qol::contracts::kQolItemHandleProviderNative);
+        fn_save_destroy_save_slot();
+    }
     if (fn_save_create_save_slot != nullptr) fn_save_create_save_slot();
     g_slots_stale.store(false, std::memory_order_release);
 }

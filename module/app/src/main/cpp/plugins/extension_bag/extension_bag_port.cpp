@@ -8,12 +8,20 @@
 #include "contracts/host_sdk.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <string>
 
 namespace {
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
+
+const qol::contracts::QolItemHandleApi* item_handle_api() {
+    if (g_sdk == nullptr ||
+        g_sdk->abi.size < offsetof(qol::contracts::QolHostSdk, item_handle) +
+                              sizeof(qol::contracts::QolItemHandleApi)) return nullptr;
+    return &g_sdk->item_handle;
+}
 
 uint32_t canonical_count_from_field(uint32_t field) {
     return virtual_bag_canonical_from_field(field, field);
@@ -49,6 +57,33 @@ void qol::features::extension_bag::extension_bag_bind_port_sdk(
     const qol::contracts::QolHostSdk* sdk) {
     g_sdk = sdk;
     virtual_bag::set_count_policy(sdk == nullptr ? nullptr : &kCountPolicy);
+}
+
+bool extension_bag_register_item_handle(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr || api->register_item == nullptr) return false;
+    qol::contracts::QolItemHandle handle{};
+    return api->register_item(
+               item, qol::contracts::kQolItemHandleProviderExtensionBag, &handle) ==
+               qol::contracts::kQolItemHandleStatusOk &&
+           handle.slot != 0 && handle.generation != 0;
+}
+
+void extension_bag_invalidate_item_handle(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr || api->invalidate_item == nullptr) return;
+    (void)api->invalidate_item(
+        item, qol::contracts::kQolItemHandleProviderExtensionBag);
+}
+
+bool extension_bag_rebind_item_handle(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr) return false;
+    if (api->rebind_item != nullptr &&
+        api->rebind_item(
+            item, qol::contracts::kQolItemHandleProviderExtensionBag) ==
+            qol::contracts::kQolItemHandleStatusOk) return true;
+    return extension_bag_register_item_handle(item);
 }
 
 namespace {

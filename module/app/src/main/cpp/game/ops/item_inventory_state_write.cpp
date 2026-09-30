@@ -5,6 +5,7 @@
 
 #include "contracts/game_cache.h"
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
@@ -358,6 +359,7 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
 
     const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
     if (count > 1 && encoding != contracts::QolItemCountEncoding::kEncoded) {
+        invalidate_item(item);
         fn_itempool_free(item);
         return item_error(out, encoding == contracts::QolItemCountEncoding::kUnknown
                                    ? kQolErrNotReady
@@ -368,16 +370,19 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
     }
     if (count > 1) {
         if (item_count == nullptr || item_count->write_effective == nullptr) {
+            invalidate_item(item);
             fn_itempool_free(item);
             return item_error(out, kQolErrNotReady, "item count provider unavailable");
         }
         const QolResult write_result = item_count->write_effective(item, static_cast<uint32_t>(count));
         if (!contracts::succeeded(write_result)) {
             if (write_result.code != kQolErrNotReady && write_result.code != kQolErrUnsupported) {
+                invalidate_item(item);
                 fn_itempool_free(item);
                 return item_error(out, kQolErrInternal, "item count write failed");
             }
             if (item_count->field_from_canonical == nullptr) {
+                invalidate_item(item);
                 fn_itempool_free(item);
                 return item_error(out, kQolErrNotReady, "item count provider not ready");
             }
@@ -388,6 +393,7 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
             const QolResult fallback_result = item_count->field_from_canonical(
                 field, static_cast<uint32_t>(count), 0, &fallback_field);
             if (!contracts::succeeded(fallback_result)) {
+                invalidate_item(item);
                 fn_itempool_free(item);
                 return item_error(out, kQolErrInternal, "item count fallback failed");
             }
@@ -397,10 +403,12 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
 
     int8_t save_slot = -1;
     if (!fn_inven_find_save_slot(item, &save_slot)) {
+        invalidate_item(item);
         fn_itempool_free(item);
         return item_error(out, kQolErrBlocked, "inventory full");
     }
     if (!fn_inven_save_item(item, nullptr)) {
+        invalidate_item(item);
         fn_itempool_free(item);
         return item_error(out, kQolErrInternal, "save item failed");
     }
@@ -608,16 +616,27 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
     if (ref.kind == InventoryItemKind::kProvider) {
         // 中立 provider：provider 缺失（未注册/停用）时按删除失败处理，不落入原版删除链。
         const auto* provider = extension_provider();
+        contracts::QolItemHandle checkpoint{};
+        const bool suspended = begin_item_invalidation(
+            ref.native_item, contracts::kQolItemHandleProviderAny, &checkpoint);
         if (provider == nullptr || provider->remove_native_item == nullptr ||
             provider->remove_native_item(ref.native_item) == 0) {
+            if (suspended) finish_item_invalidation(checkpoint, false);
             return item_error(out, kQolErrInternal, "extension item removal failed");
         }
+        if (suspended) finish_item_invalidation(checkpoint, true);
+        else invalidate_item(ref.native_item);
         sync_projected_slot_if_available(ref.bag, ref.slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
     if (ref.bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
+    contracts::QolItemHandle checkpoint{};
+    const bool suspended = begin_item_invalidation(
+        ref.native_item, contracts::kQolItemHandleProviderAny, &checkpoint);
     const int result = fn_remove_item(ref.native_item);
+    if (suspended) finish_item_invalidation(checkpoint, result != 0);
+    else if (result) invalidate_item(ref.native_item);
     if (result) sync_projected_slot_if_available(ref.bag, ref.slot);
     if (!result) return item_error(out, kQolErrNotFound, "item not found");
     frame_cache_force_refresh();

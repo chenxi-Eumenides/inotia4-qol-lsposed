@@ -153,9 +153,12 @@ int main() {
     CHECK(game::lifecycle_participant_prepare_main_menu());
     CHECK(game::lifecycle_participant_inventory_state_id() == -1);
 
-    CHECK(contracts::kHostSdkMinor == 11);
+    CHECK(contracts::kHostSdkMinor == 12);
     CHECK(offsetof(contracts::QolHostSdk, lifecycle_participant_register) ==
           offsetof(contracts::QolHostSdk, ticket_result) + sizeof(contracts::QolTicketResultApi));
+    CHECK(offsetof(contracts::QolHostSdk, item_handle) ==
+          offsetof(contracts::QolHostSdk, lifecycle_participant_register) +
+              sizeof(contracts::QolLifecycleParticipantRegisterFn));
     std::printf("lifecycle_participants: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

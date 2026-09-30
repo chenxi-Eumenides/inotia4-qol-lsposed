@@ -23,6 +23,7 @@ constexpr int32_t kQolLogDomainCatalog = 14;
 constexpr int32_t kQolLogLevelDebug = 0;
 constexpr int32_t kQolLogLevelInfo = 1;
 constexpr int32_t kQolLogLevelWarn = 2;
+constexpr int32_t kQolLogLevelError = 3;
 
 inline const contracts::QolHostSdk*& qol_seam_sdk_slot() {
     static const contracts::QolHostSdk* sdk = nullptr;
@@ -85,5 +86,7 @@ inline void qol_seam_write(int32_t level, int32_t domain, const char* file, int 
     qol::game::qol_seam_write(qol::game::kQolLogLevelInfo, (dom), __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_SEAM_WARN(dom, ...) \
     qol::game::qol_seam_write(qol::game::kQolLogLevelWarn, (dom), __FILE__, __LINE__, __VA_ARGS__)
+#define QOL_LOG_SEAM_ERROR(dom, ...) \
+    qol::game::qol_seam_write(qol::game::kQolLogLevelError, (dom), __FILE__, __LINE__, __VA_ARGS__)
 
 }  // namespace qol::game

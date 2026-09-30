@@ -1398,6 +1398,10 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             release_tracked_item_locked(item_handle, item, "unequip adopt slot protected");
             return ExtensionBagUnequipResult::kFailed;
         }
+        if (!extension_bag_rebind_item_handle(item)) {
+            release_tracked_item_locked(item_handle, item, "unequip adopt handle registration");
+            return ExtensionBagUnequipResult::kFailed;
+        }
         g_module_objects[adopt_bag][adopt_slot] = item;
         g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
         g_module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
@@ -1627,6 +1631,11 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
             g_game->character_write.set_equipped_item(character, equip_slot, nullptr))) {
         return false;
     }
+    if (!extension_bag_rebind_item_handle(item)) {
+        VIRTBAG_LOG("native unequip adopt handle registration failed bag=%d slot=%d",
+                    dst_bag, dst_slot);
+        return false;
+    }
     g_item_state_dirty = true;
     persist_state_locked();
     if (g_module_view_installed && g_module_view_index == dst_bag) {
@@ -1738,6 +1747,12 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
             descriptor =
                 virtual_bag::apply_new_slot_descriptor(previous_descriptor, source, false);
             VIRTBAG_LOG("native save place blocked by active object bag=%d slot=%d", bag, slot);
+            return VirtualBagPlaceOutcome::kRejected;
+        }
+        if (!extension_bag_rebind_item_handle(req.item)) {
+            descriptor =
+                virtual_bag::apply_new_slot_descriptor(previous_descriptor, source, false);
+            VIRTBAG_LOG("native save place handle registration failed bag=%d slot=%d", bag, slot);
             return VirtualBagPlaceOutcome::kRejected;
         }
         g_module_objects[bag][slot] = req.item;
@@ -2075,6 +2090,14 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     if (!module_object_generation_advance_locked(
             adopt_bag, adopt_slot, "original bag unequip adopt")) {
         VIRTBAG_LOG("original bag unequip adopt blocked by active object bag=%d slot=%d",
+                    adopt_bag, adopt_slot);
+        return false;
+    }
+    if (!extension_bag_rebind_item_handle(item)) {
+        descriptor = virtual_bag::Item{};
+        if (adopted_handle != 0) ownership::release(&g_ownership_ledger, adopted_handle);
+        g_module_object_handles[adopt_bag][adopt_slot] = 0;
+        VIRTBAG_LOG("original bag unequip handle registration failed bag=%d slot=%d",
                     adopt_bag, adopt_slot);
         return false;
     }

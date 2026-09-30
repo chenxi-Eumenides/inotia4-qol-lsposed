@@ -27,6 +27,7 @@
 #include "commands.h"
 #include "http.h"
 #include "in_flight.h"
+#include "item_handle.h"
 #include "lifecycle_participant.h"
 #include "panels.h"
 #include "result.h"
@@ -292,10 +293,11 @@ struct QolHostSdk {
     QolTicketResultApi ticket_result;
     // 通用同步存档/UI 生命周期参与者注册（尾追加）。
     QolLifecycleParticipantRegisterFn lifecycle_participant_register;
+    QolItemHandleApi item_handle;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 11：追加通用存档/UI 生命周期参与者注册入口。
-constexpr uint16_t kHostSdkMinor = 11;
+// minor 12：追加 Game Adapter 内部 item-handle 登记、解析与生命周期回调。
+constexpr uint16_t kHostSdkMinor = 12;
 
 }  // namespace qol::contracts

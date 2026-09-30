@@ -2,6 +2,7 @@
 
 #include "game/symbols/game_symbols.h"
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/state/game_state.h"
 
 namespace qol::game {
@@ -247,7 +248,10 @@ std::string enter_slot_locked(int32_t slot) {
     uint8_t** flag_ptr = reinterpret_cast<uint8_t**>(g_base + G_GAME_RESUME_FLAG_GOT_VMA);
     if (*flag_ptr != nullptr) **flag_ptr = 0;
     contracts::qol_runtime_hooks().save_enter_mark_pending();  // 进入存档回调：标记读档发起
+    const bool handle_transition = begin_item_handle_lifecycle_transition();
     int r = fn_game_start_resume_game(slot);
+    if (handle_transition) finish_item_handle_lifecycle_transition(r != 0);
+    else if (r != 0) invalidate_all_item_handles();
     if (!r) return op_err("enter slot failed");
 
     // v0.4.49：进档后清理残留教学暂停——obj170=6（药水教学）是持久状态，

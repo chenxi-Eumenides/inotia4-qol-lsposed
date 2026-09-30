@@ -48,6 +48,50 @@ const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
 
+const qol::contracts::QolItemHandleApi* item_handle_api() {
+    if (g_sdk == nullptr ||
+        g_sdk->abi.size < offsetof(qol::contracts::QolHostSdk, item_handle) +
+                              sizeof(qol::contracts::QolItemHandleApi)) return nullptr;
+    return &g_sdk->item_handle;
+}
+
+void invalidate_item_handle(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr || api->invalidate_item == nullptr) return;
+    (void)api->invalidate_item(
+        item, qol::contracts::kQolItemHandleProviderAny);
+}
+
+void transfer_item_handle_to_extension_bag(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr) return;
+    const uint32_t provider = qol::contracts::kQolItemHandleProviderExtensionBag;
+    if (api->rebind_item != nullptr &&
+        api->rebind_item(item, provider) ==
+            qol::contracts::kQolItemHandleStatusOk) return;
+    if (api->register_item != nullptr) {
+        qol::contracts::QolItemHandle handle{};
+        (void)api->register_item(item, provider, &handle);
+    }
+}
+
+bool begin_item_handle_invalidation(void* item, qol::contracts::QolItemHandle* checkpoint) {
+    const auto* api = item_handle_api();
+    return item != nullptr && checkpoint != nullptr && api != nullptr &&
+           api->begin_invalidation != nullptr &&
+           api->begin_invalidation(
+               item, qol::contracts::kQolItemHandleProviderAny, checkpoint) ==
+               qol::contracts::kQolItemHandleStatusOk;
+}
+
+void finish_item_handle_invalidation(qol::contracts::QolItemHandle checkpoint,
+                                     bool committed) {
+    const auto* api = item_handle_api();
+    if (api != nullptr && api->finish_invalidation != nullptr) {
+        (void)api->finish_invalidation(checkpoint, committed ? 1 : 0);
+    }
+}
+
 // D2c-2a：扩展背包经 capability 现取（不缓存跨帧指针）。能力缺失或 enabled()==false
 // 与原 extension_bag_enabled()==false 等价（EB disabled）；调用方按 disabled 降级
 // （与 D2b-1/D2b-2 口径一致）。本 TU 不再直接依赖 EB 头与 EB 符号（弹窗 UI 见
@@ -574,6 +618,7 @@ void consume_item_wrapper(void* item) {
         g_backup_consume_item, g_in_consume_item);
     if (s2_borrow_armed && !extension_item) {
         if (s2_physical_slot_item(borrow_bag, borrow_slot) != item) {
+            invalidate_item_handle(item);
             // 原版仍删除了整堆（与 0x104818 的 b>1 递减分支反汇编结论矛盾）：
             // 对象已释放，禁止触磁字段，只记 ERROR 供取证。
             QOL_LOG_ERROR(QolDomain::kInventory,
@@ -625,15 +670,20 @@ int remove_item_wrapper(void* item) {
                         g_in_remove_item ? 1 : 0,
                         reinterpret_cast<void*>(g_backup_remove_item));
     const qol::contracts::ExtensionBagApi* eb = eb_active();
-    return stage4_remove_item(item,
-                              (eb != nullptr && eb->identify_native_item != nullptr)
-                                  ? eb->identify_native_item
-                                  : nullptr,
-                              (eb != nullptr && eb->remove_native_item != nullptr)
-                                  ? eb->remove_native_item
-                                  : nullptr,
-                              g_backup_remove_item,
-                              g_in_remove_item);
+    qol::contracts::QolItemHandle handle_checkpoint{};
+    const bool handle_suspended = begin_item_handle_invalidation(item, &handle_checkpoint);
+    const int result = stage4_remove_item(item,
+                                          (eb != nullptr && eb->identify_native_item != nullptr)
+                                              ? eb->identify_native_item
+                                              : nullptr,
+                                          (eb != nullptr && eb->remove_native_item != nullptr)
+                                              ? eb->remove_native_item
+                                              : nullptr,
+                                          g_backup_remove_item,
+                                          g_in_remove_item);
+    if (handle_suspended) finish_item_handle_invalidation(handle_checkpoint, result != 0);
+    else if (result != 0) invalidate_item_handle(item);
+    return result;
 }
 
 int save_item_wrapper(void* item) {
@@ -656,11 +706,17 @@ int save_item_wrapper(void* item) {
         // 归一化 payload 相同的堆，且模式视图相加不超上限时直接并入扩展堆并
         // 上报成功；否则保持原版入库（含原版同类堆合并）。修复拾取可堆叠
         // 物品在原版背包新开格、不并入扩展同类堆的缺陷。
-        if (eb->merge_native_item != nullptr && eb->merge_native_item(item)) return 1;
+        if (eb->merge_native_item != nullptr && eb->merge_native_item(item)) {
+            invalidate_item_handle(item);
+            return 1;
+        }
     }
     const int result = g_backup_save_item(item);
     if (result != 0) return result;
-    if (eb != nullptr && eb->adopt_native_item != nullptr && eb->adopt_native_item(item)) return 1;
+    if (eb != nullptr && eb->adopt_native_item != nullptr && eb->adopt_native_item(item)) {
+        transfer_item_handle_to_extension_bag(item);
+        return 1;
+    }
     return 0;
 }
 

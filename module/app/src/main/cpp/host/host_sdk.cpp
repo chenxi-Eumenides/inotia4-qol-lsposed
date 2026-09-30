@@ -27,6 +27,7 @@
 #include "infra/text_scope.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "patch/ptr_slot.h"
 
 extern bool module_save_register_participant(const ModuleSaveParticipant&) __attribute__((weak));
@@ -455,6 +456,60 @@ int32_t sdk_lifecycle_participant_register(
     return host_lifecycle_participant_register(participant);
 }
 
+int32_t sdk_item_handle_register(void* item, uint32_t provider_id,
+                                 contracts::QolItemHandle* out_handle) {
+    if (item == nullptr || out_handle == nullptr) {
+        return contracts::kQolItemHandleStatusInvalidArgument;
+    }
+    qol::game::ItemHandleError error{};
+    *out_handle = qol::game::register_item(item, provider_id, &error);
+    if (out_handle->slot != 0) return contracts::kQolItemHandleStatusOk;
+    switch (error) {
+        case qol::game::ItemHandleError::kInvalidArgument:
+            return contracts::kQolItemHandleStatusInvalidArgument;
+        case qol::game::ItemHandleError::kWrongThread:
+            return contracts::kQolItemHandleStatusWrongThread;
+        case qol::game::ItemHandleError::kFull:
+            return contracts::kQolItemHandleStatusCapacity;
+        case qol::game::ItemHandleError::kStale:
+            return contracts::kQolItemHandleStatusStale;
+        case qol::game::ItemHandleError::kType:
+            return contracts::kQolItemHandleStatusType;
+        case qol::game::ItemHandleError::kTransition:
+            return contracts::kQolItemHandleStatusTransition;
+        case qol::game::ItemHandleError::kNone:
+            return contracts::kQolItemHandleStatusNotFound;
+    }
+    return contracts::kQolItemHandleStatusNotFound;
+}
+
+int32_t sdk_item_handle_invalidate(void* item, uint32_t provider_id) {
+    return qol::game::invalidate_item(item, provider_id)
+               ? contracts::kQolItemHandleStatusOk
+               : contracts::kQolItemHandleStatusNotFound;
+}
+
+int32_t sdk_item_handle_rebind(void* item, uint32_t provider_id) {
+    return qol::game::rebind_item(item, provider_id)
+               ? contracts::kQolItemHandleStatusOk
+               : contracts::kQolItemHandleStatusNotFound;
+}
+
+int32_t sdk_item_handle_begin_invalidation(void* item, uint32_t provider_id,
+                                           contracts::QolItemHandle* out_checkpoint) {
+    if (out_checkpoint == nullptr) return contracts::kQolItemHandleStatusInvalidArgument;
+    return qol::game::begin_item_invalidation(item, provider_id, out_checkpoint)
+               ? contracts::kQolItemHandleStatusOk
+               : contracts::kQolItemHandleStatusNotFound;
+}
+
+int32_t sdk_item_handle_finish_invalidation(contracts::QolItemHandle checkpoint,
+                                            int32_t committed) {
+    return qol::game::finish_item_invalidation(checkpoint, committed != 0)
+               ? contracts::kQolItemHandleStatusOk
+               : contracts::kQolItemHandleStatusStale;
+}
+
 QolResult sdk_panels_register_item(const contracts::PanelItemSpec* item) {
     if (item == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
     return result_from_bool(infra::panels_register_item(*item), kQolErrConflict, kConflict);
@@ -850,6 +905,10 @@ contracts::QolHostSdk make_host_sdk() {
         &infra::commands_current_attempt,
     };
     sdk.lifecycle_participant_register = &sdk_lifecycle_participant_register;
+    sdk.item_handle = {&sdk_item_handle_register, &sdk_item_handle_invalidate,
+                       &sdk_item_handle_rebind,
+                       &sdk_item_handle_begin_invalidation,
+                       &sdk_item_handle_finish_invalidation};
     return sdk;
 }
 
