@@ -2297,6 +2297,13 @@ void test_inventory_owner_vs_legacy_golden() {
         CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
         uint16_t status = 0;
         const std::string owner_http = dispatch_get("/api/item/inventory", &status);
+        std::vector<char> enriched_inventory(qol::contracts::kQolItemStateRawInventoryCapacity);
+        uint32_t enriched_size = 0;
+        CHECK(item_state_api->write_state_json(
+                  static_cast<int32_t>(qol::contracts::QolItemStateKind::kEnrichedInventory),
+                  enriched_inventory.data(), static_cast<uint32_t>(enriched_inventory.size()),
+                  &enriched_size).ok == kQolOk);
+        CHECK(std::string(enriched_inventory.data(), enriched_size) == owner_http);
         // 探针（非断言）：owner 公开面（core.item HTTP）输出为**富化** schema，与 legacy
         // raw builder 天然不同；raw owner serializer（plugin.cpp:490）未经任何公开接口暴露，
         // 故 B0 的 owner-raw==legacy 不可达 → B2 前置不通过。差异清单见执行记录。

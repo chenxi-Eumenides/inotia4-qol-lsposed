@@ -32,7 +32,7 @@ inline std::string build_character_state_json_via_owner(
     return std::string(buffer.data(), size);
 }
 
-// T2h-B2：item.state 适配器（同形态）；kind 当前仅 kRawInventory。
+// item.state host cache 适配器请求 raw inventory；character owner 可独立请求 enriched inventory。
 inline std::string build_item_state_json_via_owner(const qol::contracts::ItemStateApi* api,
                                                    int32_t kind, uint32_t capacity,
                                                    std::string (*legacy)()) {

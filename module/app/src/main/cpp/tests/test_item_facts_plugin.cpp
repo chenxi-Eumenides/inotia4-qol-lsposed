@@ -37,8 +37,10 @@ int main() {
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
-    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
+    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 1);
     CHECK(descriptor.provides[1].iface != nullptr);
+    CHECK(static_cast<int32_t>(qol::contracts::QolItemStateKind::kRawInventory) == 0);
+    CHECK(static_cast<int32_t>(qol::contracts::QolItemStateKind::kEnrichedInventory) == 1);
     CHECK(static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[1].iface)
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);

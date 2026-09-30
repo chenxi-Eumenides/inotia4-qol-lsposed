@@ -13,6 +13,7 @@
 
 #include "contracts/character_facts.h"
 #include "contracts/character_state.h"
+#include "contracts/item_state.h"
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/commands.h"
@@ -121,6 +122,11 @@ const contracts::CapabilityRequirement kRequires[] = {
                                              contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
                                              contracts::kHttpDispatchVersion.minor}},
+};
+
+const contracts::CapabilityRequirement kOptionalRequires[] = {
+    {contracts::kItemStateCapabilityId,
+     {contracts::kItemStateVersion.major, contracts::kItemStateVersion.minor}},
 };
 
 QolResult not_ready() {
@@ -1345,22 +1351,315 @@ bool write_truncated_result(char* out, uint32_t capacity, uint32_t* out_size,
     return true;
 }
 
-// 写后 state：owner 经 character.state 读端口当场同步读取并序列化，与迁移前 build_*_json 逐字节一致。
-bool append_character_state(std::string& body, contracts::QolCharacterStateKind kind,
-                            uint32_t capacity) {
-    std::vector<char> buffer(kPartyCapacity);
-    uint32_t state_size = 0;
-    const QolResult result = write_character_state_json(
-        kind, buffer.data(), static_cast<uint32_t>(buffer.size()), &state_size);
-    if (!contracts::succeeded(result)) return false;
-    body = "{\"ok\":true,\"state\":";
-    body.append(buffer.data(), state_size);
-    body += "}";
-    return body.size() <= capacity;
+bool read_http_projection(contracts::QolCharacterHttpJsonKind kind, std::string* out) {
+    if (out == nullptr || g_http_port == nullptr || g_http_port->read.body_json == nullptr) {
+        return false;
+    }
+    uint32_t capacity = kPartyCapacity;
+    if (kind == contracts::QolCharacterHttpJsonKind::kPlayer) capacity = kPlayerCapacity;
+    else if (kind == contracts::QolCharacterHttpJsonKind::kSkills) capacity = kSkillsCapacity;
+    else if (kind == contracts::QolCharacterHttpJsonKind::kMercenaries) capacity = kMercenariesCapacity;
+    std::vector<char> buffer(capacity);
+    uint32_t size = 0;
+    if (!contracts::succeeded(g_http_port->read.body_json(static_cast<int32_t>(kind), buffer.data(),
+                                                          capacity, &size)) ||
+        size > capacity) {
+        return false;
+    }
+    out->assign(buffer.data(), size);
+    return true;
 }
 
-// 主线程结果处理器：owner 侧按 kind 分派 typed 低层原语并组装响应
-// （成功 {"ok":true[,"state":...]}；失败透错误体）。
+const contracts::ItemStateApi* item_state_capability() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult required = g_sdk->capabilities.require(
+        contracts::kItemStateCapabilityId,
+        QolVersionRange{contracts::kItemStateVersion.major, contracts::kItemStateVersion.minor},
+        &iface);
+    return contracts::succeeded(required) && iface != nullptr
+               ? static_cast<const contracts::ItemStateApi*>(iface)
+               : nullptr;
+}
+
+bool read_enriched_inventory(const contracts::ItemStateApi* api, std::string* out) {
+    if (api == nullptr || api->write_state_json == nullptr || out == nullptr) return false;
+    thread_local std::vector<char> buffer(contracts::kQolItemStateRawInventoryCapacity);
+    uint32_t size = 0;
+    const QolResult result = api->write_state_json(
+        static_cast<int32_t>(contracts::QolItemStateKind::kEnrichedInventory), buffer.data(),
+        static_cast<uint32_t>(buffer.size()), &size);
+    if (!contracts::succeeded(result) || size > buffer.size()) return false;
+    out->assign(buffer.data(), size);
+    return true;
+}
+
+bool json_slice_equal(const JsonSlice& left, const JsonSlice& right) {
+    return left.size == right.size &&
+           (left.size == 0 || std::memcmp(left.data, right.data, left.size) == 0);
+}
+
+bool json_slice_int(const JsonSlice& object, const char* key, int32_t* out) {
+    long long value = 0;
+    if (out == nullptr || !json_int_member(object.data, object.size, key, &value) ||
+        value < std::numeric_limits<int32_t>::min() ||
+        value > std::numeric_limits<int32_t>::max()) {
+        return false;
+    }
+    *out = static_cast<int32_t>(value);
+    return true;
+}
+
+bool append_party_slot_changes(const std::string& before, const std::string& after,
+                               std::string* out) {
+    if (out == nullptr) return false;
+    int32_t before_count = 0;
+    int32_t after_count = 0;
+    if (!json_array_size(before.data(), static_cast<uint32_t>(before.size()), &before_count) ||
+        !json_array_size(after.data(), static_cast<uint32_t>(after.size()), &after_count)) {
+        return false;
+    }
+    *out = "[";
+    bool first = true;
+    const int32_t count = std::max(before_count, after_count);
+    for (int32_t slot = 0; slot < count; ++slot) {
+        JsonSlice old_member{};
+        JsonSlice new_member{};
+        const bool has_old = slot < before_count &&
+            json_element(before.data(), static_cast<uint32_t>(before.size()), slot, &old_member);
+        const bool has_new = slot < after_count &&
+            json_element(after.data(), static_cast<uint32_t>(after.size()), slot, &new_member);
+        if ((!has_old && !has_new) ||
+            (has_old && has_new && json_slice_equal(old_member, new_member))) {
+            continue;
+        }
+        if (!first) out->push_back(',');
+        first = false;
+        *out += "{\"slot\":" + std::to_string(slot) + ",\"member\":";
+        *out += has_new ? std::string(new_member.data, new_member.size) : "null";
+        out->push_back('}');
+    }
+    out->push_back(']');
+    return true;
+}
+
+bool find_inventory_item(const JsonSlice& items, int32_t slot, JsonSlice* out, bool* found) {
+    if (out == nullptr || found == nullptr) return false;
+    *found = false;
+    int32_t count = 0;
+    if (!json_array_size(items.data, items.size, &count)) return false;
+    for (int32_t index = 0; index < count; ++index) {
+        JsonSlice item{};
+        int32_t item_slot = -1;
+        if (!json_element(items.data, items.size, index, &item) ||
+            !json_slice_int(item, "slot", &item_slot)) {
+            return false;
+        }
+        if (item_slot == slot) {
+            *out = item;
+            *found = true;
+            return true;
+        }
+    }
+    return true;
+}
+
+void append_inventory_result_slot(std::string& out, bool* first, int32_t bag, int32_t slot,
+                                  const JsonSlice* item) {
+    if (!*first) out.push_back(',');
+    *first = false;
+    out += "{\"bag\":" + std::to_string(bag) + ",\"slot\":" +
+           std::to_string(slot) + ",\"item\":";
+    out += item != nullptr ? std::string(item->data, item->size) : "null";
+    out.push_back('}');
+}
+
+bool append_inventory_slot_changes(const std::string& before, const std::string& after,
+                                   std::string* out) {
+    if (out == nullptr) return false;
+    JsonSlice before_bags{};
+    JsonSlice after_bags{};
+    if (!json_member(before.data(), static_cast<uint32_t>(before.size()), "bags", &before_bags) ||
+        !json_member(after.data(), static_cast<uint32_t>(after.size()), "bags", &after_bags)) {
+        return false;
+    }
+    int32_t before_count = 0;
+    int32_t after_count = 0;
+    if (!json_array_size(before_bags.data, before_bags.size, &before_count) ||
+        !json_array_size(after_bags.data, after_bags.size, &after_count)) {
+        return false;
+    }
+    *out = "[";
+    bool first = true;
+    for (int32_t bag_index = 0; bag_index < std::max(before_count, after_count); ++bag_index) {
+        JsonSlice old_bag{};
+        JsonSlice new_bag{};
+        const bool has_old_bag = bag_index < before_count &&
+            json_element(before_bags.data, before_bags.size, bag_index, &old_bag);
+        const bool has_new_bag = bag_index < after_count &&
+            json_element(after_bags.data, after_bags.size, bag_index, &new_bag);
+        if (!has_old_bag && !has_new_bag) continue;
+        JsonSlice old_items{};
+        JsonSlice new_items{};
+        int32_t old_bag_id = bag_index;
+        int32_t new_bag_id = bag_index;
+        if ((has_old_bag && (!json_member(old_bag.data, old_bag.size, "items", &old_items) ||
+                             !json_slice_int(old_bag, "bag", &old_bag_id))) ||
+            (has_new_bag && (!json_member(new_bag.data, new_bag.size, "items", &new_items) ||
+                             !json_slice_int(new_bag, "bag", &new_bag_id)))) {
+            return false;
+        }
+        if (has_old_bag && has_new_bag && old_bag_id != new_bag_id) return false;
+        const int32_t bag = has_new_bag ? new_bag_id : old_bag_id;
+        int32_t old_item_count = 0;
+        int32_t new_item_count = 0;
+        if ((has_old_bag && !json_array_size(old_items.data, old_items.size, &old_item_count)) ||
+            (has_new_bag && !json_array_size(new_items.data, new_items.size, &new_item_count))) {
+            return false;
+        }
+        for (int32_t index = 0; index < new_item_count; ++index) {
+            JsonSlice new_item{};
+            int32_t slot = -1;
+            if (!json_element(new_items.data, new_items.size, index, &new_item) ||
+                !json_slice_int(new_item, "slot", &slot)) {
+                return false;
+            }
+            JsonSlice old_item{};
+            bool found_old = false;
+            if (has_old_bag && !find_inventory_item(old_items, slot, &old_item, &found_old)) {
+                return false;
+            }
+            if (!found_old || !json_slice_equal(old_item, new_item)) {
+                append_inventory_result_slot(*out, &first, bag, slot, &new_item);
+            }
+        }
+        for (int32_t index = 0; index < old_item_count; ++index) {
+            JsonSlice old_item{};
+            int32_t slot = -1;
+            if (!json_element(old_items.data, old_items.size, index, &old_item) ||
+                !json_slice_int(old_item, "slot", &slot)) {
+                return false;
+            }
+            JsonSlice new_item{};
+            bool found_new = false;
+            if (has_new_bag && !find_inventory_item(new_items, slot, &new_item, &found_new)) {
+                return false;
+            }
+            if (!found_new) append_inventory_result_slot(*out, &first, bag, slot, nullptr);
+        }
+    }
+    out->push_back(']');
+    return true;
+}
+
+bool read_character_party_state(contracts::QolCharacterStateParty* out) {
+    return out != nullptr && g_character_state_port != nullptr &&
+           g_character_state_port->read.party != nullptr &&
+           contracts::succeeded(g_character_state_port->read.party(out));
+}
+
+bool read_character_player_state(contracts::QolCharacterStatePlayer* out) {
+    return out != nullptr && g_character_state_port != nullptr &&
+           g_character_state_port->read.player != nullptr &&
+           contracts::succeeded(g_character_state_port->read.player(out));
+}
+
+bool read_http_role_slice(contracts::QolCharacterHttpJsonKind kind, int32_t role,
+                          std::string* json, JsonSlice* member) {
+    if (json == nullptr || member == nullptr || role < 0 || !read_http_projection(kind, json)) {
+        return false;
+    }
+    return json_element(json->data(), static_cast<uint32_t>(json->size()), role, member) &&
+           !json_slice_is_null(*member);
+}
+
+bool read_confirmed_attack_target(int32_t role, int32_t requested_target,
+                                  int32_t* confirmed_target) {
+    std::string party;
+    JsonSlice member{};
+    JsonSlice combat{};
+    int32_t target = -1;
+    // The current owner party projection does not publish target/combat fields, so it cannot
+    // confirm the post-write target and the caller falls back to the acceptance result.
+    if (confirmed_target == nullptr ||
+        !read_http_role_slice(contracts::QolCharacterHttpJsonKind::kParty, role, &party, &member) ||
+        !json_slice_int(member, "target_slot", &target) ||
+        !json_member(member.data, member.size, "combat", &combat) || combat.size != 4 ||
+        std::memcmp(combat.data, "true", 4) != 0 || target != requested_target) {
+        return false;
+    }
+    *confirmed_target = target;
+    return true;
+}
+
+bool read_skill_result(int32_t role, int32_t action_id, bool include_all_skills,
+                       std::string* result) {
+    if (result == nullptr) return false;
+    std::string skills_json;
+    JsonSlice role_slice{};
+    if (!read_http_role_slice(contracts::QolCharacterHttpJsonKind::kSkills, role,
+                              &skills_json, &role_slice)) {
+        return false;
+    }
+    if (include_all_skills) {
+        *result = std::string(role_slice.data, role_slice.size);
+        return true;
+    }
+    JsonSlice skills{};
+    long long skill_points = 0;
+    if (!json_member(role_slice.data, role_slice.size, "skills", &skills) ||
+        !json_int_member(role_slice.data, role_slice.size, "skill_points", &skill_points)) {
+        return false;
+    }
+    int32_t count = 0;
+    if (!json_array_size(skills.data, skills.size, &count)) return false;
+    JsonSlice target{};
+    bool found = false;
+    for (int32_t i = 0; i < count; ++i) {
+        JsonSlice skill{};
+        long long id = -1;
+        if (!json_element(skills.data, skills.size, i, &skill) ||
+            !json_int_member(skill.data, skill.size, "action_id", &id)) {
+            return false;
+        }
+        if (id == action_id) {
+            target = skill;
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
+    long long level = 0;
+    if (!json_int_member(target.data, target.size, "level", &level)) return false;
+    *result = "{\"ok\":true,\"skills\":[{\"action_id\":" +
+              std::to_string(action_id) + ",\"level\":" + std::to_string(level) +
+              "}],\"skill_points\":" + std::to_string(skill_points) + "}";
+    return true;
+}
+
+bool append_stat_changes(int32_t role, const contracts::QolCharacterStateParty& before,
+                         const contracts::QolCharacterStateParty& after, std::string* out) {
+    if (out == nullptr || role < 0 || role >= static_cast<int32_t>(contracts::kQolCharacterStatePartySize) ||
+        before.member_present[role] == 0 || after.member_present[role] == 0 ||
+        (after.members[role].fields & contracts::kQolCharacterStateHasStatusPoint) == 0) {
+        return false;
+    }
+    const auto& before_member = before.members[role];
+    const auto& after_member = after.members[role];
+    *out = "\"role\":{\"role\":" + std::to_string(role) + ",\"main_stats\":[";
+    bool first = true;
+    for (uint32_t attr = 0; attr < contracts::kQolCharacterStateMainStatCount; ++attr) {
+        if (before_member.main_stats[attr] == after_member.main_stats[attr]) continue;
+        if (!first) out->push_back(',');
+        first = false;
+        *out += "{\"attr\":" + std::to_string(attr) + ",\"value\":" +
+                std::to_string(after_member.main_stats[attr]) + "}";
+    }
+    *out += "],\"status_point\":" + std::to_string(after_member.status_point) + "}";
+    return true;
+}
+
+// 主线程结果处理器：owner 侧按 kind 分派 typed 低层原语并组装操作结果。
 bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
@@ -1378,6 +1677,8 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     if (kind == contracts::QolCharacterWriteKind::kSetAttr ||
         kind == contracts::QolCharacterWriteKind::kAddStat) {
         const bool set_attr = kind == contracts::QolCharacterWriteKind::kSetAttr;
+        contracts::QolCharacterStateParty party_before{};
+        const bool has_party_before = !set_attr && read_character_party_state(&party_before);
         std::string body = set_attr ? "{\"ok\":true,\"set\":[" : "{\"ok\":true,\"applied\":[";
         bool first = true;
         for (int32_t i = 0; i < p.point_count; ++i) {
@@ -1409,84 +1710,89 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
             }
         }
         body += "]}";
+        if (!set_attr && has_party_before) {
+            contracts::QolCharacterStateParty party_after{};
+            std::string role_result;
+            if (read_character_party_state(&party_after) &&
+                append_stat_changes(p.i0, party_before, party_after, &role_result)) {
+                body.pop_back();
+                body += "," + role_result + "}";
+            }
+        }
         return write_truncated_result(out, capacity, out_size, body);
     }
 
-    contracts::QolCharacterStateKind state_kind = contracts::QolCharacterStateKind::kParty;
-    bool has_state = true;
     QolResult result = contracts::ok();
+    std::string party_before;
+    bool has_party_before = false;
+    const bool tracks_party_change = kind == contracts::QolCharacterWriteKind::kPartyInclude ||
+                                     kind == contracts::QolCharacterWriteKind::kPartyExclude ||
+                                     kind == contracts::QolCharacterWriteKind::kPartyDischarge;
+    if (tracks_party_change) {
+        has_party_before = read_http_projection(contracts::QolCharacterHttpJsonKind::kParty,
+                                                &party_before);
+    }
+    const contracts::ItemStateApi* item_state = nullptr;
+    std::string inventory_before;
+    bool has_inventory_before = false;
+    if (kind == contracts::QolCharacterWriteKind::kPartyWithdraw) {
+        item_state = item_state_capability();
+        has_inventory_before = read_enriched_inventory(item_state, &inventory_before);
+    }
     switch (kind) {
         case contracts::QolCharacterWriteKind::kSetHp:
             result = ops->set_hp(p.i0, p.i1, &op);
-            has_state = false;
             break;
         case contracts::QolCharacterWriteKind::kSetMp:
             result = ops->set_mp(p.i0, p.i1, &op);
-            has_state = false;
             break;
         case contracts::QolCharacterWriteKind::kSetLevel:
             result = ops->set_level(p.i0, p.i1, p.i2, &op);
-            has_state = false;
             break;
         case contracts::QolCharacterWriteKind::kSetExperience:
             result = ops->set_experience(p.i0, p.i64, &op);
-            has_state = false;
             break;
         case contracts::QolCharacterWriteKind::kSetStatusPoint:
             result = ops->set_status_point(p.i0, p.i1, &op);
-            has_state = false;
             break;
         case contracts::QolCharacterWriteKind::kPartySwap:
             result = ops->party_swap(p.i0, p.i1, &op);
-            has_state = false;
             break;
         case contracts::QolCharacterWriteKind::kSetAutoAttack:
             result = ops->set_auto_attack(p.i0, p.i1, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         case contracts::QolCharacterWriteKind::kCastSkill:
             result = ops->cast_skill(p.i0, p.i1, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         case contracts::QolCharacterWriteKind::kAttackTarget:
             result = ops->attack_target(p.i0, p.i1, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         case contracts::QolCharacterWriteKind::kSwitchPlayer:
             result = ops->switch_player(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kPlayer;
             break;
         case contracts::QolCharacterWriteKind::kStopCombat:
             result = ops->stop_combat(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kPlayer;
             break;
         case contracts::QolCharacterWriteKind::kLearnAction:
             result = ops->learn_action(p.i0, p.i1, p.i2, &op);
-            state_kind = contracts::QolCharacterStateKind::kSkills;
             break;
         case contracts::QolCharacterWriteKind::kStatReset:
             result = ops->stat_reset(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kPlayer;
             break;
         case contracts::QolCharacterWriteKind::kSkillReset:
             result = ops->skill_reset(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kPlayer;
             break;
         case contracts::QolCharacterWriteKind::kPartyInclude:
             result = ops->party_include(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         case contracts::QolCharacterWriteKind::kPartyExclude:
             result = ops->party_exclude(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         case contracts::QolCharacterWriteKind::kPartyDischarge:
             result = ops->party_discharge(p.i0, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         case contracts::QolCharacterWriteKind::kPartyWithdraw:
             result = ops->party_withdraw(p.i0, p.i1, &op);
-            state_kind = contracts::QolCharacterStateKind::kParty;
             break;
         default:
             return false;
@@ -1496,7 +1802,113 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                               op.error_message_len != 0 ? op.error_message : nullptr);
     }
     std::string body = "{\"ok\":true}";
-    if (has_state) (void)append_character_state(body, state_kind, capacity);
+    switch (kind) {
+        case contracts::QolCharacterWriteKind::kSetHp:
+        case contracts::QolCharacterWriteKind::kSetMp:
+        case contracts::QolCharacterWriteKind::kSetLevel:
+        case contracts::QolCharacterWriteKind::kSetExperience:
+        case contracts::QolCharacterWriteKind::kSetStatusPoint:
+        case contracts::QolCharacterWriteKind::kPartySwap:
+        case contracts::QolCharacterWriteKind::kSetAttr:
+            break;
+        case contracts::QolCharacterWriteKind::kSetAutoAttack:
+            body = "{\"ok\":true,\"role\":{\"role\":" + std::to_string(p.i0) +
+                   ",\"auto_attack\":" + (p.i1 != 0 ? "true" : "false") + "}}";
+            break;
+        case contracts::QolCharacterWriteKind::kCastSkill: {
+            std::string skills_json;
+            JsonSlice member{};
+            long long active_skill = -1;
+            if (read_http_role_slice(contracts::QolCharacterHttpJsonKind::kSkills, p.i0,
+                                     &skills_json, &member) &&
+                json_int_member(member.data, member.size, "active_skill_id", &active_skill)) {
+                body = "{\"ok\":true,\"role\":{\"role\":" + std::to_string(p.i0) +
+                       ",\"active_skill_id\":" + std::to_string(active_skill) + "}}";
+            }
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kAttackTarget: {
+            // game ops setters are void and the read-face party model has no target/combat fields.
+            int32_t target = -1;
+            if (read_confirmed_attack_target(p.i0, p.i1, &target)) {
+                body = "{\"ok\":true,\"role\":{\"role\":" + std::to_string(p.i0) +
+                       ",\"target_slot\":" + std::to_string(target) + ",\"combat\":true}}";
+            }
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kSwitchPlayer: {
+            contracts::QolCharacterStatePlayer player{};
+            if (read_character_player_state(&player)) {
+                body = "{\"ok\":true,\"player\":{\"leader_slot\":" +
+                       std::to_string(player.leader_slot) + "}}";
+            }
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kStopCombat:
+            body = "{\"ok\":true,\"role\":{\"role\":" + std::to_string(p.i0) +
+                   ",\"combat\":false}}";
+            break;
+        case contracts::QolCharacterWriteKind::kLearnAction: {
+            std::string skills_result;
+            if (read_skill_result(p.i0, p.i1, false, &skills_result)) body = std::move(skills_result);
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kStatReset: {
+            contracts::QolCharacterStateParty party{};
+            if (read_character_party_state(&party) && p.i0 >= 0 &&
+                p.i0 < static_cast<int32_t>(contracts::kQolCharacterStatePartySize) &&
+                party.member_present[p.i0] != 0 &&
+                (party.members[p.i0].fields & contracts::kQolCharacterStateHasStatusPoint) != 0) {
+                body = "{\"ok\":true,\"role\":{\"role\":" + std::to_string(p.i0) +
+                       ",\"main_stats\":[";
+                for (uint32_t i = 0; i < contracts::kQolCharacterStateMainStatCount; ++i) {
+                    if (i != 0) body.push_back(',');
+                    body += std::to_string(party.members[p.i0].main_stats[i]);
+                }
+                body += "],\"status_point\":" +
+                        std::to_string(party.members[p.i0].status_point) + "}}";
+            }
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kSkillReset: {
+            std::string skills_json;
+            JsonSlice role_skills{};
+            if (read_http_role_slice(contracts::QolCharacterHttpJsonKind::kSkills, p.i0,
+                                     &skills_json, &role_skills)) {
+                body = "{\"ok\":true,\"skills\":" +
+                       std::string(role_skills.data, role_skills.size) + "}";
+            }
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kPartyInclude:
+        case contracts::QolCharacterWriteKind::kPartyExclude:
+        case contracts::QolCharacterWriteKind::kPartyDischarge: {
+            std::string party_after;
+            std::string changes;
+            if (has_party_before &&
+                read_http_projection(contracts::QolCharacterHttpJsonKind::kParty, &party_after) &&
+                append_party_slot_changes(party_before, party_after, &changes)) {
+                body = "{\"ok\":true,\"party\":" + changes + "}";
+            }
+            break;
+        }
+        case contracts::QolCharacterWriteKind::kPartyWithdraw: {
+            std::string inventory_after;
+            std::string changed_inventory;
+            body = "{\"ok\":true,\"equipment\":{\"mercenary_slot\":" +
+                   std::to_string(p.i0) + ",\"slot\":" + std::to_string(p.i1) +
+                   ",\"item\":null}";
+            if (has_inventory_before && read_enriched_inventory(item_state, &inventory_after) &&
+                append_inventory_slot_changes(inventory_before, inventory_after,
+                                              &changed_inventory)) {
+                body += ",\"inventory\":" + changed_inventory;
+            }
+            body.push_back('}');
+            break;
+        }
+        default:
+            return false;
+    }
     return write_truncated_result(out, capacity, out_size, body);
 }
 
@@ -1681,8 +2093,8 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     2,
     kRequires,
-    0,
-    nullptr,
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires,
     2,
     kProvides,
     0,

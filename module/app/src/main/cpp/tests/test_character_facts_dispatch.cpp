@@ -11,6 +11,7 @@
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/character_write_ops_port.h"
+#include "contracts/item_state.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
@@ -24,6 +25,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <vector>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -68,9 +70,37 @@ constexpr char kMember0[] =
     "\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}],\"type\":0,\"class_idx\":0,"
     "\"name_id\":7,\"stats\":{\"0\":1}}";
 constexpr char kNotInGame[] = "{\"error\":\"not in game\"}";
+constexpr char kMember1[] =
+    "{\"name\":\"佣兵B\",\"class_name\":\"忍者\",\"level\":8,\"hp\":30,"
+    "\"max_hp\":40,\"mp\":4,\"max_mp\":5,\"exp\":2,\"exp_next\":3,"
+    "\"status_point\":1,\"equipment\":[null],\"type\":1,\"class_idx\":1,"
+    "\"name_id\":8,\"stats\":{\"0\":2}}";
+constexpr char kMember2[] =
+    "{\"name\":\"佣兵C\",\"class_name\":\"黑魔导\",\"level\":6,\"hp\":20,"
+    "\"max_hp\":25,\"mp\":8,\"max_mp\":10,\"exp\":3,\"exp_next\":4,"
+    "\"status_point\":0,\"equipment\":[null],\"type\":1,\"class_idx\":2,"
+    "\"name_id\":9,\"stats\":{\"0\":3}}";
 
 bool g_not_in_game = false;
-const char* g_player_json = kPlayer;
+std::string g_player_json = kPlayer;
+std::string g_party_json = kParty;
+std::string g_skills_json = kSkills;
+std::string g_party_after_write_json;
+std::string g_skills_after_write_json;
+std::string g_player_after_write_json;
+const char* g_inventory_before_write_json =
+    "{\"bags\":[{\"bag\":0,\"items\":[],\"capacity\":16,\"slot_count\":0}]}";
+const char* g_inventory_after_write_json =
+    "{\"bags\":[{\"bag\":0,\"items\":[{\"slot\":2,\"name\":\"Potion\","
+    "\"category\":10,\"count\":1,\"item_type\":\"consumable\",\"need_level\":0,"
+    "\"rarity\":0,\"rarity_tier\":\"白\",\"base\":{\"damage\":0,\"defense\":0,"
+    "\"magic_rate\":0},\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
+    "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
+    "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}],\"capacity\":16,"
+    "\"slot_count\":1}]}";
+bool g_item_state_available = true;
+bool g_item_state_parse_failure = false;
+int g_item_state_snapshot_reads = 0;
 qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
 uint32_t g_post_handler_id = 0;
 uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
@@ -120,10 +150,62 @@ int64_t g_op_i64 = 0;
 int g_op_calls = 0;
 int g_op_fail_at = 0;
 const char* g_op_error = "port failed";
+int32_t g_main_stats[3][5] = {{10, 20, 30, 40, 50}, {1, 2, 3, 4, 5}, {6, 7, 8, 9, 10}};
+int32_t g_status_points[3] = {12, 3, 2};
+int32_t g_skill_points[3] = {4, 2, 1};
+int32_t g_leader_slot = 0;
+int32_t g_auto_attack[3] = {};
+int32_t g_active_skill[3] = {-1, -1, -1};
 
 QolResult fake_op_result(qol::contracts::QolCharacterWriteOpResult* out) {
     ++g_op_calls;
-    if (g_op_fail_at != g_op_calls) return qol::contracts::ok();
+    if (g_op_fail_at != g_op_calls) {
+        switch (g_last_op) {
+            case FakeOp::kAddStat:
+                if (g_op_a >= 0 && g_op_a < 3 && g_op_b >= 0 && g_op_b < 5) {
+                    ++g_main_stats[g_op_a][g_op_b];
+                    --g_status_points[g_op_a];
+                }
+                break;
+            case FakeOp::kStatReset:
+                if (g_op_a >= 0 && g_op_a < 3) {
+                    for (int32_t i = 0; i < 5; ++i) g_main_stats[g_op_a][i] = i + 1;
+                    g_status_points[g_op_a] = 18;
+                }
+                break;
+            case FakeOp::kSkillReset:
+            case FakeOp::kLearnAction:
+                if (!g_skills_after_write_json.empty()) g_skills_json = g_skills_after_write_json;
+                if (g_last_op == FakeOp::kSkillReset && g_op_a >= 0 && g_op_a < 3) {
+                    g_skill_points[g_op_a] = 11;
+                }
+                break;
+            case FakeOp::kSwitchPlayer:
+                g_leader_slot = g_op_a;
+                if (!g_player_after_write_json.empty()) g_player_json = g_player_after_write_json;
+                break;
+            case FakeOp::kPartyInclude:
+            case FakeOp::kPartyExclude:
+            case FakeOp::kPartyDischarge:
+                if (!g_party_after_write_json.empty()) g_party_json = g_party_after_write_json;
+                break;
+            case FakeOp::kPartyWithdraw:
+                if (!g_party_after_write_json.empty()) g_party_json = g_party_after_write_json;
+                break;
+            case FakeOp::kAttackTarget:
+                if (!g_party_after_write_json.empty()) g_party_json = g_party_after_write_json;
+                break;
+            case FakeOp::kSetAutoAttack:
+                if (g_op_a >= 0 && g_op_a < 3) g_auto_attack[g_op_a] = g_op_b;
+                break;
+            case FakeOp::kCastSkill:
+                if (g_op_a >= 0 && g_op_a < 3) g_active_skill[g_op_a] = g_op_b;
+                break;
+            default:
+                break;
+        }
+        return qol::contracts::ok();
+    }
     const uint32_t length = static_cast<uint32_t>(std::strlen(g_op_error));
     if (out != nullptr && length < sizeof(out->error_message)) {
         std::memcpy(out->error_message, g_op_error, length + 1);
@@ -206,11 +288,11 @@ QolResult fake_character_json(int32_t kind, char* out, uint32_t capacity, uint32
     if (g_not_in_game) return write_json(kNotInGame, out, capacity, out_size);
     switch (static_cast<QolCharacterHttpJsonKind>(kind)) {
         case QolCharacterHttpJsonKind::kPlayer:
-            return write_json(g_player_json, out, capacity, out_size);
+            return write_json(g_player_json.c_str(), out, capacity, out_size);
         case QolCharacterHttpJsonKind::kParty:
-            return write_json(kParty, out, capacity, out_size);
+            return write_json(g_party_json.c_str(), out, capacity, out_size);
         case QolCharacterHttpJsonKind::kSkills:
-            return write_json(kSkills, out, capacity, out_size);
+            return write_json(g_skills_json.c_str(), out, capacity, out_size);
         case QolCharacterHttpJsonKind::kMercenaries:
             return write_json(kMercenaries, out, capacity, out_size);
     }
@@ -242,21 +324,68 @@ QolResult fake_state_party(qol::contracts::QolCharacterStateParty* out) {
         return qol::contracts::error(kQolErrNotReady, "state unavailable", 17);
     }
     *out = {};
+    for (uint32_t role = 0; role < qol::contracts::kQolCharacterStatePartySize; ++role) {
+        out->member_present[role] = 1;
+        out->members[role].fields = qol::contracts::kQolCharacterStateHasStatusPoint;
+        out->members[role].status_point = g_status_points[role];
+        for (uint32_t stat = 0; stat < qol::contracts::kQolCharacterStateMainStatCount; ++stat) {
+            out->members[role].main_stats[stat] = g_main_stats[role][stat];
+        }
+    }
     return qol::contracts::ok();
 }
 QolResult fake_state_player(qol::contracts::QolCharacterStatePlayer* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
     *out = {};
+    out->leader_slot = g_leader_slot;
     return qol::contracts::ok();
 }
 QolResult fake_state_skills(qol::contracts::QolCharacterStateSkills* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
     *out = {};
+    for (uint32_t role = 0; role < qol::contracts::kQolCharacterStatePartySize; ++role) {
+        out->member_present[role] = 1;
+        out->members[role].skill_points = g_skill_points[role];
+    }
     return qol::contracts::ok();
 }
 const qol::contracts::QolCharacterStatePort kFakeStatePort{
     qol::contracts::kQolPortCharacterStateVersion,
     {&fake_state_party, &fake_state_player, &fake_state_skills}};
+
+QolResult fake_item_state_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (kind != static_cast<int32_t>(qol::contracts::QolItemStateKind::kEnrichedInventory)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad item state kind", 19);
+    }
+    ++g_item_state_snapshot_reads;
+    const char* json = g_item_state_parse_failure
+                           ? "not-json"
+                           : (g_item_state_snapshot_reads % 2 == 1
+                                  ? g_inventory_before_write_json
+                                  : g_inventory_after_write_json);
+    const uint32_t size = static_cast<uint32_t>(std::strlen(json));
+    if (out == nullptr || out_size == nullptr || size > capacity) {
+        return qol::contracts::error(kQolErrBlocked, "item state buffer small", 23);
+    }
+    std::memcpy(out, json, size);
+    *out_size = size;
+    return qol::contracts::ok();
+}
+const qol::contracts::ItemStateApi kFakeItemStateApi{&fake_item_state_json};
+
+QolResult fake_capability_require(const char* id, ::QolVersionRange,
+                                  const void** out_iface) {
+    if (id == nullptr || out_iface == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad capability", 15);
+    }
+    if (std::strcmp(id, qol::contracts::kItemStateCapabilityId) == 0 &&
+        g_item_state_available) {
+        *out_iface = &kFakeItemStateApi;
+        return qol::contracts::ok();
+    }
+    return qol::contracts::error(kQolErrNotFound, "capability missing", 18);
+}
 
 const void* const kPortArray[] = {&kFakeCharacterPort, &kFakeHttpPort, &kFakeWriteOpsPort,
                                   &kFakeStatePort};
@@ -317,6 +446,7 @@ qol::contracts::QolHostSdk make_sdk() {
                qol::contracts::kHostSdkMinor};
     sdk.log = {&fake_log_write, nullptr};
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
+    sdk.capabilities.require = &fake_capability_require;
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.commands.post_typed = &fake_post_typed;
@@ -471,6 +601,9 @@ void test_write_value_semantics() {
 
 void test_add_stat_result_semantics() {
     const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
+    g_main_stats[0][0] = 10;
+    g_main_stats[0][2] = 30;
+    g_status_points[0] = 12;
     uint16_t status = 0;
     CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3.7}}",
                         &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
@@ -482,7 +615,9 @@ void test_add_stat_result_semantics() {
     g_last_op = FakeOp::kNone;
     bool success = false;
     CHECK(run_post_result(&success) ==
-              "{\"ok\":true,\"applied\":[{\"attr\":0},{\"attr\":0},{\"attr\":0}]}" &&
+              "{\"ok\":true,\"applied\":[{\"attr\":0},{\"attr\":0},{\"attr\":0}],"
+              "\"role\":{\"role\":0,\"main_stats\":[{\"attr\":0,\"value\":13}],"
+              "\"status_point\":9}}" &&
           success);
     CHECK(g_op_calls == 3);
     CHECK(g_last_op == FakeOp::kAddStat && g_op_a == 0 && g_op_b == 0);
@@ -520,6 +655,160 @@ void test_add_stat_result_semantics() {
     g_op_fail_at = 0;
 }
 
+void test_operation_specific_result_goldens() {
+    uint16_t status = 0;
+    bool succeeded = false;
+    const auto run = [&]() { return run_post_result(&succeeded); };
+
+    g_skills_json = kSkills;
+    g_skills_after_write_json =
+        "[{\"role\":0,\"skills\":[{\"action_id\":7,\"level\":2,"
+        "\"max_level\":10,\"skill_name\":\"火球\"}],\"unlock_bitmap\":9,"
+        "\"active_skill_id\":-1,\"skill_points\":3},null,null]";
+    CHECK(dispatch_post("/api/character/grow/add_skill", "{\"action_id\":7}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"skills\":[{\"action_id\":7,\"level\":2}],"
+          "\"skill_points\":3}" && succeeded);
+
+    g_main_stats[1][0] = 10;
+    g_main_stats[1][2] = 30;
+    g_status_points[1] = 8;
+    const qol::contracts::HttpPathParam role1{"role", 4, "1", 1};
+    CHECK(dispatch_post("/api/character/grow/1/add_stat",
+                        "{\"attrs\":{\"strength\":2,\"vitality\":1}}", &role1, 1,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"applied\":[{\"attr\":0},{\"attr\":0},{\"attr\":2}],"
+          "\"role\":{\"role\":1,\"main_stats\":[{\"attr\":0,\"value\":12},"
+          "{\"attr\":2,\"value\":31}],\"status_point\":5}}" && succeeded);
+
+    g_player_after_write_json = "{\"money\":100,\"leader_slot\":2,\"party_count\":3}";
+    CHECK(dispatch_post("/api/character/combat/switch_player", "{\"slot\":2}", nullptr, 0,
+                        &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() == "{\"ok\":true,\"player\":{\"leader_slot\":2}}" && succeeded);
+
+    g_skills_after_write_json =
+        "[{\"role\":0,\"skills\":[{\"action_id\":7,\"level\":3,"
+        "\"max_level\":10,\"skill_name\":\"火球\"}],\"unlock_bitmap\":9,"
+        "\"active_skill_id\":-1,\"skill_points\":2},null,null]";
+    const qol::contracts::HttpPathParam role0{"role", 4, "0", 1};
+    CHECK(dispatch_post("/api/character/grow/reset_skill", nullptr, nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"skills\":{\"role\":0,\"skills\":[{\"action_id\":7,"
+          "\"level\":3,\"max_level\":10,\"skill_name\":\"火球\"}],"
+          "\"unlock_bitmap\":9,\"active_skill_id\":-1,\"skill_points\":2}}" && succeeded);
+
+    g_skills_json =
+        "[null,{\"role\":1,\"skills\":[{\"action_id\":7,\"level\":3}],"
+        "\"unlock_bitmap\":0,\"active_skill_id\":7,\"skill_points\":2},null]";
+    CHECK(dispatch_post("/api/character/combat/1/cast_skill", "{\"action_id\":7}", &role1,
+                        1, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() == "{\"ok\":true,\"role\":{\"role\":1,\"active_skill_id\":7}}" &&
+          succeeded);
+
+    CHECK(dispatch_post("/api/character/combat/1/stop_combat", nullptr, &role1, 1, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() == "{\"ok\":true,\"role\":{\"role\":1,\"combat\":false}}" &&
+          succeeded);
+
+    const std::string confirmed_target_member =
+        std::string(kMember1).substr(0, std::strlen(kMember1) - 1) +
+        ",\"target_slot\":2,\"combat\":true}";
+    g_party_json = "[" + std::string(kMember0) + "," + kMember1 + ",null]";
+    g_party_after_write_json =
+        "[" + std::string(kMember0) + "," + confirmed_target_member + ",null]";
+    CHECK(dispatch_post("/api/character/combat/1/attack_target", "{\"target_slot\":2}",
+                        &role1, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"role\":{\"role\":1,\"target_slot\":2,\"combat\":true}}" &&
+          succeeded);
+
+    g_party_after_write_json = "[" + std::string(kMember0) + "," + kMember1 + ",null]";
+    CHECK(dispatch_post("/api/character/combat/1/attack_target", "{\"target_slot\":2}",
+                        &role1, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() == "{\"ok\":true}" && succeeded);
+
+    g_party_json = "[" + std::string(kMember0) + ",null," + kMember2 + "]";
+    g_party_after_write_json = "[" + std::string(kMember0) + "," + kMember1 + ",null]";
+    CHECK(dispatch_post("/api/character/party/include", "{\"mercenary_slot\":7}", nullptr,
+                        0, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() == "{\"ok\":true,\"party\":[{\"slot\":1,\"member\":" +
+                      std::string(kMember1) + "},{\"slot\":2,\"member\":null}]}" &&
+          succeeded);
+
+    g_party_json = "[" + std::string(kMember0) + "," + kMember1 + "," + kMember2 + "]";
+    g_party_after_write_json = "[" + std::string(kMember0) + ",null,null]";
+    CHECK(dispatch_post("/api/character/party/exclude", "{\"mercenary_slot\":7}", nullptr,
+                        0, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"party\":[{\"slot\":1,\"member\":null},"
+          "{\"slot\":2,\"member\":null}]}" && succeeded);
+
+    g_party_json = "[" + std::string(kMember0) + "," + kMember1 + ",null]";
+    g_party_after_write_json = "[" + std::string(kMember0) + ",null,null]";
+    CHECK(dispatch_post("/api/character/party/discharge", "{\"mercenary_slot\":7}", nullptr,
+                        0, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() == "{\"ok\":true,\"party\":[{\"slot\":1,\"member\":null}]}" &&
+          succeeded);
+
+    g_item_state_available = true;
+    g_item_state_parse_failure = false;
+    g_item_state_snapshot_reads = 0;
+    CHECK(dispatch_post("/api/character/party/withdraw",
+                        "{\"mercenary_slot\":7,\"equip_slot\":0}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,\"slot\":0,"
+          "\"item\":null},\"inventory\":[{\"bag\":0,\"slot\":2,\"item\":"
+          "{\"slot\":2,\"name\":\"Potion\",\"category\":10,\"count\":1,"
+          "\"item_type\":\"consumable\",\"need_level\":0,\"rarity\":0,"
+          "\"rarity_tier\":\"白\",\"base\":{\"damage\":0,\"defense\":0,"
+          "\"magic_rate\":0},\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
+          "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
+          "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}}]}" && succeeded);
+    CHECK(g_item_state_snapshot_reads == 2);
+
+    g_item_state_available = false;
+    g_item_state_snapshot_reads = 0;
+    CHECK(dispatch_post("/api/character/party/withdraw",
+                        "{\"mercenary_slot\":7,\"equip_slot\":0}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,\"slot\":0,"
+          "\"item\":null}}" && succeeded);
+
+    g_item_state_available = true;
+    g_item_state_parse_failure = true;
+    g_item_state_snapshot_reads = 0;
+    CHECK(dispatch_post("/api/character/party/withdraw",
+                        "{\"mercenary_slot\":7,\"equip_slot\":0}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":11}");
+    g_op_calls = 0;
+    CHECK(run() ==
+          "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,\"slot\":0,"
+          "\"item\":null}}" && succeeded);
+    g_item_state_parse_failure = false;
+    g_party_after_write_json.clear();
+    g_party_json = kParty;
+    g_skills_json = kSkills;
+    g_player_json = kPlayer;
+}
+
 void test_set_attr_result_semantics() {
     const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
     uint16_t status = 0;
@@ -551,16 +840,22 @@ void test_set_attr_result_semantics() {
 void test_no_body_and_boolean_semantics() {
     uint16_t status = 0;
     bool success = false;
-    constexpr char kPlayerState[] =
-        "{\"money\":0,\"map_id\":0,\"x\":0,\"y\":0,\"active_quest\":0,\"leader_slot\":0,"
-        "\"party_count\":0}";
     const char* reset_paths[] = {"/api/character/grow/reset_stat",
-                                 "/api/character/grow/reset_skill"};
+                                  "/api/character/grow/reset_skill"};
     const qol::contracts::QolCharacterWriteKind expected_kinds[] = {
         qol::contracts::QolCharacterWriteKind::kStatReset,
         qol::contracts::QolCharacterWriteKind::kSkillReset,
     };
     const FakeOp expected_ops[] = {FakeOp::kStatReset, FakeOp::kSkillReset};
+    g_main_stats[0][0] = 10;
+    g_main_stats[0][1] = 20;
+    g_main_stats[0][2] = 30;
+    g_main_stats[0][3] = 40;
+    g_main_stats[0][4] = 50;
+    g_status_points[0] = 2;
+    g_skills_after_write_json =
+        "[{\"role\":0,\"skills\":[],\"unlock_bitmap\":0,\"active_skill_id\":-1,"
+        "\"skill_points\":11},null,null]";
     for (size_t i = 0; i < 2; ++i) {
         CHECK(dispatch_post(reset_paths[i], nullptr, nullptr, 0, &status) ==
               "{\"ok\":true,\"ticket\":11}");
@@ -569,9 +864,12 @@ void test_no_body_and_boolean_semantics() {
         CHECK(payload.kind == static_cast<int32_t>(expected_kinds[i]) && payload.i0 == 0);
         g_op_calls = 0;
         g_last_op = FakeOp::kNone;
-        CHECK(run_post_result(&success) ==
-                  std::string("{\"ok\":true,\"state\":") + kPlayerState + "}" &&
-              success);
+        const std::string expected = i == 0
+            ? "{\"ok\":true,\"role\":{\"role\":0,\"main_stats\":[1,2,3,4,5],"
+              "\"status_point\":18}}"
+            : "{\"ok\":true,\"skills\":{\"role\":0,\"skills\":[],"
+              "\"unlock_bitmap\":0,\"active_skill_id\":-1,\"skill_points\":11}}";
+        CHECK(run_post_result(&success) == expected && success);
         CHECK(g_last_op == expected_ops[i]);
     }
 
@@ -601,7 +899,8 @@ void test_no_body_and_boolean_semantics() {
     g_state_party_fails = true;
     CHECK(dispatch_post("/api/character/combat/1/set_auto_attack", "{\"on\":true}", &role,
                         1, &status) == "{\"ok\":true,\"ticket\":11}");
-    CHECK(run_post_result(&result_ok) == "{\"ok\":true}" && result_ok);
+    CHECK(run_post_result(&result_ok) ==
+          "{\"ok\":true,\"role\":{\"role\":1,\"auto_attack\":true}}" && result_ok);
     g_state_party_fails = false;
 }
 
@@ -791,6 +1090,7 @@ void test_lifecycle_and_responses() {
 
     test_write_value_semantics();
     test_add_stat_result_semantics();
+    test_operation_specific_result_goldens();
     test_set_attr_result_semantics();
     test_no_body_and_boolean_semantics();
     test_android_number_semantics();

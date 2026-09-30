@@ -782,7 +782,7 @@ void setup_write_fixture() {
     g_live_skills.members[0].skill_points = 3;
 }
 
-// 18 个单点 kind 的响应逐字节对照 legacy builder；批量 kind 组装另断言（保持在 owner）。
+// 单点 kind 持续验证底层写操作成功/失败语义；新票据投影字节 golden 由 dispatch 接缝覆盖。
 void test_write_golden() {
     using qol::contracts::QolCharacterWriteKind;
     g_state_reads_from_legacy = true;
@@ -829,8 +829,33 @@ void test_write_golden() {
         const bool owner_ok = run_owner_write(payload, &owner);
         sync_legacy_fixture();
         const std::string legacy = frozen_character_write_result_json(payload);
-        CHECK(owner == legacy);
         CHECK(owner_ok == (legacy.find("\"ok\":false") == std::string::npos));
+        if (!owner_ok) {
+            CHECK(owner == legacy);
+            continue;
+        }
+        CHECK(owner.compare(0, 10, "{\"ok\":true") == 0);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+        switch (test.kind) {
+            case QolCharacterWriteKind::kSetAutoAttack:
+                CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"auto_attack\":true}}");
+                break;
+            case QolCharacterWriteKind::kSwitchPlayer:
+                CHECK(owner.find("{\"ok\":true,\"player\":{\"leader_slot\":") == 0);
+                break;
+            case QolCharacterWriteKind::kStopCombat:
+                CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"combat\":false}}");
+                break;
+            case QolCharacterWriteKind::kStatReset:
+                CHECK(owner.find("{\"ok\":true,\"role\":{\"role\":0,\"main_stats\":[") == 0);
+                break;
+            case QolCharacterWriteKind::kPartyWithdraw:
+                CHECK(owner == "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,"
+                              "\"slot\":0,\"item\":null}}");
+                break;
+            default:
+                break;
+        }
     }
 
     // 非 world 态：18 kind 统一失败体逐字对照（owner 不附 state）。
@@ -850,7 +875,7 @@ void test_write_golden() {
     }
     g_state_not_in_game = false;
 
-    // 批量 kind：组装保持在 core.character（不迁入 game/ops），逐字断言。
+    // 批量 kind：`set` 保持原字节；`add_stat` 额外投影写后差量。
     CharWritePayloadMirror set_attr{};
     set_attr.kind = static_cast<int32_t>(QolCharacterWriteKind::kSetAttr);
     set_attr.i0 = 0;
@@ -871,7 +896,8 @@ void test_write_golden() {
     sync_legacy_fixture();
     std::string add_owner;
     CHECK(run_owner_write(add_stat, &add_owner));
-    CHECK(add_owner == "{\"ok\":true,\"applied\":[{\"attr\":2},{\"attr\":2}]}");
+    CHECK(add_owner.find("{\"ok\":true,\"applied\":[{\"attr\":2},{\"attr\":2}],"
+                         "\"role\":{\"role\":0,\"main_stats\":[") == 0);
 
     g_state_not_in_game = true;
     std::string set_fail;
@@ -882,15 +908,14 @@ void test_write_golden() {
     CHECK(add_fail == "{\"ok\":false,\"error\":\"not in game\"}");
     g_state_not_in_game = false;
 
-    // 写后即时：op 改 fake 角色内存后，同一 owner 结果处理器读到新值（经 typed 读，不读周期快照）。
+    // switch_player 只回读写后 leader_slot，不再附加完整 player。
     CharWritePayloadMirror instant{};
     instant.kind = static_cast<int32_t>(QolCharacterWriteKind::kSwitchPlayer);
     instant.i0 = 2;
     sync_legacy_fixture();
     std::string instant_body;
     CHECK(run_owner_write(instant, &instant_body));
-    CHECK(instant_body.find("\"leader_slot\":2") != std::string::npos);
-    CHECK(instant_body.find("\"money\":100") != std::string::npos);
+    CHECK(instant_body == "{\"ok\":true,\"player\":{\"leader_slot\":2}}");
 
     g_state_reads_from_legacy = false;
 }
@@ -901,7 +926,7 @@ void test_write_no_state_family() {
     using qol::contracts::QolCharacterWriteKind;
     g_state_reads_from_legacy = true;
     setup_write_fixture();
-    // 该族无 state 附加：本段任何操作都不得读 character.state。
+    // 普通 OP/write-ack 路由不读状态；add_stat 单独读取前后状态以计算差量。
     const uint32_t state_reads_before =
         g_state_party_reads + g_state_player_reads + g_state_skills_reads;
 
@@ -1049,7 +1074,8 @@ void test_write_no_state_family() {
     sync_legacy_fixture();
     std::string add_ok_body;
     CHECK(run_owner_write(add_ok, &add_ok_body));
-    CHECK(add_ok_body == "{\"ok\":true,\"applied\":[{\"attr\":2},{\"attr\":2},{\"attr\":2}]}");
+    CHECK(add_ok_body.find("{\"ok\":true,\"applied\":[{\"attr\":2},{\"attr\":2},"
+                          "{\"attr\":2}],\"role\":{\"role\":0,\"main_stats\":[") == 0);
     CHECK(g_add_stat_main_calls == 3 && add_ok_body.find("\"state\"") == std::string::npos);
 
     CharWritePayloadMirror add_mid{};
@@ -1082,12 +1108,14 @@ void test_write_no_state_family() {
     g_state_not_in_game = true;
     g_add_stat_main_calls = 0;
     std::string add_world_body;
-    CHECK(!run_owner_write(add_ok, &add_world_body));
+    const bool add_world_ok = run_owner_write(add_ok, &add_world_body);
+    CHECK(!add_world_ok);
     CHECK(add_world_body == "{\"ok\":false,\"error\":\"not in game\"}");
     CHECK(g_add_stat_main_calls == 0);
     g_state_not_in_game = false;
 
-    CHECK(g_state_party_reads + g_state_player_reads + g_state_skills_reads == state_reads_before);
+    CHECK(g_state_party_reads + g_state_player_reads + g_state_skills_reads ==
+          state_reads_before + 5);
     g_state_reads_from_legacy = false;
 }
 
@@ -1096,6 +1124,7 @@ void test_write_no_state_family() {
 // kAttackTarget 成功路径需 g_base 非 0 且池槽有效；用小型 fake 池避免依赖真实 VMA 布局。
 void test_write_party_state_family(const qol::contracts::CharacterStateApi* state_api) {
     using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
     g_state_reads_from_legacy = true;
     setup_write_fixture();
     alignas(8) static uint8_t pool_base_slot[8]{};
@@ -1127,48 +1156,28 @@ void test_write_party_state_family(const qol::contracts::CharacterStateApi* stat
         payload.i64 = test.i64;
         return payload;
     };
-    const auto embedded_party = [](const std::string& owner, bool* found) {
-        const std::string marker = ",\"state\":";
-        const size_t at = owner.find(marker);
-        if (at == std::string::npos) {
-            *found = false;
-            return std::string();
-        }
-        *found = true;
-        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
-    };
-
-    // 成功体：typed 单路径输出与 legacy 基线逐字节一致；内嵌 kParty 子树与 capability 逐字一致。
+    // 成功体：auto-attack 可报告受理值；cast/attack 无对应终态读面时不得伪造 state。
     for (const auto& test : success) {
         const CharWritePayloadMirror payload = make_payload(test);
-        sync_legacy_fixture();
         std::string owner;
         const bool ok = run_owner_write(payload, &owner);
-        bool found = false;
-        const std::string embedded = embedded_party(owner, &found);
-        char capability[8192]{};
-        uint32_t capability_size = 0;
-        const bool capability_ok =
-            state_api != nullptr &&
-            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty, capability,
-                                        sizeof(capability), &capability_size).ok == kQolOk;
-        CHECK(found && capability_ok &&
-              embedded == std::string(capability, capability_size));
-        sync_legacy_fixture();
-        const std::string legacy = frozen_character_write_result_json(payload);
-        CHECK(ok && owner == legacy);
-        CHECK(owner.find("\"state\":[") != std::string::npos);
+        CHECK(ok);
+        if (test.kind == QolCharacterWriteKind::kSetAutoAttack) {
+            CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"auto_attack\":true}}");
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
+        CHECK(owner.find("\"state\"") == std::string::npos);
     }
 
-    // 写后即时：原语改 fake live 角色内存（level 10→42）后，同一结果处理器响应读到新值。
+    // 操作仍按 typed 原语执行；state 不再因周期快照或无关字段进入票据。
     g_write_effect_level = 42;
     for (const auto& test : success) {
         const CharWritePayloadMirror payload = make_payload(test);
         sync_legacy_fixture();
         std::string owner;
         CHECK(run_owner_write(payload, &owner));
-        CHECK(owner.find("\"level\":42") != std::string::npos);
-        CHECK(owner.find("\"level\":10") == std::string::npos);
+        CHECK(owner.find("\"state\"") == std::string::npos);
     }
     g_write_effect_level = 0;
 
@@ -1216,8 +1225,7 @@ void test_write_party_state_family(const qol::contracts::CharacterStateApi* stat
     CHECK(attack_bad_target_body == frozen_character_write_result_json(attack_bad_target) &&
           attack_bad_target_body == "{\"ok\":false,\"error\":\"target not found\"}");
 
-    // 缺口补证：g_base==0 时 kAttackTarget 固定失败（旧 host 无法覆盖成功路径）；装池后同一
-    // payload 走成功路径并附加 kParty，证明成功路径已被可控 fake 覆盖。
+    // g_base==0 时目标不存在仍保留原错误；装池后写调用成功，但终态没有读面字段可确认。
     g_base = 0;
     CharWritePayloadMirror attack_success{};
     attack_success.kind = static_cast<int32_t>(QolCharacterWriteKind::kAttackTarget);
@@ -1230,7 +1238,7 @@ void test_write_party_state_family(const qol::contracts::CharacterStateApi* stat
     sync_legacy_fixture();
     std::string with_pool_body;
     CHECK(run_owner_write(attack_success, &with_pool_body) &&
-          with_pool_body.find("\"state\":[") != std::string::npos);
+          with_pool_body == "{\"ok\":true}");
 
     g_base = 0;
     g_state_reads_from_legacy = false;
@@ -1242,6 +1250,7 @@ void test_write_party_state_family(const qol::contracts::CharacterStateApi* stat
 // 两者以调用计数锁定；失败体逐字对照 legacy 基线，失败时不触发原版副作用。
 void test_write_party_member_family(const qol::contracts::CharacterStateApi* state_api) {
     using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
     g_state_reads_from_legacy = true;
     setup_write_fixture();
     std::memset(g_merc_object, 0, sizeof(g_merc_object));
@@ -1276,17 +1285,7 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
         payload.i64 = test.i64;
         return payload;
     };
-    const auto embedded_party = [](const std::string& owner, bool* found) {
-        const std::string marker = ",\"state\":";
-        const size_t at = owner.find(marker);
-        if (at == std::string::npos) {
-            *found = false;
-            return std::string();
-        }
-        *found = true;
-        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
-    };
-    // 成功体：owner 侧计数在 legacy 基线运行前捕获，避免对照源自身的原版链调用污染次数。
+    // 成功体：party read 面不可用时不伪造成员投影；withdraw 仍明确回装备空槽。
     const auto run_golden = [&](const Case& test, int* owner_can_unequip, int* owner_unequip,
                                 int* owner_release) {
         const CharWritePayloadMirror payload = make_payload(test);
@@ -1299,18 +1298,14 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
         if (owner_can_unequip != nullptr) *owner_can_unequip = g_can_unequip_calls;
         if (owner_unequip != nullptr) *owner_unequip = g_unequip_calls;
         if (owner_release != nullptr) *owner_release = g_mercenary_release_calls;
-        bool found = false;
-        const std::string embedded = embedded_party(owner, &found);
-        char capability[8192]{};
-        uint32_t capability_size = 0;
-        const bool capability_ok =
-            state_api != nullptr &&
-            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty, capability,
-                                        sizeof(capability), &capability_size).ok == kQolOk;
-        CHECK(found && capability_ok && embedded == std::string(capability, capability_size));
-        sync_legacy_fixture();
-        const std::string legacy = frozen_character_write_result_json(payload);
-        CHECK(ok && owner == legacy && owner.find("\"state\":[") != std::string::npos);
+        CHECK(ok);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+        if (test.kind == QolCharacterWriteKind::kPartyWithdraw) {
+            CHECK(owner == "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,"
+                           "\"slot\":0,\"item\":null}}");
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
     };
     const auto run_failure = [&](const Case& test, const char* expected) {
         const CharWritePayloadMirror payload = make_payload(test);
@@ -1344,15 +1339,19 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
         }
     }
 
-    // 写后即时：原版链改 fake live 队伍成员（level 10→42）后，同一结果处理器响应读到新值。
+    // 操作写入仍执行；缺少 read-face JSON 时只回 ACK。
     g_write_effect_level = 42;
     for (const auto& test : success) {
         const CharWritePayloadMirror payload = make_payload(test);
         sync_legacy_fixture();
         std::string owner;
         CHECK(run_owner_write(payload, &owner));
-        CHECK(owner.find("\"level\":42") != std::string::npos);
-        CHECK(owner.find("\"level\":10") == std::string::npos);
+        if (test.kind == QolCharacterWriteKind::kPartyWithdraw) {
+            CHECK(owner == "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,"
+                          "\"slot\":0,\"item\":null}}");
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
     }
     g_write_effect_level = 0;
 
@@ -1445,6 +1444,7 @@ void test_write_party_member_family(const qol::contracts::CharacterStateApi* sta
 // g_main_merc_slot 同步（原队伍写实现口径）；失败/越界时先返回、不得写槽，以桩状态与计数锁定。
 void test_write_player_family(const qol::contracts::CharacterStateApi* state_api) {
     using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
     g_state_reads_from_legacy = true;
     setup_write_fixture();
     g_set_active_player_calls = 0;
@@ -1467,17 +1467,7 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
         payload.i64 = test.i64;
         return payload;
     };
-    const auto embedded_player = [](const std::string& owner, bool* found) {
-        const std::string marker = ",\"state\":";
-        const size_t at = owner.find(marker);
-        if (at == std::string::npos) {
-            *found = false;
-            return std::string();
-        }
-        *found = true;
-        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
-    };
-    // owner 侧调用计数与 leader 槽在 legacy 基线（也会调原版函数）之前捕获。
+    // owner 侧调用计数与 leader 槽在 legacy 原语基线之前捕获。
     const auto run_golden = [&](const Case& test, int* owner_calls, uint8_t* owner_leader) {
         const CharWritePayloadMirror payload = make_payload(test);
         g_set_active_player_calls = 0;
@@ -1486,18 +1476,18 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
         const bool ok = run_owner_write(payload, &owner);
         if (owner_calls != nullptr) *owner_calls = g_set_active_player_calls;
         if (owner_leader != nullptr) *owner_leader = g_legacy_leader_slot;
-        bool found = false;
-        const std::string embedded = embedded_player(owner, &found);
-        char capability[8192]{};
-        uint32_t capability_size = 0;
-        const bool capability_ok =
-            state_api != nullptr &&
-            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer, capability,
-                                        sizeof(capability), &capability_size).ok == kQolOk;
-        CHECK(found && capability_ok && embedded == std::string(capability, capability_size));
         sync_legacy_fixture();
-        const std::string legacy = frozen_character_write_result_json(payload);
-        CHECK(ok && owner == legacy && owner.find("\"state\":{") != std::string::npos);
+        CHECK(ok);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+        if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
+            CHECK(owner == "{\"ok\":true,\"player\":{\"leader_slot\":2}}");
+        } else if (test.kind == QolCharacterWriteKind::kStopCombat) {
+            CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"combat\":false}}");
+        } else if (test.kind == QolCharacterWriteKind::kStatReset) {
+            CHECK(owner.find("{\"ok\":true,\"role\":{\"role\":0,\"main_stats\":[") == 0);
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
     };
     const auto run_failure = [&](const Case& test, const char* expected) {
         const CharWritePayloadMirror payload = make_payload(test);
@@ -1514,7 +1504,7 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
         {QolCharacterWriteKind::kSkillReset, 0, 0, 0, 0},
     };
 
-    // 成功体：逐字节对照 legacy；内嵌 kPlayer 子树与 capability 同源；switch 同步 leader_slot。
+    // 成功体：逐路由字段按操作投影，不回传完整 Player。
     for (const auto& test : success) {
         int owner_calls = 0;
         uint8_t owner_leader = 0;
@@ -1527,8 +1517,7 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
         }
     }
 
-    // 写后即时：同一结果处理器读到 live 改动。switch 的改动即 g_main_merc_slot 同步；
-    // 其余经主角坐标桩（C_POS_X）改动后被 kPlayer 投影读到。
+    // 写后即时：switch_player 的 leader_slot 来自同步后的 player 读面。
     g_write_effect_level = 42;
     for (const auto& test : success) {
         const CharWritePayloadMirror payload = make_payload(test);
@@ -1536,11 +1525,7 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
         std::string owner;
         CHECK(run_owner_write(payload, &owner));
         if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
-            CHECK(owner.find("\"leader_slot\":2") != std::string::npos);
-            CHECK(owner.find("\"x\":3") != std::string::npos);
-        } else {
-            CHECK(owner.find("\"x\":42") != std::string::npos);
-            CHECK(owner.find("\"x\":3") == std::string::npos);
+            CHECK(owner == "{\"ok\":true,\"player\":{\"leader_slot\":2}}");
         }
     }
     g_write_effect_level = 0;
@@ -1601,6 +1586,7 @@ void test_write_player_family(const qol::contracts::CharacterStateApi* state_api
 // 写面不得引用 enriched build_character_skills_json（后者仅 GET 读面使用）。
 void test_write_skills_family(const qol::contracts::CharacterStateApi* state_api) {
     using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
     g_state_reads_from_legacy = true;
     setup_write_fixture();
     g_write_effect_level = 0;
@@ -1621,16 +1607,6 @@ void test_write_skills_family(const qol::contracts::CharacterStateApi* state_api
         payload.i64 = test.i64;
         return payload;
     };
-    const auto embedded_state = [](const std::string& owner, bool* found) {
-        const std::string marker = ",\"state\":";
-        const size_t at = owner.find(marker);
-        if (at == std::string::npos) {
-            *found = false;
-            return std::string();
-        }
-        *found = true;
-        return owner.substr(at + marker.size(), owner.size() - at - marker.size() - 1);
-    };
     const auto run_failure = [&](const Case& test, const char* expected) {
         const CharWritePayloadMirror payload = make_payload(test);
         std::string owner;
@@ -1639,54 +1615,40 @@ void test_write_skills_family(const qol::contracts::CharacterStateApi* state_api
         CHECK(owner.find("\"state\"") == std::string::npos);
     };
 
-    // 成功体：逐字节对照 legacy；内嵌 kSkills 子树与 capability 同源；O3 raw 形状断言。
+    // read-face skills JSON 在本测试 fake 中不可用时，仅回 ACK，不伪造技能终态。
     const Case success{QolCharacterWriteKind::kLearnAction, 0, 7, 2, 0};
     {
         const CharWritePayloadMirror payload = make_payload(success);
         sync_legacy_fixture();
         std::string owner;
         const bool ok = run_owner_write(payload, &owner);
-        bool found = false;
-        const std::string embedded = embedded_state(owner, &found);
-        char capability[8192]{};
-        uint32_t capability_size = 0;
-        const bool capability_ok =
-            state_api != nullptr &&
-            state_api->write_state_json(qol::contracts::QolCharacterStateKind::kSkills, capability,
-                                        sizeof(capability), &capability_size).ok == kQolOk;
-        // 同源：owner 内嵌 kSkills == capability kSkills。
-        CHECK(found && capability_ok && embedded == std::string(capability, capability_size));
-        // O3：raw 形状（无 skill_name），且等于 legacy raw builder 字节。
-        CHECK(embedded == frozen_skills_json());
-        CHECK(embedded.find("\"skill_name\"") == std::string::npos);
-        CHECK(embedded.find("\"action_id\":7") != std::string::npos);
-        sync_legacy_fixture();
-        CHECK(ok && owner == frozen_character_write_result_json(payload) &&
-              owner.find("\"state\":[") != std::string::npos);
+        CHECK(ok && owner == "{\"ok\":true}");
+        CHECK(owner.find("\"state\"") == std::string::npos);
     }
 
-    // 写后即时：原版学习链改 live 技能数据（skill_points 3→1、unlock_bitmap 9→31）后读到新值。
+    // read-face JSON 未提供时不回传技能数组；原版学习链的 live 副作用仍发生。
     g_write_effect_level = 1;
     {
         const CharWritePayloadMirror payload = make_payload(success);
         sync_legacy_fixture();
         std::string owner;
-        CHECK(run_owner_write(payload, &owner));
-        CHECK(owner.find("\"skill_points\":1") != std::string::npos);
-        CHECK(owner.find("\"unlock_bitmap\":31") != std::string::npos);
-        CHECK(owner.find("\"skill_points\":3") == std::string::npos);
+        CHECK(run_owner_write(payload, &owner) && owner == "{\"ok\":true}");
+        void* member = legacy_member(0);
+        CHECK(member != nullptr &&
+              reinterpret_cast<int8_t*>(static_cast<uint8_t*>(member))[C_SKILL_POINTS] == 1);
+        CHECK(member != nullptr &&
+              *reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(member) + C_SKILL_BMP) == 0x1F);
     }
     g_write_effect_level = 0;
 
-    // action_id 传递：legacy 不做 action 合法性校验（不在 owner 层新增 400），任意值透传且结果一致。
+    // action_id 传递：legacy 不做 action 合法性校验；无 read-face 技能投影时保留 ACK。
     {
         const Case passthrough{QolCharacterWriteKind::kLearnAction, 0, 9999, 3, 0};
         const CharWritePayloadMirror payload = make_payload(passthrough);
         sync_legacy_fixture();
         std::string owner;
         CHECK(run_owner_write(payload, &owner));
-        sync_legacy_fixture();
-        CHECK(owner == frozen_character_write_result_json(payload));
+        CHECK(owner == "{\"ok\":true}");
     }
 
     // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
@@ -1916,9 +1878,14 @@ int main() {
     const auto& descriptor = qol::features::core_character::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.character") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 2 && descriptor.optional_count == 0);
+    CHECK(descriptor.requires_count == 2 && descriptor.optional_count == 1 &&
+          descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kItemStateCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[0].range.major == 1 &&
+          descriptor.optional_requires[0].range.min_minor == 1);
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id,
                       qol::contracts::kCharacterFactsCapabilityId) == 0);
@@ -2175,9 +2142,7 @@ int main() {
     uint32_t result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result_storage,
                            sizeof(result_storage), &result_size));
-    CHECK(std::string(result_storage, result_size) ==
-          "{\"ok\":true,\"state\":[{\"role\":0,\"skills\":[{\"action_id\":7,\"level\":2}],"
-          "\"unlock_bitmap\":9,\"active_skill_id\":-1,\"skill_points\":3},null,null]}");
+    CHECK(std::string(result_storage, result_size) == "{\"ok\":true}");
 
     descriptor.deactivate(ctx);
     CHECK(g_result_handler == nullptr);

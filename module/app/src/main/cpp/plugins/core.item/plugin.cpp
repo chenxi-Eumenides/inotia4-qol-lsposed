@@ -500,9 +500,48 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
 }
 
 QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (out == nullptr || out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid item state output");
+    }
     switch (static_cast<contracts::QolItemStateKind>(kind)) {
         case contracts::QolItemStateKind::kRawInventory:
             return serialize_inventory_json(out, capacity, out_size);
+        case contracts::QolItemStateKind::kEnrichedInventory: {
+            const auto write_error = [out, capacity, out_size](const char* error) {
+                const std::string body = std::string("{\"ok\":false,\"error\":\"") + error +
+                                         "\"}";
+                if (body.size() > capacity) {
+                    return error_result(kQolErrBlocked, "item state buffer too small");
+                }
+                std::memcpy(out, body.data(), body.size());
+                *out_size = static_cast<uint32_t>(body.size());
+                return contracts::ok();
+            };
+            static thread_local std::vector<char> raw_inventory(kInventoryCapacity);
+            uint32_t raw_size = 0;
+            const QolResult serialized = serialize_inventory_json(
+                raw_inventory.data(), static_cast<uint32_t>(raw_inventory.size()), &raw_size);
+            if (!contracts::succeeded(serialized)) return serialized;
+            if (std::strncmp(raw_inventory.data(), "{\"error\":", 9) == 0) {
+                if (raw_size > capacity) {
+                    return error_result(kQolErrBlocked, "item state buffer too small");
+                }
+                std::memcpy(out, raw_inventory.data(), raw_size);
+                *out_size = raw_size;
+                return contracts::ok();
+            }
+            std::string body;
+            if (!enrich_inventory(raw_inventory.data(), raw_size, g_port, &body)) {
+                return write_error("internal error");
+            }
+            if (body.size() > capacity) {
+                return error_result(kQolErrBlocked, "item state buffer too small");
+            }
+            std::memcpy(out, body.data(), body.size());
+            *out_size = static_cast<uint32_t>(body.size());
+            return contracts::ok();
+        }
         default:
             return error_result(kQolErrInvalidArgument, "invalid item state kind");
     }

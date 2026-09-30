@@ -9,13 +9,15 @@
 namespace qol::contracts {
 
 constexpr const char* kItemStateCapabilityId = "item.state";
-constexpr QolVersion kItemStateVersion{1, 0};
+constexpr QolVersion kItemStateVersion{1, 1};
 
 // Item owners assemble their domain projection. Cross-domain JSON may only be filtered or
 // reordered; its fields must not be reassembled by another owner (ADR 0002).
 enum class QolItemStateKind : int32_t {
-    // raw inventory 形状 = 迁移前 legacy build_inventory_json 字节；enriched 走 HTTP 面，不在此。
+    // Raw inventory 形状 = 迁移前 legacy build_inventory_json 字节。
     kRawInventory = 0,
+    // Enriched inventory 与 GET /api/item/inventory 响应体同源，字段由 item owner 组装。
+    kEnrichedInventory = 1,
 };
 
 // 单槽 raw inventory 的宿主侧缓冲上限（对齐 legacy 最坏尺寸；见 T2h-B2 容量论证）。
