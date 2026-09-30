@@ -555,9 +555,20 @@ int read_current_save_slot() {
 
 struct NativeCallScope {
     const bool previous = g_in_native_call;
+    const qol::contracts::QolGameHost* game = g_game;
 
-    NativeCallScope() { g_in_native_call = true; }
-    ~NativeCallScope() { g_in_native_call = previous; }
+    NativeCallScope() {
+        g_in_native_call = true;
+        if (game != nullptr && game->item_abi.begin_original_only != nullptr) {
+            game->item_abi.begin_original_only();
+        }
+    }
+    ~NativeCallScope() {
+        if (game != nullptr && game->item_abi.end_original_only != nullptr) {
+            game->item_abi.end_original_only();
+        }
+        g_in_native_call = previous;
+    }
 };
 
 int extension_tab_index(void* ctrl);

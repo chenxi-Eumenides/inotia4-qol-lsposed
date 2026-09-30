@@ -296,9 +296,8 @@ bool provider_remove_native_item(qol::contracts::QolItemHandle handle) {
 
 int64_t provider_sell_price(qol::contracts::QolItemHandle handle, int count,
                             bool apply_variant_discount) {
-    void* item = nullptr;
     const auto* facts = qol::features::extension_bag::extension_bag_item_facts();
-    if (!extension_bag_private_item_for_handle(handle, &item) || count <= 0 || facts == nullptr ||
+    if (handle.slot == 0 || handle.generation == 0 || count <= 0 || facts == nullptr ||
         facts->sell_price == nullptr) return -1;
     int64_t unit_price = 0;
     if (!qol::contracts::succeeded(facts->sell_price(handle, &unit_price))) return -1;

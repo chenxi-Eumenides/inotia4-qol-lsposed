@@ -1,6 +1,7 @@
 #pragma once
 
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_host.h"
 
 // 游戏层：库存只读遍历与引用适配（ARCHITECTURE.md §5）。
 // 物理袋/扩展袋的底层布局和扩展背包端口均留在 game/ 与既有宿主实现内；插件只接收
@@ -34,5 +35,16 @@ QolResult set_desc_type(int32_t type);
 QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);
 QolResult set_bag_capacity_word(int32_t bag, uint32_t word);
 QolResult set_physical_item(int32_t bag, int32_t slot, void* item);
+
+// Hook dispatch belongs to Game Adapter so an ABI object pointer is never returned to a plugin.
+void* game_inventory_find_item_hook(int32_t category);
+QolResult game_inventory_bind_find_item_backup(contracts::QolFindItemAbiFn backup);
+QolResult game_original_find_item_slot(contracts::QolItemHandle item, int32_t* out_bag,
+                                       int32_t* out_slot);
+QolResult game_item_identity_at(int32_t bag, int32_t slot, contracts::QolItemHandle* out_item);
+void game_begin_original_only();
+void game_end_original_only();
+QolResult game_native_item_at(int32_t bag, int32_t slot, void** out_item);
+QolResult game_native_item_for_handle(contracts::QolItemHandle item, void** out_item);
 
 }  // namespace qol::game

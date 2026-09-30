@@ -125,6 +125,22 @@ struct QolInventoryWriteApi {
     QolResult (*remove_item_direct)(int32_t bag, int32_t slot);
 };
 
+// Game-owned hook bridge. The handler is installed at the game ABI entry and returns the native
+// pointer only to the original game caller; plugin code receives and exchanges item identities as handles.
+using QolFindItemAbiFn = void* (*)(int32_t category);
+struct QolItemAbiDispatchApi {
+    QolFindItemAbiFn find_item_wrapper;
+    QolResult (*bind_find_item_backup)(QolFindItemAbiFn backup);
+    QolResult (*original_find_item_slot)(QolItemHandle item, int32_t* out_bag,
+                                         int32_t* out_slot);
+    QolResult (*item_identity_at)(int32_t bag, int32_t slot, QolItemHandle* out_item);
+    void (*begin_original_only)();
+    void (*end_original_only)();
+    // Hook-private ABI passthroughs; returned pointers are valid only within the current hook call.
+    QolResult (*native_item_at)(int32_t bag, int32_t slot, void** out_item);
+    QolResult (*native_item_for_handle)(QolItemHandle item, void** out_item);
+};
+
 struct QolWorldActionApi {
     QolResult (*create_yesno)(const char* text, uint32_t text_len, void* ok, void* cancel,
                               void* param);
@@ -177,6 +193,7 @@ struct QolGameHost {
     QolCharacterWriteApi character_write;
     QolInventoryWriteApi inventory_write;
     QolWorldActionApi world_action;
+    QolItemAbiDispatchApi item_abi;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -187,10 +204,10 @@ static_assert(offsetof(QolGameHost, read_only) ==
                   offsetof(QolGameHost, item_count) + sizeof(QolItemCountApi),
               "QolGameHost read_only ABI offset changed");
 static_assert(sizeof(QolGameHost) ==
-                  offsetof(QolGameHost, world_action) + sizeof(QolWorldActionApi),
+                  offsetof(QolGameHost, item_abi) + sizeof(QolItemAbiDispatchApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
-constexpr uint16_t kGameHostMinor = 0;
+constexpr uint16_t kGameHostMinor = 1;
 
 }  // namespace qol::contracts

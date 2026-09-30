@@ -1,6 +1,5 @@
 #include "native_inventory_hook.h"
 #include "inventory_hook_stage4.h"
-#include "inventory_find_item_poc.h"
 #include "claims.h"
 #include "inventory_logging.h"
 
@@ -10,6 +9,7 @@
 #include "../../contracts/ui.h"
 
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -17,7 +17,6 @@
 
 namespace {
 
-using FindItemFn = void* (*)(int32_t);
 using HaveItemFn = int (*)(int32_t);
 using GetItemCountFn = int (*)(int32_t);
 using GetCumulateCountFn = int (*)(void*);
@@ -182,10 +181,6 @@ int put_jewel_extension_items(void* equip_item, void* jewel_item,
     return result;
 }
 
-// FindItem returns a native pointer to its game caller; translating its handle back to that ABI
-// requires a game-owned passthrough wrapper and is deferred to the hook private-bridge batch.
-void* find_extension_item_for_abi(int32_t) { return nullptr; }
-
 // D2c-2a：原 EB port extension_bag_show_*_popup（TextData 6=背包已满 / 7=袋非空）在
 // 消费者侧内联。契约 ExtensionBagApi 未导出弹窗入口（handle_original_bag_unequip 只
 // 回传标志），弹窗为纯游戏 UI 调用，由本消费者自持，避免直接依赖 EB 符号。
@@ -198,7 +193,6 @@ std::mutex g_hook_mutex;
 NativeHookFunType g_hook_func = nullptr;
 NativeUnhookFunType g_unhook_func = nullptr;
 
-FindItemFn g_backup_find_item = nullptr;
 HaveItemFn g_backup_have_item = nullptr;
 GetItemCountFn g_backup_get_item_count = nullptr;
 GetCumulateCountFn g_backup_get_cumulate_count = nullptr;
@@ -227,11 +221,9 @@ ItemSystemDivideFn g_backup_item_system_divide = nullptr;
 MakeItemFn g_backup_make_item = nullptr;
 InvenRemoveItemDataFn g_backup_remove_item_data = nullptr;
 
-std::atomic<uint64_t> g_find_item_calls{0};
 std::atomic<uint64_t> g_consume_item_calls{0};
 std::atomic<uint64_t> g_remove_item_calls{0};
 
-thread_local bool g_in_find_item = false;
 thread_local bool g_in_have_item = false;
 thread_local bool g_in_get_item_count = false;
 thread_local bool g_in_is_having_empty_slot = false;
@@ -255,25 +247,21 @@ const qol::contracts::QolItemCountApi* item_count_api() {
 }
 
 void* physical_item_at(int bag, int slot) {
-    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr) return nullptr;
-    qol::contracts::QolItemHandle handle{};
-    const QolResult result = g_item_facts->physical_item_at(bag, slot, &handle);
-    if (!qol::contracts::succeeded(result) || handle.slot == 0 || handle.generation == 0) return nullptr;
-    // Hook-side physical scans that must call the original ABI need the game-owned private
-    // passthrough implemented by the hook private-bridge batch; this handle-only path fails closed.
-    return nullptr;
+    if (g_game == nullptr || g_game->item_abi.native_item_at == nullptr) return nullptr;
+    void* item = nullptr;
+    const QolResult result = g_game->item_abi.native_item_at(bag, slot, &item);
+    return qol::contracts::succeeded(result) ? item : nullptr;
 }
 
 void* inventory_item_at(int bag, int slot) {
-    if (g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr) return nullptr;
-    qol::contracts::QolInventoryItemRef ref{};
-    const QolResult result = g_item_facts->item_ref_at(bag, slot, &ref);
-    if (!qol::contracts::succeeded(result) || ref.item.slot == 0 || ref.item.generation == 0) {
-        return nullptr;
-    }
-    // Stage4's original fallback is parameterized by bag/slot; provider-handle invocation is
-    // implemented with the same game-owned private bridge as physical_item_at above.
-    return nullptr;
+    if (g_game == nullptr || g_game->item_abi.item_identity_at == nullptr ||
+        g_game->item_abi.native_item_for_handle == nullptr) return nullptr;
+    qol::contracts::QolItemHandle handle{};
+    if (!qol::contracts::succeeded(
+            g_game->item_abi.item_identity_at(bag, slot, &handle))) return nullptr;
+    void* item = nullptr;
+    const QolResult result = g_game->item_abi.native_item_for_handle(handle, &item);
+    return qol::contracts::succeeded(result) ? item : nullptr;
 }
 
 bool item_count_is_encoded(void* item) {
@@ -492,60 +480,9 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
                         op, cap.target, cap.pre_full, cap.delta, cap.new_full, written);
 }
 
-void log_extension_item_observation(const char* operation, void* item, bool recursive,
-                                    int result_known, int result) {
-    const qol::contracts::ExtensionBagApi* eb = eb_active();
-    if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
-        QOL_LOG_INFO(QolDomain::kInventory,
-                            "%s original-only native_call=1 recursive=%d result_known=%d result=%d",
-                            operation, recursive ? 1 : 0, result_known, result);
-        return;
-    }
-    if (eb == nullptr) {
-        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
-                            "%s extension disabled recursive=%d result_known=%d result=%d",
-                            operation, recursive ? 1 : 0, result_known, result);
-        return;
-    }
-    int bag = -1;
-    int slot = -1;
-    const bool extension_item = identify_extension_item(item, &bag, &slot);
-    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
-                        "%s extension_item=%d bag=%d slot=%d recursive=%d result_known=%d result=%d",
-                        operation, extension_item ? 1 : 0, bag, slot, recursive ? 1 : 0,
-                        result_known, result);
-}
-
-void* find_item_wrapper(int32_t category) {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:INVEN_FindItem"});
-    const qol::contracts::ExtensionBagApi* eb = eb_active();
-    const uint64_t call = g_find_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    const bool native_call =
-        eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active();
-    if (native_call || g_in_find_item || g_backup_find_item == nullptr) {
-        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
-                            "FindItem call=%llu category=%d recursive=%d backup=%p",
-                            static_cast<unsigned long long>(call), category,
-                            g_in_find_item ? 1 : 0,
-                            reinterpret_cast<void*>(g_backup_find_item));
-        void* result = inventory_find_item_original_first(
-            category, g_backup_find_item, nullptr, g_in_find_item);
-        log_extension_item_observation("FindItem", result, g_in_find_item, 1, result != nullptr ? 1 : 0);
-        return result;
-    }
-    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
-                        "FindItem call=%llu category=%d backup=%p",
-                        static_cast<unsigned long long>(call), category,
-                        reinterpret_cast<void*>(g_backup_find_item));
-    void* result = inventory_find_item_original_first(
-        category, g_backup_find_item,
-        (eb != nullptr && eb->find_native_item != nullptr) ? find_extension_item_for_abi : nullptr,
-        g_in_find_item);
-    log_extension_item_observation("FindItem", result, false, 1, result != nullptr ? 1 : 0);
-    return result;
-}
+// The resource table uses this only as a non-null placeholder. The runtime claim is replaced by
+// the Game Adapter-owned ABI wrapper before the hook transaction installs it.
+void* find_item_wrapper(int32_t) { return nullptr; }
 
 int extension_item_count(int32_t category) {
     const qol::contracts::ExtensionBagApi* eb = eb_active();
@@ -1481,6 +1418,7 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
 
 constexpr uint32_t kInventoryHookClaimCount =
     sizeof(kInventoryHookClaims) / sizeof(kInventoryHookClaims[0]);
+std::array<qol::contracts::ResourceClaim, kInventoryHookClaimCount> g_runtime_hook_claims{};
 
 // claim.handler → 该 wrapper 的 backup 槽（原有 g_backup_* 全局）。以 handler 做唯一映射，
 // 避免 id 表与 backup 表两处重复维护；未登记 handler 返回 nullptr，桥按 fail-closed 处理。
@@ -1488,7 +1426,6 @@ constexpr uint32_t kInventoryHookClaimCount =
 void** backup_slot_for_handler(void* handler) {
 #define BACKUP_SLOT(HANDLER, SLOT) \
     if (handler == reinterpret_cast<void*>(&HANDLER)) return reinterpret_cast<void**>(&SLOT)
-    BACKUP_SLOT(find_item_wrapper, g_backup_find_item);
     BACKUP_SLOT(have_item_wrapper, g_backup_have_item);
     BACKUP_SLOT(get_item_count_wrapper, g_backup_get_item_count);
     BACKUP_SLOT(get_cumulate_count_wrapper, g_backup_get_cumulate_count);
@@ -1525,14 +1462,32 @@ void** backup_slot_for_handler(void* handler) {
 
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
     if (out_count != nullptr) *out_count = kInventoryHookClaimCount;
-    return kInventoryHookClaims;
+    for (uint32_t index = 0; index < kInventoryHookClaimCount; ++index) {
+        g_runtime_hook_claims[index] = kInventoryHookClaims[index];
+    }
+    if (g_game != nullptr && g_game->item_abi.find_item_wrapper != nullptr) {
+        for (auto& claim : g_runtime_hook_claims) {
+            if (std::strcmp(claim.id, "hook:INVEN_FindItem") == 0) {
+                claim.handler = reinterpret_cast<void*>(g_game->item_abi.find_item_wrapper);
+                break;
+            }
+        }
+    }
+    return g_runtime_hook_claims.data();
 }
 
 int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
     // 空 backup 或未知 id 一律非 0 → 宿主逆序回滚并置 failed（fail-closed）。
     if (resource_id == nullptr || backup == nullptr) return 1;
-    for (const qol::contracts::ResourceClaim& claim : kInventoryHookClaims) {
+    for (const qol::contracts::ResourceClaim& claim : g_runtime_hook_claims) {
         if (std::strcmp(claim.id, resource_id) != 0) continue;
+        if (std::strcmp(claim.id, "hook:INVEN_FindItem") == 0 && g_game != nullptr &&
+            g_game->item_abi.bind_find_item_backup != nullptr &&
+            claim.handler == reinterpret_cast<void*>(g_game->item_abi.find_item_wrapper)) {
+            return g_game->item_abi.bind_find_item_backup(
+                       reinterpret_cast<qol::contracts::QolFindItemAbiFn>(backup)).ok == kQolOk
+                       ? 0 : 1;
+        }
         void** slot = backup_slot_for_handler(claim.handler);
         if (slot == nullptr) return 1;
         *slot = backup;
@@ -1562,11 +1517,32 @@ bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk) {
 }
 
 bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game) {
-    if (game == nullptr || game->item_count.effective == nullptr) {
+    constexpr size_t kItemAbiEnd = offsetof(qol::contracts::QolGameHost, item_abi) +
+                                   sizeof(qol::contracts::QolItemAbiDispatchApi);
+    if (game == nullptr || game->abi.size < kItemAbiEnd ||
+        !qol::contracts::satisfies({game->abi.major, game->abi.minor},
+                                   {qol::contracts::kGameHostMajor,
+                                    qol::contracts::kGameHostMinor}) ||
+        game->item_count.effective == nullptr || game->item_abi.find_item_wrapper == nullptr ||
+        game->item_abi.bind_find_item_backup == nullptr ||
+        game->item_abi.original_find_item_slot == nullptr ||
+        game->item_abi.item_identity_at == nullptr ||
+        game->item_abi.begin_original_only == nullptr ||
+        game->item_abi.end_original_only == nullptr ||
+        game->item_abi.native_item_at == nullptr ||
+        game->item_abi.native_item_for_handle == nullptr) {
         g_game = nullptr;
         return false;
     }
     g_game = game;
+    for (uint32_t index = 0; index < kInventoryHookClaimCount; ++index) {
+        g_runtime_hook_claims[index] = kInventoryHookClaims[index];
+        if (std::strcmp(g_runtime_hook_claims[index].id, "hook:INVEN_FindItem") == 0 &&
+            game->item_abi.find_item_wrapper != nullptr) {
+            g_runtime_hook_claims[index].handler =
+                reinterpret_cast<void*>(game->item_abi.find_item_wrapper);
+        }
+    }
     return true;
 }
 

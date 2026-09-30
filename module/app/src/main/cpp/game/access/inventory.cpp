@@ -4,6 +4,7 @@
 #include "game/access/game_access.h"
 #include "game/access/item_class.h"
 #include "game/access/item_handle_registry.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 
 #include <cstring>
 
@@ -13,6 +14,9 @@ namespace {
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotFound = "inventory slot is empty";
 constexpr const char* kNotReady = "inventory not ready";
+
+contracts::QolFindItemAbiFn g_find_item_backup = nullptr;
+thread_local uint32_t g_original_only_depth = 0;
 
 QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -57,6 +61,107 @@ bool bridge_bag_slot(void* item, int bag, int slot, void* context) {
 }
 
 }  // namespace
+
+void* game_inventory_find_item_hook(int32_t category) {
+    const contracts::QolFindItemAbiFn backup = g_find_item_backup;
+    if (backup == nullptr) return nullptr;
+    void* original = backup(category);
+    if (original != nullptr) {
+        // The pointer remains inside this ABI wrapper and is returned only to the game caller.
+        (void)register_item(original, contracts::kQolItemHandleOwnerGame);
+        return original;
+    }
+    if (g_original_only_depth != 0) return nullptr;
+    const contracts::QolInventoryExtensionProvider* provider =
+        inventory_extension_provider_if_resident();
+    if (provider == nullptr || provider->for_each_item == nullptr) return nullptr;
+    struct FindContext {
+        int32_t category;
+        contracts::QolItemHandle item;
+    } context{category, contracts::kInvalidItemHandle};
+    const QolResult result = provider->for_each_item(
+        [](const contracts::QolInventoryExtensionItemRef* ref, void* raw) -> int32_t {
+            auto* state = static_cast<FindContext*>(raw);
+            if (ref == nullptr || ref->category != state->category || ref->item.slot == 0 ||
+                ref->item.generation == 0) return 0;
+            state->item = ref->item;
+            return 1;
+        },
+        &context);
+    if (!contracts::succeeded(result) || context.item.slot == 0) return nullptr;
+    const ItemHandleResolution resolved =
+        item_handle_registry().resolve_item(context.item, contracts::kQolItemHandleOwnerAny);
+    return resolved.error == ItemHandleError::kNone ? resolved.item : nullptr;
+}
+
+QolResult game_inventory_bind_find_item_backup(contracts::QolFindItemAbiFn backup) {
+    if (backup == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    g_find_item_backup = backup;
+    return contracts::ok();
+}
+
+QolResult game_original_find_item_slot(contracts::QolItemHandle handle, int32_t* out_bag,
+                                       int32_t* out_slot) {
+    if (handle.slot == 0 || handle.generation == 0 || out_bag == nullptr || out_slot == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_inven_find_item_slot == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    const ItemHandleResolution resolved =
+        item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    int8_t encoded = -1;
+    if (fn_inven_find_item_slot(resolved.item, &encoded) == 0) {
+        return error_result(kQolErrNotFound, kNotFound);
+    }
+    const uint8_t value = static_cast<uint8_t>(encoded);
+    *out_bag = value >> 5;
+    *out_slot = value & 0x1F;
+    return contracts::ok();
+}
+
+QolResult game_item_identity_at(int32_t bag, int32_t slot, contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out_item = contracts::kInvalidItemHandle;
+    contracts::QolInventoryItemRef ref{};
+    const QolResult result = inventory_item_ref_at(bag, slot, &ref);
+    if (!contracts::succeeded(result)) return result;
+    *out_item = ref.item;
+    return contracts::ok();
+}
+
+void game_begin_original_only() { ++g_original_only_depth; }
+
+void game_end_original_only() {
+    if (g_original_only_depth != 0) --g_original_only_depth;
+}
+
+QolResult game_native_item_at(int32_t bag, int32_t slot, void** out_item) {
+    return physical_item_at(bag, slot, out_item);
+}
+
+QolResult game_native_item_for_handle(contracts::QolItemHandle handle, void** out_item) {
+    if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_item = nullptr;
+    const ItemHandleResolution resolved =
+        item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    *out_item = resolved.item;
+    return contracts::ok();
+}
 
 QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
                                 contracts::QolInventoryItemRef* out) {

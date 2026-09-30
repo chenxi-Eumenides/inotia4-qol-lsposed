@@ -628,6 +628,14 @@ contracts::QolGameHost make_game_host() {
                          &call_world_close_popup, &call_world_restore_hud,
                          &call_world_show_banner, &call_world_add_money,
                          &call_world_cancel_tutorial};
+    host.item_abi = {&game_inventory_find_item_hook,
+                     &game_inventory_bind_find_item_backup,
+                     &game_original_find_item_slot,
+                      &game_item_identity_at,
+                      &game_begin_original_only,
+                      &game_end_original_only,
+                      &game_native_item_at,
+                      &game_native_item_for_handle};
     return host;
 }
 

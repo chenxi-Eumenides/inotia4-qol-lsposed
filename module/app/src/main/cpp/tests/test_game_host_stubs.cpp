@@ -1,4 +1,6 @@
 #include "game/access/inventory.h"
+#include "game/access/item_handle_registry.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/access/item_class.h"
 #include "game/access/game_access.h"
 #include "game/access/world.h"
@@ -10,10 +12,94 @@
 
 uint8_t* g_snd_fx = nullptr;
 UiEquipMakeDescFn fn_ui_equip_make_desc = nullptr;
+decltype(fn_inven_find_item_slot) fn_inven_find_item_slot = nullptr;
+extern qol::contracts::QolItemHandle g_inventory_item_handle;
 
 namespace qol::game {
 
 int item_sell_price(const void*) { return -1; }
+
+namespace {
+contracts::QolFindItemAbiFn g_test_find_item_backup = nullptr;
+thread_local uint32_t g_test_original_only_depth = 0;
+}
+
+void* game_inventory_find_item_hook(int32_t category) {
+    if (g_test_find_item_backup != nullptr) {
+        void* original = g_test_find_item_backup(category);
+        if (original != nullptr) return original;
+    }
+    if (g_test_original_only_depth != 0) return nullptr;
+    const contracts::QolInventoryExtensionProvider* provider =
+        inventory_extension_provider_if_resident();
+    if (provider == nullptr || provider->for_each_item == nullptr) return nullptr;
+    struct Context {
+        int32_t category;
+        contracts::QolItemHandle item;
+    } context{category, contracts::kInvalidItemHandle};
+    const QolResult result = provider->for_each_item(
+        [](const contracts::QolInventoryExtensionItemRef* ref, void* raw) -> int32_t {
+            auto* state = static_cast<Context*>(raw);
+            if (ref == nullptr || ref->category != state->category) return 0;
+            state->item = ref->item;
+            return 1;
+        },
+        &context);
+    if (!contracts::succeeded(result) || context.item.slot == 0) return nullptr;
+    const ItemHandleResolution resolved =
+        item_handle_registry().resolve_item(context.item, contracts::kQolItemHandleOwnerAny);
+    return resolved.error == ItemHandleError::kNone ? resolved.item : nullptr;
+}
+
+QolResult game_inventory_bind_find_item_backup(contracts::QolFindItemAbiFn backup) {
+    if (backup == nullptr) return contracts::error(kQolErrInvalidArgument, "null", 4);
+    g_test_find_item_backup = backup;
+    return contracts::ok();
+}
+
+QolResult game_original_find_item_slot(contracts::QolItemHandle item, int32_t* out_bag,
+                                       int32_t* out_slot) {
+    if (out_bag == nullptr || out_slot == nullptr || fn_inven_find_item_slot == nullptr) {
+        return contracts::error(kQolErrNotReady, "test stub", 9);
+    }
+    const ItemHandleResolution resolved =
+        item_handle_registry().resolve_item(item, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error != ItemHandleError::kNone) {
+        return contracts::error(kQolErrNotFound, "stale", 5);
+    }
+    int8_t encoded = -1;
+    if (fn_inven_find_item_slot(resolved.item, &encoded) == 0) {
+        return contracts::error(kQolErrNotFound, "not found", 9);
+    }
+    *out_bag = static_cast<uint8_t>(encoded) >> 5;
+    *out_slot = static_cast<uint8_t>(encoded) & 0x1f;
+    return contracts::ok();
+}
+
+QolResult game_item_identity_at(int32_t, int32_t,
+                                contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) return contracts::error(kQolErrInvalidArgument, "null", 4);
+    *out_item = ::g_inventory_item_handle;
+    return out_item->slot == 0 ? contracts::error(kQolErrNotFound, "empty", 5)
+                               : contracts::ok();
+}
+
+void game_begin_original_only() { ++g_test_original_only_depth; }
+void game_end_original_only() {
+    if (g_test_original_only_depth != 0) --g_test_original_only_depth;
+}
+QolResult game_native_item_at(int32_t, int32_t, void** out_item) {
+    if (out_item != nullptr) *out_item = nullptr;
+    return contracts::error(kQolErrNotReady, "test stub", 9);
+}
+QolResult game_native_item_for_handle(contracts::QolItemHandle item, void** out_item) {
+    if (out_item == nullptr) return contracts::error(kQolErrInvalidArgument, "null", 4);
+    const ItemHandleResolution resolved =
+        item_handle_registry().resolve_item(item, contracts::kQolItemHandleOwnerAny);
+    *out_item = resolved.error == ItemHandleError::kNone ? resolved.item : nullptr;
+    return *out_item == nullptr ? contracts::error(kQolErrNotFound, "stale", 5)
+                                : contracts::ok();
+}
 
 QolResult physical_item_at(int32_t, int32_t, void** out_item) {
     if (out_item != nullptr) *out_item = nullptr;

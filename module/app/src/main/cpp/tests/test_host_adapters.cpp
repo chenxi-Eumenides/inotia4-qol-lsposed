@@ -25,6 +25,7 @@
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
+#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/adapter_ports/item_extras_port.h"
 #include "game/adapter_ports/inventory_extras_port.h"
@@ -420,6 +421,35 @@ void panel_close() {}
 bool panel_active() { return true; }
 const char* panel_block_reason() { return nullptr; }
 
+int g_find_item_mode = 0;
+int g_find_item_category = 28;
+int g_find_item_backup_calls = 0;
+int g_find_item_item = 0;
+qol::contracts::QolItemHandle g_find_item_handle{};
+
+void* fake_find_item_backup(int32_t category) {
+    ++g_find_item_backup_calls;
+    return g_find_item_mode == 1 && category == g_find_item_category ? &g_find_item_item : nullptr;
+}
+
+int fake_find_item_slot(void* item, int8_t* out_slot) {
+    if (item != &g_find_item_item || out_slot == nullptr) return 0;
+    *out_slot = static_cast<int8_t>((2 << 5) | 7);
+    return 1;
+}
+
+QolResult find_item_provider_for_each(qol::contracts::QolInventoryExtensionItemFn callback,
+                                      void* ctx) {
+    if (callback == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "null", 4);
+    const qol::contracts::QolInventoryExtensionItemRef ref{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 3,
+        g_find_item_category, 1, g_find_item_handle};
+    (void)callback(&ref, ctx);
+    return qol::contracts::ok();
+}
+
+bool find_item_provider_available() { return true; }
+
 }  // namespace
 
 int main() {
@@ -600,6 +630,45 @@ int main() {
                   "read-only face must follow item-count face");
     qol::host::game_host_mark_main_thread();
     assert(game.thread.is_main_thread() == 1);
+    assert(game.item_abi.find_item_wrapper != nullptr);
+    assert(game.item_abi.bind_find_item_backup != nullptr);
+    assert(game.item_abi.original_find_item_slot != nullptr);
+    assert(game.item_abi.item_identity_at != nullptr);
+    assert(game.item_abi.native_item_at != nullptr);
+    assert(game.item_abi.native_item_for_handle != nullptr);
+    assert(game.item_abi.bind_find_item_backup(&fake_find_item_backup).ok == kQolOk);
+    qol::game::inventory_extension_bind_host();
+    qol::contracts::QolInventoryExtensionProvider find_item_provider{};
+    find_item_provider.for_each_item = &find_item_provider_for_each;
+    assert(qol::game::inventory_extension_set_provider(&find_item_provider,
+                                                        &find_item_provider_available));
+    g_find_item_handle = qol::game::register_item(
+        &g_find_item_item, qol::contracts::kQolItemHandleOwnerProvider);
+    assert(g_find_item_handle.slot != 0 && g_find_item_handle.generation != 0);
+    g_find_item_mode = 1;
+    g_find_item_backup_calls = 0;
+    assert(game.item_abi.find_item_wrapper(g_find_item_category) == &g_find_item_item);
+    assert(g_find_item_backup_calls == 1);
+    g_find_item_mode = 0;
+    assert(game.item_abi.find_item_wrapper(g_find_item_category) == &g_find_item_item);
+    game.item_abi.begin_original_only();
+    assert(game.item_abi.find_item_wrapper(g_find_item_category) == nullptr);
+    game.item_abi.end_original_only();
+    fn_inven_find_item_slot = &fake_find_item_slot;
+    int32_t found_bag = -1;
+    int32_t found_slot = -1;
+    assert(game.item_abi.original_find_item_slot(g_find_item_handle, &found_bag,
+                                                  &found_slot).ok == kQolOk);
+    assert(found_bag == 2 && found_slot == 7);
+    qol::contracts::QolItemHandle slot_identity{};
+    g_inventory_item_handle = g_find_item_handle;
+    assert(game.item_abi.item_identity_at(1, 2, &slot_identity).ok == kQolOk);
+    assert(slot_identity.slot == g_find_item_handle.slot &&
+           slot_identity.generation == g_find_item_handle.generation);
+    void* native_item = nullptr;
+    assert(game.item_abi.native_item_for_handle(g_find_item_handle, &native_item).ok == kQolOk);
+    assert(native_item == &g_find_item_item);
+    fn_inven_find_item_slot = nullptr;
     int handle_item = 0;
     qol::contracts::QolItemHandle injected_handle{};
     assert(sdk.item_handle.register_item(
