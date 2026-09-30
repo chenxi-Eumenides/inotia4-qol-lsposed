@@ -2,28 +2,31 @@
 // 重新生成：uv run python scripts/data/game_variant_table.py
 //
 // 源文件清单（确定性排序，无 arm64 libgame.so 的 APK 不在此表内）：
-//   apk/game-apk/Inotia4_v1.3.2_monster_v29.apk
-//   apk/game-apk/艾诺迪亚4_v1.3.2_原版.apk
-//   apk/game-apk/艾诺迪亚4_v1.3.2_盗版大修_20260810.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v20.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v22.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v23.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v24.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v25.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v26.apk
-//   apk/game-apk/history/Inotia4_v1.3.2_monster_v27.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.2.9_魔法使版.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260704.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260717.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260720.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260723.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260726.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260801.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260804.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260824.apk
-//   apk/game-apk/history/艾诺迪亚4_v1.3.2_盗版大修_20260830.apk
-//   apk/game-apk/history/Inotia+4_1.4.0_APKPure.xapk
+//   apk/game-apk/艾诺迪亚4_monster_v31.apk
+//   apk/game-apk/艾诺迪亚4_原版_v1.3.2.apk
+//   apk/game-apk/艾诺迪亚4_盗版大修_v0810.apk
+//   apk/game-apk/history/Inotia4_v1.2.9_魔法使版.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v19.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v20.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v22.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v23.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v24.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v25.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v26.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v27.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v28.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_v29.apk
+//   apk/game-apk/history/艾诺迪亚4_monster_国庆比赛专用.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0704.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0717.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0720.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0723.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0726.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0801.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0804.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0824.apk
+//   apk/game-apk/history/艾诺迪亚4_盗版大修_v0830.apk
+//   apk/game-apk/history/Inotia4_v1.4.0_APKPure.xapk
 //
 // 排序：系列(original/overhaul/monster/unknown) → 版本标签 → md5
 // 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline
@@ -50,6 +53,7 @@ static const GameVariant kGameVariantTable[] = {
     {GameSeries::kMonster, "v26", 0x00000003u, {0x9b, 0xc2, 0x1b, 0x18, 0xd3, 0x43, 0x46, 0x80, 0x25, 0x78, 0xd0, 0x6f, 0x62, 0x89, 0xd5, 0xd1}},
     {GameSeries::kMonster, "v27", 0x00000003u, {0xcc, 0x51, 0x78, 0x97, 0xdc, 0xaa, 0xe8, 0x02, 0x1e, 0x35, 0xa2, 0x42, 0x62, 0x84, 0xc2, 0x24}},
     {GameSeries::kMonster, "v29", 0x00000003u, {0x4c, 0x33, 0x2e, 0x9b, 0x50, 0x8b, 0x35, 0xfe, 0x1e, 0x97, 0xf1, 0xf2, 0x6e, 0x56, 0xf0, 0x4d}},
+    {GameSeries::kMonster, "v31", 0x00000003u, {0xf1, 0xcc, 0x6c, 0xbf, 0xa1, 0xf4, 0xd2, 0x96, 0x56, 0x26, 0x53, 0x13, 0x90, 0x9e, 0xe2, 0xa3}},
     {GameSeries::kUnknown, "", 0x00000000u, {0xf0, 0xee, 0x86, 0xc4, 0x9b, 0x7c, 0x68, 0x45, 0xab, 0x44, 0xdb, 0x80, 0xdc, 0x2e, 0xc0, 0x1a}},
 };
 

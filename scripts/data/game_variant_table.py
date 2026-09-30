@@ -63,8 +63,35 @@ CAP_WAREHOUSE_INLINE = 1 << 2 # block3 内嵌 WH96v002 仓库段（语义位）
 # 每条必须写明依据；未登记者语义位保持 0（表示“未验证”，不是“确定没有”）。
 CURATION = {
     # 依据：真机/反汇编实测（backlog 2026-09-14/15，block3 校验器 0x7413b4 调用链）
-    # 仅有 Inotia4_v1.3.2_monster_v23.apk 的 block3 内嵌 WH96v002 仓库段；其余版本未验证。
-    "Inotia4_v1.3.2_monster_v23.apk": CAP_WAREHOUSE_INLINE,
+    # 仅 monster v23 的 block3 内嵌 WH96v002 仓库段；其余版本未验证。
+    "艾诺迪亚4_monster_v23.apk": CAP_WAREHOUSE_INLINE,
+}
+
+# v28 and v29 ship the same libgame.so; retain the existing v29 runtime label.
+PREFERRED_DUPLICATE_SOURCE = {
+    "4c332e9b508b35fe1e97f1f26e56f04d": "apk/game-apk/history/艾诺迪亚4_monster_v29.apk",
+}
+
+# Preserve established runtime labels after the source APKs were renamed.
+VERSION_LABEL_OVERRIDES = {
+    "艾诺迪亚4_盗版大修_v0704.apk": "20260704",
+    "艾诺迪亚4_盗版大修_v0717.apk": "20260717",
+    "艾诺迪亚4_盗版大修_v0720.apk": "20260720",
+    "艾诺迪亚4_盗版大修_v0723.apk": "20260723",
+    "艾诺迪亚4_盗版大修_v0726.apk": "20260726",
+    "艾诺迪亚4_盗版大修_v0801.apk": "20260801",
+    "艾诺迪亚4_盗版大修_v0804.apk": "20260804",
+    "艾诺迪亚4_盗版大修_v0810.apk": "20260810",
+    "艾诺迪亚4_盗版大修_v0824.apk": "20260824",
+    "艾诺迪亚4_盗版大修_v0830.apk": "20260830",
+    "艾诺迪亚4_monster_v19.apk": "v1.3.2",
+    "Inotia4_v1.4.0_APKPure.xapk": "",
+}
+
+# This special-edition APK was not part of the frozen variant set; only the
+# requested v31 row is admitted in this registration batch.
+EXCLUDED_SOURCES = {
+    "apk/game-apk/history/艾诺迪亚4_monster_国庆比赛专用.apk",
 }
 
 
@@ -84,6 +111,8 @@ def parse_series(name: str) -> str:
 
 def parse_version_label(name: str) -> str:
     """版本标签：优先 8 位日期（大修构建），否则取最后一个 v<版本>；取不到留空。"""
+    if name in VERSION_LABEL_OVERRIDES:
+        return VERSION_LABEL_OVERRIDES[name]
     date = re.search(r"(20\d{6})", name)
     if date:
         return date.group(1)
@@ -171,6 +200,9 @@ def collect() -> tuple[list[dict], list[str]]:
         for apk_path in sorted(ROOT.glob(pattern)):
             rel = apk_path.relative_to(ROOT).as_posix()
             sources.append(rel)
+            if rel in EXCLUDED_SOURCES:
+                print(f"[excluded] {rel}: 不属于冻结变体集，本批不登记", file=sys.stderr)
+                continue
             name = apk_path.name
             data = read_libgame(apk_path)
             if data is None:
@@ -232,10 +264,33 @@ def render(entries: list[dict], sources: list[str]) -> str:
 
 def main() -> int:
     entries, sources = collect()
-    md5s = [e["md5"] for e in entries]
-    if len(md5s) != len(set(md5s)):
-        print("[error] md5 不唯一，拒绝生成", file=sys.stderr)
-        return 1
+    entries_by_md5: dict[str, list[dict]] = {}
+    for entry in entries:
+        entries_by_md5.setdefault(entry["md5"], []).append(entry)
+
+    unique_entries = []
+    for md5, duplicates in entries_by_md5.items():
+        if len(duplicates) == 1:
+            unique_entries.append(duplicates[0])
+            continue
+
+        preferred_source = PREFERRED_DUPLICATE_SOURCE.get(md5)
+        preferred = [entry for entry in duplicates if entry["source"] == preferred_source]
+        if (
+            preferred_source is None
+            or len(preferred) != 1
+            or any(entry["series"] != preferred[0]["series"] for entry in duplicates)
+        ):
+            print(f"[error] md5 不唯一且无有效首选源，拒绝生成：{md5}", file=sys.stderr)
+            return 1
+        unique_entries.append(preferred[0])
+        print(
+            f"[duplicate] md5={md5}: 保留 {preferred_source}，"
+            f"跳过 {', '.join(entry['source'] for entry in duplicates if entry is not preferred[0])}",
+            file=sys.stderr,
+        )
+
+    entries = unique_entries
     text = render(entries, sources)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(text, encoding="utf-8")

@@ -11,7 +11,7 @@ usage() {
   对 apk/game-apk/ 下的每个游戏 APK 生成一个集成 APK，输出到
   output/<发布前缀>_lspatched[_v<模块版本>].apk。
   发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<子版本或日期>]。
-  中文名（艾诺迪亚4_MONSTER_v31 / _原版_v1.3.2 / _盗版大修_v0810）自动映射到上述前缀；
+  中文名（艾诺迪亚4_monster_v31 / _原版_v1.3.2 / _盗版大修_v0810）自动映射到上述前缀；
   无法映射到 ASCII 的命名会直接失败（发布附件名禁止中文）。
   模块版本从 release 模块 APK 文件名 `..._vX.Y.Z.apk` 提取；debug 包无版本则不追加。
   - LSPatch 不支持新包名；传入第二位置参数会明确报错。
@@ -169,7 +169,7 @@ fi
 shopt -u nullglob
 
 # 发布前缀：游戏 APK 文件名 -> 全 ASCII 前缀（发布附件名不得含中文）。
-#   艾诺迪亚4_MONSTER_v31.apk         -> Inotia4_v1.3.2_monster_v31
+#   艾诺迪亚4_monster_v31.apk         -> Inotia4_v1.3.2_monster_v31
 #   艾诺迪亚4_原版_v1.3.2.apk          -> Inotia4_v1.3.2_original
 #   艾诺迪亚4_盗版大修_v0810.apk       -> Inotia4_v1.3.2_overhaul_v0810
 #   Inotia4_v1.3.2_monster_v25.apk     -> Inotia4_v1.3.2_monster_v25（旧 ASCII 名沿用）
