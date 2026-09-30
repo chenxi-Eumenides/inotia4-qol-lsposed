@@ -2337,10 +2337,17 @@ void test_extension_move_result_capacity_and_overflow() {
         std::vector<char> result(qol::infra::kMaxResultBytes);
         uint32_t size = 0;
         CHECK(qol::infra::read_result(ticket, result.data(), result.size(), &size));
-        CHECK(size == (overflow_expected ? qol::infra::kMaxResultBytes : body_size));
-        CHECK(std::string_view(result.data(), size).compare(0, 10, "{\"ok\":true") == 0);
-        CHECK(std::string_view(result.data(), size).find("\\\"ok\\\":false") !=
-              std::string_view::npos);
+        if (overflow_expected) {
+            constexpr std::string_view summary =
+                "{\"ok\":true,\"truncated\":true,\"reason\":\"result_limit_exceeded\"}";
+            CHECK(size == summary.size());
+            CHECK(std::string_view(result.data(), size) == summary);
+        } else {
+            CHECK(size == body_size);
+            CHECK(std::string_view(result.data(), size).compare(0, 10, "{\"ok\":true") == 0);
+            CHECK(std::string_view(result.data(), size).find("\\\"ok\\\":false") !=
+                  std::string_view::npos);
+        }
         qol::infra::command_queue_reset_for_test();
     };
     run_case(5000, false);

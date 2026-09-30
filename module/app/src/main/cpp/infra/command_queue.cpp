@@ -58,8 +58,12 @@ void record_terminal_locked(CommandTicket ticket, CommandState state, const char
     TerminalEntry entry;
     entry.state = state;
     entry.overflowed = overflowed || result_size > kMaxResultBytes;
-    if (result != nullptr && result_size != 0) {
-        entry.result.assign(result, std::min(result_size, kMaxResultBytes));
+    if (entry.overflowed) {
+        entry.result = state == CommandState::kDone
+                           ? "{\"ok\":true,\"truncated\":true,\"reason\":\"result_limit_exceeded\"}"
+                           : "{\"ok\":false,\"truncated\":true,\"reason\":\"result_limit_exceeded\"}";
+    } else if (result != nullptr && result_size != 0) {
+        entry.result.assign(result, result_size);
     }
     g_retained_result_bytes += entry.result.size();
     g_terminal[ticket] = std::move(entry);
@@ -176,10 +180,6 @@ uint32_t drain() {
             ok = command.run(command.ctx);
         }
         const bool overflowed = result_size > result_buffer.size();
-        if (overflowed) {
-            result_size = static_cast<uint32_t>(result_buffer.size());
-            ok = true;
-        }
         const bool defer = g_defer_requested;
         g_defer_requested = false;
         std::lock_guard<std::mutex> lock(g_mtx);

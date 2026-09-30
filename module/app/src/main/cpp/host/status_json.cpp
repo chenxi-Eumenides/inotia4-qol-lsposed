@@ -243,8 +243,8 @@ std::string host_ticket_json(uint64_t ticket) {
     out += ",\"state\":\"";
     out += qol::infra::command_state_name(state);
     out += "\"";
-    // 终态结果（明确尽力语义，见 ARCHITECTURE.md §8.1）：已保留则原样内嵌为 JSON 对象，
-    // 未保留（无结果/已淘汰）显式标记 result_retained=false，不静默省略。
+    // 终态结果（明确尽力语义，见 ARCHITECTURE.md §8.1）：已保留则原样内嵌为 JSON 对象；
+    // 超限结果由队列存为合成摘要，未保留（无结果/已淘汰）则显式标记 result_retained=false。
     static thread_local std::vector<char> result_buffer(qol::infra::kMaxResultBytes);
     uint32_t result_size = 0;
     const bool retained = qol::infra::read_result(ticket, result_buffer.data(),
@@ -252,9 +252,15 @@ std::string host_ticket_json(uint64_t ticket) {
                                                   &result_size) &&
                           result_size != 0 &&
                           (result_buffer[0] == '{' || result_buffer[0] == '[');
-    const bool overflowed = state == static_cast<int32_t>(qol::infra::CommandState::kDone) &&
-                            qol::infra::ticket_result_overflowed(ticket);
-    if (retained && !overflowed) {
+    const bool overflowed = qol::infra::ticket_result_overflowed(ticket);
+    if (retained && overflowed) {
+        const bool succeeded = state == static_cast<int32_t>(qol::infra::CommandState::kDone);
+        out += ",\"result\":";
+        out += succeeded
+                   ? "{\"ok\":true,\"truncated\":true,\"reason\":\"result_limit_exceeded\"}"
+                   : "{\"ok\":false,\"truncated\":true,\"reason\":\"result_limit_exceeded\"}";
+        out += ",\"result_retained\":false";
+    } else if (retained) {
         out += ",\"result\":";
         out.append(result_buffer.data(), result_size);
         out += ",\"result_retained\":true";

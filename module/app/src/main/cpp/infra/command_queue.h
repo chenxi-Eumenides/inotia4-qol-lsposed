@@ -28,7 +28,7 @@ struct Command {
     void* ctx = nullptr;
     bool cancellable = false;
     // 可选：可写结果的命令体。非空时 run 应为 nullptr；drain 调用它并以返回值判定成功，
-    // 结果 JSON 写入票据持有的有界缓冲（capacity 由队列提供，超限会截断并置超限标记）。
+    // 结果 JSON 写入票据持有的有界缓冲（capacity 由队列提供，超限时丢弃原文并保留摘要）。
     // nullptr 表示该命令无结果（read_result 恒返回 false）。
     bool (*run_with_result)(void* ctx, char* out, uint32_t capacity, uint32_t* out_size) = nullptr;
     // 延迟结算上限（帧）。命令体可在执行期间调用 request_defer_current_command() 请求
@@ -63,7 +63,7 @@ CommandState ticket_state(CommandTicket ticket);
 // pending、或 capacity 不足均返回 false。明确尽力语义：结果可能已被预算淘汰。
 bool read_result(CommandTicket ticket, char* out, uint32_t capacity, uint32_t* out_size);
 
-// 结果曾因命令体输出长度超过缓冲上限而截断；未知/过期/非超限票据返回 false。
+// 原结果曾因命令体输出长度超过缓冲上限而以摘要替代；未知/过期/非超限票据返回 false。
 bool ticket_result_overflowed(CommandTicket ticket);
 
 // 仅在命令可取消且尚未执行时成功。

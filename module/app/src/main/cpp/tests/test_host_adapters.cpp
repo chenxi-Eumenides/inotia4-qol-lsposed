@@ -436,7 +436,7 @@ int main() {
         qol::infra::Command{"host_adapter_overflow", nullptr, nullptr, false,
                             &overflow_result});
     assert(overflow_ticket != 0 && qol::infra::drain() == 1);
-    assert(qol::infra::ticket_state(overflow_ticket) == qol::infra::CommandState::kDone);
+    assert(qol::infra::ticket_state(overflow_ticket) == qol::infra::CommandState::kFailed);
     assert(qol::infra::ticket_result_overflowed(overflow_ticket));
     qol::infra::command_queue_reset_for_test();
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
