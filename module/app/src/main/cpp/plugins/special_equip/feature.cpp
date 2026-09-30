@@ -33,6 +33,24 @@ std::atomic<uint64_t> g_override_count{0};
 // 真机排障用的「未放行原因」预算：UI 每次构建详情菜单都会调，不设上限会刷爆日志。
 std::atomic<int> g_reject_log_budget{120};
 
+bool item_facts_view(void* item, contracts::QolItemInventoryView* out) {
+    if (item == nullptr || out == nullptr || g_item_facts == nullptr ||
+        g_item_facts->view == nullptr) return false;
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr) return false;
+    contracts::QolItemHandle handle{};
+    uint32_t owner = 0;
+    if (sdk->item_handle.lookup_item != nullptr &&
+        sdk->item_handle.lookup_item(item, &handle, &owner) !=
+            contracts::kQolItemHandleStatusOk) {
+        if (sdk->item_handle.register_item == nullptr ||
+            sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, &handle) !=
+                contracts::kQolItemHandleStatusOk) return false;
+    }
+    return handle.slot != 0 && handle.generation != 0 &&
+           contracts::succeeded(g_item_facts->view(handle, out));
+}
+
 void log_write(int32_t level, const char* format, va_list args) {
     const auto* sdk = host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
@@ -57,10 +75,8 @@ void log_debug_impl(const char* format, ...) {
 
 // 原版判定链重放依赖（不含「菜单角色」——那只在出售门禁与安装门控需要）。
 bool replay_deps_ready() {
-    const auto* game = game_host();
     const auto* extras = character_extras();
-    return game != nullptr && g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr &&
-           game->read_only.item.equip_level != nullptr &&
+    return g_item_facts != nullptr && g_item_facts->view != nullptr &&
            extras != nullptr && extras->read.can_change_equip != nullptr;
 }
 
@@ -93,16 +109,17 @@ void log_reject(int category, void* ch, void* item) {
     if (character_extras() != nullptr && character_extras()->read.can_change_equip != nullptr) {
         (void)character_extras()->read.can_change_equip(ch, &can_change);
     }
-    if (g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr) {
-        (void)g_item_facts->is_real_equip(item, &real_equip);
-    }
-    if (game != nullptr && game->read_only.item.equip_level != nullptr) {
-        (void)game->read_only.item.equip_level(item, &item_level);
+    contracts::QolItemInventoryView item_view{};
+    if (item_facts_view(item, &item_view)) {
+        real_equip = item_view.equip;
+        if ((item_view.fields & contracts::kQolItemInventoryHasNeedLevel) != 0) {
+            item_level = item_view.need_level;
+        }
     }
     int32_t item_category = category;
     int32_t no_equip_bit = -1;
-    if (g_item_facts != nullptr && g_item_facts->category != nullptr) {
-        (void)g_item_facts->category(item, &item_category);
+    if ((item_view.fields & contracts::kQolItemInventoryHasCategory) != 0) {
+        item_category = item_view.category;
     }
     if (game != nullptr && game->read_only.item.class_no_equip_bit != nullptr && item_category >= 0) {
         (void)game->read_only.item.class_no_equip_bit(item_category, &no_equip_bit);
@@ -154,13 +171,13 @@ bool deps_ready() {
 }
 
 void log_deps_missing() {
-    const auto* game = game_host();
-    log_error("symbols unresolved (is_real_equip=%d can_change_equip=%d equip_level=%d "
+    log_error("symbols unresolved (item_view=%d can_change_equip=%d "
               "menu_char=%d); not installed",
-              g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr,
-              game != nullptr && character_extras()->read.can_change_equip != nullptr,
-              game != nullptr && game->read_only.item.equip_level != nullptr,
-              game != nullptr && character_extras()->read.menu_character != nullptr);
+              g_item_facts != nullptr && g_item_facts->view != nullptr,
+              character_extras() != nullptr &&
+                  character_extras()->read.can_change_equip != nullptr,
+              character_extras() != nullptr &&
+                  character_extras()->read.menu_character != nullptr);
 }
 
 void set_gate(bool enabled) {
@@ -201,19 +218,20 @@ int can_equip_wrapper(void* ch, void* item) {
         log_reject(-1, ch, item);
         return 0;                                     // 依赖缺失：fail-closed，保持原版拒绝
     }
-    const auto* game = game_host();
     int32_t is_real_equip = 0;
     int32_t can_change_equip = 0;
     int32_t char_level = -1;
     int32_t item_level = -1;
-    if (game == nullptr || g_item_facts == nullptr ||
-        g_item_facts->is_real_equip(item, &is_real_equip).ok != kQolOk ||
+    contracts::QolItemInventoryView item_view{};
+    if (g_item_facts == nullptr || !item_facts_view(item, &item_view) ||
+        (item_view.fields & contracts::kQolItemInventoryHasNeedLevel) == 0 ||
         character_extras()->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
-        character_extras()->read.level(ch, &char_level).ok != kQolOk ||
-        game->read_only.item.equip_level(item, &item_level).ok != kQolOk) {
+        character_extras()->read.level(ch, &char_level).ok != kQolOk) {
         log_reject(-1, ch, item);
         return 0;
     }
+    is_real_equip = item_view.equip;
+    item_level = item_view.need_level;
     if (!equip_replay_allows(is_real_equip != 0, can_change_equip != 0, char_level, item_level)) {
         log_reject(-1, ch, item);  // UI 灰化走这条路径
         return 0;

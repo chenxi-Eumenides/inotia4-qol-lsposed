@@ -41,8 +41,10 @@ bool capture_range(Call&& call, int* out_min, int* out_max) {
     return true;
 }
 
-bool probe_jewel_bounds(const void* item, int32_t attribute_type, int* out_min, int* out_max) {
-    if (g_game == nullptr || g_game->read.attr_range.jewel_value == nullptr || item == nullptr ||
+bool probe_jewel_bounds(contracts::QolItemHandle item, int32_t attribute_type,
+                        int* out_min, int* out_max) {
+    if (g_game == nullptr || g_game->read.attr_range.jewel_value == nullptr ||
+        item.slot == 0 || item.generation == 0 ||
         attribute_type < 0) {
         return false;
     }
@@ -54,9 +56,10 @@ bool probe_jewel_bounds(const void* item, int32_t attribute_type, int* out_min, 
         out_min, out_max);
 }
 
-bool probe_option_range(const void* item, int32_t option, int32_t level, int32_t flag,
+bool probe_option_range(contracts::QolItemHandle item, int32_t option, int32_t level, int32_t flag,
                         int* out_min, int* out_max) {
-    if (g_game == nullptr || g_game->read.attr_range.option_value == nullptr || item == nullptr ||
+    if (g_game == nullptr || g_game->read.attr_range.option_value == nullptr ||
+        item.slot == 0 || item.generation == 0 ||
         option < 0 || level < 0 || flag < 0) {
         return false;
     }
@@ -124,9 +127,9 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return 0;
 }
 
-QolResult api_probe_jewel(const void* item, int32_t attribute_type, int32_t value,
+QolResult api_probe_jewel(contracts::QolItemHandle item, int32_t attribute_type, int32_t value,
                           contracts::AttributeQualityResult* out) {
-    if (item == nullptr || out == nullptr || attribute_type < 0) {
+    if (item.slot == 0 || item.generation == 0 || out == nullptr || attribute_type < 0) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
     int minimum = 0;
@@ -138,10 +141,10 @@ QolResult api_probe_jewel(const void* item, int32_t attribute_type, int32_t valu
     return contracts::ok();
 }
 
-QolResult api_probe_option(const void* item, int32_t option, int32_t level, int32_t flag,
+QolResult api_probe_option(contracts::QolItemHandle item, int32_t option, int32_t level, int32_t flag,
                            int32_t value,
                            contracts::AttributeQualityResult* out) {
-    if (item == nullptr || out == nullptr || option < 0 || level < 0 || flag < 0) {
+    if (item.slot == 0 || item.generation == 0 || out == nullptr || option < 0 || level < 0 || flag < 0) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
     int minimum = 0;

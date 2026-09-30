@@ -472,7 +472,8 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
             qol::contracts::kItemFactsCapabilityId,
             {qol::contracts::kItemFactsVersionMajor, qol::contracts::kItemFactsVersionMinor},
             &item_facts_iface)) ||
-        item_facts_iface == nullptr) {
+        item_facts_iface == nullptr || !qol::contracts::item_facts_api_size_valid(
+                                           static_cast<const qol::contracts::ItemFactsApi*>(item_facts_iface))) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_write_port = nullptr;

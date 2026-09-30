@@ -10,10 +10,12 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
     snapshot.digest = 1469598103934665603ULL;
     for (size_t index = 0; index < snapshot.slots.size(); ++index) {
         void* item = nullptr;
+        qol::contracts::QolItemHandle handle{};
         if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
             !qol::contracts::succeeded(g_item_facts->physical_item_at(
                 static_cast<int32_t>(index / virtual_bag::kSlotCount),
-                static_cast<int32_t>(index % virtual_bag::kSlotCount), &item))) {
+                static_cast<int32_t>(index % virtual_bag::kSlotCount), &handle)) ||
+            (handle.slot != 0 && !extension_bag_private_item_for_handle(handle, &item))) {
             return snapshot;
         }
         snapshot.slots[index] = item;

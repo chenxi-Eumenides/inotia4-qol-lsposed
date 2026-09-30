@@ -27,9 +27,9 @@ static_assert(std::is_trivially_copyable<QolUiControlHandle>::value,
 constexpr QolItemHandle kInvalidItemHandle{0, 0};
 constexpr QolUiControlHandle kInvalidUiControlHandle{0, 0};
 
-constexpr uint32_t kQolItemHandleProviderNative = 0;
-constexpr uint32_t kQolItemHandleProviderExtensionBag = 1;
-constexpr uint32_t kQolItemHandleProviderAny = UINT32_MAX;
+constexpr uint32_t kQolItemHandleOwnerGame = 0;
+constexpr uint32_t kQolItemHandleOwnerProvider = 1;
+constexpr uint32_t kQolItemHandleOwnerAny = UINT32_MAX;
 
 enum QolItemHandleStatus : int32_t {
     kQolItemHandleStatusOk = 0,
@@ -45,6 +45,7 @@ enum QolItemHandleStatus : int32_t {
 struct QolItemHandleApi {
     // Registration and ownership callbacks return QolItemHandleStatus.
     int32_t (*register_item)(void* item, uint32_t provider_id, QolItemHandle* out_handle);
+    int32_t (*lookup_item)(void* item, QolItemHandle* out_handle, uint32_t* out_provider_id);
     int32_t (*invalidate_item)(void* item, uint32_t provider_id);
     int32_t (*rebind_item)(void* item, uint32_t provider_id);
     int32_t (*begin_invalidation)(void* item, uint32_t provider_id,

@@ -9,10 +9,15 @@ namespace {
 
 const contracts::ItemFactsApi* facts() { return item_facts(); }
 const contracts::QolGameHost* game() { return game_host(); }
+bool read_view(contracts::QolItemHandle item, contracts::QolItemInventoryView* out) {
+    const auto* api = facts();
+    return api != nullptr && api->view != nullptr &&
+           contracts::succeeded(api->view(item, out));
+}
 
 }  // namespace
 
-bool item_category(const void* item, int32_t* out) {
+bool item_category(contracts::QolItemHandle item, int32_t* out) {
     const auto* api = facts();
     return api != nullptr && api->category != nullptr &&
            contracts::succeeded(api->category(item, out));
@@ -24,34 +29,40 @@ bool item_is_jewel(int32_t category, int32_t* out) {
            contracts::succeeded(api->is_jewel_category(category, out));
 }
 
-bool item_is_real_equip(const void* item, int32_t* out) {
-    const auto* api = facts();
-    return api != nullptr && api->is_real_equip != nullptr &&
-           contracts::succeeded(api->is_real_equip(item, out));
+bool item_is_real_equip(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view)) return false;
+    *out = view.equip;
+    return true;
 }
 
-bool item_rarity(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.rarity != nullptr &&
-           contracts::succeeded(host->read_only.item.rarity(item, out));
+bool item_rarity(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view) ||
+        (view.fields & contracts::kQolItemInventoryHasRarity) == 0) return false;
+    *out = view.rarity;
+    return true;
 }
 
-bool item_enchant_remaining(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.enchant_remaining != nullptr &&
-           contracts::succeeded(host->read_only.item.enchant_remaining(item, out));
+bool item_enchant_remaining(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view)) return false;
+    *out = view.enchant_remaining;
+    return true;
 }
 
-bool item_socket_filled(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.socket_filled != nullptr &&
-           contracts::succeeded(host->read_only.item.socket_filled(item, out));
+bool item_socket_filled(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view)) return false;
+    *out = view.socket_filled;
+    return true;
 }
 
-bool item_socket_total(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.socket_total != nullptr &&
-           contracts::succeeded(host->read_only.item.socket_total(item, out));
+bool item_socket_total(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view)) return false;
+    *out = view.socket_total;
+    return true;
 }
 
 bool item_is_backpack(int32_t category, int32_t* out) {
@@ -72,16 +83,24 @@ bool item_is_no_sell(int32_t category, int32_t* out) {
            contracts::succeeded(api->is_no_sell(category, out));
 }
 
-bool item_jewel_value(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.jewel_value != nullptr &&
-           contracts::succeeded(host->read_only.item.jewel_value(item, out));
+bool item_jewel_value(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view) ||
+        (view.fields & contracts::kQolItemInventoryHasJewelValue) == 0) return false;
+    *out = view.jewel_value;
+    return true;
 }
 
-bool item_jewel_attribute_type(const void* item, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.jewel_attribute_type != nullptr &&
-           contracts::succeeded(host->read_only.item.jewel_attribute_type(item, out));
+bool item_jewel_attribute_type(contracts::QolItemHandle item, int32_t* out) {
+    contracts::QolItemInventoryView view{};
+    if (out == nullptr || !read_view(item, &view) ||
+        (view.fields & contracts::kQolItemInventoryHasJewelAttributeType) == 0) return false;
+    *out = view.jewel_attribute_type;
+    return true;
+}
+
+bool item_inventory_view(contracts::QolItemHandle item, contracts::QolItemInventoryView* out) {
+    return read_view(item, out);
 }
 
 bool world_state(int32_t* out) {
@@ -112,15 +131,12 @@ bool game_state_gate(int32_t* out) {
 }
 
 void refresh_item_count(InventoryItemRef* ref) {
-    if (ref == nullptr || ref->native_item == nullptr) return;
-    const auto* host = game();
-    if (host == nullptr || host->item_count.effective == nullptr) return;
-    uint32_t count = 0;
-    if (!contracts::succeeded(host->item_count.effective(ref->native_item, &count)) ||
-        count > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
-        return;
-    }
-    ref->count = static_cast<int32_t>(count);
+    if (ref == nullptr || ref->item.slot == 0 || ref->item.generation == 0) return;
+    const auto* api = facts();
+    contracts::QolItemInventoryView view{};
+    if (api == nullptr || api->view == nullptr ||
+        !contracts::succeeded(api->view(ref->item, &view)) || view.count_supported == 0) return;
+    ref->count = view.effective_count;
 }
 
 }  // namespace qol::features::autosell::read_only

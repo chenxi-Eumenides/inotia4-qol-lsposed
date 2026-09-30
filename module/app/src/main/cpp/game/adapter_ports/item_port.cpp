@@ -11,6 +11,7 @@
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
+#include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/shop.h"
@@ -32,7 +33,29 @@ QolResult error_result(int32_t code, const char* message) {
 
 QolResult not_ready() { return error_result(kQolErrNotReady, "not ready"); }
 
-QolResult read_category(const void* item, int32_t* out) {
+QolResult resolve_item_handle(contracts::QolItemHandle handle, void** out_item) {
+    if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
+        return error_result(kQolErrInvalidArgument, "invalid item handle");
+    }
+    const ItemHandleResolution resolution =
+        item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolution.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolution.error == ItemHandleError::kType) {
+        return error_result(kQolErrInvalidArgument, "item handle type mismatch");
+    }
+    if (resolution.error != ItemHandleError::kNone || resolution.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    *out_item = resolution.item;
+    return contracts::ok();
+}
+
+QolResult read_category(contracts::QolItemHandle handle, int32_t* out) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
@@ -42,7 +65,10 @@ QolResult read_category(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_real_equip(const void* item, int32_t* out) {
+QolResult read_real_equip(contracts::QolItemHandle handle, int32_t* out) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
@@ -68,7 +94,10 @@ QolResult read_no_sell(int32_t category, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_sell_price(const void* item, int64_t* out) {
+QolResult read_sell_price(contracts::QolItemHandle handle, int64_t* out) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
@@ -78,7 +107,10 @@ QolResult read_sell_price(const void* item, int64_t* out) {
     return contracts::ok();
 }
 
-QolResult read_cumulate_count(const void* item, int32_t* out) {
+QolResult read_cumulate_count(contracts::QolItemHandle handle, int32_t* out) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
@@ -96,7 +128,10 @@ QolResult read_cumulate_count(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_effective_cumulate_count(const void* item, int32_t* out) {
+QolResult read_effective_cumulate_count(contracts::QolItemHandle handle, int32_t* out) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
@@ -114,15 +149,26 @@ QolResult read_item_ref_at(int32_t bag, int32_t slot, contracts::QolInventoryIte
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
-    return inventory_item_ref_at(bag, slot, out);
+    return qol::game::inventory_item_ref_at(bag, slot, out);
 }
 
 QolResult read_inventory_extension_access(contracts::QolInventoryExtensionAccess* out_access) {
     return inventory_extension_get_access(out_access);
 }
 
-QolResult read_physical_item_at(int32_t bag, int32_t slot, void** out) {
-    return physical_item_at(bag, slot, out);
+QolResult read_physical_item_at(int32_t bag, int32_t slot, contracts::QolItemHandle* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid item output");
+    void* item = nullptr;
+    const QolResult result = physical_item_at(bag, slot, &item);
+    if (!contracts::succeeded(result)) return result;
+    ItemHandleError handle_error = ItemHandleError::kNone;
+    contracts::QolItemHandle handle = lookup_item(item);
+    if (handle.slot == 0) {
+        handle = register_item(item, contracts::kQolItemHandleOwnerGame, &handle_error);
+    }
+    if (handle.slot == 0) return error_result(kQolErrNotReady, "item handle unavailable");
+    *out = handle;
+    return contracts::ok();
 }
 
 QolResult read_detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control) {
@@ -147,7 +193,11 @@ QolResult read_inventory_json(char* out, uint32_t capacity, uint32_t* out_size) 
     return copy_json(build_inventory_json(), out, capacity, out_size);
 }
 
-QolResult read_inventory_item_view(const void* item, contracts::QolItemInventoryView* out) {
+QolResult read_inventory_item_view(contracts::QolItemHandle handle,
+                                   contracts::QolItemInventoryView* out) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid item view args");
     }
@@ -162,6 +212,17 @@ QolResult read_inventory_item_view(const void* item, contracts::QolItemInventory
     }
     out->count_supported = fn_get_cumulate_count != nullptr ||
                            item_count_api_if_resident() != nullptr;
+    if (const contracts::QolItemCountApi* count_api = item_count_api_if_resident();
+        count_api != nullptr && count_api->effective != nullptr) {
+        uint32_t effective = 0;
+        if (contracts::succeeded(count_api->effective(item, &effective))) {
+            out->effective_count = static_cast<int32_t>(effective);
+        } else {
+            out->count_supported = 0;
+        }
+    } else if (fn_get_cumulate_count != nullptr) {
+        out->effective_count = fn_get_cumulate_count(item);
+    }
     out->equip = item_is_equip(const_cast<void*>(item)) ? 1 : 0;
     if (fn_get_rarity != nullptr) {
         out->fields |= contracts::kQolItemInventoryHasRarity;
@@ -185,12 +246,17 @@ QolResult read_inventory_item_view(const void* item, contracts::QolItemInventory
     out->socket_total = (out->socket >> 4) & 0x0F;
     const uint16_t enchant = *reinterpret_cast<const uint16_t*>(bytes + I_ENCHANT);
     out->enchant = enchant;
+    out->enchant_remaining = (enchant >> 2) & 0x0F;
     out->chaos = (enchant & 1u) != 0 ? 1 : 0;
     out->enchant_id = (enchant >> 11) & 0x1F;
     out->enchant_level = (enchant >> 6) & 0x1F;
     const uint32_t count_field = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
     out->chaos_level = count_field & 0xFF;
     out->chaos_rate = (count_field >> 8) & 0xFF;
+    out->jewel_value = static_cast<int32_t>(count_field & 0x7FF);
+    out->jewel_attribute_type = static_cast<int32_t>((count_field >> 18) & 0x3F);
+    out->fields |= contracts::kQolItemInventoryHasJewelValue |
+                   contracts::kQolItemInventoryHasJewelAttributeType;
     const auto* option = *reinterpret_cast<const uint8_t* const*>(bytes + I_OPTION_LIST);
     while (option != nullptr && out->option_count < contracts::kQolItemInventoryOptionCapacity) {
         const uint16_t index = *reinterpret_cast<const uint16_t*>(option + O_INDEX);
@@ -246,6 +312,7 @@ QolResult read_static_ready(int32_t* out_ready) {
 
 const contracts::QolItemPort kItemPort{
     contracts::kQolPortItemVersion,
+    sizeof(contracts::QolItemPort),
     {&read_category, &read_real_equip, &read_jewel_category, &read_no_sell, &read_sell_price,
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_context,
       &read_cursor_index, &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,

@@ -53,7 +53,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr) {
+        iface == nullptr || !contracts::item_facts_api_size_valid(
+                                static_cast<const contracts::ItemFactsApi*>(iface))) {
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));

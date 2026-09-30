@@ -99,12 +99,12 @@ QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
 
-QolResult category(const void* item, int32_t* out_category) {
+QolResult category(contracts::QolItemHandle item, int32_t* out_category) {
     if (g_port == nullptr || g_port->read.category == nullptr) return not_ready();
     return g_port->read.category(item, out_category);
 }
 
-QolResult is_real_equip(const void* item, int32_t* out_value) {
+QolResult is_real_equip(contracts::QolItemHandle item, int32_t* out_value) {
     if (g_port == nullptr || g_port->read.is_real_equip == nullptr) return not_ready();
     return g_port->read.is_real_equip(item, out_value);
 }
@@ -121,12 +121,12 @@ QolResult is_no_sell(int32_t category_value, int32_t* out_value) {
     return g_port->read.is_no_sell(category_value, out_value);
 }
 
-QolResult sell_price(const void* item, int64_t* out_price) {
+QolResult sell_price(contracts::QolItemHandle item, int64_t* out_price) {
     if (g_port == nullptr || g_port->read.sell_price == nullptr) return not_ready();
     return g_port->read.sell_price(item, out_price);
 }
 
-QolResult cumulate_count(const void* item, int32_t* out_count) {
+QolResult cumulate_count(contracts::QolItemHandle item, int32_t* out_count) {
     if (g_port == nullptr || g_port->read.cumulate_count == nullptr) return not_ready();
     return g_port->read.cumulate_count(item, out_count);
 }
@@ -136,11 +136,21 @@ QolResult item_ref_at(int32_t bag, int32_t slot, contracts::QolInventoryItemRef*
     return g_port->read.item_ref_at(bag, slot, out);
 }
 
-QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
+QolResult physical_item_at(int32_t bag, int32_t slot, contracts::QolItemHandle* out_item) {
     if (g_port == nullptr || g_port->read.physical_item_at == nullptr) {
         return not_ready();
     }
     return g_port->read.physical_item_at(bag, slot, out_item);
+}
+
+QolResult item_view(contracts::QolItemHandle item, contracts::QolItemInventoryView* out_view) {
+    if (g_port == nullptr || g_port->read.inventory_item_view == nullptr) return not_ready();
+    return g_port->read.inventory_item_view(item, out_view);
+}
+
+QolResult effective_count(contracts::QolItemHandle item, int32_t* out_count) {
+    if (g_port == nullptr || g_port->read.effective_cumulate_count == nullptr) return not_ready();
+    return g_port->read.effective_cumulate_count(item, out_count);
 }
 
 QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control) {
@@ -163,6 +173,7 @@ QolResult money(int64_t* out_money) {
 }
 
 constexpr contracts::ItemFactsApi kItemFactsApi{
+    sizeof(contracts::ItemFactsApi),
     &category,
     &is_real_equip,
     &is_jewel_category,
@@ -174,6 +185,8 @@ constexpr contracts::ItemFactsApi kItemFactsApi{
     &detail_context,
     &cursor_index,
     &money,
+    &item_view,
+    &effective_count,
 };
 
 // T2h-B2：item.state 发布面——唯一实现复用既有 serialize_inventory_json（禁止第二实现）。
@@ -304,9 +317,12 @@ bool provider_owns_bag(const InventoryExtensionAccessResult& access, int32_t bag
            access.provider->owns_bag(bag) != 0;
 }
 
-bool effective_item_count(const void* item, bool original_count_supported, uint32_t* out_count,
+bool effective_item_count(contracts::QolItemHandle item, bool original_count_supported,
+                          uint32_t* out_count,
                           bool* out_present) {
-    if (item == nullptr || out_count == nullptr || out_present == nullptr) return false;
+    if (item.slot == 0 || item.generation == 0 || out_count == nullptr || out_present == nullptr) {
+        return false;
+    }
     *out_present = false;
     if (g_port != nullptr && g_port->read.effective_cumulate_count != nullptr) {
         int32_t effective = 0;
@@ -466,11 +482,11 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
                 return ref_result;
             }
             if (item_ref.kind != static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal) ||
-                item_ref.native_item == nullptr) {
+                item_ref.item.slot == 0) {
                 continue;
             }
             contracts::QolItemInventoryView view{};
-            const QolResult view_result = g_port->read.inventory_item_view(item_ref.native_item,
+            const QolResult view_result = g_port->read.inventory_item_view(item_ref.item,
                                                                             &view);
             if (!contracts::succeeded(view_result)) return view_result;
             if (view.option_count > contracts::kQolItemInventoryOptionCapacity) {
@@ -478,7 +494,7 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
             }
             uint32_t count = 0;
             bool count_present = false;
-            if (!effective_item_count(item_ref.native_item, view.count_supported != 0, &count,
+            if (!effective_item_count(item_ref.item, view.count_supported != 0, &count,
                                       &count_present)) {
                 return error_result(kQolErrNotReady, "item count unavailable");
             }
@@ -877,7 +893,7 @@ bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
         bool found;
     } ctx{category, bag_out, slot_out, false};
     (void)access.provider->for_each_item(
-        [](const contracts::QolInventoryItemRef* ref, void* raw) -> int32_t {
+        [](const contracts::QolInventoryExtensionItemRef* ref, void* raw) -> int32_t {
             auto* p = static_cast<Ctx*>(raw);
             if (ref->category != p->category) return 0;
             *p->bag = ref->bag;
@@ -905,13 +921,15 @@ bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
         return false;
     }
     contracts::QolInventoryItemRef item_ref{};
+    contracts::QolInventoryExtensionItemRef extension_item_ref{};
+    const bool provider_item = bag >= kOriginalInventoryBagCount;
     QolResult ref_result = contracts::error(kQolErrNotFound, "empty slot", 10);
-    if (bag < kOriginalInventoryBagCount) {
+    if (!provider_item) {
         ref_result = g_port->read.item_ref_at(bag, slot, &item_ref);
     } else {
         if (extension_access.available && extension_access.provider != nullptr &&
             extension_access.provider->item_ref_at != nullptr) {
-            ref_result = extension_access.provider->item_ref_at(bag, slot, &item_ref);
+            ref_result = extension_access.provider->item_ref_at(bag, slot, &extension_item_ref);
         }
     }
     if (!contracts::succeeded(ref_result)) {
@@ -922,18 +940,20 @@ bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
         }
         return false;
     }
-    if (item_ref.native_item == nullptr) {
+    const contracts::QolItemHandle item_handle = provider_item ? extension_item_ref.item
+                                                               : item_ref.item;
+    if (item_handle.slot == 0 || item_handle.generation == 0) {
         *out = "null";
         return true;
     }
     contracts::QolItemInventoryView view{};
-    if (!contracts::succeeded(g_port->read.inventory_item_view(item_ref.native_item, &view)) ||
+    if (!contracts::succeeded(g_port->read.inventory_item_view(item_handle, &view)) ||
         view.option_count > contracts::kQolItemInventoryOptionCapacity) {
         return false;
     }
     uint32_t count = 0;
     bool count_present = false;
-    if (!effective_item_count(item_ref.native_item, view.count_supported != 0, &count,
+    if (!effective_item_count(item_handle, view.count_supported != 0, &count,
                               &count_present)) {
         return false;
     }
@@ -1908,6 +1928,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!contracts::satisfies(g_port->abi_version,
                               {contracts::kQolPortItemVersion.major,
                                contracts::kQolPortItemVersion.minor}) ||
+        !contracts::qol_item_port_size_valid(g_port) ||
         g_port->read.category == nullptr || g_port->read.cumulate_count == nullptr ||
         g_port->read.item_ref_at == nullptr ||
         g_port->read.inventory_item_view == nullptr || g_port->read.shop_items_json == nullptr ||

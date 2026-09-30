@@ -567,8 +567,11 @@ bool inventory_slot_locked(int bag, int slot, void** out) {
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
-    return qol::contracts::succeeded(
-        g_item_facts->physical_item_at(bag, slot, out));
+    qol::contracts::QolItemHandle handle{};
+    if (!qol::contracts::succeeded(g_item_facts->physical_item_at(bag, slot, &handle))) {
+        return false;
+    }
+    return extension_bag_private_item_for_handle(handle, out);
 }
 
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,

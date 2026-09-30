@@ -3,7 +3,10 @@
 #include <cstdint>
 #include <string>
 
-using LogicalInventoryItemFn = bool (*)(int bag, int slot, int category, int count, void* ctx);
+#include "contracts/item_handle.h"
+
+using LogicalInventoryItemFn = bool (*)(int bag, int slot, int category, int count,
+                                        qol::contracts::QolItemHandle item, void* ctx);
 
 bool extension_bag_enabled();
 int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount);
@@ -13,6 +16,8 @@ void extension_bag_end_internal_equip();
 bool extension_bag_register_item_handle(void* item);
 void extension_bag_invalidate_item_handle(void* item);
 bool extension_bag_rebind_item_handle(void* item);
+bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle handle, void** out_item);
+bool extension_bag_item_handle_for_pointer(void* item, qol::contracts::QolItemHandle* out_handle);
 
 namespace qol::features::extension_bag {
 

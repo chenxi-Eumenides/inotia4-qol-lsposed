@@ -39,7 +39,13 @@ int64_t sell_price_with_fallback(const qol::contracts::QolInventoryExtensionProv
                                  void* item, int count) {
     if (provider != nullptr && provider->sell_price != nullptr) {
         int64_t price = -1;
-        if (qol::contracts::succeeded(provider->sell_price(item, count, 1, &price))) return price;
+        uint32_t provider_id = qol::contracts::kQolItemHandleOwnerGame;
+        qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &provider_id);
+        if (handle.slot == 0) {
+            handle = qol::game::register_item(item, qol::contracts::kQolItemHandleOwnerGame);
+        }
+        if (handle.slot != 0 &&
+            qol::contracts::succeeded(provider->sell_price(handle, count, 1, &price))) return price;
         return -1;
     }
     if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
@@ -159,7 +165,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     // 删除失败回退金币，保持扩展物品原有退款路径语义。
     qol::contracts::QolItemHandle checkpoint{};
     const bool suspended = qol::game::begin_item_invalidation(
-        item, qol::contracts::kQolItemHandleProviderAny, &checkpoint);
+        item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
     const int removed = fn_remove_item(item);
     if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
     if (removed == 0) {
@@ -187,7 +193,7 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
     // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
     qol::contracts::QolItemHandle checkpoint{};
     const bool suspended = qol::game::begin_item_invalidation(
-        item_ref.native_item, qol::contracts::kQolItemHandleProviderAny, &checkpoint);
+        item_ref.native_item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
     const int removed = fn_remove_item(item_ref.native_item);
     if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
     if (removed == 0) return Status::kRemoveFailed;

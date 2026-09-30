@@ -69,6 +69,21 @@ contracts::QolItemHandle ItemHandleRegistry::register_item(void* item,
     return contracts::kInvalidItemHandle;
 }
 
+contracts::QolItemHandle ItemHandleRegistry::lookup_item(void* item,
+                                                         uint32_t* out_provider_id) const {
+    if (out_provider_id != nullptr) *out_provider_id = 0;
+    if (item == nullptr || !on_main_thread() || transitioning_) {
+        return contracts::kInvalidItemHandle;
+    }
+    for (size_t i = 0; i < slots_.size(); ++i) {
+        const Slot& slot = slots_[i];
+        if (!slot.active || slot.item != item) continue;
+        if (out_provider_id != nullptr) *out_provider_id = slot.provider_id;
+        return {static_cast<uint32_t>(i + 1), slot.generation};
+    }
+    return contracts::kInvalidItemHandle;
+}
+
 ItemHandleResolution ItemHandleRegistry::resolve_item(contracts::QolItemHandle handle,
                                                        uint32_t provider_id) const {
     if (handle.slot == 0 || handle.slot > slots_.size() || handle.generation == 0) {
@@ -79,7 +94,9 @@ ItemHandleResolution ItemHandleRegistry::resolve_item(contracts::QolItemHandle h
     if (!slot.active || slot.generation != handle.generation) {
         return {nullptr, ItemHandleError::kStale};
     }
-    if (slot.provider_id != provider_id) return {nullptr, ItemHandleError::kType};
+    if (provider_id != contracts::kQolItemHandleOwnerAny && slot.provider_id != provider_id) {
+        return {nullptr, ItemHandleError::kType};
+    }
     return {slot.item, ItemHandleError::kNone};
 }
 
@@ -123,7 +140,7 @@ bool ItemHandleRegistry::begin_invalidation(void* item, uint32_t provider_id,
     for (size_t i = 0; i < slots_.size(); ++i) {
         Slot& slot = slots_[i];
         if (!slot.active || slot.item != item ||
-            (provider_id != contracts::kQolItemHandleProviderAny && slot.provider_id != provider_id)) {
+            (provider_id != contracts::kQolItemHandleOwnerAny && slot.provider_id != provider_id)) {
             continue;
         }
         slot.active = false;
@@ -226,6 +243,10 @@ ItemHandleRegistry& item_handle_registry() {
 contracts::QolItemHandle register_item(void* item, uint32_t provider_id,
                                       ItemHandleError* error) {
     return item_handle_registry().register_item(item, provider_id, error);
+}
+
+contracts::QolItemHandle lookup_item(void* item, uint32_t* out_provider_id) {
+    return item_handle_registry().lookup_item(item, out_provider_id);
 }
 
 ItemHandleResolution resolve_item(contracts::QolItemHandle handle, uint32_t provider_id) {

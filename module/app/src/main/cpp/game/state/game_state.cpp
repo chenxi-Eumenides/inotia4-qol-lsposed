@@ -1,6 +1,7 @@
 // game/state/game_state.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
 #include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
 #include "game/access/ui_state.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
@@ -273,6 +274,11 @@ bool find_inventory_item_ref(int category, InventoryItemRef* out) {
         p->found = true;
         return true;
     }, &ctx);
+    if (ctx.found && out->kind == InventoryItemKind::kProvider && out->native_item == nullptr) {
+        const int bag = out->bag;
+        const int slot = out->slot;
+        return inventory_item_ref_at(bag, slot, out);
+    }
     return ctx.found;
 }
 
@@ -285,10 +291,13 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
         qol::game::inventory_extension_provider_if_resident();
     if (provider != nullptr && provider->owns_bag != nullptr && provider->owns_bag(bag) != 0) {
         if (provider->item_ref_at == nullptr) return false;
-        qol::contracts::QolInventoryItemRef ref{};
+        qol::contracts::QolInventoryExtensionItemRef ref{};
         if (!qol::contracts::succeeded(provider->item_ref_at(bag, slot, &ref))) return false;
+        const auto resolved = qol::game::resolve_item(
+            ref.item, qol::contracts::kQolItemHandleOwnerProvider);
+        if (resolved.error != qol::game::ItemHandleError::kNone) return false;
         *out = {InventoryItemKind::kProvider, ref.bag, ref.slot, ref.category, ref.count,
-                ref.native_item};
+                resolved.item};
         return true;
     }
     if (bag > 5 || g_inven == nullptr || fn_get_bit == nullptr) {
@@ -323,10 +332,19 @@ void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
     const qol::contracts::QolInventoryExtensionProvider* provider =
         qol::game::inventory_extension_provider_if_resident();
     if (provider == nullptr || provider->for_each_item == nullptr) return;
-    provider->for_each_item([](const qol::contracts::QolInventoryItemRef* ref, void* c) -> int32_t {
+    provider->for_each_item(
+        [](const qol::contracts::QolInventoryExtensionItemRef* ref, void* c) -> int32_t {
         Ctx* p = static_cast<Ctx*>(c);
+        void* native_item = nullptr;
+        if (ref->item.slot != 0) {
+            const auto resolved = qol::game::resolve_item(
+                ref->item, qol::contracts::kQolItemHandleOwnerProvider);
+            if (resolved.error == qol::game::ItemHandleError::kNone) {
+                native_item = resolved.item;
+            }
+        }
         const InventoryItemRef item{InventoryItemKind::kProvider, ref->bag, ref->slot, ref->category,
-                                    ref->count, ref->native_item};
+                                    ref->count, native_item};
         p->stopped = p->fn(item, p->ctx);
         return p->stopped ? 1 : 0;
     }, &state);

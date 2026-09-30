@@ -59,13 +59,13 @@ void invalidate_item_handle(void* item) {
     const auto* api = item_handle_api();
     if (item == nullptr || api == nullptr || api->invalidate_item == nullptr) return;
     (void)api->invalidate_item(
-        item, qol::contracts::kQolItemHandleProviderAny);
+        item, qol::contracts::kQolItemHandleOwnerAny);
 }
 
 void transfer_item_handle_to_extension_bag(void* item) {
     const auto* api = item_handle_api();
     if (item == nullptr || api == nullptr) return;
-    const uint32_t provider = qol::contracts::kQolItemHandleProviderExtensionBag;
+    const uint32_t provider = qol::contracts::kQolItemHandleOwnerProvider;
     if (api->rebind_item != nullptr &&
         api->rebind_item(item, provider) ==
             qol::contracts::kQolItemHandleStatusOk) return;
@@ -80,7 +80,7 @@ bool begin_item_handle_invalidation(void* item, qol::contracts::QolItemHandle* c
     return item != nullptr && checkpoint != nullptr && api != nullptr &&
            api->begin_invalidation != nullptr &&
            api->begin_invalidation(
-               item, qol::contracts::kQolItemHandleProviderAny, checkpoint) ==
+               item, qol::contracts::kQolItemHandleOwnerAny, checkpoint) ==
                qol::contracts::kQolItemHandleStatusOk;
 }
 
@@ -110,6 +110,81 @@ const qol::contracts::ExtensionBagApi* eb_active() {
     if (eb == nullptr || eb->enabled == nullptr || !eb->enabled()) return nullptr;
     return eb;
 }
+
+bool item_handle_for_hook_item(void* item, qol::contracts::QolItemHandle* out_handle) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || out_handle == nullptr || api == nullptr) return false;
+    uint32_t owner = 0;
+    if (api->lookup_item != nullptr &&
+        api->lookup_item(item, out_handle, &owner) == qol::contracts::kQolItemHandleStatusOk) {
+        return true;
+    }
+    return api->register_item != nullptr &&
+           api->register_item(item, qol::contracts::kQolItemHandleOwnerGame, out_handle) ==
+               qol::contracts::kQolItemHandleStatusOk;
+}
+
+bool identify_extension_item(void* item, int32_t* out_bag, int32_t* out_slot) {
+    const auto* eb = eb_active();
+    qol::contracts::QolItemHandle handle{};
+    return eb != nullptr && eb->identify_native_item != nullptr &&
+           item_handle_for_hook_item(item, &handle) &&
+           eb->identify_native_item(handle, out_bag, out_slot);
+}
+
+bool consume_extension_item(void* item) {
+    const auto* eb = eb_active();
+    qol::contracts::QolItemHandle handle{};
+    return eb != nullptr && eb->consume_native_item != nullptr &&
+           item_handle_for_hook_item(item, &handle) && eb->consume_native_item(handle);
+}
+
+bool remove_extension_item(void* item) {
+    const auto* eb = eb_active();
+    qol::contracts::QolItemHandle handle{};
+    return eb != nullptr && eb->remove_native_item != nullptr &&
+           item_handle_for_hook_item(item, &handle) && eb->remove_native_item(handle);
+}
+
+bool equip_extension_item(void* character, void* item, int32_t bag, int32_t slot,
+                          int32_t equip_slot) {
+    const auto* eb = eb_active();
+    qol::contracts::QolItemHandle handle{};
+    return eb != nullptr && eb->equip_projected_item != nullptr &&
+           item_handle_for_hook_item(item, &handle) &&
+           eb->equip_projected_item(character, handle, bag, slot, equip_slot);
+}
+
+int put_jewel_extension_items(void* equip_item, void* jewel_item,
+                              Stage4JewelBackup backup) {
+    const auto* eb = eb_active();
+    qol::contracts::QolItemHandle equip_handle{};
+    qol::contracts::QolItemHandle jewel_handle{};
+    if (eb == nullptr || eb->put_jewel_native == nullptr ||
+        !item_handle_for_hook_item(equip_item, &equip_handle) ||
+        !item_handle_for_hook_item(jewel_item, &jewel_handle)) return 3;
+    struct BackupContext {
+        Stage4JewelBackup backup;
+        void* equip_item;
+        void* jewel_item;
+    };
+    static thread_local BackupContext* active_backup = nullptr;
+    BackupContext context{backup, equip_item, jewel_item};
+    const auto bridge = [](qol::contracts::QolItemHandle, qol::contracts::QolItemHandle) -> int32_t {
+        return active_backup == nullptr || active_backup->backup == nullptr
+                   ? 3
+                   : active_backup->backup(active_backup->equip_item, active_backup->jewel_item);
+    };
+    BackupContext* previous = active_backup;
+    active_backup = &context;
+    const int result = eb->put_jewel_native(equip_handle, jewel_handle, bridge);
+    active_backup = previous;
+    return result;
+}
+
+// FindItem returns a native pointer to its game caller; translating its handle back to that ABI
+// requires a game-owned passthrough wrapper and is deferred to the hook private-bridge batch.
+void* find_extension_item_for_abi(int32_t) { return nullptr; }
 
 // D2c-2a：原 EB port extension_bag_show_*_popup（TextData 6=背包已满 / 7=袋非空）在
 // 消费者侧内联。契约 ExtensionBagApi 未导出弹窗入口（handle_original_bag_unequip 只
@@ -181,16 +256,24 @@ const qol::contracts::QolItemCountApi* item_count_api() {
 
 void* physical_item_at(int bag, int slot) {
     if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr) return nullptr;
-    void* item = nullptr;
-    const QolResult result = g_item_facts->physical_item_at(bag, slot, &item);
-    return qol::contracts::succeeded(result) ? item : nullptr;
+    qol::contracts::QolItemHandle handle{};
+    const QolResult result = g_item_facts->physical_item_at(bag, slot, &handle);
+    if (!qol::contracts::succeeded(result) || handle.slot == 0 || handle.generation == 0) return nullptr;
+    // Hook-side physical scans that must call the original ABI need the game-owned private
+    // passthrough implemented by the hook private-bridge batch; this handle-only path fails closed.
+    return nullptr;
 }
 
 void* inventory_item_at(int bag, int slot) {
     if (g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr) return nullptr;
     qol::contracts::QolInventoryItemRef ref{};
     const QolResult result = g_item_facts->item_ref_at(bag, slot, &ref);
-    return qol::contracts::succeeded(result) ? ref.native_item : nullptr;
+    if (!qol::contracts::succeeded(result) || ref.item.slot == 0 || ref.item.generation == 0) {
+        return nullptr;
+    }
+    // Stage4's original fallback is parameterized by bag/slot; provider-handle invocation is
+    // implemented with the same game-owned private bridge as physical_item_at above.
+    return nullptr;
 }
 
 bool item_count_is_encoded(void* item) {
@@ -426,8 +509,7 @@ void log_extension_item_observation(const char* operation, void* item, bool recu
     }
     int bag = -1;
     int slot = -1;
-    const bool extension_item = eb->identify_native_item != nullptr &&
-                                eb->identify_native_item(item, &bag, &slot);
+    const bool extension_item = identify_extension_item(item, &bag, &slot);
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "%s extension_item=%d bag=%d slot=%d recursive=%d result_known=%d result=%d",
                         operation, extension_item ? 1 : 0, bag, slot, recursive ? 1 : 0,
@@ -459,7 +541,7 @@ void* find_item_wrapper(int32_t category) {
                         reinterpret_cast<void*>(g_backup_find_item));
     void* result = inventory_find_item_original_first(
         category, g_backup_find_item,
-        (eb != nullptr && eb->find_native_item != nullptr) ? eb->find_native_item : nullptr,
+        (eb != nullptr && eb->find_native_item != nullptr) ? find_extension_item_for_abi : nullptr,
         g_in_find_item);
     log_extension_item_observation("FindItem", result, false, 1, result != nullptr ? 1 : 0);
     return result;
@@ -471,11 +553,13 @@ int extension_item_count(int32_t category) {
     if (eb->native_call_active != nullptr && eb->native_call_active()) return 0;
     if (eb->for_each_logical_item == nullptr) return 0;
     struct Context { int32_t category; int count; } context{category, 0};
-    eb->for_each_logical_item([](int32_t, int32_t, int32_t item_category, int32_t item_count,
-                                 void* raw) -> bool {
+    eb->for_each_logical_item([](const qol::contracts::QolInventoryExtensionItemRef* ref,
+                                 void* raw) -> int32_t {
         Context* context = static_cast<Context*>(raw);
-        if (item_category == context->category && item_count > 0) context->count += item_count;
-        return false;
+        if (ref != nullptr && ref->category == context->category && ref->count > 0) {
+            context->count += ref->count;
+        }
+        return 0;
     }, &context);
     return context.count;
 }
@@ -574,9 +658,8 @@ void consume_item_wrapper(void* item) {
     int extension_bag = -1;
     int extension_slot = -1;
     const qol::contracts::ExtensionBagApi* eb = eb_active();
-    const bool extension_item = eb != nullptr && eb->identify_native_item != nullptr &&
-                                eb->identify_native_item(item, &extension_bag,
-                                                         &extension_slot);
+    const bool extension_item = eb != nullptr &&
+                                identify_extension_item(item, &extension_bag, &extension_slot);
     // S2 写侧借位（减语义；R-45/R-46/R-49，仅启用态）：原版读 b 判 count>1——
     // b≤1 且全量≥2（a≥1）时原版落入整堆删除分支，a 段随对象一起丢失。处置：
     // backup 前把 b 预置为 2（a 与低位原样），原版按 b=2>1 走 b-1 递减写 b=1；
@@ -613,8 +696,8 @@ void consume_item_wrapper(void* item) {
     }
     const bool dispatched = stage4_consume_item(
         item,
-        (eb != nullptr && eb->identify_native_item != nullptr) ? eb->identify_native_item : nullptr,
-        (eb != nullptr && eb->consume_native_item != nullptr) ? eb->consume_native_item : nullptr,
+        (eb != nullptr && eb->identify_native_item != nullptr) ? identify_extension_item : nullptr,
+        (eb != nullptr && eb->consume_native_item != nullptr) ? consume_extension_item : nullptr,
         g_backup_consume_item, g_in_consume_item);
     if (s2_borrow_armed && !extension_item) {
         if (s2_physical_slot_item(borrow_bag, borrow_slot) != item) {
@@ -674,10 +757,10 @@ int remove_item_wrapper(void* item) {
     const bool handle_suspended = begin_item_handle_invalidation(item, &handle_checkpoint);
     const int result = stage4_remove_item(item,
                                           (eb != nullptr && eb->identify_native_item != nullptr)
-                                              ? eb->identify_native_item
+                                              ? identify_extension_item
                                               : nullptr,
                                           (eb != nullptr && eb->remove_native_item != nullptr)
-                                              ? eb->remove_native_item
+                                              ? remove_extension_item
                                               : nullptr,
                                           g_backup_remove_item,
                                           g_in_remove_item);
@@ -706,14 +789,18 @@ int save_item_wrapper(void* item) {
         // 归一化 payload 相同的堆，且模式视图相加不超上限时直接并入扩展堆并
         // 上报成功；否则保持原版入库（含原版同类堆合并）。修复拾取可堆叠
         // 物品在原版背包新开格、不并入扩展同类堆的缺陷。
-        if (eb->merge_native_item != nullptr && eb->merge_native_item(item)) {
+        qol::contracts::QolItemHandle handle{};
+        if (eb->merge_native_item != nullptr && item_handle_for_hook_item(item, &handle) &&
+            eb->merge_native_item(handle)) {
             invalidate_item_handle(item);
             return 1;
         }
     }
     const int result = g_backup_save_item(item);
     if (result != 0) return result;
-    if (eb != nullptr && eb->adopt_native_item != nullptr && eb->adopt_native_item(item)) {
+    qol::contracts::QolItemHandle adopt_handle{};
+    if (eb != nullptr && eb->adopt_native_item != nullptr &&
+        item_handle_for_hook_item(item, &adopt_handle) && eb->adopt_native_item(adopt_handle)) {
         transfer_item_handle_to_extension_bag(item);
         return 1;
     }
@@ -840,8 +927,10 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
             if (item == nullptr) continue;
             if (!item_count_is_encoded(item)) continue;
             if (g_item_facts == nullptr || g_item_facts->category == nullptr) continue;
+            qol::contracts::QolItemHandle item_handle{};
             int32_t item_category = -1;
-            if (!qol::contracts::succeeded(g_item_facts->category(item, &item_category)) ||
+            if (!item_handle_for_hook_item(item, &item_handle) ||
+                !qol::contracts::succeeded(g_item_facts->category(item_handle, &item_category)) ||
                 item_category != category) {
                 continue;
             }
@@ -965,14 +1054,15 @@ void log_move_item_observation(const char* phase, void* item, int count, int tar
                                const qol::contracts::ExtensionBagMoveObservation& observation) {
     QOL_LOG_INFO(QolDomain::kInventory,
         "MoveItem %s item=%p count=%d target=%d/%d caller=libgame+0x%llx "
-        "extension=%d/%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_ptr=%p target_ptr=%p "
+        "extension=%d/%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_handle=%u/%u target_handle=%u/%u "
         "digest=0x%llx nonnull=%d physical_valid=%d",
         phase, item, count, target_bag, target_slot,
         static_cast<unsigned long long>(caller_offset), observation.extension_item ? 1 : 0,
         observation.extension_bag, observation.extension_slot, observation.extension_handle,
         observation.ownership_state, observation.module_view_index,
         observation.drag_session_active ? 1 : 0, observation.source_bag, observation.source_slot,
-        observation.source_ptr, observation.target_ptr,
+        observation.source_item.slot, observation.source_item.generation,
+        observation.target_item.slot, observation.target_item.generation,
         static_cast<unsigned long long>(observation.physical_digest), observation.physical_nonnull,
         observation.physical_valid ? 1 : 0);
 }
@@ -985,8 +1075,11 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     // 调 backup，因为原版函数可能进入 RemoveItem/SaveItem/ConsumeItem hooks 再 try_lock。
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     qol::contracts::ExtensionBagMoveObservation before{};
+    qol::contracts::QolItemHandle item_handle{};
     const bool captured = eb != nullptr && eb->capture_move_item_observation != nullptr &&
-                          eb->capture_move_item_observation(item, target_bag, target_slot, &before);
+                          item_handle_for_hook_item(item, &item_handle) &&
+                          eb->capture_move_item_observation(item_handle, target_bag, target_slot,
+                                                            &before);
     const uint64_t caller_offset = move_item_caller_offset();
     // 仅允许装备交换 wrapper 主动借入物理槽时通过；普通投影/拖动仍必须
     // 拒绝 backup，避免扩展对象进入原版移动链。该例外不放宽其它 caller。
@@ -995,13 +1088,15 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     if (captured && before.extension_item && !internal_equip_active) {
         QOL_LOG_ERROR(QolDomain::kInventory,
             "MoveItem GUARD reject item=%p count=%d target=%d/%d caller=libgame+0x%llx "
-            "extension=%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_ptr=%p target_ptr=%p "
+            "extension=%d/%d handle=%u owner_state=%d view=%d session=%d source=%d/%d source_handle=%u/%u target_handle=%u/%u "
             "digest=0x%llx nonnull=%d physical_valid=%d backup=skipped",
             item, count, target_bag, target_slot,
             static_cast<unsigned long long>(caller_offset), before.extension_bag,
             before.extension_slot, before.extension_handle, before.ownership_state,
             before.module_view_index, before.drag_session_active ? 1 : 0,
-            before.source_bag, before.source_slot, before.source_ptr, before.target_ptr,
+            before.source_bag, before.source_slot, before.source_item.slot,
+            before.source_item.generation, before.target_item.slot,
+            before.target_item.generation,
             static_cast<unsigned long long>(before.physical_digest), before.physical_nonnull,
             before.physical_valid ? 1 : 0);
         return 0;
@@ -1026,7 +1121,8 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     if (observe) {
         qol::contracts::ExtensionBagMoveObservation after{};
         if (eb != nullptr && eb->capture_move_item_observation != nullptr &&
-            eb->capture_move_item_observation(item, target_bag, target_slot, &after)) {
+            item_handle_for_hook_item(item, &item_handle) &&
+            eb->capture_move_item_observation(item_handle, target_bag, target_slot, &after)) {
             log_move_item_observation("post", item, count, target_bag, target_slot,
                                       caller_offset, after);
         }
@@ -1052,10 +1148,10 @@ int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t 
     }
     const int result = stage4_equip_item(
         character, bag, slot, equip_slot, inventory_item_at,
-        (eb != nullptr && eb->identify_native_item != nullptr) ? eb->identify_native_item : nullptr,
-        (eb != nullptr && eb->equip_projected_item != nullptr) ? eb->equip_projected_item : nullptr,
+        (eb != nullptr && eb->identify_native_item != nullptr) ? identify_extension_item : nullptr,
+        (eb != nullptr && eb->equip_projected_item != nullptr) ? equip_extension_item : nullptr,
         g_backup_equip_item_from_inven_to_slot,
-        (eb != nullptr && eb->view_item_at != nullptr) ? eb->view_item_at : nullptr);
+        nullptr);
     QOL_LOG_INFO(QolDomain::kInventory,
                         "EquipItemFromInvenToSlot bag=%d slot=%d equip_slot=%d result=%d",
                         bag, slot, equip_slot, result);
@@ -1069,9 +1165,9 @@ int put_jewel_wrapper(void* equip_item, void* jewel_item) {
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     return stage4_put_jewel(
         equip_item, jewel_item,
-        (eb != nullptr && eb->identify_native_item != nullptr) ? eb->identify_native_item : nullptr,
+        (eb != nullptr && eb->identify_native_item != nullptr) ? identify_extension_item : nullptr,
         g_backup_put_jewel,
-        (eb != nullptr && eb->put_jewel_native != nullptr) ? eb->put_jewel_native : nullptr);
+        (eb != nullptr && eb->put_jewel_native != nullptr) ? put_jewel_extension_items : nullptr);
 }
 
 void button_equip_exe_wrapper(void* button) {
@@ -1143,8 +1239,10 @@ void ok_confirm_use_item_wrapper(void* item) {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_OKConfirmUseItem"});
     const qol::contracts::ExtensionBagApi* eb = eb_active();
+    qol::contracts::QolItemHandle use_handle{};
     if (eb != nullptr && eb->handle_confirm_use_item != nullptr &&
-        eb->handle_confirm_use_item(item)) {
+        item_handle_for_hook_item(item, &use_handle) &&
+        eb->handle_confirm_use_item(use_handle)) {
         return;
     }
     if (g_backup_ok_confirm_use_item == nullptr) {
@@ -1227,7 +1325,9 @@ uint64_t ok_destroy_item_wrapper() {
     }
     int32_t category = 0;
     int32_t no_sell = 0;
-    if (!qol::contracts::succeeded(g_item_facts->category(item, &category)) ||
+    qol::contracts::QolItemHandle item_handle{};
+    if (!item_handle_for_hook_item(item, &item_handle) ||
+        !qol::contracts::succeeded(g_item_facts->category(item_handle, &category)) ||
         !qol::contracts::succeeded(g_item_facts->is_no_sell(category, &no_sell)) ||
         category <= 0 || no_sell != 0) {
         QOL_LOG_INFO(QolDomain::kInventory,
@@ -1237,11 +1337,11 @@ uint64_t ok_destroy_item_wrapper() {
     }
     // canonical 经已 hook 的 getter：启用态返回 128a+b 全量（R-49）。
     int32_t count = 0;
-    if (!qol::contracts::succeeded(g_item_facts->cumulate_count(item, &count)) ||
+    if (!qol::contracts::succeeded(g_item_facts->cumulate_count(item_handle, &count)) ||
         count <= 0) return call_backup();
     const uint32_t canonical = static_cast<uint32_t>(count);
     int64_t unit_price = 0;
-    if (!qol::contracts::succeeded(g_item_facts->sell_price(item, &unit_price))) {
+    if (!qol::contracts::succeeded(g_item_facts->sell_price(item_handle, &unit_price))) {
         return call_backup();
     }
     int64_t price = 0;

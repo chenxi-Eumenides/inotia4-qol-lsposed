@@ -98,7 +98,8 @@ int plugin_install(contracts::PluginContext& ctx) {
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor},
             &item_facts_iface)) ||
-        item_facts_iface == nullptr) {
+        item_facts_iface == nullptr || !contracts::item_facts_api_size_valid(
+                                           static_cast<const contracts::ItemFactsApi*>(item_facts_iface))) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_choice_port = nullptr;

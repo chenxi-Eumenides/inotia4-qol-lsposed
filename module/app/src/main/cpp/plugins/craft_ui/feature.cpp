@@ -65,6 +65,17 @@ uint32_t craft_mix_type() {
     return value;
 }
 
+bool item_handle_for_craft_object(void* item, contracts::QolItemHandle* out) {
+    if (item == nullptr || out == nullptr || g_sdk == nullptr) return false;
+    uint32_t owner = 0;
+    if (g_sdk->item_handle.lookup_item != nullptr &&
+        g_sdk->item_handle.lookup_item(item, out, &owner) ==
+            contracts::kQolItemHandleStatusOk) return true;
+    return g_sdk->item_handle.register_item != nullptr &&
+           g_sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, out) ==
+               contracts::kQolItemHandleStatusOk && out->slot != 0 && out->generation != 0;
+}
+
 int64_t craft_ui_type() {
     uint32_t value = 0;
     if (g_craft_facts == nullptr || g_craft_facts->read.ui_type == nullptr ||
@@ -168,8 +179,10 @@ void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
         out[i] = 0;
         void* item = craft_stuff_item(i);
         int32_t category = 0;
-        if (item != nullptr && g_item_facts != nullptr && g_item_facts->category != nullptr &&
-            g_item_facts->category(item, &category).ok == kQolOk && category >= 0) {
+        contracts::QolItemHandle handle{};
+        if (item_handle_for_craft_object(item, &handle) && g_item_facts != nullptr &&
+            g_item_facts->category != nullptr &&
+            g_item_facts->category(handle, &category).ok == kQolOk && category >= 0) {
             out[i] = static_cast<uint16_t>(category);
         }
     }

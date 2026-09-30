@@ -88,7 +88,7 @@ QolResult fake_panels_unregister_owner(const char* owner) {
 
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
     static const qol::contracts::WorldFactsApi api{};
-    static const qol::contracts::ItemFactsApi item_api{};
+    static const qol::contracts::ItemFactsApi item_api{sizeof(qol::contracts::ItemFactsApi)};
     if (id == nullptr || out_iface == nullptr) {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }

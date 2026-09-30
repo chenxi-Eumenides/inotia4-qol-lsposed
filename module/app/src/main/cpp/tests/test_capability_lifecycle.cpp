@@ -107,11 +107,12 @@ int g_provider_deactivate_calls = 0;
 int g_provider_enabled_calls = 0;
 int g_provider_disabled_calls = 0;
 
-QolResult fake_probe_jewel(const void*, int32_t, int32_t, AttributeQualityResult*) {
+QolResult fake_probe_jewel(qol::contracts::QolItemHandle, int32_t, int32_t,
+                            AttributeQualityResult*) {
     return g_provider_revoking ? qol::contracts::error(kQolErrNotReady, "revoking", 8)
                                 : qol::contracts::ok();
 }
-QolResult fake_probe_option(const void*, int32_t, int32_t, int32_t, int32_t,
+QolResult fake_probe_option(qol::contracts::QolItemHandle, int32_t, int32_t, int32_t, int32_t,
                             AttributeQualityResult*) {
     return qol::contracts::ok();
 }
@@ -366,7 +367,7 @@ void test_disable_revokes_and_cascades() {
     CHECK(g_provider_disabled_calls == 1);  // 提供者门禁已关
     CHECK(g_provider_revoking);
     // 撤销期新调用被提供者拒绝（能力仍在撤销事务内，指针尚未失效）。
-    CHECK(saved->probe_jewel(nullptr, 0, 0, nullptr).ok != kQolOk);
+    CHECK(saved->probe_jewel(qol::contracts::QolItemHandle{0, 0}, 0, 0, nullptr).ok != kQolOk);
 
     // required 消费者先进入 release 事务：在途未归零时保持 live/deactivating。
     FeatureStatus req{};

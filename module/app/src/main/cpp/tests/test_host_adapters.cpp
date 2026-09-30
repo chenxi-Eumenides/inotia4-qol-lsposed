@@ -44,6 +44,7 @@
 
 uintptr_t g_base = 0;
 void* g_active_quest = nullptr;
+qol::contracts::QolItemHandle g_inventory_item_handle{};
 
 std::string op_ok() { return "{\"ok\":true}"; }
 std::string op_err(const char* message) {
@@ -342,7 +343,7 @@ QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
         return contracts::error(kQolErrNotFound, "inventory slot is empty", 24);
     }
     *out = {static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal), bag, slot, 28, 4,
-            reinterpret_cast<void*>(0x9)};
+            g_inventory_item_handle};
     return contracts::ok();
 }
 
@@ -354,7 +355,7 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
     if (g_inventory_mode == FakeInventoryMode::kEmpty) return contracts::ok();
     const contracts::QolInventoryItemRef ref{
         static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal), 1, 2, 28, 4,
-        reinterpret_cast<void*>(0x9)};
+        g_inventory_item_handle};
     (void)callback(&ref, ctx);
     return contracts::ok();
 }
@@ -384,7 +385,12 @@ QolResult find_save_slot(const void* item, int32_t* out_slot) {
 // T2h-B3#2：本 target 链接 game/read/item_class.cpp，其 debug raw 原语引用全局
 // inventory_item_ref_at（与 qol::game 下的 port 版同名不同签名）；本测试不触发该路径，
 // stub 仅满足链接。
-bool inventory_item_ref_at(int, int, InventoryItemRef*) { return false; }
+bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
+    if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16 ||
+        g_inventory_mode != FakeInventoryMode::kReady) return false;
+    *out = {InventoryItemKind::kOriginal, bag, slot, 28, 4, reinterpret_cast<void*>(0x9)};
+    return true;
+}
 
 namespace {
 
@@ -454,6 +460,9 @@ int main() {
     assert(sdk.store.register_participant != nullptr);
     assert(sdk.store.save_game != nullptr);
     assert(sdk.item_handle.register_item != nullptr);
+    assert(sdk.item_handle.lookup_item != nullptr);
+    static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
+                  "plugin handle API must not expose object resolution");
     assert(sdk.item_handle.invalidate_item != nullptr);
     assert(sdk.item_handle.rebind_item != nullptr);
     assert(sdk.item_handle.begin_invalidation != nullptr);
@@ -594,37 +603,28 @@ int main() {
     int handle_item = 0;
     qol::contracts::QolItemHandle injected_handle{};
     assert(sdk.item_handle.register_item(
-               &handle_item, qol::contracts::kQolItemHandleProviderNative,
+               &handle_item, qol::contracts::kQolItemHandleOwnerGame,
                &injected_handle) == qol::contracts::kQolItemHandleStatusOk);
-    auto resolved_item = qol::game::resolve_item(
-        injected_handle, qol::contracts::kQolItemHandleProviderNative);
-    assert(resolved_item.item == &handle_item);
-    assert(qol::game::resolve_item(
-               injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag).error ==
-           qol::game::ItemHandleError::kType);
-    assert(sdk.item_handle.rebind_item(
-               &handle_item, qol::contracts::kQolItemHandleProviderExtensionBag) ==
+    uint32_t registered_provider = UINT32_MAX;
+    qol::contracts::QolItemHandle looked_up{};
+    assert(sdk.item_handle.lookup_item(&handle_item, &looked_up, &registered_provider) ==
            qol::contracts::kQolItemHandleStatusOk);
-    resolved_item = qol::game::resolve_item(
-        injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag);
-    assert(resolved_item.item == &handle_item);
+    assert(looked_up.slot == injected_handle.slot &&
+           registered_provider == qol::contracts::kQolItemHandleOwnerGame);
+    assert(sdk.item_handle.rebind_item(
+               &handle_item, qol::contracts::kQolItemHandleOwnerProvider) ==
+           qol::contracts::kQolItemHandleStatusOk);
     qol::contracts::QolItemHandle removal_checkpoint{};
     assert(sdk.item_handle.begin_invalidation(
-               &handle_item, qol::contracts::kQolItemHandleProviderAny,
+               &handle_item, qol::contracts::kQolItemHandleOwnerAny,
                &removal_checkpoint) == qol::contracts::kQolItemHandleStatusOk);
     assert(sdk.item_handle.finish_invalidation(
                removal_checkpoint, 0) == qol::contracts::kQolItemHandleStatusOk);
-    resolved_item = qol::game::resolve_item(
-        injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag);
-    assert(resolved_item.item == &handle_item);
     assert(sdk.item_handle.begin_invalidation(
-               &handle_item, qol::contracts::kQolItemHandleProviderAny,
+               &handle_item, qol::contracts::kQolItemHandleOwnerAny,
                &removal_checkpoint) == qol::contracts::kQolItemHandleStatusOk);
     assert(sdk.item_handle.finish_invalidation(
                removal_checkpoint, 1) == qol::contracts::kQolItemHandleStatusOk);
-    assert(qol::game::resolve_item(
-               injected_handle, qol::contracts::kQolItemHandleProviderExtensionBag).error ==
-           qol::game::ItemHandleError::kStale);
     assert(game.thread.frame_count() == 99);
     const auto& extension_bag_write = qol::game::extension_bag_write_port();
     assert(extension_bag_write.inventory.save_item_on_empty != nullptr);
@@ -645,7 +645,8 @@ int main() {
     assert(game.inventory_write.create_item != nullptr);
     assert(game.world_action.request_map_change != nullptr);
     assert(game.character_write.max_hp(nullptr, 1).code == kQolErrInvalidArgument);
-    assert(game.inventory_write.remove_item(nullptr).code == kQolErrInvalidArgument);
+    assert(game.inventory_write.remove_item(qol::contracts::kInvalidItemHandle).code ==
+           kQolErrInvalidArgument);
     assert(game.world_action.minus_money(-1).code == kQolErrInvalidArgument);
     int32_t character_type = -1;
     assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
@@ -735,37 +736,40 @@ int main() {
     assert(character_extras_api.read.has_empty_mercenary_slot(&value).ok == kQolOk);
     assert(value == 1);
 
-    assert(item_port_api.read.category(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    g_inventory_item_handle = qol::game::register_item(
+        reinterpret_cast<void*>(0x9), qol::contracts::kQolItemHandleOwnerGame);
+    assert(g_inventory_item_handle.slot != 0 && g_inventory_item_handle.generation != 0);
+    assert(item_port_api.read.category(g_inventory_item_handle, &value).ok == kQolOk);
     assert(value == 4);
     assert(item_port_api.read.is_jewel_category(4, &value).ok == kQolOk && value == 1);
     assert(item_extras_api.read.ability_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 3);
     assert(game.read_only.item.rarity(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
-    assert(item_port_api.read.is_real_equip(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.is_real_equip(g_inventory_item_handle, &value).ok == kQolOk);
     assert(game.read_only.item.equip_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 12);
     assert(item_port_api.read.is_no_sell(4, &value).ok == kQolOk);
     assert(game.read_only.item.is_dice(4, &value).ok == kQolOk);
-    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
     static const qol::contracts::QolItemCountApi item_count_provider{
         &adapter_item_count_canonical, &adapter_item_count_effective};
     qol::game::item_count_set_provider(&item_count_provider);
     qol::game::item_count_set_active_probe(&adapter_item_count_probe);
     g_item_count_probe = false;
     value = -1;
-    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
     assert(value == 6);
     g_item_count_probe = true;
     g_adapter_canonical_count = 1023;
     value = -1;
-    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
     assert(value == 1023);
     g_adapter_canonical_error = kQolErrUnsupported;
-    assert(item_port_api.read.cumulate_count(reinterpret_cast<void*>(0x1), &value).code ==
+    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).code ==
            kQolErrUnsupported);
     g_adapter_canonical_error = kQolOk;
     value = -1;
-    assert(item_port_api.read.effective_cumulate_count(reinterpret_cast<void*>(0x1), &value).ok ==
+    assert(item_port_api.read.effective_cumulate_count(g_inventory_item_handle, &value).ok ==
            kQolOk);
     assert(value == 88);
     qol::game::item_count_set_provider(nullptr);
@@ -853,7 +857,8 @@ int main() {
     assert(choice.write.write_focus(-1).code == kQolErrInvalidArgument);
     qol::contracts::QolInventoryItemRef inventory_ref{};
     assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).ok == kQolOk);
-    assert(inventory_ref.bag == 1 && inventory_ref.slot == 2 && inventory_ref.native_item != nullptr);
+    assert(inventory_ref.bag == 1 && inventory_ref.slot == 2 &&
+           inventory_ref.item.slot != 0 && inventory_ref.item.generation != 0);
     assert(item_port_api.read.item_ref_at(1, 2, nullptr).code == kQolErrInvalidArgument);
     g_inventory_mode = FakeInventoryMode::kEmpty;
     assert(item_port_api.read.item_ref_at(1, 2, &inventory_ref).code == kQolErrNotFound);

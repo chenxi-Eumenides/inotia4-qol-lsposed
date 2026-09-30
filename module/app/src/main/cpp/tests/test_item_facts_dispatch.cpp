@@ -200,15 +200,15 @@ bool g_override_enabled = false;
 QolResult override_canonical(const void*, uint32_t* out_count);
 QolResult override_effective(const void*, uint32_t* out_count);
 const qol::contracts::QolItemCountApi* override_item_count_api();
-QolResult stub_category(const void*, int32_t*) { return unsupported(); }
-QolResult stub_is_real_equip(const void*, int32_t*) { return unsupported(); }
+QolResult stub_category(qol::contracts::QolItemHandle, int32_t*) { return unsupported(); }
+QolResult stub_is_real_equip(qol::contracts::QolItemHandle, int32_t*) { return unsupported(); }
 QolResult stub_is_jewel(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_no_sell(int32_t, int32_t*) { return unsupported(); }
-QolResult stub_sell_price(const void*, int64_t*) { return unsupported(); }
-std::size_t fake_slot_index(const void* item) {
-    return static_cast<std::size_t>(reinterpret_cast<uintptr_t>(item) - 1u);
+QolResult stub_sell_price(qol::contracts::QolItemHandle, int64_t*) { return unsupported(); }
+std::size_t fake_slot_index(qol::contracts::QolItemHandle item) {
+    return item.slot == 0 ? 176 : static_cast<std::size_t>(item.slot - 1u);
 }
-QolResult stub_cumulate(const void* item, int32_t* out_count) {
+QolResult stub_cumulate(qol::contracts::QolItemHandle item, int32_t* out_count) {
     if (g_override_available && g_override_enabled) {
         uint32_t canonical = 0;
         const QolResult result = override_canonical(nullptr, &canonical);
@@ -223,7 +223,7 @@ QolResult stub_cumulate(const void* item, int32_t* out_count) {
                                          : g_original_count);
     return qol::contracts::ok();
 }
-QolResult stub_effective_cumulate(const void* item, int32_t* out_count) {
+QolResult stub_effective_cumulate(qol::contracts::QolItemHandle item, int32_t* out_count) {
     if (out_count == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
     }
@@ -236,7 +236,8 @@ QolResult stub_effective_cumulate(const void* item, int32_t* out_count) {
         return qol::contracts::error(kQolErrNotReady, "not ready", 9);
     }
     uint32_t effective = 0;
-    const QolResult result = override_effective(item, &effective);
+    const QolResult result = override_effective(
+        reinterpret_cast<const void*>(static_cast<uintptr_t>(item.slot)), &effective);
     if (!qol::contracts::succeeded(result)) return result;
     *out_count = static_cast<int32_t>(effective);
     return qol::contracts::ok();
@@ -252,12 +253,12 @@ QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryI
         static_cast<int32_t>(g_inventory_slot_count[bag][slot] != 0
                                  ? g_inventory_slot_count[bag][slot]
                                  : g_original_count),
-        reinterpret_cast<void*>(static_cast<uintptr_t>(bag * 16 + slot + 1))};
+        {static_cast<uint32_t>(bag * 16 + slot + 1), 1}};
     return qol::contracts::ok();
 }
-QolResult fake_inventory_item_view(const void* item,
+QolResult fake_inventory_item_view(qol::contracts::QolItemHandle item,
                                    qol::contracts::QolItemInventoryView* out) {
-    if (item == nullptr || out == nullptr) {
+    if (item.slot == 0 || item.generation == 0 || out == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad item view", 13);
     }
     *out = {};
@@ -265,21 +266,27 @@ QolResult fake_inventory_item_view(const void* item,
                   qol::contracts::kQolItemInventoryHasRarity |
                   qol::contracts::kQolItemInventoryHasDamage |
                   qol::contracts::kQolItemInventoryHasDefense |
-                  qol::contracts::kQolItemInventoryHasNeedLevel;
+                  qol::contracts::kQolItemInventoryHasNeedLevel |
+                  qol::contracts::kQolItemInventoryHasJewelValue |
+                  qol::contracts::kQolItemInventoryHasJewelAttributeType;
     out->type_flags = 40;
     out->raw_rarity = 0;
     out->category = 10;
     out->count_supported = 1;
+    out->effective_count = 4;
     out->equip = 0;
     out->rarity = 0;
     out->damage = 0;
     out->defense = 0;
     out->magic_rate = 0;
     out->need_level = 0;
+    out->enchant_remaining = 0;
+    out->jewel_value = 0;
+    out->jewel_attribute_type = 0;
     out->chaos_rate = 100;
     return qol::contracts::ok();
 }
-QolResult stub_physical(int32_t, int32_t, void**) { return unsupported(); }
+QolResult stub_physical(int32_t, int32_t, qol::contracts::QolItemHandle*) { return unsupported(); }
 QolResult stub_detail(int32_t*, int32_t*, void**) { return unsupported(); }
 QolResult stub_cursor(const void*, int32_t*) { return unsupported(); }
 
@@ -363,7 +370,7 @@ const QolItemPortReadApi kFakeRead{
      &fake_inventory_extension_access,
 };
 
-const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, kFakeRead};
+const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, sizeof(QolItemPort), kFakeRead};
 const qol::contracts::QolItemMoneyWritePort kFakeMoneyWritePort{
     qol::contracts::kQolPortItemMoneyWriteVersion, &fake_set_money};
 const qol::contracts::QolItemDiceWritePort kFakeDiceWritePort{
@@ -639,21 +646,21 @@ std::string g_provider_fragment;
 
 int32_t fake_provider_owns_bag(int32_t bag) { return fake_is_logical_bag(bag) ? 1 : 0; }
 QolResult fake_provider_item_ref_at(int32_t bag, int32_t slot,
-                                    qol::contracts::QolInventoryItemRef* out) {
+                                    qol::contracts::QolInventoryExtensionItemRef* out) {
     if (out != nullptr) *out = {};
     if (out != nullptr && bag >= 6 && bag < 11 && slot >= 0 && slot < 16 &&
         g_inventory_slot_present[bag][slot]) {
-        *out = qol::contracts::QolInventoryItemRef{
+        *out = qol::contracts::QolInventoryExtensionItemRef{
             static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), bag, slot, 10,
             static_cast<int32_t>(g_inventory_slot_count[bag][slot] != 0
                                     ? g_inventory_slot_count[bag][slot]
                                     : g_original_count),
-            reinterpret_cast<void*>(static_cast<uintptr_t>(bag * 16 + slot + 1))};
+            {static_cast<uint32_t>(bag * 16 + slot + 1), 1}};
         return qol::contracts::ok();
     }
     return qol::contracts::error(kQolErrNotFound, "not found", 9);
 }
-QolResult fake_provider_for_each(qol::contracts::QolInventoryBagSlotFn, void*) {
+QolResult fake_provider_for_each(qol::contracts::QolInventoryExtensionItemFn, void*) {
     return qol::contracts::ok();
 }
 QolResult fake_provider_bag_capacity(int32_t, int32_t* out_capacity) {
@@ -685,15 +692,16 @@ int32_t fake_provider_move(int32_t from_bag, int32_t from_slot, int32_t to_bag, 
     g_inventory_slot_count[to_bag][target_slot] = 3;
     return 1;
 }
-QolResult fake_provider_sell_price(const void*, int32_t, int32_t, int64_t* out_price) {
+QolResult fake_provider_sell_price(qol::contracts::QolItemHandle, int32_t, int32_t,
+                                   int64_t* out_price) {
     if (out_price != nullptr) *out_price = 0;
     return qol::contracts::error(kQolErrNotReady, "not ready", 9);
 }
 QolResult fake_provider_sync_slot(int32_t, int32_t) { return qol::contracts::ok(); }
 QolResult fake_provider_sync_bag() { return qol::contracts::ok(); }
 int32_t fake_provider_module_view() { return 0; }
-int32_t fake_provider_identify(void*, int32_t*, int32_t*) { return 0; }
-int32_t fake_provider_remove(void*) { return 0; }
+int32_t fake_provider_identify(qol::contracts::QolItemHandle, int32_t*, int32_t*) { return 0; }
+int32_t fake_provider_remove(qol::contracts::QolItemHandle) { return 0; }
 QolResult fake_provider_put_jewel(int32_t, int32_t, int32_t, int32_t) {
     return qol::contracts::error(kQolErrNotReady, "not ready", 9);
 }
@@ -1607,15 +1615,15 @@ void test_lifecycle_and_responses() {
     CHECK(item_facts->money(&money).ok == kQolOk);
     CHECK(money == 72503);
     int32_t count = 0;
-    CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
+    CHECK(item_facts->cumulate_count({1, 1}, &count).ok == kQolOk);
     CHECK(count == 3);
     g_override_available = true;
     g_override_enabled = false;
-    CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
+    CHECK(item_facts->cumulate_count({1, 1}, &count).ok == kQolOk);
     CHECK(count == 3);
     g_canonical_count = 23;
     g_override_enabled = true;
-    CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &count).ok == kQolOk);
+    CHECK(item_facts->cumulate_count({1, 1}, &count).ok == kQolOk);
     CHECK(count == 23);
     g_override_available = false;
     g_override_enabled = false;
@@ -1658,7 +1666,7 @@ void test_lifecycle_and_responses() {
         CHECK(status == 200);
         if (test_case.canonical == 1023) {
             int32_t canonical = 0;
-            CHECK(item_facts->cumulate_count(reinterpret_cast<void*>(1), &canonical).ok == kQolOk);
+            CHECK(item_facts->cumulate_count({1, 1}, &canonical).ok == kQolOk);
             CHECK(canonical == 1023);
         }
     }
@@ -1980,23 +1988,31 @@ static bool golden_eb_capacity(int32_t bag, int32_t* out) {
     *out = g_golden_eb_caps[bag - 6];
     return true;
 }
-static void* golden_eb_item_at(int32_t internal, int32_t slot) {
-    if (internal != 6) return nullptr;
-    if (slot == 0) return g_golden_item_b;
-    if (slot == 4) return g_golden_item_projected;  // R5：投影槽活体对象（覆盖路径）
-    return nullptr;
+static int32_t golden_eb_item_at(int32_t bag, int32_t slot,
+                                 qol::contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) return 0;
+    *out_item = {};
+    if (bag != 6 || (slot != 0 && slot != 4)) return 0;
+    *out_item = {static_cast<uint32_t>(slot + 1), 1};
+    return 1;
 }
 int32_t g_golden_bad_slot = 0;
 int32_t g_golden_projected_canonical = 0;
 static void golden_eb_for_each(qol::contracts::ExtensionBagItemFn fn, void* ctx) {
     if (fn == nullptr) return;
+    const auto invoke = [fn, ctx](int32_t bag, int32_t slot, int32_t category, int32_t count) {
+        const qol::contracts::QolInventoryExtensionItemRef ref{
+            static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), bag, slot,
+            category, count, {static_cast<uint32_t>(slot + 1), 1}};
+        return fn(&ref, ctx);
+    };
     // R2：可选注入一个 count=0 的非法槽，验证 L1 单槽跳过而非整快照失败。
-    if (g_golden_bad_slot != 0) (void)fn(6, 1, 10, 0, ctx);
+    if (g_golden_bad_slot != 0) (void)invoke(6, 1, 10, 0);
     // R3-①：可选注入 canonical>0 但 b 段为 0 的投影槽（R2-1 修复后 EB 应输出 canonical 视图）。
     if (g_golden_projected_canonical != 0) {
-        (void)fn(9, 4, 35, g_golden_projected_canonical, ctx);
+        (void)invoke(9, 4, 35, g_golden_projected_canonical);
     }
-    (void)fn(6, 0, 10, 199, ctx);
+    (void)invoke(6, 0, 10, 199);
 }
 static int32_t golden_eb_move(int32_t, int32_t, int32_t, int32_t, char* out,
                               uint32_t capacity, uint32_t* out_size) {
@@ -2028,24 +2044,59 @@ const qol::contracts::ExtensionBagApi* golden_extension_bag_api() {
 static QolResult golden_unsupported() {
     return qol::contracts::error(kQolErrUnsupported, "stub", 4);
 }
-static QolResult golden_unsupported2(const void*, int32_t*) { return golden_unsupported(); }
+static QolResult golden_unsupported2(qol::contracts::QolItemHandle, int32_t*) {
+    return golden_unsupported();
+}
 static QolResult golden_unsupported1(int32_t, int32_t*) { return golden_unsupported(); }
-static QolResult golden_unsupported_price(const void*, int64_t*) { return golden_unsupported(); }
-static QolResult golden_unsupported_phys(int32_t, int32_t, void**) { return golden_unsupported(); }
+static QolResult golden_unsupported_price(qol::contracts::QolItemHandle, int64_t*) {
+    return golden_unsupported();
+}
+static QolResult golden_unsupported_phys(int32_t, int32_t, qol::contracts::QolItemHandle*) {
+    return golden_unsupported();
+}
 static QolResult golden_unsupported_detail(int32_t*, int32_t*, void**) {
     return golden_unsupported();
 }
 static QolResult golden_unsupported_cursor(const void*, int32_t*) { return golden_unsupported(); }
 
-static QolResult golden_category(const void* item, int32_t* out) {
-    if (item == nullptr || out == nullptr) {
+struct GoldenHandleEntry {
+    uint32_t slot = 0;
+    const void* item = nullptr;
+};
+GoldenHandleEntry g_golden_handle_entries[16]{};
+uint32_t g_golden_next_handle_slot = 1000;
+
+static qol::contracts::QolItemHandle golden_handle_for_item(const void* item) {
+    for (const GoldenHandleEntry& entry : g_golden_handle_entries) {
+        if (entry.slot != 0 && entry.item == item) return {entry.slot, 1};
+    }
+    for (GoldenHandleEntry& entry : g_golden_handle_entries) {
+        if (entry.slot != 0) continue;
+        entry = {g_golden_next_handle_slot++, item};
+        return {entry.slot, 1};
+    }
+    return {};
+}
+
+static const void* golden_item_for_handle(qol::contracts::QolItemHandle handle) {
+    for (const GoldenHandleEntry& entry : g_golden_handle_entries) {
+        if (entry.slot == handle.slot && handle.generation == 1) return entry.item;
+    }
+    return nullptr;
+}
+
+static QolResult golden_category(qol::contracts::QolItemHandle item, int32_t* out) {
+    if (item.slot == 0 || item.generation == 0 || out == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
     }
+    const void* native_item = golden_item_for_handle(item);
+    if (native_item == nullptr) return qol::contracts::error(kQolErrNotFound, "stale", 5);
+    const auto* item_bytes = static_cast<const uint8_t*>(native_item);
     *out = golden_bit(
-        *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(item) + I_TYPE), 15, 6);
+        *reinterpret_cast<const uint16_t*>(item_bytes + I_TYPE), 15, 6);
     return qol::contracts::ok();
 }
-static QolResult golden_cumulate_count(const void*, int32_t* out) {
+static QolResult golden_cumulate_count(qol::contracts::QolItemHandle, int32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
     *out = g_golden_raw;
     return qol::contracts::ok();
@@ -2059,7 +2110,7 @@ static QolResult golden_item_ref_at(int32_t bag, int32_t slot,
     if (item == nullptr) return qol::contracts::error(kQolErrNotFound, "empty", 5);
     *out = qol::contracts::QolInventoryItemRef{
         static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal), bag, slot, 0, 0,
-        item};
+        golden_handle_for_item(item)};
     return qol::contracts::ok();
 }
 static QolResult golden_inventory_json(char*, uint32_t, uint32_t* out_size) {
@@ -2092,13 +2143,16 @@ static QolResult golden_static_ready(int32_t* out) {
     if (out != nullptr) *out = 1;
     return qol::contracts::ok();
 }
-static QolResult golden_view(const void* item, qol::contracts::QolItemInventoryView* out) {
-    if (item == nullptr || out == nullptr) {
+static QolResult golden_view(qol::contracts::QolItemHandle handle,
+                             qol::contracts::QolItemInventoryView* out) {
+    if (handle.slot == 0 || handle.generation == 0 || out == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
     }
-    if (reinterpret_cast<uintptr_t>(item) < 177u) {
-        return fake_inventory_item_view(item, out);
+    if (handle.slot < 177u) {
+        return fake_inventory_item_view(handle, out);
     }
+    const void* item = golden_item_for_handle(handle);
+    if (item == nullptr) return qol::contracts::error(kQolErrNotFound, "stale", 5);
     const auto* bytes = static_cast<const uint8_t*>(item);
     *out = {};
     const uint16_t flags = *reinterpret_cast<const uint16_t*>(bytes + I_TYPE);
@@ -2140,7 +2194,8 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_static_ready,      &golden_view, &stub_effective_cumulate,
     &fake_inventory_extension_access,
 };
-const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion, kGoldenRead};
+const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion,
+                                               sizeof(qol::contracts::QolItemPort), kGoldenRead};
 const void* const kGoldenPortArray[] = {
     &kGoldenPort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort};
 

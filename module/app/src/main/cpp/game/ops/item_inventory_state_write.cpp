@@ -523,8 +523,14 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     // provider 命中（物品属于 provider）时按其自带逻辑袋号下发；调用方不推导袋号偏移。
     int32_t provider_bag = -1;
     int32_t provider_slot = -1;
+    uint32_t provider_id = contracts::kQolItemHandleOwnerGame;
+    contracts::QolItemHandle jewel_handle = lookup_item(jewel, &provider_id);
+    if (jewel_handle.slot == 0) {
+        jewel_handle = register_item(jewel, contracts::kQolItemHandleOwnerGame);
+    }
     if (extension_provider_arg != nullptr && extension_provider_arg->identify_native_item != nullptr &&
-        extension_provider_arg->identify_native_item(jewel, &provider_bag, &provider_slot) != 0) {
+        jewel_handle.slot != 0 &&
+        extension_provider_arg->identify_native_item(jewel_handle, &provider_bag, &provider_slot) != 0) {
         if (extension_provider_arg->put_jewel == nullptr) {
             return item_error(out, kQolErrUnsupported, "extension jewel unavailable");
         }
@@ -617,10 +623,15 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
         // 中立 provider：provider 缺失（未注册/停用）时按删除失败处理，不落入原版删除链。
         const auto* provider = extension_provider();
         contracts::QolItemHandle checkpoint{};
+        uint32_t provider_id = contracts::kQolItemHandleOwnerGame;
+        contracts::QolItemHandle item_handle = lookup_item(ref.native_item, &provider_id);
+        if (item_handle.slot == 0) {
+            item_handle = register_item(ref.native_item, contracts::kQolItemHandleOwnerGame);
+        }
         const bool suspended = begin_item_invalidation(
-            ref.native_item, contracts::kQolItemHandleProviderAny, &checkpoint);
+            ref.native_item, contracts::kQolItemHandleOwnerAny, &checkpoint);
         if (provider == nullptr || provider->remove_native_item == nullptr ||
-            provider->remove_native_item(ref.native_item) == 0) {
+            item_handle.slot == 0 || provider->remove_native_item(item_handle) == 0) {
             if (suspended) finish_item_invalidation(checkpoint, false);
             return item_error(out, kQolErrInternal, "extension item removal failed");
         }
@@ -633,7 +644,7 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
     if (ref.bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
     contracts::QolItemHandle checkpoint{};
     const bool suspended = begin_item_invalidation(
-        ref.native_item, contracts::kQolItemHandleProviderAny, &checkpoint);
+        ref.native_item, contracts::kQolItemHandleOwnerAny, &checkpoint);
     const int result = fn_remove_item(ref.native_item);
     if (suspended) finish_item_invalidation(checkpoint, result != 0);
     else if (result) invalidate_item(ref.native_item);

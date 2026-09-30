@@ -25,9 +25,9 @@ bool active();
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 
 // 能力接口实现：只读探测；撤销期 / hook 未就绪返回错误（消费者降级）。
-QolResult api_probe_jewel(const void* item, int32_t attribute_type, int32_t value,
+QolResult api_probe_jewel(contracts::QolItemHandle item, int32_t attribute_type, int32_t value,
                           contracts::AttributeQualityResult* out);
-QolResult api_probe_option(const void* item, int32_t option, int32_t level, int32_t flag,
+QolResult api_probe_option(contracts::QolItemHandle item, int32_t option, int32_t level, int32_t flag,
                            int32_t value,
                            contracts::AttributeQualityResult* out);
 QolResult api_classify(int32_t value, int32_t min, int32_t max,

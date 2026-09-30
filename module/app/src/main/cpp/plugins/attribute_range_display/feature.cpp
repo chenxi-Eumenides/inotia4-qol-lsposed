@@ -94,7 +94,12 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int 
     contracts::AttributeQualityResult quality{};
     int32_t level = 0;
     if (g_item_extras->read.ability_level(t_current_item, &level).ok != kQolOk) return;
-    if (api->probe_option(t_current_item, option_index, level, 1, value, &quality).ok != kQolOk) {
+    contracts::QolItemHandle handle{};
+    if (g_sdk->item_handle.register_item == nullptr ||
+        g_sdk->item_handle.register_item(t_current_item, contracts::kQolItemHandleOwnerGame,
+                                        &handle) != contracts::kQolItemHandleStatusOk ||
+        handle.slot == 0 || handle.generation == 0 ||
+        api->probe_option(handle, option_index, level, 1, value, &quality).ok != kQolOk) {
         return;
     }
     (void)g_sdk->ui->insert_inline_color(builder, 4096,

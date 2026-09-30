@@ -22,31 +22,22 @@ bool autosell_build_view(
     const qol::features::autosell::read_only::InventoryItemRef& ref, autosell::ItemView* out) {
     if (out == nullptr) return false;
     *out = autosell::ItemView{};
-    if (ref.native_item == nullptr) return false;
+    if (ref.item.slot == 0 || ref.item.generation == 0) return false;
     if (ref.category <= 0) return false;
     const int category = ref.category;
 
-    // 装备判据用游戏自身的 ITEM_IsRealEquip：不可堆叠（item_is_equip）会把宝石/背包/
-    // 徽章等非装备也判为真，导致 rarity/强化/孔数规则过匹配。
-    int32_t value = 0;
-    if (!qol::features::autosell::read_only::item_is_real_equip(ref.native_item, &value)) {
-        return false;
-    }
-    out->is_equip = value != 0;
-    if (!qol::features::autosell::read_only::item_rarity(ref.native_item, &out->rarity)) {
-        return false;
-    }
+    qol::contracts::QolItemInventoryView facts{};
+    if (!qol::features::autosell::read_only::item_inventory_view(ref.item, &facts) ||
+        (facts.fields & qol::contracts::kQolItemInventoryHasRarity) == 0 ||
+        (facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
+        (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0) return false;
+    out->is_equip = facts.equip != 0;
+    out->rarity = facts.rarity;
+    out->enhance_remaining = facts.enchant_remaining;
+    out->socket_filled = facts.socket_filled;
+    out->socket_total = facts.socket_total;
 
-    // 强化/孔位位段拆解（auto-sell.md §3.1）：bits2-5=剩余强化次数（筛选口径）、
-    // bits6-10=已强化次数、I_SOCKET bits0-3=已镶嵌数（后两者 >0 触发硬保护）、bits4-7=总孔数。
-    if (!qol::features::autosell::read_only::item_enchant_remaining(
-            ref.native_item, &out->enhance_remaining) ||
-        !qol::features::autosell::read_only::item_socket_filled(ref.native_item,
-                                                                &out->socket_filled) ||
-        !qol::features::autosell::read_only::item_socket_total(ref.native_item,
-                                                               &out->socket_total)) {
-        return false;
-    }
+    int32_t value = 0;
 
     if (!qol::features::autosell::read_only::item_is_jewel(category, &value)) {
         return false;
@@ -62,13 +53,8 @@ bool autosell_build_view(
         // bits18-23=属性类型。经 attribute.quality 能力探测该属性值的随机区间 [X, 2X]。
         // 过渡期消费方式：每次调用按能力查找（不缓存指针跨帧）；不可用/撤销中/探测失败
         // 时保持 -1（fail-closed，gemRange 规则不命中，不得默认 0 触发误售）。
-        int jewel_value = 0;
-        int jewel_attr_type = 0;
-        if (!qol::features::autosell::read_only::item_jewel_value(ref.native_item, &jewel_value) ||
-            !qol::features::autosell::read_only::item_jewel_attribute_type(ref.native_item,
-                                                                            &jewel_attr_type)) {
-            return false;
-        }
+        const int jewel_value = facts.jewel_value;
+        const int jewel_attr_type = facts.jewel_attribute_type;
         const auto* sdk = qol::features::autosell::host_sdk();
         const void* iface = nullptr;
         if (sdk != nullptr && sdk->capabilities.require != nullptr) {
@@ -82,7 +68,7 @@ bool autosell_build_view(
         if (attr_api != nullptr && attr_api->probe_jewel != nullptr &&
             attr_api->percentile != nullptr) {
             qol::contracts::AttributeQualityResult quality{};
-            if (attr_api->probe_jewel(ref.native_item, jewel_attr_type, jewel_value, &quality).ok ==
+            if (attr_api->probe_jewel(ref.item, jewel_attr_type, jewel_value, &quality).ok ==
                     kQolOk &&
                 attr_api->percentile(jewel_value, quality.min, quality.max,
                                      &out->jewel_percentile).ok == kQolOk) {

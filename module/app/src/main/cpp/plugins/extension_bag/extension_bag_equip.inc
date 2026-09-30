@@ -181,9 +181,13 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
     // exchange entry point reads INVEN[bag][slot], so expose the projected item
     // only for the duration of that call and restore the real slot afterwards.
     void* original_inventory_item = nullptr;
+    qol::contracts::QolItemHandle original_inventory_handle{};
     if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
         !qol::contracts::succeeded(g_item_facts->physical_item_at(
-            original_bag, source_slot, &original_inventory_item))) return false;
+            original_bag, source_slot, &original_inventory_handle)) ||
+        (original_inventory_handle.slot != 0 &&
+         !extension_bag_private_item_for_handle(original_inventory_handle,
+                                                &original_inventory_item))) return false;
     void* previous_equipped_item = read_char_equipped_item(character, target);
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> previous_equipped_payload{};
     int previous_equipped_payload_size = 0;

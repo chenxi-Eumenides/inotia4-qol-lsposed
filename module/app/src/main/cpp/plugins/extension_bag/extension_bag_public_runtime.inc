@@ -594,10 +594,15 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
         for (int slot = 0; slot < capacity; ++slot) {
             const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
             if (item.category <= 0 || item.count <= 0) continue;
+            qol::contracts::QolItemHandle item_handle = qol::contracts::kInvalidItemHandle;
+            void* native_item = g_module_objects[bag][slot];
+            if (native_item != nullptr && extension_bag_register_item_handle(native_item)) {
+                (void)extension_bag_item_handle_for_pointer(native_item, &item_handle);
+            }
             if (fn(virtual_bag::kExtensionLogicalBagFirst + bag, slot, item.category,
                    static_cast<int>(virtual_bag_effective_count(
-                       g_module_objects[bag][slot], static_cast<uint32_t>(item.count))),
-                   ctx)) {
+                        g_module_objects[bag][slot], static_cast<uint32_t>(item.count))),
+                   item_handle, ctx)) {
                 return;
             }
         }

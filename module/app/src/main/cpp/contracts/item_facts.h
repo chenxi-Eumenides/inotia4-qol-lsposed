@@ -9,26 +9,30 @@
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{1, 1};
+constexpr QolVersion kItemFactsVersion{2, 0};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 
-using ItemFactsCategoryFn = QolResult (*)(const void* item, int32_t* out_category);
-using ItemFactsIsRealEquipFn = QolResult (*)(const void* item, int32_t* out_value);
+using ItemFactsCategoryFn = QolResult (*)(QolItemHandle item, int32_t* out_category);
+using ItemFactsIsRealEquipFn = QolResult (*)(QolItemHandle item, int32_t* out_value);
 using ItemFactsIsJewelCategoryFn = QolResult (*)(int32_t category, int32_t* out_is_jewel);
 using ItemFactsIsNoSellFn = QolResult (*)(int32_t category, int32_t* out_value);
-using ItemFactsSellPriceFn = QolResult (*)(const void* item, int64_t* out_price);
-using ItemFactsCumulateCountFn = QolResult (*)(const void* item, int32_t* out_count);
+using ItemFactsSellPriceFn = QolResult (*)(QolItemHandle item, int64_t* out_price);
+using ItemFactsCumulateCountFn = QolResult (*)(QolItemHandle item, int32_t* out_count);
+using ItemFactsViewFn = QolResult (*)(QolItemHandle item, QolItemInventoryView* out_view);
+using ItemFactsEffectiveCountFn = QolResult (*)(QolItemHandle item, int32_t* out_count);
 
 using ItemFactsItemRefAtFn = QolResult (*)(int32_t bag, int32_t slot,
                                            QolInventoryItemRef* out);
-using ItemFactsPhysicalItemAtFn = QolResult (*)(int32_t bag, int32_t slot, void** out_item);
+using ItemFactsPhysicalItemAtFn = QolResult (*)(int32_t bag, int32_t slot,
+                                                QolItemHandle* out_item);
 using ItemFactsDetailContextFn = QolResult (*)(int32_t* out_desc_type, int32_t* out_bag,
                                                void** out_control);
 using ItemFactsCursorIndexFn = QolResult (*)(const void* control, int32_t* out_slot);
 using ItemFactsMoneyFn = QolResult (*)(int64_t* out_money);
 
 struct ItemFactsApi {
+    uint32_t struct_size;
     ItemFactsCategoryFn category;
     ItemFactsIsRealEquipFn is_real_equip;
     ItemFactsIsJewelCategoryFn is_jewel_category;
@@ -40,6 +44,12 @@ struct ItemFactsApi {
     ItemFactsDetailContextFn detail_context;
     ItemFactsCursorIndexFn cursor_index;
     ItemFactsMoneyFn money;
+    ItemFactsViewFn view;
+    ItemFactsEffectiveCountFn effective_count;
 };
+
+inline bool item_facts_api_size_valid(const ItemFactsApi* api) {
+    return api != nullptr && api->struct_size >= sizeof(ItemFactsApi);
+}
 
 }  // namespace qol::contracts

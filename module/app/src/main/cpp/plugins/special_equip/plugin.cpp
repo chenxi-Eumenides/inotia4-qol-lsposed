@@ -90,7 +90,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!contracts::succeeded(g_sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr) {
+        iface == nullptr || !contracts::item_facts_api_size_valid(
+                                static_cast<const contracts::ItemFactsApi*>(iface))) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_character_extras = nullptr;

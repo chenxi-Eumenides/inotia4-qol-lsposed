@@ -71,11 +71,25 @@ const contracts::CraftResultApi* craft_api() {
 }
 
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；对用到的类别而言 == itemId。
+bool item_handle(void* item, contracts::QolItemHandle* out) {
+    const auto* sdk = host_sdk();
+    if (item == nullptr || out == nullptr || sdk == nullptr) return false;
+    uint32_t owner = 0;
+    if (sdk->item_handle.lookup_item != nullptr &&
+        sdk->item_handle.lookup_item(item, out, &owner) == contracts::kQolItemHandleStatusOk) {
+        return true;
+    }
+    return sdk->item_handle.register_item != nullptr &&
+           sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, out) ==
+               contracts::kQolItemHandleStatusOk && out->slot != 0 && out->generation != 0;
+}
+
 uint16_t item_category(void* item) {
     int32_t category = 0;
+    contracts::QolItemHandle handle{};
     const auto* facts = item_facts();
-    if (item == nullptr || facts == nullptr || facts->category == nullptr ||
-        facts->category(item, &category).ok != kQolOk || category < 0) {
+    if (!item_handle(item, &handle) || facts == nullptr || facts->category == nullptr ||
+        facts->category(handle, &category).ok != kQolOk || category < 0) {
         return 0;
     }
     return static_cast<uint16_t>(category);
@@ -90,9 +104,10 @@ int jewel_grade(uint16_t category) {
 
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
+    contracts::QolItemHandle handle{};
     const auto* facts = item_facts();
-    if (item == nullptr || facts == nullptr || facts->is_real_equip == nullptr ||
-        facts->is_real_equip(item, &is_real_equip).ok != kQolOk) {
+    if (!item_handle(item, &handle) || facts == nullptr || facts->is_real_equip == nullptr ||
+        facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;
@@ -511,7 +526,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr) {
+        iface == nullptr || !contracts::item_facts_api_size_valid(
+                                static_cast<const contracts::ItemFactsApi*>(iface))) {
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));

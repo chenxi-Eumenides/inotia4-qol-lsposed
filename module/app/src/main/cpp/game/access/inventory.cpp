@@ -3,6 +3,7 @@
 #include "game/state/game_state.h"
 #include "game/access/game_access.h"
 #include "game/access/item_class.h"
+#include "game/access/item_handle_registry.h"
 
 #include <cstring>
 
@@ -17,13 +18,23 @@ QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
 
-void copy_ref(const InventoryItemRef& source, contracts::QolInventoryItemRef* target) {
+bool handle_for_item(void* item, contracts::QolItemHandle* out_handle) {
+    if (item == nullptr || out_handle == nullptr) return false;
+    *out_handle = lookup_item(item);
+    if (out_handle->slot == 0) {
+        *out_handle = register_item(item, contracts::kQolItemHandleOwnerGame);
+    }
+    return out_handle->slot != 0 && out_handle->generation != 0;
+}
+
+bool copy_ref(const InventoryItemRef& source, contracts::QolInventoryItemRef* target) {
+    if (!handle_for_item(source.native_item, &target->item)) return false;
     target->kind = static_cast<int32_t>(source.kind);
     target->bag = source.bag;
     target->slot = source.slot;
     target->category = source.category;
     target->count = source.count;
-    target->native_item = source.native_item;
+    return true;
 }
 
 struct BagSlotContext {
@@ -39,8 +50,9 @@ bool bridge_bag_slot(void* item, int bag, int slot, void* context) {
         slot,
         item_class_category(item),
         fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1,
-        item,
+        {},
     };
+    if (!handle_for_item(item, &ref.item)) return false;
     return state->callback(&ref, state->callback_context) != 0;
 }
 
@@ -58,7 +70,7 @@ QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
         }
         return error_result(kQolErrNotFound, kNotFound);
     }
-    copy_ref(source, out);
+    if (!copy_ref(source, out)) return error_result(kQolErrNotReady, "item handle unavailable");
     return contracts::ok();
 }
 

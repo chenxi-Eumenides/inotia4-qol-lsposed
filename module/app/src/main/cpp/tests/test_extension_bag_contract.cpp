@@ -59,8 +59,8 @@ bool ui_choice_button_slot_target(void** /*out_slot*/, uintptr_t* /*out_expected
 }  // namespace qol::game
 
 // ---- 契约头：可编译 + POD + sizeof + 枚举值 ----
-static_assert(qol::contracts::kExtensionBagVersionMajor == 2, "major");
-static_assert(qol::contracts::kExtensionBagVersionMinor == 2, "minor");
+    static_assert(qol::contracts::kExtensionBagVersionMajor == 3, "major");
+    static_assert(qol::contracts::kExtensionBagVersionMinor == 0, "minor");
 static_assert(std::strcmp(qol::contracts::kExtensionBagCapabilityId, "extension_bag") == 0,
               "capability id 必须为 extension_bag");
 

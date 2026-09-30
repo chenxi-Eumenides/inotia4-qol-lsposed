@@ -174,6 +174,13 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_item_facts = static_cast<const contracts::ItemFactsApi*>(iface);
+    if (!contracts::item_facts_api_size_valid(g_item_facts)) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_world_facts = nullptr;
+        g_item_facts = nullptr;
+        return 1;
+    }
     // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
     // activate 重入安全。
     autosell_register_save_enter();

@@ -50,7 +50,7 @@ constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
 };
 
 contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
-                                                     const void* expected_item,
+                                                     contracts::QolItemHandle expected_item,
                                                      const char* source) {
     contracts::InventorySellResult result{};
     const auto* facts = g_world_facts;
@@ -74,11 +74,12 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         result.status = contracts::InventorySellStatus::kEmptySlot;
         return result;
     }
-    if (item_ref.native_item == nullptr) {
-        result.status = contracts::InventorySellStatus::kNoNativeItem;
+    if (item_ref.item.slot == 0 || item_ref.item.generation == 0) {
+        result.status = contracts::InventorySellStatus::kNoItemHandle;
         return result;
     }
-    if (expected_item != nullptr && expected_item != item_ref.native_item) {
+    if (expected_item.slot != item_ref.item.slot ||
+        expected_item.generation != item_ref.item.generation) {
         result.status = contracts::InventorySellStatus::kStale;
         return result;
     }
@@ -101,14 +102,14 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
     }
     int32_t count = 0;
     if (!contracts::succeeded(
-            g_item_facts->cumulate_count(item_ref.native_item, &count)) ||
+            g_item_facts->cumulate_count(item_ref.item, &count)) ||
         count <= 0) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
     int64_t unit_price = 0;
     if (!contracts::succeeded(
-            g_item_facts->sell_price(item_ref.native_item, &unit_price))) {
+            g_item_facts->sell_price(item_ref.item, &unit_price))) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
@@ -126,7 +127,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         }
     }
     if (eb != nullptr && eb->sell_price != nullptr) {
-        price = eb->sell_price(item_ref.native_item, count, true);
+        price = eb->sell_price(item_ref.item, count, true);
     } else if (!contracts::sell_price::calculate(unit_price, static_cast<uint32_t>(count), true,
                                                  &price)) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
@@ -145,7 +146,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         return result;
     }
     if (!contracts::succeeded(
-            g_action_game->inventory_write.remove_item(item_ref.native_item))) {
+            g_action_game->inventory_write.remove_item(item_ref.item))) {
         (void)g_action_game->world_action.minus_money(price);
         result.status = contracts::InventorySellStatus::kRemoveFailed;
         return result;
@@ -191,6 +192,8 @@ int plugin_install(contracts::PluginContext& ctx) {
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor},
             &item_facts_iface)) ||
         item_facts_iface == nullptr ||
+        !contracts::item_facts_api_size_valid(
+            static_cast<const contracts::ItemFactsApi*>(item_facts_iface)) ||
         !inventory_native_hook_bind_item_facts(
             static_cast<const contracts::ItemFactsApi*>(item_facts_iface))) {
         (void)inventory_native_hook_bind_item_facts(nullptr);

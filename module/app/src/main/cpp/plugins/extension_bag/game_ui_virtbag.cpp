@@ -187,11 +187,13 @@ thread_local bool g_in_native_call = false;
 void* g_tab_bag_items[virtual_bag::kBagCount] = {};
 
 bool read_item_category(const void* item, int* out_category) {
+    qol::contracts::QolItemHandle handle{};
     if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
-        item == nullptr || out_category == nullptr) return false;
+        item == nullptr || out_category == nullptr ||
+        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
     int32_t category = 0;
     if (!qol::contracts::succeeded(
-            g_item_facts->category(item, &category))) return false;
+            g_item_facts->category(handle, &category))) return false;
     *out_category = category;
     return true;
 }
@@ -367,11 +369,13 @@ void extension_description_set_off() {
 }
 
 bool read_item_cumulate_count(const void* item, int* out_count) {
+    qol::contracts::QolItemHandle handle{};
     if (g_item_facts == nullptr || g_item_facts->cumulate_count == nullptr ||
-        item == nullptr || out_count == nullptr) return false;
+        item == nullptr || out_count == nullptr ||
+        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
     int32_t count = 0;
     if (!qol::contracts::succeeded(
-            g_item_facts->cumulate_count(item, &count))) return false;
+            g_item_facts->cumulate_count(handle, &count))) return false;
     *out_count = count;
     return true;
 }
@@ -395,11 +399,13 @@ bool read_item_category_predicate(int category,
 }
 
 bool item_is_equip(const void* item) {
-    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr || item == nullptr) {
+    qol::contracts::QolItemHandle handle{};
+    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr || item == nullptr ||
+        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) {
         return false;
     }
     int32_t value = 0;
-    return qol::contracts::succeeded(g_item_facts->is_real_equip(item, &value)) &&
+    return qol::contracts::succeeded(g_item_facts->is_real_equip(handle, &value)) &&
            value != 0;
 }
 
@@ -444,9 +450,11 @@ bool mark_native_bag_object(void* item) {
 }
 
 bool read_item_sell_price(const void* item, int64_t* out_price) {
+    qol::contracts::QolItemHandle handle{};
     if (g_item_facts == nullptr || g_item_facts->sell_price == nullptr ||
-        item == nullptr || out_price == nullptr) return false;
-    return qol::contracts::succeeded(g_item_facts->sell_price(item, out_price));
+        item == nullptr || out_price == nullptr ||
+        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
+    return qol::contracts::succeeded(g_item_facts->sell_price(handle, out_price));
 }
 
 bool read_item_encoded_field(const void* item, uint32_t* out_field) {

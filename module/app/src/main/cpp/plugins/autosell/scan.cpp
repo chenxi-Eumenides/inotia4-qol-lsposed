@@ -95,14 +95,14 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
     const auto* actions = inventory_action_api();
     if (actions == nullptr || actions->sell == nullptr) return;
     const qol::contracts::InventorySellResult result =
-        actions->sell(ref.bag, ref.slot, ref.native_item, "autosell");
+        actions->sell(ref.bag, ref.slot, ref.item, "autosell");
     if (result.status == qol::contracts::InventorySellStatus::kOk) {
         ++stats->sold;
         return;
     }
     if (result.status == qol::contracts::InventorySellStatus::kStale ||
         result.status == qol::contracts::InventorySellStatus::kEmptySlot ||
-        result.status == qol::contracts::InventorySellStatus::kNoNativeItem) {
+        result.status == qol::contracts::InventorySellStatus::kNoItemHandle) {
         return;
     }
     ++stats->failed;
@@ -135,7 +135,7 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
                     qol::features::autosell::read_only::inventory_item_ref_at(bag, slot, &ref);
                 if (result.ok != kQolOk ||
                     ref.kind != static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider) ||
-                    ref.native_item == nullptr || ref.category <= 0) {
+                    ref.item.slot == 0 || ref.item.generation == 0 || ref.category <= 0) {
                     continue;
                 }
                 qol::features::autosell::read_only::refresh_item_count(&ref);

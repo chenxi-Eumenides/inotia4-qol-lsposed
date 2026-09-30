@@ -15,7 +15,7 @@ void world_teleport_call_map_name() {}
 namespace {
 
 const qol::contracts::WorldFactsApi kWorldFacts{};
-const qol::contracts::ItemFactsApi kItemFacts{};
+const qol::contracts::ItemFactsApi kItemFacts{sizeof(qol::contracts::ItemFactsApi)};
 bool g_item_available = false;
 
 QolResult require_capability(const char* id, QolVersionRange, const void** out_iface) {

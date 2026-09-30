@@ -483,6 +483,16 @@ int32_t sdk_item_handle_register(void* item, uint32_t provider_id,
     return contracts::kQolItemHandleStatusNotFound;
 }
 
+int32_t sdk_item_handle_lookup(void* item, contracts::QolItemHandle* out_handle,
+                               uint32_t* out_provider_id) {
+    if (item == nullptr || out_handle == nullptr) {
+        return contracts::kQolItemHandleStatusInvalidArgument;
+    }
+    *out_handle = qol::game::lookup_item(item, out_provider_id);
+    return out_handle->slot != 0 ? contracts::kQolItemHandleStatusOk
+                                 : contracts::kQolItemHandleStatusNotFound;
+}
+
 int32_t sdk_item_handle_invalidate(void* item, uint32_t provider_id) {
     return qol::game::invalidate_item(item, provider_id)
                ? contracts::kQolItemHandleStatusOk
@@ -905,7 +915,8 @@ contracts::QolHostSdk make_host_sdk() {
         &infra::commands_current_attempt,
     };
     sdk.lifecycle_participant_register = &sdk_lifecycle_participant_register;
-    sdk.item_handle = {&sdk_item_handle_register, &sdk_item_handle_invalidate,
+    sdk.item_handle = {&sdk_item_handle_register, &sdk_item_handle_lookup,
+                       &sdk_item_handle_invalidate,
                        &sdk_item_handle_rebind,
                        &sdk_item_handle_begin_invalidation,
                        &sdk_item_handle_finish_invalidation};

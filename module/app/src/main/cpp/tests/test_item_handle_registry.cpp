@@ -23,6 +23,14 @@ int32_t register_locked(void* item, uint32_t provider, qol::contracts::QolItemHa
                           : qol::contracts::kQolItemHandleStatusCapacity;
 }
 
+int32_t lookup_locked(void* item, qol::contracts::QolItemHandle* out, uint32_t* provider) {
+    assert(g_virtual_bag_lock_held);
+    ++g_callback_calls;
+    *out = g_callback_registry->lookup_item(item, provider);
+    return out->slot != 0 ? qol::contracts::kQolItemHandleStatusOk
+                          : qol::contracts::kQolItemHandleStatusNotFound;
+}
+
 int32_t invalidate_locked(void* item, uint32_t provider) {
     assert(g_virtual_bag_lock_held);
     ++g_callback_calls;
@@ -138,38 +146,38 @@ int main() {
 
     ItemHandleRegistry save_reload_table;
     const QolItemHandle native_slot_item = save_reload_table.register_item(
-        &first_object, qol::contracts::kQolItemHandleProviderNative);
+        &first_object, qol::contracts::kQolItemHandleOwnerGame);
     const QolItemHandle provider_item = save_reload_table.register_item(
-        &second_object, qol::contracts::kQolItemHandleProviderExtensionBag);
-    save_reload_table.invalidate_provider(qol::contracts::kQolItemHandleProviderNative);
+        &second_object, qol::contracts::kQolItemHandleOwnerProvider);
+    save_reload_table.invalidate_provider(qol::contracts::kQolItemHandleOwnerGame);
     assert(save_reload_table.resolve_item(
-               native_slot_item, qol::contracts::kQolItemHandleProviderNative).error ==
+               native_slot_item, qol::contracts::kQolItemHandleOwnerGame).error ==
            ItemHandleError::kStale);
     assert(save_reload_table.resolve_item(
-               provider_item, qol::contracts::kQolItemHandleProviderExtensionBag).item ==
+               provider_item, qol::contracts::kQolItemHandleOwnerProvider).item ==
            &second_object);
 
     ItemHandleRegistry eb_registry;
     g_callback_registry = &eb_registry;
     const qol::contracts::QolItemHandleApi item_handle_api{
-        &register_locked, &invalidate_locked, &rebind_locked,
+        &register_locked, &lookup_locked, &invalidate_locked, &rebind_locked,
         &begin_invalidation_locked, &finish_invalidation_locked};
     {
         const std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         g_virtual_bag_lock_held = true;
         qol::contracts::QolItemHandle materialized{};
         assert(item_handle_api.register_item(
-                   &first_object, qol::contracts::kQolItemHandleProviderExtensionBag,
+                   &first_object, qol::contracts::kQolItemHandleOwnerProvider,
                    &materialized) == qol::contracts::kQolItemHandleStatusOk);
         assert(item_handle_api.rebind_item(
-                   &first_object, qol::contracts::kQolItemHandleProviderNative) ==
+                   &first_object, qol::contracts::kQolItemHandleOwnerGame) ==
                qol::contracts::kQolItemHandleStatusOk);
         const auto resolved = eb_registry.resolve_item(
-            materialized, qol::contracts::kQolItemHandleProviderNative);
+            materialized, qol::contracts::kQolItemHandleOwnerGame);
         assert(resolved.item == &first_object && resolved.error == ItemHandleError::kNone);
         qol::contracts::QolItemHandle checkpoint{};
         assert(item_handle_api.begin_invalidation(
-                   &first_object, qol::contracts::kQolItemHandleProviderNative,
+                   &first_object, qol::contracts::kQolItemHandleOwnerGame,
                    &checkpoint) == qol::contracts::kQolItemHandleStatusOk);
         assert(item_handle_api.finish_invalidation(
                    checkpoint, 0) == qol::contracts::kQolItemHandleStatusOk);
@@ -179,7 +187,7 @@ int main() {
         const std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         g_virtual_bag_lock_held = true;
         assert(item_handle_api.invalidate_item(
-                   &first_object, qol::contracts::kQolItemHandleProviderNative) ==
+                   &first_object, qol::contracts::kQolItemHandleOwnerGame) ==
                qol::contracts::kQolItemHandleStatusOk);
         g_virtual_bag_lock_held = false;
     }

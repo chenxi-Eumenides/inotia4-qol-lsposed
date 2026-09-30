@@ -5,6 +5,7 @@
 
 #include "../result.h"
 #include "../version.h"
+#include "../item_handle.h"
 
 namespace qol::contracts {
 
@@ -21,13 +22,18 @@ struct QolInventoryItemRef {
     int32_t slot;
     int32_t category;
     int32_t count;
-    void* native_item;
+    QolItemHandle item;
 };
 
 using QolInventoryBagSlotFn = int32_t (*)(const QolInventoryItemRef* item, void* ctx);
 using QolItemJsonFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_size);
 
 constexpr uint32_t kQolItemInventoryOptionCapacity = 32;
+// Autosell view consumer table (plugins/autosell/view.cpp): real-equip→equip; rarity→rarity;
+// remaining-enchant→enchant_remaining; filled/total sockets→socket_filled/socket_total;
+// jewel value/type→jewel_value/jewel_attribute_type; quantity uses effective_count when
+// count_supported is set. Bag category remains QolInventoryItemRef.category. Consumers do not
+// reinterpret payload or recompute the R-47b mode view.
 
 enum QolItemInventoryViewField : uint32_t {
     kQolItemInventoryHasCategory = 1u << 0,
@@ -35,6 +41,8 @@ enum QolItemInventoryViewField : uint32_t {
     kQolItemInventoryHasDamage = 1u << 2,
     kQolItemInventoryHasDefense = 1u << 3,
     kQolItemInventoryHasNeedLevel = 1u << 4,
+    kQolItemInventoryHasJewelValue = 1u << 5,
+    kQolItemInventoryHasJewelAttributeType = 1u << 6,
 };
 
 struct QolItemInventoryOptionView {
@@ -49,6 +57,7 @@ struct QolItemInventoryView {
     int32_t raw_rarity;
     int32_t category;
     int32_t count_supported;
+    int32_t effective_count;
     int32_t equip;
     int32_t rarity;
     int32_t damage;
@@ -59,11 +68,14 @@ struct QolItemInventoryView {
     int32_t socket_filled;
     int32_t socket_total;
     int32_t enchant;
+    int32_t enchant_remaining;
     int32_t chaos;
     int32_t enchant_id;
     int32_t enchant_level;
     int32_t chaos_level;
     int32_t chaos_rate;
+    int32_t jewel_value;
+    int32_t jewel_attribute_type;
     uint32_t option_count;
     QolItemInventoryOptionView options[kQolItemInventoryOptionCapacity];
 };
@@ -87,14 +99,14 @@ enum class QolItemStaticTextKind : int32_t {
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);
 
 struct QolItemPortReadApi {
-    QolResult (*category)(const void* item, int32_t* out_category);
-    QolResult (*is_real_equip)(const void* item, int32_t* out_value);
+    QolResult (*category)(QolItemHandle item, int32_t* out_category);
+    QolResult (*is_real_equip)(QolItemHandle item, int32_t* out_value);
     QolResult (*is_jewel_category)(int32_t category, int32_t* out_is_jewel);
     QolResult (*is_no_sell)(int32_t category, int32_t* out_value);
-    QolResult (*sell_price)(const void* item, int64_t* out_price);
-    QolResult (*cumulate_count)(const void* item, int32_t* out_count);
+    QolResult (*sell_price)(QolItemHandle item, int64_t* out_price);
+    QolResult (*cumulate_count)(QolItemHandle item, int32_t* out_count);
     QolResult (*item_ref_at)(int32_t bag, int32_t slot, QolInventoryItemRef* out);
-    QolResult (*physical_item_at)(int32_t bag, int32_t slot, void** out_item);
+    QolResult (*physical_item_at)(int32_t bag, int32_t slot, QolItemHandle* out_item);
     QolResult (*detail_context)(int32_t* out_desc_type, int32_t* out_bag, void** out_control);
     QolResult (*cursor_index)(const void* control, int32_t* out_slot);
     // Legacy JSON adapter retained for unmigrated game-system write/cache consumers.
@@ -106,14 +118,19 @@ struct QolItemPortReadApi {
     // 静态名称表是否已由启动期下发（owner 快照据此推迟发布，避免输出空名称）。
     QolResult (*static_ready)(int32_t* out_ready);
     // Synchronous main-thread typed view; item pointers remain inside the adapter call path.
-    QolResult (*inventory_item_view)(const void* item, QolItemInventoryView* out_view);
-    QolResult (*effective_cumulate_count)(const void* item, int32_t* out_count);
+    QolResult (*inventory_item_view)(QolItemHandle item, QolItemInventoryView* out_view);
+    QolResult (*effective_cumulate_count)(QolItemHandle item, int32_t* out_count);
     QolResult (*inventory_extension_access)(QolInventoryExtensionAccess* out_access);
 };
 
 struct QolItemPort {
     QolVersion abi_version;
+    uint32_t struct_size;
     QolItemPortReadApi read;
 };
+
+inline bool qol_item_port_size_valid(const QolItemPort* port) {
+    return port != nullptr && port->struct_size >= sizeof(QolItemPort);
+}
 
 }  // namespace qol::contracts

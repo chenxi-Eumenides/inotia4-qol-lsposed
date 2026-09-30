@@ -10,18 +10,20 @@ namespace qol::features::autosell::read_only {
 using InventoryItemRef = contracts::QolInventoryItemRef;
 using BagSlotFn = contracts::QolInventoryBagSlotFn;
 
-bool item_category(const void* item, int32_t* out);
+bool item_category(contracts::QolItemHandle item, int32_t* out);
 bool item_is_jewel(int32_t category, int32_t* out);
-bool item_is_real_equip(const void* item, int32_t* out);
-bool item_rarity(const void* item, int32_t* out);
-bool item_enchant_remaining(const void* item, int32_t* out);
-bool item_socket_filled(const void* item, int32_t* out);
-bool item_socket_total(const void* item, int32_t* out);
+bool item_is_real_equip(contracts::QolItemHandle item, int32_t* out);
+bool item_rarity(contracts::QolItemHandle item, int32_t* out);
+bool item_enchant_remaining(contracts::QolItemHandle item, int32_t* out);
+bool item_socket_filled(contracts::QolItemHandle item, int32_t* out);
+bool item_socket_total(contracts::QolItemHandle item, int32_t* out);
 bool item_is_backpack(int32_t category, int32_t* out);
 bool item_is_dice(int32_t category, int32_t* out);
 bool item_is_no_sell(int32_t category, int32_t* out);
-bool item_jewel_value(const void* item, int32_t* out);
-bool item_jewel_attribute_type(const void* item, int32_t* out);
+bool item_jewel_value(contracts::QolItemHandle item, int32_t* out);
+bool item_jewel_attribute_type(contracts::QolItemHandle item, int32_t* out);
+bool item_inventory_view(contracts::QolItemHandle item,
+                         contracts::QolItemInventoryView* out);
 
 bool world_state(int32_t* out);
 bool game_state_gate(int32_t* out);

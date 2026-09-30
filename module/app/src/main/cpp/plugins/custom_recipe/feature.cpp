@@ -43,6 +43,7 @@ const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
 uint64_t g_save_enter_subscription = 0;
+bool item_handle_for_recipe_object(void* item, qol::contracts::QolItemHandle* out);
 
 }  // namespace
 
@@ -111,8 +112,10 @@ const ::custom_recipe::Def* module_recipe_for_mix_type(uint32_t mix_type) {
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；空物品返回 0 = 「该槽为空」的匹配键。
 uint16_t item_category(void* item) {
     int32_t category = 0;
-    if (item == nullptr || g_item_facts == nullptr || g_item_facts->category == nullptr ||
-        g_item_facts->category(item, &category).ok != kQolOk || category < 0) {
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_recipe_object(item, &handle) || g_item_facts == nullptr ||
+        g_item_facts->category == nullptr ||
+        g_item_facts->category(handle, &category).ok != kQolOk || category < 0) {
         return 0;
     }
     return static_cast<uint16_t>(category);
@@ -121,8 +124,10 @@ uint16_t item_category(void* item) {
 // 是否可堆叠（ITEMCLASSBASE[category*stride+6] bit0；口径与 game/read/item_class.h 一致）。
 bool item_is_stackable(void* item) {
     int32_t is_real_equip = 0;
-    if (item == nullptr || g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr ||
-        g_item_facts->is_real_equip(item, &is_real_equip).ok != kQolOk) {
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_recipe_object(item, &handle) || g_item_facts == nullptr ||
+        g_item_facts->is_real_equip == nullptr ||
+        g_item_facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;
@@ -161,6 +166,17 @@ const qol::contracts::AttributeQualityApi* attribute_quality_api() {
                : nullptr;
 }
 
+bool item_handle_for_recipe_object(void* item, qol::contracts::QolItemHandle* out) {
+    if (item == nullptr || out == nullptr || g_sdk == nullptr) return false;
+    uint32_t owner = 0;
+    if (g_sdk->item_handle.lookup_item != nullptr &&
+        g_sdk->item_handle.lookup_item(item, out, &owner) ==
+            qol::contracts::kQolItemHandleStatusOk) return true;
+    return g_sdk->item_handle.register_item != nullptr &&
+           g_sdk->item_handle.register_item(item, qol::contracts::kQolItemHandleOwnerGame, out) ==
+               qol::contracts::kQolItemHandleStatusOk && out->slot != 0 && out->generation != 0;
+}
+
 ::custom_recipe::Tier classify_with_attribute_quality(int value, int minimum, int maximum) {
     const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
     if (api == nullptr || api->classify == nullptr) return ::custom_recipe::Tier::Grey;
@@ -182,7 +198,9 @@ bool jewel_tier(void* item, ::custom_recipe::Tier* out_tier, int* out_value, int
     const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
     const int value = static_cast<int>(word & kJewelValueMask);
     qol::contracts::AttributeQualityResult quality{};
-    if (api->probe_jewel(item, type, value, &quality).ok != kQolOk) return false;
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_recipe_object(item, &handle) ||
+        api->probe_jewel(handle, type, value, &quality).ok != kQolOk) return false;
     if (api->classify(value, quality.min, quality.max, out_tier).ok != kQolOk) return false;
     if (out_value != nullptr) *out_value = value;
     if (out_min != nullptr) *out_min = quality.min;
@@ -443,7 +461,11 @@ qol::contracts::CraftExecuteResult api_execute(const qol::contracts::CraftExecut
                     static_cast<int32_t>(item_category(it)), 1);
             }
         } else if (g_game != nullptr && g_game->inventory_write.remove_item != nullptr) {
-            (void)g_game->inventory_write.remove_item(it);
+            qol::contracts::QolItemHandle handle{};
+            if (!item_handle_for_recipe_object(it, &handle)) {
+                return CraftExecuteResult::kAborted;
+            }
+            (void)g_game->inventory_write.remove_item(handle);
         }
     }
     // 产物创建走按类别分派的统一入口 ITEMSYSTEM_CreatePerfectItem；未就绪退回 CreateItem。
@@ -551,7 +573,9 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
         return 1;  // 降级：不扣料不生成
     }
     qol::contracts::AttributeQualityResult quality{};
-    if (api->probe_jewel(item, type, value, &quality).ok != kQolOk) return 1;
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_recipe_object(item, &handle) ||
+        api->probe_jewel(handle, type, value, &quality).ok != kQolOk) return 1;
     min = quality.min;
     max = quality.max;
     ::custom_recipe::Tier target = ::custom_recipe::Tier::Grey;

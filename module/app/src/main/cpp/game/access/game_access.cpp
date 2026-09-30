@@ -524,7 +524,7 @@ static std::atomic<uint16_t> g_slots_state{0xFFFF};
 void save_slots_reload() {
     if (fn_save_destroy_save_slot != nullptr) {
         qol::game::invalidate_item_handles_for_provider(
-            qol::contracts::kQolItemHandleProviderNative);
+            qol::contracts::kQolItemHandleOwnerGame);
         fn_save_destroy_save_slot();
     }
     if (fn_save_create_save_slot != nullptr) fn_save_create_save_slot();

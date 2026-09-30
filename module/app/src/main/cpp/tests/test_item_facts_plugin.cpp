@@ -1,4 +1,7 @@
 #include "contracts/item_facts.h"
+#include "contracts/inventory_action.h"
+#include "contracts/inventory_extension.h"
+#include "contracts/extension_bag.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
 #include "contracts/extension_bag.h"
@@ -7,6 +10,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <type_traits>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -16,7 +20,54 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
+static_assert(std::is_same<qol::contracts::ItemFactsCategoryFn,
+                           QolResult (*)(qol::contracts::QolItemHandle, int32_t*)>::value,
+              "item.facts category must be handle-keyed");
+static_assert(std::is_same<qol::contracts::ItemFactsPhysicalItemAtFn,
+                           QolResult (*)(int32_t, int32_t,
+                                         qol::contracts::QolItemHandle*)>::value,
+              "item.facts physical lookup must return a handle");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::inventory_item_view),
+                           QolResult (*)(qol::contracts::QolItemHandle,
+                                         qol::contracts::QolItemInventoryView*)>::value,
+              "Item Port view must be handle-keyed");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::physical_item_at),
+                           QolResult (*)(int32_t, int32_t,
+                                         qol::contracts::QolItemHandle*)>::value,
+              "Item Port physical lookup must not return an object pointer");
+static_assert(std::is_same<qol::contracts::InventorySellFn,
+                           qol::contracts::InventorySellResult (*)(
+                               int32_t, int32_t, qol::contracts::QolItemHandle,
+                               const char*)>::value,
+              "cross-plugin sell must carry an expected handle");
+static_assert(sizeof(qol::contracts::QolInventoryExtensionItemRef) ==
+                  sizeof(int32_t) * 5 + sizeof(qol::contracts::QolItemHandle),
+              "inventory extension Ref must not carry an object pointer");
+static_assert(std::is_same<qol::contracts::ExtensionBagItemFn,
+                           int32_t (*)(const qol::contracts::QolInventoryExtensionItemRef*,
+                                       void*)>::value,
+              "extension bag enumeration must not carry an object pointer");
+static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
+              "Host SDK handle table must not expose resolve_item");
+static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
+                  sizeof(int32_t) * 5 + sizeof(qol::contracts::QolItemHandle),
+              "inventory reference must not carry a native object pointer");
+
 int main() {
+    qol::contracts::ItemFactsApi old_size_api{};
+    old_size_api.struct_size = sizeof(old_size_api) - 1;
+    CHECK(!qol::contracts::item_facts_api_size_valid(&old_size_api));
+    old_size_api.struct_size = sizeof(old_size_api);
+    CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
+    qol::contracts::QolItemPort old_item_port{};
+    old_item_port.struct_size = sizeof(old_item_port) - 1;
+    CHECK(!qol::contracts::qol_item_port_size_valid(&old_item_port));
+    old_item_port.struct_size = sizeof(old_item_port);
+    CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {1, 1}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 3}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {2, 0}));
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
@@ -33,7 +84,7 @@ int main() {
     CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
+    CHECK(descriptor.provides[0].version.major == 2 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -45,7 +96,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 1 && descriptor.ports[0].range.min_minor == 3);
+    CHECK(descriptor.ports[0].range.major == 2 && descriptor.ports[0].range.min_minor == 0);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
@@ -63,6 +114,8 @@ int main() {
     CHECK(api->detail_context != nullptr);
     CHECK(api->cursor_index != nullptr);
     CHECK(api->money != nullptr);
+    CHECK(api->view != nullptr);
+    CHECK(api->effective_count != nullptr);
     CHECK(g_fail == 0);
     std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

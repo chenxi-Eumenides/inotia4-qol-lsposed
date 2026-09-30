@@ -422,10 +422,20 @@ QolResult write_inventory_remove_item_data(int32_t category, int32_t count) {
     return contracts::ok();
 }
 
-QolResult write_inventory_remove_item(void* item) {
-    if (item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+QolResult write_inventory_remove_item(contracts::QolItemHandle handle) {
+    if (handle.slot == 0 || handle.generation == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
     if (fn_remove_item == nullptr) return not_ready();
-    return fn_remove_item(item) != 0 ? contracts::ok() : not_ready();
+    const auto resolved = item_handle_registry().resolve_item(
+        handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    return fn_remove_item(resolved.item) != 0 ? contracts::ok() : not_ready();
 }
 
 QolResult write_inventory_create_perfect_item(int32_t category, void** out_item) {
@@ -533,22 +543,37 @@ QolResult read_choice_state_id(int32_t* out) {
 }
 
 QolResult read_attr_option_value(int32_t option_index, int32_t level, int32_t flag,
-                                 const void* item, int32_t* out_value) {
-    if (item == nullptr || out_value == nullptr || option_index < 0 || level < 0 || flag < 0) {
+                                 contracts::QolItemHandle handle, int32_t* out_value) {
+    if (handle.slot == 0 || handle.generation == 0 || out_value == nullptr ||
+        option_index < 0 || level < 0 || flag < 0) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    if (!qol::game::attr_call_option_value(option_index, level, flag, const_cast<void*>(item),
-                                           out_value)) {
+    const auto resolved = item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    if (!qol::game::attr_call_option_value(option_index, level, flag, resolved.item, out_value)) {
         return not_ready();
     }
     return contracts::ok();
 }
 
-QolResult read_attr_jewel_value(int32_t attribute_type, const void* item, int32_t* out_value) {
-    if (item == nullptr || out_value == nullptr || attribute_type < 0) {
+QolResult read_attr_jewel_value(int32_t attribute_type, contracts::QolItemHandle handle,
+                                int32_t* out_value) {
+    if (handle.slot == 0 || handle.generation == 0 || out_value == nullptr || attribute_type < 0) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    if (!qol::game::attr_call_jewel_value(attribute_type, const_cast<void*>(item), out_value)) {
+    const auto resolved = item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    if (!qol::game::attr_call_jewel_value(attribute_type, resolved.item, out_value)) {
         return not_ready();
     }
     return contracts::ok();

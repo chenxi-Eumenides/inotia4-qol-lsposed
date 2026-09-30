@@ -25,9 +25,10 @@ public:
     explicit ItemHandleRegistry(MainThreadCheck is_main_thread = nullptr);
     contracts::QolItemHandle register_item(void* item, uint32_t provider_id = 0,
                                            ItemHandleError* error = nullptr);
+    contracts::QolItemHandle lookup_item(void* item, uint32_t* out_provider_id = nullptr) const;
     ItemHandleResolution resolve_item(contracts::QolItemHandle handle,
                                       uint32_t provider_id = 0) const;
-    bool invalidate_item(void* item, uint32_t provider_id = contracts::kQolItemHandleProviderAny);
+    bool invalidate_item(void* item, uint32_t provider_id = contracts::kQolItemHandleOwnerAny);
     bool invalidate_item(contracts::QolItemHandle handle);
     bool rebind_item(void* item, uint32_t provider_id);
     bool begin_invalidation(void* item, uint32_t provider_id,
@@ -64,10 +65,11 @@ private:
 ItemHandleRegistry& item_handle_registry();
 contracts::QolItemHandle register_item(void* item, uint32_t provider_id = 0,
                                       ItemHandleError* error = nullptr);
+contracts::QolItemHandle lookup_item(void* item, uint32_t* out_provider_id = nullptr);
 ItemHandleResolution resolve_item(contracts::QolItemHandle handle,
                                   uint32_t provider_id = 0);
 bool invalidate_item(void* item,
-                     uint32_t provider_id = contracts::kQolItemHandleProviderAny);
+                     uint32_t provider_id = contracts::kQolItemHandleOwnerAny);
 bool invalidate_item(contracts::QolItemHandle handle);
 bool rebind_item(void* item, uint32_t provider_id);
 bool begin_item_invalidation(void* item, uint32_t provider_id,

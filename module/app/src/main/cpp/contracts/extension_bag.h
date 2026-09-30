@@ -17,12 +17,14 @@
 #include <cstdint>
 
 #include "result.h"
+#include "item_handle.h"
+#include "inventory_extension.h"
 
 namespace qol::contracts {
 
 constexpr const char* kExtensionBagCapabilityId = "extension_bag";
-constexpr int32_t kExtensionBagVersionMajor = 2;
-constexpr int32_t kExtensionBagVersionMinor = 2;
+constexpr int32_t kExtensionBagVersionMajor = 3;
+constexpr int32_t kExtensionBagVersionMinor = 0;
 
 // 返回 1 表示 out 中包含完整 JSON（不附加 NUL）；返回 0 表示参数无效或缓冲区不足。
 // 操作失败仍由 JSON "ok":false 表示。此固定宽度写面避免 std::string 跨契约边界。
@@ -31,8 +33,7 @@ using ExtensionBagMoveFn = int32_t (*)(int32_t from_bag, int32_t from_slot,
                                        uint32_t capacity, uint32_t* out_len);
 using ExtensionBagCapacityFn = bool (*)(int32_t logical_bag, int32_t* out_capacity);
 
-using ExtensionBagItemFn = bool (*)(int32_t logical_bag, int32_t slot, int32_t category,
-                                    int32_t count, void* ctx);
+using ExtensionBagItemFn = QolInventoryExtensionItemFn;
 using ExtensionBagPutJewelFn = QolResult (*)(int32_t role, int32_t logical_bag, int32_t slot,
                                              int32_t equip_slot);
 
@@ -55,7 +56,7 @@ enum class ExtensionBagEquipEventResult : uint8_t {
 };
 
 using ExtensionBagEquipEventBackup = uint64_t (*)(void*, uint64_t, void*, void*);
-using ExtensionBagPutJewelBackup = int32_t (*)(void*, void*);
+using ExtensionBagPutJewelBackup = int32_t (*)(QolItemHandle, QolItemHandle);
 
 struct ExtensionBagMoveObservation {
     bool extension_item;
@@ -67,8 +68,8 @@ struct ExtensionBagMoveObservation {
     bool drag_session_active;
     int32_t source_bag;
     int32_t source_slot;
-    void* source_ptr;
-    void* target_ptr;
+    QolItemHandle source_item;
+    QolItemHandle target_item;
     uint64_t physical_digest;
     int32_t physical_nonnull;
     bool physical_valid;
@@ -87,11 +88,11 @@ struct ExtensionBagApi {
     void (*for_each_logical_item)(ExtensionBagItemFn fn, void* ctx);
 
     // 2 对象反查
-    void* (*item_at)(int32_t internal_bag, int32_t slot);
-    void* (*view_item_at)(int32_t bag, int32_t slot);
-    bool (*identify_native_item)(void* item, int32_t* out_bag, int32_t* out_slot);
-    void* (*find_native_item)(int32_t category);
-    bool (*remove_native_item)(void* item);
+    int32_t (*item_at)(int32_t internal_bag, int32_t slot, QolItemHandle* out_item);
+    int32_t (*view_item_at)(int32_t bag, int32_t slot, QolItemHandle* out_item);
+    bool (*identify_native_item)(QolItemHandle item, int32_t* out_bag, int32_t* out_slot);
+    int32_t (*find_native_item)(int32_t category, QolItemHandle* out_item);
+    bool (*remove_native_item)(QolItemHandle item);
 
     // 3 投影
     void (*sync_projected_slot)(int32_t bag, int32_t slot);
@@ -99,29 +100,29 @@ struct ExtensionBagApi {
     void (*store_restore_for_original_write)();
 
     // 4 收编/消耗
-    bool (*consume_native_item)(void* item);
+    bool (*consume_native_item)(QolItemHandle item);
     int32_t (*consume_category)(int32_t category, int32_t count);
     bool (*has_empty_slots)(int32_t needed, int32_t include_task_bag);
     bool (*adopt_unequipped_item)(void* character, int32_t equip_slot);
-    bool (*adopt_native_item)(void* item);
-    bool (*merge_native_item)(void* item);
-    int64_t (*sell_price)(void* item, int32_t count, bool apply_variant_discount);
-    bool (*equip_projected_item)(void* character, void* item, int32_t source_bag,
+    bool (*adopt_native_item)(QolItemHandle item);
+    bool (*merge_native_item)(QolItemHandle item);
+    int64_t (*sell_price)(QolItemHandle item, int32_t count, bool apply_variant_discount);
+    bool (*equip_projected_item)(void* character, QolItemHandle item, int32_t source_bag,
                                  int32_t source_slot, int32_t equip_slot);
 
     // 5 交互接管
     ExtensionBagEquipButtonResult (*handle_backpack_button_equip_result)();
-    bool (*handle_confirm_use_item)(void* item);
+    bool (*handle_confirm_use_item)(QolItemHandle item);
     bool (*handle_use_mercenary_seal)();
     ExtensionBagEquipEventResult (*handle_equip_control_event)(
         void* control, uint64_t event, void* x2, void* param,
         ExtensionBagEquipEventBackup backup, uint64_t* out_result);
     bool (*handle_original_bag_unequip)(bool* out_no_space, bool* out_not_empty);
-    int32_t (*put_jewel_native)(void* equip_item, void* jewel_item,
+    int32_t (*put_jewel_native)(QolItemHandle equip_item, QolItemHandle jewel_item,
                                 ExtensionBagPutJewelBackup backup);
 
     // 6 观测/拖放（仅跨插件消费者）
-    bool (*capture_move_item_observation)(void* item, int32_t target_bag,
+    bool (*capture_move_item_observation)(QolItemHandle item, int32_t target_bag,
                                           int32_t target_slot,
                                           ExtensionBagMoveObservation* out);
 

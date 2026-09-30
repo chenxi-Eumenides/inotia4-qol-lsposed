@@ -38,8 +38,9 @@ struct QolThreadApi {
 
 struct QolAttrRangeReadApi {
     QolResult (*option_value)(int32_t option_index, int32_t level, int32_t flag,
-                              const void* item, int32_t* out_value);
-    QolResult (*jewel_value)(int32_t attribute_type, const void* item, int32_t* out_value);
+                              QolItemHandle item, int32_t* out_value);
+    QolResult (*jewel_value)(int32_t attribute_type, QolItemHandle item,
+                             int32_t* out_value);
     QolResult (*uses_fixed_option_table)(int32_t category, int32_t* out_value);
     QolResult (*fixed_option_percent_pair)(int32_t category, int32_t option_index,
                                            int32_t* out_p1, int32_t* out_p2);
@@ -115,7 +116,7 @@ struct QolCharacterWriteApi {
 
 struct QolInventoryWriteApi {
     QolResult (*remove_item_data)(int32_t category, int32_t count);
-    QolResult (*remove_item)(void* item);
+    QolResult (*remove_item)(QolItemHandle item);
     QolResult (*create_perfect_item)(int32_t category, void** out_item);
     QolResult (*create_item)(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
                              void** out_item);

@@ -297,7 +297,7 @@ struct QolHostSdk {
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 12：追加 Game Adapter 内部 item-handle 登记、解析与生命周期回调。
-constexpr uint16_t kHostSdkMinor = 12;
+// minor 14：收窄 item-handle API，不向插件返回物品指针。
+constexpr uint16_t kHostSdkMinor = 14;
 
 }  // namespace qol::contracts
