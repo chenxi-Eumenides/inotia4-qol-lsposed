@@ -1011,8 +1011,8 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"price\":31,\"slots\":[" +
-              expected_slot_record(0, 3, expected_item_at_slot(3, 6)) + "],\"money\":72503}");
+          "{\"ok\":true,\"price\":31,\"money\":72503,\"slots\":[" +
+              expected_slot_record(0, 3, expected_item_at_slot(3, 6)) + "]}");
     CHECK(g_state_write_kind == static_cast<int32_t>(qol::contracts::QolItemWriteKind::kShopBuy));
 
     g_state_write_count = 3;

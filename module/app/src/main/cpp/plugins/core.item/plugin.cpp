@@ -1483,11 +1483,13 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             return false;
         }
         if (kind == contracts::QolItemWriteKind::kShopBuy) {
-            std::string price = ",\"price\":" + std::to_string(operation_data.value);
             const std::size_t slots_key = body.find(",\"slots\":");
-            body.insert(slots_key, price);
+            body.insert(slots_key,
+                        ",\"price\":" + std::to_string(operation_data.value) +
+                            ",\"money\":" + std::to_string(money_after));
+        } else {
+            body += ",\"money\":" + std::to_string(money_after);
         }
-        body += ",\"money\":" + std::to_string(money_after);
     }
     if (kind == contracts::QolItemWriteKind::kUseItem && health_before_available) {
         int32_t hp_after = 0;
