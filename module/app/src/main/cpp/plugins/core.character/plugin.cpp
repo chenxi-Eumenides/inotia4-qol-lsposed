@@ -1119,6 +1119,12 @@ bool char_parse_points(const CharJsonValue& body, const char* object_key, CharWr
         const std::string& key = points->keys[i];
         const int32_t index = char_attr_index(key);
         if (index < 0) { *error = "bad attr: " + key + " (0-4 或 strength/agility/vitality/intelligence/spirit)"; return false; }
+        double parsed_value = 0;
+        if (char_parse_android_number(&points->values[i], &parsed_value) &&
+            std::isfinite(parsed_value) && std::trunc(parsed_value) != parsed_value) {
+            *error = "bad value for " + key + " (must be integer)";
+            return false;
+        }
         const int64_t value = char_opt_int(&points->values[i], -1);
         if ((add && value <= 0) || (!add && (value < 0 || value > 255))) {
             *error = add ? "bad value for " + key + " (must be positive)" : "bad value for " + key + " (0-255)";

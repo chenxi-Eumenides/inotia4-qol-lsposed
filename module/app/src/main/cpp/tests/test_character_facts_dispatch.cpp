@@ -605,7 +605,16 @@ void test_add_stat_result_semantics() {
     g_main_stats[0][2] = 30;
     g_status_points[0] = 12;
     uint16_t status = 0;
-    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3.7}}",
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":1.5}}",
+                        &role, 1, &status) ==
+          "{\"ok\":false,\"error\":\"bad value for strength (must be integer)\"}");
+    CHECK(status == 400);
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":2.0}}",
+                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    CharWritePayloadMirror integer_payload{};
+    std::memcpy(&integer_payload, g_post_payload, sizeof(integer_payload));
+    CHECK(integer_payload.point_count == 1 && integer_payload.point_amt[0] == 2);
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3}}",
                         &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
     CharWritePayloadMirror payload{};
     std::memcpy(&payload, g_post_payload, sizeof(payload));
@@ -648,7 +657,7 @@ void test_add_stat_result_semantics() {
 
     g_op_calls = 0;
     g_op_fail_at = 1;
-    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3.7}}",
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3}}",
                         &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
     CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"port failed\"}" && !success);
     CHECK(g_op_calls == 1);
@@ -809,6 +818,10 @@ void test_operation_specific_result_goldens() {
 void test_set_attr_result_semantics() {
     const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
     uint16_t status = 0;
+    CHECK(dispatch_post("/api/op/character/0/set_attr",
+                        "{\"stats\":{\"strength\":\"1.5\"}}", &role, 1, &status) ==
+          "{\"ok\":false,\"error\":\"bad value for strength (must be integer)\"}");
+    CHECK(status == 400);
     CHECK(dispatch_post("/api/op/character/0/set_attr",
                         "{\"stats\":{\"strength\":5,\"agility\":6,\"strength\":\"7\"}}",
                         &role, 1,
