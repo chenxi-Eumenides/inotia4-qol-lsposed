@@ -23,6 +23,7 @@
 #include "infra/events.h"
 #include "infra/panels.h"
 #include "infra/scheduler.h"
+#include "infra/snapshot_handle.h"
 #include "infra/store.h"
 #include "infra/text_scope.h"
 #include "game/access/ptr_slots.h"
@@ -920,6 +921,11 @@ contracts::QolHostSdk make_host_sdk() {
                        &sdk_item_handle_rebind,
                        &sdk_item_handle_begin_invalidation,
                        &sdk_item_handle_finish_invalidation};
+    sdk.snapshot_create = &infra::snapshot_handle::create;
+    sdk.snapshot_destroy = &infra::snapshot_handle::destroy;
+    sdk.snapshot_publish = &infra::snapshot_handle::publish;
+    sdk.snapshot_acquire = &infra::snapshot_handle::acquire;
+    sdk.snapshot_release = &infra::snapshot_handle::release;
     return sdk;
 }
 

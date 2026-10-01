@@ -307,6 +307,16 @@ foreach(infra_case snapshot command_queue events capabilities_status)
     add_test(NAME infra_${infra_case}_tests COMMAND infra_${infra_case}_tests)
 endforeach()
 
+add_executable(infra_snapshot_handle_tests
+    test_infra_snapshot_handle.cpp
+    ${CPP_DIR}/infra/snapshot_handle.cpp
+)
+target_include_directories(infra_snapshot_handle_tests PRIVATE ${CPP_DIR})
+target_compile_features(infra_snapshot_handle_tests PRIVATE cxx_std_17)
+set_target_properties(infra_snapshot_handle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(infra_snapshot_handle_tests PRIVATE Threads::Threads)
+add_test(NAME infra_snapshot_handle_tests COMMAND infra_snapshot_handle_tests)
+
 # P2 纵向样板基础层：hooks 资源登记/安装 host 测试（末尾追加）
 # 显式锚定 C++17：contracts/plugin.h 按 §3.3 使用字段名 requires，而 host 编译器
 # 默认 C++20（requires 是关键字）；Android 构建本身固定 -std=c++17，这里与之一致。
@@ -780,6 +790,7 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/infra/snapshot_handle.cpp
     ${CPP_DIR}/host/lifecycle_participants.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp

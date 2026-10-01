@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -494,6 +495,19 @@ int main() {
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
+    assert(sdk.abi.minor == 15);
+    assert(qol::contracts::kHostSdkMinor == 15);
+    static_assert(offsetof(qol::contracts::QolHostSdk, snapshot_create) ==
+                      offsetof(qol::contracts::QolHostSdk, item_handle) +
+                          sizeof(qol::contracts::QolItemHandleApi),
+                  "snapshot fields must be tail extensions");
+    constexpr std::size_t kLegacyKnownSize =
+        offsetof(qol::contracts::QolHostSdk, snapshot_create);
+    constexpr std::size_t kSnapshotApiEnd =
+        offsetof(qol::contracts::QolHostSdk, snapshot_release) +
+        sizeof(sdk.snapshot_release);
+    assert(kLegacyKnownSize < kSnapshotApiEnd);
+    assert(sdk.abi.size >= kSnapshotApiEnd);
     assert(sdk.ui == nullptr);
     assert(sdk.config.get_bool != nullptr);
     assert(sdk.scheduler.add != nullptr);
@@ -512,6 +526,29 @@ int main() {
     assert(sdk.item_handle.rebind_item != nullptr);
     assert(sdk.item_handle.begin_invalidation != nullptr);
     assert(sdk.item_handle.finish_invalidation != nullptr);
+    assert(sdk.snapshot_create != nullptr);
+    assert(sdk.snapshot_destroy != nullptr);
+    assert(sdk.snapshot_publish != nullptr);
+    assert(sdk.snapshot_acquire != nullptr);
+    assert(sdk.snapshot_release != nullptr);
+    const uint32_t snapshot_source[] = {0x12345678u, 0xABCDEF01u};
+    qol::contracts::QolSnapshotHandle snapshot = sdk.snapshot_create(sizeof(snapshot_source));
+    assert(snapshot != nullptr);
+    const void* snapshot_data = reinterpret_cast<const void*>(0x1);
+    uint32_t snapshot_size = 99;
+    qol::contracts::QolSnapshotToken snapshot_token = reinterpret_cast<void*>(0x2);
+    assert(!sdk.snapshot_acquire(snapshot, &snapshot_data, &snapshot_size, &snapshot_token));
+    assert(snapshot_data == reinterpret_cast<const void*>(0x1));
+    assert(snapshot_size == 99);
+    assert(snapshot_token == reinterpret_cast<void*>(0x2));
+    assert(!sdk.snapshot_publish(snapshot, snapshot_source, sizeof(snapshot_source) - 1));
+    assert(sdk.snapshot_publish(snapshot, snapshot_source, sizeof(snapshot_source)));
+    assert(sdk.snapshot_acquire(snapshot, &snapshot_data, &snapshot_size, &snapshot_token));
+    assert(snapshot_size == sizeof(snapshot_source));
+    assert(std::memcmp(snapshot_data, snapshot_source, sizeof(snapshot_source)) == 0);
+    sdk.snapshot_destroy(snapshot);
+    assert(std::memcmp(snapshot_data, snapshot_source, sizeof(snapshot_source)) == 0);
+    sdk.snapshot_release(snapshot_token);
     assert(sdk.desc_button.bind != nullptr);
     assert(sdk.desc_button.unbind != nullptr);
     assert(sdk.desc_button.current_proc != nullptr);

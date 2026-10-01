@@ -270,6 +270,9 @@ struct QolDescButtonApi {
     QolResult (*call_original)(void* original, void* button);
 };
 
+using QolSnapshotHandle = void*;
+using QolSnapshotToken = void*;
+
 struct QolHostSdk {
     QolAbiHeader abi;
     QolLogApi log;
@@ -294,10 +297,17 @@ struct QolHostSdk {
     // 通用同步存档/UI 生命周期参与者注册（尾追加）。
     QolLifecycleParticipantRegisterFn lifecycle_participant_register;
     QolItemHandleApi item_handle;
+    // Opaque immutable byte snapshots; the view remains valid until snapshot_release.
+    QolSnapshotHandle (*snapshot_create)(uint32_t byte_size);
+    void (*snapshot_destroy)(QolSnapshotHandle handle);
+    bool (*snapshot_publish)(QolSnapshotHandle handle, const void* data, uint32_t byte_size);
+    bool (*snapshot_acquire)(QolSnapshotHandle handle, const void** out_data, uint32_t* out_size,
+                             QolSnapshotToken* out_token);
+    void (*snapshot_release)(QolSnapshotToken token);
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 14：收窄 item-handle API，不向插件返回物品指针。
-constexpr uint16_t kHostSdkMinor = 14;
+// minor 15：追加不透明 immutable snapshot API。
+constexpr uint16_t kHostSdkMinor = 15;
 
 }  // namespace qol::contracts
