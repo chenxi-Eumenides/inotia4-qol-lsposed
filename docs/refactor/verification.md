@@ -186,6 +186,13 @@
 | ITM-06/07 输入守卫（`NOT_ACCEPTED`） | core.item `json_lite` 已拒绝小数/指数 JSON 数值词法与超 int32 数值；core.item/core.character path parser 已加十位及 INT32 上限。Host 覆盖已实现，仍缺当前代码版真机 HTTP/业务路径复核。**台账差异**：ITM-07 原登记称有 query 数字负数解析点；当前 `core.item::query_handler` 只读取 bag/slot path 参数，未发现 query 整数解析入口，原引用行号已漂移。 | 在 VM-K5-08h item/character 写面加入小数、指数、溢出数字和超长/负号/path 边界请求；确认既有 400/404 与无游戏副作用。若仍要覆盖 query 参数，应先从当前 controller/owner 实码确认具体端点。 |
 | ITM-08 typed item/detail（`NOT_ACCEPTED`） | `item.facts`/Item Port 为 3.0，detail 已用原子 desc/bag/slot/handle；R-55 与 EB drag identity 有 Host/Debug 覆盖但无当前 HEAD VM 日志。额外全仓核对发现插件可见控件参数仍见 `contracts/extension_bag.h:117-119`、`host_sdk.h:229`、`ui.h:100`，故不能把 issues.md 中“插件契约/capability/callback 零控件指针”表述视为已由当前源码证明。`contracts/game_ports/craft_port.h:33`、`inventory_extras_port.h:14`、`extension_bag_write_port.h:47` 属 Game Adapter Port 原生控件适配，需与插件面分别归类。 | 重跑 VM-K2-02、VM-K4-03/04b/05、VM-P4-07、VM-43、VM-T2O-01；并单独裁定三处 plugin-facing callback 的控件 ABI 边界及对应红线。在此之前不宣告全仓控件口收口。 |
 
+### 5.8 FIX-10/FIX-11 修复状态（2026-10-01）
+
+| 项 | 当前事实 | 清除条件 |
+|---|---|---|
+| FIX-10 EB 面板重建风暴（VM-23/VM-24/VM-29，`NOT_ACCEPTED`） | `extension_bag_render.inc` 的 draw-end 清理分支对持续非 5 状态每帧执行 `prepare_main_menu_locked()`，重置加载态并递增页签 generation，下一帧绘制 wrapper 重载 sidecar、重装页签，最终原生 `ControlButton_Create` 空控件 → `ControlObject_SetUserType` 空指针（真机 API 打开面板 15s 内 generation 2→227）。已修：恢复 `virtual_bag_inventory_state_id()` 读 `g_state_entry` + 新增 `model/main_menu_cleanup_edge.h` 边沿/幂等清理（提交 `1088967b`）。Host `extension_bag_draw_lock_tests` 19 passed、全量 83/83；真机 API `open_panel inventory` sidecar 仅加载 1 次、8 轮开关无崩溃、FATAL/SIGSEGV=0（`.tmp/fix10-verify-r2/`） | 物理触摸打开背包 + 扩展袋页签点击 + 拖拽/详情 ≥10 轮无冻结无崩溃（人工卡见 `.tmp/real-device-261001/manual-runbook.md`）；在此之前 VM-23/VM-24/VM-29 维持 `NOT_ACCEPTED` |
+| FIX-11 character 数值守卫（VM-K5-08h，`NOT_ACCEPTED`） | `add_stat` 的 `attrs` / `set_attr` 的 `stats` 经 `char_opt_int`（复刻 `JSONObject.optInt`）静默截断小数（`1.5`→`1` 并加点）。已修：`char_parse_points` 拒绝含小数部分数值为 400 `bad value for $k (must be integer)`，整数值 double 仍接受（提交 `31de93f9`）；host `character_facts_dispatch_tests` 先红后绿 | VM-K5-08h 真机写面复核非整数 400 与整数值成功路径 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |
