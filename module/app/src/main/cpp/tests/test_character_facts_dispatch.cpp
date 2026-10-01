@@ -83,6 +83,8 @@ constexpr char kMember2[] =
     "\"name_id\":9,\"stats\":{\"0\":3}}";
 
 bool g_not_in_game = false;
+int32_t g_failed_http_kind = -1;
+int g_snapshot_warn_count = 0;
 std::string g_player_json = kPlayer;
 std::string g_party_json = kParty;
 std::string g_skills_json = kSkills;
@@ -286,6 +288,9 @@ const qol::contracts::QolCharacterWriteOpsPort kFakeWriteOpsPort{
 };
 
 QolResult fake_character_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
+    if (kind == g_failed_http_kind) {
+        return qol::contracts::error(kQolErrNotReady, "fake read failure", 17);
+    }
     if (g_not_in_game) return write_json(kNotInGame, out, capacity, out_size);
     switch (static_cast<QolCharacterHttpJsonKind>(kind)) {
         case QolCharacterHttpJsonKind::kPlayer:
@@ -399,7 +404,8 @@ struct FakeScheduler {
 
 FakeScheduler g_scheduler;
 
-QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
+QolResult fake_log_write(int32_t level, int32_t, const char*, const char*, uint32_t) {
+    if (level == 2) ++g_snapshot_warn_count;
     return qol::contracts::ok();
 }
 
@@ -621,6 +627,12 @@ void test_add_stat_result_semantics() {
     CharWritePayloadMirror payload{};
     std::memcpy(&payload, g_post_payload, sizeof(payload));
     CHECK(payload.point_count == 1 && payload.point_idx[0] == 0 && payload.point_amt[0] == 3);
+    const uint32_t accepted_payload_size = g_post_payload_size;
+    const uint32_t accepted_handler = g_post_handler_id;
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":4}}",
+                        &role, 1, &status) == "{\"ok\":false,\"error\":\"no status point\"}");
+    CHECK(status == 400 && g_post_payload_size == accepted_payload_size &&
+          g_post_handler_id == accepted_handler);
     g_op_calls = 0;
     g_op_fail_at = 0;
     g_last_op = FakeOp::kNone;
@@ -664,6 +676,16 @@ void test_add_stat_result_semantics() {
     CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"port failed\"}" && !success);
     CHECK(g_op_calls == 1);
     g_op_fail_at = 0;
+
+    g_status_points[0] = 12;
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3}}",
+                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    g_status_points[0] = 2;
+    g_op_calls = 0;
+    CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"no status point\"}" &&
+          !success);
+    CHECK(g_op_calls == 0);
+    g_status_points[0] = 12;
 }
 
 void test_operation_specific_result_goldens() {
@@ -960,20 +982,34 @@ void test_android_number_semantics() {
     CHECK(infinity_payload.i1 == std::numeric_limits<int32_t>::max());
 
     const qol::contracts::HttpPathParam role{"role", 4, "0", 1};
+    const uint32_t initial_payload_size = g_post_payload_size;
     CHECK(dispatch_post("/api/op/character/0/experience",
                         "{\"exp\":\"Infinity\"}", &role, 1, &status) ==
-          "{\"ok\":true,\"ticket\":11}");
+          "{\"ok\":false,\"error\":\"exp required\"}");
+    CHECK(status == 400 && g_post_payload_size == initial_payload_size);
     CharWritePayloadMirror long_payload{};
     std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
-    CHECK(long_payload.i64 == std::numeric_limits<int64_t>::max());
+    CHECK(long_payload.i64 == 0);
     CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":\"1e100\"}", &role,
-                        1, &status) == "{\"ok\":true,\"ticket\":11}");
+                        1, &status) == "{\"ok\":false,\"error\":\"exp required\"}");
+    CHECK(status == 400);
     std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
-    CHECK(long_payload.i64 == std::numeric_limits<int64_t>::max());
+    CHECK(long_payload.i64 == 0);
     CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":\"1e2\"}", &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":11}");
     std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
     CHECK(long_payload.i64 == 100);
+    CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":2147483647}",
+                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    std::memcpy(&long_payload, g_post_payload, sizeof(long_payload));
+    CHECK(long_payload.i64 == std::numeric_limits<int32_t>::max());
+    const uint32_t previous_payload_size = g_post_payload_size;
+    CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":2147483648}",
+                        &role, 1, &status) == "{\"ok\":false,\"error\":\"exp required\"}");
+    CHECK(status == 400 && g_post_payload_size == previous_payload_size);
+    CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":-1}", &role, 1,
+                        &status) == "{\"ok\":false,\"error\":\"exp required\"}");
+    CHECK(status == 400);
     CHECK(dispatch_post("/api/op/character/0/experience", "{\"exp\":\"-Infinity\"}", &role,
                         1, &status) == "{\"ok\":false,\"error\":\"exp required\"}");
     CHECK(status == 400);
@@ -1046,6 +1082,8 @@ void test_lifecycle_and_responses() {
     qol::host::http_dispatch_set_op_enabled(true);
     g_scheduler = FakeScheduler{};
     g_not_in_game = false;
+    g_failed_http_kind = -1;
+    g_snapshot_warn_count = 0;
     register_frozen_routes();
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
@@ -1081,6 +1119,22 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/character/party/0/skills") ==
           "{\"role\":0,\"skills\":[{\"action_id\":10,\"level\":1,\"skill_name\":\"火球\"}],"
           "\"unlock_bitmap\":0,\"active_skill_id\":-1,\"skill_points\":4}");
+
+    g_failed_http_kind = static_cast<int32_t>(QolCharacterHttpJsonKind::kParty);
+    CHECK(g_scheduler.handler(115, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/character/party") == kParty);
+    CHECK(g_snapshot_warn_count == 1);
+    CHECK(g_scheduler.handler(130, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/character/party") == kParty);
+    CHECK(g_snapshot_warn_count == 1);
+    g_failed_http_kind = -1;
+    CHECK(g_scheduler.handler(145, g_scheduler.ctx) != 0);
+    CHECK(g_snapshot_warn_count == 1);
+    g_failed_http_kind = static_cast<int32_t>(QolCharacterHttpJsonKind::kParty);
+    CHECK(g_scheduler.handler(160, g_scheduler.ctx) != 0);
+    CHECK(g_snapshot_warn_count == 2);
+    g_failed_http_kind = -1;
+    CHECK(g_scheduler.handler(175, g_scheduler.ctx) != 0);
 
     CHECK(dispatch_get("/api/character/mercenary") == kMercenaries);
     CHECK(dispatch_get("/api/character/mercenary/list") == "{\"slots\":[0,2]}");

@@ -364,6 +364,13 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
+        // Character HTTP reads expose the character projection only to its domain owner.
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHARACTER_HTTP &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.character") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
         AvailablePort port{};
         if (!available_port(requirement.id, &port) || port.iface == nullptr) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),

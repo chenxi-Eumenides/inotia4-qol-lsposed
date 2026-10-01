@@ -1129,6 +1129,24 @@ set_target_properties(character_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 
 target_link_libraries(character_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME character_facts_dispatch_tests COMMAND character_facts_dispatch_tests)
 
+add_executable(character_json_slice_tests
+    test_character_json_slice.cpp
+    ${CPP_DIR}/plugins/core.character/json_slice.cpp
+)
+target_include_directories(character_json_slice_tests PRIVATE ${CPP_DIR})
+target_compile_features(character_json_slice_tests PRIVATE cxx_std_17)
+set_target_properties(character_json_slice_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME character_json_slice_tests COMMAND character_json_slice_tests)
+
+add_executable(character_http_port_tests
+    test_character_http_port.cpp
+    ${CPP_DIR}/game/adapter_ports/character_http_port.cpp
+)
+target_include_directories(character_http_port_tests PRIVATE ${CPP_DIR})
+target_compile_features(character_http_port_tests PRIVATE cxx_std_17)
+set_target_properties(character_http_port_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME character_http_port_tests COMMAND character_http_port_tests)
+
 # 临时 core.feature 对唯一已证实未实现路由的 501 owner handler。
 add_executable(core_feature_plugin_tests
     test_core_feature_plugin.cpp

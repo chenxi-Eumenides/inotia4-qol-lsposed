@@ -6,6 +6,7 @@
 
 #include "contracts/game_ports/ports.h"
 #include "game/state/character_http.h"
+#include "game/adapter_ports/game_host_port.h"
 
 // player 体直接复用既有缓存读取器（core/native/game_cache.h 的 data_player_json）。
 std::string data_player_json();
@@ -25,6 +26,9 @@ QolResult copy_json(const std::string& json, char* out, uint32_t capacity, uint3
 
 QolResult body_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
+    if (!game_host_is_main_thread()) {
+        return contracts::error(kQolErrBlocked, "wrong thread", 12);
+    }
     switch (static_cast<contracts::QolCharacterHttpJsonKind>(kind)) {
         case contracts::QolCharacterHttpJsonKind::kPlayer:
             return copy_json(data_player_json(), out, capacity, out_size);

@@ -1116,7 +1116,7 @@ void test_write_no_state_family() {
     g_state_not_in_game = false;
 
     CHECK(g_state_party_reads + g_state_player_reads + g_state_skills_reads ==
-          state_reads_before + 5);
+          state_reads_before + 4);
     g_state_reads_from_legacy = false;
 }
 

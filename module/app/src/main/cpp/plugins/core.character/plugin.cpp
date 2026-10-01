@@ -57,32 +57,59 @@ enum class Query : uint8_t {
     kPartyMemberSkills,
 };
 
-constexpr contracts::HttpRoute kRoutes[] = {
-    {contracts::HttpMethod::kGet, "/api/character/mercenary", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/mercenary/list", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/mercenary/{slot}", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/count", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/leader", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/id", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/name", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/level", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/status", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/stats", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment/{equip_slot}", kPluginId, 0,
-     1},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", kPluginId, 0, 1},
+struct CharacterRoute {
+    CharacterRoute(contracts::HttpMethod route_method, const char* route_path, Query route_query)
+        : method(route_method), path(route_path), query(true), query_id(route_query) {}
+    CharacterRoute(contracts::HttpMethod route_method, const char* route_path,
+                   contracts::QolCharacterWriteKind route_kind)
+        : method(route_method), path(route_path), query(false), write_kind(route_kind) {}
+
+    contracts::HttpMethod method;
+    const char* path;
+    bool query;
+    Query query_id;
+    contracts::QolCharacterWriteKind write_kind;
 };
 
-constexpr Query kQueries[] = {
-    Query::kMercenary,        Query::kMercenaryList,     Query::kMercenarySlot,
-    Query::kParty,            Query::kPartyCount,        Query::kLeader,
-    Query::kPartyMember,      Query::kPartyMemberId,     Query::kPartyMemberName,
-    Query::kPartyMemberLevel, Query::kPartyMemberStatus, Query::kPartyMemberStats,
-    Query::kPartyMemberEquipment, Query::kPartyMemberEquip, Query::kPartyMemberSkills,
+CharacterRoute kRoutes[] = {
+    {contracts::HttpMethod::kGet, "/api/character/mercenary", Query::kMercenary},
+    {contracts::HttpMethod::kGet, "/api/character/mercenary/list", Query::kMercenaryList},
+    {contracts::HttpMethod::kGet, "/api/character/mercenary/{slot}", Query::kMercenarySlot},
+    {contracts::HttpMethod::kGet, "/api/character/party", Query::kParty},
+    {contracts::HttpMethod::kGet, "/api/character/party/count", Query::kPartyCount},
+    {contracts::HttpMethod::kGet, "/api/character/leader", Query::kLeader},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}", Query::kPartyMember},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/id", Query::kPartyMemberId},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/name", Query::kPartyMemberName},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/level", Query::kPartyMemberLevel},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/status", Query::kPartyMemberStatus},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/stats", Query::kPartyMemberStats},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment", Query::kPartyMemberEquipment},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment/{equip_slot}", Query::kPartyMemberEquip},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", Query::kPartyMemberSkills},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/experience", contracts::QolCharacterWriteKind::kSetExperience},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/hp", contracts::QolCharacterWriteKind::kSetHp},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/level", contracts::QolCharacterWriteKind::kSetLevel},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/mp", contracts::QolCharacterWriteKind::kSetMp},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/set_attr", contracts::QolCharacterWriteKind::kSetAttr},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/status-point", contracts::QolCharacterWriteKind::kSetStatusPoint},
+    {contracts::HttpMethod::kPost, "/api/op/party/swap", contracts::QolCharacterWriteKind::kPartySwap},
+    {contracts::HttpMethod::kPost, "/api/character/combat/{role}/attack_target", contracts::QolCharacterWriteKind::kAttackTarget},
+    {contracts::HttpMethod::kPost, "/api/character/combat/{role}/cast_skill", contracts::QolCharacterWriteKind::kCastSkill},
+    {contracts::HttpMethod::kPost, "/api/character/combat/{role}/set_auto_attack", contracts::QolCharacterWriteKind::kSetAutoAttack},
+    {contracts::HttpMethod::kPost, "/api/character/combat/{role}/stop_combat", contracts::QolCharacterWriteKind::kStopCombat},
+    {contracts::HttpMethod::kPost, "/api/character/combat/switch_player", contracts::QolCharacterWriteKind::kSwitchPlayer},
+    {contracts::HttpMethod::kPost, "/api/character/grow/add_skill", contracts::QolCharacterWriteKind::kLearnAction},
+    {contracts::HttpMethod::kPost, "/api/character/grow/reset_skill", contracts::QolCharacterWriteKind::kSkillReset},
+    {contracts::HttpMethod::kPost, "/api/character/grow/reset_stat", contracts::QolCharacterWriteKind::kStatReset},
+    {contracts::HttpMethod::kPost, "/api/character/grow/{role}/add_stat", contracts::QolCharacterWriteKind::kAddStat},
+    {contracts::HttpMethod::kPost, "/api/character/party/include", contracts::QolCharacterWriteKind::kPartyInclude},
+    {contracts::HttpMethod::kPost, "/api/character/party/exclude", contracts::QolCharacterWriteKind::kPartyExclude},
+    {contracts::HttpMethod::kPost, "/api/character/party/discharge", contracts::QolCharacterWriteKind::kPartyDischarge},
+    {contracts::HttpMethod::kPost, "/api/character/party/withdraw", contracts::QolCharacterWriteKind::kPartyWithdraw},
 };
+contracts::HttpQueryHandlerDescriptor kHttpQueries[sizeof(kRoutes) / sizeof(kRoutes[0])];
+bool g_http_routes_initialized = false;
 
 enum class SnapshotState : uint8_t { kUnavailable, kNotInGame, kReady };
 
@@ -106,6 +133,7 @@ const contracts::QolCharacterWriteOpsPort* g_character_write_ops = nullptr;
 const contracts::QolCharacterStatePort* g_character_state_port = nullptr;
 uint64_t g_frame_task = 0;
 Snapshot<CharacterSnapshot> g_snapshot;
+bool g_snapshot_read_warning_active = false;
 
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHARACTER, {1, 0}},
@@ -372,8 +400,7 @@ QolResult write_character_state_json(contracts::QolCharacterStateKind kind, char
             return contracts::error(kQolErrInvalidArgument, "invalid character state kind", 28);
     }
     if (!contracts::succeeded(read_result)) {
-        if (read_result.message != nullptr && read_result.message_len == 11 &&
-            std::memcmp(read_result.message, "not in game", 11) == 0) {
+        if (read_result.code == kQolErrNotReady) {
             body = "{\"error\":\"not in game\"}";
         } else {
             return read_result;
@@ -392,6 +419,15 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
     (void)sdk->log.write(1, 1, kPluginId, message, length);
+}
+
+void warn_snapshot_read_failure() {
+    if (g_snapshot_read_warning_active) return;
+    g_snapshot_read_warning_active = true;
+    constexpr char kMessage[] = "[core.character] snapshot read failed; keeping last snapshot";
+    if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+        (void)g_sdk->log.write(2, 1, kPluginId, kMessage, sizeof(kMessage) - 1);
+    }
 }
 
 bool is_error_body(const char* body, uint32_t size) {
@@ -413,13 +449,18 @@ void update_snapshot() {
     const auto kSkills = static_cast<int32_t>(contracts::QolCharacterHttpJsonKind::kSkills);
     const auto kMercenaries =
         static_cast<int32_t>(contracts::QolCharacterHttpJsonKind::kMercenaries);
-    if (!fetch_json(kPlayer, next.player, kPlayerCapacity, &next.player_size)) return;
-    if (!fetch_json(kParty, next.party, kPartyCapacity, &next.party_size)) return;
-    if (!fetch_json(kSkills, next.skills, kSkillsCapacity, &next.skills_size)) return;
-    if (!fetch_json(kMercenaries, next.mercenaries, kMercenariesCapacity,
-                    &next.mercenaries_size)) {
+    if (!fetch_json(kPlayer, next.player, kPlayerCapacity, &next.player_size) ||
+        !fetch_json(kParty, next.party, kPartyCapacity, &next.party_size) ||
+        !fetch_json(kSkills, next.skills, kSkillsCapacity, &next.skills_size)) {
+        warn_snapshot_read_failure();
         return;
     }
+    if (!fetch_json(kMercenaries, next.mercenaries, kMercenariesCapacity,
+                    &next.mercenaries_size)) {
+        warn_snapshot_read_failure();
+        return;
+    }
+    g_snapshot_read_warning_active = false;
     // 非 world 态四类原生体均为 {"error":"not in game"}；任意一类报错即整轮不可用。
     if (is_error_body(next.player, next.player_size) ||
         is_error_body(next.party, next.party_size) ||
@@ -1074,36 +1115,6 @@ int32_t char_attr_index(const std::string& key) {
     return -1;
 }
 
-struct CharWriteRoute {
-    const char* path;
-    contracts::QolCharacterWriteKind kind;
-};
-
-constexpr CharWriteRoute kCharWriteRoutes[] = {
-    {"/api/op/character/{role}/experience", contracts::QolCharacterWriteKind::kSetExperience},
-    {"/api/op/character/{role}/hp", contracts::QolCharacterWriteKind::kSetHp},
-    {"/api/op/character/{role}/level", contracts::QolCharacterWriteKind::kSetLevel},
-    {"/api/op/character/{role}/mp", contracts::QolCharacterWriteKind::kSetMp},
-    {"/api/op/character/{role}/set_attr", contracts::QolCharacterWriteKind::kSetAttr},
-    {"/api/op/character/{role}/status-point", contracts::QolCharacterWriteKind::kSetStatusPoint},
-    {"/api/op/party/swap", contracts::QolCharacterWriteKind::kPartySwap},
-    {"/api/character/combat/{role}/attack_target",
-     contracts::QolCharacterWriteKind::kAttackTarget},
-    {"/api/character/combat/{role}/cast_skill", contracts::QolCharacterWriteKind::kCastSkill},
-    {"/api/character/combat/{role}/set_auto_attack",
-     contracts::QolCharacterWriteKind::kSetAutoAttack},
-    {"/api/character/combat/{role}/stop_combat", contracts::QolCharacterWriteKind::kStopCombat},
-    {"/api/character/combat/switch_player", contracts::QolCharacterWriteKind::kSwitchPlayer},
-    {"/api/character/grow/add_skill", contracts::QolCharacterWriteKind::kLearnAction},
-    {"/api/character/grow/reset_skill", contracts::QolCharacterWriteKind::kSkillReset},
-    {"/api/character/grow/reset_stat", contracts::QolCharacterWriteKind::kStatReset},
-    {"/api/character/grow/{role}/add_stat", contracts::QolCharacterWriteKind::kAddStat},
-    {"/api/character/party/include", contracts::QolCharacterWriteKind::kPartyInclude},
-    {"/api/character/party/exclude", contracts::QolCharacterWriteKind::kPartyExclude},
-    {"/api/character/party/discharge", contracts::QolCharacterWriteKind::kPartyDischarge},
-    {"/api/character/party/withdraw", contracts::QolCharacterWriteKind::kPartyWithdraw},
-};
-
 // 解析 `{"stats":{...}}` 或 `{"attrs":{...}}` 为定长点集；键可为属性名或数字索引。
 bool char_parse_points(const CharJsonValue& body, const char* object_key, CharWritePayload* payload,
                        std::string* error) {
@@ -1168,6 +1179,9 @@ QolResult char_write_command(const contracts::HttpReq* request, contracts::HttpR
             }
             int64_t exp = 0;
             if (!char_long_field(body, "exp", &exp) || exp < 0) {
+                return response_error(response, 400, "exp required");
+            }
+            if (exp > std::numeric_limits<int32_t>::max()) {
                 return response_error(response, 400, "exp required");
             }
             payload.i64 = exp;
@@ -1299,6 +1313,19 @@ QolResult char_write_command(const contracts::HttpReq* request, contracts::HttpR
             std::string error;
             if (!char_parse_points(body, "attrs", &payload, &error)) {
                 return response_error(response, 400, error.c_str());
+            }
+            CharacterSnapshot snapshot{};
+            JsonSlice member{};
+            long long remaining = 0;
+            int64_t requested = 0;
+            for (int32_t i = 0; i < payload.point_count; ++i) {
+                requested += payload.point_amt[i];
+            }
+            if (g_snapshot.read(snapshot) && snapshot.state == SnapshotState::kReady &&
+                json_element(snapshot.party, snapshot.party_size, payload.i0, &member) &&
+                json_int_member(member.data, member.size, "status_point", &remaining) &&
+                requested > remaining) {
+                return response_error(response, 400, "no status point");
             }
             break;
         }
@@ -1685,7 +1712,35 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         kind == contracts::QolCharacterWriteKind::kAddStat) {
         const bool set_attr = kind == contracts::QolCharacterWriteKind::kSetAttr;
         contracts::QolCharacterStateParty party_before{};
-        const bool has_party_before = !set_attr && read_character_party_state(&party_before);
+        bool has_party_before = false;
+        if (!set_attr) {
+            if (p.i0 < 0 ||
+                p.i0 >= static_cast<int32_t>(contracts::kQolCharacterStatePartySize)) {
+                return write_op_error(out, capacity, out_size, "role not found");
+            }
+            if (g_character_state_port == nullptr ||
+                g_character_state_port->read.party == nullptr) {
+                return write_op_error(out, capacity, out_size, "no status point");
+            }
+            const QolResult state_result = g_character_state_port->read.party(&party_before);
+            if (!contracts::succeeded(state_result)) {
+                const char* message = state_result.code == kQolErrNotReady
+                                          ? "not in game"
+                                          : "no status point";
+                return write_op_error(out, capacity, out_size, message);
+            }
+            has_party_before = true;
+            int64_t requested = 0;
+            for (int32_t i = 0; i < p.point_count; ++i) requested += p.point_amt[i];
+            if (party_before.member_present[p.i0] == 0) {
+                return write_op_error(out, capacity, out_size, "role not found");
+            }
+            if ((party_before.members[p.i0].fields &
+                 contracts::kQolCharacterStateHasStatusPoint) == 0 ||
+                requested > party_before.members[p.i0].status_point) {
+                return write_op_error(out, capacity, out_size, "no status point");
+            }
+        }
         std::string body = set_attr ? "{\"ok\":true,\"set\":[" : "{\"ok\":true,\"applied\":[";
         bool first = true;
         for (int32_t i = 0; i < p.point_count; ++i) {
@@ -1934,59 +1989,18 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     return write_truncated_result(out, capacity, out_size, body);
 }
 
-const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
-    {kRoutes[0].method, kRoutes[0].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[0])},
-    {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[1])},
-    {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[2])},
-    {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[3])},
-    {kRoutes[4].method, kRoutes[4].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[4])},
-    {kRoutes[5].method, kRoutes[5].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[5])},
-    {kRoutes[6].method, kRoutes[6].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[6])},
-    {kRoutes[7].method, kRoutes[7].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[7])},
-    {kRoutes[8].method, kRoutes[8].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[8])},
-    {kRoutes[9].method, kRoutes[9].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[9])},
-    {kRoutes[10].method, kRoutes[10].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[10])},
-    {kRoutes[11].method, kRoutes[11].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[11])},
-    {kRoutes[12].method, kRoutes[12].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[12])},
-    {kRoutes[13].method, kRoutes[13].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[13])},
-    {kRoutes[14].method, kRoutes[14].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[14])},
-    // 写面 20 条（声明式 POST；owner 命令 + 票据）。
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[0].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[0].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[1].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[1].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[2].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[2].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[3].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[3].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[4].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[4].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[5].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[5].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[6].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[6].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[7].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[7].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[8].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[8].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[9].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[9].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[10].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[10].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[11].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[11].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[12].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[12].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[13].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[13].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[14].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[14].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[15].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[15].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[16].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[16].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[17].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[17].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[18].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[18].kind)},
-    {contracts::HttpMethod::kPost, kCharWriteRoutes[19].path, kPluginId, &char_write_command, const_cast<contracts::QolCharacterWriteKind*>(&kCharWriteRoutes[19].kind)},
-};
+void initialize_http_routes() {
+    if (g_http_routes_initialized) return;
+    for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); ++i) {
+        CharacterRoute& route = kRoutes[i];
+        kHttpQueries[i] = contracts::HttpQueryHandlerDescriptor{
+            route.method, route.path, kPluginId,
+            route.query ? &query_handler : &char_write_command,
+            route.query ? static_cast<void*>(&route.query_id)
+                        : static_cast<void*>(&route.write_kind)};
+    }
+    g_http_routes_initialized = true;
+}
 
 void stop_frame_task(const contracts::QolHostSdk* sdk) {
     if (g_frame_task != 0 && sdk != nullptr && sdk->scheduler.remove != nullptr) {
@@ -2151,6 +2165,7 @@ const contracts::PluginDescriptor kDescriptor = {
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
+    initialize_http_routes();
     return kDescriptor;
 }
 

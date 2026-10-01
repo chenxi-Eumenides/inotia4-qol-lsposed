@@ -1,6 +1,8 @@
 #include "game/ops/character_write.h"
 
 #include <cstring>
+#include <limits>
+#include <limits>
 
 #include "contracts/game_cache.h"
 #include "game/access/game_access.h"
@@ -107,6 +109,10 @@ QolResult set_experience(int32_t role, int64_t exp, contracts::QolCharacterWrite
     }
     *out = {};
     if (!game_in_world()) return op_fail(out, kQolErrNotReady, "not in game");
+    if (exp < std::numeric_limits<int32_t>::min() ||
+        exp > std::numeric_limits<int32_t>::max()) {
+        return op_fail(out, kQolErrInvalidArgument, "exp required");
+    }
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_fail(out, kQolErrNotFound, "role not found");
     if (fn_set_exp == nullptr) return op_fail(out, kQolErrUnsupported, "symbol not resolved");

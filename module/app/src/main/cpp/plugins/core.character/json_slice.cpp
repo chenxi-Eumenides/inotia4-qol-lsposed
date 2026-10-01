@@ -144,10 +144,16 @@ bool json_member(const char* json, uint32_t size, const char* key, JsonSlice* ou
             skip_ws(json, size, &cursor);
             continue;
         }
-        break;
+        if (cursor < size && json[cursor] == '}') {
+            ++cursor;
+            skip_ws(json, size, &cursor);
+            if (cursor != size) return false;
+            if (found) *out = last_value;
+            return found;
+        }
+        return false;
     }
-    if (found) *out = last_value;
-    return found;
+    return false;
 }
 
 bool json_element(const char* json, uint32_t size, int32_t index, JsonSlice* out) {
