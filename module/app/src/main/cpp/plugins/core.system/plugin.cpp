@@ -22,16 +22,18 @@ constexpr uint32_t kFrameCapacity = 64;
 // 主线程快照节拍：快照/info 聚合 JSON 构造不宜每帧执行；15 帧（≈4Hz）对只读查询足够。
 constexpr int32_t kSnapshotIntervalFrames = 15;
 
-enum class Query : uint8_t { kSnapshot, kGame, kInfo, kFrame };
+enum class Query : uint8_t { kSnapshot, kGame, kInfo, kFrame, kEvents };
 
 constexpr contracts::HttpRoute kRoutes[] = {
     {contracts::HttpMethod::kGet, "/api/system/snapshot", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/system/game", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/system/info", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/system/game_frame", kPluginId, 0, 1},
+    {contracts::HttpMethod::kGet, "/api/system/events", kPluginId, 0, 1},
 };
 
-constexpr Query kQueries[] = {Query::kSnapshot, Query::kGame, Query::kInfo, Query::kFrame};
+constexpr Query kQueries[] = {Query::kSnapshot, Query::kGame, Query::kInfo, Query::kFrame,
+                              Query::kEvents};
 
 enum class SnapshotState : uint8_t { kUnavailable, kReady };
 
@@ -51,9 +53,10 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolSystemPort* g_port = nullptr;
 uint64_t g_frame_task = 0;
 Snapshot<SystemSnapshot> g_snapshot;
+bool g_snapshot_failure_warned = false;
 
 const contracts::QolPortRequirement kPorts[] = {
-    {contracts::QolPortId::QOL_PORT_SYSTEM, {1, 0}},
+    {contracts::QolPortId::QOL_PORT_SYSTEM, {1, 1}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -70,9 +73,21 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     (void)sdk->log.write(1, 1, kPluginId, message, length);
 }
 
+void warn_snapshot_failure() {
+    if (!g_snapshot_failure_warned) {
+        constexpr char kMessage[] =
+            "[core.system] snapshot read failed or exceeded capacity; keeping previous snapshot";
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            (void)g_sdk->log.write(2, 1, kPluginId, kMessage, sizeof(kMessage) - 1);
+        }
+        g_snapshot_failure_warned = true;
+    }
+}
+
 void update_snapshot() {
     if (g_port == nullptr || g_port->read.body_json == nullptr) return;
-    SystemSnapshot next{};
+    static SystemSnapshot next{};
+    std::memset(&next, 0, sizeof(next));
     struct Slot {
         int32_t kind;
         char* out;
@@ -93,7 +108,7 @@ void update_snapshot() {
     for (const Slot& slot : slots) {
         const QolResult result =
             g_port->read.body_json(slot.kind, slot.out, slot.capacity, slot.size);
-        if (!contracts::succeeded(result) || *slot.size == 0) {
+        if (!contracts::succeeded(result) || *slot.size == 0 || *slot.size >= slot.capacity) {
             *slot.size = 0;
             // 身份未下发时 info/game 暂不可用；快照与帧计数与其无关，照常发布。
             const bool identity_dependent =
@@ -102,9 +117,13 @@ void update_snapshot() {
             if (!identity_dependent) core_ready = false;
         }
     }
-    if (!core_ready) return;
+    if (!core_ready) {
+        warn_snapshot_failure();
+        return;
+    }
     next.state = SnapshotState::kReady;
     g_snapshot.publish(next);
+    g_snapshot_failure_warned = false;
 }
 
 int32_t frame_tick(int64_t, void*) {
@@ -139,11 +158,26 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
     if (request == nullptr || response == nullptr || ctx == nullptr) {
         return response_error(response, 400, "bad request");
     }
+    const Query query = *static_cast<const Query*>(ctx);
+    if (query == Query::kEvents) {
+        if (g_port == nullptr || g_port->read.events_json == nullptr) {
+            return response_error(response, 503, "snapshot not ready");
+        }
+        uint32_t size = 0;
+        const QolResult result = g_port->read.events_json(
+            reinterpret_cast<char*>(response->body), response->body_capacity, &size);
+        if (!contracts::succeeded(result) || size > response->body_capacity) {
+            warn_snapshot_failure();
+            return response_error(response, 503, "snapshot not ready");
+        }
+        response->body_size = size;
+        response->status = 200;
+        return contracts::ok();
+    }
     SystemSnapshot snapshot{};
     if (!g_snapshot.read(snapshot) || snapshot.state != SnapshotState::kReady) {
         return response_error(response, 503, "snapshot not ready");
     }
-    const Query query = *static_cast<const Query*>(ctx);
     switch (query) {
         case Query::kSnapshot:
             if (snapshot.snapshot_size == 0) return response_error(response, 503, "snapshot not ready");
@@ -157,6 +191,8 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         case Query::kFrame:
             if (snapshot.frame_size == 0) return response_error(response, 503, "snapshot not ready");
             return response_body(response, snapshot.frame, snapshot.frame_size);
+        case Query::kEvents:
+            break;
     }
     return response_error(response, 500, "unknown system query");
 }
@@ -166,6 +202,7 @@ const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
     {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[1])},
     {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[2])},
     {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[3])},
+    {kRoutes[4].method, kRoutes[4].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[4])},
 };
 
 void stop_frame_task(const contracts::QolHostSdk* sdk) {
@@ -186,7 +223,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_port = static_cast<const contracts::QolSystemPort*>(ctx.ports[0]);
-    if (!contracts::satisfies(g_port->abi_version, {1, 0}) || g_port->read.body_json == nullptr) {
+    if (!contracts::satisfies(g_port->abi_version, {1, 1}) || g_port->read.body_json == nullptr ||
+        g_port->read.events_json == nullptr) {
         g_port = nullptr;
         g_sdk = nullptr;
         return 1;
@@ -198,6 +236,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     SystemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
+    g_snapshot_failure_warned = false;
     log_message(g_sdk, "[core.system] provider install");
     return 0;
 }
@@ -217,6 +256,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     }
     SystemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
+    g_snapshot_failure_warned = false;
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
         uint64_t task = 0;
         if (contracts::succeeded(g_sdk->scheduler.add(

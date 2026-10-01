@@ -1174,7 +1174,7 @@ set_target_properties(core_data_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STAN
 target_link_libraries(core_data_plugin_tests PRIVATE Threads::Threads)
 add_test(NAME core_data_plugin_tests COMMAND core_data_plugin_tests)
 
-# P5-4-3：system_facts 4 条 /api/system/{snapshot,game,info,game_frame} query handler 的
+# P5-4-3：system_facts query handler 与真实 events diff builder 的
 # 注册/快照/身份降级/注销接缝。
 add_executable(system_facts_dispatch_tests
     test_system_facts_dispatch.cpp
@@ -1189,6 +1189,25 @@ target_compile_features(system_facts_dispatch_tests PRIVATE cxx_std_17)
 set_target_properties(system_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(system_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME system_facts_dispatch_tests COMMAND system_facts_dispatch_tests)
+
+add_executable(system_events_builder_tests
+    test_system_events_builder.cpp
+    ${CPP_DIR}/game/state/system_events.cpp
+)
+target_include_directories(system_events_builder_tests PRIVATE ${CPP_DIR})
+target_compile_features(system_events_builder_tests PRIVATE cxx_std_17)
+set_target_properties(system_events_builder_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME system_events_builder_tests COMMAND system_events_builder_tests)
+
+add_executable(system_port_identity_tests
+    test_system_port_identity.cpp
+    ${CPP_DIR}/game/adapter_ports/system_port.cpp
+)
+target_include_directories(system_port_identity_tests PRIVATE ${CPP_DIR})
+target_compile_features(system_port_identity_tests PRIVATE cxx_std_17)
+set_target_properties(system_port_identity_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(system_port_identity_tests PRIVATE Threads::Threads)
+add_test(NAME system_port_identity_tests COMMAND system_port_identity_tests)
 
 # T4': core.settings config/list 序列化字段顺序、类型与 JSON 字符串转义。
 add_executable(core_settings_config_tests

@@ -1,5 +1,5 @@
 // system_facts HTTP dispatch 接缝 host 测试：
-// 覆盖 4 条 /api/system/{snapshot,game,info,game_frame} query handler 的注册、快照发布前的
+// 覆盖 5 条 /api/system/{snapshot,game,info,game_frame,events} query handler 的注册、快照发布前的
 // not-ready、发布后的响应、身份未下发时 info/game 的独立降级、owner 注销后的 handler 归零，
 // 以及主线程快照节拍（由 fake scheduler 承载）。
 //
@@ -48,10 +48,20 @@ QolResult write_json(const char* text, char* out, uint32_t capacity, uint32_t* o
 }
 
 bool g_identity_ready = true;
+bool g_fail_snapshot_read = false;
+bool g_snapshot_too_large = false;
+bool g_events_too_large = false;
 
 QolResult fake_body_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
     switch (static_cast<qol::contracts::QolSystemJsonKind>(kind)) {
         case qol::contracts::QolSystemJsonKind::kSnapshot:
+            if (g_snapshot_too_large) {
+                *out_size = capacity + 1;
+                return qol::contracts::ok();
+            }
+            if (g_fail_snapshot_read) {
+                return qol::contracts::error(kQolErrBlocked, "snapshot read failed", 20);
+            }
             return write_json("{\"frame\":9,\"screen\":\"world\"}", out, capacity, out_size);
         case qol::contracts::QolSystemJsonKind::kGame:
             if (!g_identity_ready) {
@@ -69,7 +79,16 @@ QolResult fake_body_json(int32_t kind, char* out, uint32_t capacity, uint32_t* o
     return qol::contracts::error(kQolErrInvalidArgument, "bad kind", 8);
 }
 
-const QolSystemPortReadApi kFakeRead{&fake_body_json};
+QolResult fake_events_json(char* out, uint32_t capacity, uint32_t* out_size) {
+    if (g_events_too_large) {
+        *out_size = capacity + 1;
+        return qol::contracts::ok();
+    }
+    return write_json("{\"events\":[{\"type\":\"money\",\"old\":1,\"new\":2}]}", out,
+                      capacity, out_size);
+}
+
+const QolSystemPortReadApi kFakeRead{&fake_body_json, &fake_events_json};
 const QolSystemPort kFakePort{qol::contracts::kQolPortSystemVersion, kFakeRead};
 
 // 插件描述符声明 1 个端口；这里提供与宿主装配同形的静态端口数组。
@@ -119,6 +138,7 @@ const qol::contracts::HttpRoute kRoutes[] = {
     {qol::contracts::HttpMethod::kGet, "/api/system/game", "core.system", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/system/info", "core.system", 0, 1},
     {qol::contracts::HttpMethod::kGet, "/api/system/game_frame", "core.system", 0, 1},
+    {qol::contracts::HttpMethod::kGet, "/api/system/events", "core.system", 0, 1},
 };
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
@@ -165,6 +185,9 @@ void test_lifecycle_and_responses() {
     qol::host::http_registry_reset_for_test();
     g_scheduler = FakeScheduler{};
     g_identity_ready = true;
+    g_fail_snapshot_read = false;
+    g_snapshot_too_large = false;
+    g_events_too_large = false;
     register_frozen_routes();
 
     const qol::contracts::QolHostSdk sdk = make_sdk();
@@ -191,6 +214,26 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/system/game") == "{\"snapshot\":{},\"info\":{}}");
     CHECK(dispatch_get("/api/system/info") == "{\"version\":\"0.7.13\"}");
     CHECK(dispatch_get("/api/system/game_frame") == "{\"frame\":9}");
+    CHECK(dispatch_get("/api/system/events") ==
+          "{\"events\":[{\"type\":\"money\",\"old\":1,\"new\":2}]}");
+    g_events_too_large = true;
+    CHECK(dispatch_get("/api/system/events", &status) ==
+          "{\"ok\":false,\"error\":\"snapshot not ready\"}");
+    CHECK(status == 503);
+    g_events_too_large = false;
+
+    g_fail_snapshot_read = true;
+    CHECK(g_scheduler.handler(115, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/system/snapshot", &status) ==
+          "{\"frame\":9,\"screen\":\"world\"}");
+    CHECK(status == 200);
+    g_fail_snapshot_read = false;
+    g_snapshot_too_large = true;
+    CHECK(g_scheduler.handler(130, g_scheduler.ctx) != 0);
+    CHECK(dispatch_get("/api/system/snapshot", &status) ==
+          "{\"frame\":9,\"screen\":\"world\"}");
+    CHECK(status == 200);
+    g_snapshot_too_large = false;
 
     // 身份未下发：info/game 独立 503，snapshot/frame 不受影响。
     g_identity_ready = false;
@@ -202,14 +245,18 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/system/snapshot") == "{\"frame\":9,\"screen\":\"world\"}");
     CHECK(dispatch_get("/api/system/game_frame") == "{\"frame\":9}");
     g_identity_ready = true;
-    CHECK(g_scheduler.handler(130, g_scheduler.ctx) != 0);
+    CHECK(g_scheduler.handler(145, g_scheduler.ctx) != 0);
     CHECK(dispatch_get("/api/system/info") == "{\"version\":\"0.7.13\"}");
+    CHECK(dispatch_get("/api/system/events") ==
+          "{\"events\":[{\"type\":\"money\",\"old\":1,\"new\":2}]}");
 
     // 注销 owner：handler 进入墓碑态，调度器任务撤销，请求返回明确停用错误。
     CHECK(qol::host::http_dispatch_api().unregister_owner("core.system").ok == kQolOk);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     (void)dispatch_get("/api/system/snapshot", &status);
+    CHECK(status == 503);
+    (void)dispatch_get("/api/system/events", &status);
     CHECK(status == 503);
 
     // core.api 的路由元数据保留：owner 恢复后 handler 可以重新绑定，首轮快照仍 not ready。
@@ -219,7 +266,7 @@ void test_lifecycle_and_responses() {
     CHECK(g_scheduler.handler != nullptr);
     (void)dispatch_get("/api/system/snapshot", &status);
     CHECK(status == 503);
-    CHECK(g_scheduler.handler(145, g_scheduler.ctx) != 0);
+    CHECK(g_scheduler.handler(160, g_scheduler.ctx) != 0);
     CHECK(dispatch_get("/api/system/snapshot") == "{\"frame\":9,\"screen\":\"world\"}");
 
     descriptor.deactivate(ctx);

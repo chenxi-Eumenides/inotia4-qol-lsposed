@@ -88,6 +88,7 @@ add_library(gamebridge SHARED
     game/access/world_read.cpp
     game/access/save_preflight.cpp
     game_system.cpp
+    game/state/system_events.cpp
     game/read/game_tiles.cpp
     game/access/inventory.cpp
     game/access/inventory_legacy_read.cpp

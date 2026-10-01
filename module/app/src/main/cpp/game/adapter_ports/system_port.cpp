@@ -2,7 +2,10 @@
 
 #include <cstdint>
 #include <cstring>
+#include <atomic>
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "contracts/game_ports/ports.h"
 #include "game/state/system_snapshot.h"
@@ -10,8 +13,12 @@
 namespace qol::game {
 namespace {
 
-std::string g_version;
-std::string g_package;
+struct SystemIdentity {
+    std::string version;
+    std::string package;
+};
+
+std::shared_ptr<const SystemIdentity> g_identity;
 
 // system_facts 帧任务在主线程调用 body_json；实现在 legacy/system（可访问 infra/legacy
 // 数据源），本适配端口只依赖 game 层声明，保持层依赖方向。
@@ -27,8 +34,11 @@ QolResult write_body(const std::string& body, char* out, uint32_t capacity, uint
 
 QolResult body_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
+    const std::shared_ptr<const SystemIdentity> identity =
+        std::atomic_load_explicit(&g_identity, std::memory_order_acquire);
     // 身份未下发前不产出含 version/package 的 body；快照与帧计数与其无关，始终可产出。
-    const bool identity_ready = !g_version.empty() && !g_package.empty();
+    const bool identity_ready = identity != nullptr && !identity->version.empty() &&
+                                !identity->package.empty();
     switch (static_cast<contracts::QolSystemJsonKind>(kind)) {
         case contracts::QolSystemJsonKind::kSnapshot:
             return write_body(build_system_snapshot_json(), out, capacity, out_size);
@@ -37,20 +47,26 @@ QolResult body_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_si
                 return contracts::error(kQolErrNotReady, "system identity not ready", 28);
             }
             return write_body(
-                build_system_game_json(build_system_info_json(g_version, g_package)), out,
+                build_system_game_json(build_system_info_json(identity->version, identity->package)), out,
                 capacity, out_size);
         case contracts::QolSystemJsonKind::kInfo:
             if (!identity_ready) {
                 return contracts::error(kQolErrNotReady, "system identity not ready", 28);
             }
-            return write_body(build_system_info_json(g_version, g_package), out, capacity, out_size);
+            return write_body(build_system_info_json(identity->version, identity->package), out,
+                              capacity, out_size);
         case contracts::QolSystemJsonKind::kFrame:
             return write_body(build_system_frame_json(), out, capacity, out_size);
     }
     return contracts::error(kQolErrInvalidArgument, "unknown system json kind", 25);
 }
 
-const contracts::QolSystemPortReadApi kRead{&body_json};
+QolResult events_json(char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    return write_body(build_system_events_json(), out, capacity, out_size);
+}
+
+const contracts::QolSystemPortReadApi kRead{&body_json, &events_json};
 const contracts::QolSystemPort kPort{contracts::kQolPortSystemVersion, kRead};
 
 }  // namespace
@@ -58,8 +74,12 @@ const contracts::QolSystemPort kPort{contracts::kQolPortSystemVersion, kRead};
 const contracts::QolSystemPort& system_port() { return kPort; }
 
 void system_port_set_identity(const char* version, const char* package) {
-    g_version = version != nullptr ? version : "";
-    g_package = package != nullptr ? package : "";
+    auto identity = std::make_shared<SystemIdentity>();
+    identity->version = version != nullptr ? version : "";
+    identity->package = package != nullptr ? package : "";
+    std::atomic_store_explicit(&g_identity,
+                               std::shared_ptr<const SystemIdentity>(std::move(identity)),
+                               std::memory_order_release);
 }
 
 }  // namespace qol::game

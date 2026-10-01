@@ -16,11 +16,15 @@ enum class QolSystemJsonKind : int32_t {
     kFrame = 3,     // GET /api/system/game_frame
 };
 
+using QolSystemEventsJsonFn = QolResult (*)(char* out, uint32_t capacity,
+                                            uint32_t* out_size);
+
 using QolSystemJsonFn = QolResult (*)(int32_t kind, char* out, uint32_t capacity,
                                       uint32_t* out_size);
 
 struct QolSystemPortReadApi {
     QolSystemJsonFn body_json;
+    QolSystemEventsJsonFn events_json;
 };
 
 struct QolSystemPort {

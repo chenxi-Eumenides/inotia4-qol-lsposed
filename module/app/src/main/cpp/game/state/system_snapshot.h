@@ -4,6 +4,18 @@
 
 namespace qol::game {
 
+struct SystemEventsSnapshot {
+    int64_t money;
+    int16_t x, y;
+    int32_t hp[3], mp[3], level[3];
+    int64_t exp[3];
+    int inv_count;
+};
+
+std::string build_events_json(const SystemEventsSnapshot& current,
+                              SystemEventsSnapshot& previous, bool& has_previous);
+std::string build_system_events_json();
+
 // core.system owner 的响应体拼装接缝（实现在 legacy/system 的 game_system.cpp，
 // 该文件可访问 infra/legacy 数据源；game 层适配端口只依赖本声明）。
 //

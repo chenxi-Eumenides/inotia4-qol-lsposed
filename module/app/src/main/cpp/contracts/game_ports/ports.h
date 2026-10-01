@@ -50,7 +50,7 @@ constexpr QolVersion kQolPortCustomRecipeWriteVersion{1, 0};
 constexpr QolVersion kQolPortCharacterExtrasVersion{1, 0};
 constexpr QolVersion kQolPortInventoryExtrasVersion{1, 0};
 constexpr QolVersion kQolPortItemExtrasVersion{1, 0};
-constexpr QolVersion kQolPortSystemVersion{1, 0};
+constexpr QolVersion kQolPortSystemVersion{1, 1};
 constexpr QolVersion kQolPortCharacterHttpVersion{1, 0};
 constexpr QolVersion kQolPortSaveWriteVersion{1, 0};
 constexpr QolVersion kQolPortWorldWriteVersion{1, 0};

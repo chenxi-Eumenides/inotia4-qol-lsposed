@@ -1,9 +1,8 @@
 package com.inotia4.qol.api.controller
 
-import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpQuery
 import com.inotia4.qol.util.ControllerGuard
 import com.yanzhenjie.andserver.annotation.GetMapping
-import com.yanzhenjie.andserver.annotation.RequestParam
 import com.yanzhenjie.andserver.annotation.RestController
 
 /**
@@ -14,6 +13,5 @@ import com.yanzhenjie.andserver.annotation.RestController
 class EventsController {
 
     @GetMapping("/api/system/events")
-    fun events(@RequestParam("since", required = false) since: Long?): String =
-        ControllerGuard.guard { ApiServices.info.events(since) }
+    fun events(): String = ControllerGuard.guard { NativeHttpQuery.get("/api/system/events") }
 }

@@ -89,16 +89,6 @@ Snapshot take_snapshot() {
     return s;
 }
 
-void emit(std::string& out, bool& first, const char* type, int role, int64_t a, int64_t b) {
-    if (!first) out += ",";
-    first = false;
-    out += "{\"type\":\"" + std::string(type) + "\"";
-    if (role >= 0) out += ",\"role\":" + std::to_string(role);
-    out += ",\"old\":" + std::to_string(a);
-    out += ",\"new\":" + std::to_string(b);
-    out += "}";
-}
-
 }  // namespace
 
 std::string data_events_json() {
@@ -106,33 +96,7 @@ std::string data_events_json() {
     std::lock_guard<std::mutex> lock(g_events_mtx);
     static Snapshot last;
     static bool has_last = false;
-    std::string s = "{\"events\":[";
-    bool first = true;
-    if (!has_last) {
-        has_last = true;
-        last = cur;
-        s += "]}";
-        return s;
-    }
-    if (cur.money >= 0 && last.money >= 0 && cur.money != last.money)
-        emit(s, first, "money", -1, last.money, cur.money);
-    if (cur.inv_count >= 0 && last.inv_count >= 0 && cur.inv_count != last.inv_count)
-        emit(s, first, "inventory", -1, last.inv_count, cur.inv_count);
-    if (cur.x >= 0 && last.x >= 0 && (cur.x != last.x || cur.y != last.y))
-        emit(s, first, "move", -1, 0, 0);
-    for (int i = 0; i < 3; ++i) {
-        if (cur.hp[i] >= 0 && last.hp[i] >= 0 && cur.hp[i] != last.hp[i])
-            emit(s, first, "hp", i, last.hp[i], cur.hp[i]);
-        if (cur.mp[i] >= 0 && last.mp[i] >= 0 && cur.mp[i] != last.mp[i])
-            emit(s, first, "mp", i, last.mp[i], cur.mp[i]);
-        if (cur.level[i] >= 0 && last.level[i] >= 0 && cur.level[i] != last.level[i])
-            emit(s, first, "level_up", i, last.level[i], cur.level[i]);
-        if (cur.exp[i] >= 0 && last.exp[i] >= 0 && cur.exp[i] != last.exp[i])
-            emit(s, first, "exp", i, last.exp[i], cur.exp[i]);
-    }
-    last = cur;
-    s += "]}";
-    return s;
+    return qol::game::build_events_json(cur, last, has_last);
 }
 
 std::string build_gamestate_json() {
@@ -359,6 +323,8 @@ std::string system_save_slots_array() {
 }  // namespace
 
 namespace qol::game {
+
+std::string build_system_events_json() { return data_events_json(); }
 
 std::string build_system_snapshot_json() { return build_snapshot_enriched_json(); }
 
