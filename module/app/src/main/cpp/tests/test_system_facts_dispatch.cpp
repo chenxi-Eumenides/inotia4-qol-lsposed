@@ -15,6 +15,7 @@
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "plugins/core.system/plugin.h"
+#include "test_snapshot_sdk.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -109,6 +110,7 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
+    test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
 

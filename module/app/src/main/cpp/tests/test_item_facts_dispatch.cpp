@@ -34,6 +34,7 @@
 #include "host/owner_cache_builder.h"
 #include "infra/command_queue.h"
 #include "plugins/core.item/plugin.h"
+#include "test_snapshot_sdk.h"
 
 #include <cstdint>
 #include <algorithm>
@@ -874,6 +875,7 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.commands.post_typed = &fake_post_typed;
     sdk.ticket_result.register_typed_result_handler = &fake_register_result;
     sdk.ticket_result.unregister_typed_result_handler = &fake_unregister_result;
+    test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
 
@@ -2462,6 +2464,7 @@ void test_inventory_owner_vs_legacy_golden() {
     g_golden_world = 1;
     g_in_world = true;
     g_golden_require_active = false;
+    descriptor.deactivate(ctx);
 }
 
 // ---------------------------------------------------------------------------

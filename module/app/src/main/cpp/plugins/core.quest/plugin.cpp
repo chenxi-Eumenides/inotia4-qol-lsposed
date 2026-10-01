@@ -9,7 +9,7 @@
 #include "contracts/http.h"
 #include "contracts/world_facts.h"
 #include "feature.h"
-#include "snapshot.h"
+#include "snapshot_sdk.h"
 
 namespace qol::features::core_quest {
 namespace {
@@ -367,8 +367,6 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_world_facts = nullptr;
     g_quest_port = nullptr;
     g_snapshot_task = 0;
-    QuestSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr) {
         g_sdk = nullptr;
@@ -393,6 +391,15 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_game = nullptr;
         return 1;
     }
+    if (!g_snapshot.initialize(g_sdk)) {
+        (void)g_sdk->commands.unregister_typed_handler(kSetStateHandlerId);
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_quest_port = nullptr;
+        return 1;
+    }
+    QuestSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
     const void* world_facts_iface = nullptr;
     if (g_sdk->capabilities.require == nullptr ||
         !contracts::succeeded(g_sdk->capabilities.require(
@@ -400,6 +407,7 @@ int plugin_install(contracts::PluginContext& ctx) {
             {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor},
             &world_facts_iface)) ||
         world_facts_iface == nullptr) {
+        g_snapshot.destroy();
         (void)g_sdk->commands.unregister_typed_handler(kSetStateHandlerId);
         g_sdk = nullptr;
         g_game = nullptr;
@@ -412,6 +420,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 8 ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kQuitResultHandlerId, &quit_result_handler, nullptr))) {
+        g_snapshot.destroy();
         (void)g_sdk->commands.unregister_typed_handler(kSetStateHandlerId);
         g_quest_port = nullptr;
         g_sdk = nullptr;
@@ -436,8 +445,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     set_gate(false);
     cancel_resync_task();
     stop_snapshot_task(g_sdk);
-    QuestSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
+    g_snapshot.destroy();
     g_world_facts = nullptr;
     g_quest_port = nullptr;
     g_game = nullptr;
@@ -446,7 +454,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 
 // 零资源、无门禁键：启停只切业务门禁，不做资源操作（§3.3）。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    (void)ctx;
+    if (!g_snapshot.initialize(g_sdk)) {
+        log_message(ctx.sdk, "[core.quest] snapshot unavailable");
+        return;
+    }
     set_gate(true);
     start_resync_task();
     QuestSnapshot empty_snapshot{};
@@ -459,8 +470,7 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     set_gate(false);
     cancel_resync_task();
     stop_snapshot_task(g_sdk);
-    QuestSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
+    g_snapshot.destroy();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

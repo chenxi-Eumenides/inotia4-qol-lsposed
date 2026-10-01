@@ -24,7 +24,7 @@
 #include "contracts/item_state.h"
 #include "json_lite.h"
 #include "response.h"
-#include "snapshot.h"
+#include "snapshot_sdk.h"
 
 namespace qol::features::core_item {
 namespace {
@@ -1950,8 +1950,6 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_item_dice_write = nullptr;
     g_item_state_write = nullptr;
     g_frame_task = 0;
-    ItemSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 4 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
@@ -2011,11 +2009,22 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
+    if (!g_snapshot.initialize(g_sdk)) {
+        g_port = nullptr;
+        g_item_money_write = nullptr;
+        g_item_dice_write = nullptr;
+        g_item_state_write = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    ItemSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
     if (g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 9 ||
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kItemWriteHandlerId, &item_write_result, nullptr))) {
+        g_snapshot.destroy();
         g_port = nullptr;
         g_item_money_write = nullptr;
         g_item_dice_write = nullptr;
@@ -2029,6 +2038,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.item] provider deactivate");
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
@@ -2041,6 +2051,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    if (!g_snapshot.initialize(g_sdk)) {
+        log_message(ctx.sdk, "[core.item] snapshot unavailable");
+        return;
+    }
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
@@ -2057,8 +2071,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
-    ItemSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.item] provider disabled: capability + http queries withdrawn");
 }
 

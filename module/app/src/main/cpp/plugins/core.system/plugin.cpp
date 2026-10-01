@@ -7,7 +7,7 @@
 #include "contracts/game_ports/system_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
-#include "snapshot.h"
+#include "snapshot_sdk.h"
 
 namespace qol::features::core_system {
 namespace {
@@ -179,8 +179,6 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_port = nullptr;
     g_frame_task = 0;
-    SystemSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 1 || ctx.ports[0] == nullptr) {
@@ -193,18 +191,30 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
+    if (!g_snapshot.initialize(g_sdk)) {
+        g_port = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    SystemSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
     log_message(g_sdk, "[core.system] provider install");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.system] provider deactivate");
     g_port = nullptr;
     g_sdk = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    if (!g_snapshot.initialize(g_sdk)) {
+        log_message(ctx.sdk, "[core.system] snapshot unavailable");
+        return;
+    }
     SystemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
@@ -221,8 +231,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
-    SystemSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.system] provider disabled: http queries withdrawn");
 }
 

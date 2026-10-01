@@ -12,6 +12,7 @@
 #include "infra/scheduler.h"
 #include "plugins/core.quest/feature.h"
 #include "plugins/core.quest/plugin.h"
+#include "test_snapshot_sdk.h"
 
 namespace {
 
@@ -136,7 +137,8 @@ qol::contracts::QolHostSdk fake_sdk() {
     sdk.ticket_result = {&qol::infra::commands_register_typed_result_handler,
                          &qol::infra::commands_unregister_typed_result_handler,
                          &qol::infra::commands_read_result,
-                         &qol::infra::commands_ticket_state};
+                          &qol::infra::commands_ticket_state};
+    test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
 

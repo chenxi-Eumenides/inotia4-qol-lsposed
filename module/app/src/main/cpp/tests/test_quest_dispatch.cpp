@@ -15,6 +15,7 @@
 #include "host/http_registry.h"
 #include "infra/commands.h"
 #include "plugins/core.quest/plugin.h"
+#include "test_snapshot_sdk.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -196,6 +197,7 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.ticket_result = {&fake_register_typed_result_handler,
                          &fake_unregister_typed_result_handler, &fake_read_result,
                          &fake_ticket_state};
+    test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
 

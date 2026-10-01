@@ -23,7 +23,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "json_slice.h"
-#include "snapshot.h"
+#include "snapshot_sdk.h"
 
 namespace qol::features::core_character {
 namespace {
@@ -2002,8 +2002,6 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_character_write_ops = nullptr;
     g_character_state_port = nullptr;
     g_frame_task = 0;
-    CharacterSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 4 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
@@ -2054,11 +2052,22 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
+    if (!g_snapshot.initialize(g_sdk)) {
+        g_port = nullptr;
+        g_http_port = nullptr;
+        g_character_write_ops = nullptr;
+        g_character_state_port = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    CharacterSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
     // 写命令结果处理器：需要宿主尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
     if (g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 9 ||
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kCharWriteHandlerId, &char_write_result, nullptr))) {
+        g_snapshot.destroy();
         g_port = nullptr;
         g_http_port = nullptr;
         g_character_write_ops = nullptr;
@@ -2072,6 +2081,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.character] provider deactivate");
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kCharWriteHandlerId);
@@ -2084,6 +2094,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    if (!g_snapshot.initialize(g_sdk)) {
+        log_message(ctx.sdk, "[core.character] snapshot unavailable");
+        return;
+    }
     CharacterSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
@@ -2100,8 +2114,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
-    CharacterSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.character] provider disabled: capability + http queries withdrawn");
 }
 

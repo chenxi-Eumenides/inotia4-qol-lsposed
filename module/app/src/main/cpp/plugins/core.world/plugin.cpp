@@ -11,7 +11,7 @@
 #include "contracts/http.h"
 #include "contracts/nav_bfs.h"
 #include "contracts/world_facts.h"
-#include "snapshot.h"
+#include "snapshot_sdk.h"
 
 namespace qol::features::core_world {
 namespace {
@@ -649,8 +649,6 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_port = nullptr;
     g_world_write_port = nullptr;
     g_frame_task = 0;
-    WorldSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 2 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr) {
@@ -681,11 +679,20 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
+    if (!g_snapshot.initialize(g_sdk)) {
+        g_port = nullptr;
+        g_world_write_port = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    WorldSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
     // 结果处理器需 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
     if (g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 9 ||
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kWorldWriteHandlerId, &world_write_result, nullptr))) {
+        g_snapshot.destroy();
         g_port = nullptr;
         g_world_write_port = nullptr;
         g_sdk = nullptr;
@@ -697,6 +704,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
+    g_snapshot.destroy();
     // 自注册的结果处理器不在 descriptor（由宿主按生命周期注册的是 http 路由），需显式注销。
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kWorldWriteHandlerId);
@@ -708,6 +716,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    if (!g_snapshot.initialize(g_sdk)) {
+        log_message(ctx.sdk, "[core.world] snapshot unavailable");
+        return;
+    }
     WorldSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
@@ -724,8 +736,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
-    WorldSnapshot empty_snapshot{};
-    g_snapshot.publish(empty_snapshot);
+    g_snapshot.destroy();
     log_message(ctx.sdk, "[core.world] provider disabled: capability withdrawn");
 }
 

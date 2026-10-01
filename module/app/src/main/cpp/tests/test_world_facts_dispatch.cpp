@@ -14,6 +14,7 @@
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "plugins/core.world/plugin.h"
+#include "test_snapshot_sdk.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -206,6 +207,7 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.ticket_result = qol::contracts::QolTicketResultApi{
         &fake_register_result, &fake_unregister_result, nullptr, nullptr};
+    test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
 
