@@ -7,6 +7,18 @@
 
 namespace qol::features::extension_bag::model {
 
+inline int find_handle_slot(contracts::QolItemHandle expected,
+                            const contracts::QolItemHandle* slots, size_t slot_count) {
+    if (expected.slot == 0 || expected.generation == 0 || slots == nullptr) return -1;
+    for (size_t slot = 0; slot < slot_count; ++slot) {
+        if (slots[slot].slot == expected.slot &&
+            slots[slot].generation == expected.generation) {
+            return static_cast<int>(slot);
+        }
+    }
+    return -1;
+}
+
 class ItemHandleCustody {
 public:
     static constexpr size_t kCapacity = 1024;

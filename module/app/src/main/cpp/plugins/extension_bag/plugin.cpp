@@ -14,6 +14,7 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/http_query.h"
+#include "plugins/extension_bag/lifecycle_registration.h"
 #include "plugins/extension_bag/move_merge.h"
 
 #include <cstdlib>
@@ -59,6 +60,7 @@ const contracts::CraftFactsApi* g_craft_facts = nullptr;
 // deactivate 后清除（复刻旧“能力仅在 enabled 时注册”的可用语义）。表本身静态驻留（set-once），
 // active 只表达是否参与路由/分派，不表示登记与否。
 std::atomic<bool> g_provider_active{false};
+bool g_lifecycle_participant_registered = false;
 
 // 存档/UI 生命周期参与者回调：可用性由 provider active 承载，动作回调直连扩展实现。
 // 调用方（宿主分派器）已按 available 门控，本表回调只在可用时执行。
@@ -587,8 +589,9 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     }
     // 生命周期参与者最末注册（与 provider 是两次独立注册）。注册表 set-once，provider 已
     // 无法撤销；此处失败时保持不可用（active=false）并登记部分注册状态，install 返回失败。
-    if (g_sdk == nullptr || g_sdk->lifecycle_participant_register == nullptr ||
-        g_sdk->lifecycle_participant_register(&kLifecycleParticipant) == 0) {
+    if (g_sdk == nullptr || !detail::register_lifecycle_participant_once(
+                                g_sdk->lifecycle_participant_register, &kLifecycleParticipant,
+                                g_lifecycle_participant_registered)) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] =
                 "extension bag lifecycle participant registration failed; provider resident but unavailable";

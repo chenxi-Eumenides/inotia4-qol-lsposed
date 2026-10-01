@@ -188,6 +188,17 @@ bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int d
     return moved;
 }
 
+bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+                                        void* item,
+                                        qol::contracts::QolItemHandle item_handle) {
+    const int slot = original_inventory_handle_slot_locked(item_handle, target_bag);
+    if (slot < 0) return false;
+    void* current = nullptr;
+    return inventory_slot_locked(target_bag, slot, &current) && current == item &&
+           remove_item_direct_unlocked(lock, target_bag, slot, item,
+                                       "ext2orig insertion verification rollback");
+}
+
 bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
                                        int src_slot, int target_bag) {
     if (!virtual_bag::valid_original_transaction_bag(target_bag) ||
@@ -287,6 +298,23 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     uint32_t item_handle = 0;
     void* item = load_item_payload_tracked_locked(source.payload.data(), source.payload_size,
                                                   "move_extension_to_original", &item_handle);
+    qol::contracts::QolItemHandle inserted_handle{};
+    if (item != nullptr &&
+        (!extension_bag_register_item_handle(item) ||
+         !extension_bag_item_handle_for_pointer(item, &inserted_handle))) {
+        isolate_ext2orig_failure_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                                        virtual_bag::isolation_reason::kInsertFailed,
+                                        "ext2orig item handle registration");
+        txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
+                         "loaded item handle registration failed; extension source retained");
+        release_tracked_item_locked(item_handle, item, "ext2orig handle registration failed");
+        if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
+            set_original_bag_locked(g_module_window_original_bag);
+            refresh_module_item_area_locked(g_module_view_index);
+        }
+        reset_drag_state_locked(nullptr);
+        return false;
+    }
     // VM-40 宿主身份守卫：投影安装中 CUR_BAG 是宿主身份的一部分（R-27 成对写），
     // 事务内切换会让宿主记录与 CUR_BAG 分叉（下一次 install 把用户目标袋误选为
     // 宿主——原版袋容量字被写扩展容量、扩展内容投影上去）。投影中不切换；
@@ -309,7 +337,16 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
                          item != nullptr ? virtual_bag::TxnStage::kOriginalUpdated
                                          : virtual_bag::TxnStage::kLogicalUpdated,
                          "target insertion failed; extension source retained");
-        release_tracked_item_locked(item_handle, item, "ext2orig insert failed");
+        const int failed_insert_slot = item == nullptr
+            ? -1 : original_inventory_handle_slot_locked(inserted_handle, target_bag);
+        const bool rollback_failed = failed_insert_slot >= 0 &&
+            !rollback_ext2orig_insertion_locked(lock, target_bag, item, inserted_handle);
+        if (rollback_failed) {
+            handover_tracked_item_locked(item_handle, item,
+                                         "ext2orig insertion failure rollback unconfirmed");
+        } else {
+            release_tracked_item_locked(item_handle, item, "ext2orig insert failed");
+        }
         if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
             set_original_bag_locked(g_module_window_original_bag);
             refresh_module_item_area_locked(g_module_view_index);
@@ -318,13 +355,16 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         return false;
     }
 
-    // original-state-updated：确认入库落位并以原版实态复核（指针身份扫描优先）。
-    int inserted_slot = -1;
+    // original-state-updated：用预登记 handle 确认物理槽，避免将插件私表未绑定的
+    // Game-owned handle 当成空槽；pointer/payload 仅作为兼容回退核验。
+    int inserted_slot = original_inventory_handle_slot_locked(inserted_handle, target_bag);
     void* inserted_item = nullptr;
-    for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-        if (inventory_slot_locked(target_bag, slot, &inserted_item) && inserted_item == item) {
-            inserted_slot = slot;
-            break;
+    if (inserted_slot < 0) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            if (inventory_slot_locked(target_bag, slot, &inserted_item) && inserted_item == item) {
+                inserted_slot = slot;
+                break;
+            }
         }
     }
     if (inserted_slot < 0) {
@@ -337,7 +377,13 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
                                         "ext2orig insertion verify");
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                          "insertion slot not found; extension source retained");
-        release_tracked_item_locked(item_handle, item, "ext2orig slot-not-found rollback");
+        if (!rollback_ext2orig_insertion_locked(lock, target_bag, item, inserted_handle)) {
+            handover_tracked_item_locked(item_handle, item,
+                                         "ext2orig slot-not-found rollback unconfirmed");
+        } else {
+            release_tracked_item_locked(item_handle, item,
+                                        "ext2orig slot-not-found rollback");
+        }
         if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
             set_original_bag_locked(g_module_window_original_bag);
             refresh_module_item_area_locked(g_module_view_index);

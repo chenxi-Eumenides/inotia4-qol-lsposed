@@ -510,7 +510,9 @@ bool serialize_item_payload_locked(void* item,
 }
 
 void release_temporary_item_locked(void* item) {
-    if (item != nullptr) (void)extension_free_item(item);
+    if (item == nullptr) return;
+    extension_bag_invalidate_item_handle(item);
+    (void)extension_free_item(item);
 }
 
 void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context) {
@@ -614,6 +616,24 @@ int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_s
         }
     }
     return -1;
+}
+
+int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected,
+                                          int target_bag) {
+    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
+        !virtual_bag::valid_original_transaction_bag(target_bag)) {
+        return -1;
+    }
+    std::array<qol::contracts::QolItemHandle, virtual_bag::kSlotCount> handles{};
+    for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+        qol::contracts::QolItemHandle handle{};
+        if (qol::contracts::succeeded(
+                g_item_facts->physical_item_at(target_bag, slot, &handle))) {
+            handles[static_cast<size_t>(slot)] = handle;
+        }
+    }
+    return qol::features::extension_bag::model::find_handle_slot(
+        expected, handles.data(), handles.size());
 }
 
 // ---- P4.4 五态事务协调：三条移动路径共享的唯一推进/回滚实现 ----

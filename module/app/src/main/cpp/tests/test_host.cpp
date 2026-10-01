@@ -20,6 +20,7 @@
 #include "game/read/game_tiles.h"
 #include "patch/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "contracts/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
@@ -2598,6 +2599,39 @@ static void test_p44_transaction_stages() {
     txn_rollback_logical(&st, e2o, TxnStage::kOriginalUpdated);
     CHECK(p44_item_identity(st.items[1][1], e2o.source));
     CHECK(!st.pending.valid);
+
+    // ext→orig 真实入槽后注入落位校验失败：先从可见原版槽摘除，再清 handle
+    // custody；扩展逻辑源保持不变，不允许留下原版副本。
+    {
+        using qol::contracts::QolItemHandle;
+        using qol::features::extension_bag::model::ItemHandleCustody;
+        ItemHandleCustody custody;
+        int inserted_object = 77;
+        const QolItemHandle inserted_handle{41, 3};
+        void* resolved = nullptr;
+        std::array<QolItemHandle, kSlotCount> original_handles{};
+        std::array<void*, kSlotCount> original_slots{};
+        bool extension_source_retained = true;
+        CHECK(custody.bind(&inserted_object, inserted_handle));
+
+        // Fake SaveItemOnEmpty writes the object and its registered handle to slot 4.
+        original_slots[4] = &inserted_object;
+        original_handles[4] = inserted_handle;
+        CHECK(qol::features::extension_bag::model::find_handle_slot(
+                  inserted_handle, original_handles.data(), original_handles.size()) == 4);
+        CHECK(custody.lookup(inserted_handle, &resolved) && resolved == &inserted_object);
+
+        // Failure injection at the final transaction verification boundary.
+        original_slots[4] = nullptr;
+        original_handles[4] = {};
+        CHECK(custody.begin_release(inserted_handle));
+        CHECK(custody.finish_release(inserted_handle, true));
+        CHECK(extension_source_retained);
+        CHECK(original_slots[4] == nullptr);
+        CHECK(qol::features::extension_bag::model::find_handle_slot(
+                  inserted_handle, original_handles.data(), original_handles.size()) == -1);
+        CHECK(!custody.lookup(inserted_handle, &resolved));
+    }
 
     // recovery_action：ext→ext 目标匹配 committed → kComplete；不匹配 → kRollback。
     State rs{};

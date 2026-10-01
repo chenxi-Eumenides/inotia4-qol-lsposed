@@ -11,6 +11,7 @@
 
 #include "contracts/attribute_quality.h"
 #include "contracts/commands.h"
+#include "contracts/ownership.h"
 #include "contracts/plugin.h"
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
@@ -65,6 +66,12 @@ constexpr const char* kOptionalEntrySymbol = "F_TEST_VMA_CAP_OPTIONAL";
 
 int g_hook_calls = 0;
 int g_unhook_calls = 0;
+bool g_fail_optional_soft_acquire = false;
+
+int32_t optional_soft_acquire(const char*) { return g_fail_optional_soft_acquire ? -1 : 0; }
+void optional_soft_release(const char*) {}
+const qol::contracts::OwnershipOps g_optional_soft_ownership_ops{
+    &optional_soft_acquire, &optional_soft_release};
 
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
     if (out_followed != nullptr) *out_followed = false;
@@ -176,6 +183,20 @@ ResourceClaim g_req_resources[] = {
 ResourceClaim g_opt_resources[] = {
     make_claim("hook:cap:opt", "cap_consumer_opt", "cap.consumer.on"),
 };
+ResourceClaim make_optional_soft_gate_claim() {
+    ResourceClaim claim = make_claim("hook:cap:opt-soft", "cap_consumer_opt",
+                                     "cap.consumer.soft.on");
+    claim.symbol = "ownership:cap.consumer.soft";
+    claim.mechanism = ResourceMechanism::kOwnership;
+    claim.handler = const_cast<qol::contracts::OwnershipOps*>(&g_optional_soft_ownership_ops);
+    claim.requirement = ResourceRequirement::kOptional;
+    claim.failure = ResourceFailure::kFailSoft;
+    return claim;
+}
+ResourceClaim g_opt_gate_resources[] = {
+    make_claim("hook:cap:opt", "cap_consumer_opt", "cap.consumer.on"),
+    make_optional_soft_gate_claim(),
+};
 
 CapabilityProvisionRef g_provides[] = {
     {qol::contracts::kAttributeQualityCapabilityId, {1, 0}, &g_provider_api},
@@ -262,6 +283,7 @@ void reset_all() {
         qol::hooks::TxDeps{&fake_resolve, &fake_hook, &fake_unhook, &fake_gate});
     g_hook_calls = 0;
     g_unhook_calls = 0;
+    g_fail_optional_soft_acquire = false;
     g_provider_revoking = false;
     g_provider_install_calls = 0;
     g_provider_deactivate_calls = 0;
@@ -281,6 +303,11 @@ bool feature_state_is(const char* id, FeatureState expected) {
 
 bool feature_status(const char* id, FeatureStatus* out) {
     return qol::infra::status_get(id, out);
+}
+
+bool feature_degraded(const char* id) {
+    FeatureStatus status{};
+    return feature_status(id, &status) && status.degraded;
 }
 
 const AttributeQualityApi* require_attribute_quality() {
@@ -396,6 +423,52 @@ void test_disable_revokes_and_cascades() {
     CHECK(opt_after.degraded);
     CHECK(opt_after.state == FeatureState::kEnabled);
     CHECK(qol::hooks::state_of("hook:cap:opt") == ResourceState::kLive);
+
+    // Restoring the missing optional provider clears the cascade degraded source.
+    qol::infra::config_set_bool("cap.provider.on", true);
+    CHECK(sync_gates() >= 1);
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(qol::infra::capability_count() == 1);
+    FeatureStatus opt_after_restore{};
+    CHECK(feature_status("cap_consumer_opt", &opt_after_restore));
+    CHECK(opt_after_restore.state == FeatureState::kEnabled);
+    CHECK(!opt_after_restore.degraded);
+}
+
+void test_provider_restore_preserves_gate_fail_soft_degraded() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", true);
+    qol::infra::config_set_bool("cap.consumer.on", true);
+    PluginDescriptor optional = make_optional_consumer();
+    optional.resources = g_opt_gate_resources;
+    optional.resources_count = sizeof(g_opt_gate_resources) / sizeof(g_opt_gate_resources[0]);
+    CHECK(register_plugin(make_provider()));
+    CHECK(register_plugin(optional));
+    CHECK(install_all(make_host_deps()) == 0);
+    CHECK(!feature_degraded("cap_consumer_opt"));
+
+    qol::infra::config_set_bool("cap.provider.on", false);
+    CHECK(sync_gates() >= 1);
+    drive_lifecycle();
+    CHECK(feature_degraded("cap_consumer_opt"));
+
+    g_fail_optional_soft_acquire = true;
+    qol::infra::config_set_bool("cap.consumer.soft.on", true);
+    CHECK(sync_gates() >= 1);
+    CHECK(feature_degraded("cap_consumer_opt"));
+    CHECK(qol::hooks::state_of("hook:cap:opt-soft") == ResourceState::kFree);
+
+    qol::infra::config_set_bool("cap.provider.on", true);
+    CHECK(sync_gates() >= 1);
+    drive_lifecycle();
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(qol::infra::capability_count() == 1);
+    CHECK(feature_degraded("cap_consumer_opt"));
+
+    g_fail_optional_soft_acquire = false;
+    (void)sync_gates();
+    CHECK(qol::hooks::state_of("hook:cap:opt-soft") == ResourceState::kLive);
+    CHECK(!feature_degraded("cap_consumer_opt"));
 }
 
 void test_no_auto_recovery() {
@@ -644,6 +717,7 @@ int main() {
     test_installed_disabled_does_not_register();
     test_missing_optional_capability_is_degraded();
     test_disable_revokes_and_cascades();
+    test_provider_restore_preserves_gate_fail_soft_degraded();
     test_no_auto_recovery();
     test_cascade_stopped_consumer_explicit_activate_recovers();
     test_cascade_stopped_activate_missing_dependency_is_blocked();

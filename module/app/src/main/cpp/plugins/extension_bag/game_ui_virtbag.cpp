@@ -10,6 +10,7 @@
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"

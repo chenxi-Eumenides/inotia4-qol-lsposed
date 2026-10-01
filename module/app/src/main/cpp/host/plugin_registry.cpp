@@ -387,8 +387,35 @@ char g_error_text[kMaxPlugins][kMaxErrorText];
 // optional_requires 级联设置的 degraded；error 文本同为静态存储。
 char g_gate_error_text[kMaxPlugins][kMaxErrorText];
 bool g_gate_degraded[kMaxPlugins];
+bool g_cascade_degraded[kMaxPlugins];
 // optional 依赖暂缓标记：段 1 时图中存在有效 provider 但尚未注册 → 暂缓到 install 循环后复查。
 uint8_t g_optional_pending[kMaxPlugins] = {};
+
+void refresh_degraded_status(uint32_t index) {
+    if (index >= g_plugin_count) return;
+    infra::status_set_degraded(g_plugins[index].descriptor.id,
+                               g_gate_degraded[index] || g_cascade_degraded[index]);
+}
+
+void clear_cascade_degraded_for_capability(const char* capability_id) {
+    if (capability_id == nullptr) return;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!g_cascade_degraded[i]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        bool matches_capability = false;
+        bool optional_missing = false;
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            const contracts::CapabilityRequirement& requirement = plugin.optional_requires[o];
+            if (requirement.id == nullptr) continue;
+            if (std::strcmp(requirement.id, capability_id) == 0) matches_capability = true;
+            if (infra::require_capability(requirement.id, requirement.range) == nullptr)
+                optional_missing = true;
+        }
+        if (!matches_capability || optional_missing) continue;
+        g_cascade_degraded[i] = false;
+        refresh_degraded_status(i);
+    }
+}
 
 // 依赖图由描述符构建。注册顺序只决定描述符进入图的时机，不决定业务安装顺序；
 // g_install_order 是确定性的拓扑结果，provider 必须在 consumer 前完成 install/publish。
@@ -687,8 +714,8 @@ void verify_optional_after_install() {
         if (infra::status_get(plugin.id, &status)) {
             infra::status_update(plugin.id, status.state, status.enabled, g_error_text[i]);
         }
-        infra::status_set_degraded(plugin.id, true);
         g_gate_degraded[i] = true;
+        refresh_degraded_status(i);
         QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id, "optional",
                      g_error_text[i]);
     }
@@ -1317,6 +1344,7 @@ void register_provided_capabilities(uint32_t index) {
         if (ref.id == nullptr || ref.iface == nullptr) continue;
         // 重复注册（同 id）返回 false，视为已注册；容量满/非法同样只记录、不阻断。
         infra::register_capability(infra::CapabilityProvision{ref.id, ref.version, ref.iface});
+        clear_cascade_degraded_for_capability(ref.id);
     }
     g_cap_registration[index] = CapRegistration::kRegistered;
 }
@@ -1415,7 +1443,8 @@ void cascade_dependents(const char* capability_id, CascadeContext& context) {
         for (uint32_t o = 0; o < plugin.optional_count; ++o) {
             if (plugin.optional_requires[o].id != nullptr &&
                 std::strcmp(plugin.optional_requires[o].id, capability_id) == 0) {
-                infra::status_set_degraded(plugin.id, true);
+                g_cascade_degraded[i] = true;
+                refresh_degraded_status(i);
             }
         }
     }
@@ -1630,9 +1659,9 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
                           degraded_error != nullptr ? degraded_error : "degraded");
         }
         status_error = g_error_text[index];
-        infra::status_set_degraded(plugin.id, true);
         // 记录由本路径置位，供 sync_gates 在资源重试成功后清除标记。
         g_gate_degraded[index] = true;
+        refresh_degraded_status(index);
         QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
                      degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
     }
@@ -1795,6 +1824,7 @@ uint32_t sync_gates() {
             g_gate_degraded[i] = false;
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
                                  "mechanism gate apply failed");
+            refresh_degraded_status(i);
             ++changed;
             continue;
         }
@@ -1819,7 +1849,7 @@ uint32_t sync_gates() {
                           gate_error_reason != nullptr ? gate_error_reason : "failed");
             if (newly_degraded) {
                 g_gate_degraded[i] = true;
-                infra::status_set_degraded(plugin.id, true);
+                refresh_degraded_status(i);
                 QOL_LOG_WARN(QolDomain::kCore, "plugin %s gate install deferred on %s: %s", plugin.id,
                              gate_error_claim != nullptr ? gate_error_claim : "?",
                              g_gate_error_text[i]);
@@ -1844,7 +1874,7 @@ uint32_t sync_gates() {
         // 本轮无门禁失败：若之前由本路径置位 degraded，现资源已就绪 → 清除标记与 error。
         if (g_gate_degraded[i]) {
             g_gate_degraded[i] = false;
-            infra::status_set_degraded(plugin.id, false);
+            refresh_degraded_status(i);
             if (status.error != nullptr) {
                 infra::status_update(plugin.id, status.state, status.enabled, nullptr);
             }
@@ -2080,7 +2110,7 @@ uint32_t lifecycle_step() {
                 const uint32_t plugin_index = slot.plugin_index;
                 if (enabled && g_gate_degraded[plugin_index]) {
                     g_gate_degraded[plugin_index] = false;
-                    infra::status_set_degraded(plugin.id, false);
+                    refresh_degraded_status(plugin_index);
                 }
                 infra::status_update(
                     plugin.id,
@@ -2126,7 +2156,7 @@ uint32_t lifecycle_step() {
                                   sizeof(g_error_text[slot.plugin_index]), "resource %s: %s",
                                   failed_atomic->id, error != nullptr ? error : "failed");
                     g_gate_degraded[slot.plugin_index] = true;
-                    infra::status_set_degraded(plugin.id, true);
+                    refresh_degraded_status(slot.plugin_index);
                     infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled,
                                          false, g_error_text[slot.plugin_index]);
                     QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
@@ -2172,6 +2202,7 @@ void plugin_registry_reset_for_test() {
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
         g_gate_degraded[i] = false;
+        g_cascade_degraded[i] = false;
         g_optional_pending[i] = 0;
     }
 }

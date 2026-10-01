@@ -1198,7 +1198,7 @@ void test_write_routes() {
     CHECK(g_state_write_arg0 == 1 && g_state_write_arg1 == 2);
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 0 && g_state_move_to_slot == 3);
 
-    // 扩展袋移动：owner 判定 provider 执行结果，再用中立库存读面组装两个槽位。
+    // 扩展袋移动：count=1 仍按整堆 provider 契约执行，再用中立库存读面组装槽位。
     g_provider_resident = true;
     g_provider_available = true;
     g_extension_bag_enabled = true;
@@ -1206,7 +1206,7 @@ void test_write_routes() {
     g_extension_move_body = "{\"ok\":true,\"state\":{\"extension\":true}}";
     g_state_write_count = 1;
     CHECK(dispatch_post("/api/item/inventory/move_item",
-                        "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"4\","
+                        "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"1\","
                         "\"to_bag\":\"7\",\"to_slot\":\"-1\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;

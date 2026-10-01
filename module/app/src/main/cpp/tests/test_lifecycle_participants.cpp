@@ -1,6 +1,7 @@
 #include "contracts/host_sdk.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "host/lifecycle_participants.h"
+#include "plugins/extension_bag/lifecycle_registration.h"
 
 #include <cstdio>
 #include <cstring>
@@ -110,12 +111,25 @@ int main() {
     CHECK(host::host_lifecycle_participant_register(&bad) == 0);
 
     contracts::QolLifecycleParticipant entries[8]{};
-    for (uint32_t i = 0; i < 8; ++i) {
+    entries[0] = participant(0);
+    g_available[0] = 1;
+    bool eb_participant_registered = false;
+    CHECK(features::extension_bag::detail::register_lifecycle_participant_once(
+        &host::host_lifecycle_participant_register, &entries[0], eb_participant_registered));
+    CHECK(eb_participant_registered);
+    g_available[0] = 0;
+    CHECK(features::extension_bag::detail::register_lifecycle_participant_once(
+        &host::host_lifecycle_participant_register, &entries[0], eb_participant_registered));
+    g_available[0] = 1;
+    CHECK(features::extension_bag::detail::register_lifecycle_participant_once(
+        &host::host_lifecycle_participant_register, &entries[0], eb_participant_registered));
+    CHECK(host::host_lifecycle_participant_register(&entries[0]) == 0);
+    for (uint32_t i = 1; i < 8; ++i) {
         entries[i] = participant(i);
         g_available[i] = 1;
         CHECK(host::host_lifecycle_participant_register(&entries[i]) == 1);
     }
-    CHECK(host::host_lifecycle_participant_register(&entries[0]) == 0);
+    CHECK(host::host_lifecycle_participant_register(&entries[1]) == 0);
     bad = participant(0);
     bad.available = available_0;
     bad.prepare_save_slot_load = nullptr;
