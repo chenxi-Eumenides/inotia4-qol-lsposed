@@ -1,9 +1,10 @@
 #include "plugin.h"
 
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
+#include <string_view>
 
 #include "contracts/game_ports/quest_port.h"
 #include "contracts/http.h"
@@ -273,22 +274,150 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
     return response_body(response, body);
 }
 
-// body 整数字段提取（迁移前 Controller 为 JsonUtil.parseBody + optInt("quest_id", -1)）。
-bool quest_int_field(const char* body, const char* key, int* out) {
-    if (body == nullptr || key == nullptr || out == nullptr) return false;
-    const std::string pattern = std::string("\"") + key + "\"";
-    const char* pos = std::strstr(body, pattern.c_str());
-    if (pos == nullptr) return false;
-    pos += pattern.size();
-    while (*pos == ' ' || *pos == '\t') ++pos;
-    if (*pos != ':') return false;
-    ++pos;
-    while (*pos == ' ' || *pos == '\t') ++pos;
-    if (*pos == '-' || (*pos >= '0' && *pos <= '9')) {
-        *out = std::atoi(pos);
+class QuestBodyParser {
+public:
+    QuestBodyParser(const uint8_t* body, uint32_t body_size)
+        : text_(reinterpret_cast<const char*>(body), body_size) {}
+
+    bool parse(int32_t* quest_id) {
+        skip_space();
+        if (!parse_object(0)) return false;
+        skip_space();
+        if (pos_ != text_.size() || !has_quest_id_ || quest_id == nullptr) return false;
+        *quest_id = quest_id_;
         return true;
     }
-    return false;
+
+private:
+    void skip_space() {
+        while (pos_ < text_.size() && (text_[pos_] == ' ' || text_[pos_] == '\t' ||
+               text_[pos_] == '\r' || text_[pos_] == '\n')) ++pos_;
+    }
+
+    bool parse_string(std::string_view* raw) {
+        if (pos_ >= text_.size() || text_[pos_++] != '"') return false;
+        const size_t start = pos_;
+        while (pos_ < text_.size()) {
+            const unsigned char ch = static_cast<unsigned char>(text_[pos_++]);
+            if (ch == '"') {
+                if (raw != nullptr) *raw = text_.substr(start, pos_ - start - 1);
+                return true;
+            }
+            if (ch < 0x20) return false;
+            if (ch != '\\') continue;
+            if (pos_ >= text_.size()) return false;
+            const char escaped = text_[pos_++];
+            if (escaped == '"' || escaped == '\\' || escaped == '/' || escaped == 'b' ||
+                escaped == 'f' || escaped == 'n' || escaped == 'r' || escaped == 't') continue;
+            if (escaped != 'u' || text_.size() - pos_ < 4) return false;
+            for (int i = 0; i < 4; ++i) {
+                const char hex = text_[pos_++];
+                if (!((hex >= '0' && hex <= '9') || (hex >= 'a' && hex <= 'f') ||
+                      (hex >= 'A' && hex <= 'F'))) return false;
+            }
+        }
+        return false;
+    }
+
+    bool parse_number(bool quest_id) {
+        const size_t start = pos_;
+        if (pos_ < text_.size() && text_[pos_] == '-') ++pos_;
+        if (pos_ >= text_.size()) return false;
+        if (text_[pos_] == '0') {
+            ++pos_;
+            if (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') return false;
+        } else {
+            if (text_[pos_] < '1' || text_[pos_] > '9') return false;
+            while (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') ++pos_;
+        }
+        if (pos_ < text_.size() && text_[pos_] == '.') {
+            ++pos_;
+            const size_t fraction_start = pos_;
+            while (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') ++pos_;
+            if (pos_ == fraction_start) return false;
+        }
+        if (pos_ < text_.size() && (text_[pos_] == 'e' || text_[pos_] == 'E')) {
+            ++pos_;
+            if (pos_ < text_.size() && (text_[pos_] == '+' || text_[pos_] == '-')) ++pos_;
+            const size_t exponent_start = pos_;
+            while (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') ++pos_;
+            if (pos_ == exponent_start) return false;
+        }
+        if (!quest_id) return true;
+        if (has_quest_id_ || text_[start] == '-' || text_.substr(start, pos_ - start).find_first_of(".eE") !=
+                                                        std::string_view::npos) return false;
+        uint32_t value = 0;
+        for (size_t i = start; i < pos_; ++i) {
+            const uint32_t digit = static_cast<uint32_t>(text_[i] - '0');
+            if (value > (static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) - digit) / 10) {
+                return false;
+            }
+            value = value * 10 + digit;
+        }
+        quest_id_ = static_cast<int32_t>(value);
+        has_quest_id_ = true;
+        return true;
+    }
+
+    bool parse_value(uint32_t depth, bool quest_id = false) {
+        if (depth > 32) return false;
+        skip_space();
+        if (pos_ >= text_.size()) return false;
+        const char ch = text_[pos_];
+        if (ch == '"') return !quest_id && parse_string(nullptr);
+        if (ch == '{') return !quest_id && parse_object(depth + 1);
+        if (ch == '[') {
+            if (quest_id) return false;
+            ++pos_;
+            skip_space();
+            if (pos_ < text_.size() && text_[pos_] == ']') { ++pos_; return true; }
+            while (true) {
+                if (!parse_value(depth + 1)) return false;
+                skip_space();
+                if (pos_ >= text_.size()) return false;
+                if (text_[pos_++] == ']') return true;
+                if (text_[pos_ - 1] != ',') return false;
+            }
+        }
+        if (ch == '-' || (ch >= '0' && ch <= '9')) return parse_number(quest_id);
+        if (quest_id) return false;
+        for (const std::string_view literal : {"true", "false", "null"}) {
+            if (text_.substr(pos_, literal.size()) == literal) {
+                pos_ += literal.size();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool parse_object(uint32_t depth) {
+        if (depth > 32 || pos_ >= text_.size() || text_[pos_++] != '{') return false;
+        skip_space();
+        if (pos_ < text_.size() && text_[pos_] == '}') { ++pos_; return true; }
+        while (true) {
+            std::string_view key;
+            if (!parse_string(&key)) return false;
+            skip_space();
+            if (pos_ >= text_.size() || text_[pos_++] != ':') return false;
+            const bool is_quest_id = key == "quest_id";
+            if (!parse_value(depth + 1, is_quest_id)) return false;
+            skip_space();
+            if (pos_ >= text_.size()) return false;
+            if (text_[pos_++] == '}') return true;
+            if (text_[pos_ - 1] != ',') return false;
+            skip_space();
+        }
+    }
+
+    std::string_view text_;
+    size_t pos_ = 0;
+    int32_t quest_id_ = -1;
+    bool has_quest_id_ = false;
+};
+
+bool quest_id_field(const uint8_t* body, uint32_t body_size, int32_t* out) {
+    if (body == nullptr || out == nullptr || body_size == 0) return false;
+    return QuestBodyParser(body, body_size).parse(out);
 }
 
 // HTTP 线程：仅校验并投递票据（游戏写在主线程 owner 命令执行，ARCHITECTURE.md §7.1）。
@@ -297,12 +426,8 @@ QolResult quit_command_handler(const contracts::HttpReq* request, contracts::Htt
     if (request == nullptr || response == nullptr) {
         return response_error(response, 400, "bad request");
     }
-    const std::string body_text(request->body != nullptr
-                                    ? reinterpret_cast<const char*>(request->body)
-                                    : "",
-                                request->body_len);
-    int quest_id = -1;
-    if (!quest_int_field(body_text.c_str(), "quest_id", &quest_id)) quest_id = -1;
+    int32_t quest_id = -1;
+    if (!quest_id_field(request->body, request->body_len, &quest_id)) quest_id = -1;
     if (quest_id < 0) return response_error(response, 400, "questId required");
     if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) {
         return response_error(response, 503, "command port unavailable");

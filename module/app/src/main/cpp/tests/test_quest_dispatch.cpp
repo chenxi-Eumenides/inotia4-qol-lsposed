@@ -38,6 +38,10 @@ using qol::contracts::QolQuestReadOnlyApi;
 
 bool g_in_world = true;
 int32_t g_static_ready = 1;
+uint32_t g_post_count = 0;
+int32_t g_posted_quest_id = -1;
+qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
+int g_quit_result_mode = 0;
 
 // 活动槽：slot0 → quest 5（state=2 可交付）；状态表：5=2、2=3、7=3，其余 0。
 uint32_t g_active_ids[] = {5};
@@ -107,12 +111,17 @@ QolResult fake_static_ready(int32_t* out) {
 QolResult fake_set_state(uint32_t, int32_t) { return qol::contracts::ok(); }
 
 QolResult fake_quit_result(int32_t, char* out, uint32_t capacity, uint32_t* out_size) {
-    static const char kJson[] = "{\"ok\":true,\"state\":{\"money\":0}}";
-    const uint32_t len = sizeof(kJson) - 1;
+    if (g_quit_result_mode == 1) {
+        return qol::contracts::error(1, "quest operation failed", 22);
+    }
+    static const char kSuccessJson[] = "{\"ok\":true,\"state\":{\"money\":0}}";
+    static const char kFailureJson[] = "{\"ok\":false,\"error\":\"quest not found\"}";
+    const char* json = g_quit_result_mode == 2 ? kFailureJson : kSuccessJson;
+    const uint32_t len = static_cast<uint32_t>(std::strlen(json));
     if (out == nullptr || out_size == nullptr || capacity < len) {
         return qol::contracts::error(1, "small", 5);
     }
-    std::memcpy(out, kJson, len);
+    std::memcpy(out, json, len);
     *out_size = len;
     return qol::contracts::ok();
 }
@@ -147,10 +156,25 @@ QolResult fake_unregister_typed_handler(uint32_t) { return qol::contracts::ok();
 
 // 票据结果面：本测试不校验结果通道（由 infra_config_commands_tests 覆盖），只保证 install 守卫通过。
 QolResult fake_register_typed_result_handler(uint32_t,
-                                             qol::contracts::QolTypedResultCommandHandler, void*) {
+                                             qol::contracts::QolTypedResultCommandHandler handler,
+                                             void*) {
+    g_result_handler = handler;
     return qol::contracts::ok();
 }
-QolResult fake_unregister_typed_result_handler(uint32_t) { return qol::contracts::ok(); }
+QolResult fake_unregister_typed_result_handler(uint32_t) {
+    g_result_handler = nullptr;
+    return qol::contracts::ok();
+}
+QolResult fake_post_typed(uint32_t, const void* payload, uint32_t size,
+                          qol::contracts::QolCommandTicket* out_ticket) {
+    if (payload == nullptr || size != sizeof(g_posted_quest_id) || out_ticket == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad command", 12);
+    }
+    std::memcpy(&g_posted_quest_id, payload, size);
+    ++g_post_count;
+    *out_ticket = g_post_count;
+    return qol::contracts::ok();
+}
 QolResult fake_read_result(qol::contracts::QolCommandTicket, char*, uint32_t, uint32_t*) {
     return qol::contracts::error(kQolErrNotFound, "no result", 9);
 }
@@ -192,6 +216,7 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.capabilities.require = &fake_capability_require;
     sdk.commands.register_typed_handler = &fake_register_typed_handler;
     sdk.commands.unregister_typed_handler = &fake_unregister_typed_handler;
+    sdk.commands.post_typed = &fake_post_typed;
     sdk.http = qol::host::http_registry_api();
     sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.ticket_result = {&fake_register_typed_result_handler,
@@ -240,6 +265,88 @@ std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
     (void)qol::host::http_dispatch_api().dispatch(&request, &response);
     if (status != nullptr) *status = response.status;
     return std::string(storage, response.body_size);
+}
+
+std::string dispatch_post(const char* body, uint16_t* status = nullptr) {
+    constexpr const char* kPath = "/api/quest/quit_quest";
+    const std::string body_value(body);
+    uint8_t storage[512]{};
+    qol::contracts::HttpReq request{
+        qol::contracts::HttpMethod::kPost,
+        kPath,
+        static_cast<uint32_t>(std::strlen(kPath)),
+        reinterpret_cast<const uint8_t*>(body_value.data()),
+        static_cast<uint32_t>(body_value.size()),
+        nullptr,
+        0,
+    };
+    qol::contracts::HttpRes response{storage, sizeof(storage), 0, 0};
+    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
+    if (status != nullptr) *status = response.status;
+    return std::string(reinterpret_cast<const char*>(storage), response.body_size);
+}
+
+void test_quit_command_validation_and_result_failure() {
+    qol::host::http_dispatch_reset_for_test();
+    qol::host::http_registry_reset_for_test();
+    g_scheduler = FakeScheduler{};
+    g_in_world = true;
+    g_static_ready = 1;
+    g_post_count = 0;
+    g_posted_quest_id = -1;
+    g_result_handler = nullptr;
+    g_quit_result_mode = 0;
+    register_frozen_routes();
+
+    const qol::contracts::QolHostSdk sdk = make_sdk();
+    qol::contracts::QolGameHost game = fake_game();
+    qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
+                                      qol::contracts::kHostSdkMajor,
+                                      qol::contracts::kHostSdkMinor, &sdk, &game, "core.quest",
+                                      kPortArray, 1};
+    const auto& descriptor = qol::features::core_quest::plugin_descriptor();
+    CHECK(descriptor.install(ctx) == 0);
+    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
+                                                     descriptor.http_query_count).ok == kQolOk);
+
+    const char* const invalid_bodies[] = {
+        "{\"quest_id\":5", "{\"quest_id\":2147483648}", "{\"quest_id\":5.0}",
+        "{\"quest_id\":5e0}", "{\"quest_id\":5x}", "{\"quest_id\":-1}",
+        "{\"quest_id\":\"five\"}", "{\"quest_id\":05}", "{\"quest_id\":5,}",
+        "{\"quest_id\":5,\"extra\":]}",
+    };
+    for (const char* body : invalid_bodies) {
+        uint16_t status = 0;
+        CHECK(dispatch_post(body, &status) == "{\"ok\":false,\"error\":\"questId required\"}");
+        CHECK(status == 400);
+    }
+    CHECK(g_post_count == 0);
+    CHECK(g_posted_quest_id == -1);
+
+    uint16_t status = 0;
+    CHECK(dispatch_post("{\"quest_id\":2147483647}", &status) ==
+          "{\"ok\":true,\"ticket\":1}");
+    CHECK(status == 200);
+    CHECK(g_post_count == 1);
+    CHECK(g_posted_quest_id == INT32_MAX);
+    CHECK(g_result_handler != nullptr);
+    char output[128]{};
+    uint32_t output_size = 0;
+    CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&g_posted_quest_id),
+                           sizeof(g_posted_quest_id), output, sizeof(output), &output_size));
+    CHECK(std::string(output, output_size) == "{\"ok\":true,\"state\":{\"money\":0}}");
+    g_quit_result_mode = 2;
+    output_size = 0;
+    CHECK(!g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&g_posted_quest_id),
+                            sizeof(g_posted_quest_id), output, sizeof(output), &output_size));
+    CHECK(std::string(output, output_size) == "{\"ok\":false,\"error\":\"quest not found\"}");
+    g_quit_result_mode = 1;
+    output_size = 0;
+    CHECK(!g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&g_posted_quest_id),
+                            sizeof(g_posted_quest_id), output, sizeof(output), &output_size));
+    CHECK(output_size == 0);
+    g_quit_result_mode = 0;
+    descriptor.deactivate(ctx);
 }
 
 void test_lifecycle_and_responses() {
@@ -346,6 +453,7 @@ void test_static_not_ready_holds_snapshot() {
 int main() {
     test_lifecycle_and_responses();
     test_static_not_ready_holds_snapshot();
+    test_quit_command_validation_and_result_failure();
     std::printf("quest_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
