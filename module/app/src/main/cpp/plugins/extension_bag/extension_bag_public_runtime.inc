@@ -114,10 +114,11 @@ bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int t
 }
 
 int virtual_bag_inventory_state_id() {
-    const auto* facts = qol::features::extension_bag::world_facts();
-    if (facts == nullptr || facts->state == nullptr) return -1;
-    int32_t state = -1;
-    return qol::contracts::succeeded(facts->state(&state)) ? state : -1;
+    // g_state_entry is the inventory PopupState entry set during acquire; world_facts.state is
+    // global and may trigger per-frame main-menu cleanup while the inventory panel is open.
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (g_state_entry == nullptr) return -1;
+    return *reinterpret_cast<int32_t*>(g_state_entry);
 }
 
 bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,

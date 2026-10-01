@@ -12,6 +12,7 @@
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/draw_state_lock.h"
+#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"

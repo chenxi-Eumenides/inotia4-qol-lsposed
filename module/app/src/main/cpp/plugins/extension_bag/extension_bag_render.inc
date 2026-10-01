@@ -684,12 +684,24 @@ void virtual_bag_save_panel_enter_wrapper() {
 }
 
 void virtual_bag_draw_end_locked(int inventory_state) {
+    static int previous_state = -1;
+    const int old_state = previous_state;
+    const bool due = qol::features::extension_bag::model::main_menu_cleanup_due(
+        previous_state, inventory_state,
+        g_main_menu_cleanup_dirty.load(std::memory_order_acquire));
+    if (old_state != inventory_state) {
+        VIRTBAG_LOG("draw-end state edge previous=%d current=%d gen=%llu", old_state,
+                    inventory_state, static_cast<unsigned long long>(g_inventory_generation));
+    }
+    previous_state = inventory_state;
     if (inventory_state >= 0 && inventory_state != 5) {
-        if (!prepare_main_menu_locked()) {
-            g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
-            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw-end main-menu cleanup failed; retry scheduled");
-        } else {
-            g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+        if (due) {
+            if (!prepare_main_menu_locked()) {
+                g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
+                QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw-end main-menu cleanup failed; retry scheduled");
+            } else {
+                g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+            }
         }
         if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
             (void)g_sdk->ui->end_frame();
