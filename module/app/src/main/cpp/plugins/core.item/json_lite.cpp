@@ -75,10 +75,13 @@ struct Parser {
     }
 
     bool parse_number(JsonValue* out) {
-        const uint32_t start = pos;
+        const bool leading_plus = pos < size && text[pos] == '+';
+        if (leading_plus) ++pos;
         const bool negative = pos < size && text[pos] == '-';
         if (negative) ++pos;
         if (pos >= size) return false;
+        if (leading_plus && (text[pos] < '0' || text[pos] > '9')) return false;
+        const uint32_t digits_start = pos;
 
         if (text[pos] == '0') {
             ++pos;
@@ -87,6 +90,7 @@ struct Parser {
             if (text[pos] < '1' || text[pos] > '9') return false;
             while (pos < size && text[pos] >= '0' && text[pos] <= '9') ++pos;
         }
+        const uint32_t integer_end = pos;
 
         bool integer_only = true;
         if (pos < size && text[pos] == '.') {
@@ -104,20 +108,26 @@ struct Parser {
             while (pos < size && text[pos] >= '0' && text[pos] <= '9') ++pos;
             if (pos == exponent_start) return false;
         }
-        if (!integer_only) return false;
-
         const uint64_t limit = negative
                                    ? static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1
                                    : static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
         uint64_t magnitude = 0;
-        for (uint32_t i = start + (negative ? 1U : 0U); i < pos; ++i) {
+        bool in_range = true;
+        for (uint32_t i = digits_start; i < integer_end; ++i) {
             const uint32_t digit = static_cast<uint32_t>(text[i] - '0');
-            if (magnitude > (limit - digit) / 10) return false;
+            if (magnitude > (limit - digit) / 10) {
+                in_range = false;
+                continue;
+            }
+            if (!in_range) continue;
             magnitude = magnitude * 10 + digit;
         }
         out->type = JsonValue::Type::kNumber;
-        out->integer = negative ? -static_cast<long long>(magnitude)
-                                : static_cast<long long>(magnitude);
+        out->integer_valid = integer_only && !leading_plus && in_range;
+        if (out->integer_valid) {
+            out->integer = negative ? -static_cast<long long>(magnitude)
+                                    : static_cast<long long>(magnitude);
+        }
         return true;
     }
 
@@ -206,7 +216,7 @@ const JsonValue* JsonValue::find(const char* key) const {
 }
 
 bool JsonValue::as_int(long long* out) const {
-    if (out == nullptr || type != Type::kNumber) return false;
+    if (out == nullptr || type != Type::kNumber || !integer_valid) return false;
     *out = integer;
     return true;
 }

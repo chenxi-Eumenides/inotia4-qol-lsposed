@@ -837,6 +837,22 @@ int32_t write_opt_int(const JsonValue& object, const char* key, int32_t fallback
     return write_narrow_int(parsed);
 }
 
+bool write_has_invalid_number(const JsonValue& object, const char* key) {
+    const JsonValue* value = write_member_last(object, key);
+    if (value == nullptr || value->type != JsonValue::Type::kNumber) return false;
+    long long parsed = 0;
+    return !value->as_int(&parsed);
+}
+
+bool write_has_member(const JsonValue& object, const char* key) {
+    return write_member_last(object, key) != nullptr;
+}
+
+QolResult invalid_write_number_error(const char* key, contracts::HttpRes* response) {
+    const std::string message = std::string("bad value for ") + key;
+    return response_error(response, 400, message.c_str());
+}
+
 int64_t write_opt_long(const JsonValue& object, const char* key, int64_t fallback) {
     const JsonValue* value = write_member_last(object, key);
     if (value == nullptr) return fallback;
@@ -1251,11 +1267,24 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
         case contracts::QolItemWriteKind::kUseItem:
         case contracts::QolItemWriteKind::kSellItem:
         case contracts::QolItemWriteKind::kDiscardItem:
+            if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
+            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
             args.i0 = write_opt_int(body_object, "bag", -1);
             args.i1 = write_opt_int(body_object, "slot", -1);
             if (args.i0 < 0 || args.i1 < 0) return response_error(response, 400, "bag/slot required");
             break;
         case contracts::QolItemWriteKind::kMoveItem:
+            if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
+            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
+            if (write_has_invalid_number(body_object, "count")) return invalid_write_number_error("count", response);
+            if (write_has_invalid_number(body_object, "to_bag")) return invalid_write_number_error("to_bag", response);
+            if (write_has_invalid_number(body_object, "to_slot")) return invalid_write_number_error("to_slot", response);
+            if (!write_has_member(body_object, "bag") || !write_has_member(body_object, "slot") ||
+                !write_has_member(body_object, "count") || !write_has_member(body_object, "to_bag") ||
+                !write_has_member(body_object, "to_slot")) {
+                return response_error(response, 400,
+                                      "bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)");
+            }
             args.i0 = write_opt_int(body_object, "bag", -1);
             args.i1 = write_opt_int(body_object, "slot", -1);
             args.i2 = write_opt_int(body_object, "count", -1);
@@ -1273,6 +1302,9 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
         case contracts::QolItemWriteKind::kEquipItem:
             if (!write_path_int(request, "role", &path_value)) return response_error(response, 400, "bad request");
             args.i0 = path_value;
+            if (write_has_invalid_number(body_object, "category")) return invalid_write_number_error("category", response);
+            if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
+            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
             args.i5 = write_opt_int(body_object, "category", -1);
             args.i1 = write_opt_int(body_object, "bag", -1);
             args.i2 = write_opt_int(body_object, "slot", -1);
@@ -1283,6 +1315,7 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
         case contracts::QolItemWriteKind::kUnequipItem:
             if (!write_path_int(request, "role", &path_value)) return response_error(response, 400, "bad request");
             args.i0 = path_value;
+            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
             args.i1 = write_opt_int(body_object, "slot", -1);
             if (args.i1 < 0) return response_error(response, 400, "slot required");
             break;
@@ -1290,6 +1323,9 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
         case contracts::QolItemWriteKind::kEnchant:
             if (!write_path_int(request, "role", &path_value)) return response_error(response, 400, "bad request");
             args.i0 = path_value;
+            if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
+            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
+            if (write_has_invalid_number(body_object, "equip_slot")) return invalid_write_number_error("equip_slot", response);
             args.i1 = write_opt_int(body_object, "bag", -1);
             args.i2 = write_opt_int(body_object, "slot", -1);
             args.i3 = write_opt_int(body_object, "equip_slot", -1);
@@ -1298,10 +1334,16 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
             }
             break;
         case contracts::QolItemWriteKind::kShopBuy:
+            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
             args.i0 = write_opt_int(body_object, "slot", -1);
             if (args.i0 < 0) return response_error(response, 400, "slot required");
             break;
         case contracts::QolItemWriteKind::kAddItem:
+            if (write_has_invalid_number(body_object, "category")) return invalid_write_number_error("category", response);
+            if (write_has_invalid_number(body_object, "count")) return invalid_write_number_error("count", response);
+            if (write_has_invalid_number(body_object, "socket")) return invalid_write_number_error("socket", response);
+            if (write_has_invalid_number(body_object, "enhanceRemaining")) return invalid_write_number_error("enhanceRemaining", response);
+            if (write_has_invalid_number(body_object, "rarity")) return invalid_write_number_error("rarity", response);
             args.i0 = write_opt_int(body_object, "category", -1);
             if (args.i0 < 0) return response_error(response, 400, "category required");
             args.i1 = write_opt_int(body_object, "count", 1);
@@ -1310,6 +1352,7 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
             args.i4 = write_opt_int(body_object, "rarity", -1);
             break;
         case contracts::QolItemWriteKind::kSetMoney:
+            if (write_has_invalid_number(body_object, "money")) return invalid_write_number_error("money", response);
             args.i64 = write_opt_long(body_object, "money", -1);
             if (args.i64 < 0) return response_error(response, 400, "money required");
             break;

@@ -991,6 +991,8 @@
 
 > 写操作统一「动词+宾语」两词命名。
 
+**数字字段错误**：body 数字字段缺失时返回该端点原有的 `... required` 错误；字段存在但不是有效 int32 整数（包括小数、指数、前导 `+`、超 int32 或超长数字）时返回 HTTP 400 `{"ok":false,"error":"bad value for <field>"}`。整包 JSON 语法非法或 body 不是对象时仍返回 `bad request`。适用于本节中的 `bag`、`slot`、`count`、`to_bag`、`to_slot`、`category`、`equip_slot`，以及 OP add 的 `socket`/`enhanceRemaining`/`rarity` 和 OP money 的 `money`。
+
 #### 使用物品
 
 `POST /api/item/inventory/use_item`

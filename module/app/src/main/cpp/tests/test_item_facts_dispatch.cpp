@@ -1184,6 +1184,42 @@ void test_write_routes() {
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 7;
     g_state_write_data = {};
+    const uint32_t payload_size_before_invalid = g_post_payload_size;
+    const int state_calls_before_invalid = g_state_write_calls;
+    const auto expect_invalid_move_value = [&](const char* body, const char* field) {
+        const std::string error = std::string("{\"ok\":false,\"error\":\"bad value for ") +
+                                  field + "\"}";
+        CHECK(dispatch_post("/api/item/inventory/move_item", body, nullptr, 0, &status) == error);
+        CHECK(status == 400);
+        CHECK(g_post_payload_size == payload_size_before_invalid);
+        CHECK(g_state_write_calls == state_calls_before_invalid);
+    };
+    expect_invalid_move_value(
+        "{\"bag\":1e2,\"slot\":2,\"count\":4,\"to_bag\":0,\"to_slot\":3}",
+        "bag");
+    expect_invalid_move_value(
+        "{\"bag\":2147483648,\"slot\":2,\"count\":4,\"to_bag\":0,\"to_slot\":3}",
+        "bag");
+    expect_invalid_move_value(
+        "{\"bag\":1.5,\"slot\":2,\"count\":4,\"to_bag\":0,\"to_slot\":3}",
+        "bag");
+    expect_invalid_move_value(
+        "{\"bag\":1234567890123456789012345678901234567890,\"slot\":2,\"count\":4,\"to_bag\":0,\"to_slot\":3}",
+        "bag");
+    expect_invalid_move_value(
+        "{\"bag\":+1,\"slot\":2,\"count\":4,\"to_bag\":0,\"to_slot\":3}",
+        "bag");
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":0,\"slot\":2,\"count\":4,\"to_bag\":0}",
+                        nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)\"}");
+    CHECK(status == 400);
+    CHECK(g_post_payload_size == payload_size_before_invalid);
+    CHECK(g_state_write_calls == state_calls_before_invalid);
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":0,\"slot\":2,\"count\":4,\"to_bag\":0,\"to_slot\":3}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    CHECK(status == 200 && g_post_payload_size > 0);
     CHECK(dispatch_post("/api/item/inventory/move_item",
                         "{\"bag\":\"1\",\"slot\":\"2\",\"count\":\"4\","
                         "\"to_bag\":\"0\",\"to_slot\":\"3\"}",
@@ -1427,9 +1463,12 @@ void test_write_routes() {
     };
     for (const char* invalid_body : invalid_integer_tokens) {
         CHECK(dispatch_post("/api/op/inventory/add", invalid_body, nullptr, 0, &status) ==
-              "{\"ok\":false,\"error\":\"bad request\"}");
+              "{\"ok\":false,\"error\":\"bad value for category\"}");
         CHECK(status == 400);
     }
+    CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":1,}", nullptr, 0,
+                        &status) == "{\"ok\":false,\"error\":\"bad request\"}");
+    CHECK(status == 400);
     CHECK(dispatch_post("/api/op/inventory/add", "{\"category\": 1}", nullptr, 0,
                         &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(status == 200);

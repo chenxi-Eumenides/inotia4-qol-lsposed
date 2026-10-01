@@ -14,6 +14,7 @@ struct JsonValue {
     Type type = Type::kNull;
     bool boolean = false;
     long long integer = 0;
+    bool integer_valid = false;
     std::string string;
     std::vector<JsonValue> items;
     // 对象成员用两个平行数组表示：pair<string, JsonValue> 会在 JsonValue 自身未完整时非法。
