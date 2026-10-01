@@ -1,0 +1,327 @@
+[
+  {
+    "name": "move_item bag=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":1e2,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item bag=2e0",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":2e0,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item bag=1.5",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":1.5,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item bag=100000000000",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":100000000000,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item bag=2147483648",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":2147483648,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item bag=+1",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":+1,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item slot=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":0,\"slot\":1e2,\"count\":1,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for slot\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item count=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":0,\"slot\":0,\"count\":1e2,\"to_bag\":0,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for count\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item to_bag=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":0,\"slot\":0,\"count\":1,\"to_bag\":1e2,\"to_slot\":6}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for to_bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item to_slot=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":0,\"slot\":0,\"count\":1,\"to_bag\":0,\"to_slot\":1e2}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for to_slot\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item missing to_bag",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": {
+        "bag": 0,
+        "slot": 0,
+        "count": 1,
+        "to_slot": 6
+      }
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item bag legal but out-of-range",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": {
+        "bag": 11,
+        "slot": 0,
+        "count": 1,
+        "to_bag": 0,
+        "to_slot": 6
+      }
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item invalid JSON",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "{\"bag\":1,"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad request\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "move_item non-object JSON",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/move_item",
+      "body": "[1,2]"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad request\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "use_item bag=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/use_item",
+      "body": "{\"bag\":1e2,\"slot\":0}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "use_item missing bag",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/use_item",
+      "body": {
+        "slot": 0
+      }
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bag/slot required\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "discard_item bag=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/discard_item",
+      "body": "{\"bag\":1e2,\"slot\":0}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "discard_item missing bag",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/discard_item",
+      "body": {
+        "slot": 0
+      }
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bag/slot required\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "sell_item bag=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/sell_item",
+      "body": "{\"bag\":1e2,\"slot\":0}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for bag\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "sell_item missing bag",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/sell_item",
+      "body": {
+        "slot": 0
+      }
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bag/slot required\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "equip_item category=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/0/equip_item",
+      "body": "{\"category\":1e2}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for category\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "equip_item no selector",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/0/equip_item",
+      "body": {}
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bag+slot or category required\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "put_jewel equip_slot=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/0/put_jewel",
+      "body": "{\"bag\":0,\"slot\":0,\"equip_slot\":1e2}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for equip_slot\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "enchant equip_slot=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/0/enchant",
+      "body": "{\"bag\":0,\"slot\":0,\"equip_slot\":1e2}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for equip_slot\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "unequip_item slot=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/inventory/0/unequip_item",
+      "body": "{\"slot\":1e2}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for slot\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "shop buy_item slot=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/item/shop/buy_item",
+      "body": "{\"slot\":1e2}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for slot\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "OP money=1.5",
+    "request": {
+      "method": "POST",
+      "path": "/api/op/inventory/money",
+      "body": "{\"money\":1.5}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for money\"}",
+    "ticket_ack": false
+  },
+  {
+    "name": "OP add category=1e2",
+    "request": {
+      "method": "POST",
+      "path": "/api/op/inventory/add",
+      "body": "{\"category\":1e2,\"count\":1}"
+    },
+    "http": 400,
+    "response": "{\"ok\":false,\"error\":\"bad value for category\"}",
+    "ticket_ack": false
+  }
+]
