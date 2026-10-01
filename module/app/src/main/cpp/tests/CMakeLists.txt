@@ -543,6 +543,14 @@ target_compile_features(item_handle_custody_tests PRIVATE cxx_std_17)
 set_target_properties(item_handle_custody_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_handle_custody_tests COMMAND item_handle_custody_tests)
 
+# EB draw-end synchronous state read must not re-enter g_virtual_bag_mtx.
+add_executable(extension_bag_draw_lock_tests test_extension_bag_draw_lock.cpp)
+target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
+target_compile_features(extension_bag_draw_lock_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_draw_lock_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_draw_lock_tests COMMAND extension_bag_draw_lock_tests)
+set_tests_properties(extension_bag_draw_lock_tests PROPERTIES TIMEOUT 5)
+
 add_test(NAME item_handle_contract_redline
     COMMAND ${CMAKE_COMMAND} -DCPP_DIR=${CPP_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_item_handle_contracts.cmake)

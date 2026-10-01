@@ -683,12 +683,7 @@ void virtual_bag_save_panel_enter_wrapper() {
     if (g_orig_save_enter != nullptr) g_orig_save_enter();
 }
 
-void virtual_bag_draw_end_wrapper() {
-    const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"patch:P_EXT_INVEN_DRAW_END"});
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    const int inventory_state = virtual_bag_inventory_state_id();
+void virtual_bag_draw_end_locked(int inventory_state) {
     if (inventory_state >= 0 && inventory_state != 5) {
         if (!prepare_main_menu_locked()) {
             g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
@@ -758,4 +753,13 @@ void virtual_bag_draw_end_wrapper() {
         (void)g_sdk->ui->end_frame();
     }
     drain_deferred_frees_locked();
+}
+
+void virtual_bag_draw_end_wrapper() {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"patch:P_EXT_INVEN_DRAW_END"});
+    qol::features::extension_bag::model::with_snapshot_then_lock(
+        g_virtual_bag_mtx, [] { return virtual_bag_inventory_state_id(); },
+        [](int inventory_state) { virtual_bag_draw_end_locked(inventory_state); });
 }
