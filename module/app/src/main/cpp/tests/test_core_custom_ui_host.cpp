@@ -30,6 +30,7 @@ int g_slots[5] = {};
 uint32_t g_event_result = 0;
 const QolPopupStateHooks* g_acquired_hooks = nullptr;
 bool g_sync_enter_on_push = false;
+PopupHost* g_deactivate_during_event = nullptr;
 
 bool resolve_popup(void*, const char*, QolPopupStateEntry* entry) {
     ++g_resolves;
@@ -69,7 +70,16 @@ void a_enter() { ++g_slots[0]; }
 void a_process() { ++g_slots[1]; }
 void a_f3() { ++g_slots[2]; }
 void a_f4() { ++g_slots[3]; }
-uint32_t a_event(uint64_t, uint64_t, uint64_t) { ++g_slots[4]; return 41; }
+uint32_t a_event(uint64_t, uint64_t, uint64_t) {
+    ++g_slots[4];
+    if (g_deactivate_during_event != nullptr) {
+        PopupHost* host = g_deactivate_during_event;
+        g_deactivate_during_event = nullptr;
+        assert(host->deactivate_provider("owner.a", true));
+        assert(host->close_pending_for_test());
+    }
+    return 41;
+}
 void b_enter() { g_slots[0] += 10; }
 void b_process() { g_slots[1] += 10; }
 void b_f3() { g_slots[2] += 10; }
@@ -96,6 +106,7 @@ void reset_fakes() {
     g_last_process = g_last_state_id = -1;
     g_acquired_hooks = nullptr;
     g_sync_enter_on_push = false;
+    g_deactivate_during_event = nullptr;
     g_acquire_ok = g_resolve_ok = true;
     g_a_active = g_b_active = false;
     g_open_a = g_open_b = g_close_a = g_close_b = 0;
@@ -134,6 +145,55 @@ int main() {
     assert(g_last_process == 3);
     assert(host.pump(true));
     assert(g_restores == 1 && !host.close_pending_for_test());
+
+    reset_fakes();
+    auto deactivate_top = make_host();
+    assert(deactivate_top.open(kPanelA, true));
+    assert(deactivate_top.open(kPanelB, true));
+    assert(deactivate_top.deactivate_provider("owner.b", true));
+    assert(std::strcmp(deactivate_top.current_panel_for_test(), "panel.a") == 0);
+    assert(g_close_b == 1 && g_open_a == 2 && g_restores == 0);
+
+    reset_fakes();
+    auto deactivate_non_top = make_host();
+    assert(deactivate_non_top.open(kPanelA, true));
+    assert(deactivate_non_top.open(kPanelB, true));
+    assert(deactivate_non_top.deactivate_provider("owner.a", true));
+    assert(std::strcmp(deactivate_non_top.current_panel_for_test(), "panel.b") == 0);
+    assert(g_close_b == 0 && g_restores == 0);
+    assert(deactivate_non_top.deactivate_provider("owner.a", true));
+    assert(deactivate_non_top.current_panel_for_test() != nullptr);
+
+    reset_fakes();
+    auto deactivate_last = make_host();
+    assert(deactivate_last.open(kPanelA, true));
+    assert(deactivate_last.deactivate_provider("owner.a", true));
+    assert(!deactivate_last.active_for_test() && !deactivate_last.close_pending_for_test());
+    assert(g_close_a == 1 && g_restores == 1);
+
+    reset_fakes();
+    auto deactivate_after_close = make_host();
+    assert(deactivate_after_close.open(kPanelA, true));
+    assert(deactivate_after_close.close("panel.a", true));
+    assert(deactivate_after_close.deactivate_provider("owner.a", true));
+    assert(deactivate_after_close.pump(true));
+    assert(g_close_a == 1 && g_restores == 1);
+
+    reset_fakes();
+    auto deactivate_during_callback = make_host();
+    assert(deactivate_during_callback.open(kPanelA, true));
+    g_deactivate_during_event = &deactivate_during_callback;
+    assert(deactivate_during_callback.dispatchers_for_test()->event(0, 0, 0) == 41);
+    assert(g_close_a == 1 && g_restores == 1);
+    assert(!deactivate_during_callback.close_pending_for_test());
+
+    reset_fakes();
+    auto deactivate_host = make_host();
+    assert(deactivate_host.open(kPanelA, true));
+    deactivate_host.deactivate(true);
+    deactivate_host.deactivate(true);
+    assert(deactivate_host.pump(true));
+    assert(!deactivate_host.active_for_test() && g_close_a == 1 && g_restores == 1);
 
     reset_fakes();
     auto synchronous = make_host();

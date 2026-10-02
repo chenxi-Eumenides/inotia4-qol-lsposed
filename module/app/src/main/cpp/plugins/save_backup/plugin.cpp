@@ -270,6 +270,16 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     // 资源归还包括物理写回原槽值（宿主引擎执行）；本回调只翻转上报标记（幂等）。
+    if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        if (contracts::succeeded(ctx.sdk->capabilities.require(
+                contracts::kUiPanelsCapabilityId,
+                {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface)) &&
+            iface != nullptr) {
+            const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
+            if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
+        }
+    }
     g_active.store(false, std::memory_order_release);
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
         (void)ctx.sdk->panels.unregister_owner(kPluginId);

@@ -199,7 +199,16 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    (void)ctx;
+    if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        if (contracts::succeeded(ctx.sdk->capabilities.require(
+                contracts::kUiPanelsCapabilityId,
+                {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface)) &&
+            iface != nullptr) {
+            const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
+            if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
+        }
+    }
     if (g_config_subscription != 0) {
         if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
             (void)g_sdk->events.unsubscribe(g_config_subscription);

@@ -233,6 +233,16 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (ctx.sdk != nullptr && ctx.sdk->http_dispatch.unregister_owner != nullptr) {
         (void)ctx.sdk->http_dispatch.unregister_owner(kPluginId);
     }
+    if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        if (contracts::succeeded(ctx.sdk->capabilities.require(
+                contracts::kUiPanelsCapabilityId,
+                {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface)) &&
+            iface != nullptr) {
+            const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
+            if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
+        }
+    }
     core_ui::panels_unregister();
     g_sdk = nullptr;
 }

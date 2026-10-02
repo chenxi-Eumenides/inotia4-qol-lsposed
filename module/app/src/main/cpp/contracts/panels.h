@@ -15,7 +15,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiPanelsCapabilityId = "ui_panels";
 constexpr int32_t kUiPanelsVersionMajor = 1;
-constexpr int32_t kUiPanelsVersionMinor = 1;
+constexpr int32_t kUiPanelsVersionMinor = 2;
 
 // 设置页条目类型：开关（读 config_key 门禁）/ 动作（点击打开 panel_id）。
 enum class PanelItemKind : uint8_t {
@@ -60,6 +60,7 @@ struct UiPanelsApi {
     void (*close)(const char* panel_id);
     bool (*active)(const char* panel_id);
     const char* (*block_reason)();
+    bool (*deactivate_owner)(const char* owner);
 };
 
 }  // namespace qol::contracts

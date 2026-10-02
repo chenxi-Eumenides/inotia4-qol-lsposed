@@ -28,6 +28,7 @@ public:
 
     bool open(const contracts::PanelProviderSpec& provider, bool main_thread);
     bool close(const char* panel_id, bool main_thread);
+    bool deactivate_provider(const char* owner, bool main_thread);
     bool owns_callbacks(const contracts::PanelProviderSpec& provider) const;
     void deactivate(bool main_thread);
     // Runs outside popup callbacks; restores only after the current provider is inactive.

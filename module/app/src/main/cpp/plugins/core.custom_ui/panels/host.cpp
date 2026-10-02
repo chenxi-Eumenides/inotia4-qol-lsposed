@@ -167,6 +167,62 @@ bool PopupHost::close(const char* panel_id, bool main_thread) {
     return close_top();
 }
 
+bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
+    main_thread_ = main_thread;
+    if (!main_thread || owner == nullptr || owner[0] == '\0' || deactivating_) return false;
+
+    int first_index = -1;
+    bool removes_top = false;
+    for (int i = 0; i < stack_size_; ++i) {
+        const contracts::PanelProviderSpec* provider = stack_[i].provider;
+        if (provider != nullptr && provider->owner != nullptr &&
+            std::strcmp(provider->owner, owner) == 0) {
+            if (first_index < 0) first_index = i;
+            removes_top = i == stack_size_ - 1;
+        }
+    }
+    if (first_index < 0) {
+        restore_if_idle();
+        return true;
+    }
+
+    const contracts::PanelProviderSpec* removed = stack_[stack_size_ - 1].provider;
+    if (removes_top) {
+        if (removed->close != nullptr && removed->active != nullptr && removed->active()) {
+            removed->close();
+        }
+        if (has_callbacks(*removed) &&
+            !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
+    }
+
+    for (int i = 0; i < stack_size_;) {
+        const contracts::PanelProviderSpec* provider = stack_[i].provider;
+        if (provider != nullptr && provider->owner != nullptr &&
+            std::strcmp(provider->owner, owner) == 0) {
+            for (int j = i; j + 1 < stack_size_; ++j) stack_[j] = stack_[j + 1];
+            stack_[--stack_size_] = {};
+        } else {
+            ++i;
+        }
+    }
+
+    if (removes_top) {
+        while (stack_size_ > 0) {
+            const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
+            if (restored->open != nullptr && !restored->open()) return false;
+            if (has_callbacks(*restored) &&
+                !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) return false;
+            return true;
+        }
+        if (acquired_) {
+            close_pending_ = true;
+            pending_provider_ = removed;
+        }
+    }
+    restore_if_idle();
+    return true;
+}
+
 void PopupHost::deactivate(bool main_thread) {
     main_thread_ = main_thread;
     if (!main_thread || deactivating_) return;

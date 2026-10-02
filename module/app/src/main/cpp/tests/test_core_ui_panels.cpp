@@ -23,6 +23,7 @@ using qol::features::core_ui::ui_panels_active;
 using qol::features::core_ui::ui_panels_block_reason;
 using qol::features::core_ui::ui_panels_close;
 using qol::features::core_ui::ui_panels_depth_for_test;
+using qol::features::core_ui::ui_panels_deactivate_owner;
 using qol::features::core_ui::ui_panels_open;
 using qol::features::core_ui::ui_panels_reset_for_test;
 
@@ -163,8 +164,8 @@ bool e_active() { return f_active(4); }
 const char* e_reason() { return f_reason(4); }
 
 const PanelProviderSpec kProviders[] = {
-    {"pa", "core.ui", &a_open, &a_close, &a_active, &a_reason},
-    {"pb", "core.ui", &b_open, &b_close, &b_active, &b_reason},
+    {"pa", "core.settings", &a_open, &a_close, &a_active, &a_reason},
+    {"pb", "save_backup", &b_open, &b_close, &b_active, &b_reason},
     {"pc", "core.ui", &c_open, &c_close, &c_active, &c_reason},
     {"pd", "core.ui", &d_open, &d_close, &d_active, &d_reason},
     {"pe", "core.ui", &e_open, &e_close, &e_active, &e_reason},
@@ -274,6 +275,19 @@ void test_stack_depth_limit_and_close() {
     CHECK(g_f[4].close_calls == 2);
 }
 
+void test_provider_deactivate_removes_owned_panel() {
+    reset_fakes();
+    CHECK(ui_panels_open("pa"));
+    CHECK(ui_panels_open("pb"));
+    CHECK(ui_panels_deactivate_owner("core.settings"));
+    CHECK(!g_f[0].active && g_f[1].active);
+    CHECK(g_f[0].close_calls == 1 && g_f[1].close_calls == 0);
+    CHECK(ui_panels_depth_for_test() == 1);
+    CHECK(ui_panels_deactivate_owner("core.settings"));
+    CHECK(g_f[0].close_calls == 1);
+    CHECK(!ui_panels_deactivate_owner(nullptr));
+}
+
 }  // namespace
 
 int main() {
@@ -287,6 +301,7 @@ int main() {
     test_stack_block_reason_top_first();
     test_stack_prune_stale_top();
     test_stack_depth_limit_and_close();
+    test_provider_deactivate_removes_owned_panel();
 
     std::printf("core_ui_panels_tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

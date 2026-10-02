@@ -71,6 +71,8 @@ void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
         (void)g_popup_host->pump(true);
         g_popup_host.reset();
     }
+    g_depth = 0;
+    for (const char*& panel_id : g_stack) panel_id = nullptr;
     g_sdk = sdk;
     if (sdk != nullptr) {
         g_popup_host = std::make_unique<PopupHost>("F_PANEL_UNK1_ENTER", sdk);
@@ -131,6 +133,27 @@ void ui_panels_close(const char* panel_id) {
             provider->close();
         }
     }
+}
+
+bool ui_panels_deactivate_owner(const char* owner) {
+    if (owner == nullptr || owner[0] == '\0') return false;
+    if (g_popup_host != nullptr && !g_popup_host->deactivate_provider(owner, true)) return false;
+
+    for (int i = 0; i < g_depth;) {
+        const contracts::PanelProviderSpec* provider = provider_of(g_stack[i]);
+        if (provider != nullptr && provider->owner != nullptr &&
+            std::strcmp(provider->owner, owner) == 0) {
+            if (provider->active != nullptr && provider->active() && provider->close != nullptr &&
+                (g_popup_host == nullptr || !g_popup_host->owns_callbacks(*provider))) {
+                provider->close();
+            }
+            for (int j = i; j + 1 < g_depth; ++j) g_stack[j] = g_stack[j + 1];
+            g_stack[--g_depth] = nullptr;
+        } else {
+            ++i;
+        }
+    }
+    return true;
 }
 
 bool ui_panels_active(const char* panel_id) {
