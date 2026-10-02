@@ -173,6 +173,8 @@ int main() {
 
     CHECK(components->dispatch_touch(root, 0, 105, 58).ok == kQolOk);
     CHECK(g_clicks == 0);
+    CHECK(components->dispatch_touch(root, 2, 105, 58).ok == kQolOk);
+    CHECK(g_clicks == 0);
     CHECK(components->dispatch_touch(root, 1, 105, 58).ok == kQolOk);
     CHECK(g_clicks == 1);
     CHECK(components->dispatch_touch(root, 1, 103, 83).ok == kQolOk);

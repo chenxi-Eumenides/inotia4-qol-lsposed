@@ -7,6 +7,7 @@
 #include "../../contracts/text_layer.h"
 #include "../../contracts/ui_choice.h"
 #include "feature.h"
+#include "panels/debug_components.h"
 #include "panels/stack.h"
 #include "text_mechanism.h"
 #include "ui_components.h"
@@ -60,6 +61,13 @@ const contracts::CapabilityProvisionRef kProvides[] = {
         &kTextLayerApi,
     },
 };
+
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+const contracts::CapabilityRequirement kDebugRequires[] = {
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
+};
+#endif
 
 // 原生选择控件的两条私有资源（ADR 0001：控件本体归工具插件，随 ui_choice 一起从
 // core.ui_state 迁入）。2 条资源均常驻（gate=nullptr）、私有、必需、fail-closed、
@@ -120,7 +128,7 @@ const contracts::QolPortRequirement kPorts[] = {
 };
 
 // 界面工具/框架插件（ADR 0001 D1 的 A 档）：可复用组件、面板注册/导航、原生选择控件
-// 与文本机制。具体页面（设置页等）由各自插件拥有；本插件不注册 HTTP 路由。
+// 与文本机制。具体页面（设置页等）由各自插件拥有；Debug 构建额外注册组件探针。
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_choice_port = nullptr;
@@ -130,12 +138,18 @@ int plugin_install(contracts::PluginContext& ctx) {
     // 选择控件需要游戏侧原语端口；缺失即 install 失败（宿主不启用、资源不装）。
     if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) return 1;
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    if (!debug_components_register(ctx.sdk)) return 1;
+#endif
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    debug_components_unregister(ctx.sdk);
+#endif
     text_set_active(false);
     text_mechanism_bind(nullptr);
     g_choice_port = nullptr;
@@ -148,12 +162,18 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(true);
     text_set_active(true);
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    debug_components_set_enabled(true);
+#endif
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
     text_set_active(false);
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    debug_components_set_enabled(false);
+#endif
 }
 
 // 资源安装成功回调：按资源 id 分派给选择控件与文本机制各自的 backup 处理。
@@ -175,7 +195,11 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    1, kDebugRequires, // debug panel command dispatch
+#else
     0, nullptr,      // requires
+#endif
     0, nullptr,      // optional_requires
     4, kProvides,    // provides（ui_components / ui_panels / ui_choice / text_layer v1.0）
     3, kResources,   // resources（选择控件 2 条 + 文本 GetText 共享资源）

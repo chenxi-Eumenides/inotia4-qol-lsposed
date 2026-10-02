@@ -56,6 +56,10 @@ class DebugController {
     fun settingsUiOpenPanel(): String =
         ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/open-panel", null) }
 
+    @PostMapping("/api/debug/custom-ui/components")
+    fun customUiComponents(@RequestBody body: String): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/custom-ui/components", body) }
+
     @GetMapping("/api/debug/extension_bag/status")
     fun extensionBagStatus(): String =
         ControllerGuard.guard { NativeHttpQuery.get("/api/debug/extension_bag/status") }

@@ -32,7 +32,7 @@
 | **system**（系统与会话） | `/api/system/*` | 游戏整体 game、事件流 events、存档 save、静态数据表 tables（含 text/story-events）、帮助文档 help | 16 |
 | **config**（模块配置） | `/api/config/*` | 模块配置读取与修改（list/set） | 2 |
 | **op**（越权操作） | `/api/op/*` | 改数据/强行操作（全局开关门禁，默认关闭，见 §8） | 10 已实现 + 11 定稿 |
-| debug（调试） | `/api/debug/*` | 开发期调试（含扩展背包视图/状态，见 §九） | 7 |
+| debug（调试） | `/api/debug/*` | 开发期调试（含扩展背包视图/状态，见 §九） | 8 |
 | health（顶层） | `/api/health` | 服务健康检查 | 1 |
 
 > 当前冻结路由 = 143（Kotlin controller 142 + `core.api` 的 `/api/system/routes` 1）。本文的
@@ -2120,6 +2120,10 @@
 #### 扩展背包调试端点（v0.6.16 自 `/api/extension_bag/*` 迁入）
 
 > 扩展背包**数据与移动**的正式操作面是 §4.1/§4.2 的原版背包 API（bag 6..10 并入）；以下端点仅服务**视图/选中**控制与内部状态诊断（`mode/selected/inspected/pending/recovery_action` 等），供开发期与控制面阶段验收使用，不构成发布操作面。编号约定与原型阶段声明见 §4.1。
+
+`POST /api/debug/custom-ui/components`　body `{ "open": true|false }`
+
+**用途**：组件测试面板开关（仅 Debug 构建注册）。打开后在隔离背景上绘制 `core.custom_ui` 各类组件样例（label/button/toggle/select/scroll_view），用于目视验证组件可用性；`open:false` 关闭。HTTP 线程只排队，主线程执行 `ui_panels` open/close。返回 `{"ok":true,"queued":true}`。
 
 `GET /api/debug/extension_bag/status`
 
