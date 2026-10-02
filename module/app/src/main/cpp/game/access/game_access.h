@@ -167,6 +167,8 @@ extern ItemSystemDivideFn fn_item_system_divide;
 extern SetExpFn fn_set_exp;
 extern SetLevelFn fn_set_level;
 extern AddExpFn fn_add_exp;
+extern CharAddResourceFn fn_add_life;
+extern CharAddResourceFn fn_add_mana;
 extern SetStatusPointFn fn_set_status_point;
 extern SetAutoAttackFn fn_set_auto_attack;
 extern EquipItemFn fn_equip_item;

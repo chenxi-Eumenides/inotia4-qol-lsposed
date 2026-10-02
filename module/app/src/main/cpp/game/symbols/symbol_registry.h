@@ -6,6 +6,8 @@
 // ============================================================
 
 SYM(F_ADD_EXP_VMA, CHAR_AddExperience)
+SYM(F_CHAR_ADD_LIFE_VMA, CHAR_AddLife)
+SYM(F_CHAR_ADD_MANA_VMA, CHAR_AddMana)
 SYM(F_ADD_MONEY_VMA, INVEN_AddMoney)
 SYM(F_CAN_CHANGE_EQUIP_VMA, CHAR_CanChangeEquip)
 SYM(F_CAN_EQUIP_VMA, CHAR_CanEquipItem)

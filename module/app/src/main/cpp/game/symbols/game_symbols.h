@@ -488,6 +488,8 @@ constexpr uintptr_t F_CHAR_INITIALIZE_STATUS_VMA = 0xe68c8;  // void (void*) 属
 constexpr uintptr_t F_CHAR_INITIALIZE_SKILL_VMA = 0xe67c8;   // void (void*) 技能重置：移除技能链表非基础技能（ACTLIST_RemoveNode）+ 技能点按职业还原（CHAR_SetSkillPoint）+ 清快捷键 + 重算属性
 constexpr uintptr_t F_CHAR_SET_ACTION_ID_VMA = 0xe79ec;      // void (void*, int32_t, void*) 释放技能动作（ch+actionId+目标指针；内部 FindAction→SetAction 写 [ch+0x280]）。⚠️ 第 3 参是目标对象指针非 level（技能动作 type==2 读 [target+2]/[target+4] 坐标算朝向）
 constexpr uintptr_t F_SET_LEVEL_VMA = 0xe05a0;               // int (void*, int32_t) 设置角色等级：写 [ch+0xe] + CHAR_SetNextExperience(0xd9c28) + CHAR_InitializeFromLevel(0xdf2c0) + 升级加能力点/技能点（表驱动）+ 回满血蓝（C_HP/C_MP=GetAttr(0x1e/0x1f)）。⚠️ 只允许升级/同级（b.le 分支），降级直接返回 0
+constexpr uintptr_t F_CHAR_ADD_LIFE_VMA = 0xea184;           // void (void*, int32_t) HP 增量；负值按游戏伤害/死亡语义处理
+constexpr uintptr_t F_CHAR_ADD_MANA_VMA = 0xe0958;           // void (void*, int32_t) MP 增量
 constexpr uintptr_t F_CHAR_GET_ENEMY_TARGET_VMA = 0xe42b4;   // void* (void*, int32_t, int32_t) 获取敌人目标（[ch+0x2c8] bit13 或 [ch+0x278] 有则返回，否则 FindBestTargetByAct 自动找）
 constexpr uintptr_t F_QUESTSYSTEM_FIND_VMA = 0x122914;       // int (int32_t) 按 questId 找任务槽索引（槽数组 [0x2f4000+0x3d0] 步长 12B +0 questId u16；未找到返回 -1）
 constexpr uintptr_t F_QUESTSYSTEM_REMOVE_SLOT_VMA = 0x1229a4;  // int (int32_t) 删除任务槽（CopySlot 前移 + QUEST_Initialize 末槽清空 + 槽数-1；返回 1 成功）
@@ -1001,6 +1003,7 @@ using ControlItemDrawFn = void (*)(void*);  // ControlItem_Draw(ctrl)
 using SetExpFn = void (*)(void*, int32_t);
 using SetLevelFn = int (*)(void*, int32_t);   // CHAR_SetLevel(0xe05a0)：返回 1=成功（升级/同级）/ 0=降级拒绝
 using AddExpFn = int (*)(void*, int32_t, uint8_t);
+using CharAddResourceFn = void (*)(void*, int32_t); // CHAR_AddLife/CHAR_AddMana; return value is not used by callers
 using SetStatusPointFn = void (*)(void*, int32_t);
 using GetStatMainFn = int (*)(void*, int32_t);
 using SetStatMainFn = void (*)(void*, int32_t, int32_t);

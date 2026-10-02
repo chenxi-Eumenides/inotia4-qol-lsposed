@@ -2,7 +2,6 @@
 
 #include <cstring>
 #include <limits>
-#include <limits>
 
 #include "contracts/game_cache.h"
 #include "game/access/game_access.h"
@@ -31,6 +30,25 @@ QolResult op_fail(contracts::QolCharacterWriteOpResult* out, int32_t code, const
     out->error_message[length] = '\0';
     out->error_message_len = static_cast<uint32_t>(length);
     return contracts::error(code, out->error_message, out->error_message_len);
+}
+
+QolResult op_ok();
+
+QolResult set_resource(void* ch, int32_t target, size_t current_offset, int32_t maximum,
+                       CharAddResourceFn add_resource,
+                       contracts::QolCharacterWriteOpResult* out) {
+    if (add_resource == nullptr) return op_fail(out, kQolErrUnsupported, "symbol not resolved");
+    if (target < 0) target = 0;
+    if (target > maximum) target = maximum;
+    const auto* bytes = static_cast<const uint8_t*>(ch);
+    const int32_t current = *reinterpret_cast<const int32_t*>(bytes + current_offset);
+    const int64_t delta = static_cast<int64_t>(target) - current;
+    if (delta < std::numeric_limits<int32_t>::min() ||
+        delta > std::numeric_limits<int32_t>::max()) {
+        return op_fail(out, kQolErrInternal, "resource delta out of range");
+    }
+    if (delta != 0) add_resource(ch, static_cast<int32_t>(delta));
+    return op_ok();
 }
 
 // 迁移前 op_ok()：成功写操作同步刷新缓存（v0.4.57），恰一次。
@@ -64,11 +82,7 @@ QolResult set_hp(int32_t role, int32_t hp, contracts::QolCharacterWriteOpResult*
     if (!game_in_world()) return op_fail(out, kQolErrNotReady, "not in game");
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_fail(out, kQolErrNotFound, "role not found");
-    if (hp < 0) hp = 0;
-    const int32_t max_hp = char_max_hp(ch);
-    if (hp > max_hp) hp = max_hp;
-    *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_HP) = hp;
-    return op_ok();
+    return set_resource(ch, hp, C_HP, char_max_hp(ch), fn_add_life, out);
 }
 
 QolResult set_mp(int32_t role, int32_t mp, contracts::QolCharacterWriteOpResult* out) {
@@ -79,11 +93,7 @@ QolResult set_mp(int32_t role, int32_t mp, contracts::QolCharacterWriteOpResult*
     if (!game_in_world()) return op_fail(out, kQolErrNotReady, "not in game");
     void* ch = member_or_null(role);
     if (ch == nullptr) return op_fail(out, kQolErrNotFound, "role not found");
-    if (mp < 0) mp = 0;
-    const int32_t max_mp = char_max_mp(ch);
-    if (mp > max_mp) mp = max_mp;
-    *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_MP) = mp;
-    return op_ok();
+    return set_resource(ch, mp, C_MP, char_max_mp(ch), fn_add_mana, out);
 }
 
 QolResult set_level(int32_t role, int32_t level, int32_t force,

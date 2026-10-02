@@ -40,6 +40,12 @@ static bool g_state_reads_from_legacy = false;
 // 真实 typed 原语的调用计数（批量族逐点次数断言）。
 static int g_set_stat_base_calls = 0;
 static int g_add_stat_main_calls = 0;
+static int g_add_life_calls = 0;
+static int g_add_mana_calls = 0;
+static int32_t g_last_life_before = 0;
+static int32_t g_last_mana_before = 0;
+static int32_t g_last_life_delta = 0;
+static int32_t g_last_mana_delta = 0;
 // 战斗族写后即时时序：非 0 时，fake 游戏写函数把该值写入角色 C_LEVEL，模拟原语对 live 数据的改动。
 static int g_write_effect_level = 0;
 // 队伍族（T2c-4c）可控 fake 面：佣兵槽 7 解析到的对象、装备槽 0 的 item，以及各原版链调用开关。
@@ -95,6 +101,20 @@ void* legacy_member(int role) {
     return role >= 0 && role < 3 && g_legacy_member_present[role]
                ? g_legacy_members[role]
                : nullptr;
+}
+void fake_add_life(void* ch, int32_t delta) {
+    auto* hp = reinterpret_cast<int32_t*>(static_cast<uint8_t*>(ch) + C_HP);
+    g_last_life_before = *hp;
+    g_last_life_delta = delta;
+    ++g_add_life_calls;
+    *hp += delta;
+}
+void fake_add_mana(void* ch, int32_t delta) {
+    auto* mp = reinterpret_cast<int32_t*>(static_cast<uint8_t*>(ch) + C_MP);
+    g_last_mana_before = *mp;
+    g_last_mana_delta = delta;
+    ++g_add_mana_calls;
+    *mp += delta;
 }
 char* legacy_name(void*) { return g_legacy_name; }
 void* legacy_equip(void*, int slot) {
@@ -278,6 +298,8 @@ UnequipFn fn_unequip = &legacy_unequip;
 CanUnequipFn fn_can_unequip = &legacy_can_unequip;
 IsSpecialNpcFn fn_is_special_npc = &legacy_is_special_npc;
 SetActivePlayerFn fn_set_active_player = &legacy_set_active_player;
+CharAddResourceFn fn_add_life = &fake_add_life;
+CharAddResourceFn fn_add_mana = &fake_add_mana;
 
 void* member_or_null(int role) { return legacy_member(role); }
 // 佣兵槽 7 解析到一个不在队伍中的独立对象，用于 include/exclude/discharge/withdraw 成功路径。
@@ -781,6 +803,45 @@ void setup_write_fixture() {
     g_live_skills.members[0].unlock_bitmap = 9;
     g_live_skills.members[0].active_skill_id = -1;
     g_live_skills.members[0].skill_points = 3;
+}
+
+void test_resource_setters_use_game_delta_functions() {
+    setup_write_fixture();
+    sync_legacy_fixture();
+    auto* character = g_legacy_members[0];
+    qol::contracts::QolCharacterWriteOpResult result{};
+
+    g_add_life_calls = 0;
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 40, &result)));
+    CHECK(g_add_life_calls == 1 && g_last_life_before == 50 && g_last_life_delta == -10);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 40);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 60, &result)));
+    CHECK(g_add_life_calls == 2 && g_last_life_before == 40 && g_last_life_delta == 20);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 60);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, -1, &result)));
+    CHECK(g_add_life_calls == 3 && g_last_life_before == 60 && g_last_life_delta == -60);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 0);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 100, &result)));
+    CHECK(g_add_life_calls == 4 && g_last_life_before == 0 && g_last_life_delta == 60);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 60);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 60, &result)));
+    CHECK(g_add_life_calls == 4);
+
+    g_add_mana_calls = 0;
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 3, &result)));
+    CHECK(g_add_mana_calls == 1 && g_last_mana_before == 5 && g_last_mana_delta == -2);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 3);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 6, &result)));
+    CHECK(g_add_mana_calls == 2 && g_last_mana_before == 3 && g_last_mana_delta == 3);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 6);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, -1, &result)));
+    CHECK(g_add_mana_calls == 3 && g_last_mana_before == 6 && g_last_mana_delta == -6);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 0);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 100, &result)));
+    CHECK(g_add_mana_calls == 4 && g_last_mana_before == 0 && g_last_mana_delta == 6);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 6);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 6, &result)));
+    CHECK(g_add_mana_calls == 4);
 }
 
 // 单点 kind 持续验证底层写操作成功/失败语义；新票据投影字节 golden 由 dispatch 接缝覆盖。
@@ -2085,6 +2146,7 @@ int main() {
     g_state_not_in_game = false;
 
     // owner 写结果处理器：18 单点 kind 与 legacy builder 逐字节对照；批量与写后即时另断言。
+    test_resource_setters_use_game_delta_functions();
     test_write_golden();
     test_write_no_state_family();
     test_write_party_state_family(state_api);

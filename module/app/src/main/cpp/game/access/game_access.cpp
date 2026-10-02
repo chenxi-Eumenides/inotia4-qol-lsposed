@@ -292,6 +292,10 @@ bool bridge_init() {
     fn_set_exp = reinterpret_cast<SetExpFn>(g_base + fn_resolve("F_SET_EXP_VMA", F_SET_EXP_VMA));
     fn_set_level = reinterpret_cast<SetLevelFn>(g_base + fn_resolve("F_SET_LEVEL_VMA", F_SET_LEVEL_VMA));
     fn_add_exp = reinterpret_cast<AddExpFn>(g_base + fn_resolve("F_ADD_EXP_VMA", F_ADD_EXP_VMA));
+    fn_add_life = reinterpret_cast<CharAddResourceFn>(
+        g_base + fn_resolve("F_CHAR_ADD_LIFE_VMA", F_CHAR_ADD_LIFE_VMA));
+    fn_add_mana = reinterpret_cast<CharAddResourceFn>(
+        g_base + fn_resolve("F_CHAR_ADD_MANA_VMA", F_CHAR_ADD_MANA_VMA));
     fn_set_status_point = reinterpret_cast<SetStatusPointFn>(g_base + fn_resolve("F_SET_STATUS_POINT_VMA", F_SET_STATUS_POINT_VMA));
     fn_set_auto_attack = reinterpret_cast<SetAutoAttackFn>(g_base + fn_resolve("F_SET_AUTO_ATTACK_VMA", F_SET_AUTO_ATTACK_VMA));
   fn_equip_item = reinterpret_cast<EquipItemFn>(g_base + fn_resolve("F_EQUIP_ITEM_VMA", F_EQUIP_ITEM_VMA));
