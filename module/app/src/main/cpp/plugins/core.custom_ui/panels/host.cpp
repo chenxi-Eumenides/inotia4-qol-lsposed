@@ -1,5 +1,6 @@
 #include "host.h"
 
+#include <cstdio>
 #include <cstring>
 
 #include "../../../contracts/ui.h"
@@ -30,6 +31,17 @@ bool sdk_set_process_info(void* context, int32_t process, int32_t state_id) {
     return sdk != nullptr && sdk->ui != nullptr && sdk->ui->set_popup_process_info != nullptr &&
         contracts::succeeded(sdk->ui->set_popup_process_info(process, state_id));
 }
+bool sdk_popup_stack_snapshot(void* context, uint32_t* count, uintptr_t* top_enter_vma) {
+    const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
+    return sdk != nullptr && sdk->ui != nullptr && sdk->ui->popup_stack_snapshot != nullptr &&
+        contracts::succeeded(sdk->ui->popup_stack_snapshot(count, top_enter_vma));
+}
+void sdk_log(void* context, int32_t level, const char* message) {
+    const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
+    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    (void)sdk->log.write(level, 12, "core.custom_ui/panels/host", message,
+                         static_cast<uint32_t>(std::strlen(message)));
+}
 
 void dispatch_enter() { if (g_dispatch_host != nullptr) g_dispatch_host->dispatch_enter(); }
 void dispatch_process() { if (g_dispatch_host != nullptr) g_dispatch_host->dispatch_process(); }
@@ -58,7 +70,8 @@ PopupHost::PopupHost(const char* popup_symbol, PopupHostHooks hooks)
 
 PopupHost::PopupHost(const char* popup_symbol, const contracts::QolHostSdk* sdk)
     : PopupHost(popup_symbol, {const_cast<contracts::QolHostSdk*>(sdk), sdk_popup_resolve,
-                               sdk_popup_acquire, sdk_popup_restore, sdk_set_process_info}) {}
+                               sdk_popup_acquire, sdk_popup_restore, sdk_set_process_info,
+                               sdk_popup_stack_snapshot, sdk_log}) {}
 
 PopupHost::~PopupHost() {
     if (g_dispatch_host == this) g_dispatch_host = nullptr;
@@ -90,13 +103,23 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         return stack_[stack_size_ - 1].provider->active == nullptr ||
                stack_[stack_size_ - 1].provider->active();
     }
-    if (stack_size_ >= kStackCapacity || !ensure_popup(provider)) return false;
+    if (stack_size_ >= kStackCapacity) return false;
+    if (!acquired_) {
+        if (!snapshot(&original_popup_count_, &original_popup_top_vma_)) return false;
+        original_popup_snapshot_valid_ = true;
+        log_snapshot("open-baseline", original_popup_count_, original_popup_top_vma_);
+    }
+    if (!ensure_popup(provider)) {
+        if (!acquired_) original_popup_snapshot_valid_ = false;
+        return false;
+    }
 
     const contracts::PanelProviderSpec* previous = stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider;
     if (previous != nullptr) {
         if (previous->close != nullptr) previous->close();
         if (has_callbacks(*previous) &&
             !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
+        if (has_callbacks(*previous)) log_pop_issued();
     }
     stack_[stack_size_++].provider = &provider;
     if (!provider.open()) {
@@ -134,24 +157,35 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         restore_if_idle();
         return false;
     }
+    if (has_callbacks(provider) && !capture_owned_popup()) return false;
     return true;
 }
 
 bool PopupHost::close_top() {
     if (stack_size_ == 0) return false;
     const contracts::PanelProviderSpec* previous = stack_[stack_size_ - 1].provider;
+    uint32_t current_count = 0;
+    uintptr_t current_top_vma = 0;
+    if (has_callbacks(*previous) &&
+        (!snapshot(&current_count, &current_top_vma) || !owned_popup_snapshot_valid_ ||
+         current_count != owned_popup_count_ || current_top_vma != owned_popup_top_vma_)) {
+        return false;
+    }
     if (previous->close != nullptr) previous->close();
     if (has_callbacks(*previous) &&
         !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
+    if (has_callbacks(*previous)) log_pop_issued();
     stack_[--stack_size_] = {};
     if (stack_size_ > 0) {
         const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
         if (restored->open != nullptr && !restored->open()) return false;
         if (has_callbacks(*restored) &&
             !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) return false;
+        if (has_callbacks(*restored) && !capture_owned_popup()) return false;
     } else if (acquired_) {
         close_pending_ = true;
         pending_provider_ = previous;
+        pop_issued_ = true;
     }
     return true;
 }
@@ -183,7 +217,7 @@ bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
     }
     if (first_index < 0) {
         restore_if_idle();
-        return true;
+        return !close_pending_;
     }
 
     const contracts::PanelProviderSpec* removed = stack_[stack_size_ - 1].provider;
@@ -191,8 +225,6 @@ bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
         if (removed->close != nullptr && removed->active != nullptr && removed->active()) {
             removed->close();
         }
-        if (has_callbacks(*removed) &&
-            !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
     }
 
     for (int i = 0; i < stack_size_;) {
@@ -208,15 +240,28 @@ bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
 
     if (removes_top) {
         while (stack_size_ > 0) {
+            uint32_t current_count = 0;
+            uintptr_t current_top_vma = 0;
+            if (has_callbacks(*removed) &&
+                (!snapshot(&current_count, &current_top_vma) || !owned_popup_snapshot_valid_ ||
+                 current_count != owned_popup_count_ || current_top_vma != owned_popup_top_vma_)) {
+                return false;
+            }
+            if (has_callbacks(*removed) &&
+                !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
+            if (has_callbacks(*removed)) log_pop_issued();
             const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
             if (restored->open != nullptr && !restored->open()) return false;
             if (has_callbacks(*restored) &&
                 !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) return false;
+            if (has_callbacks(*restored) && !capture_owned_popup()) return false;
             return true;
         }
         if (acquired_) {
             close_pending_ = true;
             pending_provider_ = removed;
+            restore_if_idle();
+            return !close_pending_;
         }
     }
     restore_if_idle();
@@ -231,9 +276,6 @@ void PopupHost::deactivate(bool main_thread) {
         const contracts::PanelProviderSpec* provider = stack_[--stack_size_].provider;
         stack_[stack_size_] = {};
         if (provider != nullptr && provider->close != nullptr) provider->close();
-        if (provider != nullptr && has_callbacks(*provider)) {
-            (void)hooks_.set_process_info(hooks_.context, 3, 0);
-        }
     }
     if (acquired_) {
         close_pending_ = true;
@@ -254,13 +296,81 @@ void PopupHost::restore_if_idle() {
     if (stack_size_ != 0) return;
     if (pending_provider_ != nullptr && pending_provider_->active != nullptr &&
         pending_provider_->active()) return;
+    uint32_t game_count = 0;
+    uintptr_t game_top_vma = 0;
+    if (!original_popup_snapshot_valid_ || !snapshot(&game_count, &game_top_vma)) return;
+    const bool at_original_target = game_count == original_popup_count_ &&
+                                    game_top_vma == original_popup_top_vma_;
+    if (!at_original_target && !pop_issued_) {
+        if (!owned_popup_snapshot_valid_ || game_count != owned_popup_count_ ||
+            game_top_vma != owned_popup_top_vma_) {
+            log_snapshot("waiting-for-owned-entry", game_count, game_top_vma);
+            return;
+        }
+        pop_issued_ = hooks_.set_process_info != nullptr &&
+                      hooks_.set_process_info(hooks_.context, 3, 0);
+        if (!pop_issued_) return;
+        uint32_t after_count = game_count;
+        uintptr_t after_top_vma = game_top_vma;
+        (void)snapshot(&after_count, &after_top_vma);
+        log_snapshot("pop-issued", after_count, after_top_vma);
+        game_count = after_count;
+        game_top_vma = after_top_vma;
+    }
+    if (game_count != original_popup_count_ || game_top_vma != original_popup_top_vma_) {
+        log_snapshot("waiting-for-target", game_count, game_top_vma);
+        return;
+    }
     if (popup_entry_.slot != nullptr && hooks_.restore != nullptr && hooks_.restore(hooks_.context, &popup_entry_)) {
+        if (hooks_.log != nullptr) {
+            char message[160]{};
+            std::snprintf(message, sizeof(message),
+                          "restore complete internal_stack=%d game_popup_count=%u top_enter_vma=0x%lx",
+                          stack_size_, game_count, static_cast<unsigned long>(game_top_vma));
+            hooks_.log(hooks_.context, 1, message);
+        }
         acquired_ = false;
         close_pending_ = false;
+        original_popup_snapshot_valid_ = false;
+        owned_popup_snapshot_valid_ = false;
+        pop_issued_ = false;
         pending_provider_ = nullptr;
         popup_entry_ = {};
         popup_entry_.state_id = -1;
     }
+}
+
+bool PopupHost::snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
+    return main_thread_ && count != nullptr && top_enter_vma != nullptr &&
+        hooks_.popup_stack_snapshot != nullptr &&
+        hooks_.popup_stack_snapshot(hooks_.context, count, top_enter_vma);
+}
+
+bool PopupHost::capture_owned_popup() {
+    owned_popup_snapshot_valid_ = snapshot(&owned_popup_count_, &owned_popup_top_vma_);
+    if (owned_popup_snapshot_valid_) pop_issued_ = false;
+    return owned_popup_snapshot_valid_;
+}
+
+void PopupHost::log_pop_issued() {
+    uint32_t count = original_popup_count_;
+    uintptr_t top_vma = original_popup_top_vma_;
+    (void)snapshot(&count, &top_vma);
+    log_snapshot("pop-issued", count, top_vma);
+}
+
+void PopupHost::log_snapshot(const char* event, uint32_t count, uintptr_t top_enter_vma) {
+    if (hooks_.log == nullptr || event == nullptr) return;
+    if (count == last_logged_popup_count_ && top_enter_vma == last_logged_popup_top_vma_ &&
+        std::strcmp(event, "open-baseline") != 0 && std::strcmp(event, "pop-issued") != 0) return;
+    last_logged_popup_count_ = count;
+    last_logged_popup_top_vma_ = top_enter_vma;
+    char message[192]{};
+    std::snprintf(message, sizeof(message),
+                  "%s internal_stack=%d game_popup_count=%u top_enter_vma=0x%lx target_count=%u target_top_vma=0x%lx",
+                  event, stack_size_, count, static_cast<unsigned long>(top_enter_vma),
+                  original_popup_count_, static_cast<unsigned long>(original_popup_top_vma_));
+    hooks_.log(hooks_.context, 1, message);
 }
 
 const contracts::PanelCallbacks* PopupHost::current_callbacks() const {

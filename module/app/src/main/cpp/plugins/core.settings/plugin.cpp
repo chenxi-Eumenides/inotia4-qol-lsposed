@@ -8,6 +8,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
 #include "feature.h"
+#include "log.h"
 #include "panels/settings.h"
 
 namespace qol::features::core_settings {
@@ -235,13 +236,25 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;
-        if (contracts::succeeded(ctx.sdk->capabilities.require(
-                contracts::kUiPanelsCapabilityId,
-                {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface)) &&
-            iface != nullptr) {
+        const QolResult require_result = ctx.sdk->capabilities.require(
+            contracts::kUiPanelsCapabilityId,
+            {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface);
+        const bool require_ok = contracts::succeeded(require_result) && iface != nullptr;
+        CORE_UI_LOG_INFO("ui_panels require %s requested_version=%u.%u",
+                         require_ok ? "ok" : "failed",
+                         contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor);
+        if (require_ok) {
             const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
-            if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
+            const bool deactivated = panels->deactivate_owner != nullptr &&
+                                     panels->deactivate_owner(kPluginId);
+            CORE_UI_LOG_INFO("deactivate_owner result=%s", deactivated ? "complete" : "pending_or_failed");
+        } else {
+            CORE_UI_LOG_INFO("deactivate_owner result=skipped capability_unavailable");
         }
+    } else {
+        CORE_UI_LOG_INFO("ui_panels require failed requested_version=%u.%u reason=api_unavailable",
+                         contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor);
+        CORE_UI_LOG_INFO("deactivate_owner result=skipped capability_unavailable");
     }
     core_ui::panels_unregister();
     g_sdk = nullptr;

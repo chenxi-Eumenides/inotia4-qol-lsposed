@@ -11,6 +11,8 @@
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
 #include "game/access/popup_state.h"
+#include "game/access/ui_state.h"
+#include "game/adapter_ports/game_host_port.h"
 #include "game/state/game_state.h"
 
 using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
@@ -623,6 +625,12 @@ QolResult screen_name(const char** out) {
     return *out == nullptr ? not_ready() : contracts::ok();
 }
 
+QolResult popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
+    if (out_count == nullptr || out_top_enter_vma == nullptr) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::popup_stack_snapshot(out_count, out_top_enter_vma) ? contracts::ok() : not_ready();
+}
+
 const QolUiAdapter g_ui_adapter{
     sizeof(QolUiAdapter), contracts::kUiAdapterMajor, contracts::kUiAdapterMinor,
     &create_control,
@@ -710,7 +718,8 @@ const QolUiAdapter g_ui_adapter{
      &clear_control_drag_flags,
      &clear_touch_state,
      &set_touch_release_input,
-     &clear_touch_drop_event,
+      &clear_touch_drop_event,
+      &popup_stack_snapshot,
 };
 
 }  // namespace

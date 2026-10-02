@@ -14,6 +14,8 @@ struct PopupHostHooks {
                     const contracts::QolPopupStateHooks* hooks);
     bool (*restore)(void* context, contracts::QolPopupStateEntry* entry);
     bool (*set_process_info)(void* context, int32_t process, int32_t state_id);
+    bool (*popup_stack_snapshot)(void* context, uint32_t* count, uintptr_t* top_enter_vma);
+    void (*log)(void* context, int32_t level, const char* message);
 };
 
 class PopupHost {
@@ -50,6 +52,10 @@ private:
     };
 
     bool ensure_popup(const contracts::PanelProviderSpec& provider);
+    bool snapshot(uint32_t* count, uintptr_t* top_enter_vma);
+    bool capture_owned_popup();
+    void log_pop_issued();
+    void log_snapshot(const char* event, uint32_t count, uintptr_t top_enter_vma);
     const contracts::PanelCallbacks* current_callbacks() const;
     bool close_top();
     void restore_if_idle();
@@ -61,8 +67,17 @@ private:
     StackItem stack_[kStackCapacity]{};
     int stack_size_ = 0;
     uint32_t dispatch_depth_ = 0;
+    uint32_t original_popup_count_ = 0;
+    uintptr_t original_popup_top_vma_ = 0;
+    uint32_t owned_popup_count_ = 0;
+    uintptr_t owned_popup_top_vma_ = 0;
+    uint32_t last_logged_popup_count_ = UINT32_MAX;
+    uintptr_t last_logged_popup_top_vma_ = UINTPTR_MAX;
     bool acquired_ = false;
     bool close_pending_ = false;
+    bool original_popup_snapshot_valid_ = false;
+    bool owned_popup_snapshot_valid_ = false;
+    bool pop_issued_ = false;
     bool deactivating_ = false;
     bool main_thread_ = false;
 };

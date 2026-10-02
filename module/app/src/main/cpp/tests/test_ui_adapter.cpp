@@ -94,6 +94,13 @@ bool ui_clear_touch_drop_event() { return true; }
 namespace qol::game {
 bool g_attr_insert_value_color_ok = true;
 bool attr_insert_value_color(char*, char*, char) { return g_attr_insert_value_color_ok; }
+bool game_host_is_main_thread() { return true; }
+bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
+    if (out_count == nullptr || out_top_enter_vma == nullptr) return false;
+    *out_count = 0;
+    *out_top_enter_vma = 0;
+    return true;
+}
 }
 
 void ui_set_rect(void* ctrl, UiRect rect) {
@@ -179,6 +186,7 @@ int main() {
     CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
     CHECK(adapter->find_child_in_area != nullptr);
     CHECK(adapter->set_popup_process_info != nullptr);
+    CHECK(adapter->popup_stack_snapshot != nullptr);
     CHECK(adapter->draw_custom_button != nullptr);
     CHECK(adapter->control_user_type != nullptr);
     CHECK(adapter->control_item != nullptr);

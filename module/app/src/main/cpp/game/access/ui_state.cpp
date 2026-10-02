@@ -97,6 +97,40 @@ uintptr_t popup_top_vma() {
     return enter > g_base ? enter - g_base : 0;
 }
 
+bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
+    if (out_count == nullptr || out_top_enter_vma == nullptr || g_popup_stack == nullptr || g_base == 0) {
+        return false;
+    }
+    auto* stack = reinterpret_cast<uint8_t*>(g_popup_stack);
+    if (!game_memory_accessible(stack + POPUP_STACK_COUNT, sizeof(uint32_t), 'r') ||
+        !game_memory_accessible(stack + POPUP_STACK_DATA, sizeof(uint64_t), 'r')) {
+        return false;
+    }
+    const uint32_t count = *reinterpret_cast<uint32_t*>(stack + POPUP_STACK_COUNT);
+    if (count > 27) return false;
+    if (count == 0) {
+        *out_count = 0;
+        *out_top_enter_vma = 0;
+        return true;
+    }
+    const uint64_t data = *reinterpret_cast<uint64_t*>(stack + POPUP_STACK_DATA);
+    if (data == 0) return false;
+    auto* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) +
+                (count - 1) * POPUP_ENTRY_SIZE;
+    if (!game_memory_accessible(top + POPUP_ENTRY_ENTER, sizeof(uintptr_t), 'r')) return false;
+    const uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
+    uintptr_t vma = 0;
+    if (lifecycle_participant_is_inventory_enter(enter)) {
+        vma = F_PANEL_INVENTORY_ENTER;
+    } else {
+        const uintptr_t aliased = popup_enter_alias_resolve(enter);
+        vma = aliased != kPopupEnterAliasNone ? aliased : (enter > g_base ? enter - g_base : 0);
+    }
+    *out_count = count;
+    *out_top_enter_vma = vma;
+    return true;
+}
+
 const char* top_panel_name() {
     uintptr_t vma = popup_top_vma();
     switch (vma) {

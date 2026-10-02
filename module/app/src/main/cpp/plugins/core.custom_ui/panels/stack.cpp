@@ -12,6 +12,15 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 std::unique_ptr<PopupHost> g_popup_host;
 const char* g_stack[kPanelStackDepth] = {};
 int g_depth = 0;
+uint64_t g_pump_task = 0;
+bool g_unbind_pending = false;
+
+void remove_pump_task() {
+    if (g_pump_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+        (void)g_sdk->scheduler.remove(g_pump_task);
+    }
+    g_pump_task = 0;
+}
 
 const contracts::PanelProviderSpec* provider_of(const char* panel_id) {
     if (g_sdk == nullptr || g_sdk->panels.find == nullptr) return nullptr;
@@ -66,17 +75,39 @@ void prune_inactive_top() {
 }  // namespace
 
 void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
+    g_depth = 0;
+    for (const char*& panel_id : g_stack) panel_id = nullptr;
     if (g_popup_host != nullptr) {
         g_popup_host->deactivate(true);
         (void)g_popup_host->pump(true);
+        if (g_popup_host->close_pending_for_test()) {
+            g_unbind_pending = true;
+            return;
+        }
         g_popup_host.reset();
     }
-    g_depth = 0;
-    for (const char*& panel_id : g_stack) panel_id = nullptr;
+    if (sdk == nullptr) remove_pump_task();
     g_sdk = sdk;
     if (sdk != nullptr) {
         g_popup_host = std::make_unique<PopupHost>("F_PANEL_UNK1_ENTER", sdk);
+        g_unbind_pending = false;
+        if (sdk->scheduler.add != nullptr && g_pump_task == 0) {
+            (void)sdk->scheduler.add(1, &ui_panels_frame_pump, nullptr, 1, 0, &g_pump_task);
+        }
+    } else {
+        g_unbind_pending = false;
     }
+}
+
+int32_t ui_panels_frame_pump(int64_t, void*) {
+    if (g_popup_host != nullptr) (void)g_popup_host->pump(true);
+    if (g_unbind_pending && g_popup_host != nullptr && !g_popup_host->close_pending_for_test()) {
+        g_popup_host.reset();
+        remove_pump_task();
+        g_sdk = nullptr;
+        g_unbind_pending = false;
+    }
+    return 0;
 }
 
 bool ui_panels_open(const char* panel_id) {
@@ -137,7 +168,8 @@ void ui_panels_close(const char* panel_id) {
 
 bool ui_panels_deactivate_owner(const char* owner) {
     if (owner == nullptr || owner[0] == '\0') return false;
-    if (g_popup_host != nullptr && !g_popup_host->deactivate_provider(owner, true)) return false;
+    const bool host_complete = g_popup_host == nullptr ||
+                               g_popup_host->deactivate_provider(owner, true);
 
     for (int i = 0; i < g_depth;) {
         const contracts::PanelProviderSpec* provider = provider_of(g_stack[i]);
@@ -153,7 +185,7 @@ bool ui_panels_deactivate_owner(const char* owner) {
             ++i;
         }
     }
-    return true;
+    return host_complete;
 }
 
 bool ui_panels_active(const char* panel_id) {

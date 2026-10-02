@@ -27,6 +27,12 @@ int g_open_b = 0;
 int g_close_a = 0;
 int g_close_b = 0;
 int g_slots[5] = {};
+uint32_t g_popup_count = 1;
+uintptr_t g_popup_top = 0x1234;
+uint32_t g_pending_count = 0;
+uintptr_t g_pending_top = 0;
+int g_logs = 0;
+bool g_delay_pop = false;
 uint32_t g_event_result = 0;
 const QolPopupStateHooks* g_acquired_hooks = nullptr;
 bool g_sync_enter_on_push = false;
@@ -56,10 +62,34 @@ bool restore_popup(void*, QolPopupStateEntry* entry) {
     return true;
 }
 
+bool popup_stack_snapshot(void*, uint32_t* count, uintptr_t* top_enter_vma) {
+    if (count == nullptr || top_enter_vma == nullptr) return false;
+    *count = g_popup_count;
+    *top_enter_vma = g_popup_top;
+    return true;
+}
+
+void host_log(void*, int32_t, const char*) { ++g_logs; }
+
 bool set_process_info(void*, int32_t process, int32_t state_id) {
     ++g_process_calls;
     g_last_process = process;
     g_last_state_id = state_id;
+    if (process == 1) {
+        ++g_popup_count;
+        g_popup_top = 0x9999;
+    } else if (process == 3) {
+        if (g_delay_pop) {
+            g_delay_pop = false;
+        } else if (g_pending_count != 0) {
+            g_popup_count = g_pending_count;
+            g_popup_top = g_pending_top;
+            g_pending_count = 0;
+        } else if (g_popup_count > 0) {
+            --g_popup_count;
+            if (g_popup_count == 1) g_popup_top = 0x1234;
+        }
+    }
     if (process == 1 && g_sync_enter_on_push && g_acquired_hooks != nullptr) {
         g_acquired_hooks->enter();
     }
@@ -75,7 +105,7 @@ uint32_t a_event(uint64_t, uint64_t, uint64_t) {
     if (g_deactivate_during_event != nullptr) {
         PopupHost* host = g_deactivate_during_event;
         g_deactivate_during_event = nullptr;
-        assert(host->deactivate_provider("owner.a", true));
+        assert(!host->deactivate_provider("owner.a", true));
         assert(host->close_pending_for_test());
     }
     return 41;
@@ -109,13 +139,19 @@ void reset_fakes() {
     g_deactivate_during_event = nullptr;
     g_acquire_ok = g_resolve_ok = true;
     g_a_active = g_b_active = false;
+    g_popup_count = 1;
+    g_popup_top = 0x1234;
+    g_pending_count = 0;
+    g_pending_top = 0;
+    g_logs = 0;
+    g_delay_pop = false;
     g_open_a = g_open_b = g_close_a = g_close_b = 0;
     std::memset(g_slots, 0, sizeof(g_slots));
 }
 
 PopupHost make_host() {
     return PopupHost("TEST_POPUP", {nullptr, resolve_popup, acquire_popup, restore_popup,
-                                     set_process_info});
+                                     set_process_info, popup_stack_snapshot, host_log});
 }
 
 }  // namespace
@@ -170,6 +206,41 @@ int main() {
     assert(deactivate_last.deactivate_provider("owner.a", true));
     assert(!deactivate_last.active_for_test() && !deactivate_last.close_pending_for_test());
     assert(g_close_a == 1 && g_restores == 1);
+    assert(g_popup_count == 1 && g_popup_top == 0x1234);
+
+    reset_fakes();
+    // 原生面板先占一层，模块设置弹层再压在其上；deactivate 只 pop 模块 entry。
+    g_popup_count = 2;
+    g_popup_top = 0x5678;
+    auto native_under_module = make_host();
+    assert(native_under_module.open(kPanelA, true));
+    assert(g_popup_count == 3 && g_popup_top == 0x9999);
+    g_delay_pop = true;
+    assert(!native_under_module.deactivate_provider("owner.a", true));
+    assert(native_under_module.close_pending_for_test() && g_restores == 0);
+    assert(g_popup_count == 3 && g_popup_top == 0x9999);
+    const int one_pop_only = g_process_calls;
+    assert(!native_under_module.deactivate_provider("owner.a", true));
+    assert(g_process_calls == one_pop_only && g_restores == 0);
+    // 游戏帧提交一次 pop 后，原生面板仍在栈顶，才能还原 host hook。
+    g_popup_count = 2;
+    g_popup_top = 0x5678;
+    assert(native_under_module.pump(true));
+    assert(g_restores == 1 && !native_under_module.close_pending_for_test());
+    assert(g_popup_count == 2 && g_popup_top == 0x5678);
+
+    reset_fakes();
+    auto delayed_pop = make_host();
+    assert(delayed_pop.open(kPanelA, true));
+    // 模拟一次 pop 已发起但游戏帧尚未提交：旧模块 entry 仍在栈顶。
+    g_delay_pop = true;
+    assert(!delayed_pop.deactivate_provider("owner.a", true));
+    assert(g_restores == 0 && delayed_pop.close_pending_for_test());
+    assert(g_popup_count == 2 && g_popup_top == 0x9999);
+    g_popup_count = 1;
+    g_popup_top = 0x1234;
+    assert(delayed_pop.pump(true));
+    assert(g_restores == 1 && !delayed_pop.close_pending_for_test());
 
     reset_fakes();
     auto deactivate_after_close = make_host();
@@ -194,6 +265,17 @@ int main() {
     deactivate_host.deactivate(true);
     assert(deactivate_host.pump(true));
     assert(!deactivate_host.active_for_test() && g_close_a == 1 && g_restores == 1);
+
+    reset_fakes();
+    auto deactivate_custom_ui = make_host();
+    assert(deactivate_custom_ui.open(kPanelA, true));
+    assert(deactivate_custom_ui.open(kPanelB, true));
+    const int process_calls_before_deactivate = g_process_calls;
+    deactivate_custom_ui.deactivate(true);
+    assert(deactivate_custom_ui.pump(true));
+    assert(g_process_calls == process_calls_before_deactivate + 1);
+    assert(g_last_process == 3 && g_popup_count == 1 && g_popup_top == 0x1234);
+    assert(g_close_a == 2 && g_close_b == 1 && g_restores == 1);
 
     reset_fakes();
     auto synchronous = make_host();

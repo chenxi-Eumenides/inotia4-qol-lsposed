@@ -28,6 +28,7 @@ bool ui_panels_open(const char* panel_id);
 void ui_panels_close(const char* panel_id);
 bool ui_panels_active(const char* panel_id);
 bool ui_panels_deactivate_owner(const char* owner);
+int32_t ui_panels_frame_pump(int64_t frame, void* context);
 
 // 占用原因：优先返回栈顶仍处于 active 的 provider 的 block_reason；都不占用返回 nullptr。
 // 供存档/进档等 API 守卫（verbatim 文案由各 provider 提供）。

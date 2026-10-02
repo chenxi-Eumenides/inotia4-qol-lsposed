@@ -30,6 +30,8 @@ int g_acquires = 0;
 int g_restores = 0;
 int g_pushes = 0;
 int g_pops = 0;
+uint32_t g_popup_count = 0;
+uintptr_t g_popup_top = 0;
 uint32_t g_slots[5] = {};
 
 void settings_enter() { ++g_enter_calls; g_panel_active = true; ++g_slots[0]; }
@@ -77,13 +79,26 @@ QolResult restore_popup(QolPopupStateEntry* entry) {
 QolResult set_popup_process_info(int32_t process, int32_t state_id) {
     if (process == 1) {
         ++g_pushes;
+        ++g_popup_count;
+        g_popup_top = 0x9999;
         assert(state_id == 17);
         assert(g_popup_hooks != nullptr);
         g_popup_hooks->enter();
     } else {
         ++g_pops;
         assert(process == 3 && state_id == 0);
+        if (g_popup_count > 0) --g_popup_count;
+        g_popup_top = 0;
     }
+    return qol::contracts::ok();
+}
+
+QolResult popup_stack_snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
+    if (count == nullptr || top_enter_vma == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *count = g_popup_count;
+    *top_enter_vma = g_popup_top;
     return qol::contracts::ok();
 }
 
@@ -115,6 +130,7 @@ int main() {
 
     contracts::QolUiAdapter ui{};
     ui.set_popup_process_info = &set_popup_process_info;
+    ui.popup_stack_snapshot = &popup_stack_snapshot;
     contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor,
                contracts::kHostSdkMinor};

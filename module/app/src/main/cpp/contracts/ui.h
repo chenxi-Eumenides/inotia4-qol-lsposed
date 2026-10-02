@@ -13,7 +13,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 5;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 6;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -213,6 +213,9 @@ struct QolUiAdapter {
     QolResult (*clear_touch_state)();
     QolResult (*set_touch_release_input)(int64_t, int64_t, uint64_t);
     QolResult (*clear_touch_drop_event)();
+
+    // Read-only game popup stack snapshot; main-thread only.
+    QolResult (*popup_stack_snapshot)(uint32_t*, uintptr_t*);
 };
 
 }  // namespace qol::contracts
