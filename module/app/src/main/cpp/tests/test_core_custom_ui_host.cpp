@@ -20,6 +20,7 @@ int g_last_process = -1;
 int g_last_state_id = -1;
 bool g_acquire_ok = true;
 bool g_resolve_ok = true;
+bool g_snapshot_ok = true;
 bool g_a_active = false;
 bool g_b_active = false;
 int g_open_a = 0;
@@ -63,7 +64,7 @@ bool restore_popup(void*, QolPopupStateEntry* entry) {
 }
 
 bool popup_stack_snapshot(void*, uint32_t* count, uintptr_t* top_enter_vma) {
-    if (count == nullptr || top_enter_vma == nullptr) return false;
+    if (!g_snapshot_ok || count == nullptr || top_enter_vma == nullptr) return false;
     *count = g_popup_count;
     *top_enter_vma = g_popup_top;
     return true;
@@ -138,6 +139,7 @@ void reset_fakes() {
     g_sync_enter_on_push = false;
     g_deactivate_during_event = nullptr;
     g_acquire_ok = g_resolve_ok = true;
+    g_snapshot_ok = true;
     g_a_active = g_b_active = false;
     g_popup_count = 1;
     g_popup_top = 0x1234;
@@ -181,6 +183,18 @@ int main() {
     assert(g_last_process == 3);
     assert(host.pump(true));
     assert(g_restores == 1 && !host.close_pending_for_test());
+
+    reset_fakes();
+    auto baseline_snapshot_failed = make_host();
+    g_snapshot_ok = false;
+    assert(baseline_snapshot_failed.open(kPanelA, true));
+    assert(baseline_snapshot_failed.active_for_test());
+    assert(baseline_snapshot_failed.close("panel.a", true));
+    assert(baseline_snapshot_failed.close_pending_for_test());
+    assert(baseline_snapshot_failed.pump(true));
+    assert(!baseline_snapshot_failed.close_pending_for_test());
+    assert(!baseline_snapshot_failed.active_for_test());
+    assert(g_close_a == 1 && g_restores == 1 && g_last_process == 3);
 
     reset_fakes();
     auto deactivate_top = make_host();
@@ -241,6 +255,18 @@ int main() {
     g_popup_top = 0x1234;
     assert(delayed_pop.pump(true));
     assert(g_restores == 1 && !delayed_pop.close_pending_for_test());
+
+    reset_fakes();
+    auto strict_snapshot = make_host();
+    assert(strict_snapshot.open(kPanelA, true));
+    g_delay_pop = true;
+    assert(strict_snapshot.close("panel.a", true));
+    assert(strict_snapshot.pump(true));
+    assert(g_restores == 0 && strict_snapshot.close_pending_for_test());
+    g_popup_count = 1;
+    g_popup_top = 0x1234;
+    assert(strict_snapshot.pump(true));
+    assert(g_restores == 1 && !strict_snapshot.close_pending_for_test());
 
     reset_fakes();
     auto deactivate_after_close = make_host();

@@ -22,6 +22,8 @@ int g_fill_rect_calls = 0;
 int g_set_text_calls = 0;
 int g_set_draw_proc_calls = 0;
 int g_draw_control_calls = 0;
+bool g_popup_snapshot_ok = true;
+bool g_game_main_thread = true;
 UiClickProc g_click_proc = nullptr;
 void* g_click_user = nullptr;
 
@@ -94,9 +96,9 @@ bool ui_clear_touch_drop_event() { return true; }
 namespace qol::game {
 bool g_attr_insert_value_color_ok = true;
 bool attr_insert_value_color(char*, char*, char) { return g_attr_insert_value_color_ok; }
-bool game_host_is_main_thread() { return true; }
+bool game_host_is_main_thread() { return g_game_main_thread; }
 bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
-    if (out_count == nullptr || out_top_enter_vma == nullptr) return false;
+    if (!g_popup_snapshot_ok || out_count == nullptr || out_top_enter_vma == nullptr) return false;
     *out_count = 0;
     *out_top_enter_vma = 0;
     return true;
@@ -197,6 +199,17 @@ int main() {
     CHECK(adapter->control_parent != nullptr);
     CHECK(adapter->find_root != nullptr);
     CHECK(adapter->insert_inline_color != nullptr);
+
+    uint32_t popup_count = 42;
+    uintptr_t popup_top = 0x42;
+    CHECK(adapter->popup_stack_snapshot(&popup_count, &popup_top).ok == kQolOk);
+    CHECK(popup_count == 0 && popup_top == 0);
+    g_popup_snapshot_ok = false;
+    CHECK(adapter->popup_stack_snapshot(&popup_count, &popup_top).code == kQolErrNotReady);
+    g_popup_snapshot_ok = true;
+    g_game_main_thread = false;
+    CHECK(adapter->popup_stack_snapshot(&popup_count, &popup_top).code == kQolErrNotReady);
+    g_game_main_thread = true;
 
     qol::contracts::QolUiComponents components{};
     components.size = sizeof(components);

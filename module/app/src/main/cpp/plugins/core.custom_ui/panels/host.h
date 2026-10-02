@@ -56,6 +56,7 @@ private:
     bool capture_owned_popup();
     void log_pop_issued();
     void log_snapshot(const char* event, uint32_t count, uintptr_t top_enter_vma);
+    void log_message(const char* format, ...);
     const contracts::PanelCallbacks* current_callbacks() const;
     bool close_top();
     void restore_if_idle();
@@ -80,6 +81,14 @@ private:
     bool pop_issued_ = false;
     bool deactivating_ = false;
     bool main_thread_ = false;
+    int last_open_stack_size_ = -1;
+    bool last_open_main_thread_ = false;
+    bool last_open_deactivating_ = false;
+    bool last_open_close_pending_ = false;
+    bool last_snapshot_log_valid_ = false;
+    bool last_snapshot_log_ok_ = false;
+    uint32_t last_snapshot_log_count_ = 0;
+    uintptr_t last_snapshot_log_top_vma_ = 0;
 };
 
 }  // namespace qol::features::core_ui
