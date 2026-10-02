@@ -48,7 +48,7 @@
 
 | ID | 级 | 问题 | 证据 | 状态 |
 |---|---|---|---|---|
-| CHR-01 | P1 | `POST /api/op/character/{role}/hp` 无效：`ops::set_hp` 写 `ch+0x1F0`（C_HP）成功且票据 done，但该字段是引擎每帧按权威来源重写的**镜像**——真机 10ms 高频采样确认「写入瞬时可见、≤1 帧内被覆盖」；战斗中回血不能维持生存（436 次维持写入仍阵亡）；金钱写入（不同函数链 `fn_minus_money`）对照有效。`set_mp` 按同字段体系推定同型（待取证）。读路径同患：战斗中 party hp 为帧缓存值（滞后 ~1s，观测到读 0 而 raw 4772） | `.tmp/hp-write-probe/`（poke/trace/hifreq/slots 系列）、`game/ops/character_write.cpp:56-69`、`game_symbols.h:20,73-76` | 开放（修复方向：改用游戏自身 HP 变更/治疗函数链或写权威结构；先 RE 权威来源。阻塞战斗类真机流程） |
+| CHR-01 | P1 | `POST /api/op/character/{role}/hp` 无效：`ops::set_hp` 写 `ch+0x1F0`（C_HP）成功且票据 done，但该字段是引擎每帧按权威来源重写的**镜像**——真机 10ms 高频采样确认「写入瞬时可见、≤1 帧内被覆盖」；战斗中回血不能维持生存（436 次维持写入仍阵亡）；金钱写入（不同函数链 `fn_minus_money`）对照有效。`set_mp` 按同字段体系推定同型（待取证）。读路径同患：战斗中 party hp 为帧缓存值（滞后 ~1s，观测到读 0 而 raw 4772） | `.tmp/hp-write-probe/`（poke/trace/hifreq/slots 系列）、`game/ops/character_write.cpp:56-69`、`game_symbols.h:20,73-76` | 已修复（`98a63af1`）：`set_hp`/`set_mp` 改为读当前值→clamp→按 `目标−当前` 调游戏 `CHAR_AddLife`(0xEA184)/`CHAR_AddMana`(0xE0958)（真机确认周期恢复链 `CHARSYSTEM_Process→CHARSYSTEM_ProcessAttributeRegen→CHAR_AddLife/AddMana`），不再直写字段。真机 VM-K5-04e 专项 **PASS**（写后不再被拉满、regen 正常、上限钳制正确）。残余未定：匿名写候选 0x184210/0x185A50、跨变体 |
 | CHR-03 | P1 | 6 条 Kotlin `notImpl()` 占位路由（skill-point/skill-level/heal/rest/revive/hate）`op_gated=1` 实际失效：501 抛于 op 门禁之前，op 开/关两态不可区分，与 api-reference §8 门控口径矛盾 | `plugins/core.api/routes.inc:85-95`、`OpController.kt`；审计 F2；smoke 基线仅记 501 | 开放（候选：迁 native dispatch 占位/改文档口径/Kotlin 补门禁） |
 | CHR-11 | P3 | 写后读己写：GET 快照节拍 15 帧（≈250ms）内返回旧值，契约未声明该窗口 | `plugin.cpp:400-426`；审计 F17 | 开放（文档声明或事件化刷新） |
 
