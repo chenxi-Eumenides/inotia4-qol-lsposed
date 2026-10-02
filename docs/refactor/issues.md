@@ -49,16 +49,18 @@
 | ID | 级 | 问题 | 证据 | 状态 |
 |---|---|---|---|---|
 | CHR-01 | P1 | `POST /api/op/character/{role}/hp` 无效：`ops::set_hp` 写 `ch+0x1F0`（C_HP）成功且票据 done，但该字段是引擎每帧按权威来源重写的**镜像**——真机 10ms 高频采样确认「写入瞬时可见、≤1 帧内被覆盖」；战斗中回血不能维持生存（436 次维持写入仍阵亡）；金钱写入（不同函数链 `fn_minus_money`）对照有效。`set_mp` 按同字段体系推定同型（待取证）。读路径同患：战斗中 party hp 为帧缓存值（滞后 ~1s，观测到读 0 而 raw 4772） | `.tmp/hp-write-probe/`（poke/trace/hifreq/slots 系列）、`game/ops/character_write.cpp:56-69`、`game_symbols.h:20,73-76` | 开放（修复方向：改用游戏自身 HP 变更/治疗函数链或写权威结构；先 RE 权威来源。阻塞战斗类真机流程） |
-| CHR-02 | P1 | `set_skill_usage` 迁移断裂：HTTP 路由挂 `core.feature` 501 占位，底层 `ops::set_skill_usage`（全局位域）已实现未接通；文档规划语义（action_id/mode 档位）与底层能力（无单技能档位）冲突；正确 owner 应为 core.character | `game/ops/character_write.h:39-42`、`core.feature/plugin.cpp`；审计 F1；VM-P5-CORE-FEATURE-01 NOT_ACCEPTED | 开放（裁决：按全局 onoff 实现并入 core.character+删 core.feature，或挂账） |
 | CHR-03 | P1 | 6 条 Kotlin `notImpl()` 占位路由（skill-point/skill-level/heal/rest/revive/hate）`op_gated=1` 实际失效：501 抛于 op 门禁之前，op 开/关两态不可区分，与 api-reference §8 门控口径矛盾 | `plugins/core.api/routes.inc:85-95`、`OpController.kt`；审计 F2；smoke 基线仅记 501 | 开放（候选：迁 native dispatch 占位/改文档口径/Kotlin 补门禁） |
-| CHR-04 | P2 | `set_exp` int64 入参静默截断 int32（exp>2^31 回绕写入错误值），Kotlin/native 均只查下界 | `plugin.cpp:1147-1151`、`character_write.cpp:113`；审计 F8 | 开放 |
-| CHR-05 | P2 | `add_stat` attrs 数量无上界，单请求可触发数百次主线程逐点写入与缓存刷新 | `plugin.cpp:1092-1120`；审计 F9 | 开放（上界待裁决：≤255 或 ≤剩余能力点） |
-| CHR-06 | P2 | `json_slice`（~250 行不可信输入切片解析器）无直接单测，仅 fixture 间接覆盖 | `json_slice.cpp`；审计 F13 | 开放（补截断/转义/嵌套/超长 key 用例） |
-| CHR-07 | P2 | `QOL_PORT_CHARACTER_HTTP` 未在端口解析处限 core.character 私有，port 实现无主线程断言（头文件声明 HTTP 线程不得直调） | `host/plugin_registry.cpp:207-211,271-366`、`contracts/game_ports/character_http_port.h:10-11`；审计 F7 | 开放 |
-| CHR-08 | P2 | 15 条 GET 每次在栈上构造 CharacterSnapshot（≈113KB），seqlock `read()` 最多 8 次重试逐次整块拷贝（最坏 ≈900KB/请求） | `snapshot.h:30-39`、`plugin.cpp:495-496`；审计 F11 | 开放（按需切片/双缓冲） |
-| CHR-09 | P3 | `write_character_state_json` 以 `message_len==11 && "not in game"` 字符串比较识别非 world 态，port 错误文案变更即静默改行为 | `plugin.cpp:366-373`；审计 F16 | 开放（改用 result code 判定） |
-| CHR-10 | P3 | kRoutes/kQueries/kHttpQueries 三数组手工索引对齐，增删路由易错位；constexpr 数据经 const_cast 入契约 | `plugin.cpp:57-82,1492-1543`；审计 F15 | 开放（单表生成） |
 | CHR-11 | P3 | 写后读己写：GET 快照节拍 15 帧（≈250ms）内返回旧值，契约未声明该窗口 | `plugin.cpp:400-426`；审计 F17 | 开放（文档声明或事件化刷新） |
+
+### core.quest（阶段 7 登记）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| QST-03 | P2 | quest/world/inventory 读面逐字节 frozen 对比尚未完成，迁移后读面行为保持证据不足 | VM-T2O-01；阶段 7 审计 | **NOT_ACCEPTED**：仍欠真机逐字节 frozen 对比；证据欠账以 `verification.md` §5 为准 |
+
+### core.system（阶段 7 登记）
+
+本批 SYS-01/02/03/04/06 均已修复（提交 `a30f699e`，快照并发归 `867b0974`/`a225ebcc`）；SYS-05/SYS-07 文档漂移见 §9 DOC-06/DOC-07。关联真机 VM-K5-04d 已复验通过。
 
 ## 4. core.ui_state / core.custom_ui（开放）
 
@@ -86,7 +88,7 @@
 | ENG-06 | P3 | `HttpQueryHandlerDescriptor.ctx` 为 `void*`，声明式插件被迫 const_cast（core.world 7 处等） | `contracts/http.h:72-91`；审计 world-G-02 | 开放（契约级 `const void*` 统一裁决） |
 | ENG-07 | P3 | registry 与 dispatch 两层 owner 停用文案不一致（`http registry inactive` / `http owner inactive`），且 registry 注销删槽 vs dispatch 注销留墓碑，语义分层无文档 | `host/http_registry.cpp:123-125` vs `http_dispatch.cpp:248-256`；审计 world-G-05 | 开放（文档+测试区分） |
 | ENG-08 | P3 | `check_http_routes.py` 不交叉核对各插件 descriptor 的 `http_query_count` 与 routes.inc owner 计数（core.character 35 handler vs 41 路由的差值长期不被发现） | `scripts/maintenance/check_http_routes.py:39-50`；审计 char-G-03 | 开放（工具补校验） |
-| ENG-09 | P3 | Kotlin Controller 中存在同型重复字段校验；`MovementController`/`DebugController` 为解析后转发，传输层校验/转发形态尚未按插件统一登记 | `PartyController`、`CharacterController`、`CombatController`、`OpController`、`SaveController`、`QuestController`、`UiActionController`、`MovementController`、`DebugController`；ITM-06/07 补记 | 待后续按插件处理；本批仅 core.item 的 `InventoryActionController`/`ShopController` 去除重复业务校验 |
+| ENG-09 | P3 | Kotlin Controller 中存在同型重复字段校验；部分 Controller 为解析后转发，传输层校验/转发形态尚未按插件统一登记 | `PartyController`、`CharacterController`、`CombatController`、`OpController`、`SaveController`、`QuestController`、`UiActionController`、`MovementController`、`DebugController`；ITM-06/07 补记 | Quest 实例已修复：`QuestController` 不再预解析并原样透传，`b48d5ab6`；其余 Debug/AutoSell/Movement/Party/Save/Op/Character/UiAction/Combat 仍待后续按插件处理。本批 core.item `InventoryActionController`/`ShopController` 已去除重复业务校验 |
 
 ## 7. infra / game 适配层（开放）
 
@@ -95,7 +97,6 @@
 | INF-01 | P1 | stack_limit 驻留（residency）无保护：开启期间存档写入 >99 堆叠后，关闭开关（config 或 lifecycle）使 enter_slot 预检判 `slot corrupt` 无法进档（stage load_data）；真机复现：SET-01 的门禁翻转致 slot0 不可进，重开门禁+重启进程后恢复。回滚通道=门禁开或存档回档，两者均未在开关语义中提示 | 真机（tickets 18/23/26 failed vs 28 done）；VM-P6-01 驻留证据欠账 | 开放（策略待裁决：关闭前 clamp/禁止关/关闭态预检豁免并声明） |
 | INF-02 | P2 | `game_cache` 惰性槽在**请求线程持 `g_cache_mtx` 调 builder**，builder 内 `wait_frame_boundary` 以 1ms sleep 轮询：HTTP 线程可被长时间阻塞；若任何持 `g_virtual_bag_mtx` 的路径触达缓存刷新即重入 `for_each_logical_item` 死锁——现靠「EB 的 op_ok 全在锁外」约定维持，无机制校验 | `core/native/game_cache.cpp:101-119,143-164`；审计 item-G-03；AGENTS 锁规则 | 开放（校验手段：断言/测试或锁序文档化） |
 | INF-03 | P2 | `frame_cache_force_refresh` 每次 op_ok/卖店/丢弃全量重建 12 个缓存槽（含地图/玩家/队伍），且写结果已即时序列化一次，重复成本高 | `game_cache.cpp:185-195`；审计 item-G-05 | 开放（性能项） |
-| INF-04 | P3 | 插件私有 `Snapshot` 副本与 infra 版同构但互不同步：publish 无多写者断言（单写者不变式仅靠生命周期串行约定），distance 等 HTTP 读依赖该约定 | `plugins/core.world/snapshot.h`、`plugins/core.character/snapshot.h`；审计 I-04/G-07/F-18 | 开放（断言或统一快照组件） |
 | INF-05 | P3 | `item_count_facade` 裸指针 `g_provider` set-once 无原子、deactivate 不清除（stack_limit 刻意常驻）；契约未记录该约束 | `game/adapter_ports/item_count_facade.cpp`；审计 item-G-06 | 开放（注释/断言固定） |
 | INF-06 | P3 | `capabilities.require` 无锁：注册/撤销在主线程，契约未禁止 HTTP 线程 require（数据竞争窗口） | `infra/capabilities.cpp:68-81`；审计 char-G-05 | 开放（契约声明线程约束+断言） |
 | INF-07 | P3 | 注册容量 `kMaxHandlers=128`、`kMaxPending=1024` 无余量诊断，冲突/超限错误仅落装配日志 | `http_dispatch.cpp:17`、`command_queue.cpp:22`；审计 char-G-06 | 开放 |
@@ -118,8 +119,13 @@
 |---|---|---|
 | DOC-01 | api-reference × core.world | `/map/id` 示例键名 `id` 实际 `map_id`；distance 示例含 `in_map`、`nearest:null(found=true)` 与实现不符；「drops 恒为空」被真机非空证据证伪；4 条写端点章节仍描述同步响应应改票据契约并交叉引用 §7.10 |
 | DOC-02 | api-reference × core.item | `/items` 每项「附 bag 字段」实际无；EB 容量「16/8/4/0/0」实际按袋派生 [16,16,12,12,12] |
-| DOC-03 | api-reference + game_symbols.h × core.character | §2 章首「设计草案（代码待实现）」过时；装备「position」字段实际为 `slot`；`max_level` 标注「待实现」实际已输出；`set_skill_usage` 规划语义与底层能力冲突（关联 CHR-02）；`game_symbols.h` bit0-2 注释实际 bit0-3 |
+| DOC-03 | api-reference + game_symbols.h × core.character | §2 章首「设计草案（代码待实现）」过时；装备「position」字段实际为 `slot`；`max_level` 标注「待实现」实际已输出；`set_skill_usage` 仍需将用户裁决的 501 占位/不实现语义同步到文档（关联 CHR-02）；`game_symbols.h` bit0-2 注释实际 bit0-3 |
 | DOC-04 | build-and-deploy × 全局 | 真机流程补充：阵亡恢复链（wipeout→game_over→**人工一次点按**→enter_slot，API 无法推进 UIS-01）；smoke 写副作用警示（TL-02）；config 三键的门禁语义警示（SET-01） |
+| DOC-05 | api-reference × core.character | API 文档记载「33 条票据路由」与当前实际 41 条 `core.character` owner 路由不符；其中 35 条 native handler、6 条 Kotlin 501 占位。CHR-A7 |
+| DOC-06 | api-reference × core.system | `/api/system/info` 示例含实现不存在的 `game` 字段；`game_frame` 采样语义与旧地址描述不准确。SYS-05 |
+| DOC-07 | health 文档 × core.api / Kotlin host | health 的 `ready` 按 Kotlin `ControllerGuard` 窄定义判断，当前恒真；不得将其描述成游戏世界或插件就绪保证。SYS-07 |
+
+> DOC-06/07 的具体文档段落和应采用的完整措辞尚未在本批核对；本次只登记漂移，不更新 api-reference 或 health 文档。
 
 ## 10. 无法验证项（用户确认后登记，不再主动验收）
 
@@ -127,6 +133,8 @@
 |---|---|---|---|
 | UNVER-01 | core.world（写执行链 game/access/world.cpp 的 `tutorial_block_error` 分支） | 教学态拦截：药水教学激活时 world 写面被拒绝、读面暂态语义 | 无教学存档可进入教学态（用户 2026-09-28 确认）；不再主动验收，代码保持现状 |
 | UNVER-02 | core.item / extension_bag | 掷骰；镶嵌；强化；商店购买；ITM-01 bag5 任务袋读取；`bag6 slot11` 写入前态 | 无 pending dice、背包无宝石、无原版强化卷轴且 EB 关闭、商店为空、任务袋为空；EB 关闭无法读取 `bag6 slot11` 写前态。用户确认留到后续其它插件审阅时再测，此后不再主动验收 |
+
+> QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 
 ## 附录：已修复问题（存证）
 
@@ -143,3 +151,8 @@
 | FIX-09 | extension_bag render/runtime + draw 读态快照 | **背包面板冻结**（真机事故 14:32:53，GLThread 栈顶 `MutexLockWithTimeout`←`Scene_Draw_POPUP_SC_EQUIP+528`）：hook 入口 `P_EXT_INVEN_DRAW_END`（`F_SCENE_DRAW_EQUIP_VMA+0x210`）的 `virtual_bag_draw_end_wrapper` 持 `g_virtual_bag_mtx` 后调 `virtual_bag_inventory_state_id` 重取同非递归 mutex=GLThread 同线程自锁 | 锁外先读状态快照（改走 `world_facts.state`+`draw_state_lock.h`），锁内只做快照消费；新增重入回归 `test_extension_bag_draw_lock.cpp`；host 83/83、check_arch/routes/diff/build+patch 3/3；真机物理触摸开关面板 10/10 轮无冻结（首因实证）；证据 `.tmp/panel-freeze/`。（状态源改动 `world_facts.state` 已由 FIX-10 回退为读 acquire 设置的 `g_state_entry`） |
 | FIX-10 | extension_bag render/model/public_runtime + tests | 扩展背包面板打开后**每帧重建风暴**并 SIGSEGV：draw-end 清理分支（`extension_bag_render.inc`）对持续非 5 状态每帧调 `prepare_main_menu_locked()` → 重置加载态并递增页签 generation，下一帧绘制 wrapper 重载 sidecar、重装页签 → 原生 `ControlButton_Create` 拿到空控件后 `ControlObject_SetUserType` 空指针（真机 API 打开面板 15s 内 generation 2→227、sidecar 226 次）。FIX-09 的状态源改动使面板打开读到全局 state（实测 4）而非背包 PopupState，放大该误判，但 revert 单独不能消除风暴 | ①`virtual_bag_inventory_state_id()` 恢复读 `g_state_entry`（保留 `with_snapshot_then_lock` 锁外快照 + 锁内消费结构）；②新增 `model/main_menu_cleanup_edge.h`，draw-end 清理改**边沿/幂等**触发（仅状态变化或上次清理失败重试时执行）。host `extension_bag_draw_lock_tests` 19 passed、全量 83/83、check_arch/routes/diff 通过；真机 API 路径 sidecar 仅加载 1 次、无逐帧重装、8 轮开关无崩溃、FATAL/SIGSEGV=0。**物理触摸路径与扩展页签点击待人工复验（VM-23/VM-24/VM-29）** |
 | FIX-11 | core.character + tests | `add_stat` 的 `attrs` / `set_attr` 的 `stats` 数值经 `char_opt_int` 复刻 `JSONObject.optInt` 语义被**静默截断**（`1.5`→`1` 并加点），与 Kotlin 迁移前逐字一致但存在无声数据变更隐患（对应 ITM-06 数字解析面） | `char_parse_points` 取值处新增非整数校验：数值解析为 double 后含小数部分 → 400 `bad value for $k (must be integer)`；整数值 double（如 `2.0`、`1e2`）保持接受；未改动 `char_opt_int`/`char_parse_android_*`（其它字段仍依赖 optInt 逐字语义），既有 `must be positive`/`(0-255)` 文案不变。host `character_facts_dispatch_tests` 先红（4 断言）后绿；api-reference §7.9/§7.10 错误面同步。**真机 VM-K5-08h 待复验** |
+| INF-04 | infra + core.world/core.character/core.quest/core.system/core.item | 五插件私有 seqlock 使用非原子 `data_` 并发读写，构成 C++ 数据竞争/未定义行为；单写者约定不能保护 HTTP 读线程 | 五插件本地 `snapshot.h`；阶段 7 静态审计；host/TSan 证据随 `867b0974`/`a225ebcc` | 已修复：Host SDK 快照 API minor 15，infra 改为 immutable `shared_ptr` 快照实现；五插件 character/item/quest/system/world 迁移并删除本地 `snapshot.h`。提交：`867b0974`、`a225ebcc`；Host/TSan 证据按对应提交验证记录。关联 CHR-08、QST-01、SYS-01 |
+| CHR-02 / CHR-A8 | core.character | `set_skill_usage` 不具备旧规划所需的单技能/action_id 档位控制；native 只有全局位域开关 | `game/ops/character_write.h:39-42`；阶段 7 静态审计 | 用户裁决保持 501 占位、不实现；路由 owner/占位行为按现状保留 |
+| CHR-04/05/06/07/08/09/10 | core.character | `set_exp` 窄化、`add_stat` 无上界、json_slice 缺测、HTTP port owner/线程守卫、快照失败无告警/并发风险、not-in-game 文案比较、路由表索引对齐 | 阶段 7 静态审计 | 修复批 `e743e6a1`；快照并发项由 INF-04 的 `867b0974`/`a225ebcc` 修复。monster v31 `set_exp` INT32_MAX 合法完成、越界/负值 400 且无票据；`add_stat` 超剩余点数拒绝且无部分加点，合法差分正确（`.tmp/triple-device-verify/`） |
+| QST-01/QST-02 | core.quest | 私有快照并发读写不安全；`quit_quest` 对 `quest_id` 宽松解析，可能将非法输入归一化为有效任务 ID | `plugins/core.quest/snapshot.h`、`game/access/quest.cpp`、`QuestController.kt`；阶段 7 静态审计；真机复验 `.tmp/quest-verify2/` | QST-01 随 INF-04 修复（`867b0974`/`a225ebcc`）；QST-02 native 严格解析 `95b2d004` + Kotlin 原样透传 `b48d5ab6`。monster v31 非法值均 400 `questId required` 且无票据，合法 ID ticket done |
+| SYS-01/02/03/04/06 | core.system | 私有快照并发读写；events handler 绕过 owner/dispatch；身份并发发布；快照失败无告警；测试缺口 | `plugins/core.system/*`、`routes.inc`、`EventsController.kt`；阶段 7 静态审计；真机 `.tmp/triple-device-verify/` | SYS-01 随 INF-04 修复（`867b0974`/`a225ebcc`）；其余由 `a30f699e` 修复。monster v31 验证 events owner、停用 5 条 system 路由 503 `http owner inactive`、启用恢复、events body SHA `24de1c4…`、identity version/package 正确 |
