@@ -26,6 +26,7 @@ constexpr int kPanelStackDepth = 4;
 // `UiPanelsApi` 实现：经 Host SDK panels 表分发。
 bool ui_panels_open(const char* panel_id);
 void ui_panels_close(const char* panel_id);
+bool ui_panels_back();
 bool ui_panels_active(const char* panel_id);
 bool ui_panels_deactivate_owner(const char* owner);
 int32_t ui_panels_frame_pump(int64_t frame, void* context);

@@ -222,6 +222,7 @@ bool PopupHost::close_top() {
         close_pending_ = true;
         pending_provider_ = previous;
         pop_issued_ = true;
+        restore_if_idle();
     }
     return true;
 }

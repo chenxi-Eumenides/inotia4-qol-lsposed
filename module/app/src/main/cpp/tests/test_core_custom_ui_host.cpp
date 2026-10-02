@@ -27,6 +27,9 @@ int g_open_a = 0;
 int g_open_b = 0;
 int g_close_a = 0;
 int g_close_b = 0;
+bool g_c_active = false;
+int g_open_c = 0;
+int g_close_c = 0;
 int g_slots[5] = {};
 uint32_t g_popup_count = 1;
 uintptr_t g_popup_top = 0x1234;
@@ -120,16 +123,20 @@ uint32_t b_event(uint64_t, uint64_t, uint64_t) { g_slots[4] += 10; return 42; }
 bool open_a() { ++g_open_a; g_a_active = true; return true; }
 bool fail_open() { ++g_open_a; return false; }
 bool open_b() { ++g_open_b; g_b_active = true; return true; }
+bool open_c() { ++g_open_c; g_c_active = true; return true; }
 void close_a() { ++g_close_a; g_a_active = false; }
 void close_b() { ++g_close_b; g_b_active = false; }
+void close_c() { ++g_close_c; g_c_active = false; }
 bool active_a() { return g_a_active; }
 bool active_b() { return g_b_active; }
+bool active_c() { return g_c_active; }
 const char* reason() { return nullptr; }
 
 const PanelCallbacks kCallbacksA{a_enter, a_process, a_f3, a_f4, a_event};
 const PanelCallbacks kCallbacksB{b_enter, b_process, b_f3, b_f4, b_event};
 const PanelProviderSpec kPanelA{"panel.a", "owner.a", open_a, close_a, active_a, reason, &kCallbacksA};
 const PanelProviderSpec kPanelB{"panel.b", "owner.b", open_b, close_b, active_b, reason, &kCallbacksB};
+const PanelProviderSpec kPanelC{"panel.c", "owner.c", open_c, close_c, active_c, reason, &kCallbacksB};
 
 void reset_fakes() {
     g_resolves = g_acquires = g_restores = 0;
@@ -140,14 +147,14 @@ void reset_fakes() {
     g_deactivate_during_event = nullptr;
     g_acquire_ok = g_resolve_ok = true;
     g_snapshot_ok = true;
-    g_a_active = g_b_active = false;
+    g_a_active = g_b_active = g_c_active = false;
     g_popup_count = 1;
     g_popup_top = 0x1234;
     g_pending_count = 0;
     g_pending_top = 0;
     g_logs = 0;
     g_delay_pop = false;
-    g_open_a = g_open_b = g_close_a = g_close_b = 0;
+    g_open_a = g_open_b = g_open_c = g_close_a = g_close_b = g_close_c = 0;
     std::memset(g_slots, 0, sizeof(g_slots));
 }
 
@@ -172,17 +179,23 @@ int main() {
 
     assert(host.open(kPanelB, true));
     assert(g_close_a == 1 && g_open_b == 1 && g_acquires == 1);
+    assert(host.open(kPanelC, true));
+    assert(g_close_b == 1 && g_open_c == 1 && host.current_panel_for_test() == "panel.c");
     dispatch->enter();
     assert(g_slots[0] == 11);
+    assert(host.close("panel.c", true));
+    assert(g_close_c == 1 && g_open_b == 2 && host.current_panel_for_test() == "panel.b");
     assert(host.close("panel.b", true));
-    assert(g_close_b == 1 && g_open_a == 2 && host.current_panel_for_test() == "panel.a");
+    assert(g_close_b == 2 && g_open_a == 2 && host.current_panel_for_test() == "panel.a");
 
     assert(host.close("panel.a", true));
     assert(!host.close("panel.a", true));
-    assert(g_restores == 0 && host.close_pending_for_test());
-    assert(g_last_process == 3);
-    assert(host.pump(true));
     assert(g_restores == 1 && !host.close_pending_for_test());
+    assert(g_last_process == 3);
+    assert(host.open(kPanelA, true) && g_acquires == 2);
+    assert(host.close("panel.a", true) && g_restores == 2);
+    assert(host.pump(true));
+    assert(g_restores == 2 && !host.close_pending_for_test());
 
     reset_fakes();
     auto baseline_snapshot_failed = make_host();
@@ -190,7 +203,7 @@ int main() {
     assert(baseline_snapshot_failed.open(kPanelA, true));
     assert(baseline_snapshot_failed.active_for_test());
     assert(baseline_snapshot_failed.close("panel.a", true));
-    assert(baseline_snapshot_failed.close_pending_for_test());
+    assert(!baseline_snapshot_failed.close_pending_for_test());
     assert(baseline_snapshot_failed.pump(true));
     assert(!baseline_snapshot_failed.close_pending_for_test());
     assert(!baseline_snapshot_failed.active_for_test());

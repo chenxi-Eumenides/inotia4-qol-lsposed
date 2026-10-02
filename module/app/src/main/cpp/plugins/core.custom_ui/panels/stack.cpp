@@ -50,18 +50,22 @@ void drop_top() {
 }
 
 // 关闭栈顶：调 provider.close（幂等）后弹栈。
-void close_top() {
-    if (g_depth == 0) return;
+bool close_top() {
+    if (g_depth == 0) return false;
     const contracts::PanelProviderSpec* provider = provider_of(g_stack[g_depth - 1]);
+    bool closed = false;
     if (provider != nullptr && provider->close != nullptr) {
         if (g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)) {
-            (void)g_popup_host->close(provider->panel_id, true);
+            closed = g_popup_host->close(provider->panel_id, true);
             (void)g_popup_host->pump(true);
         } else {
             provider->close();
+            closed = true;
         }
     }
+    if (!closed) return false;
     drop_top();
+    return true;
 }
 
 // provider 可能自行关闭（游戏内返回键），栈记录会滞后：只丢记录，不再调 close
@@ -124,7 +128,7 @@ bool ui_panels_open(const char* panel_id) {
         push(panel_id);
         return true;
     }
-    if (g_depth >= kPanelStackDepth) close_top();
+    if (g_depth >= kPanelStackDepth && !close_top()) return false;
     const bool opened = g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)
         ? g_popup_host->open(*provider, true)
         : provider->open();
@@ -134,7 +138,7 @@ bool ui_panels_open(const char* panel_id) {
     }
     // 失败兜底：关栈顶再开。嵌套 push 在游戏 popup 栈满时失败，关掉上层后重试。
     if (g_depth > 0) {
-        close_top();
+        if (!close_top()) return false;
         const bool retry_opened = g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)
             ? g_popup_host->open(*provider, true)
             : provider->open();
@@ -151,7 +155,7 @@ void ui_panels_close(const char* panel_id) {
     const int index = stack_index_of(panel_id);
     if (index >= 0) {
         // 关闭该面板及其之上的全部面板（保持与 UI 栈一致）。
-        while (g_depth > index) close_top();
+        while (g_depth > index && close_top()) {}
         return;
     }
     const contracts::PanelProviderSpec* provider = provider_of(panel_id);
@@ -164,6 +168,11 @@ void ui_panels_close(const char* panel_id) {
             provider->close();
         }
     }
+}
+
+bool ui_panels_back() {
+    prune_inactive_top();
+    return close_top();
 }
 
 bool ui_panels_deactivate_owner(const char* owner) {

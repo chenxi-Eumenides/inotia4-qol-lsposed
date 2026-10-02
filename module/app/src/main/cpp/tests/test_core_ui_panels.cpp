@@ -20,6 +20,7 @@ using qol::contracts::PanelItemKind;
 using qol::contracts::PanelProviderSpec;
 using qol::contracts::QolHostSdk;
 using qol::features::core_ui::ui_panels_active;
+using qol::features::core_ui::ui_panels_back;
 using qol::features::core_ui::ui_panels_block_reason;
 using qol::features::core_ui::ui_panels_close;
 using qol::features::core_ui::ui_panels_depth_for_test;
@@ -235,6 +236,21 @@ void test_stack_block_reason_top_first() {
     CHECK(std::strcmp(ui_panels_block_reason(), "ui occupied: settings panel") == 0);
 }
 
+void test_stack_nested_back_order() {
+    reset_fakes();
+    CHECK(ui_panels_open("pa"));
+    CHECK(ui_panels_open("pb"));
+    CHECK(ui_panels_open("pc"));
+    CHECK(ui_panels_depth_for_test() == 3);
+    CHECK(ui_panels_back());
+    CHECK(ui_panels_depth_for_test() == 2 && !g_f[2].active && g_f[0].active && g_f[1].active);
+    CHECK(ui_panels_back());
+    CHECK(ui_panels_depth_for_test() == 1 && !g_f[1].active && g_f[0].active);
+    ui_panels_close("pa");
+    CHECK(ui_panels_depth_for_test() == 0 && !g_f[0].active);
+    CHECK(!ui_panels_back());
+}
+
 void test_stack_prune_stale_top() {
     reset_fakes();
     CHECK(ui_panels_open("pa"));
@@ -299,6 +315,7 @@ int main() {
     test_stack_open_idempotent();
     test_stack_fallback_close_top();
     test_stack_block_reason_top_first();
+    test_stack_nested_back_order();
     test_stack_prune_stale_top();
     test_stack_depth_limit_and_close();
     test_provider_deactivate_removes_owned_panel();
