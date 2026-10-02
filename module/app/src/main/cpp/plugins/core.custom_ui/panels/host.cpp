@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "../../../contracts/ui.h"
+
 namespace qol::features::core_ui {
 namespace {
 
@@ -22,6 +24,11 @@ bool sdk_popup_restore(void* context, contracts::QolPopupStateEntry* entry) {
     const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
     return sdk != nullptr && sdk->hooks.popup_restore != nullptr &&
         contracts::succeeded(sdk->hooks.popup_restore(entry));
+}
+bool sdk_set_process_info(void* context, int32_t process, int32_t state_id) {
+    const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
+    return sdk != nullptr && sdk->ui != nullptr && sdk->ui->set_popup_process_info != nullptr &&
+        contracts::succeeded(sdk->ui->set_popup_process_info(process, state_id));
 }
 
 void dispatch_enter() { if (g_dispatch_host != nullptr) g_dispatch_host->dispatch_enter(); }
@@ -51,7 +58,7 @@ PopupHost::PopupHost(const char* popup_symbol, PopupHostHooks hooks)
 
 PopupHost::PopupHost(const char* popup_symbol, const contracts::QolHostSdk* sdk)
     : PopupHost(popup_symbol, {const_cast<contracts::QolHostSdk*>(sdk), sdk_popup_resolve,
-                               sdk_popup_acquire, sdk_popup_restore}) {}
+                               sdk_popup_acquire, sdk_popup_restore, sdk_set_process_info}) {}
 
 PopupHost::~PopupHost() {
     if (g_dispatch_host == this) g_dispatch_host = nullptr;
@@ -61,7 +68,7 @@ bool PopupHost::ensure_popup(const contracts::PanelProviderSpec& provider) {
     if (acquired_) return true;
     if (!has_callbacks(provider)) return true;
     if (popup_symbol_ == nullptr || hooks_.resolve == nullptr || hooks_.acquire == nullptr ||
-        hooks_.restore == nullptr) return false;
+        hooks_.restore == nullptr || hooks_.set_process_info == nullptr) return false;
     popup_entry_ = {};
     popup_entry_.state_id = -1;
     if (!hooks_.resolve(hooks_.context, popup_symbol_, &popup_entry_) || popup_entry_.slot == nullptr ||
@@ -86,14 +93,41 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     if (stack_size_ >= kStackCapacity || !ensure_popup(provider)) return false;
 
     const contracts::PanelProviderSpec* previous = stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider;
-    if (previous != nullptr && previous->close != nullptr) previous->close();
+    if (previous != nullptr) {
+        if (previous->close != nullptr) previous->close();
+        if (has_callbacks(*previous) &&
+            !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
+    }
     stack_[stack_size_++].provider = &provider;
     if (!provider.open()) {
         if (provider.active != nullptr && provider.active()) provider.close();
         --stack_size_;
         stack_[stack_size_] = {};
-        if (previous != nullptr) (void)previous->open();
+        if (previous != nullptr) {
+            if (previous->open != nullptr) (void)previous->open();
+            if (has_callbacks(*previous)) {
+                (void)hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id);
+            }
+        }
         if (stack_size_ == 0 && acquired_) {
+            close_pending_ = true;
+            pending_provider_ = &provider;
+        }
+        restore_if_idle();
+        return false;
+    }
+    if (has_callbacks(provider) &&
+        !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) {
+        if (provider.close != nullptr) provider.close();
+        --stack_size_;
+        stack_[stack_size_] = {};
+        if (previous != nullptr) {
+            stack_[stack_size_++].provider = previous;
+            if (previous->open != nullptr) (void)previous->open();
+            if (has_callbacks(*previous)) {
+                (void)hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id);
+            }
+        } else if (acquired_) {
             close_pending_ = true;
             pending_provider_ = &provider;
         }
@@ -107,15 +141,23 @@ bool PopupHost::close_top() {
     if (stack_size_ == 0) return false;
     const contracts::PanelProviderSpec* previous = stack_[stack_size_ - 1].provider;
     if (previous->close != nullptr) previous->close();
+    if (has_callbacks(*previous) &&
+        !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
     stack_[--stack_size_] = {};
     if (stack_size_ > 0) {
         const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
         if (restored->open != nullptr && !restored->open()) return false;
+        if (has_callbacks(*restored) &&
+            !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) return false;
     } else if (acquired_) {
         close_pending_ = true;
         pending_provider_ = previous;
     }
     return true;
+}
+
+bool PopupHost::owns_callbacks(const contracts::PanelProviderSpec& provider) const {
+    return has_callbacks(provider);
 }
 
 bool PopupHost::close(const char* panel_id, bool main_thread) {
@@ -133,6 +175,9 @@ void PopupHost::deactivate(bool main_thread) {
         const contracts::PanelProviderSpec* provider = stack_[--stack_size_].provider;
         stack_[stack_size_] = {};
         if (provider != nullptr && provider->close != nullptr) provider->close();
+        if (provider != nullptr && has_callbacks(*provider)) {
+            (void)hooks_.set_process_info(hooks_.context, 3, 0);
+        }
     }
     if (acquired_) {
         close_pending_ = true;
@@ -171,24 +216,32 @@ void PopupHost::dispatch_enter() {
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->enter != nullptr) cb->enter();
     --dispatch_depth_;
+    restore_if_idle();
 }
 void PopupHost::dispatch_process() {
     if (deactivating_ || !main_thread_) return;
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->process != nullptr) cb->process();
     --dispatch_depth_;
+    restore_if_idle();
 }
 void PopupHost::dispatch_f3() {
     if (deactivating_ || !main_thread_) return;
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->f3 != nullptr) cb->f3();
     --dispatch_depth_;
+    if (stack_size_ > 0) {
+        const auto* provider = stack_[stack_size_ - 1].provider;
+        if (provider->active != nullptr && !provider->active()) (void)close_top();
+    }
+    restore_if_idle();
 }
 void PopupHost::dispatch_f4() {
     if (deactivating_ || !main_thread_) return;
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->f4 != nullptr) cb->f4();
     --dispatch_depth_;
+    restore_if_idle();
 }
 uint32_t PopupHost::dispatch_event(uint64_t a, uint64_t b, uint64_t c) {
     if (deactivating_ || !main_thread_) return 0;
@@ -196,6 +249,7 @@ uint32_t PopupHost::dispatch_event(uint64_t a, uint64_t b, uint64_t c) {
     const auto* cb = current_callbacks();
     const uint32_t result = cb != nullptr && cb->event != nullptr ? cb->event(a, b, c) : 0;
     --dispatch_depth_;
+    restore_if_idle();
     return result;
 }
 

@@ -217,6 +217,7 @@ add_executable(native_choice_tests
     ${CPP_DIR}/plugins/core.custom_ui/text_mechanism.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
 )
 target_include_directories(native_choice_tests PRIVATE
     ${CPP_DIR}
@@ -667,6 +668,7 @@ add_test(NAME infra_panels_tests COMMAND infra_panels_tests)
 add_executable(core_ui_panels_tests
     test_core_ui_panels.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
 )
 target_include_directories(core_ui_panels_tests PRIVATE
     ${CPP_DIR}
@@ -1230,6 +1232,20 @@ target_include_directories(core_settings_config_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_settings_config_tests PRIVATE cxx_std_17)
 set_target_properties(core_settings_config_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_settings_config_tests COMMAND core_settings_config_tests)
+
+# settings provider callback registration and host-owned PopupState push/pop integration.
+add_executable(core_settings_panel_migration_tests
+    test_core_settings_panel_migration.cpp
+    ${CPP_DIR}/plugins/core.settings/plugin.cpp
+    ${CPP_DIR}/plugins/core.settings/feature.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+)
+target_include_directories(core_settings_panel_migration_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_settings_panel_migration_tests PRIVATE cxx_std_17)
+set_target_properties(core_settings_panel_migration_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_settings_panel_migration_tests COMMAND core_settings_panel_migration_tests)
 
 # P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
 add_executable(core_patches_shape_tests test_core_patches_shape.cpp)

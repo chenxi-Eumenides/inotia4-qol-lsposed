@@ -13,6 +13,7 @@ struct PopupHostHooks {
     bool (*acquire)(void* context, contracts::QolPopupStateEntry* entry,
                     const contracts::QolPopupStateHooks* hooks);
     bool (*restore)(void* context, contracts::QolPopupStateEntry* entry);
+    bool (*set_process_info)(void* context, int32_t process, int32_t state_id);
 };
 
 class PopupHost {
@@ -27,6 +28,7 @@ public:
 
     bool open(const contracts::PanelProviderSpec& provider, bool main_thread);
     bool close(const char* panel_id, bool main_thread);
+    bool owns_callbacks(const contracts::PanelProviderSpec& provider) const;
     void deactivate(bool main_thread);
     // Runs outside popup callbacks; restores only after the current provider is inactive.
     bool pump(bool main_thread);

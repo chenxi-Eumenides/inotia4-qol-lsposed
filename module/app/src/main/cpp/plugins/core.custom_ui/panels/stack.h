@@ -14,8 +14,8 @@
 //   · provider 可能自行关闭（游戏内返回键）而不经本栈：栈在每次 open 前先剔除
 //     provider.active() 为假的陈旧栈顶，避免误判幂等。
 //
-// 线程纪律：open/close/active/block_reason 由游戏主线程或 HTTP 线程调用；provider 回调
-// （open/close/active）自行保证其线程纪律（面板 provider 的 UI 操作只在主线程）。
+// 线程纪律：open/close 只由游戏主线程调用；HTTP 线程须提交命令。active/block_reason
+// 只查询 provider 状态，不执行游戏 UI 操作。
 
 namespace qol::features::core_ui {
 

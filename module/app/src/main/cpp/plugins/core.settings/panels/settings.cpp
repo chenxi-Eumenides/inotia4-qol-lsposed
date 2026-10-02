@@ -103,10 +103,6 @@ std::string result_error(const char* message) {
     return "{\"ok\":false,\"error\":\"result unavailable\"}";
 }
 
-// own:popup.settings 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
-contracts::QolPopupStateEntry g_popup_entry{};
-bool g_popup_acquired = false;
-
 struct SettingsRow {
     void* btn;
     void* desc;
@@ -188,77 +184,28 @@ bool ui_resolution_ready() {
 
 void settings_bind_sdk(const contracts::QolHostSdk* sdk) { g_sdk = sdk; }
 
-// ---- own:popup.settings（kOwnership）：整段占用 F_PANEL_UNK1_ENTER 的 5 回调 ----
-
-int32_t settings_popup_acquire(const char* id) {
-    (void)id;
-    std::lock_guard<std::mutex> lock(g_settings_mtx);
-    if (g_popup_entry.slot != nullptr) return 0;
-    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr ||
-        g_sdk->hooks.popup_acquire == nullptr) {
-        SETTINGS_LOG("popup.settings: hooks API not ready");
-        return 1;
-    }
-    contracts::QolPopupStateEntry entry{};
-    if (!contracts::succeeded(g_sdk->hooks.popup_resolve("F_PANEL_UNK1_ENTER", &entry))) {
-        SETTINGS_LOG("popup.settings: state entry (INAP_GEMSHOP) not found");
-        return 1;
-    }
-    const contracts::QolPopupStateHooks popup_hooks{
-        &settings_panel_enter,
-        &settings_panel_process,
-        &settings_panel_f3,
-        &settings_panel_f4,
-        &settings_panel_event,
-    };
-    if (!contracts::succeeded(g_sdk->hooks.popup_acquire(&entry, &popup_hooks))) {
-        SETTINGS_LOG("popup.settings: acquire rejected");
-        return 1;
-    }
-    g_popup_entry = entry;
-    g_state_id = entry.state_id;
-    g_popup_acquired = true;
-    SETTINGS_LOG("popup.settings acquired: state id=%d", g_state_id);
-    return 0;
-}
-
-void settings_popup_release(const char* id) {
-    (void)id;
-    std::lock_guard<std::mutex> lock(g_settings_mtx);
-    if (g_popup_entry.slot != nullptr && g_sdk != nullptr &&
-        g_sdk->hooks.popup_restore != nullptr) {
-        (void)g_sdk->hooks.popup_restore(&g_popup_entry);
-    }
-    g_popup_acquired = false;
-    g_state_id = -1;
-    SETTINGS_LOG("popup.settings released");
-}
-
 // ---- PanelProviderSpec ----
 
 bool settings_provider_open() {
-    int state_id = -1;
-    {
-        std::lock_guard<std::mutex> lock(g_settings_mtx);
-        if (g_state_id < 0) return false;
-        state_id = g_state_id;
-    }
-    // 锁外调游戏 pop 入口：push 链可能同步回调面板 enter/process。
-    if (!ui_set_popup_process_info(1, state_id)) return false;
-    SETTINGS_LOG("open settings panel state id=%d", state_id);
-    return true;
+    return g_sdk != nullptr;
 }
 
 void settings_provider_close() {
     // 幂等：未激活时不触碰游戏 UI（避免栈对陈旧栈顶调用 close 时误关当前顶层面板）。
     if (!settings_provider_active()) return;
     settings_ui_close_panel();
-    (void)ui_set_popup_process_info(3, 0);
 }
 
 bool settings_provider_active() {
     std::lock_guard<std::mutex> lock(g_settings_mtx);
     return g_panel_active;
+}
+
+const contracts::PanelCallbacks* settings_panel_callbacks() {
+    static const contracts::PanelCallbacks callbacks{
+        &settings_panel_enter, &settings_panel_process, &settings_panel_f3,
+        &settings_panel_f4, &settings_panel_event};
+    return &callbacks;
 }
 
 const char* settings_provider_block_reason() {
@@ -284,10 +231,20 @@ void settings_register_config_bridge(void* env, void* bridge_class) {
 }
 
 std::string data_settings_ui_inject() {
-    if (settings_popup_acquire(nullptr) != 0) return result_error("state entry inject failed");
+    if (g_sdk == nullptr || g_sdk->hooks.popup_resolve == nullptr) {
+        return result_error("state entry inject failed");
+    }
     if (!settings_try_bind_more_games()) {
         // 控件实例通常在启动期尚未创建：不视为失败，帧任务会在主菜单重试。
         SETTINGS_LOG("settings more games entry not ready; frame task will retry");
+    }
+    contracts::QolPopupStateEntry entry{};
+    if (!contracts::succeeded(g_sdk->hooks.popup_resolve("F_PANEL_UNK1_ENTER", &entry))) {
+        return result_error("state entry inject failed");
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_settings_mtx);
+        g_state_id = entry.state_id;
     }
     return result_ok();
 }
@@ -321,7 +278,7 @@ std::string data_settings_ui_status_json() {
         static_cast<long long>(bx), static_cast<long long>(by),
         static_cast<long long>(bw), static_cast<long long>(bh),
         settings_more_games_bind_state(),
-        g_state_id, g_popup_acquired ? "true" : "false",
+        g_state_id, g_panel_active ? "true" : "false",
         g_panel_active ? "true" : "false", g_root,
         (g_sdk != nullptr && g_sdk->config.get_bool != nullptr && [&]() { int32_t enabled = 0; (void)g_sdk->config.get_bool("plugin.stack_limit.enabled", 0, &enabled); return enabled != 0; }()) ? "true" : "false",
         ui_screen_name());
@@ -329,7 +286,7 @@ std::string data_settings_ui_status_json() {
 }
 
 std::string data_settings_ui_restore() {
-    settings_ui_close_panel();
+    if (g_panel_active) settings_panels_close("settings");
     {
         std::lock_guard<std::mutex> lock(g_settings_mtx);
         g_page_index = 0;
@@ -340,7 +297,6 @@ std::string data_settings_ui_restore() {
         }
     }
     settings_release_more_games();
-    settings_popup_release(nullptr);
     return result_ok();
 }
 

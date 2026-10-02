@@ -69,7 +69,7 @@ void settings_panel_process() {
     if (g_close_delay_frames > 0) {
         --g_close_delay_frames;
         if (g_close_delay_frames == 0) {
-            (void)ui_set_popup_process_info(3, 0);
+            settings_panels_close("settings");
             return;
         }
     }

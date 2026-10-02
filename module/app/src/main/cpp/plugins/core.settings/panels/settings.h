@@ -11,8 +11,7 @@
 // 经游戏 PopupState 死条目 F_PANEL_UNK1_ENTER（INAP_GEMSHOP）打开；配置页网格 + 分页 +
 // 「存档备份」动作项（ui_panels.open("save_backup")）。
 //
-// PopupState 占用为 `own:popup.settings`（kOwnership，plugin.cpp 申报）：本文件只提供
-// acquire/release 的原语调用与面板回调；线程纪律由资源事务（主线程）保证。
+// PopupState 由 core.custom_ui 面板宿主唯一持有；本插件只提供页面回调。
 //
 // 「更多游戏」按钮是运行时控件实例的 ExecuteProc 槽（非稳定 GOT 槽），D1 暂以
 // PtrHook + infra/scheduler 主线程帧任务绑定/释放；登记迁移豁免，P5/U11 由动态 UI 绑定器收口。
@@ -24,6 +23,7 @@ void settings_bind_sdk(const contracts::QolHostSdk* sdk);
 // 打开面板的本地薄入口：经必需能力 `ui_panels` 调用（ADR 0001 D2：能力 ID/版本不变，
 // 只迁提供者），设置页因此不直接依赖框架实现。实现见 feature.cpp。
 bool settings_panels_open(const char* panel_id);
+void settings_panels_close(const char* panel_id);
 
 // ---- JNI / 调试端点（原 data_settings_ui_*，名与签名保持）----
 std::string data_settings_ui_inject();
@@ -42,9 +42,7 @@ void settings_provider_close();
 bool settings_provider_active();
 const char* settings_provider_block_reason();
 
-// ---- own:popup.settings（kOwnership）----
-int32_t settings_popup_acquire(const char* id);
-void settings_popup_release(const char* id);
+const contracts::PanelCallbacks* settings_panel_callbacks();
 
 // ---- 「更多游戏」按钮绑定（帧任务驱动）----
 void settings_more_games_tick();            // 主线程帧任务调用

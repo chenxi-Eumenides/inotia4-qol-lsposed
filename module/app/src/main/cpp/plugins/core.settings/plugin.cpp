@@ -5,7 +5,6 @@
 #include <string>
 
 #include "../../contracts/http.h"
-#include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
 #include "feature.h"
@@ -30,12 +29,6 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId,
      {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
-};
-
-// own:popup.settings 的 OwnershipOps：acquire/release 走 hooks/popup_state 原语。
-const contracts::OwnershipOps kSettingsOwnershipOps{
-    &core_ui::settings_popup_acquire,
-    &core_ui::settings_popup_release,
 };
 
 void append_json_string(std::string& out, const char* value) {
@@ -154,23 +147,6 @@ const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
     {contracts::HttpMethod::kGet, "/api/config/list", kPluginId, &config_list_query, nullptr},
 };
 
-const contracts::ResourceClaim kResources[] = {
-    {
-        "own:popup.settings",  // id
-        "own:popup.settings",  // symbol（kOwnership 不使用站点解析，保留 id 作诊断标识）
-        contracts::ResourceMechanism::kOwnership,
-        contracts::ResourcePolicy::kPrivate,
-        contracts::ResourceRequirement::kRequired,
-        contracts::ResourceFailure::kFailClosed,
-        true,                  // resumable
-        kPluginId,             // owner
-        "设置面板以 PopupState 死条目承载，需整段占用 5 回调并承诺写回快照",  // reason
-        nullptr,               // gate（常驻）
-        120,                   // step_budget
-        reinterpret_cast<void*>(const_cast<contracts::OwnershipOps*>(&kSettingsOwnershipOps)),
-    },
-};
-
 // ---- HTTP command handlers（/api/debug/settings-ui/* POST）----
 // 四条端点均无请求体：插件内业务函数直调，返回体逐字与迁移前一致。
 // 自注册模式（core.api lifecycle 先例）：停用由 deactivate 显式 unregister_owner 摘除置墓碑。
@@ -284,7 +260,7 @@ const contracts::PluginDescriptor kDescriptor = {
     4, kRequires,    // requires（ui_panels + ui_components + http.registry + http.dispatch）
     0, nullptr,      // optional_requires
     0, nullptr,      // provides（页面不提供能力）
-    1, kResources,   // resources（own:popup.settings）
+    0, nullptr,      // resources（PopupState 由 core.custom_ui 面板宿主持有）
     0, nullptr,      // jni（JNI 入口由 bridge/native/gamebridge_settings.cpp 保留）
     &plugin_install,
     &plugin_deactivate,

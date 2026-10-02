@@ -16,8 +16,7 @@ void panels_unregister() {}
 bool plugin_enabled() { return false; }
 void plugin_set_enabled(bool) {}
 const char* settings_more_games_bind_state() { return "waiting"; }
-int32_t settings_popup_acquire(const char*) { return 0; }
-void settings_popup_release(const char*) {}
+const contracts::PanelCallbacks* settings_panel_callbacks() { return nullptr; }
 std::string data_settings_ui_inject() { return "{}"; }
 std::string data_settings_ui_restore() { return "{}"; }
 std::string data_settings_ui_open_option() { return "{}"; }
@@ -61,6 +60,7 @@ QolResult register_command(qol::contracts::HttpMethod, const char*, const char*,
 int main() {
     using namespace qol;
     const contracts::PluginDescriptor& descriptor = features::core_settings::plugin_descriptor();
+    if (descriptor.resources_count != 0 || descriptor.resources != nullptr) return 1;
     if (descriptor.http_query_count != 1 || descriptor.http_queries == nullptr) return 1;
     const contracts::HttpQueryHandlerDescriptor& query = descriptor.http_queries[0];
     if (query.method != contracts::HttpMethod::kGet ||

@@ -15,6 +15,9 @@ namespace {
 int g_resolves = 0;
 int g_acquires = 0;
 int g_restores = 0;
+int g_process_calls = 0;
+int g_last_process = -1;
+int g_last_state_id = -1;
 bool g_acquire_ok = true;
 bool g_resolve_ok = true;
 bool g_a_active = false;
@@ -25,6 +28,8 @@ int g_close_a = 0;
 int g_close_b = 0;
 int g_slots[5] = {};
 uint32_t g_event_result = 0;
+const QolPopupStateHooks* g_acquired_hooks = nullptr;
+bool g_sync_enter_on_push = false;
 
 bool resolve_popup(void*, const char*, QolPopupStateEntry* entry) {
     ++g_resolves;
@@ -39,6 +44,7 @@ bool acquire_popup(void*, QolPopupStateEntry*, const QolPopupStateHooks* hooks) 
     ++g_acquires;
     if (!g_acquire_ok) return false;
     assert(hooks != nullptr);
+    g_acquired_hooks = hooks;
     return true;
 }
 
@@ -46,6 +52,16 @@ bool restore_popup(void*, QolPopupStateEntry* entry) {
     ++g_restores;
     entry->slot = nullptr;
     entry->state_id = -1;
+    return true;
+}
+
+bool set_process_info(void*, int32_t process, int32_t state_id) {
+    ++g_process_calls;
+    g_last_process = process;
+    g_last_state_id = state_id;
+    if (process == 1 && g_sync_enter_on_push && g_acquired_hooks != nullptr) {
+        g_acquired_hooks->enter();
+    }
     return true;
 }
 
@@ -76,6 +92,10 @@ const PanelProviderSpec kPanelB{"panel.b", "owner.b", open_b, close_b, active_b,
 
 void reset_fakes() {
     g_resolves = g_acquires = g_restores = 0;
+    g_process_calls = 0;
+    g_last_process = g_last_state_id = -1;
+    g_acquired_hooks = nullptr;
+    g_sync_enter_on_push = false;
     g_acquire_ok = g_resolve_ok = true;
     g_a_active = g_b_active = false;
     g_open_a = g_open_b = g_close_a = g_close_b = 0;
@@ -83,7 +103,8 @@ void reset_fakes() {
 }
 
 PopupHost make_host() {
-    return PopupHost("TEST_POPUP", {nullptr, resolve_popup, acquire_popup, restore_popup});
+    return PopupHost("TEST_POPUP", {nullptr, resolve_popup, acquire_popup, restore_popup,
+                                     set_process_info});
 }
 
 }  // namespace
@@ -94,6 +115,7 @@ int main() {
     assert(host.open(kPanelA, true));
     assert(host.open(kPanelA, true));
     assert(g_open_a == 1 && g_resolves == 1 && g_acquires == 1);
+    assert(g_process_calls == 1 && g_last_process == 1 && g_last_state_id == 9);
     const auto* dispatch = host.dispatchers_for_test();
     dispatch->enter(); dispatch->process(); dispatch->f3(); dispatch->f4();
     assert(dispatch->event(1, 2, 3) == 41);
@@ -109,8 +131,15 @@ int main() {
     assert(host.close("panel.a", true));
     assert(!host.close("panel.a", true));
     assert(g_restores == 0 && host.close_pending_for_test());
+    assert(g_last_process == 3);
     assert(host.pump(true));
     assert(g_restores == 1 && !host.close_pending_for_test());
+
+    reset_fakes();
+    auto synchronous = make_host();
+    g_sync_enter_on_push = true;
+    assert(synchronous.open(kPanelA, true));
+    assert(g_slots[0] == 1);
 
     reset_fakes();
     auto failed = make_host();
@@ -129,7 +158,7 @@ int main() {
     auto empty = make_host();
     const PanelProviderSpec no_callbacks{"panel.empty", "owner.empty", open_a, close_a, active_a, reason, nullptr};
     assert(empty.open(no_callbacks, true));
-    assert(g_resolves == 0 && g_acquires == 0);
+    assert(g_resolves == 0 && g_acquires == 0 && g_process_calls == 0);
     empty.dispatchers_for_test()->enter();
     assert(g_slots[0] == 0);
     empty.deactivate(true);

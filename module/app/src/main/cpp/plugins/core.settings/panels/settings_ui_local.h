@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "../../contracts/host_sdk.h"
-#include "../../contracts/ui.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/ui.h"
 
 // 设置页自持的绘图/几何 helper（ADR 0001 D6：页面自持薄 helper）。
 //

@@ -35,6 +35,7 @@ const contracts::PanelProviderSpec kSettingsProvider = {
     &settings_provider_close,
     &settings_provider_active,
     &settings_provider_block_reason,
+    settings_panel_callbacks(),
 };
 
 // 设置页「存档备份」动作项：owner=core.ui（页面归属），目标 panel 归 save_backup 插件。
@@ -78,6 +79,12 @@ void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
 bool settings_panels_open(const char* panel_id) {
     if (g_panels_api == nullptr || g_panels_api->open == nullptr) return false;
     return g_panels_api->open(panel_id);
+}
+
+void settings_panels_close(const char* panel_id) {
+    if (g_panels_api != nullptr && g_panels_api->close != nullptr) {
+        g_panels_api->close(panel_id);
+    }
 }
 
 bool plugin_enabled() {
