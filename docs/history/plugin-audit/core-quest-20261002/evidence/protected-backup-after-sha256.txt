@@ -1,0 +1,1 @@
+b42fe68191de1dd54993b9cd863e3971a1d231ced33752a646cd1c23c609e81e  .tmp/quest-verify2/protected-slot0-after.qol_save

@@ -190,8 +190,10 @@
 
 | 项 | 当前事实 | 清除条件 |
 |---|---|---|
-| FIX-10 EB 面板重建风暴（VM-23/VM-24/VM-29，`NOT_ACCEPTED`） | `extension_bag_render.inc` 的 draw-end 清理分支对持续非 5 状态每帧执行 `prepare_main_menu_locked()`，重置加载态并递增页签 generation，下一帧绘制 wrapper 重载 sidecar、重装页签，最终原生 `ControlButton_Create` 空控件 → `ControlObject_SetUserType` 空指针（真机 API 打开面板 15s 内 generation 2→227）。已修：恢复 `virtual_bag_inventory_state_id()` 读 `g_state_entry` + 新增 `model/main_menu_cleanup_edge.h` 边沿/幂等清理（提交 `1088967b`）。Host `extension_bag_draw_lock_tests` 19 passed、全量 83/83；真机 API `open_panel inventory` sidecar 仅加载 1 次、8 轮开关无崩溃、FATAL/SIGSEGV=0（`.tmp/fix10-verify-r2/`） | 物理触摸打开背包 + 扩展袋页签点击 + 拖拽/详情 ≥10 轮无冻结无崩溃（人工卡见 `.tmp/real-device-261001/manual-runbook.md`）；在此之前 VM-23/VM-24/VM-29 维持 `NOT_ACCEPTED` |
+| FIX-10 EB 面板重建风暴（VM-23/VM-24/VM-29，`NOT_ACCEPTED`） | `extension_bag_render.inc` 的 draw-end 清理分支对持续非 5 状态每帧执行 `prepare_main_menu_locked()`，重置加载态并递增页签 generation，下一帧绘制 wrapper 重载 sidecar、重装页签，最终原生 `ControlButton_Create` 空控件 → `ControlObject_SetUserType` 空指针（真机 API 打开面板 15s 内 generation 2→227）。已修：恢复 `virtual_bag_inventory_state_id()` 读 `g_state_entry` + 新增 `model/main_menu_cleanup_edge.h` 边沿/幂等清理（提交 `1088967b`）。Host `extension_bag_draw_lock_tests` 19 passed、全量 83/83；真机 API `open_panel inventory` sidecar 仅加载 1 次、8 轮开关无崩溃、FATAL/SIGSEGV=0（`.tmp/fix10-verify-r2/`） | 物理触摸打开背包 + 扩展袋页签点击 + 拖拽/详情 ≥10 轮无冻结无崩溃（人工卡见 `.tmp/real-device-261001/manual-runbook.md`） ；在此之前 VM-23/VM-24/VM-29 维持 `NOT_ACCEPTED` |
 | FIX-11 character 数值守卫（VM-K5-08h，`NOT_ACCEPTED`） | `add_stat` 的 `attrs` / `set_attr` 的 `stats` 经 `char_opt_int`（复刻 `JSONObject.optInt`）静默截断小数（`1.5`→`1` 并加点）。已修：`char_parse_points` 拒绝含小数部分数值为 400 `bad value for $k (must be integer)`，整数值 double 仍接受（提交 `31de93f9`）；host `character_facts_dispatch_tests` 先红后绿 | VM-K5-08h 真机写面复核非整数 400 与整数值成功路径 |
+
+**插件审计批 2026-10-02 指针**：VM-K5-04e（core.character）、VM-K5-06c（core.quest）、VM-K5-04d（core.system）相关验收登记分别见 `docs/history/plugin-audit/core-character-20261002/verification-log.md`、`docs/history/plugin-audit/core-quest-20261002/verification-log.md`、`docs/history/plugin-audit/core-system-20261002/verification-log.md`。本注仅链接专项验收，不覆盖 §2/§5 登记的开放项与 NOT_ACCEPTED 项。
 
 ## 6. 待建立
 
