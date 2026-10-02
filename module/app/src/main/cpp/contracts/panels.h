@@ -15,7 +15,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiPanelsCapabilityId = "ui_panels";
 constexpr int32_t kUiPanelsVersionMajor = 1;
-constexpr int32_t kUiPanelsVersionMinor = 0;
+constexpr int32_t kUiPanelsVersionMinor = 1;
 
 // 设置页条目类型：开关（读 config_key 门禁）/ 动作（点击打开 panel_id）。
 enum class PanelItemKind : uint8_t {
@@ -34,6 +34,15 @@ struct PanelItemSpec {
     const char* page_hint;   // 归页提示（可 nullptr = 默认页）
 };
 
+// Optional callbacks routed from the shared native PopupState owner to the current panel.
+struct PanelCallbacks {
+    void (*enter)();
+    void (*process)();
+    void (*f3)();
+    void (*f4)();
+    uint32_t (*event)(uint64_t, uint64_t, uint64_t);
+};
+
 // 面板 provider 声明：由面板插件注册，容器按 panel_id 打开/查询。
 struct PanelProviderSpec {
     const char* panel_id;          // 全局唯一面板 id
@@ -42,6 +51,7 @@ struct PanelProviderSpec {
     void (*close)();               // 关闭面板（幂等）
     bool (*active)();              // 面板当前是否处于打开态
     const char* (*block_reason)(); // 拒绝原因（UTF-8，可 nullptr）；无原因返回 nullptr
+    const PanelCallbacks* callbacks; // 可选；nullptr 表示不接管 PopupState 回调
 };
 
 // 出口面容器经此接口分发（provider 由注册表按 panel_id 查找）。

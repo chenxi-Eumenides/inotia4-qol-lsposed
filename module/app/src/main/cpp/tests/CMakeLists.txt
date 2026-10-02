@@ -675,6 +675,16 @@ target_compile_features(core_ui_panels_tests PRIVATE cxx_std_17)
 set_target_properties(core_ui_panels_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_ui_panels_tests COMMAND core_ui_panels_tests)
 
+# core.custom_ui 单一 PopupState owner、逻辑面板栈与延迟还原状态机。
+add_executable(core_custom_ui_host_tests
+    test_core_custom_ui_host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+)
+target_include_directories(core_custom_ui_host_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_custom_ui_host_tests PRIVATE cxx_std_17)
+set_target_properties(core_custom_ui_host_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_custom_ui_host_tests COMMAND core_custom_ui_host_tests)
+
 # D1-b3：autosell 插件清单/资源 host 测试（声明式 claim + provider 登记；末尾追加）
 add_executable(autosell_plugin_tests
     test_autosell_plugin.cpp

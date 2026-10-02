@@ -4,6 +4,7 @@ add_library(qol_plugin_core.custom_ui STATIC
     feature.cpp
     ui_components.cpp
     panels/stack.cpp
+    panels/host.cpp
 )
 
 # feature.cpp 的选择控件资源在 device probe 构建下改用严格导出名解析（elf-export:）。
