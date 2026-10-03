@@ -55,6 +55,16 @@ QolResult register_command(qol::contracts::HttpMethod, const char*, const char*,
     return qol::contracts::ok();
 }
 
+QolResult scheduler_add(int32_t, qol::contracts::QolFrameHandler, void*, int32_t, int32_t,
+                        uint64_t* out_id) {
+    static uint64_t next_id = 1;
+    if (out_id == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out_id = next_id++;
+    return qol::contracts::ok();
+}
+
+QolResult scheduler_remove(uint64_t) { return qol::contracts::ok(); }
+
 }  // namespace
 
 int main() {
@@ -91,6 +101,7 @@ int main() {
     sdk.config.get_i32 = &config_get_i32;
     sdk.config.get_string = &config_get_string;
     sdk.http_dispatch.register_command = &register_command;
+    sdk.scheduler = {&scheduler_add, &scheduler_remove};
     contracts::PluginContext context{};
     context.sdk = &sdk;
     if (descriptor.install == nullptr || descriptor.install(context) != 0) return 1;

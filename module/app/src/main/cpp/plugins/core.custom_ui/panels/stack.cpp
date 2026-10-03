@@ -3,6 +3,7 @@
 #include <cstring>
 #include <memory>
 
+#include "../../../contracts/ui.h"
 #include "host.h"
 
 namespace qol::features::core_ui {
@@ -27,6 +28,13 @@ const contracts::PanelProviderSpec* provider_of(const char* panel_id) {
     const contracts::PanelProviderSpec* provider = nullptr;
     if (!contracts::succeeded(g_sdk->panels.find(panel_id, &provider))) return nullptr;
     return provider;
+}
+
+// 真实主线程判定：以 host UI 适配表为准，取代编译期常量，避免绕过 adapter 的 pthread 门。
+// 适配表未提供该字段（旧宿主/测试桩）时回退为调用方保证。
+bool main_thread_now() {
+    if (g_sdk == nullptr || g_sdk->ui == nullptr || g_sdk->ui->is_main_thread == nullptr) return true;
+    return g_sdk->ui->is_main_thread() != 0;
 }
 
 bool active_of(const char* panel_id) {
@@ -56,8 +64,7 @@ bool close_top() {
     bool closed = false;
     if (provider != nullptr && provider->close != nullptr) {
         if (g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)) {
-            closed = g_popup_host->close(provider->panel_id, true);
-            (void)g_popup_host->pump(true);
+            closed = g_popup_host->close(provider->panel_id, main_thread_now());
         } else {
             provider->close();
             closed = true;
@@ -104,14 +111,14 @@ void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
 }
 
 int32_t ui_panels_frame_pump(int64_t, void*) {
-    if (g_popup_host != nullptr) (void)g_popup_host->pump(true);
+    if (g_popup_host != nullptr) (void)g_popup_host->pump(main_thread_now());
     if (g_unbind_pending && g_popup_host != nullptr && !g_popup_host->close_pending_for_test()) {
         g_popup_host.reset();
         remove_pump_task();
         g_sdk = nullptr;
         g_unbind_pending = false;
     }
-    return 0;
+    return 1;  // 常驻：宿主空闲归还/原版回调 restore 只能由本帧任务推进
 }
 
 bool ui_panels_open(const char* panel_id) {
@@ -130,7 +137,7 @@ bool ui_panels_open(const char* panel_id) {
     }
     if (g_depth >= kPanelStackDepth && !close_top()) return false;
     const bool opened = g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)
-        ? g_popup_host->open(*provider, true)
+        ? g_popup_host->open(*provider, main_thread_now())
         : provider->open();
     if (opened) {
         push(panel_id);
@@ -140,7 +147,7 @@ bool ui_panels_open(const char* panel_id) {
     if (g_depth > 0) {
         if (!close_top()) return false;
         const bool retry_opened = g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)
-            ? g_popup_host->open(*provider, true)
+            ? g_popup_host->open(*provider, main_thread_now())
             : provider->open();
         if (retry_opened) {
             push(panel_id);
@@ -162,8 +169,7 @@ void ui_panels_close(const char* panel_id) {
     if (provider != nullptr && provider->close != nullptr && provider->active != nullptr &&
         provider->active()) {
         if (g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)) {
-            (void)g_popup_host->close(provider->panel_id, true);
-            (void)g_popup_host->pump(true);
+            (void)g_popup_host->close(provider->panel_id, main_thread_now());
         } else {
             provider->close();
         }
@@ -178,7 +184,10 @@ bool ui_panels_back() {
 bool ui_panels_deactivate_owner(const char* owner) {
     if (owner == nullptr || owner[0] == '\0') return false;
     const bool host_complete = g_popup_host == nullptr ||
-                               g_popup_host->deactivate_provider(owner, true);
+                               g_popup_host->deactivate_provider(owner, main_thread_now());
+    if (g_popup_host != nullptr && g_popup_host->pending_deactivate_for_owner(owner)) {
+        return host_complete;
+    }
 
     for (int i = 0; i < g_depth;) {
         const contracts::PanelProviderSpec* provider = provider_of(g_stack[i]);

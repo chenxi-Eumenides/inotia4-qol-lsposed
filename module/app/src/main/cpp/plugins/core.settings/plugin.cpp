@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include <cstdint>
+#include <atomic>
 #include <cstring>
 #include <string>
 
@@ -19,6 +20,15 @@ constexpr const char* kPluginVersion = "0.1.0";
 constexpr uint32_t kConfigResponseCapacity = 8192;
 constexpr uint32_t kConfigStringCapacity = 4096;
 const contracts::QolHostSdk* g_sdk = nullptr;
+std::atomic<int32_t> g_pending_ui_action{-1};
+uint64_t g_ui_action_task = 0;
+
+enum SettingsUiAction : int32_t {
+    kInjectUi = 0,
+    kRestoreUi = 1,
+    kOpenOptionUi = 2,
+    kOpenPanelUi = 3,
+};
 
 // 设置页只消费工具能力，不提供能力（ADR 0001 D2：能力 ID/版本保持原样，改的只是提供者）。
 const contracts::CapabilityRequirement kRequires[] = {
@@ -170,24 +180,48 @@ QolResult settings_ui_command_body(contracts::HttpRes* response, const std::stri
     return contracts::ok();
 }
 
+int32_t apply_settings_ui_action(int64_t, void*) {
+    const int32_t action = g_pending_ui_action.exchange(-1, std::memory_order_acq_rel);
+    std::string result = "{\"ok\":true}";
+    switch (action) {
+        case kInjectUi: (void)core_ui::data_settings_ui_inject(); break;
+        case kRestoreUi: (void)core_ui::data_settings_ui_restore(); break;
+        case kOpenOptionUi: result = core_ui::data_settings_ui_open_option(); break;
+        case kOpenPanelUi: result = core_ui::data_settings_ui_open_panel(); break;
+        default: break;
+    }
+    if (action >= 0) {
+        CORE_UI_LOG_INFO("ui action=%d result=%s", action, result.c_str());
+    }
+    return 1;  // 常驻：回调返回 false 会被调度器自动注销
+}
+
+QolResult queue_settings_ui_action(SettingsUiAction action, contracts::HttpRes* response) {
+    if (g_sdk == nullptr || g_sdk->scheduler.add == nullptr || g_ui_action_task == 0) {
+        return settings_ui_command_body(response, "{\"ok\":false,\"error\":\"scheduler unavailable\"}");
+    }
+    g_pending_ui_action.store(action, std::memory_order_release);
+    return settings_ui_command_body(response, "{\"ok\":true}");
+}
+
 QolResult settings_ui_inject_command(const contracts::HttpReq*, contracts::HttpRes* response,
                                      void*) {
-    return settings_ui_command_body(response, core_ui::data_settings_ui_inject());
+    return queue_settings_ui_action(kInjectUi, response);
 }
 
 QolResult settings_ui_restore_command(const contracts::HttpReq*, contracts::HttpRes* response,
                                       void*) {
-    return settings_ui_command_body(response, core_ui::data_settings_ui_restore());
+    return queue_settings_ui_action(kRestoreUi, response);
 }
 
 QolResult settings_ui_open_option_command(const contracts::HttpReq*, contracts::HttpRes* response,
                                           void*) {
-    return settings_ui_command_body(response, core_ui::data_settings_ui_open_option());
+    return queue_settings_ui_action(kOpenOptionUi, response);
 }
 
 QolResult settings_ui_open_panel_command(const contracts::HttpReq*, contracts::HttpRes* response,
                                          void*) {
-    return settings_ui_command_body(response, core_ui::data_settings_ui_open_panel());
+    return queue_settings_ui_action(kOpenPanelUi, response);
 }
 
 struct SettingsCommandRoute {
@@ -225,10 +259,25 @@ int plugin_install(contracts::PluginContext& ctx) {
     // install 只做自身初始化：注册设置页 provider + 存档备份动作项 + 按钮绑定帧任务。
     if (!core_ui::panels_register()) return 1;
     if (!register_settings_ui_commands(ctx.sdk)) return 1;
+    if (ctx.sdk->scheduler.add == nullptr ||
+        !contracts::succeeded(ctx.sdk->scheduler.add(1, &apply_settings_ui_action, nullptr,
+                                                       1, 0, &g_ui_action_task)) ||
+        g_ui_action_task == 0) {
+        if (ctx.sdk->http_dispatch.unregister_owner != nullptr)
+            (void)ctx.sdk->http_dispatch.unregister_owner(kPluginId);
+        return 1;
+    }
+    CORE_UI_LOG_INFO("ui action scheduler task=%llu",
+                     static_cast<unsigned long long>(g_ui_action_task));
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    g_pending_ui_action.store(-1, std::memory_order_release);
+    if (g_ui_action_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
+        (void)ctx.sdk->scheduler.remove(g_ui_action_task);
+    }
+    g_ui_action_task = 0;
     // 自注册的 command handler 不在 descriptor（http_query_count=0），宿主的
     // unregister_http_queries 会早退；deactivate 必须显式摘除（幂等，core.api 同款）。
     if (ctx.sdk != nullptr && ctx.sdk->http_dispatch.unregister_owner != nullptr) {
@@ -247,7 +296,9 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
             const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
             const bool deactivated = panels->deactivate_owner != nullptr &&
                                      panels->deactivate_owner(kPluginId);
-            CORE_UI_LOG_INFO("deactivate_owner result=%s", deactivated ? "complete" : "pending_or_failed");
+            const bool still_active = panels->active != nullptr && panels->active("settings");
+            CORE_UI_LOG_INFO("deactivate_owner result=%s",
+                             deactivated ? (still_active ? "queued" : "complete") : "failed");
         } else {
             CORE_UI_LOG_INFO("deactivate_owner result=skipped capability_unavailable");
         }

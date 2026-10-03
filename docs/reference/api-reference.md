@@ -2186,6 +2186,10 @@
 
 `POST /api/debug/settings-ui/open-panel`
 
+> 上述四条 settings-ui POST 端点与 `POST /api/debug/custom-ui/components` 同属调试端点：
+> HTTP 线程只把动作入队到游戏主线程帧任务，立即返回 `{"ok":true}`；UI/面板的 open/close/inject
+> 与快照一律在游戏线程执行，不返回同步业务结果。
+
 `POST /api/debug/extension_bag/unequip`
 
 ---

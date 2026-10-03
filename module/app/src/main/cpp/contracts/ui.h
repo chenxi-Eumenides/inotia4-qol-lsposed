@@ -13,7 +13,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 0;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 6;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 7;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -216,6 +216,9 @@ struct QolUiAdapter {
 
     // Read-only game popup stack snapshot; main-thread only.
     QolResult (*popup_stack_snapshot)(uint32_t*, uintptr_t*);
+    // 真实 pthread 主线程判定（minor 7 追加）；游戏 popup 读写的权威线程门，
+    // 消费者不得以编译期常量替代。
+    int32_t (*is_main_thread)();
 };
 
 }  // namespace qol::contracts

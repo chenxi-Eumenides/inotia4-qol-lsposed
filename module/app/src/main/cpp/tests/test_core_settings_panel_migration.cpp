@@ -28,6 +28,14 @@ int g_f4_calls = 0;
 int g_event_calls = 0;
 int g_acquires = 0;
 int g_restores = 0;
+uint64_t g_next_task_id = 1;
+QolResult scheduler_add(int32_t, qol::contracts::QolFrameHandler, void*, int32_t, int32_t,
+                        uint64_t* out_id) {
+    if (out_id == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out_id = g_next_task_id++;
+    return qol::contracts::ok();
+}
+QolResult scheduler_remove(uint64_t) { return qol::contracts::ok(); }
 int g_pushes = 0;
 int g_pops = 0;
 uint32_t g_popup_count = 0;
@@ -142,6 +150,7 @@ int main() {
     sdk.hooks.popup_restore = &restore_popup;
     sdk.ui = &ui;
     sdk.http_dispatch.register_command = &register_command;
+    sdk.scheduler = {&scheduler_add, &scheduler_remove};
 
     features::core_ui::ui_panels_bind_sdk(&sdk);
     contracts::PluginContext context{};
@@ -160,6 +169,10 @@ int main() {
     assert(g_popup_hooks->event(1, 2, 3) == 73);
     g_popup_hooks->f3();
     assert(g_process_calls == 1 && g_f3_calls == 1 && g_f4_calls == 1 && g_event_calls == 1);
+    assert(g_pops == 0 && g_restores == 0);
+    assert(features::core_ui::ui_panels_frame_pump(1, nullptr) == 1);
+    features::core_ui::ui_panels_frame_pump(2, nullptr);
+    features::core_ui::ui_panels_frame_pump(3, nullptr);
     assert(g_pops == 1 && g_restores == 1);
 
     features::core_ui::ui_panels_close("settings");

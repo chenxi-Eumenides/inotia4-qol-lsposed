@@ -39,6 +39,7 @@ public:
     const contracts::QolPopupStateHooks* dispatchers_for_test() const;
     const char* current_panel_for_test() const;
     bool close_pending_for_test() const;
+    bool pending_deactivate_for_owner(const char* owner) const;
     bool active_for_test() const;
     void dispatch_enter();
     void dispatch_process();
@@ -60,6 +61,8 @@ private:
     const contracts::PanelCallbacks* current_callbacks() const;
     bool close_top();
     void restore_if_idle();
+    // 嵌套逻辑切换：不触发游戏 popup 转换，手动调用新顶层的 enter 回调。
+    void invoke_enter(const contracts::PanelProviderSpec& provider);
 
     const char* popup_symbol_;
     PopupHostHooks hooks_;
@@ -79,8 +82,13 @@ private:
     bool original_popup_snapshot_valid_ = false;
     bool owned_popup_snapshot_valid_ = false;
     bool pop_issued_ = false;
+    bool retry_close_top_ = false;
+    const char* pending_deactivate_owner_ = nullptr;
+    bool pumping_ = false;
+    uint32_t idle_baseline_pumps_ = 0;
     bool deactivating_ = false;
     bool main_thread_ = false;
+    uint32_t process_dispatch_count_ = 0;
     int last_open_stack_size_ = -1;
     bool last_open_main_thread_ = false;
     bool last_open_deactivating_ = false;

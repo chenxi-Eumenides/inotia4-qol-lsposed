@@ -10,6 +10,7 @@ namespace qol::features::core_ui {
 namespace {
 
 PopupHost* g_dispatch_host = nullptr;
+void sdk_log(void* context, int32_t level, const char* message);
 
 bool sdk_popup_resolve(void* context, const char* symbol, contracts::QolPopupStateEntry* entry) {
     const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
@@ -34,8 +35,15 @@ bool sdk_set_process_info(void* context, int32_t process, int32_t state_id) {
 }
 bool sdk_popup_stack_snapshot(void* context, uint32_t* count, uintptr_t* top_enter_vma) {
     const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
-    return sdk != nullptr && sdk->ui != nullptr && sdk->ui->popup_stack_snapshot != nullptr &&
-        contracts::succeeded(sdk->ui->popup_stack_snapshot(count, top_enter_vma));
+    if (sdk == nullptr || sdk->ui == nullptr || sdk->ui->popup_stack_snapshot == nullptr) return false;
+    const QolResult result = sdk->ui->popup_stack_snapshot(count, top_enter_vma);
+    if (!contracts::succeeded(result) && result.message != nullptr) {
+        char message[320]{};
+        std::snprintf(message, sizeof(message), "snapshot seam game=%.*s",
+                      static_cast<int>(result.message_len), result.message);
+        sdk_log(context, 1, message);
+    }
+    return contracts::succeeded(result);
 }
 void sdk_log(void* context, int32_t level, const char* message) {
     const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
@@ -130,13 +138,8 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     if (stack_size_ >= kStackCapacity) return false;
     if (!acquired_) {
         original_popup_snapshot_valid_ = snapshot(&original_popup_count_, &original_popup_top_vma_);
-        if (original_popup_snapshot_valid_) {
-            log_snapshot("open-baseline", original_popup_count_, original_popup_top_vma_);
-        } else {
-            original_popup_count_ = 0;
-            original_popup_top_vma_ = 0;
-            log_message("open baseline snapshot failed; degraded close criterion enabled");
-        }
+        if (!original_popup_snapshot_valid_) return false;
+        log_snapshot("open-baseline", original_popup_count_, original_popup_top_vma_);
     }
     if (!ensure_popup(provider)) {
         if (!acquired_) original_popup_snapshot_valid_ = false;
@@ -144,23 +147,12 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     }
 
     const contracts::PanelProviderSpec* previous = stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider;
-    if (previous != nullptr) {
-        if (previous->close != nullptr) previous->close();
-        if (has_callbacks(*previous) &&
-            !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
-        if (has_callbacks(*previous)) log_pop_issued();
-    }
     stack_[stack_size_++].provider = &provider;
     if (!provider.open()) {
         if (provider.active != nullptr && provider.active()) provider.close();
         --stack_size_;
         stack_[stack_size_] = {};
-        if (previous != nullptr) {
-            if (previous->open != nullptr) (void)previous->open();
-            if (has_callbacks(*previous)) {
-                (void)hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id);
-            }
-        }
+        if (previous != nullptr && previous->open != nullptr) (void)previous->open();
         if (stack_size_ == 0 && acquired_) {
             close_pending_ = true;
             pending_provider_ = &provider;
@@ -168,7 +160,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         restore_if_idle();
         return false;
     }
-    if (has_callbacks(provider) &&
+    if (stack_size_ == 1 && has_callbacks(provider) &&
         !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) {
         if (provider.close != nullptr) provider.close();
         --stack_size_;
@@ -186,9 +178,16 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         restore_if_idle();
         return false;
     }
+    // 嵌套：共享的原始 popup 不转换，手动进入新顶层，父面板保持原状。
+    if (stack_size_ > 1 && has_callbacks(provider)) invoke_enter(provider);
     if (has_callbacks(provider) && !capture_owned_popup()) {
-        if (original_popup_snapshot_valid_) return false;
-        log_message("owned popup snapshot failed; degraded close criterion enabled");
+        provider.close();
+        --stack_size_;
+        stack_[stack_size_] = {};
+        close_pending_ = true;
+        pending_provider_ = &provider;
+        log_message("owned popup snapshot unavailable; restore held pending");
+        return false;
     }
     return true;
 }
@@ -198,31 +197,31 @@ bool PopupHost::close_top() {
     const contracts::PanelProviderSpec* previous = stack_[stack_size_ - 1].provider;
     uint32_t current_count = 0;
     uintptr_t current_top_vma = 0;
-    if (has_callbacks(*previous) && original_popup_snapshot_valid_ &&
+    if (has_callbacks(*previous) && original_popup_snapshot_valid_ && stack_size_ == 1 &&
         (!snapshot(&current_count, &current_top_vma) || !owned_popup_snapshot_valid_ ||
          current_count != owned_popup_count_ || current_top_vma != owned_popup_top_vma_)) {
-        return false;
+        close_pending_ = true;
+        retry_close_top_ = true;
+        pending_provider_ = previous;
+        log_message("close queued panel=%s snapshot_valid=%d owned_valid=%d current=%u/0x%lx owned=%u/0x%lx",
+                    previous->panel_id, original_popup_snapshot_valid_ ? 1 : 0,
+                    owned_popup_snapshot_valid_ ? 1 : 0, current_count,
+                    static_cast<unsigned long>(current_top_vma), owned_popup_count_,
+                    static_cast<unsigned long>(owned_popup_top_vma_));
+        return true;
     }
     if (previous->close != nullptr) previous->close();
-    if (has_callbacks(*previous) &&
-        !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
-    if (has_callbacks(*previous)) pop_issued_ = true;
-    if (has_callbacks(*previous)) log_pop_issued();
     stack_[--stack_size_] = {};
     if (stack_size_ > 0) {
         const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
         if (restored->open != nullptr && !restored->open()) return false;
-        if (has_callbacks(*restored) &&
-            !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) return false;
-        if (has_callbacks(*restored) && !capture_owned_popup()) {
-            if (original_popup_snapshot_valid_) return false;
-            log_message("owned popup snapshot failed after close; degraded close criterion enabled");
-        }
+        if (has_callbacks(*restored)) (void)capture_owned_popup();
+        // 逻辑回到父面板：不 pop 游戏栈，手动重新进入父面板刷新其状态。
+        if (has_callbacks(*restored)) invoke_enter(*restored);
     } else if (acquired_) {
         close_pending_ = true;
         pending_provider_ = previous;
-        pop_issued_ = true;
-        restore_if_idle();
+        idle_baseline_pumps_ = 0;
     }
     return true;
 }
@@ -258,10 +257,21 @@ bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
     }
 
     const contracts::PanelProviderSpec* removed = stack_[stack_size_ - 1].provider;
-    if (removes_top) {
-        if (removed->close != nullptr && removed->active != nullptr && removed->active()) {
-            removed->close();
+    if (removes_top && stack_size_ == 1 && has_callbacks(*removed) && original_popup_snapshot_valid_) {
+        uint32_t current_count = 0;
+        uintptr_t current_top_vma = 0;
+        if (!snapshot(&current_count, &current_top_vma) || !owned_popup_snapshot_valid_ ||
+            current_count != owned_popup_count_ || current_top_vma != owned_popup_top_vma_) {
+            close_pending_ = true;
+            pending_deactivate_owner_ = owner;
+            pending_provider_ = removed;
+            log_message("deactivate queued snapshot unavailable owner=%s panel=%s",
+                        owner, removed->panel_id);
+            return true;
         }
+    }
+    if (removes_top && removed->close != nullptr && removed->active != nullptr && removed->active()) {
+        removed->close();
     }
 
     for (int i = 0; i < stack_size_;) {
@@ -275,35 +285,18 @@ bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
         }
     }
 
-    if (removes_top) {
-        while (stack_size_ > 0) {
-            uint32_t current_count = 0;
-            uintptr_t current_top_vma = 0;
-            if (has_callbacks(*removed) && original_popup_snapshot_valid_ &&
-                (!snapshot(&current_count, &current_top_vma) || !owned_popup_snapshot_valid_ ||
-                 current_count != owned_popup_count_ || current_top_vma != owned_popup_top_vma_)) {
-                return false;
-            }
-            if (has_callbacks(*removed) &&
-                !hooks_.set_process_info(hooks_.context, 3, 0)) return false;
-            if (has_callbacks(*removed)) pop_issued_ = true;
-            if (has_callbacks(*removed)) log_pop_issued();
-            const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
-            if (restored->open != nullptr && !restored->open()) return false;
-            if (has_callbacks(*restored) &&
-                !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) return false;
-            if (has_callbacks(*restored) && !capture_owned_popup()) {
-                if (original_popup_snapshot_valid_) return false;
-                log_message("owned popup snapshot failed during deactivate; degraded close criterion enabled");
-            }
-            return true;
-        }
-        if (acquired_) {
-            close_pending_ = true;
-            pending_provider_ = removed;
-            restore_if_idle();
-            return !close_pending_;
-        }
+    if (removes_top && stack_size_ > 0) {
+        const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
+        if (restored->open != nullptr && !restored->open()) return false;
+        if (has_callbacks(*restored)) (void)capture_owned_popup();
+        if (has_callbacks(*restored)) invoke_enter(*restored);
+        return true;
+    }
+    if (removes_top && acquired_) {
+        close_pending_ = true;
+        pending_provider_ = removed;
+        idle_baseline_pumps_ = 0;
+        return true;
     }
     restore_if_idle();
     return true;
@@ -328,61 +321,64 @@ void PopupHost::deactivate(bool main_thread) {
 bool PopupHost::pump(bool main_thread) {
     main_thread_ = main_thread;
     if (!main_thread) return false;
+    if (pending_deactivate_owner_ != nullptr) {
+        const char* owner = pending_deactivate_owner_;
+        pending_deactivate_owner_ = nullptr;
+        close_pending_ = false;
+        pending_provider_ = nullptr;
+        (void)deactivate_provider(owner, true);
+    } else if (retry_close_top_) {
+        retry_close_top_ = false;
+        close_pending_ = false;
+        pending_provider_ = nullptr;
+        (void)close_top();
+    }
+    pumping_ = true;
     restore_if_idle();
+    pumping_ = false;
     return true;
 }
 
 void PopupHost::restore_if_idle() {
-    if (!close_pending_ || dispatch_depth_ != 0) return;
+    if (!pumping_ || !close_pending_ || dispatch_depth_ != 0) return;
     if (stack_size_ != 0) return;
     if (pending_provider_ != nullptr && pending_provider_->active != nullptr &&
         pending_provider_->active()) return;
-    uint32_t game_count = 0;
-    uintptr_t game_top_vma = 0;
     if (!original_popup_snapshot_valid_) {
-        if (!pop_issued_) {
-            pop_issued_ = hooks_.set_process_info != nullptr &&
-                          hooks_.set_process_info(hooks_.context, 3, 0);
-            if (!pop_issued_) return;
-            log_message("degraded close pop issued without game-stack snapshot");
-        }
-        if (popup_entry_.slot != nullptr && hooks_.restore != nullptr &&
-            hooks_.restore(hooks_.context, &popup_entry_)) {
-            log_message("restore complete degraded=1 internal_stack=0");
-            acquired_ = false;
-            close_pending_ = false;
-            original_popup_snapshot_valid_ = false;
-            owned_popup_snapshot_valid_ = false;
-            pop_issued_ = false;
-            pending_provider_ = nullptr;
-            popup_entry_ = {};
-            popup_entry_.state_id = -1;
-        }
+        log_message("restore held pending reason=baseline_snapshot_unavailable");
         return;
     }
-    if (!snapshot(&game_count, &game_top_vma)) return;
+    uint32_t game_count = 0;
+    uintptr_t game_top_vma = 0;
+    if (!snapshot(&game_count, &game_top_vma)) {
+        idle_baseline_pumps_ = 0;
+        return;
+    }
     const bool at_original_target = game_count == original_popup_count_ &&
                                     game_top_vma == original_popup_top_vma_;
+    if (at_original_target) {
+        if (++idle_baseline_pumps_ < 2) return;
+    } else {
+        idle_baseline_pumps_ = 0;
+    }
     if (!at_original_target && !pop_issued_) {
         if (!owned_popup_snapshot_valid_ || game_count != owned_popup_count_ ||
             game_top_vma != owned_popup_top_vma_) {
-            log_snapshot("waiting-for-owned-entry", game_count, game_top_vma);
+            log_message("restore held pending reason=game_stack_unexpected current=%u/0x%lx owned_valid=%d owned=%u/0x%lx",
+                        game_count, static_cast<unsigned long>(game_top_vma),
+                        owned_popup_snapshot_valid_ ? 1 : 0, owned_popup_count_,
+                        static_cast<unsigned long>(owned_popup_top_vma_));
             return;
         }
         pop_issued_ = hooks_.set_process_info != nullptr &&
                       hooks_.set_process_info(hooks_.context, 3, 0);
         if (!pop_issued_) return;
-        uint32_t after_count = game_count;
-        uintptr_t after_top_vma = game_top_vma;
-        (void)snapshot(&after_count, &after_top_vma);
-        log_snapshot("pop-issued", after_count, after_top_vma);
-        game_count = after_count;
-        game_top_vma = after_top_vma;
-    }
-    if (game_count != original_popup_count_ || game_top_vma != original_popup_top_vma_) {
-        log_snapshot("waiting-for-target", game_count, game_top_vma);
+        idle_baseline_pumps_ = 0;
+        log_message("pop issued; restore deferred to a later frame");
         return;
     }
+    if (game_count != original_popup_count_ || game_top_vma != original_popup_top_vma_ ||
+        idle_baseline_pumps_ < 2) return;
     if (popup_entry_.slot != nullptr && hooks_.restore != nullptr && hooks_.restore(hooks_.context, &popup_entry_)) {
         if (hooks_.log != nullptr) {
             char message[160]{};
@@ -397,6 +393,7 @@ void PopupHost::restore_if_idle() {
         owned_popup_snapshot_valid_ = false;
         pop_issued_ = false;
         pending_provider_ = nullptr;
+        idle_baseline_pumps_ = 0;
         popup_entry_ = {};
         popup_entry_.state_id = -1;
     }
@@ -430,7 +427,10 @@ bool PopupHost::snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
 
 bool PopupHost::capture_owned_popup() {
     owned_popup_snapshot_valid_ = snapshot(&owned_popup_count_, &owned_popup_top_vma_);
-    if (owned_popup_snapshot_valid_) pop_issued_ = false;
+    if (owned_popup_snapshot_valid_) {
+        pop_issued_ = false;
+        log_snapshot("owned-entry", owned_popup_count_, owned_popup_top_vma_);
+    }
     return owned_popup_snapshot_valid_;
 }
 
@@ -469,15 +469,59 @@ const contracts::PanelCallbacks* PopupHost::current_callbacks() const {
     return stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider->callbacks;
 }
 
+void PopupHost::invoke_enter(const contracts::PanelProviderSpec& provider) {
+    const auto* cb = provider.callbacks;
+    if (cb == nullptr || cb->enter == nullptr) return;
+    ++dispatch_depth_;
+    cb->enter();
+    --dispatch_depth_;
+}
+
 void PopupHost::dispatch_enter() {
     if (deactivating_ || !main_thread_) return;
+    log_message("dispatch enter panel=%s main_thread=%d count=%u",
+                current_panel_for_test() == nullptr ? "none" : current_panel_for_test(),
+                main_thread_ ? 1 : 0, process_dispatch_count_);
     ++dispatch_depth_;
+    if (stack_size_ > 0 && !original_popup_snapshot_valid_) {
+        uint32_t baseline_count = 0;
+        uintptr_t baseline_top_vma = 0;
+        if (snapshot(&baseline_count, &baseline_top_vma)) {
+            original_popup_count_ = baseline_count;
+            original_popup_top_vma_ = baseline_top_vma;
+            original_popup_snapshot_valid_ = true;
+            log_snapshot("open-baseline-recovered", baseline_count, baseline_top_vma);
+        }
+    }
+    if (stack_size_ > 0 && current_callbacks() != nullptr && current_callbacks()->enter != nullptr) {
+        (void)capture_owned_popup();
+    }
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->enter != nullptr) cb->enter();
     --dispatch_depth_;
     restore_if_idle();
 }
 void PopupHost::dispatch_process() {
     if (deactivating_ || !main_thread_) return;
+    if (stack_size_ > 0 && current_callbacks() != nullptr && original_popup_snapshot_valid_ &&
+        owned_popup_snapshot_valid_ && owned_popup_count_ == original_popup_count_ &&
+        owned_popup_top_vma_ == original_popup_top_vma_) {
+        uint32_t current_count = 0;
+        uintptr_t current_top_vma = 0;
+        if (snapshot(&current_count, &current_top_vma) &&
+            (current_count != original_popup_count_ ||
+             current_top_vma != original_popup_top_vma_)) {
+            owned_popup_count_ = current_count;
+            owned_popup_top_vma_ = current_top_vma;
+            pop_issued_ = false;
+            log_snapshot("owned-entry", owned_popup_count_, owned_popup_top_vma_);
+        }
+    }
+    ++process_dispatch_count_;
+    if (process_dispatch_count_ == 1 || process_dispatch_count_ % 120u == 0) {
+        log_message("dispatch process panel=%s main_thread=%d count=%u",
+                    current_panel_for_test() == nullptr ? "none" : current_panel_for_test(),
+                    main_thread_ ? 1 : 0, process_dispatch_count_);
+    }
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->process != nullptr) cb->process();
     --dispatch_depth_;
@@ -516,6 +560,10 @@ const char* PopupHost::current_panel_for_test() const {
     return stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider->panel_id;
 }
 bool PopupHost::close_pending_for_test() const { return close_pending_; }
+bool PopupHost::pending_deactivate_for_owner(const char* owner) const {
+    return owner != nullptr && pending_deactivate_owner_ != nullptr &&
+           std::strcmp(owner, pending_deactivate_owner_) == 0;
+}
 bool PopupHost::active_for_test() const { return stack_size_ != 0; }
 
 }  // namespace qol::features::core_ui

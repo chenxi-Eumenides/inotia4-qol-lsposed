@@ -13,12 +13,15 @@
 #include "game/state/game_state.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
 
 namespace qol::game {
 namespace {
+
+thread_local char g_popup_snapshot_failure[256]{};
 
 // 栈顶 enter VMA 是否为「模块可安全 Pop 的面板」（栏位与 ui_panel_close 一致）。
 bool popup_vma_is_panel(uintptr_t vma) {
@@ -98,26 +101,61 @@ uintptr_t popup_top_vma() {
 }
 
 bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
+    g_popup_snapshot_failure[0] = '\0';
     if (out_count == nullptr || out_top_enter_vma == nullptr || g_popup_stack == nullptr || g_base == 0) {
+        std::snprintf(g_popup_snapshot_failure, sizeof(g_popup_snapshot_failure),
+                      "g_base=0x%lx g_popup_stack=0x%lx output_valid=%d",
+                      static_cast<unsigned long>(g_base),
+                      static_cast<unsigned long>(reinterpret_cast<uintptr_t>(g_popup_stack)),
+                      out_count != nullptr && out_top_enter_vma != nullptr ? 1 : 0);
         return false;
     }
     auto* stack = reinterpret_cast<uint8_t*>(g_popup_stack);
-    if (!game_memory_accessible(stack + POPUP_STACK_COUNT, sizeof(uint32_t), 'r') ||
-        !game_memory_accessible(stack + POPUP_STACK_DATA, sizeof(uint64_t), 'r')) {
+    const bool count_readable = game_memory_accessible(stack + POPUP_STACK_COUNT,
+                                                       sizeof(uint32_t), 'r');
+    const bool data_readable = game_memory_accessible(stack + POPUP_STACK_DATA,
+                                                      sizeof(uint64_t), 'r');
+    if (!count_readable || !data_readable) {
+        std::snprintf(g_popup_snapshot_failure, sizeof(g_popup_snapshot_failure),
+                      "g_base=0x%lx g_popup_stack=0x%lx count_readable=%d data_readable=%d",
+                      static_cast<unsigned long>(g_base),
+                      static_cast<unsigned long>(reinterpret_cast<uintptr_t>(g_popup_stack)),
+                      count_readable ? 1 : 0, data_readable ? 1 : 0);
         return false;
     }
     const uint32_t count = *reinterpret_cast<uint32_t*>(stack + POPUP_STACK_COUNT);
-    if (count > 27) return false;
+    if (count > 27) {
+        std::snprintf(g_popup_snapshot_failure, sizeof(g_popup_snapshot_failure),
+                      "g_base=0x%lx g_popup_stack=0x%lx count=%u upper_bound=27",
+                      static_cast<unsigned long>(g_base),
+                      static_cast<unsigned long>(reinterpret_cast<uintptr_t>(g_popup_stack)), count);
+        return false;
+    }
     if (count == 0) {
         *out_count = 0;
         *out_top_enter_vma = 0;
         return true;
     }
     const uint64_t data = *reinterpret_cast<uint64_t*>(stack + POPUP_STACK_DATA);
-    if (data == 0) return false;
+    if (data == 0) {
+        std::snprintf(g_popup_snapshot_failure, sizeof(g_popup_snapshot_failure),
+                      "g_base=0x%lx g_popup_stack=0x%lx count=%u data=0",
+                      static_cast<unsigned long>(g_base),
+                      static_cast<unsigned long>(reinterpret_cast<uintptr_t>(g_popup_stack)), count);
+        return false;
+    }
     auto* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) +
                 (count - 1) * POPUP_ENTRY_SIZE;
-    if (!game_memory_accessible(top + POPUP_ENTRY_ENTER, sizeof(uintptr_t), 'r')) return false;
+    const bool top_readable = game_memory_accessible(top + POPUP_ENTRY_ENTER,
+                                                      sizeof(uintptr_t), 'r');
+    if (!top_readable) {
+        std::snprintf(g_popup_snapshot_failure, sizeof(g_popup_snapshot_failure),
+                      "g_base=0x%lx g_popup_stack=0x%lx count=%u data=0x%lx top_readable=0",
+                      static_cast<unsigned long>(g_base),
+                      static_cast<unsigned long>(reinterpret_cast<uintptr_t>(g_popup_stack)), count,
+                      static_cast<unsigned long>(data));
+        return false;
+    }
     const uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
     uintptr_t vma = 0;
     if (lifecycle_participant_is_inventory_enter(enter)) {
@@ -129,6 +167,10 @@ bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
     *out_count = count;
     *out_top_enter_vma = vma;
     return true;
+}
+
+const char* popup_stack_snapshot_failure() {
+    return g_popup_snapshot_failure;
 }
 
 const char* top_panel_name() {

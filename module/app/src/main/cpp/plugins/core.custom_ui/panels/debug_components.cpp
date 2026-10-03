@@ -3,6 +3,7 @@
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
 
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -33,9 +34,23 @@ std::atomic<int32_t> g_requested_state{-1};
 std::atomic<bool> g_enabled{false};
 uint64_t g_apply_task = 0;
 bool g_active = false;
+uint32_t g_process_log_frames = 0;
 contracts::QolUiHandle g_root = nullptr;
 contracts::QolUiHandle g_labels[5]{};
 contracts::QolUiHandle g_samples[4]{};
+
+void debug_log(const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    (void)g_sdk->log.write(1, 12, "core.custom_ui/debug_components", message,
+                           static_cast<uint32_t>(std::strlen(message)));
+}
+
+void log_create(const char* component, QolResult result, contracts::QolUiHandle handle) {
+    char message[128]{};
+    std::snprintf(message, sizeof(message), "create %s result=%d handle=%p",
+                  component, result.code, handle);
+    debug_log(message);
+}
 
 void destroy_components() {
     if (g_root != nullptr) {
@@ -75,7 +90,9 @@ bool create_components() {
                                  kPanelRect.w, kPanelRect.h};
 
     const contracts::UiPanelDesc panel_desc{rect, rect, 0, 0};
-    if (!contracts::succeeded(components->panel_create(&panel_desc, nullptr, &g_root))) {
+    QolResult result = components->panel_create(&panel_desc, nullptr, &g_root);
+    log_create("panel", result, g_root);
+    if (!contracts::succeeded(result)) {
         destroy_components();
         return false;
     }
@@ -84,7 +101,9 @@ bool create_components() {
         const contracts::UiLabelDesc desc{
             {kLabelX, kRowTop + i * kRowHeight, kLabelWidth, kControlHeight},
             labels[i], 0xFFFFFFFFu, contracts::UiAlign::kLeft};
-        if (!contracts::succeeded(components->label_create(&desc, g_root, &g_labels[i]))) {
+        result = components->label_create(&desc, g_root, &g_labels[i]);
+        log_create(labels[i], result, g_labels[i]);
+        if (!contracts::succeeded(result)) {
             destroy_components();
             return false;
         }
@@ -103,10 +122,27 @@ bool create_components() {
     const contracts::UiScrollViewDesc scroll_desc{
         {kControlX, kRowTop + 4 * kRowHeight, kControlWidth, kControlHeight},
         144, 0, static_cast<int32_t>(kControlHeight), 0, nullptr, nullptr};
-    if (!contracts::succeeded(components->button_create(&button_desc, g_root, &g_samples[0])) ||
-        !contracts::succeeded(components->toggle_create(&toggle_desc, g_root, &g_samples[1])) ||
-        !contracts::succeeded(components->select_create(&select_desc, g_root, &g_samples[2])) ||
-        !contracts::succeeded(components->scroll_view_create(&scroll_desc, g_root, &g_samples[3]))) {
+    result = components->button_create(&button_desc, g_root, &g_samples[0]);
+    log_create("button", result, g_samples[0]);
+    if (!contracts::succeeded(result)) {
+        destroy_components();
+        return false;
+    }
+    result = components->toggle_create(&toggle_desc, g_root, &g_samples[1]);
+    log_create("toggle", result, g_samples[1]);
+    if (!contracts::succeeded(result)) {
+        destroy_components();
+        return false;
+    }
+    result = components->select_create(&select_desc, g_root, &g_samples[2]);
+    log_create("select", result, g_samples[2]);
+    if (!contracts::succeeded(result)) {
+        destroy_components();
+        return false;
+    }
+    result = components->scroll_view_create(&scroll_desc, g_root, &g_samples[3]);
+    log_create("scroll_view", result, g_samples[3]);
+    if (!contracts::succeeded(result)) {
         destroy_components();
         return false;
     }
@@ -115,7 +151,11 @@ bool create_components() {
 }
 
 void panel_enter() {
-    if (g_root == nullptr) (void)create_components();
+    debug_log("panel enter");
+    if (g_root == nullptr) {
+        const bool created = create_components();
+        debug_log(created ? "panel enter create=ok" : "panel enter create=failed");
+    }
     else g_active = true;
 }
 
@@ -124,18 +164,70 @@ void panel_process() {
     const contracts::QolUiAdapter* adapter = ui_adapter();
     if (adapter == nullptr || adapter->begin_frame == nullptr || adapter->end_frame == nullptr ||
         adapter->fill_rect_alpha == nullptr || adapter->draw_control == nullptr) {
+        debug_log("process adapter unavailable");
         return;
     }
-    if (!contracts::succeeded(adapter->begin_frame())) return;
+    const QolResult begin = adapter->begin_frame();
+    const bool trace = (++g_process_log_frames % 120u) == 1u;
+    if (!contracts::succeeded(begin)) {
+        if (trace) {
+            char message[96]{};
+            std::snprintf(message, sizeof(message), "process begin failed result=%d", begin.code);
+            debug_log(message);
+        }
+        return;
+    }
     contracts::UiRect rect{};
-    if (adapter->get_rect != nullptr && contracts::succeeded(adapter->get_rect(g_root, &rect))) {
-        (void)adapter->fill_rect_alpha(rect, 0xFF101820u, 0xF0u);
+    const QolResult get_rect = adapter->get_rect == nullptr
+        ? contracts::error(kQolErrNotReady, "get_rect unavailable", 20)
+        : adapter->get_rect(g_root, &rect);
+    QolResult fill = contracts::error(kQolErrNotReady, "fill skipped", 11);
+    QolResult draw[10]{};
+    if (contracts::succeeded(get_rect)) {
+        fill = adapter->fill_rect_alpha(rect, 0xFF101820u, 0xF0u);
+        QolResult (*const draw_text)(contracts::QolUiHandle, int32_t, int32_t,
+                                     uint32_t) = adapter->draw_text;
+        QolResult (*const draw_custom_button)(contracts::QolUiHandle,
+            contracts::UiRect, uint32_t, uint32_t, int32_t, const char*, uint32_t, int32_t,
+            int32_t) = adapter->draw_custom_button;
+        if (draw_custom_button != nullptr) {
+            (void)draw_custom_button(g_root, {0, 0, kPanelRect.w, kPanelRect.h},
+                                     0xFF101820u, 0xFFB89B62u, 3, nullptr, 0, 0, 0);
+        }
         for (int32_t row = 0; row < 5; ++row) {
-            (void)adapter->draw_control(g_labels[row]);
-            if (row > 0) (void)adapter->draw_control(g_samples[row - 1]);
+            draw[row * 2] = draw_text == nullptr
+                ? contracts::error(kQolErrNotReady, "draw_text unavailable", 20)
+                : draw_text(g_labels[row], 0, 0x18, 0xFFFFFFFFu);
+            if (row == 1 && draw_custom_button != nullptr) {
+                draw[row * 2 + 1] = draw_custom_button(g_samples[0],
+                    {0, 0, kControlWidth, kControlHeight}, 0xFF241C18u, 0xFFB89B62u,
+                    2, "button", 0xFFFFFFFFu, 8, 6);
+            } else if (row == 2 && draw_custom_button != nullptr) {
+                draw[row * 2 + 1] = draw_custom_button(g_samples[1],
+                    {0, 0, kControlWidth, kControlHeight}, 0xFF241C18u, 0xFFB89B62u,
+                    2, "toggle", 0xFFFFFFFFu, 8, 6);
+            } else if (row == 3 && draw_custom_button != nullptr) {
+                draw[row * 2 + 1] = draw_custom_button(g_samples[2],
+                    {0, 0, kControlWidth, kControlHeight}, 0xFF241C18u, 0xFFB89B62u,
+                    2, "first", 0xFFFFFFFFu, 8, 6);
+            } else if (row == 4 && draw_custom_button != nullptr) {
+                draw[row * 2 + 1] = draw_custom_button(g_samples[3],
+                    {0, 0, kControlWidth, kControlHeight}, 0xFF241C18u, 0xFFB89B62u,
+                    2, "scroll_view", 0xFFFFFFFFu, 8, 6);
+            }
         }
     }
-    (void)adapter->end_frame();
+    const QolResult end = adapter->end_frame();
+    if (trace) {
+        char message[256]{};
+        std::snprintf(message, sizeof(message),
+                      "process frame=%u rect=%lld,%lld,%lld,%lld get_rect=%d fill=%d label0=%d button=%d toggle=%d select=%d scroll=%d end=%d",
+                      g_process_log_frames, static_cast<long long>(rect.x),
+                      static_cast<long long>(rect.y), static_cast<long long>(rect.w),
+                      static_cast<long long>(rect.h), get_rect.code, fill.code, draw[0].code,
+                      draw[3].code, draw[5].code, draw[7].code, draw[9].code, end.code);
+        debug_log(message);
+    }
 }
 
 void panel_close() { destroy_components(); }
@@ -192,7 +284,9 @@ QolResult write_response(contracts::HttpRes* response, const char* body) {
 }
 
 QolResult command_handler(const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
+    debug_log("endpoint hit");
     if (!g_enabled.load(std::memory_order_acquire)) {
+        debug_log("endpoint g_enabled=0");
         return write_response(response, "{\"ok\":false,\"error\":\"custom ui disabled\"}");
     }
     if (request == nullptr || request->body == nullptr || request->body_len == 0) {
@@ -219,13 +313,25 @@ QolResult command_handler(const contracts::HttpReq* request, contracts::HttpRes*
         return write_response(response, "{\"ok\":false,\"error\":\"open must be boolean\"}");
     }
     g_requested_state.store(value_size == 4 ? 1 : 0, std::memory_order_release);
+    debug_log(value_size == 4 ? "endpoint requested=open" : "endpoint requested=close");
     return write_response(response, "{\"ok\":true,\"queued\":true}");
 }
 
 int32_t apply_request(int64_t, void*) {
     const int32_t requested = g_requested_state.exchange(-1, std::memory_order_acq_rel);
-    if (requested == 1) (void)ui_panels_open(kPanelId);
-    else if (requested == 0) ui_panels_close(kPanelId);
+    if (requested == 1) {
+        const bool opened = ui_panels_open(kPanelId);
+        char message[96]{};
+        std::snprintf(message, sizeof(message), "apply requested=open result=%d active=%d",
+                      opened ? 1 : 0, ui_panels_active(kPanelId) ? 1 : 0);
+        debug_log(message);
+    } else if (requested == 0) {
+        ui_panels_close(kPanelId);
+        char message[96]{};
+        std::snprintf(message, sizeof(message), "apply requested=close active=%d",
+                      ui_panels_active(kPanelId) ? 1 : 0);
+        debug_log(message);
+    }
     return 1;
 }
 

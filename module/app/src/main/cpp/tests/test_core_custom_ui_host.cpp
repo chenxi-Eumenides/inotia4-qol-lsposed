@@ -21,6 +21,7 @@ int g_last_state_id = -1;
 bool g_acquire_ok = true;
 bool g_resolve_ok = true;
 bool g_snapshot_ok = true;
+int g_snapshot_reads = 0;
 bool g_a_active = false;
 bool g_b_active = false;
 int g_open_a = 0;
@@ -67,6 +68,7 @@ bool restore_popup(void*, QolPopupStateEntry* entry) {
 }
 
 bool popup_stack_snapshot(void*, uint32_t* count, uintptr_t* top_enter_vma) {
+    ++g_snapshot_reads;
     if (!g_snapshot_ok || count == nullptr || top_enter_vma == nullptr) return false;
     *count = g_popup_count;
     *top_enter_vma = g_popup_top;
@@ -109,7 +111,7 @@ uint32_t a_event(uint64_t, uint64_t, uint64_t) {
     if (g_deactivate_during_event != nullptr) {
         PopupHost* host = g_deactivate_during_event;
         g_deactivate_during_event = nullptr;
-        assert(!host->deactivate_provider("owner.a", true));
+        assert(host->deactivate_provider("owner.a", true));
         assert(host->close_pending_for_test());
     }
     return 41;
@@ -147,6 +149,7 @@ void reset_fakes() {
     g_deactivate_during_event = nullptr;
     g_acquire_ok = g_resolve_ok = true;
     g_snapshot_ok = true;
+    g_snapshot_reads = 0;
     g_a_active = g_b_active = g_c_active = false;
     g_popup_count = 1;
     g_popup_top = 0x1234;
@@ -178,36 +181,61 @@ int main() {
     assert(g_slots[0] == 1 && g_slots[1] == 1 && g_slots[2] == 1 && g_slots[3] == 1 && g_slots[4] == 1);
 
     assert(host.open(kPanelB, true));
-    assert(g_close_a == 1 && g_open_b == 1 && g_acquires == 1);
+    assert(g_close_a == 0 && g_open_b == 1 && g_acquires == 1);
+    assert(g_popup_count == 2 && g_process_calls == 1);
+    assert(g_a_active && g_b_active);
     assert(host.open(kPanelC, true));
-    assert(g_close_b == 1 && g_open_c == 1 && host.current_panel_for_test() == "panel.c");
+    assert(g_close_b == 0 && g_open_c == 1 && host.current_panel_for_test() == "panel.c");
     dispatch->enter();
-    assert(g_slots[0] == 11);
+    assert(g_slots[0] == 31);
     assert(host.close("panel.c", true));
     assert(g_close_c == 1 && g_open_b == 2 && host.current_panel_for_test() == "panel.b");
     assert(host.close("panel.b", true));
-    assert(g_close_b == 2 && g_open_a == 2 && host.current_panel_for_test() == "panel.a");
+    assert(g_close_b == 1 && g_open_a == 2 && host.current_panel_for_test() == "panel.a");
+    assert(g_close_a == 0 && g_a_active && g_popup_count == 2 && g_process_calls == 1);
 
     assert(host.close("panel.a", true));
     assert(!host.close("panel.a", true));
+    assert(g_restores == 0 && host.close_pending_for_test());
+    assert(host.pump(true));
+    assert(g_restores == 0 && g_last_process == 3);
+    assert(host.pump(true));
+    assert(host.pump(true));
     assert(g_restores == 1 && !host.close_pending_for_test());
-    assert(g_last_process == 3);
     assert(host.open(kPanelA, true) && g_acquires == 2);
-    assert(host.close("panel.a", true) && g_restores == 2);
+    assert(host.close("panel.a", true) && g_restores == 1);
+    assert(host.pump(true)); assert(host.pump(true)); assert(host.pump(true));
     assert(host.pump(true));
     assert(g_restores == 2 && !host.close_pending_for_test());
 
     reset_fakes();
+    auto unexpected_stack = make_host();
+    assert(unexpected_stack.open(kPanelA, true));
+    g_popup_count = 3;
+    g_popup_top = 0x7777;
+    assert(unexpected_stack.close("panel.a", true));
+    assert(unexpected_stack.active_for_test() && g_close_a == 0);
+    const int unexpected_process_calls = g_process_calls;
+    assert(unexpected_stack.pump(true));
+    assert(unexpected_stack.active_for_test() && g_restores == 0);
+    assert(g_process_calls == unexpected_process_calls);
+
+    reset_fakes();
     auto baseline_snapshot_failed = make_host();
     g_snapshot_ok = false;
-    assert(baseline_snapshot_failed.open(kPanelA, true));
-    assert(baseline_snapshot_failed.active_for_test());
-    assert(baseline_snapshot_failed.close("panel.a", true));
-    assert(!baseline_snapshot_failed.close_pending_for_test());
-    assert(baseline_snapshot_failed.pump(true));
-    assert(!baseline_snapshot_failed.close_pending_for_test());
+    assert(!baseline_snapshot_failed.open(kPanelA, true));
     assert(!baseline_snapshot_failed.active_for_test());
-    assert(g_close_a == 1 && g_restores == 1 && g_last_process == 3);
+    assert(g_close_a == 0 && g_restores == 0 && g_process_calls == 0);
+
+    reset_fakes();
+    // 非主线程 open 必须失败，且不得读取游戏 popup 栈快照。
+    auto off_main = make_host();
+    assert(!off_main.open(kPanelA, false));
+    assert(!off_main.active_for_test());
+    assert(g_snapshot_reads == 0 && g_process_calls == 0 && g_resolves == 0);
+    assert(!off_main.close("panel.a", false));
+    assert(!off_main.deactivate_provider("owner.a", false));
+    assert(g_snapshot_reads == 0);
 
     reset_fakes();
     auto deactivate_top = make_host();
@@ -231,9 +259,41 @@ int main() {
     auto deactivate_last = make_host();
     assert(deactivate_last.open(kPanelA, true));
     assert(deactivate_last.deactivate_provider("owner.a", true));
-    assert(!deactivate_last.active_for_test() && !deactivate_last.close_pending_for_test());
+    assert(!deactivate_last.active_for_test() && deactivate_last.close_pending_for_test());
+    assert(deactivate_last.pump(true)); assert(deactivate_last.pump(true));
+    assert(deactivate_last.pump(true));
     assert(g_close_a == 1 && g_restores == 1);
     assert(g_popup_count == 1 && g_popup_top == 0x1234);
+
+    reset_fakes();
+    auto retry_snapshot_deactivate = make_host();
+    assert(retry_snapshot_deactivate.open(kPanelA, true));
+    g_snapshot_ok = false;
+    assert(retry_snapshot_deactivate.deactivate_provider("owner.a", true));
+    assert(retry_snapshot_deactivate.pending_deactivate_for_owner("owner.a"));
+    assert(retry_snapshot_deactivate.active_for_test());
+    assert(g_close_a == 0 && g_restores == 0);
+    g_snapshot_ok = true;
+    assert(retry_snapshot_deactivate.pump(true));
+    assert(retry_snapshot_deactivate.pump(true));
+    assert(retry_snapshot_deactivate.pump(true));
+    assert(!retry_snapshot_deactivate.active_for_test());
+    assert(!retry_snapshot_deactivate.close_pending_for_test());
+    assert(g_close_a == 1 && g_restores == 1);
+
+    reset_fakes();
+    auto retry_snapshot_close = make_host();
+    assert(retry_snapshot_close.open(kPanelA, true));
+    g_snapshot_ok = false;
+    assert(retry_snapshot_close.close("panel.a", true));
+    assert(retry_snapshot_close.active_for_test());
+    assert(g_close_a == 0 && g_restores == 0);
+    g_snapshot_ok = true;
+    assert(retry_snapshot_close.pump(true));
+    assert(retry_snapshot_close.pump(true));
+    assert(retry_snapshot_close.pump(true));
+    assert(!retry_snapshot_close.active_for_test());
+    assert(g_close_a == 1 && g_restores == 1);
 
     reset_fakes();
     // 原生面板先占一层，模块设置弹层再压在其上；deactivate 只 pop 模块 entry。
@@ -243,7 +303,7 @@ int main() {
     assert(native_under_module.open(kPanelA, true));
     assert(g_popup_count == 3 && g_popup_top == 0x9999);
     g_delay_pop = true;
-    assert(!native_under_module.deactivate_provider("owner.a", true));
+    assert(native_under_module.deactivate_provider("owner.a", true));
     assert(native_under_module.close_pending_for_test() && g_restores == 0);
     assert(g_popup_count == 3 && g_popup_top == 0x9999);
     const int one_pop_only = g_process_calls;
@@ -253,6 +313,8 @@ int main() {
     g_popup_count = 2;
     g_popup_top = 0x5678;
     assert(native_under_module.pump(true));
+    assert(g_restores == 0 && native_under_module.close_pending_for_test());
+    assert(native_under_module.pump(true));
     assert(g_restores == 1 && !native_under_module.close_pending_for_test());
     assert(g_popup_count == 2 && g_popup_top == 0x5678);
 
@@ -261,11 +323,13 @@ int main() {
     assert(delayed_pop.open(kPanelA, true));
     // 模拟一次 pop 已发起但游戏帧尚未提交：旧模块 entry 仍在栈顶。
     g_delay_pop = true;
-    assert(!delayed_pop.deactivate_provider("owner.a", true));
+    assert(delayed_pop.deactivate_provider("owner.a", true));
     assert(g_restores == 0 && delayed_pop.close_pending_for_test());
     assert(g_popup_count == 2 && g_popup_top == 0x9999);
     g_popup_count = 1;
     g_popup_top = 0x1234;
+    assert(delayed_pop.pump(true));
+    assert(g_restores == 0 && delayed_pop.close_pending_for_test());
     assert(delayed_pop.pump(true));
     assert(g_restores == 1 && !delayed_pop.close_pending_for_test());
 
@@ -279,13 +343,17 @@ int main() {
     g_popup_count = 1;
     g_popup_top = 0x1234;
     assert(strict_snapshot.pump(true));
+    assert(g_restores == 0 && strict_snapshot.close_pending_for_test());
+    assert(strict_snapshot.pump(true));
     assert(g_restores == 1 && !strict_snapshot.close_pending_for_test());
 
     reset_fakes();
     auto deactivate_after_close = make_host();
     assert(deactivate_after_close.open(kPanelA, true));
     assert(deactivate_after_close.close("panel.a", true));
-    assert(deactivate_after_close.deactivate_provider("owner.a", true));
+    assert(!deactivate_after_close.deactivate_provider("owner.a", true));
+    assert(deactivate_after_close.pump(true));
+    assert(deactivate_after_close.pump(true));
     assert(deactivate_after_close.pump(true));
     assert(g_close_a == 1 && g_restores == 1);
 
@@ -294,8 +362,12 @@ int main() {
     assert(deactivate_during_callback.open(kPanelA, true));
     g_deactivate_during_event = &deactivate_during_callback;
     assert(deactivate_during_callback.dispatchers_for_test()->event(0, 0, 0) == 41);
-    assert(g_close_a == 1 && g_restores == 1);
-    assert(!deactivate_during_callback.close_pending_for_test());
+    assert(g_close_a == 1 && g_restores == 0);
+    assert(deactivate_during_callback.close_pending_for_test());
+    assert(deactivate_during_callback.pump(true));
+    assert(deactivate_during_callback.pump(true));
+    assert(deactivate_during_callback.pump(true));
+    assert(g_restores == 1);
 
     reset_fakes();
     auto deactivate_host = make_host();
@@ -303,6 +375,7 @@ int main() {
     deactivate_host.deactivate(true);
     deactivate_host.deactivate(true);
     assert(deactivate_host.pump(true));
+    assert(deactivate_host.pump(true)); assert(deactivate_host.pump(true));
     assert(!deactivate_host.active_for_test() && g_close_a == 1 && g_restores == 1);
 
     reset_fakes();
@@ -314,7 +387,9 @@ int main() {
     assert(deactivate_custom_ui.pump(true));
     assert(g_process_calls == process_calls_before_deactivate + 1);
     assert(g_last_process == 3 && g_popup_count == 1 && g_popup_top == 0x1234);
-    assert(g_close_a == 2 && g_close_b == 1 && g_restores == 1);
+    assert(deactivate_custom_ui.pump(true));
+    assert(deactivate_custom_ui.pump(true));
+    assert(g_close_a == 1 && g_close_b == 1 && g_restores == 1);
 
     reset_fakes();
     auto synchronous = make_host();
@@ -333,7 +408,9 @@ int main() {
     const PanelProviderSpec failed_ui{"panel.fail", "owner.fail", fail_open, close_a, active_a,
                                       reason, &kCallbacksA};
     assert(!ui_failure.open(failed_ui, true));
-    assert(!ui_failure.active_for_test() && g_restores == 1 && g_close_a == 0);
+    assert(!ui_failure.active_for_test() && g_restores == 0 && g_close_a == 0);
+    assert(ui_failure.pump(true)); assert(ui_failure.pump(true)); assert(ui_failure.pump(true));
+    assert(g_restores == 1);
 
     reset_fakes();
     auto empty = make_host();

@@ -13,6 +13,7 @@ namespace qol::game {
 // 栈顶面板原版 enter VMA（减去 g_base；模块 wrapper 经别名反查还原）；无面板/未就绪返回 0。
 uintptr_t popup_top_vma();
 bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma);
+const char* popup_stack_snapshot_failure();
 // 栈顶面板名（与 panel_* 输出口径一致）；非面板/未就绪返回 nullptr。
 const char* top_panel_name();
 

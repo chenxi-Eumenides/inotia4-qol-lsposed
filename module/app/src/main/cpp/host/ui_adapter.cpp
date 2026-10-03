@@ -627,8 +627,19 @@ QolResult screen_name(const char** out) {
 
 QolResult popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
     if (out_count == nullptr || out_top_enter_vma == nullptr) return invalid_argument();
-    if (!qol::game::game_host_is_main_thread()) return not_ready();
-    return qol::game::popup_stack_snapshot(out_count, out_top_enter_vma) ? contracts::ok() : not_ready();
+    if (!qol::game::game_host_is_main_thread()) {
+        return contracts::error(kQolErrNotReady, "popup snapshot adapter_thread=0", 32);
+    }
+    if (!qol::game::popup_stack_snapshot(out_count, out_top_enter_vma)) {
+        const char* reason = qol::game::popup_stack_snapshot_failure();
+        return contracts::error(kQolErrNotReady, reason, reason == nullptr
+            ? 0u : static_cast<uint32_t>(std::strlen(reason)));
+    }
+    return contracts::ok();
+}
+
+int32_t adapter_is_main_thread() {
+    return qol::game::game_host_is_main_thread() ? 1 : 0;
 }
 
 const QolUiAdapter g_ui_adapter{
@@ -720,6 +731,7 @@ const QolUiAdapter g_ui_adapter{
      &set_touch_release_input,
       &clear_touch_drop_event,
       &popup_stack_snapshot,
+      &adapter_is_main_thread,
 };
 
 }  // namespace
