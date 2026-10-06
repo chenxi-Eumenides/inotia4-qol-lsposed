@@ -7,7 +7,6 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
 #include "panels/settings.h"
-#include "panels/settings_ui_local.h"
 
 namespace qol::features::core_ui {
 namespace {
@@ -16,7 +15,6 @@ std::atomic<bool> g_enabled{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
 uint64_t g_frame_task = 0;
 const contracts::UiPanelsApi* g_panels_api = nullptr;
-const contracts::QolUiComponents* g_components_api = nullptr;
 
 // 主线程帧任务：替代原后台轮询线程，推进「更多游戏」按钮绑定/重绑定。
 int32_t frame_tick(int64_t frame, void* ctx) {
@@ -58,7 +56,6 @@ void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
     settings_bind_sdk(sdk);
     // 依赖一律经能力取得（ADR 0001 D2）：能力 ID 与版本保持原样，改的只是提供者。
     g_panels_api = nullptr;
-    g_components_api = nullptr;
     if (sdk != nullptr && sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;
         if (contracts::succeeded(sdk->capabilities.require(
@@ -66,15 +63,7 @@ void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
                 {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface))) {
             g_panels_api = static_cast<const contracts::UiPanelsApi*>(iface);
         }
-        iface = nullptr;
-        if (contracts::succeeded(sdk->capabilities.require(
-                contracts::kUiComponentsCapabilityId,
-                {contracts::kUiContractMajor, contracts::kUiContractMinor}, &iface))) {
-            g_components_api = static_cast<const contracts::QolUiComponents*>(iface);
-        }
     }
-    // 设置页自持 helper 的依赖注入：宿主 UI 适配表 + 组件能力（不再引用框架实现）。
-    settings_ui_bind(sdk != nullptr ? sdk->ui : nullptr, g_components_api);
 }
 
 bool settings_panels_open(const char* panel_id) {
@@ -113,9 +102,12 @@ bool panels_register() {
     if (!contracts::succeeded(g_sdk->panels.register_provider(&kSettingsProvider))) return false;
     if (!contracts::succeeded(g_sdk->panels.register_item(&kSaveBackupItem))) return false;
     if (g_frame_task == 0 && g_sdk->scheduler.add != nullptr) {
-        // 15 帧一次（≈250ms，接近原轮询线程 300ms 粒度）：绑定动作轻量，无需逐帧。
+        // 每帧（interval=1）：游戏 STATE_EnterMainMenu 会重填「更多游戏」ExecuteProc 槽为
+        // 原版 GotoShowMoreGames，重绑间隔大于 1 帧时存在点击落回原版 gemshop 的窗口；
+        // 每帧校验把窗口收窄到 1 帧。开销仅为每帧一次 screen 名比较 + 控件槽安全读 +
+        // 指针比较，校验命中（常态）时无写操作，绑定/释放只在槽被改写或进出主菜单时发生。
         uint64_t task = 0;
-        if (contracts::succeeded(g_sdk->scheduler.add(1, &frame_tick, nullptr, 15, 0, &task))) {
+        if (contracts::succeeded(g_sdk->scheduler.add(1, &frame_tick, nullptr, 1, 0, &task))) {
             g_frame_task = task;
         }
     }
@@ -130,7 +122,6 @@ void panels_unregister() {
         g_frame_task = 0;
     }
     settings_release_more_games();
-    settings_ui_unbind();
     g_enabled.store(false, std::memory_order_release);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
         (void)g_sdk->panels.unregister_owner("core.settings");

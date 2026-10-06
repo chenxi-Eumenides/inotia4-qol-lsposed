@@ -19,7 +19,10 @@
 #include "plugins/attribute_quality/plugin.h"
 #include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
+#include "plugins/autosell/settings_contribution.h"
 #include "plugins/core.settings/plugin.h"
+#include "plugins/core.settings/settings_contribution.h"
+#include "plugins/core.custom_ui/settings_contribution.h"
 #include "plugins/core.custom_ui/plugin.h"
 #include "plugins/core.api/plugin.h"
 #include "plugins/craft_ui/plugin.h"
@@ -28,16 +31,24 @@
 #include "plugins/core.data/plugin.h"
 #include "plugins/core.feature/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
+#include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
+#include "plugins/extension_bag/settings_contribution.h"
 #include "plugins/inventory_hooks/plugin.h"
+#include "plugins/move_merge/plugin.h"
+#include "plugins/move_merge/settings_contribution.h"
 #include "plugins/core.item/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/push_all/plugin.h"
+#include "plugins/push_all/settings_contribution.h"
 #include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
+#include "plugins/save_backup/settings_contribution.h"
 #include "plugins/simple_mode/plugin.h"
+#include "plugins/simple_mode/settings_contribution.h"
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
+#include "plugins/stack_limit/settings_contribution.h"
 #include "plugins/core.system/plugin.h"
 #include "plugins/character_panel_i18n/plugin.h"
 #include "plugins/world_teleport/plugin.h"
@@ -170,47 +181,54 @@ uint32_t g_registration_failures = 0;
 uint32_t g_install_failures = 0;
 
 using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
+using RegisterSettingsFn = QolResult (*)(const contracts::QolHostSdk*);
 
-// 这里只收集描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
+// 内建装配 sidecar；不扩展无 size 的 PluginDescriptor，也不维护第二份功能清单。
+struct BuiltInPlugin {
+    PluginDescriptorFn descriptor;
+};
+
+// 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
 // requires/provides 构建 capability DAG 并决定 install/publish 顺序。
-constexpr PluginDescriptorFn kPluginDescriptors[] = {
+constexpr BuiltInPlugin kBuiltInPlugins[] = {
 #if !QOL_KERNEL_ONLY
-    &features::core_world::plugin_descriptor,
-    &features::core_craft::plugin_descriptor,
-    &features::core_save::plugin_descriptor,
-    &features::core_character::plugin_descriptor,
-    &features::core_data::plugin_descriptor,
-    &features::core_feature::plugin_descriptor,
-    &features::attribute_quality::plugin_descriptor,
-    &features::attribute_range_display::plugin_descriptor,
-    &features::autosell::plugin_descriptor,
-    &features::core_api::plugin_descriptor,
-    &features::core_settings::plugin_descriptor,
-    &features::core_ui::plugin_descriptor,
-    &features::craft_ui::plugin_descriptor,
-    &features::custom_recipe::plugin_descriptor,
-    &features::extension_bag::plugin_descriptor,
-    &features::inventory_hooks::plugin_descriptor,
-    &features::core_item::plugin_descriptor,
-    &features::core_ui_state::plugin_descriptor,
-    &features::push_all::plugin_descriptor,
-    &features::core_quest::plugin_descriptor,
-    &features::save_backup::plugin_descriptor,
-    &features::simple_mode::plugin_descriptor,
-    &features::special_equip::plugin_descriptor,
-    &features::stack_limit::plugin_descriptor,
-    &features::core_system::plugin_descriptor,
-    &features::character_panel_i18n::plugin_descriptor,
-    &features::world_teleport::plugin_descriptor,
+    {&features::core_world::plugin_descriptor},
+    {&features::core_craft::plugin_descriptor},
+    {&features::core_save::plugin_descriptor},
+    {&features::core_character::plugin_descriptor},
+    {&features::core_data::plugin_descriptor},
+    {&features::core_feature::plugin_descriptor},
+    {&features::attribute_quality::plugin_descriptor},
+    {&features::attribute_range_display::plugin_descriptor},
+    {&features::autosell::plugin_descriptor},
+    {&features::core_api::plugin_descriptor},
+    {&features::core_settings::plugin_descriptor},
+    {&features::core_ui::plugin_descriptor},
+    {&features::craft_ui::plugin_descriptor},
+    {&features::custom_recipe::plugin_descriptor},
+    {&features::extension_bag::plugin_descriptor},
+    {&features::move_merge::plugin_descriptor},
+    {&features::inventory_hooks::plugin_descriptor},
+    {&features::core_item::plugin_descriptor},
+    {&features::core_ui_state::plugin_descriptor},
+    {&features::push_all::plugin_descriptor},
+    {&features::core_quest::plugin_descriptor},
+    {&features::save_backup::plugin_descriptor},
+    {&features::simple_mode::plugin_descriptor},
+    {&features::special_equip::plugin_descriptor},
+    {&features::stack_limit::plugin_descriptor},
+    {&features::core_system::plugin_descriptor},
+    {&features::character_panel_i18n::plugin_descriptor},
+    {&features::world_teleport::plugin_descriptor},
 #endif
 #if QOL_ENABLE_DEVICE_PROBE
-    &features::device_probe_provider::plugin_descriptor,
-    &features::device_probe_consumer::plugin_descriptor,
+    {&features::device_probe_provider::plugin_descriptor},
+    {&features::device_probe_consumer::plugin_descriptor},
 #endif
 #if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
-    &features::device_probe_export_failure::plugin_descriptor,
+    {&features::device_probe_export_failure::plugin_descriptor},
 #endif
-    nullptr,
+    {nullptr},
 };
 
 using MechanismOutcome = qol::hooks::TxDeps::MechanismOutcome;
@@ -396,9 +414,10 @@ bool assembly_init() {
     });
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
-    for (PluginDescriptorFn descriptor_fn : kPluginDescriptors) {
-        if (descriptor_fn == nullptr) break;
-        if (!register_plugin(descriptor_fn())) {
+    for (const BuiltInPlugin& plugin : kBuiltInPlugins) {
+        if (plugin.descriptor == nullptr) break;
+        const auto& descriptor = plugin.descriptor();
+        if (!register_plugin(descriptor)) {
             ++g_registration_failures;
             QOL_LOG_ERROR(QolDomain::kCore, "assembly: plugin descriptor registration failed");
             return false;
@@ -406,6 +425,23 @@ bool assembly_init() {
         ++g_registered_plugins;
     }
 
+    const QolResult category_result = features::core_settings::register_categories(&g_host_sdk);
+    if (!contracts::succeeded(category_result)) {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "assembly: settings categories %s code=%d reason=%.*s",
+                     category_result.code == kQolErrUnsupported ? "skipped" : "rejected",
+                     category_result.code, static_cast<int>(category_result.message_len),
+                     category_result.message != nullptr ? category_result.message : "");
+    }
+    const QolResult debug_category_result = features::core_ui::register_settings_category(&g_host_sdk);
+    if (!contracts::succeeded(debug_category_result) &&
+        debug_category_result.code != kQolErrUnsupported) {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "assembly: debug settings category rejected code=%d reason=%.*s",
+                     debug_category_result.code,
+                     static_cast<int>(debug_category_result.message_len),
+                     debug_category_result.message != nullptr ? debug_category_result.message : "");
+    }
 #if QOL_ENABLE_DEVICE_PROBE
     // bridge_init attaches the ELF resolver before nativeInit enters assembly_init.
     probe_entry_export_resolution();
@@ -419,6 +455,29 @@ bool assembly_init() {
                      "assembly: registered=%u install_failed=%u kernel_only=%s",
                      g_registered_plugins, g_install_failures,
                      QOL_KERNEL_ONLY ? "true" : "false");
+    }
+    // 插件状态由 install_all 登记，register_items 会校验 owner 状态；贡献因此必须在其后，
+    // 否则全部被判为 owner 未登记而丢弃。
+    // Catalog item ordering is contribution first-success order within these categories.
+    constexpr RegisterSettingsFn kSettingsContributions[]{
+        &features::save_backup::register_settings,
+        &features::core_settings::register_settings,
+        &features::extension_bag::register_settings,
+        &features::autosell::register_settings,
+        &features::custom_recipe::register_settings,
+        &features::stack_limit::register_settings,
+        &features::push_all::register_settings,
+        &features::move_merge::register_settings,
+        &features::simple_mode::register_settings,
+        &features::core_ui::register_settings,
+    };
+    for (const RegisterSettingsFn contribution : kSettingsContributions) {
+        const QolResult result = contribution(&g_host_sdk);
+        if (contracts::succeeded(result)) continue;
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "assembly: settings contribution %s code=%d reason=%.*s",
+                     result.code == kQolErrUnsupported ? "skipped" : "rejected", result.code,
+                     static_cast<int>(result.message_len), result.message != nullptr ? result.message : "");
     }
 #if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
     infra::FeatureStatus export_probe_status{};

@@ -2,6 +2,8 @@
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "host/lifecycle_participants.h"
+#include "host/settings_catalog_adapter.h"
+#include "host/settings_config_bridge.h"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +28,7 @@
 #include "infra/snapshot_handle.h"
 #include "infra/store.h"
 #include "infra/text_scope.h"
+#include "game/adapter_ports/system_port.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
@@ -874,6 +877,9 @@ QolResult store_result(infra::store::Status status) {
     return result_error(kQolErrInternal, "unknown store status");
 }
 
+// 模块身份版本经 JNI 下发到 game 层，此处只做仅读转发；未下发返回 nullptr。
+const char* sdk_module_version() { return qol::game::system_port_version(); }
+
 contracts::QolHostSdk make_host_sdk() {
     contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor};
@@ -926,6 +932,9 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.snapshot_publish = &infra::snapshot_handle::publish;
     sdk.snapshot_acquire = &infra::snapshot_handle::acquire;
     sdk.snapshot_release = &infra::snapshot_handle::release;
+    sdk.settings_catalog = &settings_catalog_api();
+    sdk.settings_config = &settings_config_api();
+    sdk.module_version = &sdk_module_version;
     return sdk;
 }
 

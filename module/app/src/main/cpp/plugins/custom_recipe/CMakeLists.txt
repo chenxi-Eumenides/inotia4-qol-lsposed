@@ -4,4 +4,5 @@ add_library(qol_plugin_custom_recipe STATIC
     table.cpp
     feature.cpp
     plugin.cpp
+    settings_contribution.cpp
 )

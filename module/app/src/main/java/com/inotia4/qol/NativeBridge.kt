@@ -212,4 +212,21 @@ object NativeBridge {
 
     // 游戏变体诊断（P1）：libgame.so 查表结果 JSON，供 /api/health 加法扩展使用
     external fun nativeGetVariantJson(): String
+
+    // ---- 持久配置桥（settings_config v1.0：Kotlin 镜像 + 请求回执）----
+    // 初始化：注册 enqueueSettingsConfigRequest 反调类并发布首次镜像（native ready 后调用）。
+    external fun nativeSettingsConfigInit(bridge: Class<*>, values: IntArray, revision: Long): Boolean
+    // 配置落盘后重发镜像；revision 必须严格递增，native 侧拒绝回退（Conflict）。
+    external fun nativeSettingsConfigPublish(values: IntArray, revision: Long): Boolean
+    // 后台 writer 完成一次 set 后回传回执；persisted/configured/apply 语义见
+    // cpp/contracts/settings_config.h（succeeded 只代表持久化 + setter 接受，不含监听就绪）。
+    external fun nativeSettingsConfigComplete(
+        id: Long,
+        persisted: Int,
+        configured: Int,
+        applyState: Int,
+        errorCode: Int,
+        error: String,
+        applyMessage: String,
+    ): Boolean
 }

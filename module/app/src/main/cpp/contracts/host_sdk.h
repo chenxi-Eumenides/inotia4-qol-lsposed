@@ -31,6 +31,8 @@
 #include "lifecycle_participant.h"
 #include "panels.h"
 #include "result.h"
+#include "settings.h"
+#include "settings_config.h"
 #include "version.h"
 
 namespace qol::contracts {
@@ -273,6 +275,10 @@ struct QolDescButtonApi {
 using QolSnapshotHandle = void*;
 using QolSnapshotToken = void*;
 
+// 模块身份版本（Kotlin BuildConfig.VERSION_NAME，启动期经 JNI 下发到 native）。
+// 未下发时返回 nullptr；返回的字符串为静态存储，进程内有效。
+using QolModuleVersionFn = const char* (*)();
+
 struct QolHostSdk {
     QolAbiHeader abi;
     QolLogApi log;
@@ -304,10 +310,82 @@ struct QolHostSdk {
     bool (*snapshot_acquire)(QolSnapshotHandle handle, const void** out_data, uint32_t* out_size,
                              QolSnapshotToken* out_token);
     void (*snapshot_release)(QolSnapshotToken token);
+    // Independent resident declaration catalog; does not require core.settings to be installed.
+    const QolSettingsCatalogApi* settings_catalog;
+    const QolSettingsConfigApi* settings_config;
+    // 模块身份版本访问（阶段 5 尾追加；调用方须以 abi.size/abi.minor 协商后再消费）。
+    QolModuleVersionFn module_version;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 15：追加不透明 immutable snapshot API。
-constexpr uint16_t kHostSdkMinor = 15;
+// minor 18：在 v1.17 持久布尔配置桥之后尾追加模块身份版本访问。
+constexpr uint16_t kHostSdkMinor = 18;
+
+inline const QolSettingsConfigApi* settings_config_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, settings_config) +
+                                sizeof(const QolSettingsConfigApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 17 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->settings_config;
+    if (api == nullptr || api->size < sizeof(QolSettingsConfigApi) ||
+        api->major != kSettingsConfigMajor || api->minor < kSettingsConfigMinor ||
+        api->read_bool == nullptr || api->request_set_bool == nullptr ||
+        api->query_request == nullptr) return nullptr;
+    return api;
+}
+
+// Missing/older tail means optional contribution is unavailable, not plugin failure.
+inline const QolSettingsCatalogApi* settings_catalog_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, settings_catalog) +
+                                sizeof(const QolSettingsCatalogApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 16 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->settings_catalog;
+    constexpr std::size_t required = offsetof(QolSettingsCatalogApi, invoke_action) +
+                                     sizeof(QolSettingsCatalogApi::invoke_action);
+    if (api == nullptr || api->size < required ||
+        api->major != kSettingsCatalogMajor ||
+        api->register_category == nullptr || api->unregister_owner == nullptr ||
+        api->snapshot_acquire == nullptr || api->snapshot_release == nullptr ||
+        api->invoke_action == nullptr) return nullptr;
+    return api;
+}
+
+inline const QolSettingsCatalogApi* settings_catalog_availability_if_available(
+    const QolHostSdk* sdk) {
+    const auto* api = settings_catalog_if_available(sdk);
+    constexpr std::size_t end = offsetof(QolSettingsCatalogApi, query_item_availability) +
+                                sizeof(QolSettingsCatalogApi::query_item_availability);
+    if (api == nullptr || api->minor < 1 || api->size < end ||
+        api->query_item_availability == nullptr) return nullptr;
+    return api;
+}
+
+inline const QolSettingsCatalogApi* settings_catalog_join_if_available(const QolHostSdk* sdk) {
+    const auto* api = settings_catalog_if_available(sdk);
+    constexpr std::size_t end = offsetof(QolSettingsCatalogApi, register_items) +
+                                sizeof(QolSettingsCatalogApi::register_items);
+    if (api == nullptr || api->minor < 2 || api->size < end || api->register_items == nullptr) {
+        return nullptr;
+    }
+    return api;
+}
+
+inline const QolSettingsCatalogApi* settings_catalog_metadata_if_available(const QolHostSdk* sdk) {
+    const auto* api = settings_catalog_if_available(sdk);
+    constexpr std::size_t end = offsetof(QolSettingsCatalogApi, register_category_metadata) +
+                                sizeof(QolSettingsCatalogApi::register_category_metadata);
+    if (api == nullptr || api->minor < 3 || api->size < end ||
+        api->register_category_metadata == nullptr) return nullptr;
+    return api;
+}
+
+// Missing/older tail means the identity is unavailable, not a fatal error：调用方保留无版本形态。
+inline const char* host_sdk_module_version(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, module_version) + sizeof(QolModuleVersionFn);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 18 ||
+        sdk->abi.size < end || sdk->module_version == nullptr) return nullptr;
+    return sdk->module_version();
+}
 
 }  // namespace qol::contracts

@@ -5,6 +5,7 @@ add_library(qol_plugin_autosell STATIC
     view.cpp
     scan.cpp
     plugin.cpp
+    settings_contribution.cpp
     store.cpp
     ui/panel.cpp
 )

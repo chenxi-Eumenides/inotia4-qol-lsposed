@@ -4,7 +4,7 @@
 #include "plugins/core.custom_ui/panels/stack.h"
 #include "plugins/core.settings/plugin.h"
 #include "plugins/core.settings/panels/settings.h"
-#include "plugins/core.settings/panels/settings_ui_local.h"
+#include "plugins/core.settings/panels/settings_binding.h"
 
 #include <cassert>
 #include <cstdint>
@@ -29,9 +29,11 @@ int g_event_calls = 0;
 int g_acquires = 0;
 int g_restores = 0;
 uint64_t g_next_task_id = 1;
-QolResult scheduler_add(int32_t, qol::contracts::QolFrameHandler, void*, int32_t, int32_t,
+int g_scheduler_interval = -1;
+QolResult scheduler_add(int32_t, qol::contracts::QolFrameHandler, void*, int32_t interval, int32_t,
                         uint64_t* out_id) {
     if (out_id == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    g_scheduler_interval = interval;
     *out_id = g_next_task_id++;
     return qol::contracts::ok();
 }
@@ -110,6 +112,37 @@ QolResult popup_stack_snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
     return qol::contracts::ok();
 }
 
+// 「更多游戏」绑定 tick 决策的记录用 fake 操作（settings_binding 纯逻辑的注入面）。
+class RecordingMoreGamesOps : public qol::features::core_ui::MoreGamesBindOps {
+public:
+    bool proc_matches_result = false;
+    bool bind_result = true;
+    bool btn_resolvable_result = false;
+    int release_calls = 0;
+    int bind_calls = 0;
+    int live_calls = 0;
+    int failed_calls = 0;
+    bool last_failed_resolvable = false;
+
+    void reset() {
+        release_calls = 0;
+        bind_calls = 0;
+        live_calls = 0;
+        failed_calls = 0;
+        last_failed_resolvable = false;
+    }
+
+    bool proc_matches() override { return proc_matches_result; }
+    void release() override { ++release_calls; }
+    bool bind() override { ++bind_calls; return bind_result; }
+    bool btn_resolvable() override { return btn_resolvable_result; }
+    void mark_live() override { ++live_calls; }
+    void mark_failed(bool btn_resolvable) override {
+        ++failed_calls;
+        last_failed_resolvable = btn_resolvable;
+    }
+};
+
 }  // namespace
 
 namespace qol::features::core_ui {
@@ -122,8 +155,6 @@ const char* settings_provider_block_reason() { return nullptr; }
 void settings_more_games_tick() {}
 void settings_release_more_games() {}
 const char* settings_more_games_bind_state() { return "waiting"; }
-void settings_ui_bind(const contracts::QolUiAdapter*, const contracts::QolUiComponents*) {}
-void settings_ui_unbind() {}
 std::string data_settings_ui_inject() { return "{}"; }
 std::string data_settings_ui_status_json() { return "{}"; }
 std::string data_settings_ui_restore() { return "{}"; }
@@ -161,6 +192,10 @@ int main() {
     assert(g_provider->callbacks->enter != nullptr && g_provider->callbacks->process != nullptr &&
            g_provider->callbacks->f3 != nullptr && g_provider->callbacks->f4 != nullptr &&
            g_provider->callbacks->event != nullptr);
+    // 「更多游戏」重绑帧任务必须每帧运行（interval=1）：游戏 STATE_EnterMainMenu 会把
+    // ExecuteProc 槽重填回原版 GotoShowMoreGames，间隔更大时存在点击落回原版 gemshop
+    // 的窗口；每帧校验把窗口收窄到 1 帧。
+    assert(g_scheduler_interval == 1);
 
     assert(features::core_ui::ui_panels_open("settings"));
     assert(g_acquires == 1 && g_pushes == 1 && g_enter_calls == 1);
@@ -181,4 +216,45 @@ int main() {
            g_slots[3] == 1 && g_slots[4] == 1);
     features::core_ui::ui_panels_bind_sdk(nullptr);
     descriptor.deactivate(context);
+
+    // ---- 「更多游戏」绑定每帧决策（more_games_bind_tick 纯逻辑）----
+    {
+        using qol::features::core_ui::more_games_bind_tick;
+        RecordingMoreGamesOps ops;
+
+        // 非 main_menu：只释放、不标记 live——status 回 waiting，不再展示过时的 live 快照。
+        more_games_bind_tick(false, ops);
+        assert(ops.release_calls == 1 && ops.bind_calls == 0 && ops.live_calls == 0 &&
+               ops.failed_calls == 0);
+
+        // 槽被游戏改写（STATE_EnterMainMenu 重填）→ 下一帧 tick：释放既有记录后重绑 → live。
+        ops.reset();
+        ops.proc_matches_result = false;
+        ops.bind_result = true;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 1 && ops.bind_calls == 1 && ops.live_calls == 1 &&
+               ops.failed_calls == 0);
+
+        // 校验一致（main_menu 常态）：仅确认 live，无释放/重装写操作。
+        ops.reset();
+        ops.proc_matches_result = true;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 0 && ops.bind_calls == 0 && ops.live_calls == 1);
+
+        // main_menu 绑定失败：控件不可解析 → waiting（resolvable=false）；
+        // 控件可解析但写槽失败 → error（resolvable=true）。
+        ops.reset();
+        ops.proc_matches_result = false;
+        ops.bind_result = false;
+        ops.btn_resolvable_result = false;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 1 && ops.bind_calls == 1 && ops.live_calls == 0 &&
+               ops.failed_calls == 1 && ops.last_failed_resolvable == false);
+        ops.reset();
+        ops.proc_matches_result = false;
+        ops.btn_resolvable_result = true;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 1 && ops.bind_calls == 1 && ops.live_calls == 0 &&
+               ops.failed_calls == 1 && ops.last_failed_resolvable == true);
+    }
 }

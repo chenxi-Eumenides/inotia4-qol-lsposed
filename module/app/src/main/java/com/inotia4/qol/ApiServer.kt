@@ -44,6 +44,8 @@ object ApiServer {
         if (BuildConfig.KERNEL_ONLY) {
             LogFile.info(LogDomain.HTTP, "kernel-only mode: bootstrap loader configuration and health server")
             ModuleConfig.load(context)
+            // native ready 后注册持久配置桥并发布初始镜像（read_bool 依赖 revision>0）。
+            ModuleConfigUiBridge.initSettingsConfigBridge()
             ensureAssetsInjected(context, moduleApkPath)
             start(context, moduleApkPath)
             return
@@ -73,6 +75,8 @@ object ApiServer {
         }
         // 模块配置组件：外部 config.json 为唯一来源（v0.5.21 起不再读 assets；缺失用默认值并写入外部存储）
         ModuleConfig.load(context)
+        // native ready 后注册持久配置桥并发布初始镜像（read_bool 依赖 revision>0）。
+        ModuleConfigUiBridge.initSettingsConfigBridge()
         ModuleSaveStore.initialize(context)
         // 存档管理器备份底层（bundle 导出/导入/列表/删除）收口 native feature/save_backup
         NativeBridge.nativeSaveBackupInit(
