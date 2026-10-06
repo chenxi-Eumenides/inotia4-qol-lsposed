@@ -44,7 +44,7 @@ void* ui_create_button(void* parent, UiRect rect, const char* text,
     ui_set_rect(ctrl, rect);
     if (text != nullptr) fn_ctrl_btn_set_text(ctrl, const_cast<char*>(text));
     if (draw_proc != nullptr && fn_ctrl_btn_set_draw_proc != nullptr) {
-        fn_ctrl_btn_set_draw_proc(ctrl, reinterpret_cast<void*>(draw_proc));
+        fn_ctrl_btn_set_draw_proc(ctrl, draw_proc);
     }
     fn_ctrl_set_active(ctrl, 0x20);
     set_control_proc(ctrl, g_base + F_CONTROL_BUTTON_CONTROL_EVENT_PROC_VMA);
@@ -63,7 +63,7 @@ void* ui_create_label(void* parent, UiRect rect, const char* text, UiDrawProc dr
     ui_set_rect(ctrl, rect);
     if (text != nullptr) fn_ctrl_btn_set_text(ctrl, const_cast<char*>(text));
     if (draw_proc != nullptr && fn_ctrl_btn_set_draw_proc != nullptr) {
-        fn_ctrl_btn_set_draw_proc(ctrl, reinterpret_cast<void*>(draw_proc));
+        fn_ctrl_btn_set_draw_proc(ctrl, draw_proc);
     }
     fn_ctrl_set_active(ctrl, 0);
     return ctrl;
@@ -188,6 +188,54 @@ bool ui_control_item_slot(void* ctrl, int32_t* out_slot) {
     return true;
 }
 
+bool ui_control_item_identity(void* ctrl, qol::contracts::QolItemHandle* out_item) {
+    if (ctrl == nullptr || out_item == nullptr || !qol::game::game_host_is_main_thread() ||
+        !game_memory_accessible(ctrl, CO_DATA + sizeof(void*), 'r')) return false;
+    int32_t control_kind = 0;
+    if (!ui_control_user_type(ctrl, &control_kind) || control_kind != 2) return false;
+    void* item = ui_control_item(ctrl);
+    if (item == nullptr || !game_memory_accessible(item, I_COUNT + sizeof(uint32_t), 'r')) {
+        return false;
+    }
+    qol::contracts::QolItemHandle handle = qol::game::lookup_item(item);
+    if (handle.slot == 0) {
+        qol::game::ItemHandleError error = qol::game::ItemHandleError::kNone;
+        bool found_in_physical_inventory = false;
+        for (int32_t bag = 0; bag < 6 && !found_in_physical_inventory; ++bag) {
+            for (int32_t slot = 0; slot < 16; ++slot) {
+                void* physical_item = nullptr;
+                const QolResult result = qol::game::physical_item_at(bag, slot, &physical_item);
+                if (result.code == kQolErrNotFound) continue;
+                if (!qol::contracts::succeeded(result)) return false;
+                if (physical_item == item) {
+                    found_in_physical_inventory = true;
+                    break;
+                }
+            }
+        }
+        if (!found_in_physical_inventory) return false;
+        handle = qol::game::register_item(item, qol::contracts::kQolItemHandleOwnerGame, &error);
+        if (handle.slot == 0) return false;
+    }
+    *out_item = handle;
+    return true;
+}
+
+bool ui_item_proc_source_control(void* destination, uint64_t event, const void* param,
+                                 void** out_source) {
+    if (destination == nullptr || param == nullptr || out_source == nullptr ||
+        (event != 0x02 && event != 0x04) || !qol::game::game_host_is_main_thread() ||
+        !game_memory_accessible(destination, CO_DATA + sizeof(void*), 'r') ||
+        !game_memory_accessible(param, ITEM_PROC_FIELD_SIZE, 'r')) return false;
+    void* source = *reinterpret_cast<void* const*>(
+        static_cast<const uint8_t*>(param) + ITEM_PROC_FIELD_SOURCE_CONTROL);
+    if (source == nullptr || !game_memory_accessible(source, CO_DATA + sizeof(void*), 'r')) {
+        return false;
+    }
+    *out_source = source;
+    return true;
+}
+
 void* ui_control_parent(void* ctrl) {
     if (ctrl == nullptr) return nullptr;
     return *reinterpret_cast<void**>(static_cast<uint8_t*>(ctrl) + CO_PARENT);
@@ -199,6 +247,14 @@ bool ui_execute_proc_matches(void* ctrl, UiClickProc expected) {
     if (data == nullptr) return false;
     return *reinterpret_cast<void**>(data + CB_EXECUTE_PROC) ==
            reinterpret_cast<void*>(expected);
+}
+
+bool ui_set_button_enabled(void* ctrl, bool enabled) {
+    if (ctrl == nullptr) return false;
+    uint8_t* data = static_cast<uint8_t*>(ui_control_data(ctrl));
+    if (data == nullptr) return false;
+    data[CB_ENABLED] = enabled ? 1 : 0;
+    return true;
 }
 
 bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y) {

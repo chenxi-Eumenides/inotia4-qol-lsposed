@@ -3,25 +3,24 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "game/access/game_access.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/ui_kit.h"
+#include "game/access/ui_native_close_button.h"
+#include "game/access/ui_native_scroll.h"
+#include "game/access/ui_native_toggle.h"
+#include "game/access/ui_native_text_button.h"
 #include "game/access/ui_components.h"
 #include "game/access/popup_state.h"
 #include "game/access/ui_state.h"
 #include "game/adapter_ports/game_host_port.h"
 #include "game/state/game_state.h"
-
-using ControlButtonSetTextFn = void (*)(void* ctrl, char* text);
-using ControlButtonSetDrawProcFn = void (*)(void* ctrl, void* proc);
-using ControlButtonDrawFn = void (*)(void* ctrl);
-
-extern ControlButtonSetTextFn fn_ctrl_btn_set_text;
-extern ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc;
-extern ControlButtonDrawFn fn_ctrl_btn_draw;
 
 namespace qol::host {
 namespace {
@@ -35,6 +34,9 @@ using contracts::UiRect;
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotReady = "ui adapter not ready";
 constexpr const char* kUnsupported = "ui adapter unsupported";
+// 控件按下态：原版按 data + CB_STATE（game_symbols.h CB_STATE=0x68）== 1 判定；
+// 旧实现误读 data+0x08（内联文本区），导致按住亮光绘制永不出现。
+constexpr size_t kControlPressedStateOffset = 0x68;
 
 struct ClickBinding {
     contracts::QolUiClickFn callback;
@@ -54,6 +56,17 @@ QolResult not_ready() {
 
 QolResult unsupported() {
     return contracts::error(kQolErrUnsupported, kUnsupported, 22);
+}
+
+bool game_owned_image_unit(int32_t unit) {
+    // 0x0f 边框、0x59 option/返回、0x4f/0x50 标题背景由游戏共享。
+    // UnitLoad 幂等且 UnitUnload 无引用计数；模块消费者归零不表示游戏已停止使用。
+    return unit == 0x0f || unit == 0x59 || unit == 0x4f || unit == 0x50;
+}
+
+QolResult shared_image_unload_blocked() {
+    static constexpr char message[] = "game-owned shared image unit cannot be unloaded";
+    return contracts::error(kQolErrBlocked, message, sizeof(message) - 1);
 }
 
 QolResult insert_inline_color(void* builder, uint32_t max_text_bytes, uint8_t color_code) {
@@ -87,7 +100,7 @@ QolResult create_control(uint32_t kind, QolUiHandle parent, QolUiHandle* out) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
 
-    // 0=root、1=button、2=label；组件描述符由 core.ui 负责填充属性。
+    // 0=root、1=button、2=label、3=group；组件描述符负责填充属性。
     ::UiRect rect{};
     switch (kind) {
         case 0:
@@ -101,6 +114,12 @@ QolResult create_control(uint32_t kind, QolUiHandle parent, QolUiHandle* out) {
         case 2:
             if (parent == nullptr) return invalid_argument();
             *out = ui_create_label(parent, rect, nullptr, nullptr);
+            break;
+        case 3:
+            if (parent == nullptr) return invalid_argument();
+            if (!qol::game::game_host_is_main_thread() ||
+                fn_ui_create_group_base_control == nullptr) return not_ready();
+            *out = fn_ui_create_group_base_control(parent, 0, 0, 0, 0);
             break;
         default:
             return unsupported();
@@ -124,6 +143,17 @@ QolResult get_rect(QolUiHandle control, UiRect* out) {
 
 QolResult set_text(QolUiHandle control, const char* text) {
     if (control == nullptr || text == nullptr) return invalid_argument();
+    // 原生 ControlButton_SetText（F_CONTROL_BUTTON_SET_TEXT_VMA=0xaa7dc）先把 data+0x00
+    // 起 0x20 字节清零，再对 data+0x00 调 strcpy；之后 data+0x20 是 ExecuteProc 槽
+    // （ControlButton_GetExecuteProc 读 data+0x20，ControlEventProc 释放时间接调用）。
+    // strcpy 无界：文本含 NUL 超过 0x20 字节就会覆盖 ExecuteProc，点击即跳转到被文本
+    // 污染的地址（现场 SIGBUS BUS_ADRALN）。按钮与标签都经 fn_ctrl_btn_create 创建、
+    // 共用这段内联缓冲，因此这里统一 fail-closed，不调用原生、不静默截断。
+    constexpr size_t kControlButtonInlineTextCapacity = 0x20;
+    if (strnlen(text, kControlButtonInlineTextCapacity) >= kControlButtonInlineTextCapacity) {
+        static constexpr char message[] = "control text exceeds inline buffer";
+        return contracts::error(kQolErrBlocked, message, sizeof(message) - 1);
+    }
     if (fn_ctrl_btn_set_text == nullptr) return not_ready();
     fn_ctrl_btn_set_text(control, const_cast<char*>(text));
     return contracts::ok();
@@ -132,7 +162,7 @@ QolResult set_text(QolUiHandle control, const char* text) {
 QolResult set_draw_proc(QolUiHandle control, QolUiDrawFn draw_proc) {
     if (control == nullptr || draw_proc == nullptr) return invalid_argument();
     if (fn_ctrl_btn_set_draw_proc == nullptr) return not_ready();
-    fn_ctrl_btn_set_draw_proc(control, reinterpret_cast<void*>(draw_proc));
+    fn_ctrl_btn_set_draw_proc(control, draw_proc);
     return contracts::ok();
 }
 
@@ -226,6 +256,7 @@ QolResult load_image_unit(int32_t unit) {
 }
 
 QolResult unload_image_unit(int32_t unit) {
+    if (game_owned_image_unit(unit)) return shared_image_unload_blocked();
     ui_unload_image_unit(unit);
     return contracts::ok();
 }
@@ -370,6 +401,7 @@ QolResult image_unit_load(int32_t unit) {
 }
 
 QolResult image_unit_unload(int32_t unit) {
+    if (game_owned_image_unit(unit)) return shared_image_unload_blocked();
     if (fn_imgsys_unit_unload == nullptr) return not_ready();
     fn_imgsys_unit_unload(unit);
     return contracts::ok();
@@ -391,13 +423,24 @@ QolResult image_loc(int32_t unit, int32_t loc, QolUiHandle* out) {
     return *out == nullptr ? not_ready() : contracts::ok();
 }
 
+QolResult image_loc_size(int32_t unit, int32_t loc, int32_t* out_width, int32_t* out_height) {
+    if (out_width == nullptr || out_height == nullptr) return invalid_argument();
+    QolUiHandle image = nullptr;
+    const QolResult result = image_loc(unit, loc, &image);
+    if (!contracts::succeeded(result)) return result;
+
+    const auto* bytes = static_cast<const uint8_t*>(image);
+    std::memcpy(out_width, bytes + 0x8, sizeof(*out_width));
+    std::memcpy(out_height, bytes + 0xc, sizeof(*out_height));
+    return *out_width > 0 && *out_height > 0 ? contracts::ok() : not_ready();
+}
+
 QolResult load_option_images() {
     return ui_original::load_option_images() ? contracts::ok() : not_ready();
 }
 
 QolResult unload_option_images() {
-    ui_original::unload_option_images();
-    return contracts::ok();
+    return shared_image_unload_blocked();
 }
 
 QolResult draw_back_button(QolUiHandle control, uint8_t pressed) {
@@ -408,6 +451,66 @@ QolResult draw_back_button(QolUiHandle control, uint8_t pressed) {
 QolResult draw_toggle(QolUiHandle control, uint8_t enabled) {
     if (control == nullptr) return invalid_argument();
     return ui_original::draw_toggle(control, enabled != 0) ? contracts::ok() : not_ready();
+}
+
+QolResult draw_native_toggle(UiRect rect, int32_t value, uint8_t pressed) {
+    if ((value != 0 && value != 1) || pressed > 1) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_draw_native_toggle(game_rect(rect), value, pressed)
+               ? contracts::ok()
+               : not_ready();
+}
+
+QolResult draw_native_text_button_background(UiRect rect, uint8_t pressed) {
+    if (pressed > 1) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_draw_native_text_button_background(game_rect(rect), pressed)
+               ? contracts::ok()
+               : not_ready();
+}
+
+QolResult set_button_enabled(QolUiHandle control, uint8_t enabled) {
+    if (control == nullptr || enabled > 1) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return ui_set_button_enabled(control, enabled != 0) ? contracts::ok() : not_ready();
+}
+
+QolResult draw_native_text_button_label(UiRect rect, const char* text, uint32_t color,
+                                        int32_t font) {
+    if (text == nullptr || font < 0) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_draw_native_text_button_label(game_rect(rect), text, color, font)
+               ? contracts::ok()
+               : not_ready();
+}
+
+QolResult draw_native_close_button(UiRect rect, uint8_t pressed) {
+    if (pressed > 1) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_draw_native_close_button(game_rect(rect), pressed)
+               ? contracts::ok()
+               : not_ready();
+}
+
+QolResult control_item_identity(QolUiHandle control, contracts::QolItemHandle* out_item) {
+    if (control == nullptr || out_item == nullptr) return invalid_argument();
+    contracts::QolItemHandle item{};
+    if (!ui_control_item_identity(control, &item)) return not_ready();
+    *out_item = item;
+    return contracts::ok();
+}
+
+QolResult item_proc_source_control(QolUiHandle destination, uint64_t event, const void* param,
+                                   QolUiHandle* out_source) {
+    if (destination == nullptr || out_source == nullptr || param == nullptr) {
+        return invalid_argument();
+    }
+    void* source = nullptr;
+    if (!ui_item_proc_source_control(destination, event, param, &source)) {
+        return not_ready();
+    }
+    *out_source = source;
+    return contracts::ok();
 }
 
 QolResult draw_item_icon(QolUiHandle control, contracts::QolUiItemIcon icon) {
@@ -489,6 +592,127 @@ QolResult fill_rect(UiRect rect, uint32_t color) {
     return contracts::ok();
 }
 
+QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
+    if (w < 48 || h < 48) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread() || fn_ui_draw_border_rect == nullptr) {
+        return not_ready();
+    }
+    fn_ui_draw_border_rect(x, y, w, h);
+    return contracts::ok();
+}
+
+QolResult set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
+    if (!qol::game::game_host_is_main_thread() || fn_grpx_set_clip == nullptr) {
+        return not_ready();
+    }
+    fn_grpx_set_clip(x1, y1, x2, y2);
+    return contracts::ok();
+}
+
+QolResult reset_clip() {
+    if (!qol::game::game_host_is_main_thread() || fn_grpx_reset_clip == nullptr) {
+        return not_ready();
+    }
+    fn_grpx_reset_clip();
+    return contracts::ok();
+}
+
+QolResult scroll_create(QolUiHandle parent, const contracts::UiNativeScrollDesc* desc,
+                        contracts::QolUiNativeScrollDrawFn draw_proc, QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (parent == nullptr || desc == nullptr || draw_proc == nullptr ||
+        desc->viewport.w <= 0 || desc->viewport.h <= 0 || desc->content_extent < 0 ||
+        desc->max_drag_delta <= 0 || desc->drag_threshold < 0 || desc->show_bar > 1 ||
+        (desc->show_bar && (desc->viewport.h < 4 ||
+         desc->viewport.w > std::numeric_limits<int64_t>::max() - 6))) {
+        return invalid_argument();
+    }
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_create == nullptr ||
+        fn_ctrl_scroll_set_option == nullptr || fn_ctrl_scroll_set_min_variation == nullptr ||
+        (desc->show_bar && (fn_ctrl_scroll_set_bar_data == nullptr ||
+                           fn_ctrl_scroll_set_bar_draw_type == nullptr))) return not_ready();
+    QolUiHandle scroll = fn_ctrl_scroll_create(parent, 1, draw_proc);
+    if (scroll == nullptr) return not_ready();
+    ui_set_rect(scroll, game_rect(desc->viewport));
+    fn_ctrl_scroll_set_option(scroll, desc->content_extent, desc->max_drag_delta);
+    fn_ctrl_scroll_set_min_variation(scroll, desc->drag_threshold);
+    if (desc->show_bar) {
+        // 原生帮助页使用 viewport 右侧 6px、顶部 2px、上下各缩 2px 的纯色 bar。
+        fn_ctrl_scroll_set_bar_data(scroll, desc->viewport.w + 6, 2, desc->viewport.h - 4);
+        fn_ctrl_scroll_set_bar_draw_type(scroll, 0, 0);
+    }
+    *out = scroll;
+    return contracts::ok();
+}
+
+QolResult scroll_set_target(QolUiHandle scroll, QolUiHandle group) {
+    if (scroll == nullptr || group == nullptr) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_set_target_group == nullptr) {
+        return not_ready();
+    }
+    fn_ctrl_scroll_set_target_group(scroll, group);
+    return contracts::ok();
+}
+
+QolResult button_set_scroll(QolUiHandle button, QolUiHandle scroll) {
+    if (button == nullptr || scroll == nullptr) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_btn_set_scroll_control == nullptr) {
+        return not_ready();
+    }
+    fn_ctrl_btn_set_scroll_control(button, scroll);
+    return contracts::ok();
+}
+
+QolResult scroll_process(QolUiHandle scroll) {
+    if (scroll == nullptr) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_process == nullptr) return not_ready();
+    fn_ctrl_scroll_process(scroll);
+    return contracts::ok();
+}
+
+QolResult scroll_draw(QolUiHandle scroll) {
+    if (scroll == nullptr) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_draw == nullptr) return not_ready();
+    fn_ctrl_scroll_draw(scroll);
+    return contracts::ok();
+}
+
+QolResult scroll_get_offset(QolUiHandle scroll, int64_t* out) {
+    if (scroll == nullptr || out == nullptr) return invalid_argument();
+    *out = 0;
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    qol::game::NativeScrollState state{};
+    if (!qol::game::native_scroll_state(scroll, &state)) return not_ready();
+    *out = state.offset;
+    return contracts::ok();
+}
+
+QolResult scroll_set_offset(QolUiHandle scroll, int64_t offset) {
+    if (scroll == nullptr || offset < 0) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_reset_result_point == nullptr ||
+        fn_ctrl_scroll_set_key_step_variation == nullptr || fn_ctrl_scroll_scroll == nullptr) {
+        return not_ready();
+    }
+    qol::game::NativeScrollState state{};
+    if (!qol::game::native_scroll_state(scroll, &state)) return not_ready();
+    if (offset > state.max_offset) return invalid_argument();
+    fn_ctrl_scroll_reset_result_point(scroll);
+    fn_ctrl_scroll_set_key_step_variation(scroll, offset);
+    fn_ctrl_scroll_scroll(scroll, 1);
+    fn_ctrl_scroll_set_key_step_variation(scroll, state.key_step);
+    return contracts::ok();
+}
+
+QolResult control_tree_event(QolUiHandle root, uint64_t event, uint64_t param, uint64_t param2,
+                             uint32_t* consumed) {
+    if (root == nullptr || consumed == nullptr) return invalid_argument();
+    *consumed = 0;
+    if (!qol::game::game_host_is_main_thread() || fn_touch_handle_event == nullptr) return not_ready();
+    *consumed = fn_touch_handle_event(root, event, param, param2);
+    return contracts::ok();
+}
+
 QolResult draw_item_porting(QolUiHandle item, int32_t x, int32_t y, int32_t a, int32_t b) {
     return ui_draw_item_porting(item, x, y, a, b) ? contracts::ok() : not_ready();
 }
@@ -510,9 +734,11 @@ QolResult control_pressed(QolUiHandle control, int32_t* out_pressed) {
     *out_pressed = 0;
     void* data = ui_control_data(control);
     if (data == nullptr) return not_ready();
-    *out_pressed = *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(data) + 0x08) == 1
-                       ? 1
-                       : 0;
+    *out_pressed =
+        *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(data) +
+                                          kControlPressedStateOffset) == 1
+            ? 1
+            : 0;
     return contracts::ok();
 }
 
@@ -525,7 +751,27 @@ QolResult touch_coordinates(uint64_t param, int64_t* out_x, int64_t* out_y) {
 }
 
 QolResult delete_control(QolUiHandle control) {
-    if (control == nullptr || !ui_delete_control(control)) return not_ready();
+    if (control == nullptr || !qol::game::game_host_is_main_thread() ||
+        fn_touch_handle_delete_control == nullptr || fn_ctrl_get_count == nullptr ||
+        fn_ctrl_get_child == nullptr) return not_ready();
+    // 删除整棵 native 子树前解绑所有点击回调；不得持绑定锁跨游戏调用。
+    constexpr size_t kMaxTreeControls = 4096;
+    std::vector<QolUiHandle> subtree{control};
+    std::unordered_set<QolUiHandle> seen{control};
+    for (size_t i = 0; i < subtree.size(); ++i) {
+        const uint32_t count = fn_ctrl_get_count(subtree[i]);
+        if (count > kMaxTreeControls - subtree.size()) return not_ready();
+        for (uint32_t j = 0; j < count; ++j) {
+            QolUiHandle child = fn_ctrl_get_child(subtree[i], j);
+            if (child == nullptr || !seen.insert(child).second) return not_ready();
+            subtree.push_back(child);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_click_mtx);
+        for (QolUiHandle handle : subtree) g_click_bindings.erase(handle);
+    }
+    if (!ui_delete_control(control)) return not_ready();
     return contracts::ok();
 }
 
@@ -730,8 +976,27 @@ const QolUiAdapter g_ui_adapter{
      &clear_touch_state,
      &set_touch_release_input,
       &clear_touch_drop_event,
-      &popup_stack_snapshot,
-      &adapter_is_main_thread,
+       &popup_stack_snapshot,
+       &adapter_is_main_thread,
+       &draw_border_rect,
+        &image_loc_size,
+        &set_clip,
+         &reset_clip,
+         &scroll_create,
+         &scroll_set_target,
+         &button_set_scroll,
+         &scroll_process,
+         &scroll_draw,
+         &scroll_get_offset,
+        &scroll_set_offset,
+         &control_tree_event,
+         &draw_native_toggle,
+        &control_item_identity,
+        &item_proc_source_control,
+        &draw_native_text_button_background,
+        &set_button_enabled,
+        &draw_native_text_button_label,
+        &draw_native_close_button,
 };
 
 }  // namespace

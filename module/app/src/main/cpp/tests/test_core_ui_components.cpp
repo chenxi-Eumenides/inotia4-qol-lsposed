@@ -1,9 +1,16 @@
 #include <cassert>
 #include <cstring>
 #include <cstdio>
+#include <string>
 
 #include "contracts/ui.h"
 #include "plugins/core.custom_ui/ui_components.h"
+
+// 返回按钮助手内部调用宿主 back 入口；本测试不链接面板栈实现。
+namespace qol::features::core_ui {
+void ui_panels_request_back() {}
+int ui_panels_depth() { return 1; }
+}  // namespace qol::features::core_ui
 
 namespace {
 
@@ -15,6 +22,7 @@ struct FakeControl {
     qol::contracts::QolUiClickFn click = nullptr;
     void* click_user = nullptr;
     qol::contracts::QolUiDrawFn draw = nullptr;
+    bool enabled = true;
 };
 
 int g_clicks = 0;
@@ -22,6 +30,26 @@ int g_changes = 0;
 int g_scrolls = 0;
 int32_t g_last_value = -1;
 int32_t g_last_offset = -1;
+qol::contracts::UiRect g_last_container{};
+int g_container_draws = 0;
+int g_part_draws = 0;
+int32_t g_part_x[4]{};
+int32_t g_part_y[4]{};
+int32_t g_part_loc[4]{};
+int g_fake_group = 0;
+int g_fake_parts[4]{};
+int g_fake_main_thread = 1;
+int g_native_button_draws = 0;
+int g_native_button_deletes = 0;
+qol::contracts::UiRect g_native_button_rect{};
+int g_native_label_draws = 0;
+qol::contracts::UiRect g_native_label_rect{};
+std::string g_native_label_text;
+int32_t g_native_label_font = -1;
+constexpr int32_t kPartWidths[] = {39, 43, 41, 45};
+constexpr int32_t kPartHeights[] = {40, 42, 44, 46};
+
+int32_t is_main_thread() { return g_fake_main_thread; }
 
 void on_click(void* user) {
     assert(user != nullptr);
@@ -84,6 +112,65 @@ QolResult set_click_proc(qol::contracts::QolUiHandle handle, qol::contracts::Qol
     return ok();
 }
 
+QolResult set_button_enabled(qol::contracts::QolUiHandle handle, uint8_t enabled) {
+    if (handle == nullptr || enabled > 1) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    static_cast<FakeControl*>(handle)->enabled = enabled != 0;
+    return ok();
+}
+
+QolResult draw_native_text_button_background(qol::contracts::UiRect rect, uint8_t pressed) {
+    if (pressed > 1) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    ++g_native_button_draws;
+    g_native_button_rect = rect;
+    return ok();
+}
+
+QolResult draw_native_text_button_label(qol::contracts::UiRect rect, const char* text,
+                                        uint32_t, int32_t font) {
+    if (text == nullptr || (font != 0 && font != 1)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    ++g_native_label_draws;
+    g_native_label_rect = rect;
+    g_native_label_text = text;
+    g_native_label_font = font;
+    return ok();
+}
+
+QolResult delete_control(qol::contracts::QolUiHandle handle) {
+    if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    ++g_native_button_deletes;
+    return ok();
+}
+
+QolResult control_tree_event(qol::contracts::QolUiHandle handle, uint64_t event, uint64_t param,
+                             uint64_t, uint32_t* consumed) {
+    if (handle == nullptr || param == 0 || consumed == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    const auto* point = reinterpret_cast<const int64_t*>(static_cast<uintptr_t>(param));
+    auto* control = static_cast<FakeControl*>(handle);
+    int64_t x = 0;
+    int64_t y = 0;
+    for (const FakeControl* current = control; current != nullptr; current = current->parent) {
+        x += current->rect.x;
+        y += current->rect.y;
+    }
+    const bool inside = point[0] >= x && point[0] < x + control->rect.w &&
+        point[1] >= y && point[1] < y + control->rect.h;
+    if (event == 0x17) {
+        control->enabled = inside;
+        *consumed = inside ? 1u : 0u;
+    } else if (event == 0x18) {
+        if (control->enabled && inside && control->click != nullptr) {
+            control->click(control->click_user);
+        }
+        control->enabled = false;
+        *consumed = inside ? 1u : 0u;
+    }
+    return ok();
+}
+
 int32_t hit_test(const qol::contracts::QolUiHandle handle, int64_t x, int64_t y,
                  qol::contracts::UiRect rect) {
     if (handle == nullptr) return -kQolErrInvalidArgument;
@@ -100,11 +187,138 @@ int32_t hit_test(const qol::contracts::QolUiHandle handle, int64_t x, int64_t y,
 
 QolResult draw_control(qol::contracts::QolUiHandle) { return ok(); }
 
+QolResult get_rect(qol::contracts::QolUiHandle handle, qol::contracts::UiRect* out) {
+    if (handle == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = static_cast<FakeControl*>(handle)->rect;
+    return ok();
+}
+
+int g_back_draws = 0;
+QolResult draw_back_button(qol::contracts::QolUiHandle handle, uint8_t) {
+    if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    ++g_back_draws;
+    return ok();
+}
+
+// 文本原语夹具：记录 draw_control_text 解析出的绝对坐标与颜色。
+uint32_t g_last_text_rgb = 0;
+std::string g_last_text;
+int32_t g_last_text_x = -1;
+int32_t g_last_text_y = -1;
+
+QolResult set_font_color_rgb(int32_t red, int32_t green, int32_t blue) {
+    g_last_text_rgb = static_cast<uint32_t>(red & 0xff) |
+        (static_cast<uint32_t>(green & 0xff) << 8) | (static_cast<uint32_t>(blue & 0xff) << 16);
+    return ok();
+}
+
+QolResult draw_string_with_font(const char* text, int32_t x, int32_t y, int32_t, int32_t) {
+    if (text == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    g_last_text = text;
+    g_last_text_x = x;
+    g_last_text_y = y;
+    return ok();
+}
+
+QolResult control_absolute_origin(qol::contracts::QolUiHandle handle, int64_t* out_x,
+                                  int64_t* out_y) {
+    if (handle == nullptr || out_x == nullptr || out_y == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    int64_t x = 0;
+    int64_t y = 0;
+    for (const FakeControl* current = static_cast<const FakeControl*>(handle); current != nullptr;
+         current = current->parent) {
+        x += current->rect.x;
+        y += current->rect.y;
+    }
+    *out_x = x;
+    *out_y = y;
+    return ok();
+}
+
+QolResult control_pressed(qol::contracts::QolUiHandle handle, int32_t* out_pressed) {
+    if (handle == nullptr || out_pressed == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out_pressed = 0;
+    return ok();
+}
+
+int g_option_loads = 0;
+QolResult load_option_images() {
+    ++g_option_loads;
+    return ok();
+}
+
+int g_fill_count = 0;
+QolResult fill_rect(qol::contracts::UiRect, uint32_t) {
+    ++g_fill_count;
+    return ok();
+}
+
+QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
+    g_last_container = {x, y, w, h};
+    ++g_container_draws;
+    return ok();
+}
+
+QolResult image_group(int32_t unit, qol::contracts::QolUiHandle* out) {
+    if (unit != 0x0f || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = &g_fake_group;
+    return ok();
+}
+
+QolResult image_loc(int32_t unit, int32_t loc, qol::contracts::QolUiHandle* out) {
+    if (unit != 0x0f || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    constexpr int32_t locations[] = {0x30, 0x31, 0x35, 0x36};
+    for (int i = 0; i < 4; ++i) {
+        if (loc == locations[i]) {
+            *out = &g_fake_parts[i];
+            return ok();
+        }
+    }
+    return qol::contracts::error(kQolErrNotFound, "missing", 7);
+}
+
+QolResult draw_part(qol::contracts::QolUiHandle group, int32_t x, int32_t y,
+                    qol::contracts::QolUiHandle part, int32_t type, int32_t flip) {
+    assert(group == &g_fake_group && type == 0 && flip == 1 && g_part_draws < 4);
+    g_part_x[g_part_draws] = x;
+    g_part_y[g_part_draws] = y;
+    for (int i = 0; i < 4; ++i) {
+        if (part == &g_fake_parts[i]) g_part_loc[g_part_draws] = i;
+    }
+    ++g_part_draws;
+    return ok();
+}
+
+QolResult image_loc_size(int32_t unit, int32_t loc, int32_t* out_width, int32_t* out_height) {
+    if (unit != 0x0f || out_width == nullptr || out_height == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    constexpr int32_t locations[] = {0x30, 0x31, 0x35, 0x36};
+    for (int i = 0; i < 4; ++i) {
+        if (loc == locations[i]) {
+            *out_width = kPartWidths[i];
+            *out_height = kPartHeights[i];
+            return ok();
+        }
+    }
+    return qol::contracts::error(kQolErrNotFound, "missing", 7);
+}
+
 qol::contracts::QolUiAdapter make_fake_adapter() {
     qol::contracts::QolUiAdapter adapter{};
     adapter.size = sizeof(adapter);
     adapter.major = 1;
-    adapter.minor = 0;
+    adapter.minor = qol::contracts::kUiContractMinor;
     adapter.create_control = &create_control;
     adapter.set_rect = &set_rect;
     adapter.set_text = &set_text;
@@ -112,6 +326,26 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.set_click_proc = &set_click_proc;
     adapter.hit_test = &hit_test;
     adapter.draw_control = &draw_control;
+    adapter.get_rect = &get_rect;
+    adapter.draw_back_button = &draw_back_button;
+    adapter.load_option_images = &load_option_images;
+    adapter.draw_border_rect = &draw_border_rect;
+    adapter.fill_rect = &fill_rect;
+    adapter.image_group = &image_group;
+    adapter.image_loc = &image_loc;
+    adapter.draw_part = &draw_part;
+    adapter.image_loc_size = &image_loc_size;
+    adapter.set_font_color_rgb = &set_font_color_rgb;
+    adapter.draw_string_with_font = &draw_string_with_font;
+    adapter.control_absolute_origin = &control_absolute_origin;
+    adapter.control_pressed = &control_pressed;
+    adapter.is_main_thread = &is_main_thread;
+    adapter.minor = qol::contracts::kUiAdapterMinor;
+    adapter.set_button_enabled = &set_button_enabled;
+    adapter.draw_native_text_button_background = &draw_native_text_button_background;
+    adapter.draw_native_text_button_label = &draw_native_text_button_label;
+    adapter.delete_control = &delete_control;
+    adapter.control_tree_event = &control_tree_event;
     return adapter;
 }
 
@@ -171,6 +405,14 @@ int main() {
     CHECK(components->select_set_selected(select, 2).code == kQolErrInvalidArgument);
     CHECK(components->scroll_set_offset(scroll, 81).code == kQolErrInvalidArgument);
 
+    // draw_control_text：按控件绝对原点绘制传入字符串，不触发控件文本写入。
+    CHECK(components->draw_control_text(button, "hello", 4, 6, 0x00112233u, 0, 1).ok == kQolOk);
+    CHECK(g_last_text == "hello" && g_last_text_x == 108 && g_last_text_y == 61);
+    CHECK(g_last_text_rgb == 0x00112233u);
+    CHECK(std::strcmp(static_cast<FakeControl*>(button)->text, "updated") == 0);
+    CHECK(components->draw_control_text(nullptr, "x", 0, 0, 0, 0, 1).code == kQolErrInvalidArgument);
+    CHECK(components->draw_control_text(button, nullptr, 0, 0, 0, 0, 1).code == kQolErrInvalidArgument);
+
     CHECK(components->dispatch_touch(root, 0, 105, 58).ok == kQolOk);
     CHECK(g_clicks == 0);
     CHECK(components->dispatch_touch(root, 2, 105, 58).ok == kQolOk);
@@ -188,8 +430,160 @@ int main() {
     CHECK(components->destroy(button).ok == kQolOk);
     CHECK(components->destroy(button).code == kQolErrNotFound);
     CHECK(components->destroy(nullptr).code == kQolErrInvalidArgument);
+    CHECK(components->draw_container({10, 20, 320, 140}).ok == kQolOk);
+    CHECK(g_container_draws == 1 && g_last_container.x == 10 && g_last_container.y == 20 &&
+          g_last_container.w == 320 && g_last_container.h == 140);
+    CHECK(components->draw_container({0, 0, 47, 100}).code == kQolErrInvalidArgument);
+    CHECK(components->draw_container({INT64_MAX, 0, 100, 100}).code == kQolErrInvalidArgument);
+    CHECK(components->draw_container({INT32_MAX, 0, 48, 100}).code == kQolErrInvalidArgument);
+    CHECK(components->draw_container_ornamented({10, 20, 320, 140}).ok == kQolOk);
+    CHECK(g_container_draws == 2 && g_last_container.x == 10 && g_last_container.y == 20 &&
+          g_last_container.w == 320 && g_last_container.h == 140);
+    CHECK(g_part_draws == 4);
+    CHECK(g_part_loc[0] == 0 && g_part_x[0] == 8 && g_part_y[0] == 18);
+    CHECK(g_part_loc[1] == 1 && g_part_x[1] == 287 && g_part_y[1] == 18);
+    CHECK(g_part_loc[2] == 2 && g_part_x[2] == 8 && g_part_y[2] == 116);
+    CHECK(g_part_loc[3] == 3 && g_part_x[3] == 285 && g_part_y[3] == 114);
+    CHECK(components->draw_container_ornamented({INT32_MIN, 0, 320, 140}).code ==
+          kQolErrInvalidArgument);
+
+    // 返回按钮助手：组件树按钮（手工命中，按下→抬起在按钮内请求宿主 back）与原生事件树按钮。
+    qol::contracts::QolUiHandle back = nullptr;
+    CHECK(components->back_button_create(root, {8, 8, 74, 81}, &back).ok == kQolOk);
+    CHECK(back != nullptr && g_option_loads >= 1);  // 助手借用 0x59 图集（不卸载）。
+    CHECK(components->back_button_touch(back, 1, 110, 60).ok == kQolOk);
+    CHECK(components->back_button_touch(back, 2, 110, 60).ok == kQolOk);
+    CHECK(components->back_button_draw(back).ok == kQolOk && g_back_draws == 1);
+    qol::contracts::QolUiHandle raw_parent = nullptr;
+    CHECK(create_control(0, nullptr, &raw_parent).ok == kQolOk);
+    qol::contracts::QolUiHandle raw_back = nullptr;
+    CHECK(components->back_button_create(raw_parent, {0, 0, 74, 81}, &raw_back).ok == kQolOk);
+    CHECK(raw_back != nullptr);
+    CHECK(components->back_button_touch(raw_back, 1, 0, 0).code == kQolErrUnsupported);
+    CHECK(components->back_button_draw(raw_back).ok == kQolOk && g_back_draws == 2);
+    CHECK(components->back_request().ok == kQolOk);
+    CHECK(components->back_button_touch(nullptr, 1, 0, 0).code == kQolErrInvalidArgument);
+    CHECK(components->back_button_draw(nullptr).code == kQolErrInvalidArgument);
+
+    // 可缩放开关：任意 rect 自绘（关/开）+ 仅按自身矩形命中的触摸翻转。
+    CHECK(components->switch_draw({400, 300, 96, 44}, 0).ok == kQolOk);
+    CHECK(components->switch_draw({400, 300, 96, 44}, 1).ok == kQolOk);
+    CHECK(components->switch_draw({400, 300, 150, 68}, 1).ok == kQolOk);
+    CHECK(g_fill_count > 0);
+    CHECK(components->switch_draw({0, 0, 0, 44}, 0).code == kQolErrInvalidArgument);
+    CHECK(components->switch_draw({0, 0, 96, -1}, 0).code == kQolErrInvalidArgument);
+    int32_t switch_value = 0;
+    CHECK(components->switch_touch({400, 300, 96, 44}, 2, 448, 322, &switch_value).ok == kQolOk);
+    CHECK(switch_value == 0);  // 抬起不切换
+    CHECK(components->switch_touch({400, 300, 96, 44}, 1, 448, 322, &switch_value).ok == kQolOk);
+    CHECK(switch_value == 1);
+    CHECK(components->switch_touch({400, 300, 96, 44}, 1, 448, 322, &switch_value).ok == kQolOk);
+    CHECK(switch_value == 0);
+    CHECK(components->switch_touch({400, 300, 96, 44}, 1, 399, 322, &switch_value).ok == kQolOk);
+    CHECK(switch_value == 0);  // 命中范围外不切换
+    CHECK(components->switch_touch({400, 300, 96, 44}, 1, 448, 322, nullptr).code ==
+          kQolErrInvalidArgument);
+    CHECK(components->switch_touch({0, 0, 0, 44}, 1, 0, 0, &switch_value).code ==
+          kQolErrInvalidArgument);
+    g_fake_main_thread = 0;
+    CHECK(components->switch_draw({400, 300, 96, 44}, 0).code == kQolErrNotReady);
+    CHECK(components->switch_touch({400, 300, 96, 44}, 1, 448, 322, &switch_value).code ==
+          kQolErrNotReady);
+    CHECK(switch_value == 0);
+    g_fake_main_thread = 1;
+
     CHECK(components->destroy(root).ok == kQolOk);
     CHECK(components->destroy(root).code == kQolErrNotFound);
+    qol::features::core_ui::ui_components_unbind();
+
+    CHECK(qol::features::core_ui::ui_components_bind(&kFakeAdapter));
+    qol::contracts::QolUiHandle text_root = nullptr;
+    CHECK(components->panel_create(&panel_desc, nullptr, &text_root).ok == kQolOk);
+    std::string long_text = "长文本 UTF-8 label longer than thirty-one bytes";
+    qol::contracts::UiButtonDesc text_desc{{10, 12, 220, 48}, long_text.c_str(), 0,
+                                            &on_click, &g_clicks};
+    qol::contracts::QolUiHandle text_button = nullptr;
+    CHECK(components->text_button_create(nullptr, text_root, &text_button).code ==
+          kQolErrInvalidArgument);
+    CHECK(text_button == nullptr);
+    qol::contracts::UiButtonDesc undersized_desc{{10, 12, 116, 48}, "small", 0,
+                                                  &on_click, &g_clicks};
+    CHECK(components->text_button_create(&undersized_desc, text_root, &text_button).code ==
+          kQolErrInvalidArgument);
+    CHECK(text_button == nullptr);
+    CHECK(components->text_button_create(&text_desc, text_root, &text_button).ok == kQolOk);
+    long_text.assign("temporary replacement");
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_button_draws == 1 && g_native_button_rect.x == 110 &&
+          g_native_button_rect.y == 62 && g_native_button_rect.w == 220);
+    CHECK(g_native_label_draws == 1 && g_native_label_rect.x == 110 &&
+          g_native_label_rect.y == 62 && g_native_label_text == "长文本 UTF-8 label longer than thirty-one bytes");
+    CHECK(components->button_set_text(text_button, "更新后的按钮文字").ok == kQolOk);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_label_text == "更新后的按钮文字");
+    CHECK(components->button_set_text(text_button, nullptr).code == kQolErrInvalidArgument);
+    const char malformed_utf8[] = "\xf0\x28\x8c\x28";
+    CHECK(components->button_set_text(text_button, malformed_utf8).code == kQolErrInvalidArgument);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_label_text == "更新后的按钮文字");
+    CHECK(g_native_label_font == 0);
+    qol::contracts::UiButtonDesc larger_desc{{10, 12, 220, 48}, "放大",
+                                             qol::contracts::kUiTextButtonFontLarger, &on_click,
+                                             &g_clicks};
+    qol::contracts::QolUiHandle larger_button = nullptr;
+    CHECK(components->text_button_create(&larger_desc, text_root, &larger_button).ok == kQolOk);
+    CHECK(components->text_button_draw(larger_button).ok == kQolOk);
+    CHECK(g_native_label_font == 1);
+    CHECK(components->destroy(larger_button).ok == kQolOk);
+    qol::contracts::QolUiHandle bad_button = nullptr;
+    qol::contracts::UiButtonDesc bad_style_desc{{10, 12, 220, 48}, "bad", 2, &on_click, &g_clicks};
+    CHECK(components->text_button_create(&bad_style_desc, text_root, &bad_button).code ==
+          kQolErrInvalidArgument);
+    CHECK(bad_button == nullptr);
+    CHECK(components->button_set_text(text_button, "更新后的按钮文字").ok == kQolOk);
+    CHECK(components->text_button_set_enabled(text_button, 0).ok == kQolOk);
+    auto* fake_text_button = static_cast<FakeControl*>(text_button);
+    fake_text_button->click(fake_text_button->click_user);
+    CHECK(g_clicks == 1);
+    CHECK(components->text_button_set_enabled(text_button, 1).ok == kQolOk);
+    fake_text_button->click(fake_text_button->click_user);
+    CHECK(g_clicks == 2);
+    int64_t touch_inside[] = {120, 80};
+    int64_t touch_outside[] = {500, 500};
+    uint32_t consumed = 0;
+    CHECK(components->dispatch_native_event(text_button, 0x17,
+        reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk && consumed == 1);
+    CHECK(components->dispatch_native_event(text_button, 0x18,
+        reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk && consumed == 1);
+    CHECK(g_clicks == 3);
+    CHECK(components->dispatch_native_event(text_button, 0x17,
+        reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk);
+    CHECK(components->dispatch_native_event(text_button, 0x18,
+        reinterpret_cast<uintptr_t>(touch_outside), 0, &consumed).ok == kQolOk);
+    CHECK(g_clicks == 3);
+    CHECK(components->dispatch_native_event(text_button, 0x17,
+        reinterpret_cast<uintptr_t>(touch_outside), 0, &consumed).ok == kQolOk);
+    CHECK(components->dispatch_native_event(text_button, 0x18,
+        reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk);
+    CHECK(g_clicks == 3);
+    CHECK(components->destroy(text_button).ok == kQolOk);
+    CHECK(g_native_button_deletes == 2);
+    CHECK(components->destroy(text_button).code == kQolErrNotFound);
+    CHECK(components->destroy(text_root).ok == kQolOk);
+    qol::features::core_ui::ui_components_unbind();
+
+    auto older_adapter = make_fake_adapter();
+    older_adapter.minor = qol::contracts::kUiAdapterMinor - 2;
+    older_adapter.size = static_cast<uint32_t>(offsetof(
+        qol::contracts::QolUiAdapter, draw_native_text_button_background));
+    CHECK(qol::features::core_ui::ui_components_bind(&older_adapter));
+    qol::contracts::QolUiHandle old_root = nullptr;
+    CHECK(components->panel_create(&panel_desc, nullptr, &old_root).ok == kQolOk);
+    qol::contracts::QolUiHandle unavailable_button = nullptr;
+    CHECK(components->text_button_create(&text_desc, old_root, &unavailable_button).code ==
+          kQolErrNotReady);
+    CHECK(unavailable_button == nullptr);
+    CHECK(components->destroy(old_root).ok == kQolOk);
     qol::features::core_ui::ui_components_unbind();
 
     std::printf("core_ui_components assertions: %d\n", assertions);

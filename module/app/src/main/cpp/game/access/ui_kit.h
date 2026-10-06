@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "contracts/item_handle.h"
+
 struct UiRect {
     int64_t x;
     int64_t y;
@@ -31,8 +33,12 @@ bool ui_control_user_type(void* ctrl, int32_t* out_type);
 void* ui_control_data(void* ctrl);
 void* ui_control_item(void* ctrl);
 bool ui_control_item_slot(void* ctrl, int32_t* out_slot);
+bool ui_control_item_identity(void* ctrl, qol::contracts::QolItemHandle* out_item);
+bool ui_item_proc_source_control(void* destination, uint64_t event, const void* param,
+                                 void** out_source);
 void* ui_control_parent(void* ctrl);
 bool ui_execute_proc_matches(void* ctrl, UiClickProc expected);
+bool ui_set_button_enabled(void* ctrl, bool enabled);
 bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y);
 bool ui_touch_state(void** out_moving, void** out_drop_source, int64_t* out_x, int64_t* out_y);
 bool ui_delete_control(void* ctrl);

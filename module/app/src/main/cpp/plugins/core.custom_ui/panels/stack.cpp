@@ -15,6 +15,7 @@ const char* g_stack[kPanelStackDepth] = {};
 int g_depth = 0;
 uint64_t g_pump_task = 0;
 bool g_unbind_pending = false;
+bool g_back_requested = false;
 
 void remove_pump_task() {
     if (g_pump_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
@@ -87,6 +88,7 @@ void prune_inactive_top() {
 
 void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
     g_depth = 0;
+    g_back_requested = false;
     for (const char*& panel_id : g_stack) panel_id = nullptr;
     if (g_popup_host != nullptr) {
         g_popup_host->deactivate(true);
@@ -111,6 +113,11 @@ void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
 }
 
 int32_t ui_panels_frame_pump(int64_t, void*) {
+    // 帧边界消费延迟关闭请求：此处不在弹窗事件/原生控件遍历内，关闭可安全执行。
+    if (g_back_requested) {
+        g_back_requested = false;
+        (void)ui_panels_back();
+    }
     if (g_popup_host != nullptr) (void)g_popup_host->pump(main_thread_now());
     if (g_unbind_pending && g_popup_host != nullptr && !g_popup_host->close_pending_for_test()) {
         g_popup_host.reset();
@@ -181,6 +188,8 @@ bool ui_panels_back() {
     return close_top();
 }
 
+void ui_panels_request_back() { g_back_requested = true; }
+
 bool ui_panels_deactivate_owner(const char* owner) {
     if (owner == nullptr || owner[0] == '\0') return false;
     const bool host_complete = g_popup_host == nullptr ||
@@ -230,6 +239,14 @@ void ui_panels_reset_for_test() {
 
 int ui_panels_depth_for_test() {
     return g_depth;
+}
+
+int ui_panels_depth() {
+    return g_depth;
+}
+
+void ui_panels_set_depth_for_test(int depth) {
+    if (depth >= 0 && depth <= kPanelStackDepth) g_depth = depth;
 }
 
 }  // namespace qol::features::core_ui

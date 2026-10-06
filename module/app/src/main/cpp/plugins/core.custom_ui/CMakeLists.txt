@@ -3,10 +3,14 @@ add_library(qol_plugin_core.custom_ui STATIC
     text_mechanism.cpp
     feature.cpp
     ui_components.cpp
+    settings_contribution.cpp
     panels/debug_components.cpp
     panels/stack.cpp
     panels/host.cpp
 )
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_sources(qol_plugin_core.custom_ui PRIVATE panels/debug_scroll.cpp panels/debug_help.cpp)
+endif()
 
 # feature.cpp 的选择控件资源在 device probe 构建下改用严格导出名解析（elf-export:）。
 target_compile_definitions(qol_plugin_core.custom_ui PRIVATE

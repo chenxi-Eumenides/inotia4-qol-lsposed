@@ -1,6 +1,9 @@
 #include "game/access/ui_kit.h"
 
 #include "game/access/game_access.h"
+#include "game/access/inventory.h"
+#include "game/access/item_handle_registry.h"
+#include "game/adapter_ports/game_host_port.h"
 #include "game/symbols/game_symbols.h"
 
 #include <cstring>

@@ -85,6 +85,16 @@ bool find_libgame_base() {
     return found;
 }
 
+// 原生滚动接口仅接受具名函数；解析失败不能把基址或旧版 VMA 当成可调用函数。
+template <typename Fn>
+Fn resolve_native_ui_function(const char* macro_name) {
+    const uintptr_t offset = g_resolver.resolveFunctionByName(symbol_name_for_macro(macro_name));
+    const bool available = offset != 0 &&
+        game_memory_accessible(reinterpret_cast<void*>(g_base + offset), 4, 'x');
+    g_symbol_report.emplace_back(macro_name, available);
+    return available ? reinterpret_cast<Fn>(g_base + offset) : nullptr;
+}
+
 // 全局变量/数据地址：有符号名 → ELF 动态解析（未命中回退 VMA），无符号名 → 直接 VMA
 void resolve_global(void*& dst, uintptr_t vma, const char* macro_name) {
     const char* symbol = symbol_name_for_macro(macro_name);
@@ -329,6 +339,8 @@ bool bridge_init() {
         g_base + fn_resolve("F_MAPCHANGE_SET_VMA", F_MAPCHANGE_SET_VMA));
     fn_memorytext_get_text = reinterpret_cast<MemorytextGetTextFn>(
         g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA));
+    fn_ui_draw_border_rect = reinterpret_cast<UiDrawBorderRectFn>(
+        g_base + fn_resolve("F_UI_DRAW_BORDER_RECT_VMA", F_UI_DRAW_BORDER_RECT_VMA));
     fn_move_as_path = reinterpret_cast<MoveAsPathFn>(g_base + fn_resolve("F_MOVE_AS_PATH_VMA", F_MOVE_AS_PATH_VMA));
     fn_char_move = reinterpret_cast<CharMoveFn>(g_base + fn_resolve("F_CHAR_MOVE_VMA", F_CHAR_MOVE_VMA));
     fn_char_pick_item_all = reinterpret_cast<CharPickItemAllFn>(g_base + fn_resolve("F_CHAR_PICK_ITEM_ALL_VMA", F_CHAR_PICK_ITEM_ALL_VMA));
@@ -450,7 +462,21 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ctrl_btn_set_draw_id = reinterpret_cast<ControlButtonSetDrawIDFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_ID_VMA", F_CONTROL_BUTTON_SET_DRAW_ID_VMA));
     fn_ctrl_btn_set_draw_sub_id = reinterpret_cast<ControlButtonSetDrawSubIDFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_SUB_ID_VMA", F_CONTROL_BUTTON_SET_DRAW_SUB_ID_VMA));
     fn_ctrl_btn_set_draw_proc = reinterpret_cast<ControlButtonSetDrawProcFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_PROC_VMA", F_CONTROL_BUTTON_SET_DRAW_PROC_VMA));
-    fn_ui_create_group_base_control = reinterpret_cast<UiCreateGroupBaseControlFn>(g_base + fn_resolve("F_UI_CREATE_GROUP_BASE_CONTROL_VMA", F_UI_CREATE_GROUP_BASE_CONTROL_VMA));
+    fn_ctrl_scroll_create = resolve_native_ui_function<ControlScrollCreateFn>("F_CONTROL_SCROLL_CREATE_VMA");
+    fn_ctrl_scroll_delete = resolve_native_ui_function<ControlScrollDeleteFn>("F_CONTROL_SCROLL_DELETE_VMA");
+    fn_ctrl_scroll_set_option = resolve_native_ui_function<ControlScrollSetOptionFn>("F_CONTROLSCROLL_SET_OPTION_VMA");
+    fn_ctrl_scroll_set_target_group = resolve_native_ui_function<ControlScrollSetTargetGroupFn>("F_CONTROL_SCROLL_SET_TARGET_GROUP_VMA");
+    fn_ctrl_scroll_set_bar_data = resolve_native_ui_function<ControlScrollSetBarDataFn>("F_CONTROL_SCROLL_SET_BAR_DATA_VMA");
+    fn_ctrl_scroll_set_bar_draw_type = resolve_native_ui_function<ControlScrollSetBarDrawTypeFn>("F_CONTROL_SCROLL_SET_BAR_DRAW_TYPE_VMA");
+    fn_ctrl_scroll_set_min_variation = resolve_native_ui_function<ControlScrollSetMinVariationFn>("F_CONTROL_SCROLL_SET_MIN_VARIATION_VMA");
+    fn_ctrl_scroll_set_key_step_variation = resolve_native_ui_function<ControlScrollSetKeyStepVariationFn>("F_CONTROL_SCROLL_SET_KEY_STEP_VARIATION_VMA");
+    fn_ctrl_scroll_scroll = resolve_native_ui_function<ControlScrollScrollFn>("F_CONTROL_SCROLL_SCROLL_VMA");
+    fn_ctrl_scroll_process = resolve_native_ui_function<ControlScrollProcessFn>("F_CONTROL_SCROLL_PROCESS_VMA");
+    fn_ctrl_scroll_draw = resolve_native_ui_function<ControlScrollDrawFn>("F_CONTROL_SCROLL_DRAW_VMA");
+    fn_ctrl_scroll_reset_result_point = resolve_native_ui_function<ControlScrollResetResultPointFn>("F_CONTROL_SCROLL_RESET_RESULT_POINT_VMA");
+    fn_ctrl_btn_set_scroll_control = resolve_native_ui_function<ControlButtonSetScrollControlFn>("F_CONTROL_BUTTON_SET_SCROLL_CONTROL_VMA");
+    fn_ui_create_group_base_control = resolve_native_ui_function<UiCreateGroupBaseControlFn>("F_UI_CREATE_GROUP_BASE_CONTROL_VMA");
+    fn_touch_handle_event = resolve_native_ui_function<TouchHandleEventFn>("F_TOUCH_HANDLE_EVENT_VMA");
     fn_popup_create = reinterpret_cast<UiPopupMsgCreateFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_VMA", F_UIPOPUPMSG_CREATE_VMA));
     fn_instantmsg_add = reinterpret_cast<InstantMsgSystemAddFn>(g_base + fn_resolve("F_INSTANTMSGSYSTEM_ADD_VMA", F_INSTANTMSGSYSTEM_ADD_VMA));
     fn_popup_create_yesno = reinterpret_cast<UiPopupMsgCreateYesNoFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_VMA", F_UIPOPUPMSG_CREATE_YESNO_VMA));
@@ -463,12 +489,18 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_map_drawbase = reinterpret_cast<MapDrawBaseFn>(g_base + fn_resolve("F_MAP_DRAWBASE_VMA", F_MAP_DRAWBASE_VMA));
     fn_grpx_start = reinterpret_cast<GrpxStartFn>(g_base + fn_resolve("F_GRPX_START_VMA", F_GRPX_START_VMA));
     fn_grpx_end = reinterpret_cast<GrpxEndFn>(g_base + fn_resolve("F_GRPX_END_VMA", F_GRPX_END_VMA));
+    fn_grpx_set_clip = reinterpret_cast<GrpxSetClipFn>(g_base + fn_resolve("F_GRPX_SET_CLIP_VMA", F_GRPX_SET_CLIP_VMA));
+    fn_grpx_reset_clip = reinterpret_cast<GrpxResetClipFn>(g_base + fn_resolve("F_GRPX_RESET_CLIP_VMA", F_GRPX_RESET_CLIP_VMA));
     fn_grpx_fill_rect = reinterpret_cast<GrpxFillRectFn>(g_base + fn_resolve("F_GRPX_FILL_RECT_VMA", F_GRPX_FILL_RECT_VMA));
     fn_grpx_fill_rect_alpha = reinterpret_cast<GrpxFillRectAlphaFn>(g_base + fn_resolve("F_GRPX_FILL_RECT_ALPHA_VMA", F_GRPX_FILL_RECT_ALPHA_VMA));
     fn_grpx_set_font_color = reinterpret_cast<GrpxSetFontColorFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_VMA", F_GRPX_SET_FONT_COLOR_VMA));
     fn_grpx_draw_string_with_font = reinterpret_cast<GrpxDrawStringWithFontFn>(g_base + fn_resolve("F_GRPX_DRAW_STRING_WITH_FONT_VMA", F_GRPX_DRAW_STRING_WITH_FONT_VMA));
+    fn_grpx_get_font_height = reinterpret_cast<GrpxGetFontHeightFn>(
+        g_base + fn_resolve("F_GRPX_GET_FONT_HEIGHT_VMA", F_GRPX_GET_FONT_HEIGHT_VMA));
     fn_grpx_set_font_color_rgb = reinterpret_cast<GrpxSetFontColorRgbFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_RGB_VMA", F_GRPX_SET_FONT_COLOR_RGB_VMA));
     fn_grpx_draw_part = reinterpret_cast<GrpxDrawPartFn>(g_base + fn_resolve("F_GRPX_DRAW_PART_VMA", F_GRPX_DRAW_PART_VMA));
+    fn_sgl_draw_texture_part_ex = resolve_native_ui_function<SglDrawTexturePartExFn>(
+        "F_SGL_DRAW_TEXTURE_PART_EX_VMA");
     fn_ui_draw_string_halign = reinterpret_cast<UiDrawStringHAlignFn>(g_base + fn_resolve("F_UI_DRAW_STRING_HALIGN_VMA", F_UI_DRAW_STRING_HALIGN_VMA));
     fn_ui_draw_string_in_width_with_font = reinterpret_cast<UiDrawStringInWidthWithFontFn>(g_base + fn_resolve("F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA", F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA));
     fn_uidesc_draw = reinterpret_cast<UiDescDrawFn>(g_base + fn_resolve("F_UIDESC_DRAW_VMA", F_UIDESC_DRAW_VMA));

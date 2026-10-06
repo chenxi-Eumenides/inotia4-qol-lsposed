@@ -60,6 +60,14 @@ class DebugController {
     fun customUiComponents(@RequestBody body: String): String =
         ControllerGuard.guard { NativeHttpCommand.post("/api/debug/custom-ui/components", body) }
 
+    @PostMapping("/api/debug/custom-ui/scroll")
+    fun customUiScroll(@RequestBody body: String): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/custom-ui/scroll", body) }
+
+    @PostMapping("/api/debug/custom-ui/help")
+    fun customUiHelp(@RequestBody body: String): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/custom-ui/help", body) }
+
     @GetMapping("/api/debug/extension_bag/status")
     fun extensionBagStatus(): String =
         ControllerGuard.guard { NativeHttpQuery.get("/api/debug/extension_bag/status") }

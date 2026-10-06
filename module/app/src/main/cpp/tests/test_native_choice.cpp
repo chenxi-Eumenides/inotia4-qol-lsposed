@@ -75,7 +75,7 @@ bool setup_choice_feature() {
     static const void* ports[] = {&g_choice_port};
     ui.size = sizeof(ui);
     ui.major = qol::contracts::kUiContractMajor;
-    ui.minor = qol::contracts::kUiContractMinor;
+    ui.minor = qol::contracts::kUiAdapterMinor;
     sdk.ui = &ui;
     qol::contracts::PluginContext context{};
     context.sdk = &sdk;

@@ -8,6 +8,8 @@
 #include "../../contracts/ui_choice.h"
 #include "feature.h"
 #include "panels/debug_components.h"
+#include "panels/debug_scroll.h"
+#include "panels/debug_help.h"
 #include "panels/stack.h"
 #include "text_mechanism.h"
 #include "ui_components.h"
@@ -16,7 +18,7 @@ namespace qol::features::core_ui {
 namespace {
 
 constexpr const char* kPluginId = "core.custom_ui";
-constexpr const char* kPluginVersion = "0.1.0";
+constexpr const char* kPluginVersion = "0.1.1";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolChoicePort* g_choice_port = nullptr;
@@ -141,6 +143,16 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     if (!debug_components_register(ctx.sdk)) return 1;
+    if (!debug_scroll_register(ctx.sdk)) {
+        debug_components_unregister(ctx.sdk);
+        return 1;
+    }
+    if (!debug_help_register(ctx.sdk)) {
+        debug_help_unregister(ctx.sdk);
+        debug_scroll_unregister(ctx.sdk);
+        debug_components_unregister(ctx.sdk);
+        return 1;
+    }
 #endif
     return 0;
 }
@@ -149,6 +161,8 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    debug_help_unregister(ctx.sdk);
+    debug_scroll_unregister(ctx.sdk);
     debug_components_unregister(ctx.sdk);
 #endif
     text_set_active(false);
@@ -165,6 +179,8 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     text_set_active(true);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     debug_components_set_enabled(true);
+    debug_scroll_set_enabled(true);
+    debug_help_set_enabled(true);
 #endif
 }
 
@@ -174,6 +190,8 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     text_set_active(false);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     debug_components_set_enabled(false);
+    debug_scroll_set_enabled(false);
+    debug_help_set_enabled(false);
 #endif
 }
 

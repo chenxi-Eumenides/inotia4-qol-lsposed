@@ -49,8 +49,9 @@ bool draw_back_button(void* ctrl, bool pressed) {
     if (!ui_draw_image_part(kOptionImageUnit, kBackNormalLoc, center_x, center_y, 2, 1)) {
         return false;
     }
+    // 原版返回按钮按下亮光 (loc 2) 相对常态 (loc 3) 的偏移是 (−3, −3)。
     if (pressed && !ui_draw_image_part(kOptionImageUnit, kBackPressedLoc,
-                                       center_x - 3, center_y, 2, 1)) {
+                                       center_x - 3, center_y - 3, 2, 1)) {
         return false;
     }
     return true;

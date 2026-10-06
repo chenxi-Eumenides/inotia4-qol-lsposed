@@ -33,7 +33,8 @@ void ui_draw_vertical_line(int64_t x, int64_t y, int64_t h, uint32_t color, int 
 void ui_draw_text(void* ctrl, int x, int y, uint32_t color);
 void ui_draw_text_centered(void* ctrl, int y, uint32_t color);
 bool ui_load_image_unit(int32_t unit);
-void ui_unload_image_unit(int32_t unit);
+// 不声明卸载 helper：共享图集 0x0f/0x59/0x4f/0x50 由游戏拥有，模块只确保加载与借用
+// 绘制，任何关闭/回滚路径都不得卸载（UnitUnload 无引用计数）。
 bool ui_draw_image_part(int32_t unit, int32_t loc, int32_t x, int32_t y, int32_t type, int32_t flip);
 bool ui_draw_control_image_part(void* ctrl, int32_t unit, int32_t loc, int32_t type, int32_t flip);
 bool ui_draw_control_image_part_centered(void* ctrl, int32_t unit, int32_t loc, int32_t type,
@@ -46,7 +47,7 @@ bool ui_draw_control(void* ctrl);
 namespace ui_original {
 
 bool load_option_images();
-void unload_option_images();
+// 不声明 unload_option_images：共享 option 图集由游戏拥有，页面不卸载。
 bool draw_back_button(void* ctrl, bool pressed);
 bool draw_toggle(void* ctrl, bool enabled);
 
