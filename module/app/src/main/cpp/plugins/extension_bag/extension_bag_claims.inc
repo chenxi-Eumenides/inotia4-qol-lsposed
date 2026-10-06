@@ -22,7 +22,6 @@ constexpr const char* kEbP2SavePopup = "own:popup.save_panel";
 constexpr const char* kEbP3StorePopup = "own:popup.store";
 constexpr const char* kEbP4MixPopup = "own:popup.mix";
 constexpr const char* kEbS1DescSlots = "own:desc_button_execute_slots";
-constexpr const char* kEbX1MoveMerge = "ptrslot:MOVE_MERGE_GOT";
 constexpr const char* kEbGateKey = "extensionBagEnabled";
 
 // PopupState 占用条目：资源事务 acquire 写入、release 写回（主线程）。
@@ -320,20 +319,6 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbDescSlotsOps)),
         },
-        {
-            kEbX1MoveMerge,
-            kEbX1MoveMerge,
-            ::qol::contracts::ResourceMechanism::kPtrSlot,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft,
-            true,
-            "extension_bag",
-            "UIEquip 物品事件 proc GOT 槽常驻 wrapper（move_merge / 扩展源保护在 wrapper 内自门控）",
-            nullptr,
-            120,
-            reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
-        },
         // ---- D2a-3b-2：C1–C8 存档 callsite ----
         // 站点已在 a3a 登记（game/access/patches 的 P_EXT_SAVE_*）；handler 为模块存档编排
         // 机制 owner=extension_bag；行为经 Host SDK 存档面执行。
@@ -548,8 +533,6 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {
         g_backup_store_sell_item = backup;
         return 0;
     }
-    // X1 指针槽 wrapper 直走 game_access 解析入口，接收即成功（无需缓存 backup）。
-    if (std::strcmp(resource_id, kEbX1MoveMerge) == 0) return 0;
     return 1;
 }
 

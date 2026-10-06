@@ -28,6 +28,7 @@
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
+#include "game/adapter_ports/move_merge_port.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/adapter_ports/item_extras_port.h"
@@ -46,7 +47,18 @@
 #include "infra/store.h"
 #include "infra/text_scope.h"
 
+static_assert(offsetof(qol::contracts::QolMoveMergePort, move_item) ==
+              ((sizeof(QolVersion) + alignof(void*) - 1) / alignof(void*)) * alignof(void*));
+static_assert(offsetof(qol::contracts::QolMoveMergePort, current_bag) ==
+              offsetof(qol::contracts::QolMoveMergePort, move_item) +
+                  sizeof(qol::contracts::QolMoveMergePort::move_item));
+static_assert(offsetof(qol::contracts::QolMoveMergePort, validate_native_item) ==
+              offsetof(qol::contracts::QolMoveMergePort, current_bag) +
+                  sizeof(qol::contracts::QolMoveMergePort::current_bag));
+
 uintptr_t g_base = 0;
+std::array<uint8_t, 0x304a80> g_move_merge_fake_memory{};
+bool g_move_merge_fake_memory_enabled = false;
 void* g_active_quest = nullptr;
 qol::contracts::QolItemHandle g_inventory_item_handle{};
 void* g_inven = reinterpret_cast<void*>(1);
@@ -82,6 +94,21 @@ decltype(fn_save_save_item) fn_save_save_item = nullptr;
 decltype(fn_save_load_item) fn_save_load_item = nullptr;
 decltype(fn_itempool_free) fn_itempool_free = nullptr;
 decltype(fn_inven_move_item) fn_inven_move_item = nullptr;
+int g_move_item_calls = 0;
+void* g_move_item_source = nullptr;
+int32_t g_move_item_count = 0;
+int32_t g_move_item_bag = 0;
+int32_t g_move_item_slot = 0;
+int32_t g_move_item_return = 0;
+
+int32_t fake_move_item(void* source, int32_t count, int32_t bag, int32_t slot) {
+    ++g_move_item_calls;
+    g_move_item_source = source;
+    g_move_item_count = count;
+    g_move_item_bag = bag;
+    g_move_item_slot = slot;
+    return g_move_item_return;
+}
 decltype(fn_equip_item_from_inven_to_slot) fn_equip_item_from_inven_to_slot = nullptr;
 decltype(fn_ui_equip_apply_stuff) fn_ui_equip_apply_stuff = nullptr;
 decltype(fn_char_use_item_ex) fn_char_use_item_ex = nullptr;
@@ -129,6 +156,9 @@ int fake_item_no_sell(int32_t) { return 0; }
 int fake_item_dice(int32_t) { return 0; }
 int fake_item_cumulate_count(void*) { return 6; }
 bool g_item_count_probe = false;
+int32_t g_adapter_encoding_error = kQolOk;
+qol::contracts::QolItemCountEncoding g_adapter_encoding =
+    qol::contracts::QolItemCountEncoding::kEncoded;
 uint32_t g_adapter_canonical_count = 0;
 int32_t g_adapter_canonical_error = kQolOk;
 bool adapter_item_count_probe() { return g_item_count_probe; }
@@ -145,6 +175,17 @@ QolResult adapter_item_count_canonical(const void*, uint32_t* out_count) {
 }
 QolResult adapter_item_count_effective(const void*, uint32_t* out_count) {
     *out_count = 88;
+    return qol::contracts::ok();
+}
+QolResult adapter_item_count_encoding(const void*, qol::contracts::QolItemCountEncoding* out) {
+    if (g_adapter_encoding_error != kQolOk) {
+        return qol::contracts::error(g_adapter_encoding_error, "encoding error", 14);
+    }
+    *out = g_adapter_encoding;
+    return qol::contracts::ok();
+}
+QolResult adapter_item_count_view_limit(int32_t extended, uint32_t* out_limit) {
+    *out_limit = extended != 0 ? 999u : 99u;
     return qol::contracts::ok();
 }
 int fake_can_equip(void*, void*) { return 1; }
@@ -164,7 +205,13 @@ int fake_find_save_slot(void*, int8_t* out_slot) {
 
 uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 
-bool game_memory_accessible(const void*, size_t, char) { return false; }
+bool game_memory_accessible(const void* address, size_t size, char) {
+    if (!g_move_merge_fake_memory_enabled || address == nullptr || size == 0) return false;
+    const uintptr_t begin = reinterpret_cast<uintptr_t>(g_move_merge_fake_memory.data());
+    const uintptr_t target = reinterpret_cast<uintptr_t>(address);
+    return target >= begin && target - begin <= g_move_merge_fake_memory.size() &&
+           size <= g_move_merge_fake_memory.size() - (target - begin);
+}
 
 namespace qol {
 namespace {
@@ -176,6 +223,7 @@ const GameVariant& game_variant() { return g_test_variant; }
 }  // namespace qol
 
 namespace qol::game {
+extern int32_t g_test_craft_apply_stuff_result;
 
 bool g_item_class_table_ready = true;
 
@@ -495,8 +543,26 @@ int main() {
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
-    assert(sdk.abi.minor == 15);
-    assert(qol::contracts::kHostSdkMinor == 15);
+    assert(sdk.abi.minor == 18);
+    assert(qol::contracts::kHostSdkMinor == 18);
+    assert(sdk.module_version != nullptr);
+    assert(qol::contracts::settings_catalog_if_available(&sdk) == sdk.settings_catalog);
+    assert(sdk.settings_catalog != nullptr);
+    // Old provider removal must not remove resident settings contributions.
+    const qol::contracts::SettingsCategorySpec settings_category{
+        sizeof(qol::contracts::SettingsCategorySpec), "adapter.settings", "adapter.owner", "Adapter", ""};
+    const qol::contracts::SettingsItemSpec settings_item{
+        sizeof(qol::contracts::SettingsItemSpec), "adapter.enable", "adapter.settings", "adapter.owner",
+        "Enable", "", qol::contracts::SettingsItemType::kToggle, "adapterEnabled", 1,
+        nullptr, nullptr, nullptr};
+    assert(sdk.settings_catalog->register_category(&settings_category, &settings_item, 1).ok == kQolOk);
+    assert(sdk.panels.unregister_owner("adapter.owner").ok == kQolOk);
+    const qol::contracts::CatalogView* settings_view = nullptr;
+    qol::contracts::SettingsCatalogToken settings_token = 0;
+    assert(sdk.settings_catalog->snapshot_acquire(&settings_view, &settings_token).ok == kQolOk);
+    assert(settings_view->category_count == 1 && settings_view->item_count == 1);
+    assert(sdk.settings_catalog->snapshot_release(settings_token).ok == kQolOk);
+    assert(sdk.settings_catalog->unregister_owner("adapter.owner").ok == kQolOk);
     static_assert(offsetof(qol::contracts::QolHostSdk, snapshot_create) ==
                       offsetof(qol::contracts::QolHostSdk, item_handle) +
                           sizeof(qol::contracts::QolItemHandleApi),
@@ -769,6 +835,101 @@ int main() {
     assert(game.inventory_write.remove_item(qol::contracts::kInvalidItemHandle).code ==
            kQolErrInvalidArgument);
     assert(game.world_action.minus_money(-1).code == kQolErrInvalidArgument);
+
+    // 窄 move_merge port：typed source 校验 + 主线程纪律 + 参数边界；失败不得调用底层。
+    const auto& move_merge = qol::game::move_merge_port();
+    assert(move_merge.abi_version.major == 1 && move_merge.abi_version.minor == 2);
+    assert(move_merge.move_item != nullptr);
+    assert(move_merge.current_bag != nullptr);
+    assert(move_merge.validate_native_item != nullptr);
+    const uintptr_t saved_base = g_base;
+    g_base = reinterpret_cast<uintptr_t>(g_move_merge_fake_memory.data());
+    auto* fake_current_bag = reinterpret_cast<uint8_t*>(
+        g_move_merge_fake_memory.data() + G_UIEQUIP_CUR_BAG_VMA);
+    auto* fake_panel_control = reinterpret_cast<void**>(
+        g_move_merge_fake_memory.data() + G_UIEQUIP_PANEL_CTRL_VMA);
+    *fake_current_bag = 4;
+    *fake_panel_control = g_move_merge_fake_memory.data();
+    g_move_merge_fake_memory_enabled = true;
+    int32_t queried_bag = -1;
+    assert(move_merge.current_bag(&queried_bag).ok == kQolOk && queried_bag == 4);
+    assert(move_merge.current_bag(nullptr).code == kQolErrInvalidArgument);
+    queried_bag = 23;
+    g_move_merge_fake_memory_enabled = false;
+    assert(move_merge.current_bag(&queried_bag).code == kQolErrNotReady);
+    assert(queried_bag == 23);
+    g_move_merge_fake_memory_enabled = true;
+    *fake_current_bag = 6;
+    assert(move_merge.current_bag(&queried_bag).code == kQolErrInvalidArgument);
+    assert(queried_bag == 23);
+    *fake_current_bag = 2;
+    int32_t wrong_thread_bag = 29;
+    QolResult wrong_thread_result{};
+    std::thread current_bag_worker([&] {
+        wrong_thread_result = move_merge.current_bag(&wrong_thread_bag);
+    });
+    current_bag_worker.join();
+    assert(wrong_thread_result.code == kQolErrBlocked && wrong_thread_bag == 29);
+    g_move_merge_fake_memory_enabled = false;
+    g_base = saved_base;
+    fn_inven_move_item = &fake_move_item;
+    g_move_item_return = 1;
+    int32_t move_result = -1;
+    int move_game_item = 0;
+    qol::contracts::QolItemHandle move_game_handle{};
+    assert(qol::game::register_item(&move_game_item, qol::contracts::kQolItemHandleOwnerGame,
+                                    nullptr).slot != 0);
+    move_game_handle = qol::game::lookup_item(&move_game_item);
+    assert(move_game_handle.slot != 0);
+    assert(move_merge.validate_native_item(move_game_handle).ok == kQolOk);
+    assert(move_merge.validate_native_item(g_find_item_handle).code != kQolOk);
+    qol::contracts::QolItemHandle stale_move_handle{
+        move_game_handle.slot, move_game_handle.generation + 1};
+    assert(move_merge.validate_native_item(stale_move_handle).code != kQolOk);
+    QolResult wrong_thread_native_result{};
+    std::thread native_validation_worker([&] {
+        wrong_thread_native_result = move_merge.validate_native_item(move_game_handle);
+    });
+    native_validation_worker.join();
+    assert(wrong_thread_native_result.code == kQolErrBlocked);
+    g_move_item_calls = 0;
+    assert(move_merge.move_item(move_game_handle, 2, 1, 3, &move_result).ok == kQolOk);
+    assert(g_move_item_calls == 1 && g_move_item_source == &move_game_item);
+    assert(g_move_item_count == 2 && g_move_item_bag == 1 && g_move_item_slot == 3);
+    assert(move_result == 1);
+    // 底层真实失败（0=失败）也必须原样保留。
+    g_move_item_return = 0;
+    move_result = -1;
+    g_move_item_calls = 0;
+    assert(move_merge.move_item(move_game_handle, 1, 0, 0, &move_result).ok == kQolOk);
+    assert(g_move_item_calls == 1 && move_result == 0);
+    g_move_item_return = 1;
+    // 参数校验失败：count<=0 / out 空 / 越界 bag/slot，均不调用 native。
+    g_move_item_calls = 0;
+    assert(move_merge.move_item(move_game_handle, 0, 1, 3, &move_result).ok != kQolOk);
+    assert(move_merge.move_item(move_game_handle, 1, 1, 3, nullptr).ok != kQolOk);
+    assert(move_merge.move_item(move_game_handle, 1, -1, 3, &move_result).ok != kQolOk);
+    assert(move_merge.move_item(move_game_handle, 1, 6, 3, &move_result).ok != kQolOk);
+    assert(move_merge.move_item(move_game_handle, 1, 1, -1, &move_result).ok != kQolOk);
+    assert(move_merge.move_item(move_game_handle, 1, 1, 16, &move_result).ok != kQolOk);
+    assert(g_move_item_calls == 0);
+    // 坏 handle（generation 错）/未登记 handle：fail-closed 且不调用 native。
+    g_move_item_calls = 0;
+    qol::contracts::QolItemHandle wrong_generation{move_game_handle.slot,
+                                                   move_game_handle.generation + 1};
+    assert(move_merge.move_item(wrong_generation, 1, 0, 0, &move_result).ok != kQolOk);
+    assert(move_merge.move_item(qol::contracts::kInvalidItemHandle, 1, 0, 0, &move_result).ok !=
+           kQolOk);
+    assert(g_move_item_calls == 0);
+    // foreign provider handle：拒绝且不调用 native（EB item 不注册为游戏 owner）。
+    assert(move_merge.move_item(g_find_item_handle, 1, 0, 0, &move_result).ok != kQolOk);
+    assert(g_move_item_calls == 0);
+    // 底层符号未就绪：not ready，且不写 out_result。
+    fn_inven_move_item = nullptr;
+    int32_t missing_result = 7;
+    assert(move_merge.move_item(move_game_handle, 1, 0, 0, &missing_result).ok != kQolOk);
+    assert(g_move_item_calls == 0 && missing_result == 7);
+    assert(qol::game::invalidate_item(&move_game_item) == true);
     int32_t character_type = -1;
     assert(character_port_api.read.type(reinterpret_cast<void*>(0x1), &character_type).ok == kQolOk);
     assert(character_type == 2);
@@ -860,6 +1021,23 @@ int main() {
     g_inventory_item_handle = qol::game::register_item(
         reinterpret_cast<void*>(0x9), qol::contracts::kQolItemHandleOwnerGame);
     assert(g_inventory_item_handle.slot != 0 && g_inventory_item_handle.generation != 0);
+    const auto provider_material = qol::game::register_item(
+        reinterpret_cast<void*>(0xA), qol::contracts::kQolItemHandleOwnerProvider);
+    assert(provider_material.slot != 0 && provider_material.generation != 0);
+    qol::game::g_test_craft_apply_stuff_result = 2;
+    int32_t apply_allowed = -1;
+    assert(character_extras_api.read.can_apply_stuff_items(
+               g_inventory_item_handle, provider_material, &apply_allowed).ok == kQolOk);
+    assert(apply_allowed == 2);
+    qol::game::g_test_craft_apply_stuff_result = -1;
+    apply_allowed = 123;
+    assert(character_extras_api.read.can_apply_stuff_items(
+               g_inventory_item_handle, provider_material, &apply_allowed).code == kQolErrNotReady);
+    assert(apply_allowed == 123);
+    assert(character_extras_api.read.can_apply_stuff_items(
+               qol::contracts::kInvalidItemHandle, provider_material, &apply_allowed).code != kQolOk);
+    assert(apply_allowed == 123);
+    qol::game::g_test_craft_apply_stuff_result = 2;
     assert(item_port_api.read.category(g_inventory_item_handle, &value).ok == kQolOk);
     assert(value == 4);
     assert(item_port_api.read.is_jewel_category(4, &value).ok == kQolOk && value == 1);
@@ -872,8 +1050,11 @@ int main() {
     assert(item_port_api.read.is_no_sell(4, &value).ok == kQolOk);
     assert(game.read_only.item.is_dice(4, &value).ok == kQolOk);
     assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
-    static const qol::contracts::QolItemCountApi item_count_provider{
-        &adapter_item_count_canonical, &adapter_item_count_effective};
+    static qol::contracts::QolItemCountApi item_count_provider{};
+    item_count_provider.canonical = &adapter_item_count_canonical;
+    item_count_provider.effective = &adapter_item_count_effective;
+    item_count_provider.is_encoded = &adapter_item_count_encoding;
+    item_count_provider.view_limit = &adapter_item_count_view_limit;
     qol::game::item_count_set_provider(&item_count_provider);
     qol::game::item_count_set_active_probe(&adapter_item_count_probe);
     g_item_count_probe = false;
@@ -893,6 +1074,39 @@ int main() {
     assert(item_port_api.read.effective_cumulate_count(g_inventory_item_handle, &value).ok ==
            kQolOk);
     assert(value == 88);
+    qol::contracts::QolItemCountEncoding queried_encoding =
+        qol::contracts::QolItemCountEncoding::kUnknown;
+    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kEncoded;
+    g_adapter_encoding_error = kQolOk;
+    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).ok ==
+           kQolOk);
+    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kEncoded);
+    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kNotEncoded;
+    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).ok ==
+           kQolOk);
+    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kNotEncoded);
+    queried_encoding = qol::contracts::QolItemCountEncoding::kEncoded;
+    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kUnknown;
+    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).code !=
+           kQolOk);
+    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kEncoded);
+    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kEncoded;
+    g_adapter_encoding_error = kQolErrNotReady;
+    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).code ==
+           kQolErrNotReady);
+    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kEncoded);
+    g_adapter_encoding_error = kQolOk;
+    uint32_t count_limit = 0;
+    g_item_count_probe = false;
+    assert(item_port_api.read.count_limit(g_inventory_item_handle, &count_limit).ok == kQolOk);
+    assert(count_limit == 99);
+    g_item_count_probe = true;
+    assert(item_port_api.read.count_limit(g_inventory_item_handle, &count_limit).ok == kQolOk);
+    assert(count_limit == 999);
+    count_limit = 777;
+    assert(item_port_api.read.count_limit(qol::contracts::kInvalidItemHandle, &count_limit).code !=
+           kQolOk);
+    assert(count_limit == 777);
     qol::game::item_count_set_provider(nullptr);
     g_item_count_probe = false;
     assert(game.read_only.item.class_no_equip_bit(4, &value).ok == kQolOk);

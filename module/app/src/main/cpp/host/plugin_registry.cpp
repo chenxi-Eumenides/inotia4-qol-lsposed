@@ -16,6 +16,7 @@
 #include "contracts/game_ports/extension_bag_write_port.h"
 #include "contracts/game_ports/inventory_extras_port.h"
 #include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/game_ports/item_extras_port.h"
 #include "contracts/game_ports/quest_port.h"
@@ -52,6 +53,7 @@
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
+#include "game/adapter_ports/move_merge_port.h"
 #include "game/adapter_ports/item_extras_port.h"
 #include "game/adapter_ports/inventory_extras_port.h"
 #include "game/adapter_ports/quest_port.h"
@@ -141,6 +143,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
     }
     if (id == contracts::QolPortId::QOL_PORT_ITEM) {
         const auto& port = qol::game::item_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_MOVE_MERGE) {
+        const auto& port = qol::game::move_merge_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
@@ -270,6 +277,12 @@ bool resolve_plugin_ports(uint32_t index) {
         const contracts::QolPortRequirement& requirement = plugin.ports[i];
         if (requirement.id == contracts::QolPortId::QOL_PORT_EXTENSION_BAG_WRITE &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "extension_bag") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_MOVE_MERGE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "move_merge") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

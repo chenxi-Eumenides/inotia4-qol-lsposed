@@ -144,6 +144,52 @@ QolResult read_effective_cumulate_count(contracts::QolItemHandle handle, int32_t
     return contracts::ok();
 }
 
+QolResult read_count_limit(contracts::QolItemHandle handle, uint32_t* out_limit) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
+    if (item == nullptr || out_limit == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid count limit args");
+    }
+    const contracts::QolItemCountApi* api = item_count_api_if_resident();
+    if (api == nullptr || api->is_encoded == nullptr || api->view_limit == nullptr) {
+        return not_ready();
+    }
+    contracts::QolItemCountEncoding encoding = contracts::QolItemCountEncoding::kUnknown;
+    const QolResult encoding_result = api->is_encoded(item, &encoding);
+    if (!contracts::succeeded(encoding_result)) return encoding_result;
+    if (encoding == contracts::QolItemCountEncoding::kUnknown) {
+        return error_result(kQolErrUnsupported, "item count mode unavailable");
+    }
+    uint32_t limit = 0;
+    const bool extended = encoding == contracts::QolItemCountEncoding::kEncoded && item_count_active();
+    const QolResult limit_result = api->view_limit(extended ? 1 : 0, &limit);
+    if (!contracts::succeeded(limit_result)) return limit_result;
+    *out_limit = limit;
+    return contracts::ok();
+}
+
+QolResult read_count_encoding(contracts::QolItemHandle handle,
+                              contracts::QolItemCountEncoding* out_encoding) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
+    if (item == nullptr || out_encoding == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid count encoding args");
+    }
+    const contracts::QolItemCountApi* api = item_count_api_if_resident();
+    if (api == nullptr || api->is_encoded == nullptr) return not_ready();
+    contracts::QolItemCountEncoding encoding = contracts::QolItemCountEncoding::kUnknown;
+    const QolResult result = api->is_encoded(item, &encoding);
+    if (!contracts::succeeded(result)) return result;
+    if (encoding != contracts::QolItemCountEncoding::kEncoded &&
+        encoding != contracts::QolItemCountEncoding::kNotEncoded) {
+        return error_result(kQolErrUnsupported, "item count encoding unavailable");
+    }
+    *out_encoding = encoding;
+    return contracts::ok();
+}
+
 QolResult read_item_ref_at(int32_t bag, int32_t slot, contracts::QolInventoryItemRef* out) {
     // 中立 provider 契约：只校验负 bag/slot 与固定槽界；逻辑袋号认领交由 provider。
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) {
@@ -313,7 +359,8 @@ const contracts::QolItemPort kItemPort{
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_item_context,
       &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
        &read_static_text, &read_static_ready, &read_inventory_item_view,
-       &read_effective_cumulate_count, &read_inventory_extension_access},
+        &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
+        &read_count_encoding},
 };
 
 }  // namespace

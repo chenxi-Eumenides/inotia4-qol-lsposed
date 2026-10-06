@@ -9,7 +9,7 @@
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{3, 0};
+constexpr QolVersion kItemFactsVersion{3, 2};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 
@@ -21,6 +21,9 @@ using ItemFactsSellPriceFn = QolResult (*)(QolItemHandle item, int64_t* out_pric
 using ItemFactsCumulateCountFn = QolResult (*)(QolItemHandle item, int32_t* out_count);
 using ItemFactsViewFn = QolResult (*)(QolItemHandle item, QolItemInventoryView* out_view);
 using ItemFactsEffectiveCountFn = QolResult (*)(QolItemHandle item, int32_t* out_count);
+using ItemFactsCountLimitFn = QolResult (*)(QolItemHandle item, uint32_t* out_limit);
+using ItemFactsCountEncodingFn = QolResult (*)(QolItemHandle item,
+                                               QolItemCountEncoding* out_encoding);
 
 using ItemFactsItemRefAtFn = QolResult (*)(int32_t bag, int32_t slot,
                                            QolInventoryItemRef* out);
@@ -43,10 +46,20 @@ struct ItemFactsApi {
     ItemFactsMoneyFn money;
     ItemFactsViewFn view;
     ItemFactsEffectiveCountFn effective_count;
+    ItemFactsCountLimitFn count_limit;
+    ItemFactsCountEncodingFn count_encoding;
 };
 
 inline bool item_facts_api_size_valid(const ItemFactsApi* api) {
-    return api != nullptr && api->struct_size >= sizeof(ItemFactsApi);
+    constexpr uint32_t kLegacySize = static_cast<uint32_t>(
+        offsetof(ItemFactsApi, count_encoding));
+    return api != nullptr && api->struct_size >= kLegacySize;
+}
+
+inline bool item_facts_api_count_encoding_size_valid(const ItemFactsApi* api) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(ItemFactsApi, count_encoding) + sizeof(ItemFactsCountEncodingFn));
+    return api != nullptr && api->struct_size >= kRequiredSize;
 }
 
 }  // namespace qol::contracts

@@ -6,6 +6,7 @@ add_library(qol_plugin_extension_bag STATIC
     extension_bag_api.cpp
     http_query.cpp
     plugin.cpp
+    settings_contribution.cpp
 )
 
 target_include_directories(qol_plugin_extension_bag PRIVATE

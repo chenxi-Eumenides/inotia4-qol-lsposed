@@ -1,0 +1,1 @@
+add_library(qol_plugin_move_merge STATIC plugin.cpp settings_contribution.cpp)

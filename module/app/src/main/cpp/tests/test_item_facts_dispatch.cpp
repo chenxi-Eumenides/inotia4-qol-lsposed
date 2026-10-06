@@ -367,13 +367,33 @@ QolResult fake_accept_dice(qol::contracts::QolItemDiceAcceptResult* out) {
 
 QolResult fake_inventory_extension_access(qol::contracts::QolInventoryExtensionAccess* out);
 
+QolResult fake_count_encoding(qol::contracts::QolItemHandle,
+                              qol::contracts::QolItemCountEncoding* out_encoding) {
+    if (out_encoding == nullptr) {
+        constexpr char kMessage[] = "bad encoding output";
+        return qol::contracts::error(kQolErrInvalidArgument, kMessage, sizeof(kMessage) - 1);
+    }
+    *out_encoding = g_count_encoded ? qol::contracts::QolItemCountEncoding::kEncoded
+                                    : qol::contracts::QolItemCountEncoding::kNotEncoded;
+    return qol::contracts::ok();
+}
+
+QolResult fake_item_count_limit(qol::contracts::QolItemHandle, uint32_t* out_limit) {
+    if (out_limit == nullptr) {
+        constexpr char kMessage[] = "bad limit output";
+        return qol::contracts::error(kQolErrInvalidArgument, kMessage, sizeof(kMessage) - 1);
+    }
+    *out_limit = 99;
+    return qol::contracts::ok();
+}
+
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
     &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
-     &stub_detail_item_context,              &fake_inventory,  &fake_money,
-    &fake_shop,       &fake_in_world,      &fake_static_text, &fake_static_ready,
-     &fake_inventory_item_view, &stub_effective_cumulate,
-     &fake_inventory_extension_access,
+    &stub_detail_item_context, &fake_inventory, &fake_money,
+    &fake_shop, &fake_in_world, &fake_static_text, &fake_static_ready,
+    &fake_inventory_item_view, &stub_effective_cumulate, &fake_inventory_extension_access,
+    &fake_item_count_limit, &fake_count_encoding,
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, sizeof(QolItemPort), kFakeRead};
@@ -568,6 +588,10 @@ struct FakeScheduler {
 };
 
 FakeScheduler g_scheduler;
+
+bool run_scheduler(uint64_t frame) {
+    return g_scheduler.handler != nullptr && g_scheduler.handler(frame, g_scheduler.ctx) != 0;
+}
 
 int32_t g_last_log_level = -1;
 char g_last_log_message[256] = {};
@@ -1685,7 +1709,7 @@ void test_lifecycle_and_responses() {
     (void)dispatch_get("/api/item/inventory", &status);
     CHECK(status == 503);
 
-    CHECK(g_scheduler.handler(100, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(100));
 
     const std::string expected_inventory = expected_inventory_with_count(3);
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
@@ -1694,7 +1718,7 @@ void test_lifecycle_and_responses() {
     // A physical ref/handle lookup failure must not publish a partial inventory with the slot
     // silently omitted. Retain the last complete snapshot until a full serialization succeeds.
     g_item_ref_result = kQolErrNotReady;
-    CHECK(g_scheduler.handler(101, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(101));
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
     CHECK(status == 200);
     g_item_ref_result = kQolOk;
@@ -1709,12 +1733,12 @@ void test_lifecycle_and_responses() {
     for (const CountViewCase& test_case : count_cases) {
         g_canonical_count = test_case.canonical;
         g_override_enabled = false;
-        CHECK(g_scheduler.handler(200 + test_case.canonical, g_scheduler.ctx) != 0);
+        CHECK(run_scheduler(200 + test_case.canonical));
         CHECK(dispatch_get("/api/item/inventory", &status) ==
               expected_inventory_with_count(test_case.disabled_view));
         CHECK(status == 200);
         g_override_enabled = true;
-        CHECK(g_scheduler.handler(1200 + test_case.canonical, g_scheduler.ctx) != 0);
+        CHECK(run_scheduler(1200 + test_case.canonical));
         CHECK(dispatch_get("/api/item/inventory", &status) ==
               expected_inventory_with_count(test_case.enabled_view));
         CHECK(status == 200);
@@ -1726,7 +1750,7 @@ void test_lifecycle_and_responses() {
     }
     g_count_encoded = false;
     g_override_enabled = true;
-    CHECK(g_scheduler.handler(2300, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(2300));
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(1));
     CHECK(status == 200);
 
@@ -1735,14 +1759,14 @@ void test_lifecycle_and_responses() {
     g_override_available = false;
     g_canonical_count = 900;
     g_original_count = 71;
-    CHECK(g_scheduler.handler(2400, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(2400));
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(71));
     CHECK(status == 200);
     g_override_available = true;
     g_override_enabled = false;
     g_effective_fail = true;
     g_original_count = 100;
-    CHECK(g_scheduler.handler(2500, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(2500));
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory_with_count(100));
     CHECK(status == 200);
     g_effective_fail = false;
@@ -1750,7 +1774,7 @@ void test_lifecycle_and_responses() {
     g_override_enabled = false;
     g_canonical_count = 3;
     g_original_count = 3;
-    CHECK(g_scheduler.handler(2600, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(2600));
     CHECK(dispatch_get("/api/item/inventory/money", &status) == "{\"money\":72503}");
     CHECK(status == 200);
     CHECK(dispatch_get("/api/item/inventory/items", &status) ==
@@ -1793,11 +1817,11 @@ void test_lifecycle_and_responses() {
 
     // 非 world：发布与迁移前一致的 not in game 错误体（HTTP 200）。
     g_in_world = false;
-    CHECK(g_scheduler.handler(115, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(115));
     CHECK(dispatch_get("/api/item/inventory", &status) == "{\"error\":\"not in game\"}");
     CHECK(status == 200);
     g_in_world = true;
-    CHECK(g_scheduler.handler(130, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(130));
     CHECK(dispatch_get("/api/item/inventory/money") == "{\"money\":72503}");
 
     // owner 停用：handler 墓碑，请求返回明确停用错误。
@@ -1826,12 +1850,12 @@ void test_static_not_ready_holds_snapshot() {
     CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
                                                      descriptor.http_query_count).ok == kQolOk);
     // 静态名称表未下发：快照不发布，HTTP 侧保持 not ready。
-    CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(1));
     uint16_t status = 0;
     (void)dispatch_get("/api/item/inventory", &status);
     CHECK(status == 503);
     g_static_ready = 1;
-    CHECK(g_scheduler.handler(20, g_scheduler.ctx) != 0);
+    CHECK(run_scheduler(20));
     CHECK(dispatch_get("/api/item/inventory", &status).find("\"bags\"") != std::string::npos);
     CHECK(status == 200);
     descriptor.deactivate(ctx);
@@ -2242,10 +2266,10 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_category,          &golden_unsupported2,      &golden_unsupported1,
     &golden_unsupported1,      &golden_unsupported_price, &golden_cumulate_count,
     &golden_item_ref_at,       &golden_unsupported_phys,  &golden_unsupported_detail_context,
-    &golden_inventory_json,    &golden_money,
-    &golden_shop,              &golden_in_world,          &golden_static_text,
-    &golden_static_ready,      &golden_view, &stub_effective_cumulate,
-    &fake_inventory_extension_access,
+    &golden_inventory_json, &golden_money,
+    &golden_shop, &golden_in_world, &golden_static_text,
+    &golden_static_ready, &golden_view, &stub_effective_cumulate,
+    &fake_inventory_extension_access, &fake_item_count_limit, &fake_count_encoding,
 };
 const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion,
                                                sizeof(qol::contracts::QolItemPort), kGoldenRead};
@@ -2402,7 +2426,7 @@ void test_inventory_owner_vs_legacy_golden() {
         CHECK(std::string(owner_raw.data(), raw_size) == frozen);
         CHECK(std::string(owner_raw.data(), raw_size).find(
                   "\"bag\":5,\"items\":[{\"slot\":15") != std::string::npos);
-        CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
+        CHECK(run_scheduler(1));
         uint16_t status = 0;
         const std::string owner_http = dispatch_get("/api/item/inventory", &status);
         std::vector<char> enriched_inventory(qol::contracts::kQolItemStateRawInventoryCapacity);
@@ -2487,7 +2511,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     golden_fill_item(g_golden_item_task, static_cast<uint16_t>(10 << 6), 2, 0, 0, 0);
     *reinterpret_cast<void**>(g_golden_bag_storage + 0 * 0x80 + 0 * 8) = g_golden_item_a;
     *reinterpret_cast<void**>(g_golden_bag_storage + 1 * 0x80 + 2 * 8) = g_golden_item_b;
-    *reinterpret_cast<void**>(g_golden_bag_storage + 5 * 0x80 + 19 * 8) = g_golden_item_task;
+    *reinterpret_cast<void**>(g_golden_bag_storage + 5 * 0x80 + 15 * 8) = g_golden_item_task;
     g_inven = g_golden_bag_storage;
     g_golden_world = 1;
     g_in_world = true;

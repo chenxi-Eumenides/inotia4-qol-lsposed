@@ -14,6 +14,7 @@ void test_set_item_port_version(::QolVersion version);
 #include <cstring>
 
 #include "contracts/plugin.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
 #include "contracts/ownership.h"
@@ -797,8 +798,33 @@ void test_character_http_port_is_owner_private() {
     CHECK(feature_state_is("core.character", FeatureState::kEnabled));
 }
 
-void test_gate_off_installed_disabled() {
+void test_move_merge_port_is_owner_private() {
     reset_all();
+    qol::contracts::QolPortRequirement requirement{
+        qol::contracts::QolPortId::QOL_PORT_MOVE_MERGE,
+        {qol::contracts::kQolMoveMergePortVersion.major,
+         qol::contracts::kQolMoveMergePortVersion.minor},
+    };
+    PluginDescriptor private_port = make_descriptor("test_move", nullptr, 0, nullptr, 0);
+    private_port.ports = &requirement;
+    private_port.port_count = 1;
+    CHECK(register_plugin(private_port));
+    CHECK(install_all(make_deps()) == 1);
+    CHECK(feature_state_is("test_move", FeatureState::kBlocked));
+    const char* error = nullptr;
+    CHECK(feature_of("test_move", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
+
+    reset_all();
+    PluginDescriptor owner = make_descriptor("move_merge", nullptr, 0, nullptr, 0);
+    owner.ports = &requirement;
+    owner.port_count = 1;
+    CHECK(register_plugin(owner));
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("move_merge", FeatureState::kEnabled));
+}
+
+void test_gate_off_installed_disabled() {    reset_all();
     const PluginDescriptor d =
         make_descriptor("test_gate", g_gate_resources, 1, nullptr, 0);
     CHECK(register_plugin(d));
@@ -1772,6 +1798,7 @@ int main() {
     test_save_port_version_and_private_gate();
     test_craft_port_version_and_private_gate();
     test_character_http_port_is_owner_private();
+    test_move_merge_port_is_owner_private();
     test_gate_off_installed_disabled();
     test_gate_on_and_config_hot_switch();
     test_second_resource_failure_rolls_back();

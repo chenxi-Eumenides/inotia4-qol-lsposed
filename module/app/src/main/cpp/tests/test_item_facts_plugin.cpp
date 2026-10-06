@@ -6,9 +6,11 @@
 #include "contracts/item_state.h"
 #include "contracts/extension_bag.h"
 #include "contracts/game_ports/ports.h"
+#include "contracts/game_ports/character_extras_port.h"
 #include "plugins/core.item/plugin.h"
 
 #include <cstdio>
+#include <cstddef>
 #include <cstring>
 #include <type_traits>
 
@@ -22,7 +24,35 @@ static int g_fail = 0;
 
 static_assert(std::is_same<qol::contracts::ItemFactsCategoryFn,
                            QolResult (*)(qol::contracts::QolItemHandle, int32_t*)>::value,
-              "item.facts category must be handle-keyed");
+               "item.facts category must be handle-keyed");
+static_assert(offsetof(qol::contracts::ItemFactsApi, count_limit) ==
+                  offsetof(qol::contracts::ItemFactsApi, effective_count) +
+                      sizeof(qol::contracts::ItemFactsEffectiveCountFn),
+              "ItemFactsApi count_limit must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, count_limit) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, inventory_extension_access) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::inventory_extension_access)),
+              "Item Port count_limit must be tail-appended");
+static_assert(offsetof(qol::contracts::ItemFactsApi, count_encoding) ==
+                  offsetof(qol::contracts::ItemFactsApi, count_limit) +
+                      sizeof(qol::contracts::ItemFactsCountLimitFn),
+              "ItemFacts count_encoding must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, count_encoding) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, count_limit) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::count_limit)),
+              "Item Port count_encoding must be tail-appended");
+static_assert(std::is_same<qol::contracts::ItemFactsCountEncodingFn,
+                           QolResult (*)(qol::contracts::QolItemHandle,
+                                         qol::contracts::QolItemCountEncoding*)>::value,
+              "item.facts count encoding must be handle-keyed");
+static_assert(offsetof(qol::contracts::QolCharacterExtrasReadApi, can_apply_stuff_items) ==
+                  offsetof(qol::contracts::QolCharacterExtrasReadApi, party_member) +
+                      sizeof(decltype(qol::contracts::QolCharacterExtrasReadApi::party_member)),
+              "CharacterExtras typed apply-stuff must be tail-appended");
+static_assert(offsetof(qol::contracts::QolCharacterExtrasReadApi, struct_size) ==
+                  offsetof(qol::contracts::QolCharacterExtrasReadApi, can_apply_stuff_items) +
+                      sizeof(decltype(qol::contracts::QolCharacterExtrasReadApi::can_apply_stuff_items)),
+              "CharacterExtras size must follow the typed API tail");
 static_assert(std::is_same<qol::contracts::ItemFactsPhysicalItemAtFn,
                            QolResult (*)(int32_t, int32_t,
                                          qol::contracts::QolItemHandle*)>::value,
@@ -60,18 +90,31 @@ static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
               "inventory reference must not carry a native object pointer");
 
 int main() {
+    CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
+          qol::contracts::kItemFactsVersion.minor == 2);
+    CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
+          qol::contracts::kQolPortItemVersion.minor == 2);
+    CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
+          qol::contracts::kQolPortCharacterExtrasVersion.minor == 1);
     qol::contracts::ItemFactsApi old_size_api{};
-    old_size_api.struct_size = sizeof(old_size_api) - 1;
-    CHECK(!qol::contracts::item_facts_api_size_valid(&old_size_api));
+    old_size_api.struct_size = static_cast<uint32_t>(
+        offsetof(qol::contracts::ItemFactsApi, count_encoding));
+    CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
+    CHECK(!qol::contracts::item_facts_api_count_encoding_size_valid(&old_size_api));
     old_size_api.struct_size = sizeof(old_size_api);
     CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
+    CHECK(qol::contracts::item_facts_api_count_encoding_size_valid(&old_size_api));
     qol::contracts::QolItemPort old_item_port{};
-    old_item_port.struct_size = sizeof(old_item_port) - 1;
-    CHECK(!qol::contracts::qol_item_port_size_valid(&old_item_port));
+    old_item_port.struct_size = static_cast<uint32_t>(
+        offsetof(qol::contracts::QolItemPort, read) +
+        offsetof(qol::contracts::QolItemPortReadApi, count_encoding));
+    CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
+    CHECK(!qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
     old_item_port.struct_size = sizeof(old_item_port);
     CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
+    CHECK(qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {1, 1}));
-    CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 3}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 4}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {2, 0}));
     CHECK(!qol::contracts::satisfies({2, 0}, {3, 0}));
@@ -80,6 +123,7 @@ int main() {
                  qol::contracts::kQolPortItemVersion.minor}));
     CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {3, 0}));
     CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {3, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {3, 2}));
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
@@ -96,7 +140,7 @@ int main() {
     CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 2);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -108,7 +152,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 0);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 2);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
@@ -127,6 +171,8 @@ int main() {
     CHECK(api->money != nullptr);
     CHECK(api->view != nullptr);
     CHECK(api->effective_count != nullptr);
+    CHECK(api->count_limit != nullptr);
+    CHECK(api->count_encoding != nullptr);
     CHECK(g_fail == 0);
     std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

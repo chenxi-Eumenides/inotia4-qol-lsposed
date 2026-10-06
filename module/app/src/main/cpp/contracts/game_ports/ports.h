@@ -34,11 +34,12 @@ enum class QolPortId : uint32_t {
     QOL_PORT_ITEM_INVENTORY_STATE_WRITE = 25,
     QOL_PORT_CHARACTER_STATE = 26,
     QOL_PORT_CHARACTER_WRITE_OPS = 27,
+    QOL_PORT_MOVE_MERGE = 28,
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 2};
 constexpr QolVersion kQolPortWorldVersion{2, 0};
-constexpr QolVersion kQolPortItemVersion{3, 0};
+constexpr QolVersion kQolPortItemVersion{3, 2};
 constexpr QolVersion kQolPortCharacterVersion{1, 0};
 constexpr QolVersion kQolPortExtensionBagWriteVersion{1, 0};
 constexpr QolVersion kQolPortChoiceVersion{1, 0};
@@ -47,7 +48,7 @@ constexpr QolVersion kQolPortSaveCallVersion{1, 0};
 constexpr QolVersion kQolPortCraftVersion{1, 0};
 constexpr QolVersion kQolPortCraftUiWriteVersion{1, 0};
 constexpr QolVersion kQolPortCustomRecipeWriteVersion{1, 0};
-constexpr QolVersion kQolPortCharacterExtrasVersion{1, 0};
+constexpr QolVersion kQolPortCharacterExtrasVersion{1, 1};
 constexpr QolVersion kQolPortInventoryExtrasVersion{1, 0};
 constexpr QolVersion kQolPortItemExtrasVersion{1, 0};
 constexpr QolVersion kQolPortSystemVersion{1, 1};
@@ -116,6 +117,8 @@ constexpr const char* port_id_name(QolPortId id) {
             return "QOL_PORT_CHARACTER_STATE";
         case QolPortId::QOL_PORT_CHARACTER_WRITE_OPS:
             return "QOL_PORT_CHARACTER_WRITE_OPS";
+        case QolPortId::QOL_PORT_MOVE_MERGE:
+            return "QOL_PORT_MOVE_MERGE";
     }
     return "QOL_PORT_UNKNOWN";
 }

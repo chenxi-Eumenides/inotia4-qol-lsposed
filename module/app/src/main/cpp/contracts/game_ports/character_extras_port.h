@@ -4,6 +4,7 @@
 
 #include "../result.h"
 #include "../version.h"
+#include "../item_handle.h"
 
 namespace qol::contracts {
 
@@ -24,7 +25,14 @@ struct QolCharacterExtrasReadApi {
     QolResult (*has_empty_mercenary_slot)(int32_t* out_available);
     QolResult (*can_apply_stuff)(const void* target, const void* material, int32_t* out_allowed);
     QolResult (*party_member)(int32_t role, void** out_character);
+    QolResult (*can_apply_stuff_items)(QolItemHandle target, QolItemHandle material,
+                                       int32_t* out_allowed);
+    uint32_t struct_size;
 };
+
+inline bool qol_character_extras_read_api_size_valid(const QolCharacterExtrasReadApi* api) {
+    return api != nullptr && api->struct_size >= sizeof(QolCharacterExtrasReadApi);
+}
 
 struct QolCharacterExtrasPort {
     QolVersion abi_version;

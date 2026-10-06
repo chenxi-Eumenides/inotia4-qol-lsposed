@@ -153,6 +153,17 @@ QolResult effective_count(contracts::QolItemHandle item, int32_t* out_count) {
     return g_port->read.effective_cumulate_count(item, out_count);
 }
 
+QolResult count_limit(contracts::QolItemHandle item, uint32_t* out_limit) {
+    if (g_port == nullptr || g_port->read.count_limit == nullptr) return not_ready();
+    return g_port->read.count_limit(item, out_limit);
+}
+
+QolResult count_encoding(contracts::QolItemHandle item,
+                         contracts::QolItemCountEncoding* out_encoding) {
+    if (g_port == nullptr || g_port->read.count_encoding == nullptr) return not_ready();
+    return g_port->read.count_encoding(item, out_encoding);
+}
+
 QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
     if (g_port == nullptr || g_port->read.detail_item_context == nullptr) return not_ready();
     return g_port->read.detail_item_context(out_context);
@@ -177,6 +188,8 @@ constexpr contracts::ItemFactsApi kItemFactsApi{
     &money,
     &item_view,
     &effective_count,
+    &count_limit,
+    &count_encoding,
 };
 
 // T2h-B2：item.state 发布面——唯一实现复用既有 serialize_inventory_json（禁止第二实现）。
@@ -1962,11 +1975,13 @@ int plugin_install(contracts::PluginContext& ctx) {
                               {contracts::kQolPortItemVersion.major,
                                contracts::kQolPortItemVersion.minor}) ||
         !contracts::qol_item_port_size_valid(g_port) ||
+        !contracts::qol_item_port_count_encoding_size_valid(g_port) ||
         g_port->read.category == nullptr || g_port->read.cumulate_count == nullptr ||
         g_port->read.item_ref_at == nullptr ||
         g_port->read.inventory_item_view == nullptr || g_port->read.shop_items_json == nullptr ||
         g_port->read.in_world == nullptr || g_port->read.money == nullptr ||
-        g_port->read.static_text == nullptr || g_port->read.static_ready == nullptr) {
+        g_port->read.static_text == nullptr || g_port->read.static_ready == nullptr ||
+        g_port->read.count_encoding == nullptr) {
         g_port = nullptr;
         g_sdk = nullptr;
         return 1;

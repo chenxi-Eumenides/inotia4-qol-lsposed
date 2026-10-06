@@ -1,6 +1,7 @@
 #pragma once
 
 #include "contracts/game_host.h"
+#include "contracts/move_merge.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 
 #include <jni.h>
@@ -39,9 +40,9 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
 std::string data_op_extension_bag_enter_view(int logical_bag);
 std::string data_op_extension_bag_unequip(int logical_bag);
 enum class VirtualBagProjectionDropResult : uint8_t {
-    kNotExtension,
-    kHandled,
-    kRejected,
+    kNotExtension = static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kNotHandled),
+    kHandled = static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kHandled),
+    kRejected = static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kRejected),
 };
 VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_control,
                                                                     void* src_control);

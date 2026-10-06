@@ -5,6 +5,7 @@
 #include "contracts/game_ports/ports.h"
 #include "game/access/char.h"
 #include "game/access/craft.h"
+#include "game/access/item_handle_registry.h"
 
 namespace qol::game {
 namespace {
@@ -149,6 +150,29 @@ QolResult read_can_apply_stuff(const void* target, const void* material, int32_t
     return contracts::ok();
 }
 
+QolResult read_can_apply_stuff_items(contracts::QolItemHandle target,
+                                     contracts::QolItemHandle material, int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    const ItemHandleResolution target_item = item_handle_registry().resolve_item(
+        target, contracts::kQolItemHandleOwnerAny);
+    if (target_item.error != ItemHandleError::kNone || target_item.item == nullptr) {
+        return error_result(target_item.error == ItemHandleError::kWrongThread ? kQolErrBlocked
+                                                                                : kQolErrNotFound,
+                            "target item handle unavailable");
+    }
+    const ItemHandleResolution material_item = item_handle_registry().resolve_item(
+        material, contracts::kQolItemHandleOwnerAny);
+    if (material_item.error != ItemHandleError::kNone || material_item.item == nullptr) {
+        return error_result(material_item.error == ItemHandleError::kWrongThread ? kQolErrBlocked
+                                                                                 : kQolErrNotFound,
+                            "material item handle unavailable");
+    }
+    const int32_t allowed = craft_is_apply_stuff(target_item.item, material_item.item);
+    if (allowed < 0) return not_ready();
+    *out = allowed;
+    return contracts::ok();
+}
+
 QolResult read_party_member(int32_t role, void** out) {
     if (out == nullptr || role < 0 || role >= 3) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
@@ -162,7 +186,8 @@ const contracts::QolCharacterExtrasPort kPort{
     {&read_party_index, &read_is_party_member, &read_summoner, &read_level, &read_merc_slot,
      &read_can_change_equip, &read_menu_character, &read_pool_slot, &read_max_hp, &read_hp,
      &read_can_equip, &read_find_equip_slot, &read_equipped_item, &read_has_empty_mercenary_slot,
-     &read_can_apply_stuff, &read_party_member},
+      &read_can_apply_stuff, &read_party_member, &read_can_apply_stuff_items,
+      sizeof(contracts::QolCharacterExtrasReadApi)},
 };
 
 }  // namespace

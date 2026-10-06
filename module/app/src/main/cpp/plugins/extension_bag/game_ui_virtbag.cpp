@@ -72,10 +72,7 @@ using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 
 std::mutex g_virtual_bag_mtx;
-// move_merge / extension source protection 请求标志（D2c-2b-2 由 feature/patch 迁入；
-// X1 wrapper 常驻自门控，set_*_enabled 只切标志）。
-std::mutex g_move_merge_mtx;
-std::atomic<bool> g_move_merge_requested{false};
+// Extension source protection follows the extension_bag gate independently of move_merge.
 std::atomic<bool> g_extension_source_protection_requested{false};
 // 生命周期节拍帧任务（D2a-3c：原 150ms 线程体迁 infra::scheduler，主线程执行）。
 uint64_t g_lifecycle_task = 0;

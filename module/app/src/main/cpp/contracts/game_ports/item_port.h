@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <type_traits>
 
 #include "../result.h"
 #include "../version.h"
 #include "../item_handle.h"
+#include "../item_count.h"
 
 namespace qol::contracts {
 
@@ -128,6 +130,8 @@ struct QolItemPortReadApi {
     QolResult (*inventory_item_view)(QolItemHandle item, QolItemInventoryView* out_view);
     QolResult (*effective_cumulate_count)(QolItemHandle item, int32_t* out_count);
     QolResult (*inventory_extension_access)(QolInventoryExtensionAccess* out_access);
+    QolResult (*count_limit)(QolItemHandle item, uint32_t* out_limit);
+    QolResult (*count_encoding)(QolItemHandle item, QolItemCountEncoding* out_encoding);
 };
 
 struct QolItemPort {
@@ -137,7 +141,16 @@ struct QolItemPort {
 };
 
 inline bool qol_item_port_size_valid(const QolItemPort* port) {
-    return port != nullptr && port->struct_size >= sizeof(QolItemPort);
+    constexpr uint32_t kLegacySize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, count_encoding));
+    return port != nullptr && port->struct_size >= kLegacySize;
+}
+
+inline bool qol_item_port_count_encoding_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, count_encoding) +
+        sizeof(QolItemPortReadApi::count_encoding));
+    return port != nullptr && port->struct_size >= kRequiredSize;
 }
 
 }  // namespace qol::contracts

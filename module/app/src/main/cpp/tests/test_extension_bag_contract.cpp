@@ -6,6 +6,7 @@
 // game_memory_accessible 恒真；未纳入本 target 的两个槽解析器给出保守桩。
 
 #include "contracts/extension_bag.h"
+#include "contracts/move_merge.h"
 #include "contracts/version.h"
 #include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
@@ -63,6 +64,32 @@ bool ui_choice_button_slot_target(void** /*out_slot*/, uintptr_t* /*out_expected
     static_assert(qol::contracts::kExtensionBagVersionMinor == 0, "minor");
 static_assert(std::strcmp(qol::contracts::kExtensionBagCapabilityId, "extension_bag") == 0,
               "capability id 必须为 extension_bag");
+static_assert(std::strcmp(qol::contracts::kInventoryMergeProjectionCapabilityId,
+                          "inventory.merge_projection") == 0,
+              "projection capability id");
+static_assert(std::strcmp(qol::contracts::kMoveMergeControlCapabilityId,
+                          "move_merge.control") == 0,
+              "move merge capability id");
+static_assert(qol::contracts::kInventoryMergeProjectionVersionMajor == 1 &&
+                  qol::contracts::kInventoryMergeProjectionVersionMinor == 0,
+              "projection capability version");
+static_assert(qol::contracts::kMoveMergeControlVersionMajor == 1 &&
+                  qol::contracts::kMoveMergeControlVersionMinor == 0,
+              "move merge control capability version");
+static_assert(static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kNotHandled) == 0,
+              "projection drop not handled");
+static_assert(static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kHandled) == 1,
+              "projection drop handled");
+static_assert(static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kRejected) == 2,
+              "projection drop rejected");
+static_assert(std::is_standard_layout<qol::contracts::InventoryMergeProjectionApi>::value,
+              "projection API POD");
+static_assert(std::is_trivially_copyable<qol::contracts::InventoryMergeProjectionApi>::value,
+              "projection API trivially copyable");
+static_assert(std::is_standard_layout<qol::contracts::MoveMergeControlApi>::value,
+              "move merge control API POD");
+static_assert(std::is_trivially_copyable<qol::contracts::MoveMergeControlApi>::value,
+              "move merge control API trivially copyable");
 
 static_assert(static_cast<uint8_t>(qol::contracts::ExtensionBagDropResult::kNotExtension) == 0, "drop0");
 static_assert(static_cast<uint8_t>(qol::contracts::ExtensionBagDropResult::kHandled) == 1, "drop1");
@@ -160,6 +187,17 @@ void test_contract_field_counts() {
     CHECK(static_cast<uint8_t>(ExtensionBagEquipButtonResult::kBlocked) == 2);
     CHECK(static_cast<uint8_t>(ExtensionBagEquipEventResult::kBlocked) == 2);
     CHECK(sizeof(qol::contracts::ExtensionBagMoveObservation) == 72);
+
+    const qol::contracts::InventoryMergeProjectionApi projection{
+        sizeof(qol::contracts::InventoryMergeProjectionApi), 1, 0,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    const qol::contracts::MoveMergeControlApi control{
+        sizeof(qol::contracts::MoveMergeControlApi), 1, 0, nullptr};
+    CHECK(qol::contracts::inventory_merge_projection_api_valid(&projection));
+    CHECK(qol::contracts::move_merge_control_api_valid(&control));
+    CHECK(!qol::contracts::inventory_merge_projection_api_valid(nullptr));
+    CHECK(!qol::contracts::move_merge_control_api_valid(nullptr));
+    CHECK(static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kRejected) == 2);
 }
 
 void test_patch_sites_resolve() {

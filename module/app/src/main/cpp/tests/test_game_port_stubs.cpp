@@ -23,6 +23,7 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/game_ports/character_write_ops_port.h"
 #include "contracts/game_ports/character_state_port.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "game/ops/game_ops_common.h"
 #include "game/state/game_state.h"
 
@@ -63,6 +64,8 @@ const contracts::QolCharacterWriteOpsPort kCharacterWriteOpsPort{
     contracts::kQolPortCharacterWriteOpsVersion, nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr};
+const contracts::QolMoveMergePort kMoveMergePort{contracts::kQolMoveMergePortVersion, nullptr,
+                                                  nullptr, nullptr};
 
 }  // namespace
 
@@ -100,6 +103,7 @@ const contracts::QolItemDiceWritePort& item_dice_write_port() { return kItemDice
 const contracts::QolCharacterWriteOpsPort& character_write_ops_port() {
     return kCharacterWriteOpsPort;
 }
+const contracts::QolMoveMergePort& move_merge_port() { return kMoveMergePort; }
 
 }  // namespace qol::game
 
