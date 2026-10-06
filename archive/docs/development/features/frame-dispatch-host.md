@@ -8,12 +8,12 @@
 
 **交付文件**：
 
-- `core/native/frame_task.{h,cpp}`：统一帧任务管理器（多点位 + 句柄 API）。
-- `core/native/frame_host.{h,cpp}`：锚点安装器（渲染开始前）。
+- `infra/frame/frame_task.{h,cpp}`：统一帧任务管理器（多点位 + 句柄 API）。
+- `infra/frame/frame_host.{h,cpp}`：锚点安装器（渲染开始前）。
 
 **最终锚点**：`GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`（原指令字 `0x9401d18a`；常量 `F_MAP_DRAWBASE_VMA=0x111d14` / `F_GAMESTATE_DRAWPLAY_DRAWBASE_CALL_OFF=0x20`）。DrawPlay 开头 `byte==1` 分支经 `GRP_AddColorTone` 后 `b 0x9d6ec` 与主线汇聚于此，故每次 DrawPlay 必执行；`MAP_DrawBase` 自身重新加载指针、不吃入参（`void()`）。wrapper 先 `frame_task_dispatch(kFramePointRenderPre)`，再 `fn_map_drawbase()`。
 
-**逻辑锚点（2026-09-13 新增，用于状态转换派发）**：`MainProcess` 内 `+0x40` 的 `bl STATE_NextStartProcess`（原指令字 `0x97ffff3d`；常量 `F_MAINPROCESS_VMA=0xd4984` / `F_MAINPROCESS_NEXT_STATE_CALL_OFF=0x40` / `F_STATE_NEXT_START_PROCESS_VMA=0xd46b8`，均 `.dynsym` 导出）。wrapper 先 `frame_task_dispatch(kFramePointLogicPre)`，再 `fn_state_next_start_process()`。消费点位于帧计数自增与 Draw 之前。`core/native/frame_host` 两个锚点**全成或全退**，`frame_host_anchors_installed()` 供派发器 fail-fast。用途：把 `go_main_menu` / `enter_slot` / `create_slot` 的游戏状态机调用从 HTTP 线程收敛到游戏线程安全相位（见 `core/native/transition_dispatch.{h,cpp}` 与本文 §4）。
+**逻辑锚点（2026-09-13 新增，用于状态转换派发）**：`MainProcess` 内 `+0x40` 的 `bl STATE_NextStartProcess`（原指令字 `0x97ffff3d`；常量 `F_MAINPROCESS_VMA=0xd4984` / `F_MAINPROCESS_NEXT_STATE_CALL_OFF=0x40` / `F_STATE_NEXT_START_PROCESS_VMA=0xd46b8`，均 `.dynsym` 导出）。wrapper 先 `frame_task_dispatch(kFramePointLogicPre)`，再 `fn_state_next_start_process()`。消费点位于帧计数自增与 Draw 之前。`infra/frame/frame_host` 两个锚点**全成或全退**，`frame_host_anchors_installed()` 供派发器 fail-fast。用途：把 `go_main_menu` / `enter_slot` / `create_slot` 的游戏状态机调用从 HTTP 线程收敛到游戏线程安全相位（见 `infra/frame/transition_dispatch.{h,cpp}` 与本文 §4）。
 
 **API**（与 `frame_task.h` 一致）：
 
@@ -36,7 +36,7 @@
 
 ## 1. 背景与问题
 
-现有逐帧任务机制 `FrameTaskManager`（`module/app/src/main/cpp/core/native/game_motion.{h,cpp}`）：
+现有逐帧任务机制 `FrameTaskManager`（`module/app/src/main/cpp/infra/frame/frame_task.{h,cpp}`）：
 
 - **后台线程轮询**：`task_thread_fn` 在独立 `std::thread` 每 1ms 轮询 `data_frame_count()`，帧号变化即执行回调（`game_motion.cpp:75-98`）。回调与游戏主循环**并发**读写游戏内存。
 - **单任务语义**：`frame_task_register` 注册即 `g_tasks.clear()` 再插入（`game_motion.cpp:45`），并强制 `game_in_world() && *g_gamestate==0`（`:41-44`）。
@@ -45,8 +45,8 @@
 
 同时项目已有两套相邻能力：
 
-- **主线程逐帧派发** `core/native/frame_tick.{h,cpp}`：`frame_tick_register/unregister` + `frame_tick_dispatch()`，按 `data_frame_count()` 去重，回调在调用 dispatch 的线程（游戏主线程）执行。
-- **锚点安装**：`feature/autosell/autosell_host.cpp` 用 `core/native/call_patch.h` 把 `GAMESTATE_DrawPlay` 内 `bl GRPX_Start` 改指 wrapper，wrapper 复刻原调用后执行 `frame_tick_dispatch()`。
+- **主线程逐帧派发** `infra/frame/frame_task.{h,cpp}`：`frame_tick_register/unregister` + `frame_tick_dispatch()`，按 `data_frame_count()` 去重，回调在调用 dispatch 的线程（游戏主线程）执行。
+- **锚点安装**：`feature/autosell/autosell_host.cpp` 用 `patch/call_patch.h` 把 `GAMESTATE_DrawPlay` 内 `bl GRPX_Start` 改指 wrapper，wrapper 复刻原调用后执行 `frame_tick_dispatch()`。
 
 因此本调查要回答：能否把 `FrameTaskManager` 换成「帧周期 hook 锚点 + 主线程回调 + 传入 frame 数」，以及在帧周期的哪个/哪些位置挂。
 
@@ -120,7 +120,7 @@ GAMESTATE_Draw@0x1512b8
 | 设施 | 位置 | 机制 | 现状 |
 |---|---|---|---|
 | FrameTaskManager | `game_motion.cpp` | 后台线程轮询 | 采用（待替代） |
-| `frame_tick` | `core/native/frame_tick.cpp` | 主线程回调注册表 + 帧去重 | 自动出售使用 |
+| `frame_tick` | `infra/frame/frame_task.cpp` | 主线程回调注册表 + 帧去重 | 自动出售使用 |
 | draw 锚点 | `autosell_host.cpp:34-57` | `call_patch` BL 改指 `GAMESTATE_DrawPlay+0x74` | 真机验证可用（自动出售） |
 | LSPosed Native Hook | `native_inventory_hook.{h,cpp}`、`game_ui_attr_range.cpp` | 函数入口 inline hook + backup | 扩展背包 / 属性范围使用 |
 
@@ -155,7 +155,7 @@ GAMESTATE_Draw@0x1512b8
 **已实现（2026-09-13）：**
 
 - **阶段 1（无 Native Hook）：已完成。** 删除 FrameTaskManager；统一帧任务管理器（`frame_task` + `frame_host`，多点位 + 句柄 API）取代 `frame_tick`；`autosell_host` 的锚点逻辑上移为 core `frame_host`；nav/walk 迁入「移动槽」并移除 `stop_all_tasks()`。此阶段满足现有全部消费者。
-- **阶段 2（条件触发）：已引入（状态转换场景）。** 2026-09-13 新增 `kFramePointLogicPre` 逻辑锚点（`MainProcess+0x40` 的 `bl STATE_NextStartProcess`，call_patch，非 Native Hook），用于把 `go_main_menu` / `enter_slot` / `create_slot` 的游戏状态机调用从 AndServer 工作线程收敛到游戏主线程逻辑相位；配套 `core/native/transition_dispatch.{h,cpp}` 提供单飞 + 同步等待 + 超时。背景：这些端点在 HTTP 线程直调 `GAMESTATE_SetState -> GAME_Exit` 与渲染线程并发破坏游戏无锁 `MEM` 分配器，导致 `MEM_Free` 死循环、帧计数冻结（真机 backtrace 取证）。
+- **阶段 2（条件触发）：已引入（状态转换场景）。** 2026-09-13 新增 `kFramePointLogicPre` 逻辑锚点（`MainProcess+0x40` 的 `bl STATE_NextStartProcess`，call_patch，非 Native Hook），用于把 `go_main_menu` / `enter_slot` / `create_slot` 的游戏状态机调用从 AndServer 工作线程收敛到游戏主线程逻辑相位；配套 `infra/frame/transition_dispatch.{h,cpp}` 提供单飞 + 同步等待 + 超时。背景：这些端点在 HTTP 线程直调 `GAMESTATE_SetState -> GAME_Exit` 与渲染线程并发破坏游戏无锁 `MEM` 分配器，导致 `MEM_Free` 死循环、帧计数冻结（真机 backtrace 取证）。
 - **阶段 3（最后手段）：未评估/未引入。**
 
 ## 5. 设计：统一帧派发宿主
@@ -163,10 +163,10 @@ GAMESTATE_Draw@0x1512b8
 ### 5.1 分层（两层，不新增第四套机制）
 
 ```
-core/native/frame_tick.{h,cpp}    唯一主线程帧注册表
+infra/frame/frame_task.{h,cpp}    唯一主线程帧注册表
         ▲ 注册回调（phase, fn(frame,ctx)->bool continue, ctx）
         │
-core/native/frame_host.{h,cpp}    锚点安装器（新，从 autosell_host 上移并泛化）
+infra/frame/frame_host.{h,cpp}    锚点安装器（新，从 autosell_host 上移并泛化）
         │  调用 frame_tick_dispatch(phase)
         ├─ draw 锚点：call_patch GAMESTATE_DrawPlay+0x74（复用既有）
         └─ logic 锚点：可选，LSPosed Native Hook GAMESTATE_Process（阶段 2）
@@ -239,8 +239,8 @@ void frame_motion_slot_clear();   // 对应 stop_all_tasks() 的移动语义
 
 | 步骤 | 内容 | 影响面 |
 |---|---|---|
-| 1 | 新建 `core/native/frame_task.{h,cpp}`：多点位 + `frame` 参数 + `bool continue` + 每点位去重 + 重入门禁；同步更新 host 测试 `tests/test_infra_data.cpp`（`should_dispatch` / `normalize_interval` / `is_due`）——已完成（2026-09-13） | core |
-| 2 | 新建 `core/native/frame_host.{h,cpp}`，锚点逻辑从 `autosell_host` 上移并泛化；删除 `autosell_host.{h,cpp}`——已完成（2026-09-13） | core + feature/autosell |
+| 1 | 新建 `infra/frame/frame_task.{h,cpp}`：多点位 + `frame` 参数 + `bool continue` + 每点位去重 + 重入门禁；同步更新 host 测试 `tests/test_infra_data.cpp`（`should_dispatch` / `normalize_interval` / `is_due`）——已完成（2026-09-13） | core |
+| 2 | 新建 `infra/frame/frame_host.{h,cpp}`，锚点逻辑从 `autosell_host` 上移并泛化；删除 `autosell_host.{h,cpp}`——已完成（2026-09-13） | core + feature/autosell |
 | 3 | nav/walk 迁入移动互斥槽 `g_motion_task` + `motion_task_start/stop`；删除 `stop_all_tasks()`——已完成（2026-09-13） | api/native |
 | 4 | 删除 `game_motion.{h,cpp}`（旧 FrameTaskManager）与 `frame_tick.{h,cpp}`——已完成（2026-09-13） | core |
 | 5 | 文档同步：`architecture.md` §1.4 / §2.1 / §2.2、`auto-sell.md` §3.5 / §9 / §11.2、本文件状态更新——已完成（2026-09-13） | docs |

@@ -78,7 +78,7 @@ native 侧按同一产品边界理解：`api/native/` 承载原版信息和原�
 | 层 | 文件 | 职责 | 禁止 |
 |---|---|---|---|
 | data | `game_symbols.h` / `symbol_registry.h` / `symbol_resolver.*` / `game_access.*` / `game_state.*` / `game_tiles.*` | 符号解析（VMA/ELF .dynsym）、偏移常量、`resolve_global`、跨域实体查询原语（member_or_null / lead_member / find_inventory_item / inventory_count / inventory_item_at / find_char_by_merc_slot）、**跨域遍历原语（for_each_bag_slot / pool_obj_valid）**、瓦片静态缓存、状态判定（game_in_world / ui_blocked / tutorial_*） | 构造业务 JSON；依赖 parse 层任何头 |
-| core | `core/native/game_json.*` / `core/native/game_nav.*` / `core/native/game_cache.*` / `core/native/frame_task.* / core/native/frame_host.*` / `core/native/game_ops_common.*` / `core/native/qol_log.*` | json_escape、BFS 寻路、帧缓存（12 槽表驱动）、统一帧任务管理器（§2.1）、op_ok/op_err 响应信封、统一日志单写者（`docs/development/logging.md`） | 注入游戏语义名称 |
+| core | `game/json/game_json.*` / `game/nav/game_nav.*` / `core/native/game_cache.*` / `infra/frame/frame_task.* / infra/frame/frame_host.*` / `game/ops/game_ops_common.*` / `infra/log/qol_log.*` | json_escape、BFS 寻路、帧缓存（12 槽表驱动）、统一帧任务管理器（§2.1）、op_ok/op_err 响应信封、统一日志单写者（`docs/development/logging.md`） | 注入游戏语义名称 |
 | parse 域 | `game_character/party/inventory/world/quest/ui/dialog/shop/save/system` | build_*/data_* 读构造、data_op_* 写操作 | 域间水平互调（仅 system 聚合方向向下 + 分发器特例，见 §1.2） |
 | patch | `feature/patch/game_patch.*` / `game_ptr_hook.h` + Kotlin `patch/` | 注入/修改补丁域：IAP 屏蔽、沉浸模式、堆叠上限、craft 注入、recover、migrate_stack（见 §2.5） | — |
 | service | Kotlin `service/` | inject* 名称注入、快照 attach、OP 编排（LogFile.op + **OP 门禁**）、配置下发 native | 解析 HTTP 参数；直接读内存 |
@@ -112,23 +112,23 @@ data 层 → 仅 STL
 | 文件 | 层 | 职责 | 依赖 |
 |---|---|---|---|
 | `bridge/native/gamebridge*.cpp` | bridge | **JNI 薄层**：114 个 `Java_*` 导出，按生命周期、数据读取、操作、UI 和 feature 分组，仅参数传递 + 字符串转换，无业务逻辑 | 各层头 |
-| `bridge/native/gamebridge_log.cpp` | bridge | **日志 JNI 薄层**：`nativeQolLogInit` / `nativeQolLogWrite` / `nativeQolLogSetDebugEnabled` 参数转换，转发 `core/native/qol_log.*` | qol_log.h |
+| `bridge/native/gamebridge_log.cpp` | bridge | **日志 JNI 薄层**：`nativeQolLogInit` / `nativeQolLogWrite` / `nativeQolLogSetDebugEnabled` 参数转换，转发 `infra/log/qol_log.*` | qol_log.h |
 | `game_symbols.h` | data | **常量单一来源**：结构体偏移、VMA、函数签名。含逆向来源注释 | 无 |
 | `symbol_registry.h` | data | 符号登记表（SYM 宏名 → VMA/解析来源），check_symbols.py 校验清单 | 无 |
 | `symbol_resolver.*` | data | ELF `.dynsym` 符号名动态解析 + `.rela.dyn` RELATIVE 反查（GOT 槽），VMA 仅兜底 | game_symbols.h |
 | `game_access.*` | data | `/proc/self/maps` 基址定位 + `resolve_global()` 符号解析 + `fn_*` 函数指针 + `bridge_init()` | game_symbols.h |
 | `game_state.*` | data | **状态判定 + 跨域查询原语 + 遍历原语 + 离线程只读原语**：game_in_world / ui_blocked / tutorial_*、member_or_null / lead_member / find_char_by_merc_slot / find_inventory_item / inventory_count / inventory_item_at、**for_each_bag_slot / pool_obj_valid**、**char_max_hp/char_max_mp（直读属性缓存）/ char_stat_total（直读 C_STAT_* 求和）/ char_next_exp_cached + char_next_exp_cache_start（kFramePointLogicPre 游戏线程帧缓存）** | 仅 STL |
 | `game_tiles.*` | data | 静态瓦片矩阵（64×64 通行矩阵，assets maps/tiles.json 经 JNI 传入） | 仅 STL |
-| `core/native/game_json.*` | core | 纯 JSON 工具：json_escape | 仅 STL |
-| `core/native/game_nav.*` | core | BFS 寻路（nav_bfs / nav_bfs_multi，基于瓦片矩阵） | game_state.h（lead_member） |
+| `game/json/game_json.*` | core | 纯 JSON 工具：json_escape | 仅 STL |
+| `game/nav/game_nav.*` | core | BFS 寻路（nav_bfs / nav_bfs_multi，基于瓦片矩阵） | game_state.h（lead_member） |
 | `core/native/game_cache.*` | core | **帧缓存层**：12 槽表驱动（惰性/预取双模式），对外 data_*_json 接口 | 域文件 build_* 函数指针 |
-| `core/native/frame_task.* / core/native/frame_host.*` | core | **统一帧任务管理器**（多点位 + 句柄 API，§2.1）+ 锚点安装（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase） | game_state.h / game_system.h / call_patch |
-| `core/native/save_enter.*` | core | 进入存档回调：读档/新档发起点 call_patch 标记 + 帧检测 world 就绪触发一次（§2.1） | frame_task.h / call_patch / game_state.h |
-| `core/native/save_exit.*` | core | 退出存档回调：world→主菜单发起点 call_patch（GAMESTATE_SetState+0xb0 bl GAME_Exit）触发一次 | call_patch / game_access |
-| `core/native/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
-| `core/native/qol_log.*` | core | **统一日志单写者**：行格式化、logcat + 文件发射、debug 运行时门控、逐帧节流原语；格式与规则唯一权威见 `docs/development/logging.md` | 仅 STL（Android 时含 `<android/log.h>`） |
-| `core/native/game_variant.*` | core | **游戏变体识别**：按挂载 `libgame.so` 的 md5 查离线表（`scripts/data/game_variant_table.py` → `game/variants/game_variant_table.inc`）得系列/版本/能力位；未命中回退扫 `WH4JRN01`（§4.1） | 仅 STL + 生成的表 |
-| `core/native/game_feature.*` | core | **功能抽象层**：`game_feature_state()` 把版本能力翻译为 有无/当前是否可用（可用性由上层注入回调）（§4.1） | game_variant.h + 仅 STL |
+| `infra/frame/frame_task.* / infra/frame/frame_host.*` | core | **统一帧任务管理器**（多点位 + 句柄 API，§2.1）+ 锚点安装（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase） | game_state.h / game_system.h / call_patch |
+| `infra/save/save_enter.*` | core | 进入存档回调：读档/新档发起点 call_patch 标记 + 帧检测 world 就绪触发一次（§2.1） | frame_task.h / call_patch / game_state.h |
+| `infra/save/save_exit.*` | core | 退出存档回调：world→主菜单发起点 call_patch（GAMESTATE_SetState+0xb0 bl GAME_Exit）触发一次 | call_patch / game_access |
+| `game/ops/game_ops_common.*` | core | op_ok / op_err 响应信封（含 frame_cache_force_refresh）+ 写操作跨域共享 helper | game_cache.h |
+| `infra/log/qol_log.*` | core | **统一日志单写者**：行格式化、logcat + 文件发射、debug 运行时门控、逐帧节流原语；格式与规则唯一权威见 `docs/development/logging.md` | 仅 STL（Android 时含 `<android/log.h>`） |
+| `game/variants/game_variant.*` | core | **游戏变体识别**：按挂载 `libgame.so` 的 md5 查离线表（`scripts/data/game_variant_table.py` → `game/variants/game_variant_table.inc`）得系列/版本/能力位；未命中回退扫 `WH4JRN01`（§4.1） | 仅 STL + 生成的表 |
+| `game/feature/game_feature.*` | core | **功能抽象层**：`game_feature_state()` 把版本能力翻译为 有无/当前是否可用（可用性由上层注入回调）（§4.1） | game_variant.h + 仅 STL |
 | `core/native/module_save.*` | core | 统一原版完整保存入口：participant prepare、调用原版 `SAVE_Save`、成功 commit、失败 abort；线程局部防重入 | game_access / game_state |
 | `api/native/game_character.*` | API native 域 | 角色：member_json / build_player_json / build_skills_json + 战斗/成长写操作（cast/attack/stop_combat/set_experience/set_level/add_experience/set_status_point/add_stat/set_auto_attack/set_skill_usage/learn_action/set_hp/set_mp/set_attr/stat_reset/skill_reset） | data + 引擎 |
 | `api/native/game_party.*` | API native 域 | 队伍：build_party_json / build_mercenaries_json + include/exclude/discharge/withdraw/switch_player/party_swap | data + 引擎 |
@@ -146,10 +146,10 @@ data 层 → 仅 STL
 | `feature/push_all/*` | feature | **推怪（推动增强）**：patch `CHAR_Move` 推动分支的两个 blocker 资格闸门（队伍闸门 BL 重定向 + 站立闸门 NOP），由配置开关 `pushAllEnabled` 控制安装/还原；fail-closed 指令字校验 + 部分失败回滚 | data + core（`call_patch`） |
 | `feature/ui/module_text.*` | feature | **模块自定义文本层**：独占 `MEMORYTEXT_GetText` 单一 hook，按「text id + 窗口作用域」返回模块自有文本；charinfo 标签与合成器配方按钮文案的公共设施（§2.7） | data + core + `native_hook_func()` |
 | `feature/extension_bag/game_ui_virtbag.*` | feature | 扩展背包运行时：状态、投影、拖拽、绘制、生命周期与扩展背包操作 | data + core + patch |
-| `feature/extension_bag/extension_bag_port.cpp` | feature adapter | 将扩展背包内部实现适配为 `core/native/extension_bag_port.h` 稳定端口 | extension_bag runtime |
+| `feature/extension_bag/extension_bag_port.cpp` | feature adapter | 将扩展背包内部实现适配为 `contracts/extension_bag_port.h` 稳定端口 | extension_bag runtime |
 | `feature/extension_bag/extension_bag_context.h` | feature internal | 持久化拆分使用的内部上下文访问点，不对外形成 API/core 契约 | extension_bag runtime |
 | `feature/extension_bag/extension_bag_persistence.cpp` | feature persistence | 通过内部上下文执行状态 JSON 的加载、保存和 pending 事务隔离恢复 | feature context + model |
-| `feature/extension_bag/extension_bag_geometry.*` | feature geometry | 扩展背包布局门禁及控件命中适配；纯网格计算委托 `core/native/grid_geometry.*` | core geometry + game control data |
+| `feature/extension_bag/extension_bag_geometry.*` | feature geometry | 扩展背包布局门禁及控件命中适配；纯网格计算委托 `contracts/grid_geometry.*` | core geometry + game control data |
 | `feature/extension_bag/extension_bag_api.cpp` | feature API facade | 对外扩展背包 JSON/操作入口的稳定包装，不承载锁内业务实现 | extension bag internal API |
 | `feature/save_backup/save_backup_bundle.*` | feature 纯逻辑 | 存档管理器备份纯逻辑：`.qol_save` bundle 组装/解析（大端+CRC32）、SHA-256/MD5/CRC32/base64 原语、极简扁平 metaJson 提取、MSAV sidecar 容器最小校验/重定槽；纯 STL，编入 host 单测 | 无（纯 STL） |
 | `feature/save_backup/save_backup.*` | feature | **存档管理器备份**：`.qol_save` 导出（checksum 去重）/导入（两段事务 + `.rollback/` 回滚，sidecar 直改第 6 字节 slot + 重算尾部 CRC32）/列表/删除；返回体即 HTTP 响应 JSON | game_access + core（op_err）+ save_backup_bundle |
@@ -171,7 +171,7 @@ data 层 → 仅 STL
 
 ### 2.1 统一帧任务管理器（frame_task + frame_host，2026-09-13）
 
-**位置**：`core/native/frame_task.{h,cpp}`（管理器）+ `core/native/frame_host.{h,cpp}`（锚点安装）。**动机**：逐帧操作（移动/寻路/自动出售扫描）需要「任意线程可注册、回调只在游戏主线程帧周期执行、可多任务、可查询」。旧 `FrameTaskManager`（`game_motion.{h,cpp}`，后台线程轮询 + 单任务 clear）与 `frame_tick`（单注册表、无句柄）已删除，由本管理器取代。
+**位置**：`infra/frame/frame_task.{h,cpp}`（管理器）+ `infra/frame/frame_host.{h,cpp}`（锚点安装）。**动机**：逐帧操作（移动/寻路/自动出售扫描）需要「任意线程可注册、回调只在游戏主线程帧周期执行、可多任务、可查询」。旧 `FrameTaskManager`（`game_motion.{h,cpp}`，后台线程轮询 + 单任务 clear）与 `frame_tick`（单注册表、无句柄）已删除，由本管理器取代。
 
 **多触发点位**：`enum : FramePointId { kFramePointRenderPre = 0, kFramePointLogicPre, kFramePointCount };` 每点位独立按帧去重；当前安装 `kFramePointRenderPre`（渲染开始前）与 `kFramePointLogicPre`（逻辑帧开始前）。两锚点由 `frame_host` **全成或全退**安装，`frame_host_anchors_installed()` 供派发器 fail-fast。
 
@@ -192,7 +192,7 @@ data 层 → 仅 STL
 
 **移动互斥槽**（`game_world_movement.inc`）：`g_motion_task` + `motion_task_start/stop`，nav/walk 共用，注册即替换；`stop_all_tasks()` 已删除，`walk_stop` 改调 `motion_task_stop()`，不再影响其它帧任务（自动出售）。
 
-**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）、进入存档回调（`save_enter_tick`，`core/native/save_enter.cpp`）、角色升级经验游戏线程缓存（`char_next_exp_tick`，`game_state.cpp`，`kFramePointLogicPre` 常驻）；退出存档回调（`save_exit`）经 call_patch 触发，不走帧任务。
+**现有消费者**：nav（`nav_task_tick`）、walk（`walk_task_tick`）、自动出售扫描（`autosell_tick`，`feature/autosell/autosell_scan.cpp`）、进入存档回调（`save_enter_tick`，`infra/save/save_enter.cpp`）、角色升级经验游戏线程缓存（`char_next_exp_tick`，`game_state.cpp`，`kFramePointLogicPre` 常驻）；退出存档回调（`save_exit`）经 call_patch 触发，不走帧任务。
 
 **真机验证（2026-09-13）**：锚点安装成功；world 态 move_to / walk_dir / stop_move 逐帧驱动生效；无崩溃。
 
@@ -398,9 +398,9 @@ uv run python scripts/maintenance/check_symbols.py [libgame.so 路径]
 
 ### 4.1 游戏变体与功能识别（2026-09-15）
 
-- `core/native/game_variant.*`：用挂载的 `libgame.so` **文件校验值（md5）** 查离线表，得到 `{series(原版/大修/monster), version_label, capabilities, md5, known}`；未命中时回退为"可执行映射中扫 `WH4JRN01` → monster"，并记日志。
+- `game/variants/game_variant.*`：用挂载的 `libgame.so` **文件校验值（md5）** 查离线表，得到 `{series(原版/大修/monster), version_label, capabilities, md5, known}`；未命中时回退为"可执行映射中扫 `WH4JRN01` → monster"，并记日志。
 - 对照表由 `scripts/data/game_variant_table.py` 从 `apk/game-apk/` + `apk/game-apk/history/` 的 APK/xapk 生成（提取 arm64 库 → md5/sha256/体积 + ELF 事实（隐藏可执行段、`WH4JRN01`）→ 文件名解析系列与版本 → 合并脚本内 `CURATION` 的语义能力位）。当前 19 条，md5 全唯一。
-- `core/native/game_feature.*`：把版本号翻译成"有无某功能 / 该功能当前是否可用"——`game_feature_state()` 返回 `unknown/unsupported/available/unavailable`（构建能力 × 运行时可用性，可用性由上层用 `game_feature_set_usability_fn()` 注入）。
+- `game/feature/game_feature.*`：把版本号翻译成"有无某功能 / 该功能当前是否可用"——`game_feature_state()` 返回 `unknown/unsupported/available/unavailable`（构建能力 × 运行时可用性，可用性由上层用 `game_feature_set_usability_fn()` 注入）。
 - 当前用途：存档导入时判断目标变体是否具备个人仓库/伴生文件机制，并对 wh4 逐个做"本机可解密"校验（见 `features/save-backup.md` §5 第 7 步）。
 - 启动日志一行：`game_variant: series=%s version=%s caps=0x%x md5=%s known=%d`（必须在 `qol_log_init()` 之后调用，否则只进 logcat、不落文件）。
 

@@ -18,7 +18,7 @@
 
 | 组件 | 文件 | 职责 |
 |---|---|---|
-| native 单写者 | `module/app/src/main/cpp/core/native/qol_log.{h,cpp}` | 格式化、logcat + 文件发射、调试门控、节流原语 |
+| native 单写者 | `module/app/src/main/cpp/infra/log/qol_log.{h,cpp}` | 格式化、logcat + 文件发射、调试门控、节流原语 |
 | JNI 薄层 | `module/app/src/main/cpp/bridge/native/gamebridge_log.cpp` | 仅参数转换（`nativeQolLogInit` / `nativeQolLogWrite` / `nativeQolLogSetDebugEnabled`） |
 | Kotlin 门面 | `module/app/src/main/java/com/inotia4/qol/LogFile.kt` | 经 JNI 转发 native；不再自己持有文件句柄 |
 
@@ -229,7 +229,7 @@ uv run python scripts/verification/check_log_policy.py [--warn-only]
 
 | 规则 | 性质 | 内容 |
 |---|---|---|
-| R1 唯一出口 | 违规 | native `module/app/src/main/cpp/**` 除 `core/native/qol_log.cpp` 与 `tests/stubs/android/log.h` 外不得出现 `__android_log_print`；Kotlin `module/app/src/main/java` 除 `LogFile.kt` 外不得出现 `android.util.Log` |
+| R1 唯一出口 | 违规 | native `module/app/src/main/cpp/**` 除 `infra/log/qol_log.cpp` 与 `tests/stubs/android/log.h` 外不得出现 `__android_log_print`；Kotlin `module/app/src/main/java` 除 `LogFile.kt` 外不得出现 `android.util.Log` |
 | R2 旧 tag 清零 | 违规 | native 与 Kotlin 字符串字面量中不得出现 §11 的 23 个废弃 tag（`Inotia4Qol`、文件常量 `inotia4-export.log` 允许保留）；只按「整串等于 tag」或「`tag:` 旧前缀」判定，避免把同名 Kotlin 类/标识符（`ApiServer`/`OpController` 等）误报 |
 | R3 domain 词表一致 | 违规 | Kotlin `LogDomain` token 集合 == native `kDomainTable` token 集合 |
 | R4 逐帧无高级别 | 软告警 | `*_tick`/`*_process`/`*_draw*`/`*_render*`（含 frame_host 的 `render_pre_wrapper`/`logic_pre_wrapper`）函数体与 `frame_task_add(` 回调内出现 I/W/E；别名宏（`VIRTBAG_LOG`/`VIRTBAG_LOG_WARN`/`VIRTBAG_LOG_ERROR`/`MOVE_LOG`/`SETTINGS_LOG`/`SB_LOG`/`SB_UI_LOG`/`EXP_LOG`/`CUSTOM_LOG`/`AUTOSELLUI_LOG`/`TILES_LOG`）按其 `QOL_LOG_*` 级别展开后再判定。通用 `*_wrapper`/`*_gate` 后缀已移除（事件驱动、非逐帧） |
@@ -240,7 +240,7 @@ uv run python scripts/verification/check_log_policy.py [--warn-only]
 统一日志系统的**硬性收敛已完成，R4/R5 软告警收尾进行中**（与 `../planning/backlog.md`
 「统一日志系统代码迁移收尾」条目同一状态）：
 
-- **native 单写者**：`core/native/qol_log.cpp` 是唯一直接使用 `__android_log_print` 与打开
+- **native 单写者**：`infra/log/qol_log.cpp` 是唯一直接使用 `__android_log_print` 与打开
   日志文件的模块，格式化、节流、调试门控都在此实现。其他 native 调用点统一走 `QOL_LOG_*` 宏。
 - **Kotlin 经 JNI 转发**：`LogFile.kt`（P1 重写）不再自持 `BufferedWriter`/文件句柄，所有输出经
   `nativeQolLogWrite` 进入 native 单写者，行格式与 native 完全一致；`LogFile.kt` 是 Kotlin 侧

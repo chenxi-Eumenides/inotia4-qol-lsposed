@@ -104,7 +104,7 @@ u32 crc32                      # 覆盖此前全部字节
 
 | 层 | 内容 |
 |---|---|
-| native 符号 | `game_symbols.h` + `symbol_registry.h` + `game_access.{h,cpp}` + `game_access_globals.inc`：`F_HUBSAVE_GET_KEY_VMA=0x9001c`、`F_SAVE_LOAD_DATA_VMA=0x129260`、`F_MEM_FREE_VMA=0xa8f18`、`F_ENCRYPT_PROCESS2_VMA=0xa413c` |
+| native 符号 | `game_symbols.h` + `symbol_registry.h` + `game/access/game_access.{h,cpp}` + `game/access/game_access_globals.inc`：`F_HUBSAVE_GET_KEY_VMA=0x9001c`、`F_SAVE_LOAD_DATA_VMA=0x129260`、`F_MEM_FREE_VMA=0xa8f18`、`F_ENCRYPT_PROCESS2_VMA=0xa413c` |
 | native 纯逻辑 | `feature/save_backup/save_backup_bundle.{h,cpp}`：bundle 组装/解析（大端+CRC32）、SHA-256（FIPS 180-4）、MD5（RFC 1321，存档目录名 hex(MD5(key))）、CRC32（IEEE，与 `java.util.zip.CRC32` 一致）、RFC4648 base64、极简扁平 metaJson 字段提取、MSAV sidecar 容器最小校验/重定槽；纯 STL，编入 host 单测 |
 | native 功能 | `feature/save_backup/save_backup.{h,cpp}`：`save_backup_init` / `save_backup_list_json` / `save_backup_export_json` / `save_backup_import_json` / `save_backup_delete_json`（返回体即 HTTP 响应 JSON；导出去重、导入两段事务 + `.rollback/` 回滚、sidecar 由 native 直改第 6 字节 slot + 重算尾部 CRC32 后 primary/last-good 双写）；`save_backup_slot_delete_hook_install_if_ready`（游戏删档回调 GOT 槽 PtrHook，删档后同步清该槽 sidecar） |
 | JNI | `bridge/native/gamebridge_operations.cpp` + `NativeBridge.kt`：`nativeSaveBackupInit(dataDir, externalDir)` / `nativeBackupList()` / `nativeBackupExport(slot)` / `nativeBackupImport(checksum, slot)` / `nativeBackupDelete(checksum)` |

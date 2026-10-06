@@ -1,7 +1,7 @@
 # 存档生命周期回调（进入/退出）
 
 > 状态：**进入回调已实现（2026-09-13）；退出回调已实现但未真机验证（NOT_ACCEPTED）** ｜ 日期：2026-09-13 ｜ 范围：进入存档（读档/新档）加载完成后触发一次；退出存档（world → 主菜单）触发一次。
-> 相关：`docs/development/architecture.md` §2 / §2.1；`core/native/save_enter.{h,cpp}`、`core/native/save_exit.{h,cpp}`、`core/native/frame_task.{h,cpp}`、`core/native/frame_host.{h,cpp}`。
+> 相关：`docs/development/architecture.md` §2 / §2.1；`infra/save/save_enter.{h,cpp}`、`infra/save/save_exit.{h,cpp}`、`infra/frame/frame_task.{h,cpp}`、`infra/frame/frame_host.{h,cpp}`。
 
 ## 1. 需求
 
@@ -34,7 +34,7 @@
 - 消费：`pending` 以 `std::atomic<bool>` 保存，`should_fire` 为真时 `exchange(false)` 消费一次；回调列表持锁快照、**锁外**逐个调用（主线程）。
 - 触发时打印一条 INFO 日志（domain=save，单一 tag `Inotia4Qol`，含回调数量）；`g_pending.exchange` 保证每次 pending 只触发一次，非逐帧，故保持 INFO，不每帧打印。
 
-## 5. API（`core/native/save_enter.h`）
+## 5. API（`infra/save/save_enter.h`）
 
 ```cpp
 using SaveEnterFn = void (*)(void* ctx);
@@ -71,7 +71,7 @@ bool save_enter_host_install_if_ready();               // 安装两个发起点�
 - wrapper：`save_exit_fire(); if (fn_game_exit) fn_game_exit();`——**先派发回调、再复刻原 `GAME_Exit`**（回调时 world 数据仍有效且保证执行）。
 - 未就绪/失败 fail-closed，不改写字节；`std::atomic` exchange 幂等。
 
-### 7.3 API（`core/native/save_exit.h`）
+### 7.3 API（`infra/save/save_exit.h`）
 
 ```cpp
 using SaveExitFn = void (*)(void* ctx);

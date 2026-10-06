@@ -35,7 +35,7 @@ wrapper 在游戏主线程 `CHAR_Move` 调用链内执行，只读 `C_TYPE` 并�
 
 `config.json`、`POST /api/config/set` 和设置页开关是同一份配置的三个入口：
 
-`ModuleConfig.pushAllEnabled` → `ConfigApiService.applyToNative()`（启动期）或 `applyOnChange()`（变更期）→ `NativeBridge.nativeSetPushAllEnabled` → JNI `gamebridge_push_all.cpp` → `feature/push_all/push_all.cpp` → `core/native/call_patch`。
+`ModuleConfig.pushAllEnabled` → `ConfigApiService.applyToNative()`（启动期）或 `applyOnChange()`（变更期）→ `NativeBridge.nativeSetPushAllEnabled` → JNI `gamebridge_push_all.cpp` → `feature/push_all/push_all.cpp` → `patch/call_patch`。
 
 设置页路径：`ModuleConfigUiBridge.toggleConfig("pushAllEnabled")`（与其它开关同构，只允许翻转布尔项）。开关为持久化配置，启动期由 `applyToNative()` 重新下发，状态跨进程重启保持。
 

@@ -112,7 +112,7 @@ inline hook 若需重定位一条 26 位 `b`，跨 ±128MB 的偏移会失效。
 
 `POST /api/config/set {"simpleModeEnabled":true}` 与设置页走的是同一条链路。
 
-其余接入点：`NativeBridge.kt` external 声明、`ModuleConfig.kt`（默认值 / 读取 / apply / toJson / 缺字段补写检查）、`ConfigController.kt`（old 值捕获）、`core/native/qol_log.{h,cpp}` 的日志域 `kSimpleMode`（token `simple_mode`）+ Kotlin `LogDomain.SIMPLE_MODE`。
+其余接入点：`NativeBridge.kt` external 声明、`ModuleConfig.kt`（默认值 / 读取 / apply / toJson / 缺字段补写检查）、`ConfigController.kt`（old 值捕获）、`infra/log/qol_log.{h,cpp}` 的日志域 `kSimpleMode`（token `simple_mode`）+ Kotlin `LogDomain.SIMPLE_MODE`。
 
 ## 6. 失败与降级语义
 

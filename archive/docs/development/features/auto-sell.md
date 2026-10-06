@@ -88,7 +88,7 @@
 - 面板范式：`PtrHook` 覆盖按钮 ExecuteProc（`game_ui_settings_injection.inc:12-29`）→ `fn_ui_set_popup_process_info(1, state_id)`（`:6-10`）→ 改写 PopupState 死条目 5 回调（`:75-94`）→ PROCESS 渲染 + EVENT 触摸（`game_ui_settings_panel.inc:72-116,152-192`）→ 配置反调 `game_ui_settings_config.inc:1-62`。
 - 空闲 PopupState 死条目：设置占 `F_PANEL_UNK1_ENTER`（GEMSHOP）、存档占 `F_PANEL_UNK2_ENTER`（GOODS）（`save-backup.md:118`）。
 - 可复用控件/绘制：`game_ui_kit.h:16-63` + `game_ui_components.h`。
-- 帧派发：统一帧任务管理器（core/native/frame_task.* + frame_host.*，architecture.md §2.1）在主线程渲染开始前（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase）派发；旧 FrameTaskManager（后台线程、单任务）已删除。
+- 帧派发：统一帧任务管理器（infra/frame/frame_task.* + frame_host.*，architecture.md §2.1）在主线程渲染开始前（GAMESTATE_DrawPlay+0x20 bl MAP_DrawBase）派发；旧 FrameTaskManager（后台线程、单任务）已删除。
 - 扩展袋：原版袋 `0..5`（5=任务袋，`virtual_bag_state.h:20-26`）；扩展逻辑袋 5 个（`:16`）；页签动态定位 `extension_bag_runtime.inc:110-187,138-140,169-174`。
 
 ### 3.6 外部依赖：属性范围 feature（已实现，已接线）
@@ -197,10 +197,10 @@ section `autosell` v2 payload（特殊类型由位掩码改为**类型名集合*
 
 ### 4.5 扫描与执行
 
-- **线程约束（强制）**：扫描与处置必须在游戏主线程执行；回调由统一帧任务管理器（`core/native/frame_task` + `frame_host`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`）派发；不得在 detached 线程直接调游戏函数。
+- **线程约束（强制）**：扫描与处置必须在游戏主线程执行；回调由统一帧任务管理器（`infra/frame/frame_task` + `frame_host`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`）派发；不得在 detached 线程直接调游戏函数。
 - 任务生命周期：**全局开关武装 + 进档注册 + 退档删除**——`nativeSetAutoSellEnabled` → `autosell_set_global_enabled` 置位/清位武装标志并同步任务；进入存档（读档/新档）回调 `autosell_register_save_enter` 按当前槽加载 sidecar 配置后同步任务，退出存档（world → 主菜单）回调 `autosell_register_save_exit` 清位后**无条件删除任务（兜底，不依赖存档配置）**。注册条件 = 已武装 && 已进档 && 存档配置 `config.enabled`（启动/主菜单不注册，存档开关关闭也不注册）；`autosell_apply_config` 写运行时配置，**仅存档总开关切换时**才同步任务。`autosell_tick` 顶部对全局开关与 `config.enabled` 双重防御；不常驻空转。
 - 回调**无跨帧状态**：每次调用现取 `autosell_get_runtime_config()`，按规则扫描；不缓存、不在 tick 内读盘。
-- 已接线（2026-09-13）：进入存档（读档/新档）由 `core/native/save_enter` 回调触发一次，按 `current_save_slot()` 读取 sidecar `autosell`（`autosell_store_ensure_loaded`）应用到运行时配置，再同步扫描任务。
+- 已接线（2026-09-13）：进入存档（读档/新档）由 `infra/save/save_enter` 回调触发一次，按 `current_save_slot()` 读取 sidecar `autosell`（`autosell_store_ensure_loaded`）应用到运行时配置，再同步扫描任务。
 - 单次扫描（原版袋 `0..4` + 扩展 5 袋逐槽）：
   1. 取物品指针；空槽跳过。
   2. 分类：装备 / 宝石 / 特殊类型。
@@ -331,12 +331,12 @@ section `autosell` v2 payload（特殊类型由位掩码改为**类型名集合*
 - **隐式 preview 门**：`126298 cmp x23,#0x666` —— `x23` 不是 ABI 参数、不在 prologue 保存；直调需 asm shim 保证 `x23!=0x666`，否则只算价不删除。
 - 唯一 `bl` 调用点 `UIEquip_OKDestroyItem@0xb83d0`；`0xb83d0` 才读面板 `desc_type/bag/ctrl`（`G_UIEQUIP_PANEL_VMA` 等），**直调它会误用残留面板态**。
 - 直调 `0x1261c4` 不经过 `0xb83d0`，**不触发 H-23，也不与 R-55 冲突**；但只覆盖物理袋 0..4、无 `IsNoSell`、绕过 H-04（扩展袋物品在 `g_inven` 为空指针直接早退）。
-- **结论**：首选不走 `0x1261c4`；改用模块等价原语（`IsNoSell` → 取价 → `INVEN_AddMoney` → `INVEN_RemoveItem`(H-04)），同时覆盖物理+扩展袋，且已被 API 真机路径使用；销毁兜底 `INVEN_RemoveItem`。扩展袋处置走 `extension_bag_sell_price` + `extension_bag_remove_native_item` + `extension_bag_sync_projected_slot`（`core/native/extension_bag_port.h:29-36`）。
+- **结论**：首选不走 `0x1261c4`；改用模块等价原语（`IsNoSell` → 取价 → `INVEN_AddMoney` → `INVEN_RemoveItem`(H-04)），同时覆盖物理+扩展袋，且已被 API 真机路径使用；销毁兜底 `INVEN_RemoveItem`。扩展袋处置走 `extension_bag_sell_price` + `extension_bag_remove_native_item` + `extension_bag_sync_projected_slot`（`contracts/extension_bag_port.h:29-36`）。
 
 ### 11.2 定时宿主（R4）
 
 - `FrameTaskManager` **不可用**：回调运行在后台线程（`game_motion.cpp:51,75-98`），且 `frame_task_register` 会 `g_tasks.clear()`（`:45`）顶掉移动/寻路任务。（现状：旧 FrameTaskManager 已删除，自动出售经统一帧任务管理器注册到 kFramePointRenderPre，与移动槽互不影响。）
-- 截至验证时**不存在世界态通用每帧宿主**；后由并行功能补齐统一帧任务管理器（`core/native/frame_task.{h,cpp}` + `frame_host.{h,cpp}`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`，真机已验证每帧派发）。
+- 截至验证时**不存在世界态通用每帧宿主**；后由并行功能补齐统一帧任务管理器（`infra/frame/frame_task.{h,cpp}` + `frame_host.{h,cpp}`，锚点 `GAMESTATE_DrawPlay+0x20` 的 `bl MAP_DrawBase`，真机已验证每帧派发）。
 - **结论（已实现）**：扫描任务在「全局开关已武装 && 已进档 && 存档配置 `config.enabled`」时注册（`interval=60`，`frame_task` 负责节流）；无手写节流、无单次立即执行（`nativeAutoSellRunNow` 保留签名但不再单独触发扫描）。进档时按 sidecar 配置由 `save_enter` 回调自动应用（`autosell_register_save_enter`），存档开关变化由 `autosell_apply_config` 同步任务。
 - 未决：背包面板打开时 `g_gamestate==0` 未真机证实（不影响「不用 FrameTaskManager」的结论）。
 

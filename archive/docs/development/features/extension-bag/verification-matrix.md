@@ -505,7 +505,7 @@
 - **操作**：启用态构造 canonical 数量（重点 199）的可堆叠物品 → 关闭堆叠上限 → 核对所有读写/操作按低 7 位视图（读 71、上限 99、`a` 位段不变）→ 关闭态执行消耗/合并 → 重新启用 → 核对重开读回完整 canonical 值。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`stackLimitEnabled`；操作前记录目标物品 `+0x10` 原始值与 sidecar JSON 副本。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（读侧模式视图解码）、`INVEN_ConsumeItem@0x1047bc+0x104818/0x104844/0x104858`（b 递减）、`INVEN_MoveItem@0x104934`（合并写 b）。
-- **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_get_cumulate_count`（`effective_read_count` 模式视图）、`core/native/stack_codec.h:effective_read_count/effective_write_count/effective_clamp/effective_view_count`、`native_inventory_hook.cpp:consume_item_wrapper`（借位预置仅启用态）、`extension_bag_transaction.inc:move_extension_to_extension_locked`（合并按视图、descriptor 回写 canonical）、`extension_bag_equip.inc:consume_extension_item_after_native_locked`。
+- **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_get_cumulate_count`（`effective_read_count` 模式视图）、`plugins/stack_limit/stack_codec_impl.h:effective_read_count/effective_write_count/effective_clamp/effective_view_count`、`native_inventory_hook.cpp:consume_item_wrapper`（借位预置仅启用态）、`extension_bag_transaction.inc:move_extension_to_extension_locked`（合并按视图、descriptor 回写 canonical）、`extension_bag_equip.inc:consume_extension_item_after_native_locked`。
 - **共享状态读写**：关闭态模块侧写点只改 payload b 位；descriptor `count` 与 sidecar 恒为 canonical；读档路径不参与本卡（见 VM-35）。
 - **必须保持的不变式(引 R-xx)**：关闭态有效数量 = `b` = `count mod 128`、上限 99（R-47/决策 b）；关闭态任何写点不得改写 `a`（bits22–24）与 bits0–21（R-45/R-47）；重新开启后经 S2 解码读回完整 canonical（R-45/R-47）；canonical 199 关闭态读 71、关闭态消耗 1 后重开读 198、关闭态写 99 后重开读 227（128a+99）；非可堆叠类别位段不受影响（R-46）。
 - **失败语义**：关闭态 b≤1 的堆消耗到空按原版删除（有效数量 0，不预置借位）；关闭态合并超 99 按上限拒绝/分堆，不得出现视图 >99；模式切换瞬间不得出现反向同步或 `a` 清零。

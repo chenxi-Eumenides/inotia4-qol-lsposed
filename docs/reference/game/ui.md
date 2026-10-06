@@ -98,6 +98,10 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 +0x69 u8   Enabled       使能标志（ControlButton_Create 置 1）
 ```
 
+**文本区有界，禁用 set_text 装长文本**：`ControlButton_SetText`（0xaa7dc，反汇编）先把 `data+0x00` 起 0x20 字节清零，再 `strcpy(data, text)`（无界）。文本含 NUL 超过 0x20 字节就会覆盖 `data+0x20` 的 ExecuteProc；绘制不读该槽（显示正常），但点击释放时 `ControlButton_ControlEventProc` 间接调用被文本污染的槽 → `SIGBUS BUS_ADRALN`（跳垃圾地址）。按钮与标签都由 `ControlButton_Create` 创建、共用这段 0x20 内联缓冲，因此：
+- 任何控件文本（含 NUL）必须 ≤ 0x20 字节；`host/ui_adapter.cpp` 的 `set_text` 对超长文本 fail-closed（`kQolErrBlocked`），不调用原生、不静默截断。
+- 需要更长的显示文本时走 `QolUiComponents::draw_control_text`（按控件绝对原点直接用 `GRPX_DrawStringWithFont` 绘制传入字符串），不得写入按钮内联文本。
+
 ### 3.3 控件创建（反汇编实证）
 
 `ControlButton_Create`（0xaa710）：`ControlObject_AddControlObject(parent, type=3)` → `ControlObject_SetControlProc(ControlButton_ControlEventProc)` → `SetUserType(1)` → `MEM_Malloc(0x78)` → `ControlObject_SetData` → 初始化 ExecuteProc(来自 x1 参数)/DrawType=0/DrawID=SubID=-1/State=0/Enabled=1。
@@ -120,6 +124,15 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 其他控件：`ControlItem_*`（物品）、`ControlScroll_*`（滚动条）、`ControlSkill_*`（技能图标）
 - 触摸分发：`TouchHandle_ControlEventProc`（递归控件树）、`TouchHandle_Event/MoveOut/UseControlEventMove/IsControlEventMovePointer/UnuseControlEvent*`
 - 排序：`ControlObject_fpDefaultCompare`（控件排序比较函数指针）
+
+### 3.5 弹窗事件、按压态与 X/返回按钮绘制事实
+
+- 弹窗事件回调用 `PanelCallbacks::event` 接收触摸事件：按下 `0x17`、松开 `0x18`、移动 `0x19`；带 bit63 的系统子事件（如 `0x80000001`/`0x80000004`）在每次按下时到达，不参与手势。回调须自行消费并返回 `1`（返回类型为 `uint32_t`，bit63 约定不可靠，不能以负数透传）。
+- 模块控件不在游戏 InputLayer 树内，不会自行收到触摸事件；回调须按命中选根后调 `dispatch_native_event`，把事件交给游戏原生 `TouchHandle_ControlEventProc` 状态机：按下置态、移出取消、**松开且仍落于按钮内才 ExecuteProc**。
+- 按钮按下态读 `data + 0x68`（CB_State，`== 1` 为选中高亮）；`data + 0x08` 是内联文本区，不是按下态。
+- 原版人物信息页 X 绘制顺序：① `UI_DrawBorderRect(x-0x14, y, w+0x14, h)`（金线圆角框 + 60% 黑底）→ ② unit `0x0f` loc `0x3a` @ `rect+(15,24)` 常态 X → ③ 若 State==1：unit `0x0f` loc `0x34` @ `rect+(3,12)` 橙色底板叠加（亮光）。
+- 原版返回按钮（unit `0x59`）：loc `3` 常态（自带金属框），loc `2` 按下亮光；按下叠加相对常态的偏移为 `(−3, −3)`。原生 X/返回按钮盒尺寸为 `78×86`（`UIGameMenu_InitBackButton` `SetRect(_,6,78,86)`），X 字形 `0x3a` 与按下底板 `0x34` 均按 `1:1` 放置，不随盒缩放。
+- 模块 X/返回统一外观：两者同盒 `78×86`、共用 unit `0x59` loc `3` 金属框（`ui_draw_native_close_button` 只取 loc3 边框分片拼框，跳过左侧开口与中央返回箭头），仅字形不同——X 用 unit `0x0f` loc `0x3a`（38×39 @ `rect+(15,24)`）、按下叠 loc `0x34`（62×61 @ `rect+(3,12)`）；返回用 loc `3`/loc `2`（`+(−3,−3)`）。模块不再使用 `UI_DrawBorderRect` 细线框，也不再按 rect 缩放 X 字形。共享图集 `0x0f`/`0x59` 只 ensure 加载，任何路径不卸载。
 
 ## 4. 对话框系统
 
@@ -161,6 +174,12 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 原版 Options 字体可通过 `GRPX_SetFontColorFromRGB(r,g,b)` + `GRPX_DrawStringWithFont(text,x,y,align,font)` 使用；`UIOption_UIButtonListDraw` 使用 RGB `(0xe2,0x9e,0xcb)`，font=1。
 - 自定义 PopupState 可加载 `IMGSYS_UnitLoad(0x59)` 后复用这些分片；必须先检查 `IMGSYS_GetGroup/GetLoc` 非空。此前 `GRPX_DrawPart` 崩溃的主因是未加载图像单元导致空分片，而非 Process 回调本身不可绘制。
 - `GAMELOADER_DrawBackGround` 是主菜单场景背景调用，不是可独立复用的单张贴图；自定义面板继续以 LCD 保存/恢复后的暗色遮罩作为安全背景路径。
+
+### 5.2 模块 UI 推荐色
+
+`contracts/ui_theme.h` 是模块 UI 推荐色的唯一默认来源，颜色均可由插件按页面自身需求覆盖。推荐视觉沿用原生 Options 的深灰、柔和金线与暖金文字：模块面板/容器用深灰底；普通选项不铺行底色，只用与面框同色的金线分隔；选中项使用轻微提亮的中性深灰，不使用棕金色块。可操作文字始终用 `kTextGold`，不可操作文字用 `kTextDisabled`；`kTextNormal` 留给说明性普通文字。
+
+`kFrameGold` 与 `kDividerGold` 是同值语义别名。插件可直接选用推荐值，也可传入普通颜色参数覆盖，例如为某个列表行传 `kRowSelectedBg`，或按页面布局改用自己的灰色填充；推荐值不构成强制全局主题。`kSwitchTrack*` / `kSwitchThumb*` 仅供插件自绘开关时作 fallback，不会改变 Options 页面使用的原生开关贴图。
 
 ## 6. 自定义 UI 的方式（5 种，实验目标）
 

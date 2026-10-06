@@ -35,7 +35,7 @@ void native_choice_close();
 - **文本持久化**：调用方传入的 `items` 只保证调用瞬间有效，组件拷贝进自持缓冲（6×256B）。
 - **单活动 + 互斥**：`std::mutex` 串行化；同一时刻仅一个模块框；`open` 失败（已 active、spec 非法、符号不可达、push 失败）返回 false 并保持原状态。
 - **标题**：`UIChoice_Init` 包装先调原函数，仅在"模块框激活且有 title"时把 `G_UICHOICE_MAIN_TEXT` 指向组件缓冲。
-- **依赖方向**：`feature/world_teleport` → `feature/ui/native_choice` → `game_access` / `game_symbols` / `game_ptr_hook`。
+- **依赖方向**：`feature/world_teleport` → `feature/ui/native_choice` → `game/access/game_access` / `game_symbols` / `patch/game_ptr_hook`。
 
 ## 4. 集成（世界传送）
 

@@ -188,7 +188,7 @@
 
 1. 持有 `g_virtual_bag_mtx` 时，禁止调用 `op_ok()`。
 2. 原因是 `op_ok()` 会调用 `frame_cache_force_refresh()`
-   （`core/native/game_ops_common.cpp:9-12`），该函数会再锁 `g_cache_mtx` 并构造各域
+   （`game/ops/game_ops_common.cpp:9-12`），该函数会再锁 `g_cache_mtx` 并构造各域
    缓存（`core/native/game_cache.cpp:158-168`）。
 3. 持锁时也禁止调用任何会触发原版 UI 刷新、原版库存刷新、缓存刷新或回调重入的函数，
    除非该函数已经明确标为 locked-safe 且不走上述路径。
@@ -647,7 +647,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 - **为什么**：`game_symbols.h:58` 规定物品对象 `+0x10` 的 bit22..31 中 `100` 是装备
   语义，而 `1..999` 才是可堆叠数量；序列化头部将同一字段落在
   `virtual_bag_state.h` 的 payload `+11`。`stack_codec::s2_write_count` 会保留其余
-   位（`core/native/stack_codec.h`），但不能改变这些位在非堆叠物品中的业务语义。
+   位（`plugins/stack_limit/stack_codec_impl.h`），但不能改变这些位在非堆叠物品中的业务语义。
   `stack_limit_enabled()` 是运行时操作配置，不是 sidecar 数量语义的组成部分。
 - **判据单源**：`item_is_equip`、`category_is_equip` 与载入/扩展合并适配均使用
   `ITEMCLASSBASE +6 bit0` 语义；载入路径通过 `virtual_bag_category_uses_stack_count`
@@ -772,7 +772,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   反向同步或 `a` 清零。
 - **实现锚（模式感知 helper，唯一模式入口）**：
   `stack_codec::effective_read_count / effective_write_count / effective_clamp /
-  effective_view_count`（`core/native/stack_codec.h`）；读侧 getter 分流
+  effective_view_count`（`plugins/stack_limit/stack_codec_impl.h`）；读侧 getter 分流
   `stage4_get_cumulate_count`（`inventory_hook_stage4.cpp`）；模块合并按视图相加且
   descriptor 回写 canonical（`extension_bag_transaction.inc`）；H-04 消耗借位预置仅在
   启用态生效（`native_inventory_hook.cpp` `consume_item_wrapper`——关闭态 b≤1 消耗到

@@ -98,7 +98,7 @@
 
 ### 3.4 模块既有能力（已产品化，可作为实现基础）
 
-- PtrHook 覆盖游戏内存函数指针（`feature/patch/game_ptr_hook.h`），无入口重定向，已在设置页/合成器/UI 实验真机验证（见 `../../reference/game/ui.md` §2.2.1、§6）。
+- PtrHook 覆盖游戏内存函数指针（`patch/game_ptr_hook.h`），无入口重定向，已在设置页/合成器/UI 实验真机验证（见 `../../reference/game/ui.md` §2.2.1、§6）。
 - 可复用原生 UI 组件层 `game_ui_kit` 与 `game_ui_components`（见 `../../reference/game/ui-kit.md`）。
 - 物品 JSON 读取已暴露 `base`/`bonus`/`gem`/`chaos`/`enchant` 结构（`api/native/game_inventory.*`；契约见 `../../reference/api-reference.md` Inventory 段）。
 
@@ -308,7 +308,7 @@ type=0 oi=24 val=480 -> "$R冰霜: 48.0%$B"
 |---|---|
 | 纯逻辑 | `module/app/src/main/cpp/feature/attribute_range/attribute_range.{h,cpp}`：`classify(value,min,max)` 百分位分档 + `color_code(Tier)`（`G/W/C/L/V/Y`）+ `fixed_option_range(base,p1,p2,*min,*max)`（固定词缀表值域）；host 单测 `tests/test_attribute_range.cpp`（81 断言，编入 `attribute_range_tests`） |
 | 注入 | `module/app/src/main/cpp/feature/attribute_range/game_ui_attr_range.{h,cpp}`：`attr_range_ui_install_if_ready()`，用 `native_hook_func()` 安装 3 个 hook；`item_uses_fixed_option_table()` + `fixed_option_percent_pair()` 读 `ITEMDATABASE`/`ITEMSTATICOPTBASE` |
-| 符号 | `game_symbols.h` 新增 `F_ITEMSYSTEM_GET_OPTION_VALUE_VMA`(0x109020)、`F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA`(0x108f90)、`F_MATH_GET_RANDOM_VMA`(0xa8bcc)、`F_UIDESC_ADD_OPTION_VMA`(0xb343c)、`F_UIDESC_MAKE_ITEM_VMA`(0xb36a0)、`G_UIDESC_TEXT_BUF_VMA`(0x303dc0)/`G_UIDESC_TEXT_BUF_SIZE`(0x200)、`G_ITEMSTATICOPT_TABLE_{DATA,SIZE,COUNT}_GOT_VMA`(0x2f3210/0x2f46f8/0x2f5250) + 对应 typedef；`symbol_registry.h` 登记 F_* 项；`game_access.{h,cpp}`/`game_access_globals.inc` 解析 `fn_item_system_get_option_value`/`fn_item_system_get_jewel_option_value`（复用已有 `fn_item_get_ability_level`、`fn_is_jewel`） |
+| 符号 | `game_symbols.h` 新增 `F_ITEMSYSTEM_GET_OPTION_VALUE_VMA`(0x109020)、`F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA`(0x108f90)、`F_MATH_GET_RANDOM_VMA`(0xa8bcc)、`F_UIDESC_ADD_OPTION_VMA`(0xb343c)、`F_UIDESC_MAKE_ITEM_VMA`(0xb36a0)、`G_UIDESC_TEXT_BUF_VMA`(0x303dc0)/`G_UIDESC_TEXT_BUF_SIZE`(0x200)、`G_ITEMSTATICOPT_TABLE_{DATA,SIZE,COUNT}_GOT_VMA`(0x2f3210/0x2f46f8/0x2f5250) + 对应 typedef；`symbol_registry.h` 登记 F_* 项；`game/access/game_access.{h,cpp}`/`game/access/game_access_globals.inc` 解析 `fn_item_system_get_option_value`/`fn_item_system_get_jewel_option_value`（复用已有 `fn_item_get_ability_level`、`fn_is_jewel`） |
 | 接线 | `bridge/native/gamebridge.cpp` `nativeInit` 在 `bridge_init` 成功后调用 `attr_range_ui_install_if_ready()`；`CMakeLists.txt` 加入两个 cpp |
 
 **范围获取机制**：`MATH_GetRandom` 上装一个 wrapper；probe 时置 thread_local 捕获标志，调一次游戏自身函数（词缀 `ITEMSYSTEM_GetOptionValue`、宝石 `ITEMSYSTEM_GetJewelOptionValue`），wrapper 截获其掷值区间 `[min,max]` 并返回上界（不调用原函数，不消耗游戏 RNG 状态）。这样范围完全用当前版本游戏自身算术，无 VMA/公式复制。该上界即公式 `base`，因此固定词缀类别只需再读一次 `ITEMSTATICOPTBASE` 的 `(p1,p2)` 用 `fixed_option_range` 重算 min/max（`type=0` 且 `ITEMDATABASE[cat].+6` bit1 置位分支）；`p1==p2` 时退化为单值区间，仍由 `classify` 判满值金。

@@ -73,7 +73,7 @@ patch wrapper `feature/patch/native_inventory_hook.cpp:1-8`；API port
 | `feature/patch/inventory_hook_stage4.cpp` | feature/patch | 可测试的 dispatcher seam 与递归/失败语义 |
 | `feature/patch/inventory_find_item_poc.cpp` | feature/patch | `FindItem` PoC 适配 |
 
-同一目标中的 core 源文件包括 `core/native/game_json.cpp`、`game_ops_common.cpp`、
+同一目标中的 core 源文件包括 `game/json/game_json.cpp`、`game_ops_common.cpp`、
 `grid_geometry.cpp`、`game_nav.cpp`、`game_cache.cpp`、`module_save.cpp`、
 `game_motion.cpp`（`CMakeLists.txt:14-20,29`）。data 和 API native 源文件的归属以
 `CMakeLists.txt:12-33` 为准。
@@ -112,14 +112,14 @@ JSON；`virtual_bag_transaction_types.h` 是同头展开的类型头，不是 `.
 
 接口清单见 `extension_bag_port.h:6-51`、`game_ui_virtbag.h:10-30`、
 `extension_bag_context.h:10-30`；其中 context 是内部访问点，真正对外边界是
-`game_ui_virtbag.h:10-24` 和 `core/native/extension_bag_port.h:8-51`。`Item` 不保存
+`game_ui_virtbag.h:10-24` 和 `contracts/extension_bag_port.h:8-51`。`Item` 不保存
 native 指针，见 `model/virtual_bag_state.h:53-67`。
 
 ### 1.4 port 与对外接口
 
 #### core port
 
-`core/native/extension_bag_port.h:6-51` 对 API/patch 暴露以下稳定能力：
+`contracts/extension_bag_port.h:6-51` 对 API/patch 暴露以下稳定能力：
 
 - 查询：`extension_bag_for_each_logical_item`、`extension_bag_item_at`、
   `extension_bag_view_item_at`、`extension_bag_identify_native_item`、
@@ -541,7 +541,7 @@ VM-19/VM-20/VM-21/VM-22 取证。
   kUnknown fail-closed 直通 backup；wrapper 不取 `g_virtual_bag_mtx`、不设 TLS 直通
   （原版 getter 反汇编 `0x106094–0x106124` 为纯读：空指针 0、非可堆叠 1、可堆叠
   `GetBitValue(31,25)`）。
-- **模式感知读写层（S2-P5，R-47 决策 b）**：`core/native/stack_codec.h` 提供
+- **模式感知读写层（S2-P5，R-47 决策 b）**：`plugins/stack_limit/stack_codec_impl.h` 提供
   `effective_read_count(value, enabled)`（启用态 `s2_read_count` 全量、关闭态只读
   b 段）、`effective_write_count(value, count, enabled)`（启用态 `s2_write_count`
   全量拆段、关闭态只写 b 段且 a（bits22–24）与 bits0–21 原样保留）、

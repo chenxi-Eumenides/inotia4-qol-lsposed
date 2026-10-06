@@ -444,7 +444,7 @@ P0 不改业务逻辑、API 路径、JNI 签名和构建依赖。
 - 拆 `game_ui.cpp` 与 UI 辅助文件。
 - `game_world.cpp` 已按剧情、读取、导航、移动任务和世界操作拆分。
 - `bridge/native/gamebridge.cpp` 已按生命周期、数据读取、基础操作、UI、域操作、设置和扩展背包拆分。
-- `game_inventory.cpp`、`game_dialog.cpp`、`game_access.cpp`、`game_patch.cpp` 和 UI 辅助文件已按职责拆分。
+- `game_inventory.cpp`、`game_dialog.cpp`、`game/access/game_access.cpp`、`game_patch.cpp` 和 UI 辅助文件已按职责拆分。
 - `gamebridge.cpp` 只保留 JNI 转发、参数转换和结果转换。
 
 ### API 与增强功能的 native 归属

@@ -21,46 +21,47 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 69 |
-| `game` | 143 |
+| `contracts` | 74 |
+| `game` | 151 |
 | `hooks` | 10 |
-| `host` | 54 |
-| `infra` | 35 |
+| `host` | 59 |
+| `infra` | 39 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
 | `legacy/system` | 2 |
 | `patch` | 13 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
-| `plugins/autosell` | 17 |
+| `plugins/autosell` | 19 |
 | `plugins/character_panel_i18n` | 6 |
 | `plugins/core.api` | 5 |
 | `plugins/core.character` | 5 |
 | `plugins/core.craft` | 2 |
-| `plugins/core.custom_ui` | 10 |
+| `plugins/core.custom_ui` | 20 |
 | `plugins/core.data` | 4 |
 | `plugins/core.feature` | 2 |
 | `plugins/core.item` | 7 |
 | `plugins/core.quest` | 5 |
 | `plugins/core.save` | 2 |
-| `plugins/core.settings` | 15 |
+| `plugins/core.settings` | 12 |
 | `plugins/core.system` | 3 |
 | `plugins/core.ui_state` | 2 |
 | `plugins/core.world` | 3 |
 | `plugins/craft_ui` | 4 |
-| `plugins/custom_recipe` | 11 |
+| `plugins/custom_recipe` | 13 |
 | `plugins/device_probe_consumer` | 2 |
 | `plugins/device_probe_export_failure` | 2 |
 | `plugins/device_probe_provider` | 2 |
-| `plugins/extension_bag` | 44 |
+| `plugins/extension_bag` | 50 |
 | `plugins/inventory_hooks` | 11 |
-| `plugins/push_all` | 6 |
-| `plugins/save_backup` | 13 |
-| `plugins/simple_mode` | 6 |
+| `plugins/move_merge` | 4 |
+| `plugins/push_all` | 8 |
+| `plugins/save_backup` | 15 |
+| `plugins/simple_mode` | 8 |
 | `plugins/special_equip` | 6 |
-| `plugins/stack_limit` | 3 |
+| `plugins/stack_limit` | 5 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **543** |
+| **合计** | **594** |
 
 ### 1.2 迁移期映射摘要
 
@@ -98,25 +99,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 84 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 86 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 97 |
-| `game` | `contracts` | 71 |
-| `host` | `contracts` | 54 |
-| `host` | `infra` | 45 |
-| `plugins/extension_bag` | `contracts` | 40 |
-| `plugins/autosell` | `contracts` | 23 |
-| `plugins/custom_recipe` | `contracts` | 21 |
-| `legacy/system` | `game` | 17 |
+| `host` | `game` | 106 |
+| `game` | `contracts` | 73 |
+| `host` | `contracts` | 57 |
+| `host` | `infra` | 48 |
+| `plugins/extension_bag` | `contracts` | 44 |
+| `plugins/autosell` | `contracts` | 24 |
+| `plugins/core.custom_ui` | `contracts` | 24 |
+| `plugins/custom_recipe` | `contracts` | 22 |
+| `legacy/system` | `game` | 18 |
 | `plugins/inventory_hooks` | `contracts` | 17 |
-| `plugins/save_backup` | `contracts` | 14 |
+| `plugins/core.settings` | `contracts` | 16 |
+| `plugins/save_backup` | `contracts` | 15 |
+| `plugins/core.item` | `contracts` | 14 |
 | `host` | `patch` | 13 |
-| `plugins/core.item` | `contracts` | 13 |
-| `plugins/core.settings` | `contracts` | 13 |
-| `plugins/core.character` | `contracts` | 11 |
-| `plugins/core.custom_ui` | `contracts` | 11 |
+| `plugins/core.character` | `contracts` | 12 |
 
 ### 2.2 include 环
 
@@ -148,8 +149,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：146 个
-- native 导出：146 个
+- Kotlin `external fun`：149 个
+- native 导出：149 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -158,46 +159,47 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（30 个）共 30 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（31 个）共 31 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（30）
+### 6.2 已迁移 `plugins/*`（31）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
-| `autosell` | `plugins/autosell` | 17 |
+| `autosell` | `plugins/autosell` | 19 |
 | `character_panel_i18n` | `plugins/character_panel_i18n` | 6 |
 | `core.api` | `plugins/core.api` | 5 |
 | `core.character` | `plugins/core.character` | 5 |
 | `core.craft` | `plugins/core.craft` | 2 |
-| `core.custom_ui` | `plugins/core.custom_ui` | 10 |
+| `core.custom_ui` | `plugins/core.custom_ui` | 20 |
 | `core.data` | `plugins/core.data` | 4 |
 | `core.feature` | `plugins/core.feature` | 2 |
 | `core.item` | `plugins/core.item` | 7 |
 | `core.quest` | `plugins/core.quest` | 5 |
 | `core.save` | `plugins/core.save` | 2 |
-| `core.settings` | `plugins/core.settings` | 15 |
+| `core.settings` | `plugins/core.settings` | 12 |
 | `core.system` | `plugins/core.system` | 3 |
 | `core.ui_state` | `plugins/core.ui_state` | 2 |
 | `core.world` | `plugins/core.world` | 3 |
 | `craft_ui` | `plugins/craft_ui` | 4 |
-| `custom_recipe` | `plugins/custom_recipe` | 11 |
+| `custom_recipe` | `plugins/custom_recipe` | 13 |
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
 | `device_probe_export_failure` | `plugins/device_probe_export_failure` | 2 |
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
-| `extension_bag` | `plugins/extension_bag` | 44 |
+| `extension_bag` | `plugins/extension_bag` | 50 |
 | `inventory_hooks` | `plugins/inventory_hooks` | 11 |
-| `push_all` | `plugins/push_all` | 6 |
-| `save_backup` | `plugins/save_backup` | 13 |
-| `simple_mode` | `plugins/simple_mode` | 6 |
+| `move_merge` | `plugins/move_merge` | 4 |
+| `push_all` | `plugins/push_all` | 8 |
+| `save_backup` | `plugins/save_backup` | 15 |
+| `simple_mode` | `plugins/simple_mode` | 8 |
 | `special_equip` | `plugins/special_equip` | 6 |
-| `stack_limit` | `plugins/stack_limit` | 3 |
+| `stack_limit` | `plugins/stack_limit` | 5 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 
 ## 校验入口

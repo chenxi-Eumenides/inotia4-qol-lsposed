@@ -226,7 +226,7 @@
 - `feature/craft_ui/craft_ui.cpp`：`install_got_hook`（:281-309）、`try_install_execute_wrapper`（:233-247）、`uimix_slot`（:32）、`read_filled_slots`（:48）、`selected_inven_item`（:119）。
 - `feature/attribute_range/`：`attr_range_probe_jewel_range(type, item, out_min, out_max)`（`game_ui_attr_range.h:16-20`）、`attr_range::classify` / `percentile`（`attribute_range.h:17/24`）。
 - `native_hook_func()`：函数级 hook（`feature/attribute_range/game_ui_attr_range.cpp` 已用）。
-- `feature/patch/game_ptr_hook.h`（PtrHook）、`core/native/call_patch.h`（BL patch）。
+- `feature/patch/game_ptr_hook.h`（PtrHook）、`patch/call_patch.h`（BL patch）。
 
 ### 3.10 材料需求数量的落点与依据（大修版 VMA）
 
@@ -255,7 +255,7 @@
 
 `ITEMSYSTEM_IsJewel@0x10b964` 全函数仅 `sub w0,w0,#0x1c; cmp w0,#4; cset w0,ls` —— **只比较传入的类别**，完全不触碰 `item+0x10`，故档位与随机等级 bits11-17、属性类型 bits18-23 无关。
 
-**角色等级读取入口**：`fn_get_member`（`game_access.h:47`，`F_GET_MEMBER_VMA=0x11f384` = `PARTY_GetMember`）→ `reinterpret_cast<int8_t*>(member)[C_LEVEL]`（`game_symbols.h:18`，`C_LEVEL=0x0E`）。既有同法先例 `core/native/game_system.cpp:61`、`api/native/game_character.cpp:226`。
+**角色等级读取入口**：`fn_get_member`（`game_access.h:47`，`F_GET_MEMBER_VMA=0x11f384` = `PARTY_GetMember`）→ `reinterpret_cast<int8_t*>(member)[C_LEVEL]`（`game_symbols.h:18`，`C_LEVEL=0x0E`）。既有同法先例 `game_system.cpp:61`、`api/native/game_character.cpp:226`。
 
 ### 3.11 面板控件与页签（大修版 VMA）
 

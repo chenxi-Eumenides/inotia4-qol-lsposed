@@ -2125,6 +2125,14 @@
 
 **用途**：组件测试面板开关（仅 Debug 构建注册）。打开后在隔离背景上绘制 `core.custom_ui` 各类组件样例（label/button/toggle/select/scroll_view），用于目视验证组件可用性；`open:false` 关闭。HTTP 线程只排队，主线程执行 `ui_panels` open/close。返回 `{"ok":true,"queued":true}`。
 
+`POST /api/debug/custom-ui/scroll`　body `{ "open": true|false }`
+
+**用途**：独立原生滚动测试面板（owner `core.custom_ui`，仅 Debug 构建注册，Release 不提供面板）。24 行样例使用游戏 `ControlScroll` 的滚动、惯性、裁剪与原生事件树；轻触选中，高亮行附「选中」文字，底部显示原生 offset。`open:false` 或返回按钮关闭。HTTP 线程仅入队，主线程经共享 `ui_panels` 执行；最后一个请求优先。成功返回 `{"ok":true,"queued":true}`；非单字段布尔请求返回 400，插件停用返回 503；响应不表示面板已打开。
+
+`POST /api/debug/custom-ui/help`　body `{ "open": true|false }`
+
+**用途**：独立两栏帮助页样例（provider `debug_help`，owner `core.custom_ui`，仅 Debug 注册，Release 无该面板）。左栏装饰圆角容器内复用原生滚动列表，8 个选项提供选中高亮及「选中」文字；右栏圆角容器显示不同标题、说明和色块，仅绘制、不滚动。`open:false` 或返回按钮关闭；重开默认选中首项。HTTP 线程仅排队，所有 UI 操作在游戏主线程执行，最后一个请求优先。返回 `{"ok":true,"queued":true}` 不表示面板已经打开；仅接受单字段布尔 body（否则 400），插件停用为 503；Release 不注册该 native handler。
+
 `GET /api/debug/extension_bag/status`
 
 **用途**：扩展背包内部状态全量读取（使能/注入/控件旗标、视图模式、全部物品、pending 事务与恢复动作预测）。
