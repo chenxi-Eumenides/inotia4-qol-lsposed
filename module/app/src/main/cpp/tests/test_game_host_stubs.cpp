@@ -20,6 +20,9 @@ namespace qol::game {
 int item_sell_price(const void*) { return -1; }
 int item_class_category(const void*) { return 28; }
 
+// host_adapter_tests 不链接真实 game/adapter_ports/system_port.cpp；身份版本按未下发处理。
+const char* system_port_version() { return nullptr; }
+
 #ifndef QOL_HOST_ADAPTER_REAL_INVENTORY
 namespace {
 contracts::QolFindItemAbiFn g_test_find_item_backup = nullptr;
@@ -182,7 +185,8 @@ QolResult set_physical_item(int32_t, int32_t, void*) {
 }
 #endif
 
-int32_t craft_is_apply_stuff(void*, void*) { return -1; }
+int32_t g_test_craft_apply_stuff_result = -1;
+int32_t craft_is_apply_stuff(void*, void*) { return g_test_craft_apply_stuff_result; }
 
 // legacy 聚合 TU 的写路由拼装接缝（真实实现位于 game_system.cpp，测试目标不编译它）。
 std::string build_quest_quit_result_json(int32_t) { return "{\"ok\":false,\"error\":\"stub\"}"; }

@@ -55,8 +55,9 @@ bool nav_bfs_multi(int, int, std::vector<int>& out) {
     return g_depth_ok;
 }
 
-// CHAR 池：0 号有效（英雄）；2 号有效（type=2 可交互）；其余无效。
-static uint8_t g_pool[C_OBJ_SIZE * 3]{};
+// debug_path 先扫描全部槽的 C_SITUATION，再校验对象；fixture 按真实池容量提供 backing。
+// 仅 0 号（英雄）和 2 号（type=2 可交互）有效。
+static uint8_t g_pool[C_OBJ_SIZE * C_CHARSYSTEM_POOL_SLOTS]{};
 static uint8_t g_charloc[CHARLOC_SIZE]{};
 static int8_t g_drop_count = 0;
 static uint8_t g_drop_arr[GROUND_ITEM_SIZE * 2]{};

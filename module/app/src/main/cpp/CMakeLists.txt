@@ -64,6 +64,7 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
 )
 
 add_library(gamebridge SHARED
+    host/settings_config_bridge.cpp
     bridge/native/gamebridge.cpp
     bridge/native/gamebridge_data.cpp
     bridge/native/gamebridge_operations.cpp
@@ -95,6 +96,9 @@ add_library(gamebridge SHARED
     game/access/hive_iap.cpp
     game/access/ui_kit.cpp
     game/access/ui_components.cpp
+    game/access/ui_native_toggle.cpp
+    game/access/ui_native_text_button.cpp
+    game/access/ui_native_close_button.cpp
     game/access/attr_range_ui.cpp
 )
 
@@ -226,6 +230,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/save_call_port.cpp
     game/adapter_ports/world_port.cpp
     game/adapter_ports/extension_bag_write_port.cpp
+    game/adapter_ports/move_merge_port.cpp
     game/adapter_ports/game_host_port.cpp
     game/adapter_ports/character_extras_port.cpp
     game/adapter_ports/inventory_extras_port.cpp
@@ -247,6 +252,8 @@ target_sources(gamebridge PRIVATE
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
+    host/settings_catalog_adapter.cpp
+    infra/settings_catalog.cpp
     host/lifecycle_participants.cpp
     host/http_registry.cpp
     host/http_dispatch.cpp
@@ -385,4 +392,10 @@ target_sources(gamebridge PRIVATE
 # D2a-3b-1 / D2c-2b-2：extension_bag 声明式资源插件（29 条 claim；wrapper 业务体随
 # D2c-2b-2 全部收口在 plugins/extension_bag，features/patch 已删除）
 target_sources(gamebridge PRIVATE
+)
+
+# 持久配置桥（settings_config v1.0）JNI 薄层：镜像发布/回执回传仅转换，语义在
+# host/settings_config_bridge.cpp（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    bridge/native/gamebridge_settings_config.cpp
 )

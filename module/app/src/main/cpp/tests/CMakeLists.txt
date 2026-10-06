@@ -308,6 +308,27 @@ foreach(infra_case snapshot command_queue events capabilities_status)
     add_test(NAME infra_${infra_case}_tests COMMAND infra_${infra_case}_tests)
 endforeach()
 
+add_executable(settings_catalog_tests test_settings_catalog.cpp
+    ${CPP_DIR}/infra/settings_catalog.cpp)
+target_include_directories(settings_catalog_tests PRIVATE ${CPP_DIR})
+set_target_properties(settings_catalog_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(settings_catalog_tests PRIVATE Threads::Threads)
+add_test(NAME settings_catalog_tests COMMAND settings_catalog_tests)
+
+add_executable(settings_catalog_adapter_tests test_settings_catalog_adapter.cpp
+    ${CPP_DIR}/infra/settings_catalog.cpp ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/host/settings_catalog_adapter.cpp)
+target_include_directories(settings_catalog_adapter_tests PRIVATE ${CPP_DIR})
+set_target_properties(settings_catalog_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(settings_catalog_adapter_tests PRIVATE Threads::Threads)
+add_test(NAME settings_catalog_adapter_tests COMMAND settings_catalog_adapter_tests)
+set_tests_properties(settings_catalog_adapter_tests PROPERTIES TIMEOUT 5)
+
+add_executable(settings_catalog_abi_tests test_settings_catalog_abi.cpp)
+target_include_directories(settings_catalog_abi_tests PRIVATE ${CPP_DIR})
+set_target_properties(settings_catalog_abi_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME settings_catalog_abi_tests COMMAND settings_catalog_abi_tests)
+
 add_executable(infra_snapshot_handle_tests
     test_infra_snapshot_handle.cpp
     ${CPP_DIR}/infra/snapshot_handle.cpp
@@ -802,6 +823,10 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/settings_catalog_adapter.cpp
+    ${CPP_DIR}/host/settings_config_bridge.cpp
+    ${CPP_DIR}/infra/settings_catalog.cpp
+    ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/snapshot_handle.cpp
     ${CPP_DIR}/host/lifecycle_participants.cpp
     ${CPP_DIR}/host/http_registry.cpp
@@ -815,6 +840,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/character_port.cpp
     ${CPP_DIR}/game/adapter_ports/choice_port.cpp
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
+    ${CPP_DIR}/game/adapter_ports/move_merge_port.cpp
     ${CPP_DIR}/game/adapter_ports/game_host_port.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
     ${CPP_DIR}/game/access/inventory.cpp
@@ -901,6 +927,9 @@ add_test(NAME core_api_lifecycle_tests COMMAND core_api_lifecycle_tests)
 add_executable(ui_adapter_tests
     test_ui_adapter.cpp
     ${CPP_DIR}/host/ui_adapter.cpp
+    ${CPP_DIR}/game/access/ui_native_toggle.cpp
+    ${CPP_DIR}/game/access/ui_native_text_button.cpp
+    ${CPP_DIR}/game/access/ui_native_close_button.cpp
 )
 target_include_directories(ui_adapter_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -910,6 +939,96 @@ target_include_directories(ui_adapter_tests PRIVATE
 target_compile_features(ui_adapter_tests PRIVATE cxx_std_17)
 set_target_properties(ui_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME ui_adapter_tests COMMAND ui_adapter_tests)
+
+# Execute the production ui_kit_controls.inc identity helper against fake physical inventory
+# and registry boundaries; this avoids replacing the helper with the UI adapter test stub.
+add_executable(ui_control_item_identity_tests test_ui_control_item_identity.cpp)
+target_include_directories(ui_control_item_identity_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(ui_control_item_identity_tests PRIVATE cxx_std_17)
+target_compile_options(ui_control_item_identity_tests PRIVATE -ffunction-sections -fdata-sections)
+target_link_options(ui_control_item_identity_tests PRIVATE -Wl,--gc-sections)
+set_target_properties(ui_control_item_identity_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME ui_control_item_identity_tests COMMAND ui_control_item_identity_tests)
+
+add_executable(native_toggle_render_tests
+    test_native_toggle_render.cpp
+    ${CPP_DIR}/game/access/ui_native_toggle.cpp
+)
+target_include_directories(native_toggle_render_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(native_toggle_render_tests PRIVATE cxx_std_17)
+set_target_properties(native_toggle_render_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME native_toggle_render_tests COMMAND native_toggle_render_tests)
+
+add_executable(native_text_button_render_tests
+    test_native_text_button_render.cpp
+    ${CPP_DIR}/game/access/ui_native_text_button.cpp
+    ${CPP_DIR}/game/access/ui_native_toggle.cpp
+)
+target_include_directories(native_text_button_render_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(native_text_button_render_tests PRIVATE cxx_std_17)
+set_target_properties(native_text_button_render_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME native_text_button_render_tests COMMAND native_text_button_render_tests)
+
+add_executable(native_close_button_render_tests
+    test_native_close_button_render.cpp
+    ${CPP_DIR}/game/access/ui_native_close_button.cpp
+)
+target_include_directories(native_close_button_render_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(native_close_button_render_tests PRIVATE cxx_std_17)
+set_target_properties(native_close_button_render_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME native_close_button_render_tests COMMAND native_close_button_render_tests)
+
+add_executable(close_button_component_tests
+    test_close_button_component.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+)
+target_include_directories(close_button_component_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(close_button_component_tests PRIVATE cxx_std_17)
+set_target_properties(close_button_component_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME close_button_component_tests COMMAND close_button_component_tests)
+
+add_executable(nav_button_component_tests
+    test_nav_button_component.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+)
+target_include_directories(nav_button_component_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(nav_button_component_tests PRIVATE cxx_std_17)
+set_target_properties(nav_button_component_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME nav_button_component_tests COMMAND nav_button_component_tests)
+
+add_executable(debug_two_column_tests
+    test_debug_two_column.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/debug_components.cpp
+)
+target_include_directories(debug_two_column_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_definitions(debug_two_column_tests PRIVATE QOL_DEBUG_COMPONENTS=1)
+target_compile_features(debug_two_column_tests PRIVATE cxx_std_17)
+set_target_properties(debug_two_column_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME debug_two_column_tests COMMAND debug_two_column_tests)
 
 # U11-2：core.ui 标准组件创建/更新/命中/销毁与错误语义 host 测试。
 add_executable(core_ui_components_tests
@@ -922,6 +1041,37 @@ target_include_directories(core_ui_components_tests PRIVATE
 target_compile_features(core_ui_components_tests PRIVATE cxx_std_17)
 set_target_properties(core_ui_components_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_ui_components_tests COMMAND core_ui_components_tests)
+
+add_executable(native_scroll_list_tests
+    test_native_scroll_list.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/debug_scroll.cpp
+)
+target_include_directories(native_scroll_list_tests PRIVATE ${CPP_DIR})
+target_compile_definitions(native_scroll_list_tests PRIVATE QOL_DEBUG_COMPONENTS=1)
+target_compile_features(native_scroll_list_tests PRIVATE cxx_std_17)
+add_test(NAME native_scroll_list_tests COMMAND native_scroll_list_tests)
+
+# Exercise the production settings.cpp toggle event/request/poll path with a stateful UI fake.
+add_executable(settings_panel_widget_tests test_settings_panel_widget.cpp)
+target_include_directories(settings_panel_widget_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/plugins/core.settings
+    ${CPP_DIR}/plugins/core.settings/panels
+)
+target_compile_features(settings_panel_widget_tests PRIVATE cxx_std_17)
+set_target_properties(settings_panel_widget_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME settings_panel_widget_tests COMMAND settings_panel_widget_tests)
+
+add_executable(help_page_tests
+    test_help_page.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/debug_help.cpp
+)
+target_include_directories(help_page_tests PRIVATE ${CPP_DIR})
+target_compile_definitions(help_page_tests PRIVATE QOL_DEBUG_COMPONENTS=1)
+target_compile_features(help_page_tests PRIVATE cxx_std_17)
+add_test(NAME help_page_tests COMMAND help_page_tests)
 
 # P1-A：item_count facade provider 槽、未驻留错误与空参数契约。
 # ITM-13：中立物品域扩展 provider facade（set-once / resident-available 分离 / 缺成员拒绝）。
@@ -1238,6 +1388,7 @@ add_executable(core_settings_panel_migration_tests
     test_core_settings_panel_migration.cpp
     ${CPP_DIR}/plugins/core.settings/plugin.cpp
     ${CPP_DIR}/plugins/core.settings/feature.cpp
+    ${CPP_DIR}/plugins/core.settings/panels/settings_binding.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
 )
@@ -1246,6 +1397,13 @@ target_compile_features(core_settings_panel_migration_tests PRIVATE cxx_std_17)
 set_target_properties(core_settings_panel_migration_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_settings_panel_migration_tests COMMAND core_settings_panel_migration_tests)
+
+# 设置页数据驱动模型纯规则（类别条目计数、行号映射、开关目标值、失败/回执文案）。
+add_executable(settings_panel_model_tests test_settings_panel_model.cpp)
+target_include_directories(settings_panel_model_tests PRIVATE ${CPP_DIR})
+target_compile_features(settings_panel_model_tests PRIVATE cxx_std_17)
+set_target_properties(settings_panel_model_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME settings_panel_model_tests COMMAND settings_panel_model_tests)
 
 # P1-B1：core_patches 仅保留 host Hive claim；12 条 S2 claim 不得回流。
 add_executable(core_patches_shape_tests test_core_patches_shape.cpp)
@@ -1270,7 +1428,71 @@ target_include_directories(ui_state_dialog_tests PRIVATE
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(ui_state_dialog_tests PRIVATE cxx_std_17)
-set_target_properties(ui_state_dialog_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_compile_options(ui_state_dialog_tests PRIVATE -ffunction-sections -fdata-sections)
 target_link_options(ui_state_dialog_tests PRIVATE -Wl,--gc-sections)
 add_test(NAME ui_state_dialog_tests COMMAND ui_state_dialog_tests)
+
+# 插件设置贡献 standalone harness：3 类别 12 项、可选 SDK 尾（旧前缀不读尾指针）、
+# 公共键白名单、owner gate 与 ui_panels 能力导航（末尾追加）
+add_executable(settings_contributions_tests
+    test_settings_contributions.cpp
+    ${CPP_DIR}/infra/settings_catalog.cpp
+    ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/host/settings_catalog_adapter.cpp
+    ${CPP_DIR}/plugins/core.settings/settings_contribution.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/settings_contribution.cpp
+    ${CPP_DIR}/plugins/extension_bag/settings_contribution.cpp
+    ${CPP_DIR}/plugins/stack_limit/settings_contribution.cpp
+    ${CPP_DIR}/plugins/simple_mode/settings_contribution.cpp
+    ${CPP_DIR}/plugins/push_all/settings_contribution.cpp
+    ${CPP_DIR}/plugins/custom_recipe/settings_contribution.cpp
+    ${CPP_DIR}/plugins/autosell/settings_contribution.cpp
+    ${CPP_DIR}/plugins/save_backup/settings_contribution.cpp
+    ${CPP_DIR}/plugins/move_merge/settings_contribution.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+)
+target_include_directories(settings_contributions_tests PRIVATE ${CPP_DIR})
+target_compile_features(settings_contributions_tests PRIVATE cxx_std_17)
+target_compile_definitions(settings_contributions_tests PRIVATE QOL_DEBUG_COMPONENTS=1)
+set_target_properties(settings_contributions_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(settings_contributions_tests PRIVATE Threads::Threads)
+add_test(NAME settings_contributions_tests COMMAND settings_contributions_tests)
+set_tests_properties(settings_contributions_tests PROPERTIES TIMEOUT 30)
+
+# 持久配置桥（settings_config v1.0）host 测试：白名单/未就绪/排队/回执/容量/revision 单调
+# （末尾追加；JNI 面在 Android 构建内，host 不覆盖）
+add_executable(settings_config_bridge_tests
+    test_settings_config_bridge.cpp
+    ${CPP_DIR}/host/settings_config_bridge.cpp
+)
+target_include_directories(settings_config_bridge_tests PRIVATE ${CPP_DIR})
+target_compile_features(settings_config_bridge_tests PRIVATE cxx_std_17)
+set_target_properties(settings_config_bridge_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(settings_config_bridge_tests PRIVATE Threads::Threads)
+add_test(NAME settings_config_bridge_tests COMMAND settings_config_bridge_tests)
+set_tests_properties(settings_config_bridge_tests PROPERTIES TIMEOUT 30)
+
+# Production move_merge wrapper fixture. The test includes the production body rather than a model.
+add_executable(move_merge_plugin_tests test_move_merge_plugin.cpp)
+target_include_directories(move_merge_plugin_tests PRIVATE ${CPP_DIR})
+target_compile_features(move_merge_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(move_merge_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)
+
+# Production extension_bag projection shims: typed handle/inactive/output and drop tri-state.
+add_executable(extension_bag_move_merge_shim_tests test_extension_bag_move_merge_shims.cpp)
+target_include_directories(extension_bag_move_merge_shim_tests PRIVATE ${CPP_DIR})
+target_compile_features(extension_bag_move_merge_shim_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_move_merge_shim_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_move_merge_shim_tests COMMAND extension_bag_move_merge_shim_tests)
+
+# Host tests use assert expressions for both setup and checks; keep them active in Release too.
+get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(test_target IN LISTS HOST_TEST_TARGETS)
+    get_target_property(test_target_type ${test_target} TYPE)
+    if(test_target_type STREQUAL "EXECUTABLE")
+        target_compile_options(${test_target} PRIVATE -UNDEBUG)
+    endif()
+endforeach()
