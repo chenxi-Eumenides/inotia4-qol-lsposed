@@ -13,7 +13,7 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 12;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 11;
 constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 16;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
@@ -102,13 +102,6 @@ struct UiNativeToggleDesc {
     int32_t value;
     uint8_t enabled;
     QolUiChangedFn on_changed;
-    void* user;
-};
-
-// 原生 X 关闭外观按钮：组件只提供原生视觉、按下态与点击回调；关闭/退出语义归消费者。
-struct UiCloseButtonDesc {
-    UiRect rect;
-    QolUiClickFn on_click;
     void* user;
 };
 
@@ -233,12 +226,6 @@ struct QolUiComponents {
                                     QolUiHandle* out);
     QolResult (*text_button_set_enabled)(QolUiHandle, uint8_t enabled);
     QolResult (*text_button_draw)(QolUiHandle);
-    // 原生 X 关闭外观按钮（unit 0x0f loc 0x3a，按下叠加 loc 0x34）：原生 ControlButton
-    // 命中/移出取消由引擎事件树保证；点击语义（关页/退出）由 on_click 消费者决定。
-    QolResult (*close_button_create)(const UiCloseButtonDesc*, QolUiHandle parent,
-                                     QolUiHandle* out);
-    QolResult (*close_button_set_enabled)(QolUiHandle, uint8_t enabled);
-    QolResult (*close_button_draw)(QolUiHandle);
     // 自适应导航按钮：X（unit 0x0f loc 0x3a / 按下叠加 0x34）与返回箭头（unit 0x59 loc 3 /
     // 按下叠加 loc 2）融合。auto 模式绘制时按面板栈深选图；点击一律延迟请求弹面板栈顶，
     // on_click 仅作附加通知。模式强制用于特殊页面与演示。

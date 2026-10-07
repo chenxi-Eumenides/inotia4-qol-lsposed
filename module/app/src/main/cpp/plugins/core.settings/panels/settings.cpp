@@ -51,9 +51,12 @@ int32_t g_right_row_height = settings_model::kMinimumRightRowHeight;
 // physical-pixel ratio is not established by this path; two logical units reduce subpixel risk,
 // but visibility still requires real-device confirmation.
 // 返回按钮沿用旧设置页的左上绝对逻辑 rect；创建时按 root 原点转成相对 rect。
-// 盒尺寸取原生 X/返回按钮的 78×86（UIGameMenu_InitBackButton SetRect(_,6,78,86)），
-// 使 X 与返回在同一盒内共用同款金属框；不再按 74×81 自行缩放。
-constexpr int64_t kBackAbsX = 8, kBackAbsY = 8, kBackW = 78, kBackH = 86;
+// 盒取三页统一的导航标准盒（contracts/ui_theme.h kNavBox*：左上 (8,8) 78×86，原生
+// X/返回按钮贴图盒），使 X 与返回在同一盒内共用同款金属框；不再按 74×81 自行缩放。
+constexpr int64_t kBackAbsX = contracts::ui_theme::kNavBoxAbsX;
+constexpr int64_t kBackAbsY = contracts::ui_theme::kNavBoxAbsY;
+constexpr int64_t kBackW = contracts::ui_theme::kNavBoxW;
+constexpr int64_t kBackH = contracts::ui_theme::kNavBoxH;
 
 // 背景：借用游戏主菜单共享图集 0x4f/0x50（左/右半图），绘制参数与覆盖顺序沿用旧设置页
 // （居中，画在两栏容器之前）。共享图集只 ensure/load，不 unload。
@@ -86,8 +89,8 @@ QolUiHandle g_root = nullptr;
 QolUiHandle g_left = nullptr;
 QolUiHandle g_right = nullptr;
 QolUiHandle g_back = nullptr;
-// 单手势根：0x17 命中谁就把它作为本次 0x17/0x18/0x19 的派发根，0x18 派发后清空。
-QolUiHandle g_touch_root = nullptr;
+QolUiHandle g_pressed_list = nullptr;
+bool g_back_pressed = false;
 int64_t g_inset_x = 0;  // root 相对屏幕的逻辑原点，用于把绝对逻辑 rect 转成 root 相对 rect
 int64_t g_inset_y = 0;
 char g_module_version[64] = {};  // 运行时模块版本（BuildConfig.VERSION_NAME），空表示未知
@@ -625,9 +628,8 @@ void destroy_page() {
     }
     if (g_ui != nullptr && g_root != nullptr) (void)g_ui->delete_control(g_root);
     g_root = nullptr;
-    // 手势中途被外部关闭时，原生 touch selected/moving 可能仍指向已删控件；adapter 暴露的
-    // reset_touch_* 是游戏全局触控态，复位会影响同帧其它控件，无法证明安全，故不复位（遗留风险）。
-    g_touch_root = nullptr;
+    g_pressed_list = nullptr;
+    g_back_pressed = false;
     for (uint32_t i = 0; i < kMaxItems; ++i) {
         g_action_handles[i] = nullptr;
         g_action_enabled_cache_valid[i] = false;
@@ -797,7 +799,7 @@ void settings_panel_enter() {
     g_inset_y = inset_y;
     (void)g_ui->set_rect(g_root, {inset_x, inset_y, kPanelW, kPanelH});
     // 导航按钮：绝对逻辑 (8,8) 换算成 root 相对 rect（root 原点为 inset）；auto 模式按
-    // 面板栈深绘制 X 或返回箭头，点击统一延迟请求宿主弹栈顶。
+    // 面板栈深绘制 X 或返回箭头，点击统一延迟请求宿主弹栈顶（原生事件树 ExecuteProc 触发）。
     if (g_components->nav_button_create != nullptr) {
         const contracts::UiNavButtonDesc nav_desc{
             {kBackAbsX - inset_x, kBackAbsY - inset_y, kBackW, kBackH},
@@ -910,58 +912,58 @@ void settings_panel_f3() {
 
 void settings_panel_f4() {}
 
-const char* touch_root_name(QolUiHandle root) {
-    if (root == g_root) return "nav";
-    if (root == g_right) return "right";
-    if (root == g_left) return "left";
-    return "none";
-}
-
 uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (!main_thread() || !g_panel_active || g_root == nullptr || g_components == nullptr) return 1;
     // 只处理 0x17 按下 / 0x18 松开 / 0x19 移动；0x8000000X 等 bit63 系统子事件伴随每次
-    // 按下到达，不参与手势，必须消费掉且不得改变任何本地状态（模块不持有按下态）。
+    // 按下到达，不参与手势：直接消费，不转发也不得改变本地按下镜像（g_back_pressed 若
+    // 在此清零，0x18 抬起会被下方门控拒绝，原生树收不到抬起，返回手势无法完成）。
     if (event != 0x17 && event != 0x18 && event != 0x19) return 1;
+    // 0x19 移动按按下落点镜像路由：列表手势跟随 g_pressed_list；返回按钮手势（未落列表）
+    // 跟随 root，移出取消交由原生 TouchHandle 按释放落点判定，模块侧不自行吞事件。
+    if (event == 0x19) {
+        uint32_t consumed = 0;
+        const QolUiHandle event_root = g_pressed_list != nullptr ? g_pressed_list : g_root;
+        const QolResult result = g_components->dispatch_native_event(
+            event_root, event, param, param2, &consumed);
+        if (!contracts::succeeded(result)) {
+            SETTINGS_LOG("settings event dispatch failed code=%d", result.code);
+        }
+        return consumed;
+    }
     if (param == 0 || g_ui == nullptr || g_ui->touch_coordinates == nullptr) return 1;
     int64_t x = 0;
     int64_t y = 0;
     if (!contracts::succeeded(g_ui->touch_coordinates(param, &x, &y))) return 1;
 
-    if (event == 0x17) {
-        // 命中优先级：返回/导航按钮 → 右列表 → 左列表；都未命中则消费并丢弃本次手势。
-        // 我们的控件不在游戏 InputLayer 树内，不会自己收到事件，故由本回调选根并代派发。
-        if (g_back != nullptr && g_ui->hit_test != nullptr &&
-            g_ui->hit_test(g_back, x, y, {0, 0, kBackW, kBackH}) > 0) {
-            g_touch_root = g_root;
-        } else if (g_ui->hit_test != nullptr &&
-                   g_ui->hit_test(g_right, x, y, {0, 0, kRightW, kRightH}) > 0) {
-            g_touch_root = g_right;
-        } else if (g_ui->hit_test != nullptr &&
-                   g_ui->hit_test(g_left, x, y, {0, 0, kLeftW, kLeftH}) > 0) {
-            g_touch_root = g_left;
-        } else {
-            g_touch_root = nullptr;
-            CORE_UI_LOG_DEBUG("settings touch press miss x=%lld y=%lld",
-                              static_cast<long long>(x), static_cast<long long>(y));
-            return 1;
+    // 返回按钮挂 root 的原生 ExecuteProc：按下/抬起各投递一次到原生事件树，由控件自身
+    // 在释放落于按钮内时触发 back；不再调用 back_button_touch（原生树返回 Unsupported）。
+    if (g_back != nullptr && g_ui->hit_test != nullptr) {
+        const bool inside = g_ui->hit_test(g_back, x, y, {0, 0, kBackW, kBackH}) > 0;
+        if ((event == 0x17 && inside) || (event == 0x18 && g_back_pressed)) {
+            g_back_pressed = event == 0x17;
+            uint32_t consumed = 0;
+            const QolResult result = g_components->dispatch_native_event(
+                g_root, event, param, param2, &consumed);
+            if (!contracts::succeeded(result)) {
+                SETTINGS_LOG("settings back event dispatch failed code=%d", result.code);
+            }
+            return consumed;
         }
-        CORE_UI_LOG_DEBUG("settings touch press root=%s x=%lld y=%lld",
-                          touch_root_name(g_touch_root), static_cast<long long>(x),
-                          static_cast<long long>(y));
     }
-    if (g_touch_root == nullptr) return 1;
-    // 0x17/0x18/0x19 交出游戏原生 TouchHandle 状态机：按下置态（亮光）、移出取消、
-    // 松开且仍落于按钮内才经 ExecuteProc 触发（nav_button_execute → request_host_back）。
+
+    if (event == 0x17) {
+        g_pressed_list = g_ui->hit_test(g_right, x, y, {0, 0, kRightW, kRightH}) > 0
+            ? g_right
+            : g_ui->hit_test(g_left, x, y, {0, 0, kLeftW, kLeftH}) > 0 ? g_left : nullptr;
+    }
+    if (g_pressed_list == nullptr) return 1;
     uint32_t consumed = 0;
-    const QolResult result =
-        g_components->dispatch_native_event(g_touch_root, event, param, param2, &consumed);
+    const QolResult result = g_components->dispatch_native_event(
+        g_pressed_list, event, param, param2, &consumed);
     if (!contracts::succeeded(result)) {
-        SETTINGS_LOG("settings event dispatch failed code=%d", result.code);
+        SETTINGS_LOG("settings list event dispatch failed code=%d", result.code);
     }
-    if (event == 0x18) {
-        CORE_UI_LOG_DEBUG("settings touch release root=%s", touch_root_name(g_touch_root));
-        g_touch_root = nullptr;
-    }
+    if (event == 0x18) g_pressed_list = nullptr;
     return 1;
 }
 

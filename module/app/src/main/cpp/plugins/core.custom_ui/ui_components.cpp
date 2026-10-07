@@ -28,7 +28,6 @@ enum class ComponentKind : uint8_t {
     kHelpPage,
     kNativeToggle,
     kTextButton,
-    kCloseButton,
     kNavButton,
 };
 
@@ -405,7 +404,6 @@ QolResult dispatch_touch(contracts::QolUiHandle root_handle, uint32_t phase, int
         case ComponentKind::kNativeToggle:
             return unsupported();
         case ComponentKind::kTextButton:
-        case ComponentKind::kCloseButton:
         case ComponentKind::kNavButton:
             break;
         case ComponentKind::kPanel:
@@ -427,9 +425,8 @@ bool native_list_ready() {
 }
 
 QolResult delete_owned_lists(Component* component) {
-    // 组件拥有的独立 native 按钮（含关闭/导航按钮）：destroy 时删除本控件一次。
+    // 组件拥有的独立 native 按钮（含导航按钮）：destroy 时删除本控件一次。
     if (component->kind == ComponentKind::kTextButton ||
-        component->kind == ComponentKind::kCloseButton ||
         component->kind == ComponentKind::kNavButton) {
         if (component->native_deleted) return contracts::ok();
         if (!native_list_ready()) return not_ready();
@@ -519,15 +516,6 @@ void native_toggle_execute(void* user) {
 }
 
 void text_button_execute(void* user) {
-    auto* button = static_cast<Component*>(user);
-    if (button == nullptr || button->pending_destroy || button->native_deleted ||
-        !button->enabled || button->on_click == nullptr) return;
-    CallbackScope scope;
-    button->on_click(button->user);
-}
-
-// X 关闭按钮与 text_button 共用原生 ExecuteProc 路径；关闭语义在消费者回调内执行。
-void close_button_execute(void* user) {
     auto* button = static_cast<Component*>(user);
     if (button == nullptr || button->pending_destroy || button->native_deleted ||
         !button->enabled || button->on_click == nullptr) return;
@@ -675,83 +663,6 @@ QolResult text_button_draw(contracts::QolUiHandle handle) {
     return g_adapter->draw_native_text_button_label(
         {x, y, button->rect.w, button->rect.h}, button->text.c_str(), color,
         static_cast<int32_t>(button->style));
-}
-
-QolResult close_button_create(const contracts::UiCloseButtonDesc* desc,
-                              contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
-    if (out == nullptr) return invalid_argument();
-    *out = nullptr;
-    if (desc == nullptr || desc->on_click == nullptr || desc->rect.w <= 0 || desc->rect.h <= 0 ||
-        !rect_within_int32(desc->rect)) {
-        return invalid_argument();
-    }
-    constexpr size_t kCloseButtonAdapterSize =
-        offsetof(contracts::QolUiAdapter, draw_native_close_button) +
-        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_native_close_button);
-    if (g_adapter == nullptr || g_adapter->minor < contracts::kUiAdapterMinor ||
-        g_adapter->size < kCloseButtonAdapterSize ||
-        g_adapter->draw_native_close_button == nullptr ||
-        g_adapter->set_button_enabled == nullptr) {
-        return not_ready();
-    }
-    const QolResult created = create_component(ComponentKind::kCloseButton, 1, desc->rect,
-                                                parent, nullptr, 0, nullptr, nullptr, nullptr,
-                                                out);
-    if (!contracts::succeeded(created)) return created;
-    Component* button = find_component(*out);
-    if (button == nullptr || g_adapter->set_click_proc == nullptr) {
-        if (button != nullptr) {
-            const QolResult cleanup = destroy(*out);
-            if (!contracts::succeeded(cleanup)) return cleanup;
-        }
-        *out = nullptr;
-        return not_ready();
-    }
-    button->on_click = desc->on_click;
-    button->user = desc->user;
-    const QolResult bound = g_adapter->set_click_proc(button->native, &close_button_execute,
-                                                      button);
-    if (!contracts::succeeded(bound)) {
-        const QolResult cleanup = destroy(button->native);
-        *out = nullptr;
-        return contracts::succeeded(cleanup) ? bound : cleanup;
-    }
-    return contracts::ok();
-}
-
-QolResult close_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
-    if (enabled > 1) return invalid_argument();
-    Component* component = nullptr;
-    const QolResult lookup = require_component(handle, &component);
-    if (!contracts::succeeded(lookup)) return lookup;
-    if (component->kind != ComponentKind::kCloseButton) return unsupported();
-    if (g_adapter->set_button_enabled == nullptr) return not_ready();
-    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
-    if (!contracts::succeeded(result)) return result;
-    component->enabled = enabled != 0;
-    return contracts::ok();
-}
-
-QolResult close_button_draw(contracts::QolUiHandle handle) {
-    if (!on_main_thread()) return not_ready();
-    Component* button = nullptr;
-    const QolResult lookup = require_component(handle, &button);
-    if (!contracts::succeeded(lookup)) return lookup;
-    if (button->kind != ComponentKind::kCloseButton) return unsupported();
-    if (g_adapter->draw_native_close_button == nullptr ||
-        g_adapter->control_absolute_origin == nullptr ||
-        g_adapter->control_pressed == nullptr) {
-        return not_ready();
-    }
-    int32_t pressed = 0;
-    int64_t x = 0;
-    int64_t y = 0;
-    QolResult result = g_adapter->control_pressed(handle, &pressed);
-    if (!contracts::succeeded(result)) return result;
-    result = g_adapter->control_absolute_origin(handle, &x, &y);
-    if (!contracts::succeeded(result)) return result;
-    return g_adapter->draw_native_close_button({x, y, button->rect.w, button->rect.h},
-                                               pressed != 0 ? 1 : 0);
 }
 
 QolResult nav_button_create(const contracts::UiNavButtonDesc* desc,
@@ -1617,9 +1528,6 @@ const contracts::QolUiComponents kUiComponents{
     &text_button_create,
     &text_button_set_enabled,
     &text_button_draw,
-    &close_button_create,
-    &close_button_set_enabled,
-    &close_button_draw,
     &nav_button_create,
     &nav_button_set_enabled,
     &nav_button_draw,

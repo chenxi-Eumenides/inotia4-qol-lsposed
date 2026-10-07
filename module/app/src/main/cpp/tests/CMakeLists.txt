@@ -995,6 +995,7 @@ target_compile_features(native_close_button_render_tests PRIVATE cxx_std_17)
 set_target_properties(native_close_button_render_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME native_close_button_render_tests COMMAND native_close_button_render_tests)
 
+# nav 关闭形态（ForceClose）组件级测试：X 路径的原生事件树命中、按下态透传与旧 minor 拒绝。
 add_executable(close_button_component_tests
     test_close_button_component.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
@@ -1016,6 +1017,17 @@ target_include_directories(nav_button_component_tests PRIVATE
 target_compile_features(nav_button_component_tests PRIVATE cxx_std_17)
 set_target_properties(nav_button_component_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME nav_button_component_tests COMMAND nav_button_component_tests)
+
+# 三页导航/返回按钮标准盒一致性（settings/debug/save_backup 均派生 ui_theme kNavBox*；末尾追加）
+add_executable(nav_box_consistency_tests
+    test_nav_box_consistency.cpp
+)
+target_include_directories(nav_box_consistency_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(nav_box_consistency_tests PRIVATE cxx_std_17)
+set_target_properties(nav_box_consistency_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME nav_box_consistency_tests COMMAND nav_box_consistency_tests)
 
 add_executable(debug_two_column_tests
     test_debug_two_column.cpp

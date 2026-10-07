@@ -230,6 +230,13 @@ bool PopupHost::owns_callbacks(const contracts::PanelProviderSpec& provider) con
     return has_callbacks(provider);
 }
 
+bool PopupHost::top_is(const char* panel_id) const {
+    return stack_size_ > 0 && panel_id != nullptr &&
+           stack_[stack_size_ - 1].provider != nullptr &&
+           stack_[stack_size_ - 1].provider->panel_id != nullptr &&
+           std::strcmp(stack_[stack_size_ - 1].provider->panel_id, panel_id) == 0;
+}
+
 bool PopupHost::close(const char* panel_id, bool main_thread) {
     main_thread_ = main_thread;
     if (!main_thread || panel_id == nullptr || stack_size_ == 0 || deactivating_) return false;
@@ -336,7 +343,64 @@ bool PopupHost::pump(bool main_thread) {
     pumping_ = true;
     restore_if_idle();
     pumping_ = false;
+    track_close_stall();
     return true;
+}
+
+void PopupHost::track_close_stall() {
+    const bool close_in_flight = close_pending_ || retry_close_top_;
+    if (!close_in_flight) {
+        close_stall_frames_ = 0;
+        close_stall_progress_ = CloseProgress{};
+        return;
+    }
+    const CloseProgress current{stack_size_, idle_baseline_pumps_, close_pending_,
+                                retry_close_top_, pop_issued_};
+    if (current.differs_from(close_stall_progress_)) {
+        // 任一可观察进度变化（关闭完成、pop 发出、基线确认帧推进等）→ 重计停滞。
+        close_stall_progress_ = current;
+        close_stall_frames_ = 0;
+        return;
+    }
+    if (++close_stall_frames_ < kCloseStallFrameLimit) return;
+    force_complete_close();
+}
+
+void PopupHost::force_complete_close() {
+    const contracts::PanelProviderSpec* pending = pending_provider_;
+    char panel_name[64] = "none";
+    if (pending != nullptr && pending->panel_id != nullptr) {
+        std::snprintf(panel_name, sizeof(panel_name), "%s", pending->panel_id);
+    }
+    // 内部栈残留的 provider 一律补 close（close 约定幂等）；此时游戏栈状态不可信，
+    // 不能再等快照一致。
+    while (stack_size_ > 0) {
+        const contracts::PanelProviderSpec* provider = stack_[--stack_size_].provider;
+        stack_[stack_size_] = {};
+        if (provider != nullptr && provider->close != nullptr) provider->close();
+    }
+    // pop 只补发一次：restore 阶段已发过的（pop_issued_）不重复，避免游戏栈被多弹一层。
+    const bool popped = pop_issued_ || (hooks_.set_process_info != nullptr &&
+                                        hooks_.set_process_info(hooks_.context, 3, 0));
+    // popup entry 占用尽力释放（条目字段还原，不动游戏栈）；收尾后不再有 restore 流程。
+    if (acquired_ && popup_entry_.slot != nullptr && hooks_.restore != nullptr) {
+        (void)hooks_.restore(hooks_.context, &popup_entry_);
+    }
+    log_message("close force-complete panel=%s stall_frames=%u limit=%u pop=%d", panel_name,
+                close_stall_frames_, kCloseStallFrameLimit, popped ? 1 : 0);
+    acquired_ = false;
+    close_pending_ = false;
+    retry_close_top_ = false;
+    original_popup_snapshot_valid_ = false;
+    owned_popup_snapshot_valid_ = false;
+    pop_issued_ = false;
+    pending_provider_ = nullptr;
+    pending_deactivate_owner_ = nullptr;
+    idle_baseline_pumps_ = 0;
+    close_stall_frames_ = 0;
+    close_stall_progress_ = CloseProgress{};
+    popup_entry_ = {};
+    popup_entry_.state_id = -1;
 }
 
 void PopupHost::restore_if_idle() {

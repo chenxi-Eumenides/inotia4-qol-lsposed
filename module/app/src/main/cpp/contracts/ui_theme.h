@@ -48,4 +48,14 @@ constexpr uint32_t kSwitchTrackOn = 0xFF302824u;   // RGB(36,40,48)
 constexpr uint32_t kSwitchThumbOff = 0xFFA8AAA7u;  // RGB(167,170,168)
 constexpr uint32_t kSwitchThumbOn = kTextGold;     // RGB(255,224,160)
 
+// —— 导航/返回按钮标准盒（屏幕绝对逻辑坐标）——
+// 模块设置 / 调试面板 / 存档备份三页的返回与 X 按钮统一使用同一屏幕绝对 rect：
+// 左上 (8,8)、盒 78×86（原版 UIGameMenu_InitBackButton SetRect(_,6,78,86) 的贴图盒，
+// 使 X 与返回在同一盒内共用同款金属框）。各页创建控件时自行把绝对 rect 换算为
+// root 相对（root 原点 = 屏幕 inset），换算口径与设置页 settings.cpp 一致。
+constexpr int64_t kNavBoxAbsX = 8;
+constexpr int64_t kNavBoxAbsY = 8;
+constexpr int64_t kNavBoxW = 78;
+constexpr int64_t kNavBoxH = 86;
+
 }  // namespace qol::contracts::ui_theme

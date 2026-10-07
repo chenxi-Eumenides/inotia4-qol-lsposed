@@ -24,12 +24,25 @@ constexpr const char* kOwner = "core.custom_ui";
 constexpr const char* kRoute = "/api/debug/custom-ui/components";
 
 // 双栏页：面板撑满 960×640；左右 viewport 相对 panel，扩框/裁剪由 help_page 处理。
+// viewport 顶从 y=16 下移到 y=100（参照设置页 kLeftY=100）：nav 标准盒占据左上
+// (8,8)-(86,94)，命中区必须让开，否则原生树深优先命中在首行出现歧义；
+// 高度相应收窄（panel.h=640 - 顶 100 - 底边距 16，扩框后 frame 底 632 ≤ 640）。
+// 5 行 × kRowHeight(56) = 280 ≤ 524；右栏 detail 最深内容（开关说明 y+296 行底
+// ≈ panel y 416）≤ viewport 底 624，均不越界。
+// 右栏交互控件 rect 一律 = kRightViewport 原点 + 局部偏移，与 detail 文字绘制同一
+// 坐标基准；控件不能用旧 viewport 下的固定 panel 绝对 y——viewport 下移后文字
+// 跟着右移下移而控件不动，说明行与按钮就会重叠。
 constexpr contracts::UiRect kPanelRect{0, 0, 960, 640};
-constexpr contracts::UiRect kLeftViewport{16, 16, 204, 608};
-constexpr contracts::UiRect kRightViewport{260, 16, 684, 608};
+constexpr contracts::UiRect kLeftViewport{16, 100, 204, 524};
+constexpr contracts::UiRect kRightViewport{260, 100, 684, 524};
 constexpr int32_t kRowHeight = 56;
-// 面板关闭入口：自适应导航按钮，位于右栏顶部，不与分类控件行重叠（x 888 >= 504+220）。
-constexpr contracts::UiRect kPanelNavRect{888, 24, 48, 48};
+// 面板关闭入口：自适应导航按钮，X/返回共用原生金属框盒（与设置页同款）。
+// 三页统一放在屏幕左上 (8,8)（绝对逻辑坐标，ui_theme::kNavBox*）；
+// 创建时换算成 root 相对 rect（root 原点 = 屏幕 inset，同设置页口径）。
+constexpr contracts::UiRect kPanelNavAbsRect{contracts::ui_theme::kNavBoxAbsX,
+                                             contracts::ui_theme::kNavBoxAbsY,
+                                             contracts::ui_theme::kNavBoxW,
+                                             contracts::ui_theme::kNavBoxH};
 
 // 分类清单：新增调试内容 = 加一条名称，并在 build_category_controls 与
 // draw_category_detail 各加一个分支；两类内容互不冲突。
@@ -115,8 +128,11 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
     if (components->text_button_create == nullptr || components->text_button_set_enabled == nullptr) {
         return false;
     }
-    const contracts::UiRect rects[3] = {{280, 128, 220, 48}, {504, 128, 220, 48},
-                                        {280, 180, 220, 48}};
+    // 局部偏移相对右 viewport：标题 y+32、说明 y+84 之下排第一行，脚注 y+242 之上收第二行。
+    const contracts::UiRect rects[3] = {
+        {kRightViewport.x + 20, kRightViewport.y + 120, 220, 48},
+        {kRightViewport.x + 244, kRightViewport.y + 120, 220, 48},
+        {kRightViewport.x + 20, kRightViewport.y + 176, 220, 48}};
     const char* labels[3] = {"打开", "不可用", "较长的 UTF-8 按钮文字示例"};
     for (uint32_t i = 0; i < 3; ++i) {
         const contracts::UiButtonDesc desc{rects[i], labels[i], 0, &demo_button_clicked,
@@ -136,9 +152,12 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
 bool build_nav_demos(const contracts::QolUiComponents* components,
                      contracts::QolUiHandle parent, CategoryControl* out, uint32_t* out_count) {
     if (components->nav_button_create == nullptr) return false;
-    // 盒尺寸取原生 78×86（与设置页一致），间距 88 使三枚金属框不重叠。
-    const contracts::UiRect rects[3] = {{280, 128, 78, 86}, {368, 128, 78, 86},
-                                        {456, 128, 78, 86}};
+    // 盒尺寸取原生 78×86（与设置页一致），间距 88 使三枚金属框不重叠；
+    // 标题行 y+32 之下、标签行 y+224 之上。
+    const contracts::UiRect rects[3] = {
+        {kRightViewport.x + 20, kRightViewport.y + 112, 78, 86},
+        {kRightViewport.x + 108, kRightViewport.y + 112, 78, 86},
+        {kRightViewport.x + 196, kRightViewport.y + 112, 78, 86}};
     const uint32_t modes[3] = {contracts::kUiNavButtonAuto, contracts::kUiNavButtonForceClose,
                                contracts::kUiNavButtonForceBack};
     for (uint32_t i = 0; i < 3; ++i) {
@@ -196,13 +215,14 @@ void draw_switches_detail(const contracts::QolUiAdapter* adapter, contracts::UiR
             static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
         set_text_color(adapter, contracts::ui_theme::kTextNormal);
         (void)adapter->draw_string_with_font("开 / 关 / 三种尺寸 · 点击语义由消费者决定",
-            static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 262), 0, 0);
+            static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 296), 0, 0);
     }
     constexpr uint32_t kSwitchDemoCount = 6;
+    // 行距 68：说明文字从 y+262 下移到 y+296，避开最后一排胶囊底边（y+204+66=y+270）。
     const contracts::UiRect local[kSwitchDemoCount] = {
-        {380, 70, 116, 50}, {512, 70, 116, 50},
-        {380, 138, 94, 42}, {512, 138, 94, 42},
-        {380, 202, 150, 66}, {512, 202, 150, 66},
+        {380, 76, 116, 50}, {512, 76, 116, 50},
+        {380, 144, 94, 42}, {512, 144, 94, 42},
+        {380, 204, 150, 66}, {512, 204, 150, 66},
     };
     for (uint32_t i = 0; i < kSwitchDemoCount; ++i) {
         (void)adapter->draw_native_toggle(
@@ -218,9 +238,10 @@ void draw_nav_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect r
     set_text_color(adapter, contracts::ui_theme::kTextGold);
     (void)adapter->draw_string_with_font("自适应导航按钮：点击请求弹栈顶", x + 20, y + 32, 0, 0);
     set_text_color(adapter, contracts::ui_theme::kTextNormal);
-    (void)adapter->draw_string_with_font("自动（按栈深）", x + 20, y + 232, 0, 0);
-    (void)adapter->draw_string_with_font("强制 X", x + 108, y + 232, 0, 0);
-    (void)adapter->draw_string_with_font("强制返回箭头", x + 196, y + 232, 0, 0);
+    // 标签行 y+224：演示盒（y+112..y+198）之下 26px，与标题行（y+32）分离。
+    (void)adapter->draw_string_with_font("自动（按栈深）", x + 20, y + 224, 0, 0);
+    (void)adapter->draw_string_with_font("强制 X", x + 108, y + 224, 0, 0);
+    (void)adapter->draw_string_with_font("强制返回箭头", x + 196, y + 224, 0, 0);
 }
 
 void draw_palette_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect right) {
@@ -397,8 +418,12 @@ QolResult create_components() {
         return result;
     }
 
-    const contracts::UiNavButtonDesc nav_desc{kPanelNavRect, contracts::kUiNavButtonAuto,
-                                              nullptr, nullptr};
+    // 绝对 (8,8) 换算 root 相对：root 原点 = 屏幕 inset（root rect = {inset, inset, 960, 640}），
+    // 与设置页 nav 创建（kBackAbsX - inset_x）完全同口径，三页按钮屏幕位置一致。
+    const contracts::UiNavButtonDesc nav_desc{
+        {kPanelNavAbsRect.x - inset_width, kPanelNavAbsRect.y - inset_height,
+         kPanelNavAbsRect.w, kPanelNavAbsRect.h},
+        contracts::kUiNavButtonAuto, nullptr, nullptr};
     result = components->nav_button_create(&nav_desc, g_root, &g_panel_nav);
     if (!contracts::succeeded(result)) {
         destroy_components();

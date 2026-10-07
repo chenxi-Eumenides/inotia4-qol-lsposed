@@ -381,7 +381,7 @@ int main() {
     auto ui = make_adapter();
     CHECK(ui_components_bind(&ui));
     g_api = ui_components_api();
-    CHECK(g_api->major == 1 && g_api->minor == 12);
+    CHECK(g_api->major == 1 && g_api->minor == 11);
     QolUiHandle root = nullptr, list = nullptr;
     CHECK(succeeded(create(0, nullptr, &root)));
     UiScrollListDesc desc{{12, 20, 200, 140}, 56, 24, 2, &draw_item, &select, &g_selected};

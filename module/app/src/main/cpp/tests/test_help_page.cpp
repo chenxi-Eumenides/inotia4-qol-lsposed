@@ -269,7 +269,7 @@ int main() {
         offsetof(QolUiComponents, dispatch_native_event) + sizeof(void*));
     auto ui = adapter();
     CHECK(ui_components_bind(&ui)); g_api = ui_components_api();
-    CHECK(g_api->minor == 12 && kUiAdapterMinor == 16);
+    CHECK(g_api->minor == 11 && kUiAdapterMinor == 16);
     UiHelpOption options[8]{};
     for (int i = 0; i < 8; ++i) options[i] = {&g_users[i], &detail};
     auto page_desc = desc(options);

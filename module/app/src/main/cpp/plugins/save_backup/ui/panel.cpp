@@ -112,9 +112,10 @@
 #define MSG_Y 0x18
 #define MSG_W 0x120
 #define MSG_H 0x28
-// 返回按钮：与 core.ui 设置页完全同尺寸（原版 option 贴图量级），屏幕左上 (8,8)。
-#define BACK_BTN_W 0x4a
-#define BACK_BTN_H 0x51
+// 返回按钮：三页统一导航标准盒（panel.h kBackBtn*，源自 contracts/ui_theme.h kNavBox*：
+// 屏幕左上 (8,8) 78×86，与 core.ui 设置页完全同款，原版 option 贴图量级）。
+#define BACK_BTN_W kBackBtnW
+#define BACK_BTN_H kBackBtnH
 // 背景贴图 unit/loc：与 core.ui 设置页同值（title background 左右两半）。
 #define TITLE_BACKGROUND_LEFT_UNIT 0x4f
 #define TITLE_BACKGROUND_RIGHT_UNIT 0x50

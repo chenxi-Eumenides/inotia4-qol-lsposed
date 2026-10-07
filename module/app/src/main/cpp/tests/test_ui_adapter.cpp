@@ -389,20 +389,22 @@ int main() {
     CHECK(adapter->draw_native_text_button_background != nullptr);
     CHECK(adapter->set_button_enabled != nullptr);
     CHECK(adapter->draw_native_text_button_label != nullptr);
+    CHECK(adapter->draw_native_close_button != nullptr);
 
-    // control_pressed 必须读原版 CB_STATE=0x68，而非内联文本区 0x08：仅 0x08 置位不算按下。
+    // control_pressed 必须读原版 CB_STATE（game_symbols.h），而非内联文本区 0x08：
+    // 仅 0x08 置位不算按下。
     {
         static FakeControl pressed_control;
         pressed_control.data[0x08] = 1;
-        pressed_control.data[0x68] = 0;
+        pressed_control.data[CB_STATE] = 0;
         int32_t state = -1;
         CHECK(adapter->control_pressed(&pressed_control, &state).ok == kQolOk && state == 0);
-        pressed_control.data[0x68] = 1;
+        pressed_control.data[CB_STATE] = 1;
         CHECK(adapter->control_pressed(&pressed_control, &state).ok == kQolOk && state == 1);
         pressed_control.data[0x08] = 0;
-        pressed_control.data[0x68] = 0;
+        pressed_control.data[CB_STATE] = 0;
         CHECK(adapter->control_pressed(&pressed_control, &state).ok == kQolOk && state == 0);
-        pressed_control.data[0x68] = 2;  // 非 1 的值不算按下（原版 ==1 判定）。
+        pressed_control.data[CB_STATE] = 2;  // 非 1 的值不算按下（原版 ==1 判定）。
         CHECK(adapter->control_pressed(&pressed_control, &state).ok == kQolOk && state == 0);
     }
 
@@ -418,6 +420,10 @@ int main() {
                       sizeof(adapter->set_button_enabled) ==
                   offsetof(qol::contracts::QolUiAdapter, draw_native_text_button_label),
                   "ui adapter label helper must remain a tail append");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, draw_native_text_button_label) +
+                      sizeof(adapter->draw_native_text_button_label) ==
+                  offsetof(qol::contracts::QolUiAdapter, draw_native_close_button),
+                  "ui adapter close draw must append the table");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -486,7 +492,7 @@ int main() {
     components.major = qol::contracts::kUiContractMajor;
     components.minor = qol::contracts::kUiContractMinor;
     CHECK(components.size == sizeof(qol::contracts::QolUiComponents));
-    CHECK(components.major == 1 && components.minor == 12);
+    CHECK(components.major == 1 && components.minor == 11);
 
     const qol::contracts::UiRect rect{10, 20, 30, 40};
     FakeControl control{};

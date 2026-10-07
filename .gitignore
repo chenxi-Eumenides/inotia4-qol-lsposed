@@ -68,7 +68,10 @@ log/
 # ---- 编辑器/系统杂项 ----
 .DS_Store
 *.swp
+
+# ---- AI代理 ----
 .sisyphus
+.slim
 
 # ---- 其他文件 ----
 docs/history/experiments/改版作者的一些探索文档
@@ -77,9 +80,3 @@ docs/history/experiments/改版作者的一些探索文档
 /*.md
 !/README.md
 !/ARCHITECTURE.md
-
-# deepwork 进度文件（git 本地状态）
-.slim/deepwork/
-
-# 模块本地存档运行数据（设备/导出产生，不入库）
-module-saves/

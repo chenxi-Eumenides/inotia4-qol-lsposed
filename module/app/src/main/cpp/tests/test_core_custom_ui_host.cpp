@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 using qol::contracts::PanelCallbacks;
@@ -37,6 +38,8 @@ uintptr_t g_popup_top = 0x1234;
 uint32_t g_pending_count = 0;
 uintptr_t g_pending_top = 0;
 int g_logs = 0;
+int g_pop_calls = 0;
+char g_last_log[256] = {};
 bool g_delay_pop = false;
 uint32_t g_event_result = 0;
 const QolPopupStateHooks* g_acquired_hooks = nullptr;
@@ -75,7 +78,10 @@ bool popup_stack_snapshot(void*, uint32_t* count, uintptr_t* top_enter_vma) {
     return true;
 }
 
-void host_log(void*, int32_t, const char*) { ++g_logs; }
+void host_log(void*, int32_t, const char* message) {
+    ++g_logs;
+    if (message != nullptr) std::snprintf(g_last_log, sizeof(g_last_log), "%s", message);
+}
 
 bool set_process_info(void*, int32_t process, int32_t state_id) {
     ++g_process_calls;
@@ -85,6 +91,7 @@ bool set_process_info(void*, int32_t process, int32_t state_id) {
         ++g_popup_count;
         g_popup_top = 0x9999;
     } else if (process == 3) {
+        ++g_pop_calls;
         if (g_delay_pop) {
             g_delay_pop = false;
         } else if (g_pending_count != 0) {
@@ -156,6 +163,8 @@ void reset_fakes() {
     g_pending_count = 0;
     g_pending_top = 0;
     g_logs = 0;
+    g_pop_calls = 0;
+    g_last_log[0] = '\0';
     g_delay_pop = false;
     g_open_a = g_open_b = g_open_c = g_close_a = g_close_b = g_close_c = 0;
     std::memset(g_slots, 0, sizeof(g_slots));
@@ -346,6 +355,35 @@ int main() {
     assert(g_restores == 0 && strict_snapshot.close_pending_for_test());
     assert(strict_snapshot.pump(true));
     assert(g_restores == 1 && !strict_snapshot.close_pending_for_test());
+
+    reset_fakes();
+    // P3b 逃生路径：快照持续失配 → close 无限重排队（缺陷 β）；close 管线可观察进度
+    // 连续 kCloseStallFrameLimit 帧不变后强制收尾：补 close + 补发一次 pop +
+    // 释放 popup entry + 清空状态机，超限原因与上限值写入日志。
+    auto stall_escape = make_host();
+    assert(stall_escape.open(kPanelA, true));
+    g_popup_count = 3;
+    g_popup_top = 0x7777;
+    assert(stall_escape.close("panel.a", true));
+    assert(stall_escape.active_for_test() && g_close_a == 0);
+    int stall_pumps = 0;
+    while (stall_escape.close_pending_for_test() &&
+           stall_pumps < PopupHost::kCloseStallFrameLimit * 2) {
+        assert(stall_escape.pump(true));
+        ++stall_pumps;
+    }
+    // 第 1 帧泵记录停滞基线，其后每帧 +1 → 强制发生在第 limit+1 帧（有界，不无限循环）。
+    assert(stall_pumps == PopupHost::kCloseStallFrameLimit + 1);
+    assert(!stall_escape.active_for_test() && !stall_escape.close_pending_for_test());
+    assert(g_close_a == 1);
+    assert(g_pop_calls == 1 && g_last_process == 3);  // pop 恰补发一次
+    assert(g_restores == 1);                          // popup entry 尽力释放
+    assert(std::strstr(g_last_log, "close force-complete") != nullptr &&
+           std::strstr(g_last_log, "panel=panel.a") != nullptr &&
+           std::strstr(g_last_log, "limit=120") != nullptr);
+    // 收尾后状态干净：继续泵帧无额外 close/pop。
+    assert(stall_escape.pump(true));
+    assert(g_close_a == 1 && g_pop_calls == 1 && !stall_escape.close_pending_for_test());
 
     reset_fakes();
     auto deactivate_after_close = make_host();

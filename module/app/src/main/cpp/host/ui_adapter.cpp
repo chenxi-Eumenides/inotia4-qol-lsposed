@@ -34,9 +34,9 @@ using contracts::UiRect;
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotReady = "ui adapter not ready";
 constexpr const char* kUnsupported = "ui adapter unsupported";
-// 控件按下态：原版按 data + CB_STATE（game_symbols.h CB_STATE=0x68）== 1 判定；
+// 控件按下态：原版按 data + CB_STATE（game_symbols.h CB_STATE）== 1 判定；
 // 旧实现误读 data+0x08（内联文本区），导致按住亮光绘制永不出现。
-constexpr size_t kControlPressedStateOffset = 0x68;
+constexpr size_t kControlPressedStateOffset = CB_STATE;
 
 struct ClickBinding {
     contracts::QolUiClickFn callback;
@@ -734,11 +734,10 @@ QolResult control_pressed(QolUiHandle control, int32_t* out_pressed) {
     *out_pressed = 0;
     void* data = ui_control_data(control);
     if (data == nullptr) return not_ready();
-    *out_pressed =
-        *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(data) +
-                                          kControlPressedStateOffset) == 1
-            ? 1
-            : 0;
+    *out_pressed = *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(data) +
+                                                     kControlPressedStateOffset) == 1
+                       ? 1
+                       : 0;
     return contracts::ok();
 }
 

@@ -66,6 +66,10 @@ bool close_top() {
     if (provider != nullptr && provider->close != nullptr) {
         if (g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)) {
             closed = g_popup_host->close(provider->panel_id, main_thread_now());
+            // 延迟关闭（快照失配排队）时宿主内部栈顶仍是本面板：不得提前 drop 栈记录，
+            // 否则 g_depth 归 0 而面板仍在，后续点击在 g_depth==0 被静默吞掉（退出失效）。
+            // 排队期间重复请求只是重排队（不重复发 pop），完成由帧泵驱动宿主重试推进。
+            if (closed && g_popup_host->top_is(provider->panel_id)) return false;
         } else {
             provider->close();
             closed = true;
@@ -113,6 +117,10 @@ void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
 }
 
 int32_t ui_panels_frame_pump(int64_t, void*) {
+    // provider 可能自关（存档备份返回键自调 set_process_info(3,0)，不经本栈）：
+    // 帧泵开头剔除陈旧栈顶，自关页面静置后 depth 即回落到真实值，
+    // 不必等下一次 open/back（auto 导航按钮绘制据此选 X/箭头）。
+    prune_inactive_top();
     // 帧边界消费延迟关闭请求：此处不在弹窗事件/原生控件遍历内，关闭可安全执行。
     if (g_back_requested) {
         g_back_requested = false;

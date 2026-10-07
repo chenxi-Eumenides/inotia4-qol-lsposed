@@ -121,7 +121,7 @@ QolResult control_absolute_origin(qol::contracts::QolUiHandle handle, int64_t* o
 }
 
 // 模拟引擎事件树语义：按下落在按钮内置 enabled，抬起仍在按钮内且 enabled 才触发点击；
-// 移出后抬起取消。与 test_close_button_component.cpp 的同款 fake 保持一致。
+// 移出后抬起取消。与 close/nav 组件测试的同款 fake 保持一致。
 QolResult control_tree_event(qol::contracts::QolUiHandle handle, uint64_t event, uint64_t param,
                              uint64_t, uint32_t* consumed) {
     if (handle == nullptr || param == 0 || consumed == nullptr) return invalid();
@@ -193,13 +193,14 @@ int main() {
 
     using qol::contracts::QolUiComponents;
 
-    // 表尾纯追加：close 三指针前缀成员保持原偏移，nav 三项位于其后且可用。
+    // 表尾纯追加：既有成员保持原偏移，nav 三项位于表尾且可用。
     static_assert(offsetof(QolUiComponents, nav_button_create) >
-        offsetof(QolUiComponents, close_button_draw), "nav entries must append the table");
+        offsetof(QolUiComponents, text_button_draw), "nav entries must append the table");
+    static_assert(offsetof(QolUiComponents, nav_button_set_enabled) >
+        offsetof(QolUiComponents, nav_button_create) &&
+        offsetof(QolUiComponents, nav_button_draw) >
+        offsetof(QolUiComponents, nav_button_set_enabled), "nav entries keep their order");
     const QolUiComponents* components = qol::features::core_ui::ui_components_api();
-    CHECK(components->close_button_create != nullptr &&
-          components->close_button_set_enabled != nullptr &&
-          components->close_button_draw != nullptr);
     CHECK(components->nav_button_create != nullptr &&
           components->nav_button_set_enabled != nullptr &&
           components->nav_button_draw != nullptr);
@@ -359,8 +360,7 @@ int main() {
     CHECK(g_back_requests == 4 && g_clicks == 4);
     CHECK(components->nav_button_set_enabled(nav, 2).code == kQolErrInvalidArgument);
 
-    // kind 隔离：close 入口作用于 nav 句柄、nav 入口作用于非 nav 句柄必须拒绝。
-    CHECK(components->close_button_draw(nav).code == kQolErrUnsupported);
+    // kind 隔离：nav 入口作用于非 nav 句柄必须拒绝。
     CHECK(components->text_button_set_enabled(nav, 0).code == kQolErrUnsupported);
     CHECK(components->nav_button_draw(root).code == kQolErrUnsupported);
 
@@ -375,7 +375,7 @@ int main() {
     CHECK(create_control(0, nullptr, &native_parent).ok == kQolOk);
     CHECK(native_parent != nullptr);
     const qol::contracts::UiNavButtonDesc foreign_desc{
-        {8, 8, 74, 81}, qol::contracts::kUiNavButtonAuto, &on_click, nullptr};
+        {8, 8, 78, 86}, qol::contracts::kUiNavButtonAuto, &on_click, nullptr};
     g_option_image_loads = 0;
     QolUiHandle foreign_nav = nullptr;
     CHECK(components->nav_button_create(&foreign_desc, native_parent, &foreign_nav).ok == kQolOk);

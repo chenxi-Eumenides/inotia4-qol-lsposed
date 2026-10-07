@@ -7,6 +7,19 @@
 #include <string>
 #include <vector>
 
+// 三页导航盒统一：设置页返回/X 按钮必须引用 contracts/ui_theme.h 的标准盒常量
+// （左上 (8,8) 78×86），与调试面板（debug_components）、存档备份（save_backup panel.h）一致。
+static_assert(qol::features::core_ui::kBackAbsX == qol::contracts::ui_theme::kNavBoxAbsX &&
+              qol::features::core_ui::kBackAbsY == qol::contracts::ui_theme::kNavBoxAbsY &&
+              qol::features::core_ui::kBackW == qol::contracts::ui_theme::kNavBoxW &&
+              qol::features::core_ui::kBackH == qol::contracts::ui_theme::kNavBoxH,
+              "settings back button must use the shared nav box");
+static_assert(qol::contracts::ui_theme::kNavBoxAbsX == 8 &&
+              qol::contracts::ui_theme::kNavBoxAbsY == 8 &&
+              qol::contracts::ui_theme::kNavBoxW == 78 &&
+              qol::contracts::ui_theme::kNavBoxH == 86,
+              "shared nav box is the top-left 78x86 native texture box");
+
 namespace {
 
 using namespace qol;
@@ -44,10 +57,12 @@ contracts::QolUiHandle g_native_event_root = nullptr;
 uint64_t g_native_event_code = 0;
 uint64_t g_native_event_param = 0;
 uint64_t g_native_event_param2 = 0;
+int g_back_execute_calls = 0;
+int g_back_helper_calls = 0;
 int g_back_requests = 0;
 bool g_back_close_pending = false;
-// fake 原生 TouchHandle：按下落于按钮内置态，移出取消，松开仍落于按钮内才 ExecuteProc。
 bool g_fake_native_pressed = false;
+void (*g_back_execute)(void*) = nullptr;
 bool g_right_selection_enabled = true;
 int g_receipt_queries = 0;
 int32_t g_persisted_value = 0;
@@ -125,7 +140,6 @@ QolResult fake_text_button_draw(contracts::QolUiHandle handle) {
     ++g_action_widget.draw_calls;
     return contracts::ok();
 }
-QolResult fake_back_request();
 QolResult fake_dispatch_native_event(contracts::QolUiHandle root, uint64_t event,
                                      uint64_t param, uint64_t param2, uint32_t* consumed) {
     ++g_native_event_dispatches;
@@ -141,25 +155,38 @@ QolResult fake_dispatch_native_event(contracts::QolUiHandle root, uint64_t event
         x = point[0];
         y = point[1];
     }
-    // 模拟游戏原生 TouchHandle：仅 nav 手势根（g_root）需要判定。
-    if (root == g_root && g_ui != nullptr && g_ui->hit_test != nullptr) {
-        const bool inside = g_ui->hit_test(g_back, x, y, {0, 0, 74, 81}) > 0;
-        if (event == 0x17) {
-            g_fake_native_pressed = inside;
-        } else if (event == 0x19) {
-            if (!inside) g_fake_native_pressed = false;
-        } else if (event == 0x18) {
-            const bool pressed = g_fake_native_pressed;
-            g_fake_native_pressed = false;
-            if (pressed && inside) (void)fake_back_request();
+    if (root == g_root && event == 0x17 &&
+        g_ui->hit_test(g_back, x, y, {0, 0, 78, 86}) > 0) {
+        g_fake_native_pressed = true;
+    }
+    if (root == g_root && event == 0x18 && g_fake_native_pressed) {
+        g_fake_native_pressed = false;
+        if (g_ui->hit_test(g_back, x, y, {0, 0, 78, 86}) > 0 && g_back_execute != nullptr) {
+            ++g_back_execute_calls;
+            g_back_execute(nullptr);
         }
     }
     return contracts::ok();
 }
-QolResult fake_back_request() {
+QolResult fake_nav_button_create(const contracts::UiNavButtonDesc* desc,
+                                 contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    assert(desc != nullptr && desc->mode == contracts::kUiNavButtonAuto);
+    assert(parent == g_fake_root);
+    g_back = reinterpret_cast<void*>(0x4000);
+    *out = g_back;
+    return contracts::ok();
+}
+QolResult fake_nav_button_draw(contracts::QolUiHandle handle) {
+    assert(handle == reinterpret_cast<void*>(0x4000));
+    return contracts::ok();
+}
+QolResult fake_back_touch(contracts::QolUiHandle, uint32_t, int64_t, int64_t) {
+    ++g_back_helper_calls;
+    return contracts::error(kQolErrUnsupported, "nav button uses event tree", 27);
+}
+void fake_back_execute(void*) {
     ++g_back_requests;
     g_back_close_pending = true;
-    return contracts::ok();
 }
 int32_t fake_main_thread() { return 1; }
 QolResult fake_touch_coordinates(uint64_t param, int64_t* x, int64_t* y) {
@@ -172,7 +199,7 @@ QolResult fake_touch_coordinates(uint64_t param, int64_t* x, int64_t* y) {
 }
 int32_t fake_hit_test(contracts::QolUiHandle handle, int64_t x, int64_t y, contracts::UiRect) {
     if (handle == reinterpret_cast<void*>(0x2000)) return 1;
-    return handle == reinterpret_cast<void*>(0x4000) && x >= 0 && x < 74 && y >= 0 && y < 81
+    return handle == reinterpret_cast<void*>(0x4000) && x >= 0 && x < 78 && y >= 0 && y < 86
         ? 1 : 0;
 }
 QolResult fake_toggle_create(const contracts::UiNativeToggleDesc* desc,
@@ -289,9 +316,10 @@ void setup() {
     g_native_event_code = 0;
     g_native_event_param = 0;
     g_native_event_param2 = 0;
-    g_back_requests = 0;
+    g_back_execute_calls = g_back_helper_calls = g_back_requests = 0;
     g_back_close_pending = false;
     g_fake_native_pressed = false;
+    g_back_execute = &fake_back_execute;
     g_right_selection_enabled = true;
     g_receipt_queries = 0;
     g_persisted_value = 0;
@@ -336,7 +364,9 @@ void setup() {
     g_fake_components.text_button_set_enabled = &fake_text_button_set_enabled;
     g_fake_components.text_button_draw = &fake_text_button_draw;
     g_fake_components.dispatch_native_event = &fake_dispatch_native_event;
-    g_fake_components.back_request = &fake_back_request;
+    g_fake_components.nav_button_create = &fake_nav_button_create;
+    g_fake_components.nav_button_draw = &fake_nav_button_draw;
+    g_fake_components.back_button_touch = &fake_back_touch;
     g_fake_components.native_toggle_create = &fake_toggle_create;
     g_fake_components.native_toggle_set_value = &fake_toggle_set_value;
     g_fake_components.native_toggle_set_enabled = &fake_toggle_set_enabled;
@@ -350,7 +380,8 @@ void setup() {
     g_root = g_fake_root;
     g_back = reinterpret_cast<void*>(0x4000);
     g_panel_active = false;
-    g_touch_root = nullptr;
+    g_pressed_list = nullptr;
+    g_back_pressed = false;
 
     g_fake_catalog = {};
     g_fake_catalog.size = sizeof(g_fake_catalog);
@@ -619,7 +650,7 @@ void test_settings_event_uses_one_scroll_list_dispatch() {
     assert(g_native_event_dispatches == 1 && g_native_event_root == g_right &&
            g_native_event_code == 0x17 && g_native_event_param == param &&
            g_native_event_param2 == 11);
-    assert(settings_panel_event(0x19, param, 12) == 1);
+    assert(settings_panel_event(0x19, param, 12) == 7);
     assert(g_native_event_dispatches == 2 && g_native_event_root == g_right &&
            g_native_event_code == 0x19 && g_native_event_param2 == 12);
     assert(settings_panel_event(0x18, param, 13) == 1);
@@ -628,70 +659,60 @@ void test_settings_event_uses_one_scroll_list_dispatch() {
     g_panel_active = false;
 }
 
-void test_back_button_requests_on_release() {
+void test_native_back_event_tree_and_deferred_request() {
     setup();
     g_panel_active = true;
     g_back = reinterpret_cast<void*>(0x4000);
     int64_t inside[] = {10, 10};
     const uint64_t inside_param = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(inside));
-
-    // 按下命中 nav：只置原生态并派发/消费，不请求返回（松开才触发）。
-    assert(settings_panel_event(0x17, inside_param, 21) == 1);
-    assert(g_back_requests == 0 && !g_back_close_pending);
+    assert(settings_panel_event(0x17, inside_param, 21) == 7);
     assert(g_native_event_dispatches == 1 && g_native_event_root == g_root &&
-           g_native_event_code == 0x17);
-
-    // 松开仍落于按钮内 → 原生 ExecuteProc 触发恰一次 back_request，并清手势根。
-    assert(settings_panel_event(0x18, inside_param, 22) == 1);
-    assert(g_back_requests == 1 && g_back_close_pending);
+           g_native_event_code == 0x17 && g_native_event_param2 == 21);
+    assert(settings_panel_event(0x18, inside_param, 22) == 7);
     assert(g_native_event_dispatches == 2 && g_native_event_root == g_root &&
-           g_native_event_code == 0x18);
-    // 手势根已清：后续 0x18 不再派发、不再请求。
-    assert(settings_panel_event(0x18, inside_param, 23) == 1);
-    assert(g_native_event_dispatches == 2 && g_back_requests == 1);
+           g_native_event_code == 0x18 && g_native_event_param2 == 22);
+    assert(g_back_execute_calls == 1 && g_back_requests == 1 && g_back_close_pending);
+    assert(g_back_helper_calls == 0);
 
-    // 按下后移出再松开：原生 TouchHandle 取消，不触发。
-    g_back_requests = 0;
-    g_back_close_pending = false;
+    g_back_close_pending = false;  // Frame-pump consumer owns deferred close.
     int64_t outside[] = {400, 300};
     const uint64_t outside_param = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(outside));
-    assert(settings_panel_event(0x17, inside_param, 31) == 1);
-    assert(settings_panel_event(0x19, outside_param, 32) == 1);
-    assert(settings_panel_event(0x18, inside_param, 33) == 1);
-    assert(g_back_requests == 0 && !g_back_close_pending);
+    assert(settings_panel_event(0x17, inside_param, 31) == 7);
+    assert(settings_panel_event(0x18, outside_param, 32) == 7);
+    assert(g_back_execute_calls == 1 && g_back_requests == 1 && !g_back_close_pending);
+    assert(g_back_helper_calls == 0);
 
-    // nav 外按下落到右列表（g_right），松开不请求返回。
-    assert(settings_panel_event(0x17, outside_param, 41) == 1);
-    assert(g_native_event_dispatches > 0 && g_native_event_root == g_right);
-    assert(settings_panel_event(0x18, outside_param, 42) == 1);
-    assert(g_back_requests == 0);
+    // bit63 系统子事件不得打断按下序列（真机每次按下必插入 0x8000000X）：
+    // 下按 → 盒内 0x19 → 0x80000001 → 盒内 0x18，抬起必须转发原生树并触发返回。
+    g_back_execute_calls = 0;
+    g_back_requests = 0;
+    assert(settings_panel_event(0x17, inside_param, 41) == 7);
+    const int dispatches_after_press = g_native_event_dispatches;
+    assert(settings_panel_event(0x19, inside_param, 42) == 7);
+    assert(g_native_event_dispatches == dispatches_after_press + 1 &&
+           g_native_event_root == g_root && g_native_event_code == 0x19);
+    assert(settings_panel_event(0x80000001, inside_param, 44) == 1);
+    assert(g_native_event_dispatches == dispatches_after_press + 1);
+    assert(settings_panel_event(0x18, inside_param, 43) == 7);
+    assert(g_native_event_root == g_root && g_native_event_code == 0x18 &&
+           g_native_event_param2 == 43);
+    assert(g_back_execute_calls == 1 && g_back_requests == 1 && g_back_close_pending);
+    assert(g_back_helper_calls == 0);
 
-    // bit63 系统子事件：不派发、不改手势态、消费返回 1；且不打断已开始的手势。
-    assert(settings_panel_event(0x17, inside_param, 51) == 1);
+    // 按下后移出再抬起：抬起仍转发 root，取消由原生树按释放落点判定，返回不执行。
+    g_back_execute_calls = 0;
     g_back_requests = 0;
     g_back_close_pending = false;
-    const int dispatches_before = g_native_event_dispatches;
-    constexpr uint64_t kSystemCancel = 0x80000001ULL;
-    assert(settings_panel_event(kSystemCancel, inside_param, 52) == 1);
-    assert(g_native_event_dispatches == dispatches_before);
-    assert(settings_panel_event(0x18, inside_param, 53) == 1);
-    assert(g_back_requests == 1 && g_back_close_pending);
-    g_panel_active = false;
-}
-
-// 返回控件缺失（nav 创建失败的等价前置：裸父节点被拒或组件不可用 → g_back 为 nullptr）时，
-// 按下不得请求返回，且必须落回左右列表分支（保证 g_back != nullptr 前置条件真实生效）。
-void test_back_button_absent_does_not_request() {
-    setup();
-    g_panel_active = true;
-    g_back = nullptr;
-    g_back_requests = 0;
-    g_back_close_pending = false;
-    int64_t inside[] = {10, 10};
-    const uint64_t inside_param = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(inside));
-    assert(settings_panel_event(0x17, inside_param, 51) == 1);
-    assert(g_back_requests == 0 && !g_back_close_pending);
-    assert(g_native_event_dispatches == 1 && g_native_event_root == g_right);
+    assert(settings_panel_event(0x17, inside_param, 51) == 7);
+    const int dispatches_after_press_outside = g_native_event_dispatches;
+    assert(settings_panel_event(0x19, outside_param, 52) == 7);
+    assert(g_native_event_dispatches == dispatches_after_press_outside + 1 &&
+           g_native_event_root == g_root && g_native_event_code == 0x19);
+    assert(settings_panel_event(0x18, outside_param, 53) == 7);
+    assert(g_native_event_root == g_root && g_native_event_code == 0x18 &&
+           g_native_event_param2 == 53);
+    assert(g_back_execute_calls == 0 && g_back_requests == 0 && !g_back_close_pending);
+    assert(g_back_helper_calls == 0);
     g_panel_active = false;
 }
 
@@ -755,8 +776,7 @@ int main(int argc, char** argv) {
     test_action_requires_independent_button_and_status_is_error_only();
     test_action_control_tracks_availability();
     test_settings_event_uses_one_scroll_list_dispatch();
-    test_back_button_requests_on_release();
-    test_back_button_absent_does_not_request();
+    test_native_back_event_tree_and_deferred_request();
     test_actions_use_shared_factory_across_categories();
     test_production_draw_uses_cached_description_geometry();
     std::puts("settings_panel_widget_tests: production settings.cpp widget path passed");
