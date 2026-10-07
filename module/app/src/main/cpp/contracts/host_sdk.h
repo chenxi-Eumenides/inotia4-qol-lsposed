@@ -40,6 +40,7 @@
 namespace qol::contracts {
 struct QolSlotOperationLease;
 struct QolSlotOperationApi;
+struct QolSaveRouteApi;
 
 struct QolAbiHeader {
     uint32_t size;
@@ -369,11 +370,12 @@ struct QolHostSdk {
     QolOwnerVerifyTokenFn owner_verify_token;
     const QolOwnerStoreApi* owner_store;
     const QolSlotOperationApi* slot_operation;
+    const QolSaveRouteApi* save_route;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 18：在 v1.17 持久布尔配置桥之后尾追加模块身份版本访问。
-constexpr uint16_t kHostSdkMinor = 18;
+// minor 19：在 slot_operation 之后尾追加 save_route（core.save 领域回调路由）。
+constexpr uint16_t kHostSdkMinor = 19;
 
 inline const QolSettingsConfigApi* settings_config_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, settings_config) +

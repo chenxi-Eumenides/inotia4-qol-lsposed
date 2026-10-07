@@ -5,6 +5,7 @@
 #include "game/access/quest.h"
 #include "game/access/ui_state.h"
 #include "game/access/save.h"
+#include "game/access/save_transaction.h"
 #include "game/adapter_ports/world_port.h"
 #include "game/ops/character_write.h"
 #include "game/ops/game_ops_common.h"
@@ -146,6 +147,8 @@ Java_com_inotia4_qol_NativeBridge_nativeSaveBackupInit(JNIEnv* env, jclass, jstr
     const char* d = dataDir != nullptr ? env->GetStringUTFChars(dataDir, nullptr) : nullptr;
     const char* e = externalDir != nullptr ? env->GetStringUTFChars(externalDir, nullptr) : nullptr;
     save_backup_init(d, e);
+    // 保存事务 Adapter 的平台路径上下文：复用既有 dataDir 注入点，不新增 NativeBridge external。
+    qol::game::save_transaction_set_platform_dir(d);
     // B4-1 过渡：infra/store 沿用同一 externalFilesDir 注入点（B4-2/B4-3 收敛为
     // 独立 store 初始化边界）；此处仅初始化容器层，不切换任何消费者。
     qol::infra::store::init(e);

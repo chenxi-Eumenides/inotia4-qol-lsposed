@@ -546,8 +546,8 @@ int main() {
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
-    assert(sdk.abi.minor == 18);
-    assert(qol::contracts::kHostSdkMinor == 18);
+    assert(sdk.abi.minor == 19);
+    assert(qol::contracts::kHostSdkMinor == 19);
     assert(sdk.module_version != nullptr);
     assert(qol::contracts::settings_catalog_if_available(&sdk) == sdk.settings_catalog);
     assert(sdk.settings_catalog != nullptr);

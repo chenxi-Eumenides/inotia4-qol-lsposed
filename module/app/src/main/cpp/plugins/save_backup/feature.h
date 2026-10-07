@@ -18,10 +18,13 @@
 void save_backup_init(const char* data_dir, const char* external_files_dir);
 
 // 插件装配期注入 Host SDK / Game Host；业务回调通过该上下文访问宿主适配面。
+// owner_token 为宿主按注册身份注入的 token（PluginContext.owner_token 原样透传），
+// 槽操作前置门以该 token 申请 lease；停用/解绑传 0。
 void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
                               const qol::contracts::SaveFactsApi* save_facts,
                               const qol::contracts::QolSaveCallPort* save_call,
-                              const qol::contracts::QolGameHost* game);
+                              const qol::contracts::QolGameHost* game,
+                              qol::contracts::QolOwnerToken owner_token);
 const qol::contracts::QolHostSdk* save_backup_host_sdk();
 const qol::contracts::QolGameHost* save_backup_game_host();
 const qol::contracts::SaveFactsApi* save_backup_save_facts();

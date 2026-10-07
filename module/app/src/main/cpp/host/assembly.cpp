@@ -1,6 +1,7 @@
 #include "host/assembly.h"
 
 #include <cstdint>
+#include <mutex>
 
 #include "patch/call_patch.h"
 #include "infra/log/qol_log.h"
@@ -11,9 +12,14 @@
 #include "contracts/ownership.h"
 #include "core/native/game_cache.h"
 #include "game/access/inventory_legacy_read.h"
+#include "game/access/save_transaction.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
+#include "game/adapter_ports/save_transaction_port.h"
 #include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
+#include "host/owner_identity.h"
+#include "host/save_route.h"
+#include "infra/slot_operation_gate.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
@@ -188,6 +194,7 @@ struct BuiltInPlugin {
     PluginDescriptorFn descriptor;
     const char* store_namespace = nullptr;
     bool slot_operation_allowed = false;
+    bool save_route_allowed = false;
 };
 
 // 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
@@ -196,7 +203,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
 #if !QOL_KERNEL_ONLY
     {&features::core_world::plugin_descriptor},
     {&features::core_craft::plugin_descriptor},
-    {&features::core_save::plugin_descriptor, "module-saves", true},
+    {&features::core_save::plugin_descriptor, "module-saves", true, true},
     {&features::core_character::plugin_descriptor},
     {&features::core_data::plugin_descriptor},
     {&features::core_feature::plugin_descriptor},
@@ -337,7 +344,17 @@ bool drain_commands_task(int64_t frame, void* ctx) {
     infra::commands_drain();
     lifecycle_step();
     sync_gates();
+    // save_route unbind 的 drain 在帧点完成，不自旋。
+    save_route::step();
     return true;
+}
+
+// save_transaction 的 gate 准入缝：gate 与 store 共用一把锁，取锁后按凭据校验，
+// 消除 query→write TOCTOU。
+bool save_transaction_gate_admits(void*, contracts::QolOwnerToken owner,
+                                  const contracts::QolSlotOperationLease* lease, int32_t slot) {
+    std::lock_guard<std::mutex> lock(infra::slot_operation::mutex());
+    return contracts::succeeded(infra::slot_operation::validate_locked(owner, lease, slot));
 }
 
 }  // namespace
@@ -347,6 +364,12 @@ bool assembly_init() {
     const_cast<contracts::QolHostSdk&>(g_host_sdk).ui = ui_adapter();
     // T2l-w-write：向 game 层日志缝注入 SDK（game/access/qol_log_seam.h）；装配早于任何写调用。
     qol::game::qol_seam_bind_host_sdk(&g_host_sdk);
+    // save_route 的 owner 停用通知：suspend 时旧 token 的 binding 退出派发。
+    qol::host::owner_save_route_stopped_handler(&qol::host::save_route::owner_stopped);
+    // save_transaction 准入缝：Adapter 经宿主注入的 gate 校验 lease，不在 game 层依赖 infra。
+    static const qol::game::SaveTransactionGate kSaveTransactionGate{
+        nullptr, &save_transaction_gate_admits};
+    qol::game::save_transaction_bind_gate(&kSaveTransactionGate);
     // item_count facade 是宿主稳定表；P1-B 注册 provider 前保持 not_ready。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     host_inventory_extension_bind();
@@ -356,6 +379,10 @@ bool assembly_init() {
 
     // 帧时钟注入：infra 不依赖 game，游戏事实由 host 装配时提供（见 infra/runtime.h）。
     infra::runtime_init(infra::Clock{&qol::game::frame_count});
+
+    // 保存事务 Adapter 装配期解析：SAVE_LoadCharacterAll→SAVE_Save 唯一 BL 扫描与
+    // SAVE_GetSaveFileName 注入；bridge_init 已 attach ELF resolver（此处 g_base 可用）。
+    qol::game::save_transaction_install();
 
     // 帧源常驻资源：渲染/逻辑锚点。未就绪时 fail-closed 返回 false；不阻断插件注册，
     // 后续可重试（gamebridge 在 bridge 就绪后亦会先调用一次）。
@@ -436,6 +463,11 @@ bool assembly_init() {
         if (plugin.slot_operation_allowed && !bind_plugin_slot_operation(descriptor)) {
             ++g_registration_failures;
             QOL_LOG_ERROR(QolDomain::kCore, "assembly: slot operation binding failed");
+            return false;
+        }
+        if (plugin.save_route_allowed && !bind_plugin_save_route(descriptor)) {
+            ++g_registration_failures;
+            QOL_LOG_ERROR(QolDomain::kCore, "assembly: save route binding failed");
             return false;
         }
     }

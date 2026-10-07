@@ -30,6 +30,9 @@ bool bind_plugin_store(const contracts::PluginDescriptor& plugin, const char* st
 // 宿主装配 sidecar 授权；绑定后该注册身份的 token 可申请中立槽操作门。
 bool bind_plugin_slot_operation(const contracts::PluginDescriptor& plugin);
 
+// 宿主装配 sidecar 授权；绑定后该注册身份的 token 可向 save_route 注册领域回调。
+bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin);
+
 // 安装全部已注册插件；返回失败插件数（0 = 全部按要求就绪）。
 int install_all(const HostDeps& deps);
 

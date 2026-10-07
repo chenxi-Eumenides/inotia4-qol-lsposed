@@ -93,6 +93,46 @@ set_target_properties(save_journal_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD
 add_test(NAME save_journal_tests COMMAND save_journal_tests)
 target_compile_definitions(save_journal_tests PRIVATE QOL_SAVE_EVIDENCE_TEST_SEAMS=1)
 
+# P3b-2：save_route 领域回调路由（bind/unbind drain、prepare_stop 阻断、owner 停用）。
+add_executable(save_route_tests
+    test_save_route.cpp
+    ${CPP_DIR}/host/save_route.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
+)
+target_include_directories(save_route_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_route_tests PRIVATE cxx_std_17)
+set_target_properties(save_route_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(save_route_tests PRIVATE Threads::Threads)
+add_test(NAME save_route_tests COMMAND save_route_tests)
+
+# P3b-2：保存事务 Adapter 纯逻辑（BL 扫描、invocation、loading 旁路矩阵、路径校验、
+# call_original_save 凭据链）。
+add_executable(save_transaction_tests
+    test_save_transaction.cpp
+    ${CPP_DIR}/game/access/save_transaction.cpp
+    ${CPP_DIR}/game/access/save_file_evidence.cpp
+)
+target_include_directories(save_transaction_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_transaction_tests PRIVATE cxx_std_17)
+set_target_properties(save_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(save_transaction_tests PRIVATE Threads::Threads)
+add_test(NAME save_transaction_tests COMMAND save_transaction_tests)
+
+# P3b-2：save_backup 槽操作前置门集成（真实 infra gate/store + fake Host SDK 面）。
+add_executable(save_backup_gate_tests
+    test_save_backup_gate.cpp
+    ${CPP_DIR}/plugins/save_backup/feature.cpp
+    ${CPP_DIR}/plugins/save_backup/bundle.cpp
+    ${CPP_DIR}/infra/store.cpp
+    ${CPP_DIR}/infra/slot_operation_gate.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
+)
+target_include_directories(save_backup_gate_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_backup_gate_tests PRIVATE cxx_std_17)
+set_target_properties(save_backup_gate_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(save_backup_gate_tests PRIVATE Threads::Threads)
+add_test(NAME save_backup_gate_tests COMMAND save_backup_gate_tests)
+
 add_executable(slot_operation_gate_tests
     test_slot_operation_gate.cpp
     ${CPP_DIR}/infra/slot_operation_gate.cpp
@@ -873,6 +913,7 @@ add_executable(host_adapter_tests
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/owner_identity.cpp
+    ${CPP_DIR}/host/save_route.cpp
     ${CPP_DIR}/host/settings_catalog_adapter.cpp
     ${CPP_DIR}/host/settings_config_bridge.cpp
     ${CPP_DIR}/infra/settings_catalog.cpp

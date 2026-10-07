@@ -1755,6 +1755,16 @@ bool bind_plugin_slot_operation(const contracts::PluginDescriptor& plugin) {
     return false;
 }
 
+bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0 &&
+            std::strcmp(g_plugins[i].descriptor.version, plugin.version) == 0) {
+            return owner_bind_save_route(&g_plugins[i]);
+        }
+    }
+    return false;
+}
+
 int install_all(const HostDeps& deps) {
     g_install_deps = deps;
     int failed_plugins = 0;

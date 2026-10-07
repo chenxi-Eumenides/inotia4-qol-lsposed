@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "bundle.h"
+#include "contracts/slot_operation.h"
 #include "log.h"
 #include "rollback.h"
 
@@ -48,6 +49,70 @@ const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::SaveFactsApi* g_save_facts = nullptr;
 const qol::contracts::QolSaveCallPort* g_save_call = nullptr;
+qol::contracts::QolOwnerToken g_owner_token = 0;
+
+// ---- 槽操作前置门（P3b-2）----
+// import/删槽在首次 dat/warehouse 写删之前 acquire 覆盖受影响槽的 operation lease，
+// 跨整个操作与回滚持有；完整回滚结束才 release，回滚失败置 referenced 保留证据。
+// 生产无并发 gate 持有者时此门惰性（acquire 即成功即释放，行为不变）。
+struct SlotOperationGuard {
+    qol::contracts::QolSlotOperationLease lease{};
+    const qol::contracts::QolSlotOperationApi* api = nullptr;
+    bool held = false;
+};
+
+bool slot_operation_acquire(int slot, SlotOperationGuard* guard) {
+    guard->api = nullptr;
+    guard->held = false;
+    guard->lease = qol::contracts::QolSlotOperationLease{};
+    guard->lease.size = sizeof(guard->lease);
+    if (g_sdk == nullptr || g_sdk->slot_operation == nullptr || g_owner_token == 0) return false;
+    const auto* api = g_sdk->slot_operation;
+    const QolResult result = api->acquire(api->host_ctx, g_owner_token, 1u << slot, &guard->lease);
+    if (!qol::contracts::succeeded(result)) return false;
+    guard->api = api;
+    guard->held = true;
+    return true;
+}
+
+void slot_operation_release(SlotOperationGuard* guard) {
+    if (guard == nullptr || !guard->held) return;
+    (void)guard->api->release(guard->api->host_ctx, g_owner_token, &guard->lease);
+    guard->held = false;
+}
+
+void slot_operation_hold_referenced(SlotOperationGuard* guard) {
+    // 回滚失败保留证据：置 referenced 后 owner 停用也不释放 lease。
+    if (guard == nullptr || !guard->held) return;
+    (void)guard->api->set_referenced(guard->api->host_ctx, g_owner_token, &guard->lease, 1);
+}
+
+// sidecar 容器写入的 lease 显式入口。失败时 *store_touched 指出 primary 是否已提交：
+// primary_applied（primary 已写、last-good 失败）为 true，需要回滚恢复；
+// unchanged（store 面未写任何文件）为 false，跳过 sidecar 恢复避免误报回滚失败。
+bool store_import_container_locked_gate(const SlotOperationGuard& guard, int slot,
+                                        const uint8_t* data, size_t size, bool* store_touched) {
+    *store_touched = false;
+    if (!guard.held) return false;
+    qol::contracts::QolSlotOperationApply apply{};
+    apply.size = sizeof(apply);
+    const QolResult result = guard.api->import_container(guard.api->host_ctx, g_owner_token,
+                                                         &guard.lease, slot, data,
+                                                         static_cast<uint64_t>(size), &apply);
+    if (qol::contracts::succeeded(result)) {
+        *store_touched = true;
+        return true;
+    }
+    *store_touched =
+        apply.apply == static_cast<uint32_t>(qol::contracts::QolSlotOperationApplyState::kPrimaryApplied);
+    return false;
+}
+
+bool store_delete_slot_locked_gate(const SlotOperationGuard& guard, int slot) {
+    if (!guard.held) return false;
+    return qol::contracts::succeeded(
+        guard.api->delete_container(guard.api->host_ctx, g_owner_token, &guard.lease, slot));
+}
 
 std::string result_ok() {
     char buffer[64] = {};
@@ -586,7 +651,8 @@ bool preserve_rollback_record(const std::string& path, const uint8_t* data, size
 
 save_backup::RollbackResult restore_from_rollback(
     int slot, const std::string& dat_path, const std::string& rb_dat, bool dat_existed,
-    const std::vector<uint8_t>& prev_container, bool prev_container_exists, bool sidecar_touched) {
+    const std::vector<uint8_t>& prev_container, bool prev_container_exists, bool sidecar_touched,
+    const SlotOperationGuard* guard) {
     save_backup::RollbackResult result;
     if (dat_existed) {
         result.dat_restored = file_exists(rb_dat) && copy_file(rb_dat, dat_path);
@@ -594,12 +660,19 @@ save_backup::RollbackResult restore_from_rollback(
         result.dat_restored = remove_file(dat_path);
     }
     if (sidecar_touched) {
-        if (prev_container_exists) {
-            result.sidecar_restored = store_import_container(
-                slot, prev_container.data(), prev_container.size());
-        } else {
-            result.sidecar_restored = store_delete_slot(slot) == ContainerStatus::kOk;
-        }
+        // 持有 operation lease 时回滚必须走 lease 显式入口：旧无凭据入口在有 operation
+        // 期间一律 Busy，回滚会被自己的门挡住。
+        bool restore_touched = false;
+        const bool sidecar_restored =
+            guard != nullptr && guard->held
+                ? (prev_container_exists
+                       ? store_import_container_locked_gate(*guard, slot, prev_container.data(),
+                                                            prev_container.size(), &restore_touched)
+                       : store_delete_slot_locked_gate(*guard, slot))
+                : (prev_container_exists
+                       ? store_import_container(slot, prev_container.data(), prev_container.size())
+                       : store_delete_slot(slot) == ContainerStatus::kOk);
+        result.sidecar_restored = sidecar_restored;
     }
     if (result.complete()) {
         remove_file(rb_dat);
@@ -635,11 +708,13 @@ save_backup::RollbackResult restore_from_rollback(
 void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
                               const qol::contracts::SaveFactsApi* save_facts,
                               const qol::contracts::QolSaveCallPort* save_call,
-                              const qol::contracts::QolGameHost* game) {
+                              const qol::contracts::QolGameHost* game,
+                              qol::contracts::QolOwnerToken owner_token) {
     g_sdk = sdk;
     g_game = game;
     g_save_facts = save_facts;
     g_save_call = save_call;
+    g_owner_token = owner_token;
 }
 
 const qol::contracts::QolHostSdk* save_backup_host_sdk() { return g_sdk; }
@@ -956,7 +1031,9 @@ std::string save_backup_export_json(int slot) {
 }
 
 std::string save_backup_import_json(const char* checksum, int slot) {
-    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    // 参数校验、bundle 定位与解析持锁；gate/容器/文件 IO 段在锁外执行——同槽串行由
+    // 槽操作门保证，不以跨插件持锁保证串行。
+    std::unique_lock<std::mutex> lk(g_sb_mtx);
     const std::string ck = checksum != nullptr ? checksum : "";
     if (!save_backup::valid_checksum(ck)) return result_error("bad checksum");
     if (slot < 0 || slot > 2) return result_error("bad slot");
@@ -972,6 +1049,13 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
         return result_error("backup unreadable or corrupt");
     }
+    // shared 状态（map 名表/目录根）在锁外只读；此处起进入锁外段。
+    lk.unlock();
+
+    // 前置门：首次写删之前 acquire；parsed.module 为空也必须 acquire（dat 写入本身
+    // 就是不可逆变更）。
+    SlotOperationGuard guard;
+    if (!slot_operation_acquire(slot, &guard)) return result_error("slot operation unavailable");
 
     // 1) 原版明文加密到目标槽（块0 slot 字节改写目标槽并追加校验尾）。
     std::vector<uint8_t> cipher;
@@ -1035,11 +1119,17 @@ std::string save_backup_import_json(const char* checksum, int slot) {
 
     // 3) 安全备份现存文件到 .rollback/（dat 落副本；sidecar 现状快照留在内存，失败时经 store 还原）。
     const std::string rollback_dir = dir + "/" + kRollbackDirName;
-    if (!ensure_dir(rollback_dir)) return result_error("rollback dir mkdir failed");
+    if (!ensure_dir(rollback_dir)) {
+        slot_operation_release(&guard);
+        return result_error("rollback dir mkdir failed");
+    }
     const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
     const bool dat_existed = file_exists(dat_path);
     const std::string rb_dat = rollback_dir + "/save" + std::to_string(slot) + ".dat";
-    if (dat_existed && !copy_file(dat_path, rb_dat)) return result_error("rollback backup failed");
+    if (dat_existed && !copy_file(dat_path, rb_dat)) {
+        slot_operation_release(&guard);
+        return result_error("rollback backup failed");
+    }
     std::vector<uint8_t> prev_container;
     bool prev_container_exists = false;
     {
@@ -1050,26 +1140,40 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
     bool sidecar_touched = false;
+    // 完整回滚结束才 release；回滚失败保留 referenced lease 与证据，不伪装收尾成功。
+    auto fail_with_rollback = [&](const save_backup::RollbackResult& rollback,
+                                  const char* ok_message, const char* degraded_message) {
+        if (rollback.complete()) {
+            slot_operation_release(&guard);
+            return result_error(ok_message);
+        }
+        slot_operation_hold_referenced(&guard);
+        return result_error(degraded_message);
+    };
 
     // 4) 原子写原版 .dat（tmp+rename）。
     if (!write_file_bytes_atomic(dat_path, cipher.data(), cipher.size())) {
         const save_backup::RollbackResult rollback = restore_from_rollback(
             slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-            sidecar_touched);
-        return result_error(rollback.complete() ? "save file write failed"
-                                           : "save file write failed; rollback failed");
+            sidecar_touched, &guard);
+        return fail_with_rollback(rollback, "save file write failed",
+                                  "save file write failed; rollback failed");
     }
 
-    // 5) sidecar：经 infra/store 重定槽（按源容器头槽号校验）并双写 primary + last-good；
-    //    generation 由 store 按容器语义递增（空 module = 仅原版备份，跳过）。
+    // 5) sidecar：经槽操作 lease 显式入口重定槽（按源容器头槽号校验）并双写 primary +
+    //    last-good；generation 由 store 按容器语义递增（空 module = 仅原版备份，跳过）。
     if (!parsed.module.empty()) {
-        sidecar_touched = true;
-        if (!store_import_container(slot, parsed.module.data(), parsed.module.size())) {
+        bool store_touched = false;
+        const bool imported = store_import_container_locked_gate(guard, slot, parsed.module.data(),
+                                                                 parsed.module.size(),
+                                                                 &store_touched);
+        sidecar_touched = store_touched;
+        if (!imported) {
             const save_backup::RollbackResult rollback = restore_from_rollback(
                 slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-                sidecar_touched);
-            return result_error(rollback.complete() ? "module container import failed"
-                                               : "module container import failed; rollback failed");
+                sidecar_touched, &guard);
+            return fail_with_rollback(rollback, "module container import failed",
+                                      "module container import failed; rollback failed");
         }
     }
 
@@ -1131,10 +1235,13 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                     const save_backup::RollbackResult warehouse_rollback = restore_warehouse();
                     const save_backup::RollbackResult core_rollback = restore_from_rollback(
                         slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-                        sidecar_touched);
-                    return result_error(warehouse_rollback.complete() && core_rollback.complete()
-                                      ? "rollback backup failed"
-                                      : "rollback backup failed; rollback failed");
+                        sidecar_touched, &guard);
+                    if (warehouse_rollback.complete() && core_rollback.complete()) {
+                        slot_operation_release(&guard);
+                        return result_error("rollback backup failed");
+                    }
+                    slot_operation_hold_referenced(&guard);
+                    return result_error("rollback backup failed; rollback failed");
                 }
             }
             wh_rollback.push_back(WhRollback{target, rb, existed});
@@ -1142,10 +1249,13 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                 const save_backup::RollbackResult warehouse_rollback = restore_warehouse();
                 const save_backup::RollbackResult core_rollback = restore_from_rollback(
                     slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-                    sidecar_touched);
-                return result_error(warehouse_rollback.complete() && core_rollback.complete()
-                                  ? "warehouse file write failed"
-                                  : "warehouse file write failed; rollback failed");
+                    sidecar_touched, &guard);
+                if (warehouse_rollback.complete() && core_rollback.complete()) {
+                    slot_operation_release(&guard);
+                    return result_error("warehouse file write failed");
+                }
+                slot_operation_hold_referenced(&guard);
+                return result_error("warehouse file write failed; rollback failed");
             }
             ++wh_written;
             if ((wf.flags & save_backup::kWarehouseFlagPlain) != 0) ++wh_reencrypted;
@@ -1157,9 +1267,10 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
 
-    // 7) 成功：清理该槽回滚副本（dat 与 wh 副本；sidecar 无需副本）。
+    // 7) 成功：清理该槽回滚副本（dat 与 wh 副本；sidecar 无需副本），并释放前置门 lease。
     for (const WhRollback& item : wh_rollback) remove_file(item.rb);
     remove_file(rb_dat);
+    slot_operation_release(&guard);
     save_backup::Entry entry;
     save_backup::entry_from_bundle(name, parsed, entry);
     auto iit = g_map_names.find(entry.map_id);
@@ -1188,11 +1299,12 @@ std::string save_backup_delete_json(const char* checksum) {
 }
 
 // 删除某个槽的游戏存档：原版 save{slot}.dat（游戏目录，本文件直接删除）+ 模块 sidecar
-// （经 infra/store::delete_slot 删除 primary/.last-good）。安全边界：路径由整型 slot 精确
+// （经槽操作 lease 显式入口删除 primary/.last-good）。安全边界：路径由整型 slot 精确
 // 拼接（save0/1/2.dat），不含通配/遍历，绝不删除其它槽；缺失的目标跳过。
 // 全部失败路径返回结构化 op_err，不吞异常；无任何目标文件时返回 not found。
 std::string save_backup_delete_slot_json(int slot) {
-    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    // 存在性探测持锁；gate/删除在锁外，同槽串行由槽操作门保证。
+    std::unique_lock<std::mutex> lk(g_sb_mtx);
     if (slot < 0 || slot > 2) return result_error("bad slot");
     std::string save_dir;
     switch (locate_save_directory(save_dir)) {
@@ -1212,20 +1324,25 @@ std::string save_backup_delete_slot_json(int slot) {
     const bool sidecar_existed = probe_status == ContainerStatus::kOk ||
                                  probe_status == ContainerStatus::kCorrupt;
     if (!dat_existed && !sidecar_existed) return result_error("save not found");
-    // 逐个删除并检查返回值：任一失败立即返回结构化错误（已删除的部分不回滚，与单文件删除语义一致）。
+    lk.unlock();
+
+    SlotOperationGuard guard;
+    if (!slot_operation_acquire(slot, &guard)) return result_error("slot operation unavailable");
+    // 逐个删除并检查返回值：任一失败立即返回结构化错误（已删除的部分不回滚，与单文件
+    // 删除语义一致）。删槽无回滚动作，失败路径释放 lease 恢复旧入口可用性，调用方可重试。
     if (dat_existed && ::unlink(dat_path.c_str()) != 0) {
         SB_LOG("save slot delete failed: %s", dat_path.c_str());
+        slot_operation_release(&guard);
         return result_error("delete save failed");
     }
     if (sidecar_existed) {
-        const ContainerStatus del = store_delete_slot(slot);
-        if (del != ContainerStatus::kOk) {
-            SB_LOG("save slot delete failed: slot=%d sidecar status=%s", slot,
-                   del == ContainerStatus::kNotFound ? "not_found"
-                   : del == ContainerStatus::kCorrupt ? "corrupt" : "unavailable");
+        if (!store_delete_slot_locked_gate(guard, slot)) {
+            SB_LOG("save slot delete failed: slot=%d sidecar", slot);
+            slot_operation_release(&guard);
             return result_error("delete sidecar failed");
         }
     }
+    slot_operation_release(&guard);
     SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d)", slot, dat_existed, sidecar_existed);
     // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_mark_stale();

@@ -172,6 +172,7 @@
 ### 5.4 待补行为证据
 
 - 待补行为证据：VM-P6-01、VM-D1、VM-D2-01..04，以及 P5 出口插件卡；VM-P1-S2 的 **EB 逻辑袋 >99 两态视图（R-48）已真机 PASS**（R2/R5），物理袋 >99 载体、999 clamp、原子组失败注入仍待补（见 §3 行）。
+- P3b-2 save_backup 前置门与路径注入为惰性接线：`a3bf0caf`（P3b-1）之后的 save_route/保存事务 Adapter/save_backup 槽操作门均只完成 Host 机制与 Host 测试（`save_route_tests`、`save_transaction_tests`、`save_backup_gate_tests`），未触及生产保存链与 hook；真机证据随 P3c 统一回归（重验范围届时与 VM-SD 各卡合并登记）。
 
 ### 5.5 资源豁免
 

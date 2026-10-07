@@ -3,6 +3,7 @@
 #include "host/http_registry.h"
 #include "host/lifecycle_participants.h"
 #include "host/owner_identity.h"
+#include "host/save_route.h"
 #include "host/settings_catalog_adapter.h"
 #include "host/settings_config_bridge.h"
 
@@ -616,6 +617,9 @@ const contracts::QolSlotOperationApi kSlotOperationApi{
     {sizeof(contracts::QolSlotOperationApi), 1, 0}, nullptr, &operation_acquire,
     &operation_set_referenced, &operation_refresh, &operation_release, &operation_import, &operation_delete};
 
+// core.save 领域回调路由；授权与 drain 语义在 host/save_route 内实现。
+const contracts::QolSaveRouteApi kSaveRouteApi = qol::host::save_route::save_route_api();
+
 QolResult sdk_store_read_container(int32_t slot, uint8_t* out, uint32_t capacity,
                                    uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
@@ -1148,6 +1152,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.owner_verify_token = &owner_verify_token;
     sdk.owner_store = &kOwnerStoreApi;
     sdk.slot_operation = &kSlotOperationApi;
+    sdk.save_route = &kSaveRouteApi;
     return sdk;
 }
 

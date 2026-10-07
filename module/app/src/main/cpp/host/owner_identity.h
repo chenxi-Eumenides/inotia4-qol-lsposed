@@ -11,6 +11,8 @@ void owner_suspend(void* identity);
 bool owner_bind_store(void* identity, const char* store_namespace);
 bool owner_bind_slot_operation(void* identity);
 QolResult owner_authorize_slot_operation(contracts::QolOwnerToken token);
+bool owner_bind_save_route(void* identity);
+QolResult owner_authorize_save_route(contracts::QolOwnerToken token);
 QolResult owner_verify_token(contracts::QolOwnerToken token);
 QolResult owner_authorize_store(contracts::QolOwnerToken token, const char* store_namespace);
 const contracts::QolOwnerIdentityApi& owner_identity_api();
@@ -18,5 +20,6 @@ const contracts::QolOwnerIdentityApi& owner_identity_api();
 void owner_identity_reset_for_test();
 void owner_store_lifecycle_handlers(void (*stopped)(uint64_t),
                                     void (*rebound)(uint64_t, uint64_t));
+void owner_save_route_stopped_handler(void (*stopped)(uint64_t));
 
 }  // namespace qol::host

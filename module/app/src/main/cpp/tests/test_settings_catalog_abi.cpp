@@ -8,7 +8,7 @@
 
 using namespace qol::contracts;
 static_assert(kSettingsCatalogMajor == 1 && kSettingsCatalogMinor == 3);
-static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 18);
+static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 19);
 
 // Frozen v1.15 prefix; no embedded function table may grow to add settings contributions.
 struct HostSdkV15 {
@@ -56,13 +56,14 @@ static_assert(sizeof(HostSdkV15) == 744);
 static_assert(offsetof(QolHostSdk, panels) == 248);
 static_assert(offsetof(QolHostSdk, snapshot_release) == 736);
 // minor 16 尾（settings_catalog）保持 744/752；minor 17 尾（settings_config）、
-// minor 18 尾（module_version）及后续 owner/operation 尾只追加指针。
+// minor 18 尾（module_version）及后续 owner/operation/route 尾只追加指针。
 static_assert(offsetof(QolHostSdk, settings_config) == 752);
 static_assert(offsetof(QolHostSdk, module_version) == 760);
 static_assert(offsetof(QolHostSdk, owner_verify_token) == 768);
 static_assert(offsetof(QolHostSdk, owner_store) == 776);
 static_assert(offsetof(QolHostSdk, slot_operation) == 784);
-static_assert(sizeof(QolHostSdk) == 792);
+static_assert(offsetof(QolHostSdk, save_route) == 792);
+static_assert(sizeof(QolHostSdk) == 800);
 static_assert(std::is_standard_layout_v<QolSettingsCatalogApi>);
 static_assert(offsetof(QolSettingsCatalogApi, query_item_availability) == 48);
 static_assert(offsetof(QolSettingsCatalogApi, register_items) == 56);

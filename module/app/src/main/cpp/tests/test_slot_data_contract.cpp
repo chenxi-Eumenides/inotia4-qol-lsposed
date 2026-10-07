@@ -3,6 +3,7 @@
 #include "contracts/slot_data_admin.h"
 #include "contracts/plugin.h"
 #include "contracts/slot_operation.h"
+#include "contracts/save_route.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -51,6 +52,35 @@ VALUE(QolSlotOperationApplyState, kPrimaryApplied, 1);
 VALUE(QolSlotOperationApplyState, kFullyApplied, 2);
 static_assert(offsetof(QolOwnerStoreReservation, operation)==56);
 NEXT(QolHostSdk, owner_store, slot_operation);
+NEXT(QolHostSdk, slot_operation, save_route);
+POD(QolSaveAdapterState);
+POD(QolSaveOriginalResult);
+POD(QolSaveTransitionCall);
+POD(QolSaveTransactionPort);
+POD(QolSaveNativeCall);
+POD(QolSaveDomainStatus);
+POD(QolSaveOwnerCallbacks);
+POD(QolSaveRouteApi);
+PREFIX(QolSaveTransactionPort, adapter_ctx);
+PREFIX(QolSaveOwnerCallbacks, user);
+PREFIX(QolSaveRouteApi, host_ctx);
+VALUE(QolSaveTransitionKind, kResume, 0);
+VALUE(QolSaveTransitionKind, kBeginNew, 1);
+VALUE(QolSaveTransitionKind, kConfirmNew, 2);
+VALUE(QolSaveCallKind, kSave, 0);
+VALUE(QolSaveCallKind, kResume, 1);
+VALUE(QolSaveCallKind, kBeginNew, 2);
+VALUE(QolSaveCallKind, kConfirmNew, 3);
+VALUE(QolSaveCallKind, kMaintenance, 4);
+VALUE(QolSaveOrigin, kOrdinary, 0);
+VALUE(QolSaveOrigin, kVerifiedLoadRewrite, 1);
+VALUE(QolSaveState, kPending, 0);
+VALUE(QolSaveState, kDone, 1);
+VALUE(QolSaveState, kFailed, 2);
+VALUE(QolSaveState, kCancelled, 3);
+static_assert(sizeof(QolSaveNativeCall)==40 && offsetof(QolSaveNativeCall, invocation)==24);
+static_assert(sizeof(QolSaveDomainStatus)==64 && offsetof(QolSaveDomainStatus, epoch)==24);
+static_assert(sizeof(QolSaveTransitionCall)==32 && offsetof(QolSaveTransitionCall, transition)==24);
 NEXT(QolOwnerStoreApi, set_referenced, reserve_in_operation);
 NEXT(QolOwnerStoreApi, reserve_in_operation, ensure_in_operation);
 NEXT(QolOwnerStoreApi, ensure_in_operation, reset_in_operation);

@@ -244,7 +244,7 @@ int plugin_install(contracts::PluginContext& ctx) {
             &save_facts_iface)) ||
         save_facts_iface == nullptr || ctx.ports == nullptr || ctx.port_count != 1 ||
         ctx.ports[0] == nullptr) {
-        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
     const auto* save_call = static_cast<const contracts::QolSaveCallPort*>(ctx.ports[0]);
@@ -255,10 +255,10 @@ int plugin_install(contracts::PluginContext& ctx) {
         save_call->write.free_data == nullptr || save_call->write.encrypt == nullptr ||
         save_call->write.mark_stale == nullptr || save_facts->load_data == nullptr ||
         save_facts->slot_exists == nullptr || save_facts->hub_key == nullptr) {
-        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
-    save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game);
+    save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game, ctx.owner_token);
     g_active.store(true, std::memory_order_release);
     // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
     if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
@@ -284,7 +284,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     }
-    save_backup_bind_context(nullptr, nullptr, nullptr, nullptr);
+    save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
