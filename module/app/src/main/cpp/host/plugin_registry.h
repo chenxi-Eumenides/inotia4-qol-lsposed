@@ -24,6 +24,9 @@ struct HostDeps {
 // 空 id / 重复 id / 非法描述符 / 资源登记冲突 → false。
 bool register_plugin(const contracts::PluginDescriptor& plugin);
 
+// 宿主装配 sidecar 授权；注册身份与命名空间绑定，不按插件名称特判。
+bool bind_plugin_store(const contracts::PluginDescriptor& plugin, const char* store_namespace);
+
 // 安装全部已注册插件；返回失败插件数（0 = 全部按要求就绪）。
 int install_all(const HostDeps& deps);
 

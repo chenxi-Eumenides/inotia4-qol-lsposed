@@ -1,4 +1,5 @@
 #include "plugin.h"
+#include "slot_data_provider.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include "contracts/game_ports/save_write_port.h"
 #include "contracts/http.h"
 #include "contracts/save_facts.h"
+#include "contracts/runtime_hooks.h"
 
 namespace qol::features::core_save {
 namespace {
@@ -71,6 +73,7 @@ constexpr contracts::SaveFactsApi kSaveFactsApi{
 
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kSaveFactsCapabilityId, contracts::kSaveFactsVersion, &kSaveFactsApi},
+    {contracts::kQolSlotDataCapabilityId, contracts::kQolSlotDataVersion, &slot_data_api()},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -103,6 +106,20 @@ struct SaveWritePayload {
 
 const contracts::QolSaveWritePort* g_save_write = nullptr;
 const contracts::QolHostSdk* g_sdk = nullptr;
+uint64_t g_slot_data_frame_task = 0;
+
+int32_t slot_data_frame(int64_t, void*) {
+    slot_data_pump();
+    return 1;
+}
+
+QolResult initialize_slot_data(const contracts::PluginContext& ctx) {
+    if (ctx.struct_size < sizeof(contracts::PluginContext) || ctx.sdk == nullptr ||
+        ctx.sdk->abi.size < sizeof(contracts::QolHostSdk) || ctx.game == nullptr)
+        return not_ready();
+    return slot_data_initialize(ctx.owner_token, ctx.sdk->owner_verify_token, ctx.sdk->owner_store,
+                                ctx.game->thread.is_main_thread);
+}
 
 QolResult cs_http_error(contracts::HttpRes* response, uint16_t status, const char* message) {
     const std::string body = std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
@@ -299,6 +316,12 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     g_save_write = save_write;
     g_sdk = ctx.sdk;
+    if (!contracts::succeeded(initialize_slot_data(ctx))) {
+        g_save_write = nullptr;
+        g_sdk = nullptr;
+        g_port = nullptr;
+        return 1;
+    }
     if (!contracts::succeeded(ctx.sdk->ticket_result.register_typed_result_handler(
             kSaveWriteHandlerId, &save_write_result_handler, nullptr))) {
         g_save_write = nullptr;
@@ -306,11 +329,27 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_port = nullptr;
         return 1;
     }
+    if (ctx.sdk->scheduler.add != nullptr && g_slot_data_frame_task == 0) {
+        const auto scheduled = ctx.sdk->scheduler.add(contracts::kQolRuntimeFramePointRenderPre,
+            &slot_data_frame, nullptr, 1, 0, &g_slot_data_frame_task);
+        if (!contracts::succeeded(scheduled)) {
+            (void)ctx.sdk->ticket_result.unregister_typed_result_handler(kSaveWriteHandlerId);
+            g_port = nullptr;
+            g_save_write = nullptr;
+            g_sdk = nullptr;
+            return 1;
+        }
+    }
     log_message(ctx.sdk, "[core.save] provider install: facts + save writes");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    slot_data_set_available(false);
+    if (g_slot_data_frame_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+        (void)g_sdk->scheduler.remove(g_slot_data_frame_task);
+        g_slot_data_frame_task = 0;
+    }
     // 结果处理器为自注册（不在 descriptor），必须显式注销。
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kSaveWriteHandlerId);
@@ -322,10 +361,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    slot_data_set_available(contracts::succeeded(initialize_slot_data(ctx)));
     log_message(ctx.sdk, "[core.save] provider enabled: capability published");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
+    slot_data_set_available(false);
     log_message(ctx.sdk, "[core.save] provider disabled: capability withdrawn");
 }
 
@@ -338,7 +379,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
     0, nullptr,
     0, nullptr,
-    1, kProvides,
+    2, kProvides,
     0, nullptr,
     0, nullptr,
     &plugin_install, &plugin_deactivate, &plugin_on_enabled, &plugin_on_disabled,

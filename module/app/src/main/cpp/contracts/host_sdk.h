@@ -28,6 +28,7 @@
 #include "http.h"
 #include "in_flight.h"
 #include "item_handle.h"
+#include "owner_token.h"
 #include "lifecycle_participant.h"
 #include "panels.h"
 #include "result.h"
@@ -156,6 +157,27 @@ static_assert(offsetof(QolStoreApi, save_game) == sizeof(QolStoreReadFn) * 8,
               "QolStoreApi save ABI layout changed");
 static_assert(sizeof(QolStoreApi) == sizeof(QolStoreReadFn) * 9,
               "QolStoreApi ABI size changed");
+
+// 只校验已持有的 token；签发、query 与 generation 递增为 Host 内部职责。
+using QolOwnerVerifyTokenFn = QolResult (*)(QolOwnerToken token);
+
+// 命名空间绑定由装配期授权决定；Host 验证 owner 后转发。
+// 迁移窗口保留旧 QolStoreApi，旧入口权限撤销由消费者迁移后收口。
+struct QolOwnerStoreApi {
+    QolAbiHeader abi;
+    QolResult (*ensure_slot)(QolOwnerToken owner, int32_t slot);
+    QolResult (*reset_slot)(QolOwnerToken owner, int32_t slot);
+    QolResult (*read_section)(QolOwnerToken owner, int32_t slot, const char* section,
+                             uint8_t* out_buffer, uint64_t capacity, uint64_t* out_size,
+                             uint16_t* out_version);
+    QolResult (*write_section)(QolOwnerToken owner, int32_t slot, const char* section,
+                              uint16_t version, const uint8_t* bytes, uint64_t size);
+    QolResult (*remove_section)(QolOwnerToken owner, int32_t slot, const char* section);
+    // 先删 removals，再写 replacements，单次原子提交，其余 section 保留。
+    QolResult (*replace_sections)(QolOwnerToken owner, int32_t slot,
+                                 const QolStoreSection* replacements, uint32_t replacement_count,
+                                 const char* const* removals, uint32_t removal_count);
+};
 
 using QolPanelFindFn = QolResult (*)(const char* panel_id, const PanelProviderSpec** out_provider);
 using QolPanelRegisterItemFn = QolResult (*)(const PanelItemSpec* item);
@@ -315,6 +337,9 @@ struct QolHostSdk {
     const QolSettingsConfigApi* settings_config;
     // 模块身份版本访问（阶段 5 尾追加；调用方须以 abi.size/abi.minor 协商后再消费）。
     QolModuleVersionFn module_version;
+    // 尾部扩展：以 abi.size 协商，不改变旧 SDK 前缀或存储表。
+    QolOwnerVerifyTokenFn owner_verify_token;
+    const QolOwnerStoreApi* owner_store;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;

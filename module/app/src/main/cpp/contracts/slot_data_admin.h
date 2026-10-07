@@ -2,7 +2,8 @@
 
 #include <cstdint>
 
-#include "owner_identity.h"
+#include "owner_token.h"
+#include "host_sdk.h"
 #include "version.h"
 
 namespace qol::contracts {

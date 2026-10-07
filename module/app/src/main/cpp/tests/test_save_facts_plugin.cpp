@@ -5,6 +5,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/http.h"
 #include "contracts/result.h"
+#include "contracts/slot_data.h"
 #include "plugins/core.save/plugin.h"
 
 #include <cstdio>
@@ -77,6 +78,16 @@ QolResult unregister_result(uint32_t) {
 uint32_t current_attempt() { return g_attempt; }
 QolResult defer_result() { ++g_deferred; return ok(); }
 
+int32_t is_main_thread() { return 1; }
+QolResult verify_owner(QolOwnerToken token) {
+    return token == 1 ? ok() : error(kQolErrBlocked, "invalid token", 13);
+}
+QolResult ensure_owner_slot(QolOwnerToken, int32_t) { return ok(); }
+QolResult read_owner_section(QolOwnerToken, int32_t, const char*, uint8_t*, uint64_t,
+                              uint64_t*, uint16_t*) { return error(kQolErrNotFound, "missing", 7); }
+QolResult write_owner_section(QolOwnerToken, int32_t, const char*, uint16_t,
+                               const uint8_t*, uint64_t) { return ok(); }
+
 QolResult dispatch(uint32_t route, const char* path, const char* body, char* output,
                    uint32_t capacity, uint32_t* output_size) {
     HttpReq request{HttpMethod::kPost, path, static_cast<uint32_t>(std::strlen(path)),
@@ -97,10 +108,13 @@ int main() {
     CHECK(std::strcmp(descriptor.id, "core.save") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 0);
-    CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kSaveFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[1].id, kQolSlotDataCapabilityId) == 0);
+    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
+    CHECK(descriptor.provides[1].iface != nullptr);
     CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_SAVE);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_SAVE_WRITE);
@@ -135,6 +149,12 @@ int main() {
     sdk.ticket_result.unregister_typed_result_handler = &unregister_result;
     sdk.ticket_result.current_attempt = &current_attempt;
     sdk.ticket_result.defer_current_result = &defer_result;
+    const QolOwnerStoreApi owner_store{{sizeof(QolOwnerStoreApi), 1, 0}, &ensure_owner_slot,
+        nullptr, &read_owner_section, &write_owner_section, nullptr, nullptr};
+    sdk.owner_verify_token = &verify_owner;
+    sdk.owner_store = &owner_store;
+    QolGameHost game{};
+    game.thread.is_main_thread = &is_main_thread;
     PluginContext context{};
     context.struct_size = sizeof(PluginContext);
     context.sdk_major = kHostSdkMajor;
@@ -142,6 +162,8 @@ int main() {
     context.sdk = &sdk;
     context.ports = ports;
     context.port_count = 2;
+    context.game = &game;
+    context.owner_token = 1;
     CHECK(descriptor.install(context) == 0);
 
     char output[4096]{};

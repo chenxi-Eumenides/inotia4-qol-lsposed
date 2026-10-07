@@ -1,6 +1,7 @@
 #include "contracts/owner_identity.h"
 #include "contracts/slot_data.h"
 #include "contracts/slot_data_admin.h"
+#include "contracts/plugin.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +35,24 @@ POD(QolSlotDataSpec);
 POD(QolSlotDataApi);
 POD(QolSlotAdminResult);
 POD(QolSlotDataAdminApi);
+POD(QolOwnerStoreApi);
+SIGNATURE(QolOwnerVerifyTokenFn, QolResult (*)(QolOwnerToken));
+static_assert(offsetof(PluginContext, owner_token) >= PLUGIN_CONTEXT_PORTS_STRUCT_SIZE);
+static_assert(offsetof(PluginContext, owner_token) + sizeof(QolOwnerToken) == sizeof(PluginContext));
+MEMBER(PluginContext, owner_token, QolOwnerToken);
+static_assert(offsetof(QolHostSdk, owner_verify_token) == offsetof(QolHostSdk, module_version) +
+              sizeof(QolModuleVersionFn));
+NEXT(QolHostSdk, owner_verify_token, owner_store);
+PREFIX(QolOwnerStoreApi, ensure_slot);
+NEXT(QolOwnerStoreApi, ensure_slot, reset_slot);
+NEXT(QolOwnerStoreApi, reset_slot, read_section);
+NEXT(QolOwnerStoreApi, read_section, write_section);
+NEXT(QolOwnerStoreApi, write_section, remove_section);
+NEXT(QolOwnerStoreApi, remove_section, replace_sections);
+SIGNATURE(decltype(QolOwnerStoreApi::read_section), QolResult (*)(QolOwnerToken, int32_t,
+    const char*, uint8_t*, uint64_t, uint64_t*, uint16_t*));
+SIGNATURE(decltype(QolOwnerStoreApi::replace_sections), QolResult (*)(QolOwnerToken, int32_t,
+    const QolStoreSection*, uint32_t, const char* const*, uint32_t));
 SIGNATURE(QolOwnerToken, uint64_t);
 SIGNATURE(QolSlotDataHandle, uint64_t);
 SIGNATURE(QolSlotDataRequest, uint64_t);

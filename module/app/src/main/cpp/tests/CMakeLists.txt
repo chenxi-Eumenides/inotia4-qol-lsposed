@@ -52,6 +52,7 @@ add_test(NAME item_facts_plugin_tests COMMAND item_facts_plugin_tests)
 add_executable(save_facts_plugin_tests
     test_save_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.save/plugin.cpp
+    ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
 )
 target_include_directories(save_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -69,6 +70,17 @@ target_include_directories(slot_data_contract_tests PRIVATE
 target_compile_features(slot_data_contract_tests PRIVATE cxx_std_17)
 set_target_properties(slot_data_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME slot_data_contract_tests COMMAND slot_data_contract_tests)
+
+add_executable(slot_data_provider_tests
+    test_slot_data_provider.cpp
+    ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
+)
+target_include_directories(slot_data_provider_tests PRIVATE ${CPP_DIR})
+target_compile_features(slot_data_provider_tests PRIVATE cxx_std_17)
+set_target_properties(slot_data_provider_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(slot_data_provider_tests PRIVATE Threads::Threads)
+add_test(NAME slot_data_provider_tests COMMAND slot_data_provider_tests)
 
 add_executable(craft_facts_plugin_tests
     test_craft_facts_plugin.cpp
@@ -388,6 +400,7 @@ add_executable(plugin_registry_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
@@ -463,6 +476,7 @@ add_executable(plugin_lifecycle_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/hooks/registry.cpp
@@ -502,6 +516,7 @@ add_executable(capability_lifecycle_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     ${CPP_DIR}/hooks/registry.cpp
@@ -833,6 +848,7 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/settings_catalog_adapter.cpp
     ${CPP_DIR}/host/settings_config_bridge.cpp
     ${CPP_DIR}/infra/settings_catalog.cpp

@@ -15,6 +15,7 @@
 #include "game_host.h"
 #include "game_ports/ports.h"
 #include "host_sdk.h"
+#include "owner_token.h"
 #include "version.h"
 
 namespace qol::contracts {
@@ -128,6 +129,7 @@ struct PluginContext {
     const char* plugin_id;
     const void* const* ports;
     uint32_t port_count;
+    QolOwnerToken owner_token;  // 宿主按真实注册身份注入，插件不得自报。
 };
 
 constexpr size_t PLUGIN_CONTEXT_STRUCT_SIZE = sizeof(PluginContext);

@@ -2,6 +2,7 @@
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "host/lifecycle_participants.h"
+#include "host/owner_identity.h"
 #include "host/settings_catalog_adapter.h"
 #include "host/settings_config_bridge.h"
 
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -407,6 +409,56 @@ QolResult sdk_store_replace(int32_t slot, const contracts::QolStoreSection* repl
     }
     return store_result(infra::store::replace_sections(slot, replacement_map, removal_set));
 }
+
+QolResult owner_store_ensure(contracts::QolOwnerToken owner, int32_t slot) {
+    const auto authorized = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(authorized)) return authorized;
+    return store_result(infra::store::ensure_slot(slot));
+}
+QolResult owner_store_reset(contracts::QolOwnerToken owner, int32_t slot) {
+    const auto authorized = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(authorized)) return authorized;
+    return store_result(infra::store::reset_slot(slot));
+}
+QolResult owner_store_read(contracts::QolOwnerToken owner, int32_t slot, const char* section,
+                          uint8_t* out, uint64_t capacity, uint64_t* size, uint16_t* version) {
+    if (size != nullptr) *size = 0;
+    if (version != nullptr) *version = 0;
+    const auto authorized = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(authorized)) return authorized;
+    if (section == nullptr || size == nullptr || version == nullptr ||
+        (capacity != 0 && out == nullptr)) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    std::vector<uint8_t> payload;
+    const auto status = infra::store::read_section(slot, section, &payload, version);
+    if (status != infra::store::Status::kOk) return store_result(status);
+    *size = payload.size();
+    if (payload.size() > capacity) return result_error(kQolErrInvalidArgument, "buffer too small");
+    if (!payload.empty()) std::memcpy(out, payload.data(), payload.size());
+    return contracts::ok();
+}
+QolResult owner_store_write(contracts::QolOwnerToken owner, int32_t slot, const char* section,
+                           uint16_t version, const uint8_t* bytes, uint64_t size) {
+    const auto authorized = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(authorized)) return authorized;
+    if (size > std::numeric_limits<uint32_t>::max())
+        return result_error(kQolErrInvalidArgument, "payload too large");
+    return sdk_store_write(slot, section, version, bytes, static_cast<uint32_t>(size));
+}
+QolResult owner_store_remove(contracts::QolOwnerToken owner, int32_t slot, const char* section) {
+    const auto authorized = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(authorized)) return authorized;
+    return sdk_store_remove(slot, section);
+}
+QolResult owner_store_replace(contracts::QolOwnerToken owner, int32_t slot,
+                             const contracts::QolStoreSection* replacements, uint32_t count,
+                             const char* const* removals, uint32_t removal_count) {
+    const auto authorized = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(authorized)) return authorized;
+    return sdk_store_replace(slot, replacements, count, removals, removal_count);
+}
+const contracts::QolOwnerStoreApi kOwnerStoreApi{
+    {sizeof(contracts::QolOwnerStoreApi), 1, 0}, &owner_store_ensure, &owner_store_reset,
+    &owner_store_read, &owner_store_write, &owner_store_remove, &owner_store_replace};
 
 QolResult sdk_store_read_container(int32_t slot, uint8_t* out, uint32_t capacity,
                                    uint32_t* out_size) {
@@ -935,6 +987,8 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.settings_catalog = &settings_catalog_api();
     sdk.settings_config = &settings_config_api();
     sdk.module_version = &sdk_module_version;
+    sdk.owner_verify_token = &owner_verify_token;
+    sdk.owner_store = &kOwnerStoreApi;
     return sdk;
 }
 

@@ -29,6 +29,7 @@
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 #include "host/http_dispatch.h"
+#include "host/owner_identity.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
 #include "infra/status.h"
@@ -96,6 +97,11 @@ contracts::PluginContext make_plugin_context(const char* plugin_id) {
     }
     const void* const* ports = index == kMaxPlugins ? nullptr : g_plugin_ports[index];
     const uint32_t port_count = index == kMaxPlugins ? 0 : g_plugin_port_count[index];
+    contracts::QolOwnerToken token = 0;
+    uint64_t generation = 0;
+    if (index != kMaxPlugins) {
+        (void)owner_identity_api().query(&g_plugins[index], &token, &generation);
+    }
     return contracts::PluginContext{sizeof(contracts::PluginContext),
                                     g_host_sdk.abi.major,
                                     g_host_sdk.abi.minor,
@@ -103,7 +109,8 @@ contracts::PluginContext make_plugin_context(const char* plugin_id) {
                                     &g_game_host,
                                     plugin_id,
                                     ports,
-                                    port_count};
+                                    port_count,
+                                    token};
 }
 
 bool register_http_queries(const contracts::PluginDescriptor& plugin) {
@@ -1409,6 +1416,7 @@ bool schedule_release(uint32_t index, bool cascade) {
 void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
     if (index >= g_plugin_count || context.visited[index]) return;
     context.visited[index] = true;
+    owner_suspend(&g_plugins[index]);
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     unregister_http_queries(plugin);
     if (plugin.on_disabled != nullptr) {
@@ -1472,6 +1480,7 @@ void cascade_dependents(const char* capability_id, CascadeContext& context) {
 
 // 提供者撤销（§3.4.4）：关闭提供者门禁（撤销期拒绝新调用）→ 级联 → 注销。
 void begin_revoke_provider(uint32_t index) {
+    owner_suspend(&g_plugins[index]);
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (!plugin_provides_capability(plugin)) return;
     unregister_http_queries(plugin);
@@ -1492,6 +1501,7 @@ void begin_revoke_provider(uint32_t index) {
 // 同步完成一个已通过 required 校验的插件安装。装配期与 blocked 重评估共用这条路径，
 // 保持资源安装、受限回调失败回滚、门禁落态和能力发布语义一致。
 bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
+    if (!owner_resume(&g_plugins[index])) return false;
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     contracts::PluginContext ctx = make_plugin_context(plugin.id);
 
@@ -1698,8 +1708,9 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
             return false;
         }
         register_provided_capabilities(index);
-    } else if (plugin.on_disabled != nullptr) {
-        plugin.on_disabled(ctx);
+    } else {
+        owner_suspend(&g_plugins[index]);
+        if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
     }
     return true;
 }
@@ -1719,8 +1730,19 @@ bool register_plugin(const contracts::PluginDescriptor& plugin) {
     }
 
     g_plugins[g_plugin_count].descriptor = plugin;
+    if (!owner_register(&g_plugins[g_plugin_count])) return false;
     ++g_plugin_count;
     return true;
+}
+
+bool bind_plugin_store(const contracts::PluginDescriptor& plugin, const char* store_namespace) {
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0 &&
+            std::strcmp(g_plugins[i].descriptor.version, plugin.version) == 0) {
+            return owner_bind_store(&g_plugins[i], store_namespace);
+        }
+    }
+    return false;
 }
 
 int install_all(const HostDeps& deps) {
@@ -1878,10 +1900,13 @@ uint32_t sync_gates() {
             if (status.state != target_state) {
                 infra::status_update(plugin.id, target_state, target_enabled, g_gate_error_text[i]);
                 if (target_enabled) {
+                    if (!owner_resume(&g_plugins[i])) continue;
+                    ctx = make_plugin_context(plugin.id);
                     if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
                     (void)register_http_queries(plugin);
                     register_provided_capabilities(i);
                 } else if (!plugin_provides_capability(plugin)) {
+                    owner_suspend(&g_plugins[i]);
                     unregister_http_queries(plugin);
                     if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
                 }
@@ -1904,10 +1929,13 @@ uint32_t sync_gates() {
         contracts::PluginContext ctx = make_plugin_context(plugin.id);
         infra::status_update(plugin.id, target_state, target_enabled, nullptr);
         if (target_enabled) {
+            if (!owner_resume(&g_plugins[i])) continue;
+            ctx = make_plugin_context(plugin.id);
             if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
             (void)register_http_queries(plugin);
             register_provided_capabilities(i);
         } else if (!plugin_provides_capability(plugin)) {
+            owner_suspend(&g_plugins[i]);
             // provider 的 on_disabled 已由 begin_revoke_provider 调用（避免重复）。
             unregister_http_queries(plugin);
             if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
@@ -2006,6 +2034,8 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 return false;
             }
             // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。
+            if (!owner_resume(&g_plugins[index])) return false;
+            ctx = make_plugin_context(plugin->id);
             if (plugin->install != nullptr && plugin->install(ctx) != 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
                                      "plugin install failed");
@@ -2022,9 +2052,10 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                     if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
                     (void)register_http_queries(*plugin);
                     register_provided_capabilities(plugin_index_of(plugin->id));
-                } else if (plugin->on_disabled != nullptr) {
+                } else {
+                    owner_suspend(&g_plugins[index]);
                     unregister_http_queries(*plugin);
-                    plugin->on_disabled(ctx);
+                    if (plugin->on_disabled != nullptr) plugin->on_disabled(ctx);
                 }
                 return true;
             }
@@ -2143,6 +2174,7 @@ uint32_t lifecycle_step() {
                     // §3.4.4：install 成功后进入 enabled 时注册能力。
                     register_provided_capabilities(slot.plugin_index);
                 } else {
+                    owner_suspend(&g_plugins[slot.plugin_index]);
                     unregister_http_queries(plugin);
                     if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
                 }
@@ -2214,6 +2246,7 @@ uint32_t plugin_count() {
 }
 
 void plugin_registry_reset_for_test() {
+    owner_identity_reset_for_test();
     g_plugin_count = 0;
     g_install_deps = HostDeps{};
     for (LifecycleTx& slot : g_lifecycle_txs) {

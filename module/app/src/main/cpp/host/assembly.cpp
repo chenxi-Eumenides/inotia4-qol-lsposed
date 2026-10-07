@@ -186,6 +186,7 @@ using RegisterSettingsFn = QolResult (*)(const contracts::QolHostSdk*);
 // 内建装配 sidecar；不扩展无 size 的 PluginDescriptor，也不维护第二份功能清单。
 struct BuiltInPlugin {
     PluginDescriptorFn descriptor;
+    const char* store_namespace = nullptr;
 };
 
 // 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
@@ -194,7 +195,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
 #if !QOL_KERNEL_ONLY
     {&features::core_world::plugin_descriptor},
     {&features::core_craft::plugin_descriptor},
-    {&features::core_save::plugin_descriptor},
+    {&features::core_save::plugin_descriptor, "module-saves"},
     {&features::core_character::plugin_descriptor},
     {&features::core_data::plugin_descriptor},
     {&features::core_feature::plugin_descriptor},
@@ -420,6 +421,12 @@ bool assembly_init() {
         if (!register_plugin(descriptor)) {
             ++g_registration_failures;
             QOL_LOG_ERROR(QolDomain::kCore, "assembly: plugin descriptor registration failed");
+            return false;
+        }
+        if (plugin.store_namespace != nullptr &&
+            !bind_plugin_store(descriptor, plugin.store_namespace)) {
+            ++g_registration_failures;
+            QOL_LOG_ERROR(QolDomain::kCore, "assembly: owner store binding failed");
             return false;
         }
         ++g_registered_plugins;
