@@ -21,10 +21,10 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 74 |
-| `game` | 153 |
+| `contracts` | 80 |
+| `game` | 155 |
 | `hooks` | 10 |
-| `host` | 59 |
+| `host` | 61 |
 | `infra` | 39 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
@@ -42,7 +42,7 @@
 | `plugins/core.feature` | 2 |
 | `plugins/core.item` | 7 |
 | `plugins/core.quest` | 5 |
-| `plugins/core.save` | 2 |
+| `plugins/core.save` | 6 |
 | `plugins/core.settings` | 12 |
 | `plugins/core.system` | 3 |
 | `plugins/core.ui_state` | 2 |
@@ -61,7 +61,7 @@
 | `plugins/special_equip` | 6 |
 | `plugins/stack_limit` | 5 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **596** |
+| **合计** | **610** |
 
 ### 1.2 迁移期映射摘要
 
@@ -104,8 +104,8 @@
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
 | `host` | `game` | 107 |
-| `game` | `contracts` | 73 |
-| `host` | `contracts` | 57 |
+| `game` | `contracts` | 74 |
+| `host` | `contracts` | 58 |
 | `host` | `infra` | 48 |
 | `plugins/extension_bag` | `contracts` | 44 |
 | `plugins/autosell` | `contracts` | 24 |
@@ -182,7 +182,7 @@
 | `core.feature` | `plugins/core.feature` | 2 |
 | `core.item` | `plugins/core.item` | 7 |
 | `core.quest` | `plugins/core.quest` | 5 |
-| `core.save` | `plugins/core.save` | 2 |
+| `core.save` | `plugins/core.save` | 6 |
 | `core.settings` | `plugins/core.settings` | 12 |
 | `core.system` | `plugins/core.system` | 3 |
 | `core.ui_state` | `plugins/core.ui_state` | 2 |

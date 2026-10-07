@@ -1,0 +1,3 @@
+BUILD SUCCESSFUL in 23s
+Generated Debug APK filename: inotia4_qol_lsposed_debug_2610071930_466f895b6208.apk
+SHA-256: 466f895b62089ca0c81918bee8ccb529c5a397c496194b3f1affc415d32ebe90

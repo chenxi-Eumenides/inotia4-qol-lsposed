@@ -257,8 +257,11 @@ QolResult load_payload(const std::shared_ptr<Participant>& p, const QolSlotDataC
 const contracts::QolSlotDataApi& slot_data_api() { return kApi; }
 QolResult slot_data_initialize(contracts::QolOwnerToken owner, contracts::QolOwnerVerifyTokenFn verify,
                               const contracts::QolOwnerStoreApi* backend, int32_t (*is_main)()) {
+    constexpr auto required = offsetof(contracts::QolOwnerStoreApi, replace_sections) +
+                              sizeof(contracts::QolOwnerStoreApi::replace_sections);
+    // 此 provider 只消费既有六项前缀，新增预约尾部不能提高它的最低 ABI 要求。
     if (owner == 0 || verify == nullptr || backend == nullptr || is_main == nullptr ||
-        backend->abi.size < sizeof(*backend) || backend->abi.major != 1 ||
+        backend->abi.size < required || backend->abi.major != 1 ||
         backend->ensure_slot == nullptr || backend->read_section == nullptr || backend->write_section == nullptr)
         return fail(kQolErrInvalidArgument, "invalid slot data backend");
     const auto identity = verify(owner);

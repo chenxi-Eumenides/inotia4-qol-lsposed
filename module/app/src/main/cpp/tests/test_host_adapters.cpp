@@ -45,6 +45,9 @@
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
 #include "infra/store.h"
+#include "host/owner_identity.h"
+#include <sys/stat.h>
+#include <unistd.h>
 #include "infra/text_scope.h"
 
 static_assert(offsetof(qol::contracts::QolMoveMergePort, move_item) ==
@@ -669,6 +672,78 @@ int main() {
     assert(std::equal(std::begin(section_data), std::end(section_data), section_out));
     assert(sdk.store.delete_slot(1).ok == kQolOk);
     assert(sdk.store.read(1, "adapter", &section_buffer, &section_version).code == kQolErrNotFound);
+
+    {
+        using namespace qol::contracts;
+        int identity = 0, stranger = 0;
+        assert(qol::host::owner_register(&identity));
+        assert(qol::host::owner_register(&stranger));
+        assert(qol::host::owner_bind_store(&identity, "module-saves"));
+        QolOwnerToken owner = 0, unauthorized = 0;
+        uint64_t generation = 0;
+        assert(qol::host::owner_identity_api().query(&identity, &owner, &generation).ok == kQolOk);
+        assert(qol::host::owner_identity_api().query(&stranger, &unauthorized, &generation).ok == kQolOk);
+        const auto& backend = *sdk.owner_store;
+        assert(backend.remove_section(owner, 0, "module.save.journal").code == kQolErrBlocked);
+        const QolStoreSection journal{"module.save.journal", 2, section_data, sizeof(section_data)};
+        const QolOwnerStoreCandidate candidate{sizeof(QolOwnerStoreCandidate),0,nullptr,0,nullptr,&journal};
+        QolOwnerStoreReservation reservation{};
+        reservation.size = sizeof(reservation);
+        assert(backend.reserve(unauthorized,0,&candidate,1,&reservation).code == kQolErrBlocked);
+        assert(backend.reserve(owner,0,&candidate,1,&reservation).ok == kQolOk);
+        assert(backend.write_section(owner,0,"other",1,nullptr,0).code == kQolErrBusy);
+        assert(backend.reset_slot(owner,0).code == kQolErrBusy);
+        assert(backend.ensure_slot(owner,0).code == kQolErrBusy);
+        assert(backend.replace_sections(owner,0,nullptr,0,nullptr,0).code == kQolErrBusy);
+        uint64_t read_size = 0;
+        assert(backend.read_section(owner,0,"adapter",section_out,sizeof(section_out),&read_size,&section_version).ok == kQolOk);
+        auto bad=reservation; ++bad.generation;
+        assert(backend.replace_reserved(owner,0,&bad,&journal,1,nullptr,0).code == kQolErrBusy);
+        bad=reservation; bad.owner=unauthorized;
+        assert(backend.replace_reserved(owner,0,&bad,&journal,1,nullptr,0).code == kQolErrInvalidArgument);
+        bad=reservation; bad.slot=1;
+        assert(backend.replace_reserved(owner,0,&bad,&journal,1,nullptr,0).code == kQolErrInvalidArgument);
+        const auto unreferenced=reservation;
+        assert(backend.set_referenced(owner,0,&reservation,1).ok == kQolOk);
+        assert(reservation.generation==unreferenced.generation && reservation.revision>unreferenced.revision);
+        assert(backend.release(owner,unreferenced).code == kQolErrBusy);
+        bad=unreferenced;
+        assert(backend.set_referenced(owner,0,&bad,0).code == kQolErrBusy);
+        assert(backend.write_reserved(owner,0,&reservation,journal.name,journal.version,journal.data,journal.size).ok == kQolOk);
+        const auto prepared=reservation;
+        assert(backend.write_reserved(owner,0,&reservation,journal.name,journal.version,journal.data,journal.size).ok == kQolOk);
+        assert(backend.release(owner,prepared).code == kQolErrBusy);
+        bad=reservation; bad.retain=0;
+        assert(backend.write_reserved(owner,0,&bad,journal.name,journal.version,journal.data,journal.size).ok == kQolOk);
+        assert(bad.retain==1);
+        reservation=bad;
+        const auto before_rebound=reservation;
+        qol::host::owner_suspend(&identity);
+        assert(sdk.owner_verify_token(owner).code == kQolErrBlocked);
+        assert(sdk.store.write(0,"other",1,nullptr,0).code == kQolErrBusy);
+        assert(qol::host::owner_resume(&identity));
+        assert(qol::host::owner_identity_api().query(&identity,&owner,&generation).ok == kQolOk);
+        QolOwnerStoreSlotState inspected{}; inspected.size=sizeof(inspected);
+        assert(backend.inspect_slot(owner,0,&inspected).ok == kQolOk);
+        reservation=inspected.reservation;
+        assert(reservation.owner==owner && reservation.retain==1);
+        assert(reservation.generation==before_rebound.generation && reservation.revision>before_rebound.revision);
+        bad=before_rebound; bad.owner=owner;
+        assert(backend.release(owner,bad).code == kQolErrBusy);
+        assert(backend.set_referenced(owner,0,&bad,0).code == kQolErrBusy);
+        assert(backend.remove_reserved(owner,0,&reservation,"module.save.journal").ok == kQolOk);
+        assert(backend.release(owner,reservation).ok == kQolOk);
+        assert(backend.release(owner,reservation).code == kQolErrNotFound);
+        assert(backend.write_reserved(owner,0,&reservation,"a",1,nullptr,0).code == kQolErrBusy);
+        assert(backend.write_section(owner,0,"a",1,nullptr,0).ok == kQolOk);
+        // prepared IO 失败且无在途引用，释放预约，不阻塞后续请求。
+        reservation.size=sizeof(reservation);
+        assert(backend.reserve(owner,0,&candidate,1,&reservation).ok == kQolOk);
+        assert(::mkdir("module-saves/slot-0.module-save.tmp",0755)==0);
+        assert(backend.write_reserved(owner,0,&reservation,journal.name,2,journal.data,journal.size).code == kQolErrInternal);
+        assert(::rmdir("module-saves/slot-0.module-save.tmp")==0);
+        assert(backend.write_section(owner,0,"a",1,nullptr,0).ok == kQolOk);
+    }
 
     int32_t value = 0;
     assert(sdk.config.set_bool("adapter.test", 1).ok == kQolOk);

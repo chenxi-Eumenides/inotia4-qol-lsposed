@@ -1,0 +1,14 @@
+{
+  "pattern": "FATAL EXCEPTION|Fatal signal|SIGSEGV|SIGABRT|UnsatisfiedLinkError",
+  "raw_log_scans": {
+    "after/logcat-app.txt": {
+      "matches": []
+    },
+    "after/logcat-crash.txt": {
+      "matches": []
+    },
+    "after/logcat-final-app.txt": {
+      "matches": []
+    }
+  }
+}

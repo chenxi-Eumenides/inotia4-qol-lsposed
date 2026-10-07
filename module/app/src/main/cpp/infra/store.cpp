@@ -5,6 +5,10 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <array>
+#include <cerrno>
+#include <algorithm>
+#include <limits>
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -27,6 +31,11 @@ constexpr int kContainerSlotOffset = 6;  // u32 magic + u16 version 之后
 std::mutex g_store_mtx;
 std::string g_dir;  // 仅 g_store_mtx 访问；<external>/module-saves
 std::atomic<bool> g_available{false};
+std::array<contracts::QolOwnerStoreReservation, kSlotCount> g_reservations{};
+uint64_t g_next_reservation = 1;
+#if defined(QOL_STORE_TEST_SEAMS)
+int (*g_unlink_for_test)(const char*) = nullptr;
+#endif
 
 struct SlotData {
     int64_t generation = 0;
@@ -131,6 +140,9 @@ bool encode(int slot, const SlotData& data, std::vector<uint8_t>* out) {
             section.payload.size() > kMaxPayloadBytes) {
             return false;
         }
+        if (body.size() > kMaxContainerBytes - 4 ||
+            11 + name.size() > kMaxContainerBytes - 4 - body.size() ||
+            section.payload.size() > kMaxContainerBytes - 4 - body.size() - 11 - name.size()) return false;
         body.push_back(static_cast<uint8_t>(name.size()));
         body.insert(body.end(), name.begin(), name.end());
         append_u16(body, section.version);
@@ -221,7 +233,7 @@ bool decode(const uint8_t* bytes, std::size_t size, int expected_slot, SlotData*
         if (reader.pos + name_len > reader.size) return false;
         std::memcpy(name.data(), bytes + reader.pos, name_len);
         reader.pos += name_len;
-        if (!valid_name(name.c_str())) return false;
+        if (!valid_name(name.c_str()) || std::strlen(name.c_str()) != name.size()) return false;
         if (find_section(data.sections, name.c_str()) != data.sections.end()) return false;
         uint16_t section_version = 0;
         if (!reader.u16(&section_version) || section_version == 0) return false;
@@ -280,19 +292,36 @@ bool write_atomic(const std::string& path, const std::vector<uint8_t>& bytes) {
 }
 
 // 读取整个文件；文件不存在/读失败返回 false（out 清空）。
-bool read_atomic(const std::string& path, std::vector<uint8_t>* out) {
+Status read_strict(const std::string& path, std::vector<uint8_t>* out) {
     out->clear();
     FILE* file = std::fopen(path.c_str(), "rb");
-    if (file == nullptr) return false;
+    if (file == nullptr) return errno == ENOENT ? Status::kNotFound : Status::kIoError;
+    struct stat info{};
+    if (::fstat(::fileno(file), &info) != 0 || !S_ISREG(info.st_mode)) {
+        std::fclose(file);
+        return Status::kIoError;
+    }
+    if (info.st_size < 0 || static_cast<uint64_t>(info.st_size) > kMaxContainerBytes) {
+        std::fclose(file);
+        return Status::kCorrupt;
+    }
     uint8_t buffer[8192];
     std::size_t n = 0;
     while ((n = std::fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        if (n > kMaxContainerBytes - out->size()) {
+            std::fclose(file);
+            out->clear();
+            return Status::kCorrupt;
+        }
         out->insert(out->end(), buffer, buffer + n);
     }
-    const bool ok = std::ferror(file) == 0;
-    std::fclose(file);
+    bool ok = std::ferror(file) == 0;
+    if (std::fclose(file) != 0) ok = false;
     if (!ok) out->clear();
-    return ok;
+    return ok ? Status::kOk : Status::kIoError;
+}
+bool read_atomic(const std::string& path, std::vector<uint8_t>* out) {
+    return read_strict(path, out) == Status::kOk;
 }
 
 std::string primary_path_locked(int slot) {
@@ -304,41 +333,81 @@ std::string last_good_path_locked(int slot) {
 }
 
 // 坏容器 quarantine 为 <name>.corrupt.<ms>，不删除。
-void quarantine_locked(const std::string& path) {
-    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+bool quarantine_locked(const std::string& path) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
-    const std::string target = path + ".corrupt." + std::to_string(now);
-    ::rename(path.c_str(), target.c_str());
+    std::string target = path + ".corrupt." + std::to_string(now);
+    while (path_exists(target)) target = path + ".corrupt." + std::to_string(++now);
+    return ::rename(path.c_str(), target.c_str()) == 0;
 }
 
 bool valid_slot(int slot) { return slot >= 0 && slot < kSlotCount; }
+
+bool unlink_checked_locked(const std::string& path) {
+#if defined(QOL_STORE_TEST_SEAMS)
+    const int result = g_unlink_for_test != nullptr ? g_unlink_for_test(path.c_str()) : ::unlink(path.c_str());
+#else
+    const int result = ::unlink(path.c_str());
+#endif
+    return result == 0 || errno == ENOENT;
+}
 
 // 读取 primary；无效 → 尝试 last-good（并 quarantine 无效文件）。
 // 返回 SlotData 与 primary 是否有效；两者皆无 → 空数据 generation=0。
 struct LoadResult {
     SlotData data;
     bool primary_valid = false;
+    Status status = Status::kNotFound;
+    contracts::QolOwnerStoreState state = contracts::QolOwnerStoreState::kAbsent;
 };
 
 LoadResult load_slot_locked(int slot) {
     LoadResult result;
     const std::string primary = primary_path_locked(slot);
     std::vector<uint8_t> bytes;
-    if (read_atomic(primary, &bytes) && decode(bytes.data(), bytes.size(), slot, &result.data)) {
+    auto primary_status = read_strict(primary, &bytes);
+    if (primary_status == Status::kOk && decode(bytes.data(), bytes.size(), slot, &result.data)) {
         result.primary_valid = true;
+        result.status = Status::kOk;
+        result.state = contracts::QolOwnerStoreState::kPrimaryValid;
         return result;
     }
-    if (path_exists(primary)) quarantine_locked(primary);
+    if (primary_status == Status::kOk) primary_status = Status::kCorrupt;
 
     const std::string last_good = last_good_path_locked(slot);
-    if (read_atomic(last_good, &bytes) && decode(bytes.data(), bytes.size(), slot, &result.data)) {
+    auto fallback_status = read_strict(last_good, &bytes);
+    if (fallback_status == Status::kOk && decode(bytes.data(), bytes.size(), slot, &result.data)) {
+        if (primary_status == Status::kCorrupt && !quarantine_locked(primary)) {
+            result.status = Status::kIoError;
+            result.state = contracts::QolOwnerStoreState::kIoFailed;
+            return result;
+        }
         result.primary_valid = false;
+        result.status = Status::kOk;
+        result.state = contracts::QolOwnerStoreState::kFallbackUsed;
         return result;
     }
-    if (path_exists(last_good)) quarantine_locked(last_good);
+    if (fallback_status == Status::kOk) fallback_status = Status::kCorrupt;
+    // quarantine 会移走原路径，持久标记防止后续调用或重启把双损坏误判为新槽。
+    // 显式 reset/delete 才消除未决标记；损坏证据文件不删除。
+    const auto marker = primary + ".unresolved-corrupt";
+    const bool corrupt = primary_status == Status::kCorrupt || fallback_status == Status::kCorrupt;
+    bool evidence_ok = true;
+    if (corrupt) {
+        evidence_ok = write_atomic(marker, {1});
+        if (evidence_ok && primary_status == Status::kCorrupt) evidence_ok = quarantine_locked(primary);
+        if (evidence_ok && fallback_status == Status::kCorrupt) evidence_ok = quarantine_locked(last_good);
+    }
     result.data = SlotData{};
     result.primary_valid = false;
+    if (!evidence_ok || primary_status == Status::kIoError || fallback_status == Status::kIoError) {
+        result.status = Status::kIoError;
+        result.state = contracts::QolOwnerStoreState::kIoFailed;
+    } else if (corrupt || path_exists(marker)) {
+        result.status = Status::kCorrupt;
+        result.state = contracts::QolOwnerStoreState::kCorrupt;
+    }
     return result;
 }
 
@@ -372,6 +441,8 @@ Status require_ready(int slot) {
 
 const char* status_name(Status status) {
     switch (status) {
+        case Status::kBusy: return "busy";
+        case Status::kBlocked: return "blocked";
         case Status::kOk: return "ok";
         case Status::kNotFound: return "not_found";
         case Status::kCorrupt: return "corrupt";
@@ -387,6 +458,8 @@ const char* status_name(Status status) {
 
 void init(const char* external_files_dir) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
+    if (std::any_of(g_reservations.begin(), g_reservations.end(), [](const auto& held) { return held.id != 0; }) &&
+        (external_files_dir == nullptr || g_dir != std::string(external_files_dir) + "/module-saves")) return;
     g_available.store(false, std::memory_order_release);
     g_dir.clear();
     if (external_files_dir == nullptr || external_files_dir[0] == '\0') return;
@@ -404,7 +477,9 @@ Status ensure_slot(int slot) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
     const LoadResult loaded = load_slot_locked(slot);
+    if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
     if (loaded.primary_valid) return Status::kOk;
     return write_slot_locked(slot, loaded.data, /*preserve_current=*/false);
 }
@@ -413,19 +488,26 @@ Status reset_slot(int slot) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
-    ::unlink(primary_path_locked(slot).c_str());
-    ::unlink(last_good_path_locked(slot).c_str());
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+    // 先确认旧回退文件删除，再替换主容器，避免失败时留下可复活旧槽的 last-good。
+    if (!unlink_checked_locked(last_good_path_locked(slot)) ||
+        !unlink_checked_locked(primary_path_locked(slot))) return Status::kIoError;
     SlotData empty;
     empty.generation = 1;
-    return write_slot_locked(slot, empty, /*preserve_current=*/false);
+    const auto result = write_slot_locked(slot, empty, /*preserve_current=*/false);
+    if (result == Status::kOk &&
+        !unlink_checked_locked(primary_path_locked(slot) + ".unresolved-corrupt")) return Status::kIoError;
+    return result;
 }
 
 Status delete_slot(int slot) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
-    ::unlink(primary_path_locked(slot).c_str());
-    ::unlink(last_good_path_locked(slot).c_str());
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+    if (!unlink_checked_locked(last_good_path_locked(slot)) ||
+        !unlink_checked_locked(primary_path_locked(slot))) return Status::kIoError;
+    if (!unlink_checked_locked(primary_path_locked(slot) + ".unresolved-corrupt")) return Status::kIoError;
     return Status::kOk;
 }
 
@@ -435,7 +517,11 @@ Status read_container(int slot, std::vector<uint8_t>* out) {
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
     std::vector<uint8_t> bytes;
-    if (!read_atomic(primary_path_locked(slot), &bytes)) return Status::kNotFound;
+    const auto read = read_strict(primary_path_locked(slot), &bytes);
+    if (read != Status::kOk) {
+        if (read == Status::kNotFound && path_exists(primary_path_locked(slot) + ".unresolved-corrupt")) return Status::kCorrupt;
+        return read;
+    }
     SlotData ignored;
     if (!decode(bytes.data(), bytes.size(), slot, &ignored)) return Status::kCorrupt;
     *out = std::move(bytes);
@@ -446,6 +532,7 @@ Status import_container(int slot, const uint8_t* data, std::size_t len) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
     if (data == nullptr) return Status::kCorrupt;
     int stored_slot = -1;
     if (len > static_cast<std::size_t>(kContainerSlotOffset)) {
@@ -473,7 +560,9 @@ Status read_section(int slot, const char* name, std::vector<uint8_t>* out, uint1
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
-    SlotData data_slot = load_slot_locked(slot).data;
+    const auto loaded = load_slot_locked(slot);
+    if (loaded.status != Status::kOk) return loaded.status;
+    SlotData data_slot = loaded.data;
     auto it = find_section(data_slot.sections, name);
     if (it == data_slot.sections.end()) return Status::kNotFound;
     *out = it->second.payload;
@@ -486,10 +575,14 @@ Status write_section(int slot, const char* name, uint16_t version, const uint8_t
     if (!valid_name(name)) return Status::kBadName;
     if (version == 0) return Status::kBadVersion;
     if (len > kMaxPayloadBytes) return Status::kTooLarge;
+    if (len != 0 && data == nullptr) return Status::kBadName;
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
-    SlotData data_slot = load_slot_locked(slot).data;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+    const auto loaded = load_slot_locked(slot);
+    if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
+    SlotData data_slot = loaded.data;
     Section section;
     section.version = version;
     if (len > 0) section.payload.assign(data, data + len);
@@ -503,7 +596,10 @@ Status remove_section(int slot, const char* name) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
-    SlotData data_slot = load_slot_locked(slot).data;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+    const auto loaded = load_slot_locked(slot);
+    if (loaded.status != Status::kOk) return loaded.status;
+    SlotData data_slot = loaded.data;
     auto it = find_section(data_slot.sections, name);
     if (it == data_slot.sections.end()) return Status::kNotFound;
     data_slot.sections.erase(it);
@@ -523,7 +619,10 @@ Status replace_sections(int slot, const ReplaceMap& replacements, const RemoveSe
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
-    SlotData data_slot = load_slot_locked(slot).data;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+    const auto loaded = load_slot_locked(slot);
+    if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
+    SlotData data_slot = loaded.data;
     for (const std::string& name : removals) {
         auto it = find_section(data_slot.sections, name.c_str());
         if (it != data_slot.sections.end()) data_slot.sections.erase(it);
@@ -534,5 +633,195 @@ Status replace_sections(int slot, const ReplaceMap& replacements, const RemoveSe
     data_slot.generation = next_generation(data_slot.generation);
     return write_slot_locked(slot, data_slot, /*preserve_current=*/true);
 }
+
+namespace {
+bool credential_matches(const contracts::QolOwnerStoreReservation& held,
+                        const contracts::QolOwnerStoreReservation& credential) {
+    return held.id != 0 && held.id == credential.id && held.slot == credential.slot &&
+           held.owner == credential.owner && held.generation == credential.generation &&
+           held.revision == credential.revision && held.encoded_bytes == credential.encoded_bytes;
+}
+Status apply_candidate(const SlotData& current, const contracts::QolOwnerStoreCandidate& candidate,
+                       SlotData* target) {
+    if (candidate.size < sizeof(candidate) ||
+        (candidate.replacement_count != 0 && candidate.replacements == nullptr) ||
+        (candidate.removal_count != 0 && candidate.removals == nullptr)) return Status::kBadName;
+    *target = current;
+    for (uint32_t i = 0; i < candidate.removal_count; ++i) {
+        const auto name = candidate.removals[i];
+        if (!valid_name(name)) return Status::kBadName;
+        auto it = find_section(target->sections, name);
+        if (it != target->sections.end()) target->sections.erase(it);
+    }
+    const auto add = [&](const contracts::QolStoreSection& section) {
+        if (!valid_name(section.name) || (section.size != 0 && section.data == nullptr)) return Status::kBadName;
+        if (section.version == 0) return Status::kBadVersion;
+        if (section.size > kMaxPayloadBytes) return Status::kTooLarge;
+        Section copy;
+        copy.version = section.version;
+        if (section.size != 0) copy.payload.assign(section.data, section.data + section.size);
+        put_section(target->sections, section.name, std::move(copy));
+        return Status::kOk;
+    };
+    for (uint32_t i = 0; i < candidate.replacement_count; ++i) {
+        const auto status = add(candidate.replacements[i]);
+        if (status != Status::kOk) return status;
+    }
+    if (candidate.journal != nullptr) {
+        if (candidate.journal->name == nullptr ||
+            std::strcmp(candidate.journal->name, "module.save.journal") != 0) return Status::kBadName;
+        const auto status = add(*candidate.journal);
+        if (status != Status::kOk) return status;
+    }
+    target->generation = next_generation(current.generation);
+    return Status::kOk;
+}
+Status preflight_locked(int slot, const contracts::QolOwnerStoreCandidate* candidates,
+                        uint32_t count, uint64_t* lengths, LoadResult* current) {
+    if (count == 0 || count > 3 || candidates == nullptr || lengths == nullptr) return Status::kBadName;
+    *current = load_slot_locked(slot);
+    if (current->status != Status::kOk && current->status != Status::kNotFound) return current->status;
+    for (uint32_t i = 0; i < count; ++i) {
+        SlotData candidate;
+        auto status = apply_candidate(current->data, candidates[i], &candidate);
+        if (status != Status::kOk) return status;
+        std::vector<uint8_t> encoded;
+        if (!encode(slot, candidate, &encoded)) return Status::kTooLarge;
+        lengths[i] = encoded.size();
+    }
+    return Status::kOk;
+}
+}
+
+Status inspect_slot(int slot, contracts::QolOwnerStoreSlotState* out) {
+    if (out == nullptr || out->size < sizeof(*out)) return Status::kBadName;
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    const auto ready = require_ready(slot);
+    if (ready != Status::kOk) return ready;
+    const auto loaded = load_slot_locked(slot);
+    out->state = static_cast<uint32_t>(loaded.state);
+    out->generation = static_cast<uint64_t>(loaded.data.generation);
+    out->encoded_bytes = 0;
+    out->reservation = g_reservations[slot];
+    if (loaded.status == Status::kOk) {
+        std::vector<uint8_t> encoded;
+        if (!encode(slot, loaded.data, &encoded)) return Status::kCorrupt;
+        out->encoded_bytes = encoded.size();
+    }
+    // 状态本身是 inspect 的输出；损坏/IO 不可用不会伪装为 absent。
+    return Status::kOk;
+}
+Status preflight(int slot, const contracts::QolOwnerStoreCandidate* candidates,
+                 uint32_t count, uint64_t* lengths) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    const auto ready = require_ready(slot);
+    if (ready != Status::kOk) return ready;
+    LoadResult current;
+    return preflight_locked(slot, candidates, count, lengths, &current);
+}
+Status reserve(uint64_t owner, int slot, const contracts::QolOwnerStoreCandidate* candidates,
+               uint32_t count, contracts::QolOwnerStoreReservation* out) {
+    if (out == nullptr || out->size < sizeof(*out) || owner == 0) return Status::kBadName;
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    const auto ready = require_ready(slot);
+    if (ready != Status::kOk) return ready;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+    uint64_t lengths[3]{};
+    LoadResult loaded;
+    const auto status = preflight_locked(slot, candidates, count, lengths, &loaded);
+    if (status != Status::kOk) return status;
+    if (g_next_reservation == std::numeric_limits<uint64_t>::max()) return Status::kBusy;
+    g_reservations[slot] = {sizeof(*out), slot, g_next_reservation++,
+        static_cast<uint64_t>(loaded.data.generation), owner,
+        *std::max_element(lengths, lengths + count), 0, 0, 1};
+    *out = g_reservations[slot];
+    return Status::kOk;
+}
+Status release(uint64_t owner, const contracts::QolOwnerStoreReservation& reservation) {
+    if (reservation.size < sizeof(reservation) || !valid_slot(reservation.slot) ||
+        reservation.owner != owner || owner == 0) return Status::kBadSlot;
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    auto& held = g_reservations[reservation.slot];
+    if (held.id == 0 || held.id != reservation.id) return Status::kNotFound;
+    if (!credential_matches(held, reservation)) return Status::kBusy;
+    held = {};
+    return Status::kOk;
+}
+Status replace_reserved(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* credential,
+                        const ReplaceMap& replacements, const RemoveSet& removals) {
+    if (credential == nullptr || credential->size < sizeof(*credential) || credential->slot != slot ||
+        credential->owner != owner || owner == 0) return Status::kBadSlot;
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    const auto ready = require_ready(slot);
+    if (ready != Status::kOk) return ready;
+    auto& held = g_reservations[slot];
+    if (!credential_matches(held, *credential) || held.revision == UINT64_MAX)
+        return Status::kBusy;
+    const auto loaded = load_slot_locked(slot);
+    if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
+    if (static_cast<uint64_t>(loaded.data.generation) != held.generation) return Status::kBusy;
+    SlotData target = loaded.data;
+    for (const auto& name : removals) {
+        if (!valid_name(name.c_str())) return Status::kBadName;
+        auto it = find_section(target.sections, name.c_str());
+        if (it != target.sections.end()) target.sections.erase(it);
+    }
+    for (const auto& item : replacements) {
+        if (!valid_name(item.first.c_str())) return Status::kBadName;
+        if (item.second.version == 0) return Status::kBadVersion;
+        if (item.second.payload.size() > kMaxPayloadBytes) return Status::kTooLarge;
+        put_section(target.sections, item.first, item.second);
+    }
+    target.generation = next_generation(target.generation);
+    std::vector<uint8_t> encoded;
+    if (!encode(slot, target, &encoded) || encoded.size() > held.encoded_bytes) return Status::kTooLarge;
+    // 引用状态只由 set_referenced 修改；可复制凭据中的 retain 不能撤销在途保护。
+    const auto status = write_slot_locked(slot, target, true);
+    if (status == Status::kOk) {
+        held.generation = static_cast<uint64_t>(target.generation);
+        ++held.revision;
+        *credential = held;
+    } else if (held.retain == 0) {
+        // 原版尚未开始的 prepared 写失败，不应留下永久占用；pending 必须保留。
+        held = {};
+    }
+    return status;
+}
+void owner_stopped(uint64_t owner) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    for (auto& held : g_reservations) if (held.owner == owner && held.retain == 0) held = {};
+}
+Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* credential,
+                      uint32_t referenced) {
+    if (credential == nullptr || credential->size < sizeof(*credential) || credential->slot != slot ||
+        credential->owner != owner || referenced > 1) return Status::kBadSlot;
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    const auto ready = require_ready(slot);
+    if (ready != Status::kOk) return ready;
+    auto& held = g_reservations[slot];
+    if (!credential_matches(held, *credential)) return Status::kBusy;
+    if (held.retain != referenced) {
+        if (held.revision == UINT64_MAX) return Status::kBusy;
+        held.retain = referenced;
+        ++held.revision; // 引用变化不写盘，不改变槽 generation。
+    }
+    *credential = held;
+    return Status::kOk;
+}
+void owner_rebound(uint64_t old_owner, uint64_t new_owner) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    for (auto& held : g_reservations)
+        if (held.id != 0 && held.retain != 0 && held.owner == old_owner && held.revision != UINT64_MAX) {
+            held.owner = new_owner;
+            ++held.revision;
+        }
+}
+
+#if defined(QOL_STORE_TEST_SEAMS)
+void set_unlink_for_test(int (*unlink_fn)(const char*)) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    g_unlink_for_test = unlink_fn;
+}
+#endif
 
 }  // namespace qol::infra::store

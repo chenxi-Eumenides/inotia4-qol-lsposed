@@ -82,6 +82,17 @@ set_target_properties(slot_data_provider_tests PROPERTIES CXX_STANDARD 17 CXX_ST
 target_link_libraries(slot_data_provider_tests PRIVATE Threads::Threads)
 add_test(NAME slot_data_provider_tests COMMAND slot_data_provider_tests)
 
+add_executable(save_journal_tests
+    test_save_journal.cpp
+    ${CPP_DIR}/plugins/core.save/save_journal.cpp
+    ${CPP_DIR}/game/access/save_file_evidence.cpp
+)
+target_include_directories(save_journal_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_journal_tests PRIVATE cxx_std_17)
+set_target_properties(save_journal_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME save_journal_tests COMMAND save_journal_tests)
+target_compile_definitions(save_journal_tests PRIVATE QOL_SAVE_EVIDENCE_TEST_SEAMS=1)
+
 add_executable(craft_facts_plugin_tests
     test_craft_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.craft/plugin.cpp
@@ -697,6 +708,7 @@ target_include_directories(infra_store_tests PRIVATE
 )
 target_compile_features(infra_store_tests PRIVATE cxx_std_17)
 add_test(NAME infra_store_tests COMMAND infra_store_tests)
+target_compile_definitions(infra_store_tests PRIVATE QOL_STORE_TEST_SEAMS=1)
 
 # D1-b0：面板注册表纯数据面 host 测试（末尾追加）
 add_executable(infra_panels_tests

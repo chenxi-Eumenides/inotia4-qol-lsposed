@@ -120,6 +120,15 @@
 > （`known=0`、能力位 0，靠 `WH4JRN01` 回退分类）；重新生成后补入 v27/v29，设备命中
 > `known=1, version=v27, caps=0x3`。该修复需同步到主线（活跃债务登记见本文件 §5）。
 
+### 存档数据生命周期 P3a 后注（2026-10-07）
+
+**PASS（严格限定 P3a 机制与受影响正常读面/进档范围）**。本后注不改 VM-K4-04b、VM-K5-06i 的历史 PASS 原记录，也不把其余延期的卡面追认为本次已验。
+
+- Host 7/7：`save_journal_tests`、`infra_store_tests`、`slot_data_contract_tests`、`slot_data_provider_tests`、`save_facts_plugin_tests`、`host_tests`、`host_adapter_tests`。覆盖 strict 双损坏不写空、quarantine/marker、encoder 精确开销和 1/4 MiB 边界、显式 generation/revision 凭据、注销与 owner 迁移、reset/delete 确定性 IO 失败、v2/v1 编解码、不可变捕获字节/三次重试及同名 dat 原子替换。oracle 三项 P1 复审通过；Host 输出见 `docs/history/slot-data/p3a-20261007/accepted-evidence/host-tests.txt`。
+- 有效已部署模块：`output/inotia4_qol_lsposed_debug_2610071930_466f895b6208.apk`，SHA-256 `466f895b62089ca0c81918bee8ccb529c5a397c496194b3f1affc415d32ebe90`；构建成功，架构新增违规 0，路由当前基线 146/146。收口复用该构建与设备证据，不生成未部署的新 APK。
+- 真机原版 1.3.2/槽 0：实际已安装旧包与新集成包的签名指纹一致，install-r 成功，启动身份日志 SHA 正确；只进入已有槽，不创建或保存。正常 EB 读面包括完整 status/inventory/items、5 袋 info、80 槽，共 **88/88 完整 raw body 逐字相同**，无动态字段归一化；24 个存档目录文件与 11 个模块目录文件 SHA 不变。临时启用 EB 采集后原配置逐字恢复，最终 main_menu；新增 WARN/崩溃为 0，既有告警保留。比较与身份证据见该目录 `accepted-evidence/`，完整受影响范围见 `README.md`。
+- **不覆盖**：完整历史 VM 卡、设备损坏注入、原版 save/联合提交、创建/导入/删除/回滚、provider 生命周期级联及其它变体。双损坏只在 Host 注入。journal v2、恢复状态与 evidence 尚未接生产路径；VM-SD-01..04 仍为后续计划。API 票据待 P3b 按正式 sidecar 提交确认才 done，pending 保持 pending；不以游戏 SAVE_Save 的 int 成功提前结算。
+
 > **VM-D1 状态**：D1 收尾真机卡，本轮未执行设备操作，结论待填 `PASS`/`NOT_ACCEPTED`；
 > 按 §1 交付定义，D1 行为面在真机证据归档前不视为可交付（当前状态：待真机执行）。
 

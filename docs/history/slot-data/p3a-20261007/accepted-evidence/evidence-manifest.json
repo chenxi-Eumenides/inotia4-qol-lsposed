@@ -1,0 +1,74 @@
+{
+  "build-result.txt": {
+    "bytes": 182,
+    "sha256": "726143fdeefeae373a31c14bef707be968e82a4ad324adba93d090f72089cd22"
+  },
+  "certificate-after.txt": {
+    "bytes": 383,
+    "sha256": "c9ee0a2ca34ebb6be9368ef4646eca652f5f3773ce338f29161740e0c595ca2a"
+  },
+  "certificate-before.txt": {
+    "bytes": 383,
+    "sha256": "c9ee0a2ca34ebb6be9368ef4646eca652f5f3773ce338f29161740e0c595ca2a"
+  },
+  "check-arch.txt": {
+    "bytes": 2329,
+    "sha256": "0eca13b181206ff09e0dabb0d674f3c0cce65280182b1aa50026d3badc8698e0"
+  },
+  "check-routes.txt": {
+    "bytes": 575,
+    "sha256": "91a07d784825b09af61b405778aacaa7081483732846025aea84aa7c7167e237"
+  },
+  "comparison-crash-scan.json": {
+    "bytes": 288,
+    "sha256": "0a5998a24deba8335f9794f6c2d97da13f549d12d2cc854bb18a867e93cf1bf3"
+  },
+  "comparison-read-bodies.json": {
+    "bytes": 43961,
+    "sha256": "617441a309dded4d7c6d598a3eaae6643b7bf286b0a127312aa9c62169a9a28b"
+  },
+  "comparison-warnings.json": {
+    "bytes": 3598,
+    "sha256": "fe8c76626c5ef657e6aa28d49a14c5f02b6c39dc7c445e7a1643fd5c6f609909"
+  },
+  "enter-ticket.json": {
+    "bytes": 105,
+    "sha256": "ace9107c7e9398435f0ec2ab09b3bf1fc9f792bd8df30ef928389b27c574f2bb"
+  },
+  "final-screen.json": {
+    "bytes": 22,
+    "sha256": "50c53a78034323862dee7c447dee1354ca516d72e32853edbafcef52e5491a99"
+  },
+  "health-after.json": {
+    "bytes": 105,
+    "sha256": "c214fd6cab4fb76303d130be2d3ff36dbed5400f6ccb0d60450c6660763c4af2"
+  },
+  "health-before.json": {
+    "bytes": 105,
+    "sha256": "c214fd6cab4fb76303d130be2d3ff36dbed5400f6ccb0d60450c6660763c4af2"
+  },
+  "host-tests.txt": {
+    "bytes": 901,
+    "sha256": "d20bdb0a4f2f3472aec41fc1cbdfd3e6b21c03f5cdef1fffc13910710e05a3be"
+  },
+  "identity-after.txt": {
+    "bytes": 373,
+    "sha256": "215d4500c260c553610a1c0525582889c3cb10cd9b7ab99c5d789b0b144ef0d3"
+  },
+  "identity-before.txt": {
+    "bytes": 374,
+    "sha256": "ee133692a7e923b6678018f89360be37786391c89805facb06acaaa5122eb70a"
+  },
+  "raw-bodies.json": {
+    "bytes": 51699,
+    "sha256": "0bf18d9d6024ce40061d761ff85c091a7e9ec7982bc09b5fdf74ffe584d9324b"
+  },
+  "save-file-sha256.json": {
+    "bytes": 13768,
+    "sha256": "3d9c99d7fd980269e8556c777513c94303bf87b11921f81d317c8655fca75ccc"
+  },
+  "verification-summary.json": {
+    "bytes": 1314,
+    "sha256": "4d6fd6f9b51e23826a6026461bb8b3d7032ea40e5bd3fb6029c2f54624d41f41"
+  }
+}

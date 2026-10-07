@@ -29,6 +29,7 @@
 #include "in_flight.h"
 #include "item_handle.h"
 #include "owner_token.h"
+#include "owner_store.h"
 #include "lifecycle_participant.h"
 #include "panels.h"
 #include "result.h"
@@ -160,6 +161,12 @@ static_assert(sizeof(QolStoreApi) == sizeof(QolStoreReadFn) * 9,
 
 // 只校验已持有的 token；签发、query 与 generation 递增为 Host 内部职责。
 using QolOwnerVerifyTokenFn = QolResult (*)(QolOwnerToken token);
+using QolOwnerStoreInspectFn = QolResult (*)(QolOwnerToken, int32_t, QolOwnerStoreSlotState*);
+using QolOwnerStorePreflightFn = QolResult (*)(QolOwnerToken, int32_t,
+    const QolOwnerStoreCandidate*, uint32_t, uint64_t*);
+using QolOwnerStoreReserveFn = QolResult (*)(QolOwnerToken, int32_t,
+    const QolOwnerStoreCandidate*, uint32_t, QolOwnerStoreReservation*);
+using QolOwnerStoreReleaseFn = QolResult (*)(QolOwnerToken, QolOwnerStoreReservation);
 
 // 命名空间绑定由装配期授权决定；Host 验证 owner 后转发。
 // 迁移窗口保留旧 QolStoreApi，旧入口权限撤销由消费者迁移后收口。
@@ -177,6 +184,21 @@ struct QolOwnerStoreApi {
     QolResult (*replace_sections)(QolOwnerToken owner, int32_t slot,
                                  const QolStoreSection* replacements, uint32_t replacement_count,
                                  const char* const* removals, uint32_t removal_count);
+    QolOwnerStoreInspectFn inspect_slot;
+    // out_encoded_bytes 为 candidate_count 项的输出数组；候选各自基于同一当前容器。
+    QolOwnerStorePreflightFn preflight;
+    QolOwnerStoreReserveFn reserve;
+    QolOwnerStoreReleaseFn release;
+    // 显式凭据是跨调用事务身份，不能用线程、TLS 或写入顺序推断。
+    // 成功提交后更新 in/out 凭据 generation；旧副本继续提交返回 Busy。
+    // retain 是调用方声明的在途/恢复引用，不由 Host 解释 journal stage。
+    QolResult (*write_reserved)(QolOwnerToken, int32_t, QolOwnerStoreReservation*,
+                               const char*, uint16_t, const uint8_t*, uint64_t);
+    QolResult (*remove_reserved)(QolOwnerToken, int32_t, QolOwnerStoreReservation*, const char*);
+    QolResult (*replace_reserved)(QolOwnerToken, int32_t, QolOwnerStoreReservation*,
+                                 const QolStoreSection*, uint32_t, const char* const*, uint32_t);
+    // 原版调用前登记在途引用，不需为了改变租约引用而重复写 journal。
+    QolResult (*set_referenced)(QolOwnerToken, int32_t, QolOwnerStoreReservation*, uint32_t);
 };
 
 using QolPanelFindFn = QolResult (*)(const char* panel_id, const PanelProviderSpec** out_provider);

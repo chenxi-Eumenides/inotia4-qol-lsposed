@@ -10,6 +10,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <cerrno>
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -29,6 +30,12 @@ static int g_fail = 0;
 } while (0)
 
 namespace {
+
+std::string g_fail_unlink_path;
+int injected_unlink(const char* path) {
+    if (g_fail_unlink_path == path) { errno = EACCES; return -1; }
+    return ::unlink(path);
+}
 
 std::string make_temp_dir() {
     char tmpl[] = "infra_store_test_XXXXXX";
@@ -348,6 +355,187 @@ void test_status_name() {
     CHECK(std::strcmp(qol::infra::store::status_name(Status::kUnavailable), "unavailable") == 0);
 }
 
+void test_strict_states(const std::string& dir) {
+    using namespace qol::infra::store;
+    using qol::contracts::QolOwnerStoreState;
+    init(dir.c_str());
+    qol::contracts::QolOwnerStoreSlotState state{};
+    state.size = sizeof(state);
+    CHECK(inspect_slot(0, &state) == Status::kOk);
+    CHECK(state.state == static_cast<uint32_t>(QolOwnerStoreState::kAbsent));
+    CHECK(write_section(0, "a", 1, bytes({1}).data(), 1) == Status::kOk);
+    CHECK(write_section(0, "a", 2, bytes({2}).data(), 1) == Status::kOk);
+    CHECK(inspect_slot(0, &state) == Status::kOk);
+    CHECK(state.state == static_cast<uint32_t>(QolOwnerStoreState::kPrimaryValid));
+    { std::ofstream bad(primary_path(dir, 0), std::ios::binary | std::ios::trunc); bad << "bad"; }
+    CHECK(inspect_slot(0, &state) == Status::kOk);
+    CHECK(state.state == static_cast<uint32_t>(QolOwnerStoreState::kFallbackUsed));
+    CHECK(dir_has_corrupt(dir + "/module-saves"));
+    { std::ofstream bad(last_good_path(dir, 0), std::ios::binary | std::ios::trunc); bad << "bad"; }
+    CHECK(inspect_slot(0, &state) == Status::kOk);
+    CHECK(state.state == static_cast<uint32_t>(QolOwnerStoreState::kCorrupt));
+    CHECK(ensure_slot(0) == Status::kCorrupt);
+    CHECK(!file_exists(primary_path(dir, 0)));
+    std::vector<uint8_t> payload;
+    uint16_t version = 0;
+    CHECK(read_section(0, "missing", &payload, &version) == Status::kCorrupt);
+    init(dir.c_str()); // 不能在 quarantine 后或重启重初始化时退化为 absent。
+    CHECK(ensure_slot(0) == Status::kCorrupt);
+    CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kCorrupt);
+    CHECK(reset_slot(0) == Status::kOk);
+    CHECK(dir_has_corrupt(dir + "/module-saves"));
+    CHECK(inspect_slot(0, &state) == Status::kOk && state.state == static_cast<uint32_t>(QolOwnerStoreState::kPrimaryValid));
+    CHECK(::mkdir(primary_path(dir, 1).c_str(), 0755) == 0);
+    CHECK(inspect_slot(1, &state) == Status::kOk && state.state == static_cast<uint32_t>(QolOwnerStoreState::kIoFailed));
+    CHECK(ensure_slot(1) == Status::kIoError);
+    CHECK(write_section(2,"a",1,bytes({1}).data(),1)==Status::kOk);
+    CHECK(write_section(2,"a",2,bytes({2}).data(),1)==Status::kOk);
+    { std::ofstream bad(primary_path(dir,2),std::ios::binary|std::ios::trunc); bad<<"bad-primary"; }
+    { std::ofstream bad(last_good_path(dir,2),std::ios::binary|std::ios::trunc); bad<<"bad-fallback"; }
+    CHECK(inspect_slot(2,&state)==Status::kOk && state.state==static_cast<uint32_t>(QolOwnerStoreState::kCorrupt));
+    CHECK(ensure_slot(2)==Status::kCorrupt && !file_exists(primary_path(dir,2)));
+    CHECK(read_container(2,&payload)==Status::kCorrupt);
+}
+
+void test_preflight_and_reservation(const std::string& dir) {
+    using namespace qol::infra::store;
+    using namespace qol::contracts;
+    init(dir.c_str());
+    std::vector<uint8_t> block(1024 * 1024, 7);
+    QolStoreSection sections[4]{{"a",1,block.data(),static_cast<uint32_t>(block.size())},
+        {"b",1,block.data(),static_cast<uint32_t>(block.size())},
+        {"c",1,block.data(),static_cast<uint32_t>(block.size())},
+        {"d",1,block.data(),static_cast<uint32_t>(block.size() - 69)}};
+    QolOwnerStoreCandidate candidate{sizeof(candidate), 4, sections, 0, nullptr, nullptr};
+    uint64_t length = 0;
+    CHECK(preflight(0, &candidate, 1, &length) == Status::kOk && length == 4 * 1024 * 1024);
+    const QolStoreSection extra_journal{"module.save.journal",2,block.data(),92};
+    candidate.journal=&extra_journal;
+    CHECK(preflight(0,&candidate,1,&length)==Status::kTooLarge);
+    candidate.journal=nullptr;
+    ++sections[3].size;
+    QolOwnerStoreReservation credential{};
+    credential.size = sizeof(credential);
+    CHECK(reserve(7, 0, &candidate, 1, &credential) == Status::kTooLarge);
+    CHECK(write_section(0, "free", 1, nullptr, 0) == Status::kOk); // 失败未建立租约。
+    CHECK(reset_slot(0) == Status::kOk);
+    --sections[3].size;
+    CHECK(reserve(7, 0, &candidate, 1, &credential) == Status::kOk);
+    CHECK(credential.id != 0 && credential.encoded_bytes == 4 * 1024 * 1024);
+    CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kBusy);
+    CHECK(remove_section(0, "a") == Status::kBusy);
+    CHECK(reset_slot(0) == Status::kBusy && ensure_slot(0) == Status::kBusy);
+    CHECK(replace_sections(0, {}, {}) == Status::kBusy);
+    QolOwnerStoreReservation other{};
+    other.size = sizeof(other);
+    CHECK(reserve(7, 0, &candidate, 1, &other) == Status::kBusy); // 同 owner 也不能抢占。
+    std::vector<uint8_t> payload;
+    uint16_t version = 0;
+    CHECK(read_section(0, "a", &payload, &version) == Status::kNotFound); // 读不 Busy。
+    const ReplaceMap replacement{{"a", {1, bytes({9})}}};
+    auto bad = credential;
+    ++bad.generation;
+    CHECK(replace_reserved(7, 0, &bad, replacement, {}) == Status::kBusy);
+    bad = credential; bad.slot = 1;
+    CHECK(replace_reserved(7, 0, &bad, replacement, {}) == Status::kBadSlot);
+    bad = credential; bad.owner = 8;
+    CHECK(replace_reserved(7, 0, &bad, replacement, {}) == Status::kBadSlot);
+    const auto old = credential;
+    CHECK(set_referenced(7, 0, &credential, 1) == Status::kOk);
+    CHECK(credential.generation == old.generation && credential.revision > old.revision);
+    CHECK(release(7, old) == Status::kBusy); // 未写盘的引用变化也使旧副本失效。
+    bad = old;
+    CHECK(set_referenced(7, 0, &bad, 0) == Status::kBusy);
+    CHECK(replace_reserved(7, 0, &credential, replacement, {}) == Status::kOk);
+    CHECK(credential.generation == old.generation + 1);
+    CHECK(release(7, old) == Status::kBusy);
+    const auto prepared = credential;
+    CHECK(replace_reserved(7, 0, &credential, replacement, {}) == Status::kOk);
+    CHECK(release(7, prepared) == Status::kBusy); // confirmed 提交后旧 generation 不得释放。
+    bad = prepared;
+    bad.generation = credential.generation;
+    CHECK(release(7, bad) == Status::kBusy); // 伪造当前 generation 也不能跳过 revision。
+    CHECK(set_referenced(7, 0, &bad, 0) == Status::kBusy);
+    bad = old;
+    CHECK(replace_reserved(7, 0, &bad, replacement, {}) == Status::kBusy);
+    bad = credential;
+    bad.retain = 0;
+    CHECK(replace_reserved(7, 0, &bad, replacement, {}) == Status::kOk);
+    CHECK(bad.retain == 1); // 写入只读取权威引用状态，不复制 caller 的 retain。
+    credential = bad;
+    const auto before_rebound = credential;
+    owner_stopped(7);
+    CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kBusy);
+    owner_rebound(7, 9);
+    QolOwnerStoreSlotState state{};
+    state.size = sizeof(state);
+    CHECK(inspect_slot(0, &state) == Status::kOk && state.reservation.owner == 9);
+    CHECK(state.reservation.generation == before_rebound.generation &&
+          state.reservation.revision > before_rebound.revision);
+    bad = before_rebound;
+    bad.owner = 9;
+    CHECK(release(9, bad) == Status::kBusy);
+    CHECK(set_referenced(9, 0, &bad, 0) == Status::kBusy);
+    CHECK(replace_reserved(9, 0, &bad, replacement, {}) == Status::kBusy);
+    credential = state.reservation;
+    CHECK(read_section(0, "a", &payload, &version) == Status::kOk && payload == bytes({9}));
+    CHECK(release(9, credential) == Status::kOk);
+    CHECK(release(9, credential) == Status::kNotFound);
+    CHECK(replace_reserved(9, 0, &credential, replacement, {}) == Status::kBusy);
+    CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kOk);
+    other.size = sizeof(other);
+    CHECK(reserve(9, 0, &candidate, 1, &other) == Status::kOk && other.id > credential.id);
+    CHECK(release(9, credential) == Status::kNotFound);
+    CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kBusy); // 旧 id 收尾不影响新预约。
+    owner_stopped(9); // 无引用租约随停用释放。
+    CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kOk);
+
+    const QolStoreSection journal{"module.save.journal",2,block.data(),92};
+    QolOwnerStoreCandidate small[3]{};
+    for (auto& c : small) c = {sizeof(c), 1, sections, 0, nullptr, &journal};
+    uint64_t lengths[3]{};
+    CHECK(preflight(1, small, 3, lengths) == Status::kOk);
+    CHECK(lengths[0] == 21 + 11 + 1 + block.size() + 11 + std::strlen(journal.name) + 92);
+    CHECK(lengths[1] == lengths[0] && lengths[2] == lengths[0]);
+}
+
+void test_reset_delete_unlink_failures(const std::string& dir) {
+    using namespace qol::infra::store;
+    init(dir.c_str());
+    const auto primary = primary_path(dir, 0);
+    const auto fallback = last_good_path(dir, 0);
+    const auto marker = primary + ".unresolved-corrupt";
+    const auto quarantine = primary + ".corrupt.1";
+    for (const bool reset : {true, false}) {
+        for (const auto& failing_path : {fallback, primary, marker}) {
+            CHECK(reset_slot(0) == Status::kOk);
+            CHECK(write_section(0, "a", 1, bytes({9}).data(), 1) == Status::kOk);
+            { std::ofstream file(marker, std::ios::binary); file << "unresolved"; }
+            { std::ofstream file(quarantine, std::ios::binary); file << "corrupt-evidence"; }
+            const auto old_primary = read_file(primary);
+            const auto old_fallback = read_file(fallback);
+            const auto old_marker = read_file(marker);
+            g_fail_unlink_path = failing_path;
+            set_unlink_for_test(&injected_unlink);
+            CHECK((reset ? reset_slot(0) : delete_slot(0)) == Status::kIoError);
+            set_unlink_for_test(nullptr);
+            g_fail_unlink_path.clear();
+            CHECK(read_file(marker) == old_marker);
+            CHECK(file_exists(quarantine));
+            if (failing_path == fallback) {
+                CHECK(read_file(fallback) == old_fallback);
+                CHECK(read_file(primary) == old_primary);
+            }
+            if (failing_path == primary) CHECK(read_file(primary) == old_primary);
+            CHECK((reset ? reset_slot(0) : delete_slot(0)) == Status::kOk);
+            CHECK(!file_exists(marker) && file_exists(quarantine));
+        }
+    }
+    CHECK(delete_slot(0) == Status::kOk); // ENOENT 是允许的幂等收尾。
+    CHECK(delete_slot(0) == Status::kOk);
+    CHECK(reset_slot(0) == Status::kOk);
+}
+
 void run_case(void (*fn)(const std::string&)) {
     const std::string dir = make_temp_dir();
     CHECK(!dir.empty());
@@ -367,6 +555,9 @@ int main() {
     run_case(test_replace_atomic);
     run_case(test_import_container);
     run_case(test_delete_and_reset);
+    run_case(test_strict_states);
+    run_case(test_preflight_and_reservation);
+    run_case(test_reset_delete_unlink_failures);
     std::printf("infra_store_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

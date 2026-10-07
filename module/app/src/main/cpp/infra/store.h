@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "contracts/host_sdk.h"
 
 // 模块 sidecar 容器层（infra/store）：MSAV 容器格式的 native 权威实现，
 // 与 Kotlin ModuleSaveStore.kt 的字节格式逐字节兼容（B4-1 冻结核心件）。
@@ -31,6 +32,8 @@ enum class Status {
     kBadVersion,    // section version <= 0
     kTooLarge,      // payload > 1MiB 或容器 > 4MiB 或 section 数 > 65535
     kBadName,       // section 名不符合 [a-z0-9._-]{1,64}
+    kBusy,
+    kBlocked,
 };
 
 // 稳定英文名，供诊断输出；未定义值返回 "unknown"。
@@ -80,5 +83,24 @@ Status remove_section(int slot, const char* name);
 
 // 单次原子提交：先删除 removals，再写入 replacements，其余 section 原样保留；generation 递增。
 Status replace_sections(int slot, const ReplaceMap& replacements, const RemoveSet& removals);
+
+Status inspect_slot(int slot, contracts::QolOwnerStoreSlotState* out);
+Status preflight(int slot, const contracts::QolOwnerStoreCandidate* candidates,
+                 uint32_t count, uint64_t* encoded_bytes);
+Status reserve(uint64_t owner, int slot, const contracts::QolOwnerStoreCandidate* candidates,
+               uint32_t count, contracts::QolOwnerStoreReservation* out);
+Status release(uint64_t owner, const contracts::QolOwnerStoreReservation& reservation);
+Status replace_reserved(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* reservation,
+                        const ReplaceMap& replacements, const RemoveSet& removals);
+// owner 生命周期转接；pending 租约保留，恢复授权在 Host 重新签发时迁移。
+void owner_stopped(uint64_t owner);
+void owner_rebound(uint64_t old_owner, uint64_t new_owner);
+Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* reservation,
+                       uint32_t referenced);
+
+#if defined(QOL_STORE_TEST_SEAMS)
+// 仅 Host 测试构建提供确定性文件错误注入；生产始终调用系统 unlink。
+void set_unlink_for_test(int (*unlink_fn)(const char*));
+#endif
 
 }  // namespace qol::infra::store

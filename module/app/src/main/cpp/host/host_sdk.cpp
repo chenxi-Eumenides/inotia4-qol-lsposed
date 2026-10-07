@@ -440,6 +440,8 @@ QolResult owner_store_write(contracts::QolOwnerToken owner, int32_t slot, const 
                            uint16_t version, const uint8_t* bytes, uint64_t size) {
     const auto authorized = owner_authorize_store(owner, "module-saves");
     if (!contracts::succeeded(authorized)) return authorized;
+    if (section != nullptr && std::strcmp(section, "module.save.journal") == 0)
+        return result_error(kQolErrBlocked, "journal requires reservation");
     if (size > std::numeric_limits<uint32_t>::max())
         return result_error(kQolErrInvalidArgument, "payload too large");
     return sdk_store_write(slot, section, version, bytes, static_cast<uint32_t>(size));
@@ -447,6 +449,8 @@ QolResult owner_store_write(contracts::QolOwnerToken owner, int32_t slot, const 
 QolResult owner_store_remove(contracts::QolOwnerToken owner, int32_t slot, const char* section) {
     const auto authorized = owner_authorize_store(owner, "module-saves");
     if (!contracts::succeeded(authorized)) return authorized;
+    if (section != nullptr && std::strcmp(section, "module.save.journal") == 0)
+        return result_error(kQolErrBlocked, "journal requires reservation");
     return sdk_store_remove(slot, section);
 }
 QolResult owner_store_replace(contracts::QolOwnerToken owner, int32_t slot,
@@ -454,11 +458,94 @@ QolResult owner_store_replace(contracts::QolOwnerToken owner, int32_t slot,
                              const char* const* removals, uint32_t removal_count) {
     const auto authorized = owner_authorize_store(owner, "module-saves");
     if (!contracts::succeeded(authorized)) return authorized;
+    if ((count != 0 && replacements == nullptr) || (removal_count != 0 && removals == nullptr))
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    for (uint32_t i = 0; i < count; ++i)
+        if (replacements[i].name != nullptr && std::strcmp(replacements[i].name, "module.save.journal") == 0)
+            return result_error(kQolErrBlocked, "journal requires reservation");
+    for (uint32_t i = 0; i < removal_count; ++i)
+        if (removals[i] != nullptr && std::strcmp(removals[i], "module.save.journal") == 0)
+            return result_error(kQolErrBlocked, "journal requires reservation");
     return sdk_store_replace(slot, replacements, count, removals, removal_count);
+}
+QolResult owner_store_inspect(contracts::QolOwnerToken owner, int32_t slot,
+                             contracts::QolOwnerStoreSlotState* out) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    return contracts::succeeded(allowed) ? store_result(infra::store::inspect_slot(slot, out)) : allowed;
+}
+QolResult owner_store_preflight(contracts::QolOwnerToken owner, int32_t slot,
+    const contracts::QolOwnerStoreCandidate* candidates, uint32_t count, uint64_t* lengths) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    return contracts::succeeded(allowed) ? store_result(infra::store::preflight(slot, candidates, count, lengths)) : allowed;
+}
+QolResult owner_store_reserve(contracts::QolOwnerToken owner, int32_t slot,
+    const contracts::QolOwnerStoreCandidate* candidates, uint32_t count,
+    contracts::QolOwnerStoreReservation* out) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(allowed)) return allowed;
+    owner_store_lifecycle_handlers(&infra::store::owner_stopped, &infra::store::owner_rebound);
+    const auto status = infra::store::reserve(owner, slot, candidates, count, out);
+    if (status != infra::store::Status::kOk) return store_result(status);
+    const auto still_allowed = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(still_allowed)) {
+        // 预检期间 owner 可停用；不能在停用通知之后遗留新建的过期租约。
+        (void)infra::store::release(owner, *out);
+        return still_allowed;
+    }
+    return contracts::ok();
+}
+QolResult owner_store_release(contracts::QolOwnerToken owner, contracts::QolOwnerStoreReservation credential) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    return contracts::succeeded(allowed) ? store_result(infra::store::release(owner, credential)) : allowed;
+}
+QolResult owner_store_replace_reserved(contracts::QolOwnerToken owner, int32_t slot,
+    contracts::QolOwnerStoreReservation* credential, const contracts::QolStoreSection* sections,
+    uint32_t count, const char* const* removals, uint32_t removal_count) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(allowed)) return allowed;
+    if ((count != 0 && sections == nullptr) || (removal_count != 0 && removals == nullptr))
+        return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    infra::store::ReplaceMap replacements;
+    infra::store::RemoveSet removed;
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& section = sections[i];
+        if (section.name == nullptr || section.version == 0 || section.size > 1024 * 1024 ||
+            (section.size != 0 && section.data == nullptr)) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+        infra::store::Section copy;
+        copy.version = section.version;
+        if (section.size != 0) copy.payload.assign(section.data, section.data + section.size);
+        replacements.emplace_back(section.name, std::move(copy));
+    }
+    for (uint32_t i = 0; i < removal_count; ++i) {
+        if (removals[i] == nullptr) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+        removed.emplace_back(removals[i]);
+    }
+    // 字段错误是 InvalidArgument；释放/过期/同 owner 无凭据是 Busy，不能误当成功。
+    return store_result(infra::store::replace_reserved(owner, slot, credential, replacements, removed));
+}
+QolResult owner_store_write_reserved(contracts::QolOwnerToken owner, int32_t slot,
+    contracts::QolOwnerStoreReservation* credential, const char* name, uint16_t version,
+    const uint8_t* bytes, uint64_t size) {
+    if (size > 1024 * 1024) return result_error(kQolErrInvalidArgument, "payload too large");
+    const contracts::QolStoreSection section{name, version, bytes, static_cast<uint32_t>(size)};
+    return owner_store_replace_reserved(owner, slot, credential, &section, 1, nullptr, 0);
+}
+QolResult owner_store_remove_reserved(contracts::QolOwnerToken owner, int32_t slot,
+    contracts::QolOwnerStoreReservation* credential, const char* name) {
+    return owner_store_replace_reserved(owner, slot, credential, nullptr, 0, &name, 1);
+}
+QolResult owner_store_set_referenced(contracts::QolOwnerToken owner, int32_t slot,
+    contracts::QolOwnerStoreReservation* credential, uint32_t referenced) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    return contracts::succeeded(allowed)
+        ? store_result(infra::store::set_referenced(owner, slot, credential, referenced)) : allowed;
 }
 const contracts::QolOwnerStoreApi kOwnerStoreApi{
     {sizeof(contracts::QolOwnerStoreApi), 1, 0}, &owner_store_ensure, &owner_store_reset,
-    &owner_store_read, &owner_store_write, &owner_store_remove, &owner_store_replace};
+    &owner_store_read, &owner_store_write, &owner_store_remove, &owner_store_replace,
+    &owner_store_inspect, &owner_store_preflight, &owner_store_reserve, &owner_store_release,
+    &owner_store_write_reserved, &owner_store_remove_reserved, &owner_store_replace_reserved,
+    &owner_store_set_referenced};
 
 QolResult sdk_store_read_container(int32_t slot, uint8_t* out, uint32_t capacity,
                                    uint32_t* out_size) {
@@ -910,6 +997,8 @@ QolResult sdk_text_scope_pop() {
 
 QolResult store_result(infra::store::Status status) {
     switch (status) {
+        case infra::store::Status::kBusy: return result_error(kQolErrBusy, "slot reserved");
+        case infra::store::Status::kBlocked: return result_error(kQolErrBlocked, "section reserved");
         case infra::store::Status::kOk:
             return contracts::ok();
         case infra::store::Status::kNotFound:

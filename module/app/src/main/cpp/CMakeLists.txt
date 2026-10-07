@@ -253,6 +253,7 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
     host/owner_identity.cpp
+    game/access/save_file_evidence.cpp
     host/settings_catalog_adapter.cpp
     infra/settings_catalog.cpp
     host/lifecycle_participants.cpp

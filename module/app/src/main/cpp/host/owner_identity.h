@@ -14,5 +14,7 @@ QolResult owner_authorize_store(contracts::QolOwnerToken token, const char* stor
 const contracts::QolOwnerIdentityApi& owner_identity_api();
 // 清除测试装配，但不回退 token 分配序列。
 void owner_identity_reset_for_test();
+void owner_store_lifecycle_handlers(void (*stopped)(uint64_t),
+                                    void (*rebound)(uint64_t, uint64_t));
 
 }  // namespace qol::host

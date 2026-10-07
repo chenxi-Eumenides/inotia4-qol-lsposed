@@ -146,7 +146,9 @@ int main() {
     QolOwnerToken duplicate = 0;
     CHECK(succeeded(identity.query(&consumer_identity, &duplicate, &generation)));
     CHECK(duplicate == consumer && generation == original_generation);
-    CHECK(succeeded(slot_data_initialize(provider, &qol::host::owner_verify_token, &kBackend, &is_main)));
+    auto legacy_backend = kBackend;
+    legacy_backend.abi.size = offsetof(QolOwnerStoreApi, replace_sections) + sizeof(QolOwnerStoreApi::replace_sections);
+    CHECK(succeeded(slot_data_initialize(provider, &qol::host::owner_verify_token, &legacy_backend, &is_main)));
     slot_data_set_available(true);
     CHECK(succeeded(slot_data_begin_transition(0, 0)));
     CHECK(session().state == static_cast<uint32_t>(QolSlotSessionState::kActivating));
@@ -231,6 +233,18 @@ int main() {
     CHECK(succeeded(slot_data_begin_transition(0, 1)));
     CHECK(!succeeded(slot_data_confirm_transition(0)));
     CHECK(succeeded(slot_data_confirm_transition(1)) && session().epoch > same_slot_epoch);
+
+    const auto captures_before_cancel = immediate.captures;
+    std::thread queued([&] {
+        CHECK(succeeded(slot_data_api().request_write(immediate.handle, session().epoch, &request)));
+    });
+    queued.join();
+    const auto cancelled_request = request;
+    CHECK(succeeded(slot_data_api().unregister(immediate.handle, &immediate.unregister_request)));
+    CHECK(status(immediate.unregister_request).state == static_cast<uint32_t>(QolSlotDataRequestState::kCompleted));
+    CHECK(status(cancelled_request).state == static_cast<uint32_t>(QolSlotDataRequestState::kCancelled));
+    slot_data_pump();
+    CHECK(immediate.captures == captures_before_cancel);
 
     qol::host::owner_suspend(&consumer_identity);
     CHECK(!succeeded(qol::host::owner_verify_token(consumer)));

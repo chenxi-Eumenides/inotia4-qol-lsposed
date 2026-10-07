@@ -1,0 +1,46 @@
+{
+  "read_bodies": 88,
+  "equal_raw_bodies": 88,
+  "mismatches": [],
+  "file_comparison": {
+    "dat-after": {
+      "unchanged": true,
+      "file_count": 24
+    },
+    "sidecar-after": {
+      "unchanged": true,
+      "file_count": 11
+    }
+  },
+  "new_warning_signatures": {},
+  "result": "PASS (original v1.3.2, slot 0, affected normal read/enter regression only)",
+  "module_sha256": "466f895b62089ca0c81918bee8ccb529c5a397c496194b3f1affc415d32ebe90",
+  "final_save_files_unchanged": true,
+  "original_config_restored_exactly": true,
+  "final_screen": {
+    "screen": "main_menu"
+  },
+  "final_health": {
+    "ok": true,
+    "ready": true,
+    "variant": {
+      "series": "original",
+      "version": "v1.3.2",
+      "known": true,
+      "capabilities": 0
+    }
+  },
+  "configuration_fixture": "extensionBagEnabled was initially false; temporarily enabled for normal EB read validation and restored to the exact original config bytes",
+  "scope": [
+    "VM-K4-04b affected normal save/EB read and same-slot enter",
+    "VM-K5-06i affected normal save/EB read and same-slot enter"
+  ],
+  "not_exercised": [
+    "full historical VM cards",
+    "original save API",
+    "journal v2 production coordination",
+    "double-corruption on device",
+    "import/delete/rollback",
+    "provider lifecycle cascade"
+  ]
+}

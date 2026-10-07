@@ -1,6 +1,6 @@
-# Slot data 契约规格（P1）
+# Slot data 契约与机制规格
 
-本文规定 `core.save` 存档数据收口的契约与后续批次验收边界。P1 仅定义头文件、编译期断言和规格，生产不接线，不表示后续行为已经实现。目标分层以根目录 `ARCHITECTURE.md` 为准。
+本文规定 `core.save` 存档数据收口的契约、机制与后续批次验收边界。P1 契约、P2 provider 骨架与 P3a Host 机制已完成；journal v2、恢复状态容器与 dat evidence 已有纯逻辑实现，**尚未接入生产保存协调、原版转换或 hook**。共享 store 的 strict 修复已影响旧生产读写入口。当前实现及准确验收范围见 §14；目标分层以根目录 `ARCHITECTURE.md` 为准。
 
 ## 1. 分层与权责
 
@@ -22,6 +22,36 @@
 `QolSlotSession` 包含 slot/state/epoch，状态为 unavailable/activating/ready/closing，每次进档（含同槽重入）epoch 递增。`QolSlotDataContext` 包含 session/reason/transaction，reason 为 enter/catch_up/requested/save/recovery，非保存回调 transaction 为 0。
 
 沿用 `infra/store.cpp` 的上限：section 名 **64 字节**、单 payload **1 MiB**、容器 **4 MiB**。P1 不提高预算。
+
+### 2.1 owner-bound 预算预约与显式凭据（P3a）
+
+`QolOwnerStoreApi` 既有六项及 `QolStoreApi` 前缀不变，只尾部追加 strict inspect、preflight、reserve/release、带凭据 write/remove/replace 与 set_referenced。跨边界 POD 定义在 `contracts/owner_store.h`，均有 size 字段；reserve 和所有候选预检在单次 store 锁内完成，**生命周期跨调用但不跨调用持 mutex**。
+
+`QolOwnerStoreReservation` 包含 `size / slot / id / generation / owner / encoded_bytes / retain / reserved / revision`：
+
+- id 为进程内不复用的唯一预约标识；owner 为当前宿主授权 token，不是历史 journal 的 owner_id。
+- generation 为槽容器代次；成功持久化提交后更新调用方凭据的 generation 和 revision。
+- revision 是独立的预约修订号。set_referenced 实际改变引用状态、owner_rebound 迁移持有者时递增 revision，**不冒用磁盘 generation**。写入、降引用与释放均验证当前 id/slot/owner/generation/revision/预算，旧副本拒绝。
+- retain 是 store 的权威引用状态；只通过 set_referenced 变更，不能从可复制凭据的 retain 字段撤销保护。set_referenced 返回更新后的凭据。
+- 已释放 id 的重复释放返回成功或 NotFound，不影响同槽新预约。当前有效预约的旧 generation/revision 不能通过幂等收尾释放新状态。
+
+预约期间 read_section 放行；其他无凭据写请求（**包括同 owner**）返回 Busy。显式凭据是事务身份，不能由 owner token、线程、TLS 或写入顺序推断。owner-bound 无凭据写入/删除 `module.save.journal` 返回 Blocked；迁移窗口的旧 SDK/JNI 入口尚未全面撤销，但共享 store 的槽预约同样阻止它们消耗预算或覆盖 journal。
+
+候选以 `QolStoreSection` 替换集、删除集和可选 journal 表达，每个候选都基于同一当前容器，不能把候选累加当作最终结果。preflight 调实际 encoder 并输出各候选精确长度；reserve 只在全部预检通过后建立租约，预算为候选最大编码长度。容器开销为：
+
+```text
+C(S) = 21 + Σ(11 + name_bytes + payload_bytes)
+```
+
+固定 21B 包含尾 CRC；每 section 的 11B 包含名字长度、版本、payload 长度与 payload CRC。正式数据与 prepared/confirmed journal 同存、最终删 journal 提交三个候选都须各自 ≤4 MiB。
+
+prepared 写失败且无在途引用时释放；原版调用前通过 set_referenced 登记引用，不靠重复写 journal 改变租约状态。事务取消或原版明确失败返回 Release 动作；commit-pending、recovery-retrying、degraded 返回 Hold，原版已经成功时不能以 abort 撤销事实。无引用租约随 owner 停用释放；有引用租约保留，Host 重新签发受限 backend 所属恢复身份后迁移 owner 并更新 revision。当前 backend 只授权 core.save，不能把消费者离线当作捕获字节或恢复证据失效。**P3a 只实现机制与纯状态动作，生产执行这些动作留 P3b。**
+
+### 2.2 strict 共享容器读取与证据保留（P3a）
+
+inspect 区分 `Absent / PrimaryValid / FallbackUsed / Corrupt / IoFailed`。共享 load/read/ensure 路径都不再把 primary 与 last-good 双损坏折叠成 NotFound：损坏文件保存为 `*.corrupt.<ms>`，未决 `*.unresolved-corrupt` marker 防止 quarantine 移走原路径后、重复检查或重新初始化时被误当新槽。ensure 遇 Corrupt/IO 失败必须返回失败，不能写空容器；正常 primary 读面不变。
+
+显式 reset/delete 先确认旧 last-good 和 primary 的删除，再完成 reset 写入，最后清除未决 marker。unlink 只有成功或 ENOENT 可以继续，其余返回 IO error；marker 清理失败也不能假报成功。失败保留 marker，quarantine 证据不批量删除。该流程可能部分应用，**不是跨多个文件的全有或全无事务**；没有父目录 fsync 时不承诺掉电原子保证。
 
 ## 3. 读写策略枚举
 
@@ -73,6 +103,8 @@ core.save 的确认阶段必须位于旧回调与 `kEventSaveEnter` 派发之前
 
 `complete` 只做幂等内存记账，不再执行 section IO。outcome 区分 committed、staged、original-save-failed、pending-recovery、degraded、cancelled；不能用取消通知假装已成功的原版保存被撤销。
 
+生产接线的结算要求：HTTP/API 票据只有在正式 sidecar 提交确认后才 done；commit-pending 保持 pending。游戏 SAVE_Save 的 int 返回可保持原版结果。**这不是 P3a 已接入的行为**，原版保存/协调器/票据桥留 P3b。
+
 ## 6. journal v2 格式
 
 保留 section 名 `module.save.journal`，section 版本 **2**。由 core.save 私有二进制编码，不是 JSON/Base64：
@@ -85,6 +117,40 @@ entries[{owner_id, section_name, section_version, payload_length, payload}]
 ```
 
 journal 上限 **1 MiB**，正式数据与 journal 同存时仍须满足 **4 MiB** 容器上限。事务前预检，超预算即拒绝开始事务，不调用原版保存。
+
+### 6.1 v2 字节布局
+
+全部为大端、紧凑编码，无 padding，不直接 dump C++ struct。固定头 48B：
+
+| 偏移 | 字节 | 字段 |
+|---:|---:|---|
+| 0 | 4 | magic ASCII SDJ2 |
+| 4 | 2 | schema=2 |
+| 6 | 2 | header_bytes=48 |
+| 8 | 4 | total_bytes（含尾 CRC） |
+| 12 | 4 | stage：0 prepared，1 original_confirmed |
+| 16 | 8 | 非零 tx_id |
+| 24 | 4 | slot（0..2） |
+| 28 | 4 | entry_count |
+| 32 | 8 | session_epoch |
+| 40 | 4 | evidence_kind：0 none，1 raw-dat-sha256 |
+| 44 | 4 | evidence_bytes=40 |
+
+紧接固定预留 40B：`file_length:u64 + sha256[32]`。prepared 的 kind=0 且 evidence 全零；confirmed 的 kind=1 且 SHA-256 非零。固定预留保证确认记录在原版成功后不突然变大。
+
+每 entry 为 `owner_id:u64 | name_length:u16 | section_version:u16 | payload_length:u32 | name | payload`；尾部为 IEEE CRC32（反射多项式 0xEDB88320，初值与最终异或均 0xFFFFFFFF）：
+
+```text
+J = 48 + 40 + Σ(16 + name_bytes + payload_bytes) + 4
+```
+
+解码拒绝未知 magic/schema/stage、错误 total_bytes/CRC、截断/尾随、槽不匹配、零 tx_id、非法名字/版本、重复 section、保留 `module.save` 命名空间条目及不合法 evidence。名字 1..64、单 payload 与总 journal 均 ≤1 MiB，读取长度先验证 `length <= remaining` 再分配。同一 owner 的多个不同 section 合法。owner_id 仅记来源身份，恢复授权使用 core.save 当前凭据，不能把持久化 owner_id 当作重启后的有效 token。
+
+### 6.2 原始 dat evidence 与路径绑定
+
+`game/access/save_file_evidence.cpp` 只读调用方**明确指定**的 dat 路径，输出原字节长度及 SHA-256，不写原版文件、不扫描目录取首项、不回退到 mtime 或解密明文。读取前后核对同一 fd 的 dev/inode、长度、mtime/ctime 纳秒，结束时 stat(path) 必须与 fd 的 dev/inode 一致；读取中同名原子替换或 IO 失败时返回失败并保持 out 不变。时间仅检测变化，不作为存档身份。
+
+此读函数只约束读取窗口，**不能保证 evidence 取得之后到正式 commit 之间路径不变**。应用目录注入、可靠目标槽、平台桥以及覆盖该窗口的槽准入均留 P3b。
 
 ## 7. 失败状态与迁移
 
@@ -100,11 +166,11 @@ journal 上限 **1 MiB**，正式数据与 journal 同存时仍须满足 **4 MiB
 
 ### v1 迁移规则
 
-`ModuleSaveCoordinator.kt` 的 v1 是 JSON、stage=0、entries 含 Base64。只读识别，不自动提升为 v2、不自动重放、不删除证据。有未决 v1 journal 的槽进入恢复降级；无 journal 的旧存档直接兼容，功能 section 格式不变。v2 开始后禁止产生 v1，单事务不混用两个协调器。
+`ModuleSaveCoordinator.kt` 的 v1 是有界 UTF-8 JSON，键为 `transactionId / slot / stage / sections`，stage=0，sections 每项含 name/version/payload（Base64.NO_WRAP），不是 entries。先按 section.version 分派：v1 识别成功返回 LegacyUnresolved，失败返回 CorruptLegacy；两者均终止自动恢复，不 replace/remove/reset/重放/删除证据。version=2 必须校验 SDJ2/schema，不能因首字节像 JSON 而降格为 v1。有未决 v1 journal 的槽进入恢复降级；无 journal 的旧存档直接兼容，功能 section 格式不变。v2 生产接线后禁止产生 v1，单事务不混用两个协调器；P3a 不替换生产旧协调器。
 
 ## 8. 身份约束两层
 
-Host 注入并验证 owner token，仅领域 owner core.save 获得 `module-saves` backend。token 的签发属于 Host 装配期，generation 是 owner 生命周期代次，停用后递增使旧 token 失效；授权由装配期注册的 token 决定，不按 plugin_id 字符串比较或白名单特判名称。当前 PluginContext 只有自报可引用的 plugin_id，仅在 spec 加 owner 字符串不足以落实身份约束，必须注入凭据。验证能力由 Host 持有，插件凭据只读。
+Host 按真实注册身份向 PluginContext.owner_token 注入凭据，仅领域 owner core.save 获得 `module-saves` backend。签发/query 属 Host 私有面；插件可见 verify 仅验证已持有的 token，不授予签发或枚举能力。owner 生命周期 generation 与槽容器 generation、预约 revision、session epoch 各自独立；停用使旧 token 失效。授权由装配期 owner↔命名空间绑定决定，不按 plugin_id 字符串特判。只在 spec 加 owner 字符串或引用 plugin_id 不足以落实身份约束。
 
 core.save 注册时验证归属，后续仅接受 handle/epoch，内部保留 journal 名与命名空间。`host/host_sdk.cpp` 的任意名称入口最终保留 ABI 布局但拒绝旧 section write/replace/remove；迁移窗口只保留明确列出的未迁移入口，最终撤销。**不能只加新接口却让旧入口继续可写。** P1 不接线；P2..P5 按批次迁移消费者，不以本文推定旧入口已封堵。
 
@@ -128,15 +194,18 @@ operation 跨完整 dat/sidecar/warehouse 备份事务持有，但不是跨调�
 
 | 批 | 内容 | 触及 VM 卡 |
 |---|---|---|
-| P1 | 契约冻结，生产不接线（本批） | 无行为变化，不需要真机 |
-| P2 | owner token / 受限 backend / provider 骨架、session 状态机、fake backend 验证注销与补加载；生产仍走旧路径 | 重验 VM-K5-06h；新增 Host 身份越权、注销在途、epoch 用例 |
-| P3 | core.save 协调与 journal v2、转换桥、SAVE_Save 入口资源、save Adapter、旧 module_save；EB callbacks/runtime；EB Kotlin/JNI 薄层 | 重验 VM-K4-04b、VM-K5-06d、VM-K5-06i |
+| P1（完成） | 契约冻结，生产不接线 | 无行为变化，不需要真机 |
+| P2（完成） | owner token / 受限 backend / provider 骨架、session 状态机、fake backend 验证注销与补加载；生产功能仍走旧路径 | VM-K5-06h 装配/名册范围；Host 身份、注销、epoch 用例 |
+| P3a（完成） | strict 共享 store、真实编码容量预检、显式 generation/revision 预约；journal v2/v1 识别、恢复状态容器、原 dat evidence；不接生产协调 | VM-K4-04b、VM-K5-06i 受影响正常读面/同槽进档范围；损坏与预约由 Host 覆盖 |
+| P3b（计划） | core.save 生产协调/journal v2、转换桥、SAVE_Save 入口资源、save Adapter、旧 module_save；EB callbacks/runtime、Kotlin/JNI 薄层及 evidence→commit 槽准入 | 重验 VM-K4-04b、VM-K5-06d、VM-K5-06i；执行相应 VM-SD 卡 |
 | P4 | autosell 接入 SessionBound 读 + Immediate 写，移除其存档事件加载与任意 section IO | 重验 VM-44 |
 | P5 | save_backup admin 接入、锁范围收窄、导入/删除/回滚；Host/JNI 旧入口权限封堵；旧注册生产链删除 | 重验 VM-K4-04b、VM-K5-06i |
 
 旧 `contracts/module_save_port.h` 协议 P1/P2 不动；P3 退役 EB 生产注册，可留兼容转发但不能保留第二套参与者顺序；P5 关闭旧入口。既有 VM 卡位置见 `docs/refactor/verification.md`。
 
 ## 12. 四张新卡验收要点
+
+以下四卡是生产接线后的计划验收，**均不因 P3a Host 或正常读面证据而标记已完成**。
 
 ### VM-SD-01 多槽/同槽重入
 
@@ -156,7 +225,7 @@ prepare 失败不调用原版保存；原版失败不写正式 sections；原版
 
 ## 13. 取证门与约束声明
 
-P3 开工前必须补证，不能推断：
+P3b 生产接线前必须补证，不能推断；P3a 的纯机制验收不代替该取证门：
 
 1. 各变体原版/自动保存是否完整经过 SAVE_Save。符号已登记于 `game/symbols/symbol_registry.h`；`extension_bag_render.inc` 的 SAVE_SaveInventory hook 仅撤投影，不构成完整事务。
 2. 原版新档 wrapper（`patch/save_enter.cpp`）如何由 Adapter 提供可靠目标槽。必须由 Adapter 提供，不能插件读裸地址。
@@ -164,3 +233,11 @@ P3 开工前必须补证，不能推断：
 插件间仅通过 contracts capability，core.save 不 include infra/store.h；EB/autosell/save_backup 不 include core.save 私有文件。宿主只做验证/转接，领域时序留在 core.save。不新增裸 VMA/偏移，不改模块或插件版本号，HTTP 路径/方法/成功响应与 NativeBridge external 方法名/签名冻结。
 
 P1 仅编译期/布局期断言，不写 fake 行为测试、不接线宿主/SDK/插件/Kotlin/生产 CMake 依赖。验证包括 diff 检查、相关 host tests（含新增 target）、check_arch、check_http_routes（冻结路由不漂移）、项目唯一 debug 构建入口 scripts/build-debug.sh。当前路由检查输出 controller/api-reference/native frozen 均为 146 条，重复、遗漏、额外路由均为 0；任务描述的 143 条与当前基线计数不同，本批不修改路由。P2..P5 触及行为部分必须取得真机 VM 日志，缺证据仍为 **NOT_ACCEPTED**，Host 测试或构建不能替代。
+
+## 14. P3a 当前实现与验收边界
+
+P3a 已完成 Host 机制、编解码及相应测试，oracle 三项阻断复审通过。有效验证为 7/7 targets：save_journal_tests、infra_store_tests、slot_data_contract_tests、slot_data_provider_tests、save_facts_plugin_tests、host_tests、host_adapter_tests；包含旧凭据释放/降引用拒绝、reset/delete 确定性 IO 注入与读取中同名原子替换。新增架构违规 0，HTTP 冻结集合 146 条不漂移。
+
+有效最终 Debug 模块 SHA-256：`466f895b62089ca0c81918bee8ccb529c5a397c496194b3f1affc415d32ebe90`。真机仅原版 1.3.2/槽 0：同签名 LSPatch install-r 后实际加载该 SHA；正常 world 下 5 个扩展袋、33 件物品的 88 份完整 raw body 前后相同，无归一化；24 个存档目录文件与 11 个模块目录文件 SHA 不变，原配置逐字恢复、最终 main_menu。新增 WARN 与崩溃匹配均 0；既有 optional-cycle 与 P_EXT_SAVE_REVIVE 延迟安装告警不计作消失。
+
+此证据只补 VM-K4-04b、VM-K5-06i 的**受影响正常读面及同槽进档**，不是完整旧卡重验。不覆盖设备双损坏注入、原版 save、创建/导入/删除/回滚、provider 级联或 journal v2 生产联合提交。SAV-01 已修复；新机制、纯状态动作与生产协调之间的接线仍留 P3b。可提交证据与复现说明见 `docs/history/slot-data/p3a-20261007/README.md`；保护备份和完整采集缓存仅本地保留，不入源码提交。

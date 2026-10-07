@@ -28,6 +28,7 @@ enum {
     kQolErrTimeout = 7,
     kQolErrCancelled = 8,
     kQolErrBlocked = 9,
+    kQolErrBusy = 10,
 };
 
 #ifdef __cplusplus

@@ -12,11 +12,14 @@ struct Owner {
     void* identity = nullptr;
     contracts::QolOwnerToken token = 0;
     uint64_t generation = 1;
+    uint64_t previous_token = 0;
     std::string store_namespace;
 };
 std::array<Owner, 32> g_owners;
 std::mutex g_mutex;
 uint64_t g_next_token = 1;
+void (*g_store_stopped)(uint64_t) = nullptr;
+void (*g_store_rebound)(uint64_t, uint64_t) = nullptr;
 
 QolResult fail(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -34,6 +37,8 @@ bool issue(Owner& owner) {
     if (owner.token != 0) return true;
     if (g_next_token == std::numeric_limits<uint64_t>::max()) return false;
     owner.token = g_next_token++;
+    if (owner.previous_token != 0 && g_store_rebound != nullptr && !owner.store_namespace.empty())
+        g_store_rebound(owner.previous_token, owner.token);
     return true;
 }
 QolResult query(void* identity, contracts::QolOwnerToken* token, uint64_t* generation) {
@@ -79,6 +84,8 @@ void owner_suspend(void* identity) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto* owner = identity == nullptr ? nullptr : find_identity(identity);
     if (owner == nullptr || owner->token == 0) return;
+    owner->previous_token = owner->token;
+    if (g_store_stopped != nullptr) g_store_stopped(owner->token);
     owner->token = 0;
     ++owner->generation;
 }
@@ -104,5 +111,10 @@ const contracts::QolOwnerIdentityApi& owner_identity_api() { return kApi; }
 void owner_identity_reset_for_test() {
     std::lock_guard<std::mutex> lock(g_mutex);
     for (auto& owner : g_owners) owner = Owner{};
+}
+void owner_store_lifecycle_handlers(void (*stopped)(uint64_t), void (*rebound)(uint64_t, uint64_t)) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_store_stopped = stopped;
+    g_store_rebound = rebound;
 }
 }  // namespace qol::host

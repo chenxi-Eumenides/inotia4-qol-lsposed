@@ -1,0 +1,31 @@
+{
+  "before": {
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=core.item consumer=core.character capability=item.state": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=attribute_range_display capability=attribute.quality": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=custom_recipe consumer=craft_ui capability=craft_result": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=inventory_hooks consumer=extension_bag capability=inventory_refresh": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=move_merge consumer=extension_bag capability=move_merge.control": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=extension_bag consumer=move_merge capability=inventory.merge_projection": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=inventory_hooks consumer=move_merge capability=inventory_refresh": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=core.character consumer=core.item capability=character.state": 1,
+    "core plugin_registry.cpp:1897 plugin extension_bag gate install deferred on patch:P_EXT_SAVE_REVIVE: resource patch:P_EXT_SAVE_REVIVE: primitive rejected": 1
+  },
+  "after": {
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=core.item consumer=core.character capability=item.state": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=attribute_range_display capability=attribute.quality": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=custom_recipe consumer=craft_ui capability=craft_result": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=inventory_hooks consumer=extension_bag capability=inventory_refresh": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=move_merge consumer=extension_bag capability=move_merge.control": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=extension_bag consumer=move_merge capability=inventory.merge_projection": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=inventory_hooks consumer=move_merge capability=inventory_refresh": 1,
+    "core plugin_registry.cpp:550 optional edge downgraded to avoid cycle: provider=core.character consumer=core.item capability=character.state": 1,
+    "core plugin_registry.cpp:1897 plugin extension_bag gate install deferred on patch:P_EXT_SAVE_REVIVE: resource patch:P_EXT_SAVE_REVIVE: primitive rejected": 1
+  },
+  "new_or_increased": {},
+  "method": "compare warning message signatures; raw logcat preserved including timestamp/PID/frame",
+  "after_crash_lines": []
+}

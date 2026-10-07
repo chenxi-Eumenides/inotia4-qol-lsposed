@@ -1,0 +1,1 @@
+10-07 19:49:08.129 31665 31732 I Inotia4Qol: 2026-10-07 19:49:08.129 f=0 I platform HookMain.kt:139 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/973054967.apk sha256=466f895b62089ca0c81918bee8ccb529c5a397c496194b3f1affc415d32ebe90
